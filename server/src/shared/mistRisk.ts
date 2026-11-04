@@ -1,3 +1,4 @@
+import {notifyMist} from './mistNotifications';
 /**
  * 风险管理与合规（CAP-risks-01/02 · G69）。
  * - 预警（signal）只从真实记录推出：逾期应收、往来冻结、供应商认证 / 暂停、QC 不通过、生产逾期或风险说明。
@@ -300,7 +301,7 @@ export function applyRiskCommand(root: MistState, risks: RiskRecord[], command: 
       if (approved && action === 'release') row.release = { escalationId: e!.id, approvedBy: c.actorName, at: c.now, note };
       for (const t of root.tasks) if (t.kind === 'risk-escalation:' + e!.id) t.done = true;
       const label = `${RISK_ACTION_LABEL[action]}申请${approved ? '已批准' : '已驳回，继续按原规则处理'}`;
-      root.notifications.unshift({ id: c.id(), title: `${row.title} · ${label}`, detail: `${c.actorName}：${note}`, at: c.now, readAt: null, target: { view: 'risks', id: row.id }, category: 'general' });
+      notifyMist(root,c,{ title: `${row.title} · ${label}`, detail: `${c.actorName}：${note}`, target: { view: 'risks', id: row.id }, category: 'general' },[e!.requesterId]);
       const text2 = `${approved ? '批准' : '驳回'}${RISK_ACTION_LABEL[action]}申请${approved && row.state === 'Resolved' ? '（风险已' + (action === 'waive' ? '豁免关闭' : '关闭') + '）' : approved && action === 'release' ? '（带风险放行，风险继续跟进）' : ''}：${note}`;
       emit(root, c, row.id, text2); return { id: row.id };
     }

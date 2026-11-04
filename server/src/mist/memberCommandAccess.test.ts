@@ -27,13 +27,13 @@ beforeEach(async () => {
   state.memberIds = ['other'];
   for (const [prefix, target] of [['visible', { view: 'orders/list', id: 'order' }], ['hidden', { view: 'payables', id: 'bill' }]] as const) {
     state.tasks.push({ id: prefix + '-task', title: prefix, due: '', done: false, kind: 'finance', target });
-    state.notifications.push({ id: prefix + '-notice', title: prefix, body: '', at: now, target });
+    state.notifications.push({ id: prefix + '-notice', recipientIds: ['owner','other'], title: prefix, detail: '', at: now, readAt: null, target });
     state.calendar.push({ id: prefix + '-calendar', title: prefix, date: '2026-10-14', time: '10:00', note: '', target });
   }
 });
 afterEach(async () => { await rm(directory, { recursive: true, force: true }); });
 
-describe('共享提醒动作只能处理当前账号可见来源，不另造个人提醒模型', () => {
+describe('个人通知已读与共享事项动作均受当前账号可见来源约束', () => {
   for (const subject of ['other', 'owner']) {
     it.each([
       { type: 'notification.read', payload: { id: 'hidden-notice' } },
@@ -52,14 +52,33 @@ describe('共享提醒动作只能处理当前账号可见来源，不另造个�
       const input = { requestId: 'visible-read-all', expectedRevision: 0, command: { type: 'notification.readAll' as const, payload: {} } };
       const first = await repo.execute(actor(subject), workspaceId, input);
       const state = db.workspaces.get(workspaceId).state;
-      expect(state.notifications.find((item: any) => item.id === 'visible-notice').readAt).toBe(now);
-      expect(state.notifications.find((item: any) => item.id === 'hidden-notice').readAt).toBeUndefined();
+      expect(state.notifications.find((item: any) => item.id === 'visible-notice').readBy).toEqual({[subject]:now});
+      expect(first.workspace.state.notifications.find((item: any) => item.id === 'visible-notice').readAt).toBe(now);
+      expect(state.notifications.find((item: any) => item.id === 'hidden-notice').readBy).toBeUndefined();
       const replay = await repo.execute(actor(subject), workspaceId, input);
       expect(replay.replayed).toBe(true);
       expect(replay.workspace.revision).toBe(first.workspace.revision);
       expect(db.workspaces.get(workspaceId).state.notifications).toEqual(state.notifications);
     });
   }
+
+  it('服务端持久化本人已读后，另一收件人的投影仍然未读', async () => {
+    await execute({type:'notification.read',payload:{id:'visible-notice'}},'owner-read',actor('owner'));
+    const stored=db.workspaces.get(workspaceId).state.notifications.find((item:any)=>item.id==='visible-notice');
+    expect(stored.readBy).toEqual({owner:now});
+    const otherView=await repo.get(actor('other'),workspaceId);
+    expect(otherView.state.notifications.find((item:any)=>item.id==='visible-notice')?.readAt).toBeNull();
+    const result=await execute({type:'notification.readAll',payload:{}},'other-empty-batch',actor('other'));
+    expect(result.workspace.state.notifications.find((item:any)=>item.id==='visible-notice').readAt).toBe(now);
+    expect(db.workspaces.get(workspaceId).state.notifications.find((item:any)=>item.id==='visible-notice').readBy).toEqual({owner:now,other:now});
+  });
+
+  it('没有收件人的旧流水即使公司负责人也不能标已读', async () => {
+    const state=db.workspaces.get(workspaceId).state;
+    delete state.notifications[0].recipientIds;
+    await expect(execute({type:'notification.read',payload:{id:'visible-notice'}},'legacy-read',actor('owner'))).rejects.toMatchObject({status:404});
+    expect(state.notifications[0].readBy).toBeUndefined();
+  });
 
   it('可见通知、任务、日程仍可办理，隐藏记录保持完整', async () => {
     const hidden = structuredClone(db.workspaces.get(workspaceId).state.calendar[1]);
@@ -70,7 +89,7 @@ describe('共享提醒动作只能处理当前账号可见来源，不另造个�
     expect(state.tasks.find((item: any) => item.id === 'visible-task').done).toBe(true);
     expect(state.calendar.find((item: any) => item.id === 'visible-calendar').title).toBe('可见日程更新');
     expect(state.calendar.find((item: any) => item.id === 'hidden-calendar')).toEqual(hidden);
-    expect(state.notifications.find((item: any) => item.id === 'hidden-notice').readAt).toBeUndefined();
+    expect(state.notifications.find((item: any) => item.id === 'hidden-notice').readBy).toBeUndefined();
   });
 
   it('不能借新建或修改可见日程关联无读取权限的来源', async () => {

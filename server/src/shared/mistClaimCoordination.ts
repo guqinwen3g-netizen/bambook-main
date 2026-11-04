@@ -1,3 +1,4 @@
+import {notifyMist,notificationOwners} from './mistNotifications';
 import {orderFundingNonCustomerReceiptLimit} from './mistOrderFunding';
 import {recoveryOtherFulfilledMinor,type ClaimRecoverySettlement} from './mistClaimRecoveryReceipts';
 /**
@@ -73,7 +74,7 @@ function recoveryOf(claims: ClaimLike[], id: string) { for (const claim of claim
 function emit(root: MistState, c: MistContext, claimId: string, message: string, fileIds: string[] = []) { root.events.unshift({ id: c.id(), entityType: 'claim', entityId: claimId, at: c.now, actor: c.actorName, text: message, fileIds: [...fileIds] }); }
 function task(root: MistState, c: MistContext, claimId: string, kind: string, title: string, who: { assigneeIds?: string[]; permission?: string }) { const existing = root.tasks.find(t => t.kind === kind && t.target.view === 'claims' && t.target.id === claimId); if (existing) { existing.title = title; existing.done = false; existing.assigneeIds = who.assigneeIds ?? []; existing.permission = who.permission; return; } root.tasks.unshift({ id: c.id(), title, due: '', done: false, kind, target: { view: 'claims', id: claimId }, assigneeIds: who.assigneeIds ?? [], ...(who.permission ? { permission: who.permission } : {}) }); }
 function done(root: MistState, claimId: string, kind: string) { for (const t of root.tasks) if (t.kind === kind && t.target.view === 'claims' && t.target.id === claimId) t.done = true; }
-function notify(root: MistState, c: MistContext, claimId: string, title: string, detail: string) { root.notifications.unshift({ id: c.id(), title, detail, at: c.now, readAt: null, target: { view: 'claims', id: claimId }, category: 'general' }); }
+function notify(root: MistState, c: MistContext, claimId: string, title: string, detail: string, recipientIds: string[] = []) { notifyMist(root,c,{ title, detail, target: { view: 'claims', id: claimId }, category: 'general' },recipientIds); }
 function claimFiles(root: MistState, ids: unknown) { if (!Array.isArray(ids) || ids.length > 50) fail('附件无效'); for (const id of ids) if (!root.files.some(f => f.id === id)) fail('附件不存在', 'NOT_FOUND'); return [...new Set(ids as string[])]; }
 
 /** 当前质检结论（最新一次核实）；未核实返回 null。 */
@@ -133,7 +134,7 @@ export function applyClaimCoordinationCommand(root: MistState, claims: ClaimLike
       task(root, c, claim.id, 'claim-verify:' + claim.id, '客诉核实 · ' + claim.code, { permission: claimQcPermission(root, claim) ?? 'qc:inspect' });
       task(root, c, claim.id, 'claim-factory:' + claim.id, '工厂回复 · ' + claim.code, { assigneeIds: [byId] });
       // Recording contact does not approve liability or compensation; those remain separate commands.
-      notify(root, c, claim.id, claim.code + ' · 新客诉', c.actorName + ' · ' + s.name);
+      notify(root, c, claim.id, claim.code + ' · 新客诉', c.actorName + ' · ' + s.name, notificationOwners(root,'claim',claim.id));
       emit(root, c, claim.id, '通知相关人员：内部质检 / 负责人 / 跟单，工厂 ' + s.name + '（' + notice.factoryChannel + '）');
       return { id: notice.id, claimId: claim.id };
     }
@@ -144,7 +145,7 @@ export function applyClaimCoordinationCommand(root: MistState, claims: ClaimLike
       const row: ClaimVerification = { id: c.id(), at: c.now, by: c.actorName, byId, result: enumOf(v.result, ['confirmed', 'partial', 'notConfirmed'] as const, '核实结论'), scope: text(v.scope, '影响范围（款式 / 批次）'), affectedQuantity: qty, unit: text(v.unit, '数量单位', qty > 0, 20), goodsLocation: enumOf(v.goodsLocation, CLAIM_GOODS_LOCATIONS, '货物现在的位置'), mitigation: text(v.mitigation, '减少损失的办法', false), factoryResponse: text(v.factoryResponse, '工厂回复', false), safety: v.safety === true, fileIds: claimFiles(root, v.fileIds ?? []) };
       const first = !coordination(claim).verifications.length; coordination(claim).verifications.push(row);
       done(root, claim.id, 'claim-verify:' + claim.id); if (row.factoryResponse) done(root, claim.id, 'claim-factory:' + claim.id);
-      notify(root, c, claim.id, claim.code + ' · 质检' + (first ? '已核实' : '更新核实') + '：' + CLAIM_RESULT_LABEL[row.result], (row.safety ? '⚠ 涉及安全隐患，需单独评估停售或召回，不能只谈折扣。' : '') + '影响 ' + row.scope + ' · ' + row.affectedQuantity + ' ' + row.unit + ' · 货物' + CLAIM_LOCATION_LABEL[row.goodsLocation]);
+      notify(root, c, claim.id, claim.code + ' · 质检' + (first ? '已核实' : '更新核实') + '：' + CLAIM_RESULT_LABEL[row.result], (row.safety ? '⚠ 涉及安全隐患，需单独评估停售或召回，不能只谈折扣。' : '') + '影响 ' + row.scope + ' · ' + row.affectedQuantity + ' ' + row.unit + ' · 货物' + CLAIM_LOCATION_LABEL[row.goodsLocation], notificationOwners(root,'claim',claim.id));
       emit(root, c, claim.id, '质检核实：' + CLAIM_RESULT_LABEL[row.result] + (row.safety ? '（涉及安全隐患）' : ''), row.fileIds);
       return { id: row.id, claimId: claim.id };
     }

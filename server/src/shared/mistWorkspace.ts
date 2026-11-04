@@ -1,3 +1,4 @@
+import {notifyMist,notificationOwners} from './mistNotifications';
 import {applyInternalDeliveryCommand,assertInternalDeliveryIntegrity,internalDeliveryState,syncInternalDeliveryTasks,isInternalDeliveryTask,type InternalDelivery,type InternalDeliveryCommand} from './mistInternalDelivery';
 import {syncClaimReplacementShipments,type ClaimReplacementSource} from './mistClaimReplacement';
 import {claimRecoveryReceiptUsedMinor} from './mistClaimRecoveryReceipts';
@@ -251,6 +252,7 @@ export function assertAccountUsable(account: MistBankAccount, currency: string, 
 }
 export type MistInvoice = { id: string; code: string; orderId: string; order: string; customer: string; due: string; amount: number; open: number; currency: string;
   /** 开票业务日（YYYY-MM-DD，上海时区）；期末调汇按此判断截至月末的应收。 */
+  /** 开票发起账号；旧记录不按显示名反推。 */ issuedById?: string;
   issuedAt?: string; voidedAt?: string; voidReason?: string; voidedBy?: string; voidedById?: string; voidSourceDocumentId?: string;
   /** 客户汇款被中间行 / 收款行扣费造成的短收：财务凭已核销的到账登记，计入订单费用而非冲减收入。 */
   bankCharges?: MistInvoiceBankCharge[];
@@ -307,7 +309,7 @@ export type MistTask = { id: string; title: string; due: string; done: boolean; 
 export const MIST_LOGISTICS_DUTY = 'logistics:handle';
 /** 订单负责人账号（变更、取消、客诉后续由订单负责人跟进）。 */
 export function mistOrderOwnerIds(root: Pick<MistState, 'orders'>, orderId: string): string[] { const owner = root.orders.find(order => order.id === orderId)?.ownerId; return owner ? [owner] : []; }
-export type MistNotification = { id: string; title: string; detail: string; at: string; readAt: string | null; target: MistTarget; category?:'qc'|'shipping'|'suggestion'|'general' };
+export type MistNotification = { recipientIds: string[]; readBy?: Record<string, string>; id: string; title: string; detail: string; at: string; readAt: string | null; target: MistTarget; category?:'qc'|'shipping'|'suggestion'|'general' };
 /** ownerId：日程归属人（mar60，只看我的）；旧日程没有时视为公司共享。 */
 /** mar60：参与人（本公司成员）、提前提醒（分钟）、重复（每周 / 每月，至结束日；读取时展开）。 */
 export type MistCalendarEvent = { id: string; title: string; date: string; time: string; note: string; target?: MistTarget; ownerId?: string; owner?: string;
@@ -599,9 +601,9 @@ function files(state: MistState, ids: string[]) {
   unique.forEach(id => find(state.files, id, '附件'));
   return unique;
 }
-function event(state: MistState, context: MistContext, entityType: string, entityId: string, message: string, target?: MistTarget, category:NonNullable<MistNotification['category']>='general') {
+function event(state: MistState, context: MistContext, entityType: string, entityId: string, message: string, target?: MistTarget, category:NonNullable<MistNotification['category']>='general', recipientIds: string[] = []) {
   state.events.unshift({id:context.id(),entityType,entityId,actor:context.actorName,at:context.auditNow ?? context.now,text:message,fileIds:[]});
-  if (target) state.notifications.unshift({id:context.id(),title:message,detail:context.actorName,at:context.now,readAt:null,target,category});
+  if (target) notifyMist(state,context,{title:message,detail:context.actorName,target,category},recipientIds);
 }
 /** BB-DEV-4：按当前工厂任务冻结通知单快照（仓储层渲染 PDF 前调用，命令内再次核对）。payload 只能是 devId + versionId。 */
 export function prepareDevelopmentNoticeSnapshot(state: MistState, payload: unknown, context: MistContext): DevNoticeSnapshot {
@@ -636,8 +638,8 @@ function syncDevelopmentBilling(state: MistState, context: MistContext) {
   for(const dev of state.devs){
     if(!dev.billing || !state.invoices.some(invoice=>invoice.devId===dev.id))continue;
     const settled=developmentBillingSettled(state,dev);
-    if(settled&&!dev.billing.settledAt){dev.billing.settledAt=context.now;updateDev(state,dev,context);event(state,context,'development',dev.id,'开发收费已全部结清',{view:'development/detail',id:dev.id});}
-    else if(!settled&&dev.billing.settledAt){delete dev.billing.settledAt;updateDev(state,dev,context);event(state,context,'development',dev.id,'开发收费核销已冲回，恢复待收款',{view:'development/detail',id:dev.id});}
+    if(settled&&!dev.billing.settledAt){dev.billing.settledAt=context.now;updateDev(state,dev,context);event(state,context,'development',dev.id,'开发收费已全部结清',{view:'development/detail',id:dev.id},'general',notificationOwners(state,'development',dev.id));}
+    else if(!settled&&dev.billing.settledAt){delete dev.billing.settledAt;updateDev(state,dev,context);event(state,context,'development',dev.id,'开发收费核销已冲回，恢复待收款',{view:'development/detail',id:dev.id},'general',notificationOwners(state,'development',dev.id));}
   }
 }
 function versionOf(state: MistState, devId: string, versionId: string): [MistDev, MistVersion] {
@@ -846,7 +848,7 @@ export function createMistState(context: MistContext, seed: 'demo'|'empty' = 'de
   state.contacts=Seed.CONTACTS.map((row,index)=>({...row,id:'contact-'+index,customerId:state.customers[0].id,phone:'',tone:row.tone as MistTone}));
   state.tasks=state.devs.slice(0,4).map(dev=>({id:context.id(),title:dev.name,due:dev.due,done:false,kind:'development',target:{view:'development/detail',id:dev.id,versionId:dev.currentVersionId||undefined},assigneeIds:dev.ownerId?[dev.ownerId]:[]}));
   state.calendar=[{id:context.id(),title:'秋冬首样评审',date:iso('10/12',context),time:'14:00',note:'顾言、沈禾、QC 许言 · 30 分钟',target:{view:'development/detail',id:state.devs[0].id}}];
-  state.notifications=[{id:context.id(),category:'qc',title:'首样评审报告已回传',detail:'查看当前版本的专业评审结果。',at:context.now,readAt:null,target:{view:'development/detail',id:state.devs[0].id,versionId:state.devs[0].currentVersionId||undefined}}];
+  state.notifications=[{recipientIds:notificationOwners(state,'development',state.devs[0].id).filter(id=>id!==context.actorId),id:context.id(),category:'qc',title:'首样评审报告已回传',detail:'查看当前版本的专业评审结果。',at:context.now,readAt:null,target:{view:'development/detail',id:state.devs[0].id,versionId:state.devs[0].currentVersionId||undefined}}];
   seedEmailExamples(state,context);
   recalculate(state);
   // 各模块示例数据：经真实业务命令生成，失败步骤被跳过（测试要求零失败）。
@@ -1033,7 +1035,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const confirmed=confirmationSamples(state,dev,version,p.sampleIds);
       version.confirmations.push({id:context.id(),result:p.result,confirmer:text(p.confirmer,'实际确认人',true,120),organization:text(p.organization,'所属组织',false,240),confirmedAt:instant(p.confirmedAt,context),basis:text(p.basis,'确认依据'),originalText:text(p.originalText,'需求方原文',false),recordedAt:context.now,recordedBy:context.actorName,...(confirmed?{samples:confirmed}:{})});
       delete version.confirmationDraft;updateDev(state,dev,context);
-      event(state,context,'development',dev.id,'记录 '+version.label+' 需求方确认'+(confirmed?'（'+confirmed.map(s=>s.form+' '+s.code).join('、')+'）':''),{view:'development/detail',id:dev.id,versionId:version.id});result={devId:dev.id,versionId:version.id};break;
+      event(state,context,'development',dev.id,'记录 '+version.label+' 需求方确认'+(confirmed?'（'+confirmed.map(s=>s.form+' '+s.code).join('、')+'）':''),{view:'development/detail',id:dev.id,versionId:version.id},'general',notificationOwners(state,'development',dev.id));result={devId:dev.id,versionId:version.id};break;
     }
     case 'development.recordSample': {
       const [dev,v]=versionOf(state,p.devId,p.versionId);
@@ -1074,7 +1076,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(v.qc)v.qcHistory=[...(v.qcHistory||[]),v.qc];
       v.qc={result:p.qc.result,reviewer:text(p.qc.reviewer,'评审人',true,120),reviewedAt:instant(p.qc.reviewedAt,context),report:text(p.qc.report,'报告编号',true,120),opinion:text(p.qc.opinion,'专业意见'),measurements:facts,...(developmentDomain(dev.values)==='fabric'?{fabricMeasurements:fabricFacts}:{}),...(p.qc.appearanceDefects===undefined?{}:{appearanceDefects:p.qc.appearanceDefects})};
       recordDevelopmentQcOnTasks(state,dev.id,v.id,v.qc,context);
-      updateDev(state,dev,context);event(state,context,'development',dev.id,'记录 '+v.label+' QC评审',{view:'development/detail',id:dev.id,versionId:v.id},'qc');result={devId:dev.id,versionId:v.id};break;
+      updateDev(state,dev,context);event(state,context,'development',dev.id,'记录 '+v.label+' QC评审',{view:'development/detail',id:dev.id,versionId:v.id},'qc',notificationOwners(state,'development',dev.id));result={devId:dev.id,versionId:v.id};break;
     }
     case 'development.move': {
       const dev=find(state.devs,p.devId,'开发案'), v=state.versions.find(x=>x.id===dev.currentVersionId);
@@ -1090,14 +1092,14 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const chain=previous.stages?.map(({factoryId,process})=>({factoryId,process}));
       const {round,versions}=createRound(state,dev,{factories:chain?chain.map(row=>row.factoryId):[previous.factoryId],requirements:note,referenceVersionIds:[previous.id],targetDate:dev.due||context.now.slice(0,10),fileIds:[],...(chain?{stages:chain}:{})},context),version=versions[0];
       updateDev(state,dev,context);
-      event(state,context,'development',dev.id,'创建改版 '+version.label,{view:'development/detail',id:dev.id,versionId:version.id});result={devId:dev.id,versionId:version.id,roundId:round.id};break;
+      event(state,context,'development',dev.id,'创建改版 '+version.label,{view:'development/detail',id:dev.id,versionId:version.id},'general',notificationOwners(state,'development',dev.id));result={devId:dev.id,versionId:version.id,roundId:round.id};break;
     }
     case 'development.close': {
       const dev=find(state.devs,p.devId,'开发案');
       if(p.kind!=='archived'&&p.kind!=='cancelled')throw new MistCommandError('VALIDATION','开发案结束方式无效');
       if(dev.closure)throw new MistCommandError('PRECONDITION','开发案已'+(dev.closure.kind==='cancelled'?'取消':dev.closure.kind==='archived'?'归档':'结案'));
       dev.closure={kind:p.kind,at:context.now,by:context.actorName,reason:text(p.reason,'原因')};updateDev(state,dev,context);
-      event(state,context,'development',dev.id,(p.kind==='cancelled'?'取消开发案：':'归档开发案：')+dev.closure.reason,{view:'development/detail',id:dev.id});result={devId:dev.id};break;
+      event(state,context,'development',dev.id,(p.kind==='cancelled'?'取消开发案：':'归档开发案：')+dev.closure.reason,{view:'development/detail',id:dev.id},'general',notificationOwners(state,'development',dev.id));result={devId:dev.id};break;
     }
     case 'development.qc.decide': {
       const [dev,v]=versionOf(state,p.devId,p.versionId);
@@ -1112,7 +1114,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
         v.qcHistory=[...(v.qcHistory||[]),{...v.qc,decision}];v.qc=null;
       }else v.qcDecision=decision;
       updateDev(state,dev,context);
-      event(state,context,'development',dev.id,(p.decision==='rework'?'整改复检 ':'放弃 ')+v.label,{view:'development/detail',id:dev.id,versionId:v.id},'qc');
+      event(state,context,'development',dev.id,(p.decision==='rework'?'整改复检 ':'放弃 ')+v.label,{view:'development/detail',id:dev.id,versionId:v.id},'qc',notificationOwners(state,'development',dev.id));
       result={devId:dev.id,versionId:v.id};break;
     }
     case 'development.stage.handover': {
@@ -1124,7 +1126,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const row:DevStageHandover={id:context.id(),stageIndex:p.stageIndex,quantity:positive(Number(p.quantity),'交接数量'),unit:text(p.unit,'交接单位',true,20),date:handoverDate,note:text(p.note,'交接依据',true,1000),at:context.now,actor:context.actorName};
       v.stageHandovers=[...(v.stageHandovers||[]),row];updateDev(state,dev,context);
       const from=v.stages![p.stageIndex],to=v.stages![p.stageIndex+1];
-      event(state,context,'development',dev.id,`${v.label} 前道交接：${from.factory} → ${to.factory} ${row.quantity} ${row.unit}`,{view:'development/detail',id:dev.id,versionId:v.id});
+      event(state,context,'development',dev.id,`${v.label} 前道交接：${from.factory} → ${to.factory} ${row.quantity} ${row.unit}`,{view:'development/detail',id:dev.id,versionId:v.id},'general',notificationOwners(state,'development',dev.id));
       result={devId:dev.id,versionId:v.id};break;
     }
     case 'development.round.create': {
@@ -1137,7 +1139,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const {round,versions}=createRound(state,dev,p,context);
       if(source)source.qcDecision={kind:'resample',note:text(p.requirements,'本轮要求'),decidedAt:context.now,decidedBy:context.actorName,roundId:round.id};
       updateDev(state,dev,context);
-      event(state,context,'development',dev.id,'开启第 '+round.number+' 轮：'+versions.map(v=>v.label).join('、'),{view:'development/detail',id:dev.id,versionId:versions[0].id});
+      event(state,context,'development',dev.id,'开启第 '+round.number+' 轮：'+versions.map(v=>v.label).join('、'),{view:'development/detail',id:dev.id,versionId:versions[0].id},'general',notificationOwners(state,'development',dev.id));
       result={devId:dev.id,roundId:round.id,versionId:versions[0].id,versionIds:versions.map(v=>v.id)};break;
     }
     case 'development.round.updateRequirements': {
@@ -1150,7 +1152,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       round.requirements=requirements;round.requirementsUpdatedAt=context.now;round.requirementsUpdatedBy=context.actorName;
       const pending=state.versions.filter(v=>v.roundId===round.id&&!factoryTaskSync(state,v)?.inSync).map(v=>v.label);
       dev.updatedAt=context.now;
-      event(state,context,'development',dev.id,'修改第 '+round.number+' 轮共同要求'+(pending.length?'；待逐厂同步：'+pending.join('、'):''),{view:'development/detail',id:dev.id});
+      event(state,context,'development',dev.id,'修改第 '+round.number+' 轮共同要求'+(pending.length?'；待逐厂同步：'+pending.join('、'):''),{view:'development/detail',id:dev.id},'general',notificationOwners(state,'development',dev.id));
       result={devId:dev.id,roundId:round.id};break;
     }
     case 'development.version.syncRequirements': {
@@ -1161,7 +1163,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       v.task={...task,commonRequirements:round.requirements,syncedAt:context.now,syncedBy:context.actorName};
       v.note=factoryTaskNote(round.requirements,v.task.extraRequirements);
       dev.updatedAt=context.now;
-      event(state,context,'development',dev.id,v.label+' 已同步第 '+round.number+' 轮共同要求',{view:'development/detail',id:dev.id,versionId:v.id});
+      event(state,context,'development',dev.id,v.label+' 已同步第 '+round.number+' 轮共同要求',{view:'development/detail',id:dev.id,versionId:v.id},'general',notificationOwners(state,'development',dev.id));
       result={devId:dev.id,versionId:v.id};break;
     }
     case 'development.notice.generate': {
@@ -1171,7 +1173,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const record=artifact.record;
       if(state.versions.some(row=>row.notices?.some(n=>n.id===record.id||n.fileId===record.fileId))||state.files.some(f=>f.id===artifact.file.id))throw new MistCommandError('CONFLICT','通知单记录或文件已存在',409);
       state.files.push(structuredClone(artifact.file));v.notices=[...(v.notices||[]),structuredClone(record)];dev.updatedAt=context.now;
-      event(state,context,'development',dev.id,'生成'+snapshot.title+' '+record.noticeNo+'（'+v.factory+'）',{view:'development/detail',id:dev.id,versionId:v.id});
+      event(state,context,'development',dev.id,'生成'+snapshot.title+' '+record.noticeNo+'（'+v.factory+'）',{view:'development/detail',id:dev.id,versionId:v.id},'general',notificationOwners(state,'development',dev.id));
       result={devId:dev.id,versionId:v.id,noticeId:record.id,fileId:record.fileId};break;
     }
     case 'development.version.addSampleForm': {
@@ -1183,7 +1185,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const sample=find(state.fulfillment.samples,id,'样品');
       ensureDevelopmentQcTasks(state,dev.id,v.id,context);
       updateDev(state,dev,context);
-      event(state,context,'development',dev.id,v.label+' 追加实物形态 '+form+' '+sample.quantity+' '+unit+'（'+sample.code+'）',{view:'development/detail',id:dev.id,versionId:v.id});
+      event(state,context,'development',dev.id,v.label+' 追加实物形态 '+form+' '+sample.quantity+' '+unit+'（'+sample.code+'）',{view:'development/detail',id:dev.id,versionId:v.id},'general',notificationOwners(state,'development',dev.id));
       result={devId:dev.id,versionId:v.id,id};break;
     }
     case 'development.sample.dispatch': {
@@ -1201,7 +1203,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       movement.development={devId:dev.id,versionId:v.id,dispatchId};if(trackingNo)movement.trackingNo=trackingNo;
       (v.dispatches||=[]).push({id:dispatchId,sampleId:sample.id,sampleCode:sample.code,form:sample.form,unit:sample.unit,quantity:movement.quantity,purpose,recipient,trackingNo,fee,note,movementId,recordedAt:context.now,recordedBy:context.actorName});
       updateDev(state,dev,context);
-      event(state,context,'development',dev.id,v.label+' 寄样 '+sample.form+' '+movement.quantity+' '+sample.unit+' → '+recipient+(trackingNo?'（运单 '+trackingNo+'）':''),{view:'development/detail',id:dev.id,versionId:v.id});
+      event(state,context,'development',dev.id,v.label+' 寄样 '+sample.form+' '+movement.quantity+' '+sample.unit+' → '+recipient+(trackingNo?'（运单 '+trackingNo+'）':''),{view:'development/detail',id:dev.id,versionId:v.id},'general',notificationOwners(state,'development',dev.id));
       result={devId:dev.id,versionId:v.id,id:dispatchId};break;
     }
     case 'development.sample.dispatchReceived': {
@@ -1210,7 +1212,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(row.receipt)throw new MistCommandError('PRECONDITION','已登记签收，不能覆盖');
       const day=date(p.date);if(day<row.recordedAt.slice(0,10))throw new MistCommandError('VALIDATION','签收日期不能早于寄出');if(day>platformBusinessDate(context.now))throw new MistCommandError('VALIDATION','签收日期不能在未来');
       row.receipt={date:day,feedback:text(p.feedback||'','客户意见',false,2000),at:context.now,actor:context.actorName};dev.updatedAt=context.now;
-      event(state,context,'development',dev.id,v.label+' 寄样 '+row.sampleCode+' 客户 '+day+' 签收'+(row.receipt.feedback?'：'+row.receipt.feedback:''),{view:'development/detail',id:dev.id,versionId:v.id});
+      event(state,context,'development',dev.id,v.label+' 寄样 '+row.sampleCode+' 客户 '+day+' 签收'+(row.receipt.feedback?'：'+row.receipt.feedback:''),{view:'development/detail',id:dev.id,versionId:v.id},'general',notificationOwners(state,'development',dev.id));
       result={devId:dev.id,versionId:v.id,id:row.id};break;
     }
     case 'development.sample.dispatchFee': {
@@ -1242,7 +1244,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(expenseDate>context.now.slice(0,10))throw new MistCommandError('VALIDATION','费用日期不得在未来');
       const id=context.id();(dev.billing||={makingFees:[]}).expenses||=[];
       dev.billing.expenses.push({id,...fee,description:text(p.description,'费用说明'),date:expenseDate,...(p.versionId?{versionId:p.versionId}:{}),at:context.now,actor:context.actorName});
-      dev.updatedAt=context.now;event(state,context,'development',dev.id,'登记公司支出 '+fee.amount+' '+fee.currency,{view:'development/detail',id:dev.id});result={id,devId:dev.id};break;
+      dev.updatedAt=context.now;event(state,context,'development',dev.id,'登记公司支出 '+fee.amount+' '+fee.currency,{view:'development/detail',id:dev.id},'general',notificationOwners(state,'development',dev.id));result={id,devId:dev.id};break;
     }
     case 'development.charge.add': {
       const dev=find(state.devs,p.devId,'开发案');
@@ -1256,13 +1258,13 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const id=context.id();
       (dev.billing||={makingFees:[]}).charges||=[];
       dev.billing.charges.push({id,versionIds,description:text(p.description,'收费内容'),...fee,evidence:text(p.evidence,'收费约定依据'),at:context.now,actor:context.actorName});
-      dev.updatedAt=context.now;delete dev.billing.settledAt;event(state,context,'development',dev.id,'登记对客收费 '+fee.amount+' '+fee.currency,{view:'development/detail',id:dev.id});result={id,devId:dev.id};break;
+      dev.updatedAt=context.now;delete dev.billing.settledAt;event(state,context,'development',dev.id,'登记对客收费 '+fee.amount+' '+fee.currency,{view:'development/detail',id:dev.id},'general',notificationOwners(state,'development',dev.id));result={id,devId:dev.id};break;
     }
     case 'development.charge.void': {
       const dev=find(state.devs,p.devId,'开发案'),charge=unbilledDevelopmentCharges(state,dev).find(row=>row.id===p.chargeId);
       if(!charge)throw new MistCommandError('PRECONDITION','仅未开票的有效收费项可作废');
       charge.voided={at:context.now,actor:context.actorName,reason:text(p.reason,'作废原因')};
-      event(state,context,'development',dev.id,'作废收费项：'+charge.voided.reason,{view:'development/detail',id:dev.id});result={id:charge.id,devId:dev.id};break;
+      event(state,context,'development',dev.id,'作废收费项：'+charge.voided.reason,{view:'development/detail',id:dev.id},'general',notificationOwners(state,'development',dev.id));result={id:charge.id,devId:dev.id};break;
     }
     case 'development.billing.withdraw': {
       const dev=find(state.devs,p.devId,'开发案'),request=dev.billing?.request;
@@ -1271,7 +1273,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       (dev.billing!.requestHistory||=[]).push({...structuredClone(request),withdrawnAt:context.now,withdrawnBy:context.actorName,reason});
       for(const task of state.tasks)if(task.id===request.taskId)task.done=true;
       delete dev.billing!.request;updateDev(state,dev,context);
-      event(state,context,'development',dev.id,'撤回费用开票申请：'+reason,{view:'development/detail',id:dev.id});result={devId:dev.id};break;
+      event(state,context,'development',dev.id,'撤回费用开票申请：'+reason,{view:'development/detail',id:dev.id},'general',notificationOwners(state,'development',dev.id));result={devId:dev.id};break;
     }
     case 'development.billing.issue': {
       const dev=find(state.devs,p.devId,'开发案');
@@ -1288,10 +1290,10 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(state.invoices.some(invoice=>invoice.code===number))throw new MistCommandError('CONFLICT','发票编号已使用');
       if(!fileIds.length)throw new MistCommandError('PRECONDITION','请上传核对后的发票原件');
       const id=context.id(),total=totals[0];
-      state.invoices.push({id,code:number,orderId:'',order:dev.code,customer:customer.name,customerId:customer.id,due,amount:total.amount,open:0,currency:total.currency,devId:dev.id,developmentChargeIds:chargeIds,fileIds,issuedAt:platformBusinessDate(context.now),financeStatus:'pending'});
+      state.invoices.push({id,code:number,orderId:'',order:dev.code,customer:customer.name,customerId:customer.id,due,amount:total.amount,open:0,currency:total.currency,devId:dev.id,developmentChargeIds:chargeIds,fileIds,issuedById:context.actorId,issuedAt:platformBusinessDate(context.now),financeStatus:'pending'});
       (dev.billing||={makingFees:[]}).invoices||=[];dev.billing.invoices.push({invoiceId:id,chargeIds,lines:structuredClone(selected),fileIds:[...fileIds],at:context.now,actor:context.actorName});
-      event(state,context,'invoice',id,'业务开具开发发票 '+number+'，待财务确认',{view:'invoices',id});
-      dev.updatedAt=context.now;event(state,context,'development',dev.id,'开具开发发票 '+number,{view:'development/detail',id:dev.id});
+      event(state,context,'invoice',id,'业务开具开发发票 '+number+'，待财务确认',{view:'invoices',id},'general',notificationOwners(state,'invoice',id));
+      dev.updatedAt=context.now;event(state,context,'development',dev.id,'开具开发发票 '+number,{view:'development/detail',id:dev.id},'general',notificationOwners(state,'development',dev.id));
       result={id,devId:dev.id};break;
     }
     case 'development.version.recordMinor': {
@@ -1305,7 +1307,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
         minor:{parentVersionId:parent.id,seq,change,recordedAt:context.now,recordedBy:context.actorName}};
       const after=dev.versionIds.indexOf((siblings.at(-1)||parent).id);
       state.versions.push(minor);dev.versionIds.splice(after+1,0,id);dev.currentVersionId=id;updateDev(state,dev,context);
-      event(state,context,'development',dev.id,'在 '+parent.label+' 上记录小调整，生成 '+minor.label+'：'+change,{view:'development/detail',id:dev.id,versionId:id});
+      event(state,context,'development',dev.id,'在 '+parent.label+' 上记录小调整，生成 '+minor.label+'：'+change,{view:'development/detail',id:dev.id,versionId:id},'general',notificationOwners(state,'development',dev.id));
       result={devId:dev.id,versionId:id};break;
     }
     case 'development.archive': {
@@ -1348,7 +1350,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
     case 'order.create': {result=createMistOrderRecords(state,p,context);break;}
     case 'order.files.add': {
       const order=find(state.orders,p.orderId,'订单'),ids=files(state,p.fileIds),added=ids.filter(id=>!order.fileIds?.includes(id));
-      if(added.length){order.fileIds=[...new Set([...(order.fileIds||[]),...added])];order.updatedAt=context.now;event(state,context,'order',order.id,'补充订单资料');state.events[0].fileIds=added;}
+      if(added.length){order.fileIds=[...new Set([...(order.fileIds||[]),...added])];order.updatedAt=context.now;event(state,context,'order',order.id,'补充订单资料',{view:'orders/detail',id:order.id},'general',notificationOwners(state,'order',order.id));state.events[0].fileIds=added;}
       result={orderId:order.id,applied:added.length};break;
     }
     case 'order.update': {
@@ -1356,14 +1358,14 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if((p as Record<string,unknown>).owner!==undefined)throw new MistCommandError('VALIDATION','负责人须按账号选择');
       if(o.governance?.status==='pending'||o.governance?.changeDraft?.status==='pending')throw new MistCommandError('PRECONDITION','审批中的订单内容已锁定');
       if((p.due!==undefined&&p.due!==o.due||p.season!==undefined&&p.season!==o.season)&&(!o.governance||o.governance.status==='approved'))throw new MistCommandError('PRECONDITION','正式商业条款变更须保存变更草稿并重新审批');
-      if(p.due!==undefined)o.due=date(p.due);if(p.season!==undefined)o.season=text(p.season,'季节');let ownerText='';if(p.ownerId!==undefined&&p.ownerId!==o.ownerId){const next=resolveMember(context,p.ownerId,'订单负责人');ownerText=ownerChangeText('负责人',o.owner,next.name);o.owner=next.name;o.ownerId=next.id;}o.updatedAt=context.now;event(state,context,'order',o.id,ownerText?'更新订单 · '+ownerText:'更新订单');result={orderId:o.id};break;
+      if(p.due!==undefined)o.due=date(p.due);if(p.season!==undefined)o.season=text(p.season,'季节');let ownerText='';if(p.ownerId!==undefined&&p.ownerId!==o.ownerId){const next=resolveMember(context,p.ownerId,'订单负责人');ownerText=ownerChangeText('负责人',o.owner,next.name);o.owner=next.name;o.ownerId=next.id;}o.updatedAt=context.now;event(state,context,'order',o.id,ownerText?'更新订单 · '+ownerText:'更新订单',{view:'orders/detail',id:o.id},'general',notificationOwners(state,'order',o.id));result={orderId:o.id};break;
     }
     case 'order.checklist': {
       const o=assertMistOrderApproved(state,p.orderId), item=find(o.checklist,p.itemId,'准备事项');item.done=!!p.done;item.actor=context.actorName;item.at=context.now;o.updatedAt=context.now;result={orderId:o.id};break;
     }
     case 'order.handoff': {
       const o=assertMistOrderApproved(state,p.orderId);const readiness=o.checklist.filter(i=>['拟发范围确认','收货与贸易条款确认','收款条件核对'].includes(i.label));if(readiness.length!==3||!readiness.every(i=>i.done))throw new MistCommandError('PRECONDITION','请先核对拟发范围、收货贸易条款和收款条件');
-      if(!o.handoffAt){o.handoffAt=context.now;state.tasks.unshift({id:context.id(),title:'核对 '+o.code+' 出运交接',due:o.due,done:false,kind:'shipping',target:{view:'orders/detail',id:o.id},assigneeIds:[],permission:MIST_LOGISTICS_DUTY});event(state,context,'order',o.id,'交接后勤'+(p.note?'：'+text(p.note,'交接说明',false):''),{view:'orders/detail',id:o.id},'shipping');}
+      if(!o.handoffAt){o.handoffAt=context.now;state.tasks.unshift({id:context.id(),title:'核对 '+o.code+' 出运交接',due:o.due,done:false,kind:'shipping',target:{view:'orders/detail',id:o.id},assigneeIds:[],permission:MIST_LOGISTICS_DUTY});event(state,context,'order',o.id,'交接后勤'+(p.note?'：'+text(p.note,'交接说明',false):''),{view:'orders/detail',id:o.id},'shipping',notificationOwners(state,'order',o.id));}
       result={orderId:o.id};break;
     }
     case 'production.move': {
@@ -1372,7 +1374,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       assertProductionTransition(state,job,p.col,job.pct,context);
       if(p.col==='done'&&job.pct<100)throw new MistCommandError('PRECONDITION','完成进度达到100%并完成尾期QC后才能待出运');
       job.col=p.col;const moveNote=text(p.note||'','工序备注',false,1000);
-      event(state,context,'production',job.id,'更新工序为 '+p.col+(moveNote?'：'+moveNote:''),{view:'production-board',id:job.id,productionId:job.id});result={id:job.id,orderId:job.orderId};break;
+      event(state,context,'production',job.id,'更新工序为 '+({cut:'裁剪',sew:'缝制',finish:'后整',qc:'质检',done:'待出运'} as const)[p.col as MistProduction['col']]+(moveNote?'：'+moveNote:''),{view:'production-board',id:job.id,productionId:job.id},'general',notificationOwners(state,'production',job.id));result={id:job.id,orderId:job.orderId};break;
     }
     case 'production.update': {
       const job=find(state.productions,p.id,'生产单'),pct=positive(p.pct,'进度',true);if(job.closed)throw new MistCommandError('PRECONDITION',`生产单 ${job.code} 已随合同取消关闭`);if(pct>100)throw new MistCommandError('VALIDATION','进度不得超过100%');
@@ -1383,7 +1385,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(job.startDate&&job.startDate>job.due)throw new MistCommandError('VALIDATION','开始日期不得晚于交期');
       // ord40：生产交期晚于订单交期时，提醒订单负责人发起订单交期变更并告知客户。
       {const order=state.orders.find(o=>o.id===job.orderId),kind=`production-late:${job.id}`;if(order&&job.due>order.due){state.tasks=state.tasks.filter(t=>!(t.kind===kind&&!t.done));state.tasks.unshift({id:context.id(),title:`生产 ${job.code} 交期 ${job.due} 晚于订单 ${order.code} 交期 ${order.due}，请发起订单交期变更`,due:order.due,done:false,kind,target:{view:'orders/detail',id:order.id,orderLineId:job.lineId},assigneeIds:mistOrderOwnerIds(state,order.id)});}else state.tasks.filter(t=>t.kind===kind&&!t.done).forEach(t=>t.done=true);}
-      event(state,context,'production',job.id,'更新生产进度 '+pct+'%');if(note)event(state,context,'production',job.id,'生产跟进：'+note);result={id:job.id,orderId:job.orderId};break;
+      event(state,context,'production',job.id,'更新生产进度 '+pct+'%',{view:'production-board',id:job.id},'general',notificationOwners(state,'production',job.id));if(note)event(state,context,'production',job.id,'生产跟进：'+note,{view:'production-board',id:job.id},'general',notificationOwners(state,'production',job.id));result={id:job.id,orderId:job.orderId};break;
     }
     case 'finance.receivable.confirm':
     case 'finance.receivable.reject': {
@@ -1391,17 +1393,17 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(!isPendingFinanceMistInvoice(i))throw new MistCommandError('PRECONDITION',i.financeStatus==='confirmed'?'该应收已由财务确认':'仅待财务确认的应收可以确认或驳回');
       if(command.type==='finance.receivable.confirm'){
         i.financeStatus='confirmed';i.financeConfirmedAt=context.now;i.financeConfirmedBy=context.actorName;if(context.actorId)i.financeConfirmedById=context.actorId;
-        event(state,context,'invoice',i.id,'财务确认应收 '+i.code+'，计入应收余额',{view:'invoices',id:i.id});result={id:i.id};break;
+        event(state,context,'invoice',i.id,'财务确认应收 '+i.code+'，计入应收余额',{view:'invoices',id:i.id},'general',notificationOwners(state,'invoice',i.id));result={id:i.id};break;
       }
       const reason=text(p.reason,'驳回原因',true,500),f=state.fulfillment;
       if(i.sampleRequestId){
         Object.assign(i,{financeStatus:'rejected',financeRejectedAt:context.now,financeRejectedBy:context.actorName,financeRejectReason:reason,voidedAt:context.now,voidReason:'财务驳回：'+reason,voidedBy:context.actorName,open:0},context.actorId?{financeRejectedById:context.actorId,voidedById:context.actorId}:{});
         const request=(state.sampleRequests||[]).find(r=>r.id===i.sampleRequestId);if(request?.fee?.invoiceId===i.id){delete request.fee.invoiceId;delete request.fee.invoiceCode;}
-        event(state,context,'invoice',i.id,'财务驳回样品费 '+i.code+'：'+reason,{view:'samples',section:'requests',id:i.sampleRequestId});result={id:i.id};break;
+        event(state,context,'invoice',i.id,'财务驳回样品费 '+i.code+'：'+reason,{view:'samples',section:'requests',id:i.sampleRequestId},'general',notificationOwners(state,'invoice',i.id));result={id:i.id};break;
       }
       if(i.devId&&i.developmentChargeIds?.length){
         Object.assign(i,{financeStatus:'rejected',financeRejectedAt:context.now,financeRejectedBy:context.actorName,financeRejectReason:reason,voidedAt:context.now,voidReason:'财务驳回：'+reason,voidedBy:context.actorName,open:0},context.actorId?{financeRejectedById:context.actorId,voidedById:context.actorId}:{});
-        event(state,context,'invoice',i.id,'财务驳回开发应收 '+i.code+'：'+reason,{view:'development/detail',id:i.devId});result={id:i.id,devId:i.devId};break;
+        event(state,context,'invoice',i.id,'财务驳回开发应收 '+i.code+'：'+reason,{view:'development/detail',id:i.devId},'general',notificationOwners(state,'invoice',i.id));result={id:i.id,devId:i.devId};break;
       }
 
       const docs=(f?.documents||[]).filter(d=>d.type==='CI'&&d.invoiceId===i.id&&d.status==='issued');
@@ -1411,7 +1413,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       Object.assign(i,{financeStatus:'rejected',financeRejectedAt:context.now,financeRejectedBy:context.actorName,financeRejectReason:reason,voidedAt:context.now,voidReason:'财务驳回：'+reason,voidedBy:context.actorName,voidSourceDocumentId:d.id,open:0},context.actorId?{financeRejectedById:context.actorId,voidedById:context.actorId}:{});
       d.status='draft';delete d.invoiceId;delete d.issuedAt;d.financeRejection={reason,at:context.now,actor:context.actorName,invoiceId:i.id};
       if(s.state==='ready')s.state='preparing';delete s.documentsSentAt;
-      event(state,context,'invoice',i.id,'财务驳回应收 '+i.code+'：'+reason+'；CI 退回草稿待修正',{view:'invoices',id:i.id});result={id:i.id,documentId:d.id};break;
+      event(state,context,'invoice',i.id,'财务驳回应收 '+i.code+'：'+reason+'；CI 退回草稿待修正',{view:'invoices',id:i.id},'general',notificationOwners(state,'invoice',i.id));result={id:i.id,documentId:d.id};break;
     }
     case 'finance.importReceipts': {
       if(!Array.isArray(p.receipts)||!p.receipts.length||p.receipts.length>2000)throw new MistCommandError('VALIDATION','流水数量无效');
@@ -1454,7 +1456,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
         const cents=mistMoneyMinor(amount),receiptCents=toReceipt(cents);
         if(cents<=0||cents>mistMoneyMinor(i.open)||receiptCents<=0||receiptCents>mistMoneyMinor(r.remaining))throw new MistCommandError('VALIDATION',`${i.code} 核销金额超出可分配余额`);
         state.allocations.push({id:context.id(),receiptId:r.id,invoiceId:i.id,amount,currency:i.currency,createdAt:context.now,actor:context.actorName,...(payerBasis?{payerBasis}:{}),...(cross?{receiptAmount:major(receiptCents),receiptCurrency:r.currency,rate,rateBasis}:{})});applied++;recalculate(state);
-        event(state,context,'invoice',i.id,'核销 '+r.code+' → '+i.code+(cross?`（${major(receiptCents)} ${r.currency} @${rate} = ${amount} ${i.currency}）`:''),{view:'payment-vouchers',id:i.id});
+        event(state,context,'invoice',i.id,'核销 '+r.code+' → '+i.code+(cross?`（${major(receiptCents)} ${r.currency} @${rate} = ${amount} ${i.currency}）`:''),{view:'payment-vouchers',id:i.id},'general',notificationOwners(state,'invoice',i.id));
       }
       assertOrderFundingIntegrity(state);result={applied};break;
     }
@@ -1480,7 +1482,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(mistInvoiceBankChargeMinor(i)+minor>mistMoneyMinor(MIST_BANK_CHARGE_LIMIT))throw new MistCommandError('PRECONDITION',`单张发票累计银行扣费不超过 ${MIST_BANK_CHARGE_LIMIT} ${i.currency}；更大的短收请走贷项通知或索赔`);
       const id=context.id();i.bankCharges=[...(i.bankCharges||[]),{id,receiptId:r.id,amount,currency:i.currency,reason,at:context.now,actor:context.actorName,...(context.actorId?{actorId:context.actorId}:{})}];
       recalculate(state);
-      event(state,context,'invoice',i.id,`登记银行扣费 ${amount} ${i.currency}（${r.code||r.ref}）：${reason}`,{view:'invoices',id:i.id});
+      event(state,context,'invoice',i.id,`登记银行扣费 ${amount} ${i.currency}（${r.code||r.ref}）：${reason}`,{view:'invoices',id:i.id},'general',notificationOwners(state,'invoice',i.id));
       result={id,invoiceId:i.id};break;
     }
     case 'finance.receivable.bankCharge.reverse': {
@@ -1488,7 +1490,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(!charge)throw new MistCommandError('NOT_FOUND','银行扣费记录不存在',404);
       if(charge.reversed)throw new MistCommandError('PRECONDITION','该银行扣费已冲回');
       const reason=text(p.reason,'冲回原因',true,500);charge.reversed={at:context.now,actor:context.actorName,reason};recalculate(state);
-      event(state,context,'invoice',i.id,`冲回银行扣费 ${charge.amount} ${charge.currency}：${reason}；原记录保留`,{view:'invoices',id:i.id});
+      event(state,context,'invoice',i.id,`冲回银行扣费 ${charge.amount} ${charge.currency}：${reason}；原记录保留`,{view:'invoices',id:i.id},'general',notificationOwners(state,'invoice',i.id));
       result={id:charge.id,invoiceId:i.id};break;
     }
     case 'finance.advance.apply': {
@@ -1503,7 +1505,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
         if(left<=0)break;const take=Math.min(left,mistMoneyMinor(i.open));
         state.allocations.push({id:context.id(),receiptId:receipt.id,invoiceId:i.id,amount:major(take),currency:i.currency,createdAt:context.now,actor:context.actorName});
         left-=take;applied++;recalculate(state);
-        event(state,context,'invoice',i.id,`预收冲抵 ${receipt.code} → ${i.code}（${major(take)} ${i.currency}）`,{view:'payment-vouchers',id:i.id});
+        event(state,context,'invoice',i.id,`预收冲抵 ${receipt.code} → ${i.code}（${major(take)} ${i.currency}）`,{view:'payment-vouchers',id:i.id},'general',notificationOwners(state,'invoice',i.id));
       }
       assertOrderFundingIntegrity(state);result={applied};break;
     }
@@ -1519,7 +1521,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(p.kind==='badDebt'&&!state.allocations.some(a=>a.invoiceId===i.id)&&!state.crm?.followUps.some(f=>f.link?.kind==='invoice'&&f.link.id===i.id&&f.collection))throw new MistCommandError('PRECONDITION','坏账核销前须有催收记录或已收部分款项');
       const id=context.id();i.writeoffs=[...(i.writeoffs||[]),{id,kind:p.kind,amount,currency:i.currency,reason,at:context.now,actor:context.actorName,...(context.actorId?{actorId:context.actorId}:{})}];
       recalculate(state);
-      event(state,context,'invoice',i.id,`${WRITEOFF_LABEL[p.kind as MistInvoiceWriteoff["kind"]]} ${amount} ${i.currency}：${reason}`,{view:'invoices',id:i.id});
+      event(state,context,'invoice',i.id,`${WRITEOFF_LABEL[p.kind as MistInvoiceWriteoff["kind"]]} ${amount} ${i.currency}：${reason}`,{view:'invoices',id:i.id},'general',notificationOwners(state,'invoice',i.id));
       result={id,invoiceId:i.id};break;
     }
     case 'finance.receivable.writeoff.reverse': {
@@ -1527,7 +1529,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(!w)throw new MistCommandError('NOT_FOUND','核销记录不存在',404);
       if(w.reversed)throw new MistCommandError('PRECONDITION','该核销已冲回');
       const reason=text(p.reason,'冲回原因',true,500);w.reversed={at:context.now,actor:context.actorName,reason};recalculate(state);
-      event(state,context,'invoice',i.id,`冲回${WRITEOFF_LABEL[w.kind]} ${w.amount} ${w.currency}：${reason}；原记录保留`,{view:'invoices',id:i.id});
+      event(state,context,'invoice',i.id,`冲回${WRITEOFF_LABEL[w.kind]} ${w.amount} ${w.currency}：${reason}；原记录保留`,{view:'invoices',id:i.id},'general',notificationOwners(state,'invoice',i.id));
       result={id:w.id,invoiceId:i.id};break;
     }
     case 'finance.allocation.reverse': {
@@ -1537,7 +1539,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       state.allocations=state.allocations.filter(x=>x.id!==a.id);recalculate(state);
       if(r&&r.remaining>0&&r.state==='matched')r.state=r.suggest&&(r.confidence||0)>0?'suggested':'unmatched';
       assertOrderFundingIntegrity(state);
-      event(state,context,'invoice',a.invoiceId,'冲回核销 '+(r?.code||a.receiptId)+' → '+(i?.code||a.invoiceId)+'（'+a.amount+' '+a.currency+'）：'+reason+'；原核销记录保留',{view:'payment-vouchers',id:a.invoiceId});
+      event(state,context,'invoice',a.invoiceId,'冲回核销 '+(r?.code||a.receiptId)+' → '+(i?.code||a.invoiceId)+'（'+a.amount+' '+a.currency+'）：'+reason+'；原核销记录保留',{view:'payment-vouchers',id:a.invoiceId},'general',notificationOwners(state,'invoice',a.invoiceId));
       result={id,receiptId:a.receiptId,invoiceId:a.invoiceId};break;
     }
     case 'finance.payment.reverse': {
@@ -1669,9 +1671,9 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       find(state.customers,p.customerId,'客户');const id=p.id||context.id();if(p.id){const old=find(state.contacts,id,'联系人');if(old.customerId!==p.customerId)throw new MistCommandError('VALIDATION','联系人不能改到其他客户');}
       const email=text(p.email,'邮箱',false,254);if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new MistCommandError('VALIDATION','邮箱格式无效');
       const row:MistContact={id,customerId:p.customerId,name:text(p.name,'姓名',true,120),role:text(p.role,'职务',false,240),email,phone:text(p.phone,'电话',false,80),tone:'accent'};
-      state.contacts=state.contacts.filter(c=>c.id!==id);state.contacts.push(row);event(state,context,'customer',p.customerId,'保存联系人 '+row.name);result={id,contactId:id};break;
+      state.contacts=state.contacts.filter(c=>c.id!==id);state.contacts.push(row);event(state,context,'customer',p.customerId,'保存联系人 '+row.name,{view:'crm',id:p.customerId},'general',notificationOwners(state,'customer',p.customerId));result={id,contactId:id};break;
     }
-    case 'contact.delete': {const c=find(state.contacts,p.id,'联系人');state.contacts=state.contacts.filter(x=>x.id!==c.id);event(state,context,'customer',c.customerId,'删除联系人 '+c.name);result={id:c.id};break;}
+    case 'contact.delete': {const c=find(state.contacts,p.id,'联系人');state.contacts=state.contacts.filter(x=>x.id!==c.id);event(state,context,'customer',c.customerId,'删除联系人 '+c.name,{view:'crm',id:c.customerId},'general',notificationOwners(state,'customer',c.customerId));result={id:c.id};break;}
     case 'settings.update': {
       if(Object.prototype.hasOwnProperty.call(p,'businessClock'))throw new MistCommandError('VALIDATION','业务时钟不能由公司设置修改');
       const beforeSettings=JSON.stringify(state.settings);
@@ -1698,10 +1700,14 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       }
       result={};break;
     }
-    case 'notification.read': {find(state.notifications,p.id,'通知').readAt=context.now;result={id:p.id};break;}
+    case 'notification.read': {
+      const notification=find(state.notifications,p.id,'通知');
+      if(!context.actorId || !notification.recipientIds?.includes(context.actorId) || context.visibleNotificationIds && !context.visibleNotificationIds.includes(notification.id))throw new MistCommandError('FORBIDDEN','无权读取此通知',403);
+      (notification.readBy ??= {})[context.actorId]=context.now;result={id:p.id};break;
+    }
     case 'notification.readAll': {
       const visible = context.visibleNotificationIds === undefined ? undefined : new Set(context.visibleNotificationIds);
-      state.notifications.forEach(n => { if (!visible || visible.has(n.id)) n.readAt = context.now; });
+      state.notifications.forEach(n => { if (context.actorId && n.recipientIds?.includes(context.actorId) && (!visible || visible.has(n.id))) (n.readBy ??= {})[context.actorId] = context.now; });
       result={};break;
     }
     case 'task.complete': {const task=find(state.tasks,p.id,'事项');if(task.kind==='email-extraction-review')throw new MistCommandError('PRECONDITION','请在原邮件中记录处理结果');if(isInternalDeliveryTask(task))throw new MistCommandError('PRECONDITION','请在内部交付记录中办理');task.done=!!p.done;if(task.done){task.doneAt=context.now;task.doneBy=context.actorName;}else{delete task.doneAt;delete task.doneBy;}result={id:p.id};break;}
@@ -1730,8 +1736,8 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const old=p.id?find(state.tasks,p.id,'事项'):undefined;if(old?.done)throw new MistCommandError('PRECONDITION','已完成的事项请先重开');
       const assignee=p.assigneeId?resolveMember(context,p.assigneeId,'负责人'):{id:context.actorId||'',name:context.actorName};
       const due=date(p.due),note=text(p.note||'','备注',false,1000);
-      if(old){if(old.kind==='personal')old.title=text(p.title,'事项',true,200);old.due=due;old.assigneeIds=assignee.id?[assignee.id]:old.assigneeIds;if(note)old.note=note;event(state,context,'task',old.id,`调整事项 ${old.title}：${due}${assignee.name?' · '+assignee.name:''}${note?' · '+note:''}`);result={id:old.id};}
-      else{const id=context.id();state.tasks.unshift({id,title:text(p.title,'事项',true,200),due,done:false,kind:'personal',target:p.target||{view:'cockpit'},assigneeIds:assignee.id?[assignee.id]:[],...(note?{note}:{})});result={id};}
+      if(old){if(old.kind==='personal')old.title=text(p.title,'事项',true,200);old.due=due;old.assigneeIds=assignee.id?[assignee.id]:old.assigneeIds;if(note)old.note=note;event(state,context,'task',old.id,`调整事项 ${old.title}：${due}${assignee.name?' · '+assignee.name:''}${note?' · '+note:''}`);notifyMist(state,context,{title:'指派事项 '+old.title,detail:context.actorName,target:old.target},[assignee.id]);result={id:old.id};}
+      else{const id=context.id();state.tasks.unshift({id,title:text(p.title,'事项',true,200),due,done:false,kind:'personal',target:p.target||{view:'cockpit'},assigneeIds:assignee.id?[assignee.id]:[],...(note?{note}:{})});notifyMist(state,context,{title:'指派事项 '+text(p.title,'事项',true,200),detail:context.actorName,target:p.target||{view:'cockpit'}},[assignee.id]);result={id};}
       break;
     }
     case 'files.add': {

@@ -46,8 +46,8 @@ it('uses reviewed customs value instead of zero order price and refuses unreview
 it('returns actual shipment facts to claim readers and does not call old goods disposal customer completion',()=>{
  const f=fixture(),orderId=f.create();f.approve(orderId);f.state.platform.claimGoods[0].state='Scrapped';let claim=f.state.platform.claims[0];expect(claimLedger(f.state,claim).customerGoodsOpen).toBe(true);
  const scope=f.declaration(orderId),shipment=f.state.fulfillment.shipments.find(s=>s.id===scope.shipmentId)!;shipment.state='departed';shipment.departedAt=f.c.now;
- f.run({type:'order.checklist',payload:{orderId,itemId:f.state.orders.find(o=>o.id===orderId)!.checklist[0].id,done:true}});
- claim=f.state.platform.claims[0];expect(claim.dispositions[0].replacementShipments).toEqual([{shipmentId:scope.shipmentId,code:'NEW',quantity:1,departedAt:f.c.now}]);expect(claimLedger(f.state,claim).customerGoodsOpen).toBe(false);expect(f.state.notifications.filter(n=>n.title==='补发已出运')).toHaveLength(1);
+ f.run({type:'order.checklist',payload:{orderId,itemId:f.state.orders.find(o=>o.id===orderId)!.checklist[0].id,done:true}},{...f.c,actorId:'logistics'});
+ claim=f.state.platform.claims[0];expect(claim.dispositions[0].replacementShipments).toEqual([{shipmentId:scope.shipmentId,code:'NEW',quantity:1,departedAt:f.c.now}]);expect(claimLedger(f.state,claim).customerGoodsOpen).toBe(false);expect(f.state.notifications.filter(n=>n.title==='补发已出运')).toHaveLength(1);expect(f.state.notifications.find(n=>n.title==='补发已出运')!.recipientIds).toEqual(['business']);
  f.run({type:'order.checklist',payload:{orderId,itemId:f.state.orders.find(o=>o.id===orderId)!.checklist[1].id,done:true}});expect(f.state.notifications.filter(n=>n.title==='补发已出运')).toHaveLength(1);
 });
 
