@@ -15,7 +15,7 @@ import { HomePage } from './HomePage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | undefined, host: HTMLElement, count = 0;
 const go = vi.fn(), openAI = vi.fn();
-const ctx = () => ({ id: () => `record-${++count}`, now: new Date().toISOString(), actorName: '当前员工' });
+const ctx = () => ({ id: () => `record-${++count}`, now: new Date().toISOString(), actorName: '当前员工', actorId: 'owner' });
 const element = () => <MistRoot><ToastProvider><Nav.Provider value={{ route: { view: 'cockpit' }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI }}><HomePage /></Nav.Provider></ToastProvider></MistRoot>;
 function paint() { root!.render(element()); }
 function render() { host = document.createElement('div'); document.body.append(host); root = createRoot(host); act(paint); }
@@ -29,8 +29,10 @@ beforeEach(() => {
   state.tasks = [{ id: 'task-exact', title: '完成准确版本事项', due: key, done: false, kind: 'development', target: { view: 'development/detail', id: dev.id, versionId: version.id }, assigneeIds: ['owner'] }];
   state.invoices.push({ ...state.invoices[0], id: 'euro-open', code: 'EUR-OPEN', currency: 'EUR', amount: 77, open: 77 });
   state.calendar = [{ id: 'event-real', title: '实际约定', date: key, time: '14:00', note: '实际参与安排' }];
+  state.notifications = state.notifications.map(n => ({ ...n, recipientIds: ['owner'] }));
   seam.value = { state, workspace: { id: 'workspace-one', name: '真实公司' }, loading: false, saving: false, pending: null, error: '', refresh: vi.fn(), recover: vi.fn(),
-    run: vi.fn(async (command: MistCommand) => { seam.value.state = applyMistCommand(seam.value.state, command, ctx()).state; paint(); return { requestId: 'request', revision: 1, result: {} }; }) };
+    // Same as the server read projection: each member sees notices addressed to them, with their own read state.
+    run: vi.fn(async (command: MistCommand) => { const next = applyMistCommand(seam.value.state, command, ctx()).state; next.notifications = next.notifications.map((n: any) => ({ ...n, readAt: n.readBy?.owner ?? n.readAt })); seam.value.state = next; paint(); return { requestId: 'request', revision: 1, result: {} }; }) };
 });
 afterEach(() => { if (root) act(() => root!.unmount()); host?.remove(); root = undefined; });
 describe('original Mist Home workspace functionality', () => {

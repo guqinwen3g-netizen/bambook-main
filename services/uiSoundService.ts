@@ -1,6 +1,7 @@
 export type UiSoundPreferences = { scroll: boolean; notifications: boolean; operations: boolean; volume: number };
 const KEY = 'bambook.ui-sound.v1';
-const defaults: UiSoundPreferences = { scroll: true, notifications: true, operations: true, volume: 0.4 };
+// Notification sound is off until the user turns it on in settings.
+const defaults: UiSoundPreferences = { scroll: true, notifications: false, operations: true, volume: 0.4 };
 let preferences: UiSoundPreferences | undefined;
 const listeners = new Set<() => void>();
 export function getUiSoundPreferences(): UiSoundPreferences {

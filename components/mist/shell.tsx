@@ -224,7 +224,7 @@ export function MistAppShell({ sidebar, topbar, collapsed, children, scrollKey, 
         {sidebar}
         <main className="mist-canvas" style={{ '--mist-form-footer-height': `${footerHeight}px` } as React.CSSProperties}>
           {topbar(scrolled)}
-          {notices && <div className="mist-shell-notices" role="region" aria-label={uiText("系统状态")}>{React.Children.toArray(notices).map((notice, i) => <div key={i} className="mist-shell-notice">{notice}</div>)}{onCloseNotices && <IconButton className="mist-shell-notices-close" icon={X} size="sm" label={uiText("收起")} onClick={onCloseNotices} />}</div>}
+          {notices && <div className="mist-shell-notices" role="region" aria-label={uiText("系统状态")}>{React.Children.toArray(notices).map((notice, i) => <div key={i} className="mist-shell-notice">{notice}{i === 0 && onCloseNotices && <IconButton className="mist-shell-notices-close" icon={X} size="sm" label={uiText("收起")} onClick={onCloseNotices} />}</div>)}</div>}
           <div className="mist-scroll" ref={ref} onScroll={e => setScrolled((e.target as HTMLDivElement).scrollTop > 4)}>{uiText(children)}</div>
           <div className="mist-form-dock" ref={setFooterTarget} />
         </main>

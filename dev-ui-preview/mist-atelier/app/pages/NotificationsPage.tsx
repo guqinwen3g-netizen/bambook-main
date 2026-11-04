@@ -18,7 +18,7 @@ type Category = NonNullable<MistNotification['category']>;
 export const NOTIFICATION_CATEGORY_LABEL: Record<Category, string> = { qc: 'QC 报告', shipping: '出运', suggestion: '小竹建议', general: '工作' };
 const TONE: Record<Category, Tone> = { qc: 'accent', shipping: 'ok', suggestion: 'neutral', general: 'neutral' };
 const category = (n: MistNotification): Category => n.category ?? 'general';
-const when = (at: string) => { const d = new Date(at); return Number.isNaN(d.getTime()) ? at : d.toLocaleString(interfaceLocale(), { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }); };
+const when = (at: string) => { const d = new Date(at); return Number.isNaN(d.getTime()) ? at : d.toLocaleString(interfaceLocale(), { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }); };
 
 export function notificationRows(rows: MistNotification[], tab: NotificationTab, kind: 'all' | Category, query: string) {
   const q = query.trim().toLowerCase();

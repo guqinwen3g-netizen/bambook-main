@@ -42,6 +42,8 @@ import { workspaceSearchRecords } from './runtime/search';
 import { apiService } from '../../../services/apiService';
 import { platformBusinessDate } from '../../../server/src/shared/mistPlatform';
 import { visibleMistNotifications, mistDailyDigest } from './runtime/notificationPreferences';
+import { NotificationCenter, NotificationToast } from './runtime/NotificationCenter';
+import { canPlayNotificationSound, playNotificationSound } from '../../../services/uiSoundService';
 import {readAllMistNotices,readMistNotice} from './runtime/agentTaskNotices';
 import { DEVELOPMENT_LIST_TABS, developmentCreateTarget, developmentListTab, developmentListTarget, type DevelopmentListTab } from './developmentEntry';
 const SEARCH_ICONS: Record<string, typeof Layers> = { 开发案: Layers, 订单: ClipboardList };
@@ -169,6 +171,23 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const [ai, setAI] = React.useState(false);
   React.useEffect(()=>{if(!canAI)setAI(false);},[canAI]);
   const [notifications, setNotifications] = React.useState(false);
+  // New unread notices pop a small card. The first snapshot after login or a company switch only sets the baseline.
+  const [toastIds, setToastIds] = React.useState<string[]>([]);
+  const seenNotices = React.useRef<{ scope: string; ids: Set<string> } | null>(null);
+  const noticeScope = session.sessionKey + ':' + (workspace.workspace?.id || '');
+  const unreadIds = visibleNotifications.filter(n => !n.readAt).map(n => n.id).join('|');
+  React.useEffect(() => {
+    const unread = visibleNotifications.filter(n => !n.readAt), seen = seenNotices.current;
+    if (!state || !seen || seen.scope !== noticeScope) { seenNotices.current = { scope: noticeScope, ids: new Set(unread.map(n => n.id)) }; setToastIds([]); return; }
+    const fresh = unread.filter(n => !seen.ids.has(n.id)).map(n => n.id);
+    unread.forEach(n => seen.ids.add(n.id));
+    if (!fresh.length || notifications) return;
+    setToastIds(ids => [...new Set([...ids, ...fresh])]);
+    if (canPlayNotificationSound()) playNotificationSound(fresh[0]);
+  }, [unreadIds, noticeScope, !!state]); // eslint-disable-line react-hooks/exhaustive-deps
+  React.useEffect(() => { if (!toastIds.length) return; const timer = window.setTimeout(() => setToastIds([]), 6000); return () => window.clearTimeout(timer); }, [toastIds]);
+  React.useEffect(() => { if (notifications) setToastIds([]); }, [notifications]);
+  const toastItems = toastIds.map(id => visibleNotifications.find(n => n.id === id)).filter((n): n is NonNullable<typeof n> => !!n && !n.readAt);
   const [msgs, setMsgs] = React.useState<ChatMessage[]>([]);
   const [aiBusy,setAiBusy]=React.useState(false),[aiUseRouteSource,setAiUseRouteSource]=React.useState(false);
   const aiScope=session.sessionKey+':'+(workspace.workspace?.id??'');
@@ -376,7 +395,10 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   // Collapsing remembers which notices were seen; a new or changed notice shows again. The topbar status reopens them.
   const shellNoticeKey = shellNoticeList.map(item => (item as React.ReactElement).key).join('|') + '|' + (workspace.error || '');
   const noticesHidden = !!shellNoticeList.length && hiddenNoticeKey === shellNoticeKey;
-  const shellNotices = shellNoticeList.length && !noticesHidden ? shellNoticeList : undefined;
+  const toastNotice = toastItems.length ? <NotificationToast key="toast" items={toastItems} onDismiss={() => setToastIds([])}
+    onOpen={n => { setToastIds([]); void readMistNotice(workspace, n).then(() => { if (n.target) go(n.target.view, n.target.id, n.target); }).catch(report); }}
+    onOpenAll={() => { setToastIds([]); setNotifications(true); }} /> : null;
+  const shellNotices = (shellNoticeList.length && !noticesHidden) || toastNotice ? [...(noticesHidden ? [] : shellNoticeList), ...(toastNotice ? [toastNotice] : [])] : undefined;
   return (
     <AvatarDirectory people={[...(state?.members ?? []).map(member=>({id:member.userId,name:member.name})),...organization.teams.flatMap(team=>(team.members ?? []).map(person=>({id:person.id,name:person.name,src:person.avatarUrl}))),{id:user.id,name:user.displayName || user.email,src:user.avatarUrl}]}><Nav.Provider value={nav}><MistReviewProvider><MistDensityContext.Provider value={density||'default'}>
       <MistAppShell collapsed={collapsed} scrollKey={scrollPosition.current.key} notices={shellNotices} onCloseNotices={() => setHiddenNoticeKey(shellNoticeKey)}
@@ -401,12 +423,13 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
       <ExportConfirmHost scope={JSON.stringify([session.sessionKey, user.id, user.companyId, user.roles, user.roleIds, user.permissions, user.permissionCeiling, user.businessAttributes, user.globalBusinessScope, workspace.workspace?.id, workspace.workspace?.access, teamView.teamId, route])} />
       <CommandPalette open={palette} onClose={() => setPalette(false)} query={query} onQueryChange={setQuery} items={commands} />
       <AssistantDrawer key={aiScope} open={ai} onClose={() => setAI(false)} messages={[overview(),...msgs,...(aiBusy?[{role:'typing'} as ChatMessage]:[])]} onSend={question=>void send(question)} sub={uiText(aiBusy?'正在生成':undefined)} suggestions={aiBusy?[]:['根据当前事实建议下一步','哪些信息还需要核实']} />
-      <Drawer open={notifications} onClose={()=>setNotifications(false)} title={uiText("通知")} sub={uiText("来自当前公司的操作记录")}
-        footer={<><Button variant="quiet" onClick={()=>{setNotifications(false);go('notifications');}}>{uiText("查看全部通知")}</Button><Button disabled={!visibleNotifications.some(n=>!n.readAt)} loading={workspace.saving||workspace.agentTaskNotices?.reading} onClick={()=>void readAllMistNotices(workspace,visibleNotifications).catch(report)}>{uiText("全部标为已读")}</Button></>}>
-        {workspace.agentTaskNotices?.error&&<Banner tone="bad" title={uiText(workspace.agentTaskNotices.error)} actions={<Button onClick={()=>void workspace.agentTaskNotices?.refresh()}>{uiText('重新加载')}</Button>}/>}
-        {state?.settings.notifications.digest&&<Card><CardHeader title={uiText("今日工作摘要")} sub={uiText("按当前记录生成 · 不发送邮件")}/><div className="mist-card-body">{dailyDigest.length?dailyDigest.map(item=><p key={item.id}><Button variant="quiet" onClick={()=>go(item.target.view,item.target.id,item.target)}>{uiText(item.label)} · {item.detail}</Button></p>):<p>{uiText("今天没有待处理事项。")}</p>}</div></Card>}
-        {visibleNotifications.length?visibleNotifications.map(n=><Card key={n.id}><CardHeader title={uiText(n.title)} sub={uiText(new Date(n.at).toLocaleString())} tools={<Button variant="quiet" disabled={workspace.agentTaskNotices?.reading} onClick={()=>{void readMistNotice(workspace,n).then(()=>{if(n.target)go(n.target.view,n.target.id,n.target);}).catch(report);}}>{uiText(n.readAt?'查看':'阅读')}</Button>} /><p className="mist-card-body">{n.detail}</p></Card>):<EmptyState title={uiText("暂无通知")} />}
-      </Drawer>
+      <NotificationCenter open={notifications} onClose={()=>setNotifications(false)} items={visibleNotifications} digest={dailyDigest} digestEnabled={!!state?.settings.notifications.digest}
+        busy={workspace.saving||workspace.agentTaskNotices?.reading}
+        error={workspace.agentTaskNotices?.error&&<Banner tone="bad" title={uiText(workspace.agentTaskNotices.error)} actions={<Button onClick={()=>void workspace.agentTaskNotices?.refresh()}>{uiText('重新加载')}</Button>}/>}
+        onOpenItem={n=>{void readMistNotice(workspace,n).then(()=>{setNotifications(false);if(n.target)go(n.target.view,n.target.id,n.target);}).catch(report);}}
+        onOpenDigest={target=>{setNotifications(false);go(target.view,target.id,target);}}
+        onReadAll={()=>void readAllMistNotices(workspace,visibleNotifications).catch(report)}
+        onViewAll={()=>{setNotifications(false);go('notifications');}} />
     </MistDensityContext.Provider></MistReviewProvider></Nav.Provider></AvatarDirectory>
   );
 }
