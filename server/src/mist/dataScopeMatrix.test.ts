@@ -38,6 +38,49 @@ beforeEach(async () => {
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
 describe('row-level data scope by role', () => {
+  it.each(['email.link', 'email.bulk', 'email.draft.save'])('%s rejects a business reference outside the current group', async type => {
+    const raw = db.workspaces.get(workspaceId)!.state, message = raw.email.messages[0], account = raw.email.accounts.find((a: any) => a.id === message.accountId);
+    const link = { kind: 'order', id: 'SO-G-2026-017' };
+    const payload = type === 'email.bulk' ? { ids: [message.id], action: 'link', link }
+      : type === 'email.draft.save' ? { input: { accountId: account.id, from: account.address, to: 'buyer@example.com', cc: '', bcc: '', subject: '交期', body: '', template: '', fileIds: [], links: [link] } }
+      : { id: message.id, link };
+    const before = structuredClone(raw);
+    await expect(repo.execute(actor('demo-sales'), workspaceId, { requestId: randomUUID(), expectedRevision: 0, command: { type, payload } as any })).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+    expect(db.workspaces.get(workspaceId)!.state).toEqual(before);
+    expect(db.receipts.size).toBe(0);
+  });
+  it.each(['email.link', 'email.bulk', 'email.draft.save'])('%s requires target module read permission, not merely mailbox write permission', async type => {
+    auth.users.get('demo-sales')!.permissions = ['emails:read', 'emails:write'];
+    const raw = db.workspaces.get(workspaceId)!.state, message = raw.email.messages[0], account = raw.email.accounts.find((a: any) => a.id === message.accountId);
+    const link = { kind: 'order', id: 'SO-G-2026-018' };
+    const payload = type === 'email.bulk' ? { ids: [message.id], action: 'link', link }
+      : type === 'email.draft.save' ? { input: { accountId: account.id, from: account.address, to: 'buyer@example.com', cc: '', bcc: '', subject: '交期', body: '', template: '', fileIds: [], links: [link] } }
+      : { id: message.id, link };
+    const before = structuredClone(raw);
+    await expect(repo.execute(actor('demo-sales'), workspaceId, { requestId: randomUUID(), expectedRevision: 0, command: { type, payload } as any })).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+    expect(db.workspaces.get(workspaceId)!.state).toEqual(before);
+    expect(db.receipts.size).toBe(0);
+  });
+  it.each(['disabled', 'deleted', 'left'])('rejects a %s follow-up assignee despite a stale mailbox authorization', async condition => {
+    if (condition === 'left') db.companyMembers.find(member => member.userId === 'demo-buyer')!.status = 'left';
+    else db.accounts.set('demo-buyer', condition === 'deleted' ? { deletedAt: new Date() } : { status: 'disabled' });
+    const raw = db.workspaces.get(workspaceId)!.state, before = structuredClone(raw);
+    raw.email.accounts[0].memberIds = ['demo-buyer'];
+    before.email.accounts[0].memberIds = ['demo-buyer'];
+    await expect(repo.execute(actor('demo-sales'), workspaceId, { requestId: randomUUID(), expectedRevision: 0, command: { type: 'email.followUp', payload: { id: raw.email.messages[0].id, ownerId: 'demo-buyer', due: '2026-11-02', note: '' } } })).rejects.toMatchObject({ code: 'PRECONDITION', status: 422 });
+    expect(db.workspaces.get(workspaceId)!.state).toEqual(before);
+    expect(db.receipts.size).toBe(0);
+  });
+  it('allows linking a currently readable order in the salesperson own scope', async () => {
+    const raw = db.workspaces.get(workspaceId)!.state, id = raw.email.messages[1].id, link = { kind: 'order', id: 'SO-G-2026-018' };
+    const result = await repo.execute(actor('demo-sales'), workspaceId, { requestId: randomUUID(), expectedRevision: 0, command: { type: 'email.link', payload: { id, link } } });
+    expect(result.workspace.state.email.messages.find(message => message.id === id)!.links).toContainEqual(link);
+  });
+  it('rejects a foreign-company business ID rather than creating a dangling email link', async () => {
+    const raw = db.workspaces.get(workspaceId)!.state, before = structuredClone(raw);
+    await expect(repo.execute(actor('demo-sales'), workspaceId, { requestId: randomUUID(), expectedRevision: 0, command: { type: 'email.link', payload: { id: raw.email.messages[0].id, link: { kind: 'order', id: 'foreign-company-order' } } } })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(db.workspaces.get(workspaceId)!.state).toEqual(before);
+  });
   it.each(['boss', 'finance', 'qc', 'logistics'])('%s sees every order company-wide', async userId => {
     expect(await orders(userId)).toEqual([...ALL_ORDERS].sort());
   });
