@@ -108,7 +108,7 @@ function useSections(): NavSection[] {
 /** 侧栏数字、模块页「待我处理」、首页合计共用同一口径（见 runtime/workQueue）。 */
 function useMyWorkOptions(): MistWorkOptions {
   const session = useMistSession(), { workspace } = useMistWorkspace(), reviews = useOptionalMistReviews();
-  return { canRead: view => session.canAccessView(view as View), can: permission => session.hasPermission(permission), me: session.user?.id ?? '', reviews: reviews?.rows, today: platformBusinessDate(businessNow()), now: businessNow().toISOString(), workspaceId: workspace?.id };
+  return { canRead: view => session.canAccessView(view as View), can: permission => session.hasPermission(permission), me: session.user?.id ?? '', reviews: reviews?.rows, today: platformBusinessDate(businessNow()), now: businessNow().toISOString(), workspaceId: workspace?.id, financialDisposals: workspace?.financialDisposals };
 }
 function CountedSidebar({ sections, ...rest }: React.ComponentProps<typeof MistSidebarPresentation>) {
   const { state } = useMistWorkspace(), counts = mistNavCounts(state, useMyWorkOptions());

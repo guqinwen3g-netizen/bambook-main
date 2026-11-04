@@ -156,9 +156,9 @@ export function disposalReviewBlocker(state: MistState, record: {purchaseId:stri
 }
 export function financialDisposalViews(root:MistState, visiblePurchases:ReadonlySet<string>):FinancialDisposalView[] {
  const f=root.fulfillment;if(!f)return [];
- return f.stockMovements.flatMap(row=>{const d=row.quarantineDisposition,stock=f.stock.find(x=>x.id===row.stockId),p=stock&&f.purchases.find(x=>x.id===stock.purchaseId);
+ return (f.stockMovements||[]).flatMap(row=>{const d=row.quarantineDisposition,stock=(f.stock||[]).find(x=>x.id===row.stockId),p=stock&&(f.purchases||[]).find(x=>x.id===stock.purchaseId);
   if(!d||d.decision==='release'||!row.quarantinedQuantity||!p||!visiblePurchases.has(p.id))return [];
-  const report=f.qcReports.find(r=>r.id===d.reportId),review=d.financeReviews?.slice().reverse().find(r=>!r.reversed);
+  const report=(f.qcReports||[]).find(r=>r.id===d.reportId),review=d.financeReviews?.slice().reverse().find(r=>!r.reversed);
   return [{returnId:row.id,purchaseId:p.id,purchaseCode:p.code,supplier:p.supplier,quantity:row.quarantinedQuantity,unit:stock!.unit,currency:p.currency,referenceAmount:Math.round(row.quarantinedQuantity*p.price*100)/100,decision:d.recoveryDecision?'recovery':d.noRecoveryDecision?'noRecovery':d.decision,decisionAmount:d.recoveryDecision?.amount ?? (d.noRecoveryDecision?0:undefined),disposalDecision:d.decision,...(d.recoveryDecision?{recovery:{...d.recoveryDecision}}:{}),disposalEvidence:d.evidence,report:report?.report||'',receiptId:stock!.receiptId,settlementConfirmed:!disposalReviewBlocker(root,{purchaseId:p.id,receiptId:stock!.receiptId}),disposedAt:d.at,...(d.noRecoveryDecision?{noRecovery:{actor:d.noRecoveryDecision.actor,evidence:d.noRecoveryDecision.evidence,actorId:d.noRecoveryDecision.actorId,at:d.noRecoveryDecision.at}}:{}),...(review?{review:{id:review.id,actor:review.actor,at:review.at,evidence:review.evidence}}:{})}];
  });
 }

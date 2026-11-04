@@ -12,7 +12,7 @@ import { useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
 import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
 import { useNav } from '../nav';
-import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, useListDetailRoute } from './modules/pageKit';
+import { ActionBar, businessWhen, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, useListDetailRoute } from './modules/pageKit';
 import { downloadMistCsv } from './OrderListPage';
 import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
 import { supplierPayableSummary } from '../../../../server/src/shared/mistPayables';
@@ -154,13 +154,13 @@ export function FinanceAccounts() {
     </Dialog>}
     {editing && <BankAccountDialog draft={editing} used={used(editing.id)} onClose={() => setEditing(null)} />}
     <Card><DataTable ariaLabel={uiText("锁汇与结汇记录")} rows={fxRows} rowKey={r => r.id} loading={loading} columns={[
-      { key: 'code', header: '记录', width: 'minmax(160px,1.2fr)', render: r => <ObjectCell name={<><Mono>{r.code}</Mono> {uiText(r.kind === 'lock' ? '锁汇' : '结汇')}</>} meta={`${r.date} · ${r.ref}${r.kind === 'lock' ? ' · 交割截止 ' + r.settleBy : ''}`} /> },
+      { key: 'code', header: '记录', width: 'minmax(160px,1.2fr)', render: r => <ObjectCell name={<><Mono>{r.code}</Mono> {uiText(r.kind === 'lock' ? '锁汇' : '结汇')}</>} meta={`${r.date} · ${r.ref}${r.kind === 'lock' ? ' · 交割截止 ' + r.settleBy : ''} · ${r.actor} ${businessWhen(r.createdAt)}`} /> },
       { key: 'amount', header: '原币', width: '140px', align: 'right', render: r => <span className="mist-num">{money(r.amount, r.currency)}</span> },
       { key: 'rate', header: '汇率', width: '100px', align: 'right', hideOnMobile: true, render: r => <span className="mist-num" title={uiText(r.kind === 'lock' ? '锁定汇率' : '由水单金额得出')}>{r.rate}</span> },
       { key: 'local', header: '本币', width: '150px', align: 'right', hideOnMobile: true, render: r => <span className="mist-num">{money(r.localAmount, r.localCurrency)}</span> },
       { key: 'bank', header: '银行 / 账户', width: 'minmax(120px,1fr)', hideOnMobile: true, render: r => r.kind === 'lock' ? r.bankName : `${accountCode(r.fromAccountId)} → ${accountCode(r.toAccountId)}${r.lockId ? ' · 交割 ' + ((state?.fxRecords || []).find(x => x.id === r.lockId)?.code || '') : ''}` },
       { key: 'state', header: '状态', width: '150px', render: r => r.reversed ? <Pill tone="neutral">{uiText("已冲回")}</Pill> : r.kind === 'lock' ? (() => { const u = mistFxLockUsage(state!, r.id); return <Pill tone={u.remaining > 0 ? 'accent' : 'ok'}>{uiText(u.remaining > 0 ? `剩余 ${money(u.remaining, r.currency)}` : '已全部交割')}</Pill>; })() : fxUnallocatedMinor(r) > 0 ? <Pill tone="warn">{uiText("未对应到账 ")}{money(fxUnallocatedMinor(r) / 100, r.currency)}</Pill> : <Pill tone="ok">{uiText("已入账 · 已对应到账")}</Pill> },
-      { key: 'act', header: '操作', width: '150px', render: r => r.reversed ? <span className="mist-note">{r.reversed.reason}</span> : <span className="mist-row">{r.kind === 'lock' && mistFxLockUsage(state!, r.id).remaining > 0 && canWrite && canSettle && <Button size="sm" onClick={() => setFx(newFxDraft('settlement', state, r.id))}>{uiText("交割")}</Button>}{r.kind === 'settlement' && fxUnallocatedMinor(r) > 0 && canWrite && <Button size="sm" onClick={() => setLinking(r)}>{uiText("对应到账")}</Button>}{canWrite && <Button size="sm" onClick={() => setReversing(r)}>{uiText("冲回")}</Button>}</span> },
+      { key: 'act', header: '操作', width: '150px', render: r => r.reversed ? <span className="mist-note">{r.reversed.actor} {businessWhen(r.reversed.at)} · {r.reversed.reason}</span> : <span className="mist-row">{r.kind === 'lock' && mistFxLockUsage(state!, r.id).remaining > 0 && canWrite && canSettle && <Button size="sm" onClick={() => setFx(newFxDraft('settlement', state, r.id))}>{uiText("交割")}</Button>}{r.kind === 'settlement' && fxUnallocatedMinor(r) > 0 && canWrite && <Button size="sm" onClick={() => setLinking(r)}>{uiText("对应到账")}</Button>}{canWrite && <Button size="sm" onClick={() => setReversing(r)}>{uiText("冲回")}</Button>}</span> },
     ]} empty={<EmptyState title={uiText("暂无锁汇或结汇记录")} />} /></Card>
     {fx && state && <FxDialog state={state} draft={fx} onClose={() => setFx(null)} />}
     {reversing && <FxReverseDialog record={reversing} onClose={() => setReversing(null)} />}

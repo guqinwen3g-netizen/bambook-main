@@ -1,6 +1,6 @@
 import {PayableDialog as Dialog,PayableDialogRecovery} from './PayableDialog';
 import {SupplierInvoiceTypeDialog} from './SupplierInvoiceTypeDialog';
-import {SUPPLIER_INVOICE_TYPES,billRebateLock,supplierPayee,payeeText,type SupplierInvoiceType} from '../../../../server/src/shared/mistPayables';
+import {SUPPLIER_INVOICE_TYPES,billRebateLock,disposalReviewBlocker,supplierPayee,payeeText,type SupplierInvoiceType} from '../../../../server/src/shared/mistPayables';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow} from '../runtime/businessClock';
 /** 应付待办：供应商票据 → 应付余额 → 付款申请（主管审批）→ 实际付款与多票分配。只用已登记事实，不用合同金额猜应付。
@@ -109,6 +109,9 @@ export function FinancePayables() {
   const bills = state ? payableBills(state, day) : [], payments = state ? supplierPayments(state, day) : [], sources = state ? payableSources(state) : [], summary = state ? supplierPayableSummary(state, day) : [];
   const suppliers = payableSupplierOptions(state), requests = state ? paymentRequests(state) : [], plans = state ? prepaymentPlans(state) : [], settlements = state ? supplierSettlements(state) : [];
   const disposals=workspace?.financialDisposals||[], disposal=disposals.find(d=>d.returnId===disposalDraft?.returnId);
+  // Work-queue deep link to a decided return opens its review directly.
+  const routedDisposal=disposals.find(d=>d.returnId===route.id&&(d.recovery||d.noRecovery)&&!d.review&&!!state&&!disposalReviewBlocker(state,d))?.returnId;
+  React.useEffect(()=>{if(routedDisposal&&canConfirm){setFailure('');setDisposalDraft({returnId:routedDisposal,mode:'review',reason:''});}},[routedDisposal,canConfirm,actionKey]);
   const clearedBySupplier = new Map<string,number>();
   for (const bill of bills) if (bill.status !== 'void' && !bill.held) { const key=JSON.stringify([bill.supplierId,bill.currency]);clearedBySupplier.set(key,(clearedBySupplier.get(key)||0)+billClearedMinor(bill)); }
   const shownBills = bills.filter(b => filter === 'all' || (filter === 'open' ? b.open > 0 : b.overdue));
@@ -359,13 +362,13 @@ export function FinancePayables() {
     {failure && !disposalDraft && !billDraft && !payDraft && !reasonDraft && !planDraft && !preDraft && !settleOpen && !confirmId && !linkId && !deductId && !moveDraft && !advanceId && !backfillId && !planLinkId && <Banner tone="bad" title={uiText("操作没有完成")}>{failure}</Banner>}
     {disposals.length>0&&<Card><CardHeader title={uiText('退料财务核对')}/><div className="mist-card-body"><DataTable ariaLabel={uiText('退料财务核对')} rows={disposals} rowKey={d=>d.returnId} columns={[
       {key:'purchase',header:'来源采购',render:d=>`${d.purchaseCode} · ${d.supplier}`},
-      {key:'decision',header:'处置',render:d=>`${d.decision==='scrap'?'报废':'退供应商'} ${d.quantity} ${d.unit}`},
+      {key:'decision',header:'处置',render:d=>`${(d.disposalDecision??d.decision)==='scrap'?'报废':'退供应商'} ${d.quantity} ${d.unit}`},
       {key:'value',header:'参考货值',align:'right',render:d=>apMoney(d.referenceAmount,d.currency)},
-      {key:'status',header:'状态',render:d=>d.review?'已核对 · 无补偿':d.noRecovery?'待财务核对':'待负责人决定'},
-      {key:'action',header:'操作',render:d=>canConfirm?<Button size="sm" disabled={busy||!d.noRecovery} onClick={()=>{setFailure('');setDisposalDraft({returnId:d.returnId,mode:d.review?'reverse':'review',reason:''});}}>{d.review?'撤回核对':'核对'}</Button>:null},
+      {key:'status',header:'状态',render:d=>{const blocker=!d.review&&(d.recovery||d.noRecovery)?disposalReviewBlocker(state!,d):'';return d.review?(d.recovery?`已核对 · 追偿 ${apMoney(d.recovery.amount,d.recovery.currency)}`:'已核对 · 无补偿'):d.recovery?`追偿 ${apMoney(d.recovery.amount,d.recovery.currency)} · ${blocker||'待财务核对'}`:d.noRecovery?blocker||'待财务核对':'待负责人决定';}},
+      {key:'action',header:'操作',render:d=>{if(!canConfirm)return null;const blocker=!d.review&&state?disposalReviewBlocker(state,d):'';return <Button size="sm" disabled={busy||!(d.recovery||d.noRecovery)||!!blocker} title={blocker?uiText('来源采购结算确认后才能核对'):undefined} onClick={()=>{setFailure('');setDisposalDraft({returnId:d.returnId,mode:d.review?'reverse':'review',reason:''});}}>{d.review?'撤回核对':'核对'}</Button>;}},
     ]}/></div></Card>}
     <Dialog open={!!disposalDraft} onClose={()=>{if(!busy)setDisposalDraft(null);}} title={uiText(disposalDraft?.mode==='reverse'?'撤回财务核对':'核对退料财务处理')} footer={<><Button disabled={busy} onClick={()=>setDisposalDraft(null)}>{uiText('取消')}</Button><Button variant="primary" loading={busy} disabled={busy||!canConfirm||!disposalDraft?.reason.trim()} onClick={()=>{if(!disposalDraft||!disposal)return;const command:PayablesCommand=disposalDraft.mode==='reverse'?{type:'payable.disposal.reverse',payload:{returnId:disposal.returnId,reviewId:disposal.review!.id,reason:disposalDraft.reason}}:{type:'payable.disposal.review',payload:{returnId:disposal.returnId,evidence:disposalDraft.reason}};void execute(command,()=>{setDisposalDraft(null);toast('财务核对已保存');});}}>{uiText('确认')}</Button></>}>
-      {disposal&&disposalDraft&&<div className="mist-col">{failure&&<Banner tone="bad" title={uiText('核对未保存')}>{failure}</Banner>}<Facts items={[{label:'来源采购',value:disposal.purchaseCode},{label:'处置',value:`${disposal.decision==='scrap'?'报废':'退供应商'} ${disposal.quantity} ${disposal.unit}`},{label:'参考货值',value:apMoney(disposal.referenceAmount,disposal.currency)},{label:'复检报告',value:disposal.report},{label:'处置依据',value:disposal.disposalEvidence},{label:'负责人决定',value:disposal.noRecovery?`${disposal.noRecovery.actor} · ${disposal.noRecovery.evidence}`:'未决定'}]}/>{disposalDraft.mode==='review'&&<p>{uiText('确认无补偿；原采购成本和结算不变。')}</p>}<Field label={uiText(disposalDraft.mode==='review'?'无补偿核对依据':'撤回原因')} required><TextArea aria-label={uiText(disposalDraft.mode==='review'?'无补偿核对依据':'撤回原因')} value={disposalDraft.reason} onChange={e=>setDisposalDraft({...disposalDraft,reason:e.target.value})}/></Field></div>}
+      {disposal&&disposalDraft&&<div className="mist-col">{failure&&<Banner tone="bad" title={uiText('核对未保存')}>{failure}</Banner>}<Facts items={[{label:'来源采购',value:disposal.purchaseCode},{label:'处置',value:`${(disposal.disposalDecision??disposal.decision)==='scrap'?'报废':'退供应商'} ${disposal.quantity} ${disposal.unit}`},{label:'参考货值',value:apMoney(disposal.referenceAmount,disposal.currency)},{label:'复检报告',value:disposal.report},{label:'处置依据',value:disposal.disposalEvidence},{label:'负责人决定',value:disposal.recovery?`追偿 ${apMoney(disposal.recovery.amount,disposal.recovery.currency)} · ${disposal.recovery.actor} · ${disposal.recovery.reason}`:disposal.noRecovery?`不追偿 · ${disposal.noRecovery.actor} · ${disposal.noRecovery.evidence}`:'未决定'}]}/>{disposalDraft.mode==='review'&&<p>{uiText(disposal.recovery?'追偿金额随该采购下一次结算列入争议。':'确认无补偿；原采购成本和结算不变。')}</p>}<Field label={uiText(disposalDraft.mode==='review'?'核对依据':'撤回原因')} required><TextArea aria-label={uiText(disposalDraft.mode==='review'?'核对依据':'撤回原因')} value={disposalDraft.reason} onChange={e=>setDisposalDraft({...disposalDraft,reason:e.target.value})}/></Field></div>}
     </Dialog>
     <Card>
       <CardHeader title={uiText(state?.partialPayableBills?.length ? "完整可见票据汇总（按原币）" : "供应商应付（按原币）")} tools={<div className="mist-row" style={{ flexWrap: 'wrap' }}>
