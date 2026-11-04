@@ -218,3 +218,13 @@ it('keeps supplier full-package purchases separate from self-supplied material a
  const g=fixture();g.purchase('processing');expect(()=>g.purchase('finished')).toThrow('混用');
  const h=fixture();h.allocate();expect(()=>h.purchase('finished')).toThrow('内部供料');
 });
+
+it('CMT with internal main fabric saves only processing, never a duplicate fabric procurement',()=>{
+ const f=fixture();f.revise(f.target,{fulfillmentMode:'cmt',cmtIncludedItems:[]});f.approve(f.target.orderId);f.allocate();
+ const id=f.purchase('processing');
+ expect(f.state.fulfillment.purchases.find(p=>p.id===id)).toMatchObject({kind:'processing',price:2,currency:'CNY'});
+ const before=structuredClone(f.state);
+ expect(()=>f.purchase('material','fabric')).toThrow('成衣面料须由面料组供给');
+ expect(()=>f.purchase('material','trims')).toThrow('纯 CMT 不另行采购物料');
+ expect(f.state).toEqual(before);
+});

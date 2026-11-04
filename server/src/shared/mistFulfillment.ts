@@ -1557,6 +1557,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         }
         case 'fulfillment.qc.report': {
             const t = get(f.qcTasks, p.id, 'QC任务');
+            // A closed IQC has already changed usable/rejected stock; another report cannot undo that physical disposition.
+            if (t.kind === 'incoming' && t.incoming?.releasedAt) fail('来料已处置，请按新的收货或库存复检流程办理', 'PRECONDITION');
             if (t.domain !== p.domain)
                 fail('QC业务域不一致');
             const sourceBlocker = fulfillmentQcSourceBlocker(root, t.source); if (sourceBlocker) fail(sourceBlocker);

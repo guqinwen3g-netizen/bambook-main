@@ -1217,6 +1217,8 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       }
       if (po.state !== 'approved') fail(po.state === 'cancelled' ? `${po.code} 已取消` : `${po.code} 待审批，请审批人先退回再作废`, 'PRECONDITION');
       if ((root.fulfillment?.receipts || []).some(r => r.purchaseId === po.id)) fail(`${po.code} 已有收货记录，不能直接取消；请走结算或拒收退换`, 'PRECONDITION');
+      const branchIds = new Set(root.productions.filter(branch => branch.sourcePurchaseId === po.id).map(branch => branch.id));
+      if ((root.fulfillment?.productionFacts || []).some(fact => branchIds.has(fact.productionId) && fact.completion)) fail(`${po.code} 已有最终完工记录，不能按未执行合同取消；请先处理履约与结算`, 'PRECONDITION');
       if (s.settlements.some(x => x.purchaseId === po.id && (x.state === 'pending' || x.state === 'confirmed'))) fail(`${po.code} 有待复核或已确认的结算，不能取消`, 'PRECONDITION');
       if (s.bills.some(b => b.state === 'open' && b.lines.some(l => l.purchaseId === po.id))) fail(`${po.code} 已登记供应商票据，请先由财务作废票据`, 'PRECONDITION');
       const planIds = new Set(s.plans.filter(x => x.purchaseId === po.id).map(x => x.id));
