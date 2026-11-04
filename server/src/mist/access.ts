@@ -4,7 +4,11 @@ import { hasScope } from '../auth/permissionService';
 import type { PermissionScope } from '../_shared/rolePermissionMatrix';
 import { emailVisibleScope } from '../shared/mistEmail';
 import { applyDataScope, scopedHiddenFiles, type MistDataScope } from '../shared/mistDataScope';
-import type { MistState, MistWorkspaceMember, MistWorkspaceMemberLog, MistWorkspaceAccess as SharedAccess } from '../shared/mistWorkspace';
+import type { MistCalendarEvent, MistState, MistTask, MistWorkspaceMember, MistWorkspaceMemberLog, MistWorkspaceAccess as SharedAccess } from '../shared/mistWorkspace';
+import { MIST_BUSINESS_GROUPS, MIST_BUSINESS_GROUP_LABEL, type MistOwnedObject } from '../shared/mistAccounts';
+import { accountHandovers, type MistAccountHandover } from '../shared/mistHandover';
+import { COMPANY_MAINTAIN_SCOPE, LINE_SUPERVISOR_SCOPE } from './companyLibrary';
+import { PERMISSION_SCOPES } from '../_shared/rolePermissionMatrix';
 /**
  * 公司访问与读投影。
  * - 成员资格只决定"能不能进这家公司"，看到哪些业务数据仍由账号自身现有岗位的读权限决定；
@@ -116,6 +120,79 @@ function targetVisibility(hidden: Section[]) {
 export function canReadTarget(actor: TokenPayload, target?: { view?: string }) {
   return targetVisibility(hiddenSections(actor))(target);
 }
+/** 私人日程（有 ownerId）只给本人与参与人；旧日程没有 ownerId 视为公司共享。与前端 calendarVisibleTo 同一规则，服务端为准。 */
+export const calendarVisibleTo = (event: Pick<MistCalendarEvent, 'ownerId' | 'participants'>, actorId: string) =>
+  !event.ownerId || event.ownerId === actorId || !!event.participants?.some(person => person?.id === actorId);
+/**
+ * 调度他人待办的依据：业务线主管权限 relations:admin（LINE_SUPERVISOR_SCOPE）。
+ * 它是现有「主管团队视角 / 督办 team.nudge / 客户交接」所用的权限点（mistTeam.ts、mistHandover.ts），
+ * 与“给成员派待办、跟进成员在手事项”最贴近；users:write 只管公司设置与成员授权，不作为调度依据。
+ */
+export const TASK_DISPATCH_SCOPE = LINE_SUPERVISOR_SCOPE;
+const WRITE_SCOPES = new Set(Object.keys(PERMISSION_SCOPES));
+/** 目标页面对应的写入权限：取该页面读取分区的每个读权限的同模块写权限；未登记的页面或无对应写权限时返回 null（失败关闭）。 */
+function targetWriteScopes(target?: { view?: string }): string[] | null {
+  const section = target?.view ? MIST_READ_SECTIONS.find(item => item.views.includes(target.view!)) : undefined;
+  if (!section || !section.permissions.length) return null;
+  const scopes = section.permissions.map(scope => scope.replace(/:read$/, ':write'));
+  return scopes.every(scope => scope.endsWith(':write') && WRITE_SCOPES.has(scope)) ? scopes : null;
+}
+/**
+ * 修改已有待办（task.complete、带 id 的 task.save）的办理资格；可见性须先由调用方按读投影核对（不可见一律 404）。
+ * (a) 在指派人中；(b) 没有指派人的公共待办：持有该待办的岗位权限，或待办无岗位权限时对来源页面有写入权限；(c) 有调度他人待办的主管权限。
+ */
+export function canHandleTask(actor: TokenPayload, task: Pick<MistTask, 'assigneeIds' | 'permission' | 'target'>) {
+  const assignees = Array.isArray(task.assigneeIds) ? task.assigneeIds : [];
+  if (assignees.includes(actor.userId)) return true;
+  if (hasScope(actor, TASK_DISPATCH_SCOPE as PermissionScope)) return true;
+  // 标了岗位权限的事项属于该岗位（与前端 isMyMistTask 一致）：有指派人时岗位持有人同样可以办理，例如工厂补偿交财务核对。
+  if (task.permission) return hasScope(actor, task.permission as PermissionScope);
+  if (assignees.length) return false;
+  const scopes = targetWriteScopes(task.target);
+  return !!scopes && scopes.every(scope => hasScope(actor, scope as PermissionScope));
+}
+const OWNED_KIND_BY_ROLE: Record<string, MistOwnedObject['kind']> = { 客户负责人: 'customer', 订单负责人: 'order', 开发负责人: 'development', 寻样负责人: 'fabric', 商机负责人: 'opportunity' };
+for (const group of MIST_BUSINESS_GROUPS) OWNED_KIND_BY_ROLE[`${MIST_BUSINESS_GROUP_LABEL[group]}经手人`] = 'supplier';
+/** 当前投影里可见对象的交接清单文字（与 accountOwnedObjects 同一格式，但不限负责人）；交接记录只存文字，按文字精确匹配。 */
+function visibleOwnedTexts(state: MistState) {
+  const out = new Set<string>();
+  for (const c of state.customers || []) out.add(`客户负责人 ${c.code} · ${c.name}`);
+  for (const o of state.orders || []) out.add(`订单负责人 ${o.code} · ${o.customer}`);
+  for (const d of state.devs || []) out.add(`开发负责人 ${d.code} · ${d.name}`);
+  for (const f of state.fabrics || []) out.add(`寻样负责人 ${f.code} · ${f.name}`);
+  for (const o of state.crm?.opportunities || []) out.add(`商机负责人 ${o.title}`);
+  for (const s of state.market?.suppliers || []) for (const group of MIST_BUSINESS_GROUPS) out.add(`${MIST_BUSINESS_GROUP_LABEL[group]}经手人 ${s.code} · ${s.name}`);
+  return out;
+}
+/**
+ * 成员交接档案（handover.account）的读取边界：
+ * - 能办理成员交接的账号（公司库为公司维护权限 users:write，本机空间为所有者，与仓储层 null 权限命令的门禁一致）或没有行级范围的账号：完整记录；
+ * - 其余账号：只看本人作为交出人或接手人的记录，清单只保留本人当前投影中可见的对象，数量按保留的对象重算，不暴露被隐藏的数量；
+ * - 工作区活动里的“成员交接”事件改为中性文本（只留交出人→接手人）。选择改写而不是删除：同事仍能看到负责人变动这一事实（名字本就在成员目录中），
+ *   但数量与原因属于交接档案内容，不随公司活动广播；
+ * - “接手业务”待办标题含数量汇总，只给接手人本人。
+ */
+function projectMemberHandovers(next: MistState, actor: TokenPayload) {
+  const handovers = accountHandovers(next);
+  const visibleTexts = handovers.some(row => row.fromId === actor.userId || row.toId === actor.userId) ? visibleOwnedTexts(next) : new Set<string>();
+  const records = handovers.filter(row => row.fromId === actor.userId || row.toId === actor.userId).map((row): MistAccountHandover => {
+    const objects = (row.objects || []).filter(text => visibleTexts.has(text)), counts: MistAccountHandover['counts'] = {};
+    for (const text of objects) { const kind = OWNED_KIND_BY_ROLE[text.slice(0, text.indexOf(' '))]; if (kind) counts[kind] = (counts[kind] || 0) + 1; }
+    return { ...row, objects, counts };
+  });
+  if (handovers.length) (next as MistState & { memberHandovers?: MistAccountHandover[] }).memberHandovers = records;
+  next.events = (next.events || []).map(event => {
+    if (event.entityType === 'workspace' && event.text.startsWith('成员交接：')) {
+      const names = /^成员交接：([^；]*)；/.exec(event.text)?.[1];
+      return { ...event, text: names ? `成员交接：${names}` : '成员交接' };
+    }
+    // 对象自身的“成员交接 · 负责人：甲→乙：原因”事件（供应商、面料寻样不按行裁剪）：保留负责人变动，去掉原因。
+    const object = /^(成员交接 · 负责人：[^：]*)：/.exec(event.text);
+    return object ? { ...event, text: object[1] } : event;
+  });
+  next.tasks = (next.tasks || []).filter(task => task.kind !== 'account-handover' || task.assigneeIds?.includes(actor.userId));
+}
+const canManageMemberHandover = (actor: TokenPayload, ownerId?: string) => hasScope(actor, COMPANY_MAINTAIN_SCOPE as PermissionScope) || !!ownerId && ownerId === actor.userId;
 /** 按账号自身读权限裁剪状态；被隐藏的数据结构用空公司的同名结构替换，保证页面结构完整。 */
 export function projectState(state: MistState, actor: TokenPayload, empty: () => MistState, ownerId?: string, scope?: MistDataScope): { state: MistState; hidden: Section[];costMaterialBasis?:InternalFabricCostBasis[] | null } {
   const hidden = hiddenSections(actor), next: MistState = scope ? applyDataScope(state, scope, actor.userId) : { ...state };
@@ -124,6 +201,8 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
     const {readBy, ...notification} = item;
     return {...notification, recipientIds: [actor.userId], readAt: readBy?.[actor.userId] ?? null};
   });
+  // 私人日程只给本人与参与人，不论账号权限多大或有无行级范围（日程原文不进入他人的任何读投影、预演和命令可见性校验）。
+  next.calendar = (next.calendar || []).filter(item => calendarVisibleTo(item, actor.userId));
   // Account balances require the complete company ledger; a row-scoped projection cannot compute them safely.
   if (scope && !hidden.some(section => section.key === 'bankAccounts')) hidden.push(MIST_READ_SECTIONS.find(section => section.key === 'bankAccounts')!);
   // 无 sensitive:tax_base 时退税到账流水不下发；账户余额须完整流水，同时隐藏公司银行账户。
@@ -154,6 +233,8 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
     next.notifications = (next.notifications || []).filter(item => visibleTarget(item.target));
     next.calendar = (next.calendar || []).filter(item => visibleTarget(item.target));
   }
+  // 在分区隐藏之后执行：交接清单只按本账号最终可见的对象过滤。
+  if (scope && !canManageMemberHandover(actor, ownerId)) projectMemberHandovers(next, actor);
   // Warehouse-only readers still need the outcome required to dispose their own visible lot.
   // Expose only an action, not the hidden QC task, report, opinion or attachments.
   if (!hidden.some(section => section.key === 'inventory') && next.fulfillment) {

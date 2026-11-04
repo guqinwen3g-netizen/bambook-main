@@ -1,4 +1,5 @@
 import imaps from 'imap-simple';
+import { isIP } from 'node:net';
 import SMTPConnection from 'nodemailer/lib/smtp-connection';
 import MailComposer from 'nodemailer/lib/mail-composer';
 import type { EmailTransport } from '../../shared/mistEmail';
@@ -34,10 +35,15 @@ export function smtpRejectedReplies(source: any): Array<{ address: string; reply
     return { address: String(address).toLowerCase(), reply: cleanReply(match?.response || match?.message || '') };
   });
 }
+/**
+ * 实际连接目标：imapHost / smtpHost 为本次连接用的地址（已校验并钉住的 IP，或运维白名单内按名字连接的主机），
+ * imapServername / smtpServername 为原主机名，用于 TLS SNI 与证书校验。只由 MistMailService 的主机检查生成，不入库。
+ */
+export type MailConnectTarget = EmailTransport & { imapServername?: string; smtpServername?: string };
 export interface MailTransport {
-  imap(config: EmailTransport, secret: MistMailSecret, insecureTls: boolean): Promise<MailImapSession>;
-  smtpVerify(config: EmailTransport, secret: MistMailSecret, insecureTls: boolean): Promise<void>;
-  smtpSend(config: EmailTransport, secret: MistMailSecret, insecureTls: boolean, envelope: { from: string; to: string[] }, raw: Buffer): Promise<MailSendResult>;
+  imap(config: MailConnectTarget, secret: MistMailSecret, insecureTls: boolean): Promise<MailImapSession>;
+  smtpVerify(config: MailConnectTarget, secret: MistMailSecret, insecureTls: boolean): Promise<void>;
+  smtpSend(config: MailConnectTarget, secret: MistMailSecret, insecureTls: boolean, envelope: { from: string; to: string[] }, raw: Buffer): Promise<MailSendResult>;
 }
 
 export type MailComposeInput = {
@@ -155,7 +161,8 @@ class ImapSimpleSession implements MailImapSession {
   async close(force=false) { try { if(force)this.connection.imap.destroy();else this.connection.end(); } catch { /* already closed */ } }
 }
 
-const tls = (host: string, insecureTls: boolean) => ({ servername: /^\d+\.\d+\.\d+\.\d+$/.test(host) ? undefined : host, rejectUnauthorized: !insecureTls, minVersion: 'TLSv1.2' as const });
+/** servername 显式取原主机名：连接地址被钉成 IP 时仍按原主机名做 SNI 与证书校验；原主机本身是 IP 时不发 SNI（按 IP 校验证书）。 */
+export const mailTls = (servername: string, insecureTls: boolean) => ({ servername: isIP(servername) ? undefined : servername, rejectUnauthorized: !insecureTls, minVersion: 'TLSv1.2' as const });
 
 /**
  * SMTP 分阶段执行：连接/STARTTLS/登录阶段的任何失败都证明正文没有提交；
@@ -163,8 +170,8 @@ const tls = (host: string, insecureTls: boolean) => ({ servername: /^\d+\.\d+\.\
  * 底层套接字错误不论阶段都标为 CONN，不能凭错误码判断，所以这里自行记录阶段。
  */
 type Stage = 'connect' | 'login' | 'send';
-function smtpSession(config: EmailTransport, secret: MistMailSecret, insecureTls: boolean, deliver?: { envelope: { from: string; to: string[] }; raw: Buffer }): Promise<MailSendResult> {
-  const connection = new SMTPConnection({ host: config.smtpHost, port: config.smtpPort, secure: config.smtpSecure, requireTLS: !config.smtpSecure, tls: tls(config.smtpHost, insecureTls), connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 60000, logger: false, debug: false } as any);
+function smtpSession(config: MailConnectTarget, secret: MistMailSecret, insecureTls: boolean, deliver?: { envelope: { from: string; to: string[] }; raw: Buffer }): Promise<MailSendResult> {
+  const connection = new SMTPConnection({ host: config.smtpHost, port: config.smtpPort, secure: config.smtpSecure, requireTLS: !config.smtpSecure, ...(config.smtpServername && !isIP(config.smtpServername) ? { servername: config.smtpServername } : {}), tls: mailTls(config.smtpServername || config.smtpHost, insecureTls), connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 60000, logger: false, debug: false } as any);
   let stage: Stage = 'connect', settled = false;
   return new Promise((resolve, reject) => {
     const finish = (error: any, info?: MailSendResult, replied = false) => {
@@ -193,7 +200,7 @@ export const imapSmtpTransport: MailTransport = {
   async imap(config, secret, insecureTls) {
     const connection = await imaps.connect({ imap: {
       user: secret.username, password: secret.password, host: config.imapHost, port: config.imapPort, tls: config.imapSecure, autotls: config.imapSecure ? 'never' : 'required',
-      authTimeout: 15000, connTimeout: 15000, socketTimeout:60000,tlsOptions: tls(config.imapHost, insecureTls),
+      authTimeout: 15000, connTimeout: 15000, socketTimeout:60000,tlsOptions: mailTls(config.imapServername || config.imapHost, insecureTls),
     } } as any);
     // 断线等异步错误不能让进程退出；当前操作会因连接失效而得到明确错误。
     (connection as any).on?.('error', () => undefined);

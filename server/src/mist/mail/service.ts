@@ -12,7 +12,7 @@ import { MIST_FILE_MAX_BYTES } from '../files';
 import { emailAddresses, emailSendEffectiveStatus, emailSendRecipients, type EmailAccount, type EmailAddress, type EmailDraftInput, type EmailFolderSync, type EmailMessageFolder, type EmailProblem, type EmailSend, type EmailSyncedMessage } from '../../shared/mistEmail';
 import type { MistState } from '../../shared/mistWorkspace';
 import { MistMailCredentials, type MistMailSecret } from './credentials';
-import { classifySmtpError, composeMail, describeMailError, imapSmtpTransport, smtpRejectedReplies, type MailFolderInfo, type MailImapSession, type MailTransport } from './transport';
+import { classifySmtpError, composeMail, describeMailError, imapSmtpTransport, smtpRejectedReplies, type MailConnectTarget, type MailFolderInfo, type MailImapSession, type MailTransport } from './transport';
 
 /** 每次同步每个文件夹最多拉取的邮件数；剩余部分下次同步继续（按 UID 递增，不重复）。 */
 export const MAIL_SYNC_BATCH = 100;
@@ -70,16 +70,25 @@ export class MistMailService {
     if (account!.example || !account!.transport) fail('PRECONDITION', '示例邮箱没有真实收发服务', 422);
     return { ...snapshot, account: account! };
   }
-  /** A company may only point mail at public servers; internal hosts need an explicit operator allow-list entry. */
-  private async checkHosts(account: EmailAccount) {
-    const policy = this.policy(), t = account.transport!;
-    for (const [host, port, label] of [[t.imapHost, t.imapPort, '收信'], [t.smtpHost, t.smtpPort, '发信']] as const) {
+  /**
+   * 唯一的“检查并钉住地址”入口：所有 IMAP / SMTP 连接都用这里返回的目标，不再按主机名重新解析（防 DNS 重绑定）。
+   * - 运维白名单 MIST_MAIL_ALLOWED_HOSTS 内的主机（如经 /etc/hosts 指向本机的自建邮件服务器）保持按名字连接；
+   * - 其余主机：解析出的全部地址须为公网地址，连接固定使用第一个已校验地址，TLS servername 保持原主机名以校验证书；
+   * - 主机本身就是 IP 时直接使用该 IP。
+   */
+  private async checkHosts(account: EmailAccount): Promise<MailConnectTarget> {
+    const policy = this.policy(), t = account.transport!, pinned: Record<'imap' | 'smtp', { host: string; servername: string }> = {} as any;
+    // 同一次检查内每个主机名只解析一次：收信与发信同名时钉住同一地址，不给第二次解析留出重绑定机会。
+    const resolved = new Map<string, Promise<string[]>>(), resolve = (name: string) => { if (!resolved.has(name)) resolved.set(name, this.resolveHost(name)); return resolved.get(name)!; };
+    for (const [kind, host, port, label] of [['imap', t.imapHost, t.imapPort, '收信'], ['smtp', t.smtpHost, t.smtpPort, '发信']] as const) {
       const name = host.trim().toLowerCase();
       if (policy.allowedHosts.length ? !policy.allowedHosts.includes(name) : !MAIL_PORTS.has(port)) fail('MAIL_HOST_NOT_ALLOWED', `${label}服务器 ${host}:${port} 不在允许范围内`, 422);
-      if (policy.allowedHosts.includes(name)) continue;
-      const addresses = isIP(name) ? [name] : await this.resolveHost(name).catch(() => fail('MAIL_HOST_UNRESOLVED', `${label}服务器 ${host} 无法解析，请核对地址`, 422));
-      if (!addresses.length || addresses.some(isInternalAddress)) fail('MAIL_HOST_NOT_ALLOWED', `${label}服务器 ${host} 指向内部网络，不能使用`, 422);
+      if (policy.allowedHosts.includes(name)) { pinned[kind] = { host, servername: host }; continue; }
+      const addresses = isIP(name) ? [name] : await resolve(name).catch(() => fail('MAIL_HOST_UNRESOLVED', `${label}服务器 ${host} 无法解析，请核对地址`, 422));
+      if (!addresses.length || addresses.some(address => typeof address !== 'string' || !isIP(address) || isInternalAddress(address))) fail('MAIL_HOST_NOT_ALLOWED', `${label}服务器 ${host} 指向内部网络，不能使用`, 422);
+      pinned[kind] = { host: addresses[0], servername: name };
     }
+    return { ...t, imapHost: pinned.imap.host, imapServername: pinned.imap.servername, smtpHost: pinned.smtp.host, smtpServername: pinned.smtp.servername };
   }
   private insecure(host: string) { return this.policy().insecureTlsHosts.includes(host.toLowerCase()); }
   private async secret(workspaceId: string, account: EmailAccount): Promise<MistMailSecret> {
@@ -89,7 +98,9 @@ export class MistMailService {
     if (!secret || secret.username !== account.transport!.username) fail('MAIL_CREDENTIAL_MISSING', '服务器上没有该邮箱的有效凭据，请重新绑定', 422);
     return secret!;
   }
-  private async imap(account: EmailAccount, secret: MistMailSecret) { return this.transport.imap(account.transport!, secret, this.insecure(account.transport!.imapHost)); }
+  /** 只接受 checkHosts 返回的已钉住目标；不提供按账号主机名直接连接的路径。 */
+  private async imap(account: EmailAccount, target: MailConnectTarget, secret: MistMailSecret) { return this.transport.imap(target, secret, this.insecure(account.transport!.imapHost)); }
+  private smtpVerify(account: EmailAccount, target: MailConnectTarget, secret: MistMailSecret) { return this.transport.smtpVerify(target, secret, this.insecure(account.transport!.smtpHost)); }
   private write(prior: TokenPayload, workspaceId: string, type: string, payload: Record<string, unknown>) { return this.repository.executeMail(prior, workspaceId, { type, payload }); }
 
   /** 绑定凭据：先真实登录收信与发信服务器，成功才写入服务端凭据目录；密码不回传、不落公司。 */
@@ -98,17 +109,17 @@ export class MistMailService {
     const { account } = await this.account(prior, workspaceId, accountId);
     if (account.ownerId !== prior.userId) fail('FORBIDDEN', '只有接入该邮箱的本人可以绑定凭据', 403);
     if (account.removed) fail('PRECONDITION', '该邮箱已移除', 422);
-    await this.checkHosts(account);
+    const target = await this.checkHosts(account);
     const storeProblem = MistMailCredentials.productionProblem(this.env);
     if (storeProblem) fail('MAIL_CREDENTIAL_STORE_UNAVAILABLE', '服务器暂不能保存邮箱凭据，请联系平台管理员', 409);
     const secret = { username: account.transport!.username, password: password as string };
     return this.exclusive(`${workspaceId}:${accountId}`, '该邮箱的连接操作', async () => {
       let stage: 'imap' | 'smtp' = 'imap';
       try {
-        const session = await this.imap(account, secret);
+        const session = await this.imap(account, target, secret);
         try { await session.folders(); } finally { await session.close(); }
         stage = 'smtp';
-        await this.transport.smtpVerify(account.transport!, secret, this.insecure(account.transport!.smtpHost));
+        await this.smtpVerify(account, target, secret);
       } catch (error) {
         const reason = describeMailError(error, stage);
         await this.write(prior, workspaceId, 'email.server.account', { id: accountId, lastError: problem(reason.code, reason.message), ...(account.credentialSet ? {} : { connection: 'error' }) });
@@ -131,8 +142,8 @@ export class MistMailService {
   /** Internal protocol access; callers must hold and revalidate a current account I/O lease. */
   async openStateSession(prior:MailSyncActor,workspaceId:string,accountId:string) {
     await this.repository.assertMailSync(prior,workspaceId);
-    const snapshot=await this.account(prior,workspaceId,accountId);await this.checkHosts(snapshot.account);
-    const session=await this.imap(snapshot.account,await this.secret(workspaceId,snapshot.account));
+    const snapshot=await this.account(prior,workspaceId,accountId),target=await this.checkHosts(snapshot.account);
+    const session=await this.imap(snapshot.account,target,await this.secret(workspaceId,snapshot.account));
     return {...snapshot,session};
   }
   async receivingViews(prior:TokenPayload,workspaceId:string) {return this.repository.mailReceivingViews(prior,workspaceId,this.now().getTime());}
@@ -165,9 +176,9 @@ export class MistMailService {
       let session:MailImapSession|undefined;
       const close=()=>{void session?.close(true).catch(()=>undefined);};signal.addEventListener('abort',close,{once:true});
       try {
-        const {account,state}=await this.account(op,workspaceId,accountId);await this.checkHosts(account);const secret=await this.secret(workspaceId,account);
+        const {account,state}=await this.account(op,workspaceId,accountId);const target=await this.checkHosts(account);const secret=await this.secret(workspaceId,account);
         const folders:EmailFolderSync[]=[],messages:EmailSyncedMessage[]=[];let observations:import('../../shared/mistMailState').MailStateObservation[]=[],stateCursor=lease.stateCursor||0;let lastError:EmailProblem|null=null,remaining=0;
-        try{const connecting=this.imap(account,secret);void connecting.then(value=>{if(signal.aborted)void value.close(true).catch(()=>undefined);},()=>undefined);session=await wait(connecting);}catch(error){check();const reason=describeMailError(error,'imap');lastError=problem(reason.code,reason.message);}
+        try{const connecting=this.imap(account,target,secret);void connecting.then(value=>{if(signal.aborted)void value.close(true).catch(()=>undefined);},()=>undefined);session=await wait(connecting);}catch(error){check();const reason=describeMailError(error,'imap');lastError=problem(reason.code,reason.message);}
         if(session){
           let targets:Array<{remote:string;folder:EmailMessageFolder}>=[];
           try{const listed=await wait(session.folders());targets=pickMailFolders(listed).filter(t=>!background||t.folder==='inbox');
@@ -253,8 +264,10 @@ export class MistMailService {
       const { state } = await this.repository.mailSnapshot(prior, workspaceId);
       const record = state.email.sends.find(row => row.id === sendId)!, account = state.email.accounts.find(row => row.id === record.accountId)!;
       const finish = (outcome: string, code: string, message: string, response = '', accepted: string[] = [], rejected: Array<{ address: string; reply: string }> = []) => this.write(prior, workspaceId, 'email.server.send.finish', { id: sendId, outcome, code, message, response, accepted, rejected });
-      let raw: Buffer, secret: MistMailSecret;
+      let raw: Buffer, secret: MistMailSecret, target: MailConnectTarget;
       try {
+        // 投递前在本次连接处重新检查并钉住地址；同一份目标用于 SMTP 投递和写入远端“已发送”。
+        target = await this.checkHosts(account);
         secret = await this.secret(workspaceId, account);
         raw = await this.compose(prior, workspaceId, state, record, account);
       } catch (error: any) {
@@ -267,7 +280,7 @@ export class MistMailService {
       let outcome: 'accepted' | 'failed' | 'unknown', code = 'SMTP_ACCEPTED', message = '发信服务器已接收', response = '';
       let accepted: string[] = [], rejected: Array<{ address: string; reply: string }> = [];
       try {
-        const info = await this.transport.smtpSend(account.transport!, secret!, this.insecure(account.transport!.smtpHost), { from: record.from, to: envelope }, raw!);
+        const info = await this.transport.smtpSend(target!, secret!, this.insecure(account.transport!.smtpHost), { from: record.from, to: envelope }, raw!);
         outcome = 'accepted'; response = info.response; accepted = info.accepted.map(item => item.toLowerCase());
         rejected = info.rejectedReplies?.length ? info.rejectedReplies : info.rejected.map(address => ({ address: address.toLowerCase(), reply: '' }));
         if (rejected.length) { code = 'SMTP_PARTIAL'; message = `发信服务器只接收了部分收件人；被拒：${rejected.map(item => item.address).join('、')}`; }
@@ -281,7 +294,7 @@ export class MistMailService {
       // 写回失败时记录仍是"发送中"，超时后显示为"结果待核对"，不会被自动重发。
       const result = await finish(outcome, code, message, response, accepted, rejected), done = (result.receipt as any)?.result || {};
       // 远端"已发送"只在第一次有收件人被接收时写入一次，重发被拒收件人不再重复写入。
-      if (done.firstCopy) await this.appendSent(account, secret!, raw!).catch(() => undefined);
+      if (done.firstCopy) await this.appendSent(account, target!, secret!, raw!).catch(() => undefined);
       return { ...result, send: { id: sendId, status: done.status || (outcome === 'accepted' ? 'sent' : outcome), message, recipients: done.recipients || [] } };
     });
   }
@@ -297,8 +310,8 @@ export class MistMailService {
     return composeMail({ from: { name: account.displayName, address: record.from }, to: recipients(record.to), cc: recipients(record.cc), subject: record.subject, text: record.body, messageId: record.messageId, date: new Date(record.createdAt), inReplyTo: parent?.messageId, references: parent?.messageId ? [parent.messageId] : [], attachments });
   }
   /** 与常见邮件客户端一致：投递成功后把同一份原文写入远端"已发送"，便于之后核对与同步合并。 */
-  private async appendSent(account: EmailAccount, secret: MistMailSecret, raw: Buffer) {
-    const session = await this.imap(account, secret);
+  private async appendSent(account: EmailAccount, target: MailConnectTarget, secret: MistMailSecret, raw: Buffer) {
+    const session = await this.imap(account, target, secret);
     try { const sent = pickMailFolders(await session.folders()).find(item => item.folder === 'sent'); if (sent) await session.append(sent.remote, raw); } finally { await session.close(); }
   }
   /** 核对结果不确定的发送：只在本邮箱自身的文件夹中按 Message-ID 查找，不读其他邮箱。找到副本只在待确认收件人全是本邮箱地址时才确认已接收；否则仅记录"本邮箱有副本"。 */
@@ -306,9 +319,12 @@ export class MistMailService {
     const snapshot = await this.repository.mailSnapshot(prior, workspaceId), record = snapshot.state.email.sends.find(row => row.id === sendId);
     if (!record) fail('NOT_FOUND', '发送记录不存在', 404);
     if (emailSendEffectiveStatus(record!, this.now().getTime()) !== 'unknown') fail('PRECONDITION', '只有结果待核对的发送需要核对', 422);
-    const account = snapshot.state.email.accounts.find(row => row.id === record!.accountId)!, secret = await this.secret(workspaceId, account);
+    const account = snapshot.state.email.accounts.find(row => row.id === record!.accountId);
+    if (!account?.transport || account.example) fail('PRECONDITION', '示例邮箱没有真实收发服务', 422);
+    // 核对同样经过主机检查与地址钉住（此前该路径直接按主机名连接）。
+    const target = await this.checkHosts(account!), secret = await this.secret(workspaceId, account!);
     const foundIn: EmailMessageFolder[] = [];
-    const session = await this.imap(account, secret).catch(error => { const reason = describeMailError(error, 'imap'); return fail(reason.code, `${reason.message}，无法核对`, 422); });
+    const session = await this.imap(account!, target, secret).catch(error => { const reason = describeMailError(error, 'imap'); return fail(reason.code, `${reason.message}，无法核对`, 422); });
     try {
       // 逐个查本邮箱自身的收件箱/已发送/归档，记录副本出现在哪里；只有收件箱副本才可能确认"本邮箱作为收件人已收到"。
       for (const target of pickMailFolders(await session.folders())) { await session.open(target.remote); if (await session.hasMessageId(record!.messageId)) foundIn.push(target.folder); }
