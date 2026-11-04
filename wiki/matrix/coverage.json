@@ -1497,8 +1497,9 @@
     "cost.expense.payable",
     "cost.expense.void"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 财务岗走查：SHP-2026-00001 起运港港杂与报关 CNY 1,860 登记并按出运分摊到 SO-G-2026-017；货代先由采购经办在供应商管理建档，再转应付 AP-2026-0002（到期 11-30）"
   },
   {
    "id": "pps",
@@ -1831,7 +1832,8 @@
     "fulfillment.inventory.shipment.correct"
    ],
    "impl": "source",
-   "lessons": []
+   "lessons": [],
+   "note": "2026-11-04 仓库岗已走移位（6000 粒 C-11→B-03-2，批次按位置分列，总可用不变）；出运关联修正未走"
   },
   {
    "id": "packing",
