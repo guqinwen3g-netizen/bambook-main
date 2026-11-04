@@ -24,6 +24,7 @@ import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec , moduleFi
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, businessDay, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
 import { CAPACITY_UNITS, CERTIFICATES, COUNTRIES } from '../../runtime/tradeOptions';
+import { fmt } from '../../data';
 
 type StatusFilter = 'all' | 'active' | 'paused' | 'blocked';
 type FlagFilter = 'all' | 'certExpiring' | 'certExpired' | 'noCert' | 'unrated' | 'scheduled';
@@ -294,8 +295,8 @@ function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure,
     </DetailBlock>}
     {/* mar36：应付余额、近期付款与询价历史（只读，有财务或采购读权限才有数据）。 */}
     {(() => { const pay = supplierPayableSummary(state, day).filter(r => r.supplierId === s.id), payments = supplierPayments(state, day).filter(p => p.supplierId === s.id).slice(0, 5), rfqs = readRfqs(state).filter(r => r.supplierIds.includes(s.id)).slice(0, 5);
-      return <>{!!pay.length && <DetailBlock title={uiText('应付余额')} aside={<TextLink onClick={() => onOpen('payment-vouchers', undefined)}>{uiText('应付待办')}</TextLink>}>{pay.map(r => <div key={r.currency} className="mist-row"><span>{r.currency}</span><span className="mist-spacer" /><span className="mist-num">{uiText('未付 ')}{(r.open / 100).toLocaleString()}{r.overdue ? ` · ${uiText('逾期')} ${r.overdue}` : ''}</span></div>)}</DetailBlock>}
-        {!!payments.length && <DetailBlock title={uiText('近期付款')}>{payments.map(p => <div key={p.id} className="mist-row"><Mono>{p.code}</Mono><span className="mist-note">{p.date}</span><span className="mist-spacer" /><span className="mist-num">{p.amount.toLocaleString()} {p.currency}</span></div>)}</DetailBlock>}
+      return <>{!!pay.length && <DetailBlock title={uiText('应付余额')} aside={<TextLink onClick={() => onOpen('payment-vouchers', undefined)}>{uiText('应付待办')}</TextLink>}>{pay.map(r => <div key={r.currency} className="mist-row"><span>{r.currency}</span><span className="mist-spacer" /><span className="mist-num">{uiText('未付 ')}{fmt(r.open, 2)}{r.overdue ? ` · ${uiText('逾期')} ${r.overdue}` : ''}</span></div>)}</DetailBlock>}
+        {!!payments.length && <DetailBlock title={uiText('近期付款')}>{payments.map(p => <div key={p.id} className="mist-row"><Mono>{p.code}</Mono><span className="mist-note">{p.date}</span><span className="mist-spacer" /><span className="mist-num">{fmt(p.amount, 2)} {p.currency}</span></div>)}</DetailBlock>}
         {!!rfqs.length && <DetailBlock title={uiText('询价历史')}>{rfqs.map(r => <div key={r.id} className="mist-row"><TextLink onClick={() => onOpen('procurement', r.id)}>{r.code}</TextLink><span className="mist-note">{r.description}</span><span className="mist-spacer" /><Pill tone={r.award?.supplierId === s.id ? 'ok' : 'neutral'}>{uiText(r.award?.supplierId === s.id ? '中标' : RFQ_STATE_LABEL[r.state])}</Pill></div>)}</DetailBlock>}</>; })()}
     <DetailBlock title={ui`联系人 · ${s.contacts.length}`} aside={canContacts ? <Button variant="quiet" icon={UserPlus} disabled={locked} onClick={() => onContact()}>{uiText("添加")}</Button> : undefined}>
       {s.contacts.length ? <div className="mist-col" style={{ gap: 0 }}>{s.contacts.map(c => <div key={c.id} className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}>

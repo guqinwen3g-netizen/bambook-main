@@ -1324,8 +1324,9 @@
     "payable.settlement.return",
     "payable.settlement.cancel"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 采购经办 / 财务走查：PO-2026-00013 提交最终结算 ST-2026-0001 → 林舒因对账单多列运费退回（收货记录释放、经办待办出现待结算）→ 沈禾写明对账差异重提 ST-2026-0002 → 财务确认"
   },
   {
    "id": "settlement-deduction",
@@ -1476,8 +1477,9 @@
     "payable.settlement.reverse",
     "payable.allocation.reverse"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 财务岗走查：AP-2026-0002 付款申请 PR-2026-0001 经 5 万元档（周敏）与新供应商首笔加签（陆衡）批准 → 登记收款账户并核实 → 登记实付 PAY-2026-0003 → 冲回（原记录保留，票据恢复未付，申请回到已批准待付）。结算冲回、核销冲回未单独走"
   },
   {
    "id": "expense",
@@ -1497,8 +1499,9 @@
     "cost.expense.payable",
     "cost.expense.void"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 财务岗走查：SHP-2026-00001 起运港港杂与报关 CNY 1,860 登记并按出运分摊到 SO-G-2026-017；货代先由采购经办在供应商管理建档，再转应付 AP-2026-0002（到期 11-30）"
   },
   {
    "id": "pps",
@@ -1831,7 +1834,8 @@
     "fulfillment.inventory.shipment.correct"
    ],
    "impl": "source",
-   "lessons": []
+   "lessons": [],
+   "note": "2026-11-04 仓库岗已走移位（6000 粒 C-11→B-03-2，批次按位置分列，总可用不变）；出运关联修正未走"
   },
   {
    "id": "packing",
@@ -1930,6 +1934,7 @@
    "task": "取消未离港出运",
    "kind": "branch",
    "roles": [
+    "业务员",
     "后勤/单证"
    ],
    "modes": [
@@ -1942,8 +1947,9 @@
    "commands": [
     "fulfillment.shipments.cancel"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 走查 SHP-2026-00002（独立数据副本）：取消请求先列出阻断（订舱号、已签发 CI / PL）→ 后勤作废 CI（应收随之作废）、PL 并清空订舱 → 业务发起人取消；订单回到待出运。取消由业务发起人、订单负责人或主管办理"
   },
   {
    "id": "lc-present",

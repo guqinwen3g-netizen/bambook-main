@@ -363,7 +363,7 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, inve
       ...(business ? [
         { label: '编辑出运请求', icon: Pencil, onClick: onEdit, reason: businessReason, hidden: s.state !== 'preparing' || !!editReason },
         { label: '登记已向客户发送CI/PL', icon: Send, onClick: onSent, primary: stage === 'business', reason: businessReason, hidden: s.state !== 'ready' },
-        { label: '取消请求', icon: X, onClick: onCancel, reason: businessReason, hidden: closed || !!cancelReason },
+        { label: '取消请求', icon: X, onClick: onCancel, reason: cancelReason, hidden: closed },
       ] as ReasonedAction[] : []),
     ]} />}
     <Facts items={[

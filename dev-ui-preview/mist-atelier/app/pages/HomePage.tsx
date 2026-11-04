@@ -1,4 +1,5 @@
 import { ModuleEditorDialog } from './modules/ModuleWorkbench';
+import { businessWhen } from './modules/pageKit';
 import { SetupChecklist } from './SetupChecklist';
 import { memberSelectOptions, workspaceMembers } from '../runtime/members';
 import { calendarWithDerived } from '../runtime/derivedCalendar';
@@ -144,7 +145,7 @@ export function HomePage() {
         <FormGrid cols={1}><Field label={uiText("事项")}><Select aria-label={uiText("选择事项")} value={selectedTask} onChange={event => { const task = state?.tasks.find(item => item.id === event.target.value); setSelectedTask(event.target.value); setTaskDone(task?.done ?? false); }} options={(chosenTask && !allTasks.some(task=>task.id===chosenTask.id) ? [chosenTask, ...allTasks] : allTasks).map(task => ({ value: task.id, label: task.title }))} /></Field><Switch label={uiText("已完成")} checked={taskDone} disabled={busy||taskControlled} onChange={setTaskDone} /></FormGrid>
       </Dialog>
       <Dialog open={!!reportVersion} onClose={() => setReportVersion(null)} title={uiText(report?.qc?.report || 'QC 评审')}>
-        {report?.qc ? <KeyValue items={[{ label: '版本', value: report.label }, { label: '评审人', value: report.qc.reviewer }, { label: '结论', value: ({ pass: '通过', conditional: '有保留通过', reject: '不通过' })[report.qc.result] }, { label: '评审时间', value: report.qc.reviewedAt }, { label: '意见', value: report.qc.opinion }]} /> : <EmptyState compact title={uiText("此版本没有可读取的评审记录")} />}
+        {report?.qc ? <KeyValue items={[{ label: '版本', value: report.label }, { label: '评审人', value: report.qc.reviewer }, { label: '结论', value: ({ pass: '通过', conditional: '有保留通过', reject: '不通过' })[report.qc.result] }, { label: '评审时间', value: businessWhen(report.qc.reviewedAt) }, { label: '意见', value: report.qc.opinion }]} /> : <EmptyState compact title={uiText("此版本没有可读取的评审记录")} />}
       </Dialog>
       <Dialog open={!!statView && !hiddenStats[statView]} onClose={()=>setStatView(null)} title={uiText(statView?statTitles[statView]:'统计明细')}>
         {statRows.length?statRows.map(row=><Button key={row.id} block onClick={()=>{setStatView(null);openTarget(row.target);}}>{uiText(row.label)} · {row.detail}</Button>):<EmptyState compact title={uiText("当前范围没有记录")}/>}

@@ -48,6 +48,14 @@ describe('供应商管理', () => {
     expect(button('登记认证')).toBeTruthy();
   });
 
+  it('shows the open payable balance in currency units, not minor units', async () => {
+    const row = named('华盛毛纺');
+    (state as any).payables = { ...((state as any).payables || {}), bills: [{ id: 'bill-x', code: 'AP-X', supplierId: row.id, supplier: row.name, invoiceNo: 'INV-1', invoiceDate: '2026-10-01', currency: 'CNY', amount: 1860, taxAmount: 0, taxRate: '', lines: [], terms: [], due: '2026-12-31', dueBasis: '', fileIds: [], note: '', state: 'open', registeredAt: '2026-10-01T00:00:00Z', registeredBy: '林舒' }], payments: (state as any).payables?.payments || [], allocations: (state as any).payables?.allocations || [] };
+    await mount(row.id, 'full');
+    const detail = host.querySelector('[data-supplier-detail]')!;
+    expect(detail.textContent).toContain('未付 1,860.00');
+    expect(detail.textContent).not.toContain('未付 18.6');
+  });
   it('交付表现与提醒由采购、到货与认证记录推出', () => {
     const huasheng = supplierPerformance(state, named('华盛毛纺').id);
     expect(huasheng.completed.length).toBe(1); expect(huasheng.onTime).toBe(1); expect(huasheng.open.length).toBe(1);

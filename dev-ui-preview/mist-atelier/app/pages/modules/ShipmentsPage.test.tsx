@@ -58,6 +58,15 @@ it('supplements signed fabric package colours without permitting physical edits'
  expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.shipments.pack',payload:expect.objectContaining({id:'fab',packingColorVersion:1,supplementEvidence:'按已签装箱单逐件核对',lines:expect.arrayContaining([expect.objectContaining({carton:'R1',fabricColor:'本白'}),expect.objectContaining({carton:'R2',fabricColor:'藏蓝'})])})}));
 });
 
+it('shows why the requester cannot cancel a booked shipment with issued documents',()=>{
+  const f=store.state!.fulfillment;f.shipments.push(shipment('k',{booking:'BK-9',requesterId:'biz'}));f.documents.push(doc('ci','k','CI'));
+  render('k');
+  const detail=host.querySelector('[data-shipment-detail="k"]') as HTMLElement;
+  expect((getByRole(detail,'button',{name:'取消请求'}) as HTMLButtonElement).disabled).toBe(true);
+  expect(detail.textContent).toContain('取消请求：已有订舱号 BK-9');
+  expect(detail.textContent).toContain('已有已出具的 CI / PL 等单据，请先作废');
+});
+
 it('derives the logistics stage only from recorded packing, booking, documents, dispatch and departure',()=>{
   const f=store.state!.fulfillment;
   f.shipments.push(shipment('a'),shipment('b',{booking:'BK'}),shipment('c',{state:'ready'}),shipment('d',{state:'ready',documentsSentAt:'2026-10-12T08:00:00Z'}),shipment('e',{state:'departed',departedAt:'2026-10-13T08:00:00Z'}),shipment('f',{state:'cancelled'}),shipment('g'));
