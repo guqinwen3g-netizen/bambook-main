@@ -45,6 +45,13 @@
 
 平台模型网关：开发服务器已装 magpie（本机回环 `127.0.0.1:3425`，OpenAI 兼容），可把多个订阅与 API 服务汇成一个入口，订阅额度用完时转到下一个。Bambook 后端在“平台 AI 模型”里把它登记为一个 API 服务即可使用，现有调用链与失败转移不变。运维细节见 `docs/ops/dev-server-access.md`。
 
+### 0.4 第二类个人 Agent 接线（2026-11-04）
+
+- 入口：AI 助手页「我的 Agent」（`PersonalAgentPage.tsx`），浏览器与桌面端都可用；桌面「工作助手」保留。
+- 身份：`POST /workspaces/:id/personal-agent` 开通或续期本人的个人 Agent（`agentIdentities.ts#ensurePersonalIdentity`，`kind:'personal'`，编号 `personalIdentityId(workspaceId,userId)`）。负责人即本人，权限上限 = `AGENT_OPERATE_CEILING` ∩ 本人当前权限。管理员只能停用或改名。
+- 交办：`POST /workspaces/:id/personal-agent/tasks` 建 `executor:'platform'` 任务，由 `platformTaskWorker` 执行；中高风险写入一律成为本人待确认提议。
+- 用量：`GET /workspaces/:id/personal-agent/usage?month=YYYY-MM`（`agentTasks.ts#platformTaskUsage`），按账号汇总交办项数、模型轮次、运行时长。
+
 以下第 1–13 节为历史桌面方案，保留其出处和实施记录；具体接线按第 0 节执行。
 
 ## 1. 目标与边界
