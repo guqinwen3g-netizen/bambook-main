@@ -11,7 +11,7 @@ import {buildQuotationDocumentSnapshot,quotationDocumentBlocker,quotationFormalD
 /** Market-side business records owned by the current Mist workspace. No fixture records are created. */
 import { MistCommandError, type MistState, type MistContext, type MistCommandResult, type MistCustomer, mistMoneyMinor, MIST_ORDER_CHECKLIST, mistPlaceholderImage, type MistImage } from './mistWorkspace';
 import type { MistReviewTask } from './mistReview';
-import { supplierBusinessDay, productionSupplierUnavailableReason, isServiceSupplier } from './mistSupplierStatus';
+import { supplierBusinessDay, supplierUnavailableReason, productionSupplierUnavailableReason, isServiceSupplier } from './mistSupplierStatus';
 import { relationHoldReason } from './mistRelationHold';
 import { relationBusiness } from './mistRelationBusiness';
 import { MIST_BUSINESS_GROUPS, MIST_BUSINESS_GROUP_LABEL, ownerChangeText, resolveMember, type MistAccountRef, type MistBusinessGroup } from './mistAccounts';
@@ -357,7 +357,7 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    if(!code){let serial=m.suppliers.length+1;do{code=`SUP-${ctx.now.slice(0,4)}-${String(serial++).padStart(4,'0')}`;}while(m.suppliers.some(x=>x.code.toLowerCase()===code.toLowerCase()));}
    if(m.suppliers.some(x=>x.id!==id&&x.code.toLowerCase()===code.toLowerCase()))fail('供应商编码已存在');
    const type=str(input.type,'供应商类型'),service=isServiceSupplier({type});
-   const row:MarketSupplier={...base(root,ctx,input,old),code,name:str(input.name,'供应商名称'),type,country:str(input.country??'','国家地区',false),address:str(input.address??'',service?'经营地址':'生产地址',false),capabilities:str(input.capabilities??'',service?'服务内容':'生产能力',false),capacity:service?0:count(input.capacity??0,'月产能'),capacityUnit:service?'':str(input.capacityUnit??'','产能单位',false),leadDays:service?0:count(input.leadDays??0,'交付周期'),status:old?.status||'active',blockReason:old?.blockReason||'',statusFrom:old?.statusFrom,statusHistory:old?.statusHistory,certificates:old?.certificates,ratings:old?.ratings,...(old?.handlers?{handlers:{...old.handlers}}:{}),contacts:old?.contacts||[]};
+   const row:MarketSupplier={...base(root,ctx,input,old),code,name:str(input.name,'供应商名称'),type,country:str(input.country??'','国家地区',false),address:str(input.address??'',service?'经营地址':'生产地址',false),capabilities:str(input.capabilities??'',service?'服务内容':'生产能力',false),capacity:service?0:count(input.capacity??0,'月产能'),capacityUnit:service?'':str(input.capacityUnit??'','产能单位',false),leadDays:service?0:count(input.leadDays??0,'交付周期'),status:old?.status||'active',blockReason:old?.blockReason||'',statusFrom:old?.statusFrom,statusHistory:old?.statusHistory,certificates:old?.certificates,ratings:old?.ratings,bankAccounts:old?.bankAccounts,...(old?.handlers?{handlers:{...old.handlers}}:{}),contacts:old?.contacts||[]};
    const handlerTexts=supplierHandlers(row,old,input.handlerIds,ctx);put(m.suppliers,row,old);
    if(old&&old.name!==row.name)renameDevelopmentFactory(root,row);
    if(handlerTexts.length)history(root,ctx,'supplier',row.id,handlerTexts.join('；'));
@@ -398,6 +398,7 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
   case 'market.relation.hold':{const r=find(m.relations,command.payload.id,'关系档案'),frozen=command.payload.frozen===true,reason=str(command.payload.reason,frozen?'冻结原因':'解冻说明');if(frozen===!!r.hold)fail(frozen?'该往来已冻结':'该往来未冻结');
    r.hold=frozen?{reason,at:ctx.now,actor:ctx.actorName}:null;r.holdHistory=[...(r.holdHistory||[]),{action:frozen?'freeze':'release',reason,at:ctx.now,actor:ctx.actorName}];r.updatedAt=ctx.now;history(root,ctx,'relation',r.id,(frozen?'冻结往来：':'解冻往来：')+reason);result={id:r.id};break;}
   case 'market.relation.linkSupplier':{const r=find(m.relations,command.payload.id,'关系档案');if(!r.customerId)fail('只有客户关系档案可以关联供应商身份');if(r.supplierId)fail('该组织已关联供应商身份');const supplier=find(m.suppliers,command.payload.supplierId,'供应商');
+   const unavailable=supplierUnavailableReason(supplier,marketBusinessDate(ctx.now));if(unavailable)fail(unavailable,'PRECONDITION');
    const other=m.relations.find(x=>x.supplierId===supplier.id);if(other?.customerId)fail('该供应商已关联到其它客户');if(other&&other.hold)fail('该供应商的关系档案已冻结，请先解冻');
    r.supplierId=supplier.id;r.aliases=[...new Set([...r.aliases,...(other?.aliases||[]),...(supplier.name!==r.name?[supplier.name]:[])])];r.fileIds=[...new Set([...r.fileIds,...(other?.fileIds||[])])];r.updatedAt=ctx.now;
    if(other){r.holdHistory=[...(r.holdHistory||[]),...(other.holdHistory||[])].sort((a,b)=>Date.parse(a.at)-Date.parse(b.at));r.mergedRelationIds=[...new Set([...(r.mergedRelationIds||[]),other.id,...(other.mergedRelationIds||[])])].filter(id=>id!==r.id);m.relations.splice(m.relations.indexOf(other),1);}history(root,ctx,'relation',r.id,'关联供应商身份 '+supplier.code+' '+supplier.name);result={id:r.id};break;}

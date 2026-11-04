@@ -1654,19 +1654,14 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       event(state,context,'finance',r.id,'冲回'+(r.kind==='lock'?'锁汇 ':'结汇 ')+r.code+'：'+reason+'；原记录保留');result={id:r.id};break;
     }
     case 'customer.update': {
-      const c=find(state.customers,p.id,'客户');
-      if(p.patch&&(p.patch as Record<string,unknown>).owner!==undefined)throw new MistCommandError('VALIDATION','负责人须按账号选择');
-      for(const key of ['name','country','city','industry','grade','currency','terms','incoterm','categories','since'] as const)if(p.patch[key]!==undefined)c[key]=text(p.patch[key],key,key==='name');
-      let ownerText='';if(p.patch.ownerId!==undefined&&p.patch.ownerId!==c.ownerId){const next=resolveMember(context,p.patch.ownerId,'客户负责人');ownerText=ownerChangeText('负责人',c.owner,next.name);c.owner=next.name;c.ownerId=next.id;}
-      if(p.patch.creditLimit!==undefined){mistMoneyMinor(p.patch.creditLimit);c.creditLimit=p.patch.creditLimit;}
-      state.devs.filter(d=>d.customerId===c.id).forEach(d=>{d.customer=c.name;d.values.customer=c.name;});state.orders.filter(o=>o.customerId===c.id).forEach(o=>{o.customer=c.name;});
-      event(state,context,'customer',c.id,ownerText?'更新客户档案 · '+ownerText:'更新客户档案');result={id:c.id,customerId:c.id};break;
+      // Both public entry points must share validation and the linked relation update.
+      result=applyMarketCommand(state,{type:'market.customer.update',payload:p},context);break;
     }
     case 'member.groups.set': {
       result=setMemberGroups(state,p,context);break;
     }
     case 'contact.save': {
-      find(state.customers,p.customerId,'客户');const id=p.id||context.id();if(p.id)find(state.contacts,id,'联系人');
+      find(state.customers,p.customerId,'客户');const id=p.id||context.id();if(p.id){const old=find(state.contacts,id,'联系人');if(old.customerId!==p.customerId)throw new MistCommandError('VALIDATION','联系人不能改到其他客户');}
       const email=text(p.email,'邮箱',false,254);if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new MistCommandError('VALIDATION','邮箱格式无效');
       const row:MistContact={id,customerId:p.customerId,name:text(p.name,'姓名',true,120),role:text(p.role,'职务',false,240),email,phone:text(p.phone,'电话',false,80),tone:'accent'};
       state.contacts=state.contacts.filter(c=>c.id!==id);state.contacts.push(row);event(state,context,'customer',p.customerId,'保存联系人 '+row.name);result={id,contactId:id};break;
