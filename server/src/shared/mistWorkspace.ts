@@ -1462,8 +1462,12 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const currency=text(p.currency,'币种',true,3).toUpperCase();if(!/^[A-Z]{3}$/.test(currency))throw new MistCommandError('VALIDATION','币种无效');
       const payDay=date(p.date),from=p.accountId===undefined||p.accountId===''?undefined:find(state.bankAccounts||[],text(p.accountId,'付款账户'),'付款账户');
       if(from)assertAccountUsable(from,currency,payDay);
-      state.payments.push({id,code:'PAY-'+context.now.slice(0,4)+'-'+String(state.payments.length+1).padStart(4,'0'),date:payDay,payee:text(p.payee,'收款方'),amount,currency,ref:text(p.ref,'备注',false),origin:'finance',...(from?{accountId:from.id}:{})});
-      event(state,context,'payment',id,'登记付款凭证'+(from?'（付出 '+from.code+'）':''));result={id};break;
+      const payee=text(p.payee,'收款方');
+      // 直接登记只有收款方文字，没有组织 ID：按组织名称、别名或供应商名称精确匹配，留登记时冻结事实，不拦银行实付。
+      const payeeKey=payee.trim().toLowerCase();
+      const held=(state.market?.relations||[]).filter(r=>r.hold&&r.supplierId&&[r.name,...r.aliases,state.market.suppliers.find(s=>s.id===r.supplierId)?.name].some(name=>name?.trim().toLowerCase()===payeeKey)).map(r=>relationHoldReason(state,{supplierId:r.supplierId})).filter(Boolean);
+      state.payments.push({id,code:'PAY-'+context.now.slice(0,4)+'-'+String(state.payments.length+1).padStart(4,'0'),date:payDay,payee,amount,currency,ref:text(p.ref,'备注',false),origin:'finance',...(from?{accountId:from.id}:{})});
+      event(state,context,'payment',id,'登记付款凭证'+(from?'（付出 '+from.code+'）':'')+(held.length?'；登记时：'+held.join('；'):''));result={id};break;
     }
     case 'finance.receivable.bankCharge': {
       const i=find(state.invoices,text(p.invoiceId,'应收'),'应收'),r=find(state.receipts,text(p.receiptId,'到账流水'),'到账流水');

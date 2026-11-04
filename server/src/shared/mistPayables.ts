@@ -32,6 +32,7 @@ import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
 import type { MistReviewTask } from './mistReview';
 import { MistCommandError, mistMoneyMinor, type MistState, type MistContext, type MistPayment } from './mistWorkspace';
 import { platformBusinessDate } from './mistPlatform';
+import { relationHoldReason } from './mistRelationHold';
 
 /** awaitingSettlement：发票先于结算到达，暂挂待关联已确认结算；暂挂期间不形成可付应付。 */
 export type SupplierBillLine = { purchaseId: string; purchaseCode: string; kind: 'material' | 'finished' | 'processing'; amount: number; settlementId?: string; settlementCode?: string; awaitingSettlement?: boolean; linkedAt?: string; linkedBy?: string };
@@ -813,7 +814,9 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       s.payments.push(payment);
       const applied = request.purpose === 'bill' ? allocate(root, c, payment, input) : 0;
       request.state = 'paid'; request.supplierPaymentId = id; request.paymentHistory.push(id);
-      event(root, c, id, `按付款申请 ${request.code} 登记${request.purpose === 'prepayment' ? '预付款' : request.purpose === 'settlement' ? `按结算 ${request.settlementCode} 先付（发票未到）` : '供应商付款'} ${code}（${request.supplier}）`);
+      // 实付为银行已付事实，不因当前冻结拒登；在登记事件中保留当时的冻结原因。
+      const held = relationHoldReason(root, { supplierId: request.supplierId });
+      event(root, c, id, `按付款申请 ${request.code} 登记${request.purpose === 'prepayment' ? '预付款' : request.purpose === 'settlement' ? `按结算 ${request.settlementCode} 先付（发票未到）` : '供应商付款'} ${code}（${request.supplier}）${held ? `；登记时：${held}` : ''}`);
       return { id, applied };
     }
     case 'payable.plan.register': {
@@ -907,6 +910,8 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
         ];
         request = { id, code, purpose: 'bill', supplierId, supplier, currency, amount: major(total), lines, ...(plan ? { planId: plan.id, purchaseId: plan.purchaseId, purchaseCode: plan.purchaseCode } : {}), reason, fileIds, requesterId: c.actorId, requester: c.actorName, submittedAt: c.now, reviewerIds, snapshot, state: 'pending', paymentHistory: [] };
       } else return fail('付款申请类型无效');
+      const held = relationHoldReason(root, { supplierId: request.supplierId });
+      if (held) fail(held, 'PRECONDITION');
       // 按折合人民币金额与是否首笔付款冻结审批档位；每级审批人由服务端按申请人重建。
       request.tier = paymentTier(root, request, today, c); request.approvals = []; assertDistinctReviewers(request.tier, c);
       request.reviewerIds = [...new Set(request.tier.levels.flatMap(l => l.reviewerIds))];
@@ -924,6 +929,10 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       if (request.state !== 'pending') fail('付款申请已处理或已撤回', 'CONFLICT');
       if (!['approved', 'rejected'].includes(p.decision)) fail('审批决定无效');
       if (!c.actorId || c.actorId === request.requesterId) fail('当前账号不是本次付款申请的有效审批主管', 'FORBIDDEN');
+      if (p.decision === 'approved') {
+        const held = relationHoldReason(root, { supplierId: request.supplierId });
+        if (held) fail(held, 'PRECONDITION');
+      }
       // 分档规则前提交的申请没有冻结档位：按提交日汇率与当前审批人名单补算，同样缺汇率即拒绝。
       if (!request.tier) { request.tier = paymentTier(root, request, platformBusinessDate(request.submittedAt), c); request.approvals = []; }
       const left = pendingLevels(request);
@@ -1179,7 +1188,8 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       const payment: SupplierPayment = { id, paymentId, code, supplierId: plan.supplierId, supplier: plan.supplier, date, amount: major(amount), currency: plan.currency, reference, fileIds: files(root, p.fileIds), note: text(p.note, '补登说明', false, 1000), createdAt: c.now, actor: c.actorName, purpose: stage === 'prepayment' ? 'prepayment' : 'bill', planId: plan.id, backfill: true, ...(stage === 'prepayment' ? { purchaseId: po.id } : {}) };
       s.payments.push(payment);
       if (bill) allocate(root, c, payment, [{ billId: bill.id, amount: major(amount) }]);
-      event(root, c, id, `历史补登付款 ${code}：${plan.code} ${PLAN_STAGE_LABEL[stage]} · ${fx(major(amount))} ${plan.currency} · 凭证 ${reference} · 付款日 ${date}（系统上线前已付，未走付款申请）`);
+      const held = relationHoldReason(root, { supplierId: plan.supplierId });
+      event(root, c, id, `历史补登付款 ${code}：${plan.code} ${PLAN_STAGE_LABEL[stage]} · ${fx(major(amount))} ${plan.currency} · 凭证 ${reference} · 付款日 ${date}（系统上线前已付，未走付款申请）${held ? `；登记时：${held}` : ''}`);
       return { id };
     }
     case 'payable.payment.plan': {
