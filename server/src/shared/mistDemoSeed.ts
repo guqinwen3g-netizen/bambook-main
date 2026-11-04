@@ -266,12 +266,15 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
     const due = state.fulfillment.purchases.find(p => p.id === pid)?.due || day(20);
     run(label + ' confirm', { type: 'fulfillment.procurement.confirm', payload: { id: pid, at: at(confirmedOffset, 10), evidence: '供应商盖章回签', confirmedDue: due, fileIds: [] } }, buyer);
   };
+  // 仓库主数据：收货入库登记到具体仓库，库存按仓库落账（sup13）。
+  const jiaxing = id(run('warehouse jiaxing', { type: 'fulfillment.claimInventory.warehouse.save', payload: { code: 'JX', name: '嘉兴面辅料仓', address: '浙江嘉兴秀洲区洪合镇', active: true, custodian: 'company' } }, warehouse));
+  run('warehouse shanghai', { type: 'fulfillment.claimInventory.warehouse.save', payload: { code: 'SH', name: '上海成品仓', address: '上海浦东新区外高桥保税区', active: true, custodian: 'company' } }, warehouse);
   const fabricPo = purchase('purchase fabric', { lineIndex: 0, kind: 'material', materialKind: 'fabric', supplierId: huasheng, description: '燕麦色双面呢 420 g/m² · 148 cm（大衣大身）', quantity: 2400, unit: '米', price: 46.5, currency: 'CNY', due: -2, terms: '30% 预付，余款到货验收后 30 天', destination: '嘉兴面辅料仓' });
   approveAndConfirm(fabricPo, 'purchase fabric', -12);
-  if (fabricPo) run('purchase fabric receive', { type: 'fulfillment.procurement.receive', payload: { id: fabricPo, quantity: 2380, rejected: 20, destination: 'warehouse', location: '嘉兴面辅料仓 A-03', date: day(-3), evidence: '到货 2,400 米，色差 20 米退回', fileIds: [] } }, warehouse);
+  if (fabricPo) run('purchase fabric receive', { type: 'fulfillment.procurement.receive', payload: { id: fabricPo, quantity: 2380, rejected: 20, destination: 'warehouse', ...(jiaxing ? { warehouseId: jiaxing } : {}), location: '嘉兴面辅料仓 A-03', date: day(-3), evidence: '到货 2,400 米，色差 20 米退回', fileIds: [] } }, warehouse);
   const buttonPo = purchase('purchase buttons', { lineIndex: 0, kind: 'material', materialKind: 'trims', supplierId: baotai, description: '牛角纹树脂扣 24L 深棕（每件 8 粒 + 2% 损耗）', quantity: 6600, unit: '粒', price: 0.08, currency: 'CNY', due: -1, terms: '月结 30 天', destination: '嘉兴面辅料仓' });
   approveAndConfirm(buttonPo, 'purchase buttons', -8);
-  if (buttonPo) run('purchase buttons receive', { type: 'fulfillment.procurement.receive', payload: { id: buttonPo, quantity: 6600, rejected: 0, destination: 'warehouse', location: '嘉兴面辅料仓 C-11', date: day(-2), evidence: '到货点数无误', fileIds: [] } }, warehouse);
+  if (buttonPo) run('purchase buttons receive', { type: 'fulfillment.procurement.receive', payload: { id: buttonPo, quantity: 6600, rejected: 0, destination: 'warehouse', ...(jiaxing ? { warehouseId: jiaxing } : {}), location: '嘉兴面辅料仓 C-11', date: day(-2), evidence: '到货点数无误', fileIds: [] } }, warehouse);
   purchase('purchase processing draft', { lineIndex: 1, kind: 'processing', supplierId: yuanshan, description: '炭灰细格 Blazer 成衣缝制加工（含锁眼钉扣、整烫）', quantity: 800, unit: '件', price: 85, currency: 'CNY', due: 40, terms: '月结 30 天，按实际回交数结算', destination: '远山服装', note: '待确认工价后提交审批' });
   const liningPo = purchase('purchase lining', { lineIndex: 2, kind: 'material', materialKind: 'fabric', supplierId: huasheng, description: '雾蓝西装里布 · 铜氨丝混纺', quantity: 1100, unit: '米', price: 18.8, currency: 'CNY', due: 10, terms: '月结 30 天', destination: '嘉兴面辅料仓' });
   void liningPo;

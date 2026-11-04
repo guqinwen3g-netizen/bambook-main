@@ -16,7 +16,7 @@ type ModuleFieldCondition = {key:string;values:string[]};
 /** files：上传后的附件 ID 以逗号分隔存入取值，用 moduleFileIds 读取。 */
 export type ModuleField = {key:string;label:string;type?:'text'|'number'|'date'|'month'|'datetime-local'|'select'|'choice'|'incoterm'|'textarea'|'checkbox'|'files';options?:Array<{value:string;label:string}>;/** choice：常用选项 + 手动填写；strict 时只能选列表内的值。 */strict?:boolean;required?:boolean;hint?:string;readonly?:boolean;min?:number;step?:number|string;when?:ModuleFieldCondition|ModuleFieldCondition[]};
 export type ModuleEditorSection = {id:string;label:string;description?:string;fields:string[]};
-export type ModuleEditorSpec = {title:string;description?:string;sections?:ModuleEditorSection[];fields:ModuleField[];initialValues:ModuleValues;submit:(values:ModuleValues)=>Promise<unknown>;submitLabel?:string;submitVariant?:'primary'|'danger'};
+export type ModuleEditorSpec = {title:string;description?:string;sections?:ModuleEditorSection[];fields:ModuleField[];initialValues:ModuleValues;submit:(values:ModuleValues)=>Promise<unknown>;submitLabel?:string;submitVariant?:'primary'|'danger';/** 跨字段业务前提（如来源条目的履约模式不允许此采购内容）：返回原因即阻止下一步与保存；服务端仍做同样校验。 */issue?:(values:ModuleValues)=>string};
 /** Domain-owned sections preserve the Mist T9 geometry without arbitrary six-field business boundaries.
  * Any unassigned fields remain visible in fallback sections; a partial declaration can never hide data. */
 /** Applicability only: authorization and transaction constraints remain server-owned. */
@@ -72,6 +72,7 @@ export function ModuleEditorDialog({spec,onClose,onSaved}:{spec:ModuleEditorSpec
   const submit=async()=>{
     if(!spec||disabled||lock.current)return;
     for(const f of visible){if(f.required&&(values[f.key]===undefined||String(values[f.key]).trim()==='')){setError('请填写'+f.label);return;}const invalid=selectError(f,values[f.key]);if(invalid){setError(invalid);return;}}
+    {const issue=spec.issue?.(values);if(issue){setError(issue);return;}}
     const converted=applicableValues(spec,values);for(const f of visible)if(f.type==='number'){
       if(converted[f.key]===''&&!f.required)continue; const n=Number(converted[f.key]);
       if(!Number.isFinite(n)||(f.min!==undefined&&n<f.min)){setError(f.label+'无效');return;}converted[f.key]=n;
@@ -184,7 +185,7 @@ export function ModuleEditorPage({spec,onClose}:{spec:ModuleEditorSpec;onClose:(
   const visible=moduleVisibleFields(spec,values),groups=moduleEditorSections(spec,values),shownStep=Math.min(step,groups.length-1);
   React.useEffect(()=>{setStep(previous=>Math.min(previous,groups.length-1));},[groups.length]);
   const current=groups[shownStep],last=shownStep===groups.length-1,blocked=busy||workspace.saving||!!workspace.pending||!!workspace.pendingCreate||recovery.completed;
-  const validate=(fields:ModuleField[])=>{for(const f of fields){if(f.required&&(values[f.key]===undefined||String(values[f.key]).trim()===''))return '请填写'+f.label;const invalid=selectError(f,values[f.key]);if(invalid)return invalid;if(f.type==='number'&&values[f.key]!==''&&values[f.key]!==undefined&&(!Number.isFinite(Number(values[f.key]))||(f.min!==undefined&&Number(values[f.key])<f.min)))return f.label+'无效';}return '';};
+  const validate=(fields:ModuleField[])=>{for(const f of fields){if(f.required&&(values[f.key]===undefined||String(values[f.key]).trim()===''))return '请填写'+f.label;const invalid=selectError(f,values[f.key]);if(invalid)return invalid;if(f.type==='number'&&values[f.key]!==''&&values[f.key]!==undefined&&(!Number.isFinite(Number(values[f.key]))||(f.min!==undefined&&Number(values[f.key])<f.min)))return f.label+'无效';}return spec.issue?.({...spec.initialValues,...values})||'';};
   const save=async()=>{if(blocked||lock.current)return;const problem=validate(visible);if(problem){setError(problem);return;}lock.current=true;setBusy(true);const converted=applicableValues(spec,values);for(const f of visible)if(f.type==='number'&&values[f.key]!==''&&values[f.key]!==undefined)converted[f.key]=Number(values[f.key]);try{await spec.submit(converted);if(live.current){onClose();toast('已保存');}}catch(e){if(live.current){recovery.failed(e);setError(e instanceof Error?e.message:'保存未完成');}}finally{if(live.current){lock.current=false;setBusy(false);}}};
   const set=(key:string,v:ModuleValue)=>{setValues(old=>({...old,[key]:v}));setError('');};
   return <MistPage><BackLink onClick={onClose}>{uiText("返回列表")}</BackLink><PageHeader  title={uiText(spec.title)}/>{recovery.completed?<Banner tone="ok" title={uiText("原操作已保存")}/>:error&&presentedError!==error&&<Banner tone="bad" title={uiText("未能保存")}>{uiText(error)}</Banner>}<div className="mist-wizard"><VerticalSteps current={String(shownStep)} onSelect={id=>{const target=Number(id);if(target<=step){setStep(target);setError('');}}} steps={groups.map((g,i)=>({id:String(i),label:g.label,done:i<step}))}/><Card>

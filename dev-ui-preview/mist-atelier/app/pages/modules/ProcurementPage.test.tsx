@@ -50,7 +50,7 @@ it('recognizes counted direct deliveries while keeping rejected goods awaiting r
   store.state=f.state;render(f.processingId);expect(host.textContent).toContain('1 笔已收 · 0 笔待收');
   expect(host.textContent).not.toContain('1 笔拒收待退');
 });
-beforeEach(()=>{session.id='buyer';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');store.state.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',currency:'USD'} as any);store.state.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',img:'coat',qty:100,unit:'件',price:10,made:0,qc:0});store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
+beforeEach(()=>{session.id='buyer';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');store.state.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',currency:'USD'} as any);store.state.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',img:'coat',qty:100,unit:'件',price:10,made:0,qc:0,fulfillmentMode:'trims_cmt',cmtIncludedItems:[]});store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();vi.useRealTimers();});
 
 it('shows isolated stock disposal on its source purchase only to an inventory reader',()=>{
@@ -70,6 +70,24 @@ it('offers garment supplies and processing without a fabric purchase shortcut',a
   const source=getByRole(host,'combobox',{name:'来源条目'}) as HTMLSelectElement;
   expect([...source.options].map(option=>option.value)).toEqual(['','line:l']);
   expect(content.value).toBe('');
+});
+
+it('stops at the first step when trims are bought for a pure CMT line or a CMT that already includes them',async()=>{
+  store.state!.market.suppliers=[{id:'s',name:'青禾辅料',status:'active'} as any];
+  const line=store.state!.orderLines[0];Object.assign(line,{fulfillmentMode:'cmt',cmtIncludedItems:[]});
+  render();await click(getAllByRole(host,'button',{name:'新建采购订单'})[0]);
+  const set=(name:string,value:string)=>{const el=getByRole(host,'combobox',{name}) as HTMLSelectElement;act(()=>{el.value=value;el.dispatchEvent(new Event('change',{bubbles:true}));});};
+  set('来源条目','line:l');set('采购内容','material:trims');set('供应商','s');
+  act(()=>{const d=getByRole(host,'textbox',{name:'采购品名'}) as HTMLInputElement;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(d,'纽扣');d.dispatchEvent(new Event('input',{bubbles:true}));});
+  await click(getByRole(host,'button',{name:'下一步'}));
+  expect(host.textContent).toContain('纯 CMT 不另行采购物料');
+  expect(getByRole(host,'textbox',{name:'采购品名'})).toBeTruthy();
+  Object.assign(line,{fulfillmentMode:'trims_cmt',cmtIncludedItems:['trims']});act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'procurement'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><ProcurementPage/></Nav.Provider></ToastProvider></MistRoot>));
+  await click(getByRole(host,'button',{name:'下一步'}));
+  expect(host.textContent).toContain('CMT 已包含此项，不能重复采购');
+  set('采购内容','material:packaging');await click(getByRole(host,'button',{name:'下一步'}));
+  expect(getByRole(host,'spinbutton',{name:'承诺数量'})).toBeTruthy();
+  expect(store.run).not.toHaveBeenCalled();
 });
 
 it('preserves the material category when editing and sends it with the purchase kind',async()=>{

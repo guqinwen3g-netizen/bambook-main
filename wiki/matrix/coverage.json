@@ -866,8 +866,9 @@
     "order.governance.closeLine",
     "order.governance.void"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机走查：已开票订单整单取消被拦并引导条目结案；无开票订单申请取消→主管在审批中心批准→已取消，编辑入口锁定"
   },
   {
    "id": "order-overship",
@@ -1027,9 +1028,9 @@
     "fulfillment.procurement.save",
     "fulfillment.procurement.submit"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "现有采购课程只走成衣全包"
+   "note": "现有采购课程只走成衣全包；2026-11-04 本机采购走查：面料订单面料采购四步建单（含入库前来料检验）→提交→主管批准→登记合同发出→供应商确认"
   },
   {
    "id": "purchase-cmt",
@@ -1091,9 +1092,9 @@
    "commands": [
     "fulfillment.procurement.receive"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "结算课程以已登记到货为前提，到货登记本身未成课"
+   "note": "结算课程以已登记到货为前提，到货登记本身未成课；2026-11-04 本机走查：部分到货 1200/1750 米入仓，登记缸号、色号、码单，批次待检锁定"
   },
   {
    "id": "receive-reject",
@@ -1114,8 +1115,9 @@
    "commands": [
     "fulfillment.procurement.rejectReceived"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机走查：到货时现场拒收 30 米并写明原因"
   },
   {
    "id": "receive-return",
@@ -1654,9 +1656,9 @@
     "fulfillment.qc.report",
     "fulfillment.qc.confirm"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "实施 Agent 已经 MCP 委托在本地演示种子走通，界面未走查"
+   "note": "实施 Agent 已经 MCP 委托在本地演示种子走通，界面未走查；2026-11-04 本机 QC 走查：来料检验认领→四分制验布（自动算分、判定允收）、色差缩率色牢度→提交确认→仓库放行入库解锁"
   },
   {
    "id": "qc-nok",
@@ -3051,9 +3053,9 @@
     "reports"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；PlatformReports.tsx:207"
+   "note": "只读；PlatformReports.tsx:207；2026-11-04 本机主管走查：按订单创建日 / 币种分列，确认后导出 CSV"
   },
   {
    "id": "report-margin",
@@ -3112,9 +3114,9 @@
     "reports"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读"
+   "note": "只读；2026-11-04 本机主管走查：按币种账龄分段与导出"
   },
   {
    "id": "report-order-progress",
@@ -3131,9 +3133,9 @@
     "reports"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读"
+   "note": "只读；2026-11-04 本机主管走查：逾期 / 临近 / 正常筛选与导出"
   },
   {
    "id": "data-center-overview",
