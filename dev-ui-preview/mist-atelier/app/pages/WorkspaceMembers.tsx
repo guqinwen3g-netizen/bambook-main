@@ -8,8 +8,9 @@ import { accountOwnedObjects, workspaceMembers } from '../runtime/members';
 import { useMistSession } from '../runtime/auth';
 import { useMistWorkspace } from '../runtime/workspace';
 import { MemberHandover } from './MemberHandover';
+import { businessWhen } from './modules/pageKit';
 
-const when = (at: string) => new Date(at).toLocaleString();
+const when = (at: string) => businessWhen(at);
 export function WorkspaceMembers({ busy: outerBusy }: { busy: boolean }) {
   const workspace = useMistWorkspace(), session = useMistSession();
   const envelope = workspace.workspace, state = workspace.state, owner = envelope?.access?.canManageMembers === true, company = envelope?.access?.companyLibrary === true, manager = envelope?.access?.canManageCompany ?? owner;

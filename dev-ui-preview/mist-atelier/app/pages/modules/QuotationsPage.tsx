@@ -21,6 +21,7 @@ import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
 import { FileName, PreviewButton } from '../../runtime/files';
+import { businessWhen } from './pageKit';
 
 /** 报价金额是十进制字符串；只在显示时加千分位，导出与计算仍用原值。 */
 const quoteMoney = (value: string) => { const n = Number(value); return value && Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : value; };
@@ -319,7 +320,7 @@ function QuotationDetail({ q, state, canMaintainCompany, all, day, me, can, canO
     <DetailBlock title={uiText("客户反馈记录")}><span>{q.feedback?.length||0} {uiText("条")}</span><Button onClick={()=>onOpen('quotations',q.id,{section:'feedback'})}>{uiText("查看客户反馈")}</Button></DetailBlock>
     <DetailBlock title={uiText("进度")}><Checklist items={track} /></DetailBlock>
     {!!(q.approvalHistory?.length || q.approval) && <DetailBlock title={uiText("审批记录")}>
-      <Timeline events={[...(q.approvalHistory || []), ...(q.approval ? [q.approval] : [])].reverse().map(a => ({ who: a.status === 'pending' ? '等待审批' : a.status === 'approved' ? '已批准' : '已退回', when: new Date(a.decidedAt || a.submittedAt).toLocaleString(), text: <>{a.note || (a.status === 'pending' ? '已提交，待指定审批人决定' : '—')}<br /><span className="mist-note">{a.details.filter(d => d.label === '金额' || d.label === '有效期').map(d => d.label + ' ' + d.value).join(' · ')}</span></> }))} />
+      <Timeline events={[...(q.approvalHistory || []), ...(q.approval ? [q.approval] : [])].reverse().map(a => ({ who: a.status === 'pending' ? '等待审批' : a.status === 'approved' ? '已批准' : '已退回', when: businessWhen(a.decidedAt || a.submittedAt), text: <>{a.note || (a.status === 'pending' ? '已提交，待指定审批人决定' : '—')}<br /><span className="mist-note">{a.details.filter(d => d.label === '金额' || d.label === '有效期').map(d => d.label + ' ' + d.value).join(' · ')}</span></> }))} />
     </DetailBlock>}
     <DetailBlock title={uiText("报价单文件")}>
       {missingIssuer && <div className="mist-col" style={{ gap: 8 }} data-quote-company-missing><Banner tone="warn" title={uiText("缺少公司抬头，暂不能生成报价单")}>{uiText(canMaintainCompany ? '在系统设置 → 公司资料中填写公司中文抬头并保存，回到本报价后即可生成；已生成的报价单不受影响。' : '公司资料由公司所有者维护，请联系所有者在系统设置 → 公司资料中补全。')}</Banner>{canMaintainCompany && <div className="mist-row"><Button size="sm" icon={Building2} onClick={() => onOpen('settings', q.id, { section: 'company' })}>{uiText("去维护公司资料")}</Button></div>}</div>}

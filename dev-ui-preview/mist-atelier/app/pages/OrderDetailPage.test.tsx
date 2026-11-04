@@ -422,10 +422,21 @@ it('BB-ORD-4 lets a started order change quantity, shows the floor and an impact
   expect(store.state!.orders[0].governance?.changeDraft?.lines[0].qty).toBe(8);expect(store.state!.orderLines[0].qty).toBe(10);
   const impact=getByRole(host,'region',{name:'影响清单'});
   expect(impact.textContent).toContain('10 → 8 件');expect(impact.textContent).toContain('需同步调整生产分配');
+  expect(impact.textContent).toContain('新数量生效后');expect(impact.textContent).not.toContain('交期');
   await act(async()=>within(impact).getByRole('button',{name:/生产 PR-1/}).click());
   expect(go).toHaveBeenLastCalledWith('production-board',undefined,{productionId:'job',orderLineId:lineId});
   await act(async()=>within(impact).getByRole('button',{name:/出运 SH-1/}).click());
   expect(go).toHaveBeenLastCalledWith('shipments','sh');
+});
+
+it('describes a due-date-only change as a date check, not a quantity change (impact list)',async()=>{
+  lineEditorFixture('approved',10,11);const state=store.state!,lineId=state.orderLines[0].id,g=state.orders[0].governance!;
+  state.productions.push({id:'job',code:'PR-1',orderId,lineId,order:state.orders[0].code,name:'精确金额条目',factory:'一厂',qty:10,due:'2026-11-20',pct:60,img:'coat',col:'sew'});
+  const current=state.orderLines.filter(l=>l.orderId===orderId).map(l=>({id:l.id,style:l.style,name:l.name,qty:l.qty,unit:l.unit,price:l.price})) as any;
+  g.changeDraft={contract:structuredClone(g.contract),orderPatch:{season:state.orders[0].season,currency:state.orders[0].currency,due:'2026-12-31'},lines:current,reason:'客户推迟交期',status:'draft'} as any;
+  render();
+  const impact=getByRole(host,'region',{name:'影响清单'});
+  expect(impact.textContent).toContain(`交期 ${state.orders[0].due} → 2026-12-31 生效后`);expect(impact.textContent).toContain('数量不变');expect(impact.textContent).not.toContain('新数量生效');
 });
 
 it.each([[980,'确认结案','closed','已结案（实际 980 / 订单 1000，客户接受实际数量）'],[950,'提交结案审批','pending','结案待审批（实际 950 / 订单 1000，客户接受实际数量）']] as const)('BB-ORD-5 closes a ±3%% line with %i departed (%s) via the line fulfillment panel',async(departed,submitLabel,status,label)=>{

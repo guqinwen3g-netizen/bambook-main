@@ -565,9 +565,9 @@
     "market.quotation.save",
     "market.quotation.costing.save"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "现有课程从已提交审批的报价开始，未覆盖新建与核价"
+   "note": "现有课程从已提交审批的报价开始，未覆盖新建与核价；2026-11-04 本机业务员走查：三步建报价（商业条件、条目带入档案成本与参考价、核对保存），条目核算显示毛利"
   },
   {
    "id": "quote-submit",
@@ -586,8 +586,9 @@
    "commands": [
     "market.quotation.submit"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机走查：低于成衣 15% 底价线须审批，提交后进主管审批"
   },
   {
    "id": "quote-approve",
@@ -632,8 +633,9 @@
     "market.quotation.decide",
     "market.quotation.save"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机走查：主管退回写明意见，业务员提价后重提并获批，审批记录保留两次"
   },
   {
    "id": "quote-send",
@@ -839,8 +841,9 @@
     "order.governance.submit",
     "order.governance.discardChange"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机走查：业务员改交期写原因→变更草稿与影响清单→提交→主管在审批中心批准→交期生效并给三个生产分支派交期核对待办（修正只改交期时影响清单仍写“新数量生效”）"
   },
   {
    "id": "order-cancel",
@@ -2002,8 +2005,9 @@
     "finance.reconcile",
     "finance.receivable.bankCharge"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机财务走查：导入退税到账水单（fin34 同次，人民币）"
   },
   {
    "id": "fx-settle",
@@ -2184,9 +2188,9 @@
    "commands": [
     "platform.assistant.saveDraft"
    ],
-   "impl": "unchecked",
+   "impl": "walked",
    "lessons": [],
-   "note": "模型可用性须按部署环境核对"
+   "note": "模型可用性须按部署环境核对；2026-11-04 本机以模拟模型走通引用记录→提问→回答→保存草稿，真实模型待配置后复走"
   },
   {
    "id": "work-assistant",
@@ -2278,9 +2282,9 @@
     "account"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "#577/#578 已合入 main，发布前复验发现签发问题已回退，修复后尚待发布；发布前不得写成员工可用"
+   "note": "#577/#578 已合入 main，发布前复验发现签发问题已回退，修复后尚待发布；发布前不得写成员工可用；2026-11-04 本机业务员走查：新建只读连接、续签、撤销（fin54）"
   },
   {
    "id": "agent-long-running",
@@ -2355,9 +2359,9 @@
    "commands": [
     "market.quotation.convert"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "OrderSourceDialog.tsx:71；与 quote-convert 同命令，入口不同"
+   "note": "OrderSourceDialog.tsx:71；与 quote-convert 同命令，入口不同；2026-11-04 本机走查：正式报价单生成、登记发送与客户接受后转订单；发现客户专属开发款可报给其他客户、到转单才被拒，已改为保存报价时即拦截"
   },
   {
    "id": "order-internal-inbox",
@@ -3007,9 +3011,9 @@
    "commands": [
     "team.nudge"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "TeamBoard.tsx:33，经 PlatformPages.tsx:119"
+   "note": "TeamBoard.tsx:33，经 PlatformPages.tsx:119；2026-11-04 本机主管走查：团队在手→成员抽屉→对订单督办（与 team-nudge 同次）"
   },
   {
    "id": "dashboard-weekly",
@@ -3027,9 +3031,9 @@
    "commands": [
     "team.weekly.archive"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "TeamBoard.tsx:147"
+   "note": "TeamBoard.tsx:147；2026-11-04 本机主管走查：上周周报生成并存档，按北京时间显示存档时间"
   },
   {
    "id": "report-sales",
@@ -3067,9 +3071,9 @@
     "reports"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；需毛利可见权限，PlatformReports.tsx:207"
+   "note": "只读；需毛利可见权限，PlatformReports.tsx:207；2026-11-04 本机老板走查：订单毛利口径与订单核算一致（fin37）"
   },
   {
    "id": "report-actual-cost",
@@ -3089,9 +3093,9 @@
     "cost.expense.payable",
     "cost.expense.void"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "OrderActualCostPanel.tsx，经 PlatformReports.tsx:235"
+   "note": "OrderActualCostPanel.tsx，经 PlatformReports.tsx:235；2026-11-04 本机老板走查：报表中心订单核算（fin37）"
   },
   {
    "id": "report-aging",
@@ -3443,9 +3447,9 @@
     "handover.account",
     "member.groups.set"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "WorkspaceMembers.tsx:31；MemberHandover.tsx:29"
+   "note": "WorkspaceMembers.tsx:31；MemberHandover.tsx:29；2026-11-04 本机所有者走查（与 handover 同次）"
   },
   {
    "id": "settings-activity",

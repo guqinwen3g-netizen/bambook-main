@@ -8,8 +8,9 @@ import { internalDeliveryTotals } from '../../../../server/src/shared/mistIntern
 import type { MistState } from '../../../../server/src/shared/mistWorkspace';
 import type { MistMemberOption } from '../runtime/members';
 import { useMistWorkspace } from '../runtime/workspace';
+import { businessWhen } from './modules/pageKit';
 
-const when = (at: string) => new Date(at).toLocaleString();
+const when = (at: string) => businessWhen(at);
 export function MemberHandover({ state, directory, busy: outerBusy }: { state: MistState; directory: MistMemberOption[]; busy: boolean }) {
   const workspace = useMistWorkspace();
   const [fromId, setFromId] = React.useState(''), [toId, setToId] = React.useState(''), [reason, setReason] = React.useState('');

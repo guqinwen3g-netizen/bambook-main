@@ -150,14 +150,24 @@ describe('market action audit regressions',()=>{
   expect(()=>run(s,{type:'market.quotation.status',payload:{id,status:'Sent',evidence:'仍未重审'}},ctx)).toThrow(/审批/);
   run(s,{type:'market.quotation.submit',payload:{id}},ctx);run(s,{type:'market.quotation.decide',payload:{id,decision:'approved',note:'新版已核对'}},{...ctx,actorId:'leader'});run(s,{type:'market.quotation.status',payload:{id,status:'Sent',evidence:'新版交付'}},ctx);expect(getMarketReviews(s).map(r=>r.status)).toEqual(['rejected','approved']);
  });
+ it('rejects quoting a customer-owned development (or its product) to another customer at save time',()=>{
+  const {ctx,s}=setup(),demo=createMistState(ctx);s.devs=demo.devs;s.versions=demo.versions;const v=s.versions.find(v=>v.qc?.result==='pass')!,dev=s.devs.find(d=>d.id===v.devId)!;
+  dev.customerId='someone-else';dev.customer='Cedar & Crown';
+  const p=run(s,{type:'market.product.fromVersion',payload:{devId:v.devId,versionId:v.id,sku:'VER-X'}},ctx).id!,unit=s.market.products.find(x=>x.id===p)!.unit,base=quoteInput(p);
+  const input={...base,lines:base.lines.map(l=>({...l,unit}))};
+  expect(()=>run(s,{type:'market.quotation.save',payload:{input}},ctx)).toThrow(/属于 Cedar & Crown，不能报给本报价客户/);
+  expect(s.market.quotations).toHaveLength(0);
+  dev.customerId='c';
+  expect(run(s,{type:'market.quotation.save',payload:{input}},ctx).id).toBeTruthy();
+ });
  it('takes product version provenance from the archive and rejects the wrong order family',()=>{
   const {ctx,s}=setup(),demo=createMistState(ctx);s.devs=demo.devs;s.versions=demo.versions;const v=s.versions.find(v=>v.qc?.result==='pass')!;
+  s.devs.find(d=>d.id===v.devId)!.customerId='c'; // 客户专属开发案只能报给该客户
   const p=run(s,{type:'market.product.fromVersion',payload:{devId:v.devId,versionId:v.id,sku:'VER-1'}},ctx).id!,base=quoteInput(p),id=run(s,{type:'market.quotation.save',payload:{input:{...base,lines:base.lines.map(l=>({...l,unit:s.market.products.find(x=>x.id===p)!.unit}))}}},ctx).id!;
   expect(s.market.quotations[0].lines[0]).toMatchObject({sourceDevId:v.devId,sourceVersionId:v.id});
   run(s,{type:'market.quotation.submit',payload:{id}},ctx);run(s,{type:'market.quotation.decide',payload:{id,decision:'approved',note:'已核对'}},{...ctx,actorId:'leader'});run(s,{type:'market.quotation.status',payload:{id,status:'Sent',evidence:'已交付'}},ctx);run(s,{type:'market.quotation.status',payload:{id,status:'Accepted',evidence:'已接受'}},ctx);
   expect(()=>run(s,{type:'market.quotation.convert',payload:{id,type:'fabric',due:'2026-12-01',ownerId:'sales'}},ctx)).toThrow(/类型与报价来源/);
   expect(()=>run(s,{type:'market.quotation.convert',payload:{id,type:'garment',due:'2026-12-01',ownerId:'sales'}},ctx)).toThrow(/尚无需求方确认|尚未获得需求方认可/);
-  s.devs.find(d=>d.id===v.devId)!.customerId=s.market.quotations[0].customerId; // 来源开发案须属于订单客户
   v.confirmations=[{id:'cf',result:'approved',confirmer:'客户',organization:'',confirmedAt:ctx.now,basis:'邮件',originalText:'',recordedAt:ctx.now,recordedBy:'业务员'}];
   const order=run(s,{type:'market.quotation.convert',payload:{id,type:'garment',due:'2026-12-01',ownerId:'sales'}},ctx);expect(s.orderLines.find(l=>l.orderId===order.orderId)).toMatchObject({sourceVersionId:v.id,sourceDevId:v.devId});
  });

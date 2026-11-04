@@ -404,7 +404,7 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, inve
       {customs.map(row => <span key={row.id} className="mist-note">{uiText("报关 ")}{row.code} · {status[row.status] || row.status}{uiText(row.declarationNo ? ` · ${row.declarationNo}` : '')}</span>)}
     </DetailBlock>
     <div className="mist-row mist-module-actions"><Button onClick={onSamples}>{uiText("处理本票船样")}</Button></div>
-    {!!s.documentDispatches?.length && <DetailBlock title={uiText("对客发送记录")}><Timeline events={s.documentDispatches.map(dispatch => ({ who: dispatch.actor, when: new Date(dispatch.at).toLocaleString(), text: '已登记发送：' + dispatch.documentIds.map(id => f.documents.find(row => row.id === id)?.number || '历史单据').join('、') }))} /></DetailBlock>}
+    {!!s.documentDispatches?.length && <DetailBlock title={uiText("对客发送记录")}><Timeline events={s.documentDispatches.map(dispatch => ({ who: dispatch.actor, when: businessWhen(dispatch.at), text: '已登记发送：' + dispatch.documentIds.map(id => f.documents.find(row => row.id === id)?.number || '历史单据').join('、') }))} /></DetailBlock>}
     {s.departureEvidence&&<RecordDisclosure title={s.mode === 'air' ? '起飞依据' : '离港依据'}>{s.departureEvidence}</RecordDisclosure>}<DetailBlock title={uiText("附件")}><RecordFiles key={s.id} ids={s.fileIds} /></DetailBlock>
     <RecordDisclosure title="处理记录"><Events entity="shipment" id={s.id} /></RecordDisclosure>
   </DetailBody>;
