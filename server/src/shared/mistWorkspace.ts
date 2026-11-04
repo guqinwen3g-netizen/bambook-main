@@ -1640,7 +1640,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
         if(amountMinor>Math.round(fromBalance*100))throw new MistCommandError('PRECONDITION','账户 '+from.code+' 余额只有 '+fromBalance.toFixed(2)+' '+from.currency+'，不能卖出 '+amount+' '+from.currency+'；请先把对应到账归属到该账户');
         const links=p.receipts===undefined?[]:settlementLinks(state,from,day,p.receipts,amountMinor,[]);
         records.push({...base,kind:'settlement',bankName:from.bankName,currency:from.currency,localCurrency:to.currency,localAmount,rate:mistFxRate(amount,localAmount),fromAccountId:from.id,toAccountId:to.id,...(lockId?{lockId}:{}),...(links.length?{receipts:links}:{})});
-        event(state,context,'finance',id,'登记结汇 '+code+'：'+from.code+' 卖出 '+amount+' '+from.currency+' → '+to.code+' 入账 '+localAmount+' '+to.currency+(lockId?'（交割锁汇 '+records.find(r=>r.id===lockId)!.code+'）':'')+(links.length?'，对应到账 '+links.map(l=>state.receipts.find(x=>x.id===l.receiptId)!.code).join('、'):''));
+        event(state,context,'finance',id,'登记结汇 '+code+'：'+from.code+' 卖出 '+amount+' '+from.currency+' → '+to.code+' 入账 '+localAmount+' '+to.currency+'，成交汇率 '+mistFxRate(amount,localAmount)+(lockId?'（交割 '+amount+' '+from.currency+'，锁汇合同 '+records.find(r=>r.id===lockId)!.ref+' / '+records.find(r=>r.id===lockId)!.code+'）':'')+(links.length?'，对应到账 '+links.map(l=>state.receipts.find(x=>x.id===l.receiptId)!.code).join('、'):''));
       }
       result={id};break;
     }

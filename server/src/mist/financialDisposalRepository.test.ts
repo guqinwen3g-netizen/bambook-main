@@ -17,7 +17,7 @@ it('shares a minimal financial handoff without warehouse access and checks curre
  f.state.payables!.settlements!.push({id:'settlement',purchaseId:f.purchaseId,state:'confirmed',receiptIds:[stock.receiptId]} as any);
  f.state.memberIds!.push('finance');auth.users.set('finance',{active:true,permissions:['invoices:read','vouchers:read','procurement:read']});
  const repo=new MistRepository(db,contract,new MistPrivateFiles(dir),auth.authorize,()=>new Date(f.context.now));const wid=(await repo.create(testActor(),{name:'test',seed:'empty'})).id;db.workspaces.get(wid).state=structuredClone(f.state);
- const a={...testActor('finance'),roles:[]},before=await repo.get(a,wid);expect(before.state.fulfillment.stockMovements).toEqual([]);expect(before.financialDisposals).toMatchObject([{returnId:returned,decision:'scrap',referenceAmount:272}]);
+ const a={...testActor('finance'),roles:[]},before=await repo.get(a,wid);expect(before.state.fulfillment.stockMovements).toEqual([]);expect(before.financialDisposals).toMatchObject([{returnId:returned,decision:'scrap',referenceAmount:272,settlementConfirmed:true,noRecovery:{actorId:'reviewer'}}]);
  expect(JSON.stringify(before.financialDisposals)).not.toContain('private warehouse');
  const cmd={requestId:'review-disposal',expectedRevision:0,command:{type:'payable.disposal.review' as const,payload:{returnId:returned,evidence:'No recovery agreed'}}};
  await expect(repo.execute(a,wid,cmd)).rejects.toMatchObject({status:403});auth.users.get('finance')!.permissions.push('invoices:reconcile');

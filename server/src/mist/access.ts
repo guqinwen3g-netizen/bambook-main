@@ -154,6 +154,18 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
     next.notifications = (next.notifications || []).filter(item => visibleTarget(item.target));
     next.calendar = (next.calendar || []).filter(item => visibleTarget(item.target));
   }
+  // Warehouse-only readers still need the outcome required to dispose their own visible lot.
+  // Expose only an action, not the hidden QC task, report, opinion or attachments.
+  if (!hidden.some(section => section.key === 'inventory')) {
+    next.fulfillment = {...next.fulfillment, stockMovements:(next.fulfillment.stockMovements || []).map(row => {
+      const {quarantineAction:_stale, ...safe} = row;
+      if (!row.quarantinedQuantity || row.quarantineDisposition || !hasScope(actor,'inventory:write')) return safe;
+      const task = state.fulfillment.qcTasks.find(task => task.id === row.quarantineTaskId && task.kind === 'quarantine' && task.quarantine?.returnId === row.id);
+      const report = task && state.fulfillment.qcReports.find(report => report.id === task.reportIds.at(-1) && report.taskId === task.id);
+      const action = task?.state === 'blocked' && report?.result === 'reject' ? 'dispose' : task?.state === 'reported' && report?.result === 'pass' ? 'release' : undefined;
+      return action ? {...safe,quarantineAction:action} : safe;
+    })};
+  }
   // 敏感字段 sensitive:tax_base：退税计税金额与供应商专票税额只给持码人；其余人按 0 返回并标 taxMasked，界面显示“已隐藏”。
   if (!hasScope(actor, 'sensitive:tax_base' as PermissionScope)) maskTaxBase(next);
   // Warehouse readers without payable access must not receive financial review evidence.

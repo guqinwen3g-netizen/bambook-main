@@ -148,13 +148,18 @@ export type PrepaymentMove = {
 export type PayableReversal = { id: string; kind: 'payment' | 'allocation'; targetId: string; parentId?: string; amount: number; currency: string; reason: string; at: string; actor: string };
 export type PayablesState = { bills: SupplierBill[]; payments: SupplierPayment[]; allocations: SupplierPaymentAllocation[]; plans?: PrepaymentPlan[]; requests?: PaymentRequest[]; reversals?: PayableReversal[]; settlements?: SupplierSettlement[]; deductions?: SupplierDeduction[]; prepaymentMoves?: PrepaymentMove[] };
 /** Minimal financial handoff; generated for an authorized reader, never persisted in the response state. */
-export type FinancialDisposalView = {returnId:string;purchaseId:string;purchaseCode:string;supplier:string;quantity:number;unit:string;currency:string;referenceAmount:number;decision:'supplierReturn'|'scrap';disposalEvidence:string;report:string;noRecovery?:{actor:string;evidence:string};review?:{id:string;actor:string;at:string;evidence:string}};
+export type FinancialDisposalView = {returnId:string;purchaseId:string;purchaseCode:string;supplier:string;quantity:number;unit:string;currency:string;referenceAmount:number;decision:'supplierReturn'|'scrap';disposalEvidence:string;report:string;receiptId?:string;settlementConfirmed?:boolean;disposedAt?:string;noRecovery?:{actor:string;evidence:string;actorId?:string;at?:string};review?:{id:string;actor:string;at:string;evidence:string}};
+/** 批次级结算前提；投影携带服务端判定，财务无需获得仓库读取权限。 */
+export function disposalReviewBlocker(state: MistState, record: {purchaseId:string;receiptId?:string;settlementConfirmed?:boolean}): string {
+ const confirmed = record.settlementConfirmed ?? (!!record.receiptId && (state.payables?.settlements || []).some(row => row.purchaseId === record.purchaseId && row.state === 'confirmed' && row.receiptIds.includes(record.receiptId!)));
+ return confirmed ? '' : '待结算确认';
+}
 export function financialDisposalViews(root:MistState, visiblePurchases:ReadonlySet<string>):FinancialDisposalView[] {
  const f=root.fulfillment;if(!f)return [];
  return f.stockMovements.flatMap(row=>{const d=row.quarantineDisposition,stock=f.stock.find(x=>x.id===row.stockId),p=stock&&f.purchases.find(x=>x.id===stock.purchaseId);
   if(!d||d.decision==='release'||!row.quarantinedQuantity||!p||!visiblePurchases.has(p.id))return [];
   const report=f.qcReports.find(r=>r.id===d.reportId),review=d.financeReviews?.slice().reverse().find(r=>!r.reversed);
-  return [{returnId:row.id,purchaseId:p.id,purchaseCode:p.code,supplier:p.supplier,quantity:row.quarantinedQuantity,unit:stock!.unit,currency:p.currency,referenceAmount:Math.round(row.quarantinedQuantity*p.price*100)/100,decision:d.decision,disposalEvidence:d.evidence,report:report?.report||'',...(d.noRecoveryDecision?{noRecovery:{actor:d.noRecoveryDecision.actor,evidence:d.noRecoveryDecision.evidence}}:{}),...(review?{review:{id:review.id,actor:review.actor,at:review.at,evidence:review.evidence}}:{})}];
+  return [{returnId:row.id,purchaseId:p.id,purchaseCode:p.code,supplier:p.supplier,quantity:row.quarantinedQuantity,unit:stock!.unit,currency:p.currency,referenceAmount:Math.round(row.quarantinedQuantity*p.price*100)/100,decision:d.decision,disposalEvidence:d.evidence,report:report?.report||'',receiptId:stock!.receiptId,settlementConfirmed:!disposalReviewBlocker(root,{purchaseId:p.id,receiptId:stock!.receiptId}),disposedAt:d.at,...(d.noRecoveryDecision?{noRecovery:{actor:d.noRecoveryDecision.actor,evidence:d.noRecoveryDecision.evidence,actorId:d.noRecoveryDecision.actorId,at:d.noRecoveryDecision.at}}:{}),...(review?{review:{id:review.id,actor:review.actor,at:review.at,evidence:review.evidence}}:{})}];
  });
 }
 type AllocationInput = Array<{ billId: string; amount: number }>;
@@ -705,7 +710,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       if(d!.financeReviews?.some(r=>!r.reversed))fail('该批次已核对','CONFLICT');
       if(!d!.noRecoveryDecision)fail('请先由负责人确认不追偿');
       const stock=root.fulfillment.stock.find(x=>x.id===row.stockId), purchase=root.fulfillment.purchases.find(x=>x.id===stock?.purchaseId);
-      if(!purchase||!stock?.receiptId||!s.settlements.some(x=>x.purchaseId===purchase.id&&x.state==='confirmed'&&x.receiptIds.includes(stock.receiptId!)))fail('请先核对该批次对应的已确认结算');
+      if(!purchase||!stock?.receiptId||!!disposalReviewBlocker(root,{purchaseId:purchase.id,receiptId:stock.receiptId}))fail('请先核对该批次对应的已确认结算');
       if(!c.actorId)fail('缺少财务经办人');
       if(c.actorId===d!.noRecoveryDecision!.actorId)fail('负责人不能复核自己的不追偿决定','FORBIDDEN');
       const evidence=text(p.evidence,'无补偿核对依据',true,1000),id=c.id();

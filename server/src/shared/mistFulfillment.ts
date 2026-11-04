@@ -324,6 +324,8 @@ export type FulfillmentStockMovement = {
     /** Rejected part frozen at return time; explicit 0 means accepted surplus, absent preserves legacy interpretation. Not available until disposed. */
     quarantinedQuantity?: number;
     quarantineTaskId?: string;
+    /** Response-only warehouse handoff; never grants access to the QC report. */
+    quarantineAction?: 'release' | 'dispose';
     quarantineDisposition?: { decision: 'release' | 'supplierReturn' | 'scrap'; taskId: string; reportId: string; movementId: string; evidence: string; actor: string; at: string; noRecoveryDecision?: {actorId:string;actor:string;at:string;evidence:string}; noRecoveryHistory?: Array<{actorId:string;actor:string;at:string;evidence:string;revokedAt:string;revokedBy:string;reason:string}>; financeReviews?: Array<{ id:string; outcome:'noRecovery'; evidence:string; actorId:string; actor:string; at:string; reversed?:{actorId:string;actor:string;at:string;reason:string} }> };
     quarantineReturnId?: string;
     /** Explicitly reconciled physical issue; independent of shipment documents. */

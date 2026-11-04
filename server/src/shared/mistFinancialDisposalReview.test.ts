@@ -1,6 +1,6 @@
 import {expect,it} from 'vitest';
 import {materialDeliveryFixture} from '../mist/__tests__/materialDelivery';
-import {financialDisposalViews} from './mistPayables';
+import {disposalReviewBlocker,financialDisposalViews} from './mistPayables';
 import {mistCommandPermission} from './mistWorkspace';
 
 function fixture(){
@@ -32,7 +32,20 @@ it('confirms no recovery once, without creating another expense or altering any 
 });
 it('requires actual disposition and an established settlement before financial review',()=>{
  const {f,returned}=fixture();f.state.payables!.settlements=[];
+ const row=f.state.fulfillment.stockMovements.find(r=>r.id===returned)!,stock=f.state.fulfillment.stock.find(s=>s.id===row.stockId)!;
+ const record={purchaseId:f.purchaseId,receiptId:stock.receiptId};
+ expect(disposalReviewBlocker(f.state,record)).toBe('待结算确认');
+ expect(financialDisposalViews(f.state,new Set([f.purchaseId]))[0].settlementConfirmed).toBe(false);
  expect(()=>f.run({type:'payable.disposal.review',payload:{returnId:returned,evidence:'No recovery'}})).toThrow('已确认结算');
+ f.state.payables.settlements!.push({id:'wrong',purchaseId:f.purchaseId,state:'confirmed',receiptIds:['other-batch']} as any);
+ expect(disposalReviewBlocker(f.state,record)).toBe('待结算确认');
+ f.state.payables.settlements![0].receiptIds=[stock.receiptId!];
+ expect(disposalReviewBlocker(f.state,record)).toBe('');
+ const projection=financialDisposalViews(f.state,new Set([f.purchaseId]))[0];
+ expect(projection.settlementConfirmed).toBe(true);
+ const hidden=structuredClone(f.state);hidden.fulfillment.stock=[];hidden.fulfillment.stockMovements=[];hidden.payables.settlements=[];
+ expect(disposalReviewBlocker(hidden,projection)).toBe('');
+ f.state.payables.settlements![0].state='reversed';expect(disposalReviewBlocker(f.state,record)).toBe('待结算确认');
 });
 it('requires a separate manager decision and disallows self-review',()=>{
  const {f,returned}=fixture();

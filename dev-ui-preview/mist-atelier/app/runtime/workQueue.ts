@@ -1,5 +1,5 @@
 import { uiText, ui, localizedPageTitle } from '../../../../services/interfaceLanguage';
-import { isPendingFinanceMistInvoice, mistMoneyMinor, MIST_LOGISTICS_DUTY, type MistState, type MistTarget, type MistTask } from '../../../../server/src/shared/mistWorkspace';
+import { isPendingFinanceMistInvoice, mistFxLockUsage, mistMoneyMinor, MIST_LOGISTICS_DUTY, type MistState, type MistTarget, type MistTask } from '../../../../server/src/shared/mistWorkspace';
 import type { MistReview } from './reviews';
 import { addBusinessDays, pendingWeeklyArchive } from '../../../../server/src/shared/mistTeam';
 import { shipmentStage } from './shipmentStage';
@@ -7,7 +7,7 @@ import { advanceBalances } from '../../../../server/src/shared/mistOrderFunding'
 import { financeReceiptDisplay } from './financeReceiptDisplay';
 import { materialDeliveryRows, materialReceiverIds } from '../../../../server/src/shared/mistInternalFabric';
 import { developmentVersionSamples } from '../../../../server/src/shared/mistDevelopmentSamples';
-import { SETTLEMENT_SCOPES, PAYMENT_REQUEST_SCOPES, settlementReceipts, purchaseRequiresSettlementLink, shortClosureBlocker, purchasePrepaymentReadback, payableBills, billRequestedUnpaidMinor, prepaymentPlans } from '../../../../server/src/shared/mistPayables';
+import { disposalReviewBlocker, financialDisposalViews, type FinancialDisposalView, SETTLEMENT_SCOPES, PAYMENT_REQUEST_SCOPES, settlementReceipts, purchaseRequiresSettlementLink, shortClosureBlocker, purchasePrepaymentReadback, payableBills, billRequestedUnpaidMinor, prepaymentPlans } from '../../../../server/src/shared/mistPayables';
 import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
 import { businessDate } from './businessClock';
 import { quotationPendingLines } from '../../../../server/src/shared/mistQuotationLineConversion';
@@ -23,6 +23,7 @@ export type MistWorkSource = 'review' | 'agent' | 'qc' | 'shipping' | 'finance' 
 export type MistWorkItem = { id: string; source: MistWorkSource; sourceLabel: string; title: string; meta: string; when: string; urgent: boolean; at: string; due?: string; target: MistTarget & { detail?: 'full' }; module: string };
 export const MIST_WORK_SOURCE_LABEL: Record<MistWorkSource, string> = { review: '待我审批', agent: 'Agent 提议', qc: 'QC', shipping: '出运', finance: '财务', report: '周报', material: '物料', task: '工作事项', calendar: '日程提醒' };
 export type MistWorkOptions = {
+  financialDisposals?: FinancialDisposalView[];
   canRead: CanRead; me: string; today: string; reviews?: MistReview[];
   /** 当前业务时刻（ISO），用于日程提醒；不传时不出提醒。 */
   now?: string;
@@ -172,6 +173,38 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
         meta: [source.code, `${row.pending} ${uiText(row.unit)}`, row.delivery.supplier].join(' · '), when: '待接收', urgent: false, at: row.at,
         target: { view: 'procurement', id: contract.id, detail: 'full', section: 'order:' + row.delivery.orderId, orderLineId: row.delivery.lineId } });
     }
+  }
+  // Physical disposal and recovery decisions belong to the warehouse/manager, not QC.
+  if (canRead('inventory')) for (const row of f.stockMovements || []) {
+    if (!row.quarantinedQuantity) continue;
+    const stock = f.stock.find(stock => stock.id === row.stockId), disposition = row.quarantineDisposition;
+    if (!stock) continue;
+    const task = f.qcTasks.find(task => task.id === row.quarantineTaskId);
+    const report = task && f.qcReports.find(report => report.id === task.reportIds.at(-1));
+    const inspect = !disposition && !row.quarantineTaskId && can('inventory:write');
+    const failed = row.quarantineAction === 'dispose' || task?.state === 'blocked' && report?.result === 'reject';
+    const passed = row.quarantineAction === 'release' || task?.state === 'reported' && report?.result === 'pass';
+    const dispose = !disposition && can('inventory:write') && (failed || passed);
+    const decide = disposition && disposition.decision !== 'release' && !disposition.noRecoveryDecision && can('aftersales:approve');
+    if (!inspect && !dispose && !decide) continue;
+    const action = inspect ? '待送复检' : decide ? '待追偿决定' : passed ? '待恢复可用' : '待处置';
+    push({ id:'quarantine:'+row.id, source:'material', title:`${f.purchases.find(purchase => purchase.id === stock.purchaseId)?.code || stock.id} · ${uiText(action)}`, meta:[stock.name,`${row.quarantinedQuantity} ${stock.unit}`].join(' · '), when:action, urgent:!!dispose && failed, at:disposition?.at || row.at,
+      target:{view:'inventory',id:stock.id,detail:'full'} });
+  }
+  if (canRead('payment-vouchers') && canRead('procurement') && can('invoices:read') && can('vouchers:read') && can('procurement:read') && can(MIST_FINANCE_SCOPES.reconcile)) {
+    const disposals = options.financialDisposals ?? financialDisposalViews(state, new Set((f.purchases || []).map(row => row.id)));
+    for (const row of disposals) {
+      if (!row.noRecovery || row.review || !me || row.noRecovery.actorId === me) continue;
+      const blocker = disposalReviewBlocker(state, row);
+      push({ id:'disposal-review:'+row.returnId, source:'finance', title:`${row.purchaseCode} · ${uiText('退料核对')}`, meta:[row.supplier,blocker && uiText(blocker)].filter(Boolean).join(' · '), when:blocker || '待核对', urgent:false, at:row.noRecovery.at || row.disposedAt || '',
+        target:{view:'payment-vouchers',id:blocker ? row.purchaseId : row.returnId,section:'payables'} });
+    }
+  }
+  if (canRead('payment-vouchers') && can('vouchers:read') && can(MIST_FINANCE_SCOPES.voucher)) for (const lock of state.fxRecords || []) {
+    if (lock.kind !== 'lock' || lock.reversed) continue;
+    const remaining = mistFxLockUsage(state, lock.id).remaining;
+    if (remaining <= 0) continue;
+    push({id:'fx-lock:'+lock.id,source:'finance',title:`${lock.ref} · ${remaining.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} ${lock.currency}`,meta:lock.bankName,when:lock.settleBy || '',urgent:!!lock.settleBy && lock.settleBy <= addDays(today,3),at:lock.createdAt,due:lock.settleBy,target:{view:'payment-vouchers',id:lock.id,section:'accounts'}});
   }
   if (canRead('qc-workbench')) for (const task of state.fulfillment.qcTasks) {
     // 待认领/检验中只给专业 QC（qc:inspect，且有该业务线登记权）；业务主管虽有登记权但不是检验岗。
