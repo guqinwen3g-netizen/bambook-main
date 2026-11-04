@@ -241,7 +241,7 @@ export class MistRepository {
   private async authorizeCompoundCommand(db: any, prior: TokenPayload, command?: MistCommand) {
     if (command?.type === 'email.server.analysis') await this.authorize(db, prior, 'ai:chat');
     if (command?.type === 'email.server.analysis' || command?.type.startsWith('email.extraction.')) await this.authorize(db, prior, 'emails:read');
-    if(command?.type==='fulfillment.inventory.quarantine.noRecovery'||command?.type==='fulfillment.inventory.quarantine.noRecovery.revoke')await this.authorize(db,prior,'inventory:read');
+    if(command?.type==='fulfillment.inventory.quarantine.recovery'||command?.type==='fulfillment.inventory.quarantine.recovery.revoke'||command?.type==='fulfillment.inventory.quarantine.noRecovery'||command?.type==='fulfillment.inventory.quarantine.noRecovery.revoke')await this.authorize(db,prior,'inventory:read');
     if (command?.type.startsWith('payable.')) for (const scope of payablesCommandPermissions(command as any).slice(1)) await this.authorize(db, prior, scope);
     if (command?.type.startsWith('market.')) for (const scope of marketCommandExtraPermissions(command)) await this.authorize(db, prior, scope);
     if (command?.type.startsWith('rebate.')) for (const scope of exportRebateExtraPermissions(command)) {

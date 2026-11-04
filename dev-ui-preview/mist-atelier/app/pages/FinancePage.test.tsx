@@ -3,6 +3,7 @@ import React,{act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 import {getByRole,getAllByRole,getByText,getAllByText,getByLabelText,queryByRole} from '@testing-library/dom';
+import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
 import {MistRoot,ToastProvider} from '../../../../components/mist';
 import {createMistState,applyMistCommand} from '../../../../server/src/shared/mistWorkspace';
 import {platformBusinessDate} from '../../../../server/src/shared/mistPlatform';
@@ -97,6 +98,11 @@ it('reverses an allocation only with a written reason and keeps the reversed rec
  expect(store.value.run).toHaveBeenLastCalledWith({type:'finance.allocation.reverse',payload:{allocationId:expect.any(String),reason:'核错发票'}});
  expect(store.value.state.allocations).toHaveLength(0);expect(store.value.state.receipts[0].remaining).toBe(50);expect(store.value.state.invoices[0].open).toBe(100);render();
  expect(host.textContent).toContain('核错发票');expect(host.textContent).toContain('已冲回');
+});
+it('hides allocation reversal from a reader without reconcile permission',async()=>{
+ render();await act(async()=>getByRole(host,'radio',{name:/INV-EUR/}).click());input('本次核销金额','20');await click('确认核销');
+ store.value.denied=new Set([MIST_FINANCE_SCOPES.reconcile]);render();
+ expect(queryByRole(host,'button',{name:'核销冲回'})).toBeNull();expect(getAllByRole(host,'button',{name:'查看核销票据'}).length).toBeGreaterThan(0);
 });
 it('reverses a finance voucher with a counter voucher and blocks supplier-payment vouchers',async()=>{
  store.value.state.payments=[{id:'manual',code:'PAY-M',date:today(),payee:'物流商',amount:25,currency:'EUR',ref:'m',origin:'finance'},{id:'supplier',code:'PAY-S',date:today(),payee:'工厂',amount:9,currency:'EUR',ref:'s'}];

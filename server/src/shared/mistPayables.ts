@@ -121,7 +121,7 @@ export type PaymentRequest = {
 };
 /** 结算争议 / 未确认扣款：单列记录，不自动抵减。 */
 /** qcDispositionId: carried from a production QC chargeback (mistQcDisposition) rather than typed by hand. */
-export type SettlementDispute = { description: string; amount: number; qcDispositionId?: string; returnId?: string; overLoss?: boolean };
+export type SettlementDispute = { description: string; amount: number; qcDispositionId?: string; quarantineRecoveryId?: string; returnId?: string; overLoss?: boolean };
 /** 供应商结算：业务员按实际收货提交，财务复核确认；确认时决定预付抵扣。 */
 export type SupplierSettlement = {
   id: string; code: string; purchaseId: string; purchaseCode: string; supplierId: string; supplier: string; currency: string;
@@ -148,13 +148,27 @@ export type PrepaymentMove = {
 export type PayableReversal = { id: string; kind: 'payment' | 'allocation'; targetId: string; parentId?: string; amount: number; currency: string; reason: string; at: string; actor: string };
 export type PayablesState = { bills: SupplierBill[]; payments: SupplierPayment[]; allocations: SupplierPaymentAllocation[]; plans?: PrepaymentPlan[]; requests?: PaymentRequest[]; reversals?: PayableReversal[]; settlements?: SupplierSettlement[]; deductions?: SupplierDeduction[]; prepaymentMoves?: PrepaymentMove[] };
 /** Minimal financial handoff; generated for an authorized reader, never persisted in the response state. */
-export type FinancialDisposalView = {returnId:string;purchaseId:string;purchaseCode:string;supplier:string;quantity:number;unit:string;currency:string;referenceAmount:number;decision:'supplierReturn'|'scrap';disposalEvidence:string;report:string;noRecovery?:{actor:string;evidence:string};review?:{id:string;actor:string;at:string;evidence:string}};
+export type FinancialDisposalView = {returnId:string;purchaseId:string;purchaseCode:string;supplier:string;quantity:number;unit:string;currency:string;referenceAmount:number;decision:'supplierReturn'|'scrap'|'recovery'|'noRecovery';decisionAmount?:number;disposalDecision?:'supplierReturn'|'scrap';recovery?:{id:string;actorId:string;actor:string;at:string;amount:number;currency:string;reason:string};disposalEvidence:string;report:string;receiptId?:string;settlementConfirmed?:boolean;disposedAt?:string;noRecovery?:{actor:string;evidence:string;actorId?:string;at?:string};review?:{id:string;actor:string;at:string;evidence:string}};
+/** 批次级结算前提；投影携带服务端判定，财务无需获得仓库读取权限。 */
+export function disposalReviewBlocker(state: MistState, record: {purchaseId:string;receiptId?:string;settlementConfirmed?:boolean}): string {
+ const confirmed = record.settlementConfirmed ?? (!!record.receiptId && (state.payables?.settlements || []).some(row => row.purchaseId === record.purchaseId && row.state === 'confirmed' && row.receiptIds.includes(record.receiptId!)));
+ return confirmed ? '' : '待结算确认';
+}
 export function financialDisposalViews(root:MistState, visiblePurchases:ReadonlySet<string>):FinancialDisposalView[] {
  const f=root.fulfillment;if(!f)return [];
- return f.stockMovements.flatMap(row=>{const d=row.quarantineDisposition,stock=f.stock.find(x=>x.id===row.stockId),p=stock&&f.purchases.find(x=>x.id===stock.purchaseId);
+ return (f.stockMovements||[]).flatMap(row=>{const d=row.quarantineDisposition,stock=(f.stock||[]).find(x=>x.id===row.stockId),p=stock&&(f.purchases||[]).find(x=>x.id===stock.purchaseId);
   if(!d||d.decision==='release'||!row.quarantinedQuantity||!p||!visiblePurchases.has(p.id))return [];
-  const report=f.qcReports.find(r=>r.id===d.reportId),review=d.financeReviews?.slice().reverse().find(r=>!r.reversed);
-  return [{returnId:row.id,purchaseId:p.id,purchaseCode:p.code,supplier:p.supplier,quantity:row.quarantinedQuantity,unit:stock!.unit,currency:p.currency,referenceAmount:Math.round(row.quarantinedQuantity*p.price*100)/100,decision:d.decision,disposalEvidence:d.evidence,report:report?.report||'',...(d.noRecoveryDecision?{noRecovery:{actor:d.noRecoveryDecision.actor,evidence:d.noRecoveryDecision.evidence}}:{}),...(review?{review:{id:review.id,actor:review.actor,at:review.at,evidence:review.evidence}}:{})}];
+  const report=(f.qcReports||[]).find(r=>r.id===d.reportId),review=d.financeReviews?.slice().reverse().find(r=>!r.reversed);
+  return [{returnId:row.id,purchaseId:p.id,purchaseCode:p.code,supplier:p.supplier,quantity:row.quarantinedQuantity,unit:stock!.unit,currency:p.currency,referenceAmount:Math.round(row.quarantinedQuantity*p.price*100)/100,decision:d.recoveryDecision?'recovery':d.noRecoveryDecision?'noRecovery':d.decision,decisionAmount:d.recoveryDecision?.amount ?? (d.noRecoveryDecision?0:undefined),disposalDecision:d.decision,...(d.recoveryDecision?{recovery:{...d.recoveryDecision}}:{}),disposalEvidence:d.evidence,report:report?.report||'',receiptId:stock!.receiptId,settlementConfirmed:!disposalReviewBlocker(root,{purchaseId:p.id,receiptId:stock!.receiptId}),disposedAt:d.at,...(d.noRecoveryDecision?{noRecovery:{actor:d.noRecoveryDecision.actor,evidence:d.noRecoveryDecision.evidence,actorId:d.noRecoveryDecision.actorId,at:d.noRecoveryDecision.at}}:{}),...(review?{review:{id:review.id,actor:review.actor,at:review.at,evidence:review.evidence}}:{})}];
+ });
+}
+/** Pending/confirmed settlements reserve the decision; cancellation, return and reversal release it. */
+export function openQuarantineRecoveries(root:MistState,purchaseId:string) {
+ const carried=new Set((root.payables?.settlements||[]).filter(s=>s.state==='pending'||s.state==='confirmed').flatMap(s=>s.disputes.map(d=>d.quarantineRecoveryId)));
+ const f=root.fulfillment,purchase=f.purchases.find(p=>p.id===purchaseId);
+ return f.stockMovements.flatMap(row=>{
+  const decision=row.quarantineDisposition?.recoveryDecision,stock=f.stock.find(s=>s.id===row.stockId);
+  return decision&&stock?.purchaseId===purchaseId&&decision.currency===purchase?.currency&&!carried.has(decision.id)?[decision]:[];
  });
 }
 type AllocationInput = Array<{ billId: string; amount: number }>;
@@ -703,14 +717,15 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       const row=root.fulfillment.stockMovements.find(m=>m.id===text(p.returnId,'隔离退回')) || fail('隔离退回不存在','NOT_FOUND'), d=row.quarantineDisposition;
       if(!d || d.decision==='release' || !row.quarantinedQuantity)fail('该批次尚无退供或报废记录');
       if(d!.financeReviews?.some(r=>!r.reversed))fail('该批次已核对','CONFLICT');
-      if(!d!.noRecoveryDecision)fail('请先由负责人确认不追偿');
+      const decision=d!.recoveryDecision||d!.noRecoveryDecision;
+      if(!decision)fail('请先由负责人确认追偿或不追偿');
       const stock=root.fulfillment.stock.find(x=>x.id===row.stockId), purchase=root.fulfillment.purchases.find(x=>x.id===stock?.purchaseId);
-      if(!purchase||!stock?.receiptId||!s.settlements.some(x=>x.purchaseId===purchase.id&&x.state==='confirmed'&&x.receiptIds.includes(stock.receiptId!)))fail('请先核对该批次对应的已确认结算');
+      if(!purchase||!stock?.receiptId||!!disposalReviewBlocker(root,{purchaseId:purchase.id,receiptId:stock.receiptId}))fail('请先核对该批次对应的已确认结算');
       if(!c.actorId)fail('缺少财务经办人');
-      if(c.actorId===d!.noRecoveryDecision!.actorId)fail('负责人不能复核自己的不追偿决定','FORBIDDEN');
-      const evidence=text(p.evidence,'无补偿核对依据',true,1000),id=c.id();
-      (d!.financeReviews ||= []).push({id,outcome:'noRecovery',evidence,actorId:c.actorId!,actor:c.actorName,at:c.now});
-      event(root,c,purchase.id,`隔离料财务核对：${d!.decision==='scrap'?'报废':'退供'} ${row.quarantinedQuantity} ${stock!.unit}，确认无补偿；原结算不变`);
+      if(c.actorId===decision!.actorId)fail('负责人不能复核自己的追偿决定','FORBIDDEN');
+      const evidence=text(p.evidence,'退料核对依据',true,1000),id=c.id();
+      (d!.financeReviews ||= []).push({id,outcome:d!.recoveryDecision?'recovery':'noRecovery',evidence,actorId:c.actorId!,actor:c.actorName,at:c.now});
+      event(root,c,purchase.id,`隔离料财务核对：${d!.decision==='scrap'?'报废':'退供'} ${row.quarantinedQuantity} ${stock!.unit}，${d!.recoveryDecision?`追偿 ${d!.recoveryDecision.amount} ${d!.recoveryDecision.currency}`:'确认无补偿；原结算不变'}`);
       return {id};
     }
     case 'payable.disposal.reverse': {
@@ -1011,6 +1026,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       const disputes: SettlementDispute[] = ((p.disputes || []) as SettlementDispute[]).map(d => ({ description: text(d?.description, '争议 / 扣款说明', true, 500), amount: major(minor(d?.amount, '争议 / 扣款金额')) }));
       // Production QC chargebacks against this contract are carried automatically so finance reviews them with the settlement.
       for (const c of openQcChargebacks(root, po.id)) disputes.push({ description: `QC 扣款：${c.note}`, amount: c.amount!, qcDispositionId: c.id });
+      for (const recovery of openQuarantineRecoveries(root, po.id)) disputes.push({description:`隔离料追偿：${recovery.reason}`,amount:recovery.amount,quarantineRecoveryId:recovery.id});
       for (const r of openReturnCharges(root, po.id)) disputes.push({ description: r.description, amount: r.amount, returnId: r.id });
       // P1-1 超耗扣款：染整加工单的最终结算带出超约定损耗的来料货值，财务复核时决定是否扣。
       { const b = final ? fabricStageBalance(root, po.id) : null; if (b?.lossCost && b.lossCost.overAmount > 0 && !s.settlements.some(x => x.purchaseId === po.id && (x.state === 'pending' || x.state === 'confirmed') && x.disputes.some(d => d.overLoss))) disputes.push({ description: `超耗扣款：实际损耗 ${b.lossPercent}%，约定 ${b.agreedLossPercent}%，超出 ${b.lossCost.overQuantity} ${b.unit}`, amount: b.lossCost.overAmount, overLoss: true }); }

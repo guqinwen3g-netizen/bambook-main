@@ -150,6 +150,28 @@ it('shows failed quarantine disposal choices and records their evidence on the e
   expect(store.run).toHaveBeenCalledWith({type:'fulfillment.inventory.quarantine.dispose',payload:{returnId:ret,decision:'supplierReturn',evidence:'模拟供应商确认收回'}});
 });
 
+it('lets the owner choose recovery with the scrap reference amount prefilled and editable, or no recovery',async()=>{
+  const f=materialDeliveryFixture(20); f.context.members!.push({id:'qc',name:'QC',active:true,groups:[]});const id=f.issue(20);
+  f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id,acceptedQuantity:16,rejectedQuantity:4,expectedReceivingRevision:0,evidence:'Counted'}},'garment');
+  const ret=f.run({type:'fulfillment.inventory.move',payload:{id:f.state.fulfillment.stock[0].id,kind:'return',issueId:id,quantity:4,location:'Hold A',person:'factory',note:'Rejected'}}).id!;
+  const task=f.run({type:'fulfillment.inventory.quarantine.request',payload:{returnId:ret,due:'2026-10-24'}}).id!;
+  f.run({type:'fulfillment.qc.claim',payload:{id:task,domain:'fabric'}},'qc');
+  f.run({type:'fulfillment.qc.report',payload:{id:task,domain:'fabric',result:'reject',report:'FAIL-1',opinion:'Defect',location:'Hold A',reviewedAt:f.context.now,measurements:[],fileIds:[]}},'qc');
+  f.run({type:'fulfillment.inventory.quarantine.dispose',payload:{returnId:ret,decision:'scrap',evidence:'Scrapped'}});
+  const purchase=f.state.fulfillment.purchases.find(p=>p.id===f.state.fulfillment.stock[0].purchaseId)!,reference=Math.round(4*purchase.price*100)/100;
+  store.state=f.state;render(f.state.fulfillment.stock[0].id);
+  await click(getByRole(host,'button',{name:'追偿决定'}));
+  let dialog=getByRole(document.body,'dialog',{name:'追偿决定'});
+  const amount=getByRole(dialog,'spinbutton',{name:new RegExp('追偿金额')}) as HTMLInputElement;expect(Number(amount.value)).toBe(reference);
+  typeInto(amount,'12.5');typeInto(getByRole(dialog,'textbox',{name:'决定依据'}) as HTMLTextAreaElement,'按横档疵点向供应商追偿');await click(getByRole(dialog,'button',{name:'确认决定'}));
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.inventory.quarantine.recovery',payload:{returnId:ret,amount:12.5,reason:'按横档疵点向供应商追偿'}});
+  store.run.mockClear();await click(getByRole(host,'button',{name:'追偿决定'}));dialog=getByRole(document.body,'dialog',{name:'追偿决定'});
+  const choice=getByRole(dialog,'combobox',{name:'决定'}) as HTMLSelectElement;act(()=>{choice.value='noRecovery';choice.dispatchEvent(new Event('change',{bubbles:true}));});
+  expect(queryByRole(dialog,'spinbutton',{name:new RegExp('追偿金额')})).toBeNull();
+  typeInto(getByRole(dialog,'textbox',{name:'决定依据'}) as HTMLTextAreaElement,'小批量疵点，供应商已补货');await click(getByRole(dialog,'button',{name:'确认决定'}));
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.inventory.quarantine.noRecovery',payload:{returnId:ret,evidence:'小批量疵点，供应商已补货'}});
+});
+
 it('allows an evidence-based correction of a departed link while displaying the original record',async()=>{
   store.state!.fulfillment.stock.push(stock('gone',{available:0}));
   store.state!.fulfillment.stockMovements.push(movement('m1','gone','issue',100,{shipmentLink:{shipmentId:'s',productionId:'p',evidence:'原依据',actor:'经办人',at:'2026-10-12'}}));

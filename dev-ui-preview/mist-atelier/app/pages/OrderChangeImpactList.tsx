@@ -22,7 +22,7 @@ export function OrderChangeImpactList({ state, order, lines, go, note, due }: { 
     <span className="mist-note">{note || `${defaultNote}；不会自动改采购、生产或出运数据。`}</span>
     {shown.map(line => <div key={line.lineId} className="mist-col" style={{ gap: 4 }} data-impact-line={line.lineId}>
       <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><b>{uiText(line.label)}</b><span className="mist-muted">{uiText(line.removed ? '拟删除' : line.before !== null && line.before === line.after ? `${q(line.before)} ${line.unit} · 数量不变` : `${line.before === null ? '新增' : q(line.before)} → ${line.after === null ? '—' : q(line.after)} ${line.unit}`)}</span><span className="mist-spacer" /><Pill tone="neutral">{uiText("下限 ")}{q(line.floor)} {uiText(line.unit)}{uiText("（已完工 ")}{q(line.completed)}{uiText(" · 已排出运 ")}{q(line.shipped)}）</Pill></div>
-      {line.warning && <Banner tone="warn" title={uiText("需同步调整生产分配")}>{line.warning}</Banner>}
+      {line.warning && <Banner variant="notice" tone="warn" title={uiText("需同步调整生产分配")}>{line.warning}</Banner>}
       <div className="mist-row" style={{ gap: 4, flexWrap: 'wrap' }}>
         {line.purchases.map(p => <React.Fragment key={p.id}>{link(<>{uiText("采购 ")}<Mono>{p.code}</Mono> · {impactStateLabel(p.state)} · {q(p.quantity)} {uiText(p.unit)}</>, () => go('procurement', p.id, { orderLineId: line.lineId }))}</React.Fragment>)}
         {line.productions.map(p => <React.Fragment key={p.id}>{link(<>{uiText("生产 ")}<Mono>{p.code}</Mono> · {p.factory} · {impactStateLabel(p.col)}{uiText(" · 分配 ")}{q(p.qty)}{uiText(" · 已完工 ")}{q(p.completed)}</>, () => go('production-board', undefined, { productionId: p.id, orderLineId: line.lineId }))}</React.Fragment>)}

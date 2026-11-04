@@ -187,6 +187,17 @@ it('lets the current QC transfer to a named member and reschedule with reasons',
   expect(store.run).toHaveBeenLastCalledWith(expect.objectContaining({type:'fulfillment.qc.reschedule',payload:expect.objectContaining({id:'mine',reason:'工厂延期'})}));
 });
 
+it('tells QC the production size plan is missing and blocks the report instead of failing on submit',async()=>{
+  store.state!.productions.push({id:'p2',code:'PB-2',orderId:'o',lineId:'l',order:'SO1',name:'大衣',factory:'江南成衣',qty:800,due:'2026-12-01',pct:40,img:'coat',col:'qc'} as any);
+  store.state!.fulfillment.productionFacts.push({productionId:'p2',sizes:[],revision:1} as any);
+  store.state!.fulfillment.qcTasks.push(task('nosize',{kind:'production',source:{kind:'orderLine',orderId:'o',lineId:'l',productionId:'p2'},state:'working',assignee:'QC甲',assigneeId:'qc-a'}));
+  render('nosize');
+  await click(getByRole(host,'button',{name:'提交 / 追加复验报告'}));
+  expect(host.textContent).toContain('生产尺码未登记');
+  expect((getByRole(host,'button',{name:'提交报告'}) as HTMLButtonElement).disabled).toBe(true);
+  await click(getByRole(host,'button',{name:'查看生产单'}));expect(go).toHaveBeenLastCalledWith('production-board','p2');
+});
+
 it('validates garment size checks and confirms the consequence before appending a report',async()=>{
   store.state!.productions.push({id:'p1',code:'PB-1',orderId:'o',lineId:'l',order:'SO1',name:'衬衫',factory:'华美制衣',qty:20,due:'2026-11-01',pct:50,img:'coat',col:'qc'} as any);
   store.state!.fulfillment.productionFacts.push({productionId:'p1',sizes:[{size:'M',quantity:10},{size:'L',quantity:10}],revision:1} as any);

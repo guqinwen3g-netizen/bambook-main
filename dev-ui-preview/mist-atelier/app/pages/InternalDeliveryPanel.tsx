@@ -92,8 +92,7 @@ export function InternalDeliveryInbox() {
   return <MistPage>
     <BackLink onClick={() => go('orders')}>{uiText('订单管理')}</BackLink>
     <PageHeader title={uiText('内部接收')} />
-    {workspace.error && <Banner tone="bad" title={uiText('内部交付读取失败')} actions={<Button onClick={() => void workspace.refresh()}>{uiText('重试')}</Button>}>{workspace.error}</Banner>}
-    {route.id && !workspace.loading && !rows.some(row => row.id === route.id) && <Banner tone="warn" title={uiText('未找到指定的内部交付')} />}
+    {route.id && !workspace.loading && !rows.some(row => row.id === route.id) && <Banner variant="notice" tone="warn" title={uiText('未找到指定的内部交付')} />}
     <Card><InternalDeliveryRecords key={`${workspace.workspace?.id}:${session?.sessionKey}`} rows={rows} selectedId={route.id} onSelect={id => go('orders', id, { section: 'internal-deliveries' })} onClose={() => go('orders', undefined, { section: 'internal-deliveries' })} /></Card>
   </MistPage>;
 }

@@ -209,3 +209,11 @@ describe('到账导入边界', () => {
     expect(f.balance(f.usd)).toBe(6);
   });
 });
+
+it('audits actual settlement rate, delivered amount and bank forward contract number',()=>{
+ const f=setup();f.receipt(100,'FX-AUDIT');const lockId=f.lock(100),id=f.settle(40,284,'FX-AUDIT-SETTLE',{lockId});
+ const record=f.state.fxRecords!.find(r=>r.id===id)!;
+ expect(record).toMatchObject({actor:'财务',actorId:'finance',createdAt:f.ctx.now,rate:'7.100000'});
+ const audit=f.state.events.find(e=>e.entityId===id)!;
+ expect(audit.text).toContain('成交汇率 7.100000');expect(audit.text).toContain('交割 40 USD');expect(audit.text).toContain('锁汇合同 FWD-1');
+});

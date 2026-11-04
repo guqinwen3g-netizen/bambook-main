@@ -767,6 +767,16 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistFulfillment.ts"
  },
  {
+  "type": "fulfillment.inventory.quarantine.recovery",
+  "payload": "{ returnId: string; amount: number; reason: string }",
+  "source": "server/src/shared/mistFulfillment.ts"
+ },
+ {
+  "type": "fulfillment.inventory.quarantine.recovery.revoke",
+  "payload": "{ returnId: string; reason: string }",
+  "source": "server/src/shared/mistFulfillment.ts"
+ },
+ {
   "type": "fulfillment.inventory.quarantine.request",
   "payload": "{ returnId: string; due: string }",
   "source": "server/src/shared/mistFulfillment.ts"
@@ -1957,7 +1967,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "payable.settlement.submit",
   "payload": "{ purchaseId: string; receiptIds: string[]; final?: boolean; disputes?: SettlementDispute[]; note?: string; fileIds?: string[] }",
   "types": {
-   "SettlementDispute": "{ description: string; amount: number; qcDispositionId?: string; returnId?: string; overLoss?: boolean }"
+   "SettlementDispute": "{ description: string; amount: number; qcDispositionId?: string; quarantineRecoveryId?: string; returnId?: string; overLoss?: boolean }"
   },
   "source": "server/src/shared/mistPayables.ts"
  },
@@ -2151,7 +2161,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "platform.risk.save",
   "payload": "{ orderId?: string; title: string; level: RiskRecord['level']; basis: string; owner: string; type?: RiskType; source?: { kind: RiskSourceKind; id: string }; signalKey?: string }",
   "types": {
-   "RiskRecord": "{ id: string; orderId: string; title: string; level: 'info' | 'warning' | 'critical'; basis: string; owner: string; state: RiskState; resolution: string; createdAt: string; type?: RiskType; source?: { kind: RiskSourceKind; id: string; label: string }; signalKey?: string; createdBy?: string; acknowledgedAt?: string; plan?: string; planDue?: string; escalations?: RiskEscalation[]; closedAt?: string; closedBy?: string; updatedAt?: string; disposition?: 'closed' | 'waived'; release?: { escalationId: string; approvedBy: string; at: string; note: string; shipmentId?: string; shipmentCode?: string; usedAt?: string }; }",
+   "RiskRecord": "{ id: string; orderId: string; title: string; level: 'info' | 'warning' | 'critical'; basis: string; owner: string; state: RiskState; resolution: string; createdAt: string; ownerId?: string; type?: RiskType; source?: { kind: RiskSourceKind; id: string; label: string }; signalKey?: string; createdBy?: string; acknowledgedAt?: string; plan?: string; planDue?: string; escalations?: RiskEscalation[]; closedAt?: string; closedBy?: string; updatedAt?: string; disposition?: 'closed' | 'waived'; release?: { escalationId: string; approvedBy: string; at: string; note: string; shipmentId?: string; shipmentCode?: string; usedAt?: string }; }",
    "RiskState": "'Open' | 'Acknowledged' | 'InProgress' | 'Escalated' | 'Resolved'",
    "RiskType": "'credit' | 'fx' | 'compliance' | 'quality' | 'delivery' | 'other'",
    "RiskSourceKind": "'order' | 'invoice' | 'customer' | 'supplier' | 'production' | 'relation'",

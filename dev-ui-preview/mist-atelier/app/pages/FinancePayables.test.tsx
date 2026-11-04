@@ -31,12 +31,23 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
 it('requires an explicit no-compensation basis before closing a disposal review',async()=>{
- store.value.workspace.financialDisposals=[{returnId:'ret',purchaseId:'p',purchaseCode:'PO-1',supplier:'供应商',quantity:2,unit:'米',currency:'CNY',referenceAmount:32,decision:'scrap',disposalEvidence:'实际报废',report:'QC-1',noRecovery:{actor:'主管',evidence:'确认不追偿'}}];
+ store.value.workspace.financialDisposals=[{returnId:'ret',purchaseId:'p',purchaseCode:'PO-1',supplier:'供应商',quantity:2,unit:'米',currency:'CNY',referenceAmount:32,decision:'scrap',disposalEvidence:'实际报废',report:'QC-1',settlementConfirmed:true,noRecovery:{actor:'主管',evidence:'确认不追偿'}}];
  store.value.run=vi.fn(async()=>({result:{id:'r'}}));render();await click('核对');
  const dialog=getByRole(document.body,'dialog',{name:'核对退料财务处理'});expect(dialog.textContent).toContain('原采购成本和结算不变');
  expect((getByRole(dialog,'button',{name:'确认'}) as HTMLButtonElement).disabled).toBe(true);
- const area=getByLabelText(dialog,'无补偿核对依据') as HTMLTextAreaElement;act(()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(area,'核对处理依据');area.dispatchEvent(new Event('input',{bubbles:true}));});
+ const area=getByLabelText(dialog,'核对依据') as HTMLTextAreaElement;act(()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(area,'核对处理依据');area.dispatchEvent(new Event('input',{bubbles:true}));});
  await click('确认',dialog);expect(store.value.run).toHaveBeenCalledWith({type:'payable.disposal.review',payload:{returnId:'ret',evidence:'核对处理依据'}});
+});
+
+it('shows a recovery decision and keeps review disabled until the source settlement is confirmed',async()=>{
+ const recovery={id:'rec',actorId:'manager',actor:'主管',at:ctx.now,amount:25,currency:'CNY',reason:'向供应商追偿'};
+ store.value.workspace.financialDisposals=[{returnId:'ret',purchaseId:'p',purchaseCode:'PO-1',supplier:'供应商',quantity:2,unit:'米',currency:'CNY',referenceAmount:32,decision:'recovery',disposalDecision:'scrap',decisionAmount:25,recovery,disposalEvidence:'实际报废',report:'QC-1',settlementConfirmed:false}];
+ render();const table=getByRole(document.body,'table',{name:'退料财务核对'});
+ expect(table.textContent).toContain('报废 2 米');expect(table.textContent).toContain('待结算确认');
+ expect((getByRole(table,'button',{name:'核对'}) as HTMLButtonElement).disabled).toBe(true);
+ store.value.workspace.financialDisposals[0].settlementConfirmed=true;store.value.run=vi.fn(async()=>({result:{id:'r'}}));render();
+ await click('核对');const dialog=getByRole(document.body,'dialog',{name:'核对退料财务处理'});
+ expect(dialog.textContent).toContain('追偿');expect(dialog.textContent).toContain('下一次结算列入争议');
 });
 
 it('opens the purchaser work item at its fixed contract without selecting receipts or final settlement on their behalf',async()=>{

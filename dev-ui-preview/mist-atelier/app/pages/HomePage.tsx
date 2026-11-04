@@ -60,7 +60,7 @@ export function HomePage() {
   const days = weekDays(today), weekStart = days[0].key, weekEnd = days[6].key;
   const reviews = useOptionalMistReviews(), waitingReviews = reviews?.rows.filter(row => row.canDecide).length ?? 0;
   // 与侧栏同一口径：只列指定给我或我岗位的事项，「N 件事」= 侧栏「我的工作」数字。
-  const workOptions: MistWorkOptions = { canRead: view => session.canAccessView(view as View), can: permission => session.hasPermission(permission), me: session.user?.id ?? '', reviews: reviews?.rows, today, now: businessNow().toISOString(), workspaceId: workspace.workspace?.id };
+  const workOptions: MistWorkOptions = { canRead: view => session.canAccessView(view as View), can: permission => session.hasPermission(permission), me: session.user?.id ?? '', reviews: reviews?.rows, today, now: businessNow().toISOString(), workspaceId: workspace.workspace?.id, financialDisposals: workspace.workspace?.financialDisposals };
   const allTasks = mistMyTasks(state, workOptions);
   const inRange = (date: string) => !date || (range === 'today' ? date <= today : date <= weekEnd);
   const tasks = allTasks.filter(task => (task.kind === 'shipping' && task.permission === MIST_LOGISTICS_DUTY) || inRange(task.due)).slice().sort((a, b) => sort === 'title' ? a.title.localeCompare(b.title, 'zh-CN') : (a.due || '9999').localeCompare(b.due || '9999') || a.title.localeCompare(b.title, 'zh-CN'));

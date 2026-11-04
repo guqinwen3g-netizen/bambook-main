@@ -90,7 +90,7 @@ it('releases one rejected return, scraps the other and reviews no recovery witho
  expect(internalFabricCostShare(f.state,f.purchaseId,f.target.orderId,136000)).toBe(108800);
  f.run({type:'fulfillment.inventory.quarantine.noRecovery',payload:{returnId:scrap,evidence:'Leader approved unrecoverable loss'}},'reviewer');
  f.run({type:'payable.disposal.review',payload:{returnId:scrap,evidence:'No compensation; retain original supplier settlement'}});
- expect(financialDisposalViews(f.state,new Set([f.purchaseId]))).toMatchObject([{returnId:scrap,quantity:2.5,referenceAmount:170,decision:'scrap',review:{actor:'Fabric'}}]);
+ expect(financialDisposalViews(f.state,new Set([f.purchaseId]))).toMatchObject([{returnId:scrap,quantity:2.5,referenceAmount:170,decision:'noRecovery',disposalDecision:'scrap',review:{actor:'Fabric'}}]);
  expect(cost()).toEqual(costBefore);
  expect({payables:f.state.payables,payments:f.state.payments,receipts:f.state.fulfillment.receipts}).toEqual(financeBefore);
  const before=structuredClone(f.state);

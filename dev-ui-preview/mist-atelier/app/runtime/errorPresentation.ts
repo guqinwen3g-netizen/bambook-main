@@ -1,4 +1,4 @@
-import {createContext,useEffect,useSyncExternalStore} from 'react';
+import {createContext,useEffect,useId,useRef,useSyncExternalStore} from 'react';
 /** The enclosing app has already rendered this exact error; standalone surfaces keep their own feedback. Modal errors remain inside the active dialog because the enclosing page is behind its overlay. */
 export const MistPresentedErrorContext=createContext<string|undefined>(undefined);
 
@@ -26,3 +26,21 @@ export function usePendingRecoveryClaim(active: boolean) {
   }, [active]);
 }
 export const usePendingRecoveryClaimed = () => useSyncExternalStore(listener => { pendingListeners.add(listener); return () => { pendingListeners.delete(listener); }; }, () => claimedPending > 0, () => false);
+
+/**
+ * 页面级操作失败送到外壳右下角的状态卡，而不是插进页面顶部。弹窗内的失败仍留在弹窗里。
+ * 页面关闭、换对象或错误清空时自动撤下。
+ */
+export type PageFailure = { id: string; title: string; detail: string; retry?: () => void };
+let pageFailures: PageFailure[] = [];
+const failureListeners = new Set<() => void>();
+const announceFailures = () => failureListeners.forEach(listener => listener());
+export function usePageFailure(title: string, detail: string | null | undefined, retry?: () => void) {
+  const id = useId(), retryRef = useRef(retry); retryRef.current = retry;
+  useEffect(() => {
+    if (!detail) return;
+    pageFailures = [...pageFailures.filter(item => item.id !== id), { id, title, detail, retry: retryRef.current ? () => retryRef.current?.() : undefined }]; announceFailures();
+    return () => { pageFailures = pageFailures.filter(item => item.id !== id); announceFailures(); };
+  }, [id, title, detail, !!retry]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+export const usePageFailures = () => useSyncExternalStore(listener => { failureListeners.add(listener); return () => { failureListeners.delete(listener); }; }, () => pageFailures, () => pageFailures);

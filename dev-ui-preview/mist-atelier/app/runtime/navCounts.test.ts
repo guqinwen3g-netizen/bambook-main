@@ -4,6 +4,21 @@ import { mistNavCounts } from './workQueue';
 const base = { tasks: [], fulfillment: { qcTasks: [], shipments: [] }, payables: { requests: [] } } as any;
 const task = (id: string, view: string, patch: any = {}) => ({ id, title: id, due: '', done: false, kind: 'work', target: { view, id: 'x' }, assigneeIds: ['u1'], ...patch });
 describe('mistNavCounts', () => {
+  it('counts risk owner work consistently and excludes approval, closed, unowned and unreadable risks', () => {
+    const state = { ...base, platform: { risks: [
+      { id: 'new', ownerId: 'u1', state: 'Open' },
+      { id: 'ack', ownerId: 'u1', state: 'Acknowledged' },
+      { id: 'late', ownerId: 'u1', state: 'InProgress', planDue: '2026-10-01' },
+      { id: 'approval', ownerId: 'u1', state: 'Escalated' },
+      { id: 'closed', ownerId: 'u1', state: 'Resolved' },
+      { id: 'other', ownerId: 'u2', state: 'Open' },
+      { id: 'unbound', owner: 'u1', state: 'Open' },
+    ] } } as any;
+    const options = { canRead: () => true, me: 'u1', today: '2026-10-15' };
+    expect(mistNavCounts(state, options)).toEqual({ cockpit: 3, risks: 3 });
+    expect(mistNavCounts(state, { ...options, canRead: view => view !== 'risks' })).toEqual({});
+    expect(mistNavCounts(state, { ...options, me: '' })).toEqual({});
+  });
   it('counts what waits for me per module, with 我的工作 as the total', () => {
     const state = { ...base,
       tasks: [task('t1', 'development/detail'), task('t2', 'development/detail', { done: true }), task('t3', 'orders/detail'), task('t4', 'orders/detail', { assigneeIds: ['u2'] }), task('t5', 'orders/detail', { assigneeIds: [] }), task('t6', 'invoices', { assigneeIds: [], permission: 'invoices:write' })],

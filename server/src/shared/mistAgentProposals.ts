@@ -61,7 +61,7 @@ export const HIGH_RISK_COMMANDS: ReadonlySet<string> = new Set(['cost.expense.pa
   'fulfillment.qc.confirm', 'fabric.confirm', 'development.confirm', 'platform.claim.disposition', 'platform.claim.execute', 'platform.claim.verify',
   'fulfillment.inventory.quarantine.dispose', 'fulfillment.claimInventory.scrap',
   // 放弃追偿属减免；修改邮箱成员与发信凭据属权限类（2026-11-02 复核补充）。
-  'fulfillment.inventory.quarantine.noRecovery', 'email.account.save',
+  'fulfillment.inventory.quarantine.noRecovery', 'fulfillment.inventory.quarantine.recovery', 'fulfillment.inventory.quarantine.recovery.revoke', 'email.account.save',
   // 生产QC不合格处置：工厂扣款进入应付结算、让步接收放行有缺陷的大货（2026-11-03）。
   'fulfillment.qc.dispose',
   // 来料检验后放行或拒收库存（2026-11-03）。
