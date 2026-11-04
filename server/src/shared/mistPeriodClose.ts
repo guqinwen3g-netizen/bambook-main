@@ -30,9 +30,15 @@ const instantMonth = (value: unknown) => typeof value === 'string' && value ? mi
 function datedFacts(root: Root): Dated[] {
   const out: Dated[] = [], put = (key: string, m: string, row: unknown) => { if (m) out.push({ key, month: m, fingerprint: stableJson(row) }); };
   const receiptDate = new Map((root.receipts || []).map(r => [r.id, r.date]));
+  const paymentDate = new Map((root.payments || []).map(p => [p.id, p.date]));
   for (const r of root.receipts || []) put('receipt:' + r.id, month(r.date), { ...r, state: undefined, suggest: undefined, confidence: undefined, remaining: undefined });
   for (const a of root.allocations || []) put('allocation:' + a.id, month(receiptDate.get(a.receiptId)), a);
-  for (const p of root.payments || []) put('payment:' + p.id, month(p.date), p);
+  for (const p of root.payments || []) {
+    put('payment:' + p.id, month(p.date), p);
+    // A counter-voucher is dated today, but also reverses the original payment fact.
+    // Track that effect in the original month so a new date cannot bypass its close.
+    if (p.reversalOf) put('paymentReversal:' + p.id, month(paymentDate.get(p.reversalOf)), p);
+  }
   for (const f of root.fxRecords || []) put('fx:' + f.id, month(f.date), f);
   for (const i of root.invoices || []) {
     for (const c of i.bankCharges || []) put('charge:' + c.id, instantMonth(c.reversed?.at || c.at), c);

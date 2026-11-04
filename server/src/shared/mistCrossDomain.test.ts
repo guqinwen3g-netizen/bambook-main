@@ -227,4 +227,13 @@ describe('B · CI 生成的应收须财务确认后才入账', () => {
     expect(reissued).not.toBe(invoiceId);
     expect(f.state.invoices.find(i => i.id === reissued)).toMatchObject({ financeStatus: 'pending', open: 0 });
   });
+  it.each(['departed', 'cancelled'] as const)('来源出运已 %s 时拒绝驳回，保留待确认应收与已签发 CI', state => {
+    const f = gate(), { documentId, invoiceId } = issue(f);
+    f.state.fulfillment.shipments.find(s => s.id === f.shipmentId)!.state = state;
+    const before = structuredClone(f.state);
+    expect(() => f.run({ type: 'finance.receivable.reject', payload: { invoiceId, reason: '金额不符' } }, f.finance)).toThrow('请走财务更正');
+    expect(f.state).toEqual(before);
+    expect(f.state.fulfillment.documents.find(d => d.id === documentId)?.status).toBe('issued');
+    expect(f.state.invoices.find(i => i.id === invoiceId)?.financeStatus).toBe('pending');
+  });
 });
