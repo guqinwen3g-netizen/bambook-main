@@ -159,6 +159,14 @@ export function downloadModuleCsv(filename:string,headers:string[],rows:Array<Ar
 }
 
 /** Excel workbook export (one or more sheets). Text that a spreadsheet would run as a formula is kept as text. */
+/** fin63：生成 xlsx 文件对象（不下载），供附到邮件；单元格同样防公式注入。 */
+export async function buildModuleXlsxFile(filename:string,sheets:Array<{name:string;headers:string[];rows:Array<Array<unknown>>}>):Promise<File>{
+  const cell=(input:unknown)=>{if(input==null)return '';if(typeof input==='number')return Number.isFinite(input)?input:'';const value=String(input);return /^[=+@\t\r]/.test(value)||(/^-/.test(value)&&!/^-[\d.]+$/.test(value))?"'"+value:value;};
+  const XLSX=await import('xlsx'),book=XLSX.utils.book_new();
+  for(const sheet of sheets)XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([sheet.headers,...sheet.rows.map(row=>row.map(cell))]),sheet.name.replace(/[\\/?*[\]:]/g,'_').slice(0,31)||'Sheet1');
+  const bytes=XLSX.write(book,{type:'array',bookType:'xlsx'});
+  return new File([bytes],filename,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
 export function downloadModuleXlsx(filename:string,sheets:Array<{name:string;headers:string[];rows:Array<Array<unknown>>}>){
   const cell=(input:unknown)=>{if(input==null)return '';if(typeof input==='number')return Number.isFinite(input)?input:'';const value=String(input);return /^[=+@\t\r]/.test(value)||(/^-/.test(value)&&!/^-[\d.]+$/.test(value))?"'"+value:value;};
   requestGeneratedExport({filename,rowCount:sheets.reduce((n,s)=>n+s.rows.length,0),run:async()=>{

@@ -30,6 +30,7 @@ export const MIST_READ_SECTIONS: Section[] = [
   { key: 'funding', label: '订单资金归属', permissions: ['finance:read', 'invoices:read', 'vouchers:read'], paths: [['orderFunding']], entityTypes: ['orderFunding'], views: ['funding'] },
   { key: 'relations', label: '客户与联系人', permissions: ['relations:read'], paths: [['customers'], ['contacts'], ['market', 'relations']], entityTypes: ['customer', 'relation'], views: ['customers', 'relations'] },
   { key: 'teamReports', label: '团队周报存档', permissions: ['relations:admin'], paths: [['teamReports']], entityTypes: [], views: [] },
+  { key: 'reportSchedules', label: '报表订阅', permissions: ['reports:read'], paths: [['reportSchedules']], entityTypes: ['reportSchedule'], views: [] },
   { key: 'memberHandovers', label: '成员交接记录', permissions: ['relations:read'], paths: [['memberHandovers']], entityTypes: [], views: [] },
   { key: 'crm', label: '客户跟进', permissions: ['crm:read'], paths: [['crm']], entityTypes: ['crm'], views: ['crm'] },
   { key: 'email', label: '邮件', permissions: ['emails:read'], paths: [['email']], entityTypes: ['email'], views: ['emails'] },
@@ -128,6 +129,8 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
   // Group scope conditions and notes may reference company-wide business; match the management API's permission boundary.
   // Agent 提议含待执行命令，只给提议所属账号本人。
   if (next.agentProposals) next.agentProposals = next.agentProposals.filter(proposal => proposal.ownerId === actor.userId);
+  // fin63：报表订阅只给订阅人本人（收件人与发送节奏属个人安排）。
+  if (next.reportSchedules) next.reportSchedules = next.reportSchedules.filter(row => row.ownerId === actor.userId);
   if (!hasScope(actor, 'hr:write')) {
     delete next.teamScopes;
     next.events = (next.events || []).filter(event => event.entityType !== 'teamScope');

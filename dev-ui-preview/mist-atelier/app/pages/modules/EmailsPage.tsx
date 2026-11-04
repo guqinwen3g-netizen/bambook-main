@@ -21,8 +21,8 @@ export type MailView = 'unread' | 'starred' | 'important' | 'followup' | 'unlink
 export type MailScope = { kind: 'folder'; value: MailFolder } | { kind: 'view'; value: MailView };
 type Row = { kind: 'message'; id: string; message: EmailMessage } | { kind: 'draft'; id: string; draft: EmailDraft } | { kind: 'send'; id: string; send: EmailSend };
 type Mail = (action: MistMailAction) => Promise<MistMailResult>;
-type Compose = { id?: string; input: EmailDraftInput; forwardOfId?: string };
-type PendingSend = { input: EmailDraftInput; requestKey: string; draftId?: string; forwardOfId?: string; source: 'compose' | 'draft' };
+type Compose = { id?: string; input: EmailDraftInput; forwardOfId?: string; afterSent?: MistCommand };
+type PendingSend = { input: EmailDraftInput; requestKey: string; draftId?: string; forwardOfId?: string; source: 'compose' | 'draft'; afterSent?: MistCommand };
 type Exec = (command: MistCommand, done?: string) => Promise<unknown>;
 const FOLDERS: Array<{ value: MailFolder; label: string; icon: typeof Inbox }> = [
   { value: 'inbox', label: '收件箱', icon: Inbox }, { value: 'drafts', label: '草稿', icon: PenLine }, { value: 'outbox', label: '待发送', icon: Upload },
@@ -205,6 +205,8 @@ export function EmailsPage() {
     if (!result && p.source === 'compose') unsettledCompose.current = p.requestKey;
     // 服务端拒绝（如意图冲突）时保留写信内容与草稿，便于修改后再发。
     if (!result) return;
+    // fin63 等：邮件被服务器接受后才做业务登记；登记失败只提示，不影响已发出的邮件。
+    if (p.afterSent && result.send?.status === 'sent') await exec(p.afterSent, '已登记');
     if (p.source === 'compose') setCompose(null);
     else if (!result.send?.replayed) { setPicked(null); setDrawer(false); }
   };
@@ -248,7 +250,7 @@ export function EmailsPage() {
     if (!state || !can || compose) return;
     const intent = takeComposeIntent(); if (!intent) return;
     const base = blankInput(defaultAccount);
-    setCompose({ input: { ...base, to: intent.to || '', bcc: intent.bcc || '', subject: intent.subject, body: (intent.body || '') + base.body, fileIds: (intent.fileIds || []).filter(id => state.files.some(f => f.id === id)), links: intent.links || [] } });
+    setCompose({ input: { ...base, to: intent.to || '', bcc: intent.bcc || '', subject: intent.subject, body: (intent.body || '') + base.body, fileIds: (intent.fileIds || []).filter(id => state.files.some(f => f.id === id)), links: intent.links || [] }, ...(intent.afterSent ? { afterSent: intent.afterSent } : {}) });
   }, [!!state, can]);
   const respond = (m: EmailMessage, mode: 'reply' | 'all' | 'forward') => {
     const account = accounts.find(a => a.id === m.accountId) || defaultAccount;
@@ -333,7 +335,7 @@ export function EmailsPage() {
         ? <SendDetail send={selected.send} state={state} can={can} me={me} locked={locked} onRetry={row => void retrySend(row)} onVerify={row => void verifySend(row)} onConfirmResend={setConfirmResend} />
         : <MessageDetail message={uiText(selected.message)} state={state} can={can} locked={locked} exec={exec} onOpen={(view, id) => go(view, id)} onRespond={mode => respond(selected.message, mode)} onFollowUp={() => setFollowUp(selected.message)} onDownload={id => void downloadAttachment(id)} />
     : <div className="mist-mail-read-empty"><EmptyState icon={MailOpen} title={uiText(rows.length ? '选择一封邮件阅读' : '没有可阅读的邮件')} description={uiText(loading ? '正在读取邮箱' : '↑ ↓ 键可在列表中切换邮件')} compact /></div>;
-  const sendCompose = async (input: EmailDraftInput, requestKey: string) => { if (compose) setPendingSend({ input, requestKey, ...(compose.id ? { draftId: compose.id } : {}), ...(compose.forwardOfId ? { forwardOfId: compose.forwardOfId } : {}), source: 'compose' }); };
+  const sendCompose = async (input: EmailDraftInput, requestKey: string) => { if (compose) setPendingSend({ input, requestKey, ...(compose.id ? { draftId: compose.id } : {}), ...(compose.forwardOfId ? { forwardOfId: compose.forwardOfId } : {}), ...(compose.afterSent ? { afterSent: compose.afterSent } : {}), source: 'compose' }); };
   const saveDraft = async (input: EmailDraftInput, id?: string) => { const receipt = await exec({ type: 'email.draft.save', payload: { ...(id ? { id } : {}), input } }, '草稿已保存'); if (receipt) setCompose(null); };
   const createFollowUp = async (ownerId: string, due: string, note: string) => { if (followUp && await exec({ type: 'email.followUp', payload: { id: followUp.id, ownerId, due, note } }, '已生成跟进待办，并写入日历')) setFollowUp(null); };
   const selectedTitle = selected ? (selected.kind === 'draft' ? selected.draft.subject || '（无主题草稿）' : selected.kind === 'send' ? selected.send.subject : selected.message.subject) : '邮件';

@@ -27,6 +27,18 @@ function bankReceipt(f:ReturnType<typeof fixture>,value:number,currency='USD',pa
 }
 function cashRecovery(f:ReturnType<typeof fixture>,value=100){const id=f.run({type:'platform.claim.recovery.open',payload:{claimId:f.claimId,supplierId:f.supplierId,currency:'USD',requested:value,basis:'质检与合同依据'}}).id;f.run({type:'platform.claim.recovery.agree',payload:{id,agreed:value,method:'payment',note:'工厂确认付款'}});return id;}
 describe('售后索赔协同',()=>{
+ it('fin44: the requester withdraws a wrong-factory recovery while negotiating; it does not count as company cost',()=>{
+  const f=fixture();
+  const id=f.run({type:'platform.claim.recovery.open',payload:{claimId:f.claimId,supplierId:f.supplierId,currency:'USD',requested:40,basis:'先按色差提出'}} as MistCommand).id;
+  expect(()=>f.run({type:'platform.claim.recovery.withdraw',payload:{id,reason:'选错'}} as MistCommand,f.leader)).toThrow('提出人');
+  f.run({type:'platform.claim.recovery.withdraw',payload:{id,reason:'选错工厂'}} as MistCommand);
+  expect(f.claim().coordination!.recoveries[0]).toMatchObject({state:'Withdrawn'});
+  expect(f.state.tasks.some(t=>t.kind==='claim-recovery:'+id&&!t.done)).toBe(false);
+  const again=f.run({type:'platform.claim.recovery.open',payload:{claimId:f.claimId,supplierId:f.supplierId,currency:'USD',requested:40,basis:'重新提出'}} as MistCommand).id;
+  f.run({type:'platform.claim.recovery.agree',payload:{id:again,agreed:40,method:'payment',note:'工厂同意'}} as MistCommand);
+  expect(()=>f.run({type:'platform.claim.recovery.withdraw',payload:{id:again,reason:'x'}} as MistCommand)).toThrow('放弃追偿');
+  expect(mistCommandPermission({type:'platform.claim.recovery.withdraw',payload:{}} as any)).toBe('aftersales:write');
+ });
  it('maps permissions to the people who actually do each step',()=>{
   const p=(type:string)=>mistCommandPermission({type,payload:{}} as unknown as MistCommand);
   expect(p('platform.claim.notify')).toBe('aftersales:write');expect(p('platform.claim.verify')).toBe('qc:inspect');expect(p('platform.claim.recovery.open')).toBe('aftersales:write');

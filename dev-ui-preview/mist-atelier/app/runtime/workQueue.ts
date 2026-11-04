@@ -11,6 +11,7 @@ import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePe
 import { businessDate } from './businessClock';
 import { quotationPendingLines } from '../../../../server/src/shared/mistQuotationLineConversion';
 import { calendarVisibleTo, expandRepeats } from './derivedCalendar';
+import { dueReportSchedules, REPORT_SCHEDULE_KINDS } from '../../../../server/src/shared/mistReportSchedules';
 
 type CanRead = (view: string) => boolean;
 export type MistWorkSource = 'review' | 'agent' | 'qc' | 'shipping' | 'finance' | 'report' | 'material' | 'task' | 'calendar';
@@ -286,6 +287,9 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
       push({ id: 'finance:' + request.id, source: 'finance', title: ui`${request.code} · 付款申请被退回`, meta: [request.supplier, request.decision?.actor && '退回人 ' + request.decision.actor, request.decision?.note].filter(Boolean).join(' · '), when: '被退回', urgent: true, at: request.decision?.at || request.submittedAt, target: { view: 'payment-vouchers', id: request.id, section: 'payables' } });
     }
   }
+  // fin63：报表订阅到期，提醒本人生成并发送。
+  if (me && canRead('reports')) for (const due of dueReportSchedules(state, me, today))
+    push({ id: `report-schedule:${due.schedule.id}:${due.period}`, source: 'report', title: ui`发送${REPORT_SCHEDULE_KINDS[due.schedule.kind]}`, meta: due.schedule.to, when: '待发送', urgent: due.due < today, at: due.due, due: due.due, target: { view: 'reports', section: due.schedule.kind } as MistTarget });
   // mar60：设了提醒的日程，在当天进入提醒窗口后列为待我处理，开始时刻过后自动消失。
   if (me && options.now && state.calendar) {
     const now = Date.parse(options.now);
