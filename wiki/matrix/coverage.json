@@ -1477,8 +1477,9 @@
     "payable.settlement.reverse",
     "payable.allocation.reverse"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 财务岗走查：AP-2026-0002 付款申请 PR-2026-0001 经 5 万元档（周敏）与新供应商首笔加签（陆衡）批准 → 登记收款账户并核实 → 登记实付 PAY-2026-0003 → 冲回（原记录保留，票据恢复未付，申请回到已批准待付）。结算冲回、核销冲回未单独走"
   },
   {
    "id": "expense",
