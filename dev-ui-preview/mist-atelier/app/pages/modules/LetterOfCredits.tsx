@@ -106,7 +106,7 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
   const missing = lcOrders.filter(o => !covered(o).length && o.governance?.status === 'approved');
 
   return <>
-    {missing.length > 0 && <div className="mist-section"><Banner tone="warn" title={ui`未登记来证 · ${missing.length}`}>{missing.map(o => o.code).join('、')}</Banner></div>}
+    {missing.length > 0 && <div className="mist-section"><Banner variant="status" tone="warn" title={ui`未登记来证 · ${missing.length}`}>{missing.map(o => o.code).join('、')}</Banner></div>}
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.lcNo} · ${selected.customer}` : '信用证详情'} drawerSub={selected ? LC_STATUS_LABEL[lcStatus(selected, day)] : undefined}
       list={<Card>
         <CardHeader title={ui`信用证台账 · ${all.length}`} tools={can ? <Button variant="primary" icon={Plus} disabled={locked || !lcOrders.length} title={uiText(lcOrders.length ? undefined : '没有合同约定以信用证付款的订单')} onClick={() => open(createSpec())}>{uiText("登记信用证")}</Button> : undefined} />
@@ -140,8 +140,8 @@ function LcDetail({ lc, state, day, can, locked, run, presentable, onShipment, o
   const openPresentations = lc.presentations.some(p => !final(p));
   return <DetailBody data-lc-detail={lc.id} heading={<div><span className="mist-mono mist-muted">{lc.code}</span><div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{lc.lcNo}</div></div>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATUS_TONE[status]}>{LC_STATUS_LABEL[status]}</Pill><Pill>{uiText(lc.availableBy === 'sight' ? '即期' : `远期 ${lc.usanceDays} 天`)}</Pill><Pill tone={lc.confirmed?"accent":"neutral"}>{uiText(lc.confirmed?"保兑":"未保兑")}</Pill></div>
-    {alerts.length > 0 && <Banner tone="warn" title={uiText("需要关注")}>{alerts.map(uiText).join('；')}</Banner>}
-    {lc.cancelled && <Banner tone="neutral" title={ui`已于 ${lc.cancelled.date} 注销`}>{lc.cancelled.reason}</Banner>}
+    {alerts.length > 0 && <Banner variant="notice" tone="warn" title={uiText("需要关注")}>{alerts.map(uiText).join('；')}</Banner>}
+    {lc.cancelled && <Banner variant="status" tone="neutral" title={ui`已于 ${lc.cancelled.date} 注销`}>{lc.cancelled.reason}</Banner>}
     {can && <ActionBar busy={locked} actions={[
       { label: '登记交单', icon: Send, onClick: onPresent, primary: true, reason: cancelled ? '信用证已注销' : available <= 0 ? '可用余额为零' : !presentable ? '没有可交单的出运（须含本信用证订单且尚未交单）' : false },
       { label: '登记修改书', icon: FilePen, onClick: onAmend, reason: cancelled ? '信用证已注销' : false },

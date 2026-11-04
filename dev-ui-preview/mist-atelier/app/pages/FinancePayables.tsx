@@ -23,6 +23,7 @@ import { BillLinkDialog, DeductionDialog, DeductionList, PrepaymentMoveDialog, P
 import { AdvanceRequestDialog, BackfillDialog, PlanLinkDialog, SettlementAdvance, advancePill } from './FinancePayments';
 import { OptionInput } from './OptionInput';
 import { SUPPLIER_PAYMENT_TRIGGERS, VAT_RATES } from '../runtime/tradeOptions';
+import { usePageFailure } from '../runtime/errorPresentation';
 
 type View = 'bills' | 'requests' | 'settlements' | 'prepay' | 'sources' | 'payments';
 function payableTargetView(state: MistState | null | undefined, id?: string): View | undefined {
@@ -131,6 +132,8 @@ export function FinancePayables() {
   };
   const pendingPayable=pending?.kind==='command'&&!!pending.command?.type.startsWith('payable.');
   const failure=pendingPayable?'':operationFailure;
+  // Failures inside an open dialog stay there; otherwise they go to the shell card.
+  usePageFailure('操作没有完成', failure && !disposalDraft && !billDraft && !payDraft && !reasonDraft && !planDraft && !preDraft && !settleOpen && !confirmId && !linkId && !deductId && !moveDraft && !advanceId && !backfillId && !planLinkId ? failure : '');
   const recoverPayable=async()=>{
     if(!pendingPayable||saving||working)return;
     const scope=actionScope.current,intent=pending,original=unresolved.current;
@@ -290,8 +293,8 @@ export function FinancePayables() {
       { label: '已结清 / 未付', value: apMoney(billClearedMinor(bill)/100, bill.currency) + ' / ' + apMoney(bill.open, bill.currency) },
       { label: '到期日', value: bill.due + (bill.overdue ? '（已逾期）' : '') }, { label: '到期日依据', value: bill.dueBasis }, { label: '登记', value: bill.registeredBy + ' · ' + fmtDay(bill.registeredAt) },
     ]} />
-    {bill.held && <Banner tone="warn" title={uiText("待关联结算")}>{uiText("结算确认后关联。")}</Banner>}
-    {bill.status === 'void' && <Banner title={uiText("已作废")}>{bill.voided?.reason}（{bill.voided?.actor} · {fmtDay(bill.voided?.at)}{uiText("），不再计入应付；原记录保留。")}</Banner>}
+    {bill.held && <Banner variant="status" tone="warn" title={uiText("待关联结算")}>{uiText("结算确认后关联。")}</Banner>}
+    {bill.status === 'void' && <Banner variant="status" tone="neutral" title={uiText("已作废")}>{bill.voided?.reason}（{bill.voided?.actor} · {fmtDay(bill.voided?.at)}{uiText("），不再计入应付；原记录保留。")}</Banner>}
     <ActionBar busy={busy} actions={[
       {label:'核对票种',onClick:()=>setInvoiceTypeId(bill.id),reason:!canBill?'需要票据登记权限':state?billRebateLock(state,bill.id):'公司尚未读取',hidden: !(canBill) || bill.status==='void'},
       { label: '关联结算', onClick: () => { setFailure(''); setLinkId(bill.id); }, reason: !canBill ? '需要票据登记权限' : undefined, hidden: !(canBill) || !bill.held || bill.status === 'void' },
@@ -310,10 +313,10 @@ export function FinancePayables() {
     {state && <DeductionList rows={supplierDeductions(state, bill.id)} busy={busy} canReverse={canConfirm} onReverse={d => askReason('reverse-deduction', d.id)} onClaim={id => go('claims', id)} />}
   </DetailBody> : payment ? <DetailBody data-supplier-payment={payment.id} heading={<h2 className="mist-h2">{payment.code}</h2>}>
     <Facts items={[{ label: '收款供应商', value: payment.supplier }, { label: '付款日期', value: payment.date }, { label: '付款金额', value: apMoney(payment.amount, payment.currency) }, { label: '银行流水号', value: <Mono>{payment.reference}</Mono> }, { label: '付款申请', value: payment.requestCode ? <Mono>{payment.requestCode}</Mono> : payment.backfill ? '历史补登（系统上线前已付，未走申请）' : '旧记录（审批规则前登记）' }, ...(payment.planCode ? [{ label: '付款计划', value: <Mono>{payment.planCode}</Mono> }] : []), ...(payment.purpose === 'prepayment' ? [{ label: '用途', value: '合同预付款 · ' + (state?.fulfillment.purchases.find(x => x.id === payment.purchaseId)?.code || '') }] : payment.purpose === 'settlement' ? [{ label: '用途', value: '按结算先付（发票未到）· ' + (settlements.find(x => x.id === payment.settlementId)?.code || '') }, { label: '其中未收票', value: apMoney(payment.aheadOpen, payment.currency) }] : [{ label: '已分配 / 未分配', value: apMoney(payment.allocated, payment.currency) + ' / ' + apMoney(payment.unallocated, payment.currency) }]), { label: '登记', value: payment.actor + ' · ' + fmtDay(payment.createdAt) }, ...(payment.note ? [{ label: '备注', value: payment.note }] : [])]} />
-    {payment.reversed && <Banner title={uiText("已冲回")}>{payment.reversed.reason}（{payment.reversed.actor} · {fmtDay(payment.reversed.at)}{uiText("）")}</Banner>}
-    {!payment.reversed && payment.purpose === 'settlement' && (payment.aheadOpen > 0 ? <Banner tone={payment.aheadOverdue ? 'bad' : 'warn'} title={uiText(payment.aheadOverdue ? '付款超 30 天仍未收票' : '已付未收票')}>{uiText("供应商票据到后按结算登记，这笔钱自动抵到票据；请跟进工厂开票。")}</Banner> : <Banner tone="ok" title={uiText("已随票抵扣")}>{uiText("关联结算的供应商票据已登记，这笔先付款已抵到票据。")}</Banner>)}
+    {payment.reversed && <Banner variant="status" tone="neutral" title={uiText("已冲回")}>{payment.reversed.reason}（{payment.reversed.actor} · {fmtDay(payment.reversed.at)}{uiText("）")}</Banner>}
+    {!payment.reversed && payment.purpose === 'settlement' && (payment.aheadOpen > 0 ? <Banner variant={payment.aheadOverdue ? 'notice' : 'status'} tone={payment.aheadOverdue ? 'bad' : 'warn'} title={uiText(payment.aheadOverdue ? '付款超 30 天仍未收票' : '已付未收票')}>{uiText("供应商票据到后按结算登记，这笔钱自动抵到票据；请跟进工厂开票。")}</Banner> : <Banner variant="status" tone="ok" title={uiText("已随票抵扣")}>{uiText("关联结算的供应商票据已登记，这笔先付款已抵到票据。")}</Banner>)}
     {payment.planLinked && <span className="mist-note">{uiText("旧付款由 ")}{payment.planLinked.actor}{uiText(" 于 ")}{fmtDay(payment.planLinked.at)}{uiText(" 对应到计划")}{uiText(payment.planLinked.note ? '：' + payment.planLinked.note : '')}</span>}
-    {payment.unallocated > 0 && <Banner tone="warn" title={uiText("付款待分配")}>{apMoney(payment.unallocated, payment.currency)}</Banner>}
+    {payment.unallocated > 0 && <Banner variant="status" tone="warn" title={uiText("付款待分配")}>{apMoney(payment.unallocated, payment.currency)}</Banner>}
     <ActionBar busy={busy} actions={[{ label: '分配到应付', onClick: () => startAllocate(payment), reason: !canAllocate ? '需要核销分配权限' : payment.unallocated <= 0 ? '没有可分配的金额' : undefined, hidden: !(canAllocate) || payment.purpose === 'prepayment' || payment.purpose === 'settlement' || !!payment.reversed },
       { label: '对应付款计划', onClick: () => { setFailure(''); setPlanLinkId(payment.id); }, reason: !canBill ? '需要票据登记权限' : undefined, hidden: !(canBill) || !!payment.requestId || !!payment.backfill || !!payment.planId || !!payment.reversed },
       { label: '取消计划对应', onClick: () => setUnlinkPlanId(payment.id), reason: !canBill ? '需要票据登记权限' : undefined, hidden: !(canBill) || !payment.planLinked || !!payment.reversed },
@@ -325,8 +328,8 @@ export function FinancePayables() {
     <div className="mist-row"><Pill tone={REQ[request.state].tone}>{uiText(REQ[request.state].label)}</Pill><span className="mist-note">{request.requester}{uiText(" · 提交于 ")}{fmtDay(request.submittedAt)}</span></div>
     <DetailBlock title={uiText("申请依据")}><Facts items={request.snapshot.map(d => ({ label: d.label, value: d.value }))} /></DetailBlock>
     {request.fileIds.length > 0 && <DetailBlock title={uiText("申请附件")}><DraftFiles ids={request.fileIds} onChange={() => undefined} disabled /></DetailBlock>}
-    {request.decision && <Banner tone={request.decision.decision === 'approved' ? 'ok' : 'bad'} title={uiText(request.decision.decision === 'approved' ? '主管已批准' : '主管已退回')}>{request.decision.note}（{request.decision.actor} · {fmtDay(request.decision.at)}）</Banner>}
-    {request.cancelled && <Banner title={uiText("已撤回")}>{request.cancelled.reason}（{request.cancelled.actor} · {fmtDay(request.cancelled.at)}）</Banner>}
+    {request.decision && <Banner variant="status" tone={request.decision.decision === 'approved' ? 'ok' : 'bad'} title={uiText(request.decision.decision === 'approved' ? '主管已批准' : '主管已退回')}>{request.decision.note}（{request.decision.actor} · {fmtDay(request.decision.at)}）</Banner>}
+    {request.cancelled && <Banner variant="status" tone="neutral" title={uiText("已撤回")}>{request.cancelled.reason}（{request.cancelled.actor} · {fmtDay(request.cancelled.at)}）</Banner>}
     <ActionBar busy={busy} actions={[
       { label: '登记实付', onClick: () => startPayRequest(request), reason: !canPay ? '需要付款登记权限' : request.purpose === 'bill' && !canAllocate ? '票据付款需同时具备核销分配权限' : undefined, hidden: !(canPay && (request.purpose !== 'bill' || canAllocate)) || request.state !== 'approved' },
       { label: '撤回申请', onClick: () => askReason('cancel-request', request.id), reason: !canRequest ? '需要付款申请权限' : undefined, hidden: !(canRequest && request.requesterId === session.user?.id) || request.state !== 'pending' && request.state !== 'approved' },
@@ -335,7 +338,7 @@ export function FinancePayables() {
     {request.paymentHistory.length > (request.supplierPaymentId ? 1 : 0) && <span className="mist-note">{uiText("此申请曾登记实付后冲回 ")}{uiText(request.paymentHistory.length - (request.supplierPaymentId ? 1 : 0))}{uiText(" 次，原记录保留在供应商付款中。")}</span>}
   </DetailBody> : plan ? <DetailBody data-prepayment-plan={plan.id} heading={<h2 className="mist-h2">{plan.code}</h2>}>
     <Facts items={[{ label: '来源合同', value: <Mono>{plan.purchaseCode}</Mono> }, { label: '供应商', value: plan.supplier }, { label: '计划金额', value: apMoney(plan.amount, plan.currency) }, { label: '付款触发条件', value: plan.trigger }, { label: '合同条款依据', value: plan.basis }, ...(plan.due ? [{ label: '计划付款日', value: plan.due }] : []), { label: '已申请 / 已付', value: apMoney(plan.requested, plan.currency) + ' / ' + apMoney(plan.paid, plan.currency) }, { label: '登记', value: plan.registeredBy + ' · ' + fmtDay(plan.registeredAt) }]} />
-    {plan.cancelled && <Banner title={uiText("已取消")}>{plan.cancelled.reason}（{plan.cancelled.actor} · {fmtDay(plan.cancelled.at)}）</Banner>}
+    {plan.cancelled && <Banner variant="status" tone="neutral" title={uiText("已取消")}>{plan.cancelled.reason}（{plan.cancelled.actor} · {fmtDay(plan.cancelled.at)}）</Banner>}
     <ActionBar busy={busy} actions={[
       { label: '申请预付款', onClick: () => { setFailure(''); setPreDraft({ planId: plan.id, amount: String(plan.available), reason: '' }); }, reason: !canRequest ? '需要付款申请权限' : plan.available <= 0 ? '计划金额已全部申请' : undefined, hidden: !(canRequest) || plan.state !== 'active' || plan.stage !== 'prepayment' },
       { label: '历史付款补登', onClick: () => { setFailure(''); setBackfillId(plan.id); }, reason: !canPay ? '需要付款登记权限（财务）' : plan.stage !== 'prepayment' && !canAllocate ? '进度款 / 尾款补登会分配到票据，需同时具备核销权限' : plan.available <= 0 ? '计划金额已全部申请或补登' : undefined, hidden: !(canPay && (plan.stage === 'prepayment' || canAllocate)) || plan.state !== 'active' },
@@ -359,7 +362,6 @@ export function FinancePayables() {
     : <DataTable ariaLabel={uiText("供应商付款")} rows={payments} columns={paymentColumns} loading={loading} rowKey={p => p.id} selectedKey={selected} onRowClick={p => open(p.id)} empty={<EmptyState title={uiText("还没有供应商付款")} description={uiText("实际付款后在这里登记，并分配到一张或多张票据。")} />} />;
 
   return <PayableDialogRecovery value={{pending:pendingPayable&&(!saving||recovering),failure:operationFailure,busy:working||saving||loading,recover:()=>void recoverPayable()}}><div className="mist-col" data-finance-payables>
-    {failure && !disposalDraft && !billDraft && !payDraft && !reasonDraft && !planDraft && !preDraft && !settleOpen && !confirmId && !linkId && !deductId && !moveDraft && !advanceId && !backfillId && !planLinkId && <Banner tone="bad" title={uiText("操作没有完成")}>{failure}</Banner>}
     {disposals.length>0&&<Card><CardHeader title={uiText('退料财务核对')}/><div className="mist-card-body"><DataTable ariaLabel={uiText('退料财务核对')} rows={disposals} rowKey={d=>d.returnId} columns={[
       {key:'purchase',header:'来源采购',render:d=>`${d.purchaseCode} · ${d.supplier}`},
       {key:'decision',header:'处置',render:d=>`${(d.disposalDecision??d.decision)==='scrap'?'报废':'退供应商'} ${d.quantity} ${d.unit}`},

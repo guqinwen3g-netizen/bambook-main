@@ -275,7 +275,7 @@ export function FxRevaluationCard() {
       <Select aria-label={uiText("调汇月份")} value={month} onChange={e => setMonth(e.target.value)} options={months.map(m => ({ value: m, label: m }))} />
       {canWrite && <Button size="sm" disabled={busy || !view || view.blockers.length > 0} onClick={() => post && setSpec(post)}>{uiText("登记期末调汇")}</Button>}</span>} />
     <div className="mist-card-body mist-col">
-      {view && view.blockers.length > 0 && <Banner tone="warn" title={uiText("暂不能登记")}>{view.blockers.join('；')}</Banner>}
+      {view && view.blockers.length > 0 && <Banner variant="notice" tone="warn" title={uiText("暂不能登记")}>{view.blockers.join('；')}</Banner>}
       {view && view.currencies.length > 0 && <div className="mist-row" style={{ flexWrap: 'wrap', gap: 16 }}>{view.currencies.map(c => <span key={c.currency} className="mist-col" style={{ gap: 2 }}><b>{c.currency} · {c.bookRate} → {c.closingRate || '缺月末汇率'}</b><small className="mist-muted">{uiText("未实现 ")}{cny(c.unrealized)}{uiText(" · 结汇 ")}{cny(c.realized)}{uiText(" · 合计 ")}{cny(c.total)}</small></span>)}</div>}
       {view && <RevalLinesTable lines={view.lines} label={ui`${month} 期末调汇预览`} />}
       <span className="mist-note">{uiText("余额按月末截止：银行按流水日期，应收按开票日期、核销按到账日期计入；外币应付按发票日期、付款按付款日计入，合同预付款不重估。须按月连续登记。")}</span>
