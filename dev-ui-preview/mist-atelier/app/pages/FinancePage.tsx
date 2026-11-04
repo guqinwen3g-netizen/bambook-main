@@ -1,5 +1,5 @@
 import { uiText, ui } from '../../../../services/interfaceLanguage';
-import { MistPresentedErrorContext } from '../runtime/errorPresentation';
+import { MistPresentedErrorContext, usePendingRecoveryClaim } from '../runtime/errorPresentation';
 import {businessDate,businessNow,businessToday} from '../runtime/businessClock';
 /** T6 收款核销：保留原 Mist 双栏，对账结果由公司共享数据保存。 */
 import { AccessHiddenNotice } from './AccessHiddenNotice';
@@ -71,6 +71,7 @@ export function FinancePage() {
   const [area,setArea]=React.useState<FinanceArea>(()=>areaOf(route.section));
   React.useEffect(()=>setArea(areaOf(route.section)),[route.section,canSeeAccounts]);
   const { state, loading, error, run, refresh, saving, pending, recover }=workspace;
+  usePendingRecoveryClaim(!!pending);
   const scope=`${workspace.workspace?.id||''}:${workspace.workspace?.ownerId||''}`,activeScope=React.useRef(scope);activeScope.current=scope;
   const alive=React.useRef(true);React.useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const operation=React.useRef(false),fileSequence=React.useRef(0),routed=React.useRef('');

@@ -105,7 +105,7 @@ export function applySampleRequestCommand(root: Root, command: SampleRequestComm
       const fileIds = Array.isArray(p.fileIds) ? [...new Set(p.fileIds.map(id => { const f = root.files.find(x => x.id === id) || fail('附件不存在', 'NOT_FOUND'); return f.id; }))] : [];
       if (!fileIds.length) fail('请上传核对后的发票原件', 'PRECONDITION');
       const id = c.id();
-      const invoice: MistInvoice = { id, code: number, orderId: '', order: r.code, customer: r.customer, customerId: r.customerId, due, amount: r.fee!.amount, open: 0, currency: r.fee!.currency, fileIds, issuedAt: platformBusinessDate(c.now), financeStatus: 'pending', sampleRequestId: r.id };
+      const invoice: MistInvoice = { id, code: number, orderId: '', order: r.code, customer: r.customer, customerId: r.customerId, due, amount: r.fee!.amount, open: 0, currency: r.fee!.currency, fileIds, issuedById: c.actorId, issuedAt: platformBusinessDate(c.now), financeStatus: 'pending', sampleRequestId: r.id };
       root.invoices.push(invoice);
       r.fee = { ...r.fee!, invoiceId: id, invoiceCode: number };
       for (const t of root.tasks) if (t.kind === `sample-request-fee:${r.id}` && !t.done) { t.done = true; t.doneAt = c.now; t.doneBy = c.actorName; }

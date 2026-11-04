@@ -1,3 +1,4 @@
+import {notifyMist,notificationOwners,notificationTargetOwners} from './mistNotifications';
 import {packingBreakdownBlocker,packingFabricSpecification,packingFabricColorError,packingPhysicalKey,packingSkuError,canonicalPackingSkus,canSupplementPacking,type PackingSku} from './mistPackingBreakdown';
 import {recordReplacementExportReview,replacementDeclaredUnitPrice,type ReplacementExportCommand,type ReplacementExportReview} from './mistClaimReplacement';
 import { normalizeFabricStageTerms, fabricStageSubmitProblem, fabricStageTermsText, type FabricStageTerms } from './mistFabricStage';
@@ -128,6 +129,7 @@ export type FulfillmentQcTask = {
     contact: string;
     due: string;
     requestedBy: string;
+    requesterId?: string;
     assignee: string;
     assigneeId?: string;
     state: 'pending' | 'working' | 'reported' | 'blocked' | 'awaiting_business';
@@ -909,8 +911,8 @@ export function fulfillmentSourceLabel(root: MistState, s: FulfillmentSource): s
     return `${root.devs.find(d => d.id === s.devId)?.code || s.devId} · ${root.versions.find(v => v.id === s.versionId)?.label || s.versionId}`; return `${root.orders.find(o => o.id === s.orderId)?.code || s.orderId} · ${root.orderLines.find(l => l.id === s.lineId)?.style || s.lineId}`; }
 const sourceKey = (s: FulfillmentSource) => s.kind === 'version' ? `v:${s.versionId}` : s.kind === 'orderLine' ? `l:${s.lineId}:${s.productionId || ''}` : `m:${s.description}`;
 const target = (s: FulfillmentSource): MistTarget => s.kind === 'version' ? { view: 'development/detail', id: s.devId, versionId: s.versionId } : s.kind === 'orderLine' ? { view: 'orders/detail', id: s.orderId, orderLineId: s.lineId, productionId: s.productionId } : { view: 'samples' };
-function audit(root: MistState, ctx: MistContext, entity: string, id: string, message: string, to?: MistTarget) { root.events.unshift({ id: ctx.id(), entityType: entity, entityId: id, actor: ctx.actorName, at: ctx.now, text: message, fileIds: [] }); if (to)
-    root.notifications.unshift({ id: ctx.id(), title: message, detail: ctx.actorName, at: ctx.now, readAt: null, target: to, category:entity==='qc'?'qc':['shipment','customs','document'].includes(entity)?'shipping':'general' }); }
+function audit(root: MistState, ctx: MistContext, entity: string, id: string, message: string, to?: MistTarget, recipientIds: string[] = []) { root.events.unshift({ id: ctx.id(), entityType: entity, entityId: id, actor: ctx.actorName, at: ctx.now, text: message, fileIds: [] }); if (to)
+    notifyMist(root, ctx, { title: message, detail: ctx.actorName, target: to, category:entity==='qc'?'qc':['shipment','customs','document'].includes(entity)?'shipping':'general' }, recipientIds); }
 const code = (prefix: string, rows: {
     code: string;
 }[], ctx: MistContext) => `${prefix}-${ctx.now.slice(0, 4)}-${String(rows.length + 1).padStart(5, '0')}`;
@@ -1316,7 +1318,7 @@ export function ensureDevelopmentQcTasks(root: MistState, devId: string, version
     for (const sample of f.samples.filter(s => s.source.kind === 'version' && s.source.devId === devId && s.source.versionId === versionId)) {
         if (f.qcTasks.some(t => t.sampleId === sample.id)) continue;
         const id = ctx.id();
-        f.qcTasks.push({ id, code: code('QC', f.qcTasks, ctx), source: { kind: 'version', devId, versionId }, sampleId: sample.id, domain: developmentDomain(dev.values) === 'fabric' ? 'fabric' : 'garment', kind: 'sample', factory: version.factory || '待安排工厂', location: sample.location || '样品间', contact: '', due: platformBusinessDate(ctx.now), requestedBy: ctx.actorName, assignee: '', state: 'pending', reportIds: [], createdAt: ctx.now });
+        f.qcTasks.push({ id, code: code('QC', f.qcTasks, ctx), source: { kind: 'version', devId, versionId }, sampleId: sample.id, domain: developmentDomain(dev.values) === 'fabric' ? 'fabric' : 'garment', kind: 'sample', factory: version.factory || '待安排工厂', location: sample.location || '样品间', contact: '', due: platformBusinessDate(ctx.now), requestedBy: ctx.actorName, requesterId: ctx.actorId, assignee: '', state: 'pending', reportIds: [], createdAt: ctx.now });
         audit(root, ctx, 'qc', id, `${version.label} 返样待 QC 认领`, { view: 'qc-workbench', id });
         created.push(id);
     }
@@ -1484,7 +1486,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (f.qcTasks.some(t => p.kind === 'sample' && sample ? t.sampleId === sample.id : sourceKey(t.source) === sourceKey(s) && t.kind === p.kind))
                 fail('该准确来源已有QC任务，请在原任务追加复验');
             const id = ctx.id();
-            f.qcTasks.push({ id, code: code('QC', f.qcTasks, ctx), source: s, ...(sample ? { sampleId: sample.id } : {}), domain: p.domain, kind: p.kind, factory: text(p.factory, '工厂'), location: text(p.location, '检查地点'), contact: text(p.contact, '联系人', false), due: day(p.due, '预期检查日'), requestedBy: ctx.actorName, assignee: '', state: 'pending', reportIds: [], createdAt: ctx.now });
+            f.qcTasks.push({ id, code: code('QC', f.qcTasks, ctx), source: s, ...(sample ? { sampleId: sample.id } : {}), domain: p.domain, kind: p.kind, factory: text(p.factory, '工厂'), location: text(p.location, '检查地点'), contact: text(p.contact, '联系人', false), due: day(p.due, '预期检查日'), requestedBy: ctx.actorName, requesterId: ctx.actorId, assignee: '', state: 'pending', reportIds: [], createdAt: ctx.now });
             audit(root, ctx, 'qc', id, '已发起准确来源QC', { view: 'qc-workbench', id });
             return { id };
         }
@@ -1494,7 +1496,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (!fulfillmentProductionFact(root, branch.id)?.release) fail('生产分支尚未放行，不能安排巡检', 'PRECONDITION');
             if (!ctx.actorId) fail('需要真实账号');
             const id = ctx.id();
-            f.qcTasks.push({ id, code: code('QC', f.qcTasks, ctx), source: { kind: 'orderLine', orderId: branch.orderId, lineId: branch.lineId, productionId: branch.id }, domain: order.type, kind: 'patrol', factory: branch.factory, location: text(p.location, '检查地点'), contact: text(p.contact, '联系人', false), due: day(p.due, '预计检查日'), requestedBy: ctx.actorName, assignee: ctx.actorName, assigneeId: ctx.actorId, state: 'working', reportIds: [], createdAt: ctx.now });
+            f.qcTasks.push({ id, code: code('QC', f.qcTasks, ctx), source: { kind: 'orderLine', orderId: branch.orderId, lineId: branch.lineId, productionId: branch.id }, domain: order.type, kind: 'patrol', factory: branch.factory, location: text(p.location, '检查地点'), contact: text(p.contact, '联系人', false), due: day(p.due, '预计检查日'), requestedBy: ctx.actorName, requesterId: ctx.actorId, assignee: ctx.actorName, assigneeId: ctx.actorId, state: 'working', reportIds: [], createdAt: ctx.now });
             audit(root, ctx, 'qc', id, `QC 自建巡检：${text(p.purpose, '巡检目的', true, 500)}`, { view: 'qc-workbench', id });
             return { id };
         }
@@ -1519,7 +1521,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 f.stockMovements.push({ id: ctx.id(), stockId: stock.id, kind: 'unlock', quantity, location: stock.location, person: ctx.actorName, note: evidence, at: ctx.now, actor: ctx.actorName });
             }
             t.incoming!.releasedAt = ctx.now;
-            audit(root, ctx, 'qc', t.id, report.result === 'reject' ? `来料拒收 ${quantity} ${t.incoming!.unit}：${evidence}` : `来料放行 ${quantity} ${t.incoming!.unit}：${evidence}`, { view: 'procurement', id: receipt.purchaseId });
+            audit(root,ctx,'qc',t.id,report.result === 'reject' ? `来料拒收 ${quantity} ${t.incoming!.unit}：${evidence}` : `来料放行 ${quantity} ${t.incoming!.unit}：${evidence}`,{ view: 'procurement', id: receipt.purchaseId },notificationOwners(root,'qc',t.id));
             return { id: t.id };
         }
         case 'fulfillment.qc.claim': {
@@ -1560,7 +1562,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 t.assigneeId = to.id;
                 if (t.state === 'pending')
                     t.state = 'working';
-                audit(root, ctx, 'qc', t.id, `QC转交：${from}→${to.name}（${reason}）`, { view: 'qc-workbench', id: t.id });
+                audit(root,ctx,'qc',t.id,`QC转交：${from}→${to.name}（${reason}）`,{ view: 'qc-workbench', id: t.id },[to.id]);
             } else {
                 const due = day(p.due, '新检查日');
                 if (due < platformBusinessDate(ctx.now))
@@ -1569,7 +1571,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                     fail('新检查日与原日期相同');
                 const from = t.due || '未排期';
                 t.due = due;
-                audit(root, ctx, 'qc', t.id, `QC改期：${from}→${due}（${reason}）`, { view: 'qc-workbench', id: t.id });
+                audit(root,ctx,'qc',t.id,`QC改期：${from}→${due}（${reason}）`,{ view: 'qc-workbench', id: t.id },notificationOwners(root,'qc',t.id));
             }
             return { id: t.id };
         }
@@ -1647,7 +1649,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 if (p.result === 'reject')
                     job.risk = `QC 不通过：${opinion}`;
             }
-            audit(root, ctx, 'qc', t.id, `QC报告：${({ pass: '通过', conditional: '有保留通过', reject: '不通过' } as const)[p.result as MistQc['result']]}`, target(t.source));
+            audit(root,ctx,'qc',t.id,`QC报告：${({ pass: '通过', conditional: '有保留通过', reject: '不通过' } as const)[p.result as MistQc['result']]}`,target(t.source),notificationOwners(root,'qc',t.id));
             return { id, taskId: t.id };
         }
         case 'fulfillment.qc.confirm': {
@@ -1661,7 +1663,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 fail('不通过的QC报告不能确认采用');
             delete t.businessContinued;
             t.businessConfirmation = { result: p.result, note: text(p.note, '需求方确认依据'), actor: ctx.actorName, at: ctx.now };
-            audit(root, ctx, 'qc', t.id, '业务记录需求方样品确认', target(t.source));
+            audit(root,ctx,'qc',t.id,'业务记录需求方样品确认',target(t.source),notificationOwners(root,'qc',t.id));
             return { id: t.id };
         }
         case 'fulfillment.qc.continue': {
@@ -1678,7 +1680,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 if (job.risk?.startsWith('QC 不通过：'))
                     job.risk = '';
             }
-            audit(root, ctx, 'qc', t.id, `业务确认继续：${note}`, target(t.source));
+            audit(root,ctx,'qc',t.id,`业务确认继续：${note}`,target(t.source),notificationOwners(root,'qc',t.id));
             return { id: t.id };
         }
         case 'fulfillment.production.plan': {
@@ -1705,7 +1707,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             fact.release = { at: ctx.now, actor: ctx.actorName, note: text(p.note, '开产放行依据'), sampleChecks };
             const conditional = sampleChecks.filter(sample => sample.result === 'conditional');
             branch.risk = conditional.length ? `样品有保留通过：${conditional.map(sample => sample.sampleCode).join('、')}` : '';
-            audit(root, ctx, 'production', branch.id, '业务确认开产放行', { view: 'production-board', id: branch.id, productionId: branch.id });
+            audit(root,ctx,'production',branch.id,'业务确认开产放行',{ view: 'production-board', id: branch.id, productionId: branch.id },notificationOwners(root,'production',branch.id));
             return { id: branch.id };
         }
         case 'fulfillment.production.hold': {
@@ -1717,7 +1719,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const reason = text(p.reason, '暂停原因', true, 500);
             fact.hold = { at: ctx.now, actor: ctx.actorName, category: p.category, reason };
             branch.risk = `异常暂停（${PRODUCTION_HOLD_CATEGORIES[fact.hold.category]}）：${reason}`;
-            audit(root, ctx, 'production', branch.id, `生产异常暂停：${PRODUCTION_HOLD_CATEGORIES[fact.hold.category]}（${reason}）`, { view: 'production-board', id: branch.id, productionId: branch.id });
+            audit(root,ctx,'production',branch.id,`生产异常暂停：${PRODUCTION_HOLD_CATEGORIES[fact.hold.category]}（${reason}）`,{ view: 'production-board', id: branch.id, productionId: branch.id },notificationOwners(root,'production',branch.id));
             return { id: branch.id };
         }
         case 'fulfillment.production.resume': {
@@ -1728,7 +1730,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             (fact.holdLog ||= []).push({ ...fact.hold!, resumedAt: ctx.now, resumedBy: ctx.actorName, resumeNote: note });
             delete fact.hold;
             if (branch.risk?.startsWith('异常暂停')) branch.risk = '';
-            audit(root, ctx, 'production', branch.id, `恢复生产（${note}）`, { view: 'production-board', id: branch.id, productionId: branch.id });
+            audit(root,ctx,'production',branch.id,`恢复生产（${note}）`,{ view: 'production-board', id: branch.id, productionId: branch.id },notificationOwners(root,'production',branch.id));
             return { id: branch.id };
         }
         case 'fulfillment.production.complete': {
@@ -1846,7 +1848,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 const order = root.orders.find(o => o.id === purchase.orderId);
                 if (order && to.due !== amendment.from.due && to.due > order.due) root.tasks.unshift({ id: ctx.id(), title: `采购 ${purchase.code} 变更后交期 ${to.due} 晚于订单 ${order.code} 交期 ${order.due}，请核对订单交期`, due: order.due, done: false, kind: `purchase-late:${purchase.id}`, target: { view: 'orders/detail', id: order.id, orderLineId: purchase.lineId }, assigneeIds: mistOrderOwnerIds(root, order.id) });
             }
-            audit(root, ctx, 'procurement', purchase.id, `合同变更${p.decision === 'approved' ? '已批准' : '退回'}：${purchaseAmendmentText(purchase, amendment)}；${note}`, { view: 'procurement', id: purchase.id });
+            audit(root,ctx,'procurement',purchase.id,`合同变更${p.decision === 'approved' ? '已批准' : '退回'}：${purchaseAmendmentText(purchase, amendment)}；${note}`,{ view: 'procurement', id: purchase.id },[amendment.requesterId]);
             return { id: purchase.id };
         }
         case 'fulfillment.procurement.amend.withdraw': {
@@ -1962,7 +1964,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 root.productions.push({ id: productionId, sourcePurchaseId: purchase.id, code: 'FUL-' + purchase.code, orderId: order.id, lineId: line.id, order: order.code, name: purchase.description, factory: purchase.supplier, qty: purchase.quantity, due: purchase.due, pct: 0, img: line.img, col: purchase.kind === 'processing' ? 'cut' : 'finish', risk: '' });
                 productionFact(root, productionId);
             }
-            audit(root, ctx, 'procurement', purchase.id, `采购审批${p.decision === 'approved' ? '通过' : '退回'}：${note}`, { view: 'procurement', id: purchase.id });
+            audit(root,ctx,'procurement',purchase.id,`采购审批${p.decision === 'approved' ? '通过' : '退回'}：${note}`,{ view: 'procurement', id: purchase.id },[purchase.requesterId]);
             return { id: purchase.id };
         }
         case 'fulfillment.procurement.receive': {
@@ -2011,11 +2013,11 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 f.stockMovements.push({ id: ctx.id(), stockId, kind: 'receive', quantity, location, person: purchase.supplier, note: evidence, at: ctx.now, actor: ctx.actorName });
                 if (iqc) {
                     const taskId = ctx.id();
-                    f.qcTasks.push({ id: taskId, code: code('QC', f.qcTasks, ctx), source: { kind: 'orderLine', orderId: purchase.orderId, lineId: purchase.lineId }, domain: purchase.domain, kind: 'incoming', incoming: { receiptId: id, stockId, quantity, unit: purchase.unit, name: stockName }, factory: purchase.supplier, location, contact: '', due: platformBusinessDate(ctx.now), requestedBy: ctx.actorName, assignee: '', state: 'pending', reportIds: [], createdAt: ctx.now });
+                    f.qcTasks.push({ id: taskId, code: code('QC', f.qcTasks, ctx), source: { kind: 'orderLine', orderId: purchase.orderId, lineId: purchase.lineId }, domain: purchase.domain, kind: 'incoming', incoming: { receiptId: id, stockId, quantity, unit: purchase.unit, name: stockName }, factory: purchase.supplier, location, contact: '', due: platformBusinessDate(ctx.now), requestedBy: ctx.actorName, requesterId: ctx.actorId, assignee: '', state: 'pending', reportIds: [], createdAt: ctx.now });
                     audit(root, ctx, 'qc', taskId, `${purchase.code} 来料 ${quantity} ${purchase.unit} 待检验`, { view: 'qc-workbench', id: taskId });
                 }
             }
-            audit(root, ctx, 'procurement', purchase.id, `登记真实交付 ${quantity} ${purchase.unit}${purchase.received !== purchase.quantity ? ' · 数量差异待处理' : ''}`, { view: 'orders/detail', id: purchase.orderId, orderLineId: purchase.lineId });
+            audit(root,ctx,'procurement',purchase.id,`登记真实交付 ${quantity} ${purchase.unit}${purchase.received !== purchase.quantity ? ' · 数量差异待处理' : ''}`,{ view: 'orders/detail', id: purchase.orderId, orderLineId: purchase.lineId },notificationOwners(root,'procurement',purchase.id));
             return { id, purchaseId: purchase.id };
         }
         case 'fulfillment.procurement.rejectReceived': {
@@ -2043,7 +2045,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 branch.col = 'qc';
                 for (const task of f.qcTasks) if (task.kind === 'production' && task.source.kind === 'orderLine' && task.source.productionId === branch.id && task.state === 'reported') task.state = 'working';
             }
-            audit(root, ctx, 'procurement', purchase.id, `收货后转为拒收 ${quantity} ${purchase.unit} · ${evidence}`, { view: 'procurement', id: purchase.id });
+            audit(root,ctx,'procurement',purchase.id,`收货后转为拒收 ${quantity} ${purchase.unit} · ${evidence}`,{ view: 'procurement', id: purchase.id },notificationOwners(root,'procurement',purchase.id));
             return { id, purchaseId: purchase.id };
         }
         case 'fulfillment.procurement.return': {
@@ -2063,7 +2065,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const id = ctx.id();
             (receipt.returns ||= []).push({ id, quantity, disposition: p.disposition, date, evidence, ...(returnNo ? { returnNo } : {}), ...(freight ? { freight, freightBy: p.freightBy } : {}), ...(deduction ? { deduction } : {}), actor: ctx.actorName, at: ctx.now });
             const money = [freight ? `运费 ${freight} ${purchase.currency}（${p.freightBy === 'supplier' ? '供应商承担' : '我方承担'}）` : '', deduction ? `扣款 ${deduction} ${purchase.currency}` : ''].filter(Boolean).join(' · ');
-            audit(root, ctx, 'procurement', purchase.id, `拒收货物退回供应商 ${quantity} ${purchase.unit}${returnNo ? ` · 退货单 ${returnNo}` : ''} · ${p.disposition === 'replace' ? '供应商补发，补货另行收货' : '不再补发，按实收结算'}${money ? ' · ' + money : ''} · ${evidence}`, { view: 'orders/detail', id: purchase.orderId, orderLineId: purchase.lineId });
+            audit(root,ctx,'procurement',purchase.id,`拒收货物退回供应商 ${quantity} ${purchase.unit}${returnNo ? ` · 退货单 ${returnNo}` : ''} · ${p.disposition === 'replace' ? '供应商补发，补货另行收货' : '不再补发，按实收结算'}${money ? ' · ' + money : ''} · ${evidence}`,{ view: 'orders/detail', id: purchase.orderId, orderLineId: purchase.lineId },notificationOwners(root,'procurement',purchase.id));
             return { id, purchaseId: purchase.id };
         }
         case 'fulfillment.procurement.return.reverse': {
@@ -2076,7 +2078,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const carriedBy = (root.payables?.settlements || []).find(s => (s.state === 'pending' || s.state === 'confirmed') && s.disputes.some(d => d.returnId === row.id));
             if (carriedBy) fail(`该退货扣款已带入结算 ${carriedBy.code}，请先撤回或退回该结算`, 'PRECONDITION');
             row.reversed = { at: ctx.now, actor: ctx.actorName, reason };
-            audit(root, ctx, 'procurement', purchase.id, `冲回退换登记 ${row.quantity} ${purchase.unit}：${reason}`, { view: 'orders/detail', id: purchase.orderId, orderLineId: purchase.lineId });
+            audit(root,ctx,'procurement',purchase.id,`冲回退换登记 ${row.quantity} ${purchase.unit}：${reason}`,{ view: 'orders/detail', id: purchase.orderId, orderLineId: purchase.lineId },notificationOwners(root,'procurement',purchase.id));
             return { id: row.id, purchaseId: purchase.id };
         }
         case 'fulfillment.inventory.move': {
@@ -2142,7 +2144,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const previous = issue.shipmentLinkHistory?.at(-1);
             if (issue.shipmentCorrectionHold && previous && !previous.correctionEvidence) previous.correctionEvidence = issue.shipmentCorrectionHold.reason;
             delete issue.shipmentCorrectionHold;
-            audit(root, ctx, 'inventory', stock.id, `关联出运 ${shipment.code}`, { view: 'shipments', id: shipment.id });
+            audit(root,ctx,'inventory',stock.id,`关联出运 ${shipment.code}`,{ view: 'shipments', id: shipment.id },notificationOwners(root,'inventory',stock.id));
             return { id: issue.id };
         }
         case 'fulfillment.inventory.shipment.unlink': {
@@ -2181,7 +2183,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (returned.quarantineTaskId || f.qcTasks.some(task => task.kind === 'quarantine' && task.quarantine?.returnId === returned.id)) fail('该退回已有复检任务');
             const order = get(root.orders, stock.orderId, '来源订单'), id = ctx.id();
             const due = day(p.due, '预计检查日');
-            f.qcTasks.push({ id, code: code('QC', f.qcTasks, ctx), source: { kind:'orderLine', orderId:stock.orderId, lineId:stock.lineId }, domain: order.type, kind:'quarantine', quarantine:{ returnId:returned.id, stockId:stock.id, quantity:returned.quarantinedQuantity!, unit:stock.unit, name:stock.name }, factory:'仓库', location:returned.location, contact:returned.person, due, requestedBy:ctx.actorName, assignee:'', state:'pending', reportIds:[], createdAt:ctx.now });
+            f.qcTasks.push({ id, code: code('QC', f.qcTasks, ctx), source: { kind:'orderLine', orderId:stock.orderId, lineId:stock.lineId }, domain: order.type, kind:'quarantine', quarantine:{ returnId:returned.id, stockId:stock.id, quantity:returned.quarantinedQuantity!, unit:stock.unit, name:stock.name }, factory:'仓库', location:returned.location, contact:returned.person, due, requestedBy:ctx.actorName, requesterId:ctx.actorId, assignee:'', state:'pending', reportIds:[], createdAt:ctx.now });
             returned.quarantineTaskId = id;
             audit(root,ctx,'qc',id,'隔离料已送复检',{view:'qc-workbench',id});
             return { id };
@@ -2286,7 +2288,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             }
             else
                 f.shipments.push(row);
-            audit(root, ctx, 'shipment', id, '保存出运请求', { view: 'shipments', id });
+            audit(root,ctx,'shipment',id,'保存出运请求',{ view: 'shipments', id },notificationOwners(root,'shipment',id));
             return { id };
         }
         case 'fulfillment.shipments.pack': {
@@ -2342,7 +2344,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 (shipment.bookingChanges ||= []).push({ from: previous, to: booking, reason: note, ...(fee ? { fee } : {}), at: ctx.now, actor: ctx.actorName });
             }
             shipment.booking = booking; shipment.plannedDate = plannedDate; shipment.note = note;
-            audit(root, ctx, 'shipment', shipment.id, `更新运输安排：${previous || '未订舱'} → ${booking || '未订舱'}；计划 ${plannedDate || '未定'}${note ? '；' + note : ''}`, { view: 'shipments', id: shipment.id });
+            audit(root,ctx,'shipment',shipment.id,`更新运输安排：${previous || '未订舱'} → ${booking || '未订舱'}；计划 ${plannedDate || '未定'}${note ? '；' + note : ''}`,{ view: 'shipments', id: shipment.id },notificationOwners(root,'shipment',shipment.id));
             return { id: shipment.id };
         }
         case 'fulfillment.shipments.arrive': {
@@ -2352,7 +2354,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const at = instant(p.at, ctx, '实际到港时间');
             if (s.departedAt && at < s.departedAt) fail('到港不得早于离港');
             s.arrival = { at, evidence: text(p.evidence, '到港依据'), actor: ctx.actorName };
-            audit(root, ctx, 'shipment', s.id, '已登记到港', { view: 'shipments', id: s.id });
+            audit(root,ctx,'shipment',s.id,'已登记到港',{ view: 'shipments', id: s.id },notificationOwners(root,'shipment',s.id));
             return { id: s.id };
         }
         case 'fulfillment.shipments.deliver': {
@@ -2362,7 +2364,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const at = instant(p.at, ctx, '签收时间');
             if ((s.arrival?.at || s.departedAt || '') > at) fail('签收不得早于到港 / 离港');
             s.delivered = { at, receiver: text(p.receiver, '签收人'), evidence: text(p.evidence, '签收依据（POD）'), fileIds: files(root, p.fileIds), actor: ctx.actorName };
-            audit(root, ctx, 'shipment', s.id, `客户已签收：${s.delivered.receiver}`, { view: 'shipments', id: s.id });
+            audit(root,ctx,'shipment',s.id,`客户已签收：${s.delivered.receiver}`,{ view: 'shipments', id: s.id },notificationOwners(root,'shipment',s.id));
             return { id: s.id };
         }
         case 'fulfillment.shipments.ready': {
@@ -2380,7 +2382,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             assertCurrentShipmentTolerance(root, s);
             requiredShipmentDocuments(root, s);
             s.state = 'ready';
-            audit(root, ctx, 'shipment', s.id, '单据准备完毕，返回业务发送', { view: 'shipments', id: s.id });
+            audit(root,ctx,'shipment',s.id,'单据准备完毕，返回业务发送',{ view: 'shipments', id: s.id },notificationOwners(root,'shipment',s.id));
             return { id: s.id };
         }
         case 'fulfillment.shipments.sent': {
@@ -2418,8 +2420,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             s.state = 'departed';
             // Finished goods held in our warehouse for these lines leave stock with the shipment.
             autoIssueForDeparture(root, s, ctx);
-            audit(root, ctx, 'shipment', s.id, '已登记实际出运', { view: 'orders/detail', id: s.lines[0].orderId, orderLineId: s.lines[0].lineId });
-            if (hold.risk?.release) { Object.assign(hold.risk.release, { shipmentId: s.id, shipmentCode: s.code, usedAt: ctx.now }); audit(root, ctx, 'risk', hold.risk.id, `带风险放行已用于 ${s.code}（往来冻结中，下一票须重新申请）`, { view: 'risks', id: hold.risk.id }); }
+            audit(root,ctx,'shipment',s.id,'已登记实际出运',{ view: 'orders/detail', id: s.lines[0].orderId, orderLineId: s.lines[0].lineId },notificationOwners(root,'shipment',s.id));
+            if (hold.risk?.release) { Object.assign(hold.risk.release, { shipmentId: s.id, shipmentCode: s.code, usedAt: ctx.now }); audit(root,ctx,'risk',hold.risk.id,`带风险放行已用于 ${s.code}（往来冻结中，下一票须重新申请）`,{ view: 'risks', id: hold.risk.id },notificationOwners(root,'risk',hold.risk.id)); }
             return { id: s.id };
         }
         case 'fulfillment.shipments.cancel': {
@@ -2472,7 +2474,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 Object.assign(old, row);
             else
                 f.customs.push(row);
-            audit(root, ctx, 'customs', id, `登记外部报关事实：${p.status}`, { view: 'shipments', id: s.id });
+            audit(root,ctx,'customs',id,`登记外部报关事实：${({draft:'草稿',submitted:'已申报',cleared:'已清关'} as Record<string,string>)[p.status]}`,{ view: 'shipments', id: s.id },notificationOwners(root,'customs',id));
             return { id };
         }
         case 'fulfillment.customs.amend': {
@@ -2488,7 +2490,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             c.fileIds = [...new Set([...c.fileIds, ...fileIds])];
             // 退关：报关单不再作为本票离港依据，出运回到准备中。
             if (p.kind === 'withdraw') { c.status = 'draft'; if (shipment.state === 'ready') shipment.state = 'preparing'; }
-            audit(root, ctx, 'customs', c.id, `${({ amend: '改单', withdraw: '退关', attach: '补充附件' } as Record<string, string>)[p.kind as string]}：${reason}`, { view: 'shipments', id: shipment.id });
+            audit(root,ctx,'customs',c.id,`${({ amend: '改单', withdraw: '退关', attach: '补充附件' } as Record<string, string>)[p.kind as string]}：${reason}`,{ view: 'shipments', id: shipment.id },notificationOwners(root,'customs',c.id));
             return { id: c.id };
         }
         case 'fulfillment.documents.save': {
@@ -2553,13 +2555,13 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                     fail('CI金额超过来源订单尚未开票额度');
                 const id = ctx.id();
                 // CI 只形成待财务确认的应收：确认前不计入余额、账龄、报表、催收，也不能核销。
-                root.invoices.push({ id, code: d.number, orderId: order.id, order: order.code, customer: order.customer, due: d.dueDate, amount, open: 0, currency: order.currency, financeStatus: 'pending', sourceDocumentId: d.id, issuedAt: platformBusinessDate(ctx.now) });
+                root.invoices.push({ id, code: d.number, orderId: order.id, order: order.code, customer: order.customer, due: d.dueDate, amount, open: 0, currency: order.currency, financeStatus: 'pending', sourceDocumentId: d.id, issuedById: ctx.actorId, issuedAt: platformBusinessDate(ctx.now) });
                 d.invoiceId = id;
                 }
             }
             d.status = 'issued';
             d.issuedAt = ctx.now;
-            audit(root, ctx, 'document', d.id, '签发单据并返回来源', { view: d.invoiceId ? 'invoices' : 'shipments', id: d.invoiceId || s.id });
+            audit(root,ctx,'document',d.id,'签发单据并返回来源',{ view: d.invoiceId ? 'invoices' : 'shipments', id: d.invoiceId || s.id },notificationTargetOwners(root,{ view: d.invoiceId ? 'invoices' : 'shipments', id: d.invoiceId || s.id }));
             return { id: d.id, invoiceId: d.invoiceId };
         }
         case 'fulfillment.documents.archiveExternal': {

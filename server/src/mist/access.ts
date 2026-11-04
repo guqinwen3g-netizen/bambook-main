@@ -119,6 +119,11 @@ export function canReadTarget(actor: TokenPayload, target?: { view?: string }) {
 /** 按账号自身读权限裁剪状态；被隐藏的数据结构用空公司的同名结构替换，保证页面结构完整。 */
 export function projectState(state: MistState, actor: TokenPayload, empty: () => MistState, ownerId?: string, scope?: MistDataScope): { state: MistState; hidden: Section[];costMaterialBasis?:InternalFabricCostBasis[] | null } {
   const hidden = hiddenSections(actor), next: MistState = scope ? applyDataScope(state, scope, actor.userId) : { ...state };
+  // Legacy company activity had no recipients. Keep it in events, never broadcast it to accounts.
+  next.notifications = (next.notifications || []).filter(item => item.recipientIds?.includes(actor.userId)).map(item => {
+    const {readBy, ...notification} = item;
+    return {...notification, recipientIds: [actor.userId], readAt: readBy?.[actor.userId] ?? null};
+  });
   // Account balances require the complete company ledger; a row-scoped projection cannot compute them safely.
   if (scope && !hidden.some(section => section.key === 'bankAccounts')) hidden.push(MIST_READ_SECTIONS.find(section => section.key === 'bankAccounts')!);
   // 无 sensitive:tax_base 时退税到账流水不下发；账户余额须完整流水，同时隐藏公司银行账户。

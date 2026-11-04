@@ -1,3 +1,4 @@
+import {notifyMist} from './mistNotifications';
 import {assertReplacementOrder} from './mistClaimReplacement';
 import {normalizeGarmentFulfillment,normalizeInternalSupply,assertInternalFabricOrderChange,GARMENT_FULFILLMENT_LABELS,CMT_INCLUDED_ITEM_LABELS,type InternalSupply} from './mistInternalFabric';
 /** Formal order approval and proposed commercial changes, independent of the Mist view layer. */
@@ -160,7 +161,7 @@ export function applyOrderGovernanceCommand(root:MistState,command:OrderGovernan
    g.changeDraft={contract,orderPatch,lines,reason,status:'draft'};event(root,context,order,'保存订单变更草稿，原批准内容继续生效');
   }else{g.contract=contract;g.status='draft';applySnapshot(root,order,{...snapshot(root,order),...orderPatch,contract,lines});order.state='订单草稿';order.tone='neutral';event(root,context,order,'保存订单合同草稿');}
   if((p.orderPatch as Record<string,unknown>|undefined)?.owner!==undefined)fail('负责人须按账号选择');
-  if(p.orderPatch?.ownerId!==undefined&&p.orderPatch.ownerId!==order.ownerId){const next=resolveMember(context,p.orderPatch.ownerId,'订单负责人');event(root,context,order,ownerChangeText('负责人',order.owner,next.name));order.owner=next.name;order.ownerId=next.id;}order.updatedAt=context.now;return{id,orderId:id};
+  if(p.orderPatch?.ownerId!==undefined&&p.orderPatch.ownerId!==order.ownerId){const next=resolveMember(context,p.orderPatch.ownerId,'订单负责人');event(root,context,order,ownerChangeText('负责人',order.owner,next.name));order.owner=next.name;order.ownerId=next.id;notifyMist(root,context,{title:order.code+' 负责人已变更',detail:context.actorName,target:{view:'orders/detail',id:order.id}},[next.id]);}order.updatedAt=context.now;return{id,orderId:id};
  }
  if(command.type==='order.governance.discardChange'){if(g.changeDraft?.status==='pending')fail('审批中的变更不能直接删除');delete g.changeDraft;event(root,context,order,'放弃尚未生效的变更草稿');return{id,orderId:id};}
  if(command.type==='order.governance.submit'){
@@ -179,7 +180,7 @@ export function applyOrderGovernanceCommand(root:MistState,command:OrderGovernan
  if(!sameCommercialSnapshot(snapshot(root,order,round!.kind==='change'?g.changeDraft:undefined),round!.snapshot))fail('订单内容与提交快照不一致，请重新提交','CONFLICT');
  if(p.decision==='approved'){validateSubmission(root,round!.snapshot,context);const before=root.orderLines.filter(l=>l.orderId===id).map(snapshotLine),beforeDue=order.due;if(round!.kind==='change')assertOrderChangeAllowed(root,order,round!.snapshot.lines,round!.snapshot.currency);applySnapshot(root,order,round!.snapshot);if(round!.kind==='change')createOrderChangeTasks(root,context,order,before,round!.snapshot.lines,beforeDue);g.contract=structuredClone(round!.snapshot.contract);g.status='approved';g.effectiveVersion++;g.approvedAt=context.now;g.approvedBy=context.actorId;g.approvedSnapshot=structuredClone(round!.snapshot);delete g.changeDraft;order.state='已批准待履约';order.tone='ok';}
  else if(round!.kind==='change'){if(g.changeDraft)g.changeDraft.status='rejected';}else{g.status='rejected';order.state='主单已退回';order.tone='bad';}
- round!.status=p.decision;round!.decidedBy=context.actorId;round!.decidedName=context.actorName;round!.decidedAt=context.now;round!.note=note;root.tasks.filter(t=>t.kind==='order-approval'&&t.target.id===id).forEach(t=>t.done=true);event(root,context,order,'订单审批'+(p.decision==='approved'?'通过':'退回')+'：'+note);root.notifications.unshift({id:context.id(),title:order.code+' 主单审批'+(p.decision==='approved'?'通过':'退回'),detail:note,at:context.now,readAt:null,target:{view:'orders/detail',id}});order.updatedAt=context.now;return{id,orderId:id};
+ round!.status=p.decision;round!.decidedBy=context.actorId;round!.decidedName=context.actorName;round!.decidedAt=context.now;round!.note=note;root.tasks.filter(t=>t.kind==='order-approval'&&t.target.id===id).forEach(t=>t.done=true);event(root,context,order,'订单审批'+(p.decision==='approved'?'通过':'退回')+'：'+note);notifyMist(root,context,{title:order.code+' 主单审批'+(p.decision==='approved'?'通过':'退回'),detail:note,target:{view:'orders/detail',id}},[round!.requesterId]);order.updatedAt=context.now;return{id,orderId:id};
 }
 /* ── BB-ORD-5：条目按实际结案 ── */
 const CLOSE_MARK='#close:';
@@ -208,7 +209,7 @@ function decideClosure(root:MistState,p:{id:string;decision:'approved'|'rejected
  if(!['approved','rejected'].includes(p.decision))fail('审批决定无效');const note=text(p.note,'审批意见',true);
  const facts=lineShipmentFacts(root,line.id);if(order.replacementSource&&p.decision==='approved'&&Math.round(facts.departed*10000)!==Math.round(line.qty*10000))fail('补发货物尚未发齐，不能结案','PRECONDITION');if(p.decision==='approved'&&(facts.open.length||facts.departed!==c!.quantity))fail('条目出运事实已变化，请退回后重新申请结案','CONFLICT');
  c!.status=p.decision==='approved'?'closed':'rejected';c!.decidedBy=context.actorId;c!.decidedName=context.actorName;c!.decidedAt=context.now;c!.note=note;
- event(root,context,order,`条目结案审批${p.decision==='approved'?'通过':'退回'}：${line.style}，${note}`);root.notifications.unshift({id:context.id(),title:`${order.code} · ${line.style} 结案审批${p.decision==='approved'?'通过':'退回'}`,detail:note,at:context.now,readAt:null,target:{view:'orders/detail',id:order.id}});order.updatedAt=context.now;
+ event(root,context,order,`条目结案审批${p.decision==='approved'?'通过':'退回'}：${line.style}，${note}`);notifyMist(root,context,{title:`${order.code} · ${line.style} 结案审批${p.decision==='approved'?'通过':'退回'}`,detail:note,target:{view:'orders/detail',id:order.id}},[c!.requesterId]);order.updatedAt=context.now;
  return{id:order.id,orderId:order.id,lineId:line.id,closure:c!.status};
 }
 function closureReviews(root:MistState):MistReviewTask[]{
@@ -242,7 +243,7 @@ function decideOverShip(root:MistState,p:{id:string;decision:'approved'|'rejecte
  if(!r.reviewerIds.includes(context.actorId)||!reviewers(context,order.type).includes(context.actorId))fail('当前账号不在本次及当前有效审批名单','FORBIDDEN');
  if(!['approved','rejected'].includes(p.decision))fail('审批决定无效');const note=text(p.note,'审批意见',true);
  r.status=p.decision==='approved'?'approved':'rejected';r.decidedBy=context.actorId;r.decidedName=context.actorName;r.decidedAt=context.now;r.note=note;
- event(root,context,order,`超量出运审批${r.status==='approved'?'通过':'退回'}：${line.style} 累计可出 ${r.quantity} ${line.unit}，${note}`);root.notifications.unshift({id:context.id(),title:`${order.code} · ${line.style} 超量出运审批${r.status==='approved'?'通过':'退回'}`,detail:note,at:context.now,readAt:null,target:{view:'orders/detail',id:order.id}});order.updatedAt=context.now;
+ event(root,context,order,`超量出运审批${r.status==='approved'?'通过':'退回'}：${line.style} 累计可出 ${r.quantity} ${line.unit}，${note}`);notifyMist(root,context,{title:`${order.code} · ${line.style} 超量出运审批${r.status==='approved'?'通过':'退回'}`,detail:note,target:{view:'orders/detail',id:order.id}},[r.requesterId]);order.updatedAt=context.now;
  return{id:order.id,orderId:order.id,lineId:line.id,overShip:r.status};
 }
 function overShipReviews(root:MistState):MistReviewTask[]{
@@ -323,7 +324,7 @@ function decideCancel(root:MistState,p:{id:string;decision:'approved'|'rejected'
  }
  else if(order.state==='取消审批中'){order.state='已批准待履约';order.tone='ok';}
  event(root,context,order,`取消订单审批${p.decision==='approved'?'通过，订单已取消':'退回，订单恢复'}：${note}`+(created?`；已生成 ${created} 条关联处理待办`:''));
- root.notifications.unshift({id:context.id(),title:`${order.code} 取消订单审批${p.decision==='approved'?'通过':'退回'}`,detail:note,at:context.now,readAt:null,target:{view:'orders/detail',id:order.id}});order.updatedAt=context.now;
+ notifyMist(root,context,{title:`${order.code} 取消订单审批${p.decision==='approved'?'通过':'退回'}`,detail:note,target:{view:'orders/detail',id:order.id}},[c!.requesterId]);order.updatedAt=context.now;
  return{id:order.id,orderId:order.id,cancellation:c!.status,tasks:created};
 }
 function cancelReviews(root:MistState):MistReviewTask[]{

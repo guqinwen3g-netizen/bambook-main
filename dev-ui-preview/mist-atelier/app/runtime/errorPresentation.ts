@@ -14,3 +14,15 @@ export function useUploadRecoveryClaim(requestId: string | null) {
   }, [requestId]);
 }
 export const useClaimedUploadRecovery = () => useSyncExternalStore(listener => { claimListeners.add(listener); return () => { claimListeners.delete(listener); }; }, () => claimedUpload, () => null);
+
+/** 页面自己展示并处理“上次操作待核对”（核对后还要做本页善后）时声明接管，外壳不再重复同一条提示。 */
+let claimedPending = 0;
+const pendingListeners = new Set<() => void>();
+export function usePendingRecoveryClaim(active: boolean) {
+  useEffect(() => {
+    if (!active) return;
+    claimedPending++; pendingListeners.forEach(listener => listener());
+    return () => { claimedPending--; pendingListeners.forEach(listener => listener()); };
+  }, [active]);
+}
+export const usePendingRecoveryClaimed = () => useSyncExternalStore(listener => { pendingListeners.add(listener); return () => { pendingListeners.delete(listener); }; }, () => claimedPending > 0, () => false);

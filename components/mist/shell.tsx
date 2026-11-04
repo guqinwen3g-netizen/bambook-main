@@ -141,7 +141,7 @@ export function MistSidebarPresentation({ sections, activeId, onNavigate, collap
 /* ───────────── Topbar ───────────── */
 export type Crumb = { label: React.ReactNode; onClick?: () => void; mono?: boolean; hideOnMobile?: boolean };
 export function MistTopbar({ crumbs, scrolled, sync, theme, onToggleTheme, onSearch, notifications, onAsk, extra, onBack, backLabel = '返回' }: {
-  crumbs: Crumb[]; scrolled?: boolean; sync?: { state?: 'ok' | 'syncing' | 'offline'; text: string };
+  crumbs: Crumb[]; scrolled?: boolean; sync?: { state?: 'ok' | 'syncing' | 'offline'; text: string; /** 有外壳提示被收起时，点同步状态重新展开 */ onClick?: () => void; expanded?: boolean };
   theme?: ThemeMode; onToggleTheme?: () => void; onSearch?: () => void; notifications?: { unread: boolean; onClick: () => void }; onAsk?: () => void; extra?: React.ReactNode;
   /** 二级页（详情、新建）返回上一页。手机端和独立窗口（PWA）没有浏览器返回键，顶栏常驻返回按钮。 */
   onBack?: () => void; backLabel?: string;
@@ -162,7 +162,7 @@ export function MistTopbar({ crumbs, scrolled, sync, theme, onToggleTheme, onSea
         })}
       </div>
       <div className="mist-top-actions">
-        {sync && <span className="mist-sync" data-state={sync.state && sync.state !== 'ok' ? sync.state : undefined}><i />{uiText(sync.text)}</span>}
+        {sync && (sync.onClick ? <button type="button" className="mist-sync" data-state={sync.state && sync.state !== 'ok' ? sync.state : undefined} aria-expanded={sync.expanded} onClick={sync.onClick}><i />{uiText(sync.text)}</button> : <span className="mist-sync" data-state={sync.state && sync.state !== 'ok' ? sync.state : undefined}><i />{uiText(sync.text)}</span>)}
         {extra}
         {onSearch && <IconButton icon={Search} label={uiText("搜索")} onClick={onSearch} />}
         {notifications && <IconButton icon={Bell} label={uiText("通知")} dot={notifications.unread} onClick={notifications.onClick} />}
@@ -178,7 +178,11 @@ export function MistTopbar({ crumbs, scrolled, sync, theme, onToggleTheme, onSea
  * 整站外壳：侧栏 + 圆角画布（顶栏 + 滚动区）。
  * children 放 <MistPage>。scrollKey 变化时滚动回顶部（切换页面时传 view id）。
  */
-export function MistAppShell({ sidebar, topbar, collapsed, children, scrollKey }: { sidebar: React.ReactNode; topbar: (scrolled: boolean) => React.ReactNode; collapsed?: boolean; children: React.ReactNode; scrollKey?: string }) {
+/**
+ * notices：外壳级状态（读取失败、待核对请求、公司管理模式等）。浮在顶栏下方、盖住内容顶端，不进入页面流，
+ * 出现或消失时页面标题与模块不移动。页面内与具体对象相关的提示仍由页面自己放。
+ */
+export function MistAppShell({ sidebar, topbar, collapsed, children, scrollKey, notices, onCloseNotices }: { sidebar: React.ReactNode; topbar: (scrolled: boolean) => React.ReactNode; collapsed?: boolean; children: React.ReactNode; scrollKey?: string; notices?: React.ReactNode; onCloseNotices?: () => void }) {
   const ref = React.useRef<HTMLDivElement>(null);
   const [footerTarget, setFooterTarget] = React.useState<HTMLDivElement | null>(null);
   const [footerHeight, setFooterHeight] = React.useState(0);
@@ -220,6 +224,7 @@ export function MistAppShell({ sidebar, topbar, collapsed, children, scrollKey }
         {sidebar}
         <main className="mist-canvas" style={{ '--mist-form-footer-height': `${footerHeight}px` } as React.CSSProperties}>
           {topbar(scrolled)}
+          {notices && <div className="mist-shell-notices" role="region" aria-label={uiText("系统状态")}>{React.Children.toArray(notices).map((notice, i) => <div key={i} className="mist-shell-notice">{notice}{i === 0 && onCloseNotices && <IconButton className="mist-shell-notices-close" icon={X} size="sm" label={uiText("收起")} onClick={onCloseNotices} />}</div>)}</div>}
           <div className="mist-scroll" ref={ref} onScroll={e => setScrolled((e.target as HTMLDivElement).scrollTop > 4)}>{uiText(children)}</div>
           <div className="mist-form-dock" ref={setFooterTarget} />
         </main>
