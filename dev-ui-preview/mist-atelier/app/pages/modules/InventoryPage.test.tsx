@@ -33,7 +33,7 @@ afterEach(()=>{act(()=>root.unmount());host.remove();});
 it('summarises each business group per unit without ever adding different units together',async()=>{
   store.state!.fulfillment.stock.push(stock('a',{available:400}),stock('b',{name:'里布',unit:'米',available:860,quantity:860}),stock('c',{name:'主唛补单',available:20}),stock('f',{orderId:'of',lineId:'lf',name:'府绸坯布',unit:'米',available:300,quantity:300}));
   render();
-  const tabs=getByRole(host,'tablist',{name:'库存业务板块'}),garment=getByRole(tabs,'tab',{name:/成衣库存/}),fabric=getByRole(tabs,'tab',{name:/面料库存/});
+  const tabs=getByRole(host,'tablist',{name:'库存业务板块'}),garment=getByRole(tabs,'tab',{name:/成衣业务/}),fabric=getByRole(tabs,'tab',{name:/面料业务/});
   expect(garment.getAttribute('aria-selected')).toBe('true');
   expect(garment.textContent).toContain('3 个批次');
   expect(garment.textContent).toContain('860米');expect(garment.textContent).toContain('420个');expect(garment.textContent).not.toContain('1280');

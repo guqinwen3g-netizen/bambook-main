@@ -28,7 +28,8 @@ import { businessWhen } from './pageKit';
 type Domain = 'fabric' | 'garment';
 type StateFilter = 'all' | 'available' | 'inspecting' | 'isolated' | 'cleared';
 type SourceFilter = 'all' | 'purchase' | 'claimReturn' | 'other';
-const DOMAIN_LABEL: Record<Domain, string> = { fabric: '面料库存', garment: '成衣库存' };
+// Split by business group, not by material: the garment group's stock also holds trims and fabric for its orders.
+const DOMAIN_LABEL: Record<Domain, string> = { fabric: '面料业务', garment: '成衣业务' };
 const MOVE_LABEL: Record<string, string> = { receive: '实际入库', issue: '出库', return: '按原出库退回', move: '移位', lock: '隔离锁定', unlock: '批准解锁', scrap: '报废出库', reject: '转为拒收', adjust: '盘点调整', transferOut: '调拨出仓', transferIn: '调拨到仓', reserve: '预留', release: '释放预留' };
 /** Lots older than this with goods still available are flagged as slow-moving. */
 const SLOW_DAYS = 90;
@@ -201,7 +202,7 @@ export function InventoryPage() {
   const filtersOn = !!needle || stateFilter !== 'all' || sourceFilter !== 'all' || !!warehouseFilter;
   const empty = filtersOn && domainRows.length
     ? <EmptyState icon={SearchX} title={uiText("没有符合条件的库存")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setStateFilter('all'); setSourceFilter('all'); setWarehouseFilter(''); }}>{uiText("清除筛选")}</Button>} />
-    : <EmptyState icon={Boxes} title={uiText(invalidSource ? '来源不匹配' : sourceMode ? '本来源还没有入库批次' : `还没有${DOMAIN_LABEL[domain]}`)} description={uiText(invalidSource ? '请返回来源案件重新选择准确退货单。' : '')} action={!sourceMode && session.canAccessView(View.Procurement) ? <Button onClick={() => go('procurement')}>{uiText("前往采购管理")}</Button> : undefined} />;
+    : <EmptyState icon={Boxes} title={uiText(invalidSource ? '来源不匹配' : sourceMode ? '本来源还没有入库批次' : `${DOMAIN_LABEL[domain]}还没有库存`)} description={uiText(invalidSource ? '请返回来源案件重新选择准确退货单。' : '')} action={!sourceMode && session.canAccessView(View.Procurement) ? <Button onClick={() => go('procurement')}>{uiText("前往采购管理")}</Button> : undefined} />;
   const detail = selected && state
     ? <StockDetail stock={selected} state={state} can={canStockWrite(selected)} canFinance={session.hasPermission('invoices:read')&&session.hasPermission('vouchers:read')} locked={locked}
         onMove={kind => setDialog(moveSpec(selected, kind))} onScrap={() => setDialog(scrapSpec(selected))} onRepair={() => {const spec=repairSpec(selected);if(spec)editor.open(spec);}} onHandback={() => {const spec=repairSpec(selected,true);if(spec)editor.open(spec);}} onDispatch={()=>{const spec=custodySpec(selected);if(spec)editor.open(spec);}} onRepairReturn={()=>{const spec=custodySpec(selected,true);if(spec)editor.open(spec);}}
