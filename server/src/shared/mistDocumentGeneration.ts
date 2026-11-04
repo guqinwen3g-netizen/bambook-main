@@ -182,7 +182,7 @@ export function prepareShipmentDocumentSnapshot(root: MistState, payload: unknow
   return { snapshot, total };
 }
 /** Plain-text summary stored as the document content (search, review and history), derived from the same snapshot. */
-const contentText = (s: GeneratedDocSnapshot) => [...s.facts.map(f => `${f.label.zh}：${f.value}`), ...(s.table ? s.table.rows.map(r => Object.values(r).join(' · ')) : []), ...s.paragraphs.map(p => (p.title ? p.title.zh + '：' : '') + p.text), s.amountInWords || ''].filter(Boolean).join('\n').slice(0, 8000);
+const contentText = (s: GeneratedDocSnapshot) => [...s.facts.map(f => `${f.label.zh}：${f.value}`), ...(s.table ? s.table.rows.map(r => Object.values(r).filter(v => String(v ?? '').trim()).join(' · ')) : []), ...s.paragraphs.map(p => (p.title ? p.title.zh + '：' : '') + p.text), s.amountInWords || ''].filter(Boolean).join('\n').slice(0, 8000);
 
 export function prepareOrderDocumentSnapshot(root: MistState, payload: unknown, ctx: MistContext): GeneratedDocSnapshot {
   exact(payload, ['orderId', 'kind']);

@@ -39,6 +39,13 @@ describe('shipment document generation', () => {
     expect(f.state.invoices.at(-1)).toMatchObject({ amount: 100, due: '2026-12-05', financeStatus: 'pending' });
     expect(documentGenerationBlocker(f.state, f.state.fulfillment.shipments[0], 'CI', f.orderId)).toContain('已有有效签发版本');
   });
+  it('leaves no empty separators in the PL body when packing rows have no colour or size detail', () => {
+    const { f, shipmentId } = ready(), line = f.state.fulfillment.shipments.find(s => s.id === shipmentId)!.lines[0];
+    f.run({ type: 'fulfillment.shipments.pack', payload: { id: shipmentId, lines: [{ lineId: line.lineId, productionId: line.productionId, carton: '1', quantity: line.quantity, netWeight: 10, grossWeight: 11, volume: 1, note: '' }] } } as MistCommand);
+    const { result } = generate(f, { type: 'fulfillment.documents.generate', payload: { shipmentId, type: 'PL' } });
+    const doc = f.state.fulfillment.documents.find(d => d.id === result.id)!;
+    expect(doc.content).not.toMatch(/·\s+·/);
+  });
   it('refuses client content, missing letterhead and types that need prior facts', () => {
     const { f, shipmentId } = ready();
     expect(() => prepareGeneratedSnapshot(f.state, { type: 'fulfillment.documents.generate', payload: { shipmentId, type: 'SO', content: 'x' } }, f.context)).toThrow('服务端');
