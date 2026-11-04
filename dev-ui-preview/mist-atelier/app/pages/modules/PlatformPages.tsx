@@ -36,6 +36,7 @@ import { BusinessCalculators } from './BusinessCalculators';
 import { PlatformReportsPage, buildOrderProgress, buildReceivableAging, AGING_BUCKETS } from './PlatformReports';
 export { PlatformReportsPage as ReportsPage, buildCustomerSales, buildReceivableAging, buildOrderProgress } from './PlatformReports';
 import { WorkAssistantPage } from './WorkAssistantPage';
+import { PersonalAgentPage } from './PersonalAgentPage';
 import { FileName } from '../../runtime/files';
 export { RisksPage };
 const money=(n:number,digits=2)=>new Intl.NumberFormat(interfaceLocale(),{minimumFractionDigits:digits,maximumFractionDigits:digits}).format(n);
@@ -185,5 +186,5 @@ function PlatformAssistantPage({tabs}:{tabs:React.ReactNode}){
     <ModuleEditorDialog spec={editor} onClose={()=>setEditor(null)}/>
   </MistPage>;
 }
-export function AssistantPage(){const {route,go}=useNav();const work=route.section==='work';const tabs=<Tabs value={work?'work':'platform'} options={[{value:'platform',label:'小竹 · 业务问答'},{value:'work',label:'工作助手'}]} onChange={v=>go('assistant',undefined,v==='work'?{section:'work'}:{})}/>;return work?<WorkAssistantPage tabs={tabs}/>:<PlatformAssistantPage tabs={tabs}/>;}
+export function AssistantPage(){const {route,go}=useNav();const tab=route.section==='work'?'work':route.section==='agent'?'agent':'platform';const tabs=<Tabs value={tab} options={[{value:'platform',label:'小竹 · 业务问答'},{value:'agent',label:'我的 Agent'},{value:'work',label:'工作助手'}]} onChange={v=>go('assistant',undefined,v==='platform'?{}:{section:v})}/>;return tab==='work'?<WorkAssistantPage tabs={tabs}/>:tab==='agent'?<PersonalAgentPage tabs={tabs}/>:<PlatformAssistantPage tabs={tabs}/>;}
 export const PLATFORM_PAGES:Record<string,React.FC>={invoices:InvoicePage,pricing:PricingPage,bom:BomPage,risks:RisksPage,claims:ClaimsPage,reports:PlatformReportsPage,dashboard:DashboardPage,'data-center':DataCenterPage,hr:HrOrganizationPage,'business-tools':BusinessToolsPage,assistant:AssistantPage};

@@ -408,6 +408,21 @@ export async function resolveTaskCredential(db: any, token: unknown, now: number
   raw.permissionCeiling = [...c.ceiling]; raw.agentTaskLease = { workspaceId, taskId, runId, grantHash: hash(token as string), serviceLease: c.authority };
   return raw;
 }
+/**
+ * 个人 Agent 用量（平台执行任务的模型轮次），按账号与自然月汇总。只读元数据，不含任务内容。
+ * 费用按 2026-11-04 定案记到公司；收费与结算本期不做，这里只提供计量。
+ */
+export async function platformTaskUsage(db: any, workspaceId: string, month: string, ownerId?: string) {
+  const rows = await db.mistCommandReceipt.findMany({ where: { workspaceId, inputHash: TASK_HASH, requestId: { startsWith: TASK_PREFIX }, ...(ownerId ? { actorId: ownerId } : {}) } });
+  const out = new Map<string, { ownerId: string; ownerName: string; tasks: number; modelTurns: number; runtimeMs: number }>();
+  for (const row of rows) {
+    let c: TaskRecord; try { c = record(row, workspaceId); } catch { continue; }
+    if (c.executor !== 'platform' || !c.createdAt.startsWith(month)) continue;
+    const u = out.get(c.ownerId) ?? { ownerId: c.ownerId, ownerName: c.ownerName, tasks: 0, modelTurns: 0, runtimeMs: 0 };
+    u.tasks++; u.modelTurns += c.platform?.steps?.length ?? 0; u.runtimeMs += c.runtimeUsedMs || 0; out.set(c.ownerId, u);
+  }
+  return [...out.values()].sort((a, b) => b.modelTurns - a.modelTurns || a.ownerName.localeCompare(b.ownerName));
+}
 export async function listTasks(db: any, actor: TokenPayload, workspaceId: string, cursor: unknown, now: number, sourcesVisible: (c:TaskRecord)=>boolean = ()=>true) {
   const where: any = { workspaceId, actorId: actor.userId, inputHash: TASK_HASH };
   if ((actor as AgentActor).agentIdentity) where.AND = [{ result: { path: [TASK_FIELD, 'identityId'], equals: (actor as AgentActor).agentIdentity!.id } }];
