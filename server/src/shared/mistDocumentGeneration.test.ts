@@ -108,3 +108,39 @@ it('writes amounts in words the way invoices and drafts do', () => {
   expect(amountInWords(12345.67, 'USD')).toBe('SAY TOTAL US DOLLARS TWELVE THOUSAND THREE HUNDRED AND FORTY-FIVE AND CENTS SIXTY-SEVEN ONLY');
   expect(amountInWords(1000000, 'EUR')).toBe('SAY TOTAL EUROS ONE MILLION ONLY');
 });
+
+
+describe('external goods descriptions and customs facts',()=>{
+ it.each([undefined,'COTTON COAT'])('uses English then Chinese externally, with unchanged fallback: %s',nameEn=>{
+  const {f,shipmentId}=ready(),line=f.state.orderLines[0];line.nameEn=nameEn;
+  f.state.orders[0].governance!.approvedSnapshot!.lines[0].nameEn=nameEn;
+  f.state.fulfillment.packing.push({id:'pack',shipmentId,lineId:line.id,productionId:f.state.fulfillment.shipments[0].lines[0].productionId,carton:'1',quantity:10,netWeight:2,grossWeight:3,volume:1,note:''});
+  const expected=nameEn?`${nameEn} / ${line.name}`:line.name;
+  for(const type of ['CI','PL','SO','SI','DN','CDA'] as const){
+   const {snapshot}=generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type,...(type==='CI'?{orderId:f.orderId,dueDate:'2026-12-01'}:{})}});
+   const row=snapshot.table!.rows[0];expect(type==='PL'?row.style:row.desc).toContain(expected);
+   expect(renderGeneratedDocumentHtml(snapshot)).toContain(expected);
+  }
+  for(const kind of ['PI','SC'] as const){
+   const snapshot=prepareGeneratedSnapshot(f.state,{type:'order.document.generate',payload:{orderId:f.orderId,kind}},f.context);
+   expect(snapshot.table!.rows[0].desc).toContain(expected);
+  }
+  f.state.fulfillment.shipments[0].state='departed';
+  expect(prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'SA'}},f.context).table!.rows[0].desc).toBe(expected);
+ });
+ it.each(['瑞典',''])('fills CD from the customs record and known country only: %s',country=>{
+  const {f,shipmentId}=ready(),line=f.state.orderLines[0];line.price=3.2;line.nameEn='COTTON COAT';f.state.customers[0].country=country;
+  f.state.fulfillment.customs.push({id:'customs',shipmentId,code:'CUS-1',status:'draft',channel:'general',declarationNo:'',broker:'模拟报关行',origin:'中国',tradeMode:'一般贸易',declaredAt:'',clearedAt:'',evidence:'',fileIds:[],note:''});
+  f.run({type:'fulfillment.customs.classify.save',payload:{family:'garment',hsCode:'6203310000',declaredName:'男式羊毛西服上衣',brandType:'3',preference:'0',elements:['机织','西服上衣','男式','100%羊毛','无品牌'],styles:[line.style],legalUnit:'件',secondUnit:''}});
+  const {snapshot}=generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CD'}});
+  expect(Object.fromEntries(snapshot.facts.map(fact=>[fact.label.zh,fact.value]))).toMatchObject({'监管方式':'一般贸易','原产国':'中国','申报单位 / 报关行':'模拟报关行','运抵国 / 最终目的国':country});
+  expect(snapshot.table!.rows[0]).toMatchObject({price:'3.20',amount:'32.00 USD'});
+  expect(snapshot.table!.rows[0].name).toContain('男式羊毛西服上衣');expect(snapshot.table!.rows[0].name).not.toContain('COTTON COAT');
+  const html=renderGeneratedDocumentHtml(snapshot);for(const text of ['监管方式','一般贸易','原产国','中国','模拟报关行','3.20'])expect(html).toContain(text);
+ });
+ it('does not add customs facts without a customs record',()=>{
+  const {f,shipmentId}=ready();const {snapshot}=generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CD'}});
+  expect(snapshot.facts.some(fact=>fact.label.zh==='监管方式')).toBe(false);
+  expect(snapshot.paragraphs[0].text).toContain('尚未建立商品归类');
+ });
+});

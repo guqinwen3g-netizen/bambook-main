@@ -1674,7 +1674,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "types": {
    "MistOrderInput": "{ type: 'garment' | 'fabric'; customerId: string; season: string; currency: string; due: string; ownerId: string; governance?:OrderGovernanceInput; lines: Array<Omit<MistOrderLine, 'id' | 'orderId' | 'made' | 'qc'> & OrderLineSource & {breakdown?:OrderLineBreakdown}> }",
    "OrderGovernanceInput": "{ internalSupply?:InternalSupply; kind:'external'|'internal';poNumber:string;confirmationFileIds:string[];internalPurpose:string;receiver:string; paymentMethod:'TT'|'LC'|'OA'|'OTHER';depositPercent:number|null;paymentNote:string;incoterm:string;deliveryPlace:string; overPercent?:number|null;shortPercent?:number|null; quantityBasis?:'total'|'size';quantityBasisNote?:string; preShipmentPercent?:number|null; }",
-   "MistOrderLine": "GarmentFulfillmentFields & { id: string; orderId: string; name: string; style: string; img: MistImage; qty: number; unit: string; price: number; made: number; qc: number }",
+   "MistOrderLine": "GarmentFulfillmentFields & { id: string; orderId: string; name: string; nameEn?: string; style: string; img: MistImage; qty: number; unit: string; price: number; made: number; qc: number }",
    "OrderLineSource": "{sourceDevId?:string;sourceVersionId?:string;sourceProductId?:string}",
    "OrderLineBreakdown": "GarmentBreakdown|FabricBreakdown"
   },
@@ -1742,8 +1742,8 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
    "MistTone": "'neutral' | 'accent' | 'ok' | 'warn' | 'bad' | 'ai'",
    "MistImage": "'coat' | 'blazer' | 'suit' | 'clay' | 'fabric'",
    "MistChecklistItem": "{ id: string; label: string; done: boolean; note: string; actor?: string; at?: string }",
-   "OrderGovernanceLine": "Pick<MistOrderLine,'id'|'name'|'style'|'img'|'qty'|'unit'|'price'|'fulfillmentMode'|'cmtIncludedItems'> & {sourceProductId?:string;sourceDevId?:string;sourceVersionId?:string;breakdown?:OrderLineBreakdown}",
-   "MistOrderLine": "GarmentFulfillmentFields & { id: string; orderId: string; name: string; style: string; img: MistImage; qty: number; unit: string; price: number; made: number; qc: number }",
+   "OrderGovernanceLine": "Pick<MistOrderLine,'id'|'name'|'nameEn'|'style'|'img'|'qty'|'unit'|'price'|'fulfillmentMode'|'cmtIncludedItems'> & {sourceProductId?:string;sourceDevId?:string;sourceVersionId?:string;breakdown?:OrderLineBreakdown}",
+   "MistOrderLine": "GarmentFulfillmentFields & { id: string; orderId: string; name: string; nameEn?: string; style: string; img: MistImage; qty: number; unit: string; price: number; made: number; qc: number }",
    "OrderLineBreakdown": "GarmentBreakdown|FabricBreakdown"
   },
   "source": "server/src/shared/mistOrderGovernance.ts"

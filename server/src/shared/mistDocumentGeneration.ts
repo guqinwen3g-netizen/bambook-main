@@ -68,9 +68,11 @@ function goodsLines(root: MistState, s: FulfillmentShipment, orderId?: string) {
     return { order, line, quantity: l.quantity, detail: line.breakdown ? breakdownSummary(line.breakdown, line.unit) : '' };
   });
 }
+/** External goods names keep the identifier separate from specifications. */
+const externalGoodsName = (line: Pick<MistOrderLine, 'name' | 'nameEn'>) => line.nameEn?.trim() ? `${line.nameEn.trim()} / ${line.name}` : line.name;
 function ciSnapshot(root: MistState, s: FulfillmentShipment, order: MistOrder) {
   const lines = goodsLines(root, s, order.id);
-  const rows = lines.map(g => { const price = unitPriceOf(root, s, order, g.line.id); return { style: g.line.style, desc: g.line.name + (g.detail ? '\n' + g.detail : ''), qty: `${qtyText(g.quantity)} ${g.line.unit}`, price: money2(price), amount: money2(lineAmount(g.quantity, price)), _amount: lineAmount(g.quantity, price) }; });
+  const rows = lines.map(g => { const price = unitPriceOf(root, s, order, g.line.id); return { style: g.line.style, desc: externalGoodsName(g.line) + (g.detail ? '\n' + g.detail : ''), qty: `${qtyText(g.quantity)} ${g.line.unit}`, price: money2(price), amount: money2(lineAmount(g.quantity, price)), _amount: lineAmount(g.quantity, price) }; });
   const total = r2(rows.reduce((n, r) => n + r._amount, 0)), pack = packingTotals(root, s), lc = lcFor(root, s);
   return {
     parties: [buyerParty(root, s), consigneeParty(s)], total,
@@ -91,14 +93,14 @@ function plSnapshot(root: MistState, s: FulfillmentShipment) {
     parties: [buyerParty(root, s), consigneeParty(s)],
     facts: [...transportFacts(s), { label: { zh: fabric ? '件数' : '箱数', en: 'Packages' }, value: String(pack.packages) }],
     table: { columns: [{ key: 'carton', label: fabric ? { zh: '卷 / 包号', en: 'Roll / Bale' } : { zh: '箱号', en: 'Carton' } }, { key: 'style', label: { zh: '款号 / 品名', en: 'Style / Description' } }, { key: 'detail', label: { zh: fabric ? '颜色' : '分色分码', en: fabric ? 'Colour' : 'Assortment' } }, { key: 'qty', label: { zh: '数量', en: 'Quantity' }, num: true }, { key: 'nw', label: { zh: '净重 kg', en: 'N.W.' }, num: true }, { key: 'gw', label: { zh: '毛重 kg', en: 'G.W.' }, num: true }, { key: 'cbm', label: { zh: '体积 m³', en: 'CBM' }, num: true }],
-      rows: rows.map(r => { const line = lineOf(root, r.lineId); return { carton: r.carton, style: `${line?.style || ''} ${line?.name || ''}`.trim(), detail: r.fabricColor || (r.assortment || []).filter(a => a.quantity > 0).map(a => `${a.color} ${a.size}×${a.quantity}`).join(' / '), qty: `${qtyText(r.quantity)} ${line?.unit || ''}`, nw: money2(r.netWeight), gw: money2(r.grossWeight), cbm: qtyText(r.volume) }; }),
+      rows: rows.map(r => { const line = lineOf(root, r.lineId); return { carton: r.carton, style: `${line?.style || ''} ${line ? externalGoodsName(line) : ''}`.trim(), detail: r.fabricColor || (r.assortment || []).filter(a => a.quantity > 0).map(a => `${a.color} ${a.size}×${a.quantity}`).join(' / '), qty: `${qtyText(r.quantity)} ${line?.unit || ''}`, nw: money2(r.netWeight), gw: money2(r.grossWeight), cbm: qtyText(r.volume) }; }),
       totals: { qty: [...new Set(rows.map(r => lineOf(root, r.lineId)?.unit || ''))].map(u => `${qtyText(r4(rows.filter(r => (lineOf(root, r.lineId)?.unit || '') === u).reduce((n, r) => n + r.quantity, 0)))} ${u}`).join(' / '), nw: money2(pack.net), gw: money2(pack.gross), cbm: qtyText(pack.volume) } },
   };
 }
 function cargoTable(root: MistState, s: FulfillmentShipment) {
   const pack = packingTotals(root, s);
   return { columns: [{ key: 'style', label: { zh: '款号', en: 'Style' } }, { key: 'desc', label: { zh: '品名', en: 'Description' } }, { key: 'qty', label: { zh: '数量', en: 'Quantity' }, num: true }],
-    rows: goodsLines(root, s).map(g => ({ style: g.line.style, desc: g.line.name, qty: `${qtyText(g.quantity)} ${g.line.unit}` })),
+    rows: goodsLines(root, s).map(g => ({ style: g.line.style, desc: externalGoodsName(g.line), qty: `${qtyText(g.quantity)} ${g.line.unit}` })),
     totals: pack.packages ? { desc: `${pack.packages} PKGS · N.W. ${money2(pack.net)} kg · G.W. ${money2(pack.gross)} kg · ${qtyText(pack.volume)} m³` } : undefined };
 }
 function shipmentDocContent(root: MistState, s: FulfillmentShipment, type: OwnDocumentType, order: MistOrder | undefined, dueDate: string): Pick<GeneratedDocSnapshot, 'parties' | 'facts' | 'table' | 'paragraphs' | 'amountInWords'> & { total?: number } {
@@ -122,10 +124,18 @@ function shipmentDocContent(root: MistState, s: FulfillmentShipment, type: OwnDo
     }
     case 'CD': {
       const draft = draftCustomsDeclaration(root, s), pack = packingTotals(root, s);
+      const customs = root.fulfillment.customs.find(x => x.shipmentId === s.id);
+      // No port/country mapping or structured consignee address exists; use the customer country, never infer from free text.
+      const destinationCountry = root.customers.find(x => x.id === s.customerId)?.country || '';
       return { parties: [{ label: { zh: '境内发货人', en: 'Exporter' }, name: c.legalName, detail: [c.customsCode && '海关编码 ' + c.customsCode, c.taxId && '税号 ' + c.taxId].filter(Boolean).join(' · ') }, { label: { zh: '境外收货人', en: 'Overseas consignee' }, name: s.consignee, detail: '' }],
-        facts: [...transportFacts(s), { label: { zh: '件数 / 毛重 / 净重', en: 'Packages / G.W. / N.W.' }, value: `${pack.packages} · ${money2(pack.gross)} kg · ${money2(pack.net)} kg` }],
+        facts: [...transportFacts(s), ...(customs ? [
+          { label: { zh: '监管方式', en: 'Trade mode' }, value: customs.tradeMode },
+          { label: { zh: '原产国', en: 'Country of origin' }, value: customs.origin },
+          { label: { zh: '申报单位 / 报关行', en: 'Customs broker' }, value: customs.broker },
+          { label: { zh: '运抵国 / 最终目的国', en: 'Country of destination' }, value: destinationCountry },
+        ] : []), { label: { zh: '件数 / 毛重 / 净重', en: 'Packages / G.W. / N.W.' }, value: `${pack.packages} · ${money2(pack.gross)} kg · ${money2(pack.net)} kg` }],
         table: { columns: [{ key: 'no', label: { zh: '项号', en: 'No.' } }, { key: 'hs', label: { zh: '商品编号', en: 'HS code' } }, { key: 'name', label: { zh: '商品名称及规格型号', en: 'Description / elements' } }, { key: 'qty', label: { zh: '数量及单位', en: 'Quantity' }, num: true }, { key: 'price', label: { zh: '单价', en: 'Unit price' }, num: true }, { key: 'amount', label: { zh: '总价 / 币制', en: 'Amount' }, num: true }],
-          rows: draft.items.map(i => ({ no: String(i.no), hs: i.hsCode, name: `${i.declaredName}\n${i.elements}`, qty: [`${qtyText(i.quantity)} ${i.unit}`, `${qtyText(i.legalQty)} ${i.legalUnit}`, i.secondUnit && i.secondQty !== null ? `${qtyText(i.secondQty)} ${i.secondUnit}` : ''].filter(Boolean).join('\n'), price: qtyText(i.unitPrice), amount: `${money2(i.amount)} ${i.currency}` })),
+          rows: draft.items.map(i => ({ no: String(i.no), hs: i.hsCode, name: `${i.declaredName}\n${i.elements}`, qty: [`${qtyText(i.quantity)} ${i.unit}`, `${qtyText(i.legalQty)} ${i.legalUnit}`, i.secondUnit && i.secondQty !== null ? `${qtyText(i.secondQty)} ${i.secondUnit}` : ''].filter(Boolean).join('\n'), price: money2(i.unitPrice), amount: `${money2(i.amount)} ${i.currency}` })),
           totals: { amount: draft.totals.map(t => `${money2(t.amount)} ${t.currency}`).join(' / ') } },
         paragraphs: draft.blockers.length ? [{ title: { zh: '待补资料', en: 'Open items' }, text: draft.blockers.join('\n') }] : [] };
     }
@@ -185,7 +195,7 @@ export function prepareOrderDocumentSnapshot(root: MistState, payload: unknown, 
   const issuer = issuerOf(root.settings.companyProfile) || fail('请先补全公司抬头');
   if (!ctx.actorId) fail('缺少真实生成人');
   const customer = root.customers.find(c => c.id === snap!.customerId), contract = snap!.contract;
-  const rows = snap!.lines.map((l, i) => ({ no: String(i + 1), style: l.style, desc: l.name + (l.breakdown ? '\n' + breakdownSummary(l.breakdown, l.unit) : ''), qty: `${qtyText(l.qty)} ${l.unit}`, price: money2(l.price), amount: money2(lineAmount(l.qty, l.price)), _a: lineAmount(l.qty, l.price) }));
+  const rows = snap!.lines.map((l, i) => ({ no: String(i + 1), style: l.style, desc: externalGoodsName(l) + (l.breakdown ? '\n' + breakdownSummary(l.breakdown, l.unit) : ''), qty: `${qtyText(l.qty)} ${l.unit}`, price: money2(l.price), amount: money2(lineAmount(l.qty, l.price)), _a: lineAmount(l.qty, l.price) }));
   const total = r2(rows.reduce((n, r) => n + r._a, 0)), count = ((order as MistOrder & { documents?: OrderDocumentRecord[] }).documents || []).filter(d => d.orderKind === p.kind).length;
   const tolerance = contract.overPercent || contract.shortPercent ? `+${contract.overPercent || 0}% / -${contract.shortPercent || 0}%` : '';
   const terms = [

@@ -140,3 +140,37 @@ it('reports all missing commercial approval fields together without changing the
  for(const field of ['PO','书面确认','贸易术语','指定地点','付款条款'])expect(message).toContain(field);
  expect(f.state).toEqual(before);
 });
+
+
+describe('order line external English name',()=>{
+ it('accepts nameEn on order creation and trims it',()=>{
+  const f=fixture(),line=f.state.orderLines[0];
+  const next=applyMistCommand(f.state,{type:'order.create',payload:{type:'garment',customerId:'customer',ownerId:'sales',season:'AW26',currency:'USD',due:'2026-12-01',lines:[{...line,nameEn:'  COTTON COAT  '}] }},f.c).state;
+  expect(next.orderLines.at(-1)?.nameEn).toBe('COTTON COAT');
+ });
+ it.each(['  COTTON COAT  ',' '+ 'A'.repeat(200)+' ','   '])('normalizes optional nameEn in drafts: %s',nameEn=>{
+  const f=fixture();f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:f.contract,lines:[{...f.state.orderLines[0],nameEn}]}});
+  expect(f.state.orderLines[0].nameEn).toBe(nameEn.trim()||undefined);
+ });
+ it.each(['A'.repeat(201),123,null])('rejects invalid English names: %s',nameEn=>{
+  const f=fixture();expect(()=>f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:f.contract,lines:[{...f.state.orderLines[0],nameEn:nameEn as string}]}})).toThrow('英文品名');
+ });
+ it('requires change approval for nameEn and can clear the approved value',()=>{
+  const f=fixture();f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'通过'}},{...f.c,actorId:'leader'});
+  for(const nameEn of ['COTTON COAT','   ']){
+   const before=f.state.orderLines[0].nameEn;
+   f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:f.contract,reason:'修订英文品名',lines:[{...f.state.orderLines[0],nameEn}]}});
+   expect(f.state.orderLines[0].nameEn).toBe(before);
+   f.run({type:'order.governance.submit',payload:{orderId:'order'}});
+   expect(f.order.governance.rounds.at(-1)?.kind).toBe('change');
+   expect(f.state.orderLines[0].nameEn).toBe(before);
+   f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'通过'}},{...f.c,actorId:'leader'});
+   expect(f.state.orderLines[0].nameEn).toBe(nameEn.trim()||undefined);
+   expect(f.order.governance.approvedSnapshot?.lines[0].nameEn).toBe(nameEn.trim()||undefined);
+  }
+ });
+ it('detects nameEn tampering after submission',()=>{
+  const f=fixture();f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.state.orderLines[0].nameEn='FORGED';
+  expect(()=>f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'通过'}},{...f.c,actorId:'leader'})).toThrow('快照不一致');
+ });
+});
