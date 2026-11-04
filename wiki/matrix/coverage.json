@@ -1933,6 +1933,7 @@
    "task": "取消未离港出运",
    "kind": "branch",
    "roles": [
+    "业务员",
     "后勤/单证"
    ],
    "modes": [
@@ -1945,8 +1946,9 @@
    "commands": [
     "fulfillment.shipments.cancel"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 走查 SHP-2026-00002（独立数据副本）：取消请求先列出阻断（订舱号、已签发 CI / PL）→ 后勤作废 CI（应收随之作废）、PL 并清空订舱 → 业务发起人取消；订单回到待出运。取消由业务发起人、订单负责人或主管办理"
   },
   {
    "id": "lc-present",
