@@ -2119,8 +2119,9 @@
     "platform.claim.decide",
     "platform.claim.recovery.open"
    ],
-   "impl": "unchecked",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机走查：登记→判定折让→追偿协商与撤回（#651 修复来源发票随订单筛选、补撤回追偿）"
   },
   {
    "id": "internal-fabric-order",
@@ -2295,9 +2296,9 @@
     "account"
    ],
    "commands": [],
-   "impl": "missing",
+   "impl": "source",
    "lessons": [],
-   "note": "长期运行循环与无人值守账号尚未交付"
+   "note": "#649 个人 Agent：交办即建平台执行任务，无人值守运行、本人确认回程；原生 Agent 业务员用管理员开设的服务身份。本机用模拟模型走通，真实模型待平台模型配置后复走"
   },
   {
    "id": "order-list-browse",
@@ -2810,9 +2811,9 @@
     "marketing"
    ],
    "commands": [],
-   "impl": "missing",
+   "impl": "walked",
    "lessons": [],
-   "note": "MarketingPage.tsx:73 按钮禁用：“尚未接入外部推广发送服务”"
+   "note": "2026-11-04 本机业务员走查：营销活动「发送推广邮件」打开智能邮箱写信，活动线索邮箱自动填入密送、主题与签名带入；对外实发须真实邮箱账户"
   },
   {
    "id": "marketing-lookbook-pdf",
@@ -2828,9 +2829,9 @@
     "marketing"
    ],
    "commands": [],
-   "impl": "missing",
+   "impl": "walked",
    "lessons": [],
-   "note": "MarketPages.tsx:148 “PDF 排版导出服务尚未接入”"
+   "note": "2026-11-04 本机业务员走查：画册「生成画册 PDF」由服务端排版生成并存为附件，「用邮箱发送」自动附上 PDF 与客户关联"
   },
   {
    "id": "product-archive-create",
