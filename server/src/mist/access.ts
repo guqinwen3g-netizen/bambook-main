@@ -156,12 +156,12 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
   }
   // Warehouse-only readers still need the outcome required to dispose their own visible lot.
   // Expose only an action, not the hidden QC task, report, opinion or attachments.
-  if (!hidden.some(section => section.key === 'inventory')) {
+  if (!hidden.some(section => section.key === 'inventory') && next.fulfillment) {
     next.fulfillment = {...next.fulfillment, stockMovements:(next.fulfillment.stockMovements || []).map(row => {
       const {quarantineAction:_stale, ...safe} = row;
       if (!row.quarantinedQuantity || row.quarantineDisposition || !hasScope(actor,'inventory:write')) return safe;
-      const task = state.fulfillment.qcTasks.find(task => task.id === row.quarantineTaskId && task.kind === 'quarantine' && task.quarantine?.returnId === row.id);
-      const report = task && state.fulfillment.qcReports.find(report => report.id === task.reportIds.at(-1) && report.taskId === task.id);
+      const task = (state.fulfillment?.qcTasks || []).find(task => task.id === row.quarantineTaskId && task.kind === 'quarantine' && task.quarantine?.returnId === row.id);
+      const report = task && (state.fulfillment?.qcReports || []).find(report => report.id === task.reportIds.at(-1) && report.taskId === task.id);
       const action = task?.state === 'blocked' && report?.result === 'reject' ? 'dispose' : task?.state === 'reported' && report?.result === 'pass' ? 'release' : undefined;
       return action ? {...safe,quarantineAction:action} : safe;
     })};
