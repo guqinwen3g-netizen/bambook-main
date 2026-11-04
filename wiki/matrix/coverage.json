@@ -1850,8 +1850,9 @@
     "fulfillment.shipments.save",
     "fulfillment.shipments.pack"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 后勤岗走查 SHP-2026-00002：面料 60 卷按码单装箱，毛净重与体积汇总进 CI / PL / 报关"
   },
   {
    "id": "shipping-docs",
@@ -1873,8 +1874,9 @@
     "fulfillment.documents.issue",
     "fulfillment.documents.void"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 走查：CI-2026-00002（按实际出运 3560 米计价）、PL-2026-00002 生成与签发，PDF 已目视；对外英文品名由条目英文品名提供"
   },
   {
    "id": "customs",
@@ -1895,8 +1897,9 @@
     "fulfillment.customs.items",
     "fulfillment.customs.classify.save"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 走查：建报关记录、面料归类 5209320000、生成商品项、报关单草稿与委托书；申报 / 放行按船期未登记"
   },
   {
    "id": "depart",
@@ -1985,8 +1988,9 @@
     "finance.receivable.confirm",
     "finance.receivable.reject"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 财务岗走查：CI 签发后「我的工作」出现待确认，确认后计入应收与账龄"
   },
   {
    "id": "receipt-reconcile",
