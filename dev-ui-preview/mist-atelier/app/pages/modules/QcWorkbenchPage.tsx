@@ -360,6 +360,8 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
   const shippingSet=state?.fulfillment.samples.find(sample=>sample.id===task.sampleId)?.sizeQuantities;
   const garmentProduction = (task.kind === 'production'||!!shippingSet?.length) && task.domain === 'garment';
   const [sizeChecks, setSizeChecks] = React.useState<SizeCheck[]>((shippingSet||(fact?.completion?.sizeQuantities.length ? fact.completion.sizeQuantities : fact?.sizes || [])).map(size => ({ size: size.size, inspected: 0, result: '', evidence: '' })));
+  // Garment production QC checks real sizes; without the branch's size plan there is nothing to inspect against.
+  const missingSizes = garmentProduction && !sizeChecks.length, productionId = task.source.kind === 'orderLine' ? (task.source as { productionId?: string }).productionId : undefined, { go } = useNav();
   const blocked = busy || saving || !!pending;
   const previous = state?.fulfillment.qcReports.filter(item => item.taskId === task.id) || [];
   const resultOptions = task.kind === 'production'
@@ -396,6 +398,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
     <BackLink onClick={onClose}>{uiText("返回QC工作台")}</BackLink>
     <PageHeader description={uiText(`${task.code} · ${state ? fulfillmentSourceLabel(state, task.source) : ''}`)} eyebrow={uiText(`${DOMAIN_LABEL[task.domain]} · ${KIND_LABEL[task.kind]}`)} title={uiText("提交专业QC报告")} />
     {failure && <div className="mist-section"><Banner tone="bad" title={uiText("报告未保存")}>{failure}</Banner></div>}
+    {missingSizes && <div className="mist-section"><Banner variant="notice" tone="warn" title={uiText("生产尺码未登记")} actions={productionId ? <Button onClick={() => go('production-board', productionId)}>{uiText("查看生产单")}</Button> : undefined}>{uiText("由业务员在生产进度登记尺码与数量后再提交报告。")}</Banner></div>}
     {sampleConcerns.length > 0 && <div className="mist-section"><ProductionSampleNotes checks={sampleConcerns} /></div>}
     <div className="mist-detail" data-layout="main-rail">
       <div>
@@ -432,7 +435,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
             <UploadZone hint={uiText("上传现场照片或完整报告")} onFiles={files => { if (blocked) return; setBusy(true); void (async () => { try { for (const file of files) { const added = await uploadFile(file); setIds(old => [...old, added.id]); } } catch (e) { setFailure(String(e)); } finally { setBusy(false); } })(); }} />
             <RecordFiles ids={ids} />
           </CardBody>
-          <FormFooter><span className="mist-spacer" /><Button onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" disabled={blocked} onClick={review}>{uiText("提交报告")}</Button></FormFooter>
+          <FormFooter><span className="mist-spacer" /><Button onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" disabled={blocked || missingSizes} onClick={review}>{uiText("提交报告")}</Button></FormFooter>
         </Card>
       </div>
       <div>

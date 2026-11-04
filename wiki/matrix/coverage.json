@@ -889,8 +889,9 @@
    "commands": [
     "order.governance.requestOverShip"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机走查：出运超量申请 1240 件，主管批准后 1241 件被拦截"
   },
   {
    "id": "order-deposit",
@@ -1048,8 +1049,9 @@
    "commands": [
     "fulfillment.procurement.save"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机走查：主料内供加工合同 800 件 × 65 元，主管批准生成生产分支"
   },
   {
    "id": "purchase-cancel",
@@ -1071,8 +1073,9 @@
    "commands": [
     "payable.purchase.cancel"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机走查：未执行合同取消不形成应付；已收货合同无取消入口（已付款负例未覆盖）"
   },
   {
    "id": "receive",
@@ -1685,8 +1688,9 @@
     "fulfillment.qc.report",
     "fulfillment.qc.continue"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机走查：面料生产 QC 四分制 NOK → 整改 → 复验通过 → 业务确认继续（成衣分支缺生产尺码时已改为提交前阻断）"
   },
   {
    "id": "fabric-allocate",
@@ -1706,11 +1710,12 @@
     "order.fabric.allocate",
     "order.fabric.cancel"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
    "pages": [
     "45-内部面料发料与点收.md"
-   ]
+   ],
+   "note": "2026-11-04 本机走查：2380 米内部面料分配给江南成衣"
   },
   {
    "id": "fabric-issue",
@@ -1734,11 +1739,12 @@
     "fulfillment.materials.issue",
     "fulfillment.materials.confirm"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
    "pages": [
     "45-内部面料发料与点收.md"
-   ]
+   ],
+   "note": "2026-11-04 本机走查：工厂点收 2350 米、拒收 30 米，待接收清零"
   },
   {
    "id": "fabric-shortclose",
@@ -1758,8 +1764,9 @@
    "commands": [
     "order.fabric.shortClose"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机走查：分配 2380 / 实收 2350，30 米短结不补发"
   },
   {
    "id": "fabric-return",
@@ -1783,11 +1790,12 @@
     "fulfillment.inventory.quarantine.request",
     "fulfillment.inventory.quarantine.dispose"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
    "pages": [
     "65-退料处置与财务核对.md"
-   ]
+   ],
+   "note": "2026-11-04 本机走查：按原出库退回 30 米隔离、送复检、QC 判不合格"
   },
   {
    "id": "scrap-norecovery",
@@ -1809,11 +1817,12 @@
     "fulfillment.inventory.quarantine.noRecovery",
     "payable.disposal.review"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
    "pages": [
     "65-退料处置与财务核对.md"
-   ]
+   ],
+   "note": "2026-11-04 本机走查：报废 30 米 → 负责人不追偿 → 结算确认后财务核对"
   },
   {
    "id": "inventory-move",
@@ -2041,8 +2050,9 @@
     "finance.fx.settle",
     "finance.fx.reverse"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机走查：锁汇交割与结汇，凭证跨月核对"
   },
   {
    "id": "rebate",
@@ -2086,8 +2096,9 @@
     "finance.allocation.reverse",
     "finance.payment.reverse"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机走查：核销冲回后重新核销，10 / 11 月凭证分月"
   },
   {
    "id": "cost-profit",
@@ -2332,9 +2343,9 @@
     "orders"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；OrderListPage.tsx:47-104"
+   "note": "只读；OrderListPage.tsx:47-104；2026-11-04 本机走查"
   },
   {
    "id": "order-list-export",
@@ -2352,9 +2363,9 @@
     "orders"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；本地生成 CSV（OrderListPage.tsx:90）"
+   "note": "只读；本地生成 CSV（OrderListPage.tsx:90）；2026-11-04 本机走查"
   },
   {
    "id": "order-from-quotation",
@@ -2415,9 +2426,9 @@
     "orders"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；OrderListPage.tsx:98"
+   "note": "只读；OrderListPage.tsx:98；2026-11-04 本机走查：面料订单逾期 0 笔跳转，统计随筛选"
   },
   {
    "id": "risk-register",
@@ -2436,9 +2447,9 @@
    "commands": [
     "platform.risk.save"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "RisksPage.tsx:93"
+   "note": "RisksPage.tsx:93；2026-11-04 本机走查：手工登记与预警转风险"
   },
   {
    "id": "risk-acknowledge-plan",
@@ -2458,9 +2469,9 @@
     "platform.risk.transition",
     "platform.risk.plan"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "RisksPage.tsx:97-98"
+   "note": "RisksPage.tsx:97-98；2026-11-04 本机走查：接手、方案与计划完成日"
   },
   {
    "id": "risk-escalate",
@@ -2480,9 +2491,9 @@
     "platform.risk.escalate",
     "platform.risk.withdraw"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "RisksPage.tsx:104,106"
+   "note": "RisksPage.tsx:104,106；2026-11-04 本机走查：提交、撤回、重提、主管批准"
   },
   {
    "id": "risk-close",
@@ -2500,9 +2511,9 @@
    "commands": [
     "platform.risk.transition"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "RisksPage.tsx:107（state=Resolved）"
+   "note": "RisksPage.tsx:107（state=Resolved）；2026-11-04 本机走查：主管填写依据关闭，无权岗位被拒"
   },
   {
    "id": "relation-profile",
@@ -2561,9 +2572,9 @@
    "commands": [
     "market.relation.hold"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "RelationsPage.tsx:92-93，adminOnly"
+   "note": "RelationsPage.tsx:92-93，adminOnly；2026-11-04 本机走查：冻结 / 解冻，订单、报价、采购入口拦截"
   },
   {
    "id": "relation-link-supplier",

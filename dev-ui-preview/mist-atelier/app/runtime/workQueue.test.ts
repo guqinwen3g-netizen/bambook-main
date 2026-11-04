@@ -9,6 +9,51 @@ let n = 0;
 const ctx = () => ({ id: () => `id-${++n}`, now: '2026-10-15T08:00:00.000Z', actorName: '当前员工' });
 const all = () => true;
 const base = () => { const state = createMistState(ctx(), 'empty'); state.fulfillment.qcTasks = []; state.fulfillment.shipments = []; return state; };
+describe('risk owner work', () => {
+  const options: MistWorkOptions = { canRead: all, me: 'risk-owner', today: '2026-10-15' };
+  const fixture = () => {
+    const state = base();
+    state.platform.risks = [{ id: 'risk-1', orderId: 'order-1', title: '交期风险', level: 'warning', basis: '工厂延误', owner: '当前员工', ownerId: 'risk-owner', state: 'Open', resolution: '', createdAt: '2026-10-14T08:00:00Z', source: { kind: 'order', id: 'order-1', label: 'SO-1' } }];
+    return state;
+  };
+  it.each([
+    ['Open', undefined, undefined, '待接手', false],
+    ['Acknowledged', undefined, undefined, '待制定方案', false],
+    ['Acknowledged', '  ', undefined, '待制定方案', false],
+    ['InProgress', '协调工厂', undefined, '待处理', false],
+    ['InProgress', '协调工厂', '2026-10-16', '待处理', false],
+    ['InProgress', '协调工厂', '2026-10-15', '待处理', false],
+    ['InProgress', '协调工厂', '2026-10-14', '已逾期', true],
+  ] as const)('derives %s (%s, %s) as %s without mutating the risk', (status, plan, planDue, when, urgent) => {
+    const state = fixture(); Object.assign(state.platform.risks[0], { state: status, plan, planDue });
+    const before = structuredClone(state);
+    expect(mistWorkQueue(state, options)).toEqual([expect.objectContaining({ id: 'risk:risk-1', source: 'task', module: 'risks', title: '交期风险', meta: 'SO-1', when, urgent, due: planDue, target: { view: 'risks', id: 'risk-1', section: 'ledger' } })]);
+    expect(state).toEqual(before);
+  });
+  it('requires the bound owner account and risk read access, never matching names or source owners', () => {
+    const state = fixture();
+    expect(mistWorkQueue(state, { ...options, me: 'other' })).toEqual([]);
+    expect(mistWorkQueue(state, { ...options, me: '' })).toEqual([]);
+    expect(mistWorkQueue(state, { ...options, canRead: view => view !== 'risks' })).toEqual([]);
+    delete state.platform.risks[0].ownerId;
+    expect(mistWorkQueue(state, options)).toEqual([]);
+    expect(mistWorkQueue(state, { ...options, me: '当前员工' })).toEqual([]);
+  });
+  it.each(['Escalated', 'Resolved'] as const)('does not assign %s risks even when overdue', status => {
+    const state = fixture(); Object.assign(state.platform.risks[0], { state: status, planDue: '2026-10-01' });
+    expect(mistWorkQueue(state, options)).toEqual([]);
+  });
+  it('waits for pending approval and restores owner follow-up after rejection or withdrawal', () => {
+    const state = fixture(), risk = state.platform.risks[0];
+    risk.state = 'InProgress'; risk.plan = '协调工厂'; risk.planDue = '2026-10-14';
+    risk.escalations = [{ id: 'e', approver: '主管', reason: '申请放行', requestedBy: risk.owner, requestedAt: risk.createdAt, decision: 'pending', decisionNote: '', decidedBy: '', decidedAt: '' }];
+    expect(mistWorkQueue(state, options)).toEqual([]);
+    for (const decision of ['rejected', 'withdrawn', 'approved'] as const) {
+      risk.escalations[0].decision = decision;
+      expect(mistWorkQueue(state, options)).toEqual([expect.objectContaining({ when: '已逾期', urgent: true })]);
+    }
+  });
+});
 describe('returned quotation handoff',()=>{
  const options={canRead:all,can:(permission:string)=>permission==='quotations:write',me:'sales',today:'2026-10-29'};
  const fixture=()=>{const state=base();state.customers.push({id:'quote-customer',name:'客户'} as any);state.market.quotations.push({id:'quote-return',code:'QT-1',status:'Draft',customerId:'quote-customer',requiresApproval:true,approval:{id:'review',requesterId:'sales',reviewerId:'supervisor',status:'rejected',submittedAt:'2026-10-28T18:13:00Z',decidedAt:'2026-10-28T18:16:00Z',note:'补齐交期',details:[],fileIds:[]}} as any);return state;};

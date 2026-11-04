@@ -28,6 +28,8 @@ export type RiskEscalation = {
 };
 export type RiskRecord = {
   id: string; orderId: string; title: string; level: 'info' | 'warning' | 'critical'; basis: string; owner: string; state: RiskState; resolution: string; createdAt: string;
+  /** 负责人本人登记或接手时绑定；自由填写的他人姓名不推断账号。 */
+  ownerId?: string;
   type?: RiskType; source?: { kind: RiskSourceKind; id: string; label: string }; signalKey?: string; createdBy?: string;
   acknowledgedAt?: string; plan?: string; planDue?: string; escalations?: RiskEscalation[]; closedAt?: string; closedBy?: string; updatedAt?: string;
   /** 关闭方式：经审批关闭 / 豁免；直接关闭的低风险与早期记录不写。 */
@@ -226,7 +228,7 @@ export function applyRiskCommand(root: MistState, risks: RiskRecord[], command: 
         if (live && (live.source.kind !== kind || live.source.id !== sourceId)) fail('预警来源与登记来源不一致，请从预警重新登记', 'CONFLICT');
         if (live && LEVEL_RANK[level as RiskRecord['level']] > LEVEL_RANK[live.level]) fail(`风险等级不能低于预警等级（${RISK_LEVEL_LABEL[live.level]}）`);
       }
-      const row: RiskRecord = { id: c.id(), orderId, title: text(v.title, '风险标题', true, 200), basis: text(v.basis, '风险依据'), owner, level, state: 'Open', resolution: '', createdAt: c.now, type, source: src, signalKey, createdBy: c.actorName, escalations: [], updatedAt: c.now };
+      const row: RiskRecord = { id: c.id(), orderId, title: text(v.title, '风险标题', true, 200), basis: text(v.basis, '风险依据'), owner, ownerId: owner === c.actorName ? c.actorId : undefined, level, state: 'Open', resolution: '', createdAt: c.now, type, source: src, signalKey, createdBy: c.actorName, escalations: [], updatedAt: c.now };
       risks.unshift(row); emit(root, c, row.id, `登记风险 ${row.title} · 负责人 ${row.owner}`); return { id: row.id };
     }
     case 'platform.risk.transition': {
@@ -237,7 +239,7 @@ export function applyRiskCommand(root: MistState, risks: RiskRecord[], command: 
       if (v.state === 'Acknowledged') {
         if (row.state !== 'Open') fail('风险已被接手', 'CONFLICT');
         const note = text(v.resolution, '接手说明', false);
-        row.state = 'Acknowledged'; row.acknowledgedAt = c.now; if (row.owner !== c.actorName) { emit(root, c, row.id, `负责人由 ${row.owner} 变更为 ${c.actorName}`); row.owner = c.actorName; }
+        row.state = 'Acknowledged'; row.acknowledgedAt = c.now; row.ownerId = c.actorId; if (row.owner !== c.actorName) { emit(root, c, row.id, `负责人由 ${row.owner} 变更为 ${c.actorName}`); row.owner = c.actorName; }
         row.updatedAt = c.now; emit(root, c, row.id, '接手风险' + (note ? '：' + note : '')); return { id: row.id };
       }
       if (row.state === 'Open') fail('请先确认接手风险，再记录关闭依据');

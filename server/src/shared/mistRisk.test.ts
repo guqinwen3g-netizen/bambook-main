@@ -33,12 +33,29 @@ describe('风险预警只从真实记录推出', () => {
 });
 
 describe('风险登记与处理闭环', () => {
+  it('本人登记绑定账号，指派他人姓名不猜账号，接手后绑定实际处理人', () => {
+    const { state, order, owner } = owned(), me = sales(owner), manager = ctx('周经理');
+    const mine = run(state, save(order.id, owner), me).state;
+    expect(mine.platform.risks[0]).toMatchObject({ owner, ownerId: me.actorId });
+    const assigned = run(state, { ...save(order.id, owner), payload: { ...save(order.id, owner).payload, ownerId: 'forged-account' } }, manager).state;
+    expect(assigned.platform.risks[0].ownerId).toBeUndefined();
+    const id = assigned.platform.risks[0].id;
+    const accepted = run(assigned, { type: 'platform.risk.transition', payload: { id, state: 'Acknowledged', resolution: '' } }, me).state;
+    expect(accepted.platform.risks[0]).toMatchObject({ owner, ownerId: me.actorId });
+    const taken = run(assigned, { type: 'platform.risk.transition', payload: { id, state: 'Acknowledged', resolution: '' } }, manager).state;
+    expect(taken.platform.risks[0]).toMatchObject({ owner: manager.actorName, ownerId: manager.actorId });
+  });
+  it('没有账号的上下文不按姓名产生账号绑定', () => {
+    const { state, order, owner } = owned(), c = ctx(owner); delete c.actorId;
+    const s = run(state, save(order.id, owner), c).state;
+    expect(s.platform.risks[0].ownerId).toBeUndefined();
+  });
   it('同一预警只允许一条未关闭风险；关闭后可再次登记', () => {
     const { state, c, day } = demo(); const sig = riskSignals(state, day).find(x => x.level !== 'critical' && !state.platform!.risks.some(r => r.signalKey === x.key))!;
     const save = { type: 'platform.risk.save', payload: { title: sig.title, level: sig.level, basis: sig.basis, owner: '顾言', type: sig.type, source: { kind: sig.source.kind, id: sig.source.id }, signalKey: sig.key } };
     const a = run(state, save, c); const id = a.result.id!;
     const row = a.state.platform!.risks.find(r => r.id === id)!;
-    expect(row.source?.label).toBe(sig.source.label); expect(row.orderId).toBe(sig.orderId); expect(row.state).toBe('Open');
+    expect(row.source?.label).toBe(sig.source.label); expect(row.orderId).toBe(sig.orderId); expect(row.state).toBe('Open'); expect(row.ownerId).toBe(c.actorId);
     expect(() => run(a.state, save, c)).toThrow(/已登记/);
     let s = run(a.state, { type: 'platform.risk.transition', payload: { id, state: 'Acknowledged', resolution: '' } }, c).state;
     s = run(s, { type: 'platform.risk.transition', payload: { id, state: 'Resolved', resolution: '客户已付款，银行水单已核对' } }, c).state;

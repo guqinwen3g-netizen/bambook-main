@@ -13,6 +13,7 @@ import { businessDate } from './businessClock';
 import { quotationPendingLines } from '../../../../server/src/shared/mistQuotationLineConversion';
 import { calendarVisibleTo, expandRepeats } from './derivedCalendar';
 import { dueReportSchedules, REPORT_SCHEDULE_KINDS } from '../../../../server/src/shared/mistReportSchedules';
+import { pendingEscalation } from '../../../../server/src/shared/mistRisk';
 
 type CanRead = (view: string) => boolean;
 export type MistWorkSource = 'review' | 'agent' | 'qc' | 'shipping' | 'finance' | 'report' | 'material' | 'task' | 'calendar';
@@ -125,6 +126,16 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
     if (proposal.state !== 'pending' || !me || proposal.ownerId !== me) continue;
     push({ id: `agent-proposal:${proposal.id}`, source: 'agent', title: proposal.summary[0] || proposal.command.type, meta: proposal.summary.slice(1).join(' · '),
       when: '待确认', urgent: true, at: proposal.createdAt, target: { view: 'cockpit', id: proposal.id, section: 'agent-proposal' } as MistTarget, module: 'cockpit' });
+  }
+  // 风险按绑定账号派给负责人；审批中的工作已交主管，不重复催办负责人。
+  if (me && canRead('risks')) for (const risk of state.platform?.risks || []) {
+    if (risk.ownerId !== me || risk.state === 'Resolved' || risk.state === 'Escalated' || pendingEscalation(risk)) continue;
+    const overdue = risk.state === 'InProgress' && !!risk.planDue && risk.planDue < today;
+    const when = risk.state === 'Open' ? '待接手'
+      : risk.state === 'Acknowledged' && !risk.plan?.trim() ? '待制定方案'
+      : overdue ? '已逾期' : '待处理';
+    push({ id: `risk:${risk.id}`, source: 'task', title: risk.title, meta: risk.source?.label || '', when, urgent: overdue,
+      at: risk.updatedAt || risk.createdAt, due: risk.planDue || undefined, target: { view: 'risks', id: risk.id, section: 'ledger' } });
   }
   if (me && canRead('quotations')) {
     for (const quote of state.market?.quotations || []) {

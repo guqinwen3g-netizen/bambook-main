@@ -161,6 +161,12 @@ describe('currency defaults respect entered and source values',()=>{
   bridge.current.state.settings.companyProfile={defaultCurrency:'CNY'};bridge.current.state.customers[0].currency='EUR';bridge.current.state.customers.push({...bridge.current.state.customers[0],id:'c2',name:'英国客户',currency:'GBP'});
   await mount('quotations');await click('新建报价');expect((host.querySelector('[aria-label="客户"]') as HTMLSelectElement).value).toBe('');expect((host.querySelector('[aria-label="币种"]') as HTMLInputElement).value).toBe('CNY');await fill('客户','c1');expect((host.querySelector('[aria-label="币种"]') as HTMLInputElement).value).toBe('EUR');await fill('客户','c2');expect((host.querySelector('[aria-label="币种"]') as HTMLInputElement).value).toBe('GBP');await fill('币种','JPY');await fill('客户','c1');expect((host.querySelector('[aria-label="币种"]') as HTMLInputElement).value).toBe('JPY');
  });
+ it('stops a quotation for a held customer as soon as the customer is chosen',async()=>{
+  bridge.current.state.market.relations.push({id:'held',name:'客户',customerId:'c1',supplierId:'',hold:{reason:'账户资料待核验',actor:'主管',at:'2026-10-13T00:00:00.000Z'}});
+  await mount('quotations');await click('新建报价');await fill('客户','c1');
+  expect(host.textContent).toContain('客户往来已冻结');expect(host.textContent).not.toContain('账户资料待核验');
+  const next=[...host.querySelectorAll('button')].find(b=>b.textContent?.trim()==='下一步') as HTMLButtonElement;expect(next.disabled).toBe(true);
+ });
  it('does not overwrite an existing quote currency when a different workspace default is configured',async()=>{
   const s=bridge.current.state;s.settings.companyProfile={defaultCurrency:'CNY'};s.customers[0].currency='EUR';s.market.quotations=[{id:'q',code:'Q-USD',customerId:'c1',currency:'USD',season:'AW26',validUntil:'2026-12-01',deliveryTerms:'FOB',paymentTerms:'T/T',status:'Draft',lines:[],total:'0.00',deliveryEvidence:'',responseEvidence:'',approval:null,convertedOrderId:null,fileIds:[],note:'',createdAt:'',updatedAt:''}];await mount('quotations','q');await click('编辑草稿');expect((host.querySelector('[aria-label="币种"]') as HTMLInputElement).value).toBe('USD');
  });

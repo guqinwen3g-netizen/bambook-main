@@ -28,6 +28,7 @@ import { parsePurchaseContent, purchaseChoices, purchaseContent, sourceOrderBloc
 import { CURRENCIES, SUPPLIER_PAYMENT_TERMS, UNITS } from '../../runtime/tradeOptions';
 import { businessWhen } from './pageKit';
 import { usePageFailure } from '../../runtime/errorPresentation';
+import { relationHoldReason } from '../../../../../server/src/shared/mistRelationHold';
 
 type ProcurementEditorSpec = ModuleEditorSpec & { approvalFor?: string };
 const AMENDMENT_STATE = { pending: '待审批', approved: '已生效', rejected: '已退回', withdrawn: '已撤回' } as const;
@@ -129,6 +130,7 @@ export function ProcurementPage() {
     initialValues: { source: p ? 'line:' + p.lineId : sourceLine ? 'line:' + sourceLine.id : '', kind: p ? (p.kind === 'material' ? p.materialKind ? `material:${p.materialKind}` : '' : p.kind) : entry === 'processing' ? 'processing' : sourceLine?.fulfillmentMode === 'full_package' && domain === 'garment' ? 'finished' : '', supplierId: p?.supplierId || '', description: p?.description || '', quantity: p?.quantity || sourceLine?.qty || 1, unit: p?.unit || sourceLine?.unit || '', kgPerMetre: p?.stageTerms?.kgPerMetre ?? '', lossPercent: p?.stageTerms?.lossPercent ?? '', intermediate: !!p?.stageTerms?.intermediate, deliverToSupplierId: p?.stageTerms?.deliverToSupplierId || '', iqcRequired: !!p?.iqcRequired, price: p?.price || 0, currency: p?.currency || 'CNY', due: p?.due || factoryDueFor(sourceOrder?.due, today()), terms: p?.terms || '', destination: p?.destination || '', note: p?.note || '' },
     // 直接调用服务端同一校验（assertGarmentProcurement）：纯 CMT 不另购物料、CMT 已含项不重复、全包成品与物料 / 加工 / 内部供料不混用。
     issue: values => {
+      if (state && values.supplierId && relationHoldReason(state, { supplierId: String(values.supplierId) })) return '供应商往来已冻结';
       const line = state?.orderLines.find(l => 'line:' + l.id === String(values.source || '')), order = state?.orders.find(o => o.id === line?.orderId), choice = String(values.kind || '');
       if (!state || !line || !order || !choice) return '';
       try { const c = parsePurchaseContent(choice, domain); assertGarmentProcurement(order, line, c.kind, c.kind === 'material' ? c.materialKind : undefined, state, p?.id); return ''; }
