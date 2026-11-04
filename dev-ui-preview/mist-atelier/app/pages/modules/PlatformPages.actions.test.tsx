@@ -156,8 +156,8 @@ it('shows a retained void invoice as void and prevents reconciliation navigation
 });
 it('omits retained void invoices from effective reports and new claim source choices',async()=>{
  const oldId=invoice();Object.assign(bridge.current.state.invoices.find((row:any)=>row.id===oldId),{voidedAt:'2026-10-13T10:00:00Z',voidReason:'旧版',voidSourceDocumentId:'old-doc',open:100});const activeId=invoice();
- await mount(ReportsPage,'reports');const report=getByRole(host,'table');expect(report.textContent).toContain('100.00');expect(report.textContent).not.toContain('200.00');
- await act(async()=>root!.unmount());root=undefined;host.remove();await mount(ClaimsPage,'claims');await click('新建');const options=getByRole(host,'combobox',{name:'来源发票'}) as HTMLSelectElement;expect([...options.options].map(option=>option.value)).toContain(activeId);expect([...options.options].map(option=>option.value)).not.toContain(oldId);
+ await mount(ReportsPage,'reports');const report=getByRole(host,'table',{name:'客户销售额'});expect(report.textContent).toContain('100.00');expect(report.textContent).not.toContain('200.00');
+ await act(async()=>root!.unmount());root=undefined;host.remove();await mount(ClaimsPage,'claims');await click('新建');await field('来源订单',orderId);const options=getByRole(host,'combobox',{name:'来源发票'}) as HTMLSelectElement;expect([...options.options].map(option=>option.value)).toContain(activeId);expect([...options.options].map(option=>option.value)).not.toContain(oldId);
 });
 
 
