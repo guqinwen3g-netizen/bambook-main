@@ -45,6 +45,7 @@ import {applyHandoverCommand,handoverCommandPermission,type HandoverCommand} fro
 import {applyTeamCommand,teamCommandPermission,type TeamCommand} from './mistTeam';
 import {applyTeamScopeCommand,teamScopeCommandPermission,type MistTeamScope,type TeamScopeCommand,type TeamScopeTeam} from './mistTeamScope';
 import {applyOrderCostCommand,orderCostCommandPermission,type OrderCostCommand} from './mistOrderCost';
+import {applyReportScheduleCommand,reportSchedulePermission,type ReportScheduleCommand,type MistReportSchedule} from './mistReportSchedules';
 import {applyOrderSplitCommand,orderDownstreamFacts,type OrderSplitCommand} from './mistOrderSplit';
 import {applySampleRequestCommand,sampleRequestPermission,type SampleRequestCommand,type MistSampleRequest} from './mistSampleRequests';
 import {applyFxRateCommand,fxCommandPermission,type FxPeriodRate,type FxRateCommand,type FxRevaluation} from './mistFxRates';
@@ -352,6 +353,8 @@ export type MistState = {
   rfqs?: MistRfq[];
   /** ord19 客户索样申请，见 mistSampleRequests。 */
   sampleRequests?: MistSampleRequest[];
+  /** fin63 报表订阅（定时发送），见 mistReportSchedules。 */
+  reportSchedules?: MistReportSchedule[];
   customers: MistCustomer[]; contacts: MistContact[]; files: MistFile[];
   events: MistEvent[]; tasks: MistTask[]; notifications: MistNotification[]; calendar: MistCalendarEvent[];
   settings: MistSettings; fulfillment:FulfillmentState; market:MarketState; platform:PlatformState; email:EmailState; crm:CrmState; reviewerIds?:string[];
@@ -363,7 +366,7 @@ export type MistState = {
   teamScopes?:MistTeamScope[];
 };
 export type MistOrderInput = { type: 'garment' | 'fabric'; customerId: string; season: string; currency: string; due: string; ownerId: string; governance?:OrderGovernanceInput; lines: Array<Omit<MistOrderLine, 'id' | 'orderId' | 'made' | 'qc'> & OrderLineSource & {breakdown?:OrderLineBreakdown}> };
-export type MistCommand = PeriodCloseCommand | Extract<DocumentGenerationCommand, { type: 'order.document.generate' | 'market.lookbook.document' }> | AgentTaskCommand | AgentProposalCommand | InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | SampleRequestCommand | OrderSplitCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
+export type MistCommand = PeriodCloseCommand | Extract<DocumentGenerationCommand, { type: 'order.document.generate' | 'market.lookbook.document' }> | AgentTaskCommand | AgentProposalCommand | InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | SampleRequestCommand | OrderSplitCommand | ReportScheduleCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
   | { type: 'development.saveDraft'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.submit'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.update'; payload: { devId: string; patch: Partial<DevelopmentValues> } }
@@ -875,6 +878,7 @@ export function mistCommandPermission(command: MistCommand): string | null {
   if(command.type.startsWith('teamScope.'))return teamScopeCommandPermission(command as TeamScopeCommand);
   if(command.type.startsWith('cost.'))return orderCostCommandPermission(command as OrderCostCommand);
   if(command.type.startsWith('sample.request.'))return sampleRequestPermission(command as SampleRequestCommand);
+  if(command.type.startsWith('report.schedule.'))return reportSchedulePermission(command as ReportScheduleCommand);
   if(command.type.startsWith('fulfillment.'))return fulfillmentCommandPermission(command as FulfillmentCommand);
   if(command.type.startsWith('market.'))return marketCommandPermission(command as MarketCommand);
   if(command.type.startsWith('platform.'))return platformCommandPermission(command as PlatformCommand);
@@ -959,6 +963,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
   if(command.type.startsWith('team.')){const result=applyTeamCommand(state,command as TeamCommand,context);return {state,result};}
   if(command.type.startsWith('teamScope.')){const result=applyTeamScopeCommand(state,command as TeamScopeCommand,context);return {state,result};}
   if(command.type.startsWith('cost.')){const result=applyOrderCostCommand(state,command as OrderCostCommand,context);return {state,result};}
+  if(command.type.startsWith('report.schedule.')){const result=applyReportScheduleCommand(state,command as ReportScheduleCommand,context);return {state,result};}
   if(command.type.startsWith('sample.request.')){const result=applySampleRequestCommand(state,command as SampleRequestCommand,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('rfq.')||command.type.startsWith('sourcing.')){const result=applyRfqCommand(state,command as RfqCommand,context);closeTakenOverHandoffs(state);normalizeMistState(state,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('rebate.')){const result=applyExportRebateCommand(state,command as ExportRebateCommand,context);recalculate(state);assertOrderFundingIntegrity(state);return {state,result};}

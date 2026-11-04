@@ -11,6 +11,7 @@ import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { downloadModuleCsv, downloadModuleXlsx } from './ModuleWorkbench';
+import { ReportSchedules } from './ReportSchedules';
 import { OrderActualCostPanel } from './OrderActualCostPanel';
 import { REBATE_ACCESS_TEXT, rebateAccess } from './RebatePanel';
 import { FX_BASIS_LABEL, fxOrderActual, fxRateFor, fxUnallocatedSettlements, type FxBasis, type FxResolved } from '../../../../../server/src/shared/mistFxRates';
@@ -128,7 +129,7 @@ export function buildOrderProgress(state: MistState, asOf: string): OrderProgres
     return { id: o.id, code: o.code, customer: o.customer, due: o.due, progress: o.progress, state: o.state, tone: o.tone, status, lateDays: Math.max(0, late) };
   }).sort((a, b) => ({ overdue: 0, soon: 1, ontrack: 2, nodue: 3 }[a.status] - { overdue: 0, soon: 1, ontrack: 2, nodue: 3 }[b.status]) || b.lateDays - a.lateDays || a.due.localeCompare(b.due));
 }
-const PROGRESS_STATUS = { overdue: { label: '已逾期', tone: 'bad' }, soon: { label: '7 天内到期', tone: 'warn' }, ontrack: { label: '正常', tone: 'ok' }, nodue: { label: '未填交期', tone: 'neutral' } } as const;
+export const PROGRESS_STATUS = { overdue: { label: '已逾期', tone: 'bad' }, soon: { label: '7 天内到期', tone: 'warn' }, ontrack: { label: '正常', tone: 'ok' }, nodue: { label: '未填交期', tone: 'neutral' } } as const;
 
 type ReportTab = 'sales' | 'margin' | 'actual' | 'aging' | 'orders' | 'cash';
 export function PlatformReportsPage() {
@@ -220,6 +221,7 @@ export function PlatformReportsPage() {
   return <MistPage>
     <PageHeader title={uiText("报表中心")} actions={<>{tab !== 'actual' && <><Button icon={Download} disabled={!state || ((tab === 'sales' || tab === 'margin') && invalid)} onClick={() => exportCurrent('csv')}>{uiText("导出 CSV")}</Button><Button icon={Download} disabled={!state || ((tab === 'sales' || tab === 'margin') && invalid)} onClick={() => exportCurrent('xlsx')}>{uiText("导出 Excel")}</Button></>}</>} />
     {workspace.error && <Banner tone="bad" title={uiText("读取失败")}>{workspace.error}</Banner>}
+    {state && <ReportSchedules state={state} canAdmin={canSeeMargin} asOf={asOf} />}
     <Tabs<ReportTab> value={tab} onChange={next => go('reports', undefined, { section: next })} options={[{ value: 'sales', label: '客户销售额' }, ...(canSeeMargin ? [{ value: 'margin' as const, label: '订单毛利' }, { value: 'actual' as const, label: '订单核算' }] : []), { value: 'aging', label: '应收账龄' }, ...(canSeeMargin ? [{ value: 'cash' as const, label: '资金月报' }] : []), { value: 'orders', label: '订单进度与逾期', count: progress.filter(r => r.status === 'overdue').length || undefined }]} />
     <section className="mist-section">{tab === 'sales' ? <>
       <Toolbar><Field label={uiText("统计日期")}><Select aria-label={uiText("统计日期")} value={salesBasis} onChange={e => setSalesBasis(e.target.value as SalesBasis)} options={(Object.keys(SALES_BASIS_LABEL) as SalesBasis[]).map(k => ({ value: k, label: SALES_BASIS_LABEL[k] }))} /></Field><Field label={uiText("起日")}><TextInput type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field><Field label={uiText("止日")}><TextInput type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>{currencyFilter}</Toolbar>

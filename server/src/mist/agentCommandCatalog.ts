@@ -2214,6 +2214,24 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistExportRebate.ts"
  },
  {
+  "type": "report.schedule.save",
+  "payload": "{ id?: string; kind: ReportScheduleKind; every: 'week' | 'month'; day: number; to: string; note?: string }",
+  "types": {
+   "ReportScheduleKind": "keyof typeof REPORT_SCHEDULE_KINDS"
+  },
+  "source": "server/src/shared/mistReportSchedules.ts"
+ },
+ {
+  "type": "report.schedule.sent",
+  "payload": "{ id: string; period: string }",
+  "source": "server/src/shared/mistReportSchedules.ts"
+ },
+ {
+  "type": "report.schedule.stop",
+  "payload": "{ id: string }",
+  "source": "server/src/shared/mistReportSchedules.ts"
+ },
+ {
   "type": "rfq.award",
   "payload": "{ id: string; quoteId: string; reason?: string }",
   "source": "server/src/shared/mistSourcing.ts"
