@@ -12,16 +12,16 @@ import { NotificationsPage, notificationRows } from './NotificationsPage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | undefined, host: HTMLElement, count = 0;
 const go = vi.fn();
-const ctx = () => ({ id: () => `record-${++count}`, now: '2026-10-15T08:00:00.000Z', actorName: '当前员工' });
+const ctx = () => ({ id: () => `record-${++count}`, now: '2026-10-15T08:00:00.000Z', actorName: '当前员工', actorId: 'owner' });
 const element = () => <MistRoot><ToastProvider><Nav.Provider value={{ route: seam.route, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() } as any}><NotificationsPage /></Nav.Provider></ToastProvider></MistRoot>;
 const paint = () => root!.render(element());
 const render = () => { host = document.createElement('div'); document.body.append(host); root = createRoot(host); act(paint); };
 const button = (text: string) => { const value = [...host.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.trim() === text); expect(value).toBeDefined(); return value!; };
 const click = async (target: HTMLElement) => act(async () => target.click());
 const notes = () => [
-  { id: 'n-qc', category: 'qc', title: 'QC 报告已回传', detail: '样品评审通过', at: '2026-10-15T07:00:00Z', readAt: null, target: { view: 'qc-workbench', id: 'qc-1' } },
-  { id: 'n-ship', category: 'shipping', title: '出运准备提醒', detail: '本周出运', at: '2026-10-14T07:00:00Z', readAt: null, target: { view: 'shipments', id: 'sh-1' } },
-  { id: 'n-old', category: 'general', title: '已读的工作通知', detail: '订单已确认', at: '2026-10-13T07:00:00Z', readAt: '2026-10-13T08:00:00Z', target: { view: 'orders/detail', id: 'o-1' } },
+  { id: 'n-qc', recipientIds: ['owner'], category: 'qc', title: 'QC 报告已回传', detail: '样品评审通过', at: '2026-10-15T07:00:00Z', readAt: null, target: { view: 'qc-workbench', id: 'qc-1' } },
+  { id: 'n-ship', recipientIds: ['owner'], category: 'shipping', title: '出运准备提醒', detail: '本周出运', at: '2026-10-14T07:00:00Z', readAt: null, target: { view: 'shipments', id: 'sh-1' } },
+  { id: 'n-old', recipientIds: ['owner'], category: 'general', title: '已读的工作通知', detail: '订单已确认', at: '2026-10-13T07:00:00Z', readAt: '2026-10-13T08:00:00Z', target: { view: 'orders/detail', id: 'o-1' } },
 ];
 it('opens a personal Agent reminder through its own read state and accurate task link',async()=>{
  const notice={id:'agent-task:task:key',taskId:'task',key:'a'.repeat(64),title:'Agent待补充资料',detail:'核对交期',at:'2026-11-01T00:00:00Z',readAt:null,category:'general',target:{view:'account',id:'task',section:'agents'}},read=vi.fn(async()=>{});seam.value.agentTaskNotices={items:[notice],read};render();const row=[...host.querySelectorAll('[role=row]')].find(r=>r.textContent?.includes('Agent待补充资料'))!;expect(row).toBeTruthy();await click(row.querySelector('button')!);expect(read).toHaveBeenCalledWith([notice]);expect(seam.value.run).not.toHaveBeenCalled();expect(go).toHaveBeenCalledWith('account','task',notice.target);
@@ -31,7 +31,8 @@ beforeEach(() => {
   seam.session = { sessionKey: 'one', user: { id: 'owner', displayName: '当前员工' }, hasPermission: () => true, canAccessView: () => true };
   const state = createMistState(ctx(), 'empty'); state.notifications = notes() as any;
   seam.value = { state, workspace: { id: 'w1', name: '空间' }, loading: false, saving: false, pending: null, error: '',
-    run: vi.fn(async (command: MistCommand) => { seam.value.state = applyMistCommand(seam.value.state, command, ctx()).state; paint(); return { result: {} }; }) };
+    // The server projects each member's readBy into readAt; mirror that so the page sees its own read state.
+    run: vi.fn(async (command: MistCommand) => { const next = applyMistCommand(seam.value.state, command, ctx()).state; next.notifications = next.notifications.map((n: any) => ({ ...n, readAt: n.readBy?.owner ?? n.readAt })); seam.value.state = next; paint(); return { result: {} }; }) };
 });
 afterEach(() => { if (root) act(() => root!.unmount()); host?.remove(); root = undefined; });
 

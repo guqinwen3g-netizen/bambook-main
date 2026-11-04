@@ -70,6 +70,7 @@ describe('应收 → 多票核销 → 部分冲正', () => {
     ['7.8', 1321, 'credit'], ['7.6', 679, 'debit'],
   ] as const)('跨币种多票核销 @%s：凭证保留两种原币与汇兑差，冲正后只回滚对应一票', (eurRate, difference, side) => {
     const f = setup(), eur = f.account('EUR', '3333'), receiptId = f.receipt(150.01, 'CROSS', 'EUR', eur);
+    f.ctx.now = '2026-10-05T02:00:00Z';
     f.invoice('usd-invoice', 108.01); f.invoice('cny-invoice', 390, 'CNY');
     for (const [currency, rate] of [['EUR', eurRate], ['USD', '7.1']]) f.run({ type: 'fxrate.period.save', payload: { month: '2026-10', currency, rate, source: '月末牌价' } });
     f.run({ type: 'finance.reconcile', payload: { receiptId, rateBasis: '银行水单', lines: [
@@ -82,7 +83,7 @@ describe('应收 → 多票核销 → 部分冲正', () => {
     const crossLines = () => monthlyVouchers(f.state, '2026-10').filter(l => l.source === `${f.state.receipts[0].code}/USD-INVOICE`);
     const before = crossLines();
     expect(before.map(l => [l.account, l.currency, mistMoneyMinor(l.amount)])).toEqual([
-      ['1002', 'EUR', 10001], ['1122', 'USD', 10801], ['6603.02', 'CNY', difference],
+      ['2203', 'EUR', 10001], ['1122', 'USD', 10801], ['6603.02', 'CNY', difference],
     ]);
     expect(Math.round((before[2][side] || 0) * 100)).toBe(difference);
     expect(voucherMinor(before, 'debit')).toBe(voucherMinor(before, 'credit'));
@@ -90,7 +91,10 @@ describe('应收 → 多票核销 → 部分冲正', () => {
     const keptLines = () => monthlyVouchers(f.state, '2026-10').filter(l => l.source.endsWith('/CNY-INVOICE')).map(({ no, ...line }) => line);
     const kept = keptLines();
     f.run({ type: 'finance.allocation.reverse', payload: { allocationId: first.id, reason: '客户更正付款用途' } });
-    expect(crossLines()).toEqual([]);
+    expect(crossLines()).toEqual(before);
+    const reversalLines = monthlyVouchers(f.state, '2026-10').filter(l => l.source === f.state.financeReversals![0].id);
+    expect(reversalLines.map(l => l.account)).toEqual(['1122', '2203', '6603.02']);
+    expect(voucherMinor(reversalLines, 'debit')).toBe(voucherMinor(reversalLines, 'credit'));
     expect(keptLines()).toEqual(kept);
     expect(f.state.allocations).toEqual([second]);
     expect(mistMoneyMinor(f.state.receipts[0].remaining)).toBe(10001);
@@ -101,6 +105,7 @@ describe('应收 → 多票核销 → 部分冲正', () => {
 
   it('跨币种凭证缺一侧月末汇率时保留各侧原币，缺失折算不生成汇兑差', () => {
     const f = setup(), eur = f.account('EUR', '3333'), receiptId = f.receipt(100, 'NO-RATE', 'EUR', eur);
+    f.ctx.now = '2026-10-05T02:00:00Z';
     f.invoice('i1', 108);
     f.run({ type: 'fxrate.period.save', payload: { month: '2026-10', currency: 'EUR', rate: '7.8', source: '月末牌价' } });
     f.run({ type: 'finance.reconcile', payload: { receiptId, invoiceId: 'i1', rate: '1.08', rateBasis: '客户确认' } });
@@ -169,14 +174,12 @@ describe('锁汇 → 部分结汇 → 冲正', () => {
 });
 
 describe('已结账月份的冲正', () => {
-  it.each(['allocation', 'payment', 'lock', 'settlement'] as const)('%s 冲正须先反结账，拒绝时所有记录不变', kind => {
+  it.each(['payment', 'lock', 'settlement'] as const)('%s 冲正须先反结账，拒绝时所有记录不变', kind => {
     const f = setup(), receiptId = f.receipt(100.03, 'CLOSED'); f.invoice('i1', 100.03);
     f.run({ type: 'finance.reconcile', payload: { receiptId, invoiceId: 'i1', amount: 100.03 } });
-    const allocationId = f.state.allocations[0].id;
     const paymentId = String(f.run({ type: 'finance.payment.save', payload: { accountId: f.usd, date: '2026-10-07', payee: '物流商', amount: 10.01, currency: 'USD', ref: 'PAY-1' } }).id);
     const lockId = f.lock(50), settlementId = f.settle(50, 355, 'CLOSED-FX');
-    const command: MistCommand = kind === 'allocation' ? { type: 'finance.allocation.reverse', payload: { allocationId, reason: '录入有误' } }
-      : kind === 'payment' ? { type: 'finance.payment.reverse', payload: { paymentId, reason: '录入有误' } }
+    const command: MistCommand = kind === 'payment' ? { type: 'finance.payment.reverse', payload: { paymentId, reason: '录入有误' } }
         : { type: 'finance.fx.reverse', payload: { id: kind === 'lock' ? lockId : settlementId, reason: '录入有误' } };
     f.run({ type: 'finance.period.close', payload: { month: '2026-10', note: '核对一致' } });
     f.rejectUnchanged(command, '2026-10 已结账');

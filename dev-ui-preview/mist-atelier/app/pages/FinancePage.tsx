@@ -1,5 +1,5 @@
 import { uiText, ui } from '../../../../services/interfaceLanguage';
-import { MistPresentedErrorContext } from '../runtime/errorPresentation';
+import { MistPresentedErrorContext, usePendingRecoveryClaim } from '../runtime/errorPresentation';
 import {businessDate,businessNow,businessToday} from '../runtime/businessClock';
 /** T6 收款核销：保留原 Mist 双栏，对账结果由公司共享数据保存。 */
 import { AccessHiddenNotice } from './AccessHiddenNotice';
@@ -71,6 +71,7 @@ export function FinancePage() {
   const [area,setArea]=React.useState<FinanceArea>(()=>areaOf(route.section));
   React.useEffect(()=>setArea(areaOf(route.section)),[route.section,canSeeAccounts]);
   const { state, loading, error, run, refresh, saving, pending, recover }=workspace;
+  usePendingRecoveryClaim(!!pending);
   const scope=`${workspace.workspace?.id||''}:${workspace.workspace?.ownerId||''}`,activeScope=React.useRef(scope);activeScope.current=scope;
   const alive=React.useRef(true);React.useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const operation=React.useRef(false),fileSequence=React.useRef(0),routed=React.useRef('');
@@ -139,7 +140,8 @@ export function FinancePage() {
   const currencies=[...new Set([...receipts.map(row=>row.currency),...invoices.map(row=>row.currency)])];
   const displayCurrency=previewInvoice?.currency||receipt?.currency||(currencies.includes('USD')?'USD':currencies[0])||'USD';
   const now=businessNow(),monthAllocations=allocations.filter(item=>{const date=mistDate(item.createdAt);return date&&date.getFullYear()===now.getFullYear()&&date.getMonth()===now.getMonth();});
-  const overdueInvoices=invoices.filter(item=>isActiveMistInvoice(item)&&item.open>0&&item.due<today);
+  // The overdue card follows the same scope as the list (e.g. only fabric orders when opened from the fabric order card).
+  const overdueInvoices=(hasInvoiceFilter?visibleInvoices:invoices).filter(item=>isActiveMistInvoice(item)&&item.open>0&&item.due<today);
   const pendingAmount=cashTotal(pendingReceipts.filter(item=>item.currency===displayCurrency).map(item=>item.remaining));
   const otherPending=currencies.filter(currency=>currency!==displayCurrency).map(currency=>`${fmt(cashTotal(pendingReceipts.filter(item=>item.currency===currency).map(item=>item.remaining)),2)} ${currency}`).join(' · ');
   const resolvePending=async()=>{if(working||saving||loading||operation.current)return;const bound=scope,original=pending;operation.current=true;setWorking(true);setFailure('');try{const receipt=await recover();if(receipt&&alive.current&&activeScope.current===bound&&routeScope.isCurrent()){if(original?.command?.type==='finance.importReceipts')setImportRows([]);if(original?.command?.type==='finance.payment.save')setPaymentOpen(false);toast('原操作结果已核对');}}catch(error){if(alive.current&&activeScope.current===bound)setFailure(error instanceof Error?error.message:'原请求核对失败');}finally{if(alive.current&&activeScope.current===bound){operation.current=false;setWorking(false);}}};
@@ -173,7 +175,7 @@ export function FinancePage() {
       { label: '待核销到账', value: state?.partialReceipts?.length ? '—' : fmt(pendingAmount, 2), unit: state?.partialReceipts?.length ? undefined : displayCurrency, hint: state?.partialReceipts?.length ? '部分到账余额不可见' : otherPending || `${pendingReceipts.length} 笔流水` },
       { label: '本月已核销', value: fmt(cashTotal(monthAllocations.filter(item => item.currency === displayCurrency).map(item=>item.amount)),2), unit: displayCurrency, hint: `${monthAllocations.length} 条本月核销记录` },
       { label: '未认领', value: state?.partialReceipts?.length ? '—' : unclaimedCount, unit: state?.partialReceipts?.length ? undefined : '笔', hint: state?.partialReceipts?.length ? '部分到账余额不可见' : unclaimedCount?'需联系付款方':'暂无待认领流水', hintTone: unclaimedCount?'bad':undefined },
-      { label: '逾期应收', value: fmt(cashTotal(overdueInvoices.filter(item=>item.currency===displayCurrency).map(item=>item.open)),2), unit: displayCurrency, hint: '按发票余额统计', hintTone: 'warn' }]} />
+      { label: '逾期应收', value: fmt(cashTotal(overdueInvoices.filter(item=>item.currency===displayCurrency).map(item=>item.open)),2), unit: displayCurrency, hint: orderType==='fabric'?'面料订单 · 按发票余额':orderType==='garment'?'成衣订单 · 按发票余额':route.customerId?'当前客户 · 按发票余额':'按发票余额统计', hintTone: 'warn' }]} />
     {suggestions.length > 0 && <div className="mist-section"><Banner tone="ai" icon={Sparkles} title={ui`小竹匹配了 ${suggestions.length} 笔到账`} actions={canFund?<Button size="sm" variant="ai" disabled={busy} onClick={() => setSuggestConfirm(true)}>{uiText("核对并采纳")}</Button>:undefined} /></div>}
     {state&&<FinanceDevBilling state={state} canInvoice={session.hasPermission(MIST_FINANCE_SCOPES.invoice)} busy={busy} execute={execute} />}
     <Tabs<'recv' | 'pay' | 'inv'> value={tab} onChange={setTab} options={[{ value: 'recv', label: '收款核销', count: pendingReceipts.length }, { value: 'pay', label: '付款凭证', count: payments.length }, { value: 'inv', label: '发票', count: visibleInvoices.length }]} />

@@ -1,3 +1,4 @@
+import {notifyMist,notificationOwners} from './mistNotifications';
 import {recoveryOtherFulfilledMinor} from './mistClaimRecoveryReceipts';
 import {openQcChargebacks} from './mistQcDisposition';
 import {openReturnCharges} from './mistReturnCharges';
@@ -645,8 +646,9 @@ function assertDistinctReviewers(tier: PaymentTier, c: MistContext) {
 /** 决定时此刻仍被服务端重建为该级审批人（原路由或冲突时的其他合格审批人）。 */
 const currentTierReviewers = (c: MistContext, level: PaymentApprovalLevel) => [...(c.authority?.paymentTierReviewerIds?.[level] || []), ...((c.authority as PaymentTierAuthority | undefined)?.paymentTierAlternateIds?.[level] || [])];
 
-function event(root: Root, c: MistContext, entityId: string, message: string) {
+function event(root: Root, c: MistContext, entityId: string, message: string, recipientIds: string[] = []) {
   root.events.unshift({ id: c.id(), entityType: 'payable', entityId, actor: c.actorName, at: c.now, text: message, fileIds: [] });
+  notifyMist(root,c,{title:message,detail:c.actorName,target:{view:'payables',id:entityId},category:'general'},recipientIds);
 }
 function files(root: Root, value: unknown) {
   if (value === undefined) return [];
@@ -816,7 +818,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       request.state = 'paid'; request.supplierPaymentId = id; request.paymentHistory.push(id);
       // 实付为银行已付事实，不因当前冻结拒登；在登记事件中保留当时的冻结原因。
       const held = relationHoldReason(root, { supplierId: request.supplierId });
-      event(root, c, id, `按付款申请 ${request.code} 登记${request.purpose === 'prepayment' ? '预付款' : request.purpose === 'settlement' ? `按结算 ${request.settlementCode} 先付（发票未到）` : '供应商付款'} ${code}（${request.supplier}）${held ? `；登记时：${held}` : ''}`);
+      event(root,c,id,`按付款申请 ${request.code} 登记${request.purpose === 'prepayment' ? '预付款' : request.purpose === 'settlement' ? `按结算 ${request.settlementCode} 先付（发票未到）` : '供应商付款'} ${code}（${request.supplier}）${held ? `；登记时：${held}` : ''}`,[request.requesterId,...(request.purchaseId?notificationOwners(root,'procurement',request.purchaseId):request.lines.flatMap(line=>s.bills.find(b=>b.id===line.billId)?.lines.flatMap(l=>notificationOwners(root,'procurement',l.purchaseId))??[]))]);
       return { id, applied };
     }
     case 'payable.plan.register': {
@@ -946,7 +948,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       (request.approvals ||= []).push({ level: level!.level, actorId: c.actorId, actor: c.actorName, at: c.now, decision: p.decision, note });
       const finished = p.decision === 'rejected' || left.length === 1;
       if (finished) { request.state = p.decision; request.decision = { actorId: c.actorId, actor: c.actorName, at: c.now, decision: p.decision, note }; }
-      event(root, c, request.id, `付款申请 ${request.code} ${PAYMENT_APPROVAL_LABEL[level!.level]}${p.decision === 'approved' ? '已批准' : '已退回'}${finished ? '' : `，还差 ${left.filter(l => l !== level).map(l => PAYMENT_APPROVAL_LABEL[l.level]).join('、')}`}：${note}`);
+      event(root,c,request.id,`付款申请 ${request.code} ${PAYMENT_APPROVAL_LABEL[level!.level]}${p.decision === 'approved' ? '已批准' : '已退回'}${finished ? '' : `，还差 ${left.filter(l => l !== level).map(l => PAYMENT_APPROVAL_LABEL[l.level]).join('、')}`}：${note}`,[request.requesterId]);
       return { id: request.id };
     }
     case 'payable.request.cancel': {
@@ -1030,7 +1032,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       if (st.state !== 'pending') fail('结算已处理或已撤回', 'CONFLICT');
       if (st.submitterId === c.actorId) fail('不能复核本人提交的结算', 'FORBIDDEN');
       st.state = 'returned'; st.returned = { at: c.now, actor: c.actorName, reason: text(p.reason, '退回原因', true, 500) };
-      event(root, c, st.id, `退回结算 ${st.code}：${st.returned.reason}`);
+      event(root,c,st.id,`退回结算 ${st.code}：${st.returned.reason}`,[st.submitterId,...notificationOwners(root,'procurement',st.purchaseId)]);
       return { id: st.id };
     }
     case 'payable.settlement.confirm': {
@@ -1049,7 +1051,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       if (applied > mistMoneyMinor(st.amount)) fail('本次预付抵扣不能超过结算金额');
       const adjustReason = text(p.adjustReason, '调整原因', applied !== suggested, 500);
       st.state = 'confirmed'; st.confirmation = { actorId: c.actorId, actor: c.actorName, at: c.now, suggestedPrepayment: major(suggested), prepaymentApplied: major(applied), adjustReason: applied !== suggested ? adjustReason : '', note: text(p.note, '复核意见', false, 1000) };
-      event(root, c, st.id, `确认结算 ${st.code}（${fx(st.amount)} ${st.currency}${applied ? `，预付抵扣 ${fx(major(applied))}` : ''}${applied !== suggested ? `，调整原因：${adjustReason}` : ''}）`);
+      event(root,c,st.id,`确认结算 ${st.code}（${fx(st.amount)} ${st.currency}${applied ? `，预付抵扣 ${fx(major(applied))}` : ''}${applied !== suggested ? `，调整原因：${adjustReason}` : ''}）`,[st.submitterId,...notificationOwners(root,'procurement',st.purchaseId)]);
       return { id: st.id };
     }
     case 'payable.settlement.reverse': {

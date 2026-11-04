@@ -65,6 +65,7 @@
 .mist-icon-btn:hover { background: var(--mist-fill); color: var(--mist-ink); }
 .mist-icon-btn[data-size="sm"] { width: 30px; height: 30px; border-radius: var(--mist-r-sm); }
 .mist-pip { position: absolute; top: 9px; right: 10px; width: 7px; height: 7px; border-radius: 50%; background: var(--mist-bad); }
+.mist-pip-count { position: absolute; top: 3px; right: 2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; display: grid; place-items: center; background: var(--mist-accent); color: var(--mist-card); font-size: 10px; font-weight: var(--mist-fw-medium); line-height: 1; font-variant-numeric: tabular-nums; pointer-events: none; }
 
 .mist-link { color: var(--mist-accent-ink); font-size: var(--mist-text-sm); display: inline-flex; align-items: center; gap: 6px; font-weight: var(--mist-fw-medium); }
 .mist-link:hover { text-decoration: underline; text-underline-offset: 3px; }

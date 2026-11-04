@@ -157,8 +157,10 @@ describe('my work queue sources', () => {
     state.allocations = [{ id: 'al', receiptId: 'r4', invoiceId: 'i0', amount: 5, currency: 'USD', createdAt: '', actor: '' }] as any;
     state.invoices = [{ id: 'i1', code: 'INV-1', customer: '客户', order: 'SO-1', due: '2026-11-01', financeStatus: 'pending' }, { id: 'i2', code: 'INV-2', financeStatus: 'confirmed' }] as any;
     const items = mistWorkQueue(state, { canRead: all, can: p => p === 'invoices:reconcile' || p === 'invoices:write', me: 'me', today: '2026-10-15' });
-    expect(items.map(item => [item.id, item.module])).toEqual([['receipt:r1', 'payment-vouchers'], ['receipt:r2', 'payment-vouchers'], ['invoice:i1', 'payment-vouchers']]);
-    expect(items[2].target).toEqual({ view: 'invoices', section: 'pending', id: 'i1' });
+    // r4 is partly allocated with 5 USD still open, so it stays in the queue until the rest is allocated.
+    expect(items.map(item => [item.id, item.module])).toEqual([['receipt:r1', 'payment-vouchers'], ['receipt:r2', 'payment-vouchers'], ['receipt:r4', 'payment-vouchers'], ['invoice:i1', 'payment-vouchers']]);
+    expect(items[2].title).toContain('5');
+    expect(items[3].target).toEqual({ view: 'invoices', section: 'pending', id: 'i1' });
     expect(mistWorkQueue(state, { canRead: all, me: 'me', today: '2026-10-15' })).toEqual([]);
   });
   it('counts work items only for their assignees or holders of the named permission', () => {
