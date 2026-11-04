@@ -7,6 +7,7 @@ import { marketBusinessDate, type MarketState } from '../../../../../server/src/
 import { MARGIN_FLOOR_FAMILY_LABEL, applicableMarginFloor, normalizeMarginPercent, type MarginFloorFamily, type QuoteMarginFloor } from '../../../../../server/src/shared/mistQuotationMarginFloor';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
+import { businessWhen } from './pageKit';
 
 const FAMILIES: MarginFloorFamily[] = ['garment', 'fabric'];
 export function marginFloorDraftProblem(input: { minMarginPercent: string; effectiveFrom: string; reason: string }, today: string) {
@@ -37,7 +38,7 @@ export function QuoteMarginFloorPanel() {
     { key: 'min', header: '最低毛利率', width: '100px', align: 'right', render: r => <span className="mist-num">{r.minMarginPercent}%</span> },
     { key: 'from', header: '生效日', width: '110px', render: r => r.effectiveFrom },
     { key: 'reason', header: '调整原因', hideOnMobile: true, render: r => r.reason },
-    { key: 'by', header: '设置人 / 时间', hideOnMobile: true, render: r => `${r.createdBy || '—'} · ${r.createdAt.slice(0, 16).replace('T', ' ')}` },
+    { key: 'by', header: '设置人 / 时间', hideOnMobile: true, render: r => `${r.createdBy || '—'} · ${businessWhen(r.createdAt)}` },
   ];
   return <div className="mist-col" data-margin-floors>
     <Banner title={uiText("报价底价线")}>{uiText("条目毛利率 =（单价 − 成本）/ 单价。低于所在板块的最低毛利率即“须审批”，与“低于成本 / 成本未核实”并存。报价保存时冻结当时适用的版本，之后修改参数不影响已保存报价。")}</Banner>

@@ -90,6 +90,8 @@ describe('供应商询价比价',()=>{
     expect(old).toMatchObject({state:'cancelled',transferredTo:{purchaseId:id,purchaseCode:next.code,supplier:'江南成衣'}});
     expect(old.cancellation!.reason).toBe('转给 江南成衣：远山服装产能被抽调，无法保交期');
     expect(next).toMatchObject({state:'draft',supplier:'江南成衣',price:88,currency:'CNY',due:'2026-11-18',quantity:old.quantity,lineId:old.lineId,kind:'processing',terms:old.terms,transferredFrom:{purchaseCode:'PO-2026-00003',supplier:'远山服装'}});
+    // 原合同交付地点是原加工厂本身（料送到厂里加工），换厂后改为新加工厂（fin81 走查）。
+    expect(old.destination).toBe('远山服装');expect(next.destination).toBe('江南成衣');
     expect(f.state.productions.find(j=>j.id===branch.id)!.closed!.reason).toContain('PO-2026-00003 取消');
     expect(()=>f.run({type:'fulfillment.production.plan',payload:{productionId:branch.id,lines:[]}} as MistCommand)).toThrow('已随合同取消关闭');
     f.run({type:'fulfillment.procurement.submit',payload:{id}} as MistCommand);

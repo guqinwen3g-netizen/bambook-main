@@ -10,7 +10,7 @@ import { TEAM_DORMANT_DAYS, addBusinessDays, myTeamReport, teamOverview, teamWee
 import { platformBusinessDate } from '../../../../../server/src/shared/mistPlatform';
 import type { MistMemberOption } from '../../runtime/members';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec, type ModuleValues } from './ModuleWorkbench';
-import { DetailBlock } from './pageKit';
+import { DetailBlock, businessWhen } from './pageKit';
 
 const money = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const sums = (rows: Array<{ currency: string; amount: number }>) => rows.map(r => `${r.currency} ${money(r.amount)}`).join(' / ');
@@ -164,7 +164,7 @@ export function TeamWeekly({ state, members, viewer, group, today, initialWeek, 
       <span className="mist-row"><Button size="sm" icon={ChevronLeft} aria-label={uiText("上一周")} onClick={() => setWeek(addBusinessDays(week, -7))} /><b>{report.weekStart}{uiText(" 至 ")}{report.weekEnd}</b>{week === current && <Pill tone="accent">{uiText("本周 · 统计到 ")}{today}</Pill>}<Button size="sm" icon={ChevronRight} aria-label={uiText("下一周")} disabled={week >= current} onClick={() => setWeek(addBusinessDays(week, 7))} /></span>
       <span className="mist-row">{ended && !archived && canArchive && run && <Button size="sm" variant="primary" icon={Archive} disabled={busy} onClick={() => void archive()}>{uiText("生成并存档")}</Button>}<Button size="sm" icon={Copy} onClick={() => void copy()}>{uiText("复制周报文字")}</Button><Button size="sm" icon={Download} disabled={!report.rows.length} onClick={exportCsv}>{uiText("导出 CSV")}</Button></span>
     </div>
-    {archived ? <Banner tone="ok" title={ui`已存档 · ${archived.scope}`}>{uiText("由 ")}{archived.generatedBy}{uiText(" 于 ")}{archived.generatedAt.slice(0, 16).replace('T', ' ')}{uiText(" 生成；以下是生成那一刻的数据，之后的补录不会改变它。")}</Banner>
+    {archived ? <Banner tone="ok" title={ui`已存档 · ${archived.scope}`}>{uiText("由 ")}{archived.generatedBy}{uiText(" 于 ")}{businessWhen(archived.generatedAt)}{uiText(" 生成；以下是生成那一刻的数据，之后的补录不会改变它。")}</Banner>
       : ended && canArchive && run ? <Banner tone="warn" title={uiText("这一周已结束，尚未存档")}>{uiText("点“生成并存档”把此刻的数据冻结成正式周报，之后可随时回看、复制或导出。")}</Banner> : null}
     <StatGrid>
       <StatCard icon={Package} label={uiText("新接订单")} value={t.newOrders} unit={uiText("单")} foot={sums(t.newOrderAmount) || '本周没有新单'} />

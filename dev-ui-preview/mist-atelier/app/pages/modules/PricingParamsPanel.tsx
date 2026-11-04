@@ -7,6 +7,7 @@ import { platformBusinessDate } from '../../../../../server/src/shared/mistPlatf
 import { PRICING_PARAM_FAMILY_LABEL, PRICING_PARAM_MAX, applicablePricingParams, normalizePricingPercent, upcomingPricingParams, type PricingParamFamily, type PricingParamVersion } from '../../../../../server/src/shared/mistPricingParams';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
+import { businessWhen } from './pageKit';
 
 const FAMILIES: PricingParamFamily[] = ['garment', 'fabric'];
 export function pricingParamsDraftProblem(input: { profitMargin: string; commissionRate: string; effectiveFrom: string; reason: string }, today: string) {
@@ -39,7 +40,7 @@ export function PricingParamsPanel() {
     { key: 'commission', header: '佣金率', width: '90px', align: 'right', render: r => <span className="mist-num">{r.commissionRate}%</span> },
     { key: 'from', header: '生效日', width: '110px', render: r => r.effectiveFrom },
     { key: 'reason', header: '调整原因', hideOnMobile: true, render: r => r.reason },
-    { key: 'by', header: '设置人 / 时间', hideOnMobile: true, render: r => `${r.createdBy || '—'} · ${r.createdAt.slice(0, 16).replace('T', ' ')}` },
+    { key: 'by', header: '设置人 / 时间', hideOnMobile: true, render: r => `${r.createdBy || '—'} · ${businessWhen(r.createdAt)}` },
   ];
   return <div className="mist-col" data-pricing-params>
     <Banner title={uiText("标准参数")}>{uiText("按板块设定标准成本加成率与佣金率。定价试算保存时按订单类型冻结当天适用的版本；加成率低于标准须写偏离理由。汇率、退税率与采购成本是单笔事实，每次试算按依据填写。")}</Banner>

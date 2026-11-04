@@ -55,6 +55,10 @@ const currencyOf = (v: unknown) => { const c = text(v, '币种', true, 3).toUppe
 export const readRfqs = (root: Pick<Root, 'rfqs'>) => root.rfqs || [];
 export const rfqCommandPermission = (_c: RfqCommand) => 'procurement:write';
 /** 整单转移的前置条件；返回空字符串表示可以转移。 */
+/** 加工合同交付地点就是原加工厂本身时（料送到厂里加工），换厂后改为新加工厂；其他地点（仓库、下道工厂）保持不变。 */
+export function transferDestination(po: Pick<FulfillmentPurchase, 'kind' | 'supplier' | 'destination'>, nextSupplier: string): string {
+  return po.kind === 'processing' && po.destination.trim() === po.supplier.trim() ? nextSupplier : po.destination;
+}
 export function purchaseTransferBlocker(root: MistState, po: FulfillmentPurchase): string {
   if (hasMaterialAtFactory(root, po.id)) return '已有物料交给该加工分支，请先按原交接退回';
   if (po.state !== 'approved') return po.state === 'cancelled' ? `${po.code} 已取消` : `${po.code} 尚未批准；草稿或退回的单据直接改供应商后重新提交即可`;
@@ -227,7 +231,7 @@ export function applyRfqCommand(root: Root, command: RfqCommand, c: MistContext)
       const reason = text(p.reason, '转移原因', true, 1000), due = day(p.due, '新供应商交期');
       const prepaid = purchasePrepaymentAvailableMinor(root, po.id);
       applyPayablesCommand(root, { type: 'payable.purchase.cancel', payload: { purchaseId: po.id, reason: `转给 ${target.name}：${reason}`, ...(prepaid > 0 ? { prepayment: 'refund' as const } : {}) } }, c);
-      const saved = applyFulfillmentCommand(root, { type: 'fulfillment.procurement.save', payload: { orderId: po.orderId, lineId: po.lineId, kind: po.kind, ...(po.materialKind?{materialKind:po.materialKind}:{}), ...(po.stageTerms?{stageTerms:{...po.stageTerms}}:{}), ...(po.iqcRequired?{iqcRequired:true}:{}), supplierId: target.id, supplier: target.name, description: po.description, quantity: po.quantity, unit: po.unit, price: positive(p.price, '新单价'), currency: currencyOf(p.currency), due, terms: text(p.terms, '付款条件', false, 200) || po.terms, destination: po.destination,
+      const saved = applyFulfillmentCommand(root, { type: 'fulfillment.procurement.save', payload: { orderId: po.orderId, lineId: po.lineId, kind: po.kind, ...(po.materialKind?{materialKind:po.materialKind}:{}), ...(po.stageTerms?{stageTerms:{...po.stageTerms}}:{}), ...(po.iqcRequired?{iqcRequired:true}:{}), supplierId: target.id, supplier: target.name, description: po.description, quantity: po.quantity, unit: po.unit, price: positive(p.price, '新单价'), currency: currencyOf(p.currency), due, terms: text(p.terms, '付款条件', false, 200) || po.terms, destination: transferDestination(po, target.name),
         note: `由 ${po.code}（${po.supplier}）转入：${reason}`, fileIds: [] } }, c) as { id: string };
       const next = root.fulfillment.purchases.find(x => x.id === saved.id)!;
       next.transferredFrom = { purchaseId: po.id, purchaseCode: po.code, supplierId: po.supplierId, supplier: po.supplier, reason };
