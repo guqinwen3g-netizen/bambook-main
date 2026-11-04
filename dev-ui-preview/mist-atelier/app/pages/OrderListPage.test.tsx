@@ -10,6 +10,7 @@ import { getAllByRole, getByRole, getByLabelText, queryByRole } from '@testing-l
 import { MistRoot, ToastProvider } from '../../../../components/mist';
 import type { MistState } from '../../../../server/src/shared/mistWorkspace';
 import { Nav } from '../nav';
+import { usePageFailures } from '../runtime/errorPresentation';
 const store = vi.hoisted(() => ({ state: null as MistState | null, canWrite:true, loading: false, error: '', workspace: { id: 'w', ownerId: 'test-user' }, run: vi.fn(), refresh: vi.fn(), downloadFile: vi.fn(), uploadFile: vi.fn() }));
 vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => store }));
 vi.mock('../runtime/auth', () => { const useMistSession = () => ({ status:'authenticated', sessionKey:'order-test', user:{id:'test-user',displayName:'负责人'}, hasPermission:(scope:string)=>scope.endsWith(':read')||store.canWrite,canAccessView:()=>true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
@@ -42,6 +43,8 @@ function fixture(): MistState {
   };
 }
 let element: React.ReactNode, route: { view: string; id?: string; customerId?: string; orderLineId?: string; productionId?: string; section?: string };
+// Stands in for the shell's bottom-right failure card.
+function ShellFailures() { return <>{usePageFailures().map(item => <p key={item.id}>{item.title}{item.detail}</p>)}</>; }
 function render(page: React.ReactNode, nextRoute = { view: 'orders' } as typeof route) {
   element = page; route = nextRoute;
   act(() => root.render(<MistRoot><ToastProvider><Nav.Provider value={{ route, go, openAI, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn() }}>{element}</Nav.Provider></ToastProvider></MistRoot>));
@@ -112,7 +115,7 @@ it('order detail renders only its own lines and does not invent a fallback order
 });
 it('waits for the checklist acknowledgement and leaves data unchanged on rejection', async () => {
   const pending = deferred<unknown>(); store.run.mockReturnValue(pending.promise);
-  render(<OrderDetailPage />, { view: 'orders/detail', id: 'order-a' });
+  render(<><OrderDetailPage /><ShellFailures /></>, { view: 'orders/detail', id: 'order-a' });
   await click(getByRole(host, 'checkbox', { name: '装箱单草稿' }));
   expect(store.run).toHaveBeenCalledWith({ type: 'order.checklist', payload: { orderId: 'order-a', itemId: 'check-a', done: true } });
   expect(getByRole(host, 'checkbox', { name: '装箱单草稿' }).getAttribute('aria-checked')).toBe('false');

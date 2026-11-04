@@ -17,7 +17,7 @@ export function LineCloseDialog({ open, line, status, onClose, onSubmit }: { ope
   };
   return <Dialog open={open} onClose={() => { if (!busy) onClose(); }} title={uiText("按实际完工结案")} description={uiText(`${line.style} · ${line.name}`)} footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy} onClick={() => void submit()}>{uiText(within ? '确认结案' : '提交结案审批')}</Button></>}>
     <KeyValue items={[{ label: '订单数量', value: `${q(line.qty)} ${line.unit}` }, { label: '溢短装条款', value: status.text }, { label: '允许范围', value: `${q(status.min)} – ${q(status.max)} ${line.unit}` }, { label: '结案数量（已离港）', value: `${q(status.departed)} ${line.unit}` }]} />
-    {within ? <Banner tone="ok" title={uiText("在允许范围内")}>{uiText("确认后直接结案。")}</Banner> : <Banner tone="warn" title={uiText("超出允许范围")}>{uiText("将提交订单审批人审批，批准后才结案；申请人不能自批。")}</Banner>}
+    {within ? <Banner variant="notice" tone="ok" title={uiText("在允许范围内")}>{uiText("确认后直接结案。")}</Banner> : <Banner variant="notice" tone="warn" title={uiText("超出允许范围")}>{uiText("将提交订单审批人审批，批准后才结案；申请人不能自批。")}</Banner>}
     <Field label={uiText("结案原因")} required full><TextArea aria-label={uiText("结案原因")} value={reason} disabled={busy} onChange={event => setReason(event.target.value)} /></Field>
     {failure && <Banner tone="bad" title={uiText("未能结案")}>{failure}</Banner>}
   </Dialog>;
