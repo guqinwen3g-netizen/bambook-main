@@ -163,7 +163,8 @@ export type OrderActualCost = {
   orderId: string; code: string; customer: string; currency: string;
   revenue: OrderCostLine[]; purchases: OrderCostLine[]; expenses: OrderCostLine[]; rebate: { expected: number; approved: number; received: number; used: number };
   revenueCny: number | null; purchaseCny: number | null; expenseCny: number | null; marginEx: number | null; marginIn: number | null; rateIn: number | null;
-  estimated: boolean; missing: string[]; status: 'ok' | 'norate';
+  /** nocost：对外订单还没有已批准采购，成本不全，不算毛利也不进合计；pendingPurchases 为未批准（草稿 / 待审）采购数。 */
+  estimated: boolean; missing: string[]; status: 'ok' | 'norate' | 'nocost'; pendingPurchases: number;
   /** 内部订单：金额是预算，不计对外收入、毛利或出口退税；只核算实际成本（costCny）。 */
   internal: boolean; costCny: number | null;
   /**
@@ -226,7 +227,8 @@ export function orderActualCost(root: MistState, orderId: string, basis: FxBasis
   const rebateRaw = internal ? { expected: 0, approved: 0, received: 0 } : orderRebate(root as never, orderId), used = rebateRaw.approved || rebateRaw.expected;
   const sum = (rows: OrderCostLine[]) => rows.some(r => r.cny === null) ? null : Math.round(rows.reduce((n, r) => n + mistMoneyMinor(r.cny!), 0));
   const rv = sum(revenue), pc = sum(purchases), ex = sum(expenses);
-  const missing = [...rates.entries()].filter(([, r]) => !r).map(([cur]) => cur), status: OrderActualCost['status'] = missing.length ? 'norate' : 'ok';
+  const missing = [...rates.entries()].filter(([, r]) => !r).map(([cur]) => cur), status: OrderActualCost['status'] = missing.length ? 'norate' : !internal && !purchases.length ? 'nocost' : 'ok';
+  const pendingPurchases = (root.fulfillment?.purchases || []).filter(p => p.orderId === orderId && !p.cancellation && (p.state === 'draft' || p.state === 'pending')).length;
   const cost = status === 'ok' && pc !== null && ex !== null ? pc + ex : null;
   const marginEx = internal ? null : status === 'ok' && rv !== null && cost !== null ? rv - cost : null, marginIn = marginEx === null ? null : marginEx + mistMoneyMinor(used);
   // 面料组内部销售：本单面料交给其他订单的那部分成本 × (1 + 加成)；只有约定了加成的内部供料单才计。
@@ -243,6 +245,6 @@ export function orderActualCost(root: MistState, orderId: string, basis: FxBasis
   return { orderId, code: o.code, customer: o.customer, currency: o.currency, revenue, purchases, expenses, rebate: { ...rebateRaw, used },
     revenueCny: rv === null ? null : major(rv), purchaseCny: pc === null ? null : major(pc), expenseCny: ex === null ? null : major(ex),
     marginEx: marginEx === null ? null : major(marginEx), marginIn: marginIn === null ? null : major(marginIn), rateIn: marginIn === null || !rv ? null : marginIn / rv,
-    estimated: [...revenue, ...purchases].some(r => r.estimated) || [...rates.values()].some(r => r?.estimated), missing, status,
+    estimated: [...revenue, ...purchases].some(r => r.estimated) || [...rates.values()].some(r => r?.estimated), missing, status, pendingPurchases,
     internal, costCny: cost === null ? null : major(cost), internalSale };
 }
