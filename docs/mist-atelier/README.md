@@ -36,6 +36,10 @@
 
 完整本地应用：`npm run dev` 或 `npm run dev:mist`，自动启动独立本地服务并在3001提供Mist前端，无需旧库账号。参考同源入口：`npm run mist:ref`（3131）。还可用 `mist:ref:build` / `mist:check` / `mist:docs` / `mist:shots`。
 
+并行本机走查：各后端用 `createMistLocalRuntime({directory})` 指定独立数据目录，再用 `createMistServer` 监听各自端口；前端运行 `MIST_LOCAL_API_PORT=8083 npm run dev:mist:ui -- --port 3003`。
+也可设置 `MIST_LOCAL_API_ORIGIN=http://localhost:8083`（优先于端口变量）；仅允许 `127.0.0.1` / `localhost` 的 HTTP origin，非法值启动时报错。
+未配置仍代理 8082、前端默认仍为 3001；上述覆盖不影响共享开发模式。并行通道使用仅前端命令，`dev:mist` 的一体启动仍管理默认 8082 后端。
+
 日常共享模拟演练：`npm run dev:mist:shared`，本地只启动 Mist 前端（3001），登录、业务 API、附件都连接开发测试服务器，共用一份模拟库。使用开发测试账号登录；服务不可用时直接报错，不会另起本地库。与完整本地模式择一启动，避免争用 3001。破坏性回归仍使用隔离本地库，不能指向共享库执行清空或重置。连接与备份边界见[开发环境说明](../deployment/bambook-development.md#本地前端共享开发模拟库)。
 
 终端网络需要代理时，把现有 `HTTPS_PROXY` / `NO_PROXY` 配置传给共享启动进程；启动检查与两类 API 使用同一连接配置。本地独立模式仍直连本机服务。

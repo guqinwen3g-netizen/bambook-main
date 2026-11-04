@@ -248,19 +248,31 @@ export function applyInternalFabricCommand(root: MistState, command: InternalFab
   return { id: saved.id, orderId: target.order.id, lineId: target.line.id, revision: saved.revision };
 }
 
+/** Read the frozen return split; old returns without one retain their rejected-first interpretation. */
+export function materialIssueReturnTotals(root: MistState, issueId: string): { returned: string; rejectedReturned: string } {
+  const issue = root.fulfillment.stockMovements.find(row => row.id === issueId && row.kind === 'issue');
+  const returns = root.fulfillment.stockMovements.filter(row => row.kind === 'return' && row.issueId === issueId);
+  const returned = returns.reduce((sum, row) => sum + quantityMinor(row.quantity), BigInt(0));
+  const frozenRejected = returns.reduce((sum, row) => sum + quantityMinor(row.quarantinedQuantity ?? 0), BigInt(0));
+  const legacy = returns.filter(row => row.quarantinedQuantity === undefined).reduce((sum, row) => sum + quantityMinor(row.quantity), BigInt(0));
+  const rejected = (issue?.materialDelivery?.receivingChecks || []).reduce((sum, check) => sum + quantityMinor(check.rejectedQuantity), BigInt(0));
+  const remaining = rejected > frozenRejected ? rejected - frozenRejected : BigInt(0);
+  return { returned: metresText(returned), rejectedReturned: metresText(frozenRejected + (legacy < remaining ? legacy : remaining)) };
+}
+
 /** Actual issues/receipts, never planned allocations, are the physical and cost-transfer evidence. */
 export function materialDeliveryRows(root: MistState): MaterialDeliveryRow[] {
   const f = root.fulfillment, result: MaterialDeliveryRow[] = [];
   for (const m of f.stockMovements.filter(m => m.kind === 'issue' && m.materialDelivery)) {
     const stock = f.stock.find(stock => stock.id === m.stockId); if (!stock?.purchaseId) continue;
-    const returned = f.stockMovements.filter(r => r.kind === 'return' && r.issueId === m.id).reduce((sum, r) => sum + metresMinor(r.quantity), BigInt(0));
+    const totals = materialIssueReturnTotals(root, m.id), returned = quantityMinor(totals.returned);
     const left = metresMinor(m.quantity) - returned;
     const outstanding = metresText(left > BigInt(0) ? left : BigInt(0));
     const checks = m.materialDelivery!.receivingChecks || [];
     const checkedAccepted = checks.reduce((sum, check) => sum + quantityMinor(check.acceptedQuantity), BigInt(0));
     const checkedRejected = checks.reduce((sum, check) => sum + quantityMinor(check.rejectedQuantity), BigInt(0));
-    // Physical returns consume rejected goods first; a later surplus return reduces accepted cost.
-    const acceptedReturned = returned > checkedRejected ? returned - checkedRejected : BigInt(0);
+    // A later rejection must not turn an earlier accepted surplus return into rejected goods.
+    const acceptedReturned = returned - quantityMinor(totals.rejectedReturned);
     const accepted = checks.length ? checkedAccepted - acceptedReturned : m.materialDelivery!.confirmation ? left : BigInt(0);
     const pending = checks.length ? metresMinor(m.quantity) - checkedAccepted - checkedRejected : m.materialDelivery!.confirmation ? BigInt(0) : left;
     result.push({ id: m.id, kind: 'issue', purchaseId: stock.purchaseId, quantity: normalizeInternalMetres(m.quantity), outstanding, accepted: metresText(accepted > BigInt(0) ? accepted : BigInt(0)), rejected: metresText(checkedRejected), pending: metresText(pending), returned: metresText(returned), unit: stock.unit, at: m.at, location: m.location, evidence: m.note, delivery: m.materialDelivery! });

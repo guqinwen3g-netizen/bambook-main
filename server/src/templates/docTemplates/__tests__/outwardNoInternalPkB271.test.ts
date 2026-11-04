@@ -16,6 +16,7 @@ import { createFinanceRouter } from '../../../finance/route';
 import { invoicePdfHtml } from '../financeInvoice';
 import { renderPaymentRequestBody } from '../paymentRequest';
 import { statementExportFileName } from '../../../finance/reportExportService';
+import { createAuthService } from '../../../auth/service';
 
 const EXPORTER = {
   nameEn: 'B271 Exporter Ltd', addressEn: 'B271 Road 1', beneficiary: '', bankName: '',
@@ -101,15 +102,32 @@ describe('B271·两枚 xlsx 文件名：B269 改对了但没有门禁证人 ⇒ 
  */
 describe('B271·两枚 xlsx 文件名的调用点（HTTP 级证人，不再只靠人工 curl）', () => {
   const ID = 'REL-B271-PK-4242';
-  const appFor = (relationRow: any) => {
-    const prisma = {
-      invoice: { findMany: vi.fn().mockResolvedValue([]), findUnique: vi.fn().mockResolvedValue(null) },
+  const permissions = ['finance:read', 'invoices:read'];
+  const authorization = `Bearer ${createAuthService().signToken({
+    userId: 'b271-finance', roles: ['finance'], permissions, authorizationLoaded: true,
+  })}`;
+  const appFor = (relationRow: any, type: 'Receivable' | 'Payable' = 'Receivable') => {
+    const user = { id: 'b271-finance', status: 'active', deletedAt: null,
+      roles: [{ roleId: 'role-finance', role: { id: 'role-finance', permissions: permissions.map(scope => ({ permission: { scope } })) } }] };
+    // reportService → withFinanceReadProjection 要求当前身份与事务；已存票据保留无档案往来对象的可读依据（financeSourceAccess.invoice 的 all 分支）。
+    const invoice = { id: 'INV-B271-STATEMENT', invoiceNumber: 'INV-B271-0042', type, status: 'Issued',
+      customerRelationId: ID, customerName: null, amount: 100, currency: 'USD', issueDate: '2026-09-01', deletedAt: null };
+    const invoiceRows = ({ where }: any = {}) => [invoice].filter(row =>
+      (!where?.id || (typeof where.id === 'string' ? row.id === where.id : where.id.in.includes(row.id)))
+      && (!where?.type || row.type === where.type)
+      && (!where?.customerRelationId || row.customerRelationId === where.customerRelationId));
+    const prisma: any = {
+      userAccount: { findFirst: vi.fn().mockResolvedValue(user), findUnique: vi.fn().mockResolvedValue(user) },
+      userPermissionOverrides: { findMany: vi.fn().mockResolvedValue([]) },
+      invoice: { findMany: vi.fn(async (args: any) => invoiceRows(args)), findFirst: vi.fn(async (args: any) => invoiceRows(args)[0] ?? null) },
       invoiceAllocation: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+      creditNoteAllocation: { findMany: vi.fn().mockResolvedValue([]) },
       paymentVoucher: { findMany: vi.fn().mockResolvedValue([]) },
-      relation: { findUnique: vi.fn().mockResolvedValue(relationRow) },
-    } as any;
+      relation: { findUnique: vi.fn().mockResolvedValue(relationRow), findFirst: vi.fn().mockResolvedValue(relationRow) },
+    };
+    prisma.$transaction = async (read: (tx: any) => Promise<unknown>) => read(prisma);
     const app = express();
-    app.use('/api/v1/finance', createFinanceRouter({ prisma, requireAuth: false, apiKeys: new Set(), onDataChange: vi.fn() } as any));
+    app.use('/api/v1/finance', createFinanceRouter({ prisma, requireAuth: true, apiKeys: new Set(), onDataChange: vi.fn() } as any));
     return app;
   };
   const nameOf = (cd: string | undefined) => {
@@ -118,7 +136,7 @@ describe('B271·两枚 xlsx 文件名的调用点（HTTP 级证人，不再只�
   };
 
   it('⑦ 档案查不到（名字与编码都没有）⇒ 文件名整段省略对象段，不许把被查的 id 拼进去', async () => {
-    const res = await request(appFor(null)).get(`/api/v1/finance/reports/statement?customerRelationId=${ID}&format=xlsx`);
+    const res = await request(appFor(null)).get(`/api/v1/finance/reports/statement?customerRelationId=${ID}&format=xlsx`).set('Authorization', authorization);
     const fn = nameOf(res.headers['content-disposition'] as string);
     expect(res.status).toBe(200);
     expect(fn, '★ 病灶：这一档此前没有任何门禁证人').not.toContain(ID);
@@ -127,15 +145,17 @@ describe('B271·两枚 xlsx 文件名的调用点（HTTP 级证人，不再只�
 
   it('⑧ 阳性对照：档案有编码 ⇒ 名字优先（有名字时印名字）', async () => {
     const res = await request(appFor({ name: 'B271 Co', chineseName: '测试恒溢（B271）', code: 'CUS-B271-1' }))
-      .get(`/api/v1/finance/reports/statement?customerRelationId=${ID}&format=xlsx`);
+      .get(`/api/v1/finance/reports/statement?customerRelationId=${ID}&format=xlsx`).set('Authorization', authorization);
     const fn = nameOf(res.headers['content-disposition'] as string);
+    expect(res.status).toBe(200);
     expect(fn).toContain('测试恒溢（B271）');
     expect(fn).not.toContain(ID);
   });
 
   it('⑨ 供应商侧同族同修 ⇒ 文件名也不许带 id', async () => {
-    const res = await request(appFor(null)).get(`/api/v1/finance/reports/supplier-statement?supplierRelationId=${ID}&format=xlsx`);
+    const res = await request(appFor(null, 'Payable')).get(`/api/v1/finance/reports/supplier-statement?supplierRelationId=${ID}&format=xlsx`).set('Authorization', authorization);
     const fn = nameOf(res.headers['content-disposition'] as string);
+    expect(res.status).toBe(200);
     expect(fn, '★ 病灶：供应商那枚文件名同样只在人工读数里验过').not.toContain(ID);
     expect(fn).toBe('供应商对账单_全部.xlsx');
   });

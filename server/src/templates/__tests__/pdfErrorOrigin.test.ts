@@ -48,7 +48,8 @@ describe('Template PDF private refusal consumer and diagnostic boundary',()=>{
   expect(res.status).toBe(200);expect(db.renderedDoc.create).toHaveBeenCalledTimes(1);expect(db.auditLog.create).toHaveBeenCalledTimes(1);
   const after=db.auditLog.create.mock.calls[0]![0] as any;
   expect(after.data.detail.source).toBe('route:templates:renderPdf');expect(after.data.targetType).toBe('RenderedDoc');expect(after.data.targetId).toBe('invoice.sample.pdas');
-  expect(res.body).toEqual({renderedDocId:null,templateId:html.templateId,schemaVersion:html.schemaVersion,htmlSha:html.sha,pdfSha:crypto.createHash('sha256').update(Buffer.from('Synthetic private PDF')).digest('hex').slice(0,16),pdfBytes:21,pdfBase64:Buffer.from('Synthetic private PDF').toString('base64'),format:'A4',landscape:false,generatedAt:expect.any(String)});expect(res.body.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  // pdf.ts 的 renderPdf 返回完整 SHA-256；pdfIntegrity.test.ts 同样要求 64 位摘要，不能套用 HTML 的短摘要。
+  expect(res.body).toEqual({renderedDocId:null,templateId:html.templateId,schemaVersion:html.schemaVersion,htmlSha:html.sha,pdfSha:crypto.createHash('sha256').update(Buffer.from('Synthetic private PDF')).digest('hex'),pdfBytes:21,pdfBase64:Buffer.from('Synthetic private PDF').toString('base64'),format:'A4',landscape:false,generatedAt:expect.any(String)});expect(res.body.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   expect(after.data.detail.after.htmlSha).toBe(res.body.htmlSha);expect(after.data.detail.after.pdfSha).toBe(res.body.pdfSha);
  });
  it('actual PDF mandatory audit failure remains safe500 even when its logger also throws',async()=>{

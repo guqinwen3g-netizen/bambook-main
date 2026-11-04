@@ -129,7 +129,12 @@ export function customsItemsStale(root: MistState, c: FulfillmentCustoms & { ite
   const s = root.fulfillment.shipments.find(x => x.id === c.shipmentId);
   if (!s || !c.items?.length) return false;
   const now = draftCustomsDeclaration(root, s);
-  return stableJson(now.items) !== stableJson(c.items.map(generatedItem));
+  return now.blockers.length > 0
+    || stableJson(now.items) !== stableJson(c.items.map(generatedItem))
+    // Package totals are declaration facts even when no legal-unit quantity changes.
+    || (c.packages !== undefined && now.packages !== c.packages)
+    || (c.netWeight !== undefined && now.netWeight !== c.netWeight)
+    || (c.grossWeight !== undefined && now.grossWeight !== c.grossWeight);
 }
 /** 去掉手工调整、还原为自动生成时的商品项（用于与当前出运比对）。 */
 export function generatedItem(item: CustomsDeclarationItem): CustomsDeclarationItem {

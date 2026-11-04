@@ -8,7 +8,7 @@ import { applyDocumentGeneration, type DocumentGenerationCommand } from './mistD
 import { applyStockOperation, autoIssueForDeparture, stockOperationPermission, STOCK_OPERATION_COMMANDS, type StockCount, type StockOperationCommand, type StockTransfer } from './mistStockOperations';
 import { applyQcDispositionCommand, qcConcessionReleases, type QcDisposition, type QcDispositionCommand } from './mistQcDisposition';
 import { applyProductionIntake, productionIntake, type ProductionIntakeCommand, type ProductionIntakeRound, type ProductionObservation } from './mistProductionIntake';
-import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,materialDeliveryRequired,isFabricStageMaterial,isFabricIntermediateProcessing,isFabricStageSource,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,assertMaterialReturnReversal,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
+import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,materialDeliveryRequired,isFabricStageMaterial,isFabricIntermediateProcessing,isFabricStageSource,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,assertMaterialReturnReversal,materialIssueReturnTotals,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
 import {sampleSendPurpose,sampleSendBlocker,SAMPLE_SEND_PURPOSES,type SampleSendPurpose} from './mistSampleSending';
 import {assertOrderShipmentPaymentCovered} from './mistOrderFunding';
 import { preparePurchaseDocumentSnapshot, purchaseDocumentFingerprint, type PurchaseDocumentArtifact, type PurchaseDocumentRecord } from './mistPurchaseDocument';
@@ -27,7 +27,7 @@ import { supplierBusinessDay, productionSupplierUnavailableReason } from './mist
 import {procurementCurrencyProblem} from './mistProcurementCurrency';
 import { heldShipmentRelease, relationHoldReason } from './mistRelationHold';
 import { assertOrderLineOpen, assertShipmentWithinTolerance } from './mistOrderClosure';
-import {applyCustomsDeclarationCommand,CUSTOMS_DECLARATION_COMMANDS,type CustomsClassification,type CustomsDeclarationCommand,type CustomsDeclarationItem} from './mistCustomsDeclaration';
+import {applyCustomsDeclarationCommand,customsItemsStale,CUSTOMS_DECLARATION_COMMANDS,type CustomsClassification,type CustomsDeclarationCommand,type CustomsDeclarationItem} from './mistCustomsDeclaration';
 import {applyClaimInventoryCommand,claimInventoryPermission,type ClaimInventoryCommand,type ClaimInventoryWarehouse,type ClaimReturnReceipt,type ClaimReceivedRecord} from './mistClaimInventory';
 export type FulfillmentSource = {
     kind: 'version';
@@ -319,7 +319,7 @@ export type FulfillmentStockMovement = {
     onHandAfter?: number;
     lockedBefore?: number;
     lockedAfter?: number;
-    /** Part of an original issue returned after receiver rejection; not available until disposed. */
+    /** Rejected part frozen at return time; explicit 0 means accepted surplus, absent preserves legacy interpretation. Not available until disposed. */
     quarantinedQuantity?: number;
     quarantineTaskId?: string;
     quarantineDisposition?: { decision: 'release' | 'supplierReturn' | 'scrap'; taskId: string; reportId: string; movementId: string; evidence: string; actor: string; at: string; noRecoveryDecision?: {actorId:string;actor:string;at:string;evidence:string}; noRecoveryHistory?: Array<{actorId:string;actor:string;at:string;evidence:string;revokedAt:string;revokedBy:string;reason:string}>; financeReviews?: Array<{ id:string; outcome:'noRecovery'; evidence:string; actorId:string; actor:string; at:string; reversed?:{actorId:string;actor:string;at:string;reason:string} }> };
@@ -2089,7 +2089,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                     const checked = issue.materialDelivery.receivingChecks.reduce((n, check) => n + Number(check.acceptedQuantity) + Number(check.rejectedQuantity), 0);
                     if (quantity > sum([checked, -returned])) fail('尚未点收的物料不能登记退回');
                     const rejected = sum(issue.materialDelivery.receivingChecks.map(check => Number(check.rejectedQuantity)));
-                    quarantinedQuantity = Math.min(quantity, Math.max(0, sum([rejected, -returned])));
+                    const rejectedReturned = Number(materialIssueReturnTotals(root, issue.id).rejectedReturned);
+                    quarantinedQuantity = Math.min(quantity, Math.max(0, sum([rejected, -rejectedReturned])));
                 }
             }
             else if (quantity > stock.available)
@@ -2108,7 +2109,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 if (p.kind === 'move') addAtPosition(stock, quantity, location);
             }
             const id = ctx.id();
-            f.stockMovements.push({ id, stockId: stock.id, kind: p.kind, quantity, location, person, note, at: ctx.now, actor: ctx.actorName, ...(sourceLocation === undefined ? {} : { sourceLocation }), ...(issue ? { issueId: issue.id } : {}), ...(quarantinedQuantity ? { quarantinedQuantity } : {}), ...(materialDelivery ? { materialDelivery } : {}) });
+            f.stockMovements.push({ id, stockId: stock.id, kind: p.kind, quantity, location, person, note, at: ctx.now, actor: ctx.actorName, ...(sourceLocation === undefined ? {} : { sourceLocation }), ...(issue ? { issueId: issue.id } : {}), ...(issue?.materialDelivery?.receivingChecks?.length ? { quarantinedQuantity } : {}), ...(materialDelivery ? { materialDelivery } : {}) });
             audit(root, ctx, 'inventory', stock.id, '登记实际库存交接');
             return { id };
         }
@@ -2433,6 +2434,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 throw new MistCommandError('FORBIDDEN', '登记已申报须由后勤/单证办理', 403);
             if (p.status === 'cleared' && !ctx.can?.(FULFILLMENT_CUSTOMS_CLEAR_SCOPE))
                 throw new MistCommandError('FORBIDDEN', '清关完成须由后勤/单证登记', 403);
+            if (p.status !== 'draft' && old && customsItemsStale(root, old))
+                fail('出运、装箱或商品归类已变更，请重新生成申报商品项', 'PRECONDITION');
             if(p.status!=='draft')for(const line of s.lines)if(root.orders.find(o=>o.id===line.orderId)?.replacementSource){assertMistOrderApproved(root,line.orderId);replacementDeclaredUnitPrice(root,s.id,line.orderId,line.lineId);}
             const id = old?.id || ctx.id(), fileIds = files(root, p.fileIds);
             if (p.channel !== undefined && !['general', 'express'].includes(p.channel)) fail('报关方式无效');
@@ -2440,7 +2443,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             // sup51：已生成商品项时表头 HS 由商品项汇总，不再手填。
             const itemHs = [...new Set((old?.items || []).map(i => i.hsCode).filter(Boolean))];
             const hsCode = itemHs.length ? itemHs.join(' / ') : text(p.hsCode, 'HS编码', p.status !== 'draft' && !express);
-            const row: FulfillmentCustoms = { id, shipmentId: s.id, code: old?.code || code('CUS', f.customs, ctx), status: p.status, ...(express ? { channel: 'express' as const } : {}), declarationNo: text(p.declarationNo, express ? '快件运单号' : '报关单号', p.status !== 'draft'), broker: text(p.broker, express ? '快递 / 承运商' : '报关行', p.status !== 'draft'), hsCode, origin: text(p.origin, '原产地', p.status !== 'draft' && !express), tradeMode: text(p.tradeMode, '成交方式', p.status !== 'draft' && !express), declaredAt: day(p.declaredAt, '申报日', p.status !== 'draft'), clearedAt: day(p.clearedAt, '清关日', p.status === 'cleared'), evidence: text(p.evidence, '外部申报/清关依据', p.status === 'cleared'), fileIds, note: text(p.note, '备注', false) };
+            const row: FulfillmentCustoms = { id, shipmentId: s.id, code: old?.code || code('CUS', f.customs, ctx), status: p.status, channel: express ? 'express' : 'general', declarationNo: text(p.declarationNo, express ? '快件运单号' : '报关单号', p.status !== 'draft'), broker: text(p.broker, express ? '快递 / 承运商' : '报关行', p.status !== 'draft'), hsCode, origin: text(p.origin, '原产地', p.status !== 'draft' && !express), tradeMode: text(p.tradeMode, '成交方式', p.status !== 'draft' && !express), declaredAt: day(p.declaredAt, '申报日', p.status !== 'draft'), clearedAt: day(p.clearedAt, '清关日', p.status === 'cleared'), evidence: text(p.evidence, '外部申报/清关依据', p.status === 'cleared'), fileIds, note: text(p.note, '备注', false) };
             if (row.clearedAt && row.declaredAt && row.clearedAt < row.declaredAt)
                 fail('清关不能早于申报');
             if (row.clearedAt > platformBusinessDate(ctx.now) || row.declaredAt > platformBusinessDate(ctx.now))
