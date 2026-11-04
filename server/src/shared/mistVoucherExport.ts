@@ -5,8 +5,8 @@
  * Accounting staff review and post them; nothing here is a posted ledger. Foreign amounts are converted at the month's
  * registered period rate when there is one, otherwise the CNY columns are left for the bookkeeper.
  */
-import { WRITEOFF_LABEL, type MistState } from './mistWorkspace';
-import { fxPeriodRateFor } from './mistFxRates';
+import { WRITEOFF_LABEL, mistMoneyMinor, mistAllocationReceiptMinor, type MistState } from './mistWorkspace';
+import { fxCnyMinor, fxPeriodRateFor } from './mistFxRates';
 import { mistBusinessDate } from './mistBusinessClock';
 
 export const ACCOUNTS = {
@@ -24,18 +24,43 @@ export function monthlyVouchers(root: MistState, month: string): VoucherLine[] {
     out.push({ date, no, summary, account: dr[0], accountName: dr[1], currency, amount, rate: fx, debit: cny, credit: null, source });
     out.push({ date, no, summary, account: cr[0], accountName: cr[1], currency, amount, rate: fx, debit: null, credit: cny, source });
   };
+  // Each side keeps its own original currency. Only converted CNY minor units may
+  // be subtracted for the exchange gain/loss; a missing rate leaves that side unpriced.
+  const exchange = (date: string, summary: string, source: string,
+    dr: { account: readonly [string, string]; currency: string; amount: number },
+    cr: { account: readonly [string, string]; currency: string; amount: number }) => {
+    const no = `记-${String(++seq).padStart(4, '0')}`;
+    const convert = (side: typeof dr) => {
+      const text = side.currency === 'CNY' ? '1' : fxPeriodRateFor(root, side.currency, month)?.rate;
+      return { rate: text ? Number(text) : null, minor: text ? fxCnyMinor(mistMoneyMinor(side.amount), text) : null };
+    };
+    const debit = convert(dr), credit = convert(cr);
+    out.push({ date, no, summary, account: dr.account[0], accountName: dr.account[1], currency: dr.currency, amount: dr.amount,
+      rate: debit.rate, debit: debit.minor === null ? null : debit.minor / 100, credit: null, source });
+    out.push({ date, no, summary, account: cr.account[0], accountName: cr.account[1], currency: cr.currency, amount: cr.amount,
+      rate: credit.rate, debit: null, credit: credit.minor === null ? null : credit.minor / 100, source });
+    if (debit.minor !== null && credit.minor !== null) {
+      const gain = debit.minor - credit.minor;
+      if (gain) out.push({ date, no, summary: summary + ' 汇兑差', account: ACCOUNTS.fx[0], accountName: ACCOUNTS.fx[1],
+        currency: 'CNY', amount: Math.abs(gain) / 100, rate: 1, debit: gain < 0 ? -gain / 100 : null, credit: gain > 0 ? gain / 100 : null, source });
+    }
+  };
   const inMonth = (d: string | undefined) => !!d && d.slice(0, 7) === month;
   for (const i of root.invoices || []) if (!i.voidedAt && i.financeStatus !== 'pending' && i.financeStatus !== 'rejected' && inMonth(i.issuedAt)) pair(i.issuedAt!, `确认应收 ${i.code} ${i.customer}`, i.currency, i.amount, ACCOUNTS.receivable, ACCOUNTS.revenue, i.code);
   const receipts = new Map((root.receipts || []).map(r => [r.id, r]));
   for (const a of root.allocations || []) {
     const r = receipts.get(a.receiptId), i = root.invoices.find(x => x.id === a.invoiceId);
     if (!r || !i || !inMonth(r.date)) continue;
-    pair(r.date, `收款核销 ${r.code} → ${i.code}`, a.receiptCurrency || a.currency, a.receiptAmount ?? a.amount, ACCOUNTS.bank, ACCOUNTS.receivable, `${r.code}/${i.code}`);
+    const summary = `收款核销 ${r.code} → ${i.code}`, source = `${r.code}/${i.code}`;
+    if ((a.receiptCurrency || a.currency) !== a.currency) exchange(r.date, summary, source,
+      { account: ACCOUNTS.bank, currency: a.receiptCurrency!, amount: a.receiptAmount! },
+      { account: ACCOUNTS.receivable, currency: a.currency, amount: a.amount });
+    else pair(r.date, summary, a.currency, a.amount, ACCOUNTS.bank, ACCOUNTS.receivable, source);
   }
   for (const r of root.receipts || []) {
     if (!inMonth(r.date)) continue;
-    const used = (root.allocations || []).filter(a => a.receiptId === r.id).reduce((n, a) => n + (a.receiptAmount ?? a.amount), 0), left = r2(r.amount - used);
-    if (left > 0) pair(r.date, `到账待核销 ${r.code} ${r.payer}`, r.currency, left, ACCOUNTS.bank, ACCOUNTS.advance, r.code);
+    const used = (root.allocations || []).filter(a => a.receiptId === r.id).reduce((n, a) => n + mistAllocationReceiptMinor(a), 0), left = mistMoneyMinor(r.amount) - used;
+    if (left > 0) pair(r.date, `到账待核销 ${r.code} ${r.payer}`, r.currency, left / 100, ACCOUNTS.bank, ACCOUNTS.advance, r.code);
   }
   for (const i of root.invoices || []) {
     for (const c of i.bankCharges || []) if (!c.reversed && inMonth(mistBusinessDate(c.at))) pair(mistBusinessDate(c.at), `银行扣费 ${i.code}`, c.currency, c.amount, ACCOUNTS.fee, ACCOUNTS.receivable, i.code);
@@ -43,10 +68,9 @@ export function monthlyVouchers(root: MistState, month: string): VoucherLine[] {
   }
   for (const p of root.payments || []) if (inMonth(p.date)) pair(p.date, `付款 ${p.payee}${p.ref ? ' ' + p.ref : ''}`, p.currency, Math.abs(p.amount), p.amount >= 0 ? ACCOUNTS.payable : ACCOUNTS.bank, p.amount >= 0 ? ACCOUNTS.bank : ACCOUNTS.payable, p.code);
   for (const f of root.fxRecords || []) if (f.kind === 'settlement' && !f.reversed && inMonth(f.date)) {
-    const no = `记-${String(++seq).padStart(4, '0')}`, booked = rate(f.currency), bookedCny = booked ? r2(f.amount * booked) : null, gain = bookedCny === null ? null : r2(f.localAmount - bookedCny);
-    out.push({ date: f.date, no, summary: `结汇 ${f.code}`, account: ACCOUNTS.bank[0], accountName: `${ACCOUNTS.bank[1]}-人民币`, currency: 'CNY', amount: f.localAmount, rate: 1, debit: f.localAmount, credit: null, source: f.code });
-    out.push({ date: f.date, no, summary: `结汇 ${f.code}`, account: ACCOUNTS.bank[0], accountName: `${ACCOUNTS.bank[1]}-${f.currency}`, currency: f.currency, amount: f.amount, rate: booked, debit: null, credit: bookedCny, source: f.code });
-    if (gain) out.push({ date: f.date, no, summary: `结汇 ${f.code} 汇兑差`, account: ACCOUNTS.fx[0], accountName: ACCOUNTS.fx[1], currency: 'CNY', amount: Math.abs(gain), rate: 1, debit: gain < 0 ? -gain : null, credit: gain > 0 ? gain : null, source: f.code });
+    exchange(f.date, `结汇 ${f.code}`, f.code,
+      { account: [ACCOUNTS.bank[0], `${ACCOUNTS.bank[1]}-${f.localCurrency === 'CNY' ? '人民币' : f.localCurrency}`], currency: f.localCurrency, amount: f.localAmount },
+      { account: [ACCOUNTS.bank[0], `${ACCOUNTS.bank[1]}-${f.currency}`], currency: f.currency, amount: f.amount });
   }
   return out.sort((a, b) => a.date.localeCompare(b.date) || a.no.localeCompare(b.no));
 }
