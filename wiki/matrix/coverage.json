@@ -3228,9 +3228,9 @@
     "hr"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；走 REST organizationApi /hr/departments（HrOrganization.tsx:125）"
+   "note": "2026-11-05 公司版界面走查（本机临时 PostgreSQL 库 bambook_test_walk_1105，新开公司“雾织贸易走查”，总经理沈霁）：新建部门“服装部”（业务属性成衣），部门详情列启用人员、小组；部门名称必填。裁撤未走。"
   },
   {
    "id": "hr-teams",
@@ -3247,9 +3247,9 @@
     "hr"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；REST /hr/teams（HrOrganization.tsx:126-127,208）"
+   "note": "2026-11-05 公司版界面走查（本机临时 PostgreSQL 库 bambook_test_walk_1105，新开公司“雾织贸易走查”，总经理沈霁）：在服装部新建小组“成衣一组”，加入林澈 → 移出（确认“保留部门归属”）→ 再加入。解散未走。"
   },
   {
    "id": "hr-personnel",
@@ -3266,9 +3266,9 @@
     "hr"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；REST /hr/personnel"
+   "note": "2026-11-05 公司版界面走查（本机临时 PostgreSQL 库 bambook_test_walk_1105，新开公司“雾织贸易走查”，总经理沈霁）：人员列表列姓名、部门、小组、岗位、在职、账号状态；按部门“服装部”筛选只剩林澈。"
   },
   {
    "id": "hr-employee-file",
@@ -3284,9 +3284,9 @@
     "hr"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；REST PUT /hr/employees（EmployeeFile.tsx:61）"
+   "note": "2026-11-05 公司版界面走查（本机临时 PostgreSQL 库 bambook_test_walk_1105，新开公司“雾织贸易走查”，总经理沈霁）：为林澈建立员工档案（入职 2026-03-02、转正 2026-06-02、固定期限合同至 2029-03-01、上海虹口），编号 E0001，自动生成入职、转正两条在职变动；入职日期必填。"
   },
   {
    "id": "hr-employment-event",
@@ -3302,9 +3302,9 @@
     "hr"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；REST POST /hr/employment-events（EmployeeFile.tsx）"
+   "note": "2026-11-05 公司版界面走查（本机临时 PostgreSQL 库 bambook_test_walk_1105，新开公司“雾织贸易走查”，总经理沈霁）：办理调岗：业务员 → 跟单员（服装），生效 2026-11-05、写明原因；账号岗位同步更新（库中 UserRole 读回），在职变动记录增至 3 条。"
   },
   {
    "id": "tools-length",
@@ -3356,9 +3356,9 @@
     "admin-panel"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；REST /admin/users（AdminAccounts.tsx:87）"
+   "note": "2026-11-05 公司版界面走查（本机临时 PostgreSQL 库 bambook_test_walk_1105，新开公司“雾织贸易走查”，总经理沈霁）：公司管理 → 新建账号林澈（服装部 · 业务员，设置初始密码），首次登录接口返回须修改密码；新建账号后列表显示已启用。"
   },
   {
    "id": "admin-account-security",
@@ -3374,9 +3374,9 @@
     "admin-panel"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；REST /admin/users/:id disable/reset-password"
+   "note": "2026-11-05 公司版界面走查（本机临时 PostgreSQL 库 bambook_test_walk_1105，新开公司“雾织贸易走查”，总经理沈霁）：停用账号（确认提示会话随即失效）后该账号登录被拒；重新启用恢复；重置密码只显示一次临时密码，旧密码失效、临时密码登录须先改密。"
   },
   {
    "id": "admin-roles",
@@ -3392,9 +3392,9 @@
     "admin-panel"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；REST /admin/roles（AdminAccounts.tsx:235）"
+   "note": "2026-11-05 公司版界面走查（本机临时 PostgreSQL 库 bambook_test_walk_1105，新开公司“雾织贸易走查”，总经理沈霁）：新建岗位“跟单员（服装）”参照“常见岗位 · 跟单员”（34 项权限），列表显示自定义岗位与权限档位；总经理岗位不可调整。编辑与删除未走。"
   },
   {
    "id": "admin-approval-authority",
