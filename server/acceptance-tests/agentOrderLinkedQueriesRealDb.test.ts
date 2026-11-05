@@ -15,7 +15,6 @@ import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../src/auth/toke
 import { createIdentityService } from '../src/agent/identity';
 import { registerNewDomainQueryTools } from '../src/agent/newDomainQueryTools';
 import { dispatchFromRegistry, type ToolExecutionContext } from '../src/agent/toolDispatchRegistry';
-import { createProcurementRouter } from '../src/procurement/procurementRoute';
 import { createBOMRouter } from '../src/bom/bomRoute';
 import { createCustomsRouter } from '../src/customs/customsRoute';
 
@@ -133,15 +132,17 @@ describe.each(['purchase_orders.query', 'bom.query'])('real PG registered %s', t
   it('native human route and Agent list/count/detail honor actual customer plus shared anchors', async () => {
     const f = await fixture('human-comparison'), before = await snapshot(f);
     const app = express(); app.set('json replacer', (_key: string, value: any) => typeof value === 'bigint' ? value.toString() : value);
-    app.use('/po', createProcurementRouter({ prisma: db(), requireAuth: true, apiKeys: new Set() }));
     app.use('/bom', createBOMRouter({ prisma: db(), requireAuth: true, apiKeys: new Set() }));
-    const human = await request(app).get(`/${suffix}`).query({ search: f.id, limit: 1, offset: 1 })
-      .set('Authorization', `Bearer ${createAuthService().signToken(f.token)}`);
-    expect(human.status).toBe(200);
     const agent = await query(f, toolId, { limit: 1, offset: 1, actor: { userId: reviewerId, roles: ['owner'], permissions: ['*'] } });
     expect(agent.total).toBe(toolId === 'bom.query' ? 3 : 2);
-    expect(agent.items.map((item: any) => item.id)).toEqual(human.body.items.map((item: any) => item.id));
-    expect(agent.total).toBe(human.body.total);
+    // The legacy procurement REST list was retired; only BOM still has a native human route to compare.
+    if (toolId === 'bom.query') {
+      const human = await request(app).get(`/${suffix}`).query({ search: f.id, limit: 1, offset: 1 })
+        .set('Authorization', `Bearer ${createAuthService().signToken(f.token)}`);
+      expect(human.status).toBe(200);
+      expect(agent.items.map((item: any) => item.id)).toEqual(human.body.items.map((item: any) => item.id));
+      expect(agent.total).toBe(human.body.total);
+    }
     expect((await query(f, toolId, { id: `${f.id}-${suffix}-0` })).ok).toBe(true);
     expect((await query(f, toolId, { id: `${f.id}-${suffix}-1` })).errorCode).toBe('NOT_FOUND');
     expect(await snapshot(f)).toEqual(before);

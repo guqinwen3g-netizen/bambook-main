@@ -711,14 +711,6 @@ describe('procurement authorized order binding', () => {
     await expect(createProcurementService(f.prisma).createPurchaseOrder({...baseInput,orderId:'O1',bomId:'B1'},'buyer')).rejects.toThrow('不一致');
     expect(f.purchaseOrderCreate).not.toHaveBeenCalled();
   });
-  it.each([null,undefined,[],['O1']])('inquiry query applies scope before pagination: %s',async visibleOrderIds=>{
-    const db:any={supplierInquiry:{findMany:vi.fn(async()=>[]),count:vi.fn(async()=>0)}};
-    await createProcurementService(db).listSupplierInquiries({visibleOrderIds,limit:5,offset:5,search:'fabric'});
-    const where=db.supplierInquiry.findMany.mock.calls[0][0].where;
-    expect(where.OR).toHaveLength(4);
-    if(visibleOrderIds==null)expect(where.AND).toBeUndefined();else expect(where.AND).toEqual([{orderId:{in:visibleOrderIds}}]);
-    expect(db.supplierInquiry.count.mock.calls[0][0].where).toEqual(where);
-  });
 });
 
 describe('加工服务采购类型',()=>{

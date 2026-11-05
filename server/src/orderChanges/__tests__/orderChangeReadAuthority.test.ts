@@ -4,7 +4,6 @@ import { createOrderChangeRequestService } from '../orderChangeRequestService';
 import { assertApprovalReviewSourceRead } from '../../approvals/approvalReviewSourceAccess';
 import { registerNewDomainQueryTools } from '../../agent/newDomainQueryTools';
 import { getToolHandler, type ToolExecutionContext } from '../../agent/toolDispatchRegistry';
-import { createApprovalRouter } from '../../approvals/approvalRoute';
 import { createOrderChangeRouter } from '../orderChangeRoute';
 import type { Request, Response } from 'express';
 
@@ -26,18 +25,6 @@ function matches(row: any, where: any): boolean {
   });
 }
 
-async function readApprovalRoute(fixture: ReturnType<typeof store>, path: '/' | '/:id' | '/:id/detail', approvalId = 'A1') {
-  const router = createApprovalRouter({ prisma: fixture.db, requireAuth: true });
-  const route = router.stack.find(layer => layer.route?.path === path && layer.route.stack.some(handler => handler.method === 'get'))?.route;
-  if (!route) throw Error('APPROVAL_READ_ROUTE_NOT_FOUND');
-  let status = 200, body: any;
-  const signedActor: TokenPayload = { ...actor(), roles: ['manager'] };
-  const req = { actor: signedActor, params: { id: approvalId }, query: {},
-    headers: { authorization: `Bearer ${createAuthService().signToken(signedActor)}` } };
-  const res = { status(code: number) { status = code; return res; }, json(value: unknown) { body = value; return res; } };
-  await route.stack[0].handle(req as unknown as Request, res as unknown as Response, () => {});
-  return { status, body };
-}
 function project(row: any, select?: any) {
   return select ? Object.fromEntries(Object.keys(select).filter(key => select[key]).map(key => [key, row[key]])) : { ...row };
 }
@@ -215,29 +202,6 @@ describe('order change reads use current full parent authority', () => {
   it('storage faults propagate instead of claiming a legitimate empty list', async () => {
     const fixture = store(); fixture.db.order.findFirst.mockRejectedValueOnce(Error('ORDER_STORE_UNAVAILABLE'));
     await expect(fixture.service.listChangeRequests({ trustedActor: actor() })).rejects.toThrow('ORDER_STORE_UNAVAILABLE');
-  });
-  it.each(['/:id', '/:id/detail'] as const)('approval HTTP handler %s refuses frozen content when any CR source is hidden', async path => {
-    const fixture = store(); fixture.rows.approvalRequest[0].payload = { sourceProofs: [{ orderId: 'O2' }],
-      beforeSnapshot: { commercialNote: 'HIDDEN-FROZEN-COMMERCIAL-BASIS' } };
-    const result = await readApprovalRoute(fixture, path);
-    expect(result.status).toBe(403);
-    expect(JSON.stringify(result.body)).not.toContain('HIDDEN-FROZEN-COMMERCIAL-BASIS');
-  });
-  it('approval HTTP list filters an assigned CR whose complete frozen source is hidden', async () => {
-    const fixture = store(); fixture.rows.approvalRequest[0].reviewerId = 'sales-1';
-    fixture.rows.approvalRequest[0].payload = { sourceProofs: [{ orderId: 'O2' }] };
-    const result = await readApprovalRoute(fixture, '/');
-    expect(result.status).toBe(200); expect(result.body.items).toEqual([]);
-  });
-  it.each(['order:cancel', 'order:pause'])('%s cannot bypass full source authorization in any approval read entry', async actionType => {
-    const fixture = store(); fixture.rows.approvalRequest[0].actionType = actionType;
-    fixture.rows.approvalRequest[0].reviewerId = 'sales-1';
-    fixture.rows.approvalRequest[0].payload = { sourceProofs: [{ orderId: 'O2' }], beforeSnapshot: { note: 'HIDDEN-LIFECYCLE-BASIS' } };
-    for (const path of ['/:id', '/:id/detail'] as const) {
-      const result = await readApprovalRoute(fixture, path);
-      expect(result.status).toBe(403); expect(JSON.stringify(result.body)).not.toContain('HIDDEN-LIFECYCLE-BASIS');
-    }
-    expect((await readApprovalRoute(fixture, '/')).body.items).toEqual([]);
   });
   it('the HTTP detail cannot return its earlier payload when the optional confirmation lookup observes account disablement', async () => {
     const fixture = store(); fixture.rows.orderChangeRequest[0].changeTypes = ['unitPrice'];

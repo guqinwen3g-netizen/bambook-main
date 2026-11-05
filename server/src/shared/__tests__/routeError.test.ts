@@ -101,8 +101,6 @@ const FROZEN_RAW_ERROR_LEAKS: Record<string, number> = {
   'inventory/inventoryRoute.ts': 11,
   'marketing/marketingRouteV2.ts': 10,
   'mes/mesRoute.ts': 33,
-  'orders/route.ts': 1,
-  'procurement/procurementRoute.ts': 21, // actual native PO/receipt instance branch plus safe unknown fallback; other 21 unchanged.
   // 92df64c5 native inspection catch uses safeRouteError; actual raw site retired.
   'quotations/quotationRoute.ts': 15, // v3.03：两审批站**刻意不收**（复核 B-1，收了会吞掉 NO_REVIEWER_RESOLVED 的业务文案）
   'traceability/traceabilityRoute.ts': 1,

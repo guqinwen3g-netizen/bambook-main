@@ -188,7 +188,7 @@ describe('G4.1 门的四种落点（参数表 / 文件级 router.use / handler �
     expect(mes.scopeGate?.cls, 'scopeGate 判 hasScope ⇒ permission').toBe('permission');
     expect(mes.requireProductionWrite?.cls, '组合门（= authenticate && scopeGate）必须继承 permission，否则 mesRoute 26 条被降级').toBe('permission');
     // 返回类型注解带花括号时，体不能从类型注解那里开始切（实测会静默丢掉整个门）
-    expect(Object.keys(extractLocalGates(src('server/src/approvals/approvalKernelRoute.ts'))).length, '带 `): { userId: string } | null =>` 的门必须被认出来').toBeGreaterThanOrEqual(1);
+    expect(Object.keys(extractLocalGates(src('server/src/exceptions/exceptionRoute.ts'))).length, '带 `): { userId: string } | null =>` 的门必须被认出来').toBeGreaterThanOrEqual(1);
     // `const apiKey = (req.query.apiKey as string) || …` 不是门 ⇒ 不许因为它里面出现 res.status 就给绿
     expect(Object.keys(mes)).not.toContain('apiKey');
     // 恒真检查：门全被判成 authn 的话，上面四条里有三条会同时失去意义

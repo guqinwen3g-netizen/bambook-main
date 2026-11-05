@@ -75,8 +75,6 @@ const RAW_MESSAGE_LEAK_BASELINE: Record<string, number> = {
   'src/finance/reconciliationService.ts': 1,
   'src/lib/asyncHandler.ts': 1,
   'src/orderChanges/orderChangeRequestService.ts': 1,
-  'src/orders/route.ts': 1,
-  'src/orders/routeV2.ts': 1,
   'src/production/route.ts': 1,
   'src/relations/routeV2.ts': 1,
   'src/samples/fabricShipmentSampleService.ts': 1,
@@ -184,8 +182,6 @@ const TRUTH_FILE_SITE_LEAKS: Record<string, number> = {
   'src/finance/invoiceMutationService.ts': 1,
   'src/exceptions/exceptionRoute.ts': 1,
   'src/lib/asyncHandler.ts': 1,
-  'src/orders/route.ts': 1,
-  'src/orders/routeV2.ts': 1,
   'src/production/route.ts': 1,
 };
 
@@ -235,7 +231,7 @@ describe('B22 内部异常原文直上响应体 · 逐文件棘轮（只许减�
       proven += bare;
     }
     expect(proven).toBe(7);
-    expect(Object.values(countLeaksByFile()).reduce((a, b) => a + b, 0) + proven).toBe(114);
+    expect(Object.values(countLeaksByFile()).reduce((a, b) => a + b, 0) + proven).toBe(112);
   });
   it('实际站点数不得高于基线，且每个文件都要对得上', () => {
     const actual = countLeaksByFile();
@@ -324,7 +320,7 @@ it('★ 未接真源的那一半（B22 欠债本体）只许减不许增，且�
     const stale = Object.entries(TRUTH_FILE_SITE_LEAKS).filter(([f, n]) => (actual[f] ?? 0) < n)
       .map(([f, n]) => `${f}: 基线 ${n} → 实际 ${actual[f] ?? 0}`);
     expect(stale, `已经核准/改接了就同步删掉那一行（留着会把下一次回潮算成正常）：${JSON.stringify(stale)}`).toEqual([]);
-    expect(Object.values(actual).reduce((a, b) => a + b, 0), '候选清单总数').toBe(25); // V1: two existing exclusivity validators moved sides, three caught raw messages were removed. Historical 12 → 17（v3.03）：两文件接真源后挪进本侧（customs 2 + quotation 3 = +5）；★ 其中 **0 处新增**，且对面少了 6 ⇒ 差的那 1 处是**真清掉的**（`/documents` 列表），不是换侧
+    expect(Object.values(actual).reduce((a, b) => a + b, 0), '候选清单总数').toBe(23); // V1: two existing exclusivity validators moved sides, three caught raw messages were removed. Historical 12 → 17（v3.03）：两文件接真源后挪进本侧（customs 2 + quotation 3 = +5）；★ 其中 **0 处新增**，且对面少了 6 ⇒ 差的那 1 处是**真清掉的**（`/documents` 列表），不是换侧
     // ★ 本批的正面证据：samples 那 47 处正是藏在这一侧（文件早已 import 真源 ⇒ 被文件级分类判成"已过滤"）
     expect(truthRe.test(stripComments(fs.readFileSync(path.join(SERVER, 'src/samples/sampleRoute.ts'), 'utf8'))),
       'samples 早已接真源 ⇒ 旧口径会把它整文件算成无害').toBe(true);
@@ -356,8 +352,8 @@ it('★ 未接真源的那一半（B22 欠债本体）只许减不许增，且�
   it('★ 基线自身不是空表（空表 = 恒绿 = 没守卫）', () => {
     const total = Object.values(RAW_MESSAGE_LEAK_BASELINE).reduce((a, b) => a + b, 0);
     const unfiltered = Object.values(UNFILTERED_LEAK_BASELINE).reduce((a, b) => a + b, 0);
-    expect(total).toBe(107); // Fixed-source PDML one-site retirement: prior 108/45 remains in source receipt; no raw debt increase.
-    expect(Object.keys(RAW_MESSAGE_LEAK_BASELINE).length).toBe(44);
+    expect(total).toBe(105); // Fixed-source PDML one-site retirement: prior 108/45 remains in source receipt; no raw debt increase.
+    expect(Object.keys(RAW_MESSAGE_LEAK_BASELINE).length).toBe(42);
     // 114 / 38：2026-09-22 v2.73 清掉 `systemConfigRoute` 的 3 处后同步（那批只同步了根侧那把尺，server 侧这三份基线漏改 ⇒ server 全量当场红）。
 // 105 / 39：2026-09-21 G-4 起 原口径 ↓ `invoiceMutationService` 因 import 真源而被分类到另一侧
     //   ⇒ **未接真源侧少 1 处、已接真源侧多 1 处，总量表 117 一处未动**。

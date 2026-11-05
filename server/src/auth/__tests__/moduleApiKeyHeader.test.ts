@@ -17,7 +17,6 @@ vi.mock('../../lib/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-import { createProcurementRouter } from '../../procurement/procurementRoute';
 import { createCrmRouter } from '../../crm/crmRoute';
 import { createQuotationRouter } from '../../quotations/quotationRoute';
 import { createBOMRouter } from '../../bom/bomRoute';
@@ -46,7 +45,6 @@ const modelStub = new Proxy({}, {
 const prismaStub = new Proxy({}, { get: () => modelStub }) as any;
 
 const ROUTERS: Array<{ name: string; listPath: string; create: (opts: any) => express.Router; readScope?: boolean }> = [
-  { name: 'procurement', listPath: '/', create: createProcurementRouter, readScope: true },
   { name: 'crm', listPath: '/REL__1/contacts', create: createCrmRouter },
   { name: 'quotations', listPath: '/', create: createQuotationRouter },
   { name: 'bom', listPath: '/', create: createBOMRouter, readScope: true },
@@ -55,7 +53,7 @@ const ROUTERS: Array<{ name: string; listPath: string; create: (opts: any) => ex
 ];
 
 /**
- * §10.4.1（2026-09-12）：API Key 只是凭据，不是身份。采购/BOM 读端点自本批起
+ * §10.4.1（2026-09-12）：API Key 只是凭据，不是身份。BOM 读端点自本批起
  * 挂 procurement:read / bom:read（§10.7 B-5），因此「有效 key + 已绑定主体」才能读，
  * 裸 key（无主体）走 scope 门 401——与 products/emails 既有口径一致。
  *
