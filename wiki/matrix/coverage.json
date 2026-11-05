@@ -3602,9 +3602,9 @@
     "platform-admin"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；REST platformAdminApi.create（SaasAdminPage.tsx:43）"
+   "note": "2026-11-05 平台版界面走查（本机临时 PostgreSQL 库，平台运维账号从平台入口登录；平台账号走公司入口被拒）：开通公司“青禾纺织（走查）”（标识 qinghe-walk、管理员周宁、总经理岗位、设置初始密码），列表即出现；管理员可登录且须先改初始密码。"
   },
   {
    "id": "platform-company-service",
@@ -3620,9 +3620,9 @@
     "platform-admin"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；REST platformAdminApi.update（SaasAdminPage.tsx:46,58）"
+   "note": "2026-11-05 平台版界面走查（本机临时 PostgreSQL 库，平台运维账号从平台入口登录；平台账号走公司入口被拒）：席位上限设为 1 后列表显示 1 / 1；服务状态改为已暂停须确认（提示现有访问立即失效），库中 Company.status=suspended，该公司管理员登录被拒，另一家公司不受影响；恢复为运行中后可再登录。"
   },
   {
    "id": "platform-company-members",
@@ -3638,9 +3638,9 @@
     "platform-admin"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；REST addMember/removeMember/resendMember（SaasAdminPage.tsx:59-60,74）"
+   "note": "2026-11-05 平台版界面走查（本机临时 PostgreSQL 库，平台运维账号从平台入口登录；平台账号走公司入口被拒）：公司详情列成员（周宁 · 总经理 · 公司管理员），提供重发邀请、移出公司（确认提示访问立即失效；唯一管理员移出被拒 409）、按邮箱加入公司。"
   },
   {
    "id": "platform-company-list",
@@ -3656,9 +3656,9 @@
     "platform-admin"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；REST list/companySettings（SaasAdminPage.tsx:33-34）"
+   "note": "2026-11-05 平台版界面走查（本机临时 PostgreSQL 库，平台运维账号从平台入口登录；平台账号走公司入口被拒）：公司列表列名称、标识、状态、方案、成员 / 席位，支持按状态筛选；“管理”打开公司详情。"
   }
  ]
 }
