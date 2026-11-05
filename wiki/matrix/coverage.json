@@ -252,8 +252,9 @@
    "commands": [
     "settings.update"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机独立数据副本界面走查：公司管理 → 公司资料补登中英文注册地址并保存；错误邮箱格式被拒并提示示例格式；写入设置记录。"
   },
   {
    "id": "handover",
@@ -2689,9 +2690,9 @@
    "commands": [
     "market.trend.save"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "SeasonsPage.tsx:100；MarketPages.tsx:89"
+   "note": "2026-11-05 本机独立数据副本界面走查：季节性与趋势 → 记录趋势「可回收羊毛混纺」（成分、AW27、来源依据、观察内容）并勾选关联产品 FB-2702，读回关联正确。修改已登记趋势的关联未走。"
   },
   {
    "id": "season-show",
@@ -3445,9 +3446,9 @@
    "commands": [
     "settings.update"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "SettingsPage.tsx:76,135"
+   "note": "2026-11-05 本机独立数据副本界面走查：公司显示名称清空后失焦提示“须为1至120字”且不保存，恢复原名后保存；默认币种显示 CNY。"
   },
   {
    "id": "settings-notify",
@@ -3465,9 +3466,9 @@
    "commands": [
     "settings.update"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "SettingsPage.tsx:141-146"
+   "note": "2026-11-05 本机独立数据副本界面走查：关闭“出运准备提醒”后服务端读回 false，再开启读回 true；四个开关与公司设置一致。"
   },
   {
    "id": "settings-member-handover",
@@ -3504,9 +3505,9 @@
     "settings"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；SettingsPage.tsx:138"
+   "note": "2026-11-05 本机独立数据副本界面走查：设置记录按时间倒序列出“更新通知偏好”“更新公司资料”，含操作人与北京时间。"
   },
   {
    "id": "settings-agent-identity",
