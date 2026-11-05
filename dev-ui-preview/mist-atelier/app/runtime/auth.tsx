@@ -180,7 +180,7 @@ function ProductionMistSessionProvider({ children }: { children: React.ReactNode
     const sequence = ++commandSequence.current;
     setError(''); setSigningOut(true); setSigningIn(false);
     refreshSequence.current += 1; setInitializing(false); setRefreshing(false);
-    try { await authLogout(); }
+    try { await authLogout(); dropStoredSignatures(); }
     catch (failure) {
       if (mounted.current && sequence === commandSequence.current) setError(mapAuthErrorMessage(failure, '退出登录失败，请重试'));
       throw failure;
@@ -280,6 +280,17 @@ export function MistSessionProvider({children}:{children:React.ReactNode}) {
 }
 
 /** 可选会话：在没有会话上下文的嵌入 / 测试场景返回 null（仅用于展示与默认值，不用于权限判断）。 */
+/** 退出登录后，本机待核对记录里不保留手写签字图像；记录本身保留以便核对原请求，重发时由本人重新签字。 */
+export function dropStoredSignatures(storage: Storage = localStorage) {
+  try {
+    for (let i = storage.length - 1; i >= 0; i--) {
+      const key = storage.key(i);
+      if (!key || !/^bambook\.mist\.(pending|review-pending):/.test(key)) continue;
+      const raw = storage.getItem(key); if (!raw || !raw.includes('"signature"')) continue;
+      const value = JSON.parse(raw); if (value && typeof value === 'object' && 'signature' in value) { delete value.signature; storage.setItem(key, JSON.stringify(value)); }
+    }
+  } catch { /* storage unavailable: nothing persisted to clean */ }
+}
 export function useOptionalMistSession(): MistSession | null { return React.useContext(SessionContext); }
 export function useMistSession(): MistSession {
   const session = React.useContext(SessionContext);

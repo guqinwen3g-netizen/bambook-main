@@ -1945,8 +1945,9 @@
     "fulfillment.shipments.sent",
     "fulfillment.shipments.depart"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机独立数据副本界面走查：供应商直交分批回交 120+180 后离港（只交接部分时离港按钮禁用并写明差额；ATD 早于对客发送被拒）；入我方仓 200 件后离港自动出库（可用 200→0）。教学课未录。"
   },
   {
    "id": "shipment-cancel",
