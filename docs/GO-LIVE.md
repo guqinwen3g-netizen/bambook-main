@@ -728,6 +728,7 @@
 
 ## 7. 进度记录
 
+- 2026-11-06：桌面版加载方式定为公司 HTTPS 站点（`electron/appOrigin.ts`，默认 `https://bambook.sylway.cloud`，可用 `BAMBOOK_DESKTOP_ORIGIN` 指定其他 https 来源）。特权 IPC 只接受该来源的主框架；离开站点的导航交给系统浏览器，站点重定向到别处不跟随；断网显示重试页。独立复核（安全 / 功能两视角 + 逐条反驳）确认 2 项并已修复：断网时窗口不可见或空白、UI-lab 的 file:// 例外。打包产物实测：联网进入登录页且桥接可用，断网显示重试页且桥接拒绝。`electron/brandAssets.test.ts` 1 项既有失败（改动前后一致）。覆盖台账 170/170 已走查。Windows x64 免安装包在本机交叉构建通过（`Bambook.exe` 为 PE32+ x64，`better-sqlite3` 已重建为 Windows 原生模块，主进程含公司站点来源）；未签名，本机无 Windows 环境，未实际运行。
 - 2026-11-06：桌面工作助手（Electron）核对：测试 47 项通过，打包后本机 Agent 进程与桥接正常；但打包版用 `file://` 加载，Mist 的 `/api/mist` 相对请求到不了服务器，窗口停在“公司连接待核对”。桌面版交付前须定加载方式（HTTPS 托管页或受控自定义协议），见 `docs/mist-atelier/LIVE-PROGRESS.md`“桌面来源核对”。网页版投产不受影响。
 - 2026-11-06：现网真实邮件往返通过（模拟公司诚川纺织，sylway.cloud 自建邮件服务内）：Bambook 经 SMTP 发信、Dovecot 投递、模拟客户回信、Bambook 经 IMAP 同步入收件箱。覆盖台账 169/170 已走查，仅剩桌面工作助手（Electron）为源码核对。对公网真实客户收发（MX/SPF/DKIM/DMARC、25 端口、PTR）属对外发送，须用户另行授权。
 - 2026-11-06：主机告警启用（用户提供 Bark key，检查配置、干跑七项、测试推送均通过，timer 已运行）；平台 AI 模型按用户决定改为 ChatGPT 订阅 GPT-6.1 Terra，`backend.env` 改前已备份，重启后进程载入新模型，订阅直连与小竹现网实答均通过。
