@@ -115,6 +115,10 @@ GitHub 的 deployment / ops 工作流均已停用，旧服务器授权及仓库 
 
 服务器直连不到 `chatgpt.com` / `api.openai.com`。平台 ChatGPT 套餐（登录、令牌刷新、模型调用）及 OpenAI API 服务经出站代理访问：服务器本机 `sing-box.service` 提供 mixed 入站 `127.0.0.1:7890`，`backend.env` 设 `BAMBOOK_AI_HTTPS_PROXY=http://127.0.0.1:7890`。代码只对 `*.openai.com`、`*.chatgpt.com` 走代理（`server/src/ai/outboundProxy.ts`），国内模型接口仍直连；未设置该变量时行为不变。Node 内置 fetch 不读取 `HTTPS_PROXY`，不要用它代替。
 
+### 平台模型（2026-11-06 用户定）
+
+magpie 暂不登录订阅。平台 AI（小竹、报价审阅、汇总、对账、Agent 任务）改用平台 ChatGPT 订阅里的 GPT-6.1 Terra：`backend.env` 设 `BAMBOOK_CODEX_MODEL=gpt-6.1-terra`（改前副本在 `shared/private-backups/ops-scripts-20261106/`，属主与权限不变），重启两套服务后进程已载入。实测订阅直连 Terra 返回正常，小竹在模拟公司「诚川纺织」实答一次（200，约 3.7 秒）。推理档位仍按功能分配（报价审阅 max、对账与 Agent 任务 high、问答与汇总 medium）。订阅令牌按期自动续期；令牌失效时由平台管理员在「平台设置 › 平台 AI 模型」重新连接。
+
 ### 平台模型网关 magpie（2026-11-04）
 
 用户要求在后端加装 magpie，补充平台可用的模型订阅。magpie 是开源（MIT）的模型网关，把多个订阅和 API 服务汇成一个 OpenAI / Anthropic 兼容入口，额度用完或出错时转到下一个，并记录用量。
@@ -162,7 +166,7 @@ GitHub 的 deployment / ops 工作流均已停用，旧服务器授权及仓库 
 - 安装：root 运行 `scripts/deploy/install-bambook-dev-monitor.sh --verify`（只读）后再正式安装。只写 `/usr/local/sbin/bambook-dev-monitor`、monitor 的 service 与 timer、`/etc/bambook-dev-monitor/`（0700）与 `/var/lib/bambook-dev-monitor/`（0700）；不读 `backend.env`，不重启业务服务，不动数据库与备份。
 - 配置：`/etc/bambook-dev-monitor/config.json`（root:root 0600），Bark 设备 key 只放这里，不进仓库、日志或状态文件。配置通过 `--check-config` 才启用 timer。
 - 首次启用顺序：`--check-config` → `--dry-run`（真实检查、不写状态、不发送）→ `--send-test`（发一条测试推送）→ 启用 timer。
-- 状态（2026-11-06）：已安装 monitor 程序与 service / timer，干跑检查六项全部正常（两套 API、磁盘 35.7%、两项服务、最新备份 0 小时）。**timer 未启用**：`/etc/bambook-dev-monitor/config.json` 需要有效的 Bark 设备 key，旧 key 已公开须先轮换；用户提供新 key 后写入配置，按 `--check-config` → `--dry-run` → `--send-test` → 启用 timer。
+- 状态（2026-11-06）：已安装并启用。用户提供 Bark 设备 key（只写在 `/etc/bambook-dev-monitor/config.json`，root:root 0600），`--check-config` 通过，`--dry-run` 七项全部正常（两套 API、公网健康、磁盘、两项服务、备份），`--send-test` 已送达 1 台设备，timer 已启用并完成首次运行。注意：这把 key 曾出现在公开仓库历史（`scripts/bark_notify.sh`，#669 前），用户确认继续使用；他人可据此向该设备推送消息，但无法读取 Bambook 数据。
 - 本机通知脚本 `scripts/bark_notify.sh` 改为读取环境变量 `BAMBOOK_BARK_KEYS`。此前写在公开仓库里的两把设备 key 仍留在 Git 历史中，须在 Bark 端轮换后再使用。
 
 ## 产品图去背景模型

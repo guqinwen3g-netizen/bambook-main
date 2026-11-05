@@ -193,9 +193,9 @@
     "email.server.send.begin",
     "email.server.sync"
    ],
-   "impl": "missing",
+   "impl": "walked",
    "lessons": [],
-   "note": "服务端收发接口已有（server/src/mist/mail），真实收发服务尚未接通，不得写成可用"
+   "note": "2026-11-06 现网（腾讯云 SaaS，模拟公司诚川纺织）真实 IMAP/SMTP 往返：程野经 Bambook 发信（状态 sent）→ Dovecot 投递到模拟客户邮箱 → 模拟客户经真实 SMTP 回信 → Bambook IMAP 同步后回信进入收件箱。范围仅 sylway.cloud 自建邮件服务（只听本机回环，收件域限 sylway.cloud，不对外投递，按用户 2026-11-02 定案）。对公网真实客户收发需 MX/SPF/DKIM/DMARC、25 端口与 PTR，属对外发送，须用户另行授权。"
   },
   {
    "id": "org-members",
@@ -2250,9 +2250,9 @@
     "assistant"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "仅 Electron 桌面端；敏感操作转本人确认"
+   "note": "仅 Electron 桌面端；敏感操作转本人确认。2026-11-06：桌面版改为加载公司 HTTPS 站点（默认 https://bambook.sylway.cloud），打包产物实测进入登录页、本机 Agent 桥接可用；离开公司站点的导航改在系统浏览器打开，特权通道只接受公司站点主框架；断网显示“无法连接 Bambook · 重试”，该页调用不到桥接。登录后的对话与委托办理依赖用户本人 ChatGPT 连接，未代登录。"
   },
   {
    "id": "agent-proposal",
