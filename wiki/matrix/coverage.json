@@ -193,9 +193,9 @@
     "email.server.send.begin",
     "email.server.sync"
    ],
-   "impl": "missing",
+   "impl": "walked",
    "lessons": [],
-   "note": "服务端收发接口已有（server/src/mist/mail），真实收发服务尚未接通，不得写成可用"
+   "note": "2026-11-06 现网（腾讯云 SaaS，模拟公司诚川纺织）真实 IMAP/SMTP 往返：程野经 Bambook 发信（状态 sent）→ Dovecot 投递到模拟客户邮箱 → 模拟客户经真实 SMTP 回信 → Bambook IMAP 同步后回信进入收件箱。范围仅 sylway.cloud 自建邮件服务（只听本机回环，收件域限 sylway.cloud，不对外投递，按用户 2026-11-02 定案）。对公网真实客户收发需 MX/SPF/DKIM/DMARC、25 端口与 PTR，属对外发送，须用户另行授权。"
   },
   {
    "id": "org-members",
@@ -2252,7 +2252,7 @@
    "commands": [],
    "impl": "source",
    "lessons": [],
-   "note": "仅 Electron 桌面端；敏感操作转本人确认"
+   "note": "仅 Electron 桌面端；敏感操作转本人确认。2026-11-06 核对：assistant 测试 8 文件 47 项通过；打包产物指向现网 API 后可启动、本机 Agent 进程与桥接正常（未登录时如实提示登录）。正式桌面形态未定：打包版用 file:// 加载，Mist 运行时的 /api/mist 同源相对请求在 file:// 下无法到达服务器（窗口停在“公司连接待核对”），委托来源校验也拒绝 file://。需决定加载方式（HTTP(S) 托管页面，或受控自定义协议 + 主进程固定 API 来源）后才能对用户交付桌面版。网页版不受影响。"
   },
   {
    "id": "agent-proposal",
