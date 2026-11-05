@@ -830,7 +830,7 @@ export function createMistState(context: MistContext, seed: 'demo'|'empty' = 'de
     for(let index=0;index<order.lines;index++){
       const original=base?.[index], job=jobs[index], fallback=Seed.DEVS[index%Seed.DEVS.length];
       const qty=original?.qty ?? (job?.qty ?? Math.floor(order.qty/order.lines)+(index===order.lines-1?order.qty%order.lines:0));
-      state.orderLines.push({id:order.id+'-line-'+index,orderId:order.id,name:original?.name||job?.name||fallback.name,style:original?.style||fallback.style,img:(original?.img||job?.img||fallback.img) as MistImage,qty,unit:'件',price:original?.price??major(Math.round(mistMoneyMinor(order.amount)/order.qty)),made:original?.made??job?.pct??order.progress,qc:original?.qc??0});
+      state.orderLines.push({id:order.id+'-line-'+index,orderId:order.id,name:original?.name||job?.name||fallback.name,style:original?.style||(job?Seed.DEVS.find(d=>d.name===job.name)?.style||`${order.code}-${index+1}`:fallback.style),img:(original?.img||job?.img||fallback.img) as MistImage,qty,unit:'件',price:original?.price??major(Math.round(mistMoneyMinor(order.amount)/order.qty)),made:original?.made??job?.pct??order.progress,qc:original?.qc??0});
     }
   }
   state.productions=Seed.PRODS.map(source=>{const order=state.orders.find(o=>o.code===source.order)!, line=state.orderLines.find(l=>l.orderId===order.id&&l.name===source.name)||state.orderLines.find(l=>l.orderId===order.id)!;return {...source,code:source.id,orderId:order.id,lineId:line.id,col:source.col as MistProduction['col'],img:source.img as MistImage,due:iso(source.due,context)};});

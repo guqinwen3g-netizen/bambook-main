@@ -9,7 +9,7 @@ function fixture(){
   const run=(type:string,payload:Record<string,unknown>)=>{const r=applyMistCommand(state,{type,payload} as MistCommand,ctx);state=r.state;return r.result as {id:string};};
   return {run,ctx,customsId:customs.id,get state(){return state as MistState;}};
 }
-const suit={family:'garment',hsCode:'6203.3100.00',declaredName:'男式羊毛西服上衣',brandType:'3',preference:'0',elements:['机织','西服上衣','男式','100%羊毛','Northwind'],styles:['cc-aw27-coat-014']};
+const suit={family:'garment',hsCode:'6203.3100.00',declaredName:'男式羊毛西服上衣',brandType:'3',preference:'0',elements:['机织','西服上衣','男式','100%羊毛','Northwind'],styles:['cc-aw27-suit-102']};
 
 describe('报关申报资料',()=>{
   it('splits one fabric style by recorded package colour and explicit classification',()=>{
@@ -81,10 +81,10 @@ describe('报关申报资料',()=>{
     expect(()=>f.run('fulfillment.customs.classify.save',{...suit,styles:[]})).toThrow('款号');
     f.run('fulfillment.customs.classify.save',suit);
     const c=readCustomsClassifications(f.state)[0];
-    expect(c).toMatchObject({code:'HSC-0001',hsCode:'6203310000',legalUnit:'件',secondUnit:'千克',styles:['cc-aw27-coat-014']});
-    expect(()=>f.run('fulfillment.customs.classify.save',{...suit,styles:['CC-AW27-COAT-014']})).toThrow('已在归类 HSC-0001');
+    expect(c).toMatchObject({code:'HSC-0001',hsCode:'6203310000',legalUnit:'件',secondUnit:'千克',styles:['cc-aw27-suit-102']});
+    expect(()=>f.run('fulfillment.customs.classify.save',{...suit,styles:['CC-AW27-SUIT-102']})).toThrow('已在归类 HSC-0001');
     f.run('fulfillment.customs.classify.void',{id:c.id,reason:'归类错误'});
-    f.run('fulfillment.customs.classify.save',{...suit,styles:['CC-AW27-COAT-014']});
+    f.run('fulfillment.customs.classify.save',{...suit,styles:['CC-AW27-SUIT-102']});
     expect(readCustomsClassifications(f.state)).toHaveLength(2);
   });
   it('按款号匹配归类生成商品项：数量、金额与 CI 同算法，法定数量取装箱净重，要素带货号',()=>{
@@ -93,7 +93,7 @@ describe('报关申报资料',()=>{
     f.run('fulfillment.customs.classify.save',suit);
     f.run('fulfillment.customs.items',{id:f.customsId});
     const c=f.state.fulfillment.customs[0];
-    expect(c.items).toEqual([expect.objectContaining({no:1,hsCode:'6203310000',declaredName:'男式羊毛西服上衣',elements:'3|0|机织|西服上衣|男式|100%羊毛|Northwind|货号CC-AW27-COAT-014',quantity:500,unit:'件',legalQty:500,legalUnit:'件',secondQty:480,secondUnit:'千克',unitPrice:46.5,amount:23250,currency:'USD',origin:'中国',destination:'瑞典'})]);
+    expect(c.items).toEqual([expect.objectContaining({no:1,hsCode:'6203310000',declaredName:'男式羊毛西服上衣',elements:'3|0|机织|西服上衣|男式|100%羊毛|Northwind|货号CC-AW27-SUIT-102',quantity:500,unit:'件',legalQty:500,legalUnit:'件',secondQty:480,secondUnit:'千克',unitPrice:46.5,amount:23250,currency:'USD',origin:'中国',destination:'瑞典'})]);
     expect(c).toMatchObject({packages:5,netWeight:480,grossWeight:540,hsCode:'6203310000'});
     expect(customsItemsStale(f.state,c)).toBe(false);
     // PostgreSQL jsonb 存取后键顺序改变，不应误判为已变化
@@ -116,7 +116,7 @@ describe('报关申报资料',()=>{
     const f=fixture();
     f.run('fulfillment.customs.classify.save',suit);
     f.run('fulfillment.customs.items',{id:f.customsId});
-    const adj={id:f.customsId,no:1,declaredName:'男式羊毛制西服上衣',elements:'3|0|机织|西服上衣|男式|100%羊毛|Northwind|货号CC-AW27-COAT-014',legalQty:500,secondQty:478.5,reason:'报关行审单：净重按磅单'};
+    const adj={id:f.customsId,no:1,declaredName:'男式羊毛制西服上衣',elements:'3|0|机织|西服上衣|男式|100%羊毛|Northwind|货号CC-AW27-SUIT-102',legalQty:500,secondQty:478.5,reason:'报关行审单：净重按磅单'};
     expect(mistCommandPermission({type:'fulfillment.customs.item.adjust',payload:adj} as MistCommand)).toBe('customs:write');
     expect(()=>f.run('fulfillment.customs.item.adjust',{...adj,no:9})).toThrow('不存在');
     expect(()=>f.run('fulfillment.customs.item.adjust',{...adj,reason:''})).toThrow('调整原因');
