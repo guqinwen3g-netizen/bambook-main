@@ -165,12 +165,16 @@ it('shows a rejected decision inside the approval drawer instead of failing sile
 });
 
 it('shows who decided a handled approval, when, and the note',async()=>{
- serverStatus='approved';rows=[{...row({status:'approved',canDecide:false}),decision:{actor:'周敏',at:'2026-11-05T12:30:00.000Z',note:'单价与交期已核对'}}];
+ serverStatus='approved';rows=[{...row({status:'approved',canDecide:false}),signatureFileId:'sig-1',decision:{actor:'周敏',at:'2026-11-05T12:30:00.000Z',note:'单价与交期已核对'}}];
+ intercept=(url)=>url.endsWith('/files/sig-1')?Promise.resolve({ok:true,status:200,arrayBuffer:async()=>new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>').buffer}):undefined;
+ vi.stubGlobal('URL',Object.assign(URL,{createObjectURL:()=> 'blob:sig',revokeObjectURL:()=>undefined}));
  try{
   route={view:'approvals',section:'done'} as any;await render();
   const tab=[...document.querySelectorAll('[role="tab"],button')].find(b=>(b.textContent||'').startsWith('已处理')) as HTMLElement|undefined;if(tab)await act(async()=>tab.click());
-  await openRow();
+  await openRow();await act(async()=>{await Promise.resolve();await Promise.resolve();});
   const text=document.body.textContent||'';
   expect(text).toContain('经办人');expect(text).toContain('周敏');expect(text).toContain('单价与交期已核对');
- }finally{rows=undefined;route={view:'approvals'};}
+  // 带签字的已批准事项：按图片加载归档签字。
+  expect(document.querySelector('[data-approval-signature]')?.getAttribute('src')).toMatch(/^blob:/);
+ }finally{rows=undefined;intercept=undefined;route={view:'approvals'};}
 });

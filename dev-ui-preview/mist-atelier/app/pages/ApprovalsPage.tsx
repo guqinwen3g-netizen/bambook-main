@@ -12,7 +12,7 @@ import type { View } from '../../../../types';
 import { useNav } from '../nav';
 import { useMistSession } from '../runtime/auth';
 import { useMistWorkspace } from '../runtime/workspace';
-import { useMistReviews, type MistReview } from '../runtime/reviews';
+import { reviewSignatureImage, useMistReviews, type MistReview } from '../runtime/reviews';
 import { ActionBar, DetailBlock, DetailBody, ListDetail } from './modules/pageKit';
 import { FailureNotice } from '../runtime/FailureNotice';
 
@@ -63,6 +63,15 @@ export function ApprovalsPage() {
   const shown = inTab.filter(r => (kind === 'all' || r.kind === kind) && (!q || [r.title, r.workspaceName, APPROVAL_KIND_LABEL[r.kind], ...r.details.map(d => d.value)].some(v => v.toLowerCase().includes(q))));
   const selected = all.find(r => rowKey(r) === route.id) ?? null;
   React.useEffect(() => { setNote(''); setLocal(''); setSignature(null); setSignKey(k => k + 1); }, [route.id]);
+  const [signatureUrl, setSignatureUrl] = React.useState<string | null>(null);
+  const signatureKey = selected ? selected.workspaceId + '|' + selected.id + '|' + (selected.signatureFileId || '') : '';
+  React.useEffect(() => {
+    setSignatureUrl(null);
+    if (!selected?.signatureFileId) return;
+    const abort = new AbortController(); let url: string | null = null;
+    void reviewSignatureImage(selected, abort.signal).then(next => { if (abort.signal.aborted) { if (next) URL.revokeObjectURL(next); return; } url = next; setSignatureUrl(next); }).catch(() => undefined);
+    return () => { abort.abort(); if (url) URL.revokeObjectURL(url); };
+  }, [signatureKey]);
   React.useEffect(() => { if (kind !== 'all' && !kinds.includes(kind)) setKind('all'); }, [tab, kinds.join(',')]);
   const open = (r: Row) => { setDrawer(true); go('approvals', rowKey(r), { section: tab }); };
   const requester = (r: Row) => r.requesterId === me ? '我' : state?.members?.find(m => m.userId === r.requesterId)?.name ?? (current && r.workspaceId === current.id && current.ownerId === r.requesterId ? '公司所有者' : '其他成员');
@@ -92,7 +101,7 @@ export function ApprovalsPage() {
     {selected.kind === 'payment' && tierNote(selected) && <Banner variant="status" tone={selected.status === 'pending' ? 'warn' : 'neutral'} title={uiText('付款审批档位')}><span data-payment-tier>{tierNote(selected)}</span></Banner>}
     <DetailBlock title={uiText("审批内容")}>{selected.details.length ? <KeyValue items={selected.details.map(item=>['处置方式','退回去向','审批内容','订单用途','客户收款','溢短装','数量口径'].includes(item.label)?{...item,value:uiText(item.value)}:item)} /> : <span className="mist-note">{uiText("缺少审批内容")}</span>}
       </DetailBlock>
-    {selected.status !== 'pending' && selected.decision && <DetailBlock title={uiText(selected.status === 'approved' ? '批准' : '退回')}><KeyValue items={[{ label: '经办人', value: selected.decision.actor }, { label: '时间', value: when(selected.decision.at) }, ...(selected.decision.note ? [{ label: '意见', value: selected.decision.note }] : [])]} /></DetailBlock>}
+    {selected.status !== 'pending' && selected.decision && <DetailBlock title={uiText(selected.status === 'approved' ? '批准' : '退回')}><KeyValue items={[{ label: '经办人', value: selected.decision.actor }, { label: '时间', value: when(selected.decision.at) }, ...(selected.decision.note ? [{ label: '意见', value: selected.decision.note }] : []), ...(signatureUrl ? [{ label: '签字', value: <img className="mist-signature-archive" src={signatureUrl} alt={uiText('批准签字')} data-approval-signature /> }] : [])]} /></DetailBlock>}
     {!!selected.files?.length && <DetailBlock title={uiText("随附依据")}>{selected.files.map(f => <div className="mist-row" key={f.id}><Button size="sm" icon={Paperclip} onClick={() => void reviews.download(selected, f)}>{f.name}</Button></div>)}</DetailBlock>}
     {selected.status === 'pending' && !decideReason && <Field label={uiText("审批意见")} required><TextArea aria-label={uiText("审批意见")} rows={3} maxLength={4000} value={note} disabled={reviews.busy} onChange={e => setNote(e.target.value)} /></Field>}
     {selected.status === 'pending' && !decideReason && selected.signatureRequired && <Field label={uiText("批准签字")} required><SignaturePad key={signKey} ariaLabel="批准签字" disabled={reviews.busy} onChange={setSignature} /></Field>}
