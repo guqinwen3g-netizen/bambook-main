@@ -7,7 +7,7 @@ import {getAllByRole,getByRole,queryByRole} from '@testing-library/dom';
 import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {prepareCreditDocumentSnapshot,creditSourceFingerprint,creditDocumentFingerprint} from '../../../../../server/src/shared/mistCreditDocuments';
 import {applyMistCommand,createMistState,type MistCommand,type MistContext} from '../../../../../server/src/shared/mistWorkspace';
-import {InvoicePage,BomPage,RisksPage,ClaimsPage,PricingPage,ReportsPage,BusinessToolsPage,DataCenterPage} from './PlatformPages';
+import {InvoicePage,BomPage,RisksPage,ClaimsPage,PricingPage,ReportsPage,BusinessToolsPage,DataCenterPage,DashboardPage} from './PlatformPages';
 const bridge=vi.hoisted(()=>({current:null as any,version:0,listeners:new Set<()=>void>(),route:{view:'invoices'} as any,go:vi.fn(),export:vi.fn(),actor:'operator',permissions:null as string[]|null}));
 vi.mock('../../runtime/workspace',async()=>{const React=await import('react');return{useMistWorkspace:()=>{React.useSyncExternalStore(listener=>{bridge.listeners.add(listener);return()=>{bridge.listeners.delete(listener);};},()=>bridge.version);return bridge.current;}};});
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:bridge.actor,displayName:bridge.actor},sessionKey:'test-'+bridge.actor,hasPermission:(scope:string)=>bridge.permissions===null||bridge.permissions.includes(scope),hasRole:()=>true,canAccessView:(view:string)=>bridge.permissions===null||bridge.permissions.includes(view==='payment-vouchers'?'invoices:read':'aftersales:read')}); return { useMistSession, useOptionalMistSession: useMistSession }; });
@@ -144,6 +144,21 @@ describe('platform form and return-path actions',()=>{
  });
  it('cancels an unexecuted claim through its explicit reason form',async()=>{const invoiceId=invoice();const claim=command({type:'platform.claim.create',payload:{orderId,invoiceId,problem:'撤销客诉',fileIds:[]}});await mount(ClaimsPage,'claims',claim.result.id!);await click('撤销案件');await field('撤销原因','客户确认撤销');await click('保存');expect(bridge.current.state.platform.claims[0]).toMatchObject({state:'Cancelled',cancelReason:'客户确认撤销'});expect((getByRole(document.body,'button',{name:'新增处置'}) as HTMLButtonElement).disabled).toBe(true);});
  it('converts lengths and routes each business tool to its real module',async()=>{await mount(BusinessToolsPage,'business-tools');await field('原始长度','1');await field('原单位','yd');await field('目标单位','m');expect(document.body.textContent).toContain('0.9144 m');for(const [name,target] of [['退税美元定价','pricing'],['成本与利润核算','bom'],['商业发票','invoices'],['收款核销','payment-vouchers'],['业务报表','reports']]){await click(name);expect(bridge.go).toHaveBeenLastCalledWith(target);}expect(bridge.current.run).not.toHaveBeenCalled();});
+ it('dashboard counts only approved orders still being fulfilled, never drafts, cancelled or finished ones',async()=>{
+  const base=bridge.current.state.orders[0];
+  const orders=['生产中','订单草稿','已取消','履约完成','待收尾款'].map((state,i)=>({...base,id:'dash-'+i,code:'SO-DASH-'+i,state,progress:state==='生产中'?40:state==='履约完成'?100:0,governance:{...(base.governance||{}),status:state==='订单草稿'?'draft':state==='已取消'?'cancelled':'approved'}}));
+  bridge.current.state.orders=orders;
+  await mount(DashboardPage,'cockpit');
+  const card=[...document.querySelectorAll('.mist-stat')].find(e=>e.textContent?.includes('履行中订单'));
+  expect(card?.querySelector('.mist-stat-value, b, strong')?.textContent ?? card?.textContent).toContain('1');
+  expect(host.textContent).toContain('SO-DASH-0');
+  for(const o of orders.slice(1))expect(host.textContent).not.toContain(o.code);
+ });
+ it('data center lists attachments without a misleading link to shipping documents',async()=>{
+  await mount(DataCenterPage,'data-center');
+  const row=[...host.querySelectorAll('[role="row"]')].find(r=>r.textContent?.includes('附件'));
+  expect(row).toBeTruthy();expect(row!.querySelector('button')).toBeNull();
+ });
  it('reloads data center through the real workspace refresh action',async()=>{await mount(DataCenterPage,'data-center');await click('刷新数据');expect(bridge.current.refresh).toHaveBeenCalledTimes(1);});
  it('reports a failed original-request recovery without discarding the pending operation',async()=>{bridge.current.pending={requestId:'original-operation'};bridge.current.recover.mockRejectedValueOnce(new Error('原请求仍待核对'));await mount(PricingPage,'pricing');await click('核对原请求');expect(document.body.textContent).toContain('原请求仍待核对');expect(bridge.current.pending.requestId).toBe('original-operation');expect(bridge.current.run).not.toHaveBeenCalled();});
  it('exports the selected report date cohort without mixing it with excluded orders',async()=>{await mount(ReportsPage,'reports');await click('导出 CSV');expect(bridge.export.mock.calls.at(-1)![2]).toHaveLength(1);await field('起日','2099-01-01');await click('导出 CSV');expect(bridge.export.mock.calls.at(-1)![2]).toEqual([]);expect(bridge.current.run).not.toHaveBeenCalled();});

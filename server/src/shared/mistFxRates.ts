@@ -160,8 +160,10 @@ export function fxRevaluationPreview(root: Root, month: string, today: string): 
     const issued = isRecognizedMistInvoice(inv) && mistInvoiceDate(root, inv) <= monthEnd; invoiceIssued.set(inv.id, issued);
     if (!issued || cur(inv.currency) === 'CNY') continue;
     const paid = (root.allocations || []).filter(x => x.invoiceId === inv.id && (receiptDate.get(x.receiptId) || '') <= monthEnd).reduce((n, x) => n + minor(x.amount), 0);
-    // Both the charge and its reversal take effect on their Beijing business date, not today's state.
-    const open = Math.max(0, minor(inv.amount) - paid - platformCreditAppliedMinor(root as any, inv.id) - (inv.bankCharges || []).filter(c => platformBusinessDate(c.at) <= monthEnd && (!c.reversed || platformBusinessDate(c.reversed.at) > monthEnd)).reduce((n, c) => n + minor(c.amount), 0));
+    // Bank charges and write-offs (尾差 / 坏账 / 红冲) and their reversals take effect on their Beijing business date, not today's state.
+    const effective = (x: { at: string; reversed?: { at: string } }) => platformBusinessDate(x.at) <= monthEnd && (!x.reversed || platformBusinessDate(x.reversed.at) > monthEnd);
+    const reduced = [...(inv.bankCharges || []), ...(inv.writeoffs || [])].filter(effective).reduce((n, x) => n + minor(x.amount), 0);
+    const open = Math.max(0, minor(inv.amount) - paid - platformCreditAppliedMinor(root as any, inv.id) - reduced);
     if (open) raw.push({ kind: 'receivable', refId: inv.id, ref: `${inv.code} · ${inv.customer}`, currency: cur(inv.currency), amount: open / 100 });
   }
   for (const r of receipts) {

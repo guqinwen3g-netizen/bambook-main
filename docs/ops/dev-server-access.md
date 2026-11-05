@@ -71,6 +71,16 @@ GitHub 的 deployment / ops 工作流均已停用，旧服务器授权及仓库 
 
 部署包保留在同一私有目录的 releases 下。重试同一版本复用原包并核对摘要；不能用不同内容覆盖已接收的相同提交。服务器仍先准备依赖再切换版本，验证两套 API 的数据库健康，失败恢复上一版。客户端再读取公开 `mist-version.json`，确认版本和已提交状态后才报告部署成功。
 
+### 表结构门禁（2026-11-05 起随发布生效）
+
+`bambook-dev-release.sh` 在构建和切换版本之前比较候选版本与当前运行版本的 `server/prisma`（schema、迁移、迁移锁与手工 SQL）文件摘要：
+
+- 完全相同：照常发布，不读数据库。
+- 有新增、修改或删除，或者是首次激活：拒绝激活（退出码 3），当前版本与数据库都不变。要放行，须先按受审流程执行并核对迁移，再由 root 写入 `/etc/bambook-dev/schema-approvals/<提交号>.json`：`{"release": 提交号, "schema": 拒绝信息中给出的指纹, "from": 当前运行的提交号, "rollback": "previous" 或 "stop"}`。文件与目录须为 root 所有、组和其他人不可写。没有环境变量绕过。
+- 放行后仍以候选版本的 Prisma 客户端只读查询 `_prisma_migrations`：本次新增或修改的迁移必须都已完成、未回滚且校验值一致，且库里没有未完成的迁移，否则拒绝。
+- `rollback` 写明健康检查失败时的处理：`previous` 表示负责人已核实旧代码能在新表结构上运行，失败切回上一版；`stop` 表示失败时停止两个服务，不在新表结构上运行旧代码。首次激活只接受 `stop`。
+- 门禁不执行迁移，也不判断破坏性迁移是否安全；它只核对迁移是否已按记录执行。表结构升级仍是单独受审的人工步骤。
+
 每次提交仍正常推送 GitHub。`.github/workflows/mist.yml` 保留手动验证入口；`bambook-dev-deploy.yml` 虽保留历史定义，GitHub 实际工作流已停用且所需私钥已撤销，不是可用的应急发布通道。发布与运维只走本机 SSH，不能依据历史 YAML 恢复远端执行。正式环境不适用本命令。
 
 ## 撤销 / 轮换
@@ -131,12 +141,17 @@ GitHub 的 deployment / ops 工作流均已停用，旧服务器授权及仓库 
 
 ## 每日备份（cron.daily）
 
-`/etc/cron.daily/bambook-dev-backup`（root）每天写入 `/var/backups/bambook-dev`（目录 0700、文件 0600），各保留 7 天：
+仓库里的唯一入口是 `scripts/deploy/bambook-dev-backup.py`，`bootstrap-dev-server.sh` 将其安装为 `/usr/local/sbin/bambook-dev-backup`（root 0755），`/etc/cron.daily/bambook-dev-backup` 只调用它。
 
-- `panda_hub_dev-YYYYMMDD.dump`：`pg_dump -Fc` 整库，可用 `pg_restore` 恢复。
-- `bambook-files-YYYYMMDD.tar.gz`（2026-10-21 起）：`/srv/bambook-dev/shared` 下的 `mist-files`、`private-files`、`uploads` 与 `ai-subscriptions`（平台 ChatGPT 套餐凭据与 API 服务 Key）；打包时有文件正在写入不视为失败。
+- 每次生成一组 `/var/backups/bambook-dev/bambook-dev-YYYYMMDD-HHMMSS/`：`database.dump`（`pg_dump -Fc`，核对 `PGDMP` 文件头）、`files.tar.gz`、`manifest.json`（大小与 SHA-256）。目录 0700，文件 0600。
+- 文件范围：`/srv/bambook-dev/shared/` 下除 `logs`、`private-backups` 之外的全部目录（mist-files、uploads、private-files、ai-subscriptions、mist-mail-credentials、market、storage、data、output、cutout-queue 等）。bootstrap 创建的 8 个目录缺失即失败。`backend.env` 中指向 `shared/` 之外的 `*_DIR`/`*_QUEUE` 路径只记为警告并列入 manifest 的 `notIncluded`。
+- 不包含：`/etc/bambook-dev`（`backend.env` 与密钥），因此归档中的邮箱凭据密文不能单靠备份解密；`/var/lib/magpie`；`/var/mail/vhosts`。注意 `ai-subscriptions` 中的平台订阅令牌与 API Key 以及 `shared/mail-accounts.txt` 为明文，做异地副本前必须先排除或加密。
+- 写入 `.incomplete-*` 临时目录，全部步骤成功后才改名；失败只删除本次临时目录，不动旧备份；同时只允许一个任务运行。`pg_dump` 失败、磁盘写满、tar 的真实错误都使任务失败；tar 仅在全部提示都是“读取期间文件变化 / 已删除”时视为成功；归档会完整读回校验。
+- 新一组成功后才删除超过 7 天的旧组；旧格式的 `panda_hub_dev-*.dump`、`mist-files-*`、`bambook-files-*` 按修改时间满 7 天删除。
 
-备份与服务同盘，尚无异地副本。修改脚本前先把原脚本复制到 `shared/private-backups`，保持 `root:root 755`。
+> 状态（2026-11-05）：仓库脚本已更新并测试，**服务器尚未重新安装**，现网仍是此前的手工脚本（备份 `panda_hub_dev-*.dump` 与 `bambook-files-*.tar.gz`）。重新安装前须在服务器核对 `/usr/bin/python3` 与 GNU tar，并经运维授权。
+
+备份与服务同盘，尚无异地副本，也没有做过完整恢复演练。修改脚本前先把原脚本复制到 `shared/private-backups`，保持 `root:root 755`。
 
 ## 产品图去背景模型
 

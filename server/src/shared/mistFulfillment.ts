@@ -27,7 +27,7 @@ import type { MistReviewTask } from './mistReview';
 import { supplierBusinessDay, productionSupplierUnavailableReason } from './mistSupplierStatus';
 import {procurementCurrencyProblem} from './mistProcurementCurrency';
 import { heldShipmentRelease, relationHoldReason } from './mistRelationHold';
-import { assertOrderLineOpen, assertShipmentWithinTolerance } from './mistOrderClosure';
+import { assertOrderLineOpen, assertShipmentWithinTolerance, orderInvoiceCapProblem } from './mistOrderClosure';
 import {applyCustomsDeclarationCommand,customsItemsStale,CUSTOMS_DECLARATION_COMMANDS,type CustomsClassification,type CustomsDeclarationCommand,type CustomsDeclarationItem} from './mistCustomsDeclaration';
 import {applyClaimInventoryCommand,claimInventoryPermission,type ClaimInventoryCommand,type ClaimInventoryWarehouse,type ClaimReturnReceipt,type ClaimReceivedRecord} from './mistClaimInventory';
 export type FulfillmentSource = {
@@ -2586,9 +2586,9 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 const existing = root.invoices.filter(i => i.orderId === order.id && isActiveMistInvoice(i));
                 if (existing.some(i => i.currency !== order.currency))
                     fail('来源订单已有不同币种发票，请先核实财务来源');
-                const issued = existing.reduce((n, i) => n + BigInt(mistMoneyMinor(i.amount)), BigInt("0"));
-                if (issued + BigInt(mistMoneyMinor(amount)) > BigInt(mistMoneyMinor(order.amount)))
-                    fail('CI金额超过来源订单尚未开票额度');
+                // 开票上限与出运上限同口径：按条目 lineShipLimit（溢装上限 / 已批准超量）× 单价，不按订单原数量。
+                const capProblem = orderInvoiceCapProblem(root, order, { lines: s.lines.filter(l => l.orderId === order.id), amount });
+                if (capProblem) fail(capProblem === 'total' ? 'CI金额超过来源订单尚未开票额度' : capProblem);
                 const id = ctx.id();
                 // CI 只形成待财务确认的应收：确认前不计入余额、账龄、报表、催收，也不能核销。
                 root.invoices.push({ id, code: d.number, orderId: order.id, order: order.code, customer: order.customer, due: d.dueDate, amount, open: 0, currency: order.currency, financeStatus: 'pending', sourceDocumentId: d.id, issuedById: ctx.actorId, issuedAt: platformBusinessDate(ctx.now) });

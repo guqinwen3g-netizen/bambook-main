@@ -49,7 +49,7 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
   app.use(express.json({ limit: '4mb' })); app.use(cookieParser());
   app.get('/api/health', async (_req, res) => {
     try { if(local){await local.ready;await local.database.health();res.json({status:'ok',service:'mist-workspace',mode:'local',storage:'local-file'});return;}await prisma.$queryRawUnsafe('SELECT 1'); res.json({ status: 'ok', service: 'mist-workspace', database: 'ok' }); }
-    catch { res.status(503).json(local?{status:'error',service:'mist-workspace',mode:'local',storage:'unavailable'}:{ status: 'error', service: 'mist-workspace', database: 'unavailable' }); }
+    catch (error) { console.error('[mist-health] storage check failed', error instanceof Error ? error.message : error); res.status(503).json(local?{status:'error',service:'mist-workspace',mode:'local',storage:'unavailable'}:{ status: 'error', service: 'mist-workspace', database: 'unavailable' }); }
   });
   if(local){
     app.locals.mistLocal=local;

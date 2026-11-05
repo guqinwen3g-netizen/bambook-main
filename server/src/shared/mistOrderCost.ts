@@ -209,8 +209,9 @@ export function orderActualCost(root: MistState, orderId: string, basis: FxBasis
       if (total) deducted += Math.round(deductions.filter(d => d.billId === b.id).reduce((n, d) => n + mistMoneyMinor(d.amount), 0) * mine / total);
     }
     const settlements = root.payables?.settlements?.filter(s => s.purchaseId === p.id && s.state === 'confirmed') || [];
-    const finalInternal = root.orders.find(o => o.id === p.orderId)?.governance?.contract.internalSupply && settlements.some(s => s.final);
-    const contract = finalInternal ? settlements.reduce((sum, s) => sum + mistMoneyMinor(s.amount), 0) : Math.max(0, Math.round(p.quantity * p.price * 100));
+    // 已确认最终结算（含短交结案的零数量最终结算）后合同已按实际关闭：成本以已确认结算金额为准，不再暂估未交部分。
+    const finalSettled = settlements.some(s => s.final);
+    const contract = finalSettled ? settlements.reduce((sum, s) => sum + mistMoneyMinor(s.amount), 0) : Math.max(0, Math.round(p.quantity * p.price * 100));
     // Staged fabric costs read as 坯布 + 染整 on the same item, so both stages are named on their cost lines.
     const stage = p.domain === 'fabric' ? p.kind === 'processing' ? p.stageTerms?.intermediate ? '前道加工 ' : '染整加工 ' : p.materialKind === 'greige' ? '坯布 ' : '' : '';
     const unbilled = Math.max(0, contract - billed), share = (minor: number) => internalFabricCostShare(root, p.id, orderId, minor,materialCostBasis), suffix = p.orderId === orderId ? '' : ' 内部面料';
