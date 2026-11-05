@@ -22,6 +22,7 @@ import { OpenBitFunRuntime } from '../scripts/openbitfun-runtime.mjs';
 import { resolveBambookIconPath } from './brandAssets';
 import { AssistantRequestError, AssistantSupervisor } from './assistantSupervisor';
 import { bindDelegationOrigin } from './assistant/protocol';
+import { desktopAppOrigin, isTrustedOrigin, trustedOrigins } from './appOrigin';
 import { AssistantError } from './assistant/types';
 
 let openbitfunRuntime: OpenBitFunRuntime | null = null;
@@ -537,23 +538,37 @@ async function checkServerHealth(host: string, port: number): Promise<{ ok: bool
 // components/WindowControls.tsx) draws / triggers buttons via these
 // handlers. Registered ONCE at module load (handlers are idempotent and
 // scoped to whichever BrowserWindow is currently `mainWindow`).
-ipcMain.handle('window:set-traffic-lights', (_e, visible: boolean) => {
+// Main-window pages come from the company HTTPS site (or the electron-vite dev server). A page from any other
+// origin, e.g. after a redirect or a navigated link, must not reach privileged bridges.
+const APP_ORIGIN = desktopAppOrigin();
+const TRUSTED_ORIGINS = trustedOrigins(APP_ORIGIN, process.env.ELECTRON_RENDERER_URL);
+function trustedMainFrame(event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): boolean {
+    return !!mainWindow && event.sender === mainWindow.webContents && event.senderFrame === mainWindow.webContents.mainFrame
+        && isTrustedOrigin(event.senderFrame.url, TRUSTED_ORIGINS);
+}
+function requireTrustedMainFrame(event: Electron.IpcMainInvokeEvent): void {
+    if (!trustedMainFrame(event)) throw new Error('Untrusted caller');
+}
+
+ipcMain.handle('window:set-traffic-lights', (event, visible: boolean) => {
+    requireTrustedMainFrame(event);
     // macOS only — toggles native red/yellow/green circle visibility. No-op
     // on Windows/Linux where there are no traffic lights to show/hide.
     if (process.platform === 'darwin' && mainWindow) {
         mainWindow.setWindowButtonVisibility(mainWindow.isFullScreen() ? true : Boolean(visible));
     }
 });
-ipcMain.handle('window:minimize', () => mainWindow?.minimize());
-ipcMain.handle('window:toggle-maximize', () => {
+ipcMain.handle('window:minimize', (event) => { requireTrustedMainFrame(event); return mainWindow?.minimize(); });
+ipcMain.handle('window:toggle-maximize', (event) => {
+    requireTrustedMainFrame(event);
     if (!mainWindow) return;
     if (mainWindow.isMaximized()) mainWindow.unmaximize();
     else mainWindow.maximize();
 });
-ipcMain.handle('window:close', () => mainWindow?.close());
+ipcMain.handle('window:close', (event) => { requireTrustedMainFrame(event); return mainWindow?.close(); });
 // Fullscreen state — pulled by the renderer once on mount, then pushed
 // via `window:fullscreen-changed` whenever it flips.
-ipcMain.handle('window:is-fullscreen', () => Boolean(mainWindow?.isFullScreen()));
+ipcMain.handle('window:is-fullscreen', (event) => { requireTrustedMainFrame(event); return Boolean(mainWindow?.isFullScreen()); });
 ipcMain.handle('agent-os:get-activity', () => agentActivitySnapshot);
 ipcMain.handle('agent-os:publish-activity', (_event, snapshot: Partial<AgentActivitySnapshot>) => {
     return broadcastAgentActivity(snapshot);
@@ -571,7 +586,8 @@ ipcMain.handle('agent-os:focus-view', (_event, view: 'assistant' | 'system-setti
 
 // D2 主动提醒引擎 — 桌面原生推送：warning/critical 预警在窗口不可见时
 // 通过 OS 通知中心触达；点击回到主窗口并跳转到通知携带的业务链接。
-ipcMain.handle('notification:show-native', (_event, payload: { title?: string; body?: string; link?: string }) => {
+ipcMain.handle('notification:show-native', (event, payload: { title?: string; body?: string; link?: string }) => {
+    requireTrustedMainFrame(event);
     if (!Notification.isSupported()) return { ok: false, reason: 'unsupported' };
     const title = typeof payload?.title === 'string' ? payload.title.slice(0, 120) : '';
     const body = typeof payload?.body === 'string' ? payload.body.slice(0, 300) : '';
@@ -691,16 +707,19 @@ ipcMain.on('agent-os:pet-renderer-error', (event, payload: Partial<AgentPetRende
 });
 
 // ── 后端健康检查 & 自动启动 ─────────────────────────────────────
-ipcMain.handle('server:health', async (_event, host: string, port: number) => {
+ipcMain.handle('server:health', async (event, host: string, port: number) => {
+    requireTrustedMainFrame(event);
     return checkServerHealth(host || 'localhost', port || 8081);
 });
 
-ipcMain.handle('server:start-embedded', () => {
+ipcMain.handle('server:start-embedded', (event) => {
+    requireTrustedMainFrame(event);
     startEmbeddedServer();
     return { started: true };
 });
 
-ipcMain.handle('server:stop-embedded', () => {
+ipcMain.handle('server:stop-embedded', (event) => {
+    requireTrustedMainFrame(event);
     stopEmbeddedServer();
     return { stopped: true };
 });
@@ -712,7 +731,8 @@ const sanitizeFilename = (name: string) =>
         .trim()
         .slice(0, 120) || 'sample-invoice';
 
-ipcMain.handle('invoice:save-pdf', async (_event, payload: { html: string; filename: string }) => {
+ipcMain.handle('invoice:save-pdf', async (event, payload: { html: string; filename: string }) => {
+    requireTrustedMainFrame(event);
     const html = String(payload?.html || '');
     if (!html) throw new Error('Missing invoice HTML');
 
@@ -844,6 +864,14 @@ function createWindow(): void {
         }
         return { action: 'deny' };
     });
+    // Keep the main window on the company site; anything else opens in the system browser instead.
+    const keepOnTrustedOrigin = (event: Electron.Event, url: string) => {
+        if (isTrustedOrigin(url, TRUSTED_ORIGINS) || url.startsWith('file://') && !process.env.ELECTRON_RENDERER_URL && isUiLabElectron) return;
+        event.preventDefault();
+        try { const parsed = new URL(url); if (parsed.protocol === 'https:' || parsed.protocol === 'http:') shell.openExternal(url); } catch { /* ignore */ }
+    };
+    mainWindow.webContents.on('will-navigate', keepOnTrustedOrigin);
+    mainWindow.webContents.on('will-redirect', keepOnTrustedOrigin);
     mainWindow.on('closed', () => {
         mainWindow = null;
         if (agentPetWindow && !agentPetWindow.isDestroyed()) {
@@ -870,10 +898,13 @@ function createWindow(): void {
             '  bundle overhead). Production preview / DMG runs full 60fps.\n' +
             '════════════════════════════════════════════════════════\n\n'
         );
-    } else {
+    } else if (isUiLabElectron) {
         const uiLabPath = path.join(__dirname, '../renderer/archive/ui-lab/dev-ui-lab.html');
-        const defaultPath = path.join(__dirname, '../renderer/index.html');
-        mainWindow.loadFile(isUiLabElectron && fsSync.existsSync(uiLabPath) ? uiLabPath : defaultPath);
+        mainWindow.loadFile(fsSync.existsSync(uiLabPath) ? uiLabPath : path.join(__dirname, '../renderer/index.html'));
+    } else {
+        // The workspace runtime needs a real HTTP(S) origin (same-origin /api calls, delegation binding), so the
+        // packaged app opens the company site rather than the bundled file:// renderer.
+        mainWindow.loadURL(APP_ORIGIN + '/');
     }
 
     // Always surface load failures and renderer crashes to main-process
@@ -889,7 +920,8 @@ function createWindow(): void {
 
 
 
-ipcMain.handle('stt:local-status', () => {
+ipcMain.handle('stt:local-status', (event) => {
+    requireTrustedMainFrame(event);
     const model = getLocalSttModelStatus();
     return {
         ok: true,
@@ -905,7 +937,8 @@ ipcMain.handle('stt:local-status', () => {
     };
 });
 
-ipcMain.handle('stt:local-prepare', async () => {
+ipcMain.handle('stt:local-prepare', async (event) => {
+    requireTrustedMainFrame(event);
     try {
         const model = getLocalSttModelStatus();
         if (!model.exists) {
@@ -926,7 +959,8 @@ ipcMain.handle('stt:local-prepare', async () => {
     }
 });
 
-ipcMain.handle('stt:local-start', async () => {
+ipcMain.handle('stt:local-start', async (event) => {
+    requireTrustedMainFrame(event);
     try {
         const recognizer = createLocalSttRecognizer();
         const stream = recognizer.createStream();
@@ -944,7 +978,8 @@ ipcMain.handle('stt:local-start', async () => {
     }
 });
 
-ipcMain.handle('stt:local-push-pcm', async (_event, payload: { sessionId?: string; pcm?: ArrayBuffer; sampleRate?: number }) => {
+ipcMain.handle('stt:local-push-pcm', async (event, payload: { sessionId?: string; pcm?: ArrayBuffer; sampleRate?: number }) => {
+    requireTrustedMainFrame(event);
     try {
         const sessionId = String(payload?.sessionId || '');
         if (!sessionId) throw new Error('缺少 STT sessionId');
@@ -961,7 +996,8 @@ ipcMain.handle('stt:local-push-pcm', async (_event, payload: { sessionId?: strin
     }
 });
 
-ipcMain.handle('stt:local-finish', async (_event, sessionId: string) => {
+ipcMain.handle('stt:local-finish', async (event, sessionId: string) => {
+    requireTrustedMainFrame(event);
     try {
         const id = String(sessionId || '');
         if (!id) throw new Error('缺少 STT sessionId');
@@ -977,14 +1013,16 @@ ipcMain.handle('stt:local-finish', async (_event, sessionId: string) => {
     }
 });
 
-ipcMain.handle('stt:local-stop', async (_event, sessionId: string) => {
+ipcMain.handle('stt:local-stop', async (event, sessionId: string) => {
+    requireTrustedMainFrame(event);
     cleanupLocalSttSession(String(sessionId || ''));
     return { ok: true };
 });
 
 // ── 刷新窗口的 IPC 通道 + 全局快捷键 ──
 // 当 Vite HMR 不工作时，用户可通过 Cmd+Shift+R 或 IPC 调用强制刷新
-ipcMain.handle('dev:hard-reload', () => {
+ipcMain.handle('dev:hard-reload', (event) => {
+    requireTrustedMainFrame(event);
     BrowserWindow.getAllWindows().forEach((win) => {
         if (!win.isDestroyed()) win.webContents.reload();
     });
@@ -1024,7 +1062,7 @@ function getAssistantSupervisor() {
     return assistantSupervisor;
 }
 ipcMain.handle('assistant:request', async (event, method: unknown, params: unknown) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) {
+    if (!trustedMainFrame(event)) {
         throw new Error('Untrusted assistant caller');
     }
     try {
@@ -1040,7 +1078,7 @@ ipcMain.handle('assistant:request', async (event, method: unknown, params: unkno
 for (const operation of ['start', 'status'] as const) {
     ipcMain.handle(`openbitfun:${operation}`, async (event) => {
         // The embedded workbench (and other windows) cannot use this bridge.
-        if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) {
+        if (!trustedMainFrame(event)) {
             throw new Error('Untrusted Agent runtime caller');
         }
         return getOpenBitFunRuntime()[operation]();
