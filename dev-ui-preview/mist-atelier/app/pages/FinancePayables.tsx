@@ -119,12 +119,12 @@ export function FinancePayables() {
   const bill = bills.find(b => b.id === selected), payment = payments.find(p => p.id === selected), request = requests.find(r => r.id === selected), plan = plans.find(p => p.id === selected), settlement = settlements.find(x => x.id === selected);
   const open = (id: string) => { setSelected(id); setDrawer(true); go('payment-vouchers', id, { section: 'payables' }, { keepScroll: true }); };
 
-  const execute = async (command: PayablesCommand, done: (result: Record<string, unknown>) => void) => {
+  const execute = async (command: PayablesCommand, done: (result: Record<string, unknown>) => void, signature?: { svg: string }) => {
     if (payablesCommandPermissions(command).some(permission => !session.hasPermission(permission as any))) { setFailure('没有办理此项财务动作的权限。'); return; }
     if (busy) return; setWorking(true); setFailure('');
     const scope=actionScope.current,available=()=>mounted.current&&actionScope.current===scope;
     unresolved.current=null;
-    try { const receipt = await run(command as any); if(available())done(receipt.result as Record<string, unknown>); } catch (problem) { if(available()){
+    try { const receipt = await (signature ? run(command as any, { signature }) : run(command as any)); if(available())done(receipt.result as Record<string, unknown>); } catch (problem) { if(available()){
       const intent=(problem as {mistPendingCommand?:{requestId:string;workspaceId:string;actorId:string}})?.mistPendingCommand;
       if(intent)unresolved.current={...intent,scope,done};
       setFailure(intent?'':problem instanceof Error ? problem.message : '操作失败，请重试');
@@ -497,7 +497,7 @@ export function FinancePayables() {
     </Dialog>
 
     <SettlementSubmitDialog open={settleOpen} state={state} initialPurchaseId={settlementPurchaseId} busy={busy} canSettle={canSettle} failure={settleOpen ? failure : ''} onClose={() => { setSettleOpen(false); setFailure(''); if (settlementPurchaseId) go('payment-vouchers', undefined, { section: 'payables' }); }} execute={(command, done) => void execute(command, done)} onDone={id => { setSettleOpen(false); setView('settlements'); open(id); toast('结算已提交，等待财务复核'); }} />
-    <SettlementConfirmDialog settlement={settlements.find(x => x.id === confirmId)} busy={busy} canConfirm={canConfirm} failure={confirmId ? failure : ''} onClose={() => { setConfirmId(''); setFailure(''); }} execute={(command, done) => void execute(command, done)} onDone={() => { setConfirmId(''); toast('结算已确认'); }} />
+    <SettlementConfirmDialog settlement={settlements.find(x => x.id === confirmId)} busy={busy} canConfirm={canConfirm} failure={confirmId ? failure : ''} onClose={() => { setConfirmId(''); setFailure(''); }} execute={(command, done, signature) => void execute(command, done, signature)} onDone={() => { setConfirmId(''); toast('结算已确认'); }} />
     {linkId && state && bills.find(b => b.id === linkId) && <BillLinkDialog bill={bills.find(b => b.id === linkId)!} state={state} busy={busy} allowed={canBill} failure={failure} onClose={() => { setLinkId(''); setFailure(''); }} execute={(command, done) => void execute(command, done)} onDone={() => { setLinkId(''); toast('已关联结算'); }} />}
     {deductId && state && bills.find(b => b.id === deductId) && <DeductionDialog bill={bills.find(b => b.id === deductId)!} state={state} busy={busy} allowed={canAllocate} failure={failure} onClose={() => { setDeductId(''); setFailure(''); }} execute={(command, done) => void execute(command, done)} onDone={() => { setDeductId(''); toast('索赔扣款已登记'); }} />}
     {moveDraft && state && <PrepaymentMoveDialog kind={moveDraft.kind} purchaseId={moveDraft.purchaseId} state={state} busy={busy} allowed={moveDraft.kind === 'refund' ? canPay && canConfirm : canConfirm} failure={failure} onClose={() => { setMoveDraft(null); setFailure(''); }} execute={(command, done) => void execute(command, done)} onDone={() => { const k = moveDraft.kind; setMoveDraft(null); toast(k === 'refund' ? '剩余预付退款已登记' : '剩余预付已转抵'); }} />}

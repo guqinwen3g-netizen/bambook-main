@@ -24,7 +24,7 @@ import type { MarketLookbook } from './mistMarket';
 export type DocumentGenerationCommand =
   | { type: 'fulfillment.documents.generate'; payload: { shipmentId: string; type: OwnDocumentType; orderId?: string; dueDate?: string } }
   | { type: 'fulfillment.documents.bl'; payload: { id: string; blNo: string; kind: BillOfLadingKind; originals: number; siDocumentId?: string; confirmDraft?: string; release?: string } }
-  | { type: 'order.document.generate'; payload: { orderId: string; kind: 'PI' | 'SC' } }
+  | { type: 'order.document.generate'; payload: { orderId: string; kind: 'PI' | 'SC'; sealId?: string; sealReason?: string } }
   | { type: 'market.lookbook.document'; payload: { id: string } };
 export const DOCUMENT_GENERATION_COMMANDS = ['fulfillment.documents.generate', 'fulfillment.documents.bl', 'order.document.generate', 'market.lookbook.document'] as const;
 export const GENERATING_COMMANDS: ReadonlySet<string> = new Set(['fulfillment.documents.generate', 'order.document.generate', 'market.lookbook.document']);
@@ -258,7 +258,8 @@ export function applyDocumentGeneration(root: MistState, command: DocumentGenera
     const snapshot = prepareOrderDocumentSnapshot(root, command.payload, ctx), artifact = bound(root, snapshot, ctx);
     const order = root.orders.find(o => o.id === command.payload.orderId)! as MistOrder & { documents?: OrderDocumentRecord[] };
     const prior = (order.documents || []).filter(d => d.orderKind === command.payload.kind).at(-1);
-    if (prior && generatedDocFingerprint(generatedDocContent(prior.snapshot)) === generatedDocFingerprint(generatedDocContent({ ...snapshot, number: prior.number }))) fail('订单内容未变化，可直接下载上一份' + ORDER_DOCUMENT_LABEL[command.payload.kind].zh, 'CONFLICT');
+    // 同内容再次生成只允许为未盖章的上一份补盖印章（见 mistSeals）。
+    if (prior && (!(ctx as MistContext & { sealStamp?: unknown }).sealStamp || (prior as OrderDocumentRecord & { sealUseId?: string }).sealUseId) && generatedDocFingerprint(generatedDocContent(prior.snapshot)) === generatedDocFingerprint(generatedDocContent({ ...snapshot, number: prior.number }))) fail('订单内容未变化，可直接下载上一份' + ORDER_DOCUMENT_LABEL[command.payload.kind].zh, 'CONFLICT');
     order.documents = [...(order.documents || []), { ...structuredClone(artifact.record), orderKind: command.payload.kind, version: (order.documents || []).filter(d => d.orderKind === command.payload.kind).length + 1 }];
     event(root, ctx, 'order', order.id, `生成${ORDER_DOCUMENT_LABEL[command.payload.kind].zh} ${snapshot.number}`, [artifact.file.id]);
     return { id: order.id, fileId: artifact.file.id };

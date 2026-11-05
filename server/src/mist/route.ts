@@ -254,7 +254,7 @@ export function createMistRouter(options: { prisma?: any; marketStore?: MarketSt
   router.get('/reviews', run(async (req,res)=>{res.json({reviews:await repository.listReviews(actor(req))});}));
   router.get('/reviews/:workspaceId/receipts/:requestId', run(async (req,res)=>{res.json({receipt:await repository.reviewReceipt(actor(req),req.params.workspaceId,req.params.requestId)});}));
   router.get('/reviews/:workspaceId/:reviewId/files/:fileId',run(async(req,res)=>{const {file,bytes}=await repository.reviewFile(actor(req),req.params.workspaceId,req.params.reviewId,req.params.fileId);res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);res.type('application/octet-stream').send(Buffer.from(bytes));}));
-  router.post('/reviews/:workspaceId/:reviewId', run(async (req,res)=>{const body=exactBody(req.body,['requestId','expectedRevision','decision','note']);res.json(await repository.decideReview(actor(req),req.params.workspaceId,req.params.reviewId,body as any));}));
+  router.post('/reviews/:workspaceId/:reviewId', run(async (req,res)=>{const body=exactBody(req.body,['requestId','expectedRevision','decision','note','signature']);if(body.signature!==undefined&&typeof exactBody(body.signature,['svg']).svg!=='string')fail('INVALID_INPUT','签字格式无效',400);res.json(await repository.decideReview(actor(req),req.params.workspaceId,req.params.reviewId,body as any));}));
   router.get('/workspaces/default', run(async (req, res) => { res.json({ workspace: await repository.create(actor(req), { name: '公司业务', seed: actor(req)?.companyId ? 'empty' : 'demo' }, true) }); }));
   router.get('/workspaces', run(async (req, res) => {
     const workspaces = req.query.summary === '1' ? await repository.listSummaries(actor(req)) : await repository.list(actor(req));
@@ -276,7 +276,8 @@ export function createMistRouter(options: { prisma?: any; marketStore?: MarketSt
   router.get('/workspaces/:id/team-scopes', run(async (req, res) => { res.json(await repository.teamScopes(actor(req), req.params.id)); }));
   router.post('/workspaces/:id/team-scopes/preview', run(async (req, res) => { res.json(await repository.previewTeamScope(actor(req), req.params.id, exactBody(req.body, ['teamId', 'conditions', 'picks', 'exclusions', 'note']))); }));
   router.post('/workspaces/:id/commands', run(async (req, res) => {
-    const body = exactBody(req.body, ['requestId', 'expectedRevision', 'command', 'reauth']);
+    const body = exactBody(req.body, ['requestId', 'expectedRevision', 'command', 'reauth', 'signature']);
+    if (body.signature !== undefined && typeof exactBody(body.signature, ['svg']).svg !== 'string') fail('INVALID_INPUT', '签字格式无效', 400);
     exactBody(body.command, ['type', 'payload']);
     if (body.reauth !== undefined && (body.command?.type !== 'agent.proposal.confirm' || typeof exactBody(body.reauth, ['password']).password !== 'string')) fail('INVALID_INPUT', '只有确认 Agent 提议时可附带登录密码复验', 400);
     res.json(await repository.execute(actor(req), req.params.id, body as any));

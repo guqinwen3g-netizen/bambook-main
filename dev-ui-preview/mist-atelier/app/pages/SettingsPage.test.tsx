@@ -36,7 +36,7 @@ describe('original Mist settings with server workspace commands', () => {
   it('keeps only company sections and no personal appearance or security controls', () => {
     render(); expect(host.querySelector('.mist-wizard')).toBeTruthy();
     const labels=[...host.querySelectorAll('.mist-vsteps button')].map(item=>item.textContent);
-    expect(labels).toEqual(['公司资料','数据访问','通知','设置记录']);
+    expect(labels).toEqual(['公司资料','印章','数据访问','通知','设置记录']);
     expect(host.querySelector('[aria-label="界面语言"]')).toBeNull();
     expect(host.textContent).not.toContain('查看账号安全');
   });
@@ -122,7 +122,7 @@ it('puts accounts, 岗位 and company settings in one page, leaves HR to its own
  vi.stubGlobal('fetch',vi.fn(()=>new Promise(()=>{})));
  try{
   seam.session={...seam.session,hasPermission:(p:string)=>['users:admin','hr:read'].includes(p)} as any;seam.nav={route:{view:'admin-panel',section:'roles'},go:vi.fn()};render();
-  expect([...host.querySelectorAll('.mist-vsteps button')].map(item=>item.textContent)).toEqual(['账号','岗位与权限','审批资格','公司资料','数据访问','通知','设置记录','审计日志']);
+  expect([...host.querySelectorAll('.mist-vsteps button')].map(item=>item.textContent)).toEqual(['账号','岗位与权限','审批资格','公司资料','印章','数据访问','通知','设置记录','审计日志']);
   expect(host.textContent).toContain('只读');
   expect(host.textContent).not.toContain('平台设置');expect(seam.nav.go).not.toHaveBeenCalled();
  }finally{vi.unstubAllGlobals();}

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MistRoot } from '../../../../components/mist';
 import { createMistState } from '../../../../server/src/shared/mistWorkspace';
 import { AgentProposalDialog } from './AgentProposalDialog';
@@ -107,4 +107,16 @@ it('high-risk proposals list every array item untruncated, and block confirmatio
     expect(account).toContain('9999888877776666'); expect(account).toContain('1111222233334444'); expect(account).toContain('CMBCCNBS'); expect(account).toContain('BKCHCNBJ');
     expect(document.querySelector('[data-agent-proposal-changes]')).toBeNull();
   } finally { act(() => root.unmount()); host.remove(); }
+});
+
+describe('signature on Agent-drafted approvals', () => {
+ it('requires the confirming person to sign a contract or money approval before it can run', async () => {
+  const { commandRequiresSignature } = await import('../runtime/signatureRules');
+  expect(commandRequiresSignature({ type: 'fulfillment.procurement.decide', payload: { id: 'p', decision: 'approved', note: 'ok' } })).toBe(true);
+  expect(commandRequiresSignature({ type: 'fulfillment.procurement.decide', payload: { id: 'p', decision: 'rejected', note: 'no' } })).toBe(false);
+  expect(commandRequiresSignature({ type: 'finance.receivable.writeoff', payload: { kind: 'badDebt' } })).toBe(true);
+  expect(commandRequiresSignature({ type: 'finance.receivable.writeoff', payload: { kind: 'rounding' } })).toBe(false);
+  expect(commandRequiresSignature({ type: 'payable.settlement.confirm', payload: {} })).toBe(true);
+  expect(commandRequiresSignature({ type: 'market.quotation.decide', payload: { decision: 'approved' } })).toBe(false);
+ });
 });

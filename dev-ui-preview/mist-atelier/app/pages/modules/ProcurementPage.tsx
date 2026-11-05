@@ -18,7 +18,7 @@ import { supplierBusinessDay, productionSupplierUnavailableReason } from '../../
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
-import { ModuleEditorDialog, ModuleEditorPage, moduleFileIds, type ModuleEditorSpec } from './ModuleWorkbench';
+import { ModuleEditorDialog, ModuleEditorPage, moduleFileIds, moduleSignature, signatureField, type ModuleEditorSpec } from './ModuleWorkbench';
 import { choiceField, deliveryTargetPayload, emptyOption, Events, exportRecords, field, localNow, number, parseRolls, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, RecordDisclosure, shortWhen, useListDetailRoute } from './pageKit';
@@ -215,7 +215,7 @@ export function ProcurementPage() {
     fields: [{ ...field('quantity', `数量（${p.unit}）`, 'number'), min: 0.0001 }, field('price', `单价（${p.currency}）`, 'number'), field('due', '交期', 'date'), field('reason', '变更原因', 'textarea'), field('evidence', '供应商同意依据', 'textarea'), field('files', '供应商确认件', 'files', false)],
     initialValues: { quantity: p.quantity, price: p.price, due: p.due, reason: '', evidence: '', files: '' },
     submit: values => run({ type: 'fulfillment.procurement.amend', payload: { id: p.id, quantity: number(values, 'quantity'), price: number(values, 'price'), due: text(values, 'due'), reason: text(values, 'reason'), evidence: text(values, 'evidence'), fileIds: moduleFileIds(values.files) } }) });
-  const decideSpec = (p: FulfillmentPurchase, decision: 'approved' | 'rejected'): ProcurementEditorSpec => ({ approvalFor:p.id, title: decision === 'approved' ? '批准采购承诺' : '退回采购', submitLabel: decision === 'approved' ? '批准' : '退回修改', fields: [field('note', '审批意见', 'textarea')], initialValues: { note: '' }, submit: values => run({ type: 'fulfillment.procurement.decide', payload: { id: p.id, decision, note: text(values, 'note') } }) });
+  const decideSpec = (p: FulfillmentPurchase, decision: 'approved' | 'rejected'): ProcurementEditorSpec => ({ approvalFor:p.id, title: decision === 'approved' ? '批准采购承诺' : '退回采购', submitLabel: decision === 'approved' ? '批准' : '退回修改', fields: [field('note', '审批意见', 'textarea'), ...(decision === 'approved' ? [signatureField()] : [])], initialValues: { note: '', signature: '' }, submit: values => run({ type: 'fulfillment.procurement.decide', payload: { id: p.id, decision, note: text(values, 'note') } }, { signature: moduleSignature(values.signature) }) });
 
   const stageCount = (value: StageFilter) => value === 'all' ? searched.length : searched.filter(p => purchaseStage(p) === value).length;
   const lineLabel = (p: FulfillmentPurchase) => state ? fulfillmentSourceLabel(state, { kind: 'orderLine', orderId: p.orderId, lineId: p.lineId }) : '';

@@ -14,7 +14,8 @@ import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { fmt } from '../../data';
-import { ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
+import { ModuleEditorDialog, type ModuleEditorSpec, type ModuleField } from './ModuleWorkbench';
+import { SEAL_KIND_LABEL, usableSeals } from './CompanySeals';
 import { documentTypeLabel, choices, emptyOption, Events, exportRecords, field, localNow, RecordFiles, text } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen, type ReasonedAction } from './pageKit';
@@ -136,7 +137,11 @@ export function DocumentCenterPage() {
   const issueSpec = (d: FulfillmentDocument): ModuleEditorSpec => {
     const order = state?.orders.find(o => o.id === d.orderId), s = f?.shipments.find(row => row.id === d.shipmentId);
     const amount = d.type === 'CI' && order && s && !order.replacementSource ? s.lines.filter(l => l.orderId === order.id).reduce((n, l) => n + Math.round(l.quantity * (state?.orderLines.find(x => x.id === l.lineId)?.price || 0) * 100), 0) / 100 : null;
-    return { title: `签发 ${d.number} · V${d.version}`, submitLabel: '确认签发', ...(amount !== null ? { description: `将生成应收 ${order!.currency} ${fmt(amount, 2)}，到期 ${d.dueDate}，待财务确认。` } : {}), fields: [], initialValues: {}, submit: () => run({ type: 'fulfillment.documents.issue', payload: { id: d.id } }) };
+    // 指定用印人签发系统生成的单据时可选章盖印；其他人签发不带章，不显示这两项。
+    const seals = d.generated?.length ? usableSeals(state, session.user?.id) : [];
+    const sealFields: ModuleField[] = seals.length ? [field('sealId', '加盖印章', 'select', false, [{ value: '', label: '不盖章' }, ...seals.map(seal => ({ value: seal.id, label: `${seal.name} · ${SEAL_KIND_LABEL[seal.kind]}` }))]), { ...field('sealReason', '用印事由', 'text', true), when: { key: 'sealId', values: seals.map(seal => seal.id) } }] : [];
+    return { title: `签发 ${d.number} · V${d.version}`, submitLabel: '确认签发', ...(amount !== null ? { description: `将生成应收 ${order!.currency} ${fmt(amount, 2)}，到期 ${d.dueDate}，待财务确认。` } : {}), fields: sealFields, initialValues: seals.length ? { sealId: '', sealReason: '' } : {},
+      submit: v => run({ type: 'fulfillment.documents.issue', payload: { id: d.id, ...(text(v, 'sealId') ? { sealId: text(v, 'sealId'), sealReason: text(v, 'sealReason').trim() } : {}) } } as never) };
   };
   const archiveSpec = (d: FulfillmentDocument): ModuleEditorSpec => ({ title: '归档外部机构原件', submitLabel: '归档原件', description: `${TYPE_LABEL[d.type]} ${d.number} · 以外部机构签发的原件为准。`, fields: [field('issuer', '外部签发机构', 'choice', true, DOCUMENT_ISSUERS), field('at', '实际签发时间', 'datetime-local'), field('evidence', '原件来源依据', 'textarea')], initialValues: { issuer: '', at: localNow(), evidence: '' }, submit: v => run({ type: 'fulfillment.documents.archiveExternal', payload: { id: d.id, issuer: text(v, 'issuer'), at: new Date(text(v, 'at')).toISOString(), evidence: text(v, 'evidence') } }) });
   const voidSpec = (d: FulfillmentDocument): ModuleEditorSpec => ({ title: `作废 ${d.number} · V${d.version}`, submitLabel: '确认作废', description: d.invoiceId ? '作废 CI 会同时作废其财务应收，出运回到单证处理中；已对客发送的需重新发送。' : '作废后出运回到单证处理中；原版本保留为历史。', fields: [field('reason', '作废原因', 'textarea')], initialValues: { reason: '' }, submit: v => run({ type: 'fulfillment.documents.void', payload: { id: d.id, reason: text(v, 'reason') } }) });

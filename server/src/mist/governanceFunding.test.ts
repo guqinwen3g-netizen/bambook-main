@@ -8,6 +8,7 @@ import {MemoryMistDatabase,testActor,testAuthority} from './__tests__/support';
 import * as contract from '../shared/mistWorkspace';
 import {orderFundingCoveredAmount} from '../shared/mistOrderFunding';
 import type {OrderGovernanceInput} from '../shared/mistOrderGovernance';
+import { TEST_SIGNATURE } from './__tests__/signature';
 
 vi.mock('./context',()=>({mistApprovalAuthority:async()=>({supplier:{},orderReviewerIds:{garment:['reviewer'],fabric:['reviewer']}})}));
 vi.mock('../auth/tokenHelpers',()=>({loadUserWithRoles:async(_db:unknown,id:string)=>({id,status:'active',deletedAt:null}),buildLoadedAuthTokenPayload:async(_db:unknown,user:{id:string})=>({userId:user.id,permissions:['orders:write'],roles:[],departmentIds:[]})}));
@@ -32,7 +33,7 @@ describe('real order governance and funding repository transaction',()=>{
   const orderId=created.receipt.result.orderId as string;
   const decide=async(requestId:string)=>{
    const review=(await repo.listReviews(testActor('reviewer'))).find((row:{entityId:string;status:string})=>row.entityId===orderId&&row.status==='pending')!;
-   const result=await repo.decideReview(testActor('reviewer'),workspace.id,review.id,{requestId,expectedRevision:revision,decision:'approved',note:'核对冻结合同'});revision=result.receipt.revision;return result;
+   const result=await repo.decideReview(testActor('reviewer'),workspace.id,review.id,{requestId,expectedRevision:revision,decision:'approved',note:'核对冻结合同',signature:TEST_SIGNATURE});revision=result.receipt.revision;return result;
   };
   await run({type:'order.governance.submit',payload:{orderId}});await decide('approve-original');
   const receipt=await run({type:'finance.importReceipts',payload:{receipts:[{date:'2026-10-13',payer:'客户',amount:80,currency:'USD',ref:'BANK-UNIQUE'}]}});
@@ -53,6 +54,6 @@ describe('real order governance and funding repository transaction',()=>{
   expect(after.state.orders[0]).toMatchObject(mode==='amount'?{amount:50,currency:'USD'}:{amount:100,currency:'EUR'});
   expect(after.state.orders[0].governance?.changeDraft).toBeUndefined();expect(after.state.orders[0].governance?.effectiveVersion).toBe(2);
   expect(orderFundingCoveredAmount(after.state,orderId)).toBe(0);expect(after.state.receipts[0].remaining).toBe(80);expect(after.state.allocations).toEqual([]);
-  expect((await repo.decideReview(testActor('reviewer'),workspace.id,approved.receipt.result.reviewId as string,{requestId:'approve-released-change',expectedRevision:before.revision+2,decision:'approved',note:'核对冻结合同'})).replayed).toBe(true);
+  expect((await repo.decideReview(testActor('reviewer'),workspace.id,approved.receipt.result.reviewId as string,{requestId:'approve-released-change',expectedRevision:before.revision+2,decision:'approved',note:'核对冻结合同',signature:TEST_SIGNATURE})).replayed).toBe(true);
  });
 });

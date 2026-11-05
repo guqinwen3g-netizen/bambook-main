@@ -19,14 +19,15 @@ import { AdminAccounts, AdminAuditLog, AdminRoles } from './modules/AdminAccount
 import { AdminApprovalAuthorities } from './modules/AdminApprovalAuthorities';
 import { LocalAdminPanel } from './modules/LocalAdminPanel';
 import { ExporterProfilePanel } from './modules/ExporterProfilePanel';
+import { CompanySealsSection } from './modules/CompanySeals';
 import {AgentIdentities} from './AgentIdentities';
 import { FailureNotice } from '../runtime/FailureNotice';
 
 type TextKey = 'workspaceName';
 type TextValues = Pick<MistSettings, TextKey>;
 type SettingsPatch = Partial<Omit<MistSettings, 'companyProfile'>> & { companyProfile?: Partial<MistCompanyProfile> };
-export type CompanySection = 'accounts' | 'jobs' | 'approvals' | 'profile' | 'access' | 'teams' | 'notify' | 'activity' | 'audit' | 'local'|'agents';
-const SECTIONS: CompanySection[] = ['accounts', 'jobs', 'approvals', 'profile', 'access', 'teams', 'notify', 'activity', 'audit', 'local','agents'];
+export type CompanySection = 'accounts' | 'jobs' | 'approvals' | 'profile' | 'seals' | 'access' | 'teams' | 'notify' | 'activity' | 'audit' | 'local'|'agents';
+const SECTIONS: CompanySection[] = ['accounts', 'jobs', 'approvals', 'profile', 'seals', 'access', 'teams', 'notify', 'activity', 'audit', 'local','agents'];
 /** 旧页面与分区地址 → 公司管理分区。 */
 export function companySection(view: string, section?: string, id?: string): CompanySection | undefined {
   if (section && (SECTIONS as string[]).includes(section)) return section as CompanySection;
@@ -102,6 +103,7 @@ export function SettingsPage() {
     manager && { id: 'jobs', label: '岗位与权限', icon: Briefcase },
     manager && !scoped && { id: 'approvals', label: '审批资格', icon: Stamp },
     settingsAccess && { id: 'profile', label: '公司资料', icon: Landmark },
+    settingsAccess && !platformCompany && { id: 'seals', label: '印章', icon: Stamp },
     settingsAccess && !platformCompany && { id: 'access', label: '数据访问', icon: ShieldCheck },
     settingsAccess && !platformCompany && !local && session.hasPermission('hr:write') && { id: 'teams', label: '小组范围', icon: UsersRound },
     (session.hasPermission('users:write')||local&&access?.role==='owner')&&{id:'agents',label:'Agent服务',icon:Bot},
@@ -128,6 +130,7 @@ export function SettingsPage() {
           {sec === 'approvals' && <AdminApprovalAuthorities />}
           {sec === 'audit' && <AdminAuditLog />}
           {sec === 'local' && <LocalAdminPanel embedded />}
+          {sec === 'seals' && <Card><CompanySealsSection canManage={!member} /></Card>}
           {workspaceSection && <Card>
             {!settings || !values ? <FormSection title={uiText("正在读取设置")}><Skeleton height={120} /></FormSection> : <>
             {member && sec === 'notify' && <Banner variant="status" tone="neutral" title={uiText("公司设置由管理人员维护")}>{uiText("这些设置作用于整个公司，当前账号只能查看。")}</Banner>}

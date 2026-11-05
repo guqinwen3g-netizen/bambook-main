@@ -1,7 +1,8 @@
 import React from 'react';
 import { ui, uiText } from '../../../../services/interfaceLanguage';
 import { businessDate } from '../runtime/businessClock';
-import { Banner, Button, Dialog, Field, KeyValue, PasswordInput, Pill, TextArea } from '../../../../components/mist';
+import { Banner, Button, Dialog, Field, KeyValue, PasswordInput, Pill, SignaturePad, TextArea, type SignatureValue } from '../../../../components/mist';
+import { commandRequiresSignature } from '../runtime/signatureRules';
 import { agentCommandRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../server/src/shared/mistAgentProposals';
 import type { MistCommand, MistState } from '../../../../server/src/shared/mistWorkspace';
 import { reviewEmailAnalysis } from '../../../../server/src/shared/mistEmailReview';
@@ -79,10 +80,10 @@ export function proposalAccountRows(command: AgentProposal['command'], state?: M
  * 中、高风险都列出将要执行的具体内容；高风险另须本人密码。拒绝只记录结论，不改业务。
  */
 export function AgentProposalDialog({ proposal, state, onClose, run, onDone }: {
-  proposal: AgentProposal | undefined; state?: MistState | null; onClose: () => void; run: (command: MistCommand, options?: { reauth?: { password: string } }) => Promise<unknown>; onDone: (message: string) => void;
+  proposal: AgentProposal | undefined; state?: MistState | null; onClose: () => void; run: (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string } }) => Promise<unknown>; onDone: (message: string) => void;
 }) {
-  const [note, setNote] = React.useState(''), [busy, setBusy] = React.useState(false), [failure, setFailure] = React.useState(''), [password, setPassword] = React.useState('');
-  React.useEffect(() => { setNote(''); setFailure(''); setPassword(''); }, [proposal?.id]);
+  const [note, setNote] = React.useState(''), [busy, setBusy] = React.useState(false), [failure, setFailure] = React.useState(''), [password, setPassword] = React.useState(''), [signature, setSignature] = React.useState<SignatureValue | null>(null);
+  React.useEffect(() => { setNote(''); setFailure(''); setPassword(''); setSignature(null); }, [proposal?.id]);
   if (!proposal) return null;
   const mail = mailProposalDetails(proposal, state);
   // 风险等级与服务端共用 agentCommandRisk：未登记的普通写入按中风险，付款、核销、审批等按高风险须输入密码。服务端仍会独立校验档位、密码与原业务权限。
@@ -92,16 +93,18 @@ export function AgentProposalDialog({ proposal, state, onClose, run, onDone }: {
   // 公司收款账户只对照银行字段；同一命令里的其他设置仍逐项列出。
   const changes = account && proposal.command.type !== 'settings.update' ? [] : account ? fields.rows.filter(r => !/^companyProfile\.(bankName|bankAccount|swift|bankAddress)$/.test(r.field)) : fields.rows;
   const incomplete = risk === 'high' && fields.omitted > 0;
-  const decide = async (command: MistCommand, message: string, reauth?: { password: string }) => {
+  // Agent 起草的合同与资金类批准，由确认人本人当场签字；Agent 不能代签。
+  const signing = commandRequiresSignature(proposal.command);
+  const decide = async (command: MistCommand, message: string, reauth?: { password: string }, signed?: { svg: string }) => {
     if (busy) return; setBusy(true); setFailure('');
-    try { await run(command, reauth ? { reauth } : undefined); setPassword(''); onDone(message); onClose(); }
+    try { await run(command, reauth || signed ? { ...(reauth ? { reauth } : {}), ...(signed ? { signature: signed } : {}) } : undefined); setPassword(''); setSignature(null); onDone(message); onClose(); }
     catch (error) { setPassword(''); setFailure(error instanceof Error ? error.message : String(error)); }
     finally { setBusy(false); }
   };
   return <Dialog open onClose={() => { if (!busy) onClose(); }} width={560} title={uiText('确认 Agent 提议')}
     footer={<><Button disabled={busy} onClick={onClose}>{uiText('稍后')}</Button>
       <Button disabled={busy} onClick={() => void decide({ type: 'agent.proposal.reject', payload: { id: proposal.id, ...(note.trim() ? { note: note.trim() } : {}) } }, '已拒绝提议')}>{uiText('拒绝')}</Button>
-      <Button variant="primary" loading={busy} disabled={busy || !!mail?.reason || !!proposal.taskBlocked || proposal.unavailable || incomplete || (risk === 'high' && !password)} onClick={() => void decide({ type: 'agent.proposal.confirm', payload: { id: proposal.id } }, '已确认并执行', risk === 'high' ? { password } : undefined)}>{uiText('确认执行')}</Button></>}>
+      <Button variant="primary" loading={busy} disabled={busy || !!mail?.reason || !!proposal.taskBlocked || proposal.unavailable || incomplete || (risk === 'high' && !password) || (signing && !signature)} onClick={() => void decide({ type: 'agent.proposal.confirm', payload: { id: proposal.id } }, '已确认并执行', risk === 'high' ? { password } : undefined, signing && signature ? { svg: signature.svg } : undefined)}>{uiText('确认执行')}</Button></>}>
     <div className="mist-col">
       {failure && <Banner tone="bad" title={uiText('没有执行')}>{failure}</Banner>}
       {proposal.taskBlocked && <Banner tone="warn" title={uiText(proposal.taskBlocked)} />}
@@ -126,6 +129,7 @@ export function AgentProposalDialog({ proposal, state, onClose, run, onDone }: {
         </>}
       </div>}
       {risk === 'high' && <Field label={uiText('本人登录密码')} required hint={uiText('付款、核销、审批、作废等资金或不可逆操作，确认前须重新验证本人密码')}><PasswordInput aria-label={uiText('本人登录密码')} autoComplete="current-password" value={password} disabled={busy} onChange={event => setPassword(event.target.value)} /></Field>}
+      {signing && <Field label={uiText('确认签字')} required><SignaturePad key={proposal.id} ariaLabel="确认签字" disabled={busy} onChange={setSignature} /></Field>}
       <Field label={uiText('拒绝原因')}><TextArea aria-label={uiText('拒绝原因')} rows={2} value={note} onChange={event => setNote(event.target.value)} /></Field>
     </div>
   </Dialog>;

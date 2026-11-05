@@ -22,7 +22,7 @@ export type GeneratedDocSnapshot = {
   signatures: Array<{ label: Bilingual; name: string }>;
   generatedAt: string; generatedBy: string; generatedById: string;
 };
-export type GeneratedDocRecord = { id: string; kind: string; number: string; fileId: string; fileName: string; sha256: string; bytes: number; templateVersion: number; snapshotFingerprint: string; snapshot: GeneratedDocSnapshot; generatedAt: string; generatedBy: string };
+export type GeneratedDocRecord = { id: string; kind: string; number: string; fileId: string; fileName: string; sha256: string; bytes: number; templateVersion: number; snapshotFingerprint: string; snapshot: GeneratedDocSnapshot; generatedAt: string; generatedBy: string; /** 加盖电子公章的版本对应的用印记录（见 mistSeals）。 */ sealUseId?: string };
 export type GeneratedDocFile = { id: string; name: string; mimeType: string; size: number; storageKey: string; createdAt: string; uploadedBy?: string };
 /** Server-rendered and stored before the command runs; the command re-derives the snapshot and must match it exactly. */
 export type GeneratedDocArtifact = { requestId: string; record: GeneratedDocRecord; file: GeneratedDocFile };

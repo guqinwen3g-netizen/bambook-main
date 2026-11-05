@@ -13,6 +13,7 @@ import { MistApiError } from './errors';
 import { MIST_COMMAND_CATALOG } from './agentCommandCatalog';
 import { AGENT_AUDIT_FIELD, agentAuditReceiptId } from './agentAudit';
 import {randomUUID} from 'node:crypto';
+import { TEST_SIGNATURE } from './__tests__/signature';
 
 let directory: string;
 beforeEach(async () => { directory = await fs.mkdtemp(path.join(os.tmpdir(), 'mist-mcp-')); vi.stubEnv('MIST_LOCAL_WORKSPACE', '1'); vi.stubEnv('NODE_ENV', 'test'); });
@@ -167,7 +168,7 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     grantHigh = true;
     const noPassword = await run(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } });
     expect(noPassword.status).toBe(403); expect(noPassword.body.error.code).toBe('REAUTH_REQUIRED');
-    const runWith = async (client: any, command: any, password: string) => { const ws = await read(client); return client.post('/api/mist/workspaces/' + ws.id + '/commands').send({ requestId: 'r-' + Math.random().toString(36).slice(2), expectedRevision: ws.revision, command, reauth: { password } }); };
+    const runWith = async (client: any, command: any, password: string) => { const ws = await read(client); return client.post('/api/mist/workspaces/' + ws.id + '/commands').send({ requestId: 'r-' + Math.random().toString(36).slice(2), expectedRevision: ws.revision, command, reauth: { password }, signature: TEST_SIGNATURE }); };
     const wrong = await runWith(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } }, 'not-the-password');
     expect(wrong.status).toBe(403); expect(wrong.body.error.code).toBe('REAUTH_FAILED');
     expect((await read(finance.client)).state.payables.settlements[0].state).toBe('pending');
@@ -250,7 +251,8 @@ describe('M1 计税依据：退税预演与提议说明', () => {
     const app = createMistServer(undefined, { local });
     const finance = await as(app, 'demo-finance');
     const read = async () => (await finance.client.get('/api/mist/workspaces/' + finance.workspace.id).expect(200)).body.workspace;
-    const run = async (command: any) => { const ws = await read(); return finance.client.post('/api/mist/workspaces/' + ws.id + '/commands').send({ requestId: 'r-' + randomUUID(), expectedRevision: ws.revision, command }); };
+    // 退税核准须当场手写签字（mistSignatures）；其余命令不附签字。
+    const run = async (command: any) => { const ws = await read(); return finance.client.post('/api/mist/workspaces/' + ws.id + '/commands').send({ requestId: 'r-' + randomUUID(), expectedRevision: ws.revision, command, ...(command.type === 'rebate.claim.approve' ? { signature: TEST_SIGNATURE } : {}) }); };
     const ws = await read();
     const customs = ws.state.fulfillment.customs.find((c: any) => ws.state.fulfillment.shipments.find((s: any) => s.id === c.shipmentId)?.state === 'departed');
     const { rebateCandidateBills } = await import('../shared/mistExportRebate'), { platformBusinessDate } = await import('../shared/mistPlatform'), today = platformBusinessDate(new Date().toISOString());

@@ -16,6 +16,7 @@ import { useMistWorkspace } from '../runtime/workspace';
 import { useOptionalMistSession } from '../runtime/auth';
 import { memberSelectOptions, workspaceMembers } from '../runtime/members';
 import { mistDate } from './OrderListPage';
+import { SEAL_KIND_LABEL, usableSeals } from './modules/CompanySeals';
 import { formatOrderQuantity, orderAmounts, sumOrderMoney } from './orderAmounts';
 import {createOrderGovernance,orderContractRequiredFields,type OrderGovernanceInput,type OrderGovernanceFields,type OrderGovernanceLine} from '../../../../server/src/shared/mistOrderGovernance';
 import { OrderLineFulfillment } from './OrderLineFulfillment';
@@ -171,6 +172,8 @@ export function OrderDetailPage() {
   const selectedRound=governance?.rounds.find(round=>round.id===reviewRoundId);
   const [edit, setEdit] = React.useState({ season: '', due: '', ownerId: '',reason:'' }), [note, setNote] = React.useState('');
   const [working, setWorking] = React.useState(false), [failure, setFailure] = React.useState('');
+  // 用印人生成 PI / SC 时可选择加盖印章；其他人生成不带章（服务端同样校验用印人与事由）。
+  const seals = usableSeals(state, session?.user?.id), [sealPick, setSealPick] = React.useState<{ kind: 'PI' | 'SC'; sealId: string; reason: string } | null>(null);
   // Page-level failures go to the shell's bottom-right card; dialog failures stay inside their dialog.
   usePageFailure('操作尚未完成', !editOpen && !handoffOpen && (failure || error) !== presentedError ? failure || error : '', failure ? undefined : () => void refresh());
   React.useEffect(()=>{if(!canWriteOrders){setEditOpen(false);setContractOpen(false);setHandoffOpen(false);setLineEditorId(null);}},[canWriteOrders]);
@@ -211,7 +214,8 @@ export function OrderDetailPage() {
   const act = async (command: Parameters<typeof run>[0], onSuccess?: () => void) => {
     if (busy||operation.current) return; const bound=scope;operation.current=true;setWorking(true);setFailure('');
     try { await run(command);if(alive.current&&activeScope.current===bound)onSuccess?.(); } catch (problem) { if(alive.current&&activeScope.current===bound)setFailure(problem instanceof Error ? problem.message : '保存失败，请重试'); } finally { if(alive.current&&activeScope.current===bound){operation.current=false;setWorking(false);} }
-  };
+  };  const generateDocument = (kind: 'PI' | 'SC', seal?: { sealId: string; sealReason: string }) => act({ type: 'order.document.generate', payload: { orderId: order!.id, kind, ...(seal ?? {}) } } as Parameters<typeof run>[0], () => toast(ORDER_DOCUMENT_LABEL[kind].zh + (seal ? '已生成并盖章' : '已生成')));
+
   const columns = [
     { key: 'n', header: '款式', width: 'minmax(170px,1.6fr)', render: (line: MistOrderLine) => <ObjectCell thumb={<OrderProductThumb line={line} category={order?.type ?? 'garment'}/>} name={line.name} meta={<><Mono>{line.style}</Mono> · <span data-line-breakdown={line.id}>{uiText(breakdownShort((line as MistOrderLine&{breakdown?:OrderLineBreakdown}).breakdown))}</span></>} /> },
     { key: 'q', header: '数量', width: '80px', align: 'right' as const, hideOnMobile: true, render: (line: MistOrderLine) => <span className="mist-num">{formatOrderQuantity(line.qty)} {uiText(line.unit)}</span> },
@@ -276,9 +280,16 @@ export function OrderDetailPage() {
       <DataTable density={density} ariaLabel={uiText('客户单据')} rows={(['PI', 'SC'] as const).map(kind => ({ id: kind, kind, latest: ((order as MistOrder & { documents?: OrderDocumentRecord[] }).documents || []).filter(d => d.orderKind === kind).at(-1) }))} rowKey={row => row.id} columns={[
         { key: 'kind', header: '单据', render: row => uiText(ORDER_DOCUMENT_LABEL[row.kind].zh) },
         { key: 'latest', header: '最近生成', render: row => row.latest ? <span><Mono>{row.latest.number}</Mono> · {row.latest.generatedBy}</span> : <span className="mist-muted">{uiText('未生成')}</span> },
-        { key: 'act', header: '', align: 'right' as const, render: row => { const file = row.latest && state?.files.find(f => f.id === row.latest!.fileId); return <span className="mist-row" style={{ justifyContent: 'flex-end' }}>{file && <Button size="sm" onClick={() => void workspace.downloadFile(file)}>{uiText('下载')}</Button>}{canWriteOrders && <Button size="sm" variant={row.latest ? undefined : 'primary'} disabled={busy || !approved} title={uiText(approved ? undefined : '订单审批通过后生成')} onClick={() => void act({ type: 'order.document.generate', payload: { orderId: order.id, kind: row.kind } }, () => { const latest = ((state?.orders.find(o => o.id === order.id) as MistOrder & { documents?: OrderDocumentRecord[] })?.documents || []).filter(d => d.orderKind === row.kind).at(-1); toast(ORDER_DOCUMENT_LABEL[row.kind].zh + '已生成'); void latest; })}>{uiText(row.latest ? '重新生成' : '生成')}</Button>}</span>; } },
+        { key: 'act', header: '', align: 'right' as const, render: row => { const file = row.latest && state?.files.find(f => f.id === row.latest!.fileId); return <span className="mist-row" style={{ justifyContent: 'flex-end' }}>{file && <Button size="sm" onClick={() => void workspace.downloadFile(file)}>{uiText('下载')}</Button>}{canWriteOrders && <Button size="sm" variant={row.latest ? undefined : 'primary'} disabled={busy || !approved} title={uiText(approved ? undefined : '订单审批通过后生成')} onClick={() => { if (seals.length) { setSealPick({ kind: row.kind, sealId: '', reason: '' }); return; } void generateDocument(row.kind); }}>{uiText(row.latest ? '重新生成' : '生成')}</Button>}</span>; } },
       ]} />
       {shipments.length ? shipments.map(shipment => <Button key={shipment.id} block onClick={() => go('document-center', undefined, { section: shipment.id })}>{uiText("出运单据 ")}{shipment.code}</Button>) : null}
+    </Dialog>
+    <Dialog open={!!sealPick} onClose={() => { if (!busy) setSealPick(null); }} title={uiText(sealPick ? ORDER_DOCUMENT_LABEL[sealPick.kind].zh : '生成单据')} width={520}
+      footer={<><Button disabled={busy} onClick={() => setSealPick(null)}>{uiText('取消')}</Button><Button variant="primary" loading={busy} disabled={busy || !!sealPick?.sealId && !sealPick.reason.trim()} onClick={() => { const pick = sealPick!; setSealPick(null); void generateDocument(pick.kind, pick.sealId ? { sealId: pick.sealId, sealReason: pick.reason.trim() } : undefined); }}>{uiText('生成')}</Button></>}>
+      {sealPick && <FormGrid cols={1}>
+        <Field label={uiText('加盖印章')}><Select aria-label={uiText('加盖印章')} value={sealPick.sealId} options={[{ value: '', label: uiText('不盖章') }, ...seals.map(seal => ({ value: seal.id, label: `${seal.name} · ${uiText(SEAL_KIND_LABEL[seal.kind])}` }))]} onChange={e => setSealPick({ ...sealPick, sealId: e.target.value })} /></Field>
+        {sealPick.sealId && <Field label={uiText('用印事由')} required><TextInput aria-label={uiText('用印事由')} maxLength={200} value={sealPick.reason} onChange={e => setSealPick({ ...sealPick, reason: e.target.value })} /></Field>}
+      </FormGrid>}
     </Dialog>
     <Dialog open={editOpen} onClose={() => { if (!busy) setEditOpen(false); }} title={uiText("编辑订单")} footer={<><Button onClick={() => setEditOpen(false)} disabled={busy}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy||approvalPending} onClick={() => void act(approved&&!governance?.changeDraft&&edit.season===order.season&&edit.due===order.due?{type:'order.update',payload:{orderId:order.id,ownerId:edit.ownerId}}:{type:'order.governance.saveDraft',payload:{orderId:order.id,input:governance?.changeDraft?.contract||governance?.contract||createOrderGovernance({id:()=>'',now:'',actorName:''}).contract,...(governance?.changeDraft?{lines:governance.changeDraft.lines}:{}),orderPatch:{...governance?.changeDraft?.orderPatch,season:edit.season,due:edit.due,ownerId:edit.ownerId},...(approved?{reason:edit.reason}: {})}},()=>{setEditOpen(false);toast(approved?'变更草稿已保存，原批准内容继续生效':'订单资料已保存');})}>{uiText("保存")}</Button></>}>
       {failure && <Banner tone="bad" title={uiText("保存失败")}>{failure}</Banner>}<FormGrid><Field label={uiText("季节")}><OptionInput ariaLabel="季节" options={seasonOptions(businessNow().getFullYear(), state?.market?.seasons)} value={edit.season} onChange={season => setEdit(value => ({ ...value, season }))} /></Field><Field label={uiText("交期")}><TextInput type="date" value={mistDate(edit.due)?.toISOString().slice(0, 10) ?? edit.due} onChange={event => setEdit(value => ({ ...value, due: event.target.value }))} /></Field><Field label={uiText("负责人")}><Select aria-label={uiText("负责人")} value={edit.ownerId} onChange={event => setEdit(value => ({ ...value, ownerId: event.target.value }))} options={memberSelectOptions(members, { current: { id: order.ownerId, name: order.owner } })} /></Field>{approved&&<Field label={uiText("实质变更原因")} full><TextArea value={edit.reason} onChange={event=>setEdit(value=>({...value,reason:event.target.value}))}/></Field>}</FormGrid>

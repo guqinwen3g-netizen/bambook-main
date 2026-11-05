@@ -21,6 +21,8 @@ import {mistBusinessDate} from './mistBusinessClock';
 import {getQcConcessionReviews} from './mistQcDisposition';
 import {getStockCountReviews} from './mistStockOperations';
 import {applyDocumentGeneration,documentGenerationPermission,type DocumentGenerationCommand} from './mistDocumentGeneration';
+import {applySealCommand,applySealedCommand,requestsSeal,sealCommandPermission,unsealDraft,type MistSeal,type MistSealStamp,type MistSealUse,type SealCommand} from './mistSeals';
+import type {MistDecisionSignature} from './mistSignatures';
 import {applyPeriodClose,assertClosedPeriodsUntouched,periodClosePermission,type PeriodClose,type PeriodCloseCommand} from './mistPeriodClose';
 import {devStageHandoverBlocker,devStagePendingHandovers,devStagePlanError,devStagesOf,normalizeDevStagePlan,type DevStage,type DevStageHandover,type DevStagePlan} from './mistDevelopmentStages';
 import {createEmailState,applyEmailCommand,emailCommandPermission,seedEmailExamples,type EmailState,type EmailCommand} from './mistEmail';
@@ -73,6 +75,8 @@ export type MistContext = {
   /** 服务端按委托身份设置：本次写入经 Agent 发起；领域处理据此限制 Agent 提议的创建与处理。 */
   viaAgent?: boolean; agentSessionId?: string; agentIdentity?:{id:string;name:string}; agentTaskId?: string; agentTaskSourceRevision?: number;
   creditDocumentIssue?: MistCreditDocumentIssue;
+  /** 盖章单据：仓储按冻结快照渲染并写入私有文件后放入，领域层核对后落账（见 mistSeals）。 */
+  sealStamp?: MistSealStamp;
   /** 服务端按本次执行时的所有者、授权成员、账号状态与业务组构建（包 A）；负责人/经手人只能从这里按账号 ID 选，缺省一律拒绝。 */
   members?: MistMemberDirectoryEntry[];
   authority?: { supplier: Record<string,{version:number;userIds:string[]}>; claimReviewerId?:string; businessReviewerId?:string; orderReviewerIds?:{garment:string[];fabric:string[]}; /** 付款申请分档审批人：服务端按申请人与各档权限重建（见 mistPayables 付款审批分档）。 */ paymentTierReviewerIds?:Partial<Record<'pay_lt5'|'pay_gt5'|'pay_new_supplier',string[]>>; /** 风险处理与审批：服务端按当前账号岗位权限与部门主管路由重建，不接受 payload。 */ risk?:{ all:boolean; orders:boolean; customers:boolean }; riskReviewerIds?:string[] };
@@ -368,9 +372,13 @@ export type MistState = {
   memberGroups?:MistMemberGroupAssignment[];
   /** 小组协作范围（条件、手选、排除与调整记录），按人事小组编号；见 mistTeamScope。 */
   teamScopes?:MistTeamScope[];
+  /** 合同、资金类审批的当场手写签字记录（见 mistSignatures）。 */
+  decisionSignatures?:MistDecisionSignature[];
+  /** 电子公章与用印记录（见 mistSeals）。 */
+  seals?:MistSeal[]; sealUses?:MistSealUse[];
 };
 export type MistOrderInput = { type: 'garment' | 'fabric'; customerId: string; season: string; currency: string; due: string; ownerId: string; governance?:OrderGovernanceInput; lines: Array<Omit<MistOrderLine, 'id' | 'orderId' | 'made' | 'qc'> & OrderLineSource & {breakdown?:OrderLineBreakdown}> };
-export type MistCommand = PeriodCloseCommand | Extract<DocumentGenerationCommand, { type: 'order.document.generate' | 'market.lookbook.document' }> | AgentTaskCommand | AgentProposalCommand | InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | SampleRequestCommand | OrderSplitCommand | ReportScheduleCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
+export type MistCommand = SealCommand | PeriodCloseCommand | Extract<DocumentGenerationCommand, { type: 'order.document.generate' | 'market.lookbook.document' }> | AgentTaskCommand | AgentProposalCommand | InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | SampleRequestCommand | OrderSplitCommand | ReportScheduleCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
   | { type: 'development.saveDraft'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.submit'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.update'; payload: { devId: string; patch: Partial<DevelopmentValues> } }
@@ -872,6 +880,7 @@ export function mistCommandPermission(command: MistCommand): string | null {
   if(command.type.startsWith('opening.'))return openingCommandPermission(command as OpeningCommand);
   if(command.type.startsWith('agent.proposal.'))return agentProposalCommandPermission(command.type);
   if(command.type==='agent.task.cancel')return null;
+  if(command.type==='seal.save'||command.type==='seal.disable')return sealCommandPermission(command as SealCommand);
   if(command.type==='finance.statement.generate')return customerStatementCommandPermission(command as CustomerStatementCommand);
   if(command.type==='order.document.generate'||command.type==='market.lookbook.document')return documentGenerationPermission(command as DocumentGenerationCommand);
   if(command.type==='finance.period.close'||command.type==='finance.period.reopen')return periodClosePermission(command as PeriodCloseCommand);
@@ -943,8 +952,12 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
   if(!original||original.schemaVersion!==1)throw new MistCommandError('INVALID_STATE','公司数据版本无效',500);
   if(!command||typeof command.type!=='string'||!command.payload||typeof command.payload!=='object')throw new MistCommandError('VALIDATION','操作格式无效');
   mistCommandPermission(command);
+  // 盖章签发 / 生成：核对印章与盖章件后执行原命令，再登记用印记录（见 mistSeals）。
+  if(requestsSeal(command))return applySealedCommand(original,command,context,(root,plain)=>applyMistCommandUnbound(root,plain,context));
   const state: MistState=JSON.parse(JSON.stringify(original));
   normalizeMistState(state,context);
+  if(command.type==='fulfillment.documents.issue')unsealDraft(state,(command.payload as {id?:unknown}).id);
+  if(command.type==='seal.save'||command.type==='seal.disable'){const result=applySealCommand(state,command as SealCommand,context);return {state,result};}
   if(command.type.startsWith('order.internal.')){const result=applyInternalDeliveryCommand(state,command as InternalDeliveryCommand,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('order.fabric.')){const result=applyInternalFabricCommand(state,command as InternalFabricCommand,context);recalculate(state);return {state,result};}
   if(command.type==='order.split'||command.type==='order.merge'){const result=applyOrderSplitCommand(state,command as OrderSplitCommand,context);recalculate(state);assertOrderFundingIntegrity(state);return {state,result};}

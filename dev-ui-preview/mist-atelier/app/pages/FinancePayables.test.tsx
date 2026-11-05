@@ -13,6 +13,7 @@ const store = vi.hoisted(() => ({ value: null as any }));
 vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => store.value }));
 vi.mock('../runtime/auth', () => { const useMistSession = () => ({ user:{id:store.value?.userId||'finance'}, hasPermission: (scope: string) => store.value?.canWrite !== false && (!store.value?.permissions || store.value.permissions.includes(scope)) }); return { useMistSession, useOptionalMistSession: useMistSession }; });
 import { FinancePayables, termsPrepayment } from './FinancePayables';
+import { signPads } from '../runtime/signTestUtils';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLElement, root: Root, route: { view: string; id?: string; section?: string };
 const go = vi.fn(), day = platformBusinessDate(new Date());
@@ -241,6 +242,8 @@ it('结算：业务员按收货提交，财务确认预付抵扣（与建议不�
   expect((getByLabelText(cd, '本次预付抵扣') as HTMLInputElement).value).toBe('13950');
   input('本次预付抵扣', '14000'); input('调整原因', '供应商同意首批多抵 50 元');
   await click('确认结算', dialog('确认结算'));
+  expect(dialog('确认结算').textContent).toContain('请先手写签字');
+  await signPads(dialog('确认结算')); await click('确认结算', dialog('确认结算'));
   expect(store.value.state.payables.settlements[0]).toMatchObject({ state: 'confirmed', confirmation: { suggestedPrepayment: 13950, prepaymentApplied: 14000, adjustReason: '供应商同意首批多抵 50 元' } });
   await click('按结算登记票据'); const bd = dialog('登记供应商票据');
   expect((getByLabelText(bd, po.code + ' 关联结算') as HTMLSelectElement).value).toBe(st.id);
