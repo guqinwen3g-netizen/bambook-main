@@ -139,7 +139,6 @@ import { createNotificationsRouter } from './notifications/route';
 import { createAutomationRouter } from './config/automationRoute';
 import { createSystemConfigRouter } from './config/systemConfigRoute';
 import { registerAllLinkages } from './events/linkages';
-import { startScheduler } from './scheduler';
 import { createWorkflowRouter } from './workflow/workflowRoute';
 import { WorkflowEngine, seedDefaultWorkflowDefinitions } from './workflow/workflowEngine';
 import { registerWorkflowEventTriggers } from './workflow/workflowEventTriggers';
@@ -231,16 +230,9 @@ ensureBusinessLineSeed(prisma).catch(error => {
 initializeNotificationBindings(prisma);
 // Phase 1 Sprint 3: 注册业务联动执行器（订单→生产→发货→发票→收款 自动联动）
 registerAllLinkages();
-// Phase 0 Sprint 2: 启动调度器（崩溃恢复 + 每日 briefing + 卡滞检测 + AgentJob 清理）
-// ★ v3.87：**默认行为不变**；置 BAMBOOK_NO_SCHEDULER=1 时不启动。
-//   用途：另起一个"走查用"后端实例（把主线分支的成果接给走查环境）时，避免它
-//   ① 往共享库写（市场价同步会无条件写一条 SystemConfigHistory）；
-//   ② 给用户发通知 —— 后者会让 M3 演练的"删账号必先删通知"判据变红，污染验收读数。
-if (process.env.BAMBOOK_NO_SCHEDULER === '1') {
-    logger.warn('[scheduler] BAMBOOK_NO_SCHEDULER=1 ⇒ 本实例不启动调度器（走查/只读实例）');
-} else {
-    startScheduler(prisma);
-}
+// 旧主 API 定时任务（src/scheduler，30 项）已于 2026-11-06 停止启动：它们只扫描旧
+// Prisma 业务表（现网为空）并写旧通知/风险表，Mist 不读取；其中简报、催款分级、季度回顾
+// 每天报错。Mist 自己的收件、平台任务和行情工作器由 src/mist/standalone.ts 启动，不受影响。
 // Phase 0 Sprint 2: 工作流引擎 — seed 默认定义 + 事件总线自动触发集成
 // Keep startup ordered: a first boot must not subscribe against an empty
 // definition table or expose workflow APIs before their registration finishes.
