@@ -374,6 +374,9 @@ export function prepareMaterialDelivery(root: MistState, purchaseId: string, pro
     if (p.orderId !== target.order.id || p.lineId !== target.line.id) return fail('坯布只能交给本条目的面料加工单');
     if (contract.id === p.id || feedsInto(root, contract.id, p.id)) return fail('该加工单的成品已交给本单，不能再交回');
   } else if (source.order.governance?.contract.internalSupply) {
+    // 接收人已离开公司时给出可办理的下一步，而不是笼统的“须为成员”。
+    const receiverId = source.order.governance.contract.internalSupply.receiverId;
+    if (ctx.members && !ctx.members.some(member => member.id === receiverId)) return fail(`订单 ${source.order.code} 指定的成衣接收负责人已不在本公司，请先变更接收负责人再发料`);
     supplyFor(root, source.order.id, source.line.id, ctx);
     allocation = root.internalFabricAllocations?.find(a => a.status === 'active' && a.orderId === target.order.id && a.lineId === target.line.id && a.fabricOrderId === source.order.id && a.fabricLineId === source.line.id);
     if (!allocation) return fail('加工分支与内部面料分配不一致');
@@ -383,7 +386,9 @@ export function prepareMaterialDelivery(root: MistState, purchaseId: string, pro
     const delivered = materialDeliveryRows(root).filter(row => row.delivery.allocationId === allocation!.id && row.delivery.allocationRevision===allocation!.revision).reduce((sum, row) => sum + (row.outstanding === '0' ? BigInt(0) : metresMinor(row.outstanding)), BigInt(0));
     if (delivered + metresMinor(quantity) > metresMinor(allocation.metres)) return fail('本次发料超过分配剩余米数');
   } else if (p.domain !== 'garment' || p.kind !== 'material' || p.orderId !== target.order.id || p.lineId !== target.line.id) return fail('物料与接收加工条目不一致');
-  const receiverId = (!stage && source.order.governance?.contract.internalSupply?.receiverId) || target.order.ownerId;
+  const internalReceiver = !stage ? source.order.governance?.contract.internalSupply?.receiverId : undefined, receiverId = internalReceiver || target.order.ownerId;
+  // 默认接收人是加工订单的负责人；其已离开公司时提示先交接订单。
+  if (!internalReceiver && ctx.members && !ctx.members.some(member => member.id === receiverId)) return fail(`订单 ${target.order.code} 的负责人已不在本公司，请先交接该订单再发料`);
   const receiver = resolveMember(ctx, receiverId, '接收负责人', stage ? 'fabric' : 'garment');
   return { productionId: production.id, orderId: target.order.id, lineId: target.line.id, supplierId: contract.supplierId, supplier: contract.supplier, receiverId: receiver.id, receiver: receiver.name, ...(allocation ? { allocationId: allocation.id, allocationRevision: allocation.revision } : {}) };
 }
