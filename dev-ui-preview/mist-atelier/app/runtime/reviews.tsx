@@ -10,7 +10,15 @@ import { useMistSession } from './auth';
 import { useMistWorkspace } from './workspace';
 import { useNav } from '../nav';
 
-export type MistReview = MistReviewTask & { signatureRequired?: boolean; workspaceId: string; workspaceName: string; revision: number; canDecide: boolean; files?: Array<{ id: string; name: string; size: number }> };
+export type MistReview = MistReviewTask & { signatureRequired?: boolean; workspaceId: string; workspaceName: string; revision: number; canDecide: boolean; files?: Array<{ id: string; name: string; size: number }>; signatureFileId?: string };
+/** 读取这次决定归档的签字（SVG，按图片显示，不作为 HTML 解析）。 */
+export async function reviewSignatureImage(row: MistReview, signal?: AbortSignal): Promise<string | null> {
+  if (!row.signatureFileId) return null;
+  const response = await fetch('/api/mist/reviews/' + encodeURIComponent(row.workspaceId) + '/' + encodeURIComponent(row.id) + '/files/' + encodeURIComponent(row.signatureFileId), { headers: apiService.getAuthHeaders(), credentials: 'include', signal });
+  if (!response.ok) return null;
+  const bytes = await response.arrayBuffer();
+  return URL.createObjectURL(new Blob([bytes], { type: 'image/svg+xml' }));
+}
 /** signature 随恢复记录保存：网络中断后按同一请求重发时，服务端幂等摘要须与原请求一致。 */
 export type MistReviewIntent = { workspaceId: string; reviewId: string; requestId: string; expectedRevision: number; decision: 'approved' | 'rejected'; note: string; signature?: { svg: string } };
 export type MistReviewQueue = {

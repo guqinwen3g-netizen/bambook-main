@@ -1155,6 +1155,13 @@ export class MistRepository {
     }
   }
   private reviews(state:MistState):MistReviewTask[]{return this.contract.getMistReviewTasks?.(state)||[];}
+  /** 已签字批准的审批：找到这次决定归档的签字文件（同一业务记录按审批命令匹配，取最近一次批准）。 */
+  private reviewSignatureFileId(state:MistState,task:MistReviewTask):string|undefined{
+    if(task.status==='pending')return undefined;
+    const command=REVIEW_COMMAND_BY_KIND[task.kind as keyof typeof REVIEW_COMMAND_BY_KIND];
+    const rows=(state.decisionSignatures||[]).filter(row=>row.commandType===command&&row.entityId===task.entityId&&(row.decision===undefined||row.decision===task.status));
+    return rows.at(-1)?.fileId;
+  }
   /** 把已写入私有存储的签字登记为附件与决定签字记录，返回签字记录编号。 */
   private archiveSignature(state: MistState, command: { type: string; payload?: any }, file: MistStoredFile, actor: TokenPayload, context: MistContext, requestId: string): string {
     state.files.push(structuredClone(file) as MistState['files'][number]);
@@ -1176,7 +1183,7 @@ export class MistRepository {
   async listReviews(prior:TokenPayload){return this.transact(async db=>{
     const actor=await this.authorize(db,prior);
     const mine={state:{path:['reviewerIds'],array_contains:[actor.userId]}},rows=await db.mistWorkspace.findMany({where:companyLibrary(actor)?{companyId:actor.companyId,OR:[mine]}:{...(actor.companyId?{companyId:actor.companyId}:{}),OR:[{ownerId:actor.userId},mine]},orderBy:{updatedAt:'desc'},take:200});
-    return rows.filter((row:MistWorkspaceRow)=>!archived(row)).flatMap((row:MistWorkspaceRow)=>this.reviews(row.state).filter(t=>!companyRow(row)&&row.ownerId===actor.userId||(t.reviewerIds.includes(actor.userId)&&hasScope(actor,t.requiredPermission as any))).map(t=>({workspaceId:row.id,workspaceName:row.name,revision:row.revision,canDecide:t.status==='pending'&&t.reviewerIds.includes(actor.userId)&&hasScope(actor,t.requiredPermission as any),signatureRequired:mistCommandRequiresSignature({type:REVIEW_COMMAND_BY_KIND[t.kind],payload:{decision:'approved'}}),files:(t.fileIds||[]).flatMap(id=>{const file=row.state.files.find(f=>f.id===id);return file?[{id:file.id,name:file.name,size:file.size}]:[];}),...t})));
+    return rows.filter((row:MistWorkspaceRow)=>!archived(row)).flatMap((row:MistWorkspaceRow)=>this.reviews(row.state).filter(t=>!companyRow(row)&&row.ownerId===actor.userId||(t.reviewerIds.includes(actor.userId)&&hasScope(actor,t.requiredPermission as any))).map(t=>({workspaceId:row.id,workspaceName:row.name,revision:row.revision,canDecide:t.status==='pending'&&t.reviewerIds.includes(actor.userId)&&hasScope(actor,t.requiredPermission as any),signatureRequired:mistCommandRequiresSignature({type:REVIEW_COMMAND_BY_KIND[t.kind],payload:{decision:'approved'}}),files:(t.fileIds||[]).flatMap(id=>{const file=row.state.files.find(f=>f.id===id);return file?[{id:file.id,name:file.name,size:file.size}]:[];}),...(()=>{const id=this.reviewSignatureFileId(row.state,t);return id&&row.state.files.some((f:MistStoredFile)=>f.id===id)?{signatureFileId:id}:{};})(),...t})));
   });}
   async reviewFile(prior:TokenPayload,workspaceId:string,reviewId:string,fileId:string){return this.transact(async db=>{
     const actor=await this.authorize(db,prior),row=await db.mistWorkspace.findFirst({where:{id:workspaceId}});
@@ -1184,7 +1191,9 @@ export class MistRepository {
     if(!row||archived(row))fail('NOT_FOUND','审批不存在',404);
     const task=this.reviews(row.state).find(t=>t.id===reviewId);
     if(!task||((companyRow(row)||row.ownerId!==actor.userId)&&(!task.reviewerIds.includes(actor.userId)||!hasScope(actor,task.requiredPermission as any))))fail('NOT_FOUND','该审批不属于当前账号',404);
-    if(!(task.fileIds||[]).includes(fileId)||sealFileIds(row.state).has(fileId))fail('FILE_NOT_FOUND','附件不在提交的审批快照中',404);
+    // 审批快照附件，或这次决定归档的签字（与列表同一匹配规则）；印章图片永远不经此下载。
+    const signatureId=this.reviewSignatureFileId(row.state,task);
+    if(!((task.fileIds||[]).includes(fileId)||fileId===signatureId)||sealFileIds(row.state).has(fileId))fail('FILE_NOT_FOUND','附件不在提交的审批快照中',404);
     const file=row.state.files.find((f:MistStoredFile)=>f.id===fileId);if(!file)fail('FILE_NOT_FOUND','附件不存在',404);
     const bytes=await this.files.read(workspaceId,file);await this.authorize(db,prior);return {file,bytes};
   });}

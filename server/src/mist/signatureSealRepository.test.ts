@@ -86,6 +86,12 @@ describe('审批手写签字', () => {
     const done = await repo.decideReview(testActor(), wid, 'order:1', { ...input, signature: TEST_SIGNATURE });
     expect(done.receipt.result).toMatchObject({ reviewId: 'order:1', signatureId: state().decisionSignatures[0].id });
     expect((await repo.decideReview(testActor(), wid, 'order:1', { ...input, signature: TEST_SIGNATURE })).replayed).toBe(true);
+    // 已处理事项：列表带出这次决定的签字文件，审批附件入口可下载该签字；无关文件仍被拒绝。
+    const handled = (await repo.listReviews(testActor())).find((r: any) => r.id === 'order:1')!;
+    expect(handled.signatureFileId).toBe(state().decisionSignatures[0].fileId);
+    const signed = await repo.reviewFile(testActor(), wid, 'order:1', handled.signatureFileId!);
+    expect(Buffer.from(signed.bytes).toString('utf8')).toMatch(/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
+    await expect(repo.reviewFile(testActor(), wid, 'order:1', 'not-a-review-file')).rejects.toMatchObject({ code: 'FILE_NOT_FOUND' });
     await expect(repo.decideReview(testActor(), wid, 'order:1', input)).rejects.toMatchObject({ code: 'REQUEST_CONFLICT' });
     state().reviewTasks = [{ ...task, id: 'order:2', entityId: 'order-2', status: 'pending' }];
     await expect(repo.decideReview(testActor(), wid, 'order:2', { requestId: 'r2', expectedRevision: 1, decision: 'rejected', note: '退回', signature: TEST_SIGNATURE })).rejects.toMatchObject({ code: 'INVALID_INPUT' });

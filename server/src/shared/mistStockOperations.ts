@@ -4,7 +4,7 @@
  * Every change writes one stock movement; nothing is edited in place without a record.
  */
 import { MistCommandError, type MistContext, type MistState, type MistCommandResult } from './mistWorkspace';
-import type { MistReviewTask } from './mistReview';
+import { reviewDecision, type MistReviewTask } from './mistReview';
 import { addAtPosition, consumeReservations, freeQuantity, removeAtPosition, reservationOpen, stockIssueRemaining, OTHER_RECEIPT_REASONS, type FulfillmentShipment, type FulfillmentStock, type OtherReceiptReason, type StockRoll } from './mistFulfillment';
 import { mistBusinessDate } from './mistBusinessClock';
 
@@ -190,7 +190,7 @@ export const stockAgeDays = (stock: Pick<FulfillmentStock, 'createdAt'>, now: st
 export function getStockCountReviews(root: MistState): MistReviewTask[] {
   return (root.fulfillment?.stockCounts || []).filter(c => c.reviewerIds.length).map(c => ({
     id: `stock-count:${c.id}`, kind: 'stockCount' as const, entityId: c.id, title: `${c.code} 盘点调整`, requesterId: c.requesterId, reviewerIds: [...c.reviewerIds],
-    status: c.state, submittedAt: c.at, requiredPermission: 'orders:write', target: { view: 'inventory', id: c.lines[0]?.stockId || '' },
+    status: c.state, submittedAt: c.at, decision: reviewDecision(c.decision?.actor, c.decision?.at, c.decision?.note), requiredPermission: 'orders:write', target: { view: 'inventory', id: c.lines[0]?.stockId || '' },
     details: [...c.lines.filter(l => l.difference !== 0).map(l => { const s = root.fulfillment.stock.find(row => row.id === l.stockId); return { label: `${s?.name || '库存'} · ${l.location}`, value: `账面 ${l.book} → 实盘 ${l.counted}（${l.difference > 0 ? '+' : ''}${l.difference} ${s?.unit || ''}）` }; }), { label: '盘点说明', value: c.note }],
   }));
 }

@@ -11,7 +11,7 @@ import {normalizeQuoteSpecs,quoteMoqStatus,quoteSpecSummary,type QuoteLineSpecs}
 import {buildQuotationDocumentSnapshot,quotationDocumentBlocker,quotationFormalDocumentBlocker,quoteDocumentFingerprint,quoteDocumentVersionLabel,type QuoteDocumentArtifact,type QuoteDocumentRecord,type QuoteDocumentSnapshot} from './mistQuotationDocument';
 /** Market-side business records owned by the current Mist workspace. No fixture records are created. */
 import { MistCommandError, type MistState, type MistContext, type MistCommandResult, type MistCustomer, mistMoneyMinor, MIST_ORDER_CHECKLIST, mistPlaceholderImage, type MistImage } from './mistWorkspace';
-import type { MistReviewTask } from './mistReview';
+import { reviewDecision, type MistReviewTask } from './mistReview';
 import { supplierBusinessDay, supplierUnavailableReason, productionSupplierUnavailableReason, isServiceSupplier } from './mistSupplierStatus';
 import { relationHoldReason } from './mistRelationHold';
 import { relationBusiness } from './mistRelationBusiness';
@@ -156,7 +156,7 @@ export function marketCommandPermission(command:MarketCommand):string|null {
  throw new MistCommandError('VALIDATION','未知市场操作');
 }
 export function getMarketReviews(rootState:MistState):MistReviewTask[] {
- return ((rootState as MistState&{market?:MarketState}).market?.quotations||[]).flatMap(q=>[...(q.approvalHistory||[]),...(q.approval?[q.approval]:[])].map(approval=>({id:approval.id,kind:'quotation' as const,entityId:q.id,title:q.code+' 报价审批',requesterId:approval.requesterId,reviewerIds:[approval.reviewerId],status:approval.status,submittedAt:approval.submittedAt,requiredPermission:'quotations:approve',target:{view:'quotations',id:q.id},details:quoteApprovalDisplayDetails(approval.details),fileIds:approval.fileIds})));
+ return ((rootState as MistState&{market?:MarketState}).market?.quotations||[]).flatMap(q=>[...(q.approvalHistory||[]),...(q.approval?[q.approval]:[])].map(approval=>({id:approval.id,kind:'quotation' as const,entityId:q.id,title:q.code+' 报价审批',requesterId:approval.requesterId,reviewerIds:[approval.reviewerId],status:approval.status,submittedAt:approval.submittedAt,decision:approval.status==='pending'?undefined:reviewDecision(rootState.members?.find(m=>m.userId===approval.reviewerId)?.name||approval.reviewerId,approval.decidedAt,approval.note),requiredPermission:'quotations:approve',target:{view:'quotations',id:q.id},details:quoteApprovalDisplayDetails(approval.details),fileIds:approval.fileIds})));
 }
 /** Present old frozen evidence without changing its stored facts or audit identifiers. */
 function quoteApprovalDisplayDetails(details:MarketQuoteApproval['details']):MarketQuoteApproval['details']{
