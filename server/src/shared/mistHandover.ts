@@ -75,7 +75,14 @@ function applyAccountHandover(root: MistState, p: Extract<HandoverCommand, { typ
   for (const r of root.fabrics || []) if (r.ownerId === fromId) { r.ownerId = to.id; r.owner = to.name; event('fabric', r.id); }
   for (const r of root.crm?.opportunities || []) if (r.ownerId === fromId) { r.ownerId = to.id; r.owner = to.name; }
   for (const s of root.market?.suppliers || []) { let changed = false; for (const g of MIST_BUSINESS_GROUPS) if (s.handlers?.[g]?.id === fromId) { s.handlers[g] = { id: to.id, name: to.name }; changed = true; } if (changed) event('supplier', s.id); }
-  for (const r of root.orders) { const supply = r.governance?.contract.internalSupply; if (supply?.receiverId === fromId && owned.some(o => o.kind === 'internalReceiver' && o.id === r.id)) { supply.receiverId = to.id; r.governance!.contract.receiver = `成衣 / ${to.name}`; event('order', r.id); } }
+  // The named receiver is a responsibility, not a commercial term: move it in the live contract and in the
+  // approved snapshot together so the order stays approved (sameCommercialSnapshot compares the contract).
+  for (const r of root.orders) {
+    const g = r.governance, supply = g?.contract.internalSupply;
+    if (supply?.receiverId !== fromId || !owned.some(o => o.kind === 'internalReceiver' && o.id === r.id)) continue;
+    for (const contract of [g!.contract, g!.approvedSnapshot?.contract]) if (contract?.internalSupply?.receiverId === fromId) { contract.internalSupply.receiverId = to.id; contract.receiver = `成衣 / ${to.name}`; }
+    event('order', r.id);
+  }
   for (const t of pendingTasks) t.assigneeIds = [...new Set(t.assigneeIds.map(id => id === fromId ? to.id : id))];
   // Internal deliveries name one exact receiver; reassign the still-open ones so the goods are not stranded.
   for (const moved of reassignInternalDeliveryReceiver(root, fromId, to, { at: c.now, actor: c.actorName, reason })) root.events.unshift({ id: c.id(), entityType: 'order', entityId: moved.orderId, actor: c.actorName, at: c.now, text: `内部交付接收人：${moved.from}→${to.name}：${reason}`, fileIds: [] });

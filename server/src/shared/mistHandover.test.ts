@@ -2,6 +2,7 @@ import {describe,it,expect} from 'vitest';
 import {applyMistCommand,createMistState,mistCommandPermission,type MistContext,type MistCommand,type MistState} from './mistWorkspace';
 import {customerHandovers,accountHandoverBlockers} from './mistHandover';
 import {accountOwnedObjects} from './mistAccounts';
+import {assertOrderApproved} from './mistOrderGovernance';
 
 function fixture(){
   let id=0;const ctx={id:()=>`ho-${++id}`,now:'2026-10-18T02:00:00Z',actorId:'demo-sales',actorName:'顾言',members:[{id:'demo-sales',name:'顾言',active:true,groups:['garment']},{id:'demo-buyer',name:'沈禾',active:true,groups:['garment']},{id:'demo-new',name:'林舟',active:true,groups:['garment']},{id:'gone',name:'已离职',active:false,groups:[]}]} as unknown as MistContext;
@@ -139,11 +140,15 @@ it('hands the internal fabric receiver over with the account so the fabric can s
   const supplied = state.orders.find(o => o.governance?.contract.internalSupply);
   expect(supplied).toBeTruthy();
   const fromId = supplied!.governance!.contract.internalSupply!.receiverId;
-  for (const o of state.orders) if (o.governance) o.governance.status = 'approved' as any;
+  expect(supplied!.governance!.approvedSnapshot).toBeTruthy();
+  for (const o of state.orders) if (o.governance && o.ownerId === fromId && o.governance.status === 'pending') o.governance.status = 'approved' as any;
   expect(accountOwnedObjects(state, fromId).some(o => o.kind === 'internalReceiver' && o.id === supplied!.id)).toBe(true);
   state = applyMistCommand(state, { type: 'handover.account', payload: { fromUserId: fromId, toUserId: 'demo-new', reason: '离职交接' } } as MistCommand, ctx).state as MistState;
   const after = state.orders.find(o => o.id === supplied!.id)!;
   expect(after.governance!.contract.internalSupply!.receiverId).toBe('demo-new');
   expect(after.governance!.contract.receiver).toBe('成衣 / 林舟');
   expect(accountOwnedObjects(state, fromId).some(o => o.kind === 'internalReceiver')).toBe(false);
+  // Still approved for fulfilment: the approved snapshot carries the same receiver.
+  expect(after.governance!.approvedSnapshot!.contract.internalSupply!.receiverId).toBe('demo-new');
+  expect(() => assertOrderApproved(state, after.id)).not.toThrow();
 });
