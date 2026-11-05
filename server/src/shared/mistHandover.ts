@@ -47,7 +47,7 @@ export function accountOwners(root: MistState): Array<{ id: string; name: string
 /** 整体交接的阻断项：审批中的订单内容锁定（业务员通用，不再按业务组阻断）。 */
 export function accountHandoverBlockers(root: MistState, fromId: string, to?: { id: string; name: string; groups: string[] }) {
   const out: string[] = [];
-  for (const o of root.orders) if ((o.ownerId === fromId || o.governance?.contract.internalSupply?.receiverId === fromId) && (o.governance?.status === 'pending' || o.governance?.changeDraft?.status === 'pending' || o.governance?.cancellation?.status === 'pending')) out.push(`订单 ${o.code} 审批中，审批完成后再交接`);
+  for (const o of root.orders) if ((o.ownerId === fromId || o.governance?.contract?.internalSupply?.receiverId === fromId) && (o.governance?.status === 'pending' || o.governance?.changeDraft?.status === 'pending' || o.governance?.cancellation?.status === 'pending')) out.push(`订单 ${o.code} 审批中，审批完成后再交接`);
   return out;
 }
 export const accountHandovers = (root: MistState) => (root as MistState & { memberHandovers?: MistAccountHandover[] }).memberHandovers || [];
@@ -78,7 +78,7 @@ function applyAccountHandover(root: MistState, p: Extract<HandoverCommand, { typ
   // The named receiver is a responsibility, not a commercial term: move it in the live contract and in the
   // approved snapshot together so the order stays approved (sameCommercialSnapshot compares the contract).
   for (const r of root.orders) {
-    const g = r.governance, supply = g?.contract.internalSupply;
+    const g = r.governance, supply = g?.contract?.internalSupply;
     if (supply?.receiverId !== fromId || !owned.some(o => o.kind === 'internalReceiver' && o.id === r.id)) continue;
     for (const contract of [g!.contract, g!.approvedSnapshot?.contract]) if (contract?.internalSupply?.receiverId === fromId) { contract.internalSupply.receiverId = to.id; contract.receiver = `成衣 / ${to.name}`; }
     event('order', r.id);
