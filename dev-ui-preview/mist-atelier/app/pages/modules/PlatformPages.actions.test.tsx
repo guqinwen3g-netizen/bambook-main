@@ -158,6 +158,8 @@ describe('platform form and return-path actions',()=>{
   await mount(DataCenterPage,'data-center');
   const row=[...host.querySelectorAll('[role="row"]')].find(r=>r.textContent?.includes('附件'));
   expect(row).toBeTruthy();expect(row!.querySelector('button')).toBeNull();
+  // 最近业务记录按北京时间显示，不直接显示 UTC 原文。
+  expect(host.textContent).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z/);
  });
  it('reloads data center through the real workspace refresh action',async()=>{await mount(DataCenterPage,'data-center');await click('刷新数据');expect(bridge.current.refresh).toHaveBeenCalledTimes(1);});
  it('reports a failed original-request recovery without discarding the pending operation',async()=>{bridge.current.pending={requestId:'original-operation'};bridge.current.recover.mockRejectedValueOnce(new Error('原请求仍待核对'));await mount(PricingPage,'pricing');await click('核对原请求');expect(document.body.textContent).toContain('原请求仍待核对');expect(bridge.current.pending.requestId).toBe('original-operation');expect(bridge.current.run).not.toHaveBeenCalled();});
