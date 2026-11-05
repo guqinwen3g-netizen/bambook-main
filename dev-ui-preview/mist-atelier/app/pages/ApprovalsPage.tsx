@@ -95,6 +95,7 @@ export function ApprovalsPage() {
     {selected.status === 'pending' && !decideReason && <Field label={uiText("审批意见")} required><TextArea aria-label={uiText("审批意见")} rows={3} maxLength={4000} value={note} disabled={reviews.busy} onChange={e => setNote(e.target.value)} /></Field>}
     {selected.status === 'pending' && !decideReason && selected.signatureRequired && <Field label={uiText("批准签字")} required><SignaturePad key={signKey} ariaLabel="批准签字" disabled={reviews.busy} onChange={setSignature} /></Field>}
     {local && <Banner variant="notice" tone="bad" title={uiText("还不能保存决定")}>{local}</Banner>}
+    {!local && reviews.error && <div data-approval-error><Banner variant="notice" tone="bad" title={uiText("审批未完成")}>{reviews.error}</Banner></div>}
     <ActionBar busy={reviews.busy} actions={[
       { label: '批准', icon: Check, primary: true, onClick: () => void decide('approved'), reason: decideReason, hidden: selected.status !== 'pending'||!selected.canDecide },
       { label: '退回', icon: CornerUpLeft, onClick: () => void decide('rejected'), reason: decideReason, hidden: selected.status !== 'pending'||!selected.canDecide },

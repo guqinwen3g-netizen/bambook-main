@@ -59,12 +59,14 @@ export function SignaturePad({ onChange, disabled, ariaLabel = '手写签字' }:
   const redraw = () => setVersion(v => v + 1);
   const total = strokes.current.reduce((n, s) => n + s.length, 0), rewinding = cut !== null, inked = total > 0;
   const emit = () => { const points = strokes.current.reduce((n, s) => n + s.length, 0); onChange(points ? { svg: signatureSvg(strokes.current), strokes: strokes.current.length, points } : null); };
-  const local = (e: React.PointerEvent) => { const r = pad.current!.getBoundingClientRect(); return { x: ((e.clientX - r.left) * W) / r.width, y: ((e.clientY - r.top) * H) / r.height }; };
+  // A pad with no measured size (hidden pane, drawer mid-animation) yields no point rather than NaN ink.
+  const local = (e: React.PointerEvent) => { const r = pad.current!.getBoundingClientRect(); if (!(r.width > 0 && r.height > 0)) return null; const x = ((e.clientX - r.left) * W) / r.width, y = ((e.clientY - r.top) * H) / r.height; return Number.isFinite(x) && Number.isFinite(y) ? { x: clamp(x, 0, W), y: clamp(y, 0, H) } : null; };
   const onDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (disabled || rewinding || e.button > 0 || strokes.current.reduce((n, s) => n + s.length, 0) >= SIGNATURE_MAX_POINTS) return;
+    const p = local(e), w = (THIN + THICK) / 2;
+    if (!p) return;
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ }
     down.current = true;
-    const p = local(e), w = (THIN + THICK) / 2;
     last.current = { ...p, t: performance.now(), w };
     strokes.current.push([{ ...p, w }]);
     redraw();
@@ -72,6 +74,7 @@ export function SignaturePad({ onChange, disabled, ariaLabel = '手写签字' }:
   const onMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!down.current || strokes.current.reduce((n, s) => n + s.length, 0) >= SIGNATURE_MAX_POINTS) return;
     const raw = local(e), l = last.current;
+    if (!raw) return;
     const x = l.x + (raw.x - l.x) * 0.62, y = l.y + (raw.y - l.y) * 0.62, d = Math.hypot(x - l.x, y - l.y);
     if (d < 0.8) return;
     const t = performance.now(), v = d / Math.max(1, t - l.t);

@@ -68,3 +68,12 @@ it('crops the exported SVG to the written area', () => {
   expect(svg).toContain('viewBox="92.0 52.0 56.0 36.0"');
   expect(signatureSvg([])).toBe('');
 });
+
+it('records nothing while the pad has no measured size', async () => {
+  const onChange = vi.fn();
+  const { pad } = await render(onChange);
+  pad.getBoundingClientRect = () => ({ left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0, x: 0, y: 0, toJSON: () => ({}) });
+  await stroke(pad, [[60, 100], [120, 90], [180, 110]]);
+  expect(onChange).not.toHaveBeenCalled();
+  expect(pad.getAttribute('aria-label')).toBe('手写签字：未签');
+});

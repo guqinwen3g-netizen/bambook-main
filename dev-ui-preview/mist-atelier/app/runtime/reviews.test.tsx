@@ -153,3 +153,13 @@ it('shows the payment approval tier and the level still missing on the approval 
  const note=host.querySelector('[data-payment-tier]')?.textContent||'';
  expect(note).toContain('需 5 万元及以下档 + 首笔付款加签');expect(note).toContain('还差：首笔付款加签（总经理级）');
 });
+
+it('shows a rejected decision inside the approval drawer instead of failing silently',async()=>{
+ intercept=(url,init)=>init.method==='POST'?Promise.resolve(response({ok:false,error:{code:'VALIDATION',message:'单价与合同不符'}},422)):undefined;
+ try{
+  await render();await prepareDecision();await click('退回');
+  const banner=document.querySelector('[data-approval-error]');
+  expect(banner?.textContent).toContain('单价与合同不符');
+  expect(banner?.closest('[data-approval]')).toBeTruthy();
+ }finally{intercept=undefined;}
+});
