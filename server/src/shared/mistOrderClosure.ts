@@ -60,15 +60,30 @@ export function overShipLabel(r:OverShipRequest){const s=r.status==='approved'?'
 /* ── 开票上限与出运上限同口径：条目累计可开票 = lineShipLimit(...).limit × 单价 ── */
 type InvoiceShipLine={lineId:string;quantity:number};
 type InvoiceCapOrder=Pick<MistOrder,'id'>&{governance?:{contract?:OrderTolerance}};
-/** CI 应收按来源出运的本订单条目数量归属到条目；旧独立开票（无来源 CI）只有订单级金额。 */
-function invoicedByLine(root:MistState,orderId:string){
+/**
+ * 已开有效销售发票按条目归属：数量取来源 CI 出运的本订单条目数量；金额按发票实际金额分摊，
+ * 权重为“数量 × 开票时单价”（旧记录无开票时单价则用当前单价），整数分最大余数法处理尾差，分摊合计恒等于发票金额。
+ * 旧独立开票（无来源 CI）只有订单级金额，计入 unattributed。
+ */
+export function orderInvoicedByLine(root:MistState,orderId:string){
  const qty=new Map<string,number>(),amount=new Map<string,number>();let unattributed=0;
  for(const invoice of root.invoices.filter(i=>i.orderId===orderId&&isActiveMistInvoice(i))){
+  const total=mistMoneyMinor(invoice.amount);
   const doc=invoice.sourceDocumentId?(root.fulfillment?.documents||[]).find(d=>d.id===invoice.sourceDocumentId&&d.type==='CI'):undefined;
   const shipment=doc?(root.fulfillment?.shipments||[]).find(s=>s.id===doc.shipmentId):undefined;
-  const lines=shipment?.lines.filter(l=>l.orderId===orderId)||[];
-  if(!lines.length){unattributed+=mistMoneyMinor(invoice.amount);continue;}
-  for(const l of lines){qty.set(l.lineId,r4((qty.get(l.lineId)||0)+l.quantity));const row=root.orderLines.find(x=>x.id===l.lineId);if(row)amount.set(l.lineId,(amount.get(l.lineId)||0)+mistMoneyMinor(lineAmount(l.quantity,row.price)));}
+  const weights=new Map<string,bigint>();
+  for(const l of shipment?.lines.filter(l=>l.orderId===orderId)||[]){
+   const row=root.orderLines.find(x=>x.id===l.lineId);if(!row)continue;
+   qty.set(l.lineId,r4((qty.get(l.lineId)||0)+l.quantity));
+   const price=invoice.issuedLinePrices?.[l.lineId]??row.price;
+   weights.set(l.lineId,(weights.get(l.lineId)||BigInt(0))+BigInt(mistMoneyMinor(lineAmount(l.quantity,price))));
+  }
+  const weight=[...weights.values()].reduce((n,v)=>n+v,BigInt(0));
+  if(!weights.size||weight===BigInt(0)){unattributed+=total;continue;}
+  const shares=[...weights].map(([lineId,w])=>{const exact=BigInt(total)*w;return{lineId,minor:exact/weight,rest:exact%weight};});
+  let left=total-shares.reduce((n,x)=>n+Number(x.minor),0);
+  for(const x of [...shares].sort((a,b)=>a.rest===b.rest?0:a.rest>b.rest?-1:1)){if(left<=0)break;x.minor+=BigInt(1);left--;}
+  for(const x of shares)amount.set(x.lineId,(amount.get(x.lineId)||0)+Number(x.minor));
  }
  return{qty,amount,unattributed};
 }
@@ -76,13 +91,14 @@ function invoicedByLine(root:MistState,orderId:string){
  * 销售发票额度校验（CI 与旧独立开票共用）。
  * - CI：lines 为本出运的本订单条目数量；每条目累计开票数量不超过 lineShipLimit（溢装上限 / 已批准超量），
  *   无条目归属的旧独立开票只能占用各条目上限金额扣除已归属开票后的剩余。
- * - 旧独立开票（无 lines）：没有数量依据，不能使用溢装或超量额度，订单累计开票仍不超过合同金额。
+ * - 旧独立开票（无 lines）：没有数量依据，不能使用溢装或超量额度；有效发票实际合计 + 本次不超过合同金额。
+ * 已开发票一律按实际 invoice.amount 计，单价事后调整不改变已开金额。
  * 返回 'total' 表示订单级额度不足（调用方保留原提示），其他字符串为条目超限提示。
  */
 export function orderInvoiceCapProblem(root:MistState,order:InvoiceCapOrder,next:{lines?:InvoiceShipLine[];amount:number}):string|null{
- const contract=order.governance?.contract,rows=root.orderLines.filter(l=>l.orderId===order.id),used=invoicedByLine(root,order.id);
+ const contract=order.governance?.contract,rows=root.orderLines.filter(l=>l.orderId===order.id),used=orderInvoicedByLine(root,order.id);
  for(const l of next.lines||[]){const row=rows.find(x=>x.id===l.lineId);if(!row)return '开票条目不属于来源订单';used.qty.set(row.id,r4((used.qty.get(row.id)||0)+l.quantity));used.amount.set(row.id,(used.amount.get(row.id)||0)+mistMoneyMinor(lineAmount(l.quantity,row.price)));}
- if(!next.lines){const attributed=[...used.amount.values()].reduce((n,v)=>n+v,0);return attributed+used.unattributed+mistMoneyMinor(next.amount)>rows.reduce((n,row)=>n+mistMoneyMinor(lineAmount(row.qty,row.price)),0)?'total':null;}
+ if(!next.lines){const issued=root.invoices.filter(i=>i.orderId===order.id&&isActiveMistInvoice(i)).reduce((n,i)=>n+mistMoneyMinor(i.amount),0);return issued+mistMoneyMinor(next.amount)>rows.reduce((n,row)=>n+mistMoneyMinor(lineAmount(row.qty,row.price)),0)?'total':null;}
  let room=0;
  for(const row of rows){
   const limit=lineShipLimit(row,contract).limit,total=used.qty.get(row.id)||0;

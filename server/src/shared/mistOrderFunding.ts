@@ -1,7 +1,7 @@
 import {claimRecoveryReceiptUsedMinor} from './mistClaimRecoveryReceipts';
 import {rebateReceiptUsedMinor} from './mistExportRebate';
 import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
-import { MistCommandError, isActiveMistInvoice, mistAllocationReceiptMinor, mistMoneyMinor, type MistState, type MistContext, type MistCommandResult } from './mistWorkspace';
+import { MistCommandError, isRecognizedMistInvoice, mistAllocationReceiptMinor, mistMoneyMinor, type MistState, type MistContext, type MistCommandResult } from './mistWorkspace';
 
 export type OrderFundingAssignment = {
   id:string; receiptId:string; customerId:string; orderId:string|null; amount:number; currency:string;
@@ -45,18 +45,30 @@ function receiptFundingUse(root:Root,receipt:Root['receipts'][number]){
   }
   return {customers,reserved};
 }
-/** 订单可收款上限：合同金额；溢装 / 已批准超量出运按实际开出更高的有效销售发票时，以发票合计为准。 */
-function orderCollectibleMinor(root:Root,order:Root['orders'][number]){
- return Math.max(mistMoneyMinor(order.amount),root.invoices.filter(i=>i.orderId===order.id&&i.currency===order.currency&&isActiveMistInvoice(i)).reduce((n,i)=>n+mistMoneyMinor(i.amount),0));
+/**
+ * 订单可收款上限：合同金额；溢装 / 已批准超量出运按实际开出更高的销售发票时，以财务已确认的发票合计为准。
+ * 待确认、已驳回或已作废的 CI 不抬高上限（与核销口径 isRecognizedMistInvoice 一致）。except 用于预判作废 / 驳回某张发票之后的上限。
+ */
+function orderCollectibleMinor(root:Root,order:Root['orders'][number],except?:string){
+ return Math.max(mistMoneyMinor(order.amount),root.invoices.filter(i=>i.orderId===order.id&&i.id!==except&&i.currency===order.currency&&isRecognizedMistInvoice(i)).reduce((n,i)=>n+mistMoneyMinor(i.amount),0));
 }
+const moneyText=(minor:number,currency:string)=>(minor/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' '+currency;
 export function assertOrderFundingIntegrity(root:Root){
  for(const receipt of root.receipts){
   const {reserved}=receiptFundingUse(root,receipt);
-  if(reserved>mistMoneyMinor(receipt.amount)){const money=(n:number)=>(n/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' '+receipt.currency;fail(`此到账金额 ${money(mistMoneyMinor(receipt.amount))}，归属与核销合计将达 ${money(reserved)}，超出到账金额，不能重复计入；请核对本次金额或该到账已有的归属`,'PRECONDITION');}
+  if(reserved>mistMoneyMinor(receipt.amount)){const money=(n:number)=>moneyText(n,receipt.currency);fail(`此到账金额 ${money(mistMoneyMinor(receipt.amount))}，归属与核销合计将达 ${money(reserved)}，超出到账金额，不能重复计入；请核对本次金额或该到账已有的归属`,'PRECONDITION');}
  }
 
  for(const row of active(root))if(!root.receipts.some(r=>r.id===row.receiptId))fail('归属的到账来源不存在');
- for(const order of root.orders){const covered=mistMoneyMinor(orderFundingCoveredAmount(root,order.id));if(covered>mistMoneyMinor(order.amount)&&covered>orderCollectibleMinor(root,order))fail('订单已归属与核销金额超过合同金额，超额部分请登记为客户余额','PRECONDITION');}
+ // 报错指明订单：残留的超额状态会卡住所有资金命令，必须能定位到具体订单。
+ for(const order of root.orders){const covered=mistMoneyMinor(orderFundingCoveredAmount(root,order.id)),contract=mistMoneyMinor(order.amount);if(covered<=contract)continue;const cap=orderCollectibleMinor(root,order);if(covered>cap)fail(`订单 ${order.code} 已归属与核销 ${moneyText(covered,order.currency)}，超过合同金额${cap>contract?'及已确认发票合计':''} ${moneyText(cap,order.currency)}，请先把超出的 ${moneyText(covered-cap,order.currency)} 改登为客户余额`,'PRECONDITION');}
+}
+/** 作废或驳回销售发票前调用：发票撤出后若本订单有效归属超过新的可收上限，须先释放或改登客户余额。 */
+export function assertOrderFundingAfterInvoiceRemoval(root:Root,invoiceId:string){
+ const invoice=root.invoices.find(i=>i.id===invoiceId),order=invoice?root.orders.find(o=>o.id===invoice.orderId):undefined;if(!order)return;
+ const before=orderCollectibleMinor(root,order),after=orderCollectibleMinor(root,order,invoiceId);if(after>=before)return;
+ const covered=mistMoneyMinor(orderFundingCoveredAmount(root,order.id));
+ if(covered>after)fail(`订单 ${order.code} 已归属与核销 ${moneyText(covered,order.currency)}，作废后可收上限 ${moneyText(after,order.currency)}，请先把超出的 ${moneyText(covered-after,order.currency)} 改登为客户余额`,'PRECONDITION');
 }
 /** Read-only headroom for the reconciliation picker. Earmarks and allocations overlap only within their existing customer/order buckets. */
 export function orderFundingReconciliationLimit(root:Root,receiptId:string,invoiceId:string):number{

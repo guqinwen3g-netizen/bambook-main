@@ -1,7 +1,8 @@
 import {describe,it,expect} from 'vitest';
 import {applyMistCommand,createMistState,type MistContext,type MistState} from './mistWorkspace';
 import {createOrderGovernance,applyOrderGovernanceCommand,getOrderGovernanceReviews,type OrderGovernanceInput,type OrderGovernanceCommand} from './mistOrderGovernance';
-import {lineToleranceStatus,toleranceText,TOLERANCE_NONE,assertOrderLineOpen,assertShipmentWithinTolerance,shipmentToleranceCheck,approvedOverShip} from './mistOrderClosure';
+import {lineToleranceStatus,toleranceText,TOLERANCE_NONE,assertOrderLineOpen,assertShipmentWithinTolerance,shipmentToleranceCheck,approvedOverShip,orderInvoicedByLine} from './mistOrderClosure';
+import {assertOrderFundingIntegrity,orderFundingCoveredAmount} from './mistOrderFunding';
 import {applyFulfillmentCommand,type FulfillmentCommand} from './mistFulfillment';
 import {applyPlatformCommand} from './mistPlatform';
 function fixture(){let n=0;const c:MistContext={id:()=>`gov-${++n}`,now:'2026-10-13T08:00:00Z',actorName:'业务员',actorId:'sales',authority:{supplier:{},orderReviewerIds:{garment:['leader','sales'],fabric:['fabric-leader']}}};const state=createMistState(c,'empty');state.customers.push({id:'customer',name:'客户',code:'C',country:'CN',city:'',industry:'',owner:'业务员',grade:'',currency:'USD',terms:'',incoterm:'',categories:'',creditLimit:0,since:''});state.files.push({id:'contract-file',name:'confirmed.pdf',mimeType:'application/pdf',size:10,storageKey:'workspace/contract-file',createdAt:c.now});const contract:OrderGovernanceInput={kind:'external',poNumber:'PO-001',confirmationFileIds:['contract-file'],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,paymentNote:'30%定金，余款按合同',incoterm:'FOB',deliveryPlace:'上海'};const order={id:'order',code:'SO-1',type:'garment' as const,customerId:'customer',customer:'客户',season:'AW26',lines:1,qty:10,amount:100,currency:'USD',due:'2026-12-01',progress:0,state:'订单草稿',tone:'neutral' as const,owner:'业务员',img:'coat' as const,checklist:[],handoffAt:null,createdAt:c.now,updatedAt:c.now,governance:createOrderGovernance(c,contract)};state.orders.push(order);state.orderLines.push({id:'line',orderId:order.id,fulfillmentMode:'cmt',cmtIncludedItems:[],name:'外套',style:'A',img:'coat',qty:10,unit:'件',price:10,made:0,qc:0});const run=(command:OrderGovernanceCommand,actor=c)=>applyOrderGovernanceCommand(state,command,actor);return{state,c,contract,order,run};}
@@ -150,5 +151,105 @@ describe('CI invoicing follows the per-line shipment cap (tolerance or approved 
   expect(st.invoices[0].open).toBe(0);
   // 超出有效发票的部分仍不能计入本订单。
   expect(()=>run({type:'funding.assign',payload:{receiptId:st.receipts[0].id,customerId:'customer',orderId:'order',amount:10400,note:'超额归属'}})).toThrow('超过合同金额');
+ });
+});
+
+describe('order collectible cap follows finance-confirmed CIs only',()=>{
+ const issueCi=(f:ReturnType<typeof fixture>,shipmentId:string)=>{
+  const id='ci-'+shipmentId;
+  f.state.fulfillment.documents.push({id,shipmentId,orderId:'order',type:'CI',number:'CI-'+shipmentId,version:1,title:'CI',dueDate:'2026-12-01',content:'已核对CI',fileIds:['contract-file'],status:'draft',createdAt:f.c.now,actor:'单证'});
+  return applyFulfillmentCommand(f.state,{type:'fulfillment.documents.issue',payload:{id}} as FulfillmentCommand,f.c);
+ };
+ /** 1030 件溢装 CI（10300）待财务确认；另一张同客户订单 SO-2 用于验证不被牵连。 */
+ function overShipped(){
+  const f=thousand();ship(f,1030,'preparing','a');issueCi(f,'a');
+  f.state.orders.push({...structuredClone(f.state.orders[0]),id:'order2',code:'SO-2'} as never);
+  f.state.orderLines.push({...structuredClone(f.state.orderLines[0]),id:'line2',orderId:'order2',qty:50} as never);
+  let st=f.state;const run=(cmd:Parameters<typeof applyMistCommand>[1])=>{const r=applyMistCommand(st,cmd,{...f.c,actorId:'fin'});st=r.state;return r.result;};
+  run({type:'finance.importReceipts',payload:{receipts:[{date:'2026-10-13',payer:'客户',amount:11000,currency:'USD',ref:'R1'}]}});
+  const receiptId=st.receipts[0].id,invoiceId=st.invoices[0].id;
+  const assign=(amount:number,orderId:string|null='order')=>run({type:'funding.assign',payload:{receiptId,customerId:'customer',orderId,amount,note:'到账归属'}});
+  return{f,run,assign,invoiceId,get st(){return st;}};
+ }
+ const voidCi=(t:ReturnType<typeof overShipped>)=>t.run({type:'fulfillment.documents.void',payload:{id:'ci-a',reason:'单证有误'}} as never);
+ it('does not let a CI pending finance confirmation raise the cap above the contract amount',()=>{
+  const t=overShipped();
+  expect(()=>t.assign(10300)).toThrow('订单 SO-1 已归属与核销 10,300.00 USD，超过合同金额 10,000.00 USD');
+  t.assign(10000);expect(orderFundingCoveredAmount(t.st,'order')).toBe(10000);
+ });
+ it('lets a finance-confirmed over-shipped CI be earmarked in full',()=>{
+  const t=overShipped();t.run({type:'finance.receivable.confirm',payload:{invoiceId:t.invoiceId}});
+  t.assign(10300);expect(orderFundingCoveredAmount(t.st,'order')).toBe(10300);
+  expect(()=>t.assign(1,'order2')).not.toThrow();
+ });
+ it('refuses voiding the confirmed CI that carries the over-shipped earmark, naming the order and the excess',()=>{
+  const t=overShipped();t.run({type:'finance.receivable.confirm',payload:{invoiceId:t.invoiceId}});
+  const id=t.assign(10300).id!;const before=t.st;
+  expect(()=>voidCi(t)).toThrow('订单 SO-1 已归属与核销 10,300.00 USD，作废后可收上限 10,000.00 USD，请先把超出的 300.00 USD 改登为客户余额');
+  expect(t.st).toBe(before);expect(t.st.invoices[0].voidedAt).toBeUndefined();
+  // 同样不能绕过 applyMistCommand 直接作废。
+  expect(()=>applyFulfillmentCommand(structuredClone(t.st),{type:'fulfillment.documents.void',payload:{id:'ci-a',reason:'单证有误'}} as FulfillmentCommand,t.f.c)).toThrow('作废后可收上限');
+  // 其他订单的资金操作不受影响。
+  t.assign(100,'order2');
+  // 先释放（或改登客户余额）后再作废可以通过。
+  t.run({type:'funding.release',payload:{id,note:'溢装 CI 作废，改登客户余额'}});
+  t.assign(10000);t.assign(300,null);
+  voidCi(t);expect(t.st.invoices[0].voidedAt).toBeTruthy();
+  expect(()=>assertOrderFundingIntegrity(t.st)).not.toThrow();
+ });
+ it('keeps finance rejection of a pending over-shipped CI from leaving an over-funded order',()=>{
+  const t=overShipped();
+  expect(()=>t.assign(10300)).toThrow('订单 SO-1');
+  t.assign(10000);
+  t.run({type:'finance.receivable.reject',payload:{invoiceId:t.invoiceId,reason:'数量待核'}});
+  expect(t.st.invoices[0].financeStatus).toBe('rejected');
+  expect(()=>assertOrderFundingIntegrity(t.st)).not.toThrow();
+  t.assign(100,'order2');expect(orderFundingCoveredAmount(t.st,'order2')).toBe(100);
+ });
+ it('names the over-funded order when a residual bad state blocks an unrelated funding command',()=>{
+  const t=overShipped();t.assign(10000);
+  t.st.orderFunding!.assignments[0].amount=10300;
+  expect(()=>t.assign(100,'order2')).toThrow('订单 SO-1 已归属与核销 10,300.00 USD，超过合同金额 10,000.00 USD，请先把超出的 300.00 USD 改登为客户余额');
+ });
+});
+
+describe('invoicing headroom uses the actual amounts of issued invoices',()=>{
+ const issueCi=(f:ReturnType<typeof fixture>,shipmentId:string)=>{
+  const id='ci-'+shipmentId;
+  f.state.fulfillment.documents.push({id,shipmentId,orderId:'order',type:'CI',number:'CI-'+shipmentId,version:1,title:'CI',dueDate:'2026-12-01',content:'已核对CI',fileIds:['contract-file'],status:'draft',createdAt:f.c.now,actor:'单证'});
+  return applyFulfillmentCommand(f.state,{type:'fulfillment.documents.issue',payload:{id}} as FulfillmentCommand,f.c);
+ };
+ type Line={id:string;style:string;name:string;qty:number;price:number};
+ const asLines=(lines:Line[])=>lines.map(l=>({fulfillmentMode:'cmt' as const,cmtIncludedItems:[],img:'coat' as const,unit:'件',...l}));
+ const approved=(lines:Line[])=>{const f=fixture();f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:{...f.contract,overPercent:3,shortPercent:3},lines:asLines(lines)}});f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'通过'}},leader(f));return f;};
+ /** 已开票后经变更审批下调单价：订单变更只生成核对待办，已开 CI 金额不变。 */
+ const reprice=(f:ReturnType<typeof fixture>,lines:Line[])=>{f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:{...f.contract,overPercent:3,shortPercent:3},lines:asLines(lines),reason:'客户书面降价'}});f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'批准降价'}},leader(f));f.state.orders[0].amount=lines.reduce((n,l)=>n+l.qty*l.price,0);};
+ const coat=(price:number):Line=>({id:'line',style:'A',name:'外套',qty:1000,price});
+ const legacy=(f:ReturnType<typeof fixture>,amount:number)=>applyPlatformCommand(f.state,{type:'platform.invoice.issue',payload:{id:applyPlatformCommand(f.state,{type:'platform.invoice.save',payload:{orderId:'order',due:'2026-12-01',amount,note:'历史草稿'}},f.c).id!}},f.c);
+ it('does not let a legacy invoice exceed the contract after the unit price is lowered',()=>{
+  const f=thousand();ship(f,500,'preparing','a');issueCi(f,'a');expect(f.state.invoices[0].amount).toBe(5000);
+  reprice(f,[coat(8)]);expect(f.state.orderLines[0].price).toBe(8);
+  expect(()=>legacy(f,3000.01)).toThrow('尚未开票金额');
+  legacy(f,3000);expect(f.state.invoices.map(i=>i.amount)).toEqual([5000,3000]);
+ });
+ it('does not overstate CI room after the unit price is lowered',()=>{
+  const f=thousand();ship(f,500,'preparing','a');issueCi(f,'a');
+  reprice(f,[coat(8)]);
+  legacy(f,3000);
+  // 条目上限 1030×8=8240，已开 5000（实际）+ 本次 CI；旧票 3000 只剩 8240−5000−CI 的余量。
+  ship(f,31,'preparing','b');expect(()=>issueCi(f,'b')).toThrow('尚未开票额度');
+  ship(f,30,'preparing','c');issueCi(f,'c');expect(f.state.invoices.filter(i=>!i.voidedAt).map(i=>i.amount)).toEqual([5000,3000,240]);
+ });
+ it('splits a multi-line invoice by issue-time price, else current price, summing exactly to the invoice amount',()=>{
+  const f=approved([coat(10),{id:'line-b',style:'B',name:'裤子',qty:100,price:5}]);
+  f.state.fulfillment.shipments.push({id:'m',code:'M',customerId:'customer',customer:'客户',domain:'garment',consignee:'客户',mode:'sea',portOfLoading:'上海',portOfDischarge:'汉堡',incoterm:'FOB',plannedDate:'2026-11-25',booking:'',lines:[{lineId:'line',orderId:'order',quantity:1,factoryConfirmedAt:f.c.now},{lineId:'line-b',orderId:'order',quantity:1,factoryConfirmedAt:f.c.now}],note:'',fileIds:[],state:'preparing',requestedBy:'单证',requesterId:'docs',createdAt:f.c.now} as never);
+  issueCi(f,'m');const invoice=f.state.invoices[0];expect(invoice.amount).toBe(15);
+  // 单价改为 1 与 2 后，按开票时单价 10:5 分摊。
+  f.state.orderLines[0].price=1;f.state.orderLines[1].price=2;
+  expect(orderInvoicedByLine(f.state,'order').amount).toEqual(new Map([['line',1000],['line-b',500]]));
+  // 没有开票时单价的旧记录按当前单价 1:2 分摊，尾差使合计等于发票金额。
+  delete (invoice as {issuedLinePrices?:unknown}).issuedLinePrices;invoice.amount=10;
+  const split=orderInvoicedByLine(f.state,'order');
+  expect(split.amount).toEqual(new Map([['line',333],['line-b',667]]));expect(split.qty).toEqual(new Map([['line',1],['line-b',1]]));
  });
 });

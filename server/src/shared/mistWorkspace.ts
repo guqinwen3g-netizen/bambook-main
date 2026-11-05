@@ -36,7 +36,7 @@ import {lineQuantityFromBreakdown,type OrderLineBreakdown} from './mistOrderBrea
 import {isLineClosed} from './mistOrderClosure';
 import {quotationContract} from './mistTradeTerms';
 import {normalizeOrderLineNameEn,createOrderGovernance,applyOrderGovernanceCommand,orderGovernancePermission,getOrderGovernanceReviews,assertOrderApproved,assertOrderWritable,assertOrderNotTerminated,type OrderGovernanceFields,type OrderGovernanceCommand,type OrderGovernanceInput} from './mistOrderGovernance';
-import {createOrderFundingState,applyOrderFundingCommand,orderFundingCommandPermission,assertOrderDepositCovered,assertOrderFundingIntegrity,advanceBalances,type OrderFundingState,type OrderFundingCommand} from './mistOrderFunding';
+import {createOrderFundingState,applyOrderFundingCommand,orderFundingCommandPermission,assertOrderDepositCovered,assertOrderFundingIntegrity,assertOrderFundingAfterInvoiceRemoval,advanceBalances,type OrderFundingState,type OrderFundingCommand} from './mistOrderFunding';
 import {applyAgentProposalCommand,agentProposalCommandPermission,type AgentProposal,type AgentProposalCommand} from './mistAgentProposals';
 import type { AgentTaskCommand } from './mistAgentTasks';
 import {applyCustomerStatementCommand,customerStatementCommandPermission,type CustomerStatementCommand,type CustomerStatementRecord} from './mistCustomerStatement';
@@ -266,6 +266,8 @@ export type MistInvoice = { id: string; code: string; orderId: string; order: st
   customerId?: string; opening?: { originalAmount: number; note: string; registeredAt: string; registeredBy: string; registeredById?: string };
   /** CI 签发形成的应收须经财务确认：pending 待确认、confirmed 已确认、rejected 已驳回（同时作废、CI 退回草稿）。 */
   financeStatus?: MistReceivableFinanceStatus; sourceDocumentId?: string;
+  /** CI 开票时各订单条目单价（lineId → 单价）；条目分摊已开金额的权重。旧记录没有，则按当前单价分摊。 */
+  issuedLinePrices?: Record<string, number>;
   financeConfirmedAt?: string; financeConfirmedBy?: string; financeConfirmedById?: string;
   financeRejectedAt?: string; financeRejectedBy?: string; financeRejectedById?: string; financeRejectReason?: string };
 export type MistReceivableFinanceStatus = 'pending' | 'confirmed' | 'rejected';
@@ -1410,6 +1412,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(docs.length!==1)throw new MistCommandError('PRECONDITION','未找到唯一的来源 CI，不能驳回');
       const d=docs[0],s=f.shipments.find(x=>x.id===d.shipmentId);
       if(!s||s.state==='departed'||s.state==='cancelled')throw new MistCommandError('PRECONDITION','来源出运已离港或已取消，CI 不能退回修正，请走财务更正');
+      assertOrderFundingAfterInvoiceRemoval(state,i.id);
       Object.assign(i,{financeStatus:'rejected',financeRejectedAt:context.now,financeRejectedBy:context.actorName,financeRejectReason:reason,voidedAt:context.now,voidReason:'财务驳回：'+reason,voidedBy:context.actorName,voidSourceDocumentId:d.id,open:0},context.actorId?{financeRejectedById:context.actorId,voidedById:context.actorId}:{});
       d.status='draft';delete d.invoiceId;delete d.issuedAt;d.financeRejection={reason,at:context.now,actor:context.actorName,invoiceId:i.id};
       if(s.state==='ready')s.state='preparing';delete s.documentsSentAt;

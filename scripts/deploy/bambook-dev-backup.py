@@ -11,7 +11,10 @@ only after a new set was completed.
 
 Scope: everything directly under shared/ except logs and private-backups (operator copies). Application
 secrets in /etc/bambook-dev (backend.env with the encryption keys) are deliberately not included, so the
-encrypted mail and platform credentials in the archive stay unreadable without the separately kept keys.
+encrypted mail credentials (mist-mail-credentials) in the archive stay unreadable without them. Not every
+credential under shared/ is encrypted: ai-subscriptions holds platform subscription tokens and API keys in
+plain JSON, and any operator file there (such as mail-accounts.txt) is copied as is. The set therefore
+stays root-only on this host; exclude or encrypt those before any copy leaves it.
 No copy leaves this host; off-site copies are a separate, later decision.
 """
 import argparse
