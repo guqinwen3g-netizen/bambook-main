@@ -3545,9 +3545,9 @@
    "commands": [
     "settings.update"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "仅本地开发模式；LocalAdminPanel.tsx:103"
+   "note": "2026-11-05 本机独立数据副本界面走查：本机设置修改显示姓名与邮箱，错误邮箱提示“显示邮箱格式不正确”且不保存，正确后读回 profileName / profileEmail。"
   },
   {
    "id": "mes-history",
