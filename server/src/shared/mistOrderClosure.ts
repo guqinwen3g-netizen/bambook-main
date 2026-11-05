@@ -2,7 +2,7 @@
  * 比例是合同商业条款（溢装上限 % / 短装下限 %，0–10），批准后修改走变更审批；未填按 0，显示"未约定，按足量"。
  * 结案数量 = 已离港数量；须无未离港的有效出运；在允许范围内业务员直接结案，超出范围生成审批（审批人=订单审批人配置，申请人不能自批）。
  * 财务应收不在此自动变更。 */
-import {MistCommandError,type MistOrder,type MistOrderLine,type MistState} from './mistWorkspace';
+import {MistCommandError,isActiveMistInvoice,lineAmount,mistMoneyMinor,type MistOrder,type MistOrderLine,type MistState} from './mistWorkspace';
 
 export type OrderTolerance={overPercent?:number|null;shortPercent?:number|null};
 export type OrderLineClosure={id:string;status:'pending'|'closed'|'rejected';quantity:number;ordered:number;min:number;max:number;reason:string;requesterId:string;requesterName:string;requestedAt:string;reviewerIds:string[];decidedBy?:string;decidedName?:string;decidedAt?:string;note?:string};
@@ -56,3 +56,38 @@ export function lineShipLimit(line:MistOrderLine,contract:OrderTolerance|undefin
 export function shipmentToleranceCheck(line:MistOrderLine,contract:OrderTolerance|undefined|null,cumulative:number){const l=lineShipLimit(line,contract),total=r4(cumulative);return{...l,cumulative:total,excess:r4(Math.max(0,total-l.limit)),verdict:(total>l.limit?'over':total<l.min?'short':'within') as 'over'|'short'|'within'};}
 export function assertShipmentWithinTolerance(line:MistOrderLine,contract:OrderTolerance|undefined|null,cumulative:number){const c=shipmentToleranceCheck(line,contract,cumulative);if(c.verdict==='over')fail(`${OVER_SHIP_REQUIRED}：条目「${line.style} · ${line.name}」累计出运 ${c.cumulative}，${c.approved>c.max?`已批准上限 ${c.limit}`:`溢装上限 ${c.max}`}，超出 ${c.excess} ${line.unit}`,'PRECONDITION');return c;}
 export function overShipLabel(r:OverShipRequest){const s=r.status==='approved'?'已批准':r.status==='pending'?'待审批':'已退回';return `${s}：累计可出 ${r.quantity}（溢装上限 ${r.max}，超出 ${r.excess}），${r.reason}${r.note?`；审批意见：${r.note}`:''}`;}
+
+/* ── 开票上限与出运上限同口径：条目累计可开票 = lineShipLimit(...).limit × 单价 ── */
+type InvoiceShipLine={lineId:string;quantity:number};
+type InvoiceCapOrder=Pick<MistOrder,'id'>&{governance?:{contract?:OrderTolerance}};
+/** CI 应收按来源出运的本订单条目数量归属到条目；旧独立开票（无来源 CI）只有订单级金额。 */
+function invoicedByLine(root:MistState,orderId:string){
+ const qty=new Map<string,number>(),amount=new Map<string,number>();let unattributed=0;
+ for(const invoice of root.invoices.filter(i=>i.orderId===orderId&&isActiveMistInvoice(i))){
+  const doc=invoice.sourceDocumentId?(root.fulfillment?.documents||[]).find(d=>d.id===invoice.sourceDocumentId&&d.type==='CI'):undefined;
+  const shipment=doc?(root.fulfillment?.shipments||[]).find(s=>s.id===doc.shipmentId):undefined;
+  const lines=shipment?.lines.filter(l=>l.orderId===orderId)||[];
+  if(!lines.length){unattributed+=mistMoneyMinor(invoice.amount);continue;}
+  for(const l of lines){qty.set(l.lineId,r4((qty.get(l.lineId)||0)+l.quantity));const row=root.orderLines.find(x=>x.id===l.lineId);if(row)amount.set(l.lineId,(amount.get(l.lineId)||0)+mistMoneyMinor(lineAmount(l.quantity,row.price)));}
+ }
+ return{qty,amount,unattributed};
+}
+/**
+ * 销售发票额度校验（CI 与旧独立开票共用）。
+ * - CI：lines 为本出运的本订单条目数量；每条目累计开票数量不超过 lineShipLimit（溢装上限 / 已批准超量），
+ *   无条目归属的旧独立开票只能占用各条目上限金额扣除已归属开票后的剩余。
+ * - 旧独立开票（无 lines）：没有数量依据，不能使用溢装或超量额度，订单累计开票仍不超过合同金额。
+ * 返回 'total' 表示订单级额度不足（调用方保留原提示），其他字符串为条目超限提示。
+ */
+export function orderInvoiceCapProblem(root:MistState,order:InvoiceCapOrder,next:{lines?:InvoiceShipLine[];amount:number}):string|null{
+ const contract=order.governance?.contract,rows=root.orderLines.filter(l=>l.orderId===order.id),used=invoicedByLine(root,order.id);
+ for(const l of next.lines||[]){const row=rows.find(x=>x.id===l.lineId);if(!row)return '开票条目不属于来源订单';used.qty.set(row.id,r4((used.qty.get(row.id)||0)+l.quantity));used.amount.set(row.id,(used.amount.get(row.id)||0)+mistMoneyMinor(lineAmount(l.quantity,row.price)));}
+ if(!next.lines){const attributed=[...used.amount.values()].reduce((n,v)=>n+v,0);return attributed+used.unattributed+mistMoneyMinor(next.amount)>rows.reduce((n,row)=>n+mistMoneyMinor(lineAmount(row.qty,row.price)),0)?'total':null;}
+ let room=0;
+ for(const row of rows){
+  const limit=lineShipLimit(row,contract).limit,total=used.qty.get(row.id)||0;
+  if(total>limit)return `条目「${row.style} · ${row.name}」累计开票 ${total} ${row.unit}，超过可开票上限 ${limit} ${row.unit}（${limit>toleranceRange(row.qty,contract).max?'已批准超量':'合同溢装上限'}）`;
+  room+=Math.max(0,mistMoneyMinor(lineAmount(limit,row.price))-(used.amount.get(row.id)||0));
+ }
+ return used.unattributed>room?'total':null;
+}

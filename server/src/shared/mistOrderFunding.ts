@@ -1,7 +1,7 @@
 import {claimRecoveryReceiptUsedMinor} from './mistClaimRecoveryReceipts';
 import {rebateReceiptUsedMinor} from './mistExportRebate';
 import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
-import { MistCommandError, mistAllocationReceiptMinor, mistMoneyMinor, type MistState, type MistContext, type MistCommandResult } from './mistWorkspace';
+import { MistCommandError, isActiveMistInvoice, mistAllocationReceiptMinor, mistMoneyMinor, type MistState, type MistContext, type MistCommandResult } from './mistWorkspace';
 
 export type OrderFundingAssignment = {
   id:string; receiptId:string; customerId:string; orderId:string|null; amount:number; currency:string;
@@ -45,6 +45,10 @@ function receiptFundingUse(root:Root,receipt:Root['receipts'][number]){
   }
   return {customers,reserved};
 }
+/** 订单可收款上限：合同金额；溢装 / 已批准超量出运按实际开出更高的有效销售发票时，以发票合计为准。 */
+function orderCollectibleMinor(root:Root,order:Root['orders'][number]){
+ return Math.max(mistMoneyMinor(order.amount),root.invoices.filter(i=>i.orderId===order.id&&i.currency===order.currency&&isActiveMistInvoice(i)).reduce((n,i)=>n+mistMoneyMinor(i.amount),0));
+}
 export function assertOrderFundingIntegrity(root:Root){
  for(const receipt of root.receipts){
   const {reserved}=receiptFundingUse(root,receipt);
@@ -52,7 +56,7 @@ export function assertOrderFundingIntegrity(root:Root){
  }
 
  for(const row of active(root))if(!root.receipts.some(r=>r.id===row.receiptId))fail('归属的到账来源不存在');
- for(const order of root.orders)if(mistMoneyMinor(orderFundingCoveredAmount(root,order.id))>mistMoneyMinor(order.amount))fail('订单已归属与核销金额超过合同金额，超额部分请登记为客户余额','PRECONDITION');
+ for(const order of root.orders){const covered=mistMoneyMinor(orderFundingCoveredAmount(root,order.id));if(covered>mistMoneyMinor(order.amount)&&covered>orderCollectibleMinor(root,order))fail('订单已归属与核销金额超过合同金额，超额部分请登记为客户余额','PRECONDITION');}
 }
 /** Read-only headroom for the reconciliation picker. Earmarks and allocations overlap only within their existing customer/order buckets. */
 export function orderFundingReconciliationLimit(root:Root,receiptId:string,invoiceId:string):number{
@@ -68,7 +72,7 @@ export function orderFundingReconciliationLimit(root:Root,receiptId:string,invoi
   const buckets=[...(customer?.orders.values()??[])];
   const customerAssigned=buckets.reduce((n,b)=>n+b.assigned,0)+(customer?.unassigned??0);
   const customerUsed=buckets.reduce((n,b)=>n+Math.max(b.assigned,b.allocated),0);
-  allowed=Math.min(free+Math.max(0,customerAssigned-customerUsed)+assignedRoom,mistMoneyMinor(order.amount)-mistMoneyMinor(orderFundingCoveredAmount(root,order.id))+assignedRoom);
+  allowed=Math.min(free+Math.max(0,customerAssigned-customerUsed)+assignedRoom,orderCollectibleMinor(root,order)-mistMoneyMinor(orderFundingCoveredAmount(root,order.id))+assignedRoom);
  }
  return Math.max(0,Math.min(mistMoneyMinor(receipt.remaining),mistMoneyMinor(invoice.open),allowed))/100;
 }

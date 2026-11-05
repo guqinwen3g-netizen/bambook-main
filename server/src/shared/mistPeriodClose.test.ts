@@ -33,6 +33,42 @@ describe('month-end close', () => {
     expect(f.state.periodCloses!.map(c => [c.month, !!c.reopened])).toEqual([['2026-09', false], ['2026-10', true]]);
   });
 });
+describe('closed month locks CI receivable confirmation, rejection and void (by issuedAt month, as vouchers)', () => {
+  function withCi(issuedAt: string) {
+    const f = setup(), s = f.state as MistState;
+    s.fulfillment.shipments.push({ id: 'sh', code: 'SH', customerId: 'c', customer: 'Cedar', domain: 'garment', consignee: 'Cedar', mode: 'sea', portOfLoading: '上海', portOfDischarge: '汉堡', incoterm: 'FOB', plannedDate: '2026-11-25', booking: '', lines: [], note: '', fileIds: [], state: 'ready', requestedBy: '单证', requesterId: 'docs', createdAt: ctx.now } as never);
+    s.fulfillment.documents.push({ id: 'ci', shipmentId: 'sh', orderId: 'o', type: 'CI', number: 'CI-OCT', version: 1, title: 'CI', dueDate: '2026-12-01', content: '已核对', fileIds: ['f'], status: 'issued', createdAt: ctx.now, issuedAt: issuedAt + 'T02:00:00Z', actor: '单证', invoiceId: 'inv' });
+    s.invoices.push({ id: 'inv', code: 'CI-OCT', orderId: 'o', order: 'SO', customer: 'Cedar', due: '2026-12-01', amount: 100, open: 0, currency: 'USD', financeStatus: 'pending', sourceDocumentId: 'ci', issuedAt });
+    return f;
+  }
+  const confirm = { type: 'finance.receivable.confirm', payload: { invoiceId: 'inv' } } as MistCommand;
+  const reject = { type: 'finance.receivable.reject', payload: { invoiceId: 'inv', reason: '金额有误' } } as MistCommand;
+  const voidCi = { type: 'fulfillment.documents.void', payload: { id: 'ci', reason: '客户改单' } } as MistCommand;
+  it('refuses confirm, reject and void of an October CI once October is closed', () => {
+    const f = withCi('2026-10-20');
+    f.run({ type: 'finance.period.close', payload: { month: '2026-10', note: '十月核对' } });
+    for (const command of [confirm, reject, voidCi]) expect(() => f.run(command)).toThrow(/2026-10 已结账.*请先反结账/);
+    expect(f.state.invoices[0]).toMatchObject({ financeStatus: 'pending' });expect(f.state.invoices[0].voidedAt).toBeUndefined();
+  });
+  it('allows them again after reopening the month', () => {
+    const f = withCi('2026-10-20');
+    f.run({ type: 'finance.period.close', payload: { month: '2026-10', note: '十月核对' } });
+    f.run({ type: 'finance.period.reopen', payload: { month: '2026-10', reason: '十月 CI 待确认' } });
+    f.run(confirm);expect(f.state.invoices[0].financeStatus).toBe('confirmed');
+    f.run({ type: 'finance.period.close', payload: { month: '2026-10', note: '复结' } });
+    expect(() => f.run(voidCi)).toThrow('2026-10 已结账');
+    f.run({ type: 'finance.period.reopen', payload: { month: '2026-10', reason: '作废 CI' } });
+    f.run(voidCi);expect(f.state.invoices[0].voidedAt).toBeTruthy();
+  });
+  it('does not lock a CI issued in an open month', () => {
+    const f = withCi('2026-11-02');
+    f.run({ type: 'finance.period.close', payload: { month: '2026-10', note: '十月核对' } });
+    f.run(confirm);expect(f.state.invoices[0].financeStatus).toBe('confirmed');
+    f.run(voidCi);expect(f.state.invoices[0].voidedAt).toBeTruthy();
+    const g = withCi('2026-11-02');g.run({ type: 'finance.period.close', payload: { month: '2026-10', note: '十月核对' } });
+    g.run(reject);expect(g.state.invoices[0].financeStatus).toBe('rejected');
+  });
+});
 describe('monthly voucher export', () => {
   it('produces balanced suggested entries with account codes and period-rate CNY', async () => {
     const { monthlyVouchers } = await import('./mistVoucherExport');

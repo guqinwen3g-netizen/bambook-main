@@ -86,7 +86,7 @@ describe('reconciliation headroom matches the authoritative funding guard',()=>{
 });
 
 it('keeps customer-only balances out of another customer and development invoices',()=>{
- const f=setup();f.assign(50,'r',null);f.state.orders[1].customerId='other-customer';f.state.invoices=[{id:'foreign',orderId:'other',currency:'USD',open:100} as any,{id:'opening',currency:'USD',open:100,opening:{}} as any];
+ const f=setup();f.assign(50,'r',null);f.state.orders[1].customerId='other-customer';f.state.invoices=[{id:'foreign',orderId:'other',currency:'USD',amount:100,open:100} as any,{id:'opening',currency:'USD',amount:100,open:100,opening:{}} as any];
  expect(orderFundingReconciliationLimit(f.state,'r','foreign')).toBe(0);expect(orderFundingReconciliationLimit(f.state,'r','opening')).toBe(0);
  f.state.orderFunding!.assignments[0].state='released';expect(orderFundingReconciliationLimit(f.state,'r','foreign')).toBe(50);expect(orderFundingReconciliationLimit(f.state,'r','opening')).toBe(50);
 });

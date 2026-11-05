@@ -1,7 +1,9 @@
 /**
  * Month-end close (fin21). Once a month is closed, no finance fact dated in it may be added, changed or removed: bank receipts,
  * allocations (by registration date, including reversal snapshots), payments, FX locks / settlements, bank charges and write-offs (by registration date),
- * supplier bills and payments, and period FX rates. The check compares ledgers before and after every command, so commands
+ * supplier bills and payments, period FX rates, and receivables themselves by their 入账月 (issuedAt, the month the
+ * 确认应收 voucher uses): finance confirmation, rejection and void of such a receivable change that month's vouchers and FX
+ * revaluation, so they need a reopen first. The check compares ledgers before and after every command, so commands
  * do not each need their own guard and nothing new slips past. Reopening needs the approval permission and a reason; the
  * close and every reopen stay on record.
  */
@@ -24,7 +26,7 @@ export const latestClosedMonth = (root: Pick<Root, 'periodCloses'>) => [...close
 /** A month is locked when it or a later month is closed: closing is sequential, so everything up to the latest close is final. */
 export const monthLocked = (root: Pick<Root, 'periodCloses'>, month: string) => !!month && month <= latestClosedMonth(root);
 
-type Dated = { key: string; month: string; fingerprint: string };
+type Dated = { key: string; month: string; fingerprint: string; message?: string };
 const month = (value: unknown) => typeof value === 'string' && /^\d{4}-\d{2}/.test(value) ? value.slice(0, 7) : '';
 const instantMonth = (value: unknown) => typeof value === 'string' && value ? mistBusinessDate(value).slice(0, 7) : '';
 /** Every finance fact with the month it belongs to. */
@@ -43,6 +45,8 @@ function datedFacts(root: Root): Dated[] {
   }
   for (const f of root.fxRecords || []) put('fx:' + f.id, month(f.date), f);
   for (const i of root.invoices || []) {
+    // Only the fields that drive the 确认应收 voucher and revaluation; open is derived from allocations tracked above.
+    if (i.issuedAt) out.push({ key: 'invoice:' + i.id, month: month(i.issuedAt), message: '不能确认、驳回或作废该月应收', fingerprint: stableJson({ code: i.code, customer: i.customer, amount: i.amount, currency: i.currency, issuedAt: i.issuedAt, financeStatus: i.financeStatus, voidedAt: i.voidedAt }) });
     for (const c of i.bankCharges || []) put('charge:' + c.id, instantMonth(c.reversed?.at || c.at), c);
     for (const w of i.writeoffs || []) put('writeoff:' + w.id, instantMonth(w.reversed?.at || w.at), w);
   }
@@ -69,7 +73,8 @@ export function assertClosedPeriodsUntouched(before: Root, after: Root) {
     const a = old.get(key), b = next.get(key);
     if (a && b && a.fingerprint === b.fingerprint) continue;
     const m = [a?.month, b?.month].filter(Boolean).find(x => locked(x!));
-    if (m) fail(`${m} 已结账，不能补登、修改或冲回该月财务记录；如确需更正，请先反结账`);
+    const what = a?.message || b?.message;
+    if (m) fail(what ? `${m} 已结账，${what}，请先反结账` : `${m} 已结账，不能补登、修改或冲回该月财务记录；如确需更正，请先反结账`);
   }
 }
 

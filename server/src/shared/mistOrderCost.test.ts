@@ -134,6 +134,25 @@ describe('订单实际成本与费用分摊', () => {
     const { id } = f.run('cost.expense.register', { ...base, basis: 'manual', manual: [{ orderId: f.o17.id, amount: 100 }, { orderId: f.o18.id, amount: 200 }] });
     expect(activeExpenses(f.state).find(x => x.id === id)!.shares.map(s => s.amount)).toEqual([100, 200]);
   });
+  it('短交结案后按已确认结算计采购成本，不再暂估未交部分；未最终结算的采购照旧暂估', () => {
+    const build = (final: boolean) => {
+      const state = createMistState({ id: () => '', now: '2026-10-24T00:00:00Z', actorName: '财务' }, 'empty') as MistState & Record<string, any>;
+      state.orders.push({ id: 'o', code: 'SO-SHORT', customer: '客户', currency: 'CNY', amount: 2000 } as any);
+      state.invoices.push({ id: 'i', code: 'CI-SHORT', orderId: 'o', order: 'SO-SHORT', customer: '客户', due: '2026-12-01', amount: 2000, open: 2000, currency: 'CNY', financeStatus: 'confirmed' } as any);
+      // 合同 100 件 × 10 = 1000；实收 80 件已结算 800 并到票，供应商不再补交 20 件。
+      state.fulfillment.purchases.push({ id: 'po', code: 'PO-SHORT', orderId: 'o', supplier: '面料厂', state: 'approved', quantity: 100, price: 10, currency: 'CNY', kind: 'material', domain: 'garment' } as any);
+      state.payables = { ...(state.payables || {}), bills: [{ id: 'b', state: 'open', amount: 800, currency: 'CNY', lines: [{ purchaseId: 'po', amount: 800 }] }], deductions: [{ id: 'd', billId: 'b', amount: 50 }],
+        settlements: [{ id: 's1', purchaseId: 'po', state: 'confirmed', amount: 800, final: false }, ...(final ? [{ id: 's2', purchaseId: 'po', state: 'confirmed', amount: 0, final: true }] : [])] } as any;
+      return orderActualCost(state, 'o', 'period', '2026-10', '2026-10-24');
+    };
+    const closed = build(true);
+    expect(closed.purchases.some(l => l.key === 'est:po')).toBe(false);
+    expect(closed).toMatchObject({ status: 'ok', purchaseCny: 750, marginEx: 1250, estimated: false });
+    const open = build(false);
+    expect(open.purchases.find(l => l.key === 'est:po')).toMatchObject({ amount: 200, estimated: true });
+    expect(open).toMatchObject({ purchaseCny: 950, marginEx: 1050, estimated: true });
+  });
+
   it('订单实际核算：发票收入、已到票采购 + 暂估、分摊费用、退税；缺汇率不出结果', () => {
     const f = fixture();
     f.run('cost.expense.register', { category: 'freight', date: '2026-10-15', currency: 'USD', amount: 1000, scope: 'shipment', shipmentId: f.shipment.id, basis: 'volume' });

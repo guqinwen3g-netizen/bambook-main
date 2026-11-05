@@ -9,6 +9,7 @@ const SERVER_ROOT = path.resolve(__dirname, '..');
 dotenv.config({ path: path.join(SERVER_ROOT, '.env.local'), override: true });
 dotenv.config({ path: path.join(SERVER_ROOT, '.env') });
 import { safeRouteError } from './shared/routeError';
+import { createHealthHandler } from './healthRoute';
 import { assertBusinessClockConfiguration } from './shared/businessClock';
 import { InvoiceAttachmentError, readLegacyInvoiceAttachment } from './finance/invoiceAttachmentService';
 
@@ -514,40 +515,8 @@ function resolveBuildSha(): string {
 }
 const BUILD_SHA = resolveBuildSha();
 
-app.get('/api/health', async (_req, res) => {
-    const ttsPrewarm = getMeloPrewarmStatus();
-    const health = {
-        status: "ok",
-        node: "PandaAI-Sovereign-Node-Prisma",
-        timestamp: Date.now(),
-        version: process.env.npm_package_version || '1.0.0',
-        build: BUILD_SHA,
-        authRequired: SDK_CONFIG.requireAuth,
-        realtime: 'sse-in-process',
-        database: 'ok',
-        tts: ttsPrewarm
-            ? {
-                provider: ttsPrewarm.provider,
-                prewarmOk: ttsPrewarm.ok,
-                prewarmSkipped: ttsPrewarm.skipped,
-                prewarmElapsedMs: ttsPrewarm.elapsedMs,
-                prewarmAt: ttsPrewarm.at,
-                prewarmError: ttsPrewarm.error,
-            }
-            : { provider: process.env.BAMBOOK_TTS_PROVIDER || 'melo', prewarmOk: null },
-    };
-    try {
-        await prisma.$queryRaw`SELECT 1`;
-        res.json(health);
-    } catch (error: any) {
-        res.status(503).json({
-            ...health,
-            status: 'error',
-            database: 'unavailable',
-            error: error?.message || 'Database unavailable',
-        });
-    }
-});
+// 公开健康检查：响应只含状态字段，错误原文只写服务端日志（见 healthRoute.ts）。
+app.get('/api/health', createHealthHandler({ prisma, build: BUILD_SHA, authRequired: SDK_CONFIG.requireAuth, tts: getMeloPrewarmStatus }));
 
 // Sync Handler
 const handleSync = async (model: any, req: express.Request, res: express.Response, entity?: string) => {

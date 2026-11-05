@@ -49,6 +49,20 @@ describe('期末调汇（汇兑损益）', () => {
     expect(f.state).toEqual(before);
   });
 
+  it.each([
+    {kind:'badDebt' as const,at:'2026-10-30T02:00:00Z',expected:0},
+    {kind:'difference' as const,at:'2026-10-30T02:00:00Z',expected:0},
+    {kind:'correction' as const,at:'2026-10-30T02:00:00Z',expected:0},
+    {kind:'badDebt' as const,at:'2026-10-31T16:00:00.000Z',expected:1000},
+    {kind:'badDebt' as const,at:'2026-10-30T02:00:00Z',reversedAt:'2026-10-31T15:59:59.999Z',expected:1000},
+    {kind:'badDebt' as const,at:'2026-10-30T02:00:00Z',reversedAt:'2026-11-03T02:00:00Z',expected:0},
+  ])('应收核销按北京时间截至月末扣除：$kind / $at / $reversedAt',({kind,at,reversedAt,expected})=>{
+    const f=setup('2027-01-02T02:00:00Z');rate(f,'2026-09','7.0');rate(f,'2026-10','7.1');
+    f.state.invoices=[{id:'invoice',code:'CI-WO',orderId:'order',order:'SO-WO',customer:'Synthetic',due:'2027-02-01',amount:1000,open:0,currency:'USD',issuedAt:'2026-10-01',writeoffs:[{id:'wo',kind,amount:1000,currency:'USD',reason:'客户破产',at,actor:'财务',...(reversedAt?{reversed:{at:reversedAt,actor:'财务',reason:'追回'}}:{})}]}];
+    const before=structuredClone(f.state),preview=fxRevaluationPreview(f.state,'2026-10','2027-01-02');
+    expect(preview.lines.find(line=>line.kind==='receivable')?.amount??0).toBe(expected);
+    expect(f.state).toEqual(before);
+  });
   it('按月初汇率记账、月末汇率重估：银行按流水日、应收按开票日与到账日截止，结汇差额为已实现损益', () => {
     const f = setup(); seed(f.state); rate(f, '2026-08', '7.100000'); rate(f, '2026-09', '7.150000');
     const v = fxRevaluationPreview(f.state, '2026-09', '2026-10-17');
