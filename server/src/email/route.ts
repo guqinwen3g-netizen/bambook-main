@@ -505,8 +505,15 @@ export function createEmailRouter(options: EmailRouterOptions) {
       const emailId = req.params.id;
       const { email, password, host, port } = req.body || {};
       const ownerId = mailboxOwnerId(req);
-      if (!ownerId || !await prisma.email.findFirst({ where: { id: emailId, mailboxOwnerUserId: ownerId, deletedAt: null }, select: { id: true } }))
-        return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Email not found' } });
+      // 邮箱归属前置校验与发送服务同一口径：查不到 = EMAIL_NOT_FOUND（404），读库失败 = EMAIL_READ_FAILED（500），
+      // 不把读失败落到全局兜底、也不谎报“邮件不存在”。
+      let owned: { id: string } | null;
+      try { owned = ownerId ? await prisma.email.findFirst({ where: { id: emailId, mailboxOwnerUserId: ownerId, deletedAt: null }, select: { id: true } }) : null; }
+      catch (readError: any) {
+        logger.error('[email] outbox send ownership read failed', { error: readError?.message || String(readError) });
+        return res.status(500).json({ ok: false, error: { code: 'EMAIL_READ_FAILED', message: '系统暂时读不到原邮件，本次没有发送，请稍后核对。', statusCode: 500 } });
+      }
+      if (!owned) return res.status(404).json({ ok: false, error: { code: 'EMAIL_NOT_FOUND', message: '原邮件不存在或不可用。', statusCode: 404 } });
       const result = await sendOutboxEmail({
         prisma,
         emailId,

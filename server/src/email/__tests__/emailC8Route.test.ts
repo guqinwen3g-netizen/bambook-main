@@ -21,6 +21,8 @@ function makeMockPrisma() {
   const prisma: any = {
     email: {
       findUnique: async ({ where }: any) => emails.find(r => r.id === where.id) || null,
+      // Owner-scoped lookup used by the route's mailbox gate; synthetic rows without an owner belong to the caller.
+      findFirst: async ({ where }: any = {}) => emails.find(r => (!where?.id || r.id === where.id) && (where?.deletedAt !== null || r.deletedAt == null) && (!where?.mailboxOwnerUserId || !r.mailboxOwnerUserId || r.mailboxOwnerUserId === where.mailboxOwnerUserId)) || null,
       findMany: async ({ where, take }: any = {}) => {
         let out = emails.filter(r => r.deletedAt === null);
         if (where?.labels?.isEmpty) out = out.filter(r => !r.labels || r.labels.length === 0);

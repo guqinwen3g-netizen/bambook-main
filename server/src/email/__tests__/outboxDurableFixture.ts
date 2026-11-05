@@ -7,6 +7,16 @@ export function durableFixture(emailRow: any, opts: { readFail?: string; updateF
   const models: any = {
     email: {
       findUnique: vi.fn(async () => { if (opts.readFail) throw Error(opts.readFail); return state.email && { ...state.email }; }),
+      // Mailbox ownership gate in the route (findFirst by id + mailboxOwnerUserId + deletedAt:null). A row without an
+      // owner field is treated as the actor's own; a different owner or a soft-deleted row is not found.
+      findFirst: vi.fn(async ({ where }: any = {}) => {
+        if (opts.readFail) throw Error(opts.readFail);
+        const row = state.email; if (!row) return null;
+        if (where?.id && where.id !== row.id) return null;
+        if (where?.mailboxOwnerUserId && row.mailboxOwnerUserId && row.mailboxOwnerUserId !== where.mailboxOwnerUserId) return null;
+        if (where?.deletedAt === null && row.deletedAt) return null;
+        return { ...row };
+      }),
       update: vi.fn(async ({data}: any) => { if (opts.updateFail) throw Error('DB_LOCK'); return Object.assign(state.email, data); }),
     },
     userAccount: {findUnique: vi.fn(async () => ({id: opts.actorId || 'u1', status:'active', deletedAt:null,

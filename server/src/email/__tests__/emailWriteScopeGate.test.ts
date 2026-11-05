@@ -55,6 +55,8 @@ describe('P0-2 · email 域写端点 emails:write scope 门', () => {
   it('sales（emails:write）PATCH /:id → 通过门（200）', async () => {
     const prisma = {
       email: {
+        // The route first confirms the caller owns this mailbox row, then updates it.
+        findFirst: vi.fn().mockResolvedValue({ id: 'EML__1' }),
         update: vi.fn().mockResolvedValue({ id: 'EML__1', status: 'read', isRead: true, updatedAt: 1 }),
       },
     };
@@ -66,7 +68,7 @@ describe('P0-2 · email 域写端点 emails:write scope 门', () => {
     expect(res.body.ok).toBe(true);
   });
 
-  it('finance POST /send（写）→ 403；sales POST /send → 通过门（缺参 400 而非 403）', async () => {
+  it('finance POST /send（写）→ 403；sales POST /send → 通过门（直发已关闭 410 而非 403）', async () => {
     const app = makeApp({});
     const forbidden = await request(app)
       .post('/api/v1/email/send')
@@ -75,12 +77,12 @@ describe('P0-2 · email 域写端点 emails:write scope 门', () => {
     expect(forbidden.status).toBe(403);
     expect(forbidden.body.message).toMatch(/emails:write/);
 
-    // sales 通过 emails:write 门后进入 handler → 缺参 400（证明非权限拦截）
+    // sales 通过 emails:write 门后进入 handler → 直发已关闭 410（证明非权限拦截）
     const passed = await request(app)
       .post('/api/v1/email/send')
       .set(auth(salesToken))
       .send({});
-    expect(passed.status).toBe(400);
+    expect(passed.status).toBe(410);
   });
 
   it('finance POST /mark_read（写）→ 403', async () => {
