@@ -233,8 +233,9 @@
    "commands": [
     "teamScope.save"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 公司版界面走查（本机临时 PostgreSQL 库）：公司管理 → 小组范围为“成衣一组”添加条件“客户 = Northwind Atelier AB”，当前匹配实时预览，写调整说明后保存，读回范围版本与条件；空条件保存被拒（至少限定客户、业务线或供应商）。按范围裁剪业务数据由 dataScopeMatrix / securityScopeFixes 测试覆盖，界面上以组员身份核对可见范围未走。"
   },
   {
    "id": "org-settings",
