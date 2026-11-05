@@ -1718,7 +1718,11 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(old?.ownerId&&old.ownerId!==context.actorId){
         if(!old.participants?.some(x=>x.id===context.actorId))throw new MistCommandError('FORBIDDEN','只能修改本人或参与的个人日程',403);
         if(p.personal===false)throw new MistCommandError('FORBIDDEN','只能由本人将个人日程改为共享日程',403);
+        // 参与人只能改内容，不能把私人日程再分享给别人；页面原样带回的参与人名单不算改动。
+        if(p.participantIds!==undefined){const asked=[...new Set(strings(p.participantIds,'参与人'))].filter(x=>x!==old.ownerId).sort(),kept=(old.participants||[]).map(x=>x.id).sort();if(asked.join('\n')!==kept.join('\n'))throw new MistCommandError('FORBIDDEN','只能由本人调整个人日程的参与人',403);}
       }
+      // 共享日程改成私人日程会让其他成员看不到也改不了；只能另建个人日程。
+      if(old&&!old.ownerId&&p.personal)throw new MistCommandError('FORBIDDEN','共享日程不能改为个人日程，请另建个人日程',403);
       const participants=p.participantIds===undefined?old?.participants:[...new Set(strings(p.participantIds,'参与人'))].filter(x=>x!==(mine||context.actorId)).map(x=>resolveMember(context,x,'参与人'));
       if((participants?.length||0)>50)throw new MistCommandError('VALIDATION','参与人最多 50 位');
       const remind=p.remindMinutes===undefined?old?.remindMinutes:p.remindMinutes;if(remind!==undefined&&remind!==0&&(!Number.isInteger(remind)||remind<0||remind>10080))throw new MistCommandError('VALIDATION','提醒时间无效');
@@ -1733,7 +1737,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
     }
     case 'task.save': {
       // mar64：个人待办新建、改期、转派、加备注；系统生成的业务待办只改期限与指派，不改标题。
-      const old=p.id?find(state.tasks,p.id,'事项'):undefined;if(old?.done)throw new MistCommandError('PRECONDITION','已完成的事项请先重开');
+      const old=p.id?find(state.tasks,p.id,'事项'):undefined;if(old?.done)throw new MistCommandError('PRECONDITION','已完成的事项请先重开');if(old?.kind==='email-extraction-review')throw new MistCommandError('PRECONDITION','请在原邮件中记录处理结果');if(old&&isInternalDeliveryTask(old))throw new MistCommandError('PRECONDITION','请在内部交付记录中办理');
       const assignee=p.assigneeId?resolveMember(context,p.assigneeId,'负责人'):{id:context.actorId||'',name:context.actorName};
       const due=date(p.due),note=text(p.note||'','备注',false,1000);
       if(old){if(old.kind==='personal')old.title=text(p.title,'事项',true,200);old.due=due;old.assigneeIds=assignee.id?[assignee.id]:old.assigneeIds;if(note)old.note=note;event(state,context,'task',old.id,`调整事项 ${old.title}：${due}${assignee.name?' · '+assignee.name:''}${note?' · '+note:''}`);notifyMist(state,context,{title:'指派事项 '+old.title,detail:context.actorName,target:old.target},[assignee.id]);result={id:old.id};}

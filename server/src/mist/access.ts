@@ -146,8 +146,11 @@ export function canHandleTask(actor: TokenPayload, task: Pick<MistTask, 'assigne
   if (assignees.includes(actor.userId)) return true;
   if (hasScope(actor, TASK_DISPATCH_SCOPE as PermissionScope)) return true;
   // 标了岗位权限的事项属于该岗位（与前端 isMyMistTask 一致）：有指派人时岗位持有人同样可以办理，例如工厂补偿交财务核对。
-  if (task.permission) return hasScope(actor, task.permission as PermissionScope);
+  // 只读权限只决定能否看到，不能作为办理依据（例如内部交付待办标的是 orders:read）。
+  const duty = task.permission && !task.permission.endsWith(':read') ? task.permission : undefined;
+  if (duty && hasScope(actor, duty as PermissionScope)) return true;
   if (assignees.length) return false;
+  if (task.permission) return !!duty && hasScope(actor, duty as PermissionScope);
   const scopes = targetWriteScopes(task.target);
   return !!scopes && scopes.every(scope => hasScope(actor, scope as PermissionScope));
 }
@@ -187,7 +190,7 @@ function projectMemberHandovers(next: MistState, actor: TokenPayload) {
       return { ...event, text: names ? `成员交接：${names}` : '成员交接' };
     }
     // 对象自身的“成员交接 · 负责人：甲→乙：原因”事件（供应商、面料寻样不按行裁剪）：保留负责人变动，去掉原因。
-    const object = /^(成员交接 · 负责人：[^：]*)：/.exec(event.text);
+    const object = /^(成员交接 · 负责人：[^：]*)：/.exec(event.text) || /^(内部交付接收人：[^：]*)：/.exec(event.text);
     return object ? { ...event, text: object[1] } : event;
   });
   next.tasks = (next.tasks || []).filter(task => task.kind !== 'account-handover' || task.assigneeIds?.includes(actor.userId));

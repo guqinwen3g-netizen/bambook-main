@@ -38,6 +38,10 @@ export function pickMailFolders(folders: MailFolderInfo[]): Array<{ remote: stri
 export function isInternalAddress(address: string): boolean {
   let ip = address.trim().toLowerCase();
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(ip); if (mapped) ip = mapped[1];
+  // 十六进制写法的 IPv4 映射（::ffff:7f00:1）、IPv4 兼容（::127.0.0.1）与 NAT64（64:ff9b::/96）同样展开为内嵌 IPv4 判断。
+  const hex = /^(?:::ffff:|64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(ip);
+  if (hex) { const hi = parseInt(hex[1], 16), lo = parseInt(hex[2], 16); ip = [hi >> 8, hi & 255, lo >> 8, lo & 255].join('.'); }
+  const embedded = /^(?:::|64:ff9b::)(\d+\.\d+\.\d+\.\d+)$/.exec(ip); if (embedded) ip = embedded[1];
   if (isIP(ip) === 4) {
     const [a, b] = ip.split('.').map(Number);
     return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 198 && (b === 18 || b === 19)) || a >= 224;

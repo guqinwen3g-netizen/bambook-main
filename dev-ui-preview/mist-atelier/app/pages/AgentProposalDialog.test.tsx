@@ -79,3 +79,32 @@ it('high-risk bank account changes show the full new account beside the current 
     expect(supplier.textContent).toContain('1111222233334444'); expect(supplier.textContent).toContain('按合同电话回拨核实');
   } finally { act(() => root.unmount()); host.remove(); }
 });
+
+it('high-risk proposals list every array item untruncated, and block confirmation when the content exceeds what the dialog can show', () => {
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  const state = createMistState({ id: () => 'id', now: '2026-11-01T00:00:00Z', actorName: 'Test' }, 'demo');
+  const base = { ownerId: 'u', owner: '林舒', summary: ['分配付款'], state: 'pending' as const, createdAt: '2026-11-01T00:00:00Z' };
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+  const show = (proposal: any) => act(() => root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={() => {}} onDone={() => {}} /></MistRoot>));
+  const confirmButton = () => [...document.querySelectorAll('button')].find(b => b.textContent === '确认执行')!;
+  const fill = () => { const input = document.querySelector('input[type="password"]') as HTMLInputElement; act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Secret-1'); input.dispatchEvent(new Event('input', { bubbles: true })); }); };
+  try {
+    const allocations = Array.from({ length: 5 }, (_, i) => ({ billId: 'AP-' + (i + 1), amount: 1000 + i }));
+    const longNote = '核对依据'.repeat(80);
+    show({ ...base, id: 'a1', command: { type: 'payable.payment.allocate', payload: { paymentId: 'PAY-1', allocations, note: longNote } } });
+    const text = document.querySelector('[data-agent-proposal-changes]')!.textContent!;
+    for (let i = 1; i <= 5; i++) expect(text).toContain('allocations.' + i + '.billId · AP-' + i);
+    expect(text).toContain(longNote); expect(text).not.toContain('…');
+    fill(); expect(confirmButton().disabled).toBe(false);
+
+    show({ ...base, id: 'a2', command: { type: 'payable.payment.allocate', payload: { paymentId: 'PAY-2', allocations: Array.from({ length: 150 }, (_, i) => ({ billId: 'AP-' + i, amount: i })) } } });
+    expect(document.body.textContent).toContain('内容过多，无法在此完整核对');
+    fill(); expect(confirmButton().disabled).toBe(true);
+
+    state.settings.companyProfile = { ...(state.settings.companyProfile as any), bankName: '中国银行苏州分行', bankAccount: '1111222233334444', swift: 'BKCHCNBJ' };
+    show({ ...base, id: 'a3', command: { type: 'settings.update', payload: { companyProfile: { bankName: '招商银行苏州分行', bankAccount: '9999 8888 7777 6666', swift: 'CMBCCNBS' } } } });
+    const account = document.querySelector('[data-agent-proposal-account]')!.textContent!;
+    expect(account).toContain('9999888877776666'); expect(account).toContain('1111222233334444'); expect(account).toContain('CMBCCNBS'); expect(account).toContain('BKCHCNBJ');
+    expect(document.querySelector('[data-agent-proposal-changes]')).toBeNull();
+  } finally { act(() => root.unmount()); host.remove(); }
+});

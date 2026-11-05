@@ -28,6 +28,7 @@ import { simpleParser } from 'mailparser';
 import { sendOutboxEmail } from './outboxSend';
 import { syncEmailsFromImap, resolveEmailAttachmentPath } from './emailSyncService';
 import { ensurePrivateDir } from '../lib/privateFiles';
+import { legacyMailHostGate } from './legacyMailGate';
 import { putImapSession, getImapSession } from './imapSessionStore';
 import { autoLinkEmailById, backfillEmailLinks } from './emailLinkService';
 import { applyEmailClassification, backfillEmailClassification } from './emailClassificationService';
@@ -53,7 +54,8 @@ function makeImapConfig(email: string, password: string, host?: string, port = 9
       port,
       tls: true,
       authTimeout: 15000,
-      tlsOptions: { rejectUnauthorized: false },
+      // 旧接口：证书照常校验（不再关闭）；公司会话已由 tenantSurfaceGuard 拒绝访问本路由，公司邮箱只走 Mist 智能邮箱。
+      tlsOptions: { rejectUnauthorized: true, minVersion: 'TLSv1.2' as const },
     },
   };
 }
@@ -132,6 +134,7 @@ export function createEmailRouter(options: EmailRouterOptions) {
   // Shared auth guard: JWT or API-key
   const guard = createModuleAuthGuard({ requireAuth, apiKeys });
   router.use(guard);
+  router.use(legacyMailHostGate());
 
   // W-C 批三-F（族 C）：S1 日常写端点（sync/outbox send）已从 legacy requireRole 切换到
   // requirePermission('emails:write')——矩阵真源授权 SALES/SALES_MANAGER（业务员发邮件是 S1 主链日常），

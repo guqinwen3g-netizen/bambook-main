@@ -4,7 +4,9 @@ export const auditEnglish:Record<string,string>={
   // Agent proposal confirmation (high-risk detail and password re-check).
   '确认 Agent 提议':'Confirm Agent proposal','将要改动的字段':'Fields to change','收款账户':'Payee account','原':'Current','核实记录':'Verification record','SWIFT':'SWIFT',
   '执行身份':'Acting as','稍后':'Later','没有执行':'Not executed','本人登录密码':'Your sign-in password','原文依据':'Source quote',
-  '低风险':'Low risk','中风险':'Medium risk','高风险':'High risk',
+  '低风险':'Low risk','中风险':'Medium risk','高风险':'High risk','开户行地址':'Bank address',
+  '另有 {0} 项未显示':'{0} more items not shown','内容过多，无法在此完整核对':'Too much content to review here',
+  '请拒绝后让 Agent 拆成较小的操作重新提交':'Reject it and ask the Agent to resubmit as smaller actions',
   '付款、核销、审批、作废等资金或不可逆操作，确认前须重新验证本人密码':'Payments, write-offs, approvals, voids and other irreversible actions require your password before confirming',
   '有操作记录暂不可读取':'Some activity records are temporarily unavailable',
   '记录暂不可用':'Records temporarily unavailable',
