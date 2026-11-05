@@ -2994,9 +2994,9 @@
    "commands": [
     "market.attachment.set"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "MarketPages.tsx:56-61"
+   "note": "2026-11-05 本机独立数据副本界面走查：FB-2701 一次上传图片 + PDF（首张图标“主图”，PDF 无图片角色）；再传背面图后「设为主图」互换，再换回；「移除」只解除产品关联、文件保留。"
   },
   {
    "id": "product-to-dev-order",
