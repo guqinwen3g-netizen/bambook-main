@@ -24,11 +24,6 @@ import { buildXlsx, type XlsxSheet } from './templates/xlsxExport';
 // ★ 2026-09-25 下线：PDF 导入订单功能不再对外提供 ⇒ 不再引入该 router（模块本体保留）。
 //   恢复方式见下方 /api/v1/import 挂载点原位注释。原写法：
 //   import { createImportRouter } from './import/route';
-import { createOrdersRouter } from './orders/route';
-import { createOrderBusinessWorkspaceRouter } from './orders/orderBusinessWorkspaceRoute';
-import { createFabricCommissionBusinessRouter } from './finance/fabricCommissionRoute';
-import { createInternalFabricAllocationRouter } from './orders/internalFabricAllocationRoute';
-import { createOrdersV2Router } from './orders/routeV2';
 import { createOrderLinesRouter } from './orders/orderLinesRoute';
 import { createRelationsRouter } from './relations/route';
 import { createRelationsV2Router } from './relations/routeV2';
@@ -75,7 +70,7 @@ import { createClaimCashRefundRouter } from './claims/claimCashRefundRoute';
 import { createClaimCashRefundReturnRouter } from './claims/claimCashRefundReturnRoute';
 import { assertClaimCreditNoteVisibility } from './claims/claimVisibility';
 import { registerPaymentRequestApprovalHook } from './paymentRequests/paymentRequestApprovalHook';
-import { createProcurementRouter } from './procurement/procurementRoute';
+import { createSupplierApprovalAuthorityRouter } from './procurement/supplierApprovalAuthorityRoute';
 import { createInventoryRouter } from './inventory/inventoryRoute';
 import { createBOMRouter } from './bom/bomRoute';
 import { createCrmRouter } from './crm/crmRoute';
@@ -130,8 +125,6 @@ import { DEV_COMPANIES } from './devPanel/companies';
 import { dbUrlFor, getActiveDb, isDualMode } from './devPanel/activeDb';
 import { createAdminRouter } from './admin/route';
 import { createPlatformRouter } from './platform/route';
-import { createApprovalRouter } from './approvals/approvalRoute';
-import { createApprovalKernelRouter } from './approvals/approvalKernelRoute';
 import type { OnApprovalDecided } from './approvals/approvalDecisionService';
 import { createApprovalRoutingService } from './approvals/approvalRoutingService';
 import { createApprovalCreateService } from './approvals/approvalCreateService';
@@ -722,13 +715,8 @@ app.use('/api/admin', createAdminRouter({ prisma, email: emailService,
     requireAuth: SDK_CONFIG.requireAuth, apiKeys: SDK_CONFIG.apiKeys, onDecided: onApprovalDecided }));
 // 平台后台：跨公司运营入口，仅 platformRole='platform_admin' 可访问。
 app.use('/api/platform', createPlatformRouter({ prisma }));
-app.use('/api/v1/approvals', createApprovalRouter({
-    prisma, requireAuth: SDK_CONFIG.requireAuth, onDecided: onApprovalDecided,
-}));
-
-// Phase 1 共享内核（DR-007）：审批委派 / BOSS 最终兜底 / 解析路径只读审计
-app.use('/api/v1/approvals-kernel', createApprovalKernelRouter({ prisma,
-    requireAuth: SDK_CONFIG.requireAuth, onDecided: onApprovalDecided }));
+// 旧 REST 审批（/api/v1/approvals、/api/v1/approvals-kernel）2026-11-06 退役：Mist 审批走 /api/mist/reviews，
+// 现网 14 天零流量、公司会话本就被 tenantSurfaceGuard 拒绝。审批服务（approvalRoutingService 等）仍供 Mist 与 /api/admin 使用。
 
 app.use('/api/hr', createHRRouter({ prisma, requireAuth: SDK_CONFIG.requireAuth, apiKeys: SDK_CONFIG.apiKeys }));
 
@@ -765,34 +753,8 @@ app.use('/api/agent', createAgentRouter({
 //     })(req, res, next),
 // );
 
-// ------------------------------------------------------------------
-// /api/v1/orders — persistent Order resource (Postgres via Prisma)
-app.use('/api/v1', createInternalFabricAllocationRouter({
-    prisma, requireAuth: SDK_CONFIG.requireAuth, apiKeys: SDK_CONFIG.apiKeys,
-}));
-app.use('/api/v1/orders', createFabricCommissionBusinessRouter({ prisma }));
-app.use('/api/v1/orders', createOrderBusinessWorkspaceRouter({ prisma, apiKeys: SDK_CONFIG.apiKeys }));
-//   POST /import   { orders: ParsedOrder[] }   → privileged legacy migration (data:import + users:admin JWT; not PO upload/order entry)
-// Auth shares BAMBOOK_SDK_KEY / BAMBOOK_REQUIRE_AUTH with the rest of /api/v1.
-// ------------------------------------------------------------------
-app.use(
-    '/api/v1/orders',
-    (req, res, next) => createOrdersRouter({
-        prisma,
-        requireAuth: SDK_CONFIG.requireAuth,
-        apiKeys: SDK_CONFIG.apiKeys,
-        onDataChange: publishDataChange,
-    })(req, res, next),
-);
-
-app.use(
-    '/api/v2/orders',
-    (req, res, next) => createOrdersV2Router({
-        prisma,
-        requireAuth: SDK_CONFIG.requireAuth,
-        apiKeys: SDK_CONFIG.apiKeys,
-    })(req, res, next),
-);
+// 旧 REST 订单（/api/v1/orders 及其业务工作台、面料佣金、内部面料分配子路由，/api/v2/orders）2026-11-06 退役：
+// Mist 订单全部走 /api/mist 命令，现网 14 天零流量。订单服务（orderMainApprovalService 等）仍供 Mist 使用。
 
 app.use(
     '/api/v1/order-lines',
@@ -1112,15 +1074,11 @@ app.use(
     })(req, res, next),
 );
 
-app.use(
-    '/api/v1/procurement',
-    (req, res, next) => createProcurementRouter({
-        prisma,
-        requireAuth: SDK_CONFIG.requireAuth,
-        apiKeys: SDK_CONFIG.apiKeys,
-        onDataChange: publishDataChange,
-    })(req, res, next),
-);
+// 旧 REST 采购与供应商合同（/api/v1/procurement）2026-11-06 退役：Mist 采购走 /api/mist 命令，现网 14 天零流量。
+// 只保留公司「审批资格」页仍在使用的供应商承诺审批名单，路径不变。
+app.use('/api/v1/procurement/contracts/approval-authority', createSupplierApprovalAuthorityRouter({
+    prisma, requireAuth: SDK_CONFIG.requireAuth, apiKeys: SDK_CONFIG.apiKeys,
+}));
 
 app.use(
     '/api/v1/inventory',
@@ -2094,7 +2052,6 @@ loadAgentApiKeyActors(prisma, SDK_CONFIG.apiKeys)
     logger.info(`SDK API: ${SDK_CONFIG.requireAuth ? 'Protected (API Key Required)' : 'Open (Local Access)'}`);
     // ★ 2026-09-25 下线：PDF 导入接口未挂载，故不再打印该行（否则启动日志会继续宣称它可用）。
     //   原写法：logger.info(`Import API: POST /api/v1/import/order (auth: ${SDK_CONFIG.requireAuth ? 'required' : 'open'})`);
-    logger.info(`Orders API: POST /api/v1/orders/import (controlled migration; data:import + users:admin JWT required)`);
         if (process.env.BAMBOOK_MELO_PREWARM_ON_START === 'true') {
             prewarmMeloTts()
                 .then(result => {

@@ -84,9 +84,15 @@ describe('ERP OS 横向 smoke · L1 route 真实挂载（index.ts app.use 事实
     expect(IDX).toContain('createProductsRouter');
   });
 
-  it('Orders: index.ts app.use /api/v1/orders + createOrdersRouter', () => {
-    expect(IDX).toContain("'/api/v1/orders'");
-    expect(IDX).toContain('createOrdersRouter');
+  // 旧 REST 订单 / 采购 / 审批 2026-11-06 退役（Mist 走 /api/mist）。防回挂：谁重新挂载会当场咬红。
+  it('Legacy REST: /api/v1/orders, /api/v2/orders, /api/v1/procurement, /api/v1/approvals are not mounted', () => {
+    for (const factory of ['createOrdersRouter', 'createOrdersV2Router', 'createProcurementRouter', 'createApprovalRouter', 'createApprovalKernelRouter',
+      'createInternalFabricAllocationRouter', 'createFabricCommissionBusinessRouter', 'createOrderBusinessWorkspaceRouter']) expect(IDX).not.toContain(factory);
+    for (const mount of ["app.use('/api/v1/orders'", "'/api/v2/orders',", "app.use('/api/v1/approvals'", "app.use('/api/v1/approvals-kernel'", "    '/api/v1/procurement',"]) expect(IDX).not.toContain(mount);
+  });
+
+  it('Supplier approver lists stay mounted at their original path', () => {
+    expect(IDX).toContain("app.use('/api/v1/procurement/contracts/approval-authority', createSupplierApprovalAuthorityRouter(");
   });
 
   it('Development: index.ts app.use /api/v1/development + createDevelopmentRouter', () => {
