@@ -115,6 +115,8 @@ function targetVisibility(hidden: Section[]) {
   const deniedViews = new Set(hidden.flatMap(section => section.views)), knownViews = new Set(MIST_READ_SECTIONS.flatMap(section => section.views));
   if (hidden.some(section => ['receivables', 'receipts', 'payments', 'payables', 'funding'].includes(section.key))) deniedViews.add('finance');
   knownViews.add('finance');
+  // 首页个人待办指向 cockpit，不属于任何业务分区，按本人事项处理，不能因账号缺少某个分区权限而被整体隐藏。
+  knownViews.add('cockpit');
   return (target?: { view?: string }) => !target?.view || knownViews.has(target.view) && !deniedViews.has(target.view);
 }
 export function canReadTarget(actor: TokenPayload, target?: { view?: string }) {

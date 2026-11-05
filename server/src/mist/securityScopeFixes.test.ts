@@ -150,6 +150,12 @@ describe('2. 修改已有待办须具备办理资格', () => {
     expect(stored().tasks.find(t => t.id === 'assigned-owner')).toMatchObject({ assigneeIds: ['other'], due: '2026-10-25' });
   });
 
+  it('首页个人待办对没有全部权限的岗位同样可见', async () => {
+    await execute({ type: 'task.save', payload: { title: '走查个人待办', due: '2026-10-25', assigneeId: 'other' } } as MistCommand);
+    const view = await repo.get(actor('other'), workspaceId);
+    expect(view.state.tasks.some(t => t.title === '走查个人待办')).toBe(true);
+  });
+
   it('新建个人待办保持现状：可以给他人建', async () => {
     await execute({ type: 'task.save', payload: { title: '帮我核对', due: '2026-10-25', assigneeId: 'third' } } as MistCommand);
     expect(stored().tasks.find(t => t.title === '帮我核对')).toMatchObject({ assigneeIds: ['third'], kind: 'personal' });
