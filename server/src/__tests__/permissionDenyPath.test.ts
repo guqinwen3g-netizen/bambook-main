@@ -5,7 +5,7 @@
  * 本套件补齐反向断言：7 系统角色经 ROLE_ID_TO_LEGACY_AGENT_ROLE 映射 legacy +
  * getDefaultScopeListForRole 计算默认 scope 集，按生产登录链路同款结构签 JWT
  * （roles[]=legacy codes，permissions[]=默认 scopes），打真实 router + mock prisma：
- *   - legacy requireRole 门（finance v1 / orders v1 的 HIGH_RISK_ROLES）
+ *   - legacy requireRole 门（finance v1 的 HIGH_RISK_ROLES）
  *   - scope requirePermission 门（pricing / audit / finance v2 系）
  *
  * 断言保持「正确期望」：失败 = 走查发现的真实门禁缺口（红清单见运行输出），
@@ -19,7 +19,6 @@ import request from 'supertest';
 import { expectStatus } from '../shared/__tests__/utils/httpEvidence';
 import jwt from 'jsonwebtoken';
 import { createFinanceRouter } from '../finance/route';
-import { createOrdersRouter } from '../orders/route';
 import { createPricingRouter } from '../pricing/pricingRoute';
 import { createAuditRouter } from '../audit/route';
 import { ROLE_ID_TO_LEGACY_AGENT_ROLE } from '../auth/permissionService';
@@ -119,7 +118,6 @@ function mount(path: string, router: express.Router): express.Express {
 
 const prisma = makeMockPrisma();
 const financeApp = () => mount('/api/v1/finance', createFinanceRouter({ prisma, requireAuth: true, apiKeys }) as express.Router);
-const ordersApp = () => mount('/api/v1/orders', createOrdersRouter({ prisma, requireAuth: true, apiKeys }) as express.Router);
 const pricingApp = () => mount('/api/v1/pricing', createPricingRouter({ prisma, requireAuth: true, apiKeys }) as express.Router);
 const auditApp = () => mount('/api/v1/audit', createAuditRouter({ prisma, requireAuth: true, apiKeys }) as express.Router);
 
@@ -159,28 +157,6 @@ describe('Deny · 财务凭证写（POST /api/v1/finance/vouchers，HIGH_RISK=ow
   it('qc DELETE /api/v1/finance/vouchers/:id（高危删除）→ 403', async () => {
     const res = await request(financeApp()).delete('/api/v1/finance/vouchers/pv_x').set(auth(SYSTEM_ROLE_IDS.QC));
     expectStatus(res, 403, 'qc DELETE /finance/vouchers/:id');
-  });
-});
-
-describe('Deny · 订单写（POST/DELETE /api/v1/orders，HIGH_RISK=owner/admin/manager）', () => {
-  it('qc（role-qc→viewer）POST → 403', async () => {
-    const res = await request(ordersApp()).post('/api/v1/orders').set(auth(SYSTEM_ROLE_IDS.QC)).send({});
-    expectStatus(res, 403, 'qc POST /orders');
-  });
-
-  it('logistics（role-logistics）POST → 403', async () => {
-    const res = await request(ordersApp()).post('/api/v1/orders').set(auth(SYSTEM_ROLE_IDS.LOGISTICS)).send({});
-    expectStatus(res, 403, 'logistics POST /orders');
-  });
-
-  it('finance（role-finance，业务域只读）POST → 403', async () => {
-    const res = await request(ordersApp()).post('/api/v1/orders').set(auth(SYSTEM_ROLE_IDS.FINANCE)).send({});
-    expectStatus(res, 403, 'finance POST /orders');
-  });
-
-  it('sales DELETE /api/v1/orders/:id（orders:delete 未授予业务员）→ 403', async () => {
-    const res = await request(ordersApp()).delete('/api/v1/orders/o_x').set(auth(SYSTEM_ROLE_IDS.SALES));
-    expectStatus(res, 403, 'sales DELETE /orders/:id');
   });
 });
 
@@ -227,19 +203,9 @@ describe('Allow · 放行对照（合规角色通过门禁）', () => {
     expectPassGate(res, 'finance POST /finance/vouchers');
   });
 
-  it('sales-manager（role-sales-manager→manager）POST /api/v1/orders → 非 401/403', async () => {
-    const res = await request(ordersApp()).post('/api/v1/orders').set(auth(SYSTEM_ROLE_IDS.SALES_MANAGER)).send({});
-    expectPassGate(res, 'sales-manager POST /orders');
-  });
-
   it('admin（role-admin）DELETE /api/v1/finance/vouchers/:id → 403（S3 ε 车道：vouchers:write 仅 FINANCE 持有，§6.6 业务只读预期收紧）', async () => {
     const res = await request(financeApp()).delete('/api/v1/finance/vouchers/pv_x').set(auth(SYSTEM_ROLE_IDS.ADMIN));
     expectStatus(res, 403, 'admin DELETE /finance/vouchers/:id（写族收编 scope 门后 admin 不再放行）');
-  });
-
-  it('admin（role-admin）DELETE /api/v1/orders/:id（高危端点放行）→ 非 401/403', async () => {
-    const res = await request(ordersApp()).delete('/api/v1/orders/o_x').set(auth(SYSTEM_ROLE_IDS.ADMIN));
-    expectPassGate(res, 'admin DELETE /orders/:id');
   });
 
   it('super-admin（role-super-admin→owner）POST /api/v1/finance/vouchers → 非 401/403', async () => {

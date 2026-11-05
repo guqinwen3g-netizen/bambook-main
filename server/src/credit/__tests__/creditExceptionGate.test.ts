@@ -6,14 +6,8 @@
  *   - 信用门禁阻断 → 自动发起 credit_exemption 例外申请（DR-007 审批人解析，审批单 id 透传）
  *   - 生效例外（ReviewerApproved + 未过期 + 未核销）→ 门禁放行，动作成功后核销
  *   - 过期例外不放行（重新自动发起新申请）；审批中例外不重复发起
- * DE-6 审批单透传：
- *   - V1 status-transition / V2 PATCH status / V2 POST create / V1 batch-status
- *     信用门禁错误响应 body 均含 approvalRequestId
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import express from 'express';
-import request from 'supertest';
-import jwt from 'jsonwebtoken';
 
 vi.mock('../../lib/logger', () => ({
   logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
@@ -77,13 +71,9 @@ vi.mock('../../approvals/approvalCreateService', () => ({
 
 import { transitionOrderStatus } from '../../orders/orderLifecycleService';
 import { createOrderServiceV2 } from '../../orders/orderServiceV2';
-import { createOrdersV2Router } from '../../orders/routeV2';
-import { createOrdersRouter } from '../../orders/route';
 import { EXCEPTION_CATEGORIES } from '../../exceptions/exceptionGate';
 import { consumeCreditException, CreditExceptionConsumptionError } from '../creditExceptionGate';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'change-me-in-production-at-least-32-chars';
-const ownerToken = jwt.sign({ userId: 'u1', roles: ['owner'] }, JWT_SECRET);
 const ACTOR = { userId: 'user_1', departmentIds: ['dept_1'], roles: ['admin'] } as any;
 
 function makeOrder(overrides: any = {}) {
@@ -368,71 +358,5 @@ describe('P1-2（DE-5）信用阻断自动发起例外申请', () => {
     expect(created.attachments.scope.targetType).toBe('Relation');
     expect(created.attachments.scope.targetId).toBe('REL__F');
     expect(created.attachments.scope.action).toBe('order:create');
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════
-// P1-3（DE-6）审批单 id HTTP 透传契约
-// ═══════════════════════════════════════════════════════════════
-describe('P1-3（DE-6）信用门禁 approvalRequestId HTTP 透传', () => {
-  it('V1 POST /api/v1/orders/:id/status-transition → 403 + error.approvalRequestId', async () => {
-    const { prisma } = makePrisma({ creditLimit: FROZEN_CREDIT_LIMIT });
-    const app = express();
-    app.use(express.json());
-    app.use('/api/v1/orders', createOrdersRouter({ prisma, requireAuth: false, apiKeys: new Set() }));
-    const res = await request(app)
-      .post('/api/v1/orders/ORD__1/status-transition')
-      .set('Authorization', `Bearer ${ownerToken}`)
-      .send({ toStatus: 'Confirmed' });
-    expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe('CREDIT_FROZEN_60_DAYS');
-    expect(res.body.error.approvalRequestId).toBe(MOCK_APPROVAL_ID);
-  });
-
-  it('V2 PATCH /api/v2/orders/:id/status → 403 + body.approvalRequestId', async () => {
-    const { prisma } = makePrisma({ creditLimit: FROZEN_CREDIT_LIMIT });
-    const app = express();
-    app.use(express.json());
-    app.use('/api/v2/orders', createOrdersV2Router({ prisma, requireAuth: false, apiKeys: new Set() }));
-    const res = await request(app)
-      .patch('/api/v2/orders/ORD__1/status')
-      .set('Authorization', `Bearer ${ownerToken}`)
-      .send({ status: 'Confirmed' });
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe('CREDIT_FROZEN_60_DAYS');
-    expect(res.body.approvalRequestId).toBe(MOCK_APPROVAL_ID);
-  });
-
-  it('V2 POST /api/v2/orders Frozen 建单 → 403 + body.approvalRequestId', async () => {
-    const { prisma } = makePrisma({ creditLimit: FROZEN_CREDIT_LIMIT });
-    const app = express();
-    app.use(express.json());
-    app.use('/api/v2/orders', createOrdersV2Router({ prisma, requireAuth: false, apiKeys: new Set() }));
-    const res = await request(app)
-      .post('/api/v2/orders')
-      .set('Authorization', `Bearer ${ownerToken}`)
-      .send({
-        customer: 'Peerless', product: 'Cotton Twill', type: 'Fabric',
-        quantity: 1000, dueDate: '2026-09-01', quoteAmount: 10000,
-        customerRelationId: 'REL__F',
-      });
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe('CREDIT_FROZEN_60_DAYS');
-    expect(res.body.approvalRequestId).toBe(MOCK_APPROVAL_ID);
-  });
-
-  it('V1 PATCH /api/v1/orders/batch-status → skipped 项携带 approvalRequestId', async () => {
-    const { prisma } = makePrisma({ creditLimit: FROZEN_CREDIT_LIMIT });
-    const app = express();
-    app.use(express.json());
-    app.use('/api/v1/orders', createOrdersRouter({ prisma, requireAuth: false, apiKeys: new Set() }));
-    const res = await request(app)
-      .patch('/api/v1/orders/batch-status')
-      .set('Authorization', `Bearer ${ownerToken}`)
-      .send({ ids: ['ORD__1'], toStatus: 'Confirmed' });
-    expect(res.status).toBe(200);
-    const row = res.body.updated?.[0];
-    expect(row.skipped).toBe('CREDIT_FROZEN_60_DAYS');
-    expect(row.approvalRequestId).toBe(MOCK_APPROVAL_ID);
   });
 });

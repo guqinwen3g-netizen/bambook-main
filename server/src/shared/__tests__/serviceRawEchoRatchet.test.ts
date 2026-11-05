@@ -71,7 +71,6 @@ const BASELINE: Record<string, number> = {
   'src/suppliers/tcCertificateService.ts': 2,
   'src/claims/claimCaseService.ts': 1,
   'src/claims/creditNoteService.ts': 1,
-  'src/orders/route.ts': 1,
   'src/relations/routeV2.ts': 1,
   'src/tools/fabricCalculatorRoute.ts': 1,
 };
@@ -86,8 +85,8 @@ describe('B33 · 服务层「原文 || 文案」当对外文案（只减不增�
     const stale = Object.entries(BASELINE).filter(([f, n]) => (actual[f] ?? 0) < n)
       .map(([f, n]) => `${f}: 基线 ${n} → 实际 ${actual[f] ?? 0}`);
     expect(stale, `已经改好了就同步删掉那一行（留旧数会掩盖下一次回潮）：${JSON.stringify(stale)}`).toEqual([]);
-    expect(Object.values(actual).reduce((a, b) => a + b, 0), '全仓 B33 站点总数').toBe(38); // source-proven commission unknown failure now discards the error.
-    expect(Object.keys(actual).length, '含 B33 站点的文件数').toBe(17);
+    expect(Object.values(actual).reduce((a, b) => a + b, 0), '全仓 B33 站点总数').toBe(37); // source-proven commission unknown failure now discards the error.
+    expect(Object.keys(actual).length, '含 B33 站点的文件数').toBe(16);
   });
 
   it('★ 行号保真：每个命中点报的行，原文那一行真的就是这处写法（否则逐站点清单不能驱动改代码）', () => {

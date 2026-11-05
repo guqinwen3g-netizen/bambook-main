@@ -67,11 +67,6 @@ const REGISTRY: Consumer[] = [
     role: 'settle',
     note: 'confirmReturn 生成负额 Payable；settleReturn 在同一事务校验原收料、供应商、确认审计、贷项和实际收款核销后结清；缺乏事实不得结案',
   },
-  {
-    file: 'procurement/procurementRoute.ts',
-    role: 'notify',
-    note: 'confirm 端点把 id 交给 onDataChange 做缓存失效（entity=Invoice, action=create）——不改变生命周期',
-  },
 ];
 
 /**

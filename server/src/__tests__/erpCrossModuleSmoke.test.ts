@@ -38,7 +38,6 @@ const MODULES = {
     svc: read('products/productAssetMutationService.ts'),
   },
   orders: {
-    route: read('orders/route.ts'),
     lifecycleSvc: read('orders/orderLifecycleService.ts'),
   },
   development: {
