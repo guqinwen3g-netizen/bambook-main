@@ -55,7 +55,7 @@ function makeImapConfig(email: string, password: string, host?: string, port = 9
       tls: true,
       authTimeout: 15000,
       // 旧接口：证书照常校验（不再关闭）；公司会话已由 tenantSurfaceGuard 拒绝访问本路由，公司邮箱只走 Mist 智能邮箱。
-      tlsOptions: { rejectUnauthorized: true, minVersion: 'TLSv1.2' },
+      tlsOptions: { rejectUnauthorized: true, minVersion: 'TLSv1.2' as const },
     },
   };
 }

@@ -85,6 +85,9 @@ describe('1. 私人日程只下发给本人和参与人', () => {
     await expect(execute({ type: 'calendar.save', payload: { id: 'shared', title: '例会', date: '2026-10-15', time: '09:00', note: '', personal: true } } as MistCommand)).rejects.toMatchObject({ status: 403 });
     await expect(execute({ type: 'calendar.save', payload: { id: 'owner-with-third', title: '面谈', date: '2026-10-15', time: '11:30', note: '', participantIds: ['third', 'other'] } } as MistCommand, 'third-share', actor('third'))).rejects.toMatchObject({ status: 403 });
     expect(stored().calendar).toEqual(before);
+    // 页面编辑时原样带回参与人名单，仍可修改内容。
+    await execute({ type: 'calendar.save', payload: { id: 'owner-with-third', title: '面谈（原名单）', date: '2026-10-15', time: '11:30', note: '', participantIds: ['third'] } } as MistCommand, 'third-same', actor('third'));
+    expect(stored().calendar.find(e => e.id === 'owner-with-third')).toMatchObject({ title: '面谈（原名单）', ownerId: 'owner' });
     const owner = await repo.get(actor('owner'), workspaceId);
     expect(owner.state.calendar.some(e => e.id === 'shared')).toBe(true);
   });
