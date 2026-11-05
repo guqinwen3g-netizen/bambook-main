@@ -79,6 +79,15 @@ describe('1. 私人日程只下发给本人和参与人', () => {
     expect(stored().calendar.find(e => e.id === 'owner-with-third')).toMatchObject({ title: '面谈（改）', ownerId: 'owner' });
     await expect(execute({ type: 'calendar.delete', payload: { id: 'owner-with-third' } }, 'third-delete', actor('third'))).rejects.toMatchObject({ status: 403 });
   });
+
+  it('共享日程不能被任何成员改成私人日程；参与人不能再把私人日程分享给他人', async () => {
+    const before = structuredClone(stored().calendar);
+    await expect(execute({ type: 'calendar.save', payload: { id: 'shared', title: '例会', date: '2026-10-15', time: '09:00', note: '', personal: true } } as MistCommand)).rejects.toMatchObject({ status: 403 });
+    await expect(execute({ type: 'calendar.save', payload: { id: 'owner-with-third', title: '面谈', date: '2026-10-15', time: '11:30', note: '', participantIds: ['third', 'other'] } } as MistCommand, 'third-share', actor('third'))).rejects.toMatchObject({ status: 403 });
+    expect(stored().calendar).toEqual(before);
+    const owner = await repo.get(actor('owner'), workspaceId);
+    expect(owner.state.calendar.some(e => e.id === 'shared')).toBe(true);
+  });
 });
 
 describe('2. 修改已有待办须具备办理资格', () => {
@@ -141,6 +150,18 @@ describe('2. 修改已有待办须具备办理资格', () => {
   it('新建个人待办保持现状：可以给他人建', async () => {
     await execute({ type: 'task.save', payload: { title: '帮我核对', due: '2026-10-25', assigneeId: 'third' } } as MistCommand);
     expect(stored().tasks.find(t => t.title === '帮我核对')).toMatchObject({ assigneeIds: ['third'], kind: 'personal' });
+  });
+
+  it('只读权限不能作为办理依据：持 orders:read 的同事不能改派或完成标了只读权限的待办', async () => {
+    stored().tasks.push(task('read-duty', { assigneeIds: ['owner'], permission: 'orders:read' }), task('read-pool', { permission: 'orders:read' }));
+    for (const id of ['read-duty', 'read-pool']) for (const run of [complete, save]) await expect(run(id)).rejects.toMatchObject({ status: 403 });
+    expect(stored().tasks.find(t => t.id === 'read-duty')).toMatchObject({ assigneeIds: ['owner'], done: false });
+  });
+
+  it('内部交付与邮件复核待办也不能经通用编辑改派或改期', async () => {
+    auth.users.get('other')!.permissions = ['orders:read', 'relations:admin'];
+    for (const id of ['email-review', 'internal-delivery:d1']) await expect(save(id)).rejects.toMatchObject({ code: 'PRECONDITION' });
+    expect(stored().tasks.find(t => t.id === 'internal-delivery:d1')).toMatchObject({ assigneeIds: ['owner'] });
   });
 
   it('邮件提取复核与内部交付事项不被新规则放开', async () => {
@@ -215,6 +236,15 @@ describe('4. 成员交接档案按办理资格和当前可见范围下发', () =
     expect(Object.values(own[0].counts).reduce((n, v) => n + (v || 0), 0)).toBe(own[0].objects.length);
     const to = projectState(state, reader('demo-new'), empty, undefined, { userIds: ['demo-new'], teamIds: [] }).state;
     expect(accountHandovers(to)[0].objects.length).toBeGreaterThan(own[0].objects.length);
+  });
+
+  it('内部交付接收人改派事件对受限账号去掉交接原因', () => {
+    const event = { id: 'ev-delivery', entityType: 'order', entityId: state.orders[0].id, actor: '老板', at: now, text: '内部交付接收人：沈禾→林舟：沈禾离职 PRIVATE-REASON', fileIds: [] };
+    state.events.unshift(event as any);
+    const scoped = projectState(state, reader('demo-sales'), empty, undefined, { userIds: ['demo-sales'], teamIds: [] }).state;
+    expect(scoped.events.find(e => e.id === 'ev-delivery')?.text ?? '内部交付接收人：沈禾→林舟').toBe('内部交付接收人：沈禾→林舟');
+    const full = projectState(state, reader('finance'), empty).state;
+    expect(full.events.find(e => e.id === 'ev-delivery')?.text).toContain('PRIVATE-REASON');
   });
 
   it('工作区事件对受限账号改为不含数量与原因的中性文本，接手待办只给接手人', () => {

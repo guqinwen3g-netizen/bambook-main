@@ -138,3 +138,9 @@ describe('底层连接：host 用钉住地址，TLS servername 显式为原主�
     expect(smtpOptions[0].tls.servername).toBeUndefined();
   });
 });
+
+import { isInternalAddress } from './service';
+describe('内部地址判断覆盖 IPv4 映射与内嵌写法', () => {
+  it.each(['::ffff:7f00:1', '::ffff:a00:1', '::127.0.0.1', '64:ff9b::7f00:1', '64:ff9b::10.0.0.1', '::ffff:127.0.0.1'])('%s 视为内部地址', address => expect(isInternalAddress(address)).toBe(true));
+  it.each(['::ffff:808:808', '64:ff9b::8.8.8.8', '2001:4860:4860::8888', '8.8.8.8'])('%s 为公网地址', address => expect(isInternalAddress(address)).toBe(false));
+});

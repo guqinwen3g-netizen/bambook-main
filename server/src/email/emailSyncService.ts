@@ -196,7 +196,7 @@ export async function syncEmailsFromImap(params: EmailSyncParams): Promise<Email
       port: credentials.port || 993,
       tls: true,
       authTimeout: 15000,
-      tlsOptions: { rejectUnauthorized: false },
+      tlsOptions: { rejectUnauthorized: true, minVersion: 'TLSv1.2' },
     },
   };
 
