@@ -30,8 +30,16 @@ export function mailProposalDetails(proposal: AgentProposal, state?: MistState |
  * 确认时列出将要执行的内容：按提议命令的 payload 逐项展开（嵌套对象按路径，数组逐项）。
  * 中风险超长值截断；高风险不截断——本人输入密码确认的必须是完整内容。超出显示上限时返回 omitted，调用方须禁用确认。
  */
-export function proposalFieldChanges(command: AgentProposal['command'], full = false): { rows: Array<{ field: string; value: string }>; omitted: number } {
-  const rows: Array<{ field: string; value: string }> = [], limit = full ? 200 : 40;
+const FIELD_LABEL: Record<string, string> = { title: '标题', due: '期限', name: '名称', note: '备注', notes: '备注', amount: '金额', currency: '币种', date: '日期', start: '开始', end: '结束', status: '状态', reason: '原因', assigneeId: '负责人', ownerId: '负责人', customerId: '客户', supplierId: '供应商', orderId: '订单', quantity: '数量', qty: '数量', price: '单价', unitPrice: '单价', terms: '条款', email: '邮箱', phone: '电话', address: '地址', subject: '主题', body: '正文', to: '收件人', cc: '抄送', code: '编号', kind: '类型', type: '类型', decision: '决定', allocations: '分配', lines: '明细', items: '明细', billId: '应付单', invoiceId: '发票', paymentId: '付款', receiptId: '到账', id: '对象', target: '关联对象', view: '页面', tags: '标签', remark: '备注' };
+/** 字段路径转成业务名称；包装层 patch / payload 不显示，未登记的字段保留原名，避免误译。 */
+export function proposalFieldLabel(path: string): string {
+  if (!path) return '内容';
+  const parts = path.split('.').filter(part => part !== 'patch' && part !== 'payload');
+  return parts.length ? parts.map(part => /^\d+$/.test(part) ? '第' + part + '项' : FIELD_LABEL[part] ?? part).join(' · ') : '内容';
+}
+
+export function proposalFieldChanges(command: AgentProposal['command'], full = false): { rows: Array<{ field: string; path: string; value: string }>; omitted: number } {
+  const rows: Array<{ field: string; path: string; value: string }> = [], limit = full ? 200 : 40;
   let omitted = 0;
   const walk = (value: unknown, path: string) => {
     if (value && typeof value === 'object') {
@@ -40,7 +48,7 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
     }
     if (rows.length >= limit) { omitted++; return; }
     const text = typeof value === 'string' ? value : JSON.stringify(value) ?? '';
-    rows.push({ field: path || '内容', value: !full && text.length > 200 ? text.slice(0, 200) + '…' : text });
+    rows.push({ field: proposalFieldLabel(path), path, value: !full && text.length > 200 ? text.slice(0, 200) + '…' : text });
   };
   walk(command.payload, '');
   return { rows, omitted };
@@ -91,7 +99,7 @@ export function AgentProposalDialog({ proposal, state, onClose, run, onDone }: {
   const account = detailed ? proposalAccountRows(proposal.command, state) : null;
   const fields = detailed ? proposalFieldChanges(proposal.command, risk === 'high') : { rows: [], omitted: 0 };
   // 公司收款账户只对照银行字段；同一命令里的其他设置仍逐项列出。
-  const changes = account && proposal.command.type !== 'settings.update' ? [] : account ? fields.rows.filter(r => !/^companyProfile\.(bankName|bankAccount|swift|bankAddress)$/.test(r.field)) : fields.rows;
+  const changes = account && proposal.command.type !== 'settings.update' ? [] : account ? fields.rows.filter(r => !/^companyProfile\.(bankName|bankAccount|swift|bankAddress)$/.test(r.path)) : fields.rows;
   const incomplete = risk === 'high' && fields.omitted > 0;
   // Agent 起草的合同与资金类批准，由确认人本人当场签字；Agent 不能代签。
   const signing = commandRequiresSignature(proposal.command);

@@ -336,3 +336,11 @@ describe('External Agent confirmation uses the proposed source version',()=>{
     expect(after.state.customers).toEqual(before.state.customers);expect(after.state.agentProposals.find((p:any)=>p.id===f.id).state).toBe('rejected');
   });
 });
+
+describe('proposal fallback summary', () => {
+  it('names the business action instead of the internal command', async () => {
+    const { proposalFallbackSummary } = await import('./agentMcp');
+    expect(proposalFallbackSummary({ type: 'task.save', payload: { title: '跟进面料确认', due: '2026-11-08' } })).toBe('保存待办：跟进面料确认');
+    expect(proposalFallbackSummary({ type: 'fulfillment.unknownThing', payload: {} })).toBe('办理履约');
+  });
+});

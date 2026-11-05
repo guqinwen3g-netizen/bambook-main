@@ -32,7 +32,7 @@ it('shows the risk tier; medium lists fields to change, high requires the login 
     show({ ...base, command: { type: 'customer.update', payload: { id: 'c1', patch: { name: '新客户名', terms: 'T/T 30%' } } } });
     expect(document.querySelector('[data-agent-proposal-risk]')?.getAttribute('data-agent-proposal-risk')).toBe('medium');
     const changes = document.querySelector('[data-agent-proposal-changes]')?.textContent || '';
-    expect(changes).toContain('patch.name · 新客户名'); expect(changes).toContain('patch.terms · T/T 30%');
+    expect(changes).toContain('名称 · 新客户名'); expect(changes).toContain('条款 · T/T 30%'); expect(changes).not.toContain('patch');
     expect(document.querySelector('input[type="password"]')).toBeNull(); expect(confirmButton().disabled).toBe(false);
 
     show({ ...base, id: 'p2', command: { type: 'payable.payment.register', payload: { requestId: 'r', amount: 100 } } });
@@ -40,7 +40,7 @@ it('shows the risk tier; medium lists fields to change, high requires the login 
     // 权限码是实现细节，界面只显示风险等级（服务端仍校验 ai:write:high）。
     expect(document.body.textContent).not.toContain('ai:write');
     // 高风险同样列出将要执行的内容，不能只给摘要和密码框。
-    expect(document.querySelector('[data-agent-proposal-changes]')?.textContent).toContain('amount · 100');
+    expect(document.querySelector('[data-agent-proposal-changes]')?.textContent).toContain('金额 · 100');
     const input = document.querySelector('input[type="password"]') as HTMLInputElement; expect(input).toBeTruthy();
     expect(confirmButton().disabled).toBe(true);
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Secret-1'); input.dispatchEvent(new Event('input', { bubbles: true })); });
@@ -93,7 +93,7 @@ it('high-risk proposals list every array item untruncated, and block confirmatio
     const longNote = '核对依据'.repeat(80);
     show({ ...base, id: 'a1', command: { type: 'payable.payment.allocate', payload: { paymentId: 'PAY-1', allocations, note: longNote } } });
     const text = document.querySelector('[data-agent-proposal-changes]')!.textContent!;
-    for (let i = 1; i <= 5; i++) expect(text).toContain('allocations.' + i + '.billId · AP-' + i);
+    for (let i = 1; i <= 5; i++) expect(text).toContain('分配 · 第' + i + '项 · 应付单 · AP-' + i);
     expect(text).toContain(longNote); expect(text).not.toContain('…');
     fill(); expect(confirmButton().disabled).toBe(false);
 

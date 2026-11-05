@@ -132,7 +132,7 @@ async function callTool(repository: McpRepository, actor: TokenPayload, name: st
         // 仅在当前本人可见的提议中查找，不因重试重新提交或再次执行已确认的业务。
         const original = prior ? workspace.state.agentProposals?.find(item => item.id === prior.result?.id && item.ownerId === actor.userId) : undefined;
         if (prior && !original) throw new ToolInputError('请求编号已用于另一项操作，不能重复使用');
-        const summary = original ? original.summary : preview?.events?.length ? preview.events.slice(0, 10) : [`执行 ${command.type}`];
+        const summary = original ? original.summary : preview?.events?.length ? preview.events.slice(0, 10) : [proposalFallbackSummary(command)];
         const { receipt, replayed } = await repository.execute(actor, workspaceId, { requestId, expectedRevision: prior ? prior.expectedRevision : expected, command: { type: 'agent.proposal.create', payload: { command, summary } } });
         const status = original?.state === 'confirmed' ? 'confirmed' : original?.state === 'rejected' ? 'rejected' : 'awaiting_confirmation';
         const message = status === 'confirmed' ? '此提议已由本人确认执行，本次只回放原回执。' : status === 'rejected' ? '此提议已被本人拒绝，本次没有执行。' : '已提交给用户确认：用户在「接着完成」里确认后才会执行。';
@@ -143,6 +143,15 @@ async function callTool(repository: McpRepository, actor: TokenPayload, name: st
     }
     default: throw new ToolInputError(`未知工具 ${name}`);
   }
+}
+
+const DOMAIN_LABEL: Record<string, string> = { task: '待办', calendar: '日程', crm: '客户跟进', customer: '客户', contact: '联系人', order: '订单', fulfillment: '履约', payable: '应付', finance: '财务', funding: '资金', email: '邮件', market: '市场', development: '开发', fabric: '面料', production: '生产', sample: '样品', rfq: '询价', sourcing: '寻源', lc: '信用证', rebate: '退税', cost: '费用', report: '报表', team: '团队', member: '成员', platform: '公司管理', handover: '交接', notification: '通知', fxrate: '汇率', opening: '期初' };
+const VERB_LABEL: Record<string, string> = { save: '保存', create: '新建', add: '添加', update: '修改', delete: '删除', remove: '移除', cancel: '取消', submit: '提交', confirm: '确认', decide: '审批', approve: '批准', reject: '驳回', void: '作废', reverse: '冲销', close: '关闭', reopen: '重新打开', issue: '签发', generate: '生成', send: '发送', register: '登记', withdraw: '撤回', receive: '收货', allocate: '分配', transfer: '转移', move: '移动', link: '关联', archive: '归档' };
+/** 预演没有业务事件时的提议说明：用中文业务词和单据名称，不向本人展示内部命令名。 */
+export function proposalFallbackSummary(command: { type: string; payload?: Record<string, unknown> }): string {
+  const parts = command.type.split('.'), verb = VERB_LABEL[parts.at(-1) ?? ''] ?? '办理', domain = DOMAIN_LABEL[parts[0]] ?? '业务';
+  const p = command.payload ?? {}, name = [p.title, p.name, p.code, p.subject].find(v => typeof v === 'string' && v.trim()) as string | undefined;
+  return `${verb}${domain}${name ? '：' + name.trim().slice(0, 80) : ''}`;
 }
 
 type RpcRequest = { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: unknown };
