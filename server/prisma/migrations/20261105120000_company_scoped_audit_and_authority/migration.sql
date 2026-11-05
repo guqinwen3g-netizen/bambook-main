@@ -69,34 +69,32 @@ END $$;
 
 -- ── 供应商承诺审批名单（SystemConfig）──
 -- 公司名单存于 scope = 'company:<companyId>'、id = 'company:<companyId>::<key>'。
--- 全局名单内全部账号都恰好只在同一家公司在职时，为该公司复制一份（保留全局行，已有公司行不覆盖）。
-WITH ownership AS (
-  -- 只认“一生只属于一家公司”的账号：停用/退出的成员关系也计入，调动过公司的账号一律不猜。
-  SELECT "userId", (array_agg(DISTINCT "companyId"))[1] AS "companyId"
-  FROM "CompanyMember"
-  GROUP BY "userId" HAVING count(DISTINCT "companyId") = 1 AND bool_or(status = 'active')
-), listed AS (
-  SELECT s.id, s.key, s.value, s.version, s."updatedBy", s."auditReason", u.user_id
+-- 改动前公司会话实际生效的名单 = 全局名单 ∩ 本公司在职成员；这里为每家有在职成员在名单上的公司复制这份交集，
+-- 沿用全局行的版本号（已冻结的 configVersions 仍可比对），保留全局行，已有公司行不覆盖。
+-- 名单是现行配置而非历史记录，所以按当前在职关系计算（与审计回填只认单一公司的口径不同）。
+WITH parsed AS (
+  -- 名单可能存为 JSON 对象，也可能经通用配置接口存为 JSON 字符串；两种都解析，解析不了的跳过。
+  SELECT s.id, s.key, s.version, s."updatedBy", s."auditReason",
+         CASE WHEN jsonb_typeof(s.value) = 'object' THEN s.value
+              WHEN jsonb_typeof(s.value) = 'string' AND pg_input_is_valid(s.value #>> '{}', 'jsonb') THEN (s.value #>> '{}')::jsonb END AS doc
   FROM "SystemConfig" s
-  CROSS JOIN LATERAL jsonb_array_elements_text(
-    -- 名单可能存为 JSON 对象，也可能经通用配置接口存为 JSON 字符串；两种都解析，解析不了的跳过。
-    CASE WHEN jsonb_typeof(s.value) = 'object' AND jsonb_typeof(s.value->'userIds') = 'array' THEN s.value->'userIds'
-         WHEN jsonb_typeof(s.value) = 'string' AND (s.value #>> '{}') ~ '^\s*\{' AND jsonb_typeof(((s.value #>> '{}')::jsonb)->'userIds') = 'array' THEN ((s.value #>> '{}')::jsonb)->'userIds'
-         ELSE '[]'::jsonb END
-  ) AS u(user_id)
   WHERE s.scope = 'global' AND s.key LIKE 'supplierCommitment.approvers.%'
-), attributed AS (
-  SELECT l.id, l.key, l.value, l.version, l."updatedBy", l."auditReason",
-         (array_agg(DISTINCT o."companyId"))[1] AS "companyId",
-         count(*) AS listed, count(o."companyId") AS owned, count(DISTINCT o."companyId") AS companies
-  FROM listed l LEFT JOIN ownership o ON o."userId" = l.user_id
-  GROUP BY l.id, l.key, l.value, l.version, l."updatedBy", l."auditReason"
+), listed AS (
+  -- 只复制改动前就有效的名单（schemaVersion = 1 且 userIds 为数组），无效名单不因复制变有效。
+  SELECT p.id, p.key, p.version, p."updatedBy", p."auditReason", u.user_id
+  FROM parsed p CROSS JOIN LATERAL jsonb_array_elements_text(p.doc->'userIds') AS u(user_id)
+  WHERE p.doc->>'schemaVersion' = '1' AND jsonb_typeof(p.doc->'userIds') = 'array'
+), per_company AS (
+  SELECT l.key, l.version, l."updatedBy", l."auditReason", m."companyId",
+         jsonb_agg(DISTINCT to_jsonb(l.user_id)) AS user_ids
+  FROM listed l JOIN "CompanyMember" m ON m."userId" = l.user_id AND m.status = 'active'
+  GROUP BY l.key, l.version, l."updatedBy", l."auditReason", m."companyId"
 )
 INSERT INTO "SystemConfig" (id, scope, key, "group", label, "valueType", value, encrypted, version, "updatedBy", "auditReason", "createdAt", "updatedAt")
-SELECT 'company:' || a."companyId" || '::' || a.key, 'company:' || a."companyId", a.key, 'rbac', '供应商承诺审批资格', 'json', a.value, false,
-       a.version, a."updatedBy", a."auditReason", now(), (extract(epoch FROM now()) * 1000)::bigint
-FROM attributed a
-WHERE a.listed = a.owned AND a.companies = 1
+SELECT 'company:' || c."companyId" || '::' || c.key, 'company:' || c."companyId", c.key, 'rbac', '供应商承诺审批资格', 'json',
+       jsonb_build_object('schemaVersion', 1, 'userIds', (SELECT jsonb_agg(v ORDER BY v) FROM jsonb_array_elements_text(c.user_ids) v)), false,
+       c.version, c."updatedBy", c."auditReason", now(), (extract(epoch FROM now()) * 1000)::bigint
+FROM per_company c
 ON CONFLICT DO NOTHING;
 
 COMMIT;

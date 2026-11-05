@@ -157,14 +157,24 @@ describe.skipIf(!url || !psql || !existsSync(psql))('company-scoped audit/author
         INSERT INTO "SystemConfig" VALUES ('global::supplierCommitment.approvers.purchase.fabric','global','supplierCommitment.approvers.purchase.fabric','rbac','x','json','{"schemaVersion":1,"userIds":["one"]}',false,3,'u','r',now(),0),
           ('global::supplierCommitment.approvers.purchase.garment','global','supplierCommitment.approvers.purchase.garment','rbac','x','json','{"schemaVersion":1,"userIds":["one","two"]}',false,1,'u','r',now(),0),
           ('global::supplierCommitment.approvers.processing.fabric','global','supplierCommitment.approvers.processing.fabric','rbac','x','json',to_jsonb('{"schemaVersion":1,"userIds":["one"]}'::text),false,2,'u','r',now(),0),
-          ('global::supplierCommitment.approvers.processing.garment','global','supplierCommitment.approvers.processing.garment','rbac','x','json',to_jsonb('not json'::text),false,1,'u','r',now(),0);`);
+          ('global::supplierCommitment.approvers.processing.garment','global','supplierCommitment.approvers.processing.garment','rbac','x','json',to_jsonb('{bad'::text),false,1,'u','r',now(),0),
+          ('global::supplierCommitment.approvers.mixed.fabric','global','supplierCommitment.approvers.mixed.fabric','rbac','x','json','{"schemaVersion":1,"userIds":["two","one","nobody"]}',false,5,'u','r',now(),0),
+          ('global::supplierCommitment.approvers.legacy.fabric','global','supplierCommitment.approvers.legacy.fabric','rbac','x','json','{"userIds":["one"]}',false,1,'u','r',now(),0);`);
       ok(migration); ok(migration);
       const audit = Object.fromEntries(ok('SELECT id || \'=\' || coalesce("companyId"::text, \'\') FROM "AuditLog" ORDER BY id').split('\n').map(line => line.split('=')));
       // 'left' 曾在 A、现在 B：其历史审计不能归给 B（可能是 A 的业务），保持 NULL。
       expect(audit).toEqual({ ambiguous: '', baddetail: '', detail: b, leftmember: '', nomember: '', single: a, target: a });
       expect(ok('SELECT string_agg(id || \'=\' || coalesce("companyId"::text, \'\'), \',\' ORDER BY id) FROM "OrderApprovalAuthority"')).toBe(`r1=${a},r2=,r3=`);
       expect(ok('SELECT string_agg(id || \':\' || version, \',\' ORDER BY id) FROM "SystemConfig"'))
-        .toBe(`company:${a}::supplierCommitment.approvers.processing.fabric:2,company:${a}::supplierCommitment.approvers.purchase.fabric:3,global::supplierCommitment.approvers.processing.fabric:2,global::supplierCommitment.approvers.processing.garment:1,global::supplierCommitment.approvers.purchase.fabric:3,global::supplierCommitment.approvers.purchase.garment:1`);
+        .toBe([`company:${a}::supplierCommitment.approvers.mixed.fabric:5`, `company:${a}::supplierCommitment.approvers.processing.fabric:2`, `company:${a}::supplierCommitment.approvers.purchase.fabric:3`, `company:${a}::supplierCommitment.approvers.purchase.garment:1`,
+          `company:${b}::supplierCommitment.approvers.mixed.fabric:5`, `company:${b}::supplierCommitment.approvers.purchase.garment:1`,
+          'global::supplierCommitment.approvers.legacy.fabric:1', 'global::supplierCommitment.approvers.mixed.fabric:5', 'global::supplierCommitment.approvers.processing.fabric:2', 'global::supplierCommitment.approvers.processing.garment:1', 'global::supplierCommitment.approvers.purchase.fabric:3', 'global::supplierCommitment.approvers.purchase.garment:1'].join(','));
+      // 每家公司只拿到“全局名单 ∩ 本公司在职成员”（one 在 A，two 在 B，nobody 不在任何公司），无效名单不复制。
+      const ids = (company: string, key: string) => ok(`SELECT value->>'userIds' FROM "SystemConfig" WHERE id = 'company:${company}::supplierCommitment.approvers.${key}'`);
+      expect(ids(a, 'mixed.fabric')).toBe('["one"]');
+      expect(ids(b, 'mixed.fabric')).toBe('["two"]');
+      expect(ids(a, 'purchase.garment')).toBe('["one"]');
+      expect(ids(b, 'purchase.garment')).toBe('["two"]');
       ok(`INSERT INTO "OrderApprovalAuthority" (id,"userId","businessLine","companyId") VALUES ('r4','shared','fabric','${b}')`);
       expect(() => ok(`INSERT INTO "OrderApprovalAuthority" (id,"userId","businessLine") VALUES ('r5','shared','fabric')`)).toThrow(/unscoped_userId_businessLine/);
       expect(ok('SELECT count(*) FROM "AuditLog"')).toBe('7');
