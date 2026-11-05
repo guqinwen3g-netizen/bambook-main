@@ -3413,7 +3413,7 @@
    "commands": [],
    "impl": "source",
    "lessons": [],
-   "note": "未找到写入命令；REST /admin/order-approval-authorities、/v1/procurement/contracts/approval-authority"
+   "note": "2026-11-05 公司版核对：公司账号下“审计资格”分区隐藏，/api/admin/order-approval-authorities 未按公司隔离（OrderApprovalAuthority 无公司字段）。公司模式订单审批改由部门领导路由（mist/context.ts），可运转但不能按业务线显式指定审批人；显式配置需加公司隔离（涉及表结构，待用户批准迁移）。"
   },
   {
    "id": "admin-audit-log",
@@ -3431,7 +3431,7 @@
    "commands": [],
    "impl": "source",
    "lessons": [],
-   "note": "只读；REST auditLogs"
+   "note": "2026-11-05 公司版核对：公司账号下“审计日志”分区隐藏（SettingsPage 按 !scoped 显示），/api/admin/audit-logs 对公司账号返回 TENANT_ROUTE_UNAVAILABLE；AuditLog 无 companyId 列，只有部分动作在 detail 里带公司。公司负责人目前看不到本公司审计日志，需加公司隔离（涉及表结构，待用户批准迁移）。"
   },
   {
    "id": "settings-basic",
