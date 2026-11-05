@@ -97,7 +97,10 @@ function validateSubmission(root:MistState,s:OrderGovernanceSnapshot,context:Mis
  const order=getOrder(root,s.orderId);assertReplacementOrder(root,order,s);assertOrderPurposeChangeAllowed(root,order,s.contract);normalizeInternalSupply(s.contract,order,context,false);assertInternalFabricOrderChange(root,order,s.lines,s.contract);
  idsExist(root,s.contract);if(!s.lines.length)fail('至少需要一个条目');date(s.due);currency(s.currency);
  if(s.contract.kind==='external'&&(!s.customerId||!root.customers.some(c=>c.id===s.customerId)))fail('请选择实际客户');
- const missing=missingOrderContractFields(s.contract);if(missing.length)fail('提交审批前请补齐：'+missing.join('、'));
+ const missing=missingOrderContractFields(s.contract);
+ // 外部 T/T 订单的出运放行依赖此比例（0 有效），须在审批前确定，不能拖到出运时才被拦下。
+ if(s.contract.kind==='external'&&!order.replacementSource&&(s.contract.paymentMethod||'TT')==='TT'&&s.contract.preShipmentPercent==null)missing.push('出运前累计收款比例');
+ if(missing.length)fail('提交审批前请补齐：'+missing.join('、'));
  // 信用证付款：客户通常在订单确认后开证，来证由单证员在信用证台账登记与审核，不阻断订单审批。
 }
 function reviewers(context:MistContext,type:MistOrder['type']){const authority=context.authority as (MistContext['authority']&{orderReviewerIds?:Record<'garment'|'fabric',string[]>})|undefined;return [...new Set((authority?.orderReviewerIds?.[type]||[]).filter(id=>typeof id==='string'&&id.trim()))];}

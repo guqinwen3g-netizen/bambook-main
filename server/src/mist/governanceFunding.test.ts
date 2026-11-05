@@ -27,7 +27,7 @@ describe('real order governance and funding repository transaction',()=>{
   const customer=await run({type:'market.customer.create',payload:{input:{name:'客户',country:'CN',city:'上海',industry:'服装',ownerId:'owner',grade:'A',currency:'USD',terms:'TT',incoterm:'FOB',categories:'成衣',creditLimit:0,since:'2026-10-13'}}});
   const customerId=customer.receipt.result.customerId as string;
   const upload=await repo.upload(testActor(),workspace.id,{requestId:'actual-po-file',expectedRevision:revision},{bytes:Buffer.from('Customer written purchase order'),name:'po.txt',mimeType:'text/plain'});revision=upload.workspace.revision;
-  const terms:OrderGovernanceInput={kind:'external',poNumber:'PO-001',confirmationFileIds:[upload.workspace.state.files[0].id],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,paymentNote:'T/T 30% deposit',incoterm:'FOB',deliveryPlace:'上海'};
+  const terms:OrderGovernanceInput={kind:'external',poNumber:'PO-001',confirmationFileIds:[upload.workspace.state.files[0].id],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,preShipmentPercent:30,paymentNote:'T/T 30% deposit',incoterm:'FOB',deliveryPlace:'上海'};
   const created=await run({type:'order.create',payload:{type:'garment',customerId,season:'AW26',currency:'USD',due:'2026-12-01',ownerId:'owner',governance:terms,lines:[{fulfillmentMode:'cmt',cmtIncludedItems:[],name:'外套',style:'A',img:'coat',qty:10,unit:'件',price:10}]}});
   const orderId=created.receipt.result.orderId as string;
   const decide=async(requestId:string)=>{

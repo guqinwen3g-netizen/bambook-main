@@ -20,7 +20,7 @@ function command(value:MistCommand){const next=applyMistCommand(bridge.current.s
 function approveOrder(id:string){
  const fileId=context.id();
  command({type:'files.add',payload:{file:{id:fileId,name:'written-po.pdf',mimeType:'application/pdf',size:4,storageKey:'fixture/'+fileId,createdAt:context.now}}});
- command({type:'order.governance.saveDraft',payload:{orderId:id,input:{kind:'external',poNumber:'ACTION-PO-'+id,confirmationFileIds:[fileId],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,paymentNote:'T/T 30/70',incoterm:'FOB',deliveryPlace:'上海'}}});
+ command({type:'order.governance.saveDraft',payload:{orderId:id,input:{kind:'external',poNumber:'ACTION-PO-'+id,confirmationFileIds:[fileId],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,preShipmentPercent:30,paymentNote:'T/T 30/70',incoterm:'FOB',deliveryPlace:'上海'}}});
  command({type:'order.governance.submit',payload:{orderId:id}});
  const previous=bridge.actor;bridge.actor='reviewer';
  command({type:'order.governance.decide',payload:{id,decision:'approved',note:'已核对书面PO与全部条目'}});bridge.actor=previous;

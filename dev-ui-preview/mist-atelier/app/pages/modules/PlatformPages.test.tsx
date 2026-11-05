@@ -20,7 +20,7 @@ function approveOrder(orderId:string){
  const apply=(command:MistCommand,actor=context)=>{const result=applyMistCommand(bridge.workspace.state,command,actor);bridge.workspace.state=result.state;return result.result;};
  const fileId=context.id();
  apply({type:'files.add',payload:{file:{id:fileId,name:'written-po.pdf',mimeType:'application/pdf',size:4,storageKey:'fixture/'+fileId,createdAt:context.now}}});
- apply({type:'order.governance.saveDraft',payload:{orderId,input:{kind:'external',poNumber:'UI-PO-'+orderId,confirmationFileIds:[fileId],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,paymentNote:'T/T 30/70',incoterm:'FOB',deliveryPlace:'上海'}}});
+ apply({type:'order.governance.saveDraft',payload:{orderId,input:{kind:'external',poNumber:'UI-PO-'+orderId,confirmationFileIds:[fileId],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,preShipmentPercent:30,paymentNote:'T/T 30/70',incoterm:'FOB',deliveryPlace:'上海'}}});
  apply({type:'order.governance.submit',payload:{orderId}});
  apply({type:'order.governance.decide',payload:{id:orderId,decision:'approved',note:'已核对书面PO与全部条目'}},{...context,actorId:'leader',actorName:'授权负责人'});
 }

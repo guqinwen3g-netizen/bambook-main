@@ -52,7 +52,7 @@ it('BB-ORD-3 creates a 2 colour × 4 size garment order; quantity follows the gr
   input('条目 1 黑 · S 数量', '5'); input('条目 1 黑 · L 数量', '15');
   expect(host.querySelector('[data-breakdown-total]')!.textContent).toBe('合计 120 件');
   expect((getByLabelText(host, /^数量/) as HTMLInputElement).disabled).toBe(true);
-  await next(); input('交期', '2026-12-01'); await next();
+  await next(); input('交期', '2026-12-01'); input('出运前累计收款（%）', '0'); await next();
   expect(host.querySelector('[data-breakdown-summary]')!.textContent).toBe('藏青：S 10 / M 20 / L 30 / XL 40；黑：S 5 / M 0 / L 15 / XL 0（合计 120 件）');
   await next();
   expect(host.textContent).toContain('C1 · 分色分码');
@@ -94,7 +94,7 @@ it('BB-ORD-3 brings colours, width, weight and composition from a fabric develop
   expect((getByLabelText(host, '条目 1 克重（g/m²）') as HTMLInputElement).value).toBe('320');
   expect((getByLabelText(host, '条目 1 成分') as HTMLInputElement).value).toBe('100% 羊毛');
   input('条目 1 藏青 NV-01 数量', '300'); input('条目 1 黑 BK-02 数量', '200.5');
-  await next(); input('交期', '2026-12-01'); await next(); await next();
+  await next(); input('交期', '2026-12-01'); input('出运前累计收款（%）', '0'); await next(); await next();
   await click(getByRole(host, 'button', { name: '创建订单草稿' }));
   const line = store.state!.orderLines.find(row => row.orderId === store.state!.orders[0]?.id)!;
   expect(line).toMatchObject({ qty: 500.5, sourceVersionId: 'ver-f', breakdown: { kind: 'fabric', width: 150, weight: 320, composition: '100% 羊毛', rows: [{ color: '藏青 NV-01', quantity: 300 }, { color: '黑 BK-02', quantity: 200.5 }] } });

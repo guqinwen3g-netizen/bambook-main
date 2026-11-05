@@ -6,7 +6,7 @@ function fixture(){let i=0;const c:MistContext={id:()=>`platform-${++i}`,now:'20
 const run=(state:MistState,command:PlatformCommand,c:MistContext)=>applyMistCommand(state,command,c);
 function orderApprovalFixture(status:'draft'|'pending'|'approved'='approved'){
  const f=fixture();f.state.files.push({id:'written-po',name:'po.pdf',mimeType:'application/pdf',size:4,storageKey:'workspace/written-po',createdAt:f.c.now});
- let state=applyMistCommand(f.state,{type:'order.governance.saveDraft',payload:{orderId:f.orderId,input:{kind:'external',poNumber:'PLATFORM-PO',confirmationFileIds:['written-po'],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,paymentNote:'T/T 30/70',incoterm:'FOB',deliveryPlace:'上海'}}},f.c).state;
+ let state=applyMistCommand(f.state,{type:'order.governance.saveDraft',payload:{orderId:f.orderId,input:{kind:'external',poNumber:'PLATFORM-PO',confirmationFileIds:['written-po'],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,preShipmentPercent:30,paymentNote:'T/T 30/70',incoterm:'FOB',deliveryPlace:'上海'}}},f.c).state;
  if(status!=='draft')state=applyMistCommand(state,{type:'order.governance.submit',payload:{orderId:f.orderId}},f.c).state;
  if(status==='approved')state=applyMistCommand(state,{type:'order.governance.decide',payload:{id:f.orderId,decision:'approved',note:'核对PO与全部条目'}},{...f.c,actorId:'leader',actorName:'授权负责人'}).state;
  return{...f,state};
