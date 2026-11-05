@@ -1363,8 +1363,9 @@
     "payable.deduction.register",
     "payable.deduction.reverse"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机独立数据副本界面走查：售后索赔 CLM-2026-0001（核实、工厂同意从货款扣 2400 CNY）后，应付票据 AP-2026-0001「登记索赔扣款」部分扣 1500 → 冲回（原记录保留标记已冲回、未付恢复）→ 扣满 2400，追偿自动记为已落实、追偿待办办结。索赔前置步骤经命令建立。"
   },
   {
    "id": "bill-register",
@@ -2421,9 +2422,9 @@
     "order.internal.returnRejected",
     "order.internal.cancel"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "InternalDeliveryPanel.tsx:57-61，经 OrderListPage.tsx:87 进入"
+   "note": "2026-11-05 本机独立数据副本界面走查：内部成品订单 SO-G-2026-0011 工厂直送 20 件 → 三步「登记内部交付」→ 接收人在「内部接收」点收 18 / 拒收 2（订单变“部分内部交付”）→ 登记拒收退回 2 件。缺陷：接收账号下拉列出全体成员，选无订单办理权限者（如管理员）在最后一步才被拒；待服务端下发可接收名单后过滤。"
   },
   {
    "id": "order-overdue-jump",
