@@ -69,7 +69,7 @@ export function createCompanyEmploymentService(prisma: PrismaClient, companyId: 
     return target;
   }
   async function audit(tx: Tx, action: string, userId: string, detail: Record<string, unknown>) {
-    await tx.auditLog.create({ data: { id: randomUUID(), actorId, action, targetType: 'EmployeeProfile', targetId: userId, detail: { ...detail, companyId } as Prisma.InputJsonValue } });
+    await tx.auditLog.create({ data: { id: randomUUID(), actorId, action, targetType: 'EmployeeProfile', targetId: userId, companyId, detail: { ...detail, companyId } as Prisma.InputJsonValue } });
   }
   async function event(tx: Tx, input: EventSnapshot) {
     return tx.employmentEvent.create({ data: { id: randomUUID(), companyId, userId: input.userId,

@@ -48,7 +48,7 @@ export function createAuthorizationSnapshotGuard(options: {
         // 平台进入公司后的变更仍使用真实平台人员身份留痕。
         const recorded = await options.prisma.auditLog.create({ data: {
           id: `alog_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, actorId: user.id, action: 'platform_company_request',
-          targetType: 'Company', targetId: current.platformCompany.companyId, ip: req.ip || null,
+          targetType: 'Company', targetId: current.platformCompany.companyId, companyId: current.platformCompany.companyId, ip: req.ip || null,
           detail: { method: req.method, path: req.path, startedAt: current.platformCompany.startedAt },
         } }).then(() => true, () => false);
         if (!recorded) return res.status(503).json({ error: 'AUDIT_UNAVAILABLE', message: '暂时无法记录管理操作，请稍后重试。' });

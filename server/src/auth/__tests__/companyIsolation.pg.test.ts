@@ -59,7 +59,7 @@ describe.skipIf(!url)('real HTTP company isolation',()=>{
  it('company owner cannot manage the shared platform AI connection',async()=>{expect((await api().get('/api/mist/ai/platform-model').set('Authorization',bearer())).status).toBe(403);});
  it('company owner is not platform admin',async()=>{expect((await api().get('/api/platform/companies').set('Authorization',bearer())).status).toBe(403);});
  it('platform identity may list companies',async()=>{expect((await api().get('/api/platform/companies').set('Authorization','Bearer '+pt)).status).toBe(200);});
- it.each(['/api/v1/orders','/api/admin/audit-logs','/api/hr/payroll-runs','/api/admin/order-approval-authorities'])('closes unscoped old endpoint %s',async p=>{expect((await api().get(p).set('Authorization',bearer())).status).toBe(403);});
+ it.each(['/api/v1/orders','/api/hr/payroll-runs','/api/admin/knowledge-acl'])('closes unscoped old endpoint %s',async p=>{expect((await api().get(p).set('Authorization',bearer())).status).toBe(403);});
  it('scopes role list',async()=>{const r=await api().get('/api/admin/roles').set('Authorization',bearer());expect(r.status).toBe(200);expect(JSON.stringify(r.body)).not.toContain(companies[1]);});
  it('rejects foreign role without clearing existing grants',async()=>{const r=await api().patch('/api/admin/users/'+user+'/roles').set('Authorization',bearer()).send({roles:['role-super-admin@'+companies[1]],departmentId:depts[0]});expect(r.status).toBe(400);expect(await db.userRole.count({where:{userId:user}})).toBe(2);});
  it('rejects foreign department assignment',async()=>{expect((await api().patch('/api/admin/users/'+user+'/roles').set('Authorization',bearer()).send({roles:[],departmentId:depts[1]})).status).toBe(400);});

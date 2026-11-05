@@ -200,7 +200,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
     });
 
     await options.prisma.auditLog.create({
-      data: { id: `alog_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, actorId: user.id, action: 'login', ip: req.ip },
+      data: { id: `alog_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, actorId: user.id, action: 'login', ip: req.ip, companyId: company?.id ?? null },
     }).catch(() => undefined);
 
     return res.json({

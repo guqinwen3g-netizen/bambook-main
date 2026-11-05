@@ -19,7 +19,7 @@ export async function assertSupplierApprovalCenterRead(tx: Prisma.TransactionCli
   const revision = await tx.supplierCommitmentRevision.findUniqueOrThrow({ where: { id: approval.targetId! } });
   const kind = revision.purchaseOrderId ? 'purchase' : 'processing';
   const snapshot = supplierSnapshot(revision.snapshot, kind);
-  const authority = await resolveSupplierApprovers(tx, kind, snapshot.sourceProofs);
+  const authority = await resolveSupplierApprovers(tx, kind, snapshot.sourceProofs, actor.companyId ?? null);
   if (!Array.isArray(approval.eligibleReviewerIds) || !approval.eligibleReviewerIds.includes(actor.userId)
     || !authority.eligibleReviewerIds.includes(actor.userId))
     throw new SupplierContractError('NOT_FOUND', '审批不存在或已不在当前审批范围。', 404);
@@ -73,7 +73,7 @@ export async function readSupplierApprovalReviewDetail(tx: Prisma.TransactionCli
   if (approval.status !== 'pending') detail.approvalBlockers.push('本次审批已处理，历史内容可回看。');
   else {
     try {
-      const authority = await resolveSupplierApprovers(tx, kind, snapshot.sourceProofs);
+      const authority = await resolveSupplierApprovers(tx, kind, snapshot.sourceProofs, actor.companyId ?? null);
       if (!Array.isArray(approval.eligibleReviewerIds) || !approval.eligibleReviewerIds.includes(actor.userId)
         || !authority.eligibleReviewerIds.includes(actor.userId)) detail.approvalBlockers.push('当前账号没有本次明确审批资格。');
       else {

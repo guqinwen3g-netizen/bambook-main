@@ -129,7 +129,7 @@ export function selfRegistrationRouter(options: Options) {
         const defaults = await readCompanyDefaults(tx);
         const created = await createCompany(tx, { slug: code, name: companyName, plan: defaults.plan, seatLimit: defaults.seatLimit, ownerUserId: userId });
         if (business || size) await tx.company.update({ where: { id: created.company.id }, data: { settings: { ...((created.company.settings as Record<string, unknown>) ?? {}), registration: { ...(business ? { business } : {}), ...(size ? { size } : {}) } } } });
-        await tx.auditLog.create({ data: { id: randomUUID(), actorId: userId, action: 'platform.company.self_register', targetType: 'Company', targetId: created.company.id, detail: { name: companyName, code, adminEmail: account.email }, ip: req.ip } });
+        await tx.auditLog.create({ data: { id: randomUUID(), actorId: userId, action: 'platform.company.self_register', targetType: 'Company', targetId: created.company.id, companyId: created.company.id, detail: { name: companyName, code, adminEmail: account.email }, ip: req.ip } });
         return created.company;
       });
       return res.status(201).json({ ok: true, company: { name: company.name, code: company.slug }, email: account.email });
@@ -153,7 +153,7 @@ export function selfRegistrationRouter(options: Options) {
       await options.prisma.$transaction(async tx => {
         await tx.userAccount.create({ data: { id: userId, displayName: account.displayName, email: account.email, passwordHash, status: 'pending', metadata: metadata(req, { selfRegistration: 'join', joinCompanyId: company.id }) } });
         await tx.companyMember.create({ data: { id: randomUUID(), companyId: company.id, userId, status: 'pending' } });
-        await tx.auditLog.create({ data: { id: randomUUID(), actorId: userId, action: 'company.member.join_request', targetType: 'Company', targetId: company.id, detail: { email: account.email, displayName: account.displayName }, ip: req.ip } });
+        await tx.auditLog.create({ data: { id: randomUUID(), actorId: userId, action: 'company.member.join_request', targetType: 'Company', targetId: company.id, companyId: company.id, detail: { email: account.email, displayName: account.displayName }, ip: req.ip } });
       });
       return res.status(201).json({ ok: true, company: { name: company.name }, email: account.email });
     } catch (error: any) {

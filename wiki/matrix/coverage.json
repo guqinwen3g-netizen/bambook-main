@@ -3412,9 +3412,9 @@
     "admin-panel"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "2026-11-05 公司版核对：公司账号下“审计资格”分区隐藏，/api/admin/order-approval-authorities 未按公司隔离（OrderApprovalAuthority 无公司字段）。公司模式订单审批改由部门领导路由（mist/context.ts），可运转但不能按业务线显式指定审批人；显式配置需加公司隔离（涉及表结构，待用户批准迁移）。"
+   "note": "2026-11-05 公司版核对：公司账号下“审计资格”分区隐藏，/api/admin/order-approval-authorities 未按公司隔离（OrderApprovalAuthority 无公司字段）。公司模式订单审批改由部门领导路由（mist/context.ts），可运转但不能按业务线显式指定审批人；显式配置需加公司隔离（涉及表结构，待用户批准迁移）。；2026-11-05 补公司隔离（迁移 20261105120000，用户批准）后本机 PostgreSQL 走查：公司负责人在「审批资格」只看到本公司成员为候选人，配置成衣订单审批人后写入本公司归属；另一家公司负责人看不到该配置，候选人只有本公司成员。"
   },
   {
    "id": "admin-audit-log",
@@ -3430,9 +3430,9 @@
     "admin-panel"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "2026-11-05 公司版核对：公司账号下“审计日志”分区隐藏（SettingsPage 按 !scoped 显示），/api/admin/audit-logs 对公司账号返回 TENANT_ROUTE_UNAVAILABLE；AuditLog 无 companyId 列，只有部分动作在 detail 里带公司。公司负责人目前看不到本公司审计日志，需加公司隔离（涉及表结构，待用户批准迁移）。"
+   "note": "2026-11-05 公司版核对：公司账号下“审计日志”分区隐藏（SettingsPage 按 !scoped 显示），/api/admin/audit-logs 对公司账号返回 TENANT_ROUTE_UNAVAILABLE；AuditLog 无 companyId 列，只有部分动作在 detail 里带公司。公司负责人目前看不到本公司审计日志，需加公司隔离（涉及表结构，待用户批准迁移）。；2026-11-05 补公司隔离（迁移 20261105120000，用户批准）后本机 PostgreSQL 走查：公司负责人在「审计日志」只看到本公司 13 条记录；请求里伪造他公司 companyId 结果不变；配置审批资格的审计记录带本公司归属。"
   },
   {
    "id": "settings-basic",

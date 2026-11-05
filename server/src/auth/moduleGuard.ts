@@ -34,8 +34,9 @@ export interface ModuleAuthGuardOptions {
 export function createModuleAuthGuard(opts: ModuleAuthGuardOptions) {
   return (req: Request, res: Response, next: NextFunction) => {
     // 把会话所属公司写进请求上下文：后续任何权限重载都只按这家公司计算。
-    const proceed = (companyId: string | null | undefined) =>
-      runWithCompanyContext(companyId ?? null, () => next());
+    // 平台人员进入公司后台时一并保留所进入的公司（platformCompany），不能被模块守卫覆盖掉。
+    const proceed = (companyId: string | null | undefined, platformCompany?: { companyId: string; companyName: string; startedAt: string }) =>
+      runWithCompanyContext(companyId ?? platformCompany?.companyId ?? null, () => next(), platformCompany);
     if (!opts.requireAuth) {
       // Even in dev mode, a real JWT principal always wins over a synthesized dev actor
       // (prevents spoofed body roles from overriding an authenticated session).
@@ -43,7 +44,7 @@ export function createModuleAuthGuard(opts: ModuleAuthGuardOptions) {
       if (actor) {
         (req as any).actor = actor;
         (req as any).authSource = 'user-session';
-        return proceed(actor.companyId);
+        return proceed(actor.companyId, actor.platformCompany);
       }
       if (opts.devActorFactory) {
         (req as any).actor = opts.devActorFactory(req);
@@ -62,7 +63,7 @@ export function createModuleAuthGuard(opts: ModuleAuthGuardOptions) {
     if (actor) {
       (req as any).actor = actor;
       (req as any).authSource = 'user-session';
-      return proceed(actor.companyId);
+      return proceed(actor.companyId, actor.platformCompany);
     }
 
     // Priority 2: API key (accept both canonical and legacy header names)

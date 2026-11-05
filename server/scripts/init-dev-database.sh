@@ -21,6 +21,7 @@ has_ledger=$(psql "${DATABASE_URL%%\?*}" -Atc "select to_regclass('public.\"_pri
 if [ "$has_ledger" != t ]; then
   echo "== empty database: db push + baseline"
   "$prisma" db push --skip-generate
+  psql "${DATABASE_URL%%\?*}" -v ON_ERROR_STOP=1 -q -f prisma/sql/post-db-push.sql
   for dir in prisma/migrations/*/; do
     "$prisma" migrate resolve --applied "$(basename "$dir")" >/dev/null
   done

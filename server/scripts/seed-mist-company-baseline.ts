@@ -110,8 +110,10 @@ async function main(){
     const memberships=await tx.teamMember.findMany({where:{userId:oldId,leftAt:null}});
     for(const member of memberships)await tx.teamMember.upsert({where:{teamId_userId:{teamId:member.teamId,userId:spec.id}},create:{id:randomUUID(),teamId:member.teamId,userId:spec.id,role:member.role,joinedAt:member.joinedAt},update:{role:member.role,leftAt:null}});
     await tx.teamMember.updateMany({where:{userId:oldId,leftAt:null},data:{leftAt:new Date(now)}});
+    // 审批资格按公司归属：新账号继承旧账号同一归属（公司或无公司）下的授权。
     const approvals=await tx.orderApprovalAuthority.findMany({where:{userId:oldId,active:true}});
-    for(const approval of approvals)await tx.orderApprovalAuthority.upsert({where:{userId_businessLine:{userId:spec.id,businessLine:approval.businessLine}},create:{userId:spec.id,businessLine:approval.businessLine,createdBy:roster.owner.id},update:{active:true}});
+    for(const approval of approvals){const scope={companyId:approval.companyId??companyId??null,userId:spec.id,businessLine:approval.businessLine};const found=await tx.orderApprovalAuthority.findFirst({where:scope,select:{id:true}});
+     if(found)await tx.orderApprovalAuthority.update({where:{id:found.id},data:{active:true}});else await tx.orderApprovalAuthority.create({data:{...scope,createdBy:roster.owner.id}});}
     await tx.orderApprovalAuthority.updateMany({where:{userId:oldId},data:{active:false}});
    }
    const replacements=new Map(ACCOUNT_SPECS.map(row=>[sourcePrefix+row.suffix,row.id]));

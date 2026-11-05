@@ -172,7 +172,7 @@ export function createSupplierCommitmentService(prisma: PrismaClient) {
       await assertSupplierLineResponsibilities(tx, snapshot, fresh.sources, true);
       await reconcileSupplierDemandPlan(tx, kind, id, snapshot, snapshot.businessOwnerId, { frozen: true });
       await validateSupplierAndLocation(tx, snapshot);
-      const authority = await resolveSupplierApprovers(tx, kind, fresh.sources), approvalId = `SCAP_${randomUUID()}`;
+      const authority = await resolveSupplierApprovers(tx, kind, fresh.sources, actor.companyId ?? null), approvalId = `SCAP_${randomUUID()}`;
       const payload = { schemaVersion: 1, contractKind: kind, contractId: id, revisionId: revision.id, revision: revision.revision,
         contentFingerprint: revision.contentFingerprint, documentSnapshot: snapshot, sourceIds: [...new Set(snapshot.sourceProofs.map(source => source.orderId))].sort(),
         sourceOrderLineIds: snapshot.lines.map(line => line.orderLineId), approvalConfigVersions: authority.configVersions };
@@ -261,7 +261,7 @@ export async function decideSupplierCommitmentApproval(params: { prisma: PrismaC
     const revision = await tx.supplierCommitmentRevision.findUnique({ where: { id: initialRevision.id } });
     const approval = await tx.approvalRequest.findUnique({ where: { id: initial.id } });
     if (!revision || !approval) return supplierFail('NOT_FOUND', '审批依据已失效。', 404);
-    const snapshot = supplierSnapshot(revision.snapshot, kind), authority = await resolveSupplierApprovers(tx, kind, snapshot.sourceProofs);
+    const snapshot = supplierSnapshot(revision.snapshot, kind), authority = await resolveSupplierApprovers(tx, kind, snapshot.sourceProofs, params.actor.companyId ?? null);
     const candidates = Array.isArray(approval.eligibleReviewerIds) ? approval.eligibleReviewerIds : [];
     if (!candidates.includes(started.actor.userId) || !authority.eligibleReviewerIds.includes(started.actor.userId)) return supplierFail('FORBIDDEN', '当前账号不具备本次供应商承诺的明确审批资格。', 403);
     await freshSupplierActor(tx, params.actor, 'approve');

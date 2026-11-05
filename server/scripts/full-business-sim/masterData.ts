@@ -405,7 +405,8 @@ export async function writeScenarioMasterDataInTransaction(tx: Prisma.Transactio
     for (const family of ['fabric', 'garment'] as const) {
       const configured = await tx.orderApprovalAuthority.findMany({ where: { businessLine: family, active: true } });
       if (configured.some(row => !data.approvalAuthorities[family].includes(row.userId))) throw new Error(`SCENARIO_AUTHORITY_EXISTS: configure ${family} policy explicitly; do not overwrite another roster`);
-      for (const userId of data.approvalAuthorities[family]) await tx.orderApprovalAuthority.upsert({ where: { userId_businessLine: { userId, businessLine: family } },
-        create: { id: `${namespace}__authority_${family}_${digest(userId).slice(0, 12)}`, userId, businessLine: family, active: true, createdBy: data.cast.owner.id }, update: {} });
+      // 无公司归属的场景配置：(userId, businessLine) 由 companyId IS NULL 的局部唯一索引约束。
+      for (const userId of data.approvalAuthorities[family]) if (!(await tx.orderApprovalAuthority.findMany({ where: { companyId: null, userId, businessLine: family } })).length)
+        await tx.orderApprovalAuthority.create({ data: { id: `${namespace}__authority_${family}_${digest(userId).slice(0, 12)}`, companyId: null, userId, businessLine: family, active: true, createdBy: data.cast.owner.id } });
     }
 }
