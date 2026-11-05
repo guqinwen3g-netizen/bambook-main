@@ -1251,6 +1251,20 @@ export class MistRepository {
     }
   }
   /** 小组协作范围：本公司在用的小组、各组已存范围与当前匹配数量。范围明细会涉及全公司业务，限人事小组管理权限。 */
+  /** 内部交付可选的接收账号：与 order.internal.send 的最终校验同一口径（在用成员且有订单查看和办理权限）。 */
+  async internalReceivers(prior: TokenPayload, workspaceId: string) {
+    return this.transact(async db => {
+      const { row, actor } = await this.own(db, prior, workspaceId, 'orders:read');
+      const ids = [...new Set(candidateIds(row))], out: Array<{ id: string; name: string }> = [];
+      for (const id of ids) {
+        try {
+          const subject = await this.reviewSubject(db, actor, id, '接收账号');
+          if (hasScope(subject, 'orders:read') && hasScope(subject, 'orders:write')) out.push({ id, name: (subject as any).displayName || members(row.state).find((m: any) => m.userId === id)?.name || id });
+        } catch { /* 账号当前不可核验：不列入 */ }
+      }
+      return { receivers: out };
+    });
+  }
   async teamScopes(prior: TokenPayload, workspaceId: string) {
     return this.transact(async db => {
       const { row } = await this.own(db, prior, workspaceId, 'hr:write'), teams = await companyTeams(db, row.companyId), stored = row.state.teamScopes ?? [];

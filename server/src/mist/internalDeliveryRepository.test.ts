@@ -33,9 +33,12 @@ it('requires receiving write authority and exact assignment without granting sou
  const repo=new MistRepository(roleDb,contract,new MistPrivateFiles(dir),auth.authorize,()=>new Date(f.context.now));
  const actor=(id:string)=>({...testActor(id),companyId:company,roles:[]});
  const send={requestId:'handover',expectedRevision:0,command:{type:'order.internal.send' as const,payload:{orderId:f.target.orderId,productionId:f.productionId,source:{kind:'receipt' as const,id:'finished-receipt'},quantity:10,receiverId:'warehouse',location:'Sample room',date:'2026-10-30',evidence:'Internal handover',expectedRevision:0}}};
+ // The receiver list offered to the sender uses the same rule as the send check.
+ expect((await repo.internalReceivers(actor('garment'),wid)).receivers.map(r=>r.id).sort()).toEqual(['garment','reviewer']);
  await expect(repo.execute(actor('garment'),wid,send)).rejects.toMatchObject({status:422});
  expect(db.workspaces.get(wid).state.internalDeliveries||[]).toEqual([]);
  auth.users.set('warehouse',{active:true,permissions:['orders:read','orders:write']});
+ expect((await repo.internalReceivers(actor('garment'),wid)).receivers.map(r=>r.id).sort()).toEqual(['garment','reviewer','warehouse']);
  receiverAttributes=[];await expect(repo.execute(actor('garment'),wid,send)).rejects.toMatchObject({status:422});receiverAttributes=['garment_business'];
  const saved=await repo.execute(actor('garment'),wid,send),id=saved.receipt.result.id;
  expect((await repo.execute(actor('garment'),wid,send)).receipt.result.id).toBe(id);
