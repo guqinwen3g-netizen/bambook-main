@@ -108,8 +108,9 @@
     "files.add",
     "order.files.add"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机独立数据副本界面走查：订单详情「订单资料」上传 PDF，写入订单 fileIds 并列出；点击名称打开预览（测试文件为占位 PDF，预览提示无法解析）；下载走浏览器下载。教学课未录。"
   },
   {
    "id": "calendar",
@@ -127,8 +128,9 @@
    "commands": [
     "calendar.save"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机独立数据副本界面走查：新建日程关联订单 SO-G-2026-018、邀请参与人；共享日程全员可见；勾选“仅本人与参与人可见”后只有本人与参与人可见（财务、主管看不到）。教学课未录。"
   },
   {
    "id": "team-nudge",
@@ -170,9 +172,9 @@
     "email.flag",
     "email.followUp"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "仅本地工作空间能力；示例邮件不是真实收发"
+   "note": "2026-11-05 本机独立数据副本界面走查（示例邮箱，非真实收发）：打开来信 → 星标 → 关联订单 SO-G-2026-018 → 生成跟进（写入负责人待办与日历）→ 回复并保存草稿（收件人、Re: 主题、引用原文自动带出）。发现示例签名仍为旧名“竹衍服饰”，已改为雾织贸易。"
   },
   {
    "id": "email-real-send",
@@ -211,9 +213,9 @@
    "commands": [
     "member.groups.set"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "教学只在本地演示公司演示，不在共享环境改账号权限"
+   "note": "2026-11-05 本机独立数据副本界面走查（本机演示公司）：公司管理 → 数据访问授权周敏进入公司；在“管理业务线”勾选成衣，读回 memberGroups 为 garment。成员交接区列出原负责人名下项数。公司库（人事小组）的岗位与小组维护需连真实数据库，未走。"
   },
   {
    "id": "org-team-scope",
@@ -231,8 +233,9 @@
    "commands": [
     "teamScope.save"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 公司版界面走查（本机临时 PostgreSQL 库）：公司管理 → 小组范围为“成衣一组”添加条件“客户 = Northwind Atelier AB”，当前匹配实时预览，写调整说明后保存，读回范围版本与条件；空条件保存被拒（至少限定客户、业务线或供应商）。按范围裁剪业务数据由 dataScopeMatrix / securityScopeFixes 测试覆盖，界面上以组员身份核对可见范围未走。"
   },
   {
    "id": "org-settings",
@@ -250,8 +253,9 @@
    "commands": [
     "settings.update"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机独立数据副本界面走查：公司管理 → 公司资料补登中英文注册地址并保存；错误邮箱格式被拒并提示示例格式；写入设置记录。"
   },
   {
    "id": "handover",
@@ -288,8 +292,9 @@
     "account"
    ],
    "commands": [],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机独立数据副本界面走查：我的账号显示姓名、公司、部门、小组；「打开手册」进入 /manual/ 员工使用手册（版本号在标题）。"
   },
   {
    "id": "customer-profile",
@@ -555,8 +560,9 @@
     "rfq.quote",
     "rfq.award"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机独立数据副本界面走查：新建面料寻样 SR-F-2026-0004 → 添加候选（华盛毛纺 HS-2811-GRS 62 CNY、MOQ、交期）并保存答复，状态“待发起人确认”→ 确认结果后结案。询价比价 RFQ-2026-0001 两家报价按人民币折算排名，选第 2 名江南成衣定标：理由必填，定标记录“非最低价（排名第 2）”并生成采购草稿 PO-2026-00012。邀请与登记报价使用种子数据。"
   },
   {
    "id": "quote-build",
@@ -1361,8 +1367,9 @@
     "payable.deduction.register",
     "payable.deduction.reverse"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机独立数据副本界面走查：售后索赔 CLM-2026-0001（核实、工厂同意从货款扣 2400 CNY）后，应付票据 AP-2026-0001「登记索赔扣款」部分扣 1500 → 冲回（原记录保留标记已冲回、未付恢复）→ 扣满 2400，追偿自动记为已落实、追偿待办办结。索赔前置步骤经命令建立。"
   },
   {
    "id": "bill-register",
@@ -1853,9 +1860,9 @@
     "fulfillment.inventory.move",
     "fulfillment.inventory.shipment.correct"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "2026-11-04 仓库岗已走移位（6000 粒 C-11→B-03-2，批次按位置分列，总可用不变）；出运关联修正未走"
+   "note": "2026-11-05 本机独立数据副本界面走查：纽扣 6600 粒部分移位 2400 粒到 A-02，总数不变、批次显示两处库位；离港自动出库关联「更正」为暂未确认（保留待核对、记录原因与依据），再「关联出运」回到 SHP-2026-00004。教学课未录。"
   },
   {
    "id": "packing",
@@ -1945,8 +1952,9 @@
     "fulfillment.shipments.sent",
     "fulfillment.shipments.depart"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机独立数据副本界面走查：供应商直交分批回交 120+180 后离港（只交接部分时离港按钮禁用并写明差额；ATD 早于对客发送被拒）；入我方仓 200 件后离港自动出库（可用 200→0）。教学课未录。"
   },
   {
    "id": "shipment-cancel",
@@ -2181,11 +2189,12 @@
     "order.internal.receive",
     "order.internal.cancel"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
    "pages": [
     "45-内部面料发料与点收.md"
-   ]
+   ],
+   "note": "2026-11-05 本机数据副本走查（物料交接部分）：加工单提交→审批人手写签字批准→登记线下发出与供应商确认后，仓库对加工单登记发料（纽扣 6600 粒、内部面料 2000 米，可发米数随分配余额更新），接收负责人登记点收（接收 6500、拒收 100，状态部分接收）。走查中修复：签字板未完成布局时产生无效签字且审批窗口不报错；成员交接未移交内部面料接收人（且需同步批准快照，否则订单无法继续履约）；负责人离职时发料报错改为指明订单和下一步。成品内部交付 order.internal.* 尚未走查；成品内部交付 order.internal.send / receive（含拒收退回）已于同日本机副本走查（见 GO-LIVE“同日继续走查”）"
   },
   {
    "id": "sourcing-transfer",
@@ -2263,9 +2272,9 @@
     "agent.proposal.confirm",
     "agent.proposal.reject"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "实施 Agent 已用官方 MCP 客户端走通“采购结算 → 财务提议 → 本人确认 → 读取结果”一条链；其他客户端与业务未验收"
+   "note": "实施 Agent 已用官方 MCP 客户端走通“采购结算 → 财务提议 → 本人确认 → 读取结果”一条链；其他客户端与业务未验收；2026-11-05 公司模式（PostgreSQL 独立库）走查：MCP 提议进入「接着完成」，确认窗口列出中文字段（期限、标题），确认后任务写入、提议记为已确认；提议说明与字段名原先显示内部命令名和字段键，已改为中文"
   },
   {
    "id": "mcp-connect",
@@ -2281,9 +2290,9 @@
     "account"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "合入后 8 个工具（新增 bambook_audit）、308 条命令、24 类读取对象；委托令牌需本人签发"
+   "note": "合入后 8 个工具（新增 bambook_audit）、308 条命令、24 类读取对象；委托令牌需本人签发；2026-11-05 公司模式（PostgreSQL 独立库）走查：只读连接 MCP initialize/tools/list 10 个工具、查询客户与审计可用，预演与执行被拒；可办理连接预演 task.save 后执行记为提议，本人确认后写入。真实模型客户端未测"
   },
   {
    "id": "agent-audit-query",
@@ -2299,9 +2308,9 @@
     "account"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "#574 已合入并发布（运行提交 a9a78ee8）：账号页「Agent操作记录」、REST 与 bambook_audit；尚无员工课程"
+   "note": "#574 已合入并发布（运行提交 a9a78ee8）：账号页「Agent操作记录」、REST 与 bambook_audit；尚无员工课程；2026-11-05 公司模式（PostgreSQL 独立库）走查：账号页「Agent 操作记录」列出 Agent 提议与人工确认两条，含经办人与时间"
   },
   {
    "id": "agent-self-connect",
@@ -2319,7 +2328,7 @@
    "commands": [],
    "impl": "walked",
    "lessons": [],
-   "note": "#577/#578 已合入 main，发布前复验发现签发问题已回退，修复后尚待发布；发布前不得写成员工可用；2026-11-04 本机业务员走查：新建只读连接、续签、撤销（fin54）"
+   "note": "#577/#578 已合入 main，发布前复验发现签发问题已回退，修复后尚待发布；发布前不得写成员工可用；2026-11-04 本机业务员走查：新建只读连接、续签、撤销（fin54）；2026-11-05 公司模式（PostgreSQL 独立库）走查：新建只读连接、续签后旧凭据立即 401、撤销后新凭据 401，列表状态变为已撤销"
   },
   {
    "id": "agent-long-running",
@@ -2335,9 +2344,9 @@
     "account"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "#649 个人 Agent：交办即建平台执行任务，无人值守运行、本人确认回程；原生 Agent 业务员用管理员开设的服务身份。本机用模拟模型走通，真实模型待平台模型配置后复走"
+   "note": "#649 个人 Agent：交办即建平台执行任务，无人值守运行、本人确认回程；原生 Agent 业务员用管理员开设的服务身份。本机用模拟模型走通，真实模型待平台模型配置后复走；2026-11-05 公司模式（PostgreSQL 独立库）走查：责任人在「长期Agent」→连接启用凭据，生成 90 天长期密钥，MCP 用 x-bambook-agent-key 可读取，写入被只读权限拒绝；无人值守长任务与真实模型未测"
   },
   {
    "id": "order-list-browse",
@@ -2418,9 +2427,9 @@
     "order.internal.returnRejected",
     "order.internal.cancel"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "InternalDeliveryPanel.tsx:57-61，经 OrderListPage.tsx:87 进入"
+   "note": "2026-11-05 本机独立数据副本界面走查：内部成品订单 SO-G-2026-0011 工厂直送 20 件 → 三步「登记内部交付」→ 接收人在「内部接收」点收 18 / 拒收 2（订单变“部分内部交付”）→ 登记拒收退回 2 件。缺陷：接收账号下拉列出全体成员，选无订单办理权限者（如管理员）在最后一步才被拒；待服务端下发可接收名单后过滤。"
   },
   {
    "id": "order-overdue-jump",
@@ -2685,9 +2694,9 @@
    "commands": [
     "market.trend.save"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "SeasonsPage.tsx:100；MarketPages.tsx:89"
+   "note": "2026-11-05 本机独立数据副本界面走查：季节性与趋势 → 记录趋势「可回收羊毛混纺」（成分、AW27、来源依据、观察内容）并勾选关联产品 FB-2702，读回关联正确。修改已登记趋势的关联未走。"
   },
   {
    "id": "season-show",
@@ -2832,9 +2841,9 @@
     "market.campaign.save",
     "market.attachment.set"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "MarketPages.tsx:85-91,149"
+   "note": "2026-11-05 本机独立数据副本界面走查：营销活动「AW27 双面呢大衣推广」详情（窄屏为侧边抽屉）显示两款主推产品；「附件与凭据」上传推广册 PDF 后写入活动 fileIds 并列出下载 / 移除。进行中活动不可编辑主推产品（仅策划中或暂停可编辑），编辑主推未走。"
   },
   {
    "id": "marketing-email-send",
@@ -2969,9 +2978,9 @@
    "commands": [
     "market.import"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "BaseDataImport.tsx:61（kind=product）"
+   "note": "2026-11-05 本机独立数据副本界面走查：批量导入产品档案选 CSV（3 行，含重复编码与不存在的供应商）→ 预览表按原行号列出 → 导入整批拒绝、产品数不变，逐行列出原因（第 3 行编码已存在、第 4 行供应商不存在）。修正后重选文件：2 行全部合格导入，供应商、类别、单位、成本价读回正确。"
   },
   {
    "id": "product-attachments",
@@ -2989,9 +2998,9 @@
    "commands": [
     "market.attachment.set"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "MarketPages.tsx:56-61"
+   "note": "2026-11-05 本机独立数据副本界面走查：FB-2701 一次上传图片 + PDF（首张图标“主图”，PDF 无图片角色）；再传背面图后「设为主图」互换，再换回；「移除」只解除产品关联、文件保留。"
   },
   {
    "id": "product-to-dev-order",
@@ -3026,9 +3035,9 @@
     "dashboard"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；PlatformPages.tsx:121；2026-11-05 本机走查发现缺陷：履行中订单误含草稿与已取消（PlatformPages.tsx DashboardOverview 第130行），待修后复走"
+   "note": "2026-11-05 本机独立数据副本界面走查：履行中订单 8、逾期未收发票 3 与数据一致，五张卡片跳转订单 / 报表订单进度 / 应收账龄 / 风险 / 客诉正确。走查发现“订单进度与逾期”漏掉生产 100% 但未出运的过期订单，已改为按履行状态统计（a19d0149）。"
   },
   {
    "id": "dashboard-team",
@@ -3185,9 +3194,9 @@
     "data-center"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；PlatformPages.tsx:123；2026-11-05 本机走查发现缺陷：“文件”行跳转到出运单据（DataCenterPage 第137行），待修后复走"
+   "note": "2026-11-05 本机独立数据副本界面走查：十类记录数与实际数据一致；订单、发票、采购合同、出运“查看”跳到对应模块；最近业务记录按北京时间显示。"
   },
   {
    "id": "data-center-issues",
@@ -3203,9 +3212,9 @@
     "data-center"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；platformDataIssues PlatformPages.tsx:122"
+   "note": "2026-11-05 本机独立数据副本界面走查：关联完整性显示“已检查关联没有发现问题”，无问题时“导出问题清单”禁用。六类问题（孤立订单条目、孤立发票、核销明细缺来源、采购无订单、离港无有效 CI、到账未归属账户）由 PlatformDataIssues.test.ts 覆盖；界面上有问题时的列表与导出未走。"
   },
   {
    "id": "hr-departments",
@@ -3221,9 +3230,9 @@
     "hr"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；走 REST organizationApi /hr/departments（HrOrganization.tsx:125）"
+   "note": "2026-11-05 公司版界面走查（本机临时 PostgreSQL 库 bambook_test_walk_1105，新开公司“雾织贸易走查”，总经理沈霁）：新建部门“服装部”（业务属性成衣），部门详情列启用人员、小组；部门名称必填。裁撤未走。"
   },
   {
    "id": "hr-teams",
@@ -3240,9 +3249,9 @@
     "hr"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；REST /hr/teams（HrOrganization.tsx:126-127,208）"
+   "note": "2026-11-05 公司版界面走查（本机临时 PostgreSQL 库 bambook_test_walk_1105，新开公司“雾织贸易走查”，总经理沈霁）：在服装部新建小组“成衣一组”，加入林澈 → 移出（确认“保留部门归属”）→ 再加入。解散未走。"
   },
   {
    "id": "hr-personnel",
@@ -3259,9 +3268,9 @@
     "hr"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；REST /hr/personnel"
+   "note": "2026-11-05 公司版界面走查（本机临时 PostgreSQL 库 bambook_test_walk_1105，新开公司“雾织贸易走查”，总经理沈霁）：人员列表列姓名、部门、小组、岗位、在职、账号状态；按部门“服装部”筛选只剩林澈。"
   },
   {
    "id": "hr-employee-file",
@@ -3277,9 +3286,9 @@
     "hr"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；REST PUT /hr/employees（EmployeeFile.tsx:61）"
+   "note": "2026-11-05 公司版界面走查（本机临时 PostgreSQL 库 bambook_test_walk_1105，新开公司“雾织贸易走查”，总经理沈霁）：为林澈建立员工档案（入职 2026-03-02、转正 2026-06-02、固定期限合同至 2029-03-01、上海虹口），编号 E0001，自动生成入职、转正两条在职变动；入职日期必填。"
   },
   {
    "id": "hr-employment-event",
@@ -3295,9 +3304,9 @@
     "hr"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；REST POST /hr/employment-events（EmployeeFile.tsx）"
+   "note": "2026-11-05 公司版界面走查（本机临时 PostgreSQL 库 bambook_test_walk_1105，新开公司“雾织贸易走查”，总经理沈霁）：办理调岗：业务员 → 跟单员（服装），生效 2026-11-05、写明原因；账号岗位同步更新（库中 UserRole 读回），在职变动记录增至 3 条。"
   },
   {
    "id": "tools-length",
@@ -3349,9 +3358,9 @@
     "admin-panel"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；REST /admin/users（AdminAccounts.tsx:87）"
+   "note": "2026-11-05 公司版界面走查（本机临时 PostgreSQL 库 bambook_test_walk_1105，新开公司“雾织贸易走查”，总经理沈霁）：公司管理 → 新建账号林澈（服装部 · 业务员，设置初始密码），首次登录接口返回须修改密码；新建账号后列表显示已启用。"
   },
   {
    "id": "admin-account-security",
@@ -3367,9 +3376,9 @@
     "admin-panel"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；REST /admin/users/:id disable/reset-password"
+   "note": "2026-11-05 公司版界面走查（本机临时 PostgreSQL 库 bambook_test_walk_1105，新开公司“雾织贸易走查”，总经理沈霁）：停用账号（确认提示会话随即失效）后该账号登录被拒；重新启用恢复；重置密码只显示一次临时密码，旧密码失效、临时密码登录须先改密。"
   },
   {
    "id": "admin-roles",
@@ -3385,9 +3394,9 @@
     "admin-panel"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；REST /admin/roles（AdminAccounts.tsx:235）"
+   "note": "2026-11-05 公司版界面走查（本机临时 PostgreSQL 库 bambook_test_walk_1105，新开公司“雾织贸易走查”，总经理沈霁）：新建岗位“跟单员（服装）”参照“常见岗位 · 跟单员”（34 项权限），列表显示自定义岗位与权限档位；总经理岗位不可调整。编辑与删除未走。"
   },
   {
    "id": "admin-approval-authority",
@@ -3403,9 +3412,9 @@
     "admin-panel"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；REST /admin/order-approval-authorities、/v1/procurement/contracts/approval-authority"
+   "note": "2026-11-05 公司版核对：公司账号下“审计资格”分区隐藏，/api/admin/order-approval-authorities 未按公司隔离（OrderApprovalAuthority 无公司字段）。公司模式订单审批改由部门领导路由（mist/context.ts），可运转但不能按业务线显式指定审批人；显式配置需加公司隔离（涉及表结构，待用户批准迁移）。；2026-11-05 补公司隔离（迁移 20261105120000，用户批准）后本机 PostgreSQL 走查：公司负责人在「审批资格」只看到本公司成员为候选人，配置成衣订单审批人后写入本公司归属；另一家公司负责人看不到该配置，候选人只有本公司成员。"
   },
   {
    "id": "admin-audit-log",
@@ -3421,9 +3430,9 @@
     "admin-panel"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；REST auditLogs"
+   "note": "2026-11-05 公司版核对：公司账号下“审计日志”分区隐藏（SettingsPage 按 !scoped 显示），/api/admin/audit-logs 对公司账号返回 TENANT_ROUTE_UNAVAILABLE；AuditLog 无 companyId 列，只有部分动作在 detail 里带公司。公司负责人目前看不到本公司审计日志，需加公司隔离（涉及表结构，待用户批准迁移）。；2026-11-05 补公司隔离（迁移 20261105120000，用户批准）后本机 PostgreSQL 走查：公司负责人在「审计日志」只看到本公司 13 条记录；请求里伪造他公司 companyId 结果不变；配置审批资格的审计记录带本公司归属。"
   },
   {
    "id": "settings-basic",
@@ -3441,9 +3450,9 @@
    "commands": [
     "settings.update"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "SettingsPage.tsx:76,135"
+   "note": "2026-11-05 本机独立数据副本界面走查：公司显示名称清空后失焦提示“须为1至120字”且不保存，恢复原名后保存；默认币种显示 CNY。"
   },
   {
    "id": "settings-notify",
@@ -3461,9 +3470,9 @@
    "commands": [
     "settings.update"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "SettingsPage.tsx:141-146"
+   "note": "2026-11-05 本机独立数据副本界面走查：关闭“出运准备提醒”后服务端读回 false，再开启读回 true；四个开关与公司设置一致。"
   },
   {
    "id": "settings-member-handover",
@@ -3500,9 +3509,9 @@
     "settings"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；SettingsPage.tsx:138"
+   "note": "2026-11-05 本机独立数据副本界面走查：设置记录按时间倒序列出“更新通知偏好”“更新公司资料”，含操作人与北京时间。"
   },
   {
    "id": "settings-agent-identity",
@@ -3518,9 +3527,9 @@
     "settings"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；REST /agent-identities（AgentIdentities.tsx）"
+   "note": "未找到写入命令；REST /agent-identities（AgentIdentities.tsx）；2026-11-05 公司模式（PostgreSQL 独立库）走查：公司负责人新建「跟单助理 · 夜间」（责任人林澈、只读），状态待责任人启用；配置窗口可换责任人、调权限、停用"
   },
   {
    "id": "settings-local",
@@ -3538,9 +3547,9 @@
    "commands": [
     "settings.update"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "仅本地开发模式；LocalAdminPanel.tsx:103"
+   "note": "2026-11-05 本机独立数据副本界面走查：本机设置修改显示姓名与邮箱，错误邮箱提示“显示邮箱格式不正确”且不保存，正确后读回 profileName / profileEmail。"
   },
   {
    "id": "mes-history",
@@ -3557,9 +3566,9 @@
     "mes"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；LocalMesPage.tsx（MesHistoryPage.tsx 仅转出）"
+   "note": "2026-11-05 本机独立数据副本界面走查：历史加工记录列出 4 份成衣加工合同（已交付 / 合同数量、交期、状态与采购回交一致），“已交付”页签只剩 PO-2026-00008。加工方、交期年份筛选只在有两个以上取值时出现，本数据只有一家加工方、一个年份，未走。"
   },
   {
    "id": "mes-export",
@@ -3576,9 +3585,9 @@
     "mes"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；本地 CSV"
+   "note": "2026-11-05 本机独立数据副本界面走查：按当前页签导出，先弹确认（文件名、记录条数），确认后下载「加工履行记录.csv」。"
   },
   {
    "id": "platform-company-open",
@@ -3594,9 +3603,9 @@
     "platform-admin"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；REST platformAdminApi.create（SaasAdminPage.tsx:43）"
+   "note": "2026-11-05 平台版界面走查（本机临时 PostgreSQL 库，平台运维账号从平台入口登录；平台账号走公司入口被拒）：开通公司“青禾纺织（走查）”（标识 qinghe-walk、管理员周宁、总经理岗位、设置初始密码），列表即出现；管理员可登录且须先改初始密码。"
   },
   {
    "id": "platform-company-service",
@@ -3612,9 +3621,9 @@
     "platform-admin"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；REST platformAdminApi.update（SaasAdminPage.tsx:46,58）"
+   "note": "2026-11-05 平台版界面走查（本机临时 PostgreSQL 库，平台运维账号从平台入口登录；平台账号走公司入口被拒）：席位上限设为 1 后列表显示 1 / 1；服务状态改为已暂停须确认（提示现有访问立即失效），库中 Company.status=suspended，该公司管理员登录被拒，另一家公司不受影响；恢复为运行中后可再登录。"
   },
   {
    "id": "platform-company-members",
@@ -3630,9 +3639,9 @@
     "platform-admin"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "未找到写入命令；REST addMember/removeMember/resendMember（SaasAdminPage.tsx:59-60,74）"
+   "note": "2026-11-05 平台版界面走查（本机临时 PostgreSQL 库，平台运维账号从平台入口登录；平台账号走公司入口被拒）：公司详情列成员（周宁 · 总经理 · 公司管理员），提供重发邀请、移出公司（确认提示访问立即失效；唯一管理员移出被拒 409）、按邮箱加入公司。"
   },
   {
    "id": "platform-company-list",
@@ -3648,9 +3657,9 @@
     "platform-admin"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；REST list/companySettings（SaasAdminPage.tsx:33-34）"
+   "note": "2026-11-05 平台版界面走查（本机临时 PostgreSQL 库，平台运维账号从平台入口登录；平台账号走公司入口被拒）：公司列表列名称、标识、状态、方案、成员 / 席位，支持按状态筛选；“管理”打开公司详情。"
   }
  ]
 }

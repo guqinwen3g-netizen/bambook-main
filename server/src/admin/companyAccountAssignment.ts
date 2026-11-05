@@ -49,7 +49,7 @@ export async function saveCompanyAccountAssignment(prisma: PrismaClient, input: 
       await tx.teamMember.updateMany({ where: { userId: input.userId, leftAt: null, team: elsewhere }, data: { leftAt: new Date() } });
       await tx.team.updateMany({ where: { leaderId: input.userId, ...elsewhere }, data: { leaderId: null } });
     }
-    await tx.auditLog.create({ data: { id: randomUUID(), actorId: input.actorId, action: 'update_account_assignment', targetType: 'UserAccount', targetId: input.userId,
+    await tx.auditLog.create({ data: { id: randomUUID(), actorId: input.actorId, action: 'update_account_assignment', targetType: 'UserAccount', targetId: input.userId, companyId: input.companyId,
       detail: { companyId: input.companyId, departmentId, roleIds, identityChanged: displayName !== target.displayName || email !== target.email } } });
   });
   invalidateTeamMembershipCache();

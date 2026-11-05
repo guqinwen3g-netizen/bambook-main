@@ -1,7 +1,8 @@
 import React from 'react';
 import { ui, uiText } from '../../../../services/interfaceLanguage';
 import { businessDate } from '../runtime/businessClock';
-import { Banner, Button, Dialog, Field, KeyValue, PasswordInput, Pill, TextArea } from '../../../../components/mist';
+import { Banner, Button, Dialog, Field, KeyValue, PasswordInput, Pill, SignaturePad, TextArea, type SignatureValue } from '../../../../components/mist';
+import { commandRequiresSignature } from '../runtime/signatureRules';
 import { agentCommandRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../server/src/shared/mistAgentProposals';
 import type { MistCommand, MistState } from '../../../../server/src/shared/mistWorkspace';
 import { reviewEmailAnalysis } from '../../../../server/src/shared/mistEmailReview';
@@ -29,8 +30,16 @@ export function mailProposalDetails(proposal: AgentProposal, state?: MistState |
  * 确认时列出将要执行的内容：按提议命令的 payload 逐项展开（嵌套对象按路径，数组逐项）。
  * 中风险超长值截断；高风险不截断——本人输入密码确认的必须是完整内容。超出显示上限时返回 omitted，调用方须禁用确认。
  */
-export function proposalFieldChanges(command: AgentProposal['command'], full = false): { rows: Array<{ field: string; value: string }>; omitted: number } {
-  const rows: Array<{ field: string; value: string }> = [], limit = full ? 200 : 40;
+const FIELD_LABEL: Record<string, string> = { title: '标题', due: '期限', name: '名称', note: '备注', notes: '备注', amount: '金额', currency: '币种', date: '日期', start: '开始', end: '结束', status: '状态', reason: '原因', assigneeId: '负责人', ownerId: '负责人', customerId: '客户', supplierId: '供应商', orderId: '订单', quantity: '数量', qty: '数量', price: '单价', unitPrice: '单价', terms: '条款', email: '邮箱', phone: '电话', address: '地址', subject: '主题', body: '正文', to: '收件人', cc: '抄送', code: '编号', kind: '类型', type: '类型', decision: '决定', allocations: '分配', lines: '明细', items: '明细', billId: '应付单', invoiceId: '发票', paymentId: '付款', receiptId: '到账', id: '对象', target: '关联对象', view: '页面', tags: '标签', remark: '备注' };
+/** 字段路径转成业务名称；包装层 patch / payload 不显示，未登记的字段保留原名，避免误译。 */
+export function proposalFieldLabel(path: string): string {
+  if (!path) return '内容';
+  const parts = path.split('.').filter(part => part !== 'patch' && part !== 'payload');
+  return parts.length ? parts.map(part => /^\d+$/.test(part) ? '第' + part + '项' : FIELD_LABEL[part] ?? part).join(' · ') : '内容';
+}
+
+export function proposalFieldChanges(command: AgentProposal['command'], full = false): { rows: Array<{ field: string; path: string; value: string }>; omitted: number } {
+  const rows: Array<{ field: string; path: string; value: string }> = [], limit = full ? 200 : 40;
   let omitted = 0;
   const walk = (value: unknown, path: string) => {
     if (value && typeof value === 'object') {
@@ -39,7 +48,7 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
     }
     if (rows.length >= limit) { omitted++; return; }
     const text = typeof value === 'string' ? value : JSON.stringify(value) ?? '';
-    rows.push({ field: path || '内容', value: !full && text.length > 200 ? text.slice(0, 200) + '…' : text });
+    rows.push({ field: proposalFieldLabel(path), path, value: !full && text.length > 200 ? text.slice(0, 200) + '…' : text });
   };
   walk(command.payload, '');
   return { rows, omitted };
@@ -79,10 +88,10 @@ export function proposalAccountRows(command: AgentProposal['command'], state?: M
  * 中、高风险都列出将要执行的具体内容；高风险另须本人密码。拒绝只记录结论，不改业务。
  */
 export function AgentProposalDialog({ proposal, state, onClose, run, onDone }: {
-  proposal: AgentProposal | undefined; state?: MistState | null; onClose: () => void; run: (command: MistCommand, options?: { reauth?: { password: string } }) => Promise<unknown>; onDone: (message: string) => void;
+  proposal: AgentProposal | undefined; state?: MistState | null; onClose: () => void; run: (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string } }) => Promise<unknown>; onDone: (message: string) => void;
 }) {
-  const [note, setNote] = React.useState(''), [busy, setBusy] = React.useState(false), [failure, setFailure] = React.useState(''), [password, setPassword] = React.useState('');
-  React.useEffect(() => { setNote(''); setFailure(''); setPassword(''); }, [proposal?.id]);
+  const [note, setNote] = React.useState(''), [busy, setBusy] = React.useState(false), [failure, setFailure] = React.useState(''), [password, setPassword] = React.useState(''), [signature, setSignature] = React.useState<SignatureValue | null>(null);
+  React.useEffect(() => { setNote(''); setFailure(''); setPassword(''); setSignature(null); }, [proposal?.id]);
   if (!proposal) return null;
   const mail = mailProposalDetails(proposal, state);
   // 风险等级与服务端共用 agentCommandRisk：未登记的普通写入按中风险，付款、核销、审批等按高风险须输入密码。服务端仍会独立校验档位、密码与原业务权限。
@@ -90,18 +99,20 @@ export function AgentProposalDialog({ proposal, state, onClose, run, onDone }: {
   const account = detailed ? proposalAccountRows(proposal.command, state) : null;
   const fields = detailed ? proposalFieldChanges(proposal.command, risk === 'high') : { rows: [], omitted: 0 };
   // 公司收款账户只对照银行字段；同一命令里的其他设置仍逐项列出。
-  const changes = account && proposal.command.type !== 'settings.update' ? [] : account ? fields.rows.filter(r => !/^companyProfile\.(bankName|bankAccount|swift|bankAddress)$/.test(r.field)) : fields.rows;
+  const changes = account && proposal.command.type !== 'settings.update' ? [] : account ? fields.rows.filter(r => !/^companyProfile\.(bankName|bankAccount|swift|bankAddress)$/.test(r.path)) : fields.rows;
   const incomplete = risk === 'high' && fields.omitted > 0;
-  const decide = async (command: MistCommand, message: string, reauth?: { password: string }) => {
+  // Agent 起草的合同与资金类批准，由确认人本人当场签字；Agent 不能代签。
+  const signing = commandRequiresSignature(proposal.command);
+  const decide = async (command: MistCommand, message: string, reauth?: { password: string }, signed?: { svg: string }) => {
     if (busy) return; setBusy(true); setFailure('');
-    try { await run(command, reauth ? { reauth } : undefined); setPassword(''); onDone(message); onClose(); }
+    try { await run(command, reauth || signed ? { ...(reauth ? { reauth } : {}), ...(signed ? { signature: signed } : {}) } : undefined); setPassword(''); setSignature(null); onDone(message); onClose(); }
     catch (error) { setPassword(''); setFailure(error instanceof Error ? error.message : String(error)); }
     finally { setBusy(false); }
   };
   return <Dialog open onClose={() => { if (!busy) onClose(); }} width={560} title={uiText('确认 Agent 提议')}
     footer={<><Button disabled={busy} onClick={onClose}>{uiText('稍后')}</Button>
       <Button disabled={busy} onClick={() => void decide({ type: 'agent.proposal.reject', payload: { id: proposal.id, ...(note.trim() ? { note: note.trim() } : {}) } }, '已拒绝提议')}>{uiText('拒绝')}</Button>
-      <Button variant="primary" loading={busy} disabled={busy || !!mail?.reason || !!proposal.taskBlocked || proposal.unavailable || incomplete || (risk === 'high' && !password)} onClick={() => void decide({ type: 'agent.proposal.confirm', payload: { id: proposal.id } }, '已确认并执行', risk === 'high' ? { password } : undefined)}>{uiText('确认执行')}</Button></>}>
+      <Button variant="primary" loading={busy} disabled={busy || !!mail?.reason || !!proposal.taskBlocked || proposal.unavailable || incomplete || (risk === 'high' && !password) || (signing && !signature)} onClick={() => void decide({ type: 'agent.proposal.confirm', payload: { id: proposal.id } }, '已确认并执行', risk === 'high' ? { password } : undefined, signing && signature ? { svg: signature.svg } : undefined)}>{uiText('确认执行')}</Button></>}>
     <div className="mist-col">
       {failure && <Banner tone="bad" title={uiText('没有执行')}>{failure}</Banner>}
       {proposal.taskBlocked && <Banner tone="warn" title={uiText(proposal.taskBlocked)} />}
@@ -126,6 +137,7 @@ export function AgentProposalDialog({ proposal, state, onClose, run, onDone }: {
         </>}
       </div>}
       {risk === 'high' && <Field label={uiText('本人登录密码')} required hint={uiText('付款、核销、审批、作废等资金或不可逆操作，确认前须重新验证本人密码')}><PasswordInput aria-label={uiText('本人登录密码')} autoComplete="current-password" value={password} disabled={busy} onChange={event => setPassword(event.target.value)} /></Field>}
+      {signing && <Field label={uiText('确认签字')} required><SignaturePad key={proposal.id} ariaLabel="确认签字" disabled={busy} onChange={setSignature} /></Field>}
       <Field label={uiText('拒绝原因')}><TextArea aria-label={uiText('拒绝原因')} rows={2} value={note} onChange={event => setNote(event.target.value)} /></Field>
     </div>
   </Dialog>;

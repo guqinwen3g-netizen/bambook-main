@@ -86,3 +86,11 @@ test('shared development honors NO_PROXY for its fixed backend and keeps proxy c
   assert.throws(()=>mistDevelopmentProxy(true,{HTTPS_PROXY:'invalid proxy'}),/代理配置无效/);
   assert.throws(()=>mistDevelopmentProxy(true,{HTTPS_PROXY:'socks5://127.0.0.1:1080'}),/代理配置无效/);
 });
+
+test('local main API port splits /api from /api/mist like the server proxy',()=>{
+  const proxies=mistDevelopmentProxy(false,{MIST_LOCAL_API_PORT:'8087',MIST_MAIN_API_PORT:'8088'});
+  assert.equal(proxies['/api/mist'].target,'http://127.0.0.1:8087');
+  assert.equal(proxies['/api'].target,'http://127.0.0.1:8088');
+  assert.throws(()=>mistDevelopmentProxy(false,{MIST_MAIN_API_PORT:'0x1'}),/MIST_MAIN_API_PORT/);
+  assert.equal(mistDevelopmentProxy(true,{MIST_MAIN_API_PORT:'8088'})['/api'].target,mistDevelopmentProxy(true,{})['/api'].target);
+});

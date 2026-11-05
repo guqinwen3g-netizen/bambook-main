@@ -123,8 +123,11 @@ export function buildReceivableAging(state: MistState, asOf: string): AgingRow[]
 
 export type OrderProgressRow = { id: string; code: string; customer: string; due: string; progress: number; state: string; tone: string; status: 'overdue' | 'soon' | 'ontrack' | 'nodue'; lateDays: number };
 /** 未完成订单（进度 < 100%）：已过交期为逾期，7 天内到期为临近。 */
+/** 已履行完毕（或已交付内部接收方）的订单状态；不再计入在途与交期逾期。 */
+export const ORDER_FINISHED_STATES = ['已出运', '履约完成', '已完成', '已取消', '已作废', '待收尾款', '内部交付完成', '已交接'];
 export function buildOrderProgress(state: MistState, asOf: string): OrderProgressRow[] {
-  return state.orders.filter(o => o.progress < 100).map(o => {
+  // 交期逾期看订单是否履行完毕，不看生产进度：生产 100% 但尚未出运的订单过了交期同样逾期。口径与首页“履行中订单”一致。
+  return state.orders.filter(o => o.governance?.status === 'approved' && !ORDER_FINISHED_STATES.includes(o.state)).map(o => {
     const late = o.due ? days(o.due, asOf) : 0;
     const status: OrderProgressRow['status'] = !o.due ? 'nodue' : late > 0 ? 'overdue' : late >= -7 ? 'soon' : 'ontrack';
     return { id: o.id, code: o.code, customer: o.customer, due: o.due, progress: o.progress, state: o.state, tone: o.tone, status, lateDays: Math.max(0, late) };
@@ -273,7 +276,7 @@ export function PlatformReportsPage() {
       <section className="mist-section"><Card><DataTable ariaLabel={uiText("应收账龄")} rows={aging} rowKey={r => r.id} loading={workspace.loading} columns={agingColumns} empty={<EmptyState title={uiText("没有未收应收")} description={uiText("有效发票均已收清。")} />} /></Card></section>
       <div className="mist-row"><Button onClick={() => go('invoices')}>{uiText("查看发票")}</Button><Button onClick={() => go('payment-vouchers')}>{uiText("查看到账与核销")}</Button></div>
     </> : <>
-      <Toolbar right={<span className="mist-note">{uiText("截至 ")}{asOf}{uiText(" · 只含进度未到 100% 的订单")}</span>}><Field label={uiText("交期状态")}><Select aria-label={uiText("交期状态")} value={progressFilter} onChange={e => setProgressFilter(e.target.value)} options={[{ value: '', label: '全部' }, ...Object.entries(PROGRESS_STATUS).map(([value, s]) => ({ value, label: s.label }))]} /></Field></Toolbar>
+      <Toolbar right={<span className="mist-note">{uiText("截至 ")}{asOf}{uiText(" · 只含尚未履行完毕的订单")}</span>}><Field label={uiText("交期状态")}><Select aria-label={uiText("交期状态")} value={progressFilter} onChange={e => setProgressFilter(e.target.value)} options={[{ value: '', label: '全部' }, ...Object.entries(PROGRESS_STATUS).map(([value, s]) => ({ value, label: s.label }))]} /></Field></Toolbar>
       <StatGrid>{(Object.keys(PROGRESS_STATUS) as Array<keyof typeof PROGRESS_STATUS>).map(k => <StatCard key={k} icon={Package} label={uiText(PROGRESS_STATUS[k].label)} value={progress.filter(r => r.status === k).length} onClick={() => setProgressFilter(k)} />)}</StatGrid>
       <section className="mist-section"><Card><DataTable ariaLabel={uiText("订单进度")} rows={shownProgress} rowKey={r => r.id} loading={workspace.loading} columns={progressColumns} empty={<EmptyState title={uiText("没有符合条件的未完成订单")} />} /></Card></section>
     </>}</section>

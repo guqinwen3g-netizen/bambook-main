@@ -29,5 +29,12 @@ export function mistDevelopmentProxy(shared=process.env.MIST_SHARED_DEVELOPMENT=
   const address=shared&&!bypass?(environment.https_proxy||environment.HTTPS_PROXY||environment.http_proxy||environment.HTTP_PROXY):undefined;
   let agent;
   if(address){try{if(!['http:','https:'].includes(new URL(address).protocol))throw new Error();agent=new HttpsProxyAgent(address,{keepAlive:true});}catch{throw new Error('共享开发代理配置无效，请检查 HTTPS_PROXY（HTTP / HTTPS 地址）。');}}
-  return Object.fromEntries(['/api/mist','/api'].map(route=>[route,{target,changeOrigin:true,...(agent?{agent}:{})}]));
+  const routes=Object.fromEntries(['/api/mist','/api'].map(route=>[route,{target,changeOrigin:true,...(agent?{agent}:{})}]));
+  // Local only: mirror the server split (nginx sends /api/mist to the Mist API and the rest of /api to the main API).
+  const main=!shared&&environment.MIST_MAIN_API_PORT;
+  if(main){
+    if(!/^[0-9]+$/.test(main)||Number(main)<1||Number(main)>65535)throw new Error('MIST_MAIN_API_PORT 无效：须为 1–65535 的整数。');
+    routes['/api']={target:`http://127.0.0.1:${Number(main)}`,changeOrigin:true};
+  }
+  return routes;
 }

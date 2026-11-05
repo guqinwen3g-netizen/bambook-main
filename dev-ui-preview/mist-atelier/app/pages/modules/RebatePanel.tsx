@@ -7,13 +7,13 @@ import type { MistCommand, MistState } from '../../../../../server/src/shared/mi
 import type { FulfillmentCustoms } from '../../../../../server/src/shared/mistFulfillment';
 import { REBATE_STATE_LABEL, rebateBillTaxableMinor, rebateCandidateBills, rebateClaimForCustoms, rebateClaimTotals, rebateExportDate, rebatePlan, rebateRateFor, readRebate, type RebateClaim, type RebateRate } from '../../../../../server/src/shared/mistExportRebate';
 import { fmt } from '../../data';
-import type { ModuleEditorSpec } from './ModuleWorkbench';
+import { moduleSignature, signatureField, type ModuleEditorSpec } from './ModuleWorkbench';
 import { emptyOption, field, number, text, today } from './fulfillmentKit';
 import { ActionBar, DetailBlock, type ReasonedAction } from './pageKit';
 import { EXPORT_REBATE_RATES } from '../../runtime/tradeOptions';
 import { rebateDeadlines, type RebateDeadlineRow } from '../../../../../server/src/shared/mistRebateDeadlines';
 
-type Run = (command: MistCommand) => Promise<unknown>;
+type Run = (command: MistCommand, options?: { signature?: { svg: string } }) => Promise<unknown>;
 const cny = (value: number) => `${fmt(value, 2)} CNY`;
 /** 无 sensitive:tax_base 的账号：服务端已把计税金额与税额置零，这里显示“已隐藏”，不显示 0。 */
 const MASKED = '已隐藏';
@@ -115,9 +115,9 @@ export function RebateClaimBlock({ state, customs: c, canWrite, canApprove = fal
   const totals = rebateClaimTotals(claim), live = claim.receipts.filter(r => !r.reversed), masked = !!claim.taxMasked, amount = (value: number) => masked ? MASKED : cny(value);
   const receipts = state.receipts.filter(r => r.currency === 'CNY' && r.remaining > 0);
   const approveSpec: ModuleEditorSpec = { title: '登记税务核准', submitLabel: '登记核准', description: `${claim.code} · 应退 ${amount(claim.expected)}`,
-    fields: [field('date', '核准日', 'date'), field('amount', '核准退税额（CNY）', 'number'), field('ref', '审核通知 / 批复文号'), field('reason', '差异原因（核准额不同时必填）', 'textarea', false)],
-    initialValues: { date: today(), amount: masked ? '' : claim.expected, ref: '', reason: '' },
-    submit: v => run({ type: 'rebate.claim.approve', payload: { id: claim.id, date: text(v, 'date'), amount: number(v, 'amount'), ref: text(v, 'ref'), reason: text(v, 'reason') } }) };
+    fields: [field('date', '核准日', 'date'), field('amount', '核准退税额（CNY）', 'number'), field('ref', '审核通知 / 批复文号'), field('reason', '差异原因（核准额不同时必填）', 'textarea', false), signatureField('登记签字')],
+    initialValues: { date: today(), amount: masked ? '' : claim.expected, ref: '', reason: '', signature: '' },
+    submit: v => run({ type: 'rebate.claim.approve', payload: { id: claim.id, date: text(v, 'date'), amount: number(v, 'amount'), ref: text(v, 'ref'), reason: text(v, 'reason') } }, { signature: moduleSignature(v.signature) }) };
   const receiveSpec: ModuleEditorSpec = { title: '退税到账勾稽', submitLabel: '勾稽到账', description: `${claim.code} · 待到账 ${amount(totals.open)}`,
     fields: [field('receiptId', '到账流水（人民币）', 'select', true, [emptyOption, ...receipts.map(r => ({ value: r.id, label: `${r.code} · ${r.date.slice(0, 10)} · ${r.payer} · 余 ${cny(r.remaining)}` }))]), field('amount', '勾稽金额（CNY）', 'number'),
       { ...field('settle', '少收也按本次结清', 'checkbox', false), hint: '税务机关扣抵等原因到账少于核准额时勾选，并写明原因。' }, field('reason', '少收原因', 'textarea', false)],

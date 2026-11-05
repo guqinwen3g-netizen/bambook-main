@@ -819,9 +819,7 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
     };
 } | {
     type: 'fulfillment.documents.issue';
-    payload: {
-        id: string;
-    };
+    payload: { id: string; sealId?: string; sealReason?: string };
 } | {
     type: 'fulfillment.documents.archiveExternal';
     payload: { id: string; issuer: string; at: string; evidence: string };

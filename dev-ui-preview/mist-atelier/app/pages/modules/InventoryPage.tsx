@@ -122,7 +122,8 @@ export function InventoryPage() {
   };
   const issueTargets = (stock: FulfillmentStock) => !!state && materialDeliveryRequired(state, stock.purchaseId || '') ? workspace?.materialIssueTargets?.[stock.id] ?? materialDeliveryTargets(state, stock.purchaseId || '', stock.id) : null;
   // When every receiving contract is blocked by the source's quality state, say why before the form is opened.
-  const issueBlocker = (stock: FulfillmentStock) => { const targets = issueTargets(stock); return targets?.length && targets.every(target => target.blocker) ? targets[0].blocker! : ''; };
+  // An empty target list means no processing contract can receive yet; say so rather than opening a form with nothing to pick.
+  const issueBlocker = (stock: FulfillmentStock) => { const targets = issueTargets(stock); if (targets && !targets.length) return '本订单条目还没有已发出并经供应商确认的加工合同'; return targets?.length && targets.every(target => target.blocker) ? targets[0].blocker! : ''; };
   const moveSpec = (stock: FulfillmentStock, kind: 'issue' | 'return' | 'move'): ModuleEditorSpec => {
     const linked = kind === 'issue' && !!state && materialDeliveryRequired(state, stock.purchaseId || '');
     const targets = (linked ? issueTargets(stock) ?? [] : []).map(target => target.blocker ? { ...target, label: `${target.label} · ${target.blocker}` } : target);

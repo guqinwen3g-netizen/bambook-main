@@ -14,6 +14,7 @@ const session=vi.hoisted(()=>({id:'buyer',denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:session.id,displayName:'经办人'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 import {ProcurementPage,factoryDueFor,isDomesticSupplier} from './ProcurementPage';
+import { SIGNED, signPads } from '../../runtime/signTestUtils';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let host:HTMLElement,root:Root;const go=vi.fn();
 function render(id?:string,mode:'full'|'list'=id?'full':'list',scope:Record<string,string>={}){const detail=mode==='full'?mode:undefined;act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'procurement',id,detail,...scope},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><ProcurementPage/></Nav.Provider></ToastProvider></MistRoot>));}
@@ -484,7 +485,9 @@ it.each([false,true])('keeps assigned approval independent of procurement write 
  let dialog=getByRole(document.body,'dialog');
  typeInto(getByRole(dialog,'textbox',{name:'审批意见',exact:true}) as HTMLTextAreaElement,'规格及报价已核对');
  await click(getByRole(dialog,'button',{name:'批准',exact:true}));
- expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.procurement.decide',payload:{id:'approve-only',decision:'approved',note:'规格及报价已核对'}});
+ expect(store.run).not.toHaveBeenCalled();expect(dialog.textContent).toContain('请先手写签字');
+ await signPads(dialog);await click(getByRole(dialog,'button',{name:'批准',exact:true}));
+ expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.procurement.decide',payload:{id:'approve-only',decision:'approved',note:'规格及报价已核对'}},SIGNED);
  await click(getByRole(host,'button',{name:'批准承诺',exact:true}));expect(getByRole(document.body,'dialog')).toBeTruthy();
  session.denied.add('procurement:approve');render('approve-only');expect(queryByRole(document.body,'dialog')).toBeNull();
  session.denied.delete('procurement:approve');render('approve-only');expect(queryByRole(document.body,'dialog')).toBeNull();

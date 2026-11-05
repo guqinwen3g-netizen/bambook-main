@@ -6,6 +6,7 @@ import {MistRepository} from './repository';
 import {MistPrivateFiles} from './files';
 import {MemoryMistDatabase,testActor,testAuthority} from './__tests__/support';
 import * as contract from '../shared/mistWorkspace';
+import { TEST_SIGNATURE } from './__tests__/signature';
 
 vi.mock('./context',()=>({mistApprovalAuthority:async()=>({supplier:{},claimReviewerId:'reviewer',orderReviewerIds:{garment:['reviewer'],fabric:['reviewer']}})}));
 vi.mock('../auth/tokenHelpers',()=>({loadUserWithRoles:async(_db:unknown,id:string)=>({id,status:'active',deletedAt:null}),buildLoadedAuthTokenPayload:async(_db:unknown,user:{id:string})=>({userId:user.id,permissions:['orders:write','aftersales:write'],roles:[],departmentIds:[]})}));
@@ -26,7 +27,7 @@ async function fixture(){
  const orderId=(await run({type:'order.create',payload:{type:'garment',customerId,season:'AW26',currency:'USD',due:'2026-12-01',ownerId:'owner',governance:{kind:'external',poNumber:'CLAIM-PO',confirmationFileIds:[po.id],internalPurpose:'',receiver:'',paymentMethod:'OA',depositPercent:null,paymentNote:'发票日起30天',incoterm:'FOB',deliveryPlace:'上海'},lines:[{fulfillmentMode:'cmt',cmtIncludedItems:[],name:'外套',style:'A',img:'coat',qty:4,unit:'件',price:15}]}})).receipt.result.orderId as string;
  await run({type:'order.governance.submit',payload:{orderId}});
  let review=(await repo.listReviews(testActor('reviewer'))).find((row:{entityId:string})=>row.entityId===orderId)!;
- const approved=await repo.decideReview(testActor('reviewer'),workspace.id,review.id,{requestId:'approve-order',expectedRevision:revision,decision:'approved',note:'核对正式合同'});revision=approved.receipt.revision;
+ const approved=await repo.decideReview(testActor('reviewer'),workspace.id,review.id,{requestId:'approve-order',expectedRevision:revision,decision:'approved',note:'核对正式合同',signature:TEST_SIGNATURE});revision=approved.receipt.revision;
  const draft=(await run({type:'platform.invoice.save',payload:{orderId,due:'2026-12-31',amount:60,note:'正式批准合同CI'}})).receipt.result.id as string;
  const invoiceId=(await run({type:'platform.invoice.issue',payload:{id:draft}})).receipt.result.invoiceId as string;
  const ci=await upload('CI-v2.pdf','original invoice evidence');

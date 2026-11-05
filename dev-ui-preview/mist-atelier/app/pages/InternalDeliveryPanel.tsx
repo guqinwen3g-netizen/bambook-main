@@ -3,7 +3,7 @@ import { BackLink, Banner, Button, Card, CardBody, CardHeader, DataTable, Drawer
 import type { MistOrder } from '../../../../server/src/shared/mistWorkspace';
 import { internalDeliveryRevision, internalDeliverySources, internalDeliveryTotals, type InternalDelivery } from '../../../../server/src/shared/mistInternalDelivery';
 import { uiText } from '../../../../services/interfaceLanguage';
-import { useMistWorkspace } from '../runtime/workspace';
+import { mistApiRequest, useMistWorkspace } from '../runtime/workspace';
 import { useOptionalMistSession } from '../runtime/auth';
 import { workspaceMembers, memberSelectOptions } from '../runtime/members';
 import { businessToday } from '../runtime/businessClock';
@@ -97,7 +97,23 @@ export function InternalDeliveryInbox() {
   </MistPage>;
 }
 
+// The receiver list comes from the server with the same rule as the final send check
+// (active member with order read and write), so an ineligible account is never offered.
 export function InternalDeliveryCreate({ order, onClose }: { order: MistOrder; onClose: () => void }) {
+  const workspace = useMistWorkspace(), workspaceId = workspace.workspace?.id;
+  const [receivers, setReceivers] = React.useState<Array<{ id: string; name: string }> | null>(null), [failed, setFailed] = React.useState('');
+  React.useEffect(() => {
+    if (!workspaceId) return; let alive = true;
+    mistApiRequest('/api/mist/workspaces/' + encodeURIComponent(workspaceId) + '/internal-receivers')
+      .then((r: { receivers: Array<{ id: string; name: string }> }) => { if (alive) setReceivers(r.receivers); })
+      .catch((e: unknown) => { if (alive) setFailed(e instanceof Error ? e.message : '接收账号读取失败'); });
+    return () => { alive = false; };
+  }, [workspaceId]);
+  if (failed) return <MistPage><BackLink onClick={onClose}>{uiText('返回订单')}</BackLink><Card><CardBody><EmptyState title={uiText('接收账号读取失败')} description={failed} /></CardBody></Card></MistPage>;
+  if (!receivers) return <MistPage><BackLink onClick={onClose}>{uiText('返回订单')}</BackLink><Card><CardBody><EmptyState title={uiText('正在读取接收账号')} /></CardBody></Card></MistPage>;
+  return <InternalDeliveryForm order={order} onClose={onClose} receivers={receivers} />;
+}
+function InternalDeliveryForm({ order, onClose, receivers }: { order: MistOrder; onClose: () => void; receivers: Array<{ id: string; name: string }> }) {
   const workspace = useMistWorkspace(), session = useOptionalMistSession();
   const [expectedRevision] = React.useState(() => (workspace.state?.internalDeliveries || []).filter(row => row.orderId === order.id).length);
   const members = workspaceMembers(workspace.workspace, workspace.state, session?.user);
@@ -108,7 +124,7 @@ export function InternalDeliveryCreate({ order, onClose }: { order: MistOrder; o
   const [spec] = React.useState<ModuleEditorSpec>(() => ({
     title: '登记内部交付', submitLabel: '确认交付', initialValues: { source: '', quantity: '', receiverId: '', location: '', date: businessToday(), evidence: '' },
     sections: [{ id: 'handover', label: '实物与接收', fields: ['source', 'quantity', 'receiverId'] }, { id: 'evidence', label: '交付依据', fields: ['location', 'date', 'evidence'] }],
-    fields: [field('source', '交付来源', 'select', true, sources.map(source => ({ value: source.key, label: `${source.style} · ${source.productionCode} · ${uiText(source.source.kind === 'receipt' ? '工厂直接回交' : '成品出库')} · ${source.date} · ${source.location} · ${source.evidence.slice(0,60)} · ${uiText('可交')} ${quantity(source.remaining, source.unit)}` }))), field('quantity', '本次交付数量', 'number'), field('receiverId', '本次接收账号', 'select', true, memberSelectOptions(members)), field('location', '交付地点'), field('date', '实际交付日期', 'date'), field('evidence', '交接依据', 'textarea')],
+    fields: [field('source', '交付来源', 'select', true, sources.map(source => ({ value: source.key, label: `${source.style} · ${source.productionCode} · ${uiText(source.source.kind === 'receipt' ? '工厂直接回交' : '成品出库')} · ${source.date} · ${source.location} · ${source.evidence.slice(0,60)} · ${uiText('可交')} ${quantity(source.remaining, source.unit)}` }))), field('quantity', '本次交付数量', 'number'), field('receiverId', '本次接收账号', 'select', true, memberSelectOptions(members.filter(member => receivers.some(r => r.id === member.id)))), field('location', '交付地点'), field('date', '实际交付日期', 'date'), field('evidence', '交接依据', 'textarea')],
     submit: values => {
       if (!allowed) throw new Error('当前不能登记内部交付');
       const source = sources.find(item => item.key === values.source);

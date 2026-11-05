@@ -6,6 +6,7 @@ import {MistRepository} from './repository';
 import {MistPrivateFiles} from './files';
 import {MemoryMistDatabase,testActor,testAuthority} from './__tests__/support';
 import * as contract from '../shared/mistWorkspace';
+import { TEST_SIGNATURE } from './__tests__/signature';
 const env=vi.hoisted(()=>({leader:'' as string,routes:new Map<string,string>(),users:null as null|Map<string,{active:boolean;permissions:string[]}>}));
 vi.mock('../approvals/approvalRoutingService',()=>({createApprovalRoutingService:()=>({
  resolveReviewerByDepartment:async(id:string)=>{const reviewerId=env.routes.get(id);if(!reviewerId)throw Object.assign(new Error('missing'),{code:'NO_REVIEWER_RESOLVED'});return{reviewerId};},
@@ -39,8 +40,8 @@ async function fixture(first=false,amount=100,extra:string[]=[]){
 }
 for(const endpoint of ['command','review'] as const)describe(`付款审批：${endpoint} 入口`,()=>{
  const decide=async(f:Awaited<ReturnType<typeof fixture>>,who='manager',requestId='approve')=>endpoint==='command'
-  ? repo.execute(actor(who),f.workspaceId,{requestId,expectedRevision:f.revision,command:{type:'payable.request.decide',payload:{id:f.id,decision:'approved',note:'核对合同、票据与应付，同意'}}})
-  : repo.decideReview(actor(who),f.workspaceId,f.task.id,{requestId,expectedRevision:f.revision,decision:'approved',note:'核对合同、票据与应付，同意'});
+  ? repo.execute(actor(who),f.workspaceId,{requestId,expectedRevision:f.revision,command:{type:'payable.request.decide',payload:{id:f.id,decision:'approved',note:'核对合同、票据与应付，同意'}},signature:TEST_SIGNATURE})
+  : repo.decideReview(actor(who),f.workspaceId,f.task.id,{requestId,expectedRevision:f.revision,decision:'approved',note:'核对合同、票据与应付，同意',signature:TEST_SIGNATURE});
  it('按申请人的当前部门路由审批；主管自身部门由自己负责也不影响，并且重放不重复决定',async()=>{
   const f=await fixture();await decide(f);const replay=await decide(f);expect(replay.replayed).toBe(true);
   const saved=await repo.get(actor(),f.workspaceId),request=db.workspaces.get(f.workspaceId)!.state.payables!.requests!.find(r=>r.id===f.id)!;
@@ -68,7 +69,7 @@ for(const endpoint of ['command','review'] as const)describe(`付款审批：${e
 describe('付款申请撤回：本人和当前权限',()=>{
  it.each(['pending','approved'])('不能凭申请权限撤回其他人的%s申请，拒绝不占用请求号也不改状态',async status=>{
   const f=await fixture();let revision=f.revision;
-  if(status==='approved'){const next=await repo.execute(actor('manager'),f.workspaceId,{requestId:'approve-for-cancel',expectedRevision:revision,command:{type:'payable.request.decide',payload:{id:f.id,decision:'approved',note:'核对后批准'}}});revision=next.workspace.revision;}
+  if(status==='approved'){const next=await repo.execute(actor('manager'),f.workspaceId,{requestId:'approve-for-cancel',expectedRevision:revision,command:{type:'payable.request.decide',payload:{id:f.id,decision:'approved',note:'核对后批准'}},signature:TEST_SIGNATURE});revision=next.workspace.revision;}
   auth.users.get('manager2')!.permissions.push('finance:payment_request:create');
   const before=structuredClone(db.workspaces.get(f.workspaceId));
   const input={requestId:'cancel-other-'+status,expectedRevision:revision,command:{type:'payable.request.cancel',payload:{id:f.id,reason:'申请依据已变化'}}};
@@ -95,12 +96,12 @@ describe('付款审批分档：服务端按当前权限重建每一级审批人'
   const request=row.state.payables!.requests!.find((r:any)=>r.id===f.id)!;
   expect(request.tier!.levels).toEqual([{level:'pay_lt5',reviewerIds:['manager']},{level:'pay_new_supplier',reviewerIds:['boss']}]);
   expect(f.task.reviewerIds).toEqual(['manager','boss']);
-  const first=await repo.execute(actor('manager'),f.workspaceId,{requestId:'lvl-1',expectedRevision:f.revision,command:{type:'payable.request.decide',payload:{id:f.id,decision:'approved',note:'金额档核对通过'}}});
+  const first=await repo.execute(actor('manager'),f.workspaceId,{requestId:'lvl-1',expectedRevision:f.revision,command:{type:'payable.request.decide',payload:{id:f.id,decision:'approved',note:'金额档核对通过'}},signature:TEST_SIGNATURE});
   expect(db.workspaces.get(f.workspaceId)!.state.payables!.requests!.find((r:any)=>r.id===f.id)!.state).toBe('pending');
   const after=contract.getMistReviewTasks(db.workspaces.get(f.workspaceId)!.state).find(t=>t.id===f.task.id)!;
   expect(after.reviewerIds).toEqual(['boss']);expect(after.details.find(d=>d.label==='审批进度')!.value).toContain('还差：首笔付款加签');
-  await expect(repo.execute(actor('manager'),f.workspaceId,{requestId:'lvl-dup',expectedRevision:first.workspace.revision,command:{type:'payable.request.decide',payload:{id:f.id,decision:'approved',note:'再批一次'}}})).rejects.toMatchObject({code:'FORBIDDEN'});
-  await repo.decideReview(actor('boss'),f.workspaceId,f.task.id,{requestId:'lvl-2',expectedRevision:first.workspace.revision,decision:'approved',note:'新供应商资质已核'});
+  await expect(repo.execute(actor('manager'),f.workspaceId,{requestId:'lvl-dup',expectedRevision:first.workspace.revision,command:{type:'payable.request.decide',payload:{id:f.id,decision:'approved',note:'再批一次'}},signature:TEST_SIGNATURE})).rejects.toMatchObject({code:'FORBIDDEN'});
+  await repo.decideReview(actor('boss'),f.workspaceId,f.task.id,{requestId:'lvl-2',expectedRevision:first.workspace.revision,decision:'approved',note:'新供应商资质已核',signature:TEST_SIGNATURE});
   expect(db.workspaces.get(f.workspaceId)!.state.payables!.requests!.find((r:any)=>r.id===f.id)!.state).toBe('approved');
  });
  // 默认岗位形状：业务主管只有 ≤5 万档；公司管理员（总领导）持 >5 万档与首笔加签。
@@ -111,12 +112,12 @@ describe('付款审批分档：服务端按当前权限重建每一级审批人'
   const f=await fixture(true,60000,['director']);
   const request=()=>db.workspaces.get(f.workspaceId)!.state.payables!.requests!.find((r:any)=>r.id===f.id)!;
   expect(request().tier!.levels).toEqual([{level:'pay_gt5',reviewerIds:['boss','director']},{level:'pay_new_supplier',reviewerIds:['boss']}]);
-  const first=await repo.execute(actor('boss'),f.workspaceId,{requestId:'big-1',expectedRevision:f.revision,command:{type:'payable.request.decide',payload:{id:f.id,decision:'approved',note:'新供应商资质已核'}}});
+  const first=await repo.execute(actor('boss'),f.workspaceId,{requestId:'big-1',expectedRevision:f.revision,command:{type:'payable.request.decide',payload:{id:f.id,decision:'approved',note:'新供应商资质已核'}},signature:TEST_SIGNATURE});
   // 总领导先签只有他能签的首笔加签，金额档留给另一位领导。
   expect(request()).toMatchObject({state:'pending',approvals:[{level:'pay_new_supplier',actorId:'boss'}]});
-  await expect(repo.execute(actor('boss'),f.workspaceId,{requestId:'big-dup',expectedRevision:first.workspace.revision,command:{type:'payable.request.decide',payload:{id:f.id,decision:'approved',note:'再签'}}})).rejects.toMatchObject({code:'FORBIDDEN'});
+  await expect(repo.execute(actor('boss'),f.workspaceId,{requestId:'big-dup',expectedRevision:first.workspace.revision,command:{type:'payable.request.decide',payload:{id:f.id,decision:'approved',note:'再签'}},signature:TEST_SIGNATURE})).rejects.toMatchObject({code:'FORBIDDEN'});
   expect(request().state).toBe('pending');
-  await repo.decideReview(actor('director'),f.workspaceId,f.task.id,{requestId:'big-2',expectedRevision:first.workspace.revision,decision:'approved',note:'金额核对通过'});
+  await repo.decideReview(actor('director'),f.workspaceId,f.task.id,{requestId:'big-2',expectedRevision:first.workspace.revision,decision:'approved',note:'金额核对通过',signature:TEST_SIGNATURE});
   expect(request()).toMatchObject({state:'approved',approvals:[{level:'pay_new_supplier',actorId:'boss'},{level:'pay_gt5',actorId:'director'}]});
  });
  it('业务员 >5 万元首笔付款：只有总领导一人能签两级时拒绝提交',async()=>{
@@ -126,6 +127,6 @@ describe('付款审批分档：服务端按当前权限重建每一级审批人'
  it('总领导失去首笔付款加签权后不能签该级',async()=>{
   auth.users.set('boss',{active:true,permissions:['finance:payment_request:approve','vouchers:approve:pay_new_supplier']});env.leader='boss';
   const f=await fixture(true);auth.users.get('boss')!.permissions=['finance:payment_request:approve'];
-  await expect(repo.decideReview(actor('boss'),f.workspaceId,f.task.id,{requestId:'lvl-x',expectedRevision:f.revision,decision:'approved',note:'同意'})).rejects.toMatchObject({code:'FORBIDDEN'});
+  await expect(repo.decideReview(actor('boss'),f.workspaceId,f.task.id,{requestId:'lvl-x',expectedRevision:f.revision,decision:'approved',note:'同意',signature:TEST_SIGNATURE})).rejects.toMatchObject({code:'FORBIDDEN'});
  });
 });

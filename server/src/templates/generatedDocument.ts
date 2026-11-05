@@ -5,7 +5,11 @@ import type { Bilingual, GeneratedDocSnapshot } from '../shared/mistGeneratedDoc
 const t = (b: Bilingual) => `${esc(b.zh)}${b.en ? ` <span class="en">${esc(b.en)}</span>` : ''}`;
 const br = (s: string) => esc(s).replace(/\n/g, '<br>');
 
-export function renderGeneratedDocumentHtml(s: GeneratedDocSnapshot): string {
+/**
+ * seal：加盖电子公章时的印章图片（服务端由私有文件生成的 data URI）。只叠在第一个签字区（出具方）：约 38mm、半透明正片叠底，压住签字线。
+ * 快照本身不含印章，盖章件与草稿出自同一份冻结快照。
+ */
+export function renderGeneratedDocumentHtml(s: GeneratedDocSnapshot, options: { sealDataUrl?: string } = {}): string {
   const c = s.issuer, tb = s.table;
   const table = tb ? `<table class="doc-table"><thead><tr>${tb.columns.map(col => `<th${col.num ? ' class="num"' : ''}>${t(col.label)}</th>`).join('')}</tr></thead>
 <tbody>${tb.rows.map(row => `<tr>${tb.columns.map(col => `<td${col.num ? ' class="num"' : ''}>${br(row[col.key] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody>
@@ -17,7 +21,7 @@ ${s.facts.length ? `<section class="facts">${s.facts.map(f => `<div><span class=
 ${table}
 ${s.amountInWords ? `<p class="words">${esc(s.amountInWords)}</p>` : ''}
 ${s.paragraphs.map(p => `<section class="doc-section">${p.title ? `<div class="doc-section-title">${t(p.title)}</div>` : ''}<div class="para">${br(p.text)}</div></section>`).join('')}
-${s.signatures.length ? `<footer class="doc-footer">${s.signatures.map(sig => `<div class="doc-signature"><div class="sig-label">${t(sig.label)}</div><div class="sig-line">${esc(sig.name)}</div></div>`).join('')}</footer>` : ''}
+${s.signatures.length ? `<footer class="doc-footer">${s.signatures.map((sig, i) => `<div class="doc-signature">${i === 0 && options.sealDataUrl ? `<img class="doc-seal" src="${esc(options.sealDataUrl)}" alt="">` : ''}<div class="sig-label">${t(sig.label)}</div><div class="sig-line">${esc(sig.name)}</div></div>`).join('')}</footer>` : ''}
 <div class="version-note">${esc(s.number)} · ${esc(s.kind)} · Template v${s.templateVersion}</div>`;
-  return buildServerDocument(body, { extraStyles: '@page{size:A4}body{padding:0;font-size:11px}.en{font-weight:400;color:#718096;font-size:.85em;text-transform:none;letter-spacing:0}.issuer-name{font-size:15px;font-weight:600}.issuer-en{font-size:11px;color:#4a5568}.issuer-detail{font-size:10px;color:#4a5568;margin-top:4px;overflow-wrap:anywhere}.doc-meta h1{font-size:20px;font-weight:600;letter-spacing:2px}.doc-meta .subtitle{letter-spacing:2px;color:#718096;margin-bottom:6px;text-transform:uppercase}.facts{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;margin-bottom:16px}.facts .k{color:#718096;margin-right:6px}.facts .v{overflow-wrap:anywhere}.num{text-align:right!important;white-space:nowrap}.words{font-weight:600;margin:-8px 0 16px}.para{white-space:normal;overflow-wrap:anywhere}.doc-footer,tr{break-inside:avoid}thead{display:table-header-group}.version-note{margin-top:16px;font-size:9px;color:#a0aec0;text-align:right}' }).replace('<head>', `<head><title>${esc(s.number)} · ${esc(s.title.zh)}</title>`);
+  return buildServerDocument(body, { extraStyles: '@page{size:A4}body{padding:0;font-size:11px}.en{font-weight:400;color:#718096;font-size:.85em;text-transform:none;letter-spacing:0}.issuer-name{font-size:15px;font-weight:600}.issuer-en{font-size:11px;color:#4a5568}.issuer-detail{font-size:10px;color:#4a5568;margin-top:4px;overflow-wrap:anywhere}.doc-meta h1{font-size:20px;font-weight:600;letter-spacing:2px}.doc-meta .subtitle{letter-spacing:2px;color:#718096;margin-bottom:6px;text-transform:uppercase}.facts{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;margin-bottom:16px}.facts .k{color:#718096;margin-right:6px}.facts .v{overflow-wrap:anywhere}.num{text-align:right!important;white-space:nowrap}.words{font-weight:600;margin:-8px 0 16px}.para{white-space:normal;overflow-wrap:anywhere}.doc-footer,tr{break-inside:avoid}thead{display:table-header-group}.doc-signature{position:relative}.doc-seal{position:absolute;left:12mm;top:-6mm;width:38mm;height:38mm;object-fit:contain;opacity:.88;mix-blend-mode:multiply;pointer-events:none}.version-note{margin-top:16px;font-size:9px;color:#a0aec0;text-align:right}' }).replace('<head>', `<head><title>${esc(s.number)} · ${esc(s.title.zh)}</title>`);
 }

@@ -360,6 +360,10 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
       const unit017 = state.orderLines.find(l => l.id === job017.lineId)?.unit || '套';
       const finishedPo = id(run('purchase finished 017', { type: 'fulfillment.procurement.save', payload: { orderId: order017.id, lineId: job017.lineId, kind: 'processing', supplierId: jiangnan, supplier: '', description: '修身羊毛西装套装加工 · 第一批 500 件', quantity: 500, unit: unit017, price: 452, currency: 'CNY', due: day(-8), terms: '出运后 30 天付清，凭增值税专用发票', destination: '上海洋山', note: '含税价，税率 13%', fileIds: [] } }, buyer));
       approveAndConfirm(finishedPo, 'purchase finished 017', -30);
+      // 第一批 500 件已由 PO-L-0411 完工出运，本合同只用于登记工厂专票与退税；审批自动生成的分支不再排产，
+      // 否则同一条目会多出 500 件可出运额度，后续出运被溢装上限拦下。
+      const extra017 = finishedPo ? state.productions.find(p => p.sourcePurchaseId === finishedPo && !p.closed) : undefined;
+      if (extra017) extra017.closed = { at: context.now, actor: '沈禾', reason: '本批成品已随 PO-L-0411 第一批出运，本合同仅登记票据' };
       if (finishedPo) run('bill vat 017', { type: 'payable.bill.register', payload: { invoiceType:'vat-special',supplierId: jiangnan, invoiceNo: '33002641 04517712', invoiceDate: day(-3), currency: 'CNY', amount: 226000, taxAmount: 26000, taxRate: '13%', lines: [{ purchaseId: finishedPo, amount: 226000 }], due: day(26), dueBasis: '合同：出运后 30 天付清', fileIds: [demoFile('vat-invoice', finishedPo, '增值税专用发票 江南成衣 SO-G-2026-017.pdf')], note: '数电专票，已勾选确认用途（出口退税）' } }, finance);
       run('rebate rate 6203.31', { type: 'rebate.rate.save', payload: { hsCode: '6203.31', rate: '13', effectiveFrom: '2019-04-01', basis: '财政部 税务总局 海关总署公告 2019 年第 39 号' } }, finance);
     }

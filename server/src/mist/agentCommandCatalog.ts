@@ -727,7 +727,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "fulfillment.documents.issue",
-  "payload": "{ id: string; }",
+  "payload": "{ id: string; sealId?: string; sealReason?: string }",
   "source": "server/src/shared/mistFulfillment.ts"
  },
  {
@@ -736,7 +736,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "types": {
    "FulfillmentDocument": "{ replacementDeclaredAmount?:number; id: string; familyId?: string; shipmentId: string; orderId: string; type: ShipmentDocumentType; number: string; version: number; generated?: GeneratedDocRecord[]; bl?: BillOfLadingDetails; title: string; dueDate: string; content: string; fileIds: string[]; status: 'draft' | 'issued' | 'void'; createdAt: string; issuedAt?: string; actor: string; invoiceId?: string; externalIssue?: { issuer: string; at: string; evidence: string; recordedBy: string }; financeRejection?: { reason: string; at: string; actor: string; invoiceId: string }; }",
    "ShipmentDocumentType": "typeof DOCUMENT_TYPES[number]",
-   "GeneratedDocRecord": "{ id: string; kind: string; number: string; fileId: string; fileName: string; sha256: string; bytes: number; templateVersion: number; snapshotFingerprint: string; snapshot: GeneratedDocSnapshot; generatedAt: string; generatedBy: string }",
+   "GeneratedDocRecord": "{ id: string; kind: string; number: string; fileId: string; fileName: string; sha256: string; bytes: number; templateVersion: number; snapshotFingerprint: string; snapshot: GeneratedDocSnapshot; generatedAt: string; generatedBy: string; sealUseId?: string }",
    "BillOfLadingDetails": "{ blNo: string; kind: BillOfLadingKind; originals: number; siDocumentId?: string; draftConfirmed?: { at: string; actor: string; evidence: string }; released?: { at: string; actor: string; evidence: string }; updatedAt: string; updatedBy: string; }"
   },
   "source": "server/src/shared/mistFulfillment.ts"
@@ -1692,7 +1692,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "order.document.generate",
-  "payload": "{ orderId: string; kind: 'PI' | 'SC' }",
+  "payload": "{ orderId: string; kind: 'PI' | 'SC'; sealId?: string; sealReason?: string }",
   "source": "server/src/shared/mistDocumentGeneration.ts"
  },
  {

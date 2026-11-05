@@ -40,7 +40,7 @@ export async function setCompanyAccountAccess(prisma: PrismaClient, input: {
     await tx.userAccount.update({ where: { id: input.userId }, data: { metadata: revokeAllSessions(member.user.metadata) as any } });
     await tx.auditLog.create({ data: {
       id: randomUUID(), actorId: input.actorId, action: input.enabled ? 'enable_company_account' : 'disable_company_account',
-      targetType: 'UserAccount', targetId: input.userId, detail: { companyId: input.companyId },
+      targetType: 'UserAccount', targetId: input.userId, companyId: input.companyId, detail: { companyId: input.companyId },
     } });
     return true;
   });

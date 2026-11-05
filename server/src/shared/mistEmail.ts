@@ -736,8 +736,8 @@ export function seedEmailExamples(root: MistState, context: MistContext) {
   // 示例个人邮箱是业务员顾言的地址（gu.yan@），显示名与签名固定为顾言，不随建公司的人变化。
   const me = '顾言';
   root.email.accounts.push(
-    { id: 'mail-personal', address: 'gu.yan@bambook.example.invalid', displayName: `${me}（示例个人邮箱）`, kind: 'personal', ownerName: me, memberNames: [], aliases: ['sales@bambook.example.invalid'], signature: `${me}\n竹衍服饰 · 业务部\n示例签名`, connection: 'example', lastSyncAt: day(0, '07:40'), failedFolders: [], example: true },
-    { id: 'mail-shared', address: 'orders@bambook.example.invalid', displayName: '订单共享邮箱（示例）', kind: 'shared', ownerName: '沈禾', memberNames: [me, '沈禾'], aliases: [], signature: '竹衍服饰 · 订单组', connection: 'example', lastSyncAt: day(0, '07:35'), failedFolders: ['已发送'], example: true },
+    { id: 'mail-personal', address: 'gu.yan@bambook.example.invalid', displayName: `${me}（示例个人邮箱）`, kind: 'personal', ownerName: me, memberNames: [], aliases: ['sales@bambook.example.invalid'], signature: `${me}\n雾织贸易 · 业务部\n示例签名`, connection: 'example', lastSyncAt: day(0, '07:40'), failedFolders: [], example: true },
+    { id: 'mail-shared', address: 'orders@bambook.example.invalid', displayName: '订单共享邮箱（示例）', kind: 'shared', ownerName: '沈禾', memberNames: [me, '沈禾'], aliases: [], signature: `雾织贸易 · 订单组`, connection: 'example', lastSyncAt: day(0, '07:35'), failedFolders: ['已发送'], example: true },
   );
   const customer = root.customers[0], order = root.orders.find(row => row.code === 'SO-G-2026-018') || root.orders[0], dev = root.devs[0], invoice = root.invoices[0];
   const buyer = { name: 'Emma Clarke', address: 'emma.clarke@cedarcrown.example.invalid' }, ops = { name: 'Sophie Hale', address: 'sophie.hale@cedarcrown.example.invalid' };

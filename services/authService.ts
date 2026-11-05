@@ -26,6 +26,8 @@ export interface AuthUser {
   mustChangePassword?: boolean;
   /** 强制改密的原因：initial = 首次登录，reset = 管理员重置。 */
   passwordChangeReason?: 'initial' | 'reset';
+  /** 账号所属公司（/auth/me 顶层返回），用于公司资料未填法定名称时显示。 */
+  company?: { id: string; name: string; slug?: string } | null;
   /** 平台管理员当前选择的公司。 */
   platformCompany?: { companyId: string; companyName: string; startedAt: string };
 }
@@ -243,7 +245,7 @@ export async function checkAuth(): Promise<AuthState> {
     if (res.ok) {
       const data = await readJsonResponse(res);
       if (!isCurrent()) return currentState;
-      currentState = { user: normalizeAuthUser(data.user), isLoading: false, isAuthenticated: true };
+      currentState = { user: normalizeAuthUser(data.user && data.company && !data.user.company ? { ...data.user, company: data.company } : data.user), isLoading: false, isAuthenticated: true };
       cacheAuthUser(currentState.user);
     } else if (canRenderFromCachedUser && keepCachedAuthOnRefreshFailure(res.status)) {
       currentState = { ...currentState, isLoading: false, isAuthenticated: true };

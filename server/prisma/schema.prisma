@@ -2237,10 +2237,14 @@ model OrderApprovalAuthority {
   createdBy    String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  /// 所属公司；null 仅用于没有公司上下文的单租户/历史配置（另有 SQL 局部唯一索引约束 userId+businessLine，db push 建库后由 bootstrap 补建）。
+  companyId    String?  @db.Uuid
   user         UserAccount @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company      Company?    @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, businessLine])
+  @@unique([companyId, userId, businessLine])
   @@index([businessLine, active])
+  @@index([companyId, businessLine, active])
 }
 
 model FabricSearchTask {
@@ -4999,9 +5003,12 @@ model AuditLog {
   beforeValue   Json?
   afterValue    Json?
   transactionId String? // 关联 OrderStatusTransition / BusinessEvent id，用于串联同一业务操作
+  /// 所属公司（发生在哪家公司的操作）；null 为平台级或无公司上下文的历史记录。
+  companyId     String?  @db.Uuid
   createdAt     DateTime @default(now())
 
   actor UserAccount @relation(fields: [actorId], references: [id])
+  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
   claimCreditNoteLines ClaimCreditNoteLine[]
   cashRefundDecisions CreditNoteRefund[] @relation("CashRefundDecision")
   cashRefundEvents CreditNoteRefundEvent[] @relation("CashRefundEventAudit")
@@ -5017,6 +5024,7 @@ model AuditLog {
   @@index([createdAt])
   @@index([targetType, targetId])
   @@index([transactionId])
+  @@index([companyId, createdAt])
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -9824,6 +9832,8 @@ model Company {
   workspaces  MistWorkspace[]
   employeeProfiles EmployeeProfile[]
   employmentEvents EmploymentEvent[]
+  auditLogs   AuditLog[]
+  orderApprovalAuthorities OrderApprovalAuthority[]
 
   @@index([status])
   @@index([createdAt])

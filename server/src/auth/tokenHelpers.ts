@@ -126,7 +126,8 @@ export function buildAuthTokenPayload(user: any, companyId?: string | null): Tok
  */
 export async function buildLoadedAuthTokenPayload(prisma: PrismaClient, user: any, companyId?: string | null, platformCompany?: PlatformCompanyContext): Promise<TokenPayload> {
   if (user.status !== 'active' || user.deletedAt != null) throw new Error('AUTHORIZATION_ACCOUNT_INACTIVE');
-  const contextSupport = currentPlatformCompanyContext();
+  // 请求里的“平台人员进入公司”上下文只属于平台人员本人；重载其他账号（如审批候选人）时按普通成员计算。
+  const contextSupport = user.platformRole === 'platform_admin' ? currentPlatformCompanyContext() : undefined;
   const activeSupport = platformCompany ?? (companyId === undefined || companyId === contextSupport?.companyId ? contextSupport : undefined);
   if (activeSupport) {
     const acting = await platformCompanyUser(prisma, user, activeSupport, companyId === undefined ? activeSupport.companyId : companyId);

@@ -17,7 +17,7 @@ async function main() {
     assertMistLocalMode(host);app=createMistServer(undefined,{host});await app.locals.mistLocal.ready;
     disconnect=()=>app.locals.mistLocal.database.$disconnect();
   }else{
-    const {PrismaClient}=await import('@prisma/client');const prisma=new PrismaClient();
+    const {PrismaClient}=await import('@prisma/client');const prisma=new PrismaClient();(await import('../audit/auditCompanyStamp')).installAuditCompanyStamp(prisma as any);
     app=createMistServer(prisma,{host});disconnect=()=>prisma.$disconnect();
   }
   if(process.env.MIST_MAIL_RECEIVER_ENABLED!=='0')app.locals.mailReceiver.start();

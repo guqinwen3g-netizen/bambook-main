@@ -11,7 +11,8 @@ import type {MistState,MistCommand} from '../../../../server/src/shared/mistWork
 import {Nav,type Route} from '../nav';
 const store=vi.hoisted(()=>({state:null as MistState|null,workspace:{id:'independent',access:{companyLibrary:true}},loading:false,saving:false,pending:null,pendingCreate:null,commandRecovery:null,error:'',run:vi.fn(),refresh:vi.fn()}));
 const auth=vi.hoisted(()=>({user:{id:'garment'},sessionKey:'session',permissions:new Set<string>(),hasPermission:(p:string)=>auth.permissions.has(p)}));
-vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>store}));
+const receivers=vi.hoisted(()=>({list:[{id:'warehouse',name:'Warehouse'},{id:'garment',name:'Garment'}] as Array<{id:string;name:string}>,request:vi.fn()}));
+vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>store,mistApiRequest:(url:string)=>{receivers.request(url);return Promise.resolve({receivers:receivers.list});}}));
 vi.mock('../runtime/auth',()=>({useOptionalMistSession:()=>auth}));
 import {InternalDeliveryPanel,InternalDeliveryCreate,InternalDeliveryInbox} from './InternalDeliveryPanel';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
@@ -27,6 +28,7 @@ it('records a real source and explicit recipient through the two form steps, the
  const source=internalDeliverySources(f.state,f.target.orderId)[0],order=f.state.orders.find(o=>o.id===f.target.orderId)!;
  store.run.mockImplementation(async(command:MistCommand)=>{f.run(command,'garment');store.state=f.state;render(<InternalDeliveryCreate order={order} onClose={close}/>);return{result:{}};});
  render(<InternalDeliveryCreate order={order} onClose={close}/>);
+ await act(async()=>{await Promise.resolve();});
  await fill('交付来源',source.key);await fill('本次交付数量','10');await fill('本次接收账号','warehouse');
  await click(getByRole(host,'button',{name:'下一步'}));
  await fill('交付地点','Training sample room');await fill('实际交付日期','2026-10-30');await fill('交接依据','Independent handover evidence');
@@ -89,4 +91,16 @@ it('keeps an assigned handover read-only after the recipient loses receiving wri
  const detail=getByRole(document.body,'dialog',{name:'内部交付'});
  expect(detail.textContent).toContain('Jacket');expect(queryByRole(detail,'button',{name:'登记点收'})).toBeNull();
  expect(queryByRole(detail,'button',{name:'更正点收'})).toBeNull();expect(store.run).not.toHaveBeenCalled();
+});
+
+it('offers only receivers the server says can take over the delivery',async()=>{
+ const order=f.state.orders.find(o=>o.id===f.target.orderId)!;
+ receivers.list=[{id:'warehouse',name:'Warehouse'}];
+ try{
+  render(<InternalDeliveryCreate order={order} onClose={close}/>);
+  await act(async()=>{await Promise.resolve();});
+  expect(receivers.request).toHaveBeenCalledWith('/api/mist/workspaces/independent/internal-receivers');
+  const select=getByLabelText(host,'本次接收账号',{exact:true}) as HTMLSelectElement;
+  expect([...select.options].map(o=>o.value).filter(Boolean)).toEqual(['warehouse']);
+ }finally{receivers.list=[{id:'warehouse',name:'Warehouse'},{id:'garment',name:'Garment'}];}
 });

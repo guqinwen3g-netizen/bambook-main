@@ -8,6 +8,7 @@ import { MemoryMistDatabase, testActor, testAuthority } from './__tests__/suppor
 import * as contract from '../shared/mistWorkspace';
 import { createOrderGovernance } from '../shared/mistOrderGovernance';
 import { internalFabricRemaining } from '../shared/mistInternalFabric';
+import { TEST_SIGNATURE } from './__tests__/signature';
 
 vi.mock('./context',()=>({mistApprovalAuthority:async()=>({supplier:{},orderReviewerIds:{garment:['reviewer'],fabric:['reviewer']}})}));
 vi.mock('../auth/tokenHelpers',()=>({loadUserWithRoles:async(_db:unknown,id:string)=>({id,status:'active',deletedAt:null}),buildLoadedAuthTokenPayload:async(_db:unknown,user:{id:string})=>({userId:user.id,permissions:['orders:write'],roles:[],departmentIds:[]})}));
@@ -48,10 +49,10 @@ it('rechecks current members inside the approval-center transaction and preserve
   const submitted=await repo.execute(testActor(),workspace.id,{requestId:'submit-internal-supply',expectedRevision:0,command:{type:'order.governance.submit',payload:{orderId:source.id}}});
   const review=(await repo.listReviews(testActor('reviewer'))).find((task:{entityId:string})=>task.entityId===source.id)!;
   const before=structuredClone(db.workspaces.get(workspace.id));db.accounts.set('owner',{status:'disabled'});
-  await expect(repo.decideReview(testActor('reviewer'),workspace.id,review.id,{requestId:'disabled-supply-owner',expectedRevision:submitted.workspace.revision,decision:'approved',note:'Review supply'})).rejects.toThrow('停用');
+  await expect(repo.decideReview(testActor('reviewer'),workspace.id,review.id,{requestId:'disabled-supply-owner',expectedRevision:submitted.workspace.revision,decision:'approved',note:'Review supply',signature:TEST_SIGNATURE})).rejects.toThrow('停用');
   expect(db.workspaces.get(workspace.id)).toEqual(before);
   db.accounts.set('owner',{status:'active'});
-  const input={requestId:'approve-internal-supply',expectedRevision:submitted.workspace.revision,decision:'approved' as const,note:'Supply owner and receiver checked'};
+  const input={requestId:'approve-internal-supply',expectedRevision:submitted.workspace.revision,decision:'approved' as const,note:'Supply owner and receiver checked',signature:TEST_SIGNATURE};
   const approved=await repo.decideReview(testActor('reviewer'),workspace.id,review.id,input);
   expect(approved.receipt.result.orderId).toBe(source.id);
   expect(db.workspaces.get(workspace.id).state.orders.find((o:{id:string})=>o.id===source.id).governance.status).toBe('approved');

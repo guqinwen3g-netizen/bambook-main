@@ -207,7 +207,10 @@ export function createAdminRouter(options: AdminRouterOptions) {
   /** 当前会话所属公司；历史令牌没有公司上下文时返回 null（保持原有全局行为）。 */
   function actorCompanyId(req: Request): string | null {
     const actor = (req as any).actor;
-    return typeof actor?.companyId === 'string' && actor.companyId ? actor.companyId : null;
+    if (typeof actor?.companyId === 'string' && actor.companyId) return actor.companyId;
+    // 平台人员进入公司后台：按所进入的公司收窄（正常令牌里 companyId 已等于它，这里防御缺省）。
+    const entered = actor?.platformCompany?.companyId;
+    return typeof entered === 'string' && entered ? entered : null;
   }
 
   // 统一认证守卫：JWT（走 jwt.verify 验签）优先，API-Key 次之
@@ -258,8 +261,9 @@ export function createAdminRouter(options: AdminRouterOptions) {
 
   // Explicit main-order approval authorities; never infer fabric/garment scope
   // from the shared sales-manager role or the generic department-head fallback.
-  router.get('/order-approval-authorities', withRouteErrorGuard(async (_req, res) => {
-    res.json({ ok: true, ...(await orderMainApprovals.listAuthorityConfig()) });
+  // 公司会话只读写本公司的授权（候选人为本公司在职成员）；无公司会话保持历史全局配置。
+  router.get('/order-approval-authorities', withRouteErrorGuard(async (req, res) => {
+    res.json({ ok: true, ...(await orderMainApprovals.listAuthorityConfig(actorCompanyId(req))) });
   }));
   router.put('/order-approval-authorities/:businessLine', withRouteErrorGuard(async (req, res) => {
     const businessLine = req.params.businessLine;
@@ -268,7 +272,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
     if (!Array.isArray(userIds) || userIds.some((id: unknown) => typeof id !== 'string' || !id.trim())) return res.status(400).json({ ok: false, error: 'INVALID_USER_IDS', message: 'userIds 必须是账号 ID 数组。' });
     const actorId = (req as any).actor?.userId;
     if (!actorId) return res.status(401).json({ ok: false, error: 'AUTH_REQUIRED', message: '需要管理员登录。' });
-    const assignments = await orderMainApprovals.replaceAuthorityConfig({ businessLine, userIds, actorId });
+    const assignments = await orderMainApprovals.replaceAuthorityConfig({ businessLine, userIds, actorId, companyId: actorCompanyId(req) });
     res.json({ ok: true, businessLine, assignments });
   }));
 
@@ -944,6 +948,11 @@ export function createAdminRouter(options: AdminRouterOptions) {
   }));
 
   // ---- Audit Logs ----
+  /** 公司会话只看本公司审计（companyId 精确匹配，平台级/无归属记录不可见）；无公司会话保持全局。 */
+  function companyAuditWhere(req: Request, where: Record<string, unknown>) {
+    const companyId = actorCompanyId(req);
+    return companyId ? { AND: [where, { companyId }] } : where;
+  }
   // task ERP-P1: target/time filters + 参数校验 fail closed
   // 阶段 D / D6：where 构造抽取至 audit/entityQuery.ts（与 /api/v1/audit/entity 共享）
   router.get('/audit-logs', withRouteErrorGuard(async (req: Request, res: Response) => {
@@ -951,15 +960,16 @@ export function createAdminRouter(options: AdminRouterOptions) {
     if (!built.ok) {
       return res.status(built.status).json({ ok: false, error: built.error, message: built.message });
     }
+    const where = companyAuditWhere(req, built.where);
 
     const [logs, total] = await Promise.all([
       options.prisma.auditLog.findMany({
-        where: built.where,
+        where,
         orderBy: { createdAt: 'desc' },
         take: built.limit,
         skip: built.offset,
       }),
-      options.prisma.auditLog.count({ where: built.where }),
+      options.prisma.auditLog.count({ where }),
     ]);
     res.json({ ok: true, logs, total });
   }));
@@ -972,7 +982,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
     for (let offset = 0; ; offset += PAGE) {
       const built = buildAuditLogQuery({ ...(req.query as any), limit: String(PAGE), offset: String(offset) });
       if (!built.ok) return res.status(built.status).json({ ok: false, error: built.error, message: built.message });
-      const page = await options.prisma.auditLog.findMany({ where: built.where, orderBy: { createdAt: 'desc' }, take: PAGE, skip: offset, include: { actor: { select: { id: true, displayName: true, email: true } } } });
+      const page = await options.prisma.auditLog.findMany({ where: companyAuditWhere(req, built.where), orderBy: { createdAt: 'desc' }, take: PAGE, skip: offset, include: { actor: { select: { id: true, displayName: true, email: true } } } });
       rows.push(...page);
       if (page.length < PAGE) break;
       if (rows.length > MAX) { truncated = true; break; }

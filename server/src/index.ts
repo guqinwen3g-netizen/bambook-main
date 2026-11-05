@@ -167,6 +167,7 @@ import { todayLocalKey } from './shared/localDate';
 import { orderAmountOrNull } from './shared/orderAmount';
 // ★★ 删实体时统一清引用（修 2026-09-18 发现的根因：`server/src` 里引用表只 upsert 不 delete ✗）
 import { installEntityRefPurge } from './entities/entityRefPurgeMiddleware';
+import { installAuditCompanyStamp } from './audit/auditCompanyStamp';
 // 行情唯一真源（棉花实时 / 羊毛·亚麻人工录入；拿不到就返回 null，绝不编造）
 import { fetchCommodityQuotes } from './market/marketQuoteService';
 // 汇率唯一真源（读财务 ExchangeRate 表，与单据换算同源；不再直连 exchangerate-api.com）
@@ -188,6 +189,7 @@ if (isDualMode()) {
     const client = new PrismaClient({ datasources: { db: { url } }, log: [{ emit: 'event', level: 'query' }] });
     // ★★ 每个库客户端都装「删实体清引用」中间件（2026-09-18 · 根因修复 ✓）
     installEntityRefPurge(client as unknown as Parameters<typeof installEntityRefPurge>[0]);
+    installAuditCompanyStamp(client as any);
     clients.set(c.dbName, client);
   }
   const dualFallback = clients.get(getActiveDb()) ?? clients.values().next().value!;
@@ -204,6 +206,8 @@ if (isDualMode()) {
   });
   // ★★ 装「删实体清引用」中间件（2026-09-18 · 根因修复 ✓）
   installEntityRefPurge(prisma as unknown as Parameters<typeof installEntityRefPurge>[0]);
+  // 审计日志按请求公司上下文补 companyId（公司后台只看本公司审计）。
+  installAuditCompanyStamp(prisma as any);
 }
 attachPrismaSlowQueryLogger(prisma as unknown as Parameters<typeof attachPrismaSlowQueryLogger>[0]);
 const runtimeDataSource = describeRuntimeDataSource();

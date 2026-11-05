@@ -9,14 +9,14 @@ import type { MistFileInput, MistStoredFile } from './files';
 export type PreparedGeneratedDocument = { snapshot: GeneratedDocSnapshot; file: MistFileInput; sha256: string; bytes: number };
 const fail = (message: string): never => { throw new MistCommandError('DOCUMENT_PRECONDITION', message, 422); };
 
-export async function buildGeneratedDocument(snapshot: GeneratedDocSnapshot, render: (html: string) => Promise<PdfRenderResult> = html => renderHtmlToPdf(html, { format: 'A4' })): Promise<PreparedGeneratedDocument> {
+export async function buildGeneratedDocument(snapshot: GeneratedDocSnapshot, render: (html: string) => Promise<PdfRenderResult> = html => renderHtmlToPdf(html, { format: 'A4' }), options: { sealDataUrl?: string } = {}): Promise<PreparedGeneratedDocument> {
   let result: PdfRenderResult;
   // Rendering happens before any file is written or state changes: a failure means nothing was generated.
-  try { result = await render(renderGeneratedDocumentHtml(snapshot)); }
+  try { result = await render(renderGeneratedDocumentHtml(snapshot, options)); }
   catch (error) { console.error('[mist] document PDF render failed:', error instanceof Error ? error.message : error); throw new MistCommandError('DOCUMENT_PDF_UNAVAILABLE', '单据 PDF 渲染服务暂不可用，本次未生成文件，请稍后重试', 422); }
   const bytes = Buffer.from(result.pdf), sha256 = createHash('sha256').update(bytes).digest('hex');
   if (bytes.length < 10 || bytes.subarray(0, 5).toString() !== '%PDF-' || !bytes.subarray(Math.max(0, bytes.length - 1024)).toString('ascii').includes('%%EOF') || result.sha !== sha256 || result.bytes !== bytes.length) fail('未生成有效PDF，请重试');
-  return { snapshot: structuredClone(snapshot), file: { bytes, name: generatedDocFileName(snapshot), mimeType: 'application/pdf' }, sha256, bytes: bytes.length };
+  return { snapshot: structuredClone(snapshot), file: { bytes, name: options.sealDataUrl ? generatedDocFileName(snapshot).replace(/\.pdf$/, '-盖章.pdf') : generatedDocFileName(snapshot), mimeType: 'application/pdf' }, sha256, bytes: bytes.length };
 }
 export function bindGeneratedDocument(prepared: PreparedGeneratedDocument, file: MistStoredFile, ctx: { id: () => string; workspaceId: string; requestId: string }): GeneratedDocArtifact {
   if (file.mimeType !== 'application/pdf' || file.size !== prepared.bytes || file.name !== prepared.file.name || file.storageKey !== ctx.workspaceId + '/' + file.id || !ctx.requestId) fail('单据未按本公司安全归档');

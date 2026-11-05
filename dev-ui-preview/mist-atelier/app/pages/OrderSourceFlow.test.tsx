@@ -54,7 +54,7 @@ it('carries a product archive source into the draft and stamps it on the created
   expect((getByLabelText(host, /^品名/) as HTMLInputElement).value).toBe('双面羊毛大衣');
   expect((getByLabelText(host, /^款号 \/ 品号/) as HTMLInputElement).value).toBe('CC-COAT-14');
   input('数量', '300'); input('单价 USD', '62'); await click(getByRole(host, 'button', { name: '下一步' }));
-  input('交期', '2026-12-01'); await click(getByRole(host, 'button', { name: '下一步' })); await click(getByRole(host, 'button', { name: '下一步' }));
+  input('交期', '2026-12-01'); input('出运前累计收款（%）', '0'); await click(getByRole(host, 'button', { name: '下一步' })); await click(getByRole(host, 'button', { name: '下一步' }));
   await click(getByRole(host, 'button', { name: '创建订单草稿' }));
   // BB-ORD-2：来源随 order.create 一次写入，不再二次调用 order.governance.saveDraft
   expect(store.run.mock.calls.map(call => call[0].type)).toEqual(['order.create']);
@@ -151,7 +151,7 @@ async function createFromVersion() {
   render({ view: 'orders/new', versionId: 'ver-1', customerId: 'customer-a', section: 'garment' }, <OrderCreatePage />);
   input('季节 / 批次', 'AW27'); await click(getByRole(host, 'button', { name: '下一步' }));
   input('数量', '120'); input('单价 USD', '50'); await click(getByRole(host, 'button', { name: '下一步' }));
-  input('交期', '2026-12-01'); await click(getByRole(host, 'button', { name: '下一步' })); await click(getByRole(host, 'button', { name: '下一步' }));
+  input('交期', '2026-12-01'); input('出运前累计收款（%）', '0'); await click(getByRole(host, 'button', { name: '下一步' })); await click(getByRole(host, 'button', { name: '下一步' }));
   await click(getByRole(host, 'button', { name: '创建订单草稿' }));
 }
 

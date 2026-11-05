@@ -65,13 +65,16 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
     return { userId: user.id };
   }
 
+  // 平台动作针对哪家公司就归属哪家公司（targetId 为公司 id），公司后台可见平台对本公司的操作。
   function audit(actorId: string, action: string, targetId: string, detail?: unknown) {
     return options.prisma.auditLog.create({
       data: {
         id: `alog_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         actorId,
         action,
+        targetType: 'Company',
         targetId,
+        companyId: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId) ? targetId : null,
         ...(detail === undefined ? {} : { detail: detail as any }),
       },
     }).catch(() => undefined);

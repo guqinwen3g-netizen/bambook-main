@@ -326,6 +326,25 @@
 .mist-upload:hover, .mist-upload[data-over] { background: var(--mist-accent-tint); color: var(--mist-accent-ink); }
 .mist-upload b { color: var(--mist-ink); font-weight: var(--mist-fw-medium); }
 
+/* ── 手写签字板：填充底，墨迹跟随 --mist-ink；签名线与提示退到最弱层级 ── */
+.mist-signature { position: relative; }
+.mist-signature-pad { position: relative; width: 100%; border-radius: var(--mist-r-lg); background: var(--mist-fill); color: var(--mist-ink); cursor: crosshair; touch-action: none; user-select: none; -webkit-user-select: none; transition: background var(--mist-dur); }
+.mist-signature-pad:hover { background: color-mix(in srgb, var(--mist-fill) 60%, var(--mist-accent-tint)); }
+.mist-signature[data-disabled] .mist-signature-pad { cursor: default; opacity: .6; }
+.mist-signature-line { position: absolute; height: 1px; background: var(--mist-ink-3); opacity: .5; pointer-events: none; }
+.mist-signature-hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: var(--mist-ink-3); font-size: var(--mist-text-sm); pointer-events: none; }
+.mist-signature-ink { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.mist-signature-clear { position: absolute; top: 8px; right: 8px; height: 26px; padding: 0 10px; border: 0; border-radius: var(--mist-r-pill); background: var(--mist-card); color: var(--mist-ink-2); font: inherit; font-size: var(--mist-text-xs); cursor: pointer; opacity: 0; transition: opacity var(--mist-dur), color var(--mist-dur-fast); }
+.mist-signature[data-inked] .mist-signature-clear { opacity: 1; }
+.mist-signature-clear:hover { color: var(--mist-ink); }
+.mist-signature-clear:focus-visible { outline: none; box-shadow: var(--mist-focus); opacity: 1; }
+.mist-signature-clear:disabled { cursor: default; }
+@media (prefers-reduced-motion: reduce) { .mist-signature-pad, .mist-signature-clear { transition: none; } }
+
+/* ── 印章缩略图：填充底方块，图片按原比例居中 ── */
+.mist-seal-image { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 48px; height: 48px; border-radius: var(--mist-r-md); background: var(--mist-fill); color: var(--mist-ink-3); overflow: hidden; }
+.mist-seal-image img { width: 100%; height: 100%; object-fit: contain; }
+
 /* ── 浮层（唯一允许阴影的地方）── */
 .mist-scrim { position: fixed; inset: 0; background: var(--mist-scrim); backdrop-filter: blur(3px); z-index: var(--mist-z-overlay); animation: mist-fade .25s both; }
 @keyframes mist-fade { from { opacity: 0; } }

@@ -4,7 +4,7 @@ import { uiText, ui } from '../../../../services/interfaceLanguage';
  *  只展示服务端派生的提交快照；批准、退回都写回原业务命令（采购、报价偏差、订单、付款申请、索赔方案、风险处置），不另设审批引擎。 */
 import React from 'react';
 import { ArrowUpRight, Check, CornerUpLeft, Paperclip, RefreshCw } from 'lucide-react';
-import { Banner, Button, Card, DataTable, EmptyState, Facts, Field, KeyValue, MistPage, ObjectCell, PageHeader, Pill, SearchField, Segmented, Tabs, TextArea, Toolbar, type Column, type Tone } from '../../../../components/mist';
+import { Banner, Button, Card, DataTable, EmptyState, Facts, Field, KeyValue, MistPage, ObjectCell, PageHeader, Pill, SearchField, Segmented, SignaturePad, Tabs, TextArea, Toolbar, type Column, type SignatureValue, type Tone } from '../../../../components/mist';
 import { getMistReviewTasks } from '../../../../server/src/shared/mistWorkspace';
 import type { MistReviewTask } from '../../../../server/src/shared/mistReview';
 import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
@@ -45,7 +45,7 @@ export function ApprovalsPage() {
   const [kind, setKind] = React.useState<'all' | Kind>('all'), [query, setQuery] = React.useState('');
   // The shell remounts this page when a review link changes; keep the compact detail reachable.
   const [drawer, setDrawer] = React.useState(() => !!route.id);
-  const [note, setNote] = React.useState(''), [local, setLocal] = React.useState('');
+  const [note, setNote] = React.useState(''), [local, setLocal] = React.useState(''), [signature, setSignature] = React.useState<SignatureValue | null>(null), [signKey, setSignKey] = React.useState(0);
   /** 服务端只返回我是所有者或审批人的空间；我在本公司提交、但不是审批人的事项从本公司状态补齐（只读）。 */
   const all = React.useMemo<Row[]>(() => {
     const server: Row[] = reviews.rows;
@@ -61,7 +61,7 @@ export function ApprovalsPage() {
   const q = query.trim().toLowerCase();
   const shown = inTab.filter(r => (kind === 'all' || r.kind === kind) && (!q || [r.title, r.workspaceName, APPROVAL_KIND_LABEL[r.kind], ...r.details.map(d => d.value)].some(v => v.toLowerCase().includes(q))));
   const selected = all.find(r => rowKey(r) === route.id) ?? null;
-  React.useEffect(() => { setNote(''); setLocal(''); }, [route.id]);
+  React.useEffect(() => { setNote(''); setLocal(''); setSignature(null); setSignKey(k => k + 1); }, [route.id]);
   React.useEffect(() => { if (kind !== 'all' && !kinds.includes(kind)) setKind('all'); }, [tab, kinds.join(',')]);
   const open = (r: Row) => { setDrawer(true); go('approvals', rowKey(r), { section: tab }); };
   const requester = (r: Row) => r.requesterId === me ? '我' : state?.members?.find(m => m.userId === r.requesterId)?.name ?? (current && r.workspaceId === current.id && current.ownerId === r.requesterId ? '公司所有者' : '其他成员');
@@ -69,8 +69,11 @@ export function ApprovalsPage() {
     if (!selected) return;
     if (!note.trim()) { setLocal(decision === 'rejected' ? '请填写退回理由。' : '请填写批准依据。'); return; }
     if (note.trim().length > 4000) { setLocal('审批意见不能超过 4000 字。'); return; }
+    // 合同与资金类批准须当场手写签字；退回不签。
+    const needsSignature = decision === 'approved' && !!selected.signatureRequired;
+    if (needsSignature && !signature) { setLocal('请先手写签字。'); return; }
     setLocal('');
-    if (await reviews.decide(selected, decision, note)) setNote('');
+    if (await reviews.decide(selected, decision, note, needsSignature && signature ? { svg: signature.svg } : undefined)) { setNote(''); setSignature(null); setSignKey(k => k + 1); }
   };
   const columns: Column<Row>[] = [
     { key: 'title', header: '事项', width: 'minmax(220px,2fr)', render: r => <ObjectCell name={localizedPageTitle(r.title)} meta={uiText(APPROVAL_KIND_LABEL[r.kind])} /> },
@@ -90,7 +93,9 @@ export function ApprovalsPage() {
       </DetailBlock>
     {!!selected.files?.length && <DetailBlock title={uiText("随附依据")}>{selected.files.map(f => <div className="mist-row" key={f.id}><Button size="sm" icon={Paperclip} onClick={() => void reviews.download(selected, f)}>{f.name}</Button></div>)}</DetailBlock>}
     {selected.status === 'pending' && !decideReason && <Field label={uiText("审批意见")} required><TextArea aria-label={uiText("审批意见")} rows={3} maxLength={4000} value={note} disabled={reviews.busy} onChange={e => setNote(e.target.value)} /></Field>}
+    {selected.status === 'pending' && !decideReason && selected.signatureRequired && <Field label={uiText("批准签字")} required><SignaturePad key={signKey} ariaLabel="批准签字" disabled={reviews.busy} onChange={setSignature} /></Field>}
     {local && <Banner variant="notice" tone="bad" title={uiText("还不能保存决定")}>{local}</Banner>}
+    {!local && reviews.error && <div data-approval-error><Banner variant="notice" tone="bad" title={uiText("审批未完成")}>{reviews.error}</Banner></div>}
     <ActionBar busy={reviews.busy} actions={[
       { label: '批准', icon: Check, primary: true, onClick: () => void decide('approved'), reason: decideReason, hidden: selected.status !== 'pending'||!selected.canDecide },
       { label: '退回', icon: CornerUpLeft, onClick: () => void decide('rejected'), reason: decideReason, hidden: selected.status !== 'pending'||!selected.canDecide },

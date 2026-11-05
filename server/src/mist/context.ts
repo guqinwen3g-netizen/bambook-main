@@ -32,7 +32,8 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
     const {createOrderMainApprovalService}=await import('../orders/orderMainApprovalService');
     const service=createOrderMainApprovalService(db);authority.orderReviewerIds={garment:[],fabric:[]};
     for(const domain of ['garment','fabric'] as const){
-      let configured:string[]=[];try{configured=await service.resolveEligibleReviewerIds(db,domain);}catch(error:any){if(error?.code!=='ORDER_APPROVAL_AUTHORITY_MISSING')throw error;}
+      // 公司会话只取本公司显式配置的审批资格；未配置时下方按部门主管路由。
+      let configured:string[]=[];try{configured=await service.resolveEligibleReviewerIds(db,domain,actor.companyId??null);}catch(error:any){if(error?.code!=='ORDER_APPROVAL_AUTHORITY_MISSING')throw error;}
       const current=async(id:string,checkDomain=false)=>{
         if(eligibleReviewerIds&&!eligibleReviewerIds.includes(id))return false;
         const user=await loadUserWithRoles(db,id);if(!user||user.status!=='active'||user.deletedAt)return false;
@@ -79,7 +80,8 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
     };
     for(const contract of ['purchase','processing'])for(const family of ['fabric','garment']){
       const key=`supplierCommitment.approvers.${contract}.${family}`;
-      const row=await db.systemConfig?.findUnique({where:{id:`global::${key}`}});
+      // 公司名单在 scope `company:<id>`；无公司会话沿用 global（与 supplierCommitmentAuthority 一致）。
+      const row=await db.systemConfig?.findUnique({where:{id:`${actor.companyId?`company:${actor.companyId}`:'global'}::${key}`}});
       let value:any=row?.value;try{if(typeof value==='string')value=JSON.parse(value);}catch{value=null;}
       const valid=value?.schemaVersion===1&&Array.isArray(value.userIds)&&Number.isSafeInteger(row?.version);
       const userIds:string[]=[];

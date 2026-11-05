@@ -18,6 +18,8 @@ import { fileURLToPath } from 'node:url';
 export const AGENT_EXCLUDED_COMMANDS = {
   'platform.invoice.save': '旧独立 CI 草稿：职责已改为业务/后勤经单据签发（fulfillment.documents.issue）、财务登记核销，发票页只读展示历史草稿；后端保留供历史草稿与既有校验测试使用，不再交给 Agent',
   'platform.invoice.issue': '同 platform.invoice.save：财务不直接签发商业发票，页面无入口',
+  'seal.save': '电子公章由公司管理员本人维护（上传印章图片、指定用印人），不交给 Agent，也不能经 Agent 提议',
+  'seal.disable': '同 seal.save：停用印章只由公司管理员本人操作',
 };
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');

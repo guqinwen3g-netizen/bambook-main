@@ -35,7 +35,7 @@ export function AccountPage() {
           <KeyValue items={[
             { label: '姓名', value: user.displayName || '—' }, { label: '工作邮箱', value: user.email || '—' },
             ...(user.platformRole === 'platform_admin' ? [] : [
-            { label: '公司', value: state?.settings.companyProfile?.legalName || '—' }, { label: '部门', value: user.department || '—' },
+            { label: '公司', value: state?.settings.companyProfile?.legalName || user.company?.name || '—' }, { label: '部门', value: user.department || '—' },
             { label: '小组', value: organization.loading ? '正在读取' : organization.error ? '读取失败' : organization.teams.map(team => team.name).join('、') || '未加入小组' },
             ]),
           ]} />

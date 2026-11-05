@@ -9,6 +9,7 @@ import { MIST_BUSINESS_GROUPS, MIST_BUSINESS_GROUP_LABEL, type MistOwnedObject }
 import { accountHandovers, type MistAccountHandover } from '../shared/mistHandover';
 import { COMPANY_MAINTAIN_SCOPE, LINE_SUPERVISOR_SCOPE } from './companyLibrary';
 import { PERMISSION_SCOPES } from '../_shared/rolePermissionMatrix';
+import { projectSeals } from '../shared/mistSeals';
 /**
  * 公司访问与读投影。
  * - 成员资格只决定"能不能进这家公司"，看到哪些业务数据仍由账号自身现有岗位的读权限决定；
@@ -276,6 +277,9 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
     }
   }
   const restrictedFiles = new Set(scopedHiddenFiles(next));
+  // 印章图片只给公司管理员（本机空间为所有者）与该章用印人，Agent 一律不给；用印与签字记录按所涉业务记录裁剪（见 mistSeals）。
+  const maintainer = hasScope(actor, COMPANY_MAINTAIN_SCOPE as PermissionScope) || !!ownerId && ownerId === actor.userId;
+  for (const id of projectSeals(state, next, actor.userId, maintainer, (actor as { actorKind?: unknown }).actorKind === 'agent')) restrictedFiles.add(id);
   if (taxBaseHidden) {
     // A PDF/image cannot use the structured tax mask. Use the full source state so
     // another shared reference (or uploader ownership) cannot reopen its original.

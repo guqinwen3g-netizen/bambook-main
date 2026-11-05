@@ -10,7 +10,7 @@ import {agentTaskNoticeScope,useAgentTaskNotices,type AgentTaskNotices} from './
 import { useMistSession } from './auth';
 import type { MistCommand, MistFile, MistRunReceipt, MistState, MistWorkspaceEnvelope } from '../../../../server/src/shared/mistWorkspace';
 
-type Pending = { workspaceId: string; requestId: string; expectedRevision: number; kind: 'command' | 'upload' | 'archive' | 'restore' | 'member' | 'mail-send'; command?: MistCommand; file?: { name: string; size: number; sha256?: string }; actorId?: string; claimId?: string; action?: 'add' | 'remove'; account?: string;
+type Pending = { workspaceId: string; requestId: string; expectedRevision: number; kind: 'command' | 'upload' | 'archive' | 'restore' | 'member' | 'mail-send'; command?: MistCommand; signature?: { svg: string }; file?: { name: string; size: number; sha256?: string }; actorId?: string; claimId?: string; action?: 'add' | 'remove'; account?: string;
   /** 邮件发送意图：发出前存本机，丢失回执后用同一 requestKey 核对；凭据类动作绝不写入。 */
   mail?: { requestKey: string; draftId?: string; forwardOfId?: string; input: Record<string, unknown>;
     /** 回执与原意图不符（账号 / 请求编号 / 主题 / 收件人 / 已被其他意图认领）时写入：停在待人工核对，不再自动核对或重发。 */
@@ -26,8 +26,9 @@ export interface MistWorkspaceContext {
   loading: boolean; saving: boolean; error: string; pending: Pending | null;
   pendingCreate?: MistPendingCreate | null;
   commandRecovery?:MistCommandRecovery|null;
-  /** reauth：只在确认高风险 Agent 提议时随本次请求发送，不写入本机待核对记录。 */
-  run: (command: MistCommand, options?: { reauth?: { password: string } }) => Promise<MistRunReceipt>;
+  /** reauth：只在确认高风险 Agent 提议时随本次请求发送，不写入本机待核对记录。
+   *  signature：合同与资金类批准的当场手写签字；属于请求内容，随待核对记录保存以便按原请求重发。 */
+  run: (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string } }) => Promise<MistRunReceipt>;
   uploadFile: (file: File, options?:MistUploadOptions) => Promise<MistFile>;
   downloadFile: (file: MistFile) => Promise<void>;
   /** 读取附件原件（带登录凭据），供在线预览使用；不会触发下载。 */
@@ -519,15 +520,15 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       throw failure;
     }finally{if(token)unlock(token,authority);}
   },[authority.key,authority.userId,authority.status,boundEpoch,boundWorkspaceId,assertSource,lock,load,put,unlock,persist,clearPending,holdForReview]);
-  const run = React.useCallback(async (command: MistCommand, options?: { reauth?: { password: string } }) => {
+  const run = React.useCallback(async (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string } }) => {
     assertSource(authority, boundEpoch, boundWorkspaceId);
     if (pendingCreateRef.current) throw new RequestError(createNotice(pendingCreateRef.current));
     if (pendingRef.current) throw new RequestError('存在待核对的操作，请先核对原请求结果');
     const token = lock();
     try {
-      const intent: Pending = { workspaceId: boundWorkspaceId!, requestId: crypto.randomUUID(), expectedRevision: snapshot.current!.revision, actorId: authority.userId, kind: 'command', command: JSON.parse(JSON.stringify(command)) };
+      const intent: Pending = { workspaceId: boundWorkspaceId!, requestId: crypto.randomUUID(), expectedRevision: snapshot.current!.revision, actorId: authority.userId, kind: 'command', command: JSON.parse(JSON.stringify(command)), ...(options?.signature ? { signature: { svg: options.signature.svg } } : {}) };
       const audible = !['settings.update','notification.read','notification.readAll','email.flag','email.move'].includes(command.type);
-      try{const result=await perform(intent, JSON.stringify({ requestId: intent.requestId, expectedRevision: intent.expectedRevision, command: intent.command, ...(options?.reauth && command.type === 'agent.proposal.confirm' ? { reauth: { password: options.reauth.password } } : {}) }), authority); if(audible)playFeedbackSound('success');return result;}
+      try{const result=await perform(intent, JSON.stringify({ requestId: intent.requestId, expectedRevision: intent.expectedRevision, command: intent.command, ...(intent.signature ? { signature: intent.signature } : {}), ...(options?.reauth && command.type === 'agent.proposal.confirm' ? { reauth: { password: options.reauth.password } } : {}) }), authority); if(audible)playFeedbackSound('success');return result;}
       catch(failure){
         if(audible)playFeedbackSound('failure');
         // Forms retain the exact unresolved command identity, even if React batches away the saving frame.
@@ -652,7 +653,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       try { data = await request(BASE + '/' + encodeURIComponent(intent.workspaceId) + '/receipts/' + encodeURIComponent(intent.requestId)); }
       catch (failure) {
         assertSource(authority, boundEpoch, boundWorkspaceId);
-        if (failure instanceof RequestError && failure.status === 404 && intent.kind === 'command') return recovered(await perform(intent, JSON.stringify({ requestId: intent.requestId, expectedRevision: intent.expectedRevision, command: intent.command }), authority));
+        if (failure instanceof RequestError && failure.status === 404 && intent.kind === 'command') return recovered(await perform(intent, JSON.stringify({ requestId: intent.requestId, expectedRevision: intent.expectedRevision, command: intent.command, ...(intent.signature ? { signature: intent.signature } : {}) }), authority));
         if (failure instanceof RequestError && failure.status === 404 && intent.kind === 'member') return await perform(intent, JSON.stringify({ requestId: intent.requestId, expectedRevision: intent.expectedRevision, action: intent.action, account: intent.account }), authority);
         throw failure;
       }

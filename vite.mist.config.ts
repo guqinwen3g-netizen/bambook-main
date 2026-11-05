@@ -1,10 +1,12 @@
 import { defineConfig, mergeConfig } from 'vite';
 import referenceConfig from './dev-ui-preview/mist-atelier/app/vite.config';
 import { mistDevelopmentProxy } from './scripts/mist-dev-target.mjs';
+import { walkNoDialogsPlugin } from './scripts/walk-no-dialogs';
 
 // Both Mist ports run the same approved frontend source. Business adapters attach here.
 export default defineConfig(
   mergeConfig(referenceConfig, {
+    plugins: [walkNoDialogsPlugin()],
     // The runtime CLI must use the same auth/data proxy as the daily dev runner.
     define: {
       'import.meta.env.VITE_MIST_REFERENCE': JSON.stringify('false'),

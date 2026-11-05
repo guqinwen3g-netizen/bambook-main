@@ -7,7 +7,7 @@ import { freshOrderLineScope } from '../orders/orderLineWriteAccess';
 import { logger } from '../lib/logger';
 import { createSupplierCommitmentService, authorizeSupplierContract } from './supplierCommitmentService';
 import { createSupplierFulfillmentService } from './supplierFulfillmentService';
-import { setSupplierApprovalAuthority, supplierAuthorityKey } from './supplierCommitmentAuthority';
+import { setSupplierApprovalAuthority, supplierAuthorityConfigId, supplierAuthorityKey } from './supplierCommitmentAuthority';
 import { freshSupplierActor, authorizeSupplierSources } from './supplierContractAccess';
 import { readSupplierContractDocument, renderSupplierContractHtml } from './supplierContractDocument';
 import { registerSupplierContractTradeDocument } from '../customs/supplierContractDocumentArchive';
@@ -50,7 +50,7 @@ export function createSupplierContractRouter(options: { prisma: PrismaClient; re
     const kind = kindOf(req), family = familyOf(req), actor = actorOf(req);
     const item = await options.prisma.$transaction(async tx => {
       await freshSupplierActor(tx, actor, 'config');
-      const key = supplierAuthorityKey(kind, family), row = await tx.systemConfig.findUnique({ where: { id: `global::${key}` } });
+      const key = supplierAuthorityKey(kind, family), row = await tx.systemConfig.findUnique({ where: { id: supplierAuthorityConfigId(key, actor.companyId ?? null) } });
       let value: unknown = row?.value; if (typeof value === 'string') { try { value = JSON.parse(value); } catch { value = null; } }
       return { key, version: row?.version ?? 0, userIds: Array.isArray(supplierObject(value).userIds) ? supplierObject(value).userIds : [] };
     });

@@ -2,7 +2,7 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** Shared T2/T3 lists and T4 editors. Domain pages own fields, transitions and authority. */
 import React from 'react';
 import { ArrowLeft, ArrowRight, Download, Edit3, Plus } from 'lucide-react';
-import { UploadZone, FormFooter, BackLink, Banner, Button, Card, Checkbox, DataTable, Dialog, EmptyState, Field, FormGrid, FormSection, KeyValue, MistPage, Mono, PageHeader, Pagination, SearchField, Select, TextArea, TextInput, Toolbar, VerticalSteps, useToast, type Column } from '../../../../../components/mist';
+import { UploadZone, FormFooter, BackLink, Banner, Button, Card, Checkbox, DataTable, Dialog, EmptyState, Field, FormGrid, FormSection, KeyValue, MistPage, Mono, PageHeader, Pagination, SearchField, Select, SignaturePad, TextArea, TextInput, Toolbar, VerticalSteps, useToast, type Column } from '../../../../../components/mist';
 import { useMistWorkspace,type MistWorkspaceContext,type MistCommandRecovery } from '../../runtime/workspace';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import { useNav } from '../../nav';
@@ -12,10 +12,14 @@ import { downloadGeneratedBlob, requestGeneratedExport } from '../../runtime/exp
 import { FailureNotice } from '../../runtime/FailureNotice';
 export type ModuleValue = string | number | boolean;
 export const moduleFileIds = (value: ModuleValue | undefined): string[] => typeof value === 'string' && value ? value.split(',').filter(Boolean) : [];
+export const moduleSignature = (value: ModuleValue | undefined): { svg: string } | undefined => typeof value === 'string' && value.startsWith('<svg') ? { svg: value } : undefined;
+/** 合同与资金类批准的手写签字字段（必填，整行）。 */
+export const signatureField = (label = '批准签字'): ModuleField => ({ key: 'signature', label, type: 'signature', required: true });
 export type ModuleValues = Record<string, ModuleValue>;
 type ModuleFieldCondition = {key:string;values:string[]};
 /** files：上传后的附件 ID 以逗号分隔存入取值，用 moduleFileIds 读取。 */
-export type ModuleField = {key:string;label:string;type?:'text'|'number'|'date'|'month'|'datetime-local'|'select'|'choice'|'incoterm'|'textarea'|'checkbox'|'files';options?:Array<{value:string;label:string}>;/** choice：常用选项 + 手动填写；strict 时只能选列表内的值。 */strict?:boolean;required?:boolean;hint?:string;readonly?:boolean;min?:number;step?:number|string;when?:ModuleFieldCondition|ModuleFieldCondition[]};
+/** signature：当场手写签字，取值为签字 SVG；用 moduleSignature 读取，作为命令的 signature 选项发送（不进命令 payload）。 */
+export type ModuleField = {key:string;label:string;type?:'text'|'number'|'date'|'month'|'datetime-local'|'select'|'choice'|'incoterm'|'textarea'|'checkbox'|'files'|'signature';options?:Array<{value:string;label:string}>;/** choice：常用选项 + 手动填写；strict 时只能选列表内的值。 */strict?:boolean;required?:boolean;hint?:string;readonly?:boolean;min?:number;step?:number|string;when?:ModuleFieldCondition|ModuleFieldCondition[]};
 export type ModuleEditorSection = {id:string;label:string;description?:string;fields:string[]};
 export type ModuleEditorSpec = {title:string;description?:string;sections?:ModuleEditorSection[];fields:ModuleField[];initialValues:ModuleValues;submit:(values:ModuleValues)=>Promise<unknown>;submitLabel?:string;submitVariant?:'primary'|'danger';/** 跨字段业务前提（如来源条目的履约模式不允许此采购内容）：返回原因即阻止下一步与保存；服务端仍做同样校验。 */issue?:(values:ModuleValues)=>string};
 /** Domain-owned sections preserve the Mist T9 geometry without arbitrary six-field business boundaries.
@@ -72,7 +76,7 @@ export function ModuleEditorDialog({spec,onClose,onSaved}:{spec:ModuleEditorSpec
   const disabled=busy||saving||!!pending||!!pendingCreate||recovery.completed;
   const submit=async()=>{
     if(!spec||disabled||lock.current)return;
-    for(const f of visible){if(f.required&&(values[f.key]===undefined||String(values[f.key]).trim()==='')){setError('请填写'+f.label);return;}const invalid=selectError(f,values[f.key]);if(invalid){setError(invalid);return;}}
+    for(const f of visible){if(f.required&&(values[f.key]===undefined||String(values[f.key]).trim()==='')){setError(f.type==='signature'?'请先手写签字':'请填写'+f.label);return;}const invalid=selectError(f,values[f.key]);if(invalid){setError(invalid);return;}}
     {const issue=spec.issue?.(values);if(issue){setError(issue);return;}}
     const converted=applicableValues(spec,values);for(const f of visible)if(f.type==='number'){
       if(converted[f.key]===''&&!f.required)continue; const n=Number(converted[f.key]);
@@ -89,12 +93,13 @@ export function ModuleEditorDialog({spec,onClose,onSaved}:{spec:ModuleEditorSpec
     {spec?.description&&<p className="mist-sub" style={{margin:'0 0 12px'}}>{uiText(spec.description)}</p>}
     {recovery.completed?<Banner variant="status" tone="ok" title={uiText("原操作已保存")}/>:error&&<Banner tone="bad" title={uiText("未能保存")}>{uiText(error)}</Banner>}
     {(pending||pendingCreate)&&!saving&&<Banner tone="warn" title={uiText("请先核对上次操作的结果")}>{uiText("输入会保留；使用页面上的原请求核对入口后继续。")}</Banner>}
-    <FormGrid>{visible.map(f=><Field key={f.key} label={f.type==='checkbox'?undefined:uiText(f.label)} required={f.required} hint={uiText(f.hint)} full={f.type==='textarea'||f.type==='files'}>
+    <FormGrid>{visible.map(f=><Field key={f.key} label={f.type==='checkbox'?undefined:uiText(f.label)} required={f.required} hint={uiText(f.hint)} full={f.type==='textarea'||f.type==='files'||f.type==='signature'}>
       {f.type==='choice'?<OptionInput ariaLabel={f.label} options={f.options||[]} strict={f.strict} value={String(values[f.key]??'')} disabled={disabled||f.readonly} onChange={v=>change(f.key,v)} />
       :f.type==='incoterm'?<IncotermPlaceInput ariaLabel={f.label} value={String(values[f.key]??'')} disabled={disabled||f.readonly} onChange={v=>change(f.key,v)} />
       :f.type==='select'?<Select aria-label={uiText(f.label)} placeholder={uiText(f.options?.some(option=>option.value==='')?undefined:'请选择')} value={selectValue(f,values[f.key])} options={f.options||[]} disabled={disabled||f.readonly} onChange={e=>change(f.key,e.target.value)} />
       :f.type==='textarea'?<TextArea aria-label={uiText(f.label)} value={String(values[f.key]??'')} disabled={disabled||f.readonly} onChange={e=>change(f.key,e.target.value)} />
       :f.type==='checkbox'?<Checkbox label={uiText(f.label)} checked={!!values[f.key]} disabled={disabled||f.readonly} onChange={v=>change(f.key,v)} />
+      :f.type==='signature'?<SignaturePad ariaLabel={f.label} disabled={disabled||!!f.readonly} onChange={v=>change(f.key,v?.svg??'')} />
       :f.type==='files'?<ModuleFilesInput label={f.label} ids={moduleFileIds(values[f.key])} disabled={disabled||!!f.readonly} onChange={ids=>change(f.key,ids.join(','))} onError={setError} />
       :<TextInput aria-label={uiText(f.label)} type={f.type||'text'} min={f.min} step={f.step} value={String(values[f.key]??'')} disabled={disabled||f.readonly} onChange={e=>change(f.key,e.target.value)} />}
     </Field>)}</FormGrid>

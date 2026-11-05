@@ -52,7 +52,7 @@ export function ownerChangeText(label: string, before: string | undefined, after
   return `${label}：${before || '未指定'}→${after || '未指定'}`;
 }
 
-export type MistOwnedObject = { kind: 'customer' | 'order' | 'development' | 'fabric' | 'opportunity' | 'supplier'; id: string; label: string; role: string };
+export type MistOwnedObject = { kind: 'customer' | 'order' | 'development' | 'fabric' | 'opportunity' | 'supplier' | 'internalReceiver'; id: string; label: string; role: string };
 /** 按账号列出其负责/经手的全部对象（客户、订单、开发案、面料寻样、商机、供应商经手）。 */
 export function accountOwnedObjects(state: MistState, accountId: string): MistOwnedObject[] {
   if (!accountId) return [];
@@ -62,6 +62,8 @@ export function accountOwnedObjects(state: MistState, accountId: string): MistOw
   for (const d of state.devs || []) if (d.ownerId === accountId) out.push({ kind: 'development', id: d.id, label: `${d.code} · ${d.name}`, role: '开发负责人' });
   for (const f of state.fabrics || []) if (f.ownerId === accountId) out.push({ kind: 'fabric', id: f.id, label: `${f.code} · ${f.name}`, role: '寻样负责人' });
   for (const o of state.crm?.opportunities || []) if (o.ownerId === accountId) out.push({ kind: 'opportunity', id: o.id, label: o.title, role: '商机负责人' });
+  // Internal fabric supply names one exact garment receiver; without handing it over the fabric cannot be issued.
+  for (const o of state.orders || []) if (o.governance?.contract?.internalSupply?.receiverId === accountId && !['void', 'cancelled'].includes(o.governance.status) && o.state !== '履约完成') out.push({ kind: 'internalReceiver', id: o.id, label: `${o.code} · ${o.customer}`, role: '内部面料接收人' });
   for (const s of state.market?.suppliers || []) for (const group of MIST_BUSINESS_GROUPS) if (s.handlers?.[group]?.id === accountId) out.push({ kind: 'supplier', id: s.id, label: `${s.code} · ${s.name}`, role: `${MIST_BUSINESS_GROUP_LABEL[group]}经手人` });
   return out;
 }

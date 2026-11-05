@@ -6,6 +6,7 @@ import path from 'node:path';
 import {createMistLocalRuntime} from './local';
 import {createMistServer} from './server';
 import {platformBusinessDate} from '../shared/mistPlatform';
+import { TEST_SIGNATURE } from './__tests__/signature';
 /**
  * 跨账号、跨岗位办理同一笔采购合同：每个身份都用现有岗位矩阵的权限（不是全权限账号），
  * 所有限制都在服务端接口上断言，不依赖前端按钮。
@@ -26,7 +27,7 @@ describe('公司成员与岗位权限（服务端）',()=>{
   const po=ws.state.fulfillment.purchases.find((p:any)=>p.state==='draft');
   ws=(await command(sales,id,ws.revision,'fulfillment.procurement.submit',{id:po.id}).expect(200)).body.workspace;
   const purchaseReview=(await manager.get('/api/mist/reviews').expect(200)).body.reviews.find((r:any)=>r.kind==='procurement'&&r.entityId===po.id);
-  await manager.post('/api/mist/reviews/'+id+'/'+purchaseReview.id).send({requestId:'intake-po-approve',expectedRevision:ws.revision,decision:'approved',note:'测试合同'}).expect(200);
+  await manager.post('/api/mist/reviews/'+id+'/'+purchaseReview.id).send({requestId:'intake-po-approve',expectedRevision:ws.revision,decision:'approved',note:'测试合同',signature:TEST_SIGNATURE}).expect(200);
   ws=(await sales.get(W+id).expect(200)).body.workspace;
   const branch=ws.state.productions.find((p:any)=>p.sourcePurchaseId===po.id),today=platformBusinessDate(new Date().toISOString());
   const input={productionId:branch.id,asOf:today,sourceName:'工厂记录',evidence:'线下已在产，具体工序待核',stage:null,percent:null,quantity:null,fileIds:[]};
@@ -83,8 +84,8 @@ describe('公司成员与岗位权限（服务端）',()=>{
   const reviews=(await manager.get('/api/mist/reviews').expect(200)).body.reviews.filter((t:any)=>t.workspaceId===id);
   expect(reviews).toHaveLength(1);expect(reviews[0]).toMatchObject({canDecide:true,kind:'procurement',entityId:draft.id});expect(reviews[0].state).toBeUndefined();
   await manager.get(W+id).expect(404);
-  await finance.post('/api/mist/reviews/'+id+'/'+reviews[0].id).send({requestId:'fin-decide',expectedRevision:ws.revision,decision:'approved',note:'财务越权'}).expect(404);
-  await manager.post('/api/mist/reviews/'+id+'/'+reviews[0].id).send({requestId:'mgr-decide',expectedRevision:ws.revision,decision:'approved',note:'价格交期核对无误'}).expect(200);
+  await finance.post('/api/mist/reviews/'+id+'/'+reviews[0].id).send({requestId:'fin-decide',expectedRevision:ws.revision,decision:'approved',note:'财务越权',signature:TEST_SIGNATURE}).expect(404);
+  await manager.post('/api/mist/reviews/'+id+'/'+reviews[0].id).send({requestId:'mgr-decide',expectedRevision:ws.revision,decision:'approved',note:'价格交期核对无误',signature:TEST_SIGNATURE}).expect(200);
   ws=(await sales.get(W+id).expect(200)).body.workspace;
   const po=ws.state.fulfillment.purchases.find((p:any)=>p.id===draft.id);expect(po.state).toBe('approved');
   // 业务登记发出与供应商确认
@@ -123,8 +124,8 @@ describe('公司成员与岗位权限（服务端）',()=>{
   const inbox=(await manager.get('/api/mist/reviews').expect(200)).body.reviews.find((t:any)=>t.id==='payment:'+payReq);
   expect(inbox).toMatchObject({kind:'payment',canDecide:true,status:'pending'});expect(inbox.details.find((d:any)=>d.label==='本次申请金额').value).toContain('600.00');
   expect((await finance.get('/api/mist/reviews').expect(200)).body.reviews.some((t:any)=>t.id==='payment:'+payReq)).toBe(false);
-  await sales.post('/api/mist/reviews/'+id+'/payment:'+payReq).send({requestId:'self-approve',expectedRevision:r.body.workspace.revision,decision:'approved',note:'自批'}).expect(404);
-  await manager.post('/api/mist/reviews/'+id+'/payment:'+payReq).send({requestId:'pay-approve',expectedRevision:r.body.workspace.revision,decision:'approved',note:'核对票据与合同，同意付款'}).expect(200);
+  await sales.post('/api/mist/reviews/'+id+'/payment:'+payReq).send({requestId:'self-approve',expectedRevision:r.body.workspace.revision,decision:'approved',note:'自批',signature:TEST_SIGNATURE}).expect(404);
+  await manager.post('/api/mist/reviews/'+id+'/payment:'+payReq).send({requestId:'pay-approve',expectedRevision:r.body.workspace.revision,decision:'approved',note:'核对票据与合同，同意付款',signature:TEST_SIGNATURE}).expect(200);
   await manager.get(W+id).expect(404);
   // 该供应商首笔付款：业务主管只签了 5 万元及以下档，还须总经理级加签后才能付款。
   let pendingRev=(await finance.get(W+id).expect(200)).body.workspace.revision;
@@ -132,7 +133,7 @@ describe('公司成员与岗位权限（服务端）',()=>{
   const reviewer=await agent(app,'local-reviewer');
   const second=(await reviewer.get('/api/mist/reviews').expect(200)).body.reviews.find((t:any)=>t.id==='payment:'+payReq);
   expect(second).toMatchObject({canDecide:true,status:'pending'});expect(second.details.find((d:any)=>d.label==='审批进度').value).toContain('还差：首笔付款加签');
-  await reviewer.post('/api/mist/reviews/'+id+'/payment:'+payReq).send({requestId:'pay-approve-first',expectedRevision:pendingRev,decision:'approved',note:'新供应商资质已核'}).expect(200);
+  await reviewer.post('/api/mist/reviews/'+id+'/payment:'+payReq).send({requestId:'pay-approve-first',expectedRevision:pendingRev,decision:'approved',note:'新供应商资质已核',signature:TEST_SIGNATURE}).expect(200);
   const approvedRev=(await finance.get(W+id).expect(200)).body.workspace.revision;
   r=await command(finance,id,approvedRev,'payable.payment.register',{requestId:payReq,date:today,amount:600,reference:'BANK-MEMBER-1',allocations:[{billId,amount:600}]}).expect(200);
   expect(r.body.workspace.state.payables.requests.find((q:any)=>q.id===payReq)).toMatchObject({state:'paid'});
