@@ -291,8 +291,9 @@
     "account"
    ],
    "commands": [],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机独立数据副本界面走查：我的账号显示姓名、公司、部门、小组；「打开手册」进入 /manual/ 员工使用手册（版本号在标题）。"
   },
   {
    "id": "customer-profile",
@@ -3562,9 +3563,9 @@
     "mes"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；LocalMesPage.tsx（MesHistoryPage.tsx 仅转出）"
+   "note": "2026-11-05 本机独立数据副本界面走查：历史加工记录列出 4 份成衣加工合同（已交付 / 合同数量、交期、状态与采购回交一致），“已交付”页签只剩 PO-2026-00008。加工方、交期年份筛选只在有两个以上取值时出现，本数据只有一家加工方、一个年份，未走。"
   },
   {
    "id": "mes-export",
@@ -3581,9 +3582,9 @@
     "mes"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；本地 CSV"
+   "note": "2026-11-05 本机独立数据副本界面走查：按当前页签导出，先弹确认（文件名、记录条数），确认后下载「加工履行记录.csv」。"
   },
   {
    "id": "platform-company-open",
