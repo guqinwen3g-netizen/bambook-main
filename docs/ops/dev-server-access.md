@@ -149,7 +149,9 @@ GitHub 的 deployment / ops 工作流均已停用，旧服务器授权及仓库 
 - 写入 `.incomplete-*` 临时目录，全部步骤成功后才改名；失败只删除本次临时目录，不动旧备份；同时只允许一个任务运行。`pg_dump` 失败、磁盘写满、tar 的真实错误都使任务失败；tar 仅在全部提示都是“读取期间文件变化 / 已删除”时视为成功；归档会完整读回校验。
 - 新一组成功后才删除超过 7 天的旧组；旧格式的 `panda_hub_dev-*.dump`、`mist-files-*`、`bambook-files-*` 按修改时间满 7 天删除。
 
-> 状态（2026-11-05）：仓库脚本已更新并测试，**服务器尚未重新安装**，现网仍是此前的手工脚本（备份 `panda_hub_dev-*.dump` 与 `bambook-files-*.tar.gz`）。重新安装前须在服务器核对 `/usr/bin/python3` 与 GNU tar，并经运维授权。
+> 状态（2026-11-06，用户授权安装）：已安装 `/usr/local/sbin/bambook-dev-backup`，`/etc/cron.daily/bambook-dev-backup` 只调用它；原手工脚本已备份到 `shared/private-backups/ops-scripts-20261106/`。首次手动运行生成 `bambook-dev-20261106-004024`（数据库 3.3 MB、文件 486 MB，26 个目录，37 秒），manifest 校验值与文件一致。旧格式备份按 7 天规则自动清理。
+>
+> **恢复演练（2026-11-06）**：用该组备份恢复到临时库与临时目录，耗时数据库 3 秒、文件 4 秒；表数、审计、公司、账号、工作区数及迁移数与现网一致，全部工作区状态指纹一致，`mist-files` 586 个文件名称与大小逐一一致；临时库与目录已删除。尚无异地副本。
 
 备份与服务同盘，尚无异地副本，也没有做过完整恢复演练。修改脚本前先把原脚本复制到 `shared/private-backups`，保持 `root:root 755`。
 
@@ -160,6 +162,7 @@ GitHub 的 deployment / ops 工作流均已停用，旧服务器授权及仓库 
 - 安装：root 运行 `scripts/deploy/install-bambook-dev-monitor.sh --verify`（只读）后再正式安装。只写 `/usr/local/sbin/bambook-dev-monitor`、monitor 的 service 与 timer、`/etc/bambook-dev-monitor/`（0700）与 `/var/lib/bambook-dev-monitor/`（0700）；不读 `backend.env`，不重启业务服务，不动数据库与备份。
 - 配置：`/etc/bambook-dev-monitor/config.json`（root:root 0600），Bark 设备 key 只放这里，不进仓库、日志或状态文件。配置通过 `--check-config` 才启用 timer。
 - 首次启用顺序：`--check-config` → `--dry-run`（真实检查、不写状态、不发送）→ `--send-test`（发一条测试推送）→ 启用 timer。
+- 状态（2026-11-06）：已安装 monitor 程序与 service / timer，干跑检查六项全部正常（两套 API、磁盘 35.7%、两项服务、最新备份 0 小时）。**timer 未启用**：`/etc/bambook-dev-monitor/config.json` 需要有效的 Bark 设备 key，旧 key 已公开须先轮换；用户提供新 key 后写入配置，按 `--check-config` → `--dry-run` → `--send-test` → 启用 timer。
 - 本机通知脚本 `scripts/bark_notify.sh` 改为读取环境变量 `BAMBOOK_BARK_KEYS`。此前写在公开仓库里的两把设备 key 仍留在 Git 历史中，须在 Bark 端轮换后再使用。
 
 ## 产品图去背景模型
