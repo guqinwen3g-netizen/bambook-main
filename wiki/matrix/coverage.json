@@ -213,9 +213,9 @@
    "commands": [
     "member.groups.set"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "教学只在本地演示公司演示，不在共享环境改账号权限"
+   "note": "2026-11-05 本机独立数据副本界面走查（本机演示公司）：公司管理 → 数据访问授权周敏进入公司；在“管理业务线”勾选成衣，读回 memberGroups 为 garment。成员交接区列出原负责人名下项数。公司库（人事小组）的岗位与小组维护需连真实数据库，未走。"
   },
   {
    "id": "org-team-scope",
