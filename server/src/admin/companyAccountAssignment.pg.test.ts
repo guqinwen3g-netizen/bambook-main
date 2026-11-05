@@ -74,6 +74,8 @@ describe.skipIf(!url)('atomic company account assignment', () => {
     expect((await db.userRole.findFirstOrThrow({ where: { userId: single } })).departmentId).toBe(d1);
   });
   it('rolls back identity and role changes if the audit cannot be saved', async () => {
+    // 上一用例为该账号建了员工档案（调岗须走人事）；本用例只验证审计失败时整笔回滚，先移除档案。
+    await db.employeeProfile.deleteMany({ where: { companyId, userId: single } });
     const before = await db.userAccount.findUniqueOrThrow({ where: { id: single } });
     const failing = new Proxy(db, { get(target, name) {
       if (name === '$transaction') return (fn: any) => target.$transaction(tx => fn(new Proxy(tx, { get(t, n) { return n === 'auditLog' ? { create: async () => { throw Error('audit unavailable'); } } : Reflect.get(t, n); } })));

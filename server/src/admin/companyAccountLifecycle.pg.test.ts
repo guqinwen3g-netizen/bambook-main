@@ -48,7 +48,10 @@ describe.skipIf(!url)('company account suspension and restoration on PostgreSQL'
     const before = await db.userAccount.findUniqueOrThrow({ where: { id: memberId } });
     expect((await call('patch', '/users/' + memberId).send({ status: 'active' })).status).toBe(200);
     expect((await db.companyMember.findUniqueOrThrow({ where: { companyId_userId: { companyId, userId: memberId } } })).status).toBe('active');
-    expect(await db.userAccount.findUniqueOrThrow({ where: { id: memberId } })).toEqual(before);
+    // 重新启用会作废旧会话（5e2e4f4c）；姓名、邮箱、密码等全局身份不变。
+    const after = await db.userAccount.findUniqueOrThrow({ where: { id: memberId } }) as any, was = before as any;
+    for (const key of ['displayName', 'email', 'passwordHash', 'status', 'deletedAt']) expect(after[key]).toEqual(was[key]);
+    expect(after.metadata?.credentialVersion).toBeTruthy(); expect(after.metadata?.credentialVersion).not.toBe(was.metadata?.credentialVersion);
   });
 
   it('records the company scope for both state changes', async () => {
