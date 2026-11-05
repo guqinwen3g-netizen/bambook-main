@@ -6,7 +6,7 @@
  * Each disposition is append-only on the task; earlier reports and decisions are never rewritten.
  */
 import { MistCommandError, assertMistOrderOpen, type MistContext, type MistState, type MistCommandResult } from './mistWorkspace';
-import type { MistReviewTask } from './mistReview';
+import { reviewDecision, type MistReviewTask } from './mistReview';
 import type { FulfillmentQcTask } from './mistFulfillment';
 import { platformBusinessDate } from './mistPlatform';
 
@@ -114,7 +114,7 @@ export function applyQcDispositionCommand(root: MistState, command: QcDispositio
 export function getQcConcessionReviews(root: MistState): MistReviewTask[] {
   return (root.fulfillment?.qcTasks || []).flatMap(task => qcDispositions(task).filter(d => d.kind === 'concession' && d.status !== 'open').map(d => ({
     id: `qc-concession:${d.id}`, kind: 'qcConcession' as const, entityId: d.id, title: `${task.code} 让步接收`, requesterId: d.requesterId, reviewerIds: d.reviewerIds || [],
-    status: d.status === 'pending' ? 'pending' as const : d.status === 'approved' ? 'approved' as const : 'rejected' as const, submittedAt: d.at, requiredPermission: 'orders:write',
+    status: d.status === 'pending' ? 'pending' as const : d.status === 'approved' ? 'approved' as const : 'rejected' as const, submittedAt: d.at, decision: reviewDecision(d.decision?.actor, d.decision?.at, d.decision?.note), requiredPermission: 'orders:write',
     fileIds: [...d.fileIds], target: { view: 'qc-workbench', id: task.id },
     details: [{ label: '工厂', value: task.factory }, { label: '让步范围', value: d.scope || '' }, { label: '客户书面同意', value: d.customerEvidence || '' }, { label: '处置说明', value: d.note }],
   })));

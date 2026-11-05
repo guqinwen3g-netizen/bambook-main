@@ -12,7 +12,7 @@ import {notifyMist} from './mistNotifications';
 import { MistCommandError, isActiveMistInvoice, type MistContext, type MistState } from './mistWorkspace';
 import { supplierStatusOn } from './mistSupplierStatus';
 import { mistInvoiceCustomerName } from './mistOpeningBalance';
-import type { MistReviewTask } from './mistReview';
+import { reviewDecision, type MistReviewTask } from './mistReview';
 
 export type RiskType = 'credit' | 'fx' | 'compliance' | 'quality' | 'delivery' | 'other';
 export type RiskSourceKind = 'order' | 'invoice' | 'customer' | 'supplier' | 'production' | 'relation';
@@ -201,7 +201,7 @@ export function riskCommandPermission(command: RiskCommand) { return command.typ
 export function getRiskReviews(root: MistState): MistReviewTask[] {
   return (root.platform?.risks || []).flatMap(r => (r.escalations || []).filter(e => isReviewedEscalation(e) && e.decision !== 'withdrawn').map(e => ({
     id: 'risk:' + e.id, kind: 'risk' as const, entityId: e.id, title: `风险${RISK_ACTION_LABEL[e.action || 'authorize']}审批 · ${r.title}`,
-    requesterId: e.requesterId!, reviewerIds: [...e.reviewerIds!], status: e.decision as 'pending' | 'approved' | 'rejected', submittedAt: e.requestedAt,
+    requesterId: e.requesterId!, reviewerIds: [...e.reviewerIds!], status: e.decision as 'pending' | 'approved' | 'rejected', submittedAt: e.requestedAt, decision: reviewDecision(e.decidedBy, e.decidedAt, e.decisionNote),
     requiredPermission: RISK_REVIEW_PERMISSION, target: { view: 'risks', id: r.id }, details: (e.snapshot || []).map(d => ({ ...d })),
   })));
 }

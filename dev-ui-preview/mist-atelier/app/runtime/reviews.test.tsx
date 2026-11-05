@@ -163,3 +163,14 @@ it('shows a rejected decision inside the approval drawer instead of failing sile
   expect(banner?.closest('[data-approval]')).toBeTruthy();
  }finally{intercept=undefined;}
 });
+
+it('shows who decided a handled approval, when, and the note',async()=>{
+ serverStatus='approved';rows=[{...row({status:'approved',canDecide:false}),decision:{actor:'周敏',at:'2026-11-05T12:30:00.000Z',note:'单价与交期已核对'}}];
+ try{
+  route={view:'approvals',section:'done'} as any;await render();
+  const tab=[...document.querySelectorAll('[role="tab"],button')].find(b=>(b.textContent||'').startsWith('已处理')) as HTMLElement|undefined;if(tab)await act(async()=>tab.click());
+  await openRow();
+  const text=document.body.textContent||'';
+  expect(text).toContain('经办人');expect(text).toContain('周敏');expect(text).toContain('单价与交期已核对');
+ }finally{rows=undefined;route={view:'approvals'};}
+});

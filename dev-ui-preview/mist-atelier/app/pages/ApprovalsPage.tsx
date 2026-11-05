@@ -26,6 +26,7 @@ const STATUS: Record<MistReviewTask['status'], { tone: Tone; label: string }> = 
 export const APPROVAL_NOT_CONNECTED = ['受控例外'];
 const rowKey = (r: Pick<Row, 'workspaceId' | 'id'>) => r.workspaceId + '|' + r.id;
 const day = (at: string) => { try { return platformBusinessDate(at); } catch { return at.slice(0, 10); } };
+const when = (at: string) => { const d = new Date(at); return Number.isNaN(d.getTime()) ? at : d.toLocaleString(interfaceLocale(), { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }); };
 
 /** 按页签筛选：待我审批 = 我能决定的待审；我发起的 = 我提交的（含本公司里仅本人可见的）；已处理 = 已批准 / 已退回；空间内其他 = 我是所有者但不由我审批的待审。 */
 export function approvalRows(rows: Row[], tab: ApprovalTab, me: string) {
@@ -91,6 +92,7 @@ export function ApprovalsPage() {
     {selected.kind === 'payment' && tierNote(selected) && <Banner variant="status" tone={selected.status === 'pending' ? 'warn' : 'neutral'} title={uiText('付款审批档位')}><span data-payment-tier>{tierNote(selected)}</span></Banner>}
     <DetailBlock title={uiText("审批内容")}>{selected.details.length ? <KeyValue items={selected.details.map(item=>['处置方式','退回去向','审批内容','订单用途','客户收款','溢短装','数量口径'].includes(item.label)?{...item,value:uiText(item.value)}:item)} /> : <span className="mist-note">{uiText("缺少审批内容")}</span>}
       </DetailBlock>
+    {selected.status !== 'pending' && selected.decision && <DetailBlock title={uiText(selected.status === 'approved' ? '批准' : '退回')}><KeyValue items={[{ label: '经办人', value: selected.decision.actor }, { label: '时间', value: when(selected.decision.at) }, ...(selected.decision.note ? [{ label: '意见', value: selected.decision.note }] : [])]} /></DetailBlock>}
     {!!selected.files?.length && <DetailBlock title={uiText("随附依据")}>{selected.files.map(f => <div className="mist-row" key={f.id}><Button size="sm" icon={Paperclip} onClick={() => void reviews.download(selected, f)}>{f.name}</Button></div>)}</DetailBlock>}
     {selected.status === 'pending' && !decideReason && <Field label={uiText("审批意见")} required><TextArea aria-label={uiText("审批意见")} rows={3} maxLength={4000} value={note} disabled={reviews.busy} onChange={e => setNote(e.target.value)} /></Field>}
     {selected.status === 'pending' && !decideReason && selected.signatureRequired && <Field label={uiText("批准签字")} required><SignaturePad key={signKey} ariaLabel="批准签字" disabled={reviews.busy} onChange={setSignature} /></Field>}

@@ -30,7 +30,7 @@ import { receiptReturnedQuantity } from './mistFulfillment';
  * - 短交最终结算后剩余的预付，由财务登记供应商退款或转到同一供应商的其他合同（PM-），可冲回。
  */
 import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
-import type { MistReviewTask } from './mistReview';
+import { reviewDecision, type MistReviewTask } from './mistReview';
 import { MistCommandError, mistMoneyMinor, type MistState, type MistContext, type MistPayment } from './mistWorkspace';
 import { platformBusinessDate } from './mistPlatform';
 import { relationHoldReason } from './mistRelationHold';
@@ -585,7 +585,7 @@ export function getPayableReviews(root: Root): MistReviewTask[] {
       id: 'payment:' + r.id, kind: 'payment' as const, entityId: r.id, title: `${r.code} · ${r.supplier} · ${fx(major(mistMoneyMinor(r.amount)))} ${r.currency}`,
       // 待审批时只列还差的那一级的审批人，已签完的人不再显示为可决定。
       requesterId: r.requesterId, reviewerIds: pending.length ? [...new Set(pending.flatMap(l => l.reviewerIds))] : r.reviewerIds, status: r.state === 'pending' ? 'pending' as const : r.decision?.decision === 'rejected' ? 'rejected' as const : 'approved' as const,
-      submittedAt: r.submittedAt, requiredPermission: PAYMENT_REQUEST_SCOPES.approve, fileIds: [...r.fileIds], target: { view: 'payment-vouchers', id: r.id }, details: [...r.snapshot.map(d => ({ ...d })), ...paymentTierDetails(r)],
+      submittedAt: r.submittedAt, decision: reviewDecision(r.decision?.actor, r.decision?.at, r.decision?.note), requiredPermission: PAYMENT_REQUEST_SCOPES.approve, fileIds: [...r.fileIds], target: { view: 'payment-vouchers', id: r.id }, details: [...r.snapshot.map(d => ({ ...d })), ...paymentTierDetails(r)],
     };
   });
 }

@@ -4,7 +4,7 @@ import {normalizeGarmentFulfillment,normalizeInternalSupply,assertInternalFabric
 /** Formal order approval and proposed commercial changes, independent of the Mist view layer. */
 import{stableJson}from'./stableJson';
 import {MistCommandError,mistOrderOwnerIds,lineAmount,mistMoneyMinor,isActiveMistInvoice,type MistContext,type MistState,type MistOrder,type MistOrderLine,type MistCommandResult} from './mistWorkspace';
-import type {MistReviewTask} from './mistReview';
+import {reviewDecision,type MistReviewTask} from './mistReview';
 import {ownerChangeText,resolveMember} from './mistAccounts';
 import {assertOrderLineSource,normalizeOrderLineSource} from './mistOrderSource';
 import {breakdownSummary,lineQuantityFromBreakdown,type OrderLineBreakdown} from './mistOrderBreakdown';
@@ -126,7 +126,7 @@ export function getOrderGovernanceReviews(root:MistState):MistReviewTask[]{
   return(order.governance?.rounds||[]).map(round=>{
    const snapshot=round.snapshot,contract=snapshot.contract,internal=contract.kind==='internal',replacement=!!order.replacementSource;
    const sourceCase=replacement?root.platform?.claims.find(claim=>claim.id===order.replacementSource!.claimId):undefined;
-   return{id:'order:'+round.id,kind:'order' as const,entityId:order.id,title:order.code+(round.kind==='change'?' 订单变更审批':' 订单主单审批'),requesterId:round.requesterId,reviewerIds:round.reviewerIds,status:round.status,submittedAt:round.submittedAt,requiredPermission:'orders:write',target:{view:'orders/detail',id:order.id},fileIds:contract.confirmationFileIds,details:[
+   return{id:'order:'+round.id,kind:'order' as const,entityId:order.id,title:order.code+(round.kind==='change'?' 订单变更审批':' 订单主单审批'),requesterId:round.requesterId,reviewerIds:round.reviewerIds,status:round.status,submittedAt:round.submittedAt,decision:reviewDecision(round.decidedName,round.decidedAt,round.note),requiredPermission:'orders:write',target:{view:'orders/detail',id:order.id},fileIds:contract.confirmationFileIds,details:[
     {label:'订单用途',value:replacement?'换货补发':internal?'内部用途订单':'外部客户订单'},
     ...(sourceCase?[{label:'来源案件',value:sourceCase.code}]:[]),
     {label:internal?'接收负责人':'客户',value:internal?contract.receiver:snapshot.customer},
@@ -217,7 +217,7 @@ function decideClosure(root:MistState,p:{id:string;decision:'approved'|'rejected
 }
 function closureReviews(root:MistState):MistReviewTask[]{
  return (root.orderLines as ClosableLine[]).filter(line=>line.closure&&line.closure.reviewerIds.length).map(line=>{const c=line.closure!,order=root.orders.find(o=>o.id===line.orderId) as GovernedOrder|undefined;
-  return{id:'order-close:'+c.id,kind:'order' as const,entityId:closureReviewEntity(line.orderId,line.id),title:`${order?.code||''} 条目结案审批 · ${line.style}`,requesterId:c.requesterId,reviewerIds:c.reviewerIds,status:c.status==='pending'?'pending':c.status==='closed'?'approved':'rejected',submittedAt:c.requestedAt,requiredPermission:'orders:write',target:{view:'orders/detail',id:line.orderId},
+  return{id:'order-close:'+c.id,kind:'order' as const,entityId:closureReviewEntity(line.orderId,line.id),title:`${order?.code||''} 条目结案审批 · ${line.style}`,requesterId:c.requesterId,reviewerIds:c.reviewerIds,status:c.status==='pending'?'pending':c.status==='closed'?'approved':'rejected',submittedAt:c.requestedAt,decision:reviewDecision(c.decidedName,c.decidedAt,c.note),requiredPermission:'orders:write',target:{view:'orders/detail',id:line.orderId},
    details:[{label:'条目',value:`${line.style} · ${line.name}`},{label:'订单数量',value:`${c.ordered} ${line.unit}`},{label:'溢短装',value:toleranceText(order?.governance?.contract)},{label:'允许范围',value:`${c.min}–${c.max} ${line.unit}`},{label:'实际离港（结案数量）',value:`${c.quantity} ${line.unit}`},{label:'差异',value:`${Math.round((c.quantity-c.ordered)*10000)/10000} ${line.unit}`},{label:'结案原因',value:c.reason},{label:'申请人',value:c.requesterName},{label:'结算',value:CLOSE_SETTLEMENT_HINT},{label:'状态',value:closureLabel(c)}]};});
 }
 
@@ -251,7 +251,7 @@ function decideOverShip(root:MistState,p:{id:string;decision:'approved'|'rejecte
 }
 function overShipReviews(root:MistState):MistReviewTask[]{
  return (root.orderLines as ClosableLine[]).flatMap(line=>(line.overShips||[]).map(r=>{const order=root.orders.find(o=>o.id===line.orderId) as GovernedOrder|undefined;
-  return{id:'order-overship:'+r.id,kind:'order' as const,entityId:overShipReviewEntity(line.orderId,r.id),title:`${order?.code||''} 超量出运审批 · ${line.style}`,requesterId:r.requesterId,reviewerIds:r.reviewerIds,status:r.status,submittedAt:r.requestedAt,requiredPermission:'orders:write',target:{view:'orders/detail',id:line.orderId},
+  return{id:'order-overship:'+r.id,kind:'order' as const,entityId:overShipReviewEntity(line.orderId,r.id),title:`${order?.code||''} 超量出运审批 · ${line.style}`,requesterId:r.requesterId,reviewerIds:r.reviewerIds,status:r.status,submittedAt:r.requestedAt,decision:reviewDecision(r.decidedName,r.decidedAt,r.note),requiredPermission:'orders:write',target:{view:'orders/detail',id:line.orderId},
    details:[{label:'条目',value:`${line.style} · ${line.name}`},{label:'订单数量',value:`${r.ordered} ${line.unit}`},{label:'溢短装',value:toleranceText(order?.governance?.contract)},{label:'溢装上限',value:`${r.max} ${line.unit}`},{label:'拟出数量（累计）',value:`${r.quantity} ${line.unit}`},{label:'超出量',value:`${r.excess} ${line.unit}`},{label:'超量原因',value:r.reason},{label:'申请人',value:r.requesterName},{label:'状态',value:overShipLabel(r)}]};}));
 }
 
@@ -332,6 +332,6 @@ function decideCancel(root:MistState,p:{id:string;decision:'approved'|'rejected'
 }
 function cancelReviews(root:MistState):MistReviewTask[]{
  return root.orders.flatMap(source=>{const order=source as GovernedOrder,c=order.governance?.cancellation;if(!c)return [];
-  return [{id:'order-cancel:'+c.id,kind:'order' as const,entityId:cancelReviewEntity(order.id,c.id),title:`${order.code} 取消订单审批`,requesterId:c.requesterId,reviewerIds:c.reviewerIds,status:c.status,submittedAt:c.requestedAt,requiredPermission:'orders:write',target:{view:'orders/detail',id:order.id},
+  return [{id:'order-cancel:'+c.id,kind:'order' as const,entityId:cancelReviewEntity(order.id,c.id),title:`${order.code} 取消订单审批`,requesterId:c.requesterId,reviewerIds:c.reviewerIds,status:c.status,submittedAt:c.requestedAt,decision:reviewDecision(c.decidedName,c.decidedAt,c.note),requiredPermission:'orders:write',target:{view:'orders/detail',id:order.id},
    details:[{label:'订单',value:`${order.code} · ${order.customer}`},{label:'取消原因',value:c.reason},{label:'申请人',value:c.requesterName},...(c.status==='pending'?orderChangeImpactDetails(orderChangeImpact(root,order,[])):[]),...(c.note?[{label:'审批意见',value:c.note}]:[])]}];});
 }
