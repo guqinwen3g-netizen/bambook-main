@@ -1007,7 +1007,7 @@ export class MistRepository {
             modules.add('relations');
             if (command.payload.orderIds?.length) modules.add('orders');
           } else {
-            const moduleByKind = { customer: 'relations', opportunity: 'relations', order: 'orders', development: 'products', fabric: 'products', supplier: 'suppliers' };
+            const moduleByKind = { customer: 'relations', opportunity: 'relations', order: 'orders', development: 'products', fabric: 'products', supplier: 'suppliers', internalReceiver: 'orders' } as const;
             for (const object of accountOwnedObjects(row.state, command.payload.fromUserId.trim())) modules.add(moduleByKind[object.kind]);
             if (row.state.internalDeliveries?.some(delivery => delivery.receiverId === command.payload.fromUserId && applied.state.internalDeliveries?.find(next => next.id === delivery.id)?.receiverId !== delivery.receiverId)) modules.add('orders');
           }

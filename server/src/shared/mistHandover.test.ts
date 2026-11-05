@@ -1,6 +1,7 @@
 import {describe,it,expect} from 'vitest';
 import {applyMistCommand,createMistState,mistCommandPermission,type MistContext,type MistCommand,type MistState} from './mistWorkspace';
 import {customerHandovers,accountHandoverBlockers} from './mistHandover';
+import {accountOwnedObjects} from './mistAccounts';
 
 function fixture(){
   let id=0;const ctx={id:()=>`ho-${++id}`,now:'2026-10-18T02:00:00Z',actorId:'demo-sales',actorName:'顾言',members:[{id:'demo-sales',name:'顾言',active:true,groups:['garment']},{id:'demo-buyer',name:'沈禾',active:true,groups:['garment']},{id:'demo-new',name:'林舟',active:true,groups:['garment']},{id:'gone',name:'已离职',active:false,groups:[]}]} as unknown as MistContext;
@@ -129,4 +130,20 @@ it('moves selected old orders to the existing customer owner without changing co
  const f=fixture(),customer=f.state.customers.find(row=>row.id==='customer-1')!,selected=order(f.state,'SO-G-2026-009'),other=order(f.state,'SO-G-2026-017');expect(selected.ownerId).not.toBe(customer.ownerId);
  f.state.tasks.push({id:'old-order-task',title:'核对原单',due:'2026-10-20',done:false,kind:'order',target:{view:'orders/detail',id:selected.id},assigneeIds:[selected.ownerId]},{id:'other-order-task',title:'另一原单',due:'2026-10-20',done:false,kind:'order',target:{view:'orders/detail',id:other.id},assigneeIds:['demo-sales']});const before=structuredClone(f.state),ownerId=customer.ownerId;
  f.run({customerId:customer.id,toUserId:ownerId,reason:'在手订单由现客户负责人接续',orderIds:[selected.id]});const after=order(f.state,selected.code);expect(after).toEqual({...before.orders.find(row=>row.id===selected.id),ownerId,owner:customer.owner});expect(f.state.customers.find(row=>row.id===customer.id)?.ownerId).toBe(ownerId);expect(order(f.state,other.code)).toEqual(before.orders.find(row=>row.id===other.id));expect(f.state.orderLines).toEqual(before.orderLines);expect(f.state.fulfillment).toEqual(before.fulfillment);expect(f.state.invoices).toEqual(before.invoices);expect(f.state.payments).toEqual(before.payments);expect(f.state.tasks.find(row=>row.id==='old-order-task')?.assigneeIds).toEqual([ownerId]);expect(f.state.tasks.find(row=>row.id==='other-order-task')).toEqual(before.tasks.find(row=>row.id==='other-order-task'));expect(f.state.events.some(row=>row.text.startsWith('在手业务交接给 '+customer.owner))).toBe(true);
+});
+
+it('hands the internal fabric receiver over with the account so the fabric can still be issued', () => {
+  let id = 0;
+  const ctx = { id: () => `ir-${++id}`, now: '2026-10-18T02:00:00Z', actorId: 'owner', actorName: '所有者', members: [{ id: 'demo-new', name: '林舟', active: true, groups: ['garment', 'fabric'] }] } as unknown as MistContext;
+  let state = createMistState(ctx, 'demo');
+  const supplied = state.orders.find(o => o.governance?.contract.internalSupply);
+  expect(supplied).toBeTruthy();
+  const fromId = supplied!.governance!.contract.internalSupply!.receiverId;
+  for (const o of state.orders) if (o.governance) o.governance.status = 'approved' as any;
+  expect(accountOwnedObjects(state, fromId).some(o => o.kind === 'internalReceiver' && o.id === supplied!.id)).toBe(true);
+  state = applyMistCommand(state, { type: 'handover.account', payload: { fromUserId: fromId, toUserId: 'demo-new', reason: '离职交接' } } as MistCommand, ctx).state as MistState;
+  const after = state.orders.find(o => o.id === supplied!.id)!;
+  expect(after.governance!.contract.internalSupply!.receiverId).toBe('demo-new');
+  expect(after.governance!.contract.receiver).toBe('成衣 / 林舟');
+  expect(accountOwnedObjects(state, fromId).some(o => o.kind === 'internalReceiver')).toBe(false);
 });

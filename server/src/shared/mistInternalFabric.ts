@@ -94,6 +94,8 @@ function supplyFor(root: MistState, orderId: string, lineId: string, context: In
   const value = lineFor(root, orderId, lineId), { order, line } = value;
   if (order.type !== 'fabric' || order.governance?.contract.kind !== 'internal' || !order.governance.contract.internalSupply) fail('请选择内部面料供给行');
   assertOrderApproved(root, order.id); assertOrderLineOpen(line);
+  // 面料订单负责人或指定接收人已离开公司时，指明订单和下一步，而不是笼统的“须为成员”。
+  if (context.members && !context.members.some(member => member.id === order.ownerId)) fail(`订单 ${order.code} 的面料负责人已不在本公司，请先交接该订单再发料`);
   normalizeInternalSupply(order.governance!.contract, order, context, false);
   if (!['米', 'm', 'metre', 'metres', 'meter', 'meters'].includes(line.unit.trim().toLowerCase())) fail('内部面料行须使用米数单位');
   internalFabricRemaining(root, line.id);
