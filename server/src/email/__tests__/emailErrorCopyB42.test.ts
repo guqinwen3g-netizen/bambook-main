@@ -44,6 +44,7 @@ const SECRET = process.env.JWT_SECRET || 'change-me-in-production-at-least-32-ch
  */
 const adminCookie = `bambook_token=${jwt.sign({ userId: 'u_admin', roles: ['admin'] }, SECRET)}`;
 const salesCookie = `bambook_token=${jwt.sign({ userId: 'u_sales', roles: ['sales'] }, SECRET)}`;
+const mailAdminCookie = `bambook_token=${jwt.sign({ userId: 'u_mail_admin', roles: ['admin'], permissions: ['emails:read', 'emails:write', 'emails:admin'] }, SECRET)}`;
 
 /**
  * 只在测试里出现的"内部原文"指纹：任何一段都不许出现在响应体里。
@@ -120,6 +121,30 @@ function makeEmailApp(err: Error = new Error(RAW_SENTINEL)) {
   return baseApp(createEmailRouter({ prisma: throwingPrisma(err), requireAuth: true, apiKeys: new Set(['ak']) } as any), '/api/v1/email');
 }
 
+/** 发件端点先核对原邮件归属：这一步放行，让异常落在 sendOutboxEmail（路由那一层出口）。 */
+function makeOutboxApp(err: Error = new Error(RAW_SENTINEL)) {
+  imapMocks.connect.mockRejectedValue(err);
+  const base = throwingPrisma(err);
+  const prisma = new Proxy({}, {
+    get(_t, prop) {
+      if (prop === 'email') return { findFirst: async () => ({ id: 'EO-1' }) };
+      return base[prop as any];
+    },
+  });
+  return baseApp(createEmailRouter({ prisma, requireAuth: true, apiKeys: new Set(['ak']) } as any), '/api/v1/email');
+}
+
+/** 模拟来信只在本机开发库开放：用例期间切到开发库地址，结束后还原。 */
+const SIM_ENV = { DATABASE_URL: process.env.DATABASE_URL, NODE_ENV: process.env.NODE_ENV };
+function makeSimulatorApp(err: Error = new Error(RAW_SENTINEL)) {
+  process.env.DATABASE_URL = 'postgresql://u:p@localhost:5432/panda_hub_dev';
+  process.env.NODE_ENV = 'test';
+  return makeEmailApp(err);
+}
+afterEach(() => {
+  for (const [k, v] of Object.entries(SIM_ENV)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+});
+
 function makeTemplateApp(err: Error = new Error(RAW_SENTINEL)) {
   // AI 生成端点的异常源是 LLM 调用器（不是 prisma）⇒ 注入同一个哨兵，保住"每条都测的是出口"
   const llm = async () => { throw err; };
@@ -136,7 +161,7 @@ type Case = {
   at: string;
   app: () => express.Express;
   /** 缺省 = admin 令牌；写端点必须用 sales（矩阵：emails:write 在 SALES 手上，用错令牌测的是 403） */
-  tok?: 'sales';
+  tok?: 'sales' | 'mailAdmin';
   send: (a: express.Express, token: string) => any;
 };
 
@@ -177,6 +202,7 @@ const SITES: Site[] = [...sitesOf('route.ts', ROUTE_SRC), ...sitesOf('templateRo
 
 const CASES: Case[] = [
   // ── server/src/email/route.ts（18 处）
+  { name: 'POST /simulate-inbound 开发模拟来信', at: 'route.ts:POST /simulate-inbound', app: makeSimulatorApp, tok: 'mailAdmin', send: (a, tok) => request(a).post('/api/v1/email/simulate-inbound').set('Cookie', tok).send({ recipientUserId: 'U-1', fromAddress: 'buyer@example.com', fromName: 'Buyer', subject: '询价', bodyText: '请报价' }) },
   { name: 'GET / 邮件列表', at: 'route.ts:GET /', app: makeEmailApp, send: (a, tok) => request(a).get('/api/v1/email').set('Cookie', tok) },
   { name: 'PATCH /:id 标记邮件', at: 'route.ts:PATCH /:id', app: makeEmailApp, tok: 'sales', send: (a, tok) => request(a).patch('/api/v1/email/E-1').set('Cookie', tok).send({ isRead: true }) },
   { name: 'POST /backfill-links 关联回填', at: 'route.ts:POST /backfill-links', app: makeEmailApp, send: (a, tok) => request(a).post('/api/v1/email/backfill-links').set('Cookie', tok).send({}) },
@@ -185,10 +211,9 @@ const CASES: Case[] = [
   { name: 'POST /classify-backfill 补分类', at: 'route.ts:POST /classify-backfill', app: makeEmailApp, send: (a, tok) => request(a).post('/api/v1/email/classify-backfill').set('Cookie', tok).send({}) },
   { name: 'POST /:id/create-followup 转跟进', at: 'route.ts:POST /:id/create-followup', app: makeEmailApp, tok: 'sales', send: (a, tok) => request(a).post('/api/v1/email/E-1/create-followup').set('Cookie', tok).send({ subject: '跟进' }) },
   // outboxSend 在服务边界被改成"真的抛错"，这样打到的才是路由那一层出口（吸收本身另账 B67）
-  { name: 'POST /outbox/:id/send 发件', at: 'route.ts:POST /outbox/:id/send', app: makeEmailApp, tok: 'sales', send: (a, tok) => request(a).post('/api/v1/email/outbox/EO-1/send').set('Cookie', tok).send({}) },
+  { name: 'POST /outbox/:id/send 发件', at: 'route.ts:POST /outbox/:id/send', app: makeOutboxApp, tok: 'sales', send: (a, tok) => request(a).post('/api/v1/email/outbox/EO-1/send').set('Cookie', tok).send({}) },
   // ↓ 以下 8 处是复核补进来的：异常源是 IMAP/SMTP 库，不是 prisma，首版按形状数的时候全漏了
   { name: 'POST /fetch IMAP 拉列表', at: 'route.ts:POST /fetch', app: makeEmailApp, send: (a, tok) => request(a).post('/api/v1/email/fetch').set('Cookie', tok).send({ email: 's@mailer.example.internal', password: 'p', box: 'INBOX' }) },
-  { name: 'POST /send SMTP 直发', at: 'route.ts:POST /send', app: makeEmailApp, tok: 'sales', send: (a, tok) => request(a).post('/api/v1/email/send').set('Cookie', tok).send({ email: 's@mailer.example.internal', password: 'p', to: 'c@d.com', subject: 'x' }) },
   { name: 'POST /mark_read 标记已读', at: 'route.ts:POST /mark_read', app: makeEmailApp, tok: 'sales', send: (a, tok) => request(a).post('/api/v1/email/mark_read').set('Cookie', tok).send({ email: 's@mailer.example.internal', password: 'p', uid: 7 }) },
   { name: 'POST /mark_starred 标记星标', at: 'route.ts:POST /mark_starred', app: makeEmailApp, tok: 'sales', send: (a, tok) => request(a).post('/api/v1/email/mark_starred').set('Cookie', tok).send({ email: 's@mailer.example.internal', password: 'p', uid: 7 }) },
   { name: 'POST /mark_important 标记重要', at: 'route.ts:POST /mark_important', app: makeEmailApp, tok: 'sales', send: (a, tok) => request(a).post('/api/v1/email/mark_important').set('Cookie', tok).send({ email: 's@mailer.example.internal', password: 'p', uid: 7 }) },
@@ -368,7 +393,7 @@ describe('B42 A1 · email 路由出口：25 处逐个打，原文不外泄、每
     it(`${c.name} ⇒ 只发本端点自己的那句话，响应体里不许有原始异常文本`, async () => {
       const site = SITES.find((s) => s.key === c.at)!;
       const errSpy = vi.spyOn(logger, 'error').mockImplementation(() => undefined as any);
-      const res = await c.send(c.app(), c.tok === 'sales' ? salesCookie : adminCookie);
+      const res = await c.send(c.app(), c.tok === 'sales' ? salesCookie : c.tok === 'mailAdmin' ? mailAdminCookie : adminCookie);
       const body = JSON.stringify(res.body) + String(res.text ?? '');
       const { msg, code } = outward(res);
 
@@ -395,5 +420,24 @@ describe('B42 A1 · email 路由出口：25 处逐个打，原文不外泄、每
       const body = JSON.stringify(r.body);
       for (const part of RAW_PARTS) expect(body).toContain(part); // 判据能抓到 = 前面那批断言有牙
     });
+  });
+});
+
+describe('closed and pre-checked email send exits', () => {
+  it('POST /send direct SMTP is closed: 410 NATIVE_OUTBOX_REQUIRED, no raw error text, nothing sent', async () => {
+    const res = await request(makeEmailApp()).post('/api/v1/email/send').set('Cookie', salesCookie).send({ email: 's@mailer.example.internal', password: 'p', to: 'c@d.com', subject: 'x' });
+    expect(res.status).toBe(410);
+    expect(res.body.error.code).toBe('NATIVE_OUTBOX_REQUIRED');
+    expect(JSON.stringify(res.body)).not.toContain(RAW_SENTINEL);
+    expect(nmMocks.createTransport).not.toHaveBeenCalled();
+  });
+  it('POST /outbox/:id/send: a failed ownership read is EMAIL_READ_FAILED with its own message, never the raw error', async () => {
+    const errSpy = vi.spyOn(logger, 'error').mockImplementation(() => undefined as any);
+    const res = await request(makeEmailApp()).post('/api/v1/email/outbox/EO-1/send').set('Cookie', salesCookie).send({});
+    expect(res.status).toBe(500);
+    expect(res.body.error).toMatchObject({ code: 'EMAIL_READ_FAILED', message: '系统暂时读不到原邮件，本次没有发送，请稍后核对。' });
+    expect(JSON.stringify(res.body)).not.toContain(RAW_SENTINEL);
+    expect(errSpy).toHaveBeenCalled();
+    errSpy.mockRestore();
   });
 });

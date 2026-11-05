@@ -66,16 +66,17 @@ describe('邮件附件下载权限门：GET /api/v1/email/attachments/:id/downlo
   });
 
   it('owner JWT → 通过权限门（附件不存在 → 404，证明非权限拦截）', async () => {
-    const prisma = { emailAttachment: { findUnique: vi.fn(async () => null) } };
+    const prisma = { emailAttachment: { findUnique: vi.fn(async () => null), findFirst: vi.fn(async () => null) } };
     const res = await request(makeApp(prisma))
       .get('/api/v1/email/attachments/EMLATT__X/download')
       .set('Cookie', `bambook_token=${ownerToken}`);
     expect(res.status).toBe(404);
-    expect(prisma.emailAttachment.findUnique).toHaveBeenCalledOnce();
+    // Reached the owner-scoped lookup, so the permission gate let the request through.
+    expect(prisma.emailAttachment.findFirst).toHaveBeenCalledOnce();
   });
 
   it('sales JWT（矩阵含 emails:read）→ 通过权限门', async () => {
-    const prisma = { emailAttachment: { findUnique: vi.fn(async () => null) } };
+    const prisma = { emailAttachment: { findUnique: vi.fn(async () => null), findFirst: vi.fn(async () => null) } };
     const res = await request(makeApp(prisma))
       .get('/api/v1/email/attachments/EMLATT__X/download')
       .set('Cookie', `bambook_token=${salesToken}`);
@@ -135,7 +136,8 @@ describe('邮件附件私有根存储契约（defaultEmailAttachmentSaver / reso
 
       const prisma = {
         emailAttachment: {
-          findUnique: vi.fn(async () => ({
+          // The download is owner-scoped (findFirst with the mailbox owner), as in the route.
+          findFirst: vi.fn(async () => ({
             id: 'EMLATT__E2E', filePath: rel, filename: 'report.pdf', contentType: 'application/pdf',
           })),
         },
