@@ -11,7 +11,7 @@ import { applyQcDispositionCommand, qcConcessionReleases, type QcDisposition, ty
 import { applyProductionIntake, productionIntake, type ProductionIntakeCommand, type ProductionIntakeRound, type ProductionObservation } from './mistProductionIntake';
 import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,materialDeliveryRequired,isFabricStageMaterial,isFabricIntermediateProcessing,isFabricStageSource,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,assertMaterialReturnReversal,materialIssueReturnTotals,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
 import {sampleSendPurpose,sampleSendBlocker,SAMPLE_SEND_PURPOSES,type SampleSendPurpose} from './mistSampleSending';
-import {assertOrderShipmentPaymentCovered} from './mistOrderFunding';
+import {assertOrderFundingAfterInvoiceRemoval,assertOrderShipmentPaymentCovered} from './mistOrderFunding';
 import { preparePurchaseDocumentSnapshot, purchaseDocumentFingerprint, type PurchaseDocumentArtifact, type PurchaseDocumentRecord } from './mistPurchaseDocument';
 /** Actual fulfillment records in the persisted Mist workspace. No fixture import. */
 import { DEVELOPMENT_BILLING_LOCK } from './mistDevelopmentBilling';
@@ -2582,16 +2582,18 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                     const amount=sum(s.lines.filter(l=>l.orderId===order.id).map(l=>lineAmount(l.quantity,replacementDeclaredUnitPrice(root,s.id,order.id,l.lineId)!)));
                     d.replacementDeclaredAmount=amount;
                 }else{
-                const amount = sum(s.lines.filter(l => l.orderId === order.id).map(l => lineAmount(l.quantity, get(root.orderLines, l.lineId, '条目').price)));
+                const orderShipLines = s.lines.filter(l => l.orderId === order.id);
+                const issuedLinePrices = Object.fromEntries(orderShipLines.map(l => [l.lineId, get(root.orderLines, l.lineId, '条目').price]));
+                const amount = sum(orderShipLines.map(l => lineAmount(l.quantity, issuedLinePrices[l.lineId])));
                 const existing = root.invoices.filter(i => i.orderId === order.id && isActiveMistInvoice(i));
                 if (existing.some(i => i.currency !== order.currency))
                     fail('来源订单已有不同币种发票，请先核实财务来源');
                 // 开票上限与出运上限同口径：按条目 lineShipLimit（溢装上限 / 已批准超量）× 单价，不按订单原数量。
-                const capProblem = orderInvoiceCapProblem(root, order, { lines: s.lines.filter(l => l.orderId === order.id), amount });
+                const capProblem = orderInvoiceCapProblem(root, order, { lines: orderShipLines, amount });
                 if (capProblem) fail(capProblem === 'total' ? 'CI金额超过来源订单尚未开票额度' : capProblem);
                 const id = ctx.id();
                 // CI 只形成待财务确认的应收：确认前不计入余额、账龄、报表、催收，也不能核销。
-                root.invoices.push({ id, code: d.number, orderId: order.id, order: order.code, customer: order.customer, due: d.dueDate, amount, open: 0, currency: order.currency, financeStatus: 'pending', sourceDocumentId: d.id, issuedById: ctx.actorId, issuedAt: platformBusinessDate(ctx.now) });
+                root.invoices.push({ id, code: d.number, orderId: order.id, order: order.code, customer: order.customer, due: d.dueDate, amount, open: 0, currency: order.currency, financeStatus: 'pending', sourceDocumentId: d.id, issuedLinePrices, issuedById: ctx.actorId, issuedAt: platformBusinessDate(ctx.now) });
                 d.invoiceId = id;
                 }
             }
@@ -2625,6 +2627,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 const hasCreditApplication = (root.platform?.creditApplications || []).some(a => a.invoiceId === inv.id);
                 if ((isRecognizedMistInvoice(inv) && inv.open !== inv.amount) || root.allocations.some(a => a.invoiceId === inv.id) || claimIds.size || hasCredit || hasCreditApplication)
                     fail('CI已有收款、索赔或贷项事实，请先走财务更正');
+                assertOrderFundingAfterInvoiceRemoval(root, inv.id);
                 inv.voidedAt = ctx.now;
                 inv.voidReason = reason;
                 inv.voidedBy = ctx.actorName;
