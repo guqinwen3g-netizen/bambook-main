@@ -108,8 +108,9 @@
     "files.add",
     "order.files.add"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机独立数据副本界面走查：订单详情「订单资料」上传 PDF，写入订单 fileIds 并列出；点击名称打开预览（测试文件为占位 PDF，预览提示无法解析）；下载走浏览器下载。教学课未录。"
   },
   {
    "id": "calendar",
@@ -127,8 +128,9 @@
    "commands": [
     "calendar.save"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机独立数据副本界面走查：新建日程关联订单 SO-G-2026-018、邀请参与人；共享日程全员可见；勾选“仅本人与参与人可见”后只有本人与参与人可见（财务、主管看不到）。教学课未录。"
   },
   {
    "id": "team-nudge",
@@ -1853,9 +1855,9 @@
     "fulfillment.inventory.move",
     "fulfillment.inventory.shipment.correct"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "2026-11-04 仓库岗已走移位（6000 粒 C-11→B-03-2，批次按位置分列，总可用不变）；出运关联修正未走"
+   "note": "2026-11-05 本机独立数据副本界面走查：纽扣 6600 粒部分移位 2400 粒到 A-02，总数不变、批次显示两处库位；离港自动出库关联「更正」为暂未确认（保留待核对、记录原因与依据），再「关联出运」回到 SHP-2026-00004。教学课未录。"
   },
   {
    "id": "packing",
@@ -3027,9 +3029,9 @@
     "dashboard"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；PlatformPages.tsx:121；2026-11-05 本机走查发现缺陷：履行中订单误含草稿与已取消（PlatformPages.tsx DashboardOverview 第130行），待修后复走"
+   "note": "2026-11-05 本机独立数据副本界面走查：履行中订单 8、逾期未收发票 3 与数据一致，五张卡片跳转订单 / 报表订单进度 / 应收账龄 / 风险 / 客诉正确。走查发现“订单进度与逾期”漏掉生产 100% 但未出运的过期订单，已改为按履行状态统计（a19d0149）。"
   },
   {
    "id": "dashboard-team",
@@ -3186,9 +3188,9 @@
     "data-center"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；PlatformPages.tsx:123；2026-11-05 本机走查发现缺陷：“文件”行跳转到出运单据（DataCenterPage 第137行），待修后复走"
+   "note": "2026-11-05 本机独立数据副本界面走查：十类记录数与实际数据一致；订单、发票、采购合同、出运“查看”跳到对应模块；最近业务记录按北京时间显示。"
   },
   {
    "id": "data-center-issues",
