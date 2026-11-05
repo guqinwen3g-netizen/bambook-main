@@ -90,6 +90,12 @@ describe('ERP OS 横向 smoke · L1 route 真实挂载（index.ts app.use 事实
     for (const mount of ["app.use('/api/v1/orders'", "'/api/v2/orders',", "app.use('/api/v1/approvals'", "app.use('/api/v1/approvals-kernel'", "    '/api/v1/procurement',"]) expect(IDX).not.toContain(mount);
   });
 
+  // 旧主 API 定时任务 2026-11-06 停止启动（只扫空的旧业务表、写 Mist 不读的旧通知，且每天报错）。
+  it('Legacy scheduler is not started by the main API', () => {
+    expect(IDX).not.toMatch(/\bstartScheduler\b/);
+    expect(IDX).not.toContain("from './scheduler'");
+  });
+
   it('Supplier approver lists stay mounted at their original path', () => {
     expect(IDX).toContain("app.use('/api/v1/procurement/contracts/approval-authority', createSupplierApprovalAuthorityRouter(");
   });
