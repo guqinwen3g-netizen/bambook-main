@@ -24,7 +24,8 @@ VERIFY = ['npm', 'run', 'verify:mist']
 CHECKS = [[sys.executable, 'scripts/deploy/test_direct_dev.py'],
           [sys.executable, 'scripts/deploy/test_bambook_dev_receiver.py'],
           [sys.executable, 'scripts/deploy/test_bambook_dev_release.py'],
-          [sys.executable, 'scripts/deploy/test_bambook_dev_backup.py'], VERIFY]
+          [sys.executable, 'scripts/deploy/test_bambook_dev_backup.py'],
+          [sys.executable, 'scripts/deploy/test_bambook_dev_monitor.py'], VERIFY]
 
 def git(*args):
     return subprocess.check_output(['git', *args], cwd=ROOT, text=True).strip()

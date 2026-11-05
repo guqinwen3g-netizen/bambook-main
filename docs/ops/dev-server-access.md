@@ -153,6 +153,15 @@ GitHub 的 deployment / ops 工作流均已停用，旧服务器授权及仓库 
 
 备份与服务同盘，尚无异地副本，也没有做过完整恢复演练。修改脚本前先把原脚本复制到 `shared/private-backups`，保持 `root:root 755`。
 
+## 主机告警（2026-11-05 起，尚未安装）
+
+`scripts/deploy/bambook-dev-monitor.py` 每分钟检查：两套 API 的 `/api/health`（须 `status=ok`、`database=ok`，`mode=local` 视为故障）、可配置的公网 HTTPS 健康探针、根目录磁盘使用率（默认 85%）、`bambook-dev.service` 与 `bambook-dev-mist.service`、最新一组备份是否完整且不超过 36 小时。故障经 Bark 推送：同一故障只发一次，按间隔提醒，恢复发一次；只有全部设备都接收才算已发送，否则下次重试。
+
+- 安装：root 运行 `scripts/deploy/install-bambook-dev-monitor.sh --verify`（只读）后再正式安装。只写 `/usr/local/sbin/bambook-dev-monitor`、monitor 的 service 与 timer、`/etc/bambook-dev-monitor/`（0700）与 `/var/lib/bambook-dev-monitor/`（0700）；不读 `backend.env`，不重启业务服务，不动数据库与备份。
+- 配置：`/etc/bambook-dev-monitor/config.json`（root:root 0600），Bark 设备 key 只放这里，不进仓库、日志或状态文件。配置通过 `--check-config` 才启用 timer。
+- 首次启用顺序：`--check-config` → `--dry-run`（真实检查、不写状态、不发送）→ `--send-test`（发一条测试推送）→ 启用 timer。
+- 本机通知脚本 `scripts/bark_notify.sh` 改为读取环境变量 `BAMBOOK_BARK_KEYS`。此前写在公开仓库里的两把设备 key 仍留在 Git 历史中，须在 Bark 端轮换后再使用。
+
 ## 产品图去背景模型
 
 产品图透明派生使用 IS-Net general-use Q8 ONNX 权重（上游 DIS / IS-Net 为 Apache-2.0；量化权重沿用同许可），文件 44,436,071 bytes，SHA-256 为 `feed6f32a5e707ca7e939576b2d891b23fb9eb4114749657a5efc64e8651e43a`。模型只保存在本机和服务器私有模型目录，不进入公开仓库或部署包。BiRefNet 通用 Swin-Tiny 的边缘质量已验收，但在当前 4GB 共享主机上超出服务资源边界，只保留为未来独立推理主机候选，不在当前服务启用。
