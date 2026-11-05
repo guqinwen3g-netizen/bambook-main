@@ -864,14 +864,36 @@ function createWindow(): void {
         }
         return { action: 'deny' };
     });
+    // Offline / unreachable site: show a minimal page with a retry button instead of an invisible or blank window.
+    // The page uses no bridges, so the trusted-origin IPC gate is unaffected; retry navigates back to the company site.
+    const showLoadError = (reason: string) => {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        const safe = (value: string) => value.replace(/[<>&"'`]/g, '');
+        const html = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Bambook</title>`
+            + `<body style="-webkit-app-region:drag;margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;font:14px -apple-system,system-ui,sans-serif;color:#1d2a33;background:#f4f6f7">`
+            + `<div style="font-size:16px;font-weight:600">无法连接 Bambook</div><div style="color:#5b6b75">${safe(reason)}</div>`
+            + `<button style="-webkit-app-region:no-drag;padding:7px 18px;border-radius:8px;border:1px solid #c5cfd4;background:#fff;font:inherit;cursor:pointer" onclick="location.href='${safe(APP_ORIGIN)}/'">重试</button></body></html>`;
+        mainWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html)).catch(() => undefined);
+        if (isMac) mainWindow.setWindowButtonVisibility(true);
+        mainWindow.show();
+    };
+
     // Keep the main window on the company site; anything else opens in the system browser instead.
-    const keepOnTrustedOrigin = (event: Electron.Event, url: string) => {
-        if (isTrustedOrigin(url, TRUSTED_ORIGINS) || url.startsWith('file://') && !process.env.ELECTRON_RENDERER_URL && isUiLabElectron) return;
-        event.preventDefault();
+    const openOutside = (url: string) => {
         try { const parsed = new URL(url); if (parsed.protocol === 'https:' || parsed.protocol === 'http:') shell.openExternal(url); } catch { /* ignore */ }
     };
-    mainWindow.webContents.on('will-navigate', keepOnTrustedOrigin);
-    mainWindow.webContents.on('will-redirect', keepOnTrustedOrigin);
+    // A link or script navigating away: stay on the current page and open the target in the system browser.
+    mainWindow.webContents.on('will-navigate', (event, url) => {
+        if (isTrustedOrigin(url, TRUSTED_ORIGINS)) return;
+        event.preventDefault();
+        openOutside(url);
+    });
+    // The company site redirecting elsewhere (e.g. a captive portal): never follow it, show the retry page instead.
+    mainWindow.webContents.on('will-redirect', (event, url, _isInPlace, isMainFrame) => {
+        if (isTrustedOrigin(url, TRUSTED_ORIGINS)) return;
+        event.preventDefault();
+        if (isMainFrame) showLoadError('网络被重定向到其他站点');
+    });
     mainWindow.on('closed', () => {
         mainWindow = null;
         if (agentPetWindow && !agentPetWindow.isDestroyed()) {
@@ -898,20 +920,21 @@ function createWindow(): void {
             '  bundle overhead). Production preview / DMG runs full 60fps.\n' +
             '════════════════════════════════════════════════════════\n\n'
         );
-    } else if (isUiLabElectron) {
-        const uiLabPath = path.join(__dirname, '../renderer/archive/ui-lab/dev-ui-lab.html');
-        mainWindow.loadFile(fsSync.existsSync(uiLabPath) ? uiLabPath : path.join(__dirname, '../renderer/index.html'));
     } else {
         // The workspace runtime needs a real HTTP(S) origin (same-origin /api calls, delegation binding), so the
-        // packaged app opens the company site rather than the bundled file:// renderer.
-        mainWindow.loadURL(APP_ORIGIN + '/');
+        // packaged app (UI-lab included) opens the company site rather than the bundled file:// renderer.
+        // Failures surface through did-fail-load below.
+        mainWindow.loadURL(APP_ORIGIN + '/').catch(() => undefined);
     }
 
     // Always surface load failures and renderer crashes to main-process
     // stderr — these would otherwise produce a silent white window in
     // production. (Cheap; no DevTools window is opened.)
-    mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    mainWindow.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
         process.stderr.write(`[renderer] did-fail-load ${code} ${desc} ${url}\n`);
+        // -3 is ERR_ABORTED (navigation replaced or blocked on purpose); that case is handled where it happens.
+        // Users see a plain reason; the network error code stays in the log above.
+        if (isMainFrame && code !== -3) showLoadError('请检查网络后重试');
     });
     mainWindow.webContents.on('render-process-gone', (_e, details) => {
         process.stderr.write(`[renderer] render-process-gone ${JSON.stringify(details)}\n`);
