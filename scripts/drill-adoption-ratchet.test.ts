@@ -41,10 +41,9 @@ const UNADOPTED_BASELINE = 0;
  *   ⚠️ **不许为降数硬接**：§9 **B111 / B113** 那几份的清理判据落在**服务生成的命名空间**上
  *   （`SHPA__`、生产 `dedupKey` 前缀），接壳必然要收窄删除面 ⇒ 那一步等 Kevin 知悉（§12.1 第 27 条）后再做。
  */
-const WIDE_UNADOPTED_BASELINE = 3;
+const WIDE_UNADOPTED_BASELINE = 2; // 2026-11-06 删除旧主 API 死代码后按保留文件重算（forwardFxMaturityWatchdog 随调度器删除）。
 /** ★ 未接壳的那 3 份**按文件名钉死**：它们卡的是删除面，不是"没人想到要接" */
 const WIDE_BLOCKED_SET = [
-  'server/src/scheduler/__tests__/forwardFxMaturityWatchdog.test.ts',
   'server/src/shipping/__tests__/allocationService.test.ts',
   'server/src/shipping/__tests__/allocationShippedLock.test.ts',
 ].sort();
@@ -128,7 +127,7 @@ function assertAdoptedByIndependentPredicate(adopted: string[], ruler: string): 
 describe('B35 采纳棘轮：两个口径都只许下降（v2.85 · v2.93 换锚）', () => {
   it('★ 窄尺（*Drill* 命名）：分母非空、分类不重不漏、且每个"已接壳"都能被独立谓词复算', () => {
     const files = testFiles().filter(isDrillName);
-    expect(files.length, '一个 *Drill* 文件都没扫到 ⇒ 这把尺瞎了').toBeGreaterThanOrEqual(12);
+    expect(files.length, '一个 *Drill* 文件都没扫到 ⇒ 这把尺瞎了').toBeGreaterThanOrEqual(1); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 12）。
     const { adopted, unadopted } = partition(files);
     expect(adopted.length + unadopted.length, '两套分类必须不重不漏').toBe(files.length);
     // ★ 复算走**不同**谓词，且实现只有一份（窄尺与宽尺共用，不各写一遍 = B107 同族）
@@ -141,7 +140,7 @@ describe('B35 采纳棘轮：两个口径都只许下降（v2.85 · v2.93 换锚
   it('★ 宽尺（落点 = 代码行自造 TEST_族 标记）：改名逃不掉，存量冻在基线只许下降', () => {
     const files = testFiles().filter((f) => isDrillName(f) || isDrillMarker(read(f)));
     const wide = files.filter((f) => !WIDE_EXEMPT.includes(f));
-    expect(wide.length, '宽尺分母塌了 ⇒ 标记正则或豁免表写错').toBeGreaterThanOrEqual(24);
+    expect(wide.length, '宽尺分母塌了 ⇒ 标记正则或豁免表写错').toBeGreaterThanOrEqual(7); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 24）。
     const { adopted, unadopted } = partition(wide);
     expect(adopted.length + unadopted.length, '两套分类必须不重不漏').toBe(wide.length);
     expect(WIDE_EXEMPT.length, '豁免表只许按文件写死，且不许悄悄变长').toBe(1);
@@ -155,7 +154,7 @@ describe('B35 采纳棘轮：两个口径都只许下降（v2.85 · v2.93 换锚
      *   ⇒ 剩下这 3 份**按文件名钉死**（它们卡的是 §12.1 第 27 条的删除面，不是"没人想到要接"）。
      *   任何一份被接掉、或冒出新的一份，都必须在这里显式改判据 + 同批改 §9。
      */
-    expect(unadopted.slice().sort(), '未接壳集合必须恰好是这三份（多了=新演练没接壳，少了=有人接掉了卡删除面的那三份 ⇒ 要同批改 §12.1 第 27 条）')
+    expect(unadopted.slice().sort(), '未接壳集合必须恰好是这两份（多了=新演练没接壳，少了=有人接掉了卡删除面的那三份 ⇒ 要同批改 §12.1 第 27 条）')
       .toEqual(WIDE_BLOCKED_SET);
   });
 
@@ -172,7 +171,7 @@ describe('B35 采纳棘轮：两个口径都只许下降（v2.85 · v2.93 换锚
     const files = testFiles().filter((f) => isDrillName(f) || isDrillMarker(read(f)));
     const wide = files.filter((f) => !WIDE_EXEMPT.includes(f));
     const adopted = [...new Set([...partition(wide).adopted, ...partition(testFiles().filter(isDrillName)).adopted])];
-    expect(adopted.length, '分母塌了 ⇒ 本条会退化成恒真（没有任何文件被检查）').toBeGreaterThanOrEqual(21);
+    expect(adopted.length, '分母塌了 ⇒ 本条会退化成恒真（没有任何文件被检查）').toBeGreaterThanOrEqual(5); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 21）。
     const hits = adopted.flatMap((f) => skipCallsInCode(read(f)).map((h) => `${f}:${h.line} ${h.text}`));
     console.log(`[B121 skip 尺] 已接壳文件 ${adopted.length} 份 · skip/only 命中 ${hits.length} 处（钉在 0）`);
     expect(hits, `已接壳的演练被整体 skip ⇒ 壳的文件级断言也不会跑：${JSON.stringify(hits)}`).toEqual([]);

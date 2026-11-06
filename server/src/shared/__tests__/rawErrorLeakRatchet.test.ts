@@ -43,7 +43,7 @@ const RAW_MESSAGE_LEAK_BASELINE: Record<string, number> = {
   'src/dictionaries/dataDictionaryService.ts': 1,
   'src/finance/invoiceMutationService.ts': 1,
   'src/lib/asyncHandler.ts': 1,
-  'src/orderChanges/orderChangeRequestService.ts': 1,
+  // 2026-11-06: orderChangeRequestService direct-cancel no longer forwards a storage error's own message (0).
   'src/shared/errorCodes.ts': 1,
 };
 
@@ -74,7 +74,7 @@ const UNFILTERED_LEAK_BASELINE: Record<string, number> = {
   // ★ src/finance/invoiceMutationService.ts 于 2026-09-21（G-4 批）从本表移到 TRUTH_FILE_SITE_LEAKS：
   //   它为了拿 code→status 真源而 import 了 shared/errorCodes ⇒ 分类器把它判成"已接真源"。
   //   **欠债一条未增也未减**（总量表 RAW_MESSAGE_LEAK_BASELINE 仍记着它那一处），只是换了记账的侧。
-  'src/orderChanges/orderChangeRequestService.ts': 1,
+  // 2026-11-06: orderChangeRequestService direct-cancel no longer forwards a storage error's own message (0).
   'src/shared/errorCodes.ts': 1,
 };
 
@@ -262,14 +262,14 @@ it('★ 未接真源的那一半（B22 欠债本体）只许减不许增，且�
   it('★ 基线自身不是空表（空表 = 恒绿 = 没守卫）', () => {
     const total = Object.values(RAW_MESSAGE_LEAK_BASELINE).reduce((a, b) => a + b, 0);
     const unfiltered = Object.values(UNFILTERED_LEAK_BASELINE).reduce((a, b) => a + b, 0);
-    expect(total).toBe(11); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 105 / 42）。
-    expect(Object.keys(RAW_MESSAGE_LEAK_BASELINE).length).toBe(9);
+    expect(total).toBe(10); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 105 / 42）；orderChangeRequestService 收敛 −1。
+    expect(Object.keys(RAW_MESSAGE_LEAK_BASELINE).length).toBe(8);
     // 114 / 38：2026-09-22 v2.73 清掉 `systemConfigRoute` 的 3 处后同步（那批只同步了根侧那把尺，server 侧这三份基线漏改 ⇒ server 全量当场红）。
 // 105 / 39：2026-09-21 G-4 起 原口径 ↓ `invoiceMutationService` 因 import 真源而被分类到另一侧
     //   ⇒ **未接真源侧少 1 处、已接真源侧多 1 处，总量表 117 一处未动**。
     //   这两个数一起看才不是"假装收敛"：只看 105 会以为少了一处欠债，其实只是换了记账的侧。
-    expect(unfiltered, 'B22 欠债本体（未接真源、原文可直上屏）').toBe(8); // 2026-11-06 重算（原 82 / 30）。
-    expect(Object.keys(UNFILTERED_LEAK_BASELINE).length).toBe(6);
+    expect(unfiltered, 'B22 欠债本体（未接真源、原文可直上屏）').toBe(7); // 2026-11-06 重算（原 82 / 30）；orderChangeRequestService 收敛 −1。
+    expect(Object.keys(UNFILTERED_LEAK_BASELINE).length).toBe(5);
     // 两表相加必须仍等于总量表：挪侧（一份欠债从一侧记到另一侧）不许让任何一处掉出分母
     const truthSum = Object.values(TRUTH_FILE_SITE_LEAKS).reduce((a, b) => a + b, 0);
     expect(unfiltered + truthSum, `两表之和（${unfiltered}+${truthSum}）必须等于总量 ${total}，否则有一处被两侧同时漏计`).toBe(total);

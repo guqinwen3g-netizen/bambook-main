@@ -13,32 +13,32 @@
     "worktreeDiffSha": "sha256:0aea7dcce13d"
   },
   "totals": {
-    "landingPoints": 445,
-    "filesWithLandingPoints": 70,
+    "landingPoints": 61,
+    "filesWithLandingPoints": 13,
     "wideFragments": 1798
   },
   "byKind": {
-    "literalStatus": 155,
-    "keywordCopy": 32,
-    "tierArg": 143,
-    "rulerNoFallback": 74,
-    "rulerFallback": 17,
-    "rulerConsumer": 2,
-    "codeKey": 18,
-    "passthroughStatusCode": 3,
-    "otherTernary": 1
+    "literalStatus": 15,
+    "keywordCopy": 0,
+    "tierArg": 41,
+    "rulerNoFallback": 0,
+    "rulerFallback": 3,
+    "rulerConsumer": 0,
+    "codeKey": 1,
+    "passthroughStatusCode": 1,
+    "otherTernary": 0
   },
   "ratchet": {
     "caps": {
-      "literalStatus": 185,
-      "tierArg": 161,
-      "keywordCopy": 46,
-      "codeKey": 20,
-      "passthroughStatusCode": 3,
-      "otherTernary": 2,
+      "literalStatus": 15,
+      "tierArg": 41,
+      "keywordCopy": 0,
+      "codeKey": 1,
+      "passthroughStatusCode": 1,
+      "otherTernary": 0,
       "unclassified": 0,
       "tierViaVariable": 0,
-      "rulerNoFallback": 75
+      "rulerNoFallback": 0
     },
     "floors": {
       "rulerFallback": 11,

@@ -293,14 +293,14 @@ describe('B37 · B33/B36 都认不到的第四种写法（只减不增）', () =
  *   ⇒ 是本站点里第一处「导出但无消费者」的出口，**不声称它是活的上屏路径**（另 5 处由端到端用例钉住）。
  */
 const B39_BASELINE: Record<string, number> = {
-  'src/finance/billingItemService.ts': 6,
+  'src/finance/billingItemService.ts': 4, // 2026-11-06: actual remaining sites (main measured 4 here; the earlier 6 was stale).
 };
 
 describe('B39 · 位置参数内插原文（只减不增）', () => {
   const actual = countByFile(scanSources(SERVER), b39Sites);
 
-  it('逐文件基线：6 处 / 1 文件（原 9 / 2），涨了红、偷偷少了也红', () => {
-    expect(Object.values(actual).reduce((a, b) => a + b, 0), '全仓 B39 站点总数').toBe(6); // 2026-11-06 删除死代码后按保留文件的原基线重算（原 9 / 2）。
+  it('逐文件基线：4 处 / 1 文件（原 9 / 2），涨了红、偷偷少了也红', () => {
+    expect(Object.values(actual).reduce((a, b) => a + b, 0), '全仓 B39 站点总数').toBe(4); // 2026-11-06 删除死代码后按保留文件的原基线重算（原 9 / 2）。
     expect(Object.keys(actual).length, '含 B39 站点的文件数').toBe(1);
     expect(actual).toEqual(B39_BASELINE);
   });

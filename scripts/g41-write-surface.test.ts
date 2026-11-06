@@ -29,8 +29,8 @@ const sum = summarize(surface.routes);
 
 describe('G4.1 · 写端点面是派生的，且新增缺陷必须当场红', () => {
   it('★ 分母非空：扫不到写路由 = 这把尺在空转（此时任何"覆盖率"都不作数）', () => {
-    expect(surface.files, '路由文件数为 0 ⇒ 枚举器没找到 src，别把"零命中"当"没问题"').toBeGreaterThanOrEqual(60);
-    expect(sum.total, '一条写路由都没枚举到 ⇒ 判据恒真').toBeGreaterThanOrEqual(600);
+    expect(surface.files, '路由文件数为 0 ⇒ 枚举器没找到 src，别把"零命中"当"没问题"').toBeGreaterThanOrEqual(14); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 60）。
+    expect(sum.total, '一条写路由都没枚举到 ⇒ 判据恒真').toBeGreaterThanOrEqual(138); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 600）。
     expect(sum.denominatorIsMeaningful).toBe(true);
   });
 
@@ -176,19 +176,20 @@ describe('G4.1 门的四种落点（参数表 / 文件级 router.use / handler �
 
   it('★ requireAuth 是 boolean 不是门：这些文件的任何一条路由都不许因为挂载层被记功', () => {
     const boolOnly = new Set(mounts.booleanFlagOnlyFiles);
-    expect(boolOnly.size, '本仓实测：多数 router 只拿到 requireAuth 这个布尔 ⇒ 集合不该是空的（空了说明挂载解析瞎了）').toBeGreaterThan(10);
+    expect(boolOnly.size, '本仓实测：多数 router 只拿到 requireAuth 这个布尔 ⇒ 集合不该是空的（空了说明挂载解析瞎了）').toBeGreaterThan(2); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 >10）。
     const credited = routes.filter((x) => boolOnly.has(x.file) && (x.mountAuthn || x.mountPermission));
     expect(credited.map(siteKey), '只传了 boolean 的文件却拿到挂载层记功 ⇒ 把布尔当中间件了（这正是 B76 那类"把字面量当结构"）').toEqual([]);
   });
 
   it('★ 分类器按"做了什么"分，不按名字猜：四处现场形状各钉一条', () => {
-    const src = (p: string) => readFileSync(join(REPO, p), 'utf8');
-    const mes = extractLocalGates(src('server/src/mes/mesRoute.ts'));
+    // mes/exception/release 路由与旧 index.ts 已随旧主 API 删除（2026-11-06）；分类器形状改读 scripts/__fixtures__/g41 里钉住的最后一版源码。
+    const fixture = (name: string) => readFileSync(join(REPO, 'scripts/__fixtures__/g41', name), 'utf8');
+    const mes = extractLocalGates(fixture('mesRoute.ts.txt'));
     expect(mes.authenticate?.cls, 'authenticate 只验身份（无 actor ⇒ 401）⇒ 不许升成 permission').toBe('authn');
     expect(mes.scopeGate?.cls, 'scopeGate 判 hasScope ⇒ permission').toBe('permission');
     expect(mes.requireProductionWrite?.cls, '组合门（= authenticate && scopeGate）必须继承 permission，否则 mesRoute 26 条被降级').toBe('permission');
     // 返回类型注解带花括号时，体不能从类型注解那里开始切（实测会静默丢掉整个门）
-    expect(Object.keys(extractLocalGates(src('server/src/exceptions/exceptionRoute.ts'))).length, '带 `): { userId: string } | null =>` 的门必须被认出来').toBeGreaterThanOrEqual(1);
+    expect(Object.keys(extractLocalGates(fixture('exceptionRoute.ts.txt'))).length, '带 `): { userId: string } | null =>` 的门必须被认出来').toBeGreaterThanOrEqual(1);
     // `const apiKey = (req.query.apiKey as string) || …` 不是门 ⇒ 不许因为它里面出现 res.status 就给绿
     expect(Object.keys(mes)).not.toContain('apiKey');
     // 恒真检查：门全被判成 authn 的话，上面四条里有三条会同时失去意义
@@ -250,21 +251,23 @@ describe('G4.1 门的四种落点（参数表 / 文件级 router.use / handler �
   });
 
   it('★ 数组门与具名箭头门：两处假洞都拿真文件钉住，且必须能拒绝"数组里混进判不出的成员"', () => {
-    const src = (p: string) => readFileSync(join(REPO, p), 'utf8');
-    const rel = extractLocalGuards(src('server/src/production/releaseRoute.ts'));
+    // mes/exception/release 路由与旧 index.ts 已随旧主 API 删除（2026-11-06）；分类器形状改读 scripts/__fixtures__/g41 里钉住的最后一版源码。
+    const fixture = (name: string) => readFileSync(join(REPO, 'scripts/__fixtures__/g41', name), 'utf8');
+    const rel = extractLocalGuards(fixture('releaseRoute.ts.txt'));
     expect(rel.requireReleaseAdmin?.cls, '`const X = [requireWrite, requirePermission(…)]` 必须按成员组合定档成 permission').toBe('permission');
-    const defs = extractLocalGuards(src('server/src/index.ts'));
+    const defs = extractLocalGuards(fixture('index.ts.txt'));
     expect(defs.sdkAuth?.cls, 'sdkAuth 体内只有 401/403 与 API Key 校验 ⇒ 是身份门，不许升成权限').toBe('identity');
     expect(defs.sdkAuth?.booleanGated, '`if (!SDK_CONFIG.requireAuth) return next();` ⇒ 身份功本身也依赖配置（B88 同一族）').toBe(true);
     // 真文件侧：这三条/两条确实不在"什么证据都没有"里
     const noEvKeys = new Set(noEv);
-    expect(noEvKeys.has('server/src/production/releaseRoute.ts:85 POST \'/release-scopes/:scopeId/:action\''), '数组门修好后这条不该再被报成无证据').toBe(false);
-    expect(noEvKeys.has('server/src/samples/sampleRoute.ts:278 POST \'/garment/:id/submit-qc\''), '同上').toBe(false);
+    expect([...noEvKeys].some((k) => k.startsWith('server/src/production/releaseRoute.ts:')), 'releaseRoute 已删除 ⇒ 不该再有它的无证据条目').toBe(false);
+    expect([...noEvKeys].some((k) => k.startsWith('server/src/samples/sampleRoute.ts:')), 'sampleRoute 已删除 ⇒ 同上').toBe(false);
     // ★ v3.87：这里原来**硬编码行号**（`…index.ts:1823 POST '/api/orders/search'`）⇒ index.ts 一改行数
     //   （本批给调度器加门控就挪了 8 行）+ 基线一按行号重冻结，这条控制断言就假红（B102/B105 那族"钉实现字面"）。
     //   改成**不依赖行号**的匹配 + 反面对照（路径不同必须不匹配），这样它只咬"这条路由的身份功有没有被认出来"。
     const hasOrderSearchIdentity = (keys: string[]) => keys.some((k) => /^server\/src\/index\.ts:\d+ POST '\/api\/orders\/search'$/.test(k));
-    expect(hasOrderSearchIdentity(authn), 'sdkAuth 当实参时要拿到身份功').toBe(true);
+    // 2026-11-06：/api/orders/search 随旧主 API 删除 ⇒ 现树里不得再出现这条写路由（身份功的分类仍由上面的 fixture 断言钉住）。
+    expect(hasOrderSearchIdentity([...authn, ...noEv]), '/api/orders/search 已删除，不得回到写面').toBe(false);
     expect(hasOrderSearchIdentity(['server/src/index.ts:1 POST \'/api/orders/other\'']), '反面对照：路径不同必须不匹配').toBe(false);
     // 反面对照（决定上面不是"什么数组都给绿"）：成员判不出档 ⇒ 整个数组不并桶，且逐成员逼表态
     const synth = extractLocalGuards('const gate = [mysteryHelper(x), anotherThing(y)];\n');
