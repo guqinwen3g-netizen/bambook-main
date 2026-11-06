@@ -141,7 +141,7 @@ magpie 暂不登录订阅。平台 AI（小竹、报价审阅、汇总、对账�
 
 
 
-公司在智能邮箱接入时填写的 IMAP/SMTP 地址，服务端会先解析：解析结果含回环、私网、链路本地（含云元数据 169.254.169.254）、CGNAT、基准测试（198.18/15）、组播或 IPv6 唯一本地/链路本地地址时一律拒绝（`MAIL_HOST_NOT_ALLOWED`），解析失败返回 `MAIL_HOST_UNRESOLVED`。只有运维在 `backend.env` 的 `MIST_MAIL_ALLOWED_HOSTS` 中显式登记的主机名才可指向内部地址，登记后其他主机仍须为允许端口（143/465/587/993）。
+公司在智能邮箱填写 IMAP/SMTP 地址后，服务端按 `mist/mail/service.ts#checkHosts` 校验。`MIST_MAIL_ALLOWED_HOSTS` 非空时默认是严格白名单，未登记的公网主机也会被拒绝；为空时允许标准端口（143/465/587/993）的公网主机。`MIST_MAIL_ALLOW_PUBLIC_HOSTS=1` 模式用于让白名单内的验收邮箱与租户公网邮箱并存，仅字面量 `1` 开启；未配置、`0` 或 `true` 均不会放宽非空白名单。生产开通前须单独确认接入与收件域范围，缺省仍保留严格限制。公网路径必须检查全部解析结果并钉住实际连接地址，TLS 证书按原主机名校验；回环、私网、链路本地（含云元数据 169.254.169.254）、CGNAT、基准测试、组播或 IPv6 内部地址均拒绝，混合公网/内网结果也拒绝。显式列入运维白名单的主机保持现有受信连接规则；该名单不是允许任意内网的通配授权。公网模式不改变 TLS 例外名单、收件域白名单或本人确认发送规则。
 
 本机自建的 `mail.sylway.cloud`（Postfix/Dovecot，只听 127.0.0.1，见 `scripts/deploy/bootstrap-dev-mail.sh`）用于验收走查时，须同时登记：`MIST_MAIL_ALLOWED_HOSTS` 加入 `mail.sylway.cloud`，`MIST_MAIL_INSECURE_TLS_HOSTS` 加入同名（自签证书），并在 `/etc/hosts` 将其指向 127.0.0.1。该服务不对外投递；`MIST_MAIL_ALLOWED_RECIPIENT_DOMAINS` 可限定收件域。改 `backend.env` 时保留原属主与 0640 权限。
 
@@ -165,9 +165,9 @@ magpie 暂不登录订阅。平台 AI（小竹、报价审阅、汇总、对账�
 >
 > **恢复演练（2026-11-06）**：用该组备份恢复到临时库与临时目录，耗时数据库 3 秒、文件 4 秒；表数、审计、公司、账号、工作区数及迁移数与现网一致，全部工作区状态指纹一致，`mist-files` 586 个文件名称与大小逐一一致；临时库与目录已删除。尚无异地副本。
 
-备份与服务同盘，尚无异地副本，也没有做过完整恢复演练。修改脚本前先把原脚本复制到 `shared/private-backups`，保持 `root:root 755`。
+备份与服务同盘，尚无异地副本；本机恢复演练已于 2026-11-06 完成，范围与结果见上文。修改脚本前先把原脚本复制到 `shared/private-backups`，保持 `root:root 755`。
 
-## 主机告警（2026-11-05 起，尚未安装）
+## 主机告警（2026-11-06 已安装启用）
 
 `scripts/deploy/bambook-dev-monitor.py` 每分钟检查：两套 API 的 `/api/health`（须 `status=ok`、`database=ok`，`mode=local` 视为故障）、可配置的公网 HTTPS 健康探针、根目录磁盘使用率（默认 85%）、`bambook-dev.service` 与 `bambook-dev-mist.service`、最新一组备份是否完整且不超过 36 小时。故障经 Bark 推送：同一故障只发一次，按间隔提醒，恢复发一次；只有全部设备都接收才算已发送，否则下次重试。
 
