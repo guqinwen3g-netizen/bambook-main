@@ -8,7 +8,8 @@ const context = { audioWorklet: { addModule: vi.fn(async () => undefined) }, cre
 vi.mock('./voiceAudio', () => ({ RealtimePcmPlayer: { create: () => ({ getAudioContext: () => context, isPlaying: () => false, stop: seam.stopAudio, close: seam.close, enqueue: vi.fn(async () => undefined) }) } }));
 import { usePersonalAgentVoice } from './personalAgentVoice';
 let root: Root, host: HTMLDivElement;
-let tracks: Array<{ enabled: boolean; stop: ReturnType<typeof vi.fn> }>;
+let tracks: Array<{ enabled: boolean; stop: ReturnType<typeof vi.fn>; addEventListener: (type: string, fn: () => void) => void; end: () => void }>;
+let workletNodes: any[] = [];
 class Socket {
   static OPEN = 1; static CLOSING = 2; static instances: Socket[] = [];
   readyState = 1; bufferedAmount = 0; binaryType = '';
@@ -25,11 +26,15 @@ const flush = async () => act(async () => { for (let i = 0; i < 8; i++) await Pr
 const click = async (text: string) => { act(() => [...host.querySelectorAll('button')].find(button => button.textContent === text)!.click()); await flush(); };
 beforeEach(() => {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; vi.clearAllMocks(); Socket.instances = [];
-  tracks = [{ enabled: true, stop: vi.fn() }];
+  workletNodes = [];
+  const track: any = { enabled: true, stop: vi.fn(), listeners: [] as Array<() => void> };
+  track.addEventListener = (type: string, fn: () => void) => { if (type === 'ended') track.listeners.push(fn); };
+  track.end = () => track.listeners.forEach((fn: () => void) => fn());
+  tracks = [track];
   seam.media.mockResolvedValue({ getTracks: () => tracks, getAudioTracks: () => tracks });
   Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: seam.media } });
   vi.stubGlobal('WebSocket', Socket); vi.stubGlobal('AudioContext', class {});
-  vi.stubGlobal('AudioWorkletNode', class { port = { onmessage: null }; connect = vi.fn(); disconnect = vi.fn(); });
+  vi.stubGlobal('AudioWorkletNode', class { port = { onmessage: null }; onprocessorerror: null | (() => void) = null; connect = vi.fn(); disconnect = vi.fn(); constructor() { workletNodes.push(this); } });
   seam.api.mockImplementation(async (url: string, init: any) => init?.method === 'POST' ? { id: 'call', ticket: 'private-one-use-ticket' } : { configured: true });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host); act(() => root.render(<Harness />));
 });
@@ -67,4 +72,20 @@ it('reconnects to the existing persistent task without replaying old audio or su
 it('does not request the microphone when the platform has no voice connection', async () => {
   seam.api.mockResolvedValue({ configured: false }); await click('start');
   expect(seam.media).not.toHaveBeenCalled(); expect(seam.close).toHaveBeenCalledOnce(); expect(host.textContent).toContain('平台尚未配置实时语音');
+});
+
+it('ends the call and releases the microphone when the device disconnects mid-call', async () => {
+  await click('start'); const socket = Socket.instances[0];
+  act(() => socket.event({ type: 'ready' })); await flush();
+  act(() => tracks[0].end()); await flush();
+  expect(host.textContent).toContain('error'); expect(host.textContent).toContain('麦克风已断开，已交办事项继续执行');
+  expect(tracks[0].stop).toHaveBeenCalledOnce(); expect(socket.close).toHaveBeenCalled(); expect(seam.close).toHaveBeenCalledOnce();
+});
+
+it('ends the call when the capture processor fails', async () => {
+  await click('start'); const socket = Socket.instances[0];
+  act(() => socket.event({ type: 'ready' })); await flush();
+  act(() => workletNodes[0].onprocessorerror()); await flush();
+  expect(host.textContent).toContain('麦克风采集中断，已交办事项继续执行');
+  expect(tracks[0].stop).toHaveBeenCalledOnce(); expect(socket.close).toHaveBeenCalled();
 });

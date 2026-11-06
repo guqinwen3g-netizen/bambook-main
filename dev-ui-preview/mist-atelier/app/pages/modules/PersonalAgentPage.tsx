@@ -28,6 +28,7 @@ export function PersonalAgentPage({ tabs }: { tabs?: React.ReactNode }) {
   const [busy, setBusy] = React.useState(false), [loading, setLoading] = React.useState(true), [error, setError] = React.useState('');
   const request = React.useRef<{ fingerprint: string; id: string } | undefined>(undefined);
   const loadVersion = React.useRef(0);
+  const owner = `${session.sessionKey}:${workspaceId}`, liveOwner = React.useRef(owner); liveOwner.current = owner;
   const onVoiceTask = React.useCallback((task: AgentTaskView) => setTasks(old => [task, ...old.filter(item => item.id !== task.id)]), []);
   const voice = usePersonalAgentVoice(`${session.sessionKey}:${workspaceId}:${canChat}`, workspaceId, onVoiceTask);
   const inCall = voice.state === 'connecting' || voice.state === 'listening' || voice.state === 'speaking';
@@ -49,6 +50,7 @@ export function PersonalAgentPage({ tabs }: { tabs?: React.ReactNode }) {
     } catch (e) { if (version === loadVersion.current) setError(e instanceof Error ? e.message : '读取失败'); } finally { if (version === loadVersion.current) setLoading(false); }
   }, [base, canChat, month, session.sessionKey]);
   React.useEffect(() => { setTasks([]); setIdentity(null); setUsage(null); request.current = undefined; void load(); return () => { loadVersion.current++; }; }, [load]);
+  React.useEffect(() => { setName(''); setInstructions(''); setBusy(false); setError(''); request.current = undefined; }, [owner]);
   const activeIds = tasks.filter(t => ['queued', 'running', 'waiting_time', 'waiting_condition', 'waiting_human'].includes(t.state)).map(t => t.id).sort().join(',');
   React.useEffect(() => {
     if (!activeIds || !base || !canChat) return;
@@ -64,14 +66,17 @@ export function PersonalAgentPage({ tabs }: { tabs?: React.ReactNode }) {
   }, [activeIds, base, canChat, session.sessionKey]);
   const send = async () => {
     if (busy || !base || !instructions.trim()) return;
+    const sentBy = owner, stillCurrent = () => liveOwner.current === sentBy;
     setBusy(true); setError('');
     try {
       const input = { name: (name.trim() || instructions.trim()).slice(0, 60), instructions: instructions.trim(), locale: interfaceLocale() };
       const fingerprint = JSON.stringify([base, input]);
       if (request.current?.fingerprint !== fingerprint) request.current = { fingerprint, id: crypto.randomUUID() };
       const r = await mistApiRequest(base + '/personal-agent/tasks', { method: 'POST', body: JSON.stringify({ requestId: request.current!.id, ...input }) }) as { item: AgentTaskView };
+      // A reply that lands after an account or company switch belongs to the previous context.
+      if (!stillCurrent()) return;
       request.current = undefined; voice.followTask(r.item.id); setTasks(old => [r.item, ...old.filter(item => item.id !== r.item.id)]); setName(''); setInstructions(''); toast(uiText('已交给我的 Agent')); void load();
-    } catch (e) { setError(e instanceof Error ? e.message : '未能交办'); } finally { setBusy(false); }
+    } catch (e) { if (stillCurrent()) setError(e instanceof Error ? e.message : '未能交办'); } finally { if (stillCurrent()) setBusy(false); }
   };
   const header = <PageHeader title={uiText('我的 Agent')} actions={<><Button icon={Mic} disabled={!canChat || inCall || !available || identity?.state === 'disabled'} onClick={() => void voice.start()}>{uiText('语音')}</Button><Button icon={RefreshCw} disabled={loading} onClick={() => void load()}>{uiText('刷新')}</Button></>} />;
   if (!canChat) return <MistPage>{header}{tabs}<Banner tone="warn" title={uiText('无 AI 使用权限')} /></MistPage>;

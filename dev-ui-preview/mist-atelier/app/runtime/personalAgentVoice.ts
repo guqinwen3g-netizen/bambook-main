@@ -41,6 +41,7 @@ export function usePersonalAgentVoice(scope: string, workspaceId: string | undef
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
       if (!current()) { stream.getTracks().forEach(track => track.stop()); return; }
       r.stream = stream;
+      for (const track of stream.getAudioTracks()) track.addEventListener('ended', () => fail('麦克风已断开，已交办事项继续执行'), { once: true });
       const context = r.player.getAudioContext();
       await context.audioWorklet.addModule(new URL('./voiceCapture.worklet.js', import.meta.url));
       if (!current()) return;
@@ -57,6 +58,8 @@ export function usePersonalAgentVoice(scope: string, workspaceId: string | undef
           if (selectedTask.current && selectedTask.current !== bound) socket.send(JSON.stringify({ type: 'bind_task', taskId: selectedTask.current }));
           r.source = context.createMediaStreamSource(stream);
           r.capture = new AudioWorkletNode(context, 'bambook-voice-capture');
+          // Microphone or capture loss ends the call; delegated tasks keep running server-side.
+          r.capture.onprocessorerror = () => fail('麦克风采集中断，已交办事项继续执行');
           r.gain = context.createGain(); r.gain.gain.value = 0;
           r.capture.port.onmessage = ({ data }: MessageEvent<ArrayBuffer>) => {
             if (!current() || socket.readyState !== WebSocket.OPEN || !stream.getAudioTracks().some(track => track.enabled)) return;
@@ -65,7 +68,11 @@ export function usePersonalAgentVoice(scope: string, workspaceId: string | undef
           };
           r.source.connect(r.capture); r.capture.connect(r.gain); r.gain.connect(context.destination);
           setState('listening');
-          r.timer = setInterval(() => { if (current()) setState(r.player?.isPlaying() ? 'speaking' : 'listening'); }, 150);
+          r.timer = setInterval(() => {
+            if (!current()) return;
+            if (context.state === 'closed') { fail('语音设备已关闭，已交办事项继续执行'); return; }
+            setState(r.player?.isPlaying() ? 'speaking' : 'listening');
+          }, 150);
         } else if (message.type === 'speech_started' || message.type === 'speech_stopped') { r.player?.stop(); setReply(''); }
         else if (message.type === 'transcript') setTranscript(String(message.text ?? ''));
         else if (message.type === 'reply') setReply(previous => message.final ? String(message.text ?? '') : previous + String(message.text ?? ''));
