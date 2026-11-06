@@ -30,3 +30,14 @@ it('lists documents for a reader and refuses accounts without customs read acces
  expect(agentCatalog(f.actor).map(t=>t.type)).not.toContain('shipment_document');
  expect(()=>agentGet(f.state,f.actor,'shipment_document','d1')).toThrow();expect(()=>agentQuery(f.state,f.actor,{type:'shipment_document'})).toThrow();
 });
+it('flattens generated quotation and order files into metadata-only objects with their parent read scope',async()=>{
+ const raw=db.workspaces.get(workspaceId).state;
+ raw.market.quotations=[{id:'q1',code:'QT-1',ownerId:'clerk',documents:[{id:'qd1',quotationId:'q1',revision:2,draft:false,fileId:'f-q',fileName:'q.pdf',sha256:'h1',bytes:10,templateVersion:1,snapshotFingerprint:'fp',snapshot:{price:'quote-snapshot-sentinel'},generatedAt:now,generatedBy:'Clerk',generatedById:'clerk'}]}];
+ raw.orders=[{id:'o1',code:'SO-1',ownerId:'clerk',documents:[{id:'od1',orderKind:'PI',version:3,kind:'PI',number:'PI-1',fileId:'f-o',fileName:'o.pdf',sha256:'h2',bytes:20,templateVersion:1,snapshotFingerprint:'fp',snapshot:{terms:'order-snapshot-sentinel'},generatedAt:now,generatedBy:'Clerk'}]}];
+ auth.users.get('clerk')!.permissions=['ai:chat','quotations:read','orders:read'];const f=await view(SYSTEM_ROLE_IDS.SUPER_ADMIN);
+ const q=agentGet(f.state,f.actor,'quotation_document','qd1'),o=agentGet(f.state,f.actor,'order_document','od1');
+ expect(q.data).toMatchObject({quotationId:'q1',revision:2,fileId:'f-q',sha256:'h1',draft:false});expect(o.data).toMatchObject({orderId:'o1',kind:'PI',version:3,fileId:'f-o'});
+ const text=JSON.stringify([q,o]);expect(text).not.toContain('snapshot-sentinel');expect(q.link).toContain('id=q1');expect(o.link).toContain('id=o1');
+ auth.users.get('clerk')!.permissions=['ai:chat'];const g=await view(SYSTEM_ROLE_IDS.SALES);
+ expect(()=>agentGet(g.state,g.actor,'order_document','od1')).toThrow();
+});

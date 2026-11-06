@@ -10,7 +10,7 @@ import type { MistState } from '../shared/mistWorkspace';
 import { emailSendEffectiveStatus, emailSendRecipients } from '../shared/mistEmail';
 import { MistApiError } from './errors';
 
-type ObjectType = { type: string; label: string; scope: PermissionScope; path: string[]; view: string; section?: string; linkId?: (row: any) => string | undefined };
+type ObjectType = { type: string; label: string; scope: PermissionScope; path: string[]; view: string; section?: string; linkId?: (row: any) => string | undefined; /** Rows that live inside parent records (generated documents) are flattened here instead of walked by `path`. */ flatten?: (state: MistState) => any[] };
 
 /** 首批可读对象。view 与前端路由一致，链接由页面用 go(view, id) 打开。 */
 export const AGENT_OBJECT_TYPES: ObjectType[] = [
@@ -41,6 +41,9 @@ export const AGENT_OBJECT_TYPES: ObjectType[] = [
   { type: 'shipment', label: '出运', scope: 'shipments:read', path: ['fulfillment', 'shipments'], view: 'shipments' },
   // 出运单据（CI/PL/BL 等）：与报关与单证分区同一读权限；只给元数据与文件编号，不给文件字节，生成快照不入模型。
   { type: 'shipment_document', label: '出运单据', scope: 'customs:read', path: ['fulfillment', 'documents'], view: 'shipments', linkId: r => r.shipmentId },
+  // 报价单、PI/SC 生成记录：嵌在报价/订单记录内，按所属记录的读权限展开；只给文件元数据，不给快照与字节。
+  { type: 'quotation_document', label: '报价单文件', scope: 'quotations:read', path: ['market', 'quotations'], view: 'quotations', linkId: r => r.quotationId, flatten: state => ((state as any).market?.quotations ?? []).flatMap((q: any) => (q.documents ?? []).map((d: any) => ({ ...d, code: q.code, kind: 'QUOTATION' }))) },
+  { type: 'order_document', label: '订单合同文件', scope: 'orders:read', path: ['orders'], view: 'orders/detail', linkId: r => r.orderId, flatten: state => ((state as any).orders ?? []).flatMap((o: any) => (o.documents ?? []).map((d: any) => ({ ...d, orderId: o.id, code: d.number }))) },
   { type: 'invoice', label: '发票', scope: 'invoices:read', path: ['invoices'], view: 'invoices' },
   { type: 'risk', label: '风险', scope: 'risk:read', path: ['platform', 'risks'], view: 'risks' },
   { type: 'claim', label: '售后案件', scope: 'aftersales:read', path: ['platform', 'claims'], view: 'claims' },
@@ -56,6 +59,7 @@ const QUERY_RESULT_MAX = 20_000; // 留出公司等字段的空间，低于本�
 function deny(code: string, message: string, status = 400): never { throw new MistApiError(code, message, status); }
 
 function rows(state: MistState, type: ObjectType): any[] {
+  if (type.flatten) return type.flatten(state).filter(r => r && typeof r === 'object' && typeof r.id === 'string').map(row => mailReadRecord(type.type, row));
   let value: any = state;
   for (const key of type.path) value = value?.[key];
   return Array.isArray(value) ? value.filter(r => r && typeof r === 'object' && typeof r.id === 'string').map(row=>mailReadRecord(type.type,row)) : [];
@@ -71,8 +75,13 @@ function documentReadRecord(row:any){
     ...(row.financeRejection?{financeRejection:{reason:row.financeRejection.reason,at:row.financeRejection.at}}:{}),
     content:content.slice(0,DOCUMENT_CONTENT_LIMIT),...(content.length>DOCUMENT_CONTENT_LIMIT?{contentTruncated:true}:{})};
 }
+/** Generated quotation / order files: file facts only; the stored snapshot holds prices, parties and terms and stays out of the model context. */
+function generatedFileReadRecord(row:any){
+  return{id:row.id,...(row.quotationId?{quotationId:row.quotationId}:{}),...(row.orderId?{orderId:row.orderId}:{}),code:row.code,kind:row.kind??row.orderKind,number:row.number,revision:row.revision,version:row.version,draft:row.draft,fileId:row.fileId,fileName:row.fileName,sha256:row.sha256,bytes:row.bytes,templateVersion:row.templateVersion,generatedAt:row.generatedAt,generatedBy:row.generatedBy,sealed:!!row.sealUseId};
+}
 function mailReadRecord(type:string,row:any){
   if(type==='shipment_document')return documentReadRecord(row);
+  if(type==='quotation_document'||type==='order_document')return generatedFileReadRecord(row);
   if(!['email_draft','email_send'].includes(type))return row;
   const common={id:row.id,subject:row.subject,accountId:row.accountId,...(type==='email_send'?{status:row.status,effectiveStatus:emailSendEffectiveStatus(row)}:{}),from:row.from,to:row.to,cc:row.cc,bcc:row.bcc,createdAt:row.createdAt,updatedAt:row.updatedAt,body:row.body,replyToId:row.replyToId};
   if(type==='email_draft')return{...common,updatedBy:row.updatedBy,template:row.template,links:row.links,fileIds:row.fileIds};

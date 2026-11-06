@@ -743,7 +743,7 @@
 
 ## 7. 进度记录
 
-- **2026-11-07 Agent 可读出运单据（分支 `codex/dangling-scope-closure`，已推送未合入）**：新增对象类型 `shipment_document`，沿用「报关与单证」分区的 `customs:read`；只给单据事实、文件编号和已生成文件的摘要（编号、哈希、大小、是否盖章），生成快照与外部签发证据文本不入模型，正文最多 2000 字并标记截断。无该读权限的账号看不到类型也读不到。新增 2 项测试，Agent 与 mist 相关 21 文件 175 项、服务端类型通过；未读取文件字节、未部署。主线 ② 仍缺：报价/订单单据元数据、邮件附件文本摘录。
+- **2026-11-07 Agent 可读出运单据（分支 `codex/dangling-scope-closure`，已推送未合入）**：新增对象类型 `shipment_document`，沿用「报关与单证」分区的 `customs:read`；只给单据事实、文件编号和已生成文件的摘要（编号、哈希、大小、是否盖章），生成快照与外部签发证据文本不入模型，正文最多 2000 字并标记截断。无该读权限的账号看不到类型也读不到。另增 `quotation_document`（报价单文件，`quotations:read`）与 `order_document`（PI/SC 合同文件，`orders:read`），从所属记录展开，只给文件元数据，不给快照；仍受所属记录的数据范围限制。新增 3 项测试，Agent 与 mist 相关测试、服务端类型通过；未读取文件字节、未部署。主线 ② 仍缺：邮件附件文本摘录。
 
 - **2026-11-07 22 个旧权限登记项收口（分支 `codex/dangling-scope-closure`，已推送未合入）**：对照 `mistWorkspace.ts` 命令权限分发与仓储层逐码核实，15 个已由现行码强制（含 `settings.update` 经仓储层要求 `users:write`、Agent 确认要求 `ai:write:*` 加原命令权限），7 个动作已不存在；新增 `superseded-by-mist` 归类，未改任何运行代码，守卫测试 44 项通过。
 
