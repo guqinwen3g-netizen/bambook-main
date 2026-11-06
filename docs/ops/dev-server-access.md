@@ -121,7 +121,7 @@ magpie 暂不登录订阅。平台 AI（小竹、报价审阅、汇总、对账�
 
 ### 豆包实时语音（2026-11-06）
 
-语音运行于 Mist API，公网使用 `/api/mist/voice/stream`。Nginx 必须为该路径保留 WebSocket 精确匹配转发，使用 HTTP/1.1，并传递 `Upgrade` 与 `Connection: upgrade`；同时保留原主机、协议与代理缓冲配置。新服务器规则在 `scripts/deploy/bootstrap-dev-server.sh`，已有服务器须先备份配置、执行 `nginx -t` 后重载；应用直传不会自动更新 Nginx。无票据升级请求被拒绝只证明鉴权有效，不能替代带一次性票据的真实连接验收。
+语音运行于 Mist API，公网使用 `/api/mist/voice/stream`。Nginx 必须为该路径保留 WebSocket 精确匹配转发，使用 HTTP/1.1，并传递 `Upgrade` 与 `Connection: upgrade`；同时保留原主机、协议与代理缓冲配置。新服务器规则在 `scripts/deploy/bootstrap-dev-server.sh`，已有服务器须先备份配置、执行 `nginx -t` 后重载；应用直传不会自动更新 Nginx。公司域名的直连 HTTPS 外层代理也须传递升级头，不能只更新内层 Mist 转发；本轮两层均已补齐。无票据升级请求被拒绝只证明鉴权有效，不能替代带一次性票据的真实连接验收。
 
 用户已授权复用本机 OpenBitFun 豆包语音连接。服务器私有 `backend.env` 配置 `BAMBOOK_VOICE_API_KEY`、`BAMBOOK_VOICE_VOICE`，保留原属主与 0640 权限，仅重启 Mist 服务载入。页面后续保存的私有 `platform-voice.json` 优先于环境变量，包括明确禁用的设置；不要通过改环境变量覆盖管理员停用状态。该文件与平台模型凭据放在发布间持久保存的私有目录中，按私有备份规则保存；Key 不入库、不回传页面。
 
