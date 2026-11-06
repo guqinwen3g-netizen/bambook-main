@@ -1,6 +1,7 @@
 import { createPublicEntryHostGuard } from './auth/publicEntryHostGuard';
 import { samePublicOrigin, publicOriginAllowed } from './shared/bambookPublicOrigins';
 import { tenantSurfaceGuard } from './auth/tenantSurfaceGuard';
+import { liveApiSurface } from './http/liveApiSurface';
 // Load env BEFORE Prisma is initialized.
 // Local dev overrides come from .env.local (gitignored); .env is the fallback (e.g. cloud creds).
 import dotenv from 'dotenv';
@@ -398,6 +399,8 @@ app.use((req, _res, next) => {
     next();
 });
 
+// 主 API 只保留在用路径，其余旧接口在鉴权与查库之前直接 404（见 http/liveApiSurface.ts）。
+app.use('/api', liveApiSurface);
 app.use('/api', createAuthorizationSnapshotGuard({ prisma, apiKeys: SDK_CONFIG.apiKeys, apiKeyActors: AGENT_API_KEY_ACTORS }));
 app.use('/api', createPublicEntryHostGuard());
 app.use('/api', tenantSurfaceGuard);
