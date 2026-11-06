@@ -192,7 +192,7 @@ describe('B120 的"别人名下"那一刀：一份列知识 + 四段口径', () 
    *   ⇒ 分两把尺，各管各的语义：
    *     第一把（清扫语义）：凡调用基座读数口的文件必须被登记 —— 按**行为**派生，今天现量 6 个。
    *     第二把（删除面）：凡出现 `.deleteMany(` 的文件**逐个冻结条数** + 一条总数棘轮 —— 按**落点**派生，
-   *     不看它叫什么、是否调基座 ⇒ 改名躲不掉。退役不安全 CLM/claim 脚本后上限 25 个文件 / 200 条。
+   *     不看它叫什么、是否调基座 ⇒ 改名躲不掉。退役不安全 CLM/claim 脚本后上限 25 个文件 / 200 条；2026-11-06 删除旧主 API 走查 w-a-5 后为 24 个文件 / 175 条。
    *   ⚠️ 为什么只登记现状而不顺手收编：收编＝**改删除面**（本批硬边界不许自主动）⇒ 先让它全量可见、
    *     只许降不许升，收编与授权同批做（§12.1 第 27 条同族）。
    */
@@ -202,7 +202,6 @@ describe('B120 的"别人名下"那一刀：一份列知识 + 四段口径', () 
   const SELF_CLEANERS: Record<string, number> = {
     'scripts/acceptance-e2e-business-chain.mjs': 32,
     'scripts/acceptance-e2e-business-variants.mjs': 31,
-    'scripts/walkthrough/w-a-5-four-batches.ts': 25,
     'scripts/acceptance-batch1-a3b1b4.mjs': 16,
     'scripts/acceptance-invoice-amount-recalc.mjs': 10,
     'scripts/acceptance-pending-cancel-path.mjs': 10,
@@ -227,7 +226,7 @@ describe('B120 的"别人名下"那一刀：一份列知识 + 四段口径', () 
     'scripts/check-fail-open-inventory.mjs': 1,
   };
   /** CLM/claim 退役移除原 9+7 条预算：只许降，扫描人口与负面自证仍保持。 */
-  const DELETEMANY_TOTAL_MAX = 200;
+  const DELETEMANY_TOTAL_MAX = 175; // 2026-11-06: −25 with the deleted legacy walkthrough w-a-5.
 
   const walkCode = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
     const f = join(dir, e.name);

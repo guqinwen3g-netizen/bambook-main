@@ -25,7 +25,6 @@ vi.mock('../../credit/creditService', () => ({
 }));
 
 import { createInvoice, updateInvoice, findAllocationCustomerViolation } from '../invoiceMutationService';
-import { createFinanceRouter } from '../route';
 import { authHeader } from '../../__tests__/authTestHelper';
 
 // ────────────────────────────────────────────────────────────────
@@ -309,32 +308,3 @@ describe('updateInvoice — 同客户硬门禁（含「只改客户不动分配�
 // ③ 路由层：错误码 → 409（不能落 500）
 // ────────────────────────────────────────────────────────────────
 
-describe('路由层 — 错误码映射到 409', () => {
-  it('POST /api/v1/finance 多客户合并开票 → 409 + 结构化错误码', async () => {
-    const { prisma } = makePrisma({ orders: ORDERS_TWO_CUSTOMERS });
-    const app = express();
-    app.use(express.json());
-    app.use('/api/v1/finance', createFinanceRouter({ prisma, requireAuth: false, apiKeys: new Set(), onDataChange: vi.fn() }));
-    const res = await request(app).post('/api/v1/finance').set(authHeader()).send({
-      invoiceNumber: 'INV-R1', type: 'Receivable', amount: '100', currency: 'USD',
-      issueDate: '2026-09-17', dueDate: '2026-10-17', status: 'Draft',
-      customerRelationId: R1, customerName: '客户甲', orderIds: ['O1', 'O2'],
-    });
-    expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('INVOICE_CONSOLIDATION_CUSTOMER_MISMATCH');
-  });
-
-  it('POST /api/v1/finance 票头客户不符 → 409', async () => {
-    const { prisma } = makePrisma({ orders: ORDERS_SAME_CUSTOMER });
-    const app = express();
-    app.use(express.json());
-    app.use('/api/v1/finance', createFinanceRouter({ prisma, requireAuth: false, apiKeys: new Set(), onDataChange: vi.fn() }));
-    const res = await request(app).post('/api/v1/finance').set(authHeader()).send({
-      invoiceNumber: 'INV-R2', type: 'Receivable', amount: '100', currency: 'USD',
-      issueDate: '2026-09-17', dueDate: '2026-10-17', status: 'Draft',
-      customerRelationId: R2, customerName: '客户乙', orderIds: ['O1'],
-    });
-    expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('INVOICE_CUSTOMER_MISMATCH');
-  });
-});

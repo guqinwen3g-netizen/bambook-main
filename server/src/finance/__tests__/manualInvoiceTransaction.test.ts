@@ -8,7 +8,6 @@ vi.mock('../../lib/logger', () => ({logger:{info:vi.fn(),warn:vi.fn(),error:vi.f
 vi.mock('../../events/businessEventBus', () => ({publishBusinessEvent:vi.fn().mockResolvedValue(undefined)}));
 import { publishBusinessEvent } from '../../events/businessEventBus';
 import { invoiceBillingItem } from '../billingItemService';
-import { createSceneInvoice } from '../sceneInvoiceService';
 const USER='synthetic-manual-finance';
 const SCOPES=['invoices:read','invoices:write','invoices:reconcile','pricing:read','sensitive:cost'];
 const actor:TokenPayload={userId:USER,roles:[],permissions:SCOPES,authorizationLoaded:true,departmentIds:[],permissionCeiling:SCOPES};
@@ -84,7 +83,6 @@ function storage(options:{faultAudit?:string;faultBackfill?:boolean;revokeOnLock
  return {db,state,authority,boundary};
 }
 const invoice=(f:ReturnType<typeof storage>,trustedActor:TokenPayload|null|undefined=actor)=>invoiceBillingItem({prisma:f.db,id:'BI',actorId:USER,trustedActor});
-const scene=(f:ReturnType<typeof storage>)=>createSceneInvoice({prisma:f.db,scene:'sample',sourceId:'S',lineIds:['COST'],input:{invoiceNumber:'INV-explicit-synthetic',status:'Issued'},actorId:USER,trustedActor:actor});
 beforeEach(()=>vi.clearAllMocks());
 describe('Manual invoice transaction composition',()=>{
  it('ordinary billing commits canonical Invoice/Lines, sample projection and all mandatory audits in one outer transaction, then source replay creates nothing',async()=>{
@@ -146,20 +144,6 @@ describe('Manual invoice transaction composition',()=>{
   const f=storage({revokeAfterCreate:true});expect(await invoice(f)).toMatchObject({ok:false,error:{code:'FORBIDDEN',status:403}});
   expect(f.db.invoice.create).toHaveBeenCalledOnce();expect(f.state.invoice).toHaveLength(0);expect(f.state.invoiceLine).toHaveLength(0);expect(f.state.auditLog).toHaveLength(0);
  });
- it('successful Scene dispatch occurs after the real outer commit and uses actual canonical audit identity',async()=>{
-  const f=storage();vi.mocked(publishBusinessEvent).mockImplementationOnce(async()=>{expect(f.boundary.committed).toBe(true);});
-  expect(await scene(f)).toMatchObject({ok:true,data:{invoice:{status:'Issued'}}});expect(f.db.$transaction).toHaveBeenCalledOnce();
-  expect(f.state.invoice).toHaveLength(1);expect(f.state.invoiceLine).toHaveLength(1);expect(f.state.auditLog.map((r:any)=>r.action)).toEqual(['create_invoice','create_scene_invoice']);
-  expect(publishBusinessEvent).toHaveBeenCalledWith(expect.objectContaining({sourceEntityId:f.state.invoice[0].id,actorId:USER,transactionId:f.state.auditLog[0].id}));
- });
- it('a post-commit dispatch outage cannot misreport the committed Scene as an invoice failure',async()=>{
-  const f=storage();vi.mocked(publishBusinessEvent).mockRejectedValueOnce(Error('synthetic event dispatcher offline'));
-  expect(await scene(f)).toMatchObject({ok:true,data:{invoice:{status:'Issued'}}});expect(f.boundary.committed).toBe(true);expect(f.state.invoice).toHaveLength(1);expect(f.state.auditLog).toHaveLength(2);
- });
- it('Scene mandatory audit failure rolls back actual canonical Invoice/Lines and does not dispatch a precommit issued event',async()=>{
-  const f=storage({faultAudit:'create_scene_invoice'});expect(await scene(f)).toMatchObject({ok:false,error:{code:'SCENE_INVOICE_CREATE_FAILED',status:500}});
-  expect(f.boundary.rollbacks).toBe(1);expect(f.state.invoice).toHaveLength(0);expect(f.state.invoiceLine).toHaveLength(0);expect(f.state.auditLog).toHaveLength(0);expect(publishBusinessEvent).not.toHaveBeenCalled();
- });
 });
 
 
@@ -171,27 +155,5 @@ describe('Manual invoice exact amount and local business date',()=>{
   expect(f.state.invoice[0].amount.toFixed(4)).toBe('90071992547409.1231');
   expect(f.state.invoiceLine[0].amount.toFixed(4)).toBe('90071992547409.1231');expect(f.state.invoiceLine[0].sourceType).toBe(lineSource);
   expect((result as any).data.billingItem.netAmountExact).toBe('90071992547409.1231');
- });
- it('Scene consumes the exact locked two-row amounts, rather than reconstructing them from numeric candidate DTOs',async()=>{
-  const f=storage();f.state.costRecord[0].amount='90071992547409.1234';
-  f.state.costRecord.push({...f.state.costRecord[0],id:'COST-2',recordNo:'CR-source-2',amount:'0.8765'});
-  const result=await createSceneInvoice({prisma:f.db,scene:'sample',sourceId:'S',lineIds:['COST','COST-2'],input:{invoiceNumber:'INV-exact-sum',status:'Draft'},actorId:USER,trustedActor:actor});
-  expect(result.ok).toBe(true);expect(f.state.invoice[0].amount.toFixed(4)).toBe('90071992547409.9999');
-  expect(f.state.invoiceLine.map((row:any)=>row.amount.toFixed(4))).toEqual(['90071992547409.1234','0.8765']);
-  expect(f.state.auditLog.find((row:any)=>row.action==='create_scene_invoice').detail.after.amount).toBe('90071992547409.9999');
-  expect(f.db.costRecord.findMany).toHaveBeenCalledWith({where:{id:{in:['COST','COST-2']},deletedAt:null},orderBy:{id:'asc'}});
-  // The existing successful DTO stays display-compatible; it is never the write source.
-  expect((result as any).data.lines[0].amount).toBe(Number('90071992547409.1234'));
- });
- it('Scene default issueDate at China midnight uses local business day, retaining an explicitly chosen date',async()=>{
-  vi.useFakeTimers({toFake:['Date']});
-  try {
-   vi.setSystemTime(new Date('2026-10-02T16:30:00.000Z'));
-   // The runner deliberately fixes the deployed business timezone for this control.
-   expect(new Date().getTimezoneOffset()).toBe(-480);
-   const f=storage();expect((await scene(f)).ok).toBe(true);expect(f.state.invoice[0].issueDate).toBe('2026-10-03');
-   const explicit=storage();expect((await createSceneInvoice({prisma:explicit.db,scene:'sample',sourceId:'S',lineIds:['COST'],input:{invoiceNumber:'INV-explicit-day',status:'Draft',issueDate:'2026-09-25'},actorId:USER,trustedActor:actor})).ok).toBe(true);
-   expect(explicit.state.invoice[0].issueDate).toBe('2026-09-25');
-  } finally {vi.useRealTimers();}
  });
 });

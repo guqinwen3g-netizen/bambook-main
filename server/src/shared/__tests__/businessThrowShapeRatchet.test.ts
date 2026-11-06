@@ -33,11 +33,8 @@
  *
  * 基线取样：2026-09-20 15:35（判据修正后重测）⇒ **33 个文件 / 149 处**。只许减不许增。
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import vm from 'node:vm';
-import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { b34Sites, countByFile, scanSources, stripComments } from '../../../scripts/lib/errorDebtScanners.mjs';
 import { classifyPrivateSymbolRefusals } from '../../../../scripts/lib/tierMessageSources.mjs';
@@ -79,32 +76,13 @@ function countByFileHere(): Record<string, number> {
  *    总数与文件数一开始就对得上，是明细不全。**报"某文件涨了"之前必须先核对明细是否全量** —— 已写在这里防下次再犯。
  */
 const BASELINE: Record<string, number> = {
-  'src/agent/emailReplySendFlow.ts': 1,
-  'src/agent/invoiceIssueFlow.ts': 1,
-  'src/agent/reconcileFlow.ts': 1,
-  // Native issue/create/update now carry typed errors; retired four actual sites.
-  'src/credit/bankruptcyService.ts': 1,
-  'src/email/emailOutboxMutationService.ts': 5,
-  'src/email/emailSyncService.ts': 2,
-  'src/finance/fxSettlementService.ts': 6,
-  'src/finance/outwardRemittanceService.ts': 6,
-  'src/finance/vatInvoiceService.ts': 17,
-  'src/finance/writeOffService.ts': 9,
+  // 2026-11-06：删除旧主 API 死代码时一并移除已删除文件的行（只减不增）。
   'src/internalTrade/internalTransferService.ts': 1,
-  'src/inventory/stockOwnershipService.ts': 3,
-  'src/mes/processChainService.ts': 4,
   'src/orderChanges/orderChangeRequestService.ts': 2,
   'src/orders/toleranceCore.ts': 2,
-  'src/qc/testRequestService.ts': 6,
   'src/quotations/quotationService.ts': 2, // two native typed refusals retired; remaining two stay debt.
   'src/relations/relationMutationService.ts': 1,
-  'src/reporting/reportDefinitionService.ts': 6,
-  'src/samples/colorBatchService.ts': 10,
-  'src/samples/colorCardService.ts': 1,
-  'src/samples/sampleLengthService.ts': 1,
   'src/shipping/allocationService.ts': 21,
-  'src/shipping/shipmentPackingService.ts': 10,
-  'src/suppliers/tcCertificateService.ts': 3,
 };
 
 describe('B34 · 抛点缺 statusCode 的计量（只减不增）', () => {
@@ -115,8 +93,8 @@ describe('B34 · 抛点缺 statusCode 的计量（只减不增）', () => {
     // Fixed c9ab5189: original toolRuntime four and quotationService two
     // retired; new quotationApproval/packing sites were fixed in production,
     // never grandfathered. Original scanner and every negative control remain.
-    expect(total, `全仓公开「抛点缺 statusCode」总数（固定 c9ab5189 来源复核）`).toBe(122);
-    expect(Object.keys(actual).length, '含此类抛点的文件数').toBe(25);
+    expect(total, `全仓公开「抛点缺 statusCode」总数（2026-11-06 删除旧主 API 死代码后，按保留文件的原基线重算）`).toBe(29);
+    expect(Object.keys(actual).length, '含此类抛点的文件数').toBe(6);
     const grew = Object.entries(actual)
       .filter(([f, n]) => (BASELINE[f] ?? 0) < n)
       .map(([f, n]) => `${f}: 基线 ${BASELINE[f] ?? 0} → 实际 ${n}`);
@@ -162,132 +140,5 @@ describe('B34 · 抛点缺 statusCode 的计量（只减不增）', () => {
     const both = resolveError(Object.assign(new Error('非法疵点原因：X'), { code: 'INVALID_DEFECT_CAUSES', statusCode: 400 }), 'FEEDBACK_FAILED');
     expect(both.status).toBe(400);
     expect(both.message).toContain('非法疵点原因');
-  });
-});
-
-describe('B34 · 私有事务拒绝单独登记，不增加公共债务 cap', () => {
-  const source = () => fs.readFileSync(path.join(SERVER, 'src/agent/commitTransaction.ts'), 'utf8');
-  const witness = () => {
-    const sites = classifyPrivateSymbolRefusals(source(), 'src/agent/commitTransaction.ts');
-    expect(sites).toHaveLength(1);
-    return sites[0];
-  };
-  const copies = [
-    ['ORDER_NOT_FOUND', '订单不存在或已删除，请核对订单后重新办理。'],
-    ['STATUS_DRIFT', '订单状态已变化，请刷新后重新确认。'],
-    ['INVOICE_AMOUNT_INVALID', '发票金额必须为正数，请先核对订单金额。'],
-    ['INVOICE_CURRENCY_MISSING', '发票币种未填写，请先完善订单币种。'],
-  ] as const;
-  it('完整内部库存只有已核定的一站；原始计量仍等于公共债务加内部库存', () => {
-    const entries = scanSources(SERVER);
-    const internal = entries.flatMap(({ rel, src }) => classifyPrivateSymbolRefusals(src, rel)
-      .map((site: { keys: string[]; producer: string }) => ({ file: rel, producer: site.producer, keys: site.keys })));
-    expect(internal).toEqual([{ file: 'src/agent/commitTransaction.ts', producer: 'rejectOrderConfirm',
-      keys: ['ORDER_NOT_FOUND', 'STATUS_DRIFT', 'INVOICE_AMOUNT_INVALID', 'INVOICE_CURRENCY_MISSING'] }]);
-    const raw = entries.reduce((sum, entry) => sum + b34Sites(entry.src).length, 0);
-    const debt = entries.reduce((sum, entry) => sum + debtSites(entry.src).length, 0);
-    expect(raw).toBe(debt + 1); // preserves the new station in the total inventory
-  });
-  // Execute only the AST-extracted native sentinel producer/consumer. Formatter
-  // and result metadata are supplied; no backend import, tool action or DB runs.
-  function inspect(probeInput: Record<string, unknown>) {
-    const site = witness();
-    const snippet = `${site.setupSource}
-      const poNumber='synthetic-po',approvalId='synthetic-approval';
-      const draft={idempotencyKey:'synthetic-request',subOperations:[],impactScope:{}};
-      const buildOrderConfirmError=(message:string)=>({message});
-      function inspect(input:any){let error:any;
-        if(input.kind==='native'){try{${site.producer}(input.code)}catch(caught){error=caught}}
-        else if(input.kind==='unknown-key') error={[${site.symbol}]:'UNREGISTERED_REFUSAL'};
-        else if(input.kind==='foreign-symbol') error={[Symbol('order-confirm-business-refusal')]:'ORDER_NOT_FOUND'};
-        else error=input.error;
-        ${site.consumerSource}
-        return {recognized:false};
-      }
-      inspect(probeInput);`;
-    const compiled = ts.transpileModule(snippet, { compilerOptions: { target: ts.ScriptTarget.ES2022,
-      module: ts.ModuleKind.None } }).outputText;
-    return vm.runInNewContext(compiled, { probeInput }, { timeout: 1000 });
-  }
-  it.each(copies)('本地标记 %s 只返回核定的失败/未提交公开文案', (code, copy) => {
-    const result = inspect({ kind: 'native', code });
-    expect({ ok: result.ok, committed: result.committed, error: result.error, retryable: result.errorFeedback.retryable })
-      .toEqual({ ok: false, committed: false, error: `${code}: ${copy}`, retryable: false });
-  });
-  it.each(['unknown-key', 'foreign-symbol'] as const)('%s 不能经过有限消费者', kind => {
-    expect(inspect({ kind }).recognized).toBe(false);
-  });
-  it('同文案/同公开 code 的未知 SQL 错不能伪造私有拒绝', () => {
-    const error = Object.assign(new Error('订单不存在 SELECT private_orders'), { code: 'ORDER_NOT_FOUND', statusCode: 404 });
-    expect(inspect({ kind: 'unknown-error', error }).recognized).toBe(false);
-  });
-  it('有限消费者被移除则不能扣除内部一站，原 debt 判断仍咬住', () => {
-    const changed = stripComments(source()).replace('Object.prototype.hasOwnProperty.call(COMMIT_REFUSAL_COPY, refusal)', 'true');
-    expect(classifyPrivateSymbolRefusals(changed)).toHaveLength(0);
-    expect(debtSites(changed)).toHaveLength(b34Sites(changed).length);
-  });
-});
-
-/**
- * §9 **B34 处置栏 · "为什么现在没炸"的三条前提守卫**（2026-09-20 15:20 独立复核逐处核可达性）
- *
- * 复核结论是"**无回归**"，但"无回归"依赖三件此刻成立、写代码时不一定成立的前提。
- * 本组用例把前提钉成**可证伪**：前提一旦破就红，红 = "重核这一条"，不是"你写错了"。
- * 这正是 R4-T2 负面用例该有的样子 —— 不是再数一遍抛点，而是把"为什么现在没炸"变成守卫。
- *
- * ⚠️ **复核结论本身也被复核掉一条**（15:40 实测）：R1 原话是"`assertConsolidationAllowed` 的三处中文抛点
- *   **零生产调用方**"。实际它在本文件内被 `createAllocation` 调 **2 次**（:506 / :527），只是**外部**没有消费者，
- *   而且那两个码在路由本地表里已经明写 409（`shipping/route.ts:752-753`）。
- *   ⇒ "没人用"这句不成立，这里改钉真正起作用的那两件（服务层 catch + 路由表已给 409）。
- *   教训：**"没人用 / 已废弃"这类断言，无论来自注释还是来自复核报告，都要自己搜过再说。**
- */
-describe('B34 处置栏 · "无回归"依赖的前提', () => {
-  const read = (rel: string) => stripComments(fs.readFileSync(path.join(SERVER, rel), 'utf8'));
-
-  it('P1 合票抛点：被本文件服务层 catch 吸收，且两个码在路由本地表里已经是 409（不是 500）', () => {
-    const svc = read('src/shipping/allocationService.ts');
-    expect(/assertConsolidationAllowed\(t, shipmentId\)[\s\S]{0,1600}catch \(e: any\)/.test(svc),
-      'createAllocation 里那层吸收用的 catch 不见了 ⇒ 这三处抛点会直接冲到路由').toBe(true);
-    const route = read('src/shipping/route.ts');
-    for (const code of ['CONSOLIDATION_CUSTOMER_MISMATCH', 'CONSOLIDATION_BUSINESS_LINE_MISMATCH']) {
-      expect(new RegExp(`${code}:\\s*409`).test(route), `${code} 不再被答成 409 = 业务拒绝被降档`).toBe(true);
-    }
-  });
-
-  it('P2 finance/allocationService 的两处抛点只靠**上游 code 白名单**兜住 ⇒ 白名单少了要重核', () => {
-    const guard = read('src/finance/allocationMutationService.ts');
-    const whitelist = (guard.match(/const PASSTHROUGH_ERROR_CODES = \[([\s\S]*?)\]/) ?? [])[1] ?? '';
-    expect(whitelist, '白名单形状变了 ⇒ 本条前提要重核').not.toBe('');
-    const codes = b34Sites(read('src/finance/allocationService.ts'))
-      .map((h: { match: string }) => (h.match.match(/code:\s*'([A-Z0-9_]+)'/) ?? [])[1])
-      .filter(Boolean);
-    expect(codes, '原两处缺形状的不存在拒绝已补typed404，缺形状抛点不得回潮').toEqual([]);
-    for (const code of ['INVOICE_NOT_FOUND', 'VOUCHER_NOT_FOUND']) {
-      const service = read('src/finance/allocationService.ts');
-      expect(service).toMatch(new RegExp(`code: '${code}', statusCode: 404`));
-      expect(whitelist).toContain(`'${code}'`);
-    }
-    for (const c of codes) {
-      expect(new RegExp(`'${c}'`).test(whitelist), `${c} 掉出白名单 ⇒ 会被兜成 CREATE_FAILED 并丢掉中文文案`).toBe(true);
-    }
-  });
-
-  it('P3 shipping 有 9 个写端点只查 result.ok、**没有路由级 try** ⇒ 未被吸收的抛点会变未处理拒绝', () => {
-    const route = read('src/shipping/route.ts');
-    const bare: string[] = [];
-    for (const m of route.matchAll(/router\.(get|post|put|patch|delete)\(\s*'([^']+)'/g)) {
-      const body = route.slice(m.index ?? 0);
-      const end = body.indexOf('\n  });');
-      const seg = end > 0 ? body.slice(0, end) : body.slice(0, 2500);
-      if (/result\.ok/.test(seg) && !/\btry\s*\{/.test(seg)) bare.push(`${m[1].toUpperCase()} ${m[2]}`);
-    }
-    // Keep the historical nine-site title; current source shape has eight.
-    expect(bare, '端点形状变了 ⇒ "哪些端点裸奔"必须重核（其后果**未覆盖**：没有执行证据）').toEqual([
-      'PUT /:id/lines', 'POST /:id/lines/pull-from-order', 'PUT /:id/cartons', 'POST /',
-      'PATCH /:id', 'DELETE /:id', 'POST /:id/allocations', 'PATCH /:id/allocations/:allocId',
-      // DELETE gained the actual modern-presence catch. Its legacy call is
-      // outside that catch, but the native service absorbs storage exceptions.
-      // This is textual-shape retirement, not proof that every exit is covered.
-    ]);
   });
 });

@@ -51,7 +51,6 @@ describe('task_mqxxxu1g: actorIdFromRequest', () => {
   });
 });
 
-const FINANCE = fs.readFileSync(path.resolve(__dirname, '../../finance/route.ts'), 'utf-8');
 const PAYMENT_VOUCHER_SERVICE = fs.readFileSync(path.resolve(__dirname, '../../finance/paymentVoucherMutationService.ts'), 'utf-8');
 const INVOICE_SERVICE = fs.readFileSync(path.resolve(__dirname, '../../finance/invoiceMutationService.ts'), 'utf-8');
 const ROUTE_AUDIT = fs.readFileSync(path.resolve(__dirname, '../routeAudit.ts'), 'utf-8');
@@ -108,24 +107,9 @@ describe('task_mqxxxu1g: finance route 事务闭环（业务+sync+AuditLog 同�
     expect(section).toContain('existing.appliedAmount');
   });
 
-  it('route 只调用 invoice/payment voucher service，onDataChange 在 service success 后', () => {
-    expect(FINANCE).toContain('createInvoice({');
-    expect(FINANCE).toContain('updateInvoice({');
-    expect(FINANCE).toContain('createPaymentVoucher({');
-    expect(FINANCE).toContain('updatePaymentVoucher({');
-    const postIdx = FINANCE.indexOf("router.post('/'");
-    const voucherIdx = FINANCE.indexOf("router.get('/vouchers'", postIdx);
-    const section = FINANCE.slice(postIdx, voucherIdx);
-    expect(section.indexOf('onDataChange')).toBeGreaterThan(section.indexOf('if (!result.ok)'));
-  });
 });
 
 describe('task_mqxxxu1g: NOT_FOUND 错误契约（404 不漂成 500）', () => {
-  it('invoice/voucher route statusCodeMap 识别 NOT_FOUND 返回 404', () => {
-    const matches = FINANCE.match(/NOT_FOUND: 404/g) || [];
-    expect(matches.length).toBeGreaterThanOrEqual(2);
-  });
-
   it('NOT_FOUND 在 invoice service 中稳定返回', () => {
     expect(INVOICE_SERVICE).toContain("code: 'NOT_FOUND'");
   });

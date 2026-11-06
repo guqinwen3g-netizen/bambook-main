@@ -3,7 +3,6 @@ import * as errors from '../errorCodes';
 import { safeRouteError } from '../routeError';
 import * as line from '../../orders/orderLineWriteAccess';
 import * as development from '../../development/developmentOperationalGuard';
-import { saveShipmentCartonMetadata, shipmentCartonMetadataError } from '../../shipping/shipmentCartonMetadataCommand';
 
 const readers = () => [errors.readBusinessErrorMint, line.readOrderLineWriteErrorMint, development.readDevelopmentDomainErrorMint];
 const sql = 'PRIVATE_MINT_NEGATIVE SELECT password FROM UserAccount';
@@ -61,22 +60,4 @@ describe('private error mint identity; no public shape or object registration au
     expectedSourceFingerprint: 'b'.repeat(64), expectedDispatchHash: 'c'.repeat(64), reason: 'Private callback outcome control', cartons: [{ cartonNo: 'ONE',
       length: null, width: null, height: null, grossWeight: null, netWeight: null, volume: null, items: [{ shipmentLineId: 'private-line', quantity: '1' }] }] });
   const safeUnknown = { status: 500, code: 'SAVE_FAILED', message: '包装资料结果暂时无法确认，请保留原请求重试。', passthrough: false };
-  it('MINT06 a transaction driver refusal before actual main callback entry remains unknown even with a genuine mint', async () => {
-    let attempts = 0;
-    const prisma = { $transaction: async () => { attempts++; throw errors.businessError('CONFLICT', sql); } };
-    let caught: unknown;
-    try { await saveShipmentCartonMetadata({ prisma: prisma as any, shipmentId: 'private-target', actor: null, input: validInput() }); } catch (error) { caught = error; }
-    expect(shipmentCartonMetadataError(caught)).toEqual(safeUnknown); expect(attempts).toBe(1);
-  });
-  it('MINT07 an outer replacement error cannot reuse the actual main callbacks different rejected error identity', async () => {
-    const original = errors.businessError('FORBIDDEN', 'Actual callback delegate refusal.'); let attempts = 0, callbackFaults = 0;
-    const prisma = { $transaction: async (work: (tx: any) => Promise<unknown>) => {
-      attempts++; const tx = { shipment: { findUnique: async () => { callbackFaults++; throw original; } } };
-      try { await work(tx); } catch (error) { expect(error).toBe(original); throw errors.businessError('CONFLICT', sql); }
-      throw Error('Actual callback must reach its first storage delegate');
-    } };
-    let caught: unknown;
-    try { await saveShipmentCartonMetadata({ prisma: prisma as any, shipmentId: 'private-target', actor: null, input: validInput() }); } catch (error) { caught = error; }
-    expect(shipmentCartonMetadataError(caught)).toEqual(safeUnknown); expect(attempts).toBe(1); expect(callbackFaults).toBe(1);
-  });
 });

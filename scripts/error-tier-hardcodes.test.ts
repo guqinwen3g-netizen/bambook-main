@@ -44,8 +44,8 @@ const kindDrift = (base: Record<string, number>, fresh: Record<string, number>) 
 
 describe('B126 · catch 里定档的站点是派生的，且新增必须当场红', () => {
   it('① 分母非空：扫不到源码/落点 ⇒ 这把尺在空转，任何"覆盖率/债的规模"都不作数', () => {
-    expect(files.length, `扫到 ${files.length} 个源文件 ⇒ 路径配错了（应约 477）`).toBeGreaterThanOrEqual(400);
-    expect(sum.total, '一条落点都没有 ⇒ 判据恒真').toBeGreaterThanOrEqual(300);
+    expect(files.length, `扫到 ${files.length} 个源文件 ⇒ 路径配错了（应约 521）`).toBeGreaterThanOrEqual(400);
+    expect(sum.total, '一条落点都没有 ⇒ 判据恒真').toBeGreaterThanOrEqual(170); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 300）。
   });
 
   it('② 分桶加得回总数，**且每一桶都必须与冻结基线逐桶相等**（复核 M-1：只把 byKind 求和与 points.length 比是**恒等式**，两边同源、永远绿）', () => {
@@ -115,10 +115,11 @@ describe('B126 · catch 里定档的站点是派生的，且新增必须当场�
 
   it('⑦ 已接真尺的站必须在册（B124 那几站不许被悄悄改回写死）', () => {
     const rulerFiles = new Set(points.filter((p: any) => p.kind === 'rulerFallback').map((p: any) => p.file));
-    for (const must of ['customs/customsRouteV2.ts', 'quotations/quotationRoute.ts', 'customs/customsRoute.ts', 'mes/mesRoute.ts']) {
+    // 2026-11-06 删除旧主 API 死代码后按保留文件重算：B124 原四站（customs/quotation/mes 路由）随旧主 API 删除；保留下来已接真尺的三站同样不许改回写死。
+    for (const must of ['exceptions/exceptionService.ts', 'orderChanges/orderChangeRequestService.ts', 'paymentRequests/paymentRequestService.ts']) {
       expect([...rulerFiles].some((f: string) => f.endsWith(must)), `${must} 不再走 statusFromError ⇒ 档位真源被绕过（B124 回归）`).toBe(true);
     }
-    expect(BASELINE.rulerSites.length).toBeGreaterThanOrEqual(7);
+    expect(BASELINE.rulerSites.length).toBeGreaterThanOrEqual(3); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 7）。
   });
 
   it('⑧ 台账里那句数必须等于当场实测（文档与尺**双向**对撞，防"基线重冻结了、文档还写着旧数"）', () => {
@@ -288,7 +289,7 @@ describe('B126 · 分类器正负对照（缺一侧就是恒绿/恒红的尺）'
     const t0 = Date.now();
     const r = enumerateTierLandingPoints(REPO);
     const ms = Date.now() - t0;
-    expect(r.points.length, '扫描没数出东西').toBeGreaterThan(300);
+    expect(r.points.length, '扫描没数出东西').toBeGreaterThan(170); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 300）。
     expect(ms, `整树扫描用了 ${ms}ms ⇒ 量级失控（基线时代码里就有 500+ 文件/20ms 级）`).toBeLessThan(8000);
   });
 

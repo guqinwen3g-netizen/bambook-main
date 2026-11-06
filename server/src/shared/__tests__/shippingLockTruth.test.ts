@@ -105,12 +105,9 @@ describe('★ 结构守卫：不许再内联一份「已发运」集合', () => 
   it('★ 不得再内联一份订单「已出运」集合（内容与真源完全一致即红）', () => {
     expect(inlineDuplicatesOf(SHIPPED_ORDER_STATUSES)).toEqual([]);
   });
-  it('★ 五个原内联点都必须改为引用真源（少一个都红）', () => {
+  it('★ 原内联点中仍保留的两个都必须引用真源（另三处所在文件已于 2026-11-06 删除）', () => {
     const consumers = [
       'shipping/allocationService.ts',
-      'shipping/shipmentStockService.ts',
-      'finance/reconciliationService.ts',
-      'customer/orderScheduleService.ts',
       'orderChanges/orderChangeRequestService.ts',
     ];
     for (const rel of consumers) {

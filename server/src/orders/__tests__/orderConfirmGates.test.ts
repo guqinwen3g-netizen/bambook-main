@@ -69,7 +69,6 @@ vi.mock('../../approvals/approvalCreateService', () => ({
 }));
 
 import { transitionOrderStatus } from '../orderLifecycleService';
-import { createOrderServiceV2 } from '../orderServiceV2';
 import { publishBusinessEvent } from '../../events/businessEventBus';
 
 // ── helpers ──
@@ -227,104 +226,5 @@ describe('P0-1 信用门禁：Confirmed 流转 fail-closed', () => {
     const eventTypes = (publishBusinessEvent as any).mock.calls.map((c: any[]) => c[0]?.type);
     expect(eventTypes).toContain('OrderStatusChanged');
     expect(eventTypes).toContain('OrderConfirmed');
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════
-// P0-1（DE-1）信用门禁：orderServiceV2.createOrder 建单 fail-closed
-// ═══════════════════════════════════════════════════════════════
-describe('P0-1 信用门禁：V2 建单 fail-closed', () => {
-  it('Frozen 客户建单被拒（CREDIT_FROZEN_60_DAYS），order.create 未调用', async () => {
-    const { prisma } = makePrisma({
-      creditLimit: makeCreditLimit({ relationId: 'REL__F', status: 'Frozen' }),
-    });
-    const svc = createOrderServiceV2(prisma);
-    const r = await svc.createOrder(ACTOR, {
-      customer: 'Peerless', product: 'Cotton Twill', type: 'Fabric',
-      quantity: 1000, dueDate: '2026-09-01', quoteAmount: 10000,
-      customerRelationId: 'REL__F',
-    });
-    expect(r.ok).toBe(false);
-    expect(r.error!.code).toBe('CREDIT_FROZEN_60_DAYS');
-    expect(prisma.order.create).not.toHaveBeenCalled();
-  });
-
-  it('Active 客户建单正常放行', async () => {
-    const { prisma } = makePrisma({
-      creditLimit: makeCreditLimit({ relationId: 'REL__A', status: 'Active' }),
-    });
-    const svc = createOrderServiceV2(prisma);
-    const r = await svc.createOrder(ACTOR, {
-      customer: 'Peerless', product: 'Cotton Twill', type: 'Fabric',
-      quantity: 1000, dueDate: '2026-09-01', quoteAmount: 10000,
-      customerRelationId: 'REL__A',
-    });
-    expect(r.ok).toBe(true);
-    expect(prisma.order.create).toHaveBeenCalledTimes(1);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════
-// P0-2（DE-2/DE-4）确认路径统一：V1 补 MOQ 门禁，V2 委托单引擎发事件
-// ═══════════════════════════════════════════════════════════════
-describe('P0-2 确认路径统一（V1/V2 单引擎）', () => {
-  it('V1 确认 MOQ 不足被阻断：MOQ_VIOLATION + approvalRequestId（豁免审批单自动发起）', async () => {
-    const { prisma, tx } = makePrisma({ order: makeOrder({ quantity: 100 }) });
-    const r = await transitionOrderStatus({ prisma, orderId: 'ORD__1', toStatus: 'Confirmed', actorId: 'user_1' });
-    expect(r.ok).toBe(false);
-    expect(r.error!.code).toBe('MOQ_VIOLATION');
-    expect(r.error!.approvalRequestId).toBe(MOCK_APPROVAL_ID);
-    expect(tx.order.update).not.toHaveBeenCalled();
-  });
-
-  it('V1 确认 MOQ 不足但已有 approved 豁免单 → 放行', async () => {
-    const { prisma } = makePrisma({
-      order: makeOrder({ quantity: 100 }),
-      approvedMoqExemption: { id: 'APR__APPROVED' },
-    });
-    const r = await transitionOrderStatus({ prisma, orderId: 'ORD__1', toStatus: 'Confirmed', actorId: 'user_1' });
-    expect(r.ok).toBe(true);
-  });
-
-  it('V2 transitionStatus 委托单引擎：小单确认 → MOQ_VIOLATION + approvalRequestId 透传', async () => {
-    const { prisma } = makePrisma({ order: makeOrder({ quantity: 100 }) });
-    const svc = createOrderServiceV2(prisma);
-    const r = await svc.transitionStatus(ACTOR, 'ORD__1', 'Confirmed');
-    expect(r.ok).toBe(false);
-    expect(r.error!.code).toBe('MOQ_VIOLATION');
-    expect(r.error!.approvalRequestId).toBe(MOCK_APPROVAL_ID);
-  });
-
-  it('V2 transitionStatus 委托单引擎：合规确认 → 成功且发布 OrderConfirmed（L1/L6 联动恢复）', async () => {
-    const { prisma } = makePrisma();
-    const svc = createOrderServiceV2(prisma);
-    const r = await svc.transitionStatus(ACTOR, 'ORD__1', 'Confirmed');
-    expect(r.ok).toBe(true);
-    const eventTypes = (publishBusinessEvent as any).mock.calls.map((c: any[]) => c[0]?.type);
-    expect(eventTypes).toContain('OrderStatusChanged');
-    expect(eventTypes).toContain('OrderConfirmed');
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════
-// P0-3（DE-6）信用证门禁：机器可读码保持原名
-// ═══════════════════════════════════════════════════════════════
-describe('P0-3 信用证门禁码', () => {
-  // ★ G-4：`orderServiceV2` 的 codeMap 是 `Record<string, OrderV2Error>`（**不是**穷尽表），
-  //   漏登记的新码会被 `?? 'INTERNAL_ERROR'` 把机器可读码销毁。
-  it('★ G-4 V2 服务层：L/C 订单无证确认 → code 仍是 LC_GATE_BLOCKED（不许塌成 INTERNAL_ERROR）', async () => {
-    const { prisma } = makePrisma({ order: makeOrder({ paymentInstrument: 'L/C' }) });
-    const svc = createOrderServiceV2(prisma);
-    const r = await svc.transitionStatus(ACTOR, 'ORD__1', 'Confirmed');
-    expect(r.ok).toBe(false);
-    expect(r.error!.code, 'V2 的 codeMap 漏码 = 把业务拒绝伪装成内部错误').toBe('LC_GATE_BLOCKED');
-    expect(r.error!.message).toContain('LC_NOT_REGISTERED');
-  });
-
-  it('★ 正向对照：同样无证但订单是 T/T ⇒ V2 确认照常放行（门禁不许把非信用证订单一起锁死）', async () => {
-    const { prisma } = makePrisma({ order: makeOrder({ paymentInstrument: 'T/T' }) });
-    const svc = createOrderServiceV2(prisma);
-    const r = await svc.transitionStatus(ACTOR, 'ORD__1', 'Confirmed');
-    expect(r.ok, JSON.stringify(r.error)).toBe(true);
   });
 });

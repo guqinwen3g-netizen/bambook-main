@@ -6,7 +6,6 @@ import * as permissionModule from '../../auth/permissionService';
 import { claimPage, createClaimVisibility, validateClaimSourceFacts } from '../claimVisibility';
 import { __clearTeamShareCacheForTests } from '../../teams/teamShareService';
 import { listClaimCases } from '../claimCaseService';
-import { listOpenCreditNotes } from '../creditNoteService';
 
 const actor = { userId: 'u', roles: ['sales'], permissions: ['aftersales:read'], authorizationLoaded: true } as any;
 function database(roleId = 'role-sales') {
@@ -156,14 +155,6 @@ describe('Pagination and liability use the same scoped full query', () => {
     expect((await listClaimCases(db, { limit: 2, offset: 4, scopeWhere })).data).toMatchObject({ total: 7, limit: 2, offset: 4 });
     expect(db.claimCase.count).toHaveBeenCalledWith({ where: db.claimCase.findMany.mock.calls[0][0].where });
     expect(db.claimCase.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 4, take: 2 }));
-  });
-  it('closed document history stays readable without counting cancelled liability or only paged amounts', async () => {
-    const { db } = database(); db.creditNote.count.mockResolvedValue(9); db.creditNote.aggregate.mockResolvedValue({ _sum: { openAmount: '85.50' } });
-    const result = await listOpenCreditNotes(db, { limit: 1, offset: 2, includeClosed: true, scopeWhere: { claimCaseId: 'C' } });
-    expect(result.data).toMatchObject({ total: 9, totalOpen: '85.5', limit: 1, offset: 2 });
-    const where = db.creditNote.findMany.mock.calls[0][0].where;
-    expect(db.creditNote.count).toHaveBeenCalledWith({ where });
-    expect(db.creditNote.aggregate).toHaveBeenCalledWith({ where: { AND: [where, { status: { in: ['Open', 'PartiallyApplied'] } }] }, _sum: { openAmount: true } });
   });
   it.each([{ limit: 0 }, { limit: 1.1 }, { offset: -1 }, { limit: 501 }])('invalid page %j never becomes an unbounded query', input => {
     expect(() => claimPage(input)).toThrow('limit');

@@ -2,7 +2,7 @@ import { businessNowDate } from '../shared/businessClock';
 import { isValidSnapshot } from '../moq/moqResolutionService';
 import { freezeQuantityMoqSnapshot, requireProposedPlanMoq, withQuantityApprovalFingerprint, assertOriginalQuantityDecision } from './quantityPlanMoqGate';
 import {canonicalClaimJson} from '../claims/claimApprovalFact';
-import {businessError} from '../shared/errorCodes';
+import {businessError, isBusinessError, resolveError} from '../shared/errorCodes';
 import type {TokenPayload} from '../auth/service';
 import {lockAndValidateQuantityPlan,applyExactQuantityPlan,canonicalQuantityPlan,quantityPlanApprovalHash,quantityPlanCommercialFacts} from './orderLineQuantityPlan';
 /**
@@ -51,7 +51,7 @@ import { isLeaderPrincipal } from '../_shared/rolePermissionMatrix';
 import { isOrderShipped, isShipmentShipped } from '../shared/shippingLock';
 import { statusFromError } from '../shared/bizStatus';
 import { createSequenceService } from '../sequence/sequenceService';
-import { assertFinalCustomerConfirmationInTx, currentCustomerConfirmationActor } from '../customerConfirmations/customerConfirmationService';
+import { assertFinalCustomerConfirmationInTx, currentCustomerConfirmationActor, CustomerConfirmationError } from '../customerConfirmations/customerConfirmationService';
 import { hasScope } from '../auth/permissionService';
 import { freshOrderLineScope } from '../orders/orderLineWriteAccess';
 import { assertOrderChangeApprovalDecisionFact, assertOrderChangeDecisionFact, buildOrderChangeFinalVersion, captureOrderChangeReviewBasis, normalizeOrderChangeDecimal, orderChangeAmendmentProposalFingerprint, OrderChangeFinalVersionError } from './orderChangeFinalVersion';
@@ -1458,8 +1458,12 @@ export function createOrderChangeRequestService(opts: OrderChangeRequestServiceO
     try {
       currentActor = await currentCustomerConfirmationActor(prisma, params.trustedActor, 'order:change_request:create');
     } catch (error: any) {
-      const code = ['UNAUTHORIZED', 'FORBIDDEN', 'AUTHORIZATION_UNAVAILABLE'].includes(error?.code) ? error.code : 'AUTHORIZATION_UNAVAILABLE';
-      return fail(code as OrderChangeErrorCode, error?.message ?? '当前订单变更权限暂时无法核验。', error?.statusCode ?? 503);
+      // Only the confirmation actor check's own refusals carry public copy; any other failure stays generic.
+      if (error instanceof CustomerConfirmationError) {
+        const code = ['UNAUTHORIZED', 'FORBIDDEN', 'AUTHORIZATION_UNAVAILABLE'].includes(error.code) ? error.code : 'AUTHORIZATION_UNAVAILABLE';
+        return fail(code as OrderChangeErrorCode, error.message, error.statusCode);
+      }
+      return fail('AUTHORIZATION_UNAVAILABLE' as OrderChangeErrorCode, '当前订单变更权限暂时无法核验。', 503);
     }
 
     const cr = await prisma.orderChangeRequest.findUnique({ where: { id: changeRequestId } });
@@ -1900,9 +1904,13 @@ export async function directCancelPendingOrder(
 
     return { ok: true, data: result };
   } catch (e: any) {
-    if (e.code) {
-      return { ok: false, error: { code: e.code, message: e.message, statusCode: e.statusCode ?? DIRECT_CANCEL_ERROR_HTTP_STATUS[e.code as DirectCancelErrorCode] ?? 500 } };
+    // Only this function's own refusals (code + statusCode) keep their copy; a storage error that merely
+    // carries a code (e.g. Prisma P20xx) must not reach the caller as a business refusal with its raw text.
+    if (isBusinessError(e) && e.code in DIRECT_CANCEL_ERROR_HTTP_STATUS) {
+      const refusal = resolveError(e, DIRECT_CANCEL_ERRORS.CANCEL_FAILED);
+      return { ok: false, error: { code: refusal.code as DirectCancelErrorCode, message: refusal.message, statusCode: refusal.status } };
     }
-    return { ok: false, error: { code: DIRECT_CANCEL_ERRORS.CANCEL_FAILED, message: `直接取消事务失败：${String(e?.message ?? e)}`, statusCode: 500 } };
+    logger.error('[orderChange] direct cancel failed', { orderId, error: e?.message || String(e) });
+    return { ok: false, error: { code: DIRECT_CANCEL_ERRORS.CANCEL_FAILED, message: '订单取消未能完成，请稍后重试。', statusCode: 500 } };
   }
 }

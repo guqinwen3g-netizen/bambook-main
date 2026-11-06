@@ -42,13 +42,12 @@ const EXEMPT = ['server/src/__tests__/drillTouchLog.test.ts'];
 const KNOWN_FOREIGN_NAMESPACES: Array<{ file: string; value: string; defect: boolean; why: string }> = [
   { file: 'server/src/shipping/__tests__/allocationService.test.ts', value: 'SHPA__', defect: true, why: 'B111：服务生成的合票分配行 id 前缀 ⇒ 清理范围大于自己的写入范围' },
   { file: 'server/src/shipping/__tests__/allocationShippedLock.test.ts', value: 'SHPA__', defect: true, why: 'B111：同一命名空间的第二处落点' },
-  { file: 'server/src/scheduler/__tests__/forwardFxMaturityWatchdog.test.ts', value: 'forward_fx_maturity:', defect: true, why: 'B113：调度任务写在生产 RiskAlert 上的 dedupKey 前缀（该测试还直驱一个不筛标记的扫描）' },
-  { file: 'server/src/dashboard/__tests__/marginCrossCurrency.test.ts', value: 'MCCTEST', defect: false, why: 'B114 判定：该演练自造的独立币种（全库只有它写这个值）⇒ 属"本族跨 run"的既有认领口径，**登记但不算缺陷**' },
+  // 2026-11-06 删除旧主 API 死代码后按保留文件重算：forwardFxMaturityWatchdog（B113）与 marginCrossCurrency（B114）两份演练随源码删除。
 ];
 /** 棘轮基线：越界**判据**总数（登记即占格，只许下降） */
-const FOREIGN_BASELINE = 4;
+const FOREIGN_BASELINE = 2;
 /** 缺陷基线：其中真被判成缺陷的（只许下降；修好一处要同时删登记行与这里的数字） */
-const DEFECT_BASELINE = 3;
+const DEFECT_BASELINE = 2;
 
 const readRepo = (rel: string) => readFileSync(join(REPO, rel), 'utf8');
 
@@ -78,10 +77,10 @@ describe('B114：演练删除判据不许落在非 TEST 命名空间（v2.98 起
   it('★ 分母与两条身份尺都要自证不瞎（任一写错，下面的"零越界"就是空断言）', () => {
     const c = census();
     expect(c.all.length, '一份 *.test.ts 都没扫到 ⇒ 扫描根写错了').toBeGreaterThan(400);
-    expect(c.narrow.length, '窄尺（*Drill* 命名族）瞎了').toBeGreaterThanOrEqual(12);
-    expect(c.wide.length, '宽尺（代码行自造 TEST_族 标记）瞎了 ⇒ 分母会塌成窄尺那一小撮').toBeGreaterThanOrEqual(20);
-    expect(c.candidates.length, '分母塌了（豁免表或身份尺写错）').toBeGreaterThanOrEqual(23);
-    expect(c.preds, '一个 startsWith 谓词都没取到 ⇒ 谓词正则瞎了，"零越界"是假的').toBeGreaterThan(30);
+    expect(c.narrow.length, '窄尺（*Drill* 命名族）瞎了').toBeGreaterThanOrEqual(1); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 12）。
+    expect(c.wide.length, '宽尺（代码行自造 TEST_族 标记）瞎了 ⇒ 分母会塌成窄尺那一小撮').toBeGreaterThanOrEqual(7); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 20）。
+    expect(c.candidates.length, '分母塌了（豁免表或身份尺写错）').toBeGreaterThanOrEqual(7); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 23）。
+    expect(c.preds, '一个 startsWith 谓词都没取到 ⇒ 谓词正则瞎了，"零越界"是假的').toBeGreaterThan(24); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 >30）。
     expect(c.preds, '前缀谓词必须不多于删除调用总数（两个名字的包含关系，防止有人把口径调反）')
       .toBeLessThanOrEqual(c.deleteCalls);
     console.log(`[B114 普查] 分母 ${c.candidates.length}（窄 ${c.narrow.length} ∪ 宽 ${c.wide.length}，豁免 ${EXEMPT.length}）`
@@ -182,7 +181,8 @@ describe('B114：演练删除判据不许落在非 TEST 命名空间（v2.98 起
       .toBe(1);
 
     /* ── 真文件级突变（在内存里改，不动仓库）：新演练塞一条未登记越界，尺必须立刻报出来 ── */
-    const realFile = readRepo('server/src/finance/__tests__/thirdPartyStatementAttribution.test.ts');
+    // thirdPartyStatementAttribution.test.ts 随旧主 API 删除（2026-11-06）；改用仍保留、同样带 cleanup() 的真演练。
+    const realFile = readRepo('server/src/shipping/__tests__/containerConsolidationDrill.test.ts');
     const planted = realFile.replace(
       'async function cleanup() {',
       "async function cleanup() {\n  await prisma.invoice.deleteMany({ where: { id: { startsWith: 'ZZOFF__' } } });",

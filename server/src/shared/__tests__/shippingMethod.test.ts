@@ -125,19 +125,6 @@ describe('★ 结构守卫：运输方式判据不得再各自实现', () => {
   const srcRoot = path.resolve(process.cwd(), 'src');
   const read = (rel: string) => readFileSync(path.join(srcRoot, rel), 'utf8');
 
-  it('服务端写入校验已接线（create + patch 同真源）', () => {
-    const s = read('shipping/shipmentMutationService.ts');
-    expect(s).toMatch(/from '\.\.\/shared\/shippingMethod'/);
-    // create 与 patch 各一处
-    expect((s.match(/coerceMvpShippingMethodForWrite\(/g) ?? []).length).toBe(2);
-  });
-
-  it('台账标签不再内联一份 map（route.ts 必须用真源的 label 函数）', () => {
-    const s = read('shipping/route.ts');
-    expect(s).toMatch(/shippingMethodLabel/);
-    expect(s).not.toMatch(/Courier: '快递'/);
-  });
-
   it('统计分组按归一后的枚举（否则脏值单独立桶）', () => {
     const s = read('shipping/shipmentStatsService.ts');
     expect(s).toMatch(/normalizeShippingMethod\(s\.shippingMethod\)/);

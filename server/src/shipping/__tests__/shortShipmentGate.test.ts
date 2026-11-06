@@ -8,9 +8,6 @@
  *   · 放行后必须把 `ShipmentOrderAllocation.status` 写成 `ShortShipped`（那个死状态要接上）
  *   ★ 真库段跑完要**零残留**（本仓惯例：自己造的数据自己清干净，并断言清干净了）
  */
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { createDrillContext, residualFailureMessage } from '../../__tests__/lib/drillTouchLog';
 import { createAllocationService } from '../allocationService';
@@ -250,8 +247,6 @@ describe('evaluateShortShipment — 收集本票涉及的行（桩）', () => {
 // 三、真库：端到端（造数 → 判定 → 写 ShortShipped → 零残留）
 // ══════════════════════════════════════════════════════════════════
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-
 /**
  * ★★ 接壳（B35/B111 那一族的要求：**新的写库演练必须接壳**）。
  *
@@ -450,107 +445,5 @@ describe('短装门禁 — 真库端到端', () => {
     const ev2 = await evaluateShortShipment(prisma, { shipmentId: sh.id });
     expect(ev2.blocked).toHaveLength(1);
     expect(ev2.blocked[0].allowedMin).toBe(970);
-  });
-});
-
-// ══════════════════════════════════════════════════════════════════
-// 四、接线契约（源码级牙齿）：短装码的档位必须走注册表，不许被本地 `|| 500` 吞掉
-// ══════════════════════════════════════════════════════════════════
-
-describe('接线契约 — 短装拦截码必须能上屏（409，不是 500）', () => {
-  const routeSrc = readFileSync(join(HERE, '..', 'route.ts'), 'utf8');
-  const mutSrc = readFileSync(join(HERE, '..', 'shipmentMutationService.ts'), 'utf8');
-  /**
-   * ★ 注释剥离：本源扫描型守卫的口径是**只判代码不判注释**（B68 守卫自己就是这么做的）。
-   *   ⓘ 同时这也是本批踩过的坑：我一开始在注释里照抄了那串被禁源码片段，
-   *     结果被"按源码文本扫"的守卫当成真实现（本次在自己的测试里再犯一次 ⇒ 就地补剥离）。
-   */
-  const stripComments = (src: string) =>
-    src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
-  const routeCode = stripComments(routeSrc);
-  const mutCode = stripComments(mutSrc);
-
-  it('★★ PATCH /:id 的档位：本地表查不到就问**注册表**，且**不许**自带兜底数字（B68 口径）', () => {
-    // ★ 只看 PATCH 那一段（本文件里 POST/DELETE 各自还有一张历史本地表，不改它们）
-    const start = routeCode.indexOf("router.patch('/:id'");
-    const end = routeCode.indexOf('onDataChange?.({ entity: \'shipping\', action: \'update\'', start);
-    expect(start, 'PATCH 处理器找不到了').toBeGreaterThan(0);
-    expect(end).toBeGreaterThan(start);
-    const patchSrc = routeCode.slice(start, end);
-    const iLocal = patchSrc.indexOf('statusCodeMap[code]');
-    const iReg = patchSrc.indexOf('httpStatusOfCode(code)');
-    expect(iLocal, '本地表那一层不许消失（它承载存量码的既有档位，如 ORDER_TERMINAL=400）').toBeGreaterThan(0);
-    expect(iReg, '★ 少了注册表这一步 ⇒ 未登记的码会又变成 500').toBeGreaterThan(0);
-    expect(iLocal, '顺序必须是 本地表 → 注册表').toBeLessThan(iReg);
-    // ★★ 兜底数字不许出现在调用点（B68 守卫的判据同款）
-    expect(patchSrc.match(/\?\.status\s*\?\?\s*\d/g) ?? [], '不许写 `?.status ?? <数字>`').toEqual([]);
-    expect(patchSrc.includes('?? 500'), '不许写兜底 500 —— 档位只许从注册表拿').toBe(false);
-  });
-
-  it('★★ 运单服务能返回的**每一枚码**都必须定得了档（否则新码会让响应回不去）', () => {
-    // 判据来源：`ShipmentMutationErrorCode` 联合 —— route 出口已改成"缺码即抛"，
-    // 未登记的新码 = 抛错 = 请求回不到响应（比 500 更糟）。这条把整个联合逐枚验一遍。
-    const unionSrc = mutSrc.slice(mutSrc.indexOf('export type ShipmentMutationErrorCode'), mutSrc.indexOf('export interface ShipmentMutationError'));
-    const codes = [...unionSrc.matchAll(/'([A-Z][A-Z0-9_]+)'/g)].map((m) => m[1]);
-    expect(codes.length, '联合没解析出来 ⇒ 这条是恒绿的假闸门').toBeGreaterThan(15);
-    const patchedSrc = routeCode.slice(routeCode.indexOf("router.patch('/:id'"), routeCode.indexOf('onDataChange?.({ entity: \'shipping\', action: \'update\'', routeCode.indexOf("router.patch('/:id'")));
-    const localCodes = new Set([...patchedSrc.matchAll(/^\s*([A-Z][A-Z0-9_]+):\s*\d+,/gm)].map((m) => m[1]));
-    const unresolved = codes.filter((c) => {
-      if (localCodes.has(c)) return false;
-      try { httpStatusOfCode(c); return false; } catch { return true; }
-    });
-    expect(unresolved, '这些码既不在本地表、也没登记进注册表 ⇒ 一旦返回就会抛错（挂住请求）').toEqual([]);
-  });
-
-  it('★★ 三枚新码**不许**抄进本地表（那是"登记欠债"，B32 棘轮盯着）', () => {
-    const start = routeCode.indexOf("router.patch('/:id'");
-    const end = routeCode.indexOf('onDataChange?.({ entity: \'shipping\', action: \'update\'', start);
-    const localMap = routeCode.slice(routeCode.indexOf('const statusCodeMap', start), routeCode.indexOf('};', routeCode.indexOf('const statusCodeMap', start)));
-    for (const c of [SHORT_SHIP_BLOCKED_CODE, ACTUAL_QTY_MISSING_CODE, NO_ALLOCATION_DETAIL_CODE]) {
-      expect(localMap.includes(c), `★ ${c} 不该出现在本地表里：会凭空多登记一处本地 code→status 映射`).toBe(false);
-    }
-  });
-
-  it('★★ 门禁挂在"运单流转至 Shipped"那一处（与放行门禁同事务、同位置）', () => {
-    const i = mutSrc.indexOf('evaluateShortShipment(t, { shipmentId, physicalSource: modern,');
-    expect(i, '运单服务里没有调用短装门禁 ⇒ 门禁是死的').toBeGreaterThan(0);
-    // 必须在 `newStatus === 'Shipped'` 分支内（而不是别的状态上）
-    const shippedIdx = mutSrc.indexOf("if (newStatus === 'Shipped' && existing.status !== 'Shipped')");
-    expect(shippedIdx).toBeGreaterThan(0);
-    expect(i, '短装门禁必须写在「流转至 Shipped」的分支里').toBeGreaterThan(shippedIdx);
-    const gateCall = mutSrc.slice(i, mutSrc.indexOf('});', i) + 3);
-    expect(gateCall).toContain("modern && isHandoffDeparture ? { quantityBasis: 'native_production_facts' as const }");
-  });
-
-  it('★★ 三个出口的顺序：先问"数据齐不齐"，再问"少不少"', () => {
-    const i = mutSrc.indexOf('const shortShip = await evaluateShortShipment');
-    const iNoDetail = mutSrc.indexOf('throw noAllocationDetailError()', i);
-    const iUnfilled = mutSrc.indexOf('throw actualQtyMissingError(', i);
-    const iBlocked = mutSrc.indexOf('throw shortShipBlockedError(', i);
-    expect(iNoDetail).toBeGreaterThan(i);
-    expect(iUnfilled).toBeGreaterThan(iNoDetail);
-    expect(iBlocked, '★ 数据都没齐就先去发起审批，等于让"客户同意"给"没录数量"背书').toBeGreaterThan(iUnfilled);
-  });
-
-  it('★★ 阻断时审批单在**事务外**建（D83：事务里建的会被回滚带走 = 屏幕上那句是假话）', () => {
-    const idxCatch = mutSrc.indexOf("if (e?.code === SHORT_SHIP_BLOCKED_CODE");
-    const idxRequest = mutSrc.indexOf('await requestShortShipApproval(prisma,');
-    expect(idxCatch, 'catch 分支里没有短装处理').toBeGreaterThan(0);
-    expect(idxRequest, '审批单没有在事务外发起').toBeGreaterThan(idxCatch);
-    // 事务内**不许**出现建审批单的调用（否则被回滚带走）
-    const txSection = mutSrc.slice(mutSrc.indexOf('const shortShip = await evaluateShortShipment'), mutSrc.indexOf('await deductShipmentStockInTx'));
-    expect(txSection.includes('requestShortShipApproval'), '事务内不许建审批单').toBe(false);
-  });
-
-  it('★★ 只有"事实清楚、缺客户同意"那一枚码才发起审批单（缺数据的两枚不许）', () => {
-    const idxCatch = mutSrc.indexOf("if (e?.code === SHORT_SHIP_BLOCKED_CODE");
-    const idxRequest = mutSrc.indexOf('await requestShortShipApproval(prisma,');
-    const region = mutSrc.slice(idxCatch, idxRequest + 40);
-    // 这个分支的**触发条件**里只许出现短装码；两枚"缺数据"的码出现在这里 = 逻辑混淆
-    const condEnd = region.indexOf(') {');
-    const cond = region.slice(0, condEnd + 1);
-    expect(cond).toContain('SHORT_SHIP_BLOCKED_CODE');
-    expect(cond.includes('ACTUAL_QTY_MISSING'), '★ "数量没填"不能用审批单放行').toBe(false);
-    expect(cond.includes('NO_ALLOCATION_DETAIL'), '★ "没有明细"不能用审批单放行').toBe(false);
   });
 });

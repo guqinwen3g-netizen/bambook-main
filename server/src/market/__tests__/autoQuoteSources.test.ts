@@ -127,32 +127,14 @@ describe('parseAllianceLinen（亚麻 = 叙述文，必须失败即停）', () =
   });
 });
 
-describe('结构守卫：自动同步真的接进调度与路由了', () => {
-  const SCHED = readFileSync(resolve(__dirname, '../../scheduler/index.ts'), 'utf8');
-  const TASK = readFileSync(resolve(__dirname, '../../scheduler/tasks/marketQuoteSync.ts'), 'utf8');
+describe('结构守卫：自动同步接进了路由', () => {
+  // 2026-11-06：旧主 API 定时任务（src/scheduler，含 market_quote_sync）已删除；
+  // 自动行情由 Mist 的 MarketQuoteWorker（mist/standalone.ts 启动）负责，路由的「立即同步」保留。
   const ROUTE = readFileSync(resolve(__dirname, '../marketQuoteRoute.ts'), 'utf8');
-
-  it('★ 调度器注册了 market_quote_sync（不注册 = 永远不自动跑）', () => {
-    expect(SCHED).toContain('createMarketQuoteSyncTask');
-    expect(TASK).toContain("id: 'market_quote_sync'");
-  });
-
-  it('★ 排期在汇率同步之后（羊毛折算要用当日 USD/CNY）', () => {
-    const fxIdx = SCHED.indexOf('createFxRateSyncTask()');
-    const mkIdx = SCHED.indexOf('createMarketQuoteSyncTask()');
-    expect(fxIdx).toBeGreaterThan(-1);
-    expect(mkIdx).toBeGreaterThan(fxIdx);
-  });
 
   it('★ 路由暴露「立即同步」，且是写权限（owner/admin）', () => {
     expect(ROUTE).toContain("'/quotes/refresh'");
     expect(ROUTE).toContain('runAutoQuoteSync');
-  });
-
-  it('★ 失败必须保留旧值（不写 null / 不写兜底数字）', () => {
-    // 只在「解析成功且折算后在区间内」才 writeConfig
-    expect(TASK).toContain('report.failed');
-    expect(TASK).toContain('ok: report.ok');
   });
 });
 

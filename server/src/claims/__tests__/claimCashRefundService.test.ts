@@ -6,7 +6,6 @@ import { createClaimCashRefundService } from '../claimCashRefundService';
 import { appendRefundEvent, assertRefundHistory, cashRefundApprovalPayload, cashRefundReservedAmount,
   currentRefundActor, refundAmount, refundDate, refundPayee } from '../claimCashRefundFact';
 import { creditNoteDigest } from '../claimCreditNoteVersionService';
-import { createClaimCashRefundRequestService } from '../claimCashRefundRequestService';
 import { refundFenceId } from '../claimCashRefundRequestFact';
 // This file substitutes the canonical voucher producer; account/source locks
 // are exercised by financeF1Integrity and the native company-cash acceptance.
@@ -181,56 +180,5 @@ describe('cash refund independent guards and orchestration', () => {
     f.T.creditNoteRefundEvidence[0].refundId = 'OTHER';
     await expect(f.service.confirm('R1', { ...input, actualMethod: 'TT' }, f.actor)).rejects.toMatchObject({ code: 'INVALID_STATE' });
     expect(f.T.creditNote[0].openAmount.toString()).toBe('500'); expect(f.T.paymentVoucher).toEqual([]);
-  });
-  it('absence remains unknown until an explicit audited fence closes the same original key', async () => {
-    const f = await fixture(), protocol = createClaimCashRefundRequestService({ prisma: f.db, assertVisible: async () => undefined });
-    const body = { action: 'start' as const, originalClientRequestId: 'late-start', originalPayload: { clientRequestId: 'late-start' } };
-    expect(await protocol.result('R1', 'refund', body, f.actor)).toMatchObject({ state: 'unknown', retry: 'same_request_only' });
-    const before = clone(f.T), retire = { ...body, retirementClientRequestId: 'retire-start', reason: 'Explicit correction of saved intent' };
-    const result = await protocol.retire('R1', 'refund', retire, f.actor);
-    expect(result).toMatchObject({ state: 'not_applied', originalParameterHash: creditNoteDigest(body.originalPayload),
-      actorId: 'finance', parent: { creditNoteId: 'CN1', refundId: 'R1' }, fenceAuditId: refundFenceId('CN1', 'late-start'), meaning: 'system_record_only' });
-    expect(f.T.creditNoteRefund).toEqual(before.creditNoteRefund); expect(f.T.paymentVoucher).toEqual([]);
-    expect((await protocol.retire('R1', 'refund', retire, f.actor)).fenceAuditId).toBe(result.fenceAuditId);
-    expect(f.T.auditLog.filter(row => row.action === 'CREDIT_NOTE_REFUND_REQUEST_RETIRED')).toHaveLength(1);
-    await expect(f.service.start('R1', body.originalPayload, f.actor)).rejects.toMatchObject({ code: 'INVALID_STATE' });
-    expect((await protocol.retire('R1', 'refund', { ...retire, reason: 'Changed retirement reason' }, f.actor)).state).toBe('conflict');
-    expect((await protocol.result('R1', 'refund', { ...body, originalPayload: { clientRequestId: 'late-start', reason: 'Changed old request' } }, f.actor)).state).toBe('conflict');
-  });
-  it('a committed start is acknowledged from its immutable event after its current projection changes', async () => {
-    const f = await fixture(), protocol = createClaimCashRefundRequestService({ prisma: f.db, assertVisible: async () => undefined });
-    const originalPayload = { clientRequestId: 'receipt-start' };
-    await f.service.start('R1', originalPayload, f.actor);
-    await f.service.confirm('R1', { companyAccountId:'ACCOUNT',expectedAccountRevision:1,clientRequestId: 'receipt-paid', actualDate: '2026-10-01', actualMethod: 'TT', paymentReference: 'real-system-fact', evidenceIds: ['E1'] }, f.actor);
-    const check = { action: 'start' as const, originalClientRequestId: 'receipt-start', originalPayload };
-    const result = await protocol.result('R1', 'refund', check, f.actor);
-    expect(result).toMatchObject({ state: 'applied', ack: { kind: 'Started', statusAtExecution: 'Executing', refundId: 'R1' } });
-    expect(f.T.creditNoteRefund[0].status).toBe('Paid');
-    const before = clone(f.T);
-    expect((await protocol.retire('R1', 'refund', { ...check, retirementClientRequestId: 'cannot-retire-applied', reason: 'Check lost response' }, f.actor)).state).toBe('applied');
-    expect(f.T).toEqual(before);
-  });
-  it('old semantic history without an exact wire envelope is not fabricated into an exact receipt or a negative proof', async () => {
-    const f = await fixture(), protocol = createClaimCashRefundRequestService({ prisma: f.db, assertVisible: async () => undefined });
-    // The fixture deliberately lacks the historical wire body. Even the same
-    // actual requester cannot replace the existing creation by a negative proof.
-    f.T.userAccount[0].id = 'sales';
-    const requester = { ...f.actor, userId: 'sales' };
-    const body = { action: 'create' as const, originalClientRequestId: 'create-1', originalPayload: { clientRequestId: 'create-1', amount: '125' } };
-    expect((await protocol.result('CN1', 'note', body, requester)).state).toBe('unknown');
-    expect((await protocol.retire('CN1', 'note', { ...body, retirementClientRequestId: 'legacy-retire', reason: 'Must retain historical fact' }, requester)).state).toBe('unknown');
-    expect(f.T.auditLog.filter(row => row.action === 'CREDIT_NOTE_REFUND_REQUEST_RETIRED')).toEqual([]);
-  });
-  it('a required retirement audit failure rolls back the substitute and cannot block the original request', async () => {
-    const f = await fixture(), protocol = createClaimCashRefundRequestService({ prisma: f.db, assertVisible: async () => undefined });
-    const before = clone(f.T), original = f.db.auditLog.create.getMockImplementation();
-    f.db.auditLog.create.mockImplementation(async (args: any) => {
-      if (args.data.action === 'CREDIT_NOTE_REFUND_REQUEST_RETIRED') throw Object.assign(new Error('retirement audit actor FK fault'), { code: 'P2003' });
-      return original(args);
-    });
-    await expect(protocol.retire('R1', 'refund', { action: 'start', originalClientRequestId: 'audit-failed-start', originalPayload: { clientRequestId: 'audit-failed-start' }, retirementClientRequestId: 'retirement-1', reason: 'Correct old request' }, f.actor)).rejects.toMatchObject({ code: 'P2003' });
-    expect(f.T).toEqual(before);
-    await f.service.start('R1', { clientRequestId: 'audit-failed-start' }, f.actor);
-    expect(f.T.creditNoteRefund[0].status).toBe('Executing');
   });
 });

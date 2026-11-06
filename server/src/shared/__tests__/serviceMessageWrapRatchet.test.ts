@@ -38,24 +38,13 @@ const SERVER = path.resolve(HERE, '..', '..', '..');       // server/
 /** 2026-09-20 10:28 实测：36 处 / 19 个文件（其中 finance 已在本批清零，故不在此表内）。只许减不许增。 */
 const WRAP_BASELINE: Record<string, number> = {
   'src/orders/orderLifecycleService.ts': 5,
-  'src/development/developmentCaseMutationService.ts': 4,
-  'src/ai/knowledgeIngestService.ts': 3,
-  'src/orders/orderLineMutationService.ts': 0, // All three unknown caught storage-error wrappers now use safeRouteError.
-  'src/orders/orderServiceV2.ts': 3,
-  'src/agent/commitTransaction.ts': 1,
-  'src/email/route.ts': 0, // 2 → 0：S0-A2 第 10 批复核批补的 11 处里，属本棘轮口径（原文拼进对外文案）的 2 处已接真源；留 0 而不是删行 = 回潮当场红
-  'src/index.ts': 2,
+  'src/index.ts': 0, // 2026-11-06：旧主 API 路由删除后归零，保留零基线防回潮。
   'src/market/autoQuoteSources.ts': 2,
-  'src/agent/agentLoop.ts': 1,
-  'src/agent/llmPlanner.ts': 1,
-  'src/ai/route.ts': 1,
-  'src/claims/claimRoute.ts': 0,
   'src/development/convertService.ts': 0,
   'src/market/marketQuoteService.ts': 1,
-  'src/orderChanges/orderChangeRequestService.ts': 1,
-  'src/reporting/reportDefinitionService.ts': 1,
-  'src/scheduler/tasks/marketQuoteSync.ts': 1,
-  'src/shipping/shipmentEligibilityGate.ts': 1,
+  // 内部分类字段：LLM_ALL_PROVIDERS_FAILED 的逐 provider 摘要只供 mist/assistant.ts 分类，不回给用户、不写日志。
+  'src/ai/llmProviders.ts': 1,
+  'src/orderChanges/orderChangeRequestService.ts': 0, // 2026-11-06：直接取消兜底改为固定文案，原文只进日志。
 };
 
 const WRAP_RE = /(?:message|error|reason)\s*:\s*(?:`[^`]*\$\{[^`]*?(?:\.message|String\([^)]*[Ee]rr|\?\?\s*e\b|\|\|\s*e\b)[^`]*`|'[^']*'\s*\+\s*[A-Za-z_]\w*\??\.message)/g;
@@ -120,7 +109,7 @@ describe('B30 服务层把原文拼进业务文案 · 逐文件棘轮（只许�
 
   it('★ 基线自身不是空表（空表 = 恒绿 = 没守卫）', () => {
     const sum = Object.values(WRAP_BASELINE).reduce((a, b) => a + b, 0);
-    expect(sum).toBe(28); // 31 → 28: three actual order-line storage-error wrappers removed in bbc6d3a3.
-    expect(Object.values(WRAP_BASELINE).filter((n) => n > 0).length).toBe(15); // Order-line entry remains at zero to prevent recurrence.
+    expect(sum).toBe(9); // 2026-11-06：删除旧主 API 死代码后按保留文件重算（原 28）。
+    expect(Object.values(WRAP_BASELINE).filter((n) => n > 0).length).toBe(4); // 零基线条目保留以防回潮。
   });
 });

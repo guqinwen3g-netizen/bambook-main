@@ -16,12 +16,6 @@ vi.mock('../shipmentBatchSettlementHook', () => ({ notifyShipmentBatchSettlement
 vi.mock('../supplierClaimSettlementGuard', () => ({ lockSupplierClaimInvoice: vi.fn() }));
 vi.mock('../supplierClaimInvoiceRelease', () => ({ releaseSupplierClaimInvoiceInTx: vi.fn() }));
 import { createPaymentVoucher, updatePaymentVoucher } from '../paymentVoucherMutationService';
-import { deleteVoucher, deleteInvoice } from '../voidDeleteService';
-import { createVatInvoice, updateVatInvoice, deleteVatInvoice } from '../vatInvoiceService';
-import { readFinanceBalanceProjection } from '../financeBalanceProjection';
-import { withFinanceReadProjection } from '../financeReadProjection';
-import { getAgingReport, getCustomerStatement, getSupplierStatement } from '../reportService';
-import { createFinanceServiceV2 } from '../financeServiceV2';
 import { beginFinanceCommand } from '../financeCommandReceipt';
 import { createPaymentRequestService } from '../../paymentRequests/paymentRequestService';
 import {commandCompanyCashAccount,createCompanyCashAccount,getCompanyCashAccount} from '../companyCashAccountService';
@@ -141,84 +135,10 @@ describe('F1 actual source, stable commands and exact currency net controls (pur
   it('disbursement cannot bypass its genuine approved request', async () => {
     const {db} = fixture(); expect(await createPaymentVoucher({prisma: db, actor, actorId: actor.userId, input: receipt({type: 'Disbursement'})})).toMatchObject({ok: false, error: {code: 'PAYMENT_REQUEST_REQUIRED'}});
   });
-  it('stale cash edit and allocation-bearing deletion cannot write', async () => {
-    const {db, facts} = fixture(); facts.paymentVoucher.push({id: 'cash', ownerId: 'actor', updatedAt: BigInt(7), type: 'Receipt', status: 'unreconciled', deletedAt: null, amount: new Prisma.Decimal(100), currency: 'USD'});
-    expect(await updatePaymentVoucher({prisma: db, actor, actorId: actor.userId, voucherId: 'cash', input: {requestKey: key, expectedUpdatedAt: '6', notes: 'wrong'}})).toMatchObject({ok: false, error: {code: 'CONFLICT'}});
-    facts.invoiceAllocation.push({invoiceId: 'invoice', voucherId: 'cash', appliedAmount: '1'});
-    expect(await deleteVoucher({prisma: db, actor, actorId: actor.userId, voucherId: 'cash', requestKey: key, expectedUpdatedAt: '7'})).toMatchObject({ok: false, error: {code: 'HAS_ALLOCATIONS'}});
-    expect(db.paymentVoucher.update).not.toHaveBeenCalled();
-  });
-  it.each(['BusinessShipmentCI', 'BusinessDevelopmentCI'])('keeps %s source registration immutable', async sourceType => {
-    const {db, facts} = fixture(); facts.invoice.push(invoice('CI', {sourceType}));
-    expect(await deleteInvoice({prisma: db, actor, actorId: actor.userId, invoiceId: 'CI'})).toMatchObject({ok: false, error: {code: 'HANDOFF_CONFLICT'}});
-    expect(db.invoice.update).not.toHaveBeenCalled();
-  });
-  it('VAT input cannot borrow our commercial invoice as supplier source', async () => {
-    const {db, facts} = fixture(); facts.invoice.push(invoice('AP', {sourceType: 'BusinessDevelopmentCI'}));
-    expect(await createVatInvoice({prisma: db, actor, actorId: actor.userId, input: vat()})).toMatchObject({ok: false, error: {code: 'CONFLICT'}});
-    expect(db.vatInvoice.create).not.toHaveBeenCalled();
-  });
-  it('a supplier original supporting an issued AP cannot be overwritten or deleted', async () => {
-    const {db, facts} = fixture(); facts.invoice.push(invoice('AP', {type: 'Payable'}));
-    facts.vatInvoice.push({...vat(), id: 'VAT', status: 'Received', updatedAt: BigInt(2), deletedAt: null, attachments: [{id: 'original'}]});
-    for (const patch of [{sellerName: 'different supplier'}, {attachments: [{id: 'replacement'}]}])
-      expect(await updateVatInvoice({prisma: db, actor, actorId: actor.userId, vatInvoiceId: 'VAT', patch: {...patch, requestKey: key, expectedUpdatedAt: '2'}})).toMatchObject({ok: false, error: {code: 'CONFLICT'}});
-    expect(await deleteVatInvoice({prisma: db, actor, actorId: actor.userId, vatInvoiceId: 'VAT', requestKey: key, expectedUpdatedAt: '2'})).toMatchObject({ok: false, error: {code: 'CONFLICT'}});
-    expect(db.vatInvoice.update).not.toHaveBeenCalled();
-  });
-  it('keeps currencies separate and subtracts only actual cash plus credit allocations', async () => {
-    const {db, facts} = fixture(); facts.invoice.push(invoice('USD'), invoice('EUR', {currency: 'EUR', amount: '50'}), invoice('draft', {status: 'Draft', amount: '999'}));
-    facts.paymentVoucher.push({id: 'cash', type: 'Receipt', amount: '60', currency: 'USD', deletedAt: null, ownerId: 'actor'});
-    facts.invoiceAllocation.push({invoiceId: 'USD', voucherId: 'cash', appliedAmount: '40'}); facts.creditNoteAllocation.push({invoiceId: 'USD', appliedAmount: '10'});
-    const result = await readFinanceBalanceProjection(db, actor);
-    expect(result.receivable).toBeNull(); expect(result.byCurrency).toMatchObject([{currency: 'EUR', receivable: {total: '50.0000', outstanding: '50.0000'}}, {currency: 'USD', receivable: {total: '100.0000', paid: '40.0000', creditApplied: '10.0000', outstanding: '50.0000'}, receipts: {unallocated: '20.0000'}}]);
-  });
-  it('negative payable uses an actual receipt without manufacturing positive debt', async () => {
-    const {db, facts} = fixture(); facts.invoice.push(invoice('creditAP', {type: 'Payable', amount: '-30'})); facts.paymentVoucher.push({id:'return',type:'Receipt',amount:'30',currency:'USD',deletedAt:null}); facts.invoiceAllocation.push({invoiceId:'creditAP',voucherId:'return',appliedAmount:'30'});
-    expect((await readFinanceBalanceProjection(db, actor)).payable).toMatchObject({total:'-30.0000',paid:'-30.0000',outstanding:'0.0000'});
-  });
-  it('source filtering occurs before count/page and honors an inaccessible target', async () => {
-    grants.kind = 'self'; const {db, facts} = fixture(); facts.invoice.push(invoice('own'), invoice('hidden', {customerRelationId:'hidden'}));
-    const result = await withFinanceReadProjection(db, actor, async view => ({count: await view.invoice.count({where:{deletedAt:null}}), page: await view.invoice.findMany({where:{deletedAt:null}, take:1})}));
-    expect(result.count).toBe(1); expect(result.page.map((row:any)=>row.id)).toEqual(['own']);
-    await expect(getCustomerStatement(db, {actor, customerRelationId:'hidden'})).rejects.toMatchObject({code:'NOT_FOUND'});
-  });
-  it('customer statement sees its actual third-party share without the whole payer balance', async () => {
-    grants.kind = 'self'; const {db, facts} = fixture(); facts.invoice.push(invoice('own'), invoice('hidden', {customerRelationId:'hidden'}));
-    facts.paymentVoucher.push({id:'foreign-cash',voucherNumber:'bank-proof',type:'Receipt',status:'unreconciled',customerRelationId:'hidden',customerName:'Foreign payer',ownerId:'else',amount:'999',currency:'USD',paymentDate:'2026-10-07',deletedAt:null});
-    facts.invoiceAllocation.push({invoiceId:'own',voucherId:'foreign-cash',appliedAmount:'10'},{invoiceId:'hidden',voucherId:'foreign-cash',appliedAmount:'500'});
-    const result = await getCustomerStatement(db,{actor, customerRelationId:'own'});
-    expect(result.sections[0].closingBalance).toBe(90); expect(JSON.stringify(result)).not.toContain('Foreign payer'); expect(JSON.stringify(result)).not.toContain('999');
-  });
-  it('report missing identity and missing storage never become an empty balance', async () => {
-    const {db} = fixture(); await expect(getAgingReport(db,{type:'Receivable'})).rejects.toMatchObject({code:'UNAUTHORIZED'});
-    db.invoice.findMany.mockRejectedValue(new Error('storage down')); await expect(getAgingReport(db,{actor,type:'Receivable'})).rejects.toThrow('storage down');
-  });
   it('stable receipt binds the complete command, including expected revision', async () => {
     const {db} = fixture(); const command = await beginFinanceCommand(db,actor,'voucher.update',{requestKey:key,expectedUpdatedAt:'1'}); await command.commit({id:'same'});
     expect((await beginFinanceCommand(db,actor,'voucher.update',{requestKey:key,expectedUpdatedAt:'1'})).receipt).toEqual({id:'same'});
     await expect(beginFinanceCommand(db,actor,'voucher.update',{requestKey:key,expectedUpdatedAt:'2'})).rejects.toMatchObject({code:'CONFLICT'});
-  });
-  it('V2 creates actual cash only through the canonical audited command', async () => {
-    const {db} = fixture(); const result = await createFinanceServiceV2(db).create('payment', actor, receipt({ownerId:'spoofed'}));
-    expect(result).toMatchObject({ok:true,data:{ownerId:'actor',status:'unreconciled'}});
-    expect(db.auditLog.create).toHaveBeenCalledOnce();
-    expect(await createFinanceServiceV2(db).create('payment',actor,receipt({requestKey:undefined}))).toMatchObject({ok:false,error:{code:'INVALID_INPUT'}});
-    expect(db.paymentVoucher.create).toHaveBeenCalledOnce();
-  });
-  it('aging nets a genuine negative original without omitting or reversing it', async () => {
-    const {db,facts}=fixture(); facts.invoice.push(invoice('debt'),invoice('credit',{amount:'-30'}));
-    facts.creditNoteAllocation.push({invoiceId:'debt',creditNoteId:'CN',appliedAmount:'10',appliedDate:'2026-10-07'});
-    expect((await getAgingReport(db,{actor,type:'Receivable'})).totals[0].total).toBe(60);
-    const statement=await getCustomerStatement(db,{actor,customerRelationId:'own'});
-    expect(statement.sections[0].closingBalance).toBe(60);
-    expect(statement.sections[0].transactions.find(row=>row.number==='CN')).toMatchObject({kind:'credit',credit:10});
-  });
-  it('supplier statement consumes actual returned cash against a negative payable', async () => {
-    const {db,facts}=fixture(); facts.invoice.push(invoice('AP',{type:'Payable'}),invoice('returnAP',{type:'Payable',amount:'-30'}));
-    facts.paymentVoucher.push({id:'return',voucherNumber:'Returned money',type:'Receipt',amount:'30',currency:'USD',customerRelationId:'own',paymentDate:'2026-10-07',deletedAt:null,status:'unreconciled'});
-    facts.invoiceAllocation.push({invoiceId:'returnAP',voucherId:'return',appliedAmount:'30'});
-    expect((await getSupplierStatement(db,{actor,supplierRelationId:'own'})).sections[0].closingBalance).toBe(100);
   });
 
 });
@@ -282,18 +202,6 @@ describe('F2 actual company bank ledger (pure storage mocks)',()=>{
     expect(replay).toEqual({...first,replayed:true});expect(facts.cashAccountEntry).toHaveLength(2);
     await expect(commandCompanyCashAccount({prisma:db,actor,accountId:'ACCOUNT',input:{...input,amount:'0'}})).rejects.toMatchObject({code:'CONFLICT'});
     expect((await getCompanyCashAccount({prisma:db,actor,accountId:'ACCOUNT'})).balance).toBe('90.0000');
-  });
-  it('keeps cash after soft removal and bounds true corrections by the original bank net',async()=>{
-    const {db,facts}=fixture();const made=await createPaymentVoucher({prisma:db,actorId:'actor',actor,input:receipt({bankFee:'2',feeBearer:'BEN',actualAccountAmount:'98'})});expect(made.ok).toBe(true);
-    const entry=facts.cashAccountEntry[0];
-    await commandCompanyCashAccount({prisma:db,actor,accountId:'ACCOUNT',input:fact({requestKey:'10000000-0000-4000-8000-000000000002',expectedRevision:2})});
-    const correction={requestKey:'10000000-0000-4000-8000-000000000003',expectedRevision:3,action:'correction' as const,amount:'98',currency:'USD',occurredDate:'2026-10-07',correctsEntryId:entry.id,bankReference:'REAL-REFUND',reason:'真实退回原收款'};
-    await commandCompanyCashAccount({prisma:db,actor,accountId:'ACCOUNT',input:correction});
-    const current=facts.paymentVoucher[0];const removed=await deleteVoucher({prisma:db,actorId:'actor',actor,voucherId:current.id,requestKey:'10000000-0000-4000-8000-000000000004',expectedUpdatedAt:String(current.updatedAt)});expect(removed.ok).toBe(true);
-    expect(facts.cashAccountEntry).toHaveLength(3);
-    expect((await getCompanyCashAccount({prisma:db,actor,accountId:'ACCOUNT'})).balance).toBe('0.0000');
-    await expect(commandCompanyCashAccount({prisma:db,actor,accountId:'ACCOUNT',input:{...correction,requestKey:'10000000-0000-4000-8000-000000000005',expectedRevision:4,amount:'0.0001'}})).rejects.toMatchObject({code:'CONFLICT'});
-    expect(facts.cashAccountEntry).toHaveLength(3);
   });
   it('intersects current financial owner scope and explicit use list, including original receipt replay',async()=>{
     const {db,facts}=fixture();const input=receipt();expect((await createPaymentVoucher({prisma:db,actorId:'actor',actor,input})).ok).toBe(true);
