@@ -14,7 +14,8 @@ export type CrmCollectionLevel = 1 | 2 | 3;
 export const CRM_COLLECTION_LEVEL_LABEL: Record<CrmCollectionLevel, string> = { 1: '到期提醒', 2: '逾期催收', 3: '最后通知' };
 export type CrmCollection = { level: CrmCollectionLevel; promisedDate: string; promisedAmount: string; currency: string; openAtLog: number };
 export type CrmLink = { kind: CrmLinkKind; id: string };
-export type CrmFollowUp = { id: string; customerId: string; method: CrmFollowUpMethod; content: string; at: string; nextDate: string; nextTaskId: string; link: CrmLink | null; actor: string; createdAt: string; collection?: CrmCollection };
+/** voided：作废的跟进保留原文与原因，不计入统计。 */
+export type CrmFollowUp = { id: string; customerId: string; method: CrmFollowUpMethod; content: string; at: string; nextDate: string; nextTaskId: string; link: CrmLink | null; actor: string; actorId?: string; createdAt: string; collection?: CrmCollection; voided?: { reason: string; at: string; actor: string } };
 export type CrmStage = 'intent' | 'sampling' | 'quoting' | 'won' | 'lost';
 export type CrmOpportunity = { id: string; customerId: string; title: string; domain: 'garment' | 'fabric'; stage: CrmStage; amount: string; currency: string; expectedDate: string; /** 负责人显示名快照；ownerId 为负责人账号。 */ owner: string; ownerId: string; note: string; lossReason: string; devIds: string[]; quotationIds: string[]; orderIds: string[]; history: Array<{ at: string; actor: string; from: CrmStage | null; to: CrmStage; note: string }>; createdAt: string; updatedAt: string };
 export type CrmState = { followUps: CrmFollowUp[]; opportunities: CrmOpportunity[] };
@@ -22,7 +23,9 @@ export type CrmOpportunityInput = { customerId: string; title: string; domain: '
 export type CrmCommand =
   | { type: 'crm.followUp.save'; payload: { customerId: string; method: CrmFollowUpMethod; content: string; at: string; nextDate: string; link: CrmLink | null; collection?: { level: CrmCollectionLevel; promisedDate?: string; promisedAmount?: string } } }
   | { type: 'crm.opportunity.save'; payload: { id?: string; input: CrmOpportunityInput } }
-  | { type: 'crm.opportunity.stage'; payload: { id: string; stage: CrmStage; note: string } };
+  | { type: 'crm.opportunity.stage'; payload: { id: string; stage: CrmStage; note: string } }
+  | { type: 'crm.followUp.void'; payload: { id: string; reason: string } }
+  | { type: 'crm.opportunity.reopen'; payload: { id: string; stage: Exclude<CrmStage, 'won' | 'lost'>; note: string } };
 
 export const CRM_METHOD_LABEL: Record<CrmFollowUpMethod, string> = { call: '电话', email: '邮件', meeting: '会议', visit: '拜访', im: '即时通讯', other: '其他' };
 export const CRM_STAGE_LABEL: Record<CrmStage, string> = { intent: '意向', sampling: '打样', quoting: '报价', won: '已下单', lost: '已流失' };
@@ -70,6 +73,14 @@ function ids(root: MistState, customerId: string, kind: Exclude<CrmLinkKind, 'op
 /** Keep the customer timeline anchor, but authorize business activity by its concrete source record. */
 function log(root: MistState, context: MistContext, entityId: string, value: string, businessRef: { kind: 'opportunity' | 'followUp'; id: string }) { root.events.unshift({ id: context.id(), entityType: 'customer', entityId, actor: context.actorName, at: context.now, text: value, fileIds: [], businessRef }); }
 
+/** Shared by manual follow-ups and imported lead history; historical overdue dates remain actionable. */
+export function scheduleCrmFollowUp(root: MistState, context: MistContext, input: { title: string; content: string; nextDate: string; target: import('./mistWorkspace').MistTarget }) {
+  const id = context.id();
+  root.tasks.unshift({ id, title: input.title, due: input.nextDate, done: false, kind: 'crm-follow-up', target: input.target, assigneeIds: context.actorId ? [context.actorId] : [] });
+  root.calendar.push({ id: context.id(), title: input.title, date: input.nextDate, time: '09:00', note: input.content.slice(0, 200), target: input.target, ...(context.actorId ? { ownerId: context.actorId, owner: context.actorName } : {}) });
+  return id;
+}
+
 export function applyCrmCommand(root: MistState, command: CrmCommand, context: MistContext): { id: string } {
   switch (command.type) {
     case 'crm.followUp.save': {
@@ -97,8 +108,8 @@ export function applyCrmCommand(root: MistState, command: CrmCommand, context: M
       }
       const id = context.id(); let nextTaskId = '';
       const inv = link?.kind === 'invoice' ? root.invoices.find(i => i.id === link!.id) : undefined;
-      if (nextDate) { nextTaskId = context.id(); root.tasks.unshift({ id: nextTaskId, title: collection && inv ? `催收 ${inv.code}：${c.name}` : `跟进客户：${c.name}`, due: nextDate, done: false, kind: 'crm-follow-up', target: collection && inv ? { view: 'invoices', id: inv.id } : { view: 'crm', id: c.id, customerId: c.id }, assigneeIds: context.actorId ? [context.actorId] : [] }); }
-      root.crm.followUps.unshift({ id, customerId: c.id, method: p.method, content, at: new Date(stamp).toISOString(), nextDate, nextTaskId, link, actor: context.actorName, createdAt: context.now, ...(collection ? { collection } : {}) });
+      if (nextDate) nextTaskId = scheduleCrmFollowUp(root, context, { title: collection && inv ? `催收 ${inv.code}：${c.name}` : `跟进客户：${c.name}`, content, nextDate, target: collection && inv ? { view: 'invoices', id: inv.id } : { view: 'crm', id: c.id, customerId: c.id } });
+      root.crm.followUps.unshift({ id, customerId: c.id, method: p.method, content, at: new Date(stamp).toISOString(), nextDate, nextTaskId, link, actor: context.actorName, ...(context.actorId ? { actorId: context.actorId } : {}), createdAt: context.now, ...(collection ? { collection } : {}) });
       const what = collection && inv ? `${CRM_COLLECTION_LEVEL_LABEL[collection.level]} ${inv.code}${collection.promisedDate ? `，客户承诺 ${collection.promisedDate} 付 ${collection.promisedAmount} ${collection.currency}` : ''}` : '';
       log(root, context, c.id, `记录${CRM_METHOD_LABEL[p.method]}${what ? '催收：' + what : '跟进'}${nextDate ? `，下次跟进 ${nextDate}` : ''}`, { kind: 'followUp', id });
       if (collection && inv) root.events.unshift({ id: context.id(), entityType: 'invoice', entityId: inv.id, actor: context.actorName, at: context.now, text: `${CRM_METHOD_LABEL[p.method]}${what}`, fileIds: [] });
@@ -128,6 +139,23 @@ export function applyCrmCommand(root: MistState, command: CrmCommand, context: M
       if (stage === 'quoting' && !row.quotationIds.length && !note) fail('请关联报价，或说明报价依据');
       row.history.push({ at: context.now, actor: context.actorName, from: row.stage, to: stage, note }); row.stage = stage; if (stage === 'lost') row.lossReason = note; row.updatedAt = context.now;
       log(root, context, row.customerId, `商机 ${row.title} 推进到${CRM_STAGE_LABEL[stage]}`, { kind: 'opportunity', id: row.id }); return { id: row.id };
+    }
+    case 'crm.followUp.void': {
+      // mar19：写错的跟进作废，保留原文；关联的下次跟进待办一并关闭。
+      const row = root.crm.followUps.find(item => item.id === command.payload.id) || fail('跟进记录不存在', 'NOT_FOUND');
+      if (row.voided) fail('该跟进已作废', 'PRECONDITION');
+      row.voided = { reason: text(command.payload.reason, '作废原因', true, 500), at: context.now, actor: context.actorName };
+      for (const task of root.tasks) if (task.id === row.nextTaskId && !task.done) task.done = true;
+      log(root, context, row.customerId, `作废跟进记录：${row.voided.reason}`, { kind: 'followUp', id: row.id }); return { id: row.id };
+    }
+    case 'crm.opportunity.reopen': {
+      // mar20：已下单 / 已流失的商机客户回头再谈时重开，阶段记录保留。
+      const row = root.crm.opportunities.find(item => item.id === command.payload.id) || fail('商机不存在', 'NOT_FOUND'), stage = command.payload.stage;
+      if (row.stage !== 'won' && row.stage !== 'lost') fail('商机未结束，无需重开', 'PRECONDITION');
+      if (!['intent', 'sampling', 'quoting'].includes(stage)) fail('请选择重开后的阶段');
+      const note = text(command.payload.note, '重开原因', true, 1000);
+      row.history.push({ at: context.now, actor: context.actorName, from: row.stage, to: stage, note: '重开：' + note }); row.stage = stage; row.lossReason = ''; row.updatedAt = context.now;
+      log(root, context, row.customerId, `重开商机 ${row.title}：${note}`, { kind: 'opportunity', id: row.id }); return { id: row.id };
     }
   }
   return fail('未知客户关系操作');

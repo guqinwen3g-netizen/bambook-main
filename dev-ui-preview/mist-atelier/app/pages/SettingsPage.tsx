@@ -5,8 +5,8 @@ import { uiText, ui } from '../../../../services/interfaceLanguage';
  * 旧地址（system-settings / admin-panel 及其分区）仍打开本页对应分区；各分区按本人权限出现，服务端照常复核。
  */
 import React from 'react';
-import { Bell,Bot, Briefcase, History, Landmark, Laptop, RefreshCw, ScrollText, ShieldCheck, Stamp, Users, UsersRound } from 'lucide-react';
-import { Banner, Button, Card, DataTable, EmptyState, Field, FormGrid, FormSection, MistPage, PageHeader, Select, SettingRow, Skeleton, Switch, TextInput, VerticalSteps, useToast } from '../../../../components/mist';
+import { Bell, Bot, Briefcase, History, Landmark, Laptop, ScrollText, ShieldCheck, Stamp, Users, UsersRound } from 'lucide-react';
+import { Banner, Card, DataTable, EmptyState, Field, FormGrid, FormSection, MistPage, PageHeader, Select, SettingRow, Skeleton, Switch, TextInput, VerticalSteps, useToast } from '../../../../components/mist';
 import type { MistCompanyProfile, MistSettings } from '../../../../server/src/shared/mistWorkspace';
 import { View } from '../../../../types';
 import { useMistSession } from '../runtime/auth';
@@ -19,13 +19,15 @@ import { AdminAccounts, AdminAuditLog, AdminRoles } from './modules/AdminAccount
 import { AdminApprovalAuthorities } from './modules/AdminApprovalAuthorities';
 import { LocalAdminPanel } from './modules/LocalAdminPanel';
 import { ExporterProfilePanel } from './modules/ExporterProfilePanel';
+import { CompanySealsSection } from './modules/CompanySeals';
 import {AgentIdentities} from './AgentIdentities';
+import { FailureNotice } from '../runtime/FailureNotice';
 
 type TextKey = 'workspaceName';
 type TextValues = Pick<MistSettings, TextKey>;
 type SettingsPatch = Partial<Omit<MistSettings, 'companyProfile'>> & { companyProfile?: Partial<MistCompanyProfile> };
-export type CompanySection = 'accounts' | 'jobs' | 'approvals' | 'profile' | 'access' | 'teams' | 'notify' | 'activity' | 'audit' | 'local'|'agents';
-const SECTIONS: CompanySection[] = ['accounts', 'jobs', 'approvals', 'profile', 'access', 'teams', 'notify', 'activity', 'audit', 'local','agents'];
+export type CompanySection = 'accounts' | 'jobs' | 'approvals' | 'profile' | 'seals' | 'access' | 'teams' | 'notify' | 'activity' | 'audit' | 'local'|'agents';
+const SECTIONS: CompanySection[] = ['accounts', 'jobs', 'approvals', 'profile', 'seals', 'access', 'teams', 'notify', 'activity', 'audit', 'local','agents'];
 /** 旧页面与分区地址 → 公司管理分区。 */
 export function companySection(view: string, section?: string, id?: string): CompanySection | undefined {
   if (section && (SECTIONS as string[]).includes(section)) return section as CompanySection;
@@ -99,14 +101,15 @@ export function SettingsPage() {
   const steps = ([
     manager && { id: 'accounts', label: '账号', icon: Users },
     manager && { id: 'jobs', label: '岗位与权限', icon: Briefcase },
-    manager && !scoped && { id: 'approvals', label: '审批资格', icon: Stamp },
+    manager && { id: 'approvals', label: '审批资格', icon: Stamp },
     settingsAccess && { id: 'profile', label: '公司资料', icon: Landmark },
+    settingsAccess && !platformCompany && { id: 'seals', label: '印章', icon: Stamp },
     settingsAccess && !platformCompany && { id: 'access', label: '数据访问', icon: ShieldCheck },
     settingsAccess && !platformCompany && !local && session.hasPermission('hr:write') && { id: 'teams', label: '小组范围', icon: UsersRound },
     (session.hasPermission('users:write')||local&&access?.role==='owner')&&{id:'agents',label:'Agent服务',icon:Bot},
     settingsAccess && { id: 'notify', label: '通知', icon: Bell },
     settingsAccess && !member && { id: 'activity', label: '设置记录', icon: History },
-    manager && !scoped && { id: 'audit', label: '审计日志', icon: ScrollText },
+    manager && { id: 'audit', label: '审计日志', icon: ScrollText },
     local && { id: 'local', label: '本机设置', icon: Laptop },
   ].filter(Boolean)) as Array<{ id: CompanySection; label: string; icon: typeof Users }>;
   const requested = companySection(nav?.route?.view ?? '', nav?.route?.section, nav?.route?.id);
@@ -117,9 +120,8 @@ export function SettingsPage() {
   return (
     <MistPage>
       <PageHeader title={uiText("公司管理")} />
-      {workspaceSection && (error || workspace.error) && <Banner tone="bad" title={uiText(error || workspace.error)} actions={<Button size="sm" icon={RefreshCw} onClick={() => { setError(''); void workspace.refresh(); }}>{uiText("重新读取")}</Button>} />}
-      {workspaceSection && pending && !saving && <Banner tone="warn" title={uiText("上一次操作结果待核对")} actions={<Button size="sm" disabled={saving} onClick={() => void workspace.recover().catch(failure=>setError(failure instanceof Error?failure.message:'原请求核对失败'))}>{uiText("核对原请求")}</Button>} />}
-      {!sec ? <Banner tone="neutral" title={uiText("当前账号没有公司管理权限")} /> : <div className="mist-wizard">
+      {workspaceSection && (error || workspace.error) && <FailureNotice title="设置未完成" detail={error || workspace.error} retry={() => { setError(''); void workspace.refresh(); }} retryLabel="重新读取" />}
+      {!sec ? <Banner variant="status" tone="neutral" title={uiText("当前账号没有公司管理权限")} /> : <div className="mist-wizard">
         <VerticalSteps mode="page" current={sec} onSelect={id => setChosen(id as CompanySection)} steps={steps} />
         <div className="mist-col" style={{ minWidth: 0 }}>
           {sec === 'accounts' && <AdminAccounts />}
@@ -128,9 +130,10 @@ export function SettingsPage() {
           {sec === 'approvals' && <AdminApprovalAuthorities />}
           {sec === 'audit' && <AdminAuditLog />}
           {sec === 'local' && <LocalAdminPanel embedded />}
+          {sec === 'seals' && <Card><CompanySealsSection canManage={!member} /></Card>}
           {workspaceSection && <Card>
             {!settings || !values ? <FormSection title={uiText("正在读取设置")}><Skeleton height={120} /></FormSection> : <>
-            {member && sec === 'notify' && <Banner tone="neutral" title={uiText("公司设置由管理人员维护")}>{uiText("这些设置作用于整个公司，当前账号只能查看。")}</Banner>}
+            {member && sec === 'notify' && <Banner variant="status" tone="neutral" title={uiText("公司设置由管理人员维护")}>{uiText("这些设置作用于整个公司，当前账号只能查看。")}</Banner>}
             {sec === 'profile' && <FormSection title={uiText("公司基本设置")}>
             <FormGrid><Field label={uiText("名称")}><TextInput aria-label={uiText("公司显示名称")} value={values.workspaceName} disabled={settingsLocked} onChange={event => edit('workspaceName', event.target.value)} onBlur={() => saveField('workspaceName')} /></Field><Field label={uiText("默认币种")} hint={uiText("用于新建资料；客户与来源单据的币种优先")}><Select aria-label={uiText("默认币种")} disabled={settingsLocked} value={settings.companyProfile?.defaultCurrency||'USD'} options={[...new Set(['USD','EUR','CNY','GBP','HKD',settings.companyProfile?.defaultCurrency||'USD'])]} onChange={event=>saveCurrency(event.target.value)} /></Field>
             </FormGrid>

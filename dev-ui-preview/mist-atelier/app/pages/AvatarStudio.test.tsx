@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React,{act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
-import {afterEach,beforeEach,expect,it,vi} from 'vitest';
+import {afterEach,beforeAll,beforeEach,expect,it,vi} from 'vitest';
 import {getByRole,queryByRole} from '@testing-library/dom';
 import {Avatar,MistRoot,ToastProvider} from '../../../../components/mist';
 import {AVATAR_COLORS,defaultAvatarColor,defaultPersonAvatar,patternColorFromIdentity,personIdentity} from '../../../../lib/avatarIdentity';
@@ -12,7 +12,12 @@ vi.mock('../../../../services/authService',()=>({updateMyProfile:update}));
 vi.mock('../runtime/auth',()=>({useMistSession:()=>session,useOptionalMistSession:()=>session}));
 let root:Root,host:HTMLDivElement;
 const click=async(role:string,name:string)=>act(async()=>getByRole(document.body,role as any,{name,exact:true}).click());
-const settle=async(check:()=>void)=>vi.waitFor(async()=>{await act(async()=>{await new Promise(r=>setTimeout(r,15));});check();},{timeout:3000,interval:20});
+// Poll sequentially: each act() finishes before the next check, and none is left running after a failure
+// (vi.waitFor around act() leaked a pending act into the next test once it timed out).
+const settle=async(check:()=>void)=>{const deadline=Date.now()+3000;for(;;){await act(async()=>{await new Promise(r=>setTimeout(r,15));});try{check();return;}catch(failure){if(Date.now()>deadline)throw failure;}}};
+// The explorer and preset avatars load the DiceBear generator with a dynamic import. A cold import under a
+// loaded full run can take seconds; load it once here so per-test waits only cover rendering.
+beforeAll(async()=>{await Promise.all([import('../../../../lib/avatarPresets'),import('../../../../lib/avatarPerson')]);},30000);
 const open=async()=>{await act(async()=>root.render(<MistRoot><ToastProvider><AvatarSettingRow/></ToastProvider></MistRoot>));await click('button','编辑头像');};
 beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;update.mockReset();session.user.avatarUrl=null;host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();document.body.innerHTML='';vi.restoreAllMocks();vi.unstubAllGlobals();});

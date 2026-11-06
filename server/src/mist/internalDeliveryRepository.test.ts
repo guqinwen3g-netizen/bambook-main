@@ -9,6 +9,8 @@ import {MemoryMistDatabase,testActor,testAuthority} from './__tests__/support';
 import {MistPrivateFiles} from './files';
 import {MistRepository} from './repository';
 import {scopedWriteViolation} from '../shared/mistDataScope';
+import {agentGet,agentQuery} from './agentRead';
+import {runMistAssistant} from './assistant';
 vi.mock('./context',()=>({mistApprovalAuthority:async()=>({supplier:{}})}));
 let dir:string;beforeEach(async()=>{dir=await mkdtemp(path.join(tmpdir(),'internal-delivery-'));});afterEach(async()=>{await rm(dir,{recursive:true,force:true});});
 
@@ -31,9 +33,12 @@ it('requires receiving write authority and exact assignment without granting sou
  const repo=new MistRepository(roleDb,contract,new MistPrivateFiles(dir),auth.authorize,()=>new Date(f.context.now));
  const actor=(id:string)=>({...testActor(id),companyId:company,roles:[]});
  const send={requestId:'handover',expectedRevision:0,command:{type:'order.internal.send' as const,payload:{orderId:f.target.orderId,productionId:f.productionId,source:{kind:'receipt' as const,id:'finished-receipt'},quantity:10,receiverId:'warehouse',location:'Sample room',date:'2026-10-30',evidence:'Internal handover',expectedRevision:0}}};
+ // The receiver list offered to the sender uses the same rule as the send check.
+ expect((await repo.internalReceivers(actor('garment'),wid)).receivers.map(r=>r.id).sort()).toEqual(['garment','reviewer']);
  await expect(repo.execute(actor('garment'),wid,send)).rejects.toMatchObject({status:422});
  expect(db.workspaces.get(wid).state.internalDeliveries||[]).toEqual([]);
  auth.users.set('warehouse',{active:true,permissions:['orders:read','orders:write']});
+ expect((await repo.internalReceivers(actor('garment'),wid)).receivers.map(r=>r.id).sort()).toEqual(['garment','reviewer','warehouse']);
  receiverAttributes=[];await expect(repo.execute(actor('garment'),wid,send)).rejects.toMatchObject({status:422});receiverAttributes=['garment_business'];
  const saved=await repo.execute(actor('garment'),wid,send),id=saved.receipt.result.id;
  expect((await repo.execute(actor('garment'),wid,send)).receipt.result.id).toBe(id);
@@ -41,6 +46,14 @@ it('requires receiving write authority and exact assignment without granting sou
  expect(view.state.orders).toEqual([]);expect(view.state.fulfillment.purchases).toEqual([]);
  expect(view.state.internalDeliveries).toMatchObject([{id,receiverId:'warehouse',quantity:10}]);
  expect(JSON.stringify(view.state.internalDeliveries)).not.toMatch(/price|amount|currency/);
+ const agentView=await repo.getForAgent(actor('warehouse'),wid);
+ expect(agentQuery(agentView.workspace.state,agentView.actor,{type:'order'})).toMatchObject({results:[],total:0,truncated:false});
+ expect(()=>agentGet(agentView.workspace.state,agentView.actor,'order',f.target.orderId)).toThrow('不存在');
+ auth.users.get('warehouse')!.permissions.push('ai:chat');
+ const assistantView=await repo.getForAssistant(actor('warehouse'),wid),complete=vi.fn(async()=> 'Advice');
+ await expect(runMistAssistant({...assistantView,body:{message:'Source order',sourceIds:['orders:'+f.target.orderId]}},{providers:()=>[],subscription:()=>({connected:true,model:'test'}),complete})).rejects.toMatchObject({status:404,code:'SOURCE_NOT_FOUND'});
+ expect(complete).not.toHaveBeenCalled();
+ auth.users.get('warehouse')!.permissions=auth.users.get('warehouse')!.permissions.filter(p=>p!=='ai:chat');
  expect(view.state.tasks.some(t=>t.id==='internal-delivery:'+id)).toBe(true);
  const receive={requestId:'count',expectedRevision:1,command:{type:'order.internal.receive' as const,payload:{id,accepted:10,rejected:0,expectedRevision:0,evidence:'Counted by receiver'}}};
  auth.users.set('warehouse',{active:true,permissions:['orders:read']});

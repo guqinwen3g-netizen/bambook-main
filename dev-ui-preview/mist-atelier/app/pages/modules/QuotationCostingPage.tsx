@@ -24,8 +24,10 @@ import { FormFooter,
   TextInput,
   VerticalSteps,
 } from "../../../../../components/mist";
+import type { PlatformBom } from "../../../../../server/src/shared/mistPlatform";
 import {
   calculateQuoteCosting,
+  quoteCostTarget,
   quotationCostingTarget,
   QUOTE_COST_KINDS,
   type QuoteCostComponent,
@@ -51,6 +53,7 @@ import { downloadModuleCsv } from "./ModuleWorkbench";
 import { shortWhen } from "./pageKit";
 import { OptionInput } from '../OptionInput';
 import { CHARGE_UNITS, UNITS } from '../../runtime/tradeOptions';
+import { FailureNotice } from '../../runtime/FailureNotice';
 const kinds: Record<QuoteCostComponent["kind"], string> = {
   yarn: "纱线 / 原料",
   weaving: "织造",
@@ -76,6 +79,15 @@ const blankComponent = (): QuoteCostComponent => ({
   basis: "",
   outsideSupplierPrice: false,
 });
+/** A confirmed reference cost becomes cost lines (materials with loss, labour, overhead), each citing the reference code. */
+function referenceComponents(b: PlatformBom): QuoteCostComponent[] {
+  const cite = `参考成本 ${b.code}`;
+  return [
+    ...b.lines.map((l) => ({ ...blankComponent(), kind: "fabric" as const, description: l.description, quantity: String(l.quantity), unit: l.unit, lossPercent: String(l.wastagePercent), unitPrice: String(l.unitCost), basis: cite })),
+    ...(b.labor > 0 ? [{ ...blankComponent(), kind: "cmt" as const, description: "加工费", unitPrice: String(b.labor), unit: b.unit || "", basis: cite }] : []),
+    ...(b.overhead > 0 ? [{ ...blankComponent(), kind: "other" as const, description: "其他费用", unitPrice: String(b.overhead), unit: b.unit || "", basis: cite }] : []),
+  ];
+}
 function AllocationSummary({
   allocation,
   unit,
@@ -146,19 +158,19 @@ function Snapshot({ r }: { r: QuoteCostSnapshot }) {
             { label: "本次适用规格", value: r.input.sourceSpecification },
             {
               label: "币种 / 单位",
-              value: r.input.currency + " / " + r.input.unit,
+              value: r.input.currency + " / " + r.input.unit + (r.input.conversion ? ` → ${r.input.conversion.currency} / ${r.input.conversion.unit}（汇率 ${r.input.conversion.rate}，单位系数 ${r.input.conversion.unitFactor}；${r.input.conversion.basis}）` : ""),
             },
             {
               label: "单位参考成本",
-              value: r.result.cost + " " + r.input.currency,
+              value: r.result.cost + " " + quoteCostTarget(r.input).currency,
             },
             {
               label: "建议报价",
-              value: r.result.suggestedQuotePrice + " " + r.input.currency,
+              value: r.result.suggestedQuotePrice + " " + quoteCostTarget(r.input).currency,
             },
             {
               label: "人工拟报价",
-              value: r.input.proposedPrice + " " + r.input.currency,
+              value: r.input.proposedPrice + " " + quoteCostTarget(r.input).currency,
             },
             {
               label: "是否写入报价",
@@ -340,13 +352,22 @@ export function QuotationCostingPage() {
         i === index ? { ...r, ...patch } : r,
       ),
     }));
+  // ord26：成本币种或单位与报价行不同时，带上折算（汇率、单位换算与依据）后按报价币种与单位出结果。
+  const needsConversion = !!q && !!line && (input.currency.trim().toUpperCase() !== q.currency || input.unit.trim() !== line.unit);
+  const conv = input.conversion ?? { currency: q?.currency || "", unit: line?.unit || "", rate: "", unitFactor: "", basis: "" };
+  const patchConv = (patch: Partial<NonNullable<QuoteCostInput["conversion"]>>) => patch && setInput((x) => ({ ...x, conversion: { ...conv, ...x.conversion, ...patch, currency: q?.currency || "", unit: line?.unit || "" } }));
+  const effective: QuoteCostInput = needsConversion
+    ? { ...input, conversion: { ...conv, currency: q!.currency, unit: line!.unit, rate: input.currency.trim().toUpperCase() === q!.currency ? "1" : conv.rate, unitFactor: input.unit.trim() === line!.unit ? "1" : conv.unitFactor } }
+    : (({ conversion: _, ...rest }) => rest)(input);
   let calculation: ReturnType<typeof calculateQuoteCosting> | null = null,
     problem = "";
   try {
-    calculation = calculateQuoteCosting(input);
+    calculation = calculateQuoteCosting(effective);
   } catch (e) {
     problem = e instanceof Error ? e.message : "待补齐核算输入";
   }
+  // Confirmed reference costs that fit this exact line: same product or development version, or the line's unit and the quote currency.
+  const references = (w.state?.platform.boms || []).filter((b) => b.state === "Confirmed" && b.currency === input.currency && (!b.unit || b.unit === input.unit) && (b.productId ? b.productId === line?.productId : b.versionId ? b.versionId === line?.sourceVersionId : true));
   const back = () => go("quotations", q?.id || route.id, { detail: "full" });
   const begin = () => {
     if (!q || !line || disabled) return;
@@ -448,7 +469,7 @@ export function QuotationCostingPage() {
           title={uiText("报价核算历史")}
           eyebrow={<Mono>{q.code}</Mono>}
         />
-        <Banner title={uiText("历史只读")}>{uiText("新条目与新版本需重新核算，不能把旧单价、规格或策略自动沿用。")}</Banner>
+        <Banner variant="status" title={uiText("历史只读")}>{uiText("新条目与新版本需重新核算，不能把旧单价、规格或策略自动沿用。")}</Banner>
         {snapshots.length ? (
           <div className="mist-col">
             {[...snapshots].reverse().map((r) => (
@@ -465,26 +486,13 @@ export function QuotationCostingPage() {
       <MistPage>
         <PageHeader title={uiText("报价条目核算")} />
         {w.error && (
-          <Banner
-            tone="bad"
-            title={uiText("读取失败")}
-            actions={
-              <Button
-                onClick={() =>
+          <FailureNotice title={"读取失败"} detail={w.error} retry={() =>
                   void w.refresh().catch((e) => {
                     if (scope.isCurrent()) setFailure(e.message);
-                  })
-                }
-              >{uiText("重试读取")}</Button>
-            }
-          >
-            {w.error}
-          </Banner>
+                  })} retryLabel="重试读取" />
         )}
         {failure && (
-          <Banner tone="bad" title={uiText("重试未完成")}>
-            {failure}
-          </Banner>
+          <FailureNotice title={"重试未完成"} detail={failure} />
         )}
         <EmptyState
           title={uiText(w.loading ? "正在读取准确条目" : "未找到指定报价条目")}
@@ -505,8 +513,6 @@ export function QuotationCostingPage() {
         type={field === 'sourceDate' || field === 'sourceValidUntil' ? 'date' : 'text'}
         value={String(input[field])}
         disabled={disabled}
-        // 服务端要求成本币种、计价单位与本报价行一致，不换算，因此只读展示。
-        readOnly={field === 'currency' || field === 'unit'}
         onChange={(e) => patch(field, e.target.value)}
       />
     </Field>
@@ -524,26 +530,13 @@ export function QuotationCostingPage() {
         }
       />
       {w.error && (
-        <Banner
-          tone="bad"
-          title={uiText("读取失败")}
-          actions={
-            <Button
-              onClick={() =>
+        <FailureNotice title={"读取失败"} detail={w.error} retry={() =>
                 void w.refresh().catch((e) => {
                   if (scope.isCurrent()) setFailure(e.message);
-                })
-              }
-            >{uiText("重试读取")}</Button>
-          }
-        >
-          {w.error}
-        </Banner>
+                })} retryLabel="重试读取" />
       )}
       {failure && (
-        <Banner tone="bad" title={uiText("核算未完成")}>
-          {failure}
-        </Banner>
+        <FailureNotice title={"核算未完成"} detail={failure} />
       )}
       {w.pending && !w.saving && (
         <Banner
@@ -555,7 +548,7 @@ export function QuotationCostingPage() {
         >{uiText("核对原请求，不重新保存或写入报价。")}</Banner>
       )}
       {(!can || frozen) && (
-        <Banner title={uiText(can ? "本版本只读" : "没有报价写权限")}>{uiText("审批中、已发送或已转单的报价不能改核算；需要改价时从报价主线建立适用新版本。")}</Banner>
+        <Banner variant="status" title={uiText(can ? "本版本只读" : "没有报价写权限")}>{uiText("审批中、已发送或已转单的报价不能改核算；需要改价时从报价主线建立适用新版本。")}</Banner>
       )}
       {editing && can && !frozen ? (
         <div className="mist-wizard">
@@ -603,6 +596,23 @@ export function QuotationCostingPage() {
                     </Field>
                     {inputField("currency", "成本币种")}
                     {inputField("unit", "成本计价单位")}
+                    {needsConversion && q && line && (
+                      <>
+                        {input.currency.trim().toUpperCase() !== q.currency && (
+                          <Field label={ui`折算汇率（1 ${input.currency.trim().toUpperCase()} = ? ${q.currency}）`} required>
+                            <TextInput aria-label={uiText("折算汇率")} disabled={disabled} value={conv.rate} onChange={(e) => patchConv({ rate: e.target.value })} />
+                          </Field>
+                        )}
+                        {input.unit.trim() !== line.unit && (
+                          <Field label={ui`单位换算（1 ${line.unit} = ? ${input.unit.trim()}）`} required>
+                            <TextInput aria-label={uiText("单位换算系数")} disabled={disabled} value={conv.unitFactor} onChange={(e) => patchConv({ unitFactor: e.target.value })} />
+                          </Field>
+                        )}
+                        <Field label={uiText("折算依据")} required>
+                          <TextInput aria-label={uiText("折算依据")} disabled={disabled} value={conv.basis} onChange={(e) => patchConv({ basis: e.target.value })} />
+                        </Field>
+                      </>
+                    )}
                     {inputField("sourceSpecification", "适用规格")}
                     {inputField("sourceDate", "来源日期")}
                     {inputField("sourceValidUntil", "来源有效期", false)}
@@ -666,6 +676,17 @@ export function QuotationCostingPage() {
                       : "成本明细")
                   }
                   tools={
+                    <span className="mist-row">
+                    {input.mode === "breakdown" && references.length > 0 && (
+                      <Select
+                        aria-label={uiText("引用参考成本")}
+                        value=""
+                        disabled={disabled}
+                        placeholder={uiText("引用参考成本")}
+                        options={references.map((b) => ({ value: b.id, label: `${b.code} · ${b.description.slice(0, 30)} · ${b.total} ${b.currency}` }))}
+                        onChange={(e) => { const b = references.find((x) => x.id === e.target.value); if (b) patch("components", [...input.components, ...referenceComponents(b)]); }}
+                      />
+                    )}
                     <Button
                       disabled={disabled || input.components.length >= 100}
                       onClick={() =>
@@ -675,6 +696,7 @@ export function QuotationCostingPage() {
                         ])
                       }
                     >{uiText("增加成本项")}</Button>
+                    </span>
                   }
                 />
                 {input.components.some((r) => r.scope === "per_line") && (
@@ -893,25 +915,25 @@ export function QuotationCostingPage() {
                     items={[
                       {
                         label: "单位参考成本",
-                        value: calculation?.result.cost + " " + input.currency,
+                        value: calculation?.result.cost + " " + (q?.currency || input.currency),
                       },
                       {
                         label: "建议报价",
                         value:
                           calculation?.result.suggestedQuotePrice +
                           " " +
-                          input.currency,
+                          (q?.currency || input.currency),
                       },
                       {
                         label: "人工拟报价",
-                        value: input.proposedPrice + " " + input.currency,
+                        value: input.proposedPrice + " " + (q?.currency || input.currency),
                       },
                       {
                         label: "预计单位价差",
                         value:
                           calculation?.result.unitDifference +
                           " " +
-                          input.currency,
+                          (q?.currency || input.currency),
                       },
                       {
                         label: "拟报价毛利参考",
@@ -977,7 +999,7 @@ export function QuotationCostingPage() {
                     disabled={disabled}
                     onChange={setApplyPrice}
                   />
-                  <Banner tone="warn" title={uiText("待业务审批")} />
+                  <Banner variant="status" tone="warn" title={uiText("待业务审批")} />
                 </div>
               </>
             )}
@@ -995,7 +1017,7 @@ export function QuotationCostingPage() {
                     if (step === 0) {
                       try {
                         calculateQuoteCosting({
-                          ...input,
+                          ...effective,
                           targetPercent: "0",
                           strategyBasis: "仅校验成本来源，未记录策略",
                         });

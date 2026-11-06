@@ -1,7 +1,7 @@
 import {claimRecoveryReceiptUsedMinor} from './mistClaimRecoveryReceipts';
 import {rebateReceiptUsedMinor} from './mistExportRebate';
 import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
-import { MistCommandError, mistMoneyMinor, type MistState, type MistContext, type MistCommandResult } from './mistWorkspace';
+import { MistCommandError, isRecognizedMistInvoice, mistAllocationReceiptMinor, mistMoneyMinor, type MistState, type MistContext, type MistCommandResult } from './mistWorkspace';
 
 export type OrderFundingAssignment = {
   id:string; receiptId:string; customerId:string; orderId:string|null; amount:number; currency:string;
@@ -32,7 +32,8 @@ function receiptFundingUse(root:Root,receipt:Root['receipts'][number]){
   let development=0;
   for(const allocation of root.allocations.filter(a=>a.receiptId===receipt.id)){
    const invoice=root.invoices.find(i=>i.id===allocation.invoiceId);
-   if(invoice&&((invoice as {devId?:string}).devId||(invoice as {opening?:unknown}).opening)){if(invoice.currency!==receipt.currency||allocation.currency!==receipt.currency)fail('核销来源或币种不一致');development+=mistMoneyMinor(allocation.amount);continue;}
+   const crossCurrency=allocation.receiptAmount!==undefined&&allocation.receiptCurrency===receipt.currency;
+   if(invoice&&((invoice as {devId?:string}).devId||(invoice as {sampleRequestId?:string}).sampleRequestId||(invoice as {opening?:unknown}).opening||crossCurrency)){if(invoice.currency!==allocation.currency||!crossCurrency&&allocation.currency!==receipt.currency)fail('核销来源或币种不一致');development+=mistAllocationReceiptMinor(allocation);continue;}
    const order=root.orders.find(o=>o.id===invoice?.orderId);
    if(!invoice||!order||invoice.currency!==receipt.currency||allocation.currency!==receipt.currency)fail('核销来源或币种不一致');
    orderBucket(order.customerId,order.id).allocated+=mistMoneyMinor(allocation.amount);
@@ -44,14 +45,30 @@ function receiptFundingUse(root:Root,receipt:Root['receipts'][number]){
   }
   return {customers,reserved};
 }
+/**
+ * 订单可收款上限：合同金额；溢装 / 已批准超量出运按实际开出更高的销售发票时，以财务已确认的发票合计为准。
+ * 待确认、已驳回或已作废的 CI 不抬高上限（与核销口径 isRecognizedMistInvoice 一致）。except 用于预判作废 / 驳回某张发票之后的上限。
+ */
+function orderCollectibleMinor(root:Root,order:Root['orders'][number],except?:string){
+ return Math.max(mistMoneyMinor(order.amount),root.invoices.filter(i=>i.orderId===order.id&&i.id!==except&&i.currency===order.currency&&isRecognizedMistInvoice(i)).reduce((n,i)=>n+mistMoneyMinor(i.amount),0));
+}
+const moneyText=(minor:number,currency:string)=>(minor/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' '+currency;
 export function assertOrderFundingIntegrity(root:Root){
  for(const receipt of root.receipts){
   const {reserved}=receiptFundingUse(root,receipt);
-  if(reserved>mistMoneyMinor(receipt.amount)){const money=(n:number)=>(n/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' '+receipt.currency;fail(`此到账金额 ${money(mistMoneyMinor(receipt.amount))}，归属与核销合计将达 ${money(reserved)}，超出到账金额，不能重复计入；请核对本次金额或该到账已有的归属`,'PRECONDITION');}
+  if(reserved>mistMoneyMinor(receipt.amount)){const money=(n:number)=>moneyText(n,receipt.currency);fail(`此到账金额 ${money(mistMoneyMinor(receipt.amount))}，归属与核销合计将达 ${money(reserved)}，超出到账金额，不能重复计入；请核对本次金额或该到账已有的归属`,'PRECONDITION');}
  }
 
  for(const row of active(root))if(!root.receipts.some(r=>r.id===row.receiptId))fail('归属的到账来源不存在');
- for(const order of root.orders)if(mistMoneyMinor(orderFundingCoveredAmount(root,order.id))>mistMoneyMinor(order.amount))fail('订单已归属与核销金额超过合同金额，超额部分请登记为客户余额','PRECONDITION');
+ // 报错指明订单：残留的超额状态会卡住所有资金命令，必须能定位到具体订单。
+ for(const order of root.orders){const covered=mistMoneyMinor(orderFundingCoveredAmount(root,order.id)),contract=mistMoneyMinor(order.amount);if(covered<=contract)continue;const cap=orderCollectibleMinor(root,order);if(covered>cap)fail(`订单 ${order.code} 已归属与核销 ${moneyText(covered,order.currency)}，超过合同金额${cap>contract?'及已确认发票合计':''} ${moneyText(cap,order.currency)}，请先把超出的 ${moneyText(covered-cap,order.currency)} 改登为客户余额`,'PRECONDITION');}
+}
+/** 作废或驳回销售发票前调用：发票撤出后若本订单有效归属超过新的可收上限，须先释放或改登客户余额。 */
+export function assertOrderFundingAfterInvoiceRemoval(root:Root,invoiceId:string){
+ const invoice=root.invoices.find(i=>i.id===invoiceId),order=invoice?root.orders.find(o=>o.id===invoice.orderId):undefined;if(!order)return;
+ const before=orderCollectibleMinor(root,order),after=orderCollectibleMinor(root,order,invoiceId);if(after>=before)return;
+ const covered=mistMoneyMinor(orderFundingCoveredAmount(root,order.id));
+ if(covered>after)fail(`订单 ${order.code} 已归属与核销 ${moneyText(covered,order.currency)}，作废后可收上限 ${moneyText(after,order.currency)}，请先把超出的 ${moneyText(covered-after,order.currency)} 改登为客户余额`,'PRECONDITION');
 }
 /** Read-only headroom for the reconciliation picker. Earmarks and allocations overlap only within their existing customer/order buckets. */
 export function orderFundingReconciliationLimit(root:Root,receiptId:string,invoiceId:string):number{
@@ -60,14 +77,14 @@ export function orderFundingReconciliationLimit(root:Root,receiptId:string,invoi
  const {customers,reserved}=receiptFundingUse(root,receipt);
  const free=mistMoneyMinor(receipt.amount)-reserved;
  let allowed=free;
- if(!(invoice as {devId?:string;opening?:unknown}).devId&&!(invoice as {opening?:unknown}).opening){
+ if(!(invoice as {devId?:string;opening?:unknown}).devId&&!(invoice as {sampleRequestId?:string}).sampleRequestId&&!(invoice as {opening?:unknown}).opening){
   const order=root.orders.find(o=>o.id===invoice.orderId);if(!order)return 0;
   const customer=customers.get(order.customerId),bucket=customer?.orders.get(order.id);
   const assignedRoom=Math.max(0,(bucket?.assigned??0)-(bucket?.allocated??0));
   const buckets=[...(customer?.orders.values()??[])];
   const customerAssigned=buckets.reduce((n,b)=>n+b.assigned,0)+(customer?.unassigned??0);
   const customerUsed=buckets.reduce((n,b)=>n+Math.max(b.assigned,b.allocated),0);
-  allowed=Math.min(free+Math.max(0,customerAssigned-customerUsed)+assignedRoom,mistMoneyMinor(order.amount)-mistMoneyMinor(orderFundingCoveredAmount(root,order.id))+assignedRoom);
+  allowed=Math.min(free+Math.max(0,customerAssigned-customerUsed)+assignedRoom,orderCollectibleMinor(root,order)-mistMoneyMinor(orderFundingCoveredAmount(root,order.id))+assignedRoom);
  }
  return Math.max(0,Math.min(mistMoneyMinor(receipt.remaining),mistMoneyMinor(invoice.open),allowed))/100;
 }
@@ -131,6 +148,8 @@ export function applyOrderFundingCommand(root:Root,command:OrderFundingCommand,c
  const assignments=structuredClone(root.orderFunding?.assignments||[]);let row:OrderFundingAssignment;
  if(command.type==='funding.assign'){
   const p=command.payload,receipt=root.receipts.find(r=>r.id===p.receiptId);if(!receipt)fail('到账来源不存在','NOT_FOUND');
+  // 已勾稽到退税申报的国库到账：金额即退税到账额。不持计税依据时返回不带金额的通用错误，不能借超额提示取数。
+  if(!context.can?.('sensitive:tax_base')&&rebateReceiptUsedMinor(root,receipt!.id)>0)fail('该到账不能用于客户资金归属','PRECONDITION');
   if(!root.customers.some(c=>c.id===p.customerId))fail('归属客户不存在','NOT_FOUND');cents(p.amount);const note=text(p.note,'资金归属依据');
   const orderId=p.orderId||null,order=orderId?root.orders.find(o=>o.id===orderId):null;if(orderId&&(!order||order.customerId!==p.customerId||order.currency!==receipt!.currency))fail('请选择同客户同币种订单');
   const old=p.id?assignments.find(r=>r.id===p.id):undefined;if(p.id&&!old)fail('资金归属记录不存在','NOT_FOUND');if(old?.state==='released')fail('已释放的归属不能覆盖，请另建记录');if(old&&old.receiptId!==p.receiptId)fail('不能更换原到账来源');
@@ -141,4 +160,19 @@ export function applyOrderFundingCommand(root:Root,command:OrderFundingCommand,c
  const next={...root,orderFunding:{assignments}};assertOrderFundingIntegrity(next);root.orderFunding=next.orderFunding;
  root.events.unshift({id:context.id(),entityType:'orderFunding',entityId:row.id,actor:context.actorName,at:context.now,text:row.state==='released'?'释放资金归属：'+row.note:'登记资金归属：'+row.note,fileIds:[]});
  return{id:row.id,orderId:row.orderId??undefined};
+}
+
+/**
+ * Advance (预收) ledger: money earmarked to a customer or order that has not yet been applied to its invoices.
+ * remaining = earmarked − already allocated to that order's invoices from the same receipt. Read-only; applying goes through
+ * finance.reconcile (finance.advance.apply picks the order's oldest open invoices).
+ */
+export type AdvanceBalance = { assignmentId: string; receiptId: string; receiptCode: string; customerId: string; orderId: string | null; currency: string; earmarked: number; applied: number; remaining: number };
+export function advanceBalances(root: Root): AdvanceBalance[] {
+ return active(root).map(row => {
+  const receipt = root.receipts.find(r => r.id === row.receiptId);
+  const applied = row.orderId ? root.allocations.filter(a => a.receiptId === row.receiptId && root.invoices.some(i => i.id === a.invoiceId && i.orderId === row.orderId)).reduce((n, a) => n + mistAllocationReceiptMinor(a), 0) : 0;
+  const earmarked = mistMoneyMinor(row.amount);
+  return { assignmentId: row.id, receiptId: row.receiptId, receiptCode: receipt?.code || '', customerId: row.customerId, orderId: row.orderId, currency: row.currency, earmarked: earmarked / 100, applied: Math.min(applied, earmarked) / 100, remaining: Math.max(0, earmarked - applied) / 100 };
+ }).filter(b => b.remaining > 0);
 }

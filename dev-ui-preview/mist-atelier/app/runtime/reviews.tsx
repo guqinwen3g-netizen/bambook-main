@@ -10,13 +10,22 @@ import { useMistSession } from './auth';
 import { useMistWorkspace } from './workspace';
 import { useNav } from '../nav';
 
-export type MistReview = MistReviewTask & { workspaceId: string; workspaceName: string; revision: number; canDecide: boolean; files?: Array<{ id: string; name: string; size: number }> };
-export type MistReviewIntent = { workspaceId: string; reviewId: string; requestId: string; expectedRevision: number; decision: 'approved' | 'rejected'; note: string };
+export type MistReview = MistReviewTask & { signatureRequired?: boolean; workspaceId: string; workspaceName: string; revision: number; canDecide: boolean; files?: Array<{ id: string; name: string; size: number }>; signatureFileId?: string };
+/** 读取这次决定归档的签字（SVG，按图片显示，不作为 HTML 解析）。 */
+export async function reviewSignatureImage(row: MistReview, signal?: AbortSignal): Promise<string | null> {
+  if (!row.signatureFileId) return null;
+  const response = await fetch('/api/mist/reviews/' + encodeURIComponent(row.workspaceId) + '/' + encodeURIComponent(row.id) + '/files/' + encodeURIComponent(row.signatureFileId), { headers: apiService.getAuthHeaders(), credentials: 'include', signal });
+  if (!response.ok) return null;
+  const bytes = await response.arrayBuffer();
+  return URL.createObjectURL(new Blob([bytes], { type: 'image/svg+xml' }));
+}
+/** signature 随恢复记录保存：网络中断后按同一请求重发时，服务端幂等摘要须与原请求一致。 */
+export type MistReviewIntent = { workspaceId: string; reviewId: string; requestId: string; expectedRevision: number; decision: 'approved' | 'rejected'; note: string; signature?: { svg: string } };
 export type MistReviewQueue = {
   rows: MistReview[]; loaded: boolean; error: string; busy: boolean; intent: MistReviewIntent | null;
   refresh: () => Promise<void>; clearError: () => void;
   /** 保存一次审批决定；成功返回 true。失败时保留恢复记录（网络/服务端异常）或给出明确原因（4xx）。 */
-  decide: (row: MistReview, decision: 'approved' | 'rejected', note: string) => Promise<boolean>;
+  decide: (row: MistReview, decision: 'approved' | 'rejected', note: string, signature?: { svg: string }) => Promise<boolean>;
   recover: () => Promise<void>; download: (row: MistReview, file: { id: string; name: string }) => Promise<void>;
 };
 
@@ -63,7 +72,7 @@ export function MistReviewProvider({ children }: { children: React.ReactNode }) 
     if (locked.current || identity !== ref.current) return false; locked.current = true; setBusy(true); setError('');
     try {
       persist(next);
-      const result = await call('/' + encodeURIComponent(next.workspaceId) + '/' + encodeURIComponent(next.reviewId), { requestId: next.requestId, expectedRevision: next.expectedRevision, decision: next.decision, note: next.note });
+      const result = await call('/' + encodeURIComponent(next.workspaceId) + '/' + encodeURIComponent(next.reviewId), { requestId: next.requestId, expectedRevision: next.expectedRevision, decision: next.decision, note: next.note, ...(next.signature ? { signature: next.signature } : {}) });
       if (result.receipt?.requestId !== next.requestId) throw new Error('审批回执与原请求不符');
       if (identity !== ref.current) return false;
       persist(null); toast(next.decision === 'approved' ? '已批准，决定已保存' : '已退回，决定已保存'); await refresh(); await refreshCurrentWorkspace(next.workspaceId); return true;
@@ -72,9 +81,9 @@ export function MistReviewProvider({ children }: { children: React.ReactNode }) 
       return false;
     } finally { if (identity === ref.current) { locked.current = false; setBusy(false); } }
   };
-  const decide = (row: MistReview, decision: 'approved' | 'rejected', note: string) => {
+  const decide = (row: MistReview, decision: 'approved' | 'rejected', note: string, signature?: { svg: string }) => {
     if (intent) { setError('上一次审批结果待核对，请先核对原请求'); return Promise.resolve(false); }
-    return execute({ workspaceId: row.workspaceId, reviewId: row.id, requestId: crypto.randomUUID(), expectedRevision: row.revision, decision, note: note.trim() });
+    return execute({ workspaceId: row.workspaceId, reviewId: row.id, requestId: crypto.randomUUID(), expectedRevision: row.revision, decision, note: note.trim(), ...(signature ? { signature } : {}) });
   };
   const recover = async () => {
     if (!intent || locked.current) return; setBusy(true);

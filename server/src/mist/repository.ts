@@ -1,7 +1,8 @@
 import {mistBusinessInstant} from '../shared/mistBusinessClock';
-import { EMAIL_SERVER_COMMAND, emailAccountAccessible, emailBusinessOwner } from '../shared/mistEmail';
+import { EMAIL_SERVER_COMMAND, emailAccountAccessible, emailBusinessOwner, emailLinkTarget } from '../shared/mistEmail';
 import { emailAnalysisHash } from './mail/intelligence';
 import { createHash, randomUUID } from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import type { TokenPayload } from '../auth/service';
 import type { MistState, MistCommand, MistContext } from '../shared/mistWorkspace';
 import { freshMistAuthority, type FreshAuthority } from './authority';
@@ -9,37 +10,42 @@ import { fail, MistApiError } from './errors';
 import { mistApprovalAuthority } from './context';
 import type { MistReviewTask } from '../shared/mistReview';
 const REVIEW_COMMAND_BY_KIND = {
-  procurement:'fulfillment.procurement.decide',quotation:'market.quotation.decide',
+  procurement:'fulfillment.procurement.decide',procurementAmendment:'fulfillment.procurement.amend.decide',quotation:'market.quotation.decide',
   claim:'platform.claim.decide',order:'order.governance.decide',
   payment:'payable.request.decide',risk:'platform.risk.decide',
   productionIntake:'fulfillment.production.intake.decide',
+  qcConcession:'fulfillment.qc.concession.decide',
+  stockCount:'fulfillment.stock.count.decide',
 } as const satisfies Record<MistReviewTask['kind'],MistCommand['type']>;
 const REVIEW_KIND_BY_COMMAND = new Map<string,MistReviewTask['kind']>(Object.entries(REVIEW_COMMAND_BY_KIND).map(([kind,type])=>[type,kind as MistReviewTask['kind']]));
 import { hasScope } from '../auth/permissionService';
-import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projectState, canReadFile, canReadTarget, type MistWorkspaceAccess, type MistMemberLog } from './access';
+import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projectState, canReadFile, canReadTarget, canHandleTask, isTaxBaseCommand, maskTaxBaseText, type MistWorkspaceAccess, type MistMemberLog } from './access';
 import { payablesCommandPermissions, financialDisposalViews } from '../shared/mistPayables';
+import { marketCommandExtraPermissions } from '../shared/mistMarket';
+import { exportRebateExtraPermissions } from '../shared/mistExportRebate';
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyRoster, canMaintainCompany, companyDataScope, companyTeamIds, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
 import { isAgentActor, type AgentActor } from './agentDelegation';
 import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, assertTaskLease, assertTaskAuthority, assertTaskViewAuthority, acknowledgePlatformStep, advanceTaskSources, answerTaskQuestion, askTaskQuestion, changeTask, checkpointTask, claimTask, deferPlatformJob, duePlatformTasks, createTask, finishTask, finishTaskSession, heartbeatTask, issueTaskControl, listTasks, readTaskRecord, reserveTaskStep, resolveTaskControl, resolveTaskCredential, releasePlatformTask, savePlatformPlan, saveTaskSources, settleTaskProposal, taskHistory, taskRecord, taskView, waitTaskForProposal, type MakeTaskCredential, type MakeTaskControl, type TaskRecord, type PlatformTaskJob } from './agentTasks';
 import { collectTaskSources, knownCommandSourcesVisible, taskScopeHash, taskSourcesVisible } from './agentTaskVisibility';
 import {taskNotice,taskNoticeCandidates} from './agentTaskAttention';
-import {markTaskNoticeRead,waitTaskUntil} from './agentTasks';
+import {markTaskNoticeRead,waitTaskUntil,platformTaskUsage} from './agentTasks';
 import {assertTaskBusinessRead,checkTaskCondition,type PlatformTaskScanCursor} from './agentTasks';
 import {prepareTaskCondition,taskConditionChanged} from './agentTaskConditions';
 import type {PlatformTaskContext,PlatformTaskPlan} from './platformTaskPlan';
 import {assertConnection,listConnections,getConnection,createConnection,changeConnection,type MakeAgentLease} from './agentConnections';
-import {assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceActorFromIdentity,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
+import {ensurePersonalIdentity,assertPersonalVoiceAvailable,assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceActorFromIdentity,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
 import { assertReceivingLease, receivingRecord, receivingView, setReceiving, claimReceiving, finishReceiving, blockReceiving, invalidateReceiving, dueReceiving, RECEIVE_LEASE_MS, RECEIVE_INTERVAL_MS, type MailSyncActor, type MailSyncLease, type ReceivingJob, receiveSource } from './mail/receiverRegistry';
 import { enqueueMailState, taskHasPendingMail, mailStateViews, pendingMailFields, dueMailState, readMailState, claimMailState, planMailState, rememberMailState, failMailState, completeMailState, type MailStateRecord, type MailStateAttempt } from './mail/stateQueue';
 import type { MailStateObservation } from '../shared/mistMailState';
 import { AGENT_AUDIT_FIELD, AGENT_AUDIT_HASH, AGENT_AUDIT_PREFIX, agentAuditReceiptId, createAgentCommandAudit, publicCommandReceiptResult } from './agentAudit';
 import { auditFromReceipt, auditMatchesParent, auditEntry, projectAgentAudit, readableCommand } from './agentAuditRead';
-import { markAgentProposalConfirmed } from '../shared/mistAgentProposals';
+import { markAgentProposalConfirmed, agentCommandRisk, AI_WRITE_SCOPES, AGENT_RISK_LABEL } from '../shared/mistAgentProposals';
 import { canGenerateScopedStatement, scopedMaterialIssueTargets, scopedFabricAccess, scopedReferenceViolation, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
 import { buildTeamScopeGraph, resolveTeamScope, normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
-import { buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
+import { accountOwnedObjects, buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
 import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../auth/tokenHelpers';
+import { createLoginRateLimiter, type LoginRateLimiter } from '../auth/loginRateLimiter';
 import { primaryImageIds } from '../shared/mistPrimaryImage';
 import { MistPrivateFiles, validateFileInput, type MistFileInput, type MistStoredFile } from './files';
 import type { ImagePreviewMode } from './imagePreview';
@@ -50,6 +56,10 @@ import { buildPurchaseDocument, bindPurchaseDocument } from './purchasePrint';
 import { preparePurchaseDocumentSnapshot } from '../shared/mistPurchaseDocument';
 import { bindDevelopmentNotice, buildDevelopmentNotice, prepareDevelopmentNoticeSnapshot } from './developmentNoticePrint';
 import { bindCustomerStatement, buildCustomerStatement, prepareCustomerStatementSnapshot } from './customerStatementPrint';
+import { bindGeneratedDocument, buildGeneratedDocument } from './generatedDocumentPrint';
+import { GENERATING_COMMANDS, prepareGeneratedSnapshot } from '../shared/mistDocumentGeneration';
+import { mistCommandRequiresSignature, normalizeSignatureSvg, signatureEntityId, type MistDecisionSignature } from '../shared/mistSignatures';
+import { prepareSeal, requestsSeal, sealFileIds, SEAL_COMMANDS, SEAL_IMAGE_MIME_TYPES, withoutSeal, type MistSealStamp } from '../shared/mistSeals';
 import type { PdfRenderResult } from '../templates/pdf';
 import { canonicalCreditDocument, creditDocumentFingerprint, creditSourceFingerprint, type MistBusinessNumberNeed, type MistCreditPrintSnapshot } from '../shared/mistCreditDocuments';
 /** 演示公司里指派给演示成员（demo-*）的审批无人能处理，不阻止移入回收站。 */
@@ -65,7 +75,35 @@ export type MistContract = {
   getRequiredBusinessNumberPlan?: (state: MistState, command: MistCommand) => MistBusinessNumberNeed[];
 };
 export type MistWorkspaceRow = { id: string; ownerId: string; companyId?: string | null; slug: string; name: string; revision: number; state: MistState; createdAt: Date; updatedAt: Date };
-export type MistCommandRequest = { requestId: string; expectedRevision: number; command: MistCommand };
+/** reauth 只用于确认高风险 Agent 提议时复验本人登录密码；不参与请求摘要，也不写入回执或操作记录。 */
+/** signature：合同、资金类批准的当场手写签字（签字板 SVG），参与请求摘要并随决定归档（见 mistSignatures）。 */
+export type MistCommandRequest = { requestId: string; expectedRevision: number; command: MistCommand; reauth?: { password: string }; signature?: { svg: string } };
+/**
+ * 校验本次请求附带的签字：不需要签字的命令不得附带，Agent 永远不能签字。返回归档用的规范化 SVG。
+ * 缺少签字在命令通过权限与业务门禁之后才拒绝（requireSignature），无权办理的人先看到真实原因。
+ */
+function decisionSignature(prior: TokenPayload, command: { type: string; payload?: any }, signature: unknown): string | undefined {
+  if (signature !== undefined && isAgentActor(prior)) fail('FORBIDDEN', 'Agent 不能签字，须本人当场手写签字', 403);
+  if (signature === undefined || signature === null) return undefined;
+  if (!mistCommandRequiresSignature(command)) fail('INVALID_INPUT', '该操作不需要签字', 422);
+  if (!plainRecord(signature) || Object.keys(signature).some(key => key !== 'svg')) fail('VALIDATION', '签字无效，请重新签字', 422);
+  return normalizeSignatureSvg((signature as { svg?: unknown }).svg);
+}
+const requireSignature = (command: { type: string; payload?: any } | undefined, signatureSvg?: string) => { if (command && mistCommandRequiresSignature(command) && !signatureSvg) fail('SIGNATURE_REQUIRED', '请先手写签字', 422); };
+const signatureFileName = (requestId: string) => `签字-${requestId.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 80)}.svg`;
+/** 复验本人当前登录密码；账号没有密码时返回 false。 */
+export type MistPasswordVerifier = (db: any, userId: string, password: string) => Promise<boolean>;
+export const verifyAccountPassword: MistPasswordVerifier = async (db, userId, password) => {
+  const user = await db.userAccount?.findUnique?.({ where: { id: userId }, select: { passwordHash: true, status: true, deletedAt: true } });
+  if (!user?.passwordHash || user.status !== 'active' || user.deletedAt) return false;
+  return bcrypt.compare(password, user.passwordHash);
+};
+/**
+ * 高风险提议的密码复验限流：与登录同一套滑动窗口（默认 15 分钟 5 次失败即锁定），键为 `reauth|<userId>`。
+ * 计数在本进程内存中；多个后端进程各自计数。窗口与次数可用 BAMBOOK_REAUTH_RATE_LIMIT_WINDOW_MS / _MAX_FAILURES 调整（同登录限流的开关做法），不提供关闭开关。
+ */
+export const createReauthRateLimiter = () => createLoginRateLimiter({ windowMs: Number(process.env.BAMBOOK_REAUTH_RATE_LIMIT_WINDOW_MS) || undefined, maxFailures: Number(process.env.BAMBOOK_REAUTH_RATE_LIMIT_MAX_FAILURES) || undefined });
+type ReauthGrant = { proposalId: string; command: string };
 export type MistUploadRequest = { requestId: string; expectedRevision: number; claimId?: string };
 const MIST_UPLOAD_SCOPES = ['products:write', 'orders:write', 'procurement:write', 'shipments:write', 'customs:write', 'invoices:write', 'vouchers:write', 'qc:fabric_chain:write', 'qc:garment_chain:write', 'relations:write', 'aftersales:write'] as const;
 function canonical(value: any, depth = 0): string {
@@ -167,7 +205,7 @@ const candidateIds=(row:MistWorkspaceRow)=>companyRow(row)?memberIds(row.state):
 const WRITE_QUEUES = new WeakMap<object, Map<string, Promise<void>>>();
 /** 预演结束时用来整笔回滚的信号（不是错误）。 */
 class MistPreviewOutcome extends Error { constructor(readonly preview: { revision: number; result: unknown; events: string[]; changes: unknown }) { super('preview'); } }
-const PREVIEW_UNSUPPORTED = new Set(['platform.credit.issue', 'fulfillment.procurement.document', 'market.quotation.document', 'development.notice.generate', 'finance.statement.generate']);
+const PREVIEW_UNSUPPORTED = new Set(['platform.credit.issue', 'fulfillment.procurement.document', 'market.quotation.document', 'development.notice.generate', 'finance.statement.generate', ...GENERATING_COMMANDS]);
 
 export class MistRepository {
   private platformRuntimeAvailable:()=>boolean=()=>false;
@@ -209,7 +247,7 @@ export class MistRepository {
   async releasePlatformTask(prior:AgentActor,issue?:'model_unavailable'|'model_response_invalid'){return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,prior.agentTaskLease!.workspaceId);return releasePlatformTask(db,{...prior,...actor},prior.agentTaskLease!,issue,Date.now());});}
   private mailStateWake?: () => void;
   setMailStateWake(wake: () => void) { this.mailStateWake = wake; }
-  constructor(private readonly prisma: any, private readonly contract: MistContract, private readonly files: MistPrivateFiles, private readonly authorize: FreshAuthority = freshMistAuthority, private readonly now = () => new Date(), private readonly creditArchiveBuilder: (snapshot: MistCreditPrintSnapshot, options?: {draft?: boolean}) => Promise<PreparedCreditIssueArchive> = buildIssueArchive, private readonly quotationPdfRenderer?: (html: string) => Promise<PdfRenderResult>) {}
+  constructor(private readonly prisma: any, private readonly contract: MistContract, private readonly files: MistPrivateFiles, private readonly authorize: FreshAuthority = freshMistAuthority, private readonly now = () => new Date(), private readonly creditArchiveBuilder: (snapshot: MistCreditPrintSnapshot, options?: {draft?: boolean}) => Promise<PreparedCreditIssueArchive> = buildIssueArchive, private readonly quotationPdfRenderer?: (html: string) => Promise<PdfRenderResult>, private readonly verifyPassword: MistPasswordVerifier = verifyAccountPassword, private reauthLimiter?: LoginRateLimiter) {}
   private context(actor: TokenPayload, state?: MistState): MistContext { const auditNow=this.now().toISOString();return { id: randomUUID, now: mistBusinessInstant(state,auditNow), auditNow, actorName: actor.displayName || actor.userId, actorId:actor.userId, can: scope => hasScope(actor, scope as any) }; }
   /** 普通附件上传：只落私有文件、不改业务记录；持有任一业务写入权限即可（后勤的 CI/PL、财务的水单、质检的报告都要先上传再关联）。关联到哪条记录仍由各自业务命令按权限校验。 */
   private async uploadPermission(db: any, prior: TokenPayload) {
@@ -219,8 +257,12 @@ export class MistRepository {
   private async authorizeCompoundCommand(db: any, prior: TokenPayload, command?: MistCommand) {
     if (command?.type === 'email.server.analysis') await this.authorize(db, prior, 'ai:chat');
     if (command?.type === 'email.server.analysis' || command?.type.startsWith('email.extraction.')) await this.authorize(db, prior, 'emails:read');
-    if(command?.type==='fulfillment.inventory.quarantine.noRecovery'||command?.type==='fulfillment.inventory.quarantine.noRecovery.revoke')await this.authorize(db,prior,'inventory:read');
+    if(command?.type==='fulfillment.inventory.quarantine.recovery'||command?.type==='fulfillment.inventory.quarantine.recovery.revoke'||command?.type==='fulfillment.inventory.quarantine.noRecovery'||command?.type==='fulfillment.inventory.quarantine.noRecovery.revoke')await this.authorize(db,prior,'inventory:read');
     if (command?.type.startsWith('payable.')) for (const scope of payablesCommandPermissions(command as any).slice(1)) await this.authorize(db, prior, scope);
+    if (command?.type.startsWith('market.')) for (const scope of marketCommandExtraPermissions(command)) await this.authorize(db, prior, scope);
+    if (command?.type.startsWith('rebate.')) for (const scope of exportRebateExtraPermissions(command)) {
+      try { await this.authorize(db, prior, scope); } catch (error) { if (error instanceof MistApiError && error.status === 403) fail('FORBIDDEN', '退税申报、核准与到账勾稽需要「计税依据查看」权限', 403); throw error; }
+    }
   }
   /** 公司库：当前公司在职成员即可进入（R2），ownerOnly 的动作（回收站、成员授权）一律不适用。非公司（本机）空间：所有者或被明确授权的成员可进入，ownerOnly 只限所有者。 */
   private async own(db: any, prior: TokenPayload, id: string, permission?: string | null, lock = false, allowArchived = false, ownerOnly = false, captureAuditBefore = false): Promise<{ actor: TokenPayload; row: MistWorkspaceRow }> {
@@ -417,6 +459,21 @@ export class MistRepository {
   async issueAgentServiceKey(prior:TokenPayload,workspaceId:string,id:string,input:Record<string,unknown>,make:MakeServiceCredential,now=Date.now()){if(isAgentActor(prior))fail('FORBIDDEN','Agent不能启用长期凭据',403);return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,workspaceId,'ai:chat');return issueServiceKey(db,actor,workspaceId,id,input,make,now);});}
   async revokeAgentServiceKey(prior:TokenPayload,workspaceId:string,id:string,input:Record<string,unknown>,now=Date.now()){if(isAgentActor(prior))fail('FORBIDDEN','Agent不能管理长期凭据',403);return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId);return revokeServiceKey(db,this.identityManager(actor,row),workspaceId,id,input,now);});}
   async resolveAgentServiceKey(token:unknown){return this.transact(db=>resolveServiceCredential(db,token));}
+  /** 第二类个人 Agent：本人开通（或续期）并直接安排平台执行任务。 */
+  async ensurePersonalAgent(prior:TokenPayload,workspaceId:string,make:MakeServiceCredential,now=Date.now()){if(isAgentActor(prior))fail('FORBIDDEN','个人 Agent 须由本人开通',403);return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,'ai:chat');return ensurePersonalIdentity(db,actor,workspaceId,make,now,row.companyId??undefined);});}
+  /** Speech heartbeats recheck current identity/company without loading the business JSON. */
+  async authorizePersonalAgentVoice(prior:TokenPayload,workspaceId:string){if(isAgentActor(prior))fail('FORBIDDEN','语音只供本人使用',403);await this.transact(async db=>{const actor=await this.taskAccess(db,prior,workspaceId,'ai:chat');await assertPersonalVoiceAvailable(db,actor,workspaceId);});}
+  async assignPersonalAgentTask(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>,make:MakeServiceCredential){
+    if(isAgentActor(prior))fail('FORBIDDEN','任务须由本人安排',403);
+    if(Object.keys(input).some(k=>!['requestId','name','instructions','locale'].includes(k)))fail('INVALID_INPUT','任务字段无效',400);
+    const identity=await this.ensurePersonalAgent(prior,workspaceId,make);
+    return this.createAgentTask(prior,workspaceId,{requestId:input.requestId,identityId:identity.id,name:input.name,instructions:input.instructions,executor:'platform',...(input.locale!==undefined?{locale:input.locale}:{})});
+  }
+  /** 个人 Agent 用量：本人看自己的；公司管理员（users:write）看全公司。 */
+  async personalAgentUsage(prior:TokenPayload,workspaceId:string,month:unknown){
+    if(typeof month!=='string'||!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))fail('INVALID_INPUT','月份格式为 YYYY-MM',400);
+    return this.transact(async db=>{const{actor}=await this.own(db,prior,workspaceId);const all=!isAgentActor(prior)&&serviceCanManage(actor);return{month,scope:all?'company':'mine',items:await platformTaskUsage(db,workspaceId,month as string,all?undefined:actor.userId)};});
+  }
   /** Heartbeat/control traffic reads company metadata, never the shared business JSON. */
   private async taskAccess(db:any,prior:TokenPayload,workspaceId:string,permission?:string){
     if(isAgentActor(prior)&&prior.agentWorkspaceId!==workspaceId)fail('NOT_FOUND','公司不存在或无权访问',404);
@@ -538,7 +595,10 @@ export class MistRepository {
     const name = identifier(input.name, '公司名称'), slug = defaultOnly ? 'default' : identifier(input.slug || randomUUID(), '公司标识');
     if (input.seed !== undefined && !['demo', 'empty'].includes(input.seed)) fail('INVALID_INPUT', '公司初始方式无效', 400);
     // 正式账号首次进入的默认公司一律空白，示例数据只在本机演示模式或显式新建演示公司时出现。
-    const seed = defaultOnly && !localMode(prior) ? 'empty' : input.seed ?? 'demo', requestId = `create:${slug}`;
+    // 生产服务器上任何账号都不生成演示种子：显式请求拒绝，缺省一律空白。
+    const demoAllowed = process.env.NODE_ENV !== 'production';
+    if (!demoAllowed && !defaultOnly && input.seed === 'demo' && !companyLibrary(prior)) fail('DEMO_SEED_DISABLED', '正式环境不提供演示公司', 403);
+    const seed = !demoAllowed || (defaultOnly && !localMode(prior)) ? 'empty' : input.seed ?? 'demo', requestId = `create:${slug}`;
     const inputHash = createHash('sha256').update(canonical({ type: 'workspace.create', actorId: prior.userId, name, seed })).digest('hex');
     const create = () => this.transact(async db => {
       const actor = await this.authorize(db, prior);
@@ -679,9 +739,35 @@ export class MistRepository {
       const proposal = workspace.state.agentProposals?.find((p: { id: string; state: string }) => p.id === id && p.state === 'pending');
       if (!proposal) fail('NOT_FOUND', '提议不存在、已处理或不属于当前账号', 404);
       if(proposal!.unavailable||proposal!.taskBlocked)fail(proposal!.taskId?'AGENT_TASK_SCOPE_CHANGED':'AGENT_PROPOSAL_UNAVAILABLE',proposal!.taskBlocked||'提议来源已不可见',409);
-      return this.executeInternal(prior, workspaceId, { ...input, command: proposal!.command }, { command: input.command }, undefined, false, id);
+      // 印章只能由本人直接管理和使用，不经 Agent 提议；需要签字的提议须附确认人本人当场手写的签字。
+      if(SEAL_COMMANDS.includes(proposal!.command.type)||requestsSeal(proposal!.command))fail('FORBIDDEN','印章须由本人在系统中操作，不能经 Agent 提议',403);
+      const proposalSignature = decisionSignature(prior, proposal!.command, input.signature);
+      // 高风险：在取工作区行锁之前复验密码（bcrypt 不占用锁）；复验只对这一条提议的这一份命令有效，锁内按最新状态再核。
+      const grant = agentCommandRisk(proposal!.command.type) === 'high' ? await this.reauthenticate(prior, workspaceId, id, proposal!.command, input.reauth) : undefined;
+      return this.executeInternal(prior, workspaceId, { ...input, command: proposal!.command }, { command: input.command, ...(proposalSignature ? { signature: proposalSignature } : {}) }, undefined, false, id, grant, proposalSignature);
     }
-    return this.executeInternal(prior, workspaceId, input, { command: input.command });
+    const signature = decisionSignature(prior, input.command, input.signature);
+    return this.executeInternal(prior, workspaceId, input, { command: input.command, ...(signature ? { signature } : {}) }, undefined, false, '', undefined, signature);
+  }
+  private async authorizeAiWrite(db: any, prior: TokenPayload, risk: ReturnType<typeof agentCommandRisk>) {
+    try { await this.authorize(db, prior, AI_WRITE_SCOPES[risk]); } catch (error) { if (error instanceof MistApiError && error.status === 403) fail('FORBIDDEN', `确认${AGENT_RISK_LABEL[risk]}的 AI 提议需要「${AI_WRITE_SCOPES[risk]}」权限`, 403); throw error; }
+  }
+  /**
+   * 高风险提议的本人密码复验（锁外执行）。先核 ai:write:high，再查限流：锁定期间不做密码比对，直接返回 403 REAUTH_LOCKED（确定拒绝，提示几分钟后再试）。
+   * 失败计数，成功清零。返回的凭证只绑定本提议编号与命令内容。
+   */
+  private async reauthenticate(prior: TokenPayload, workspaceId: string, proposalId: string, command: unknown, reauth?: { password: string }): Promise<ReauthGrant> {
+    // 不加锁读取：先核原命令业务权限与 ai:write:high，缺权限的人不进入密码比对。
+    const actor = await this.transact(async db => { const { actor } = await this.own(db, prior, workspaceId, this.contract.mistCommandPermission(command as MistCommand)); await this.authorizeCompoundCommand(db, prior, command as MistCommand); await this.authorizeAiWrite(db, prior, 'high'); return actor; });
+    const password = reauth?.password;
+    if (typeof password !== 'string' || !password) fail('REAUTH_REQUIRED', '确认高风险 AI 提议须输入本人当前登录密码', 403);
+    const limiter = this.reauthLimiter ??= createReauthRateLimiter(), key = `reauth|${actor.userId}`;
+    const verdict = limiter.check(key);
+    // 403 而非 429：这是确定的拒绝（未执行），前端据此清掉待核对记录；429 在前端表示结果未知。
+    if (verdict.blocked) fail('REAUTH_LOCKED', `密码错误次数过多，请 ${Math.max(1, Math.ceil(verdict.retryAfterMs / 60000))} 分钟后再试`, 403);
+    if (password!.length > 256 || !await this.verifyPassword(this.prisma, actor.userId, password!)) { limiter.recordFailure(key); fail('REAUTH_FAILED', '登录密码不正确，提议未执行', 403); }
+    limiter.reset(key);
+    return { proposalId, command: canonical(command) };
   }
   /**
    * 预演：与 execute 走同一事务、同一套账号 / 成员 / 权限 / 范围 / 业务门禁，应用命令后整笔回滚，不留状态、回执或编号。
@@ -690,13 +776,15 @@ export class MistRepository {
   async preview(prior: TokenPayload, workspaceId: string, input: MistCommandRequest) {
     if (!input.command || typeof input.command.type !== 'string' || !input.command.payload || typeof input.command.payload !== 'object' || Array.isArray(input.command.payload)) fail('INVALID_COMMAND', '业务命令格式无效', 400);
     if (input.command.type === 'files.add' || EMAIL_SERVER_COMMAND.test(input.command.type)) fail('INVALID_COMMAND', '该命令只能由服务端写入', 400);
-    if (PREVIEW_UNSUPPORTED.has(input.command.type)) fail('PREVIEW_UNSUPPORTED', '该命令会生成正式文件，不支持预演', 400);
+    if (PREVIEW_UNSUPPORTED.has(input.command.type) || requestsSeal(input.command)) fail('PREVIEW_UNSUPPORTED', '该命令会生成正式文件，不支持预演', 400);
     try { await this.executeInternal(prior, workspaceId, input, { command: input.command }, undefined, true); }
     catch (error) { if (error instanceof MistPreviewOutcome) return error.preview; throw error; }
     fail('PREVIEW_UNSUPPORTED', '预演未完成', 500);
   }
-  private async executeInternal(prior: TokenPayload, workspaceId: string, input: Omit<MistCommandRequest, 'command'> & { command?: any; claimId?: string }, hashPayload: any, upload?: MistFileInput, dryRun = false, confirmProposalId = '') {
+  private async executeInternal(prior: TokenPayload, workspaceId: string, input: Omit<MistCommandRequest, 'command'> & { command?: any; claimId?: string }, hashPayload: any, upload?: MistFileInput, dryRun = false, confirmProposalId = '', reauthGrant?: ReauthGrant, signatureSvg?: string) {
     if(isAgentActor(prior)&&prior.agentTaskLease&&!prior.agentTaskOperation)fail('FORBIDDEN','任务业务请求缺少操作编号',403);
+    if (signatureSvg && (dryRun || !input.command || !mistCommandRequiresSignature(input.command))) fail('INVALID_INPUT', '该操作不需要签字', 422);
+    if (input.command && requestsSeal(input.command) && isAgentActor(prior)) fail('FORBIDDEN', 'Agent 不能使用印章', 403);
     if (isAgentActor(prior)) identifier(prior.agentSessionId, 'Agent会话编号');
     requestIdentifier(input.requestId); revision(input.expectedRevision);
     const hash = createHash('sha256').update(canonical({ actorId: prior.userId, expectedRevision: input.expectedRevision, ...hashPayload })).digest('hex');
@@ -717,6 +805,7 @@ export class MistRepository {
           if (!expected || emailAnalysisHash(message!) !== expected) fail('CONFLICT', '邮件原文已变化，请重新整理', 409);
         }
         if (permission === null && !MEMBER_PERSONAL_COMMANDS.includes(input.command?.type) && !(companyRow(row) ? canMaintainCompany(actor) : isOwner(row, actor))) fail('FORBIDDEN', companyRow(row) ? '公司设置只能由公司管理员修改' : '公司设置只能由所有者修改', 403);
+        if (SEAL_COMMANDS.includes(input.command?.type) && (isAgentActor(prior) || !(companyRow(row) ? canMaintainCompany(actor) : isOwner(row, actor)))) fail('FORBIDDEN', companyRow(row) ? '印章只能由公司管理员维护' : '印章只能由所有者维护', 403);
         const previous = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: input.requestId } } });
         if (previous) {
           if (previous.actorId !== actor.userId || previous.inputHash !== hash || previous.expectedRevision !== input.expectedRevision) fail('REQUEST_CONFLICT', '此请求编号已用于另一项操作', 409);
@@ -729,6 +818,16 @@ export class MistRepository {
         }
         if(isAgentActor(prior)&&prior.agentTaskLease&&input.command?.type==='agent.proposal.create'&&await taskHasPendingMail(db,workspaceId,prior.agentTaskLease.taskId))fail('PRECONDITION','请先核对待同步的邮箱操作',422);
         const humanTaskProposal=confirmProposalId?row.state.agentProposals?.find(p=>p.id===confirmProposalId):undefined;
+        // AI 写入三级确认：确认人须持有该命令风险等级对应的 ai:write:* 码（等级按 agentCommandRisk 规则，未登记的普通写入为中）；高风险的密码复验已在取锁前完成（reauthenticate），
+        // 这里按锁内最新提议与将执行的命令再判风险：任一为高时，复验凭证必须属于同一提议、同一份命令，否则拒绝。
+        // 原命令本身的业务权限已在上面按原命令重新校验，不能借 AI 越权。
+        if(confirmProposalId){
+          const locked=row.state.agentProposals?.find(p=>p.id===confirmProposalId)?.command;
+          const high=agentCommandRisk(input.command?.type)==='high'||(!!locked&&agentCommandRisk(locked.type)==='high');
+          const risk=high?'high':agentCommandRisk(input.command?.type);
+          await this.authorizeAiWrite(db,prior,risk);
+          if(high&&(!reauthGrant||reauthGrant.proposalId!==confirmProposalId||reauthGrant.command!==canonical(input.command)||(!!locked&&reauthGrant.command!==canonical(locked))))fail('REAUTH_REQUIRED','确认高风险 AI 提议须输入本人当前登录密码',403);
+        }
         if(humanTaskProposal&&!humanTaskProposal.taskId){const visible=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;if(!this.proposalReadable(row,actor,humanTaskProposal.command)||!knownCommandSourcesVisible(row.state,visible)(humanTaskProposal.command))fail('FORBIDDEN','提议来源已不可见，请拒绝后重新核对',403);}
         if(humanTaskProposal?.taskId){this.assertTaskSources(row,actor,(await taskRecord(db,workspaceId,humanTaskProposal.taskId)).value);await assertHumanTaskProposal(db,actor,workspaceId,humanTaskProposal.taskId,humanTaskProposal.id,Date.now());}
         // 版本落后时只在能证明安全时把本命令重新应用到最新状态；否则照旧明确拒绝。
@@ -750,6 +849,22 @@ export class MistRepository {
           if (customer && !earlyScope.userIds.includes(customer.ownerId)) fail('NOT_FOUND', '客户不在当前可交接范围内', 404);
         }
         if (input.command) {
+          const mailCommand = input.command;
+          const mailLinks = mailCommand.type === 'email.link' || mailCommand.type === 'email.submitExtraction' || mailCommand.type === 'email.bulk' && mailCommand.payload.action === 'link' ? [mailCommand.payload.link]
+            : mailCommand.type === 'email.draft.save' || mailCommand.type === 'email.server.send.begin' && mailCommand.payload.mode === 'new' ? mailCommand.payload.input?.links : undefined;
+          if (Array.isArray(mailLinks) && mailLinks.length) {
+            // Existence in company state is not enough: the target module and row
+            // must both be readable. Stale links may still be explicitly unlinked.
+            const visible = projectState(row.state, actor, this.emptyState(actor), fileOwner(row), earlyScope).state;
+            for (const link of mailLinks) if (link && emailLinkTarget(row.state, link) && !emailLinkTarget(visible, link)) fail('NOT_FOUND', '关联对象不存在或当前账号无权查看', 404);
+          }
+          if (input.command.type === 'email.followUp') {
+            const ownerId = typeof input.command.payload.ownerId === 'string' && input.command.payload.ownerId ? input.command.payload.ownerId : actor.userId;
+            if (!candidateIds(row).includes(ownerId)) fail('PRECONDITION', '请选择本公司在职成员作为负责人', 422);
+            // Mailbox sharing alone does not grant the current role permission to handle mail.
+            const recipient = await this.reviewSubject(db, actor, ownerId, '跟进负责人');
+            if (!hasScope(recipient, 'emails:read') || !hasScope(recipient, 'emails:write')) fail('PRECONDITION', '负责人缺少邮件办理权限，请先核对岗位', 422);
+          }
           if (input.command.type === 'email.submitExtraction') {
             const visible = projectState(row.state, actor, this.emptyState(actor), fileOwner(row), earlyScope).state;
             const ownerId = emailBusinessOwner(visible, input.command.payload.link);
@@ -770,8 +885,10 @@ export class MistRepository {
           }
           const known = new Set(row.state.files.map(file => file.id));
           const allowed = new Set(projectState(row.state, actor, this.emptyState(actor), fileOwner(row), earlyScope).state.files.map(file => file.id));
+          // 印章图片不能被任何其他业务记录引用（邮件附件、审批附件等），只有维护印章本身可以引用。
+          const sealImages = input.command.type === 'seal.save' ? new Set<string>() : sealFileIds(row.state);
           const check = (value: unknown): void => {
-            if (typeof value === 'string' && known.has(value) && !allowed.has(value)) fail('FILE_NOT_FOUND', '附件不存在或当前账号无权引用', 404);
+            if (typeof value === 'string' && known.has(value) && (!allowed.has(value) || sealImages.has(value))) fail('FILE_NOT_FOUND', '附件不存在或当前账号无权引用', 404);
             else if (Array.isArray(value)) value.forEach(check);
             else if (value && typeof value === 'object') Object.values(value).forEach(check);
           };
@@ -795,9 +912,12 @@ export class MistRepository {
         if (MEMBER_PERSONAL_COMMANDS.includes(input.command?.type)) {
           const visible = projectState(row.state, actor, this.emptyState(actor), fileOwner(row), scopeOf(row)).state;
           const { type, payload } = input.command;
-          const collection = type === 'notification.read' ? visible.notifications : type === 'task.complete' ? visible.tasks : type === 'calendar.save' && payload.id ? visible.calendar : undefined;
+          // calendar.delete / task.save（改已有事项）同样只能作用于本账号可见的日程与事项。
+          const collection = type === 'notification.read' ? visible.notifications : type === 'task.complete' || (type === 'task.save' && payload.id) ? visible.tasks : (type === 'calendar.save' && payload.id) || type === 'calendar.delete' ? visible.calendar : undefined;
           if (collection && !collection.some(item => item.id === payload.id)) fail('NOT_FOUND', '记录不存在或当前账号无权访问', 404);
-          if (type === 'calendar.save' && !canReadTarget(actor, payload.target)) fail('FORBIDDEN', '无权关联该业务来源', 403);
+          // 可见不等于可办理：修改已有待办须是指派人、公共待办池的岗位办理人，或有调度他人待办的主管权限（见 canHandleTask）。
+          if ((type === 'task.complete' || (type === 'task.save' && payload.id)) && !canHandleTask(actor, visible.tasks.find(item => item.id === payload.id)!)) fail('FORBIDDEN', '只能办理指派给本人的事项', 403);
+          if ((type === 'calendar.save' || type === 'task.save') && payload.target && !canReadTarget(actor, payload.target)) fail('FORBIDDEN', '无权关联该业务来源', 403);
           if (type === 'notification.readAll') context.visibleNotificationIds = visible.notifications.map(item => item.id);
         }
         if(input.command) {
@@ -806,7 +926,7 @@ export class MistRepository {
           const subject=review?await this.reviewSubject(db,actor,review.requesterId):actor;
           context.authority = await mistApprovalAuthority(db,subject,input.command.type,candidateIds(row));
         }
-        if(input.command && MIST_MEMBER_DIRECTORY_COMMANDS.includes(input.command.type)) context.members = await this.memberDirectory(db,row,actor);
+        if(input.command && (MIST_MEMBER_DIRECTORY_COMMANDS.includes(input.command.type) || input.command.type === 'seal.save')) context.members = await this.memberDirectory(db,row,actor);
         if(input.command?.type?.startsWith('teamScope.')) context.teams = await companyTeams(db,row.companyId);
         const plan = input.command ? this.contract.getRequiredBusinessNumberPlan?.(row.state, input.command) ?? [] : [];
         const numbers = await prepareMistBusinessNumbers(db, row.state, plan, context.now);
@@ -849,13 +969,64 @@ export class MistRepository {
           stored = await this.files.write(workspaceId, prepared.file, context.now);
           (context as typeof context & { customerStatement?: unknown }).customerStatement = bindCustomerStatement(prepared, stored, { id: context.id, workspaceId, requestId: input.requestId });
         }
+        // 盖章：用印人、在用印章、系统生成单据；按冻结快照把印章叠在出具方签字区重新渲染，盖章件作为新文件归档（见 mistSeals）。
+        const sealPlan = input.command && requestsSeal(input.command) ? prepareSeal(row.state, input.command, { actorId: actor.userId, viaAgent: isAgentActor(prior) }) : undefined;
+        let sealDataUrl: string | undefined;
+        if (sealPlan) {
+          const image = row.state.files.find(file => file.id === sealPlan.seal.fileId);
+          if (!image || !SEAL_IMAGE_MIME_TYPES.includes(image.mimeType)) fail('PRECONDITION', '印章图片不可用，请联系公司管理员', 422);
+          sealDataUrl = `data:${image!.mimeType};base64,${(await this.files.read(workspaceId, image! as MistStoredFile)).toString('base64')}`;
+        }
+        if (sealPlan && input.command.type === 'fulfillment.documents.issue') {
+          const prepared = await buildGeneratedDocument(sealPlan.snapshot!, this.quotationPdfRenderer, { sealDataUrl });
+          stored = await this.files.write(workspaceId, prepared.file, context.now);
+          context.sealStamp = { sealId: sealPlan.seal.id, reason: sealPlan.reason, documentId: sealPlan.documentId, baseRecordId: sealPlan.baseRecordId, artifact: bindGeneratedDocument(prepared, stored, { id: context.id, workspaceId, requestId: input.requestId }) } satisfies MistSealStamp;
+        }
+        if (input.command && GENERATING_COMMANDS.has(input.command.type)) {
+          const snapshot = prepareGeneratedSnapshot(row.state, sealPlan ? withoutSeal(input.command) : input.command, context);
+          const prepared = await buildGeneratedDocument(snapshot, this.quotationPdfRenderer, { sealDataUrl });
+          stored = await this.files.write(workspaceId, prepared.file, context.now);
+          (context as typeof context & { generatedDocument?: unknown }).generatedDocument = bindGeneratedDocument(prepared, stored, { id: context.id, workspaceId, requestId: input.requestId });
+          if (sealPlan) context.sealStamp = { sealId: sealPlan.seal.id, reason: sealPlan.reason, fileId: stored.id };
+        }
         const command = upload ? { type: 'files.add', payload: { file: stored } } : input.command;
         if (command?.type === 'email.server.sync' || command?.type === 'email.server.state') Object.assign(context, {mailPendingFields:await pendingMailFields(db,workspaceId,command.type === 'email.server.state' ? command.payload.operationId : undefined)});
-        const applied = this.contract.applyMistCommand(structuredClone(row.state), command, context);
+        // 不持有计税依据时，退税命令的错误提示按读投影同一规则脱敏金额。
+        const taxBaseHidden = isTaxBaseCommand(command?.type) && !hasScope(actor, 'sensitive:tax_base' as any);
+        let applied: ReturnType<MistContract['applyMistCommand']>;
+        try { applied = this.contract.applyMistCommand(structuredClone(row.state), command, context); }
+        catch (error) { if (taxBaseHidden && error instanceof Error && typeof error.message === 'string') error.message = maskTaxBaseText(error.message); throw error; }
+        if (command.type === 'agent.proposal.create') {
+          // External proposals need the same stale-source guard as task proposals. Bind the preview's source version, not the later human confirmation request's version.
+          const proposal = applied.state.agentProposals?.find(p => p.id === applied.result.id);
+          if (proposal && proposal.sourceRevision === undefined) proposal.sourceRevision = input.expectedRevision;
+        }
+        if (command.type === 'handover.customer' || command.type === 'handover.account') {
+          // Validate against the recipient's current company job, not the manager's grants.
+          // Run after domain validation (on the clone), before persisting any change or receipt.
+          const modules = new Set<string>();
+          if (command.type === 'handover.customer') {
+            modules.add('relations');
+            if (command.payload.orderIds?.length) modules.add('orders');
+          } else {
+            const moduleByKind = { customer: 'relations', opportunity: 'relations', order: 'orders', development: 'products', fabric: 'products', supplier: 'suppliers', internalReceiver: 'orders' } as const;
+            for (const object of accountOwnedObjects(row.state, command.payload.fromUserId.trim())) modules.add(moduleByKind[object.kind]);
+            if (row.state.internalDeliveries?.some(delivery => delivery.receiverId === command.payload.fromUserId && applied.state.internalDeliveries?.find(next => next.id === delivery.id)?.receiverId !== delivery.receiverId)) modules.add('orders');
+          }
+          if (modules.size) {
+            const recipient = await this.reviewSubject(db, actor, command.payload.toUserId.trim(), '新负责人');
+            if ([...modules].some(module => !hasScope(recipient, `${module}:read` as any) || !hasScope(recipient, `${module}:write` as any))) fail('PRECONDITION', '新负责人缺少接手业务的查看或办理权限', 422);
+          }
+        }
         const remoteQueued = await enqueueMailState(db, row, applied.state, command, actor, prior, Date.now(),humanTaskProposal?.taskId);
         if (remoteQueued) applied.result = {...applied.result, remoteQueued:true};
         if (command?.type === 'email.server.state') await completeMailState(db,workspaceId,command.payload.operationId,command.payload.attemptId,command.payload.observation,(prior as MailSyncActor).mailSyncLease!.id);
         numbers.assertConsumed();
+        if (signatureSvg) {
+          // 命令已通过全部业务门禁：归档本次签字并登记到所签记录；之后任何一步失败，私有文件按无回执清理。
+          stored = { ...await this.files.write(workspaceId, { bytes: Buffer.from(signatureSvg, 'utf8'), name: signatureFileName(input.requestId), mimeType: 'image/svg+xml' }, context.now), uploadedBy: actor.userId };
+          applied.result = { ...applied.result, signatureId: this.archiveSignature(applied.state, command, stored!, actor, context, input.requestId) };
+        }
         if (confirmProposalId) markAgentProposalConfirmed(applied.state, confirmProposalId, command, actor.userId, context.now);
         if(isAgentActor(prior)&&prior.agentTaskLease&&command.type==='agent.proposal.create')await waitTaskForProposal(db,actor,prior.agentTaskLease,String(applied.result.id),input.requestId,Date.now());
         const rejectedTaskProposal=command.type==='agent.proposal.reject'?row.state.agentProposals?.find(p=>p.id===command.payload.id):undefined;
@@ -877,7 +1048,9 @@ export class MistRepository {
           if (!changeKeys) fail('REVISION_CONFLICT', '公司已被他人更新，本次修改范围过大无法自动合并，请刷新后重试', 409);
           if (changeKeys!.some(key => concurrent.some(other => overlapping(key, other)))) fail('REVISION_CONFLICT', '其他人已修改同一记录，为避免覆盖对方的更新未自动合并，请刷新核对后重试', 409);
         }
-        if (dryRun) throw new MistPreviewOutcome({ revision: row.revision, result: applied.result, events: (applied.state.events ?? []).filter((event: { id: string }) => !previousEvents.has(event.id)).map((event: { text: string }) => event.text), changes: changeKeys ?? null });
+        // 需要签字的批准：权限、范围、并发与业务门禁都已通过（结果仍在副本上）才要求签字；预演不落账，不要求签字。
+        if (!dryRun) requireSignature(command, signatureSvg);
+        if (dryRun) throw new MistPreviewOutcome({ revision: row.revision, result: applied.result, events: (applied.state.events ?? []).filter((event: { id: string }) => !previousEvents.has(event.id)).map((event: { text: string }) => taxBaseHidden ? maskTaxBaseText(event.text) : event.text), changes: changeKeys ?? null });
         const nextRevision = row.revision + 1;
         const sourceTask=isAgentActor(prior)?prior.agentTaskLease?.taskId:humanTaskProposal?.taskId;
         if(sourceTask&&!EMAIL_SERVER_COMMAND.test(command?.type??''))await advanceTaskSources(db,actor,workspaceId,sourceTask,changeKeys,nextRevision);
@@ -984,6 +1157,21 @@ export class MistRepository {
     }
   }
   private reviews(state:MistState):MistReviewTask[]{return this.contract.getMistReviewTasks?.(state)||[];}
+  /** 已签字批准的审批：找到这次决定归档的签字文件（同一业务记录按审批命令匹配，取最近一次批准）。 */
+  private reviewSignatureFileId(state:MistState,task:MistReviewTask):string|undefined{
+    if(task.status==='pending')return undefined;
+    const command=REVIEW_COMMAND_BY_KIND[task.kind as keyof typeof REVIEW_COMMAND_BY_KIND];
+    const rows=(state.decisionSignatures||[]).filter(row=>row.commandType===command&&row.entityId===task.entityId&&(row.decision===undefined||row.decision===task.status));
+    return rows.at(-1)?.fileId;
+  }
+  /** 把已写入私有存储的签字登记为附件与决定签字记录，返回签字记录编号。 */
+  private archiveSignature(state: MistState, command: { type: string; payload?: any }, file: MistStoredFile, actor: TokenPayload, context: MistContext, requestId: string): string {
+    state.files.push(structuredClone(file) as MistState['files'][number]);
+    const decision = typeof command.payload?.decision === 'string' ? command.payload.decision : undefined;
+    const record: MistDecisionSignature = { id: context.id(), commandType: command.type, entityId: signatureEntityId(command), ...(decision ? { decision } : {}), fileId: file.id, actorId: actor.userId, actor: actor.displayName || actor.userId, at: context.auditNow ?? context.now, requestId };
+    (state.decisionSignatures ??= []).push(record);
+    return record.id;
+  }
   /** Both command and review entry points rebuild routing from the current requester, while the actor remains the decision maker. */
   private async reviewSubject(db:any,actor:TokenPayload,requesterId:string,label='申请账号'):Promise<TokenPayload>{
     if((actor as any).mistLocal===true && process.env.MIST_LOCAL_WORKSPACE==='1' && process.env.NODE_ENV!=='production'){
@@ -997,7 +1185,7 @@ export class MistRepository {
   async listReviews(prior:TokenPayload){return this.transact(async db=>{
     const actor=await this.authorize(db,prior);
     const mine={state:{path:['reviewerIds'],array_contains:[actor.userId]}},rows=await db.mistWorkspace.findMany({where:companyLibrary(actor)?{companyId:actor.companyId,OR:[mine]}:{...(actor.companyId?{companyId:actor.companyId}:{}),OR:[{ownerId:actor.userId},mine]},orderBy:{updatedAt:'desc'},take:200});
-    return rows.filter((row:MistWorkspaceRow)=>!archived(row)).flatMap((row:MistWorkspaceRow)=>this.reviews(row.state).filter(t=>!companyRow(row)&&row.ownerId===actor.userId||(t.reviewerIds.includes(actor.userId)&&hasScope(actor,t.requiredPermission as any))).map(t=>({workspaceId:row.id,workspaceName:row.name,revision:row.revision,canDecide:t.status==='pending'&&t.reviewerIds.includes(actor.userId)&&hasScope(actor,t.requiredPermission as any),files:(t.fileIds||[]).flatMap(id=>{const file=row.state.files.find(f=>f.id===id);return file?[{id:file.id,name:file.name,size:file.size}]:[];}),...t})));
+    return rows.filter((row:MistWorkspaceRow)=>!archived(row)).flatMap((row:MistWorkspaceRow)=>this.reviews(row.state).filter(t=>!companyRow(row)&&row.ownerId===actor.userId||(t.reviewerIds.includes(actor.userId)&&hasScope(actor,t.requiredPermission as any))).map(t=>({workspaceId:row.id,workspaceName:row.name,revision:row.revision,canDecide:t.status==='pending'&&t.reviewerIds.includes(actor.userId)&&hasScope(actor,t.requiredPermission as any),signatureRequired:mistCommandRequiresSignature({type:REVIEW_COMMAND_BY_KIND[t.kind],payload:{decision:'approved'}}),files:(t.fileIds||[]).flatMap(id=>{const file=row.state.files.find(f=>f.id===id);return file?[{id:file.id,name:file.name,size:file.size}]:[];}),...(()=>{const id=this.reviewSignatureFileId(row.state,t);return id&&row.state.files.some((f:MistStoredFile)=>f.id===id)?{signatureFileId:id}:{};})(),...t})));
   });}
   async reviewFile(prior:TokenPayload,workspaceId:string,reviewId:string,fileId:string){return this.transact(async db=>{
     const actor=await this.authorize(db,prior),row=await db.mistWorkspace.findFirst({where:{id:workspaceId}});
@@ -1005,22 +1193,35 @@ export class MistRepository {
     if(!row||archived(row))fail('NOT_FOUND','审批不存在',404);
     const task=this.reviews(row.state).find(t=>t.id===reviewId);
     if(!task||((companyRow(row)||row.ownerId!==actor.userId)&&(!task.reviewerIds.includes(actor.userId)||!hasScope(actor,task.requiredPermission as any))))fail('NOT_FOUND','该审批不属于当前账号',404);
-    if(!(task.fileIds||[]).includes(fileId))fail('FILE_NOT_FOUND','附件不在提交的审批快照中',404);
+    // 审批快照附件，或这次决定归档的签字（与列表同一匹配规则）；印章图片永远不经此下载。
+    const signatureId=this.reviewSignatureFileId(row.state,task);
+    if(!((task.fileIds||[]).includes(fileId)||fileId===signatureId)||sealFileIds(row.state).has(fileId))fail('FILE_NOT_FOUND','附件不在提交的审批快照中',404);
     const file=row.state.files.find((f:MistStoredFile)=>f.id===fileId);if(!file)fail('FILE_NOT_FOUND','附件不存在',404);
     const bytes=await this.files.read(workspaceId,file);await this.authorize(db,prior);return {file,bytes};
   });}
   async reviewReceipt(prior:TokenPayload,workspaceId:string,requestId:string){return this.transact(async db=>{
     const actor=await this.authorize(db,prior);requestIdentifier(requestId);
+    if(!/^[0-9a-f-]{36}$/i.test(workspaceId))fail('NOT_FOUND','原审批回执不存在',404);
+    // 公司边界与 decideReview / own 一致：工作区须存在、属于当前会话的公司且未移入回收站。只读归属字段和回收站标记，不加载整份状态。
+    const row=await db.mistWorkspace.findFirst({where:{id:workspaceId},select:{id:true,companyId:true,ownerId:true}});
+    if(!row||(row.companyId||actor.companyId)&&(row.companyId??null)!==(actor.companyId??null))fail('NOT_FOUND','原审批回执不存在',404);
+    // 回收站只适用于非公司空间（archived()）；其标记在 state 内，Prisma 无法只选 JSON 子字段，故仅对非公司空间读取 state 判断，公司库从不加载。
+    if(!row.companyId){const legacy=await db.mistWorkspace.findFirst({where:{id:workspaceId},select:{id:true,companyId:true,ownerId:true,state:true}});if(!legacy||archived(legacy))fail('NOT_FOUND','原审批回执不存在',404);}
     const item=await db.mistCommandReceipt.findUnique({where:{workspaceId_requestId:{workspaceId,requestId}}});
     if(!item||item.actorId!==actor.userId)fail('NOT_FOUND','原审批回执不存在',404);
     return {requestId:item.requestId,...publicCommandReceiptResult(item.result)};
   });}
-  async decideReview(prior:TokenPayload,workspaceId:string,reviewId:string,input:{requestId:string;expectedRevision:number;decision:'approved'|'rejected';note:string}){
+  async decideReview(prior:TokenPayload,workspaceId:string,reviewId:string,input:{requestId:string;expectedRevision:number;decision:'approved'|'rejected';note:string;signature?:{svg:string}}){
     if(!/^[0-9a-f-]{36}$/i.test(workspaceId))fail('INVALID_INPUT','公司编号无效',400);
     requestIdentifier(input.requestId);revision(input.expectedRevision);identifier(reviewId,'审批编号');
     if(!['approved','rejected'].includes(input.decision)||typeof input.note!=='string'||!input.note.trim()||input.note.length>4000)fail('INVALID_INPUT','请选择审批结论并填写意见',400);
-    const hash=createHash('sha256').update(canonical({actorId:prior.userId,reviewId,...input})).digest('hex');
-    return this.writeTransact(workspaceId,async db=>{
+    if(input.signature!==undefined&&isAgentActor(prior))fail('FORBIDDEN','Agent 不能签字，须本人当场手写签字',403);
+    // 签字格式先校验；是否需要签字取决于审批对应的命令，锁内按审批类型核对。签字参与请求摘要。
+    const signatureSvg=input.signature===undefined?undefined:plainRecord(input.signature)&&Object.keys(input.signature).every(key=>key==='svg')?normalizeSignatureSvg(input.signature.svg):fail('VALIDATION','签字无效，请重新签字',422);
+    const {signature:_signature,...decision}=input;
+    const hash=createHash('sha256').update(canonical({actorId:prior.userId,reviewId,...decision,...(signatureSvg?{signature:signatureSvg}:{})})).digest('hex');
+    let stored:MistStoredFile|undefined;
+    try{return await this.writeTransact(workspaceId,async db=>{
       const actor=await this.authorize(db,prior);
       await db.$queryRawUnsafe('SELECT "id" FROM "MistWorkspace" WHERE "id" = $1::uuid FOR UPDATE',workspaceId);
       const row=await db.mistWorkspace.findFirst({where:{id:workspaceId}});if(row&&(row.companyId||actor.companyId)&&(row.companyId??null)!==(actor.companyId??null))fail('NOT_FOUND','审批对象不存在',404);if(!row||archived(row))fail('NOT_FOUND','审批对象不存在',404);if(companyRow(row))applyRoster(row.state,await companyRoster(db,row.companyId));
@@ -1034,11 +1235,14 @@ export class MistRepository {
       const type=REVIEW_COMMAND_BY_KIND[task.kind];
       // 风险申请：审批结果回到原风险记录（target.id），并精确对应本次申请（entityId）。
       const command={type,payload:task.kind==='risk'?{id:task.target.id,escalationId:task.entityId,decision:input.decision,note:input.note}:{id:task.entityId,decision:input.decision,note:input.note}} as MistCommand;
+      if(!mistCommandRequiresSignature(command)&&signatureSvg)fail('INVALID_INPUT','该操作不需要签字',422);
       // 审批人所见版本落后时：只要期间没有人改过本次审批写入的同一记录，就在最新状态上重新执行审批门禁后落库；否则要求刷新核对。
       const concurrent=row.revision===input.expectedRevision?undefined:await this.concurrentChanges(db,workspaceId,row.revision,input.expectedRevision,type);
       const context=this.context(actor,row.state);context.authority=await mistApprovalAuthority(db,subject,type,candidateIds(row));
       if(MIST_MEMBER_DIRECTORY_COMMANDS.includes(type))context.members=await this.memberDirectory(db,row,actor);
       const applied=this.contract.applyMistCommand(structuredClone(row.state),command,context);
+      requireSignature(command,signatureSvg);
+      if(signatureSvg){stored={...await this.files.write(workspaceId,{bytes:Buffer.from(signatureSvg,'utf8'),name:signatureFileName(input.requestId),mimeType:'image/svg+xml'},context.now),uploadedBy:actor.userId};applied.result={...applied.result,signatureId:this.archiveSignature(applied.state,command,stored!,actor,context,input.requestId)};}
       const previousEvents=new Set((row.state.events??[]).map((event:{id:string})=>event.id));
       for(const event of applied.state.events??[])if(!previousEvents.has(event.id))event.at=context.auditNow ?? context.now;
       (applied.state as any).reviewerIds=[...new Set(this.reviews(applied.state).flatMap(t=>t.reviewerIds))];
@@ -1051,9 +1255,27 @@ export class MistRepository {
       await this.markRevision(db,workspaceId,actor.userId,row.revision,next.revision,changeKeys);
       await this.authorize(db,prior,task.requiredPermission);
       return {receipt:{requestId:input.requestId,...result},replayed:false};
-    });
+    });}catch(error){
+      // 未落账（无本请求回执）时清掉本次写入的签字文件；无法确认时保留，不删可能已提交的附件。
+      if(stored)try{const receipt=await this.prisma.mistCommandReceipt.findUnique({where:{workspaceId_requestId:{workspaceId,requestId:input.requestId}}});if(!receipt)await this.files.remove(workspaceId,stored);}catch{/* keep */}
+      throw error;
+    }
   }
   /** 小组协作范围：本公司在用的小组、各组已存范围与当前匹配数量。范围明细会涉及全公司业务，限人事小组管理权限。 */
+  /** 内部交付可选的接收账号：与 order.internal.send 的最终校验同一口径（在用成员且有订单查看和办理权限）。 */
+  async internalReceivers(prior: TokenPayload, workspaceId: string) {
+    return this.transact(async db => {
+      const { row, actor } = await this.own(db, prior, workspaceId, 'orders:read');
+      const ids = [...new Set(candidateIds(row))], out: Array<{ id: string; name: string }> = [];
+      for (const id of ids) {
+        try {
+          const subject = await this.reviewSubject(db, actor, id, '接收账号');
+          if (hasScope(subject, 'orders:read') && hasScope(subject, 'orders:write')) out.push({ id, name: (subject as any).displayName || members(row.state).find((m: any) => m.userId === id)?.name || id });
+        } catch { /* 账号当前不可核验：不列入 */ }
+      }
+      return { receivers: out };
+    });
+  }
   async teamScopes(prior: TokenPayload, workspaceId: string) {
     return this.transact(async db => {
       const { row } = await this.own(db, prior, workspaceId, 'hr:write'), teams = await companyTeams(db, row.companyId), stored = row.state.teamScopes ?? [];

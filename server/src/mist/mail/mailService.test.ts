@@ -7,6 +7,8 @@ import { createMistLocalRuntime } from '../local';
 import { createMistServer } from '../server';
 import { composeMail, classifySmtpError, describeMailError, type MailImapSession, type MailTransport } from './transport';
 import { pickMailFolders } from './service';
+/** Test mail hosts are fakes behind a stub transport; resolve them to a documentation-range public address. */
+const publicMailHost = async () => ['203.0.113.10'];
 
 /**
  * 智能邮箱收发：用内存 IMAP/SMTP 替身覆盖服务端全链路（凭据、同步去重、附件隔离、发送幂等与安全重试）。
@@ -63,7 +65,7 @@ beforeEach(async () => { directory = await fs.mkdtemp(path.join(os.tmpdir(), 'mi
 afterEach(async () => { vi.unstubAllEnvs(); await fs.rm(directory, { recursive: true, force: true }); });
 const W = '/api/mist/workspaces/';
 async function setup() {
-  const local = createMistLocalRuntime({ directory }), app = createMistServer(undefined, { local, mailTransport: fake.transport() });
+  const local = createMistLocalRuntime({ directory }), app = createMistServer(undefined, { local, mailResolve:publicMailHost, mailTransport: fake.transport() });
   const owner = request.agent(app); await owner.get('/api/mist/session').expect(200);
   let ws = (await owner.get(W + 'default').expect(200)).body.workspace;
   const latest = async (client = owner) => (ws = (await client.get(W + ws.id).expect(200)).body.workspace);
@@ -95,6 +97,26 @@ describe('智能邮箱真实收发（服务端）', () => {
     for (const text of [JSON.stringify(ok.body), JSON.stringify(ws), store]) expect(text).not.toContain(SECRET);
     // 共享邮箱接入需要邮件账户管理权限；成员只能是本公司成员（按用户 ID）。
     await t.command('email.account.save', { input: { address: 'orders@sylway.cloud', displayName: 'orders', kind: 'shared', memberIds: ['someone-else'], aliases: [], signature: '', transport: { ...transport(), username: 'orders@sylway.cloud' } } }, t.owner, 404);
+  });
+
+  it('未登记内部主机时，拒绝指向本机、内网或解析到内网的邮件服务器，公网服务器可接入', async () => {
+    vi.stubEnv('MIST_MAIL_ALLOWED_HOSTS', '');
+    const dns: Record<string, string[]> = { 'mail.public.test': ['203.0.113.10'], 'mail.inside.test': ['10.1.2.3'], 'mail.mixed.test': ['203.0.113.11', '127.0.0.1'], 'mail.mapped.test': ['::ffff:192.168.1.5'] };
+    const local = createMistLocalRuntime({ directory }), app = createMistServer(undefined, { local, mailResolve: async host => { if (!dns[host]) throw new Error('ENOTFOUND'); return dns[host]; }, mailTransport: fake.transport() });
+    const owner = request.agent(app); await owner.get('/api/mist/session').expect(200);
+    let ws = (await owner.get(W + 'default').expect(200)).body.workspace;
+    const save = async (host: string) => { ws = (await owner.get(W + ws.id).expect(200)).body.workspace; const r = await owner.post(W + ws.id + '/commands').send({ requestId: 'mail-host-' + (++n), expectedRevision: ws.revision, command: { type: 'email.account.save', payload: { input: { address: 'staff-' + n + '@example.test', displayName: 'staff', kind: 'personal', memberIds: [], aliases: [], signature: '', transport: { ...transport(host), username: 'sales@sylway.cloud' } } } } }); if (r.status !== 200) throw new Error(host + ' save ' + r.status + ' ' + JSON.stringify(r.body).slice(0, 300)); return r.body.receipt.result.id as string; };
+    const bind = async (id: string) => owner.put(W + ws.id + '/email/accounts/' + id + '/credential').send({ password: SECRET });
+    await expect(save('::1')).rejects.toThrow('收信服务器格式无效');
+    for (const host of ['127.0.0.1', '10.0.0.8', '169.254.169.254', 'mail.inside.test', 'mail.mixed.test', 'mail.mapped.test']) {
+      const r = await bind(await save(host));
+      expect(r.status, host).toBe(422);expect(r.body.error.code, host).toBe('MAIL_HOST_NOT_ALLOWED');
+    }
+    const unresolved = await bind(await save('mail.unknown.test'));
+    expect(unresolved.status).toBe(422);expect(unresolved.body.error.code).toBe('MAIL_HOST_UNRESOLVED');
+    // Host check passes; the stub server then authenticates the mailbox normally.
+    const accepted = await bind(await save('mail.public.test'));
+    expect(accepted.status, JSON.stringify(accepted.body).slice(0, 300)).toBe(200);
   });
 
   it('客户端不能直接写入收信/发信结果；不在允许范围的服务器被拒绝', async () => {

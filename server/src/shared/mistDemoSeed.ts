@@ -266,12 +266,15 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
     const due = state.fulfillment.purchases.find(p => p.id === pid)?.due || day(20);
     run(label + ' confirm', { type: 'fulfillment.procurement.confirm', payload: { id: pid, at: at(confirmedOffset, 10), evidence: '供应商盖章回签', confirmedDue: due, fileIds: [] } }, buyer);
   };
+  // 仓库主数据：收货入库登记到具体仓库，库存按仓库落账（sup13）。
+  const jiaxing = id(run('warehouse jiaxing', { type: 'fulfillment.claimInventory.warehouse.save', payload: { code: 'JX', name: '嘉兴面辅料仓', address: '浙江嘉兴秀洲区洪合镇', active: true, custodian: 'company' } }, warehouse));
+  run('warehouse shanghai', { type: 'fulfillment.claimInventory.warehouse.save', payload: { code: 'SH', name: '上海成品仓', address: '上海浦东新区外高桥保税区', active: true, custodian: 'company' } }, warehouse);
   const fabricPo = purchase('purchase fabric', { lineIndex: 0, kind: 'material', materialKind: 'fabric', supplierId: huasheng, description: '燕麦色双面呢 420 g/m² · 148 cm（大衣大身）', quantity: 2400, unit: '米', price: 46.5, currency: 'CNY', due: -2, terms: '30% 预付，余款到货验收后 30 天', destination: '嘉兴面辅料仓' });
   approveAndConfirm(fabricPo, 'purchase fabric', -12);
-  if (fabricPo) run('purchase fabric receive', { type: 'fulfillment.procurement.receive', payload: { id: fabricPo, quantity: 2380, rejected: 20, destination: 'warehouse', location: '嘉兴面辅料仓 A-03', date: day(-3), evidence: '到货 2,400 米，色差 20 米退回', fileIds: [] } }, warehouse);
+  if (fabricPo) run('purchase fabric receive', { type: 'fulfillment.procurement.receive', payload: { id: fabricPo, quantity: 2380, rejected: 20, destination: 'warehouse', ...(jiaxing ? { warehouseId: jiaxing } : {}), location: '嘉兴面辅料仓 A-03', date: day(-3), evidence: '到货 2,400 米，色差 20 米退回', fileIds: [] } }, warehouse);
   const buttonPo = purchase('purchase buttons', { lineIndex: 0, kind: 'material', materialKind: 'trims', supplierId: baotai, description: '牛角纹树脂扣 24L 深棕（每件 8 粒 + 2% 损耗）', quantity: 6600, unit: '粒', price: 0.08, currency: 'CNY', due: -1, terms: '月结 30 天', destination: '嘉兴面辅料仓' });
   approveAndConfirm(buttonPo, 'purchase buttons', -8);
-  if (buttonPo) run('purchase buttons receive', { type: 'fulfillment.procurement.receive', payload: { id: buttonPo, quantity: 6600, rejected: 0, destination: 'warehouse', location: '嘉兴面辅料仓 C-11', date: day(-2), evidence: '到货点数无误', fileIds: [] } }, warehouse);
+  if (buttonPo) run('purchase buttons receive', { type: 'fulfillment.procurement.receive', payload: { id: buttonPo, quantity: 6600, rejected: 0, destination: 'warehouse', ...(jiaxing ? { warehouseId: jiaxing } : {}), location: '嘉兴面辅料仓 C-11', date: day(-2), evidence: '到货点数无误', fileIds: [] } }, warehouse);
   purchase('purchase processing draft', { lineIndex: 1, kind: 'processing', supplierId: yuanshan, description: '炭灰细格 Blazer 成衣缝制加工（含锁眼钉扣、整烫）', quantity: 800, unit: '件', price: 85, currency: 'CNY', due: 40, terms: '月结 30 天，按实际回交数结算', destination: '远山服装', note: '待确认工价后提交审批' });
   const liningPo = purchase('purchase lining', { lineIndex: 2, kind: 'material', materialKind: 'fabric', supplierId: huasheng, description: '雾蓝西装里布 · 铜氨丝混纺', quantity: 1100, unit: '米', price: 18.8, currency: 'CNY', due: 10, terms: '月结 30 天', destination: '嘉兴面辅料仓' });
   void liningPo;
@@ -341,7 +344,9 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
       run('pack 017', { type: 'fulfillment.shipments.pack', payload: { id: ship, lines: Array.from({ length: 5 }, (_, i) => ({ lineId: job017.lineId, productionId: job017.id, carton: `${i * 20 + 1}-${i * 20 + 20}`, quantity: 100, netWeight: 96, grossWeight: 108, volume: 1.15, note: '' })) } }, warehouse);
       run('customs 017', { type: 'fulfillment.customs.save', payload: { shipmentId: ship, declarationNo: '2200 2026 1004 9126 51', broker: '上海东航报关有限公司', hsCode: '6203.31', origin: '中国', tradeMode: '一般贸易', declaredAt: day(-5), clearedAt: day(-4), evidence: '海关放行通知', fileIds: [demoFile('customs-release', ship, '报关放行通知 SO-G-2026-017.pdf')], note: '', status: 'cleared' } }, warehouse);
       // 商品归类按款号建档一次，之后每票出运自动带出商品编号、申报品名与申报要素。
-      run('customs classify coat', { type: 'fulfillment.customs.classify.save', payload: { family: 'garment', hsCode: '6203310000', declaredName: '男式羊毛西服上衣', brandType: '3', preference: '0', elements: ['机织', '西服上衣', '男式', '100%羊毛', 'Northwind'], styles: ['CC-AW27-COAT-014'] } }, warehouse);
+      // 款号对应本票实际出运的西装套装（PO-L-0411），不挂到大衣款：大衣与西服上衣税号不同，品名、要素须与款式一致。
+      const suitStyle = state.orderLines.find(line => line.id === job017.lineId)?.style;
+      if (suitStyle) run('customs classify suit', { type: 'fulfillment.customs.classify.save', payload: { family: 'garment', hsCode: '6203310000', declaredName: '男式羊毛西服上衣', brandType: '3', preference: '0', elements: ['机织', '西服上衣', '男式', '100%羊毛', 'Northwind'], styles: [suitStyle] } }, warehouse);
       for (const [type, title] of [['CI', '商业发票'], ['PL', '装箱单']] as const) {
         const doc = id(run('document ' + type, { type: 'fulfillment.documents.save', payload: { shipmentId: ship, orderId: type === 'CI' ? order017.id : '', type, number: `${type}-2026-0417`, title: `${title} · SO-G-2026-017 第一批`, dueDate: type === 'CI' ? day(26) : '', content: type === 'CI' ? '500 件修身羊毛西装套装 · FOB 上海 · USD' : '100 箱 · 净重 480 kg · 毛重 540 kg · 5.75 m³', fileIds: [demoFile(type === 'CI' ? 'commercial-invoice' : 'packing-list', ship, `${type}-2026-0417 ${title}.pdf`)] } }, warehouse));
         const issued = doc ? run('document issue ' + type, { type: 'fulfillment.documents.issue', payload: { id: doc } }, warehouse) : null;
@@ -355,6 +360,10 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
       const unit017 = state.orderLines.find(l => l.id === job017.lineId)?.unit || '套';
       const finishedPo = id(run('purchase finished 017', { type: 'fulfillment.procurement.save', payload: { orderId: order017.id, lineId: job017.lineId, kind: 'processing', supplierId: jiangnan, supplier: '', description: '修身羊毛西装套装加工 · 第一批 500 件', quantity: 500, unit: unit017, price: 452, currency: 'CNY', due: day(-8), terms: '出运后 30 天付清，凭增值税专用发票', destination: '上海洋山', note: '含税价，税率 13%', fileIds: [] } }, buyer));
       approveAndConfirm(finishedPo, 'purchase finished 017', -30);
+      // 第一批 500 件已由 PO-L-0411 完工出运，本合同只用于登记工厂专票与退税；审批自动生成的分支不再排产，
+      // 否则同一条目会多出 500 件可出运额度，后续出运被溢装上限拦下。
+      const extra017 = finishedPo ? state.productions.find(p => p.sourcePurchaseId === finishedPo && !p.closed) : undefined;
+      if (extra017) extra017.closed = { at: context.now, actor: '沈禾', reason: '本批成品已随 PO-L-0411 第一批出运，本合同仅登记票据' };
       if (finishedPo) run('bill vat 017', { type: 'payable.bill.register', payload: { invoiceType:'vat-special',supplierId: jiangnan, invoiceNo: '33002641 04517712', invoiceDate: day(-3), currency: 'CNY', amount: 226000, taxAmount: 26000, taxRate: '13%', lines: [{ purchaseId: finishedPo, amount: 226000 }], due: day(26), dueBasis: '合同：出运后 30 天付清', fileIds: [demoFile('vat-invoice', finishedPo, '增值税专用发票 江南成衣 SO-G-2026-017.pdf')], note: '数电专票，已勾选确认用途（出口退税）' } }, finance);
       run('rebate rate 6203.31', { type: 'rebate.rate.save', payload: { hsCode: '6203.31', rate: '13', effectiveFrom: '2019-04-01', basis: '财政部 税务总局 海关总署公告 2019 年第 39 号' } }, finance);
     }

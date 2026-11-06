@@ -195,6 +195,14 @@ describe("quote-cost-v1 deterministic costing", () => {
     }).result;
     expect(r.cost).toBe("1.5000");
   });
+  it("converts a CNY per metre supplier cost into the USD per yard quote line", () => {
+    const r = calculateQuoteCosting({ ...input(), currency: "CNY", supplierPrice: "36", conversion: { currency: "USD", unit: "码", rate: "0.140000", unitFactor: "0.914400", basis: "中行 2026-10-14 结汇价；1 码 = 0.9144 米" } });
+    // 36 CNY/米 × 0.9144 米/码 × 0.14 USD/CNY = 4.608576 → 4.6086 USD/码
+    expect(r.result.cost).toBe("4.6086");
+    expect(r.input.conversion).toMatchObject({ currency: "USD", unit: "码", rate: "0.140000" });
+    expect(() => calculateQuoteCosting({ ...input(), conversion: { currency: "USD", unit: "米", rate: "1", unitFactor: "1", basis: "x" } })).toThrow("无需折算");
+    expect(() => calculateQuoteCosting({ ...input(), conversion: { currency: "USD", unit: "码", rate: "0.9", unitFactor: "0.9144", basis: "x" } })).toThrow("汇率须为 1");
+  });
   it("adds only explicitly excluded expenses to supplier base", () => {
     expect(
       calculateQuoteCosting({ ...input(), components: [component()] }).result

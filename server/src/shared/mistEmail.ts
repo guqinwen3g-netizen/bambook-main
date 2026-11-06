@@ -12,7 +12,7 @@ import { mistBusinessDate } from './mistBusinessClock';
 export type EmailAddress = { name: string; address: string };
 export type EmailFolder = 'inbox' | 'drafts' | 'outbox' | 'sent' | 'archive' | 'trash';
 export type EmailMessageFolder = 'inbox' | 'sent' | 'archive' | 'trash';
-export type EmailLinkKind = 'customer' | 'development' | 'order' | 'invoice';
+export type EmailLinkKind = 'customer' | 'development' | 'order' | 'invoice' | 'supplier' | 'purchase' | 'quotation' | 'rfq';
 export type EmailLink = { kind: EmailLinkKind; id: string };
 export type EmailConnection = 'not_connected' | 'example' | 'connected' | 'syncing' | 'partial' | 'error';
 /** 收发服务器设置（非秘密）。smtpSecure=false 表示先明文连接再强制 STARTTLS。 */
@@ -30,6 +30,8 @@ export type EmailAccount = {
    * 之后同步的去重键与 Message-ID 合并都只在当前代际内进行，旧来源已同步的邮件原样保留。缺省按 1。
    */
   sourceGeneration?: number;
+  /** Removed from use: history stays readable, no new drafts, sends, sync or credentials. */
+  removed?: { at: string; actor: string; reason: string };
 };
 /** fileId 指向私有附件文件；omitted 说明未保存内容的原因（如超过大小上限）。 */
 export type EmailAttachment = { id: string; name: string; size: number; contentType: string; fileId?: string; omitted?: string };
@@ -70,7 +72,9 @@ export type EmailSend = {
 };
 export type EmailDraftInput = { accountId: string; from: string; to: string; cc: string; bcc: string; subject: string; body: string; template: string; links: EmailLink[]; fileIds: string[]; replyToId?: string };
 export type EmailDraft = EmailDraftInput & { id: string; createdAt: string; updatedAt: string; updatedBy: string };
-export type EmailState = { accounts: EmailAccount[]; messages: EmailMessage[]; drafts: EmailDraft[]; sends: EmailSend[] };
+/** Company mail template. Placeholders in braces are filled from the draft's linked records: {客户} {订单号} {款号} {交期} {报价号} {出运号}. */
+export type EmailTemplate = { id: string; name: string; subject: string; body: string; updatedAt: string; updatedBy: string; archived?: boolean };
+export type EmailState = { accounts: EmailAccount[]; messages: EmailMessage[]; drafts: EmailDraft[]; sends: EmailSend[]; templates?: EmailTemplate[] };
 export type EmailAccountInput = { address: string; displayName: string; kind: 'personal' | 'shared'; memberIds: string[]; aliases: string[]; signature: string; transport: EmailTransport };
 export type EmailSyncedMessage = {
   remote: { folder: string; uid: number; uidValidity: number }; folder: EmailMessageFolder; messageId: string; inReplyTo: string; references: string[];
@@ -83,7 +87,11 @@ export type EmailCommand =
   | { type: 'email.state.retry'; payload: { id: string; acceptRemote?: boolean } }
   | { type: 'email.link'; payload: { id: string; link: EmailLink } }
   | { type: 'email.unlink'; payload: { id: string; link: EmailLink } }
-  | { type: 'email.followUp'; payload: { id: string; owner: string; due: string; note: string } }
+  | { type: 'email.followUp'; payload: { id: string; owner?: string; ownerId?: string; due: string; note: string } }
+  | { type: 'email.bulk'; payload: { ids: string[]; action: 'read' | 'unread' | 'archive' | 'trash' | 'restore' | 'link'; link?: EmailLink } }
+  | { type: 'email.purge'; payload: { ids: string[] } }
+  | { type: 'email.account.remove'; payload: { id: string; reason: string } }
+  | { type: 'email.template.save'; payload: { id?: string; name: string; subject: string; body: string; archived?: boolean } }
   | { type: 'email.submitExtraction'; payload: { id: string; link: EmailLink } }
   | { type: 'email.extraction.review'; payload: EmailReviewInput }
   | { type: 'email.extraction.resolve'; payload: { id: string; taskId: string; outcome: 'handled' | 'not_applicable'; note: string } }
@@ -108,12 +116,33 @@ const HOST_RE = /^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?(?:\
 const FOLDER_LABEL: Record<EmailMessageFolder, string> = { inbox: '收件箱', sent: '已发送', archive: '已归档', trash: '已删除' };
 const clip = (value: unknown, max: number) => (typeof value === 'string' ? value : '').slice(0, max);
 const text = (value: unknown, label: string, required = false, max = 2000) => { const v = typeof value === 'string' ? value.trim() : ''; if (required && !v) fail(`请填写${label}`); if (v.length > max) fail(`${label}过长`); return v; };
-const LINK_KINDS: EmailLinkKind[] = ['customer', 'development', 'order', 'invoice'];
-export const EMAIL_LINK_LABEL: Record<EmailLinkKind, string> = { customer: '客户', development: '开发案', order: '订单', invoice: '发票' };
+const LINK_KINDS: EmailLinkKind[] = ['customer', 'development', 'order', 'invoice', 'supplier', 'purchase', 'quotation', 'rfq'];
+export const EMAIL_LINK_LABEL: Record<EmailLinkKind, string> = { customer: '客户', development: '开发案', order: '订单', invoice: '发票', supplier: '供应商', purchase: '采购单', quotation: '报价', rfq: '询价' };
 export function emailBusinessOwner(root: MistState, value: EmailLink): string | undefined {
   if (!value || !LINK_KINDS.includes(value.kind)) return undefined;
-  const invoice = value.kind === 'invoice' ? root.invoices.find(i => i.id === value.id) : undefined;
-  return (value.kind === 'customer' ? root.customers.find(c => c.id === value.id) : value.kind === 'development' ? root.devs.find(d => d.id === value.id) : value.kind === 'order' ? root.orders.find(o => o.id === value.id) : root.orders.find(o => invoice?.orderId ? o.id === invoice.orderId : o.code === invoice?.order))?.ownerId;
+  const orderOwner = (orderId?: string) => root.orders.find(o => o.id === orderId)?.ownerId;
+  switch (value.kind) {
+    case 'customer': return root.customers.find(c => c.id === value.id)?.ownerId;
+    case 'development': return root.devs.find(d => d.id === value.id)?.ownerId;
+    case 'order': return orderOwner(value.id);
+    case 'invoice': return orderOwner(root.invoices.find(i => i.id === value.id)?.orderId);
+    case 'purchase': { const p = root.fulfillment.purchases.find(x => x.id === value.id); return p?.requesterId || orderOwner(p?.orderId); }
+    case 'rfq': return orderOwner((root as MistState & { rfqs?: Array<{ id: string; orderId: string }> }).rfqs?.find(r => r.id === value.id)?.orderId);
+    case 'quotation': { const q = root.market.quotations.find(x => x.id === value.id); return root.customers.find(c => c.id === q?.customerId)?.ownerId; }
+    case 'supplier': { const sup = root.market.suppliers.find(x => x.id === value.id) as { handlers?: Record<string, { id: string }> } | undefined; return Object.values(sup?.handlers || {})[0]?.id; }
+  }
+}
+/** Customer the linked record belongs to, so a submission can also land in that customer's follow-up history. */
+export function emailLinkCustomerId(root: MistState, value: EmailLink): string | undefined {
+  const orderCustomer = (orderId?: string) => root.orders.find(o => o.id === orderId)?.customerId;
+  switch (value.kind) {
+    case 'customer': return root.customers.some(c => c.id === value.id) ? value.id : undefined;
+    case 'development': return root.devs.find(d => d.id === value.id)?.customerId;
+    case 'order': return orderCustomer(value.id);
+    case 'invoice': return orderCustomer(root.invoices.find(i => i.id === value.id)?.orderId);
+    case 'quotation': return root.market.quotations.find(q => q.id === value.id)?.customerId;
+    default: return undefined;
+  }
 }
 
 export function createEmailState(_context: MistContext, _root: unknown): EmailState { return { accounts: [], messages: [], drafts: [], sends: [] }; }
@@ -157,13 +186,27 @@ const sourceOf = (row: { source?: number } | undefined) => row?.source || 1;
 /** 收信来源身份：任何一项变化都表示远端邮箱已不是同一个，旧的 UID 游标与去重键失效。 */
 const imapSourceKey = (address: string, t: EmailTransport | undefined) => t ? [address.toLowerCase(), t.imapHost.toLowerCase(), t.imapPort, t.imapSecure ? 'tls' : 'starttls', t.username.toLowerCase()].join('|') : '';
 /** 个人邮箱由本人以邮件编辑权限接入；共享邮箱涉及他人可见范围，需要邮件账户管理权限（emails:admin）。 */
-export function emailCommandPermission(command: EmailCommand) { return command.type === 'email.account.save' && (command.payload as { input?: { kind?: string } })?.input?.kind === 'shared' ? 'emails:admin' : 'emails:write'; }
+export function emailCommandPermission(command: EmailCommand) { return command.type === 'email.account.save' && (command.payload as { input?: { kind?: string } })?.input?.kind === 'shared' || command.type === 'email.template.save' ? 'emails:admin' : 'emails:write'; }
+/** Fill {placeholders} from the draft's linked records; unknown placeholders stay for the user to replace. */
+export function fillEmailTemplate(root: MistState, value: string, links: EmailLink[]): string {
+  const order = root.orders.find(o => links.some(l => l.kind === 'order' && l.id === o.id)) || root.orders.find(o => links.some(l => l.kind === 'invoice' && root.invoices.find(i => i.id === l.id)?.orderId === o.id));
+  const quote = root.market.quotations.find(q => links.some(l => l.kind === 'quotation' && l.id === q.id));
+  const customerId = links.find(l => l.kind === 'customer')?.id || order?.customerId || quote?.customerId;
+  const customer = root.customers.find(c => c.id === customerId), line = order ? root.orderLines.find(l => l.orderId === order.id) : undefined;
+  const shipment = order ? root.fulfillment.shipments.filter(sh => sh.lines.some(l => l.orderId === order.id) && sh.state !== 'cancelled').at(-1) : undefined;
+  const values: Record<string, string | undefined> = { 客户: customer?.name, 订单号: order?.code, 款号: line?.style, 交期: order?.due, 报价号: quote?.code, 出运号: shipment?.code };
+  return value.replace(/\{(客户|订单号|款号|交期|报价号|出运号)\}/g, (all, key) => values[key] || all);
+}
 
 /** 关联目标必须是本公司里真实存在的对象。 */
 export function emailLinkTarget(root: MistState, link: EmailLink): { label: string; view: string; id: string } | null {
   if (link.kind === 'customer') { const row = root.customers.find(item => item.id === link.id); return row ? { label: row.name, view: 'crm', id: row.id } : null; }
   if (link.kind === 'development') { const row = root.devs.find(item => item.id === link.id); return row ? { label: `${row.code} · ${row.name}`, view: 'development/detail', id: row.id } : null; }
   if (link.kind === 'order') { const row = root.orders.find(item => item.id === link.id); return row ? { label: `${row.code} · ${row.customer}`, view: 'orders/detail', id: row.id } : null; }
+  if (link.kind === 'supplier') { const row = root.market.suppliers.find(item => item.id === link.id); return row ? { label: row.name, view: 'suppliers', id: row.id } : null; }
+  if (link.kind === 'purchase') { const row = root.fulfillment.purchases.find(item => item.id === link.id); return row ? { label: `${row.code} · ${row.supplier}`, view: 'procurement', id: row.id } : null; }
+  if (link.kind === 'quotation') { const row = root.market.quotations.find(item => item.id === link.id); return row ? { label: `${row.code} · ${root.customers.find(c => c.id === row.customerId)?.name || ''}`, view: 'quotations', id: row.id } : null; }
+  if (link.kind === 'rfq') { const row = (root as MistState & { rfqs?: Array<{ id: string; code: string; description: string }> }).rfqs?.find(item => item.id === link.id); return row ? { label: `${row.code} · ${row.description}`, view: 'procurement', id: row.id } : null; }
   const row = root.invoices.find(item => item.id === link.id); return row ? { label: `${row.code} · ${row.customer}`, view: 'payment-vouchers', id: row.id } : null;
 }
 function link(root: MistState, value: EmailLink): EmailLink {
@@ -205,6 +248,7 @@ function transportOf(value: unknown): EmailTransport {
 }
 function draftOf(root: MistState, input: EmailDraftInput, context: MistContext) {
   const owner = account(root, input?.accountId, context);
+  if (owner.removed) fail('该邮箱已移除', 'PRECONDITION');
   const from = text(input.from, '发件身份', true, 200); if (from !== owner.address && !owner.aliases.includes(from)) fail('发件身份不在该邮箱允许的别名中');
   const blocked = privateMailFileIds(root, context.actorId);
   const draft = { accountId: owner.id, from, to: addressList(text(input.to, '收件人', false, 2000), '收件人'), cc: addressList(text(input.cc, '抄送', false, 2000), '抄送'), bcc: addressList(text(input.bcc, '密送', false, 2000), '密送'), subject: text(input.subject, '主题', false, 300), body: text(input.body, '正文', false, 20000), template: text(input.template, '模板', false, 40), links: (input.links || []).map(item => link(root, item)), fileIds: [...new Set((input.fileIds || []).map(String))], ...(input.replyToId ? { replyToId: message(root, String(input.replyToId), context).id } : {}) };
@@ -310,12 +354,79 @@ export function applyEmailCommand(root: MistState, command: EmailCommand, contex
       if (row.submissions.some(item => sameLink(item.link, value))) fail('已向该对象提交过资料，关联不能移除', 'PRECONDITION');
       row.links = row.links.filter(item => !sameLink(item, value)); log(root, context, row.id, '移除邮件关联'); return { id: row.id };
     }
+    case 'email.bulk': {
+      const ids = command.payload.ids, action = command.payload.action;
+      if (!Array.isArray(ids) || !ids.length || ids.length > 200) fail('请选择 1–200 封邮件');
+      if (!['read', 'unread', 'archive', 'trash', 'restore', 'link'].includes(action)) fail('批量操作无效');
+      const value = action === 'link' ? link(root, command.payload.link as EmailLink) : undefined;
+      let applied = 0;
+      for (const id of [...new Set(ids.map(String))]) {
+        const row = message(root, id, context);
+        if (action === 'read' || action === 'unread') { if (row.read !== (action === 'read')) { row.read = action === 'read'; applied++; } }
+        else if (action === 'link') { if (!row.links.some(item => sameLink(item, value!))) { row.links.push(value!); applied++; } }
+        else if (action === 'restore') { if (row.folder === 'trash') { row.folder = row.previousFolder || 'inbox'; delete row.previousFolder; applied++; } }
+        else if (row.folder !== action && row.folder !== 'trash') { if (action === 'trash') row.previousFolder = row.folder; row.folder = action; applied++; }
+      }
+      log(root, context, ids[0], `批量${{ read: '标为已读', unread: '标为未读', archive: '归档', trash: '删除', restore: '恢复', link: '关联' }[action]} ${applied} 封邮件${value ? ' · ' + emailLinkTarget(root, value)!.label : ''}`);
+      return { id: String(ids[0]), applied };
+    }
+    case 'email.purge': {
+      // Permanent removal of messages already in 已删除. Messages that carry business submissions stay as records.
+      const ids = command.payload.ids;
+      if (!Array.isArray(ids) || !ids.length || ids.length > 500) fail('请选择要彻底删除的邮件');
+      const rows = [...new Set(ids.map(String))].map(id => message(root, id, context));
+      if (rows.some(row => row.folder !== 'trash')) fail('只能彻底删除「已删除」中的邮件', 'PRECONDITION');
+      if (rows.some(row => row.submissions.length)) fail('已提交过业务资料的邮件需保留记录，不能彻底删除', 'PRECONDITION');
+      const gone = new Set(rows.map(row => row.id)), files = new Set(rows.flatMap(row => row.attachments.map(a => a.fileId).filter(Boolean) as string[]));
+      root.email.messages = root.email.messages.filter(row => !gone.has(row.id));
+      // Mail attachments can also be evidence on business records. Check all remaining
+      // references (not the file registry itself), matching the read projection's exact-ID rule.
+      const stillUsed = new Set<string>();
+      const walk = (value: unknown): void => {
+        if (typeof value === 'string') { if (files.has(value)) stillUsed.add(value); }
+        else if (Array.isArray(value)) value.forEach(walk);
+        else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+      };
+      walk({ ...root, files: [] });
+      root.files = root.files.filter(file => !files.has(file.id) || stillUsed.has(file.id));
+      log(root, context, rows[0].accountId, `彻底删除 ${rows.length} 封邮件`);
+      return { id: rows[0].accountId, applied: rows.length };
+    }
+    case 'email.template.save': {
+      const v = command.payload, list = root.email.templates ||= [];
+      const row = v.id ? list.find(t => t.id === v.id) : undefined;
+      if (v.id && !row) fail('模板不存在', 'NOT_FOUND');
+      const name = text(v.name, '模板名称', true, 60), subject = text(v.subject, '主题', false, 300), body = text(v.body, '正文', true, 20000);
+      if (list.some(t => t.id !== row?.id && !t.archived && t.name === name)) fail('已有同名模板');
+      if (row) Object.assign(row, { name, subject, body, archived: v.archived === true, updatedAt: context.now, updatedBy: context.actorName });
+      else list.push({ id: context.id(), name, subject, body, updatedAt: context.now, updatedBy: context.actorName });
+      log(root, context, row?.id || list.at(-1)!.id, `${row ? (v.archived ? '停用' : '更新') : '新增'}邮件模板 ${name}`);
+      return { id: row?.id || list.at(-1)!.id };
+    }
+    case 'email.account.remove': {
+      const row = account(root, command.payload.id, context), reason = text(command.payload.reason, '移除原因', true, 300);
+      if (row.credentialSet) fail('请先断开邮箱连接', 'PRECONDITION');
+      if (row.ownerId && row.ownerId !== context.actorId) fail('邮箱只能由开通人移除', 'FORBIDDEN');
+      if (root.email.sends.some(sd => sd.accountId === row.id && ['sending', 'unknown'].includes(emailSendEffectiveStatus(sd)))) fail('还有结果待核对的发送，请先核对', 'PRECONDITION');
+      // Messages, drafts and send records stay readable as history under the removed account.
+      row.removed = { at: context.now, actor: context.actorName, reason };
+      row.connection = 'not_connected';
+      log(root, context, row.id, `移除邮箱 ${row.address}：${reason}`);
+      return { id: row.id };
+    }
     case 'email.followUp': {
-      const row = message(root, String(p.id), context), owner = text(p.owner, '负责人', true, 80), note = text(p.note, '说明', false, 500), due = text(p.due, '截止日', true, 10);
+      const row = message(root, String(p.id), context), note = text(p.note, '说明', false, 500), due = text(p.due, '截止日', true, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) fail('截止日格式无效');
-      const id = context.id(), target = { view: 'emails', id: row.id };
-      root.tasks.unshift({ id, title: `跟进邮件：${row.subject}`, due, done: false, kind: 'email-follow-up', target, assigneeIds: context.actorId ? [context.actorId] : [] });
+      // The follow-up goes to a real member who can see this mailbox; free-text names are not assignees.
+      const ownerId = typeof command.payload.ownerId === 'string' && command.payload.ownerId ? command.payload.ownerId : context.actorId;
+      const member = (root.members || []).find(m => m.userId === ownerId), owner = ownerId === context.actorId ? context.actorName : member?.name || '';
+      if (!ownerId || ownerId !== context.actorId && !member) fail('请选择本公司在职成员作为负责人');
+      if (!emailAccountAccessible(root.email.accounts.find(a => a.id === row.accountId)!, ownerId)) fail('负责人无权查看此邮箱，请使用已授权的共享邮箱');
+      const id = context.id(), customerLink = row.links.map(l => emailLinkCustomerId(root, l)).find(Boolean), target = { view: 'emails', id: row.id };
+      root.tasks.unshift({ id, title: `跟进邮件：${row.subject}`, due, done: false, kind: 'email-follow-up', target, assigneeIds: [ownerId!] });
       root.calendar.push({ id: context.id(), title: `邮件跟进 · ${row.subject}`, date: due, time: '', note: `${owner}${note ? ' · ' + note : ''} · 来源：${row.from.name || row.from.address}`, target });
+      // Linked to a customer: the follow-up also appears in the customer's follow-up history.
+      if (customerLink && root.crm) root.crm.followUps.unshift({ id: context.id(), customerId: customerLink, method: 'email', content: `邮件：${row.subject}${note ? '\n' + note : ''}`, at: row.at, nextDate: due, nextTaskId: id, link: null, actor: context.actorName, createdAt: context.now });
       row.followUpTaskIds.push(id); log(root, context, row.id, `生成邮件跟进（${owner}，${due}）`); return { id };
     }
     case 'email.submitExtraction': {
@@ -329,6 +440,10 @@ export function applyEmailCommand(root: MistState, command: EmailCommand, contex
       if (!ownerId) fail('请先指定业务负责人', 'PRECONDITION');
       if (!ownerId || !emailAccountAccessible(root.email.accounts.find(a => a.id === row.accountId)!, ownerId)) fail('业务负责人无权查看此邮箱，请使用已授权的共享邮箱交接', 'PRECONDITION');
       root.tasks.unshift({ id, title: `处理邮件资料：${target.label}`.slice(0, 100), due: mistBusinessDate(context.now), done: false, kind: 'email-extraction-review', target: { view: 'emails', id: row.id }, assigneeIds: [ownerId!] });
+      // The business record's own history shows the submission (customer communication timeline, order / supplier events).
+      const customerId = emailLinkCustomerId(root, value), entity = value.kind === 'customer' ? 'customer' : value.kind;
+      root.events.unshift({ id: context.id(), entityType: entity, entityId: value.id, actor: context.actorName, at: context.now, text: `邮件资料：${row.subject}（来自 ${row.from.name || row.from.address}）`, fileIds: [] });
+      if (customerId && value.kind !== 'customer') root.events.unshift({ id: context.id(), entityType: 'customer', entityId: customerId, actor: context.actorName, at: context.now, text: `邮件资料提交到${EMAIL_LINK_LABEL[value.kind]} ${target.label}：${row.subject}`, fileIds: [] });
       row.submissions.push({ at: context.now, actor: context.actorName, link: value, taskId: id, ...(row.extractionReview ? { review: JSON.parse(JSON.stringify(row.extractionReview)) } : {}) });
       log(root, context, row.id, `提交邮件资料到${EMAIL_LINK_LABEL[value.kind]} ${target.label}（待处理）`); return { id: row.id };
     }
@@ -344,7 +459,7 @@ export function applyEmailCommand(root: MistState, command: EmailCommand, contex
       account(root, target!.accountId, context);
       root.email.drafts = root.email.drafts.filter(row => row.id !== target!.id); return { id: target!.id };
     }
-    case 'email.account.save': return saveAccount(root, command.payload, context);
+    case 'email.account.save': { const old = command.payload.id ? root.email.accounts.find(a => a.id === command.payload.id) : undefined; if (old?.removed) fail('该邮箱已移除', 'PRECONDITION'); return saveAccount(root, command.payload, context); }
     case 'email.server.account': {
       const row = account(root, p.id, context); if (row.example) fail('示例邮箱没有真实连接', 'PRECONDITION');
       const v = command.payload;
@@ -618,10 +733,11 @@ function beginSend(root: MistState, payload: Extract<EmailCommand, { type: 'emai
 /** 演示公司的合成邮件：全部标注示例、使用 example.invalid 地址，不代表真实收信。 */
 export function seedEmailExamples(root: MistState, context: MistContext) {
   const day = (offset: number, time: string) => { const date = new Date(context.now); date.setUTCDate(date.getUTCDate() - offset); return date.toISOString().slice(0, 10) + 'T' + time + ':00Z'; };
-  const me = context.actorName || '顾言';
+  // 示例个人邮箱是业务员顾言的地址（gu.yan@），显示名与签名固定为顾言，不随建公司的人变化。
+  const me = '顾言';
   root.email.accounts.push(
-    { id: 'mail-personal', address: 'gu.yan@bambook.example.invalid', displayName: `${me}（示例个人邮箱）`, kind: 'personal', ownerName: me, memberNames: [], aliases: ['sales@bambook.example.invalid'], signature: `${me}\n竹衍服饰 · 业务部\n示例签名`, connection: 'example', lastSyncAt: day(0, '07:40'), failedFolders: [], example: true },
-    { id: 'mail-shared', address: 'orders@bambook.example.invalid', displayName: '订单共享邮箱（示例）', kind: 'shared', ownerName: '沈禾', memberNames: [me, '沈禾'], aliases: [], signature: '竹衍服饰 · 订单组', connection: 'example', lastSyncAt: day(0, '07:35'), failedFolders: ['已发送'], example: true },
+    { id: 'mail-personal', address: 'gu.yan@bambook.example.invalid', displayName: `${me}（示例个人邮箱）`, kind: 'personal', ownerName: me, memberNames: [], aliases: ['sales@bambook.example.invalid'], signature: `${me}\n雾织贸易 · 业务部\n示例签名`, connection: 'example', lastSyncAt: day(0, '07:40'), failedFolders: [], example: true },
+    { id: 'mail-shared', address: 'orders@bambook.example.invalid', displayName: '订单共享邮箱（示例）', kind: 'shared', ownerName: '沈禾', memberNames: [me, '沈禾'], aliases: [], signature: `雾织贸易 · 订单组`, connection: 'example', lastSyncAt: day(0, '07:35'), failedFolders: ['已发送'], example: true },
   );
   const customer = root.customers[0], order = root.orders.find(row => row.code === 'SO-G-2026-018') || root.orders[0], dev = root.devs[0], invoice = root.invoices[0];
   const buyer = { name: 'Emma Clarke', address: 'emma.clarke@cedarcrown.example.invalid' }, ops = { name: 'Sophie Hale', address: 'sophie.hale@cedarcrown.example.invalid' };

@@ -27,13 +27,13 @@ beforeEach(async () => {
   state.memberIds = ['other'];
   for (const [prefix, target] of [['visible', { view: 'orders/list', id: 'order' }], ['hidden', { view: 'payables', id: 'bill' }]] as const) {
     state.tasks.push({ id: prefix + '-task', title: prefix, due: '', done: false, kind: 'finance', target });
-    state.notifications.push({ id: prefix + '-notice', title: prefix, body: '', at: now, target });
+    state.notifications.push({ id: prefix + '-notice', recipientIds: ['owner','other'], title: prefix, detail: '', at: now, readAt: null, target });
     state.calendar.push({ id: prefix + '-calendar', title: prefix, date: '2026-10-14', time: '10:00', note: '', target });
   }
 });
 afterEach(async () => { await rm(directory, { recursive: true, force: true }); });
 
-describe('共享提醒动作只能处理当前账号可见来源，不另造个人提醒模型', () => {
+describe('个人通知已读与共享事项动作均受当前账号可见来源约束', () => {
   for (const subject of ['other', 'owner']) {
     it.each([
       { type: 'notification.read', payload: { id: 'hidden-notice' } },
@@ -52,8 +52,9 @@ describe('共享提醒动作只能处理当前账号可见来源，不另造个�
       const input = { requestId: 'visible-read-all', expectedRevision: 0, command: { type: 'notification.readAll' as const, payload: {} } };
       const first = await repo.execute(actor(subject), workspaceId, input);
       const state = db.workspaces.get(workspaceId).state;
-      expect(state.notifications.find((item: any) => item.id === 'visible-notice').readAt).toBe(now);
-      expect(state.notifications.find((item: any) => item.id === 'hidden-notice').readAt).toBeUndefined();
+      expect(state.notifications.find((item: any) => item.id === 'visible-notice').readBy).toEqual({[subject]:now});
+      expect(first.workspace.state.notifications.find((item: any) => item.id === 'visible-notice').readAt).toBe(now);
+      expect(state.notifications.find((item: any) => item.id === 'hidden-notice').readBy).toBeUndefined();
       const replay = await repo.execute(actor(subject), workspaceId, input);
       expect(replay.replayed).toBe(true);
       expect(replay.workspace.revision).toBe(first.workspace.revision);
@@ -61,8 +62,28 @@ describe('共享提醒动作只能处理当前账号可见来源，不另造个�
     });
   }
 
+  it('服务端持久化本人已读后，另一收件人的投影仍然未读', async () => {
+    await execute({type:'notification.read',payload:{id:'visible-notice'}},'owner-read',actor('owner'));
+    const stored=db.workspaces.get(workspaceId).state.notifications.find((item:any)=>item.id==='visible-notice');
+    expect(stored.readBy).toEqual({owner:now});
+    const otherView=await repo.get(actor('other'),workspaceId);
+    expect(otherView.state.notifications.find((item:any)=>item.id==='visible-notice')?.readAt).toBeNull();
+    const result=await execute({type:'notification.readAll',payload:{}},'other-empty-batch',actor('other'));
+    expect(result.workspace.state.notifications.find((item:any)=>item.id==='visible-notice').readAt).toBe(now);
+    expect(db.workspaces.get(workspaceId).state.notifications.find((item:any)=>item.id==='visible-notice').readBy).toEqual({owner:now,other:now});
+  });
+
+  it('没有收件人的旧流水即使公司负责人也不能标已读', async () => {
+    const state=db.workspaces.get(workspaceId).state;
+    delete state.notifications[0].recipientIds;
+    await expect(execute({type:'notification.read',payload:{id:'visible-notice'}},'legacy-read',actor('owner'))).rejects.toMatchObject({status:404});
+    expect(state.notifications[0].readBy).toBeUndefined();
+  });
+
   it('可见通知、任务、日程仍可办理，隐藏记录保持完整', async () => {
     const hidden = structuredClone(db.workspaces.get(workspaceId).state.calendar[1]);
+    // 可见之外还须有办理资格：本事项指派给执行人（未指派且无岗位权限的事项需来源写入权限，见 securityScopeFixes.test.ts）。
+    db.workspaces.get(workspaceId).state.tasks.find((item: any) => item.id === 'visible-task').assigneeIds = ['other'];
     await execute({ type: 'notification.read', payload: { id: 'visible-notice' } });
     await execute({ type: 'task.complete', payload: { id: 'visible-task', done: true } });
     await execute({ type: 'calendar.save', payload: { id: 'visible-calendar', title: '可见日程更新', date: '2026-10-14', time: '12:00', note: '', target: { view: 'orders/list', id: 'order' } } });
@@ -70,7 +91,7 @@ describe('共享提醒动作只能处理当前账号可见来源，不另造个�
     expect(state.tasks.find((item: any) => item.id === 'visible-task').done).toBe(true);
     expect(state.calendar.find((item: any) => item.id === 'visible-calendar').title).toBe('可见日程更新');
     expect(state.calendar.find((item: any) => item.id === 'hidden-calendar')).toEqual(hidden);
-    expect(state.notifications.find((item: any) => item.id === 'hidden-notice').readAt).toBeUndefined();
+    expect(state.notifications.find((item: any) => item.id === 'hidden-notice').readBy).toBeUndefined();
   });
 
   it('不能借新建或修改可见日程关联无读取权限的来源', async () => {
@@ -89,7 +110,10 @@ function paymentFixture(reconcile = false) {
   state.fulfillment.purchases.push({ id: 'purchase', supplierId: 'supplier', supplier: '隔离供应商', state: 'approved', kind: 'material', currency: 'CNY', amount: 1000, terms: '合同付款条件', lines: [] });
   state.payables.bills.push({ id: 'bill', code: 'AP-TEST', supplierId: 'supplier', supplier: '隔离供应商', invoiceNo: 'VAT-TEST', invoiceDate: '2026-10-13', currency: 'CNY', amount: 1000, taxAmount: 0, taxRate: '', lines: [], terms: [], due: '2026-11-14', dueBasis: '合同付款条件', fileIds: [], note: '', state: 'open', registeredAt: now, registeredBy: 'owner' });
   // 所有付款须先有主管已批准的付款申请：票据付款申请带分配，预付款申请不带。
-  const approved = { reviewerIds: ['manager'], requesterId: 'sales', requester: '业务', submittedAt: '2026-10-12T01:00:00.000Z', reason: '按合同付款', fileIds: [], snapshot: [], state: 'approved', paymentHistory: [], decision: { actorId: 'manager', actor: '主管', at: '2026-10-12T02:00:00.000Z', decision: 'approved', note: '同意' } };
+  const approved = { reviewerIds: ['manager'], requesterId: 'sales', requester: '业务', submittedAt: '2026-10-12T01:00:00.000Z', reason: '按合同付款', fileIds: [], snapshot: [], state: 'approved', paymentHistory: [], decision: { actorId: 'manager', actor: '主管', at: '2026-10-12T02:00:00.000Z', decision: 'approved', note: '同意' },
+    // 分档规则（M4）下已批准申请须带提交时冻结的档位：600 元、该供应商首笔付款 → ≤5 万元级 + 新供应商首笔级，两级由不同人签。
+    tier: { cnyAmount: 600, cumulativeCnyAmount: 600, rate: '1', rateSource: '人民币', firstPayment: true, levels: [{ level: 'pay_lt5', reviewerIds: ['manager'] }, { level: 'pay_new_supplier', reviewerIds: ['owner'] }] },
+    approvals: [{ level: 'pay_lt5', actorId: 'manager', actor: '主管', at: '2026-10-12T02:00:00.000Z', decision: 'approved', note: '同意' }, { level: 'pay_new_supplier', actorId: 'owner', actor: '总经理', at: '2026-10-12T02:00:00.000Z', decision: 'approved', note: '同意' }] };
   state.payables.requests = [
     { id: 'req-bill', code: 'PR-TEST-1', purpose: 'bill', supplierId: 'supplier', supplier: '隔离供应商', currency: 'CNY', amount: 600, lines: [{ billId: 'bill', billCode: 'AP-TEST', invoiceNo: 'VAT-TEST', amount: 600 }], ...approved },
     { id: 'req-pre', code: 'PR-TEST-2', purpose: 'prepayment', supplierId: 'supplier', supplier: '隔离供应商', currency: 'CNY', amount: 600, planId: 'plan', purchaseId: 'purchase', purchaseCode: 'PO-TEST', lines: [], ...approved },

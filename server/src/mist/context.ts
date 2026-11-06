@@ -3,6 +3,7 @@ import type { MistContext } from '../shared/mistWorkspace';
 import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../auth/tokenHelpers';
 import { hasScope } from '../auth/permissionService';
 import { createApprovalRoutingService } from '../approvals/approvalRoutingService';
+import type { PaymentTierAuthority } from '../shared/mistPayables';
 /** Approval authority is rebuilt in the same DB transaction as the business command. */
 export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:string,eligibleReviewerIds?:readonly string[]):Promise<NonNullable<MistContext['authority']>>{
   const authority:NonNullable<MistContext['authority']>={supplier:{}};
@@ -14,18 +15,25 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
     for(const contract of ['purchase','processing'])for(const family of ['fabric','garment'])authority.supplier[`supplierCommitment.approvers.${contract}.${family}`]={version:1,userIds:demo?managers:['local-reviewer','local-manager']};
     // 本地测试审批人：原全权限审批员 + 按现有岗位持有 procurement:approve / orders:write 的业务主管测试身份。
     authority.claimReviewerId=single;authority.businessReviewerId=single;const orderReviewers=demo?managers:['local-operator','local-reviewer','local-manager'];authority.orderReviewerIds={garment:[...orderReviewers],fabric:[...orderReviewers]};
-    // 付款申请：业务主管按岗位持有 finance:payment_request:approve。
-    authority.paymentReviewerIds=[...managers];
+    // 付款申请分档：业务主管岗只有 5 万元及以下档；5 万元以上与首笔付款加签由全权限审批员 / 公司管理员（总领导）办理。
+    const leaders=demo?['demo-admin']:['local-reviewer'];
+    authority.paymentTierReviewerIds={pay_lt5:[...managers],pay_gt5:leaders,pay_new_supplier:leaders};
+    // 两级须不同的人签（H1）：本地测试身份里本地操作员同为全权限，作为 5 万元以上档与首笔加签的第二位审批人
+    // （本地操作员自己提交 5 万元以上的首笔付款时没有第二位，提交被拒绝）。
+    // 演示公司按岗位只有公司管理员陆衡持有 5 万元以上档与首笔加签（周敏是业务主管，只有 5 万元及以下档），
+    // 没有第二位合格的人：演示中 5 万元及以下的首笔付款由周敏 + 陆衡各签一级；5 万元以上的首笔付款提交即被拒绝。
+    if(!demo)(authority as PaymentTierAuthority).paymentTierAlternateIds={pay_lt5:[],pay_gt5:['local-operator'],pay_new_supplier:['local-operator']};
     // 风险申请：业务主管按岗位持有 risk:write；申请人本人由命令排除。
     if(kind.startsWith('platform.risk.'))authority.riskReviewerIds=[...managers];
     return authority;
   }
   const routing=createApprovalRoutingService({prisma:db,companyId:actor.companyId??null,eligibleReviewerIds});
-  if(kind.startsWith('order.governance.') || kind.startsWith('fulfillment.production.intake')){
+  if(kind.startsWith('order.governance.') || kind.startsWith('fulfillment.production.intake') || kind==='fulfillment.qc.dispose' || kind==='fulfillment.qc.concession.decide' || kind==='fulfillment.stock.count' || kind==='fulfillment.stock.count.decide'){
     const {createOrderMainApprovalService}=await import('../orders/orderMainApprovalService');
     const service=createOrderMainApprovalService(db);authority.orderReviewerIds={garment:[],fabric:[]};
     for(const domain of ['garment','fabric'] as const){
-      let configured:string[]=[];try{configured=await service.resolveEligibleReviewerIds(db,domain);}catch(error:any){if(error?.code!=='ORDER_APPROVAL_AUTHORITY_MISSING')throw error;}
+      // 公司会话只取本公司显式配置的审批资格；未配置时下方按部门主管路由。
+      let configured:string[]=[];try{configured=await service.resolveEligibleReviewerIds(db,domain,actor.companyId??null);}catch(error:any){if(error?.code!=='ORDER_APPROVAL_AUTHORITY_MISSING')throw error;}
       const current=async(id:string,checkDomain=false)=>{
         if(eligibleReviewerIds&&!eligibleReviewerIds.includes(id))return false;
         const user=await loadUserWithRoles(db,id);if(!user||user.status!=='active'||user.deletedAt)return false;
@@ -60,7 +68,7 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
   }
   // Only submission/decision consumes approval authority. Drafts, documents and
   // receipt records must not reload unrelated global reviewer accounts.
-  if(['fulfillment.procurement.submit','fulfillment.procurement.decide'].includes(kind)){
+  if(['fulfillment.procurement.submit','fulfillment.procurement.decide','fulfillment.procurement.amend','fulfillment.procurement.amend.decide'].includes(kind)){
     const current=async(id:string,family:string,strictDomain=false)=>{
       if(eligibleReviewerIds&&!eligibleReviewerIds.includes(id))return false;
       if(actor.companyId&&db.companyMember?.findFirst&&!await db.companyMember.findFirst({where:{companyId:actor.companyId,userId:id,status:'active'}}))return false;
@@ -72,7 +80,8 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
     };
     for(const contract of ['purchase','processing'])for(const family of ['fabric','garment']){
       const key=`supplierCommitment.approvers.${contract}.${family}`;
-      const row=await db.systemConfig?.findUnique({where:{id:`global::${key}`}});
+      // 公司名单在 scope `company:<id>`；无公司会话沿用 global（与 supplierCommitmentAuthority 一致）。
+      const row=await db.systemConfig?.findUnique({where:{id:`${actor.companyId?`company:${actor.companyId}`:'global'}::${key}`}});
       let value:any=row?.value;try{if(typeof value==='string')value=JSON.parse(value);}catch{value=null;}
       const valid=value?.schemaVersion===1&&Array.isArray(value.userIds)&&Number.isSafeInteger(row?.version);
       const userIds:string[]=[];
@@ -92,8 +101,37 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
     }
   }
   if(kind.startsWith('platform.claim.')){try{const reviewerId=(await routing.resolveClaimLeader(actor.userId)).reviewerId;const user=reviewerId&&reviewerId!==actor.userId?await loadUserWithRoles(db,reviewerId):null;if(user&&user.status==='active'&&!user.deletedAt&&hasScope(await buildLoadedAuthTokenPayload(db,user,actor.companyId??null),'aftersales:approve'))authority.claimReviewerId=reviewerId;}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}}
-  // 付款申请由申请人所在部门主管审批；主管必须当前仍持有付款申请审批权，不能自审。
-  if(kind.startsWith('payable.request.')){authority.paymentReviewerIds=[];try{const reviewerId=(await routing.resolveReviewerByDepartment(actor.userId)).reviewerId;const user=reviewerId&&reviewerId!==actor.userId?await loadUserWithRoles(db,reviewerId):null;if(user&&user.status==='active'&&!user.deletedAt&&hasScope(await buildLoadedAuthTokenPayload(db,user,actor.companyId ?? null),'finance:payment_request:approve' as any))authority.paymentReviewerIds.push(reviewerId);}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}}
+  // 付款申请分档：每一档先找申请人所在部门主管，主管没有该档权限时上抬到总领导；
+  // 审批人必须当前在职、同时持有付款申请审批权与该档权限，且不能是申请人本人。
+  if(kind.startsWith('payable.request.')){
+    const tiers={pay_lt5:'vouchers:approve:pay_lt5',pay_gt5:'vouchers:approve:pay_gt5',pay_new_supplier:'vouchers:approve:pay_new_supplier'} as const;
+    const holds=new Map<string,Promise<TokenPayload|null>>();
+    const fresh=(id:string)=>{if(!holds.has(id))holds.set(id,(async()=>{if(id===actor.userId||(eligibleReviewerIds&&!eligibleReviewerIds.includes(id)))return null;const user=await loadUserWithRoles(db,id);return user&&user.status==='active'&&!user.deletedAt?buildLoadedAuthTokenPayload(db,user,actor.companyId ?? null):null;})());return holds.get(id)!;};
+    const resolve=async(run:()=>Promise<{reviewerId:string}>)=>{try{return (await run()).reviewerId;}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;return undefined;}};
+    const head=await resolve(()=>routing.resolveReviewerByDepartment(actor.userId));let leader:string|undefined|null=null;
+    authority.paymentTierReviewerIds={};
+    for(const [level,scope] of Object.entries(tiers) as Array<[keyof typeof tiers,string]>){
+      const qualified=async(id?:string)=>{const p=id?await fresh(id):null;return !!p&&hasScope(p,'finance:payment_request:approve' as any)&&hasScope(p,scope as any);};
+      if(await qualified(head)){authority.paymentTierReviewerIds[level]=[head!];continue;}
+      if(leader===null)leader=await resolve(()=>routing.resolveClaimLeader(actor.userId));
+      authority.paymentTierReviewerIds[level]=await qualified(leader??undefined)?[leader!]:[];
+    }
+    // H1：首笔付款的金额档与首笔加签须由不同的人签。原路由让两级落到同一人时（主管没有该档、上抬到同一位总领导，
+    // 或申请人本人就是主管），另给出本空间成员中当前合格持有该档权限的其他人（申请人已由 fresh 排除）；
+    // 只在本次申请的两级确实冲突时由 mistPayables 并入该级名单，无冲突时原路由不变。决定时按原申请人重建，结果一致。
+    const routed=authority.paymentTierReviewerIds,same=(a:string[]=[],b:string[]=[])=>a.length>0&&b.length>0&&new Set([...a,...b]).size<2;
+    if(eligibleReviewerIds&&(same(routed.pay_lt5,routed.pay_new_supplier)||same(routed.pay_gt5,routed.pay_new_supplier))){
+      const alternates:Partial<Record<keyof typeof tiers,string[]>>={};
+      for(const [level,scope] of Object.entries(tiers) as Array<[keyof typeof tiers,string]>){
+        alternates[level]=[];
+        for(const id of eligibleReviewerIds){
+          if((routed[level]||[]).includes(id))continue;
+          const p=await fresh(id);if(p&&hasScope(p,'finance:payment_request:approve' as any)&&hasScope(p,scope as any))alternates[level]!.push(id);
+        }
+      }
+      (authority as PaymentTierAuthority).paymentTierAlternateIds=alternates;
+    }
+  }
   // 风险关闭/豁免/带风险放行申请：由申请人所在部门主管审批；主管须当前在职、仍持有风险处理权，且不能是申请人本人。
   if(kind.startsWith('platform.risk.')){authority.riskReviewerIds=[];try{const reviewerId=(await routing.resolveReviewerByDepartment(actor.userId)).reviewerId;const user=reviewerId&&reviewerId!==actor.userId?await loadUserWithRoles(db,reviewerId):null;if(user&&user.status==='active'&&!user.deletedAt&&hasScope(await buildLoadedAuthTokenPayload(db,user,actor.companyId ?? null),'risk:write' as any))authority.riskReviewerIds.push(reviewerId);}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}}
   if(kind.startsWith('market.quotation.')){try{authority.businessReviewerId=(await routing.resolveReviewerByDepartment(actor.userId)).reviewerId;}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}}

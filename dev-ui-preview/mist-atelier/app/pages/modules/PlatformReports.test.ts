@@ -3,7 +3,7 @@ import { agingBucket, buildCustomerSales, buildOrderMargin, buildOrderMarginCny,
 import { applyMistCommand, createMistState, type MistCommand, type MistContext } from '../../../../../server/src/shared/mistWorkspace';
 import { rebateCandidateBills } from '../../../../../server/src/shared/mistExportRebate';
 
-const order = (id: string, o: Record<string, unknown> = {}) => ({ id, code: 'SO-' + id, customerId: 'c-' + (o.customer ?? 'A'), customer: 'A', currency: 'USD', amount: 100, due: '2026-10-20', progress: 50, state: '生产中', tone: 'neutral', createdAt: '2026-10-01T02:00:00Z', ...o });
+const order = (id: string, o: Record<string, unknown> = {}) => ({ id, code: 'SO-' + id, customerId: 'c-' + (o.customer ?? 'A'), customer: 'A', currency: 'USD', amount: 100, due: '2026-10-20', progress: 50, state: '生产中', tone: 'neutral', createdAt: '2026-10-01T02:00:00Z', governance: { status: 'approved' }, ...o });
 const invoice = (id: string, orderId: string, o: Record<string, unknown> = {}) => ({ id, code: 'INV-' + id, orderId, order: '', customer: 'A', currency: 'USD', amount: 100, open: 100, due: '2026-10-01', ...o });
 const state = (orders: any[], invoices: any[] = []) => ({ orders, invoices } as any);
 
@@ -20,6 +20,12 @@ describe('报表中心', () => {
     expect(rows.map(r => [r.customer, r.currency, r.orders, r.amount, r.invoiced, r.received, r.open])).toEqual([['A', 'CNY', 1, 50, 50, 0, 50], ['B', 'USD', 1, 300, 0, 0, 0], ['A', 'USD', 2, 200, 100, 60, 40]]);
     expect(buildCustomerSales(s, '2026-10-02')).toEqual([]);
   });
+  it('counts sales by shipment departure or invoice date when asked, skipping orders without that date', () => {
+    const s = { ...state([order('1'), order('2')], [invoice('i1', '1', { issuedAt: '2026-10-15T02:00:00Z' })]), fulfillment: { shipments: [{ id: 's1', state: 'departed', departedAt: '2026-10-20T02:00:00Z', lines: [{ orderId: '2' }] }] } };
+    expect(buildCustomerSales(s, '2026-10-10', '', '', 'invoice').map(r => r.orders)).toEqual([1]);
+    expect(buildCustomerSales(s, '2026-10-16', '', '', 'invoice')).toEqual([]);
+    expect(buildCustomerSales(s, '2026-10-16', '', '', 'shipment').map(r => [r.orders, r.amount])).toEqual([[1, 100]]);
+  });
   it('buckets open receivables by days past due and skips settled or void invoices', () => {
     expect(['2026-10-15', '2026-10-14', '2026-09-15', '2026-08-16', '2026-07-17', '2026-07-16'].map(d => agingBucket(d, '2026-10-15'))).toEqual(['current', 'd30', 'd30', 'd60', 'd90', 'over']);
     const rows = buildReceivableAging(state([], [invoice('a', 'x', { due: '2026-10-20' }), invoice('b', 'x', { due: '2026-06-01', open: 25.5 }), invoice('c', 'x', { open: 0 }), invoice('d', 'x', { voidedAt: '2026-10-01T00:00:00Z' }), invoice('e', 'x', { currency: 'EUR', open: 7 })]), '2026-10-15');
@@ -29,8 +35,8 @@ describe('报表中心', () => {
     ]);
   });
   it('lists unfinished orders with overdue first, then due within seven days', () => {
-    const rows = buildOrderProgress(state([order('done', { progress: 100, due: '2026-01-01' }), order('ok', { due: '2026-11-30' }), order('soon', { due: '2026-10-22' }), order('late', { due: '2026-10-10' }), order('none', { due: '' })]), '2026-10-15');
-    expect(rows.map(r => [r.id, r.status, r.lateDays])).toEqual([['late', 'overdue', 5], ['soon', 'soon', 0], ['ok', 'ontrack', 0], ['none', 'nodue', 0]]);
+    const rows = buildOrderProgress(state([order('done', { state: '履约完成', due: '2026-01-01' }), order('draft', { governance: { status: 'draft' }, due: '2026-01-01' }), order('made', { progress: 100, state: '出运准备中', due: '2026-10-05' }), order('ok', { due: '2026-11-30' }), order('soon', { due: '2026-10-22' }), order('late', { due: '2026-10-10' }), order('none', { due: '' })]), '2026-10-15');
+    expect(rows.map(r => [r.id, r.status, r.lateDays])).toEqual([['made', 'overdue', 10], ['late', 'overdue', 5], ['soon', 'soon', 0], ['ok', 'ontrack', 0], ['none', 'nodue', 0]]);
   });
   it('computes contract-basis gross margin per order in the order currency without FX conversion', () => {
     const purchase = (id: string, orderId: string, o: Record<string, unknown> = {}) => ({ id, code: 'PO-' + id, orderId, state: 'approved', quantity: 10, price: 3.33, currency: 'USD', ...o });
@@ -72,5 +78,16 @@ describe('报表中心', () => {
     expect(buildOrderMarginCny(s, 'actual', '2026-07', '2026-10-17').find(r => r.code === 'SO-G-2026-017')).toMatchObject({ status: 'norate', marginEx: null, missing: ['USD'] });
     const eur = buildOrderMarginCny(s, 'quote', '2026-10', '2026-10-17').find(r => r.currency === 'EUR')!;
     expect(eur.status).toBe('norate');
+  });
+});
+
+import { rebateAccess } from './RebatePanel';
+describe('退税金额可读程度', () => {
+  it('无 tax:read 为无权查看；被 sensitive:tax_base 掩码为已隐藏；否则完整', () => {
+    const s = createMistState({ id: () => 'x', now: '2026-10-17T04:00:00Z', actorName: 't' }, 'empty');
+    expect(rebateAccess(s)).toBe('full');
+    expect(rebateAccess(s, [{ key: 'exportRebate' }])).toBe('denied');
+    s.exportRebate = { rates: [], claims: [{ taxMasked: true } as any] };
+    expect(rebateAccess(s)).toBe('masked');
   });
 });

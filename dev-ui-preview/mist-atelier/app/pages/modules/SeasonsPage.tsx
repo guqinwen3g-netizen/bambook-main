@@ -12,9 +12,10 @@ import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
 import { useRouteDraft } from './useRouteDraft';
-import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
+import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, businessWhen, shortWhen, useListDetailRoute } from './pageKit';
 import { quotationStage } from './QuotationsPage';
 import { CURRENCIES } from '../../runtime/tradeOptions';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 type Tab = 'seasons' | 'trends' | 'shows';
 const SEASON_STATUS: Record<MarketSeason['status'], { label: string; tone: Tone }> = { Planning: { label: '规划中', tone: 'neutral' }, Active: { label: '进行中', tone: 'accent' }, Closed: { label: '已结束', tone: 'neutral' } };
@@ -64,6 +65,7 @@ export function SeasonTimeline({ seasons, day, selected, onPick }: { seasons: Ma
 
 export type SeasonWorkbenchProps = { attachments: (kind: 'season' | 'trend' | 'show' | 'showLead', row: { id: string; fileIds: string[] }, locked: boolean) => React.ReactNode; history: (id: string) => React.ReactNode };
 
+const MILESTONE_ROWS = 6;
 export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) {
   const { state, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
   const legacyShow = route.section?.startsWith('show-leads:') ? route.section.slice('show-leads:'.length) : '';
@@ -79,26 +81,33 @@ export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) 
   const seasonOptions = [{ value: '', label: '未关联季节' }, ...seasons.map(s => ({ value: s.id, label: `${s.code} · ${s.name}` }))];
   const switchTab = (t: Tab) => { setPicked(null); setDrawer(false); go('seasons', undefined, { section: t }); };
   const pick = (id: string) => { setPicked(id); setDrawer(true); go('seasons', id, { section: tab }, { keepScroll: true }); };
-  const seasonSpec = (s?: MarketSeason): ModuleEditorSpec => ({
+  // mar47：里程碑按行录入名称与日期，空行忽略。
+  const seasonSpec = (s?: MarketSeason): ModuleEditorSpec => {
+    const rows = Math.min(12, Math.max(MILESTONE_ROWS, (s?.milestones.length || 0) + 2)), slots = Array.from({ length: rows }, (_, i) => i);
+    return {
     title: s ? `编辑 ${s.code}` : '新建季节', submitLabel: '保存',
-    initialValues: s ? { code: s.code, name: s.name, startDate: s.startDate, endDate: s.endDate, status: s.status, milestones: s.milestones.map(x => `${x.label} | ${x.date}`).join('\n'), note: s.note } : { code: '', name: '', startDate: '', endDate: '', status: 'Planning', milestones: '', note: '' },
-    fields: [{ key: 'code', label: '季节编码', required: true, readonly: !!s, hint: 'SS27 或 AW27；保存后不可改，订单、开发、报价按此编码归季' }, { key: 'name', label: '季节名称', required: true },
+    sections: [{ id: 'season', label: '季节', fields: ['code', 'name', 'startDate', 'endDate', 'status', 'note'] }, { id: 'milestones', label: '里程碑', fields: slots.flatMap(i => [`m${i}`, `d${i}`]) }],
+    initialValues: { ...(s ? { code: s.code, name: s.name, startDate: s.startDate, endDate: s.endDate, status: s.status, note: s.note } : { code: '', name: '', startDate: '', endDate: '', status: 'Planning', note: '' }), ...Object.fromEntries(slots.flatMap(i => [[`m${i}`, s?.milestones[i]?.label || ''], [`d${i}`, s?.milestones[i]?.date || '']])) },
+    fields: [{ key: 'code', label: '季节编码', required: true, readonly: !!s, hint: 'SS27 或 AW27；保存后不可改' }, { key: 'name', label: '季节名称', required: true },
       { key: 'startDate', label: '开始日期', type: 'date', required: true }, { key: 'endDate', label: '结束日期', type: 'date', required: true },
       { key: 'status', label: '状态', type: 'select', options: (['Planning', 'Active', 'Closed'] as const).map(v => ({ value: v, label: SEASON_STATUS[v].label })) },
-      { key: 'milestones', label: '里程碑', type: 'textarea', hint: '每行一个：名称 | YYYY-MM-DD，须在季节日期内' }, { key: 'note', label: '备注', type: 'textarea' }],
-    submit: v => { const milestones = String(v.milestones ?? '').split('\n').map(x => x.trim()).filter(Boolean).map(line => { const [label, date] = line.split('|').map(x => x.trim()); if (!label || !date) throw new Error(`里程碑格式应为“名称 | 日期”：${line}`); return { label, date }; });
+      { key: 'note', label: '备注', type: 'textarea' },
+      ...slots.flatMap(i => [{ key: `m${i}`, label: `里程碑 ${i + 1}` }, { key: `d${i}`, label: `日期 ${i + 1}`, type: 'date' as const }])],
+    submit: v => { const milestones = slots.flatMap(i => { const label = String(v[`m${i}`] ?? '').trim(), date = String(v[`d${i}`] ?? '').trim(); if (!label && !date) return []; if (!label || !date) throw new Error(`里程碑 ${i + 1} 须同时填写名称与日期`); return [{ label, date }]; });
       return run({ type: 'market.season.save', payload: { id: s?.id, input: { code: String(v.code ?? ''), name: String(v.name ?? ''), startDate: String(v.startDate ?? ''), endDate: String(v.endDate ?? ''), status: String(v.status) as MarketSeason['status'], milestones, note: String(v.note ?? ''), fileIds: s?.fileIds || [] } } }); },
-  });
+  }; };
   const fabricProducts = (m?.products || []).filter(p => p.category === 'fabric');
-  const trendSpec = (t?: MarketTrend): ModuleEditorSpec => ({
+  // mar47：趋势关联面料改为勾选（使用中的面料档案及已关联的）。
+  const trendSpec = (t?: MarketTrend): ModuleEditorSpec => { const pickable = fabricProducts.filter(p => p.status === 'active' || t?.productIds.includes(p.id)); return {
     title: t ? `编辑趋势 ${t.name}` : '记录趋势', submitLabel: '保存',
-    initialValues: t ? { name: t.name, type: t.type, seasonId: t.seasonId, source: t.source, products: t.productIds.map(id => m?.products.find(p => p.id === id)?.sku || '').filter(Boolean).join('、'), note: t.note } : { name: '', type: 'fabric', seasonId: seasons.find(s => s.status === 'Active')?.id || seasons[0]?.id || '', source: '', products: '', note: '' },
+    sections: [{ id: 'trend', label: '趋势', fields: ['name', 'type', 'seasonId', 'source', 'note'] }, { id: 'products', label: '关联面料', fields: pickable.map(p => `p:${p.id}`) }],
+    initialValues: { ...(t ? { name: t.name, type: t.type, seasonId: t.seasonId, source: t.source, note: t.note } : { name: '', type: 'fabric', seasonId: seasons.find(s => s.status === 'Active')?.id || seasons[0]?.id || '', source: '', note: '' }), ...Object.fromEntries(pickable.map(p => [`p:${p.id}`, !!t?.productIds.includes(p.id)])) },
     fields: [{ key: 'name', label: '趋势名称', required: true }, { key: 'type', label: '类别', type: 'select', options: (Object.keys(TREND_TYPE) as MarketTrend['type'][]).map(k => ({ value: k, label: TREND_TYPE[k] })) },
       { key: 'seasonId', label: '季节', type: 'select', required: true, options: seasonOptions.slice(1) }, { key: 'source', label: '来源依据', required: true, hint: '例如展会趋势区、色彩报告、客户简报' },
-      { key: 'products', label: '关联面料档案', hint: `填写面料档案编码，用顿号分隔${fabricProducts.length ? '；可选：' + fabricProducts.slice(0, 6).map(p => p.sku).join('、') : ''}` }, { key: 'note', label: '观察内容', type: 'textarea' }],
-    submit: v => { const skus = String(v.products ?? '').split(/[、,\s]+/).map(x => x.trim()).filter(Boolean); const productIds = skus.map(sku => { const p = m?.products.find(x => x.sku.toLowerCase() === sku.toLowerCase()); if (!p) throw new Error(`找不到数字档案 ${sku}`); if (p.category !== 'fabric') throw new Error(`${sku} 不是面料档案，趋势只关联面料`); return p.id; });
+      { key: 'note', label: '观察内容', type: 'textarea' }, ...pickable.map(p => ({ key: `p:${p.id}`, label: `${p.sku} · ${p.name}`, type: 'checkbox' as const }))],
+    submit: v => { const productIds = pickable.filter(p => v[`p:${p.id}`] === true).map(p => p.id);
       return run({ type: 'market.trend.save', payload: { id: t?.id, input: { name: String(v.name ?? ''), type: String(v.type) as MarketTrend['type'], seasonId: String(v.seasonId ?? ''), source: String(v.source ?? ''), productIds, note: String(v.note ?? ''), fileIds: t?.fileIds || [] } } }); },
-  });
+  }; };
   const showSpec = (x?: MarketShow): ModuleEditorSpec => ({
     title: x ? `编辑 ${x.name}` : '新建展会', submitLabel: '保存',
     initialValues: x ? { name: x.name, location: x.location, seasonId: x.seasonId, startDate: x.startDate, endDate: x.endDate, booth: x.booth, attendees: x.attendees, cost: x.cost, currency: x.currency, status: x.status, note: x.note } : { name: '', location: '', seasonId: '', startDate: '', endDate: '', booth: '', attendees: '', cost: '0', currency: 'USD', status: 'Planned', note: '' },
@@ -150,9 +159,12 @@ export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) 
     { key: 'leads', header: '线索 / 转化', width: '96px', align: 'right', render: x => { const ls = showLeads(x); return <span className="mist-num">{ls.length} / {ls.filter(l => l.status === 'Converted').length}</span>; } },
     { key: 'status', header: '状态', width: '84px', render: x => <Pill tone={SHOW_STATUS[x.status].tone}>{uiText(SHOW_STATUS[x.status].label)}</Pill> },
   ];
-  const detail = tab === 'seasons' ? (selSeason && <SeasonDetail s={selSeason} state={state} day={day} can={can} locked={locked} onEdit={() => setDialog(seasonSpec(selSeason))} onReview={() => void run({ type: 'market.season.review', payload: { id: selSeason.id } })} onOpen={(view, id, extra) => go(view, id, extra)} onTab={(t, id) => { go('seasons', id, { section: t }); setPicked(id); }} attachments={attachments('season', selSeason, !can)} history={history(selSeason.id)} />)
+  const detail = tab === 'seasons' ? (selSeason && <SeasonDetail s={selSeason} state={state} day={day} can={can} locked={locked} onEdit={() => setDialog(seasonSpec(selSeason))} onReview={() => setDialog({ title: selSeason.review ? `更新 ${selSeason.name} 回顾` : `生成 ${selSeason.name} 回顾`, submitLabel: selSeason.review ? '更新回顾' : '生成回顾', description: selSeason.review ? `将替换 ${selSeason.review.at.slice(0, 10)} 的回顾快照。` : undefined, fields: [], initialValues: {}, submit: () => run({ type: 'market.season.review', payload: { id: selSeason.id } }) })} onOpen={(view, id, extra) => go(view, id, extra)} onTab={(t, id) => { go('seasons', id, { section: t }); setPicked(id); }} attachments={attachments('season', selSeason, !can)} history={history(selSeason.id)} />)
     : tab === 'trends' ? (selTrend && <TrendDetail t={selTrend} state={state} season={seasonName(selTrend.seasonId)} can={can} locked={locked} onEdit={() => setDialog(trendSpec(selTrend))} onOpen={(view, id, extra) => go(view, id, extra)} attachments={attachments('trend', selTrend, !can)} history={history(selTrend.id)} />)
     : (selShow && <ShowDetail x={selShow} leads={showLeads(selShow)} day={day} season={seasonName(selShow.seasonId)} can={can} canCrm={canCrm} locked={locked} onEdit={() => setDialog(showSpec(selShow))} onLead={l => setDialog(leadSpec(selShow, l))} onConvert={l => setDialog(convertSpec(l))} onProgress={(l, n) => setDialog(progressSpec(l, n))} onOpen={(view, id, extra) => go(view, id, extra)} attachments={attachments('show', selShow, !can)} history={history(selShow.id)} />);
+  // mar49：未被引用的季节、趋势、展会可作废（服务端校验引用）。
+  const voidTarget = tab === 'seasons' ? selSeason && { kind: 'season' as const, id: selSeason.id, name: selSeason.name } : tab === 'trends' ? selTrend && { kind: 'trend' as const, id: selTrend.id, name: selTrend.name } : selShow && { kind: 'show' as const, id: selShow.id, name: selShow.name };
+  const voidBar = can && voidTarget ? <div className="mist-row mist-module-actions"><Button variant="quiet" disabled={locked} onClick={() => setDialog({ title: `作废 ${voidTarget.name}`, submitLabel: '作废', submitVariant: 'danger', fields: [{ key: 'reason', label: '作废原因（录入错误等）', type: 'textarea', required: true }], initialValues: { reason: '' }, submit: async v => { await run({ type: 'market.season.void', payload: { kind: voidTarget.kind, id: voidTarget.id, reason: String(v.reason || '') } }); setPicked(null); } })}>{uiText('作废')}</Button></div> : null;
   const placeholder = <EmptyState icon={tab === 'seasons' ? CalendarRange : tab === 'trends' ? Sparkles : Tent} title={uiText(tab === 'seasons' ? '季节详情' : tab === 'trends' ? '趋势详情' : '展会与线索')} description={uiText(tab === 'seasons' ? '从时间线或列表选择一个季节，查看里程碑与本季业务。' : tab === 'trends' ? '选择一条趋势，查看关联面料与客户。' : '选择一个展会，查看线索并转入 CRM。')} compact />;
   const exportRows = () => tab === 'seasons' ? downloadModuleCsv('季节.csv', ['编码', '名称', '开始', '结束', '状态', '订单', '开发', '数字档案', '订单金额（原币）'], seasonRows.map(s => { const b = seasonBusiness(state, s); return [s.code, s.name, s.startDate, s.endDate, SEASON_STATUS[s.status].label, b.orders.length, b.devs.length, b.products.length, b.amounts.map(([c, v]) => `${c} ${v}`).join(' / ')]; }))
     : tab === 'trends' ? downloadModuleCsv('趋势.csv', ['趋势', '类别', '季节', '来源', '关联档案', '关联客户'], trendRows.map(t => [t.name, TREND_TYPE[t.type], seasonName(t.seasonId), t.source, t.productIds.map(id => m?.products.find(p => p.id === id)?.sku).join('、'), trendCustomers(state, t).map(c => c.name).join('、')]))
@@ -165,13 +177,13 @@ export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) 
       facts: [{ label: '关联面料档案', value: `${selTrend.productIds.length} 个` }, { label: '关联客户', value: `${trendCustomers(state, selTrend).length} 个` }] }} />
     : selShow ? (() => { const ls = showLeads(selShow); return <PreviewSummary openLabel="打开展会与线索" onOpen={() => full.open(selShow.id)} data={{ code: seasonName(selShow.seasonId), status: <Pill tone={SHOW_STATUS[selShow.status].tone}>{uiText(SHOW_STATUS[selShow.status].label)}</Pill>, title: selShow.name, description: `${selShow.location}${selShow.booth ? ' · ' + selShow.booth : ''}`,
       facts: [{ label: '日期', value: `${selShow.startDate} — ${selShow.endDate}` }, { label: '费用', value: `${selShow.currency} ${selShow.cost}` }, { label: '线索', value: `${ls.length} 条` }, { label: '已转入 CRM', value: `${ls.filter(l => l.status === 'Converted').length} 条` }] }} />; })() : null;
-  if (full.active && detail) return <ListDetailPage backLabel="季节性与趋势" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
+  if (full.active && detail) return <ListDetailPage backLabel="季节性与趋势" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}{voidBar}</ListDetailPage>;
   const createLabel = tab === 'seasons' ? '新建季节' : tab === 'trends' ? '记录趋势' : '新建展会';
   return <MistPage>
     <PageHeader eyebrow={uiText("客户与市场 · 季节与趋势")} title={uiText("季节性与趋势")}
       actions={<><Button icon={Download} onClick={exportRows}>{uiText("导出")}</Button>{can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => setDialog(tab === 'seasons' ? seasonSpec() : tab === 'trends' ? trendSpec() : showSpec())}>{createLabel}</Button>}</>} />
-    {!can && <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有季节与趋势写权限。")}</Banner></div>}
-    {error && <div className="mist-section"><Banner tone="bad" title={uiText("数据未加载")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
+    {!can && <div className="mist-section"><Banner variant="status" tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有季节与趋势写权限。")}</Banner></div>}
+    {error && <FailureNotice title={"数据未加载"} detail={error} retry={() => void refresh()} />}
     <div className="mist-section"><Segmented<Tab> ariaLabel={uiText("内容")} value={tab} onChange={switchTab} options={[{ value: 'seasons', label: `季节 · ${seasons.length}` }, { value: 'trends', label: `趋势 · ${trends.length}` }, { value: 'shows', label: `展会与线索 · ${shows.length}` }]} /></div>
     {tab === 'seasons' && <div className="mist-section"><SeasonTimeline seasons={seasons} day={day} selected={selSeason?.id} onPick={s => pick(s.id)} /></div>}
     <ListDetail drawerOpen={drawer && !!detail} onDrawerClose={() => setDrawer(false)} drawerTitle={selSeason ? `${selSeason.code} · ${selSeason.name}` : selTrend?.name || selShow?.name || ''}
@@ -245,9 +257,11 @@ function ShowDetail({ x, leads, day, season, can, canCrm, locked, onEdit, onLead
           {open && can && <Button variant="quiet" icon={Flag} disabled={locked} onClick={() => onProgress(l, 'Following')}>{uiText("记录跟进")}</Button>}
           {open && can && <Button variant="quiet" icon={UserX} disabled={locked} onClick={() => onProgress(l, 'Lost')}>{uiText("已流失")}</Button>}
           {open && can && <Button variant="quiet" disabled={locked} onClick={() => onLead(l)}>{uiText("编辑")}</Button>}
+          {l.status === 'Lost' && can && <Button variant="quiet" icon={Flag} disabled={locked} onClick={() => onProgress(l, 'Following')}>{uiText("恢复跟进")}</Button>}
           {l.status === 'Converted' && <Button variant="quiet" onClick={() => onOpen('crm', l.customerId, { customerId: l.customerId })}>{uiText("客户业务")}{uiText(l.opportunityId ? ' · 商机' : '')}</Button>}
         </div>
         {l.note && <small className="mist-note" style={{ whiteSpace: 'pre-line' }}>{l.note}</small>}
+        {!!l.followUps?.length && <div className="mist-col" style={{ gap: 2 }} data-lead-followups>{l.followUps.map((f, i) => <small key={i} className="mist-note">{f.actor} · {businessWhen(f.at)} · {uiText(LEAD_STATUS[f.status as MarketLead['status']]?.label || f.status)}{f.note ? ' · ' + f.note : ''}</small>)}</div>}
       </div>; })}</div> : <span className="mist-muted">{uiText("还没有线索。展会现场交换的名片可在这里录入。")}</span>}
       {!canCrm && <span className="mist-note">{uiText("转入 CRM 需要客户关系写权限。")}</span>}
     </DetailBlock>

@@ -1,3 +1,5 @@
+import {financialDisposalViews} from '../../../../server/src/shared/mistPayables';
+import {projectState} from '../../../../server/src/mist/access';
 import {materialDeliveryFixture} from '../../../../server/src/mist/__tests__/materialDelivery';
 import { describe, expect, it } from 'vitest';
 import { createMistState } from '../../../../server/src/shared/mistWorkspace';
@@ -7,6 +9,51 @@ let n = 0;
 const ctx = () => ({ id: () => `id-${++n}`, now: '2026-10-15T08:00:00.000Z', actorName: '当前员工' });
 const all = () => true;
 const base = () => { const state = createMistState(ctx(), 'empty'); state.fulfillment.qcTasks = []; state.fulfillment.shipments = []; return state; };
+describe('risk owner work', () => {
+  const options: MistWorkOptions = { canRead: all, me: 'risk-owner', today: '2026-10-15' };
+  const fixture = () => {
+    const state = base();
+    state.platform.risks = [{ id: 'risk-1', orderId: 'order-1', title: '交期风险', level: 'warning', basis: '工厂延误', owner: '当前员工', ownerId: 'risk-owner', state: 'Open', resolution: '', createdAt: '2026-10-14T08:00:00Z', source: { kind: 'order', id: 'order-1', label: 'SO-1' } }];
+    return state;
+  };
+  it.each([
+    ['Open', undefined, undefined, '待接手', false],
+    ['Acknowledged', undefined, undefined, '待制定方案', false],
+    ['Acknowledged', '  ', undefined, '待制定方案', false],
+    ['InProgress', '协调工厂', undefined, '待处理', false],
+    ['InProgress', '协调工厂', '2026-10-16', '待处理', false],
+    ['InProgress', '协调工厂', '2026-10-15', '待处理', false],
+    ['InProgress', '协调工厂', '2026-10-14', '已逾期', true],
+  ] as const)('derives %s (%s, %s) as %s without mutating the risk', (status, plan, planDue, when, urgent) => {
+    const state = fixture(); Object.assign(state.platform.risks[0], { state: status, plan, planDue });
+    const before = structuredClone(state);
+    expect(mistWorkQueue(state, options)).toEqual([expect.objectContaining({ id: 'risk:risk-1', source: 'task', module: 'risks', title: '交期风险', meta: 'SO-1', when, urgent, due: planDue, target: { view: 'risks', id: 'risk-1', section: 'ledger' } })]);
+    expect(state).toEqual(before);
+  });
+  it('requires the bound owner account and risk read access, never matching names or source owners', () => {
+    const state = fixture();
+    expect(mistWorkQueue(state, { ...options, me: 'other' })).toEqual([]);
+    expect(mistWorkQueue(state, { ...options, me: '' })).toEqual([]);
+    expect(mistWorkQueue(state, { ...options, canRead: view => view !== 'risks' })).toEqual([]);
+    delete state.platform.risks[0].ownerId;
+    expect(mistWorkQueue(state, options)).toEqual([]);
+    expect(mistWorkQueue(state, { ...options, me: '当前员工' })).toEqual([]);
+  });
+  it.each(['Escalated', 'Resolved'] as const)('does not assign %s risks even when overdue', status => {
+    const state = fixture(); Object.assign(state.platform.risks[0], { state: status, planDue: '2026-10-01' });
+    expect(mistWorkQueue(state, options)).toEqual([]);
+  });
+  it('waits for pending approval and restores owner follow-up after rejection or withdrawal', () => {
+    const state = fixture(), risk = state.platform.risks[0];
+    risk.state = 'InProgress'; risk.plan = '协调工厂'; risk.planDue = '2026-10-14';
+    risk.escalations = [{ id: 'e', approver: '主管', reason: '申请放行', requestedBy: risk.owner, requestedAt: risk.createdAt, decision: 'pending', decisionNote: '', decidedBy: '', decidedAt: '' }];
+    expect(mistWorkQueue(state, options)).toEqual([]);
+    for (const decision of ['rejected', 'withdrawn', 'approved'] as const) {
+      risk.escalations[0].decision = decision;
+      expect(mistWorkQueue(state, options)).toEqual([expect.objectContaining({ when: '已逾期', urgent: true })]);
+    }
+  });
+});
 describe('returned quotation handoff',()=>{
  const options={canRead:all,can:(permission:string)=>permission==='quotations:write',me:'sales',today:'2026-10-29'};
  const fixture=()=>{const state=base();state.customers.push({id:'quote-customer',name:'客户'} as any);state.market.quotations.push({id:'quote-return',code:'QT-1',status:'Draft',customerId:'quote-customer',requiresApproval:true,approval:{id:'review',requesterId:'sales',reviewerId:'supervisor',status:'rejected',submittedAt:'2026-10-28T18:13:00Z',decidedAt:'2026-10-28T18:16:00Z',note:'补齐交期',details:[],fileIds:[]}} as any);return state;};
@@ -27,6 +74,11 @@ describe('approved quotation business continuation',()=>{
  const fixture=()=>{const state=base();state.customers.push({id:'quote-customer',name:'客户'} as any);state.market.quotations.push({id:'quote-ready',code:'QT-READY',customerId:'quote-customer',status:'Draft',convertedOrderId:null,lines:[{id:'a'},{id:'b'}],updatedAt:'2026-10-28T18:55:00Z',approval:{id:'approved-review',requesterId:'sales',reviewerId:'supervisor',status:'approved',submittedAt:'2026-10-28T18:51:00Z',decidedAt:'2026-10-28T18:55:00Z',note:'同意报价',details:[],fileIds:[]}} as any);return state;};
  it('hands an approved draft back to its requester for issue and removes it once sent',()=>{
   const state=fixture(),before=structuredClone(state);expect(mistWorkQueue(state,options)).toEqual([expect.objectContaining({id:'quote-issue:quote-ready',module:'quotations',source:'task',sourceLabel:'工作事项',when:'待发送',meta:'客户 · 同意报价',target:{view:'quotations',id:'quote-ready',detail:'full'}})]);expect(state).toEqual(before);state.market.quotations[0].status='Sent';expect(mistWorkQueue(state,options)).toEqual([]);
+ });
+ it('reminds the requester a week before a sent quotation expires and after it lapses',()=>{
+  const state=fixture(),quote=state.market.quotations[0];quote.status='Sent';quote.validUntil='2026-11-10';expect(mistWorkQueue(state,options)).toEqual([]);
+  quote.validUntil='2026-11-05';expect(mistWorkQueue(state,options)).toEqual([expect.objectContaining({id:'quote-expiry:quote-ready',when:'即将到期',urgent:false})]);
+  quote.validUntil='2026-10-28';expect(mistWorkQueue(state,options)).toEqual([expect.objectContaining({when:'已过有效期',urgent:true})]);
  });
  it('waits for customer acceptance, then retains only genuinely pending conversion lines',()=>{
   const state=fixture(),quote=state.market.quotations[0];quote.status='Accepted';expect(mistWorkQueue(state,options)).toEqual([expect.objectContaining({id:'quote-convert:quote-ready',when:'待转订单',meta:'客户 · 2 个待转条目'})]);
@@ -152,8 +204,10 @@ describe('my work queue sources', () => {
     state.allocations = [{ id: 'al', receiptId: 'r4', invoiceId: 'i0', amount: 5, currency: 'USD', createdAt: '', actor: '' }] as any;
     state.invoices = [{ id: 'i1', code: 'INV-1', customer: '客户', order: 'SO-1', due: '2026-11-01', financeStatus: 'pending' }, { id: 'i2', code: 'INV-2', financeStatus: 'confirmed' }] as any;
     const items = mistWorkQueue(state, { canRead: all, can: p => p === 'invoices:reconcile' || p === 'invoices:write', me: 'me', today: '2026-10-15' });
-    expect(items.map(item => [item.id, item.module])).toEqual([['receipt:r1', 'payment-vouchers'], ['receipt:r2', 'payment-vouchers'], ['invoice:i1', 'payment-vouchers']]);
-    expect(items[2].target).toEqual({ view: 'invoices', section: 'pending', id: 'i1' });
+    // r4 is partly allocated with 5 USD still open, so it stays in the queue until the rest is allocated.
+    expect(items.map(item => [item.id, item.module])).toEqual([['receipt:r1', 'payment-vouchers'], ['receipt:r2', 'payment-vouchers'], ['receipt:r4', 'payment-vouchers'], ['invoice:i1', 'payment-vouchers']]);
+    expect(items[2].title).toContain('5');
+    expect(items[3].target).toEqual({ view: 'invoices', section: 'pending', id: 'i1' });
     expect(mistWorkQueue(state, { canRead: all, me: 'me', today: '2026-10-15' })).toEqual([]);
   });
   it('counts work items only for their assignees or holders of the named permission', () => {
@@ -170,8 +224,12 @@ describe('my work queue sources', () => {
 });
 
 describe('weekly team report reminder', () => {
+  it('skips the weekly report when last week had no business activity', () => {
+    const state = base(); state.events = []; state.tasks = [];
+    expect(mistWorkQueue(state, { canRead: all, can: (p: string) => p === 'relations:admin', me: 'boss', today: '2026-10-19' }).some(i => i.source === 'report')).toBe(false);
+  });
   it('appears from Monday for supervisors until they archive last week', () => {
-    const state = base();
+    const state = base(); state.events.unshift({ id: 'last-week', entityType: 'order', entityId: 'x', actor: '业务员', at: '2026-10-14T02:00:00Z', text: '上周动态', fileIds: [] });
     const opts = { canRead: all, can: (p: string) => p === 'relations:admin', me: 'boss', today: '2026-10-19' };
     const item = mistWorkQueue(state, opts).find(i => i.source === 'report')!;
     expect(item).toMatchObject({ id: 'report:2026-10-12', sourceLabel: '周报', title: '生成上周团队周报（10-12 至 10-18）', target: { view: 'dashboard', section: 'team-weekly' }, module: 'dashboard' });
@@ -384,4 +442,153 @@ it('reminds the order owner to hand an approved order to logistics until it is h
  expect(mistWorkQueue(state,{...options,me:'other'}).filter(i=>i.id==='order-handoff:o')).toHaveLength(0);
  (state.orders[0] as any).handoffAt='2026-11-01T00:00:00.000Z';expect(mistWorkQueue(state,{...options,me:'sales'}).filter(i=>i.id==='order-handoff:o')).toHaveLength(0);
  (state.orders[0] as any).handoffAt=undefined;(state.orders[0] as any).governance.status='submitted';expect(mistWorkQueue(state,{...options,me:'sales'}).filter(i=>i.id==='order-handoff:o')).toHaveLength(0);
+});
+
+describe('quarantine handoffs',()=>{
+ const fixture=()=>{
+  const f=materialDeliveryFixture(20);f.context.members!.push({id:'qc',name:'QC',active:true,groups:[]});const issue=f.issue(20);
+  f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id:issue,acceptedQuantity:16,rejectedQuantity:4,expectedReceivingRevision:0,evidence:'Counted'}},'garment');
+  const stock=f.state.fulfillment.stock[0],returned=f.run({type:'fulfillment.inventory.move',payload:{id:stock.id,kind:'return',issueId:issue,quantity:4,location:'Hold',person:'factory',note:'Rejected'}}).id!;
+  const task=f.run({type:'fulfillment.inventory.quarantine.request',payload:{returnId:returned,due:'2026-10-24'}}).id!;
+  f.run({type:'fulfillment.qc.claim',payload:{id:task,domain:'fabric'}},'qc');f.run({type:'fulfillment.qc.report',payload:{id:task,domain:'fabric',result:'reject',report:'QC-FAIL',opinion:'Defect',location:'Hold',reviewedAt:f.context.now,measurements:[],fileIds:[]}},'qc');
+  return {f,stock,returned};
+ };
+ const opts=(permissions:string[],me='warehouse'):MistWorkOptions=>({me,today:'2026-10-24',canRead:all,can:p=>permissions.includes(p)});
+ const finance=['invoices:read','vouchers:read','procurement:read','invoices:reconcile'];
+ const queue=(f:ReturnType<typeof fixture>['f'],options:MistWorkOptions)=>mistWorkQueue(f.state,options).filter(x=>x.id.startsWith('quarantine:')||x.id.startsWith('disposal-review:'));
+ it.each(['scrap','supplierReturn'] as const)('hands failed QC through %s to manager and independent finance, then removes completed work',decision=>{
+  const {f,stock,returned}=fixture(),warehouse=opts(['inventory:write']),manager=opts(['aftersales:approve'],'reviewer'),financial=opts(finance,'finance');
+  expect(queue(f,warehouse)).toMatchObject([{when:'待处置',target:{view:'inventory',id:stock.id}}]);expect(queue(f,manager)).toEqual([]);expect(queue(f,financial)).toEqual([]);
+  f.run({type:'fulfillment.inventory.quarantine.dispose',payload:{returnId:returned,decision,evidence:'Disposed'}});
+  expect(queue(f,warehouse)).toEqual([]);expect(queue(f,manager)).toMatchObject([{when:'待追偿决定'}]);
+  f.run({type:'fulfillment.inventory.quarantine.noRecovery',payload:{returnId:returned,evidence:'Manager confirmed'}},'reviewer');
+  expect(queue(f,manager)).toEqual([]);expect(queue(f,financial)).toMatchObject([{when:'待结算确认',meta:expect.stringContaining('待结算确认'),target:{id:f.purchaseId,section:'payables'}}]);
+  f.state.payables.settlements!.push({id:'st',purchaseId:f.purchaseId,state:'confirmed',receiptIds:[stock.receiptId]} as any);
+  expect(queue(f,financial)).toMatchObject([{when:'待核对',target:{id:returned}}]);expect(queue(f,opts(finance,'reviewer'))).toEqual([]);
+  f.run({type:'payable.disposal.review',payload:{returnId:returned,evidence:'No recovery verified'}});
+  expect(queue(f,financial)).toEqual([]);
+  const review=f.state.fulfillment.stockMovements.find(r=>r.id===returned)!.quarantineDisposition!.financeReviews![0];
+  f.run({type:'payable.disposal.reverse',payload:{returnId:returned,reviewId:review.id,reason:'Correction'}});
+  expect(queue(f,financial)).toHaveLength(1);
+ });
+ it('hands recovery to finance and restores the manager task on revocation',()=>{
+  const {f,returned}=fixture(),manager=opts(['aftersales:approve'],'reviewer'),financial=opts(finance,'finance');
+  f.run({type:'fulfillment.inventory.quarantine.dispose',payload:{returnId:returned,decision:'scrap',evidence:'Disposed'}});
+  expect(queue(f,manager)).toMatchObject([{when:'待追偿决定'}]);
+  f.run({type:'fulfillment.inventory.quarantine.recovery',payload:{returnId:returned,amount:272,reason:'Supplier liable'}},'reviewer');
+  expect(queue(f,manager)).toEqual([]);expect(queue(f,financial)).toMatchObject([{when:'待结算确认'}]);
+  expect(queue(f,opts(finance,'reviewer'))).toEqual([]);
+  const financialDisposals=financialDisposalViews(f.state,new Set([f.purchaseId]));
+  const hidden=structuredClone(f.state);hidden.fulfillment.stock=[];hidden.fulfillment.stockMovements=[];
+  expect(mistWorkQueue(hidden,{...financial,financialDisposals}).filter(x=>x.id==='disposal-review:'+returned)).toHaveLength(1);
+  const receiptId=f.state.fulfillment.stock[0].receiptId!;
+  f.state.payables.settlements!.push({id:'st',purchaseId:f.purchaseId,state:'confirmed',receiptIds:[receiptId],disputes:[]} as any);
+  expect(queue(f,financial)).toMatchObject([{when:'待核对',target:{id:returned}}]);
+  const reviewId=f.run({type:'payable.disposal.review',payload:{returnId:returned,evidence:'Recovery verified'}}).id!;
+  expect(queue(f,financial)).toEqual([]);
+  f.run({type:'payable.disposal.reverse',payload:{returnId:returned,reviewId,reason:'Recheck'}});
+  expect(queue(f,financial)).toHaveLength(1);
+  f.run({type:'fulfillment.inventory.quarantine.recovery.revoke',payload:{returnId:returned,reason:'Recheck'}},'reviewer');
+  expect(queue(f,financial)).toEqual([]);expect(queue(f,manager)).toMatchObject([{when:'待追偿决定'}]);
+ });
+ it('keeps a warehouse-only handoff without exposing QC records and removes it after disposal',()=>{
+  const {f,returned}=fixture();
+  const projected=()=>projectState(f.state,{userId:'warehouse',roles:[],permissions:['inventory:read','inventory:write'],authorizationLoaded:true,departmentIds:[]} as any,()=>base()).state;
+  let state=projected();expect(state.fulfillment.qcTasks).toEqual([]);expect(state.fulfillment.qcReports).toEqual([]);
+  expect(mistWorkQueue(state,{...opts(['inventory:write']),canRead:v=>v==='inventory'})).toMatchObject([{when:'待处置'}]);
+  expect(f.state.fulfillment.stockMovements.find(r=>r.id===returned)?.quarantineAction).toBeUndefined();
+  f.run({type:'fulfillment.inventory.quarantine.dispose',payload:{returnId:returned,decision:'scrap',evidence:'Disposed'}});
+  state=projected();expect(mistWorkQueue(state,{...opts(['inventory:write']),canRead:v=>v==='inventory'})).toEqual([]);
+ });
+ it('requires action and read permissions for every handoff, including a warehouse-free financial projection',()=>{
+  const {f,returned}=fixture();expect(queue(f,opts([]))).toEqual([]);expect(queue(f,{...opts(['inventory:write']),canRead:()=>false})).toEqual([]);
+  f.run({type:'fulfillment.inventory.quarantine.dispose',payload:{returnId:returned,decision:'scrap',evidence:'Disposed'}});
+  expect(queue(f,opts([]))).toEqual([]);expect(queue(f,{...opts(['aftersales:approve']),canRead:()=>false})).toEqual([]);
+  f.run({type:'fulfillment.inventory.quarantine.noRecovery',payload:{returnId:returned,evidence:'Manager confirmed'}},'reviewer');
+  for(const denied of finance)expect(queue(f,opts(finance.filter(p=>p!==denied),'finance'))).toEqual([]);
+  for(const denied of ['payment-vouchers','procurement'])expect(queue(f,{...opts(finance,'finance'),canRead:v=>v!==denied})).toEqual([]);
+  const projection={returnId:returned,purchaseId:f.purchaseId,purchaseCode:'PO-1',supplier:'mill',quantity:4,unit:'米',currency:'CNY',referenceAmount:272,decision:'scrap' as const,disposalEvidence:'Disposed',report:'QC-FAIL',settlementConfirmed:false,noRecovery:{actor:'Leader',actorId:'reviewer',evidence:'Agreed'}};
+  const state=structuredClone(f.state);state.fulfillment.stock=[];state.fulfillment.stockMovements=[];
+  expect(mistWorkQueue(state,{...opts(finance,'finance'),financialDisposals:[projection]}).filter(x=>x.id.startsWith('disposal-review:'))).toMatchObject([{when:'待结算确认'}]);
+  projection.settlementConfirmed=true;
+  expect(mistWorkQueue(state,{...opts(finance,'finance'),financialDisposals:[projection]}).find(x=>x.id==='disposal-review:'+returned)?.when).toBe('待核对');
+ });
+});
+describe('outstanding forward FX work',()=>{
+ const options:MistWorkOptions={me:'finance',today:'2026-10-24',canRead:all,can:p=>['vouchers:read','vouchers:write'].includes(p)};
+ const fixture=()=>{const state=base();state.fxRecords=[{id:'lock',kind:'lock',code:'FX-1',ref:'FWD-1',amount:100,currency:'USD',bankName:'Bank',settleBy:'2026-10-28',createdAt:'2026-10-01'} as any];return state;};
+ const rows=(state:ReturnType<typeof base>,opts=options)=>mistWorkQueue(state,opts).filter(x=>x.id.startsWith('fx-lock:'));
+ it('shows remaining original currency, deadline and urgency from three days before through overdue',()=>{
+  const state=fixture();expect(rows(state)).toMatchObject([{title:'FWD-1 · 100.00 USD',when:'2026-10-28',urgent:false,target:{view:'payment-vouchers',id:'lock',section:'accounts'}}]);
+  for(const today of ['2026-10-25','2026-10-28','2026-10-29'])expect(rows(state,{...options,today})[0].urgent).toBe(true);
+ });
+ it('reduces partial deliveries, exits when fully delivered or reversed and returns after delivery reversal',()=>{
+  const state=fixture();state.fxRecords!.push({id:'settle',kind:'settlement',lockId:'lock',amount:40} as any);expect(rows(state)[0].title).toContain('60.00 USD');
+  state.fxRecords![1].amount=100;expect(rows(state)).toEqual([]);state.fxRecords![1].reversed={at:'2026-10-24',actor:'finance',reason:'Correction'};expect(rows(state)[0].title).toContain('100.00 USD');
+  state.fxRecords![0].reversed={at:'2026-10-24',actor:'finance',reason:'Cancelled'};expect(rows(state)).toEqual([]);
+ });
+ it('does not show the financial action to read-only or unauthorized staff',()=>{
+  const state=fixture();for(const denied of ['vouchers:read','vouchers:write'])expect(rows(state,{...options,can:p=>p!==denied&&options.can!(p)})).toEqual([]);
+  expect(rows(state,{...options,canRead:()=>false})).toEqual([]);expect(rows(state,{...options,can:()=>false})).toEqual([]);
+ });
+});
+
+describe('rejected development samples and outstanding sample loans', () => {
+  const options = { canRead: all, can: (p: string) => p === 'orders:write', me: 'sales', today: '2026-10-15' };
+  const rejected = () => {
+    const state = base();
+    state.devs = [{ id: 'd', ownerId: 'sales' }] as any;
+    state.versions = [{ id: 'v', devId: 'd', qc: { result: 'reject' }, confirmations: [] }] as any;
+    state.fulfillment.qcTasks = [qc({ source: { kind: 'version', devId: 'd', versionId: 'v' }, state: 'blocked' })] as any;
+    state.fulfillment.qcReports = [{ id: 'r', result: 'reject' }] as any;
+    return state;
+  };
+  it('returns a rejected version to its development owner until a business decision', () => {
+    const state = rejected(), before = structuredClone(state);
+    expect(mistWorkQueue(state, options)).toEqual([expect.objectContaining({ id: 'qc:qc-1', urgent: true, module: 'development', target: { view: 'development/detail', id: 'd', versionId: 'v' } })]);
+    expect(state).toEqual(before);
+    for (const kind of ['resample', 'abandon'] as const) {
+      state.versions[0].qcDecision = { kind, note: '', decidedAt: ctx().now, decidedBy: '业务员' };
+      expect(mistWorkQueue(state, options)).toEqual([]);
+    }
+  });
+  it('requires exact rejected report, owner and both read permissions; closed versions no longer need decisions', () => {
+    const state = rejected();
+    expect(mistWorkQueue(state, { ...options, me: 'other' })).toEqual([]);
+    expect(mistWorkQueue(state, { ...options, can: () => false })).toEqual([]);
+    for (const view of ['development', 'qc-workbench']) expect(mistWorkQueue(state, { ...options, canRead: v => v !== view })).toEqual([]);
+    state.fulfillment.qcReports[0].result = 'pass'; expect(mistWorkQueue(state, options)).toEqual([]);
+    state.fulfillment.qcReports[0].result = 'reject'; state.devs[0].closure = { kind: 'cancelled' } as any; expect(mistWorkQueue(state, options)).toEqual([]);
+  });
+  const borrowed = () => {
+    const state = base();
+    state.fulfillment.samples = [{ id: 's', name: '借用样布', unit: '米' }] as any;
+    state.fulfillment.sampleMovements = [{ id: 'loan', kind: 'lend', sampleId: 's', quantity: 1.25, person: '借用人', borrowerId: 'sales', at: '2026-10-10', expectedReturn: '2026-10-14' }] as any;
+    return state;
+  };
+  it('tracks partial returns against the exact loan, with overdue urgency only after its due day', () => {
+    const state = borrowed();
+    expect(mistWorkQueue(state, options)).toEqual([expect.objectContaining({ id: 'sample-return:loan', module: 'samples', urgent: true, when: '待归还', due: '2026-10-14' })]);
+    expect(mistWorkQueue(state, { ...options, today: '2026-10-14' })[0].urgent).toBe(false);
+    state.fulfillment.sampleMovements.push({ id: 'return', kind: 'return', sampleId: 's', loanId: 'loan', quantity: 0.25 } as any);
+    expect(mistWorkQueue(state, options)[0].meta).toBe('1 米');
+    state.fulfillment.sampleMovements.push({ id: 'other-return', kind: 'return', sampleId: 's', loanId: 'other-loan', quantity: 1 } as any);
+    expect(mistWorkQueue(state, options)).toHaveLength(1);
+    state.fulfillment.sampleMovements.push({ id: 'final-return', kind: 'return', sampleId: 's', loanId: 'loan', quantity: 1 } as any);
+    expect(mistWorkQueue(state, options)).toEqual([]);
+  });
+  it('does not notify the lender or unreadable users and matches legacy names only if unique', () => {
+    const state = borrowed();
+    expect(mistWorkQueue(state, { ...options, me: 'lender' })).toEqual([]);
+    expect(mistWorkQueue(state, { ...options, canRead: v => v !== 'samples' })).toEqual([]);
+    delete state.fulfillment.sampleMovements[0].borrowerId;
+    expect(mistWorkQueue(state, options)).toEqual([]);
+    state.members = [{ userId: 'sales', name: '借用人' }] as any;
+    expect(mistWorkQueue(state, options)).toHaveLength(1);
+    state.fulfillment.sampleMovements[0].borrowerId = '';
+    expect(mistWorkQueue(state, options)).toEqual([]);
+    delete state.fulfillment.sampleMovements[0].borrowerId;
+    state.members!.push({ userId: 'other', name: '借用人' } as any);
+    expect(mistWorkQueue(state, options)).toEqual([]);
+  });
 });

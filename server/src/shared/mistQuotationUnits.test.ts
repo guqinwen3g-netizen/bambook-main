@@ -21,7 +21,7 @@ describe('BB-QUO-1 quotation pricing units',()=>{
  });
  it('checks development version lines by the development business domain',()=>{
   const {ctx,s}=setup(),fd=s.devs.find(d=>developmentDomain(d.values)==='fabric')!,gd=s.devs.find(d=>developmentDomain(d.values)==='garment')!;
-  const fv=s.versions.find(v=>v.devId===fd.id)!,gv=s.versions.find(v=>v.devId===gd.id)!;
+  const fv=s.versions.find(v=>v.devId===fd.id)!,gv=s.versions.find(v=>v.devId===gd.id)!;fd.customerId=gd.customerId=header.customerId;
   expect(()=>save(s,ctx,[line({sourceDevId:fd.id,sourceVersionId:fv.id},'件')])).toThrow(/面料条目.*米 \/ 码 \/ 公斤.*不自动换算/);
   expect(()=>save(s,ctx,[line({sourceDevId:gd.id,sourceVersionId:gv.id},'公斤')])).toThrow(/成衣条目/);
   const id=save(s,ctx,[line({sourceDevId:fd.id,sourceVersionId:fv.id},'公斤'),line({sourceDevId:gd.id,sourceVersionId:gv.id},'套')]).id;

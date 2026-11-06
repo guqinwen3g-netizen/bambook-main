@@ -39,3 +39,22 @@ it('does not use prior allocation deliveries to short-close a newly selected sou
  expect(()=>f.run({type:'order.fabric.shortClose',payload:{id:allocationId,expectedRevision:2,reason:'Wrong prior delivery'}},'garment')).toThrow('请先完成');
  expect(materialDeliveryRows(f.state).find(r=>r.id===id)?.delivery.allocationRevision).toBe(1);
 });
+
+it('uses the effective allocation after shortage closure for a source reduction and refuses actual reissue, cancellation or reassignment',()=>{
+ const f=materialDeliveryFixture(20),issue=f.issue(20),allocation=f.state.internalFabricAllocations![0];
+ f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id:issue,acceptedQuantity:16,rejectedQuantity:4,expectedReceivingRevision:0,evidence:'Factory count'}},'garment');
+ f.run({type:'fulfillment.inventory.move',payload:{id:f.state.fulfillment.stock[0].id,kind:'return',issueId:issue,quantity:4,location:'Hold',person:'factory',note:'Actual rejected return'}});
+ f.run({type:'order.fabric.shortClose',payload:{id:allocation.id,expectedRevision:1,reason:'No replacement required'}},'garment');
+ const before=structuredClone(f.state);
+ expect(()=>f.issue(1)).toThrow('已短结');
+ expect(()=>f.run({type:'order.fabric.cancel',payload:{id:allocation.id,expectedRevision:1}},'garment')).toThrow('已短结');
+ expect(()=>f.run({type:'order.fabric.allocate',payload:{...f.target,fabricOrderId:f.source.orderId,fabricLineId:f.source.lineId,metres:'16',expectedRevision:1}},'garment')).toThrow('已短结');
+ const order=f.state.orders.find(o=>o.id===f.source.orderId)!,line=f.state.orderLines.find(l=>l.id===f.source.lineId)!;
+ const reduce=(qty:number)=>f.run({type:'order.governance.saveDraft',payload:{orderId:order.id,input:order.governance!.contract,reason:'Actual supply reduction',lines:[{...line,qty}]}});
+ expect(()=>reduce(15)).toThrow('低于已分配');expect(f.state).toEqual(before);
+ reduce(16);
+ f.run({type:'order.governance.submit',payload:{orderId:order.id}});
+ f.run({type:'order.governance.decide',payload:{id:order.id,decision:'approved',note:'Actual supply confirmed'}},'reviewer');
+ expect(internalFabricRemaining(f.state,f.source.lineId)).toBe('0');
+ expect(materialDeliveryRows(f.state)[0]).toMatchObject({accepted:'16',returned:'4',outstanding:'16'});
+});

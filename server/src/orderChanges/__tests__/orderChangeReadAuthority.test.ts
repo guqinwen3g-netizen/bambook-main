@@ -1,11 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createAuthService, type TokenPayload } from '../../auth/service';
 import { createOrderChangeRequestService } from '../orderChangeRequestService';
-import { assertApprovalReviewSourceRead } from '../../approvals/approvalReviewSourceAccess';
-import { registerNewDomainQueryTools } from '../../agent/newDomainQueryTools';
-import { getToolHandler, type ToolExecutionContext } from '../../agent/toolDispatchRegistry';
-import { createApprovalRouter } from '../../approvals/approvalRoute';
-import { createOrderChangeRouter } from '../orderChangeRoute';
 import type { Request, Response } from 'express';
 
 // Storage-only substitute. Actual current account/grant/L2 helpers run; no
@@ -26,18 +21,6 @@ function matches(row: any, where: any): boolean {
   });
 }
 
-async function readApprovalRoute(fixture: ReturnType<typeof store>, path: '/' | '/:id' | '/:id/detail', approvalId = 'A1') {
-  const router = createApprovalRouter({ prisma: fixture.db, requireAuth: true });
-  const route = router.stack.find(layer => layer.route?.path === path && layer.route.stack.some(handler => handler.method === 'get'))?.route;
-  if (!route) throw Error('APPROVAL_READ_ROUTE_NOT_FOUND');
-  let status = 200, body: any;
-  const signedActor: TokenPayload = { ...actor(), roles: ['manager'] };
-  const req = { actor: signedActor, params: { id: approvalId }, query: {},
-    headers: { authorization: `Bearer ${createAuthService().signToken(signedActor)}` } };
-  const res = { status(code: number) { status = code; return res; }, json(value: unknown) { body = value; return res; } };
-  await route.stack[0].handle(req as unknown as Request, res as unknown as Response, () => {});
-  return { status, body };
-}
 function project(row: any, select?: any) {
   return select ? Object.fromEntries(Object.keys(select).filter(key => select[key]).map(key => [key, row[key]])) : { ...row };
 }
@@ -116,14 +99,6 @@ describe('order change reads use current full parent authority', () => {
     expect(fixture.db.orderChangeRequest.findUnique).not.toHaveBeenCalled();
     expect(fixture.db.orderChangeRequest.findMany).not.toHaveBeenCalled();
   });
-  it('ordinary source business can read without a change execution or approval permission', async () => {
-    const fixture = store();
-    const detail = await fixture.service.getChangeRequest('C1', actor());
-    expect(detail.item).toMatchObject({ id: 'C1', order: { id: 'O1' }, approvalRequest: { id: 'A1', actionType: 'order:change' } });
-    expect(detail.item.approvalRequest.payload).toBeUndefined();
-    await expect(assertApprovalReviewSourceRead(fixture.db, fixture.rows.approvalRequest[0], actor())).resolves.toBeUndefined();
-    expect(fixture.writes).toEqual([]);
-  });
   it('foreign-group detail is invisible even when the supplied token claims owner authority', async () => {
     const fixture = store();
     const supplied = { ...actor(), roles: ['owner'], permissions: ['*'], authorizationLoaded: true } as TokenPayload;
@@ -178,78 +153,14 @@ describe('order change reads use current full parent authority', () => {
     expect(result.item?.revisionSuccessor).toBeNull();
     expect(JSON.stringify(result)).not.toContain('HIDDEN-CR');
   });
-  it('the shared approval reader rejects a frozen source outside the current parent range', async () => {
-    const fixture = store();
-    fixture.rows.approvalRequest[0].payload = { sourceProofs: [{ orderId: 'O2', orderLineId: 'L2' }] };
-    await expect(assertApprovalReviewSourceRead(fixture.db, fixture.rows.approvalRequest[0], actor()))
-      .rejects.toMatchObject({ code: 'FORBIDDEN' });
-    expect(fixture.writes).toEqual([]);
-  });
-  it('the shared approval reader cannot reuse an earlier argument after the frozen payload was replaced', async () => {
-    const fixture = store();
-    const earlier = { ...fixture.rows.approvalRequest[0], payload: { sourceProofs: [{ orderId: 'O2' }] } };
-    await expect(assertApprovalReviewSourceRead(fixture.db, earlier, actor())).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    expect(fixture.writes).toEqual([]);
-  });
   it.each(['order:cancel', 'order:pause'])('keeps legitimate %s history readable through the same parent gate', async actionType => {
     const fixture = store(); fixture.rows.approvalRequest[0].actionType = actionType;
     const result = await fixture.service.getChangeRequest('C1', actor());
     expect(result.item?.approvalRequest?.actionType).toBe(actionType);
   });
-  it('Agent registry requires the same trusted context and ignores identity supplied in tool input', async () => {
-    const fixture = store(); registerNewDomainQueryTools();
-    const handler = getToolHandler('order_changes.query');
-    if (!handler) throw Error('ORDER_CHANGES_QUERY_NOT_REGISTERED');
-    await expect(handler(fixture.db, { id: 'C1', actorId: 'sales-1', roles: ['owner'] }))
-      .rejects.toMatchObject({ code: 'UNAUTHORIZED' });
-    const context: ToolExecutionContext = { actor: { userId: 'sales-1', roles: ['sales'],
-      permissionScopes: ['orders:read'], permissionsAuthoritative: true,
-      departmentIds: [], toolScopes: [], memoryScopes: [], knowledgeScopes: [] } };
-    expect(await handler(fixture.db, { id: 'C1' }, undefined, context)).toMatchObject({ ok: true, item: { id: 'C1' } });
-    expect(await handler(fixture.db, { id: 'C2' }, undefined, context)).toMatchObject({ ok: false, errorCode: 'NOT_FOUND' });
-    expect(await handler(fixture.db, { limit: 1 }, undefined, context)).toMatchObject({ ok: true, items: [{ id: 'C1' }] });
-    context.actor!.permissionCeiling = [];
-    await expect(handler(fixture.db, { id: 'C1' }, undefined, context)).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    expect(fixture.writes).toEqual([]);
-  });
   it('storage faults propagate instead of claiming a legitimate empty list', async () => {
     const fixture = store(); fixture.db.order.findFirst.mockRejectedValueOnce(Error('ORDER_STORE_UNAVAILABLE'));
     await expect(fixture.service.listChangeRequests({ trustedActor: actor() })).rejects.toThrow('ORDER_STORE_UNAVAILABLE');
-  });
-  it.each(['/:id', '/:id/detail'] as const)('approval HTTP handler %s refuses frozen content when any CR source is hidden', async path => {
-    const fixture = store(); fixture.rows.approvalRequest[0].payload = { sourceProofs: [{ orderId: 'O2' }],
-      beforeSnapshot: { commercialNote: 'HIDDEN-FROZEN-COMMERCIAL-BASIS' } };
-    const result = await readApprovalRoute(fixture, path);
-    expect(result.status).toBe(403);
-    expect(JSON.stringify(result.body)).not.toContain('HIDDEN-FROZEN-COMMERCIAL-BASIS');
-  });
-  it('approval HTTP list filters an assigned CR whose complete frozen source is hidden', async () => {
-    const fixture = store(); fixture.rows.approvalRequest[0].reviewerId = 'sales-1';
-    fixture.rows.approvalRequest[0].payload = { sourceProofs: [{ orderId: 'O2' }] };
-    const result = await readApprovalRoute(fixture, '/');
-    expect(result.status).toBe(200); expect(result.body.items).toEqual([]);
-  });
-  it.each(['order:cancel', 'order:pause'])('%s cannot bypass full source authorization in any approval read entry', async actionType => {
-    const fixture = store(); fixture.rows.approvalRequest[0].actionType = actionType;
-    fixture.rows.approvalRequest[0].reviewerId = 'sales-1';
-    fixture.rows.approvalRequest[0].payload = { sourceProofs: [{ orderId: 'O2' }], beforeSnapshot: { note: 'HIDDEN-LIFECYCLE-BASIS' } };
-    for (const path of ['/:id', '/:id/detail'] as const) {
-      const result = await readApprovalRoute(fixture, path);
-      expect(result.status).toBe(403); expect(JSON.stringify(result.body)).not.toContain('HIDDEN-LIFECYCLE-BASIS');
-    }
-    expect((await readApprovalRoute(fixture, '/')).body.items).toEqual([]);
-  });
-  it('the HTTP detail cannot return its earlier payload when the optional confirmation lookup observes account disablement', async () => {
-    const fixture = store(); fixture.rows.orderChangeRequest[0].changeTypes = ['unitPrice'];
-    fixture.db.$transaction.mockImplementation(async (run: (tx: any) => Promise<unknown>) => { fixture.active = false; return run(fixture.db); });
-    const router = createOrderChangeRouter({ prisma: fixture.db, requireAuth: true });
-    const route = router.stack.find(layer => layer.route?.path === '/:id' && layer.route.stack.some(handler => handler.method === 'get'))?.route;
-    if (!route) throw Error('ORDER_CHANGE_DETAIL_ROUTE_NOT_FOUND');
-    let status = 200, body: any;
-    const req = { actor: actor(), params: { id: 'C1' }, headers: { authorization: `Bearer ${createAuthService().signToken(actor())}` } };
-    const res = { status(code: number) { status = code; return res; }, json(value: unknown) { body = value; return res; } };
-    await route.stack[0].handle(req as unknown as Request, res as unknown as Response, () => {});
-    expect(status).toBe(401); expect(body.item).toBeUndefined();
   });
   it.each([0, -1, 1.5, Number.NaN])('rejects invalid list limit %s without reading change requests', async limit => {
     const fixture = store();

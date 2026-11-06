@@ -28,6 +28,8 @@ it('lists every member with what they hold, and nudges a member on a specific or
   const drawer=document.querySelector('[data-team-member="demo-sales"]') as HTMLElement;
   expect(drawer.textContent).toContain('SO-G-2026-018');
   await click(getByRole(drawer,'button',{name:'督办 订单 SO-G-2026-018'}));
+  // The nudge button sits inside a clickable order row; it must not also open the order (fin81 walk).
+  expect(go).not.toHaveBeenCalled();
   const dialog=getByRole(document.body,'dialog',{name:/督办 顾言/});
   expect((getByRole(dialog,'textbox',{name:'督办事项'}) as HTMLInputElement).value).toContain('SO-G-2026-018');
   await click(getByRole(dialog,'button',{name:'发出督办'}));

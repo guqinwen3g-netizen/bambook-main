@@ -92,43 +92,21 @@ const FROZEN_NO_TRUTH_ROUTES: string[] = [
   //     quotation 3 处含 `NOT_FOUND` 早退臂），由 B22 的逐文件表盯着（挪表说明见 `rawErrorLeakRatchet.test.ts`）。
 
 
-  'ai/route.ts',
   'auth/route.ts',
-  'bom/bomRoute.ts',
   // BusinessLine now uses actual safeRouteError for every public failure.
 
-  'config/automationRoute.ts',
   'config/systemConfigRoute.ts',
-  'credit/creditRoute.ts',
-  'crm/crmRoute.ts',
-  'crm/crmRouteV2.ts',
   // Native QC branches now import/use truth; other customs raw sites remain in the separate raw-message inventory.
-  'customs/documentTemplateRoute.ts',
-  'dashboard/route.ts',
 
-  'email/signatureRoute.ts',
   // email/templateRoute.ts：S0-A2 第 10 批起该文件 import 了 `shared/routeError` ⇒ 按本守卫的判据不再违规。
   //   ★ 判据的真实形状（见上面 `isNoTruthRoute`，别照抄这句注释）：
   //     「定义了 Router」＋「catch 里 600 字符内出现 `res.status(...).json(`」＋「**没有** import 三个真源模块」⇒ 违规。
   //   ⇒ 这是**文件级二值**判据（接没接真源），**不是**"原文直发有几处"的计数判据，所以"降到 0 继续钉"在这里没有对应物；
   //     接了真源却仍把异常原文发给用户（`error: e.message`、字符串拼接、`.send(文本)`）本守卫一概看不见
   //     ——那 11 处兄弟形状正是这个盲区的实例，归 B22 棘轮与 docs/S0-A2 第 10 批 §八 的形状无关普查管（同一批复核抓到）。
-  'finance/reconciliationRoute.ts',
-  'inventory/inventoryRoute.ts',
-  'marketing/marketingRouteV2.ts',
-  'mes/mesRoute.ts',
 
   // Two native PO/receipt branches import/use truth; remaining procurement raw sites are still measured separately.
-  'products/lookbookRoute.ts',
   // Native assignment/report branches import/use truth; this file-level retirement is not all-QC error clearance.
-  'relations/routeV2.ts',
-  'reporting/route.ts',
-  'seal/sealRoute.ts',
-  'seasons/seasonRoute.ts',
-  'suppliers/factoryRoute.ts',
-  'templates/route.ts',
-  'tools/fabricCalculatorRoute.ts',
-  'traceability/traceabilityRoute.ts',
 ];
 
 const SCAN_TIMEOUT_MS = 30_000;

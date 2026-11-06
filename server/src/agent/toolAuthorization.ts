@@ -63,8 +63,8 @@ declare(['credit.freeze'], true, ['credit:freeze:write'], 'credit/creditRoute.ts
 declare(['credit.thaw'], true, ['credit:thaw:write'], 'credit/creditRoute.ts');
 declare(['internal_trade.query'], false, ['orders:read'], '_shared/rolePermissionMatrix Orders read; internalTrade/internalTradeRoute.ts');
 declare(['internal_trade.create', 'internal_trade.confirm'], true, ['order:internal_trade:write'], 'internalTrade/internalTradeRoute.ts WRITE_SCOPE');
-declare(['purchase_orders.query'], false, ['procurement:read'], 'procurement/procurementRoute.ts');
-declare(['procurement.create', 'procurement.update_status'], true, ['procurement:write'], 'procurement/procurementRoute.ts');
+declare(['purchase_orders.query'], false, ['procurement:read'], 'agent/newDomainQueryTools.ts purchase_orders.query; procurement/procurementService.ts');
+declare(['procurement.create', 'procurement.update_status'], true, ['procurement:write'], 'agent/procurementFlow.ts; procurement/procurementService.ts');
 declare(['inventory.adjust_stock'], true, ['inventory:write'], 'inventory/inventoryRoute.ts');
 declare(['bom.query'], false, ['bom:read'], 'bom/bomRoute.ts');
 declare(['order_changes.create', 'order_changes.withdraw'], true, ['order:change_request:create'], 'orderChanges/orderChangeRoute.ts');

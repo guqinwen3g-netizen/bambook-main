@@ -50,7 +50,8 @@ it('offers device-only notification and operation sound controls',()=>{
   seam.section='appearance';act(paint);
   const notifications=getByRole(host,'switch',{name:'通知提示音'});
   const operations=getByRole(host,'switch',{name:'操作反馈音'});
-  expect((notifications as HTMLInputElement).checked).toBe(true);
+  // Notification sound is off until the user turns it on.
+  expect((notifications as HTMLInputElement).checked).toBe(false);
   expect((operations as HTMLInputElement).checked).toBe(true);
   expect(queryByRole(host,'button',{name:'试听通知'})).toBeNull();
   expect(queryByRole(host,'button',{name:'试听完成'})).toBeNull();
@@ -58,6 +59,6 @@ it('offers device-only notification and operation sound controls',()=>{
   expect(queryByRole(host,'combobox',{name:'声音风格'})).toBeNull();
   expect(getByRole(host,'slider',{name:'提示音量'})).toBeTruthy();
   act(()=>notifications.click());
-  expect(JSON.parse(localStorage.getItem('bambook.ui-sound.v1')!).notifications).toBe(false);
+  expect(JSON.parse(localStorage.getItem('bambook.ui-sound.v1')!).notifications).toBe(true);
   expect(seam.run).not.toHaveBeenCalled();
 });

@@ -41,7 +41,7 @@
 .mist-tone-ok { color: var(--mist-ok-ink); } .mist-tone-warn { color: var(--mist-warn-ink); } .mist-tone-bad { color: var(--mist-bad-ink); } .mist-tone-accent { color: var(--mist-accent-ink); } .mist-tone-ai { color: var(--mist-ai-ink); }
 
 /* ── 按钮 ── */
-.mist-btn { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: var(--mist-control-h); padding: 0 16px; border-radius: var(--mist-r-md); font-size: var(--mist-text-md); font-weight: var(--mist-fw-medium); white-space: nowrap; transition: background var(--mist-dur), color var(--mist-dur), transform var(--mist-dur-fast); background: var(--mist-fill); color: var(--mist-ink); }
+.mist-btn { text-decoration: none; display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; gap: 8px; height: var(--mist-control-h); padding: 0 16px; border-radius: var(--mist-r-md); font-size: var(--mist-text-md); font-weight: var(--mist-fw-medium); white-space: nowrap; transition: background var(--mist-dur), color var(--mist-dur), transform var(--mist-dur-fast); background: var(--mist-fill); color: var(--mist-ink); }
 .mist-btn:hover { background: var(--mist-fill-2); }
 .mist-btn:active { transform: scale(.98); }
 .mist-btn[data-variant="primary"] { background: var(--mist-accent); color: var(--mist-on-accent); }
@@ -65,6 +65,7 @@
 .mist-icon-btn:hover { background: var(--mist-fill); color: var(--mist-ink); }
 .mist-icon-btn[data-size="sm"] { width: 30px; height: 30px; border-radius: var(--mist-r-sm); }
 .mist-pip { position: absolute; top: 9px; right: 10px; width: 7px; height: 7px; border-radius: 50%; background: var(--mist-bad); }
+.mist-pip-count { position: absolute; top: 3px; right: 2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; display: grid; place-items: center; background: var(--mist-accent); color: var(--mist-card); font-size: 10px; font-weight: var(--mist-fw-medium); line-height: 1; font-variant-numeric: tabular-nums; pointer-events: none; }
 
 .mist-link { color: var(--mist-accent-ink); font-size: var(--mist-text-sm); display: inline-flex; align-items: center; gap: 6px; font-weight: var(--mist-fw-medium); }
 .mist-link:hover { text-decoration: underline; text-underline-offset: 3px; }
@@ -230,6 +231,30 @@
 .mist-banner b { font-weight: var(--mist-fw-medium); }
 .mist-banner p { color: var(--mist-ink-2); margin-top: 2px; font-size: var(--mist-text-sm); }
 .mist-banner .mist-banner-act { margin-left: auto; display: flex; gap: 8px; flex: none; }
+/* notice: a must-read blocker kept in place. Neutral surface; a short straight tone rail and the icon carry the tone. */
+.mist-banner[data-variant="notice"] { position: relative; background: var(--mist-card); color: var(--mist-ink); border-radius: var(--mist-r-md); padding: 12px 14px 12px 18px; align-items: flex-start; }
+.mist-banner[data-variant="notice"]::before { content: ''; position: absolute; left: 6px; top: 10px; bottom: 10px; width: 3px; border-radius: 2px; background: var(--mist-accent); }
+.mist-banner[data-variant="notice"] > .mist-icon { color: var(--mist-accent-ink); margin-top: 1px; }
+.mist-banner[data-variant="notice"][data-tone="warn"]::before { background: var(--mist-warn); }
+.mist-banner[data-variant="notice"][data-tone="warn"] > .mist-icon { color: var(--mist-warn-ink); }
+.mist-banner[data-variant="notice"][data-tone="bad"]::before { background: var(--mist-bad); }
+.mist-banner[data-variant="notice"][data-tone="bad"] > .mist-icon { color: var(--mist-bad-ink); }
+.mist-banner[data-variant="notice"][data-tone="ok"]::before { background: var(--mist-ok); }
+.mist-banner[data-variant="notice"][data-tone="ok"] > .mist-icon { color: var(--mist-ok-ink); }
+.mist-banner[data-variant="notice"][data-tone="neutral"]::before { background: var(--mist-ink-4); }
+.mist-banner[data-variant="notice"][data-tone="neutral"] > .mist-icon { color: var(--mist-ink-3); }
+.mist-banner[data-variant="notice"] p { color: var(--mist-ink-2); }
+.mist-card > .mist-banner[data-variant="notice"], .mist-card-body > .mist-banner[data-variant="notice"], .mist-dialog-body .mist-banner[data-variant="notice"], .mist-drawer-body .mist-banner[data-variant="notice"] { background: var(--mist-card-2); }
+/* status: the record's current state as one line under the title. Only the dot carries the tone. */
+.mist-status-line { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; min-height: 28px; font-size: var(--mist-text-md); color: var(--mist-ink); }
+.mist-status-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--mist-accent); }
+.mist-status-line[data-tone="warn"] .mist-status-dot { background: var(--mist-warn); }
+.mist-status-line[data-tone="bad"] .mist-status-dot { background: var(--mist-bad); }
+.mist-status-line[data-tone="ok"] .mist-status-dot { background: var(--mist-ok); }
+.mist-status-line[data-tone="neutral"] .mist-status-dot { background: var(--mist-ink-3); }
+.mist-status-line > b { font-weight: var(--mist-fw-medium); }
+.mist-status-text { color: var(--mist-ink-2); min-width: 0; }
+.mist-status-act { margin-left: auto; display: inline-flex; gap: 6px; }
 
 /* ── 表单 ── */
 .mist-form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -300,6 +325,27 @@
 .mist-upload { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 26px; border-radius: var(--mist-r-lg); background: var(--mist-fill); color: var(--mist-ink-3); font-size: var(--mist-text-sm); text-align: center; transition: background var(--mist-dur); cursor: pointer; }
 .mist-upload:hover, .mist-upload[data-over] { background: var(--mist-accent-tint); color: var(--mist-accent-ink); }
 .mist-upload b { color: var(--mist-ink); font-weight: var(--mist-fw-medium); }
+
+/* ── 手写签字板：填充底，墨迹跟随 --mist-ink；签名线与提示退到最弱层级 ── */
+.mist-signature { position: relative; }
+.mist-signature-pad { position: relative; width: 100%; border-radius: var(--mist-r-lg); background: var(--mist-fill); color: var(--mist-ink); cursor: crosshair; touch-action: none; user-select: none; -webkit-user-select: none; transition: background var(--mist-dur); }
+.mist-signature-pad:hover { background: color-mix(in srgb, var(--mist-fill) 60%, var(--mist-accent-tint)); }
+.mist-signature[data-disabled] .mist-signature-pad { cursor: default; opacity: .6; }
+.mist-signature-line { position: absolute; height: 1px; background: var(--mist-ink-3); opacity: .5; pointer-events: none; }
+.mist-signature-hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: var(--mist-ink-3); font-size: var(--mist-text-sm); pointer-events: none; }
+.mist-signature-ink { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.mist-signature-clear { position: absolute; top: 8px; right: 8px; height: 26px; padding: 0 10px; border: 0; border-radius: var(--mist-r-pill); background: var(--mist-card); color: var(--mist-ink-2); font: inherit; font-size: var(--mist-text-xs); cursor: pointer; opacity: 0; transition: opacity var(--mist-dur), color var(--mist-dur-fast); }
+.mist-signature[data-inked] .mist-signature-clear { opacity: 1; }
+.mist-signature-clear:hover { color: var(--mist-ink); }
+.mist-signature-clear:focus-visible { outline: none; box-shadow: var(--mist-focus); opacity: 1; }
+.mist-signature-clear:disabled { cursor: default; }
+@media (prefers-reduced-motion: reduce) { .mist-signature-pad, .mist-signature-clear { transition: none; } }
+
+/* ── 印章缩略图：填充底方块，图片按原比例居中 ── */
+.mist-seal-image { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 48px; height: 48px; border-radius: var(--mist-r-md); background: var(--mist-fill); color: var(--mist-ink-3); overflow: hidden; }
+.mist-seal-image img { width: 100%; height: 100%; object-fit: contain; }
+/* 已归档的审批签字：实色墨迹在浅底上显示，深色主题下同样可读。 */
+.mist-signature-archive { display: block; max-width: 220px; max-height: 72px; padding: 6px 10px; border-radius: var(--mist-r-md); background: #FFFFFF; /* mist-allow: 存档签字为深色实墨，固定浅底保证深色主题可读 */ border: 1px solid var(--mist-line); object-fit: contain; }
 
 /* ── 浮层（唯一允许阴影的地方）── */
 .mist-scrim { position: fixed; inset: 0; background: var(--mist-scrim); backdrop-filter: blur(3px); z-index: var(--mist-z-overlay); animation: mist-fade .25s both; }

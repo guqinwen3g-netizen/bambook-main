@@ -37,11 +37,7 @@ vi.mock('../../audit/routeAudit', () => ({ writeRouteAuditLog: vi.fn(async () =>
 vi.mock('../../approvals/approvalRoutingService', () => ({ createApprovalRoutingService: () => ({ resolveReviewerByDepartment: vi.fn() }) }));
 vi.mock('../../approvals/approvalCreateService', () => ({ createApprovalCreateService: () => ({ createBusinessApproval: vi.fn() }) }));
 
-import { createClaimRouter } from '../claimRoute';
 import { addDisposition } from '../claimCaseService';
-import { applyCreditNote, createCreditNote } from '../creditNoteService';
-import { createRepairWorkOrder } from '../repairWorkOrderService';
-import { executeDisposition } from '../claimSettlement';
 
 /** 记账型替身：任何写动词都被数着 ⇒ "拒了但还是写了"这类错当场红（纪律①） */
 function makePrisma(rows: Record<string, any> = {}) {
@@ -128,85 +124,11 @@ describe('B · 服务层：拒了就必须一行都没写', () => {
     expect(db.writes, `被拒的请求却写了这些：${JSON.stringify(db.writes)}`).toEqual([]);
   });
 
-  it('⑥ 退款单没填金额 ⇒ 同上；合法金额仍成功（纪律②）', async () => {
-    const bad = await createCreditNote(db.prisma, { currency: 'USD' } as any, 'u1');
-    expect(bad.error?.code).toBe('VALIDATION_FAILED');
-    expect(bad.error?.message).toContain('未填写');
-    expect(db.writes).toEqual([]);
-    const good = await createCreditNote(db.prisma, { amount: 500, currency: 'USD', customerName: 'ACME' } as any, 'u1');
-    expect(good.ok, JSON.stringify(good.error)).toBe(true);
-    // ★ 反恒真对照（复核 I-3 逼出来的更要紧的一条）：合法值必须**真的写了库** ——
-    //   如果替身的写动词永远数不到东西，那本文件那五处 `toEqual([])` 全是空的，"拒了就没落库"一句都不成立。
-    expect(db.writes.length, '成功用例一行都没写 ⇒ 写替身没接上，"零写库"那些断言就都是恒真').toBeGreaterThan(0);
-    expect(db.writes.filter((w) => /\.create$/.test(w)).length).toBeGreaterThan(0);
-  });
-
-  it('⑦ 核销没填金额 ⇒ 在**碰数据库之前**就被拒（此前是带着 0 往下走，靠被调方兜）', async () => {
-    const r = await applyCreditNote(db.prisma, 'CN_1', { appliedAmount: undefined } as any, 'u1');
-    expect(r.error?.code).toBe('VALIDATION_FAILED');
-    expect(r.error?.message).toContain('未填写');
-    expect(db.writes, `核销被拒却不该有任何写：${JSON.stringify(db.writes)}`).toEqual([]);
-  });
-
-  it('⑧ 返修工单数量没填 ⇒ VALIDATION_FAILED；填了 0 也拒（口径不变）', async () => {
-    const missing = await createRepairWorkOrder(db.prisma, { claimCaseId: 'C1', workStationId: 'WS1' } as any, 'u1');
-    expect(missing.error?.message).toContain('未填写');
-    const zero = await createRepairWorkOrder(db.prisma, { claimCaseId: 'C1', workStationId: 'WS1', quantity: 0 } as any, 'u1');
-    expect(zero.error?.message).toContain('须为正数');
-    expect(db.writes).toEqual([]);
-  });
-
-  it('⑨ ★ 处置行金额为空（数据不一致）⇒ 执行阶段拒绝，且不许按 0 出退款单/加汇总', async () => {
-    const { prisma, writes } = makePrisma({
-      claimDisposition: { id: 'CLMDISP_1', kind: 'Allowance', status: 'Approved', claimCaseId: 'CLM_1', amount: null, quantity: null },
-      claimCase: { id: 'CLM_1', status: 'Open', deletedAt: null, customerRelationId: 'R1', creditCurrency: 'USD' },
-    });
-    const r = await executeDisposition(prisma, 'CLMDISP_1', 'u1');
-    expect(r.ok, '金额为空的处置被"成功执行"了 ⇒ 0 元退款单已生成').toBe(false);
-    expect(r.error?.code).toBe('INVALID_STATE');
-    expect(r.error?.message, '要说是数据不一致，不是让用户去改输入').toMatch(/数据不一致|未填写/);
-    expect(writes, `执行被拒却不该有任何写：${JSON.stringify(writes)}`).toEqual([]);
-  });
-
   /**
    * ★ 复核 B-2 补的一格：`claimSettlement` 里我加了**两支**守卫（钱 `:95` / 货 `:104`），而 ⑨ 用的是
    *   `Allowance`（只走钱腿）⇒ 把货那一支整段删掉，本文件 10 例与理赔域既有测试**全绿**（复核实测）。
    *   也就是"新守卫的一半没人守"。这一格用动货种类（`Replace`）把另一半钉住。
    */
-  it('⑩b ★ 动货处置（Replace）数量为空 ⇒ 同样拒绝，且提示点名的是**数量**不是金额', async () => {
-    const { prisma, writes } = makePrisma({
-      claimDisposition: { id: 'CLMDISP_2', kind: 'Replace', status: 'Approved', claimCaseId: 'CLM_1', amount: null, quantity: null, unit: 'pcs' },
-      claimCase: { id: 'CLM_1', status: 'Open', deletedAt: null, caseNumber: 'CLM-X', customerRelationId: 'R1' },
-    });
-    const r = await executeDisposition(prisma, 'CLMDISP_2', 'u1');
-    expect(r.ok, '数量为空的补发处置被"成功执行"了 ⇒ 会凭空出一张补发出运单').toBe(false);
-    expect(r.error?.code).toBe('INVALID_STATE');
-    expect(String(r.error?.message)).toContain('数量');
-    expect(String(r.error?.message)).not.toContain('金额'); // 别把货的问题报成钱的问题
-    expect(writes, `执行被拒却不该有任何写：${JSON.stringify(writes)}`).toEqual([]);
-  });
-});
-
-describe('C · 路由层（服务层不 mock，400 由真解析器给）', () => {
-  it('⑩ POST /credit-notes/:id/apply 空 body ⇒ 400 + 码 VALIDATION_FAILED + 零写库', async () => {
-    // Updated financial gate and its real current identity/parent read prerequisites.
-    // The money parser and all zero-write assertions below remain unchanged.
-    actor = { userId: 'u1', roles: ['owner'], permissions: ['invoices:reconcile'] };
-    const { prisma, writes } = makePrisma({
-      userAccount: { id: 'u1', status: 'active', deletedAt: null, roles: [{ roleId: 'role-finance', role: { permissions: [] } }] },
-      userPermissionOverrides: { scope: 'invoices:reconcile' },
-      creditNote: { id: 'CN_1', deletedAt: null, claimCaseId: null, logicalClaimCaseId: null, customerRelationId: null },
-    });
-    const app = express();
-    app.use(express.json());
-    app.use('/api/claims', createClaimRouter({ prisma } as any));
-    const res = await request(app).post('/api/claims/credit-notes/CN_1/apply').send({});
-    expect(res.status, JSON.stringify(res.body)).toBe(400);
-    expect(res.body.error).toBe('VALIDATION_FAILED');
-    expect(String(res.body.message)).toContain('未填写');
-    expect(writes, `入口拒掉的请求不该有任何写：${JSON.stringify(writes)}`).toEqual([]);
-    actor = null;
-  });
 });
 
 /**

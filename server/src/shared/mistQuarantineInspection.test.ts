@@ -1,6 +1,9 @@
 import { expect, it } from 'vitest';
 import { materialDeliveryFixture } from '../mist/__tests__/materialDelivery';
 import { mistCommandPermission } from './mistWorkspace';
+import { internalFabricCostShare, materialDeliveryRows } from './mistInternalFabric';
+import { orderActualCost } from './mistOrderCost';
+import { financialDisposalViews } from './mistPayables';
 
 function fixture() {
   const f=materialDeliveryFixture(20); f.context.members!.push({id:'qc',name:'Fabric QC',active:true,groups:[]});
@@ -59,4 +62,41 @@ it('does not release against an unrelated or forged report',()=>{
  const f=fixture(),taskId=f.request().id!;
  const task=f.state.fulfillment.qcTasks.find(t=>t.id===taskId)!;task.state='reported';task.reportIds.push('fabric-report');
  const before=structuredClone(f.state);expect(()=>f.dispose()).toThrow('本批隔离料');expect(f.state).toEqual(before);
+});
+
+it('releases one rejected return, scraps the other and reviews no recovery without duplicating inventory or purchase cost',()=>{
+ const f=materialDeliveryFixture(20);f.context.members!.push({id:'qc',name:'QC',active:true,groups:[]});
+ const issue=f.issue(20),stockId=f.state.fulfillment.stock[0].id;
+ f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id:issue,acceptedQuantity:16,rejectedQuantity:4,expectedReceivingRevision:0,evidence:'Factory count'}},'garment');
+ const returned=(quantity:number,location:string)=>f.run({type:'fulfillment.inventory.move',payload:{id:stockId,kind:'return',issueId:issue,quantity,location,person:'factory',note:'Actual rejection return'}}).id!;
+ const release=returned(1.5,'Hold A'),scrap=returned(2.5,'Hold B');
+ expect(f.state.fulfillment.stock[0]).toMatchObject({available:0,locked:4,quantity:20});
+ const receipt=f.state.fulfillment.receipts.find(r=>r.id===f.state.fulfillment.stock[0].receiptId)!;
+ const settlement=f.run({type:'payable.settlement.submit',payload:{purchaseId:f.purchaseId,receiptIds:[receipt.id],final:true}}).id!;
+ f.run({type:'payable.settlement.confirm',payload:{id:settlement,prepaymentApplied:0}},'reviewer');
+ const financeBefore=structuredClone({payables:f.state.payables,payments:f.state.payments,receipts:f.state.fulfillment.receipts});
+ const cost=()=>[f.source.orderId,f.target.orderId].map(id=>orderActualCost(f.state,id,'period','2026-10','2026-10-24'));
+ const costBefore=cost();
+ for(const [returnId,decision,result] of [[release,'release','pass'],[scrap,'scrap','reject']] as const){
+  const task=f.run({type:'fulfillment.inventory.quarantine.request',payload:{returnId,due:'2026-10-24'}}).id!;
+  f.run({type:'fulfillment.qc.claim',payload:{id:task,domain:'fabric'}},'qc');
+  f.run({type:'fulfillment.qc.report',payload:{id:task,domain:'fabric',result,report:'QC-'+returnId,opinion:'Actual reinspection',location:decision==='release'?'Hold A':'Hold B',reviewedAt:f.context.now,measurements:[],fileIds:[]}},'qc');
+  f.run({type:'fulfillment.inventory.quarantine.dispose',payload:{returnId,decision,evidence:'Actual disposition'}});
+ }
+ expect(f.state.fulfillment.stock[0]).toMatchObject({quantity:20,available:1.5,locked:0});
+ expect(f.state.fulfillment.stock[0].positions).toContainEqual({location:'Hold A',available:1.5});
+ expect(materialDeliveryRows(f.state)[0]).toMatchObject({accepted:'16',returned:'4',outstanding:'16'});
+ expect(internalFabricCostShare(f.state,f.purchaseId,f.source.orderId,136000)).toBe(27200);
+ expect(internalFabricCostShare(f.state,f.purchaseId,f.target.orderId,136000)).toBe(108800);
+ f.run({type:'fulfillment.inventory.quarantine.noRecovery',payload:{returnId:scrap,evidence:'Leader approved unrecoverable loss'}},'reviewer');
+ f.run({type:'payable.disposal.review',payload:{returnId:scrap,evidence:'No compensation; retain original supplier settlement'}});
+ expect(financialDisposalViews(f.state,new Set([f.purchaseId]))).toMatchObject([{returnId:scrap,quantity:2.5,referenceAmount:170,decision:'noRecovery',disposalDecision:'scrap',review:{actor:'Fabric'}}]);
+ expect(cost()).toEqual(costBefore);
+ expect({payables:f.state.payables,payments:f.state.payments,receipts:f.state.fulfillment.receipts}).toEqual(financeBefore);
+ const before=structuredClone(f.state);
+ expect(()=>f.run({type:'fulfillment.inventory.quarantine.noRecovery',payload:{returnId:release,evidence:'Passed goods'}},'reviewer')).toThrow('已退供或报废');
+ expect(()=>f.run({type:'payable.disposal.review',payload:{returnId:scrap,evidence:'Duplicate'}})).toThrow('已核对');
+ expect(()=>f.run({type:'fulfillment.inventory.quarantine.dispose',payload:{returnId:scrap,decision:'scrap',evidence:'Duplicate'}})).toThrow('已处置');
+ expect(f.state).toEqual(before);
+ expect(f.state.fulfillment.stockMovements.filter(m=>m.kind==='scrap'&&m.quarantineReturnId===scrap)).toHaveLength(1);
 });

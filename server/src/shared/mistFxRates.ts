@@ -78,7 +78,7 @@ export function fxOrderActual(root: Root, order: { id: string; currency: string;
   const invoices = new Set((root.invoices || []).filter(i => i.orderId === order.id && i.currency === order.currency && isRecognizedMistInvoice(i)).map(i => i.id));
   let settled = 0, settledCny = 0;
   for (const a of root.allocations || []) {
-    const r = receipts.get(a.receiptId); if (!invoices.has(a.invoiceId) || !r || r.date > asOf) continue;
+    const r = receipts.get(a.receiptId); if (!invoices.has(a.invoiceId) || !r || r.date > asOf || r.currency !== order.currency) continue;
     const am = minor(a.amount);
     let sf = 0, sc = 0; for (const s of settlements) for (const l of s.receipts || []) if (l.receiptId === r.id) { const x = minor(l.amount); sf += x; sc += x * minor(s.localAmount) / minor(s.amount); }
     const total = minor(r.amount); if (!sf || !total) continue;
@@ -160,13 +160,15 @@ export function fxRevaluationPreview(root: Root, month: string, today: string): 
     const issued = isRecognizedMistInvoice(inv) && mistInvoiceDate(root, inv) <= monthEnd; invoiceIssued.set(inv.id, issued);
     if (!issued || cur(inv.currency) === 'CNY') continue;
     const paid = (root.allocations || []).filter(x => x.invoiceId === inv.id && (receiptDate.get(x.receiptId) || '') <= monthEnd).reduce((n, x) => n + minor(x.amount), 0);
-    // Both the charge and its reversal take effect on their Beijing business date, not today's state.
-    const open = Math.max(0, minor(inv.amount) - paid - platformCreditAppliedMinor(root as any, inv.id) - (inv.bankCharges || []).filter(c => platformBusinessDate(c.at) <= monthEnd && (!c.reversed || platformBusinessDate(c.reversed.at) > monthEnd)).reduce((n, c) => n + minor(c.amount), 0));
+    // Bank charges and write-offs (尾差 / 坏账 / 红冲) and their reversals take effect on their Beijing business date, not today's state.
+    const effective = (x: { at: string; reversed?: { at: string } }) => platformBusinessDate(x.at) <= monthEnd && (!x.reversed || platformBusinessDate(x.reversed.at) > monthEnd);
+    const reduced = [...(inv.bankCharges || []), ...(inv.writeoffs || [])].filter(effective).reduce((n, x) => n + minor(x.amount), 0);
+    const open = Math.max(0, minor(inv.amount) - paid - platformCreditAppliedMinor(root as any, inv.id) - reduced);
     if (open) raw.push({ kind: 'receivable', refId: inv.id, ref: `${inv.code} · ${inv.customer}`, currency: cur(inv.currency), amount: open / 100 });
   }
   for (const r of receipts) {
     if (cur(r.currency) === 'CNY' || r.date > monthEnd) continue;
-    const applied = (root.allocations || []).filter(x => x.receiptId === r.id && invoiceIssued.get(x.invoiceId)).reduce((n, x) => n + minor(x.amount), 0);
+    const applied = (root.allocations || []).filter(x => x.receiptId === r.id && invoiceIssued.get(x.invoiceId)).reduce((n, x) => n + minor(x.receiptAmount ?? x.amount), 0);
     const left = minor(r.amount) - applied;
     if (left > 0) raw.push({ kind: 'unapplied', refId: r.id, ref: `${r.code} · ${r.payer}`, currency: cur(r.currency), amount: -left / 100 });
   }

@@ -10,6 +10,7 @@ import { DraftFiles, today } from './modules/fulfillmentKit';
 import { RecordDisclosure } from './modules/pageKit';
 import { OptionInput } from './OptionInput';
 import { CURRENCIES } from '../runtime/tradeOptions';
+import { usePageFailure } from '../runtime/errorPresentation';
 
 type Props = { state: MistState; dev: MistDev; disabled?: boolean; run: (command: MistCommand) => Promise<unknown> };
 type Action = 'making' | 'expense' | 'charge' | 'invoice' | 'withdraw' | 'void';
@@ -20,6 +21,8 @@ export function DevBillingCard({ state, dev, disabled, run }: Props) {
   const [form, setForm] = React.useState({ sampleId: '', version: '*', amount: '', currency: 'USD', description: '', evidence: '', date: today(), number: '' });
   const [voidId, setVoidId] = React.useState('');
   const [fileIds, setFileIds] = React.useState<string[]>([]), [uploading, setUploading] = React.useState(false), [busy, setBusy] = React.useState(false), [failure, setFailure] = React.useState('');
+  // Dialog failures stay in the dialog; a failure with no dialog open goes to the shell card.
+  usePageFailure('未能保存', action ? '' : failure);
   const lock = React.useRef(false), live = React.useRef(true);
   React.useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
   React.useEffect(() => { setAction(null); setSelected([]); setFailure(''); }, [dev.id]);
@@ -58,8 +61,7 @@ export function DevBillingCard({ state, dev, disabled, run }: Props) {
   const versionOptions = [{ value: '*', label: '整案' }, ...dev.versionIds.flatMap(id => { const v = state.versions.find(row => row.id === id); return v ? [{ value: id, label: v.label }] : []; })];
   return <Card><CardHeader title={uiText('开发费用')} tools={stage ? <Pill tone={stage.tone}>{uiText(stage.label)}</Pill> : <Pill>{uiText('不向客户收费')}</Pill>} />
     <div className="mist-card-body mist-col">
-      {failure && !action && <Banner tone="bad" title={uiText('未能保存')}>{failure}</Banner>}
-      {dev.billing?.request?.state === 'pending' && <Banner tone="warn" title={uiText('原申请需重新核对收费')} actions={canWrite ? <Button disabled={blocked} onClick={() => open('withdraw')}>{uiText('撤回原申请')}</Button> : undefined} />}
+      {dev.billing?.request?.state === 'pending' && <Banner variant="notice" tone="warn" title={uiText('原申请需重新核对收费')} actions={canWrite ? <Button disabled={blocked} onClick={() => open('withdraw')}>{uiText('撤回原申请')}</Button> : undefined} />}
       {charged && <><div className="mist-row"><b>{uiText('客户收费')}</b><span className="mist-spacer" />{canWrite && <Button disabled={blocked} onClick={() => open('charge')}>{uiText('添加收费项')}</Button>}</div>
         {(dev.billing?.charges || []).filter(row => !row.voided).map(row => { const unbilled = available.some(item => item.id === row.id); return <div className="mist-row" key={row.id}>
           {canWrite && unbilled ? <Checkbox label={row.description} checked={selected.includes(row.id)} disabled={blocked} onChange={checked => setSelected(ids => checked ? [...ids, row.id] : ids.filter(id => id !== row.id))} /> : <span>{row.description}</span>}

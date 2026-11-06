@@ -52,7 +52,7 @@ describe('development costs and customer billing',()=>{
  it('preserves unbilled items when only some charges are invoiced',()=>{const f=fixture(true);file(f);const a=charge(f,200),b=charge(f,100);invoice(f,[a]);expect(unbilledDevelopmentCharges(f.state,f.dev()).map(row=>row.id)).toEqual([b]);invoice(f,[b],'DI-2');expect(unbilledDevelopmentCharges(f.state,f.dev())).toEqual([]);});
  it('rejects duplicate, mixed-currency and foreign lines atomically',()=>{const f=fixture(true);file(f);const a=charge(f),b=charge(f,100,'EUR');f.unchanged(()=>invoice(f,[a,a]),/重复/);f.unchanged(()=>invoice(f,[a,b]),/不同币种/);f.unchanged(()=>invoice(f,['foreign']),/不属于|已开票/);f.unchanged(()=>f.run({type:'development.charge.add',payload:{devId:f.at.devId,versionIds:['foreign'],description:'费',amount:1,currency:'USD',evidence:'依据'}}),/本案/);});
  it('keeps a rejected invoice and releases its charges for corrected issuance',()=>{const f=fixture(true);file(f);const a=charge(f),id=invoice(f,[a]);f.run({type:'finance.receivable.reject',payload:{invoiceId:id,reason:'抬头需更正'}});expect(f.state.invoices.find(row=>row.id===id)).toMatchObject({amount:300,financeStatus:'rejected',voidReason:'财务驳回：抬头需更正'});expect(unbilledDevelopmentCharges(f.state,f.dev()).map(row=>row.id)).toEqual([a]);invoice(f,[a],'DI-2');expect(f.state.invoices).toHaveLength(2);});
- it('withdraws the old cost request with history and forbids financial staff creating development invoices',()=>{const f=fixture(true);f.dev().billing={makingFees:[],request:{id:'old',requestedAt:f.ctx.now,requestedBy:'业务',billTo:'客户',lines:[],totals:[{amount:1020,currency:'CNY'}],state:'pending',invoiceIds:[],taskId:'task'}};f.state.tasks.push({id:'task',title:'旧任务',due:'2026-10-16',done:false} as any);f.unchanged(()=>f.run({type:'finance.developmentInvoice.issue',payload:{devId:f.at.devId,requestId:'old',due:'2026-10-20'}}),/业务员/);f.run({type:'development.billing.withdraw',payload:{devId:f.at.devId,reason:'支出不能当客户收费'}});expect(f.dev().billing!.request).toBeUndefined();expect(f.dev().billing!.requestHistory?.[0].totals).toEqual([{amount:1020,currency:'CNY'}]);expect(f.state.tasks.find(row=>row.id==='task')?.done).toBe(true);expect(f.state.invoices).toEqual([]);});
+ it('withdraws the old cost request with history and forbids financial staff creating development invoices',()=>{const f=fixture(true);f.dev().billing={makingFees:[],request:{id:'old',requestedAt:f.ctx.now,requestedBy:'业务',billTo:'客户',lines:[],totals:[{amount:1020,currency:'CNY'}],state:'pending',invoiceIds:[],taskId:'task'}};f.state.tasks.push({id:'task',title:'旧任务',due:'2026-10-16',done:false} as any);f.unchanged(()=>f.run({type:'finance.developmentInvoice.issue',payload:{devId:f.at.devId,requestId:'old',due:'2026-10-20'}} as any),/未知财务操作/);f.run({type:'development.billing.withdraw',payload:{devId:f.at.devId,reason:'支出不能当客户收费'}});expect(f.dev().billing!.request).toBeUndefined();expect(f.dev().billing!.requestHistory?.[0].totals).toEqual([{amount:1020,currency:'CNY'}]);expect(f.state.tasks.find(row=>row.id==='task')?.done).toBe(true);expect(f.state.invoices).toEqual([]);});
  it('requires an original file and a unique invoice number',()=>{const f=fixture(true),a=charge(f);f.unchanged(()=>invoice(f,[a]),/附件不存在|文件不存在|文件不可用/);file(f);f.unchanged(()=>f.run({type:'development.billing.issue',payload:{devId:f.at.devId,chargeIds:[a],number:'DI-1',due:'2026-10-20',fileIds:[]}}),/原件/);invoice(f,[a]);const b=charge(f);f.unchanged(()=>invoice(f,[b]),/编号已使用/);});
  it('routes customer charges and business issuance to product permissions',()=>{expect(mistCommandPermission({type:'development.charge.add',payload:{} as any})).toBe('products:write');expect(mistCommandPermission({type:'development.billing.issue',payload:{} as any})).toBe('products:write');expect(mistCommandPermission({type:'finance.receivable.confirm',payload:{} as any})).toBe('invoices:write');});
  it('only allows unbilled charges to be voided and retains the reason',()=>{
@@ -62,6 +62,25 @@ describe('development costs and customer billing',()=>{
   expect(unbilledDevelopmentCharges(f.state,f.dev())).toEqual([]);expect(f.dev().billing!.charges!.find(row=>row.id===open)?.voided?.reason).toBe('重复登记');
  });
 
+ it.each(['pending','confirmed','paid'] as const)('does not withdraw invoiced charges or void them at the %s stage',stage=>{
+  const f=fixture(true);file(f);const chargeId=charge(f,0.3),id=invoice(f,[chargeId]);
+  if(stage!=='pending')f.run({type:'finance.receivable.confirm',payload:{invoiceId:id}});
+  if(stage==='paid'){
+   f.run({type:'finance.importReceipts',payload:{receipts:[{date:'2026-10-16',payer:f.dev().customer,amount:0.3,currency:'USD',ref:'PAID-SAMPLE'}]}});
+   f.run({type:'finance.reconcile',payload:{receiptId:f.state.receipts[0].id,invoiceId:id}});
+  }
+  f.unchanged(()=>f.run({type:'development.billing.withdraw',payload:{devId:f.at.devId,reason:'撤回'}}),/仅未开票/);
+  f.unchanged(()=>f.run({type:'development.charge.void',payload:{devId:f.at.devId,chargeId,reason:'撤回'}}),/仅未开票/);
+  if(stage==='paid'){
+   f.unchanged(()=>f.run({type:'finance.receivable.reject',payload:{invoiceId:id,reason:'撤回'}}),/已由财务确认/);
+   expect(Math.round(f.state.invoices.find(row=>row.id===id)!.open*100)).toBe(0);
+  }
+ });
+ it('sums fractional customer charges in cents and freezes the issued lines',()=>{
+  const f=fixture(true);file(f);const a=charge(f,0.1),b=charge(f,0.2),id=invoice(f,[a,b]);
+  expect(Math.round(f.state.invoices.find(row=>row.id===id)!.amount*100)).toBe(30);
+  expect(f.dev().billing!.invoices![0].lines.map(row=>Math.round(row.amount*100))).toEqual([10,20]);
+ });
  it.each([0,-1,0.001])('rejects an invalid customer charge amount %s atomically',amount=>{const f=fixture(true);f.unchanged(()=>charge(f,amount),/金额|小数/);});
 
 });

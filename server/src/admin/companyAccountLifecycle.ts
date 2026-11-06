@@ -1,5 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { revokeAllSessions } from '../auth/sessionRevocation';
+import { invalidateAccountStatusCache } from '../auth/accountStatusGuard';
 
 export class CompanyAccountError extends Error {
   constructor(message: string, public statusCode: number, public code: string) { super(message); }
@@ -10,7 +12,7 @@ export async function setCompanyAccountAccess(prisma: PrismaClient, input: {
   companyId: string; userId: string; actorId: string; enabled: boolean;
 }) {
   if (!input.enabled && input.userId === input.actorId) throw new CompanyAccountError('不能停用自己。', 400, 'SELF_DISABLE');
-  return prisma.$transaction(async tx => {
+  const changed = await prisma.$transaction(async tx => {
     // Serialize capacity changes with the platform's company-member operations.
     await tx.$queryRaw`SELECT "id" FROM "Company" WHERE "id" = ${input.companyId}::uuid FOR UPDATE`;
     const member = await tx.companyMember.findUnique({
@@ -28,15 +30,19 @@ export async function setCompanyAccountAccess(prisma: PrismaClient, input: {
       }
     }
     const status = input.enabled ? 'active' : 'suspended';
-    if (member.status === status) return;
+    if (member.status === status) return false;
     if (input.enabled && member.company.seatLimit !== null) {
       const used = await tx.companyMember.count({ where: { companyId: input.companyId, status: 'active', user: { status: 'active', deletedAt: null } } });
       if (used >= member.company.seatLimit) throw new CompanyAccountError('公司席位已用完。', 409, 'SEAT_LIMIT_REACHED');
     }
     await tx.companyMember.update({ where: { id: member.id }, data: { status } });
+    // 停用与恢复都作废该账号已签发的令牌，否则停用前的令牌会在恢复后复活（账号级撤销，其他公司的会话也须重新登录）。
+    await tx.userAccount.update({ where: { id: input.userId }, data: { metadata: revokeAllSessions(member.user.metadata) as any } });
     await tx.auditLog.create({ data: {
       id: randomUUID(), actorId: input.actorId, action: input.enabled ? 'enable_company_account' : 'disable_company_account',
-      targetType: 'UserAccount', targetId: input.userId, detail: { companyId: input.companyId },
+      targetType: 'UserAccount', targetId: input.userId, companyId: input.companyId, detail: { companyId: input.companyId },
     } });
+    return true;
   });
+  if (changed) invalidateAccountStatusCache(input.userId);
 }

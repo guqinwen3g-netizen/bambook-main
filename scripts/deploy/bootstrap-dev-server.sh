@@ -33,6 +33,8 @@ install -d -m 0755 -o "$deploy_user" -g "$deploy_user" "$root" "$root/releases" 
 install -d -m 0700 -o "$deploy_user" -g "$deploy_user" "$root/shared/mist-files" "$root/shared/ai-subscriptions" "$root/shared/logs" \
   "$root/shared/uploads" "$root/shared/private-files" "$root/shared/storage" "$root/shared/data" "$root/shared/output" "$root/shared/cutout-queue"
 install -d -m 0750 -o root -g "$deploy_user" "$etc"
+# Root-written approvals for releases that change server/prisma (read by bambook-dev-release.sh's schema gate).
+install -d -m 0750 -o root -g "$deploy_user" "$etc/schema-approvals"
 
 # Dedicated development database and role. The password is generated once and only written to backend.env.
 systemctl enable --now postgresql >/dev/null
@@ -68,6 +70,7 @@ ensure_env BAMBOOK_PUBLIC_BASE_URL "$public_origin"
 ensure_env BAMBOOK_UPLOAD_DIR "$root/shared/uploads"
 ensure_env BAMBOOK_PRIVATE_FILES_DIR "$root/shared/private-files"
 ensure_env SYSTEM_CONFIG_ENCRYPTION_KEY "$(openssl rand -hex 32)"
+ensure_env BAMBOOK_MARKET_DIR "$root/shared/market"
 ensure_env BAMBOOK_COOKIE_SECRET "$(openssl rand -hex 32)"
 ensure_env BAMBOOK_CODEX_SUBSCRIPTION 1
 ensure_env BAMBOOK_IMAGE_CUTOUT_QUEUE "$root/shared/cutout-queue"
@@ -192,6 +195,12 @@ server {
     root /srv/bambook-dev/current/web;
     client_max_body_size 64m;
     # Mist workspace routes are served by the Mist API; everything else under /api/ by the main API.
+    location = /api/mist/voice/stream {
+        proxy_pass http://127.0.0.1:8082;
+        include snippets/bambook-dev-proxy.conf;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
     location /api/mist/ {
         proxy_pass http://127.0.0.1:8082;
         include snippets/bambook-dev-proxy.conf;
@@ -236,16 +245,13 @@ fi
 install -d -m 0700 "$etc/proxy"
 [[ -f "$etc/proxy/nodes.txt" ]] || install -m 0600 /dev/null "$etc/proxy/nodes.txt"
 
-# Daily compressed database + attachment backup, 7 days retained.
-install -d -m 0700 -o postgres -g postgres /var/backups/bambook-dev
+# Daily local backup (database + persistent data under shared/), 7 days retained. The logic lives in
+# bambook-dev-backup.py, the only backup entry; cron just runs it. Sets are root-only (dir 0700, files 0600).
+install -d -m 0700 -o root -g root /var/backups/bambook-dev
+install -m 0755 -o root -g root "$(dirname "$0")/bambook-dev-backup.py" /usr/local/sbin/bambook-dev-backup
 cat > /etc/cron.daily/bambook-dev-backup <<'CRON'
 #!/bin/sh
-set -e
-cd /var/backups/bambook-dev
-sudo -u postgres pg_dump -Fc panda_hub_dev > "panda_hub_dev-$(date +%Y%m%d).dump"
-# 附件随数据库一起备份（数据库在前，附件在后：备份期间新上传的附件只会多出、不会缺）。
-if [ -d /srv/bambook-dev/shared/mist-files ]; then tar -czf "mist-files-$(date +%Y%m%d).tar.gz" -C /srv/bambook-dev/shared/mist-files .; fi
-find . \( -name 'panda_hub_dev-*.dump' -o -name 'mist-files-*.tar.gz' \) -mtime +7 -delete
+exec /usr/local/sbin/bambook-dev-backup
 CRON
 chmod 0755 /etc/cron.daily/bambook-dev-backup
 

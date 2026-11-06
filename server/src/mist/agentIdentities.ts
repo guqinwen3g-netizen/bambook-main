@@ -15,7 +15,7 @@ export const SERVICE_KEY_HEADER='x-bambook-agent-key';
 export const SERVICE_KEY_TTL_MS=90*24*60*60*1000;
 type Key={generation:string;hash:string;issuedAt:number;expiresAt:number;mode:'read'|'operate';ceiling:string[];credentialVersion?:string;revokedAt?:string};
 export type AgentServiceLease={id:string;workspaceId:string;hash:string;ownerId:string;issuedAt:number;expiresAt:number};
-export type AgentIdentity={schemaVersion:1;id:string;workspaceId:string;companyId?:string;name:string;ownerId:string;ownerName:string;mode:'read'|'operate';version:number;enabled:boolean;createdAt:string;createdBy:string;key?:Key;lastRequestId:string;lastExpectedVersion?:number;lastAction:string};
+export type AgentIdentity={schemaVersion:1;id:string;workspaceId:string;companyId?:string;/** personal：账号本人开通的个人 Agent，负责人固定为本人，每个账号一个。 */kind?:'personal';name:string;ownerId:string;ownerName:string;mode:'read'|'operate';version:number;enabled:boolean;createdAt:string;createdBy:string;key?:Key;lastRequestId:string;lastExpectedVersion?:number;lastAction:string};
 export type MakeServiceCredential=(workspaceId:string,id:string,generation:string)=>string;
 const uuid=(v:unknown):v is string=>typeof v==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
@@ -38,7 +38,7 @@ export async function identityRecord(db:any,workspaceId:string,id:string){const 
 export function identityView(c:AgentIdentity,actor:TokenPayload,now:number,ownerActive=true,ownerName=c.ownerName):AgentIdentityView{
   const key=c.key,own=c.ownerId===actor.userId;
   const state=!c.enabled?'disabled':!ownerActive?'invalid':!key?'pending':key.revokedAt?'revoked':key.expiresAt<=now?'expired':own&&(!hasScope(actor,'ai:chat')||key.credentialVersion!==actor.credentialVersion)?'invalid':'active';
-  return{id:c.id,name:c.name,ownerId:c.ownerId,ownerName,mode:c.mode,version:c.version,state,createdAt:c.createdAt,...(key?{expiresAt:new Date(key.expiresAt).toISOString(),activatedAt:new Date(key.issuedAt).toISOString()}:{}),canManage:serviceCanManage(actor),canIssue:own&&c.enabled&&hasScope(actor,'ai:chat'),canRevoke:(own||serviceCanManage(actor))&&!!key&&!key.revokedAt};
+  return{id:c.id,name:c.name,ownerId:c.ownerId,ownerName,mode:c.mode,version:c.version,...(c.kind?{kind:c.kind}:{}),state,createdAt:c.createdAt,...(key?{expiresAt:new Date(key.expiresAt).toISOString(),activatedAt:new Date(key.issuedAt).toISOString()}:{}),canManage:serviceCanManage(actor),canIssue:own&&c.kind!=='personal'&&c.enabled&&hasScope(actor,'ai:chat'),canRevoke:(own||serviceCanManage(actor))&&!!key&&!key.revokedAt};
 }
 async function save(db:any,row:any,c:AgentIdentity,next:AgentIdentity){
   const updated=await db.mistCommandReceipt.updateMany({where:{id:row.id,workspaceId:c.workspaceId,inputHash:SERVICE_HASH,result:{path:[SERVICE_FIELD,'version'],equals:c.version}},data:{actorId:next.ownerId,result:{revision:0,[SERVICE_FIELD]:next}}});
@@ -62,6 +62,42 @@ export async function createIdentity(db:any,actor:TokenPayload,workspaceId:strin
   await appendEvent(db,c,actor,'created',id,now);
   return identityView(c,actor,now);
 }
+/** 个人 Agent 的身份编号由公司与账号确定，保证每个账号只有一个。 */
+export function personalIdentityId(workspaceId:string,userId:string){const h=hash('bambook-personal-agent/v1:'+workspaceId+':'+userId);return `${h.slice(0,8)}-${h.slice(8,12)}-4${h.slice(13,16)}-8${h.slice(17,20)}-${h.slice(20,32)}`;}
+/** A voice connection must respect an administrator's personal-Agent disable. No identity is created by this read. */
+export async function assertPersonalVoiceAvailable(db:any,actor:TokenPayload,workspaceId:string){
+ const id=personalIdentityId(workspaceId,actor.userId),row=await db.mistCommandReceipt.findUnique({where:{workspaceId_requestId:{workspaceId,requestId:SERVICE_PREFIX+id}}});
+ if(!row)return;
+ const identity=read(row,workspaceId);
+ if(identity.kind!=='personal'||identity.ownerId!==actor.userId||!identity.enabled)fail('FORBIDDEN','你的个人 Agent 已被管理员停用',403);
+}
+/**
+ * 第二类个人 Agent（2026-11-04 定案）：账号本人开通，负责人即本人，可办理范围不超过本人当前权限；
+ * 需要确认的提议进入本人「接着完成」。开通即签发服务端密钥，密钥只在服务端保存摘要、不返回浏览器。
+ * 已开通且有效时直接返回；停用、过期或权限变化后重新开通会轮换密钥。管理员仍可在公司 Agent 身份中停用。
+ */
+export async function ensurePersonalIdentity(db:any,actor:TokenPayload,workspaceId:string,make:MakeServiceCredential,now:number,companyId?:string){
+  if(!hasScope(actor,'ai:chat'))fail('FORBIDDEN','当前账号没有 AI 使用权限',403);
+  const id=personalIdentityId(workspaceId,actor.userId),name=(actor.displayName||'我')+'的 Agent';
+  const existing=await db.mistCommandReceipt.findUnique({where:{workspaceId_requestId:{workspaceId,requestId:SERVICE_PREFIX+id}}});
+  let c:AgentIdentity;let row=existing;
+  if(!existing){
+    c={schemaVersion:1,id,workspaceId,...(companyId?{companyId}:{}),kind:'personal',name,ownerId:actor.userId,ownerName:actor.displayName||actor.userId,mode:'operate',version:1,enabled:true,createdAt:new Date(now).toISOString(),createdBy:actor.userId,lastRequestId:id,lastAction:'created'};
+    row=await db.mistCommandReceipt.create({data:{id:randomUUID(),workspaceId,requestId:SERVICE_PREFIX+id,actorId:actor.userId,inputHash:SERVICE_HASH,expectedRevision:0,result:{revision:0,[SERVICE_FIELD]:c},createdAt:new Date(now)}});
+    await appendEvent(db,c,actor,'created',id,now);
+  }else{
+    c=read(existing,workspaceId);
+    if(c.kind!=='personal'||c.ownerId!==actor.userId)fail('CONFLICT','个人 Agent 编号已被占用',409);
+    if(!c.enabled)fail('FORBIDDEN','你的个人 Agent 已被管理员停用',403);
+  }
+  const key=c.key,live=key&&!key.revokedAt&&key.expiresAt>now+24*60*60_000&&key.credentialVersion===actor.credentialVersion&&AGENT_OPERATE_CEILING.filter(scope=>hasScope(actor,scope as any)).join()===key.ceiling.join();
+  if(live)return identityView(c,actor,now);
+  const generation=randomUUID(),token=make(workspaceId,c.id,generation),ceiling=AGENT_OPERATE_CEILING.filter(scope=>hasScope(actor,scope as any)),rid='personal-issue:'+generation;
+  const nextKey:Key={generation,hash:hash(token),issuedAt:now,expiresAt:now+SERVICE_KEY_TTL_MS,mode:'operate',ceiling,...(actor.credentialVersion?{credentialVersion:actor.credentialVersion}:{})};
+  const next:AgentIdentity={...c,name,ownerName:actor.displayName||c.ownerName,key:nextKey,version:c.version+1,lastRequestId:rid,lastExpectedVersion:c.version,lastAction:'issued'};
+  await save(db,row,c,next);await appendEvent(db,next,actor,'issued',rid,now);
+  return identityView(next,actor,now);
+}
 export async function configureIdentity(db:any,actor:TokenPayload,workspaceId:string,id:string,input:Record<string,unknown>,owner:{id:string;name:string},now:number){
   if(!serviceCanManage(actor))fail('FORBIDDEN','没有Agent身份管理权限',403);
   if(Object.keys(input).some(k=>!['requestId','version','name','ownerId','mode','enabled'].includes(k)))fail('INVALID_INPUT','Agent身份字段无效',400);
@@ -70,6 +106,7 @@ export async function configureIdentity(db:any,actor:TokenPayload,workspaceId:st
   if(!name||name.length>60||/[\u0000-\u001f\u007f]/.test(name)||!['read','operate'].includes(input.mode as string)||typeof input.enabled!=='boolean')fail('INVALID_INPUT','Agent身份字段无效',400);
   if(c.lastRequestId===rid&&c.lastAction==='configured'){if(input.version!==c.lastExpectedVersion||name!==c.name||owner.id!==c.ownerId||input.mode!==c.mode||input.enabled!==c.enabled)fail('CONFLICT','操作编号已用于其他内容',409);return identityView(c,actor,now);}
   if(input.version!==c.version)fail('AGENT_IDENTITY_CHANGED','Agent身份已更新，请刷新重试',409);
+  if(c.kind==='personal'&&(owner.id!==c.ownerId||input.mode!==c.mode))fail('PRECONDITION','个人 Agent 只能停用或改名，不能转给他人或改权限',422);
   await unusedOperation(db,c,rid);
   const next:AgentIdentity={...c,name,ownerId:owner.id,ownerName:owner.name,mode:input.mode as 'read'|'operate',enabled:input.enabled,version:c.version+1,lastRequestId:rid,lastExpectedVersion:c.version,lastAction:'configured'};
   // Reassignment, mode changes and disabling never reactivate a previously delivered key.
@@ -80,6 +117,8 @@ export async function issueServiceKey(db:any,actor:TokenPayload,workspaceId:stri
   if(Object.keys(input).some(k=>!['requestId','version'].includes(k)))fail('INVALID_INPUT','密钥字段无效',400);
   const rid=requestId(input.requestId),{row,value:c}=await identityRecord(db,workspaceId,id);
   if(c.ownerId!==actor.userId)fail('FORBIDDEN','长期凭据须由责任人本人启用',403);
+  // Personal credentials belong to the platform executor and must never be exported through external Agent activation (including idempotent retries).
+  if(c.kind==='personal')fail('FORBIDDEN','个人 Agent 密钥仅供服务端使用',403);
   if(!c.enabled||!hasScope(actor,'ai:chat'))fail('FORBIDDEN','Agent身份或责任人权限已停用',403);
   if(c.lastRequestId===rid&&c.lastAction==='issued'&&c.key){
     if(input.version!==c.lastExpectedVersion||c.key.revokedAt||c.key.expiresAt<=now||c.key.credentialVersion!==actor.credentialVersion||now-c.key.issuedAt>5*60_000)fail('AGENT_IDENTITY_CHANGED','密钥已更新，请重新轮换',409);

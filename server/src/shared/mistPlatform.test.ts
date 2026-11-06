@@ -6,7 +6,7 @@ function fixture(){let i=0;const c:MistContext={id:()=>`platform-${++i}`,now:'20
 const run=(state:MistState,command:PlatformCommand,c:MistContext)=>applyMistCommand(state,command,c);
 function orderApprovalFixture(status:'draft'|'pending'|'approved'='approved'){
  const f=fixture();f.state.files.push({id:'written-po',name:'po.pdf',mimeType:'application/pdf',size:4,storageKey:'workspace/written-po',createdAt:f.c.now});
- let state=applyMistCommand(f.state,{type:'order.governance.saveDraft',payload:{orderId:f.orderId,input:{kind:'external',poNumber:'PLATFORM-PO',confirmationFileIds:['written-po'],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,paymentNote:'T/T 30/70',incoterm:'FOB',deliveryPlace:'上海'}}},f.c).state;
+ let state=applyMistCommand(f.state,{type:'order.governance.saveDraft',payload:{orderId:f.orderId,input:{kind:'external',poNumber:'PLATFORM-PO',confirmationFileIds:['written-po'],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,preShipmentPercent:30,paymentNote:'T/T 30/70',incoterm:'FOB',deliveryPlace:'上海'}}},f.c).state;
  if(status!=='draft')state=applyMistCommand(state,{type:'order.governance.submit',payload:{orderId:f.orderId}},f.c).state;
  if(status==='approved')state=applyMistCommand(state,{type:'order.governance.decide',payload:{id:f.orderId,decision:'approved',note:'核对PO与全部条目'}},{...f.c,actorId:'leader',actorName:'授权负责人'}).state;
  return{...f,state};
@@ -140,7 +140,7 @@ describe('Mist platform business evidence',()=>{
  it('requires complete physical return through the real isolated stock ledger before refund',()=>{
   const f=approvedClaim('ReturnRefund');let r=run(f.state,{type:'platform.claim.execute',payload:{id:f.dispositionId,warehouseId:f.warehouseId}},f.c);const credit=r.state.platform.credits[0],goods=r.state.platform.claimGoods[0];
   expect(()=>run(r.state,{type:'platform.credit.refund',payload:{creditId:credit.id,amount:20,date:'2026-10-13',reference:'bank'}},f.c)).toThrow(/收齐/);
-  expect(()=>run(r.state,{type:'platform.goods.transition',payload:{id:goods.id,state:'Dispatched',basis:'skip',fileIds:[]}},f.c)).toThrow(/实际库存/);
+  expect(()=>run(r.state,{type:'platform.goods.transition',payload:{id:goods.id,state:'Dispatched',basis:'skip',fileIds:[]}} as any,f.c)).toThrow(/未知平台操作/);
   const received=applyMistCommand(r.state,{type:'fulfillment.claimInventory.receive',payload:{goodsId:goods.id,quantity:2,unit:'件',warehouseId:f.warehouseId,location:'退回隔离区',batchNumber:'RT-BATCH',ownership:'Owned',ownershipDate:'2026-10-13',ownershipEvidence:'客户确认我方货权',receivedAt:'2026-10-13',basis:'退货点数与签收凭据',fileIds:['written-po']}},f.c);
   r=run(received.state,{type:'platform.credit.refund',payload:{creditId:credit.id,amount:20,date:'2026-10-13',reference:'真实银行回单'}},f.c);expect(r.state.payments[0].ref).toContain('真实银行回单');expect(r.state.payments[0].code).toMatch(/^PV-2026-\d{4}$/);expect(r.state.allocations).toEqual([]);
   expect(()=>run(r.state,{type:'platform.claim.close',payload:{id:f.claimId}},f.c)).toThrow(/尚未报废/);
@@ -149,7 +149,7 @@ describe('Mist platform business evidence',()=>{
  });
  it.each(['Replace','Repair'] as const)('refuses fake %s release states without actual professional fulfillment',kind=>{
   const f=approvedClaim(kind),r=run(f.state,{type:'platform.claim.execute',payload:{id:f.dispositionId,warehouseId:f.warehouseId}},f.c);expect(r.state.platform.credits).toHaveLength(0);const id=r.state.platform.claimGoods[0].id;
-  for(const state of ['Received','Ready','Dispatched'] as const)expect(()=>run(r.state,{type:'platform.goods.transition',payload:{id,state,basis:'不能以备注制造履行事实',fileIds:[]}},f.c)).toThrow(/实际库存/);
+  for(const state of ['Received','Ready','Dispatched'] as const)expect(()=>run(r.state,{type:'platform.goods.transition',payload:{id,state,basis:'不能以备注制造履行事实',fileIds:[]}} as any,f.c)).toThrow(/未知平台操作/);
   expect(r.state.platform.claimGoods[0].state).toBe('AwaitingReturn');expect(()=>run(r.state,{type:'platform.claim.close',payload:{id:f.claimId}},f.c)).toThrow();
  });
  it('preserves business archive events without modifying authentication identity',()=>{const f=fixture();const r=run(f.state,{type:'platform.employee.save',payload:{name:'林',department:'业务',position:'跟单',contact:'',startDate:'2026-10-01',note:'入组记录',active:true}},f.c);expect(r.state.platform.employees[0].history[0].actor).toBe('业务员');expect(r.state.platform.employees[0]).not.toHaveProperty('permissions');expect(platformCommandPermission({type:'platform.employee.save',payload:{} as any})).toBe('hr:write');expect(platformCommandPermission({type:'platform.credit.refund',payload:{} as any})).toBe('invoices:reconcile');});

@@ -230,19 +230,26 @@ it("rejects missing explicit figures and preserves draft", async () => {
     (getByLabelText(host, "本次报价策略依据") as HTMLTextAreaElement).value,
   ).toContain("人工策略");
 });
-it("server rejects unit mismatch and keeps all inputs for correction", async () => {
+it("a different cost unit needs a unit conversion before it can be saved in the quote unit", async () => {
   render();
   field("成本计价单位", "公斤");
+  // 缺单位换算时第 1 步不放行。
+  field("适用规格", "软件验收 150cm");
+  field("来源日期", "2026-10-14");
+  field("来源供应商", bridge.w.state.market.suppliers[0].id);
+  field("供应商成品单价", "10");
+  field("来源交付与费用包含条件", "软件验收 FOB 包含加工包装，不含运输");
+  field("成本来源依据", "软件验收，非真实成本");
+  await click("下一步");
+  expect(getByLabelText(host, "适用规格")).toBeTruthy();
+  field("单位换算系数", "0.5");
+  field("折算依据", "软件验收：每计价单位 0.5 公斤");
   await fill();
   await click("下一步");
   await click("保存核算");
-  expect(host.textContent).toContain("不自动换算");
-  await click("上一步");
-  await click("上一步");
-  expect((getByLabelText(host, "成本计价单位") as HTMLInputElement).value).toBe(
-    "公斤",
-  );
-  expect(q().costingSnapshots || []).toHaveLength(0);
+  expect(q().costingSnapshots).toHaveLength(1);
+  expect(q().costingSnapshots[0].input.conversion).toMatchObject({ unitFactor: "0.500000" });
+  expect(q().lines[0].cost).toBe("5.0000");
 });
 it("does not treat incomplete receipt as success", async () => {
   bridge.w.run.mockResolvedValue({ result: { id: route.id } });

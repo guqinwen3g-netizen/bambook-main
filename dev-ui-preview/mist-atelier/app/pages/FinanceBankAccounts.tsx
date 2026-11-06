@@ -9,6 +9,7 @@ import { ModuleEditorDialog, type ModuleEditorSpec } from './modules/ModuleWorkb
 import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
 import { mistCommandPermission, mistFxLockUsage, mistFxRate, mistReceiptSettledMinor, type MistBankAccount, type MistCommand, type MistFxRecord, type MistPayment, type MistReceipt, type MistState } from '../../../../server/src/shared/mistWorkspace';
 import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
+import { latestClosedMonth } from '../../../../server/src/shared/mistPeriodClose';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
 import { OptionInput } from './OptionInput';
@@ -21,14 +22,14 @@ export const accountLabel = (a: MistBankAccount) => `${a.name} · ${a.bankName} 
 export function useBankAccountCommand() {
   const { run, loading, saving, pending } = useMistWorkspace(), session = useMistSession();
   const [working, setWorking] = React.useState(false), [failure, setFailure] = React.useState('');
-  const busy = working || loading || saving || !!pending, canWrite = session.hasPermission(MIST_FINANCE_SCOPES.voucher);
+  const busy = working || loading || saving || !!pending, canWrite = session.hasPermission(MIST_FINANCE_SCOPES.voucher), canLock = session.hasPermission('fx:lock');
   const execute = async (command: MistCommand, done: () => void) => {
     const permission = mistCommandPermission(command);
     if (permission && !session.hasPermission(permission as any)) { setFailure('没有办理此项财务动作的权限。'); return; }
     if (busy) return; setWorking(true); setFailure('');
     try { await run(command); done(); } catch (problem) { setFailure(problem instanceof Error ? problem.message : '操作失败，请重试'); } finally { setWorking(false); }
   };
-  return { execute, busy, failure, setFailure, canWrite };
+  return { execute, busy, failure, setFailure, canWrite, canLock };
 }
 
 type AccountDraft = { id?: string; name: string; bankName: string; accountNo: string; currency: string; openingDate: string; openingBalance: string };
@@ -102,7 +103,8 @@ const amountOk = (v: string) => /^\d+(\.\d{1,2})?$/.test(v.trim()) && Number(v) 
 
 /** 锁汇：登记银行远期合同；结汇：按银行水单登记卖出原币与入账本币，汇率由实际金额得出。 */
 export function FxDialog({ state, draft, onClose }: { state: MistState; draft: FxDraft; onClose: () => void }) {
-  const { execute, busy, failure, canWrite } = useBankAccountCommand(), toast = useToast();
+  const { execute, busy, failure, canWrite: canVoucher, canLock } = useBankAccountCommand(), toast = useToast();
+  const canWrite = draft.kind === 'lock' ? canLock : canVoucher;
   const [form, setForm] = React.useState(draft), [local, setLocal] = React.useState(''), [links, setLinks] = React.useState<Links>({});
   const set = (key: keyof FxDraft) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm({ ...form, [key]: e.target.value });
   const accounts = state.bankAccounts || [], from = accounts.find(a => a.id === form.fromAccountId), to = accounts.find(a => a.id === form.toAccountId);
@@ -273,7 +275,7 @@ export function FxRevaluationCard() {
       <Select aria-label={uiText("调汇月份")} value={month} onChange={e => setMonth(e.target.value)} options={months.map(m => ({ value: m, label: m }))} />
       {canWrite && <Button size="sm" disabled={busy || !view || view.blockers.length > 0} onClick={() => post && setSpec(post)}>{uiText("登记期末调汇")}</Button>}</span>} />
     <div className="mist-card-body mist-col">
-      {view && view.blockers.length > 0 && <Banner tone="warn" title={uiText("暂不能登记")}>{view.blockers.join('；')}</Banner>}
+      {view && view.blockers.length > 0 && <Banner variant="notice" tone="warn" title={uiText("暂不能登记")}>{view.blockers.join('；')}</Banner>}
       {view && view.currencies.length > 0 && <div className="mist-row" style={{ flexWrap: 'wrap', gap: 16 }}>{view.currencies.map(c => <span key={c.currency} className="mist-col" style={{ gap: 2 }}><b>{c.currency} · {c.bookRate} → {c.closingRate || '缺月末汇率'}</b><small className="mist-muted">{uiText("未实现 ")}{cny(c.unrealized)}{uiText(" · 结汇 ")}{cny(c.realized)}{uiText(" · 合计 ")}{cny(c.total)}</small></span>)}</div>}
       {view && <RevalLinesTable lines={view.lines} label={ui`${month} 期末调汇预览`} />}
       <span className="mist-note">{uiText("余额按月末截止：银行按流水日期，应收按开票日期、核销按到账日期计入；外币应付按发票日期、付款按付款日计入，合同预付款不重估。须按月连续登记。")}</span>
@@ -307,4 +309,26 @@ export function AccountStatusCell({ account, balance }: { account: MistBankAccou
     {canWrite && (account.closed ? <Button size="sm" disabled={busy} onClick={() => setSpec(reopen)}>{uiText("恢复")}</Button> : <Button size="sm" disabled={busy} title={uiText(Math.round(balance * 100) ? '余额须为零才能销户' : undefined)} onClick={() => setSpec(close)}>{uiText("销户")}</Button>)}
     <ModuleEditorDialog spec={spec} onClose={() => setSpec(null)} />
   </span>;
+}
+
+/** Month-end close: after bank, receivable and payable checks, finance closes the month; later changes need a reopen. */
+export function PeriodCloseCard() {
+  const { state, run, loading, saving, pending } = useMistWorkspace(), session = useMistSession();
+  const canClose = session.hasPermission(MIST_FINANCE_SCOPES.voucher), canReopen = session.hasPermission('invoices:approve:writeoff' as never), busy = loading || saving || !!pending;
+  const [spec, setSpec] = React.useState<ModuleEditorSpec | null>(null);
+  const rows = [...(state?.periodCloses || [])].sort((a, b) => b.month.localeCompare(a.month) || b.closedAt.localeCompare(a.closedAt));
+  const latest = latestClosedMonth(state || {}), today = platformBusinessDate(businessNow()).slice(0, 7);
+  const next = latest ? (() => { const [y, m] = latest.split('-').map(Number); return `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}`; })() : fxPrevMonth(today);
+  const close: ModuleEditorSpec = { title: `结账 ${next}`, submitLabel: '结账', description: `结账后 ${next} 及以前日期的到账、核销、付款、结汇、票据和月末汇率不能再补登或修改。`, fields: [{ key: 'note', label: '结账核对说明', type: 'textarea', required: true }], initialValues: { note: '' }, submit: v => run({ type: 'finance.period.close', payload: { month: next, note: String(v.note ?? '') } }) };
+  const reopen: ModuleEditorSpec = { title: `反结账 ${latest}`, submitLabel: '反结账', submitVariant: 'danger', fields: [{ key: 'reason', label: '反结账原因', type: 'textarea', required: true }], initialValues: { reason: '' }, submit: v => run({ type: 'finance.period.reopen', payload: { month: latest, reason: String(v.reason ?? '') } }) };
+  return <Card>
+    <CardHeader title={uiText('期末结账')} tools={<span className="mist-row">{canReopen && latest && <Button size="sm" disabled={busy} onClick={() => setSpec(reopen)}>{uiText(`反结账 ${latest}`)}</Button>}{canClose && next < today && <Button size="sm" variant="primary" disabled={busy} onClick={() => setSpec(close)}>{uiText(`结账 ${next}`)}</Button>}</span>} />
+    {rows.length ? <DataTable ariaLabel={uiText('结账记录')} rows={rows} rowKey={r => r.month + r.closedAt} density="comfy" columns={[
+      { key: 'm', header: '月份', render: r => r.month },
+      { key: 's', header: '状态', render: r => <Pill tone={r.reopened ? 'neutral' : 'ok'}>{uiText(r.reopened ? '已反结账' : '已结账')}</Pill> },
+      { key: 'by', header: '结账', render: r => `${r.closedBy} · ${platformBusinessDate(r.closedAt)}` },
+      { key: 'n', header: '说明', render: r => r.reopened ? `${r.note}；反结账：${r.reopened.reason}（${r.reopened.actor}）` : r.note },
+    ]} /> : <EmptyState compact title={uiText('还没有结账月份')} />}
+    <ModuleEditorDialog spec={spec} onClose={() => setSpec(null)} />
+  </Card>;
 }

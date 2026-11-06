@@ -1,4 +1,3 @@
-import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** BB-ORD-7：草稿 / 已退回订单作废，已批准订单申请取消；终止后只读。 */
 import React from 'react';
@@ -8,6 +7,7 @@ import type { MistCommand, MistOrder, MistState } from '../../../../server/src/s
 import { ORDER_CANCEL_ALTERNATIVE, orderCancelBlockers, type OrderGovernanceFields } from '../../../../server/src/shared/mistOrderGovernance';
 import { isLineClosed } from '../../../../server/src/shared/mistOrderClosure';
 import { OrderChangeImpactList } from './OrderChangeImpactList';
+import { businessWhen } from './modules/pageKit';
 
 type Go = (view: string, id?: string, target?: Record<string, string | undefined>) => void;
 type Governed = MistOrder & { governance?: OrderGovernanceFields };
@@ -18,14 +18,15 @@ export function orderLocked(order: Governed) {
   return g?.status === 'void' || g?.status === 'cancelled' || g?.cancellation?.status === 'pending';
 }
 
+/** Order termination state as one status line under the header: what happened, why, who and when (Beijing time). */
 export function OrderTerminationBanner({ order }: { order: Governed }) {
   const g = order.governance, t = g?.termination, c = g?.cancellation;
-  const when = (at?: string) => at ? new Date(at).toLocaleString(interfaceLocale()) : '';
-  const facts=(reason:string,role:string,name:string,at?:string)=><><span>{reason}</span><span className="mist-row" style={{gap:16,marginTop:4,flexWrap:'wrap'}}><span>{uiText(role)}：{name}</span>{at&&<time>{when(at)}</time>}</span></>;
-  if (g?.status === 'void') return <Banner tone="neutral" title={uiText("已作废")}>{facts(t?.reason||'','作废人',t?.byName||'',t?.at)}</Banner>;
-  if (g?.status === 'cancelled') return <Banner tone="bad" title={uiText("已取消")}>{facts(t?.reason||c?.reason||'','批准人',c?.decidedName||t?.byName||'',t?.at)}</Banner>;
-  if (c?.status === 'pending') return <Banner tone="warn" title={uiText("取消审批中")}>{facts(c.reason,'申请人',c.requesterName,c.requestedAt)}</Banner>;
-  if (c?.status === 'rejected') return <Banner tone="neutral" title={uiText("取消已退回")}>{facts(c.note||'','审批人',c.decidedName||'',c.decidedAt)}</Banner>;
+  const line = (tone: 'neutral' | 'bad' | 'warn', title: string, reason: string, role: string, name: string, at?: string) =>
+    <Banner variant="status" tone={tone} title={uiText(title)}>{[reason, name && `${uiText(role)} ${name}`, at && businessWhen(at)].filter(Boolean).join(' · ')}</Banner>;
+  if (g?.status === 'void') return line('neutral', '已作废', t?.reason || '', '作废人', t?.byName || '', t?.at);
+  if (g?.status === 'cancelled') return line('bad', '已取消', t?.reason || c?.reason || '', '批准人', c?.decidedName || t?.byName || '', t?.at);
+  if (c?.status === 'pending') return line('warn', '取消审批中', c.reason, '申请人', c.requesterName, c.requestedAt);
+  if (c?.status === 'rejected') return line('neutral', '取消已退回', c.note || '', '审批人', c.decidedName || '', c.decidedAt);
   return null;
 }
 
@@ -34,6 +35,15 @@ export function orderFulfilled(state: MistState, order: Pick<MistOrder, 'id'>) {
   const lines = state.orderLines.filter(line => line.orderId === order.id);
   const departed = (state.fulfillment?.shipments || []).filter(s => s.state === 'departed');
   return lines.length > 0 && lines.every(line => isLineClosed(line) || departed.reduce((sum, s) => sum + s.lines.filter(item => item.lineId === line.id).reduce((n, item) => n + Math.round(item.quantity * 10000), 0), 0) >= Math.round(line.qty * 10000));
+}
+
+/** Lines not closed and not fully departed, with the quantity still to ship. */
+function openLines(state: MistState, order: Pick<MistOrder, 'id'>) {
+  const departed = (state.fulfillment?.shipments || []).filter(s => s.state === 'departed');
+  return state.orderLines.filter(line => line.orderId === order.id && !isLineClosed(line)).map(line => {
+    const shipped = departed.reduce((sum, s) => sum + s.lines.filter(item => item.lineId === line.id).reduce((n, item) => n + Math.round(item.quantity * 10000), 0), 0);
+    return { line, left: Math.max(0, Math.round(line.qty * 10000) - shipped) / 10000 };
+  }).filter(row => row.left > 0);
 }
 
 export function OrderTerminationButton({ state, order, busy, run, go }: { state: MistState; order: Governed; busy: boolean; run: (command: MistCommand) => Promise<unknown>; go: Go }) {
@@ -57,11 +67,13 @@ export function OrderTerminationButton({ state, order, busy, run, go }: { state:
       footer={<><Button disabled={working} onClick={() => setOpen(false)}>{uiText("返回")}</Button><Button variant="danger" loading={working} disabled={busy || working || blockers.length > 0 || changePending} onClick={() => void submit()}>{uiText(mode === 'void' ? '确认作废' : '提交取消审批')}</Button></>}>
       {failure && <Banner tone="bad" title={uiText("未能提交")}>{failure}</Banner>}
       {mode === 'void'
-        ? <Banner tone="warn" title={uiText("作废后订单只读")}>{uiText("记录保留，停止采购与履约。")}</Banner>
+        ? <Banner variant="notice" tone="warn" title={uiText("作废后订单只读")}>{uiText("记录保留，停止采购与履约。")}</Banner>
         : blockers.length
-          ? <Banner tone="bad" title={uiText(ORDER_CANCEL_ALTERNATIVE)}>{ui`${blockers.join('；')}。已出运或已开票的订单不能整单取消，请在条目详情中按实际数量结案。`}</Banner>
-          : <Banner tone="warn" title={uiText("取消须经订单审批人批准")}>{uiText("审批期间暂停新的采购、生产与出运。")}</Banner>}
-      {changePending && <Banner tone="warn" title={uiText("有待审批的变更")}>{uiText("请先处理变更审批，再申请取消。")}</Banner>}
+          ? <><Banner variant="notice" tone="bad" title={uiText(ORDER_CANCEL_ALTERNATIVE)}>{ui`${blockers.join('；')}。`}</Banner>
+            {/* ord34：列出尚未出足的条目，直接到条目详情结案。 */}
+            <div className="mist-col">{openLines(state, order).map(row => <div key={row.line.id} className="mist-row mist-module-actions"><span>{row.line.name} · {row.line.style}</span><span className="mist-note">{ui`未出运 ${row.left} ${row.line.unit}`}</span><span className="mist-spacer" /><Button size="sm" onClick={() => { setOpen(false); go('orders/detail', order.id, { orderLineId: row.line.id }); }}>{uiText('去结案')}</Button></div>)}</div></>
+          : <Banner variant="notice" tone="warn" title={uiText("取消须经订单审批人批准")}>{uiText("审批期间暂停新的采购、生产与出运。")}</Banner>}
+      {changePending && <Banner variant="notice" tone="warn" title={uiText("有待审批的变更")}>{uiText("请先处理变更审批，再申请取消。")}</Banner>}
       {mode === 'cancel' && <KeyValue items={[{ label: '订单', value: `${order.code} · ${order.customer}` }, { label: '交期', value: order.due }]} />}
       {mode === 'cancel' && !blockers.length && <OrderChangeImpactList state={state} order={order} lines={[]} go={go} note={uiText("批准取消后，下列采购、生产、出运各生成一条“订单已取消，请处理”待办；不会自动改动这些记录。")} />}
       <Field label={uiText(mode === 'void' ? '作废原因' : '取消原因')} required full><TextArea aria-label={uiText(mode === 'void' ? '作废原因' : '取消原因')} value={reason} onChange={e => setReason(e.target.value)} /></Field>

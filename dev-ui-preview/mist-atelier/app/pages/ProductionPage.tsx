@@ -9,7 +9,7 @@ import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow,businessToday} from '../runtime/businessClock';
 /** T8 生产看板：沿用原 Mist 卡片和布局，拖动保存到公司共享数据。 */
 import React from 'react';
-import { AlertTriangle, CalendarRange, Factory } from 'lucide-react';
+import { CalendarRange, Factory, Layers } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, Checklist, DataTable, Drawer, Dropdown, EmptyState, Field, FormGrid, Kanban, KeyValue, Meter, MistPage, Mono, ObjectCell, PageHeader, Pill, SearchField, Segmented, SummaryBar, TextArea, TextInput, Thumb, Toolbar, useToast } from '../../../../components/mist';
 import type { MistProduction, MistState } from '../../../../server/src/shared/mistWorkspace';
 import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
@@ -26,6 +26,7 @@ import { workspaceMembers } from '../runtime/members';
 import { ProductionSampleNotes } from './ProductionSampleNotes';
 import { breakdownSizeTotals, type OrderLineBreakdown } from '../../../../server/src/shared/mistOrderBreakdown';
 import { useDevice } from '../runtime/devicePreferences';
+import { usePageFailure } from '../runtime/errorPresentation';
 
 export function parseProductionSizes(value:string):FulfillmentSizeQuantity[] { if(!value.trim())return []; return value.split(/\n+/).map(line=>{ const match=line.trim().match(/^(.+?)[:：]\s*(\d+(?:\.\d{1,4})?)$/);if(!match)throw new Error('尺码数量请逐行填写，例如 M:10');return {size:match[1].trim(),quantity:Number(match[2])}; }); }
 export type ProductionRange = 'week' | 'month' | 'all';
@@ -72,6 +73,8 @@ export function ProductionPage() {
   const [selectedId, setSelectedId] = React.useState<string | null>(route.productionId ?? route.id ?? null);
   const [draft, setDraft] = React.useState({ pct: 0, risk: '', note: '', startDate: '', due: '' });
   const [busy, setBusy] = React.useState(false), [failure, setFailure] = React.useState('');
+  // Board-level failures (outside the open drawer) go to the shell's bottom-right card; the drawer shows its own.
+  usePageFailure('生产记录未保存', selectedId ? '' : failure);
   const items = (state?.productions ?? []).filter(item => !item.closed).map(item => ({ ...item, col: state ? fulfillmentProductionColumn(state, item) : item.col, name: state ? productionName(state, item) : item.name })), selected = items.find(item => item.id === selectedId);
   const fact=state?.fulfillment.productionFacts?.find(item=>item.productionId===selectedId);
   const intake=state&&selected?productionIntake(state,selected.id):undefined;
@@ -108,16 +111,17 @@ export function ProductionPage() {
   const offlineShown=shown.filter(isOfflineInProgress),normalShown=shown.filter(item=>!isOfflineInProgress(item));
   const domains=new Set(shown.map(item=>state?.orders.find(order=>order.id===item.orderId)?.type));
   const domain=domains.size===1?[...domains][0]:undefined;
-  const stageTitles:Record<string,string>=domain==='garment'?{done:'已完成'}:domain==='fabric'?{cut:'备货',sew:'加工',finish:'整理',qc:'尾检',done:'已完成'}:{cut:'准备',sew:'制作',finish:'整理',qc:'尾检',done:'已完成'};
+  const stageTitles:Record<string,string>=domain==='garment'?{done:'已完成'}:domain==='fabric'?{cut:'坯布',sew:'染整',finish:'后整理',qc:'尾检',done:'已完成'}:{cut:'准备',sew:'制作',finish:'整理',qc:'尾检',done:'已完成'};
   const columns=PROD_COLUMNS.map(column=>({...column,title:stageTitles[column.id]||column.title}));
   const risks = shown.filter(item => productionRiskText(item));
   const move = async (id: string, col: string) => {
     if (busy || !canPlan || !PROD_COLUMNS.some(column => column.id === col)) return;
     const item = items.find(item => item.id === id); if (!item || item.col === col) return;
     if(state&&productionIntake(state,item.id)){setFailure('请通过登记实际进度记录线下工序');return;}
-    setBusy(true); setFailure('');
-    try { await run({ type: 'production.move', payload: { id, col: col as MistProduction['col'] } }); toast(`${item.code} 已移至${columns.find(column => column.id === col)?.title}`); }
-    catch (problem) { setFailure(problem instanceof Error ? problem.message : '工序未保存，请重试'); } finally { setBusy(false); }
+    // ord42：拖动后先确认，可填写备注；取消即不改动。
+    const title = columns.find(column => column.id === col)?.title;
+    setOperation({ title: `${item.code} 移至${title}`, fields: [{ key: 'note', label: '备注', type: 'textarea', required: false }], initialValues: { note: '' }, submitLabel: '确认移动',
+      submit: async values => { await run({ type: 'production.move', payload: { id, col: col as MistProduction['col'], note: String(values.note || '').trim() } }); toast(`${item.code} 已移至${title}`); } });
   };
   const position = (date: string) => Math.max(0, Math.min(100, ((mistDate(date)?.getTime() ?? window.start.getTime()) - window.start.getTime()) / (window.end.getTime() - window.start.getTime()) * 100));
   if(intakeMode&&selected)return <ProductionIntakeEditor key={`${workspace?.id}|${session.user?.id}|${selected.id}|${intakeMode}`} productionId={selected.id} initial={intakeMode==='initial'} onClose={()=>setIntakeMode(null)}/>;
@@ -126,8 +130,7 @@ export function ProductionPage() {
     <PageHeader eyebrow={uiText("订单履约 · 生产")} title={uiText("生产进度")}
       actions={<><Segmented<ProductionRange> ariaLabel={uiText("范围")} value={range} onChange={setRange} options={[{ value: 'week', label: '本周' }, { value: 'month', label: '本月' },{ value:'all',label:'全部' }]} /><Button icon={CalendarRange} onClick={() => setGantt(value => !value)}>{uiText(gantt ? '看板' : '甘特图')}</Button></>} />
     <SummaryBar items={[{label:'在手分支',value:items.filter(item=>item.col!=='done').length,unit:'个',hint:[...units].map(([unit,qty])=>`${qty.toLocaleString(interfaceLocale(), { maximumFractionDigits: 4 })} ${unit}`).join(' · ')||'暂无在手数量'},{label:'待业务放行',value:unreleased,unit:'个'},{label:'QC NOK',value:nokCount,unit:'个',hintTone:nokCount?'bad':undefined},{label:'生产风险',value:items.filter(item=>productionRiskText(item)).length,unit:'个'},{label:'已完成',value:items.filter(item=>item.col==='done').length,unit:'个'}]}/>
-    {(failure || error) && <Banner tone="bad" title={uiText("生产记录未保存")} actions={error ? <Button onClick={() => void refresh()}>{uiText("重试")}</Button> : undefined}>{failure || error}</Banner>}
-    {risks.length > 0 && <div className="mist-section"><Banner tone="warn" icon={AlertTriangle} title={ui`${risks.length} 个生产单有风险`} actions={<Button size="sm" onClick={() => { setSelectedId(risks[0].id); }}>{uiText("查看生产单")}</Button>} /></div>}
+    {risks.length > 0 && <div className="mist-section"><Banner variant="status" tone="warn" title={ui`${risks.length} 个生产单有风险`} actions={<Button size="sm" onClick={() => { setSelectedId(risks[0].id); }}>{uiText("查看生产单")}</Button>} /></div>}
     <Toolbar><SearchField value={q} onChange={setQ} placeholder={uiText("款式、生产单或工厂")} /><Dropdown label={uiText("订单")} value={orderId} onChange={setOrderId} options={[{ value: 'all', label: '全部' }, ...(state?.orders ?? []).map(order => ({ value: order.id, label: order.code }))]} /></Toolbar>
     {!shown.length && !loading ? <Card><EmptyState title={uiText(q || orderId !== 'all' ? '没有匹配的生产单' : range==='all'?'暂无生产单':`本${range === 'week' ? '周' : '月'}没有计划中的生产单`)} action={range!=='all'||q||orderId!=='all'?<Button onClick={() => { setQ(''); setOrderId('all'); setRange('all'); }}>{uiText("查看全部生产单")}</Button>:undefined} /></Card> : gantt ? <Card><CardHeader title={uiText("生产计划")} sub={uiText(`${window.start.toLocaleDateString(interfaceLocale())} — ${new Date(window.end.getTime() - 1).toLocaleDateString(interfaceLocale())}`)} /><DataTable density={density} ariaLabel={uiText("生产甘特图")} rows={shown} loading={loading} rowKey={item => item.id} onRowClick={item => setSelectedId(item.id)} columns={[
       { key: 'object', header: '生产单', width: 'minmax(180px,1fr)', render: item => <ObjectCell name={item.name} meta={<Mono>{item.code}</Mono>} /> },
@@ -143,7 +146,7 @@ export function ProductionPage() {
       {key:'status',header:'状态',width:'100px',render:item=>{const r=productionIntake(state!,item.id),nok=productionNok(state!,item),conditional=productionConditionalQc(state!,item);return <Pill tone={nok?'bad':conditional||r?.status==='rejected'?'warn':'neutral'}>{uiText(nok?'QC NOK':conditional?conditional.state==='awaiting_business'?'待业务确认':'QC 有保留':r?.status==='pending'?'承接待确认':r?.status==='rejected'?'承接已退回':'承接已确认')}</Pill>;}},
     ]}/></Card>}{normalShown.length>0&&<Kanban columns={columns.map(column => ({ ...column, items: normalShown.filter(item => item.col === column.id) }))} itemKey={item => item.id}
       onMove={busy||!canPlan ? undefined : (id, col) => { void move(id, col); }} onOpen={item => setSelectedId(item.id)} renderCard={item => <>
-        <div className="mist-row"><Thumb src={IMG[item.img]} size="sm" /><div style={{ minWidth: 0 }}><b>{item.name}</b><div className="mist-obj-meta" title={uiText(`${item.code} · ${item.order} · ${state?.orderLines.find(line=>line.id===item.lineId)?.style||'条目不可用'}`)}><Mono>{item.code}</Mono> · {item.order} · {state?.orderLines.find(line=>line.id===item.lineId)?.style||'条目不可用'}</div></div></div>
+        <div className="mist-row"><Thumb src={IMG[item.img]} icon={Layers} size="sm" /><div style={{ minWidth: 0 }}><b>{item.name}</b><div className="mist-obj-meta" title={uiText(`${item.code} · ${item.order} · ${state?.orderLines.find(line=>line.id===item.lineId)?.style||'条目不可用'}`)}><Mono>{item.code}</Mono> · {item.order} · {state?.orderLines.find(line=>line.id===item.lineId)?.style||'条目不可用'}</div></div></div>
         {fulfillmentProductionFact(state!,item.id)?.completion?<div className="mist-cell-sub">{uiText('已完工')} · {fulfillmentProductionFact(state!,item.id)!.completion!.quantity} {productionUnit(item)}</div>:productionIntake(state!,item.id)?<div className="mist-cell-sub">{uiText(productionProgressText(state!,item))} · {uiText(productionObservation(state!,item.id)?.stage?observedProductionStages(state!.orders.find(o=>o.id===item.orderId)?.type)[productionObservation(state!,item.id)!.stage!]: '工序待核')} · {item.qty} {productionUnit(item)}</div>:<Meter segments={[{ value: item.pct, tone: item.pct === 100 ? 'ok' : 'accent' }]} caption={uiText(`${item.pct}% · ${item.qty.toLocaleString(interfaceLocale(), { maximumFractionDigits: 4 })} ${productionUnit(item)}`)} />}
         <div className="mist-kb-card-foot"><Factory className="mist-icon" data-size="xs" />{item.factory}<span className="mist-spacer" />{state&&productionNok(state,item) ? <Pill tone="bad">QC NOK</Pill> : state&&productionConditionalQc(state,item) ? <Pill tone="warn">{uiText("QC 有保留")}</Pill> : productionRiskText(item) ? <Pill tone="warn">{uiText(productionRiskText(item).length>14?productionRiskText(item).slice(0,14)+'…':productionRiskText(item))}</Pill> : !state?.fulfillment.productionFacts?.some(fact=>fact.productionId===item.id&&fact.release) ? <Pill tone="neutral">{uiText("待放行")}</Pill> : <span>{item.due}</span>}</div>
       </>} />}</>}
@@ -154,12 +157,12 @@ export function ProductionPage() {
         catch (problem) { setFailure(problem instanceof Error ? problem.message : '生产记录保存失败'); } finally { setBusy(false); }
       }}>{uiText(intake||fact?.completion?"保存计划与跟进":"保存进度")}</Button>}</>}>
       <div className="mist-col" data-module-detail>{failure && <Banner tone="bad" title={uiText("保存失败")}>{failure}</Banner>}
-      {nok&&<Banner tone="bad" title={uiText("生产 QC NOK")} actions={<Button onClick={()=>go('qc-workbench',nok.id,{productionId:selected!.id,orderLineId:selected!.lineId,section:'production'})}>{uiText("查看 QC 结论")}</Button>}>{nok.code}{uiText(" · 待复验与业务确认")}</Banner>}
-      {!nok&&conditionalQc&&<Banner tone="warn" title={uiText("生产 QC 有保留")} actions={<Button onClick={()=>go('qc-workbench',conditionalQc.id,{productionId:selected!.id,orderLineId:selected!.lineId,section:'production'})}>{uiText("查看 QC 结论")}</Button>}>{conditionalQc.code}{uiText(conditionalQc.state==='awaiting_business'?' · 待业务确认':' · 已由业务处理')}</Banner>}
-      {fact?.hold&&<Banner tone="warn" title={uiText("生产已异常暂停")}>{PRODUCTION_HOLD_CATEGORIES[fact.hold.category]}：{fact.hold.reason}（{fact.hold.actor} · {platformBusinessDate(fact.hold.at)}{uiText("）")}</Banner>}
+      {nok&&<Banner variant="notice" tone="bad" title={uiText("生产 QC NOK")} actions={<Button onClick={()=>go('qc-workbench',nok.id,{productionId:selected!.id,orderLineId:selected!.lineId,section:'production'})}>{uiText("查看 QC 结论")}</Button>}>{nok.code}{uiText(" · 待复验与业务确认")}</Banner>}
+      {!nok&&conditionalQc&&<Banner variant="notice" tone="warn" title={uiText("生产 QC 有保留")} actions={<Button onClick={()=>go('qc-workbench',conditionalQc.id,{productionId:selected!.id,orderLineId:selected!.lineId,section:'production'})}>{uiText("查看 QC 结论")}</Button>}>{conditionalQc.code}{uiText(conditionalQc.state==='awaiting_business'?' · 待业务确认':' · 已由业务处理')}</Banner>}
+      {fact?.hold&&<Banner variant="status" tone="warn" title={uiText("生产已异常暂停")}>{PRODUCTION_HOLD_CATEGORIES[fact.hold.category]}：{fact.hold.reason}（{fact.hold.actor} · {platformBusinessDate(fact.hold.at)}{uiText("）")}</Banner>}
       {!fact?.release&&<div className="mist-col" style={{gap:6}} data-release-gate><b className="mist-h3">{uiText(finishedSupply?'供货核对':selectedDomain==='fabric'?'量产核对':'开产核对')}</b><Checklist items={gate.map(item=>({label:item.label,done:item.ok,note:item.detail,noteTone:item.ok?undefined:'bad'}))}/></div>}
       <ProductionSampleNotes key={selectedId} checks={sampleChecks} />
-      {intakeScopeChanged&&<Banner tone="warn" title={uiText('生产范围已变更，请重新核对在制承接')}/>}
+      {intakeScopeChanged&&<Banner variant="notice" tone="warn" title={uiText('生产范围已变更，请重新核对在制承接')}/>}
       {intake&&observed&&<><KeyValue items={[{label:'线下状态',value:'已开产'},{label:'承接状态',value:intake.status==='pending'?'待确认':intake.status==='approved'?'已确认':'已退回'},{label:fact?.completion?'上次进度截至日':'进度截至日',value:observed.asOf},{label:'实际开产日',value:observed.startedOn||intake.snapshot.startedOn||'待核'},{label:fact?.completion?'上次工厂工序':'实际工序',value:observed.stage?observedProductionStages(selectedDomain)[observed.stage]:'待核'},{label:fact?.completion?'上次工厂进度':'工厂进度',value:observed.percent===null?'进度待核':`${observed.percent}%`},{label:'本工序已完成数量',value:observed.quantity===null?'待核':`${observed.quantity} ${productionUnit(selected!)}`}]} /><RecordDisclosure title="在制承接记录">{fact!.intakes!.map(round=><div key={round.id} className="mist-section"><KeyValue items={[{label:'登记人',value:round.snapshot.recordedBy},{label:'登记时间',value:round.snapshot.recordedAt},{label:'资料来源',value:round.snapshot.sourceName},{label:'事实依据',value:round.snapshot.evidence},...(round.decision?[{label:'核验人',value:round.decision.actor},{label:'核验时间',value:round.decision.at},{label:'核验意见',value:round.decision.note}]:[])]}/><RecordFiles ids={round.snapshot.fileIds}/></div>)}</RecordDisclosure><RecordDisclosure title="实际进度记录">{fact!.observations!.map(row=><div key={row.id} className="mist-section"><KeyValue items={[{label:'进度截至日',value:row.asOf},{label:'工厂进度',value:row.percent===null?'待核':`${row.percent}%`},{label:'资料来源',value:row.sourceName},{label:'登记人',value:row.recordedBy},{label:'登记时间',value:row.recordedAt},{label:'事实依据',value:row.evidence}]}/><RecordFiles ids={row.fileIds}/></div>)}</RecordDisclosure></>}
       <KeyValue items={[{label:finishedSupply?'供货状态':'开产状态',value:fact?.hold||nok?'已暂停':fact?.release?'已放行':'待放行'},...(selectedDomain==='garment'?[{label:'计划尺码',value:fact?.sizes.length?sizesText(fact.sizes):'未登记'}]:[]),{label:'完工状态',value:fact?.completion?'已完工':'未完工'},...(fact?.completion?[{label:'完工数量',value:`${fact.completion.quantity} ${selected?productionUnit(selected):''}`}]:[]),...(fact?.completion&&selected&&fact.completion.quantity!==selected.qty?[{label:'差异确认',value:fact.customerAcceptance?'已确认':'待确认'}]:[])]}/>
       {fact?.release && <RecordDisclosure title="放行记录"><KeyValue items={[{label:'经办人',value:fact.release.actor},{label:'时间',value:fact.release.at}]} />{fact.release.note}</RecordDisclosure>}

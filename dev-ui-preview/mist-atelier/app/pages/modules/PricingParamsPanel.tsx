@@ -7,6 +7,8 @@ import { platformBusinessDate } from '../../../../../server/src/shared/mistPlatf
 import { PRICING_PARAM_FAMILY_LABEL, PRICING_PARAM_MAX, applicablePricingParams, normalizePricingPercent, upcomingPricingParams, type PricingParamFamily, type PricingParamVersion } from '../../../../../server/src/shared/mistPricingParams';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
+import { businessWhen } from './pageKit';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 const FAMILIES: PricingParamFamily[] = ['garment', 'fabric'];
 export function pricingParamsDraftProblem(input: { profitMargin: string; commissionRate: string; effectiveFrom: string; reason: string }, today: string) {
@@ -39,15 +41,15 @@ export function PricingParamsPanel() {
     { key: 'commission', header: '佣金率', width: '90px', align: 'right', render: r => <span className="mist-num">{r.commissionRate}%</span> },
     { key: 'from', header: '生效日', width: '110px', render: r => r.effectiveFrom },
     { key: 'reason', header: '调整原因', hideOnMobile: true, render: r => r.reason },
-    { key: 'by', header: '设置人 / 时间', hideOnMobile: true, render: r => `${r.createdBy || '—'} · ${r.createdAt.slice(0, 16).replace('T', ' ')}` },
+    { key: 'by', header: '设置人 / 时间', hideOnMobile: true, render: r => `${r.createdBy || '—'} · ${businessWhen(r.createdAt)}` },
   ];
   return <div className="mist-col" data-pricing-params>
     <Banner title={uiText("标准参数")}>{uiText("按板块设定标准成本加成率与佣金率。定价试算保存时按订单类型冻结当天适用的版本；加成率低于标准须写偏离理由。汇率、退税率与采购成本是单笔事实，每次试算按依据填写。")}</Banner>
     <section className="mist-grid">{FAMILIES.map(f => { const cur = applicablePricingParams(rows, f, today), next = upcomingPricingParams(rows, f, today);
       return <Card key={f} className="mist-col-6"><CardHeader title={ui`${PRICING_PARAM_FAMILY_LABEL[f]} · 当前适用`} sub={uiText(cur ? `V${cur.version}，${cur.effectiveFrom} 起生效` : '尚未设置：试算不做标准比对')} /><div className="mist-card-body"><span className="mist-h2 mist-num" data-params-current={f}>{uiText(cur ? `加成 ${cur.profitMargin}% · 佣金 ${cur.commissionRate}%` : '未设置')}</span>{next && <p className="mist-sub">{uiText("待生效：V")}{next.version}{uiText(" 加成 ")}{next.profitMargin}{uiText("% · 佣金 ")}{next.commissionRate}%（{next.effectiveFrom}{uiText(" 起）")}</p>}</div></Card>; })}</section>
     <Card><CardHeader title={uiText("新增参数版本")} sub={uiText("新增一个版本，不改写旧版本；改动留痕。")} /><div className="mist-card-body mist-col">
-      {!canAdmin && <Banner tone="warn" title={uiText("只读")}>{uiText("仅管理层（定价管理权限）可修改标准参数；你可以查看当前参数与版本记录。")}</Banner>}
-      {error && <Banner tone="bad" title={uiText("未能保存")}>{uiText(error)}</Banner>}
+      {!canAdmin && <Banner variant="status" tone="warn" title={uiText("只读")}>{uiText("仅管理层（定价管理权限）可修改标准参数；你可以查看当前参数与版本记录。")}</Banner>}
+      {error && <FailureNotice title={"未能保存"} detail={error} />}
       <FormGrid>
         <Field label={uiText("板块")} required><Select aria-label={uiText("参数板块")} value={input.family} disabled={!canAdmin} options={FAMILIES.map(f => ({ value: f, label: PRICING_PARAM_FAMILY_LABEL[f] }))} onChange={e => setInput({ ...input, family: e.target.value as PricingParamFamily })} /></Field>
         <Field label={uiText("标准成本加成率（%）")} required hint={ui`0–${PRICING_PARAM_MAX.profitMargin}，最多两位小数`}><TextInput aria-label={uiText("标准成本加成率")} inputMode="decimal" value={input.profitMargin} disabled={!canAdmin} onChange={e => setInput({ ...input, profitMargin: e.target.value })} /></Field>

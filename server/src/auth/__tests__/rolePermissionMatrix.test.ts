@@ -108,6 +108,18 @@ describe('系统内置角色注册（DR-041 + GAP-R11）', () => {
     expect(scopes).not.toContain('qc:write');
   });
 
+  it('2026-11 新码补授：原凭 invoices:read 看退税的岗位有 tax:read，AI 确认按风险档补齐', () => {
+    const S = SYSTEM_ROLE_IDS, has = (role: SystemRoleId, scope: string) => getDefaultScopeListForRole(role).includes(scope);
+    for (const role of [S.SALES, S.SALES_MANAGER, S.LOGISTICS, S.FINANCE, S.ADMIN]) expect(has(role, 'tax:read'), `${role} 缺 tax:read`).toBe(true);
+    for (const role of [S.SALES, S.SALES_MANAGER, S.LOGISTICS]) expect(has(role, 'sensitive:tax_base'), `${role} 不应有计税依据`).toBe(false);
+    for (const role of [S.SALES, S.SALES_MANAGER, S.FINANCE, S.ADMIN, S.QC, S.LOGISTICS]) expect(has(role, 'ai:write:medium'), `${role} 缺 ai:write:medium`).toBe(true);
+    for (const role of [S.FINANCE, S.SALES_MANAGER, S.ADMIN]) expect(has(role, 'ai:write:high'), `${role} 缺 ai:write:high`).toBe(true);
+    for (const role of [S.SALES, S.QC, S.LOGISTICS]) expect(has(role, 'ai:write:high'), `${role} 不应有 ai:write:high`).toBe(false);
+    // 单证模板改由 customs:admin 把关（fin74）：后勤与管理员持有，业务员与销售主管不补授。
+    for (const role of [S.LOGISTICS, S.ADMIN]) expect(has(role, 'customs:admin')).toBe(true);
+    for (const role of [S.SALES, S.SALES_MANAGER]) expect(has(role, 'customs:admin')).toBe(false);
+  });
+
   it('采购与库存是业务模块：业务员和业务主管可按对象范围经办', () => {
     for (const role of [SYSTEM_ROLE_IDS.SALES, SYSTEM_ROLE_IDS.SALES_MANAGER]) {
       const scopes = getDefaultScopeListForRole(role);

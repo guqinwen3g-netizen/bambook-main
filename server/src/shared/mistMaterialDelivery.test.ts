@@ -105,3 +105,88 @@ it('uses explicit record scope rather than a business-group name for cross-group
  const sharedBefore=structuredClone(shared.state);shared.issue(1,'garment');
  expect(scopedWriteViolation(sharedBefore,shared.state,{userIds:['garment'],teamIds:['material-team']})).toBeNull();
 });
+
+it('prices internal fabric at cost plus the agreed markup: garment cost includes it, the fabric order books internal revenue and profit', () => {
+  const f = materialDeliveryFixture(), id = f.issue();
+  f.run({ type: 'fulfillment.materials.confirm', payload: { kind: 'issue', id, evidence: 'Counted at factory' } }, 'garment');
+  const plain = orderActualCost(f.state, f.target.orderId, 'period', '2026-10', '2026-10-24');
+  expect(plain.purchaseCny).toBe(6840.4);
+  f.state.orders.find(o => o.id === f.source.orderId)!.governance!.contract.internalSupply!.markupPercent = 10;
+  const garment = orderActualCost(f.state, f.target.orderId, 'period', '2026-10', '2026-10-24');
+  expect(garment.purchases.find(r => r.key.startsWith('mk:'))).toMatchObject({ amount: 682.04 });
+  expect(garment.purchaseCny).toBe(7522.44);
+  const fabric = orderActualCost(f.state, f.source.orderId, 'period', '2026-10', '2026-10-24');
+  expect(fabric.internalSale).toEqual({ revenueCny: 7502.44, profitCny: 682.04, markupPercent: 10 });
+});
+
+
+it('reconciles marked-up internal revenue to the actual final settlement and supplier deduction, not the original contract', () => {
+  const f = materialDeliveryFixture(10), id = f.issue();
+  f.run({ type: 'fulfillment.materials.confirm', payload: { kind: 'issue', id, evidence: 'Counted' } }, 'garment');
+  f.state.orders.find(o => o.id === f.source.orderId)!.governance!.contract.internalSupply!.markupPercent = 15;
+  f.state.payables!.settlements.push({ id: 'final', purchaseId: f.purchaseId, state: 'confirmed', final: true, quantity: 10, amount: 600 } as any);
+  f.state.payables!.bills.push({ id: 'fabric-bill', state: 'open', currency: 'CNY', amount: 600, lines: [{ purchaseId: f.purchaseId, amount: 600 }] } as any);
+  f.state.payables!.deductions.push({ id: 'deduction', billId: 'fabric-bill', amount: 20 } as any);
+  const cost = (orderId: string) => orderActualCost(f.state, orderId, 'period', '2026-10', '2026-10-24');
+  expect(cost(f.target.orderId).purchaseCny).toBe(687); // (600 - 20) × 1.15 + garment processing 20
+  expect(cost(f.source.orderId).internalSale).toEqual({ revenueCny: 667, profitCny: 87, markupPercent: 15 });
+});
+
+it('preserves every cent of internal revenue across destinations and foreign-currency cost components', () => {
+  const f = materialDeliveryFixture(2), allocation = f.state.internalFabricAllocations![0];
+  f.run({ type: 'order.fabric.allocate', payload: { ...f.target, fabricOrderId: f.source.orderId, fabricLineId: f.source.lineId, metres: '1', expectedRevision: allocation.revision } }, 'garment');
+  const other = f.create('garment');
+  f.run({ type: 'order.fabric.allocate', payload: { ...other, fabricOrderId: f.source.orderId, fabricLineId: f.source.lineId, metres: '1', expectedRevision: 0 } }, 'garment');
+  const po = f.purchase('processing', other), branch = f.state.productions.find(p => p.sourcePurchaseId === po)!.id;
+  for (const id of [f.issue(1), f.issue(1, 'owner', branch)]) f.run({ type: 'fulfillment.materials.confirm', payload: { kind: 'issue', id, evidence: 'Counted' } }, 'garment');
+  const purchase = f.state.fulfillment.purchases.find(p => p.id === f.purchaseId)!;
+  purchase.price = .03; purchase.currency = 'USD';
+  f.state.orders.find(o => o.id === f.source.orderId)!.governance!.contract.internalSupply!.markupPercent = 15;
+  f.state.fxPeriodRates = [{ id: 'usd', currency: 'USD', month: '2026-10', rate: '7.10' } as any];
+  const costs = [f.target.orderId, other.orderId].map(id => orderActualCost(f.state, id, 'period', '2026-10', '2026-10-24'));
+  const internalMinor = costs.flatMap(c => c.purchases).filter(l => l.key.endsWith(':' + f.purchaseId)).reduce((sum, l) => sum + Math.round(l.cny! * 100), 0);
+  const sale = orderActualCost(f.state, f.source.orderId, 'period', '2026-10', '2026-10-24').internalSale!;
+  expect(internalMinor).toBe(42); // each destination: USD .03, markup rounds to zero cents
+  expect(Math.round(sale.revenueCny * 100)).toBe(internalMinor);
+  expect(sale.profitCny).toBe(0);
+  f.state.fxPeriodRates = [];
+  expect(orderActualCost(f.state, f.source.orderId, 'period', '2026-10', '2026-10-24')).toMatchObject({ status: 'norate', missing: ['USD'], internalSale: null });
+});
+
+
+it('keeps both groups separate through partial receipt, rejected return, replacement and accepted surplus return', () => {
+  const f = materialDeliveryFixture(10);
+  const contract = structuredClone(f.state.orders.find(o => o.id === f.source.orderId)!.governance!.contract);
+  contract.internalSupply!.markupPercent = 15;
+  f.run({ type: 'order.governance.saveDraft', payload: { orderId: f.source.orderId, input: contract, reason: 'Agree internal price' } });
+  f.run({ type: 'order.governance.submit', payload: { orderId: f.source.orderId } });
+  f.run({ type: 'order.governance.decide', payload: { id: f.source.orderId, decision: 'approved', note: 'Checked internal markup' } }, 'reviewer');
+  const id = f.issue();
+  const cost = (orderId: string) => orderActualCost(f.state, orderId, 'period', '2026-10', '2026-10-24');
+  const reconcile = (accepted: number) => {
+    const fabric = cost(f.source.orderId), garment = cost(f.target.orderId);
+    const internalMinor = garment.purchases.filter(l => l.key.endsWith(':' + f.purchaseId)).reduce((n, l) => n + Math.round(l.cny! * 100), 0);
+    expect(internalMinor).toBe(Math.round(accepted * 68 * 1.15 * 100));
+    expect(Math.round((fabric.internalSale?.revenueCny || 0) * 100)).toBe(internalMinor);
+    expect(fabric.purchaseCny).toBe((10 - accepted) * 68);
+    expect(fabric.revenueCny).toBe(0); expect(fabric.marginIn).toBeNull();
+  };
+  reconcile(0);
+  f.run({ type: 'fulfillment.materials.confirm', payload: { kind: 'issue', id, acceptedQuantity: 4, rejectedQuantity: 2, expectedReceivingRevision: 0, evidence: 'First count' } }, 'garment');
+  reconcile(4);
+  f.run({ type: 'fulfillment.materials.confirm', payload: { kind: 'issue', id, acceptedQuantity: 4, rejectedQuantity: 0, expectedReceivingRevision: 1, evidence: 'Remaining count' } }, 'garment');
+  reconcile(8);
+  const returned = (quantity: number, issueId = id) => f.run({ type: 'fulfillment.inventory.move', payload: { id: f.state.fulfillment.stock[0].id, kind: 'return', quantity, issueId, location: 'A-01', person: 'factory', note: 'Actual return' } });
+  returned(2); reconcile(8);
+  expect(f.state.fulfillment.stock[0]).toMatchObject({ available: 0, locked: 2 });
+  // An accepted surplus return, unlike the earlier rejected return, rolls back the cost transfer.
+  returned(1); reconcile(7);
+  const replacement = f.issue(1);
+  f.run({ type: 'fulfillment.materials.confirm', payload: { kind: 'issue', id: replacement, evidence: 'Replacement counted' } }, 'garment');
+  reconcile(8);
+  const target = f.state.orders.find(o => o.id === f.target.orderId)!;
+  target.governance!.contract.kind = 'external'; target.amount = 1000;
+  const fabric = cost(f.source.orderId), garment = cost(f.target.orderId);
+  expect(garment.marginEx).toBe(354.4); // 1000 - 625.60 internal price - 20 processing
+  expect(Math.round((garment.marginEx! + fabric.internalSale!.profitCny - fabric.costCny!) * 100)).toBe(30000);
+});

@@ -3,13 +3,14 @@ import React,{act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 import {getByRole,getAllByRole,getByText,getAllByText,getByLabelText,queryByRole} from '@testing-library/dom';
+import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
 import {MistRoot,ToastProvider} from '../../../../components/mist';
 import {createMistState,applyMistCommand} from '../../../../server/src/shared/mistWorkspace';
 import {platformBusinessDate} from '../../../../server/src/shared/mistPlatform';
 import {Nav} from '../nav';
 const store=vi.hoisted(()=>({value:null as any}));
 vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>store.value}));
-vi.mock('../runtime/auth', () => { const useMistSession = ()=>({hasPermission:()=>store.value?.canWrite!==false}); return { useMistSession, useOptionalMistSession: useMistSession }; });
+vi.mock('../runtime/auth', () => { const useMistSession = ()=>({hasPermission:(p:string)=>store.value?.canWrite!==false&&!store.value?.denied?.has(p)}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 import {FinancePage,parseMistReceiptCsv,financeAllocationAmount} from './FinancePage';
 import {MistPresentedErrorContext} from '../runtime/errorPresentation';
 let host:HTMLElement,root:Root,route:{view:string;id?:string;section?:string;customerId?:string;detail?:string};const go=vi.fn();
@@ -24,6 +25,9 @@ beforeEach(()=>{let serial=0;const context={id:()=>`test-${++serial}`,actorName:
 afterEach(()=>{act(()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
 it.each(['2026-02-30,Client,1.00,USD,ref','2026-10-13,Client,1e3,USD,ref','2026-10-13,Client,1.001,USD,ref','2026-10-13,Client,"1,2",USD,ref'])('rejects malformed bank facts before import: %s',row=>{expect(()=>parseMistReceiptCsv('日期,付款方,金额,币种,附言\n'+row)).toThrow('第 2 行');});
 it('does not mix last year into current-month totals or force EUR into a USD label',()=>{const now=new Date(),previous=new Date(now);previous.setFullYear(now.getFullYear()-1);store.value.state.allocations=[{id:'current',receiptId:'receipt',invoiceId:'invoice',amount:5,currency:'EUR',createdAt:now.toISOString(),actor:'财务'},{id:'old',receiptId:'receipt',invoiceId:'invoice',amount:90,currency:'EUR',createdAt:previous.toISOString(),actor:'财务'}];render();const stat=getByText(host,'本月已核销').parentElement!;expect(stat.textContent).toContain('5.00EUR');expect(stat.textContent).not.toContain('95.00');expect(getByText(host,'待核销到账').parentElement?.textContent).toContain('50.00EUR');});
+it('counts the overdue card in the scope it was opened from',()=>{const yesterday=new Date(Date.now()-86400000);store.value.state.invoices[0].due=yesterday.toISOString().slice(0,10);
+  route={view:'payment-vouchers',section:'overdue:garment'};render();const card=[...host.querySelectorAll<HTMLElement>('.mist-sumbar > div')].find(el=>el.textContent?.includes('逾期应收'));
+  expect(card?.textContent).toContain('0.00');expect(card?.textContent).toContain('成衣订单');});
 it('opens the exact incoming invoice and filters overdue results by source domain',()=>{const yesterday=new Date(Date.now()-86400000);store.value.state.invoices[0].due=yesterday.toISOString().slice(0,10);store.value.state.invoices.push({...store.value.state.invoices[0],id:'future',code:'INV-FUTURE',due:'2099-01-01'});route={view:'payment-vouchers',id:'invoice',section:'overdue:fabric',customerId:'customer'};render();expect(getByRole(document.body,'dialog',{name:'INV-EUR'})).toBeTruthy();expect(host.querySelector('[aria-label="发票"]')?.textContent).not.toContain('INV-FUTURE');});
 it('offers recovery of the exact pending operation without a second command',async()=>{store.value.pending={kind:'command',command:{type:'finance.importReceipts'}};store.value.recover.mockResolvedValue({result:{imported:1}});render();await click('核对原操作结果');expect(store.value.recover).toHaveBeenCalledTimes(1);expect(store.value.run).not.toHaveBeenCalled();});
 it('does not close a new payment form on an old workspace acknowledgement',async()=>{let resolve!:(value:unknown)=>void;store.value.run.mockReturnValue(new Promise(done=>resolve=done));render();await act(async()=>getByRole(host,'tab',{name:/付款凭证/}).click());await click('登记付款');input('收款方','旧收款方');input('金额','1');await click('保存付款');store.value={...store.value,workspace:{id:'space-b'}};render();await click('登记付款');input('收款方','新收款方');await act(async()=>resolve({result:{}}));expect(getByRole(document.body,'dialog',{name:'登记付款凭证'})).toBeTruthy();expect((getByLabelText(document.body,/^收款方/) as HTMLInputElement).value).toBe('新收款方');expect(host.textContent).not.toContain('付款凭证已保存');});
@@ -94,6 +98,11 @@ it('reverses an allocation only with a written reason and keeps the reversed rec
  expect(store.value.run).toHaveBeenLastCalledWith({type:'finance.allocation.reverse',payload:{allocationId:expect.any(String),reason:'核错发票'}});
  expect(store.value.state.allocations).toHaveLength(0);expect(store.value.state.receipts[0].remaining).toBe(50);expect(store.value.state.invoices[0].open).toBe(100);render();
  expect(host.textContent).toContain('核错发票');expect(host.textContent).toContain('已冲回');
+});
+it('hides allocation reversal from a reader without reconcile permission',async()=>{
+ render();await act(async()=>getByRole(host,'radio',{name:/INV-EUR/}).click());input('本次核销金额','20');await click('确认核销');
+ store.value.denied=new Set([MIST_FINANCE_SCOPES.reconcile]);render();
+ expect(queryByRole(host,'button',{name:'核销冲回'})).toBeNull();expect(getAllByRole(host,'button',{name:'查看核销票据'}).length).toBeGreaterThan(0);
 });
 it('reverses a finance voucher with a counter voucher and blocks supplier-payment vouchers',async()=>{
  store.value.state.payments=[{id:'manual',code:'PAY-M',date:today(),payee:'物流商',amount:25,currency:'EUR',ref:'m',origin:'finance'},{id:'supplier',code:'PAY-S',date:today(),payee:'工厂',amount:9,currency:'EUR',ref:'s'}];
@@ -186,9 +195,14 @@ it('opens the unassigned bank worklist, includes missing account references and 
  await click('全部币种');await click('全部 · 5');expect(go).toHaveBeenLastCalledWith('payment-vouchers',undefined,{section:'records'},{keepScroll:true});table=getByRole(host,'table',{name:'收付款记录'});expect(table.textContent).toContain('R-EUR');expect(table.textContent).toContain('P-ASSIGNED');
  expect(JSON.stringify(st)).toBe(before);expect(store.value.run).not.toHaveBeenCalled();
 });
+it('shows the lock entrance only to fx:lock holders; voucher writers without it can still settle',async()=>{
+ store.value.denied=new Set(['fx:lock']);route.section='accounts';render();
+ expect(queryByRole(host,'button',{name:'登记锁汇'})).toBeNull();expect(queryByRole(host,'button',{name:'登记结汇'})).not.toBeNull();
+ store.value.denied=new Set();render();expect(queryByRole(host,'button',{name:'登记锁汇'})).not.toBeNull();
+});
 it('keeps company bank accounts with finance staff and transaction facts readable without write entrances',async()=>{
  store.value.canWrite=false;route.section='accounts';render();for(const name of ['新增账户','登记锁汇','登记结汇'])expect(queryByRole(host,'button',{name})).toBeNull();
  expect(host.textContent).not.toContain('还没有登记公司银行账户');expect(host.textContent).not.toContain('公司账户余额');expect(queryByRole(host,'tab',{name:'账户与余额'})).toBeNull();route={view:'payment-vouchers',section:'records',id:'receipt',detail:'full'};render();expect(host.textContent).toContain('R-EUR');expect(queryByRole(host,'button',{name:'归属账户'})).toBeNull();expect(getByRole(host,'button',{name:'查看收款核销'})).toBeTruthy();expect(store.value.run).not.toHaveBeenCalled();
 });
 
-it('labels partially visible receipts without showing an invented original total or balance',()=>{store.value.state.receipts=[];store.value.state.partialReceipts=[{id:'r-part',code:'R-PART',date:today(),payer:'客户',currency:'EUR',visibleAllocatedAmount:40,hiddenCount:1}];render();const partial=getByRole(host,'list',{name:'部分可见到账'});expect(partial.textContent).toContain('R-PART');expect(partial.textContent).toContain('本范围已核销');expect(partial.textContent).toContain('40.00');expect(partial.textContent).toContain('另有 1 笔其他范围业务');expect(partial.textContent).not.toContain('100.00');expect(getByText(host,'到账待核销').parentElement?.textContent).toContain('部分到账余额不可见');expect(getByText(host,'待核销到账').parentElement?.textContent).toContain('部分到账余额不可见');});
+it('labels partially visible receipts without showing an invented original total or balance',()=>{store.value.state.receipts=[];store.value.state.partialReceipts=[{id:'r-part',code:'R-PART',date:today(),payer:'客户',currency:'EUR',visibleAllocatedAmount:40,hiddenCount:1}];render();const partial=getByRole(host,'list',{name:'部分可见到账'});expect(partial.textContent).toContain('R-PART');expect(partial.textContent).toContain('本范围已核销');expect(partial.textContent).toContain('40.00');expect(partial.textContent).toContain('另含其他范围业务');expect(partial.textContent).not.toContain('100.00');expect(getByText(host,'到账待核销').parentElement?.textContent).toContain('部分到账余额不可见');expect(getByText(host,'待核销到账').parentElement?.textContent).toContain('部分到账余额不可见');});

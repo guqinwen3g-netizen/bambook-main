@@ -11,6 +11,7 @@ import { useNav } from '../../nav';
 import { downloadModuleCsv } from './ModuleWorkbench';
 import { today } from './fulfillmentKit';
 import { DetailBlock, DetailBody, ListDetail } from './pageKit';
+import { platformBusinessDate } from '../../../../../server/src/shared/mistPlatform';
 
 type Domain = FulfillmentPurchase['domain'];
 type Stage = 'open' | 'done' | 'variance';
@@ -92,7 +93,7 @@ function LocalMesDetail({ purchase: p, state, orderCode, go }: { purchase: Fulfi
       { label: '交期', value: p.supplierConfirmation?.confirmedDue && p.supplierConfirmation.confirmedDue !== p.due ? `${p.due} · 加工方确认 ${p.supplierConfirmation.confirmedDue}` : p.due || '未定' },
       { label: '交付地点', value: p.destination || '未填写' },
       { label: '条款', value: p.terms || '未填写' },
-      { label: '批准', value: p.decision ? `${p.decision.actor} · ${p.decision.at.slice(0, 10)}` : '已批准' },
+      { label: '批准', value: p.decision ? `${p.decision.actor} · ${platformBusinessDate(p.decision.at)}` : '已批准' },
     ]} />
     <DetailBlock title={ui`实际交付（${receipts.length}）`}>
       {receipts.length ? <DataTable ariaLabel={uiText("加工实际交付")} rows={receipts} rowKey={receipt => receipt.id} columns={[

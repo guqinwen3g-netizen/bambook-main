@@ -39,11 +39,6 @@ const UNREGISTERED_FALLBACK_BASELINE: Record<string, number> = {
   //    `INVALID_SHIPMENT_STATUS` / `INVALID_INITIAL_STATUS`），其中若干枚在本文件被当兜底码用 ⇒
   //   这些站点从"真源不认"变成"真源认得"，**依本条自己的规则必须把基线一起改小**
   //   （原注释：「登记好了就把基线一并改小（留旧数 = 掩盖下一次回潮）」）。★ 实测，不是推算。
-  'src/relations/route.ts': 5, // fixed 9b206773: UPDATE_FAILED is now actually registered; unchanged callsite.
-  'src/production/route.ts': 6,
-  'src/production/routeV2.ts': 0,
-  'src/system-assets/route.ts': 3, // same UPDATE_FAILED registration; prior 5 → 4 history above is retained.
-  'src/business-profiles/route.ts': 2,   // ★ 2026-09-29 晚：3 → 2（同上）
   'src/devPanel/route.ts': 1,
 };
 

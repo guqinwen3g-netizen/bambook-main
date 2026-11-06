@@ -1,12 +1,12 @@
 /** Offline execution facts are evidence, never a production release or a financial posting. */
 import { MistCommandError, assertMistOrderApproved, assertMistOrderOpen, type MistContext, type MistState, type MistCommandResult } from './mistWorkspace';
 import { platformBusinessDate } from './mistPlatform';
-import type { MistReviewTask } from './mistReview';
+import { reviewDecision, type MistReviewTask } from './mistReview';
 import type { FulfillmentProductionFact } from './mistFulfillment';
 
 export const OBSERVED_PRODUCTION_STAGES = { cut: '裁剪', sew: '车缝', finish: '整烫包装', qc: '待检验' } as const;
 export function observedProductionStages(domain: 'fabric'|'garment'|undefined): Record<keyof typeof OBSERVED_PRODUCTION_STAGES,string> {
-  return domain==='fabric'?{cut:'备货',sew:'加工',finish:'整理',qc:'待检验'}:OBSERVED_PRODUCTION_STAGES;
+  return domain==='fabric'?{cut:'坯布',sew:'染整',finish:'后整理',qc:'待检验'}:OBSERVED_PRODUCTION_STAGES;
 }
 export type ProductionObservationInput = {
   productionId: string; asOf: string; startedOn?: string; sourceName: string; evidence: string; fileIds: string[];
@@ -105,6 +105,6 @@ export function getProductionIntakeReviews(root: MistState): MistReviewTask[] {
   return (root.fulfillment?.productionFacts || []).flatMap(fact => (fact.intakes || []).map(round => {
     const branch = root.productions.find(p => p.id === fact.productionId), p = round.snapshot;
     const labels=observedProductionStages(root.orders.find(o=>o.id===round.scope.orderId)?.type);
-    return { id: `production-intake:${round.id}`, kind: 'productionIntake' as const, entityId: round.id, title: `${branch?.code || ''} 在制承接`, requesterId: round.requesterId, reviewerIds: round.reviewerIds, status: round.status, submittedAt: round.submittedAt, requiredPermission: 'orders:write', fileIds: [...p.fileIds], target: { view: 'production-board', id: fact.productionId }, details: [{ label: '工厂', value: round.scope.factory }, { label: '计划数量', value: `${round.scope.quantity} ${round.scope.unit}` }, { label: '进度截至日', value: p.asOf }, { label: '实际开产日', value: p.startedOn || '待核' }, { label: '实际工序', value: p.stage ? labels[p.stage] : '待核' }, { label: '工厂进度', value: p.percent === null ? '待核' : `${p.percent}%` }, { label: '本工序已完成数量', value: p.quantity === null ? '待核' : String(p.quantity) }, { label: '资料来源', value: p.sourceName }, { label: '事实依据', value: p.evidence }] };
+    return { id: `production-intake:${round.id}`, kind: 'productionIntake' as const, entityId: round.id, title: `${branch?.code || ''} 在制承接`, requesterId: round.requesterId, reviewerIds: round.reviewerIds, status: round.status, submittedAt: round.submittedAt, decision: reviewDecision(round.decision?.actor, round.decision?.at, round.decision?.note), requiredPermission: 'orders:write', fileIds: [...p.fileIds], target: { view: 'production-board', id: fact.productionId }, details: [{ label: '工厂', value: round.scope.factory }, { label: '计划数量', value: `${round.scope.quantity} ${round.scope.unit}` }, { label: '进度截至日', value: p.asOf }, { label: '实际开产日', value: p.startedOn || '待核' }, { label: '实际工序', value: p.stage ? labels[p.stage] : '待核' }, { label: '工厂进度', value: p.percent === null ? '待核' : `${p.percent}%` }, { label: '本工序已完成数量', value: p.quantity === null ? '待核' : String(p.quantity) }, { label: '资料来源', value: p.sourceName }, { label: '事实依据', value: p.evidence }] };
   }));
 }

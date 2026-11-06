@@ -11,7 +11,7 @@ export function renderDevelopmentNoticeHtml(s: DevNoticeSnapshot, options: { scr
   const fabric = s.fabricRequirements.length ? `<section class="block"><div class="block-title">面料要求</div><table class="facts">${s.fabricRequirements.map(item => row(item.label, item.value)).join('')}</table></section>` : '';
   const body = `<header class="doc-header"><div class="doc-title-block"><div class="issuer-name">${esc(c.legalName)}</div>${c.englishName ? `<div class="issuer-en">${esc(c.englishName)}</div>` : ''}<div class="issuer-detail">${[c.address, [c.phone, c.email].filter(Boolean).join(' / ')].filter(Boolean).map(esc).join('<br>')}</div></div>
 <div class="doc-meta"><h1>${esc(s.title)}</h1><div class="doc-no">${esc(s.noticeNo)}</div><div>致：${esc(s.factory)}</div><div>第 ${s.roundNumber} 轮 · ${esc(s.versionLabel)}</div><div>生成日期：${esc(generated.slice(0, 10))}</div></div></header>
-<table class="facts">${facts}</table>
+<table class="facts">${facts}${row('工序链', s.stageChain || '')}</table>
 <section class="block"><div class="block-title">本轮共同要求</div><div class="text" data-common>${esc(s.commonRequirements)}</div></section>
 <section class="block"><div class="block-title">本厂差异要求</div><div class="text" data-extra>${s.extraRequirements ? esc(s.extraRequirements) : '无（按共同要求）'}</div></section>
 ${fabric}

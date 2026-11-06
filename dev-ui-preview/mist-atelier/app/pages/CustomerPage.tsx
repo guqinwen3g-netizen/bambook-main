@@ -1,3 +1,4 @@
+import { CustomerList } from './CustomerList';
 import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow} from '../runtime/businessClock';
@@ -6,10 +7,11 @@ import { BaseDataImportButton } from './modules/BaseDataImport';
 import React from 'react';
 import { View } from '../../../../types';
 import { BadgeDollarSign, CalendarClock, ClipboardList, Download, Ellipsis, Layers, Mail, Plus, Sparkles, TrendingUp, Wallet } from 'lucide-react';
-import { Avatar, Banner, Button, Card, CardHeader, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, IconButton, IdentityHeader, KeyValue, MistPage, Mono, ObjectCell, PageHeader, Pill, Select, StageProgress, StatCard, StatGrid, Tabs, TextInput, Thumb, Timeline, useToast } from '../../../../components/mist';
+import { Avatar, Banner, Button, Card, Checkbox, CardHeader, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, IconButton, IdentityHeader, KeyValue, MistPage, Mono, ObjectCell, PageHeader, Pill, Select, StageProgress, StatCard, StatGrid, Tabs, TextInput, Thumb, Timeline, useToast } from '../../../../components/mist';
 import type { MistContact, MistCustomer } from '../../../../server/src/shared/mistWorkspace';
 import { IMG, STAGES, fmt } from '../data';
 import { useNav } from '../nav';
+import { setComposeIntent } from '../runtime/composeIntent';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
 import { defaultMemberId, memberSelectOptions, workspaceMembers } from '../runtime/members';
@@ -19,6 +21,7 @@ import { useFilePreview } from '../runtime/files';
 import { useDevice } from '../runtime/devicePreferences';
 import { IncotermPlaceInput, OptionInput } from './OptionInput';
 import { COUNTRIES, CURRENCIES, CUSTOMER_GRADES, CUSTOMER_PAYMENT_TERMS, INDUSTRIES, PRODUCT_CATEGORIES, withCurrent, type TradeOption } from '../runtime/tradeOptions';
+import { FailureNotice } from '../runtime/FailureNotice';
 const CUSTOMER_CHOICES: Partial<Record<string, TradeOption[]>> = { country: COUNTRIES, industry: INDUSTRIES, grade: CUSTOMER_GRADES, terms: CUSTOMER_PAYMENT_TERMS, categories: PRODUCT_CATEGORIES };
 
 export function CustomerPage() {
@@ -36,7 +39,8 @@ export function CustomerPage() {
   const manageableCustomers = workspace?.access?.manageableCustomerIds;
   const canMaintainCustomer = canCreate && (manageableCustomers ? !!customer && manageableCustomers.includes(customer.id) : !!session.localMode || canChangeOwner || customer?.ownerId === session.user?.id);
   React.useEffect(()=>{if(!canCreate)setCreating(false);if(!canMaintainCustomer){setEdit(null);setDeleteContact(false);}},[canCreate,canMaintainCustomer]);
-  const [contact, setContact] = React.useState<Partial<MistContact> | null>(null);
+  const [contact, setContact] = React.useState<(Partial<MistContact> & { primary?: boolean }) | null>(null);
+  const relationContact = (id?: string) => state?.market.relations.find(r => r.customerId === customer?.id)?.contacts.find(c => c.id === id);
   const [edit, setEdit] = React.useState<MistCustomer | null>(null);
   const [deleteContact, setDeleteContact] = React.useState(false), [frequency, setFrequency] = React.useState(false);
   const [busy, setBusy] = React.useState(false), [failure, setFailure] = React.useState('');
@@ -47,14 +51,18 @@ export function CustomerPage() {
   const invoices = (state?.invoices ?? []).filter(invoice => orders.some(order => order.id === invoice.orderId));
   const active = orders.filter(order => !['已出运', '履约完成', '已完成', '已取消', '已作废', '待收尾款'].includes(order.state));
   const events = (state?.events ?? []).filter(event => event.entityId === customer?.id || orders.some(order => order.id === event.entityId) || devs.some(dev => dev.id === event.entityId) || contacts.some(contact => contact.id === event.entityId)).sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
-  const fileIds = new Set([...devs.flatMap(dev => dev.fileIds), ...events.flatMap(event => event.fileIds)]);
+  // mar25：客户文件汇总开发案、动态、报价、订单、关系档案与关联邮件的附件。
+  const relation = state?.market.relations.find(r => r.customerId === customer?.id);
+  const quotes = (state?.market.quotations ?? []).filter(q => q.customerId === customer?.id);
+  const mails = (state?.email?.messages ?? []).filter(m => m.folder !== 'trash' && m.links.some(l => l.kind === 'customer' && l.id === customer?.id));
+  const fileIds = new Set([...devs.flatMap(dev => dev.fileIds), ...events.flatMap(event => event.fileIds), ...quotes.flatMap(q => [...q.fileIds, ...(q.documents || []).map(d => d.fileId)]), ...orders.flatMap(o => (o as { fileIds?: string[] }).fileIds || []), ...(relation?.fileIds || []), ...mails.flatMap(m => (m.attachments || []).map(a => a.fileId).filter((id): id is string => !!id))]);
   const files = (state?.files ?? []).filter(file => fileIds.has(file.id));
   const saveContact = async () => {
     if (!canMaintainCustomer || !contact || !customer || busy) return;
     if (!contact.name?.trim()) { setFailure('请填写联系人姓名'); return; }
     if (contact.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email)) { setFailure('请填写有效邮箱'); return; }
     setBusy(true); setFailure('');
-    try { await run({ type: 'market.contact.save', payload: { kind:'customer',parentId:customer.id,id: contact.id,primary:state?.market.relations.find(r=>r.customerId===customer.id)?.contacts.find(c=>c.id===contact.id)?.primary||false, name: contact.name, role: contact.role ?? '', email: contact.email ?? '', phone: contact.phone ?? '' } }); setContact(null); toast('联系人已保存'); }
+    try { await run({ type: 'market.contact.save', payload: { kind:'customer',parentId:customer.id,id: contact.id,primary:!!contact.primary, name: contact.name, role: contact.role ?? '', email: contact.email ?? '', phone: contact.phone ?? '' } }); setContact(null); toast('联系人已保存'); }
     catch (problem) { setFailure(problem instanceof Error ? problem.message : '联系人保存失败'); } finally { setBusy(false); }
   };
   const createSpec:ModuleEditorSpec={
@@ -78,19 +86,22 @@ export function CustomerPage() {
   };
   const customerActions=<><Select aria-label={uiText("选择客户")} value={customer?.id||''} disabled={loading||creating} onChange={event=>{if(event.target.value)go('crm',event.target.value,{customerId:event.target.value});}} options={[{value:'',label:'选择客户'},...(state?.customers||[]).map(c=>({value:c.id,label:c.name+' · '+c.code}))]}/>{canCreate&&<BaseDataImportButton kind="customer" disabled={loading}/>}{canCreate&&<Button icon={Plus} disabled={loading} onClick={()=>setCreating(true)}>{uiText("新建客户")}</Button>}</>;
   if(creating&&canCreate)return <ModuleEditorPage spec={createSpec} onClose={()=>setCreating(false)}/>;
+  // mar17：未指定客户且有多个客户时先看客户列表；只有一个客户时直接进入详情。
+  if(!requestedId&&state&&state.customers.length>1)return <CustomerList state={state} actions={canCreate?<Button icon={Plus} onClick={()=>setCreating(true)}>{uiText('新建客户')}</Button>:null} onOpen={id=>go('crm',id,{customerId:id})}/>;
   const emailValid = (email?:string):email is string => !!email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   const customerEmail = contacts.find(item=>emailValid(item.email))?.email;
-  const writeMail = (email?: string) => { if (!emailValid(email)) { setFailure('请先为联系人填写有效邮箱'); return; } window.location.href = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(customer?.name ?? '')}`; };
+  // Mail goes out through the smart mailbox so it stays with the customer; the mailbox opens a draft linked to this customer.
+  const writeMail = (email?: string) => { if (!emailValid(email)) { setFailure('请先为联系人填写有效邮箱'); return; } setComposeIntent({ to: email!, subject: '', links: customer ? [{ kind: 'customer', id: customer.id }] : [] }); go('emails'); };
   if (!customer) return <MistPage><PageHeader title={uiText("客户管理")} actions={customerActions}/><EmptyState title={uiText(loading ? '正在读取客户' : requestedId ? '没有找到指定客户' : '还没有客户档案')} description={uiText(error || (requestedId ? '请选择本公司已有客户，或新建客户。' : '创建首个客户后，即可发起开发、报价与订单。'))} action={<Button onClick={() => void refresh()}>{uiText("重新读取")}</Button>} /></MistPage>;
   const currencyOrders = orders.filter(order => order.currency === customer.currency && !['已作废', '已取消'].includes(order.state)), currencyInvoices = invoices.filter(invoice => invoice.currency === customer.currency);
   const start = new Date(customer.since).getTime(), years = Number.isFinite(start) ? Math.max(0, (businessNow().getTime() - start) / (365.25 * 24 * 3600 * 1000)).toFixed(1) : '—';
-  const contactList = <div className="mist-related">{contacts.length ? contacts.map(item => <button key={item.id} type="button" onClick={() => { setContact({ ...item }); setFailure(''); }}><Avatar name={item.name} identityKey={`contact:${item.id}`} tone={item.tone} /><span><b>{item.name}</b><small>{item.role} · {item.email || item.phone || '待补充联系方式'}</small></span></button>) : <EmptyState compact title={uiText("还没有联系人")} action={canMaintainCustomer?<Button onClick={() => setContact({ name: '', role: '', email: '', phone: '' })}>{uiText("添加联系人")}</Button>:undefined} />}</div>;
+  const contactList = <div className="mist-related">{contacts.length ? contacts.map(item => <button key={item.id} type="button" onClick={() => { setContact({ ...item, primary: !!relationContact(item.id)?.primary }); setFailure(''); }}><Avatar name={item.name} identityKey={`contact:${item.id}`} tone={item.tone} /><span><b>{item.name}</b><small>{item.role} · {item.email || item.phone || '待补充联系方式'}</small></span></button>) : <EmptyState compact title={uiText("还没有联系人")} action={canMaintainCustomer?<Button onClick={() => setContact({ name: '', role: '', email: '', phone: '' })}>{uiText("添加联系人")}</Button>:undefined} />}</div>;
   return <MistPage>
     <IdentityHeader thumb={<span className="mist-thumb" data-size="lg" style={{ fontSize: 22, fontWeight: 300, color: 'var(--mist-accent-ink)', background: 'var(--mist-accent-tint)' }}>{customer.name.slice(0, 2)}</span>}
       meta={[`${customer.country} · ${customer.city}`, customer.industry, <Mono key="code">{customer.code}</Mono>]} title={uiText(customer.name)}
       facts={[{ label: '客户经理', value: <><Avatar name={customer.owner} identityKey={customer.ownerId} size="xs" />{customer.owner}</> }, { label: '等级', value: <Pill tone="accent">{customer.grade}</Pill> }]}
       actions={<>{customerActions}{canMail&&<Button icon={Mail} disabled={!customerEmail} title={uiText(customerEmail?'使用本机邮件应用撰写，Bambook不会发送邮件':'请先添加含有效邮箱的联系人')} onClick={() => writeMail(customerEmail)}>{uiText("写邮件")}</Button>}{canDevelop&&<Button variant="primary" icon={Plus} onClick={() => go('development/new', undefined, { customerId: customer.id })}>{uiText("新建开发案")}</Button>}{canMaintainCustomer&&<IconButton icon={Ellipsis} label={uiText("编辑客户资料")} onClick={() => { setEdit({ ...customer }); setFailure(''); }} />}</>} />
-    {(error || failure) && <Banner tone="bad" title={uiText("操作尚未完成")}>{failure || error}</Banner>}
+    {(error || failure) && <FailureNotice title={"操作尚未完成"} detail={failure || error} />}
     <Tabs value={tab} onChange={setTab} options={[{ value: 'overview', label: '概览' }, { value: 'orders', label: '订单', count: orders.length }, { value: 'dev', label: '开发', count: devs.length }, { value: 'followups', label: '跟进', count: (state?.crm?.followUps ?? []).filter(row => row.customerId === customer.id).length }, { value: 'opportunities', label: '商机', count: (state?.crm?.opportunities ?? []).filter(row => row.customerId === customer.id && !['won', 'lost'].includes(row.stage)).length }, { value: 'mail', label: '邮件' }, { value: 'contacts', label: '联系人', count: contacts.length }, { value: 'files', label: '文件', count: files.length }]} />
     <StatGrid>
       <StatCard icon={BadgeDollarSign} label={uiText("今年下单")} value={fmt(currencyOrders.filter(order => new Date(order.createdAt).getFullYear() === businessNow().getFullYear()).reduce((sum, order) => sum + order.amount, 0), 2)} unit={uiText(customer.currency)} foot={`共 ${orders.length} 个订单`} />
@@ -103,7 +114,7 @@ export function CustomerPage() {
         {tab === 'overview' && <Banner tone="ai" icon={Sparkles} title={uiText("小竹洞察")} actions={<Button size="sm" variant="ai" onClick={() => openAI(`仅根据以下已读取事实概括客户 ${customer.name}（${customer.code}）：${active.length} 个在途订单，${devs.length} 个开发案，待收 ${fmt(currencyInvoices.reduce((sum, invoice) => sum + invoice.open, 0), 2)} ${customer.currency}。说明缺失信息，不要推断未提供的对客沟通或承诺。`)}>{uiText("展开")}</Button>}>{customer.name}{uiText(" 当前有 ")}{active.length}{uiText(" 个在途订单、")}{devs.length}{uiText(" 个开发案；待收 ")}{fmt(currencyInvoices.reduce((sum, invoice) => sum + invoice.open, 0), 2)} {customer.currency}。</Banner>}
         {(tab === 'overview' || tab === 'orders') && <Card><CardHeader title={uiText("订单")} tools={<Button variant="quiet" size="sm" onClick={() => go('orders', undefined, { customerId: customer.id })}>{uiText("全部订单")}</Button>} />
           <DataTable density={density} ariaLabel={uiText("客户订单")} rows={orders} rowKey={order => order.id} onRowClick={order => go('orders/detail', order.id, { customerId: customer.id })} empty={<EmptyState compact title={uiText("还没有订单")} action={<Button onClick={() => go('orders/new', undefined, { customerId: customer.id })}>{uiText("新建订单")}</Button>} />} columns={[
-            { key: 'id', header: '订单', width: 'minmax(180px,1.6fr)', render: order => <ObjectCell thumb={<Thumb src={IMG[order.img]} size="sm" />} name={<Mono>{order.code}</Mono>} meta={order.season} /> },
+            { key: 'id', header: '订单', width: 'minmax(180px,1.6fr)', render: order => <ObjectCell thumb={<Thumb src={IMG[order.img]} icon={Layers} size="sm" />} name={<Mono>{order.code}</Mono>} meta={order.season} /> },
             { key: 'a', header: '金额', width: '120px', align: 'right', render: order => <b className="mist-cell-strong mist-num">{fmt(order.amount, 2)} <span className="mist-muted">{order.currency}</span></b> },
             { key: 'd', header: '交期', width: '88px', hideOnMobile: true, render: order => <span className="mist-num">{order.due}</span> },
             { key: 's', header: '状态', width: '120px', render: order => <Pill tone={order.tone}>{order.state}</Pill> },
@@ -130,7 +141,7 @@ export function CustomerPage() {
       </div>
     </div>
     <Drawer open={!!contact} onClose={() => { if (!busy) setContact(null); }} title={uiText(!canMaintainCustomer?'联系人':contact?.id ? '编辑联系人' : '添加联系人')} footer={<><Button disabled={busy} onClick={() => setContact(null)}>{uiText(canMaintainCustomer?'取消':'关闭')}</Button>{canMaintainCustomer&&contact?.id && <Button variant="danger" disabled={busy} onClick={() => setDeleteContact(true)}>{uiText("删除")}</Button>}{canMaintainCustomer&&<Button variant="primary" loading={busy} onClick={() => void saveContact()}>{uiText("保存")}</Button>}</>}>
-      {failure && <Banner tone="bad" title={uiText("联系人未保存")}>{failure}</Banner>}<FormGrid>{(['name', 'role', 'email', 'phone'] as const).map((key, index) => <Field key={key} label={uiText(['姓名', '职责', '邮箱', '电话'][index])} required={key === 'name'}><TextInput readOnly={!canMaintainCustomer} type={key === 'email' ? 'email' : 'text'} value={contact?.[key] ?? ''} onChange={event => setContact(value => ({ ...value, [key]: event.target.value }))} /></Field>)}</FormGrid>
+      {failure && <Banner tone="bad" title={uiText("联系人未保存")}>{failure}</Banner>}<FormGrid>{(['name', 'role', 'email', 'phone'] as const).map((key, index) => <Field key={key} label={uiText(['姓名', '职责', '邮箱', '电话'][index])} required={key === 'name'}><TextInput aria-label={uiText(['姓名', '职责', '邮箱', '电话'][index])} readOnly={!canMaintainCustomer} type={key === 'email' ? 'email' : 'text'} value={contact?.[key] ?? ''} onChange={event => setContact(value => ({ ...value, [key]: event.target.value }))} /></Field>)}{canMaintainCustomer ? <Checkbox label={uiText('主联系人')} checked={!!contact?.primary} onChange={primary => setContact(value => ({ ...value, primary }))} /> : contact?.primary ? <span className="mist-note">{uiText('主联系人')}</span> : null}</FormGrid>
       {canMail&&contact?.email && <Button icon={Mail} disabled={!emailValid(contact.email)} title={uiText("使用本机邮件应用撰写，Bambook不会发送邮件")} onClick={() => writeMail(contact.email)}>{uiText("写邮件")}</Button>}
     </Drawer>
     <Dialog open={deleteContact} onClose={() => { if (!busy) setDeleteContact(false); }} title={uiText("删除联系人？")} description={uiText(contact?.name)} footer={<><Button onClick={() => setDeleteContact(false)}>{uiText("取消")}</Button><Button variant="danger" loading={busy} onClick={async () => { if (!canMaintainCustomer || !contact?.id || busy) return; setBusy(true); try { await run({ type: 'market.contact.delete', payload: { kind:'customer',parentId:customer.id,id: contact.id } }); setDeleteContact(false); setContact(null); toast('联系人已删除'); } catch (problem) { setFailure(problem instanceof Error ? problem.message : '删除失败'); } finally { setBusy(false); } }}>{uiText("删除联系人")}</Button></>} />

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -7,11 +7,14 @@ import { createMistState, applyMistCommand, mistCommandPermission } from '../sha
 import { getDefaultScopeListForRole, SYSTEM_ROLE_IDS, type SystemRoleId } from '../_shared/rolePermissionMatrix';
 import { MistRepository, type MistContract } from './repository';
 import { MistPrivateFiles } from './files';
+import { agentGet, agentQuery, agentRelated } from './agentRead';
+import { handleMcpMessage } from './agentMcp';
+import { runMistAssistant } from './assistant';
 import { MemoryMistDatabase, testAuthority } from './__tests__/support';
 
 // 规格 §2 / P3：岗位 × 越权读写矩阵。示例数据：customer-0、customer-2 跟进人 demo-sales，customer-1 跟进人 demo-buyer。
 const COMPANY = '11111111-1111-4111-8111-111111111111';
-const ALL_ORDERS = ['id-321', 'id-301', 'id-166', 'SO-G-2026-018', 'SO-G-2026-017', 'SO-G-2026-015', 'SO-G-2026-012', 'SO-G-2026-009'];
+const ALL_ORDERS = ['id-330', 'id-311', 'id-167', 'SO-G-2026-018', 'SO-G-2026-017', 'SO-G-2026-015', 'SO-G-2026-012', 'SO-G-2026-009'];
 const contract: MistContract = { createMistState, applyMistCommand, mistCommandPermission };
 const PEOPLE: Record<string, { role: SystemRoleId | 'owner' }> = {
   boss: { role: 'owner' }, finance: { role: SYSTEM_ROLE_IDS.FINANCE }, qc: { role: SYSTEM_ROLE_IDS.QC }, logistics: { role: SYSTEM_ROLE_IDS.LOGISTICS },
@@ -38,13 +41,56 @@ beforeEach(async () => {
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
 describe('row-level data scope by role', () => {
+  it.each(['email.link', 'email.bulk', 'email.draft.save'])('%s rejects a business reference outside the current group', async type => {
+    const raw = db.workspaces.get(workspaceId)!.state, message = raw.email.messages[0], account = raw.email.accounts.find((a: any) => a.id === message.accountId);
+    const link = { kind: 'order', id: 'SO-G-2026-017' };
+    const payload = type === 'email.bulk' ? { ids: [message.id], action: 'link', link }
+      : type === 'email.draft.save' ? { input: { accountId: account.id, from: account.address, to: 'buyer@example.com', cc: '', bcc: '', subject: '交期', body: '', template: '', fileIds: [], links: [link] } }
+      : { id: message.id, link };
+    const before = structuredClone(raw);
+    await expect(repo.execute(actor('demo-sales'), workspaceId, { requestId: randomUUID(), expectedRevision: 0, command: { type, payload } as any })).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+    expect(db.workspaces.get(workspaceId)!.state).toEqual(before);
+    expect(db.receipts.size).toBe(0);
+  });
+  it.each(['email.link', 'email.bulk', 'email.draft.save'])('%s requires target module read permission, not merely mailbox write permission', async type => {
+    auth.users.get('demo-sales')!.permissions = ['emails:read', 'emails:write'];
+    const raw = db.workspaces.get(workspaceId)!.state, message = raw.email.messages[0], account = raw.email.accounts.find((a: any) => a.id === message.accountId);
+    const link = { kind: 'order', id: 'SO-G-2026-018' };
+    const payload = type === 'email.bulk' ? { ids: [message.id], action: 'link', link }
+      : type === 'email.draft.save' ? { input: { accountId: account.id, from: account.address, to: 'buyer@example.com', cc: '', bcc: '', subject: '交期', body: '', template: '', fileIds: [], links: [link] } }
+      : { id: message.id, link };
+    const before = structuredClone(raw);
+    await expect(repo.execute(actor('demo-sales'), workspaceId, { requestId: randomUUID(), expectedRevision: 0, command: { type, payload } as any })).rejects.toMatchObject({ code: 'NOT_FOUND', status: 404 });
+    expect(db.workspaces.get(workspaceId)!.state).toEqual(before);
+    expect(db.receipts.size).toBe(0);
+  });
+  it.each(['disabled', 'deleted', 'left'])('rejects a %s follow-up assignee despite a stale mailbox authorization', async condition => {
+    if (condition === 'left') db.companyMembers.find(member => member.userId === 'demo-buyer')!.status = 'left';
+    else db.accounts.set('demo-buyer', condition === 'deleted' ? { deletedAt: new Date() } : { status: 'disabled' });
+    const raw = db.workspaces.get(workspaceId)!.state, before = structuredClone(raw);
+    raw.email.accounts[0].memberIds = ['demo-buyer'];
+    before.email.accounts[0].memberIds = ['demo-buyer'];
+    await expect(repo.execute(actor('demo-sales'), workspaceId, { requestId: randomUUID(), expectedRevision: 0, command: { type: 'email.followUp', payload: { id: raw.email.messages[0].id, ownerId: 'demo-buyer', due: '2026-11-02', note: '' } } })).rejects.toMatchObject({ code: 'PRECONDITION', status: 422 });
+    expect(db.workspaces.get(workspaceId)!.state).toEqual(before);
+    expect(db.receipts.size).toBe(0);
+  });
+  it('allows linking a currently readable order in the salesperson own scope', async () => {
+    const raw = db.workspaces.get(workspaceId)!.state, id = raw.email.messages[1].id, link = { kind: 'order', id: 'SO-G-2026-018' };
+    const result = await repo.execute(actor('demo-sales'), workspaceId, { requestId: randomUUID(), expectedRevision: 0, command: { type: 'email.link', payload: { id, link } } });
+    expect(result.workspace.state.email.messages.find(message => message.id === id)!.links).toContainEqual(link);
+  });
+  it('rejects a foreign-company business ID rather than creating a dangling email link', async () => {
+    const raw = db.workspaces.get(workspaceId)!.state, before = structuredClone(raw);
+    await expect(repo.execute(actor('demo-sales'), workspaceId, { requestId: randomUUID(), expectedRevision: 0, command: { type: 'email.link', payload: { id: raw.email.messages[0].id, link: { kind: 'order', id: 'foreign-company-order' } } } })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(db.workspaces.get(workspaceId)!.state).toEqual(before);
+  });
   it.each(['boss', 'finance', 'qc', 'logistics'])('%s sees every order company-wide', async userId => {
     expect(await orders(userId)).toEqual([...ALL_ORDERS].sort());
   });
   it('a salesperson sees own orders and orders of customers they follow, with their downstream only', async () => {
-    expect(await orders('demo-sales')).toEqual(['SO-G-2026-009', 'SO-G-2026-012', 'SO-G-2026-015', 'SO-G-2026-018', 'id-166']);
+    expect(await orders('demo-sales')).toEqual(['SO-G-2026-009', 'SO-G-2026-012', 'SO-G-2026-015', 'SO-G-2026-018', 'id-167']);
     const state = (await repo.get(actor('demo-sales'), workspaceId)).state;
-    expect(state.orderLines.every(line => ['SO-G-2026-009', 'SO-G-2026-012', 'SO-G-2026-015', 'SO-G-2026-018', 'id-166'].includes(line.orderId))).toBe(true);
+    expect(state.orderLines.every(line => ['SO-G-2026-009', 'SO-G-2026-012', 'SO-G-2026-015', 'SO-G-2026-018', 'id-167'].includes(line.orderId))).toBe(true);
     expect(state.fulfillment.purchases.every(p => p.orderId !== 'SO-G-2026-017')).toBe(true);
     expect(state.tasks.some(task => task.target?.view === 'orders/detail' && task.target.id === 'SO-G-2026-017' && !task.assigneeIds?.includes('demo-sales'))).toBe(false); // 指派给本人的待办保留
     expect(state.customers).toHaveLength(6); // 档案全公司共享
@@ -107,13 +153,94 @@ describe('row-level data scope by role', () => {
     expect(source.events.some(row => row.id === 'hidden-order-event')).toBe(true);
   });
   it('a department head sees members of the department and its sub-departments', async () => {
-    expect(await orders('head')).toEqual(expect.arrayContaining(['SO-G-2026-017', 'id-321', 'id-301']));
+    expect(await orders('head')).toEqual(expect.arrayContaining(['SO-G-2026-017', 'id-330', 'id-311']));
     expect(await orders('head')).not.toContain('SO-G-2026-018');
   });
   it('a group member sees the group scope and nothing else', async () => {
     expect(await orders('teammate')).toEqual(['SO-G-2026-012']);
     db.teamMembers[0].leftAt = new Date();
     expect(await orders('teammate')).toEqual([]);
+  });
+  it.each(['leave', 'narrow', 'dissolve'])('revokes already-open group records immediately after %s, including writes at the current revision', async change => {
+    const subject = actor('teammate');
+    const opened = await repo.get(subject, workspaceId);
+    const orderId = 'SO-G-2026-012';
+    expect(opened.state.orders.map(row => row.id)).toContain(orderId);
+    if (change === 'leave') db.teamMembers[0].leftAt = new Date();
+    else if (change === 'dissolve') db.teams[0].deletedAt = 1n;
+    else {
+      auth.users.get('boss')!.permissions.push('hr:write');
+      await repo.execute(actor('boss'), workspaceId, { requestId: 'narrow-scope', expectedRevision: opened.revision,
+        command: { type: 'teamScope.save', payload: { teamId: 'team-lune', conditions: [], picks: [], exclusions: [] } } });
+    }
+    expect((await repo.get(subject, workspaceId)).state.orders.map(row => row.id)).not.toContain(orderId);
+    const before = structuredClone(db.workspaces.get(workspaceId)), receipts = db.receipts.size;
+    await expect(repo.execute(subject, workspaceId, { requestId: 'stale-open-order', expectedRevision: before.revision,
+      command: { type: 'order.checklist', payload: { orderId, itemId: `${orderId}-check-0`, done: true } } } as any)).rejects.toMatchObject({ status: 404 });
+    expect(db.workspaces.get(workspaceId)).toEqual(before);
+    expect(db.receipts.size).toBe(receipts);
+  });
+  it('clears old managed-line access immediately through member.groups.set, without removing department access', async () => {
+    const setGroups = (groups: ('fabric' | 'garment')[], requestId: string) => repo.execute(actor('boss'), workspaceId, {
+      requestId, expectedRevision: db.workspaces.get(workspaceId)!.revision,
+      command: { type: 'member.groups.set', payload: { userId: 'head', groups } },
+    });
+    await setGroups(['fabric'], 'manage-fabric');
+    expect(await orders('head')).toContain('id-167');
+    await setGroups([], 'stop-managing-fabric');
+    expect(await orders('head')).not.toContain('id-167');
+    expect(await orders('head')).toContain('SO-G-2026-017');
+    const before = structuredClone(db.workspaces.get(workspaceId)), receipts = db.receipts.size;
+    await expect(repo.execute(actor('head'), workspaceId, { requestId: 'old-line-write', expectedRevision: before.revision,
+      command: { type: 'order.checklist', payload: { orderId: 'id-167', itemId: 'id-167-check-0', done: true } } } as any)).rejects.toMatchObject({ status: 404 });
+    expect(db.workspaces.get(workspaceId)).toEqual(before);
+    expect(db.receipts.size).toBe(receipts);
+  });
+  it('does not retain write authority from an already-open session after the job loses its permission', async () => {
+    const subject = actor('demo-sales'), opened = await repo.get(subject, workspaceId);
+    auth.users.get('demo-sales')!.permissions = ['orders:read'];
+    const before = structuredClone(db.workspaces.get(workspaceId));
+    await expect(repo.execute(subject, workspaceId, { requestId: 'old-job-write', expectedRevision: opened.revision,
+      command: { type: 'order.checklist', payload: { orderId: 'SO-G-2026-018', itemId: 'SO-G-2026-018-check-0', done: true } } } as any)).rejects.toMatchObject({ status: 403 });
+    expect(db.workspaces.get(workspaceId)).toEqual(before);
+    expect(db.receipts.size).toBe(0);
+  });
+  it('customer handover immediately moves business visibility while leaving company-wide archives readable', async () => {
+    const source = db.workspaces.get(workspaceId)!.state;
+    const selected = source.orders.find((row: any) => row.id === 'SO-G-2026-017')!;
+    if (selected.governance) selected.governance.status = 'approved';
+    const subject = actor('demo-buyer');
+    vi.spyOn(repo as any, 'reviewSubject').mockResolvedValue({ ...actor('loner'), permissions: auth.users.get('loner')!.permissions });
+    expect(await orders('demo-buyer')).toContain(selected.id);
+    await repo.execute(actor('boss'), workspaceId, { requestId: 'customer-transfer', expectedRevision: 0,
+      command: { type: 'handover.customer', payload: { customerId: selected.customerId, toUserId: 'loner', reason: '调岗交接', orderIds: [selected.id] } } });
+    expect(await orders('loner')).toContain(selected.id);
+    expect(await orders('demo-buyer')).not.toContain(selected.id);
+    expect((await repo.get(subject, workspaceId)).state.customers.map(row => row.id)).toContain(selected.customerId);
+    const before = structuredClone(db.workspaces.get(workspaceId)), receipts = db.receipts.size;
+    await expect(repo.execute(subject, workspaceId, { requestId: 'old-owner-write', expectedRevision: before.revision,
+      command: { type: 'order.checklist', payload: { orderId: selected.id, itemId: `${selected.id}-check-0`, done: true } } } as any)).rejects.toMatchObject({ status: 404 });
+    expect(db.workspaces.get(workspaceId)).toEqual(before);
+    expect(db.receipts.size).toBe(receipts);
+  });
+  it.each([
+    ['handover.customer', 'relations:write'], ['handover.customer', 'orders:read'],
+    ['handover.account', 'products:write'], ['handover.account', 'suppliers:read'],
+  ])('%s rejects an active recipient missing %s without changing ownership, tasks or receipts', async (type, missing) => {
+    const source = db.workspaces.get(workspaceId)!.state;
+    for (const order of source.orders) if (order.ownerId === 'demo-buyer' && order.governance) order.governance.status = 'approved';
+    const permissions = ['relations:read', 'relations:write', 'orders:read', 'orders:write', 'products:read', 'products:write', 'suppliers:read', 'suppliers:write'].filter(scope => scope !== missing);
+    const loadRecipient = vi.spyOn(repo as any, 'reviewSubject').mockResolvedValue({ ...actor('loner'), permissions });
+    const command = type === 'handover.customer'
+      ? { type, payload: { customerId: 'customer-1', toUserId: 'loner', reason: '调岗', orderIds: ['SO-G-2026-017'] } }
+      : { type, payload: { fromUserId: 'demo-buyer', toUserId: 'loner', reason: '离职' } };
+    const before = structuredClone(db.workspaces.get(workspaceId)), receipts = db.receipts.size;
+    await expect(repo.execute(actor('boss'), workspaceId, { requestId: 'unqualified-recipient', expectedRevision: 0, command } as any)).rejects.toMatchObject({ status: 422, code: 'PRECONDITION' });
+    expect(loadRecipient).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ userId: 'boss', companyId: COMPANY }), 'loner', '新负责人');
+    expect(db.workspaces.get(workspaceId)).toEqual(before);
+    expect(db.receipts.size).toBe(receipts);
+    loadRecipient.mockResolvedValue({ ...actor('loner'), permissions: [...permissions, missing] });
+    await expect(repo.execute(actor('boss'), workspaceId, { requestId: 'qualified-recipient', expectedRevision: 0, command } as any)).resolves.toMatchObject({ workspace: { revision: 1 } });
   });
   it('rejects writes to records outside the scope and keeps the data unchanged', async () => {
     const before = structuredClone(db.workspaces.get(workspaceId));
@@ -185,11 +312,11 @@ describe('row-level data scope by role', () => {
   it('a line supervisor adds its managed line to existing department access', async () => {
     const row: any = db.workspaces.get(workspaceId);
     row.state.memberGroups = [{ userId: 'head', name: 'head', groups: ['fabric'], updatedAt: '', updatedBy: 'boss' }, { userId: 'demo-sales', name: 'demo-sales', groups: ['garment'], updatedAt: '', updatedBy: 'boss' }];
-    expect(await orders('head')).toContain('id-166');
+    expect(await orders('head')).toContain('id-167');
     expect(await orders('head')).not.toContain('SO-G-2026-018');
     (db.workspaces.get(workspaceId) as any).state.memberGroups[0].groups = ['garment'];
     expect(await orders('head')).toEqual(expect.arrayContaining(['SO-G-2026-018', 'SO-G-2026-015', 'SO-G-2026-009']));
-    expect(await orders('head')).not.toContain('id-166');
+    expect(await orders('head')).not.toContain('id-167');
     // 管理业务线只对主管权限生效；业务员设置了也不扩大范围。
     expect(await orders('demo-sales')).not.toContain('SO-G-2026-017');
   });
@@ -205,5 +332,95 @@ describe('row-level data scope by role', () => {
   it('hides files referenced only by records outside the scope', async () => {
     const full = (await repo.get(actor('boss'), workspaceId)).state.files.length, scoped = (await repo.get(actor('loner'), workspaceId)).state.files.length;
     expect(scoped).toBeLessThan(full);
+  });
+});
+
+
+describe('read-only exits use the current repository projection', () => {
+  it.each(['demo-sales', 'teammate', 'head', 'loner'])('%s cannot discover hidden orders by query count, reference, or MCP get', async userId => {
+    const subject = actor(userId), first = await repo.getForAgent(subject, workspaceId);
+    const before = agentQuery(first.workspace.state, first.actor, { type: 'order', limit: 1 });
+    const source = db.workspaces.get(workspaceId)!.state;
+    source.orders.push({ ...source.orders[0], id: 'outside-order', code: 'PRIVATE-ORDER-98765', customerId: 'outside-customer', ownerId: 'outside-user' });
+    const current = await repo.getForAgent(subject, workspaceId);
+    expect(agentQuery(current.workspace.state, current.actor, { type: 'order', limit: 1 })).toEqual(before);
+    expect(agentQuery(current.workspace.state, current.actor, { q: 'PRIVATE-ORDER-98765' }).total).toBe(0);
+    const errorOf = (id: string) => { try { agentGet(current.workspace.state, current.actor, 'order', id); } catch (error) { return error; } };
+    expect(errorOf('outside-order')).toMatchObject({ code: 'NOT_FOUND', status: 404, message: (errorOf('never-existed') as Error).message });
+    expect(() => agentRelated(current.workspace.state, current.actor, 'order', 'outside-order')).toThrow('不存在');
+    const call = async (id: string) => handleMcpMessage(repo, subject, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'bambook_get', arguments: { workspaceId, type: 'order', id } } }, error => (error as Error).message);
+    expect(await call('outside-order')).toEqual(await call('never-existed'));
+    const response: any = await handleMcpMessage(repo, subject, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'bambook_query', arguments: { workspaceId, type: 'order', limit: 1 } } }, error => (error as Error).message);
+    expect(response.result.structuredContent).toMatchObject(before);
+  });
+
+  it.each(['demo-sales', 'teammate', 'head', 'loner'])('%s sends only visible AI source facts and counts, and rejects hidden citations like missing ones', async userId => {
+    const subject = actor(userId), complete = vi.fn(async (_input: any) => '只读建议');
+    const deps = { complete, providers: () => [], subscription: () => ({ connected: true, model: 'test-model' }) };
+    const request = async (sourceIds: string[]) => {
+      const current = await repo.getForAssistant(subject, workspaceId);
+      return runMistAssistant({ ...current, body: { message: '请核对来源', sourceIds } }, deps);
+    };
+    await request([]);
+    const before = complete.mock.calls.at(-1)![0].messages[0].content;
+    const source = db.workspaces.get(workspaceId)!.state;
+    source.orders.push({ ...source.orders[0], id: 'outside-ai', code: 'PRIVATE-AI-98765', customerId: 'outside-customer', ownerId: 'outside-user' });
+    await request([]);
+    expect(complete.mock.calls.at(-1)![0].messages[0].content).toBe(before);
+    complete.mockClear();
+    for (const id of ['outside-ai', 'never-existed', 'another-company-id']) await expect(request(['orders:' + id])).rejects.toMatchObject({ status: 404, code: 'SOURCE_NOT_FOUND', message: '选择的业务来源已不存在，请刷新后重选' });
+    expect(complete).not.toHaveBeenCalled();
+    const view = await repo.getForAssistant(subject, workspaceId), visible = view.workspace.state.orders[0];
+    if (visible) {
+      const result = await request(['orders:' + visible.id]);
+      expect(result.sources).toEqual([{ id: 'orders:' + visible.id, entityId: visible.id, label: visible.code, view: 'orders/detail' }]);
+      expect(JSON.stringify(complete.mock.calls.at(-1)![0])).not.toContain('PRIVATE-AI-98765');
+    }
+  });
+
+  it('hides an out-of-scope sample request notification, including its title and attachment', async () => {
+    const state = db.workspaces.get(workspaceId)!.state;
+    (state.sampleRequests ??= []).push({ id: 'private-sample', code: 'SR-PRIVATE', requesterId: 'demo-buyer', customerId: 'customer-1' } as any);
+    // Addressed to both, so the row scope (not the recipient filter) is what hides it from the out-of-scope salesperson.
+    state.notifications.push({ id: 'sample-notice', recipientIds: ['demo-buyer', 'demo-sales'], title: '财务驳回样品费 SR-PRIVATE 98765 USD', detail: 'private sample terms', at: '', readAt: null, target: { view: 'samples', section: 'requests', id: 'private-sample' } });
+    state.files.push({ id: 'sample-file', name: 'private sample terms.pdf', uploadedBy: 'demo-sales', size: 10, mimeType: 'application/pdf', storageKey: 'test/sample', createdAt: '' } as any);
+    state.invoices.push({ id: 'sample-invoice', code: 'SI-PRIVATE', sampleRequestId: 'private-sample', fileIds: ['sample-file'] } as any);
+    const view = (await repo.get(actor('demo-sales'), workspaceId)).state;
+    expect(view.sampleRequests.some(row => row.id === 'private-sample')).toBe(false);
+    expect(view.notifications.some(row => row.id === 'sample-notice')).toBe(false);
+    expect(view.files.some(row => row.id === 'sample-file')).toBe(false);
+    await expect(repo.download(actor('demo-sales'), workspaceId, 'sample-file')).rejects.toMatchObject({ status: 404, code: 'FILE_NOT_FOUND' });
+    expect((await repo.get(actor('demo-buyer'), workspaceId)).state.notifications.some(row => row.id === 'sample-notice')).toBe(true);
+  });
+
+  it('does not let a finance reader without tax-base permission download a tax original', async () => {
+    const state = db.workspaces.get(workspaceId)!.state, id = randomUUID();
+    state.files.push({ id, name: 'vat-original.pdf', uploadedBy: 'finance', size: 10, mimeType: 'application/pdf', storageKey: workspaceId + '/' + id, createdAt: '' });
+    (state.payables ??= {} as any).bills = [{ id: 'tax-bill', invoiceType: 'vat-special', taxAmount: 13000, fileIds: [id] } as any];
+    const permissions = auth.users.get('finance')!.permissions;
+    auth.users.get('finance')!.permissions = permissions.filter(p => p !== 'sensitive:tax_base');
+    const read = vi.spyOn(MistPrivateFiles.prototype, 'read').mockResolvedValue(Buffer.from('tax original'));
+    try {
+      expect((await repo.get(actor('finance'), workspaceId)).state.files.some(file => file.id === id)).toBe(false);
+      await expect(repo.download(actor('finance'), workspaceId, id)).rejects.toMatchObject({ status: 404, code: 'FILE_NOT_FOUND' });
+      expect(read).not.toHaveBeenCalled();
+      auth.users.get('finance')!.permissions.push('sensitive:tax_base');
+      expect((await repo.download(actor('finance'), workspaceId, id)).bytes.toString()).toBe('tax original');
+      expect(read).toHaveBeenCalledTimes(1);
+    } finally { read.mockRestore(); }
+  });
+
+  it('denies hidden, missing and other-company file ids before reading any bytes', async () => {
+    const state = db.workspaces.get(workspaceId)!.state;
+    const file = { id: 'private-file', name: 'private.pdf', uploadedBy: 'demo-sales', size: 10, mimeType: 'application/pdf', storageKey: 'test/private', createdAt: '' };
+    state.files.push(file);
+    state.orders.find(row => row.id === 'SO-G-2026-017')!.fileIds = [file.id];
+    const read = vi.spyOn(MistPrivateFiles.prototype, 'read');
+    try {
+      for (const id of [file.id, 'other-company-file', 'missing-file']) await expect(repo.download(actor('demo-sales'), workspaceId, id)).rejects.toMatchObject({ status: 404, code: 'FILE_NOT_FOUND' });
+      for (const method of ['getForAgent', 'getForAssistant'] as const) await expect(repo[method]({ ...actor('demo-sales'), companyId: '22222222-2222-4222-8222-222222222222' }, workspaceId)).rejects.toMatchObject({ status: 404 });
+      await expect(repo.download({ ...actor('demo-sales'), companyId: '22222222-2222-4222-8222-222222222222' }, workspaceId, file.id)).rejects.toMatchObject({ status: 404 });
+      expect(read).not.toHaveBeenCalled();
+    } finally { read.mockRestore(); }
   });
 });

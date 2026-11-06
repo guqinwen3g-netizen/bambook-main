@@ -7,6 +7,10 @@ import { useMistPortalTarget } from './shell';
 import { EmptyState, Icon, IconButton, Kbd, Tile } from './primitives';
 import { installUiSoundActivation, playFeedbackSound } from '../../services/uiSoundService';
 
+/** True inside a Dialog or Drawer: page-level feedback there must stay in the overlay, not go to the shell behind the scrim. */
+export const InModalContext = React.createContext(false);
+export const useInModal = () => React.useContext(InModalContext);
+
 const modalStack: HTMLElement[] = [];
 const focusableSelector = 'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]';
 
@@ -79,7 +83,7 @@ export function Dialog({ open, onClose, title, description, icon, tone = 'accent
   return <Portal><div className="mist-scrim" onClick={onClose} />
     <div ref={ref} id={id} tabIndex={-1} className="mist-dialog" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={description ? `${id}-description` : undefined} style={width ? { width: `min(${width}px, 92vw)` } : undefined}>
       <div className="mist-dialog-h">{icon && <Tile icon={icon} tone={tone} />}<div style={{ flex: 1 }}><div id={`${id}-title`} className="mist-h2">{uiText(title)}</div>{description && <p id={`${id}-description`}>{uiText(description)}</p>}</div><IconButton icon={X} label={uiText("关闭")} size="sm" onClick={onClose} /></div>
-      {children && <div className="mist-dialog-body">{uiText(children)}</div>}
+      {children && <div className="mist-dialog-body"><InModalContext.Provider value={true}>{uiText(children)}</InModalContext.Provider></div>}
       {footer && <div className="mist-dialog-foot">{footer}</div>}
     </div></Portal>;
 }
@@ -95,8 +99,8 @@ export function Drawer({ open, onClose, title, sub, leading, tone, size, childre
   return <Portal><div className="mist-scrim" onClick={onClose} />
     <aside ref={ref} id={id} tabIndex={-1} className="mist-drawer" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={sub ? `${id}-description` : undefined} data-size={size === 'lg' ? 'lg' : undefined}>
       <div className="mist-drawer-h" data-tone={tone}>{leading}<div><b id={`${id}-title`}>{uiText(title)}</b>{sub && <small id={`${id}-description`}>{uiText(sub)}</small>}</div><IconButton icon={X} label={uiText("关闭")} onClick={onClose} /></div>
-      {bodyless ? children : <div className="mist-drawer-body">{uiText(children)}</div>}
-      {footer && <div className="mist-drawer-foot">{footer}</div>}
+      <InModalContext.Provider value={true}>{bodyless ? children : <div className="mist-drawer-body">{uiText(children)}</div>}
+      {footer && <div className="mist-drawer-foot">{footer}</div>}</InModalContext.Provider>
     </aside></Portal>;
 }
 

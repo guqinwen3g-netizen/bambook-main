@@ -1,3 +1,4 @@
+import {notifyMist,notificationOwners} from './mistNotifications';
 /** Approved claims are the only producer of free replacement order sources. */
 import {createMistOrderRecords,MistCommandError,type MistState,type MistContext,type MistOrder,type MistOrderInput} from './mistWorkspace';
 import {frozenDisposition,type PlatformClaimDisposition} from './mistPlatform';
@@ -76,6 +77,6 @@ export function syncClaimReplacementShipments(root:MistState,context:MistContext
   const facts=root.fulfillment.shipments.filter(s=>s.state==='departed'&&s.lines.some(l=>l.orderId===order.id&&l.lineId===line.id)).map(s=>({shipmentId:s.id,code:s.code,quantity:s.lines.filter(l=>l.orderId===order.id&&l.lineId===line.id).reduce((sum,l)=>sum+l.quantity,0),departedAt:s.departedAt!}));
   const before=(row.replacementShipments??[]).reduce((sum,s)=>sum+s.quantity,0),after=facts.reduce((sum,s)=>sum+s.quantity,0);
   row.replacementShipments=facts;
-  if(before<row.quantity&&after>=row.quantity)root.notifications.unshift({id:context.id(),category:'general',title:'补发已出运',detail:order.code,at:context.now,readAt:null,target:{view:'claims',id:claim.id}});
+  if(before<row.quantity&&after>=row.quantity)notifyMist(root,context,{category:'general',title:'补发已出运',detail:order.code,target:{view:'claims',id:claim.id}},notificationOwners(root,'claim',claim.id));
  }
 }

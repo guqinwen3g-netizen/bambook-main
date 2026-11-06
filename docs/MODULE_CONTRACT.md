@@ -40,6 +40,68 @@ Author: Bamboo（基于优先级 1 端到端联调踩坑沉淀）
 - 未确认且仍有交接余量时，首页/侧栏给当前有效接收人同一条事项，直接打开准确加工合同详情。真实确认接收或整笔退回后自动消失，不创建可手工勾完的替代任务。
 - 源码：`runtime/workQueue.ts::mistWorkQueue` → `MaterialDeliveryPanel` → `fulfillment.materials.confirm`。仓库发料和供应商直送沿用原交接ID、数量、分配版本与QC来源。
 
+## 当前 Mist 面料分段委外交接（P1-1 第一块）
+
+- 物料类别 `greige`（坯布 / 纱线）只用于面料条目的物料采购。`isFabricStageMaterial` 判定后，`materialDeliveryTargets` / `prepareMaterialDelivery` 只接受**同一订单条目**、已批准且已线下发出并取得供应商确认的面料加工单；不走内部面料分配、不做成衣 QC 放行证明（`materialQualityProof` 跳过）。原有 `fabric`（成品面料）采购和内部供料到成衣厂的路径不变。
+- 点收人只取目标订单负责人（`materialReceiverIds`），不再加内部供料的成衣接收人。直送与仓库发料两条路径沿用 `fulfillment.materials.deliver` / `fulfillment.materials.issue` / `fulfillment.materials.confirm`，交接留在 `materialDeliveryRows`，坯布在染厂期间加工单不能取消或转厂（`hasMaterialAtFactory`）。
+- 面料加工单回交允许 `destination='warehouse'` 入库，批次名取订单条目品名；成衣加工回交仍不能入库。
+- 第二块（`server/src/shared/mistFabricStage.ts`）：采购单可带 `stageTerms`——按公斤采购的坯布须有 `kgPerMetre`（提交时校验），面料加工单可选 `lossPercent`（0–50%）；不属于该合同类型的字段直接拒绝。`stageTerms` 进入审批快照、审批详情「工序约定」和加工合同 PDF，转供应商时沿用。`fabricStageBalance` 只读汇总：投入 = 目标加工单上坯布交接的已点收合格数（拒收、待点收不计），按坯布单单位换算到加工单单位（米/码互换，公斤用 `kgPerMetre`）；产出 = 加工单 `received`；回交多于投入时不出损耗率并提示。订单核算的采购行按 `坯布` / `染整加工` 开头标注。面料看板与线下进度工序名改为 坯布 / 染整 / 后整理。
+- 第三块（`server/src/shared/mistDevelopmentStages.ts`）：面料开发可设 `DevelopmentValues.stages`（工序链，2–6 道，末道不能织造、工厂不重复）。`createRound` 收到 `stages` 时只给末道工厂建一个版本、分配字母和工厂任务，`MistRound.stages` 与 `MistVersion.stages`（含工厂名，供应商改名同步）记录整条链；没有 `stages` 仍为并行比样。`development.stage.handover` 登记前道交接（日期按北京业务日校验），`development.recordSample` 在前道交接未齐时拒绝；`updateDev` 显示「前道打样中」。改版、重新打样沿用工序链。试样通知单内容带 `stageChain`。草稿可存未填完的工序链，提交时完整校验。
+- 第四块：面料加工单 `stageTerms.intermediate=true` 为前道加工——审批不生成生产分支（`fulfillment.procurement.decide`），也不计入同条目履约数量；回交可直送下一道或入库。`MaterialDeliveryLink` 新增 `contractId`（接收方为前道加工单，此时无 `productionId`）；`deliveryContractId` 统一解析接收加工单，`hasMaterialAtFactory`、`fabricStageBalance`、物料接收待办与交接面板都按它取。`materialDeliveryTargets` 对面料工序来源（坯布、前道加工）列出本条目已接单的前道加工单（选项值 `contract:<id>`）和最后一道的生产分支，排除自身和已向本单交货的加工单；`fulfillment.materials.deliver/issue` 与 `procurement.receive` 用 `targetPurchaseId` 指向前道加工单。订单核算标「前道加工」。
+- 未做：损耗成本金额与超耗扣款、收货方结构化字段。受限范围账号从库存发料的跨范围白名单（`repository.ts` `crossTarget`）仍只认 `targetProductionId`，发给前道加工单会被拒（不放宽权限）；面料负责人本人范围内办理不受影响。设计稿 `docs/design/P1-1-fabric-staged-outsourcing.md`；测试 `server/src/shared/mistFabricStaged.test.ts`。
+
+## 当前 Mist 开发样品 QC 任务（P1-4 第一块）
+
+- `development.recordSample` 与 `development.version.addSampleForm` 入库实物后调用 `ensureDevelopmentQcTasks`（`mistFulfillment.ts`）：每件开发实物一条 `kind:'sample'`、`state:'pending'` 的 QC 任务，按 `sampleId` 去重；小版本和已处置版本（`fulfillmentQcSourceBlocker`）不建。手动 `fulfillment.qc.request` 同一实物会被“已有QC任务”拒绝。
+- `development.recordQc`（开发页直接录入）经 `recordDevelopmentQcOnTasks` 在该版本未结任务上追加报告、补认领人、按结论置 `reported` / `blocked`；任务已被他人认领时拒绝（CONFLICT），原状态不变。工作台报告仍沿原逻辑写 `version.qc`。
+- 开发案状态：有未认领任务时为「待 QC 认领」，否则「QC 待评审」；工作台的 `fulfillment.qc.*` 命令作用于版本来源任务时同步刷新开发案（`applyMistCommand`）。版本卡片 `versionTimelineStatus(version, state)` 同样区分「待 QC 认领 / QC 中」。
+- 尚未合并：旧数据库层 `server/src/development/developmentSampleQualityService.ts`（`sup31`）不在 Mist 运行入口内，未改动。
+
+## 当前 Mist 生产 QC 不合格处置（P1-4 第二块）
+
+- `server/src/shared/mistQcDisposition.ts`：`fulfillment.qc.dispose` 只对最新报告不通过、状态 `blocked` 的生产检验任务，由订单负责人登记；`FulfillmentQcTask.dispositions` 只追加。`rework` 记工厂与完成日并把任务 `due` 改为完成日，复验仍走原 `fulfillment.qc.report`；`concession` 必须有让步范围、客户书面同意依据和附件，按订单审批人（`orderReviewerIds`，`context.ts` 对这两条命令加载）建 `qcConcession` 审批，`fulfillment.qc.concession.decide` 批准后任务回到 `reported` 并记 `businessContinued`；`chargeback` 记工厂合同、金额与币种。
+- 生产门禁 `requireProductionQc`：当前报告为不通过但有已批准让步（`qcConcessionReleases`，限同一 reportId）时放行，并跳过逐码覆盖检查；新报告需重新决定。
+- 工厂扣款不直接生成应付：`payable.settlement.submit` 自动把 `openQcChargebacks` 追加为 `disputes`（带 `qcDispositionId`），结算撤回或退回后会重新出现在下一次结算。已最终结算的合同拒绝新扣款。
+- Agent 风险：`fulfillment.qc.dispose` 登记为高风险，`concession.decide` 按动词规则为高风险。
+
+## 当前 Mist QC 抽样、来料检验与巡检（P1-4 第三块）
+
+- `server/src/shared/mistQcInspection.ts`：成衣 AQL（ISO 2859-1 / GB/T 2828.1 一般水平 II、正常一次抽样，严重与轻微缺陷各自 AQL，致命零容忍）；面料四分制（ASTM D5430，分/100 平方码，逐卷与整批）及色差、缩率、色牢度。`fulfillment.qc.report` 可选带 `aql` / `fabricInspection`，服务端算判定并存 `outcome`；抽样拒收时结论不能报通过（`assertConclusionMatches`）。抽样记录可选，旧报告不受影响。
+- 来料检验：物料采购 `iqcRequired=true` 时，入我方仓库的批次全部锁定（`available:0`、`locked`），自动建 `kind:'incoming'` 任务；QC 报告后由有库存写权限的人 `fulfillment.qc.incoming.close`：通过则解锁可用，不通过则转为该次收货的拒收数量（`receipt.rejected`、`purchase.received` 回减），再走原退换流程。默认不开启，现有采购不变。
+- 巡检：`fulfillment.qc.patrol`（`qc:inspect`）由 QC 在已放行生产分支上自建 `kind:'patrol'` 任务并自动认领；巡检不替代正式生产检验，但不通过同样暂停该分支，并可走不合格处置。
+- Agent 风险：`fulfillment.qc.incoming.close` 高风险。
+
+## 当前 Mist 库存批次与仓储操作（P1-5）
+
+- 批次字段（`FulfillmentStock`）：`warehouseId`、`dyeLot`、`shade`、`rolls`（码单，合计须等于入库数量）、`reservations`、`sourceKind:'other'` + `otherReceipt`。`fulfillment.procurement.receive` 仅在 `destination:'warehouse'` 时接受仓库、缸号与码单（`receiptLot`）。
+- `server/src/shared/mistStockOperations.ts`：其他入库 `fulfillment.stock.receiveOther`；预留 / 释放 `fulfillment.stock.reserve|release`（`orders:write`）；调拨 `fulfillment.stock.transfer` → `transfer.receive`（`fulfillment.stockTransfers`，在途数量不在 `positions` 内，见 `stockInTransit`；整批到仓才改批次 `warehouseId`，未到齐前新仓位置名带仓库前缀）；盘点 `fulfillment.stock.count` → `count.decide`（`fulfillment.stockCounts`；有差异须由订单审批人批准，审批类型 `stockCount`，批准时账面已变则拒绝，写 `adjust` 流水带 `countId`）。
+- 可用量：`freeQuantity = available − 有效预留`。出库、调拨、预留按此校验；`consumeReservations` 让给本条目的发料 / 离港先使用本条目预留。
+- 离港自动出库：`fulfillment.shipments.depart` 调 `autoIssueForDeparture`，按条目对应生产分支的来源采购批次（非物料、非内部订单）先进先出写 `issue` 流水并带 `shipmentLink`；已手工关联本票的数量先扣除，其他条目的预留不动。没有我方仓库库存的出运不受影响。
+- 库龄与金额：`stockAgeDays`（北京业务日）、`stockUnitCost`（采购单价，加工合同不计；其他入库按填写成本）。界面仅对 `procurement:read` 显示金额。
+- 数据范围：`fulfillment.stockCounts` / `stockTransfers` 随所涉批次可见。Agent 风险：`stock.release`、`stock.count.decide` 按动词规则为高风险，其余为中风险。
+- 装箱箱号段 / 码单录入只在前端展开为逐箱行（`PackingRangeDialog`），`fulfillment.shipments.pack` 契约不变。
+
+## 当前 Mist 单据生成（P1-3）
+
+- `server/src/shared/mistDocumentTypes.ts`：我方单据 CI、PL、SO 订舱委托、SI 补料、DN 出货通知、SA 装船通知、BC 受益人证明、DFT 汇票、CD 报关单草稿、CDA 报关委托书；外部单据 BL、CO、INS、IC、OTHER 只归档原件。SA/BC/DFT 离港后仍可出具；离港门禁仍只看 CI/PL，作废 SO/SI 等不让出运退回准备。
+- `mistDocumentGeneration.ts` + `mistGeneratedDocument.ts` + `templates/generatedDocument.ts`：同一冻结快照结构和一个中英双语模板。`fulfillment.documents.generate`（`customs:write`）建 / 刷新草稿并挂生成文件（重新生成只替换上次生成的文件），CI/PL 仍走 `documents.issue` 的应收规则；`order.document.generate`（`orders:write`）只读批准快照出 PI / SC，内容未变拒绝重复；`market.lookbook.document`（`marketing:write`）只对已准备画册；`fulfillment.documents.bl` 登记提单号、放货方式、正本份数、补料、草稿核对与电放。
+- 仓储层 `GENERATING_COMMANDS` 先渲染、写私有文件、绑定 `generatedDocument` 产物，命令按同一快照指纹核对；不支持预演；客户端带内容一律拒绝。
+- 前端去智能邮箱：`runtime/composeIntent.ts` 只在本标签页内存交接收件人、主题、附件和关联，邮箱打开后建一次草稿，发送仍由用户在邮箱完成。
+- 报表 Excel：`downloadModuleXlsx`（懒加载 `xlsx`，公式样文本前置单引号）。
+
+## 当前 Mist 邮件与业务打通（P1-2）
+
+- `EmailLinkKind` 增加 supplier / purchase / quotation / rfq；`emailBusinessOwner`（提交资料的接收人）与 `emailLinkCustomerId`（写入客户动态与跟进记录）。提交资料同时写业务对象事件和所属客户事件；关联客户的邮件跟进写一条 `crm.followUps`（method=email，nextTaskId 指向跟进待办）。
+- `email.followUp` 改为 `ownerId`（本公司成员且可见该邮箱），旧 `owner` 文本不再作派单依据。
+- `email.bulk`（≤200 封：已读 / 未读 / 归档 / 删除 / 恢复 / 关联）、`email.purge`（只限已删除、未提交过资料的邮件，同时清掉无人引用的附件文件，高风险）、`email.account.remove`（须先断开，开通人办理，`removed` 后历史保留、禁止新草稿 / 凭据 / 同步，高风险）、`email.template.save`（`emails:admin`，`fillEmailTemplate` 按关联订单 / 报价 / 客户填 {客户}{订单号}{款号}{交期}{报价号}{出运号}）。
+- 业务页发信统一经 `runtime/composeIntent.ts` 打开智能邮箱草稿：客户、供应商、报价（附正式报价单）、询价函、画册、营销推广（线索密送）。发送仍由用户在邮箱确认。
+
+## 当前 Mist 定价、参考成本与市场参考（P1-8）
+
+- `platform.pricing.save`：来源为订单（`orderId`）或报价条目（`quotationId`+`lineId`）二选一；`currency` 默认 USD，报价来源必须等于报价币种；标准参数按订单类型或报价条目 `family`。`platform.pricing.apply`（`pricing:write`）把报价来源试算的单价四舍五入到两位写回草稿条目，归档原审批、`requiresApproval=true`。
+- `platform.bom.save`：锚点为订单（可含 `lineId`）、`productId` 或 `devId`+`versionId`，至少一个；`unit` 取订单条目或产品档案。数据范围：报价来源试算随报价可见，开发版本参考成本随开发案可见。报价分项核算只列同币种、同单位、同产品 / 版本（或未限定）的已确认参考成本，引用时逐项写入并在依据中注明参考成本编号。
+- 平台市场参考 `server/src/ai/marketQuotes.ts`：`MarketQuoteWorker` 每北京日 10 点后取一次（`BAMBOOK_MARKET_FETCH=0` 关闭），经 Exa MCP（`https://mcp.exa.ai/mcp`，JSON-RPC `web_fetch_exa` / `web_search_exa`，可选 `EXA_API_KEY`）。汇率只取中国银行外汇牌价现汇买入价（每 100 外币折 1 外币存），中行折算价仅对照；原料只取标明日期与“元/吨”成交价的现货页面（7 天内），否则记为缺失。结果存平台私有文件 `BAMBOOK_MARKET_DIR`（本地模式在数据目录 `market/`），`GET /api/mist/market/quotes` 供登录账号读取。只用于定价试算一键填入与参考展示，不写入月末汇率或任何账务。
+
 ## 当前 Mist 后勤交接显示
 
 - 客户交期是出运目标，不是后勤承接的开始日期。已分派、未完成且具有 `logistics:handle` 的出运交接事项在本人首页即时可见，原交期与任务事实不改写。

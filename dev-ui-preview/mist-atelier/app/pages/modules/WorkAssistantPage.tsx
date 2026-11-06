@@ -11,6 +11,7 @@ import { useMistSession } from '../../runtime/auth';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useNav } from '../../nav';
 import { useAssistantDelegation } from './useAssistantDelegation';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 // ── 桥接层 ─────────────────────────────────────────────────────────
 
@@ -86,7 +87,7 @@ function ProviderForm({ bridge, draft, setDraft, onSaved, onCancel, chatgpt, onC
     try { setModels(await call<string[]>(bridge, 'providers.models', { id: saved.id })); } catch (e) { setError(e instanceof Error ? e.message : '读取模型失败'); } finally { setBusy(false); }
   };
   return <>
-    {error && <Banner tone="bad" title={uiText("配置未保存")}>{uiText(error)}</Banner>}
+    {error && <FailureNotice title={"配置未保存"} detail={error} />}
     <FormGrid>
       <Field label={uiText("接入方式")} full><Select aria-label={uiText("接入方式")} value={draft.format} disabled={!!draft.id} options={(Object.keys(FORMAT_LABEL) as Format[]).map(f => ({ value: f, label: FORMAT_LABEL[f] }))} onChange={e => setDraft({ ...emptyDraft(e.target.value as Format) })} /></Field>
       <Field label={uiText("名称")} required><TextInput aria-label={uiText("名称")} value={draft.name} maxLength={60} onChange={e => set({ name: e.target.value })} /></Field>
@@ -135,7 +136,7 @@ function ChatgptLogin({ bridge, status, onChange }: { bridge: AssistantBridge; s
   return <Card>
     <CardHeader title={uiText("ChatGPT 账号")} sub={uiText("用你本人的 ChatGPT 订阅；令牌只保存在这台电脑。")} tools={status?.connected ? <Pill tone="ok">{uiText("已登录")}</Pill> : <Pill tone="neutral">{uiText("未登录")}</Pill>} />
     <div className="mist-card-body">
-      {error && <Banner tone="bad" title={uiText("登录未完成")}>{uiText(error)}</Banner>}
+      {error && <FailureNotice title={"登录未完成"} detail={error} />}
       {status?.connected && <KeyValue items={[{ label: '账号', value: status.email ?? '—' }, { label: '订阅', value: status.plan ?? '—' }, { label: '登录时间', value: status.connectedAt ? time(status.connectedAt) : '—' }]} />}
       {login?.state === 'pending' && <Banner tone="ai" title={uiText("在浏览器中完成登录")} actions={<Button icon={ExternalLink} onClick={() => window.open(login.verificationUrl, '_blank', 'noopener')}>{uiText("打开登录页")}</Button>}>{uiText("输入验证码 ")}<Mono>{login.userCode}</Mono>{uiText("，完成后这里会自动更新。验证码 15 分钟内有效。")}</Banner>}
       {login && login.state !== 'pending' && login.state !== 'connected' && <Banner tone="warn" title={uiText("登录没有完成")}>{login.message ?? '请重新登录'}</Banner>}
@@ -338,9 +339,9 @@ export function WorkAssistantPage({ tabs }: { tabs?: React.ReactNode }) {
     {uiText(header)}{tabs}
     {host?.state === 'failed' && <Banner tone="bad" title={uiText("工作助手已停止")} actions={<Button icon={RefreshCw} onClick={() => void call<HostStatus>(bridge, 'host.restart').then(setHost).catch(e => setError(e.message))}>{uiText("重新启动")}</Button>}>{uiText("多次异常退出（")}{host.reason ?? '未知原因'}{uiText("），已停止自动重启。")}</Banner>}
     {host?.state === 'restarting' && <Banner tone="warn" title={uiText("工作助手正在重启")}>{host.reason ?? ''}{uiText("。进行中的任务已停止，对话已保存。")}</Banner>}
-    {error && <Banner tone="bad" title={uiText("未完成")}>{uiText(error)}</Banner>}
+    {error && <FailureNotice title={"未完成"} detail={error} />}
     {!canChat ? <Banner tone="warn" title={uiText("无工作助手使用权限")}>{uiText("当前账号没有 ai:chat 权限；不会签发委托，也不能向模型发送任务。")}</Banner> :
-      <Banner tone={delegation.phase === 'connected' ? 'ai' : 'warn'} title={uiText(delegation.phase === 'connected' ? '业务读取已连接 · ' + (w.workspace?.name ?? '') : delegation.phase === 'connecting' ? '正在连接业务读取' : '业务读取未连接')} actions={<Button size="sm" disabled={!accountReady || !workspaceId || delegation.phase === 'connecting'} onClick={() => void delegation.renew()}>{uiText("重新连接")}</Button>}>
+      <Banner variant="status" tone={delegation.phase === 'connected' ? 'ai' : 'warn'} title={uiText(delegation.phase === 'connected' ? '业务读取已连接 · ' + (w.workspace?.name ?? '') : delegation.phase === 'connecting' ? '正在连接业务读取' : '业务读取未连接')} actions={<Button size="sm" disabled={!accountReady || !workspaceId || delegation.phase === 'connecting'} onClick={() => void delegation.renew()}>{uiText("重新连接")}</Button>}>
         {delegation.phase === 'connected' ? <>{uiText("可读：")}{uiText(delegation.readable.length ? delegation.readable.map(t => t.label).join('、') : '当前账号暂无首批可读对象')}{uiText("。仅限本公司，权限由服务端每次复核；")}{uiText(delegation.expiresAt ? time(delegation.expiresAt) + ' 到期，提前自动续签。' : '')}</> : delegation.error || (!workspaceId ? '请先选择可访问的公司。' : '由本人会话签发短期只读委托，业务写入、邮件与文档能力尚未开放。')}
       </Banner>}
     {accountReady && !providers.length ? <Card><div className="mist-card-body"><EmptyState title={uiText("先连接你的模型")} description={uiText("工作助手只用你本人的模型：ChatGPT 账号登录，或你自己的 OpenAI 兼容 API。凭据只保存在这台电脑。")} action={<div className="mist-row"><Button variant="primary" icon={LogIn} onClick={() => setSettings({ open: true, format: 'chatgpt-subscription' })}>{uiText("用 ChatGPT 登录")}</Button><Button icon={KeyRound} onClick={() => setSettings({ open: true, format: 'openai' })}>{uiText("添加 API 配置")}</Button></div>} /></div></Card> :
@@ -360,7 +361,7 @@ export function WorkAssistantPage({ tabs }: { tabs?: React.ReactNode }) {
             {live.text ? <BusinessText text={live.text} onOpen={openBusiness} /> : !live.confirms.length && <p className="mist-note">{uiText("正在处理…")}</p>}
           </div>}
           {live?.confirms.map(c => <Banner key={c.token} tone="warn" title={uiText('需要你确认：' + (RISK_LABEL[c.risk] ?? c.tool))} actions={<><Button variant="primary" onClick={() => void resolve(c, true)}>{uiText("确认执行")}</Button><Button onClick={() => void resolve(c, false)}>{uiText("不执行")}</Button></>}>{c.summary}</Banner>)}
-          {!messages.length && !live && <EmptyState title={uiText("告诉助手要做什么")} description={uiText("例如：查找某个订单，展开关联开发单，并附上原记录编号供我核对。业务写入、邮箱和文档能力尚未开放。")} compact />}
+          {!messages.length && !live && <EmptyState title={uiText("告诉助手要做什么")} description={uiText("例如：查找某个订单，展开关联开发单，并附上原记录编号。")} compact />}
         </div>
         <div className="mist-wa-composer">
           <TextArea aria-label={uiText("给工作助手的指令")} rows={3} maxLength={20000} value={input} disabled={!accountReady || !canChat} placeholder={uiText("输入指令，Ctrl+Enter 发送")} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void send(); } }} />

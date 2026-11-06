@@ -3,7 +3,7 @@ import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** 供应商结算：业务员按实际收货提交 → 财务复核确认并决定预付抵扣 → 发票到后关联结算登记票据。
  *  拒收不计结算；争议 / 未确认扣款单列，不自动抵减。抵扣建议按结算数量比例，最后一次结算扫尾；调整须写原因。 */
 import React from 'react';
-import { Banner, Button, Checkbox, Facts, Field, FormGrid, Mono, ObjectCell, Pill, Select, TextArea, TextInput, type Column, type Tone } from '../../../../components/mist';
+import { Banner, Button, Checkbox, Facts, Field, FormGrid, Mono, ObjectCell, Pill, Select, SignaturePad, TextArea, TextInput, type Column, type SignatureValue, type Tone } from '../../../../components/mist';
 import { type MistState } from '../../../../server/src/shared/mistWorkspace';
 import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
 import { receiptReturnedQuantity } from '../../../../server/src/shared/mistFulfillment';
@@ -45,10 +45,10 @@ export function SettlementDetail({ settlement: st, state, me, busy, canSettle, c
       ...(st.state === 'pending' ? [{ label: '建议预付抵扣', value: money(st.suggested, st.currency) + ` · 合同剩余可抵扣 ${money(st.available, st.currency)}` }] : []),
       ...(st.note ? [{ label: '结算说明', value: st.note }] : []),
     ]} />
-    {st.confirmation && <Banner tone="ok" title={uiText("财务已确认")}>{st.confirmation.actor} · {fmtDay(st.confirmation.at)}{uiText(st.confirmation.adjustReason ? `。抵扣调整原因：${st.confirmation.adjustReason}` : '')}{uiText(st.confirmation.note ? `。${st.confirmation.note}` : '')}</Banner>}
-    {st.returned && <Banner tone="bad" title={uiText("财务已退回")}>{st.returned.reason}（{st.returned.actor} · {fmtDay(st.returned.at)}{uiText("）。收货记录已释放，可修正后重新提交。")}</Banner>}
-    {st.cancelled && <Banner title={uiText("已撤回")}>{st.cancelled.reason}（{st.cancelled.actor} · {fmtDay(st.cancelled.at)}）</Banner>}
-    {st.reversed && <Banner title={uiText("已冲回")}>{st.reversed.reason}（{st.reversed.actor} · {fmtDay(st.reversed.at)}{uiText("）。原记录保留；收货记录和预付抵扣已释放。")}</Banner>}
+    {st.confirmation && <Banner variant="status" tone="ok" title={uiText("财务已确认")}>{st.confirmation.actor} · {fmtDay(st.confirmation.at)}{uiText(st.confirmation.adjustReason ? `。抵扣调整原因：${st.confirmation.adjustReason}` : '')}{uiText(st.confirmation.note ? `。${st.confirmation.note}` : '')}</Banner>}
+    {st.returned && <Banner variant="status" tone="bad" title={uiText("财务已退回")}>{st.returned.reason}（{st.returned.actor} · {fmtDay(st.returned.at)}{uiText("）。收货记录已释放，可修正后重新提交。")}</Banner>}
+    {st.cancelled && <Banner variant="status" tone="neutral" title={uiText("已撤回")}>{st.cancelled.reason}（{st.cancelled.actor} · {fmtDay(st.cancelled.at)}）</Banner>}
+    {st.reversed && <Banner variant="status" tone="neutral" title={uiText("已冲回")}>{st.reversed.reason}（{st.reversed.actor} · {fmtDay(st.reversed.at)}{uiText("）。原记录保留；收货记录和预付抵扣已释放。")}</Banner>}
     <ActionBar busy={busy} actions={[
       { label: '确认结算', onClick: onConfirm, reason: !canConfirm ? '需要核销权限（财务）' : own ? '不能复核本人提交的结算' : undefined, hidden: !canConfirm || st.state !== 'pending' },
       { label: '退回结算', onClick: () => onReason('return-settlement'), reason: !canConfirm ? '需要核销权限（财务）' : own ? '不能复核本人提交的结算' : undefined, hidden: !canConfirm || st.state !== 'pending' },
@@ -144,10 +144,10 @@ export function SettlementSubmitDialog({ open, state, initialPurchaseId, busy, c
 
 export function SettlementConfirmDialog({ settlement: st, busy, canConfirm, failure, onClose, execute, onDone }: {
   settlement: SettlementView | undefined; busy: boolean; canConfirm: boolean; failure: string; onClose: () => void;
-  execute: (command: PayablesCommand, done: (result: Record<string, unknown>) => void) => void; onDone: () => void;
+  execute: (command: PayablesCommand, done: (result: Record<string, unknown>) => void, signature?: { svg: string }) => void; onDone: () => void;
 }) {
-  const [applied, setApplied] = React.useState(''), [adjust, setAdjust] = React.useState(''), [note, setNote] = React.useState(''), [local, setLocal] = React.useState('');
-  React.useEffect(() => { if (st) { setApplied(String(st.suggested)); setAdjust(''); setNote(''); setLocal(''); } }, [st?.id]);
+  const [applied, setApplied] = React.useState(''), [adjust, setAdjust] = React.useState(''), [note, setNote] = React.useState(''), [local, setLocal] = React.useState(''), [signature, setSignature] = React.useState<SignatureValue | null>(null);
+  React.useEffect(() => { if (st) { setApplied(String(st.suggested)); setAdjust(''); setNote(''); setLocal(''); setSignature(null); } }, [st?.id]);
   if (!st) return null;
   const value = cents(applied || '0'), changed = value !== Math.round(st.suggested * 100);
   const submit = () => {
@@ -155,7 +155,8 @@ export function SettlementConfirmDialog({ settlement: st, busy, canConfirm, fail
     if (value > Math.round(st.available * 100)) return setLocal('预付抵扣超过合同剩余可抵扣预付。');
     if (value > Math.round(st.amount * 100)) return setLocal('预付抵扣不能超过结算金额。');
     if (changed && !adjust.trim()) return setLocal('抵扣额与建议不同，请写明调整原因。');
-    setLocal(''); execute({ type: 'payable.settlement.confirm', payload: { id: st.id, prepaymentApplied: value / 100, adjustReason: changed ? adjust : undefined, note } }, onDone);
+    if (!signature) return setLocal('请先手写签字。');
+    setLocal(''); execute({ type: 'payable.settlement.confirm', payload: { id: st.id, prepaymentApplied: value / 100, adjustReason: changed ? adjust : undefined, note } }, onDone, { svg: signature.svg });
   };
   const message = local || failure;
   return <Dialog open onClose={() => { if (!busy) onClose(); }} width={640} title={uiText("确认结算")} description={ui`${st.code} · ${st.purchaseCode}`}
@@ -166,6 +167,7 @@ export function SettlementConfirmDialog({ settlement: st, busy, canConfirm, fail
       <Field label={uiText("本次预付抵扣")} required><TextInput aria-label={uiText("本次预付抵扣")} type="number" min="0" step="0.01" value={applied} onChange={e => setApplied(e.target.value)} /></Field>
       {changed && <Field label={uiText("调整原因")} required><TextInput aria-label={uiText("调整原因")} value={adjust} onChange={e => setAdjust(e.target.value)} /></Field>}
       <Field label={uiText("复核意见")}><TextArea aria-label={uiText("复核意见")} rows={2} value={note} onChange={e => setNote(e.target.value)} /></Field>
+      <Field label={uiText("确认签字")} required><SignaturePad key={st.id} ariaLabel="确认签字" disabled={busy || !canConfirm} onChange={setSignature} /></Field>
     </div>
   </Dialog>;
 }

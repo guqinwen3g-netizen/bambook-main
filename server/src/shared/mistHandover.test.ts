@@ -1,12 +1,15 @@
 import {describe,it,expect} from 'vitest';
 import {applyMistCommand,createMistState,mistCommandPermission,type MistContext,type MistCommand,type MistState} from './mistWorkspace';
 import {customerHandovers,accountHandoverBlockers} from './mistHandover';
+import {accountOwnedObjects} from './mistAccounts';
+import {assertOrderApproved} from './mistOrderGovernance';
 
 function fixture(){
   let id=0;const ctx={id:()=>`ho-${++id}`,now:'2026-10-18T02:00:00Z',actorId:'demo-sales',actorName:'顾言',members:[{id:'demo-sales',name:'顾言',active:true,groups:['garment']},{id:'demo-buyer',name:'沈禾',active:true,groups:['garment']},{id:'demo-new',name:'林舟',active:true,groups:['garment']},{id:'gone',name:'已离职',active:false,groups:[]}]} as unknown as MistContext;
   let state=createMistState(ctx,'demo');
   const run=(payload:Record<string,unknown>)=>{const r=applyMistCommand(state,{type:'handover.customer',payload} as MistCommand,ctx);state=r.state;return r.result as {id:string};};
-  return {run,get state(){return state as MistState;}};
+  const command=(cmd:MistCommand)=>{const r=applyMistCommand(state,cmd,ctx);state=r.state;return r.result as {id:string};};
+  return {run,command,get state(){return state as MistState;}};
 }
 const order=(s:MistState,code:string)=>s.orders.find(o=>o.code===code)!;
 
@@ -19,8 +22,12 @@ describe('客户在手业务交接',()=>{
     expect(()=>f.run({...base,toUserId:'nobody'})).toThrow('须为本公司的成员账号');
     expect(()=>f.run({...base,reason:' '})).toThrow('交接原因');
     expect(()=>f.run({...base,orderIds:[order(f.state,'SO-G-2026-018').id]})).toThrow('不属于该客户');
-    const opp=f.state.crm.opportunities.find(o=>o.customerId==='customer-1')!;
-    const followUp=f.state.tasks.find(t=>!t.done&&t.kind==='crm-follow-up'&&t.assigneeIds.includes('demo-sales'))!;
+    // The shared demo seed no longer gives customer-1 an open opportunity; create this case's own via the real commands.
+    const oppId=f.command({type:'crm.opportunity.save',payload:{input:{customerId:'customer-1',ownerId:'demo-sales',title:'AW27 大衣与马甲补单',domain:'garment',amount:'75700.00',currency:'USD',expectedDate:'2026-11-07',note:'',devIds:[],quotationIds:[],orderIds:[]}}} as unknown as MistCommand).id;
+    f.command({type:'crm.followUp.save',payload:{customerId:'customer-1',method:'meeting',content:'确认补单意向',at:'2026-10-17T08:00:00Z',nextDate:'2026-10-21',link:{kind:'opportunity',id:oppId}}} as unknown as MistCommand);
+    const opp=f.state.crm.opportunities.find(o=>o.id===oppId)!;
+    const followUp=f.state.tasks.find(t=>!t.done&&t.kind==='crm-follow-up'&&t.target?.id==='customer-1')!;
+    expect(followUp).toBeDefined();
     f.run({...base,orderIds:[order(f.state,'SO-G-2026-017').id,order(f.state,'SO-G-2026-009').id],opportunityIds:[opp.id]});
     const s=f.state, c=s.customers.find(x=>x.id==='customer-1')!;
     expect(c).toMatchObject({ownerId:'demo-new',owner:'林舟'});
@@ -101,8 +108,47 @@ it('locks customer and whole-account handover throughout cancellation review wit
  o.governance.cancellation.status='rejected';expect(accountHandoverBlockers(f.state,o.ownerId)).not.toContain(`订单 ${o.code} 审批中，审批完成后再交接`);
 });
 
+it('only reassigns pending tasks of selected business and the customer relation, not other business carrying the same customerId',()=>{
+ const f=fixture(),customer=f.state.customers.find(row=>row.id==='customer-1')!,selected=order(f.state,'SO-G-2026-009'),other=order(f.state,'SO-G-2026-017');
+ const relation=f.state.market.relations.find(row=>row.customerId===customer.id)!;
+ const task=(id:string,target:NonNullable<MistState['tasks'][number]['target']>,done=false)=>({id,title:id,due:'2026-10-20',done,kind:'handover-test',target,assigneeIds:[customer.ownerId,'demo-new']});
+ f.state.tasks.push(task('selected',{view:'orders/detail',id:selected.id,customerId:customer.id}),task('unselected',{view:'orders/detail',id:other.id,customerId:customer.id}),task('relation',{view:'relations',id:relation.id}),task('done',{view:'crm',id:customer.id},true),task('customer-only',{view:'crm',customerId:customer.id}));
+ const before=structuredClone(f.state);
+ f.run({customerId:customer.id,toUserId:'demo-new',reason:'调岗',orderIds:[selected.id]});
+ for(const id of ['selected','relation','customer-only'])expect(f.state.tasks.find(row=>row.id===id)?.assigneeIds,id).toEqual(['demo-new']);
+ for(const id of ['unselected','done'])expect(f.state.tasks.find(row=>row.id===id),id).toEqual(before.tasks.find(row=>row.id===id));
+ expect(order(f.state,other.code)).toEqual(before.orders.find(row=>row.id===other.id));
+ expect(customerHandovers(f.state.customers.find(row=>row.id===customer.id)!)[0].tasks).toBe(3);
+});
+
+it.each(['foreign-company-user','gone'])('rejects invalid customer handover recipient %s without modifying any records',toUserId=>{
+ const f=fixture(),before=structuredClone(f.state);
+ expect(()=>f.run({customerId:'customer-1',toUserId,reason:'离职',orderIds:[order(f.state,'SO-G-2026-009').id]})).toThrow();
+ expect(f.state).toEqual(before);
+});
+
 it('moves selected old orders to the existing customer owner without changing commercial facts or unrelated tasks',()=>{
  const f=fixture(),customer=f.state.customers.find(row=>row.id==='customer-1')!,selected=order(f.state,'SO-G-2026-009'),other=order(f.state,'SO-G-2026-017');expect(selected.ownerId).not.toBe(customer.ownerId);
  f.state.tasks.push({id:'old-order-task',title:'核对原单',due:'2026-10-20',done:false,kind:'order',target:{view:'orders/detail',id:selected.id},assigneeIds:[selected.ownerId]},{id:'other-order-task',title:'另一原单',due:'2026-10-20',done:false,kind:'order',target:{view:'orders/detail',id:other.id},assigneeIds:['demo-sales']});const before=structuredClone(f.state),ownerId=customer.ownerId;
  f.run({customerId:customer.id,toUserId:ownerId,reason:'在手订单由现客户负责人接续',orderIds:[selected.id]});const after=order(f.state,selected.code);expect(after).toEqual({...before.orders.find(row=>row.id===selected.id),ownerId,owner:customer.owner});expect(f.state.customers.find(row=>row.id===customer.id)?.ownerId).toBe(ownerId);expect(order(f.state,other.code)).toEqual(before.orders.find(row=>row.id===other.id));expect(f.state.orderLines).toEqual(before.orderLines);expect(f.state.fulfillment).toEqual(before.fulfillment);expect(f.state.invoices).toEqual(before.invoices);expect(f.state.payments).toEqual(before.payments);expect(f.state.tasks.find(row=>row.id==='old-order-task')?.assigneeIds).toEqual([ownerId]);expect(f.state.tasks.find(row=>row.id==='other-order-task')).toEqual(before.tasks.find(row=>row.id==='other-order-task'));expect(f.state.events.some(row=>row.text.startsWith('在手业务交接给 '+customer.owner))).toBe(true);
+});
+
+it('hands the internal fabric receiver over with the account so the fabric can still be issued', () => {
+  let id = 0;
+  const ctx = { id: () => `ir-${++id}`, now: '2026-10-18T02:00:00Z', actorId: 'owner', actorName: '所有者', members: [{ id: 'demo-new', name: '林舟', active: true, groups: ['garment', 'fabric'] }] } as unknown as MistContext;
+  let state = createMistState(ctx, 'demo');
+  const supplied = state.orders.find(o => o.governance?.contract.internalSupply);
+  expect(supplied).toBeTruthy();
+  const fromId = supplied!.governance!.contract.internalSupply!.receiverId;
+  expect(supplied!.governance!.approvedSnapshot).toBeTruthy();
+  for (const o of state.orders) if (o.governance && o.ownerId === fromId && o.governance.status === 'pending') o.governance.status = 'approved' as any;
+  expect(accountOwnedObjects(state, fromId).some(o => o.kind === 'internalReceiver' && o.id === supplied!.id)).toBe(true);
+  state = applyMistCommand(state, { type: 'handover.account', payload: { fromUserId: fromId, toUserId: 'demo-new', reason: '离职交接' } } as MistCommand, ctx).state as MistState;
+  const after = state.orders.find(o => o.id === supplied!.id)!;
+  expect(after.governance!.contract.internalSupply!.receiverId).toBe('demo-new');
+  expect(after.governance!.contract.receiver).toBe('成衣 / 林舟');
+  expect(accountOwnedObjects(state, fromId).some(o => o.kind === 'internalReceiver')).toBe(false);
+  // Still approved for fulfilment: the approved snapshot carries the same receiver.
+  expect(after.governance!.approvedSnapshot!.contract.internalSupply!.receiverId).toBe('demo-new');
+  expect(() => assertOrderApproved(state, after.id)).not.toThrow();
 });

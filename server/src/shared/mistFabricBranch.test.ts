@@ -7,7 +7,7 @@ function fixture(domain:'fabric'|'garment'='fabric', twoColors=false){
  state.customers.push({id:'customer',name:'测试客户',code:'C',country:'',city:'',industry:'',owner:'sales',grade:'',currency:'EUR',terms:'',incoterm:'',categories:'',creditLimit:0,since:''});
  for(const id of ['factory-a','factory-b'])state.market.suppliers.push({id,code:id,name:id,type:'工厂',country:'',address:'测试现场',capabilities:'加工',capacity:100,capacityUnit:domain==='fabric'?'码':'件',leadDays:5,status:'active',blockReason:'',contacts:[],fileIds:[],note:'',createdAt:context.now,updatedAt:context.now});
  state.files.push({id:'contract',name:'test.pdf',mimeType:'application/pdf',size:1,storageKey:'test/contract',createdAt:context.now});
- const orderId=run({type:'order.create',payload:{type:domain,customerId:'customer',season:'AW',currency:'EUR',due:'2026-11-01',ownerId:'sales',governance:{kind:'external',poNumber:'TEST-PO',confirmationFileIds:['contract'],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:0,paymentNote:'测试付款',incoterm:'FOB',deliveryPlace:'上海'},lines:[{...(domain==='garment'?{fulfillmentMode:'cmt' as const,cmtIncludedItems:[]}:{}),name:'测试产品',style:'TEST',qty:domain==='fabric'?100.5:100,unit:domain==='fabric'?'码':'件',price:2,img:'clay',...(twoColors?{breakdown:{kind:'fabric' as const,composition:'羊毛',width:148,weight:300,rows:[{color:'Navy',quantity:60.5},{color:'Stone',quantity:40}]}}:{})}]}}).id!;
+ const orderId=run({type:'order.create',payload:{type:domain,customerId:'customer',season:'AW',currency:'EUR',due:'2026-11-01',ownerId:'sales',governance:{kind:'external',poNumber:'TEST-PO',confirmationFileIds:['contract'],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:0,preShipmentPercent:0,paymentNote:'测试付款',incoterm:'FOB',deliveryPlace:'上海'},lines:[{...(domain==='garment'?{fulfillmentMode:'cmt' as const,cmtIncludedItems:[]}:{}),name:'测试产品',style:'TEST',qty:domain==='fabric'?100.5:100,unit:domain==='fabric'?'码':'件',price:2,img:'clay',...(twoColors?{breakdown:{kind:'fabric' as const,composition:'羊毛',width:148,weight:300,rows:[{color:'Navy',quantity:60.5},{color:'Stone',quantity:40}]}}:{})}]}}).id!;
  run({type:'order.governance.submit',payload:{orderId}});run({type:'order.governance.decide',payload:{id:orderId,decision:'approved',note:'测试批准'}},{...context,actorId:'reviewer'});
  function pending(quantity=100.5,unit=domain==='fabric'?'码':'件',supplierId='factory-a',kind:'material'|'processing'|'finished'='processing'){
  const id=run({type:'fulfillment.procurement.save',payload:{orderId,lineId:state.orderLines[0].id,kind,...(kind==='material'?{materialKind:'other' as const}:{}),supplierId,supplier:'客户端不可作真源',description:'测试供给',quantity,unit,price:1,currency:'EUR',due:'2026-10-30',terms:'测试约定',destination:'测试现场',note:'',fileIds:[]}}).id!;
@@ -126,5 +126,18 @@ describe('post-receipt rejection',()=>{
   t.f.state.fulfillment.qcTasks.push({id:'qc',kind:'production',source:{kind:'orderLine',orderId:t.f.orderId,lineId:branch.lineId,productionId:branch.id},state:'reported'} as any);
   t.reject();expect(t.f.state.fulfillment.productionFacts[0].revision).toBe(revision+1);expect(t.f.state.fulfillment.qcTasks[0].state).toBe('working');
   t.f.state.fulfillment.qcTasks[0].state='blocked';t.reject(1);expect(t.f.state.fulfillment.qcTasks[0].state).toBe('blocked');
+ });
+});
+
+describe('sup11 supplier confirms a different due date',()=>{
+ it('requires a reason, keeps the original due and reminds the order owner when it slips past the order',()=>{
+  const f=fixture('fabric',true),purchaseId=f.pending();f.approve(purchaseId);
+  f.run({type:'fulfillment.procurement.send',payload:{id:purchaseId,at:f.context.now,evidence:'测试发出',fileIds:[]}});
+  const po=()=>f.state.fulfillment.purchases.find(p=>p.id===purchaseId)!,original=po().due,order=f.state.orders.find(o=>o.id===f.orderId)!;
+  const later=new Date(Date.parse(order.due+'T00:00:00Z')+3*86400000).toISOString().slice(0,10);
+  expect(()=>f.run({type:'fulfillment.procurement.confirm',payload:{id:purchaseId,at:f.context.now,confirmedDue:later,evidence:'回签',fileIds:[]}})).toThrow('交期变更原因');
+  f.run({type:'fulfillment.procurement.confirm',payload:{id:purchaseId,at:f.context.now,confirmedDue:later,evidence:'回签',fileIds:[],dueChangeReason:'染厂排期满'}});
+  expect(po()).toMatchObject({due:later,dueChanges:[{from:original,to:later,reason:'染厂排期满'}]});
+  expect(f.state.tasks.find(t=>t.kind==='purchase-late:'+purchaseId)).toMatchObject({done:false,target:{view:'orders/detail',id:f.orderId}});
  });
 });

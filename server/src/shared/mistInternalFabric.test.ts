@@ -17,7 +17,7 @@ function fixture(sourceQty = 100.3) {
   state.files.push({ id: 'po', name: 'PO.pdf', mimeType: 'application/pdf', size: 4, storageKey: 'synthetic/po', createdAt: context.now });
   for (const id of ['factory', 'alternate']) state.market.suppliers.push({ id, code: id, name: id, type: '成衣加工', country: 'CN', address: '工厂', capabilities: '加工', capacity: 100, capacityUnit: '件', leadDays: 10, status: 'active', blockReason: '', contacts: [], fileIds: [], note: '', createdAt: context.now, updatedAt: context.now });
   const run = (command: MistCommand, actor = context) => { const result = applyMistCommand(state, command, actor); state = result.state; return result.result; };
-  const contract = (internal = false): OrderGovernanceInput => ({ ...createOrderGovernance(context).contract, kind: internal ? 'internal' : 'external', poNumber: internal ? '' : 'PO-1', confirmationFileIds: internal ? [] : ['po'], internalPurpose: internal ? '供成衣生产' : '', receiver: internal ? '客户端显示名不可信' : '', paymentNote: '无定金，履约结算', depositPercent: 0, incoterm: 'FOB', deliveryPlace: '上海', ...(internal ? { internalSupply: { group: 'garment', receiverId: 'garment' } } : {}) });
+  const contract = (internal = false): OrderGovernanceInput => ({ ...createOrderGovernance(context).contract, kind: internal ? 'internal' : 'external', poNumber: internal ? '' : 'PO-1', confirmationFileIds: internal ? [] : ['po'], internalPurpose: internal ? '供成衣生产' : '', receiver: internal ? '客户端显示名不可信' : '', paymentNote: '无定金，履约结算', depositPercent: 0, incoterm: 'FOB', deliveryPlace: '上海', ...(internal ? {} : { preShipmentPercent: 0 }), ...(internal ? { internalSupply: { group: 'garment', receiverId: 'garment' } } : {}) });
   const create = (type: 'garment' | 'fabric', mode: GarmentFulfillmentMode | undefined = 'full_package', qty = type === 'fabric' ? sourceQty : 10, actor = type === 'fabric' ? fabric : context, input = contract(type === 'fabric')) => {
     const orderId = run({ type: 'order.create', payload: { type, customerId: type === 'fabric' ? '' : 'customer', season: 'AW', currency: 'USD', due: '2026-11-30', ownerId: actor.actorId!, governance: input, lines: [{ name: type === 'fabric' ? '斜纹面料' : '衬衫', style: type === 'fabric' ? 'F1' : 'G1', img: 'clay', qty, unit: type === 'fabric' ? '米' : '件', price: 10, ...(type === 'garment' && mode ? { fulfillmentMode: mode, cmtIncludedItems: [] } : {}) }] } }, actor).orderId!;
     return { orderId, lineId: state.orderLines.find(line => line.orderId === orderId)!.id };
@@ -53,6 +53,21 @@ function fixture(sourceQty = 100.3) {
 }
 
 describe('current Mist internal fabric contract', () => {
+  it('accepts decimal internal markups without binary floating-point rejection and rejects invalid precision or bounds', () => {
+    const f = fixture();
+    for (const markupPercent of [0, 10.12, 14.57, 100]) {
+      const input = f.contract(true); input.internalSupply!.markupPercent = markupPercent;
+      const { orderId } = f.create('fabric', undefined, 10, f.fabric, input);
+      expect(f.state.orders.find(o => o.id === orderId)!.governance!.contract.internalSupply!.markupPercent).toBe(markupPercent);
+    }
+    for (const markupPercent of [-1, 100.01, 10.123, NaN, Infinity]) {
+      const input = f.contract(true); input.internalSupply!.markupPercent = markupPercent;
+      const before = structuredClone(f.state);
+      expect(() => f.create('fabric', undefined, 10, f.fabric, input)).toThrow('内部加成率');
+      expect(f.state).toEqual(before);
+    }
+  });
+
   it('uses inventory handover rather than export shipments or CI for internal supply',()=>{
     const f=fixture(),before=structuredClone(f.state);
     expect(()=>f.run({type:'fulfillment.shipments.save',payload:{consignee:'Production',mode:'sea',portOfLoading:'Warehouse',portOfDischarge:'Factory',incoterm:'Internal',plannedDate:'2026-10-24',booking:'',lines:[{...f.source,quantity:1,factoryConfirmedAt:'2026-10-24'}],note:'',fileIds:[]}})).toThrow('内部订单请登记库存交接');
@@ -217,4 +232,14 @@ it('keeps supplier full-package purchases separate from self-supplied material a
  expect(()=>f.allocate()).toThrow('全包成品采购');
  const g=fixture();g.purchase('processing');expect(()=>g.purchase('finished')).toThrow('混用');
  const h=fixture();h.allocate();expect(()=>h.purchase('finished')).toThrow('内部供料');
+});
+
+it('CMT with internal main fabric saves only processing, never a duplicate fabric procurement',()=>{
+ const f=fixture();f.revise(f.target,{fulfillmentMode:'cmt',cmtIncludedItems:[]});f.approve(f.target.orderId);f.allocate();
+ const id=f.purchase('processing');
+ expect(f.state.fulfillment.purchases.find(p=>p.id===id)).toMatchObject({kind:'processing',price:2,currency:'CNY'});
+ const before=structuredClone(f.state);
+ expect(()=>f.purchase('material','fabric')).toThrow('成衣面料须由面料组供给');
+ expect(()=>f.purchase('material','trims')).toThrow('纯 CMT 不另行采购物料');
+ expect(f.state).toEqual(before);
 });

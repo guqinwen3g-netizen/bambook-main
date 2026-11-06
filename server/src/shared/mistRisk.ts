@@ -1,3 +1,4 @@
+import {notifyMist} from './mistNotifications';
 /**
  * 风险管理与合规（CAP-risks-01/02 · G69）。
  * - 预警（signal）只从真实记录推出：逾期应收、往来冻结、供应商认证 / 暂停、QC 不通过、生产逾期或风险说明。
@@ -11,7 +12,7 @@
 import { MistCommandError, isActiveMistInvoice, type MistContext, type MistState } from './mistWorkspace';
 import { supplierStatusOn } from './mistSupplierStatus';
 import { mistInvoiceCustomerName } from './mistOpeningBalance';
-import type { MistReviewTask } from './mistReview';
+import { reviewDecision, type MistReviewTask } from './mistReview';
 
 export type RiskType = 'credit' | 'fx' | 'compliance' | 'quality' | 'delivery' | 'other';
 export type RiskSourceKind = 'order' | 'invoice' | 'customer' | 'supplier' | 'production' | 'relation';
@@ -27,6 +28,8 @@ export type RiskEscalation = {
 };
 export type RiskRecord = {
   id: string; orderId: string; title: string; level: 'info' | 'warning' | 'critical'; basis: string; owner: string; state: RiskState; resolution: string; createdAt: string;
+  /** 负责人本人登记或接手时绑定；自由填写的他人姓名不推断账号。 */
+  ownerId?: string;
   type?: RiskType; source?: { kind: RiskSourceKind; id: string; label: string }; signalKey?: string; createdBy?: string;
   acknowledgedAt?: string; plan?: string; planDue?: string; escalations?: RiskEscalation[]; closedAt?: string; closedBy?: string; updatedAt?: string;
   /** 关闭方式：经审批关闭 / 豁免；直接关闭的低风险与早期记录不写。 */
@@ -109,6 +112,17 @@ export function riskSignals(state: MistState | null, day: string): RiskSignal[] 
     const late = days(i.due, day);
     out.push({ key: 'invoice-overdue:' + i.id, type: 'credit', level: late > 30 ? 'critical' : 'warning', title: `${mistInvoiceCustomerName(state, i)} 应收逾期 ${late} 天`, basis: `${i.code} 到期 ${i.due}，未收 ${i.currency} ${i.open.toFixed(2)}（原币，未换算）。`, source: { kind: 'invoice', id: i.id, label: i.code + ' · ' + i.customer }, orderId: i.orderId, since: i.due });
   }
+  // fin40：合规筛查到期未复查、或结论命中 / 待复核时进预警。
+  for (const r of state.market?.relations || []) {
+    if (r.status === 'archived') continue;
+    const latest = new Map<string, NonNullable<typeof r.screenings>[number]>();
+    for (const s of r.screenings || []) { const prev = latest.get(s.kind); if (!prev || s.screenedOn >= prev.screenedOn) latest.set(s.kind, s); }
+    for (const s of latest.values()) {
+      const label = ({ sanctions: '制裁名单', export_control: '出口管制', annual: '年度合规检查', other: '合规筛查' } as Record<string, string>)[s.kind];
+      if (s.result !== 'clear') out.push({ key: `screening-${s.result}:${r.id}:${s.kind}`, type: 'compliance', level: s.result === 'hit' ? 'critical' : 'warning', title: `${r.name} ${label}${s.result === 'hit' ? '命中' : '待复核'}`, basis: `${s.screenedOn} 筛查：${s.basis}`, source: { kind: 'relation', id: r.id, label: r.name }, orderId: '', since: s.screenedOn });
+      else if (s.nextReview <= day) out.push({ key: `screening-due:${r.id}:${s.kind}`, type: 'compliance', level: 'warning', title: `${r.name} ${label}到期复查`, basis: `上次 ${s.screenedOn} 筛查未命中，复查日 ${s.nextReview}。`, source: { kind: 'relation', id: r.id, label: r.name }, orderId: '', since: s.nextReview });
+    }
+  }
   for (const r of state.market?.relations || []) {
     if (!r.hold || r.status === 'archived') continue;
     out.push({ key: 'relation-hold:' + r.id, type: 'credit', level: 'warning', title: `${r.name} 往来已冻结`, basis: `冻结原因：${r.hold.reason}（${r.hold.actor} · ${riskBusinessDay(r.hold.at)}）。新报价、订单与采购会被拦截，已有业务需逐项确认。`, source: { kind: 'relation', id: r.id, label: r.name }, orderId: '', since: riskBusinessDay(r.hold.at) });
@@ -176,17 +190,18 @@ export type RiskCommand =
   | { type: 'platform.risk.decide'; payload: { id: string; escalationId: string; decision: 'approved' | 'rejected'; note: string } };
 
 /**
- * 入口门槛：答复只经统一审批中心（审批人需 risk:write，按冻结的部门主管核验），直接命令须 risk:admin 作为兜底门槛；
+ * 入口门槛：答复与统一审批中心同一门槛（RISK_REVIEW_PERMISSION），命令内再只认冻结且此刻仍有效的部门主管、不能自审；
+ * 本人在审批页办理、或确认 Agent 提议后经命令办理，校验完全一致。
  * 其余命令以风险读权限进入，再在命令内按来源负责人与服务端重建的岗位权限核验处理权。
  */
-export function riskCommandPermission(command: RiskCommand) { return command.type === 'platform.risk.decide' ? 'risk:admin' : 'risk:read'; }
 export const RISK_REVIEW_PERMISSION = 'risk:write';
+export function riskCommandPermission(command: RiskCommand) { return command.type === 'platform.risk.decide' ? RISK_REVIEW_PERMISSION : 'risk:read'; }
 
 /** 统一审批：只给提交时冻结的申请快照；撤回的申请不再出现。 */
 export function getRiskReviews(root: MistState): MistReviewTask[] {
   return (root.platform?.risks || []).flatMap(r => (r.escalations || []).filter(e => isReviewedEscalation(e) && e.decision !== 'withdrawn').map(e => ({
     id: 'risk:' + e.id, kind: 'risk' as const, entityId: e.id, title: `风险${RISK_ACTION_LABEL[e.action || 'authorize']}审批 · ${r.title}`,
-    requesterId: e.requesterId!, reviewerIds: [...e.reviewerIds!], status: e.decision as 'pending' | 'approved' | 'rejected', submittedAt: e.requestedAt,
+    requesterId: e.requesterId!, reviewerIds: [...e.reviewerIds!], status: e.decision as 'pending' | 'approved' | 'rejected', submittedAt: e.requestedAt, decision: reviewDecision(e.decidedBy, e.decidedAt, e.decisionNote),
     requiredPermission: RISK_REVIEW_PERMISSION, target: { view: 'risks', id: r.id }, details: (e.snapshot || []).map(d => ({ ...d })),
   })));
 }
@@ -213,7 +228,7 @@ export function applyRiskCommand(root: MistState, risks: RiskRecord[], command: 
         if (live && (live.source.kind !== kind || live.source.id !== sourceId)) fail('预警来源与登记来源不一致，请从预警重新登记', 'CONFLICT');
         if (live && LEVEL_RANK[level as RiskRecord['level']] > LEVEL_RANK[live.level]) fail(`风险等级不能低于预警等级（${RISK_LEVEL_LABEL[live.level]}）`);
       }
-      const row: RiskRecord = { id: c.id(), orderId, title: text(v.title, '风险标题', true, 200), basis: text(v.basis, '风险依据'), owner, level, state: 'Open', resolution: '', createdAt: c.now, type, source: src, signalKey, createdBy: c.actorName, escalations: [], updatedAt: c.now };
+      const row: RiskRecord = { id: c.id(), orderId, title: text(v.title, '风险标题', true, 200), basis: text(v.basis, '风险依据'), owner, ownerId: owner === c.actorName ? c.actorId : undefined, level, state: 'Open', resolution: '', createdAt: c.now, type, source: src, signalKey, createdBy: c.actorName, escalations: [], updatedAt: c.now };
       risks.unshift(row); emit(root, c, row.id, `登记风险 ${row.title} · 负责人 ${row.owner}`); return { id: row.id };
     }
     case 'platform.risk.transition': {
@@ -224,7 +239,7 @@ export function applyRiskCommand(root: MistState, risks: RiskRecord[], command: 
       if (v.state === 'Acknowledged') {
         if (row.state !== 'Open') fail('风险已被接手', 'CONFLICT');
         const note = text(v.resolution, '接手说明', false);
-        row.state = 'Acknowledged'; row.acknowledgedAt = c.now; if (row.owner !== c.actorName) { emit(root, c, row.id, `负责人由 ${row.owner} 变更为 ${c.actorName}`); row.owner = c.actorName; }
+        row.state = 'Acknowledged'; row.acknowledgedAt = c.now; row.ownerId = c.actorId; if (row.owner !== c.actorName) { emit(root, c, row.id, `负责人由 ${row.owner} 变更为 ${c.actorName}`); row.owner = c.actorName; }
         row.updatedAt = c.now; emit(root, c, row.id, '接手风险' + (note ? '：' + note : '')); return { id: row.id };
       }
       if (row.state === 'Open') fail('请先确认接手风险，再记录关闭依据');
@@ -288,7 +303,7 @@ export function applyRiskCommand(root: MistState, risks: RiskRecord[], command: 
       if (approved && action === 'release') row.release = { escalationId: e!.id, approvedBy: c.actorName, at: c.now, note };
       for (const t of root.tasks) if (t.kind === 'risk-escalation:' + e!.id) t.done = true;
       const label = `${RISK_ACTION_LABEL[action]}申请${approved ? '已批准' : '已驳回，继续按原规则处理'}`;
-      root.notifications.unshift({ id: c.id(), title: `${row.title} · ${label}`, detail: `${c.actorName}：${note}`, at: c.now, readAt: null, target: { view: 'risks', id: row.id }, category: 'general' });
+      notifyMist(root,c,{ title: `${row.title} · ${label}`, detail: `${c.actorName}：${note}`, target: { view: 'risks', id: row.id }, category: 'general' },[e!.requesterId]);
       const text2 = `${approved ? '批准' : '驳回'}${RISK_ACTION_LABEL[action]}申请${approved && row.state === 'Resolved' ? '（风险已' + (action === 'waive' ? '豁免关闭' : '关闭') + '）' : approved && action === 'release' ? '（带风险放行，风险继续跟进）' : ''}：${note}`;
       emit(root, c, row.id, text2); return { id: row.id };
     }

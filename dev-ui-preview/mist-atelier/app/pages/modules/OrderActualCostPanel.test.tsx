@@ -82,4 +82,41 @@ it('opens the order it was sent for',()=>{
   expect(document.querySelector(`[data-order-cost-detail="${order.id}"]`)).not.toBeNull();
 });
 
-it('shows only visible expense shares when full cost basis is unavailable',()=>{state.partialExpenses=[{id:'e',code:'EX-P',category:'freight',date:'2026-10-18',currency:'USD',shares:[{orderId:'o',orderCode:'SO-OWN',basisValue:1,amount:40}],hiddenCount:1,voided:false}];act(()=>root.render(<MistRoot><ToastProvider><OrderActualCostPanel state={state} asOf="2026-10-18" canWrite={false} busy={false} run={run} materialCostBasis={null}/></ToastProvider></MistRoot>));const list=getByRole(host,'list',{name:'部分可见费用'});expect(list.textContent).toContain('SO-OWN');expect(list.textContent).toContain('40.00');expect(list.textContent).toContain('另有 1 笔其他范围业务');expect(list.textContent).not.toContain('100.00');});
+it('shows only visible expense shares when full cost basis is unavailable',()=>{state.partialExpenses=[{id:'e',code:'EX-P',category:'freight',date:'2026-10-18',currency:'USD',shares:[{orderId:'o',orderCode:'SO-OWN',basisValue:1,amount:40}],hiddenCount:1,voided:false}];act(()=>root.render(<MistRoot><ToastProvider><OrderActualCostPanel state={state} asOf="2026-10-18" canWrite={false} busy={false} run={run} materialCostBasis={null}/></ToastProvider></MistRoot>));const list=getByRole(host,'list',{name:'部分可见费用'});expect(list.textContent).toContain('SO-OWN');expect(list.textContent).toContain('40.00');expect(list.textContent).toContain('另含其他范围业务');expect(list.textContent).not.toContain('100.00');});
+it('shows an internal order as cost only and keeps it out of the business revenue and margin totals',async()=>{
+  render();const external=getStatValue();expect(external).toContain('实际毛利');
+  state=structuredClone(state);
+  state.orders.push({id:'int-order',code:'INT-2026-0001',customer:'成衣组',currency:'CNY',amount:500,state:'备料',governance:{status:'approved',contract:{kind:'internal'}}} as any);
+  (state as any).orderCosts={expenses:[...((state as any).orderCosts?.expenses||[]),{id:'int-exp',code:'FY-INT',category:'trucking',currency:'CNY',amount:134,shares:[{orderId:'int-order',orderCode:'INT-2026-0001',basisValue:1,amount:134}],scope:'orders',basis:'manual',vendor:'内部'}]};
+  act(()=>root.unmount());root=createRoot(host);render();
+  const row=[...getByRole(host,'table',{name:'订单实际核算'}).querySelectorAll('[role="row"]')].find(r=>r.textContent?.includes('INT-2026-0001'))!;
+  expect(row.textContent).toContain('内部订单');expect(row.textContent).toContain('134.00');expect(row.textContent).not.toContain('-134');
+  const internalCount=state.orders.filter(o=>(o as any).governance?.contract?.kind==='internal'&&(!o.governance||o.governance.status==='approved')).length;
+  expect(internalCount).toBeGreaterThan(1);expect(host.textContent).toContain(`内部订单成本 · ${internalCount} 单`);
+  expect(getStatValue()).toBe(external);
+  await click(row);
+  const detail=document.querySelector('[data-order-cost-detail="int-order"]') as HTMLElement;
+  expect(queryByRole(detail,'table',{name:'收入'})).toBeNull();expect(detail.textContent).not.toContain('出口退税');expect(detail.textContent).not.toContain('毛利');expect(detail.textContent).toContain('实际成本');
+  function getStatValue(){return [...host.querySelectorAll('.mist-stat')].find(n=>n.textContent?.includes('实际毛利'))?.textContent;}
+});
+
+it('hides the export rebate and the rebate-inclusive margin when the rebate amounts are masked or not readable',async()=>{
+  let n=0;const c={...ctx,id:()=>'rbm-'+(++n)};
+  const customs=state.fulfillment.customs.find(x=>state.fulfillment.shipments.find(s=>s.id===x.shipmentId)?.state==='departed')!;
+  const {rebateCandidateBills}=await import('../../../../../server/src/shared/mistExportRebate');
+  state=applyMistCommand(state,{type:'rebate.claim.file',payload:{customsId:customs.id,billIds:rebateCandidateBills(state,customs).map(b=>b.id),filedAt:'2026-10-16',batchRef:'B-1'}} as MistCommand,c).state;
+  render();const rebateText=()=>{const table=getByRole(host,'table',{name:'订单实际核算'}),headers=[...table.querySelectorAll('[role="columnheader"]')].map(h=>h.textContent),row=[...table.querySelectorAll('[role="row"]')].find(r=>r.textContent?.includes('SO-G-2026-017'))!;return row.querySelectorAll('[role="cell"],[role="gridcell"]')[headers.indexOf('退税')]!.textContent!;};
+  expect(rebateText()).toBe('26,000.00');
+  // 服务端按 sensitive:tax_base 掩码后的投影：金额为 0 并标 taxMasked
+  state=structuredClone(state);state.exportRebate!.claims=state.exportRebate!.claims.map(x=>({...x,taxable:0,expected:0,taxMasked:true,lines:x.lines.map(l=>({...l,taxable:0,rebate:0}))}));
+  act(()=>root.unmount());root=createRoot(host);render();
+  expect(rebateText()).toContain('已隐藏');expect(rebateText()).not.toContain('26,000.00');
+  expect(host.textContent).toContain('实际毛利（不含退税）');expect(host.textContent).not.toContain('实际毛利 · 含退税');
+  const row=[...getByRole(host,'table',{name:'订单实际核算'}).querySelectorAll('[role="row"]')].find(r=>r.textContent?.includes('SO-G-2026-017'))!;await click(row);
+  const detail=document.querySelector('[data-order-cost-detail]') as HTMLElement;
+  expect(detail.textContent).toContain('已隐藏');expect(detail.textContent).not.toMatch(/应退 [\d,]+/);
+  // 整段退税不可读（无 tax:read）
+  act(()=>root.unmount());root=createRoot(host);
+  act(()=>root.render(<MistRoot><ToastProvider><OrderActualCostPanel state={state} asOf="2026-10-18" canWrite={false} busy={false} run={run} rebate="denied"/></ToastProvider></MistRoot>));
+  expect(rebateText()).toContain('无权查看');
+});

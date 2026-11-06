@@ -53,6 +53,18 @@ it('forces a password change after an admin reset and reloads the session once c
   await act(async () => button('退出登录').click());
   expect(session.logout).toHaveBeenCalled();
 });
+it('explains a first-login password change differently from an administrator reset', async () => {
+  session.user = { email: 'a@x.test', mustChangePassword: true, passwordChangeReason: 'initial' };
+  await act(async () => root.render(<ToastProvider><ForcedPasswordChangePage /></ToastProvider>));
+  expect(document.body.textContent).toContain('首次登录');
+  expect(document.body.textContent).toContain('初始密码');
+  expect(document.body.textContent).not.toContain('管理员为你重置了密码');
+  session.user = { email: 'a@x.test', mustChangePassword: true, passwordChangeReason: 'reset' };
+  await act(async () => root.render(<ToastProvider><ForcedPasswordChangePage key="reset" /></ToastProvider>));
+  expect(document.body.textContent).toContain('管理员为你重置了密码');
+  expect(document.body.textContent).toContain('临时密码');
+  session.user = { email: 'a@x.test', mustChangePassword: false };
+});
 it('logs out every device only after confirmation, then ends the local session', async () => {
   logoutAll.mockReset();
   await act(async () => root.render(<ToastProvider><LogoutAllRow /></ToastProvider>));

@@ -47,6 +47,24 @@ it('quarantines only returned rejected material and leaves a returned accepted s
   expect(materialDeliveryRows(f.state)[0]).toMatchObject({accepted:'15',rejected:'4',pending:'0',returned:'5',outstanding:'15'});
 });
 
+it('keeps an accepted surplus return separate from a later rejection in the same partial receiving chain', () => {
+  const f = materialDeliveryFixture(20), id = f.issue(20), stockId = f.state.fulfillment.stock[0].id;
+  const count = (acceptedQuantity: number, rejectedQuantity: number, expectedReceivingRevision: number) => f.run({ type: 'fulfillment.materials.confirm', payload: { kind: 'issue', id, acceptedQuantity, rejectedQuantity, expectedReceivingRevision, evidence: 'Factory count' } }, 'garment');
+  const returned = (quantity: number) => f.run({ type: 'fulfillment.inventory.move', payload: { id: stockId, kind: 'return', issueId: id, quantity, location: 'A-01', person: 'factory', note: 'Actual return' } }).id!;
+  count(10, 0, 0);
+  const surplus = returned(5);
+  expect(materialDeliveryRows(f.state)[0]).toMatchObject({ accepted: '5', pending: '10', returned: '5' });
+  count(6, 4, 1);
+  // Later counts cannot reclassify goods already returned as accepted surplus.
+  expect(materialDeliveryRows(f.state)[0]).toMatchObject({ accepted: '11', rejected: '4', pending: '0', outstanding: '15' });
+  expect(internalFabricCostShare(f.state, f.purchaseId, f.target.orderId, 136000)).toBe(74800);
+  const rejected = returned(4);
+  expect(f.state.fulfillment.stock[0]).toMatchObject({ available: 5, locked: 4 });
+  expect(f.state.fulfillment.stockMovements.find(m => m.id === surplus)).toMatchObject({ quarantinedQuantity: 0 });
+  expect(f.state.fulfillment.stockMovements.find(m => m.id === rejected)).toMatchObject({ quarantinedQuantity: 4 });
+  expect(materialDeliveryRows(f.state)[0]).toMatchObject({ accepted: '11', returned: '9', outstanding: '11' });
+});
+
 it('keeps a legacy pre-count return eligible for full confirmation and refuses ambiguous partial conversion', () => {
   const f=materialDeliveryFixture(20), id=f.issue(20);
   f.run({type:'fulfillment.inventory.move',payload:{id:f.state.fulfillment.stock[0].id,kind:'return',issueId:id,quantity:4,location:'A-01',person:'factory',note:'Legacy return'}});

@@ -5,6 +5,7 @@ import { randomUUID, randomBytes } from 'node:crypto';
 import { createAuthService } from '../auth/service';
 import { pickRequestToken } from '../auth/middleware';
 import { invalidateAccountStatusCache } from '../auth/accountStatusGuard';
+import { revokeAllSessions } from '../auth/sessionRevocation';
 import { createCompany, companyRoleId, COMPANY_SYSTEM_ROLE_CODES } from './companyProvisioning';
 import { companyAdministratorIds } from '../auth/companyAdministration';
 import { passwordProblem } from '../auth/passwordPolicy';
@@ -14,6 +15,7 @@ import { logger } from '../lib/logger';
 import { CompanyAccessError } from '../auth/companyAccess';
 import { buildLoadedAuthTokenPayload, loadUserWithRoles, serializeAuthUser, platformCompanyUser } from '../auth/tokenHelpers';
 import { createPlatformCompanySettings } from './companySettings';
+import { sessionOf, writeSession } from '../auth/sessionLifetime';
 
 type PlatformRouterOptions = AccountAccessOptions & {
   prisma: PrismaClient;
@@ -63,13 +65,16 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
     return { userId: user.id };
   }
 
+  // 平台动作针对哪家公司就归属哪家公司（targetId 为公司 id），公司后台可见平台对本公司的操作。
   function audit(actorId: string, action: string, targetId: string, detail?: unknown) {
     return options.prisma.auditLog.create({
       data: {
         id: `alog_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         actorId,
         action,
+        targetType: 'Company',
         targetId,
+        companyId: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId) ? targetId : null,
         ...(detail === undefined ? {} : { detail: detail as any }),
       },
     }).catch(() => undefined);
@@ -87,7 +92,8 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
   });
 
   // 平台身份选择公司范围，不成为该公司成员，也不依赖公司的角色配置。
-  const managementCookie = (res: Response, token: string) => res.cookie('bambook_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 7 * 24 * 3600 * 1000, path: '/' });
+  // 进出公司后台沿用本次登录会话（保持登录与否、90 天上限不变）。
+  const managementSession = (req: Request, res: Response, payload: Parameters<typeof auth.signToken>[0]) => writeSession(res, auth, payload, sessionOf(auth.verifyToken(pickRequestToken(req)!)));
   router.post('/companies/:id/management-session', async (req: Request, res: Response, next) => {
     try {
       const admin = await requirePlatformAdmin(req, res);
@@ -101,9 +107,8 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
       let current;
       try { current = await buildLoadedAuthTokenPayload(options.prisma, user, company.id, platformCompany); }
       catch (error) { if (error instanceof CompanyAccessError) return res.status(error.status).json({ ok: false, error: error.code, message: error.message }); throw error; }
-      const token = auth.signToken(current);
+      const token = managementSession(req, res, current);
       await audit(admin.userId, 'platform_company_enter', company.id, {});
-      managementCookie(res, token);
       const acting = await platformCompanyUser(options.prisma, user, platformCompany, company.id);
       return res.json({ ok: true, token, company, platformCompany, user: { ...serializeAuthUser(acting, current.roles, current.permissions, current.departmentIds, { companyId: company.id, newRoleIds: current.roleIds, authorizationLoaded: true }), platformCompany } });
     } catch (error) { next(error); }
@@ -118,8 +123,7 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
       const user = await loadUserWithRoles(options.prisma, admin.userId);
       if (!user) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: '账号不可用。' });
       const current = await buildLoadedAuthTokenPayload(options.prisma, user, null);
-      const token = auth.signToken(current);
-      managementCookie(res, token);
+      const token = managementSession(req, res, current);
       return res.json({ ok: true, token, user: serializeAuthUser(user, current.roles, current.permissions, current.departmentIds, { companyId: null, newRoleIds: current.roleIds, authorizationLoaded: true }) });
     } catch (error) { next(error); }
   });
@@ -211,7 +215,7 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
 
       const result = await options.prisma.$transaction(async (tx) => {
         if (!ownerUserId) {
-          const account = await tx.userAccount.create({ data: { id: `usr_${randomUUID()}`, displayName: ownerName || ownerEmail.split('@')[0], email: ownerEmail, passwordHash: passwordHash!, status: 'active', metadata: { forceChangePassword: deliveryMode !== 'password' } } });
+          const account = await tx.userAccount.create({ data: { id: `usr_${randomUUID()}`, displayName: ownerName || ownerEmail.split('@')[0], email: ownerEmail, passwordHash: passwordHash!, status: 'active', metadata: { forceChangePassword: true, forceChangeReason: deliveryMode === 'password' ? 'initial' : 'invite' } } });
           ownerUserId = account.id;
         }
         const defaults = await readCompanyDefaults(tx);
@@ -272,7 +276,11 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
       }
       data.status = body.status;
     }
-    if (typeof body.plan === 'string') data.plan = body.plan;
+    if (body.plan !== undefined) {
+      // Match the platform defaults contract; never persist blank or unbounded service labels.
+      if (typeof body.plan !== 'string' || !body.plan.trim() || body.plan.trim().length > 80) return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '请填写1至80字的服务方案。' });
+      data.plan = body.plan.trim();
+    }
     if (body.seatLimit !== undefined) {
       if (body.seatLimit !== null && (!Number.isInteger(body.seatLimit) || body.seatLimit < 1)) return res.status(400).json({ ok: false, error: 'INVALID_SEAT_LIMIT', message: '席位上限须为正整数。' });
       data.seatLimit = body.seatLimit;
@@ -357,9 +365,12 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
         const membership = await tx.companyMember.findUnique({ where: { companyId_userId: { companyId, userId: user.id } } });
         if (membership?.status !== 'active' && current.seatLimit !== null && await tx.companyMember.count({ where: { companyId, status: 'active', user: { status: 'active', deletedAt: null } } }) >= current.seatLimit) return 'full';
         await tx.companyMember.upsert({ where: { companyId_userId: { companyId, userId: user.id } }, update: { status: 'active' }, create: { id: randomUUID(), companyId, userId: user.id, status: 'active', joinedAt: new Date(), invitedBy: admin.userId } });
+        // 移除后重新加入：作废移除前签发的令牌，避免旧的本公司会话复活。
+        if (membership && membership.status !== 'active') { const row = await tx.userAccount.findUniqueOrThrow({ where: { id: user.id }, select: { metadata: true } }); await tx.userAccount.update({ where: { id: user.id }, data: { metadata: revokeAllSessions(row.metadata) as any } }); }
         return 'joined';
       });
       if (joined !== 'joined') return res.status(409).json({ ok: false, error: joined === 'full' ? 'SEAT_LIMIT_REACHED' : 'COMPANY_UNAVAILABLE', message: joined === 'full' ? '公司席位已用完，请先增加席位。' : '公司未启用，不能添加成员。' });
+      invalidateAccountStatusCache(user.id);
       await audit(admin.userId, 'platform.company.member.add', companyId, { userId: user.id, email });
       return res.json({ ok: true, member: { userId: user.id, displayName: user.displayName, email } });
     } catch (error) {

@@ -14,7 +14,7 @@ import { primaryImageId } from '../../../server/src/shared/mistPrimaryImage';
 import { Bell, ClipboardList, Component, KeyRound, Layers, ListTodo, Moon, Search, Settings2, ShieldCheck, Sparkles, SquareDashed, Users } from 'lucide-react';
 
 import {
-  AvatarDirectory, AssistantDrawer, Banner, TaskList, Button, Card, CardHeader, CommandPalette, Drawer, EmptyState, MistAppShell, MistPage, MistRoot, MistSidebarPresentation, MistTopbar, ToastProvider, MistDensityContext, useHotkey, useToast,
+  AvatarDirectory, AssistantDrawer, Banner, TaskList, Button, IconButton, Card, CardHeader, CommandPalette, Drawer, EmptyState, MistAppShell, MistPage, MistRoot, MistSidebarPresentation, MistTopbar, ToastProvider, MistDensityContext, useHotkey, useToast,
   type ChatMessage, type CommandItem, type Crumb, type NavSection, type ThemeMode,
 } from '../../../components/mist';
 import { getModuleByView, getPrimaryNavigationModules, groupPrimaryNavigationModules } from '../../../components/moduleRegistry';
@@ -27,7 +27,7 @@ import { onThemePreference, readThemePreference, resolveTheme, writeThemePrefere
 import { useDevice } from './runtime/devicePreferences';
 import { LegacyStartup } from '../../../components/mist/LegacyStartup';
 import { MistWorkspaceProvider, useMistWorkspace } from './runtime/workspace';
-import {MistPresentedErrorContext,useClaimedUploadRecovery} from './runtime/errorPresentation';
+import {MistPresentedErrorContext,useClaimedUploadRecovery,usePendingRecoveryClaimed,usePageFailures,usePageFailureHost} from './runtime/errorPresentation';
 import { clearPrivateImages, schedulePrivateImagePrefetch } from './runtime/usePrivateImage';
 import { useOrganizationContext } from './runtime/organizationContext';
 import { TeamViewScope, useTeamView } from './runtime/teamView';
@@ -42,6 +42,8 @@ import { workspaceSearchRecords } from './runtime/search';
 import { apiService } from '../../../services/apiService';
 import { platformBusinessDate } from '../../../server/src/shared/mistPlatform';
 import { visibleMistNotifications, mistDailyDigest } from './runtime/notificationPreferences';
+import { NotificationCenter, NotificationToast } from './runtime/NotificationCenter';
+import { canPlayNotificationSound, playNotificationSound } from '../../../services/uiSoundService';
 import {readAllMistNotices,readMistNotice} from './runtime/agentTaskNotices';
 import { DEVELOPMENT_LIST_TABS, developmentCreateTarget, developmentListTab, developmentListTarget, type DevelopmentListTab } from './developmentEntry';
 const SEARCH_ICONS: Record<string, typeof Layers> = { 开发案: Layers, 订单: ClipboardList };
@@ -106,21 +108,21 @@ function useSections(): NavSection[] {
 /** 侧栏数字、模块页「待我处理」、首页合计共用同一口径（见 runtime/workQueue）。 */
 function useMyWorkOptions(): MistWorkOptions {
   const session = useMistSession(), { workspace } = useMistWorkspace(), reviews = useOptionalMistReviews();
-  return { canRead: view => session.canAccessView(view as View), can: permission => session.hasPermission(permission), me: session.user?.id ?? '', reviews: reviews?.rows, today: platformBusinessDate(businessNow()), workspaceId: workspace?.id };
+  return { canRead: view => session.canAccessView(view as View), can: permission => session.hasPermission(permission), me: session.user?.id ?? '', reviews: reviews?.rows, today: platformBusinessDate(businessNow()), now: businessNow().toISOString(), workspaceId: workspace?.id, financialDisposals: workspace?.financialDisposals };
 }
 function CountedSidebar({ sections, ...rest }: React.ComponentProps<typeof MistSidebarPresentation>) {
   const { state } = useMistWorkspace(), counts = mistNavCounts(state, useMyWorkOptions());
   const counted = sections.map(section => ({ ...section, items: section.items.map(item => ({ ...item, count: counts[item.id] || undefined })) }));
   return <MistSidebarPresentation sections={counted} {...rest} />;
 }
-/** 模块首页顶部：本模块等我处理的事项（条数与侧栏数字一致），展开后可直接打开原业务。 */
-function ModuleWorkBar({ view }: { view: string }) {
+/** 顶栏「待我处理」：本模块等我处理的事项（条数与侧栏数字一致），打开抽屉后可直接进入原业务。放在顶栏而不是页面内，页面标题位置不随待办有无而变化。 */
+function ModuleWorkButton({ view }: { view: string }) {
   const { state } = useMistWorkspace(), { go } = useNav(), [open, setOpen] = React.useState(false), today = platformBusinessDate(businessNow());
   const module = mistWorkModule(view), items = mistMyWork(state, useMyWorkOptions()).filter(item => item.module === module);
   React.useEffect(() => setOpen(false), [module]);
   if (!items.length || module === 'cockpit') return null;
-  return <><div data-mist-module-work={module}><Banner tone="accent" icon={ListTodo} title={ui`待我处理 ${items.length} 项`} actions={<Button size="sm" variant="secondary" onClick={() => setOpen(true)}>{uiText("查看")}</Button>}>{items.slice(0, 2).map(item => item.title).join('；')}{uiText(items.length > 2 ? ' 等' : '')}</Banner></div>
-    <Drawer open={open} onClose={() => setOpen(false)} title={ui`待我处理 · ${items.length} 项`} sub={uiText("指定给我或我岗位的事项；办理后自动消失")}>
+  return <><span data-mist-module-work={module}><IconButton icon={ListTodo} label={ui`本模块待我处理 ${items.length} 项`} count={items.length} onClick={() => setOpen(true)} /></span>
+    <Drawer open={open} onClose={() => setOpen(false)} title={ui`待我处理 · ${items.length} 项`}>
       <TaskList items={items.map(item => ({ id: item.id, when: item.when, urgent: item.urgent || (!!item.at && item.at.slice(0, 10) < today && item.source === 'task'), title: item.title, meta: item.meta }))}
         onOpen={row => { const item = items.find(entry => entry.id === row.id); if (item) { setOpen(false); go(item.target.view, item.target.id, item.target); } }} />
     </Drawer></>;
@@ -145,7 +147,9 @@ function crumbsFor(route: Route, go: (view: string, id?: string) => void, object
 }
 function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: ThemeMode) => void }) {
   const locale = useInterfaceLanguage();
-  const session = useMistSession(), toast = useToast(), workspace = useMistWorkspace(), claimedUpload = useClaimedUploadRecovery();
+  const session = useMistSession(), toast = useToast(), workspace = useMistWorkspace(), claimedUpload = useClaimedUploadRecovery(), pendingClaimed = usePendingRecoveryClaimed(), pageFailures = usePageFailures();
+  usePageFailureHost();
+  const [hiddenNoticeKey, setHiddenNoticeKey] = React.useState('');
   const {state} = workspace;
   const platformOnly = session.user?.platformRole === 'platform_admin' && !session.user.roleIds?.length;
   const platformCompany = session.user?.platformCompany;
@@ -168,6 +172,23 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const [ai, setAI] = React.useState(false);
   React.useEffect(()=>{if(!canAI)setAI(false);},[canAI]);
   const [notifications, setNotifications] = React.useState(false);
+  // New unread notices pop a small card. The first snapshot after login or a company switch only sets the baseline.
+  const [toastIds, setToastIds] = React.useState<string[]>([]);
+  const seenNotices = React.useRef<{ scope: string; ids: Set<string> } | null>(null);
+  const noticeScope = session.sessionKey + ':' + (workspace.workspace?.id || '');
+  const unreadIds = visibleNotifications.filter(n => !n.readAt).map(n => n.id).join('|');
+  React.useEffect(() => {
+    const unread = visibleNotifications.filter(n => !n.readAt), seen = seenNotices.current;
+    if (!state || !seen || seen.scope !== noticeScope) { seenNotices.current = { scope: noticeScope, ids: new Set(unread.map(n => n.id)) }; setToastIds([]); return; }
+    const fresh = unread.filter(n => !seen.ids.has(n.id)).map(n => n.id);
+    unread.forEach(n => seen.ids.add(n.id));
+    if (!fresh.length || notifications) return;
+    setToastIds(ids => [...new Set([...ids, ...fresh])]);
+    if (canPlayNotificationSound()) playNotificationSound(fresh[0]);
+  }, [unreadIds, noticeScope, !!state]); // eslint-disable-line react-hooks/exhaustive-deps
+  React.useEffect(() => { if (!toastIds.length) return; const timer = window.setTimeout(() => setToastIds([]), 6000); return () => window.clearTimeout(timer); }, [toastIds]);
+  React.useEffect(() => { if (notifications) setToastIds([]); }, [notifications]);
+  const toastItems = toastIds.map(id => visibleNotifications.find(n => n.id === id)).filter((n): n is NonNullable<typeof n> => !!n && !n.readAt);
   const [msgs, setMsgs] = React.useState<ChatMessage[]>([]);
   const [aiBusy,setAiBusy]=React.useState(false),[aiUseRouteSource,setAiUseRouteSource]=React.useState(false);
   const aiScope=session.sessionKey+':'+(workspace.workspace?.id??'');
@@ -209,8 +230,11 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
     return preloadPagesWhenIdle(pages);
   }, [sections, session.status, session.sessionKey, session.user?.mustChangePassword, session.canAccessView, session.hasPermission, session.user?.platformRole, platformOnly, !!platformCompany, workspace.loading]);
   // 侧栏「开发与寻样」回到本次会话最近查看的页签；未查看过时为「成衣开发」。
-  const lastDevelopmentTab = React.useRef<DevelopmentListTab>('garment');
+  const lastDevelopmentTab = React.useRef<DevelopmentListTab | null>(null);
   if (route.view === 'development') lastDevelopmentTab.current = developmentListTab(route.section);
+  // ord7：未查看过时按本人所在业务线落页签：只属面料组的员工默认「面料开发」。
+  const myGroups = workspace.state?.memberGroups?.find(g => g.userId === session.user?.id)?.groups ?? [];
+  const defaultDevelopmentTab: DevelopmentListTab = myGroups.includes('fabric') && !myGroups.includes('garment') ? 'fabric' : 'garment';
   const go = React.useCallback((view: string, id?: string, target: RouteTarget = {}, options: GoOptions = {}) => {
     const next = { view, id, ...target }, list = isListState(next, options);
     scrollPosition.current = { key: nextScrollKey(scrollPosition.current, next, list), route: next, list };
@@ -225,7 +249,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   }, [platformOnly, platformCompany, session.status, go]);
   React.useEffect(() => {
     if (publicEntryForHost(location.host) === 'platform' && platformOnly && !personalSection
-      && !['platform-admin','system-settings','settings','platform-login','platform-recovery','account-access'].includes(route.view)) go('platform-admin');
+      && !['platform-admin','system-settings','settings','platform-login','account-recovery','platform-recovery','account-access'].includes(route.view)) go('platform-admin');
   }, [platformOnly, personalSection, route.view, go]);
   // 公司管理会话保持在当前公司的管理页面。
   React.useEffect(() => { if (platformCompany && !personalSection && !COMPANY_MANAGEMENT_VIEWS.includes(route.view.split('/')[0])) go('company-settings'); }, [platformCompany, personalSection, route.view, go]);
@@ -332,11 +356,12 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   ];
   function navigateModule(id: string) {
     if (id !== 'development') { go(id); return; }
-    const target = developmentListTarget(lastDevelopmentTab.current);
+    const target = developmentListTarget(lastDevelopmentTab.current ?? defaultDevelopmentTab);
     go(target.view, target.id, target.target);
   }
   const nav = { route, go, theme, toggleTheme, openPalette: () => setPalette(true), openAI };
-  if (['account-access','platform-recovery'].includes(route.view)) return <Nav.Provider value={nav}><AccountAccessPage key={route.view}/></Nav.Provider>;
+  // 找回密码：公司员工与平台人员同一页面；platform-recovery 仅为兼容旧链接。
+  if (['account-access','account-recovery','platform-recovery'].includes(route.view)) return <Nav.Provider value={nav}><AccountAccessPage key={route.view}/></Nav.Provider>;
   if (route.view === 'register' && publicEntryForHost(location.host) !== 'platform') return <Nav.Provider value={nav}><RegisterPage/></Nav.Provider>;
   if (session.status === 'loading') return null;
   if (session.status === 'anonymous' && (session.localMode || session.connectionModeUnverified)) return <MistPage width="narrow"><Card><CardHeader title={uiText("公司连接待核对")} sub={uiText(session.localMode?'本地工作身份由本机服务提供，无需输入旧账号密码。':'暂时无法确认当前公司，请重新连接后继续。')}/><div className="mist-card-body"><p>{session.error||'暂时无法读取公司会话，请重新连接。'}</p><Button variant="primary" loading={session.refreshing} onClick={()=>void session.refresh()}>{uiText(session.localMode?'重新进入本地身份':'重新连接公司')}</Button></div></Card></MistPage>;
@@ -361,9 +386,25 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const workspaceProfileName = state?.settings.profileName?.trim() || '';
   const name = (workspace.workspace?.ownerId === user.id ? workspaceProfileName : '') || user.displayName || user.email;
   const roles = platformOnly ? '平台管理员' : platformCompany ? '平台管理' : user.roleLabels?.filter(role => !role.name.endsWith('标准岗位补充')).map(role => role.name).join(' · ') || user.roles.map(role => ({ owner: '负责人', admin: '管理员', manager: '管理者', merchandiser: '业务员', finance: '财务', sales: '业务员', viewer: '查看人员', agent_operator: '助手操作员' })[role]).join(' · ');
+  // Shell status floats under the topbar (MistAppShell notices) instead of pushing the page title down.
+  const shellNoticeList = [
+    platformCompany && <Banner variant="inline" key="platform" tone="neutral" title={ui`公司管理 · ${platformCompany.companyName}`} actions={<Button loading={exitingSupport} onClick={()=>void exitManagement()}>{uiText("返回平台")}</Button>}/>,
+    workspace.pendingCreate && !workspace.saving && <Banner variant="inline" key="create" tone="warn" title={uiText("历史数据创建结果需要核对")} actions={<Button onClick={()=>void workspace.createWorkspace(workspace.pendingCreate!.name,workspace.pendingCreate!.seed).catch(report)}>{uiText("核对创建结果")}</Button>}>{workspace.pendingCreate.name}{uiText("：将查询并继续同一次创建。")}</Banner>,
+    workspace.pending && !workspace.saving && !pendingClaimed && !(workspace.pending.kind==='mail-send'&&route.view==='emails') && !(workspace.pending.kind==='command'&&route.view==='calendar') && !(workspace.pending.kind==='upload'&&claimedUpload===workspace.pending.requestId) && <Banner variant="inline" key="pending" tone="warn" title={uiText("上次操作的结果需要核对")} actions={<Button loading={workspace.saving} onClick={()=>void workspace.recover().catch(report)}>{uiText("核对原请求")}</Button>}>{uiText("核对前会保留原请求，避免重复保存。")}{uiText(workspace.pending.kind==='upload'?'如尚未上传成功，请在原页面重新选择同一附件。':workspace.pending.kind==='mail-send'?'上次邮件发送未收到服务器回执；核对时使用原发送请求，已登记的不会重复投递。':'')}</Banner>,
+    workspace.error && !workspace.pending && <Banner variant="inline" key="error" tone="bad" title={uiText(workspace.error)} actions={<Button onClick={()=>void workspace.refresh()}>{uiText("重新读取")}</Button>} />,
+    // A page's own failure that the shell already shows (same text) is not repeated.
+    ...pageFailures.filter(item => item.detail !== workspace.error).map(item => <Banner variant="inline" key={'page:'+item.id} tone="bad" title={uiText(item.title)} actions={item.retry ? <Button onClick={item.retry}>{uiText("重试")}</Button> : undefined}>{item.detail}</Banner>)
+  ].filter(Boolean);
+  // Collapsing remembers which notices were seen; a new or changed notice shows again. The topbar status reopens them.
+  const shellNoticeKey = shellNoticeList.map(item => (item as React.ReactElement).key).join('|') + '|' + (workspace.error || '') + '|' + pageFailures.map(item => item.detail).join('|');
+  const noticesHidden = !!shellNoticeList.length && hiddenNoticeKey === shellNoticeKey;
+  const toastNotice = toastItems.length ? <NotificationToast key="toast" items={toastItems} onDismiss={() => setToastIds([])}
+    onOpen={n => { setToastIds([]); void readMistNotice(workspace, n).then(() => { if (n.target) go(n.target.view, n.target.id, n.target); }).catch(report); }}
+    onOpenAll={() => { setToastIds([]); setNotifications(true); }} /> : null;
+  const shellNotices = (shellNoticeList.length && !noticesHidden) || toastNotice ? [...(noticesHidden ? [] : shellNoticeList), ...(toastNotice ? [toastNotice] : [])] : undefined;
   return (
     <AvatarDirectory people={[...(state?.members ?? []).map(member=>({id:member.userId,name:member.name})),...organization.teams.flatMap(team=>(team.members ?? []).map(person=>({id:person.id,name:person.name,src:person.avatarUrl}))),{id:user.id,name:user.displayName || user.email,src:user.avatarUrl}]}><Nav.Provider value={nav}><MistReviewProvider><MistDensityContext.Provider value={density||'default'}>
-      <MistAppShell collapsed={collapsed} scrollKey={scrollPosition.current.key}
+      <MistAppShell collapsed={collapsed} scrollKey={scrollPosition.current.key} notices={shellNotices} onCloseNotices={() => setHiddenNoticeKey(shellNoticeKey)}
         sidebar={<CountedSidebar sections={sections} activeId={base === 'development' ? 'development' : COMPANY_ADMIN_VIEWS.has(base) && !(platformOnly && ['system-settings','settings'].includes(base)) ? 'company-settings' : base}
           onNavigate={navigateModule} collapsed={collapsed} onToggleCollapsed={() => setCollapsed(value => !value)}
           workspace={platformOnly ? { symbol: 'S', name: 'Sylway Cloud', caption: '平台运营', onClick:()=>go('platform-admin') } : platformCompany ? { symbol: platformCompany.companyName.slice(0,1), name: platformCompany.companyName, caption: '平台管理', onClick:()=>go('company-settings') } : { ...organizationEntry({ organization:{...organization,teams:organization.teams.map(team=>({...team,members:team.members?.map(person=>person.id===user.id?{...person,avatarUrl:user.avatarUrl ?? undefined}:person)}))}, department: user.department, teamId: teamView.teamId, onSelect: id => { teamView.select(id); setOrganizationOpen(false); },
@@ -374,27 +415,24 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
           onSearch={() => setPalette(true)}
           assistant={!canAI ? undefined : { title: '小竹', text: '查询当前公司的进展', onClick: ()=>openAI() }} />}
         topbar={scrolled => <MistTopbar scrolled={scrolled} onBack={backTarget ? goBack : undefined} backLabel={backTarget ? '返回' + backTarget.label : undefined} crumbs={platformOnly && ['system-settings','settings'].includes(route.view) ? [{label:'平台运营'},{label:'平台设置'}] : crumbsFor(route, go, state?.devs.find(d=>d.id===route.id)?.code || state?.orders.find(o=>o.id===route.id)?.code, state?.versions.find(v=>v.id===route.versionId)?.label)}
-          sync={base === 'account' ? undefined : platformOnly ? { state: 'ok', text: '平台运营' } : platformCompany ? { state: 'ok', text: '平台管理' } : { state: workspace.error||workspace.pending&&!workspace.saving ? 'offline' : workspace.loading||workspace.saving ? 'syncing' : 'ok', text: workspace.saving ? '正在保存' : workspace.loading ? '读取公司数据' : workspace.pending ? '需要核对同步状态' : workspace.error ? (workspace.pendingCreate ? '需要核对同步状态' : '操作未完成') : live ? '已保存 · 公司' : '设计组件展示' }}
+          sync={base === 'account' ? undefined : platformOnly ? { state: 'ok', text: '平台运营' } : platformCompany ? { state: 'ok', text: '平台管理' } : { state: workspace.error||workspace.pending&&!workspace.saving ? 'offline' : workspace.loading||workspace.saving ? 'syncing' : 'ok', text: workspace.saving ? '正在保存' : workspace.loading ? '读取公司数据' : workspace.pending ? '需要核对同步状态' : workspace.error ? (workspace.pendingCreate ? '需要核对同步状态' : '操作未完成') : live ? '已保存 · 公司' : '设计组件展示', ...(shellNoticeList.length ? { onClick: () => setHiddenNoticeKey(noticesHidden ? '' : shellNoticeKey), expanded: !noticesHidden } : {}) }}
           theme={theme} onToggleTheme={toggleTheme} onSearch={() => setPalette(true)}
-          extra={<>{!(platformOnly || platformCompany) && <MistReviewButton/>}<ManualLink /></>} notifications={platformOnly || platformCompany ? undefined : { unread: visibleNotifications.some(n=>!n.readAt), onClick:()=>setNotifications(true) }} onAsk={!canAI ? undefined : ()=>openAI()} />}
+          extra={<>{!(platformOnly || platformCompany) && !route.id && !route.view.includes('/') && <ModuleWorkButton view={route.view} />}{!(platformOnly || platformCompany) && <MistReviewButton/>}<ManualLink /></>} notifications={platformOnly || platformCompany ? undefined : { unread: visibleNotifications.some(n=>!n.readAt), onClick:()=>setNotifications(true) }} onAsk={!canAI ? undefined : ()=>openAI()} />}
       >
-        {platformCompany && <Banner tone="neutral" title={ui`公司管理 · ${platformCompany.companyName}`} actions={<Button loading={exitingSupport} onClick={()=>void exitManagement()}>{uiText("返回平台")}</Button>}/>}
-        {workspace.pendingCreate && !workspace.saving && <Banner tone="warn" title={uiText("历史数据创建结果需要核对")} actions={<Button onClick={()=>void workspace.createWorkspace(workspace.pendingCreate!.name,workspace.pendingCreate!.seed).catch(report)}>{uiText("核对创建结果")}</Button>}>{workspace.pendingCreate.name}{uiText("：将查询并继续同一次创建。")}</Banner>}
-        {workspace.pending && !workspace.saving && !(workspace.pending.kind==='mail-send'&&route.view==='emails') && !(workspace.pending.kind==='command'&&route.view==='calendar') && !(workspace.pending.kind==='upload'&&claimedUpload===workspace.pending.requestId) && <Banner tone="warn" title={uiText("上次操作的结果需要核对")} actions={<Button loading={workspace.saving} onClick={()=>void workspace.recover().catch(report)}>{uiText("核对原请求")}</Button>}>{uiText("核对前会保留原请求，避免重复保存。")}{uiText(workspace.pending.kind==='upload'?'如尚未上传成功，请在原页面重新选择同一附件。':workspace.pending.kind==='mail-send'?'上次邮件发送未收到服务器回执；核对时使用原发送请求，已登记的不会重复投递。':'')}</Banner>}
-        {workspace.error && !workspace.pending && <Banner tone="bad" title={uiText(workspace.error)} actions={<Button onClick={()=>void workspace.refresh()}>{uiText("重新读取")}</Button>} />}
         {!permitted ? <EmptyState icon={ShieldCheck} title={uiText("没有查看权限")} description={uiText("当前账号无法访问此业务。")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />
-          : Page ? <TeamViewScope teamId={COMPANY_ADMIN_VIEWS.has(base) || base === 'account' ? 'all' : teamView.teamId} actorId={user.id} teams={organization.teams}><MistPresentedErrorContext.Provider value={workspace.error||undefined}>{!route.id && !route.view.includes('/') && <ModuleWorkBar view={route.view} />}<PageLoadBoundary resetKey={route.view} fallback={retry=><MistPage><Banner tone="bad" title={uiText('页面未能加载')} actions={<Button onClick={retry}>{uiText('重新加载')}</Button>}/></MistPage>}><React.Suspense fallback={<PageLoading />}><Page key={session.sessionKey + ':' + workspace.workspace?.id + ':' + (MODULE_VIEW_SET.has(route.view)||route.view==='emails'?route.view:JSON.stringify(route))} /></React.Suspense></PageLoadBoundary></MistPresentedErrorContext.Provider></TeamViewScope>
+          : Page ? <TeamViewScope teamId={COMPANY_ADMIN_VIEWS.has(base) || base === 'account' ? 'all' : teamView.teamId} actorId={user.id} teams={organization.teams}><MistPresentedErrorContext.Provider value={workspace.error||undefined}><PageLoadBoundary resetKey={route.view} fallback={retry=><MistPage><Banner tone="bad" title={uiText('页面未能加载')} actions={<Button onClick={retry}>{uiText('重新加载')}</Button>}/></MistPage>}><React.Suspense fallback={<PageLoading />}><Page key={session.sessionKey + ':' + workspace.workspace?.id + ':' + (MODULE_VIEW_SET.has(route.view)||route.view==='emails'?route.view:JSON.stringify(route))} /></React.Suspense></PageLoadBoundary></MistPresentedErrorContext.Provider></TeamViewScope>
           : <EmptyState title={uiText("没有找到此页面")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />}
       </MistAppShell>
       <ExportConfirmHost scope={JSON.stringify([session.sessionKey, user.id, user.companyId, user.roles, user.roleIds, user.permissions, user.permissionCeiling, user.businessAttributes, user.globalBusinessScope, workspace.workspace?.id, workspace.workspace?.access, teamView.teamId, route])} />
       <CommandPalette open={palette} onClose={() => setPalette(false)} query={query} onQueryChange={setQuery} items={commands} />
       <AssistantDrawer key={aiScope} open={ai} onClose={() => setAI(false)} messages={[overview(),...msgs,...(aiBusy?[{role:'typing'} as ChatMessage]:[])]} onSend={question=>void send(question)} sub={uiText(aiBusy?'正在生成':undefined)} suggestions={aiBusy?[]:['根据当前事实建议下一步','哪些信息还需要核实']} />
-      <Drawer open={notifications} onClose={()=>setNotifications(false)} title={uiText("通知")} sub={uiText("来自当前公司的操作记录")}
-        footer={<><Button variant="quiet" onClick={()=>{setNotifications(false);go('notifications');}}>{uiText("查看全部通知")}</Button><Button disabled={!visibleNotifications.some(n=>!n.readAt)} loading={workspace.saving||workspace.agentTaskNotices?.reading} onClick={()=>void readAllMistNotices(workspace,visibleNotifications).catch(report)}>{uiText("全部标为已读")}</Button></>}>
-        {workspace.agentTaskNotices?.error&&<Banner tone="bad" title={uiText(workspace.agentTaskNotices.error)} actions={<Button onClick={()=>void workspace.agentTaskNotices?.refresh()}>{uiText('重新加载')}</Button>}/>}
-        {state?.settings.notifications.digest&&<Card><CardHeader title={uiText("今日工作摘要")} sub={uiText("按当前记录生成 · 不发送邮件")}/><div className="mist-card-body">{dailyDigest.length?dailyDigest.map(item=><p key={item.id}><Button variant="quiet" onClick={()=>go(item.target.view,item.target.id,item.target)}>{uiText(item.label)} · {item.detail}</Button></p>):<p>{uiText("今天没有待处理事项。")}</p>}</div></Card>}
-        {visibleNotifications.length?visibleNotifications.map(n=><Card key={n.id}><CardHeader title={uiText(n.title)} sub={uiText(new Date(n.at).toLocaleString())} tools={<Button variant="quiet" disabled={workspace.agentTaskNotices?.reading} onClick={()=>{void readMistNotice(workspace,n).then(()=>{if(n.target)go(n.target.view,n.target.id,n.target);}).catch(report);}}>{uiText(n.readAt?'查看':'阅读')}</Button>} /><p className="mist-card-body">{n.detail}</p></Card>):<EmptyState title={uiText("暂无通知")} />}
-      </Drawer>
+      <NotificationCenter open={notifications} onClose={()=>setNotifications(false)} items={visibleNotifications} digest={dailyDigest} digestEnabled={!!state?.settings.notifications.digest}
+        busy={workspace.saving||workspace.agentTaskNotices?.reading}
+        error={workspace.agentTaskNotices?.error&&<Banner tone="bad" title={uiText(workspace.agentTaskNotices.error)} actions={<Button onClick={()=>void workspace.agentTaskNotices?.refresh()}>{uiText('重新加载')}</Button>}/>}
+        onOpenItem={n=>{void readMistNotice(workspace,n).then(()=>{setNotifications(false);if(n.target)go(n.target.view,n.target.id,n.target);}).catch(report);}}
+        onOpenDigest={target=>{setNotifications(false);go(target.view,target.id,target);}}
+        onReadAll={()=>void readAllMistNotices(workspace,visibleNotifications).catch(report)}
+        onViewAll={()=>{setNotifications(false);go('notifications');}} />
     </MistDensityContext.Provider></MistReviewProvider></Nav.Provider></AvatarDirectory>
   );
 }

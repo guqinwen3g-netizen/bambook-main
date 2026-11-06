@@ -60,7 +60,8 @@ describe('G41 source-backed identity factory evidence', () => {
   });
 
   it('actual Agent factory is identity, preserving the permission ceiling of that evidence', () => {
-    const source = readFileSync(new URL('../server/src/agent/route.ts', import.meta.url), 'utf8');
+    // agent/route.ts was deleted with the legacy main API (2026-11-06); its last source is pinned as a scanner fixture.
+    const source = readFileSync(new URL('./__fixtures__/g41/agentRoute.ts.txt', import.meta.url), 'utf8');
     expect(extractLocalGuards(source).requireAgentActor?.cls).toBe('identity');
   });
 });
@@ -353,13 +354,15 @@ describe('G41 current DB actor/scope continuation follows actual local and impor
   // code or creates a Prisma client. Existing QC PG probes independently test
   // withdrawn grants, inactive accounts and [] / read-only credential ceilings.
   const repo = fileURLToPath(new URL('../', import.meta.url));
-  const route = readFileSync(join(repo, 'server/src/qc/qcRoute.ts'), 'utf8');
+  // qc/qcRoute.ts was deleted with the legacy main API (2026-11-06); its last source is pinned as a scanner fixture.
+  const QC_ROUTE_FIXTURE = join(repo, 'scripts/__fixtures__/g41/qcRoute.ts.txt');
+  const route = readFileSync(QC_ROUTE_FIXTURE, 'utf8');
   function sourceFixture(changes: Record<string, (source: string) => string> = {}) {
     const root = fixtureRepo('');
     for (const file of ['qc/qcRoute.ts', 'qc/qcAssignmentAccess.ts', 'qc/qcReportAuthority.ts', 'auth/tokenHelpers.ts', 'auth/permissionService.ts',
       'auth/middleware.ts', 'shared/routeError.ts']) {
       mkdirSync(join(root, 'server/src', file, '..'), { recursive: true });
-      const original = readFileSync(join(repo, 'server/src', file), 'utf8');
+      const original = readFileSync(file === 'qc/qcRoute.ts' ? QC_ROUTE_FIXTURE : join(repo, 'server/src', file), 'utf8');
       writeFileSync(join(root, 'server/src', file), changes[file]?.(original) ?? original);
     }
     const context = { filename: join(root, 'server/src/qc/qcRoute.ts'), root: join(root, 'server/src') };

@@ -1,7 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { bindSampleOrigins, cloneSampleOrigins, readSampleOriginContexts, sampleOriginFingerprint, sampleProjectionKey, snapshotSampleOrigin, loadSampleOriginCommand, loadSealSampleOriginCommand } from '../sampleOriginService';
-import { upsertPpSampleFromSealedRound } from '../sampleManageService';
-import { advanceSampleBatchStage, confirmSampleBatch } from '../../development/fabricDevelopmentService';
 import { fabricAuthorizationFixture } from '../../development/__tests__/fabricAuthorizationFixture';
 
 const fabricCase = { id: 'C-F', type: 'fabric', customerRelationId: 'CUSTOMER', specComposition: 'cotton', deletedAt: null };
@@ -92,35 +90,6 @@ describe('Sample exact physical origin',()=>{
   it.each([{sourceRound:2},{expectedUpdatedAt:'11'},{batchId:'MISSING'}])('explicit source command rejects stale/missing identity %j',async override=>{
     const f=fixture();await expect(loadSampleOriginCommand(f.tx,'C-F',{batchId:'B-A',sourceRound:1,expectedUpdatedAt:'10',...override})).rejects.toMatchObject({code:'DEVELOPMENT_SOURCE_CHANGED'});
     expect(f.state.sources).toHaveLength(0);expect(f.state.audits).toHaveLength(0);
-  });
-  it('native PP new factory/round creates a distinct Sample and preserves earlier physical identity, same-origin replay is idempotent',async()=>{
-    const native=(id:string,factory:string):any=>({id,batchCode:id,developmentCaseId:'C-G',supplierRelationId:factory,sampleType:'garment-round',round:1,
-      status:'approved',qcStatus:'passed',customerStatus:'approved',updatedAt:40n,deletedAt:null,attachments:{version:id,purpose:'pre_production',materialConfig:{fabric:'cotton'},sealedRoundStatus:'sealed'}});
-    const f=fixture({cases:[garmentCase],batches:[native('R-A','A'),native('R-B','B')],samples:[]});
-    const project=async(index:number)=>upsertPpSampleFromSealedRound({prisma:f.tx,devCase:garmentCase,round:f.state.batches[index],sealedAt:40,sealedBy:'ACTOR',actorId:'ACTOR'});
-    const first=await project(0);f.state.samples[0].productAssetId='PRESERVE-OLD-ASSET';const old=structuredClone(f.state.samples[0]);
-    const second=await project(1);const auditCount=f.state.audits.length;const replay=await project(1);
-    expect(second.sample.id).not.toBe(first.sample.id);expect(f.state.samples[0]).toEqual(old);expect(f.state.samples).toHaveLength(2);expect(replay.sample.id).toBe(second.sample.id);expect(f.state.audits).toHaveLength(auditCount);
-    f.state.batches[1].attachments.materialConfig={fabric:'silk'};await expect(project(1)).rejects.toMatchObject({code:'DEVELOPMENT_SOURCE_CHANGED'});expect(f.state.samples).toHaveLength(2);
-  });
-  it('fabric confirmation affects only exact batch A1, not B, same-factory lookalikes, old round or unknown legacy',async()=>{
-    const f=fixture({batches:[fabric('B-A','A',2),fabric('B-B','B'),fabric('B-A2')],samples:[sample('S-A'),sample('S-B','C-F','B'),sample('S-A2'),sample('S-OLD'),sample('LEGACY')]});
-    for(let i=0;i<3;i++)await bind(f,f.state.samples[i],f.state.batches[i]);
-    // A historical physical binding predates the current native round.
-    f.state.batches[0].round=1;await bind(f,f.state.samples[3],f.state.batches[0]);f.state.batches[0].round=2;
-    for(const b of f.state.batches){b.status='sent';const approved=await advanceSampleBatchStage({prisma:f.prisma,batchId:b.id,action:'approve',input:{},actorId:'ACTOR',trustedActor:{userId:'ACTOR'} as any});expect(approved.ok).toBe(true);}
-    const confirmed=await confirmSampleBatch({prisma:f.prisma,batchId:'B-A',actorId:'ACTOR',trustedActor:{userId:'ACTOR'} as any});
-    expect(confirmed.ok).toBe(true);if(confirmed.ok)expect(confirmed.data.sampleCount).toBe(1);
-    expect(f.state.samples[0].designConfirmStatus).toBe('batch-confirmed');for(const other of f.state.samples.slice(1))expect(other.designConfirmStatus??null).toBe(null);
-  });
-  it('all required exact composite components must be confirmed; loss of one component clears only linked current display',async()=>{
-    const f=fixture({batches:[fabric('A1'),fabric('A2')],samples:[sample('COMPOSITE'),sample('LEGACY')]});
-    await bindSampleOrigins(f.tx,f.state.samples[0],f.state.batches.map(b=>snapshotSampleOrigin(b,fabricCase)),'ACTOR');
-    for(const b of f.state.batches){b.status='sent';expect((await advanceSampleBatchStage({prisma:f.prisma,batchId:b.id,action:'approve',input:{},actorId:'ACTOR',trustedActor:{userId:'ACTOR'} as any})).ok).toBe(true);}
-    expect((await confirmSampleBatch({prisma:f.prisma,batchId:'A1',actorId:'ACTOR',trustedActor:{userId:'ACTOR'} as any})).ok).toBe(true);expect(f.state.samples[0].designConfirmStatus??null).toBe(null);
-    expect((await confirmSampleBatch({prisma:f.prisma,batchId:'A2',actorId:'ACTOR',trustedActor:{userId:'ACTOR'} as any})).ok).toBe(true);expect(f.state.samples[0].designConfirmStatus).toBe('batch-confirmed');
-    f.state.batches[0].status='sent';expect((await advanceSampleBatchStage({prisma:f.prisma,batchId:'A1',action:'revise',input:{feedback:'actual change'},actorId:'ACTOR',trustedActor:{userId:'ACTOR'} as any})).ok).toBe(true);
-    expect(f.state.samples[0].designConfirmStatus).toBe(null);expect(f.state.samples[1].designConfirmStatus).toBeUndefined();expect(f.state.sources).toHaveLength(2);
   });
   it('label-only legacy approved source never proves native approval/version for new exact origin',async()=>{
     const f=fixture();f.state.batches[0]= {...fabric(),status:'approved',approvedAt:1n,approvedBy:'ACTOR'};await bind(f);

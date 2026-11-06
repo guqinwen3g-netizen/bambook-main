@@ -224,8 +224,11 @@ export const teamReports = (root: MistState) => (root as MistState & { teamRepor
 export const myTeamReport = (root: MistState, viewerId: string, weekStart: string) => teamReports(root).find(r => r.generatedById === viewerId && r.weekStart === weekStart);
 /** 已结束、尚未由本人存档的最近一周（每周一起出现在“我的工作”）。 */
 export function pendingWeeklyArchive(root: MistState, viewerId: string, today: string): string | null {
-  const last = addBusinessDays(weekStartOf(today), -7);
-  return viewerId && !myTeamReport(root, viewerId, last) ? last : null;
+  const last = addBusinessDays(weekStartOf(today), -7), end = addBusinessDays(last, 6);
+  // fin10：上周没有任何业务动态（动态记录或完成的事项）时不推周报，避免新公司生成空表。
+  const inWeek = (at?: string) => { const d = at ? platformBusinessDate(at) : ''; return !!d && d >= last && d <= end; };
+  const active = (root.events || []).some(e => inWeek(e.at)) || (root.tasks || []).some(t => t.done && inWeek(t.doneAt));
+  return viewerId && active && !myTeamReport(root, viewerId, last) ? last : null;
 }
 function archiveWeekly(root: MistState, p: { weekStart?: unknown }, c: MistContext): { id: string } {
   const weekStart = typeof p?.weekStart === 'string' ? p.weekStart : '';

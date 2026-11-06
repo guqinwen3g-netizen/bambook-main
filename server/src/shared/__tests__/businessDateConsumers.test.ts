@@ -1,6 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PrismaClient } from '@prisma/client';
-import type { TokenPayload } from '../../auth/service';
 
 vi.mock('../../devPanel/activeDb', () => ({ getActiveDb: () => 'panda_hub_dev' }));
 vi.mock('../../audit/routeAudit', () => ({ writeRouteAuditLog: vi.fn(async () => 'audit-clock') }));
@@ -10,12 +8,7 @@ import { renderFormatTemplate } from '../../sequence/sequenceService';
 import { actualFinancialDate } from '../../paymentRequests/supplierPaymentExecutionService';
 import { cashDate } from '../../finance/companyCashAccountService';
 import { orderSampleDate } from '../../samples/orderSampleSourceContract';
-import { todayYmd, addDaysYmd } from '../../samples/fabricShipmentSampleService';
-import { createSampleRoomService } from '../../samples/sampleRoomService';
-import { storage } from '../../samples/__tests__/sampleRoomListFixture';
-import { buildOrderSchedule } from '../../customer/orderScheduleService';
 import { evaluateLcEligibility } from '../../customs/lcGate';
-import { createFollowUpFromEmail } from '../../email/emailFollowUpService';
 import { resolveCreditException } from '../../credit/creditExceptionGate';
 import type { ExceptionService } from '../../exceptions/exceptionService';
 
@@ -43,22 +36,12 @@ describe('business consumers retain the development as-of date when process time
   });
 
   it('keeps actual financial and sample dates explicit instead of replacing historical input with today', () => {
-    expect(todayYmd()).toBe('2026-10-08'); expect(addDaysYmd('2024-02-28', 1)).toBe('2024-02-29');
     for (const validate of [actualFinancialDate, cashDate, orderSampleDate]) {
       expect(validate('2024-02-29')).toBe('2024-02-29');
       for (const invalid of ['2026-02-29', '2026-02-30', '2026-10-08T00:18:00Z']) {
         expect(() => validate(invalid)).toThrow();
       }
     }
-  });
-
-  it('evaluates a pending order against the business day and completed shipments against their historical actual date', async () => {
-    const shipments: Array<{ id: string; status: string; atd?: string; ata?: string }> = [];
-    const db = { order: { findFirst: vi.fn(async () => ({ id: 'O-1', dueDate: '2026-10-09' })) },
-      shipmentOrderAllocation: { findMany: vi.fn(async () => []) }, shipment: { findMany: vi.fn(async () => shipments) } };
-    expect(await buildOrderSchedule(db as unknown as PrismaClient, 'O-1')).toMatchObject({ status: 'pending', deviationDays: -1 });
-    shipments.push({ id: 'SH-1', status: 'Delivered', ata: '2026-10-10' });
-    expect(await buildOrderSchedule(db as unknown as PrismaClient, 'O-1')).toMatchObject({ status: 'delayed', deviationDays: 1 });
   });
 
   it('keeps LC valid under the fixed date and enforces Shanghai end-of-day independently of the host timezone', () => {
@@ -83,36 +66,5 @@ describe('business consumers retain the development as-of date when process time
     }));
     expect(Date.now()).toBe(WALL_TIME.getTime());
   });
-
-  it('uses the same business instant in room cards and overdue-loan filters but keeps the read snapshot wall time', async () => {
-    const card = (id: string) => ({ id, code: id, name: id, devCaseId: 'F', cardType: 'fabric', quantity: 2, availableQty: 1,
-      minStock: null, deletedAt: null });
-    const loan = (id: string, itemId: string, due: string) => ({ id, itemId, loanType: 'borrow', loanQuantity: 1,
-      loanLength: null, lengthReturnHistory: [], returnedAt: null, loanedAt: 1, dueAt: Date.parse(due) });
-    const s = storage({ cases: [{ id: 'F', type: 'fabric', deletedAt: null }], items: [card('C-past'), card('C-future')],
-      loans: [loan('L-past', 'C-past', '2026-10-07T10:00:00Z'), loan('L-future', 'C-future', '2026-10-09T10:00:00Z')] });
-    const actor: TokenPayload = { userId: 'u_owner', roles: [], permissions: [], departmentIds: [], authorizationLoaded: true };
-    const service = createSampleRoomService(s.db);
-    const items = await service.listItems({ scope: 'fabric' }, actor);
-    expect(items.ok).toBe(true); if (!items.ok) throw new Error(items.error.message);
-    expect(items.data.snapshotAt).toBe(String(WALL_TIME.getTime()));
-    expect(items.data.items).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'C-past', overdue: true }), expect.objectContaining({ id: 'C-future', overdue: false }),
-    ]));
-    const loans = await service.listLoans({ overdue: true }, actor);
-    expect(loans.ok).toBe(true); if (!loans.ok) throw new Error(loans.error.message);
-    expect(loans.data.total).toBe(1); expect(loans.data.loans.map((row: { id: string }) => row.id)).toEqual(['L-past']);
-  });
-
-  it('defaults email follow-up to the business today/tomorrow without rewriting explicit deadlines or audit epochs', async () => {
-    const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
-    const db = { email: { findUnique: vi.fn(async () => ({ id: 'E-1', relationId: 'R-1', subject: '确认交期', deletedAt: null })) },
-      followUpRecord: { findFirst: vi.fn(async () => null), create } };
-    await expect(createFollowUpFromEmail(db as unknown as PrismaClient, 'E-1', { actorId: 'U-1', source: 'test' }))
-      .resolves.toMatchObject({ ok: true, nextFollowUpAt: '2026-10-09' });
-    expect(create).toHaveBeenLastCalledWith({ data: expect.objectContaining({ followUpAt: '2026-10-08',
-      nextFollowUpAt: '2026-10-09', createdAt: BigInt(WALL_TIME.getTime()) }) });
-    await expect(createFollowUpFromEmail(db as unknown as PrismaClient, 'E-1', { actorId: 'U-1', source: 'test',
-      overrides: { nextFollowUpAt: '2024-02-29' } })).resolves.toMatchObject({ nextFollowUpAt: '2024-02-29' });
-  });
+  // 2026-11-06: order schedule, sample room and email follow-up consumers were deleted with the legacy main API.
 });

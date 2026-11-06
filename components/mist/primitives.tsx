@@ -1,7 +1,7 @@
 import { uiText, ui } from '../../services/interfaceLanguage';
 import React from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { ChevronLeft, ChevronRight, Loader2, Sparkles } from 'lucide-react'; // mist-allow: Button 的 loading 态是唯一允许的 spinner
+import { AlertTriangle, ChevronLeft, ChevronRight, Info, Loader2, Sparkles } from 'lucide-react'; // mist-allow: Button 的 loading 态是唯一允许的 spinner
 import { cx, toneAttr, type Size, type Tone } from './types';
 import { AssistantEyes } from './AssistantEyes';
 import { parseAvatarIdentity, parsePersonIdentity, parseInitialsIdentity, patternColorFromIdentity, defaultAvatarColor, AVATAR_COLORS } from '../../lib/avatarIdentity';
@@ -57,12 +57,12 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
   );
 });
 
-export type IconButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & { icon: LucideIcon; label: string; size?: 'sm' | 'md'; dot?: boolean };
-/** 纯图标按钮。label 必填（无障碍 + tooltip）。dot = 右上角红点（未读通知）。 */
-export function IconButton({ icon, label, size = 'md', dot, className, type = 'button', ...rest }: IconButtonProps) {
+export type IconButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & { icon: LucideIcon; label: string; size?: 'sm' | 'md'; dot?: boolean; count?: number };
+/** 纯图标按钮。label 必填（无障碍 + tooltip）。dot = 右上角红点（未读通知）；count > 0 时改为数字角标（待处理条数）。 */
+export function IconButton({ icon, label, size = 'md', dot, count, className, type = 'button', ...rest }: IconButtonProps) {
   return (
     <button type={type} className={cx('mist-icon-btn', className)} aria-label={uiText(label)} title={uiText(label)} data-size={size === 'sm' ? 'sm' : undefined} {...rest}>
-      <Icon icon={icon} size={size === 'sm' ? 'sm' : 'md'} />{dot && <span className="mist-pip" />}
+      <Icon icon={icon} size={size === 'sm' ? 'sm' : 'md'} />{count ? <span className="mist-pip-count" aria-hidden="true">{count > 99 ? '99+' : count}</span> : dot && <span className="mist-pip" />}
     </button>
   );
 }
@@ -219,9 +219,20 @@ export function EmptyState({ icon, title, description, action, compact }: { icon
 export function Skeleton({ width = '100%', height = 12, radius }: { width?: number | string; height?: number; radius?: number }) {
   return <span className="mist-skel" style={{ width, height, borderRadius: radius }} aria-hidden />;
 }
-/** 内联提示条（页面内的提醒/错误/AI 建议），不是弹窗。 */
-export function Banner({ tone = 'accent', icon, title, children, actions }: { tone?: Tone; icon?: LucideIcon; title: React.ReactNode; children?: React.ReactNode; actions?: React.ReactNode }) {
-  return <div className="mist-banner" data-tone={toneAttr(tone)} role={tone === 'bad' ? 'alert' : 'status'}>{icon && <Icon icon={icon} />}<div><b>{uiText(title)}</b>{children && <p>{uiText(children)}</p>}</div>{actions && <div className="mist-banner-act">{actions}</div>}</div>;
+/**
+ * 页面内提示，不是弹窗。variant：
+ * - inline（默认）：原有色块，用于弹窗内与 AI 建议。
+ * - status：对象的当前状态说明，一行色点 + 短文字，放在标题下方，不染整块背景。
+ * - notice：动手前必须看清的阻断或风险，白底、左侧细色条，保留在原位。
+ */
+export type BannerVariant = 'inline' | 'status' | 'notice';
+export function Banner({ tone = 'accent', icon, title, children, actions, variant: requested }: { tone?: Tone; icon?: LucideIcon; title: React.ReactNode; children?: React.ReactNode; actions?: React.ReactNode; variant?: BannerVariant }) {
+  // Unmarked banners read as notices; AI suggestions keep their own surface; 'inline' stays for the shell's floating card.
+  const variant = requested ?? (tone === 'ai' ? 'inline' : 'notice');
+  if (variant === 'status') return <div className="mist-status-line" data-tone={toneAttr(tone)} role="status"><span className="mist-status-dot" aria-hidden="true" /><b>{uiText(title)}</b>{children && <span className="mist-status-text">{uiText(children)}</span>}{actions && <span className="mist-status-act">{actions}</span>}</div>;
+  // Notices always lead with an icon so every blocker reads the same: a warning triangle for warn/bad, info otherwise.
+  const lead = icon ?? (variant === 'notice' ? (tone === 'warn' || tone === 'bad' ? AlertTriangle : Info) : undefined);
+  return <div className="mist-banner" data-variant={variant === 'notice' ? 'notice' : undefined} data-tone={toneAttr(tone)} role={tone === 'bad' ? 'alert' : 'status'}>{lead && <Icon icon={lead} />}<div><b>{uiText(title)}</b>{children && <p>{uiText(children)}</p>}</div>{actions && <div className="mist-banner-act">{actions}</div>}</div>;
 }
 
 /* ───────────── Pagination ───────────── */

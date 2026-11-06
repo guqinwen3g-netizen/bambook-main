@@ -74,7 +74,7 @@ it('creates a follow-up and keeps example attachments undownloadable',async()=>{
   await click(button('生成跟进')!);
   const dialogButtons=[...document.querySelectorAll('button')].filter(b=>b.textContent?.trim()==='生成跟进');
   await click(dialogButtons.at(-1)!);
-  expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'email.followUp',payload:expect.objectContaining({id:'mail-ex-2',owner:'顾言'})}));
+  expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'email.followUp',payload:expect.objectContaining({id:'mail-ex-2',ownerId:expect.any(String)})}));
 });
 
 it('is read-only without email write permission',()=>{

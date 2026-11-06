@@ -49,7 +49,10 @@ it('queues a CI receivable as pending finance confirmation outside open balance,
   expect(host.textContent).not.toContain('票款明细待核对');
   const collect=getByRole(host,'button',{name:'收款与核销'}) as HTMLButtonElement;
   expect(collect.disabled).toBe(true);
-  await click('确认应收');
+  await act(async()=>getAllByRole(document.body,'button',{name:'确认应收',exact:true}).find(b=>!b.closest('[role=dialog]'))!.click());
+  expect(store.value.run).not.toHaveBeenCalledWith({type:'finance.receivable.confirm',payload:{invoiceId:'p'}});
+  expect(getByRole(document.body,'dialog',{name:'确认应收 · CI-P'})).toBeTruthy();
+  await act(async()=>getByRole(getByRole(document.body,'dialog',{name:/确认应收/}),'button',{name:'确认应收'}).click());
   expect(store.value.run).toHaveBeenLastCalledWith({type:'finance.receivable.confirm',payload:{invoiceId:'p'}});
   await click('驳回 CI');
   await act(async()=>getByRole(getByRole(document.body,'dialog',{name:'驳回 CI 应收'}),'button',{name:'驳回并退回更正'}).click());
@@ -86,7 +89,7 @@ it('hands collection to the exact invoice reconciliation context rather than a p
  route.id='a';render();await click('收款与核销');expect(go).toHaveBeenCalledWith('payment-vouchers',undefined,{section:'invoice:a'});expect(store.value.run).not.toHaveBeenCalled();
 });
 
-it('shows only visible statement lines when the archived statement spans hidden business',()=>{const s=store.value.state;s.customers=[{id:'customer',name:'客户',code:'C-1'}];s.partialStatements=[{id:'st-part',customerId:'customer',statementNo:'SOA-PART',asOf:'2026-10-13',hiddenCount:1,sections:[{currency:'USD',lines:[{invoiceId:'a',code:'CI-A',open:'70.00'}],hiddenCount:1}]}];render();const list=getByRole(host,'list',{name:'已生成的客户对账单'});expect(list.textContent).toContain('SOA-PART');expect(list.textContent).toContain('CI-A');expect(list.textContent).toContain('70.00');expect(list.textContent).toContain('另有 1 笔其他范围业务');expect(list.textContent).not.toContain('净欠');expect(getAllByRole(list,'listitem')[0].querySelector('button')).toBeNull();});
+it('shows only visible statement lines when the archived statement spans hidden business',()=>{const s=store.value.state;s.customers=[{id:'customer',name:'客户',code:'C-1'}];s.partialStatements=[{id:'st-part',customerId:'customer',statementNo:'SOA-PART',asOf:'2026-10-13',hiddenCount:1,sections:[{currency:'USD',lines:[{invoiceId:'a',code:'CI-A',open:'70.00'}],hiddenCount:1}]}];render();const list=getByRole(host,'list',{name:'已生成的客户对账单'});expect(list.textContent).toContain('SOA-PART');expect(list.textContent).toContain('CI-A');expect(list.textContent).toContain('70.00');expect(list.textContent).toContain('另含其他范围业务');expect(list.textContent).not.toContain('净欠');expect(getAllByRole(list,'listitem')[0].querySelector('button')).toBeNull();});
 it('records a remittance bank charge on the receivable detail and explains it in the balance',async()=>{
  const a=store.value.state.invoices.find((i:any)=>i.id==='a');a.open=65;a.bankCharges=[{id:'c1',receiptId:'r',amount:5,currency:'USD',reason:'中转行扣费，见入账通知',at:'2026-10-02T02:00:00.000Z',actor:'实际财务'}];
  const row=invoiceLedgerRows(store.value.state).find(r=>r.id==='a')!;expect(invoiceFinancialFacts(store.value.state,row)).toMatchObject({charged:5,unexplained:0});

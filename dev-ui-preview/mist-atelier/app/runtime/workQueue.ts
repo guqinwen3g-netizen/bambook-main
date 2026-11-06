@@ -1,32 +1,42 @@
+import { sampleLoanRemaining } from '../../../../server/src/shared/mistFulfillment';
 import { uiText, ui, localizedPageTitle } from '../../../../services/interfaceLanguage';
-import { isPendingFinanceMistInvoice, MIST_LOGISTICS_DUTY, type MistState, type MistTarget, type MistTask } from '../../../../server/src/shared/mistWorkspace';
+import { isPendingFinanceMistInvoice, mistFxLockUsage, mistMoneyMinor, MIST_LOGISTICS_DUTY, type MistState, type MistTarget, type MistTask } from '../../../../server/src/shared/mistWorkspace';
 import type { MistReview } from './reviews';
 import { addBusinessDays, pendingWeeklyArchive } from '../../../../server/src/shared/mistTeam';
 import { shipmentStage } from './shipmentStage';
+import { advanceBalances } from '../../../../server/src/shared/mistOrderFunding';
 import { financeReceiptDisplay } from './financeReceiptDisplay';
 import { materialDeliveryRows, materialReceiverIds } from '../../../../server/src/shared/mistInternalFabric';
 import { developmentVersionSamples } from '../../../../server/src/shared/mistDevelopmentSamples';
-import { SETTLEMENT_SCOPES, PAYMENT_REQUEST_SCOPES, settlementReceipts, purchaseRequiresSettlementLink, shortClosureBlocker, purchasePrepaymentReadback, payableBills, billRequestedUnpaidMinor, prepaymentPlans } from '../../../../server/src/shared/mistPayables';
+import { disposalReviewBlocker, financialDisposalViews, type FinancialDisposalView, SETTLEMENT_SCOPES, PAYMENT_REQUEST_SCOPES, settlementReceipts, purchaseRequiresSettlementLink, shortClosureBlocker, purchasePrepaymentReadback, payableBills, billRequestedUnpaidMinor, prepaymentPlans } from '../../../../server/src/shared/mistPayables';
 import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
 import { businessDate } from './businessClock';
 import { quotationPendingLines } from '../../../../server/src/shared/mistQuotationLineConversion';
+import { calendarVisibleTo, expandRepeats } from './derivedCalendar';
+import { dueReportSchedules, REPORT_SCHEDULE_KINDS } from '../../../../server/src/shared/mistReportSchedules';
+import { pendingEscalation } from '../../../../server/src/shared/mistRisk';
 
 type CanRead = (view: string) => boolean;
-export type MistWorkSource = 'review' | 'agent' | 'qc' | 'shipping' | 'finance' | 'report' | 'material' | 'task';
+export type MistWorkSource = 'review' | 'agent' | 'qc' | 'shipping' | 'finance' | 'report' | 'material' | 'task' | 'calendar';
 /**
  * 等我处理的一条事项。module 是它计入的侧栏模块（与模块页「待我处理」同一归属）；
  * 其他公司的审批归到 approvals，只进「我的工作」合计。
  */
 export type MistWorkItem = { id: string; source: MistWorkSource; sourceLabel: string; title: string; meta: string; when: string; urgent: boolean; at: string; due?: string; target: MistTarget & { detail?: 'full' }; module: string };
-export const MIST_WORK_SOURCE_LABEL: Record<MistWorkSource, string> = { review: '待我审批', agent: 'Agent 提议', qc: 'QC', shipping: '出运', finance: '财务', report: '周报', material: '物料', task: '工作事项' };
+export const MIST_WORK_SOURCE_LABEL: Record<MistWorkSource, string> = { review: '待我审批', agent: 'Agent 提议', qc: 'QC', shipping: '出运', finance: '财务', report: '周报', material: '物料', task: '工作事项', calendar: '日程提醒' };
 export type MistWorkOptions = {
+  financialDisposals?: FinancialDisposalView[];
   canRead: CanRead; me: string; today: string; reviews?: MistReview[];
+  /** 当前业务时刻（ISO），用于日程提醒；不传时不出提醒。 */
+  now?: string;
   /** 当前账号是否持有某项权限；不传时岗位事项（按权限分派）一律不算我的。 */
   can?: (permission: string) => boolean;
   /** 本公司；只有本公司的审批按业务模块归类。 */
   workspaceId?: string;
 };
 const FINANCE_RETURN_DAYS = 30;
+const QUOTE_EXPIRY_NOTICE_DAYS = 7;
+const addDays = (day: string, n: number) => new Date(Date.parse(day + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
 /** 不在主导航里的视图归到同组的主模块，保证侧栏数字加起来等于合计。 */
 const MODULE_ALIAS: Record<string, string> = { invoices: 'payment-vouchers' };
 export const mistWorkModule = (view: string | undefined) => { const base = (view || '').split('/')[0] || 'cockpit'; return MODULE_ALIAS[base] ?? base; };
@@ -118,6 +128,16 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
     push({ id: `agent-proposal:${proposal.id}`, source: 'agent', title: proposal.summary[0] || proposal.command.type, meta: proposal.summary.slice(1).join(' · '),
       when: '待确认', urgent: true, at: proposal.createdAt, target: { view: 'cockpit', id: proposal.id, section: 'agent-proposal' } as MistTarget, module: 'cockpit' });
   }
+  // 风险按绑定账号派给负责人；审批中的工作已交主管，不重复催办负责人。
+  if (me && canRead('risks')) for (const risk of state.platform?.risks || []) {
+    if (risk.ownerId !== me || risk.state === 'Resolved' || risk.state === 'Escalated' || pendingEscalation(risk)) continue;
+    const overdue = risk.state === 'InProgress' && !!risk.planDue && risk.planDue < today;
+    const when = risk.state === 'Open' ? '待接手'
+      : risk.state === 'Acknowledged' && !risk.plan?.trim() ? '待制定方案'
+      : overdue ? '已逾期' : '待处理';
+    push({ id: `risk:${risk.id}`, source: 'task', title: risk.title, meta: risk.source?.label || '', when, urgent: overdue,
+      at: risk.updatedAt || risk.createdAt, due: risk.planDue || undefined, target: { view: 'risks', id: risk.id, section: 'ledger' } });
+  }
   if (me && canRead('quotations')) {
     for (const quote of state.market?.quotations || []) {
       const customer=state.customers.find(row=>row.id===quote.customerId)?.name;
@@ -132,6 +152,10 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
         } else if (quote.approval?.status === 'approved' && quote.approval.requesterId === me) {
           push({id:`quote-issue:${quote.id}`,source:'task',title:`${quote.code} 报价`,meta:[customer,quote.approval.note].filter(Boolean).join(' · '),when:'待发送',urgent:true,at:quote.approval.decidedAt||quote.approval.submittedAt,target:{view:'quotations',id:quote.id,detail:'full'}});
         }
+      } else if (quote.status === 'Sent' && can('quotations:write') && (quote.approval?.requesterId || state.customers.find(row => row.id === quote.customerId)?.ownerId) === me && !!quote.validUntil && quote.validUntil <= addDays(options.today, QUOTE_EXPIRY_NOTICE_DAYS)) {
+        // ord25：已发送报价到期前 7 天提醒负责人跟进客户；过期后提醒登记失效或出新版本。
+        const expired = quote.validUntil < options.today;
+        push({ id: `quote-expiry:${quote.id}`, source: 'task', title: `${quote.code} 报价`, meta: [customer, `有效期至 ${quote.validUntil}`].filter(Boolean).join(' · '), when: expired ? '已过有效期' : '即将到期', urgent: expired, at: quote.updatedAt, due: quote.validUntil, target: { view: 'quotations', id: quote.id, detail: 'full' } });
       } else if (quote.status === 'Accepted' && quote.approval?.status === 'approved' && quote.approval.requesterId === me && canRead('orders') && can('orders:write')) {
         const remaining=quotationPendingLines(quote).length;
         if(remaining)push({id:`quote-convert:${quote.id}`,source:'task',title:`${quote.code} 报价`,meta:[customer,`${remaining} 个待转条目`].filter(Boolean).join(' · '),when:'待转订单',urgent:true,at:quote.updatedAt,target:{view:'quotations',id:quote.id,detail:'full'}});
@@ -152,8 +176,9 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
     // Receiving authority follows the same current-owner rule as the server; no manual task completion.
     for (const row of materialDeliveryRows(state)) {
       if (row.pending === '0' || !materialReceiverIds(state, row).includes(me)) continue;
-      const branch = state.productions.find(item => item.id === row.delivery.productionId && !item.closed);
-      const contract = f.purchases.find(item => item.id === branch?.sourcePurchaseId && item.kind === 'processing' && item.state === 'approved');
+      const branch = row.delivery.productionId ? state.productions.find(item => item.id === row.delivery.productionId && !item.closed) : undefined;
+      const contractId = row.delivery.contractId ?? branch?.sourcePurchaseId;
+      const contract = f.purchases.find(item => item.id === contractId && item.kind === 'processing' && item.state === 'approved');
       const source = f.purchases.find(item => item.id === row.purchaseId);
       if (!contract || !source) continue;
       push({ id: `material:${row.kind}:${row.id}`, source: 'material', title: `${contract.code} · ${uiText('物料接收')}`,
@@ -161,15 +186,67 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
         target: { view: 'procurement', id: contract.id, detail: 'full', section: 'order:' + row.delivery.orderId, orderLineId: row.delivery.lineId } });
     }
   }
+  // Physical disposal and recovery decisions belong to the warehouse/manager, not QC.
+  if (canRead('inventory')) for (const row of f.stockMovements || []) {
+    if (!row.quarantinedQuantity) continue;
+    const stock = f.stock.find(stock => stock.id === row.stockId), disposition = row.quarantineDisposition;
+    if (!stock) continue;
+    const task = f.qcTasks.find(task => task.id === row.quarantineTaskId);
+    const report = task && f.qcReports.find(report => report.id === task.reportIds.at(-1));
+    const inspect = !disposition && !row.quarantineTaskId && can('inventory:write');
+    const failed = row.quarantineAction === 'dispose' || task?.state === 'blocked' && report?.result === 'reject';
+    const passed = row.quarantineAction === 'release' || task?.state === 'reported' && report?.result === 'pass';
+    const dispose = !disposition && can('inventory:write') && (failed || passed);
+    const decide = disposition && disposition.decision !== 'release' && !disposition.noRecoveryDecision && !disposition.recoveryDecision && can('aftersales:approve');
+    if (!inspect && !dispose && !decide) continue;
+    const action = inspect ? '待送复检' : decide ? '待追偿决定' : passed ? '待恢复可用' : '待处置';
+    push({ id:'quarantine:'+row.id, source:'material', title:`${f.purchases.find(purchase => purchase.id === stock.purchaseId)?.code || stock.id} · ${uiText(action)}`, meta:[stock.name,`${row.quarantinedQuantity} ${stock.unit}`].join(' · '), when:action, urgent:!!dispose && failed, at:disposition?.at || row.at,
+      target:{view:'inventory',id:stock.id,detail:'full'} });
+  }
+  if (canRead('payment-vouchers') && canRead('procurement') && can('invoices:read') && can('vouchers:read') && can('procurement:read') && can(MIST_FINANCE_SCOPES.reconcile)) {
+    const disposals = options.financialDisposals ?? financialDisposalViews(state, new Set((f.purchases || []).map(row => row.id)));
+    for (const row of disposals) {
+      const decision=row.recovery || row.noRecovery;
+      if (!decision || row.review || !me || decision.actorId === me) continue;
+      const blocker = disposalReviewBlocker(state, row);
+      push({ id:'disposal-review:'+row.returnId, source:'finance', title:`${row.purchaseCode} · ${uiText('退料核对')}`, meta:[row.supplier,blocker && uiText(blocker)].filter(Boolean).join(' · '), when:blocker || '待核对', urgent:false, at:decision.at || row.disposedAt || '',
+        target:{view:'payment-vouchers',id:blocker ? row.purchaseId : row.returnId,section:'payables'} });
+    }
+  }
+  if (canRead('payment-vouchers') && can('vouchers:read') && can(MIST_FINANCE_SCOPES.voucher)) for (const lock of state.fxRecords || []) {
+    if (lock.kind !== 'lock' || lock.reversed) continue;
+    const remaining = mistFxLockUsage(state, lock.id).remaining;
+    if (remaining <= 0) continue;
+    push({id:'fx-lock:'+lock.id,source:'finance',title:`${lock.ref} · ${remaining.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} ${lock.currency}`,meta:lock.bankName,when:lock.settleBy || '',urgent:!!lock.settleBy && lock.settleBy <= addDays(today,3),at:lock.createdAt,due:lock.settleBy,target:{view:'payment-vouchers',id:lock.id,section:'accounts'}});
+  }
+  if (me && canRead('samples')) for (const loan of f.sampleMovements || []) {
+    if (loan.kind !== 'lend' || sampleLoanRemaining(state, loan.id) <= 0) continue;
+    // Legacy name-only loans are matched only when the company member list is unambiguous.
+    const members = (state.members || []).filter(member => member.name === loan.person);
+    const borrowerId = loan.borrowerId ?? (members.length === 1 ? members[0].userId : '');
+    if (borrowerId !== me) continue;
+    const sample = f.samples.find(sample => sample.id === loan.sampleId);
+    if (!sample) continue;
+    push({ id: 'sample-return:' + loan.id, source: 'task', title: sample.name, meta: `${sampleLoanRemaining(state, loan.id)} ${sample.unit}`, when: '待归还', urgent: !!loan.expectedReturn && loan.expectedReturn < today,
+      at: loan.at, due: loan.expectedReturn, target: { view: 'samples', id: sample.id, detail: 'full' } });
+  }
   if (canRead('qc-workbench')) for (const task of state.fulfillment.qcTasks) {
     // 待认领/检验中只给专业 QC（qc:inspect，且有该业务线登记权）；业务主管虽有登记权但不是检验岗。
     const qcRole = can('qc:inspect') && can(`qc:${task.domain}_chain:write`), business = can('orders:write');
     const open = qcRole && task.state === 'pending', working = qcRole && task.state === 'working' && !!me && task.assigneeId === me;
-    const sampleBack = business && task.kind === 'sample' && task.state === 'reported' && !sampleBusinessFinished(state, task)
+    const source = task.source;
+    const version = source.kind === 'version' ? state.versions.find(version => version.id === source.versionId && version.devId === source.devId) : undefined;
+    const dev = source.kind === 'version' ? state.devs.find(dev => dev.id === source.devId) : undefined;
+    const rejectedSample = business && !!me && task.kind === 'sample' && source.kind === 'version' && task.state === 'blocked'
+      && state.fulfillment.qcReports.some(report => report.id === task.reportIds.at(-1) && report.result === 'reject')
+      && !!version && !version.qcDecision && !version.archivedAt && !!dev && !dev.closure && dev.ownerId === me && canRead('development');
+    const sampleBack = rejectedSample || business && task.kind === 'sample' && task.state === 'reported' && !sampleBusinessFinished(state, task)
       && (task.source.kind !== 'version' || canRead('development'));
-    const productionBack = business && task.kind === 'production' && (task.state === 'awaiting_business' || task.state === 'blocked');
-    if (!open && !working && !sampleBack && !productionBack) continue;
-    const what = open ? '待认领' : working ? '检验中' : task.kind === 'sample' ? task.source.kind === 'orderLine' && task.businessConfirmation?.result === 'approved' ? '待业务确认' : '待需求方确认' : task.state === 'blocked' ? '检验不通过，待业务决定' : '检验结果待业务确认';
+    const productionBack = business && (task.kind === 'production' || task.kind === 'patrol') && (task.state === 'awaiting_business' || task.state === 'blocked');
+    // A reported incoming lot waits for the warehouse to release or reject it.
+    const incomingBack = can('inventory:write') && task.kind === 'incoming' && !!task.incoming && !task.incoming.releasedAt && (task.state === 'reported' || task.state === 'blocked');
+    if (!open && !working && !sampleBack && !productionBack && !incomingBack) continue;
+    const what = open ? '待认领' : working ? '检验中' : rejectedSample ? '检验不通过，待业务决定' : incomingBack ? (task.state === 'blocked' ? '来料不合格，待登记拒收' : '来料待放行入库') : task.kind === 'sample' ? task.source.kind === 'orderLine' && task.businessConfirmation?.result === 'approved' ? '待业务确认' : '待需求方确认' : task.state === 'blocked' ? '检验不通过，待业务决定' : '检验结果待业务确认';
     push({ id: 'qc:' + task.id, source: 'qc', title: `${task.code} · ${uiText(what)}`, meta: [task.factory, task.requestedBy && uiText('发起人') + ' ' + task.requestedBy].filter(Boolean).join(' · '),
       when: task.state === 'blocked' ? '已阻断' : open ? '待认领' : working ? '处理中' : '待确认', urgent: task.state === 'blocked' || (!!task.due && task.due <= today), at: task.due || task.createdAt, due: task.due || undefined,
       target: sampleBack && task.source.kind === 'version' ? { view: 'development/detail', id: task.source.devId, versionId: task.source.versionId } : { view: 'qc-workbench', id: task.id } });
@@ -253,8 +330,10 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
     }
     if (can('invoices:reconcile')) for (const receipt of state.receipts ?? []) {
       const display = financeReceiptDisplay(receipt, state.orderFunding?.assignments ?? [], state.allocations ?? []);
-      if (receipt.remaining <= 0 || (display.label !== '未认领' && display.label !== '匹配建议')) continue;
-      push({ id: 'receipt:' + receipt.id, source: 'finance', title: `${receipt.payer || '到账'} · ${uiText(display.label === '未认领' ? '到账未认领' : '匹配建议待确认')}`, meta: [`${receipt.currency} ${receipt.remaining.toLocaleString('en-US')}`, receipt.date].filter(Boolean).join(' · '),
+      const reserved = advanceBalances(state).filter(row => row.receiptId === receipt.id && row.currency === receipt.currency).reduce((sum, row) => sum + mistMoneyMinor(row.remaining), 0);
+      const remaining = mistMoneyMinor(receipt.remaining) - reserved;
+      if (remaining <= 0 || !['未认领', '匹配建议', '部分核销'].includes(display.label)) continue;
+      push({ id: 'receipt:' + receipt.id, source: 'finance', title: `${receipt.payer || '到账'} · ${display.label === '部分核销' ? `${receipt.currency} ${(remaining / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : uiText(display.label === '未认领' ? '到账未认领' : '匹配建议待确认')}`, meta: [`${receipt.currency} ${receipt.remaining.toLocaleString('en-US')}`, receipt.date].filter(Boolean).join(' · '),
         when: display.label, urgent: display.label === '未认领', at: receipt.date || '', target: { view: 'payment-vouchers', id: receipt.id } });
     }
     if (can('invoices:write')) for (const invoice of (state.invoices ?? []).filter(isPendingFinanceMistInvoice))
@@ -272,6 +351,19 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
         && (other.purchaseId ?? other.settlementId ?? other.planId ?? '') === (request.purchaseId ?? request.settlementId ?? request.planId ?? ''));
       if (resubmitted) continue;
       push({ id: 'finance:' + request.id, source: 'finance', title: ui`${request.code} · 付款申请被退回`, meta: [request.supplier, request.decision?.actor && '退回人 ' + request.decision.actor, request.decision?.note].filter(Boolean).join(' · '), when: '被退回', urgent: true, at: request.decision?.at || request.submittedAt, target: { view: 'payment-vouchers', id: request.id, section: 'payables' } });
+    }
+  }
+  // fin63：报表订阅到期，提醒本人生成并发送。
+  if (me && canRead('reports')) for (const due of dueReportSchedules(state, me, today))
+    push({ id: `report-schedule:${due.schedule.id}:${due.period}`, source: 'report', title: ui`发送${REPORT_SCHEDULE_KINDS[due.schedule.kind]}`, meta: due.schedule.to, when: '待发送', urgent: due.due < today, at: due.due, due: due.due, target: { view: 'reports', section: due.schedule.kind } as MistTarget });
+  // mar60：设了提醒的日程，在当天进入提醒窗口后列为待我处理，开始时刻过后自动消失。
+  if (me && options.now && state.calendar) {
+    const now = Date.parse(options.now);
+    for (const event of expandRepeats(state.calendar)) {
+      if (!event.remindMinutes || event.date !== today || !calendarVisibleTo(event, me) || !/^\d{2}:\d{2}$/.test(event.time)) continue;
+      const start = Date.parse(`${event.date}T${event.time}:00+08:00`);
+      if (now < start - event.remindMinutes * 60000 || now > start) continue;
+      push({ id: 'calendar:' + event.id, source: 'calendar', title: event.title, meta: [event.time, event.participants?.length ? ui`${event.participants.length + 1} 人参加` : ''].filter(Boolean).join(' · '), when: '即将开始', urgent: true, at: `${event.date}T${event.time}`, due: event.date, target: { view: 'calendar', section: event.date } as MistTarget, module: 'calendar' });
     }
   }
   // 每周一起：主管把上周团队周报生成并存档（服务端冻结此刻数据）；存档后自动消失。

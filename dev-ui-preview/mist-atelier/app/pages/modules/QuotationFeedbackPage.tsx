@@ -40,6 +40,7 @@ import { downloadModuleCsv } from "./ModuleWorkbench";
 import { DraftFiles } from "./fulfillmentKit";
 import { OptionInput } from '../OptionInput';
 import { FEEDBACK_CHANNELS } from '../../runtime/tradeOptions';
+import { FailureNotice } from '../../runtime/FailureNotice';
 const origins = {
   customer: "客户明确说明",
   business: "业务判断（非客户原话）",
@@ -50,11 +51,14 @@ function Record({
   corrected,
   canCorrect,
   onCorrect,
+  onRevise,
 }: {
   r: QuoteFeedbackRecord;
   corrected: boolean;
   canCorrect: boolean;
   onCorrect: () => void;
+  /** ord21：客户还价且报价可出新版本时，按还价单价 / 数量预填新版本。 */
+  onRevise?: () => void;
 }) {
   return (
     <Card>
@@ -63,14 +67,19 @@ function Record({
         sub={uiText(r.input.receivedOn + " · " + r.input.contact)}
         tools={
           canCorrect && !corrected ? (
-            <Button onClick={onCorrect}>{uiText("追加更正")}</Button>
+            <span className="mist-row">
+              {onRevise && r.input.kind === "counteroffer" && r.input.lines.some((l) => l.price || l.quantity) && (
+                <Button variant="primary" onClick={onRevise}>{uiText("按还价建新版本")}</Button>
+              )}
+              <Button onClick={onCorrect}>{uiText("追加更正")}</Button>
+            </span>
           ) : undefined
         }
       />
       <div className="mist-card-body mist-col">
         <Mono>{r.id}</Mono>
         {corrected && (
-          <Banner title={uiText("已有后续更正")}>{uiText("原反馈保留供追溯，不将这条旧表述作为当前结论。")}</Banner>
+          <Banner variant="status" title={uiText("已有后续更正")}>{uiText("原反馈保留供追溯，不将这条旧表述作为当前结论。")}</Banner>
         )}
         {r.input.correctionOfId && (
           <Banner title={uiText("追加更正记录")}>
@@ -298,13 +307,7 @@ export function QuotationFeedbackPage() {
       <MistPage>
         <PageHeader title={uiText("报价客户反馈")} />
         {w.error && (
-          <Banner
-            tone="bad"
-            title={uiText("读取失败")}
-            actions={<Button onClick={() => void retry()}>{uiText("重试读取")}</Button>}
-          >
-            {w.error}
-          </Banner>
+          <FailureNotice title={"读取失败"} detail={w.error} retry={() => void retry()} retryLabel="重试读取" />
         )}
         <EmptyState
           title={uiText(w.loading ? "正在读取准确报价" : "未找到指定报价或被更正反馈")}
@@ -392,18 +395,10 @@ export function QuotationFeedbackPage() {
         }
       />
       {w.error && (
-        <Banner
-          tone="bad"
-          title={uiText("读取失败")}
-          actions={<Button onClick={() => void retry()}>{uiText("重试读取")}</Button>}
-        >
-          {w.error}
-        </Banner>
+        <FailureNotice title={"读取失败"} detail={w.error} retry={() => void retry()} retryLabel="重试读取" />
       )}
       {failure && (
-        <Banner tone="bad" title={uiText("反馈未完成")}>
-          {failure}
-        </Banner>
+        <FailureNotice title={"反馈未完成"} detail={failure} />
       )}
       {w.pending && !w.saving && (
         <Banner
@@ -421,7 +416,7 @@ export function QuotationFeedbackPage() {
         </Banner>
       )}
       {(!can || frozen) && (
-        <Banner title={uiText(!can ? "只读查看" : "尚未登记报价已发送")}>
+        <Banner variant="status" title={uiText(!can ? "只读查看" : "尚未登记报价已发送")}>
           {uiText(!can
             ? "没有报价写权限，可查看原反馈。"
             : "先完成报价主线交付登记；不为未发送的草稿补造客户反馈。")}
@@ -770,6 +765,11 @@ export function QuotationFeedbackPage() {
               canCorrect={can && !frozen && !w.pending && !w.saving}
               onCorrect={() =>
                 go("quotations", q.id, { section: "feedback-correct:" + r.id })
+              }
+              onRevise={
+                q.status === "Sent" && !w.state?.market.quotations.some((x) => x.previousId === q.id)
+                  ? () => go("quotations", q.id, { section: "revise-from:" + r.id })
+                  : undefined
               }
             />
           ))}

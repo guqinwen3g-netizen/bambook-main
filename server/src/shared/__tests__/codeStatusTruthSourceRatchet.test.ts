@@ -123,24 +123,7 @@ function looseTableEntries(): number {
  * 本文件按口径把它记成"少了一处本地推导"，**数字变小是真实进展，不是尺瞎了**（与 B73 那类"尺变宽导致的变小"相反）。
  */
 const BASELINE: Record<string, number> = {
-  'src/finance/route.ts': 149,
-  'src/shipping/route.ts': 52,
-  'src/orders/routeV2.ts': 37,
-  'src/relations/routeV2.ts': 36,
-  'src/development/route.ts': 30,
   // 1f7daebd: confirmed-source result uses its typed status; removed four local entries.
-  'src/orders/orderLinesRoute.ts': 14,
-  'src/relations/route.ts': 18,
-  'src/production/route.ts': 14, // native inspection catch retired two local ternaries.
-  'src/ai/knowledgeDocumentsRoute.ts': 11,
-  'src/orders/route.ts': 6,
-  'src/finance/routeV2.ts': 3,
-  'src/mes/processChainService.ts': 3,
-  'src/production/routeV2.ts': 2,
-  'src/qc/testRequestService.ts': 2,
-  'src/suppliers/tcCertificateService.ts': 2,
-  'src/customer/route.ts': 1,
-  'src/finance/sceneInvoiceService.ts': 1,
 };
 
 /**
@@ -213,8 +196,8 @@ describe('B32 · code→status 只能有一份真源（棘轮）', () => {
       expect(file in actual, `${file} 已经不在基线里了 = 又并进真源了一批，删掉这一行`).toBe(true);
     }
     const total = Object.values(actual).reduce((a, b) => a + b, 0);
-    expect(total, '全仓本地 code→status 条数与基线不符').toBe(381);
-    expect(Object.keys(actual).length, '含本地映射的文件数与基线不符').toBe(17);
+    expect(total, '全仓本地 code→status 条数与基线不符').toBe(338);
+    expect(Object.keys(actual).length, '含本地映射的文件数与基线不符').toBe(15);
   });
 
   it('★ 同码两档必须等于冻结清单（改好一枚就删一行，新长一枚当场红）', () => {
@@ -238,7 +221,7 @@ describe('B32 · code→status 只能有一份真源（棘轮）', () => {
     // ★ 每次跑都把实测值打出来（v3.12 加的）：此前重冻结只能"改一个数跑一遍"猜，
     //   而基线里的数字一旦要动，**看得见实测值**才谈得上"有意识地认账"（否则就是盲调阈值）。
     console.log(`[B32 实测] 表=${narrowTables} 三元=${narrowTerns} 和=${narrowTables + narrowTerns} 宽=${loose} 盲区=${loose - narrowTables} 文件=${hits.filter((h) => h.tableEntries + h.ternaryEntries > 0).length}`);
-    expect(narrowTables + narrowTerns, '两种形状之和必须等于基线总数（口径不许各说各话）').toBe(381);
+    expect(narrowTables + narrowTerns, '两种形状之和必须等于基线总数（口径不许各说各话）').toBe(338);
     // 2026-09-22 v2.47：三元 29 → 28（`shipping/route.ts` 那条三元改问单一映射函数），表形状 364 条未动
     expect(narrowTerns, '原25处，PI两处及inspection两处退休后21；if/helper盲区仍保留').toBe(21);
     expect(narrowTables, '版本回填改读业务错误真源后，表形状364降为360').toBe(360);

@@ -22,13 +22,14 @@ function app() {
   return a;
 }
 const token = () => auth.signToken({ userId: user.id, displayName: 'U', roles: ['viewer'], roleIds: [], permissions: [], departmentIds: [] } as any);
-beforeEach(async () => { user = { id: 'u1', status: 'active', passwordHash: await auth.hashPassword('Temp-pass-1'), metadata: { forceChangePassword: true, passwordResetAt: '2026-10-15T00:00:00Z', note: 'keep' } }; updates = []; });
+beforeEach(async () => { user = { id: 'u1', status: 'active', passwordHash: await auth.hashPassword('Temp-pass-1'), metadata: { forceChangePassword: true, forceChangeReason: 'initial', passwordResetAt: '2026-10-15T00:00:00Z', note: 'keep' } }; updates = []; });
 
 it('本人改密后清除管理员重置留下的 forceChangePassword，其余 metadata 保留', async () => {
   const res = await request(app()).post('/auth/change-password').set('Authorization', `Bearer ${token()}`).send({ currentPassword: 'Temp-pass-1', newPassword: 'New-pass-22' });
   expect(res.status).toBe(200);
   expect(updates).toHaveLength(1);
   expect(updates[0].metadata).toMatchObject({ forceChangePassword: false, passwordResetAt: '2026-10-15T00:00:00Z', note: 'keep' });
+  expect(updates[0].metadata).not.toHaveProperty('forceChangeReason');
   expect(await auth.verifyPassword('New-pass-22', user.passwordHash)).toBe(true);
 });
 it('当前密码错误时不改任何字段；无重置标记时只更新密码', async () => {

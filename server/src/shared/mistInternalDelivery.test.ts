@@ -40,6 +40,29 @@ it('corrects a receiving record with history, detects stale revisions and restor
  expect(internalDeliveryRevision(f.state.internalDeliveries![0])).toBe(2);
 });
 
+it('corrects only an independent partial count after a rejection return and preserves the remaining source capacity',()=>{
+ const f=internalDeliveryFixture(),id=f.send();
+ const count=(accepted:number,rejected:number,expectedRevision:number)=>f.run({type:'order.internal.receive',payload:{id,accepted,rejected,expectedRevision,evidence:'Actual partial count'}},'warehouse');
+ const returned=(quantity:number,expectedRevision:number)=>f.run({type:'order.internal.returnRejected',payload:{id,quantity,expectedRevision,date:'2026-10-30',evidence:'Actual rejected return'}});
+ count(4,1,0);count(3,2,1);returned(1,2);
+ const row=f.state.internalDeliveries![0],first=row.checks[0].id,second=row.checks[1].id;
+ // The first rejection is already covered by a physical return; another independent check may still be corrected.
+ f.run({type:'order.internal.reverseCheck',payload:{id,checkId:second,expectedRevision:3,reason:'Second count corrected'}},'warehouse');
+ expect(internalDeliveryTotals(f.state.internalDeliveries![0])).toMatchObject({accepted:4,rejected:1,returned:1,pending:5,reserved:9});
+ const before=structuredClone(f.state);
+ expect(()=>f.run({type:'order.internal.reverseCheck',payload:{id,checkId:first,expectedRevision:4,reason:'Cannot erase returned rejection'}},'warehouse')).toThrow('退回记录');
+ expect(()=>f.run({type:'order.internal.cancel',payload:{id,expectedRevision:4,reason:'Already partly accepted'}})).toThrow('已有接收');
+ expect(()=>returned(1,4)).toThrow('未退拒收量');
+ expect(f.state).toEqual(before);
+ count(2,3,4);returned(3,5);
+ expect(internalDeliverySources(f.state,f.target.orderId)).toMatchObject([{remaining:4}]);
+ const replacement=f.send(4);
+ f.run({type:'order.internal.receive',payload:{id:replacement,accepted:4,rejected:0,expectedRevision:0,evidence:'Replacement counted'}},'warehouse');
+ expect(f.state.orders.find(o=>o.id===f.target.orderId)?.state).toBe('内部交付完成');
+ expect(f.state.internalDeliveries![0].checks.find(c=>c.id===second)?.reversed?.evidence).toBe('Second count corrected');
+ expect(internalDeliverySources(f.state,f.target.orderId)).toEqual([]);
+});
+
 it('requires approved internal purpose, current QC, actual completion, delivered source and active recipient',()=>{
  for(const mutate of [
   (f:ReturnType<typeof internalDeliveryFixture>)=>{f.state.fulfillment.productionFacts.find(x=>x.productionId===f.productionId)!.completion=undefined;},
@@ -100,4 +123,47 @@ it('distinguishes source handovers by exact evidence and suppresses closed or ca
  delete order.governance!.cancellation;
  Object.assign(f.state.orderLines.find(l=>l.id===f.target.lineId)!,{closure:{status:'closed'}});
  expect(internalDeliverySources(f.state,f.target.orderId)).toEqual([]);
+});
+
+it('moves an open delivery to the successor on a staff handover, keeps the original receiver on record and leaves finished ones alone',()=>{
+ const f=internalDeliveryFixture(),open=f.send(6),done=f.send(4);
+ f.run({type:'order.internal.receive',payload:{id:done,accepted:4,rejected:0,expectedRevision:0,evidence:'Counted'}},'warehouse');
+ f.run({type:'handover.account',payload:{fromUserId:'warehouse',toUserId:'reviewer',reason:'Warehouse clerk left'}},'reviewer');
+ const openRow=f.state.internalDeliveries!.find(r=>r.id===open)!,doneRow=f.state.internalDeliveries!.find(r=>r.id===done)!;
+ expect(openRow).toMatchObject({receiverId:'reviewer',receiver:'Leader',reassignments:[{fromId:'warehouse',from:'Warehouse',toId:'reviewer',to:'Leader',reason:'Warehouse clerk left'}]});
+ expect(doneRow.receiverId).toBe('warehouse');expect(doneRow.reassignments).toBeUndefined();
+ expect(f.state.tasks.find(t=>t.id==='internal-delivery:'+open)?.assigneeIds).toEqual(['reviewer']);
+ // The former receiver can no longer count the goods; the successor can.
+ expect(()=>f.run({type:'order.internal.receive',payload:{id:open,accepted:6,rejected:0,expectedRevision:0,evidence:'Counted'}},'warehouse')).toThrow('指定接收账号');
+ f.run({type:'order.internal.receive',payload:{id:open,accepted:6,rejected:0,expectedRevision:0,evidence:'Counted'}},'reviewer');
+ expect(f.state.orders.find(o=>o.id===f.target.orderId)?.state).toBe('内部交付完成');
+ expect(f.state.events.some(e=>e.text.startsWith('内部交付接收人：Warehouse→Leader'))).toBe(true);
+});
+
+
+it('rolls a cancelled handover back to its source and blocks all further receiving commands on that record',()=>{
+ const f=internalDeliveryFixture(),id=f.send(),before=structuredClone(f.state.fulfillment);
+ f.run({type:'order.internal.cancel',payload:{id,expectedRevision:0,reason:'Goods recalled before receipt'}});
+ expect(internalDeliveryTotals(f.state.internalDeliveries![0])).toMatchObject({accepted:0,pending:0,reserved:0});
+ expect(internalDeliverySources(f.state,f.target.orderId)).toMatchObject([{remaining:10}]);
+ expect(f.state.tasks.find(t=>t.id==='internal-delivery:'+id)?.done).toBe(true);
+ const cancelled=structuredClone(f.state);
+ expect(()=>f.run({type:'order.internal.receive',payload:{id,accepted:10,rejected:0,expectedRevision:1,evidence:'Late receipt'}},'warehouse')).toThrow('已撤回');
+ expect(f.state).toEqual(cancelled);expect(f.state.fulfillment).toEqual(before);
+ const replacement=f.send();
+ f.run({type:'order.internal.receive',payload:{id:replacement,accepted:10,rejected:0,expectedRevision:0,evidence:'Fresh handover counted'}},'warehouse');
+ expect(f.state.orders.find(o=>o.id===f.target.orderId)?.state).toBe('内部交付完成');
+});
+
+it('blocks inactive recipients and cancelled source orders without changing deliveries or inventory',()=>{
+ const f=internalDeliveryFixture(),id=f.send();
+ f.context.members!.find(m=>m.id==='warehouse')!.active=false;
+ const before=structuredClone(f.state);
+ expect(()=>f.run({type:'order.internal.receive',payload:{id,accepted:10,rejected:0,expectedRevision:0,evidence:'Counted'}},'warehouse')).toThrow('停用');
+ expect(f.state).toEqual(before);
+ const cancelled=internalDeliveryFixture();
+ cancelled.state.orders.find(o=>o.id===cancelled.target.orderId)!.governance!.status='cancelled';
+ const snapshot=structuredClone(cancelled.state);
+ expect(()=>cancelled.send()).toThrow();expect(cancelled.state).toEqual(snapshot);
+ expect(internalDeliverySources(cancelled.state,cancelled.target.orderId)).toEqual([]);
 });

@@ -80,7 +80,7 @@ describe('订单核算 · 实际结汇口径', () => {
     settle(f, { receipts: [{ receiptId: f.r1.id, amount: 6000 }] });
     const cost = orderActualCost(f.s, 'o1', 'actual', '2026-10', '2026-10-17');
     expect(cost.revenue.map(l => [l.key, l.amount, l.cny, !!l.estimated])).toEqual([['rev:settled', 6000, 42600, false], ['rev:unsettled', 4000, 28200, true]]);
-    expect(cost).toMatchObject({ revenueCny: 70800, estimated: true, status: 'ok' });
+    expect(cost).toMatchObject({ revenueCny: 70800, estimated: true, status: 'nocost', marginEx: null });
     (f.s as any).fxPeriodRates = [];
     expect(orderActualCost(f.s, 'o1', 'actual', '2026-10', '2026-10-17')).toMatchObject({ status: 'norate', revenueCny: null, missing: ['USD'] });
   });

@@ -8,6 +8,8 @@ import { Banner, Button, Field, FormGrid, FormSection, Pill, Select, SettingRow,
 import { uiText } from '../../../../services/interfaceLanguage';
 import type { MistTeamScope, TeamScopeNodeKind, TeamScopePreview, TeamScopeRef } from '../../../../server/src/shared/mistTeamScope';
 import { mistApiRequest, useMistWorkspace } from '../runtime/workspace';
+import { businessWhen } from './modules/pageKit';
+import { FailureNotice } from '../runtime/FailureNotice';
 
 type Row = { id: string; name: string; scope: MistTeamScope | null; counts: Record<TeamScopeNodeKind, number> | null };
 type Condition = { customerId: string; line: string; season: string; supplierId: string };
@@ -77,7 +79,7 @@ export function TeamScopesSection({ canEdit, initialTeamId, onReturnToTeam }: { 
     {onReturnToTeam && team && <Button variant="quiet" size="sm" onClick={() => onReturnToTeam(team.id)}>{uiText('返回小组')}</Button>}
     <FormSection title={uiText('小组范围')}>
       {rows === null && <Skeleton height={64} />}
-      {error && <Banner tone="bad" title={uiText(error)} actions={<Button size="sm" onClick={() => void load()}>{uiText('重新读取')}</Button>} />}
+      {error && <FailureNotice title="小组范围读取失败" detail={error} retry={() => void load()} retryLabel="重新读取" />}
       {rows && !rows.length && !error && <p className="mist-note">{uiText('本公司还没有在用的小组。')}</p>}
       {rows?.map(row => <SettingRow key={row.id} title={uiText(row.name)} description={uiText(countText(row.counts))}
         control={<Button size="sm" aria-pressed={row.id === teamId} variant={row.id === teamId ? 'secondary' : 'quiet'} onClick={() => edit(row)}>{uiText(canEdit ? '调整范围' : '查看范围')}</Button>} />)}
@@ -106,7 +108,7 @@ export function TeamScopesSection({ canEdit, initialTeamId, onReturnToTeam }: { 
         <Field label={uiText('调整说明')}><TextInput aria-label={uiText('调整说明')} value={note} onChange={event => setNote(event.target.value)} /></Field>
         <Button variant="primary" loading={busy} disabled={busy || !!workspace.pending} onClick={() => void save()}>{uiText('保存范围')}</Button>
       </div>}
-      {!!team.scope?.history.length && <div className="mist-col"><b>{uiText('调整记录')}</b>{team.scope.history.slice(0, 20).map(h => <small key={h.at + h.summary}>{new Date(h.at).toLocaleString()} · {h.actorName} · {uiText(h.summary)}{h.note ? ' · ' + h.note : ''}</small>)}</div>}
+      {!!team.scope?.history.length && <div className="mist-col"><b>{uiText('调整记录')}</b>{team.scope.history.slice(0, 20).map(h => <small key={h.at + h.summary}>{businessWhen(h.at)} · {h.actorName} · {uiText(h.summary)}{h.note ? ' · ' + h.note : ''}</small>)}</div>}
       </div>
     </FormSection>}
   </>;

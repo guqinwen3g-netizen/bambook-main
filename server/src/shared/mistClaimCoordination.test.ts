@@ -27,16 +27,28 @@ function bankReceipt(f:ReturnType<typeof fixture>,value:number,currency='USD',pa
 }
 function cashRecovery(f:ReturnType<typeof fixture>,value=100){const id=f.run({type:'platform.claim.recovery.open',payload:{claimId:f.claimId,supplierId:f.supplierId,currency:'USD',requested:value,basis:'质检与合同依据'}}).id;f.run({type:'platform.claim.recovery.agree',payload:{id,agreed:value,method:'payment',note:'工厂确认付款'}});return id;}
 describe('售后索赔协同',()=>{
+ it('fin44: the requester withdraws a wrong-factory recovery while negotiating; it does not count as company cost',()=>{
+  const f=fixture();
+  const id=f.run({type:'platform.claim.recovery.open',payload:{claimId:f.claimId,supplierId:f.supplierId,currency:'USD',requested:40,basis:'先按色差提出'}} as MistCommand).id;
+  expect(()=>f.run({type:'platform.claim.recovery.withdraw',payload:{id,reason:'选错'}} as MistCommand,f.leader)).toThrow('提出人');
+  f.run({type:'platform.claim.recovery.withdraw',payload:{id,reason:'选错工厂'}} as MistCommand);
+  expect(f.claim().coordination!.recoveries[0]).toMatchObject({state:'Withdrawn'});
+  expect(f.state.tasks.some(t=>t.kind==='claim-recovery:'+id&&!t.done)).toBe(false);
+  const again=f.run({type:'platform.claim.recovery.open',payload:{claimId:f.claimId,supplierId:f.supplierId,currency:'USD',requested:40,basis:'重新提出'}} as MistCommand).id;
+  f.run({type:'platform.claim.recovery.agree',payload:{id:again,agreed:40,method:'payment',note:'工厂同意'}} as MistCommand);
+  expect(()=>f.run({type:'platform.claim.recovery.withdraw',payload:{id:again,reason:'x'}} as MistCommand)).toThrow('放弃追偿');
+  expect(mistCommandPermission({type:'platform.claim.recovery.withdraw',payload:{}} as any)).toBe('aftersales:write');
+ });
  it('maps permissions to the people who actually do each step',()=>{
   const p=(type:string)=>mistCommandPermission({type,payload:{}} as unknown as MistCommand);
   expect(p('platform.claim.notify')).toBe('aftersales:write');expect(p('platform.claim.verify')).toBe('qc:inspect');expect(p('platform.claim.recovery.open')).toBe('aftersales:write');
   expect(p('platform.claim.recovery.settle')).toBe('invoices:reconcile');expect(p('platform.claim.recovery.waive')).toBe('aftersales:approve');
  });
  it('records notification of internal parties and factory without sending anything externally, and creates follow-up work',()=>{
-  const f=fixture(),before=structuredClone([f.claim().dispositions,f.state.platform.credits,f.state.payments,f.state.payables]);notify(f);const n=f.claim().coordination!.notices[0];
+  const f=fixture(),before=structuredClone([f.claim().dispositions,f.state.platform.credits,f.state.payments,f.state.payables]),notificationsBefore=f.state.notifications.length;notify(f);const n=f.claim().coordination!.notices[0];
   expect(n).toMatchObject({supplierName:'江南成衣',factoryChannel:'微信群',note:'客户要求赔 10000',byId:'business'});
   const tasks=f.state.tasks.filter(t=>t.target.id===f.claimId&&!t.done).map(t=>t.kind);expect(tasks).toEqual(expect.arrayContaining(['claim-verify:'+f.claimId,'claim-factory:'+f.claimId]));
-  expect(f.state.notifications[0].detail).toBe('业务员顾言 · 江南成衣');expect([f.claim().dispositions,f.state.platform.credits,f.state.payments,f.state.payables]).toEqual(before);
+  expect(f.state.notifications).toHaveLength(notificationsBefore);expect([f.claim().dispositions,f.state.platform.credits,f.state.payments,f.state.payables]).toEqual(before);
   expect(()=>f.run({type:'platform.claim.notify',payload:{id:f.claimId,supplierId:'nope',factoryChannel:'电话',note:''}})).toThrow('准确工厂');
  });
  it('lets QC record facts, closes the QC task and flags safety issues',()=>{

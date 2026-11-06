@@ -5,12 +5,6 @@ import path from 'path';
 const SCHEMA = fs.readFileSync(
   path.resolve(__dirname, '../../../prisma/schema.prisma'), 'utf-8'
 );
-const TOOLRUNTIME = fs.readFileSync(
-  path.resolve(__dirname, '../../agent/toolRuntime.ts'), 'utf-8'
-);
-const FINANCE_ROUTE = fs.readFileSync(
-  path.resolve(__dirname, '../route.ts'), 'utf-8'
-);
 const PAYMENT_VOUCHER_SERVICE = fs.readFileSync(
   path.resolve(__dirname, '../paymentVoucherMutationService.ts'), 'utf-8'
 );
@@ -91,41 +85,7 @@ describe('task_mqxwgafj: voucher status 枚举校验', () => {
   });
 });
 
-describe('task_mqxwgafj + phase1-w1: toolRuntime apply_voucher 源码验证（复用 service，彻底消除双账本漂移）', () => {
-  // 提取 handleFinanceApplyVoucherToInvoice 函数体（Phase 1 W1 改写为复用 applyAllocation service）
-  function extractApplyVoucherFuncBody(): string {
-    const funcStart = TOOLRUNTIME.indexOf('async function handleFinanceApplyVoucherToInvoice');
-    expect(funcStart).toBeGreaterThan(-1);
-    const funcEnd = TOOLRUNTIME.indexOf('\n}', funcStart + 100);
-    return TOOLRUNTIME.slice(funcStart, funcEnd);
-  }
-
-  it('复用 applyAllocation service（单一写入路径，非内联实现）', () => {
-    const funcBody = extractApplyVoucherFuncBody();
-    // 必须调用 applyAllocation service（route 与 agent 共享同一写入路径）
-    expect(funcBody).toContain('applyAllocation');
-    // 不应内联 invoiceAllocation.upsert / findMany（避免与 service 层重复实现）
-    expect(funcBody).not.toContain('invoiceAllocation.upsert');
-    expect(funcBody).not.toContain('invoiceAllocation.findMany');
-    // 不应再用 paymentVoucher.findMany 汇总 appliedAmount（避免双账本）
-    expect(funcBody).not.toContain('paymentVoucher.findMany');
-  });
-
-  it('在 $transaction 内调用 applyAllocation（事务闭环）', () => {
-    const funcBody = extractApplyVoucherFuncBody();
-    expect(funcBody).toContain('$transaction');
-    expect(funcBody).toContain('applyAllocation');
-  });
-
-  it('透传 service 返回的 newInvoiceStatus / newVoucherStatus / auditId', () => {
-    const funcBody = extractApplyVoucherFuncBody();
-    // service 层负责 status 重算 + 审计写入，agent 工具透传结果
-    expect(funcBody).toContain('newInvoiceStatus');
-    expect(funcBody).toContain('newVoucherStatus');
-    expect(funcBody).toContain('auditId');
-  });
-});
-
+// 2026-11-06: the agent toolRuntime apply_voucher and legacy finance route source checks were removed with those files.
 describe('task_mqxwgafj: paymentVoucherMutationService voucher status 不从 appliedAmount 推导', () => {
   it('createPaymentVoucher: null status 默认 unreconciled + 存在但非法返回 INVALID_STATUS', () => {
     const createStart = PAYMENT_VOUCHER_SERVICE.indexOf('function normalizeCreateInput');
@@ -135,15 +95,6 @@ describe('task_mqxwgafj: paymentVoucherMutationService voucher status 不从 app
     expect(createBody).toContain("'unreconciled'");
     expect(createBody).toContain('INVALID_STATUS');
     expect(createBody).toContain('isValidPaymentVoucherStatus');
-  });
-
-  it('POST /vouchers 非法 status 经 service 返回后 route 400 + return', () => {
-    const postStart = FINANCE_ROUTE.indexOf("router.post('/vouchers'");
-    const postEnd = FINANCE_ROUTE.indexOf("router.patch('/vouchers/:id'");
-    const postBody = FINANCE_ROUTE.slice(postStart, postEnd);
-    expect(postBody).toContain('statusCodeMap');
-    expect(postBody).toContain('INVALID_STATUS: 400');
-    expect(postBody).toContain('return;');
   });
 
   it('PATCH /vouchers/:id status 不可手动修改（STATUS_NOT_MANUAL_SETTABLE，由 allocation 重算）', () => {

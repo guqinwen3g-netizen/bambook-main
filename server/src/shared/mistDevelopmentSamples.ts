@@ -15,6 +15,8 @@ export type MistSampleDispatch = {
   id: string; sampleId: string; sampleCode: string; form: string; unit: string; quantity: number;
   purpose?:SampleSendPurpose;recipient: string; trackingNo: string; fee: MistSampleFee | null; note: string; movementId: string;
   recordedAt: string; recordedBy: string; feeRecordedAt?: string; feeRecordedBy?: string;
+  /** ord14：客户签收与对样品的意见（签收后登记，原寄出记录不改）。 */
+  receipt?: { date: string; feedback: string; at: string; actor: string };
 };
 type VersionSample = MistState['fulfillment']['samples'][number];
 
@@ -33,7 +35,9 @@ export function sampleFormBlocker(state: MistState, dev: MistDev, version: MistV
   if (version.minor) return '小版本沿用大版本实物，不登记新实物';
   if (dev.billing?.request) return DEVELOPMENT_BILLING_LOCK;
   if (developmentClosure(state, dev)?.kind === 'cancelled') return '开发案已取消';
+  if (version.archivedAt) return '本版已留档，请在新版本登记实物';
   if (version.qcDecision?.kind === 'abandon') return '本版已放弃';
+  if (version.qcDecision) return '本版已重新打样，请在新一轮版本登记实物';
   if (!version.returnedAt || !developmentVersionSamples(state, version).length) return '请先登记本版返样';
   return null;
 }

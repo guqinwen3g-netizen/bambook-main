@@ -42,11 +42,13 @@ it('opens the correct QC domain when arriving from an explicitly typed developme
 });
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 
-it('shows the precise returned quantity in an independent quarantine inspection',()=>{
+it('shows the precise returned quantity in an independent quarantine inspection',async()=>{
   store.state!.orders.push({id:'o',code:'SO-F',type:'fabric'} as any);store.state!.orderLines.push({id:'l',orderId:'o',name:'布',style:'F',unit:'米',qty:20} as any);
   store.state!.fulfillment.qcTasks.push(task('held',{domain:'fabric',kind:'quarantine',quarantine:{returnId:'return',stockId:'stock',quantity:4,unit:'米',name:'布'},source:{kind:'orderLine',orderId:'o',lineId:'l'}}));
   render('held');expect(host.textContent).toContain('退料复检');expect(host.textContent).toContain('布 · 4 米');
   expect(getByRole(host,'button',{name:'认领任务'})).toBeTruthy();
+  await click(getByRole(host,'button',{name:'认领任务'}));
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.claim',payload:{id:'held',domain:'fabric'}});expect(document.body.textContent).toContain('已认领 ');
 });
 
 it.each(['resample','abandon','confirmed','archived'] as const)('locks the %s source, retaining history without counting it as open QC work',disposition=>{
@@ -185,6 +187,17 @@ it('lets the current QC transfer to a named member and reschedule with reasons',
   expect(store.run).toHaveBeenLastCalledWith(expect.objectContaining({type:'fulfillment.qc.reschedule',payload:expect.objectContaining({id:'mine',reason:'工厂延期'})}));
 });
 
+it('tells QC the production size plan is missing and blocks the report instead of failing on submit',async()=>{
+  store.state!.productions.push({id:'p2',code:'PB-2',orderId:'o',lineId:'l',order:'SO1',name:'大衣',factory:'江南成衣',qty:800,due:'2026-12-01',pct:40,img:'coat',col:'qc'} as any);
+  store.state!.fulfillment.productionFacts.push({productionId:'p2',sizes:[],revision:1} as any);
+  store.state!.fulfillment.qcTasks.push(task('nosize',{kind:'production',source:{kind:'orderLine',orderId:'o',lineId:'l',productionId:'p2'},state:'working',assignee:'QC甲',assigneeId:'qc-a'}));
+  render('nosize');
+  await click(getByRole(host,'button',{name:'提交 / 追加复验报告'}));
+  expect(host.textContent).toContain('生产尺码未登记');
+  expect((getByRole(host,'button',{name:'提交报告'}) as HTMLButtonElement).disabled).toBe(true);
+  await click(getByRole(host,'button',{name:'查看生产单'}));expect(go).toHaveBeenLastCalledWith('production-board','p2');
+});
+
 it('validates garment size checks and confirms the consequence before appending a report',async()=>{
   store.state!.productions.push({id:'p1',code:'PB-1',orderId:'o',lineId:'l',order:'SO1',name:'衬衫',factory:'华美制衣',qty:20,due:'2026-11-01',pct:50,img:'coat',col:'qc'} as any);
   store.state!.fulfillment.productionFacts.push({productionId:'p1',sizes:[{size:'M',quantity:10},{size:'L',quantity:10}],revision:1} as any);
@@ -225,7 +238,7 @@ it('keeps business resume available to business users and absent for QC-only acc
   expect(queryByRole(host,'button',{name:'确认继续生产'})).toBeNull();
   expect(host.textContent).not.toContain('由业务员确认恢复');
   render('resume','list');
-  expect((getByRole(host,'button',{name:'从来源发起QC'}) as HTMLButtonElement).disabled).toBe(true);
+  expect(queryByRole(host,'button',{name:'从来源发起QC'})).toBeNull();expect(host.textContent).toContain('送检由业务员在准确来源发起');
   expect(queryByRole(document.body,'dialog')).toBeNull();
 });
 
@@ -262,4 +275,42 @@ it('keeps the permanent report notice without claiming a passed report automatic
 
 it('keeps confirmation and continuation evidence in expandable records',async()=>{
  store.state!.fulfillment.qcTasks.push(task('evidence',{state:'reported',businessConfirmation:{result:'approved',actor:'业务员',at:'2026-10-08',note:'燕麦布样批准依据'},businessContinued:{reportId:'r',actor:'业务员',at:'2026-10-08',note:'本批继续依据'}}));render('evidence');expect(host.textContent).not.toContain('燕麦布样批准依据');expect(host.textContent).not.toContain('本批继续依据');await click(getByRole(host,'button',{name:'需求方确认'}));expect(host.textContent).toContain('燕麦布样批准依据');await click(getByRole(host,'button',{name:'业务继续记录'}));expect(host.textContent).toContain('本批继续依据');
+});
+
+it('lets the order owner choose a rework and requires the customer file for a concession',async()=>{
+  store.state!.orders.push({id:'o',code:'SO-G',type:'garment',ownerId:'sales'} as any);store.state!.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',unit:'件',qty:10} as any);
+  store.state!.productions.push({id:'prod',code:'FUL-1',orderId:'o',lineId:'l',order:'SO-G',name:'风衣',factory:'华美制衣',qty:10,due:'2026-10-30',pct:100,img:'coat',col:'qc'} as any);
+  store.state!.fulfillment.qcReports.push({id:'r1',taskId:'nok',result:'reject',report:'PQC-1',opinion:'门襟跳针',measurements:[],fileIds:[],reviewer:'QC甲',reviewedAt:'2026-10-13T09:00:00Z'} as any);
+  store.state!.fulfillment.qcTasks.push(task('nok',{kind:'production',source:{kind:'orderLine',orderId:'o',lineId:'l',productionId:'prod'},state:'blocked',reportIds:['r1'],assignee:'QC甲',assigneeId:'qc-a'}));
+  render('nok');expect(queryByRole(host,'button',{name:'选择处置方式'})).toBeNull();
+  session.id='sales';render('nok');
+  await click(getByRole(host,'button',{name:'选择处置方式'}));
+  const dialog=getByRole(document.body,'dialog',{name:'不合格处置'});
+  typeInto(within(dialog).getByRole('textbox',{name:'处置说明'}) as HTMLTextAreaElement,'全检返修');
+  await click(within(dialog).getByRole('button',{name:'保存'}));
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.dispose',payload:expect.objectContaining({id:'nok',kind:'rework',factory:'华美制衣',note:'全检返修'})});
+  store.run.mockClear();await click(getByRole(host,'button',{name:'选择处置方式'}));
+  const again=getByRole(document.body,'dialog',{name:'不合格处置'});
+  await click(within(again).getByRole('radio',{name:/让步接收/}));
+  typeInto(within(again).getByRole('textbox',{name:'处置说明'}) as HTMLTextAreaElement,'色差');typeInto(within(again).getByRole('textbox',{name:'让步范围'}) as HTMLInputElement,'M 码 4 件');typeInto(within(again).getByRole('textbox',{name:'客户书面同意依据'}) as HTMLInputElement,'买手邮件');
+  await click(within(again).getByRole('button',{name:'提交审批'}));
+  expect(store.run).not.toHaveBeenCalled();expect(again.textContent).toContain('附文件');
+});
+
+it('computes the AQL decision in the production report and lets the warehouse release an inspected incoming lot',async()=>{
+  store.state!.orders.push({id:'o',code:'SO-G',type:'garment',ownerId:'sales'} as any);store.state!.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',unit:'件',qty:1200} as any);
+  store.state!.productions.push({id:'prod',code:'FUL-1',orderId:'o',lineId:'l',order:'SO-G',name:'风衣',factory:'华美制衣',qty:1200,due:'2026-10-30',pct:50,img:'coat',col:'sew'} as any);
+  store.state!.fulfillment.qcTasks.push(task('prod-qc',{kind:'production',source:{kind:'orderLine',orderId:'o',lineId:'l',productionId:'prod'},state:'working',assignee:'QC甲',assigneeId:'qc-a'}));
+  render('prod-qc');await click(getByRole(host,'button',{name:'提交 / 追加复验报告'}));
+  expect(host.textContent).toContain('AQL 抽样');
+  typeInto(getByRole(host,'spinbutton',{name:'实际抽检件数'}) as HTMLInputElement,'80');typeInto(getByRole(host,'spinbutton',{name:'严重缺陷'}) as HTMLInputElement,'6');
+  expect(host.textContent).toContain('80 件（字码 J）');expect(host.textContent).toContain('5 / 6');expect(host.textContent).toContain('抽样拒收');
+  act(()=>root.unmount());root=createRoot(host);
+  store.state!.fulfillment.qcReports.push({id:'ir',taskId:'iqc',result:'pass',report:'IQC-1',opinion:'合格',measurements:[],fileIds:[],reviewer:'QC甲',reviewedAt:'2026-10-13T09:00:00Z'} as any);
+  store.state!.fulfillment.qcTasks.push(task('iqc',{kind:'incoming',incoming:{receiptId:'rc',stockId:'st',quantity:100,unit:'米',name:'坯布'},state:'reported',reportIds:['ir']}));
+  render('iqc');expect(host.textContent).toContain('待检锁定');
+  await click(getByRole(host,'button',{name:'放行入库'}));
+  const dialog=getByRole(document.body,'dialog',{name:'放行入库'});typeInto(within(dialog).getByRole('textbox',{name:'放行依据'}) as HTMLTextAreaElement,'IQC-1 合格');
+  await click(within(dialog).getByRole('button',{name:'放行'}));
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.incoming.close',payload:{id:'iqc',evidence:'IQC-1 合格'}});
 });

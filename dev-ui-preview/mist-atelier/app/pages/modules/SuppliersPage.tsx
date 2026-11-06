@@ -1,11 +1,14 @@
+import { supplierPayableSummary, supplierPayments } from '../../../../../server/src/shared/mistPayables';
+import { readRfqs, RFQ_STATE_LABEL } from '../../../../../server/src/shared/mistSourcing';
+import { CURRENCIES } from '../../runtime/tradeOptions';
 import { interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 /** 供应商管理：类型 / 合作状态筛选，档案含产能工艺、认证有效期、评级历史、在手业务与交付表现；暂停 / 停用按生效日阻止新增业务。 */
 import { BaseDataImportButton } from './BaseDataImport';
 import React from 'react';
-import { Award, Ban, Building2, Download, FileBadge, Pause, Pencil, Play, Plus, Scale, SearchX, UserPlus } from 'lucide-react';
-import { Banner, Button, Card, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, ObjectCell, PageHeader, Pill, Pipeline, SearchField, Timeline, Toolbar, type Column, type Tone } from '../../../../../components/mist';
+import { Award, Ban, Building2, Download, FileBadge, Mail, Pause, Pencil, Play, Plus, Scale, SearchX, UserPlus } from 'lucide-react';
+import { Banner, Button, Card, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, ObjectCell, PageHeader, Pill, Pipeline, SearchField, TextLink, Timeline, Toolbar, type Column, type Tone } from '../../../../../components/mist';
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentPurchase } from '../../../../../server/src/shared/mistFulfillment';
 import { SUPPLIER_GRADES, SUPPLIER_TYPES, marketBusinessDate, supplierGrade, type MarketSupplier, type SupplierCertificate } from '../../../../../server/src/shared/mistMarket';
@@ -16,10 +19,13 @@ import { useMistSession } from '../../runtime/auth';
 import { memberSelectOptions, workspaceMembers } from '../../runtime/members';
 import { MIST_BUSINESS_GROUPS, MIST_BUSINESS_GROUP_LABEL } from '../../../../../server/src/shared/mistAccounts';
 import { useNav } from '../../nav';
-import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
+import { setComposeIntent } from '../../runtime/composeIntent';
+import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec , moduleFileIds } from './ModuleWorkbench';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, businessDay, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
 import { CAPACITY_UNITS, CERTIFICATES, COUNTRIES } from '../../runtime/tradeOptions';
+import { fmt } from '../../data';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 type StatusFilter = 'all' | 'active' | 'paused' | 'blocked';
 type FlagFilter = 'all' | 'certExpiring' | 'certExpired' | 'noCert' | 'unrated' | 'scheduled';
@@ -67,7 +73,7 @@ export type SupplierWorkbenchProps = {
 export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchProps) {
   const { state, run, error, refresh, loading, saving, pending, workspace } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
   const members = workspaceMembers(workspace, state, session.user);
-  const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all'), [typeFilter, setTypeFilter] = React.useState('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [query, setQuery] = React.useState('');
+  const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all'), [typeFilter, setTypeFilter] = React.useState('all'), [gradeFilter, setGradeFilter] = React.useState('all'), [countryFilter, setCountryFilter] = React.useState('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [query, setQuery] = React.useState('');
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
   const full = useListDetailRoute();
@@ -78,7 +84,8 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   const needle = query.trim().toLowerCase();
   const legacyTypes = [...new Set(all.map(s => s.type).filter(t => !(SUPPLIER_TYPES as readonly string[]).includes(t)))];
   const searched = all.filter(s => (!needle || `${s.code} ${s.name} ${s.type} ${s.capabilities} ${s.address} ${s.contacts.map(c => c.name).join(' ')}`.toLowerCase().includes(needle))
-    && (typeFilter === 'all' || s.type === typeFilter) && (flagFilter === 'all' || supplierFlags(s, day).some(f => f.key === flagFilter)));
+    && (typeFilter === 'all' || s.type === typeFilter) && (flagFilter === 'all' || supplierFlags(s, day).some(f => f.key === flagFilter))
+    && (gradeFilter === 'all' || (supplierGrade(s)?.grade || 'none') === gradeFilter) && (countryFilter === 'all' || s.country === countryFilter));
   const statusCount = (v: StatusFilter) => searched.filter(s => v === 'all' || statusNow(s) === v).length;
   const perf = React.useMemo(() => new Map(all.map(s => [s.id, supplierPerformance(state, s.id)])), [state, all, interfaceLocale()]);
   const rows = searched.filter(s => statusFilter === 'all' || statusNow(s) === statusFilter).sort((a, b) => ['active', 'paused', 'blocked'].indexOf(statusNow(a)) - ['active', 'paused', 'blocked'].indexOf(statusNow(b)) || a.code.localeCompare(b.code));
@@ -109,9 +116,9 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   });
   const certSpec = (s: MarketSupplier, c?: SupplierCertificate): ModuleEditorSpec => ({
     title: c ? `更新认证 ${c.name}` : `登记 ${s.name} 的认证`, submitLabel: '保存',
-    initialValues: c ? { name: c.name, number: c.number, issuer: c.issuer, validUntil: c.validUntil } : { name: '', number: '', issuer: '', validUntil: '' },
-    fields: [{ key: 'name', label: '认证名称', type: 'choice', options: CERTIFICATES, required: true }, { key: 'number', label: '证书编号' }, { key: 'issuer', label: '发证机构' }, { key: 'validUntil', label: '有效期至', type: 'date', required: true }],
-    submit: v => run({ type: 'market.supplier.certificate.save', payload: { supplierId: s.id, id: c?.id, name: String(v.name ?? ''), number: String(v.number ?? ''), issuer: String(v.issuer ?? ''), validUntil: String(v.validUntil ?? ''), fileIds: c?.fileIds || [] } }),
+    initialValues: c ? { name: c.name, number: c.number, issuer: c.issuer, validUntil: c.validUntil, files: (c.fileIds || []).join(',') } : { name: '', number: '', issuer: '', validUntil: '', files: '' },
+    fields: [{ key: 'name', label: '认证名称', type: 'choice', options: CERTIFICATES, required: true }, { key: 'number', label: '证书编号' }, { key: 'issuer', label: '发证机构' }, { key: 'validUntil', label: '有效期至', type: 'date', required: true }, { key: 'files', label: '证书扫描件', type: 'files' }],
+    submit: v => run({ type: 'market.supplier.certificate.save', payload: { supplierId: s.id, id: c?.id, name: String(v.name ?? ''), number: String(v.number ?? ''), issuer: String(v.issuer ?? ''), validUntil: String(v.validUntil ?? ''), fileIds: moduleFileIds(v.files) } }),
   });
   // 收款账户：财务登记；更换须写明核实方式（按合同或既有记录中的电话回拨、盖章变更函），原账户保留为已替换。
   const bankSpec = (s: MarketSupplier, currency = 'CNY'): ModuleEditorSpec => {
@@ -119,14 +126,20 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
     return { title: current ? `变更 ${s.name} 的收款账户` : `登记 ${s.name} 的收款账户`, submitLabel: '保存',
       description: current ? '变更后，按原账户提交的付款申请需撤回重新审批。' : undefined,
       initialValues: { currency, accountName: current?.accountName || s.name, bankName: '', accountNo: '', swift: '', verification: '' },
-      fields: [{ key: 'currency', label: '币种', type: 'select', required: true, options: ['CNY', 'USD', 'EUR', 'HKD', 'JPY', 'GBP'].map(c => ({ value: c, label: c })) }, { key: 'accountName', label: '账户名称', required: true }, { key: 'bankName', label: '开户行', required: true },
+      fields: [{ key: 'currency', label: '币种', type: 'select', required: true, options: CURRENCIES.map(c => ({ value: c.value, label: c.label })) }, { key: 'accountName', label: '账户名称', required: true }, { key: 'bankName', label: '开户行', required: true },
         { key: 'accountNo', label: '账号', required: true }, { key: 'swift', label: 'SWIFT（境外）' }, { key: 'verification', label: '核实记录', type: 'textarea', required: true, hint: '向谁、通过合同或既有记录中的电话核实，或盖章变更函' }],
       submit: v => run({ type: 'market.supplier.bank.save', payload: { supplierId: s.id, currency: String(v.currency ?? 'CNY'), accountName: String(v.accountName ?? ''), bankName: String(v.bankName ?? ''), accountNo: String(v.accountNo ?? ''), swift: String(v.swift ?? ''), verification: String(v.verification ?? '') } }) };
   };
+  const bankDisableSpec = (s: MarketSupplier, a: NonNullable<MarketSupplier['bankAccounts']>[number]): ModuleEditorSpec => ({
+    title: `停用收款账户 ${a.currency} · 尾号 ${a.accountNo.slice(-4)}`, submitLabel: '停用', submitVariant: 'danger',
+    description: '按该账户提交的付款申请需撤回，按新账户重新审批。', initialValues: { reason: '' },
+    fields: [{ key: 'reason', label: '停用原因', type: 'textarea', required: true }],
+    submit: v => run({ type: 'market.supplier.bank.disable', payload: { supplierId: s.id, accountId: a.id, reason: String(v.reason ?? '') } }),
+  });
   const deleteCertSpec = (s: MarketSupplier, c: SupplierCertificate): ModuleEditorSpec => ({ title: `删除认证 ${c.name}`, submitLabel: '删除', description: '仅在登记错误时删除；过期认证请保留，以便追溯。', initialValues: {}, fields: [], submit: () => run({ type: 'market.supplier.certificate.delete', payload: { supplierId: s.id, id: c.id } }) });
   const rateSpec = (s: MarketSupplier): ModuleEditorSpec => ({
     title: `评级 ${s.name}`, submitLabel: '保存评级', description: '每次评级单独记录，历史评级保留。',
-    initialValues: { grade: supplierGrade(s)?.grade || 'B', period: '', note: '' },
+    initialValues: { grade: supplierGrade(s)?.grade || 'B', period: '', note: (() => { const p = perf.get(s.id); return p ? [p.completed.length ? `准交 ${rate(p.onTime, p.completed.length)}（${p.onTime}/${p.completed.length} 单）` : '', p.receipts ? `来料无退货 ${rate(p.clean, p.receipts)}（${p.clean}/${p.receipts} 次）` : ''].filter(Boolean).join('；') : ''; })() },
     fields: [{ key: 'grade', label: '评级', type: 'select', required: true, options: SUPPLIER_GRADES.map(g => ({ value: g, label: g })) }, { key: 'period', label: '评级周期', required: true, hint: '例如 2026 Q3' }, { key: 'note', label: '评级依据', type: 'textarea', required: true, hint: '准交、品质、响应等事实依据' }],
     submit: v => run({ type: 'market.supplier.rate', payload: { supplierId: s.id, grade: String(v.grade) as typeof SUPPLIER_GRADES[number], period: String(v.period ?? ''), note: String(v.note ?? '') } }),
   });
@@ -156,9 +169,9 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
     ? <EmptyState icon={SearchX} title={uiText("没有符合条件的供应商")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setStatusFilter('all'); setTypeFilter('all'); setFlagFilter('all'); }}>{uiText("清除筛选")}</Button>} />
     : <EmptyState icon={Building2} title={uiText("还没有供应商")} action={can ? <Button icon={Plus} onClick={() => setDialog(profileSpec())}>{uiText("新增供应商")}</Button> : undefined} />;
   const detail = selected && state
-    ? <SupplierDetail s={selected} state={state} day={day} can={can} canAdmin={canAdmin} canContacts={canContacts} locked={locked} perf={perf.get(selected.id)!} canProcure={session.hasPermission('procurement:write')} canBank={session.hasPermission('invoices:write')} onBank={currency => setDialog(bankSpec(selected, currency))} onRfq={() => go('procurement', undefined, { section: 'rfq:' + selected.id })}
+    ? <SupplierDetail s={selected} state={state} day={day} can={can} canAdmin={canAdmin} canContacts={canContacts} locked={locked} perf={perf.get(selected.id)!} canProcure={session.hasPermission('procurement:write')} canBank={session.hasPermission('invoices:write')} onBank={currency => setDialog(bankSpec(selected, currency))} onBankDisable={a => setDialog(bankDisableSpec(selected, a))} onRfq={() => go('procurement', undefined, { section: 'rfq:' + selected.id })}
         onEdit={() => setDialog(profileSpec(selected))} onRate={() => setDialog(rateSpec(selected))} onCert={c => setDialog(certSpec(selected, c))} onDeleteCert={c => setDialog(deleteCertSpec(selected, c))}
-        onStatus={n => setDialog(statusSpec(selected, n))} onContact={c => setDialog(contactSpec(selected, c))} onOpen={(view, id) => go(view, id)}
+        onStatus={n => setDialog(statusSpec(selected, n))} onContact={c => setDialog(contactSpec(selected, c))} onContactDelete={c => setDialog({ title: `删除联系人 ${c.name}`, submitLabel: '删除', submitVariant: 'danger', fields: [], initialValues: {}, submit: () => run({ type: 'market.contact.delete', payload: { kind: 'supplier', parentId: selected.id, id: c.id } }) })} onOpen={(view, id) => go(view, id)}
         attachments={attachments(selected, !can)} history={history(selected.id)} />
     : <EmptyState icon={Building2} title={uiText("供应商档案")} description={uiText("从左侧列表选择一家供应商，查看认证、评级、在手业务与交付表现。")} compact />;
   const summary = selected ? (() => {
@@ -183,10 +196,12 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
         <Button icon={Download} onClick={() => downloadModuleCsv('供应商.csv', ['编码', '名称', '类型', '地址', '工艺与能力', '月产能', '产能单位', '交付周期天', '评级', '认证', '在手单', '准交', '状态'], rows.map(s => { const p = perf.get(s.id); return [s.code, s.name, s.type, s.address, s.capabilities, s.capacity, s.capacityUnit, s.leadDays, supplierGrade(s)?.grade || '', (s.certificates || []).map(c => `${c.name}(${c.validUntil})`).join('；'), p?.open.length || 0, p?.completed.length ? `${p.onTime}/${p.completed.length}` : '', STATUS_LABEL[statusNow(s)]]; }))}>{uiText("导出")}</Button>
         {can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => setDialog(profileSpec())}>{uiText("新增供应商")}</Button>}
       </>} />
-    {!can && <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有供应商写权限，可以查看档案、认证与交付表现。")}</Banner></div>}
-    {error && <div className="mist-section"><Banner tone="bad" title={uiText("供应商数据未加载")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
+    {!can && <div className="mist-section"><Banner variant="status" tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有供应商写权限，可以查看档案、认证与交付表现。")}</Banner></div>}
+    {error && <FailureNotice title={"供应商数据未加载"} detail={error} retry={() => void refresh()} />}
     <Toolbar>
       <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索名称、编码、工艺、地址或联系人")} />
+      <Dropdown label={uiText("评级")} value={gradeFilter} onChange={setGradeFilter} options={[{ value: 'all', label: '全部' }, ...SUPPLIER_GRADES.map(g => ({ value: g, label: g })), { value: 'none', label: '未评级' }]} />
+      <Dropdown label={uiText("国家地区")} value={countryFilter} onChange={setCountryFilter} options={[{ value: 'all', label: '全部' }, ...[...new Set(all.map(x => x.country).filter(Boolean))].sort().map(c => ({ value: c, label: c }))]} />
       <Dropdown label={uiText("类型")} value={typeFilter} onChange={setTypeFilter} options={[{ value: 'all', label: '全部' }, ...[...SUPPLIER_TYPES, ...legacyTypes].map(t => ({ value: t, label: `${t} · ${all.filter(s => s.type === t).length}` }))]} />
       <Dropdown<FlagFilter> label={uiText("提醒")} value={flagFilter} onChange={setFlagFilter} options={[{ value: 'all', label: '全部' }, { value: 'certExpired', label: '认证已过期' }, { value: 'certExpiring', label: `认证 ${CERT_NEAR_DAYS} 天内到期` }, { value: 'noCert', label: '未登记认证' }, { value: 'unrated', label: '未评级' }, { value: 'scheduled', label: '即将暂停 / 停用' }]} />
     </Toolbar>
@@ -203,10 +218,20 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   </MistPage>;
 }
 
-function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure, canBank, onBank, onRfq, locked, perf, onEdit, onRate, onCert, onDeleteCert, onStatus, onContact, onOpen, attachments, history }: {
-  s: MarketSupplier; state: MistState; day: string; can: boolean; canAdmin: boolean; canContacts: boolean; canProcure: boolean; canBank: boolean; onBank: (currency?: string) => void; onRfq: () => void; locked: boolean; perf: ReturnType<typeof supplierPerformance>;
+/** Correspondence with this supplier: messages linked to it or exchanged with its contacts, and a mailbox draft addressed to them. */
+function SupplierMail({ s, state }: { s: MarketSupplier; state: MistState }) {
+  const { go } = useNav(), session = useMistSession();
+  const emails = new Set(s.contacts.filter(c => c.email).map(c => c.email.toLowerCase()));
+  const rows = (state.email?.messages || []).filter(m => m.folder !== 'trash' && (m.links.some(l => l.kind === 'supplier' && l.id === s.id) || emails.has(m.from.address.toLowerCase()) || m.to.some(t => emails.has(t.address.toLowerCase())))).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 20);
+  const primary = s.contacts.find(c => c.primary && c.email) || s.contacts.find(c => c.email);
+  return <DetailBlock title={ui`邮件 · ${rows.length}`} aside={session.hasPermission('emails:write') && (state.email?.accounts || []).some(a => !a.removed) ? <Button variant="quiet" icon={Mail} onClick={() => { setComposeIntent({ to: primary?.email || '', subject: '', links: [{ kind: 'supplier', id: s.id }] }); go('emails'); }}>{uiText('写邮件')}</Button> : undefined}>
+    {rows.length ? <div className="mist-col" style={{ gap: 4 }}>{rows.map(m => <TextLink key={m.id} onClick={() => go('emails', m.id)}>{m.subject || '（无主题）'} · {m.folder === 'sent' ? m.to.map(t => t.name || t.address).join('、') : m.from.name || m.from.address} · {m.at.slice(0, 10)}</TextLink>)}</div> : <span className="mist-muted">{uiText('还没有往来邮件。')}</span>}
+  </DetailBlock>;
+}
+function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure, canBank, onBank, onBankDisable, onRfq, locked, perf, onEdit, onRate, onCert, onDeleteCert, onStatus, onContact, onContactDelete, onOpen, attachments, history }: {
+  s: MarketSupplier; state: MistState; day: string; can: boolean; canAdmin: boolean; canContacts: boolean; canProcure: boolean; canBank: boolean; onBank: (currency?: string) => void; onBankDisable: (a: NonNullable<MarketSupplier['bankAccounts']>[number]) => void; onRfq: () => void; locked: boolean; perf: ReturnType<typeof supplierPerformance>;
   onEdit: () => void; onRate: () => void; onCert: (c?: SupplierCertificate) => void; onDeleteCert: (c: SupplierCertificate) => void; onStatus: (s: MarketSupplier['status']) => void;
-  onContact: (c?: MarketSupplier['contacts'][number]) => void; onOpen: (view: string, id?: string) => void; attachments: React.ReactNode; history: React.ReactNode;
+  onContact: (c?: MarketSupplier['contacts'][number]) => void; onContactDelete: (c: MarketSupplier['contacts'][number]) => void; onOpen: (view: string, id?: string) => void; attachments: React.ReactNode; history: React.ReactNode;
 }) {
   const service=isServiceSupplier(s);
   const now = supplierStatusOn(s, day), grade = supplierGrade(s), flags = supplierFlags(s, day), certs = s.certificates || [];
@@ -248,7 +273,7 @@ function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure,
       {(s.bankAccounts || []).some(a => a.state === 'active') ? <div className="mist-col" style={{ gap: 0 }} role="list" aria-label={ui`${s.name} 收款账户`} data-supplier-bank>{(s.bankAccounts || []).filter(a => a.state === 'active').map(a => <div key={a.id} role="listitem" className="mist-col mist-quote-line" style={{ gap: 4, padding: '10px 0' }}>
         <div className="mist-row" style={{ gap: 8 }}><strong>{a.accountName}</strong><span className="mist-spacer" /><Pill tone="neutral">{a.currency}</Pill>{Date.parse(day) - Date.parse(businessDay(a.addedAt)) < PAYEE_RECENT_DAYS * 86400000 && <Pill tone="warn">{uiText('近期变更')}</Pill>}</div>
         <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><small className="mist-muted">{a.bankName} · <Mono>{a.accountNo}</Mono>{a.swift ? <> · SWIFT <Mono>{a.swift}</Mono></> : null}{uiText(' · ')}{a.addedBy} {businessDay(a.addedAt)}</small><span className="mist-spacer" />
-          {canBank && <Button variant="quiet" disabled={locked} onClick={() => onBank(a.currency)}>{uiText('变更')}</Button>}</div>
+          {canBank && <><Button variant="quiet" disabled={locked} onClick={() => onBank(a.currency)}>{uiText('变更')}</Button><Button variant="quiet" disabled={locked} onClick={() => onBankDisable(a)}>{uiText('停用')}</Button></>}</div>
       </div>)}</div> : <span className="mist-muted">{uiText("未登记收款账户")}</span>}
     </DetailBlock>
     <DetailBlock title={ui`认证 · ${certs.length}`} aside={can ? <Button variant="quiet" icon={Plus} disabled={locked} onClick={() => onCert()}>{uiText("登记")}</Button> : undefined}>
@@ -269,11 +294,17 @@ function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure,
         <Mono>{c.purchase.code}</Mono><span style={{ flex: '1 1 160px', minWidth: 0 }}>{c.purchase.description}<small className="mist-cell-sub">{uiText("到货 ")}{c.last}{uiText(" · 承诺 ")}{c.promised}</small></span><Pill tone={c.onTime ? 'ok' : 'bad'}>{uiText(c.onTime ? '准时' : '延迟')}</Pill>
       </div>)}</div>
     </DetailBlock>}
+    {/* mar36：应付余额、近期付款与询价历史（只读，有财务或采购读权限才有数据）。 */}
+    {(() => { const pay = supplierPayableSummary(state, day).filter(r => r.supplierId === s.id), payments = supplierPayments(state, day).filter(p => p.supplierId === s.id).slice(0, 5), rfqs = readRfqs(state).filter(r => r.supplierIds.includes(s.id)).slice(0, 5);
+      return <>{!!pay.length && <DetailBlock title={uiText('应付余额')} aside={<TextLink onClick={() => onOpen('payment-vouchers', undefined)}>{uiText('应付待办')}</TextLink>}>{pay.map(r => <div key={r.currency} className="mist-row"><span>{r.currency}</span><span className="mist-spacer" /><span className="mist-num">{uiText('未付 ')}{fmt(r.open, 2)}{r.overdue ? ` · ${uiText('逾期')} ${r.overdue}` : ''}</span></div>)}</DetailBlock>}
+        {!!payments.length && <DetailBlock title={uiText('近期付款')}>{payments.map(p => <div key={p.id} className="mist-row"><Mono>{p.code}</Mono><span className="mist-note">{p.date}</span><span className="mist-spacer" /><span className="mist-num">{fmt(p.amount, 2)} {p.currency}</span></div>)}</DetailBlock>}
+        {!!rfqs.length && <DetailBlock title={uiText('询价历史')}>{rfqs.map(r => <div key={r.id} className="mist-row"><TextLink onClick={() => onOpen('procurement', r.id)}>{r.code}</TextLink><span className="mist-note">{r.description}</span><span className="mist-spacer" /><Pill tone={r.award?.supplierId === s.id ? 'ok' : 'neutral'}>{uiText(r.award?.supplierId === s.id ? '中标' : RFQ_STATE_LABEL[r.state])}</Pill></div>)}</DetailBlock>}</>; })()}
     <DetailBlock title={ui`联系人 · ${s.contacts.length}`} aside={canContacts ? <Button variant="quiet" icon={UserPlus} disabled={locked} onClick={() => onContact()}>{uiText("添加")}</Button> : undefined}>
       {s.contacts.length ? <div className="mist-col" style={{ gap: 0 }}>{s.contacts.map(c => <div key={c.id} className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}>
-        <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{c.name}{uiText(c.role ? ' · ' + c.role : '')}<small className="mist-cell-sub">{[c.phone, c.email].filter(Boolean).join(' · ') || '未填联系方式'}</small></span>{c.primary && <Pill>{uiText("主联系人")}</Pill>}{canContacts && <Button variant="quiet" disabled={locked} onClick={() => onContact(c)}>{uiText("编辑")}</Button>}
+        <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{c.name}{uiText(c.role ? ' · ' + c.role : '')}<small className="mist-cell-sub">{[c.phone, c.email].filter(Boolean).join(' · ') || '未填联系方式'}</small></span>{c.primary && <Pill>{uiText("主联系人")}</Pill>}{canContacts && <Button variant="quiet" disabled={locked} onClick={() => onContact(c)}>{uiText("编辑")}</Button>}{canContacts && <Button variant="quiet" disabled={locked} onClick={() => onContactDelete(c)}>{uiText("删除")}</Button>}
       </div>)}</div> : <span className="mist-muted">{uiText("未登记联系人。")}</span>}
     </DetailBlock>
+    <SupplierMail s={s} state={state} />
     {!!products.length && <DetailBlock title={ui`引用档案 · ${products.length}`}>
       <div className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }}>{products.map(p => <Button key={p.id} variant="quiet" onClick={() => onOpen('products', p.id)}><Mono>{p.sku}</Mono> {p.name}{uiText(p.supplierCode ? ` · ${p.supplierCode}` : '')}</Button>)}</div>
     </DetailBlock>}

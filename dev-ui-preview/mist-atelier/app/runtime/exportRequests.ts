@@ -1,4 +1,4 @@
-export type GeneratedExportRequest = { filename: string; rowCount: number; run: () => void };
+export type GeneratedExportRequest = { filename: string; rowCount: number; run: () => void | Promise<void> };
 export const GENERATED_EXPORT_EVENT = 'bambook:confirm-generated-export';
 
 /** Generated exports must be accepted by the active application confirmation host. */

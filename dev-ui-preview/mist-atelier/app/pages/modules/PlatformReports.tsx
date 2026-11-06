@@ -10,11 +10,15 @@ import { isActiveMistInvoice, isRecognizedMistInvoice, mistMoneyMinor, type Mist
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
-import { downloadModuleCsv } from './ModuleWorkbench';
+import { downloadModuleCsv, downloadModuleXlsx } from './ModuleWorkbench';
+import { ReportSchedules } from './ReportSchedules';
 import { OrderActualCostPanel } from './OrderActualCostPanel';
+import { REBATE_ACCESS_TEXT, rebateAccess } from './RebatePanel';
 import { FX_BASIS_LABEL, fxOrderActual, fxRateFor, fxUnallocatedSettlements, type FxBasis, type FxResolved } from '../../../../../server/src/shared/mistFxRates';
 import { orderRebate } from '../../../../../server/src/shared/mistExportRebate';
+import { monthlyFinanceSummary } from '../../../../../server/src/shared/mistFinanceReports';
 import { mistInvoiceCustomerId, mistInvoiceCustomerName } from '../../../../../server/src/shared/mistOpeningBalance';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 const money = (n: number) => new Intl.NumberFormat(interfaceLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 const minor = (n: number) => mistMoneyMinor(n);
@@ -23,8 +27,16 @@ const businessDay = (at: string) => { try { return platformBusinessDate(at); } c
 
 export type CustomerSalesRow = { id: string; customerId: string; customer: string; currency: string; orders: number; amount: number; invoiced: number; received: number; open: number };
 /** 订单按业务日（上海）落在范围内；开票、已收、未收只统计这些订单的有效发票。 */
-export function buildCustomerSales(state: MistState, from = '', to = '', currency = ''): CustomerSalesRow[] {
-  const orders = state.orders.filter(o => o.governance?.contract?.kind !== 'internal').filter(o => { const d = businessDay(o.createdAt); return (!from || d >= from) && (!to || d <= to) && (!currency || o.currency === currency); });
+export type SalesBasis = 'order' | 'shipment' | 'invoice';
+export const SALES_BASIS_LABEL: Record<SalesBasis, string> = { order: '订单创建日', shipment: '出运离港日', invoice: '开票日' };
+/** fin62: the date an order counts under. Shipment = first departure carrying it; invoice = first recognized invoice. Orders without that date are left out. */
+export function salesBasisDay(state: MistState, o: MistState['orders'][number], basis: SalesBasis): string {
+  if (basis === 'order') return businessDay(o.createdAt);
+  if (basis === 'shipment') return (state.fulfillment?.shipments || []).filter(s => s.departedAt && s.state !== 'cancelled' && s.lines.some(l => l.orderId === o.id)).map(s => businessDay(s.departedAt!)).sort()[0] || '';
+  return state.invoices.filter(i => i.orderId === o.id && isRecognizedMistInvoice(i) && i.issuedAt).map(i => businessDay(i.issuedAt!)).sort()[0] || '';
+}
+export function buildCustomerSales(state: MistState, from = '', to = '', currency = '', basis: SalesBasis = 'order'): CustomerSalesRow[] {
+  const orders = state.orders.filter(o => o.governance?.contract?.kind !== 'internal').filter(o => { const d = salesBasisDay(state, o, basis); return !!d && (!from || d >= from) && (!to || d <= to) && (!currency || o.currency === currency); });
   const map = new Map<string, { customerId: string; customer: string; currency: string; orders: number; amount: number; invoiced: number; open: number }>();
   for (const o of orders) {
     const key = (o.customerId || o.customer) + '|' + o.currency, row = map.get(key) ?? { customerId: o.customerId, customer: o.customer, currency: o.currency, orders: 0, amount: 0, invoiced: 0, open: 0 };
@@ -111,33 +123,41 @@ export function buildReceivableAging(state: MistState, asOf: string): AgingRow[]
 
 export type OrderProgressRow = { id: string; code: string; customer: string; due: string; progress: number; state: string; tone: string; status: 'overdue' | 'soon' | 'ontrack' | 'nodue'; lateDays: number };
 /** 未完成订单（进度 < 100%）：已过交期为逾期，7 天内到期为临近。 */
+/** 已履行完毕（或已交付内部接收方）的订单状态；不再计入在途与交期逾期。 */
+export const ORDER_FINISHED_STATES = ['已出运', '履约完成', '已完成', '已取消', '已作废', '待收尾款', '内部交付完成', '已交接'];
 export function buildOrderProgress(state: MistState, asOf: string): OrderProgressRow[] {
-  return state.orders.filter(o => o.progress < 100).map(o => {
+  // 交期逾期看订单是否履行完毕，不看生产进度：生产 100% 但尚未出运的订单过了交期同样逾期。口径与首页“履行中订单”一致。
+  return state.orders.filter(o => o.governance?.status === 'approved' && !ORDER_FINISHED_STATES.includes(o.state)).map(o => {
     const late = o.due ? days(o.due, asOf) : 0;
     const status: OrderProgressRow['status'] = !o.due ? 'nodue' : late > 0 ? 'overdue' : late >= -7 ? 'soon' : 'ontrack';
     return { id: o.id, code: o.code, customer: o.customer, due: o.due, progress: o.progress, state: o.state, tone: o.tone, status, lateDays: Math.max(0, late) };
   }).sort((a, b) => ({ overdue: 0, soon: 1, ontrack: 2, nodue: 3 }[a.status] - { overdue: 0, soon: 1, ontrack: 2, nodue: 3 }[b.status]) || b.lateDays - a.lateDays || a.due.localeCompare(b.due));
 }
-const PROGRESS_STATUS = { overdue: { label: '已逾期', tone: 'bad' }, soon: { label: '7 天内到期', tone: 'warn' }, ontrack: { label: '正常', tone: 'ok' }, nodue: { label: '未填交期', tone: 'neutral' } } as const;
+export const PROGRESS_STATUS = { overdue: { label: '已逾期', tone: 'bad' }, soon: { label: '7 天内到期', tone: 'warn' }, ontrack: { label: '正常', tone: 'ok' }, nodue: { label: '未填交期', tone: 'neutral' } } as const;
 
-type ReportTab = 'sales' | 'margin' | 'actual' | 'aging' | 'orders';
+type ReportTab = 'sales' | 'margin' | 'actual' | 'aging' | 'orders' | 'cash';
 export function PlatformReportsPage() {
   const workspace = useMistWorkspace(), session = useMistSession(), { route, go } = useNav(), state = workspace.state;
   // 毛利涉及采购成本，只给报表管理者（业务主管、财务、老板）看；本机演示公司为单人使用。
   const canSeeMargin = session.hasPermission('reports:admin');
-  const tab: ReportTab = route.section === 'aging' || route.section === 'orders' || ((route.section === 'margin' || route.section === 'actual') && canSeeMargin) ? route.section : 'sales';
+  const tab: ReportTab = route.section === 'aging' || route.section === 'orders' || (route.section === 'cash' && canSeeMargin) || ((route.section === 'margin' || route.section === 'actual') && canSeeMargin) ? route.section : 'sales';
   const asOf = platformBusinessDate(businessNow());
   const [from, setFrom] = React.useState(''), [to, setTo] = React.useState(''), [currency, setCurrency] = React.useState(''), [progressFilter, setProgressFilter] = React.useState('');
   // 默认口径：有实际结汇用实际结汇，否则有月末汇率用月末暂估，都没有则原币。
   const [viewChoice, setView] = React.useState<MarginView | null>(null), view: MarginView = viewChoice ?? ((state?.fxRecords || []).some(r => r.kind === 'settlement' && !r.reversed) ? 'actual' : (state?.fxPeriodRates || []).some(r => !r.voided) ? 'period' : 'none'), [fxMonth, setFxMonth] = React.useState(asOf.slice(0, 7));
   const invalid = !!from && !!to && from > to;
   const currencies = [...new Set([...(state?.orders ?? []).map(o => o.currency), ...(state?.invoices ?? []).map(i => i.currency)])].filter(Boolean).sort();
-  const sales = state && !invalid ? buildCustomerSales(state, from, to, currency) : [];
+  const [salesBasis, setSalesBasis] = React.useState<SalesBasis>('order');
+  const sales = state && !invalid ? buildCustomerSales(state, from, to, currency, salesBasis) : [];
+  const cash = state && !invalid && tab === 'cash' ? monthlyFinanceSummary(state, from, to).filter(r => !currency || r.currency === currency) : [];
   const margin = state && !invalid && tab === 'margin' && view === 'none' ? buildOrderMargin(state, from, to, currency) : [];
   const cny = state && !invalid && tab === 'margin' && view !== 'none' ? buildOrderMarginCny(state, view, fxMonth, asOf, from, to, currency) : [];
   const unallocated = state && tab === 'margin' && view === 'actual' ? fxUnallocatedSettlements(state, asOf) : [];
   const cnyOk = cny.filter(r => r.status === 'ok'), sum = (pick: (r: OrderMarginCnyRow) => number | null) => cnyOk.reduce((t, r) => t + minor(pick(r) ?? 0), 0) / 100;
   const cnyTotals = { revenue: sum(r => r.revenueCny), ex: sum(r => r.marginEx), rebate: sum(r => r.rebate.approved), inc: sum(r => r.marginIn), estimated: cnyOk.filter(r => r.estimated).length };
+  // 退税金额不可读（无 tax:read 或无 sensitive:tax_base）时，退税与含退税毛利都不显示，避免从毛利差额反推退税。
+  const rebateClaimsReceived = (state?.exportRebate?.claims || []).filter(c => (c.receipts || []).some(x => !x.reversed)).length;
+  const rebateView = state ? rebateAccess(state, workspace.workspace?.access?.hidden) : 'full', rebateShown = rebateView === 'full', rebateHidden = rebateView === 'full' ? '' : REBATE_ACCESS_TEXT[rebateView];
   const marginTotals = [...new Set(margin.map(r => r.currency))].map(c => { const rows = margin.filter(r => r.currency === c && r.status === 'ok'), rev = rows.reduce((t, r) => t + minor(r.revenue), 0), m = rows.reduce((t, r) => t + minor(r.margin ?? 0), 0); return { currency: c, revenue: rev / 100, margin: m / 100, rate: rev ? m / rev : null, orders: rows.length }; });
   const aging = state ? buildReceivableAging(state, asOf).filter(r => !currency || r.currency === currency) : [];
   const progress = state ? buildOrderProgress(state, asOf) : [];
@@ -175,8 +195,8 @@ export function PlatformReportsPage() {
     { key: 'fx', header: '汇率', width: 'minmax(120px,1fr)', hideOnMobile: true, render: r => r.fx ? <div className="mist-col" style={{ gap: 2 }}><span>{uiText(r.fx.label)}</span>{r.estimated && <small className="mist-tone-warn">{uiText("暂估")}</small>}</div> : <span className="mist-tone-bad">{uiText("缺 ")}{r.currency}{uiText(" 汇率")}</span> },
     { key: 'cost', header: '采购成本', align: 'right', render: r => r.costCny === null || !r.purchases ? <span className="mist-note">—</span> : money(r.costCny), sortValue: r => r.costCny ?? 0 },
     { key: 'ex', header: '毛利 · 不含退税', align: 'right', render: r => r.marginEx === null ? <span className="mist-note">—</span> : <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><b className={r.marginEx < 0 ? 'mist-tone-bad' : undefined}>{money(r.marginEx)}</b><small className="mist-muted">{percent(r.rateEx)}</small></div>, sortValue: r => r.marginEx ?? -Infinity },
-    { key: 'rebate', header: '出口退税', align: 'right', render: r => !r.rebate.expected ? <span className="mist-note">{uiText("未申报")}</span> : <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span>{money(r.rebate.approved)}</span><small className={r.rebate.received && r.rebate.received < r.rebate.approved ? 'mist-tone-warn' : 'mist-muted'}>{uiText(r.rebate.approved !== r.rebate.expected ? `应退 ${money(r.rebate.expected)} · ` : '')}{uiText(r.rebate.received ? `到账 ${money(r.rebate.received)}${r.rebate.received !== r.rebate.approved ? ` · 差 ${money(r.rebate.received - r.rebate.approved)}` : ''}` : '未到账')}</small></div>, sortValue: r => r.rebate.approved },
-    { key: 'in', header: '毛利 · 含退税', align: 'right', render: r => r.marginIn === null ? <span className="mist-note">—</span> : <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><b className={r.marginIn < 0 ? 'mist-tone-bad' : undefined}>{money(r.marginIn)}</b><small className="mist-muted">{percent(r.rateIn)}</small></div>, sortValue: r => r.marginIn ?? -Infinity },
+    { key: 'rebate', header: '出口退税', align: 'right', render: r => !rebateShown ? <span className="mist-note">{uiText(rebateHidden)}</span> : !r.rebate.expected ? <span className="mist-note">{uiText("未申报")}</span> : <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span>{money(r.rebate.approved)}</span><small className={r.rebate.received && r.rebate.received < r.rebate.approved ? 'mist-tone-warn' : 'mist-muted'}>{uiText(r.rebate.approved !== r.rebate.expected ? `应退 ${money(r.rebate.expected)} · ` : '')}{uiText(r.rebate.received ? `到账 ${money(r.rebate.received)}${r.rebate.received !== r.rebate.approved ? ` · 差 ${money(r.rebate.received - r.rebate.approved)}` : ''}` : '未到账')}</small></div>, sortValue: r => rebateShown ? r.rebate.approved : 0 },
+    { key: 'in', header: '毛利 · 含退税', align: 'right', render: r => !rebateShown ? <span className="mist-note">{uiText(rebateHidden)}</span> : r.marginIn === null ? <span className="mist-note">—</span> : <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><b className={r.marginIn < 0 ? 'mist-tone-bad' : undefined}>{money(r.marginIn)}</b><small className="mist-muted">{percent(r.rateIn)}</small></div>, sortValue: r => rebateShown ? r.marginIn ?? -Infinity : 0 },
     { key: 'status', header: '说明', width: 'minmax(120px,1fr)', render: r => <><Pill tone={CNY_STATUS[r.status].tone}>{uiText(CNY_STATUS[r.status].label)}</Pill>{r.missing.length > 0 && <div className="mist-note">{uiText("缺 ")}{r.missing.join('、')}</div>}{r.pending > 0 && <div className="mist-note">{r.pending}{uiText(" 张采购未批准，未计入")}</div>}</> },
   ];
   const agingColumns: Column<AgingRow>[] = [
@@ -193,24 +213,27 @@ export function PlatformReportsPage() {
     { key: 'status', header: '交期状态', width: '120px', render: r => <Pill tone={PROGRESS_STATUS[r.status].tone}>{uiText(PROGRESS_STATUS[r.status].label)}{uiText(r.status === 'overdue' ? ` ${r.lateDays} 天` : '')}</Pill> },
     { key: 'state', header: '当前环节', render: r => r.state },
   ];
-  const exportCurrent = () => {
-    if (tab === 'sales') downloadModuleCsv('客户销售额.csv', ['客户', '币种', '订单数', '订单金额', '已开票', '已收', '未收'], sales.map(r => [r.customer, r.currency, r.orders, r.amount, r.invoiced, r.received, r.open]));
-    else if (tab === 'margin' && view !== 'none') downloadModuleCsv(`订单毛利-人民币-${FX_BASIS_LABEL[view]}.csv`, ['订单', '客户', '币种', '原币收入', '汇率口径', '汇率', '暂估', '收入CNY', '采购成本CNY', '毛利不含退税', '毛利率不含退税%', '退税核准或应退', '退税应退', '退税到账', '毛利含退税', '毛利率含退税%', '说明'], cny.map(r => [r.code, r.customer, r.currency, r.revenue, FX_BASIS_LABEL[view], r.fx ? Math.round(r.fx.rate * 1e6) / 1e6 : '', r.estimated ? '是' : '', r.revenueCny ?? '', r.costCny ?? '', r.marginEx ?? '', r.rateEx === null ? '' : Math.round(r.rateEx * 1000) / 10, r.rebate.approved, r.rebate.expected, r.rebate.received, r.marginIn ?? '', r.rateIn === null ? '' : Math.round(r.rateIn * 1000) / 10, CNY_STATUS[r.status].label + (r.missing.length ? ' ' + r.missing.join('/') : '')]));
-    else if (tab === 'margin') downloadModuleCsv('订单毛利.csv', ['订单', '客户', '币种', '销售收入', '采购成本', '毛利', '毛利率%', '已到票', '说明', '异币种采购', '未批准采购数'], margin.map(r => [r.code, r.customer, r.currency, r.revenue, r.purchases ? r.cost : '', r.margin ?? '', r.rate === null ? '' : Math.round(r.rate * 1000) / 10, r.billed, MARGIN_STATUS[r.status].label, r.foreign, r.pending]));
-    else if (tab === 'aging') downloadModuleCsv(`应收账龄-${asOf}.csv`, ['客户', '币种', ...AGING_BUCKETS.map(b => b.label), '未收合计'], aging.map(r => [r.customer, r.currency, ...AGING_BUCKETS.map(b => r[b.key]), r.total]));
-    else downloadModuleCsv(`订单进度-${asOf}.csv`, ['订单', '客户', '交期', '进度%', '交期状态', '逾期天数', '当前环节'], shownProgress.map(r => [r.code, r.customer, r.due, r.progress, PROGRESS_STATUS[r.status].label, r.lateDays, r.state]));
+  const exportCurrent = (format: 'csv' | 'xlsx' = 'csv') => {
+    const out = (name: string, headers: string[], rows: unknown[][]) => format === 'xlsx' ? downloadModuleXlsx(name.replace(/\.csv$/, '.xlsx'), [{ name: name.replace(/\.csv$/, ''), headers, rows }]) : downloadModuleCsv(name, headers, rows);
+    if (tab === 'sales') out('客户销售额.csv', ['客户', '币种', '订单数', '订单金额', '已开票', '已收', '未收'], sales.map(r => [r.customer, r.currency, r.orders, r.amount, r.invoiced, r.received, r.open]));
+    else if (tab === 'margin' && view !== 'none') out(`订单毛利-人民币-${FX_BASIS_LABEL[view]}.csv`, ['订单', '客户', '币种', '原币收入', '汇率口径', '汇率', '暂估', '收入CNY', '采购成本CNY', '毛利不含退税', '毛利率不含退税%', '退税核准或应退', '退税应退', '退税到账', '毛利含退税', '毛利率含退税%', '说明'], cny.map(r => [r.code, r.customer, r.currency, r.revenue, FX_BASIS_LABEL[view], r.fx ? Math.round(r.fx.rate * 1e6) / 1e6 : '', r.estimated ? '是' : '', r.revenueCny ?? '', r.costCny ?? '', r.marginEx ?? '', r.rateEx === null ? '' : Math.round(r.rateEx * 1000) / 10, ...(rebateShown ? [r.rebate.approved, r.rebate.expected, r.rebate.received, r.marginIn ?? '', r.rateIn === null ? '' : Math.round(r.rateIn * 1000) / 10] : Array(5).fill(rebateHidden)), CNY_STATUS[r.status].label + (r.missing.length ? ' ' + r.missing.join('/') : '')]));
+    else if (tab === 'margin') out('订单毛利.csv', ['订单', '客户', '币种', '销售收入', '采购成本', '毛利', '毛利率%', '已到票', '说明', '异币种采购', '未批准采购数'], margin.map(r => [r.code, r.customer, r.currency, r.revenue, r.purchases ? r.cost : '', r.margin ?? '', r.rate === null ? '' : Math.round(r.rate * 1000) / 10, r.billed, MARGIN_STATUS[r.status].label, r.foreign, r.pending]));
+    else if (tab === 'cash') out('资金月报.csv', ['月份', '币种', '收款', '付款', '净流入', '退税到账', '汇兑损益', '费用'], cash.map(r => [r.month, r.currency, r.cashIn, r.cashOut, r.net, rebateShown ? r.rebate : rebateHidden, r.fx, r.expense]));
+    else if (tab === 'aging') out(`应收账龄-${asOf}.csv`, ['客户', '币种', ...AGING_BUCKETS.map(b => b.label), '未收合计'], aging.map(r => [r.customer, r.currency, ...AGING_BUCKETS.map(b => r[b.key]), r.total]));
+    else out(`订单进度-${asOf}.csv`, ['订单', '客户', '交期', '进度%', '交期状态', '逾期天数', '当前环节'], shownProgress.map(r => [r.code, r.customer, r.due, r.progress, PROGRESS_STATUS[r.status].label, r.lateDays, r.state]));
   };
 
   return <MistPage>
-    <PageHeader title={uiText("报表中心")} actions={<Button icon={Download} disabled={!state || tab === 'actual' || ((tab === 'sales' || tab === 'margin') && invalid)} onClick={exportCurrent}>{uiText("导出当前报表")}</Button>} />
-    {workspace.error && <Banner tone="bad" title={uiText("读取失败")}>{workspace.error}</Banner>}
-    <Tabs<ReportTab> value={tab} onChange={next => go('reports', undefined, { section: next })} options={[{ value: 'sales', label: '客户销售额' }, ...(canSeeMargin ? [{ value: 'margin' as const, label: '订单毛利' }, { value: 'actual' as const, label: '订单核算' }] : []), { value: 'aging', label: '应收账龄' }, { value: 'orders', label: '订单进度与逾期', count: progress.filter(r => r.status === 'overdue').length || undefined }]} />
+    <PageHeader title={uiText("报表中心")} actions={<>{tab !== 'actual' && <><Button icon={Download} disabled={!state || ((tab === 'sales' || tab === 'margin') && invalid)} onClick={() => exportCurrent('csv')}>{uiText("导出 CSV")}</Button><Button icon={Download} disabled={!state || ((tab === 'sales' || tab === 'margin') && invalid)} onClick={() => exportCurrent('xlsx')}>{uiText("导出 Excel")}</Button></>}</>} />
+    {workspace.error && <FailureNotice title={"读取失败"} detail={workspace.error} />}
+    {state && <ReportSchedules state={state} canAdmin={canSeeMargin} asOf={asOf} />}
+    <Tabs<ReportTab> value={tab} onChange={next => go('reports', undefined, { section: next })} options={[{ value: 'sales', label: '客户销售额' }, ...(canSeeMargin ? [{ value: 'margin' as const, label: '订单毛利' }, { value: 'actual' as const, label: '订单核算' }] : []), { value: 'aging', label: '应收账龄' }, ...(canSeeMargin ? [{ value: 'cash' as const, label: '资金月报' }] : []), { value: 'orders', label: '订单进度与逾期', count: progress.filter(r => r.status === 'overdue').length || undefined }]} />
     <section className="mist-section">{tab === 'sales' ? <>
-      <Toolbar><Field label={uiText("订单创建起日")}><TextInput type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field><Field label={uiText("订单创建止日")}><TextInput type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>{currencyFilter}</Toolbar>
+      <Toolbar><Field label={uiText("统计日期")}><Select aria-label={uiText("统计日期")} value={salesBasis} onChange={e => setSalesBasis(e.target.value as SalesBasis)} options={(Object.keys(SALES_BASIS_LABEL) as SalesBasis[]).map(k => ({ value: k, label: SALES_BASIS_LABEL[k] }))} /></Field><Field label={uiText("起日")}><TextInput type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field><Field label={uiText("止日")}><TextInput type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>{currencyFilter}</Toolbar>
       {invalid && <Banner tone="bad" title={uiText("起始日期不能晚于结束日期")} />}
       <StatGrid><StatCard icon={Package} label={uiText("订单金额")} value={totals(sales, r => r.amount)} /><StatCard icon={Receipt} label={uiText("已收")} value={totals(sales, r => r.received)} /><StatCard icon={Clock} label={uiText("未收")} value={totals(sales, r => r.open)} /></StatGrid>
       <section className="mist-section"><Card><DataTable ariaLabel={uiText("客户销售额")} rows={sales} rowKey={r => r.id} loading={workspace.loading} columns={salesColumns} empty={<EmptyState title={uiText("当前范围没有订单")} description={uiText("调整日期或币种后重新查看。")} />} /></Card></section>
-      <p className="mist-note">{uiText("按订单业务日期（北京时间）统计；已开票、已收、未收只计这些订单下的有效发票，作废发票不计。")}</p>
+      <p className="mist-note">{uiText(`按${SALES_BASIS_LABEL[salesBasis]}（北京时间）统计；已开票、已收、未收只计这些订单下的有效发票，作废发票不计。`)}</p>
     </> : tab === 'margin' ? <>
       <Toolbar><Field label={uiText("订单创建起日")}><TextInput type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field><Field label={uiText("订单创建止日")}><TextInput type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>{currencyFilter}
         <Field label={uiText("折算口径")}><Select aria-label={uiText("折算口径")} value={view} onChange={e => setView(e.target.value as MarginView)} options={[{ value: 'actual', label: '人民币 · 实际结汇' }, { value: 'period', label: '人民币 · 月末暂估' }, { value: 'quote', label: '人民币 · 报价预计' }, { value: 'none', label: '原币（不折算）' }]} /></Field>
@@ -224,21 +247,36 @@ export function PlatformReportsPage() {
         <StatGrid>
           <StatCard icon={Package} label={ui`收入 CNY · ${cnyOk.length} 单`} value={money(cnyTotals.revenue)} />
           <StatCard icon={TrendingUp} label={uiText("毛利 · 不含退税")} value={`${money(cnyTotals.ex)}（${percent(cnyTotals.revenue ? cnyTotals.ex / cnyTotals.revenue : null)}）`} />
-          <StatCard icon={Receipt} label={uiText("出口退税（核准 / 应退）")} value={money(cnyTotals.rebate)} />
-          <StatCard icon={TrendingUp} label={uiText("毛利 · 含退税")} value={`${money(cnyTotals.inc)}（${percent(cnyTotals.revenue ? cnyTotals.inc / cnyTotals.revenue : null)}）`} />
+          <StatCard icon={Receipt} label={uiText("出口退税（核准 / 应退）")} value={rebateShown ? money(cnyTotals.rebate) : uiText(rebateHidden)} />
+          <StatCard icon={TrendingUp} label={uiText("毛利 · 含退税")} value={rebateShown ? `${money(cnyTotals.inc)}（${percent(cnyTotals.revenue ? cnyTotals.inc / cnyTotals.revenue : null)}）` : uiText(rebateHidden)} />
         </StatGrid>
         {cnyTotals.estimated > 0 && <Banner tone="warn" title={ui`${cnyTotals.estimated} 单${view === 'actual' ? '含暂估部分' : '按暂估 / 预计汇率折算'}`}>{uiText(view === 'actual' ? '已收未结汇（外币留存）与未收部分按所选月份的月末汇率暂估；结汇并分配到对应到账后转为实际汇率。' : view === 'period' ? '月末暂估汇率仅用于管理报表，结汇后以实际结汇口径为准。' : '报价预计汇率取订单来源报价版本上的报价汇率，仅反映报价时的预期。')}</Banner>}
         {view === 'actual' && unallocated.length > 0 && <Banner tone="accent" title={ui`有结汇未对应到账：${unallocated.map(u => `${u.currency} ${money(u.amount)}（${u.count} 笔）`).join('、')}`}>{uiText("未对应到账的结汇不计入任何订单。请在“账户与余额 → 锁汇 / 结汇”为该结汇补登对应到账。")}</Banner>}
         <section className="mist-section"><Card><DataTable ariaLabel={uiText("订单毛利（人民币）")} rows={cny} rowKey={r => r.id} loading={workspace.loading} columns={cnyColumns} empty={<EmptyState title={uiText("当前范围没有已生效订单")} description={uiText("草稿、待审批或被退回的订单不计入毛利。")} />} /></Card></section>
         <p className="mist-note">{FX_BASIS_LABEL[view]}：{uiText(view === 'actual' ? `订单收入中已收且已结汇的部分（本单发票的核销到账 → 结汇时分配到该到账的金额）按各笔结汇的实际成交汇率；已收未结汇与未收部分、外币采购按不晚于 ${fxMonth} 的最新月末汇率暂估。` : view === 'period' ? `取不晚于 ${fxMonth} 的最新一期月末汇率（财务在“账户与余额”登记）。` : '取订单来源报价版本上冻结的报价汇率（多个报价版本按条目金额加权）；报价未填报价汇率的订单标“缺汇率”。')}{uiText("缺少所选口径汇率的订单不出毛利。不含退税毛利 = 收入 × 汇率 − 已批准采购合同（通常含税价）；含退税毛利再加本单分摊的出口退税（已核准按核准额，未核准按应退额；未申报不计）。未计运费、报关、佣金与索赔扣款。")}</p>
       </>}
-    </> : tab === 'actual' ? (state ? <OrderActualCostPanel key={route.id || ''} initialOrderId={route.id} state={state} materialCostBasis={workspace.workspace?.costMaterialBasis === null ? null : workspace.workspace?.costMaterialBasis??(workspace.workspace?.access?.hidden.some(section=>section.key==='inventory')?null:undefined)} asOf={asOf} canWrite={!!session.localMode || session.hasPermission('invoices:write')} busy={workspace.loading || workspace.saving || !!workspace.pending} run={c => workspace.run(c)} /> : <EmptyState title={uiText("正在读取数据")} compact />) : tab === 'aging' ? <>
+    </> : tab === 'cash' ? <>
+      <Toolbar><Field label={uiText("起日")}><TextInput type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field><Field label={uiText("止日")}><TextInput type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>{currencyFilter}</Toolbar>
+      {invalid && <Banner tone="bad" title={uiText("起始日期不能晚于结束日期")} />}
+      <section className="mist-section"><Card><DataTable ariaLabel={uiText("资金月报")} rows={cash} rowKey={r => r.month + r.currency} loading={workspace.loading} columns={[
+        { key: 'm', header: '月份', width: '100px', render: r => r.month, sortValue: r => r.month },
+        { key: 'c', header: '币种', width: '72px', render: r => r.currency },
+        { key: 'in', header: '收款', align: 'right', render: r => money(r.cashIn) },
+        { key: 'out', header: '付款', align: 'right', render: r => money(r.cashOut) },
+        { key: 'net', header: '净流入', align: 'right', render: r => <b className={r.net < 0 ? 'mist-tone-bad' : undefined}>{money(r.net)}</b> },
+        // 无退税计税依据权限时，退税到账流水整笔不下发（access.maskTaxBase），收款与退税都不含这部分：标“已隐藏”而不是“—”。
+        { key: 'rb', header: '退税到账', align: 'right', render: r => !rebateShown ? <span className="mist-note">{uiText(rebateHidden)}</span> : r.rebate ? money(r.rebate) : <span className="mist-note">—</span> },
+        { key: 'fx', header: '汇兑损益', align: 'right', render: r => r.fx ? <span className={r.fx < 0 ? 'mist-tone-bad' : undefined}>{money(r.fx)}</span> : <span className="mist-note">—</span> },
+        { key: 'ex', header: '费用', align: 'right', render: r => r.expense ? money(r.expense) : <span className="mist-note">—</span> },
+      ]} empty={<EmptyState title={uiText("当前范围没有资金记录")} />} /></Card></section>
+      {!rebateShown && rebateClaimsReceived > 0 && <p className="mist-note">{uiText("收款不含出口退税到账")}</p>}
+    </> : tab === 'actual' ? (state ? <OrderActualCostPanel key={route.id || ''} initialOrderId={route.id} state={state} rebate={rebateView} materialCostBasis={workspace.workspace?.costMaterialBasis === null ? null : workspace.workspace?.costMaterialBasis??(workspace.workspace?.access?.hidden.some(section=>section.key==='inventory')?null:undefined)} asOf={asOf} canWrite={!!session.localMode || session.hasPermission('invoices:write')} busy={workspace.loading || workspace.saving || !!workspace.pending} run={c => workspace.run(c)} /> : <EmptyState title={uiText("正在读取数据")} compact />) : tab === 'aging' ? <>
       <Toolbar right={<span className="mist-note">{uiText("截至 ")}{asOf}</span>}>{currencyFilter}</Toolbar>
       <StatGrid>{AGING_BUCKETS.map(b => <StatCard key={b.key} icon={Clock} label={uiText(b.label)} value={totals(aging, r => r[b.key])} />)}</StatGrid>
       <section className="mist-section"><Card><DataTable ariaLabel={uiText("应收账龄")} rows={aging} rowKey={r => r.id} loading={workspace.loading} columns={agingColumns} empty={<EmptyState title={uiText("没有未收应收")} description={uiText("有效发票均已收清。")} />} /></Card></section>
       <div className="mist-row"><Button onClick={() => go('invoices')}>{uiText("查看发票")}</Button><Button onClick={() => go('payment-vouchers')}>{uiText("查看到账与核销")}</Button></div>
     </> : <>
-      <Toolbar right={<span className="mist-note">{uiText("截至 ")}{asOf}{uiText(" · 只含进度未到 100% 的订单")}</span>}><Field label={uiText("交期状态")}><Select aria-label={uiText("交期状态")} value={progressFilter} onChange={e => setProgressFilter(e.target.value)} options={[{ value: '', label: '全部' }, ...Object.entries(PROGRESS_STATUS).map(([value, s]) => ({ value, label: s.label }))]} /></Field></Toolbar>
+      <Toolbar right={<span className="mist-note">{uiText("截至 ")}{asOf}{uiText(" · 只含尚未履行完毕的订单")}</span>}><Field label={uiText("交期状态")}><Select aria-label={uiText("交期状态")} value={progressFilter} onChange={e => setProgressFilter(e.target.value)} options={[{ value: '', label: '全部' }, ...Object.entries(PROGRESS_STATUS).map(([value, s]) => ({ value, label: s.label }))]} /></Field></Toolbar>
       <StatGrid>{(Object.keys(PROGRESS_STATUS) as Array<keyof typeof PROGRESS_STATUS>).map(k => <StatCard key={k} icon={Package} label={uiText(PROGRESS_STATUS[k].label)} value={progress.filter(r => r.status === k).length} onClick={() => setProgressFilter(k)} />)}</StatGrid>
       <section className="mist-section"><Card><DataTable ariaLabel={uiText("订单进度")} rows={shownProgress} rowKey={r => r.id} loading={workspace.loading} columns={progressColumns} empty={<EmptyState title={uiText("没有符合条件的未完成订单")} />} /></Card></section>
     </>}</section>

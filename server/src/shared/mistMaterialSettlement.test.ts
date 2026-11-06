@@ -85,3 +85,13 @@ it('prevents reversing returned rejected goods after the capacity was consumed b
   expect(() => f.run({ type: 'fulfillment.procurement.return.reverse', payload: { receiptId: id, returnId, reason: 'Mistaken return' } })).toThrow('超过面料分配');
   expect(f.state).toEqual(before);
 });
+
+it('carries a return deduction and supplier-borne freight into the next settlement and blocks reversing it there', () => {
+  const f = directFixture(), id = f.deliver(20);
+  f.receive(id, 17, 3);
+  expect(() => f.run({ type: 'fulfillment.procurement.return', payload: { receiptId: id, quantity: 3, disposition: 'noReplace', date: '2026-10-24', evidence: 'Returned', freight: 80 } })).toThrow('运费由谁承担');
+  const returnId = f.run({ type: 'fulfillment.procurement.return', payload: { receiptId: id, quantity: 3, disposition: 'noReplace', date: '2026-10-24', evidence: 'Returned', returnNo: 'RT-0001', freight: 80, freightBy: 'supplier', deduction: 120 } }).id!;
+  f.settle(id);
+  expect(f.state.payables.settlements![0].disputes).toEqual([expect.objectContaining({ amount: 200, returnId, description: expect.stringContaining('RT-0001') })]);
+  expect(() => f.run({ type: 'fulfillment.procurement.return.reverse', payload: { receiptId: id, returnId, reason: 'x' } })).toThrow('已带入结算');
+});

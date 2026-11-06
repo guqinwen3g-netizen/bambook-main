@@ -18,6 +18,7 @@ import { useNav } from '../../nav';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, useListDetailRoute, businessDay, businessWhen, shortWhen } from './pageKit';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 type Tab = 'signals' | 'ledger';
 type LedgerFilter = 'open' | 'escalated' | 'closed' | 'all';
@@ -83,14 +84,18 @@ export function RisksPage() {
 
   const registerSpec = (s?: RiskSignal): ModuleEditorSpec => ({
     title: s ? '登记风险' : '手工登记风险', submitLabel: '登记',
-    description: s ? `来源：${SOURCE_LABEL[s.source.kind]} ${s.source.label}。登记后由负责人接手推进；预警本身不会冻结付款、删单或修改原记录。` : '只能挂在真实订单上；其他来源请从“预警”页登记，保留准确来源。',
-    initialValues: s ? { title: s.title, level: s.level, owner: me, basis: s.basis } : { orderId: ownOrders[0]?.id || '', type: 'delivery', title: '', level: 'warning', owner: me, basis: '' },
-    fields: [...(s ? [] : [{ key: 'orderId', label: '来源订单', type: 'select' as const, required: true, hint: canAll ? undefined : '只能选择你负责的订单', options: ownOrders.map(o => ({ value: o.id, label: `${o.code} · ${o.customer}` })) }, { key: 'type', label: '风险类型', type: 'select' as const, options: (Object.keys(RISK_TYPE_LABEL) as RiskType[]).map(t => ({ value: t, label: RISK_TYPE_LABEL[t] })) }]),
+    description: s ? `来源：${SOURCE_LABEL[s.source.kind]} ${s.source.label}。登记后由负责人接手推进；预警本身不会冻结付款、删单或修改原记录。` : undefined,
+    initialValues: s ? { title: s.title, level: s.level, owner: me, basis: s.basis } : { sourceKind: 'order', orderId: ownOrders[0]?.id || '', customerId: '', supplierId: '', type: 'delivery', title: '', level: 'warning', owner: me, basis: '' },
+    // fin39：手工登记可挂订单、客户或供应商。
+    fields: [...(s ? [] : [{ key: 'sourceKind', label: '来源类型', type: 'select' as const, required: true, options: [{ value: 'order', label: '订单' }, { value: 'customer', label: '客户' }, { value: 'supplier', label: '供应商' }] },
+      { key: 'orderId', label: '来源订单', type: 'select' as const, required: true, when: { key: 'sourceKind', values: ['order'] }, hint: canAll ? undefined : '只能选择你负责的订单', options: ownOrders.map(o => ({ value: o.id, label: `${o.code} · ${o.customer}` })) },
+      { key: 'customerId', label: '来源客户', type: 'select' as const, required: true, when: { key: 'sourceKind', values: ['customer'] }, options: (state?.customers || []).filter(c => canAll || c.ownerId === me).map(c => ({ value: c.id, label: c.name })) },
+      { key: 'supplierId', label: '来源供应商', type: 'select' as const, required: true, when: { key: 'sourceKind', values: ['supplier'] }, options: (state?.market.suppliers || []).map(x => ({ value: x.id, label: x.name })) }, { key: 'type', label: '风险类型', type: 'select' as const, options: (Object.keys(RISK_TYPE_LABEL) as RiskType[]).map(t => ({ value: t, label: RISK_TYPE_LABEL[t] })) }]),
       { key: 'title', label: '风险标题', required: true }, { key: 'level', label: '风险等级', type: 'select', hint: s ? '不能低于预警等级；严重为高风险，关闭须经部门主管审批' : '严重为高风险，关闭须经部门主管审批', options: (['critical', 'warning', 'info'] as const).filter(l => !s || levelRank[l] <= levelRank[s.level]).map(l => ({ value: l, label: LEVEL[l].label })) },
       { key: 'owner', label: '负责人', required: true, readonly: !canAll, hint: canAll ? '单一主负责人，统筹各岗位处理' : '登记本人客户或订单的风险，负责人为本人；需转交请联系主管' }, { key: 'basis', label: '事实与依据', type: 'textarea', required: true }],
     submit: async v => {
       const base = { title: String(v.title ?? ''), level: String(v.level) as RiskRecord['level'], owner: canAll ? String(v.owner ?? '') : me, basis: String(v.basis ?? '') };
-      const r = await run(s ? { type: 'platform.risk.save', payload: { ...base, type: s.type, source: { kind: s.source.kind, id: s.source.id }, signalKey: s.key } } : { type: 'platform.risk.save', payload: { ...base, type: String(v.type) as RiskType, source: { kind: 'order', id: String(v.orderId ?? '') } } });
+      const r = await run(s ? { type: 'platform.risk.save', payload: { ...base, type: s.type, source: { kind: s.source.kind, id: s.source.id }, signalKey: s.key } } : { type: 'platform.risk.save', payload: { ...base, type: String(v.type) as RiskType, source: { kind: (String(v.sourceKind || 'order')) as 'order' | 'customer' | 'supplier', id: String((v.sourceKind === 'customer' ? v.customerId : v.sourceKind === 'supplier' ? v.supplierId : v.orderId) ?? '') } } });
       const id = (r as { result?: { id?: string } } | undefined)?.result?.id; if (id) openRisk(id);
     },
   });
@@ -144,13 +149,13 @@ export function RisksPage() {
           ...(e ? [{ label: '审批中', value: RISK_ACTION_LABEL[e.action || 'authorize'] }] : []),
         ] }} />; })()
     : null;
-  const roleBanner = !can ? <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}/></div> : null;
+  const roleBanner = !can ? <div className="mist-section"><Banner variant="status" tone="neutral" title={uiText("只读查看")}/></div> : null;
   if (full.active && detail) return <ListDetailPage backLabel={tab === 'signals' ? '风险预警' : '风险台账'} onBack={full.back} before={roleBanner} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage>
     <PageHeader eyebrow={uiText("财务与成本 · 风险")} title={uiText("风险管理与合规")}
       actions={<><Button icon={Download} onClick={exportRows}>{uiText("导出")}</Button>{(canAll || canOrders) && <Button variant="primary" icon={Plus} disabled={locked || !ownOrders.length} title={uiText(ownOrders.length ? undefined : canAll ? '还没有订单' : '没有负责人绑定为你账号的订单')} onClick={() => setDialog(registerSpec())}>{uiText("手工登记")}</Button>}</>} />
     {roleBanner}
-    {error && <div className="mist-section"><Banner tone="bad" title={uiText("数据未加载")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
+    {error && <FailureNotice title={"数据未加载"} detail={error} retry={() => void refresh()} />}
     <div className="mist-section" data-risk-summary><SummaryBar items={[
       { label: '未登记预警', value: unregistered.length, hint: unregistered.filter(s => s.level === 'critical').length ? `其中严重 ${unregistered.filter(s => s.level === 'critical').length}` : undefined, hintTone: 'bad' },
       { label: '未关闭风险', value: open.length, hint: open.filter(r => r.planDue && r.planDue < day).length ? `方案逾期 ${open.filter(r => r.planDue && r.planDue < day).length}` : undefined, hintTone: 'warn' },
@@ -204,7 +209,7 @@ function RiskDetail({ r, state, day, me, meId, locked, writeReason, onAck, onPla
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATE_TONE[r.state]}>{uiText(r.disposition === 'waived' ? '已豁免' : RISK_STATE_LABEL[r.state])}</Pill><Pill tone={LEVEL[level].tone}>{uiText(LEVEL[level].label)}{uiText(high && !done ? ' · 高风险' : '')}</Pill><Pill>{uiText("负责人 ")}{r.owner}</Pill>{r.release && !done && <Pill tone="warn">{uiText(r.release.shipmentId ? `带风险放行已用于 ${r.release.shipmentCode || '一票出运'}` : '已获准带风险放行（可放行一票）')}</Pill>}</div>
     {raised && !done && <p className="mist-note">{uiText("登记时为")}{uiText(LEVEL[r.level].label)}{uiText("，来源预警当前已升为")}{uiText(LEVEL[level].label)}{uiText("，按当前等级处理。")}</p>}
     {esc && <div className="mist-col" data-risk-escalation>
-      <Banner tone="warn" title={ui`待部门主管审批 · ${RISK_ACTION_LABEL[esc.action || 'authorize']}`}>{esc.requestedBy} · {shortWhen(esc.requestedAt)}：{esc.reason}</Banner>
+      <Banner variant="status" tone="warn" title={ui`待部门主管审批 · ${RISK_ACTION_LABEL[esc.action || 'authorize']}`}>{esc.requestedBy} · {shortWhen(esc.requestedAt)}：{esc.reason}</Banner>
       <ActionBar busy={locked} actions={[{ label: '到审批中心', icon: ArrowUpRight, onClick: onApprovals }, { label: '撤回申请', icon: Undo2, onClick: onWithdraw, hidden: !mine || !!writeReason }]} />
     </div>}
     {!done && !writeReason && <ActionBar busy={locked} actions={[

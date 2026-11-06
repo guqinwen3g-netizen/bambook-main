@@ -146,3 +146,35 @@ it('opens and reopens a compact approval after navigation remounts its page', as
  expect(getByRole(document.body,'dialog',{name:'SO-ONE 主单审批'})).toBeTruthy();
  expect(postCount).toBe(0);
 });
+
+it('shows the payment approval tier and the level still missing on the approval detail',async()=>{
+ rows=[row({id:'payment:pr-1',kind:'payment',entityId:'pr-1',title:'PR-2026-0001 · 华盛毛纺 · 1,000.00 CNY',requiredPermission:'finance:payment_request:approve',target:{view:'payment-vouchers',id:'pr-1'},details:[{label:'本次申请金额',value:'1,000.00 CNY'},{label:'审批档位',value:'申请金额 1,000.00 CNY；需 5 万元及以下档 + 首笔付款加签（总经理级）（该供应商首笔付款）'},{label:'审批进度',value:'已批：5 万元及以下档（财务主管）；还差：首笔付款加签（总经理级）'}]})];
+ await render();await openRow('PR-2026-0001');
+ const note=host.querySelector('[data-payment-tier]')?.textContent||'';
+ expect(note).toContain('需 5 万元及以下档 + 首笔付款加签');expect(note).toContain('还差：首笔付款加签（总经理级）');
+});
+
+it('shows a rejected decision inside the approval drawer instead of failing silently',async()=>{
+ intercept=(url,init)=>init.method==='POST'?Promise.resolve(response({ok:false,error:{code:'VALIDATION',message:'单价与合同不符'}},422)):undefined;
+ try{
+  await render();await prepareDecision();await click('退回');
+  const banner=document.querySelector('[data-approval-error]');
+  expect(banner?.textContent).toContain('单价与合同不符');
+  expect(banner?.closest('[data-approval]')).toBeTruthy();
+ }finally{intercept=undefined;}
+});
+
+it('shows who decided a handled approval, when, and the note',async()=>{
+ serverStatus='approved';rows=[{...row({status:'approved',canDecide:false}),signatureFileId:'sig-1',decision:{actor:'周敏',at:'2026-11-05T12:30:00.000Z',note:'单价与交期已核对'}}];
+ intercept=(url)=>url.endsWith('/files/sig-1')?Promise.resolve({ok:true,status:200,arrayBuffer:async()=>new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>').buffer}):undefined;
+ vi.stubGlobal('URL',Object.assign(URL,{createObjectURL:()=> 'blob:sig',revokeObjectURL:()=>undefined}));
+ try{
+  route={view:'approvals',section:'done'} as any;await render();
+  const tab=[...document.querySelectorAll('[role="tab"],button')].find(b=>(b.textContent||'').startsWith('已处理')) as HTMLElement|undefined;if(tab)await act(async()=>tab.click());
+  await openRow();await act(async()=>{await Promise.resolve();await Promise.resolve();});
+  const text=document.body.textContent||'';
+  expect(text).toContain('经办人');expect(text).toContain('周敏');expect(text).toContain('单价与交期已核对');
+  // 带签字的已批准事项：按图片加载归档签字。
+  expect(document.querySelector('[data-approval-signature]')?.getAttribute('src')).toMatch(/^blob:/);
+ }finally{rows=undefined;intercept=undefined;route={view:'approvals'};}
+});

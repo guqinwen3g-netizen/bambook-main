@@ -15,6 +15,7 @@ import { freshOrderLineScope } from './orderLineWriteAccess';
 import { currentInternalDemand, isInternalOrderPurpose } from './internalOrderFacts';
 import { normalizeGarmentFulfillment } from './internalFabricPolicy';
 import { assertFabricSupplyTermsParty } from './fabricSupplyTermsService';
+import { currentCompanyId } from '../auth/requestCompanyContext';
 
 export const ORDER_MAIN_APPROVAL_ACTION = 'order:main_approval';
 const OWNER_ROLE_IDS = new Set([SYSTEM_ROLE_IDS.SUPER_ADMIN]);
@@ -34,14 +35,24 @@ export function orderApprovalBusinessLine(order: any): OrderApprovalBusinessLine
   throw new OrderMainApprovalError('ORDER_APPROVAL_DOMAIN_UNKNOWN', 409, '订单业务域无法明确识别为面料或成衣，暂不能提交主单审批。');
 }
 
+/** 审批资格所属公司：显式传入优先，其次是请求级公司上下文；都没有为 null（无公司的单租户/历史配置）。 */
+export function orderApprovalCompanyScope(companyId?: string | null): string | null {
+  return companyId !== undefined ? companyId : currentCompanyId() ?? null;
+}
+const activeCompanyUser = (companyId: string) => ({ status: 'active', deletedAt: null, companyMembers: { some: { companyId, status: 'active' } } });
+
 export function createOrderMainApprovalService(prisma: PrismaClient) {
-  async function resolveEligibleReviewerIds(tx: any, businessLine: OrderApprovalBusinessLine) {
+  /** 公司会话只认本公司的授权与本公司总经理岗；无公司会话只认无公司归属的历史配置与全局总经理岗。 */
+  async function resolveEligibleReviewerIds(tx: any, businessLine: OrderApprovalBusinessLine, companyIdInput?: string | null) {
+    const companyId = orderApprovalCompanyScope(companyIdInput);
     const assignments = await tx.orderApprovalAuthority.findMany({
-      where: { businessLine, active: true, user: { status: 'active', deletedAt: null } },
+      where: { businessLine, active: true, companyId, user: companyId ? activeCompanyUser(companyId) : { status: 'active', deletedAt: null } },
       select: { userId: true },
     });
     const owners = await tx.userAccount.findMany({
-      where: { status: 'active', deletedAt: null, roles: { some: { roleId: { in: [...OWNER_ROLE_IDS] } } } },
+      where: companyId
+        ? { ...activeCompanyUser(companyId), roles: { some: { role: { companyId, code: SYSTEM_ROLE_IDS.SUPER_ADMIN } } } }
+        : { status: 'active', deletedAt: null, roles: { some: { roleId: { in: [...OWNER_ROLE_IDS] } } } },
       select: { id: true },
     });
     if (!assignments.length) throw new OrderMainApprovalError('ORDER_APPROVAL_AUTHORITY_MISSING', 409,
@@ -64,7 +75,7 @@ export function createOrderMainApprovalService(prisma: PrismaClient) {
       if (isInternalOrderPurpose(order.orderPurpose)) await currentInternalDemand(tx, order);
       if (businessLine === 'garment') for (const line of order.lines) normalizeGarmentFulfillment(line);
       for (const line of order.lines) await assertFabricSupplyTermsParty(tx, submitActor, line, businessLine, true);
-      const eligibleReviewerIds = await resolveEligibleReviewerIds(tx, businessLine);
+      const eligibleReviewerIds = await resolveEligibleReviewerIds(tx, businessLine, submitActor?.companyId ?? trustedActor?.companyId);
       const rawSnapshot = { order: { ...order, lines: order.lines }, businessLine };
       const snapshot = JSON.parse(JSON.stringify(rawSnapshot, (_key, value) => typeof value === 'bigint' ? value.toString() : value));
       const contentFingerprint = orderMainSnapshotFingerprint(rawSnapshot);
@@ -81,13 +92,16 @@ export function createOrderMainApprovalService(prisma: PrismaClient) {
     }, { isolationLevel: 'Serializable' });
   }
 
-  async function listAuthorityConfig() {
+  /** 公司会话：只列本公司的授权，候选人只取本公司在职成员。 */
+  async function listAuthorityConfig(companyIdInput?: string | null) {
+    const companyId = orderApprovalCompanyScope(companyIdInput);
     const [assignments, users] = await Promise.all([
-      prisma.orderApprovalAuthority.findMany({ where: { active: true }, include: { user: { select: { id: true, displayName: true, email: true, status: true } } }, orderBy: [{ businessLine: 'asc' }, { userId: 'asc' }] }),
-      prisma.userAccount.findMany({ where: { status: 'active', deletedAt: null }, select: { id: true, displayName: true, email: true,
-        roles: { select: { roleId: true } } }, orderBy: { displayName: 'asc' } }),
+      prisma.orderApprovalAuthority.findMany({ where: { active: true, companyId }, include: { user: { select: { id: true, displayName: true, email: true, status: true } } }, orderBy: [{ businessLine: 'asc' }, { userId: 'asc' }] }),
+      prisma.userAccount.findMany({ where: companyId ? activeCompanyUser(companyId) : { status: 'active', deletedAt: null }, select: { id: true, displayName: true, email: true,
+        roles: { select: { roleId: true, role: { select: { companyId: true, code: true } } } } }, orderBy: { displayName: 'asc' } }),
     ]);
-    return { assignments, users: users.map((user: any) => ({ ...user, isOwner: user.roles.some((role: any) => OWNER_ROLE_IDS.has(role.roleId)) })) };
+    const owner = (role: any) => companyId ? role.role?.companyId === companyId && role.role?.code === SYSTEM_ROLE_IDS.SUPER_ADMIN : OWNER_ROLE_IDS.has(role.roleId);
+    return { assignments, users: users.map(({ roles, ...user }: any) => ({ ...user, isOwner: roles.some(owner) })) };
   }
 
   async function listHistory(orderId: string) {
@@ -97,21 +111,23 @@ export function createOrderMainApprovalService(prisma: PrismaClient) {
     return Promise.all(items.map(async row => ({ ...row, ...await readOrderMainRejection(prisma, row), ...await readOrderMainWithdrawal(prisma, row) })));
   }
 
-  async function replaceAuthorityConfig(input: { businessLine: OrderApprovalBusinessLine; userIds: string[]; actorId: string }) {
-    const userIds = [...new Set(input.userIds)];
+  /** 只替换当前公司（或无公司历史配置）的名单；别家公司的授权不读不改，名单里只能是本公司在职成员。 */
+  async function replaceAuthorityConfig(input: { businessLine: OrderApprovalBusinessLine; userIds: string[]; actorId: string; companyId?: string | null }) {
+    const userIds = [...new Set(input.userIds)], companyId = orderApprovalCompanyScope(input.companyId);
     return prisma.$transaction(async (tx: any) => {
-      const users = await tx.userAccount.findMany({ where: { id: { in: userIds }, status: 'active', deletedAt: null }, select: { id: true } });
-      if (users.length !== userIds.length) throw new OrderMainApprovalError('ORDER_APPROVAL_AUTHORITY_INVALID_USER', 400, '授权列表包含停用、删除或不存在的账号。');
-      await tx.orderApprovalAuthority.updateMany({ where: { businessLine: input.businessLine }, data: { active: false } });
-      for (const userId of userIds) await tx.orderApprovalAuthority.upsert({
-        where: { userId_businessLine: { userId, businessLine: input.businessLine } },
-        create: { userId, businessLine: input.businessLine, active: true, createdBy: input.actorId },
-        update: { active: true, createdBy: input.actorId },
-      });
-      const assignments = await tx.orderApprovalAuthority.findMany({ where: { businessLine: input.businessLine, active: true }, include: { user: { select: { id: true, displayName: true, email: true } } }, orderBy: { userId: 'asc' } });
+      const users = await tx.userAccount.findMany({ where: { id: { in: userIds }, ...(companyId ? activeCompanyUser(companyId) : { status: 'active', deletedAt: null }) }, select: { id: true } });
+      if (users.length !== userIds.length) throw new OrderMainApprovalError('ORDER_APPROVAL_AUTHORITY_INVALID_USER', 400, companyId ? '授权列表只能选择本公司在职成员。' : '授权列表包含停用、删除或不存在的账号。');
+      await tx.orderApprovalAuthority.updateMany({ where: { businessLine: input.businessLine, companyId }, data: { active: false } });
+      for (const userId of userIds) {
+        // 复合唯一键含可空 companyId，不能用 upsert 的复合 where；Serializable 事务内先查后写。
+        const existing = await tx.orderApprovalAuthority.findFirst({ where: { companyId, userId, businessLine: input.businessLine }, select: { id: true } });
+        if (existing) await tx.orderApprovalAuthority.update({ where: { id: existing.id }, data: { active: true, createdBy: input.actorId } });
+        else await tx.orderApprovalAuthority.create({ data: { companyId, userId, businessLine: input.businessLine, active: true, createdBy: input.actorId } });
+      }
+      const assignments = await tx.orderApprovalAuthority.findMany({ where: { businessLine: input.businessLine, active: true, companyId }, include: { user: { select: { id: true, displayName: true, email: true } } }, orderBy: { userId: 'asc' } });
       await writeRouteAuditLog({ prisma: tx, actorId: input.actorId, source: 'admin:order-approval-authorities',
         operation: 'replace_order_approval_authorities', targetType: 'OrderApprovalAuthority', targetId: input.businessLine,
-        after: { businessLine: input.businessLine, userIds } });
+        after: { businessLine: input.businessLine, userIds }, companyId });
       return assignments;
     }, { isolationLevel: 'Serializable' });
   }
@@ -161,7 +177,7 @@ export function createOrderMainApprovalService(prisma: PrismaClient) {
       if (!hasScope({ ...currentActor, roles: [] }, 'orders:write')) throw new OrderMainApprovalError('FORBIDDEN', 403, '当前账号没有订单审批写权限。');
       const visible = await tx.order.findFirst({ where: { id: order.id, deletedAt: null, AND: [await freshOrderLineScope(tx, currentActor)] } });
       if (!visible) throw new OrderMainApprovalError('ORDER_NOT_FOUND', 404, '关联订单不在当前可操作范围。');
-      const currentReviewers = await resolveEligibleReviewerIds(tx, orderApprovalBusinessLine(order));
+      const currentReviewers = await resolveEligibleReviewerIds(tx, orderApprovalBusinessLine(order), currentActor?.companyId ?? prior.companyId);
       if (!currentReviewers.includes(input.actorId)) throw new OrderMainApprovalError('APPROVAL_NOT_ASSIGNED', 403, '当前账号已不具备该业务域的主单审批资格。');
       const frozenEvidence = verifyOrderMainFrozenEvidence(approval, order);
       if (frozenEvidence === 'legacy_unverifiable') throw new OrderMainApprovalError('ORDER_APPROVAL_EVIDENCE_UNKNOWN', 409, '历史冻结依据无法核验，请撤回后重新提交准确快照。');
@@ -237,7 +253,7 @@ export function createOrderMainApprovalService(prisma: PrismaClient) {
       const approval = await tx.approvalRequest.findUnique({ where: { id: input.approvalId } });
       const order = await tx.order.findFirst({ where: { id: candidate.targetId, deletedAt: null, AND: [await freshOrderLineScope(tx, actor)] } });
       if (!order || !approval || approval.targetId !== order.id) throw new OrderMainApprovalError('ORDER_NOT_FOUND', 404, '关联订单不在当前可操作范围。');
-      if (approval.requesterId !== actor.userId && !(await resolveEligibleReviewerIds(tx, orderApprovalBusinessLine(order))).includes(actor.userId))
+      if (approval.requesterId !== actor.userId && !(await resolveEligibleReviewerIds(tx, orderApprovalBusinessLine(order), actor?.companyId ?? input.actor.companyId)).includes(actor.userId))
         throw new OrderMainApprovalError('APPROVAL_NOT_ASSIGNED', 403, '只有原提交人或当前同域审批负责人可撤回。');
       const original = await tx.auditLog.findFirst({ where: { actorId: actor.userId, action: 'withdraw_order_main_approval',
         detail: { path: ['after', 'requestKey'], equals: input.requestKey } } });
@@ -266,6 +282,6 @@ export function createOrderMainApprovalService(prisma: PrismaClient) {
     catch (error) { if (isOrderLineStorageConflict(error)) throw new OrderMainApprovalError('ORDER_APPROVAL_CONFLICT', 409, '审批正在被处理，请使用原请求重试撤回或读回实际结果。'); throw error; }
   }
 
-  const readAccess = (tx: any, approval: any, actor: TokenPayload) => readOrderMainApprovalAccess(tx, approval, actor, resolveEligibleReviewerIds);
+  const readAccess = (tx: any, approval: any, actor: TokenPayload) => readOrderMainApprovalAccess(tx, approval, actor, (db, line) => resolveEligibleReviewerIds(db, line, actor.companyId));
   return { submit, decide, withdraw, readAccess, resolveEligibleReviewerIds, listAuthorityConfig, replaceAuthorityConfig, listHistory };
 }

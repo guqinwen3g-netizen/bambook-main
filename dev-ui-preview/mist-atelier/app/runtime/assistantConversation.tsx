@@ -11,14 +11,21 @@ type Conversation = {
   messages: AssistantReply[];
 };
 const empty = (): Conversation => ({ question: '', selected: [], messages: [] });
+/** fin50：对话按账号与公司（scope）存本标签页 sessionStorage，切页与刷新后保留；换账号或关标签即清空。 */
+const KEY = (scope: string) => 'mist.assistant.conversation:' + scope;
+function load(scope: string): Conversation {
+  try { const raw = typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem(KEY(scope)); if (!raw) return empty(); const v = JSON.parse(raw) as Conversation; return Array.isArray(v?.messages) ? { question: String(v.question || ''), selected: Array.isArray(v.selected) ? v.selected : [], messages: v.messages.slice(-40) } : empty(); } catch { return empty(); }
+}
+function save(scope: string, value: Conversation) { try { if (typeof sessionStorage !== 'undefined' && scope) sessionStorage.setItem(KEY(scope), JSON.stringify(value)); } catch { /* storage full or blocked: keep in memory only */ } }
 
 function useConversationState(scope: string) {
-  const [entry, setEntry] = React.useState(() => ({ scope, value: empty() }));
+  const [entry, setEntry] = React.useState(() => ({ scope, value: load(scope) }));
+  React.useEffect(() => { if (entry.scope === scope) save(scope, entry.value); }, [entry, scope]);
   const live = React.useRef(scope);
   live.current = scope;
   const fresh = React.useMemo(empty, [scope]);
   React.useLayoutEffect(() => {
-    setEntry(previous => previous.scope === scope ? previous : { scope, value: empty() });
+    setEntry(previous => previous.scope === scope ? previous : { scope, value: load(scope) });
   }, [scope]);
   const update = React.useCallback(<K extends keyof Conversation>(key: K, action: React.SetStateAction<Conversation[K]>) => {
     if (live.current !== scope) return;

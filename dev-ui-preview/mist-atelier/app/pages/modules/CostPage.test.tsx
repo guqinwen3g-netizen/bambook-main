@@ -44,7 +44,13 @@ it('clears source filters on workspace switch',()=>{route.section='sources';rend
 
 
 it('uses the financial material proportions when inventory is hidden and otherwise marks cost unknown',()=>{
- const f=materialDeliveryFixture(),id=f.issue(50);f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id,evidence:'Counted'}},'garment');const projected=structuredClone(f.state);projected.fulfillment.stock=[];projected.fulfillment.stockMovements=[];store.w.state=projected;store.w.workspace={id:'space',costMaterialBasis:financialMaterialCostBasis(f.state),access:{hidden:[{key:'inventory'}]}};route={view:'bom',id:f.target.orderId,section:'orders'};render();expect(host.textContent).toContain('¥-3,420.00');expect(host.textContent).not.toContain('证据归集不等于已完成核算');
+ const f=materialDeliveryFixture(),id=f.issue(50);f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id,evidence:'Counted'}},'garment');const projected=structuredClone(f.state);projected.fulfillment.stock=[];projected.fulfillment.stockMovements=[];store.w.state=projected;store.w.workspace={id:'space',costMaterialBasis:financialMaterialCostBasis(f.state),access:{hidden:[{key:'inventory'}]}};route={view:'bom',id:f.target.orderId,section:'orders'};render();/* The fixture order is internal: its 3,420 is actual cost, not a negative sales margin. */expect(host.textContent).toContain('内部订单实际成本 ¥3,420.00');expect(host.textContent).not.toContain('¥-3,420.00');expect(host.textContent).not.toContain('证据归集不等于已完成核算');
  store.w.workspace.costMaterialBasis=undefined;render();expect(host.textContent).toContain('暂不能核算');expect(host.textContent).not.toContain('¥-20.00');
 });
 it('keeps order margin behind report permission for a local role profile',()=>{store.write=false;store.local=true;render();expect(host.textContent).toContain('需报表管理权限查看');store.local=undefined;});
+it('shows the rebate-inclusive margin as hidden and gives the margin without rebate when rebate amounts are masked or unreadable',()=>{
+ route.section='period';store.w.state.exportRebate={rates:[],claims:[{id:'rc',code:'RC-1',orderIds:['order'],lines:[],receipts:[],taxable:0,expected:0,taxMasked:true,state:'filed'}]};render();
+ expect(host.textContent).toContain('毛利（不含退税）');expect(host.textContent).toContain('毛利（含退税）已隐藏');
+ store.w.state={...store.w.state,exportRebate:{rates:[],claims:[]}};store.w.workspace={...(store.w.workspace||{}),access:{hidden:[{key:'exportRebate'}]}};render();
+ expect(host.textContent).toContain('毛利（含退税）无权查看');
+});

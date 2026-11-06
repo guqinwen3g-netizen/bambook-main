@@ -1,17 +1,18 @@
+import { FinanceLedgers } from './FinanceLedgers';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow} from '../runtime/businessClock';
 /** Four finance entrances. Only existing workspace facts are projected; unavailable accounting capabilities stay explicit. */
 import React from 'react';
 import { ArrowDownLeft, ArrowUpRight, Landmark, ReceiptText } from 'lucide-react';
-import { Banner, Button, Card, CardHeader, DataTable, EmptyState, Facts, Mono, ObjectCell, Pill, SearchField, Segmented, StatCard, StatGrid, Tabs, Toolbar, type Column } from '../../../../components/mist';
+import { Banner, Button, Card, CardHeader, DataTable, Dialog, EmptyState, Facts, Mono, ObjectCell, Pill, SearchField, Segmented, StatCard, StatGrid, Tabs, Toolbar, type Column } from '../../../../components/mist';
 import type { MistState, MistReceipt, MistPayment } from '../../../../server/src/shared/mistWorkspace';
 import { isActiveMistInvoice, mistBankAccountBalances, mistFxLockUsage, type MistFxRecord } from '../../../../server/src/shared/mistWorkspace';
-import { AccountAssignDialog, BankAccountDialog, FxAllocateDialog, FxDialog, fxUnallocatedMinor, FxPeriodRatesCard, FxReverseDialog, FxRevaluationCard, AccountStatusCell, accountLabel, editAccountDraft, newAccountDraft, newFxDraft, useBankAccountCommand } from './FinanceBankAccounts';
+import { AccountAssignDialog, BankAccountDialog, FxAllocateDialog, FxDialog, fxUnallocatedMinor, FxPeriodRatesCard, FxReverseDialog, FxRevaluationCard, PeriodCloseCard, AccountStatusCell, accountLabel, editAccountDraft, newAccountDraft, newFxDraft, useBankAccountCommand } from './FinanceBankAccounts';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
 import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
 import { useNav } from '../nav';
-import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, useListDetailRoute } from './modules/pageKit';
+import { ActionBar, businessWhen, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, useListDetailRoute } from './modules/pageKit';
 import { downloadMistCsv } from './OrderListPage';
 import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
 import { supplierPayableSummary } from '../../../../server/src/shared/mistPayables';
@@ -88,7 +89,7 @@ export function FinanceRecords({ onReceipt }: { onReceipt: (id: string) => void 
     <Facts items={[{ label: '方向', value: current.direction === 'receipt' ? '实际收款' : '已登记付款记录' }, { label: '交易日期', value: current.date }, { label: '付款方 / 收款方', value: current.party }, { label: '原币金额', value: money(current.amount, current.currency) }, { label: '银行参考 / 附言', value: current.ref || '未填写' }, ...(accountsVisible ? [{ label: '公司银行账户', value: account ? `${account.code} · ${accountLabel(account)}` : '未归属' }] : [])]} />
     <ActionBar actions={[
       { label: account ? '调整归属账户' : '归属账户', onClick: () => setAssigning(true), hidden:!canWrite },
-      ...(current.receipt ? [{label:'查看收款核销',onClick:()=>onReceipt(current.id)},...(allocations.length&&canReconcile?[{label:'核销冲回',onClick:()=>onReceipt(current.id)}]:[])] : supplierPayment ? [{label:'查看应付分配',onClick:()=>go('payment-vouchers',supplierPayment.id,{section:'payables'})},{label:'付款冲回',onClick:()=>go('payment-vouchers',supplierPayment.id,{section:'payables'}),hidden:!canWrite||!canReconcile}] : refundClaim ? [{label:'查看索赔案件',onClick:()=>go('claims',refundClaim.id)}] : []),
+      ...(current.receipt ? [{label:'查看收款核销',onClick:()=>onReceipt(current.id)},...(allocations.length&&canReconcile?[{label:'核销冲回',onClick:()=>onReceipt(current.id)}]:[])] : supplierPayment ? [{label:'查看应付分配',onClick:()=>go('payment-vouchers',supplierPayment.id,{section:'payables'})},{label:'去应付详情冲回',onClick:()=>go('payment-vouchers',supplierPayment.id,{section:'payables'}),hidden:!canWrite||!canReconcile}] : refundClaim ? [{label:'查看索赔案件',onClick:()=>go('claims',refundClaim.id)}] : []),
     ]} />
     {current.receipt && <DetailBlock title={uiText("到账用途")}><Facts items={[{ label: '当前未分配', value: money(current.receipt.remaining, current.currency) }, { label: '原始到账', value: money(current.amount, current.currency) }]} />
       {allocations.map(a => { const i = state?.invoices.find(i => i.id === a.invoiceId); return <div className="mist-col" key={a.id}><div className="mist-row mist-module-actions"><Mono>{i?.code || '来源票据未找到'}</Mono><span className="mist-num">{money(a.amount, a.currency)}</span>{i && <Button size="sm" onClick={() => go('payment-vouchers', i.id)}>{uiText("查看票据")}</Button>}</div><span className="mist-note">{a.createdAt} · {a.actor}{uiText(a.payerBasis ? ` · ${a.payerBasis}` : '')}</span></div>; })}
@@ -112,7 +113,7 @@ export function FinanceRecords({ onReceipt }: { onReceipt: (id: string) => void 
     <Segmented value={currency} onChange={setCurrency} options={[{ value: 'all', label: '全部币种' }, ...currencies.map(c => ({ value: c, label: c }))]} />
     {assignDialog}
     <ListDetail drawerOpen={drawer && !!current} drawerTitle={current?.code || '交易详情'} onDrawerClose={() => setDrawer(false)} detail={detail} summary={summary} list={<Card><DataTable ariaLabel={uiText("收付款记录")} rows={shown} columns={columns} loading={loading} selectedKey={selected} rowKey={r => r.id} onRowClick={r => { setSelected(r.id); setDrawer(true); go('payment-vouchers', r.id, { section: recordSection(direction) }, { keepScroll: true }); }} empty={<EmptyState title={uiText(rows.length ? '没有符合条件的收付款记录' : '还没有收付款记录')} action={rows.length ? <Button onClick={() => { setQuery(''); changeDirection('all'); setCurrency('all'); }}>{uiText("清除筛选")}</Button> : undefined} />} /></Card>} />
-    {partials.length>0 && <Card><CardHeader title={uiText('部分可见到账')} /><div className="mist-card-body mist-col" role="list" aria-label={uiText('部分可见到账')}>{partials.map(item=><div className="mist-row" role="listitem" key={item.id}><Mono>{item.code}</Mono><span>{item.date} · {item.payer}</span><span className="mist-spacer"/><span>{uiText('本范围已核销')} {money(item.visibleAllocatedAmount,item.currency)}</span>{item.hiddenCount>0 && <span>{ui`另有 ${item.hiddenCount} 笔其他范围业务`}</span>}</div>)}</div></Card>}
+    {partials.length>0 && <Card><CardHeader title={uiText('部分可见到账')} /><div className="mist-card-body mist-col" role="list" aria-label={uiText('部分可见到账')}>{partials.map(item=><div className="mist-row" role="listitem" key={item.id}><Mono>{item.code}</Mono><span>{item.date} · {item.payer}</span><span className="mist-spacer"/><span>{uiText('本范围已核销')} {money(item.visibleAllocatedAmount,item.currency)}</span>{item.hiddenCount>0 && <span>{uiText('另含其他范围业务')}</span>}</div>)}</div></Card>}
   </div>;
 }
 
@@ -127,17 +128,18 @@ export function financeCustomerReceivables(state: MistState | null) {
 }
 export function FinanceAccounts() {
   const { state, loading } = useMistWorkspace(), { go } = useNav(); const customers = financeCustomerReceivables(state);
-  const { canWrite } = useBankAccountCommand(), [editing, setEditing] = React.useState<ReturnType<typeof newAccountDraft> | null>(null);
+  const { canWrite, canLock } = useBankAccountCommand(), [editing, setEditing] = React.useState<ReturnType<typeof newAccountDraft> | null>(null);
   const [fx, setFx] = React.useState<ReturnType<typeof newFxDraft> | null>(null), [reversing, setReversing] = React.useState<MistFxRecord | null>(null), [linking, setLinking] = React.useState<MistFxRecord | null>(null);
   const fxRows = [...(state?.fxRecords || [])].sort((a, b) => b.date.localeCompare(a.date) || b.code.localeCompare(a.code)), accountCode = (id?: string) => (state?.bankAccounts || []).find(a => a.id === id)?.code || '';
   const currencies = new Set((state?.bankAccounts || []).map(a => a.currency)), canSettle = currencies.size >= 2;
   const bank = state ? mistBankAccountBalances(state) : { accounts: [], unassigned: { receipts: 0, payments: 0 } }, unassigned = bank.unassigned.receipts + bank.unassigned.payments;
   const used = (id?: string) => !!id && !!bank.accounts.find(a => a.account.id === id && a.receiptCount + a.paymentCount > 0);
+  const [viewing, setViewing] = React.useState(''), viewingRow = bank.accounts.find(r => r.account.id === viewing);
   return <div className="mist-col">
-    {!bank.accounts.length ? <Banner tone="warn" title={uiText("还没有登记公司银行账户")} />
-      : unassigned > 0 ? <Banner tone="warn" title={ui`待归属 · ${unassigned}`}>{uiText("余额未含待归属流水")}</Banner> : null}
-    <ActionBar actions={[{ label: '新增账户', onClick: () => setEditing(newAccountDraft()), hidden:!canWrite }, { label: '查看未归属流水', onClick: () => go('payment-vouchers', undefined, { section: 'records:unassigned' }), hidden: !unassigned }, { label: '登记锁汇', onClick: () => setFx(newFxDraft('lock', state)), hidden:!canWrite }, { label: '登记结汇', onClick: () => setFx(newFxDraft('settlement', state)), hidden:!canWrite, reason:canSettle ? undefined : '先登记原币和本币两个不同币种的账户' }]} />
-    <Card><DataTable ariaLabel={uiText("公司银行账户")} rows={bank.accounts} rowKey={r => r.account.id} loading={loading} onRowClick={r => { if (canWrite) setEditing(editAccountDraft(r.account)); }} columns={[
+    {!bank.accounts.length ? <Banner variant="notice" tone="warn" title={uiText("还没有登记公司银行账户")} />
+      : unassigned > 0 ? <Banner variant="status" tone="warn" title={ui`待归属 · ${unassigned}`}>{uiText("余额未含待归属流水")}</Banner> : null}
+    <ActionBar actions={[{ label: '新增账户', onClick: () => setEditing(newAccountDraft()), hidden:!canWrite }, { label: '查看未归属流水', onClick: () => go('payment-vouchers', undefined, { section: 'records:unassigned' }), hidden: !unassigned }, { label: '登记锁汇', onClick: () => setFx(newFxDraft('lock', state)), hidden:!canLock }, { label: '登记结汇', onClick: () => setFx(newFxDraft('settlement', state)), hidden:!canWrite, reason:canSettle ? undefined : '先登记原币和本币两个不同币种的账户' }]} />
+    <Card><DataTable ariaLabel={uiText("公司银行账户")} rows={bank.accounts} rowKey={r => r.account.id} loading={loading} onRowClick={r => setViewing(r.account.id)} columns={[
       { key: 'account', header: '账户', width: 'minmax(200px,1.6fr)', render: r => <ObjectCell name={<><Mono>{r.account.code}</Mono> {r.account.name}</>} meta={`${r.account.bankName} · ${r.account.accountNo} · 期初日 ${r.account.openingDate}`} /> },
       { key: 'opening', header: '期初', width: '150px', align: 'right', hideOnMobile: true, render: r => <span className="mist-num">{money(r.account.openingBalance, r.account.currency)}</span> },
       { key: 'in', header: '归属到账', width: '150px', align: 'right', hideOnMobile: true, render: r => <span className="mist-num" title={ui`${r.receiptCount} 笔`}>{money(r.receipts, r.account.currency)}</span> },
@@ -146,21 +148,27 @@ export function FinanceAccounts() {
       { key: 'balance', header: '账户余额', width: '150px', align: 'right', render: r => <span className="mist-num">{money(r.balance, r.account.currency)}</span> },
       { key: 'status', header: '状态', width: '170px', render: r => <AccountStatusCell account={r.account} balance={r.balance} /> },
     ]} empty={<EmptyState title={uiText("暂无公司银行账户")} description={uiText("点上方“新增账户”登记账户与期初余额。")} />} /></Card>
+    {viewingRow && <Dialog open onClose={() => setViewing('')} width={640} title={ui`${viewingRow.account.code} · ${viewingRow.account.name}`}
+      footer={<><Button onClick={() => setViewing('')}>{uiText("关闭")}</Button>{canWrite && <Button variant="primary" onClick={() => { setViewing(''); setEditing(editAccountDraft(viewingRow.account)); }}>{uiText("编辑")}</Button>}</>}>
+      <Facts items={[{ label: '开户行', value: viewingRow.account.bankName }, { label: '账号', value: viewingRow.account.accountNo }, { label: '币种', value: viewingRow.account.currency }, { label: '期初日', value: viewingRow.account.openingDate }, { label: '期初余额', value: money(viewingRow.account.openingBalance, viewingRow.account.currency) }, { label: '账户余额', value: money(viewingRow.balance, viewingRow.account.currency) }, { label: '归属到账', value: ui`${money(viewingRow.receipts, viewingRow.account.currency)} · ${viewingRow.receiptCount} 笔` }, { label: '归属付款', value: ui`${money(viewingRow.payments, viewingRow.account.currency)} · ${viewingRow.paymentCount} 笔` }]} />
+    </Dialog>}
     {editing && <BankAccountDialog draft={editing} used={used(editing.id)} onClose={() => setEditing(null)} />}
     <Card><DataTable ariaLabel={uiText("锁汇与结汇记录")} rows={fxRows} rowKey={r => r.id} loading={loading} columns={[
-      { key: 'code', header: '记录', width: 'minmax(160px,1.2fr)', render: r => <ObjectCell name={<><Mono>{r.code}</Mono> {uiText(r.kind === 'lock' ? '锁汇' : '结汇')}</>} meta={`${r.date} · ${r.ref}${r.kind === 'lock' ? ' · 交割截止 ' + r.settleBy : ''}`} /> },
+      { key: 'code', header: '记录', width: 'minmax(160px,1.2fr)', render: r => <ObjectCell name={<><Mono>{r.code}</Mono> {uiText(r.kind === 'lock' ? '锁汇' : '结汇')}</>} meta={`${r.date} · ${r.ref}${r.kind === 'lock' ? ' · 交割截止 ' + r.settleBy : ''} · ${r.actor} ${businessWhen(r.createdAt)}`} /> },
       { key: 'amount', header: '原币', width: '140px', align: 'right', render: r => <span className="mist-num">{money(r.amount, r.currency)}</span> },
       { key: 'rate', header: '汇率', width: '100px', align: 'right', hideOnMobile: true, render: r => <span className="mist-num" title={uiText(r.kind === 'lock' ? '锁定汇率' : '由水单金额得出')}>{r.rate}</span> },
       { key: 'local', header: '本币', width: '150px', align: 'right', hideOnMobile: true, render: r => <span className="mist-num">{money(r.localAmount, r.localCurrency)}</span> },
       { key: 'bank', header: '银行 / 账户', width: 'minmax(120px,1fr)', hideOnMobile: true, render: r => r.kind === 'lock' ? r.bankName : `${accountCode(r.fromAccountId)} → ${accountCode(r.toAccountId)}${r.lockId ? ' · 交割 ' + ((state?.fxRecords || []).find(x => x.id === r.lockId)?.code || '') : ''}` },
       { key: 'state', header: '状态', width: '150px', render: r => r.reversed ? <Pill tone="neutral">{uiText("已冲回")}</Pill> : r.kind === 'lock' ? (() => { const u = mistFxLockUsage(state!, r.id); return <Pill tone={u.remaining > 0 ? 'accent' : 'ok'}>{uiText(u.remaining > 0 ? `剩余 ${money(u.remaining, r.currency)}` : '已全部交割')}</Pill>; })() : fxUnallocatedMinor(r) > 0 ? <Pill tone="warn">{uiText("未对应到账 ")}{money(fxUnallocatedMinor(r) / 100, r.currency)}</Pill> : <Pill tone="ok">{uiText("已入账 · 已对应到账")}</Pill> },
-      { key: 'act', header: '操作', width: '150px', render: r => r.reversed ? <span className="mist-note">{r.reversed.reason}</span> : <span className="mist-row">{r.kind === 'lock' && mistFxLockUsage(state!, r.id).remaining > 0 && canWrite && canSettle && <Button size="sm" onClick={() => setFx(newFxDraft('settlement', state, r.id))}>{uiText("交割")}</Button>}{r.kind === 'settlement' && fxUnallocatedMinor(r) > 0 && canWrite && <Button size="sm" onClick={() => setLinking(r)}>{uiText("对应到账")}</Button>}{canWrite && <Button size="sm" onClick={() => setReversing(r)}>{uiText("冲回")}</Button>}</span> },
+      { key: 'act', header: '操作', width: '150px', render: r => r.reversed ? <span className="mist-note">{r.reversed.actor} {businessWhen(r.reversed.at)} · {r.reversed.reason}</span> : <span className="mist-row">{r.kind === 'lock' && mistFxLockUsage(state!, r.id).remaining > 0 && canWrite && canSettle && <Button size="sm" onClick={() => setFx(newFxDraft('settlement', state, r.id))}>{uiText("交割")}</Button>}{r.kind === 'settlement' && fxUnallocatedMinor(r) > 0 && canWrite && <Button size="sm" onClick={() => setLinking(r)}>{uiText("对应到账")}</Button>}{canWrite && <Button size="sm" onClick={() => setReversing(r)}>{uiText("冲回")}</Button>}</span> },
     ]} empty={<EmptyState title={uiText("暂无锁汇或结汇记录")} />} /></Card>
     {fx && state && <FxDialog state={state} draft={fx} onClose={() => setFx(null)} />}
     {reversing && <FxReverseDialog record={reversing} onClose={() => setReversing(null)} />}
     {linking && state && <FxAllocateDialog state={state} record={linking} onClose={() => setLinking(null)} />}
     <FxPeriodRatesCard />
     <FxRevaluationCard />
+    <PeriodCloseCard />
+    <FinanceLedgers />
     <Card><DataTable ariaLabel={uiText("客户应收余额（原币）")} rows={customers} rowKey={r => r.id} loading={loading} onRowClick={r => { if (r.customerId) go('payment-vouchers', undefined, { section: 'open', customerId: r.customerId }); }} columns={[
       { key: 'customer', header: '客户', render: r => <ObjectCell name={r.name} meta={r.customerId ? undefined : '缺少来源客户标识，请核对'} /> },
       { key: 'count', header: '未结票据', width: '90px', align: 'right', render: r => r.invoices }, { key: 'amount', header: '未收余额', width: '150px', align: 'right', render: r => money(r.amount, r.currency) },

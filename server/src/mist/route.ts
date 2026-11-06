@@ -10,6 +10,7 @@ import { MistRepository, type MistContract } from './repository';
 import { MistPrivateFiles, MIST_FILE_MAX_BYTES } from './files';
 import type { ImagePreviewMode } from './imagePreview';
 import { MistApiError, fail } from './errors';
+import { assertCurrentAccount } from './authority';
 import {getMistAssistantStatus,runMistAssistant} from './assistant';
 import { analyzeEmail } from './mail/intelligence';
 import {runQuoteCostAdvisor} from './quoteCostAdvisor';
@@ -17,12 +18,17 @@ import { hasScope } from '../auth/permissionService';
 import { codexSubscriptions, CodexSubscriptionError, PLATFORM_SUBJECT, personalSubject, type CodexSubscriptionService } from '../ai/codexSubscription';
 import { platformProfileList } from '../ai/platformModel';
 import { platformProviders, type PlatformProviderStore } from '../ai/platformProviders';
+import type { MarketStore } from '../ai/marketQuotes';
 import { resolveEnvProviderChain, testLlmProvider } from '../ai/llmProviders';
 import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
 import { handleMcpMessage, taskMcpTools, MCP_PROTOCOL_VERSIONS, MCP_SOURCE_RULES, type McpRepository } from './agentMcp';
 import { AGENT_DELEGATION_HEADER, agentRouteAllowed, createAgentDelegation, isAgentActor, type AgentDelegation } from './agentDelegation';
 import { agentCatalog, agentGet, agentQuery, agentRelated } from './agentRead';
-import {SERVICE_KEY_HEADER} from './agentIdentities';
+import {SERVICE_KEY_HEADER, personalIdentityId} from './agentIdentities';
+import type { MistVoiceService } from './voice/service';
+import { samePublicOrigin } from '../shared/bambookPublicOrigins';
+import { responseLocale } from './responseLanguage';
+import type { PlatformVoiceStore } from '../ai/platformVoice';
 import { TASK_HEADER, TASK_CONTROL_HEADER } from './agentTasks';
 import type { MistMailReceiver } from './mail/receiverWorker';
 import { MistMailService } from './mail/service';
@@ -43,7 +49,7 @@ function publicError(res: Response, error: any) {
   const known = error instanceof MistApiError || (typeof error?.code === 'string' && Number(error?.status) >= 400 && Number(error?.status) < 500);
   res.status(known ? Number(error.status) : 500).json({ ok: false, error: { code: known ? error.code : 'MIST_REQUEST_FAILED', message: known ? error.message : '公司操作未完成，请查询原请求回执或稍后重试' } });
 }
-export function createMistRouter(options: { prisma?: any; platformProviders?: PlatformProviderStore; filesRoot?: string; repository?: MistRepository; contract?: MistContract; authenticate?: RequestHandler; subscriptions?: CodexSubscriptionService; mail?: MistMailService; mailReceiver?: MistMailReceiver; mailTransport?: MailTransport; mailCredentialsRoot?: string; delegation?: AgentDelegation; delegationGuard?: (req: Request) => void }) {
+export function createMistRouter(options: { prisma?: any; voice?: MistVoiceService; voiceSettings?: PlatformVoiceStore; marketStore?: MarketStore; platformProviders?: PlatformProviderStore; filesRoot?: string; repository?: MistRepository; contract?: MistContract; authenticate?: RequestHandler; subscriptions?: CodexSubscriptionService; mail?: MistMailService; mailReceiver?: MistMailReceiver; mailTransport?: MailTransport; mailCredentialsRoot?: string; delegation?: AgentDelegation; delegationGuard?: (req: Request) => void }) {
   const repository = options.repository ?? new MistRepository(options.prisma, options.contract ?? require('../shared/mistWorkspace') as MistContract, new MistPrivateFiles(options.filesRoot ?? path.resolve(__dirname, '../../private/mist-files')));
   const router = Router();
   const authenticate = options.authenticate ?? requireAuth;
@@ -101,11 +107,51 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
   router.use(createPublicEntryHostGuard('mist'));
   const actor = (req: Request) => (req as Request & { actor: TokenPayload }).actor;
   const run = (handler: (req: Request, res: Response) => Promise<void>): RequestHandler => (req, res) => { void handler(req, res).catch(error => publicError(res, error)); };
+  router.get('/workspaces/:id/voice/status', run(async (req, res) => {
+    if (isAgentActor(actor(req))) fail('FORBIDDEN', '语音只供本人使用', 403);
+    await repository.authorizePersonalAgentVoice(actor(req), req.params.id);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.json(options.voice?.status() ?? { configured: false });
+  }));
+  router.post('/workspaces/:id/voice/sessions', run(async (req, res) => {
+    const prior = actor(req), workspaceId = req.params.id;
+    if (isAgentActor(prior)) fail('FORBIDDEN', '语音只供本人使用', 403);
+    const body = exactBody(req.body, ['locale', 'taskId']);
+    if (body.taskId !== undefined && (typeof body.taskId !== 'string' || body.taskId.length > 100)) fail('INVALID_INPUT', '任务编号无效', 400);
+    const origin = req.get('Origin') ?? '';
+    if (!samePublicOrigin(req.get('Host') ?? '', origin) && !(/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.get('Host') ?? ''))) fail('FORBIDDEN', '语音来源无效', 403);
+    const voice = options.voice; if (!voice) fail('VOICE_NOT_CONFIGURED', '平台尚未配置实时语音', 503);
+    if (!(await repository.platformTaskCapabilities(prior, workspaceId)).platformAvailable) fail('MIST_ASSISTANT_NOT_CONFIGURED', '平台模型暂不可用', 503);
+    const authorize = async () => { await repository.authorizePersonalAgentVoice(prior, workspaceId); };
+    const task = async (id: string) => {
+      const item = await repository.getAgentTask(prior, workspaceId, id);
+      if (item.executor !== 'platform' || item.identityId !== personalIdentityId(workspaceId, prior.userId)) fail('FORBIDDEN', '只能接续本人的个人 Agent 事项', 403);
+      return item;
+    };
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.status(201).json(await voice!.issue({
+      owner: workspaceId + ':' + prior.userId, workspaceId, locale: responseLocale(body.locale), taskId: body.taskId, authorize, task,
+      submit: async (text, requestId, current) => {
+        if (current?.waitingProposalIds.length) fail('AGENT_CONFIRMATION_REQUIRED', '请先在页面确认当前事项', 422);
+        const question = current?.questions?.find(q => !q.answer);
+        if (current && question) return repository.answerAgentTaskQuestion(prior, workspaceId, current.id, { requestId, version: current.version, questionId: question.id, answer: text });
+        return repository.assignPersonalAgentTask(prior, workspaceId, { requestId, name: text.slice(0, 60), instructions: text, locale: responseLocale(body.locale) }, delegation.makeServiceCredential);
+      },
+      control: async (action, current, requestId) => {
+        if (action !== 'cancel') return repository.changeAgentTask(prior, workspaceId, current.id, action, { requestId, version: current.version });
+        await repository.cancelAgentTask(prior, workspaceId, current.id, { requestId, version: current.version });
+        return repository.getAgentTask(prior, workspaceId, current.id);
+      },
+    }, origin));
+  }));
   // Older native clients have a closed type enum. Keep broad REST results compatible until explicit opt-in.
   const mailRecordReadOptions=(req:Request)=>{if(req.query.includeMailRecords!==undefined&&req.query.includeMailRecords!=='1')fail('INVALID_INPUT','邮件读取能力参数无效',400);return{excludeTypes:req.query.includeMailRecords==='1'?[]:['email_draft','email_send']};};
   router.get('/workspaces/:id/agent-tasks',run(async(req,res)=>{exactBody(req.query,['cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.listAgentTasks(actor(req),req.params.id,req.query.cursor));}));
   router.get('/workspaces/:id/agent-tasks/:taskId',run(async(req,res)=>{exactBody(req.query,['summary']);if(req.query.summary!==undefined&&req.query.summary!=='1')fail('INVALID_INPUT','任务查询字段无效',400);res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.getAgentTask(actor(req),req.params.id,req.params.taskId,req.query.summary==='1')});}));
   router.get('/workspaces/:id/agent-tasks/:taskId/history',run(async(req,res)=>{exactBody(req.query,['cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.agentTaskHistory(actor(req),req.params.id,req.params.taskId,req.query.cursor));}));
+  router.post('/workspaces/:id/personal-agent',run(async(req,res)=>{exactBody(req.body??{},[]);res.setHeader('Cache-Control','private, no-store');res.json({identity:await repository.ensurePersonalAgent(actor(req),req.params.id,delegation.makeServiceCredential,delegation.timestamp())});}));
+  router.post('/workspaces/:id/personal-agent/tasks',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.status(201).json({item:await repository.assignPersonalAgentTask(actor(req),req.params.id,exactBody(req.body,['requestId','name','instructions','locale']),delegation.makeServiceCredential)});}));
+  router.get('/workspaces/:id/personal-agent/usage',run(async(req,res)=>{exactBody(req.query,['month']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.personalAgentUsage(actor(req),req.params.id,req.query.month));}));
   router.get('/workspaces/:id/agent-task-capabilities',run(async(req,res)=>{exactBody(req.query,[]);res.setHeader('Cache-Control','private, no-store');res.json(await repository.platformTaskCapabilities(actor(req),req.params.id));}));
   router.get('/workspaces/:id/agent-task-notices',run(async(req,res)=>{exactBody(req.query,[]);res.setHeader('Cache-Control','private, no-store');res.json(await repository.listAgentTaskNotices(actor(req),req.params.id));}));
   router.post('/workspaces/:id/agent-task-notices/read',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.readAgentTaskNotices(actor(req),req.params.id,exactBody(req.body,['items'])));}));
@@ -120,8 +166,9 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
   //   - 平台连接（管理员）：平台 AI 固定流程共用；测试期为管理员个人订阅，生产期改企业 API。
   //   - 个人连接（ai:chat）：仅供后续本机工作助手使用，不参与平台 AI。
   const subscriptions = () => options.subscriptions ?? codexSubscriptions();
-  const aiActor = (req: Request) => { const a = actor(req); if (!a?.userId || !hasScope(a, 'ai:chat')) fail('FORBIDDEN', '当前账号无助手使用权限', 403); return a; };
-  const platformAdmin = async (req: Request) => { const a = actor(req); if (options.prisma) { const current = a?.userId ? await options.prisma.userAccount.findUnique({ where: { id: a.userId }, select: { platformRole: true, status: true, deletedAt: true } }) : null; if (!current || current.status !== 'active' || current.deletedAt || current.platformRole !== 'platform_admin') fail('FORBIDDEN', '仅平台管理员可配置平台模型', 403); } else if (!a?.userId || !(a.roles ?? []).some(role => role === 'owner' || role === (SYSTEM_ROLE_IDS.SUPER_ADMIN as unknown))) fail('FORBIDDEN', '仅管理员可配置平台模型', 403); return a; };
+  // 个人订阅与其他 Mist 路由同一实时授权：重载账号，拒绝停用、已撤销、待改密的会话，再按当前权限判定 ai:chat。
+  const aiActor = async (req: Request) => { const a = actor(req); if (!a?.userId || isAgentActor(a)) fail('FORBIDDEN', '当前账号无助手使用权限', 403); return repository.currentActor(a, 'ai:chat'); };
+  const platformAdmin = async (req: Request) => { const a = actor(req); if (options.prisma) { if (!a?.userId || isAgentActor(a)) fail('FORBIDDEN', '仅平台管理员可配置平台模型', 403); const current = await options.prisma.userAccount.findUnique({ where: { id: a.userId }, select: { platformRole: true, status: true, deletedAt: true, metadata: true } }); assertCurrentAccount(current, a); if (current.platformRole !== 'platform_admin') fail('FORBIDDEN', '仅平台管理员可配置平台模型', 403); } else if (!a?.userId || !(a.roles ?? []).some(role => role === 'owner' || role === (SYSTEM_ROLE_IDS.SUPER_ADMIN as unknown))) fail('FORBIDDEN', '仅管理员可配置平台模型', 403); return a; };
   const subscriptionCall = (handler: (req: Request, res: Response) => Promise<void> | void) => run(async (req, res) => {
     res.setHeader('Cache-Control', 'private, no-store');
     try { await handler(req, res); } catch (error) {
@@ -139,6 +186,21 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
     await options.prisma.auditLog.create({ data: { id: randomUUID(), actorId: actor(req).userId, action, targetType: 'PlatformAiProvider', targetId, detail } });
   };
   const brief = (p: { name: string; baseUrl: string; model: string; enabled: boolean }) => ({ name: p.name, host: hostOf(p.baseUrl), model: p.model, enabled: p.enabled });
+  router.get('/ai/platform-model/voice', subscriptionCall(async (req, res) => {
+    await platformAdmin(req);
+    if (!options.voiceSettings) fail('VOICE_NOT_CONFIGURED', '实时语音配置不可用', 503);
+    res.json(options.voiceSettings!.view());
+  }));
+  router.put('/ai/platform-model/voice', subscriptionCall(async (req, res) => {
+    await platformAdmin(req);
+    if (!options.voiceSettings) fail('VOICE_NOT_CONFIGURED', '实时语音配置不可用', 503);
+    const saved = await options.voiceSettings!.update(exactBody(req.body, ['revision', 'enabled', 'apiKey', 'clearKey', 'voice', 'speed', 'loudness']), next => providerAudit(req, 'platform.ai.voice.update', 'doubao', { revision: next.revision, enabled: next.enabled, voice: next.voice, speed: next.speed, loudness: next.loudness, hasKey: next.hasKey }));
+    // Stop existing speech on key rotation/disable; persistent work is unaffected.
+    options.voice?.stopCalls();
+    res.json(saved);
+  }));
+  // Platform market reference quotes: readable by any signed-in account; values are references with source and time.
+  router.get('/market/quotes', run(async (req, res) => { if (!actor(req)?.userId) fail('UNAUTHENTICATED', '请先登录', 401); const store = options.marketStore; res.set('Cache-Control', 'private, max-age=300').json({ latest: store?.latest() ?? null, history: (store?.history(30) ?? []).map(s => ({ fetchedAt: s.fetchedAt, fx: s.fx.map(q => ({ currency: q.currency, settlementBuy: q.settlementBuy })), materials: s.materials.map(m => ({ key: m.key, price: m.price, date: m.date })) })) }); }));
   router.get('/ai/platform-model', subscriptionCall(async (req, res) => { await platformAdmin(req); res.json(platformView()); }));
   router.post('/ai/platform-model/chatgpt/login', subscriptionCall(async (req, res) => { await platformAdmin(req); exactBody(req.body ?? {}, []); res.status(201).json({ login: await subscriptions().startLogin(PLATFORM_SUBJECT) }); }));
   router.get('/ai/platform-model/chatgpt/login/:loginId', subscriptionCall(async (req, res) => { await platformAdmin(req); res.json({ login: subscriptions().getLogin(PLATFORM_SUBJECT, req.params.loginId), ...platformView() }); }));
@@ -185,10 +247,10 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
       res.json({ ok: false, error: message || '连接失败' });
     } finally { clearTimeout(timer); }
   }));
-  router.get('/ai/subscriptions', subscriptionCall((req, res) => { res.json({ chatgpt: subscriptions().status(personalSubject(aiActor(req).userId)) }); }));
-  router.post('/ai/subscriptions/chatgpt/login', subscriptionCall(async (req, res) => { const a = aiActor(req); exactBody(req.body ?? {}, []); res.status(201).json({ login: await subscriptions().startLogin(personalSubject(a.userId)) }); }));
-  router.get('/ai/subscriptions/chatgpt/login/:loginId', subscriptionCall((req, res) => { const a = aiActor(req); res.json({ login: subscriptions().getLogin(personalSubject(a.userId), req.params.loginId), chatgpt: subscriptions().status(personalSubject(a.userId)) }); }));
-  router.post('/ai/subscriptions/chatgpt/disconnect', subscriptionCall((req, res) => { const a = aiActor(req); exactBody(req.body ?? {}, []); res.json({ chatgpt: subscriptions().disconnect(personalSubject(a.userId)) }); }));
+  router.get('/ai/subscriptions', subscriptionCall(async (req, res) => { res.json({ chatgpt: subscriptions().status(personalSubject((await aiActor(req)).userId)) }); }));
+  router.post('/ai/subscriptions/chatgpt/login', subscriptionCall(async (req, res) => { const a = await aiActor(req); exactBody(req.body ?? {}, []); res.status(201).json({ login: await subscriptions().startLogin(personalSubject(a.userId)) }); }));
+  router.get('/ai/subscriptions/chatgpt/login/:loginId', subscriptionCall(async (req, res) => { const a = await aiActor(req); res.json({ login: subscriptions().getLogin(personalSubject(a.userId), req.params.loginId), chatgpt: subscriptions().status(personalSubject(a.userId)) }); }));
+  router.post('/ai/subscriptions/chatgpt/disconnect', subscriptionCall(async (req, res) => { const a = await aiActor(req); exactBody(req.body ?? {}, []); res.json({ chatgpt: subscriptions().disconnect(personalSubject(a.userId)) }); }));
   const connectionReply=(result:any)=>({...result,payload:undefined,...(result.payload?{delegation:delegation.signManaged(result.payload),readable:agentCatalog({userId:result.payload.sub,roles:[],permissions:result.payload.ceil,departmentIds:[],permissionCeiling:result.payload.ceil,authorizationLoaded:true})}:{} )});
   router.get('/workspaces/:id/agent-identities',run(async(req,res)=>{const query=exactBody(req.query,['scope','cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.agentIdentities(actor(req),req.params.id,delegation.timestamp(),query.scope??'mine',query.cursor));}));
   router.post('/workspaces/:id/agent-identities',run(async(req,res)=>{const body=exactBody(req.body??{},['id','name','ownerId','mode']);res.setHeader('Cache-Control','private, no-store');res.status(201).json(await repository.createAgentIdentity(actor(req),req.params.id,body,delegation.timestamp()));}));
@@ -246,7 +308,7 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
   router.get('/reviews', run(async (req,res)=>{res.json({reviews:await repository.listReviews(actor(req))});}));
   router.get('/reviews/:workspaceId/receipts/:requestId', run(async (req,res)=>{res.json({receipt:await repository.reviewReceipt(actor(req),req.params.workspaceId,req.params.requestId)});}));
   router.get('/reviews/:workspaceId/:reviewId/files/:fileId',run(async(req,res)=>{const {file,bytes}=await repository.reviewFile(actor(req),req.params.workspaceId,req.params.reviewId,req.params.fileId);res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);res.type('application/octet-stream').send(Buffer.from(bytes));}));
-  router.post('/reviews/:workspaceId/:reviewId', run(async (req,res)=>{const body=exactBody(req.body,['requestId','expectedRevision','decision','note']);res.json(await repository.decideReview(actor(req),req.params.workspaceId,req.params.reviewId,body as any));}));
+  router.post('/reviews/:workspaceId/:reviewId', run(async (req,res)=>{const body=exactBody(req.body,['requestId','expectedRevision','decision','note','signature']);if(body.signature!==undefined&&typeof exactBody(body.signature,['svg']).svg!=='string')fail('INVALID_INPUT','签字格式无效',400);res.json(await repository.decideReview(actor(req),req.params.workspaceId,req.params.reviewId,body as any));}));
   router.get('/workspaces/default', run(async (req, res) => { res.json({ workspace: await repository.create(actor(req), { name: '公司业务', seed: actor(req)?.companyId ? 'empty' : 'demo' }, true) }); }));
   router.get('/workspaces', run(async (req, res) => {
     const workspaces = req.query.summary === '1' ? await repository.listSummaries(actor(req)) : await repository.list(actor(req));
@@ -266,10 +328,13 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
   router.post('/workspaces/:id/assistant',run(async(req,res)=>{const context=await repository.getForAssistant(actor(req),req.params.id);const controller=new AbortController();res.once('close',()=>{if(!res.writableEnded)controller.abort();});res.json(await runMistAssistant({...context,body:withResponseLocale(req.body,req.get('X-Bambook-Locale')),signal:controller.signal}));}));
   router.post('/workspaces/:id/quotation-cost-advisor',run(async(req,res)=>{const context=await repository.getForAssistant(actor(req),req.params.id);const controller=new AbortController();res.once('close',()=>{if(!res.writableEnded)controller.abort();});res.setHeader('Cache-Control','private, no-store');res.json(await runQuoteCostAdvisor({...context,body:withResponseLocale(req.body,req.get('X-Bambook-Locale')),signal:controller.signal}));}));
   router.get('/workspaces/:id/team-scopes', run(async (req, res) => { res.json(await repository.teamScopes(actor(req), req.params.id)); }));
+  router.get('/workspaces/:id/internal-receivers', run(async (req, res) => { res.setHeader('Cache-Control', 'private, no-store'); res.json(await repository.internalReceivers(actor(req), req.params.id)); }));
   router.post('/workspaces/:id/team-scopes/preview', run(async (req, res) => { res.json(await repository.previewTeamScope(actor(req), req.params.id, exactBody(req.body, ['teamId', 'conditions', 'picks', 'exclusions', 'note']))); }));
   router.post('/workspaces/:id/commands', run(async (req, res) => {
-    const body = exactBody(req.body, ['requestId', 'expectedRevision', 'command']);
+    const body = exactBody(req.body, ['requestId', 'expectedRevision', 'command', 'reauth', 'signature']);
+    if (body.signature !== undefined && typeof exactBody(body.signature, ['svg']).svg !== 'string') fail('INVALID_INPUT', '签字格式无效', 400);
     exactBody(body.command, ['type', 'payload']);
+    if (body.reauth !== undefined && (body.command?.type !== 'agent.proposal.confirm' || typeof exactBody(body.reauth, ['password']).password !== 'string')) fail('INVALID_INPUT', '只有确认 Agent 提议时可附带登录密码复验', 400);
     res.json(await repository.execute(actor(req), req.params.id, body as any));
   }));
   // 智能邮箱真实收发：凭据只写入服务端，响应只含公司投影与操作结果。

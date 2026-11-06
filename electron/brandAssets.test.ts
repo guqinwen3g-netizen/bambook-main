@@ -1,7 +1,7 @@
 import { readMobileIcons } from '../scripts/mobile-icons';
 import {describe,it,expect} from 'vitest';
 import path from 'node:path';
-import {readFileSync} from 'node:fs';
+import {existsSync,readFileSync} from 'node:fs';
 import {resolveBambookIconPath} from './brandAssets';
 import {BAMBOOK_BRAND} from '../server/src/shared/brand';
 
@@ -51,12 +51,14 @@ describe('V3 installed and development identity',()=>{
     expect(manifest.icons).toEqual(expect.arrayContaining([expect.objectContaining({src:'brand/bambook-v3-app-512.png',type:'image/png'}),expect.objectContaining({src:'brand/bambook-v3-maskable-512.png',purpose:'maskable'})]));
     for(const html of ['index.html','dev-ui-preview/mist-atelier/app/index.html']) expect(readFileSync(html,'utf8')).toContain('rel="apple-touch-icon" sizes="180x180" href="/brand/bambook-v3-apple-touch-180.png"');
   });
-  it('uses the same favicon in the application and embedded Agent',()=>{
-    for(const file of ['index.html','tmp/upstream/OpenBitFun/src/web-ui/index.html']) {
+  it('uses the same favicon in the web app and the Mist entry (and the embedded Agent when it is checked out)',()=>{
+    // tmp/upstream is a git-ignored local checkout of OpenBitFun; only check it when present.
+    const files=['index.html','dev-ui-preview/mist-atelier/app/index.html',...(existsSync('tmp/upstream/OpenBitFun/src/web-ui/index.html')?['tmp/upstream/OpenBitFun/src/web-ui/index.html']:[])];
+    for(const file of files) {
       const html=readFileSync(file,'utf8');
-      expect(html).toContain('/brand/bambook-v3-favicon.svg?v=4');
-      expect(html).toContain('/brand/bambook-v3-favicon-32.png?v=4');
-      expect(html.indexOf('bambook-v3-favicon-32.png')).toBeLessThan(html.indexOf('bambook-v3-favicon.svg'));
+      expect(html).toContain('<link rel="icon" href="/brand/bambook-v3-favicon.svg" />');
+      expect(html).toContain('<link rel="icon" type="image/png" sizes="32x32" href="/brand/bambook-v3-favicon-32.png" />');
     }
+    for(const asset of ['bambook-v3-favicon.svg','bambook-v3-favicon-32.png']) expect(existsSync(path.join('public/brand',asset))).toBe(true);
   });
 });

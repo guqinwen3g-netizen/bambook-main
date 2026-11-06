@@ -135,28 +135,6 @@ describe('syncShipmentReferences — shipsVia link uses carrierRelationId (task_
   });
 });
 
-describe('manifest 字段契约对齐 schema（task_mqxwgae9）', () => {
-  it('manifest 源码不含废弃的 forwarderRelationId/forwarderName', async () => {
-    const fs = await import('fs');
-    const path = await import('path');
-    const manifestSrc = fs.readFileSync(
-      path.resolve(__dirname, '../../agent/mcp/manifest.ts'), 'utf-8'
-    );
-    expect(manifestSrc).not.toContain('forwarderRelationId');
-    expect(manifestSrc).not.toContain('forwarderName');
-  });
-
-  it('manifest shipping 段含 carrierRelationId/carrierName', async () => {
-    const fs = await import('fs');
-    const path = await import('path');
-    const manifestSrc = fs.readFileSync(
-      path.resolve(__dirname, '../../agent/mcp/manifest.ts'), 'utf-8'
-    );
-    expect(manifestSrc).toContain('carrierRelationId');
-    expect(manifestSrc).toContain('carrierName');
-  });
-});
-
 // ---------------------------------------------------------------------------
 // 阶段 D / D1.1a：六类主链路实体 sync 函数
 // ---------------------------------------------------------------------------

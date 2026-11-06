@@ -37,6 +37,8 @@ export interface RouteAuditInput {
   transactionId?: string | null;  // 关联 OrderStatusTransition / BusinessEvent id
   /** 写进 detail.note 的一句话（界面上的「详情」列看得到）—— 用于降级/异常这类"必须让人看见"的说明 */
   note?: string | null;
+  /** 所属公司；不传时由 auditCompanyStamp 按请求公司上下文补齐。 */
+  companyId?: string | null;
 }
 
 /**
@@ -69,6 +71,7 @@ export async function writeRouteAuditLog(input: RouteAuditInput): Promise<string
       beforeValue: input.beforeValue != null ? (input.beforeValue as any) : null,
       afterValue: input.afterValue != null ? (input.afterValue as any) : null,
       transactionId: input.transactionId ?? null,
+      ...(input.companyId !== undefined ? { companyId: input.companyId } : {}),
     },
   });
   return id;

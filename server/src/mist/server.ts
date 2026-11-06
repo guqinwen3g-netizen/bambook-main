@@ -20,16 +20,21 @@ import * as mistContract from '../shared/mistWorkspace';
 import { AGENT_DELEGATION_HEADER } from './agentDelegation';
 import { TASK_HEADER, TASK_CONTROL_HEADER } from './agentTasks';
 import{MistPlatformTaskWorker,type PlatformTaskWorkerOptions}from'./platformTaskWorker';
+import { createMarketStore, MarketQuoteWorker } from '../ai/marketQuotes';
 import{defaultAgentDelegation}from'./route';
 import type{AgentDelegation}from'./agentDelegation';
-export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;host?:string;mailTransport?:MailTransport;mailReceive?:Pick<MailReceiverOptions,'tickMs'|'concurrency'>&{intervalMs?:number;leaseMs?:number;timeoutMs?:number};agentTasks?:Omit<PlatformTaskWorkerOptions,'makeCredential'>}={}) {
+import { MistVoiceService, type VoiceOptions } from './voice/service';
+import { createPlatformVoiceStore } from '../ai/platformVoice';
+export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;host?:string;mailTransport?:MailTransport;mailResolve?:(host:string)=>Promise<string[]>;mailReceive?:Pick<MailReceiverOptions,'tickMs'|'concurrency'>&{intervalMs?:number;leaseMs?:number;timeoutMs?:number};agentTasks?:Omit<PlatformTaskWorkerOptions,'makeCredential'>;voice?:VoiceOptions}={}) {
   const app = express(); app.disable('x-powered-by');
   const host=options.host??process.env.MIST_HOST??'127.0.0.1';
   const local=options.local??(mistLocalRequested()?createMistLocalRuntime({host}):undefined);
   if(local)assertMistLocalMode(host);
+  const voiceSettings = createPlatformVoiceStore(local ? { dir: path.join(local.database.directory, 'platform-ai') } : {});
+  const voice = new MistVoiceService({ ...options.voice, config: options.voice?.config ?? voiceSettings.runtime }); app.locals.voice = voice;
   const mailRuntime=(repository:MistRepository)=>{
     const credentials=new MistMailCredentials(process.env.MIST_MAIL_CREDENTIAL_DIR||(local?path.join(local.database.directory,'mail-credentials'):path.resolve(__dirname,'../../private/mist-mail-credentials')));
-    const mail=new MistMailService(repository,credentials,options.mailTransport,process.env,()=>new Date(),options.mailReceive);
+    const mail=new MistMailService(repository,credentials,options.mailTransport,process.env,()=>new Date(),options.mailReceive,options.mailResolve);
     const stateWorker=new MistMailStateWorker(repository,mail,{tickMs:options.mailReceive?.tickMs,...(local?{localActor:local.actorForProfile}:{}),onError:code=>console.error('[mail-state]',code)});
     app.locals.mailStateWorker=stateWorker;repository.setMailStateWake(()=>stateWorker.wake());
     const mailReceiver=new MistMailReceiver(repository,mail,{...options.mailReceive,stateWorker,...(local?{localActor:local.actorForProfile}:{}),onError:code=>console.error('[mail-receiver]',code)});
@@ -37,6 +42,8 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
     return{mail,mailReceiver};
   };
   const agentRuntime=(repository:MistRepository,delegation:AgentDelegation)=>{const worker=new MistPlatformTaskWorker(repository,{onError:code=>console.error('[platform-agent]',code),...options.agentTasks,makeCredential:delegation.makeTaskCredential});app.locals.platformTaskWorker=worker;app.locals.mistRepository=repository;repository.setPlatformTaskRuntime(()=>worker.available,delegation.hydrateServiceActor);};
+  const marketStore=createMarketStore(process.env.BAMBOOK_MARKET_DIR?.trim()||(local?path.join(local.database.directory,'market'):undefined));
+  app.locals.marketStore=marketStore;app.locals.marketWorker=new MarketQuoteWorker(marketStore,{onError:code=>console.error('[market-quotes]',code)});
   const configured = new Set((local?'':process.env.MIST_CORS_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean));
   app.use((req, res, next) => cors({ credentials: true, origin(origin, callback) {
     const requestHost = String(req.headers.host ?? '');
@@ -46,7 +53,7 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
   app.use(express.json({ limit: '4mb' })); app.use(cookieParser());
   app.get('/api/health', async (_req, res) => {
     try { if(local){await local.ready;await local.database.health();res.json({status:'ok',service:'mist-workspace',mode:'local',storage:'local-file'});return;}await prisma.$queryRawUnsafe('SELECT 1'); res.json({ status: 'ok', service: 'mist-workspace', database: 'ok' }); }
-    catch { res.status(503).json(local?{status:'error',service:'mist-workspace',mode:'local',storage:'unavailable'}:{ status: 'error', service: 'mist-workspace', database: 'unavailable' }); }
+    catch (error) { console.error('[mist-health] storage check failed', error instanceof Error ? error.message : error); res.status(503).json(local?{status:'error',service:'mist-workspace',mode:'local',storage:'unavailable'}:{ status: 'error', service: 'mist-workspace', database: 'unavailable' }); }
   });
   if(local){
     app.locals.mistLocal=local;
@@ -56,20 +63,22 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
       res.status(403).set('Cache-Control','private, no-store').json({ok:false,error:{code:'AGENT_FORBIDDEN',message:'工作助手委托不能操作本人登录会话'}});
     });
     app.get('/api/mist/session',local.sessionGet);app.post('/api/mist/session',local.sessionPost);
-    const repository=new MistRepository(local.database,mistContract as MistContract,new MistPrivateFiles(path.join(local.database.directory,'files')),local.authorize);
+    const repository=new MistRepository(local.database,mistContract as MistContract,new MistPrivateFiles(path.join(local.database.directory,'files')),local.authorize,undefined,undefined,undefined,(db,userId,password)=>local.verifyPassword(db,userId,password));
     agentRuntime(repository,local.agentDelegation);
-    app.use('/api/mist',createMistRouter({repository,...mailRuntime(repository),authenticate:local.authenticate,delegation:local.agentDelegation,delegationGuard:local.requestGuard}));
+    app.use('/api/mist',createMistRouter({repository,marketStore,voice,voiceSettings,...mailRuntime(repository),authenticate:local.authenticate,delegation:local.agentDelegation,delegationGuard:local.requestGuard}));
   }else{
     if(!prisma)throw new Error('Mist server requires an explicit database outside local mode');
     const requireEmailVerification = process.env.AUTH_REQUIRE_EMAIL_VERIFY ? !/^(0|false|no)$/i.test(process.env.AUTH_REQUIRE_EMAIL_VERIFY.trim()) : true;
     app.use('/api/auth', createAuthRouter({ prisma, email: createEmailService(), verification: createDbVerificationStore({ prisma }), requireEmailVerification }));
-    // The local-identity session exists only in local mode. Answer 404 before authentication so the web app
-    // detects server-account mode and shows sign-in (a 401 here made it fall back to the local-workspace screen).
+    // The local-identity session exists only in local mode. Clients that send X-Mist-Session-Probe: 2 get an explicit
+    // non-error answer, so the web app shows account sign-in without a console 404. Older clients (cached pages,
+    // desktop builds) read any 200 as a local session, so without the header they keep the legacy 404.
+    app.get('/api/mist/session', (req, res, next) => { if (req.get('X-Mist-Session-Probe') !== '2') { next(); return; } res.set('Cache-Control', 'private, no-store').json({ ok: true, mode: 'remote' }); });
     app.all('/api/mist/session', (_req, res) => { res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Local workspace session is not available on this server' } }); });
     const filesRoot=process.env.MIST_FILES_DIR||path.resolve(__dirname,'../../private/mist-files');
     const repository=new MistRepository(prisma,mistContract as MistContract,new MistPrivateFiles(filesRoot));
     agentRuntime(repository,defaultAgentDelegation());
-    app.use('/api/mist', createMistRouter({ prisma,repository,...mailRuntime(repository),contract:mistContract as MistContract,filesRoot }));
+    app.use('/api/mist', createMistRouter({ prisma,repository,marketStore,voice,voiceSettings,...mailRuntime(repository),contract:mistContract as MistContract,filesRoot }));
   }
   app.use((error: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const tooLarge = error?.type === 'entity.too.large';

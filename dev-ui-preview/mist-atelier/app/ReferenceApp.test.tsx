@@ -2,7 +2,7 @@ import {createMistState as newModuleFixture} from '../../../server/src/shared/mi
 // @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getByRole, queryByRole, queryAllByRole } from '@testing-library/dom';
 import * as auth from '../../../services/authService';
 import type { MistState } from '../../../server/src/shared/mistWorkspace';
@@ -61,6 +61,13 @@ vi.mock('./pages/StatesPage', () => ({ StatesPage: () => null }));
 vi.mock('./pages/DesignSystemPage', () => ({ DesignSystemPage: () => null }));
 vi.mock('./pages/ModuleTemplatePage', () => ({ ModuleTemplatePage: () => null }));
 import { ReferenceApp } from './ReferenceApp';
+
+// Pages that these tests render for real are lazy chunks. A cold first import (MarketPages alone takes
+// ~1.5 s here, longer in a loaded full run) raced the short polling in waitFor, so whichever test reached
+// a page first failed depending on run order. Load the real page modules once before any test.
+beforeAll(async () => {
+  await Promise.all([import('./pages/modules/EmailsPage'), import('./pages/modules/MarketPages'), import('./pages/ApprovalsPage'), import('./pages/NotificationsPage'), import('./pages/AccountPage')]);
+}, 60000);
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 const user = (id: string, permissions = ['products:read', 'orders:read', 'crm:read']): auth.AuthUser => ({ id, displayName: id, email: `${id}@example.com`, roles: ['sales'], roleIds: ['sales-role'], permissions, permissionCeiling: permissions, departmentIds: ['team-a'], department: 'Team A' });
@@ -331,16 +338,31 @@ describe('one Mist entry with real authentication and workspace state', () => {
     await waitFor(() => expect(host!.textContent).toContain('DEV-staff-c')); expect(host!.textContent).not.toContain('DEV-staff-b');
   });
 
+  it('pops a card for notices that arrive after load, merges several, and clears it when the center opens', async () => {
+    await signIn(); const ctx = currentContext();
+    ctx.state!.notifications.push({ id: 'old', title: '旧通知', detail: '林舒', at: '2026-10-13T02:00:00Z', readAt: null, target: { view: 'orders/detail', id: 'order-staff-a' } });
+    await mount(); await waitFor(() => expect(probes.home).toHaveBeenCalled());
+    expect(host!.querySelector('.mist-notice-toast')).toBeNull();
+    ctx.state = { ...ctx.state!, notifications: [{ id: 'n1', title: 'PO-1 采购审批已批准', detail: '周敏', at: '2026-10-13T03:00:00Z', readAt: null, target: { view: 'orders/detail', id: 'order-staff-a' } }, ...ctx.state!.notifications] };
+    await act(async () => publish());
+    expect(host!.querySelector('.mist-notice-toast')?.textContent).toContain('PO-1 采购审批已批准');
+    ctx.state = { ...ctx.state!, notifications: [{ id: 'n2', title: 'QC-9 报告已回传', detail: '许言', at: '2026-10-13T03:05:00Z', readAt: null, target: { view: 'orders/detail', id: 'order-staff-a' } }, ...ctx.state!.notifications] };
+    await act(async () => publish());
+    expect(host!.querySelector('.mist-notice-toast')?.textContent).toContain('2 条新通知');
+    await click(getByRole(host!, 'button', { name: '通知' }));
+    expect(host!.querySelector('.mist-notice-toast')).toBeNull();
+  });
+
   it('marks a notification read before following its precise target and keeps the drawer on rejection', async () => {
     await signIn(); const ctx = currentContext();
     ctx.state!.notifications.push({ id: 'notice-a', title: '审核完成', detail: '指定版本可以继续', at: '2026-10-13', readAt: null, target: { view: 'orders/detail', id: 'order-staff-a', orderLineId: 'line-a', productionId: 'production-a', customerId: 'customer-staff-a' } });
     await mount(); await waitFor(() => expect(probes.home).toHaveBeenCalled()); await click(getByRole(host!, 'button', { name: '通知' }));
     const first = deferred<any>(); vi.mocked(ctx.run).mockReturnValueOnce(first.promise);
-    await click(getByRole(getByRole(host!, 'dialog', { name: '通知' }), 'button', { name: '阅读' }));
+    await click(getByRole(getByRole(host!, 'dialog', { name: '通知' }), 'button', { name: /审核完成/ }));
     expect(ctx.run).toHaveBeenLastCalledWith({ type: 'notification.read', payload: { id: 'notice-a' } }); expect(probes.order).not.toHaveBeenCalled();
     await act(async () => first.reject(new Error('未保存已读'))); expect(getByRole(host!, 'dialog', { name: '通知' }).textContent).toContain('审核完成'); expect(host!.textContent).toContain('未保存已读');
     const next = deferred<any>(); vi.mocked(ctx.run).mockReturnValueOnce(next.promise);
-    await click(getByRole(getByRole(host!, 'dialog', { name: '通知' }), 'button', { name: '阅读' })); expect(probes.order).not.toHaveBeenCalled();
+    await click(getByRole(getByRole(host!, 'dialog', { name: '通知' }), 'button', { name: /审核完成/ })); expect(probes.order).not.toHaveBeenCalled();
     await act(async () => next.resolve({ requestId: 'notice-read', revision: 1, result: {} }));
     expect(currentRoute()).toMatchObject({ view: 'orders/detail', id: 'order-staff-a', orderLineId: 'line-a', productionId: 'production-a', customerId: 'customer-staff-a' });
     expect(queryByRole(host!, 'dialog', { name: '通知' })).toBeNull();

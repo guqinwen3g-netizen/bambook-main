@@ -44,12 +44,22 @@ describe('BB-DEV-6 fabric version physical forms',()=>{
   expect(f.state.events[0].text).toContain('米样 '+metre.code);expect(colour.form).toBe('色样');
  });
  it.each([
-  [{form:'色样',quantity:1.5,unit:'份'},/整数份/],[{form:'米样',quantity:2,unit:'份'},/米样按米/],[{form:'',quantity:2,unit:'份'},/形态/],[{form:'米样',quantity:0,unit:'米'},/数量/],
+  [{form:'色样',quantity:1.5,unit:'份'},/须为整数/],[{form:'米样',quantity:2,unit:'份'},/米样按米/],[{form:'',quantity:2,unit:'份'},/形态/],[{form:'米样',quantity:0,unit:'米'},/数量/],
  ])('rejects invalid appended forms without writing: %j',(input,pattern)=>{const f=fixture();f.record(3,'色样','份');f.unchanged(()=>f.run({type:'development.version.addSampleForm',payload:{...f.at,...input}}),pattern);});
  it('blocks appending before return and on cancelled developments',()=>{
   const f=fixture();f.unchanged(()=>f.run({type:'development.version.addSampleForm',payload:{...f.at,form:'米样',quantity:1,unit:'米'}}),/先登记本版返样/);
   f.record(3,'色样','份');f.run({type:'development.close',payload:{devId:f.at.devId,kind:'cancelled',reason:'客户取消'}});
   f.unchanged(()=>f.run({type:'development.version.addSampleForm',payload:{...f.at,form:'米样',quantity:1,unit:'米'}}),/已取消/);
+ });
+ it.each(['archived','resample','abandon'] as const)('does not append new physical forms to a %s version',disposition=>{
+  const f=fixture();f.record(3,'色样','份');
+  if(disposition==='archived'){f.qc();f.run({type:'development.archive',payload:f.at});}
+  else{
+   f.run({type:'development.recordQc',payload:{...f.at,domain:'fabric',qc:{result:'reject',reviewer:'QC',reviewedAt:f.ctx.now,report:'FAIL-1',opinion:'色差不合格'}}});
+   if(disposition==='abandon')f.run({type:'development.qc.decide',payload:{...f.at,decision:'abandon',note:'不再采用'}});
+   else f.run({type:'development.round.create',payload:{devId:f.at.devId,factories:['测试面料厂'],requirements:'调整染色',targetDate:'2026-11-01',resampleFromVersionId:f.at.versionId}});
+  }
+  f.unchanged(()=>f.run({type:'development.version.addSampleForm',payload:{...f.at,form:'米样',quantity:1,unit:'米'}}),/已留档|重新打样|已放弃/);
  });
  it('uses the development write permission',()=>{
   expect(mistCommandPermission({type:'development.version.addSampleForm',payload:{} as any})).toBe('products:write');
@@ -67,6 +77,14 @@ describe('BB-DEV-8 dispatch from version detail',()=>{
   expect(f.version().dispatches).toEqual([expect.objectContaining({id:r.id,sampleId:metre.id,sampleCode:metre.code,form:'米样',unit:'米',quantity:2,recipient:'测试客户 Anna',trackingNo:'SF123',fee:null,movementId:move.id})]);
   // 无需仓库二次确认：没有待处理任务，余额即时扣减。
   expect(f.state.tasks.filter(t=>t.title.includes('寄'))).toHaveLength(0);
+ });
+ it('records the customer sign-off once, not before dispatch or in the future',()=>{
+  const f=fixture();f.record(5,'米样','米');f.qc();const [metre]=f.samples();
+  const r=f.run({type:'development.sample.dispatch',payload:{...f.at,sampleId:metre.id,quantity:1,recipient:'测试客户',trackingNo:'SF1',fee:null}});
+  expect(()=>f.run({type:'development.sample.dispatchReceived',payload:{...f.at,dispatchId:r.id,date:'2099-01-01'}})).toThrow('未来');
+  f.run({type:'development.sample.dispatchReceived',payload:{...f.at,dispatchId:r.id,date:f.state.fulfillment.sampleMovements.find(m=>m.kind==='send')!.at.slice(0,10),feedback:'手感偏硬'}});
+  expect(f.version().dispatches![0].receipt).toMatchObject({feedback:'手感偏硬'});
+  expect(()=>f.run({type:'development.sample.dispatchReceived',payload:{...f.at,dispatchId:r.id,date:'2026-10-14'}})).toThrow('不能覆盖');
  });
  it('dispatches only from the selected position and preserves the other balance',()=>{
   const f=fixture();f.record(5,'米样','米');f.qc();const [metre]=f.samples();
@@ -119,11 +137,11 @@ it('records external testing separately from a confirmation send while preservin
 
 it('binds a one-item development QC request and requires an explicit item when multiple forms exist',()=>{
  const f=fixture();f.record(1,'色样','份');const sample=f.samples()[0];
- const request=()=>f.run({type:'fulfillment.qc.request',payload:{source:{kind:'version',...f.at},domain:'fabric',kind:'sample',factory:'测试面料厂',location:'架A',contact:'',due:'2026-10-16'}});
- const first=request().id;expect(f.state.fulfillment.qcTasks.find(task=>task.id===first)!.sampleId).toBe(sample.id);
+ // Each physical form gets exactly one pending workbench task; a manual request cannot duplicate it.
+ expect(f.state.fulfillment.qcTasks.map(task=>[task.sampleId,task.state])).toEqual([[sample.id,'pending']]);
+ f.unchanged(()=>f.run({type:'fulfillment.qc.request',payload:{source:{kind:'version',...f.at},domain:'fabric',kind:'sample',factory:'测试面料厂',location:'架A',contact:'',due:'2026-10-16'}}),/已有QC任务/);
  f.run({type:'development.version.addSampleForm',payload:{...f.at,form:'米样',quantity:2,unit:'米',location:'架B'}});
- f.unchanged(request,/准确实物/);
  const second=f.samples().find(row=>row.id!==sample.id)!;
- f.run({type:'fulfillment.qc.request',payload:{source:{kind:'version',...f.at},sampleId:second.id,domain:'fabric',kind:'sample',factory:'测试面料厂',location:'架B',contact:'',due:'2026-10-16'}});
  expect(f.state.fulfillment.qcTasks.map(task=>task.sampleId)).toEqual([sample.id,second.id]);
+ expect(f.state.fulfillment.qcTasks[1]).toMatchObject({location:'架B',kind:'sample',domain:'fabric'});
 });

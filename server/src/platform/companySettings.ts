@@ -77,7 +77,7 @@ export function createPlatformCompanySettings(prisma: PrismaClient) {
       }
       const receipt = { requestId: input.requestId, revision: row.revision, result: {} };
       await db.mistCommandReceipt.create({ data: { id: randomUUID(), workspaceId: row.id, requestId: input.requestId, actorId: user.id, inputHash: hash, expectedRevision: input.expectedRevision, result: receipt } });
-      await db.auditLog.create({ data: { id: randomUUID(), actorId: user.id, action: 'platform_company_settings_update', targetType: 'Company', targetId: companyId, detail: { fields: Object.keys(input.patch), requestId: input.requestId, revision: row.revision } } });
+      await db.auditLog.create({ data: { id: randomUUID(), actorId: user.id, action: 'platform_company_settings_update', targetType: 'Company', targetId: companyId, companyId, detail: { fields: Object.keys(input.patch), requestId: input.requestId, revision: row.revision } } });
       return { snapshot: view(company, row, user), receipt, replayed: false };
     }),
   };

@@ -8,6 +8,7 @@ import { useNav } from '../nav';
 import { platformAdminApi, type PlatformAudit, type PlatformDefaults, type Invitation, type PlatformStaff } from '../runtime/platformAdmin';
 import { ChangePasswordRow, LogoutAllRow } from './ChangePassword';
 import { PlatformAiProvidersPanel } from './modules/PlatformAiProviders';
+import { FailureNotice } from '../runtime/FailureNotice';
 const actions:Record<string,string>={'platform.company.create':'开通公司','platform.company.update':'调整公司服务','platform.company.member.add':'添加公司成员','platform.company.member.remove':'移出公司成员','platform.settings.update':'更新开户默认设置','platform.staff.update':'调整平台人员状态','platform.staff.create':'新增平台人员','platform.ai.provider.create':'添加平台 AI 服务','platform.ai.provider.update':'调整平台 AI 服务','platform.ai.provider.delete':'删除平台 AI 服务','platform.ai.provider.order':'调整平台 AI 调用顺序'};
 const errorText=(e:unknown)=>e instanceof Error?e.message:'操作失败，请重试。';
 export function PlatformSettingsPage(){
@@ -29,7 +30,7 @@ export function PlatformSettingsPage(){
  async function changeStaff(){if(!target||busy)return;const key=session.sessionKey;setBusy(true);setError('');try{await platformAdminApi.updateStaff(target.id,target.status==='active'?'disabled':'active');if(scope.current===key){setTarget(null);await reload();}}catch(e){if(scope.current===key)setError(errorText(e));}finally{if(scope.current===key)setBusy(false);}}
  if(!allowed)return <MistPage><EmptyState icon={Shield} title={uiText("需要平台管理员身份")} description={uiText("公司人员不能管理平台设置。")}/></MistPage>;
  return <MistPage><PageHeader eyebrow={uiText("Sylway Cloud · 平台运营")} title={uiText("平台设置")} actions={<Button onClick={()=>nav?.go('platform-admin')}>{uiText("公司服务管理")}</Button>}/>
-  {error&&<Banner tone="bad" title={uiText(error)} actions={<Button size="sm" disabled={busy} onClick={()=>void reload()}>{uiText("重新读取")}</Button>}/>}{notice&&<Banner tone="ok" title={uiText(notice)}/>}
+  {error&&<FailureNotice title="平台设置未完成" detail={error} retry={busy?undefined:()=>void reload()} retryLabel="重新读取" />}{notice&&<Banner variant="status" tone="ok" title={uiText(notice)}/>}
   <div className="mist-wizard"><VerticalSteps mode="page" current={section} onSelect={value=>{if(!busy)setSection(value);}} steps={[{id:'defaults',label:'开户默认设置',icon:Building2},{id:'ai',label:'平台 AI 模型',icon:Sparkles},{id:'staff',label:'平台人员',icon:Users},{id:'audit',label:'操作记录',icon:History},{id:'security',label:'账号安全',icon:Shield}]}/><Card>
    {section==='defaults'&&<><FormSection title={uiText("开户默认设置")} description={uiText("新开通公司时采用；已有公司的方案和席位保持原值，可在公司服务管理中逐家调整。")}><FormGrid cols={2}><Field label={uiText("默认服务方案")}><TextInput aria-label={uiText("默认服务方案")} value={plan} disabled={busy||loading||!defaults} onChange={e=>setPlan(e.target.value)}/></Field><Field label={uiText("默认席位上限")} hint={uiText("留空表示不限，按有效公司成员计数。")}><TextInput aria-label={uiText("默认席位上限")} type="number" min={1} value={seats} disabled={busy||loading||!defaults} onChange={e=>setSeats(e.target.value)}/></Field></FormGrid></FormSection><FormFooter><span className="mist-note">{uiText(loading?'正在读取…':'保存后对新开户生效')}</span><span className="mist-spacer"/><Button variant="primary" loading={busy} disabled={loading||!defaults} onClick={()=>void save()}>{uiText("保存开户设置")}</Button></FormFooter></>}
    {section==='ai'&&<PlatformAiProvidersPanel sessionKey={session.sessionKey}/>}

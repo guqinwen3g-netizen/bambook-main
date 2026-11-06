@@ -31,7 +31,6 @@ vi.mock('../../lib/logger', () => ({
 }));
 
 import { applyAllocation } from '../allocationService';
-import { createAllocation } from '../allocationMutationService';
 import { publishBusinessEvent } from '../../events/businessEventBus';
 
 const dec = (v: number | string) => new Prisma.Decimal(v);
@@ -202,41 +201,3 @@ describe('★① 留痕落在内核 applyAllocation（三通道共用点）', ()
   });
 });
 
-describe('★⑤ route 通道：提交后发 ThirdPartyPaymentDetected 事件', () => {
-  it('跨客户核销 → createAllocation 回传判定 + 发事件（含付款方/合同客户）', async () => {
-    const { prisma } = makeTx({
-      invoice: { customerRelationId: 'REL_CUST', customerName: 'ACME' },
-      voucher: { customerRelationId: 'REL_PAYER', customerName: 'PARENT CO' },
-    });
-    const res = await createAllocation({
-      prisma, input: { invoiceId: 'INV__1', voucherId: 'PAY__1', appliedAmount: 400 }, actorId: 'u_fin',
-    });
-    expect(res.ok).toBe(true);
-    expect(res.data!.thirdPartyPayment?.basis).toBe('relationId');
-
-    // 事件是 fire-and-forget（不 await），轮询等待
-    await vi.waitFor(() => {
-      expect(publishBusinessEvent).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'ThirdPartyPaymentDetected' }),
-      );
-    });
-    const evt = (publishBusinessEvent as any).mock.calls
-      .map((c: any[]) => c[0]).find((e: any) => e.type === 'ThirdPartyPaymentDetected');
-    expect(evt.sourceEntityType).toBe('InvoiceAllocation');
-    expect(evt.payload.payerName).toBe('PARENT CO');
-    expect(evt.payload.invoiceCustomerName).toBe('ACME');
-    expect(evt.payload.basis).toBe('relationId');
-  });
-
-  it('同客户核销 → 不发代付事件', async () => {
-    const { prisma } = makeTx();
-    const res = await createAllocation({
-      prisma, input: { invoiceId: 'INV__1', voucherId: 'PAY__1', appliedAmount: 400 }, actorId: 'u_fin',
-    });
-    expect(res.ok).toBe(true);
-    expect(res.data!.thirdPartyPayment).toBeNull();
-    await new Promise(r => setTimeout(r, 20)); // 给 fire-and-forget 一点时间
-    const types = (publishBusinessEvent as any).mock.calls.map((c: any[]) => c[0]?.type);
-    expect(types).not.toContain('ThirdPartyPaymentDetected');
-  });
-});

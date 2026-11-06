@@ -2,7 +2,7 @@ import {describe,it,expect} from 'vitest';
 import {applyMistCommand,createMistState,type MistContext,type MistState} from './mistWorkspace';
 import {createOrderGovernance,applyOrderGovernanceCommand,assertOrderApproved,getOrderGovernanceReviews,type OrderGovernanceFields,type OrderGovernanceInput,type OrderGovernanceCommand} from './mistOrderGovernance';
 import {assertOrderFundingIntegrity,orderFundingCoveredAmount} from './mistOrderFunding';
-function fixture(){let n=0;const c:MistContext={id:()=>`gov-${++n}`,now:'2026-10-13T08:00:00Z',actorName:'业务员',actorId:'sales',authority:{supplier:{},orderReviewerIds:{garment:['leader','sales'],fabric:['fabric-leader']}}};const state=createMistState(c,'empty');state.customers.push({id:'customer',name:'客户',code:'C',country:'CN',city:'',industry:'',owner:'业务员',grade:'',currency:'USD',terms:'',incoterm:'',categories:'',creditLimit:0,since:''});state.files.push({id:'contract-file',name:'confirmed.pdf',mimeType:'application/pdf',size:10,storageKey:'workspace/contract-file',createdAt:c.now});const contract:OrderGovernanceInput={kind:'external',poNumber:'PO-001',confirmationFileIds:['contract-file'],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,paymentNote:'30%定金，余款按合同',incoterm:'FOB',deliveryPlace:'上海'};const order={id:'order',code:'SO-1',type:'garment' as const,customerId:'customer',customer:'客户',season:'AW26',lines:1,qty:10,amount:100,currency:'USD',due:'2026-12-01',progress:0,state:'订单草稿',tone:'neutral' as const,owner:'业务员',img:'coat' as const,checklist:[],handoffAt:null,createdAt:c.now,updatedAt:c.now,governance:createOrderGovernance(c,contract)};state.orders.push(order);state.orderLines.push({id:'line',orderId:order.id,fulfillmentMode:'cmt' as const,cmtIncludedItems:[],name:'外套',style:'A',img:'coat',qty:10,unit:'件',price:10,made:0,qc:0});const run=(command:OrderGovernanceCommand,actor=c)=>applyOrderGovernanceCommand(state,command,actor);return{state,c,contract,order,run};}
+function fixture(){let n=0;const c:MistContext={id:()=>`gov-${++n}`,now:'2026-10-13T08:00:00Z',actorName:'业务员',actorId:'sales',authority:{supplier:{},orderReviewerIds:{garment:['leader','sales'],fabric:['fabric-leader']}}};const state=createMistState(c,'empty');state.customers.push({id:'customer',name:'客户',code:'C',country:'CN',city:'',industry:'',owner:'业务员',grade:'',currency:'USD',terms:'',incoterm:'',categories:'',creditLimit:0,since:''});state.files.push({id:'contract-file',name:'confirmed.pdf',mimeType:'application/pdf',size:10,storageKey:'workspace/contract-file',createdAt:c.now});const contract:OrderGovernanceInput={kind:'external',poNumber:'PO-001',confirmationFileIds:['contract-file'],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,preShipmentPercent:30,paymentNote:'30%定金，余款按合同',incoterm:'FOB',deliveryPlace:'上海'};const order={id:'order',code:'SO-1',type:'garment' as const,customerId:'customer',customer:'客户',season:'AW26',lines:1,qty:10,amount:100,currency:'USD',due:'2026-12-01',progress:0,state:'订单草稿',tone:'neutral' as const,owner:'业务员',img:'coat' as const,checklist:[],handoffAt:null,createdAt:c.now,updatedAt:c.now,governance:createOrderGovernance(c,contract)};state.orders.push(order);state.orderLines.push({id:'line',orderId:order.id,fulfillmentMode:'cmt' as const,cmtIncludedItems:[],name:'外套',style:'A',img:'coat',qty:10,unit:'件',price:10,made:0,qc:0});const run=(command:OrderGovernanceCommand,actor=c)=>applyOrderGovernanceCommand(state,command,actor);return{state,c,contract,order,run};}
 describe('formal order governance',()=>{
  it.each(['invoice','funding'] as const)('does not turn an external order with %s into an internal budget',fact=>{
   const f=fixture();f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'Approved'}},{...f.c,actorId:'leader'});
@@ -96,7 +96,7 @@ it.each(['amount','currency'] as const)('atomically refuses a funded order %s ch
 
 it('allows preparation of a procurement draft but blocks commitment and production until the main order is approved',()=>{
  const f=fixture();f.state.market.suppliers.push({id:'supplier',code:'S1',name:'真实供应商',type:'成衣加工',country:'CN',address:'上海',capabilities:'成衣加工',capacity:10,capacityUnit:'件',leadDays:3,status:'active',blockReason:'',contacts:[],fileIds:[],note:'',createdAt:f.c.now,updatedAt:f.c.now});
- const command={type:'fulfillment.procurement.save',payload:{orderId:'order',lineId:'line',kind:'processing',supplierId:'supplier',supplier:'真实供应商',description:'成衣加工',quantity:10,unit:'件',price:5,currency:'USD',due:'2026-11-01',terms:'按合同',destination:'上海',note:'',fileIds:[]}} as const;
+ const command={type:'fulfillment.procurement.save',payload:{orderId:'order',lineId:'line',kind:'processing',supplierId:'supplier',supplier:'真实供应商',description:'成衣加工',quantity:10,unit:'件',price:5,currency:'CNY',due:'2026-11-01',terms:'按合同',destination:'上海',note:'',fileIds:[]}} as const;
  const prepared=applyMistCommand(f.state,command as any,f.c);let state=prepared.state;const purchaseId=prepared.result.id!;
  const context={...f.c,authority:{...f.c.authority!,supplier:{'supplierCommitment.approvers.processing.garment':{version:1,userIds:['leader']}}}};
  expect(state.fulfillment.purchases[0].state).toBe('draft');
@@ -129,14 +129,58 @@ it.each(['TT','LC','OA'] as const)('shows cumulative pre-shipment cash only for 
  const f=fixture();f.order.governance.contract={...f.order.governance.contract,paymentMethod,depositPercent:0,preShipmentPercent:100,paymentNote:'按原合同付款'};f.run({type:'order.governance.submit',payload:{orderId:'order'}});const details=getOrderGovernanceReviews(f.state)[0].details;expect(details.some(row=>row.label==='出运前累计收款')).toBe(paymentMethod==='TT');expect(details.find(row=>row.label==='付款')?.value).toContain(paymentMethod);
 });
 
-it('allows optional size, tolerance and payment percentages to remain unset at main-order submission',()=>{
- const f=fixture();const contract={...f.contract,quantityBasis:undefined,quantityBasisNote:undefined,overPercent:undefined,shortPercent:undefined,depositPercent:null,preShipmentPercent:null};
+it('allows optional size, tolerance and deposit percentages to remain unset at main-order submission',()=>{
+ const f=fixture();const contract={...f.contract,quantityBasis:undefined,quantityBasisNote:undefined,overPercent:undefined,shortPercent:undefined,depositPercent:null,preShipmentPercent:0};
  f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:contract}});
  expect(()=>f.run({type:'order.governance.submit',payload:{orderId:'order'}})).not.toThrow();
+});
+it('requires an explicit T/T pre-shipment percentage before submission, accepts 0 and exempts L/C',()=>{
+ const missing=fixture();missing.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:{...missing.contract,preShipmentPercent:null}}});
+ expect(()=>missing.run({type:'order.governance.submit',payload:{orderId:'order'}})).toThrow(/提交审批前请补齐：.*出运前累计收款比例/);
+ expect(missing.order.governance.status).toBe('draft');expect(missing.order.governance.rounds).toHaveLength(0);
+ const zero=fixture();zero.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:{...zero.contract,depositPercent:0,preShipmentPercent:0}}});
+ expect(()=>zero.run({type:'order.governance.submit',payload:{orderId:'order'}})).not.toThrow();expect(zero.order.governance.status).toBe('pending');
+ const lc=fixture();lc.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:{...lc.contract,paymentMethod:'LC',depositPercent:0,preShipmentPercent:null,paymentNote:'即期信用证'}}});
+ expect(()=>lc.run({type:'order.governance.submit',payload:{orderId:'order'}})).not.toThrow();expect(lc.order.governance.status).toBe('pending');
 });
 it('reports all missing commercial approval fields together without changing the draft',()=>{
  const f=fixture();f.order.governance.contract={...f.contract,poNumber:'',confirmationFileIds:[],incoterm:'',deliveryPlace:'',paymentNote:''};const before=structuredClone(f.state);
  let message='';try{f.run({type:'order.governance.submit',payload:{orderId:'order'}});}catch(e){message=(e as Error).message;}
  for(const field of ['PO','书面确认','贸易术语','指定地点','付款条款'])expect(message).toContain(field);
  expect(f.state).toEqual(before);
+});
+
+
+describe('order line external English name',()=>{
+ it('accepts nameEn on order creation and trims it',()=>{
+  const f=fixture(),line=f.state.orderLines[0];
+  const next=applyMistCommand(f.state,{type:'order.create',payload:{type:'garment',customerId:'customer',ownerId:'sales',season:'AW26',currency:'USD',due:'2026-12-01',lines:[{...line,nameEn:'  COTTON COAT  '}] }},f.c).state;
+  expect(next.orderLines.at(-1)?.nameEn).toBe('COTTON COAT');
+ });
+ it.each(['  COTTON COAT  ',' '+ 'A'.repeat(200)+' ','   '])('normalizes optional nameEn in drafts: %s',nameEn=>{
+  const f=fixture();f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:f.contract,lines:[{...f.state.orderLines[0],nameEn}]}});
+  expect(f.state.orderLines[0].nameEn).toBe(nameEn.trim()||undefined);
+ });
+ it.each(['A'.repeat(201),123,null])('rejects invalid English names: %s',nameEn=>{
+  const f=fixture();expect(()=>f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:f.contract,lines:[{...f.state.orderLines[0],nameEn:nameEn as string}]}})).toThrow('英文品名');
+ });
+ it('requires change approval for nameEn and can clear the approved value',()=>{
+  const f=fixture();f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'通过'}},{...f.c,actorId:'leader'});
+  for(const nameEn of ['COTTON COAT','   ']){
+   const before=f.state.orderLines[0].nameEn;
+   f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:f.contract,reason:'修订英文品名',lines:[{...f.state.orderLines[0],nameEn}]}});
+   expect(f.state.orderLines[0].nameEn).toBe(before);
+   f.run({type:'order.governance.submit',payload:{orderId:'order'}});
+   expect(f.order.governance.rounds.at(-1)?.kind).toBe('change');
+   const review=getOrderGovernanceReviews(f.state).at(-1)!;expect(review.details.some(item=>item.value.includes('英文品名 COTTON COAT'))).toBe(nameEn.trim()==='COTTON COAT');
+   expect(f.state.orderLines[0].nameEn).toBe(before);
+   f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'通过'}},{...f.c,actorId:'leader'});
+   expect(f.state.orderLines[0].nameEn).toBe(nameEn.trim()||undefined);
+   expect(f.order.governance.approvedSnapshot?.lines[0].nameEn).toBe(nameEn.trim()||undefined);
+  }
+ });
+ it('detects nameEn tampering after submission',()=>{
+  const f=fixture();f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.state.orderLines[0].nameEn='FORGED';
+  expect(()=>f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'通过'}},{...f.c,actorId:'leader'})).toThrow('快照不一致');
+ });
 });

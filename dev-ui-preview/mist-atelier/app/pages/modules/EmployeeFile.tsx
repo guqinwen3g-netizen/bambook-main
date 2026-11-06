@@ -2,9 +2,11 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 /** 员工档案与在职变动：人员详情里的人事部分，账号与人事两处共用同一份。 */
 import React from 'react';
-import { Banner, Button, CardHeader, Checkbox, DataTable, Drawer, EmptyState, Field, FormGrid, KeyValue, Select, TextArea, TextInput, useToast } from '../../../../../components/mist';
+import { TextLink, Banner, Button, CardHeader, Checkbox, DataTable, Drawer, EmptyState, Field, FormGrid, KeyValue, Select, TextArea, TextInput, useToast } from '../../../../../components/mist';
 import { useMistSession } from '../../runtime/auth';
+import { useNav } from '../../nav';
 import { ACTIVE_EMPLOYMENT, CONTRACT_TYPES, departmentOptions, EMPLOYMENT_EVENTS, EMPLOYMENT_STATUS, eventLabel, organizationApi, type EmployeeProfile, type EmploymentEvent, type OrgDepartment, type OrgJob } from '../../runtime/organization';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 export type EmployeePerson = { id: string; displayName: string; departmentId: string | null; roleIds?: string[]; roles: string[] };
 type ProfileForm = { kind: 'profile'; exists: boolean; hireDate: string; regularDate: string; contractType: string; contractEnd: string; phone: string; emergencyContact: string; workLocation: string; notes: string };
@@ -19,6 +21,7 @@ export function EmployeeFile({ person, departments, jobs, positionNames, nameOf,
   person: EmployeePerson; departments: OrgDepartment[]; jobs: OrgJob[]; positionNames: Record<string, string>;
   nameOf: (userId: string) => string | undefined; onChanged?: () => unknown;
 }) {
+  const nav = useNav();
   const session = useMistSession(), toast = useToast();
   const canWrite = session.hasPermission('hr:write'), canAssignJobs = session.hasPermission('users:admin'), company = !!session.user?.companyId;
   const [profile, setProfile] = React.useState<{ userId: string; value: EmployeeProfile | null; error?: string } | null>(null);
@@ -74,7 +77,7 @@ export function EmployeeFile({ person, departments, jobs, positionNames, nameOf,
       {(!value || ACTIVE_EMPLOYMENT.includes(value.employmentStatus)) && <Button size="sm" variant={value ? 'secondary' : 'primary'} onClick={() => { setFormError(''); setForm(profileForm(value)); }}>{uiText(value ? '修改员工档案' : '建立员工档案')}</Button>}
       {value && eventChoices(value.employmentStatus).length > 0 && <Button size="sm" onClick={() => { const first = eventChoices(value.employmentStatus)[0]; setFormError(''); setForm({ kind: 'event', fromStatus: value.employmentStatus, type: first.value, effectiveDate: today(), toDeptId: person.departmentId ?? '', toRoleId: person.roleIds?.[0] ?? '', reason: '', acknowledged: false }); }}>{uiText("办理在职变动")}</Button>}
     </div> : undefined} />
-    {!current ? null : current.error ? <Banner tone="bad" title={uiText("档案读取失败")}>{current.error}</Banner> : value ? <KeyValue items={[
+    {!current ? null : current.error ? <FailureNotice title={"档案读取失败"} detail={current.error} /> : value ? <KeyValue items={[
       { label: '在职状态', value: EMPLOYMENT_STATUS[value.employmentStatus] ?? value.employmentStatus },
       { label: '入职日期', value: value.hireDate ?? '—' }, { label: '转正日期', value: value.regularDate ?? '—' },
       { label: '合同类型', value: CONTRACT_TYPES.find(c => c.value === value.contractType)?.label ?? '—' }, { label: '合同到期', value: value.contractEnd ?? '—' },
@@ -83,7 +86,7 @@ export function EmployeeFile({ person, departments, jobs, positionNames, nameOf,
     ]} /> : <EmptyState compact title={uiText("尚未建立员工档案")} />}
     {value && <>
       <CardHeader title={uiText("在职变动记录")} sub={uiText(events?.userId === person.id && events.rows ? `${events.rows.length} 条` : undefined)} />
-      {events?.userId !== person.id || !events.rows ? <p className="mist-note">{uiText("读取中…")}</p> : events.error ? <Banner tone="bad" title={uiText("变动记录读取失败")}>{events.error}</Banner> : events.rows.length ? <DataTable ariaLabel={uiText("在职变动记录")} rows={events.rows} rowKey={e => e.id} columns={[
+      {events?.userId !== person.id || !events.rows ? <p className="mist-note">{uiText("读取中…")}</p> : events.error ? <FailureNotice title={"变动记录读取失败"} detail={events.error} /> : events.rows.length ? <DataTable ariaLabel={uiText("在职变动记录")} rows={events.rows} rowKey={e => e.id} columns={[
         { key: 'date', header: '生效日期', width: '110px', render: e => e.effectiveDate },
         { key: 'type', header: '变动', width: '110px', render: e => <b>{eventLabel(e.type, e.fromStatus)}</b> },
         { key: 'detail', header: '说明', render: e => <>{(e.type === 'Transfer' || e.type === 'Promote') && <div>{positionTitle(e.fromPositionId)} → {positionTitle(e.toPositionId)}</div>}{e.toDeptId && e.toDeptId !== e.fromDeptId && <div>{uiText("部门：")}{deptName(e.fromDeptId)} → {deptName(e.toDeptId)}</div>}{e.reason && <div className="mist-note">{e.reason}</div>}</> },
@@ -103,7 +106,7 @@ export function EmployeeFile({ person, departments, jobs, positionNames, nameOf,
           {def?.position && <Field label={uiText("任职部门")} required><Select aria-label={uiText("调入部门")} value={form.toDeptId} disabled={busy} placeholder={uiText("选择部门")} onChange={e => setForm({ ...form, toDeptId: e.target.value })} options={departmentOptions(departments)} /></Field>}
           <Field label={uiText("原因 / 说明")} full><TextArea value={form.reason} disabled={busy} onChange={e => setForm({ ...form, reason: e.target.value })} /></Field>
           {def?.position && form.toDeptId && form.toDeptId !== (person.departmentId ?? '') && <div style={{ gridColumn: '1 / -1' }}><Banner tone="warn" title={ui`部门将从 ${deptName(person.departmentId)} 调为 ${deptName(form.toDeptId)}`}>{uiText("同时退出原部门的小组。")}</Banner></div>}
-          {stopsAccess && <div style={{ gridColumn: '1 / -1' }}><Banner tone="bad" title={uiText(company ? "办理后暂停本公司访问" : "办理后系统账号立即停用")}>{uiText("请先完成业务交接。")}</Banner>
+          {stopsAccess && <div style={{ gridColumn: '1 / -1' }}><Banner tone="bad" title={uiText(company ? "办理后暂停本公司访问" : "办理后系统账号立即停用")}>{uiText("请先完成业务交接。")} <TextLink onClick={() => nav.go('settings', undefined, { section: 'workspace' })}>{uiText('去办理交接')}</TextLink></Banner>
             <Checkbox label={uiText(company ? "我已确认，暂停此人在本公司的访问" : "我已确认，办理后立即停用该员工的系统账号")} checked={form.acknowledged} disabled={busy} onChange={on => setForm({ ...form, acknowledged: on })} /></div>}
           {form.type === 'Onboard' && <div style={{ gridColumn: '1 / -1' }}><Banner tone="warn" title={uiText(company ? "返聘将恢复本公司访问" : "返聘会恢复系统账号")}>{uiText("原有岗位保留。")}</Banner></div>}
         </FormGrid> : <FormGrid>

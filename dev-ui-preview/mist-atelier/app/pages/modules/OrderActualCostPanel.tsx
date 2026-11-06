@@ -8,7 +8,8 @@ import { Banner, Button, Card, CardBody, CardHeader, Checkbox, DataTable, Dialog
 import type { MistCommand, MistState } from '../../../../../server/src/shared/mistWorkspace';
 import { FX_BASIS_LABEL, type FxBasis } from '../../../../../server/src/shared/mistFxRates';
 import { ALLOCATION_BASES, EXPENSE_CATEGORIES, activeExpenses, expensePayableBill, orderActualCost, orderExpenses, type AllocationBasis, type ExpenseCategory, type OrderActualCost, type OrderCostLine, type OrderExpense } from '../../../../../server/src/shared/mistOrderCost';
-import { downloadModuleCsv } from './ModuleWorkbench';
+import { downloadModuleCsv, downloadModuleXlsx } from './ModuleWorkbench';
+import { REBATE_ACCESS_TEXT, rebateAccess, type RebateAccess } from './RebatePanel';
 
 const money = (v: number) => v.toLocaleString(interfaceLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const cnyCell = (v: number | null) => v === null ? <span className="mist-note">—</span> : money(v);
@@ -16,27 +17,31 @@ const pct = (r: number | null) => r === null ? '—' : (r * 100).toFixed(1) + '%
 const SHIPMENT_BASES: AllocationBasis[] = ['volume', 'weight', 'value', 'quantity', 'equal', 'manual'];
 const ORDER_BASES: AllocationBasis[] = ['value', 'quantity', 'equal', 'manual'];
 
-export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,materialCostBasis,initialOrderId }: { materialCostBasis?:ReadonlyArray<InternalFabricCostBasis>|null;initialOrderId?:string;state: MistState; asOf: string; canWrite: boolean; busy: boolean; run: (c: MistCommand) => Promise<unknown> }) {
+const STATUS_ORDER = { ok: 0, norate: 1, nocost: 2 } as const;
+export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,materialCostBasis,initialOrderId,rebate: rebateChoice }: { materialCostBasis?:ReadonlyArray<InternalFabricCostBasis>|null;initialOrderId?:string;state: MistState; asOf: string; canWrite: boolean; busy: boolean; run: (c: MistCommand) => Promise<unknown>; rebate?: RebateAccess }) {
   const toast = useToast();
+  // 退税金额不可读时不显示退税，也不显示可反推退税的含退税毛利；毛利改按不含退税口径。
+  const access = rebateChoice ?? rebateAccess(state), shown = access === 'full', hiddenText = access === 'full' ? '' : REBATE_ACCESS_TEXT[access];
+  const marginOf = (r: OrderActualCost) => shown ? r.marginIn : r.marginEx, rateOf = (r: OrderActualCost) => shown ? r.rateIn : r.marginEx === null || !r.revenueCny ? null : r.marginEx / r.revenueCny;
   const [basisChoice, setBasis] = React.useState<FxBasis | null>(null), [month, setMonth] = React.useState(asOf.slice(0, 7));
   const basis: FxBasis = basisChoice ?? ((state.fxRecords || []).some(r => r.kind === 'settlement' && !r.reversed) ? 'actual' : 'period');
   const [open, setOpen] = React.useState<string | null>(initialOrderId ?? null), [register, setRegister] = React.useState(false), [voiding, setVoiding] = React.useState<OrderExpense | null>(null), [reason, setReason] = React.useState(''), [showVoided, setShowVoided] = React.useState(false), [paying, setPaying] = React.useState<OrderExpense | null>(null), [payForm, setPayForm] = React.useState({ supplierId: '', invoiceNo: '', due: '', taxAmount: '' });
-  if(materialCostBasis===null)return <div className="mist-col"><Banner tone="warn" title={uiText(state.partialExpenses !== undefined ? '当前范围无法核对完整成本' : '内部供料成本依据未读取')}/>{(state.partialExpenses?.length ?? 0)>0 && <Card><CardHeader title={uiText('部分可见费用')} /><div className="mist-card-body mist-col" role="list" aria-label={uiText('部分可见费用')}>{state.partialExpenses!.map(expense=><div className="mist-col" role="listitem" key={expense.id}><div className="mist-row"><span>{expense.code} · {EXPENSE_CATEGORIES[expense.category]}</span><span className="mist-spacer"/><span>{ui`另有 ${expense.hiddenCount} 笔其他范围业务`}</span></div>{expense.shares.map(share=><div className="mist-row" key={share.orderId}><span>{share.orderCode}</span><span className="mist-spacer"/><span>{money(share.amount)} {expense.currency}</span></div>)}</div>)}</div></Card>}</div>;
+  if(materialCostBasis===null)return <div className="mist-col"><Banner tone="warn" title={uiText(state.partialExpenses !== undefined ? '当前范围无法核对完整成本' : '内部供料成本依据未读取')}/>{(state.partialExpenses?.length ?? 0)>0 && <Card><CardHeader title={uiText('部分可见费用')} /><div className="mist-card-body mist-col" role="list" aria-label={uiText('部分可见费用')}>{state.partialExpenses!.map(expense=><div className="mist-col" role="listitem" key={expense.id}><div className="mist-row"><span>{expense.code} · {EXPENSE_CATEGORIES[expense.category]}</span><span className="mist-spacer"/><span>{uiText('另含其他范围业务')}</span></div>{expense.shares.map(share=><div className="mist-row" key={share.orderId}><span>{share.orderCode}</span><span className="mist-spacer"/><span>{money(share.amount)} {expense.currency}</span></div>)}</div>)}</div></Card>}</div>;
   const orders = state.orders.filter(o => !o.governance || o.governance.status === 'approved');
-  const rows = orders.map(o => orderActualCost(state, o.id, basis, month, asOf,materialCostBasis)).sort((a, b) => ({ ok: 0, norate: 1 }[a.status] - { ok: 0, norate: 1 }[b.status]) || (a.rateIn ?? 0) - (b.rateIn ?? 0) || a.code.localeCompare(b.code));
-  const ok = rows.filter(r => r.status === 'ok'), total = (pick: (r: OrderActualCost) => number | null) => Math.round(ok.reduce((n, r) => n + (pick(r) ?? 0) * 100, 0)) / 100;
-  const t = { revenue: total(r => r.revenueCny), purchase: total(r => r.purchaseCny), expense: total(r => r.expenseCny), margin: total(r => r.marginIn) };
+  const rows = orders.map(o => orderActualCost(state, o.id, basis, month, asOf,materialCostBasis)).sort((a, b) => (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) || (rateOf(a) ?? 0) - (rateOf(b) ?? 0) || a.code.localeCompare(b.code));
+  const ok = rows.filter(r => r.status === 'ok' && !r.internal), internalRows = rows.filter(r => r.status === 'ok' && r.internal), total = (pick: (r: OrderActualCost) => number | null, list = ok) => Math.round(list.reduce((n, r) => n + (pick(r) ?? 0) * 100, 0)) / 100;
+  const t = { revenue: total(r => r.revenueCny), purchase: total(r => r.purchaseCny), expense: total(r => r.expenseCny), margin: total(marginOf), internalCost: total(r => r.costCny, internalRows) };
   const expenses = showVoided ? orderExpenses(state) : activeExpenses(state);
   const detail = rows.find(r => r.orderId === open);
   const columns: Column<OrderActualCost>[] = [
     { key: 'code', header: '订单', render: r => <div className="mist-col" style={{ gap: 2 }}><b>{r.code}</b><small className="mist-muted">{r.customer}</small></div> },
-    { key: 'rev', header: '收入 CNY', align: 'right', render: r => cnyCell(r.revenueCny) },
+    { key: 'rev', header: '收入 CNY', align: 'right', render: r => r.internal ? <Pill tone="neutral">{uiText("内部订单")}</Pill> : cnyCell(r.revenueCny) },
     { key: 'pur', header: '采购 CNY', align: 'right', render: r => cnyCell(r.purchaseCny) },
     { key: 'exp', header: '费用 CNY', align: 'right', render: r => r.expenses.length ? cnyCell(r.expenseCny) : <span className="mist-note">{uiText("未登记")}</span> },
-    { key: 'rebate', header: '退税', align: 'right', render: r => r.rebate.used ? money(r.rebate.used) : '—' },
-    { key: 'margin', header: '实际毛利（含退税）', align: 'right', render: r => r.marginIn === null ? <span className="mist-note">—</span> : <b className={r.marginIn < 0 ? 'mist-tone-bad' : undefined}>{money(r.marginIn)}</b>, sortValue: r => r.marginIn ?? -Infinity },
-    { key: 'rate', header: '毛利率', align: 'right', render: r => pct(r.rateIn) },
-    { key: 'status', header: '状态', render: r => r.status === 'norate' ? <Pill tone="warn">{uiText("缺 ")}{r.missing.join('、')}{uiText(" 汇率")}</Pill> : r.estimated ? <Pill tone="neutral">{uiText("含暂估")}</Pill> : <Pill tone="ok">{uiText("无暂估")}</Pill> },
+    { key: 'rebate', header: '退税', align: 'right', render: r => r.internal ? '—' : !shown ? <span className="mist-note">{uiText(hiddenText)}</span> : r.rebate.used ? money(r.rebate.used) : '—' },
+    { key: 'margin', header: shown ? '实际毛利（含退税）' : '实际毛利（不含退税）', align: 'right', render: r => { const m = marginOf(r); return r.internal ? <span className="mist-note">{uiText("成本 ")}{cnyCell(r.costCny)}</span> : m === null ? <span className="mist-note">—</span> : <b className={m < 0 ? 'mist-tone-bad' : undefined}>{money(m)}</b>; }, sortValue: r => r.internal ? -Infinity : marginOf(r) ?? -Infinity },
+    { key: 'rate', header: '毛利率', align: 'right', render: r => pct(rateOf(r)) },
+    { key: 'status', header: '状态', render: r => <>{r.status === 'norate' ? <Pill tone="warn">{uiText("缺 ")}{r.missing.join('、')}{uiText(" 汇率")}</Pill> : r.status === 'nocost' ? <Pill tone="neutral">{uiText("无已批准采购")}</Pill> : r.estimated ? <Pill tone="neutral">{uiText("含暂估")}</Pill> : <Pill tone="ok">{uiText("无暂估")}</Pill>}{r.pendingPurchases > 0 && <div className="mist-note">{ui`${r.pendingPurchases} 张采购未批准，未计入`}</div>}</> },
   ];
   const expenseColumns: Column<OrderExpense>[] = [
     { key: 'code', header: '编号', render: e => <div className="mist-col" style={{ gap: 2 }}><b>{e.code}</b><small className="mist-muted">{e.date}</small></div> },
@@ -47,12 +52,12 @@ export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,material
     { key: 'payable', header: '应付', render: e => { const bill = expensePayableBill(state, e); return bill ? <Pill tone="ok">{bill.code}</Pill> : e.voided ? null : canWrite ? <Button size="sm" variant="quiet" disabled={busy} aria-label={ui`转应付 ${e.code}`} onClick={() => { setPayForm({ supplierId: (state.market?.suppliers || []).find(x => x.name === e.vendor)?.id || '', invoiceNo: e.ref, due: '', taxAmount: '' }); setPaying(e); }}>{uiText("转应付")}</Button> : <span className="mist-note">{uiText("未转")}</span>; } },
     { key: 'state', header: '', render: e => e.voided ? <Pill tone="neutral">{uiText("已作废")}</Pill> : canWrite && !expensePayableBill(state, e) ? <Button size="sm" variant="quiet" disabled={busy} aria-label={ui`作废 ${e.code}`} onClick={() => { setReason(''); setVoiding(e); }}>{uiText("作废")}</Button> : null },
   ];
-  const exportCsv = () => downloadModuleCsv(`订单核算-${FX_BASIS_LABEL[basis]}-${asOf}.csv`, ['订单', '客户', '收入CNY', '采购CNY', '费用CNY', '退税CNY', '毛利不含退税', '毛利含退税', '毛利率%', '状态'],
-    rows.map(r => [r.code, r.customer, r.revenueCny ?? '', r.purchaseCny ?? '', r.expenseCny ?? '', r.rebate.used, r.marginEx ?? '', r.marginIn ?? '', r.rateIn === null ? '' : (r.rateIn * 100).toFixed(1), r.status === 'norate' ? '缺汇率' : r.estimated ? '含暂估' : '无暂估']));
+  const exportCsv = (format: 'csv' | 'xlsx' = 'csv') => (format === 'xlsx' ? (name: string, headers: string[], rows: unknown[][]) => downloadModuleXlsx(name.replace(/\.csv$/, '.xlsx'), [{ name: '订单核算', headers, rows }]) : downloadModuleCsv)(`订单核算-${FX_BASIS_LABEL[basis]}-${asOf}.csv`, ['订单', '客户', '类型', '收入CNY', '采购CNY', '费用CNY', '退税CNY', '毛利不含退税', '毛利含退税', '毛利率%', '状态'],
+    rows.map(r => [r.code, r.customer, r.internal ? '内部订单' : '对外订单', r.internal ? '' : r.revenueCny ?? '', r.purchaseCny ?? '', r.expenseCny ?? '', r.internal ? '' : shown ? r.rebate.used : hiddenText, r.marginEx ?? '', shown ? r.marginIn ?? '' : hiddenText, rateOf(r) === null ? '' : (rateOf(r)! * 100).toFixed(1), r.status === 'norate' ? '缺汇率' : r.status === 'nocost' ? '无已批准采购' : r.estimated ? '含暂估' : '无暂估']));
   const doPayable = async () => { if (!paying) return; await run({ type: 'cost.expense.payable', payload: { id: paying.id, supplierId: payForm.supplierId, invoiceNo: payForm.invoiceNo, due: payForm.due, taxAmount: payForm.taxAmount } } as MistCommand); setPaying(null); toast('已转入应付待办，可按票申请付款'); };
   const doVoid = async () => { if (!voiding) return; await run({ type: 'cost.expense.void', payload: { id: voiding.id, reason } } as MistCommand); setVoiding(null); toast('费用已作废'); };
   return <div data-order-actual-cost>
-    <Toolbar right={<span className="mist-row">{canWrite && <Button icon={Plus} variant="primary" disabled={busy} onClick={() => setRegister(true)}>{uiText("登记费用")}</Button>}<Button onClick={exportCsv}>{uiText("导出核算")}</Button></span>}>
+    <Toolbar right={<span className="mist-row">{canWrite && <Button icon={Plus} variant="primary" disabled={busy} onClick={() => setRegister(true)}>{uiText("登记费用")}</Button>}<Button onClick={() => exportCsv('csv')}>{uiText("导出 CSV")}</Button><Button onClick={() => exportCsv('xlsx')}>{uiText("导出 Excel")}</Button></span>}>
       <Field label={uiText("折算口径")}><Select aria-label={uiText("核算折算口径")} value={basis} onChange={e => setBasis(e.target.value as FxBasis)} options={(['actual', 'period', 'quote'] as FxBasis[]).map(b => ({ value: b, label: `人民币 · ${FX_BASIS_LABEL[b]}` }))} /></Field>
       {basis !== 'quote' && <Field label={uiText("暂估月份")}><TextInput type="month" aria-label={uiText("核算暂估月份")} value={month} onChange={e => setMonth(e.target.value)} /></Field>}
     </Toolbar>
@@ -60,7 +65,8 @@ export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,material
       <StatCard icon={Wallet} label={ui`收入 CNY · ${ok.length} 单`} value={money(t.revenue)} />
       <StatCard icon={Receipt} label={uiText("采购成本")} value={money(t.purchase)} />
       <StatCard icon={Truck} label={uiText("分摊费用")} value={money(t.expense)} />
-      <StatCard icon={TrendingUp} label={uiText("实际毛利 · 含退税")} value={`${money(t.margin)}（${pct(t.revenue ? t.margin / t.revenue : null)}）`} />
+      <StatCard icon={TrendingUp} label={uiText(shown ? "实际毛利 · 含退税" : "实际毛利 · 不含退税")} value={`${money(t.margin)}（${pct(t.revenue ? t.margin / t.revenue : null)}）`} />
+      {internalRows.length > 0 && <StatCard icon={Receipt} label={ui`内部订单成本 · ${internalRows.length} 单`} value={money(t.internalCost)} />}
     </StatGrid>
     <section className="mist-section"><Card><CardHeader title={uiText("订单实际核算")} />
       <DataTable ariaLabel={uiText("订单实际核算")} rows={rows} rowKey={r => r.orderId} columns={columns} onRowClick={r => setOpen(r.orderId)} empty={<EmptyState title={uiText("没有已生效订单")} compact />} />
@@ -70,13 +76,14 @@ export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,material
     </Card></section>
     <Drawer open={!!detail} onClose={() => setOpen(null)} size="lg" title={uiText(detail ? `${detail.code} 实际核算` : '实际核算')} sub={detail?[detail.customer,uiText(FX_BASIS_LABEL[basis]),...(detail.estimated?[uiText('含暂估')]:[])].join(' · '):undefined}>
       {detail && <div className="mist-content-flow" data-order-cost-detail={detail.orderId}>
-        {(['revenue', 'purchases', 'expenses'] as const).map(k => <CostBlock key={k} title={uiText({ revenue: '收入', purchases: '采购成本', expenses: '分摊费用' }[k])} rows={detail[k]} />)}
-        <Card><CardHeader title={uiText("出口退税")} sub={ui`应退 ${money(detail.rebate.expected)} · 核准 ${money(detail.rebate.approved)} · 已到账 ${money(detail.rebate.received)}`} /></Card>
+        {(detail.internal ? (['purchases', 'expenses'] as const) : (['revenue', 'purchases', 'expenses'] as const)).map(k => <CostBlock key={k} title={uiText({ revenue: '收入', purchases: '采购成本', expenses: '分摊费用' }[k])} rows={detail[k]} />)}
+        {detail.internal ? <Card><CardBody><Facts items={[{label:uiText('实际成本'),value:cnyCell(detail.costCny)},...(detail.internalSale?[{label:ui`内部收入（加成 ${detail.internalSale.markupPercent}%）`,value:cnyCell(detail.internalSale.revenueCny)},{label:uiText('内部利润'),value:cnyCell(detail.internalSale.profitCny)}]:[])]}/></CardBody></Card> : <>
+        <Card><CardHeader title={uiText("出口退税")} sub={shown ? ui`应退 ${money(detail.rebate.expected)} · 核准 ${money(detail.rebate.approved)} · 已到账 ${money(detail.rebate.received)}` : uiText(hiddenText)} /></Card>
         <Card><CardBody><Facts items={[
           {label:uiText('毛利 · 不含退税'),value:detail.marginEx===null?'—':money(detail.marginEx)},
-          {label:uiText('毛利 · 含退税'),value:detail.marginIn===null?'—':money(detail.marginIn)},
-          ...(detail.rateIn===null?[]:[{label:uiText('毛利率'),value:pct(detail.rateIn)}]),
-        ]}/></CardBody></Card>
+          {label:uiText('毛利 · 含退税'),value:!shown?uiText(hiddenText):detail.marginIn===null?'—':money(detail.marginIn)},
+          ...(rateOf(detail)===null?[]:[{label:uiText('毛利率'),value:pct(rateOf(detail))}]),
+        ]}/></CardBody></Card></>}
       </div>}
     </Drawer>
     {register && <RegisterExpense state={state} asOf={asOf} busy={busy} run={run} onClose={() => setRegister(false)} onDone={() => { setRegister(false); toast('费用已登记并分摊'); }} />}

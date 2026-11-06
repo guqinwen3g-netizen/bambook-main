@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {materialDeliveryFixture} from '../../../../../server/src/mist/__tests__/materialDelivery';
+import {fabricStagedFixture} from '../../../../../server/src/mist/__tests__/fabricStaged';
 import React,{act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
@@ -13,6 +14,7 @@ const session=vi.hoisted(()=>({id:'buyer',denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:session.id,displayName:'经办人'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 import {ProcurementPage,factoryDueFor,isDomesticSupplier} from './ProcurementPage';
+import { SIGNED, signPads } from '../../runtime/signTestUtils';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let host:HTMLElement,root:Root;const go=vi.fn();
 function render(id?:string,mode:'full'|'list'=id?'full':'list',scope:Record<string,string>={}){const detail=mode==='full'?mode:undefined;act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'procurement',id,detail,...scope},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><ProcurementPage/></Nav.Provider></ToastProvider></MistRoot>));}
@@ -49,7 +51,7 @@ it('recognizes counted direct deliveries while keeping rejected goods awaiting r
   store.state=f.state;render(f.processingId);expect(host.textContent).toContain('1 笔已收 · 0 笔待收');
   expect(host.textContent).not.toContain('1 笔拒收待退');
 });
-beforeEach(()=>{session.id='buyer';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');store.state.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',currency:'USD'} as any);store.state.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',img:'coat',qty:100,unit:'件',price:10,made:0,qc:0});store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
+beforeEach(()=>{session.id='buyer';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');store.state.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',currency:'USD'} as any);store.state.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',img:'coat',qty:100,unit:'件',price:10,made:0,qc:0,fulfillmentMode:'trims_cmt',cmtIncludedItems:[]});store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();vi.useRealTimers();});
 
 it('shows isolated stock disposal on its source purchase only to an inventory reader',()=>{
@@ -69,6 +71,24 @@ it('offers garment supplies and processing without a fabric purchase shortcut',a
   const source=getByRole(host,'combobox',{name:'来源条目'}) as HTMLSelectElement;
   expect([...source.options].map(option=>option.value)).toEqual(['','line:l']);
   expect(content.value).toBe('');
+});
+
+it('stops at the first step when trims are bought for a pure CMT line or a CMT that already includes them',async()=>{
+  store.state!.market.suppliers=[{id:'s',name:'青禾辅料',status:'active'} as any];
+  const line=store.state!.orderLines[0];Object.assign(line,{fulfillmentMode:'cmt',cmtIncludedItems:[]});
+  render();await click(getAllByRole(host,'button',{name:'新建采购订单'})[0]);
+  const set=(name:string,value:string)=>{const el=getByRole(host,'combobox',{name}) as HTMLSelectElement;act(()=>{el.value=value;el.dispatchEvent(new Event('change',{bubbles:true}));});};
+  set('来源条目','line:l');set('采购内容','material:trims');set('供应商','s');
+  act(()=>{const d=getByRole(host,'textbox',{name:'采购品名'}) as HTMLInputElement;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(d,'纽扣');d.dispatchEvent(new Event('input',{bubbles:true}));});
+  await click(getByRole(host,'button',{name:'下一步'}));
+  expect(host.textContent).toContain('纯 CMT 不另行采购物料');
+  expect(getByRole(host,'textbox',{name:'采购品名'})).toBeTruthy();
+  Object.assign(line,{fulfillmentMode:'trims_cmt',cmtIncludedItems:['trims']});act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'procurement'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><ProcurementPage/></Nav.Provider></ToastProvider></MistRoot>));
+  await click(getByRole(host,'button',{name:'下一步'}));
+  expect(host.textContent).toContain('CMT 已包含此项，不能重复采购');
+  set('采购内容','material:packaging');await click(getByRole(host,'button',{name:'下一步'}));
+  expect(getByRole(host,'spinbutton',{name:'承诺数量'})).toBeTruthy();
+  expect(store.run).not.toHaveBeenCalled();
 });
 
 it('preserves the material category when editing and sends it with the purchase kind',async()=>{
@@ -208,7 +228,7 @@ it('records rejected goods returned to the supplier per receipt and shows replac
   await click(getByRole(detail,'button',{name:'登记退货 / 换货'}));
   const dialog=getByRole(document.body,'dialog');
   expect((getByRole(dialog,'spinbutton',{name:'退回数量（个）'}) as HTMLInputElement).value).toBe('6');
-  typeInto(getByRole(dialog,'textbox',{name:'退货单 / 供应商确认依据'}) as HTMLTextAreaElement,'退货单 RT-9');
+  typeInto(getByRole(dialog,'textbox',{name:'供应商确认依据'}) as HTMLTextAreaElement,'退货单 RT-9');
   await click(getByRole(dialog,'button',{name:'登记退换'}));
   expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.procurement.return',payload:expect.objectContaining({receiptId:'r1',quantity:6,disposition:'replace',evidence:'退货单 RT-9'})}));
 });
@@ -341,6 +361,64 @@ it.each(['warehouse','supplier'] as const)('records the processing target only o
   const command=store.run.mock.calls.at(-1)![0],payload=command.payload;expect(command.type).toBe(destination==='supplier'?'fulfillment.materials.deliver':'fulfillment.procurement.receive');expect(payload.destination).toBe(destination==='warehouse'?'warehouse':undefined);expect(payload.targetProductionId).toBe(destination==='supplier'?f.productionId:undefined);
 });
 
+it('sends greige straight to the same item\'s dyeing contract and lets the dyed fabric enter stock',async()=>{
+  const f=fabricStagedFixture();store.state=f.state;session.id='sales';render(f.greige);
+  await click(getByRole(host,'button',{name:'登记本次交付',exact:true}));
+  let dialog=getByRole(document.body,'dialog',{name:'登记收料'});const path=getByRole(dialog,'combobox',{name:'交付路径'}) as HTMLSelectElement;
+  act(()=>{path.value='supplier';path.dispatchEvent(new Event('change',{bubbles:true}));});
+  expect((getByRole(dialog,'combobox',{name:'直送加工单'}) as HTMLSelectElement).value).toBe(f.branch.id);
+  typeInto(getByRole(dialog,'textbox',{name:'点数与交接依据'}) as HTMLTextAreaElement,'织厂送货单 WJ-1013');
+  await click(getByRole(dialog,'button',{name:'登记本次交付',exact:true}));
+  expect(store.run.mock.calls.at(-1)![0]).toMatchObject({type:'fulfillment.materials.deliver',payload:{id:f.greige,targetProductionId:f.branch.id,quantity:3800}});
+  render(f.dyeing);await click(getByRole(host,'button',{name:'登记加工回交'}));
+  dialog=getByRole(document.body,'dialog',{name:'登记加工回交'});const paths=getByRole(dialog,'combobox',{name:'交付路径'}) as HTMLSelectElement;
+  expect(paths.value).toBe('warehouse');expect([...paths.options].filter(o=>o.value).map(o=>o.textContent)).toEqual(['入我方仓库','加工厂直送客户或指定地点']);
+});
+it('shows counted greige against returned fabric and the agreed loss on the dyeing contract',()=>{
+  const f=fabricStagedFixture({lossPercent:5}),id=f.deliver();
+  f.run({type:'fulfillment.materials.confirm',payload:{kind:'direct',id,acceptedQuantity:3800,rejectedQuantity:0,expectedReceivingRevision:0,evidence:'染厂验坯'}});
+  f.release();f.run({type:'fulfillment.procurement.receive',payload:{id:f.dyeing,quantity:3550,rejected:0,destination:'warehouse',location:'上海仓',date:'2026-10-13',evidence:'码单',fileIds:[]}});
+  store.state=f.state;session.id='sales';render(f.dyeing);
+  const text=host.textContent!;
+  expect(text).toContain('投入与产出');expect(text).toContain('3800 米');expect(text).toContain('3550 米');expect(text).toContain('6.58%');
+  expect(text).toContain('损耗超出约定');expect(text).toContain('约定加工损耗 5%');
+  render(f.greige);expect(host.textContent).not.toContain('投入与产出');
+});
+it('asks for the weight per metre only on greige bought by kilogram, and the loss only on fabric processing',async()=>{
+  const f=fabricStagedFixture();store.state=f.state;session.id='sales';
+  render(undefined,'list',{orderLineId:f.lineId,section:'order:'+f.orderId});
+  await click(getAllByRole(host,'button',{name:/^新建(采购订单|委外加工单)$/})[0]);
+  const pick=(name:string|RegExp,value:string)=>{const el=getByRole(host,'combobox',{name}) as HTMLSelectElement;act(()=>{el.value=value;el.dispatchEvent(new Event('change',{bubbles:true}));});};
+  pick('来源条目','line:'+f.lineId);pick('采购内容','material:greige');pick(/供应商/,'weaver');
+  typeInto(getByRole(host,'textbox',{name:'采购品名'}) as HTMLInputElement,'CT-2103 坯布');
+  await click(getByRole(host,'button',{name:'下一步',exact:true}));
+  const unit=getByRole(host,'combobox',{name:'计量单位'}) as HTMLSelectElement;
+  expect(queryByRole(host,'spinbutton',{name:'每米重量（公斤/米）'})).toBeNull();
+  act(()=>{unit.value='公斤';unit.dispatchEvent(new Event('change',{bubbles:true}));});
+  expect(getByRole(host,'spinbutton',{name:'每米重量（公斤/米）'})).toBeTruthy();
+  expect(queryByRole(host,'spinbutton',{name:'约定加工损耗（%）'})).toBeNull();
+  typeInto(getByRole(host,'spinbutton',{name:'每米重量（公斤/米）'}) as HTMLInputElement,'0.72');
+  await click(getByRole(host,'button',{name:'下一步',exact:true}));
+  expect(host.textContent).toContain('入库前来料检验');
+});
+it('lets greige go to an intermediate dyeing contract and the dyed fabric on to the finishing contract',async()=>{
+  const f=fabricStagedFixture({intermediateDyeing:true}),finishing=f.contract('processing',3600,'米',{lossPercent:3},'finisher');
+  const finishBranch=f.state.productions.find(p=>p.sourcePurchaseId===finishing)!;
+  store.state=f.state;session.id='sales';render(f.greige);
+  await click(getByRole(host,'button',{name:'登记本次交付',exact:true}));
+  let dialog=getByRole(document.body,'dialog',{name:'登记收料'});
+  const path=getByRole(dialog,'combobox',{name:'交付路径'}) as HTMLSelectElement;act(()=>{path.value='supplier';path.dispatchEvent(new Event('change',{bubbles:true}));});
+  const target=getByRole(dialog,'combobox',{name:'直送加工单'}) as HTMLSelectElement;
+  expect([...target.options].filter(o=>o.value).map(o=>o.value)).toEqual(['contract:'+f.dyeing,finishBranch.id]);
+  act(()=>{target.value='contract:'+f.dyeing;target.dispatchEvent(new Event('change',{bubbles:true}));});
+  typeInto(getByRole(dialog,'textbox',{name:'点数与交接依据'}) as HTMLTextAreaElement,'织厂送货单');
+  await click(getByRole(dialog,'button',{name:'登记本次交付',exact:true}));
+  const sent=store.run.mock.calls.at(-1)![0];expect(sent).toMatchObject({type:'fulfillment.materials.deliver',payload:{id:f.greige,targetPurchaseId:f.dyeing}});expect(sent.payload.targetProductionId).toBeUndefined();
+  render(f.dyeing);expect(host.textContent).not.toContain('待放行');expect(host.textContent).toContain('前道加工，成品交下一道加工厂');
+  await click(getByRole(host,'button',{name:'登记加工回交'}));
+  dialog=getByRole(document.body,'dialog',{name:'登记加工回交'});
+  const paths=getByRole(dialog,'combobox',{name:'交付路径'}) as HTMLSelectElement;expect([...paths.options].filter(o=>o.value).map(o=>o.textContent)).toEqual(['入我方仓库','直送下一道加工厂']);
+});
 it('does not call confirmed processing started until the exact production branch has a release',()=>{
   store.state!.fulfillment.purchases.push(purchase('start',approved({kind:'processing',offlineSend:{at:'2026-10-04T08:00:00Z',actor:'经办人',evidence:'交厂',fileIds:[],revision:1},supplierConfirmation:{at:'2026-10-05T08:00:00Z',actor:'经办人',evidence:'回函',confirmedDue:'2026-10-30',fileIds:[],revision:1}})));
   store.state!.productions.push({id:'branch',sourcePurchaseId:'start',orderId:'o',lineId:'l',col:'cut',pct:0} as any);
@@ -407,7 +485,9 @@ it.each([false,true])('keeps assigned approval independent of procurement write 
  let dialog=getByRole(document.body,'dialog');
  typeInto(getByRole(dialog,'textbox',{name:'审批意见',exact:true}) as HTMLTextAreaElement,'规格及报价已核对');
  await click(getByRole(dialog,'button',{name:'批准',exact:true}));
- expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.procurement.decide',payload:{id:'approve-only',decision:'approved',note:'规格及报价已核对'}});
+ expect(store.run).not.toHaveBeenCalled();expect(dialog.textContent).toContain('请先手写签字');
+ await signPads(dialog);await click(getByRole(dialog,'button',{name:'批准',exact:true}));
+ expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.procurement.decide',payload:{id:'approve-only',decision:'approved',note:'规格及报价已核对'}},SIGNED);
  await click(getByRole(host,'button',{name:'批准承诺',exact:true}));expect(getByRole(document.body,'dialog')).toBeTruthy();
  session.denied.add('procurement:approve');render('approve-only');expect(queryByRole(document.body,'dialog')).toBeNull();
  session.denied.delete('procurement:approve');render('approve-only');expect(queryByRole(document.body,'dialog')).toBeNull();

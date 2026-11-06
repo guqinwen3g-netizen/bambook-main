@@ -1,6 +1,8 @@
+import { fixture as professionalFixture } from '../mist/__tests__/professionalFulfillment';
 import { describe, expect, it } from 'vitest';
 import { applyMistCommand, createMistState, type MistContext, type MistState } from './mistWorkspace';
 import { createFulfillmentState, applyFulfillmentCommand, getFulfillmentReviews, fulfillmentPositions, assertProductionTransition, type FulfillmentCommand, type FulfillmentPurchase } from './mistFulfillment';
+import { openReturnCharges } from './mistReturnCharges';
 import { applyPlatformCommand } from './mistPlatform';
 
 function setup(){let serial=0;const ctx:MistContext={id:()=>`id-${++serial}`,now:'2026-10-13T10:00:00Z',actorName:'业务员',actorId:'business',members:[{id:'business',name:'业务员',active:true,groups:['fabric','garment']}],authority:{supplier:{'supplierCommitment.approvers.purchase.garment':{version:3,userIds:['reviewer']},'supplierCommitment.approvers.processing.garment':{version:4,userIds:['reviewer']}}}};let root=createMistState(ctx,'empty');root.fulfillment=createFulfillmentState(ctx,root);root.customers.push({id:'customer',name:'真实客户',code:'C1',country:'',city:'',industry:'',owner:'业务员',ownerId:'business',grade:'',currency:'USD',terms:'',incoterm:'',categories:'',creditLimit:0,since:''});root=applyMistCommand(root,{type:'order.create',payload:{type:'garment',customerId:'customer',season:'AW',currency:'USD',due:'2026-12-01',ownerId:'business',lines:[{fulfillmentMode:'trims_cmt',cmtIncludedItems:[],name:'衬衫',style:'SH1',img:'coat',qty:10,unit:'件',price:12}] }},ctx).state;root.orders[0].handoffAt=ctx.now;root.files.push({id:'contract-file',name:'contract.pdf',mimeType:'application/pdf',size:10,storageKey:'workspace/contract',createdAt:ctx.now});root=applyMistCommand(root,{type:'order.governance.saveDraft',payload:{orderId:root.orders[0].id,input:{kind:'external',poNumber:'TEST-PO',confirmationFileIds:['contract-file'],internalPurpose:'',receiver:'',quantityBasis:'total',quantityBasisNote:'客户按条目总量核验',paymentMethod:'TT',depositPercent:0,preShipmentPercent:0,paymentNote:'无定金要求',incoterm:'FOB',deliveryPlace:'上海'}}},ctx).state;const orderCtx={...ctx,authority:{...ctx.authority,orderReviewerIds:{garment:['reviewer'],fabric:['reviewer']}}};root=applyMistCommand(root,{type:'order.governance.submit',payload:{orderId:root.orders[0].id}},orderCtx).state;root=applyMistCommand(root,{type:'order.governance.decide',payload:{id:root.orders[0].id,decision:'approved',note:'核对主单'}},{...orderCtx,actorId:'reviewer'}).state;root.market.suppliers.push({id:'supplier',code:'SUP1',name:'真实供应商',type:'工厂',country:'',address:'上海',capabilities:'缝制',capacity:20,capacityUnit:'件',leadDays:5,status:'active',blockReason:'',contacts:[],fileIds:[],note:'',createdAt:ctx.now,updatedAt:ctx.now});const run=(command:FulfillmentCommand,actor=ctx)=>{const next=structuredClone(root);const result=applyFulfillmentCommand(next,command,actor);root=next;return result;};return{ctx,run,get root(){return root;},set root(value:MistState){root=value;}};}
@@ -22,6 +24,7 @@ describe('Mist actual fulfillment chain',()=>{
  it('does not add an empty requirements placeholder to procurement reviews',()=>{const f=setup(),id=purchase(f);f.run({type:'fulfillment.procurement.submit',payload:{id}});expect(getFulfillmentReviews(f.root)[0].details.some(row=>row.label==='规格与交付要求')).toBe(false);});
  it('editing a rejected purchase clears its submitted revision',()=>{const f=setup(),id=purchase(f);f.run({type:'fulfillment.procurement.submit',payload:{id}});f.run({type:'fulfillment.procurement.decide',payload:{id,decision:'rejected',note:'修改交期'}},{...f.ctx,actorId:'reviewer'});const p=f.root.fulfillment.purchases[0];f.run({type:'fulfillment.procurement.save',payload:{...p,due:'2026-11-02'}});expect(getFulfillmentReviews(f.root)).toHaveLength(0);expect(f.root.fulfillment.purchases[0].decision).toBeUndefined();});
  it('approved warehouse receipt creates one actual source lot; over-receipt stays a visible fact',()=>{const f=setup(),id=purchase(f);expect(()=>f.run({type:'fulfillment.procurement.receive',payload:{id,quantity:2,rejected:0,destination:'warehouse',location:'上海仓',date:'2026-10-13',evidence:'收货单',fileIds:[]}})).toThrow('已批准');approve(f,id);f.run({type:'fulfillment.procurement.receive',payload:{id,quantity:11,rejected:1,destination:'warehouse',location:'上海仓',date:'2026-10-13',evidence:'实际点数11',fileIds:[]}});expect(f.root.fulfillment.stock[0].available).toBe(11);expect(f.root.fulfillment.purchases[0].quantity).toBe(10);expect(f.root.fulfillment.purchases[0].received).toBe(11);});
+ it('warehouse receipt records warehouse, dye lot and roll list; partial moves keep the rest in place',()=>{const f=setup(),id=purchase(f);approve(f,id);f.root.fulfillment.warehouses.push({id:'w',code:'SH',name:'上海仓',address:'',active:true} as any);const base={id,quantity:10,rejected:0,destination:'warehouse' as const,location:'A-1',date:'2026-10-13',evidence:'实际点数',fileIds:[]};expect(()=>f.run({type:'fulfillment.procurement.receive',payload:{...base,warehouseId:'w',rolls:[{roll:'R1',quantity:4},{roll:'R2',quantity:4}]}})).toThrow('码单合计');expect(()=>f.run({type:'fulfillment.procurement.receive',payload:{...base,warehouseId:'nope'}})).toThrow('启用中的仓库');f.run({type:'fulfillment.procurement.receive',payload:{...base,warehouseId:'w',dyeLot:'D1',shade:'藏青',rolls:[{roll:'R1',quantity:6},{roll:'R2',quantity:4}]}});const stock=f.root.fulfillment.stock[0];expect(stock).toMatchObject({warehouseId:'w',dyeLot:'D1',shade:'藏青',rolls:[{roll:'R1',quantity:6},{roll:'R2',quantity:4}]});f.run({type:'fulfillment.inventory.move',payload:{id:stock.id,kind:'move',quantity:3,location:'B-2',person:'仓管',note:'理货'}});expect(fulfillmentPositions(f.root.fulfillment.stock[0])).toEqual([{location:'A-1',available:7},{location:'B-2',available:3}]);expect(()=>f.run({type:'fulfillment.inventory.move',payload:{id:stock.id,kind:'move',quantity:1,sourceLocation:'B-2',location:'B-2',person:'仓管',note:'理货'}})).toThrow('相同');});
  it('rejected goods returned to supplier: replace / no-replace is recorded per receipt, capped by rejected quantity, and reversible',()=>{const f=setup(),id=purchase(f);approve(f,id);const rid=f.run({type:'fulfillment.procurement.receive',payload:{id,quantity:8,rejected:3,destination:'warehouse',location:'上海仓',date:'2026-10-13',evidence:'收货单',fileIds:[]}}).id;const ret=(quantity:number,disposition:any='replace',date='2026-10-13')=>f.run({type:'fulfillment.procurement.return',payload:{receiptId:rid,quantity,disposition,date,evidence:'退货单 RT-1'}});expect(()=>ret(4)).toThrow('尚可登记退换 3');expect(()=>ret(1,'x')).toThrow('补发');expect(()=>ret(1,'replace','2026-10-12')).toThrow('早于收货');const a=ret(2).id;ret(1,'noReplace');const receipt=f.root.fulfillment.receipts.find((r:any)=>r.id===rid)!;expect(receipt.returns!.map(r=>[r.quantity,r.disposition])).toEqual([[2,'replace'],[1,'noReplace']]);expect(()=>ret(0.5)).toThrow('尚可登记退换 0');f.run({type:'fulfillment.procurement.return.reverse',payload:{receiptId:rid,returnId:a,reason:'数量录错'}});expect(()=>f.run({type:'fulfillment.procurement.return.reverse',payload:{receiptId:rid,returnId:a,reason:'再冲'}})).toThrow('已冲回');expect(ret(2).id).toBeTruthy();expect(f.root.fulfillment.stock[0].quantity).toBe(8);});
  it('keeps routine release and delivery progress out of the production risk field',()=>{const f=setup(),id=purchase(f,'processing');f.run({type:'fulfillment.procurement.submit',payload:{id}});f.run({type:'fulfillment.procurement.decide',payload:{id,decision:'approved',note:'已核对'}},{...f.ctx,actorId:'reviewer'});expect(f.root.productions[0].risk).toBe('');});
  it('does not overwrite a genuine production risk when processing goods are delivered',()=>{const f=setup(),id=purchase(f,'processing');approve(f,id);const branch=f.root.productions[0];branch.risk='工厂设备检修，交期可能延后';f.run({type:'fulfillment.procurement.receive',payload:{id,quantity:4,rejected:0,destination:'supplier',location:'加工厂',date:'2026-10-13',evidence:'加工回交凭据',fileIds:[]}});expect(branch.risk).toBe('工厂设备检修，交期可能延后');});
@@ -29,13 +32,13 @@ describe('Mist actual fulfillment chain',()=>{
  it.each(['processing','finished'] as const)('garment %s procurement follows the permitted service boundary',kind=>{const f=setup();if(kind==='finished'){expect(()=>purchase(f,kind)).toThrow('仅全包条目可采购成衣成品');expect(f.root.productions).toHaveLength(0);return;}const id=purchase(f,kind);approve(f,id);expect(f.root.productions).toHaveLength(1);expect(f.root.productions[0].sourcePurchaseId).toBe(id);expect(f.root.productions[0].factory).toBe('真实供应商');expect(f.root.productions[0].pct).toBe(0);expect(f.root.productions[0].col).not.toBe('done');expect(()=>f.run({type:'fulfillment.procurement.decide',payload:{id,decision:'approved',note:'重复审批'}},{...f.ctx,actorId:'reviewer'})).toThrow('待审批');expect(f.root.productions).toHaveLength(1);f.run({type:'fulfillment.procurement.receive',payload:{id,quantity:4,rejected:0,destination:'supplier',location:'真实交付地',date:'2026-10-13',evidence:'实际交付4',fileIds:[]}});expect(f.root.productions[0].pct).toBe(40);expect(f.root.productions[0].col).toBe('qc');expect(f.root.productions[0].risk).toBe('');});
  it('does not ship the unreceived balance of a partially delivered purchase',()=>{const f=setup(),id=purchase(f,'processing');approve(f,id);f.run({type:'fulfillment.procurement.receive',payload:{id,quantity:4,rejected:0,destination:'supplier',location:'工厂',date:'2026-10-13',evidence:'实际到货4',fileIds:[]}});terms(f);expect(()=>shipment(f,5)).toThrow('最终完工数量');const productionId=f.root.productions[0].id;f.run({type:'fulfillment.production.complete',payload:{productionId,quantity:4,sizeQuantities:[{size:'M',quantity:4}],date:'2026-10-13',evidence:'已确认本批最终4件',fileIds:[]}});f.run({type:'fulfillment.production.acceptCompletion',payload:{productionId,note:'客户接受短产4件作为最终交付'}});expect(shipment(f,4)).toBeTruthy();expect(()=>shipment(f,1)).toThrow('实际交付数量');});
  it('inventory issue / partial return conserves the original source lot',()=>{const f=setup(),id=purchase(f);approve(f,id);const processingId=purchase(f,'processing');approve(f,processingId);const targetProductionId=f.root.productions.find(p=>p.sourcePurchaseId===processingId)!.id;f.run({type:'fulfillment.procurement.receive',payload:{id,quantity:10,rejected:0,destination:'warehouse',location:'上海仓',date:'2026-10-13',evidence:'已清点',fileIds:[]}});const stock=f.root.fulfillment.stock[0],issue=f.run({type:'fulfillment.inventory.move',payload:{id:stock.id,kind:'issue',targetProductionId,quantity:6,person:'工厂',location:'工厂',note:'领料'}}).id!;f.run({type:'fulfillment.inventory.move',payload:{id:stock.id,kind:'return',quantity:2,person:'工厂',location:'上海仓',note:'退回',issueId:issue}});expect(f.root.fulfillment.stock[0].available).toBe(6);expect(()=>f.run({type:'fulfillment.inventory.move',payload:{id:stock.id,kind:'return',quantity:5,person:'工厂',location:'上海仓',note:'超退',issueId:issue}})).toThrow('未还量');expect(f.root.fulfillment.stock[0].available).toBe(6);});
- it('garment samples are individual and loans can only return against their own history',()=>{const f=setup();const sample=f.run({type:'fulfillment.samples.create',payload:{name:'客户来样',category:'成衣',form:'参考样',quantity:1,unit:'件',location:'A',size:'M',color:'蓝',source:{kind:'manual',description:'客户交付'},fileIds:[],note:''}}).id!;expect(()=>f.run({type:'fulfillment.samples.create',payload:{name:'两件',category:'成衣',form:'参考样',quantity:2,unit:'件',location:'',size:'M',color:'',source:{kind:'manual',description:'客户'},fileIds:[],note:''}})).toThrow('逐件');const loan=f.run({type:'fulfillment.samples.move',payload:{id:sample,kind:'lend',quantity:1,person:'业务同事',location:'外借',note:''}}).id!;expect(f.root.fulfillment.samples[0].available).toBe(0);f.run({type:'fulfillment.samples.move',payload:{id:sample,kind:'return',quantity:1,person:'',location:'A',note:'',loanId:loan}});expect(f.root.fulfillment.samples[0].available).toBe(1);expect(()=>f.run({type:'fulfillment.samples.move',payload:{id:sample,kind:'return',quantity:1,person:'',location:'A',note:'',loanId:loan}})).toThrow('未还量');});
+ it('garment samples are individual and loans can only return against their own history',()=>{const f=setup();const sample=f.run({type:'fulfillment.samples.create',payload:{name:'客户来样',category:'成衣',form:'参考样',quantity:1,unit:'件',location:'A',size:'M',color:'蓝',source:{kind:'manual',description:'客户交付'},fileIds:[],note:''}}).id!;expect(()=>f.run({type:'fulfillment.samples.create',payload:{name:'两件',category:'成衣',form:'参考样',quantity:2,unit:'件',location:'',size:'M',color:'',source:{kind:'manual',description:'客户'},fileIds:[],note:''}})).toThrow('逐码');const loan=f.run({type:'fulfillment.samples.move',payload:{id:sample,kind:'lend',quantity:1,person:'业务同事',location:'外借',note:''}}).id!;expect(f.root.fulfillment.samples[0].available).toBe(0);f.run({type:'fulfillment.samples.move',payload:{id:sample,kind:'return',quantity:1,person:'',location:'A',note:'',loanId:loan}});expect(f.root.fulfillment.samples[0].available).toBe(1);expect(()=>f.run({type:'fulfillment.samples.move',payload:{id:sample,kind:'return',quantity:1,person:'',location:'A',note:'',loanId:loan}})).toThrow('未还量');});
  it('requires source shipping terms and forbids split shipments when the contract forbids them',()=>{const f=setup();expect(()=>shipment(f)).toThrow('合同收货方');terms(f,false);expect(()=>shipment(f,5)).toThrow('禁止分批');expect(shipment(f,10)).toBeTruthy();});
  it('counts all effective shipment reservations and releases a cancelled request',()=>{const f=setup();terms(f);const id=shipment(f,6);expect(()=>shipment(f,5)).toThrow('预留');f.run({type:'fulfillment.shipments.updateTransport',payload:{id,booking:'BK-1',plannedDate:'2026-11-10',note:'已订舱'}});expect(()=>f.run({type:'fulfillment.shipments.cancel',payload:{id,reason:'客户取消本次'}})).toThrow('已有订舱号 BK-1，请后勤在运输安排中清空订舱号');f.run({type:'fulfillment.shipments.updateTransport',payload:{id,booking:'',plannedDate:'2026-11-10',note:'订舱已取消'}});f.run({type:'fulfillment.shipments.cancel',payload:{id,reason:'客户取消本次'}});expect(shipment(f,10)).toBeTruthy();});
  it('packing must conserve each exact line quantity without partial mutation',()=>{const f=setup();terms(f);const id=shipment(f);const lineId=f.root.orderLines[0].id;expect(()=>f.run({type:'fulfillment.shipments.pack',payload:{id,lines:[{lineId,carton:'1',quantity:9,netWeight:1,grossWeight:2,volume:1,note:''}]}})).toThrow('必须等于');expect(f.root.fulfillment.packing).toEqual([]);f.run({type:'fulfillment.shipments.pack',payload:{id,lines:[{lineId,carton:'1',quantity:4,netWeight:1,grossWeight:2,volume:1,note:''},{lineId,carton:'2',quantity:6,netWeight:1,grossWeight:2,volume:1,note:''}]}});expect(f.root.fulfillment.packing.reduce((n,p)=>n+p.quantity,0)).toBe(10);});
  it('keeps separate production branches inside one shipment and each carton allocation',()=>{const f=setup();terms(f,false);const order=f.root.orders[0],line=f.root.orderLines[0];for(const [id,quantity] of [['a',4],['b',6]] as const)f.root.productions.push({id,code:id,orderId:order.id,lineId:line.id,order:order.code,name:line.name,factory:'工厂'+id,qty:quantity,due:'2026-11-01',pct:100,img:'coat',col:'done'});prepareBranch(f,'a');prepareBranch(f,'b');const payload={consignee:'合同收货人',mode:'sea' as const,portOfLoading:'上海',portOfDischarge:'伦敦',incoterm:'FOB',plannedDate:'',booking:'',note:'',fileIds:[],lines:[{orderId:order.id,lineId:line.id,productionId:'a',quantity:4,factoryConfirmedAt:'2026-10-12'},{orderId:order.id,lineId:line.id,productionId:'b',quantity:6,factoryConfirmedAt:'2026-10-12'}]};const id=f.run({type:'fulfillment.shipments.save',payload}).id!;expect(()=>f.run({type:'fulfillment.shipments.pack',payload:{id,lines:[{lineId:line.id,carton:'1',quantity:10,netWeight:1,grossWeight:2,volume:1,note:''}]}})).toThrow('准确条目与生产分支');f.run({type:'fulfillment.shipments.pack',payload:{id,lines:[{lineId:line.id,productionId:'a',carton:'1',quantity:4,netWeight:1,grossWeight:2,volume:1,note:''},{lineId:line.id,productionId:'b',carton:'2',quantity:6,netWeight:1,grossWeight:2,volume:1,note:''}]}});expect(f.root.fulfillment.packing.map(p=>p.productionId)).toEqual(['a','b']);});
  it('cannot substitute a plan or a draft document for actual departure',()=>{const f=setup();terms(f);const id=shipment(f);expect(()=>f.run({type:'fulfillment.shipments.ready',payload:{id}})).toThrow('QC');expect(()=>f.run({type:'fulfillment.shipments.depart',payload:{id,at:f.ctx.now,evidence:'计划离港',fileIds:[]}})).toThrow('单据准备');expect(f.root.fulfillment.shipments[0].state).toBe('preparing');});
- it('source QC cannot be fabricated and inspector identity comes from context',()=>{const f=setup();terms(f);shipment(f);const sample=f.root.fulfillment.samples[0],id=f.root.fulfillment.qcTasks.find(t=>t.sampleId===sample.id)!.id;const qc={...f.ctx,actorName:'专业QC',actorId:'qc'};f.root.fulfillment.qcTasks.find(t=>t.id===id)!.assigneeId='qc';f.run({type:'fulfillment.qc.report',payload:{id,domain:'garment',result:'conditional',report:'QC-1',opinion:'测量偏差由QC保留意见',measurements:[{point:'胸围',standard:100,actual:110,tolerance:1}],fileIds:[],reviewedAt:f.ctx.now}},qc);expect(f.root.fulfillment.qcReports.at(-1)!.result).toBe('conditional');expect(f.root.fulfillment.qcReports.at(-1)!.reviewer).toBe('专业QC');expect(f.root.fulfillment.qcTasks.find(t=>t.id===id)!.businessConfirmation).toBeUndefined();f.run({type:'fulfillment.qc.confirm',payload:{id,result:'approved',note:'客户书面接受有保留意见'}});expect(f.root.fulfillment.qcTasks.find(t=>t.id===id)!.businessConfirmation?.result).toBe('approved');});
+ it('source QC cannot be fabricated and inspector identity comes from context',()=>{const f=setup();terms(f);shipment(f);const sample=f.root.fulfillment.samples[0],id=f.root.fulfillment.qcTasks.find(t=>t.sampleId===sample.id)!.id;const qc={...f.ctx,actorName:'专业QC',actorId:'qc'};f.root.fulfillment.qcTasks.find(t=>t.id===id)!.assigneeId='qc';f.run({type:'fulfillment.qc.report',payload:{id,domain:'garment',result:'conditional',report:'QC-1',opinion:'测量偏差由QC保留意见',measurements:[{point:'胸围',standard:100,actual:110,tolerance:1}],fileIds:[],reviewedAt:f.ctx.now}},qc);expect(f.root.fulfillment.qcReports.at(-1)!.result).toBe('conditional');expect(f.root.fulfillment.qcReports.at(-1)!.reviewer).toBe('专业QC');expect(f.root.notifications[0].recipientIds).toEqual(['business']);expect(f.root.fulfillment.qcTasks.find(t=>t.id===id)!.businessConfirmation).toBeUndefined();f.run({type:'fulfillment.qc.confirm',payload:{id,result:'approved',note:'客户书面接受有保留意见'}});expect(f.root.fulfillment.qcTasks.find(t=>t.id===id)!.businessConfirmation?.result).toBe('approved');});
  it('a production hold blocks progress and completion until resumed with a reason',()=>{const f=setup();terms(f);const order=f.root.orders[0],line=f.root.orderLines[0];f.root.productions.push({id:'hold',code:'PROD-HOLD',orderId:order.id,lineId:line.id,order:order.code,name:line.name,factory:'已确认工厂',qty:10,due:'2026-11-01',pct:10,img:'coat',col:'cut'});
   expect(()=>f.run({type:'fulfillment.production.hold',payload:{productionId:'hold',category:'material',reason:'面料未到'}})).toThrow('尚未放行');
   prepareBranch(f,'hold');
@@ -57,7 +60,7 @@ describe('Mist actual fulfillment chain',()=>{
   expect(()=>f.run({type:'fulfillment.qc.transfer',payload:{id,domain:'garment',assigneeId:'qc2',reason:'出差'}},other)).toThrow('只有当前QC');
   expect(()=>f.run({type:'fulfillment.qc.reschedule',payload:{id,domain:'garment',due:'2026-10-01',reason:'工厂延期'}},qc)).toThrow('不能早于今天');
   f.run({type:'fulfillment.qc.reschedule',payload:{id,domain:'garment',due:'2026-10-20',reason:'工厂延期'}},qc);expect(task().due).toBe('2026-10-20');
-  f.run({type:'fulfillment.qc.transfer',payload:{id,domain:'garment',assigneeId:'qc2',reason:'出差'}},qc);expect(task()).toMatchObject({assignee:'接手QC',assigneeId:'qc2'});
+  f.run({type:'fulfillment.qc.transfer',payload:{id,domain:'garment',assigneeId:'qc2',reason:'出差'}},qc);expect(task()).toMatchObject({assignee:'接手QC',assigneeId:'qc2'});expect(f.root.notifications[0].recipientIds).toEqual(['qc2']);
   expect(f.root.events.some(e=>e.entityId===id&&e.text==='QC转交：专业QC→接手QC（出差）')).toBe(true);expect(f.root.events.some(e=>e.entityId===id&&e.text.startsWith('QC改期：')&&e.text.endsWith('→2026-10-20（工厂延期）'))).toBe(true);
   expect(()=>f.run({type:'fulfillment.qc.reschedule',payload:{id,domain:'garment',due:'2026-10-21',reason:'再延'}},qc)).toThrow('只有当前QC');});
  it('repeat passed rechecks cannot bypass the explicit business resume after NOK',()=>{const f=setup();terms(f);shipment(f);const branch=f.root.productions[0];const id=f.run({type:'fulfillment.qc.request',payload:{source:{kind:'orderLine',orderId:branch.orderId,lineId:branch.lineId,productionId:branch.id},domain:'garment',kind:'production',factory:'工厂',location:'现场',contact:'',due:'2026-10-13'}}).id!;f.run({type:'fulfillment.qc.claim',payload:{id,domain:'garment'}});for(const result of ['reject','pass','pass'] as const)f.run({type:'fulfillment.qc.report',payload:{id,domain:'garment',result,report:'QC',opinion:'实际复验',measurements:[],sizeChecks:[{size:'M',inspected:1,result:'pass',evidence:'实际抽检'}],fileIds:[],reviewedAt:f.ctx.now}});expect(f.root.fulfillment.qcTasks.find(t=>t.id===id)!.state).toBe('awaiting_business');f.run({type:'fulfillment.qc.continue',payload:{id,note:'工厂整改已确认'}});expect(f.root.fulfillment.qcTasks.find(t=>t.id===id)!.state).toBe('reported');expect(f.root.fulfillment.qcReports.filter(r=>r.taskId===id)).toHaveLength(3);});
@@ -69,6 +72,44 @@ describe('Mist actual fulfillment chain',()=>{
  it('preserves CI value when an executed credit or downstream application exists',()=>{const f=setup();terms(f);const shipmentId=shipment(f),id=document(f,shipmentId,'CI');f.run({type:'fulfillment.documents.issue',payload:{id}});const invoice=f.root.invoices[0];f.root.platform.claims.push({id:'claim',code:'CLAIM',orderId:invoice.orderId,invoiceId:invoice.id,problem:'实物问题',fileIds:[],state:'Processing',createdAt:f.ctx.now,dispositions:[]});f.root.platform.credits.push({id:'credit',code:'CN',claimId:'claim',dispositionId:'decision',customerId:'customer',currency:'USD',amount:20,createdAt:f.ctx.now});expect(()=>f.run({type:'fulfillment.documents.void',payload:{id,reason:'不能抹去退款来源'}})).toThrow('索赔或贷项');expect(f.root.invoices[0].amount).toBe(120);expect(f.root.fulfillment.documents[0].status).toBe('issued');});
  it('completes a production-QC, packing, CI/PL, customs and actual departure chain',()=>{const f=setup();terms(f);const o=f.root.orders[0],l=f.root.orderLines[0];f.root.productions.push({id:'prod',code:'PROD',orderId:o.id,lineId:l.id,order:o.code,name:l.name,factory:'工厂',qty:10,due:'2026-11-01',pct:100,img:'coat',col:'done'});prepareBranch(f,'prod');const qc=f.run({type:'fulfillment.qc.request',payload:{source:{kind:'orderLine',orderId:o.id,lineId:l.id,productionId:'prod'},domain:'garment',kind:'production',factory:'工厂',location:'现场',contact:'',due:'2026-10-13'}}).id!;f.run({type:'fulfillment.qc.claim',payload:{id:qc,domain:'garment'}});f.run({type:'fulfillment.qc.report',payload:{id:qc,domain:'garment',result:'pass',report:'QC-FINAL',opinion:'大货检查通过',measurements:[],sizeChecks:[{size:'M',inspected:1,result:'pass',evidence:'实际抽检'}],fileIds:[],reviewedAt:f.ctx.now}});const shipmentId=shipment(f);f.run({type:'fulfillment.shipments.pack',payload:{id:shipmentId,lines:[{lineId:l.id,carton:'1',quantity:10,netWeight:1,grossWeight:2,volume:0.1,note:''}]}});for(const type of ['CI','PL'] as const){const id=document(f,shipmentId,type);f.run({type:'fulfillment.documents.issue',payload:{id}});}f.run({type:'fulfillment.shipments.ready',payload:{id:shipmentId}});f.run({type:'fulfillment.shipments.sent',payload:{id:shipmentId,at:'2026-10-13T08:00:00Z'}});expect(()=>f.run({type:'fulfillment.shipments.depart',payload:{id:shipmentId,at:f.ctx.now,evidence:'离港通知',fileIds:[]}})).toThrow('出口清关');const salesOnly={...f.ctx,can:(scope:string)=>scope==='customs:write'};expect(()=>f.run({type:'fulfillment.customs.save',payload:{shipmentId,status:'cleared',declarationNo:'CUSTOMS-REAL',broker:'真实报关行',hsCode:'620530',origin:'CN',tradeMode:'FOB',declaredAt:'2026-10-12',clearedAt:'2026-10-13',evidence:'海关放行回执',fileIds:[],note:''}},salesOnly)).toThrow('清关完成须由后勤/单证登记');expect(f.root.fulfillment.customs.some(c=>c.status==='cleared')).toBe(false);expect(()=>f.run({type:'fulfillment.shipments.depart',payload:{id:shipmentId,at:f.ctx.now,evidence:'离港通知',fileIds:[]}},salesOnly)).toThrow('出口清关');f.run({type:'fulfillment.customs.save',payload:{shipmentId,status:'cleared',declarationNo:'CUSTOMS-REAL',broker:'真实报关行',hsCode:'620530',origin:'CN',tradeMode:'FOB',declaredAt:'2026-10-12',clearedAt:'2026-10-13',evidence:'海关放行回执',fileIds:[],note:''}},{...f.ctx,can:(scope:string)=>scope==='customs:clear'});f.run({type:'fulfillment.shipments.depart',payload:{id:shipmentId,at:f.ctx.now,evidence:'实际离港通知',fileIds:[]}});expect(f.root.fulfillment.shipments[0].state).toBe('departed');expect(f.root.invoices[0].amount).toBe(120);expect(f.root.orderLines[0].qty).toBe(10);const issuedCi=f.root.fulfillment.documents.find(d=>d.type==='CI')!;expect(()=>f.run({type:'fulfillment.documents.void',payload:{id:issuedCi.id,reason:'不能抹掉已离港的原票'}})).toThrow('已出运');expect(()=>f.run({type:'fulfillment.shipments.cancel',payload:{id:shipmentId,reason:'不能取消实际离港'}})).toThrow('已出运');expect(f.root.invoices[0]).toMatchObject({amount:120,open:0,financeStatus:'pending'});f.root=applyMistCommand(f.root,{type:'finance.receivable.confirm',payload:{invoiceId:f.root.invoices[0].id}},{...f.ctx,actorName:'财务',actorId:'finance'}).state;expect(f.root.invoices[0]).toMatchObject({amount:120,open:120});expect(f.root.invoices[0].voidedAt).toBeUndefined();});
  it('信用冻结的客户：没有部门主管批准的带风险放行不能登记离港；批准一次只放行一票',()=>{const f=setup();terms(f);const o=f.root.orders[0],l=f.root.orderLines[0];f.root.productions.push({id:'prod',code:'PROD',orderId:o.id,lineId:l.id,order:o.code,name:l.name,factory:'工厂',qty:10,due:'2026-11-01',pct:100,img:'coat',col:'done'});prepareBranch(f,'prod');const qc=f.run({type:'fulfillment.qc.request',payload:{source:{kind:'orderLine',orderId:o.id,lineId:l.id,productionId:'prod'},domain:'garment',kind:'production',factory:'工厂',location:'现场',contact:'',due:'2026-10-13'}}).id!;f.run({type:'fulfillment.qc.claim',payload:{id:qc,domain:'garment'}});f.run({type:'fulfillment.qc.report',payload:{id:qc,domain:'garment',result:'pass',report:'QC-FINAL',opinion:'大货检查通过',measurements:[],sizeChecks:[{size:'M',inspected:1,result:'pass',evidence:'实际抽检'}],fileIds:[],reviewedAt:f.ctx.now}});const shipmentId=shipment(f);f.run({type:'fulfillment.shipments.pack',payload:{id:shipmentId,lines:[{lineId:l.id,carton:'1',quantity:10,netWeight:1,grossWeight:2,volume:0.1,note:''}]}});for(const type of ['CI','PL'] as const){const id=document(f,shipmentId,type);f.run({type:'fulfillment.documents.issue',payload:{id}});}f.run({type:'fulfillment.shipments.ready',payload:{id:shipmentId}});f.run({type:'fulfillment.shipments.sent',payload:{id:shipmentId,at:'2026-10-13T08:00:00Z'}});expect(()=>f.run({type:'fulfillment.shipments.depart',payload:{id:shipmentId,at:f.ctx.now,evidence:'离港通知',fileIds:[]}})).toThrow('出口清关');const salesOnly={...f.ctx,can:(scope:string)=>scope==='customs:write'};expect(()=>f.run({type:'fulfillment.customs.save',payload:{shipmentId,status:'cleared',declarationNo:'CUSTOMS-REAL',broker:'真实报关行',hsCode:'620530',origin:'CN',tradeMode:'FOB',declaredAt:'2026-10-12',clearedAt:'2026-10-13',evidence:'海关放行回执',fileIds:[],note:''}},salesOnly)).toThrow('清关完成须由后勤/单证登记');expect(f.root.fulfillment.customs.some(c=>c.status==='cleared')).toBe(false);expect(()=>f.run({type:'fulfillment.shipments.depart',payload:{id:shipmentId,at:f.ctx.now,evidence:'离港通知',fileIds:[]}},salesOnly)).toThrow('出口清关');f.run({type:'fulfillment.customs.save',payload:{shipmentId,status:'cleared',declarationNo:'CUSTOMS-REAL',broker:'真实报关行',hsCode:'620530',origin:'CN',tradeMode:'FOB',declaredAt:'2026-10-12',clearedAt:'2026-10-13',evidence:'海关放行回执',fileIds:[],note:''}},{...f.ctx,can:(scope:string)=>scope==='customs:clear'});(f.root.market.relations as any[]).push({id:'rel-hold',customerId:o.customerId,supplierId:'',name:'冻结客户',hold:{reason:'尾款逾期',at:f.ctx.now,actor:'主管'}});const depart=()=>f.run({type:'fulfillment.shipments.depart',payload:{id:shipmentId,at:f.ctx.now,evidence:'实际离港通知',fileIds:[]}});expect(depart).toThrow('带风险放行');expect(f.root.fulfillment.shipments[0].state).toBe('ready');(f.root as any).platform.risks.push({id:'risk-hold',orderId:'',title:'冻结客户 往来已冻结',level:'warning',basis:'',owner:'财务',state:'InProgress',resolution:'',createdAt:f.ctx.now,signalKey:'relation-hold:rel-hold',release:{escalationId:'e1',approvedBy:'主管',at:f.ctx.now,note:'只放行这一票'}});depart();expect(f.root.fulfillment.shipments[0].state).toBe('departed');expect((f.root as any).platform.risks[0].release).toMatchObject({shipmentId,shipmentCode:f.root.fulfillment.shipments[0].code});expect(f.root.events.some(e=>e.entityId==='risk-hold'&&e.text.includes('下一票须重新申请'))).toBe(true);});
+});
+
+describe('sup11 approved contract amendment', () => {
+  const reviewer = (f: ReturnType<typeof setup>) => ({ ...f.ctx, actorId: 'reviewer', actorName: '批准人' });
+  const amend = (f: ReturnType<typeof setup>, id: string, change: Partial<{ quantity: number; price: number; due: string }>) => { const p = f.root.fulfillment.purchases.find(x => x.id === id)!; return f.run({ type: 'fulfillment.procurement.amend', payload: { id, quantity: p.quantity, price: p.price, due: p.due, reason: '客户追加数量', evidence: '供应商邮件同意', fileIds: [], ...change } }).id!; };
+  it('goes to the commitment reviewers, takes effect only on approval and becomes a new contract revision', () => {
+    const f = setup(), id = purchase(f); approve(f, id);
+    expect(() => amend(f, id, {})).toThrow('没有变化');
+    const a = amend(f, id, { quantity: 12, price: 2.5, due: '2026-11-05' });
+    expect(f.root.fulfillment.purchases.find(x => x.id === id)).toMatchObject({ quantity: 10, price: 2 });
+    expect(getFulfillmentReviews(f.root).find(r => r.entityId === a)).toMatchObject({ kind: 'procurementAmendment', status: 'pending', reviewerIds: ['reviewer'], requiredPermission: 'procurement:approve' });
+    expect(() => amend(f, id, { quantity: 11 })).toThrow('待审批');
+    expect(() => f.run({ type: 'fulfillment.procurement.amend.decide', payload: { id: a, decision: 'approved', note: '同意' } })).toThrow('审批名单');
+    f.run({ type: 'fulfillment.procurement.amend.decide', payload: { id: a, decision: 'approved', note: '同意' } }, reviewer(f));
+    const po = f.root.fulfillment.purchases.find(x => x.id === id)!;
+    expect(po).toMatchObject({ quantity: 12, price: 2.5, due: '2026-11-05', supplierConfirmation: { confirmedDue: '2026-11-05' } });
+    expect(po.revisionHistory!.at(-1)).toMatchObject({ revision: 2, snapshot: { quantity: 12, price: 2.5 }, decision: { decision: 'approved' } });
+    expect(po.dueChanges!.at(-1)).toMatchObject({ from: '2026-11-01', to: '2026-11-05' });
+  });
+  it('keeps received and billed facts; withdraw and reject leave the contract unchanged', () => {
+    const f = setup(), id = purchase(f); approve(f, id);
+    f.run({ type: 'fulfillment.procurement.receive', payload: { id, quantity: 5, rejected: 0, destination: 'warehouse', location: '上海仓', date: '2026-10-13', evidence: '收货单', fileIds: [] } });
+    expect(() => amend(f, id, { quantity: 4 })).toThrow('已收');
+    f.root.payables!.bills.push({ id: 'bill', state: 'open', lines: [{ purchaseId: id, amount: 10 }] } as any);
+    expect(() => amend(f, id, { price: 1.5 })).toThrow('单价不能再变更');
+    const a = amend(f, id, { quantity: 8 });
+    expect(() => f.run({ type: 'fulfillment.procurement.amend.withdraw', payload: { id: a } }, reviewer(f))).toThrow('申请人');
+    f.run({ type: 'fulfillment.procurement.amend.withdraw', payload: { id: a } });
+    expect(getFulfillmentReviews(f.root).some(r => r.entityId === a)).toBe(false);
+    const b = amend(f, id, { quantity: 8 });
+    f.run({ type: 'fulfillment.procurement.amend.decide', payload: { id: b, decision: 'rejected', note: '先确认客户追加' } }, reviewer(f));
+    expect(f.root.fulfillment.purchases.find(x => x.id === id)).toMatchObject({ quantity: 10, price: 2 });
+  });
+  it('does not change the quantity of a released production branch', () => {
+    const f = setup(), id = purchase(f, 'processing'); approve(f, id);
+    expect(() => amend(f, id, { quantity: 9 })).toThrow('生产已放行');
+    expect(() => amend(f, id, { due: '2026-11-03' })).not.toThrow();
+  });
 });
 
 describe('fulfillment action audit',()=>{
@@ -207,4 +248,158 @@ it.each(['TT','LC'] as const)('applies the approved %s cash condition to actual 
  const before=structuredClone(f.root);expect(()=>f.run(depart)).toThrow('尚差 84.00 USD');expect(f.root).toEqual(before);
  f.root.orderFunding.assignments[0].amount=119.99;expect(()=>f.run(depart)).toThrow('尚差 0.01 USD');
  f.root.orderFunding.assignments[0].amount=120;f.run(depart);expect(f.root.fulfillment.shipments[0].state).toBe('departed');
+});
+
+describe('ord5/6/15/16 sample warehouse',()=>{
+ const make=(f:ReturnType<typeof setup>,payload:Record<string,unknown>)=>f.run({type:'fulfillment.samples.create',payload:{name:'样',category:'面料',form:'剪样',quantity:1,unit:'份',location:'A',size:'',color:'',source:{kind:'manual',description:'客户'},fileIds:[],note:'',...payload}} as never).id!;
+ it('accepts measured units with decimals and count units only as integers',()=>{
+  const f=setup();
+  make(f,{quantity:0.5,unit:'米'});make(f,{quantity:1.2,unit:'码'});make(f,{quantity:9,unit:'色位'});
+  expect(()=>make(f,{quantity:1.5,unit:'色位'})).toThrow('整数');
+ });
+ it('files a garment set as one entry and several pieces with a size breakdown',()=>{
+  const f=setup();
+  make(f,{category:'成衣',form:'销售样',quantity:1,unit:'套',size:'M'});
+  expect(()=>make(f,{category:'成衣',form:'销售样',quantity:2,unit:'套',size:'M'})).toThrow('每档登记 1 套');
+  expect(()=>make(f,{category:'成衣',form:'销售样',quantity:3,unit:'件',size:'M'})).toThrow('逐码');
+  make(f,{category:'成衣',form:'销售样',quantity:3,unit:'件',size:'',sizeQuantities:[{size:'S',quantity:1},{size:'M',quantity:2}]});
+ });
+ it('records scrap and return-to-factory as permanent moves with a reason, and keeps courier fields apart',()=>{
+  const f=setup(),id=make(f,{quantity:3,unit:'份'});
+  expect(()=>f.run({type:'fulfillment.samples.move',payload:{id,kind:'scrap',quantity:1,person:'',location:'',note:''}} as never)).toThrow('原因');
+  f.run({type:'fulfillment.samples.move',payload:{id,kind:'scrap',quantity:1,person:'',location:'',note:'测试撕坏'}} as never);
+  f.run({type:'fulfillment.samples.move',payload:{id,kind:'returnFactory',quantity:1,person:'华盛毛纺',location:'',note:'退回重做'}} as never);
+  f.run({type:'fulfillment.samples.move',payload:{id,kind:'send',quantity:1,person:'客户A',location:'',note:'',trackingNo:'SF123',carrier:'顺丰',destination:'伦敦'}} as never);
+  const s=f.root.fulfillment.samples.find(x=>x.id===id)!;expect(s.available).toBe(0);
+  expect(f.root.fulfillment.sampleMovements.filter(m=>m.sampleId===id).map(m=>m.kind)).toEqual(expect.arrayContaining(['scrap','returnFactory','send']));
+  expect(f.root.fulfillment.sampleMovements.find(m=>m.sampleId===id&&m.kind==='send')).toMatchObject({trackingNo:'SF123',carrier:'顺丰',destination:'伦敦'});
+ });
+});
+
+describe('P2-3 shipment transport, booking history, arrival and customs amendments',()=>{
+ it('keeps transport fields and a booking change with its fee, and refuses ETA before ETD',()=>{
+  const f=setup();terms(f);const id=shipment(f);
+  f.run({type:'fulfillment.shipments.updateTransport',payload:{id,booking:'BK-1',plannedDate:'2026-10-30',note:'',transport:{vessel:'COSCO STAR',voyage:'012E',etd:'2026-10-30',eta:'2026-11-28',containers:[{type:'40HQ',number:'cbhu1234567',seal:'SL001'}],mainMark:'CEDAR\nPO 123'}}});
+  const s=()=>f.root.fulfillment.shipments.find(x=>x.id===id)!;
+  expect(s().transport).toMatchObject({vessel:'COSCO STAR',containers:[{type:'40HQ',number:'CBHU1234567',seal:'SL001'}],mainMark:'CEDAR\nPO 123'});
+  expect(()=>f.run({type:'fulfillment.shipments.updateTransport',payload:{id,booking:'BK-1',plannedDate:'2026-10-30',note:'',transport:{etd:'2026-10-30',eta:'2026-10-01'}}})).toThrow('ETA');
+  expect(()=>f.run({type:'fulfillment.shipments.updateTransport',payload:{id,booking:'BK-1',plannedDate:'2026-10-30',note:'',transport:{cutoff:'截'.repeat(41)}}})).toThrow('截关 / 截港时间不能超过 40 字');
+  f.run({type:'fulfillment.shipments.updateTransport',payload:{id,booking:'BK-2',plannedDate:'2026-11-05',note:'原船甩柜改下一班',changeFee:{amount:150,currency:'usd'}}});
+  expect(s().bookingChanges).toEqual([expect.objectContaining({from:'BK-1',to:'BK-2',reason:'原船甩柜改下一班',fee:{amount:150,currency:'USD'}})]);
+ });
+ it('records arrival and POD only after departure, in order',()=>{
+  const f=setup();terms(f);const id=shipment(f),s=()=>f.root.fulfillment.shipments.find(x=>x.id===id)!;
+  expect(()=>f.run({type:'fulfillment.shipments.arrive',payload:{id,at:'2026-10-13T08:00:00Z',evidence:'到港通知'}})).toThrow('尚未离港');
+  s().state='departed';s().departedAt='2026-10-10T08:00:00Z';
+  f.run({type:'fulfillment.shipments.arrive',payload:{id,at:'2026-10-12T08:00:00Z',evidence:'到港通知'}});
+  expect(()=>f.run({type:'fulfillment.shipments.deliver',payload:{id,at:'2026-10-11T08:00:00Z',receiver:'仓库',evidence:'POD',fileIds:[]}})).toThrow('不得早于');
+  f.run({type:'fulfillment.shipments.deliver',payload:{id,at:'2026-10-13T08:00:00Z',receiver:'客户仓库',evidence:'POD 签字',fileIds:[]}});
+  expect(s().delivered).toMatchObject({receiver:'客户仓库'});
+ });
+ it('adds amendments to a cleared declaration and lets a not-yet-departed shipment withdraw it',()=>{
+  const f=setup();terms(f);const id=shipment(f);
+  f.root.fulfillment.customs.push({id:'cus',shipmentId:id,code:'CUS-1',status:'cleared',declarationNo:'D1',broker:'B',hsCode:'6203',origin:'CN',tradeMode:'FOB',declaredAt:'2026-10-12',clearedAt:'2026-10-12',evidence:'放行',fileIds:[],note:''} as never);
+  expect(()=>f.run({type:'fulfillment.customs.amend',payload:{id:'cus',kind:'attach',reason:'补放行单',fileIds:[]}})).toThrow('请上传');
+  f.run({type:'fulfillment.customs.amend',payload:{id:'cus',kind:'amend',reason:'改毛重，海关回执 R-1',fileIds:[]}});
+  f.run({type:'fulfillment.customs.amend',payload:{id:'cus',kind:'withdraw',reason:'客户取消本票',fileIds:[]}});
+  const c=f.root.fulfillment.customs.find(x=>x.id==='cus')!;
+  expect(c.status).toBe('draft');expect(c.amendments!.map(a=>a.kind)).toEqual(['amend','withdraw']);
+ });
+});
+
+describe('procurement return accounting scenarios',()=>{
+ it('multiple partial returns and reversal preserve counted stock and release only uncarried supplier charges',()=>{
+  const f=setup(),id=purchase(f);approve(f,id);
+  const receiptId=f.run({type:'fulfillment.procurement.receive',payload:{id,quantity:8,rejected:3,destination:'warehouse',location:'上海仓',date:'2026-10-13',evidence:'点收',fileIds:[]}}).id!;
+  const before=structuredClone({stock:f.root.fulfillment.stock,received:f.root.fulfillment.purchases[0].received});
+  const ret=(quantity:number)=>f.run({type:'fulfillment.procurement.return',payload:{receiptId,quantity,disposition:'noReplace',date:'2026-10-13',evidence:'供应商拒收货退回',deduction:0.2,freight:0.1,freightBy:'supplier'}}).id!;
+  const first=ret(1),second=ret(2);
+  expect(()=>ret(1)).toThrow('尚可登记退换 0');
+  expect(openReturnCharges(f.root,id).map(r=>Math.round(r.amount*100))).toEqual([30,30]);
+  const settlement=applyMistCommand(f.root,{type:'payable.settlement.submit',payload:{purchaseId:id,receiptIds:[receiptId]}},f.ctx);f.root=settlement.state;
+  expect(openReturnCharges(f.root,id)).toEqual([]);
+  expect(()=>f.run({type:'fulfillment.procurement.return.reverse',payload:{receiptId,returnId:first,reason:'数量有误'}})).toThrow('已带入结算');
+  f.root=applyMistCommand(f.root,{type:'payable.settlement.cancel',payload:{id:settlement.result.id!,reason:'先纠正退货'}},f.ctx).state;
+  for(const returnId of [first,second])f.run({type:'fulfillment.procurement.return.reverse',payload:{receiptId,returnId,reason:'纠正退货登记'}});
+  expect(openReturnCharges(f.root,id)).toEqual([]);
+  expect({stock:f.root.fulfillment.stock,received:f.root.fulfillment.purchases[0].received}).toEqual(before);
+  expect(f.root.fulfillment.receipts.find(r=>r.id===receiptId)).toMatchObject({quantity:8,rejected:3});
+  expect(ret(3)).toBeTruthy();
+ });
+ it('refuses cancellation after processing delivery even when no warehouse stock was created',()=>{
+  const f=setup(),id=purchase(f,'processing');approve(f,id);
+  f.run({type:'fulfillment.procurement.receive',payload:{id,quantity:4,rejected:0,destination:'supplier',location:'加工厂',date:'2026-10-13',evidence:'加工回交',fileIds:[]}});
+  expect(f.root.fulfillment.stock).toEqual([]);
+  expect(()=>applyMistCommand(f.root,{type:'payable.purchase.cancel',payload:{purchaseId:id,reason:'不能抹掉已执行合同'}},f.ctx)).toThrow('已有收货记录');
+ });
+ it('refuses cancellation after final production completion without a receipt',()=>{
+  const f=setup(),id=purchase(f,'processing');approve(f,id);
+  f.run({type:'fulfillment.production.complete',payload:{productionId:f.root.productions[0].id,quantity:10,sizeQuantities:[{size:'M',quantity:10}],date:'2026-10-13',evidence:'工厂最终完工',fileIds:[]}});
+  expect(f.root.fulfillment.receipts).toEqual([]);
+  expect(()=>applyMistCommand(f.root,{type:'payable.purchase.cancel',payload:{purchaseId:id,reason:'不能按未执行取消'}},f.ctx)).toThrow('已有最终完工记录');
+ });
+});
+
+it('actual shipment save enforces overship approval, including rejection and reapplication',()=>{
+ const f=professionalFixture(),{productionId,purchaseId}=f.released();
+ f.receiveAndComplete(productionId,purchaseId,11);
+ f.run({type:'fulfillment.production.acceptCompletion',payload:{productionId,note:'客户接受最终 11 件'}});
+ const request=()=>f.run({type:'order.governance.requestOverShip',payload:{orderId:f.orderId,lineId:f.state.orderLines[0].id,quantity:11,reason:'客户追加接受'}});
+ const decide=(decision:'approved'|'rejected')=>{
+  const row=f.state.orderLines[0].overShips!.at(-1)!;
+  f.run({type:'order.governance.decide',payload:{id:f.orderId+'#overship:'+row.id,decision,note:'核对客户要求'}},{...f.context,actorId:'reviewer'});
+ };
+ expect(()=>f.shipment(productionId,11)).toThrow('超出允许溢装');
+ request();expect(()=>f.shipment(productionId,11)).toThrow('超出允许溢装');
+ decide('rejected');expect(()=>f.shipment(productionId,11)).toThrow('超出允许溢装');
+ request();decide('approved');expect(f.shipment(productionId,11)).toBeTruthy();
+});
+
+describe('往来冻结的下单与在途边界', () => {
+ it('客户冻结拒绝新订单，解冻恢复；原订单保持不变', () => {
+  const f=setup(),customerId=f.root.orders[0].customerId;
+  const apply=(command:Parameters<typeof applyMistCommand>[1])=>{const next=applyMistCommand(f.root,command,f.ctx);f.root=next.state;return next.result;};
+  const id=String(apply({type:'market.relation.save',payload:{input:{name:'',category:'Customer',customerId,supplierId:'',country:'',address:'',aliases:[]}}}).id);
+  const existing=structuredClone(f.root.orders);
+  const command={type:'order.create' as const,payload:{type:'garment' as const,customerId,season:'AW',currency:'USD',due:'2026-12-01',ownerId:'business',lines:[{fulfillmentMode:'trims_cmt' as const,cmtIncludedItems:[],name:'场景衬衫',style:'HOLD-1',img:'coat' as const,qty:10,unit:'件',price:12}]}};
+  apply({type:'market.relation.hold',payload:{id,frozen:true,reason:'账期待核实'}});
+  expect(()=>apply(command)).toThrow(/往来已冻结/);
+  expect(f.root.orders).toEqual(existing);
+  apply({type:'market.relation.hold',payload:{id,frozen:false,reason:'账期已核实'}});
+  expect(apply(command).orderId).toBeTruthy();
+  expect(f.root.orders).toHaveLength(existing.length+1);
+ });
+ it('供应商冻结拒绝新增采购，但已有合同仍可按既定规则收货；解冻恢复新增', () => {
+  const f=setup(),purchaseId=purchase(f);approve(f,purchaseId);
+  const apply=(command:Parameters<typeof applyMistCommand>[1])=>{const next=applyMistCommand(f.root,command,f.ctx);f.root=next.state;return next.result;};
+  const id=String(apply({type:'market.relation.save',payload:{input:{name:'',category:'Supplier',customerId:'',supplierId:'supplier',country:'',address:'',aliases:[]}}}).id);
+  apply({type:'market.relation.hold',payload:{id,frozen:true,reason:'新增采购待核实'}});
+  expect(()=>purchase(f)).toThrow(/往来已冻结/);
+  f.run({type:'fulfillment.procurement.receive',payload:{id:purchaseId,quantity:2,rejected:0,destination:'warehouse',location:'上海仓',date:'2026-10-13',evidence:'冻结前合同实际收货',fileIds:[]}});
+  expect(f.root.fulfillment.purchases.find(p=>p.id===purchaseId)?.received).toBe(2);
+  const existing=structuredClone(f.root.fulfillment.purchases.find(p=>p.id===purchaseId));
+  expect(existing?.state).toBe('approved');
+  apply({type:'market.relation.hold',payload:{id,frozen:false,reason:'核实完成'}});
+  expect(purchase(f)).toBeTruthy();
+  expect(f.root.fulfillment.purchases.find(p=>p.id===purchaseId)).toEqual(existing);
+ });
+});
+
+describe('sample borrower account binding',()=>{
+ it('binds the borrower rather than the lending operator and leaves ambiguous names unbound',()=>{
+  const f=setup();const id=f.run({type:'fulfillment.samples.create',payload:{name:'面料实物',category:'面料',form:'米样',quantity:10,unit:'米',location:'A',size:'',color:'',source:{kind:'manual',description:'实际来样'},fileIds:[],note:''}}).id!;
+  const payload={id,kind:'lend' as const,quantity:1,person:'借用同事',location:'外借',note:'',expectedReturn:'2026-10-15'};
+  const directory=[...f.ctx.members!,{id:'borrower',name:'借用同事',active:true,groups:[] as ('fabric'|'garment')[]}];
+  const loan=f.run({type:'fulfillment.samples.move',payload},{...f.ctx,members:directory}).id!;
+  expect(f.root.fulfillment.sampleMovements.find(m=>m.id===loan)).toMatchObject({borrowerId:'borrower',actor:'业务员',expectedReturn:'2026-10-15'});
+  const ambiguous=f.run({type:'fulfillment.samples.move',payload},{...f.ctx,members:[...directory,{id:'duplicate',name:'借用同事',active:true,groups:[]}]}).id!;
+  expect(f.root.fulfillment.sampleMovements.find(m=>m.id===ambiguous)?.borrowerId).toBe('');
+  const sameNames=[...directory,{id:'duplicate',name:'借用同事',active:true,groups:[] as ('fabric'|'garment')[]}];
+  const bound=f.run({type:'fulfillment.samples.move',payload:{...payload,borrowerId:'duplicate',person:'伪造显示名'}},{...f.ctx,members:sameNames}).id!;
+  expect(f.root.fulfillment.sampleMovements.find(m=>m.id===bound)).toMatchObject({borrowerId:'duplicate',person:'借用同事'});
+  const before=structuredClone(f.root);
+  expect(()=>f.run({type:'fulfillment.samples.move',payload:{...payload,borrowerId:'foreign'}},{...f.ctx,members:directory})).toThrow(/本公司/);
+  expect(()=>f.run({type:'fulfillment.samples.move',payload:{...payload,borrowerId:'duplicate'}},{...f.ctx,members:[...directory,{id:'duplicate',name:'停用人',active:false,groups:[]}]})).toThrow(/停用/);
+  expect(f.root).toEqual(before);
+ });
 });

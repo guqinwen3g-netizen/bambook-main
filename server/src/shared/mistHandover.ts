@@ -8,6 +8,7 @@
  */
 import { MistCommandError, type MistContext, type MistCustomer, type MistState } from './mistWorkspace';
 import { MIST_BUSINESS_GROUPS, MIST_BUSINESS_GROUP_LABEL, accountOwnedObjects, resolveMember, type MistOwnedObject } from './mistAccounts';
+import { reassignInternalDeliveryReceiver } from './mistInternalDelivery';
 
 export type MistCustomerHandover = { id: string; at: string; actor: string; fromId: string; from: string; toId: string; to: string; reason: string; orders: string[]; opportunities: string[]; tasks: number };
 /** 成员离职 / 调岗：按账号把名下全部负责对象一次交给新负责人（所有者在成员管理办理）。 */
@@ -17,7 +18,7 @@ export type HandoverCommand =
   | { type: 'handover.account'; payload: { fromUserId: string; toUserId: string; reason: string } };
 /** 客户交接由主管办理；按账号整体交接涉及全部业务对象，权限 null 由仓储层限定为公司所有者（与成员授权一致）。 */
 export const handoverCommandPermission = (c: HandoverCommand) => c.type === 'handover.account' ? null : 'relations:admin';
-export const MIST_OWNED_KIND_LABEL: Record<MistOwnedObject['kind'], string> = { customer: '客户', order: '订单', development: '开发案', fabric: '面料寻样', opportunity: '商机', supplier: '供应商经手' };
+export const MIST_OWNED_KIND_LABEL: Record<MistOwnedObject['kind'], string> = { customer: '客户', order: '订单', development: '开发案', fabric: '面料寻样', opportunity: '商机', supplier: '供应商经手', internalReceiver: '内部面料接收' };
 
 const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCommandError(code, message, code === 'NOT_FOUND' ? 404 : 422); };
 const ids = (v: unknown) => [...new Set((Array.isArray(v) ? v : []).map(String))];
@@ -46,7 +47,7 @@ export function accountOwners(root: MistState): Array<{ id: string; name: string
 /** 整体交接的阻断项：审批中的订单内容锁定（业务员通用，不再按业务组阻断）。 */
 export function accountHandoverBlockers(root: MistState, fromId: string, to?: { id: string; name: string; groups: string[] }) {
   const out: string[] = [];
-  for (const o of root.orders) if (o.ownerId === fromId && (o.governance?.status === 'pending' || o.governance?.changeDraft?.status === 'pending' || o.governance?.cancellation?.status === 'pending')) out.push(`订单 ${o.code} 审批中，审批完成后再交接`);
+  for (const o of root.orders) if ((o.ownerId === fromId || o.governance?.contract?.internalSupply?.receiverId === fromId) && (o.governance?.status === 'pending' || o.governance?.changeDraft?.status === 'pending' || o.governance?.cancellation?.status === 'pending')) out.push(`订单 ${o.code} 审批中，审批完成后再交接`);
   return out;
 }
 export const accountHandovers = (root: MistState) => (root as MistState & { memberHandovers?: MistAccountHandover[] }).memberHandovers || [];
@@ -74,7 +75,17 @@ function applyAccountHandover(root: MistState, p: Extract<HandoverCommand, { typ
   for (const r of root.fabrics || []) if (r.ownerId === fromId) { r.ownerId = to.id; r.owner = to.name; event('fabric', r.id); }
   for (const r of root.crm?.opportunities || []) if (r.ownerId === fromId) { r.ownerId = to.id; r.owner = to.name; }
   for (const s of root.market?.suppliers || []) { let changed = false; for (const g of MIST_BUSINESS_GROUPS) if (s.handlers?.[g]?.id === fromId) { s.handlers[g] = { id: to.id, name: to.name }; changed = true; } if (changed) event('supplier', s.id); }
+  // The named receiver is a responsibility, not a commercial term: move it in the live contract and in the
+  // approved snapshot together so the order stays approved (sameCommercialSnapshot compares the contract).
+  for (const r of root.orders) {
+    const g = r.governance, supply = g?.contract?.internalSupply;
+    if (supply?.receiverId !== fromId || !owned.some(o => o.kind === 'internalReceiver' && o.id === r.id)) continue;
+    for (const contract of [g!.contract, g!.approvedSnapshot?.contract]) if (contract?.internalSupply?.receiverId === fromId) { contract.internalSupply.receiverId = to.id; contract.receiver = `成衣 / ${to.name}`; }
+    event('order', r.id);
+  }
   for (const t of pendingTasks) t.assigneeIds = [...new Set(t.assigneeIds.map(id => id === fromId ? to.id : id))];
+  // Internal deliveries name one exact receiver; reassign the still-open ones so the goods are not stranded.
+  for (const moved of reassignInternalDeliveryReceiver(root, fromId, to, { at: c.now, actor: c.actorName, reason })) root.events.unshift({ id: c.id(), entityType: 'order', entityId: moved.orderId, actor: c.actorName, at: c.now, text: `内部交付接收人：${moved.from}→${to.name}：${reason}`, fileIds: [] });
   const counts: MistAccountHandover['counts'] = {};
   for (const o of owned) counts[o.kind] = (counts[o.kind] || 0) + 1;
   const record: MistAccountHandover = { id: c.id(), at: c.now, actor: c.actorName, fromId, from, toId: to.id, to: to.name, reason, counts, objects: owned.map(o => `${o.role} ${o.label}`), tasks: pendingTasks.length };
@@ -103,11 +114,14 @@ export function applyHandoverCommand(root: MistState, command: HandoverCommand, 
   if (customer.ownerId === to.id && !changedOrders.length && !changedOpps.length) fail(`${to.name} 已是该客户及所选业务的负责人`);
   const fromId = customer.ownerId, from = customer.owner;
   // 改派指向这些对象、且由原负责人（客户或所交接订单/商机的负责人）处理的未完成待办。
-  const objects = new Set([customer.id, ...changedOrders.map(o => o.id), ...changedOpps.map(o => o.id)]);
+  const relation = root.market?.relations?.find(r => r.customerId === customer.id);
+  const objects = new Set([customer.id, ...(relation ? [relation.id] : []), ...changedOrders.map(o => o.id), ...changedOpps.map(o => o.id)]);
   const previous = new Set([fromId, ...changedOrders.map(o => o.ownerId), ...changedOpps.map(o => o.ownerId)].filter(id => id && id !== to.id));
   let tasks = 0;
   for (const t of root.tasks) {
-    if (t.done || !(objects.has(t.target?.id || '') || objects.has(t.target?.customerId || ''))) continue;
+    // customerId is a navigation anchor, not proof that a specific order/opportunity was selected.
+    const targetId = t.target?.id || t.target?.customerId || '';
+    if (t.done || !objects.has(targetId)) continue;
     if (!t.assigneeIds.some(id => previous.has(id))) continue;
     t.assigneeIds = [...new Set(t.assigneeIds.map(id => previous.has(id) ? to.id : id))]; tasks++;
   }
@@ -116,7 +130,6 @@ export function applyHandoverCommand(root: MistState, command: HandoverCommand, 
   for (const o of changedOpps) { o.owner = to.name; o.ownerId = to.id; }
   const record: MistCustomerHandover = { id: c.id(), at: c.now, actor: c.actorName, fromId, from, toId: to.id, to: to.name, reason, orders: changedOrders.map(o => o.code), opportunities: changedOpps.map(o => o.title), tasks };
   ((customer as MistCustomer & { handovers?: MistCustomerHandover[] }).handovers ||= []).push(record);
-  const relation = root.market?.relations?.find(r => r.customerId === customer.id);
   const heading=fromId===to.id?`在手业务交接给 ${to.name}`:`客户交接：${from || '未指定'}→${to.name}`;
   const summary = `${heading}；订单 ${record.orders.length} 张${record.orders.length ? `（${record.orders.join('、')}）` : ''}、商机 ${record.opportunities.length} 个、改派待办 ${tasks} 条。原因：${reason}`;
   for (const entityId of new Set([customer.id, relation?.id].filter(Boolean) as string[])) root.events.unshift({ id: c.id(), entityType: entityId === customer.id ? 'customer' : 'market.relation', entityId, actor: c.actorName, at: c.now, text: summary, fileIds: [] });

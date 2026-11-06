@@ -20,7 +20,7 @@ import { orderRebate } from './mistExportRebate';
 import { createPayablesState, nextPayableCode, type SupplierBill } from './mistPayables';
 import { internalFabricCostShare,type InternalFabricCostBasis } from './mistInternalFabric';
 
-export const EXPENSE_CATEGORIES = { freight: '海运/空运费', trucking: '拖车/内陆运输', customs: '报关/港杂', inspection: '商检/验货', courier: '快递/寄样', insurance: '保险', commission: '佣金', bank: '银行手续费', claim: '客户索赔赔付', sample: '样品/打样', other: '其他' } as const;
+export const EXPENSE_CATEGORIES = { freight: '海运/空运费', trucking: '拖车/内陆运输', customs: '报关/港杂', inspection: '商检/验货', courier: '快递/寄样', insurance: '保险', commission: '佣金', bank: '银行手续费', claim: '客户索赔赔付', sample: '样品/打样', cancelLoss: '订单取消损失', other: '其他' } as const;
 export type ExpenseCategory = keyof typeof EXPENSE_CATEGORIES;
 export const ALLOCATION_BASES = { volume: '按体积', weight: '按毛重', value: '按货值', quantity: '按件数', equal: '平均', manual: '手工指定' } as const;
 export type AllocationBasis = keyof typeof ALLOCATION_BASES;
@@ -163,8 +163,18 @@ export type OrderActualCost = {
   orderId: string; code: string; customer: string; currency: string;
   revenue: OrderCostLine[]; purchases: OrderCostLine[]; expenses: OrderCostLine[]; rebate: { expected: number; approved: number; received: number; used: number };
   revenueCny: number | null; purchaseCny: number | null; expenseCny: number | null; marginEx: number | null; marginIn: number | null; rateIn: number | null;
-  estimated: boolean; missing: string[]; status: 'ok' | 'norate';
+  /** nocost：对外订单还没有已批准采购，成本不全，不算毛利也不进合计；pendingPurchases 为未批准（草稿 / 待审）采购数。 */
+  estimated: boolean; missing: string[]; status: 'ok' | 'norate' | 'nocost'; pendingPurchases: number;
+  /** 内部订单：金额是预算，不计对外收入、毛利或出口退税；只核算实际成本（costCny）。 */
+  internal: boolean; costCny: number | null;
+  /**
+   * ord39 跨组供布（用户 2026-11-02 定案）：面料组按本组成本 + 约定加成定内部价交给成衣组。
+   * 成衣订单的内部面料成本按内部价计；面料订单记内部收入（按内部价）与内部利润。没有约定加成时按成本价，内部收入、利润为空。
+   */
+  internalSale?: { revenueCny: number; profitCny: number; markupPercent: number } | null;
 };
+/** Markup on internal fabric supply agreed on the fabric order; undefined = at cost. */
+const internalMarkup = (root: MistState, fabricOrderId: string) => root.orders.find(o => o.id === fabricOrderId)?.governance?.contract.internalSupply?.markupPercent;
 /** 单个订单的实际核算；金额单位为元，人民币按 basis 口径折算。 */
 export function orderActualCost(root: MistState, orderId: string, basis: FxBasis, month: string, asOf: string,materialCostBasis?:ReadonlyArray<InternalFabricCostBasis>|null): OrderActualCost {
   const order = root.orders.find(o => o.id === orderId); if (!order) return fail('订单不存在或不可见', 'NOT_FOUND');
@@ -187,6 +197,10 @@ export function orderActualCost(root: MistState, orderId: string, basis: FxBasis
   // 采购：已到票金额 − 索赔扣款；未到票按合同暂估
   const bills = (root.payables?.bills || []).filter(b => b.state !== 'void'), deductions = (root.payables?.deductions || []).filter(d => !d.reversed);
   const purchases: OrderCostLine[] = [];
+  const markupOwn = internal ? o.governance?.contract.internalSupply?.markupPercent : undefined;
+  let internalRevenueMinor = 0, internalProfitMinor = 0;
+  const transferMissing = new Set<string>();
+  let transferEstimated = false;
   for (const p of (root.fulfillment?.purchases || []).filter(p => !p.cancellation && p.state === 'approved')) {
     let billed = 0, deducted = 0;
     for (const b of bills) {
@@ -195,12 +209,31 @@ export function orderActualCost(root: MistState, orderId: string, basis: FxBasis
       if (total) deducted += Math.round(deductions.filter(d => d.billId === b.id).reduce((n, d) => n + mistMoneyMinor(d.amount), 0) * mine / total);
     }
     const settlements = root.payables?.settlements?.filter(s => s.purchaseId === p.id && s.state === 'confirmed') || [];
-    const finalInternal = root.orders.find(o => o.id === p.orderId)?.governance?.contract.internalSupply && settlements.some(s => s.final);
-    const contract = finalInternal ? settlements.reduce((sum, s) => sum + mistMoneyMinor(s.amount), 0) : Math.max(0, Math.round(p.quantity * p.price * 100));
+    // 已确认最终结算（含短交结案的零数量最终结算）后合同已按实际关闭：成本以已确认结算金额为准，不再暂估未交部分。
+    const finalSettled = settlements.some(s => s.final);
+    const contract = finalSettled ? settlements.reduce((sum, s) => sum + mistMoneyMinor(s.amount), 0) : Math.max(0, Math.round(p.quantity * p.price * 100));
+    // Staged fabric costs read as 坯布 + 染整 on the same item, so both stages are named on their cost lines.
+    const stage = p.domain === 'fabric' ? p.kind === 'processing' ? p.stageTerms?.intermediate ? '前道加工 ' : '染整加工 ' : p.materialKind === 'greige' ? '坯布 ' : '' : '';
     const unbilled = Math.max(0, contract - billed), share = (minor: number) => internalFabricCostShare(root, p.id, orderId, minor,materialCostBasis), suffix = p.orderId === orderId ? '' : ' 内部面料';
-    if (share(billed)) purchases.push(line('pur:' + p.id, `${p.code} ${p.supplier}${suffix} 已到票`, p.currency, share(billed)));
+    if (share(billed)) purchases.push(line('pur:' + p.id, `${stage}${p.code} ${p.supplier}${suffix} 已到票`, p.currency, share(billed)));
     if (share(deducted)) purchases.push(line('ded:' + p.id, `${p.code}${suffix} 供应商索赔扣款`, p.currency, -share(deducted)));
-    if (share(unbilled)) purchases.push(line('est:' + p.id, `${p.code} ${p.supplier}${suffix} 未到票（按合同暂估）`, p.currency, share(unbilled), { estimated: true }));
+    if (share(unbilled)) purchases.push(line('est:' + p.id, `${stage}${p.code} ${p.supplier}${suffix} 未到票（按合同暂估）`, p.currency, share(unbilled), { estimated: true }));
+    // ord39：本单使用的内部面料按内部价计成本，加成部分记为面料组的内部利润。
+    const markup = p.orderId !== orderId ? internalMarkup(root, p.orderId) : undefined;
+    if (markup) { const base = share(billed) - share(deducted) + share(unbilled), extra = Math.round(base * markup / 100); if (extra) purchases.push(line('mk:' + p.id, `${p.code} 内部面料加成 ${markup}%（面料组利润）`, p.currency, extra, { estimated: share(unbilled) > 0 })); }
+    if (markupOwn && p.orderId === orderId) for (const target of root.orders.filter(t => t.id !== orderId)) {
+      // Mirror the recipient's cost components and per-line FX rounding exactly. Contract-only
+      // totals lose final settlement/deduction changes and introduce cross-destination cent drift.
+      const targetShare = (minor: number) => internalFabricCostShare(root, p.id, target.id, minor, materialCostBasis);
+      const parts = [targetShare(billed), -targetShare(deducted), targetShare(unbilled)];
+      const extra = Math.round(parts.reduce((n, v) => n + v, 0) * markupOwn / 100);
+      if (![...parts, extra].some(v => v !== 0)) continue;
+      const rate = p.currency === 'CNY' ? { rate: 1, estimated: false } : fxRateFor(root, p.currency, basis, { month, asOf, orderId: target.id });
+      if (!rate) { transferMissing.add(p.currency); continue; }
+      internalRevenueMinor += [...parts, extra].reduce((n, v) => n + Math.round(v * rate.rate), 0);
+      internalProfitMinor += Math.round(extra * rate.rate);
+      transferEstimated ||= !!rate.estimated || targetShare(unbilled) > 0;
+    }
   }
   const expenses: OrderCostLine[] = [];
   for (const e of activeExpenses(root)) for (const s of e.shares.filter(s => s.orderId === orderId))
@@ -208,13 +241,20 @@ export function orderActualCost(root: MistState, orderId: string, basis: FxBasis
   // 客户汇款被银行扣费的短收：收入仍按发票，扣费计入本单费用。
   for (const i of invoices) for (const c of (i.bankCharges || []).filter(c => !c.reversed))
     expenses.push(line('bank:' + c.id, `${i.code} 客户汇款银行扣费`, c.currency, mistMoneyMinor(c.amount), { note: c.reason }));
-  const rebateRaw = orderRebate(root as never, orderId), used = rebateRaw.approved || rebateRaw.expected;
-  const sum = (rows: OrderCostLine[]) => rows.some(r => r.cny === null) ? null : Math.round(rows.reduce((n, r) => n + mistMoneyMinor(r.cny!), 0));
+  // 内部订单没有出口销售，不计退税（其采购票据的退税不归属本单）。
+  const rebateRaw = internal ? { expected: 0, approved: 0, received: 0 } : orderRebate(root as never, orderId), used = rebateRaw.approved || rebateRaw.expected;
+  const sum = (rows: OrderCostLine[]) => rows.some(r => r.cny === null) ? null : Math.round(rows.reduce((n, r) => n + (r.cny! < 0 ? -mistMoneyMinor(-r.cny!) : mistMoneyMinor(r.cny!)), 0));
   const rv = sum(revenue), pc = sum(purchases), ex = sum(expenses);
-  const missing = [...rates.entries()].filter(([, r]) => !r).map(([cur]) => cur), status: OrderActualCost['status'] = missing.length ? 'norate' : 'ok';
-  const marginEx = status === 'ok' && rv !== null && pc !== null && ex !== null ? rv - pc - ex : null, marginIn = marginEx === null ? null : marginEx + mistMoneyMinor(used);
+  const missing = [...new Set([...rates.entries()].filter(([, r]) => !r).map(([cur]) => cur).concat([...transferMissing]))], status: OrderActualCost['status'] = missing.length ? 'norate' : !internal && !purchases.length ? 'nocost' : 'ok';
+  const pendingPurchases = (root.fulfillment?.purchases || []).filter(p => p.orderId === orderId && !p.cancellation && (p.state === 'draft' || p.state === 'pending')).length;
+  const cost = status === 'ok' && pc !== null && ex !== null ? pc + ex : null;
+  const marginEx = internal ? null : status === 'ok' && rv !== null && cost !== null ? rv - cost : null, marginIn = marginEx === null ? null : marginEx + mistMoneyMinor(used);
+  // Internal revenue is separate from external sales/margins; never add it to company sales.
+  const internalSale: OrderActualCost['internalSale'] = markupOwn && status === 'ok' && internalRevenueMinor
+    ? { revenueCny: major(internalRevenueMinor), profitCny: major(internalProfitMinor), markupPercent: markupOwn } : null;
   return { orderId, code: o.code, customer: o.customer, currency: o.currency, revenue, purchases, expenses, rebate: { ...rebateRaw, used },
     revenueCny: rv === null ? null : major(rv), purchaseCny: pc === null ? null : major(pc), expenseCny: ex === null ? null : major(ex),
     marginEx: marginEx === null ? null : major(marginEx), marginIn: marginIn === null ? null : major(marginIn), rateIn: marginIn === null || !rv ? null : marginIn / rv,
-    estimated: [...revenue, ...purchases].some(r => r.estimated) || [...rates.values()].some(r => r?.estimated), missing, status };
+    estimated: transferEstimated || [...revenue, ...purchases].some(r => r.estimated) || [...rates.values()].some(r => r?.estimated), missing, status, pendingPurchases,
+    internal, costCny: cost === null ? null : major(cost), internalSale };
 }

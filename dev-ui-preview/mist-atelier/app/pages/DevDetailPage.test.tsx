@@ -35,6 +35,19 @@ async function click(text:string){const button=[...document.querySelectorAll('bu
 async function fill(label:string,value:string){const field=[...document.querySelectorAll('label')].find(item=>item.querySelector('.mist-field-label')?.textContent?.replace('*','')===label);const select=field?.querySelector('select');if(select){await act(async()=>{select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));});expect(select.value,label).toBe(value);return;}const input=field?.querySelector('input,textarea') as HTMLInputElement|HTMLTextAreaElement;expect(input,label).toBeTruthy();await act(async()=>{const prototype=input.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(prototype,'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));});}
 
 describe('exact persisted version detail',()=>{
+  it('shows a staged version chain, blocks the sample until the greige is handed over and records the handover',async()=>{
+    bridge.current.state.versions[0]={...bridge.current.state.versions[0],sample:'',returnedAt:null,qc:null,stages:[{factoryId:'weaver',process:'织造',factory:'吴江织造'},{factoryId:'sup-a',process:'染整',factory:'工厂 va'}]};
+    await mount();
+    expect(host.querySelector('[data-stage-chain]')?.textContent).toContain('吴江织造（织造） → 工厂 va（染整 · 出样）');
+    expect(host.querySelector('[data-handover="0"]')?.textContent).toContain('待交接');
+    const sample=[...host.querySelectorAll('button')].find(b=>b.textContent?.trim()==='登记返样') as HTMLButtonElement;
+    expect(sample.disabled).toBe(true);expect(sample.title).toContain('请先登记前道交接：吴江织造 → 工厂 va');
+    await click('登记 吴江织造 交接');
+    const set=async(name:string,value:string)=>{const el=host.querySelector(`[aria-label="${name}"]`) as HTMLInputElement;await act(async()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el),'value')!.set!.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}));});};
+    await set('交接数量','3.5');await set('交接依据','坯样 3.5 米寄染厂 SF1013');
+    await click('保存交接');
+    expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'development.stage.handover',payload:expect.objectContaining({devId:'dev-a',versionId:'va',stageIndex:0,quantity:3.5,unit:'米',note:'坯样 3.5 米寄染厂 SF1013'})}));
+  });
   it('shows a not-yet-returned factory sample using its planned unit',async()=>{
     bridge.current.state.versions[0]={...bridge.current.state.versions[0],sample:'',sampleQuantity:1,returnedAt:null,qc:null,task:{commonRequirements:'测试',extraRequirements:'',sampleForm:'半成品',sampleQuantity:1,sampleUnit:'套',dueDate:'2026-11-20',syncedAt:'2026-10-16T00:00:00Z',syncedBy:'业务员'}};
     await mount();expect(host.textContent).toContain('未登记 · 1 套');

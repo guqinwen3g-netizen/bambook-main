@@ -47,7 +47,7 @@ describe('风险分级权限经仓储与统一审批全链路',()=>{
   await f.run({type:'platform.risk.transition',payload:{id,state:'Acknowledged',resolution:'我来跟'}});
   await f.run({type:'platform.risk.plan',payload:{id,plan:'本周与客户确认付款计划',planDue:'2026-10-20'}});
   await expect(f.run({type:'platform.risk.transition',payload:{id,state:'Resolved',resolution:'已催款'}})).rejects.toMatchObject({code:'PRECONDITION'});
-  // 请求体不能指定审批人；也不能直接以 decide 命令绕过统一审批（缺 risk:admin）。
+  // 请求体不能指定审批人；申请人也不能以 decide 命令自批（缺 risk:write，且领域层拒绝自审）。
   await expect(f.run({type:'platform.risk.escalate',payload:{id,action:'close',reason:'x',approver:'owner'}})).rejects.toMatchObject({code:'FORBIDDEN'});
   await f.run({type:'platform.risk.escalate',payload:{id,action:'close',reason:'客户已付清，银行水单已核对'}});
   const review=(await repo.listReviews(testActor('manager'))).find((t:any)=>t.kind==='risk')!;
@@ -72,6 +72,26 @@ describe('风险分级权限经仓储与统一审批全链路',()=>{
   expect(row.escalations![0]).toMatchObject({decision:'approved',decidedById:'manager'});
   expect(state.notifications.find(n=>n.target?.id===id)!.title).toContain('关闭申请已批准');
   expect((await repo.decideReview(testActor('manager'),f.workspace.id,review.id,{...input('approve-close'),expectedRevision:decided.receipt.revision-1})).replayed).toBe(true);
+ });
+ for(const endpoint of ['command','review'] as const)it(`审批人经 ${endpoint} 入口答复走同一校验（Agent 提议经本人确认即走 command 入口）`,async()=>{
+  const f=await fixture(),orderId=await f.order('owner','RISK-PO-'+endpoint);
+  const id=(await f.run(risk(orderId))).receipt.result.id as string;
+  await f.run({type:'platform.risk.transition',payload:{id,state:'Acknowledged',resolution:'我来跟'}});
+  await f.run({type:'platform.risk.plan',payload:{id,plan:'核对回款',planDue:'2026-10-20'}});
+  await f.run({type:'platform.risk.escalate',payload:{id,action:'close',reason:'客户已付清'}});
+  // 主管登记为空间成员（与付款审批测试一致），两入口才比较同一套审批校验，而不是成员资格。
+  const row=db.workspaces.get(f.workspace.id)!;row.state.memberIds=['manager','manager2'];row.state.members=['manager','manager2'].map(userId=>({userId,name:userId,addedBy:'owner',addedByName:'owner',addedAt:'2026-10-13T08:00:00Z'}));
+  const review=(await repo.listReviews(testActor('manager'))).find((t:any)=>t.kind==='risk')!;let n=0;
+  const decide=(who:string)=>endpoint==='command'
+   ? repo.execute(testActor(who),f.workspace.id,{requestId:endpoint+'-'+(++n),expectedRevision:f.revision(),command:{type:'platform.risk.decide',payload:{id,escalationId:review.entityId,decision:'approved',note:'核对水单'}}})
+   : repo.decideReview(testActor(who),f.workspace.id,review.id,{requestId:endpoint+'-'+(++n),expectedRevision:f.revision(),decision:'approved',note:'核对水单'});
+  // 未分配的主管：审批页看不到这项审批（404）；命令入口由领域层拒绝（非本次有效主管）。
+  await expect(decide('manager2')).rejects.toMatchObject(endpoint==='command'?{code:'FORBIDDEN'}:{status:404});
+  auth.users.get('manager')!.permissions=['risk:read'];await expect(decide('manager')).rejects.toMatchObject({status:403});
+  auth.users.get('manager')!.permissions=['risk:read','risk:write'];
+  env.routes.set('owner','manager2');await expect(decide('manager')).rejects.toMatchObject({code:'FORBIDDEN'});env.routes.set('owner','manager');
+  await decide('manager');
+  expect(db.workspaces.get(f.workspace.id).state.platform.risks.find((r:any)=>r.id===id)).toMatchObject({state:'Resolved',disposition:'closed'});
  });
  it('他人订单的风险、无主管路由与自审路由都在服务端拒绝',async()=>{
   const f=await fixture(),mine=await f.order('owner','RISK-PO-2'),theirs=await f.order('owner','RISK-PO-3');

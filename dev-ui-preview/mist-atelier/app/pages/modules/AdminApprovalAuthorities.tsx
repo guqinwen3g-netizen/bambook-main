@@ -5,6 +5,7 @@ import { Pencil, RefreshCw } from 'lucide-react';
 import { Banner, Button, Card, Checkbox, DataTable, Drawer, Field, Pill, TextArea, Toolbar, useToast, type Column } from '../../../../../components/mist';
 import { useMistSession } from '../../runtime/auth';
 import { organizationApi, type ApprovalBusinessLine, type ApprovalCandidate, type SupplierAuthorityKind } from '../../runtime/organization';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 const LINES: Array<{ value: ApprovalBusinessLine; label: string }> = [{ value: 'fabric', label: '面料' }, { value: 'garment', label: '成衣' }];
 const KINDS: Array<{ value: SupplierAuthorityKind; label: string }> = [{ value: 'purchase', label: '采购合同' }, { value: 'processing', label: '加工合同' }];
@@ -61,7 +62,7 @@ export function AdminApprovalAuthorities() {
     <Toolbar right={<Button icon={RefreshCw} loading={loading} onClick={() => void load()}>{uiText("重新读取")}</Button>}>
       <span className="mist-note">{uiText("审批人仍须持有相应岗位权限，服务器保存与审批时复核。")}</span>
     </Toolbar>
-    {error && <Banner tone="bad" title={uiText("审批资格读取失败")}>{uiText(error)}</Banner>}
+    {error && <FailureNotice title={"审批资格读取失败"} detail={error} />}
     {missing.length > 0 && <Banner tone="warn" title={uiText('尚有 ' + missing.length + ' 项审批资格未配置')}>{missing.map(row => row.label).join('、')}{uiText("在配置前无法提交审批。")}</Banner>}
     {data && !supplierWriter && <Banner tone="neutral" title={uiText("供应商承诺审批人仅老板或管理员可修改")}>{uiText("当前账号可调整订单审批负责人；供应商承诺审批人须由持有数据字典写入权限的老板或管理员办理。")}</Banner>}
     <Card><DataTable ariaLabel={uiText("审批资格")} rows={data?.rows ?? []} rowKey={row => row.id} loading={loading && !data} columns={columns} /></Card>

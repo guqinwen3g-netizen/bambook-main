@@ -160,6 +160,8 @@ describe('ChatGPT subscription completions', () => {
 });
 
 describe('assistant status and HTTP routes', () => {
+  // 路由经 repository.currentActor 做实时授权；此处只按令牌内的权限判定（实时重载另见 subscriptionAuthority.test.ts）。
+  const currentActorOnly = { currentActor: async (a: TokenPayload, scope: string) => { if (!a.permissions?.includes(scope as any)) throw Object.assign(new Error('forbidden'), { code: 'FORBIDDEN', status: 403 }); return a; } } as any;
   const actorFor = (id: string, scopes = ['ai:chat']) => ({ userId: id, roles: [], permissions: scopes, authorizationLoaded: true, departmentIds: [] }) as unknown as TokenPayload;
   it('treats the platform subscription as the configured model for every user', async () => {
     const deps = { providers: () => [], subscription: () => ({ connected: true, model: 'gpt-test' }) };
@@ -175,7 +177,7 @@ describe('assistant status and HTTP routes', () => {
     deviceRoutes([200]);
     const s = service();
     const app = express(); app.use(express.json());
-    app.use('/api/mist', createMistRouter({ repository: {} as any, subscriptions: s, authenticate: (req, _res, next) => { const id = String(req.headers['x-test-user'] || ''); (req as any).actor = { ...actorFor(id), roles: id === 'admin' ? ['owner'] : [] }; next(); } }));
+    app.use('/api/mist', createMistRouter({ repository: currentActorOnly, subscriptions: s, authenticate: (req, _res, next) => { const id = String(req.headers['x-test-user'] || ''); (req as any).actor = { ...actorFor(id), roles: id === 'admin' ? ['owner'] : [] }; next(); } }));
     await request(app).get('/api/mist/ai/platform-model').set('x-test-user', 'sales').expect(403);
     await request(app).post('/api/mist/ai/platform-model/chatgpt/login').set('x-test-user', 'sales').send({}).expect(403);
     const login = (await request(app).post('/api/mist/ai/platform-model/chatgpt/login').set('x-test-user', 'admin').send({}).expect(201)).body.login;
@@ -193,7 +195,7 @@ describe('assistant status and HTTP routes', () => {
     deviceRoutes([200]);
     const s = service();
     const app = express(); app.use(express.json());
-    app.use('/api/mist', createMistRouter({ repository: {} as any, subscriptions: s, authenticate: (req, _res, next) => { const id = String(req.headers['x-test-user'] || ''); (req as any).actor = actorFor(id, id === 'viewer' ? [] : ['ai:chat']); next(); } }));
+    app.use('/api/mist', createMistRouter({ repository: currentActorOnly, subscriptions: s, authenticate: (req, _res, next) => { const id = String(req.headers['x-test-user'] || ''); (req as any).actor = actorFor(id, id === 'viewer' ? [] : ['ai:chat']); next(); } }));
     await request(app).get('/api/mist/ai/subscriptions').set('x-test-user', 'viewer').expect(403);
     await request(app).post('/api/mist/ai/subscriptions/chatgpt/login').set('x-test-user', 'owner').send({ userId: 'other' }).expect(400);
     const login = (await request(app).post('/api/mist/ai/subscriptions/chatgpt/login').set('x-test-user', 'owner').send({}).expect(201)).body.login;

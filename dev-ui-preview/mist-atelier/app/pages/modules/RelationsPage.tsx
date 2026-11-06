@@ -9,14 +9,14 @@ import type { MarketRelation } from '../../../../../server/src/shared/mistMarket
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
-import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
+import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec , moduleFileIds } from './ModuleWorkbench';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
-import { quotationStage } from './QuotationsPage';
-import { supplierPerformance } from './SuppliersPage';
 import { memberSelectOptions, workspaceMembers } from '../../runtime/members';
 import { customerHandoverScope, customerHandovers } from '../../../../../server/src/shared/mistHandover';
+import { relationBusiness } from '../../../../../server/src/shared/mistRelationBusiness';
 import { COUNTRIES } from '../../runtime/tradeOptions';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 type Identity = 'all' | 'customer' | 'supplier' | 'agent' | 'partner' | 'other';
 type FlagFilter = 'all' | 'hold' | 'dual' | 'noContact';
@@ -30,17 +30,8 @@ export function relationIdentities(r: MarketRelation): Exclude<Identity, 'all'>[
   if (!ids.length) ids.push(r.category === 'Agent' ? 'agent' : r.category === 'Partner' ? 'partner' : 'other');
   return ids;
 }
-/** 在手业务：客户侧（进行中订单、未关闭报价、进行中商机、未收发票按币种），供应商侧（未到齐采购单）。 */
-export function relationBusiness(state: MistState | null, r: MarketRelation) {
-  const orders = state&&r.customerId ? customerHandoverScope(state,r.customerId).orders : [];
-  const quotations = r.customerId ? (state?.market.quotations || []).filter(q => q.customerId === r.customerId && ['draft', 'pending', 'sent', 'accepted'].includes(quotationStage(q))) : [];
-  const opportunities = r.customerId ? (state?.crm.opportunities || []).filter(o => o.customerId === r.customerId && o.stage !== 'won' && o.stage !== 'lost') : [];
-  const orderIds = new Set((state?.orders || []).filter(o => o.customerId === r.customerId).map(o => o.id));
-  const receivable = new Map<string, number>();
-  if (r.customerId) for (const inv of state?.invoices || []) if (!inv.voidedAt && orderIds.has(inv.orderId) && inv.open > 0) receivable.set(inv.currency, Math.round(((receivable.get(inv.currency) || 0) + inv.open) * 100) / 100);
-  const purchases = r.supplierId ? supplierPerformance(state, r.supplierId).open : [];
-  return { orders, quotations, opportunities, receivable: [...receivable.entries()], purchases, total: orders.length + quotations.length + opportunities.length + purchases.length };
-}
+/** 在手业务与服务端归档拦截同一口径（server/src/shared/mistRelationBusiness.ts）。 */
+export { relationBusiness };
 
 /** 客户身份的联系人以客户档案为准（客户页与关系智库共用），主联系人标记取自关系档案。 */
 export function relationContacts(state: MistState | null, r: MarketRelation): MarketRelation['contacts'] {
@@ -98,10 +89,22 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
     initialValues: { supplierId: '' }, fields: [{ key: 'supplierId', label: '供应商', type: 'select', required: true, options: linkable.map(s => ({ value: s.id, label: `${s.code} · ${s.name}` })) }],
     submit: v => run({ type: 'market.relation.linkSupplier', payload: { id: r.id, supplierId: String(v.supplierId ?? '') } }),
   });
+  const linkableCustomers = (state?.customers || []).filter(c => !all.some(r => r.customerId === c.id && r.supplierId));
+  const linkCustomerSpec = (r: MarketRelation): ModuleEditorSpec => ({
+    title: `为 ${r.name} 关联客户身份`, submitLabel: '关联', description: '该供应商的关系档案并入所选客户的关系档案，别名与附件保留。',
+    initialValues: { customerId: '' }, fields: [{ key: 'customerId', label: '客户', type: 'select', required: true, options: linkableCustomers.map(c => ({ value: c.id, label: `${c.code} · ${c.name}` })) }],
+    submit: v => run({ type: 'market.relation.linkCustomer', payload: { id: r.id, customerId: String(v.customerId ?? '') } }),
+  });
+  const unlinkSpec = (r: MarketRelation): ModuleEditorSpec => ({
+    title: `撤销 ${r.name} 的供应商关联`, submitLabel: '撤销关联', submitVariant: 'danger', description: '供应商拆回独立的关系档案；客户与供应商的业务记录不变。',
+    initialValues: { reason: '' }, fields: [{ key: 'reason', label: '撤销原因', type: 'textarea', required: true }],
+    submit: v => run({ type: 'market.relation.unlinkSupplier', payload: { id: r.id, reason: String(v.reason ?? '') } }),
+  });
   const contactSpec = (kind: 'relation' | 'supplier', parentId: string, owner: string, c?: MarketRelation['contacts'][number]): ModuleEditorSpec => ({
     title: c ? `编辑联系人 ${c.name}` : `添加 ${owner} 联系人`, submitLabel: '保存', initialValues: c ? { ...c } : { name: '', role: '', email: '', phone: '', primary: false },
-    fields: [{ key: 'name', label: '联系人姓名', required: true }, { key: 'role', label: '岗位' }, { key: 'email', label: '邮箱' }, { key: 'phone', label: '电话' }, { key: 'primary', label: '主联系人', type: 'checkbox' }],
-    submit: v => run({ type: 'market.contact.save', payload: { kind, parentId, id: c?.id, name: String(v.name ?? ''), role: String(v.role ?? ''), email: String(v.email ?? ''), phone: String(v.phone ?? ''), primary: !!v.primary } }),
+    // mar31：编辑时可勾选删除该联系人（后端 market.contact.delete）。
+    fields: [{ key: 'name', label: '联系人姓名', required: true }, { key: 'role', label: '岗位' }, { key: 'email', label: '邮箱' }, { key: 'phone', label: '电话' }, { key: 'primary', label: '主联系人', type: 'checkbox' }, ...(c ? [{ key: 'remove', label: '删除该联系人', type: 'checkbox' as const }] : [])],
+    submit: v => c && v.remove === true ? run({ type: 'market.contact.delete', payload: { kind, parentId, id: c.id } }) : run({ type: 'market.contact.save', payload: { kind, parentId, id: c?.id, name: String(v.name ?? ''), role: String(v.role ?? ''), email: String(v.email ?? ''), phone: String(v.phone ?? ''), primary: !!v.primary } }),
   });
   const handoverSpec = (r: MarketRelation): RelationEditorSpec | null => {
     const c = state?.customers.find(x => x.id === r.customerId); if (!state || !c) return null;
@@ -115,7 +118,7 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
         ...scope.opportunities.map(o => ({ key: 'opp:' + o.id, label: `商机 ${o.title} · 负责人 ${o.owner || '未指定'}`, type: 'checkbox' as const })),
         { key: 'reason', label: '交接原因', type: 'textarea', required: true },
       ],
-      submit: v => run({ type: 'handover.customer', payload: { customerId: c.id, toUserId: String(v.toUserId ?? ''), reason: String(v.reason ?? ''), orderIds: movable.filter(o => v['order:' + o.id]).map(o => o.id), opportunityIds: scope.opportunities.filter(o => v['opp:' + o.id]).map(o => o.id) } } as any) };
+      submit: v => run({ type: 'handover.customer', payload: { customerId: c.id, toUserId: String(v.toUserId ?? ''), reason: String(v.reason ?? ''), orderIds: movable.filter(o => v['order:' + o.id]).map(o => o.id), opportunityIds: scope.opportunities.filter(o => v['opp:' + o.id]).map(o => o.id) } }) };
   };
   const identityPills = (r: MarketRelation) => <>{r.customerId && <Pill tone="accent">{uiText("客户")}</Pill>}{r.supplierId && <Pill tone="ok">{uiText("供应商")}</Pill>}{!r.customerId && !r.supplierId && <Pill>{CATEGORY_LABEL[r.category]}</Pill>}</>;
   const columns: Column<MarketRelation>[] = [
@@ -131,8 +134,8 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
     : <EmptyState icon={Users} title={uiText("还没有关系档案")} description={uiText("新建客户或供应商时会自动生成；货代、报关行等其它组织可在这里登记。")} action={can ? <Button icon={Plus} onClick={() => setDialog(profileSpec())}>{uiText("建立关系档案")}</Button> : undefined} />;
   const detail = selected && state
     ? <RelationDetail r={selected} state={state} can={can} canAdmin={canAdmin} onHandover={() => { const spec = handoverSpec(selected); if (spec) setDialog(spec); }} locked={locked} business={business.get(selected.id)!} identityPills={identityPills(selected)} linkableCount={linkable.length}
-        onEdit={() => setDialog(profileSpec(selected))} onHold={f => setDialog(holdSpec(selected, f))} onLink={() => setDialog(linkSpec(selected))}
-        onContact={(kind, parentId, owner, c) => setDialog(contactSpec(kind, parentId, owner, c))} onArchive={() => void run({ type: 'market.relation.status', payload: { id: selected.id, status: selected.status === 'active' ? 'archived' : 'active' } })}
+        onEdit={() => setDialog(profileSpec(selected))} onHold={f => setDialog(holdSpec(selected, f))} onLink={() => setDialog(linkSpec(selected))} onLinkCustomer={() => setDialog(linkCustomerSpec(selected))} onUnlink={() => setDialog(unlinkSpec(selected))} linkableCustomerCount={linkableCustomers.length}
+        onContact={(kind, parentId, owner, c) => setDialog(contactSpec(kind, parentId, owner, c))} onScreen={() => setDialog({ title: `登记合规筛查 · ${selected.name}`, submitLabel: '登记', fields: [{ key: 'kind', label: '筛查类型', type: 'select', required: true, options: [{ value: 'sanctions', label: '制裁名单' }, { value: 'export_control', label: '出口管制' }, { value: 'annual', label: '年度合规检查' }, { value: 'other', label: '其他' }] }, { key: 'result', label: '结论', type: 'select', required: true, options: [{ value: 'clear', label: '未命中' }, { value: 'review', label: '待人工复核' }, { value: 'hit', label: '命中' }] }, { key: 'screenedOn', label: '筛查日期', type: 'date', required: true }, { key: 'nextReview', label: '下次复查日', type: 'date', required: true }, { key: 'basis', label: '依据（名单来源与查询结果）', type: 'textarea', required: true }, { key: 'files', label: '查询截图 / 报告', type: 'files' }], initialValues: { kind: 'sanctions', result: 'clear', screenedOn: '', nextReview: '', basis: '', files: '' }, submit: v => run({ type: 'market.relation.screening', payload: { id: selected.id, kind: String(v.kind) as 'sanctions', result: String(v.result) as 'clear', screenedOn: String(v.screenedOn || ''), nextReview: String(v.nextReview || ''), basis: String(v.basis || ''), fileIds: moduleFileIds(v.files) } }) })} onArchive={() => setDialog({ title: `${selected.status === 'active' ? '归档' : '恢复'} ${selected.name}`, submitLabel: selected.status === 'active' ? '归档' : '恢复', submitVariant: selected.status === 'active' ? 'danger' : 'primary', fields: [], initialValues: {}, submit: () => run({ type: 'market.relation.status', payload: { id: selected.id, status: selected.status === 'active' ? 'archived' : 'active' } }) })}
         onOpen={(view, id, extra) => go(view, id, extra)} attachments={attachments(selected, !can)} history={history(selected.id)} />
     : <EmptyState icon={Building2} title={uiText("组织档案")} description={uiText("从左侧列表选择一个组织，查看身份、联系人、信用与在手业务。")} compact />;
   const summary = selected ? (() => {
@@ -157,8 +160,8 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
         <Button icon={Download} onClick={() => downloadModuleCsv('关系智库.csv', ['组织', '身份', '别名', '地区', '地址', '联系人', '在手业务', '状态', '冻结原因'], rows.map(r => [r.name, relationIdentities(r).map(i => ({ customer: '客户', supplier: '供应商', agent: '代理', partner: '合作伙伴', other: '其他' })[i]).join(' + '), r.aliases.join('、'), r.country, r.address, relationContacts(state, r).map(c => c.name).join('、'), business.get(r.id)?.total || 0, r.hold ? '已冻结' : r.status === 'archived' ? '已归档' : '正常', r.hold?.reason || '']))}>{uiText("导出")}</Button>
         {can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => setDialog(profileSpec())}>{uiText("建立关系档案")}</Button>}
       </>} />
-    {!can && <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有关系档案写权限，可以查看组织、联系人与在手业务。")}</Banner></div>}
-    {error && <div className="mist-section"><Banner tone="bad" title={uiText("关系数据未加载")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
+    {!can && <div className="mist-section"><Banner variant="status" tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有关系档案写权限，可以查看组织、联系人与在手业务。")}</Banner></div>}
+    {error && <FailureNotice title={"关系数据未加载"} detail={error} retry={() => void refresh()} />}
     <Toolbar>
       <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索组织、别名、编码、地址或联系人")} />
       <Dropdown<FlagFilter> label={uiText("提醒")} value={flagFilter} onChange={setFlagFilter} options={[{ value: 'all', label: '全部' }, { value: 'hold', label: '已冻结' }, { value: 'dual', label: '既是客户也是供应商' }, { value: 'noContact', label: '没有联系人' }]} />
@@ -185,10 +188,10 @@ function ContactRows({ contacts, edit }: { contacts: MarketRelation['contacts'];
   </div>)}</div> : <span className="mist-muted">{uiText("未登记联系人。")}</span>;
 }
 
-function RelationDetail({ r, state, can, canAdmin, onHandover, locked, business, identityPills, linkableCount, onEdit, onHold, onLink, onContact, onArchive, onOpen, attachments, history }: {
-  r: MarketRelation; state: MistState; can: boolean; canAdmin: boolean; onHandover: () => void; locked: boolean; business: ReturnType<typeof relationBusiness>; identityPills: React.ReactNode; linkableCount: number;
+function RelationDetail({ r, state, can, canAdmin, onHandover, locked, business, identityPills, linkableCount, linkableCustomerCount, onEdit, onHold, onLink, onLinkCustomer, onUnlink, onContact, onScreen, onArchive, onOpen, attachments, history }: {
+  r: MarketRelation; state: MistState; can: boolean; canAdmin: boolean; onHandover: () => void; locked: boolean; business: ReturnType<typeof relationBusiness>; identityPills: React.ReactNode; linkableCount: number; linkableCustomerCount: number; onLinkCustomer: () => void; onUnlink: () => void;
   onEdit: () => void; onHold: (frozen: boolean) => void; onLink: () => void; onContact: (kind: 'relation' | 'supplier', parentId: string, owner: string, c?: MarketRelation['contacts'][number]) => void;
-  onArchive: () => void; onOpen: (view: string, id?: string, extra?: Record<string, string | undefined>) => void; attachments: React.ReactNode; history: React.ReactNode;
+  onScreen: () => void; onArchive: () => void; onOpen: (view: string, id?: string, extra?: Record<string, string | undefined>) => void; attachments: React.ReactNode; history: React.ReactNode;
 }) {
   const customer = state.customers.find(c => c.id === r.customerId), supplier = state.market.suppliers.find(s => s.id === r.supplierId);
   const dual = !!(customer && supplier), contacts = relationContacts(state, r);
@@ -202,9 +205,12 @@ function RelationDetail({ r, state, can, canAdmin, onHandover, locked, business,
       { label: '冻结往来', icon: Lock, onClick: () => onHold(true), hidden: !!r.hold||!canAdmin },
       { label: '解冻', icon: Unlock, onClick: () => onHold(false), primary: true, hidden: !r.hold||!canAdmin },
       { label: '关联供应商身份', icon: Link2, onClick: onLink, reason: writeReason || (!linkableCount ? '没有可关联的供应商' : false), hidden: !can || !customer || !!supplier },
+      { label: '关联客户身份', icon: Link2, onClick: onLinkCustomer, reason: writeReason || (!linkableCustomerCount ? '没有可关联的客户' : r.hold ? '关系档案已冻结，请先解冻' : false), hidden: !can || !!customer || !supplier },
+      { label: '撤销供应商关联', onClick: onUnlink, reason: writeReason || (r.hold ? '关系档案已冻结，请先解冻' : false), hidden: !can || !customer || !supplier },
       { label: '打开客户业务', icon: Users, onClick: () => onOpen('crm', r.customerId, { customerId: r.customerId }), hidden: !customer },
       { label: '打开供应商', icon: Building2, onClick: () => onOpen('suppliers', r.supplierId), hidden: !supplier },
       { label: '在手业务交接', icon: Undo2, onClick: onHandover, hidden: !canAdmin || !customer },
+      { label: '登记合规筛查', onClick: onScreen, hidden: !can },
       { label: r.status === 'active' ? '归档' : '恢复', icon: r.status === 'active' ? Archive : ArchiveRestore, onClick: onArchive, reason: archiveReason, hidden: !can },
     ]} />
     <Facts items={[
@@ -223,6 +229,7 @@ function RelationDetail({ r, state, can, canAdmin, onHandover, locked, business,
         {business.purchases.map(p => <div key={p.id} role="listitem" className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}><Pill tone="ok">{uiText("采购")}</Pill><Mono>{p.code}</Mono><span style={{ flex: '1 1 8em', minWidth: 0 }} className="mist-muted">{p.description}</span><Button variant="quiet" onClick={() => onOpen('procurement', p.id)}>{uiText("打开")}</Button></div>)}
       </div> : <span className="mist-muted">{uiText("没有在手业务。")}</span>}
     </DetailBlock>
+    {!!r.screenings?.length && <DetailBlock title={uiText('合规筛查')}>{[...r.screenings].reverse().map(x => <div key={x.id} className="mist-row"><span>{x.screenedOn}</span><span>{({ sanctions: '制裁名单', export_control: '出口管制', annual: '年度合规检查', other: '其他' })[x.kind]}</span><Pill tone={x.result === 'clear' ? 'ok' : x.result === 'hit' ? 'bad' : 'warn'}>{uiText(({ clear: '未命中', hit: '命中', review: '待复核' })[x.result])}</Pill><span className="mist-note">{uiText('复查 ')}{x.nextReview} · {x.basis}</span></div>)}</DetailBlock>}
     <DetailBlock title={uiText(dual ? `客户联系人 · ${contacts.length}` : `联系人 · ${contacts.length}`)} aside={can ? <Button variant="quiet" icon={UserPlus} disabled={locked} onClick={() => onContact('relation', r.id, dual ? '客户侧' : r.name)}>{uiText("添加")}</Button> : undefined}>
       <ContactRows contacts={contacts} edit={can ? c => onContact('relation', r.id, r.name, c) : undefined} />
     </DetailBlock>

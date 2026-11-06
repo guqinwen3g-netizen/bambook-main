@@ -1,11 +1,17 @@
+import { ModuleEditorDialog } from './modules/ModuleWorkbench';
+import { businessWhen } from './modules/pageKit';
+import { SetupChecklist } from './SetupChecklist';
+import { memberSelectOptions, workspaceMembers } from '../runtime/members';
+import { calendarWithDerived } from '../runtime/derivedCalendar';
+import { isRecognizedMistInvoice } from '../../../../server/src/shared/mistWorkspace';
 import {isInternalDeliveryTask} from '../../../../server/src/shared/mistInternalDelivery';
 import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow} from '../runtime/businessClock';
 /** T1 工作台：保留 Mist 的问候、统计、焦点、简报、任务与日程构图。 */
 import React from 'react';
-import { ArrowRight, BadgeCheck, FileText, Layers, Plus, Ship, SlidersHorizontal, Sparkles, Wallet, ArrowUpRight, RefreshCw } from 'lucide-react';
-import { AIBrief, Agenda, Banner, Button, Card, CardBody, CardHeader, Dialog, Dropdown, EmptyState, Field, FormGrid, HeroFocus, KeyValue, MistPage, PageHeader, Segmented, Select, Skeleton, StatCard, StatGrid, Switch, TaskList, TextLink, WeekStrip, useToast, type TaskItem } from '../../../../components/mist';
+import { ArrowRight, BadgeCheck, FileText, Layers, Plus, Ship, SlidersHorizontal, Sparkles, Wallet, ArrowUpRight } from 'lucide-react';
+import { AIBrief, Agenda, Button, Card, CardBody, CardHeader, Dialog, Dropdown, EmptyState, Field, FormGrid, HeroFocus, KeyValue, MistPage, PageHeader, Segmented, Select, Skeleton, StatCard, StatGrid, Switch, TaskList, TextLink, WeekStrip, useToast, type TaskItem } from '../../../../components/mist';
 import { MIST_LOGISTICS_DUTY, type MistTarget } from '../../../../server/src/shared/mistWorkspace';
 import { IMG, STAGES } from '../data';
 import { useNav } from '../nav';
@@ -20,6 +26,7 @@ import { AgentProposalDialog } from './AgentProposalDialog';
 import { mistWorkQueue, mistMyTasks, mistEmailFollowUpTaskIds, type MistWorkOptions } from '../runtime/workQueue';
 import type { View } from '../../../../types';
 import { firstWorkspaceImage, useWorkspaceImage } from '../runtime/useWorkspaceImage';
+import { FailureNotice } from '../runtime/FailureNotice';
 
 function dateKey(value: Date) { return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`; }
 function weekDays(date: string) {
@@ -38,6 +45,8 @@ export function HomePage() {
   const [day, setDay] = React.useState(today);
   const [sort, setSort] = React.useState<'due' | 'title'>('due');
   const [taskDialog, setTaskDialog] = React.useState(false), [selectedTask, setSelectedTask] = React.useState(''), [taskDone, setTaskDone] = React.useState(false);
+  // mar64：新建 / 改期 / 转派待办。
+  const me = session.user?.id || '', [todo, setTodo] = React.useState<{ id: string; title: string; due: string; assigneeId: string; note: string } | null>(null), members = workspaceMembers(workspace.workspace, workspace.state, session.user);
   const [reportVersion, setReportVersion] = React.useState<string | null>(null), [error, setError] = React.useState('');
   const [statView,setStatView]=React.useState<'development'|'qc'|'shipping'|'invoices'|null>(null);
   const hidden = new Set(workspace.workspace?.access?.hidden?.map(section => section.key) ?? []);
@@ -52,7 +61,7 @@ export function HomePage() {
   const days = weekDays(today), weekStart = days[0].key, weekEnd = days[6].key;
   const reviews = useOptionalMistReviews(), waitingReviews = reviews?.rows.filter(row => row.canDecide).length ?? 0;
   // 与侧栏同一口径：只列指定给我或我岗位的事项，「N 件事」= 侧栏「我的工作」数字。
-  const workOptions: MistWorkOptions = { canRead: view => session.canAccessView(view as View), can: permission => session.hasPermission(permission), me: session.user?.id ?? '', reviews: reviews?.rows, today, workspaceId: workspace.workspace?.id };
+  const workOptions: MistWorkOptions = { canRead: view => session.canAccessView(view as View), can: permission => session.hasPermission(permission), me: session.user?.id ?? '', reviews: reviews?.rows, today, now: businessNow().toISOString(), workspaceId: workspace.workspace?.id, financialDisposals: workspace.workspace?.financialDisposals };
   const allTasks = mistMyTasks(state, workOptions);
   const inRange = (date: string) => !date || (range === 'today' ? date <= today : date <= weekEnd);
   const tasks = allTasks.filter(task => (task.kind === 'shipping' && task.permission === MIST_LOGISTICS_DUTY) || inRange(task.due)).slice().sort((a, b) => sort === 'title' ? a.title.localeCompare(b.title, 'zh-CN') : (a.due || '9999').localeCompare(b.due || '9999') || a.title.localeCompare(b.title, 'zh-CN'));
@@ -78,7 +87,7 @@ export function HomePage() {
     title: task.title, meta: [emailTasks.has(task.id) ? '邮件跟进' : task.kind === 'development' ? '开发事项' : task.kind === 'supervision' ? `主管督办${(task as { nudge?: { by: string } }).nudge?.by ? ' · ' + (task as { nudge?: { by: string } }).nudge!.by : ''}` : '工作事项', state?.devs.find(dev=>dev.id===task.target.id)?.code||state?.orders.find(order=>order.id===task.target.id)?.code, task.target.versionId ? state?.versions.find(v => v.id === task.target.versionId)?.label : undefined].filter(Boolean).join(' · '),
     status: { tone: task.due && task.due < today ? 'warn' : 'accent', label: task.due && task.due < today ? '已逾期' : '待处理' } as TaskItem['status'] }))];
   const outstanding = new Map<string, number>();
-  state?.invoices.forEach(invoice => { if (invoice.open > 0) outstanding.set(invoice.currency, (outstanding.get(invoice.currency) ?? 0) + invoice.open); });
+  state?.invoices.forEach(invoice => { if (isRecognizedMistInvoice(invoice) && invoice.open > 0) outstanding.set(invoice.currency, (outstanding.get(invoice.currency) ?? 0) + invoice.open); });
   const currencies = [...outstanding.entries()].sort(([a], [b]) => a.localeCompare(b));
   const preferredCurrency=state?.settings.companyProfile?.defaultCurrency;
   const mainCurrency = currencies.find(([currency]) => currency===preferredCurrency) ?? currencies.find(([currency]) => currency === 'USD') ?? currencies[0];
@@ -102,18 +111,18 @@ export function HomePage() {
     <MistPage>
       <PageHeader description={!state ? uiText(loading ? '正在读取公司业务…' : '公司业务尚未读取成功，请重试。') : undefined} variant="greeting" eyebrow={uiText(`${dateLabel} · ${workspace.workspace?.name ?? '公司工作台'}`)} title={<>{uiText(greeting)}{interfaceLocale() === 'en-US' ? ', ' : '，'}<em>{myName || uiText('同事')}</em></>}
         actions={<><Segmented<'today' | 'week'> ariaLabel={uiText("时间范围")} value={range} onChange={setRange} options={[{ value: 'today', label: '今天' }, { value: 'week', label: '本周' }]} />
-          <Button variant="primary" icon={Plus} disabled={busy || !state || !session.hasPermission('products:write')} onClick={() => go('development/new')}>{uiText("新建")}</Button></>} />
-      {(error || workspace.error) && <Banner tone="bad" title={uiText(error || workspace.error)} actions={<Button size="sm" icon={RefreshCw} onClick={() => { setError(''); void workspace.refresh(); }}>{uiText("重新读取")}</Button>} />}
-      {pending && !saving && <Banner tone="warn" title={uiText("上一次操作结果待核对")} actions={<Button size="sm" disabled={saving} onClick={() => void workspace.recover().catch(problem=>setError(problem instanceof Error?problem.message:'原请求核对失败'))}>{uiText("核对原请求")}</Button>}>{uiText("核对完成前，暂停提交新的操作。")}</Banner>}
+          <Button icon={Plus} disabled={busy || !state} onClick={() => setTodo({ id: '', title: '', due: today, assigneeId: me, note: '' })}>{uiText("新建待办")}</Button><Button variant="primary" icon={Plus} disabled={busy || !state || !session.hasPermission('products:write')} onClick={() => go('development/new')}>{uiText("新建开发案")}</Button></>} />
+      {state && <SetupChecklist state={state} workspace={workspace.workspace} canAdmin={session.hasPermission('users:admin')} go={go} />}
+      {(error || workspace.error) && <FailureNotice title="操作未完成" detail={error || workspace.error} retry={() => { setError(''); void workspace.refresh(); }} retryLabel="重新读取" />}
       {Object.values(hiddenStats).some(value=>!value)&&<StatGrid cols={Object.values(hiddenStats).filter(value=>!value).length}>
         {!hiddenStats.development&&<StatCard icon={Layers} label={uiText("在途开发案")} value={state ? activeDevs.length : '—'} unit={uiText('个')} onClick={() => setStatView('development')} />}
         {!hiddenStats.qc&&<StatCard icon={BadgeCheck} label={uiText("待 QC 评审")} value={state ? qcTasks.length+qcVersions.length : '—'} unit={uiText('项')} onClick={() => setStatView('qc')} />}
         {!hiddenStats.shipping&&<StatCard icon={Ship} label={uiText("本周出运")} value={state ? weekShipments.length : '—'} unit={uiText('票')} onClick={() => setStatView('shipping')} />}
-        {!hiddenStats.invoices&&<StatCard icon={Wallet} label={uiText("应收待核销")} value={state ? money(mainCurrency?.[1] ?? 0) : '—'} unit={uiText(mainCurrency?.[0] ?? '')} foot={currencies.length > 1 ? currencies.filter(([currency]) => currency !== mainCurrency?.[0]).map(([currency, value]) => `${currency} ${money(value)}`).join(' · ') : (state ? `${state.invoices.filter(item => item.open > 0).length} 张未结发票` : '等待公司业务数据')} onClick={() => setStatView('invoices')} />}
+        {!hiddenStats.invoices&&<StatCard icon={Wallet} label={uiText("应收待核销")} value={state ? money(mainCurrency?.[1] ?? 0) : '—'} unit={uiText(mainCurrency?.[0] ?? '')} foot={currencies.length > 1 ? currencies.filter(([currency]) => currency !== mainCurrency?.[0]).map(([currency, value]) => `${currency} ${money(value)}`).join(' · ') : (state ? `${state.invoices.filter(item => isRecognizedMistInvoice(item) && item.open > 0).length} 张未结发票` : '等待公司业务数据')} onClick={() => setStatView('invoices')} />}
       </StatGrid>}
 
       <section className="mist-grid">
-        <HeroFocus className="mist-col-8" meta={focus ? dev ? [<span className="mist-mono">{dev.code}</span>,dev.customer] : [('sourceLabel' in focus ? focus.sourceLabel : '工作事项')] : []} media={dev ? { src: focusImage.src||IMG[dev.img], alt: dev.name } : undefined}
+        <HeroFocus className="mist-col-8" meta={focus ? dev ? [<span className="mist-mono">{dev.code}</span>,dev.customer] : [('sourceLabel' in focus ? focus.sourceLabel : '工作事项')] : []} media={dev ? { src: focusImage.src||IMG[dev.img]||IMG.coat!, alt: dev.name } : undefined}
           title={loading ? '正在读取当前焦点' : focus ? dev ? <>{dev.name}<br />{uiText(version ? `${version.label} · ${dev.state}` : dev.state)}</> : focus.title : '当前没有待处理事项'} description={uiText(dev?.goal)}
           steps={dev ? STAGES.map((label, index) => ({ label, state: index < dev.stage ? 'done' : index === dev.stage ? 'now' : 'todo' })) : undefined}
           actions={<><Button variant="white" disabled={busy || !focus} iconRight={ArrowRight} onClick={() => focus && openTarget(focus.target)}>{uiText("打开事项")}</Button>{version?.qc&&<Button variant="glass" disabled={busy} icon={FileText} onClick={() => setReportVersion(version.id)}>{uiText("QC 报告")}</Button>}</>} />
@@ -124,17 +133,19 @@ export function HomePage() {
         </Card>
         <Card className="mist-col-4">
           <CardHeader title={uiText(day===today?'今日安排':`${day.slice(5)} 安排`)} tools={<TextLink iconRight={ArrowUpRight} onClick={() => go('calendar',undefined,{section:day})}>{uiText("日历")}</TextLink>} />
-          <WeekStrip days={days.map(value => ({ ...value, dots: state?.calendar.filter(event => event.date === value.key).length ?? 0 }))} value={day} onChange={setDay} />
-          <Agenda events={(state?.calendar.filter(event => event.date === day).slice().sort((a, b) => a.time.localeCompare(b.time)) ?? []).map(event => ({ time: event.time, title: event.target ? <TextLink onClick={() => openTarget(event.target!)}>{event.title}</TextLink> : event.title, meta: event.note }))} />
-          {!loading && !state?.calendar.some(event => event.date === day) && <EmptyState compact title={uiText("这一天没有安排")} action={<TextLink onClick={() => go('calendar',undefined,{section:day})}>{uiText("添加日程")}</TextLink>} />}
+          <WeekStrip days={days.map(value => ({ ...value, dots: calendarWithDerived(state).filter(event => event.date === value.key).length ?? 0 }))} value={day} onChange={setDay} />
+          <Agenda events={(calendarWithDerived(state).filter(event => event.date === day).slice().sort((a, b) => a.time.localeCompare(b.time)) ?? []).map(event => ({ time: event.time, title: event.target ? <TextLink onClick={() => openTarget(event.target!)}>{event.title}</TextLink> : event.title, meta: event.note }))} />
+          {!loading && !calendarWithDerived(state).some(event => event.date === day) && <EmptyState compact title={uiText("这一天没有安排")} action={<TextLink onClick={() => go('calendar',undefined,{section:day})}>{uiText("添加日程")}</TextLink>} />}
         </Card>
       </section>
-      <AgentProposalDialog state={workspace.state} proposal={workspace.state?.agentProposals?.find(p => p.id === proposalId && p.state === 'pending')} onClose={() => setProposalId('')} run={command => workspace.run(command)} onDone={message => toast(uiText(message))} />
+      <ModuleEditorDialog spec={todo ? { title: todo.id ? '调整待办' : '新建待办', submitLabel: '保存', fields: [{ key: 'title', label: '事项', required: true, readonly: !!todo.id && state?.tasks.find(t => t.id === todo.id)?.kind !== 'personal' }, { key: 'due', label: '期限', type: 'date', required: true }, { key: 'assigneeId', label: '负责人', type: 'select', required: true, options: memberSelectOptions(members) }, { key: 'note', label: '备注', type: 'textarea' }], initialValues: { ...todo },
+        submit: async v => { await workspace.run({ type: 'task.save', payload: { ...(todo.id ? { id: todo.id } : {}), title: String(v.title || ''), due: String(v.due || ''), assigneeId: String(v.assigneeId || ''), note: String(v.note || '') } }); toast(uiText(todo.id ? '待办已调整' : '待办已创建')); } } : null} onClose={() => setTodo(null)} />
+      <AgentProposalDialog state={workspace.state} proposal={workspace.state?.agentProposals?.find(p => p.id === proposalId && p.state === 'pending')} onClose={() => setProposalId('')} run={(command, options) => workspace.run(command, options)} onDone={message => toast(uiText(message))} />
       <Dialog open={taskDialog} onClose={() => setTaskDialog(false)} title={uiText("任务状态")} footer={<><Button variant="quiet" onClick={() => setTaskDialog(false)}>{uiText("关闭")}</Button>{taskControlled?<Button variant="primary" disabled={busy||!chosenTask?.target} onClick={()=>{setTaskDialog(false);if(chosenTask?.target)openTarget(chosenTask.target);}}>{uiText("打开事项")}</Button>:<Button variant="primary" disabled={busy || !chosenTask || chosenTask.done === taskDone} onClick={() => void run(async () => { await workspace.run({ type: 'task.complete', payload: { id: selectedTask, done: taskDone } }); if (alive.current && activeScope.current === scope) setTaskDialog(false); }, taskDone ? '已完成事项' : '已重新打开事项')}>{uiText("保存状态")}</Button>}</>}>
         <FormGrid cols={1}><Field label={uiText("事项")}><Select aria-label={uiText("选择事项")} value={selectedTask} onChange={event => { const task = state?.tasks.find(item => item.id === event.target.value); setSelectedTask(event.target.value); setTaskDone(task?.done ?? false); }} options={(chosenTask && !allTasks.some(task=>task.id===chosenTask.id) ? [chosenTask, ...allTasks] : allTasks).map(task => ({ value: task.id, label: task.title }))} /></Field><Switch label={uiText("已完成")} checked={taskDone} disabled={busy||taskControlled} onChange={setTaskDone} /></FormGrid>
       </Dialog>
       <Dialog open={!!reportVersion} onClose={() => setReportVersion(null)} title={uiText(report?.qc?.report || 'QC 评审')}>
-        {report?.qc ? <KeyValue items={[{ label: '版本', value: report.label }, { label: '评审人', value: report.qc.reviewer }, { label: '结论', value: ({ pass: '通过', conditional: '有保留通过', reject: '不通过' })[report.qc.result] }, { label: '评审时间', value: report.qc.reviewedAt }, { label: '意见', value: report.qc.opinion }]} /> : <EmptyState compact title={uiText("此版本没有可读取的评审记录")} />}
+        {report?.qc ? <KeyValue items={[{ label: '版本', value: report.label }, { label: '评审人', value: report.qc.reviewer }, { label: '结论', value: ({ pass: '通过', conditional: '有保留通过', reject: '不通过' })[report.qc.result] }, { label: '评审时间', value: businessWhen(report.qc.reviewedAt) }, { label: '意见', value: report.qc.opinion }]} /> : <EmptyState compact title={uiText("此版本没有可读取的评审记录")} />}
       </Dialog>
       <Dialog open={!!statView && !hiddenStats[statView]} onClose={()=>setStatView(null)} title={uiText(statView?statTitles[statView]:'统计明细')}>
         {statRows.length?statRows.map(row=><Button key={row.id} block onClick={()=>{setStatView(null);openTarget(row.target);}}>{uiText(row.label)} · {row.detail}</Button>):<EmptyState compact title={uiText("当前范围没有记录")}/>}

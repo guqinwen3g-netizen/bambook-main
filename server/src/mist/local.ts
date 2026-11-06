@@ -7,6 +7,7 @@ import {createHmac,randomBytes,randomUUID,timingSafeEqual} from 'node:crypto';
 import type {Request,Response,RequestHandler} from 'express';
 import type {TokenPayload} from '../auth/service';
 import type {FreshAuthority} from './authority';
+import type {MistPasswordVerifier} from './repository';
 import {MistApiError} from './errors';
 import {hasScope} from '../auth/permissionService';
 import {getDefaultScopeListForRole,SYSTEM_ROLE_IDS} from '../_shared/rolePermissionMatrix';
@@ -110,5 +111,7 @@ export function createMistLocalRuntime(options:{directory?:string;host?:string;e
   const authenticate:RequestHandler=(req,res,next)=>{void(async()=>{await ready;requestGuard(req);const token=req.cookies?.[COOKIE],id=verify(token);(req as Request&{actor:TokenPayload}).actor=actor(id,token);next();})().catch(e=>failure(res,e));};
   // 工作助手委托：签名密钥从本地会话密钥派生；还原时为该身份签一份新的本地会话，供仓储照常复核。
   const agentDelegation=createAgentDelegation({rootSecret:()=>{if(!secret)invalid('本机演示公司尚未就绪',503);return secret;},resolve:profileId=>actorForProfile(profileId),now:clock});
-  return{ready,database,authenticate,authorize,sessionGet,sessionPost,actorForProfile,agentDelegation,requestGuard};
+  // 本机演示身份没有登录密码：高风险 AI 提议的复验只认本机配置的 MIST_LOCAL_REAUTH_PASSWORD，未配置时一律拒绝。
+  const verifyPassword:MistPasswordVerifier=async(_db,_userId,password)=>{const expected=(options.env??process.env).MIST_LOCAL_REAUTH_PASSWORD;if(!expected)return false;const a=Buffer.from(password),b=Buffer.from(expected);return a.length===b.length&&timingSafeEqual(a,b);};
+  return{ready,database,authenticate,authorize,sessionGet,sessionPost,actorForProfile,agentDelegation,requestGuard,verifyPassword};
 }

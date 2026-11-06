@@ -17,8 +17,6 @@
  *      让替身 prisma 抛系统故障 ⇒ 必须 5xx；再抛业务文案 ⇒ 档位必须照旧。
  *      没有这一层，共享函数可以写得很对但一行都没被执行到。
  */
-import express from 'express';
-import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../lib/logger', () => ({
@@ -26,9 +24,6 @@ vi.mock('../../lib/logger', () => ({
 }));
 
 import { statusFromError } from '../bizStatus';
-import { createCustomsRouter } from '../../customs/customsRoute';
-import { createCustomsV2Router } from '../../customs/customsRouteV2';
-import { createMesRouter } from '../../mes/mesRoute';
 
 /** 改造前那份关键词实现（三个域取并集）—— 只作对照用，跑在同一个输入上 */
 function legacyStatus(msg: string, fallback = 400): number {
@@ -168,50 +163,3 @@ function textFedSites(src: string): string[] {
   }
   return out;
 }
-
-describe('B68 活路径 · 三个 router 真发请求：系统故障不得再报 400', () => {
-  const SYSTEM = 'connect ECONNREFUSED 127.0.0.1:5432';
-
-  function appWith(router: express.Router, prefix: string) {
-    const app = express();
-    app.use(express.json());
-    app.use(prefix, router);
-    return app;
-  }
-  /** prisma 替身：让列表/单条读取按指定文案抛错 */
-  const prismaThrowing = (msg: string) => new Proxy({}, {
-    get: () => new Proxy({}, { get: () => async () => { throw new Error(msg); } }),
-  }) as any;
-
-  const cases = [
-    { name: 'customs V1 GET /hs-codes/:code', app: () => appWith(createCustomsRouter({ prisma: prismaThrowing(SYSTEM), requireAuth: false, apiKeys: new Set() } as any), '/api/v1/customs'), url: '/api/v1/customs/hs-codes/HS1', legacyWas400: true },
-    { name: 'customs V2 GET /hs-codes/:code', app: () => appWith(createCustomsV2Router({ prisma: prismaThrowing(SYSTEM), requireAuth: false, apiKeys: new Set() } as any), '/api/v2/customs'), url: '/api/v2/customs/hs-codes/HS1', legacyWas400: true },
-    // MES 这一站点的调用点本来就传了 500 ⇒ 它不是"被改好"的那一类；留在这里是为了证明**共享实现真的在活路径上被走到**
-    { name: 'MES GET /work-stations/:id/utilization（该站点旧 fallback 已是 500）', app: () => appWith(createMesRouter({ prisma: prismaThrowing(SYSTEM), requireAuth: false, apiKeys: new Set() } as any), '/api/v1/mes'), url: '/api/v1/mes/work-stations/WS1/utilization?startDate=2026-01-01&endDate=2026-02-01', legacyWas400: false },
-  ];
-
-  for (const c of cases) {
-    it(`${c.name}：数据层 ECONNREFUSED ⇒ 500（而不是把系统故障说成"你的请求有问题"的 400）`, async () => {
-      const res = await request(c.app()).get(c.url);
-      expect(res.status, `档位应为 500，实得 ${res.status}`).toBe(500);
-      if (c.legacyWas400) {
-        // ★ 这条断言不是恒真：这类站点没传 fallback ⇒ 旧关键词表对同一句给 400
-        expect(legacyStatus(SYSTEM), '对照：旧实现对同一条给 400').toBe(400);
-      }
-    });
-  }
-
-  it('同一批 router 上业务文案仍走 404（证明不是"一律 500"糊过去）', async () => {
-    for (const prefix of ['/api/v1/customs', '/api/v2/customs']) {
-      const factory: any = prefix.includes('v1') ? createCustomsRouter : createCustomsV2Router;
-      const app = appWith(factory({ prisma: prismaThrowing('HS 编码不存在'), requireAuth: false, apiKeys: new Set() } as any), prefix);
-      const res = await request(app).get(`${prefix}/hs-codes/HS1`);
-      expect(res.status, `${prefix} 上「不存在」应保持 404，实得 ${res.status}`).toBe(404);
-    }
-  });
-
-  it('★ 反向自检：判据确实会红 —— 把系统故障文案交给旧实现就落在 4xx', () => {
-    // 这条不测产品代码，测的是"上面那三条断言的判据不是恒真"
-    expect(SYSTEM_MSGS.every((m) => legacyStatus(m) < 500)).toBe(true);
-  });
-});

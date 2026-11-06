@@ -1,7 +1,58 @@
-# 工作助手方案（方案 B：桌面端自建精简 Agent 框架）
+# Bambook AI 与 Agent 方案
 
 > 状态：用户已确认（2026-10-15，第 13 节为确认结果），按分期实施。口径来源：决策总账第二十三节“AI 模型分层与 ChatGPT 订阅接入”。
 > 本文只覆盖**工作助手**；平台 AI（汇总、需求识别、报价/审阅、对账、业务问答）维持统一平台连接，不在此改动。
+
+## 0. 三类 Agent（2026-11-04 用户定案）
+
+用户按使用场景划分，并明确第一、第二类都是平台后端服务，第三类是员工本地服务；不再以“本机工作助手 / 平台聊天 / 长期任务”等现有入口作为产品边界。2026-11-04 用户按归属再次明确三类 Agent：
+
+1. **平台内置的被动 Agent**：属于平台和公司层，由既定流程触发、完全自动执行，不需要员工发起（邮件总结、邮件草拟、洞察分析、每日市场与汇率参考等）。
+2. **每个账号的个人 Agent**：每个账号都有一个，只服务这个账号本人，相当于该账号的 personal bot。可以按账户计量费用，结算一般记在公司。原生 Agent 业务员也走这一机制：它是公司开设的独立服务账号，有自己的个人 Agent，无人值守运行。
+3. **第三方外部 Agent**：外部自带模型与执行框架，自行配置，通过 MCP / SDK / API 等接入 Bambook。
+
+本节是设计定案，不是功能交付或发布记录。
+
+| 场景 | 运行位置 | 发起与目的 | 判断及执行方 | 对用户的形态 |
+|---|---|---|---|---|
+| 自动化平台 AI | 平台后端 | 已配置的系统流程触发邮件总结、邮件草拟、洞察分析等任务 | 固定流程调用对应模型或分析服务，按原业务规则保存结果 | 在相应业务里直接看到摘要、草稿、分析及状态 |
+| Bambook 内置工作 Agent | 平台后端 | 业务员主动交付工作；同类机制覆盖已授权的无人值守任务与原生 Agent 业务员 | 后端工作模型通过 harness 规划、读取和调用受控业务能力 | 员工的孪生助手；文字、语音、进度、结果和任务接续属于同一工作上下文 |
+| 第三方 Agent 接入 | 员工本地 | 外部桌面 Agent 或其他受信客户端调用 Bambook，完成跨软件等额外任务 | 直接调用工具时由本地外部模型/harness 判断，Bambook 后端校验并办理业务；明确委派给内置 Agent 的任务进入第二类 | MCP、SDK/API 及插件为接入形式；ACP 属于会话/任务委派方向，不能与 MCP 工具调用混为一条协议 |
+
+### 0.1 共同边界
+
+- **统一业务能力**：三类场景复用同一套类型化业务命令、读取服务、文件/单据生成和业务校验。内置与外部 Agent 不分别维护业务规则，也不通过直接写库或模拟点击绕过原规则。
+- **运行边界已明确**：自动化平台 AI 与内置工作 Agent 的模型调用、harness 和任务执行由平台后端承载；浏览器、桌面端承担交互、收音、播放和状态展示。第三类的第三方 Agent 在员工本地运行；它调用的 Bambook 业务接口及权限校验仍在后端。本轮独立工作树的本机测试用于模拟平台后端，不恢复“员工必须安装本机工作助手”的依赖。
+- **功能覆盖面**：内置 Agent 的目标是覆盖员工在软件内可用的业务能力，包括填表、生成单据、分析、报表和总结。实际执行范围取当前账号权限与本次授权的交集；高敏感操作和岗位审批继续进入原本人确认/审批链。
+- **身份隔离**：员工孪生助手绑定本人、公司、会话和任务。独立原生 Agent 业务员需要明确服务身份、业务角色与责任归属；不能自动借用管理员或某个员工的全部身份。原生 Agent 业务员使用独立服务身份，需要人确认的事项交给它的负责人确认（见 0.3）。
+- **任务接续**：实时协作、后台执行、无人值守属于工作 Agent 的不同执行状态。任务、检查点、问题、确认、结果和审计应衔接；现有限时任务不等于已交付跨天值守。
+- **语音定位**：豆包负责实时收音/转写/发声/打断；工作模型承担业务判断，harness 组织模型和工具循环。语音与文字进入同一工作 Agent；播报公开回复与实际进度，不播报私有推理，也不让语音模型自行裁决业务。
+- **OpenBitFun 复用范围**：继续按用户要求复用其语音控制器、任务桥、harness 与执行事件等现成实现，适配为 Bambook 内置 Agent；是否保留某个现有 Rust/Node 宿主由产品边界和验证决定，不恢复旧的整套桌面产品嵌入。
+- **平台分析复用**：工作 Agent 可调用或读取固定 AI 分析结果。平台 AI 不是另一套必须重复询问的员工会话；第三方直接用工具时不强制再经内置工作模型推理。
+
+### 0.2 当前实现与缺口
+
+- 桌面 `electron/assistant/harness.ts` 已有模型工具循环、流式事件、取消和确认挂起；当前 `bambookTools.ts` 主要是读取，不能把它视为完整软件操作能力。
+- 服务端 `mist/agentMcp.ts` 与 `agentTasks.ts` 已有受控业务执行、提议确认、持久任务和外部/平台执行区分；`platformTaskWorker.ts` 是现有平台执行器。与桌面会话尚未统一。
+- 平台只读问答、桌面工作助手、长期任务目前仍是不同入口/执行链；原生统一工作 Agent、完整功能目录、会话与任务接续及语音接入需要逐项实现与验收。
+- MCP 已有实现；ACP、面向外部的 SDK 与插件按接口能力分别核实，不作为已交付功能。当前 Agent 不能覆盖的文件上传、单据生成及管理类 REST 能力须登记差距，不能仅凭命令目录声称“全部功能”。
+
+### 0.3 产品政策（2026-11-04 用户定案）
+
+1. **模型与语音连接**：第一、二类 Agent 的工作模型和语音连接由平台统一配置（平台设置 › 平台 AI 模型），员工和公司不自配。费用记到公司；个人 Agent 的用量按账号计量，汇总到所属公司。第三类外部 Agent 的模型由外部自行配置，Bambook 不计其模型费用。
+2. **原生 Agent 业务员**：使用公司开设的独立服务账号，不借用管理员或任何员工的身份；权限不超过该账号岗位。必须有一名负责人，遇到需要人确认或审批的事项，进入负责人的待确认，由负责人确认后生效。
+3. **平台收费与续费**：账单、到期续费提醒、退租数据导出先不做，留后续版本。
+
+平台模型网关：开发服务器已装 magpie（本机回环 `127.0.0.1:3425`，OpenAI 兼容），可把多个订阅与 API 服务汇成一个入口，订阅额度用完时转到下一个。Bambook 后端在“平台 AI 模型”里把它登记为一个 API 服务即可使用，现有调用链与失败转移不变。运维细节见 `docs/ops/dev-server-access.md`。
+
+### 0.4 第二类个人 Agent 接线（2026-11-04）
+
+- 入口：AI 助手页「我的 Agent」（`PersonalAgentPage.tsx`），浏览器与桌面端都可用；桌面「工作助手」保留。
+- 身份：`POST /workspaces/:id/personal-agent` 开通或续期本人的个人 Agent（`agentIdentities.ts#ensurePersonalIdentity`，`kind:'personal'`，编号 `personalIdentityId(workspaceId,userId)`）。负责人即本人，权限上限 = `AGENT_OPERATE_CEILING` ∩ 本人当前权限。管理员只能停用或改名。
+- 交办：`POST /workspaces/:id/personal-agent/tasks` 建 `executor:'platform'` 任务，由 `platformTaskWorker` 执行；中高风险写入一律成为本人待确认提议。
+- 用量：`GET /workspaces/:id/personal-agent/usage?month=YYYY-MM`（`agentTasks.ts#platformTaskUsage`），按账号汇总交办项数、模型轮次、运行时长。
+
+以下第 1–13 节为历史桌面方案，保留其出处和实施记录；具体接线按第 0 节执行。
 
 ## 1. 目标与边界
 
@@ -182,7 +233,8 @@ assistant-host（utilityProcess，独立进程，有内存/并发上限）
 - **身份**：`POST /api/mist/agent/delegations` 由本人会话签发委托（2 小时）。`{mode:'read'}`（默认）上限为只读 scope；`{mode:'operate'}` 上限 = 账号现有 scope（`AGENT_OPERATE_CEILING`），永远不超出账号。委托只能调用读取路由和 `/mcp`。
 - **工具**：`bambook_workspaces`、`bambook_query`、`bambook_get`、`bambook_related`（复用 `agentRead.ts`）；`bambook_commands`（命令目录 + payload 结构 + `via`）；`bambook_preview`（`repository.preview`：同一事务、同一套账号 / 成员 / 权限 / 数据范围 / 业务门禁，应用后整笔回滚，返回业务事件说明；生成文件的命令不支持）；`bambook_execute`（`repository.execute`，请求编号幂等：重试沿用原版本号重放，不同命令复用编号被拒）。
 - **分级**：`agentCommandSensitivity()`。`confirm`（资金 / 账务前缀、人员与权限、供应商收款账户（`market.supplier.bank.*`）、对外邮件，以及 confirm/approve/decide/void/reverse/cancel/delete/close/issue/send/notify/present/refund/waive/withdraw/transition 等动词）执行时先按 Agent 身份完整预演，通过后记为 Agent 提议（见下条），不直接生效；`payable.settlement.submit` 例外为普通；`files.add` 与 `email.server.*` 不能经接口。
-- **命令目录**：`scripts/gen-mist-command-catalog.mjs` 从 `server/src/shared/*.ts` 的 `{ type: '…'; payload: … }` 声明生成 `server/src/mist/agentCommandCatalog.ts`（当前314条），`agentMcp.test.ts` 用 `--check` 守住与源码一致。目录外的类型不能执行。
+- **命令目录**：`scripts/gen-mist-command-catalog.mjs` 从 `server/src/shared/*.ts` 的 `{ type: '…'; payload: … }` 声明生成 `server/src/mist/agentCommandCatalog.ts`（当前313条），`agentMcp.test.ts` 用 `--check` 守住与源码一致；`agentCommandCatalogGuard.test.ts` 再用语法树核对声明、处理分支与权限映射（null 只允许写明原因的白名单）。源码保留但不交给 Agent 的旧命令列在生成脚本 `AGENT_EXCLUDED_COMMANDS`（目前 `platform.invoice.save/issue`）。目录外的类型不能执行。
+- **Agent 不能办理的公司管理事项**：账号（开通、资料、停用、重置密码、注册审批）、岗位与权限、部门、小组、员工档案与在职变动、订单/采购审批资格人、Agent 服务身份与密钥，都走公司管理 / 人事 REST 接口（`/admin/*`、`/hr/*`、`/agent-identities`），不是 Mist 命令，也不在命令目录。这是设计：这些操作改变的是谁能办理业务，须由公司管理员本人在页面办理。Agent 被要求做这些事时，应告诉本人到「公司管理」或「人事管理」页面自行办理，不要尝试用其他命令替代。仍在目录中的 `member.groups.set`、`teamScope.save`、`handover.account` 是工作区内的业务组、小组数据范围与离岗交接，均为 confirm 级，须本人确认。
 - **审计落盘（2026-10-31）**：`agentAudit.ts` 与 `repository.ts#executeInternal` 在 `MistCommandReceipt` 追加单独的内部审计回执，内部 `result.__agentAudit` 保存版本化证据；与业务状态/编号/原业务回执同事务提交。内部编号为 `mist-revision:agent-audit:<原请求编号>`，沿用旧版本已拒绝公开读取/占用的服务端命名空间；普通业务回执本身不增加私有字段，回退到上一版本也不附带泄漏。普通委托命令及提议创建记录当前账号、Agent会话、原命令、实际前后差异、请求版本/实际起止版本和真实审计时间；本人确认或拒绝记录真实人工身份，并关联原提议及原Agent会话。旧提议未记录会话时保留null，不伪造或倒填历史。普通人工命令没有因此自动变成Agent操作。
 - **审计安全与准确性**：按记录id定位字段，保留新增/删除/null及数组顺序差异，包含本次真正提交的名册/规范化变化；并发重试仅保留最终实际提交的审计，另一会话抢先提交时沿用其原审计。预演、失败回滚和幂等回放不新增审计。命令及变化递归遮蔽密码、密钥、令牌和内嵌二进制；普通写入、回执读取、审批回执旁路和重放响应都移除内部证据，不把旧商业数据作为附带回执交给客户端。MCP预演/办理必须使用本人签发的operate委托，普通登录Cookie不能冒充Agent办理。
 - **审计当前交付**：#574已接入账号页Agent操作记录、当前权限裁剪的查询与详情，以及只读`bambook_audit`；复核当前公司/岗位/行级范围，不展开内部授权。仍不覆盖所有普通人工写入，旧历史不倒填。完整源码锚点及验收边界见Code Wiki6节。

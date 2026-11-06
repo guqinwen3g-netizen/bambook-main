@@ -23,8 +23,9 @@ describe('Mist market business handoffs',()=>{
   expect(()=>run(s,{type:'market.quotation.save',payload:{input:{...input,previousId:v1}}},ctx)).toThrow(/已有新版本/);
   expect(quotationVersions(s.market,first).map(q=>q.id)).toEqual([v1,v2]);
   const next=run(s,{type:'market.quotation.save',payload:{input}},ctx).id!;expect(s.market.quotations.find(q=>q.id===next)!.code).toBe('QT-2026-0002');});
- it('never turns acceptance into an order and explicit conversion preserves exact line source once',()=>{const {ctx,s}=setup();const p=run(s,{type:'market.product.save',payload:{input:productInput}},ctx).id!;const input=quoteInput(p);input.lines[0].cost='0.01';const id=run(s,{type:'market.quotation.save',payload:{input}},ctx).id!;run(s,{type:'market.quotation.status',payload:{id,status:'Sent',evidence:'线下已交付'}},ctx);run(s,{type:'market.quotation.status',payload:{id,status:'Accepted',evidence:'客户签回'}},ctx);expect(s.orders).toHaveLength(0);const command={type:'market.quotation.convert',payload:{id,type:'fabric',due:'2026-12-01',ownerId:'sales'}} as const;const receipt=run(s,command,ctx);expect(s.orders[0].amount).toBe(0.3);expect(s.orderLines[0]).toMatchObject({sourceProductId:p,quantityExact:'3',unitPriceExact:'0.10',amountExact:'0.30'});expect(run(s,command,ctx).orderId).toBe(receipt.orderId);expect(s.orders).toHaveLength(1);});
+ it('never turns acceptance into an order and explicit conversion preserves exact line source once',()=>{const {ctx,s}=setup();const p=run(s,{type:'market.product.save',payload:{input:productInput}},ctx).id!;const input=quoteInput(p);input.lines[0].cost='0.01';const id=run(s,{type:'market.quotation.save',payload:{input}},ctx).id!;run(s,{type:'market.quotation.status',payload:{id,status:'Sent',evidence:'线下已交付'}},ctx);run(s,{type:'market.quotation.status',payload:{id,status:'Accepted',evidence:'客户签回'}},ctx);expect(s.orders).toHaveLength(0);const command={type:'market.quotation.convert',payload:{id,type:'fabric',due:'2026-12-01',ownerId:'sales'}} as const;const receipt=run(s,command,ctx);expect(s.orders[0].amount).toBe(0.3);expect(s.orderLines[0]).toMatchObject({sourceProductId:p,quantityExact:'3',unitPriceExact:'0.10',amountExact:'0.30'});expect(s.orders[0].img).toBe('fabric');expect(s.orderLines[0].img).toBe('fabric');expect(s.orders[0].checklist.map(c=>c.label)).toEqual(['拟发范围确认','收货与贸易条款确认','收款条件核对']);expect(run(s,command,ctx).orderId).toBe(receipt.orderId);expect(s.orders).toHaveLength(1);});
  it('creates a supplier identity once and keeps its contacts in the relation',()=>{const {ctx,s}=setup();const id=run(s,{type:'market.supplier.save',payload:{input:{code:'S1',name:'织造厂',type:'面料厂',country:'CN',address:'生产地',capabilities:'织造',capacity:10000,capacityUnit:'米',leadDays:20}}},ctx).id!;run(s,{type:'market.contact.save',payload:{kind:'supplier',parentId:id,name:'联系人',role:'业务',phone:'123',email:'person@example.com',primary:true}},ctx);expect(s.market.relations).toHaveLength(1);expect(s.market.relations[0].supplierId).toBe(id);expect(s.market.relations[0].contacts[0].name).toBe('联系人');run(s,{type:'market.supplier.status',payload:{id,status:'blocked',reason:'整改'}},ctx);expect(()=>run(s,{type:'market.product.save',payload:{input:{...productInput,supplierId:id}}},ctx)).toThrow(/停用/);});
+ it('voids an unreferenced season and refuses one a trend still points to',()=>{const {ctx,s}=setup();const input={code:'SS28',name:'春夏',startDate:'2028-01-01',endDate:'2028-06-30',status:'Planning' as const,milestones:[]};const id=run(s,{type:'market.season.save',payload:{input}},ctx).id!;const used=run(s,{type:'market.season.save',payload:{input:{...input,code:'SS29',name:'春夏29'}}},ctx).id!;run(s,{type:'market.trend.save',payload:{input:{name:'亚麻',type:'fabric',seasonId:used,source:'展会',productIds:[],note:'',fileIds:[]}}} as never,ctx);expect(()=>run(s,{type:'market.season.void',payload:{kind:'season',id:used,reason:'录错'}},ctx)).toThrow(/已被引用/);run(s,{type:'market.season.void',payload:{kind:'season',id,reason:'录错'}},ctx);expect(s.market.seasons.some(x=>x.id===id)).toBe(false);});
  it('keeps season codes immutable and review totals separated by currency',()=>{const {ctx,s}=setup();const input={code:'AW26',name:'秋冬',startDate:'2026-01-01',endDate:'2026-12-31',status:'Active' as const,milestones:[]};const id=run(s,{type:'market.season.save',payload:{input}},ctx).id!;expect(()=>run(s,{type:'market.season.save',payload:{id,input:{...input,code:'SS27'}}},ctx)).toThrow(/不可更改/);run(s,{type:'market.season.review',payload:{id}},ctx);expect(s.market.seasons[0].review?.orderCount).toBe(0);expect(s.market.seasons[0].review?.amounts).toEqual([]);});
  it('requires existing customers on lead conversion without making a duplicate customer',()=>{const {ctx,s}=setup();const campaign=run(s,{type:'market.campaign.save',payload:{input:{name:'展品推广',type:'catalog',seasonId:'',showId:'',startDate:'2026-10-01',endDate:'2026-10-30',target:'新客户',budget:'100',actualCost:'10',currency:'USD',owner:'业务员',productIds:[]}}},ctx).id!;const id=run(s,{type:'market.lead.save',payload:{input:{name:'采购',company:'客户',email:'',phone:'',demand:'样布',source:'campaign',parentId:campaign,customerId:'',followUpDate:'2026-10-20',estimatedValue:'100',actualValue:'0',currency:'USD'}}},ctx).id!;expect(()=>run(s,{type:'market.lead.transition',payload:{id,status:'Converted',note:'已确认'}},ctx)).toThrow(/不存在/);run(s,{type:'market.lead.transition',payload:{id,status:'Converted',customerId:'c',actualValue:'30',note:'确认归入现有客户'}},ctx);expect(s.market.leads[0].convertedAt).toBe(ctx.now);expect(s.customers).toHaveLength(1);expect(()=>run(s,{type:'market.lead.transition',payload:{id,status:'Lost',note:'变更'}},ctx)).toThrow(/不可/);});
  it('does not claim that preparing a lookbook externally publishes it',()=>{const {ctx,s}=setup();const p=run(s,{type:'market.product.save',payload:{input:productInput}},ctx).id!;const id=run(s,{type:'market.lookbook.save',payload:{input:{name:'秋冬画册',customerId:'c',productIds:[p]}}},ctx).id!;run(s,{type:'market.lookbook.status',payload:{id,status:'Prepared'}},ctx);expect(s.market.lookbooks[0].snapshots[0].sku).toBe('P1');expect(s.market.lookbooks[0].status).toBe('Prepared');});
@@ -91,6 +92,35 @@ describe('relation holds and dual identity',()=>{
   expect(()=>run(s,{type:'market.relation.hold',payload:{id:rel.id,frozen:true,reason:'再次'}},ctx)).toThrow(/已冻结/);
   run(s,{type:'market.relation.hold',payload:{id:rel.id,frozen:false,reason:'已回款'}},ctx);run(s,{type:'market.quotation.status',payload:{id:draft,status:'Sent',evidence:'邮件'}},ctx);
   const after=s.market.relations.find(r=>r.id===rel.id)!;expect(after.hold).toBeNull();expect(after.holdHistory!.map(h=>h.action+h.reason)).toEqual(['freeze逾期未付','release已回款']);});
+ it('mar32: links from the supplier side and splits a wrong merge back out',()=>{const {ctx,s}=setup();
+  const sid=run(s,{type:'market.supplier.save',payload:{input:{code:'S10',name:'反向贸易行',type:'面料贸易',country:'中国',address:'绍兴',capabilities:'现货',capacity:1,capacityUnit:'米/月',leadDays:3,fileIds:[],note:''}}},ctx).id!;
+  const supRel=s.market.relations.find(r=>r.supplierId===sid)!;
+  run(s,{type:'market.relation.linkCustomer',payload:{id:supRel.id,customerId:'c'}},ctx);
+  const merged=s.market.relations.find(r=>r.customerId==='c')!;
+  expect(merged.supplierId).toBe(sid);expect(s.market.relations.some(r=>r.id===supRel.id)).toBe(false);
+  expect(()=>run(s,{type:'market.relation.unlinkSupplier',payload:{id:merged.id,reason:''}},ctx)).toThrow(/撤销原因/);
+  const split=run(s,{type:'market.relation.unlinkSupplier',payload:{id:merged.id,reason:'误合并，同名不同公司'}},ctx).id!;
+  expect(s.market.relations.find(r=>r.id===merged.id)).toMatchObject({customerId:'c',supplierId:''});
+  expect(s.market.relations.find(r=>r.id===merged.id)!.aliases).not.toContain('反向贸易行');
+  expect(s.market.relations.find(r=>r.id===split)).toMatchObject({supplierId:sid,customerId:'',category:'Supplier',name:'反向贸易行'});
+  expect(()=>run(s,{type:'market.relation.unlinkSupplier',payload:{id:merged.id,reason:'再次'}},ctx)).toThrow(/没有同时关联/);
+ });
+ it('mar56: several suppliers per archive with price history kept across product edits',()=>{const {ctx,s}=setup();
+  const pid=run(s,{type:'market.product.save',payload:{input:productInput}},ctx).id!;
+  const a=run(s,{type:'market.supplier.save',payload:{input:{code:'SA',name:'甲工厂',type:'面料工厂',country:'中国',address:'绍兴',capabilities:'',capacity:1,capacityUnit:'米/月',leadDays:3}}},ctx).id!;
+  const b=run(s,{type:'market.supplier.save',payload:{input:{code:'SB',name:'乙工厂',type:'面料工厂',country:'中国',address:'嘉兴',capabilities:'',capacity:1,capacityUnit:'米/月',leadDays:3}}},ctx).id!;
+  run(s,{type:'market.product.source.save',payload:{productId:pid,supplierId:a,price:'20',currency:'cny',moq:'500',leadDays:15}},ctx);
+  run(s,{type:'market.product.source.save',payload:{productId:pid,supplierId:b,price:'21.5',currency:'CNY'}},ctx);
+  run(s,{type:'market.product.source.save',payload:{productId:pid,supplierId:a,price:'19',currency:'CNY',note:'年度议价'}},ctx);
+  expect(()=>run(s,{type:'market.product.source.save',payload:{productId:pid,supplierId:a,price:'0',currency:'CNY'}},ctx)).toThrow(/大于零/);
+  const p=()=>s.market.products.find(x=>x.id===pid)!;
+  expect(p().sources!.map(x=>[x.supplierId,x.price])).toEqual([[a,'19'],[b,'21.5']]);
+  expect(p().priceHistory!.map(h=>h.from+'→'+h.to)).toEqual(['→20 CNY','→21.5 CNY','20 CNY→19 CNY']);
+  run(s,{type:'market.product.save',payload:{id:pid,input:{...productInput,name:'改名'} as any}},ctx);
+  expect(p().sources).toHaveLength(2);expect(p().priceHistory).toHaveLength(3);
+  run(s,{type:'market.product.source.remove',payload:{productId:pid,supplierId:b,reason:'停产'}},ctx);
+  expect(p().sources!.map(x=>x.supplierId)).toEqual([a]);
+ });
  it('links an existing supplier identity into a customer relation, keeping both contact sets separate',()=>{const {ctx,s}=setup();
   const sid=run(s,{type:'market.supplier.save',payload:{input:{code:'S9',name:'某贸易行',type:'面料贸易',country:'中国',address:'绍兴',capabilities:'现货',capacity:1,capacityUnit:'米/月',leadDays:3,fileIds:[],note:''}}},ctx).id!;
   run(s,{type:'market.contact.save',payload:{kind:'supplier',parentId:sid,name:'供方联系人',role:'',email:'',phone:'',primary:true}},ctx);
@@ -120,14 +150,24 @@ describe('market action audit regressions',()=>{
   expect(()=>run(s,{type:'market.quotation.status',payload:{id,status:'Sent',evidence:'仍未重审'}},ctx)).toThrow(/审批/);
   run(s,{type:'market.quotation.submit',payload:{id}},ctx);run(s,{type:'market.quotation.decide',payload:{id,decision:'approved',note:'新版已核对'}},{...ctx,actorId:'leader'});run(s,{type:'market.quotation.status',payload:{id,status:'Sent',evidence:'新版交付'}},ctx);expect(getMarketReviews(s).map(r=>r.status)).toEqual(['rejected','approved']);
  });
+ it('rejects quoting a customer-owned development (or its product) to another customer at save time',()=>{
+  const {ctx,s}=setup(),demo=createMistState(ctx);s.devs=demo.devs;s.versions=demo.versions;const v=s.versions.find(v=>v.qc?.result==='pass')!,dev=s.devs.find(d=>d.id===v.devId)!;
+  dev.customerId='someone-else';dev.customer='Cedar & Crown';
+  const p=run(s,{type:'market.product.fromVersion',payload:{devId:v.devId,versionId:v.id,sku:'VER-X'}},ctx).id!,unit=s.market.products.find(x=>x.id===p)!.unit,base=quoteInput(p);
+  const input={...base,lines:base.lines.map(l=>({...l,unit}))};
+  expect(()=>run(s,{type:'market.quotation.save',payload:{input}},ctx)).toThrow(/属于 Cedar & Crown，不能报给本报价客户/);
+  expect(s.market.quotations).toHaveLength(0);
+  dev.customerId='c';
+  expect(run(s,{type:'market.quotation.save',payload:{input}},ctx).id).toBeTruthy();
+ });
  it('takes product version provenance from the archive and rejects the wrong order family',()=>{
   const {ctx,s}=setup(),demo=createMistState(ctx);s.devs=demo.devs;s.versions=demo.versions;const v=s.versions.find(v=>v.qc?.result==='pass')!;
+  s.devs.find(d=>d.id===v.devId)!.customerId='c'; // 客户专属开发案只能报给该客户
   const p=run(s,{type:'market.product.fromVersion',payload:{devId:v.devId,versionId:v.id,sku:'VER-1'}},ctx).id!,base=quoteInput(p),id=run(s,{type:'market.quotation.save',payload:{input:{...base,lines:base.lines.map(l=>({...l,unit:s.market.products.find(x=>x.id===p)!.unit}))}}},ctx).id!;
   expect(s.market.quotations[0].lines[0]).toMatchObject({sourceDevId:v.devId,sourceVersionId:v.id});
   run(s,{type:'market.quotation.submit',payload:{id}},ctx);run(s,{type:'market.quotation.decide',payload:{id,decision:'approved',note:'已核对'}},{...ctx,actorId:'leader'});run(s,{type:'market.quotation.status',payload:{id,status:'Sent',evidence:'已交付'}},ctx);run(s,{type:'market.quotation.status',payload:{id,status:'Accepted',evidence:'已接受'}},ctx);
   expect(()=>run(s,{type:'market.quotation.convert',payload:{id,type:'fabric',due:'2026-12-01',ownerId:'sales'}},ctx)).toThrow(/类型与报价来源/);
   expect(()=>run(s,{type:'market.quotation.convert',payload:{id,type:'garment',due:'2026-12-01',ownerId:'sales'}},ctx)).toThrow(/尚无需求方确认|尚未获得需求方认可/);
-  s.devs.find(d=>d.id===v.devId)!.customerId=s.market.quotations[0].customerId; // 来源开发案须属于订单客户
   v.confirmations=[{id:'cf',result:'approved',confirmer:'客户',organization:'',confirmedAt:ctx.now,basis:'邮件',originalText:'',recordedAt:ctx.now,recordedBy:'业务员'}];
   const order=run(s,{type:'market.quotation.convert',payload:{id,type:'garment',due:'2026-12-01',ownerId:'sales'}},ctx);expect(s.orderLines.find(l=>l.orderId===order.orderId)).toMatchObject({sourceVersionId:v.id,sourceDevId:v.devId});
  });
@@ -171,4 +211,35 @@ it('skips occupied automatic supplier codes and still rejects missing identity o
  for(const input of [{name:'',type:'成衣加工'},{name:'新厂',type:''},{name:'新厂',type:'成衣加工',capacity:-1},{name:'新厂',type:'成衣加工',leadDays:Number.NaN}]){
   const before=s.market.suppliers.length;expect(()=>run(s,{type:'market.supplier.save',payload:{input}},ctx)).toThrow();expect(s.market.suppliers).toHaveLength(before);
  }
+});
+
+describe('fin40 compliance screening',()=>{
+ it('records a screening on a relation and raises a due re-check and a hit as risk signals',async()=>{
+  const {riskSignals}=await import('./mistRisk');const {ctx,s}=setup();run(s,{type:'market.customer.create',payload:{input:{name:'筛查客户',country:'US',city:'',industry:'',ownerId:'sales',grade:'',currency:'USD',terms:'',incoterm:'',categories:'',creditLimit:0,since:''}}} as never,ctx);const r=s.market.relations.find(x=>x.name==='筛查客户')!;
+  expect(()=>run(s,{type:'market.relation.screening',payload:{id:r.id,kind:'sanctions',result:'clear',basis:'OFAC SDN',screenedOn:'2026-10-01',nextReview:'2026-09-01'}},ctx)).toThrow(/晚于/);
+  run(s,{type:'market.relation.screening',payload:{id:r.id,kind:'sanctions',result:'clear',basis:'OFAC SDN 无命中',screenedOn:'2026-10-01',nextReview:'2026-10-10'}},ctx);
+  expect(riskSignals(s,'2026-10-12').some(x=>x.key===`screening-due:${r.id}:sanctions`)).toBe(true);
+  run(s,{type:'market.relation.screening',payload:{id:r.id,kind:'export_control',result:'hit',basis:'实体清单疑似同名',screenedOn:'2026-10-12',nextReview:'2027-10-12'}},ctx);
+  expect(riskSignals(s,'2026-10-12').find(x=>x.key===`screening-hit:${r.id}:export_control`)).toMatchObject({level:'critical',type:'compliance'});
+ });
+});
+
+describe('market history and lookbook specifications',()=>{
+ it('records business actions rather than raw status commands',()=>{
+  const {s,ctx}=setup();const p=run(s,{type:'market.product.save',payload:{input:productInput}},ctx).id!;
+  expect(s.events[0].text).toBe('创建产品档案');
+  for(const status of ['archived','active'] as const){run(s,{type:'market.product.status',payload:{id:p,status}},ctx);expect(s.events[0].text).toBe((status==='archived'?'归档':'恢复')+'产品档案 P1');}
+  const id=run(s,{type:'market.campaign.save',payload:{input:{name:'展品推广',type:'catalog',seasonId:'',showId:'',startDate:'2026-10-01',endDate:'2026-10-30',target:'新客户',budget:'100',actualCost:'10',currency:'USD',owner:'业务员',productIds:[]}}},ctx).id!;
+  for(const [status,text] of [['Active','活动 策划中 → 进行中'],['Paused','暂停活动'],['Active','恢复活动'],['Completed','活动 进行中 → 已完成']] as const){run(s,{type:'market.campaign.status',payload:{id,status}},ctx);expect(s.events[0].text).toBe(text);}
+  expect(s.events.every(e=>!e.text.startsWith('market.'))).toBe(true);
+ });
+ it('freezes all structured fields for export and keeps an explicit specification authoritative',()=>{
+  const {s,ctx}=setup();const ids=[run(s,{type:'market.product.save',payload:{input:{...productInput,specification:'',specs:{weight:'240',width:'150',weave:'斜纹',yarn:'32S',finish:'磨毛'}}}},ctx).id!,run(s,{type:'market.product.save',payload:{input:{...productInput,sku:'P2',specification:'客户签认规格',specs:{weight:'240'}}}},ctx).id!];
+  const id=run(s,{type:'market.lookbook.save',payload:{input:{name:'画册',customerId:'c',productIds:ids}}},ctx).id!;
+  run(s,{type:'market.lookbook.status',payload:{id,status:'Prepared'}},ctx);
+  const snapshots=s.market.lookbooks[0].snapshots;
+  expect(snapshots[0].specification).toBe('棉 · 克重 240 g/m² · 门幅 150 cm · 组织 斜纹 · 纱支 / 原料 32S · 后整理 磨毛');
+  expect(snapshots[1].specification).toBe('客户签认规格');expect(s.events[0].text).toBe('准备画册');
+  s.market.products.find(p=>p.id===ids[0])!.specs!.finish='防泼水';expect(snapshots[0].specification).toContain('磨毛');
+ });
 });

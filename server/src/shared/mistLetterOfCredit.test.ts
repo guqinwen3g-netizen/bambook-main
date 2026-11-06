@@ -115,3 +115,17 @@ it('preserves an express presentation period over 21 days while expiry still cap
 it('accepts an express presentation period from an accepted amendment and keeps the original value in history',()=>{
  const f=fixture();f.run(save());expect(f.lc.presentationDays).toBe(21);f.run({type:'lc.amend',payload:{id:f.lc.id,date:'2026-10-18',changes:{presentationDays:30},note:'银行修改书已由受益人接受'}});expect(f.lc.presentationDays).toBe(30);expect(f.lc.amendments.at(-1)?.changes).toContainEqual({field:'presentationDays',label:'交单期（天）',from:'21',to:'30'});
 });
+describe('信用证不符点处理与承付到账',()=>{
+  it('records the follow-up on a discrepancy and links the honoured proceeds to a receipt',()=>{
+    const f=fixture(),{id}=f.run(save());const {presentationId}=f.run(present(id,f.shipmentId));
+    expect(()=>f.run({type:'lc.discrepancy.action',payload:{id,presentationId,kind:'waiverRequested',date:'2026-10-18',note:'x'}} as MistCommand)).toThrow('不符点');
+    f.run({type:'lc.presentation.result',payload:{id,presentationId,result:'discrepant',date:'2026-10-18',discrepancies:'发票抬头拼写'}} as MistCommand);
+    f.run({type:'lc.discrepancy.action',payload:{id,presentationId,kind:'waiverRequested',date:'2026-10-18',note:'已邮件请 Nordvik 接受'}} as MistCommand);
+    expect(f.lc.presentations[0].discrepancyAction).toMatchObject({kind:'waiverRequested',note:'已邮件请 Nordvik 接受'});
+    f.run({type:'lc.presentation.result',payload:{id,presentationId,result:'honoured',date:'2026-10-18'}} as MistCommand);
+    const receipt=f.state.receipts.find(r=>r.currency==='USD')!;
+    expect(mistCommandPermission({type:'lc.receipt.link',payload:{id,presentationId,receiptId:receipt.id}} as MistCommand)).toBe('invoices:reconcile');
+    f.run({type:'lc.receipt.link',payload:{id,presentationId,receiptId:receipt.id}} as MistCommand);
+    expect(f.lc.presentations[0].receiptIds).toEqual([receipt.id]);
+  });
+});

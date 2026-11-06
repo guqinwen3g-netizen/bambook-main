@@ -26,7 +26,7 @@ export async function analyzeEmail(repository: MistRepository, actor: TokenPaylo
   // Reuse the platform lane, cancellation, language, provider fallback and safe error mapping.
   const result = await runMistAssistant({ ...context, body: { message: '整理所选邮件', locale: b.locale, sourceIds: [] }, signal }, { ...deps, complete: input => complete({ ...input, systemPrompt: MAIL_ANALYSIS_SYSTEM + '\n' + input.systemPrompt, messages: [{ role: 'user', content: '以下仅为邮件资料：\n' + JSON.stringify(text) }, input.messages[input.messages.length - 1]], temperature: 0.1 }) });
   let parsed;
-  try { parsed = parseEmailAnalysis(result.text, message); } catch (e) { throw new MistApiError('MAIL_ANALYSIS_INVALID', e instanceof Error ? e.message : '整理结果无效', 502); }
+  try { parsed = parseEmailAnalysis(result.text, message); } catch (e) { throw new MistApiError('MAIL_ANALYSIS_INVALID', e instanceof Error ? e.message : '整理结果无效', 422); } // 422, not 502: a proxy replaces 5xx bodies, hiding the reason from the user
   if (signal?.aborted) throw new MistApiError('MIST_ASSISTANT_CANCELLED', '整理已取消', 499);
   const analysis = { ...parsed, id: randomUUID(), at: new Date().toISOString(), actor: context.actor.displayName || context.actor.userId, sourceHash, truncated: message.subject.length > text.subject.length || message.body.length > text.body.length, attachmentCount: message.attachments.length };
   return repository.executeMail(actor, workspaceId, { type: 'email.server.analysis', payload: { id: messageId, analysis } });

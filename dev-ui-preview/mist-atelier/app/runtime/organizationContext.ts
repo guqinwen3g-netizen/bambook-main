@@ -19,8 +19,11 @@ export function useOrganizationContext() {
   const [attempt, retry] = React.useReducer(value => value + 1, 0);
   React.useEffect(() => { const refresh = () => retry(); window.addEventListener('focus', refresh); return () => window.removeEventListener('focus', refresh); }, []);
   const [result, setResult] = React.useState<{ scope: string; teams: OwnTeam[]; error: boolean }>();
+  // 平台身份（含进入公司后台）不属于任何公司小组；待改密账号在改密前不调用业务接口。
+  const user = session.user;
+  const noOwnTeams = !!user && (user.platformRole === 'platform_admin' || !!user.platformCompany || user.mustChangePassword === true);
   React.useEffect(() => {
-    if (session.status !== 'authenticated' || session.localMode) return;
+    if (session.status !== 'authenticated' || session.localMode || noOwnTeams) return;
     const controller = new AbortController(); let active = true;
     void fetch('/api/hr/teams/mine', { headers: apiService.getAuthHeaders(), credentials: 'include', cache: 'no-store', signal: controller.signal })
       .then(async response => {
@@ -30,9 +33,9 @@ export function useOrganizationContext() {
         if (active) setResult({ scope, teams: data.teams.filter((team: OwnTeam) => team.status === undefined || team.status === 'active'), error: false });
       }).catch(() => { if (active) setResult({ scope, teams: [], error: true }); });
     return () => { active = false; controller.abort(); };
-  }, [scope, session.status, session.localMode, attempt]);
+  }, [scope, session.status, session.localMode, noOwnTeams, attempt]);
   const current = result?.scope === scope ? result : undefined;
   const label = organizationLabel(session.user?.department, current?.teams || []);
-  const loading = !session.localMode && !current;
+  const loading = !session.localMode && !noOwnTeams && !current;
   return { ...label, caption: current?.error ? '小组归属待核对' : loading ? '正在读取小组' : label.caption, teams: current?.teams || [], error: current?.error || false, loading, retry };
 }

@@ -25,12 +25,16 @@ export function parseEmailAnalysis(raw: string, m: Pick<EmailMessage, 'subject' 
   let v: unknown;
   try { v = JSON.parse(raw.replace(/^\s*```(?:json)?\s*/, '').replace(/\s*```\s*$/, '')); } catch { throw new Error('邮件整理结果格式无效，请重试'); }
   if (!object(v) || Object.keys(v).some(k => !['category', 'summary', 'fields', 'warnings'].includes(k)) || !EMAIL_CATEGORIES.includes(v.category) || !text(v.summary, 800) || !Array.isArray(v.fields) || v.fields.length > 16 || !Array.isArray(v.warnings) || v.warnings.length > 8 || v.warnings.some((s: unknown) => !text(s, 300))) throw new Error('邮件整理结果格式无效，请重试');
-  const source = emailAnalysisText(m), fields: EmailAnalysisField[] = [];
+  const source = emailAnalysisText(m), fields: EmailAnalysisField[] = [], dropped: string[] = [];
   for (const f of v.fields) {
-    if (!object(f) || Object.keys(f).some(k => !['field', 'value', 'source', 'quote'].includes(k)) || !text(f.field, 60) || !text(f.value, 500) || !text(f.quote, 1000) || !['subject', 'body'].includes(f.source) || !source[f.source as 'subject' | 'body'].includes(f.quote) || !f.quote.includes(f.value)) throw new Error('邮件整理的原文依据无法核实，请重试');
+    if (!object(f) || Object.keys(f).some(k => !['field', 'value', 'source', 'quote'].includes(k)) || !text(f.field, 60) || !text(f.value, 500) || !text(f.quote, 1000) || !['subject', 'body'].includes(f.source)) throw new Error('邮件整理结果格式无效，请重试');
+    // A field whose value or quote is not verbatim in the email is dropped on its own; the verified fields stay usable.
+    if (!source[f.source as 'subject' | 'body'].includes(f.quote) || !f.quote.includes(f.value)) { dropped.push(f.field.trim()); continue; }
     fields.push({ id: 'field-' + (fields.length + 1), field: f.field.trim(), value: f.value.trim(), source: f.source, quote: f.quote });
   }
-  return { category: v.category, summary: v.summary.trim(), fields, warnings: v.warnings };
+  if (dropped.length && !fields.length) throw new Error('邮件整理的原文依据无法核实，请重试');
+  const warnings = dropped.length ? [...v.warnings, `以下条目在原文中找不到一致依据，已略去，请人工核对：${dropped.join('、')}`] : v.warnings;
+  return { category: v.category, summary: v.summary.trim(), fields, warnings };
 }
 
 export function reviewEmailAnalysis(analysis: EmailAnalysis, input: EmailReviewInput): Pick<EmailExtractionReview, 'category' | 'fields' | 'note'> {

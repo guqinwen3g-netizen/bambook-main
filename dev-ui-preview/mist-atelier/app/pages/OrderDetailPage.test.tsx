@@ -35,7 +35,7 @@ it('shows an internal budget without external collection or shipping actions',()
   const order=store.state!.orders[0];order.governance!.contract={...order.governance!.contract,kind:'internal',internalPurpose:'Production supply',receiver:'Garment team'};
   render();expect(host.textContent).toContain('内部预算');expect(host.textContent).not.toContain('合同待收');
   expect([...host.querySelectorAll('button')].some(button=>button.textContent==='查看收款核销')).toBe(false);
-  expect([...host.querySelectorAll('button')].some(button=>button.textContent==='装箱单草稿')).toBe(false);
+  expect([...host.querySelectorAll('button')].some(button=>button.textContent==='客户单据')).toBe(false);
 });
 
 it('does not mark full-package procurement complete while another ordered line has no approved coverage',()=>{
@@ -141,7 +141,7 @@ it('does not render a misleading percentage when a received amount is invalid', 
   expect(host.querySelector('.mist-donut')).toBeNull();
 });
 it('retains the current order editor when an older order save completes',async()=>{render();await act(async()=>getByRole(host,'button',{name:'编辑'}).click());let finish!:(value:unknown)=>void;store.run.mockReturnValue(new Promise(resolve=>finish=resolve));await act(async()=>getByRole(document.body,'button',{name:'保存'}).click());store.state!.orders.push({...store.state!.orders[0],id:'other',code:'OTHER',season:'NEW-SEASON'});orderId='other';render();await act(async()=>getByRole(host,'button',{name:'编辑'}).click());await act(async()=>finish({result:{orderId:'old'}}));expect(getByRole(document.body,'dialog',{name:'编辑订单'})).toBeTruthy();expect((getByLabelText(document.body,'季节（手动填写）') as HTMLInputElement).value).toBe('NEW-SEASON');});
-it('labels the order quantity document as a draft and links the real shipment separately',async()=>{store.state!.fulfillment.shipments.push({id:'ship',code:'SHIP-ACTUAL',lines:[{orderId,lineId:store.state!.orderLines[0].id,quantity:1}],state:'preparing'} as any);render();await act(async()=>getByRole(host,'button',{name:'装箱单草稿'}).click());expect(document.body.textContent).toContain('正式装箱与原件以具体出运为准');await act(async()=>getByRole(document.body,'button',{name:'打开正式出运 SHIP-ACTUAL'}).click());expect(go).toHaveBeenCalledWith('shipments','ship');});
+it('offers PI and sales contract from the approved order and links each shipment\'s documents',async()=>{store.state!.fulfillment.shipments.push({id:'ship',code:'SHIP-ACTUAL',lines:[{orderId,lineId:store.state!.orderLines[0].id,quantity:1}],state:'preparing'} as any);render();await act(async()=>getByRole(host,'button',{name:'客户单据'}).click());const dialog=getByRole(document.body,'dialog',{name:/客户单据/});expect(dialog.textContent).toContain('形式发票');expect(dialog.textContent).toContain('销售合同');await act(async()=>getByRole(document.body,'button',{name:'出运单据 SHIP-ACTUAL'}).click());expect(go).toHaveBeenCalledWith('document-center',undefined,{section:'ship'});});
 
 it('lets the business attach contract evidence and submit the entire draft for approval',async()=>{
   const ctx={...context,actorId:'sales',authority:{supplier:{},orderReviewerIds:{garment:['leader'],fabric:[]}}};
@@ -238,6 +238,15 @@ async function lineInput(label:string,value:string){
   const control=getByLabelText(document.body,label) as HTMLInputElement|HTMLTextAreaElement;
   await act(async()=>{Object.getOwnPropertyDescriptor(control.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value')!.set!.call(control,value);control.dispatchEvent(new Event('input',{bubbles:true}));});
 }
+
+it('saves and clears an English line name through the line editor',async()=>{
+  lineEditorFixture('rejected');render();await openLineEditor();
+  await lineInput('英文品名','  COTTON STRETCH TWILL NAVY ');await act(async()=>getByRole(document.body,'button',{name:'保存条目'}).click());
+  expect(store.state!.orderLines[0].nameEn).toBe('COTTON STRETCH TWILL NAVY');
+  await openLineEditor();expect((getByLabelText(document.body,'英文品名') as HTMLInputElement).value).toBe('COTTON STRETCH TWILL NAVY');
+  await lineInput('英文品名','');await act(async()=>getByRole(document.body,'button',{name:'保存条目'}).click());
+  expect(store.state!.orderLines[0].nameEn).toBeUndefined();
+});
 
 it('corrects a rejected order from 10 at 11 to 10 at 12 and preserves the rejected snapshot through resubmission',async()=>{
   const actor=lineEditorFixture('rejected'),lineId=store.state!.orderLines[0].id;render();await openLineEditor();
@@ -422,10 +431,21 @@ it('BB-ORD-4 lets a started order change quantity, shows the floor and an impact
   expect(store.state!.orders[0].governance?.changeDraft?.lines[0].qty).toBe(8);expect(store.state!.orderLines[0].qty).toBe(10);
   const impact=getByRole(host,'region',{name:'影响清单'});
   expect(impact.textContent).toContain('10 → 8 件');expect(impact.textContent).toContain('需同步调整生产分配');
+  expect(impact.textContent).toContain('新数量生效后');expect(impact.textContent).not.toContain('交期');
   await act(async()=>within(impact).getByRole('button',{name:/生产 PR-1/}).click());
   expect(go).toHaveBeenLastCalledWith('production-board',undefined,{productionId:'job',orderLineId:lineId});
   await act(async()=>within(impact).getByRole('button',{name:/出运 SH-1/}).click());
   expect(go).toHaveBeenLastCalledWith('shipments','sh');
+});
+
+it('describes a due-date-only change as a date check, not a quantity change (impact list)',async()=>{
+  lineEditorFixture('approved',10,11);const state=store.state!,lineId=state.orderLines[0].id,g=state.orders[0].governance!;
+  state.productions.push({id:'job',code:'PR-1',orderId,lineId,order:state.orders[0].code,name:'精确金额条目',factory:'一厂',qty:10,due:'2026-11-20',pct:60,img:'coat',col:'sew'});
+  const current=state.orderLines.filter(l=>l.orderId===orderId).map(l=>({id:l.id,style:l.style,name:l.name,qty:l.qty,unit:l.unit,price:l.price})) as any;
+  g.changeDraft={contract:structuredClone(g.contract),orderPatch:{season:state.orders[0].season,currency:state.orders[0].currency,due:'2026-12-31'},lines:current,reason:'客户推迟交期',status:'draft'} as any;
+  render();
+  const impact=getByRole(host,'region',{name:'影响清单'});
+  expect(impact.textContent).toContain(`交期 ${state.orders[0].due} → 2026-12-31 生效后`);expect(impact.textContent).toContain('数量不变');expect(impact.textContent).not.toContain('新数量生效');
 });
 
 it.each([[980,'确认结案','closed','已结案（实际 980 / 订单 1000，客户接受实际数量）'],[950,'提交结案审批','pending','结案待审批（实际 950 / 订单 1000，客户接受实际数量）']] as const)('BB-ORD-5 closes a ±3%% line with %i departed (%s) via the line fulfillment panel',async(departed,submitLabel,status,label)=>{
@@ -487,9 +507,14 @@ it('keeps the original handover note in a collapsed record for this exact order'
  const order=store.state!.orders[0];order.handoffAt=context.now;const note='本票一件CPT客户约定及完整交接说明';store.state!.events.unshift({id:'handoff',entityType:'order',entityId:order.id,actor:'原业务员',at:context.now,text:'交接后勤：'+note,fileIds:[]},{id:'other-handoff',entityType:'order',entityId:'another-order',actor:'他人',at:context.now,text:'交接后勤：别的订单说明',fileIds:[]});render();expect(host.textContent).not.toContain(note);act(()=>getByRole(host,'button',{name:'后勤交接记录'}).click());expect(host.textContent).toContain(note);expect(host.textContent).toContain('原业务员');expect(host.textContent).not.toContain('别的订单说明');
 });
 
+it('toggles a shipping-preparation item from its label text',()=>{
+ render();const item=store.state!.orders[0].checklist[0];act(()=>getByText(host,item.label,{selector:'label'}).click());
+ expect(store.run).toHaveBeenCalledWith({type:'order.checklist',payload:{orderId:store.state!.orders[0].id,itemId:item.id,done:!item.done}});
+});
+
 it('keeps a read-only order inspectable and shipping reachable without commercial mutation controls',()=>{
  permissions.ordersWrite=false;store.state!.orders[0].handoffAt=context.now;render();expect(queryByRole(host,'button',{name:'编辑',exact:true})).toBeNull();expect(queryByRole(host,'button',{name:'合同与审批资料',exact:true})).toBeNull();expect(queryByRole(host,'button',{name:'提交主单审批',exact:true})).toBeNull();expect(getByRole(host,'button',{name:'出运准备',exact:true})).toBeTruthy();
- const check=getByRole(host,'checkbox',{name:'拟发范围确认'});expect(check.hasAttribute('disabled')).toBe(true);act(()=>check.click());expect(store.run).not.toHaveBeenCalled();act(()=>getByText(host,'精确金额条目').click());expect(queryByRole(document.body,'button',{name:'编辑条目',exact:true})).toBeNull();
+ const check=getByRole(host,'checkbox',{name:'拟发范围确认'});expect(check.hasAttribute('disabled')).toBe(true);act(()=>check.click());act(()=>getByText(host,'拟发范围确认',{selector:'label'}).click());expect(store.run).not.toHaveBeenCalled();act(()=>getByText(host,'精确金额条目').click());expect(queryByRole(document.body,'button',{name:'编辑条目',exact:true})).toBeNull();
 });
 it('closes a commercial editor when order write authority is revoked and hides unreadable shipping entry',()=>{
  render();act(()=>getByRole(host,'button',{name:'编辑',exact:true}).click());expect(queryByRole(document.body,'dialog')).not.toBeNull();permissions.ordersWrite=false;permissions.shippingRead=false;store.state!.orders[0].handoffAt=context.now;render();expect(queryByRole(document.body,'dialog')).toBeNull();expect(queryByRole(host,'button',{name:'出运准备',exact:true})).toBeNull();expect(store.run).not.toHaveBeenCalled();

@@ -17,14 +17,17 @@ async function main() {
     assertMistLocalMode(host);app=createMistServer(undefined,{host});await app.locals.mistLocal.ready;
     disconnect=()=>app.locals.mistLocal.database.$disconnect();
   }else{
-    const {PrismaClient}=await import('@prisma/client');const prisma=new PrismaClient();
+    const {PrismaClient}=await import('@prisma/client');const prisma=new PrismaClient();(await import('../audit/auditCompanyStamp')).installAuditCompanyStamp(prisma as any);
     app=createMistServer(prisma,{host});disconnect=()=>prisma.$disconnect();
   }
   if(process.env.MIST_MAIL_RECEIVER_ENABLED!=='0')app.locals.mailReceiver.start();
   if(process.env.MIST_PLATFORM_AGENT_ENABLED!=='0'){app.locals.platformTaskWorker.start();console.log('[platform-agent] started');}
+  // Platform market reference quotes (Bank of China settlement rates, domestic spot materials) refresh daily via Exa MCP.
+  app.locals.marketWorker.start();
   const server = app.listen(port, host, () => { console.log(`[mist] ${mistLocalRequested()?'local-file workspace':'workspace server'} listening on ${host}:${port}`); });
+  const stopVoice = app.locals.voice.attach(server);
   let stopping=false;
-  const stop = () => {if(stopping)return;stopping=true;void Promise.allSettled([app.locals.mailReceiver.stop(),app.locals.platformTaskWorker.stop()]).finally(()=>server.close(()=>{void disconnect().finally(()=>process.exit(0));}));};
+  const stop = () => {if(stopping)return;stopping=true;stopVoice();app.locals.marketWorker.stop();void Promise.allSettled([app.locals.mailReceiver.stop(),app.locals.platformTaskWorker.stop()]).finally(()=>server.close(()=>{void disconnect().finally(()=>process.exit(0));}));};
   process.once('SIGINT', stop); process.once('SIGTERM', stop);
 }
 void main().catch(() => { console.error('[mist] startup failed; check the local server configuration'); process.exitCode = 1; });

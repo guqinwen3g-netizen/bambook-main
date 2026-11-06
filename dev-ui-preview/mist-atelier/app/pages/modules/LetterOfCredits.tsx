@@ -1,3 +1,4 @@
+import { DOCUMENT_TYPE_LABEL } from '../../../../../server/src/shared/mistDocumentTypes';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 信用证台账（外贸与报关 · 信用证页签）：单证员按来证登记条款、修改书、交单与银行审单结果。系统按条款提示迟装 / 迟交单 / 过期 / 分批不符点，不代替银行审单。 */
 import React from 'react';
@@ -77,7 +78,8 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
   const presentSpec = (lc: MistLetterOfCredit): ModuleEditorSpec => ({
     title: '登记交单', submitLabel: '登记交单', description: `${lc.lcNo} · 可用余额 ${money(lcAvailableMinor(lc) / 100, lc.currency)}`,
     fields: [field('shipmentId', '出运', 'select', true, [emptyOption, ...presentable(lc).map(s => ({ value: s.id, label: `${s.code} · ${s.portOfLoading} → ${s.portOfDischarge}` }))]), field('shipmentDate', '装运日（运输单据日）', 'date'), field('presentedAt', '交单日', 'date'), field('amount', `交单金额（${lc.currency}）`, 'number'), field('documents', '提交单据', 'textarea'), field('discrepancies', '已知不符点', 'textarea', false)],
-    initialValues: { shipmentId: '', shipmentDate: day, presentedAt: day, amount: '', documents: lc.documentsRequired, discrepancies: '' },
+    initialValues: (() => { const only = presentable(lc).length === 1 ? presentable(lc)[0] : undefined, issued = only ? (state?.fulfillment.documents || []).filter(d => d.shipmentId === only.id && d.status === 'issued') : [];
+      return { shipmentId: only?.id || '', shipmentDate: day, presentedAt: day, amount: '', documents: issued.length ? issued.map(d => `${DOCUMENT_TYPE_LABEL[d.type]} ${d.number}`).join('\n') + (lc.documentsRequired ? `\n—\n${lc.documentsRequired}` : '') : lc.documentsRequired, discrepancies: '' }; })(),
     submit: v => run({ type: 'lc.present', payload: { id: lc.id, shipmentId: text(v, 'shipmentId'), shipmentDate: text(v, 'shipmentDate'), presentedAt: text(v, 'presentedAt'), amount: num(v, 'amount'), documents: text(v, 'documents'), discrepancies: text(v, 'discrepancies') } }) });
   const resultSpec = (lc: MistLetterOfCredit, p: MistLcPresentation): ModuleEditorSpec => ({
     title: `登记第 ${p.no} 次交单审单结果`, submitLabel: '登记结果', description: `${p.shipmentCode} · ${money(p.amount, lc.currency)} · 交单日 ${p.presentedAt} · 承付或拒付后不可修改`,
@@ -97,14 +99,14 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
     { key: 'status', header: '状态', width: 'minmax(130px,1.2fr)', render: lc => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={STATUS_TONE[lcStatus(lc, day)]}>{LC_STATUS_LABEL[lcStatus(lc, day)]}</Pill>{lcAlerts(lc, day).map(a => <small key={a} className="mist-tone-bad">{uiText(a)}</small>)}</div> },
   ];
   const detail = selected && state ? <LcDetail lc={selected} state={state} day={day} can={can} locked={locked} run={run} onShipment={onShipment}
-      onAmend={() => open(amendSpec(selected))} onPresent={() => open(presentSpec(selected))} onResult={p => open(resultSpec(selected, p))} onCancel={() => open(cancelSpec(selected))} presentable={presentable(selected).length} />
+      onAmend={() => open(amendSpec(selected))} onPresent={() => open(presentSpec(selected))} onResult={p => open(resultSpec(selected, p))} onCancel={() => open(cancelSpec(selected))} onAction={p => open({ title: `第 ${p.no} 次交单 · 不符点处理`, submitLabel: '登记', fields: [field('kind', '处理方式', 'select', true, [{ value: 'waiverRequested', label: '请申请人接受不符点' }, { value: 'corrected', label: '更正单据重新交单' }, { value: 'collection', label: '改为托收' }]), field('date', '处理日', 'date'), field('note', '处理说明', 'textarea')], initialValues: { kind: p.discrepancyAction?.kind || 'waiverRequested', date: day, note: '' }, submit: v => run({ type: 'lc.discrepancy.action', payload: { id: selected.id, presentationId: p.id, kind: text(v, 'kind') as 'waiverRequested' | 'corrected' | 'collection', date: text(v, 'date'), note: text(v, 'note') } }) })} onLink={p => open({ title: `第 ${p.no} 次交单 · 关联到账`, submitLabel: '关联', fields: [field('receiptId', '到账流水', 'select', true, [emptyOption, ...(state?.receipts || []).filter(r => r.currency === selected.currency && !(p.receiptIds || []).includes(r.id)).map(r => ({ value: r.id, label: `${r.code} · ${r.payer} · ${r.amount} ${r.currency} · ${r.date}` }))])], initialValues: { receiptId: '' }, submit: v => run({ type: 'lc.receipt.link', payload: { id: selected.id, presentationId: p.id, receiptId: text(v, 'receiptId') } }) })} presentable={presentable(selected).length} />
     : <EmptyState icon={Landmark} title={uiText("选择信用证")} compact />;
   const partials = (state?.partialLettersOfCredit ?? []).filter(lc => lc.orderIds.some(id => state?.orders.some(order => order.id === id && order.type === domain)) && (!needle || `${lc.code} ${lc.lcNo} ${lc.customer}`.toLowerCase().includes(needle)));
   const covered = (o: MistOrder) => [...all, ...partials].filter(lc => !lc.cancelled && lc.orderIds.includes(o.id));
   const missing = lcOrders.filter(o => !covered(o).length && o.governance?.status === 'approved');
 
   return <>
-    {missing.length > 0 && <div className="mist-section"><Banner tone="warn" title={ui`未登记来证 · ${missing.length}`}>{missing.map(o => o.code).join('、')}</Banner></div>}
+    {missing.length > 0 && <div className="mist-section"><Banner variant="status" tone="warn" title={ui`未登记来证 · ${missing.length}`}>{missing.map(o => o.code).join('、')}</Banner></div>}
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.lcNo} · ${selected.customer}` : '信用证详情'} drawerSub={selected ? LC_STATUS_LABEL[lcStatus(selected, day)] : undefined}
       list={<Card>
         <CardHeader title={ui`信用证台账 · ${all.length}`} tools={can ? <Button variant="primary" icon={Plus} disabled={locked || !lcOrders.length} title={uiText(lcOrders.length ? undefined : '没有合同约定以信用证付款的订单')} onClick={() => open(createSpec())}>{uiText("登记信用证")}</Button> : undefined} />
@@ -112,7 +114,7 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
           empty={needle && all.length ? <EmptyState icon={SearchX} title={uiText("没有符合条件的信用证")} description={uiText("换个关键词试试。")} /> : <EmptyState icon={Landmark} title={ui`还没有登记${domain === 'fabric' ? '面料' : '成衣'}信用证`} />} />
       </Card>}
       detail={detail} />
-    {partials.length > 0 && <div className="mist-section"><Card><CardHeader title={uiText('部分可见信用证')} /><div className="mist-card-body mist-col" role="list" aria-label={uiText('部分可见信用证')}>{partials.map(lc=><div className="mist-row" role="listitem" key={lc.id}><Mono>{lc.lcNo}</Mono><span>{lc.customer}</span><span className="mist-spacer"/><span>{ui`另有 ${lc.hiddenCount} 笔其他范围业务`}</span></div>)}</div></Card></div>}
+    {partials.length > 0 && <div className="mist-section"><Card><CardHeader title={uiText('部分可见信用证')} /><div className="mist-card-body mist-col" role="list" aria-label={uiText('部分可见信用证')}>{partials.map(lc=><div className="mist-row" role="listitem" key={lc.id}><Mono>{lc.lcNo}</Mono><span>{lc.customer}</span><span className="mist-spacer"/><span>{uiText('另含其他范围业务')}</span></div>)}</div></Card></div>}
     <ExportedOrders orders={lcOrders} covered={covered} onOrder={onOrder} />
   </>;
 }
@@ -130,16 +132,16 @@ function ExportedOrders({ orders, covered, onOrder }: { orders: MistOrder[]; cov
   </Card></div>;
 }
 
-function LcDetail({ lc, state, day, can, locked, run, presentable, onShipment, onAmend, onPresent, onResult, onCancel }: {
+function LcDetail({ lc, state, day, can, locked, run, presentable, onShipment, onAmend, onPresent, onResult, onCancel, onAction, onLink }: {
   lc: MistLetterOfCredit; state: MistState; day: string; can: boolean; locked: boolean; run: (command: MistCommand) => Promise<unknown>; presentable: number;
-  onShipment: (id: string) => void; onAmend: () => void; onPresent: () => void; onResult: (p: MistLcPresentation) => void; onCancel: () => void;
+  onShipment: (id: string) => void; onAmend: () => void; onPresent: () => void; onResult: (p: MistLcPresentation) => void; onCancel: () => void; onAction: (p: MistLcPresentation) => void; onLink: (p: MistLcPresentation) => void;
 }) {
   const status = lcStatus(lc, day), alerts = lcAlerts(lc, day), available = lcAvailableMinor(lc) / 100, cancelled = !!lc.cancelled;
   const openPresentations = lc.presentations.some(p => !final(p));
   return <DetailBody data-lc-detail={lc.id} heading={<div><span className="mist-mono mist-muted">{lc.code}</span><div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{lc.lcNo}</div></div>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATUS_TONE[status]}>{LC_STATUS_LABEL[status]}</Pill><Pill>{uiText(lc.availableBy === 'sight' ? '即期' : `远期 ${lc.usanceDays} 天`)}</Pill><Pill tone={lc.confirmed?"accent":"neutral"}>{uiText(lc.confirmed?"保兑":"未保兑")}</Pill></div>
-    {alerts.length > 0 && <Banner tone="warn" title={uiText("需要关注")}>{alerts.map(uiText).join('；')}</Banner>}
-    {lc.cancelled && <Banner tone="neutral" title={ui`已于 ${lc.cancelled.date} 注销`}>{lc.cancelled.reason}</Banner>}
+    {alerts.length > 0 && <Banner variant="notice" tone="warn" title={uiText("需要关注")}>{alerts.map(uiText).join('；')}</Banner>}
+    {lc.cancelled && <Banner variant="status" tone="neutral" title={ui`已于 ${lc.cancelled.date} 注销`}>{lc.cancelled.reason}</Banner>}
     {can && <ActionBar busy={locked} actions={[
       { label: '登记交单', icon: Send, onClick: onPresent, primary: true, reason: cancelled ? '信用证已注销' : available <= 0 ? '可用余额为零' : !presentable ? '没有可交单的出运（须含本信用证订单且尚未交单）' : false },
       { label: '登记修改书', icon: FilePen, onClick: onAmend, reason: cancelled ? '信用证已注销' : false },
@@ -166,7 +168,12 @@ function LcDetail({ lc, state, day, can, locked, run, presentable, onShipment, o
         { key: 'no', header: '交单', render: p => <div className="mist-col" style={{ gap: 2 }}><TextLink onClick={() => onShipment(p.shipmentId)}>{uiText("第 ")}{p.no}{uiText(" 次 · ")}{p.shipmentCode}</TextLink><small className="mist-muted">{uiText("装运 ")}{p.shipmentDate}{uiText(" · 交单 ")}{p.presentedAt}{uiText("（截止 ")}{p.deadline}）</small></div> },
         { key: 'amount', header: '金额', align: 'right', render: p => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span>{money(p.amount, lc.currency)}</span>{p.honouredAmount !== undefined && <small className="mist-muted">{uiText("承付 ")}{money(p.honouredAmount, lc.currency)}</small>}</div> },
         { key: 'result', header: '结果', render: p => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={RESULT_TONE[p.result]}>{LC_RESULT_LABEL[p.result]}</Pill>{p.autoDiscrepancies.map(d => <small key={d} className="mist-tone-bad">{d}</small>)}{p.discrepancies && <small className="mist-muted">{uiText("不符点：")}{p.discrepancies}</small>}{p.resultNote && <small className="mist-muted">{p.resultNote}</small>}</div> },
-        ...(can ? [{ key: 'act', header: '', align: 'right' as const, render: (p: MistLcPresentation) => final(p) ? null : <Button size="sm" icon={Stamp} disabled={locked} aria-label={ui`登记第 ${p.no} 次交单审单结果`} onClick={() => onResult(p)}>{uiText("审单结果")}</Button> }] : []),
+        ...(can ? [{ key: 'act', header: '', align: 'right' as const, render: (p: MistLcPresentation) => <span className="mist-row" style={{ justifyContent: 'flex-end' }}>
+          {!final(p) && <Button size="sm" icon={Stamp} disabled={locked} aria-label={ui`登记第 ${p.no} 次交单审单结果`} onClick={() => onResult(p)}>{uiText("审单结果")}</Button>}
+          {p.result === 'discrepant' && <Button size="sm" disabled={locked} onClick={() => onAction(p)}>{uiText(p.discrepancyAction ? '更新处理' : '不符点处理')}</Button>}
+          {p.result === 'honoured' && <Button size="sm" disabled={locked} onClick={() => onLink(p)}>{uiText('关联到账')}</Button>}
+        </span> }] : []),
+        { key: 'follow', header: '后续', hideOnMobile: true, render: (p: MistLcPresentation) => p.discrepancyAction ? <small>{uiText({ waiverRequested: '已请申请人接受', corrected: '已更正重交', collection: '改为托收' }[p.discrepancyAction.kind])} · {p.discrepancyAction.date}</small> : p.receiptIds?.length ? <small>{p.receiptIds.map(id => state.receipts.find(r => r.id === id)?.code || id).join('、')}</small> : null },
       ]} /> : <span className="mist-note">{uiText("尚未交单")}</span>}
     </DetailBlock>
     <DetailBlock title={ui`修改记录 · ${lc.amendments.length}`}>

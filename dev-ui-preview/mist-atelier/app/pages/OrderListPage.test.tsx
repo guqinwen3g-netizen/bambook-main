@@ -10,6 +10,7 @@ import { getAllByRole, getByRole, getByLabelText, queryByRole } from '@testing-l
 import { MistRoot, ToastProvider } from '../../../../components/mist';
 import type { MistState } from '../../../../server/src/shared/mistWorkspace';
 import { Nav } from '../nav';
+import { usePageFailures } from '../runtime/errorPresentation';
 const store = vi.hoisted(() => ({ state: null as MistState | null, canWrite:true, loading: false, error: '', workspace: { id: 'w', ownerId: 'test-user' }, run: vi.fn(), refresh: vi.fn(), downloadFile: vi.fn(), uploadFile: vi.fn() }));
 vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => store }));
 vi.mock('../runtime/auth', () => { const useMistSession = () => ({ status:'authenticated', sessionKey:'order-test', user:{id:'test-user',displayName:'负责人'}, hasPermission:(scope:string)=>scope.endsWith(':read')||store.canWrite,canAccessView:()=>true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
@@ -42,6 +43,8 @@ function fixture(): MistState {
   };
 }
 let element: React.ReactNode, route: { view: string; id?: string; customerId?: string; orderLineId?: string; productionId?: string; section?: string };
+// Stands in for the shell's bottom-right failure card.
+function ShellFailures() { return <>{usePageFailures().map(item => <p key={item.id}>{item.title}{item.detail}</p>)}</>; }
 function render(page: React.ReactNode, nextRoute = { view: 'orders' } as typeof route) {
   element = page; route = nextRoute;
   act(() => root.render(<MistRoot><ToastProvider><Nav.Provider value={{ route, go, openAI, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn() }}>{element}</Nav.Provider></ToastProvider></MistRoot>));
@@ -112,7 +115,7 @@ it('order detail renders only its own lines and does not invent a fallback order
 });
 it('waits for the checklist acknowledgement and leaves data unchanged on rejection', async () => {
   const pending = deferred<unknown>(); store.run.mockReturnValue(pending.promise);
-  render(<OrderDetailPage />, { view: 'orders/detail', id: 'order-a' });
+  render(<><OrderDetailPage /><ShellFailures /></>, { view: 'orders/detail', id: 'order-a' });
   await click(getByRole(host, 'checkbox', { name: '装箱单草稿' }));
   expect(store.run).toHaveBeenCalledWith({ type: 'order.checklist', payload: { orderId: 'order-a', itemId: 'check-a', done: true } });
   expect(getByRole(host, 'checkbox', { name: '装箱单草稿' }).getAttribute('aria-checked')).toBe('false');
@@ -145,7 +148,7 @@ it('creates an order from explicit independent lines and navigates only after th
   render(<OrderCreatePage />, { view: 'orders/new', customerId: 'customer-a' });
   input('季节 / 批次', 'AW28'); await click(getByRole(host, 'button', { name: '下一步' }));
   input('品名', '新增款式'); input('款号 / 品号', 'SKU-NEW'); input('数量', '12'); input('单价 USD', '8.50');
-  await click(getByRole(host, 'button', { name: '下一步' })); input('交期', today()); expect((getByLabelText(host, /^负责人/) as HTMLSelectElement).value).toBe('test-user');
+  await click(getByRole(host, 'button', { name: '下一步' })); input('交期', today()); input('出运前累计收款（%）', '0'); expect((getByLabelText(host, /^负责人/) as HTMLSelectElement).value).toBe('test-user');
   await click(getByRole(host, 'button', { name: '下一步' })); await click(getByRole(host, 'button', { name: '下一步' })); await click(getByRole(host, 'button', { name: '创建订单草稿' }));
   expect(store.run.mock.calls[0][0]).toMatchObject({ type: 'order.create', payload: { customerId: 'customer-a', ownerId: 'test-user', lines: [{ name: '新增款式', style: 'SKU-NEW', qty: 12, price: 8.5, unit: '件' }] } });
   expect(go).not.toHaveBeenCalled(); await act(async () => pending.resolve({ requestId: 'r1', revision: 2, result: { orderId: 'new-order' } }));
@@ -168,7 +171,10 @@ it('dragging a production card waits for persistence and re-renders the acknowle
   await act(async () => card.dispatchEvent(new Event('dragstart', { bubbles: true })));
   await act(async () => destination.dispatchEvent(new Event('dragover', { bubbles: true, cancelable: true })));
   await act(async () => destination.dispatchEvent(new Event('drop', { bubbles: true, cancelable: true })));
-  expect(store.run).toHaveBeenCalledWith({ type: 'production.move', payload: { id: 'production-a', col: 'cut' } });
+  // ord42：拖动后先确认，确认前不写入。
+  expect(store.run).not.toHaveBeenCalled();
+  await click(getByRole(document.body, 'button', { name: '确认移动' }));
+  expect(store.run).toHaveBeenCalledWith({ type: 'production.move', payload: { id: 'production-a', col: 'cut', note: '' } });
   expect(destination.querySelector('.mist-kb-card')).toBeNull();
   store.state = { ...store.state!, productions: store.state!.productions.map(item => ({ ...item, col: 'cut' })) };
   await act(async () => pending.resolve({ requestId: 'r2', revision: 2, result: {} })); render(<ProductionPage />, { view: 'production-board' });

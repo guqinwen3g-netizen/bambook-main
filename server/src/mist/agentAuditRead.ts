@@ -4,7 +4,7 @@ import { hasScope } from '../auth/permissionService';
 import type { MistState } from '../shared/mistWorkspace';
 import type { AgentAuditDetail, AgentAuditEntry, AgentAuditVisibleChange } from '../shared/mistAgentAudit';
 import { AGENT_AUDIT_FIELD_LABELS, agentAuditActionLabel } from '../shared/mistAgentAudit';
-import { MIST_READ_SECTIONS } from './access';
+import { MIST_READ_SECTIONS, maskTaxBaseInput } from './access';
 import { AGENT_OBJECT_TYPES } from './agentRead';
 import { AGENT_AUDIT_FIELD, AGENT_AUDIT_HASH, agentAuditReceiptId, redactAgentAuditValue, type AgentCommandAudit, type AgentAuditChange } from './agentAudit';
 
@@ -193,6 +193,8 @@ export function projectAgentAudit(a: AgentCommandAudit, input: { actor:TokenPayl
     const proven=evidencedInput(body.payload,contexts);
     if(proven&&referencesVisible(proven,known,seen,hiddenIds))projectedPayload=a.command.type==='agent.proposal.create'?{command:{type:body.type,payload:proven}}:proven;
   }
+  // 原始填写里的专票税额 / 税率、退税核准与到账金额属于计税依据：无 sensitive:tax_base 时不回传（含本人与全量审计读者）。
+  if(projectedPayload&&!hasScope(actor,'sensitive:tax_base' as any))projectedPayload=a.command.type==='agent.proposal.create'?maskTaxBaseInput(body.type,projectedPayload):maskTaxBaseInput(a.command.type,projectedPayload);
   const commandRestricted=!projectedPayload||!same(projectedPayload,a.command.payload),commandAvailable=projectedPayload!==undefined;
   const selected=allowed.slice(input.offset,input.offset+input.limit),end=input.offset+selected.length;
   const names=new Map<string,string>(),currentIds=ids(current),currentVisibleIds=ids(visible);ids(visible,new Set(),names);

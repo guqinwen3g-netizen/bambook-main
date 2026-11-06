@@ -20,7 +20,7 @@ function fixture() {
  const lineId=state.orderLines[0].id;
  run({type:'order.governance.submit',payload:{orderId}});run({type:'order.governance.decide',payload:{id:orderId,decision:'approved',note:'已核对客户书面合同'}},{...context,actorId:'leader'});
  run({type:'finance.importReceipts',payload:{receipts:[{date:'2026-10-13',payer:'现有客户',amount:30,currency:'USD',ref:'CROSS-DEPOSIT'}]}});run({type:'funding.assign',payload:{receiptId:state.receipts[0].id,customerId:'customer',orderId,amount:30,note:'本订单合同定金'}});
- const purchaseId=run({type:'fulfillment.procurement.save',payload:{orderId,lineId,kind:'processing',supplierId:'supplier',supplier:'实际工厂',description:'衬衫加工',quantity:10,unit:'件',price:2,currency:'USD',due:'2026-11-30',terms:'加工合同付款条件',destination:'实际工厂',note:'',fileIds:['uploaded']}}).id!;
+ const purchaseId=run({type:'fulfillment.procurement.save',payload:{orderId,lineId,kind:'processing',supplierId:'supplier',supplier:'实际工厂',description:'衬衫加工',quantity:10,unit:'件',price:2,currency:'CNY',due:'2026-11-30',terms:'加工合同付款条件',destination:'实际工厂',note:'',fileIds:['uploaded']}}).id!;
  run({type:'fulfillment.procurement.submit',payload:{id:purchaseId}});run({type:'fulfillment.procurement.decide',payload:{id:purchaseId,decision:'approved',note:'核对采购承诺'}},{...context,actorId:'leader'});
  run({type:'fulfillment.procurement.send',payload:{id:purchaseId,at:context.now,evidence:'实际线下合同发出记录',fileIds:['uploaded']}});run({type:'fulfillment.procurement.confirm',payload:{id:purchaseId,at:context.now,confirmedDue:'2026-11-30',evidence:'工厂确认原合同',fileIds:['uploaded']}});
  const productionId=state.productions[0].id,source={kind:'orderLine' as const,orderId,lineId,productionId};
@@ -226,5 +226,14 @@ describe('B · CI 生成的应收须财务确认后才入账', () => {
     const reissued = String(f.run({ type: 'fulfillment.documents.issue', payload: { id: documentId } } as MistCommand).invoiceId);
     expect(reissued).not.toBe(invoiceId);
     expect(f.state.invoices.find(i => i.id === reissued)).toMatchObject({ financeStatus: 'pending', open: 0 });
+  });
+  it.each(['departed', 'cancelled'] as const)('来源出运已 %s 时拒绝驳回，保留待确认应收与已签发 CI', state => {
+    const f = gate(), { documentId, invoiceId } = issue(f);
+    f.state.fulfillment.shipments.find(s => s.id === f.shipmentId)!.state = state;
+    const before = structuredClone(f.state);
+    expect(() => f.run({ type: 'finance.receivable.reject', payload: { invoiceId, reason: '金额不符' } }, f.finance)).toThrow('请走财务更正');
+    expect(f.state).toEqual(before);
+    expect(f.state.fulfillment.documents.find(d => d.id === documentId)?.status).toBe('issued');
+    expect(f.state.invoices.find(i => i.id === invoiceId)?.financeStatus).toBe('pending');
   });
 });

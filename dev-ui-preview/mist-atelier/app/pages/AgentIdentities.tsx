@@ -4,6 +4,7 @@ import {uiText,interfaceLocale} from '../../../../services/interfaceLanguage';
 import {useMistSession} from '../runtime/auth';import {mistApiRequest,useMistWorkspace} from '../runtime/workspace';
 import type {AgentIdentityPage,AgentIdentityView,AgentIdentityEvent} from '../../../../server/src/shared/mistAgentIdentities';
 import {agentConnectionEndpoint} from './AgentConnections';
+import { FailureNotice } from '../runtime/FailureNotice';
 const date=(v:string)=>new Date(v).toLocaleString(interfaceLocale(),{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
 const states:Record<AgentIdentityView['state'],string>={pending:'待责任人启用',active:'凭据有效',disabled:'已停用',revoked:'已撤销',expired:'已过期',invalid:'已失效'};
 const actions:Record<AgentIdentityEvent['action'],string>={created:'新建',configured:'配置',issued:'签发密钥',revoked:'撤销密钥'};
@@ -40,7 +41,7 @@ function IdentityPanel({workspaceId,endpoint,management}:{workspaceId:string;end
  const owners=[...page.owners];if(config?.ownerId&&!owners.some(o=>o.id===config.ownerId))owners.unshift({id:config.ownerId,name:config.ownerName});
  return <div className="mist-col">
   <div className="mist-row" data-wrap><Button icon={RefreshCw} disabled={loading} onClick={()=>void load()}>{uiText('刷新')}</Button>{management&&page.canManage&&<Button variant="primary" icon={Plus} onClick={()=>begin({kind:'create',id:crypto.randomUUID(),name:'',ownerId:'',ownerName:'',mode:'read',enabled:true,version:0,requestId:crypto.randomUUID()})}>{uiText('新建Agent身份')}</Button>}</div>
-  {error&&<Banner tone="bad" title={uiText('Agent身份读取失败')}>{uiText(error)} <Button onClick={()=>void load()}>{uiText('重试')}</Button></Banner>}
+  {error&&<FailureNotice title="Agent身份读取失败" detail={error} retry={()=>void load()} />}
   <DataTable ariaLabel={uiText('Agent服务身份')} loading={loading&&!page.items.length} rows={page.items} rowKey={r=>r.id} minWidth={300} columns={[
    {key:'identity',header:uiText('Agent身份'),width:'minmax(140px,2fr)',render:r=><div><div className="mist-row" data-wrap><Bot size={15}/><span>{r.name}</span><Pill tone={r.state==='active'?'ok':'neutral'}>{uiText(states[r.state])}</Pill></div><span className="mist-note">{r.ownerName} · {uiText(r.mode==='read'?'只读':'可办理')}{r.expiresAt?' · '+uiText('到期')+' '+date(r.expiresAt):''}</span></div>},
    {key:'actions',header:uiText('操作'),width:'180px',render:r=><div className="mist-row" data-wrap>{management&&r.canManage&&<Button size="sm" onClick={()=>begin({kind:'configure',id:r.id,name:r.name,ownerId:r.ownerId,ownerName:r.ownerName,mode:r.mode,enabled:r.state!=='disabled',version:r.version,requestId:crypto.randomUUID()})}>{uiText('配置')}</Button>}{!management&&r.canIssue&&<Button size="sm" onClick={()=>begin({kind:'issue',row:r,requestId:crypto.randomUUID()})}>{uiText(r.activatedAt?'轮换密钥':'启用凭据')}</Button>}{(r.canRevoke??((r.canManage||r.canIssue)&&!!r.activatedAt&&r.state!=='revoked'&&r.state!=='disabled'))&&<Button size="sm" onClick={()=>begin({kind:'revoke',row:r,requestId:crypto.randomUUID()})}>{uiText('撤销')}</Button>}<Button size="sm" onClick={()=>void loadHistory(r)}>{uiText('操作记录')}</Button></div>},

@@ -1,5 +1,7 @@
 export type AgentIdentityView = {
   id:string; name:string; ownerId:string; ownerName:string; mode:'read'|'operate'; version:number;
+  /** personal：账号本人开通的个人 Agent。 */
+  kind?:'personal';
   state:'pending'|'active'|'disabled'|'revoked'|'expired'|'invalid';
   createdAt:string; expiresAt?:string; activatedAt?:string; canManage:boolean; canIssue:boolean;
   /** Personal revocation remains available after AI use is removed; optional during rolling upgrades. */

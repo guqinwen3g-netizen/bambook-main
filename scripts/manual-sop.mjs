@@ -65,8 +65,8 @@ export function readTextSops(wikiDir) {
 export function linkTextSops(html, sops) {
   const ids = new Map(sops.map(sop => [sop.name, sop.id]));
   return html.replace(/<a href="([^"]+)"/g, (match, href) => {
-    const local = href.match(/^(?:\.\/)?(?:sop\/)?([\w-]+)\.md(#[\w-]*)?$/);
-    if (local && ids.has(local[1])) return `<a href="#${ids.get(local[1])}"`;
+    const local = href.match(/^(?:\.\/)?(?:sop\/)?([\w-]+)\.md(?:#(.*))?$/);
+    if (local && ids.has(local[1])) return `<a href="#${esc(ids.get(local[1]) + (local[2] ? '-' + local[2] : ''))}"`;
     if (/^(?:https?:|#|mailto:)/.test(href)) return match;
     return '<a';
   });
@@ -87,21 +87,20 @@ export function renderSopOverview(lessons, trackOf, textSops) {
     const rows = lessons.filter(lesson => roleGroup(lesson.role) === group);
     return `<h3 id="sop-role-${esc(group)}">${esc(group)}<span class="sop-count">${rows.length} 项</span></h3><div class="table-wrap"><table class="sop-table"><thead><tr><th scope="col">任务</th><th scope="col">业务链</th><th scope="col">入口</th><th scope="col">完成后交给</th></tr></thead><tbody>${rows.map(lesson => `<tr><td>${lessonLink(lesson)}</td><td>${esc(trackOf(lesson))}</td><td>${esc(lesson.entry)}</td><td>${esc(lesson.handoff)}</td></tr>`).join('')}</tbody></table></div>`;
   }).join('');
-  const common = textSops.length ? `<h2 id="sop-common">通用工作（全部岗位）</h2><p>以下工作按本人账号权限办理，暂无分步演示，按文字 SOP 操作。</p><ul class="sop-list">${textSops.map(sop => `<li><a href="#${esc(sop.id)}">${esc(sop.title)}</a></li>`).join('')}</ul>` : '';
+  const common = textSops.length ? `<h2 id="sop-common">通用工作</h2><ul class="sop-list">${textSops.map(sop => `<li><a href="#${esc(sop.id)}">${esc(sop.title)}</a></li>`).join('')}</ul>` : '';
   return `<section id="sop-overview" class="chapter sop-overview">
  <p class="lesson-kicker">岗位 SOP</p>
  <h1>岗位 SOP 总览</h1>
- <p class="start-intro">先找到自己的岗位和手上这一棒，再打开对应课程看完整 SOP：开始条件、入口、步骤、完成标准和下一位接手人。</p>
  <div class="sop-jump"><span>按岗位：</span>${groups.map(group => `<a href="#sop-role-${esc(group)}">${esc(group)}</a>`).join('')}<span>按业务链：</span>${tracks.map(track => `<a href="#sop-flow-${esc(track)}">${esc(track)}</a>`).join('')}</div>
  <h2 id="sop-by-flow">按业务链：先后顺序与交接</h2>${flow}
  <h2 id="sop-by-role">按岗位：我负责的事项</h2>${byRole}
  ${common}
- <p class="lesson-review-note">大货 QC、装箱出运、交单收汇、结汇退税等环节的课程仍在制作，未列出的工作以主管安排和系统提示为准。</p>
+ <p class="lesson-review-note">尚无分步课程：大货 QC、装箱出运、交单收汇、结汇退税。</p>
 </section>`;
 }
 
 export const sopStyles = `
-.sop-card{margin-top:32px;padding:22px 24px;border:1px solid var(--line);border-radius:14px}
+.sop-card{margin-top:32px;padding:22px 24px;background:var(--bg-2);border-radius:14px}
 .sop-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.sop-head h2{margin:0;padding:0;font-size:18px}
 .sop-print{font:inherit;font-size:13px;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;background:var(--bg-2);color:var(--ink-2)}
 .sop-grid{display:grid;grid-template-columns:96px minmax(0,1fr);gap:12px 20px;margin:0;font-size:14.5px}
@@ -109,7 +108,7 @@ export const sopStyles = `
 .sop-grid .table-wrap{margin:0}
 .sop-note{margin:4px 0 0;color:var(--ink-2);font-size:13.5px}
 .sop-steps th[scope=row]{width:52px;text-align:center;background:var(--bg-2);color:var(--ink-3);font-weight:500}
-.sop-steps td{font-size:13.5px;line-height:1.7}.sop-steps td b{font-weight:600}
+.sop-steps td{font-size:13.5px;line-height:1.7}.sop-steps td b{font-weight:500}
 .sop-fill-label{font-size:12px;color:var(--ink-3);margin-right:6px}
 .sop-list{margin:0;padding-left:18px}.sop-list li{margin:4px 0}
 .sop-table td:first-child{white-space:nowrap}
@@ -117,6 +116,7 @@ export const sopStyles = `
 .sop-jump{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin:18px 0 8px;font-size:13.5px}.sop-jump span{color:var(--ink-3)}.sop-jump span+a{margin-left:0}.sop-jump a{padding:4px 10px;border-radius:999px;background:var(--bg-2)}
 .chapter h2[id],.chapter h3[id]{scroll-margin-top:80px}
 .sop-text .sop-kicker{font-size:13px;letter-spacing:.06em;color:var(--accent);margin:0}
-@media(max-width:700px){.sop-card{padding:18px 16px;margin-left:-4px;margin-right:-4px}.sop-grid{grid-template-columns:1fr;gap:2px}.sop-grid>dd{margin-bottom:12px}.sop-table td:first-child{white-space:normal}}
-@media print{.mobile-nav,.lesson-rail,.lesson-work,.lesson-footer,.lesson-done,.sop-print,.lesson-review-note{display:none!important}.sop-card{border:0;padding:0}.table-wrap{overflow:visible}}
+@media(max-width:700px){.sop-card{padding:18px 16px;margin-left:-4px;margin-right:-4px}.sop-grid{grid-template-columns:1fr;gap:2px}.sop-grid>dd{margin-bottom:12px}}
+@media screen and (max-width:700px){.sop-table{min-width:760px}.sop-steps{min-width:600px}}
+@media print{body[data-print-sop] .chapter:not([data-print-selected]){display:none!important}.mobile-nav,.lesson-rail,.lesson-work,.lesson-footer,.lesson-done,.sop-print,.lesson-review-note{display:none!important}.sop-card{padding:0}.table-wrap{overflow:visible}}
 `;

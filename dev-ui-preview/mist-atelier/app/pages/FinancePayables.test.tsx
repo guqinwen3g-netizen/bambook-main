@@ -13,6 +13,7 @@ const store = vi.hoisted(() => ({ value: null as any }));
 vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => store.value }));
 vi.mock('../runtime/auth', () => { const useMistSession = () => ({ user:{id:store.value?.userId||'finance'}, hasPermission: (scope: string) => store.value?.canWrite !== false && (!store.value?.permissions || store.value.permissions.includes(scope)) }); return { useMistSession, useOptionalMistSession: useMistSession }; });
 import { FinancePayables, termsPrepayment } from './FinancePayables';
+import { signPads } from '../runtime/signTestUtils';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLElement, root: Root, route: { view: string; id?: string; section?: string };
 const go = vi.fn(), day = platformBusinessDate(new Date());
@@ -22,7 +23,7 @@ function input(label: string, value: string) { const c = getByLabelText(document
 function select(label: string, value: string) { const c = getByLabelText(document.body, label) as HTMLSelectElement; act(() => { c.value = value; c.dispatchEvent(new Event('change', { bubbles: true })); }); }
 let po: any, ctx: any;
 beforeEach(() => {
-  let serial = 0; const context = ctx = { id: () => `ui-${++serial}`, actorName: '财务', actorId: 'finance', now: new Date().toISOString(), authority: { supplier: {}, paymentReviewerIds: ['manager'] } };
+  let serial = 0; const context = ctx = { id: () => `ui-${++serial}`, actorName: '财务', actorId: 'finance', now: new Date().toISOString(), authority: { supplier: {}, paymentTierReviewerIds: { pay_lt5: ['manager'], pay_gt5: ['manager'], pay_new_supplier: ['director'] } } };
   const state = createMistState(context, 'demo'); state.payables!.bills = []; /* 演示自带出口退税专票；本组从没有票据开始 */ po = state.fulfillment.purchases.find(p => p.code === 'PO-2026-00001');
   store.value = { state, workspace: { id: 'space' }, loading: false, saving: false, pending: null, run: vi.fn(async (command: any) => { const r = applyMistCommand(store.value.state, command, context); store.value.state = r.state; render(); return { requestId: 'req', revision: 1, result: r.result }; }) };
   go.mockReset(); route = { view: 'payment-vouchers', section: 'payables' };
@@ -31,12 +32,23 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
 it('requires an explicit no-compensation basis before closing a disposal review',async()=>{
- store.value.workspace.financialDisposals=[{returnId:'ret',purchaseId:'p',purchaseCode:'PO-1',supplier:'供应商',quantity:2,unit:'米',currency:'CNY',referenceAmount:32,decision:'scrap',disposalEvidence:'实际报废',report:'QC-1',noRecovery:{actor:'主管',evidence:'确认不追偿'}}];
+ store.value.workspace.financialDisposals=[{returnId:'ret',purchaseId:'p',purchaseCode:'PO-1',supplier:'供应商',quantity:2,unit:'米',currency:'CNY',referenceAmount:32,decision:'scrap',disposalEvidence:'实际报废',report:'QC-1',settlementConfirmed:true,noRecovery:{actor:'主管',evidence:'确认不追偿'}}];
  store.value.run=vi.fn(async()=>({result:{id:'r'}}));render();await click('核对');
  const dialog=getByRole(document.body,'dialog',{name:'核对退料财务处理'});expect(dialog.textContent).toContain('原采购成本和结算不变');
  expect((getByRole(dialog,'button',{name:'确认'}) as HTMLButtonElement).disabled).toBe(true);
- const area=getByLabelText(dialog,'无补偿核对依据') as HTMLTextAreaElement;act(()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(area,'核对处理依据');area.dispatchEvent(new Event('input',{bubbles:true}));});
+ const area=getByLabelText(dialog,'核对依据') as HTMLTextAreaElement;act(()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(area,'核对处理依据');area.dispatchEvent(new Event('input',{bubbles:true}));});
  await click('确认',dialog);expect(store.value.run).toHaveBeenCalledWith({type:'payable.disposal.review',payload:{returnId:'ret',evidence:'核对处理依据'}});
+});
+
+it('shows a recovery decision and keeps review disabled until the source settlement is confirmed',async()=>{
+ const recovery={id:'rec',actorId:'manager',actor:'主管',at:ctx.now,amount:25,currency:'CNY',reason:'向供应商追偿'};
+ store.value.workspace.financialDisposals=[{returnId:'ret',purchaseId:'p',purchaseCode:'PO-1',supplier:'供应商',quantity:2,unit:'米',currency:'CNY',referenceAmount:32,decision:'recovery',disposalDecision:'scrap',decisionAmount:25,recovery,disposalEvidence:'实际报废',report:'QC-1',settlementConfirmed:false}];
+ render();const table=getByRole(document.body,'table',{name:'退料财务核对'});
+ expect(table.textContent).toContain('报废 2 米');expect(table.textContent).toContain('待结算确认');
+ expect((getByRole(table,'button',{name:'核对'}) as HTMLButtonElement).disabled).toBe(true);
+ store.value.workspace.financialDisposals[0].settlementConfirmed=true;store.value.run=vi.fn(async()=>({result:{id:'r'}}));render();
+ await click('核对');const dialog=getByRole(document.body,'dialog',{name:'核对退料财务处理'});
+ expect(dialog.textContent).toContain('追偿');expect(dialog.textContent).toContain('下一次结算列入争议');
 });
 
 it('opens the purchaser work item at its fixed contract without selecting receipts or final settlement on their behalf',async()=>{
@@ -101,7 +113,7 @@ it('有付款的票据不能作废，按钮写明原因；没有付款的作废�
 function text(label: string, value: string, scope: HTMLElement = document.body) { const t = getByLabelText(scope, label) as HTMLTextAreaElement; act(() => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(t, value); t.dispatchEvent(new Event('input', { bubbles: true })); }); }
 const reg = (no: string, amount: number) => { let n = 0; store.value.state = applyMistCommand(store.value.state, { type: 'payable.bill.register', payload: { supplierId: po.supplierId, invoiceNo: no, invoiceDate: day, currency: 'CNY', amount, taxAmount: 0, lines: [{ purchaseId: po.id, amount }], due: day, dueBasis: '测试' } } as any, { id: () => no + '-' + (++n), now: new Date().toISOString(), actorName: '财务' } as any).state; };
 /** 主管在审批收件箱批准（服务端审批入口，界面外）。 */
-const approve = (id: string) => { store.value.state = applyMistCommand(store.value.state, { type: 'payable.request.decide', payload: { id, decision: 'approved', note: '核对后同意' } } as any, { id: () => 'decide-' + id, now: new Date().toISOString(), actorName: '主管', actorId: 'manager', authority: { supplier: {}, paymentReviewerIds: ['manager'] } } as any).state; };
+const approve = (id: string) => { for (let level = 0; level < 3 && store.value.state.payables?.requests?.find((r: any) => r.id === id)?.state === 'pending'; level++) { const r: any = store.value.state.payables.requests.find((x: any) => x.id === id), signed = (r.approvals || []).map((a: any) => a.actorId), who = r.tier.levels.find((l: any) => !(r.approvals || []).some((a: any) => a.level === l.level)).reviewerIds.find((x: string) => !signed.includes(x)); store.value.state = applyMistCommand(store.value.state, { type: 'payable.request.decide', payload: { id, decision: 'approved', note: '核对后同意' } } as any, { id: () => 'decide-' + level + '-' + id, now: new Date().toISOString(), actorName: who === 'director' ? '总经理' : '主管', actorId: who, authority: { supplier: {}, paymentTierReviewerIds: { pay_lt5: ['manager'], pay_gt5: ['manager'], pay_new_supplier: ['director'] } } } as any).state; } };
 const dialog = (name: string) => getByRole(document.body, 'dialog', { name });
 
 it('票据付款：先申请并经主管批准，再按批准登记实付；分配错误可冲回后重新分配', async () => {
@@ -120,7 +132,7 @@ it('票据付款：先申请并经主管批准，再按批准登记实付；分�
   text('付款依据', '两张票均已到期，按合同 30 天付款');
   await click('提交审批', dialog('申请票据付款'));
   const req = store.value.state.payables.requests[0];
-  expect(req).toMatchObject({ state: 'pending', amount: 400, reviewerIds: ['manager'] });
+  expect(req).toMatchObject({ state: 'pending', amount: 400, reviewerIds: ['manager', 'director'] });
   route = { view: 'payment-vouchers', section: 'payables', id: req.id }; render();
   expect(host.textContent).toContain('等待主管审批'); expect(queryAllByRole(host, 'button', { name: '登记实付' })).toHaveLength(0);
   approve(req.id); render();
@@ -180,7 +192,7 @@ it('没有财务写权限：保留查看，隐藏登记和申请入口', async (
 
 function approvedBillRequest() {
   reg('PERMISSION-VAT', 100); const bill = store.value.state.payables.bills[0];
-  store.value.state = applyMistCommand(store.value.state, { type: 'payable.request.submit', payload: { purpose: 'bill', supplierId: po.supplierId, currency: 'CNY', lines: [{ billId: bill.id, amount: 100 }], reason: '到期' } } as any, { id: () => 'perm-req', now: new Date().toISOString(), actorName: '业务', actorId: 'sales', authority: { supplier: {}, paymentReviewerIds: ['manager'] } } as any).state;
+  store.value.state = applyMistCommand(store.value.state, { type: 'payable.request.submit', payload: { purpose: 'bill', supplierId: po.supplierId, currency: 'CNY', lines: [{ billId: bill.id, amount: 100 }], reason: '到期' } } as any, { id: () => 'perm-req', now: new Date().toISOString(), actorName: '业务', actorId: 'sales', authority: { supplier: {}, paymentTierReviewerIds: { pay_lt5: ['manager'], pay_gt5: ['manager'], pay_new_supplier: ['director'] } } } as any).state;
   approve('perm-req'); return { bill, request: store.value.state.payables.requests[0] };
 }
 it('只有付款登记权限、没有核销权时，隐藏票据复合付款入口', async () => {
@@ -200,7 +212,7 @@ it('打开登记实付后失去核销权限，不能提交附带分配的复合�
   expect(document.body.textContent).toContain('没有办理此项财务动作的权限');
 });
 
-const as = (actorId: string, actorName: string, command: any) => { let n = 0; const r = applyMistCommand(store.value.state, command, { id: () => `${actorId}-${command.type}-${++n}-${Math.random()}`, now: new Date().toISOString(), actorName, actorId, authority: { supplier: {}, paymentReviewerIds: ['manager'] } } as any); store.value.state = r.state; return r.result; };
+const as = (actorId: string, actorName: string, command: any) => { let n = 0; const r = applyMistCommand(store.value.state, command, { id: () => `${actorId}-${command.type}-${++n}-${Math.random()}`, now: new Date().toISOString(), actorName, actorId, authority: { supplier: {}, paymentTierReviewerIds: { pay_lt5: ['manager'], pay_gt5: ['manager'], pay_new_supplier: ['director'] } } } as any); store.value.state = r.state; return r.result; };
 
 it('结算：业务员按收货提交，财务确认预付抵扣（与建议不同须写原因），再按结算登记票据，应付扣除预付', async () => {
   as('finance', '财务', { type: 'payable.plan.register', payload: { purchaseId: po.id, amount: 33480, trigger: '合同签订后 7 天内', basis: '合同第 5 条' } });
@@ -230,6 +242,8 @@ it('结算：业务员按收货提交，财务确认预付抵扣（与建议不�
   expect((getByLabelText(cd, '本次预付抵扣') as HTMLInputElement).value).toBe('13950');
   input('本次预付抵扣', '14000'); input('调整原因', '供应商同意首批多抵 50 元');
   await click('确认结算', dialog('确认结算'));
+  expect(dialog('确认结算').textContent).toContain('请先手写签字');
+  await signPads(dialog('确认结算')); await click('确认结算', dialog('确认结算'));
   expect(store.value.state.payables.settlements[0]).toMatchObject({ state: 'confirmed', confirmation: { suggestedPrepayment: 13950, prepaymentApplied: 14000, adjustReason: '供应商同意首批多抵 50 元' } });
   await click('按结算登记票据'); const bd = dialog('登记供应商票据');
   expect((getByLabelText(bd, po.code + ' 关联结算') as HTMLSelectElement).value).toBe(st.id);
@@ -352,7 +366,7 @@ it('短交最终结算后剩余预付：在结算详情登记退款，可冲回'
   expect(store.value.state.payables.prepaymentMoves[0].reversed).toMatchObject({ reason: '流水录错' });
 });
 
-const actAs = (actorId: string, command: any) => { let n = 0; const r = applyMistCommand(store.value.state, command, { id: () => `${actorId}-${Date.now()}-${++n}`, now: new Date().toISOString(), actorName: actorId, actorId, authority: { supplier: {}, paymentReviewerIds: ['manager'] } } as any); store.value.state = r.state; return r.result as any; };
+const actAs = (actorId: string, command: any) => { let n = 0; const r = applyMistCommand(store.value.state, command, { id: () => `${actorId}-${Date.now()}-${++n}`, now: new Date().toISOString(), actorName: actorId, actorId, authority: { supplier: {}, paymentTierReviewerIds: { pay_lt5: ['manager'], pay_gt5: ['manager'], pay_new_supplier: ['director'] } } } as any); store.value.state = r.state; return r.result as any; };
 
 it('不等票付款：已确认结算可写明未收票原因申请先付，经批准登记后显示已付未收票', async () => {
   const receipt = store.value.state.fulfillment.receipts.find((r: any) => r.purchaseId === po.id);
@@ -525,10 +539,17 @@ it('locks the bill form while registration is in flight',async()=>{
   await act(async()=>finish());store.value.run=original;
 });
 
-it('shows only scoped purchase lines for a partially visible supplier invoice',()=>{store.value.state.partialPayableBills=[{id:'part',code:'AP-PART',supplier:'供应商',currency:'USD',lines:[{purchaseId:'p',purchaseCode:'PO-OWN',kind:'finished',amount:40}],hiddenCount:1,voided:false}];render();const list=getByRole(host,'list',{name:'部分可见应付票据'});expect(list.textContent).toContain('AP-PART');expect(list.textContent).toContain('PO-OWN');expect(list.textContent).toContain('40.00');expect(list.textContent).toContain('另有 1 笔其他范围业务');expect(list.textContent).not.toContain('100.00');});
+it('shows only scoped purchase lines for a partially visible supplier invoice',()=>{store.value.state.partialPayableBills=[{id:'part',code:'AP-PART',supplier:'供应商',currency:'USD',lines:[{purchaseId:'p',purchaseCode:'PO-OWN',kind:'finished',amount:40}],hiddenCount:1,voided:false}];render();const list=getByRole(host,'list',{name:'部分可见应付票据'});expect(list.textContent).toContain('AP-PART');expect(list.textContent).toContain('PO-OWN');expect(list.textContent).toContain('40.00');expect(list.textContent).toContain('另含其他范围业务');expect(list.textContent).not.toContain('100.00');});
 it('prefills the prepayment plan from a stated percentage in the contract terms only',()=>{
  expect(termsPrepayment({quantity:2400,price:46.5,terms:'30% 预付，余款到货验收后 30 天'})).toBe('33480');
  expect(termsPrepayment({quantity:500,price:452,terms:'定金 20%，出运前付清'})).toBe('45200');
  expect(termsPrepayment({quantity:6600,price:0.08,terms:'月结 30 天'})).toBe('');
  expect(termsPrepayment({quantity:10,price:3,terms:'150% 预付'})).toBe('');
+});
+
+it('税基被掩码时票据详情的税额与税率都显示“已隐藏”，价税合计照常', () => {
+ const added = applyMistCommand(store.value.state, { type: 'payable.bill.register', payload: { supplierId: po.supplierId, invoiceNo: 'MASK-01', invoiceDate: day, currency: 'CNY', amount: 1130, taxAmount: 130, taxRate: '13%', lines: [{ purchaseId: po.id, amount: 1130 }], due: day, dueBasis: '按合同' } } as any, ctx);
+ store.value.state = { ...added.state, payables: { ...added.state.payables, bills: added.state.payables.bills.map((b: any) => ({ ...b, taxAmount: 0, taxRate: '', taxMasked: true })) } };
+ route.id = added.result.id!; render();
+ expect(host.textContent).toContain('已隐藏'); expect(host.textContent).not.toContain('13%'); expect(host.textContent).not.toContain('未填写');
 });

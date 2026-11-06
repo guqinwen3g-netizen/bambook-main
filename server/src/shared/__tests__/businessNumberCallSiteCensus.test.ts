@@ -84,34 +84,17 @@ describe('nextBusinessNumber 调用点族级守卫（占用追平不许漏）', 
     expect(sites.length).toBeGreaterThan(0);
     expect(sites.map((s) => `${s.file}`).sort()).toEqual(
       [
-        'bom/bomService.ts',
-        'bom/bomService.ts',
         'claims/claimCaseService.ts',
-        'claims/claimRepairFulfillmentService.ts', // 修复完成质检单，复用实际占用追平
-        'claims/creditNoteService.ts',
-        'claims/repairWorkOrderService.ts',
-        'claims/replacementService.ts',
-        'claims/returnReceiptService.ts',
         'customs/customsService.ts',
         'customs/customsService.ts',
         'customs/customsService.ts',
         'customs/tradeDocumentLifecycleService.ts',
-        'development/fabricDevelopmentService.ts', // SampleBatch occupied sequence
-        'development/fabricDevelopmentService.ts', // SealSample occupied sequence incl soft-deleted historical codes
         'finance/billingItemService.ts', // BillingItem
         'finance/billingItemService.ts', // CostRecord
         'finance/invoiceMutationService.ts',
         'finance/paymentVoucherMutationService.ts',
-        'orders/route.ts',
-        'procurement/materialReturnService.ts',
-        'procurement/materialReturnService.ts',
         'procurement/procurementService.ts',
-        'procurement/procurementService.ts',
-        'procurement/purchaseServiceDeliveryService.ts',
         'quotations/quotationService.ts',
-        'samples/garmentSampleGateService.ts', // current garment SampleBatch uses the same occupied SB sequence
-        'samples/sampleManageService.ts',
-        'shipping/shipmentMutationService.ts',
       ].sort(),
     );
   });

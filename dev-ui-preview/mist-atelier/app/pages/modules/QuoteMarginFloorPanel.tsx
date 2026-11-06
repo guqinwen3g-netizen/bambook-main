@@ -7,6 +7,8 @@ import { marketBusinessDate, type MarketState } from '../../../../../server/src/
 import { MARGIN_FLOOR_FAMILY_LABEL, applicableMarginFloor, normalizeMarginPercent, type MarginFloorFamily, type QuoteMarginFloor } from '../../../../../server/src/shared/mistQuotationMarginFloor';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
+import { businessWhen } from './pageKit';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 const FAMILIES: MarginFloorFamily[] = ['garment', 'fabric'];
 export function marginFloorDraftProblem(input: { minMarginPercent: string; effectiveFrom: string; reason: string }, today: string) {
@@ -37,15 +39,15 @@ export function QuoteMarginFloorPanel() {
     { key: 'min', header: '最低毛利率', width: '100px', align: 'right', render: r => <span className="mist-num">{r.minMarginPercent}%</span> },
     { key: 'from', header: '生效日', width: '110px', render: r => r.effectiveFrom },
     { key: 'reason', header: '调整原因', hideOnMobile: true, render: r => r.reason },
-    { key: 'by', header: '设置人 / 时间', hideOnMobile: true, render: r => `${r.createdBy || '—'} · ${r.createdAt.slice(0, 16).replace('T', ' ')}` },
+    { key: 'by', header: '设置人 / 时间', hideOnMobile: true, render: r => `${r.createdBy || '—'} · ${businessWhen(r.createdAt)}` },
   ];
   return <div className="mist-col" data-margin-floors>
     <Banner title={uiText("报价底价线")}>{uiText("条目毛利率 =（单价 − 成本）/ 单价。低于所在板块的最低毛利率即“须审批”，与“低于成本 / 成本未核实”并存。报价保存时冻结当时适用的版本，之后修改参数不影响已保存报价。")}</Banner>
     <section className="mist-grid">{FAMILIES.map(f => { const cur = applicableMarginFloor(floors, f, today), next = floors.filter(x => x.family === f && x.effectiveFrom > today).sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom))[0];
       return <Card key={f} className="mist-col-6"><CardHeader title={ui`${MARGIN_FLOOR_FAMILY_LABEL[f]} · 当前适用`} sub={uiText(cur ? `V${cur.version}，${cur.effectiveFrom} 起生效` : '尚未设置：不按底价线判断')} /><div className="mist-card-body"><span className="mist-h2 mist-num" data-floor-current={f}>{uiText(cur ? cur.minMarginPercent + '%' : '未设置')}</span>{next && <p className="mist-sub">{uiText("待生效：V")}{next.version} {next.minMarginPercent}%（{next.effectiveFrom}{uiText(" 起）")}</p>}</div></Card>; })}</section>
     <Card><CardHeader title={uiText("设置最低毛利率")} sub={uiText("新增一个版本，不改写旧版本；改动留痕。")} /><div className="mist-card-body mist-col">
-      {!canAdmin && <Banner tone="warn" title={uiText("只读")}>{uiText("仅管理层（定价管理权限）可修改最低毛利率；你可以查看当前参数与版本记录。")}</Banner>}
-      {error && <Banner tone="bad" title={uiText("未能保存")}>{uiText(error)}</Banner>}
+      {!canAdmin && <Banner variant="status" tone="warn" title={uiText("只读")}>{uiText("仅管理层（定价管理权限）可修改最低毛利率；你可以查看当前参数与版本记录。")}</Banner>}
+      {error && <FailureNotice title={"未能保存"} detail={error} />}
       <FormGrid>
         <Field label={uiText("板块")} required><Select aria-label={uiText("底价线板块")} value={input.family} disabled={!canAdmin} options={FAMILIES.map(f => ({ value: f, label: MARGIN_FLOOR_FAMILY_LABEL[f] }))} onChange={e => setInput({ ...input, family: e.target.value as MarginFloorFamily })} /></Field>
         <Field label={uiText("最低毛利率（%）")} required hint={uiText("0–99.99，最多两位小数")}><TextInput aria-label={uiText("最低毛利率")} inputMode="decimal" value={input.minMarginPercent} disabled={!canAdmin} onChange={e => setInput({ ...input, minMarginPercent: e.target.value })} /></Field>

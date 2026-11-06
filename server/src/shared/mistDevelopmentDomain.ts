@@ -15,7 +15,15 @@ export function fabricRequirementError(input:FabricDevelopmentRequirements):stri
  }
  return null;
 }
-export function validFabricSample(quantity:number,form:string,unit:string):boolean{if(typeof form!=='string'||typeof unit!=='string')return false;const f=form.trim(),u=unit.trim();return Number.isFinite(quantity)&&quantity>0&&!!f&&((f==='米样'&&u==='米')||(f!=='米样'&&u==='份'&&Number.isInteger(quantity)));}
+/**
+ * ord3/4/5/8 样品单位：按长度、重量计的单位可带小数，按件数计的单位须为整数。前后端共用这一份规则。
+ * 面料米样只能按米 / 码；其余形态（剪样、色卡、手织样等）可选按件数的单位，也可按米 / 码记剪样长度。
+ */
+export const SAMPLE_MEASURED_UNITS = ['米', '码', '公斤'] as const;
+export const SAMPLE_COUNT_UNITS = { fabric: ['份', '张', '个', '色位', '卡'], garment: ['件', '套', '份'] } as const;
+export const sampleUnitAllowsDecimal = (unit: string) => (SAMPLE_MEASURED_UNITS as readonly string[]).includes(unit.trim());
+export const sampleUnitsFor = (domain: 'fabric' | 'garment', form = '') => domain === 'garment' ? [...SAMPLE_COUNT_UNITS.garment] : form.trim() === '米样' ? ['米', '码'] : [...SAMPLE_MEASURED_UNITS, ...SAMPLE_COUNT_UNITS.fabric];
+export function validFabricSample(quantity:number,form:string,unit:string):boolean{if(typeof form!=='string'||typeof unit!=='string')return false;const f=form.trim(),u=unit.trim();return Number.isFinite(quantity)&&quantity>0&&!!f&&sampleUnitsFor('fabric',f).includes(u)&&(sampleUnitAllowsDecimal(u)||Number.isInteger(quantity));}
 
 /** BB-DEV-1：开发案发起方。旧记录没有该字段时均为客户开发，按原样读取。 */
 export type DevelopmentInitiator = 'customer' | 'internal';

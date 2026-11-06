@@ -71,6 +71,16 @@ GitHub 的 deployment / ops 工作流均已停用，旧服务器授权及仓库 
 
 部署包保留在同一私有目录的 releases 下。重试同一版本复用原包并核对摘要；不能用不同内容覆盖已接收的相同提交。服务器仍先准备依赖再切换版本，验证两套 API 的数据库健康，失败恢复上一版。客户端再读取公开 `mist-version.json`，确认版本和已提交状态后才报告部署成功。
 
+### 表结构门禁（2026-11-05 起随发布生效）
+
+`bambook-dev-release.sh` 在构建和切换版本之前比较候选版本与当前运行版本的 `server/prisma`（schema、迁移、迁移锁与手工 SQL）文件摘要：
+
+- 完全相同：照常发布，不读数据库。
+- 有新增、修改或删除，或者是首次激活：拒绝激活（退出码 3），当前版本与数据库都不变。要放行，须先按受审流程执行并核对迁移，再由 root 写入 `/etc/bambook-dev/schema-approvals/<提交号>.json`：`{"release": 提交号, "schema": 拒绝信息中给出的指纹, "from": 当前运行的提交号, "rollback": "previous" 或 "stop"}`。文件与目录须为 root 所有、组和其他人不可写。没有环境变量绕过。
+- 放行后仍以候选版本的 Prisma 客户端只读查询 `_prisma_migrations`：本次新增或修改的迁移必须都已完成、未回滚且校验值一致，且库里没有未完成的迁移，否则拒绝。
+- `rollback` 写明健康检查失败时的处理：`previous` 表示负责人已核实旧代码能在新表结构上运行，失败切回上一版；`stop` 表示失败时停止两个服务，不在新表结构上运行旧代码。首次激活只接受 `stop`。
+- 门禁不执行迁移，也不判断破坏性迁移是否安全；它只核对迁移是否已按记录执行。表结构升级仍是单独受审的人工步骤。
+
 每次提交仍正常推送 GitHub。`.github/workflows/mist.yml` 保留手动验证入口；`bambook-dev-deploy.yml` 虽保留历史定义，GitHub 实际工作流已停用且所需私钥已撤销，不是可用的应急发布通道。发布与运维只走本机 SSH，不能依据历史 YAML 恢复远端执行。正式环境不适用本命令。
 
 ## 撤销 / 轮换
@@ -105,14 +115,69 @@ GitHub 的 deployment / ops 工作流均已停用，旧服务器授权及仓库 
 
 服务器直连不到 `chatgpt.com` / `api.openai.com`。平台 ChatGPT 套餐（登录、令牌刷新、模型调用）及 OpenAI API 服务经出站代理访问：服务器本机 `sing-box.service` 提供 mixed 入站 `127.0.0.1:7890`，`backend.env` 设 `BAMBOOK_AI_HTTPS_PROXY=http://127.0.0.1:7890`。代码只对 `*.openai.com`、`*.chatgpt.com` 走代理（`server/src/ai/outboundProxy.ts`），国内模型接口仍直连；未设置该变量时行为不变。Node 内置 fetch 不读取 `HTTPS_PROXY`，不要用它代替。
 
+### 平台模型（2026-11-06 用户定）
+
+magpie 暂不登录订阅。平台 AI（小竹、报价审阅、汇总、对账、Agent 任务）改用平台 ChatGPT 订阅里的 GPT-6.1 Terra：`backend.env` 设 `BAMBOOK_CODEX_MODEL=gpt-6.1-terra`（改前副本在 `shared/private-backups/ops-scripts-20261106/`，属主与权限不变），重启两套服务后进程已载入。实测订阅直连 Terra 返回正常，小竹在模拟公司「诚川纺织」实答一次（200，约 3.7 秒）。推理档位仍按功能分配（报价审阅 max、对账与 Agent 任务 high、问答与汇总 medium）。订阅令牌按期自动续期；令牌失效时由平台管理员在「平台设置 › 平台 AI 模型」重新连接。
+
+### 豆包实时语音（2026-11-06）
+
+语音运行于 Mist API，公网使用 `/api/mist/voice/stream`。Nginx 必须为该路径保留 WebSocket 精确匹配转发，使用 HTTP/1.1，并传递 `Upgrade` 与 `Connection: upgrade`；同时保留原主机、协议与代理缓冲配置。新服务器规则在 `scripts/deploy/bootstrap-dev-server.sh`，已有服务器须先备份配置、执行 `nginx -t` 后重载；应用直传不会自动更新 Nginx。公司域名的直连 HTTPS 外层代理也须传递升级头，不能只更新内层 Mist 转发；本轮两层均已补齐。无票据升级请求被拒绝只证明鉴权有效，不能替代带一次性票据的真实连接验收。
+
+用户已授权复用本机 OpenBitFun 豆包语音连接。服务器私有 `backend.env` 配置 `BAMBOOK_VOICE_API_KEY`、`BAMBOOK_VOICE_VOICE`，保留原属主与 0640 权限，仅重启 Mist 服务载入。页面后续保存的私有 `platform-voice.json` 优先于环境变量，包括明确禁用的设置；不要通过改环境变量覆盖管理员停用状态。该文件与平台模型凭据放在发布间持久保存的私有目录中，按私有备份规则保存；Key 不入库、不回传页面。
+
+本轮已验证：运行中的 Mist 进程载入配置、两套 API 与数据库健康、服务器真实豆包握手与会话建立、固定测试语句返回完整音频。最终源码另以录制音频验证真实转写、单次模拟交办与播报，不写共享业务数据。鉴权票据、服务器语音返回、隔离浏览器业务链和终端实际麦克风是不同验收项，分别登记，不以 `configured: true` 代替成功收音与交办。
+
+### 平台模型网关 magpie（2026-11-04）
+
+用户要求在后端加装 magpie，补充平台可用的模型订阅。magpie 是开源（MIT）的模型网关，把多个订阅和 API 服务汇成一个 OpenAI / Anthropic 兼容入口，额度用完或出错时转到下一个，并记录用量。
+
+- 安装：官方 Linux 终端版二进制，按官方发布清单核对 SHA-256 后放在 `/usr/local/bin/magpie`；系统服务 `magpie.service`，专用系统用户 `magpie`，数据目录 `/var/lib/magpie`（0700），`ProtectSystem=strict`、`MemoryMax=384M`。
+- 监听：网关 `127.0.0.1:3425`、管理页 `127.0.0.1:3430`，只在本机回环，不开放公网端口。管理页需 `MAGPIE_WEB_KEY`（`/etc/magpie/magpie.env`，0600），运维从本机用 SSH 端口转发打开。
+- 出站：设置 `proxy=http://127.0.0.1:7890`，经现有 sing-box 分流；关闭自动更新与自动下载（升级由运维核对后手动做），关闭统计上报。
+- 接入 Bambook：已为后端生成专用网关密钥（`/etc/magpie/bambook-gateway.key`，0600）。在“平台设置 › 平台 AI 模型”新增 API 服务：接口地址 `http://127.0.0.1:3425/v1`，模型填 magpie 列出的 `provider/model` 或路由组 id，Key 填该网关密钥。后端只对回环地址允许 http（`normalizeBaseUrl`）。
+- 订阅与 Key：登录订阅或添加 API 服务都在 magpie 管理页或 `magpie provider add` 完成，凭据只存在 `/var/lib/magpie`。个人订阅用作平台共享额度前，须确认其服务条款允许。
+- 密钥：本机回环来的请求不带网关密钥也能调用，安全边界是只监听回环；网关密钥用于按调用方区分用量和设限额（`magpie gateway-key limit`）。
+- 备份：`/var/lib/magpie` 暂未纳入每日备份；接入正式订阅后再加入。
+
+
+
+公司在智能邮箱填写 IMAP/SMTP 地址后，服务端按 `mist/mail/service.ts#checkHosts` 校验。`MIST_MAIL_ALLOWED_HOSTS` 非空时默认是严格白名单，未登记的公网主机也会被拒绝；为空时允许标准端口（143/465/587/993）的公网主机。`MIST_MAIL_ALLOW_PUBLIC_HOSTS=1` 模式用于让白名单内的验收邮箱与租户公网邮箱并存，仅字面量 `1` 开启；未配置、`0` 或 `true` 均不会放宽非空白名单。生产开通前须单独确认接入与收件域范围，缺省仍保留严格限制。公网路径必须检查全部解析结果并钉住实际连接地址，TLS 证书按原主机名校验；回环、私网、链路本地（含云元数据 169.254.169.254）、CGNAT、基准测试、组播或 IPv6 内部地址均拒绝，混合公网/内网结果也拒绝。显式列入运维白名单的主机保持现有受信连接规则；该名单不是允许任意内网的通配授权。公网模式不改变 TLS 例外名单、收件域白名单或本人确认发送规则。
+
+本机自建的 `mail.sylway.cloud`（Postfix/Dovecot，只听 127.0.0.1，见 `scripts/deploy/bootstrap-dev-mail.sh`）用于验收走查时，须同时登记：`MIST_MAIL_ALLOWED_HOSTS` 加入 `mail.sylway.cloud`，`MIST_MAIL_INSECURE_TLS_HOSTS` 加入同名（自签证书），并在 `/etc/hosts` 将其指向 127.0.0.1。该服务不对外投递；`MIST_MAIL_ALLOWED_RECIPIENT_DOMAINS` 可限定收件域。改 `backend.env` 时保留原属主与 0640 权限。
+
+**生产开通状态（2026-11-06）**：用户明确允许后，已设置 `MIST_MAIL_ALLOW_PUBLIC_HOSTS=1` 并清空 `MIST_MAIL_ALLOWED_RECIPIENT_DOMAINS`，对共享 Mist 服务的全部租户生效。原受信主机、TLS 例外、语音及其他环境项保持不变，保留 `root:bambook-deploy`、0640，仅重启 Mist；配置备份留在 root 私有目录。运行进程、公网及双 API / 数据库健康已核对。此调整允许租户使用自己的公网 IMAP/SMTP 服务，不把本机验收服务器变成公网中继；没有更改 DNS 或开放 25 端口，也没有代登录邮箱或发送实际邮件。实际第三方账号收发仍须在绑定后核验，不能以开关、TLS 连通或模拟用例替代。
+
+## 邮箱凭据存储（2026-11-02）
+
+公司在智能邮箱绑定的密码/授权码只存服务器私有目录。生产（`NODE_ENV=production`）必须同时配置：`MIST_MAIL_CREDENTIAL_DIR`（发布目录之外、服务可写的持久位置，当前为 `/srv/bambook-dev/shared/mist-mail-credentials`，0700）与 `MIST_MAIL_CREDENTIAL_KEY`（≥32 位随机串，AES-256-GCM 加密落盘）。缺任一项时绑定直接返回 `MAIL_CREDENTIAL_STORE_UNAVAILABLE`（409），不再写出可逆的明文副本，也不会写进每次发布都会替换的 `current/server/private`。保存失败只在日志记录文件系统错误码。
+
+密钥一旦更换，已存凭据无法解密，相关邮箱需本人重新绑定。密钥只存在 `backend.env`（root:bambook-deploy 0640），不进入仓库或备份说明；日常备份会打包凭据目录，但其中为密文。
+
 ## 每日备份（cron.daily）
 
-`/etc/cron.daily/bambook-dev-backup`（root）每天写入 `/var/backups/bambook-dev`（目录 0700、文件 0600），各保留 7 天：
+仓库里的唯一入口是 `scripts/deploy/bambook-dev-backup.py`，`bootstrap-dev-server.sh` 将其安装为 `/usr/local/sbin/bambook-dev-backup`（root 0755），`/etc/cron.daily/bambook-dev-backup` 只调用它。
 
-- `panda_hub_dev-YYYYMMDD.dump`：`pg_dump -Fc` 整库，可用 `pg_restore` 恢复。
-- `bambook-files-YYYYMMDD.tar.gz`（2026-10-21 起）：`/srv/bambook-dev/shared` 下的 `mist-files`、`private-files`、`uploads` 与 `ai-subscriptions`（平台 ChatGPT 套餐凭据与 API 服务 Key）；打包时有文件正在写入不视为失败。
+- 每次生成一组 `/var/backups/bambook-dev/bambook-dev-YYYYMMDD-HHMMSS/`：`database.dump`（`pg_dump -Fc`，核对 `PGDMP` 文件头）、`files.tar.gz`、`manifest.json`（大小与 SHA-256）。目录 0700，文件 0600。
+- 文件范围：`/srv/bambook-dev/shared/` 下除 `logs`、`private-backups` 之外的全部目录（mist-files、uploads、private-files、ai-subscriptions、mist-mail-credentials、market、storage、data、output、cutout-queue 等）。bootstrap 创建的 8 个目录缺失即失败。`backend.env` 中指向 `shared/` 之外的 `*_DIR`/`*_QUEUE` 路径只记为警告并列入 manifest 的 `notIncluded`。
+- 不包含：`/etc/bambook-dev`（`backend.env` 与密钥），因此归档中的邮箱凭据密文不能单靠备份解密；`/var/lib/magpie`；`/var/mail/vhosts`。注意 `ai-subscriptions` 中的平台订阅令牌与 API Key 以及 `shared/mail-accounts.txt` 为明文，做异地副本前必须先排除或加密。
+- 写入 `.incomplete-*` 临时目录，全部步骤成功后才改名；失败只删除本次临时目录，不动旧备份；同时只允许一个任务运行。`pg_dump` 失败、磁盘写满、tar 的真实错误都使任务失败；tar 仅在全部提示都是“读取期间文件变化 / 已删除”时视为成功；归档会完整读回校验。
+- 新一组成功后才删除超过 7 天的旧组；旧格式的 `panda_hub_dev-*.dump`、`mist-files-*`、`bambook-files-*` 按修改时间满 7 天删除。
 
-备份与服务同盘，尚无异地副本。修改脚本前先把原脚本复制到 `shared/private-backups`，保持 `root:root 755`。
+> 状态（2026-11-06，用户授权安装）：已安装 `/usr/local/sbin/bambook-dev-backup`，`/etc/cron.daily/bambook-dev-backup` 只调用它；原手工脚本已备份到 `shared/private-backups/ops-scripts-20261106/`。首次手动运行生成 `bambook-dev-20261106-004024`（数据库 3.3 MB、文件 486 MB，26 个目录，37 秒），manifest 校验值与文件一致。旧格式备份按 7 天规则自动清理。
+>
+> **恢复演练（2026-11-06）**：用该组备份恢复到临时库与临时目录，耗时数据库 3 秒、文件 4 秒；表数、审计、公司、账号、工作区数及迁移数与现网一致，全部工作区状态指纹一致，`mist-files` 586 个文件名称与大小逐一一致；临时库与目录已删除。尚无异地副本。
+
+备份与服务同盘，尚无异地副本；本机恢复演练已于 2026-11-06 完成，范围与结果见上文。修改脚本前先把原脚本复制到 `shared/private-backups`，保持 `root:root 755`。
+
+## 主机告警（2026-11-06 已安装启用）
+
+`scripts/deploy/bambook-dev-monitor.py` 每分钟检查：两套 API 的 `/api/health`（须 `status=ok`、`database=ok`，`mode=local` 视为故障）、可配置的公网 HTTPS 健康探针、根目录磁盘使用率（默认 85%）、`bambook-dev.service` 与 `bambook-dev-mist.service`、最新一组备份是否完整且不超过 36 小时。故障经 Bark 推送：同一故障只发一次，按间隔提醒，恢复发一次；只有全部设备都接收才算已发送，否则下次重试。
+
+- 安装：root 运行 `scripts/deploy/install-bambook-dev-monitor.sh --verify`（只读）后再正式安装。只写 `/usr/local/sbin/bambook-dev-monitor`、monitor 的 service 与 timer、`/etc/bambook-dev-monitor/`（0700）与 `/var/lib/bambook-dev-monitor/`（0700）；不读 `backend.env`，不重启业务服务，不动数据库与备份。
+- 配置：`/etc/bambook-dev-monitor/config.json`（root:root 0600），Bark 设备 key 只放这里，不进仓库、日志或状态文件。配置通过 `--check-config` 才启用 timer。
+- 首次启用顺序：`--check-config` → `--dry-run`（真实检查、不写状态、不发送）→ `--send-test`（发一条测试推送）→ 启用 timer。
+- 状态（2026-11-06）：已安装并启用。用户提供 Bark 设备 key（只写在 `/etc/bambook-dev-monitor/config.json`，root:root 0600），`--check-config` 通过，`--dry-run` 七项全部正常（两套 API、公网健康、磁盘、两项服务、备份），`--send-test` 已送达 1 台设备，timer 已启用并完成首次运行。注意：这把 key 曾出现在公开仓库历史（`scripts/bark_notify.sh`，#669 前），用户确认继续使用；他人可据此向该设备推送消息，但无法读取 Bambook 数据。
+- 本机通知脚本 `scripts/bark_notify.sh` 改为读取环境变量 `BAMBOOK_BARK_KEYS`。此前写在公开仓库里的两把设备 key 仍留在 Git 历史中，须在 Bark 端轮换后再使用。
 
 ## 产品图去背景模型
 

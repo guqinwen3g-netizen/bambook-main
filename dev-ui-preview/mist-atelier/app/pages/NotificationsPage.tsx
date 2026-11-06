@@ -12,13 +12,14 @@ import { useMistSession } from '../runtime/auth';
 import { useMistWorkspace } from '../runtime/workspace';
 import { notificationPermissionView,visibleMistNotifications } from '../runtime/notificationPreferences';
 import {readAllMistNotices,readMistNotice} from '../runtime/agentTaskNotices';
+import { FailureNotice } from '../runtime/FailureNotice';
 
 export type NotificationTab = 'unread' | 'all';
 type Category = NonNullable<MistNotification['category']>;
 export const NOTIFICATION_CATEGORY_LABEL: Record<Category, string> = { qc: 'QC 报告', shipping: '出运', suggestion: '小竹建议', general: '工作' };
 const TONE: Record<Category, Tone> = { qc: 'accent', shipping: 'ok', suggestion: 'neutral', general: 'neutral' };
 const category = (n: MistNotification): Category => n.category ?? 'general';
-const when = (at: string) => { const d = new Date(at); return Number.isNaN(d.getTime()) ? at : d.toLocaleString(interfaceLocale(), { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }); };
+const when = (at: string) => { const d = new Date(at); return Number.isNaN(d.getTime()) ? at : d.toLocaleString(interfaceLocale(), { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }); };
 
 export function notificationRows(rows: MistNotification[], tab: NotificationTab, kind: 'all' | Category, query: string) {
   const q = query.trim().toLowerCase();
@@ -55,9 +56,9 @@ export function NotificationsPage() {
     <PageHeader eyebrow={uiText("我的事务 · 通知")} title={uiText("通知中心")}
       actions={<><Button icon={Settings2} onClick={() => go('settings', undefined, { section: 'notify' })}>{uiText("通知订阅")}</Button>
         <Button variant="primary" icon={CheckCheck} disabled={busy || !unread} loading={workspace.saving} onClick={readAll}>{uiText("全部标为已读")}</Button></>} />
-    {error && <Banner tone="bad" title={uiText(error)} actions={<Button size="sm" onClick={() => setError('')}>{uiText("知道了")}</Button>} />}
-    {!error&&workspace.agentTaskNotices?.error&&<Banner tone="bad" title={uiText(workspace.agentTaskNotices.error)} actions={<Button onClick={()=>void workspace.agentTaskNotices?.refresh()}>{uiText('重新加载')}</Button>}/>}
-    {!!off.length && <Banner tone="neutral" title={ui`已关闭：${off.join('、')}`} actions={<Button size="sm" onClick={() => go('settings', undefined, { section: 'notify' })}>{uiText("去设置")}</Button>}>{uiText("这些类别的通知不在这里显示，重新开启后会恢复显示。")}</Banner>}
+    {error && <FailureNotice title="通知操作未完成" detail={error} retry={() => setError('')} retryLabel="知道了" />}
+    {!error&&workspace.agentTaskNotices?.error&&<FailureNotice title="Agent 通知读取失败" detail={workspace.agentTaskNotices.error} retry={()=>void workspace.agentTaskNotices?.refresh()} retryLabel="重新加载" />}
+    {!!off.length && <Banner variant="status" tone="neutral" title={ui`已关闭：${off.join('、')}`} actions={<Button size="sm" onClick={() => go('settings', undefined, { section: 'notify' })}>{uiText("去设置")}</Button>}>{uiText("这些类别的通知不在这里显示，重新开启后会恢复显示。")}</Banner>}
     <Tabs<NotificationTab> value={tab} onChange={next => go('notifications', undefined, { section: next })} options={[{ value: 'unread', label: '未读', count: unread }, { value: 'all', label: '全部', count: visible.length }]} />
     <Toolbar right={kinds.length > 1 ? <Segmented<'all' | Category> ariaLabel={uiText("通知类型")} value={kind} onChange={setKind} options={[{ value: 'all', label: '全部' }, ...kinds.map(c => ({ value: c, label: NOTIFICATION_CATEGORY_LABEL[c] }))]} /> : undefined}>
       <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索通知标题或内容")} />

@@ -73,6 +73,9 @@ async function main() {
   const tables = Number(psql(targetPsql, `select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE' and table_name not like '\\_prisma%'`));
   step(`db push 完成 ⇒ 产品表 ${tables} 张${pushOut.includes('already in sync') ? '（already in sync）' : ''}`);
   if (tables < 200) { console.error(`ABORT: 只建出 ${tables} 张表，不像完整 schema`); process.exit(1); }
+  // schema.prisma 表达不了的局部唯一索引等，db push 后补建（server/prisma/sql/post-db-push.sql）。
+  execFileSync('psql', ['-X', '-d', targetPsql, '-v', 'ON_ERROR_STOP=1', '-q', '-f', join(R, 'server', 'prisma', 'sql', 'post-db-push.sql')], { encoding: 'utf8' });
+  step('db push 后补建索引完成');
 
   // ---- 2) 把既有迁移逐条标记为已应用（= 基线）----
   const dir = join(R, 'server', 'prisma', 'migrations');

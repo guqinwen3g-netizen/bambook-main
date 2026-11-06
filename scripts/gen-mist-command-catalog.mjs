@@ -12,6 +12,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/**
+ * 源码保留、但不向 Agent 登记的命令（目录外的类型 MCP 一律拒绝执行）。逐条写明原因；agentCommandCatalogGuard.test.ts 同样认这份名单。
+ */
+export const AGENT_EXCLUDED_COMMANDS = {
+  'platform.invoice.save': '旧独立 CI 草稿：职责已改为业务/后勤经单据签发（fulfillment.documents.issue）、财务登记核销，发票页只读展示历史草稿；后端保留供历史草稿与既有校验测试使用，不再交给 Agent',
+  'platform.invoice.issue': '同 platform.invoice.save：财务不直接签发商业发票，页面无入口',
+  'seal.save': '电子公章由公司管理员本人维护（上传印章图片、指定用印人），不交给 Agent，也不能经 Agent 提议',
+  'seal.disable': '同 seal.save：停用印章只由公司管理员本人操作',
+};
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SHARED = path.join(ROOT, 'server/src/shared');
 export const CATALOG = path.join(ROOT, 'server/src/mist/agentCommandCatalog.ts');
@@ -69,7 +79,8 @@ export function buildCatalog() {
   const found = new Map();
   for (const file of fs.readdirSync(SHARED).filter(f => f.endsWith('.ts') && !f.endsWith('.test.ts')).sort()) {
     const text = fs.readFileSync(path.join(SHARED, file), 'utf8');
-    for (const match of text.matchAll(/\{\s*type:\s*'([a-z][\w]*(?:\.[\w]+)+)'\s*;\s*payload\??:\s*/g)) {
+    // `{` 与 type 之间允许注释；type 可写成字面量联合（`type: 'a' | 'b'; payload: …`），联合中每个类型共用同一 payload。
+    for (const match of text.matchAll(/\{\s*(?:\/\*(?:[^*]|\*(?!\/))*\*\/\s*|\/\/[^\n]*\n\s*)*type:\s*('[a-z][\w]*(?:\.[\w]+)+'(?:\s*\|\s*'[a-z][\w]*(?:\.[\w]+)+')*)\s*;\s*payload\??:\s*/g)) {
       const at = match.index + match[0].length;
       let payload = text[at] === '{' ? balanced(text, at) : (text.slice(at).match(/^[\w.<>[\]|' ]+/) || [''])[0].trim();
       // 联合类型 payload（如 `{ purpose: 'prepayment'… } | { purpose: 'bill'… }`）须收齐全部分支，否则 Agent 只能看到第一种用法。
@@ -82,9 +93,11 @@ export function buildCatalog() {
           payload += ' | ' + variant; end += next[0].length + variant.length;
         }
       }
-      if (!payload || found.has(match[1])) continue;
+      if (!payload) continue;
       const flat = payload.replace(/\s+/g, ' ').slice(0, 1500), refs = referenced(flat, types);
-      found.set(match[1], { type: match[1], payload: flat, ...(refs.size ? { types: Object.fromEntries([...refs].slice(0, 12)) } : {}), source: `server/src/shared/${file}` });
+      for (const [, type] of match[1].matchAll(/'([^']+)'/g)) {
+        if (!found.has(type) && !Object.hasOwn(AGENT_EXCLUDED_COMMANDS, type)) found.set(type, { type, payload: flat, ...(refs.size ? { types: Object.fromEntries([...refs].slice(0, 12)) } : {}), source: `server/src/shared/${file}` });
+      }
     }
   }
   return [...found.values()].sort((a, b) => a.type.localeCompare(b.type));
