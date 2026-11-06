@@ -39,6 +39,8 @@ export const AGENT_OBJECT_TYPES: ObjectType[] = [
   { type: 'prepayment_move', label: '预付退款/转抵', scope: 'invoices:read', path: ['payables', 'prepaymentMoves'], view: 'procurement', linkId: r=>r.purchaseId },
   { type: 'production', label: '生产', scope: 'production:read', path: ['productions'], view: 'production-board' },
   { type: 'shipment', label: '出运', scope: 'shipments:read', path: ['fulfillment', 'shipments'], view: 'shipments' },
+  // 出运单据（CI/PL/BL 等）：与报关与单证分区同一读权限；只给元数据与文件编号，不给文件字节，生成快照不入模型。
+  { type: 'shipment_document', label: '出运单据', scope: 'customs:read', path: ['fulfillment', 'documents'], view: 'shipments', linkId: r => r.shipmentId },
   { type: 'invoice', label: '发票', scope: 'invoices:read', path: ['invoices'], view: 'invoices' },
   { type: 'risk', label: '风险', scope: 'risk:read', path: ['platform', 'risks'], view: 'risks' },
   { type: 'claim', label: '售后案件', scope: 'aftersales:read', path: ['platform', 'claims'], view: 'claims' },
@@ -59,7 +61,18 @@ function rows(state: MistState, type: ObjectType): any[] {
   return Array.isArray(value) ? value.filter(r => r && typeof r === 'object' && typeof r.id === 'string').map(row=>mailReadRecord(type.type,row)) : [];
 }
 /** Only public mail facts are model-visible; request keys and the record-level transport response stay internal. */
+const DOCUMENT_CONTENT_LIMIT = 2_000;
+/** Shipment documents expose facts and file ids only; generated snapshots carry full party/price tables and stay out of the model context. */
+function documentReadRecord(row:any){
+  const content=typeof row.content==='string'?row.content:'';
+  return{id:row.id,shipmentId:row.shipmentId,orderId:row.orderId,type:row.type,number:row.number,version:row.version,title:row.title,status:row.status,dueDate:row.dueDate,createdAt:row.createdAt,issuedAt:row.issuedAt,invoiceId:row.invoiceId,fileIds:row.fileIds,
+    generated:Array.isArray(row.generated)?row.generated.map((g:any)=>({id:g.id,kind:g.kind,number:g.number,fileId:g.fileId,fileName:g.fileName,sha256:g.sha256,bytes:g.bytes,generatedAt:g.generatedAt,sealed:!!g.sealUseId})):[],
+    ...(row.externalIssue?{externalIssue:{issuer:row.externalIssue.issuer,at:row.externalIssue.at}}:{}),
+    ...(row.financeRejection?{financeRejection:{reason:row.financeRejection.reason,at:row.financeRejection.at}}:{}),
+    content:content.slice(0,DOCUMENT_CONTENT_LIMIT),...(content.length>DOCUMENT_CONTENT_LIMIT?{contentTruncated:true}:{})};
+}
 function mailReadRecord(type:string,row:any){
+  if(type==='shipment_document')return documentReadRecord(row);
   if(!['email_draft','email_send'].includes(type))return row;
   const common={id:row.id,subject:row.subject,accountId:row.accountId,...(type==='email_send'?{status:row.status,effectiveStatus:emailSendEffectiveStatus(row)}:{}),from:row.from,to:row.to,cc:row.cc,bcc:row.bcc,createdAt:row.createdAt,updatedAt:row.updatedAt,body:row.body,replyToId:row.replyToId};
   if(type==='email_draft')return{...common,updatedBy:row.updatedBy,template:row.template,links:row.links,fileIds:row.fileIds};
