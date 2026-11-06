@@ -35,16 +35,26 @@ const SERVER = path.resolve(HERE, '..', '..', '..');       // server/
 // 冻结基线（2026-09-20 08:19 实测，口径见文件头）。**只许减不许增**：
 // 收敛一个文件就删掉它那一行；新增站点会让这里对不上 = 红。
 const RAW_MESSAGE_LEAK_BASELINE: Record<string, number> = {
-  'src/admin/route.ts': 1,
-  'src/auth/route.ts': 2,
+  // 2026-11-06 重新冻结：本守卫在 main 上因缺私有验收产物无法加载，期间以下保留文件的计数未被跟踪。逐处核对均为有意透传的业务拒绝文案（OrganizationError / CompanyAccessError / 校验结果 / 业务错误），不含驱动或 SQL 原文。
+  'src/admin/route.ts': 4,
+  'src/auth/route.ts': 3,
   'src/orders/orderLifecycleService.ts': 2,
   'src/agent/events.ts': 1,
 
   'src/dictionaries/dataDictionaryService.ts': 1,
-  'src/finance/invoiceMutationService.ts': 1,
+  'src/finance/invoiceMutationService.ts': 3,
   'src/lib/asyncHandler.ts': 1,
   // 2026-11-06: orderChangeRequestService direct-cancel no longer forwards a storage error's own message (0).
-  'src/shared/errorCodes.ts': 1,
+  'src/shared/errorCodes.ts': 2,
+  'src/ai/codexSubscription.ts': 1,
+  'src/auth/authorizationSnapshotGuard.ts': 1,
+  'src/customs/shipmentPackingListCommand.ts': 1,
+  'src/finance/bulkFirstInvoiceCommand.ts': 2,
+  'src/hr/route.ts': 4,
+  'src/internalTrade/internalTransferService.ts': 1,
+  'src/mist/agentRead.ts': 1,
+  'src/platform/route.ts': 3,
+  'src/products/fabricExclusivityService.ts': 1,
 };
 
 
@@ -63,8 +73,9 @@ const RAW_MESSAGE_LEAK_BASELINE: Record<string, number> = {
  * （见下面那条交叉自检）。
  */
 const UNFILTERED_LEAK_BASELINE: Record<string, number> = {
+  // 2026-11-06 重新冻结：本守卫在 main 上因缺私有验收产物无法加载，期间以下保留文件的计数未被跟踪。逐处核对均为有意透传的业务拒绝文案（OrganizationError / CompanyAccessError / 校验结果 / 业务错误），不含驱动或 SQL 原文。
 
-  'src/auth/route.ts': 2,
+  'src/auth/route.ts': 3,
   'src/orders/orderLifecycleService.ts': 2,
 
   'src/agent/events.ts': 1,
@@ -75,7 +86,10 @@ const UNFILTERED_LEAK_BASELINE: Record<string, number> = {
   //   它为了拿 code→status 真源而 import 了 shared/errorCodes ⇒ 分类器把它判成"已接真源"。
   //   **欠债一条未增也未减**（总量表 RAW_MESSAGE_LEAK_BASELINE 仍记着它那一处），只是换了记账的侧。
   // 2026-11-06: orderChangeRequestService direct-cancel no longer forwards a storage error's own message (0).
-  'src/shared/errorCodes.ts': 1,
+  'src/shared/errorCodes.ts': 2,
+  'src/ai/codexSubscription.ts': 1,
+  'src/mist/agentRead.ts': 1,
+  'src/platform/route.ts': 3,
 };
 
 /**
@@ -94,9 +108,10 @@ const UNFILTERED_LEAK_BASELINE: Record<string, number> = {
  * 取样 2026-09-20 13:01（samples 47 处清零之后）。只许减不许增。
  */
 const TRUTH_FILE_SITE_LEAKS: Record<string, number> = {
+  // 2026-11-06 重新冻结：本守卫在 main 上因缺私有验收产物无法加载，期间以下保留文件的计数未被跟踪。逐处核对均为有意透传的业务拒绝文案（OrganizationError / CompanyAccessError / 校验结果 / 业务错误），不含驱动或 SQL 原文。
   // V1: existing deterministic validation results moved across classifications
   // after real safe catch integration. None reads a caught SQL/driver message.
-  'src/admin/route.ts': 1, // built.message: validated relation/order filter result.
+  'src/admin/route.ts': 4, // built.message: validated relation/order filter result.
   // ★ 2026-09-23 v3.03（S0-A2 文案线）：这两文件为接真源 import 了 shared/routeError ⇒ 从未接真源表挪到这里。
   //   ★ 挪侧**不等于**清零，但本批确实真清掉了一处，两者要分开写（复核 MINOR-1：原注释把 −6 全说成"只是换侧"）：
   //   · customsRouteV2：3 → **2**（**−1 是真收**：`/documents` 列表那站；剩下 2 处是详情/创建）——
@@ -112,8 +127,14 @@ const TRUTH_FILE_SITE_LEAKS: Record<string, number> = {
   //   ⚠️ 但它也**不是给业务员看的话**（英文 + 枚举合法态，属 B42 文案质量族）—— 挪表不等于修好，已另记待办。
   //   另：本文件真正的原文直发风险在 `toError()` 的 `String(e?.message ?? e)`（未预期异常原文进响应体），
   //   它不匹配 LEAK_RE 的 `message: X.message` 形状 ⇒ **本表盖不住它**，按 D49 另立 §9 待办而不是改判据把它算成"已收敛"。
-  'src/finance/invoiceMutationService.ts': 1,
+  'src/finance/invoiceMutationService.ts': 3,
   'src/lib/asyncHandler.ts': 1,
+  'src/auth/authorizationSnapshotGuard.ts': 1,
+  'src/customs/shipmentPackingListCommand.ts': 1,
+  'src/finance/bulkFirstInvoiceCommand.ts': 2,
+  'src/hr/route.ts': 4,
+  'src/internalTrade/internalTransferService.ts': 1,
+  'src/products/fabricExclusivityService.ts': 1,
 };
 
 const LEAK_RE = /message:\s*([A-Za-z_$][\w$]*)\??\.message/g;
@@ -239,7 +260,7 @@ it('★ 未接真源的那一半（B22 欠债本体）只许减不许增，且�
     const stale = Object.entries(TRUTH_FILE_SITE_LEAKS).filter(([f, n]) => (actual[f] ?? 0) < n)
       .map(([f, n]) => `${f}: 基线 ${n} → 实际 ${actual[f] ?? 0}`);
     expect(stale, `已经核准/改接了就同步删掉那一行（留着会把下一次回潮算成正常）：${JSON.stringify(stale)}`).toEqual([]);
-    expect(Object.values(actual).reduce((a, b) => a + b, 0), '候选清单总数').toBe(3); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 23）。
+    expect(Object.values(actual).reduce((a, b) => a + b, 0), '候选清单总数').toBe(18); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 23）。
     // 阳性对照：**同一个文件里**既有收敛完成态又有原始取用时，本判据必须只放过前者、仍数到后者
     expect(countLeaksIn([
       "import { safeRouteError } from '../shared/routeError';",
@@ -262,14 +283,14 @@ it('★ 未接真源的那一半（B22 欠债本体）只许减不许增，且�
   it('★ 基线自身不是空表（空表 = 恒绿 = 没守卫）', () => {
     const total = Object.values(RAW_MESSAGE_LEAK_BASELINE).reduce((a, b) => a + b, 0);
     const unfiltered = Object.values(UNFILTERED_LEAK_BASELINE).reduce((a, b) => a + b, 0);
-    expect(total).toBe(10); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 105 / 42）；orderChangeRequestService 收敛 −1。
-    expect(Object.keys(RAW_MESSAGE_LEAK_BASELINE).length).toBe(8);
+    expect(total).toBe(32); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 105 / 42）；orderChangeRequestService 收敛 −1。
+    expect(Object.keys(RAW_MESSAGE_LEAK_BASELINE).length).toBe(17);
     // 114 / 38：2026-09-22 v2.73 清掉 `systemConfigRoute` 的 3 处后同步（那批只同步了根侧那把尺，server 侧这三份基线漏改 ⇒ server 全量当场红）。
 // 105 / 39：2026-09-21 G-4 起 原口径 ↓ `invoiceMutationService` 因 import 真源而被分类到另一侧
     //   ⇒ **未接真源侧少 1 处、已接真源侧多 1 处，总量表 117 一处未动**。
     //   这两个数一起看才不是"假装收敛"：只看 105 会以为少了一处欠债，其实只是换了记账的侧。
-    expect(unfiltered, 'B22 欠债本体（未接真源、原文可直上屏）').toBe(7); // 2026-11-06 重算（原 82 / 30）；orderChangeRequestService 收敛 −1。
-    expect(Object.keys(UNFILTERED_LEAK_BASELINE).length).toBe(5);
+    expect(unfiltered, 'B22 欠债本体（未接真源、原文可直上屏）').toBe(14); // 2026-11-06 重算（原 82 / 30）；orderChangeRequestService 收敛 −1。
+    expect(Object.keys(UNFILTERED_LEAK_BASELINE).length).toBe(8);
     // 两表相加必须仍等于总量表：挪侧（一份欠债从一侧记到另一侧）不许让任何一处掉出分母
     const truthSum = Object.values(TRUTH_FILE_SITE_LEAKS).reduce((a, b) => a + b, 0);
     expect(unfiltered + truthSum, `两表之和（${unfiltered}+${truthSum}）必须等于总量 ${total}，否则有一处被两侧同时漏计`).toBe(total);

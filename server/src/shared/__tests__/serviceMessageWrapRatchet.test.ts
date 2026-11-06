@@ -42,7 +42,9 @@ const WRAP_BASELINE: Record<string, number> = {
   'src/market/autoQuoteSources.ts': 2,
   'src/development/convertService.ts': 0,
   'src/market/marketQuoteService.ts': 1,
-  'src/orderChanges/orderChangeRequestService.ts': 1,
+  // 内部分类字段：LLM_ALL_PROVIDERS_FAILED 的逐 provider 摘要只供 mist/assistant.ts 分类，不回给用户、不写日志。
+  'src/ai/llmProviders.ts': 1,
+  'src/orderChanges/orderChangeRequestService.ts': 0, // 2026-11-06：直接取消兜底改为固定文案，原文只进日志。
 };
 
 const WRAP_RE = /(?:message|error|reason)\s*:\s*(?:`[^`]*\$\{[^`]*?(?:\.message|String\([^)]*[Ee]rr|\?\?\s*e\b|\|\|\s*e\b)[^`]*`|'[^']*'\s*\+\s*[A-Za-z_]\w*\??\.message)/g;

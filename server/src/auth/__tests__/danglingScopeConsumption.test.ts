@@ -100,7 +100,6 @@ const EXEMPT: ReadonlyArray<{ scope: string; reason: Reason; note: string }> = [
   { scope: 'business:delete', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
   { scope: 'cockpit:read', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
   { scope: 'crm:write', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'customs:admin', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
   { scope: 'data:export:full', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
   { scope: 'data:import', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
   { scope: 'emails:maintenance:write', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },

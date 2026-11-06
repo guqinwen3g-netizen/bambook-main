@@ -1910,6 +1910,7 @@ export async function directCancelPendingOrder(
       const refusal = resolveError(e, DIRECT_CANCEL_ERRORS.CANCEL_FAILED);
       return { ok: false, error: { code: refusal.code as DirectCancelErrorCode, message: refusal.message, statusCode: refusal.status } };
     }
-    return { ok: false, error: { code: DIRECT_CANCEL_ERRORS.CANCEL_FAILED, message: `直接取消事务失败：${String(e?.message ?? e)}`, statusCode: 500 } };
+    logger.error('[orderChange] direct cancel failed', { orderId, error: e?.message || String(e) });
+    return { ok: false, error: { code: DIRECT_CANCEL_ERRORS.CANCEL_FAILED, message: '订单取消未能完成，请稍后重试。', statusCode: 500 } };
   }
 }
