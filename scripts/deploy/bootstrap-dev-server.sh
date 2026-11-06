@@ -195,6 +195,12 @@ server {
     root /srv/bambook-dev/current/web;
     client_max_body_size 64m;
     # Mist workspace routes are served by the Mist API; everything else under /api/ by the main API.
+    location = /api/mist/voice/stream {
+        proxy_pass http://127.0.0.1:8082;
+        include snippets/bambook-dev-proxy.conf;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
     location /api/mist/ {
         proxy_pass http://127.0.0.1:8082;
         include snippets/bambook-dev-proxy.conf;

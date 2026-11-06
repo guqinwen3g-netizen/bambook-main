@@ -24,7 +24,11 @@ import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
 import { handleMcpMessage, taskMcpTools, MCP_PROTOCOL_VERSIONS, MCP_SOURCE_RULES, type McpRepository } from './agentMcp';
 import { AGENT_DELEGATION_HEADER, agentRouteAllowed, createAgentDelegation, isAgentActor, type AgentDelegation } from './agentDelegation';
 import { agentCatalog, agentGet, agentQuery, agentRelated } from './agentRead';
-import {SERVICE_KEY_HEADER} from './agentIdentities';
+import {SERVICE_KEY_HEADER, personalIdentityId} from './agentIdentities';
+import type { MistVoiceService } from './voice/service';
+import { samePublicOrigin } from '../shared/bambookPublicOrigins';
+import { responseLocale } from './responseLanguage';
+import type { PlatformVoiceStore } from '../ai/platformVoice';
 import { TASK_HEADER, TASK_CONTROL_HEADER } from './agentTasks';
 import type { MistMailReceiver } from './mail/receiverWorker';
 import { MistMailService } from './mail/service';
@@ -45,7 +49,7 @@ function publicError(res: Response, error: any) {
   const known = error instanceof MistApiError || (typeof error?.code === 'string' && Number(error?.status) >= 400 && Number(error?.status) < 500);
   res.status(known ? Number(error.status) : 500).json({ ok: false, error: { code: known ? error.code : 'MIST_REQUEST_FAILED', message: known ? error.message : '公司操作未完成，请查询原请求回执或稍后重试' } });
 }
-export function createMistRouter(options: { prisma?: any; marketStore?: MarketStore; platformProviders?: PlatformProviderStore; filesRoot?: string; repository?: MistRepository; contract?: MistContract; authenticate?: RequestHandler; subscriptions?: CodexSubscriptionService; mail?: MistMailService; mailReceiver?: MistMailReceiver; mailTransport?: MailTransport; mailCredentialsRoot?: string; delegation?: AgentDelegation; delegationGuard?: (req: Request) => void }) {
+export function createMistRouter(options: { prisma?: any; voice?: MistVoiceService; voiceSettings?: PlatformVoiceStore; marketStore?: MarketStore; platformProviders?: PlatformProviderStore; filesRoot?: string; repository?: MistRepository; contract?: MistContract; authenticate?: RequestHandler; subscriptions?: CodexSubscriptionService; mail?: MistMailService; mailReceiver?: MistMailReceiver; mailTransport?: MailTransport; mailCredentialsRoot?: string; delegation?: AgentDelegation; delegationGuard?: (req: Request) => void }) {
   const repository = options.repository ?? new MistRepository(options.prisma, options.contract ?? require('../shared/mistWorkspace') as MistContract, new MistPrivateFiles(options.filesRoot ?? path.resolve(__dirname, '../../private/mist-files')));
   const router = Router();
   const authenticate = options.authenticate ?? requireAuth;
@@ -103,6 +107,43 @@ export function createMistRouter(options: { prisma?: any; marketStore?: MarketSt
   router.use(createPublicEntryHostGuard('mist'));
   const actor = (req: Request) => (req as Request & { actor: TokenPayload }).actor;
   const run = (handler: (req: Request, res: Response) => Promise<void>): RequestHandler => (req, res) => { void handler(req, res).catch(error => publicError(res, error)); };
+  router.get('/workspaces/:id/voice/status', run(async (req, res) => {
+    if (isAgentActor(actor(req))) fail('FORBIDDEN', '语音只供本人使用', 403);
+    await repository.authorizePersonalAgentVoice(actor(req), req.params.id);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.json(options.voice?.status() ?? { configured: false });
+  }));
+  router.post('/workspaces/:id/voice/sessions', run(async (req, res) => {
+    const prior = actor(req), workspaceId = req.params.id;
+    if (isAgentActor(prior)) fail('FORBIDDEN', '语音只供本人使用', 403);
+    const body = exactBody(req.body, ['locale', 'taskId']);
+    if (body.taskId !== undefined && (typeof body.taskId !== 'string' || body.taskId.length > 100)) fail('INVALID_INPUT', '任务编号无效', 400);
+    const origin = req.get('Origin') ?? '';
+    if (!samePublicOrigin(req.get('Host') ?? '', origin) && !(/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.get('Host') ?? ''))) fail('FORBIDDEN', '语音来源无效', 403);
+    const voice = options.voice; if (!voice) fail('VOICE_NOT_CONFIGURED', '平台尚未配置实时语音', 503);
+    if (!(await repository.platformTaskCapabilities(prior, workspaceId)).platformAvailable) fail('MIST_ASSISTANT_NOT_CONFIGURED', '平台模型暂不可用', 503);
+    const authorize = async () => { await repository.authorizePersonalAgentVoice(prior, workspaceId); };
+    const task = async (id: string) => {
+      const item = await repository.getAgentTask(prior, workspaceId, id);
+      if (item.executor !== 'platform' || item.identityId !== personalIdentityId(workspaceId, prior.userId)) fail('FORBIDDEN', '只能接续本人的个人 Agent 事项', 403);
+      return item;
+    };
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.status(201).json(await voice!.issue({
+      owner: workspaceId + ':' + prior.userId, workspaceId, locale: responseLocale(body.locale), taskId: body.taskId, authorize, task,
+      submit: async (text, requestId, current) => {
+        if (current?.waitingProposalIds.length) fail('AGENT_CONFIRMATION_REQUIRED', '请先在页面确认当前事项', 422);
+        const question = current?.questions?.find(q => !q.answer);
+        if (current && question) return repository.answerAgentTaskQuestion(prior, workspaceId, current.id, { requestId, version: current.version, questionId: question.id, answer: text });
+        return repository.assignPersonalAgentTask(prior, workspaceId, { requestId, name: text.slice(0, 60), instructions: text, locale: responseLocale(body.locale) }, delegation.makeServiceCredential);
+      },
+      control: async (action, current, requestId) => {
+        if (action !== 'cancel') return repository.changeAgentTask(prior, workspaceId, current.id, action, { requestId, version: current.version });
+        await repository.cancelAgentTask(prior, workspaceId, current.id, { requestId, version: current.version });
+        return repository.getAgentTask(prior, workspaceId, current.id);
+      },
+    }, origin));
+  }));
   // Older native clients have a closed type enum. Keep broad REST results compatible until explicit opt-in.
   const mailRecordReadOptions=(req:Request)=>{if(req.query.includeMailRecords!==undefined&&req.query.includeMailRecords!=='1')fail('INVALID_INPUT','邮件读取能力参数无效',400);return{excludeTypes:req.query.includeMailRecords==='1'?[]:['email_draft','email_send']};};
   router.get('/workspaces/:id/agent-tasks',run(async(req,res)=>{exactBody(req.query,['cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.listAgentTasks(actor(req),req.params.id,req.query.cursor));}));
@@ -145,6 +186,19 @@ export function createMistRouter(options: { prisma?: any; marketStore?: MarketSt
     await options.prisma.auditLog.create({ data: { id: randomUUID(), actorId: actor(req).userId, action, targetType: 'PlatformAiProvider', targetId, detail } });
   };
   const brief = (p: { name: string; baseUrl: string; model: string; enabled: boolean }) => ({ name: p.name, host: hostOf(p.baseUrl), model: p.model, enabled: p.enabled });
+  router.get('/ai/platform-model/voice', subscriptionCall(async (req, res) => {
+    await platformAdmin(req);
+    if (!options.voiceSettings) fail('VOICE_NOT_CONFIGURED', '实时语音配置不可用', 503);
+    res.json(options.voiceSettings!.view());
+  }));
+  router.put('/ai/platform-model/voice', subscriptionCall(async (req, res) => {
+    await platformAdmin(req);
+    if (!options.voiceSettings) fail('VOICE_NOT_CONFIGURED', '实时语音配置不可用', 503);
+    const saved = await options.voiceSettings!.update(exactBody(req.body, ['revision', 'enabled', 'apiKey', 'clearKey', 'voice', 'speed', 'loudness']), next => providerAudit(req, 'platform.ai.voice.update', 'doubao', { revision: next.revision, enabled: next.enabled, voice: next.voice, speed: next.speed, loudness: next.loudness, hasKey: next.hasKey }));
+    // Stop existing speech on key rotation/disable; persistent work is unaffected.
+    options.voice?.stopCalls();
+    res.json(saved);
+  }));
   // Platform market reference quotes: readable by any signed-in account; values are references with source and time.
   router.get('/market/quotes', run(async (req, res) => { if (!actor(req)?.userId) fail('UNAUTHENTICATED', '请先登录', 401); const store = options.marketStore; res.set('Cache-Control', 'private, max-age=300').json({ latest: store?.latest() ?? null, history: (store?.history(30) ?? []).map(s => ({ fetchedAt: s.fetchedAt, fx: s.fx.map(q => ({ currency: q.currency, settlementBuy: q.settlementBuy })), materials: s.materials.map(m => ({ key: m.key, price: m.price, date: m.date })) })) }); }));
   router.get('/ai/platform-model', subscriptionCall(async (req, res) => { await platformAdmin(req); res.json(platformView()); }));

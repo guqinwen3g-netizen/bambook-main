@@ -10,6 +10,7 @@ import { Banner, Button, CardHeader, Dialog, Drawer, Field, FormGrid, IconButton
 import { apiService } from '../../../../../services/apiService';
 import { AiSubscriptionPanel, type ChatgptSubscriptionStatus } from './AiSubscriptionPanel';
 import { FailureNotice } from '../../runtime/FailureNotice';
+import { PlatformVoicePanel } from './PlatformVoicePanel';
 
 type ApiProvider = { id: string; name: string; baseUrl: string; model: string; enabled: boolean; keyHint: string };
 type ChainView = { chatgpt: ChatgptSubscriptionStatus | null; api: { providers: ApiProvider[]; order: string[] }; env: Array<{ id: string; host: string; model: string }>; supportsApi: boolean };
@@ -148,6 +149,7 @@ export function PlatformAiProvidersPanel({ sessionKey }: { sessionKey: string })
         </FormGrid>
       </>}
     </Drawer>
+    <PlatformVoicePanel sessionKey={sessionKey} />
     <Dialog open={!!removing} tone="bad" onClose={() => { if (!busy) setRemoving(null); }} title={uiText(removing ? `删除「${removing.name}」？` : '')} description={uiText("删除后平台 AI 不再调用此服务，服务器上保存的 Key 一并删除。")}
       footer={<><Button disabled={busy} onClick={() => setRemoving(null)}>{uiText("取消")}</Button><Button variant="danger" loading={busy} onClick={() => void remove()}>{uiText("删除")}</Button></>}>
       {error && removing && <Banner tone="bad" title={uiText("未能删除")}>{uiText(error)}</Banner>}
