@@ -20,9 +20,9 @@ const BODY_LIMIT = 100_000;
 const MAIL_PORTS = new Set([143, 465, 587, 993]);
 const list = (value: string | undefined) => (value || '').split(',').map(item => item.trim().toLowerCase()).filter(Boolean);
 
-type Policy = { allowedHosts: string[]; insecureTlsHosts: string[]; allowedRecipientDomains: string[] };
+type Policy = { allowedHosts: string[]; allowPublicHosts: boolean; insecureTlsHosts: string[]; allowedRecipientDomains: string[] };
 export function mailPolicy(env: NodeJS.ProcessEnv = process.env): Policy {
-  return { allowedHosts: list(env.MIST_MAIL_ALLOWED_HOSTS), insecureTlsHosts: list(env.MIST_MAIL_INSECURE_TLS_HOSTS), allowedRecipientDomains: list(env.MIST_MAIL_ALLOWED_RECIPIENT_DOMAINS) };
+  return { allowedHosts: list(env.MIST_MAIL_ALLOWED_HOSTS), allowPublicHosts: env.MIST_MAIL_ALLOW_PUBLIC_HOSTS === '1', insecureTlsHosts: list(env.MIST_MAIL_INSECURE_TLS_HOSTS), allowedRecipientDomains: list(env.MIST_MAIL_ALLOWED_RECIPIENT_DOMAINS) };
 }
 
 /** 选择实际同步的远端文件夹：收件箱、已发送（特殊用途标记或常见名称）、归档；垃圾箱/垃圾邮件不同步。 */
@@ -77,7 +77,8 @@ export class MistMailService {
   /**
    * 唯一的“检查并钉住地址”入口：所有 IMAP / SMTP 连接都用这里返回的目标，不再按主机名重新解析（防 DNS 重绑定）。
    * - 运维白名单 MIST_MAIL_ALLOWED_HOSTS 内的主机（如经 /etc/hosts 指向本机的自建邮件服务器）保持按名字连接；
-   * - 其余主机：解析出的全部地址须为公网地址，连接固定使用第一个已校验地址，TLS servername 保持原主机名以校验证书；
+   * - 其余主机：仅白名单为空或显式启用 MIST_MAIL_ALLOW_PUBLIC_HOSTS=1 时允许，且端口须在 MAIL_PORTS 内；
+   *   解析出的全部地址须为公网地址，连接固定使用第一个已校验地址，TLS servername 保持原主机名以校验证书；
    * - 主机本身就是 IP 时直接使用该 IP。
    */
   private async checkHosts(account: EmailAccount): Promise<MailConnectTarget> {
@@ -86,8 +87,8 @@ export class MistMailService {
     const resolved = new Map<string, Promise<string[]>>(), resolve = (name: string) => { if (!resolved.has(name)) resolved.set(name, this.resolveHost(name)); return resolved.get(name)!; };
     for (const [kind, host, port, label] of [['imap', t.imapHost, t.imapPort, '收信'], ['smtp', t.smtpHost, t.smtpPort, '发信']] as const) {
       const name = host.trim().toLowerCase();
-      if (policy.allowedHosts.length ? !policy.allowedHosts.includes(name) : !MAIL_PORTS.has(port)) fail('MAIL_HOST_NOT_ALLOWED', `${label}服务器 ${host}:${port} 不在允许范围内`, 422);
       if (policy.allowedHosts.includes(name)) { pinned[kind] = { host, servername: host }; continue; }
+      if ((policy.allowedHosts.length && !policy.allowPublicHosts) || !MAIL_PORTS.has(port)) fail('MAIL_HOST_NOT_ALLOWED', `${label}服务器 ${host}:${port} 不在允许范围内`, 422);
       const addresses = isIP(name) ? [name] : await resolve(name).catch(() => fail('MAIL_HOST_UNRESOLVED', `${label}服务器 ${host} 无法解析，请核对地址`, 422));
       if (!addresses.length || addresses.some(address => typeof address !== 'string' || !isIP(address) || isInternalAddress(address))) fail('MAIL_HOST_NOT_ALLOWED', `${label}服务器 ${host} 指向内部网络，不能使用`, 422);
       pinned[kind] = { host: addresses[0], servername: name };
