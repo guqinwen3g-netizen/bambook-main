@@ -145,6 +145,8 @@ magpie 暂不登录订阅。平台 AI（小竹、报价审阅、汇总、对账�
 
 本机自建的 `mail.sylway.cloud`（Postfix/Dovecot，只听 127.0.0.1，见 `scripts/deploy/bootstrap-dev-mail.sh`）用于验收走查时，须同时登记：`MIST_MAIL_ALLOWED_HOSTS` 加入 `mail.sylway.cloud`，`MIST_MAIL_INSECURE_TLS_HOSTS` 加入同名（自签证书），并在 `/etc/hosts` 将其指向 127.0.0.1。该服务不对外投递；`MIST_MAIL_ALLOWED_RECIPIENT_DOMAINS` 可限定收件域。改 `backend.env` 时保留原属主与 0640 权限。
 
+**生产开通状态（2026-11-06）**：用户明确允许后，已设置 `MIST_MAIL_ALLOW_PUBLIC_HOSTS=1` 并清空 `MIST_MAIL_ALLOWED_RECIPIENT_DOMAINS`，对共享 Mist 服务的全部租户生效。原受信主机、TLS 例外、语音及其他环境项保持不变，保留 `root:bambook-deploy`、0640，仅重启 Mist；配置备份留在 root 私有目录。运行进程、公网及双 API / 数据库健康已核对。此调整允许租户使用自己的公网 IMAP/SMTP 服务，不把本机验收服务器变成公网中继；没有更改 DNS 或开放 25 端口，也没有代登录邮箱或发送实际邮件。实际第三方账号收发仍须在绑定后核验，不能以开关、TLS 连通或模拟用例替代。
+
 ## 邮箱凭据存储（2026-11-02）
 
 公司在智能邮箱绑定的密码/授权码只存服务器私有目录。生产（`NODE_ENV=production`）必须同时配置：`MIST_MAIL_CREDENTIAL_DIR`（发布目录之外、服务可写的持久位置，当前为 `/srv/bambook-dev/shared/mist-mail-credentials`，0700）与 `MIST_MAIL_CREDENTIAL_KEY`（≥32 位随机串，AES-256-GCM 加密落盘）。缺任一项时绑定直接返回 `MAIL_CREDENTIAL_STORE_UNAVAILABLE`（409），不再写出可逆的明文副本，也不会写进每次发布都会替换的 `current/server/private`。保存失败只在日志记录文件系统错误码。
