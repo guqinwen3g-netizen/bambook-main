@@ -119,6 +119,14 @@ GitHub 的 deployment / ops 工作流均已停用，旧服务器授权及仓库 
 
 magpie 暂不登录订阅。平台 AI（小竹、报价审阅、汇总、对账、Agent 任务）改用平台 ChatGPT 订阅里的 GPT-6.1 Terra：`backend.env` 设 `BAMBOOK_CODEX_MODEL=gpt-6.1-terra`（改前副本在 `shared/private-backups/ops-scripts-20261106/`，属主与权限不变），重启两套服务后进程已载入。实测订阅直连 Terra 返回正常，小竹在模拟公司「诚川纺织」实答一次（200，约 3.7 秒）。推理档位仍按功能分配（报价审阅 max、对账与 Agent 任务 high、问答与汇总 medium）。订阅令牌按期自动续期；令牌失效时由平台管理员在「平台设置 › 平台 AI 模型」重新连接。
 
+### 豆包实时语音（2026-11-06）
+
+语音运行于 Mist API，公网使用 `/api/mist/voice/stream`。Nginx 必须为该路径保留 WebSocket 精确匹配转发，使用 HTTP/1.1，并传递 `Upgrade` 与 `Connection: upgrade`；同时保留原主机、协议与代理缓冲配置。新服务器规则在 `scripts/deploy/bootstrap-dev-server.sh`，已有服务器须先备份配置、执行 `nginx -t` 后重载；应用直传不会自动更新 Nginx。公司域名的直连 HTTPS 外层代理也须传递升级头，不能只更新内层 Mist 转发；本轮两层均已补齐。无票据升级请求被拒绝只证明鉴权有效，不能替代带一次性票据的真实连接验收。
+
+用户已授权复用本机 OpenBitFun 豆包语音连接。服务器私有 `backend.env` 配置 `BAMBOOK_VOICE_API_KEY`、`BAMBOOK_VOICE_VOICE`，保留原属主与 0640 权限，仅重启 Mist 服务载入。页面后续保存的私有 `platform-voice.json` 优先于环境变量，包括明确禁用的设置；不要通过改环境变量覆盖管理员停用状态。该文件与平台模型凭据放在发布间持久保存的私有目录中，按私有备份规则保存；Key 不入库、不回传页面。
+
+本轮已验证：运行中的 Mist 进程载入配置、两套 API 与数据库健康、服务器真实豆包握手与会话建立、固定测试语句返回完整音频。最终源码另以录制音频验证真实转写、单次模拟交办与播报，不写共享业务数据。鉴权票据、服务器语音返回、隔离浏览器业务链和终端实际麦克风是不同验收项，分别登记，不以 `configured: true` 代替成功收音与交办。
+
 ### 平台模型网关 magpie（2026-11-04）
 
 用户要求在后端加装 magpie，补充平台可用的模型订阅。magpie 是开源（MIT）的模型网关，把多个订阅和 API 服务汇成一个 OpenAI / Anthropic 兼容入口，额度用完或出错时转到下一个，并记录用量。
