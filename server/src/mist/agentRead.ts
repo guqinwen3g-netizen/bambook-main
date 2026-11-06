@@ -10,7 +10,7 @@ import type { MistState } from '../shared/mistWorkspace';
 import { emailSendEffectiveStatus, emailSendRecipients } from '../shared/mistEmail';
 import { MistApiError } from './errors';
 
-type ObjectType = { type: string; label: string; scope: PermissionScope; path: string[]; view: string; section?: string; linkId?: (row: any) => string | undefined };
+type ObjectType = { type: string; label: string; scope: PermissionScope; path: string[]; view: string; section?: string; linkId?: (row: any) => string | undefined; /** Rows that live inside parent records (generated documents) are flattened here instead of walked by `path`. */ flatten?: (state: MistState) => any[] };
 
 /** 首批可读对象。view 与前端路由一致，链接由页面用 go(view, id) 打开。 */
 export const AGENT_OBJECT_TYPES: ObjectType[] = [
@@ -39,6 +39,22 @@ export const AGENT_OBJECT_TYPES: ObjectType[] = [
   { type: 'prepayment_move', label: '预付退款/转抵', scope: 'invoices:read', path: ['payables', 'prepaymentMoves'], view: 'procurement', linkId: r=>r.purchaseId },
   { type: 'production', label: '生产', scope: 'production:read', path: ['productions'], view: 'production-board' },
   { type: 'shipment', label: '出运', scope: 'shipments:read', path: ['fulfillment', 'shipments'], view: 'shipments' },
+  // 出运单据（CI/PL/BL 等）：与报关与单证分区同一读权限；只给元数据与文件编号，不给文件字节，生成快照不入模型。
+  { type: 'shipment_document', label: '出运单据', scope: 'customs:read', path: ['fulfillment', 'documents'], view: 'shipments', linkId: r => r.shipmentId },
+  // 报价单、PI/SC 生成记录：嵌在报价/订单记录内，按所属记录的读权限展开；只给文件元数据，不给快照与字节。
+  { type: 'quotation_document', label: '报价单文件', scope: 'quotations:read', path: ['market', 'quotations'], view: 'quotations', linkId: r => r.quotationId, flatten: state => ((state as any).market?.quotations ?? []).flatMap((q: any) => (q.documents ?? []).map((d: any) => ({ ...d, code: q.code, kind: 'QUOTATION' }))) },
+  { type: 'order_document', label: '订单合同文件', scope: 'orders:read', path: ['orders'], view: 'orders/detail', linkId: r => r.orderId, flatten: state => ((state as any).orders ?? []).flatMap((o: any) => (o.documents ?? []).map((d: any) => ({ ...d, orderId: o.id, code: d.number }))) },
+  // 收款与核销链、锁汇结汇、信用证、询价、索样、报表订阅：读权限与 access.ts 读分区一致，分区缺权限时仓储投影已清空，这里再复核一次。
+  { type: 'receipt_record', label: '客户收款', scope: 'invoices:read', path: ['receipts'], view: 'receipts' },
+  { type: 'receipt_allocation', label: '收款核销', scope: 'invoices:read', path: ['allocations'], view: 'receipts', linkId: r => r.receiptId },
+  { type: 'finance_reversal', label: '财务冲正', scope: 'invoices:read', path: ['financeReversals'], view: 'receipts' },
+  { type: 'customer_statement', label: '客户对账单', scope: 'invoices:read', path: ['customerStatements'], view: 'invoices' },
+  { type: 'bank_account', label: '公司银行账户', scope: 'vouchers:write', path: ['bankAccounts'], view: 'receipts' },
+  { type: 'fx_record', label: '锁汇结汇', scope: 'vouchers:read', path: ['fxRecords'], view: 'receipts' },
+  { type: 'letter_of_credit', label: '信用证', scope: 'customs:read', path: ['letterOfCredits'], view: 'shipments' },
+  { type: 'rfq', label: '供应商询价', scope: 'procurement:read', path: ['rfqs'], view: 'procurement' },
+  { type: 'sample_request', label: '客户索样', scope: 'products:read', path: ['sampleRequests'], view: 'samples' },
+  { type: 'report_schedule', label: '报表订阅', scope: 'reports:read', path: ['reportSchedules'], view: 'reports' },
   { type: 'invoice', label: '发票', scope: 'invoices:read', path: ['invoices'], view: 'invoices' },
   { type: 'risk', label: '风险', scope: 'risk:read', path: ['platform', 'risks'], view: 'risks' },
   { type: 'claim', label: '售后案件', scope: 'aftersales:read', path: ['platform', 'claims'], view: 'claims' },
@@ -54,12 +70,35 @@ const QUERY_RESULT_MAX = 20_000; // 留出公司等字段的空间，低于本�
 function deny(code: string, message: string, status = 400): never { throw new MistApiError(code, message, status); }
 
 function rows(state: MistState, type: ObjectType): any[] {
+  if (type.flatten) return type.flatten(state).filter(r => r && typeof r === 'object' && typeof r.id === 'string').map(row => mailReadRecord(type.type, row));
   let value: any = state;
   for (const key of type.path) value = value?.[key];
   return Array.isArray(value) ? value.filter(r => r && typeof r === 'object' && typeof r.id === 'string').map(row=>mailReadRecord(type.type,row)) : [];
 }
 /** Only public mail facts are model-visible; request keys and the record-level transport response stay internal. */
+const DOCUMENT_CONTENT_LIMIT = 2_000;
+/** Shipment documents expose facts and file ids only; generated snapshots carry full party/price tables and stay out of the model context. */
+function documentReadRecord(row:any){
+  const content=typeof row.content==='string'?row.content:'';
+  return{id:row.id,shipmentId:row.shipmentId,orderId:row.orderId,type:row.type,number:row.number,version:row.version,title:row.title,status:row.status,dueDate:row.dueDate,createdAt:row.createdAt,issuedAt:row.issuedAt,invoiceId:row.invoiceId,fileIds:row.fileIds,
+    generated:Array.isArray(row.generated)?row.generated.map((g:any)=>({id:g.id,kind:g.kind,number:g.number,fileId:g.fileId,fileName:g.fileName,sha256:g.sha256,bytes:g.bytes,generatedAt:g.generatedAt,sealed:!!g.sealUseId})):[],
+    ...(row.externalIssue?{externalIssue:{issuer:row.externalIssue.issuer,at:row.externalIssue.at}}:{}),
+    ...(row.financeRejection?{financeRejection:{reason:row.financeRejection.reason,at:row.financeRejection.at}}:{}),
+    content:content.slice(0,DOCUMENT_CONTENT_LIMIT),...(content.length>DOCUMENT_CONTENT_LIMIT?{contentTruncated:true}:{})};
+}
+/** Generated quotation / order files: file facts only; the stored snapshot holds prices, parties and terms and stays out of the model context. */
+function generatedFileReadRecord(row:any){
+  return{id:row.id,...(row.quotationId?{quotationId:row.quotationId}:{}),...(row.orderId?{orderId:row.orderId}:{}),code:row.code,kind:row.kind??row.orderKind,number:row.number,revision:row.revision,version:row.version,draft:row.draft,fileId:row.fileId,fileName:row.fileName,sha256:row.sha256,bytes:row.bytes,templateVersion:row.templateVersion,generatedAt:row.generatedAt,generatedBy:row.generatedBy,sealed:!!row.sealUseId};
+}
+/** Bank account numbers are masked to the last four digits; everything else about the account (name, balance basis, closure) stays readable. */
+function bankAccountReadRecord(row:any){
+  const no=typeof row.accountNo==='string'?row.accountNo.replace(/\s/g,''):'';
+  return{...row,accountNo:no?'****'+no.slice(-4):''};
+}
 function mailReadRecord(type:string,row:any){
+  if(type==='bank_account')return bankAccountReadRecord(row);
+  if(type==='shipment_document')return documentReadRecord(row);
+  if(type==='quotation_document'||type==='order_document')return generatedFileReadRecord(row);
   if(!['email_draft','email_send'].includes(type))return row;
   const common={id:row.id,subject:row.subject,accountId:row.accountId,...(type==='email_send'?{status:row.status,effectiveStatus:emailSendEffectiveStatus(row)}:{}),from:row.from,to:row.to,cc:row.cc,bcc:row.bcc,createdAt:row.createdAt,updatedAt:row.updatedAt,body:row.body,replyToId:row.replyToId};
   if(type==='email_draft')return{...common,updatedBy:row.updatedBy,template:row.template,links:row.links,fileIds:row.fileIds};

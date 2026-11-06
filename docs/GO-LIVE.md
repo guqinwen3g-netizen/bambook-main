@@ -170,7 +170,7 @@
 **当前待办（2026-11-06）**
 - 真实业务邮件：2026-11-06 用户明确允许后，已对全部租户启用公网 IMAP/SMTP 接入并解除仅 `sylway.cloud` 的外发域限制；受信验收邮箱和 TLS 例外保留。租户通过自己的邮箱账号 / 授权码绑定，实际第三方账号收发尚待验收，未代用户登录或发送真实邮件。该接入不需要开放自建服务器的 25 端口或更改 MX/PTR；OAuth 专用邮箱和自建公网邮件服务不因该开关自动具备。
 - 可自主：完成当前 AI / Agent 主线剩余能力、在用代码的回归欠账与权限登记收口。#685 已删除大批旧代码和旧测试，不再使用删除前的 285 项等旧计数；缺库用例与实际回归须分别核实，不能仅凭发布门禁通过声称全量全绿。
-- 22 个旧权限登记项须按现行 Mist 语义逐条核实，不等于已发现 22 个越权漏洞。定向 106 项通过：薪资由 `sensitive:salary` 强制保护，管理毛利按 `reports:admin` 及来源范围保护；业务员本人报价核算的毛利按既有定案保留。佣金字段与旧权限码、其他登记项的语义对应尚未全部收口，不能宣布权限全验收。
+- 22 个旧权限登记项已逐条核实（2026-11-07，`codex/dangling-scope-closure`，未合入）：15 个由现行 Mist 命令门禁强制（登记为 `superseded-by-mist`，note 写明判定点），7 个对应动作在 Mist 已不存在（`module-absent`）；没有发现需要新增门禁的越权。佣金率修改要求 `pricing:admin`，报价人对自己报价核算可见沿用既有定案。无新权限码、无迁移。
 - 本人或外部条件：Windows 桌面包实机运行、交付设备的麦克风及本人 ChatGPT 登录后桌面对话；异地备份按用户已定投产后再定，不将它们混入可自主完成的开发事项。
 - `dev-scenario-rebuild.cjs` 与 `acceptance-isolated-run.cjs` 的 `dev-scenario-rehearsal` 模式指向已删除的 `fullBusinessScenarioDriverAcceptance.test.ts`（#680）。共享库整库重建已被 2026-10-19 裁决禁止，这道只读门现对任何结果都拒绝，不再换用例。
 - **旧接口已退役（2026-11-06）**：`/api/v1/orders`、`/api/v2/orders`、`/api/v1/procurement`、`/api/v1/approvals`、`/api/v1/approvals-kernel` 已卸载并删除代码（#679、#680），现网 404；供应商承诺审批名单保留原路径。
@@ -742,6 +742,14 @@
 - 开发服务器访问：`docs/ops/dev-server-access.md`（默认本机验证、直接发布；GitHub 自动部署已取消，正式环境不在范围）。
 
 ## 7. 进度记录
+
+- **2026-11-07 Agent 可读财务与相关台账（分支 `codex/dangling-scope-closure`，已推送未合入）**：新增只读对象类型 `receipt_record`（客户收款）、`receipt_allocation`、`finance_reversal`、`customer_statement`、`bank_account`（账号只给后四位，需 `vouchers:write`）、`fx_record`、`letter_of_credit`、`rfq`、`sample_request`、`report_schedule`；权限与现有读分区一致，缺权限账号看不到类型也读不到，报表订阅仍只限本人。财务 Agent 现在能查到到账、核销、结汇、信用证编号再下写命令。新增 2 项测试；`test:mist` 全量此前仅有的 2 项失败是任务连接工具数断言（9→10），已更新，Agent 相关 26 文件 248 项通过。出口退税、月结未开放，仍在后续。
+
+- **2026-11-07 Agent 可读附件正文（分支 `codex/dangling-scope-closure`，已推送未合入）**：标准 MCP 与平台任务新增只读 `bambook_file_text({workspaceId,fileId,maxChars})`，复用附件下载的同一授权（`canReadFile`），返回纯文本或 PDF 前 20 页的有界摘录（默认 8000、最多 20000 字符，超出标记 `truncated`），附外部资料提示；图片、扫描件、Office 文件、超 20MB 或无法解析的明确返回 `unsupported/unreadable` 与原因，不猜测内容、不返回字节。无权限与不存在的文件同为 404。新增 9 项测试（含真实 PDF 解析与授权拒绝）；MCP 工具清单测试同步。桌面工作助手的同名工具尚未提供；服务器未部署，未用真实附件验收。基线：本分支起点（= main b0470a8e）`npm test` 2172、`test:mist` 2510、`test:access` 693 全绿（另有 *.pg 测试因无库跳过），`mist:check` 0 错误。
+
+- **2026-11-07 Agent 可读出运单据（分支 `codex/dangling-scope-closure`，已推送未合入）**：新增对象类型 `shipment_document`，沿用「报关与单证」分区的 `customs:read`；只给单据事实、文件编号和已生成文件的摘要（编号、哈希、大小、是否盖章），生成快照与外部签发证据文本不入模型，正文最多 2000 字并标记截断。无该读权限的账号看不到类型也读不到。另增 `quotation_document`（报价单文件，`quotations:read`）与 `order_document`（PI/SC 合同文件，`orders:read`），从所属记录展开，只给文件元数据，不给快照；仍受所属记录的数据范围限制。新增 3 项测试，Agent 与 mist 相关测试、服务端类型通过；未读取文件字节、未部署。主线 ② 仍缺：邮件附件文本摘录。
+
+- **2026-11-07 22 个旧权限登记项收口（分支 `codex/dangling-scope-closure`，已推送未合入）**：对照 `mistWorkspace.ts` 命令权限分发与仓储层逐码核实，15 个已由现行码强制（含 `settings.update` 经仓储层要求 `users:write`、Agent 确认要求 `ai:write:*` 加原命令权限），7 个动作已不存在；新增 `superseded-by-mist` 归类，未改任何运行代码，守卫测试 44 项通过。
 
 - **2026-11-07 历史分支与手册 #614 收口**：用户明确授权逐条审核、验证后合入及删除过时分支。复核余下 6 条历史分支：2 条已合入、P0 仅剩无人工改动的自动合并记录、供应商结算已被现行流程与权限保护覆盖、旧 UI 发布检查点及公司范围规格已过时；不把旧源码回灌 main。#614 补齐每课 SOP、岗位总览与当前 5 篇文字 SOP，保留 35 课 / 238 步 / 273 图及独立核验口径；修复多课程搜索下单课打印范围、带片段的 SOP 链接，去掉新增重复教学小字，窄屏表格保持可读列宽。11 文件 188 项定向、前端/助手类型、严格 Wiki 和覆盖检查通过；实际 Chromium 宽窄、深浅、岗位及文字 SOP 跳转、打印范围与恢复通过。主线独立对照同样有 29 个历史脚本文件无法通过 `vitest run scripts/`（包括非 Vitest 脚本、退役接口和旧原型路径）；不宣称总跑全绿或员工培训已验收。代码合入、公开版本和最终分支状态以本轮 Git / 部署回读为准，私有回执不入库。
 

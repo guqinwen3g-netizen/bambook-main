@@ -223,7 +223,7 @@ export async function acknowledgePlatformStep(db:any,actor:AgentActor,lease:Agen
   const step=c.platform.steps.at(-1);if(!step||step.id!==stepId)fail('AGENT_TASK_CHANGED','执行步骤已变化',409);if(step.result!==undefined)return;
   const n={...next(c,now,'model_step','ack-'+stepId,[result]),platform:{...c.platform,steps:compactPlatformTaskSteps(c.platform.steps.map(s=>s.id===stepId?{...s,result}:s)),failures:0,issue:undefined,retryAt:undefined,checkpointBeforeIssue:undefined}};
   if(c.platform.checkpointBeforeIssue!==undefined)n.checkpoint=c.platform.checkpointBeforeIssue;
-  const data=result as any;if(['bambook_get','bambook_query','bambook_related','bambook_audit','bambook_mail_receiving'].includes(step.plan.name)&&!data?.error&&!data?.truncated&&!data?.object?.truncated&&!c.requiredRead)n.platform.requiresRead=false;
+  const data=result as any;if(['bambook_get','bambook_query','bambook_related','bambook_audit','bambook_mail_receiving','bambook_file_text'].includes(step.plan.name)&&!data?.error&&!data?.truncated&&!data?.object?.truncated&&!c.requiredRead)n.platform.requiresRead=false;
   await save(db,row,c,n);
 }
 /** Release only this completed local runner; human stop/pause or a revoked grant always wins. */

@@ -78,9 +78,14 @@ type Reason =
    *   · `ui-label-only`         = **按口径就不该有门禁**（不是欠账，是设计）
    * ⇒ 归入本类后**不再计入「待接通」欠账**。
    */
-  | 'ui-label-only';
+  | 'ui-label-only'
+  /**
+   * ★ 2026-11-07 新增：旧主 API 删除后，**同一业务动作已由 Mist 命令层按现行权限码强制**，
+   * 本码只作岗位授权清单里的历史标签。不是欠账；note 必须写明现行判定点（文件:行）。
+   */
+  | 'superseded-by-mist';
 
-const REASONS: readonly Reason[] = ['module-absent', 'no-scope-enforcement', 'ui-label-only'];
+const REASONS: readonly Reason[] = ['module-absent', 'no-scope-enforcement', 'ui-label-only', 'superseded-by-mist'];
 
 /**
  * ★ 豁免登记表 —— 无消费点的权限码必须登记在此。
@@ -92,31 +97,29 @@ const EXEMPT: ReadonlyArray<{ scope: string; reason: Reason; note: string }> = [
   // that still does not replace the native approval policy gate.
   { scope: 'settings:account', reason: 'module-absent', note: '公司管理员授权清单含此码（companyAdministration），但无页面或接口按它判定' },
 
-  // ── 功能存在，但无 scope 强制点 ──
-  { scope: 'dashboard:read', reason: 'no-scope-enforcement', note: '首页按 cockpit:read 判定；公司管理员授权清单中的 dashboard:read 无判定点' },
-
-  // ── 2026-11-06 删除旧主 API 死代码后失去服务端判定点的码（如实登记，不是已接通）──
-  { scope: 'agent:approvals:approve', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'business:delete', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'cockpit:read', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'crm:write', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'data:export:full', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'data:import', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'emails:maintenance:write', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'exception:dr013:create', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'hr:salary:read', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'invoices:suggest_match', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'moq:capsule_exemption:write', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'remit:write', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'reports:write', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'risk:admin', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'sample:color_batch:write', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'sample:early_production:write', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'sample:shipment:write', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'sensitive:commission', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'sensitive:profit', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'settings:automation:write', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
-  { scope: 'settings:tolerance:write', reason: 'no-scope-enforcement', note: '原判定点在已删除的旧主 API 路由/服务（2026-11-06），Mist 仅作岗位授权展示；待 Mist 命令门禁接通后从本表删除' },
+  // ── 2026-11-07 逐码核对现行 Mist 命令门禁后的归类：superseded-by-mist = 已由现行码强制；module-absent = 对应动作已不存在 ──
+  { scope: 'dashboard:read', reason: 'superseded-by-mist', note: '首页为个人视图（mist/access.ts 首页恒可见），业务数据按各分区权限码过滤；本码无独立判定' },
+  { scope: 'cockpit:read', reason: 'superseded-by-mist', note: '同 dashboard:read：首页个人视图恒可见，业务数据按分区权限过滤（mist/access.ts:119）' },
+  { scope: 'agent:approvals:approve', reason: 'superseded-by-mist', note: 'Agent 提议确认由 ai:write:low/medium/high 加原命令自身权限强制，高风险另需密码重认证（mist/repository.ts:752-761）' },
+  { scope: 'business:delete', reason: 'superseded-by-mist', note: '删除动作按域写权限强制：联系人 relations:write / suppliers:write（mistMarket.ts:139），邮件草稿 emails:write（mistEmail.ts:189）' },
+  { scope: 'crm:write', reason: 'superseded-by-mist', note: '商机与跟进命令要求 relations:write（shared/mistCrm.ts:39）' },
+  { scope: 'data:import', reason: 'superseded-by-mist', note: '导入按目标域写权限强制：客户 relations:write、供应商 suppliers:write、产品 products:write（mistImport.ts:168），期初 invoices:write' },
+  { scope: 'emails:maintenance:write', reason: 'superseded-by-mist', note: '邮箱账号与模板维护要求 emails:write，共享账号与模板要求 emails:admin（mistEmail.ts:189）' },
+  { scope: 'hr:salary:read', reason: 'superseded-by-mist', note: '薪资读取由 sensitive:salary 强制保护，员工档案视图要求 hr:read（mist/access.ts:51）' },
+  { scope: 'invoices:suggest_match', reason: 'superseded-by-mist', note: '接受对账建议要求 invoices:reconcile（mistWorkspace.ts:910）' },
+  { scope: 'reports:write', reason: 'superseded-by-mist', note: '报表计划：管理类要求 reports:admin，其余 reports:read（mistReportSchedules.ts:31）' },
+  { scope: 'risk:admin', reason: 'superseded-by-mist', note: '风险决策要求 risk:write，其余风险命令 risk:read（mistRisk.ts:198）' },
+  { scope: 'sensitive:commission', reason: 'superseded-by-mist', note: '佣金率属报价参数：修改要求 pricing:admin（mistPlatform.ts:96）；报价人对自己报价核算可见，沿用既有定案' },
+  { scope: 'sensitive:profit', reason: 'superseded-by-mist', note: '成本与毛利可见性由 reports:admin 强制（mist/access.ts:290），毛利底线修改要求 pricing:admin（mistMarket.ts:143）' },
+  { scope: 'settings:automation:write', reason: 'superseded-by-mist', note: '无权限码的 settings.update 在仓储层要求公司维护权 users:write（mist/repository.ts:807，companyLibrary.ts:19）' },
+  { scope: 'settings:tolerance:write', reason: 'superseded-by-mist', note: '同 settings:automation:write：公司设置更新要求 users:write（mist/repository.ts:807）' },
+  { scope: 'data:export:full', reason: 'module-absent', note: 'Mist 无整库导出命令；功能未重建前本码无对应动作' },
+  { scope: 'exception:dr013:create', reason: 'module-absent', note: 'Mist 无对应例外登记命令；旧 DR-013 流程随旧主 API 删除' },
+  { scope: 'moq:capsule_exemption:write', reason: 'module-absent', note: 'Mist 无起订量胶囊豁免命令；旧流程随旧主 API 删除' },
+  { scope: 'remit:write', reason: 'module-absent', note: 'Mist 无独立汇款命令；收付款走 finance.* 由 vouchers:write / invoices:* 强制' },
+  { scope: 'sample:color_batch:write', reason: 'module-absent', note: 'Mist 无色批样命令；样品申请走 sample.request.*（products:write，mistSampleRequests.ts:38）' },
+  { scope: 'sample:early_production:write', reason: 'module-absent', note: 'Mist 无产前样独立命令；产前样走生产与质检链（orders:write / qc:*）' },
+  { scope: 'sample:shipment:write', reason: 'module-absent', note: 'Mist 无样品出运独立命令；出运走 fulfillment.*（mistFulfillment.ts）' },
 
   // ── *:admin 系列：只出现在 permissionGuard 的 WRITE_SCOPE_EXACT 高危分类集 ──
 
