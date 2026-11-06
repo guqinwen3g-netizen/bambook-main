@@ -55,12 +55,8 @@ import { ERROR_CODES, GENERIC_ROUTE_ERROR_MESSAGE, lookupErrorCode, resolveError
 import { safeRouteError } from '../routeError';
 import { HrError, hrStatusForCode } from '../../hr/hrService';
 import { CrmValidationError } from '../../crm/crmService';
-import { StageGateError } from '../../production/stageService';
 import { SealValidationError } from '../../seal/sealService';
 import { GateBlockedError } from '../../exceptions/exceptionGate';
-import { FabricCalcValidationError } from '../../tools/fabricCalculatorService';
-import { TemplateNotFoundError, TemplateRenderError } from '../../templates/render';
-import { SsrfBlockedError } from '../../lib/ssrfGuard';
 import { CreditExceptionConsumptionError } from '../../credit/creditExceptionGate';
 import { InventoryStockInsufficientError } from '../../inventory/inventoryService';
 import { ProformaAccessError } from '../../finance/proformaInvoiceAccess';
@@ -74,11 +70,7 @@ import { ClaimVisibilityError } from '../../claims/claimVisibility';
 import { CashRefundError } from '../../claims/claimCashRefundFact';
 import { ClaimTransactionError } from '../../claims/claimApprovalFact';
 import { ApprovalDecisionError } from '../../approvals/approvalDecisionService';
-import { ReceiptMatchProposalError } from '../../finance/receiptMatchProposalService';
-import { DemandError } from '../../procurement/procurementDemandService';
-import { PurchaseServiceDeliveryError } from '../../procurement/purchaseServiceDeliveryService';
 import { OrderLineWriteError, orderLineWriteFailure, currentOrderLineWriteActor } from '../../orders/orderLineWriteAccess';
-import { WorkflowError, currentWorkflowActor, workflowReject } from '../../workflow/workflowAccess';
 import { PricingDomainError } from '../../pricing/pricingError';
 import { stripComments } from './utils/sourceScan';
 import { classifyPrivateResultBoundaries } from '../../../../scripts/lib/tierMessageSources.mjs';
@@ -144,22 +136,12 @@ const USER_FACING: Array<[string, Error, ShapeSpec]> = [
     { code: 'VALIDATION_FAILED', status: 400, message: '索赔金额必须为有效正数' }],
   ['ApprovalDecisionError', new ApprovalDecisionError('SELF_APPROVAL_FORBIDDEN', 403, '申请人不能审批自己的申请'),
     { code: 'SELF_APPROVAL_FORBIDDEN', status: 403, message: '申请人不能审批自己的申请' }],
-  ['ReceiptMatchProposalError', new ReceiptMatchProposalError('FORBIDDEN', '当前账号不能确认核销', 403),
-    { code: 'FORBIDDEN', status: 403, message: '当前账号不能确认核销' }],
-  ['DemandError', new DemandError('NOT_FOUND', '采购需求不存在或不可见', 404),
-    { code: 'NOT_FOUND', status: 404, message: '采购需求不存在或不可见' }],
-  ['PurchaseServiceDeliveryError', new PurchaseServiceDeliveryError('INVALID_INPUT', '实际验收数量无效', 400),
-    { code: 'INVALID_INPUT', status: 400, message: '实际验收数量无效' }],
   ['HrError', new HrError('VALIDATION_FAILED', 'KPI 权重总和 120 超过 100'),
     { code: 'VALIDATION_FAILED', status: 400, message: 'KPI 权重总和 120 超过 100' }],
   ['CrmValidationError', new CrmValidationError('body.totalLimit 必填且须为正数（信用额度）'),
     { code: 'CRM_VALIDATION_FAILED', status: 400, message: 'body.totalLimit 必填且须为正数（信用额度）' }],
-  ['StageGateError', new StageGateError('STAGE_BLOCKED', '阶段 pp 已被标记阻塞，请先在看板解除阻塞（留痕）后再推进'),
-    { code: 'STAGE_BLOCKED', status: 409, message: '阶段 pp 已被标记阻塞，请先在看板解除阻塞（留痕）后再推进' }],
   ['SealValidationError', new SealValidationError('印章图必填'),
     { code: 'SEAL_VALIDATION_FAILED', status: 400, message: '印章图必填' }],
-  ['FabricCalcValidationError', new FabricCalcValidationError('字段 gsm 须为正数'),
-    { code: 'VALIDATION_FAILED', status: 400, message: '字段 gsm 须为正数' }],
   // 门禁类的消息同时含「为什么被挡（SS_NOT_CONFIRMED）」与「下一步做什么（DR-013 受控例外入口）」——
   // 这正是 G7.5「异常可行动」要求的那段话，被吞成通用 500 就等于把用户推到「只能猜」。
   ['GateBlockedError', new GateBlockedError({
@@ -167,14 +149,6 @@ const USER_FACING: Array<[string, Error, ShapeSpec]> = [
   }), { code: 'GATE_BLOCKED', status: 409, messageIncludes: ['SS_NOT_CONFIRMED', 'shipment_release', 'DR-013'] }],
 ];
 
-/** 纯内部：允许不外显细节，但必须显式登记 —— [类名, 实例, 不得出现在响应里的内部标识片段] */
-const INTERNAL_CLASSES: Array<[string, Error, string[]]> = [
-  ['TemplateNotFoundError', new TemplateNotFoundError('packing_list'), ['packing_list']],
-  ['TemplateRenderError',
-    new TemplateRenderError('packing_list', new Error('driver said: connection terminated unexpectedly')),
-    ['connection terminated', 'packing_list']],
-  ['SsrfBlockedError', new SsrfBlockedError('不允许访问内网/回环地址'), ['内网', '回环']],
-];
 
 // Independently adjudicated HTTP literals. These are not obtained from the
 // constructors or registry under test; the 503 rows also prevent a blanket
@@ -299,15 +273,11 @@ export function privateTransactionResultProof(file: string, source: string) {
     consumerSource: text(outer.block), transactionSource: text(command), constructors: constructors.length };
 }
 
-describe('V1 新增三个公共错误类：逐码 HTTP/文案及未知存储边界', () => {
+describe('V1 新增公共错误类：逐码 HTTP/文案及未知存储边界', () => {
   const message = '独立验收文案，请核对原请求。';
   const orderLineCases = [
     ['UNAUTHORIZED', 401], ['ACCOUNT_DISABLED', 401], ['FORBIDDEN', 403],
     ['AUTHORIZATION_UNAVAILABLE', 503], ['CONFLICT', 409], ['ORDER_NOT_FOUND', 404], ['ORDER_LINE_NOT_FOUND', 404],
-  ] as const;
-  const workflowCases = [
-    ['INVALID_INPUT', 400], ['UNAUTHORIZED', 401], ['DEPENDENCY_CHECK_FAILED', 503],
-    ['FORBIDDEN', 403], ['NOT_FOUND', 404], ['CONFLICT', 409], ['INVALID_STATE', 409],
   ] as const;
   const pricingCases = [['VALIDATION_FAILED', 400], ['NOT_FOUND', 404], ['INVALID_MULTIPLIER', 400]] as const;
 
@@ -315,43 +285,31 @@ describe('V1 新增三个公共错误类：逐码 HTTP/文案及未知存储边�
     expect(safeRouteError(new OrderLineWriteError(code, message), { fallbackCode: FALLBACK_NOT_IN_TABLE }))
       .toMatchObject({ code, status, message, passthrough: status < 500 });
   });
-  it.each(workflowCases)('WorkflowError %s 真实显式状态 %i 不被通用兜底压掉', (code, status) => {
-    expect(safeRouteError(new WorkflowError(code, message, status), { fallbackCode: FALLBACK_NOT_IN_TABLE }))
-      .toMatchObject({ code, status, message, passthrough: status < 500 });
-  });
   it.each(pricingCases)('PricingDomainError %s 保留独立核定状态 %i', (code, status) => {
     expect(safeRouteError(new PricingDomainError(code, message), { fallbackCode: FALLBACK_NOT_IN_TABLE }))
       .toMatchObject({ code, status, message, passthrough: true });
   });
-  it('workflowReject 的当前默认是来源/状态冲突409，不能改成 blanket400', () => {
-    let caught: unknown;
-    try { workflowReject('CONFLICT', message); } catch (error) { caught = error; }
-    expect(safeRouteError(caught, { fallbackCode: FALLBACK_NOT_IN_TABLE }))
-      .toMatchObject({ code: 'CONFLICT', status: 409, message, passthrough: true });
-  });
-  it.each(['订单不存在', 'INVALID_STATE', '金额必须为正数'])('含 %s 的真实未知 SQL 形状不能伪装三个新增公共类', fragment => {
+  it.each(['订单不存在', 'INVALID_STATE', '金额必须为正数'])('含 %s 的真实未知 SQL 形状不能伪装新增公共类', fragment => {
     const error = Object.assign(new Error(`SQL private_table.private_column ${fragment} /private/path`), { code: 'P2022' });
     expect(error).not.toBeInstanceOf(OrderLineWriteError);
-    expect(error).not.toBeInstanceOf(WorkflowError);
     expect(error).not.toBeInstanceOf(PricingDomainError);
     expect(orderLineWriteFailure(error)).toBeNull();
     const result = safeRouteError(error, { fallbackCode: 'INTERNAL_ERROR' });
     expect(result).toMatchObject({ code: 'INTERNAL_ERROR', status: 500, passthrough: false, message: GENERIC_ROUTE_ERROR_MESSAGE });
     expect(JSON.stringify(result)).not.toMatch(/SQL|private_table|private_column|private\/path|P2022/);
   });
-  it.each(['orderLine', 'workflow'] as const)('%s 当前身份存储读取故障实际变为503，不恢复旧授权/泄SQL', async domain => {
+  it('orderLine 当前身份存储读取故障实际变为503，不恢复旧授权/泄SQL', async () => {
     const failed = async () => { throw Object.assign(new Error('SQL 不存在 private_authority'), { code: 'P2022' }); };
     const db = { userAccount: { findFirst: failed, findUnique: failed } };
     const prior = { userId: 'synthetic-current-user', roles: ['owner'] as const, permissions: ['*'], departmentIds: [] };
     let caught: unknown;
     try {
-      if (domain === 'orderLine') await currentOrderLineWriteActor(db, { ...prior, roles: ['owner'] }, 'update');
-      else await currentWorkflowActor(db, { ...prior, roles: ['owner'] });
+      await currentOrderLineWriteActor(db, { ...prior, roles: ['owner'] }, 'update');
     } catch (error) { caught = error; }
     const result = safeRouteError(caught, { fallbackCode: 'INTERNAL_ERROR' });
     expect(result.status).toBe(503);
-    expect(result.code).toBe(domain === 'orderLine' ? 'AUTHORIZATION_UNAVAILABLE' : 'DEPENDENCY_CHECK_FAILED');
-    expect(result.message).toBe(domain === 'orderLine' ? '暂时无法核验写入权限，请稍后重试。' : '无法核对当前工作流权限，请稍后重试');
+    expect(result.code).toBe('AUTHORIZATION_UNAVAILABLE');
+    expect(result.message).toBe('暂时无法核验写入权限，请稍后重试。');
     expect(JSON.stringify(result)).not.toMatch(/SQL|private_authority|P2022/);
   });
 });
@@ -393,21 +351,6 @@ describe('★ 面向业务的 error class 必须携带透传契约', () => {
     expect(new HrError('INVALID_TRANSITION', '请假单当前状态 Approved，不可审批').statusCode).toBe(409);
     // 显式第三参仍可覆写（个别抛出点需要偏离码语义默认档）—— 当前无调用点这么做
     expect(new HrError('VALIDATION_FAILED', 'x', 422).statusCode).toBe(422);
-  });
-});
-
-describe('内部技术错类不得伪装成业务错误', () => {
-  it.each(INTERNAL_CLASSES)('%s 不带 statusCode 时必须落到通用文案、且不带任何内部标识', (name, err, tokens) => {
-    const r = resolveError(err, FALLBACK_NOT_IN_TABLE);
-    expect(r.status).toBe(500);
-    // 未被认成业务错误 ⇒ 外发的码就是兜底探针本身；哪天有人顺手给这类补上 code，这里就红
-    expect(r.code).toBe(FALLBACK_NOT_IN_TABLE);
-    expect(r.message).not.toBe(err.message);
-    expect(r.message).toBe(GENERIC_ROUTE_ERROR_MESSAGE); // 只钉「换成了通用文案」这件事，不比内容
-    for (const t of tokens) {
-      expect(r.message, `内部标识「${t}」泄进响应了`).not.toContain(t);
-    }
-    expect(JSON.stringify(r)).not.toContain('prisma');
   });
 });
 
@@ -1010,16 +953,14 @@ describe('ReleaseGateError：私有原生生产者与结果边界独立核定', 
 describe('★ 全仓 error class 普查：所有类逐个核定，新增类必须先登记', () => {
   /** 原核定不删；V1 五个原生公共类有上方独立字面量证人及隔离业务回归。 */
   const ADJUDICATED = [
-    'CreditBlockedError', 'CrmValidationError', 'FabricCalcValidationError', 'GateBlockedError',
-    'HrError', 'RoleWriteRejectedError', 'SealValidationError', 'StageGateError',
-    'StockMovementCasConflictError', 'SsrfBlockedError', 'TemplateNotFoundError', 'TemplateRenderError',
+    'CreditBlockedError', 'CrmValidationError', 'GateBlockedError',
+    'HrError', 'RoleWriteRejectedError', 'SealValidationError',
+    'StockMovementCasConflictError',
     'CreditExceptionConsumptionError', 'InventoryStockInsufficientError', 'ClaimVisibilityError', 'CashRefundError',
-    'ClaimTransactionError', 'CreditNoteTransactionError', 'ApprovalDecisionError', 'ReceiptMatchProposalError',
-    'DemandError', 'PurchaseServiceDeliveryError',
-    'OrderLineWriteError', 'WorkflowError', 'PricingDomainError',
-    'ProformaCommandError',
+    'ClaimTransactionError', 'ApprovalDecisionError',
+    'OrderLineWriteError', 'PricingDomainError',
     'DevelopmentDomainError', 'ProformaAccessError', 'PurchaseOrderDomainError', 'ReceiptDomainError', 'QcAssignmentError',
-    'ManualInvoiceAbort', 'CommissionAbort', // Source-bound TX-result contracts below; no public/raw exemption.
+    'ManualInvoiceAbort', // Source-bound TX-result contract below; no public/raw exemption.
     'ReleaseGateError', // Private open contract: independent native consumer controls above; no finite exemption.
     'ProductionBatchFactsError', 'ReleaseBatchBindingError',
   ];
@@ -1048,17 +989,6 @@ describe('★ 全仓 error class 普查：所有类逐个核定，新增类必�
    *     由 `admin/route.ts:534` 的 instanceof 分支读 statusCode 作答；逃出该分支才落到
    *     `admin/route.ts:49` 的 withRouteErrorGuard —— 那里恒答 500、**不读** statusCode。
    */
-  it('CreditNoteTransactionError 仅用于事务回滚，必须由结果边界消费且不能伪装为公共业务错误', () => {
-    const src = stripComments(fs.readFileSync(path.join(SRC, 'claims/creditNoteService.ts'), 'utf8'));
-    const body = /class CreditNoteTransactionError extends Error \{[\s\S]*?\n\}/.exec(src)?.[0];
-    expect(body).toBeTruthy();
-    expect(body).not.toMatch(/statusCode/);
-    expect(body).not.toMatch(/readonly code/);
-    expect(src).toMatch(/if \(error instanceof CreditNoteTransactionError\) return fail\(error\.creditNoteError\.code, error\.creditNoteError\.message\)/);
-    expect(safeRouteError(new Error('private SQL detail'), { fallbackCode: 'INTERNAL_ERROR' }))
-      .toMatchObject({ status: 500, code: 'INTERNAL_ERROR', passthrough: false, message: GENERIC_ROUTE_ERROR_MESSAGE });
-  });
-
   it('ClaimTransactionError 的四种业务结果与实际 HTTP 契约一致', () => {
     const expected = [['NOT_FOUND', 404], ['VALIDATION_FAILED', 400], ['INVALID_STATE', 409], ['UNSUPPORTED_KIND', 422]] as const;
     for (const [code, status] of expected) {
@@ -1073,62 +1003,6 @@ describe('★ 全仓 error class 普查：所有类逐个核定，新增类必�
     expect(body, '类体找不到 = 该类被改名或搬走，核定表要更新').toBeTruthy();
     expect(body).not.toMatch(/statusCode/);
     expect(body).not.toMatch(/\bcode\b/);
-  });
-});
-
-describe('ProformaCommandError：内部事务拒绝须由实际结果边界消费', () => {
-  const source = () => fs.readFileSync(path.join(SRC, 'finance/proformaInvoiceService.ts'), 'utf8');
-  const entries = (src = source()) => [{ file: 'src/finance/proformaInvoiceService.ts', src },
-    { file: 'src/shared/routeError.ts', src: fs.readFileSync(path.join(SRC, 'shared/routeError.ts'), 'utf8') }];
-  const witness = () => {
-    const proof = classifyPrivateResultBoundaries(entries()).find((p: { className: string }) => p.className === 'ProformaCommandError');
-    expect(proof).toBeTruthy(); return proof!;
-  };
-  it('有限构造器、instanceof结果消费、两处真实catch及unknown安全结果全部在场', () => {
-    const proof = witness();
-    expect(proof.codes).toEqual(['NOT_FOUND', 'QUOTATION_NOT_FOUND', 'QUOTATION_NOT_ACCEPTED', 'NOT_PROFORMA',
-      'ALREADY_CONVERTED', 'INVALID_STATUS', 'SEQUENCE_FAILED', 'LC_GATE_BLOCKED', 'LC_EXCEPTION_CHECK_FAILED', 'INTERNAL_ERROR']);
-    expect(proof.producerLines).toHaveLength(1); expect(proof.catchLines).toHaveLength(2);
-    expect(proof.producer).toBe('reject'); expect(proof.consumer).toBe('failure');
-    expect(proof.constructorSource).not.toContain('statusCode');
-  });
-  // Only the extracted native class/reject/failure run. The actual shared safe
-  // adapter is injected; logging is disabled. Neither the service nor PG runs.
-  const inspect = (probeInput: Record<string, unknown>) => {
-    const proof = witness();
-    const source = `${proof.constructorSource}\n${proof.producerSource}\n${proof.consumerSource}\n
-      function inspect(input:any){let caught:any;
-        if(input.kind==='native'){try{${proof.producer}(input.code,input.message)}catch(error){caught=error}}
-        else caught=input.error;
-        return {result:${proof.consumer}(caught,input.mode),direct:safeRouteError(caught,{fallbackCode:'INTERNAL_ERROR'})};
-      }
-      inspect(probeInput);`;
-    const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.None, target: ts.ScriptTarget.ES2022 } }).outputText;
-    return vm.runInNewContext(compiled, { probeInput, safeRouteError, ProformaAccessError, logger: { error() {} } }, { timeout: 1000 });
-  };
-  it.each(['NOT_FOUND', 'SEQUENCE_FAILED'])('本地 %s 保留结果码/文案，但不可直接冒充公共HTTP类', code => {
-    const result = inspect({ kind: 'native', code, message: '独立事务拒绝文案。', mode: 'generate' });
-    expect({ ok: result.result.ok, code: result.result.error.code, message: result.result.error.message })
-      .toEqual({ ok: false, code, message: '独立事务拒绝文案。' });
-    expect(result.direct).toMatchObject({ code: 'INTERNAL_ERROR', status: 500, passthrough: false, message: GENERIC_ROUTE_ERROR_MESSAGE });
-  });
-  it.each(['generate', 'convert'])('%s 未知SQL/同名假类不能继承内部拒绝文案', mode => {
-    const error = { name: 'ProformaCommandError', code: 'NOT_FOUND', message: 'SQL private_table 不存在' };
-    const result = inspect({ kind: 'unknown', error, mode });
-    expect({ ok: result.result.ok, code: result.result.error.code, message: result.result.error.message }).toEqual({
-      ok: false, code: 'INTERNAL_ERROR', message: mode === 'generate'
-        ? '形式发票生成结果暂不可确认，请刷新核对原发票记录后重试。'
-        : '形式发票转正结果暂不可确认，请刷新核对原形式发票及正式发票后重试。',
-    });
-    expect(result.direct.status).toBe(500);
-    expect(JSON.stringify(result)).not.toMatch(/SQL|private_table/);
-  });
-  it('移除实际instanceof消费或catch调用，内部登记证明必须失效', () => {
-    const noTypeGuard = source().replace('error instanceof ProformaCommandError) return', 'true) return');
-    const noCatch = source().replaceAll("return failure(error, 'generate')", 'return null')
-      .replaceAll("return failure(error, 'convert')", 'return null');
-    expect(classifyPrivateResultBoundaries(entries(noTypeGuard))).toHaveLength(0);
-    expect(classifyPrivateResultBoundaries(entries(noCatch))).toHaveLength(0);
   });
 });
 
@@ -1181,12 +1055,14 @@ describe('★ 委托的安全前提：调用点的 fallbackCode 不得是表里�
    *   （新增中继、却没在目标文件里留下 `resolveError(<ident>, <该形参>)` 这一行 ⇒ 自检红），
    *   所以它不是一张随手抄近的白名单。
    */
+  // 2026-11-06：唯一的中继文件 risk/riskRoute.ts 随旧主 API 一并删除，清单清空；
+  // 中继支的扫描写法仍由下面的合成样例（RISK_STYLE_RELAY）正反核对，新增中继须先登记到这里。
+  const RISK_STYLE_RELAY = {
+    file: '(synthetic)',
+    param: 'code',
+    re: /handleError\(\s*res\s*,\s*[A-Za-z_$][\w$]*\s*,\s*'([A-Z0-9_]+)'\s*,?\s*\)/g,
+  };
   const RELAY_HELPERS: Array<{ file: string; param: string; re: RegExp }> = [
-    {
-      file: 'risk/riskRoute.ts',
-      param: 'code',
-      re: /handleError\(\s*res\s*,\s*[A-Za-z_$][\w$]*\s*,\s*'([A-Z0-9_]+)'\s*,?\s*\)/g,
-    },
     // 阳性对照（2026-09-20 实跑，非推演）：往本清单加一条 param 不相符的条目 ⇒ 第二腿红「中继清单过期」；
     // 加一条正则匹配不到任何站点的条目 ⇒ 第一腿红「空转的中继清单」。两条都会被下面那个循环抓到。
   ];
@@ -1263,8 +1139,8 @@ describe('★ 委托的安全前提：调用点的 fallbackCode 不得是表里�
     //   与 risk 的中继 20 处 / 20 码（Task 5 摘豁免后才出现的支路，旧正则扫不到）。
     //   合计 226 处 / 105 码 = 红线现在真正看着的面。少一处的唯一后果就是「有一批兜底码不在照妖镜里」。
     expect(viaDirect.length, 'resolveError 直调兜底码处数与基线不符（扫描正则失效 / 新增未登记）').toBe(1);
-    expect(viaRelay.length, '中继（handleError → resolveError）处数与基线不符 = risk 的码掉出普查分母').toBe(20);
-    expect(new Set(viaRelay.map((h) => h.code)).size, 'risk 的中继兜底码必须仍是 20 个不同码').toBe(20);
+    // 2026-11-06：risk/riskRoute.ts 已删除，中继支归零。
+    expect(viaRelay.length, '中继（handleError → resolveError）处数与基线不符').toBe(0);
     expect(hits.length, '全仓兜底码调用点总数（三支合计）').toBe(414);
     /**
      * ★ 复核 B-1（也是我自己的现量）：这里原先钉 **196**，旁边写着"实测，非推算"，而尺自报 **195**
@@ -1306,17 +1182,13 @@ describe('★ 委托的安全前提：调用点的 fallbackCode 不得是表里�
     // 中继支：正例 + 注释不参与 + 变量写法不吃。
     // 注：合成样例与 risk 的调用写法绑定；若往 RELAY_HELPERS 里加**另一种写法**的中继，须为它补一对合成样例。
     // 下面那个逐条循环只保证「每条清单的声称都为真、且不是空转条目」，不能替代这一对正反对照。
-    const relay = RELAY_HELPERS[0];
+    const relay = RISK_STYLE_RELAY;
     expect(relayHits(relay, sample)).toEqual(['RELAY_ONE', 'RELAY_ONE_LINE_COMMENTED', 'RELAY_BLOCK_COMMENTED']);
     expect(relayHits(relay, stripComments(sample))).toEqual(['RELAY_ONE']);
     // ★ 真站点（不是合成串）：全仓那 1 处 resolveError 直调字面量兜底码
     expect(
       resolveErrorFallbackHits(stripComments(fs.readFileSync(path.join(SRC, 'lib/asyncHandler.ts'), 'utf8'))),
     ).toEqual(['INTERNAL_ERROR']);
-    // ★ risk 的 20 个码确实在普查分母里（少一个 = 该文件的写法变了，中继支该更新）
-    expect(
-      new Set(relayHits(relay, stripComments(fs.readFileSync(path.join(SRC, relay.file), 'utf8')))).size,
-    ).toBe(20);
     // ★ 中继声称必须为真，且**逐条**核：只查 `[0]` 的话，日后往清单里加第二条中继，
     //   它就带着「形参原样交给 resolveError」的声称进了红线分母，而这条声称从未被核过 ——
     //   那正是本条自检要防的假覆盖。空转条目（真文件里一处都匹配不到）也在这里红掉。

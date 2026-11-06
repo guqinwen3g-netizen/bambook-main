@@ -8,7 +8,6 @@ import { createCustomsService } from '../customsService';
 import { generateTradeDocumentsFromShipment, renderTradeDocumentServerHtml, assertCiTradeDocumentArchive } from '../tradeDocumentLifecycleService';
 import { renderServerDocument } from '../../templates/docTemplates/registry';
 import { renderFinanceInvoiceDocument } from '../../templates/docTemplates/financeInvoice';
-import { checkTripleConsistency } from '../tripleDocumentConsistency';
 const options = { trustedActor: actor, sourceInvoiceId: 'INV', shipmentId: 'S', mode: 'register' as const };
 const sourceOptions = { trustedActor: actor };
 const counts = (s: ReturnType<typeof storage>) => [s.tables.tradeDocument.length, s.tables.documentVersion.length, s.tables.auditLog.length];
@@ -244,10 +243,5 @@ describe('public CI bypass gates use original helpers — storage substitute onl
     const s = storage(); s.tables.invoice[0].amount = decimal('99999999999999.9999');
     const html = await renderFinanceInvoiceDocument(s.db, 'INV', { trustedActor: actor, shipmentId: 'S' });
     expect(html).toContain('99,999,999,999,999.9999'); expect(html).toContain('POINT NINE NINE NINE NINE'); expect(html).not.toContain('1,000.00');
-  });
-  it('triple-document check never replaces missing original Invoice money with old CI snapshot amount', async () => {
-    const s = storage(); s.tables.tradeDocument.push({ id: 'OLD', type: 'CommercialInvoice', shipmentId: 'S', status: 'Draft', documentNumber: 'OLD-CI', totalAmount: decimal('999'), currency: 'USD', sourceInvoiceId: null });
-    const result = await checkTripleConsistency(s.db, 'S', { trustedActor: actor }); expect(result!.internal.invoiceAmount).toBeNull();
-    expect(result!.internal.invoiceCurrency).toBeNull(); expect(result!.discrepancies.some(row => row.field === 'commercialInvoice.sourceInvoiceId')).toBe(true);
   });
 });

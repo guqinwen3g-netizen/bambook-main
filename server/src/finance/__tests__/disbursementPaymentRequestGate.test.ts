@@ -13,7 +13,6 @@ import request from 'supertest';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Prisma } from '@prisma/client';
 import { createPaymentVoucher } from '../paymentVoucherMutationService';
-import { createFinanceRouter } from '../route';
 import { createPaymentRequestService } from '../../paymentRequests/paymentRequestService';
 import { authHeader } from '../../__tests__/authTestHelper';
 
@@ -128,40 +127,6 @@ describe('P1-1（DE-3）Disbursement 直付门禁（service 层）', () => {
     const res = await createPaymentVoucher({ prisma, input: { ...disbursementInput, type: 'Receipt' } });
     expect(res.ok).toBe(true);
     expect(voucherCreate).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('P1-1（DE-3）Disbursement 直付门禁（HTTP 契约）', () => {
-  function makeApp(prisma: any) {
-    const app = express();
-    app.use(express.json());
-    app.use('/api/v1/finance', createFinanceRouter({ prisma, requireAuth: false, apiKeys: new Set(), onDataChange: vi.fn() }));
-    return app;
-  }
-
-  it('POST /api/v1/finance/vouchers Disbursement 无申请 → 403 PAYMENT_REQUEST_REQUIRED', async () => {
-    const { prisma } = makePrisma();
-    const res = await request(makeApp(prisma)).post('/api/v1/finance/vouchers').set(authHeader()).send(disbursementInput);
-    expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe('PAYMENT_REQUEST_REQUIRED');
-  });
-
-  it('POST /api/v1/finance/vouchers Disbursement + Approved 申请 → 201', async () => {
-    const { prisma } = makePrisma();
-    const res = await request(makeApp(prisma))
-      .post('/api/v1/finance/vouchers')
-      .set(authHeader())
-      .send({ ...disbursementInput, paymentRequestId: 'PAYR__OK' });
-    expect(res.status).toBe(201);
-  });
-
-  it('POST /api/v1/finance/vouchers CAS 未占用成功 → 409 且返回可识别冲突', async () => {
-    const { prisma, paymentRequestUpdateMany } = makePrisma();
-    paymentRequestUpdateMany.mockResolvedValue({ count: 0 });
-    const res = await request(makeApp(prisma)).post('/api/v1/finance/vouchers').set(authHeader())
-      .send({ ...disbursementInput, paymentRequestId: 'PAYR__OK' });
-    expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('PAYMENT_REQUEST_ALREADY_LINKED');
   });
 });
 

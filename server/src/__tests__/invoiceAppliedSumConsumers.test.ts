@@ -39,14 +39,8 @@ function importersOfSource(): string[] {
 
 /** 必须走真源的消费点（语义 = 「该发票已收/还欠多少」） */
 const MUST_USE = [
-  'events/linkages/L5AutoAllocate.ts',         // 出运候选核销也须计入真实贷项抵扣
-  'finance/route.ts',                        // 发票列表 appliedAmount/openAmount
-  'finance/reportService.ts',                // 账龄 + 现金流日历
-  'finance/dunningService.ts',               // 催办未结清单
-  'finance/dunningStageService.ts',          // 催款分级看板（★ B273 批补登记：它一直在引用，名单里没有 ⇒ 旧守卫对它空转）
   'credit/creditService.ts',                 // 授信净额
   'shipping/orderShipmentBatchService.ts',   // 批次结清（paid）+ 订单已收合计
-  'agent/toolRuntime.ts',                    // AI 助手报的未结清额
 ];
 
 describe('消费点登记：已核销合计必须走 shared/invoiceAppliedSum', () => {
@@ -90,27 +84,5 @@ describe('消费点登记：已核销合计必须走 shared/invoiceAppliedSum', 
     }
   });
 
-  it('★ route.ts 的**发票侧**必须直接调真源（不得改回 scope 三元手写）', () => {
-    const src = read('finance/route.ts');
-    expect(src).toMatch(/scope === 'invoice'\)\s*\{\s*appliedMap = await sumAppliedAmountByInvoice/);
-  });
 });
 
-describe('刻意不适用真源的场景（防被顺手改坏）', () => {
-  it('finance/route.ts 的**凭证侧**仍只算 InvoiceAllocation（贷项票没有凭证）', () => {
-    const src = read('finance/route.ts');
-    expect(src).toMatch(/by:\s*\[\s*'voucherId'\s*\]/);
-  });
-
-  it('dashboard.collectOrderReceipts 是**实收（现金流）**语义 ⇒ 必须保留「只认 Receipt 凭证」的过滤', () => {
-    const src = read('dashboard/dashboardService.ts');
-    expect(src).toContain('receiptIds.has(a.voucherId)');
-    // 且不得把它改成真源（否则「实收」把折让也算成收到的钱）
-    expect(src).not.toContain('shared/invoiceAppliedSum');
-  });
-
-  it('reportService 的凭证侧汇总（代付来源/未核销凭证/汇兑）仍按 voucherId —— 语义不同，不得收编', () => {
-    const src = read('finance/reportService.ts');
-    expect(src).toMatch(/by:\s*\[\s*'voucherId'\s*\]/);
-  });
-});

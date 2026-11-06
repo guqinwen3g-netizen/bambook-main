@@ -1,7 +1,6 @@
 /** Pure source/amount rules only: these synthetic facts do not prove PG audit, authorization, files or UAT. */
 import { describe, expect, it } from 'vitest';
 import { COST_CATEGORIES, calculateOrderCostReview, parseOrderCostReviewInput, reviewHash, type OrderCostReviewInput, type OrderCostSources } from '../orderCostReviewSource';
-import { maskProfitSheet, readCostEvidence } from '../costEvidence';
 
 function fixture() {
   const source: OrderCostSources = {
@@ -73,12 +72,6 @@ describe('whole-order actual cost review independent source contract', () => {
   it('source fingerprint detects a real amount/version change without relying on a client complete flag', () => {
     const x = fixture(); x.source.invoices[1].amount = '1100'; expect(() => calculateOrderCostReview(x.source, x.input, new Set(['E1']))).toThrow('来源已变化');
     expect(reviewHash({ a: 1, b: [{ id: 'X' }, { id: 'Y' }] })).toBe(reviewHash({ b: [{ id: 'Y' }, { id: 'X' }], a: 1 }));
-  });
-  it('new complete DTO requires exact reviewed scope and consistent six-category totals', () => {
-    const costEvidence = { version: 2, status: 'complete', calculatedAt: '2026-10-01', pendingReasons: [], committedAmountCny: 9999, acceptedAmountCny: 1200, paidPrincipalCny: 500, actualCostCny: 1200, actualProfitCny: 800, actualRevenueCny: 2000, reviewId: 'R1', reviewRevision: 1, sourceFingerprint: 'a'.repeat(64), actualBreakdown: { procurement: 1200, companySupply: 0, logistics: 0, otherExpenses: 0, bankFees: 0, allowances: 0 } };
-    expect(readCostEvidence({ costEvidence })?.actualCostCny).toBe(1200);
-    expect(maskProfitSheet({ details: { costEvidence }, grossProfit: -9999, grossMargin: -50 })).toMatchObject({ grossProfit: 800, grossMargin: 40 });
-    for (const patch of [{ reviewId: undefined }, { actualRevenueCny: NaN }, { actualBreakdown: { ...costEvidence.actualBreakdown, logistics: 1 } }]) expect(readCostEvidence({ costEvidence: { ...costEvidence, ...patch } })).toBeNull();
   });
 });
 

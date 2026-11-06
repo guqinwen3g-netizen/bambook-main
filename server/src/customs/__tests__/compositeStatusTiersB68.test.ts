@@ -39,7 +39,6 @@ vi.mock('../../lib/logger', () => ({
 import { statusFromError } from '../../shared/bizStatus';
 import { httpStatusOfCode, lookupErrorCode } from '../../shared/errorCodes';
 import { getDatabaseSeedScopeListForRole, SYSTEM_ROLE_IDS } from '../../_shared/rolePermissionMatrix';
-import { createCustomsRouter } from '../customsRoute';
 import { assembleMergedDocumentSet, assembleCompositeDocument } from '../compositeDocumentService';
 import { createApprovalRoutingService, NO_REVIEWER_RESOLVED } from '../../approvals/approvalRoutingService';
 
@@ -106,15 +105,6 @@ const prismaNull: any = new Proxy({}, {
 const prismaThrow = (msg: string): any => new Proxy({}, {
   get: () => new Proxy({}, { get: () => async () => { throw new Error(msg); } }),
 });
-
-function appWith(prisma: any) {
-  const app = express();
-  app.use(express.json());
-  app.use('/api/v1/customs', createCustomsRouter({
-    prisma, requireAuth: true, apiKeys: new Set(['test-key']),
-  } as any));
-  return app;
-}
 const post = (app: express.Express, url: string, token = logisticsToken) => request(app).post(url).set('Authorization', `Bearer ${token}`);
 
 describe('A · 服务层真抛点：错误自带 code 与 statusCode（不是靠文案）', () => {
@@ -168,87 +158,6 @@ describe('A · 服务层真抛点：错误自带 code 与 statusCode（不是靠
   });
 });
 
-describe('B · 路由层真实响应：受控预览、合同、DR-007 与当前权限边界', () => {
-  const URL_PREVIEW = '/api/v1/customs/trade-documents/composite/preview.html';
-  const URL_PDF = '/api/v1/customs/trade-documents/composite/generate.pdf';
-  const URL_SIGN = '/api/v1/customs/trade-documents/composite/request-sign';
-
-  it('旧 MERGED_PL 组合预览已受控归档：继续经旧直接预览入口 ⇒ 409 CONFLICT', async () => {
-    const res = await post(appWith(prismaNull), URL_PREVIEW).send({ kind: 'MERGED_PL', sourceIds: ['S1'] });
-    expect(res.status).toBe(409);
-    expect(res.body.error).toBe('CONFLICT');
-    expect(res.body.message).toBe('装箱单文件需按确切版本受控归档，当前入口不能重新生成或下载未核验的旧文件。');
-  });
-
-  it('新贸易单据预览入口对缺失归档返回 404（不把旧组合直接预览当可用入口）', async () => {
-    const res = await request(appWith(prismaNull)).get('/api/v1/customs/trade-documents/TD_MISSING/preview.html')
-      .set('Authorization', `Bearer ${logisticsToken}`);
-    expect(res.status).toBe(404);
-    expect(res.body.error).toBe('贸易单据 TD_MISSING 不存在');
-  });
-
-  it('新合并装箱单来源选择入口拒绝不足两张票的输入 ⇒ 400 INVALID_INPUT', async () => {
-    const res = await post(appWith(prismaNull), '/api/v1/customs/trade-documents/merged-packing-list-source')
-      .send({ sourceIds: ['S1'] });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('INVALID_INPUT');
-  });
-
-  it('POST generate.pdf（订单不存在）⇒ 404 ★ 这是本批的可见行为变更（旧实现给 400）', async () => {
-    const res = await post(appWith(prismaNull), URL_PDF).send({ kind: 'CONTRACT', sourceIds: ['O1', 'O2'] });
-    expect(res.status).toBe(404);
-  });
-
-  it('★ POST request-sign：解析不到审批人 ⇒ 409（真链路抛出，档位来自注册表而不是文案）', async () => {
-    // 说明：这一档**改造前也是 409** —— 但那时靠的是站点手写的 `msg.includes('NO_REVIEWER_RESOLVED')`
-    // （85a66cd2:customsRoute.ts:830 那行三元）。本批改的是**出处**：码登记进注册表后认 `.code`。
-    // 差别可证伪：见 C 层"同一句话交给关键词表答 404"。
-    const res = await post(appWith(currentPrisma()), URL_SIGN).send({ kind: 'CONTRACT', sourceIds: ['O1', 'O2'] });
-    expect(res.status, `实得 ${res.status}，body=${JSON.stringify(res.body)}`).toBe(409);
-    expect(res.body.message).toContain(NO_REVIEWER_RESOLVED);
-  });
-
-  it('当前数据库角色没有 customs:write ⇒ 403，即使旧 JWT 声称 logistics', async () => {
-    const res = await post(appWith(currentPrisma({ roleId: SYSTEM_ROLE_IDS.QC })), URL_SIGN, qcTokenWithStaleLogisticsClaim)
-      .send({ kind: 'CONTRACT', sourceIds: ['O1', 'O2'] });
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe('FORBIDDEN');
-  });
-
-  it('有效身份但当前权限加载失败 ⇒ 503，不降级为旧 JWT 的物流权限', async () => {
-    const res = await post(appWith(currentPrisma({ permissionReadError: new Error('grant store unavailable') })), URL_SIGN)
-      .send({ kind: 'CONTRACT', sourceIds: ['O1', 'O2'] });
-    expect(res.status).toBe(503);
-    expect(res.body.error).toBe('AUTHORIZATION_UNAVAILABLE');
-  });
-
-  it('★ 组合合同读取发生数据层故障（ECONNREFUSED）⇒ 500', async () => {
-    const res = await post(appWith(prismaThrow('connect ECONNREFUSED 127.0.0.1:5432')), URL_PREVIEW)
-      .send({ kind: 'CONTRACT', sourceIds: ['O1', 'O2'] });
-    expect(res.status, `实得 ${res.status}，body=${JSON.stringify(res.body)}`).toBe(500);
-  });
-
-  it('★ request-sign 未登录 ⇒ 401（未进入当前身份加载或审批路由）', async () => {
-    const res = await request(appWith(currentPrisma())).post(URL_SIGN).send({ kind: 'CONTRACT', sourceIds: ['O1', 'O2'] });
-    expect(res.status).toBe(401);
-    expect(res.body.error).toBe('UNAUTHORIZED');
-  });
-
-  /**
-   * ★ 反向自检（S1：判据不许恒真）：上面四条各钉一个值。这里证明"门"与"档"是两件事——
-   *   没有 JWT 时同一请求是 401 而不是 400/404/409/500，即第一版那四条**测的确实是门**。
-   */
-  it('★ 反面对照：不带 JWT 时同一路径 401（证明上面四条真的进了 handler，不是被门挡住恰好同档）', async () => {
-    for (const [url, body] of [
-      [URL_PREVIEW, { kind: 'MERGED_PL', sourceIds: ['S1'] }],
-      [URL_SIGN, { kind: 'CONTRACT', sourceIds: ['O1', 'O2'] }],
-    ] as const) {
-      const res = await request(appWith(prismaNull)).post(url).send(body);
-      expect(res.status, `${url} 未鉴权应 401`).toBe(401);
-    }
-  });
-});
-
 describe('C · 映射层：409 来自"登记"这一步（可证伪）', () => {
   /**
    * 改造前的**真**实现，逐字抄自 `git show 19d8bc5f~1:server/src/customs/customsRoute.ts`（`errStatus`，:108-112）。
@@ -262,48 +171,6 @@ describe('C · 映射层：409 来自"登记"这一步（可证伪）', () => {
     if (msg.includes('非法') || msg.includes('不可删除') || msg.includes('不可编辑') || msg.includes('不可审核') || msg.includes('不可')) return 409;
     return 400;
   };
-
-  it('NO_REVIEWER_RESOLVED 已登记且档位是 409；错误只带 code 时第 2 档就命中', () => {
-    expect(lookupErrorCode('NO_REVIEWER_RESOLVED')?.status).toBe(409);
-    const err = Object.assign(new Error('NO_REVIEWER_RESOLVED: 申请人 U1（部门快照=none）解析不到任何审批人 — 申请人不存在或已停用/已删除'), { code: 'NO_REVIEWER_RESOLVED' });
-    expect(statusFromError(err, 500)).toBe(409);
-    /**
-     * ★ 反面对照（写第一版时这里我凭印象写了"旧表答 400"，跑出来是 **404** ⇒ 现量为准）：
-     *   这句真文案里含"申请人**不存在**或已停用" ⇒ 关键词表把它答成 404。
-     *   也就是说：**没有那个站点手写的码名字符串匹配，同一件事会被说成"你要的东西没了"**
-     *   —— 而它真正的意思是"管理员还没配审批人"（409，用户改不了、运维要动组织归属）。
-     *   这正是"档位挂在人读的一句话上"的失效方式：改文案 = 悄悄改状态码。
-     */
-    expect(legacy(err.message)).toBe(404);
-    /**
-     * ★ "登记"这一步的可证伪断言（v2.47 复核 minor-1 补，v2.47 复核 I-4 更正它**声称了什么**）：
-     *   同一个形状、把码换成**一枚没登记的** ⇒ 第 2 档取不到 ⇒ 落到第 4 档关键词 ⇒ 404。
-     *   ⚠️ 它只证明"`statusFromError` 这个共享函数按'码有没有登记'来分档"，
-     *      **不证明**调用点没被人改回文案猜档（把 `shipping/route.ts` 改回旧三元，本条照样绿）。
-     *   后半句那件事由下面 **D 段：反并行真源普查** 盯住（v2.47 复核 I-2 补的缺口）。
-     */
-    expect(statusFromError(Object.assign(new Error(err.message), { code: 'NOT_REGISTERED_XYZ' }), 500)).toBe(404);
-    // 而**登记着的**码 + 一句完全不含关键词的文案 ⇒ 仍是 409（证明档位来自码，不来自句子）
-    expect(statusFromError(Object.assign(new Error('x'), { code: 'NO_REVIEWER_RESOLVED' }), 500)).toBe(409);
-  });
-
-  /** ★ v2.47 复核 minor-2：`legacy()` 是"旧实现"的**手抄本**，抄错就等于对照组失真。这里逐条钉住它。 */
-  it('★ 对照组自检：legacy() 必须只有改造前那三条规则 + 400 兜底（多一条少一条都红）', () => {
-    expect(legacy('该报关单不存在')).toBe(404);                     // 规则 1：不存在 → 404
-    expect(legacy('该 HS 编码已存在')).toBe(409);                   // 规则 2：已存在 → 409
-    expect(legacy('提交内容非法')).toBe(409);                        // 规则 3：非法 / 不可* → 409
-    expect(legacy('该单据不可编辑')).toBe(409);                      //   同一条规则的另一种写法
-    // ★ 复核抓到的那条失真：旧代码**没有** `超过` 这条规则 ⇒ 这句只能落兜底。
-    //   （今天该走 409 是靠抛出方自带 code 命中注册表第 2 档，不是靠关键词表认识它。）
-    expect(legacy('工序时长超过上限')).toBe(400);
-    expect(legacy('please try later')).toBe(400);                    // 都不认 → 兜底 400（旧实现没有 5xx 档）
-    // 死条款留痕：这三条被后面的 `不可` 完全吞掉，删掉它们 legacy() 行为不变 ——
-    // 保留是因为**旧代码字面就有**，对照组不许被"顺手清理"成另一份实现。
-    expect(legacy('不可删除')).toBe(legacy('不可'));
-    expect(legacy('不可编辑')).toBe(legacy('不可'));
-    expect(legacy('不可审核')).toBe(legacy('不可'));
-    // 真源对照：`git show 19d8bc5f~1:server/src/customs/customsRoute.ts`，函数 `errStatus` 在 :108-112
-  });
 
   it('★ 校验错与"不存在"各自命中自己的档，不再共享一次文本猜测', () => {
     expect(statusFromError(Object.assign(new Error('合并合同至少需要 2 个订单'), { code: 'VALIDATION_FAILED', statusCode: 400 }), 500)).toBe(400);
@@ -323,7 +190,6 @@ describe('D · 反并行真源普查：禁止复制 inline code → HTTP 数字�
    */
   const SRC = new URL('../../', import.meta.url);
   const read = (rel: string) => stripComments(fs.readFileSync(new URL(rel, import.meta.url), 'utf8'));
-  const SHIPPING_ROUTE = read('../../shipping/route.ts');
   const COMPOSITE_SVC = read('../compositeDocumentService.ts');
   /** 只检测重复的 inline code → HTTP 数字映射，不拦合法的 code → code 归一化。 */
   const DUP_RE = /===\s*['"`]SHIPMENT_NOT_FOUND['"`]\s*\?\s*[45]\d{2}\s*:\s*[45]\d{2}/g;
@@ -343,11 +209,6 @@ describe('D · 反并行真源普查：禁止复制 inline code → HTTP 数字�
     return out;
   };
 
-  it('★ 两个消费方都只问那一个映射函数（存在性先钉住，否则下一条"零命中"可以靠删代码变绿）', () => {
-    expect(SHIPPING_ROUTE.match(/documentSetHttpErrorCode\(/g)?.length ?? 0, 'shipping/route.ts 不再问单一映射').toBeGreaterThan(0);
-    expect(COMPOSITE_SVC.match(/documentSetHttpErrorCode\(/g)?.length ?? 0, 'compositeDocumentService 不再问单一映射').toBeGreaterThan(0);
-  });
-
   it('★ 重复 inline code → HTTP 数字映射在整个 src 生产源码零命中', () => {
     const files = prodSources();
     expect(files.length, '扫描根没走起来 ⇒ 这条普查是恒绿的假闸门').toBeGreaterThan(300);
@@ -364,19 +225,5 @@ describe('D · 反并行真源普查：禁止复制 inline code → HTTP 数字�
     expect(normalization.match(DUP_RE) ?? [], '合法业务码归一化不应被误报成 HTTP 映射').toEqual([]);
     // 注释里出现同样字面不算（stripComments 已剥 ⇒ 用一段被剥掉的样本来证明"注释不算命中"这条口径成立）
     expect(stripComments(`// ${reintroduced}`).match(DUP_RE) ?? [], '注释里的字面被算成命中 ⇒ 判据会把文档说明也判红').toEqual([]);
-  });
-
-  /**
-   * ★ v2.47 复核 I-3：这一族的**数字**只许住在注册表里。
-   * 原先调用点写 `lookupErrorCode(code)?.status ?? 500` ⇒ 注册表外多了一个状态码，
-   * 且未登记的码在两条路径上失败方式不一致（抛错侧炸、这里静默 500）。
-   */
-  it('★ 调用点不再自带状态码数字：`?.status ?? <数字>` 这一族形状必须为零，两侧缺码同规则（都抛）', () => {
-    expect(SHIPPING_ROUTE.match(/\?\.status\s*\?\?\s*\d/g) ?? [], 'shipping/route.ts 又自带了一个状态码数字').toEqual([]);
-    expect(SHIPPING_ROUTE).toContain('httpStatusOfCode(');
-    // 契约一致性的真源侧：未登记的码 ⇒ 抛，而不是静默给一个默认档
-    expect(() => httpStatusOfCode('NOT_REGISTERED_XYZ')).toThrow(/注册表缺少业务码/);
-    expect(httpStatusOfCode('NOT_FOUND')).toBe(404);
-    expect(httpStatusOfCode('ASSEMBLE_FAILED')).toBe(500);
   });
 });

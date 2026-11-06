@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { AuditLog, PrismaClient } from '@prisma/client';
 import { BUSINESS_CLOCK_DATABASE, BUSINESS_TIME_ZONE, FIXED_BUSINESS_TIME_ISO, getBusinessClock } from '../../src/shared/businessClock';
-import { batchReceiptRecordedAt, readBatchReceiptSnapshot } from '../../src/samples/sampleBatchReceipt';
+import { batchReceiptRecordedAt, readBatchReceiptSnapshot } from './sampleBatchReceiptSnapshot';
 import { buildDevelopmentQualitySourceSnapshot } from '../../src/development/developmentVersionGate';
 
 export type DevelopmentClockEventKind = 'returnedAt' | 'requestedAt' | 'startedAt' | 'reviewedAt' | 'acknowledgedAt';

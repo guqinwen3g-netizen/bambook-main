@@ -57,22 +57,7 @@ function countByFileHere() {
 
 /** 冻结基线（2026-09-20 15:06 收紧判据后实测 21 个文件 / 51 处）。只许减不许增。 */
 const BASELINE: Record<string, number> = {
-  'src/reporting/reportDefinitionService.ts': 7,
-  'src/credit/bankruptcyService.ts': 3,
-  'src/handover/handoverService.ts': 3,
-  'src/mes/processChainService.ts': 3,
-  'src/qc/testRequestService.ts': 3,
-  'src/finance/dunningService.ts': 2,
-  'src/finance/dunningStageService.ts': 2,
-  'src/finance/forwardFxService.ts': 2,
-  'src/inventory/stockOwnershipService.ts': 2,
-  'src/reporting/monthlyCloseService.ts': 2,
-  'src/suppliers/delayImpactService.ts': 2,
-  'src/suppliers/tcCertificateService.ts': 2,
   'src/claims/claimCaseService.ts': 1,
-  'src/claims/creditNoteService.ts': 1,
-  'src/relations/routeV2.ts': 1,
-  'src/tools/fabricCalculatorRoute.ts': 1,
 };
 
 describe('B33 · 服务层「原文 || 文案」当对外文案（只减不增）', () => {
@@ -85,8 +70,8 @@ describe('B33 · 服务层「原文 || 文案」当对外文案（只减不增�
     const stale = Object.entries(BASELINE).filter(([f, n]) => (actual[f] ?? 0) < n)
       .map(([f, n]) => `${f}: 基线 ${n} → 实际 ${actual[f] ?? 0}`);
     expect(stale, `已经改好了就同步删掉那一行（留旧数会掩盖下一次回潮）：${JSON.stringify(stale)}`).toEqual([]);
-    expect(Object.values(actual).reduce((a, b) => a + b, 0), '全仓 B33 站点总数').toBe(37); // source-proven commission unknown failure now discards the error.
-    expect(Object.keys(actual).length, '含 B33 站点的文件数').toBe(16);
+    expect(Object.values(actual).reduce((a, b) => a + b, 0), '全仓 B33 站点总数').toBe(1); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 37 / 16）。
+    expect(Object.keys(actual).length, '含 B33 站点的文件数').toBe(1);
   });
 
   it('★ 行号保真：每个命中点报的行，原文那一行真的就是这处写法（否则逐站点清单不能驱动改代码）', () => {
@@ -157,36 +142,24 @@ describe('B33 · 服务层「原文 || 文案」当对外文案（只减不增�
  * 基线 2026-09-20 14:48 实测：① **10 处 / 5 文件**、② **18 处 / 8 文件**，合计 **28 处 / 13 文件**。只减不增。
  */
 const B36_STRING_COPY_BASELINE: Record<string, number> = {
-  'src/samples/sampleLengthService.ts': 5,
-  'src/inventory/inventoryOwnershipService.ts': 2,
-  'src/customer/reconciliationAckService.ts': 1,
   'src/finance/billingItemService.ts': 1,
-  'src/shipping/shipmentLandTransportService.ts': 1,
 };
 const B36_CODE_PASSTHROUGH_BASELINE: Record<string, number> = {
-  'src/credit/bankruptcyService.ts': 3,
-  'src/mes/processChainService.ts': 3,
-  'src/qc/testRequestService.ts': 3,
-  'src/samples/colorBatchService.ts': 3,
-  'src/samples/colorCardService.ts': 2,
-  'src/suppliers/tcCertificateService.ts': 2,
-  'src/finance/dunningService.ts': 1,
-  'src/suppliers/delayImpactService.ts': 1,
 };
 function countByFileB36(which: 'stringCopy' | 'codePassthrough'): Record<string, number> {
   return countByFile(scanSources(SERVER), (src: string) => b36Sites(src, which));
 }
 
 describe('B36 · 同一条通道的另外两种形状（只减不增）', () => {
-  it('① 文案位 = String(原文)：10 处 / 5 文件', () => {
+  it('① 文案位 = String(原文)：1 处 / 1 文件（2026-11-06 删除死代码后；原 10 / 5）', () => {
     const actual = countByFileB36('stringCopy');
-    expect(Object.values(actual).reduce((a, b) => a + b, 0)).toBe(10);
+    expect(Object.values(actual).reduce((a, b) => a + b, 0)).toBe(1);
     expect(actual).toEqual(B36_STRING_COPY_BASELINE);
   });
 
-  it('② `if (e?.code) return fail(e.code, e.message)`：18 处 / 8 文件（Prisma 自带 code ⇒ 原文上屏 + 降 400）', () => {
+  it('② `if (e?.code) return fail(e.code, e.message)`：已归零（2026-11-06 删除死代码后；原 18 / 8），新增即红', () => {
     const actual = countByFileB36('codePassthrough');
-    expect(Object.values(actual).reduce((a, b) => a + b, 0)).toBe(18);
+    expect(Object.values(actual).reduce((a, b) => a + b, 0)).toBe(0);
     expect(actual).toEqual(B36_CODE_PASSTHROUGH_BASELINE);
   });
 
@@ -225,17 +198,14 @@ describe('B36 · 同一条通道的另外两种形状（只减不增）', () => 
 const B37_BASELINE: Record<string, number> = {
   'src/paymentRequests/paymentRequestService.ts': 2,
   'src/exceptions/exceptionService.ts': 1,
-  'src/finance/forwardFxService.ts': 1,
-  'src/finance/writeOffService.ts': 1,
-  'src/inventory/stockOwnershipService.ts': 1,
   'src/orderChanges/orderChangeRequestService.ts': 1,
 };
 
 describe('B37 · B33/B36 都认不到的第四种写法（只减不增）', () => {
   const actual = countByFile(scanSources(SERVER), b37Sites);
 
-  it('逐文件基线：7 处 / 6 文件，涨了红、偷偷少了也红', () => {
-    expect(Object.values(actual).reduce((a, b) => a + b, 0)).toBe(7);
+  it('逐文件基线：4 处 / 3 文件（2026-11-06 删除死代码后按保留文件的原基线重算；原 7 / 6），涨了红、偷偷少了也红', () => {
+    expect(Object.values(actual).reduce((a, b) => a + b, 0)).toBe(4);
     expect(actual).toEqual(B37_BASELINE);
   });
 
@@ -323,16 +293,15 @@ describe('B37 · B33/B36 都认不到的第四种写法（只减不增）', () =
  *   ⇒ 是本站点里第一处「导出但无消费者」的出口，**不声称它是活的上屏路径**（另 5 处由端到端用例钉住）。
  */
 const B39_BASELINE: Record<string, number> = {
-  'src/development/fabricDevelopmentService.ts': 3, // 11 exact native catches now use failFabricOperation; remaining seal create/update/delete stay measured.
-  'src/finance/billingItemService.ts': 6,
+  'src/finance/billingItemService.ts': 4, // 2026-11-06: actual remaining sites (main measured 4 here; the earlier 6 was stale).
 };
 
 describe('B39 · 位置参数内插原文（只减不增）', () => {
   const actual = countByFile(scanSources(SERVER), b39Sites);
 
-  it('逐文件基线：9 处 / 2 文件，涨了红、偷偷少了也红', () => {
-    expect(Object.values(actual).reduce((a, b) => a + b, 0), '全仓 B39 站点总数').toBe(9);
-    expect(Object.keys(actual).length, '含 B39 站点的文件数').toBe(2);
+  it('逐文件基线：4 处 / 1 文件（原 9 / 2），涨了红、偷偷少了也红', () => {
+    expect(Object.values(actual).reduce((a, b) => a + b, 0), '全仓 B39 站点总数').toBe(4); // 2026-11-06 删除死代码后按保留文件的原基线重算（原 9 / 2）。
+    expect(Object.keys(actual).length, '含 B39 站点的文件数').toBe(1);
     expect(actual).toEqual(B39_BASELINE);
   });
 

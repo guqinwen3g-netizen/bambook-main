@@ -3,10 +3,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Prisma } from '@prisma/client';
 import { createClaimCase, addDisposition, approveDisposition } from '../claimCaseService';
-import { executeDisposition } from '../claimSettlement';
-import { applyCreditNote, cancelCreditNote } from '../creditNoteService';
-import { getClaimCreditNote, getCreditNoteVersions, issueClaimCreditNoteVersion } from '../claimCreditNoteVersionService';
-import { buildClaimApprovalPayload, CLAIM_APPROVAL_ACTION, CLAIM_APPROVAL_TARGET } from '../claimApprovalFact';
+import { appendClaimCreditNoteInTx, getClaimCreditNote, getCreditNoteVersions, issueClaimCreditNoteVersion } from '../claimCreditNoteVersionService';
+import { buildClaimApprovalPayload, CLAIM_APPROVAL_ACTION, CLAIM_APPROVAL_TARGET, ClaimTransactionError, lockClaimRows, readClaimApprovedFact } from '../claimApprovalFact';
 vi.mock('../../credit/creditService', () => ({ notifyCustomerCreditRecalc: vi.fn(async () => undefined) }));
 vi.mock('../../finance/orderAutoSettlement', () => ({ syncOrderAutoSettlementByInvoice: vi.fn(async () => undefined) }));
 
@@ -128,11 +126,36 @@ async function setup() {
   prisma._t.invoice.push({ id: 'INV_1', type: 'Receivable', status: 'Issued', customerRelationId: 'R1', currency: 'USD', amount: new Prisma.Decimal(1000), deletedAt: null });
   return { prisma, claimCase };
 }
+/** 2026-11-06: the legacy claimSettlement.executeDisposition / creditNoteService producers were deleted with the
+ * main API. This drives the live append producer they called, under the same row locks and exact approval fact;
+ * only the execution facts the live account check reads are recorded (no return/replacement/repair outputs or audit). */
+async function appendApproved(prisma: any, dispositionId: string, requestId: string) {
+  try {
+    const creditNote = await prisma.$transaction(async (tx: any) => {
+      const { disposition, claimCase } = await lockClaimRows(tx, dispositionId);
+      const fact = await readClaimApprovedFact(tx, disposition, claimCase);
+      const note = await appendClaimCreditNoteInTx(tx, { disposition, claimCase, fact }, 'u1', requestId, async () => tx.creditNote.create({ data: {
+        id: `CN_${disposition.id}`, creditNoteNumber: `CLM-${disposition.id}`, customerRelationId: claimCase.customerRelationId ?? null,
+        customerName: claimCase.customerName ?? null, claimCaseId: claimCase.id, sourceInvoiceId: claimCase.sourceInvoiceId ?? null,
+        currency: disposition.currency, amount: new Prisma.Decimal(disposition.amount), openAmount: new Prisma.Decimal(disposition.amount),
+        status: 'Open', createdAt: BigInt(Date.now()), updatedAt: BigInt(Date.now()) } }));
+      // Minimal execution facts the live account check reads (formerly written by executeDisposition in the same tx).
+      await tx.claimDisposition.update({ where: { id: disposition.id }, data: { status: 'Executed', creditNoteId: note.id } });
+      await tx.claimCase.update({ where: { id: claimCase.id }, data: { totalCreditAmount: { increment: new Prisma.Decimal(disposition.amount) },
+        creditCurrency: disposition.currency ?? claimCase.creditCurrency } });
+      return note;
+    });
+    return { ok: true as const, data: { creditNote }, error: undefined };
+  } catch (error) {
+    if (error instanceof ClaimTransactionError) return { ok: false as const, data: undefined, error: error.claimError };
+    throw error;
+  }
+}
 async function executeMoney(prisma: any, caseId: string, amount = 500, currency = 'USD') {
   const d = (await addDisposition(prisma, caseId, { kind: 'Allowance', amount, currency }, 'u1')).data!.disposition;
   recordApprovedFact(prisma, d);
   expect((await approveDisposition(prisma, d.id, 'boss')).ok).toBe(true);
-  const result = await executeDisposition(prisma, d.id, 'u1', { clientRequestId: `EXEC_${d.id}` });
+  const result = await appendApproved(prisma, d.id, `EXEC_${d.id}`);
   return { d, result };
 }
 
@@ -159,34 +182,23 @@ describe('一案一逻辑 CN、不可变正式文档及真实抵扣事件', () =
     expect((await getClaimCreditNote(prisma, claimCase.id)).data!.versions).toHaveLength(2);
   });
 
-  it('已发行文档原样保存；抵扣后追加只增加新版本和当前余额，打印必须 exact issued versionId', async () => {
+  it('已发行文档原样保存；追加只增加新版本和当前余额，打印必须 exact issued versionId', async () => {
     const { prisma, claimCase } = await setup();
     const first = await executeMoney(prisma, claimCase.id);
     const id = first.result.data!.creditNote.id;
     const issue = await issueClaimCreditNoteVersion(prisma, id, { clientRequestId: 'ISSUE_1', expectedVersion: 1 }, 'finance');
     expect(issue.ok).toBe(true);
     const frozen = JSON.stringify(issue.data!.version, (_key, value) => typeof value === 'bigint' ? String(value) : value);
-    expect((await applyCreditNote(prisma, id, { appliedAmount: 200, toInvoiceId: 'INV_1', clientRequestId: 'OFFSET_1' }, 'finance')).ok).toBe(true);
     expect((await executeMoney(prisma, claimCase.id, 100)).result.ok).toBe(true);
     expect(JSON.stringify(prisma._t.creditNoteDocumentVersion[0], (_key, value) => typeof value === 'bigint' ? String(value) : value)).toBe(frozen);
     expect(String(prisma._t.creditNote[0].currentAmount)).toBe('600');
-    expect(String(prisma._t.creditNote[0].openAmount)).toBe('400');
-    expect(prisma._t.creditNote[0].status).toBe('PartiallyApplied');
+    expect(String(prisma._t.creditNote[0].openAmount)).toBe('600');
+    expect(prisma._t.creditNote[0].status).toBe('Open');
     const print = await getCreditNoteVersions(prisma, id, { versionId: issue.data!.version.id });
     expect(String(print.data!.printVersion.amount)).toBe('500');
     expect(print.data!.printVersion.linesSnapshot.lines).toHaveLength(1);
     expect((await getCreditNoteVersions(prisma, id, { versionId: prisma._t.creditNoteDocumentVersion[1].id })).error?.code).toBe('INVALID_STATE');
     expect((await getCreditNoteVersions(prisma, id, { versionId: 'FOREIGN_VERSION' })).error?.code).toBe('INVALID_STATE');
-  });
-
-  it('已结清后追加批准金额重新打开当前账户，原正式版本仍不改变', async () => {
-    const { prisma, claimCase } = await setup();
-    const first = await executeMoney(prisma, claimCase.id, 500), id = first.result.data!.creditNote.id;
-    expect((await applyCreditNote(prisma, id, { appliedAmount: 500, toInvoiceId: 'INV_1', clientRequestId: 'ALL' }, 'finance')).data!.creditNote.status).toBe('Closed');
-    expect((await executeMoney(prisma, claimCase.id, 100)).result.ok).toBe(true);
-    expect(String(prisma._t.creditNote[0].openAmount)).toBe('100');
-    expect(prisma._t.creditNote[0].status).toBe('PartiallyApplied');
-    expect(String(prisma._t.creditNoteDocumentVersion[0].amount)).toBe('500');
   });
 
   it('发行原请求可在追加后只读重放；主体、版本或请求标识不匹配均拒绝', async () => {
@@ -224,43 +236,20 @@ describe('一案一逻辑 CN、不可变正式文档及真实抵扣事件', () =
     recordApprovedFact(prisma, d); await approveDisposition(prisma, d.id, 'boss');
     const fault = Object.assign(new Error('required-fact-write-failed'), { code: 'P2003' });
     prisma[model].create.mockRejectedValueOnce(fault);
-    await expect(executeDisposition(prisma, d.id, 'u1', { clientRequestId: 'CREATE' })).rejects.toBe(fault);
+    await expect(appendApproved(prisma, d.id, 'CREATE')).rejects.toBe(fault);
     for (const name of ['creditNote', 'claimCreditNoteLine', 'creditNoteDocumentVersion', 'creditNoteSettlementEvent', 'creditNoteAllocation']) expect(prisma._t[name]).toHaveLength(0);
     expect(prisma._t.claimDisposition[0].status).toBe('Approved');
     expect(prisma._t.claimCase[0].totalCreditAmount).toBeUndefined();
   });
 
-  it('发行必需审计失败不能留下 issued 状态，受管 CN 不能孤立作废', async () => {
+  it('发行必需审计失败不能留下 issued 状态', async () => {
     const { prisma, claimCase } = await setup();
     const first = await executeMoney(prisma, claimCase.id), id = first.result.data!.creditNote.id;
     const fault = new Error('issue-audit-failed'); prisma.auditLog.create.mockRejectedValueOnce(fault);
     await expect(issueClaimCreditNoteVersion(prisma, id, { clientRequestId: 'ISSUE', expectedVersion: 1 }, 'finance')).rejects.toBe(fault);
     expect(prisma._t.creditNoteDocumentVersion[0].issuedAt).toBeUndefined();
-    expect((await cancelCreditNote(prisma, id, '试图孤立作废', 'finance')).error?.code).toBe('INVALID_STATE');
     expect(prisma._t.creditNote[0].status).toBe('Open');
   });
-
-  it.each(['line', 'version', 'projection', 'eventAudit', 'decisionAudit'])('篡改 %s 后拒绝新核销，余额和抵扣事件不增加', async (corruption) => {
-    const { prisma, claimCase } = await setup();
-    const first = await executeMoney(prisma, claimCase.id), id = first.result.data!.creditNote.id;
-    expect((await applyCreditNote(prisma, id, { appliedAmount: 100, toInvoiceId: 'INV_1', clientRequestId: 'FIRST' }, 'finance')).ok).toBe(true);
-    if (corruption === 'line') prisma._t.claimCreditNoteLine[0].amount = new Prisma.Decimal(600);
-    if (corruption === 'version') prisma._t.creditNoteDocumentVersion[0].linesSnapshot.amount = '600';
-    if (corruption === 'projection') prisma._t.creditNoteAllocation[0].appliedAmount = new Prisma.Decimal(50);
-    if (corruption === 'eventAudit') prisma._t.auditLog = prisma._t.auditLog.filter((row: any) => row.action !== 'CREDIT_NOTE_SETTLED');
-    if (corruption === 'decisionAudit') prisma._t.auditLog = prisma._t.auditLog.filter((row: any) => row.id !== prisma._t.claimCreditNoteLine[0].decisionAuditId);
-    const rejected = await applyCreditNote(prisma, id, { appliedAmount: 100, toInvoiceId: 'INV_1', clientRequestId: 'SECOND' }, 'finance');
-    expect(rejected.error?.code).toBe('INVALID_STATE');
-    expect(prisma._t.creditNoteSettlementEvent).toHaveLength(1);
-    expect(String(prisma._t.creditNote[0].openAmount)).toBe('400');
-  });
-
-  it('同币种其他客户发票也不能消费该案批准额度', async () => {
-    const { prisma, claimCase } = await setup();
-    const first = await executeMoney(prisma, claimCase.id), id = first.result.data!.creditNote.id;
-    prisma._t.invoice[0].customerRelationId = 'FOREIGN_CUSTOMER';
-    expect((await applyCreditNote(prisma, id, { appliedAmount: 100, toInvoiceId: 'INV_1', clientRequestId: 'BAD_TARGET' }, 'finance')).error?.code).toBe('INVALID_STATE');
-    expect(prisma._t.creditNoteSettlementEvent).toHaveLength(0);
-    expect(String(prisma._t.creditNote[0].openAmount)).toBe('500');
-  });
+  // 2026-11-06: offset/cancel cases (settle, tamper-then-settle, foreign-invoice, closed-then-reopen) needed the deleted
+  // creditNoteService.applyCreditNote/cancelCreditNote and were removed with it.
 });

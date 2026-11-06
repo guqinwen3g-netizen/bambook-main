@@ -70,7 +70,6 @@ vi.mock('../../approvals/approvalCreateService', () => ({
 }));
 
 import { transitionOrderStatus } from '../../orders/orderLifecycleService';
-import { createOrderServiceV2 } from '../../orders/orderServiceV2';
 import { EXCEPTION_CATEGORIES } from '../../exceptions/exceptionGate';
 import { consumeCreditException, CreditExceptionConsumptionError } from '../creditExceptionGate';
 
@@ -233,36 +232,12 @@ describe('credit order mandatory consumption transaction contract', () => {
       scope: { targetType: 'Order', targetId: 'ORD', action: 'order:confirm' }, actorId: 'user_1', tx: undefined as any })).rejects.toBeInstanceOf(CreditExceptionConsumptionError);
     expect(consumeException).not.toHaveBeenCalled();
   });
-  it('valid Relation/order:create consumption uses the order insert transaction once', async () => {
-    const exc = makeException({ scope: { targetType: 'Relation', targetId: 'REL__F', action: 'order:create' } });
-    const { prisma, tx } = makePrisma({ creditLimit: FROZEN_CREDIT_LIMIT, exceptions: [exc] });
-    const result = await createOrderServiceV2(prisma).createOrder(ACTOR, { customer: 'Peerless', product: 'Cotton Twill', type: 'Fabric', quantity: 1000, customerRelationId: 'REL__F', dueDate: '2099-01-01', quoteAmount: 1000 });
-    expect(result.ok).toBe(true); expect(prisma.$transaction).toHaveBeenCalledTimes(1); expect(tx.order.create).toHaveBeenCalledTimes(1);
-    expect(tx.$queryRaw).toHaveBeenCalledWith(expect.anything(), exc.id);
-    expect(tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ actorId: ACTOR.userId, action: 'dr013_exception_consumed' }) }));
-    expect(exc.status).toBe('Consumed'); expect(exc.attachments.scope.usedCount).toBe(1);
-  });
-  it('creation surfaces a mandatory consumption audit failure and emits no advisory success', async () => {
-    const exc = makeException({ scope: { targetType: 'Relation', targetId: 'REL__F', action: 'order:create' } });
-    const { prisma, tx } = makePrisma({ creditLimit: FROZEN_CREDIT_LIMIT, exceptions: [exc] });
-    tx.auditLog.create.mockRejectedValue(new Error('Injected adapter audit failure'));
-    const result = await createOrderServiceV2(prisma).createOrder(ACTOR, { customer: 'Peerless', product: 'Cotton Twill', type: 'Fabric', quantity: 1000, customerRelationId: 'REL__F', dueDate: '2099-01-01', quoteAmount: 1000 });
-    expect(result.ok).toBe(false); expect(result.error!.code).toBe('EXCEPTION_CONSUME_FAILED'); expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    expect(tx.order.create).toHaveBeenCalledTimes(1); expect(tx.agentJob.create).not.toHaveBeenCalled();
-  });
   it('a confirmation quota CAS conflict fails before persisting or publishing success events', async () => {
     const exc = makeException(); const { prisma, tx, dr013ExceptionRequest } = makePrisma({ creditLimit: FROZEN_CREDIT_LIMIT, exceptions: [exc] });
     dr013ExceptionRequest.updateMany.mockResolvedValue({ count: 0 });
     const result = await transitionOrderStatus({ prisma, orderId: 'ORD__1', toStatus: 'Confirmed', actorId: 'user_1' });
     expect(result.ok).toBe(false); expect(result.error!.code).toBe('EXCEPTION_CONSUME_CONFLICT'); expect(tx.agentJob.create).not.toHaveBeenCalled();
     const { publishBusinessEvent } = await import('../../events/businessEventBus'); expect(publishBusinessEvent).not.toHaveBeenCalled();
-  });
-  it('normal creation never consumes an available exception which the credit gate did not use', async () => {
-    const exc = makeException({ scope: { targetType: 'Relation', targetId: 'REL__F', action: 'order:create' } });
-    const { prisma, tx, dr013ExceptionRequest } = makePrisma({ exceptions: [exc] });
-    expect((await createOrderServiceV2(prisma).createOrder(ACTOR, { customer: 'Peerless', product: 'Cotton Twill', type: 'Fabric', quantity: 1000, customerRelationId: 'REL__F', dueDate: '2099-01-01', quoteAmount: 1000 })).ok).toBe(true);
-    expect(prisma.$transaction).not.toHaveBeenCalled(); expect(tx.$queryRaw).not.toHaveBeenCalled(); expect(dr013ExceptionRequest.updateMany).not.toHaveBeenCalled();
-    expect(exc.attachments.scope.usedCount).toBe(0);
   });
 });
 
@@ -341,22 +316,4 @@ describe('P1-2（DE-5）信用阻断自动发起例外申请', () => {
     expect(dr013ExceptionRequest.create).not.toHaveBeenCalled();
   });
 
-  it('V2 建单信用阻断 → 自动发起 credit_exemption（scope=Relation/order:create）+ 审批单 id 透传', async () => {
-    const { prisma, dr013ExceptionRequest } = makePrisma({ creditLimit: FROZEN_CREDIT_LIMIT });
-    const svc = createOrderServiceV2(prisma);
-    const r = await svc.createOrder(ACTOR, {
-      customer: 'Peerless', product: 'Cotton Twill', type: 'Fabric',
-      quantity: 1000, dueDate: '2026-09-01', quoteAmount: 10000,
-      customerRelationId: 'REL__F',
-    });
-    expect(r.ok).toBe(false);
-    expect(r.error!.code).toBe('CREDIT_FROZEN_60_DAYS');
-    expect(r.error!.approvalRequestId).toBe(MOCK_APPROVAL_ID);
-    expect(prisma.order.create).not.toHaveBeenCalled();
-    const created = dr013ExceptionRequest.create.mock.calls[0][0].data;
-    expect(created.exceptionCategory).toBe('credit_exemption');
-    expect(created.attachments.scope.targetType).toBe('Relation');
-    expect(created.attachments.scope.targetId).toBe('REL__F');
-    expect(created.attachments.scope.action).toBe('order:create');
-  });
 });

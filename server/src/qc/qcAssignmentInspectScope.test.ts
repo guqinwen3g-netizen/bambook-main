@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TokenPayload } from '../auth/service';
 import { qcAssignmentAccess } from './qcAssignmentAccess';
-import { assertQcAssignmentUser, listQcAssignmentUsers, type QcAssignmentUserOption } from './qcAssignmentUsers';
 import { qcOrderInspectionScope } from './qcExecutionScope';
 
 const state = vi.hoisted(() => ({ users: new Map<string, any>(), visible: true,
@@ -81,28 +80,3 @@ describe('professional QC execution grants', () => {
   });
 });
 
-describe('professional QC dispatch directory', () => {
-  it('rejects business self-assignment and lists only current actual professional grants', async () => {
-    const { db } = fixture();
-    await expect(assertQcAssignmentUser(db, 'business')).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
-    await expect(assertQcAssignmentUser(db, 'qc')).resolves.toBeUndefined();
-    const result = await listQcAssignmentUsers(db, prior('business'));
-    expect(result.users.map((row: QcAssignmentUserOption) => row.id)).toEqual(['qc']);
-    const sql = db.$queryRaw.mock.calls.map(([query]: [{ strings: string[] }]) => query.strings.join(' '));
-    for (const table of ['RolePermission', 'Permission', 'UserPermissionOverrides']) {
-      expect(sql.find((text: string) => text.includes(`FROM "${table}"`))).toContain("'qc:inspect'");
-    }
-  });
-  it('rechecks fresh recipient status and grants even when a prior picker showed the person', async () => {
-    const { db } = fixture(); expect((await listQcAssignmentUsers(db, prior('business'))).users).toHaveLength(1);
-    state.users.get('qc').permissions = ['qc:read', 'qc:write'];
-    await expect(assertQcAssignmentUser(db, 'qc')).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
-    expect((await listQcAssignmentUsers(db, prior('business'))).users).toHaveLength(0);
-  });
-  it('does not dispatch a professional to another business family or an unclassified order', async () => {
-    const { db } = fixture();
-    await expect(assertQcAssignmentUser(db, 'qc', 'qc:fabric_chain:write')).resolves.toBeUndefined();
-    await expect(assertQcAssignmentUser(db, 'qc', 'qc:garment_chain:write')).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
-    await expect(assertQcAssignmentUser(db, 'qc', null)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
-  });
-});

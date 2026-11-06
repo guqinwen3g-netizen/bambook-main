@@ -162,7 +162,6 @@ describe('B76 · 真实受害者：曾经瞎掉的五处代码，现在必须在
   const victims: Array<{ file: string; line: string; label: string }> = [
     { file: 'src/index.ts', line: "    if (req.url === '/bambook/api' || req.url.startsWith('/bambook/api/')) {", label: 'index.ts :376（盲区 375→1328，545 行 —— 里面躺着 /bambook 前缀剥离中间件）' },
     { file: 'src/notifications/notificationService.ts', line: "  lc_shipment_deadline: '信用证装运截止',", label: 'notificationService :70（盲区 62→116）' },
-    { file: 'src/audit/auditService.ts', line: '    if (!matchSeg(patSegs[i], pathSegs[i])) return false;', label: 'auditService :65（盲区 60→73）' },
     { file: '../components/Settings.tsx', line: "                    <div className={labelCls + ' mb-2'}>认证模式</div>", label: 'Settings.tsx :700（该文件 32% 曾不可见）' },
     { file: '../services/apiService.ts', line: '  MarketingCampaign,', label: 'apiService.ts :232（行注释里的 /api/v2/marketing/ 通配吃掉 43 行）' },
   ];
@@ -233,7 +232,8 @@ describe('B76 · 总闸：全仓扫一遍，行数必须守恒、且"新尺更�
      */
     expect(g.server.new, `server 侧新尺仍吃掉了 ${g.server.new} 行 ⇒ B76 复发`).toBe(0);
     // 差分总闸：旧尺在 server 侧吃掉的行数（口径 C = 总闸集里以 server/ 开头的 1089 个文件，v2.55 现量 **673**；原先这里写"约 610"是 B∩server=542 个文件那个口径的 614，混了两个口径）⇒ 一旦有人把尺换回去就会掉回来
-    expect(g.server.old).toBeGreaterThanOrEqual(600);
+    // 2026-11-06：删除旧主 API 死代码（约 500 个 server 文件）后同口径现量 129。
+    expect(g.server.old).toBeGreaterThanOrEqual(120);
     expect(g.frontend.new).toBeLessThan(g.frontend.old);
   });
 });

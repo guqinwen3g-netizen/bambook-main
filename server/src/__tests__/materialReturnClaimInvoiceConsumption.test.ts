@@ -48,11 +48,6 @@ interface Consumer {
  */
 const REGISTRY: Consumer[] = [
   {
-    file: 'workflow/workflowInvoiceSource.ts',
-    role: 'reconcile',
-    note: '通用工作流沿实际 claimInvoiceId 与原确认审计回查退料、收料、采购单和供应商；拒绝不唯一、失效或金额币种不一致来源，不改变原生结算状态',
-  },
-  {
     file: 'finance/supplierClaimSettlementGuard.ts',
     role: 'reconcile',
     note: '锁定实际 claimInvoiceId 来源；财务更正失去足额有效核销时同事务追加审计并重开当前结算投影，保留历史事实',
@@ -62,11 +57,7 @@ const REGISTRY: Consumer[] = [
     role: 'release',
     note: '作废当前负额 Payable 时严格校验来源并释放当前 claimInvoiceId 投影，保留历史确认与作废审计；不结清贷项',
   },
-  {
-    file: 'procurement/materialReturnService.ts',
-    role: 'settle',
-    note: 'confirmReturn 生成负额 Payable；settleReturn 在同一事务校验原收料、供应商、确认审计、贷项和实际收款核销后结清；缺乏事实不得结案',
-  },
+  // 2026-11-06: workflow/workflowInvoiceSource.ts and procurement/materialReturnService.ts were deleted with the legacy main API.
 ];
 
 /**
@@ -154,11 +145,5 @@ describe('★ 行为守卫：负额贷项票的已知状态机缺陷（回归即
     //    钉住「超票面额必须拦」这件事本身，而不是某个变量名 —— 允许 basis 命名演进。
     expect(src).toMatch(/appliedAmountDecimal\.gt\(invoiceBasis\)/);
     expect(src).toContain('AMOUNT_EXCEEDS_INVOICE');
-  });
-
-  it('cancelReturn 仍只允许 pending（⇒ 作废是 confirmed 索赔的唯一出口）', () => {
-    const src = fs.readFileSync(path.join(SRC, 'procurement', 'materialReturnService.ts'), 'utf8');
-    const fn = src.slice(src.indexOf('cancelReturn'));
-    expect(fn).toMatch(/pending/);
   });
 });

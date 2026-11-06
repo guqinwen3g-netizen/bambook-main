@@ -33,7 +33,6 @@ vi.mock('../../credit/creditService', () => ({
 }));
 
 import { applyAllocation } from '../allocationService';
-import { createAllocation } from '../allocationMutationService';
 import { AUTO_SETTLE_ACTOR } from '../orderAutoSettlement';
 
 /** 内存 prisma：发票 + 凭证 + 核销 + 发票↔订单分配 + 订单（批次表为空 → 批次重算 no-op） */
@@ -198,19 +197,6 @@ describe('L3③ 订单自动结案 —— 触发面 & 口径与核销内核一�
     expect(o1.settledAt).not.toBeNull();
     expect(o2.settledAt).not.toBeNull(); // ★ 修前必为 null
     expect(o2.settledBy).toBe(AUTO_SETTLE_ACTOR);
-  });
-
-  it('③ route 通道（createAllocation）同样结案 —— 不因收口而回归', async () => {
-    const { prisma, state } = makePrisma({
-      orders: [ord('O-1')],
-      vouchers: [{ id: 'V-1', type: 'Receipt', amount: '10000', currency: 'USD', status: 'unreconciled', deletedAt: null }],
-      invoices: [inv({ orderId: 'O-1' })],
-      ioAllocations: [],
-    });
-
-    const r = await createAllocation({ prisma, input: { invoiceId: 'INV-1', voucherId: 'V-1', appliedAmount: 10000 }, actorId: 'tester' });
-    expect(r.ok).toBe(true);
-    expect(state.orders[0].settledAt).not.toBeNull();
   });
 
   it('④ 未收齐（部分核销）→ 不误结案', async () => {

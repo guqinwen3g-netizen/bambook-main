@@ -14,7 +14,6 @@ import {
   resetMeloCircuitForTesting,
   MELO_CIRCUIT_OPEN_ERROR,
 } from '../tts';
-import { createAiRouter } from '../route';
 import { createAiRuntime } from '../runtime';
 import jwt from 'jsonwebtoken';
 
@@ -107,44 +106,5 @@ describe('A. melo 熔断器核心', () => {
     controller.abort();
     await expect(pending).rejects.toThrow();
     expect(getMeloCircuitState().open).toBe(false);
-  });
-});
-
-describe('B. /tts/speech 路由错误语义化', () => {
-  function makeTtsApp() {
-    const app = express();
-    app.use(express.json());
-    const runtime = createAiRuntime({ chatRunner: async () => ({ text: 'ok' }) });
-    app.use('/api/ai', createAiRouter({
-      runtime,
-      prisma: {} as any,
-      requireAuth: true,
-      apiKeys: new Set<string>(),
-    } as any));
-    return app;
-  }
-
-  it('熔断打开 → 503 TTS_UNAVAILABLE', async () => {
-    // 先触发一次真实失败打开熔断
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValueOnce(new Error('connect ECONNREFUSED')));
-    await expect(synthesizeMeloSpeech(SPEECH_INPUT)).rejects.toThrow('ECONNREFUSED');
-    expect(getMeloCircuitState().open).toBe(true);
-
-    const res = await request(makeTtsApp())
-      .post('/api/ai/tts/speech')
-      .set('Authorization', `Bearer ${ownerToken}`)
-      .send({ input: '测试' });
-    expect(res.status).toBe(503);
-    expect(res.body.error).toBe('TTS_UNAVAILABLE');
-  });
-
-  it('BAMBOOK_MELO_URL 未配置 → 503 TTS_NOT_CONFIGURED', async () => {
-    delete process.env.BAMBOOK_MELO_URL;
-    const res = await request(makeTtsApp())
-      .post('/api/ai/tts/speech')
-      .set('Authorization', `Bearer ${ownerToken}`)
-      .send({ input: '测试' });
-    expect(res.status).toBe(503);
-    expect(res.body.error).toBe('TTS_NOT_CONFIGURED');
   });
 });
