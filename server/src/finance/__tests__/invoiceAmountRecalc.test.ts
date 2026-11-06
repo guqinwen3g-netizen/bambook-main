@@ -33,7 +33,6 @@ vi.mock('../../credit/creditService', () => ({
 }));
 
 import { updateInvoice } from '../invoiceMutationService';
-import { createFinanceRouter } from '../route';
 import { authHeader } from '../../__tests__/authTestHelper';
 
 const R1 = 'REL__CUST_A';
@@ -254,14 +253,3 @@ describe('updateInvoice — Paid ⟹ settlementDate 非空（否则被按期回�
 // ③ 路由层：错误码 → 409（不能落 500）
 // ────────────────────────────────────────────────────────────────
 
-describe('路由层 — 改金额低于已核销 → 409（不是 500）', () => {
-  it('★ PATCH /api/v1/finance/:id → 409 + 结构化错误码', async () => {
-    const { prisma } = makePrisma({ existing: baseExisting(), allocations: [{ appliedAmount: '900' }] });
-    const app = express();
-    app.use(express.json());
-    app.use('/api/v1/finance', createFinanceRouter({ prisma, requireAuth: false, apiKeys: new Set(), onDataChange: vi.fn() }));
-    const res = await request(app).patch('/api/v1/finance/INV__1').set(authHeader()).send({ amount: '800' });
-    expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('AMOUNT_BELOW_ALLOCATED');
-  });
-});

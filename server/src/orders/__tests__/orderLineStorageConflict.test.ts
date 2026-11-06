@@ -7,7 +7,6 @@ import { describe, expect, it, vi } from 'vitest';
 import type { TokenPayload } from '../../auth/service';
 import { lookupErrorCode, GENERIC_ROUTE_ERROR_MESSAGE } from '../../shared/errorCodes';
 import { authorizeOrderLineWrite, lockedOrderLine, isOrderLineStorageConflict, orderLineWriteFailure, OrderLineWriteError } from '../orderLineWriteAccess';
-import { createOrderLine } from '../orderLineMutationService';
 
 const secret = 'SQL path and driver details must never become a public message';
 function known(code: string, meta?: Record<string, unknown>) {
@@ -65,21 +64,5 @@ describe('OrderLine structured storage conflict and public error contract', () =
       const work = target === 'Order' ? authorizeOrderLineWrite(f.tx, f.order.id, prior, 'create') : lockedOrderLine(f.tx, 'L_actual_storage', f.order.id);
       await expect(work).rejects.toBe(error); expect(orderLineWriteFailure(error)).toBeNull(); expect(f.tx.auditLog.create).not.toHaveBeenCalled();
     });
-  });
-  it('actual OrderLine.create P2002(id) maps to existing CONFLICT409 and cannot reach sync/audit', async () => {
-    const f = storage(); f.tx.orderLine.create.mockRejectedValue(known('P2002', { target: ['id'] }));
-    const result = await createOrderLine({ prisma: f.client, orderId: f.order.id, quantity: 2, trustedActor: prior });
-    expect(result.ok).toBe(false); expect(result.error).toEqual({ code: 'CONFLICT', message: lookupErrorCode('CONFLICT')!.message });
-    expect(f.tx.entityReference.upsert).not.toHaveBeenCalled(); expect(f.tx.auditLog.create).not.toHaveBeenCalled();
-  });
-  it.each(['other-create-key', 'untrusted-error', 'unrelated-upsert'])('%s uniqueness failure is safe500 rather than a fabricated auto-number conflict', async variant => {
-    const f = storage();
-    if (variant === 'other-create-key') f.tx.orderLine.create.mockRejectedValue(known('P2002', { target: ['unrelated_field'] }));
-    if (variant === 'untrusted-error') f.tx.orderLine.create.mockRejectedValue(Object.assign(new Error(secret), { code: 'P2002', meta: { target: ['id'] } }));
-    if (variant === 'unrelated-upsert') f.tx.entityReference.upsert.mockRejectedValue(known('P2002', { target: ['id'] }));
-    const result = await createOrderLine({ prisma: f.client, orderId: f.order.id, quantity: 2, trustedActor: prior,
-      ...(variant === 'unrelated-upsert' ? { materialCode: 'actual-synthetic-link-target' } : {}) });
-    expect(result.ok).toBe(false); expect(result.error).toEqual({ code: 'CREATE_LINE_FAILED', message: GENERIC_ROUTE_ERROR_MESSAGE });
-    expect(JSON.stringify(result)).not.toContain(secret); expect(f.tx.auditLog.create).not.toHaveBeenCalled();
   });
 });

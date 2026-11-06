@@ -91,20 +91,9 @@ function scanLeaks(): Record<string, number> {
  *   223 → 213 已逐笔归因到两个 commit（机械取法：`git log -- 本文件` 逐个版本对表求和，v3.84 现量）：
  *     v2.92 `c5337824`：17 文件 / 223 → 16 文件 / 220 · v3.03 `93ef1aef`：16 文件 / 220 → 16 文件 / 213。
  */
-const FROZEN_RAW_ERROR_LEAKS: Record<string, number> = {
-  'bom/bomRoute.ts': 2,
-  'crm/crmRoute.ts': 33,
-  'crm/crmRouteV2.ts': 1,
-  'customs/customsRoute.ts': 46,
-  'customs/customsRouteV2.ts': 26, // V1: declaration list/detail now use safe typed errors; original 9 actual-PG read/SQL controls passed. Other raw outlets retained.
-  // email/route.ts 与 email/templateRoute.ts 曾各 7 处：S0-A2 第 10 批（B42 A1）首版 14 处接真源后归零，故从基线删除
-  'inventory/inventoryRoute.ts': 11,
-  'marketing/marketingRouteV2.ts': 10,
-  'mes/mesRoute.ts': 33,
-  // 92df64c5 native inspection catch uses safeRouteError; actual raw site retired.
-  'quotations/quotationRoute.ts': 15, // v3.03：两审批站**刻意不收**（复核 B-1，收了会吞掉 NO_REVIEWER_RESOLVED 的业务文案）
-  'traceability/traceabilityRoute.ts': 1,
-};
+// 2026-11-06：基线里的文件（bom/crm/customs/inventory/marketing/mes/quotations/traceability 旧路由）
+// 随主 API 死代码一并删除，存量归零；仍保留零基线，新增即红。
+const FROZEN_RAW_ERROR_LEAKS: Record<string, number> = {};
 
 const SCAN_TIMEOUT_MS = 30_000;
 let _scanned: Record<string, number> | null = null;
@@ -183,13 +172,6 @@ describe('★ 棘轮守卫：原始错误不外泄（只许减不许增）', () 
     expect(scanned()).toEqual(FROZEN_RAW_ERROR_LEAKS);
   }, SCAN_TIMEOUT_MS);
 
-  it('★ 试点文件已归零：entities/route.ts 无残留且引用真源', () => {
-    expect(scanned()['entities/route.ts']).toBeUndefined();
-    const src = fs.readFileSync(path.join(SRC, 'entities', 'route.ts'), 'utf8');
-    expect(src).toMatch(/from '\.\.\/shared\/routeError'/);
-    expect(stripComments(src)).not.toMatch(RAW_ERROR_LEAK_RE);
-  });
-
   it('★ 守卫自检：剥注释后计数不把「解释该写法的注释」算进去', () => {
     const sample = [
       "// 旧写法 res.status(500).json({ message: e?.message }) 是错的",
@@ -228,26 +210,4 @@ describe('★ 棘轮守卫：原始错误不外泄（只许减不许增）', () 
     expect((stripComments(otherName).match(RAW_ERROR_LEAK_RE) ?? []).length).toBe(0);
   });
 
-  /**
-   * ★ B73 的**存量证据**（在同一把尺的家里量，不再靠当场现写脚本）：
-   *   旧形状 V1 与现形状 V2 跑同一份源码 ⇒ 差额就是"尺瞎了多少处"。
-   *   这条断言不锁死差额（差额会随收敛变小是好事），只锁死**差额必须存在**且**四个已知文件都在**：
-   *   哪天有人把 V2 换回 V1，第二条会当场红（因为它要求 V2 严格多于 V1）。
-   */
-  it('★ B73：V1（旧形状）与 V2（现形状）在同一份源码上的差额 = 尺的盲区，必须被看见', () => {
-    let v1 = 0, v2 = 0;
-    const blind: Record<string, [number, number]> = {};
-    for (const { rel, src } of ENTRIES) {
-      const a = (src.match(RAW_ERROR_LEAK_V1_RE) ?? []).length;
-      const b = (src.match(RAW_ERROR_LEAK_RE) ?? []).length;
-      v1 += a; v2 += b;
-      if (a !== b) blind[rel] = [a, b];
-    }
-    expect(v2, 'V2 不多于 V1 ⇒ 尺被换窄了（或者已经全部收敛，那要连基线一起删）').toBeGreaterThan(v1);
-    console.log(`\n[B73] 同一份源码：旧尺 V1 ${v1} 处 / 现尺 V2 ${v2} 处 ⇒ 盲区 ${v2 - v1} 处，涉及 ${Object.keys(blind).length} 个文件`);
-    console.log(`[B73] 明细 ${JSON.stringify(blind)}`);
-    for (const f of ['customs/customsRoute.ts', 'customs/customsRouteV2.ts', 'mes/mesRoute.ts', 'crm/crmRoute.ts']) {
-      expect(blind[f], `${f} 是本次发现盲区的现场，必须仍在差额清单里`).toBeTruthy();
-    }
-  });
 });

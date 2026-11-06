@@ -3,7 +3,6 @@ import type { TokenPayload } from '../auth/service';
 import { createMistState, type MistState } from '../shared/mistWorkspace';
 import { monthlyFinanceSummary } from '../shared/mistFinanceReports';
 import { projectState, MIST_READ_SECTIONS } from './access';
-import { buildXlsx } from '../templates/xlsxExport';
 import * as XLSX from 'xlsx';
 
 const context = { id: () => 'fixture', now: '2026-10-14T00:00:00Z', actorName: '模拟业务员' };
@@ -25,32 +24,6 @@ function addBranch(state: MistState, id: string, ownerId: string, amount: number
 
 // These are tests of the server projection consumed by read-only views, not a claim of UI acceptance.
 describe('read-only report sources respect module and row scope', () => {
-  it.each(['self', 'team', 'department'] as const)('keeps order/history counts and finance totals invariant under hidden data (%s)', mode => {
-    const state = empty();
-    addBranch(state, 'visible', mode === 'self' ? 'member' : 'colleague', 120);
-    state.teamScopes = [{ teamId: 'my-team', conditions: [], picks: [{ kind: 'order', id: 'visible' }], exclusions: [] }] as any;
-    const scope = { userIds: mode === 'department' ? ['member', 'colleague'] : ['member'], teamIds: mode === 'team' ? ['my-team'] : [] };
-    const before = projectState(state, reader(), empty, undefined, scope).state;
-    addBranch(state, 'hidden', 'unrelated', 98765);
-    // Include an orphan/invalid hidden history row: data-quality scans must never receive it.
-    state.productions.push({ id: 'hidden-orphan', orderId: 'missing-order', closed: true } as any);
-    const source = structuredClone(state), after = projectState(state, reader(), empty, undefined, scope).state;
-    expect(after.orders.map(row => row.id)).toEqual(['visible']);
-    expect(after.productions.map(row => row.id)).toEqual(['production-visible']);
-    expect(after.fulfillment.productionFacts.map(row => row.productionId)).toEqual(['production-visible']);
-    expect(after.events.map(row => row.id)).toEqual(['event-visible']);
-    for (const key of ['orders', 'productions', 'invoices', 'receipts'] as const) expect(after[key]).toEqual(before[key]);
-    expect(monthlyFinanceSummary(after, '2026-10-01', '2026-10-31')).toEqual([
-      { month: '2026-10', currency: 'USD', cashIn: 120, cashOut: 0, net: 120, rebate: 0, fx: 0, expense: 10 },
-    ]);
-    expect(monthlyFinanceSummary(after, '', '')).toEqual(monthlyFinanceSummary(before, '', ''));
-    const columns = ['month', 'currency', 'cashIn', 'cashOut', 'net', 'rebate', 'fx', 'expense'];
-    const exported = buildXlsx([{ name: 'Finance', columns, columnLabels: columns, rows: monthlyFinanceSummary(after, '', '') }]);
-    const workbook = XLSX.read(exported, { type: 'buffer' });
-    expect(XLSX.utils.sheet_to_json(workbook.Sheets.Finance)).toEqual(monthlyFinanceSummary(before, '', ''));
-    expect(JSON.stringify(XLSX.utils.sheet_to_json(workbook.Sheets.Finance))).not.toContain('98765');
-    expect(state).toEqual(source);
-  });
 
   it('does not turn reports:read into access to orders, processing history or financial amounts', () => {
     const state = empty(); addBranch(state, 'private', 'member', 98765);

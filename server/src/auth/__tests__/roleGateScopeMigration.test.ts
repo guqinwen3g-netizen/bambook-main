@@ -41,8 +41,7 @@ describe('权限点授予与原角色组等价', () => {
 });
 
 describe('路由不再按内置角色名放行', () => {
-  const files = ['shipping/route.ts', 'relations/route.ts', 'email/route.ts', 'agent/route.ts',
-    'admin/route.ts', 'config/systemConfigRoute.ts', 'market/marketQuoteRoute.ts'];
+  const files = ['admin/route.ts', 'config/systemConfigRoute.ts', 'market/marketQuoteRoute.ts'];
   it.each(files)('%s 无 requireRole( 调用', file => {
     expect(fs.readFileSync(path.join(SRC, file), 'utf8')).not.toMatch(/requireRole\(/);
   });

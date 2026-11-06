@@ -18,7 +18,6 @@ vi.mock('../../lib/logger', () => ({
 import { createInvoice, updateInvoice, SUPPORTED_CURRENCIES } from '../invoiceMutationService';
 import { createPaymentVoucher, updatePaymentVoucher } from '../paymentVoucherMutationService';
 import { applyAllocation, readAllocationRefusal } from '../allocationService';
-import { cancelInvoice } from '../voidDeleteService';
 
 // ── helpers ────────────────────────────────────────────────────────
 
@@ -281,23 +280,6 @@ describe('修复1：createInvoice / updateInvoice → 重算接线', () => {
     const probedRelations = tx.creditLimit.findFirst.mock.calls.map((c: any[]) => c[0].where.relationId);
     expect(probedRelations).toContain('REL_OLD');
     expect(probedRelations).toContain('REL_NEW');
-  });
-});
-
-describe('修复1：cancelInvoice 作废 → 重算接线', () => {
-  it('作废 Receivable 发票 → 重算该客户（应收退出净额口径）', async () => {
-    const { tx, prisma } = makeTx({
-      invoicesForNet: [],
-      creditLimit: { id: 'CL_1', relationId: 'REL_1', usedAmount: dec('1000'), deletedAt: null },
-    });
-    const r = await cancelInvoice({ prisma: prisma as any, invoiceId: 'INV__1', actorId: 'user_1', reason: '开错' });
-    expect(r.ok).toBe(true);
-    expect(tx.creditLimit.update).toHaveBeenCalledTimes(1);
-    expect(tx.creditLimitHistory.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ beforeUsedAmount: 1000, afterUsedAmount: 0 }),
-      }),
-    );
   });
 });
 

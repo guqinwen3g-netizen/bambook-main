@@ -125,12 +125,6 @@ describe('★ 结构守卫：syncOrderLineShipmentQuantity 的收口点', () => 
     expect(countCalls(s)).toBe(3);
   });
 
-  it('shipmentMutationService：取消票 + 软删票两条路径都要同步（= 2）', () => {
-    const s = src('shipping/shipmentMutationService.ts');
-    expect(s).toMatch(/from '\.\.\/shared\/orderLineShippedQty'/);
-    expect(countCalls(s)).toBe(2);
-  });
-
   it('lineShares 不得再各自实现（allocationService 必须 import 真源）', () => {
     const s = src('shipping/allocationService.ts');
     expect(s).toMatch(/lineShares/);

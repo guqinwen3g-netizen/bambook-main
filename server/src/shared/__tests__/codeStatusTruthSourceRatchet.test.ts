@@ -123,22 +123,7 @@ function looseTableEntries(): number {
  * 本文件按口径把它记成"少了一处本地推导"，**数字变小是真实进展，不是尺瞎了**（与 B73 那类"尺变宽导致的变小"相反）。
  */
 const BASELINE: Record<string, number> = {
-  'src/finance/route.ts': 149,
-  'src/shipping/route.ts': 52,
-  'src/relations/routeV2.ts': 36,
-  'src/development/route.ts': 30,
   // 1f7daebd: confirmed-source result uses its typed status; removed four local entries.
-  'src/orders/orderLinesRoute.ts': 14,
-  'src/relations/route.ts': 18,
-  'src/production/route.ts': 14, // native inspection catch retired two local ternaries.
-  'src/ai/knowledgeDocumentsRoute.ts': 11,
-  'src/finance/routeV2.ts': 3,
-  'src/mes/processChainService.ts': 3,
-  'src/production/routeV2.ts': 2,
-  'src/qc/testRequestService.ts': 2,
-  'src/suppliers/tcCertificateService.ts': 2,
-  'src/customer/route.ts': 1,
-  'src/finance/sceneInvoiceService.ts': 1,
 };
 
 /**

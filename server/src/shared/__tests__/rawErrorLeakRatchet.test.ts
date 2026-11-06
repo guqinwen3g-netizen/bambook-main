@@ -28,58 +28,23 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './utils/sourceScan';
-import { finiteMessageOffsets, readNativeProof } from './utils/nativeMessageProof';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url)); // server/src/shared/__tests__
 const SERVER = path.resolve(HERE, '..', '..', '..');       // server/
-const nativeProof = readNativeProof(path.resolve(SERVER, '..'));
 
 // 冻结基线（2026-09-20 08:19 实测，口径见文件头）。**只许减不许增**：
 // 收敛一个文件就删掉它那一行；新增站点会让这里对不上 = 红。
 const RAW_MESSAGE_LEAK_BASELINE: Record<string, number> = {
-  'src/agent/toolRuntime.ts': 10,
-  'src/marketing/marketingRouteV2.ts': 10,
-  'src/reporting/reportDefinitionService.ts': 8,
-  'src/inventory/inventoryRoute.ts': 6,
-  'src/agent/agentLoop.ts': 5,
-  'src/orders/orderLineMutationService.ts': 2, // Three caught raw messages removed; two original exclusivity-validator results remain.
-  'src/reporting/route.ts': 5,
-  'src/development/developmentCaseMutationService.ts': 4,
-  'src/finance/voidDeleteService.ts': 4,
-  'src/moq/moqRoute.ts': 4,
-  'src/ai/knowledgeIngestService.ts': 3,
-  'src/customs/customsRouteV2.ts': 2, // v3.03：/documents 列表那站也收了（该服务函数段内零 throw ⇒ 无业务文案可吞）
-  'src/quotations/quotationRoute.ts': 3,
   'src/admin/route.ts': 1,
-  'src/agent/checkpoint.ts': 2,
-  'src/agent/orchestrator.ts': 2,
   'src/auth/route.ts': 2,
-  'src/crm/crmRouteV2.ts': 2,
-  'src/development/route.ts': 2,
   'src/orders/orderLifecycleService.ts': 2,
-  'src/production/stageService.ts': 2,
-  'src/shipping/shipmentMutationService.ts': 2,
-  'src/templates/route.ts': 2,
-  'src/tools/fabricCalculatorRoute.ts': 2,
   'src/agent/events.ts': 1,
-  'src/ai/knowledgeDocumentsRoute.ts': 1,
-  'src/ai/runner.ts': 1,
-  'src/audit/createAuditMiddleware.ts': 1,
-  'src/audit/route.ts': 1,
 
   'src/dictionaries/dataDictionaryService.ts': 1,
-  'src/events/domainEventBus.ts': 1,
-  'src/exceptions/exceptionRoute.ts': 1,
-  'src/finance/allocationMutationService.ts': 1,
   'src/finance/invoiceMutationService.ts': 1,
-  'src/finance/reconciliationService.ts': 1,
   'src/lib/asyncHandler.ts': 1,
   'src/orderChanges/orderChangeRequestService.ts': 1,
-  'src/production/route.ts': 1,
-  'src/relations/routeV2.ts': 1,
-  'src/samples/fabricShipmentSampleService.ts': 1,
   'src/shared/errorCodes.ts': 1,
-  'src/traceability/traceabilityRoute.ts': 1,
 };
 
 
@@ -98,43 +63,19 @@ const RAW_MESSAGE_LEAK_BASELINE: Record<string, number> = {
  * （见下面那条交叉自检）。
  */
 const UNFILTERED_LEAK_BASELINE: Record<string, number> = {
-  'src/agent/toolRuntime.ts': 10,
-  'src/marketing/marketingRouteV2.ts': 10,
-  'src/reporting/reportDefinitionService.ts': 8,
-  'src/inventory/inventoryRoute.ts': 6,
-  'src/agent/agentLoop.ts': 5,
-  'src/orders/orderLineMutationService.ts': 0, // Actual safeRouteError import moved two validators to truth-side; no raw-catch budget remains.
-  'src/reporting/route.ts': 5,
-  'src/development/developmentCaseMutationService.ts': 4,
-  'src/finance/voidDeleteService.ts': 4,
-  'src/ai/knowledgeIngestService.ts': 3,
 
-  'src/agent/checkpoint.ts': 2,
-  'src/agent/orchestrator.ts': 2,
   'src/auth/route.ts': 2,
-  'src/crm/crmRouteV2.ts': 2,
   'src/orders/orderLifecycleService.ts': 2,
 
-  'src/templates/route.ts': 2,
-  'src/tools/fabricCalculatorRoute.ts': 2,
   'src/agent/events.ts': 1,
-  'src/ai/knowledgeDocumentsRoute.ts': 1,
-  'src/ai/runner.ts': 1,
-  'src/audit/createAuditMiddleware.ts': 1,
-  'src/audit/route.ts': 1,
 
   'src/dictionaries/dataDictionaryService.ts': 1,
-  'src/events/domainEventBus.ts': 1,
 
   // ★ src/finance/invoiceMutationService.ts 于 2026-09-21（G-4 批）从本表移到 TRUTH_FILE_SITE_LEAKS：
   //   它为了拿 code→status 真源而 import 了 shared/errorCodes ⇒ 分类器把它判成"已接真源"。
   //   **欠债一条未增也未减**（总量表 RAW_MESSAGE_LEAK_BASELINE 仍记着它那一处），只是换了记账的侧。
-  'src/finance/reconciliationService.ts': 1,
   'src/orderChanges/orderChangeRequestService.ts': 1,
-  'src/relations/routeV2.ts': 1,
-  'src/samples/fabricShipmentSampleService.ts': 1,
   'src/shared/errorCodes.ts': 1,
-  'src/traceability/traceabilityRoute.ts': 1,
 };
 
 /**
@@ -153,13 +94,9 @@ const UNFILTERED_LEAK_BASELINE: Record<string, number> = {
  * 取样 2026-09-20 13:01（samples 47 处清零之后）。只许减不许增。
  */
 const TRUTH_FILE_SITE_LEAKS: Record<string, number> = {
-  'src/orders/orderLineMutationService.ts': 2, // exclusive.error.message comes from findExclusiveCustomerConflict's deterministic business result, not a caught driver error.
-  'src/development/route.ts': 2, // Existing two validators moved sides after the verified error adapter import; no leak removed.
   // V1: existing deterministic validation results moved across classifications
   // after real safe catch integration. None reads a caught SQL/driver message.
   'src/admin/route.ts': 1, // built.message: validated relation/order filter result.
-  'src/shipping/shipmentMutationService.ts': 2, // smCheck.message: shipping-method validator.
-  'src/finance/allocationMutationService.ts': 1, // v.message: allocation input validator.
   // ★ 2026-09-23 v3.03（S0-A2 文案线）：这两文件为接真源 import 了 shared/routeError ⇒ 从未接真源表挪到这里。
   //   ★ 挪侧**不等于**清零，但本批确实真清掉了一处，两者要分开写（复核 MINOR-1：原注释把 −6 全说成"只是换侧"）：
   //   · customsRouteV2：3 → **2**（**−1 是真收**：`/documents` 列表那站；剩下 2 处是详情/创建）——
@@ -168,10 +105,6 @@ const TRUTH_FILE_SITE_LEAKS: Record<string, number> = {
   //   · quotationRoute：3 → 3（**没变**）。本尺只认 `message: X.message` 这一族，而那两站原本是 `message: String(e?.message ?? e)`
   //     ⇒ 本批收掉的 2 处**从一开始就不在这把尺的分子里**（数不变 ≠ 没做事；也别拿这把尺去量本批战果，见 `routeError.test.ts` 的 V2 尺 17 → 15）。
   //   · quotationRoute 剩下的 3 处是 `if (e?.code === 'NOT_FOUND')` 早退臂透传业务文案（有意保留，`quotationCopyB42.test.ts` ⑤ 钉着）。
-  'src/customs/customsRouteV2.ts': 2, // v3.03 再 −1：详情/创建两站是刻意留的（理由见 customsCopyB42.test.ts 文件头）
-  'src/quotations/quotationRoute.ts': 3,
-  'src/moq/moqRoute.ts': 4,
-  'src/production/stageService.ts': 2,
   // ★ 2026-09-21 G-4：本文件为拿 code→status 真源 import 了 shared/errorCodes ⇒ 从"未接真源"表挪到这里。
   //   该处已逐字核过（不是凭印象）：`:153` 的 `message: transition.message!` 出自
   //   `statusTransition.validateStatusTransition`，是状态机自己拼的模板串（"X cannot transition from 'A' to 'B'. Allowed: …"），
@@ -180,9 +113,7 @@ const TRUTH_FILE_SITE_LEAKS: Record<string, number> = {
   //   另：本文件真正的原文直发风险在 `toError()` 的 `String(e?.message ?? e)`（未预期异常原文进响应体），
   //   它不匹配 LEAK_RE 的 `message: X.message` 形状 ⇒ **本表盖不住它**，按 D49 另立 §9 待办而不是改判据把它算成"已收敛"。
   'src/finance/invoiceMutationService.ts': 1,
-  'src/exceptions/exceptionRoute.ts': 1,
   'src/lib/asyncHandler.ts': 1,
-  'src/production/route.ts': 1,
 };
 
 const LEAK_RE = /message:\s*([A-Za-z_$][\w$]*)\??\.message/g;
@@ -198,10 +129,10 @@ const LEAK_RE = /message:\s*([A-Za-z_$][\w$]*)\??\.message/g;
  */
 const RESOLVED_BIND_RE = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?(?:safeRouteError|resolveError)\s*\(/g;
 
-function countLeaksIn(src: string, relativeFile?: string): number {
+// 2026-11-06：原先的「有限原生结果」证明只覆盖 proforma/qc/commission 等已删除文件，随之移除。
+function countLeaksIn(src: string): number {
   const resolved = new Set([...src.matchAll(RESOLVED_BIND_RE)].map((m) => m[1]));
-  const proven = relativeFile ? finiteMessageOffsets(`server/${relativeFile}`, src, nativeProof.sources, nativeProof.receipt) : new Set<number>();
-  return [...src.matchAll(LEAK_RE)].filter((m) => !resolved.has(m[1]) && !proven.has(m.index!)).length;
+  return [...src.matchAll(LEAK_RE)].filter((m) => !resolved.has(m[1])).length;
 }
 
 function countLeaksByFile(): Record<string, number> {
@@ -212,7 +143,7 @@ function countLeaksByFile(): Record<string, number> {
       const abs = path.join(dir, ent.name);
       if (ent.isDirectory()) { walk(abs); continue; }
       if (!ent.name.endsWith('.ts') || ent.name.endsWith('.test.ts')) continue;
-      const n = countLeaksIn(stripComments(fs.readFileSync(abs, 'utf8')), path.relative(SERVER, abs).split(path.sep).join('/'));
+      const n = countLeaksIn(stripComments(fs.readFileSync(abs, 'utf8')));
       if (n > 0) out[path.relative(SERVER, abs).split(path.sep).join('/')] = n;
     }
   };
@@ -221,18 +152,6 @@ function countLeaksByFile(): Record<string, number> {
 }
 
 describe('B22 内部异常原文直上响应体 · 逐文件棘轮（只许减不许增）', () => {
-  it('★ seven finite native results remain in the original bare grammar denominator, separately proven', () => {
-    let proven = 0;
-    for (const [file, count] of Object.entries(nativeProof.receipt.provenSites)) {
-      const src = stripComments(nativeProof.sources[file]);
-      const bare = countLeaksIn(src);
-      expect(bare, file).toBe(count);
-      expect(countLeaksIn(src, file.replace(/^server\//, '')), file).toBe(0);
-      proven += bare;
-    }
-    expect(proven).toBe(7);
-    expect(Object.values(countLeaksByFile()).reduce((a, b) => a + b, 0) + proven).toBe(112);
-  });
   it('实际站点数不得高于基线，且每个文件都要对得上', () => {
     const actual = countLeaksByFile();
     const grew = Object.entries(actual).filter(([f, n]) => (RAW_MESSAGE_LEAK_BASELINE[f] ?? 0) < n)
@@ -320,13 +239,7 @@ it('★ 未接真源的那一半（B22 欠债本体）只许减不许增，且�
     const stale = Object.entries(TRUTH_FILE_SITE_LEAKS).filter(([f, n]) => (actual[f] ?? 0) < n)
       .map(([f, n]) => `${f}: 基线 ${n} → 实际 ${actual[f] ?? 0}`);
     expect(stale, `已经核准/改接了就同步删掉那一行（留着会把下一次回潮算成正常）：${JSON.stringify(stale)}`).toEqual([]);
-    expect(Object.values(actual).reduce((a, b) => a + b, 0), '候选清单总数').toBe(23); // V1: two existing exclusivity validators moved sides, three caught raw messages were removed. Historical 12 → 17（v3.03）：两文件接真源后挪进本侧（customs 2 + quotation 3 = +5）；★ 其中 **0 处新增**，且对面少了 6 ⇒ 差的那 1 处是**真清掉的**（`/documents` 列表），不是换侧
-    // ★ 本批的正面证据：samples 那 47 处正是藏在这一侧（文件早已 import 真源 ⇒ 被文件级分类判成"已过滤"）
-    expect(truthRe.test(stripComments(fs.readFileSync(path.join(SERVER, 'src/samples/sampleRoute.ts'), 'utf8'))),
-      'samples 早已接真源 ⇒ 旧口径会把它整文件算成无害').toBe(true);
-    expect(actual['src/samples/sampleRoute.ts'] ?? 0,
-      'samples 站点级必须已清零（第 6 域收口）').toBe(0);
-    expect('src/samples/sampleRoute.ts' in TRUTH_FILE_SITE_LEAKS).toBe(false);
+    expect(Object.values(actual).reduce((a, b) => a + b, 0), '候选清单总数').toBe(3); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 23）。
     // 阳性对照：**同一个文件里**既有收敛完成态又有原始取用时，本判据必须只放过前者、仍数到后者
     expect(countLeaksIn([
       "import { safeRouteError } from '../shared/routeError';",
@@ -339,27 +252,24 @@ it('★ 未接真源的那一半（B22 欠债本体）只许减不许增，且�
   it('★ 交叉自检：真源识别必须认得「已收敛」与「未收敛」两类真文件（防分类器反向失灵）', () => {
     const read = (rel: string) => stripComments(fs.readFileSync(path.join(SERVER, 'src', rel), 'utf8'));
     const truthRe = /from '[.\w/]*shared\/(routeError|errorCodes)'|from '[.\w/]*lib\/asyncHandler'/;
-    expect(truthRe.test(read('risk/riskRoute.ts')), 'risk 已接真源 ⇒ 必须判为「已过滤」').toBe(true);
-    // 未收敛侧的样本改用 `inventory/inventoryRoute.ts`（shipping 已于 2026-09-20 第 5 域收敛 ⇒ 它现在是
-    // "已接真源"的例子，再拿它当反例会把这条自检变成恒假）。两例都必须是**真文件**，不拿合成串糊。
-    expect(truthRe.test(read('inventory/inventoryRoute.ts')), 'inventory 尚未接 ⇒ 必须判为「未过滤」').toBe(false);
-    expect(UNFILTERED_LEAK_BASELINE['src/inventory/inventoryRoute.ts'], 'inventory 在未过滤清单里必须有数').toBeGreaterThan(0);
-    // 反向：shipping 现在必须落在"已接真源"那一侧（收敛一处 ⇒ 分类跟着变，这条盯的就是分类本身）
-    expect(truthRe.test(read('shipping/route.ts')), 'shipping 已接真源 ⇒ 必须判为「已过滤」').toBe(true);
-    expect('src/risk/riskRoute.ts' in UNFILTERED_LEAK_BASELINE).toBe(false);
+    // 2026-11-06：原样本 risk/inventory/shipping 路由已删除，改用仍保留的真文件。
+    expect(truthRe.test(read('admin/route.ts')), 'admin 已接真源 ⇒ 必须判为「已过滤」').toBe(true);
+    expect(truthRe.test(read('auth/route.ts')), 'auth/route 尚未接 ⇒ 必须判为「未过滤」').toBe(false);
+    expect(UNFILTERED_LEAK_BASELINE['src/auth/route.ts'], 'auth/route 在未过滤清单里必须有数').toBeGreaterThan(0);
+    expect('src/admin/route.ts' in UNFILTERED_LEAK_BASELINE).toBe(false);
   });
 
   it('★ 基线自身不是空表（空表 = 恒绿 = 没守卫）', () => {
     const total = Object.values(RAW_MESSAGE_LEAK_BASELINE).reduce((a, b) => a + b, 0);
     const unfiltered = Object.values(UNFILTERED_LEAK_BASELINE).reduce((a, b) => a + b, 0);
-    expect(total).toBe(105); // Fixed-source PDML one-site retirement: prior 108/45 remains in source receipt; no raw debt increase.
-    expect(Object.keys(RAW_MESSAGE_LEAK_BASELINE).length).toBe(42);
+    expect(total).toBe(11); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 105 / 42）。
+    expect(Object.keys(RAW_MESSAGE_LEAK_BASELINE).length).toBe(9);
     // 114 / 38：2026-09-22 v2.73 清掉 `systemConfigRoute` 的 3 处后同步（那批只同步了根侧那把尺，server 侧这三份基线漏改 ⇒ server 全量当场红）。
 // 105 / 39：2026-09-21 G-4 起 原口径 ↓ `invoiceMutationService` 因 import 真源而被分类到另一侧
     //   ⇒ **未接真源侧少 1 处、已接真源侧多 1 处，总量表 117 一处未动**。
     //   这两个数一起看才不是"假装收敛"：只看 105 会以为少了一处欠债，其实只是换了记账的侧。
-    expect(unfiltered, 'B22 欠债本体（未接真源、原文可直上屏）').toBe(82); // PDML's one real retirement lowers prior 83/31; truth-file debt is unchanged.
-    expect(Object.keys(UNFILTERED_LEAK_BASELINE).length).toBe(30);
+    expect(unfiltered, 'B22 欠债本体（未接真源、原文可直上屏）').toBe(8); // 2026-11-06 重算（原 82 / 30）。
+    expect(Object.keys(UNFILTERED_LEAK_BASELINE).length).toBe(6);
     // 两表相加必须仍等于总量表：挪侧（一份欠债从一侧记到另一侧）不许让任何一处掉出分母
     const truthSum = Object.values(TRUTH_FILE_SITE_LEAKS).reduce((a, b) => a + b, 0);
     expect(unfiltered + truthSum, `两表之和（${unfiltered}+${truthSum}）必须等于总量 ${total}，否则有一处被两侧同时漏计`).toBe(total);

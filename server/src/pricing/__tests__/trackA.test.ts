@@ -16,7 +16,6 @@ import {
   DEVIATION_WARN_PERCENT,
   DEVIATION_BLOCK_PERCENT,
 } from '../trackAEstimator';
-import { createPricingService } from '../pricingService';
 
 // ────────────────────────────────────────────────────────────────
 // 1. 纯函数：成衣
@@ -187,34 +186,3 @@ function createMockPrisma(latestPrice: { price: number } | null) {
   } as any;
 }
 
-describe('estimateTrackA（服务层）', () => {
-  it('garment + fabricCode 命中价格历史 → price_history 来源', async () => {
-    const svc = createPricingService(createMockPrisma({ price: 62.5 }));
-    const r = await svc.estimateTrackA({ category: 'garment', fabricCode: 'FB-1001' });
-    expect(r.lines[0].source).toBe('price_history');
-    // 面料成本 = 62.5 × 1.5 × 1.03
-    expect(r.lines[0].amountCny).toBeCloseTo(62.5 * 1.5 * 1.03, 4);
-    expect(r.dataQuality).toBe('full_history');
-  });
-
-  it('fabric + yarnCode 命中价格历史 → price_history 来源', async () => {
-    const svc = createPricingService(createMockPrisma({ price: 210 }));
-    const r = await svc.estimateTrackA({ category: 'fabric', yarnCode: 'W100-32NM' });
-    expect(r.lines[0].source).toBe('price_history');
-    expect(r.lines[0].amountCny).toBeCloseTo(210 * 0.42, 4);
-  });
-
-  it('未命中 → 行业基准兜底（benchmark_only）', async () => {
-    const svc = createPricingService(createMockPrisma(null));
-    const r = await svc.estimateTrackA({ category: 'garment', fabricCode: 'NOPE' });
-    expect(r.lines[0].source).toBe('industry_benchmark');
-    expect(r.dataQuality).toBe('benchmark_only');
-  });
-
-  it('显式价格优先于价格历史（不查询也保持 manual）', async () => {
-    const svc = createPricingService(createMockPrisma({ price: 62.5 }));
-    const r = await svc.estimateTrackA({ category: 'garment', fabricCode: 'FB-1001', fabricPriceCny: 70 });
-    expect(r.lines[0].source).toBe('manual');
-    expect(r.lines[0].amountCny).toBeCloseTo(70 * 1.5 * 1.03, 4);
-  });
-});
