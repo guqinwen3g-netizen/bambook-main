@@ -25,8 +25,9 @@ async function main() {
   // Platform market reference quotes (Bank of China settlement rates, domestic spot materials) refresh daily via Exa MCP.
   app.locals.marketWorker.start();
   const server = app.listen(port, host, () => { console.log(`[mist] ${mistLocalRequested()?'local-file workspace':'workspace server'} listening on ${host}:${port}`); });
+  const stopVoice = app.locals.voice.attach(server);
   let stopping=false;
-  const stop = () => {if(stopping)return;stopping=true;app.locals.marketWorker.stop();void Promise.allSettled([app.locals.mailReceiver.stop(),app.locals.platformTaskWorker.stop()]).finally(()=>server.close(()=>{void disconnect().finally(()=>process.exit(0));}));};
+  const stop = () => {if(stopping)return;stopping=true;stopVoice();app.locals.marketWorker.stop();void Promise.allSettled([app.locals.mailReceiver.stop(),app.locals.platformTaskWorker.stop()]).finally(()=>server.close(()=>{void disconnect().finally(()=>process.exit(0));}));};
   process.once('SIGINT', stop); process.once('SIGTERM', stop);
 }
 void main().catch(() => { console.error('[mist] startup failed; check the local server configuration'); process.exitCode = 1; });

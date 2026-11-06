@@ -23,11 +23,15 @@ import{MistPlatformTaskWorker,type PlatformTaskWorkerOptions}from'./platformTask
 import { createMarketStore, MarketQuoteWorker } from '../ai/marketQuotes';
 import{defaultAgentDelegation}from'./route';
 import type{AgentDelegation}from'./agentDelegation';
-export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;host?:string;mailTransport?:MailTransport;mailResolve?:(host:string)=>Promise<string[]>;mailReceive?:Pick<MailReceiverOptions,'tickMs'|'concurrency'>&{intervalMs?:number;leaseMs?:number;timeoutMs?:number};agentTasks?:Omit<PlatformTaskWorkerOptions,'makeCredential'>}={}) {
+import { MistVoiceService, type VoiceOptions } from './voice/service';
+import { createPlatformVoiceStore } from '../ai/platformVoice';
+export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;host?:string;mailTransport?:MailTransport;mailResolve?:(host:string)=>Promise<string[]>;mailReceive?:Pick<MailReceiverOptions,'tickMs'|'concurrency'>&{intervalMs?:number;leaseMs?:number;timeoutMs?:number};agentTasks?:Omit<PlatformTaskWorkerOptions,'makeCredential'>;voice?:VoiceOptions}={}) {
   const app = express(); app.disable('x-powered-by');
   const host=options.host??process.env.MIST_HOST??'127.0.0.1';
   const local=options.local??(mistLocalRequested()?createMistLocalRuntime({host}):undefined);
   if(local)assertMistLocalMode(host);
+  const voiceSettings = createPlatformVoiceStore(local ? { dir: path.join(local.database.directory, 'platform-ai') } : {});
+  const voice = new MistVoiceService({ ...options.voice, config: options.voice?.config ?? voiceSettings.runtime }); app.locals.voice = voice;
   const mailRuntime=(repository:MistRepository)=>{
     const credentials=new MistMailCredentials(process.env.MIST_MAIL_CREDENTIAL_DIR||(local?path.join(local.database.directory,'mail-credentials'):path.resolve(__dirname,'../../private/mist-mail-credentials')));
     const mail=new MistMailService(repository,credentials,options.mailTransport,process.env,()=>new Date(),options.mailReceive,options.mailResolve);
@@ -61,7 +65,7 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
     app.get('/api/mist/session',local.sessionGet);app.post('/api/mist/session',local.sessionPost);
     const repository=new MistRepository(local.database,mistContract as MistContract,new MistPrivateFiles(path.join(local.database.directory,'files')),local.authorize,undefined,undefined,undefined,(db,userId,password)=>local.verifyPassword(db,userId,password));
     agentRuntime(repository,local.agentDelegation);
-    app.use('/api/mist',createMistRouter({repository,marketStore,...mailRuntime(repository),authenticate:local.authenticate,delegation:local.agentDelegation,delegationGuard:local.requestGuard}));
+    app.use('/api/mist',createMistRouter({repository,marketStore,voice,voiceSettings,...mailRuntime(repository),authenticate:local.authenticate,delegation:local.agentDelegation,delegationGuard:local.requestGuard}));
   }else{
     if(!prisma)throw new Error('Mist server requires an explicit database outside local mode');
     const requireEmailVerification = process.env.AUTH_REQUIRE_EMAIL_VERIFY ? !/^(0|false|no)$/i.test(process.env.AUTH_REQUIRE_EMAIL_VERIFY.trim()) : true;
@@ -74,7 +78,7 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
     const filesRoot=process.env.MIST_FILES_DIR||path.resolve(__dirname,'../../private/mist-files');
     const repository=new MistRepository(prisma,mistContract as MistContract,new MistPrivateFiles(filesRoot));
     agentRuntime(repository,defaultAgentDelegation());
-    app.use('/api/mist', createMistRouter({ prisma,repository,marketStore,...mailRuntime(repository),contract:mistContract as MistContract,filesRoot }));
+    app.use('/api/mist', createMistRouter({ prisma,repository,marketStore,voice,voiceSettings,...mailRuntime(repository),contract:mistContract as MistContract,filesRoot }));
   }
   app.use((error: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const tooLarge = error?.type === 'entity.too.large';

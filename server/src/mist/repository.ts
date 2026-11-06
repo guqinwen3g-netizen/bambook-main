@@ -34,7 +34,7 @@ import {assertTaskBusinessRead,checkTaskCondition,type PlatformTaskScanCursor} f
 import {prepareTaskCondition,taskConditionChanged} from './agentTaskConditions';
 import type {PlatformTaskContext,PlatformTaskPlan} from './platformTaskPlan';
 import {assertConnection,listConnections,getConnection,createConnection,changeConnection,type MakeAgentLease} from './agentConnections';
-import {ensurePersonalIdentity,assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceActorFromIdentity,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
+import {ensurePersonalIdentity,assertPersonalVoiceAvailable,assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceActorFromIdentity,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
 import { assertReceivingLease, receivingRecord, receivingView, setReceiving, claimReceiving, finishReceiving, blockReceiving, invalidateReceiving, dueReceiving, RECEIVE_LEASE_MS, RECEIVE_INTERVAL_MS, type MailSyncActor, type MailSyncLease, type ReceivingJob, receiveSource } from './mail/receiverRegistry';
 import { enqueueMailState, taskHasPendingMail, mailStateViews, pendingMailFields, dueMailState, readMailState, claimMailState, planMailState, rememberMailState, failMailState, completeMailState, type MailStateRecord, type MailStateAttempt } from './mail/stateQueue';
 import type { MailStateObservation } from '../shared/mistMailState';
@@ -461,6 +461,8 @@ export class MistRepository {
   async resolveAgentServiceKey(token:unknown){return this.transact(db=>resolveServiceCredential(db,token));}
   /** 第二类个人 Agent：本人开通（或续期）并直接安排平台执行任务。 */
   async ensurePersonalAgent(prior:TokenPayload,workspaceId:string,make:MakeServiceCredential,now=Date.now()){if(isAgentActor(prior))fail('FORBIDDEN','个人 Agent 须由本人开通',403);return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,'ai:chat');return ensurePersonalIdentity(db,actor,workspaceId,make,now,row.companyId??undefined);});}
+  /** Speech heartbeats recheck current identity/company without loading the business JSON. */
+  async authorizePersonalAgentVoice(prior:TokenPayload,workspaceId:string){if(isAgentActor(prior))fail('FORBIDDEN','语音只供本人使用',403);await this.transact(async db=>{const actor=await this.taskAccess(db,prior,workspaceId,'ai:chat');await assertPersonalVoiceAvailable(db,actor,workspaceId);});}
   async assignPersonalAgentTask(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>,make:MakeServiceCredential){
     if(isAgentActor(prior))fail('FORBIDDEN','任务须由本人安排',403);
     if(Object.keys(input).some(k=>!['requestId','name','instructions','locale'].includes(k)))fail('INVALID_INPUT','任务字段无效',400);

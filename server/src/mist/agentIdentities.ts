@@ -64,6 +64,13 @@ export async function createIdentity(db:any,actor:TokenPayload,workspaceId:strin
 }
 /** 个人 Agent 的身份编号由公司与账号确定，保证每个账号只有一个。 */
 export function personalIdentityId(workspaceId:string,userId:string){const h=hash('bambook-personal-agent/v1:'+workspaceId+':'+userId);return `${h.slice(0,8)}-${h.slice(8,12)}-4${h.slice(13,16)}-8${h.slice(17,20)}-${h.slice(20,32)}`;}
+/** A voice connection must respect an administrator's personal-Agent disable. No identity is created by this read. */
+export async function assertPersonalVoiceAvailable(db:any,actor:TokenPayload,workspaceId:string){
+ const id=personalIdentityId(workspaceId,actor.userId),row=await db.mistCommandReceipt.findUnique({where:{workspaceId_requestId:{workspaceId,requestId:SERVICE_PREFIX+id}}});
+ if(!row)return;
+ const identity=read(row,workspaceId);
+ if(identity.kind!=='personal'||identity.ownerId!==actor.userId||!identity.enabled)fail('FORBIDDEN','你的个人 Agent 已被管理员停用',403);
+}
 /**
  * 第二类个人 Agent（2026-11-04 定案）：账号本人开通，负责人即本人，可办理范围不超过本人当前权限；
  * 需要确认的提议进入本人「接着完成」。开通即签发服务端密钥，密钥只在服务端保存摘要、不返回浏览器。
