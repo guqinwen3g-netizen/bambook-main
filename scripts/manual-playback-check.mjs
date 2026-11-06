@@ -171,7 +171,7 @@ function register() {
   const git = args => execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' }).trim();
   const row = readLessonCatalog().lessons.find(entry => entry.id === lessonId);
   if (!row) throw new Error(`课程 ${lessonId} 不存在`);
-  const sources = ['scripts/manual-lesson.mjs', 'scripts/manual-navigation.mjs', 'scripts/manual-catalog.mjs', 'scripts/manual-site.ts', 'scripts/wiki-build.mjs', row.file, path.dirname(row.captureFile)];
+  const sources = ['scripts/manual-lesson.mjs', 'scripts/manual-sop.mjs', 'scripts/manual-navigation.mjs', 'scripts/manual-catalog.mjs', 'scripts/manual-site.ts', 'scripts/wiki-build.mjs', row.file, path.dirname(row.captureFile)];
   const dirty = git(['status', '--porcelain', '--', ...sources]);
   if (dirty) { console.log('未登记：播放器或课程源码有未提交改动\n' + dirty); process.exitCode = 1; return; }
   const file = path.join(ROOT, row.file), lesson = JSON.parse(fs.readFileSync(file, 'utf8'));

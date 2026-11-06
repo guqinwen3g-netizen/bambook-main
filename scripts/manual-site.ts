@@ -87,7 +87,7 @@ export function manualSitePlugin(repoRoot: string, options: { build?: Builder } 
     name: 'bambook-employee-manual',
     configResolved(value) { config = value; },
     configureServer(server) {
-      const sources = [path.join(repoRoot, 'wiki'), ...['wiki-build.mjs', 'wiki-lib.mjs', 'manual-catalog.mjs', 'manual-lesson.mjs', 'manual-navigation.mjs', 'manual-media.mjs'].map(name => path.join(repoRoot, 'scripts', name))];
+      const sources = [path.join(repoRoot, 'wiki'), ...['wiki-build.mjs', 'wiki-lib.mjs', 'manual-catalog.mjs', 'manual-lesson.mjs', 'manual-navigation.mjs', 'manual-media.mjs', 'manual-sop.mjs'].map(name => path.join(repoRoot, 'scripts', name))];
       const changed = (_event: string, file: string) => { if (sources.some(source => file === source || file.startsWith(source + path.sep))) stale = true; };
       server.watcher.add(sources); server.watcher.on('all', changed);
       server.httpServer?.once('close', () => { server.watcher.off('all', changed); clean(); });

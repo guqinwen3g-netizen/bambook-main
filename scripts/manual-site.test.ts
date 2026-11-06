@@ -7,6 +7,7 @@ import {execFileSync,spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {build,createServer,type ViteDevServer} from 'vite';
 import {manualSitePlugin} from './manual-site';
+import {JSDOM} from 'jsdom';
 
 const repo=fileURLToPath(new URL('..',import.meta.url));
 let root:string,server:ViteDevServer,port:number,buildCount=0;
@@ -65,6 +66,12 @@ it('builds all 35 real courses with matching standalone version metadata and ver
  const manifest=JSON.parse(fs.readFileSync(path.join(output,'manual-version.json'),'utf8'));
  expect(manifest.totals).toEqual({lessons:35,steps:238,images:273});expect(manifest.build.commit).toMatch(/^[a-f0-9]{40}$/);expect(manifest.courses.every((c:any)=>c.provenance.status==='registered'&&/^[a-f0-9]{40}$/.test(c.provenance.softwareCommit))).toBe(true);
  const html=fs.readFileSync(path.join(output,'index.html'),'utf8');expect(html.match(/data-lesson data-frames=/g)).toHaveLength(35);expect(html).toMatch(/\/[a-f0-9]{64}\/01\.webp/);
+ const dom=new JSDOM(html),doc=dom.window.document;
+ expect(doc.querySelectorAll('.lesson-sop')).toHaveLength(35);
+ const textSopCount=fs.readdirSync(path.join(repo,'wiki/sop')).filter(file=>file.endsWith('.md')).length;
+ expect(doc.querySelectorAll('.sop-text')).toHaveLength(textSopCount);
+ for(const link of doc.querySelectorAll<HTMLAnchorElement>('#sop-overview a[href^="#"],.sop-text a[href^="#"]'))expect(doc.getElementById(decodeURIComponent(link.hash.slice(1))),link.outerHTML).not.toBeNull();
+ const sopIds=[...doc.querySelectorAll('#sop-overview [id],.sop-text [id]')].map(node=>node.id);expect(new Set(sopIds).size).toBe(sopIds.length);dom.window.close();
  const files=(directory:string):string[]=>fs.readdirSync(directory,{withFileTypes:true}).flatMap(entry=>entry.isDirectory()?files(path.join(directory,entry.name)):[path.join(directory,entry.name)]);
  expect(files(output).filter(file=>file.endsWith('.webp'))).toHaveLength(273);expect(files(output).some(file=>file.endsWith('capture.json'))).toBe(false);
  const protectedDir=path.join(root,'other-files');fs.mkdirSync(protectedDir);fs.writeFileSync(path.join(protectedDir,'important.txt'),'keep');
