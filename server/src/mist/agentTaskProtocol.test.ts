@@ -99,7 +99,7 @@ it('issues a task-only connection, binds and rotates standard MCP sessions witho
  const init=await request(f.app).post('/api/mist/mcp').set(TASK_CONTROL_HEADER,issued.token).send({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'task-client',version:'1'}}}).expect(200);
  const session=init.headers['mcp-session-id'];expect(session).toMatch(/^bms1_/);expect(init.body.result.instructions).toContain('不可信资料');expect(JSON.stringify(init.body)).not.toMatch(/bma1_|bmt1_|bmc1_/);
  const call=async(name:string,args:any={},status=200)=>request(f.app).post('/api/mist/mcp').set(TASK_CONTROL_HEADER,issued.token).set('Mcp-Session-Id',session).send({jsonrpc:'2.0',id:randomUUID(),method:name==='tools/list'?name:'tools/call',params:name==='tools/list'?{}:{name,arguments:args}}).expect(status);
- const tools=(await call('tools/list')).body.result.tools;expect(tools).toHaveLength(9);expect(tools.some((t:any)=>t.name==='bambook_workspaces')).toBe(false);expect(tools.every((t:any)=>!t.inputSchema.properties.workspaceId)).toBe(true);
+ const tools=(await call('tools/list')).body.result.tools;expect(tools).toHaveLength(10);expect(tools.some((t:any)=>t.name==='bambook_workspaces')).toBe(false);expect(tools.every((t:any)=>!t.inputSchema.properties.workspaceId)).toBe(true);
  await call('bambook_query',{workspaceId:randomUUID(),type:'email'},403);
  const q=await call('bambook_query',{type:'email'});expect(q.body.result.isError).not.toBe(true);expect((await f.current()).state).toBe('running');
  const current=await f.current(),rotated=(await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/issue').send({requestId:randomUUID(),version:current.version}).expect(200)).body;
@@ -111,7 +111,7 @@ it('works with an actual standard MCP client over HTTP through waiting and resum
  const server=f.app.listen(0,'127.0.0.1');servers.push(server);await new Promise<void>(resolve=>server.once('listening',resolve));const address=server.address();if(!address||typeof address==='string')throw Error('Missing loopback port');
  const client=new Client({name:'standard-task-client',version:'1'},{versionNegotiation:{mode:'auto'}});clients.push(client);
  await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/api/mist/mcp`),{requestInit:{headers:{[TASK_CONTROL_HEADER]:issued.token}}}));
- expect((await client.listTools()).tools).toHaveLength(9);
+ expect((await client.listTools()).tools).toHaveLength(10);
  const status=await client.callTool({name:'bambook_task',arguments:{action:'status'}});expect((status.structuredContent as any).item.state).toBe('queued');expect(JSON.stringify(status)).not.toMatch(/bma1_|bmt1_|bmc1_/);
  const q=await client.callTool({name:'bambook_query',arguments:{type:'email',q:'PO 确认'}}),id=(q.structuredContent as any).results[0].id;
  const proposed=await client.callTool({name:'bambook_execute',arguments:{requestId:randomUUID(),command:{type:'email.move',payload:{id,folder:'archive'}}}});expect((proposed.structuredContent as any).status).toBe('awaiting_confirmation');

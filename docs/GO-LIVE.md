@@ -743,6 +743,8 @@
 
 ## 7. 进度记录
 
+- **2026-11-07 Agent 可读附件正文（分支 `codex/dangling-scope-closure`，已推送未合入）**：标准 MCP 与平台任务新增只读 `bambook_file_text({workspaceId,fileId,maxChars})`，复用附件下载的同一授权（`canReadFile`），返回纯文本或 PDF 前 20 页的有界摘录（默认 8000、最多 20000 字符，超出标记 `truncated`），附外部资料提示；图片、扫描件、Office 文件、超 20MB 或无法解析的明确返回 `unsupported/unreadable` 与原因，不猜测内容、不返回字节。无权限与不存在的文件同为 404。新增 9 项测试（含真实 PDF 解析与授权拒绝）；MCP 工具清单测试同步。桌面工作助手的同名工具尚未提供；服务器未部署，未用真实附件验收。基线：本分支起点（= main b0470a8e）`npm test` 2172、`test:mist` 2510、`test:access` 693 全绿（另有 *.pg 测试因无库跳过），`mist:check` 0 错误。
+
 - **2026-11-07 Agent 可读出运单据（分支 `codex/dangling-scope-closure`，已推送未合入）**：新增对象类型 `shipment_document`，沿用「报关与单证」分区的 `customs:read`；只给单据事实、文件编号和已生成文件的摘要（编号、哈希、大小、是否盖章），生成快照与外部签发证据文本不入模型，正文最多 2000 字并标记截断。无该读权限的账号看不到类型也读不到。另增 `quotation_document`（报价单文件，`quotations:read`）与 `order_document`（PI/SC 合同文件，`orders:read`），从所属记录展开，只给文件元数据，不给快照；仍受所属记录的数据范围限制。新增 3 项测试，Agent 与 mist 相关测试、服务端类型通过；未读取文件字节、未部署。主线 ② 仍缺：邮件附件文本摘录。
 
 - **2026-11-07 22 个旧权限登记项收口（分支 `codex/dangling-scope-closure`，已推送未合入）**：对照 `mistWorkspace.ts` 命令权限分发与仓储层逐码核实，15 个已由现行码强制（含 `settings.update` 经仓储层要求 `users:write`、Agent 确认要求 `ai:write:*` 加原命令权限），7 个动作已不存在；新增 `superseded-by-mist` 归类，未改任何运行代码，守卫测试 44 项通过。
