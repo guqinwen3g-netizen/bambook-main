@@ -743,6 +743,8 @@
 
 ## 7. 进度记录
 
+- **2026-11-07 Agent 可读财务与相关台账（分支 `codex/dangling-scope-closure`，已推送未合入）**：新增只读对象类型 `receipt_record`（客户收款）、`receipt_allocation`、`finance_reversal`、`customer_statement`、`bank_account`（账号只给后四位，需 `vouchers:write`）、`fx_record`、`letter_of_credit`、`rfq`、`sample_request`、`report_schedule`；权限与现有读分区一致，缺权限账号看不到类型也读不到，报表订阅仍只限本人。财务 Agent 现在能查到到账、核销、结汇、信用证编号再下写命令。新增 2 项测试；`test:mist` 全量此前仅有的 2 项失败是任务连接工具数断言（9→10），已更新，Agent 相关 26 文件 248 项通过。出口退税、月结未开放，仍在后续。
+
 - **2026-11-07 Agent 可读附件正文（分支 `codex/dangling-scope-closure`，已推送未合入）**：标准 MCP 与平台任务新增只读 `bambook_file_text({workspaceId,fileId,maxChars})`，复用附件下载的同一授权（`canReadFile`），返回纯文本或 PDF 前 20 页的有界摘录（默认 8000、最多 20000 字符，超出标记 `truncated`），附外部资料提示；图片、扫描件、Office 文件、超 20MB 或无法解析的明确返回 `unsupported/unreadable` 与原因，不猜测内容、不返回字节。无权限与不存在的文件同为 404。新增 9 项测试（含真实 PDF 解析与授权拒绝）；MCP 工具清单测试同步。桌面工作助手的同名工具尚未提供；服务器未部署，未用真实附件验收。基线：本分支起点（= main b0470a8e）`npm test` 2172、`test:mist` 2510、`test:access` 693 全绿（另有 *.pg 测试因无库跳过），`mist:check` 0 错误。
 
 - **2026-11-07 Agent 可读出运单据（分支 `codex/dangling-scope-closure`，已推送未合入）**：新增对象类型 `shipment_document`，沿用「报关与单证」分区的 `customs:read`；只给单据事实、文件编号和已生成文件的摘要（编号、哈希、大小、是否盖章），生成快照与外部签发证据文本不入模型，正文最多 2000 字并标记截断。无该读权限的账号看不到类型也读不到。另增 `quotation_document`（报价单文件，`quotations:read`）与 `order_document`（PI/SC 合同文件，`orders:read`），从所属记录展开，只给文件元数据，不给快照；仍受所属记录的数据范围限制。新增 3 项测试，Agent 与 mist 相关测试、服务端类型通过；未读取文件字节、未部署。主线 ② 仍缺：邮件附件文本摘录。

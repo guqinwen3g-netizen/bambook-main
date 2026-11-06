@@ -1,0 +1,32 @@
+import {afterEach,beforeEach,expect,it,vi} from 'vitest';
+import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import path from 'node:path';import {randomUUID} from 'node:crypto';
+import {createMistState,applyMistCommand,mistCommandPermission} from '../shared/mistWorkspace';
+import {SYSTEM_ROLE_IDS} from '../_shared/rolePermissionMatrix';
+import {MemoryMistDatabase,testAuthority} from './__tests__/support';import {MistRepository} from './repository';import {MistPrivateFiles} from './files';
+import {agentCatalog,agentGet,agentQuery} from './agentRead';
+let directory:string,db:MemoryMistDatabase,repo:MistRepository,auth:ReturnType<typeof testAuthority>,workspaceId:string;
+const company='11111111-1111-4111-8111-111111111111',now='2026-11-07T00:06:00Z';
+const actorWith=(role:string):any=>({userId:'clerk',displayName:'Clerk',roleIds:[role+'@'+company],roles:[],companyId:company,authorizationLoaded:true});
+beforeEach(async()=>{
+ vi.spyOn(Date,'now').mockReturnValue(Date.parse(now));directory=await mkdtemp(path.join(tmpdir(),'mist-agent-finance-'));db=new MemoryMistDatabase();auth=testAuthority();auth.users.set('clerk',{active:true,permissions:['ai:chat','invoices:read','vouchers:read','vouchers:write','customs:read','procurement:read','products:read','reports:read']});db.companyMembers.push({companyId:company,userId:'clerk',status:'active'});
+ const state=createMistState({id:randomUUID,now,actorId:'clerk',actorName:'Clerk'},'empty');Object.assign(state as any,{receipts:[{id:'r1',code:'RC-1',amount:1200,currency:'USD'}],allocations:[{id:'a1',receiptId:'r1',amount:1200}],
+  bankAccounts:[{id:'b1',code:'BA-1',name:'USD main',bankName:'Test Bank',accountNo:'6222 0000 1234 5678',currency:'USD',openingBalance:0}],fxRecords:[{id:'fx1',kind:'lock',currency:'USD',amount:500}],
+  letterOfCredits:[{id:'lc1',code:'LC-1',lcNo:'LC778'}],rfqs:[{id:'rfq1',code:'RFQ-1'}],sampleRequests:[{id:'sr1',code:'SR-1'}],reportSchedules:[{id:'rs1',name:'Weekly',ownerId:'clerk'},{id:'rs2',name:'Other',ownerId:'someone'}]});
+ workspaceId=randomUUID();db.workspaces.set(workspaceId,{id:workspaceId,ownerId:'other',companyId:company,slug:'company@'+company,name:'Company',revision:4,state,createdAt:new Date(),updatedAt:new Date()});repo=new MistRepository(db,{createMistState,applyMistCommand,mistCommandPermission},new MistPrivateFiles(directory),auth.authorize);
+});
+afterEach(async()=>{vi.restoreAllMocks();await rm(directory,{recursive:true,force:true});});
+async function view(role:string=SYSTEM_ROLE_IDS.LOGISTICS){const{workspace,actor:current}=await repo.getForAgent(actorWith(role),workspaceId);return{state:workspace.state,actor:current};}
+it('lets a finance reader see receipts, allocations, treasury, credits and requests, with bank account numbers masked',async()=>{
+ const f=await view(SYSTEM_ROLE_IDS.SUPER_ADMIN);const types=agentCatalog(f.actor).map(t=>t.type);
+ expect(types).toEqual(expect.arrayContaining(['receipt_record','receipt_allocation','bank_account','fx_record','letter_of_credit','rfq','sample_request','report_schedule','customer_statement','finance_reversal']));
+ expect(agentGet(f.state,f.actor,'receipt_record','r1').data).toMatchObject({amount:1200,currency:'USD'});
+ expect(agentGet(f.state,f.actor,'receipt_allocation','a1').link).toContain('id=r1');
+ const bank=agentGet(f.state,f.actor,'bank_account','b1');expect(bank.data).toMatchObject({name:'USD main',accountNo:'****5678'});expect(JSON.stringify(bank)).not.toContain('6222');
+ for(const [type,id] of [['fx_record','fx1'],['letter_of_credit','lc1'],['rfq','rfq1'],['sample_request','sr1'],['report_schedule','rs1']])expect(agentGet(f.state,f.actor,type,id).data).toMatchObject({id});
+ expect(()=>agentGet(f.state,f.actor,'report_schedule','rs2')).toThrow();
+});
+it('hides bank accounts and treasury from an account without the matching finance permissions',async()=>{
+ auth.users.get('clerk')!.permissions=['ai:chat','invoices:read','customs:read'];const f=await view(SYSTEM_ROLE_IDS.SALES);
+ const types=agentCatalog(f.actor).map(t=>t.type);expect(types).not.toContain('bank_account');expect(types).not.toContain('fx_record');
+ expect(()=>agentGet(f.state,f.actor,'bank_account','b1')).toThrow();expect(()=>agentGet(f.state,f.actor,'fx_record','fx1')).toThrow();
+});

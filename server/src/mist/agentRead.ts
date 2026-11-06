@@ -44,6 +44,17 @@ export const AGENT_OBJECT_TYPES: ObjectType[] = [
   // 报价单、PI/SC 生成记录：嵌在报价/订单记录内，按所属记录的读权限展开；只给文件元数据，不给快照与字节。
   { type: 'quotation_document', label: '报价单文件', scope: 'quotations:read', path: ['market', 'quotations'], view: 'quotations', linkId: r => r.quotationId, flatten: state => ((state as any).market?.quotations ?? []).flatMap((q: any) => (q.documents ?? []).map((d: any) => ({ ...d, code: q.code, kind: 'QUOTATION' }))) },
   { type: 'order_document', label: '订单合同文件', scope: 'orders:read', path: ['orders'], view: 'orders/detail', linkId: r => r.orderId, flatten: state => ((state as any).orders ?? []).flatMap((o: any) => (o.documents ?? []).map((d: any) => ({ ...d, orderId: o.id, code: d.number }))) },
+  // 收款与核销链、锁汇结汇、信用证、询价、索样、报表订阅：读权限与 access.ts 读分区一致，分区缺权限时仓储投影已清空，这里再复核一次。
+  { type: 'receipt_record', label: '客户收款', scope: 'invoices:read', path: ['receipts'], view: 'receipts' },
+  { type: 'receipt_allocation', label: '收款核销', scope: 'invoices:read', path: ['allocations'], view: 'receipts', linkId: r => r.receiptId },
+  { type: 'finance_reversal', label: '财务冲正', scope: 'invoices:read', path: ['financeReversals'], view: 'receipts' },
+  { type: 'customer_statement', label: '客户对账单', scope: 'invoices:read', path: ['customerStatements'], view: 'invoices' },
+  { type: 'bank_account', label: '公司银行账户', scope: 'vouchers:write', path: ['bankAccounts'], view: 'receipts' },
+  { type: 'fx_record', label: '锁汇结汇', scope: 'vouchers:read', path: ['fxRecords'], view: 'receipts' },
+  { type: 'letter_of_credit', label: '信用证', scope: 'customs:read', path: ['letterOfCredits'], view: 'shipments' },
+  { type: 'rfq', label: '供应商询价', scope: 'procurement:read', path: ['rfqs'], view: 'procurement' },
+  { type: 'sample_request', label: '客户索样', scope: 'products:read', path: ['sampleRequests'], view: 'samples' },
+  { type: 'report_schedule', label: '报表订阅', scope: 'reports:read', path: ['reportSchedules'], view: 'reports' },
   { type: 'invoice', label: '发票', scope: 'invoices:read', path: ['invoices'], view: 'invoices' },
   { type: 'risk', label: '风险', scope: 'risk:read', path: ['platform', 'risks'], view: 'risks' },
   { type: 'claim', label: '售后案件', scope: 'aftersales:read', path: ['platform', 'claims'], view: 'claims' },
@@ -79,7 +90,13 @@ function documentReadRecord(row:any){
 function generatedFileReadRecord(row:any){
   return{id:row.id,...(row.quotationId?{quotationId:row.quotationId}:{}),...(row.orderId?{orderId:row.orderId}:{}),code:row.code,kind:row.kind??row.orderKind,number:row.number,revision:row.revision,version:row.version,draft:row.draft,fileId:row.fileId,fileName:row.fileName,sha256:row.sha256,bytes:row.bytes,templateVersion:row.templateVersion,generatedAt:row.generatedAt,generatedBy:row.generatedBy,sealed:!!row.sealUseId};
 }
+/** Bank account numbers are masked to the last four digits; everything else about the account (name, balance basis, closure) stays readable. */
+function bankAccountReadRecord(row:any){
+  const no=typeof row.accountNo==='string'?row.accountNo.replace(/\s/g,''):'';
+  return{...row,accountNo:no?'****'+no.slice(-4):''};
+}
 function mailReadRecord(type:string,row:any){
+  if(type==='bank_account')return bankAccountReadRecord(row);
   if(type==='shipment_document')return documentReadRecord(row);
   if(type==='quotation_document'||type==='order_document')return generatedFileReadRecord(row);
   if(!['email_draft','email_send'].includes(type))return row;
