@@ -743,7 +743,7 @@
 
 ## 7. 进度记录
 
-- **2026-11-07 月结对象开放给 Agent（分支 `codex/agent-period-close`，未合入）**：新增 `period_close` 只读对象（按月份取，状态 closed/reopened，含关账人与重开原因，读权限 `invoices:read`），桌面助手同步；Agent 可读对象共 43 类。定向测试与服务端类型检查通过；未跑完整验证、未部署。
+- **2026-11-07 月结对象开放给 Agent 已合入并部署**：main `07eabffe`（merge commit），合入前 `npm test` 2172、`test:mist` 2527（11 跳过）、两套 tsc、`mist:check` 全通过，经 `npm run dev:deploy` 发布，部署脚本读回版本 `07eabffeaceb`；新增 `period_close` 只读对象（按月份取，状态 closed/reopened，含关账人与重开原因，读权限 `invoices:read`），桌面助手同步；Agent 可读对象共 43 类。未真机验证，未用真实租户数据看过。
 
 - **2026-11-07 桌面助手读取与任务限额已合入并部署**：main `8326af2c`（merge commit）合入前 `npm test` 2172、`test:mist` 2526、`test:access` 693 全通过（*.pg 因无库跳过），经 `npm run dev:deploy` 发布，公网版本与 API 健康读回一致；未真机验证桌面助手，服务器未设置任何限额覆盖。
 
