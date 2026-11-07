@@ -1,13 +1,12 @@
 import React from 'react';
 import { Bot, Copy, Plus, RefreshCw } from 'lucide-react';
-import { Banner, Button, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, KeyValue, Pill, Segmented, Select, Skeleton, TextArea, TextInput, useToast, type Column, type Tone } from '../../../../components/mist';
+import { Banner, Button, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, KeyValue, Pill, Select, Skeleton, TextArea, TextInput, useToast, type Column, type Tone } from '../../../../components/mist';
 import type { AgentTaskEvent, AgentTaskPage, AgentTaskView } from '../../../../server/src/shared/mistAgentTasks';
 import type { AgentIdentityView } from '../../../../server/src/shared/mistAgentIdentities';
 import { uiText, interfaceLocale } from '../../../../services/interfaceLanguage';
 import { mistApiRequest, useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
 import { useNav } from '../nav';
-import { AgentIdentities } from './AgentIdentities';
 import { agentConnectionEndpoint } from './AgentConnections';
 import { FailureNotice } from '../runtime/FailureNotice';
 
@@ -18,16 +17,12 @@ const tone=(state:AgentTaskView['state']):Tone=>state==='running'?'accent':state
 const time=(v:string|null)=>v?new Date(v).toLocaleString(interfaceLocale(),{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}):'—';
 const duration=(ms:number)=>`${Math.floor(ms/60000)}:${String(Math.floor(ms/1000)%60).padStart(2,'0')}`;
 type Plan={kind:'create';requestId:string;identityId:string;name:string;instructions:string;executor:'external'|'platform'}|{kind:'answer';requestId:string;row:AgentTaskView;questionId:string;answer:string}|{kind:'pause'|'resume'|'cancel'|'issue';requestId:string;row:AgentTaskView};
-export function LongAgentWorkspace(){
- const [view,setView]=React.useState('tasks');
- return <div className="mist-col"><Segmented aria-label={uiText('长期Agent视图')} value={view} onChange={setView} options={[{value:'tasks',label:uiText('任务')},{value:'connections',label:uiText('连接')}]} />
-  {view==='connections'?<AgentIdentities/>:<AgentTasks onConnections={()=>setView('connections')}/>}</div>;
-}
-export function AgentTasks({onConnections}:{onConnections:()=>void}){
+type TaskPanelProps={onConnections:()=>void;rowAction?:(row:AgentTaskView)=>React.ReactNode;refreshSignal?:number};
+export function AgentTasks(props:TaskPanelProps){
  const w=useMistWorkspace(),s=useMistSession();
- return w.workspace?<TaskPanel key={JSON.stringify([s.sessionKey,s.user?.id,w.workspace.id])} workspaceId={w.workspace.id} onConnections={onConnections}/>:<EmptyState title={uiText('尚未进入公司')}/>;
+ return w.workspace?<TaskPanel key={JSON.stringify([s.sessionKey,s.user?.id,w.workspace.id])} workspaceId={w.workspace.id} {...props}/>:<EmptyState title={uiText('尚未进入公司')}/>;
 }
-function TaskPanel({workspaceId,onConnections}:{workspaceId:string;onConnections:()=>void}){
+function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal}:TaskPanelProps&{workspaceId:string}){
  const w=useMistWorkspace(),nav=useNav(),toast=useToast(),base='/api/mist/workspaces/'+encodeURIComponent(workspaceId)+'/agent-tasks',endpoint=agentConnectionEndpoint(location.origin);
  const [platformAvailable,setPlatformAvailable]=React.useState(false);
  const [page,setPage]=React.useState<AgentTaskPage>({items:[],nextCursor:null}),[identities,setIdentities]=React.useState<AgentIdentityView[]>([]),[loading,setLoading]=React.useState(true),[error,setError]=React.useState('');
@@ -50,7 +45,8 @@ function TaskPanel({workspaceId,onConnections}:{workspaceId:string;onConnections
  const currentLoad=React.useRef(load);currentLoad.current=load;
  React.useEffect(()=>{alive.current=true;void currentLoad.current();const timer=setInterval(()=>void currentLoad.current(),10_000);return()=>{alive.current=false;readGeneration.current++;writeGeneration.current++;detailGeneration.current++;clearInterval(timer);readAbort.current?.abort();writeAbort.current?.abort();};},[base]);
  const openDetail=async(row:Pick<AgentTaskView,'id'>,appendHistory=false)=>{const epoch=++detailGeneration.current;if(detailRef.current?.id!==row.id)setHistory({items:[],nextCursor:null});if('name'in row)setDetail(row as AgentTaskView);else setDetail(null);setOpening(true);setDetailError('');try{const [result,events]=await Promise.all([mistApiRequest(base+'/'+encodeURIComponent(row.id)),mistApiRequest(base+'/'+encodeURIComponent(row.id)+'/history'+(appendHistory&&history.nextCursor?'?cursor='+encodeURIComponent(history.nextCursor):''))]);if(!alive.current||epoch!==detailGeneration.current)return;setDetail(result.item);setHistory(previous=>appendHistory?{...events,items:[...previous.items,...events.items]}:events);}catch(e){if(alive.current&&epoch===detailGeneration.current){setDetailError(e instanceof Error?e.message:'任务读取失败');setDetail(null);}}finally{if(alive.current&&epoch===detailGeneration.current)setOpening(false);}};
- const routeTaskId=nav?.route?.section==='agents'?nav.route.id:undefined;
+ React.useEffect(()=>{if(refreshSignal)void currentLoad.current();},[refreshSignal]);
+ const routeTaskId=nav?.route?.section==='tasks'?nav.route.id:undefined;
  React.useEffect(()=>{if(routeTaskId)void openDetail({id:routeTaskId});},[routeTaskId,base]);
  const begin=(next:Plan)=>{setFailure('');setUncertain(false);setCredential(null);setPlan(next);};
  const closePlan=()=>{if(busy)return;writeGeneration.current++;writeAbort.current?.abort();setPlan(null);setCredential(null);setFailure('');setUncertain(false);};
@@ -70,7 +66,7 @@ function TaskPanel({workspaceId,onConnections}:{workspaceId:string;onConnections
   try{const link=new URL(source);if(link.protocol!=='bambook:'||link.hostname!=='open')return;const view=link.searchParams.get('view'),id=link.searchParams.get('id'),section=link.searchParams.get('section');if(view&&id)nav.go(view,id,section?{section}:undefined);}catch{/* Invalid links cannot launch an external destination. */}
  };
  const active=identities.filter(i=>i.state==='active'),aiUnavailable=identities.some(i=>i.state==='invalid'&&i.canIssue===false),create=plan?.kind==='create'?plan:null,answer=plan?.kind==='answer'?plan:null;
- const columns:Column<AgentTaskView>[]=[{key:'name',header:uiText('任务'),render:r=><div className="mist-col"><span className="mist-cell-strong">{r.name}</span><span className="mist-cell-sub">{r.identityName}</span></div>},{key:'state',header:uiText('状态'),width:'118px',render:r=><Pill tone={tone(r.state)}>{uiText(statusLabel(r))}</Pill>},{key:'usage',header:uiText('业务操作'),width:'90px',render:r=><span>{r.stepsUsed} / {r.stepLimit}</span>,hideOnMobile:true}];
+ const columns:Column<AgentTaskView>[]=[{key:'name',header:uiText('任务'),render:r=><div className="mist-col"><span className="mist-cell-strong">{r.name}</span><span className="mist-cell-sub">{r.identityName}</span></div>},{key:'state',header:uiText('状态'),width:'118px',render:r=><Pill tone={tone(r.state)}>{uiText(statusLabel(r))}</Pill>},{key:'usage',header:uiText('业务操作'),width:'90px',render:r=><span>{r.stepsUsed} / {r.stepLimit}</span>,hideOnMobile:true},...(rowAction?[{key:'act',header:'',width:'90px',render:rowAction}]:[])];
  const control=(row:AgentTaskView)=><div className="mist-row" data-wrap>
   {row.executor!=='platform'&&!['succeeded','failed','cancelled','expired','budget_exhausted','access_changed'].includes(row.state)&&<Button disabled={!endpoint||busy} onClick={()=>begin({kind:'issue',requestId:crypto.randomUUID(),row})}>{uiText('连接Agent')}</Button>}
   {row.state==='paused'&&<Button disabled={busy} onClick={()=>begin({kind:'resume',requestId:crypto.randomUUID(),row})}>{uiText('继续任务')}</Button>}
@@ -78,11 +74,11 @@ function TaskPanel({workspaceId,onConnections}:{workspaceId:string;onConnections
   {row.canControl&&<Button variant="quiet" disabled={busy} onClick={()=>begin({kind:'cancel',requestId:crypto.randomUUID(),row})}>{uiText('停止任务')}</Button>}
  </div>;
  return <div className="mist-col">
-  <div className="mist-row"><span className="mist-spacer"/><Button icon={RefreshCw} disabled={loading||busy} onClick={()=>void currentLoad.current()}>{uiText('刷新')}</Button><Button variant="primary" icon={Plus} disabled={busy||loading||!active.length} title={uiText(aiUnavailable?'当前无AI使用权限':!active.length?'请先启用Agent连接':undefined)} onClick={()=>begin({kind:'create',requestId:crypto.randomUUID(),identityId:'',name:'',instructions:'',executor:'external'})}>{uiText('新建任务')}</Button></div>
-  {error&&<FailureNotice title="任务读取失败" detail={error} />}<DataTable ariaLabel={uiText('Agent任务')} loading={loading} columns={columns} rows={page.items} rowKey={r=>r.id} onRowClick={r=>void openDetail(r)} empty={<EmptyState icon={Bot} title={uiText(active.length?'暂无任务':'暂无可用的Agent连接')} action={!active.length?<Button onClick={onConnections}>{uiText('管理连接')}</Button>:undefined}/>} />
+  <div className="mist-row"><span className="mist-spacer"/><Button icon={RefreshCw} disabled={loading||busy} onClick={()=>void currentLoad.current()}>{uiText('刷新')}</Button>{(!rowAction||active.some(i=>i.kind!=='personal'))&&<Button variant={rowAction?'secondary':'primary'} icon={Plus} disabled={busy||loading||!active.length} title={uiText(aiUnavailable?'当前无AI使用权限':!active.length?'请先启用Agent连接':undefined)} onClick={()=>begin({kind:'create',requestId:crypto.randomUUID(),identityId:'',name:'',instructions:'',executor:'external'})}>{uiText('新建任务')}</Button>}</div>
+  {error&&<FailureNotice title="任务读取失败" detail={error} />}<DataTable ariaLabel={uiText('Agent任务')} loading={loading} columns={columns} rows={page.items} rowKey={r=>r.id} onRowClick={r=>void openDetail(r)} empty={<EmptyState icon={Bot} title={uiText(active.length||rowAction?'暂无任务':'暂无可用的Agent连接')} action={!active.length&&!rowAction?<Button onClick={onConnections}>{uiText('管理连接')}</Button>:undefined}/>} />
   {page.nextCursor&&<Button onClick={()=>void load(true)}>{uiText('加载更多')}</Button>}
   {detailError&&<FailureNotice title="任务详情读取失败" detail={detailError} />}
-  <Drawer open={!!detail||opening} onClose={()=>{detailGeneration.current++;setDetail(null);setOpening(false);if(routeTaskId)nav.go('account',undefined,{section:'agents'});}} title={detail?.name??uiText('任务')} footer={detail&&detail.canControl?control(detail):undefined}>
+  <Drawer open={!!detail||opening} onClose={()=>{detailGeneration.current++;setDetail(null);setOpening(false);if(routeTaskId)nav.go('assistant',undefined,{section:'tasks'});}} title={detail?.name??uiText('任务')} footer={detail&&detail.canControl?control(detail):undefined}>
    {opening&&!detail&&<Skeleton/>}
    {detail&&<div className="mist-col"><div className="mist-row"><Pill tone={tone(detail.state)}>{uiText(statusLabel(detail))}</Pill></div>
     <KeyValue items={[{label:uiText('执行方式'),value:uiText(detail.executor==='platform'?'平台执行':'外部客户端')},{label:uiText('Agent连接'),value:detail.identityName},{label:uiText('办理权限'),value:uiText(detail.mode==='read'?'只读':'可办理')},{label:uiText('负责人'),value:detail.ownerName},{label:uiText('有效期至'),value:time(detail.expiresAt)},{label:uiText('最近心跳'),value:time(detail.lastHeartbeatAt)},{label:uiText('业务操作'),value:`${detail.stepsUsed} / ${detail.stepLimit}`},{label:uiText('累计执行 / 上限'),value:`${duration(detail.runtimeUsedMs)} / ${duration(detail.runtimeLimitMs)}`}]} />

@@ -11,6 +11,7 @@ import type { MistCommand, MistInvoice, MistReceipt, MistAllocation } from '../.
 import { isActiveMistInvoice, isPendingFinanceMistInvoice, mistCommandPermission, mistPaymentReverseBlock } from '../../../../server/src/shared/mistWorkspace';
 import { fmt } from '../data';
 import { useNav } from '../nav';
+import { XiaozhuLink } from './modules/XiaozhuLink';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
 import { useRouteDraft, useRouteScope } from './modules/useRouteDraft';
@@ -177,7 +178,7 @@ export function FinancePage() {
       { label: '本月已核销', value: fmt(cashTotal(monthAllocations.filter(item => item.currency === displayCurrency).map(item=>item.amount)),2), unit: displayCurrency, hint: `${monthAllocations.length} 条本月核销记录` },
       { label: '未认领', value: state?.partialReceipts?.length ? '—' : unclaimedCount, unit: state?.partialReceipts?.length ? undefined : '笔', hint: state?.partialReceipts?.length ? '部分到账余额不可见' : unclaimedCount?'需联系付款方':'暂无待认领流水', hintTone: unclaimedCount?'bad':undefined },
       { label: '逾期应收', value: fmt(cashTotal(overdueInvoices.filter(item=>item.currency===displayCurrency).map(item=>item.open)),2), unit: displayCurrency, hint: orderType==='fabric'?'面料订单 · 按发票余额':orderType==='garment'?'成衣订单 · 按发票余额':route.customerId?'当前客户 · 按发票余额':'按发票余额统计', hintTone: 'warn' }]} />
-    {suggestions.length > 0 && <div className="mist-section"><Banner tone="ai" icon={Sparkles} title={ui`小竹匹配了 ${suggestions.length} 笔到账`} actions={canFund?<Button size="sm" variant="ai" disabled={busy} onClick={() => setSuggestConfirm(true)}>{uiText("核对并采纳")}</Button>:undefined} /></div>}
+    {suggestions.length > 0 && <div className="mist-section"><Banner tone="ai" icon={Sparkles} title={ui`小竹匹配了 ${suggestions.length} 笔到账`} actions={<><XiaozhuLink question={`核对这 ${suggestions.length} 笔到账匹配建议，说明依据和需要人工确认的地方。`}/>{canFund&&<Button size="sm" variant="ai" disabled={busy} onClick={() => setSuggestConfirm(true)}>{uiText("核对并采纳")}</Button>}</>} /></div>}
     {state&&<FinanceDevBilling state={state} canInvoice={session.hasPermission(MIST_FINANCE_SCOPES.invoice)} busy={busy} execute={execute} />}
     <Tabs<'recv' | 'pay' | 'inv'> value={tab} onChange={setTab} options={[{ value: 'recv', label: '收款核销', count: pendingReceipts.length }, { value: 'pay', label: '付款凭证', count: payments.length }, { value: 'inv', label: '发票', count: visibleInvoices.length }]} />
     {tab === 'pay' ? <Card><DataTable density={density} ariaLabel={uiText("付款凭证")} loading={loading} rows={payments} rowKey={item => item.id} empty={<EmptyState icon={Landmark} title={uiText("还没有付款凭证")} action={canVoucher?<Button disabled={busy} onClick={() => setPaymentOpen(true)}>{uiText("登记付款")}</Button>:undefined} />} columns={[

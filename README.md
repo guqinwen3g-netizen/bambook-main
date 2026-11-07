@@ -34,7 +34,7 @@ Bambook 是公司内部业务系统，覆盖开发与寻样、报价、订单、
 
 开发服务器（腾讯云 bambook-dev）：部署流程 [PR #26](https://github.com/guqinwen3g-netizen/bambook-main/pull/26) / [#30](https://github.com/guqinwen3g-netizen/bambook-main/pull/30) 已合入，`check` 已通过。自 [PR #33](https://github.com/guqinwen3g-netizen/bambook-main/pull/33) 起，main 每次含代码改动的推送在 `Mist verification` 成功后自动部署该提交（只改 `docs/**` 或根目录 `*.md` 的推送不跑检查、不部署；这类 PR 只做空白检查）（服务端全量类型检查在 CI 里跑，服务器只装依赖、生成 Prisma、重启；lockfile 未变时复用上一版依赖，[PR #43](https://github.com/guqinwen3g-netizen/bambook-main/pull/43)；超时预算与中断回切见 [开发环境部署](docs/deployment/bambook-development.md)；仍可在 Actions 手动 check / deploy）；当前服务器版本以运维通道 `readlink -f /srv/bambook-dev/current` 为准。所有 agent 经仓库运维通道访问，见 [开发服务器访问](docs/ops/dev-server-access.md)。正式环境（Mac mini、`jiangsupanda.com`）不在范围。
 
-AI 分为“工作助手”（桌面端本机、个人凭据，方案见 `docs/mist-atelier/work-assistant-plan.md`，P0 骨架已合入 `electron/assistant/`，P1 见 PR #25）与“平台 AI”（统一平台连接）两层。报价成本 AI 审阅已合入（PR #22）：AI 只审阅本行授权依据、价格由公式重算、人工采纳只改策略草稿。平台 AI 可由管理员连接 ChatGPT 订阅作测试平台模型（GPT-6-Luna），生产期改用企业 API。
+AI 分三部分（2026-11-07 定案，见 `docs/GO-LIVE.md`）：小竹对话页、业务页内的被动 AI、MCP 外接；模型由平台统一连接。
 
 当前停点只看 [docs/GO-LIVE.md](docs/GO-LIVE.md)；[LIVE-PROGRESS](docs/mist-atelier/LIVE-PROGRESS.md) 只是 10-17 前的历史流水。开始工作时核对 GitHub 实际分支 / PR。
 

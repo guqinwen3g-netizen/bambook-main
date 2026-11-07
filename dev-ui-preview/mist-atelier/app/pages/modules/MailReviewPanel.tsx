@@ -8,6 +8,7 @@ import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { uiText } from '../../../../../services/interfaceLanguage';
 import { DetailBlock, shortWhen } from './pageKit';
+import { XiaozhuLink } from './XiaozhuLink';
 import { FailureNotice } from '../../runtime/FailureNotice';
 
 type Exec = (command: MistCommand, done?: string) => Promise<unknown>;
@@ -52,6 +53,7 @@ export function MailReviewPanel({ message: m, state, can, locked, exec, onOpen }
     {can && <div className="mist-row" style={{ flexWrap: 'wrap' }}>
       {session.hasPermission('ai:chat') && <Button variant="ai" icon={Sparkles} disabled={disabled} onClick={() => setConsent(true)}>{uiText(busy ? '正在整理…' : analysis ? '重新整理' : 'AI 整理')}</Button>}
       {analysis && <Button disabled={disabled} onClick={openReview}>{uiText(reviewed ? '修改复核' : '复核资料')}</Button>}
+      {analysis && <XiaozhuLink question={`帮我处理邮件「${m.subject}」的下一步。`} />}
     </div>}
     {(reviewed || m.example) && m.extracted.length > 0 && can && <div className="mist-row mist-mail-picker">
       <Select aria-label={uiText('提交到业务对象')} value={target} onChange={e => setTarget(e.target.value)} placeholder={uiText(options.length ? '选择已关联对象' : m.links.length ? '已全部提交' : '请先关联业务对象')} options={options.map(l => ({ value: keyOf(l), label: `${EMAIL_LINK_LABEL[l.kind]} · ${emailLinkTarget(state, l)!.label}` }))} />

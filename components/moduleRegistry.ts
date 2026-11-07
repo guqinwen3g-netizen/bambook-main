@@ -328,7 +328,7 @@ export const BAMBOOK_MODULES: readonly BambookModuleDefinition[] = [
   {
     id: 'assistant',
     view: View.Assistant,
-    productLabel: 'AI 助手（开发中）',
+    productLabel: '小竹',
     internalName: 'Assistant',
     icon: Sparkles,
     nav: { primary: true, order: 90, group: 'platform' },

@@ -6,6 +6,7 @@ import { getByRole, getByLabelText } from "@testing-library/dom";
 import { MistRoot } from "../../../../../components/mist";
 import { QuotationCostAdvisor } from "./QuotationCostAdvisor";
 import { calculateQuoteCosting } from "../../../../../server/src/shared/mistQuotationCosting";
+vi.mock('./XiaozhuLink',()=>({XiaozhuLink:()=>null}));
 vi.mock("../../../../../services/apiService", () => ({
   apiService: { getAuthHeaders: () => ({ "X-Test-Auth": "verified" }) },
 }));

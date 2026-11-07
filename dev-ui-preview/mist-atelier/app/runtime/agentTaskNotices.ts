@@ -20,7 +20,7 @@ export function useAgentTaskNotices(scope:string,workspaceId:string|undefined,re
   const serial=++generation.current,abort=new AbortController();controller.current?.abort();controller.current=abort;inFlight.current=true;setLoading(true);
   try{
    const result=await request(base,{signal:abort.signal});if(serial!==generation.current||activeScope.current!==scope)return;
-   if(!Array.isArray(result.items)||result.items.length>30||result.items.some((n:AgentTaskNotice)=>!n||typeof n.id!=='string'||typeof n.key!=='string'||typeof n.taskId!=='string'||typeof n.title!=='string'||n.target?.view!=='account'||n.target?.section!=='agents'||n.target?.id!==n.taskId))throw Error('任务提醒响应无效');
+   if(!Array.isArray(result.items)||result.items.length>30||result.items.some((n:AgentTaskNotice)=>!n||typeof n.id!=='string'||typeof n.key!=='string'||typeof n.taskId!=='string'||typeof n.title!=='string'||n.target?.view!=='assistant'||n.target?.section!=='tasks'||n.target?.id!==n.taskId))throw Error('任务提醒响应无效');
    const items=result.items as AgentTaskNotice[],seen=previous.current;
    if(seen){const old=new Set(seen.map(n=>n.id)),fresh=items.filter(n=>!n.readAt&&!old.has(n.id)).map(n=>n.id);if(fresh.length&&canPlayNotificationSound()&&markNoticeSounds(soundScope,fresh))playNotificationSound();}
    previous.current=items;setSnapshot({scope,items,error:''});

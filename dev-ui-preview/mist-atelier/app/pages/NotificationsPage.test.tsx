@@ -24,7 +24,7 @@ const notes = () => [
   { id: 'n-old', recipientIds: ['owner'], category: 'general', title: '已读的工作通知', detail: '订单已确认', at: '2026-10-13T07:00:00Z', readAt: '2026-10-13T08:00:00Z', target: { view: 'orders/detail', id: 'o-1' } },
 ];
 it('opens a personal Agent reminder through its own read state and accurate task link',async()=>{
- const notice={id:'agent-task:task:key',taskId:'task',key:'a'.repeat(64),title:'Agent待补充资料',detail:'核对交期',at:'2026-11-01T00:00:00Z',readAt:null,category:'general',target:{view:'account',id:'task',section:'agents'}},read=vi.fn(async()=>{});seam.value.agentTaskNotices={items:[notice],read};render();const row=[...host.querySelectorAll('[role=row]')].find(r=>r.textContent?.includes('Agent待补充资料'))!;expect(row).toBeTruthy();await click(row.querySelector('button')!);expect(read).toHaveBeenCalledWith([notice]);expect(seam.value.run).not.toHaveBeenCalled();expect(go).toHaveBeenCalledWith('account','task',notice.target);
+ const notice={id:'agent-task:task:key',taskId:'task',key:'a'.repeat(64),title:'Agent待补充资料',detail:'核对交期',at:'2026-11-01T00:00:00Z',readAt:null,category:'general',target:{view:'assistant',id:'task',section:'tasks'}},read=vi.fn(async()=>{});seam.value.agentTaskNotices={items:[notice],read};render();const row=[...host.querySelectorAll('[role=row]')].find(r=>r.textContent?.includes('Agent待补充资料'))!;expect(row).toBeTruthy();await click(row.querySelector('button')!);expect(read).toHaveBeenCalledWith([notice]);expect(seam.value.run).not.toHaveBeenCalled();expect(go).toHaveBeenCalledWith('assistant','task',notice.target);
 });
 beforeEach(() => {
   vi.clearAllMocks(); count = 0; seam.route = { view: 'notifications' };
