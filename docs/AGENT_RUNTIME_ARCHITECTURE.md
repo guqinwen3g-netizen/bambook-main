@@ -409,7 +409,7 @@ Still incomplete:
 - Limits (steps, runtime, concurrency, per-user tasks) are constants, not configuration.
 - Long history: the desktop assistant keeps only the latest 16 turns.
 - Scanned or image-only attachments are not read (no OCR).
-- Whether `assistant.ts` (the read-only workspace Q&A path) reads the same object set as the Agent tools has not been verified.
+- `assistant.ts` (the read-only workspace Q&A) is a separate path with no tools and no writes: it answers only from sources the user selects, drawn from orders, invoices, risks, customers, purchases, shipments and developments, each re-checked with `hasScope`. It deliberately does not read the Agent object set, so finance ledgers, documents and attachments are not available to it.
 
 ## 10. Historical Note: Central AgentRuntime Proposal
 

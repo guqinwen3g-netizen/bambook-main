@@ -743,6 +743,8 @@
 
 ## 7. 进度记录
 
+- **2026-11-07 Agent 架构文档收口**：`AGENT_RUNTIME_ARCHITECTURE.md` 第 9 节改写为现行 MCP + 平台任务实现状态（11 个工具、40 类可读对象、提议确认与重认证、任务状态与限额），第 10 节的中央 `AgentRuntime` 方案标为历史；核实 `assistant.ts` 是独立的只读问答（仅用户选定的 7 类来源，逐项 `hasScope`），与 Agent 读取对象集不同，不是缺陷。仅文档，无代码、未部署。Agent 主线剩余：出口退税与月结对象读取、桌面助手补 `bambook_file_text`、限额可配置。
+
 - **2026-11-07 权限收口与 Agent 读取扩展已部署开发服务器**：main `0d3c466d` 经 `npm run dev:deploy`（本机完整验证、直传、健康检查与回滚保护）发布，公网 `mist-version.json` 与 API 健康读回一致。新增的 `bambook_file_text`、出运/报价/订单单据文件和财务台账读取对象现网可用；尚未用真实附件或真实租户数据验收，桌面助手同名工具未提供。后续：出口退税与月结对象、`assistant.ts` 读取口径核对、AGENT_RUNTIME_ARCHITECTURE 过时章节改写。
 
 - **2026-11-07 Agent 可读财务与相关台账（分支 `codex/dangling-scope-closure`，已合入 main（7507aa1c）、未部署）**：新增只读对象类型 `receipt_record`（客户收款）、`receipt_allocation`、`finance_reversal`、`customer_statement`、`bank_account`（账号只给后四位，需 `vouchers:write`）、`fx_record`、`letter_of_credit`、`rfq`、`sample_request`、`report_schedule`；权限与现有读分区一致，缺权限账号看不到类型也读不到，报表订阅仍只限本人。财务 Agent 现在能查到到账、核销、结汇、信用证编号再下写命令。新增 2 项测试；`test:mist` 全量此前仅有的 2 项失败是任务连接工具数断言（9→10），已更新，Agent 相关 26 文件 248 项通过。出口退税、月结未开放，仍在后续。
