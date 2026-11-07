@@ -743,7 +743,7 @@
 
 ## 7. 进度记录
 
-- **2026-11-07 Agent 可读出口退税**：新增只读对象 `rebate_rate`（退税率版本）与 `rebate_claim`（退税申报），读权限 `tax:read`，计税基数沿用仓储投影按 `sensitive:tax_base` 脱敏（无该码金额置 0 并标 taxMasked，测试已钉）。月结（`periodCloses`）无逐条编号且不在任何读分区，暂不开放。Agent 相关 27 文件通过、服务端类型通过；已提交推送，未部署。
+- **2026-11-07 Agent 可读出口退税**：新增只读对象 `rebate_rate`（退税率版本）与 `rebate_claim`（退税申报），读权限 `tax:read`，计税基数沿用仓储投影按 `sensitive:tax_base` 脱敏（无该码金额置 0 并标 taxMasked，测试已钉）。月结（`periodCloses`）无逐条编号且不在任何读分区，暂不开放。Agent 相关 25 文件 191 项通过、服务端类型通过；已提交推送，未部署。
 
 - **2026-11-07 Agent 架构文档收口**：`AGENT_RUNTIME_ARCHITECTURE.md` 第 9 节改写为现行 MCP + 平台任务实现状态（11 个工具、40 类可读对象、提议确认与重认证、任务状态与限额），第 10 节的中央 `AgentRuntime` 方案标为历史；核实 `assistant.ts` 是独立的只读问答（仅用户选定的 7 类来源，逐项 `hasScope`），与 Agent 读取对象集不同，不是缺陷。仅文档，无代码、未部署。Agent 主线剩余：出口退税与月结对象读取、桌面助手补 `bambook_file_text`、限额可配置。
 
