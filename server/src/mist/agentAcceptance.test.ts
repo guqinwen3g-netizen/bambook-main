@@ -89,12 +89,13 @@ async function cowork(script: (input: LlmCompletionInput, turn: number) => strin
   await human.get('/api/mist/session').expect(200);
   const workspace = (await human.get('/api/mist/workspaces/default').expect(200)).body.workspace, base = '/api/mist/workspaces/' + workspace.id;
   const worker = app.locals.platformTaskWorker as MistPlatformTaskWorker; workers.push(worker); worker.start(3_600_000);
+  (app.locals as any).acceptanceDb = local.database;
   const drain = async () => { for (let i = 0; i < 8; i++) { await worker.tick(); await worker.settled(); } };
   const ask = async (instructions: string) => (await human.post(base + '/personal-agent/tasks').send({ requestId: randomUUID(), name: instructions.slice(0, 60), instructions, locale: 'zh-CN' }).expect(201)).body.item;
   const read = async (id: string) => (await human.get(base + '/agent-tasks/' + id).expect(200)).body.item;
   const state = async () => (await human.get(base).expect(200)).body.workspace;
   const command = async (type: string, payload: unknown) => { const w = await state(); return human.post(base + '/commands').send({ requestId: randomUUID(), expectedRevision: w.revision, command: { type, payload } }); };
-  return { human, workspace, base, drain, ask, read, state, command, prompts };
+  (human as any).app = app; return { human, workspace, base, drain, ask, read, state, command, prompts };
 }
 
 it('answers a question from business data in the conversation', async () => {
@@ -179,3 +180,46 @@ it('connects the way the account page does and keeps companies apart', async () 
   const other = await connect(null, 'read'); expect(other.workspace.id).not.toBe(id);
   const crossing = await call('bambook_query', { workspaceId: other.workspace.id, type: 'order', limit: 1 }).catch(e => ({ error: true, text: String(e.message), data: null })); await report('cross company', crossing.text.slice(0, 120)); expect(crossing.error).toBe(true);
 }, 60000);
+
+const automation = async (c: Awaited<ReturnType<typeof cowork>>, body: Record<string, unknown>) => (await c.human.post(c.base + '/agent-automations').send(body).expect(201)).body.item;
+const fire = async (c: Awaited<ReturnType<typeof cowork>>, now = Date.now()) => { const app = (c.human as any).app, worker = app.locals.automationWorker; worker.options.now = () => now; await worker.tick(); await c.drain(); };
+const rules = async (c: Awaited<ReturnType<typeof cowork>>) => (await c.human.get(c.base + '/agent-automations').expect(200)).body.items;
+
+it('runs a new-mail rule once per new mail with no one logged in, ignoring mail that was already there', async () => {
+  let mail = ''; const c = await cowork((_i, n) => n % 2 === 1 ? tool('bambook_get', { type: 'email', id: mail }) : finish('已整理新邮件'));
+  mail = c.workspace.state.email.messages[0].id;
+  const rule = await automation(c, { name: '新邮件整理', trigger: 'new_mail', instructions: '整理新邮件要点' });
+  await fire(c); expect((await rules(c))[0].runs).toHaveLength(0);
+  const repo = (c.human as any).app.locals.mistRepository; void repo;
+  const base = c.workspace.state.email.messages[0];
+  const added = { ...base, id: 'auto-new-mail', subject: '新询价', folder: 'inbox' };
+  const db = (c.human as any).app.locals.acceptanceDb; await db.mistWorkspace.update({ where: { id: c.workspace.id }, data: { state: { ...(await c.state()).state, email: { ...(await c.state()).state.email, messages: [added, ...(await c.state()).state.email.messages] } } } });
+  await fire(c); const after = await rules(c); expect(after[0].runs).toHaveLength(1); expect(after[0].runs[0].detail).toBe('1 封新邮件');
+  const task = await c.read(after[0].runs[0].taskId); expect(task).toMatchObject({ state: 'succeeded', result: '已整理新邮件', automationId: rule.id }); expect(task.instructions).toContain('新询价');
+  await fire(c); expect((await rules(c))[0].runs).toHaveLength(1);
+});
+
+it('leaves a change as a proposal, ends the run, and the person can still confirm it afterwards', async () => {
+  let mail = ''; const c = await cowork((_i, n) => n === 1 ? tool('bambook_get', { type: 'email', id: mail }) : tool('bambook_execute', { command: { type: 'email.move', payload: { id: mail, folder: 'archive' } } }));
+  mail = c.workspace.state.email.messages[0].id;
+  await automation(c, { name: '每日归档', trigger: 'daily', time: '00:00', instructions: '归档邮件' });
+  await fire(c); const run = (await rules(c))[0].runs[0]; expect(run.detail).toBe('每日定时');
+  expect(await c.read(run.taskId)).toMatchObject({ state: 'succeeded', waitingProposalIds: [] });
+  const proposal = (await c.state()).state.agentProposals.find((p: any) => p.state === 'pending'); expect(proposal).toBeTruthy();
+  expect((await c.command('agent.proposal.confirm', { id: proposal.id })).status).toBe(200);
+  expect((await c.state()).state.email.messages.find((m: any) => m.id === mail).folder).toBe('archive');
+  await fire(c); expect((await rules(c))[0].runs).toHaveLength(1);
+});
+
+it('stops when switched off, keeps rules private, and lists order due dates', async () => {
+  let order = ''; const c = await cowork((_i, n) => n % 2 === 1 ? tool('bambook_get', { type: 'order', id: order }) : finish('已提醒'));
+  order = c.workspace.state.orders[0].id;
+  const off = await automation(c, { name: '暂不运行', trigger: 'daily', time: '00:00', instructions: '不要运行', enabled: false });
+  const on = await automation(c, { name: '交期提醒', trigger: 'due_soon', time: '00:00', instructions: '提醒交期临近的订单' });
+  await fire(c, Date.parse('2030-01-01T02:00:00Z'));
+  const [first, second] = await rules(c); expect(first.id).toBe(off.id); expect(first.runs).toHaveLength(0); expect(second.id).toBe(on.id); expect(second.runs[0].detail).toContain('张订单交期临近');
+  await c.human.post('/api/mist/session').send({ profileId: 'local-reviewer' }).expect(200);
+  await c.human.put(c.base + '/agent-automations/' + on.id).send({ name: 'x', trigger: 'daily', instructions: 'y' }).expect(res => { if (res.status < 400) throw new Error('other account changed a rule'); });
+  await c.human.post('/api/mist/session').send({ profileId: 'local-operator' }).expect(200);
+  await c.human.delete(c.base + '/agent-automations/' + on.id).expect(204); expect(await rules(c)).toHaveLength(1);
+});

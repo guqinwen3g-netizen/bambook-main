@@ -21,7 +21,7 @@ async function main() {
     app=createMistServer(prisma,{host});disconnect=()=>prisma.$disconnect();
   }
   if(process.env.MIST_MAIL_RECEIVER_ENABLED!=='0')app.locals.mailReceiver.start();
-  if(process.env.MIST_PLATFORM_AGENT_ENABLED!=='0'){app.locals.platformTaskWorker.start();console.log('[platform-agent] started');}
+  if(process.env.MIST_PLATFORM_AGENT_ENABLED!=='0'){app.locals.platformTaskWorker.start();app.locals.automationWorker.start();console.log('[platform-agent] started');}
   // Platform market reference quotes (Bank of China settlement rates, domestic spot materials) refresh daily via Exa MCP.
   app.locals.marketWorker.start();
   const server = app.listen(port, host, () => { console.log(`[mist] ${mistLocalRequested()?'local-file workspace':'workspace server'} listening on ${host}:${port}`); });

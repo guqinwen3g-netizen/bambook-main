@@ -45,7 +45,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if (run !== version.current || live.current !== bound) return;
       const own = mine.items.find(i => i.kind === 'personal') ?? null;
       setAvailable(caps.platformAvailable === true && own?.state !== 'disabled');
-      setTasks(page.items.filter(t => t.executor === 'platform' && (!own || t.identityId === own.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-THREAD_LIMIT));
+      setTasks(page.items.filter(t => t.executor === 'platform' && !t.automationId && (!own || t.identityId === own.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-THREAD_LIMIT));
       setError('');
     } catch (e) {
       // 任务通道读不到时退回只读问答，不把原因当作对话内容。

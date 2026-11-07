@@ -17,7 +17,7 @@ import { InvoicePage } from './InvoicePage';
 export { InvoicePage } from './InvoicePage';
 import { useRouteDraft, useRouteScope } from './useRouteDraft';
 import { useAssistantConversation } from '../../runtime/assistantConversation';
-import { ArrowRight, ArrowUp, Calculator, Download, FileText, ListChecks, Mic, Paperclip, RefreshCw, Sparkles, Square, X, Package, Receipt, ShieldCheck, Users, Database, Building2 } from 'lucide-react';
+import { ArrowRight, ArrowUp, Calculator, Download, FileText, ListChecks, Mic, Paperclip, Zap, RefreshCw, Sparkles, Square, X, Package, Receipt, ShieldCheck, Users, Database, Building2 } from 'lucide-react';
 import { AIBadge, AssistantEyes, Banner, Button, Card, CardHeader, DataTable, Dialog, Drawer, EmptyState, Icon, IconButton, Field, FormGrid, KeyValue, Meter, MistPage, Mono, PageHeader, Pill, Select, StatCard, StatGrid, SummaryBar, Tabs, TextArea, TextInput, Toolbar, UploadZone, useToast, type Column } from '../../../../../components/mist';
 import { apiService, type CompanyExporterProfileValue } from '../../../../../services/apiService';
 import { calculatePlatformBom, calculatePlatformPricing, platformBusinessDate, platformCreditRemaining, platformCreditEffectiveAmount, getPlatformClaimSourceOptions, canEditPlatformClaimDraft, type PlatformState, type PlatformBom, type PlatformBomLine, type PlatformClaim, type PlatformCommand, type PlatformRisk, type PlatformClaimDisposition } from '../../../../../server/src/shared/mistPlatform';
@@ -36,6 +36,7 @@ import { BusinessCalculators } from './BusinessCalculators';
 import { PlatformReportsPage, buildOrderProgress, buildReceivableAging, AGING_BUCKETS, ORDER_FINISHED_STATES } from './PlatformReports';
 export { PlatformReportsPage as ReportsPage, buildCustomerSales, buildReceivableAging, buildOrderProgress } from './PlatformReports';
 import { XiaozhuTasks } from './XiaozhuTasks';
+import { XiaozhuAutomations } from './XiaozhuAutomations';
 import { XiaozhuThread } from './XiaozhuThread';
 import { XiaozhuCall, voiceInCall } from './XiaozhuCall';
 import { useXiaozhuCowork } from '../../runtime/xiaozhuCowork';
@@ -147,7 +148,7 @@ export function AssistantPage(){
   const scope=w.session.sessionKey+':'+(w.workspace?.id??'');
   const {question,setQuestion,selected,setSelected,messages,setMessages}=useAssistantConversation(scope);
   const [configuration,setConfiguration]=React.useState<{configured:boolean;models?:string[];subscription?:{provider:'chatgpt';connected:boolean}}|null>(null),[checking,setChecking]=React.useState(false),[busy,setBusy]=React.useState(false),[error,setError]=useRouteDraft('');
-  const [picker,setPicker]=React.useState(false),[drafts,setDrafts]=React.useState(false);
+  const [automations,setAutomations]=React.useState(false),[picker,setPicker]=React.useState(false),[drafts,setDrafts]=React.useState(false);
   const active=React.useRef<AbortController|null>(null),generation=React.useRef(0),live=React.useRef(''),sendLock=React.useRef(false),field=React.useRef<HTMLTextAreaElement>(null),end=React.useRef<HTMLDivElement>(null);
   live.current=scope;
   const ids=selected.map(s=>s.id),canChat=w.session.hasPermission('ai:chat');
@@ -167,7 +168,7 @@ export function AssistantPage(){
   const saved=w.platform?.assistantDrafts??[];
   const status=configuration?.configured?<Pill tone="ai">{uiText(configuration.subscription?.connected?'平台模型已连接':'服务器模型已配置')}</Pill>:configuration?<Pill tone="warn">{uiText("模型未连接")}</Pill>:<Pill>{uiText(checking?'正在读取模型配置':'尚未核实模型配置')}</Pill>;
   const hint=selected.length ? `已引用 ${selected.length} / 12 个来源` : '';
-  return <MistPage width="narrow"><PageHeader title={uiText("小竹")} actions={<>{!cowork.available&&status}<IconButton icon={RefreshCw} label={uiText("检查模型配置")} disabled={checking||busy} onClick={()=>void check()}/><Button variant="quiet" icon={Mic} disabled={!cowork.available||inCall} onClick={()=>void voice.start()}>{uiText('语音通话')}</Button><Button variant="quiet" icon={ListChecks} onClick={()=>nav.go('assistant',undefined,{section:'tasks'})}>{uiText('任务')}</Button><Button variant="quiet" icon={FileText} onClick={()=>setDrafts(true)}>{uiText(saved.length?'草稿 '+saved.length:'草稿')}</Button></>}/><ErrorNotice/><XiaozhuCall voice={voice}/>{cowork.error&&cowork.available&&<Banner tone="warn" title={uiText(cowork.error)}/>}<XiaozhuTasks refreshSignal={cowork.tasks.length} open={tasksOpen} onClose={()=>nav.go('assistant')}/>
+  return <MistPage width="narrow"><PageHeader title={uiText("小竹")} actions={<>{!cowork.available&&status}<IconButton icon={RefreshCw} label={uiText("检查模型配置")} disabled={checking||busy} onClick={()=>void check()}/><Button variant="quiet" icon={Mic} disabled={!cowork.available||inCall} onClick={()=>void voice.start()}>{uiText('语音通话')}</Button><Button variant="quiet" icon={Zap} disabled={!canChat} onClick={()=>setAutomations(true)}>{uiText('自动')}</Button><Button variant="quiet" icon={ListChecks} onClick={()=>nav.go('assistant',undefined,{section:'tasks'})}>{uiText('任务')}</Button><Button variant="quiet" icon={FileText} onClick={()=>setDrafts(true)}>{uiText(saved.length?'草稿 '+saved.length:'草稿')}</Button></>}/><ErrorNotice/><XiaozhuCall voice={voice}/>{cowork.error&&cowork.available&&<Banner tone="warn" title={uiText(cowork.error)}/>}<XiaozhuAutomations open={automations} onClose={()=>setAutomations(false)} workspaceId={w.workspace?.id}/><XiaozhuTasks refreshSignal={cowork.tasks.length} open={tasksOpen} onClose={()=>nav.go('assistant')}/>
     <div className="mist-chat">
       {!cowork.available&&configuration&&!configuration.configured&&<Banner tone="warn" title={uiText("生成模型尚未连接到此公司")}>{uiText(configuration.subscription?'请平台管理员连接平台模型。':'服务器未配置可用模型。')}{uiText("仍可引用业务记录并保存文字草稿。")}</Banner>}
       <div className="mist-chat-thread">

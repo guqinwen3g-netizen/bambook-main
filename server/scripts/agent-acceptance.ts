@@ -28,6 +28,7 @@ const local = createMistLocalRuntime({ directory: await mkdtemp(path.join(tmpdir
 const complete = async (input: any) => { const user = input.messages?.at?.(-1)?.content ?? input.user ?? JSON.stringify(input); const text = String(user); return plan(text.slice(text.indexOf('User request:') + 13)); };
 const app = createMistServer(undefined, { local, agentTasks: { complete, tickMs: 1000, pulseMs: 200 } });
 (app.locals.platformTaskWorker as any).start(1000);
+(app.locals.automationWorker as any).start(3000);
 app.listen(API_PORT, '127.0.0.1');
 const { createServer } = await import('vite');
 const { mistDevelopmentProxy } = await import(path.join(ROOT, 'scripts/mist-dev-target.mjs'));

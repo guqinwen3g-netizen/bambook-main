@@ -20,6 +20,7 @@ import * as mistContract from '../shared/mistWorkspace';
 import { AGENT_DELEGATION_HEADER } from './agentDelegation';
 import { TASK_HEADER, TASK_CONTROL_HEADER } from './agentTasks';
 import{MistPlatformTaskWorker,type PlatformTaskWorkerOptions}from'./platformTaskWorker';
+import {MistAutomationWorker} from './agentAutomationWorker';
 import { createMarketStore, MarketQuoteWorker } from '../ai/marketQuotes';
 import{defaultAgentDelegation}from'./route';
 import type{AgentDelegation}from'./agentDelegation';
@@ -41,7 +42,7 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
     app.locals.mailReceiver=mailReceiver;
     return{mail,mailReceiver};
   };
-  const agentRuntime=(repository:MistRepository,delegation:AgentDelegation)=>{const worker=new MistPlatformTaskWorker(repository,{onError:code=>console.error('[platform-agent]',code),...options.agentTasks,makeCredential:delegation.makeTaskCredential});app.locals.platformTaskWorker=worker;app.locals.mistRepository=repository;repository.setPlatformTaskRuntime(()=>worker.available,delegation.hydrateServiceActor);};
+  const agentRuntime=(repository:MistRepository,delegation:AgentDelegation)=>{const worker=new MistPlatformTaskWorker(repository,{onError:code=>console.error('[platform-agent]',code),...options.agentTasks,makeCredential:delegation.makeTaskCredential});app.locals.platformTaskWorker=worker;app.locals.mistRepository=repository;app.locals.automationWorker=new MistAutomationWorker(repository,{make:delegation.makeServiceCredential,...(local?{localActor:local.actorForProfile}:{}),onError:code=>console.error('[agent-automation]',code)});repository.setPlatformTaskRuntime(()=>worker.available,delegation.hydrateServiceActor);};
   const marketStore=createMarketStore(process.env.BAMBOOK_MARKET_DIR?.trim()||(local?path.join(local.database.directory,'market'):undefined));
   app.locals.marketStore=marketStore;app.locals.marketWorker=new MarketQuoteWorker(marketStore,{onError:code=>console.error('[market-quotes]',code)});
   const configured = new Set((local?'':process.env.MIST_CORS_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean));
