@@ -13,13 +13,13 @@ import {CONDITION_CHECK_MS,taskConditionInput,type TaskCondition,type TaskCondit
 export const TASK_PREFIX = 'mist-revision:agent-task:';
 export const TASK_HASH = 'mist-agent-task:v1';
 export const TASK_FIELD = '__agentTask';
+import { agentTaskLimits } from './agentLimits';
 export const TASK_HEADER = 'x-bambook-agent-task';
 export const TASK_CONTROL_HEADER = 'x-bambook-task-control';
 export const TASK_LEASE_MS = 90_000;
 const EVENT_PREFIX = 'mist-revision:agent-task-event:';
 const EVENT_HASH = 'mist-agent-task-event:v1';
-const STEP_LIMIT = 40;
-const RUNTIME_LIMIT = 30 * 60_000;
+const { steps: STEP_LIMIT, runtimeMs: RUNTIME_LIMIT, activePerUser: ACTIVE_TASK_LIMIT } = agentTaskLimits();
 const TASK_TTL = 24 * 60 * 60_000;
 const uuid = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 const hash = (v: string) => createHash('sha256').update(v).digest('hex');
@@ -118,7 +118,7 @@ export async function createTask(db: any, actor: TokenPayload, workspaceId: stri
   const locale=input.executor==='platform'?responseLocale(input.locale):undefined,inputHash = hash(JSON.stringify([identity.id, name, instructions,...(input.executor==='platform'?['platform',locale]:[])]));
   if (previous) { if (previous.inputHash !== inputHash) fail('CONFLICT', '操作编号已用于其他任务', 409);const c=(await taskRecord(db, workspaceId, previous.result.id)).value;let valid=c.scopeHash===scopeHash;try{await assertTaskAuthority(db,actor,c,now);}catch(e){if(!(e instanceof MistApiError))throw e;valid=false;}return taskView(c, actor, now,valid); }
   const active = await db.mistCommandReceipt.findMany({ where: { workspaceId, actorId: actor.userId, inputHash: TASK_HASH, AND: [{ OR: ['queued','running','waiting_time','waiting_condition','waiting_human','paused'].map(state => ({ result: { path: [TASK_FIELD, 'state'], equals: state } })) }, { result: { path: [TASK_FIELD, 'expiresAt'], gte: now } }] }, take: 10 });
-  if (active.length >= 10) fail('AGENT_TASK_LIMIT', '请先结束已有任务', 422);
+  if (active.length >= ACTIVE_TASK_LIMIT) fail('AGENT_TASK_LIMIT', '请先结束已有任务', 422);
   const taskId = randomUUID(), at = new Date(now).toISOString();
   const c: TaskRecord = { schemaVersion: 1, id: taskId, workspaceId, identityId: identity.id, identityName: identity.name, ownerId: actor.userId, ownerName: actor.displayName || actor.userId, name, instructions, state: 'queued', version: 1, controlVersion: 1, createdAt: at, updatedAt: at, expiresAt: Math.min(now + TASK_TTL, key.expiresAt), authority: { id: identity.id, workspaceId, hash: key.hash, ownerId: actor.userId, issuedAt: key.issuedAt, expiresAt: key.expiresAt }, ceiling, credentialVersion: actor.credentialVersion, scopeHash, sources: [], mode:key.mode, stepsUsed: 0, runtimeUsedMs: 0, checkpoint: '', result: '', waitingProposalIds: [], operations: [], lastRequestId: requestId, lastAction: 'created', lastInputHash: inputHash };
   if(input.executor==='platform'){c.executor='platform';c.locale=locale;c.platform={steps:[],nextRunAt:0};}
