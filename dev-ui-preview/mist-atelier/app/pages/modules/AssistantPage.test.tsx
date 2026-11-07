@@ -14,6 +14,13 @@ let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
 const view=(active=true)=> <Nav.Provider value={{route:{view:'assistant'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
 const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
 
+it('is the single AI page: no sub-page tabs, tasks open from the header',async()=>{
+  mock.fetch.mockResolvedValue(response({configured:true,models:['test-model']}));
+  await mount();
+  expect(host.textContent).not.toContain('我的 Agent');expect(host.textContent).not.toContain('工作助手');
+  await click('任务');expect(go).toHaveBeenCalledWith('assistant',undefined,{section:'tasks'});
+});
+
 it('retains the answer, references and an unfinished question when returning from a source page',async()=>{
   mock.fetch.mockImplementation(async(url:string)=>response(url.endsWith('/status')?{configured:true,models:['test-model']}:{text:'Answer to retain',mode:'read_only',revision:1,sources:[{id:'orders:order',label:'SO-SELECTED',view:'orders/detail',entityId:'order'}]}));
   await mount(); await click('引用业务记录'); await click('加入问题'); await question('First question'); await click('发送');

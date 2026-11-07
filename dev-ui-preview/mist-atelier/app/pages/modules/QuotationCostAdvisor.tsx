@@ -10,6 +10,7 @@ import {
   Facts,
   FormSection,
 } from "../../../../../components/mist";
+import { XiaozhuLink } from "./XiaozhuLink";
 import { apiService } from "../../../../../services/apiService";
 import {
   calculateQuoteCosting,
@@ -251,6 +252,7 @@ export function QuotationCostAdvisor(p: {
                 disabled={p.disabled || busy || !consent || !valid}
                 onClick={() => void ask()}
               >{uiText("请求 AI 审阅")}</Button>
+              <XiaozhuLink question="帮我审阅当前报价的成本依据和利润风险。" />
               {busy && (
                 <Button
                   onClick={() => {

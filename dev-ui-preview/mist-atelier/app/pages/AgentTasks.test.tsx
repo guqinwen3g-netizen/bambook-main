@@ -7,7 +7,7 @@ import {MistRoot,ToastProvider} from '../../../../components/mist';
 const seam=vi.hoisted(()=>({api:vi.fn(),copy:vi.fn(),refresh:vi.fn(),go:vi.fn(),identity:'A',userId:'sales',routeId:''}));
 vi.mock('../runtime/auth',()=>({useMistSession:()=>({sessionKey:seam.identity,user:{id:seam.userId}})}));
 vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>({workspace:{id:'workspace'},refresh:seam.refresh}),mistApiRequest:(...args:any[])=>seam.api(...args)}));
-vi.mock('../nav',()=>({useNav:()=>({go:seam.go,route:{view:'account',section:'agents',id:seam.routeId||undefined}})}));
+vi.mock('../nav',()=>({useNav:()=>({go:seam.go,route:{view:'assistant',section:'tasks',id:seam.routeId||undefined}})}));
 import {AgentTasks} from './AgentTasks';
 let host:HTMLDivElement,root:Root;
 const row=()=>({id:'task',identityId:'identity',identityName:'邮件助理',name:'核对邮件',ownerId:'sales',ownerName:'顾言',mode:'operate',instructions:'核对本人来信，移动前交本人确认。',state:'queued',version:3,createdAt:'2026-11-01T00:00:00Z',updatedAt:'2026-11-01T00:00:00Z',expiresAt:'2026-11-02T00:00:00Z',stepsUsed:0,stepLimit:40,runtimeUsedMs:0,runtimeLimitMs:1800000,lastHeartbeatAt:null,checkpoint:'',result:'',waitingProposalIds:[],canControl:true});

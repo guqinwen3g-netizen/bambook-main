@@ -20,10 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { OpenBitFunRuntime } from '../scripts/openbitfun-runtime.mjs';
 import { resolveBambookIconPath } from './brandAssets';
-import { AssistantRequestError, AssistantSupervisor } from './assistantSupervisor';
-import { bindDelegationOrigin } from './assistant/protocol';
 import { desktopAppOrigin, isTrustedOrigin, trustedOrigins } from './appOrigin';
-import { AssistantError } from './assistant/types';
 
 let openbitfunRuntime: OpenBitFunRuntime | null = null;
 
@@ -1072,32 +1069,6 @@ function getOpenBitFunRuntime() {
     return openbitfunRuntime;
 }
 
-// 工作助手（本机 Agent）：assistant-host 独立进程，只接受主窗口主框架的请求。
-let assistantSupervisor: AssistantSupervisor | null = null;
-function getAssistantSupervisor() {
-    assistantSupervisor ??= new AssistantSupervisor({
-        hostPath: path.join(__dirname, 'assistant-host.js'),
-        dataDir: path.join(app.getPath('userData'), 'assistant'),
-        send: (channel, payload) => {
-            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
-        },
-    });
-    return assistantSupervisor;
-}
-ipcMain.handle('assistant:request', async (event, method: unknown, params: unknown) => {
-    if (!trustedMainFrame(event)) {
-        throw new Error('Untrusted assistant caller');
-    }
-    try {
-        if (method === 'session.delegation') params = bindDelegationOrigin(params, event.senderFrame.url);
-        return { ok: true, result: await getAssistantSupervisor().request(method, params) };
-    } catch (error) {
-        return error instanceof AssistantRequestError || error instanceof AssistantError
-            ? { ok: false, error: { code: error.code, message: error.message } }
-            : { ok: false, error: { code: 'INTERNAL', message: '工作助手请求失败，请重试' } };
-    }
-});
-
 for (const operation of ['start', 'status'] as const) {
     ipcMain.handle(`openbitfun:${operation}`, async (event) => {
         // The embedded workbench (and other windows) cannot use this bridge.
@@ -1147,6 +1118,5 @@ app.on('before-quit', () => {
     globalShortcut.unregisterAll();
     Array.from(localSttSessions.keys()).forEach(cleanupLocalSttSession);
     openbitfunRuntime?.stop();
-    assistantSupervisor?.stop();
     stopEmbeddedServer();
 });

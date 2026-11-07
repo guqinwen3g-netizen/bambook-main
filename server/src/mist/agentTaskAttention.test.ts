@@ -30,7 +30,7 @@ async function fixture(){
 }
 it('persists owner read state across a new runtime without changing business, task control or an unanswered question',async()=>{
  const f=await fixture(),before=(await f.human.get(f.base).expect(200)).body.workspace,notice=(await f.notices())[0],task=await f.current();
- expect(notice).toMatchObject({recipientIds:['local-operator'],title:'Agent待补充资料',detail:'核对交期',readAt:null,target:{view:'account',id:f.task.id,section:'agents'}});expect(JSON.stringify(notice)).not.toContain('请提供工厂');
+ expect(notice).toMatchObject({recipientIds:['local-operator'],title:'Agent待补充资料',detail:'核对交期',readAt:null,target:{view:'assistant',id:f.task.id,section:'tasks'}});expect(JSON.stringify(notice)).not.toContain('请提供工厂');
  await f.read([{taskId:notice.taskId,key:notice.key}]);const read=(await f.notices())[0];expect(read.id).toBe(notice.id);expect(read.readAt).toBeTruthy();
  await f.read([{taskId:notice.taskId,key:notice.key}]);expect((await f.notices())[0].readAt).toBe(read.readAt);expect(await f.current()).toEqual(task);expect((await f.human.get(f.base).expect(200)).body.workspace).toEqual(before);
  const local=createMistLocalRuntime({directory});await local.ready;const human=request.agent(createMistServer(undefined,{local}));await human.get('/api/mist/session').expect(200);expect((await human.get(f.base+'/agent-task-notices').expect(200)).body.items[0]).toEqual(read);

@@ -11,6 +11,7 @@ import { PageLoading } from './PageLoading';
 import { ExportConfirmHost } from './runtime/ExportConfirmHost';
 import { preloadPagesWhenIdle } from './pagePreload';
 import { primaryImageId } from '../../../server/src/shared/mistPrimaryImage';
+import { useAssistantConversation } from './runtime/assistantConversation';
 import { Bell, ClipboardList, Component, KeyRound, Layers, ListTodo, Moon, Search, Settings2, ShieldCheck, Sparkles, SquareDashed, Users } from 'lucide-react';
 
 import {
@@ -311,7 +312,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
     if (!state) return {role:'assistant',content:'公司数据尚未读取，请稍后再试。'};
     const visibleDevs=canDevelopment?state.devs:[],visibleOrders=canOrders?state.orders:[],visibleTasks=state.tasks.filter(t=>session.canAccessView(t.target.view.split('/')[0] as View));
     const devs=visibleDevs.filter(d=>d.stage<4).slice(0,4),late=(canProduction?state.productions:[]).filter(p=>!p.closed&&p.col!=='done'&&p.due<platformBusinessDate(businessNow()));
-    return {role:'assistant',content:<div><p>{uiText("当前公司有 ")}{visibleDevs.length}{uiText(" 个可见开发案、")}{visibleOrders.length}{uiText(" 张订单；")}{visibleTasks.filter(t=>!t.done).length}{uiText(" 项待办未完成，")}{late.length}{uiText(" 项生产已过交期。")}</p>{devs.map(d=><p key={d.id}><Button variant="quiet" onClick={()=>go('development/detail',d.id,{versionId:d.currentVersionId||undefined})}>{d.code} · {d.name} · {d.state}</Button></p>)}</div>,sources:[state.settings.workspaceName || '当前公司'],actions:<><Button disabled={!session.hasPermission('ai:chat')} onClick={()=>go('assistant')}>{uiText("进入完整助手")}</Button>{currentAiSource?<Button aria-pressed={aiUseRouteSource} disabled={aiBusy} onClick={()=>setAiUseRouteSource(value=>!value)}>{uiText(aiUseRouteSource?'取消引用：':'引用当前来源：')}{uiText(currentAiSource.label)}</Button>:null}</>};
+    return {role:'assistant',content:<div><p>{uiText("当前公司有 ")}{visibleDevs.length}{uiText(" 个可见开发案、")}{visibleOrders.length}{uiText(" 张订单；")}{visibleTasks.filter(t=>!t.done).length}{uiText(" 项待办未完成，")}{late.length}{uiText(" 项生产已过交期。")}</p>{devs.map(d=><p key={d.id}><Button variant="quiet" onClick={()=>go('development/detail',d.id,{versionId:d.currentVersionId||undefined})}>{d.code} · {d.name} · {d.state}</Button></p>)}</div>,sources:[state.settings.workspaceName || '当前公司'],actions:<>{currentAiSource?<Button aria-pressed={aiUseRouteSource} disabled={aiBusy} onClick={()=>setAiUseRouteSource(value=>!value)}>{uiText(aiUseRouteSource?'取消引用：':'引用当前来源：')}{uiText(currentAiSource.label)}</Button>:null}</>};
   };
   const send = async (question:string,retrySources?:string[]) => {
     const content=question.trim();if(!content)return;
@@ -331,10 +332,13 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
       if(result?.mode!=='read_only'||typeof result.text!=='string'||!result.text.trim()||!Number.isSafeInteger(result.revision)||!Array.isArray(result.sources)||result.sources.some((source:any)=>!source||!sourceIds.includes(source.id)||typeof source.label!=='string'||typeof source.entityId!=='string'||!['orders/detail','invoices','risks'].includes(source.view)||source.id!==(source.view==='orders/detail'?'orders':source.view)+':'+source.entityId))throw new Error('助手响应格式无效，请重试');
       if(!available()||aiRun.current!==token)return;
       aiHistory.current=[...aiHistory.current,{role:'user',content},{role:'assistant',content:result.text}];
-      setMsgs(items=>[...items,{role:'assistant',content:<><p style={{whiteSpace:'pre-wrap'}}>{result.text}</p>{result.truncated&&<p className="mist-note">{uiText("回复过长，已截断；可缩小问题范围继续询问。")}</p>}</>,actions:<>{result.sources.map((source:any)=><Button key={source.id} variant="quiet" onClick={()=>go(source.view,source.entityId)}>{uiText(source.label)}</Button>)}<Button onClick={()=>go('assistant')}>{uiText("进入完整助手")}</Button></>}]);
+      setMsgs(items=>[...items,{role:'assistant',content:<><p style={{whiteSpace:'pre-wrap'}}>{result.text}</p>{result.truncated&&<p className="mist-note">{uiText("回复过长，已截断；可缩小问题范围继续询问。")}</p>}</>,actions:<>{result.sources.map((source:any)=><Button key={source.id} variant="quiet" onClick={()=>go(source.view,source.entityId)}>{uiText(source.label)}</Button>)}</>}]);
     }catch(error){if(available()&&aiRun.current===token&&!(error instanceof Error&&error.name==='AbortError'))setMsgs(items=>[...items,errorMessage(error instanceof Error?error.message:'模型服务暂不可用，请重试')]);}
     finally{if(available()&&aiRun.current===token){aiRun.current=null;aiController.current=null;setAiBusy(false);}}
   };
+  const conversation=useAssistantConversation(aiScope);
+  // 抽屉是小竹的快捷形态；进入完整版时把这段对话接到小竹页。
+  const expandAI=()=>{const history=aiHistory.current;if(history.length)conversation.setMessages(old=>[...old,...history]);aiHistory.current=[];setMsgs([]);setAI(false);go('assistant');};
   const openAI = (prompt?: string) => {if(!canAI)return;setAI(true);setPalette(false);if(prompt)void send(prompt);};
   useHotkey('k', () => { if (session.status === 'authenticated') setPalette(value => !value); }, { meta: true });
   useHotkey('j', () => { if (session.status === 'authenticated') openAI(); }, { meta: true });
@@ -425,7 +429,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
       </MistAppShell>
       <ExportConfirmHost scope={JSON.stringify([session.sessionKey, user.id, user.companyId, user.roles, user.roleIds, user.permissions, user.permissionCeiling, user.businessAttributes, user.globalBusinessScope, workspace.workspace?.id, workspace.workspace?.access, teamView.teamId, route])} />
       <CommandPalette open={palette} onClose={() => setPalette(false)} query={query} onQueryChange={setQuery} items={commands} />
-      <AssistantDrawer key={aiScope} open={ai} onClose={() => setAI(false)} messages={[overview(),...msgs,...(aiBusy?[{role:'typing'} as ChatMessage]:[])]} onSend={question=>void send(question)} sub={uiText(aiBusy?'正在生成':undefined)} suggestions={aiBusy?[]:['根据当前事实建议下一步','哪些信息还需要核实']} />
+      <AssistantDrawer key={aiScope} open={ai} onClose={() => setAI(false)} onExpand={aiBusy?undefined:expandAI} messages={[overview(),...msgs,...(aiBusy?[{role:'typing'} as ChatMessage]:[])]} onSend={question=>void send(question)} sub={uiText(aiBusy?'正在生成':undefined)} suggestions={aiBusy?[]:['根据当前事实建议下一步','哪些信息还需要核实']} />
       <NotificationCenter open={notifications} onClose={()=>setNotifications(false)} items={visibleNotifications} digest={dailyDigest} digestEnabled={!!state?.settings.notifications.digest}
         busy={workspace.saving||workspace.agentTaskNotices?.reading}
         error={workspace.agentTaskNotices?.error&&<Banner tone="bad" title={uiText(workspace.agentTaskNotices.error)} actions={<Button onClick={()=>void workspace.agentTaskNotices?.refresh()}>{uiText('重新加载')}</Button>}/>}

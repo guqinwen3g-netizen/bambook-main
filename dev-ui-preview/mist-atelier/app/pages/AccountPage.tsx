@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot,History, Link2, LogOut, Palette, Shield, User } from 'lucide-react';
+import { History, Link2, LogOut, Palette, Shield, User } from 'lucide-react';
 import { Button, Card, FormSection, KeyValue, MistPage, PageHeader, SettingRow, VerticalSteps, useToast } from '../../../../components/mist';
 import { uiText } from '../../../../services/interfaceLanguage';
 import { useMistSession } from '../runtime/auth';
@@ -12,12 +12,14 @@ import { DeviceAppearance } from './DeviceAppearance';
 import { ManualLink } from './ManualLink';
 import { AgentAuditHistory } from './AgentAuditHistory';
 import {AgentConnections} from './AgentConnections';
-import {LongAgentWorkspace} from './AgentTasks';
+import {AgentIdentities} from './AgentIdentities';
 
 export function AccountPage() {
   const session = useMistSession(), { state,workspace } = useMistWorkspace(), organization = useOrganizationContext(), nav = useNav(), toast = useToast();
   const requested = nav?.route.section;
-  const section = requested === 'appearance' || requested === 'security' || requested==='activity'||requested==='connections'||requested==='agents' ? requested : 'profile';
+  // 旧链接：长期 Agent 的任务已移入小竹页。
+  React.useEffect(()=>{if(requested==='agents')nav?.go('assistant',nav.route.id,{section:'tasks'});},[requested]);
+  const section = requested === 'appearance' || requested === 'security' || requested==='activity'||requested==='connections' ? requested : 'profile';
   const user = session.user;
   if (!user) return null;
   return <MistPage width="narrow">
@@ -27,7 +29,6 @@ export function AccountPage() {
         { id: 'profile', label: '个人资料', icon: User }, { id: 'appearance', label: '外观与语言', icon: Palette }, { id: 'security', label: '安全', icon: Shield },
         ...(workspace?.id?[{id:'activity',label:'Agent 操作记录',icon:History}]:[]),
         ...(workspace?.id?[{id:'connections',label:'Agent 连接',icon:Link2}]:[]),
-        ...(workspace?.id?[{id:'agents',label:'长期Agent',icon:Bot}]:[]),
       ]} />
       <Card>
         {section === 'profile' && <FormSection title={uiText('个人资料')}>
@@ -45,8 +46,7 @@ export function AccountPage() {
         </FormSection>}
         {section === 'appearance' && <FormSection title={uiText('外观与语言')}><DeviceAppearance /></FormSection>}
         {section==='activity'&&<FormSection title={uiText('Agent 操作记录')}><AgentAuditHistory/></FormSection>}
-        {section==='connections'&&<FormSection title={uiText('Agent 连接')}><AgentConnections/></FormSection>}
-        {section==='agents'&&<FormSection title={uiText('长期Agent')}><LongAgentWorkspace/></FormSection>}
+        {section==='connections'&&<FormSection title={uiText('Agent 连接')}><AgentConnections/><AgentIdentities/></FormSection>}
         {section === 'security' && <FormSection title={uiText('安全')}>
           {!session.localMode && <><ChangePasswordRow /><LogoutAllRow />
             <SettingRow title={uiText('当前设备')} control={<Button icon={LogOut} loading={session.signingOut} onClick={() => void session.logout().catch(failure => toast(failure instanceof Error ? failure.message : '退出失败', 'bad'))}>{uiText('退出登录')}</Button>} />

@@ -67,10 +67,8 @@ export default defineConfig((async (env) => {
             build: {
                 outDir: 'out/main',
                 lib: {
-                    // assistant-host 是工作助手的 utilityProcess 入口，与主进程同目录输出。
                     entry: {
                         main: path.resolve(__dirname, 'electron/main.ts'),
-                        'assistant-host': path.resolve(__dirname, 'electron/assistant/host.ts'),
                     },
                     formats: ['cjs'],
                 },
