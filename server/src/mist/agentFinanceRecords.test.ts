@@ -10,6 +10,7 @@ const actorWith=(role:string):any=>({userId:'clerk',displayName:'Clerk',roleIds:
 beforeEach(async()=>{
  vi.spyOn(Date,'now').mockReturnValue(Date.parse(now));directory=await mkdtemp(path.join(tmpdir(),'mist-agent-finance-'));db=new MemoryMistDatabase();auth=testAuthority();auth.users.set('clerk',{active:true,permissions:['ai:chat','invoices:read','vouchers:read','vouchers:write','customs:read','procurement:read','products:read','reports:read','tax:read']});db.companyMembers.push({companyId:company,userId:'clerk',status:'active'});
  const state=createMistState({id:randomUUID,now,actorId:'clerk',actorName:'Clerk'},'empty');Object.assign(state as any,{receipts:[{id:'r1',code:'RC-1',amount:1200,currency:'USD'}],allocations:[{id:'a1',receiptId:'r1',amount:1200}],
+  periodCloses:[{month:'2026-09',closedAt:'2026-10-02T00:00:00Z',closedBy:'clerk',note:'ok'},{month:'2026-10',closedAt:'2026-11-02T00:00:00Z',closedBy:'clerk',note:'ok',reopened:{at:'2026-11-03T00:00:00Z',actor:'clerk',reason:'fix'}}],
   bankAccounts:[{id:'b1',code:'BA-1',name:'USD main',bankName:'Test Bank',accountNo:'6222 0000 1234 5678',currency:'USD',openingBalance:0}],fxRecords:[{id:'fx1',kind:'lock',currency:'USD',amount:500}],
   letterOfCredits:[{id:'lc1',code:'LC-1',lcNo:'LC778'}],rfqs:[{id:'rfq1',code:'RFQ-1'}],sampleRequests:[{id:'sr1',code:'SR-1'}],exportRebate:{rates:[{id:'rt1',hsCode:'6203',rate:'0.13'}],claims:[{id:'cl1',code:'RB-1',customsId:'c1',lines:[],taxable:50000,expected:6500,receipts:[],approved:{amount:6400,date:'2026-11-01',ref:'AP1'}}]},reportSchedules:[{id:'rs1',name:'Weekly',ownerId:'clerk'},{id:'rs2',name:'Other',ownerId:'someone'}]});
  workspaceId=randomUUID();db.workspaces.set(workspaceId,{id:workspaceId,ownerId:'other',companyId:company,slug:'company@'+company,name:'Company',revision:4,state,createdAt:new Date(),updatedAt:new Date()});repo=new MistRepository(db,{createMistState,applyMistCommand,mistCommandPermission},new MistPrivateFiles(directory),auth.authorize);
@@ -38,4 +39,12 @@ it('reads rebate rates and claims, masking tax-base amounts unless the account a
  expect(agentGet(f.state,f.actor,'rebate_claim','cl1').data).toMatchObject({taxable:50000,expected:6500});
  auth.users.get('clerk')!.permissions=['ai:chat'];f=await view(SYSTEM_ROLE_IDS.SALES);
  expect(agentCatalog(f.actor).map(t=>t.type)).not.toContain('rebate_claim');expect(()=>agentGet(f.state,f.actor,'rebate_claim','cl1')).toThrow();
+});
+it('reads month-end closes by month with closed or reopened status, and hides them without invoice read',async()=>{
+ let f=await view(SYSTEM_ROLE_IDS.SUPER_ADMIN);
+ expect(agentCatalog(f.actor).map(t=>t.type)).toContain('period_close');
+ expect(agentGet(f.state,f.actor,'period_close','2026-09').data).toMatchObject({month:'2026-09',status:'closed'});
+ expect(agentGet(f.state,f.actor,'period_close','2026-10').data).toMatchObject({status:'reopened',reopened:{reason:'fix'}});
+ auth.users.get('clerk')!.permissions=['ai:chat'];f=await view(SYSTEM_ROLE_IDS.SALES);
+ expect(agentCatalog(f.actor).map(t=>t.type)).not.toContain('period_close');expect(()=>agentGet(f.state,f.actor,'period_close','2026-09')).toThrow();
 });

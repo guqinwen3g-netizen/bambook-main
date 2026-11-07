@@ -49,6 +49,8 @@ export const AGENT_OBJECT_TYPES: ObjectType[] = [
   { type: 'receipt_allocation', label: '收款核销', scope: 'invoices:read', path: ['allocations'], view: 'receipts', linkId: r => r.receiptId },
   { type: 'finance_reversal', label: '财务冲正', scope: 'invoices:read', path: ['financeReversals'], view: 'receipts' },
   { type: 'customer_statement', label: '客户对账单', scope: 'invoices:read', path: ['customerStatements'], view: 'invoices' },
+  // 月结：记录以月份为键（无 id），读取时用月份作 id；状态（已关/已重开）、关账人与重开原因都是公司内可见的账期事实。
+  { type: 'period_close', label: '月结', scope: 'invoices:read', path: ['periodCloses'], view: 'receipts', flatten: state => ((state as any).periodCloses ?? []).filter((c: any) => c && typeof c.month === 'string').map((c: any) => ({ ...c, id: c.month, code: c.month, status: c.reopened ? 'reopened' : 'closed' })) },
   { type: 'bank_account', label: '公司银行账户', scope: 'vouchers:write', path: ['bankAccounts'], view: 'receipts' },
   { type: 'fx_record', label: '锁汇结汇', scope: 'vouchers:read', path: ['fxRecords'], view: 'receipts' },
   { type: 'letter_of_credit', label: '信用证', scope: 'customs:read', path: ['letterOfCredits'], view: 'shipments' },
