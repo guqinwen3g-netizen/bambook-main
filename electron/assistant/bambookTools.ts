@@ -10,7 +10,7 @@ export type DelegationReason = 'missing' | 'expired' | 'rejected';
 
 export const BAMBOOK_OBJECT_TYPES = [
   'email', 'email_draft', 'email_send', 'customer', 'contact', 'order', 'order_line', 'development', 'dev_version', 'product', 'sample', 'quotation', 'supplier', 'purchase', 'receipt', 'payable_settlement', 'payable_bill', 'payment_plan', 'payment_request', 'supplier_payment', 'payment_allocation', 'prepayment_move', 'production', 'shipment', 'invoice', 'risk', 'claim',
-  'shipment_document', 'quotation_document', 'order_document', 'receipt_record', 'receipt_allocation', 'finance_reversal', 'customer_statement', 'bank_account', 'fx_record', 'letter_of_credit', 'rfq', 'sample_request', 'report_schedule', 'rebate_rate', 'rebate_claim',
+  'shipment_document', 'quotation_document', 'order_document', 'receipt_record', 'receipt_allocation', 'finance_reversal', 'customer_statement', 'bank_account', 'fx_record', 'letter_of_credit', 'rfq', 'sample_request', 'report_schedule', 'rebate_rate', 'rebate_claim', 'period_close',
 ] as const;
 
 const typeSchema = { type: 'string', enum: [...BAMBOOK_OBJECT_TYPES], description: '业务对象类型；以服务端实际允许的可读类型为准。' };

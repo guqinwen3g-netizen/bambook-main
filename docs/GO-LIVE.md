@@ -743,6 +743,8 @@
 
 ## 7. 进度记录
 
+- **2026-11-07 月结对象开放给 Agent（分支 `codex/agent-period-close`，未合入）**：新增 `period_close` 只读对象（按月份取，状态 closed/reopened，含关账人与重开原因，读权限 `invoices:read`），桌面助手同步；Agent 可读对象共 43 类。定向测试与服务端类型检查通过；未跑完整验证、未部署。
+
 - **2026-11-07 桌面助手读取与任务限额已合入并部署**：main `8326af2c`（merge commit）合入前 `npm test` 2172、`test:mist` 2526、`test:access` 693 全通过（*.pg 因无库跳过），经 `npm run dev:deploy` 发布，公网版本与 API 健康读回一致；未真机验证桌面助手，服务器未设置任何限额覆盖。
 
 - **2026-11-07 部分巡检（只读）**：公网版本与 API 健康一致；`bambook-dev`、`bambook-dev-mist` 与 `bambook-dev-monitor.timer` 均为 active；根分区 38%（15G/39G）；两套服务近 24 小时错误级日志 0 条。普通运维账号无权读取 `/var/lib/bambook-dev-monitor/state.json` 与 `/var/backups/bambook-dev/`，故监控未恢复故障、最近备份时间与校验值、`_prisma_migrations` 三项本轮未能核对，需有权限的方式读取，不据此宣称巡检全部通过。
