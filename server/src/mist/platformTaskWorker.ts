@@ -38,6 +38,8 @@ export async function invokePlatformTaskTool(repository:MistRepository,actor:Age
     return{truncated:true,status:data.status,receipt:data.receipt?{requestId:data.receipt.requestId,result:{id:data.receipt.result?.id}}:undefined,message:'操作回执较大，请按原回执核对完整结果，不要重新执行。'};
   }
   if(!['bambook_execute','bambook_task'].includes(step.plan.name))await repository.recordAgentTaskRead(actor,lease.workspaceId,data);
+  // 未列全的结果不算回源读取；不说明的话模型会反复查询直到耗尽步数。
+  if(context.requiresRead&&(data as any)?.truncated===true&&step.plan.name!=='bambook_execute')return{...(data as object),readHint:'结果未列全，不算回源读取；用bambook_get读取要核对的具体对象。'};
   return data;
 }
 
