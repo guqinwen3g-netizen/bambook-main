@@ -36,6 +36,8 @@
     "electron:dev": "env -u ELECTRON_RUN_AS_NODE electron-vite dev",
     "electron:agent-local": "bash scripts/agent-local-stack.sh electron",
     "electron:build": "electron-vite build",
+    "electron:hmr": "bash scripts/electron-hmr.sh",
+    "electron:hmr:shared": "bash scripts/electron-hmr.sh --shared",
     "electron:dist": "electron-vite build && electron-builder --mac --publish never",
     "electron:preview": "env -u ELECTRON_RUN_AS_NODE electron-vite preview",
     "electron:start": "env -u ELECTRON_RUN_AS_NODE electron .",
