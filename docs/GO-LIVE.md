@@ -743,6 +743,8 @@
 
 ## 7. 进度记录
 
+- **2026-11-07 部分巡检（只读）**：公网版本与 API 健康一致；`bambook-dev`、`bambook-dev-mist` 与 `bambook-dev-monitor.timer` 均为 active；根分区 38%（15G/39G）；两套服务近 24 小时错误级日志 0 条。普通运维账号无权读取 `/var/lib/bambook-dev-monitor/state.json` 与 `/var/backups/bambook-dev/`，故监控未恢复故障、最近备份时间与校验值、`_prisma_migrations` 三项本轮未能核对，需有权限的方式读取，不据此宣称巡检全部通过。
+
 - **2026-11-07 Agent 任务限额可配置（分支 `codex/desktop-file-text`）**：单任务步数（默认 40，5–200）、运行时长（默认 30 分钟，5–240）、每人活跃任务数（默认 10，1–50）可用环境变量 `MIST_AGENT_TASK_STEP_LIMIT` / `MIST_AGENT_TASK_RUNTIME_MINUTES` / `MIST_AGENT_TASK_ACTIVE_PER_USER` 调整，非法或越界值回落默认值，不会因写错而放宽；默认行为不变，服务器未设置任何覆盖。任务相关 9 文件 87 项与服务端类型通过，未部署。
 
 - **2026-11-07 桌面工作助手补齐读取（分支 `codex/desktop-file-text`，已推送未合入、未部署）**：桌面助手新增只读 `bambook_file_text`（服务端新增 `GET /workspaces/:id/agent/files/:fileId/text?maxChars=`，复用下载授权，未知参数、越界长度返回 400，无权限 404）；桌面读取类型表原先只有 27 类，补上本轮新增的 15 类（单据文件、财务台账、退税等），并新增守卫测试使其与服务端注册表逐项一致。桌面助手 47 项、Agent/路由相关 27 文件 208 项、双端类型与 mist:check 通过；未真机验证。
