@@ -396,7 +396,7 @@ Status as of 2026-11-07. The 2026-11 implementation is the Mist MCP surface plus
 Implemented:
 
 - Tool surface (`agentMcp.ts`): `bambook_workspaces`, `bambook_query`, `bambook_get`, `bambook_related`, `bambook_commands`, `bambook_audit`, `bambook_file_text`, `bambook_mail_receiving`, `bambook_task`, `bambook_preview`, `bambook_execute`. A task connection (`taskMcpTools`) omits `bambook_workspaces` and binds workspace and task to the lease.
-- Reads (`agentRead.ts`): 40 object types, each re-checked against the caller's read scope after the repository's per-account projection. Generated quotation, order and shipment documents are metadata only (no snapshots, no bytes). Bank account numbers are masked to the last four digits. Attachment text comes only through `bambook_file_text` (`agentFileText.ts`), which reuses the download authorization (`canReadFile`), returns plain text or the first 20 PDF pages, and reports scans, images and Office files as unsupported.
+- Reads (`agentRead.ts`): 42 object types, each re-checked against the caller's read scope after the repository's per-account projection. Generated quotation, order and shipment documents are metadata only (no snapshots, no bytes). Bank account numbers are masked to the last four digits. Attachment text comes only through `bambook_file_text` (`agentFileText.ts`), which reuses the download authorization (`canReadFile`), returns plain text or the first 20 PDF pages, and reports scans, images and Office files as unsupported.
 - Writes: every command goes through `bambook_preview` (full validation, rolled back) before `bambook_execute`. Medium and high risk commands become proposals (`agent.proposal.*`) that the owner confirms in the app; confirming needs `ai:write:low|medium|high` plus the original command's own scope, and high risk adds password re-authentication. Writes are audited with the request id (`agentAudit.ts`, `bambook_audit`).
 - Persistent tasks (`agentTasks.ts`, `platformTaskWorker.ts`): states queued, running, waiting_time, waiting_condition, waiting_human, paused and the terminal states; 90 s lease, 40 steps, 30 minute runtime and 10 active tasks per user, worker tick 3 s with concurrency 2. An expired lease makes the task claimable again; there is no separate boot-time sweep.
 - Mail receiving status is read through `bambook_mail_receiving`; the Agent cannot grant itself background mailbox access.
@@ -404,7 +404,7 @@ Implemented:
 Still incomplete:
 
 - The desktop work assistant (`electron/assistant/bambookTools.ts`) does not have `bambook_file_text`.
-- Not yet readable by the Agent: export rebate, period close and other state outside the registered object types.
+- Not yet readable by the Agent: period close (no per-record id or read section) and other state outside the registered object types.
 - No attachment upload by the Agent (`files.add` is refused by design).
 - Limits (steps, runtime, concurrency, per-user tasks) are constants, not configuration.
 - Long history: the desktop assistant keeps only the latest 16 turns.
