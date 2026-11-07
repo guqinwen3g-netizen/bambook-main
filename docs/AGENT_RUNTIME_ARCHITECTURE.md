@@ -391,38 +391,26 @@ The Agent must not silently send external communication.
 
 ## 9. Current Implementation Status
 
-Current status:
+Status as of 2026-11-07. The 2026-11 implementation is the Mist MCP surface plus persistent platform tasks; the earlier plan of a central `AgentRuntime` service (previous section 10) was not built and is superseded by it. Source anchors are under `server/src/mist/`.
 
-- Agent identity, roles, tool scopes, and database schema exist.
-- `AgentSession` and `AgentMessage` exist.
-- `AgentTool`, `AgentToolPermission`, and `AgentToolRun` exist.
-- Default tool directory exists.
-- AI chat uses backend Agent Runtime session preparation.
-- Production API exposes data-source truth through `/api/agent/status`.
-- Agent-facing MCP manifest is converging on `products.query/get/expand`, `orders.query/get/expand`, `relations.query/get/expand`, `knowledge.search`, and `entities.search/hydrate`.
-- Internal compatibility handlers such as `products.count`, `dictionary.query`, and `records.query` still exist for older planner paths and regression safety, but they are no longer the preferred Agent-facing tool contract.
-- Tool calls return `ToolResult` context and record `AgentToolRun` plus `AuditLog` where a real `UserAccount` is resolved.
+Implemented:
+
+- Tool surface (`agentMcp.ts`): `bambook_workspaces`, `bambook_query`, `bambook_get`, `bambook_related`, `bambook_commands`, `bambook_audit`, `bambook_file_text`, `bambook_mail_receiving`, `bambook_task`, `bambook_preview`, `bambook_execute`. A task connection (`taskMcpTools`) omits `bambook_workspaces` and binds workspace and task to the lease.
+- Reads (`agentRead.ts`): 40 object types, each re-checked against the caller's read scope after the repository's per-account projection. Generated quotation, order and shipment documents are metadata only (no snapshots, no bytes). Bank account numbers are masked to the last four digits. Attachment text comes only through `bambook_file_text` (`agentFileText.ts`), which reuses the download authorization (`canReadFile`), returns plain text or the first 20 PDF pages, and reports scans, images and Office files as unsupported.
+- Writes: every command goes through `bambook_preview` (full validation, rolled back) before `bambook_execute`. Medium and high risk commands become proposals (`agent.proposal.*`) that the owner confirms in the app; confirming needs `ai:write:low|medium|high` plus the original command's own scope, and high risk adds password re-authentication. Writes are audited with the request id (`agentAudit.ts`, `bambook_audit`).
+- Persistent tasks (`agentTasks.ts`, `platformTaskWorker.ts`): states queued, running, waiting_time, waiting_condition, waiting_human, paused and the terminal states; 90 s lease, 40 steps, 30 minute runtime and 10 active tasks per user, worker tick 3 s with concurrency 2. An expired lease makes the task claimable again; there is no separate boot-time sweep.
+- Mail receiving status is read through `bambook_mail_receiving`; the Agent cannot grant itself background mailbox access.
 
 Still incomplete:
 
-- planner is still rule-first and not yet a true long-task task graph
-- write tools are not yet organized as `draft -> approval -> execute`
-- `AgentToolPermission` is not yet the primary live permission source for every tool call
-- approval flow is not yet connected to live tool execution
-- workspace event stream is not yet the main Agent work surface
-- planner still needs to evolve from rule-first follow-ups into a durable task graph with resumable state
+- The desktop work assistant (`electron/assistant/bambookTools.ts`) does not have `bambook_file_text`.
+- Not yet readable by the Agent: export rebate, period close and other state outside the registered object types.
+- No attachment upload by the Agent (`files.add` is refused by design).
+- Limits (steps, runtime, concurrency, per-user tasks) are constants, not configuration.
+- Long history: the desktop assistant keeps only the latest 16 turns.
+- Scanned or image-only attachments are not read (no OCR).
+- Whether `assistant.ts` (the read-only workspace Q&A path) reads the same object set as the Agent tools has not been verified.
 
-## 10. Required Next Architecture Step
+## 10. Historical Note: Central AgentRuntime Proposal
 
-The next implementation step is to introduce a central `AgentRuntime` service:
-
-- owns session load/save
-- owns planning state
-- owns tool registry
-- owns tool execution
-- owns approvals
-- owns audit writes
-- emits workspace events
-- calls the model only as one component of the run
-
-After that, AI chat becomes one client of Agent Runtime, not the runtime itself.
+The earlier proposal introduced one `AgentRuntime` service owning sessions, planning, tools, approvals, audit and workspace events, with chat as a client of it. The implemented design distributes those duties instead: tool registry and permissions in `agentMcp.ts` and the repository, approvals in `mistAgentProposals.ts`, task state in `agentTasks.ts`, and audit in `agentAudit.ts`. Treat this section as history, not as a work item.
