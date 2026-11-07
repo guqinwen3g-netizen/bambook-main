@@ -413,3 +413,11 @@ Still incomplete:
 ## 10. Historical Note: Central AgentRuntime Proposal
 
 The earlier proposal introduced one `AgentRuntime` service owning sessions, planning, tools, approvals, audit and workspace events, with chat as a client of it. The implemented design distributes those duties instead: tool registry and permissions in `agentMcp.ts` and the repository, approvals in `mistAgentProposals.ts`, task state in `agentTasks.ts`, and audit in `agentAudit.ts`. Treat this section as history, not as a work item.
+
+## 小竹 cowork 与自动模式（2026-11-07）
+
+- 小竹页的每条请求是一项 `personal-agent/tasks` 平台任务，进度、追问和待确认事项回到同一条对话（`runtime/xiaozhuCowork.ts`）。任务通道不可用时退回只读问答。
+- 自动规则记录在回执表（前缀 `mist-revision:agent-automation:`），不进业务状态，不经业务命令和 MCP 改动。`MistAutomationWorker` 每 30 秒扫描，随平台任务执行器一起受 `MIST_PLATFORM_AGENT_ENABLED` 控制。
+- 规则保存时记下所有者授权（账号、公司、时间、凭据版本），运行时重新校验；失效则停用规则并写明原因。
+- 带 `automationId` 的任务遇到提议即结束，提议独立存在，确认时不再要求任务处于等待状态。
+- 验收：`server/src/mist/agentAcceptance.test.ts`；页面环境 `cd server && npm run agent:acceptance`（前端 3002）；真实模型 `npx tsx scripts/agent-real-model.ts`。

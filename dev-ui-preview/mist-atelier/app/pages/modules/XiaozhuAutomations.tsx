@@ -20,12 +20,14 @@ const label = (t: Trigger) => TRIGGERS.find(x => x.value === t)!.label;
 export function XiaozhuAutomations({ open, onClose, workspaceId }: { open: boolean; onClose: () => void; workspaceId?: string }) {
   const { go } = useNav(), toast = useToast(), base = workspaceId ? '/api/mist/workspaces/' + encodeURIComponent(workspaceId) + '/agent-automations' : '';
   const [rules, setRules] = React.useState<Rule[]>([]), [loading, setLoading] = React.useState(false), [error, setError] = React.useState('');
+  const rulesRef = React.useRef(rules); rulesRef.current = rules;
   const [draft, setDraft] = React.useState<{ trigger: Trigger; name: string; instructions: string; time: string } | null>(null), [busy, setBusy] = React.useState(false);
   const load = React.useCallback(async () => {
-    if (!base) return; setLoading(true);
+    if (!base) return; setLoading(l => l || !rulesRef.current.length);
     try { setRules(((await mistApiRequest(base)) as { items: Rule[] }).items); setError(''); } catch (e) { setError(e instanceof Error ? e.message : '读取失败'); } finally { setLoading(false); }
   }, [base]);
   React.useEffect(() => { if (open) void load(); else setDraft(null); }, [open, load]);
+  React.useEffect(() => { if (!open) return; const timer = setInterval(() => { if (document.visibilityState !== 'hidden') void load(); }, 10_000); return () => clearInterval(timer); }, [open, load]);
   const start = () => { const t = TRIGGERS[0]; setDraft({ trigger: t.value, name: t.name, instructions: t.instructions, time: '09:00' }); };
   const pick = (value: Trigger) => { const t = TRIGGERS.find(x => x.value === value)!; setDraft(d => d && { ...d, trigger: value, name: t.name, instructions: t.instructions }); };
   const act = async (run: () => Promise<unknown>) => { setBusy(true); setError(''); try { await run(); await load(); return true; } catch (e) { setError(e instanceof Error ? e.message : '操作未完成'); return false; } finally { setBusy(false); } };

@@ -11,6 +11,7 @@ import { createMistLocalRuntime } from './local';
 import { createMistServer } from './server';
 import { AGENT_DELEGATION_HEADER } from './agentDelegation';
 import { AGENT_OBJECT_TYPES } from './agentRead';
+import { quotationFeedbackTarget } from '../shared/mistQuotationFeedback';
 import type { MistPlatformTaskWorker } from './platformTaskWorker';
 import type { LlmCompletionInput } from '../ai/llmProviders';
 
@@ -29,7 +30,7 @@ async function connect(profileId: string | null, mode: 'read' | 'operate' = 'ope
   const client = new Client({ name: 'acceptance', version: '1' }, { versionNegotiation: { mode: 'legacy' } }); clients.push(client);
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/api/mist/mcp`), { requestInit: { headers: { [AGENT_DELEGATION_HEADER]: issued.token } } }));
   const call = async (name: string, args: Record<string, unknown> = {}) => { const r: any = await client.callTool({ name, arguments: args }); const text = r.content?.[0]?.text ?? ''; let data: any = text; try { data = JSON.parse(text); } catch { /* plain message */ } return { error: !!r.isError, data, text }; };
-  return { app, human, workspace, client, call };
+  return { app, human, workspace, client, call, local };
 }
 const OUT = process.env.AGENT_ACCEPTANCE_OUT;
 const report = async (name: string, value: unknown) => { if (OUT) await fs.appendFile(OUT, `## ${name}\n${typeof value === 'string' ? value : JSON.stringify(value, null, 1)}\n`); };
@@ -223,3 +224,54 @@ it('stops when switched off, keeps rules private, and lists order due dates', as
   await c.human.post('/api/mist/session').send({ profileId: 'local-operator' }).expect(200);
   await c.human.delete(c.base + '/agent-automations/' + on.id).expect(204); expect(await rules(c)).toHaveLength(1);
 });
+
+it('reads every one of the object types with records present', async () => {
+  const f = await connect(null), id = f.workspace.id, rows: string[] = [], db = (f.app.locals as any).mistRepository;
+  void db; const local = (f as any).local; const row = await local.database.mistWorkspace.findUnique({ where: { id } }), state: any = structuredClone(row.state);
+  const set = (p: string[], value: unknown) => { let at = state; p.slice(0, -1).forEach(k => { at[k] ??= {}; at = at[k]; }); const last = p.at(-1)!; at[last] = [...(Array.isArray(at[last]) ? at[last] : []), value]; };
+  const at = '2026-11-01T00:00:00Z';
+  for (const t of AGENT_OBJECT_TYPES) { const list = t.path.reduce((v: any, k) => v?.[k], state); if (!t.flatten && !(list?.length) && !['email_draft', 'email_send'].includes(t.type)) set(t.path, { id: 'x-' + t.type, code: 'X-' + t.type, name: t.label, ownerId: 'local-operator', ...(t.type === 'bank_account' ? { accountNo: '6222000012345678' } : {}), createdAt: at, date: '2026-11-01', state: 'open', lines: [], receipts: [], items: [], allocations: [], events: [], files: [], fileIds: [], amount: 100, currency: 'USD' }); }
+  state.periodCloses = [{ month: '2026-09', closedAt: at, closedBy: 'x', note: 'ok' }];
+  state.market.quotations[0].documents = [{ id: 'qd', quotationId: state.market.quotations[0].id, revision: 1, draft: false, fileId: 'f', fileName: 'q.pdf', sha256: 'h', bytes: 1, templateVersion: 1, snapshotFingerprint: 'fp', snapshot: { secret: 'quote-secret' }, createdAt: at }];
+  state.orders[0].documents = [{ id: 'od', orderKind: 'PI', version: 1, kind: 'PI', number: 'PI-1', fileId: 'f', fileName: 'o.pdf', sha256: 'h', bytes: 1, templateVersion: 1, snapshotFingerprint: 'fp', snapshot: { secret: 'order-secret' }, createdAt: at }];
+  await local.database.mistWorkspace.update({ where: { id }, data: { state } });
+  for (const t of AGENT_OBJECT_TYPES.filter(x => !['email_draft', 'email_send'].includes(x.type))) {
+    const q = await f.call('bambook_query', { workspaceId: id, type: t.type, limit: 5 }), first = q.data?.results?.[0];
+    if (q.error || !first) { rows.push(`${t.type} query ${q.text.slice(0, 90)}`); continue; }
+    const g = await f.call('bambook_get', { workspaceId: id, type: t.type, id: first.id }), r = await f.call('bambook_related', { workspaceId: id, type: t.type, id: first.id });
+    if (g.error || r.error) rows.push(`${t.type} ${g.error ? g.text : r.text}`.slice(0, 120));
+    if (/quote-secret|order-secret|6222000012345678/.test(g.text)) rows.push(`${t.type} leaked protected content`);
+  }
+  await report('all objects', rows.join('\n') || 'all ok'); expect(rows).toEqual([]);
+}, 120000);
+
+it('runs every direct command and a change from each finance area with real content', async () => {
+  const f = await connect(null), id = f.workspace.id, s: any = f.workspace.state, mail = s.email.messages[0], customer = s.customers[0], task = s.tasks?.[0], quote = s.market.quotations[0], notice = s.notifications?.[0];
+  const link = { kind: 'customer', id: customer.id };
+  const direct: Array<[string, any]> = [
+    ['calendar.save', { title: '验收日程', date: '2026-11-20', time: '10:00', note: '' }],
+    ['crm.followUp.save', { customerId: customer.id, method: 'call', content: '验收跟进', at: new Date(Date.now() - 60000).toISOString(), nextDate: '', link: null }],
+    ['email.flag', { id: mail.id, flag: 'starred', value: true }],
+    ['email.followUp', { id: mail.id, due: '2026-11-20', note: '跟进' }],
+    ['email.link', { id: mail.id, link }],
+    ['email.unlink', { id: mail.id, link }],
+    ['platform.assistant.saveDraft', { title: '验收草稿', content: '内容', orderId: '' }],
+    ['notification.readAll', {}],
+    ['email.draft.save', { input: { accountId: s.email.accounts?.[0]?.id ?? '', from: s.email.accounts?.[0]?.address ?? 'agent@example.test', to: 'buyer@example.test', cc: '', bcc: '', subject: '验收草稿', body: '内容', template: '', links: [], fileIds: [] } }],
+    ['market.quotation.feedback.add', { quotationId: quote.id, expectedTarget: quotationFeedbackTarget(quote), input: { kind: 'considering', receivedOn: '2026-10-14', channel: '会议纪要', contact: '测试', evidence: '软件测试', reasonOrigin: 'unknown', reasons: ['unknown'], reasonDetail: '未说明', nextAction: '继续确认', followUpOn: '', requestedTerms: '', lines: [], fileIds: [], correctionOfId: '', correctionReason: '首次录入' } }],
+    ...(notice ? [['notification.read', { id: notice.id }] as [string, any]] : []),
+    ...(task ? [['task.complete', { id: task.id, done: true }] as [string, any]] : []),
+  ];
+  const failed: string[] = [];
+  for (const [type, payload] of direct) { const r = await f.call('bambook_execute', { workspaceId: id, requestId: randomUUID(), command: { type, payload } }); if (r.error) failed.push(`${type}: ${r.text.slice(0, 110)}`); }
+  const changes: Array<[string, any]> = [
+    ['finance.payment.save', { date: '2026-11-05', payee: '验收供应商', amount: 100, currency: 'USD', ref: 'ACC-1' }],
+    ['finance.period.close', { month: '2020-01', note: '验收' }],
+    ['report.schedule.save', { kind: 'aging', every: 'week', day: 1, to: 'finance@example.test' }],
+    ['email.move', { id: mail.id, folder: 'archive' }],
+  ];
+  for (const [type, payload] of changes) { const r = await f.call('bambook_preview', { workspaceId: id, command: { type, payload } }); if (r.error) failed.push(`preview ${type}: ${r.text.slice(0, 110)}`); }
+  const draft = await f.call('bambook_query', { workspaceId: id, type: 'email_draft', limit: 5 }); if (draft.error || !draft.data.results.length) failed.push('email_draft read: ' + draft.text.slice(0, 100)); else if ((await f.call('bambook_get', { workspaceId: id, type: 'email_draft', id: draft.data.results[0].id })).error) failed.push('email_draft get');
+  await report('real payloads', { direct: direct.map(d => d[0]), failed, audit: (await f.call('bambook_audit', { workspaceId: id })).data?.items?.length });
+  expect(failed).toEqual([]);
+}, 60000);
