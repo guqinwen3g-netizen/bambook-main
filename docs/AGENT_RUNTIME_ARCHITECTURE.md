@@ -391,7 +391,7 @@ The Agent must not silently send external communication.
 
 ## 9. Current Implementation Status
 
-Status as of 2026-11-07. The 2026-11 implementation is the Mist MCP surface plus persistent platform tasks; the earlier plan of a central `AgentRuntime` service (previous section 10) was not built and is superseded by it. Source anchors are under `server/src/mist/`.
+Status as of 2026-11-07. The 2026-11 implementation is the Mist MCP surface plus persistent platform tasks; the earlier plan of a central `AgentRuntime` service (previous section 10) was not built and is superseded by it. Source anchors are under `server/src/mist/`. The desktop work assistant (`electron/assistant/bambookTools.ts`) mirrors the read tools through `GET /workspaces/:id/agent/...` routes; its object-type list is pinned to the server registry by `agentDesktopParity.test.ts`.
 
 Implemented:
 
@@ -403,7 +403,6 @@ Implemented:
 
 Still incomplete:
 
-- The desktop work assistant (`electron/assistant/bambookTools.ts`) does not have `bambook_file_text`.
 - Not yet readable by the Agent: period close (no per-record id or read section) and other state outside the registered object types.
 - No attachment upload by the Agent (`files.add` is refused by design).
 - Limits (steps, runtime, concurrency, per-user tasks) are constants, not configuration.

@@ -1,6 +1,7 @@
+import express from 'express';import request from 'supertest';
 import {afterEach,beforeEach,expect,it} from 'vitest';
 import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import path from 'node:path';
-import {MistRepository,type MistContract} from './repository';import {MistPrivateFiles} from './files';
+import {MistRepository,type MistContract} from './repository';import {createMistRouter} from './route';import {MistPrivateFiles} from './files';
 import {MemoryMistDatabase,testActor,testAuthority,testContract} from './__tests__/support';
 
 // Same isolation as the claim upload tests: one claim to attach evidence to, bytes live in a private temp directory.
@@ -25,4 +26,15 @@ it('does not reveal a file to an account that cannot download it, nor an unknown
  auth.users.set('stranger',{active:true,permissions:['ai:chat']});
  await expect(repo.fileText(testActor('stranger'),workspaceId,fileId)).rejects.toMatchObject({status:404});
  await expect(repo.fileText(testActor(),workspaceId,'missing-file')).rejects.toMatchObject({status:404,code:'FILE_NOT_FOUND'});
+});
+it('serves the excerpt to the desktop assistant route with workspace identity and rejects bad limits and strangers',async()=>{
+ const app=express();app.use(express.json());app.use('/api/mist',createMistRouter({repository:repo,authenticate:(req,res,next)=>{const id=req.headers['x-test-user'];if(typeof id!=='string'){res.status(401).end();return;}(req as any).actor=testActor(id);next();}}));
+ const url='/api/mist/workspaces/'+workspaceId+'/agent/files/'+fileId+'/text';
+ const ok=await request(app).get(url+'?maxChars=300').set('x-test-user','owner');
+ expect(ok.status).toBe(200);expect(ok.body.workspace).toMatchObject({id:workspaceId});expect(Number.isSafeInteger(ok.body.workspace.revision)).toBe(true);expect(ok.body.object).toMatchObject({kind:'text',file:{id:fileId}});expect(ok.headers['cache-control']).toContain('no-store');
+ expect((await request(app).get(url+'?maxChars=5').set('x-test-user','owner')).status).toBe(400);
+ expect((await request(app).get(url+'?maxChars=abc').set('x-test-user','owner')).status).toBe(400);
+ expect((await request(app).get(url+'?other=1').set('x-test-user','owner')).status).toBe(400);
+ auth.users.set('stranger',{active:true,permissions:['ai:chat']});expect((await request(app).get(url).set('x-test-user','stranger')).status).toBe(404);
+ expect((await request(app).get(url)).status).toBe(401);
 });
