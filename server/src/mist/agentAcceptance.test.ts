@@ -158,3 +158,24 @@ it('tells the model a partial list does not count as a re-read after the person 
   await c.human.post(c.base + '/agent-tasks/' + t.id + '/answer').send({ requestId: randomUUID(), version: w.version, questionId: w.questions[0].id, answer: '都看' }).expect(200);
   await c.drain(); expect(seen).toContain('不算回源读取');
 });
+
+it('connects the way the account page does and keeps companies apart', async () => {
+  const f = await connect('demo-sales', 'read'), base = '/api/mist/workspaces/' + f.workspace.id;
+  const created = await f.human.post(base + '/agent-connections').send({ id: randomUUID(), name: 'Claude Code', mode: 'operate' }).expect(201);
+  const token = created.body.delegation?.token ?? created.body.token; expect(typeof token).toBe('string');
+  const server = f.app.listen(0, '127.0.0.1'); servers.push(server); await new Promise<void>(r => server.once('listening', r));
+  const client = new Client({ name: 'claude-code-like', version: '1' }, { versionNegotiation: { mode: 'legacy' } }); clients.push(client);
+  await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${(server.address() as any).port}/api/mist/mcp`), { requestInit: { headers: { [AGENT_DELEGATION_HEADER]: token } } }));
+  const call = async (name: string, args: Record<string, unknown>) => { const r: any = await client.callTool({ name, arguments: args }); return { error: !!r.isError, data: r.structuredContent, text: r.content?.[0]?.text ?? '' }; };
+  const id = f.workspace.id, mine = await call('bambook_query', { workspaceId: id, type: 'order', limit: 20 }); expect(mine.error).toBe(false);
+  const owner = await connect('demo-admin', 'read'), all = await owner.call('bambook_query', { workspaceId: id, type: 'order', limit: 20 });
+  await report('row scope', { sales: mine.data.total, admin: all.data?.total, stateOrders: owner.workspace.state.orders.length });
+  // 本机演示公司没有行级范围（只有公司账号的工作区才有），这里只核对与本人页面一致；行级裁剪见 dataScopeMatrix.test.ts。
+  expect(mine.data.total).toBe(((await f.human.get(base).expect(200)).body.workspace.state.orders).length);
+  const customer = (await call('bambook_query', { workspaceId: id, type: 'customer', limit: 1 })).data.results[0].id;
+  const payload = { customerId: customer, method: 'call', content: '外部客户端跟进', at: new Date(Date.now() - 60000).toISOString(), nextDate: '', link: null };
+  expect((await call('bambook_preview', { workspaceId: id, command: { type: 'crm.followUp.save', payload } })).error).toBe(false);
+  const done = await call('bambook_execute', { workspaceId: id, requestId: randomUUID(), command: { type: 'crm.followUp.save', payload } }); await report('execute', done.text.slice(0, 160)); expect(done.error).toBe(false);
+  const other = await connect(null, 'read'); expect(other.workspace.id).not.toBe(id);
+  const crossing = await call('bambook_query', { workspaceId: other.workspace.id, type: 'order', limit: 1 }).catch(e => ({ error: true, text: String(e.message), data: null })); await report('cross company', crossing.text.slice(0, 120)); expect(crossing.error).toBe(true);
+}, 60000);
