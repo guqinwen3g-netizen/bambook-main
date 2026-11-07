@@ -6,8 +6,8 @@ import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import {createMistState} from '../../../../../server/src/shared/mistWorkspace';
 import {AssistantPage} from './PlatformPages';
 import {Nav} from '../../nav';
-const mock=vi.hoisted(()=>({workspace:null as any,fetch:vi.fn(),sessionKey:'session-a',readOrders:true}));
-vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>mock.workspace}));
+const mock=vi.hoisted(()=>({api:vi.fn(),workspace:null as any,fetch:vi.fn(),sessionKey:'session-a',readOrders:true}));
+vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>mock.workspace,mistApiRequest:(...a:any[])=>mock.api(...a)}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({sessionKey:mock.sessionKey,user:{id:'actor'},hasPermission:(scope:string)=>scope!=='orders:read'||mock.readOrders}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 vi.mock('../../../../../services/apiService',()=>({apiService:{getAuthHeaders:()=>({'X-Test-Auth':'authenticated'})}}));
 let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
@@ -40,7 +40,7 @@ it('clears retained conversation when the authenticated session changes outside 
   expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('');
   expect(host.textContent).not.toContain('Private account-A question');
 });
-beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;sessionStorage.clear();let i=0;const state=createMistState({id:()=>`assistant-ui-${++i}`,now:'2026-10-13T00:00:00Z',actorName:'Test'},'empty');state.orders.push({id:'order',code:'SO-SELECTED',customer:'Fixture',state:'Open',amount:10,currency:'USD'} as any);mock.workspace={state,workspace:{id:'workspace',name:'Test workspace',revision:1},error:'',loading:false,saving:false,pending:null,refresh:vi.fn(),run:vi.fn()};mock.sessionKey='session-a';mock.readOrders=true;go.mockReset();mock.fetch.mockReset();vi.stubGlobal('fetch',mock.fetch);});
+beforeEach(()=>{mock.api.mockReset();mock.api.mockRejectedValue(new Error('no task channel'));(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;sessionStorage.clear();let i=0;const state=createMistState({id:()=>`assistant-ui-${++i}`,now:'2026-10-13T00:00:00Z',actorName:'Test'},'empty');state.orders.push({id:'order',code:'SO-SELECTED',customer:'Fixture',state:'Open',amount:10,currency:'USD'} as any);mock.workspace={state,workspace:{id:'workspace',name:'Test workspace',revision:1},error:'',loading:false,saving:false,pending:null,refresh:vi.fn(),run:vi.fn()};mock.sessionKey='session-a';mock.readOrders=true;go.mockReset();mock.fetch.mockReset();vi.stubGlobal('fetch',mock.fetch);});
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();vi.unstubAllGlobals();});
 async function mount(){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(view()));}
 const button=(name:string)=>[...document.querySelectorAll('button')].find(b=>b.textContent?.trim()===name||b.getAttribute('aria-label')===name) as HTMLButtonElement|undefined;
@@ -60,3 +60,27 @@ it('sends with Enter, keeps Shift+Enter for a new line, and fills a suggested pr
 it('removes a referenced record from the next question',async()=>{mock.fetch.mockImplementation(async(url:string)=>response(url.endsWith('/status')?{configured:true,models:['test-model']}:{text:'No sources used',mode:'read_only',revision:1,sources:[]}));await mount();await click('引用业务记录');await click('加入问题');expect(host.textContent).toContain('SO-SELECTED · Fixture');await click('移除 SO-SELECTED · Fixture');expect(host.textContent).not.toContain('SO-SELECTED · Fixture');await question('Without sources');await click('发送');const call=mock.fetch.mock.calls.find(([url])=>!String(url).endsWith('/status'));expect(JSON.parse(call![1].body).sourceIds).toEqual([]);});
 
 it('carries the device language in a full-page assistant request without persisting settings',async()=>{localStorage.setItem('bambook.device.locale','"en-US"');mock.fetch.mockImplementation(async(url:string)=>response(url.endsWith('/status')?{configured:true,models:['test-model']}:{text:'English answer',mode:'read_only',revision:1,sources:[]}));try{await mount();await question('Question');await click('Send');const call=mock.fetch.mock.calls.find(([url])=>!String(url).endsWith('/status'));expect(call![1].headers['X-Bambook-Locale']).toBe('en-US');expect(JSON.parse(call![1].body)).not.toHaveProperty('locale');expect(mock.workspace.run).not.toHaveBeenCalled();}finally{localStorage.removeItem('bambook.device.locale');}});
+
+it('works with Xiaozhu as a coworker: a request becomes a platform task whose progress and result stay in the conversation',async()=>{
+  let created:any=null,polls=0;
+  const idn={id:'pa',kind:'personal',state:'active'};
+  mock.fetch.mockResolvedValue(response({configured:false,models:[]}));
+  mock.api.mockImplementation(async(url:string,init:any)=>{
+    if(init?.method==='POST'){created={id:'t1',identityId:'pa',executor:'platform',name:'q',instructions:JSON.parse(init.body).instructions,state:'queued',version:1,result:'',checkpoint:'',questions:[],waitingProposalIds:[],canControl:true,createdAt:'2026-11-07T00:00:00Z',updatedAt:'2026-11-07T00:00:00Z'};return {item:created};}
+    if(url.includes('/agent-identities'))return {items:[idn]};
+    if(url.includes('/agent-task-capabilities'))return {platformAvailable:true};
+    if(url.endsWith('/agent-tasks'))return {items:created?[created]:[],nextCursor:null};
+    if(url.includes('/agent-tasks/t1')){polls++;return {item:{...created,state:'succeeded',result:'本周有 2 张订单交期临近',version:2,updatedAt:'2026-11-07T00:00:05Z'}};}
+    throw new Error('unexpected '+url);
+  });
+  await mount();
+  expect(host.textContent).not.toContain('生成模型尚未连接');
+  await question('哪些订单交期临近？');await click('发送');
+  const post=mock.api.mock.calls.find(([,i])=>i?.method==='POST')!;expect(post[0]).toBe('/api/mist/workspaces/'+mock.workspace.workspace.id+'/personal-agent/tasks');
+  expect(JSON.parse(post[1].body).instructions).toBe('哪些订单交期临近？');
+  expect(mock.fetch.mock.calls.some(([u])=>String(u).endsWith('/assistant'))).toBe(false);
+  expect(host.textContent).toContain('哪些订单交期临近？');
+  await act(async()=>{await new Promise(r=>setTimeout(r,3300));});
+  expect(polls).toBeGreaterThan(0);expect(host.textContent).toContain('本周有 2 张订单交期临近');
+  expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('');
+});
