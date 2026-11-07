@@ -102,6 +102,8 @@ function bankAccountReadRecord(row:any){
 }
 function mailReadRecord(type:string,row:any){
   if(type==='bank_account')return bankAccountReadRecord(row);
+  // 报价和订单记录里内嵌的生成文件也不带快照，和单独读取文件一致。
+  if((type==='order'||type==='quotation')&&Array.isArray(row.documents))return{...row,documents:row.documents.map(({snapshot:_snapshot,...document}:any)=>document)};
   if(type==='shipment_document')return documentReadRecord(row);
   if(type==='quotation_document'||type==='order_document')return generatedFileReadRecord(row);
   if(!['email_draft','email_send'].includes(type))return row;

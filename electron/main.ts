@@ -204,6 +204,12 @@ function restoreBambookAppPresence() {
     }
 }
 
+// 热更新预览（npm run electron:hmr）：独立名称与用户数据目录，不与已安装的 Bambook 抢单实例锁，也不读写它的数据。
+if (process.env.BAMBOOK_DEV_PREVIEW === '1') {
+    app.setName('Bambook Dev');
+    app.setPath('userData', path.join(app.getPath('appData'), 'bambook-dev-preview'));
+}
+
 if (process.env.BAMBOOK_ELECTRON_UI_LAB !== '1') {
     const hasSingleInstanceLock = app.requestSingleInstanceLock();
     if (!hasSingleInstanceLock) {

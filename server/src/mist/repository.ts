@@ -42,6 +42,7 @@ import type { MailStateObservation } from '../shared/mistMailState';
 import { AGENT_AUDIT_FIELD, AGENT_AUDIT_HASH, AGENT_AUDIT_PREFIX, agentAuditReceiptId, createAgentCommandAudit, publicCommandReceiptResult } from './agentAudit';
 import { auditFromReceipt, auditMatchesParent, auditEntry, projectAgentAudit, readableCommand } from './agentAuditRead';
 import { markAgentProposalConfirmed, agentCommandRisk, AI_WRITE_SCOPES, AGENT_RISK_LABEL } from '../shared/mistAgentProposals';
+import { automationInstructions, automationOverLimit, automationRecord, automationView, dueAutomations, evaluateAutomation, listAutomations, recordAutomationRun, removeAutomation, saveAutomation, writeAutomation, type AutomationDecision, type AutomationRecord } from './agentAutomations';
 import { canGenerateScopedStatement, scopedMaterialIssueTargets, scopedFabricAccess, scopedReferenceViolation, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
 import { buildTeamScopeGraph, resolveTeamScope, normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
 import { accountOwnedObjects, buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
@@ -336,7 +337,7 @@ export class MistRepository {
     const tasks=new Map<string,TaskRecord>();for(const r of records)try{const c=readTaskRecord(r,row.id);tasks.set(c.id,c);}catch(e){if(!(e instanceof MistApiError))throw e;}
     const visible=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;
     for(const p of proposals){const c=tasks.get(p.taskId!),allowed=!!c&&this.taskSourcesAllowed(row,actor,c,visible);if(!allowed){access.set(p.id,{visible:false});continue;}let blocked:string|undefined;
-      if(p.state==='pending'){if(!['waiting_human','paused'].includes(c!.state)||c!.expiresAt<=Date.now())blocked='所属任务已停止或过期';
+      if(p.state==='pending'&&!c!.automationId){if(!['waiting_human','paused'].includes(c!.state)||c!.expiresAt<=Date.now())blocked='所属任务已停止或过期';
       else try{await assertTaskAuthority(db,actor,c!,Date.now());}catch(e){if(!(e instanceof MistApiError))throw e;blocked='任务连接已失效';}}
       access.set(p.id,{visible:true,...(blocked?{blocked}:{})});
     }
@@ -464,11 +465,11 @@ export class MistRepository {
   async ensurePersonalAgent(prior:TokenPayload,workspaceId:string,make:MakeServiceCredential,now=Date.now()){if(isAgentActor(prior))fail('FORBIDDEN','个人 Agent 须由本人开通',403);return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,'ai:chat');return ensurePersonalIdentity(db,actor,workspaceId,make,now,row.companyId??undefined);});}
   /** Speech heartbeats recheck current identity/company without loading the business JSON. */
   async authorizePersonalAgentVoice(prior:TokenPayload,workspaceId:string){if(isAgentActor(prior))fail('FORBIDDEN','语音只供本人使用',403);await this.transact(async db=>{const actor=await this.taskAccess(db,prior,workspaceId,'ai:chat');await assertPersonalVoiceAvailable(db,actor,workspaceId);});}
-  async assignPersonalAgentTask(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>,make:MakeServiceCredential){
+  async assignPersonalAgentTask(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>,make:MakeServiceCredential,automationId?:string){
     if(isAgentActor(prior))fail('FORBIDDEN','任务须由本人安排',403);
     if(Object.keys(input).some(k=>!['requestId','name','instructions','locale'].includes(k)))fail('INVALID_INPUT','任务字段无效',400);
     const identity=await this.ensurePersonalAgent(prior,workspaceId,make);
-    return this.createAgentTask(prior,workspaceId,{requestId:input.requestId,identityId:identity.id,name:input.name,instructions:input.instructions,executor:'platform',...(input.locale!==undefined?{locale:input.locale}:{})});
+    return this.createAgentTask(prior,workspaceId,{requestId:input.requestId,identityId:identity.id,name:input.name,instructions:input.instructions,executor:'platform',...(input.locale!==undefined?{locale:input.locale}:{})},automationId);
   }
   /** 个人 Agent 用量：本人看自己的；公司管理员（users:write）看全公司。 */
   async personalAgentUsage(prior:TokenPayload,workspaceId:string,month:unknown){
@@ -540,9 +541,31 @@ export class MistRepository {
     if(summaryOnly)return this.transact(async db=>{const actor=await this.taskAccess(db,prior,workspaceId,isAgentActor(prior)?'ai:chat':undefined),c=(await taskRecord(db,workspaceId,taskId)).value;if(isAgentActor(prior)&&prior.agentIdentity?.id!==c.identityId)fail('NOT_FOUND','任务不存在或无权访问',404);let valid=true;try{await assertTaskViewAuthority(db,actor,c,Date.now());}catch(e){if(!(e instanceof MistApiError))throw e;valid=false;}return {...taskView(c,actor,Date.now(),valid),name:'Agent任务',instructions:'',checkpoint:'',result:'',questions:[],waitingFor:null,requiredRead:null,wakeReason:undefined};});
     return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,isAgentActor(prior)?'ai:chat':undefined);let c=(await taskRecord(db,workspaceId,taskId)).value;if(isAgentActor(prior)&&prior.agentIdentity?.id!==c.identityId)fail('NOT_FOUND','任务不存在或无权访问',404);let valid=this.taskSourcesAllowed(row,actor,c);try{await assertTaskViewAuthority(db,actor,c,Date.now());if(valid)c=await this.refreshTaskCondition(db,actor,row,c,Date.now());}catch(e){if(!(e instanceof MistApiError))throw e;valid=false;}return taskView(c,actor,Date.now(),valid);});
   }
-  async createAgentTask(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>){
+  async listAutomations(prior:TokenPayload,workspaceId:string){if(isAgentActor(prior))fail('FORBIDDEN','自动规则须由本人管理',403);return this.transact(async db=>{const{actor}=await this.own(db,prior,workspaceId,'ai:chat');return{items:(await listAutomations(db,workspaceId,actor.userId)).map(automationView)};});}
+  async saveAutomation(prior:TokenPayload,workspaceId:string,id:string|undefined,input:Record<string,unknown>){if(isAgentActor(prior))fail('FORBIDDEN','自动规则须由本人管理',403);return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,workspaceId,'ai:chat');return automationView(await saveAutomation(db,actor,workspaceId,id,input,Date.now()));});}
+  async removeAutomation(prior:TokenPayload,workspaceId:string,id:string){if(isAgentActor(prior))fail('FORBIDDEN','自动规则须由本人管理',403);return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,workspaceId,'ai:chat');await removeAutomation(db,actor,workspaceId,id);});}
+  async dueAutomations(take:number){return this.connectionTransaction(db=>dueAutomations(db,take));}
+  /** 触发一次：按所有者当前权限读投影后判断；授权失效时停用规则并写明原因，不静默。 */
+  async runAutomation(prior:TokenPayload,workspaceId:string,id:string,make:MakeServiceCredential,now=Date.now()){
+    let decision:AutomationDecision,rule:AutomationRecord;
+    try{
+      const read=await this.transact(async db=>{const{row,actor}=await this.own(db,prior,workspaceId,'ai:chat');const{value}=await automationRecord(db,workspaceId,id);if(value.ownerId!==actor.userId)fail('NOT_FOUND','规则不存在',404);const last=value.runs[0]?.taskId;let busy=false;if(last){const task=await taskRecord(db,workspaceId,last).catch(()=>null);busy=!!task&&['queued','running','waiting_time','waiting_condition'].includes(task.value.state);}return{rule:value,busy,decision:evaluateAutomation(value,this.view(row,actor).state,now)};});
+      rule=read.rule;decision=read.decision;
+      if(read.busy||!rule.enabled||automationOverLimit(rule,now)&&decision.fire)return{fired:false};
+    }catch(error:any){if([401,403].includes(error?.status)){await this.haltAutomation(workspaceId,id,'权限已变化，请重新启用规则',now);return{fired:false};}throw error;}
+    let taskId:string|undefined;
+    if(decision.fire){
+      try{const task=await this.assignPersonalAgentTask(prior,workspaceId,{requestId:'auto-'+rule.id+'-'+rule.version,name:(rule.name+' · '+decision.fire.detail).slice(0,60),instructions:automationInstructions(rule,decision.fire.facts),locale:'zh-CN'},make,rule.id);taskId=task.id;}
+      catch(error:any){if(error?.code==='AGENT_TASK_LIMIT'||error?.status===503)return{fired:false};if([401,403,422].includes(error?.status)){await this.haltAutomation(workspaceId,id,error?.message||'规则无法运行，请重新启用',now);return{fired:false};}throw error;}
+    }
+    const changed=taskId||JSON.stringify(decision.next)!==JSON.stringify({seen:rule.seen,primed:rule.primed,lastDay:rule.lastDay});
+    if(changed)await this.connectionTransaction(async db=>{const{row,value}=await automationRecord(db,workspaceId,id);await writeAutomation(db,row,value,recordAutomationRun(value,decision,taskId,decision.fire?.detail??'',now));});
+    return{fired:!!taskId,taskId};
+  }
+  private async haltAutomation(workspaceId:string,id:string,message:string,now:number){await this.connectionTransaction(async db=>{const{row,value}=await automationRecord(db,workspaceId,id);await writeAutomation(db,row,value,{...value,version:value.version+1,enabled:false,authority:undefined,updatedAt:new Date(now).toISOString(),halted:{code:'AUTOMATION_HALTED',message}});});}
+  async createAgentTask(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>,automationId?:string){
     if(isAgentActor(prior))fail('FORBIDDEN','任务须由本人安排',403);
-    return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,'ai:chat');if(input.executor==='platform'&&!this.platformRuntimeAvailable())fail('PRECONDITION','平台执行器或模型暂不可用',503);const result=await createTask(db,actor,workspaceId,input,Date.now(),taskScopeHash(scopeOf(row),row.state));const c=(await taskRecord(db,workspaceId,result.id)).value;return taskView(c,actor,Date.now(),result.state!=='access_changed'&&this.taskSourcesAllowed(row,actor,c));});
+    return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,'ai:chat');if(input.executor==='platform'&&!this.platformRuntimeAvailable())fail('PRECONDITION','平台执行器或模型暂不可用',503);const result=await createTask(db,actor,workspaceId,input,Date.now(),taskScopeHash(scopeOf(row),row.state),automationId);const c=(await taskRecord(db,workspaceId,result.id)).value;return taskView(c,actor,Date.now(),result.state!=='access_changed'&&this.taskSourcesAllowed(row,actor,c));});
   }
   async claimAgentTask(prior:TokenPayload,workspaceId:string,taskId:string,input:Record<string,unknown>,make:MakeTaskCredential){
     if(!isAgentActor(prior)||!prior.agentServiceLease||prior.agentTaskLease)fail('FORBIDDEN','请使用执行器管理连接领取任务',403);
@@ -1083,7 +1106,7 @@ export class MistRepository {
         await this.authorize(db, prior, permission);
         await this.authorizeCompoundCommand(db, prior, input.command);
         if(isAgentActor(prior)&&prior.agentTaskLease){
-          if(command.type==='agent.proposal.create'){const c=(await taskRecord(db,workspaceId,prior.agentTaskLease.taskId)).value;await assertTaskAuthority(db,actor,c,Date.now());if(c.state!=='waiting_human'||!c.waitingProposalIds.includes(String(applied.result.id)))fail('AGENT_TASK_LEASE_INVALID','任务已停止',401);}
+          if(command.type==='agent.proposal.create'){const c=(await taskRecord(db,workspaceId,prior.agentTaskLease.taskId)).value;await assertTaskAuthority(db,actor,c,Date.now());if(!c.automationId&&(c.state!=='waiting_human'||!c.waitingProposalIds.includes(String(applied.result.id))))fail('AGENT_TASK_LEASE_INVALID','任务已停止',401);}
           else await assertTaskLease(db,await this.taskValidationActor(db,prior,actor),prior.agentTaskLease,Date.now());
         }
         await this.prepareTaskProposalAccess(db,saved,actor);

@@ -9,6 +9,7 @@ export type AgentTaskView = {
   lastHeartbeatAt: string | null; checkpoint: string; waitingProposalIds: string[]; result: string;
   canControl: boolean;
   executor?:'external'|'platform';
+  automationId?:string;
   executionIssue?:{code:'model_unavailable'|'model_response_invalid';retryAt?:string};
   /** Absent in older servers; questions and answers use the task's existing content visibility. */
   questions?:AgentTaskQuestion[];

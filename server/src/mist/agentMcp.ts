@@ -182,7 +182,10 @@ export async function handleMcpMessage(repository: McpRepository, actor: TokenPa
         return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data } };
       } catch (error) {
         // 业务和权限错误作为工具结果返回，Agent 能据此修正；不暴露内部细节。
-        return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: error instanceof ToolInputError ? error.message : describeError(error) }], isError: true } };
+        // 命令缺字段时业务代码可能直接读空属性；这不是服务故障，要让 Agent 能查 payload 结构后自行修正。
+        const shape = error instanceof TypeError && (name === 'bambook_preview' || name === 'bambook_execute');
+        if (shape) console.error('[agent-mcp] command raised TypeError', (args as any)?.command?.type, error);
+        return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: shape ? '命令 payload 缺少必填字段或结构不对；用 bambook_commands 按命令前缀查看 payload 后重试' : error instanceof ToolInputError ? error.message : describeError(error) }], isError: true } };
       }
     }
     default: return rpcError(id, -32601, 'Method not found');

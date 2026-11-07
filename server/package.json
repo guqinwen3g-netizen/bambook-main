@@ -4,6 +4,7 @@
   "description": "The Neuro-Core Backend for PandaAI",
   "main": "dist/index.js",
   "scripts": {
+    "agent:acceptance": "tsx scripts/agent-acceptance.ts",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "dev:mist": "MIST_LOCAL_WORKSPACE=1 node scripts/mist-dev.mjs",
