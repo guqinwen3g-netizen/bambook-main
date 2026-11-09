@@ -96,7 +96,7 @@ export function InvoicePage() {
   ];
   const exportRows = () => downloadModuleCsv('应收票据当前台账.csv', ['票据', '对方', '来源订单', '来源类型', '票面金额', '币种', '到账核销', '贷项抵扣', '未收余额', '到期', '账龄', '状态'], shown.map(r => { const f = invoiceFinancialFacts(w.state, r); return [r.code, r.customer, r.order, invoiceSource(w.state, r).label, r.amount, r.currency, r.draft ? '' : f.cash, r.draft ? '' : f.credit, r.draft ? '' : r.open, r.due, r.state === 'open' ? ageLabels[invoiceAge(r.due, today).group] : '', labels[r.state]]; }));
   const canInvoice = session.hasPermission('invoices:write' as any);
-  const voidOpeningSpec = (row: InvoiceLedgerRow): ModuleEditorSpec => ({ title: '作废期初应收', submitLabel: '作废', description: `${row.code} · ${row.customer} · ${money(row.amount, row.currency)}。用于登记错误后作废重登；作废后不再计入应收余额。`,
+  const voidOpeningSpec = (row: InvoiceLedgerRow): ModuleEditorSpec => ({ title: '作废期初应收', submitLabel: '作废', description: `${row.code} · ${row.customer} · ${money(row.amount, row.currency)}。作废后不再计入应收余额。`,
     fields: [{ key: 'reason', label: '作废原因', type: 'textarea', required: true }], initialValues: { reason: '' },
     submit: v => w.run({ type: 'opening.receivable.void', payload: { invoiceId: row.id, reason: String(v.reason ?? '').trim() } }) });
   const rejectSpec = (row: InvoiceLedgerRow): ModuleEditorSpec => ({ title: row.devId ? '驳回开发应收' : '驳回 CI 应收', submitLabel: '驳回并退回更正', description: `${row.code} · ${money(row.amount, row.currency)}`,

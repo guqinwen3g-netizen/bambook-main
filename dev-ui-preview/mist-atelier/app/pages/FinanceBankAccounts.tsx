@@ -222,7 +222,7 @@ export function FxPeriodRatesCard() {
   const rows = [...readFxPeriodRates(state || {})].sort((a, b) => Number(!!a.voided) - Number(!!b.voided) || b.month.localeCompare(a.month) || a.currency.localeCompare(b.currency));
   const currencies = [...new Set([...(state?.orders || []).map(o => o.currency), ...(state?.bankAccounts || []).map(a => a.currency)])].filter(c => c && c !== 'CNY').sort();
   const lastMonth = (() => { const d = businessNow(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 7); })();
-  const add: ModuleEditorSpec = { title: '登记月末汇率', submitLabel: '登记', description: '用于报表“月末暂估”折算；通常取中国人民银行月末中间价或开户行月末牌价。每月每币种一条。',
+  const add: ModuleEditorSpec = { title: '登记月末汇率', submitLabel: '登记', description: '每月每币种一条。',
     fields: [{ key: 'month', label: '月份', type: 'month', required: true }, { key: 'currency', label: '币种', type: 'select', required: true, options: (currencies.length ? currencies : ['USD', 'EUR']).map(c => ({ value: c, label: c })) },
       { key: 'rate', label: '汇率（1 单位外币兑人民币）', type: 'text', required: true, hint: '最多 6 位小数，如 7.1234' }, { key: 'source', label: '依据', type: 'choice', options: FX_RATE_SOURCES, required: true }],
     initialValues: { month: lastMonth, currency: currencies[0] || 'USD', rate: '', source: '' },
@@ -299,7 +299,7 @@ export function AccountStatusCell({ account, balance }: { account: MistBankAccou
   const { run, loading, saving, pending } = useMistWorkspace(), session = useMistSession();
   const canWrite = session.hasPermission(MIST_FINANCE_SCOPES.voucher), busy = loading || saving || !!pending;
   const [spec, setSpec] = React.useState<ModuleEditorSpec | null>(null);
-  const close: ModuleEditorSpec = { title: `销户 ${account.code} · ${account.name}`, submitLabel: '销户', description: '银行销户后登记。须账户余额为零（先转出余额、登记结息或手续费），销户日之后不能有流水；销户后不再记入新流水、结汇或归属。',
+  const close: ModuleEditorSpec = { title: `销户 ${account.code} · ${account.name}`, submitLabel: '销户', description: '须余额为零，销户日后无流水；销户后不再记入新流水、结汇或归属。',
     fields: [{ key: 'date', label: '销户日期', type: 'date', required: true }, { key: 'reason', label: '销户依据', type: 'textarea', required: true, hint: '如：中行销户回执编号' }], initialValues: { date: platformBusinessDate(businessNow()), reason: '' },
     submit: v => run({ type: 'finance.account.close', payload: { id: account.id, date: String(v.date || ''), reason: String(v.reason || '') } }) };
   const reopen: ModuleEditorSpec = { title: `恢复 ${account.code}`, submitLabel: '恢复', description: `原销户日 ${account.closed?.date || ''}。仅在银行撤销销户或销户登记有误时恢复。`, fields: [{ key: 'reason', label: '恢复原因', type: 'textarea', required: true }], initialValues: { reason: '' },
