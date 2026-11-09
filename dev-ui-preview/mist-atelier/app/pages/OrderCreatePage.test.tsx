@@ -161,3 +161,10 @@ it('requires the T/T pre-shipment percentage before leaving the plan step',async
  expect(host.textContent).toContain('请填写出运前累计收款比例');
  input('出运前累计收款（%）','0');await next();expect(host.textContent).not.toContain('请填写出运前累计收款比例');
 });
+it('offers a path to create a customer when no customer can take an order',async()=>{
+ store.state={...store.state!,customers:[]};
+ act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'orders/new'},go,openAI:vi.fn(),theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn()}}><OrderCreatePage/></Nav.Provider></ToastProvider></MistRoot>));
+ expect(host.textContent).toContain('还没有可下单的客户');
+ await act(async()=>getByRole(host,'button',{name:'去建立客户'}).click());
+ expect(go).toHaveBeenCalledWith('crm');
+});
