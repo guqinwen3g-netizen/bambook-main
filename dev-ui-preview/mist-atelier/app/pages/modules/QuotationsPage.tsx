@@ -148,11 +148,11 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
   };
   const skipSpec = (q: MarketQuotation): ModuleEditorSpec => ({
     title: `${q.code} 条目标记不再转`, submitLabel: '标记不再转',
-    description: '客户只接受部分条目时，把不再转单的条目标记出来并写明原因；标记后不能再转单，全部条目处理完报价显示“已转单”。',
+    description: '标记后这些条目不能再转单。',
     initialValues: { reason: '', ...Object.fromEntries(quotationPendingLines(q).map(l => ['line:' + l.id, false])) },
     fields: [
       ...quotationPendingLines(q).map(l => ({ key: 'line:' + l.id, label: `不再转：${l.name} · ${l.qty} ${l.unit}`, type: 'checkbox' as const })),
-      { key: 'reason', label: '不再转原因', type: 'textarea', required: true, hint: '例如客户取消该色、改由其它报价下单。' },
+      { key: 'reason', label: '不再转原因', type: 'textarea', required: true },
     ],
     submit: async v => { const lineIds = checkedLines(v); if (!lineIds.length) throw new Error('请至少勾选一个条目'); await run({ type: 'market.quotation.skipLines', payload: { id: q.id, lineIds, reason: String(v.reason ?? '') } }); },
   });

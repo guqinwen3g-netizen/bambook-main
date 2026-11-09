@@ -73,7 +73,7 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
       { key: 'category', label: '关系类别', type: 'select', required: true, readonly: linked(r), options: (linked(r) ? Object.keys(CATEGORY_LABEL) : ['Agent', 'Partner', 'Government', 'Internal', 'Other']).map(k => ({ value: k, label: CATEGORY_LABEL[k as MarketRelation['category']] })) },
       { key: 'name', label: '组织名称', required: !linked(r), readonly: linked(r) },
       { key: 'country', label: '国家地区', type: 'choice', options: COUNTRIES, readonly: linked(r) && !!r?.supplierId && !r?.customerId }, { key: 'address', label: '地址', readonly: linked(r) && !!r?.supplierId && !r?.customerId },
-      { key: 'aliases', label: '别名', hint: '英文全称、简称、旧名等，用顿号分隔；搜索与付款人匹配会用到' }, { key: 'note', label: '偏好与备注', type: 'textarea' },
+      { key: 'aliases', label: '别名', hint: '用顿号分隔' }, { key: 'note', label: '偏好与备注', type: 'textarea' },
     ],
     submit: async v => { const res = await run({ type: 'market.relation.save', payload: { id: r?.id, input: { name: String(v.name ?? ''), category: String(v.category) as MarketRelation['category'], customerId: r?.customerId || '', supplierId: r?.supplierId || '', country: String(v.country ?? ''), address: String(v.address ?? ''), aliases: String(v.aliases ?? '').split(/[、,\n]/).map(x => x.trim()).filter(Boolean), note: String(v.note ?? ''), fileIds: r?.fileIds || [] } } }); const id = String((res.result as { id?: string }).id || ''); if (!r && id) { setPicked(id); go('relations', id); } },
   });
@@ -85,7 +85,7 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
   };
   const linkable = (state?.market.suppliers || []).filter(s => !all.some(r => r.supplierId === s.id && r.customerId));
   const linkSpec = (r: MarketRelation): ModuleEditorSpec => ({
-    title: `为 ${r.name} 关联供应商身份`, submitLabel: '关联', description: '同一家公司既是客户又是供应商时使用。该供应商原有的关系档案会合并进来（别名、附件保留）；客户与供应商的联系人、业务仍各自维护。',
+    title: `为 ${r.name} 关联供应商身份`, submitLabel: '关联', description: '供应商的关系档案并入本客户（别名、附件保留）；联系人与业务仍分开维护。',
     initialValues: { supplierId: '' }, fields: [{ key: 'supplierId', label: '供应商', type: 'select', required: true, options: linkable.map(s => ({ value: s.id, label: `${s.code} · ${s.name}` })) }],
     submit: v => run({ type: 'market.relation.linkSupplier', payload: { id: r.id, supplierId: String(v.supplierId ?? '') } }),
   });

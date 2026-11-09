@@ -136,7 +136,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
     fields: [{ key: 'reason', label: '停用原因', type: 'textarea', required: true }],
     submit: v => run({ type: 'market.supplier.bank.disable', payload: { supplierId: s.id, accountId: a.id, reason: String(v.reason ?? '') } }),
   });
-  const deleteCertSpec = (s: MarketSupplier, c: SupplierCertificate): ModuleEditorSpec => ({ title: `删除认证 ${c.name}`, submitLabel: '删除', description: '仅在登记错误时删除；过期认证请保留，以便追溯。', initialValues: {}, fields: [], submit: () => run({ type: 'market.supplier.certificate.delete', payload: { supplierId: s.id, id: c.id } }) });
+  const deleteCertSpec = (s: MarketSupplier, c: SupplierCertificate): ModuleEditorSpec => ({ title: `删除认证 ${c.name}`, submitLabel: '删除', description: '仅限登记错误；过期认证请保留。', initialValues: {}, fields: [], submit: () => run({ type: 'market.supplier.certificate.delete', payload: { supplierId: s.id, id: c.id } }) });
   const rateSpec = (s: MarketSupplier): ModuleEditorSpec => ({
     title: `评级 ${s.name}`, submitLabel: '保存评级', description: '每次评级单独记录，历史评级保留。',
     initialValues: { grade: supplierGrade(s)?.grade || 'B', period: '', note: (() => { const p = perf.get(s.id); return p ? [p.completed.length ? `准交 ${rate(p.onTime, p.completed.length)}（${p.onTime}/${p.completed.length} 单）` : '', p.receipts ? `来料无退货 ${rate(p.clean, p.receipts)}（${p.clean}/${p.receipts} 次）` : ''].filter(Boolean).join('；') : ''; })() },

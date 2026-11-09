@@ -48,7 +48,7 @@ export function FollowUpPanel({ customer, state, can, compact }: { customer: Mis
   const rows = state.crm.followUps.filter(row => row.customerId === customer.id);
   const voidSpec = (row: CrmFollowUp): ModuleEditorSpec => ({ title: '作废跟进记录', submitLabel: '作废', submitVariant: 'danger', fields: [field('reason', '作废原因', 'textarea')], initialValues: { reason: '' }, submit: v => run({ type: 'crm.followUp.void', payload: { id: row.id, reason: text(v, 'reason') } }) });
   const nextOpen = rows.filter(row => !row.voided).map(row => state.tasks.find(task => task.id === row.nextTaskId)).filter(task => task && !task.done).sort((a, b) => a!.due.localeCompare(b!.due))[0];
-  const spec = (): ModuleEditorSpec => ({ title: '记录跟进', submitLabel: '保存跟进', description: `${customer.name} · 记录实际发生的沟通；填写下次跟进日会生成待办。`,
+  const spec = (): ModuleEditorSpec => ({ title: '记录跟进', submitLabel: '保存跟进', description: customer.name,
     fields: [field('method', '方式', 'select', true, Object.entries(CRM_METHOD_LABEL).map(([value, label]) => ({ value, label }))), field('at', '实际时间', 'datetime-local'), field('content', '跟进内容', 'textarea'), { ...field('nextDate', '下次跟进日', 'date', false), hint: '留空表示暂不安排' }, field('link', '关联对象', 'select', false, [{ value: '', label: '不关联' }, ...linkOptions(state, customer.id)])],
     initialValues: { method: 'call', at: localNow(), content: '', nextDate: '', link: '' },
     submit: v => run({ type: 'crm.followUp.save', payload: { customerId: customer.id, method: text(v, 'method') as CrmFollowUp['method'], content: text(v, 'content'), at: new Date(text(v, 'at')).toISOString(), nextDate: text(v, 'nextDate'), link: parseLink(text(v, 'link')) } }) });
@@ -71,7 +71,7 @@ export function OpportunityPanel({ customer, state, can }: { customer: MistCusto
   const selected = rows.find(row => row.id === picked);
   const totals = openOpportunityTotals(rows);
   const pickOptions = (kind: 'development' | 'quotation' | 'order') => [emptyOption, ...linkOptions(state, customer.id, false).filter(option => option.value.startsWith(kind + ':')).map(option => ({ value: option.value.split(':').slice(1).join(':'), label: option.label }))];
-  const editSpec = (row?: CrmOpportunity): ModuleEditorSpec => ({ title: row ? '编辑商机' : '新建商机', submitLabel: row ? '保存商机' : '建立商机', description: `${customer.name} · 金额按原币种记录，不与其他币种合计。`,
+  const editSpec = (row?: CrmOpportunity): ModuleEditorSpec => ({ title: row ? '编辑商机' : '新建商机', submitLabel: row ? '保存商机' : '建立商机', description: customer.name,
     fields: [field('title', '商机名称'), field('domain', '业务板块', 'select', true, [{ value: 'garment', label: '成衣' }, { value: 'fabric', label: '面料' }]), { ...field('amount', '预计金额'), hint: '最多两位小数' }, { ...field('currency', '币种', 'choice', true, withCurrent(CURRENCIES, customer.currency)), strict: true }, field('expectedDate', '预计成交日', 'date'), { ...field('ownerId', '负责人', 'select', true, memberSelectOptions(members, { current: row ? { id: row.ownerId, name: row.owner } : undefined })), hint: '按账号选择本公司成员' },
       // mar21：一个商机可关联多轮开发、报价与多张订单，逐项勾选。
       ...(['development', 'quotation', 'order'] as const).flatMap(kind => pickOptions(kind).filter(o => o.value).map(o => ({ ...field(`${kind}:${o.value}`, `${({ development: '开发案', quotation: '报价', order: '订单' })[kind]} · ${o.label}`, 'checkbox', false) }))), field('note', '说明', 'textarea', false)],
