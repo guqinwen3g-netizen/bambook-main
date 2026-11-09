@@ -9,7 +9,21 @@ import type { MistFileInput, MistStoredFile } from './files';
 export type PreparedGeneratedDocument = { snapshot: GeneratedDocSnapshot; file: MistFileInput; sha256: string; bytes: number };
 const fail = (message: string): never => { throw new MistCommandError('DOCUMENT_PRECONDITION', message, 422); };
 
-export async function buildGeneratedDocument(snapshot: GeneratedDocSnapshot, render: (html: string) => Promise<PdfRenderResult> = html => renderHtmlToPdf(html, { format: 'A4' }), options: { sealDataUrl?: string } = {}): Promise<PreparedGeneratedDocument> {
+const DOC_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'], DOC_IMAGE_MAX_BYTES = 8 * 1024 * 1024, DOC_IMAGE_LIMIT = 80;
+/** 图片列引用的私有图片换成 data URI：只收常见位图、单张 8MB 内、最多 80 张；读不到的留空，不影响单据生成。 */
+export async function generatedDocumentImages(snapshot: GeneratedDocSnapshot, files: ReadonlyArray<{ id: string; mimeType: string; size?: number }>, read: (file: any) => Promise<Buffer>): Promise<Record<string, string>> {
+  const keys = snapshot.table?.columns.filter(c => c.image).map(c => c.key) ?? [], out: Record<string, string> = {};
+  if (!keys.length) return out;
+  const ids = [...new Set(snapshot.table!.rows.flatMap(row => keys.map(k => row[k]).filter(Boolean)))].slice(0, DOC_IMAGE_LIMIT);
+  for (const id of ids) {
+    const file = files.find(f => f.id === id);
+    if (!file || !DOC_IMAGE_TYPES.includes(file.mimeType) || (file.size ?? 0) > DOC_IMAGE_MAX_BYTES) continue;
+    try { const bytes = await read(file); if (bytes.length <= DOC_IMAGE_MAX_BYTES) out[id] = `data:${file.mimeType};base64,${bytes.toString('base64')}`; }
+    catch (error) { console.error('[mist] document image unavailable:', error instanceof Error ? error.message : error); }
+  }
+  return out;
+}
+export async function buildGeneratedDocument(snapshot: GeneratedDocSnapshot, render: (html: string) => Promise<PdfRenderResult> = html => renderHtmlToPdf(html, { format: 'A4' }), options: { sealDataUrl?: string; images?: Record<string, string> } = {}): Promise<PreparedGeneratedDocument> {
   let result: PdfRenderResult;
   // Rendering happens before any file is written or state changes: a failure means nothing was generated.
   try { result = await render(renderGeneratedDocumentHtml(snapshot, options)); }

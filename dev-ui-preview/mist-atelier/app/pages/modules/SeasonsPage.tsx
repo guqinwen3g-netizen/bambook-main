@@ -233,8 +233,7 @@ function TrendDetail({ t, state, season, can, locked, onEdit, onOpen, attachment
     <Facts items={[{ label: '来源依据', value: t.source }, { label: '季节', value: season }]} />
     {t.note && <p className="mist-sub">{t.note}</p>}
     <DetailBlock title={ui`关联面料档案 · ${products.length}`}>{products.length ? <div className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }}>{products.map(p => <Button key={p.id} variant="quiet" onClick={() => onOpen('products', p.id)}><Mono>{p.sku}</Mono> {p.name}</Button>)}</div> : <span className="mist-muted">{uiText("未关联面料档案。")}</span>}</DetailBlock>
-    <DetailBlock title={ui`关联客户 · ${customers.length}`}>{customers.length ? <div className="mist-col" style={{ gap: 0 }} data-trend-customers>{customers.map(c => <div key={c.id} className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}><span style={{ flex: 1, minWidth: 0 }}>{c.name}<small className="mist-cell-sub">{uiText("报价 ")}{c.codes.join('、')}</small></span><Button variant="quiet" onClick={() => onOpen('crm', c.id, { customerId: c.id })}>{uiText("客户业务")}</Button></div>)}</div> : <span className="mist-muted">{uiText("还没有客户的报价引用这些面料。")}</span>}
-      <span className="mist-note">{uiText("由报价条目引用的关联档案推出，不另行登记。")}</span></DetailBlock>
+    <DetailBlock title={ui`关联客户 · ${customers.length}`}>{customers.length ? <div className="mist-col" style={{ gap: 0 }} data-trend-customers>{customers.map(c => <div key={c.id} className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}><span style={{ flex: 1, minWidth: 0 }}>{c.name}<small className="mist-cell-sub">{uiText("报价 ")}{c.codes.join('、')}</small></span><Button variant="quiet" onClick={() => onOpen('crm', c.id, { customerId: c.id })}>{uiText("客户业务")}</Button></div>)}</div> : <span className="mist-muted">{uiText("还没有客户的报价引用这些面料。")}</span>}</DetailBlock>
     <DetailBlock title={uiText("附件")}>{attachments}</DetailBlock>
     <DetailBlock title={uiText("处理记录")}>{history}</DetailBlock>
   </DetailBody>;

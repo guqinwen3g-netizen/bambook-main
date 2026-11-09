@@ -234,11 +234,12 @@ describe('market history and lookbook specifications',()=>{
   expect(s.events.every(e=>!e.text.startsWith('market.'))).toBe(true);
  });
  it('freezes all structured fields for export and keeps an explicit specification authoritative',()=>{
-  const {s,ctx}=setup();const ids=[run(s,{type:'market.product.save',payload:{input:{...productInput,specification:'',specs:{weight:'240',width:'150',weave:'斜纹',yarn:'32S',finish:'磨毛'}}}},ctx).id!,run(s,{type:'market.product.save',payload:{input:{...productInput,sku:'P2',specification:'客户签认规格',specs:{weight:'240'}}}},ctx).id!];
+  const {s,ctx}=setup();const ids=[run(s,{type:'market.product.save',payload:{input:{...productInput,specification:'',color:'藏青',customerCodes:[{customerId:'c',code:'C-01'}],specs:{weight:'240',width:'150',weave:'斜纹',yarn:'32S',finish:'磨毛'}}}},ctx).id!,run(s,{type:'market.product.save',payload:{input:{...productInput,sku:'P2',specification:'客户签认规格',specs:{weight:'240'}}}},ctx).id!];
+  (s.files as any[]).push({id:'doc',name:'a.pdf',mimeType:'application/pdf',size:1,storageKey:'k1',createdAt:''},{id:'img',name:'a.png',mimeType:'image/png',size:1,storageKey:'k2',createdAt:''});s.market.products.find(p=>p.id===ids[0])!.fileIds=['doc','img'];
   const id=run(s,{type:'market.lookbook.save',payload:{input:{name:'画册',customerId:'c',productIds:ids}}},ctx).id!;
   run(s,{type:'market.lookbook.status',payload:{id,status:'Prepared'}},ctx);
   const snapshots=s.market.lookbooks[0].snapshots;
-  expect(snapshots[0].specification).toBe('棉 · 克重 240 g/m² · 门幅 150 cm · 组织 斜纹 · 纱支 / 原料 32S · 后整理 磨毛');
+  expect(snapshots[0]).toMatchObject({specification:'克重 240 g/m² · 门幅 150 cm · 组织 斜纹 · 纱支 / 原料 32S · 后整理 磨毛',composition:'棉',color:'藏青',customerCode:'C-01'});expect(snapshots[1].customerCode).toBeUndefined();expect(snapshots[0].imageFileId).toBe('img');expect(snapshots[1].imageFileId).toBeUndefined();
   expect(snapshots[1].specification).toBe('客户签认规格');expect(s.events[0].text).toBe('准备画册');
   s.market.products.find(p=>p.id===ids[0])!.specs!.finish='防泼水';expect(snapshots[0].specification).toContain('磨毛');
  });

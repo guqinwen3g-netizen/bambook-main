@@ -1329,7 +1329,8 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "types": {
    "Input": "Omit<T,keyof RecordBase|'status'> & {fileIds?:string[];note?:string}",
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }",
-   "MarketLookbook": "RecordBase & { name:string; customerId:string; productIds:string[]; status:'Draft'|'Prepared'|'Archived'; preparedAt:string|null; snapshots:Array<{id:string;sku:string;name:string;specification:string}> }"
+   "MarketLookbook": "RecordBase & { name:string; customerId:string; productIds:string[]; status:'Draft'|'Prepared'|'Archived'; preparedAt:string|null; snapshots:LookbookSnapshot[] }",
+   "LookbookSnapshot": "{id:string;sku:string;name:string;specification:string;customerCode?:string;composition?:string;color?:string;imageFileId?:string}"
   },
   "source": "server/src/shared/mistMarket.ts"
  },
@@ -1337,8 +1338,9 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "market.lookbook.status",
   "payload": "{id:string;status:MarketLookbook['status']}",
   "types": {
-   "MarketLookbook": "RecordBase & { name:string; customerId:string; productIds:string[]; status:'Draft'|'Prepared'|'Archived'; preparedAt:string|null; snapshots:Array<{id:string;sku:string;name:string;specification:string}> }",
-   "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }"
+   "MarketLookbook": "RecordBase & { name:string; customerId:string; productIds:string[]; status:'Draft'|'Prepared'|'Archived'; preparedAt:string|null; snapshots:LookbookSnapshot[] }",
+   "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }",
+   "LookbookSnapshot": "{id:string;sku:string;name:string;specification:string;customerCode?:string;composition?:string;color?:string;imageFileId?:string}"
   },
   "source": "server/src/shared/mistMarket.ts"
  },

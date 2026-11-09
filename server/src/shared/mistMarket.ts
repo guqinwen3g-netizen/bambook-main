@@ -1,4 +1,5 @@
 import { scheduleCrmFollowUp } from './mistCrm';
+import { primaryImageId } from './mistPrimaryImage';
 import {freezeQuotationHistoryEvidence,type QuoteHistoryReference} from './mistQuotationHistoryEvidence';
 import {mistImportPermission,mistImportRun,type MistImportKind,type MistImportRow} from './mistImport';
 import {quotationFeedbackTarget,validateQuoteFeedback,type QuoteFeedbackInput,type QuoteFeedbackRecord} from './mistQuotationFeedback';
@@ -36,7 +37,14 @@ export const PRODUCT_SPEC_FIELDS:Record<MarketProduct['category'],Array<{key:str
 /** Archive/export all registered specifications, unlike the UI's abbreviated three-field preview. */
 export function marketProductSpecification(p: MarketProduct): string {
  if(p.specification.trim())return p.specification;
- return [p.composition,...PRODUCT_SPEC_FIELDS[p.category].map(field=>{const value=p.specs?.[field.key];return value?`${field.label} ${value}${field.unit?' '+field.unit:''}`:'';})].filter(Boolean).join(' · ');
+ return [p.composition,productSpecFields(p)].filter(Boolean).join(' · ');
+}
+function productSpecFields(p: MarketProduct): string {
+ return PRODUCT_SPEC_FIELDS[p.category].map(field=>{const value=p.specs?.[field.key];return value?`${field.label} ${value}${field.unit?' '+field.unit:''}`:'';}).filter(Boolean).join(' · ');
+}
+export function lookbookSnapshot(p: MarketProduct, customerId: string, imageFileId?: string): LookbookSnapshot {
+ const customerCode=customerId?p.customerCodes?.find(c=>c.customerId===customerId)?.code||'':'';
+ return {id:p.id,sku:p.sku,name:p.name,specification:p.specification.trim()||productSpecFields(p),...(customerCode?{customerCode}:{}),...(p.composition?{composition:p.composition}:{}),...(p.color?{color:p.color}:{}),...(imageFileId?{imageFileId}:{})};
 }
 /** Migrate communication history before appending the conversion action itself. */
 function continueLeadFollowUp(root:MistState,lead:MarketLead,customerId:string,ctx:MistContext){
@@ -73,7 +81,9 @@ export type MarketLead = RecordBase & { ownerId?:string; owner?:string; name:str
 export type MarketQuoteLine = { id:string; productId:string; sourceDevId:string; sourceVersionId:string; name:string; style:string; specification:string; qty:string; unit:string; price:string; cost:string; amount:string; costBasis?:'product'|'unverified'; /** BB-QUO-2 结构化规格与 MOQ；历史条目可能没有。 */ specs?:QuoteLineSpecs; /** BB-QUO-3 保存时冻结的最低毛利率版本；历史条目没有则不按底价线判断。 */ marginFloor?:FrozenMarginFloor; /** BB-QUO-3 服务端保存时按当时来源判定的板块（null=当时不属面料/成衣）；历史条目没有，编辑时按已保存单位兼容推断。不随产品档案之后改类别变化。 */ family?:QuoteFamily|null; /** BB-QUO-5 条目转单去向；仅转单命令写入。 */ conversion?:QuoteLineConversion; /** BB-QUO-5 标记不再转及原因。 */ skipped?:QuoteLineSkip };
 export type MarketQuoteApproval = { id:string; requesterId:string; reviewerId:string; status:'pending'|'approved'|'rejected'; submittedAt:string; decidedAt?:string; note?:string; details:Array<{label:string;value:string}>; fileIds:string[]; /** Immutable audit links, separate from human-readable approval text. */ costingRefs?:Array<{lineId:string;snapshotId:string;modelVersion:string}> };
 export type MarketQuotation = RecordBase & { code:string; customerId:string; currency:string; season:string; validUntil:string; deliveryTerms:string; paymentTerms:string; status:'Draft'|'Sent'|'Accepted'|'Rejected'|'Expired'; lines:MarketQuoteLine[]; total:string; deliveryEvidence:string; responseEvidence:string; approval:MarketQuoteApproval|null; approvalHistory?:MarketQuoteApproval[]; requiresApproval?:boolean; convertedOrderId:string|null; /** 报价汇率：1 单位报价币种折人民币（报价时预计的结汇汇率，非人民币报价才有）；随报价版本冻结，已发送版本不可改，报表“报价预计”口径取此值。 */ fxRate?:string; /** 版本链：V1 无 previousId；新版本不覆盖旧版本。 */ revision?:number; rootId?:string; previousId?:string;costingSnapshots?:QuoteCostSnapshot[];feedback?:QuoteFeedbackRecord[]; /** BB-QUO-6 生成的报价单文件记录；只追加，仅由生成命令写入。 */ documents?:QuoteDocumentRecord[] };
-export type MarketLookbook = RecordBase & { name:string; customerId:string; productIds:string[]; status:'Draft'|'Prepared'|'Archived'; preparedAt:string|null; snapshots:Array<{id:string;sku:string;name:string;specification:string}> };
+export type MarketLookbook = RecordBase & { name:string; customerId:string; productIds:string[]; status:'Draft'|'Prepared'|'Archived'; preparedAt:string|null; snapshots:LookbookSnapshot[] };
+/** 画册准备时冻结的产品资料：客户款号按目标客户取；成分、颜色单列，规格不重复成分。 */
+export type LookbookSnapshot = {id:string;sku:string;name:string;specification:string;customerCode?:string;composition?:string;color?:string;/** 准备时的产品主图 */imageFileId?:string};
 export type MarketState = { products:MarketProduct[]; suppliers:MarketSupplier[]; relations:MarketRelation[]; seasons:MarketSeason[]; trends:MarketTrend[]; shows:MarketShow[]; campaigns:MarketCampaign[]; leads:MarketLead[]; quotations:MarketQuotation[]; lookbooks:MarketLookbook[]; /** BB-QUO-3 定价参数：最低毛利率版本，只追加不改写。 */ marginFloors?:QuoteMarginFloor[] };
 type Input<T extends RecordBase> = Omit<T,keyof RecordBase|'status'> & {fileIds?:string[];note?:string};
 export type MarketCommand =
@@ -528,7 +538,7 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    root.files.push(structuredClone(artifact!.file));q.documents=[...(q.documents||[]),structuredClone(record)];history(root,ctx,'quotation',q.id,`生成${record.draft?'草稿水印版':'正式'}报价单 ${q.code} ${quoteDocumentVersionLabel(q)}（${record.fileName}）`,[record.fileId]);result={id:q.id,documentId:record.id,fileId:record.fileId};break;}
   case 'market.quotation.skipLines':{const q=find(m.quotations,command.payload.id,'报价');if(q.status!=='Accepted')fail('仅客户已接受的报价可标记条目不再转');const lines=pickQuoteLines(root,q,command.payload.lineIds),reason=str(command.payload.reason,'不再转原因');lines.forEach(l=>{l.skipped={reason,at:ctx.now,by:ctx.actorName,byId:ctx.actorId||''};});q.updatedAt=ctx.now;history(root,ctx,'quotation',q.id,`条目标记不再转：${lines.map(l=>l.name).join('、')}；原因：${reason}`);result={id:q.id};break;}
   case 'market.lookbook.save':{const {id,input}=command.payload,old=id?find(m.lookbooks,id,'画册'):undefined;if(old&&old.status!=='Draft')fail('已准备或归档画册不可改写');if(input.customerId)find(root.customers,input.customerId,'客户');const row:MarketLookbook={...base(root,ctx,input,old),name:str(input.name,'画册名称'),customerId:input.customerId||'',productIds:productRefs(m,input.productIds),status:'Draft',preparedAt:null,snapshots:[]};put(m.lookbooks,row,old);result={id:row.id};break;}
-  case 'market.lookbook.status':{const row=find(m.lookbooks,command.payload.id,'画册'),next=one(command.payload.status,['Draft','Prepared','Archived'],'画册状态');if(row.status==='Archived')fail('归档画册不可修改');if(next===row.status)return{id:row.id};if(next==='Prepared'){if(row.status!=='Draft')fail('请先退回草稿再重新准备画册');if(!row.productIds.length)fail('准备画册至少选择一个产品');productRefs(m,row.productIds);row.snapshots=row.productIds.map(id=>{const p=find(m.products,id,'产品');return {id:p.id,sku:p.sku,name:p.name,specification:marketProductSpecification(p)};});row.preparedAt=ctx.now;}if(next==='Draft'){row.preparedAt=null;row.snapshots=[];}row.status=next;row.updatedAt=ctx.now;result={id:row.id};break;}
+  case 'market.lookbook.status':{const row=find(m.lookbooks,command.payload.id,'画册'),next=one(command.payload.status,['Draft','Prepared','Archived'],'画册状态');if(row.status==='Archived')fail('归档画册不可修改');if(next===row.status)return{id:row.id};if(next==='Prepared'){if(row.status!=='Draft')fail('请先退回草稿再重新准备画册');if(!row.productIds.length)fail('准备画册至少选择一个产品');productRefs(m,row.productIds);row.snapshots=row.productIds.map(id=>{const p=find(m.products,id,'产品');return lookbookSnapshot(p,row.customerId,primaryImageId(root.files??[],p.fileIds));});row.preparedAt=ctx.now;}if(next==='Draft'){row.preparedAt=null;row.snapshots=[];}row.status=next;row.updatedAt=ctx.now;result={id:row.id};break;}
  }
  if(!result.id)fail('市场操作没有返回业务对象','INVALID_STATE');const described=root.events.slice(0,root.events.length-eventsBefore).some(e=>e.entityId===String(result.id));if(!described){
   const [,kind,action]=command.type.split('.');

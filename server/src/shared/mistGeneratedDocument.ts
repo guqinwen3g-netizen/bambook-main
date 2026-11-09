@@ -9,7 +9,8 @@ import type { MistCompanyProfile } from './mistWorkspace';
 
 export const GENERATED_DOCUMENT_TEMPLATE_VERSION = 1 as const;
 export type Bilingual = { zh: string; en: string };
-export type GeneratedColumn = { key: string; label: Bilingual; num?: boolean };
+/** image：该列单元格存的是私有图片文件编号，渲染时由服务端换成内嵌图片；快照只冻结编号。 */
+export type GeneratedColumn = { key: string; label: Bilingual; num?: boolean; image?: boolean };
 export type GeneratedDocSnapshot = {
   templateVersion: typeof GENERATED_DOCUMENT_TEMPLATE_VERSION;
   kind: string; number: string; date: string; title: Bilingual;
