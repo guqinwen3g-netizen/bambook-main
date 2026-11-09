@@ -112,7 +112,7 @@ function applySnapshot(root:MistState,order:GovernedOrder,s:OrderGovernanceSnaps
 function event(root:MistState,c:MistContext,order:GovernedOrder,message:string){root.events.unshift({id:c.id(),entityType:'order',entityId:order.id,actor:c.actorName,at:c.now,text:message,fileIds:[]});}
 export function assertOrderApproved(root:MistState,orderId:string){const order=getOrder(root,orderId);assertOrderNotTerminated(order);if(order.governance?.status!=='approved'||!order.governance.approvedSnapshot)fail('订单主单尚未批准，不能进入采购或履约','PRECONDITION');if(!sameCommercialSnapshot(snapshot(root,order),order.governance.approvedSnapshot))fail('订单生效内容与批准快照不一致，不能进入履约','PRECONDITION');return order;}
 function reviewLine(snapshot:OrderGovernanceSnapshot,line:OrderGovernanceLine):string{
- const parts=[`${line.qty} ${line.unit} × ${line.price} ${snapshot.currency}`];
+ const parts=[snapshot.contract.kind==='internal'&&!line.price?`${line.qty} ${line.unit} · 未定价`:`${line.qty} ${line.unit} × ${line.price} ${snapshot.currency}`];
  if(line.nameEn)parts.push('英文品名 '+line.nameEn);
  if(line.breakdown)parts.push(breakdownSummary(line.breakdown,line.unit));
  if(snapshot.type==='garment'){
@@ -133,7 +133,7 @@ export function getOrderGovernanceReviews(root:MistState):MistReviewTask[]{
     {label:internal?'接收负责人':'客户',value:internal?contract.receiver:snapshot.customer},
     {label:internal?'内部用途':'合同',value:internal?contract.internalPurpose:contract.poNumber},
     ...(internal?[{label:'交接约定',value:contract.paymentNote}]:replacement?[{label:'客户收款',value:'无需收款'}]:[{label:'付款',value:(contract.paymentMethod==='OTHER'?'其他':contract.paymentMethod)+' · '+contract.paymentNote},...(contract.paymentMethod==='TT'?[{label:'出运前累计收款',value:contract.preShipmentPercent==null?'待核对':contract.preShipmentPercent+'%'}]:[])]),
-    {label:'交期',value:snapshot.due},{label:internal?'交付地点':'贸易条件',value:contract.incoterm+' '+contract.deliveryPlace},{label:'溢短装',value:replacement?'按批准数量':toleranceText(contract)},...(snapshot.type==='garment'?[{label:'数量口径',value:contract.quantityBasis==='size'?'按尺码':contract.quantityBasis==='total'?'按总量':'待核对'},{label:'数量依据',value:contract.quantityBasisNote||'待核对'}]:[]),
+    {label:'交期',value:snapshot.due},{label:internal?'交付方式 / 地点':'贸易条件',value:internal?[contract.incoterm,contract.deliveryPlace].filter(Boolean).join(' / '):contract.incoterm+' '+contract.deliveryPlace},{label:'溢短装',value:replacement?'按批准数量':toleranceText(contract)},...(snapshot.type==='garment'?[{label:'数量口径',value:contract.quantityBasis==='size'?'按尺码':contract.quantityBasis==='total'?'按总量':'待核对'},{label:'数量依据',value:contract.quantityBasisNote||'待核对'}]:[]),
     ...(round.reason?[{label:'变更原因',value:round.reason}]:[]),...(round.kind==='change'&&round.status==='pending'?orderChangeImpactDetails(orderChangeImpact(root,order,snapshot.lines)):[]),
     ...snapshot.lines.map(line=>({label:line.style+' · '+line.name,value:reviewLine(snapshot,line)})),
    ]};
