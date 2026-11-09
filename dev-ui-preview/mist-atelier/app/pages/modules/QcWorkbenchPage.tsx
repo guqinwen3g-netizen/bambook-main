@@ -139,6 +139,13 @@ export function QcWorkbenchPage() {
     ],
     fields: [field('source', '送检来源', 'select', true, qcSources.filter(option => !option.value || (option.value.startsWith('version:') ? session.hasPermission('products:write') : session.hasPermission('orders:write')))), field('kind', '任务类别', 'select', true, [{ value: 'sample', label: '样品评审' }, { value: 'production', label: '生产检验' }]), field('factory', '工厂'), field('location', '实际检查地点'), field('contact', '现场联系人', 'text', false), field('due', '预计检查日', 'date')],
     initialValues: { source: route.productionId ? 'production:' + route.productionId : route.versionId ? 'version:' + route.versionId : route.orderLineId ? 'line:' + route.orderLineId : '', kind:kind==='quarantine'?'sample':kind, factory: state?.productions.find(p => p.id === route.productionId)?.factory || state?.versions.find(v => v.id === route.versionId)?.factory || '', location: '', contact: '', due: today() },
+    derive: (key, value) => {
+      if (key !== 'source' || !state) return {};
+      const raw = String(value || ''), sample = raw.startsWith('sample:') ? state.fulfillment.samples.find(item => item.id === raw.slice(7)) : undefined;
+      const source = sample ? sample.source : raw.startsWith('production:') ? { kind: 'orderLine' as const, productionId: raw.slice(11) } : raw.startsWith('version:') ? { kind: 'version' as const, versionId: raw.slice(8) } : undefined;
+      const factory = source?.kind === 'orderLine' ? state.productions.find(p => p.id === source.productionId)?.factory : source?.kind === 'version' ? state.versions.find(v => v.id === source.versionId)?.factory : undefined;
+      return { ...(factory ? { factory } : {}), ...(sample?.location ? { location: sample.location } : {}) };
+    },
     submit: async values => {
       if (!state) return;
       const sample = text(values, 'source').startsWith('sample:') ? state.fulfillment.samples.find(item => item.id === text(values, 'source').slice(7)) : undefined;
