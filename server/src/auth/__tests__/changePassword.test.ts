@@ -32,6 +32,10 @@ it('本人改密后清除管理员重置留下的 forceChangePassword，其余 m
   expect(updates[0].metadata).not.toHaveProperty('forceChangeReason');
   expect(await auth.verifyPassword('New-pass-22', user.passwordHash)).toBe(true);
 });
+it('新密码与当前密码相同时拒绝，强制改密标记保留', async () => {
+  const res = await request(app()).post('/auth/change-password').set('Authorization', `Bearer ${token()}`).send({ currentPassword: 'Temp-pass-1', newPassword: 'Temp-pass-1' });
+  expect(res.status).toBe(400); expect(res.body.error).toBe('SAME_PASSWORD'); expect(updates).toEqual([]);
+});
 it('当前密码错误时不改任何字段；无重置标记时只更新密码', async () => {
   const wrong = await request(app()).post('/auth/change-password').set('Authorization', `Bearer ${token()}`).send({ currentPassword: 'nope', newPassword: 'New-pass-22' });
   expect(wrong.status).toBe(401); expect(updates).toEqual([]);

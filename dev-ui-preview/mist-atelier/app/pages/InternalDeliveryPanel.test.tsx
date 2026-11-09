@@ -47,6 +47,7 @@ it('lets the exact recipient count a minimal projected handover and preserves in
  expect(detail.textContent).toContain('Jacket');expect(queryByRole(detail,'button',{name:'打开来源订单'})).toBeNull();
  await click(getByRole(detail,'button',{name:'登记点收'}));
  const dialog=getByRole(document.body,'dialog',{name:'登记内部点收'});
+ expect((getByLabelText(dialog,'接收数量') as HTMLInputElement).value).toBe(String(f.state.internalDeliveries![0].quantity));
  await fill('接收数量','6',dialog);await fill('拒收数量','4',dialog);await fill('点收依据','Counted with four rejected pieces',dialog);
  store.run.mockRejectedValueOnce(new Error('点收保存失败'));
  await click(getByRole(dialog,'button',{name:'保存点收'}));
@@ -66,7 +67,7 @@ it('shows correction, rejected-return and recall actions only for their eligible
  f.run({type:'order.internal.receive',payload:{id,accepted:6,rejected:4,expectedRevision:0,evidence:'Actual count'}},'warehouse');store.state=f.state;render(<InternalDeliveryPanel order={order}/>);
  detail=getByRole(document.body,'dialog',{name:'内部交付'});expect(queryByRole(detail,'button',{name:'撤回交付'})).toBeNull();
  await click(getByRole(detail,'button',{name:'登记拒收退回'}));
- const returned=getByRole(document.body,'dialog',{name:'登记拒收退回'});await fill('实际退回数量','4',returned);await fill('实际退回日期','2026-10-30',returned);await fill('实际退回依据','Rejected goods returned',returned);await click(getByRole(returned,'button',{name:'保存退回'}));
+ const returned=getByRole(document.body,'dialog',{name:'登记拒收退回'});expect((getByLabelText(returned,'实际退回数量') as HTMLInputElement).value).toBe('4');await fill('实际退回数量','4',returned);await fill('实际退回日期','2026-10-30',returned);await fill('实际退回依据','Rejected goods returned',returned);await click(getByRole(returned,'button',{name:'保存退回'}));
  expect(store.run).toHaveBeenLastCalledWith({type:'order.internal.returnRejected',payload:{id,quantity:4,date:'2026-10-30',evidence:'Rejected goods returned',expectedRevision:1}});
 });
 
@@ -102,5 +103,6 @@ it('offers only receivers the server says can take over the delivery',async()=>{
   expect(receivers.request).toHaveBeenCalledWith('/api/mist/workspaces/independent/internal-receivers');
   const select=getByLabelText(host,'本次接收账号',{exact:true}) as HTMLSelectElement;
   expect([...select.options].map(o=>o.value).filter(Boolean)).toEqual(['warehouse']);
+  expect(select.value).toBe('warehouse');
  }finally{receivers.list=[{id:'warehouse',name:'Warehouse'},{id:'garment',name:'Garment'}];}
 });

@@ -26,6 +26,7 @@
 import { PrismaClient } from '@prisma/client';
 import { logger } from '../lib/logger';
 import { businessNowDate } from '../shared/businessClock';
+import { localDateKey } from '../shared/localDate';
 
 
 // ───────────────────────────────────────────────────────────────────
@@ -126,10 +127,9 @@ export function isSequenceType(v: unknown): v is SequenceType {
 // ───────────────────────────────────────────────────────────────────
 // 周期键计算：year → 2026, month → 2026-08, day → 2026-08-15, none → __global__
 // ───────────────────────────────────────────────────────────────────
+// 年/月/日一律取业务时区（北京时间）日历，不随服务器本机时区漂移。
 export function periodKeyForDate(period: SequencePeriod, date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
+  const [y, m, d] = localDateKey(date).split('-');
   switch (period) {
     case 'year':  return String(y);
     case 'month': return `${y}-${m}`;
@@ -159,13 +159,13 @@ export interface FormatContext {
 }
 
 export function renderFormatTemplate(template: string, ctx: FormatContext): string {
-  const dt = ctx.date || businessNowDate();
+  const [y, m, d] = localDateKey(ctx.date || businessNowDate()).split('-');
   const defaultPad = ctx.defaultPadding || 4;
   return template
     .replace(/\{prefix\}/g, ctx.prefix)
-    .replace(/\{year\}/g, String(dt.getFullYear()))
-    .replace(/\{month\}/g, String(dt.getMonth() + 1).padStart(2, '0'))
-    .replace(/\{day\}/g, String(dt.getDate()).padStart(2, '0'))
+    .replace(/\{year\}/g, y)
+    .replace(/\{month\}/g, m)
+    .replace(/\{day\}/g, d)
     .replace(/\{seq:pad=(\d+)\}/g, (_m, pad) => String(ctx.seq).padStart(parseInt(pad, 10) || defaultPad, '0'))
     .replace(/\{seq:(\d+)\}/g, (_m, pad) => String(ctx.seq).padStart(parseInt(pad, 10) || defaultPad, '0'))
     .replace(/\{seq\}/g, String(ctx.seq).padStart(defaultPad, '0'));
@@ -500,8 +500,8 @@ export function createSequenceService(prisma: PrismaClient) {
     if (filter.voidedBy) where.voidedBy = filter.voidedBy;
     if (filter.fromDate || filter.toDate) {
       where.voidedAt = {} as any;
-      if (filter.fromDate) where.voidedAt.gte = new Date(`${filter.fromDate}T00:00:00Z`);
-      if (filter.toDate) where.voidedAt.lte = new Date(`${filter.toDate}T23:59:59Z`);
+      if (filter.fromDate) where.voidedAt.gte = new Date(`${filter.fromDate}T00:00:00+08:00`);
+      if (filter.toDate) where.voidedAt.lte = new Date(`${filter.toDate}T23:59:59.999+08:00`);
     }
     // 两次 findMany：一次拿总数（不带 take/skip），一次拿当前页
     const [allItems, items] = await Promise.all([

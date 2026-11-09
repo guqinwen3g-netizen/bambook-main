@@ -571,6 +571,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
     }
     const weakNew = passwordProblem(newPassword);
     if (weakNew) return res.status(400).json({ ok: false, error: 'WEAK_PASSWORD', message: weakNew });
+    if (newPassword === currentPassword) return res.status(400).json({ ok: false, error: 'SAME_PASSWORD', message: '新密码不能与当前密码相同。' });
     let payload: ReturnType<typeof auth.verifyToken>;
     try { payload = auth.verifyToken(token); } catch { return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Token expired or invalid.' }); }
     try {

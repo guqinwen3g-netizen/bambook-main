@@ -290,7 +290,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
     });
     const users = usersRaw.filter(u => {
       const metadata = (u.metadata || {}) as any;
-      return !metadata.erased && metadata.deletionMode !== 'erase-personal-data';
+      return u.id !== 'system' && !metadata.erased && metadata.deletionMode !== 'erase-personal-data';
     });
     // 部门选项随用户列表下发（与 knowledge-acl 返回 departments 同一模式），
     // 前端用户表单的部门字段用下拉选择，杜绝手填原始 ID。

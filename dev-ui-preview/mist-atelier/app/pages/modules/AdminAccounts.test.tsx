@@ -11,7 +11,8 @@ const api = vi.hoisted(() => ({
 vi.mock('../../runtime/organization', async orig => ({ ...(await orig<typeof import('../../runtime/organization')>()), organizationApi: api }));
 vi.mock('../../runtime/workspace', () => ({ useMistWorkspace: () => ({ workspace: null, state: null }) }));
 vi.mock('../../runtime/auth', () => { const useMistSession = () => ({ sessionKey: 'a', user: { id: 'owner', companyId: 'c1' }, hasRole: () => true, hasPermission: () => true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
-vi.mock('../../nav', () => ({ useNav: () => ({ route: { view: 'admin-panel' }, go: vi.fn() }) }));
+const nav = vi.hoisted(() => ({ go: vi.fn() }));
+vi.mock('../../nav', () => ({ useNav: () => ({ route: { view: 'admin-panel' }, go: nav.go }) }));
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLElement, root: Root;
@@ -59,4 +60,16 @@ it('keeps the initial-password mode and tells the admin the employee must change
   await act(async () => button('创建账号').click());
   expect(api.createAccount).toHaveBeenCalledWith(expect.objectContaining({ deliveryMode: 'password', password: 'safe-pass-1' }));
   expect(document.body.textContent).toContain('首次登录');
+});
+
+it('sends a new company without departments to department setup instead of an empty required choice', async () => {
+  act(() => root.unmount());
+  api.listAccounts.mockResolvedValueOnce({ users: [], departments: [{ id: 'company', name: '公司', parentId: null }] });
+  root = createRoot(host);
+  await act(async () => root.render(<MistRoot><ToastProvider><AdminAccounts /></ToastProvider></MistRoot>));
+  await act(async () => button('新建账号').click());
+  expect(document.querySelector('select[aria-label="任职部门"]')).toBeNull();
+  expect(document.body.textContent).toContain('还没有可任职的部门');
+  await act(async () => button('去建立部门').click());
+  expect(nav.go).toHaveBeenCalledWith('hr', undefined, { section: 'org' });
 });
