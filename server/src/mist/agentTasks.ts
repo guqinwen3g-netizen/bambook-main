@@ -13,7 +13,8 @@ import {CONDITION_CHECK_MS,taskConditionInput,type TaskCondition,type TaskCondit
 export const TASK_PREFIX = 'mist-revision:agent-task:';
 export const TASK_HASH = 'mist-agent-task:v1';
 export const TASK_FIELD = '__agentTask';
-import { agentTaskLimits } from './agentLimits';
+import { agentDailyLimits, agentTaskLimits } from './agentLimits';
+import { mistBusinessDate } from '../shared/mistBusinessClock';
 import { platformTrail } from './agentTaskTrail';
 export const TASK_HEADER = 'x-bambook-agent-task';
 export const TASK_CONTROL_HEADER = 'x-bambook-task-control';
@@ -124,6 +125,7 @@ export async function createTask(db: any, actor: TokenPayload, workspaceId: stri
   if (previous) { if (previous.inputHash !== inputHash) fail('CONFLICT', '操作编号已用于其他任务', 409);const c=(await taskRecord(db, workspaceId, previous.result.id)).value;let valid=c.scopeHash===scopeHash;try{await assertTaskAuthority(db,actor,c,now);}catch(e){if(!(e instanceof MistApiError))throw e;valid=false;}return taskView(c, actor, now,valid); }
   const active = await db.mistCommandReceipt.findMany({ where: { workspaceId, actorId: actor.userId, inputHash: TASK_HASH, AND: [{ OR: ['queued','running','waiting_time','waiting_condition','waiting_human','paused'].map(state => ({ result: { path: [TASK_FIELD, 'state'], equals: state } })) }, { result: { path: [TASK_FIELD, 'expiresAt'], gte: now } }] }, take: 10 });
   if (active.length >= ACTIVE_TASK_LIMIT) fail('AGENT_TASK_LIMIT', '请先结束已有任务', 422);
+  if (input.executor === 'platform') assertDailyRoom(await agentDailyUsage(db, workspaceId, actor.userId, now), true);
   const taskId = randomUUID(), at = new Date(now).toISOString();
   const c: TaskRecord = { schemaVersion: 1, id: taskId, workspaceId, identityId: identity.id, identityName: identity.name, ownerId: actor.userId, ownerName: actor.displayName || actor.userId, name, instructions, state: 'queued', version: 1, controlVersion: 1, createdAt: at, updatedAt: at, expiresAt: Math.min(now + TASK_TTL, key.expiresAt), authority: { id: identity.id, workspaceId, hash: key.hash, ownerId: actor.userId, issuedAt: key.issuedAt, expiresAt: key.expiresAt }, ceiling, credentialVersion: actor.credentialVersion, scopeHash, sources: [], mode:key.mode, stepsUsed: 0, runtimeUsedMs: 0, checkpoint: '', result: '', waitingProposalIds: [], operations: [], lastRequestId: requestId, lastAction: 'created', lastInputHash: inputHash };
   if(input.executor==='platform'){c.executor='platform';c.locale=locale;c.platform={steps:[],nextRunAt:0};}
@@ -234,9 +236,14 @@ export async function acknowledgePlatformStep(db:any,actor:AgentActor,lease:Agen
   await save(db,row,c,n);
 }
 /** Release only this completed local runner; human stop/pause or a revoked grant always wins. */
-export async function releasePlatformTask(db:any,actor:AgentActor,lease:AgentTaskLease,issue:'model_unavailable'|'model_response_invalid'|undefined,now:number){
+export async function releasePlatformTask(db:any,actor:AgentActor,lease:AgentTaskLease,issue:'model_unavailable'|'model_response_invalid'|'daily_limit'|undefined,now:number){
   await lockTaskRecord(db,lease.workspaceId,lease.taskId);const{row,value:c}=await assertTaskLease(db,actor,lease,now);
   if(c.executor!=='platform'||actor.agentExecutor!=='platform'||!c.platform)fail('FORBIDDEN','请使用平台任务执行器',403);
+  if(issue==='daily_limit'){
+    // 用量上限不是模型故障：立即暂停、不计失败次数；本人次日恢复后从原步骤继续。
+    const requestId=randomUUID(),n={...next(c,now,'model_paused',requestId,['daily_limit']),state:'paused' as const,controlVersion:c.controlVersion+1,runtimeUsedMs:usedRuntime(c,now),lease:undefined,checkpoint:'今日小竹用量已达上限，任务已暂停；明天恢复后可从原步骤继续。',platform:{...c.platform,nextRunAt:now+1000,retryAt:undefined,checkpointBeforeIssue:c.platform.checkpointBeforeIssue??c.checkpoint}};
+    await save(db,row,c,n);await event(db,n,actor,'model_paused',requestId,now);return;
+  }
   const failures=issue?(c.platform.failures??0)+1:c.platform.failures??0,retryAt=now+(issue?Math.min(300_000,10_000*2**Math.min(failures,5)):1000),paused=!!issue&&failures>=3;
   const requestId=randomUUID(),action=issue?(paused?'model_paused':'model_retry'):'recovering',n={...next(c,now,action,requestId,[issue??'interrupted']),state:paused?'paused' as const:'queued' as const,controlVersion:c.controlVersion+(paused?1:0),runtimeUsedMs:usedRuntime(c,now),lease:undefined,platform:{...c.platform,nextRunAt:retryAt,retryAt:issue&&!paused?retryAt:undefined,issue,failures}};
   if(issue)n.checkpoint=(issue==='model_response_invalid'?'模型响应无效':'模型暂不可用')+(paused?'，任务已暂停；恢复后可从原步骤继续。':'，稍后核对原步骤重试。');
@@ -423,6 +430,29 @@ export async function resolveTaskCredential(db: any, token: unknown, now: number
  * 个人 Agent 用量（平台执行任务的模型轮次），按账号与自然月汇总。只读元数据，不含任务内容。
  * 费用按 2026-11-04 定案记到公司；收费与结算本期不做，这里只提供计量。
  */
+export type AgentDailyUsage = { date: string; tasks: number; turns: number; companyTurns: number; limits: ReturnType<typeof agentDailyLimits> };
+/**
+ * 今日（上海营业日）平台任务用量：本人新建任务数、本人与全公司模型调用次数。
+ * 任务最长有效 24 小时，今日的调用只可能来自 48 小时内创建的任务，按创建时间限定扫描范围。
+ */
+export async function agentDailyUsage(db: any, workspaceId: string, ownerId: string, now: number, env: NodeJS.ProcessEnv = process.env): Promise<AgentDailyUsage> {
+  const date = mistBusinessDate(new Date(now)), limits = agentDailyLimits(env);
+  const rows = await db.mistCommandReceipt.findMany({ where: { workspaceId, inputHash: TASK_HASH, requestId: { startsWith: TASK_PREFIX }, createdAt: { gte: new Date(now - 2 * 86400_000 - TASK_TTL) } } });
+  let tasks = 0, turns = 0, companyTurns = 0;
+  for (const row of rows) {
+    let c: TaskRecord; try { c = record(row, workspaceId); } catch { continue; }
+    if (c.executor !== 'platform') continue;
+    const today = (c.platform?.steps ?? []).filter(s => typeof s.at === 'string' && mistBusinessDate(s.at) === date).length;
+    companyTurns += today;
+    if (c.ownerId === ownerId) { turns += today; if (mistBusinessDate(c.createdAt) === date) tasks++; }
+  }
+  return { date, tasks, turns, companyTurns, limits };
+}
+/** 达到每日上限时拒绝：新建任务同时检查任务数，继续执行只检查模型调用次数。 */
+export function assertDailyRoom(u: AgentDailyUsage, creating: boolean) {
+  if (u.companyTurns >= u.limits.turnsPerCompany) fail('AGENT_DAILY_LIMIT', '公司今日小竹用量已达上限，明天再安排', 429);
+  if (u.turns >= u.limits.turnsPerUser || creating && u.tasks >= u.limits.tasksPerUser) fail('AGENT_DAILY_LIMIT', '你今日的小竹用量已达上限，明天再安排', 429);
+}
 export async function platformTaskUsage(db: any, workspaceId: string, month: string, ownerId?: string) {
   const rows = await db.mistCommandReceipt.findMany({ where: { workspaceId, inputHash: TASK_HASH, requestId: { startsWith: TASK_PREFIX }, ...(ownerId ? { actorId: ownerId } : {}) } });
   const out = new Map<string, { ownerId: string; ownerName: string; tasks: number; modelTurns: number; runtimeMs: number }>();

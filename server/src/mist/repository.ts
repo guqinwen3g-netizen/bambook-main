@@ -30,7 +30,7 @@ import { isAgentActor, type AgentActor } from './agentDelegation';
 import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, assertTaskLease, assertTaskAuthority, assertTaskViewAuthority, acknowledgePlatformStep, advanceTaskSources, answerTaskQuestion, askTaskQuestion, changeTask, checkpointTask, claimTask, deferPlatformJob, duePlatformTasks, createTask, finishTask, finishTaskSession, heartbeatTask, issueTaskControl, listTasks, readTaskRecord, reserveTaskStep, resolveTaskControl, resolveTaskCredential, releasePlatformTask, savePlatformPlan, saveTaskSources, settleTaskProposal, taskHistory, taskRecord, taskView, waitTaskForProposal, type MakeTaskCredential, type MakeTaskControl, type TaskRecord, type PlatformTaskJob } from './agentTasks';
 import { collectTaskSources, knownCommandSourcesVisible, taskScopeHash, taskSourcesVisible } from './agentTaskVisibility';
 import {taskNotice,taskNoticeCandidates} from './agentTaskAttention';
-import {markTaskNoticeRead,waitTaskUntil,platformTaskUsage} from './agentTasks';
+import {markTaskNoticeRead,waitTaskUntil,platformTaskUsage,agentDailyUsage,assertDailyRoom} from './agentTasks';
 import {assertTaskBusinessRead,checkTaskCondition,type PlatformTaskScanCursor} from './agentTasks';
 import {prepareTaskCondition,taskConditionChanged} from './agentTaskConditions';
 import type {PlatformTaskContext,PlatformTaskPlan} from './platformTaskPlan';
@@ -247,7 +247,9 @@ export class MistRepository {
   }
   async savePlatformTaskPlan(prior:AgentActor,plan:PlatformTaskPlan){return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,prior.agentTaskLease!.workspaceId,'ai:chat');return savePlatformPlan(db,{...prior,...actor},prior.agentTaskLease!,plan,Date.now());});}
   async acknowledgePlatformTaskStep(prior:AgentActor,id:string,result:unknown){return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,prior.agentTaskLease!.workspaceId,'ai:chat');return acknowledgePlatformStep(db,{...prior,...actor},prior.agentTaskLease!,id,result,Date.now());});}
-  async releasePlatformTask(prior:AgentActor,issue?:'model_unavailable'|'model_response_invalid'){return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,prior.agentTaskLease!.workspaceId);return releasePlatformTask(db,{...prior,...actor},prior.agentTaskLease!,issue,Date.now());});}
+  /** 执行器每次调用模型前核对今日用量；超出时返回 false，由执行器暂停任务。 */
+  async platformTaskDailyRoom(prior:AgentActor):Promise<boolean>{if(prior.agentExecutor!=='platform'||!prior.agentTaskLease)fail('FORBIDDEN','请使用平台任务执行器',403);return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,prior.agentTaskLease!.workspaceId);try{assertDailyRoom(await agentDailyUsage(db,prior.agentTaskLease!.workspaceId,actor.userId,Date.now()),false);return true;}catch(e:any){if(e?.code==='AGENT_DAILY_LIMIT')return false;throw e;}});}
+  async releasePlatformTask(prior:AgentActor,issue?:'model_unavailable'|'model_response_invalid'|'daily_limit'){return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,prior.agentTaskLease!.workspaceId);return releasePlatformTask(db,{...prior,...actor},prior.agentTaskLease!,issue,Date.now());});}
   private mailStateWake?: () => void;
   setMailStateWake(wake: () => void) { this.mailStateWake = wake; }
   constructor(private readonly prisma: any, private readonly contract: MistContract, private readonly files: MistPrivateFiles, private readonly authorize: FreshAuthority = freshMistAuthority, private readonly now = () => new Date(), private readonly creditArchiveBuilder: (snapshot: MistCreditPrintSnapshot, options?: {draft?: boolean}) => Promise<PreparedCreditIssueArchive> = buildIssueArchive, private readonly quotationPdfRenderer?: (html: string) => Promise<PdfRenderResult>, private readonly verifyPassword: MistPasswordVerifier = verifyAccountPassword, private reauthLimiter?: LoginRateLimiter) {}
@@ -475,7 +477,7 @@ export class MistRepository {
   /** 个人 Agent 用量：本人看自己的；公司管理员（users:write）看全公司。 */
   async personalAgentUsage(prior:TokenPayload,workspaceId:string,month:unknown){
     if(typeof month!=='string'||!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))fail('INVALID_INPUT','月份格式为 YYYY-MM',400);
-    return this.transact(async db=>{const{actor}=await this.own(db,prior,workspaceId);const all=!isAgentActor(prior)&&serviceCanManage(actor);return{month,scope:all?'company':'mine',items:await platformTaskUsage(db,workspaceId,month as string,all?undefined:actor.userId)};});
+    return this.transact(async db=>{const{actor}=await this.own(db,prior,workspaceId);const all=!isAgentActor(prior)&&serviceCanManage(actor);const today=await agentDailyUsage(db,workspaceId,actor.userId,Date.now());return{month,scope:all?'company':'mine',items:await platformTaskUsage(db,workspaceId,month as string,all?undefined:actor.userId),today:{tasks:today.tasks,turns:today.turns,taskLimit:today.limits.tasksPerUser,turnLimit:today.limits.turnsPerUser,...(all?{companyTurns:today.companyTurns,companyTurnLimit:today.limits.turnsPerCompany}:{})}};});
   }
   /** Heartbeat/control traffic reads company metadata, never the shared business JSON. */
   private async taskAccess(db:any,prior:TokenPayload,workspaceId:string,permission?:string){
@@ -559,7 +561,7 @@ export class MistRepository {
     let taskId:string|undefined;
     if(decision.fire){
       try{const task=await this.assignPersonalAgentTask(prior,workspaceId,{requestId:'auto-'+rule.id+'-'+rule.version,name:(rule.name+' · '+decision.fire.detail).slice(0,60),instructions:automationInstructions(rule,decision.fire.facts),locale:'zh-CN'},make,rule.id);taskId=task.id;}
-      catch(error:any){if(error?.code==='AGENT_TASK_LIMIT'||error?.status===503)return{fired:false};if([401,403,422].includes(error?.status)){await this.haltAutomation(workspaceId,id,error?.message||'规则无法运行，请重新启用',now);return{fired:false};}await this.automationFailed(workspaceId,id,error,now).catch(()=>undefined);throw error;}
+      catch(error:any){if(error?.code==='AGENT_TASK_LIMIT'||error?.code==='AGENT_DAILY_LIMIT'||error?.status===503)return{fired:false};if([401,403,422].includes(error?.status)){await this.haltAutomation(workspaceId,id,error?.message||'规则无法运行，请重新启用',now);return{fired:false};}await this.automationFailed(workspaceId,id,error,now).catch(()=>undefined);throw error;}
     }
     const changed=taskId||rule.failures||JSON.stringify(decision.next)!==JSON.stringify({seen:rule.seen,primed:rule.primed,lastDay:rule.lastDay,since:rule.since});
     if(changed)await this.connectionTransaction(async db=>{const{row,value}=await automationRecord(db,workspaceId,id);await writeAutomation(db,row,value,recordAutomationRun(value,decision,taskId,decision.fire?.detail??'',now));});
