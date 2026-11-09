@@ -467,9 +467,9 @@ export class MistRepository {
   async authorizePersonalAgentVoice(prior:TokenPayload,workspaceId:string){if(isAgentActor(prior))fail('FORBIDDEN','语音只供本人使用',403);await this.transact(async db=>{const actor=await this.taskAccess(db,prior,workspaceId,'ai:chat');await assertPersonalVoiceAvailable(db,actor,workspaceId);});}
   async assignPersonalAgentTask(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>,make:MakeServiceCredential,automationId?:string){
     if(isAgentActor(prior))fail('FORBIDDEN','任务须由本人安排',403);
-    if(Object.keys(input).some(k=>!['requestId','name','instructions','locale'].includes(k)))fail('INVALID_INPUT','任务字段无效',400);
+    if(Object.keys(input).some(k=>!['requestId','name','instructions','locale','conversationId'].includes(k)))fail('INVALID_INPUT','任务字段无效',400);
     const identity=await this.ensurePersonalAgent(prior,workspaceId,make);
-    return this.createAgentTask(prior,workspaceId,{requestId:input.requestId,identityId:identity.id,name:input.name,instructions:input.instructions,executor:'platform',...(input.locale!==undefined?{locale:input.locale}:{})},automationId);
+    return this.createAgentTask(prior,workspaceId,{requestId:input.requestId,identityId:identity.id,name:input.name,instructions:input.instructions,executor:'platform',...(input.locale!==undefined?{locale:input.locale}:{}),...(input.conversationId!==undefined?{conversationId:input.conversationId}:{})},automationId);
   }
   /** 个人 Agent 用量：本人看自己的；公司管理员（users:write）看全公司。 */
   async personalAgentUsage(prior:TokenPayload,workspaceId:string,month:unknown){

@@ -11,7 +11,7 @@ import { mistApiRequest } from './workspace';
 
 export const COWORK_ACTIVE: ReadonlyArray<AgentTaskView['state']> = ['queued', 'running', 'waiting_time', 'waiting_condition', 'waiting_human'];
 const REQUEST_MARK = '\n【本次请求】\n';
-const CONTEXT_TURNS = 3, CONTEXT_REPLY = 300, THREAD_LIMIT = 30, INSTRUCTION_LIMIT = 4000;
+const CONTEXT_TURNS = 3, CONTEXT_REPLY = 300, THREAD_LIMIT = 90, LIST_PAGES = 3, INSTRUCTION_LIMIT = 4000, LEGACY_GAP_MS = 30 * 60_000;
 
 /** 把此前几轮的问答压成一段上下文，随本次请求一起交给任务；展示时用 splitRequest 去掉。 */
 export function composeInstructions(history: AgentTaskView[], text: string): string {
@@ -27,6 +27,20 @@ export function splitRequest(instructions: string): string {
   return at >= 0 ? instructions.slice(at + REQUEST_MARK.length) : instructions;
 }
 
+export type XiaozhuConversation = { id: string; title: string; startedAt: string; lastAt: string; tasks: AgentTaskView[]; active: boolean; legacy: boolean };
+export const newConversationId = () => 'c_' + crypto.randomUUID().replace(/-/g, '');
+/** 按对话归组（最新的在前）。早期没有对话编号的提问，相隔 30 分钟内的算同一段对话。 */
+export function conversationsOf(tasks: AgentTaskView[]): XiaozhuConversation[] {
+  const groups = new Map<string, AgentTaskView[]>(); let legacy: { id: string; at: number } | undefined;
+  for (const t of [...tasks].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+    let key = t.conversationId;
+    if (!key) { const at = Date.parse(t.createdAt); if (!legacy || at - legacy.at > LEGACY_GAP_MS) legacy = { id: 'legacy:' + t.id, at }; else legacy.at = at; key = legacy.id; }
+    groups.set(key, [...(groups.get(key) ?? []), t]);
+  }
+  return [...groups].map(([id, list]) => ({ id, tasks: list, title: splitRequest(list[0].instructions).split('\n')[0].slice(0, 60) || list[0].name, startedAt: list[0].createdAt, lastAt: list.reduce((m, t) => t.updatedAt > m ? t.updatedAt : m, list[0].updatedAt), active: list.some(t => COWORK_ACTIVE.includes(t.state)), legacy: id.startsWith('legacy:') }))
+    .sort((a, b) => b.lastAt.localeCompare(a.lastAt));
+}
+
 export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean) {
   const base = workspaceId ? '/api/mist/workspaces/' + encodeURIComponent(workspaceId) : '';
   const [available, setAvailable] = React.useState(false), [tasks, setTasks] = React.useState<AgentTaskView[]>([]);
@@ -39,7 +53,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     try {
       const [mine, page, caps] = await Promise.all([
         mistApiRequest(base + '/agent-identities?scope=mine') as Promise<{ items: AgentIdentityView[] }>,
-        mistApiRequest(base + '/agent-tasks') as Promise<AgentTaskPage>,
+        (async () => { const items: AgentTaskView[] = []; let cursor: string | undefined; for (let i = 0; i < LIST_PAGES; i++) { const page = await mistApiRequest(base + '/agent-tasks' + (cursor ? '?cursor=' + encodeURIComponent(cursor) : '')) as AgentTaskPage; items.push(...page.items); cursor = page.nextCursor ?? undefined; if (!cursor) break; } return { items }; })(),
         mistApiRequest(base + '/agent-task-capabilities') as Promise<{ platformAvailable: boolean }>,
       ]);
       if (run !== version.current || live.current !== bound) return;
@@ -60,23 +74,23 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     const timer = setInterval(() => {
       if (running || document.visibilityState === 'hidden') return; running = true;
       void Promise.all(activeIds.split(',').map(id => mistApiRequest(base + '/agent-tasks/' + encodeURIComponent(id)) as Promise<{ item: AgentTaskView }>))
-        .then(rows => { if (stopped) return; const fresh = new Map(rows.map(r => [r.item.id, r.item])); setTasks(old => old.map(t => { const n = fresh.get(t.id); return n && n.updatedAt >= t.updatedAt ? n : t; })); })
+        .then(rows => { if (stopped) return; const fresh = new Map(rows.map(r => [r.item.id, r.item])); setTasks(old => old.map(t => { const n = fresh.get(t.id); return n && n.updatedAt >= t.updatedAt ? (t.conversationId && !n.conversationId ? { ...n, conversationId: t.conversationId } : n) : t; })); })
         .catch(() => { if (!stopped) setError('进度暂未更新'); })
         .finally(() => { running = false; });
     }, 3000);
     return () => { stopped = true; clearInterval(timer); };
   }, [activeIds, base, available]);
   const post = async (path: string, body: object) => mistApiRequest(base + path, { method: 'POST', body: JSON.stringify(body) }) as Promise<{ item?: AgentTaskView }>;
-  const send = async (text: string, history: AgentTaskView[] = tasks.filter(t => !t.automationId)): Promise<AgentTaskView | null> => {
+  const send = async (text: string, history: AgentTaskView[] = [], conversationId?: string): Promise<AgentTaskView | null> => {
     const message = text.trim(); if (!message || busy || !base) return null;
     const bound = scope; setBusy(true); setError('');
     try {
-      const input = { name: message.slice(0, 60), instructions: composeInstructions(history, message), locale: interfaceLocale() };
+      const input = { name: message.slice(0, 60), instructions: composeInstructions(history, message), locale: interfaceLocale(), ...(conversationId ? { conversationId } : {}) };
       const fingerprint = JSON.stringify([base, input]);
       if (pending.current?.fingerprint !== fingerprint) pending.current = { fingerprint, id: crypto.randomUUID() };
       const r = await post('/personal-agent/tasks', { requestId: pending.current.id, ...input }) as { item: AgentTaskView };
       if (live.current !== bound) return null;
-      pending.current = undefined; setTasks(old => [...old.filter(t => t.id !== r.item.id), r.item]); return r.item;
+      pending.current = undefined; const item = conversationId && !r.item.conversationId ? { ...r.item, conversationId } : r.item; setTasks(old => [...old.filter(t => t.id !== item.id), item]); return item;
     } catch (e) { if (live.current === bound) setError(e instanceof Error ? e.message : '未能交给小竹'); return null; }
     finally { if (live.current === bound) setBusy(false); }
   };

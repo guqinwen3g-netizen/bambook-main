@@ -11,6 +11,7 @@ export type AgentTaskView = {
   canControl: boolean;
   executor?:'external'|'platform';
   automationId?:string;
+  conversationId?:string;
   /** 平台任务的办理过程（做了什么、读了哪条记录）；不含读取到的内容。 */
   trail?:AgentTaskTrailItem[];
   executionIssue?:{code:'model_unavailable'|'model_response_invalid';retryAt?:string};

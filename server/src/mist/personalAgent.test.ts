@@ -29,8 +29,9 @@ it('each account opens one personal Agent owned by itself, without exposing a ke
  const rows=await local.database.mistCommandReceipt.findMany({where:{workspaceId:sales.workspace.id}});expect(JSON.stringify(rows)).not.toMatch(/bma1_/);
  // 交给我的 Agent：直接建平台执行任务，不需要先配连接
  await sales.client.post(sales.base+'/personal-agent/tasks').send({requestId:randomUUID(),name:'核对',instructions:'核对今天的待办',identityId:other.id}).expect(400);
- const task=(await sales.client.post(sales.base+'/personal-agent/tasks').send({requestId:randomUUID(),name:'核对今日待办',instructions:'核对今天的待办并报告'}).expect(201)).body.item;
- expect(task).toMatchObject({executor:'platform',identityId:first.id,ownerId:'demo-sales',state:'queued'});
+ await sales.client.post(sales.base+'/personal-agent/tasks').send({requestId:randomUUID(),name:'核对',instructions:'核对今天的待办',conversationId:'bad id!'}).expect(400);
+ const task=(await sales.client.post(sales.base+'/personal-agent/tasks').send({requestId:randomUUID(),name:'核对今日待办',instructions:'核对今天的待办并报告',conversationId:'conv_0001abcd'}).expect(201)).body.item;
+ expect(task).toMatchObject({executor:'platform',identityId:first.id,ownerId:'demo-sales',state:'queued',conversationId:'conv_0001abcd'});
  await worker.tick();await worker.settled();
  expect((await sales.client.get(sales.base+'/agent-tasks/'+task.id).expect(200)).body.item.state).toBe('succeeded');
  await buyer.client.get(sales.base+'/agent-tasks/'+task.id).expect(404);

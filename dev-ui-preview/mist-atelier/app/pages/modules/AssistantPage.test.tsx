@@ -66,7 +66,7 @@ it('works with Xiaozhu as a coworker: a request becomes a platform task whose pr
   const idn={id:'pa',kind:'personal',state:'active'};
   mock.fetch.mockResolvedValue(response({configured:false,models:[]}));
   mock.api.mockImplementation(async(url:string,init:any)=>{
-    if(init?.method==='POST'){created={id:'t1',identityId:'pa',executor:'platform',name:'q',instructions:JSON.parse(init.body).instructions,state:'queued',version:1,result:'',checkpoint:'',questions:[],waitingProposalIds:[],canControl:true,createdAt:'2026-11-07T00:00:00Z',updatedAt:'2026-11-07T00:00:00Z'};return {item:created};}
+    if(init?.method==='POST'){created={id:'t1',identityId:'pa',executor:'platform',name:'q',instructions:JSON.parse(init.body).instructions,conversationId:JSON.parse(init.body).conversationId,state:'queued',version:1,result:'',checkpoint:'',questions:[],waitingProposalIds:[],canControl:true,createdAt:'2026-11-07T00:00:00Z',updatedAt:'2026-11-07T00:00:00Z'};return {item:created};}
     if(url.includes('/agent-identities'))return {items:[idn]};
     if(url.includes('/agent-task-capabilities'))return {platformAvailable:true};
     if(url.endsWith('/agent-tasks'))return {items:created?[created]:[],nextCursor:null};
@@ -78,6 +78,7 @@ it('works with Xiaozhu as a coworker: a request becomes a platform task whose pr
   await question('哪些订单交期临近？');await click('发送');
   const post=mock.api.mock.calls.find(([,i])=>i?.method==='POST')!;expect(post[0]).toBe('/api/mist/workspaces/'+mock.workspace.workspace.id+'/personal-agent/tasks');
   expect(JSON.parse(post[1].body).instructions).toBe('哪些订单交期临近？');
+  expect(JSON.parse(post[1].body).conversationId).toMatch(/^c_[0-9a-f]{32}$/);
   expect(mock.fetch.mock.calls.some(([u])=>String(u).endsWith('/assistant'))).toBe(false);
   expect(host.textContent).toContain('哪些订单交期临近？');
   await act(async()=>{await new Promise(r=>setTimeout(r,3300));});
