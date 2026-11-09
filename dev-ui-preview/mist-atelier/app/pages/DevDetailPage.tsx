@@ -1,3 +1,4 @@
+import { businessInputInstant, businessInputValue } from '../runtime/businessClock';
 import {useOptionalMistSession} from '../runtime/auth';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow} from '../runtime/businessClock';
@@ -34,7 +35,7 @@ import { FABRIC_SAMPLE_FORMS, sampleFormUnit, sampleUnitAllowsDecimal, sampleUni
 import { businessWhen } from './modules/pageKit';
 import { FailureNotice } from '../runtime/FailureNotice';
 
-export function localConfirmationTime(date=businessNow()){return Number.isNaN(date.getTime())?'':new Date(date.getTime()-date.getTimezoneOffset()*60_000).toISOString().slice(0,16);}
+export function localConfirmationTime(date=businessNow()){return businessInputValue(date);}
 export function confirmationFormError(values:{confirmer:string;organization:string;confirmedAt:string;basis:string;originalText:string}){
   if(!values.confirmer.trim())return '请填写实际确认人';
   if(!values.confirmedAt||Number.isNaN(new Date(values.confirmedAt).getTime()))return '请填写有效的确认时间';
@@ -92,11 +93,11 @@ export function DevDetailPage(){
   const act=async(kind:'confirm'|'draft'|'revise'|'minor'|'archive'|'sample'|'qc'|'edit'|'qcDecide'|'close')=>{
     if(!dev||busyRef.current||(!version&&kind!=='edit'&&kind!=='close'))return;const originalScope=scope.current;busyRef.current=true;setBusy(true);setFailure('');
     try{
-      if(kind==='draft'){await run({type:'development.saveConfirmationDraft',payload:{devId:dev.id,versionId:version!.id,draft:{...form,...(confirmSampleIds.length?{samples:versionSamples.filter(sample=>confirmSampleIds.includes(sample.id)).map(sampleRef)}:{}),confirmedAt:form.confirmedAt&&!Number.isNaN(new Date(form.confirmedAt).getTime())?new Date(form.confirmedAt).toISOString():''}}});}
+      if(kind==='draft'){await run({type:'development.saveConfirmationDraft',payload:{devId:dev.id,versionId:version!.id,draft:{...form,...(confirmSampleIds.length?{samples:versionSamples.filter(sample=>confirmSampleIds.includes(sample.id)).map(sampleRef)}:{}),confirmedAt:form.confirmedAt&&!Number.isNaN(new Date(form.confirmedAt).getTime())?businessInputInstant(form.confirmedAt):''}}});}
       else if(kind==='confirm'){
         const invalid=confirmationFormError(form);if(invalid)throw Error(invalid);
         if(needsForms&&!confirmSampleIds.length)throw Error('本版有多种实物形态，请选择本次确认针对的形态');
-        await run({type:'development.confirm',payload:{devId:dev.id,versionId:version!.id,...form,confirmedAt:new Date(form.confirmedAt).toISOString(),...(confirmSampleIds.length?{sampleIds:confirmSampleIds}:{})}});
+        await run({type:'development.confirm',payload:{devId:dev.id,versionId:version!.id,...form,confirmedAt:businessInputInstant(form.confirmedAt),...(confirmSampleIds.length?{sampleIds:confirmSampleIds}:{})}});
       }else if(kind==='revise'){
         if(!note.trim())throw Error('请填写本次修改要求');
         const receipt=await run({type:'development.revise',payload:{devId:dev.id,versionId:version!.id,note}});
@@ -108,11 +109,11 @@ export function DevDetailPage(){
       }else if(kind==='archive')await run({type:'development.archive',payload:{devId:dev.id,versionId:version!.id}});
       else if(kind==='sample'){
         if(!sample.sample.trim()||(fabricDomain?!validFabricSample(Number(sample.quantity),sample.form,sample.unit):!/^[1-9]\d*$/.test(sample.quantity))||Number.isNaN(new Date(sample.returnedAt).getTime()))throw Error(fabricDomain?'请填写准确实物编号、形态、数量、单位和返样时间；米样按米，剪片按整数份':'请填写实物编号、正整数数量和有效返样时间');
-        await run({type:'development.recordSample',payload:{devId:dev.id,versionId:version!.id,sample:sample.sample,quantity:Number(sample.quantity),returnedAt:new Date(sample.returnedAt).toISOString(),...(fabricDomain?{form:sample.form,unit:sample.unit,location:sample.location,color:sample.color}:{})}});
+        await run({type:'development.recordSample',payload:{devId:dev.id,versionId:version!.id,sample:sample.sample,quantity:Number(sample.quantity),returnedAt:businessInputInstant(sample.returnedAt),...(fabricDomain?{form:sample.form,unit:sample.unit,location:sample.location,color:sample.color}:{})}});
       }else if(kind==='qc'){
         if(!qc.reviewer.trim()||!qc.report.trim()||Number.isNaN(new Date(qc.reviewedAt).getTime()))throw Error('请填写评审人、报告和有效评审时间');
         const facts=fabricDomain?{measurements:[],fabricMeasurements:fabricQcFacts(qc.fabricMeasurements)}:qcMeasurementFacts(qc);
-        await run({type:'development.recordQc',payload:{devId:dev.id,versionId:version!.id,...(fabricDomain?{domain:'fabric' as const}:{}),qc:{result:qc.result,reviewer:qc.reviewer,report:qc.report,opinion:qc.opinion,reviewedAt:new Date(qc.reviewedAt).toISOString(),...facts}}});
+        await run({type:'development.recordQc',payload:{devId:dev.id,versionId:version!.id,...(fabricDomain?{domain:'fabric' as const}:{}),qc:{result:qc.result,reviewer:qc.reviewer,report:qc.report,opinion:qc.opinion,reviewedAt:businessInputInstant(qc.reviewedAt),...facts}}});
       }else if(kind==='close'){
         if(!closure.reason.trim())throw Error('请填写原因');
         await run({type:'development.close',payload:{devId:dev.id,kind:closure.kind,reason:closure.reason}});
@@ -203,7 +204,7 @@ export function DevDetailPage(){
   const openEdit=()=>{setEdit({goal:dev.goal,due:dev.due,factories:dev.values.factories.join('、')});setDialog('edit');};
   const currentFormError=confirmationFormError(form)||(needsForms&&!confirmSampleIds.length?'请选择本次确认针对的形态':null);
   const sameForms=JSON.stringify([...(last?.samples||[]).map(sample=>sample.sampleId)].sort())===JSON.stringify([...confirmSampleIds].sort());
-  const sameConfirmation=last&&sameForms&&last.result===form.result&&last.confirmer===form.confirmer&&last.organization===form.organization&&last.basis===form.basis&&last.originalText===form.originalText&&new Date(last.confirmedAt).getTime()===new Date(form.confirmedAt).getTime();
+  const sameConfirmation=last&&sameForms&&last.result===form.result&&last.confirmer===form.confirmer&&last.organization===form.organization&&last.basis===form.basis&&last.originalText===form.originalText&&new Date(last.confirmedAt).getTime()===new Date(businessInputInstant(form.confirmedAt)).getTime();
   const measurements=version?.qc?.measurements||[],measureStats=measurements.reduce((counts,row)=>{const difference=Math.abs(row.actual-row.standard),epsilon=row.tolerance===0?0:Number.EPSILON*Math.max(1,row.actual,row.standard,row.tolerance)*4;return{within:counts.within+(difference<=row.tolerance+epsilon?1:0),attention:counts.attention+(difference>row.tolerance*.5+epsilon?1:0)};},{within:0,attention:0});
   const links=developmentVersionLinks(state,version),productBlocker=productConversionBlocker(version);
   const qcFailed=version?.qc?.result==='reject'&&!version.qcDecision,qcAllowsConfirm=!!version?.qc&&version.qc.result!=='reject'&&!version.qcDecision;

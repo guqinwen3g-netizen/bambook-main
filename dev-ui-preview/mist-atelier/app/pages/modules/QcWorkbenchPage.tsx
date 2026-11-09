@@ -1,3 +1,4 @@
+import { businessInputInstant } from '../../runtime/businessClock';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** QC 工作台：先选面料 / 成衣专业板块，再分样品评审 / 生产检验；任务按工厂与检查地点分组，详情承接报告、门禁与业务恢复。 */
 import React from 'react';
@@ -395,7 +396,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
     setBusy(true); setFailure('');
     try {
       const aqlInput = useAql ? aqlFromDraft(aql) : null, fabricInput = useFabric ? fabricFromDraft(fabricCheck) : null;
-      await run({ type: 'fulfillment.qc.report', payload: { id: task.id, domain: task.domain, result, report, opinion, location, reviewedAt: new Date(at).toISOString(), measurements, fileIds: ids, sizeChecks: sizeChecks.filter(check => check.result).map(check => ({ ...check, result: check.result as 'pass' | 'reject' })), ...(aqlInput ? { aql: aqlInput } : {}), ...(fabricInput ? { fabricInspection: fabricInput } : {}) } });
+      await run({ type: 'fulfillment.qc.report', payload: { id: task.id, domain: task.domain, result, report, opinion, location, reviewedAt: businessInputInstant(at), measurements, fileIds: ids, sizeChecks: sizeChecks.filter(check => check.result).map(check => ({ ...check, result: check.result as 'pass' | 'reject' })), ...(aqlInput ? { aql: aqlInput } : {}), ...(fabricInput ? { fabricInspection: fabricInput } : {}) } });
       onClose();
     } catch (e) { setFailure(e instanceof Error ? e.message : '报告未保存'); setConfirming(false); }
     finally { setBusy(false); }

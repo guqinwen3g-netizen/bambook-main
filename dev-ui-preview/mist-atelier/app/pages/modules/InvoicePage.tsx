@@ -1,3 +1,4 @@
+import { businessInputValue } from '../../runtime/businessClock';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 /** Finance reads existing receivables; CI creation belongs to the source business, never this ledger. */
@@ -57,7 +58,7 @@ export function invoiceFinancialFacts(state: MistState | null, row: InvoiceLedge
   return { allocations, credits, cash, credit, bankCharges, charged, unexplained: row.draft || row.state === 'void' || row.state === 'pending' ? 0 : (Math.round(row.amount * 100) - Math.round(cash * 100) - Math.round(credit * 100) - Math.round(charged * 100) - Math.round(row.open * 100)) / 100 };
 }
 const PROMISE_LABEL = { pending: '待兑现', kept: '已兑现', broken: '承诺未兑现' } as const;
-const localNow = () => { const d = businessNow(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
+const localNow = () => businessInputValue();
 export function invoiceCustomerId(state: MistState | null, row: Pick<MistInvoice, 'orderId' | 'devId' | 'customerId'>) { return row.customerId ? row.customerId : row.devId ? state?.devs.find(d => d.id === row.devId)?.customerId : state?.orders.find(o => o.id === row.orderId)?.customerId; }
 /** 催收摘要（列表用）：已催次数与最近承诺。 */
 export function collectionSummary(state: MistState | null, row: InvoiceLedgerRow, today: string) {

@@ -1,3 +1,5 @@
+import { businessToday } from '../../runtime/businessClock';
+import { shiftCalendarDay } from '../../../../../server/src/shared/mistBusinessClock';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 人事管理：组织架构（部门 / 小组）与人员名册；员工档案与在职变动见 EmployeeFile。账号与岗位权限在“公司管理”，岗位即其中的公司岗位。范围按 2026-10-15 决定：不含考勤、请假、薪资、绩效、培训。 */
 import React from 'react';
@@ -150,7 +152,7 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
   ];
   const teamsIn = (departmentId: string) => (data?.teams ?? []).filter(t => t.departmentId === departmentId);
   // fin69：30 天内到期（含已过期未续）的劳动合同。
-  const today = new Date().toISOString().slice(0, 10), soon = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+  const today = businessToday(), soon = shiftCalendarDay(today, 30);
   const expiring = (data?.employees ?? []).filter(e => e.contractEnd && e.contractEnd <= soon && !['Resigned', 'Terminated'].includes(e.employmentStatus)).sort((a, b) => (a.contractEnd || '').localeCompare(b.contractEnd || ''));
   return <>
     {part === 'people' && expiring.length > 0 && <Banner tone="warn" title={uiText(`劳动合同 30 天内到期 · ${expiring.length} 人`)}>{expiring.slice(0, 6).map(e => <span key={e.userId} className="mist-row" style={{ gap: 6 }}><TextLink onClick={() => setOpen({ kind: 'person', id: e.userId })}>{e.displayName || e.employeeNo}</TextLink><span className={e.contractEnd! < today ? 'mist-tone-bad' : 'mist-note'}>{e.contractEnd}</span></span>)}</Banner>}
