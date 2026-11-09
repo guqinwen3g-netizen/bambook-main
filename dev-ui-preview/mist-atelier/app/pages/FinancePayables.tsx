@@ -351,7 +351,7 @@ export function FinancePayables() {
       {settlement.final && settlement.state === 'confirmed' && <PrepaymentResidual state={state} purchaseId={settlement.purchaseId} busy={busy} canRefund={canPay && canConfirm} canMove={canConfirm} onRefund={() => { setFailure(''); setMoveDraft({ kind: 'refund', purchaseId: settlement.purchaseId }); }} onTransfer={() => { setFailure(''); setMoveDraft({ kind: 'transfer', purchaseId: settlement.purchaseId }); }} onReverse={(m: PrepaymentMove) => askReason('reverse-prepayment', m.id)} />}
       <SettlementAdvance state={state} settlement={settlement} busy={busy} canRequest={canRequest} onRequest={() => { setFailure(''); setAdvanceId(settlement.id); }} />
     </SettlementDetail>
-  : <EmptyState compact title={uiText(route.id ? '未找到应付记录' : '应付详情')} description={uiText("选择一张票据、付款申请、结算、付款计划或一笔付款，查看来源、审批、分配和余额。")} />;
+  : <EmptyState compact title={uiText(route.id ? '未找到应付记录' : '应付详情')} />;
 
   const list = view === 'bills' ? <DataTable ariaLabel={uiText("应付票据")} rows={shownBills} columns={billColumns} loading={loading} rowKey={b => b.id} selectedKey={selected} onRowClick={b => open(b.id)}
       empty={bills.length ? <EmptyState compact title={uiText("没有符合筛选的票据")} action={<Button onClick={() => setFilter('all')}>{uiText("查看全部")}</Button>} /> : <EmptyState title={uiText("还没有登记供应商票据")} description={uiText("收到供应商的增值税发票后，在“待登记来源”里找到对应合同登记。")} />} />

@@ -92,7 +92,7 @@ export function OrderSourceDialog({ open, onClose, type, customerId, canWrite }:
     : <><Button variant="quiet" icon={ArrowLeft} disabled={busy} onClick={() => { setKind(null); setFailure(''); }}>{uiText("换一种来源")}</Button><span className="mist-spacer" />
       {kind === 'quotation' ? <Button variant="primary" loading={busy} disabled={!canWrite || busy || !!w.pending || !!blockReason || (!!pickedQuote && !chosen.length)} title={uiText(!canWrite ? '当前账号没有订单写权限' : blockReason || (pickedQuote && !chosen.length ? '请至少勾选一个条目' : undefined))} onClick={() => void convert()}>{uiText("转为订单草稿")}</Button>
         : <Button variant="primary" disabled={!canWrite} onClick={continueDraft}>{uiText("带入订单草稿")}</Button>}</>;
-  return <Dialog open={open} onClose={() => { if (!busy) onClose(); }} title={uiText(title)} description={uiText(kind ? undefined : '选择订单来源；无论哪种来源，都先生成订单草稿，补齐合同依据后提交主单审批。')} width={720} footer={footer}>
+  return <Dialog open={open} onClose={() => { if (!busy) onClose(); }} title={uiText(title)} width={720} footer={footer}>
     {!canWrite && <Banner variant="notice" tone="neutral" title={uiText("只读")}>{uiText("当前账号没有订单写权限，可以查看来源但不能建立订单。")}</Banner>}
     {failure && <Banner tone="bad" title={uiText("尚未建立订单")}>{failure}</Banner>}
     {blockers.length > 0 && <Banner variant="notice" tone="warn" title={uiText(allBlocked ? '暂不能转订单' : '部分条目暂不能转')}><span data-convert-blockers>{blockers.map(b => <span key={b.lineId} style={{ display: 'block' }}>{quotationConversionBlockerText(b)}</span>)}{uiText("请先在开发模块记录需求方认可。")}</span></Banner>}

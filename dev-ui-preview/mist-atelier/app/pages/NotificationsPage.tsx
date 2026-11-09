@@ -64,7 +64,7 @@ export function NotificationsPage() {
       <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索通知标题或内容")} />
     </Toolbar>
     <Card><DataTable ariaLabel={uiText("通知")} rows={shown} columns={columns} loading={!state && workspace.loading} rowKey={n => n.id} onRowClick={open}
-      empty={<EmptyState title={uiText(query || kind !== 'all' ? '没有符合条件的通知' : tab === 'unread' ? '没有未读通知' : '暂无通知')} description={uiText("通知按当前账号可查看的模块显示。")}
+      empty={<EmptyState title={uiText(query || kind !== 'all' ? '没有符合条件的通知' : tab === 'unread' ? '没有未读通知' : '暂无通知')}
         action={query || kind !== 'all' ? <Button onClick={() => { setQuery(''); setKind('all'); }}>{uiText("清除筛选")}</Button> : tab === 'unread' && visible.length ? <Button onClick={() => go('notifications', undefined, { section: 'all' })}>{uiText("查看全部")}</Button> : undefined} />} /></Card>
   </MistPage>;
 }
