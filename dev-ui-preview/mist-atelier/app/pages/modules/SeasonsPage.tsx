@@ -219,7 +219,7 @@ function SeasonDetail({ s, state, day, can, locked, onEdit, onReview, onOpen, on
       {b.trends.map(t => <Button key={t.id} variant="quiet" icon={Sparkles} onClick={() => onTab('trends', t.id)}>{t.name}</Button>)}
       {b.shows.map(x => <Button key={x.id} variant="quiet" icon={Tent} onClick={() => onTab('shows', x.id)}>{x.name}</Button>)}
     </div></DetailBlock>}
-    <DetailBlock title={uiText("季末回顾")}>{s.review ? <><Facts cols={3} items={[{ label: '订单', value: s.review.orderCount }, { label: '开发', value: s.review.developmentCount }, { label: '数字档案', value: s.review.productCount }]} /><span className="mist-note">{uiText("金额（原币，分别合计）：")}{s.review.amounts.map(x => `${x.currency} ${x.amount}`).join(' · ') || '无'}{uiText("；快照生成于 ")}{new Date(s.review.at).toLocaleString(interfaceLocale())}{uiText("，之后的变化需点“更新回顾”。")}</span></> : <span className="mist-muted">{uiText("尚未生成。回顾会保存生成时刻的订单、开发、档案数量与原币金额快照。")}</span>}</DetailBlock>
+    <DetailBlock title={uiText("季末回顾")}>{s.review ? <><Facts cols={3} items={[{ label: '订单', value: s.review.orderCount }, { label: '开发', value: s.review.developmentCount }, { label: '数字档案', value: s.review.productCount }]} /><span className="mist-note">{uiText("金额（原币，分别合计）：")}{s.review.amounts.map(x => `${x.currency} ${x.amount}`).join(' · ') || '无'}{uiText("；快照生成于 ")}{new Date(s.review.at).toLocaleString(interfaceLocale(),{timeZone:'Asia/Shanghai',hour12:false})}{uiText("，之后的变化需点“更新回顾”。")}</span></> : <span className="mist-muted">{uiText("尚未生成。回顾会保存生成时刻的订单、开发、档案数量与原币金额快照。")}</span>}</DetailBlock>
     <DetailBlock title={uiText("附件")}>{attachments}</DetailBlock>
     <DetailBlock title={uiText("处理记录")}>{history}</DetailBlock>
   </DetailBody>;

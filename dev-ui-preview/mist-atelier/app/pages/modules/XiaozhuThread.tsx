@@ -13,12 +13,12 @@ import { XiaozhuMarkdown } from './XiaozhuMarkdown';
 const STATE: Record<AgentTaskView['state'], [string, Tone]> = { queued: ['待执行', 'accent'], running: ['办理中', 'accent'], waiting_time: ['等待继续', 'neutral'], waiting_condition: ['等待资料变化', 'neutral'], waiting_human: ['待我确认', 'warn'], paused: ['已暂停', 'neutral'], succeeded: ['已完成', 'ok'], failed: ['未完成', 'bad'], cancelled: ['已停止', 'neutral'], expired: ['已到期', 'neutral'], budget_exhausted: ['达到限额', 'warn'], access_changed: ['权限已变化', 'warn'] };
 const RISK_TONE: Record<string, Tone> = { low: 'neutral', medium: 'warn', high: 'bad' };
 const KIND_ICON = { read: Search, write: PenLine, ask: HelpCircle, wait: Clock, note: Check };
-export const dayKey = (iso: string) => new Date(iso).toLocaleDateString('sv-SE');
+export const dayKey = (iso: string) => new Date(iso).toLocaleDateString('sv-SE',{timeZone:'Asia/Shanghai',});
 export function dayLabel(iso: string, now = new Date()): string {
   const d = new Date(iso), key = dayKey(iso), today = dayKey(now.toISOString()), yesterday = dayKey(new Date(now.getTime() - 86400_000).toISOString());
-  return key === today ? uiText('今天') : key === yesterday ? uiText('昨天') : d.toLocaleDateString(interfaceLocale(), { month: 'long', day: 'numeric' });
+  return key === today ? uiText('今天') : key === yesterday ? uiText('昨天') : d.toLocaleDateString(interfaceLocale(), {timeZone:'Asia/Shanghai',  month: 'long', day: 'numeric' });
 }
-const clock = (iso: string) => new Date(iso).toLocaleTimeString(interfaceLocale(), { hour: '2-digit', minute: '2-digit', hour12: false });
+const clock = (iso: string) => new Date(iso).toLocaleTimeString(interfaceLocale(), {timeZone:'Asia/Shanghai',  hour: '2-digit', minute: '2-digit', hour12: false });
 // 旧记录没有服务端给出的页面时按类型兜底；新记录用 ref.view / section。
 const VIEW: Record<string, string> = { order: 'orders/detail', customer: 'crm', development: 'development/detail', purchase: 'procurement', shipment: 'shipments', invoice: 'invoices', quotation: 'quotations', supplier: 'suppliers', email: 'emails', production: 'production-board', risk: 'risks', claim: 'claims' };
 

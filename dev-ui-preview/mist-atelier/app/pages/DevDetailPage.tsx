@@ -1,6 +1,7 @@
 import {useOptionalMistSession} from '../runtime/auth';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow} from '../runtime/businessClock';
+import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { DevStageChainCard } from './DevStageChain';
 import { devStagePendingHandovers } from '../../../../server/src/shared/mistDevelopmentStages';
 /** T4: the original three-column Mist detail; every action targets an exact saved version. */
@@ -285,7 +286,7 @@ export function DevDetailPage(){
             ...links.orders.map(order=>({icon:ClipboardList,title:order.code,sub:'引用本版的订单',onClick:()=>go('orders/detail',order.id)})),
             ...(dev.customerId?[{icon:Users,title:dev.customer,sub:'客户档案',onClick:()=>go('crm',dev.customerId,{customerId:dev.customerId})}]:[])]} />
           {links.product?<div className="mist-row" style={{padding:'6px 22px 10px',gap:8}}><span className="mist-note">{uiText("本版产品档案")}</span><TextLink onClick={()=>go('products',links.product!.id)}><Mono>{links.product.sku}</Mono></TextLink></div>
-            :<div className="mist-row" style={{padding:'6px 22px 10px',gap:8,flexWrap:'wrap'}}><Button size="sm" icon={Archive} disabled={!version||busy||!!productBlocker} title={uiText(productBlocker||undefined)} onClick={()=>{setFailure('');setDialog('product');}}>{uiText("转为产品档案")}</Button>{productBlocker&&<span className="mist-note">{productBlocker}</span>}</div>}<CardFooter><span className="mist-note">{uiText(version?.archivedAt?`本版已留档 · ${new Date(version.archivedAt).toLocaleDateString()}`:'本版尚未留档')}</span><Button size="sm" disabled={!version||busy||!!version.archivedAt} onClick={()=>setDialog('archive')}>{uiText("成果留档")}</Button></CardFooter></Card>
+            :<div className="mist-row" style={{padding:'6px 22px 10px',gap:8,flexWrap:'wrap'}}><Button size="sm" icon={Archive} disabled={!version||busy||!!productBlocker} title={uiText(productBlocker||undefined)} onClick={()=>{setFailure('');setDialog('product');}}>{uiText("转为产品档案")}</Button>{productBlocker&&<span className="mist-note">{productBlocker}</span>}</div>}<CardFooter><span className="mist-note">{uiText(version?.archivedAt?`本版已留档 · ${new Date(version.archivedAt).toLocaleDateString(interfaceLocale(),{timeZone:'Asia/Shanghai',})}`:'本版尚未留档')}</span><Button size="sm" disabled={!version||busy||!!version.archivedAt} onClick={()=>setDialog('archive')}>{uiText("成果留档")}</Button></CardFooter></Card>
         {state&&version&&!version.minor&&<DevNoticeCard state={state} dev={dev} version={version} busy={busy} onGenerate={()=>void generateNotice()} onDownload={downloadNotice} onPrint={printNotice}/>}
       </div>
     </div>

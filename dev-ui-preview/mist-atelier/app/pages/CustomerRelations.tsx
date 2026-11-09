@@ -17,7 +17,7 @@ import { CURRENCIES, withCurrent } from '../runtime/tradeOptions';
 
 const STAGE_TONE: Record<CrmStage, Tone> = { intent: 'neutral', sampling: 'accent', quoting: 'ai', won: 'ok', lost: 'bad' };
 const OPEN: CrmStage[] = ['intent', 'sampling', 'quoting'];
-const when = (at: string) => { const d = new Date(at); return Number.isFinite(d.getTime()) ? d.toLocaleString(interfaceLocale(), { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'; };
+const when = (at: string) => { const d = new Date(at); return Number.isFinite(d.getTime()) ? d.toLocaleString(interfaceLocale(), {timeZone:'Asia/Shanghai',  month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'; };
 const linkValue = (link: CrmLink | null) => link ? `${link.kind}:${link.id}` : '';
 const parseLink = (value: string): CrmLink | null => { const [kind, ...rest] = value.split(':'); return kind && rest.length ? { kind: kind as CrmLink['kind'], id: rest.join(':') } : null; };
 

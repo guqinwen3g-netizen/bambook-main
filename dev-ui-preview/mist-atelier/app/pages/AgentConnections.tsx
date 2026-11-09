@@ -6,7 +6,7 @@ import {useMistSession} from '../runtime/auth';
 import {mistApiRequest,useMistWorkspace} from '../runtime/workspace';
 import type {AgentConnectionView,AgentConnectionPage} from '../../../../server/src/shared/mistAgentConnections';
 import { FailureNotice } from '../runtime/FailureNotice';
-const stamp=(at:string)=>new Date(at).toLocaleString(interfaceLocale(),{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
+const stamp=(at:string)=>new Date(at).toLocaleString(interfaceLocale(),{timeZone:'Asia/Shanghai', year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
 type Action={kind:'create';id:string;name:string;mode:'read'|'operate'}|{kind:'renew'|'revoke';row:AgentConnectionView;requestId:string};
 type Issued={connection:AgentConnectionView;delegation:{token:string;expiresAt:string}};
 export function agentConnectionEndpoint(origin:string):string|null{try{const url=new URL(origin);return ['http:','https:'].includes(url.protocol)&&url.origin===origin?new URL('/api/mist/mcp',origin).href:null;}catch{return null;}}

@@ -10,7 +10,7 @@ import {workspaceMembers} from '../runtime/members';
 import { AGENT_AUDIT_FIELD_LABELS, agentAuditActionLabel, type AgentAuditDetail, type AgentAuditEntry, type AgentAuditPage } from '../../../../server/src/shared/mistAgentAudit';
 import { FailureNotice } from '../runtime/FailureNotice';
 
-const when=(at:string)=>new Date(at).toLocaleString(interfaceLocale(),{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
+const when=(at:string)=>new Date(at).toLocaleString(interfaceLocale(),{timeZone:'Asia/Shanghai', year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
 const source=(r:AgentAuditEntry)=>r.source==='human_confirmation'?'人工确认':r.source==='human_rejection'?'人工拒绝':r.phase==='proposed'?'Agent 提议':'Agent 办理';
 const action=(r:AgentAuditEntry)=>agentAuditActionLabel(r.requestedCommandType,interfaceLocale());
 const states:Record<string,string>={pending:'待处理',confirmed:'已确认',returned:'已退回',reversed:'已冲回',cancelled:'已撤销',approved:'已批准',rejected:'已拒绝',draft:'草稿',active:'在用',closed:'已关闭',garment:'成衣',fabric:'面料'};

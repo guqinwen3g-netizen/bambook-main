@@ -7,7 +7,8 @@ import {ClaimCreditDocuments} from './ClaimCreditDocuments';
 import {canVerifyClaim,claimLedger} from '../../../../../server/src/shared/mistClaimCoordination';
 import { interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
-import {businessNow} from '../../runtime/businessClock';
+import {businessNow, businessToday} from '../../runtime/businessClock';
+import { shiftCalendarDay } from '../../../../../server/src/shared/mistBusinessClock';
 /** Mist platform pages consume the current workspace and authoritative platform commands. */
 import React from 'react';
 import { CostPage } from './CostPage';
@@ -148,7 +149,7 @@ export function DataCenterPage(){const w=usePlatform(),issues=w.state?platformDa
 export function BusinessToolsPage(){const w=usePlatform();const shortcuts=([['pricing','退税美元定价'],['bom','成本与利润核算'],['invoices','商业发票'],['payment-vouchers','收款核销'],['reports','业务报表']] as const).filter(([view])=>w.session.canAccessView(view as View));const [input,setInput]=React.useState(''),[from,setFrom]=React.useState('m'),[to,setTo]=React.useState('yd');const factors:Record<string,number>={m:1,yd:0.9144,cm:0.01,in:0.0254};const value=input.trim()!==''&&Number.isFinite(Number(input))&&Number(input)>=0?Number(input)*factors[from]/factors[to]:null;return <MistPage><PageHeader title={uiText("业务工具")}/><section className="mist-grid"><Card className="mist-col-6"><CardHeader title={uiText("长度换算")}/><div className="mist-card-body"><FormGrid><Field label={uiText("原始长度")}><TextInput aria-label={uiText("原始长度")} type="number" min={0} value={input} onChange={e=>setInput(e.target.value)}/></Field><Field label={uiText("原单位")}><Select aria-label={uiText("原单位")} value={from} options={Object.keys(factors).map(s=>({value:s,label:s}))} onChange={e=>setFrom(e.target.value)}/></Field><Field label={uiText("目标单位")}><Select aria-label={uiText("目标单位")} value={to} options={Object.keys(factors).map(s=>({value:s,label:s}))} onChange={e=>setTo(e.target.value)}/></Field></FormGrid><SummaryBar items={[{label:'换算结果',value:value===null?'输入非负长度':money(value,4)+' '+to}]}/></div></Card><BusinessCalculators rates={(w.state?.fxPeriodRates??[]).filter(r=>!r.voided)}/>{shortcuts.length>0&&<Card className="mist-col-6"><CardHeader title={uiText("常用业务计算")}/><div className="mist-card-body"><div className="mist-row">{shortcuts.map(([view,label])=><Button key={view} icon={view==='pricing'?Calculator:undefined} onClick={()=>w.go(view)}>{uiText(label)}</Button>)}</div></div></Card>}</section></MistPage>;}
 function xiaozhuSuggestions(state:ReturnType<typeof useMistWorkspace>['state']):string[]{
   if(!state)return XIAOZHU_PROMPTS;
-  const today=new Date().toLocaleDateString('sv-SE'),soon=new Date(Date.now()+3*86400_000).toLocaleDateString('sv-SE');
+  const today=businessToday(),soon=shiftCalendarDay(today,3);
   const due=state.orders.filter(o=>o.due&&o.due.slice(0,10)<=soon&&!ORDER_FINISHED_STATES.includes(o.state)).length,over=state.orders.filter(o=>o.due&&o.due.slice(0,10)<today&&!ORDER_FINISHED_STATES.includes(o.state)).length;
   const unmatched=state.receipts.filter(r=>r.state==='unmatched').length,unread=(state.email?.messages??[]).filter(m=>m.folder==='inbox'&&!m.read).length;
   const list=[over?`有 ${over} 张订单已过交期，逐张说明原因和下一步`:due?`${due} 张订单交期临近，按风险排序`:'',unmatched?`核对 ${unmatched} 笔未匹配的到账，给出匹配建议`:'',unread?`整理 ${unread} 封未读邮件，列出要回复的`:'','汇总我今天要处理的事'].filter(Boolean);

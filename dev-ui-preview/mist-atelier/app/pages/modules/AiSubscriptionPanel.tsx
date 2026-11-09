@@ -21,7 +21,7 @@ async function call(path: string, init: RequestInit = {}) {
   if (!body) throw new Error('订阅连接没有返回可核对的结果');
   return body;
 }
-const time = (iso: string | null) => iso ? new Date(iso).toLocaleString(interfaceLocale(), { hour12: false }) : '—';
+const time = (iso: string | null) => iso ? new Date(iso).toLocaleString(interfaceLocale(), {timeZone:'Asia/Shanghai',  hour12: false }) : '—';
 const PLANS: Record<string, string> = { free: 'Free', go: 'Go', plus: 'Plus', pro: 'Pro', prolite: 'Pro Lite', promax: 'Pro Max', team: 'Team', business: 'Business', enterprise: 'Enterprise', edu: 'Edu' };
 const planLabel = (plan: string | null) => plan ? PLANS[plan] ?? plan : '已登录';
 const REASONING: Record<string, string> = { low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高（max）' };
