@@ -1,4 +1,5 @@
 import { scheduleCrmFollowUp } from './mistCrm';
+import { isCalendarDay } from './mistBusinessClock';
 import { primaryImageId } from './mistPrimaryImage';
 import {freezeQuotationHistoryEvidence,type QuoteHistoryReference} from './mistQuotationHistoryEvidence';
 import {mistImportPermission,mistImportRun,type MistImportKind,type MistImportRow} from './mistImport';
@@ -183,7 +184,7 @@ const str=(value:unknown,label:string,required=true,max=8000):string=>{if(typeof
 const one=<T extends string>(value:unknown,values:readonly T[],label:string):T=>values.includes(value as T)?value as T:fail(label+'无效');
 const find=<T extends {id:string}>(items:T[],id:unknown,label:string):T=>items.find(r=>r.id===id)||fail(label+'不存在','NOT_FOUND');
 const arr=(value:unknown,label:string):string[]=>{if(!Array.isArray(value)||value.length>200)return fail(label+'格式无效');return [...new Set(value.map(v=>str(v,label)))];};
-const day=(value:unknown,label:string,optional=false)=>{const v=str(value,label,!optional);if(!v&&optional)return '';if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||!Number.isFinite(Date.parse(v+'T00:00:00Z'))||new Date(v+'T00:00:00Z').toISOString().slice(0,10)!==v)return fail(label+'格式无效');return v;};
+const day=(value:unknown,label:string,optional=false)=>{const v=str(value,label,!optional);if(!v&&optional)return '';if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||!Number.isFinite(Date.parse(v+'T00:00:00Z'))||!isCalendarDay(v))return fail(label+'格式无效');return v;};
 const span=(start:unknown,end:unknown)=>{const startDate=day(start,'开始日期'),endDate=day(end,'结束日期');if(endDate<startDate)fail('结束日期不能早于开始日期');return {startDate,endDate};};
 const currency=(v:unknown)=>{const s=str(v,'币种').toUpperCase();return /^[A-Z]{3}$/.test(s)?s:fail('币种必须为三个英文字母');};
 const decimal=(v:unknown,label:string,precision=2,positive=false)=>{if(typeof v!=='string'||!new RegExp('^\\d{1,10}(\\.\\d{1,'+precision+'})?$').test(v))return fail(label+'须为最多'+precision+'位小数的非负数字');const [a,b='']=v.split('.');const minor=BigInt(a)*BigInt(10)**BigInt(precision)+BigInt(b.padEnd(precision,'0'));if(positive&&minor<=BigInt(0))return fail(label+'必须大于0');return {minor,text:a.replace(/^0+(?=\d)/,'')+(b?'.'+b:'')};};

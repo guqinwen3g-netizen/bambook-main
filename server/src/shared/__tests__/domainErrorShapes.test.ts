@@ -1,5 +1,3 @@
-import { ReleaseBatchBindingError } from '../../production/releaseBatchBinding';
-import { ProductionBatchFactsError } from '../../production/productionBatchFacts';
 /**
  * 域内 error class 形状核定（S0-A Task 4）
  *
@@ -55,17 +53,10 @@ import { ERROR_CODES, GENERIC_ROUTE_ERROR_MESSAGE, lookupErrorCode, resolveError
 import { safeRouteError } from '../routeError';
 import { HrError, hrStatusForCode } from '../../hr/hrService';
 import { CrmValidationError } from '../../crm/crmService';
-import { SealValidationError } from '../../seal/sealService';
 import { GateBlockedError } from '../../exceptions/exceptionGate';
 import { CreditExceptionConsumptionError } from '../../credit/creditExceptionGate';
-import { InventoryStockInsufficientError } from '../../inventory/inventoryService';
-import { ProformaAccessError } from '../../finance/proformaInvoiceAccess';
 import { DevelopmentDomainError } from '../../development/developmentOperationalGuard';
-import { releaseQuantity } from '../../production/releaseBatchBinding';
-import { QcAssignmentError } from '../../qc/qcAssignmentAccess';
-import { QcReportError, qcReportFailure } from '../../qc/qcReportAuthority';
 import { ClaimVisibilityError } from '../../claims/claimVisibility';
-import { CashRefundError } from '../../claims/claimCashRefundFact';
 import { ClaimTransactionError } from '../../claims/claimApprovalFact';
 import { OrderLineWriteError, orderLineWriteFailure, currentOrderLineWriteActor } from '../../orders/orderLineWriteAccess';
 import { stripComments } from './utils/sourceScan';
@@ -112,26 +103,16 @@ type ShapeSpec = {
 const USER_FACING: Array<[string, Error, ShapeSpec]> = [
   ['DevelopmentDomainError', new DevelopmentDomainError('DEVELOPMENT_CLOSED', '开发已结案，请按变更流程继续'),
     { code: 'DEVELOPMENT_CLOSED', status: 409, message: '开发已结案，请按变更流程继续' }],
-  ['ProformaAccessError', new ProformaAccessError('FORBIDDEN', '当前账号不能处理原发票'),
-    { code: 'FORBIDDEN', status: 403, message: '当前账号不能处理原发票' }],
-  ['QcAssignmentError', new QcAssignmentError('UNAUTHORIZED', '请登录后处理验货任务'),
-    { code: 'UNAUTHORIZED', status: 401, message: '请登录后处理验货任务' }],
   ['CreditExceptionConsumptionError', new CreditExceptionConsumptionError('EXCEPTION_NOT_FOUND', '受控例外不存在，请重新核对'),
     { code: 'EXCEPTION_NOT_FOUND', status: 404, message: '受控例外不存在，请重新核对' }],
-  ['InventoryStockInsufficientError', new InventoryStockInsufficientError('实际可用库存不足'),
-    { code: 'STOCK_INSUFFICIENT', status: 409, message: '实际可用库存不足' }],
   ['ClaimVisibilityError', new ClaimVisibilityError('NOT_FOUND', '案件不存在或不可见'),
     { code: 'NOT_FOUND', status: 404, message: '案件不存在或不可见' }],
-  ['CashRefundError', new CashRefundError('INVALID_STATE', '退款没有准确付款批准事实'),
-    { code: 'INVALID_STATE', status: 409, message: '退款没有准确付款批准事实' }],
   ['ClaimTransactionError', new ClaimTransactionError({ code: 'VALIDATION_FAILED', message: '索赔金额必须为有效正数' }),
     { code: 'VALIDATION_FAILED', status: 400, message: '索赔金额必须为有效正数' }],
   ['HrError', new HrError('VALIDATION_FAILED', 'KPI 权重总和 120 超过 100'),
     { code: 'VALIDATION_FAILED', status: 400, message: 'KPI 权重总和 120 超过 100' }],
   ['CrmValidationError', new CrmValidationError('body.totalLimit 必填且须为正数（信用额度）'),
     { code: 'CRM_VALIDATION_FAILED', status: 400, message: 'body.totalLimit 必填且须为正数（信用额度）' }],
-  ['SealValidationError', new SealValidationError('印章图必填'),
-    { code: 'SEAL_VALIDATION_FAILED', status: 400, message: '印章图必填' }],
   // 门禁类的消息同时含「为什么被挡（SS_NOT_CONFIRMED）」与「下一步做什么（DR-013 受控例外入口）」——
   // 这正是 G7.5「异常可行动」要求的那段话，被吞成通用 500 就等于把用户推到「只能猜」。
   ['GateBlockedError', new GateBlockedError({
@@ -143,125 +124,6 @@ const USER_FACING: Array<[string, Error, ShapeSpec]> = [
 // Independently adjudicated HTTP literals. These are not obtained from the
 // constructors or registry under test; the 503 rows also prevent a blanket
 // "all user-facing errors are 4xx" assumption. SQL is tested separately below.
-
-/** These two exact source-bound wrappers carry failed Results out of their
- * owning transaction. They are not public error classes or finite raw-message
- * exemptions. A name, constructor shape or serialized object alone is not proof. */
-export function privateTransactionResultProof(file: string, source: string) {
-  const spec = file === 'finance/billingItemService.ts' ? {
-    name: 'ManualInvoiceAbort', command: 'invoiceBillingItem', producer: 'abortManualInvoice',
-    klass: `export class ManualInvoiceAbort extends Error {
-      constructor(readonly failure: { code: string; message: string; status: number }) { super(failure.message); }
-    }`,
-    helper: `export function abortManualInvoice(code: string, message: string, status: number): never {
-      throw new ManualInvoiceAbort({ code, message, status });
-    }`,
-    consumer: `export function manualInvoiceFailure(error: unknown, fallbackCode: string, fallbackMessage: string) {
-      if (error instanceof ManualInvoiceAbort) return fail(error.failure.code, error.failure.message, error.failure.status);
-      const result = safeRouteError(error, { fallbackCode, fallbackMessage });
-      return fail(result.code, result.message, result.status);
-    }`, count: 3,
-  } : file === 'pricing/commissionPayableService.ts' ? {
-    name: 'CommissionAbort', command: 'createCommissionPayable', producer: undefined,
-    klass: `class CommissionAbort extends Error {
-      constructor(readonly refusal: CommissionResult<never>) { super('Commission Payable refused'); }
-    }`, helper: undefined, consumer: undefined, count: 5,
-  } : undefined;
-  if (!spec) return undefined;
-  const ast = ts.createSourceFile('/source/' + file, source, ts.ScriptTarget.Latest, true);
-  const collect = (node: ts.Node, predicate: (n: ts.Node) => boolean) => {
-    const found: ts.Node[] = [];
-    const visit = (n: ts.Node) => { if (predicate(n)) found.push(n); ts.forEachChild(n, visit); };
-    visit(node); return found;
-  };
-  const options: ts.CompilerOptions = { noResolve: true, noLib: true, target: ts.ScriptTarget.Latest };
-  const host: ts.CompilerHost = {
-    getSourceFile: name => name === ast.fileName ? ast : undefined,
-    getDefaultLibFileName: () => '/missing.d.ts', writeFile() {}, getCurrentDirectory: () => '/',
-    getDirectories: () => [], fileExists: name => name === ast.fileName,
-    readFile: name => name === ast.fileName ? source : undefined,
-    getCanonicalFileName: name => name, useCaseSensitiveFileNames: () => true, getNewLine: () => '\n',
-  };
-  const checker = ts.createProgram([ast.fileName], options, host).getTypeChecker();
-  const same = (a: ts.Node, b: ts.Node) => !!checker.getSymbolAtLocation(a)
-    && checker.getSymbolAtLocation(a) === checker.getSymbolAtLocation(b);
-  const printed = (text: string) => {
-    const output = ts.createPrinter({ removeComments: true }).printFile(
-      ts.createSourceFile('contract.ts', text, ts.ScriptTarget.Latest, true));
-    const scanner = ts.createScanner(ts.ScriptTarget.Latest, true, ts.LanguageVariant.Standard, output);
-    const tokens: Array<[ts.SyntaxKind, string]> = [];
-    for (let token = scanner.scan(); token !== ts.SyntaxKind.EndOfFileToken; token = scanner.scan())
-      tokens.push([token, scanner.getTokenText()]);
-    return JSON.stringify(tokens); // Ignore layout, never literal contents or bindings.
-  };
-  const text = (n: ts.Node | undefined) => n?.getText(ast) ?? '';
-  const oneFunction = (id: string) => {
-    const found = collect(ast, n => ts.isFunctionDeclaration(n) && n.name?.text === id);
-    return found.length === 1 ? found[0] as ts.FunctionDeclaration : undefined;
-  };
-  const classes = collect(ast, n => ts.isClassDeclaration(n) && n.name?.text === spec.name);
-  const klass = classes.length === 1 ? classes[0] as ts.ClassDeclaration : undefined;
-  if (!klass?.name || printed(text(klass)) !== printed(spec.klass)) return undefined;
-  // A shadowed/imported Error or native class name invalidates this source binding.
-  const bindings = collect(ast, n => (ts.isVariableDeclaration(n) || ts.isParameter(n) || ts.isClassDeclaration(n)
-    || ts.isFunctionDeclaration(n) || ts.isImportSpecifier(n))
-    && ('name' in n) && [spec.name, 'Error'].includes(text((n as ts.NamedDeclaration).name)));
-  if (bindings.length !== 1) return undefined;
-  const command = oneFunction(spec.command);
-  if (!command?.body) return undefined;
-  const nativeTransactions = collect(command, n => ts.isCallExpression(n)
-    && text(n.expression) === 'prisma.$transaction' && n.arguments.length === 1
-    && ts.isArrowFunction(n.arguments[0])) as ts.CallExpression[];
-  if (nativeTransactions.length !== 1) return undefined;
-  const transaction = nativeTransactions[0].arguments[0];
-  const inside = (node: ts.Node, parent: ts.Node) => {
-    for (let n: ts.Node | undefined = node; n; n = n.parent) if (n === parent) return true;
-    return false;
-  };
-  const constructors = collect(ast, n => ts.isNewExpression(n) && same(n.expression, klass.name!)) as ts.NewExpression[];
-  if (constructors.length !== spec.count || constructors.some(n => !ts.isThrowStatement(n.parent))) return undefined;
-  if (spec.producer) {
-    const producer = oneFunction(spec.producer), consumer = oneFunction('manualInvoiceFailure');
-    if (!producer || !consumer || printed(text(producer)) !== printed(spec.helper!)
-      || printed(text(consumer)) !== printed(spec.consumer!)) return undefined;
-    if (constructors.some(n => !inside(n, transaction) && !inside(n, producer))) return undefined;
-    const failedCanonical = collect(transaction, n => ts.isIfStatement(n) && text(n.expression) === '!r.ok'
-      && ts.isExpressionStatement(n.thenStatement) && ts.isCallExpression(n.thenStatement.expression)
-      && same(n.thenStatement.expression.expression, producer.name!) && n.thenStatement.expression.arguments.length === 3);
-    if (failedCanonical.length !== 1) return undefined;
-    const imported = collect(ast, n => ts.isImportDeclaration(n) && ts.isStringLiteral(n.moduleSpecifier)
-      && n.moduleSpecifier.text === '../shared/routeError' && !!n.importClause?.namedBindings
-      && ts.isNamedImports(n.importClause.namedBindings)
-      && n.importClause.namedBindings.elements.some(e => e.name.text === 'safeRouteError' && !e.propertyName));
-    const safeCalls = collect(consumer, n => ts.isCallExpression(n) && text(n.expression) === 'safeRouteError');
-    const safeBindings = collect(ast, n => (ts.isVariableDeclaration(n) || ts.isParameter(n) || ts.isFunctionDeclaration(n)
-      || ts.isImportSpecifier(n)) && 'name' in n && text((n as ts.NamedDeclaration).name) === 'safeRouteError');
-    if (imported.length !== 1 || safeCalls.length !== 1 || safeBindings.length !== 1) return undefined;
-    const catches = collect(command, ts.isCatchClause) as ts.CatchClause[];
-    const outer = catches.find(n => !inside(n, transaction));
-    if (!outer || !collect(outer.block, n => ts.isReturnStatement(n) && !!n.expression
-      && ts.isCallExpression(n.expression) && text(n.expression.expression) === 'manualInvoiceFailure'
-      && text(n.expression.arguments[0]) === text(outer.variableDeclaration?.name)).length) return undefined;
-    return { className: spec.name, file, constructorSource: text(klass), producerSource: text(producer),
-      consumerSource: text(consumer), transactionSource: text(command), constructors: constructors.length };
-  }
-  if (constructors.some(n => !inside(n, transaction))) return undefined;
-  const catches = collect(command, ts.isCatchClause) as ts.CatchClause[];
-  const outer = catches.find(n => !inside(n, transaction));
-  if (!outer || text(outer.variableDeclaration?.name) !== 'error') return undefined;
-  const first = outer.block.statements[0];
-  if (!ts.isIfStatement(first) || !ts.isBinaryExpression(first.expression)
-    || first.expression.operatorToken.kind !== ts.SyntaxKind.InstanceOfKeyword
-    || !same(first.expression.right, klass.name)
-    || printed(text(first)) !== printed('if (error instanceof CommissionAbort) return error.refusal;')) return undefined;
-  const last = outer.block.statements[outer.block.statements.length - 1];
-  if (printed(text(last)) !== printed("return unknownCommissionFailure(error, 'create');")) return undefined;
-  const failedCanonical = collect(transaction, n => ts.isIfStatement(n)
-    && printed(text(n)) === printed('if (!invoiceResult.ok) throw new CommissionAbort(invoiceFailure(invoiceResult.error));'));
-  if (failedCanonical.length !== 1) return undefined;
-  return { className: spec.name, file, constructorSource: text(klass), producerSource: '',
-    consumerSource: text(outer.block), transactionSource: text(command), constructors: constructors.length };
-}
 
 describe('V1 新增公共错误类：逐码 HTTP/文案及未知存储边界', () => {
   const message = '独立验收文案，请核对原请求。';
@@ -349,9 +211,9 @@ describe('★ 用户可见 5xx 文案的标点一致性（Task 4 折入的实测
 
 describe('★ 委托后 safeRouteError 与注册表同源', () => {
   it('业务错误：透传自己的码/文案/状态', () => {
-    const r = safeRouteError(new SealValidationError('印章名称必填'), { fallbackCode: FALLBACK_NOT_IN_TABLE });
+    const r = safeRouteError(new CrmValidationError('客户名称必填'), { fallbackCode: FALLBACK_NOT_IN_TABLE });
     expect({ status: r.status, code: r.code, message: r.message, passthrough: r.passthrough }).toEqual({
-      status: 400, code: 'SEAL_VALIDATION_FAILED', message: '印章名称必填', passthrough: true,
+      status: 400, code: 'CRM_VALIDATION_FAILED', message: '客户名称必填', passthrough: true,
     });
   });
 
@@ -393,11 +255,11 @@ describe('★ 委托后 safeRouteError 与注册表同源', () => {
    * 这种巧合下有意的业务文案会被兜底文案顶掉 —— 正是本批要消灭的「吞文案」。
    */
   it('业务码与兜底码同名时仍透传业务文案（按形状判，不按码名判）', () => {
-    const r = safeRouteError(new SealValidationError('印章图必填'), {
-      fallbackCode: 'SEAL_VALIDATION_FAILED', fallbackMessage: '兜底文案',
+    const r = safeRouteError(new CrmValidationError('客户名称必填'), {
+      fallbackCode: 'CRM_VALIDATION_FAILED', fallbackMessage: '兜底文案',
     });
     expect({ status: r.status, code: r.code, message: r.message }).toEqual({
-      status: 400, code: 'SEAL_VALIDATION_FAILED', message: '印章图必填',
+      status: 400, code: 'CRM_VALIDATION_FAILED', message: '客户名称必填',
     });
   });
 
@@ -836,7 +698,9 @@ describe('★ 跨文件真源核对：hr/route.ts 的映射逐码必须等于 hr
     //      例：`CAPACITY_FULL` 被改成 403（名额满不是权限问题，改错即红）；
     //   ② HR 域新抛出了一支认证/授权/内部错码（401/403/500 档进了抛出码集）—— 那说明 HR 开始
     //      用业务异常表达「没登录」或「服务炸了」，属于 G6.5 之上的口径变化，要走裁定，不是本文件能自批的。
-    expect(hrThrownTiers()).toEqual([400, 404, 409]);
+    // 2026-11-09 裁定：companyEmploymentService 的 FORBIDDEN 是总经理账号与岗位调整的业务授权拒绝
+    // （已登录、操作对象受保护），403 是该语义的正确档位；未登录/内部错误仍不得进入 HR 抛出码集。
+    expect(hrThrownTiers()).toEqual([400, 403, 404, 409]);
   });
 
   it('★ 正向对照 3（B22 relay 终态）：真终态判 converged，四种"看着像终态"必须 throw', () => {
@@ -867,86 +731,19 @@ describe('★ 跨文件真源核对：hr/route.ts 的映射逐码必须等于 hr
   });
 });
 
-describe('ReleaseGateError：私有原生生产者与结果边界独立核定', () => {
-  const source = () => fs.readFileSync(path.join(SRC, 'production/releaseService.ts'), 'utf8');
-  const inspect = async (probe: { kind: string; code?: string; status?: number }) => {
-    const src = source();
-    const ast = ts.createSourceFile('releaseService.ts', src, ts.ScriptTarget.Latest, true);
-    const names = ['ReleaseGateError', 'knownReleaseFailure', 'storageReleaseConflict', 'createReleaseScope'];
-    const declarations = names.map(name => {
-      const matches = ast.statements.filter(node => (ts.isClassDeclaration(node) || ts.isFunctionDeclaration(node))
-        && node.name?.text === name);
-      expect(matches, `${name} 的实际本地绑定须唯一`).toHaveLength(1);
-      return matches[0].getText(ast).replace(/^export\s+/, '');
-    });
-    const failure = ast.statements.find(node => ts.isVariableStatement(node)
-      && node.declarationList.declarations.some(declaration => declaration.name.getText(ast) === 'fail'));
-    expect(failure).toBeDefined();
-    const script = `${failure!.getText(ast)}\n${declarations.join('\n')}\n
-      async function run(input:any){
-        const error = input.kind === 'native' ? new ReleaseGateError(input.code, '独立放行业务拒绝。', input.status)
-          : input.kind === 'development' ? new DevelopmentDomainError('CONFLICT', '开发来源已变化。')
-          : input.kind === 'conflict' ? {code:'P2034',message:'SQL private_scope'}
-          : input.kind === 'fake' ? Object.assign(new Error('SQL private_scope P2003'), {name:'ReleaseGateError', code:'SCOPE_NOT_ACTIVE', statusCode:409})
-          : new Error('SQL private_scope P2003');
-        const result = await createReleaseScope({prisma:{orderLine:{findUnique:async()=>({id:'L1',orderId:'O1'})},
-          $transaction:async()=>{throw error}},orderId:'O1',orderLineId:'L1',input:{quantity:1},actorId:'U1'});
-        return {result,known:knownReleaseFailure(error)};
-      }
-      run(probe);`;
-    const compiled = ts.transpileModule(script, { compilerOptions: {
-      module: ts.ModuleKind.None, target: ts.ScriptTarget.ES2022,
-    } }).outputText;
-    // Only selected actual declarations run; storage is a rejection seam, not PG.
-    return vm.runInNewContext(compiled, { probe, DevelopmentDomainError, ReleaseBatchBindingError, ProductionBatchFactsError, OrderLineWriteError, releaseQuantity, isBusinessError, safeRouteError,
-      Prisma: { PrismaClientKnownRequestError: class extends Error {} },
-      logger: { error() {} } }, { timeout: 1000 });
-  };
-
-  it.each([['ORDER_LINE_NOT_FOUND', 404], ['SCOPE_NOT_ACTIVE', 409]] as const)(
-    '%s 原生实例按其独立业务状态消费，并保留公开文案', async (code, status) => {
-      const { result, known } = await inspect({ kind: 'native', code, status });
-      expect(result).toEqual({ ok: false, error: { code, status, message: '独立放行业务拒绝。' } });
-      expect(known).toEqual(result);
-    });
-  it('实际来源冲突与序列化冲突保留409', async () => {
-    expect((await inspect({ kind: 'development' })).result).toEqual({
-      ok: false, error: { code: 'CONFLICT', status: 409, message: '开发来源已变化。' },
-    });
-    expect((await inspect({ kind: 'conflict' })).result).toEqual({ ok: false, error: {
-      code: 'CONFLICT', status: 409, message: '放行范围或来源正在变化，请保留原请求并刷新重试',
-    } });
-  });
-  it.each(['sql', 'fake'])('%s 不能满足原生消费边界，只返回安全500', async kind => {
-    const rejected = await inspect({ kind });
-    expect(rejected.known).toBeNull();
-    expect(rejected.result).toEqual({ ok: false, error: { code: 'SCOPE_CREATE_FAILED', status: 500,
-      message: '创建放行范围未能完成，请稍后重试；持续失败请联系管理员核对该订单行的放行范围与拆批记录。',
-    } });
-    expect(JSON.stringify(rejected)).not.toMatch(/SQL|private_scope|P2003/);
-  });
-  it('当前构造器是开放code/status私有契约，不可登记成有限raw-message豁免', () => {
-    const src = source();
-    expect(src).toMatch(/class ReleaseGateError extends Error \{\s*constructor\(readonly code: string, message: string, readonly statusCode: number\)/);
-    expect(src).toMatch(/if \(error instanceof ReleaseGateError \|\| error instanceof DevelopmentDomainError\) return fail\(error.code, error.message, error.statusCode\)/);
-    expect(classifyPrivateResultBoundaries([{ file: 'src/production/releaseService.ts', src }])
-      .some((proof: { className: string }) => proof.className === 'ReleaseGateError')).toBe(false);
-  });
-});
-
 describe('★ 全仓 error class 普查：所有类逐个核定，新增类必须先登记', () => {
   /** 原核定不删；V1 五个原生公共类有上方独立字面量证人及隔离业务回归。 */
   const ADJUDICATED = [
-    'CreditBlockedError', 'CrmValidationError', 'GateBlockedError',
-    'HrError', 'RoleWriteRejectedError', 'SealValidationError',
-    'StockMovementCasConflictError',
-    'CreditExceptionConsumptionError', 'InventoryStockInsufficientError', 'ClaimVisibilityError', 'CashRefundError',
-    'ClaimTransactionError',
-    'OrderLineWriteError',
-    'DevelopmentDomainError', 'ProformaAccessError', 'QcAssignmentError',
-    'ManualInvoiceAbort', // Source-bound TX-result contract below; no public/raw exemption.
-    'ReleaseGateError', // Private open contract: independent native consumer controls above; no finite exemption.
-    'ProductionBatchFactsError', 'ReleaseBatchBindingError',
+    'CrmValidationError', 'GateBlockedError', 'HrError', 'RoleWriteRejectedError',
+    'CreditExceptionConsumptionError', 'ClaimVisibilityError', 'ClaimTransactionError',
+    'OrderLineWriteError', 'DevelopmentDomainError',
+    // 2026-11-09 逐个核定（旧服务删除后，现行 Mist / 平台 / 账号链路的类）：
+    'MistApiError', 'MistCommandError', // code + status，文案由调用点写成业务句，命令层统一转 4xx。
+    'CompanyAccessError', 'CompanyAccountError', 'OrganizationError', 'OrderMainApprovalError',
+    'SupplierContractError', 'OrderQuantityError', // 携带业务码与状态；消息为面向操作者的中文业务句。
+    'CodexSubscriptionError', 'PlatformProviderError', // 外部提供方：自带 code/status，原始响应不入消息。
+    'SessionExpiredError', // 固定消息 SESSION_MAX_AGE，在 sessionLifetime 内部判定会话过期，不携带用户数据。
+    'MistPreviewOutcome', 'OfficeLimit', 'ToolInputError', // 模块内控制流：同文件 instanceof 捕获，不出 HTTP 边界。
   ];
 
   it('类清单必须等于核定表（多一个 = 有人新增没想清楚，少一个 = 表要更新）', () => {
@@ -981,13 +778,6 @@ describe('★ 全仓 error class 普查：所有类逐个核定，新增类必�
     }
   });
 
-  it('StockMovementCasConflictError 不得携带 code/statusCode（其消息含 itemId，属内部标识）', () => {
-    const src = fs.readFileSync(path.join(SRC, 'inventory/inventoryService.ts'), 'utf8');
-    const body = /class StockMovementCasConflictError extends Error \{[\s\S]*?\n\}/.exec(src)?.[0];
-    expect(body, '类体找不到 = 该类被改名或搬走，核定表要更新').toBeTruthy();
-    expect(body).not.toMatch(/statusCode/);
-    expect(body).not.toMatch(/\bcode\b/);
-  });
 });
 
 describe('★ 委托的安全前提：调用点的 fallbackCode 不得是表里的 4xx', () => {
@@ -1001,19 +791,6 @@ describe('★ 委托的安全前提：调用点的 fallbackCode 不得是表里�
    */
   const FOUR_XX_FALLBACKS_ALLOWED: string[] = [];
 
-  it.each(['SIGN_FAILED', 'QC_REPORT_DOCUMENT_FAILED'])(
-    '新增QC出口%s：实际原生拒绝保留，未知SQL和同名假类安全500', fallbackCode => {
-      const native = safeRouteError(qcReportFailure(new QcReportError('FORBIDDEN', '当前账号不能处理此报告。')),
-        { fallbackCode, fallbackMessage: '报告操作结果暂不可确认，请刷新后核对。' });
-      expect(native).toMatchObject({ status: 403, code: 'FORBIDDEN', passthrough: true,
-        message: '当前账号不能处理此报告。' });
-      const unknown = safeRouteError(qcReportFailure({ name: 'QcReportError', code: 'FORBIDDEN',
-        statusCode: 403, message: 'SQL private_report P2003' }),
-      { fallbackCode, fallbackMessage: '报告操作结果暂不可确认，请刷新后核对。' });
-      expect(unknown).toMatchObject({ status: 500, code: fallbackCode, passthrough: false,
-        message: '报告操作结果暂不可确认，请刷新后核对。' });
-      expect(JSON.stringify(unknown)).not.toMatch(/SQL|private_report|P2003/);
-    });
 
   /** 扫描正则只写一次（自检与普查共用，避免两份正则各坏各的） */
   function fallbackHits(code: string): string[] {
@@ -1112,10 +889,12 @@ describe('★ 委托的安全前提：调用点的 fallbackCode 不得是表里�
     // No fallback policy or original registered-4xx rejection is changed.
     // Exact da9448 source replay retains all 405 original7832 semantic tuples:
     // seven documented consumers added, no retirement; safe391/all412.
-    expect(viaSafe.length, 'safeRouteError 调用点处数与基线不符（新增未登记 / 扫描正则失效）').toBe(393);
+    // 2026-11-09 旧服务退役重量：现行 safeRouteError 调用点只在 admin / hr / devPanel 路由，43 处 / 40 码；
+    // 退役站点随文件删除，未放宽任何兜底规则，下方表内 4xx 拒绝仍逐站生效。
+    expect(viaSafe.length, 'safeRouteError 调用点处数与基线不符（新增未登记 / 扫描正则失效）').toBe(43);
     // 299 → 306：v3.03 B42·A1 净收七站（customsRouteV2 5 + quotationRoute 2；两审批站刻意不收，见 quotationCopyB42 文件头）
     // 288 → 299：S0-A2 第 10 批复核补的 11 处（首版按形状只数了 14 处，见 docs/S0-A2第10批…§五）
-    expect(new Set(viaSafe.map((h) => h.code)).size, '不同兜底码的个数与基线不符').toBe(202);
+    expect(new Set(viaSafe.map((h) => h.code)).size, '不同兜底码的个数与基线不符').toBe(40);
     // 160 → 171：第 10 批复核补的 11 处各用一枚**全新**码名（EMAIL_LIST/PATCH/DETAIL_FAILED、IMAP_* 6 枚、ATTACHMENT_DOWNLOAD_FAILED）⇒ 净 +11
     // ★ F3：分母从「只扫 safeRouteError」扩成三支 ⇒ 下面三个数与 `toBe(116)/toBe(70)` 是**同一口径的分支账**，
     //   不是把 116/70 改小或改松：safeRouteError 那 116 处 / 70 码一个字没动，
@@ -1125,14 +904,14 @@ describe('★ 委托的安全前提：调用点的 fallbackCode 不得是表里�
     expect(viaDirect.length, 'resolveError 直调兜底码处数与基线不符（扫描正则失效 / 新增未登记）').toBe(1);
     // 2026-11-06：risk/riskRoute.ts 已删除，中继支归零。
     expect(viaRelay.length, '中继（handleError → resolveError）处数与基线不符').toBe(0);
-    expect(hits.length, '全仓兜底码调用点总数（三支合计）').toBe(414);
+    expect(hits.length, '全仓兜底码调用点总数（三支合计）').toBe(44);
     /**
      * ★ 复核 B-1（也是我自己的现量）：这里原先钉 **196**，旁边写着"实测，非推算"，而尺自报 **195**
      *   （隔离单跑**确定性**复现同一红 ⇒ 不是偶发）。196 是按注释里那句"八站"推出来的，**那一版这条用例没跑过**。
      *   对账：并集 = safe 支 **175** 枚（上面那条）+ risk 中继 **20** 枚，直调那 1 处是既有 `INTERNAL_ERROR` ⇒ **195**。
      *   ⇒ **站点数 ≠ 码名数**：本批收 7 站，但只有 **4 枚全新码名**（报关四站各一枚；`/documents` 列表与报价两站复用 `INTERNAL_ERROR`）。
      */
-    expect(new Set(hits.map((h) => h.code)).size, '全仓不同兜底码总数（三支合计）').toBe(222);
+    expect(new Set(hits.map((h) => h.code)).size, '全仓不同兜底码总数（三支合计）').toBe(40);
     const bad = hits.filter(({ code }) => {
       const spec = lookupErrorCode(code);
       return spec !== undefined && spec.status < 500 && !FOUR_XX_FALLBACKS_ALLOWED.includes(code);

@@ -1,5 +1,6 @@
 /** Customer statements and business interpretation are separate facts, not inferred willingness-to-pay. */
 import type { MarketQuotation, MarketQuoteLine } from "./mistMarket";
+import { isCalendarDay } from './mistBusinessClock';
 import { quoteCostDecimal } from "./mistQuotationCosting";
 export const QUOTE_FEEDBACK_KINDS = {
   counteroffer: "客户还价 / 条件调整",
@@ -80,7 +81,7 @@ const date = (v: unknown, label: string, optional = false) => {
   if (
     !/^\d{4}-\d{2}-\d{2}$/.test(value) ||
     !Number.isFinite(Date.parse(value + "T00:00:00Z")) ||
-    new Date(value + "T00:00:00Z").toISOString().slice(0, 10) !== value
+    !isCalendarDay(value)
   )
     throw Error(label + "须为有效日历日期");
   return value;

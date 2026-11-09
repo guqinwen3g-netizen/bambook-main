@@ -5,7 +5,6 @@ vi.mock('../../audit/routeAudit', () => ({ writeRouteAuditLog: vi.fn(async () =>
 import { FIXED_BUSINESS_TIME_ISO } from '../businessClock';
 import { nextBusinessNumber } from '../businessNumberService';
 import { renderFormatTemplate } from '../../sequence/sequenceService';
-import { orderSampleDate } from '../../samples/orderSampleSourceContract';
 import { evaluateLcEligibility } from '../../customs/lcGate';
 import { resolveCreditException } from '../../credit/creditExceptionGate';
 import type { ExceptionService } from '../../exceptions/exceptionService';
@@ -31,15 +30,6 @@ describe('business consumers retain the development as-of date when process time
     const historical = new Date('2024-02-28T17:00:00.000Z');
     expect(renderFormatTemplate('{year}{month}{day}', { prefix: 'PO', seq: 1, date: historical })).toBe('20240229');
     expect(historical.toISOString()).toBe('2024-02-28T17:00:00.000Z');
-  });
-
-  it('keeps actual financial and sample dates explicit instead of replacing historical input with today', () => {
-    for (const validate of [orderSampleDate]) {
-      expect(validate('2024-02-29')).toBe('2024-02-29');
-      for (const invalid of ['2026-02-29', '2026-02-30', '2026-10-08T00:18:00Z']) {
-        expect(() => validate(invalid)).toThrow();
-      }
-    }
   });
 
   it('keeps LC valid under the fixed date and enforces Shanghai end-of-day independently of the host timezone', () => {

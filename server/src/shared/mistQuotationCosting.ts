@@ -1,5 +1,6 @@
 /** Auditable manual quote costing. No AI prices, FX assumptions or actual-profit recognition. */
 import type { MarketQuotation, MarketQuoteLine } from "./mistMarket";
+import { isCalendarDay } from './mistBusinessClock';
 export const QUOTE_COST_MODEL_VERSION = "quote-cost-v3";
 export const QUOTE_COST_ALLOCATION_VERSION = "quote-cost-line-allocation-v3";
 export function quoteCostModelVersion(input: QuoteCostInput) {
@@ -140,7 +141,7 @@ const calendar = (v: string, label: string, optional = false) => {
   if (
     !/^\d{4}-\d{2}-\d{2}$/.test(v) ||
     !Number.isFinite(Date.parse(v + "T00:00:00Z")) ||
-    new Date(v + "T00:00:00Z").toISOString().slice(0, 10) !== v
+    !isCalendarDay(v)
   )
     throw Error(label + "须为有效日历日期");
   return v;

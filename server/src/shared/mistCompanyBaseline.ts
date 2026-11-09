@@ -2,6 +2,7 @@ import {MIST_COMPANY_IDENTITY,MIST_COMPANY_PROFILE,mistCompanyDisplayName,rename
 import {applyMistCommand,createMistState,getMistReviewTasks,type MistCommand,type MistContext,type MistState} from './mistWorkspace';
 import {seedCompanyHistory} from './mistCompanyHistory';
 import {demoFileRecord} from './mistDemoFiles';
+import {mistBusinessDate} from './mistBusinessClock';
 import {completeCompanyProduct} from './mistCompanyCatalog';
 import type {MistAccountRef,MistMemberDirectoryEntry} from './mistAccounts';
 
@@ -89,7 +90,7 @@ export function createMistCompanyBaseline(base:MistContext,roster:MistCompanyRos
  claimReviewer.authority!.claimReviewerId=roster[claimReviewerKey].id;
  const run=(step:string,command:MistCommand,ctx:MistContext=owner)=>{try{const master=['market.customer.create','market.contact.save','market.supplier.save','market.product.save'].includes(command.type);const result=applyMistCommand(state,command,master?{...ctx,now:base.now.slice(0,4)+'-01-02T08:00:00.000Z'}:ctx);state=result.state;return result.result;}catch(error){failures.push({step,message:error instanceof Error?error.message:String(error)});return{};}};
  const id=(result:Record<string,unknown>|undefined,key='id')=>typeof result?.[key]==='string'?String(result[key]):'';
- const day=(offset:number)=>new Date(Date.parse(base.now)+offset*DAY).toISOString().slice(0,10);
+ const day=(offset:number)=>mistBusinessDate(new Date(Date.parse(base.now)+offset*DAY));
  const at=(offset:number,hour=9)=>{const value=new Date(Date.parse(base.now)+offset*DAY);value.setUTCHours(hour,0,0,0);return value.toISOString();};
 
  delete state.settings.demoSeed;state.settings.companyBaseline={version:MIST_COMPANY_BASELINE_VERSION,seededAt:base.now,dataset:MIST_COMPANY_DATASET};

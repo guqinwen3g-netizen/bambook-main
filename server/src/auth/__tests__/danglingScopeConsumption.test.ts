@@ -110,6 +110,8 @@ const EXEMPT: ReadonlyArray<{ scope: string; reason: Reason; note: string }> = [
   { scope: 'reports:write', reason: 'superseded-by-mist', note: '报表计划：管理类要求 reports:admin，其余 reports:read（mistReportSchedules.ts:31）' },
   { scope: 'risk:admin', reason: 'superseded-by-mist', note: '风险决策要求 risk:write，其余风险命令 risk:read（mistRisk.ts:198）' },
   { scope: 'sensitive:commission', reason: 'superseded-by-mist', note: '佣金率属报价参数：修改要求 pricing:admin（mistPlatform.ts:96）；报价人对自己报价核算可见，沿用既有定案' },
+  { scope: 'sensitive:cost', reason: 'superseded-by-mist', note: '采购价与成本按分区权限强制：定价 pricing:read、采购 procurement:read（mist/access.ts:49,53），成本核算依据要求 reports:admin（mist/access.ts:290）' },
+  { scope: 'production:pp_release:admin', reason: 'module-absent', note: '产前样放行的暂停 / 撤销 / 恢复动作随旧生产模块删除，Mist 无对应命令' },
   { scope: 'sensitive:profit', reason: 'superseded-by-mist', note: '成本与毛利可见性由 reports:admin 强制（mist/access.ts:290），毛利底线修改要求 pricing:admin（mistMarket.ts:143）' },
   { scope: 'settings:automation:write', reason: 'superseded-by-mist', note: '无权限码的 settings.update 在仓储层要求公司维护权 users:write（mist/repository.ts:807，companyLibrary.ts:19）' },
   { scope: 'settings:tolerance:write', reason: 'superseded-by-mist', note: '同 settings:automation:write：公司设置更新要求 users:write（mist/repository.ts:807）' },

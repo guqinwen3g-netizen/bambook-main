@@ -39,7 +39,7 @@ const UNREGISTERED_FALLBACK_BASELINE: Record<string, number> = {
   //    `INVALID_SHIPMENT_STATUS` / `INVALID_INITIAL_STATUS`），其中若干枚在本文件被当兜底码用 ⇒
   //   这些站点从"真源不认"变成"真源认得"，**依本条自己的规则必须把基线一起改小**
   //   （原注释：「登记好了就把基线一并改小（留旧数 = 掩盖下一次回潮）」）。★ 实测，不是推算。
-  'src/devPanel/route.ts': 1,
+  // 2026-11-09：devPanel 与 hr 余下兜底码全部登记（DEV_ACCOUNTS_LIST_FAILED、SCENARIO_IDENTITY_FAILED、HR_DEPARTMENT_*、HR_MEMBER_CANDIDATES_FAILED），基线清零。
 };
 
 const FALLBACK_CODE_RE = /fallbackCode:\s*'([A-Z][A-Z0-9_]*)'/g;
@@ -180,13 +180,13 @@ describe('B29 兜底码必须已登记注册表 · 逐文件棘轮（只许减�
       }
     }
     // 实测（2026-09-20 13:05）：finance 27 + seasons 22 + suppliers 19（后两族走同文件常量）+ shipping 21 + **samples 47**（端点专属中文文案）+ 其余 ⇒ 187 处 / 18 个文件（samples 早在清单里，它那处 `SHIPMENT_HISTORY_FAILED` 就自带文案 ⇒ 处数 +47 而文件数不变）
-    expect(perSite, '自带文案的站点数变了：要么又收敛了一批（好事，同步这里），要么判据认不住了').toBe(143); // 223 → 218（2026-09-29 晚）：本批新登记 6 枚码 ⇒ 原先"码不在表里 + 调用点自带文案"的 5 处变成"码已登记"（同一机制：2026-09-29 上午 `ASSEMBLE_FAILED` 就是 -1）。★ 实测，不是 223−5 推的。 // 221 → 223（2026-09-29 晚）：`orders/toleranceStandardRoute.ts` 的**客户标准**两站各 1 处（`TOLERANCE_CUSTOMER_READ_FAILED` / `TOLERANCE_CUSTOMER_WRITE_FAILED`，都自带中文文案）⇒ +2；**文件数不变**（同一文件）。★ 量出来的，不是 221+2 推的。
+    expect(perSite, '自带文案的站点数变了：要么又收敛了一批（好事，同步这里），要么判据认不住了').toBe(0); // 2026-11-09：自带文案的站点全部在已删除的旧主 API 文件里，现为 0。 // 223 → 218（2026-09-29 晚）：本批新登记 6 枚码 ⇒ 原先"码不在表里 + 调用点自带文案"的 5 处变成"码已登记"（同一机制：2026-09-29 上午 `ASSEMBLE_FAILED` 就是 -1）。★ 实测，不是 223−5 推的。 // 221 → 223（2026-09-29 晚）：`orders/toleranceStandardRoute.ts` 的**客户标准**两站各 1 处（`TOLERANCE_CUSTOMER_READ_FAILED` / `TOLERANCE_CUSTOMER_WRITE_FAILED`，都自带中文文案）⇒ +2；**文件数不变**（同一文件）。★ 量出来的，不是 221+2 推的。
     // 211 → 218（v3.03，Δ=+7）：B42·A1 收 customsRouteV2 **5** 处 + quotationRoute **2** 处 = 7 个新调用点，都走"码名跨域重名 ⇒ 调用点自带文案"这条既有路径合规路径（实测 +8） // 201 → 212：第 10 批复核补的 11 处仍走**调用点自带文案**这条合规路径（码名跨域重名，不并进全局注册表），实测数
     // 212 → 211（v2.46）：`shipping/route.ts:485` 那处 `ASSEMBLE_FAILED` 从"码不在表里 + 自带文案"变成"码已登记"（本批登记）。
     //   对外没变：状态本来就取 `spec?.status ?? 500` = 500，文案仍由调用点 `fallbackMessage` 优先（routeError.ts:93）。
-    expect(perFiles).toBe(18); // fixed 9b206773: native QC Agent and customs finite fallback copies add two visible files; 143 total remains, not increased raw debt. Historical 16 retained in source-readings.
+    expect(perFiles).toBe(0); // fixed 9b206773: native QC Agent and customs finite fallback copies add two visible files; 143 total remains, not increased raw debt. Historical 16 retained in source-readings.
     // ★ 豁免的**前提**是那句文案真的能用。实测有 16 处不成立 ⇒ 单独立项 B31，先计量、不装作没看见
-    expect(weakCopy, '这几处"自带文案"是空的/太短/不是中文 ⇒ 既没进注册表也没有可用文案（B31）').toBe(7);
+    expect(weakCopy, '这几处"自带文案"是空的/太短/不是中文 ⇒ 既没进注册表也没有可用文案（B31）').toBe(0);
   });
 
   it('★ 阳性对照 3：自带文案写成「同文件常量」也必须被认到（season 族的形状）', () => {

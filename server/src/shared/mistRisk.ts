@@ -1,4 +1,5 @@
 import {notifyMist} from './mistNotifications';
+import { isCalendarDay } from './mistBusinessClock';
 /**
  * 风险管理与合规（CAP-risks-01/02 · G69）。
  * - 预警（signal）只从真实记录推出：逾期应收、往来冻结、供应商认证 / 暂停、QC 不通过、生产逾期或风险说明。
@@ -154,7 +155,7 @@ export function riskSignals(state: MistState | null, day: string): RiskSignal[] 
 
 function fail(message: string, code = 'VALIDATION'): never { throw new MistCommandError(code, message); }
 function text(v: unknown, label: string, required = true, max = 4000) { if (typeof v !== 'string' || v.length > max || (required && !v.trim())) fail(label + '未填写或格式无效'); return (v as string).trim(); }
-function optionalDay(v: unknown, label: string) { if (v === undefined || v === '') return ''; const s = text(v, label); if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || new Date(s + 'T00:00:00Z').toISOString().slice(0, 10) !== s) fail(label + '无效'); return s; }
+function optionalDay(v: unknown, label: string) { if (v === undefined || v === '') return ''; const s = text(v, label); if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || !isCalendarDay(s)) fail(label + '无效'); return s; }
 function find(rows: RiskRecord[], id: string) { const r = rows.find(x => x.id === id); if (!r) fail('风险不存在', 'NOT_FOUND'); return r!; }
 /** 处理权：持风险写权限者（主管、财务等）不限来源；其他账号只能处理来源为本人客户 / 订单、且持有对应现有写权限的风险。 */
 function handleRefusal(root: MistState, c: MistContext, kind: RiskSourceKind, id: string): string | false {

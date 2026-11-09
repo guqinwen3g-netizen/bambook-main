@@ -283,8 +283,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
       });
     } catch (err) {
       logger.error('[send-code] unexpected failure', { error: err instanceof Error ? err.message : String(err) });
-      const detail = err instanceof Error ? err.message : String(err);
-      return res.status(500).json({ ok: false, error: 'SEND_CODE_FAILED', message: `验证码发送服务异常：${detail}` });
+      return res.status(500).json({ ok: false, error: 'SEND_CODE_FAILED', message: '验证码暂时无法发送，请稍后重试。' });
     }
   });
 

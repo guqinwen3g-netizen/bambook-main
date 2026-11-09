@@ -23,7 +23,7 @@ type Nudge = { target: MistTarget; label: string; title: string };
 export function nudgeSpec(row: TeamRow, n: Nudge, today: string, run: (c: MistCommand) => Promise<unknown>): ModuleEditorSpec {
   return {
     title: `督办 ${row.name}`, submitLabel: '发出督办',
-    description: `对象：${n.label}。督办会进入${row.name}的“我的工作”，由本人完成后勾选；同一对象未完成前不能重复督办。`,
+    description: `对象：${n.label}。同一对象未完成前不能重复督办。`,
     fields: [
       { key: 'title', label: '督办事项', hint: '写清要对方做什么，2–60 字' },
       { key: 'due', label: '完成期限', type: 'date' },

@@ -157,12 +157,10 @@ describe('B76 · 四扇门：每扇门都要"该瞎的那把尺当场瞎、新�
   });
 });
 
-describe('B76 · 真实受害者：曾经瞎掉的五处代码，现在必须在场', () => {
+describe('B76 · 真实受害者：曾经瞎掉的代码（现存两处），现在必须在场', () => {
   /** 按"整行内容"定位（不是 `includes`：这些片段在文件里另有出现，用全文包含会假绿） */
   const victims: Array<{ file: string; line: string; label: string }> = [
     { file: 'src/index.ts', line: "    if (req.url === '/bambook/api' || req.url.startsWith('/bambook/api/')) {", label: 'index.ts :376（盲区 375→1328，545 行 —— 里面躺着 /bambook 前缀剥离中间件）' },
-    { file: 'src/notifications/notificationService.ts', line: "  lc_shipment_deadline: '信用证装运截止',", label: 'notificationService :70（盲区 62→116）' },
-    { file: '../components/Settings.tsx', line: "                    <div className={labelCls + ' mb-2'}>认证模式</div>", label: 'Settings.tsx :700（该文件 32% 曾不可见）' },
     { file: '../services/apiService.ts', line: '  MarketingCampaign,', label: 'apiService.ts :232（行注释里的 /api/v2/marketing/ 通配吃掉 43 行）' },
   ];
   for (const v of victims) {
@@ -233,7 +231,8 @@ describe('B76 · 总闸：全仓扫一遍，行数必须守恒、且"新尺更�
     expect(g.server.new, `server 侧新尺仍吃掉了 ${g.server.new} 行 ⇒ B76 复发`).toBe(0);
     // 差分总闸：旧尺在 server 侧吃掉的行数（口径 C = 总闸集里以 server/ 开头的 1089 个文件，v2.55 现量 **673**；原先这里写"约 610"是 B∩server=542 个文件那个口径的 614，混了两个口径）⇒ 一旦有人把尺换回去就会掉回来
     // 2026-11-06：删除旧主 API 死代码（约 500 个 server 文件）后同口径现量 129。
-    expect(g.server.old).toBeGreaterThanOrEqual(120);
+    // 2026-11-09：再删 147 个旧服务模块后同口径现量 76。
+    expect(g.server.old).toBeGreaterThanOrEqual(70);
     expect(g.frontend.new).toBeLessThan(g.frontend.old);
   });
 });
@@ -288,16 +287,15 @@ describe('B74 尺的视野 · 复核 B1：范围声明必须与真实扫描一�
     const seen = new Map(scanFrontendSources(REPO).map((f) => [f.rel, f.lines.length]));
     const dropped = oldHits(REPO).filter((entry) => (seen.get(entry.split('#')[0]) ?? 0) < Number(entry.split('#')[1]));
     expect(dropped, `换范围时丢掉的落点：${dropped.join(', ')}`).toEqual([]);
-    expect(oldHits(REPO).length, '旧口径本来就该有命中，否则这条单调性断言是空的').toBeGreaterThan(50);
+    // 2026-11-09：旧前端（components/、App.tsx 等）已退出仓库，旧口径只剩少量命中；仍须非空。
+    expect(oldHits(REPO).length, '旧口径本来就该有命中，否则这条单调性断言是空的').toBeGreaterThan(0);
   });
 
-  it('★ 三处"从前不在视野里"的真实位置现在必须在（复核点名的那三扇门）', () => {
-    const rels = scanFrontendSources(REPO).map((f) => f.rel);
-    expect(rels, '仓根文件曾整份不可见（台账 B74 行的起源例子就在 App.tsx:944）').toContain('App.tsx');
-    expect(rels.some((r) => r.startsWith('customer-portal/')), 'customer-portal 是另一份交付前端').toBe(true);
+  it('★ 现行前端入口必须在视野里（旧仓根 App.tsx / customer-portal 已退出仓库）', () => {
+    const rels = enumerateFrontendSources(REPO).filter((f: { excluded: boolean }) => !f.excluded).map((f: { rel: string }) => f.rel);
+    expect(rels, 'Mist 统一入口').toContain('dev-ui-preview/mist-atelier/app/main.tsx');
+    expect(rels, 'Mist 页面目录').toContain('dev-ui-preview/mist-atelier/app/ReferenceApp.tsx');
     expect(rels).toContain('electron/main.ts');
-    /** ★ 我自己这批踩过：把 `tools` 放进"任意深度"黑名单 ⇒ `components/tools/` 被顺带剪掉 5 处 */
-    expect(rels.some((r) => r.startsWith('components/tools/')), '根级排除项外溢到了子目录').toBe(true);
   });
 
   it('排除清单分两层：产物目录任意深度剪，仓根目录只在第一层剪', () => {

@@ -8,6 +8,7 @@
  *   同一对象对同一成员只能有一条未完成督办；不能督办自己。完成仍由成员本人在待办中勾选。
  */
 import { isOrderTerminated } from './mistOrderGovernance';
+import { isCalendarDay, shiftCalendarDay } from './mistBusinessClock';
 import { MistCommandError, isActiveMistInvoice, type MistContext, type MistState, type MistTarget, type MistTask } from './mistWorkspace';
 import { accountOwnedObjects, resolveMember, type MistBusinessGroup } from './mistAccounts';
 import { platformBusinessDate } from './mistPlatform';
@@ -136,7 +137,7 @@ export function applyTeamCommand(root: MistState, command: TeamCommand, c: MistC
   const note = typeof p.note === 'string' ? p.note.trim() : '';
   if (note.length > 200) fail('说明不超过 200 字');
   const due = typeof p.due === 'string' ? p.due : '';
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(due) || Number.isNaN(Date.parse(due + 'T00:00:00Z')) || new Date(due + 'T00:00:00Z').toISOString().slice(0, 10) !== due) fail('请填写有效的完成期限');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(due) || Number.isNaN(Date.parse(due + 'T00:00:00Z')) || !isCalendarDay(due)) fail('请填写有效的完成期限');
   if (due < platformBusinessDate(c.now)) fail('完成期限不能早于今天');
   const t = nudgeTarget(root, p.target);
   const dup = (root.tasks as TeamTask[]).find(x => !x.done && x.nudge && x.assigneeIds.includes(member.id) && x.target?.view === t.target.view && x.target?.id === t.target.id);
@@ -161,8 +162,8 @@ export type TeamWeekRow = {
 export type TeamWeekReport = { weekStart: string; weekEnd: string; asOf: string; rows: TeamWeekRow[]; totals: Omit<TeamWeekRow, 'id' | 'name' | 'former'> };
 
 /** 某日所在周的周一。 */
-export function weekStartOf(day: string) { const n = dayNo(day), dow = (new Date(n * 86400000).getUTCDay() + 6) % 7; return new Date((n - dow) * 86400000).toISOString().slice(0, 10); }
-export const addBusinessDays = (day: string, n: number) => new Date((dayNo(day) + n) * 86400000).toISOString().slice(0, 10);
+export function weekStartOf(day: string) { const n = dayNo(day), dow = (new Date(n * 86400000).getUTCDay() + 6) % 7; return shiftCalendarDay(day.slice(0, 10), -dow); }
+export const addBusinessDays = (day: string, n: number) => shiftCalendarDay(day.slice(0, 10), n);
 const bizDay = (at: string | undefined) => !at ? '' : /^\d{4}-\d{2}-\d{2}$/.test(at) ? at : platformBusinessDate(at);
 
 export function teamWeekRow(state: MistState, member: { id: string; name: string }, weekStart: string, today: string, former = false): TeamWeekRow {

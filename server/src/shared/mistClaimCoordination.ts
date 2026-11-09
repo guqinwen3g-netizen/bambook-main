@@ -1,4 +1,5 @@
 import {notifyMist,notificationOwners} from './mistNotifications';
+import { isCalendarDay } from './mistBusinessClock';
 import {orderFundingNonCustomerReceiptLimit} from './mistOrderFunding';
 import {recoveryOtherFulfilledMinor,type ClaimRecoverySettlement} from './mistClaimRecoveryReceipts';
 /**
@@ -62,7 +63,7 @@ export function claimCoordinationPermission(type: ClaimCoordinationCommand['type
 function fail(message: string, code = 'VALIDATION'): never { throw new MistCommandError(code as any, message); }
 function text(v: unknown, label: string, required = true, max = 2000) { if (typeof v !== 'string' || v.length > max || (required && !v.trim())) fail(label + '未填写或格式无效'); return (v as string).trim(); }
 function amount(v: unknown, label: string, allowZero = false) { if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || (!allowZero && v === 0)) fail(label + (allowZero ? '须为非负金额' : '须大于零')); const minor = mistMoneyMinor(v as number); if (!/^\d{1,12}(\.\d{1,2})?$/.test(String(v))) fail(label + '最多两位小数'); return minor / 100; }
-function day(v: unknown) { const s = text(v, '日期'); if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || new Date(s + 'T00:00:00Z').toISOString().slice(0, 10) !== s) fail('日期无效'); return s; }
+function day(v: unknown) { const s = text(v, '日期'); if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || !isCalendarDay(s)) fail('日期无效'); return s; }
 function businessDay(instant: string) { const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(instant)); const v = (t: string) => parts.find(x => x.type === t)?.value ?? ''; return v('year') + '-' + v('month') + '-' + v('day'); }
 function enumOf<T extends string>(v: unknown, allowed: readonly T[], label: string): T { if (!allowed.includes(v as T)) fail(label + '无效'); return v as T; }
 function coordination(claim: ClaimLike): ClaimCoordination { if (!claim.coordination) claim.coordination = { notices: [], verifications: [], recoveries: [] }; return claim.coordination; }

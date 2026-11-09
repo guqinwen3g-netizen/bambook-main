@@ -84,16 +84,7 @@ describe('nextBusinessNumber 调用点族级守卫（占用追平不许漏）', 
     expect(sites.length).toBeGreaterThan(0);
     expect(sites.map((s) => `${s.file}`).sort()).toEqual(
       [
-        'claims/claimCaseService.ts',
-        'customs/customsService.ts',
-        'customs/customsService.ts',
-        'customs/customsService.ts',
-        'customs/tradeDocumentLifecycleService.ts',
-        'finance/billingItemService.ts', // BillingItem
-        'finance/billingItemService.ts', // CostRecord
-        'finance/invoiceMutationService.ts',
-        'finance/paymentVoucherMutationService.ts',
-        'quotations/quotationService.ts',
+        'claims/claimCaseService.ts', // 2026-11-09：报关、开票、计费、报价等旧服务删除后仅余售后。
       ].sort(),
     );
   });

@@ -1,4 +1,5 @@
 import {notifyMist,notificationOwners} from './mistNotifications';
+import { shiftCalendarDay } from './mistBusinessClock';
 import {recoveryOtherFulfilledMinor} from './mistClaimRecoveryReceipts';
 import {openQcChargebacks} from './mistQcDisposition';
 import {openReturnCharges} from './mistReturnCharges';
@@ -382,7 +383,7 @@ function advanceOpenByPayment(root: Root) {
 }
 /** 先付款超过 30 天还没收到票，提醒财务催票。 */
 export const ADVANCE_INVOICE_REMIND_DAYS = 30;
-const addDays = (d: string, n: number) => new Date(Date.parse(d + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+const addDays = (d: string, n: number) => shiftCalendarDay(d, n);
 /** 已进入有效结算（待复核或已确认）的收货记录不能再次结算。 */
 const receiptSettled = (root: Root, receiptId: string, exceptSettlementId = '') => read(root).settlements.some(x => x.id !== exceptSettlementId && (x.state === 'pending' || x.state === 'confirmed') && x.receiptIds.includes(receiptId));
 const settledQuantity = (root: Root, purchaseId: string, exceptSettlementId = '') => confirmedSettlements(root, purchaseId).filter(x => x.id !== exceptSettlementId).reduce((n, x) => n + x.quantity, 0);

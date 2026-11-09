@@ -1,7 +1,7 @@
 import {notifyMist} from './mistNotifications';
 import { marketLineAmount, marketSum } from './mistMarket';
 import {createClaimReplacementOrder,assertClaimReplacementShipped,type ClaimReplacementOrderCommand} from './mistClaimReplacement';
-import {mistBusinessDate} from './mistBusinessClock';
+import {mistBusinessDate,isCalendarDay} from './mistBusinessClock';
 import type {ClaimRepairJob,ClaimRepairDispatch} from './mistClaimInventory';
 import {claimReviewDisplay} from './mistClaimReview';
 import {orderInvoiceCapProblem} from './mistOrderClosure';
@@ -70,7 +70,7 @@ export function platformBusinessDate(instant:string|Date){return mistBusinessDat
 export function createPlatformState(_context:MistContext,_rootState:MistState):PlatformState{return {invoiceDrafts:[],boms:[],pricing:[],risks:[],employees:[],claims:[],credits:[],creditApplications:[],claimGoods:[],assistantDrafts:[],pricingParams:[]};}
 function fail(message:string,code='VALIDATION'):never{throw new MistCommandError(code,message);}
 function text(v:unknown,label:string,required=true,max=4000){if(typeof v!=='string'||v.length>max||(required&&!v.trim()))fail(label+'未填写或格式无效');return (v as string).trim();}
-function day(v:unknown){const s=text(v,'日期');if(!/^\d{4}-\d{2}-\d{2}$/.test(s)||!Number.isFinite(Date.parse(s+'T00:00:00Z'))||new Date(s+'T00:00:00Z').toISOString().slice(0,10)!==s)fail('日期无效');return s;}
+function day(v:unknown){const s=text(v,'日期');if(!/^\d{4}-\d{2}-\d{2}$/.test(s)||!Number.isFinite(Date.parse(s+'T00:00:00Z'))||!isCalendarDay(s))fail('日期无效');return s;}
 function item<T extends{id:string}>(rows:T[],id:string,label:string){const row=rows.find(r=>r.id===id);if(!row)fail(label+'不存在','NOT_FOUND');return row!;}
 function money(v:number,positive=false){const n=mistMoneyMinor(v);if(positive&&n<=0)fail('金额必须大于零');return n/100;}
 function dec(v:number,label:string,positive=false){if(typeof v!=='number'||!Number.isFinite(v)||v<0||(positive&&v===0)||!/^\d{1,9}(\.\d{1,4})?$/.test(String(v)))fail(label+'须为最多四位小数的非负数');return BigInt(Math.round(v*10000));}

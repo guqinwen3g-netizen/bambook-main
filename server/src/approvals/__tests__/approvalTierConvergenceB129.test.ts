@@ -110,7 +110,6 @@ function assertReachedApprovalBranch(res: any) {
   it('④ 源码级断言：保留两站都不再自带"码→档"手写表（判据自己也要证明它认得出旧形状；claimRoute、改单与付款申请服务已删除）', () => {
     const files = [
       'src/exceptions/exceptionService.ts',
-      'src/internalTrade/internalTransferService.ts',
     ];
     const OLD = /NO_REVIEWER_RESOLVED['"]?\s*\?\s*4\d\d|includes\('NO_REVIEWER_RESOLVED'\)/;
     // 正面对照：detector 对"改前的形状"必须真的认（否则这一组是恒绿的）

@@ -12,6 +12,7 @@ import { emptyFabricRequirements } from './mistDevelopmentDomain';
 import { demoFileRecord, type DemoFileTemplate } from './mistDemoFiles';
 import { riskSignals } from './mistRisk';
 import { MIST_DEMO_ACCOUNTS } from './mistAccounts';
+import { mistBusinessDate } from './mistBusinessClock';
 import { platformBusinessDate } from './mistPlatform';
 import { MIST_COMPANY_PROFILE } from './mistCompanyIdentity';
 
@@ -25,7 +26,7 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
   const failures: DemoSeedFailure[] = [];
   const nowMs = Date.parse(context.now);
   /** 业务日期：相对“现在”的天数偏移，保证已发生的事实不晚于现在。 */
-  const day = (offset: number) => new Date(nowMs + offset * DAY).toISOString().slice(0, 10);
+  const day = (offset: number) => mistBusinessDate(new Date(nowMs + offset * DAY));
   const at = (offset: number, hour = 9) => { const d = new Date(nowMs + offset * DAY); d.setUTCHours(hour, 0, 0, 0); return (d.getTime() > nowMs ? new Date(nowMs - 60000) : d).toISOString(); };
   const supplierApprovers = { version: 1, userIds: ['demo-reviewer'] };
   const authority: NonNullable<MistContext['authority']> = {

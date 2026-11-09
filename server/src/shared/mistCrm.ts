@@ -1,5 +1,6 @@
 /** 客户关系切片：跟进记录与商机。只记录业务员实际登记的事实；商机金额按原币种保存，不跨币种汇总。 */
 import { mistInvoiceCustomerId } from './mistOpeningBalance';
+import { isCalendarDay, mistBusinessDate } from './mistBusinessClock';
 import { MistCommandError, isRecognizedMistInvoice, type MistContext, type MistState } from './mistWorkspace';
 import { platformBusinessDate } from './mistPlatform';
 import { ownerChangeText, resolveMember } from './mistAccounts';
@@ -33,7 +34,7 @@ export const CRM_STAGES: CrmStage[] = ['intent', 'sampling', 'quoting', 'won', '
 export const CRM_LINK_LABEL: Record<CrmLinkKind, string> = { development: '开发案', quotation: '报价', order: '订单', opportunity: '商机', invoice: '应收票据' };
 const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCommandError(code, message, code === 'NOT_FOUND' ? 404 : 422); };
 const text = (value: unknown, label: string, required = false, max = 2000) => { const v = typeof value === 'string' ? value.trim() : ''; if (required && !v) fail(`请填写${label}`); if (v.length > max) fail(`${label}过长`); return v; };
-const day = (value: unknown, label: string, required = false) => { const v = text(value, label, required, 10); if (v && (!/^\d{4}-\d{2}-\d{2}$/.test(v) || new Date(v + 'T00:00:00Z').toISOString().slice(0, 10) !== v)) fail(`${label}格式无效`); return v; };
+const day = (value: unknown, label: string, required = false) => { const v = text(value, label, required, 10); if (v && (!/^\d{4}-\d{2}-\d{2}$/.test(v) || !isCalendarDay(v))) fail(`${label}格式无效`); return v; };
 
 export function createCrmState(_context: MistContext, _root: unknown): CrmState { return { followUps: [], opportunities: [] }; }
 export function crmCommandPermission(_command: CrmCommand) { return 'relations:write'; }
@@ -90,7 +91,7 @@ export function applyCrmCommand(root: MistState, command: CrmCommand, context: M
       if (!Number.isFinite(stamp)) fail('跟进时间格式无效');
       if (stamp > Date.parse(context.now) + 60000) fail('跟进时间须为已发生的实际时间');
       const nextDate = day(p.nextDate, '下次跟进日');
-      if (nextDate && nextDate < context.now.slice(0, 10)) fail('下次跟进日不能早于今天');
+      if (nextDate && nextDate < mistBusinessDate(context.now)) fail('下次跟进日不能早于今天');
       let link: CrmLink | null = null;
       if (p.link) { if (!Object.keys(CRM_LINK_LABEL).includes(p.link.kind)) fail('关联对象类型无效'); link = { kind: p.link.kind, id: text(p.link.id, '关联对象', true, 200) }; if (!crmLinkTarget(root, c.id, link)) fail('关联对象不属于该客户', 'NOT_FOUND'); }
       let collection: CrmCollection | undefined;

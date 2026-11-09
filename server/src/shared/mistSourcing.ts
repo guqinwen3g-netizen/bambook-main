@@ -1,4 +1,5 @@
 import { hasMaterialAtFactory } from './mistInternalFabric';
+import { isCalendarDay } from './mistBusinessClock';
 import {assertGarmentProcurement,type MistMaterialKind} from './mistInternalFabric';
 /**
  * 供应商询价比价（RFQ，2026-10-18）。采购按订单条目发起询价，邀请至少两家可合作供应商；逐家登记报价（单价、币种、MOQ、承诺交期、付款条件、报价有效期）或谢绝。
@@ -48,7 +49,7 @@ export const RFQ_STATE_LABEL: Record<MistRfq['state'], string> = { open: '询价
 
 const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCommandError(code, message, code === 'NOT_FOUND' ? 404 : code === 'CONFLICT' ? 409 : 422); };
 const text = (v: unknown, label: string, required = true, max = 500) => { const s = typeof v === 'string' ? v.trim() : v == null ? '' : String(v).trim(); if (required && !s) fail(`请填写${label}`); if (s.length > max) fail(`${label}过长`); return s; };
-const day = (v: unknown, label: string) => { const s = text(v, label, true, 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || new Date(s + 'T00:00:00Z').toISOString().slice(0, 10) !== s) fail(`${label}格式无效`); return s; };
+const day = (v: unknown, label: string) => { const s = text(v, label, true, 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || !isCalendarDay(s)) fail(`${label}格式无效`); return s; };
 const positive = (v: unknown, label: string, decimals = 4) => { const s = text(v, label, true, 20); if (!new RegExp(`^\\d{1,12}(\\.\\d{1,${decimals}})?$`).test(s) || !(Number(s) > 0)) fail(`${label}须为大于零的数字（最多 ${decimals} 位小数）`); return Number(s); };
 const currencyOf = (v: unknown) => { const c = text(v, '币种', true, 3).toUpperCase(); if (!/^[A-Z]{3}$/.test(c)) fail('币种须为三位英文字母'); return c; };
 

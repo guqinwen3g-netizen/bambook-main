@@ -14,7 +14,6 @@ import { createAuthService, type TokenPayload } from '../service';
 import { createPermissionService, hasScope } from '../permissionService';
 import { buildAuthTokenPayload, buildLoadedAuthTokenPayload, serializeAuthUser } from '../tokenHelpers';
 import { createAuthorizationSnapshotGuard } from '../authorizationSnapshotGuard';
-import { createCurrentWriteActor } from '../currentWriteActor';
 import { createModuleAuthGuard } from '../moduleGuard';
 import { requirePermission } from '../permissionGuard';
 
@@ -73,11 +72,11 @@ function renewedPayload(response: { headers: Record<string, unknown> }): TokenPa
   return createAuthService().verifyToken(decodeURIComponent(cookie!.slice('bambook_token='.length)));
 }
 
-describe.each(['snapshot', 'write'] as const)('%s current-authorization error boundary (actual JWT/loader, substituted storage)', kind => {
+describe.each(['snapshot'] as const)('%s current-authorization error boundary (actual JWT/loader, substituted storage)', kind => {
   function guardedHost(fixture: ReturnType<typeof database>) {
     const app = express(); app.use(express.json());
     const downstream = vi.fn();
-    app.use(kind === 'snapshot' ? createAuthorizationSnapshotGuard({ prisma: fixture.prisma }) : createCurrentWriteActor(fixture.prisma));
+    app.use(createAuthorizationSnapshotGuard({ prisma: fixture.prisma }));
     app.post('/guarded', (req, res) => { downstream(); res.json({ actor: (req as any).actor }); });
     return { app, downstream };
   }

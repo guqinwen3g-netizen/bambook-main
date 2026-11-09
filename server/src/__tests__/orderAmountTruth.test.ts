@@ -189,10 +189,7 @@ describe('findOrderAmountConflict —— 主档与明细行打架自检', () => 
  *    所以它仍是人工维护的清单。但它**不是**「不得写内联口径」的白名单：
  *    后者见下方 ③ 测试，已改为**全仓扫描**（v1 只查这 5 个文件 ⇒ 白名单外的漂移无人管）。
  */
-// 原 5 个消费点中 dashboard / seasons / reconciliation / 旧 Dashboard 页随旧主 API 与旧前端退役删除，仅余发运批次服务。
-const CONSUMERS = [
-  'server/src/shipping/orderShipmentBatchService.ts',
-];
+// 原 5 个消费点（dashboard / seasons / reconciliation / 发运批次 / 旧 Dashboard 页）均已随旧主 API 与旧前端退役；口径守卫改由下方全仓扫描承担。
 
 /**
  * ★ 全仓扫描范围（任务4 扩容 · E 批 2026-09-26 加 `customer-portal`）。
@@ -303,20 +300,6 @@ function inlineHitsInLine(line: string): string[] {
 }
 
 describe('结构守卫：订单金额口径不得再散落', () => {
-  it('① 保留的消费点文件都存在（防止清单本身腐烂）', () => {
-    for (const rel of CONSUMERS) {
-      expect(fs.existsSync(path.join(ROOT, rel)), `${rel} 应存在`).toBe(true);
-    }
-  });
-
-  it('② 每个消费点都必须 import 真源', () => {
-    for (const rel of CONSUMERS) {
-      const src = fs.readFileSync(REL(rel), 'utf8');
-      const usesTruth = /from\s+['"][^'"]*shared\/orderAmount['"]/.test(src);
-      expect(usesTruth, `${rel} 必须 import shared/orderAmount 的真源`).toBe(true);
-    }
-  });
-
   it('★ ③ 全仓不得再写内联口径字面量（剥离注释后断言）', () => {
     const offenders: string[] = [];
     let scanned = 0;
@@ -426,11 +409,7 @@ const RE_E2 = new RegExp(`(?:^|[{,(])\\s*['"]?(?:${TOTALISH_KEYS})['"]?\\s*:\\s*
  *   · 只按文件匹配 ⇒ 别处同名写法照样被抓（不接受"全局豁免某个形状"）；
  *   · 条目若在该文件里**已匹配不到任何行** ⇒ 红（防止代码改了、通行证还留着）。
  */
-const DISPLAY_EXEMPTIONS: { file: string; anchor: string; why: string }[] = [
-  // money() 在此是供应商合同行金额的解析校验（非订单金额，也不上屏），orderAmountOf 不适用。
-  { file: 'server/src/finance/supplierVatPayableSource.ts', anchor: 'money(line.contractAmount', why: '供应商合同行占用金额解析' },
-  { file: 'server/src/finance/supplierVatPayableSource.ts', anchor: 'money(row.contractAmount', why: '供应商合同行占用金额解析' },
-];
+const DISPLAY_EXEMPTIONS: { file: string; anchor: string; why: string }[] = []; // 原供应商合同行金额豁免随旧服务删除。
 
 /** 一行命中几种形状（已剥注释、跳过含 orderAmountOf 的行与类型声明行） */
 function displayHitsInLine(line: string): string[] {

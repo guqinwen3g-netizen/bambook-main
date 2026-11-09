@@ -1,5 +1,6 @@
 /** Frozen credit-note sources and issued document facts; browser-safe and DB-free. */
 import {MistCommandError,mistMoneyMinor,isActiveMistInvoice,type MistCompanyProfile,type MistContext,type MistState,type MistFile} from './mistWorkspace';
+import { isCalendarDay } from './mistBusinessClock';
 
 export type MistBusinessNumberNeed={kind:'newCase'|'newCommonCN'|'newGoods'|'refundPV';prefix:'CLM'|'RT'|'PV'};
 import type {PlatformClaimGoodsSource,PlatformCreditSourceLine,PlatformCreditSourceVersion} from './mistPlatform';
@@ -65,7 +66,7 @@ function correctionValue(value:CreditPrintCorrection){
 }
 export function createCreditPrintSnapshot(input:{creditId:string;code:string;sourceVersion:MistCreditSourceVersion;issuer:MistCompanyProfile;customer:MistCreditCustomerSnapshot;issueDate:string;issuedAt:string;issuedById:string;issuedBy:string;printRevision?:number;correction?:CreditPrintCorrection}):MistCreditPrintSnapshot{
  const {sourceVersion:v}=input;v.lines.forEach(validateLine);if(v.lines.reduce((sum,l)=>sum+mistMoneyMinor(l.amount),0)!==mistMoneyMinor(v.amount))fail('打印金额不等于冻结批准明细');required(input.creditId,'贷项ID');required(input.code,'贷项编号');required(input.issuer?.legalName,'公司法定抬头');required(input.issuer?.address,'公司地址');required(input.customer?.name,'客户名称');if(input.customer?.id!==v.customerId)fail('客户不属于批准贷项来源');
- if(!/^\d{4}-\d{2}-\d{2}$/.test(input.issueDate)||!Number.isFinite(Date.parse(input.issueDate+'T12:00:00Z'))||new Date(input.issueDate+'T12:00:00Z').toISOString().slice(0,10)!==input.issueDate)fail('签发日期无效');instant(input.issuedAt,'签发时间');required(input.issuedById,'真实签发主体');required(input.issuedBy,'真实签发人');
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(input.issueDate)||!Number.isFinite(Date.parse(input.issueDate+'T12:00:00Z'))||!isCalendarDay(input.issueDate))fail('签发日期无效');instant(input.issuedAt,'签发时间');required(input.issuedById,'真实签发主体');required(input.issuedBy,'真实签发人');
  const printRevision=creditPrintRevision({sourceVersion:v.version,printRevision:input.printRevision}),correction=input.correction?correctionValue(input.correction):undefined;
  return structuredClone({schemaVersion:1,templateId:'mist.credit-note',templateVersion:MIST_CREDIT_TEMPLATE_VERSION,printRevision,...(correction?{correction}:{}),creditId:input.creditId,code:input.code,sourceVersionId:v.id,sourceVersion:v.version,sourceFingerprint:creditSourceFingerprint(v),amount:v.amount,currency:v.currency,issuer:input.issuer,customer:input.customer,issueDate:input.issueDate,issuedAt:input.issuedAt,issuedById:input.issuedById,issuedBy:input.issuedBy,claimId:v.claimId,claimCode:v.claimCode,sourceInvoiceId:v.invoiceId,sourceInvoiceCode:v.invoiceCode,orderId:v.orderId,orderCode:v.orderCode,orderApprovedVersion:v.orderApprovedVersion,sourceLines:v.lines});
 }
