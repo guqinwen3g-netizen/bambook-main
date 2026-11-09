@@ -55,7 +55,7 @@ const REFERENCE_PREVIEW = import.meta.env.VITE_MIST_REFERENCE === 'true';
 const PAGES = buildPages(REFERENCE_PREVIEW);
 const LIVE_VIEWS = new Set(['account','platform-admin','emails','cockpit','development','development/detail','development/new','orders','orders/detail','orders/new','payment-vouchers','crm','production-board','calendar','system-settings','settings','company-settings','workspace-settings','approvals','notifications','search']);
 const ROUTE_KEYS = ['view','id','versionId','batchId','section','customerId','orderLineId','productionId','detail'] as const;
-const GROUPS: Record<string, string> = { overview: '我的事务', customer: '客户与市场', fulfillment: '订单履约', finance: '财务与成本', platform: '平台' };
+const GROUPS: Record<string, string> = { overview: '我的事务', customer: '客户与市场', fulfillment: '订单履约', finance: '财务与成本', platform: '管理与工具' };
 
 export function readMistRoute(): Route {
   const qs = new URLSearchParams(location.search);
