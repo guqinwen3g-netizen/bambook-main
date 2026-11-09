@@ -14,11 +14,11 @@ let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
 const view=(active=true)=> <Nav.Provider value={{route:{view:'assistant'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
 const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
 
-it('is the single AI page: no sub-page tabs, tasks open from the header',async()=>{
+it('is the single AI page with no sub-page tabs, and without the task channel offers no task entry',async()=>{
   mock.fetch.mockResolvedValue(response({configured:true,models:['test-model']}));
   await mount();
   expect(host.textContent).not.toContain('我的 Agent');expect(host.textContent).not.toContain('工作助手');
-  await click('任务');expect(go).toHaveBeenCalledWith('assistant',undefined,{section:'tasks'});
+  expect(button('任务')).toBeUndefined();
 });
 
 it('retains the answer, references and an unfinished question when returning from a source page',async()=>{

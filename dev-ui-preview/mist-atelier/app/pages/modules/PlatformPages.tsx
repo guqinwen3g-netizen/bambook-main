@@ -17,7 +17,7 @@ import { InvoicePage } from './InvoicePage';
 export { InvoicePage } from './InvoicePage';
 import { useRouteDraft, useRouteScope } from './useRouteDraft';
 import { useAssistantConversation } from '../../runtime/assistantConversation';
-import { ArrowRight, ArrowUp, Calculator, Download, FileText, ListChecks, MessageSquarePlus, Mic, Paperclip, Zap, RefreshCw, Sparkles, Square, X, Package, Receipt, ShieldCheck, Users, Database, Building2 } from 'lucide-react';
+import { ArrowRight, ArrowUp, Calculator, Download, FileText, ListChecks, MessageSquarePlus, ArrowDown, PanelRight, RefreshCw, Sparkles, Square, X, Package, Receipt, ShieldCheck, Users, Database, Building2 } from 'lucide-react';
 import { AIBadge, AssistantEyes, Banner, Button, Card, CardHeader, DataTable, Dialog, Drawer, EmptyState, Icon, IconButton, Field, FormGrid, KeyValue, Meter, MistPage, Mono, PageHeader, Pill, Select, StatCard, StatGrid, SummaryBar, Tabs, TextArea, TextInput, Toolbar, UploadZone, useToast, type Column } from '../../../../../components/mist';
 import { apiService, type CompanyExporterProfileValue } from '../../../../../services/apiService';
 import { calculatePlatformBom, calculatePlatformPricing, platformBusinessDate, platformCreditRemaining, platformCreditEffectiveAmount, getPlatformClaimSourceOptions, canEditPlatformClaimDraft, type PlatformState, type PlatformBom, type PlatformBomLine, type PlatformClaim, type PlatformCommand, type PlatformRisk, type PlatformClaimDisposition } from '../../../../../server/src/shared/mistPlatform';
@@ -41,7 +41,9 @@ import { XiaozhuThread } from './XiaozhuThread';
 import { XiaozhuRail, useAutomationRules } from './XiaozhuRail';
 import { AgentProposalDialog } from '../AgentProposalDialog';
 import { recordIndex } from '../../runtime/xiaozhuRecords';
-import { XiaozhuCall, voiceInCall } from './XiaozhuCall';
+import { XiaozhuComposer, XiaozhuEmpty, voiceInCall } from './XiaozhuShell';
+import { XiaozhuTurnShell } from './XiaozhuThread';
+import { XiaozhuMarkdown } from './XiaozhuMarkdown';
 import { useXiaozhuCowork } from '../../runtime/xiaozhuCowork';
 import { usePersonalAgentVoice } from '../../runtime/personalAgentVoice';
 import { FileName } from '../../runtime/files';
@@ -159,6 +161,7 @@ export function AssistantPage(){
   const scope=w.session.sessionKey+':'+(w.workspace?.id??'');
   const {question,setQuestion,selected,setSelected,messages,setMessages}=useAssistantConversation(scope);
   const [configuration,setConfiguration]=React.useState<{configured:boolean;models?:string[];subscription?:{provider:'chatgpt';connected:boolean}}|null>(null),[checking,setChecking]=React.useState(false),[busy,setBusy]=React.useState(false),[error,setError]=useRouteDraft('');
+  const [panel,setPanel]=React.useState(()=>{try{return localStorage.getItem('mist.xiaozhu.panel')==='1';}catch{return false;}}),[panelDrawer,setPanelDrawer]=React.useState(false),[atBottom,setAtBottom]=React.useState(true),atBottomRef=React.useRef(true),scrollRef=React.useRef<HTMLDivElement>(null);
   const [automations,setAutomations]=React.useState(false),[automationSeed,setAutomationSeed]=React.useState(''),[newRule,setNewRule]=React.useState(0),[proposalId,setProposalId]=React.useState(''),[showOlder,setShowOlder]=React.useState(false),[picker,setPicker]=React.useState(false),[drafts,setDrafts]=React.useState(false);
   const active=React.useRef<AbortController|null>(null),generation=React.useRef(0),live=React.useRef(''),sendLock=React.useRef(false),field=React.useRef<HTMLTextAreaElement>(null),end=React.useRef<HTMLDivElement>(null);
   live.current=scope;
@@ -181,29 +184,46 @@ export function AssistantPage(){
   const saved=w.platform?.assistantDrafts??[];
   const status=configuration?.configured?<Pill tone="ai">{uiText(configuration.subscription?.connected?'平台模型已连接':'服务器模型已配置')}</Pill>:configuration?<Pill tone="warn">{uiText("模型未连接")}</Pill>:<Pill>{uiText(checking?'正在读取模型配置':'尚未核实模型配置')}</Pill>;
   const hint=selected.length ? `已引用 ${selected.length} / 12 个来源` : '';
-  return <MistPage><PageHeader title={uiText("小竹")} actions={<>{!cowork.available&&status}{!cowork.available&&<IconButton icon={RefreshCw} label={uiText("检查模型配置")} disabled={checking||busy} onClick={()=>void check()}/>}<Button variant="quiet" icon={Zap} className="mist-xz-narrow-only" disabled={!cowork.available} onClick={()=>setAutomations(true)}>{uiText('自动')}</Button><Button variant="quiet" icon={ListChecks} className="mist-xz-narrow-only" onClick={()=>nav.go('assistant',undefined,{section:'tasks'})}>{uiText('任务')}</Button><Button variant="quiet" icon={FileText} onClick={()=>setDrafts(true)}>{uiText(saved.length?'草稿 '+saved.length:'草稿')}</Button><Button variant="quiet" icon={MessageSquarePlus} disabled={!visibleTasks.length&&!messages.length} onClick={newConversation}>{uiText('新对话')}</Button><Button variant="ai" icon={Mic} disabled={!cowork.available||inCall} onClick={()=>void voice.start()}>{uiText('语音通话')}</Button></>}/><ErrorNotice/>{cowork.error&&cowork.available&&<Banner tone="warn" title={uiText(cowork.error)}/>}<XiaozhuAutomations open={automations} onClose={()=>{setAutomations(false);setAutomationSeed('');}} workspaceId={w.workspace?.id} seed={automationSeed} newRule={newRule}/><XiaozhuTasks refreshSignal={cowork.tasks.length} open={tasksOpen} onClose={()=>nav.go('assistant')}/><AgentProposalDialog state={w.state} proposal={proposals.find(p=>p.id===proposalId)} onClose={()=>setProposalId('')} run={(command,options)=>w.run(command,options)} onDone={message=>{toast(uiText(message));void cowork.reload();}}/>
-    <div className="mist-detail" data-layout="main-rail"><div>
-    <div className="mist-chat">
-      {!cowork.available&&configuration&&!configuration.configured&&<Banner tone="warn" title={uiText("生成模型尚未连接到此公司")}>{uiText(configuration.subscription?'请平台管理员连接平台模型。':'服务器未配置可用模型。')}{uiText("仍可引用业务记录并保存文字草稿。")}</Banner>}
-      <div className="mist-chat-thread">
-        {cowork.available&&olderCount>0&&<div className="mist-xz-older"><Button size="sm" variant="quiet" onClick={()=>setShowOlder(true)}>{uiText('显示更早的 '+olderCount+' 条')}</Button></div>}
-        {cowork.available&&visibleTasks.length?<><XiaozhuThread tasks={visibleTasks} index={index} proposals={proposals} onAnswer={(t,id,text)=>void cowork.answer(t,id,text)} onCancel={t=>void cowork.cancel(t)} onRetry={text=>void sendText(text)} onCopy={text=>{void navigator.clipboard?.writeText(text).then(()=>toast(uiText('已复制')),()=>toast(uiText('复制失败，请手动选择文字'),'bad'));}} onDraft={text=>draft(text)} onAutomate={text=>{setAutomationSeed(text);setAutomations(true);}} onOpenRecord={(view,id)=>{if(view)w.go(view,id);}} onProposal={setProposalId}/></>:messages.length?<div className="mist-msgs">{messages.map((m,i)=>m.role==='user'?<div key={i} className="mist-msg" data-role="user">{m.content}</div>:<div key={i} className="mist-msg" data-role="assistant"><div className="mist-msg-bubble"><p className="mist-chat-text">{m.content}</p>{m.truncated&&<p className="mist-note">{uiText("回复较长，已截断。可缩小问题范围继续询问。")}</p>}</div>
-          <div className="mist-msg-acts">{m.sources?.map(source=><Button key={source.id} size="sm" variant="quiet" iconRight={ArrowRight} onClick={()=>w.go(source.view,source.entityId)}>{uiText(source.label)}</Button>)}{canChat&&<Button size="sm" variant="quiet" icon={FileText} onClick={()=>draft(m.content)}>{uiText("保存草稿")}</Button>}</div></div>)}
-          {busy&&<div className="mist-msg" data-role="assistant"><div className="mist-msg-bubble mist-typing" aria-label={uiText("小竹正在回复")}><i/><i/><i/></div></div>}</div>
-        :<div className="mist-chat-empty"><AIBadge icon={AssistantEyes} size="lg"/><b>{uiText("今天想了解什么？")}</b><div className="mist-sugg">{xiaozhuSuggestions(w.state).map(p=><button key={p} type="button" onClick={()=>{setQuestion(uiText(p));field.current?.focus();}}>{uiText(p)}</button>)}</div></div>}
-        <div ref={end}/>
-      </div>
-      <div className="mist-chat-dock">
-        {error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}
-        {selected.length>0&&<div className="mist-chat-sources">{selected.map(s=><span key={s.id} className="mist-chat-chip"><span className="mist-chat-chip-t">{uiText(s.label)}</span><IconButton size="sm" icon={X} label={uiText('移除 '+s.label)} disabled={busy} onClick={()=>toggle(s)}/></span>)}</div>}
-        <div className="mist-composer">
-          <IconButton icon={Paperclip} label={uiText("引用业务记录")} disabled={busy} onClick={()=>setPicker(true)}/>
-          <textarea ref={field} rows={1} aria-label={uiText("向助手提问")} placeholder={uiText(canChat?'问小竹，例如：这些订单下周能出运吗？':'当前账号无模型助手权限')} value={question} maxLength={4000} disabled={busy} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}}/>
-          {busy?<IconButton icon={Square} label={uiText("停止生成")} onClick={()=>active.current?.abort()}/>:<button type="button" className="mist-send" aria-label={uiText("发送")} disabled={!ready} onClick={()=>void send()}><Icon icon={ArrowUp} size="sm"/></button>}
+  const running=cowork.all.filter(t=>['queued','running','waiting_time','waiting_condition'].includes(t.state)).length,activity=proposals.length+running;
+  const togglePanel=()=>{if(typeof window!=='undefined'&&window.matchMedia?.('(max-width: 1100px)').matches){setPanelDrawer(true);return;}setPanel(v=>{const n=!v;try{localStorage.setItem('mist.xiaozhu.panel',n?'1':'0');}catch{/* 只在本页记住 */}return n;});};
+  const decide=async(id:string,confirm:boolean)=>{try{await w.run((confirm?{type:'agent.proposal.confirm',payload:{id}}:{type:'agent.proposal.reject',payload:{id}}) as any);toast(uiText(confirm?'已确认，小竹继续办理':'已拒绝'));void cowork.reload();}catch(e){toast(e instanceof Error?e.message:'操作未完成，请重试','bad');}};
+  const hasThread=cowork.available?visibleTasks.length>0:messages.length>0||busy;
+  const toBottom=(smooth=true)=>{const el=scrollRef.current;if(el?.scrollTo)el.scrollTo({top:el.scrollHeight,behavior:smooth?'smooth':'auto'});};
+  const threadKey=visibleTasks.map(t=>t.id+t.updatedAt).join()+messages.length+busy;
+  React.useEffect(()=>{if(atBottomRef.current)requestAnimationFrame(()=>toBottom(false));},[threadKey]);
+  // 回答排版、卡片展开等会在渲染后改变高度；停在底部时跟着到底。
+  React.useEffect(()=>{const el=scrollRef.current,content=el?.firstElementChild;if(!el||!content||typeof ResizeObserver==='undefined')return;const watch=new ResizeObserver(()=>{if(atBottomRef.current)el.scrollTop=el.scrollHeight;});watch.observe(content);return()=>watch.disconnect();},[hasThread]);
+  const composer=<XiaozhuComposer value={question} onChange={setQuestion} onSend={()=>void send()} ready={ready} busy={busy} onStop={!cowork.available?()=>active.current?.abort():undefined} sources={selected} onRemoveSource={toggle} onAttach={()=>setPicker(true)} voice={voice} voiceAvailable={cowork.available} field={field} placeholder={uiText(canChat?'问小竹，或交代一件事':'当前账号无模型助手权限')} disabled={!canChat}/>;
+  const rail=<XiaozhuRail proposals={proposals} active={cowork.all} rules={automationRules.rules} onProposal={id=>{setPanelDrawer(false);setProposalId(id);}} onOpenTasks={()=>{setPanelDrawer(false);nav.go('assistant',undefined,{section:'tasks'});}} onOpenAutomations={()=>{setPanelDrawer(false);setAutomations(true);}} onNewRule={()=>{setPanelDrawer(false);setNewRule(n=>n+1);setAutomations(true);}} onToggle={(rule,on)=>void automationRules.toggle(rule,on)} onOpenTask={t=>{setPanelDrawer(false);nav.go('assistant',t.id,{section:'tasks'});}}/>;
+  const older=cowork.available&&olderCount>0?<div className="mist-xz-older"><Button size="sm" variant="quiet" onClick={()=>setShowOlder(true)}>{uiText('显示更早的 '+olderCount+' 条')}</Button></div>:null;
+  return <MistPage><ErrorNotice/><XiaozhuAutomations open={automations} onClose={()=>{setAutomations(false);setAutomationSeed('');}} workspaceId={w.workspace?.id} seed={automationSeed} newRule={newRule}/><XiaozhuTasks refreshSignal={cowork.tasks.length} open={tasksOpen} onClose={()=>nav.go('assistant')}/><AgentProposalDialog state={w.state} proposal={proposals.find(p=>p.id===proposalId)} onClose={()=>setProposalId('')} run={(command,options)=>w.run(command,options)} onDone={message=>{toast(uiText(message));void cowork.reload();}}/>
+    <Drawer open={panelDrawer} onClose={()=>setPanelDrawer(false)} title={uiText('动态')} tone="ai">{rail}</Drawer>
+    <div className="mist-xz" data-panel={cowork.available&&panel||undefined}>
+      <div className="mist-xz-main">
+        <div className="mist-xz-head"><h1 className="mist-xz-title">{uiText('小竹')}</h1>{!cowork.available&&status}{!cowork.available&&<IconButton icon={RefreshCw} label={uiText("检查模型配置")} disabled={checking||busy} onClick={()=>void check()}/>}<span className="mist-spacer"/>
+          <IconButton icon={MessageSquarePlus} label={uiText('新对话')} disabled={!hasThread} onClick={newConversation}/>
+          <IconButton icon={FileText} label={uiText('草稿')} count={saved.length||undefined} onClick={()=>setDrafts(true)}/>
+          {cowork.available&&<IconButton icon={ListChecks} label={uiText('任务')} onClick={()=>nav.go('assistant',undefined,{section:'tasks'})}/>}
+          {cowork.available&&<IconButton icon={PanelRight} label={uiText('动态')} count={activity||undefined} aria-pressed={panel} onClick={togglePanel}/>}
         </div>
-        {hint&&<p className="mist-chat-hint">{uiText(hint)}</p>}
+        {!cowork.available&&configuration&&!configuration.configured&&<div className="mist-xz-col mist-xz-banner"><Banner tone="warn" title={uiText("生成模型尚未连接到此公司")}>{uiText(configuration.subscription?'请平台管理员连接平台模型。':'服务器未配置可用模型。')}{uiText("仍可引用业务记录并保存文字草稿。")}</Banner></div>}
+        {cowork.error&&cowork.available&&<div className="mist-xz-col mist-xz-banner"><Banner tone="warn" title={uiText(cowork.error)}/></div>}
+        {hasThread?<>
+          <div className="mist-xz-scroll" ref={scrollRef} onScroll={e=>{const el=e.currentTarget,near=el.scrollHeight-el.scrollTop-el.clientHeight<96;atBottomRef.current=near;setAtBottom(near);}}>
+            <div className="mist-xz-col">{older}
+              {cowork.available?<XiaozhuThread tasks={visibleTasks} index={index} proposals={proposals} onAnswer={(t,id,text)=>void cowork.answer(t,id,text)} onCancel={t=>void cowork.cancel(t)} onRetry={text=>void sendText(text)} onCopy={text=>{void navigator.clipboard?.writeText(text).then(()=>toast(uiText('已复制')),()=>toast(uiText('复制失败，请手动选择文字'),'bad'));}} onDraft={text=>draft(text)} onAutomate={text=>{setAutomationSeed(text);setAutomations(true);}} onOpenRecord={(view,id)=>{if(view)w.go(view,id);}} onProposal={setProposalId} onDecide={decide}/>
+              :<div className="mist-xz-thread">{messages.map((m,i)=>m.role==='user'?<div key={i} className="mist-xz-turn"><div className="mist-xz-user">{m.content}</div></div>:<div key={i} className="mist-xz-turn"><XiaozhuTurnShell><XiaozhuMarkdown text={m.content} index={index} onOpen={(view,id)=>w.go(view,id)}/>{m.truncated&&<p className="mist-xz-note">{uiText("回复较长，已截断。可缩小问题范围继续询问。")}</p>}
+                <div className="mist-xz-acts">{m.sources?.map(source=><Button key={source.id} size="sm" variant="quiet" iconRight={ArrowRight} onClick={()=>w.go(source.view,source.entityId)}>{uiText(source.label)}</Button>)}{canChat&&<Button size="sm" variant="quiet" icon={FileText} onClick={()=>draft(m.content)}>{uiText("保存草稿")}</Button>}</div></XiaozhuTurnShell></div>)}
+                {busy&&<div className="mist-xz-turn"><XiaozhuTurnShell><span className="mist-xz-shimmer" aria-label={uiText("小竹正在回复")}>{uiText('正在思考')}</span></XiaozhuTurnShell></div>}</div>}
+              <div ref={end}/>
+            </div>
+          </div>
+          {!atBottom&&<IconButton className="mist-xz-tobottom" icon={ArrowDown} label={uiText('回到最新')} onClick={()=>toBottom()}/>}
+          <div className="mist-xz-dock"><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</div></div>
+        </>:<div className="mist-xz-scroll"><div className="mist-xz-col">{older}{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}<XiaozhuEmpty name={w.session.user?.displayName} suggestions={xiaozhuSuggestions(w.state)} onPick={p=>{setQuestion(uiText(p));field.current?.focus();}}>{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</XiaozhuEmpty></div></div>}
       </div>
-    </div></div><div className="mist-detail-rail mist-xz-rail">{cowork.available&&<XiaozhuRail proposals={proposals} active={cowork.all} rules={automationRules.rules} onProposal={setProposalId} onOpenTasks={()=>nav.go('assistant',undefined,{section:'tasks'})} onOpenAutomations={()=>setAutomations(true)} onNewRule={()=>{setNewRule(n=>n+1);setAutomations(true);}} onToggle={(rule,on)=>void automationRules.toggle(rule,on)} onOpenTask={t=>nav.go('assistant',t.id,{section:'tasks'})}/>}</div></div>
+      {cowork.available&&panel&&<aside className="mist-xz-side" aria-label={uiText('动态')}>{rail}</aside>}
+    </div>
     <Drawer open={picker} onClose={()=>setPicker(false)} title={uiText("引用业务记录")} sub={uiText("选中的记录会随下一个问题提供给小竹，最多 12 条。")}>
       <Toolbar><Select aria-label={uiText("检索对象")} value={kind} options={[{value:'orders',label:'订单'},{value:'customers',label:'客户'},{value:'purchases',label:'采购'},{value:'shipments',label:'出运'},{value:'developments',label:'开发案'},{value:'invoices',label:'发票'},{value:'risks',label:'风险'}]} onChange={e=>setKind(e.target.value)}/><TextInput aria-label={uiText("业务关键词")} placeholder={uiText("编号、客户或状态")} value={query} onChange={e=>setQuery(e.target.value)}/></Toolbar>
       {w.loading?<EmptyState title={uiText("正在读取业务记录")} compact/>:data.length?<div className="mist-chat-picks">{data.map(r=>{const on=ids.includes(r.id);return <div key={r.id} className="mist-chat-pick" data-on={on||undefined}><div className="mist-chat-pick-t"><b>{uiText(r.label)}</b><span>{r.detail}</span></div><Button size="sm" variant="quiet" onClick={()=>w.go(r.view,r.entityId)}>{uiText("打开来源")}</Button><Button size="sm" variant={on?'secondary':'ai'} aria-pressed={on} aria-label={ui`${on?'移除来源':'加入问题'} ${r.label}`} disabled={busy||(!on&&selected.length>=12)} onClick={()=>toggle(r)}>{uiText(on?'移除来源':'加入问题')}</Button></div>;})}</div>:<EmptyState title={uiText(canReadSource?'没有匹配的记录':'无权查看此类记录')} description={uiText(canReadSource?'调整检索对象或关键词后再试。':'请切换检索对象，或联系管理员开通查看权限。')} compact/>}

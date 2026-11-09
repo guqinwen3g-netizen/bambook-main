@@ -189,7 +189,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   }, [unreadIds, noticeScope, !!state]); // eslint-disable-line react-hooks/exhaustive-deps
   React.useEffect(() => { if (!toastIds.length) return; const timer = window.setTimeout(() => setToastIds([]), 6000); return () => window.clearTimeout(timer); }, [toastIds]);
   React.useEffect(() => { if (notifications) setToastIds([]); }, [notifications]);
-  const toastItems = toastIds.map(id => visibleNotifications.find(n => n.id === id)).filter((n): n is NonNullable<typeof n> => !!n && !n.readAt);
+  const toastItems = toastIds.map(id => visibleNotifications.find(n => n.id === id)).filter((n): n is NonNullable<typeof n> => !!n && !n.readAt && !(route.view === 'assistant' && n.id.startsWith('agent-task:')));
   const [msgs, setMsgs] = React.useState<ChatMessage[]>([]);
   const [aiBusy,setAiBusy]=React.useState(false),[aiUseRouteSource,setAiUseRouteSource]=React.useState(false);
   const aiScope=session.sessionKey+':'+(workspace.workspace?.id??'');

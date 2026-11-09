@@ -10,7 +10,7 @@ export function XiaozhuMarkdown({ text, index, onOpen }: { text: string; index: 
   return <div className="mist-xz-md"><Markdown remarkPlugins={[remarkGfm]} skipHtml urlTransform={url => SAFE.test(url) ? url : ''} components={{
     a: ({ href, children }) => {
       const hit = href?.startsWith('bambook://r/') ? index[Number(href.slice(12))] : undefined;
-      if (hit) return <button type="button" className="mist-xz-ref" onClick={() => onOpen(hit.view, hit.id)}>{children}</button>;
+      if (hit) return <button type="button" className="mist-xz-ref" data-code={/\d/.test(hit.text) || undefined} onClick={() => onOpen(hit.view, hit.id)}>{children}</button>;
       return href && /^https?:/i.test(href) ? <a href={href} target="_blank" rel="noopener noreferrer">{children}</a> : <>{children}</>;
     },
     table: ({ children }) => <div className="mist-xz-table"><table>{children}</table></div>,

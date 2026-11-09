@@ -1,7 +1,7 @@
 /** 小竹页右侧：一眼看到待我确认、正在办理和自动规则，不用开抽屉。 */
 import React from 'react';
 import { ListChecks, Plus, ShieldCheck, Zap } from 'lucide-react';
-import { Button, Card, CardBody, CardHeader, Pill, Switch, type Tone } from '../../../../../components/mist';
+import { Button, Pill, Switch, type Tone } from '../../../../../components/mist';
 import type { AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
 import { agentCommandRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../../server/src/shared/mistAgentProposals';
 import { uiText } from '../../../../../services/interfaceLanguage';
@@ -27,19 +27,13 @@ export function XiaozhuRail({ proposals, active, rules, onProposal, onOpenTasks,
   onProposal: (id: string) => void; onOpenTasks: () => void; onOpenAutomations: () => void; onNewRule: () => void; onToggle: (rule: AutomationRule, on: boolean) => void; onOpenTask: (task: AgentTaskView) => void;
 }) {
   const running = active.filter(t => COWORK_ACTIVE.includes(t.state) && t.state !== 'waiting_human');
-  return <>
-    <Card>
-      <CardHeader title={uiText('待我确认')} leading={<ShieldCheck size={15} />} tools={proposals.length ? <Pill tone="warn">{proposals.length}</Pill> : undefined} />
-      <CardBody>{proposals.length ? <div className="mist-xz-list">{proposals.slice(0, 5).map(p => { const risk = agentCommandRisk(p.command.type); return <button type="button" key={p.id} className="mist-xz-item" onClick={() => onProposal(p.id)}><span className="mist-xz-item-t">{p.summary[0] ?? p.command.type}</span><Pill tone={RISK_TONE[risk]}>{uiText(AGENT_RISK_LABEL[risk])}</Pill></button>; })}</div> : <span className="mist-note">{uiText('没有待确认事项')}</span>}</CardBody>
-    </Card>
-    <Card>
-      <CardHeader title={uiText('正在办理')} leading={<ListChecks size={15} />} tools={<Button size="sm" variant="quiet" onClick={onOpenTasks}>{uiText('全部任务')}</Button>} />
-      <CardBody>{running.length ? <div className="mist-xz-list">{running.slice(0, 5).map(t => <button type="button" key={t.id} className="mist-xz-item" onClick={() => onOpenTask(t)}><span className="mist-xz-item-t">{t.name}</span><Pill tone="accent">{uiText(STATE_LABEL[t.state] ?? '办理中')}</Pill></button>)}</div> : <span className="mist-note">{uiText('暂时没有在办的事项')}</span>}</CardBody>
-    </Card>
-    <Card>
-      <CardHeader title={uiText('自动规则')} leading={<Zap size={15} />} tools={<Button size="sm" variant="quiet" onClick={rules.length ? onOpenAutomations : onNewRule}>{uiText(rules.length ? '管理' : '新建')}</Button>} />
-      <CardBody>{rules.length ? <div className="mist-xz-list">{rules.slice(0, 5).map(r => <div key={r.id} className="mist-xz-item mist-xz-rule"><span className="mist-xz-item-t">{r.name}<small>{uiText(TRIGGER_LABEL[r.trigger])}{r.halted ? ' · ' + r.halted.message : r.runs[0] ? ' · ' + r.runs[0].detail : ''}</small></span><Switch ariaLabel={uiText(`开启 ${r.name}`)} checked={r.enabled} onChange={on => onToggle(r, on)} /></div>)}
-        <Button size="sm" variant="quiet" icon={Plus} onClick={onNewRule}>{uiText('新建规则')}</Button></div> : <span className="mist-note">{uiText('还没有自动规则')}</span>}</CardBody>
-    </Card>
-  </>;
+  return <div className="mist-xz-panel">
+    <section><header><ShieldCheck size={14} /><b>{uiText('待我确认')}</b>{proposals.length > 0 && <Pill tone="warn">{proposals.length}</Pill>}</header>
+      {proposals.length ? <div className="mist-xz-list">{proposals.slice(0, 6).map(p => { const risk = agentCommandRisk(p.command.type); return <button type="button" key={p.id} className="mist-xz-item" onClick={() => onProposal(p.id)}><span className="mist-xz-item-t">{p.summary[0] ?? p.command.type}</span><Pill tone={RISK_TONE[risk]}>{uiText(AGENT_RISK_LABEL[risk])}</Pill></button>; })}</div> : <p className="mist-xz-quiet">{uiText('没有待确认事项')}</p>}</section>
+    <section><header><ListChecks size={14} /><b>{uiText('正在办理')}</b><span className="mist-spacer" /><Button size="sm" variant="quiet" onClick={onOpenTasks}>{uiText('全部任务')}</Button></header>
+      {running.length ? <div className="mist-xz-list">{running.slice(0, 6).map(t => <button type="button" key={t.id} className="mist-xz-item" onClick={() => onOpenTask(t)}><span className="mist-xz-item-t">{t.name}</span><Pill tone="accent">{uiText(STATE_LABEL[t.state] ?? '办理中')}</Pill></button>)}</div> : <p className="mist-xz-quiet">{uiText('暂时没有在办的事项')}</p>}</section>
+    <section><header><Zap size={14} /><b>{uiText('自动规则')}</b><span className="mist-spacer" /><Button size="sm" variant="quiet" onClick={rules.length ? onOpenAutomations : onNewRule}>{uiText(rules.length ? '管理' : '新建')}</Button></header>
+      {rules.length ? <div className="mist-xz-list">{rules.slice(0, 6).map(r => <div key={r.id} className="mist-xz-item mist-xz-rule"><span className="mist-xz-item-t">{r.name}<small>{uiText(TRIGGER_LABEL[r.trigger])}{r.halted ? ' · ' + r.halted.message : r.runs[0] ? ' · ' + r.runs[0].detail : ''}</small></span><Switch ariaLabel={uiText(`开启 ${r.name}`)} checked={r.enabled} onChange={on => onToggle(r, on)} /></div>)}
+        <Button size="sm" variant="quiet" icon={Plus} onClick={onNewRule}>{uiText('新建规则')}</Button></div> : <p className="mist-xz-quiet">{uiText('还没有自动规则')}</p>}</section>
+  </div>;
 }
