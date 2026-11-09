@@ -1074,3 +1074,11 @@ it('marks notices created by a confirmed command so other tabs do not announce t
  const {markNoticeSounds}=await import('./notificationSound');
  expect(markNoticeSounds(JSON.stringify(['actor-a',A]),['own-created-notice'])).toBe(false);
 });
+it('lets the shell dismiss a definitive rejection but keeps an unconfirmed result notice',async()=>{
+  await mount();intercept=request=>request.url.endsWith('/commands')?failure(409,'PRECONDITION'):undefined;
+  await act(async()=>{await capture(api.run(command('业务校验未通过')));});expect(api.error).toBe('请求被拒绝');
+  act(()=>api.dismissRejection?.());expect(api.error).toBe('');
+  intercept=request=>request.url.endsWith('/commands')?failure(503):undefined;
+  await act(async()=>{await capture(api.run(command('结果未确认')));});expect(api.pending).not.toBeNull();
+  act(()=>api.dismissRejection?.());expect(api.pending).not.toBeNull();
+});

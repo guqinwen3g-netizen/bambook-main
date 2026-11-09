@@ -16,6 +16,7 @@ import { currentInternalDemand, isInternalOrderPurpose } from './internalOrderFa
 import { normalizeGarmentFulfillment } from './internalFabricPolicy';
 import { assertFabricSupplyTermsParty } from './fabricSupplyTermsService';
 import { currentCompanyId } from '../auth/requestCompanyContext';
+import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../auth/tokenHelpers';
 
 export const ORDER_MAIN_APPROVAL_ACTION = 'order:main_approval';
 const OWNER_ROLE_IDS = new Set([SYSTEM_ROLE_IDS.SUPER_ADMIN]);
@@ -41,7 +42,20 @@ export function orderApprovalCompanyScope(companyId?: string | null): string | n
 }
 const activeCompanyUser = (companyId: string) => ({ status: 'active', deletedAt: null, companyMembers: { some: { companyId, status: 'active' } } });
 
-export function createOrderMainApprovalService(prisma: PrismaClient) {
+/** 订单主审批资格只授予当前持有订单写入权限的在职账号（按本公司岗位实时计算）。 */
+async function canApproveOrders(db: any, userId: string, companyId: string | null) {
+  const user = await loadUserWithRoles(db, userId);
+  if (!user || user.status !== 'active' || user.deletedAt) return false;
+  // 无公司的历史单租户配置不建立公司会话，保持原有“在职即可”的口径；真实租户都带公司。
+  if (!companyId) return true;
+  let fresh: TokenPayload & { globalBusinessScope?: boolean };
+  try { fresh = await buildLoadedAuthTokenPayload(db, user, companyId); } catch { return false; }
+  // 公司老板（超级管理员岗位）对全业务域负责，与订单写入权限同样可担任主审批人。
+  return fresh.globalBusinessScope === true || hasScope({ ...fresh, roles: [] }, 'orders:write');
+}
+
+export function createOrderMainApprovalService(prisma: PrismaClient, options: { canApprove?: (db: any, userId: string, companyId: string | null) => Promise<boolean> } = {}) {
+  const canApprove = options.canApprove ?? canApproveOrders;
   /** 公司会话只认本公司的授权与本公司总经理岗；无公司会话只认无公司归属的历史配置与全局总经理岗。 */
   async function resolveEligibleReviewerIds(tx: any, businessLine: OrderApprovalBusinessLine, companyIdInput?: string | null) {
     const companyId = orderApprovalCompanyScope(companyIdInput);
@@ -101,7 +115,9 @@ export function createOrderMainApprovalService(prisma: PrismaClient) {
         roles: { select: { roleId: true, role: { select: { companyId: true, code: true } } } } }, orderBy: { displayName: 'asc' } }),
     ]);
     const owner = (role: any) => companyId ? role.role?.companyId === companyId && role.role?.code === SYSTEM_ROLE_IDS.SUPER_ADMIN : OWNER_ROLE_IDS.has(role.roleId);
-    return { assignments, users: users.map(({ roles, ...user }: any) => ({ ...user, isOwner: roles.some(owner) })) };
+    const eligible = new Set<string>();
+    for (const user of users) if (await canApprove(prisma, user.id, companyId)) eligible.add(user.id);
+    return { assignments, users: users.filter((user: any) => eligible.has(user.id)).map(({ roles, ...user }: any) => ({ ...user, isOwner: roles.some(owner) })) };
   }
 
   async function listHistory(orderId: string) {
@@ -117,6 +133,7 @@ export function createOrderMainApprovalService(prisma: PrismaClient) {
     return prisma.$transaction(async (tx: any) => {
       const users = await tx.userAccount.findMany({ where: { id: { in: userIds }, ...(companyId ? activeCompanyUser(companyId) : { status: 'active', deletedAt: null }) }, select: { id: true } });
       if (users.length !== userIds.length) throw new OrderMainApprovalError('ORDER_APPROVAL_AUTHORITY_INVALID_USER', 400, companyId ? '授权列表只能选择本公司在职成员。' : '授权列表包含停用、删除或不存在的账号。');
+      for (const userId of userIds) if (!await canApprove(tx, userId, companyId)) throw new OrderMainApprovalError('ORDER_APPROVAL_AUTHORITY_INVALID_USER', 400, '审批人须持有订单写入权限。');
       await tx.orderApprovalAuthority.updateMany({ where: { businessLine: input.businessLine, companyId }, data: { active: false } });
       for (const userId of userIds) {
         // 复合唯一键含可空 companyId，不能用 upsert 的复合 where；Serializable 事务内先查后写。

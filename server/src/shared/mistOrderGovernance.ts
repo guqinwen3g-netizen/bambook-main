@@ -31,6 +31,12 @@ export function missingOrderContractFields(contract: OrderGovernanceInput): stri
  const labels:Partial<Record<keyof OrderGovernanceInput,string>>={poNumber:'PO或合同号',confirmationFileIds:'客户书面确认依据',incoterm:'合同贸易术语',deliveryPlace:'指定地点',paymentNote:contract.kind==='internal'?'内部交接约定':'实际付款条款',internalPurpose:'内部用途',receiver:'接收团队和负责人'};
  return orderContractRequiredFields(contract).filter(key=>key==='confirmationFileIds'?!contract.confirmationFileIds.length:!String(contract[key]??'').trim()).map(key=>labels[key]!);
 }
+/** 主单首次提交审批的前置项（服务端校验与前端提示共用）：合同必填项，外部 T/T 订单另须确定出运前累计收款比例（0 有效）。 */
+export function missingOrderSubmissionFields(contract: OrderGovernanceInput, replacement = false): string[] {
+ const missing=missingOrderContractFields(contract);
+ if(contract.kind==='external'&&!replacement&&(contract.paymentMethod||'TT')==='TT'&&contract.preShipmentPercent==null)missing.push('出运前累计收款比例');
+ return missing;
+}
 export type OrderGovernanceLine=Pick<MistOrderLine,'id'|'name'|'nameEn'|'style'|'img'|'qty'|'unit'|'price'|'fulfillmentMode'|'cmtIncludedItems'> & {sourceProductId?:string;sourceDevId?:string;sourceVersionId?:string;breakdown?:OrderLineBreakdown};
 export type OrderGovernanceSnapshot={orderId:string;code:string;type:MistOrder['type'];customerId:string;customer:string;season:string;currency:string;due:string;contract:OrderGovernanceInput;lines:OrderGovernanceLine[]};
 export type OrderGovernanceRound={id:string;kind:'initial'|'change';status:'pending'|'approved'|'rejected';requesterId:string;reviewerIds:string[];submittedAt:string;snapshot:OrderGovernanceSnapshot;reason:string;decidedBy?:string;decidedName?:string;decidedAt?:string;note?:string};
@@ -98,9 +104,8 @@ function validateSubmission(root:MistState,s:OrderGovernanceSnapshot,context:Mis
  const order=getOrder(root,s.orderId);assertReplacementOrder(root,order,s);assertOrderPurposeChangeAllowed(root,order,s.contract);normalizeInternalSupply(s.contract,order,context,false);assertInternalFabricOrderChange(root,order,s.lines,s.contract);
  idsExist(root,s.contract);if(!s.lines.length)fail('至少需要一个条目');date(s.due);currency(s.currency);
  if(s.contract.kind==='external'&&(!s.customerId||!root.customers.some(c=>c.id===s.customerId)))fail('请选择实际客户');
- const missing=missingOrderContractFields(s.contract);
- // 外部 T/T 订单的出运放行依赖此比例（0 有效），须在审批前确定，不能拖到出运时才被拦下。
- if(s.contract.kind==='external'&&!order.replacementSource&&(s.contract.paymentMethod||'TT')==='TT'&&s.contract.preShipmentPercent==null)missing.push('出运前累计收款比例');
+ // 外部 T/T 订单的出运放行依赖出运前比例（0 有效），须在审批前确定，不能拖到出运时才被拦下。
+ const missing=missingOrderSubmissionFields(s.contract,!!order.replacementSource);
  if(missing.length)fail('提交审批前请补齐：'+missing.join('、'));
  // 信用证付款：客户通常在订单确认后开证，来证由单证员在信用证台账登记与审核，不阻断订单审批。
 }

@@ -62,6 +62,12 @@ export function MistReviewProvider({ children }: { children: React.ReactNode }) 
     void refresh(); const timer = window.setInterval(() => void refresh(), 30000);
     return () => { window.clearInterval(timer); if (ref.current === identity) ref.current = ''; };
   }, [identity, session.status, key, refresh]);
+  // 本公司数据有新版本（本人提交、撤回或他处决定）时立即重读，不等 30 秒轮询；首次读取由上方负责。
+  const workspaceRevision = workspace.workspace ? workspace.workspace.id + ':' + workspace.workspace.revision : '', seenRevision = React.useRef('');
+  React.useEffect(() => {
+    const previous = seenRevision.current; seenRevision.current = workspaceRevision;
+    if (previous && workspaceRevision && previous !== workspaceRevision) void refresh();
+  }, [workspaceRevision, refresh]);
   const persist = (next: MistReviewIntent | null) => { if (next) localStorage.setItem(key, JSON.stringify(next)); else localStorage.removeItem(key); setIntent(next); };
   const refreshCurrentWorkspace = async (workspaceId: string) => {
     if (identity !== ref.current || currentWorkspace.current.workspace?.id !== workspaceId) return;
