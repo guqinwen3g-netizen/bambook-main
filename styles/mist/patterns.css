@@ -1234,12 +1234,15 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .mist-root::-webkit-scrollbar,
 .mist-xz-card p { margin: 0; line-height: 1.6; }
 .mist-xz-card ul { margin: 0; padding-left: 18px; list-style: disc; color: var(--mist-ink-2); font-size: var(--mist-text-sm); line-height: 1.6; }
 .mist-xz-answer { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 12px; border-radius: var(--mist-r-md); background: var(--mist-card); }
+.mist-xz-answer:focus-within { box-shadow: 0 0 0 2px var(--mist-ai-tint); }
 .mist-xz-answer input { flex: 1; min-width: 0; height: 32px; border: 0; outline: 0; background: none; color: var(--mist-ink); font: inherit; }
 
 .mist-xz-composer { display: flex; flex-direction: column; gap: 6px; padding: 10px 10px 8px 14px; border-radius: 22px; background: var(--mist-card); }
 .mist-xz-composer:focus-within { background: var(--mist-card); box-shadow: 0 0 0 2px var(--mist-ai-tint); }
 .mist-xz-composer textarea { width: 100%; min-height: 26px; max-height: 220px; padding: 4px 2px 0; border: 0; outline: 0; resize: none; background: none; color: var(--mist-ink); font: inherit; font-size: var(--mist-text-md); line-height: 1.6; field-sizing: content; }
 .mist-xz-composer textarea::placeholder { color: var(--mist-ink-3); }
+/* 对话输入不画全局键盘焦点框（只框住一行，视觉突兀）；外框的 focus-within 底色已标示焦点。表单输入保持焦点框。 */
+.mist-root .mist-xz-composer textarea:focus-visible, .mist-root .mist-xz-answer input:focus-visible { outline: none; }
 .mist-xz-tools { display: flex; align-items: center; gap: 2px; margin-left: -6px; }
 .mist-xz-tools .mist-send { width: 34px; height: 34px; }
 .mist-xz-sources { display: flex; flex-wrap: wrap; gap: 6px; }
