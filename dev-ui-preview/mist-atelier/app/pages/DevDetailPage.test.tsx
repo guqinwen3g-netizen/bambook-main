@@ -21,7 +21,7 @@ describe('version confirmation form',()=>{
     expect(confirmationFormError({...values,basis:''})).toContain('确认依据');
   });
   it('formats a supplied clock as a datetime-local value rather than a fixed demo date',()=>{
-    const date=new Date(2027,2,17,9,5);expect(localConfirmationTime(date)).toBe('2027-03-17T09:05');
+    const date=new Date('2027-03-17T01:05:00Z');expect(localConfirmationTime(date)).toBe('2027-03-17T09:05');
   });
 });
 
@@ -57,7 +57,7 @@ describe('exact persisted version detail',()=>{
     expect(go).toHaveBeenCalledWith('development/detail','dev-a',{versionId:'vb'});
     await fill('实际确认人','实际客户联系人');await fill('所属组织','客户组织');await fill('确认时间','2026-10-13T15:10');await fill('确认依据','会议纪要 37');await fill('需求方原文','Approved');
     await click('保存确认');await click('确认提交');
-    expect(bridge.current.run).toHaveBeenCalledWith({type:'development.confirm',payload:{devId:'dev-a',versionId:'vb',result:'approved',confirmer:'实际客户联系人',organization:'客户组织',confirmedAt:new Date('2026-10-13T15:10').toISOString(),basis:'会议纪要 37',originalText:'Approved'}});
+    expect(bridge.current.run).toHaveBeenCalledWith({type:'development.confirm',payload:{devId:'dev-a',versionId:'vb',result:'approved',confirmer:'实际客户联系人',organization:'客户组织',confirmedAt:'2026-10-13T07:10:00.000Z',basis:'会议纪要 37',originalText:'Approved'}});
     expect(host.querySelector('.mist-measure')).not.toBeNull();
     expect(host.querySelector('.mist-measure')?.textContent).toContain('暂无测量记录');
   });

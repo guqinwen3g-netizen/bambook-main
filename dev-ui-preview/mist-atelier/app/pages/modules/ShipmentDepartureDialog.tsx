@@ -1,3 +1,4 @@
+import { businessInputInstant } from '../../runtime/businessClock';
 import React from 'react';
 import { Banner, Button, Dialog, Field, FormGrid, TextArea, TextInput } from '../../../../../components/mist';
 import type { FulfillmentShipment } from '../../../../../server/src/shared/mistFulfillment';
@@ -17,7 +18,7 @@ export function ShipmentDepartureDialog({ shipment, onClose }: { shipment: Fulfi
     if (blocked || lock.current || !at || !evidence.trim()) return;
     lock.current = true; setBusy(true); setFailure('');
     try {
-      await workspace.run({ type: 'fulfillment.shipments.depart', payload: { id: shipment.id, at: new Date(at).toISOString(), evidence: evidence.trim(), fileIds } });
+      await workspace.run({ type: 'fulfillment.shipments.depart', payload: { id: shipment.id, at: businessInputInstant(at), evidence: evidence.trim(), fileIds } });
       if (live.current) onClose();
     } catch (error) { if (live.current) setFailure(error instanceof Error ? error.message : '离港记录未保存'); }
     finally { lock.current = false; if (live.current) setBusy(false); }

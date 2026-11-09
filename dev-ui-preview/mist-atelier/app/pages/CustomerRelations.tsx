@@ -1,3 +1,4 @@
+import { businessInputInstant } from '../runtime/businessClock';
 import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** 客户档案补充：跟进记录、商机与邮件（只读汇总）。全部来自公司状态，命令写入服务端。 */
@@ -51,7 +52,7 @@ export function FollowUpPanel({ customer, state, can, compact }: { customer: Mis
   const spec = (): ModuleEditorSpec => ({ title: '记录跟进', submitLabel: '保存跟进', description: customer.name,
     fields: [field('method', '方式', 'select', true, Object.entries(CRM_METHOD_LABEL).map(([value, label]) => ({ value, label }))), field('at', '实际时间', 'datetime-local'), field('content', '跟进内容', 'textarea'), { ...field('nextDate', '下次跟进日', 'date', false), hint: '留空表示暂不安排' }, field('link', '关联对象', 'select', false, [{ value: '', label: '不关联' }, ...linkOptions(state, customer.id)])],
     initialValues: { method: 'call', at: localNow(), content: '', nextDate: '', link: '' },
-    submit: v => run({ type: 'crm.followUp.save', payload: { customerId: customer.id, method: text(v, 'method') as CrmFollowUp['method'], content: text(v, 'content'), at: new Date(text(v, 'at')).toISOString(), nextDate: text(v, 'nextDate'), link: parseLink(text(v, 'link')) } }) });
+    submit: v => run({ type: 'crm.followUp.save', payload: { customerId: customer.id, method: text(v, 'method') as CrmFollowUp['method'], content: text(v, 'content'), at: businessInputInstant(text(v, 'at')), nextDate: text(v, 'nextDate'), link: parseLink(text(v, 'link')) } }) });
   const shown = compact ? rows.slice(0, 4) : rows;
   const target = (row: CrmFollowUp) => row.link ? crmLinkTarget(state, customer.id, row.link) : null;
   return <Card>

@@ -1,3 +1,4 @@
+import { businessInputInstant } from '../../runtime/businessClock';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import {fulfillmentDocumentFamily} from '../../../../../server/src/shared/mistFulfillment';
 import {BL_KIND_LABEL,DOCUMENT_TYPE_LABEL,DOCUMENT_TYPES,OWN_DOCUMENT_TYPES,PER_ORDER_TYPES,POST_DEPARTURE_TYPES,isOwnDocumentType,type BillOfLadingKind,type OwnDocumentType} from '../../../../../server/src/shared/mistDocumentTypes';
@@ -143,7 +144,7 @@ export function DocumentCenterPage() {
     return { title: `签发 ${d.number} · V${d.version}`, submitLabel: '确认签发', ...(amount !== null ? { description: `将生成应收 ${order!.currency} ${fmt(amount, 2)}，到期 ${d.dueDate}，待财务确认。` } : {}), fields: sealFields, initialValues: seals.length ? { sealId: '', sealReason: '' } : {},
       submit: v => run({ type: 'fulfillment.documents.issue', payload: { id: d.id, ...(text(v, 'sealId') ? { sealId: text(v, 'sealId'), sealReason: text(v, 'sealReason').trim() } : {}) } } as never) };
   };
-  const archiveSpec = (d: FulfillmentDocument): ModuleEditorSpec => ({ title: '归档外部机构原件', submitLabel: '归档原件', description: `${TYPE_LABEL[d.type]} ${d.number} · 以外部机构签发的原件为准。`, fields: [field('issuer', '外部签发机构', 'choice', true, DOCUMENT_ISSUERS), field('at', '实际签发时间', 'datetime-local'), field('evidence', '原件来源依据', 'textarea')], initialValues: { issuer: '', at: localNow(), evidence: '' }, submit: v => run({ type: 'fulfillment.documents.archiveExternal', payload: { id: d.id, issuer: text(v, 'issuer'), at: new Date(text(v, 'at')).toISOString(), evidence: text(v, 'evidence') } }) });
+  const archiveSpec = (d: FulfillmentDocument): ModuleEditorSpec => ({ title: '归档外部机构原件', submitLabel: '归档原件', description: `${TYPE_LABEL[d.type]} ${d.number} · 以外部机构签发的原件为准。`, fields: [field('issuer', '外部签发机构', 'choice', true, DOCUMENT_ISSUERS), field('at', '实际签发时间', 'datetime-local'), field('evidence', '原件来源依据', 'textarea')], initialValues: { issuer: '', at: localNow(), evidence: '' }, submit: v => run({ type: 'fulfillment.documents.archiveExternal', payload: { id: d.id, issuer: text(v, 'issuer'), at: businessInputInstant(text(v, 'at')), evidence: text(v, 'evidence') } }) });
   const voidSpec = (d: FulfillmentDocument): ModuleEditorSpec => ({ title: `作废 ${d.number} · V${d.version}`, submitLabel: '确认作废', description: d.invoiceId ? '作废 CI 会同时作废其财务应收，出运回到单证处理中；已对客发送的需重新发送。' : '作废后出运回到单证处理中；原版本保留为历史。', fields: [field('reason', '作废原因', 'textarea')], initialValues: { reason: '' }, submit: v => run({ type: 'fulfillment.documents.void', payload: { id: d.id, reason: text(v, 'reason') } }) });
 
   const columns: Column<FulfillmentDocument>[] = [
