@@ -6,6 +6,17 @@ export function mistBusinessDate(instant: string | Date): string {
  const part = (key: string) => parts.find(value => value.type === key)!.value;
  return `${part('year')}-${part('month')}-${part('day')}`;
 }
+/** Plain calendar day (YYYY-MM-DD): exists in the Gregorian calendar. No timezone involved. */
+export function isCalendarDay(value: unknown): value is string {
+ if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+ const [y, m, d] = value.split('-').map(Number), t = new Date(Date.UTC(y, m - 1, d));
+ return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d;
+}
+/** Calendar arithmetic on a plain day; the result is still a plain day, not an instant. */
+export function shiftCalendarDay(day: string, days: number): string {
+ const [y, m, d] = day.split('-').map(Number), t = new Date(Date.UTC(y, m - 1, d + days));
+ return `${String(t.getUTCFullYear()).padStart(4, '0')}-${String(t.getUTCMonth() + 1).padStart(2, '0')}-${String(t.getUTCDate()).padStart(2, '0')}`;
+}
 export function mistBusinessInstant(state: {settings?: {businessClock?: MistBusinessClock}} | null | undefined, actual: string): string {
  const clock=state?.settings?.businessClock;
  if(clock?.mode!=='fixed'||clock.timezone!=='Asia/Shanghai'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(clock.at))return actual;
@@ -26,7 +37,7 @@ export function alignMistScenarioTime<T extends {settings: {businessClock?: Mist
  const walk=(value:unknown,key=''):unknown=>{
   if(['events','files','email','businessClock','companyBaseline','demoSeed'].includes(key))return value;
   if(typeof value==='string'&&value>='2026-10-01'){
-   if(/^\d{4}-\d{2}-\d{2}$/.test(value)&&Number.isFinite(Date.parse(value)))return new Date(Date.parse(value+'T00:00:00Z')+deltaDays*86400000).toISOString().slice(0,10);
+   if(/^\d{4}-\d{2}-\d{2}$/.test(value)&&Number.isFinite(Date.parse(value)))return shiftCalendarDay(value,deltaDays);
    if(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)&&Number.isFinite(Date.parse(value)))return new Date(Date.parse(value)+deltaInstant).toISOString();
   }
   if(Array.isArray(value))return value.map(item=>walk(item,key));

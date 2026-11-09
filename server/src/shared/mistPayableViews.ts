@@ -6,6 +6,7 @@
  * - Payables aging: open bill balances by days past due.
  */
 import type { MistState } from './mistWorkspace';
+import { shiftCalendarDay } from './mistBusinessClock';
 import { billOpenMinor, prepaymentPlans, type PayablesState } from './mistPayables';
 
 type Root = MistState & { payables?: PayablesState };
@@ -33,13 +34,13 @@ export function supplierStatement(root: Root, supplierId: string, from: string, 
 
 export type OutlookWeek = { start: string; items: Array<{ kind: 'bill' | 'plan'; ref: string; supplier: string; currency: string; amount: number; due: string; overdue: boolean }> };
 export function paymentOutlook(root: Root, today: string, weeks = 8): OutlookWeek[] {
-  const p = pay(root), weekStart = (d: string) => { const t = new Date(d + 'T00:00:00Z'), w = (t.getUTCDay() + 6) % 7; t.setUTCDate(t.getUTCDate() - w); return t.toISOString().slice(0, 10); };
-  const first = weekStart(today), last = new Date(Date.parse(first + 'T00:00:00Z') + weeks * 7 * 86400000).toISOString().slice(0, 10);
+  const p = pay(root), weekStart = (d: string) => shiftCalendarDay(d, -((new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7));
+  const first = weekStart(today), last = shiftCalendarDay(first, weeks * 7);
   const items = [
     ...p.bills.filter(b => b.state === 'open' && billOpenMinor(root, b) > 0 && b.due && b.due < last).map(b => ({ kind: 'bill' as const, ref: `${b.code} · ${b.invoiceNo}`, supplier: b.supplier, currency: b.currency, amount: billOpenMinor(root, b) / 100, due: b.due, overdue: b.due < today })),
     ...prepaymentPlans(root).filter(v => v.state === 'active' && v.due && v.due < last && r2(v.amount - v.paid) > 0).map(v => ({ kind: 'plan' as const, ref: `${v.code} · ${v.purchaseCode}`, supplier: v.supplier, currency: v.currency, amount: r2(v.amount - v.paid), due: v.due, overdue: v.due < today })),
   ];
-  const out: OutlookWeek[] = Array.from({ length: weeks }, (_, i) => ({ start: new Date(Date.parse(first + 'T00:00:00Z') + i * 7 * 86400000).toISOString().slice(0, 10), items: [] }));
+  const out: OutlookWeek[] = Array.from({ length: weeks }, (_, i) => ({ start: shiftCalendarDay(first, i * 7), items: [] }));
   for (const item of items) { const w = item.due < first ? out[0] : out.find((x, i) => item.due >= x.start && (i === out.length - 1 || item.due < out[i + 1].start)); w?.items.push(item); }
   return out;
 }

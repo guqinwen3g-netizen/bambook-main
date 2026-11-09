@@ -19,6 +19,7 @@ import { safeRouteError } from '../shared/routeError';
 import { createOrderMainApprovalService, OrderMainApprovalError } from '../orders/orderMainApprovalService';
 import { passwordProblem } from '../auth/passwordPolicy';
 import { initialGeneralManagerEligibility } from './initialGeneralManager';
+import { mistBusinessDate } from '../shared/mistBusinessClock';
 import { createAccountAccessService, type Delivery } from '../auth/accountAccess';
 
 type AdminRouterOptions = {
@@ -962,7 +963,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
       if (rows.length > MAX) { truncated = true; break; }
     }
     if (rows.length > MAX) { rows.length = MAX; truncated = true; }
-    const name = `审计日志-${new Date().toISOString().slice(0, 10)}.csv`;
+    const name = `审计日志-${mistBusinessDate(new Date())}.csv`;
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('Content-Disposition', `attachment; filename="audit-log.csv"; filename*=UTF-8''${encodeURIComponent(name)}`);

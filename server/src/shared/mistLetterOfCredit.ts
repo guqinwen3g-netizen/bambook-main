@@ -7,6 +7,7 @@
  * 承付（登记承付日与金额，到账另由财务按银行流水核销）、拒付。不代替银行审单，不做 SWIFT 报文。
  */
 import { MistCommandError, mistMoneyMinor, type MistContext, type MistState } from './mistWorkspace';
+import { isCalendarDay, shiftCalendarDay } from './mistBusinessClock';
 import { platformBusinessDate } from './mistPlatform';
 
 export type LcAvailableBy = 'sight' | 'usance';
@@ -45,10 +46,10 @@ type Root = MistState & { letterOfCredits?: MistLetterOfCredit[] };
 
 const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCommandError(code, message, code === 'NOT_FOUND' ? 404 : code === 'CONFLICT' ? 409 : 422); };
 const text = (v: unknown, label: string, required = false, max = 200) => { const s = typeof v === 'string' ? v.trim() : v == null ? '' : String(v).trim(); if (required && !s) fail(`请填写${label}`); if (s.length > max) fail(`${label}过长`); return s; };
-const day = (v: unknown, label: string, required = true) => { const s = text(v, label, required, 10); if (s && (!/^\d{4}-\d{2}-\d{2}$/.test(s) || new Date(s + 'T00:00:00Z').toISOString().slice(0, 10) !== s)) fail(`${label}格式无效`); return s; };
+const day = (v: unknown, label: string, required = true) => { const s = text(v, label, required, 10); if (s && (!/^\d{4}-\d{2}-\d{2}$/.test(s) || !isCalendarDay(s))) fail(`${label}格式无效`); return s; };
 const money = (v: unknown, label: string) => { const s = text(v, label, true, 20); if (!/^\d{1,12}(\.\d{1,2})?$/.test(s) || !(Number(s) > 0)) fail(`${label}须为大于零、最多两位小数的金额`); return Number(s); };
 const int = (v: unknown, label: string, min: number, max: number, fallback: number) => { if (v === undefined || v === null || v === '') return fallback; const n = Number(v); if (!Number.isInteger(n) || n < min || n > max) fail(`${label}须为 ${min}–${max} 的整数`); return n; };
-const addDays = (d: string, n: number) => new Date(Date.parse(d + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+const addDays = (d: string, n: number) => shiftCalendarDay(d, n);
 const fmt = (n: number) => n.toFixed(2);
 
 export const readLetterOfCredits = (root: Pick<Root, 'letterOfCredits'>) => root.letterOfCredits || [];

@@ -41,19 +41,14 @@ const RAW_MESSAGE_LEAK_BASELINE: Record<string, number> = {
   'src/orders/orderLifecycleService.ts': 2,
 
   'src/dictionaries/dataDictionaryService.ts': 1,
-  'src/finance/invoiceMutationService.ts': 3,
   'src/lib/asyncHandler.ts': 1,
   // 2026-11-06: orderChangeRequestService direct-cancel no longer forwards a storage error's own message (0).
   'src/shared/errorCodes.ts': 2,
   'src/ai/codexSubscription.ts': 1,
   'src/auth/authorizationSnapshotGuard.ts': 1,
-  'src/customs/shipmentPackingListCommand.ts': 1,
-  'src/finance/bulkFirstInvoiceCommand.ts': 2,
   'src/hr/route.ts': 4,
-  'src/internalTrade/internalTransferService.ts': 1,
   'src/mist/agentRead.ts': 1,
   'src/platform/route.ts': 3,
-  'src/products/fabricExclusivityService.ts': 1,
 };
 
 
@@ -125,14 +120,9 @@ const TRUTH_FILE_SITE_LEAKS: Record<string, number> = {
   //   ⚠️ 但它也**不是给业务员看的话**（英文 + 枚举合法态，属 B42 文案质量族）—— 挪表不等于修好，已另记待办。
   //   另：本文件真正的原文直发风险在 `toError()` 的 `String(e?.message ?? e)`（未预期异常原文进响应体），
   //   它不匹配 LEAK_RE 的 `message: X.message` 形状 ⇒ **本表盖不住它**，按 D49 另立 §9 待办而不是改判据把它算成"已收敛"。
-  'src/finance/invoiceMutationService.ts': 3,
   'src/lib/asyncHandler.ts': 1,
   'src/auth/authorizationSnapshotGuard.ts': 1,
-  'src/customs/shipmentPackingListCommand.ts': 1,
-  'src/finance/bulkFirstInvoiceCommand.ts': 2,
   'src/hr/route.ts': 4,
-  'src/internalTrade/internalTransferService.ts': 1,
-  'src/products/fabricExclusivityService.ts': 1,
 };
 
 const LEAK_RE = /message:\s*([A-Za-z_$][\w$]*)\??\.message/g;
@@ -258,7 +248,7 @@ it('★ 未接真源的那一半（B22 欠债本体）只许减不许增，且�
     const stale = Object.entries(TRUTH_FILE_SITE_LEAKS).filter(([f, n]) => (actual[f] ?? 0) < n)
       .map(([f, n]) => `${f}: 基线 ${n} → 实际 ${actual[f] ?? 0}`);
     expect(stale, `已经核准/改接了就同步删掉那一行（留着会把下一次回潮算成正常）：${JSON.stringify(stale)}`).toEqual([]);
-    expect(Object.values(actual).reduce((a, b) => a + b, 0), '候选清单总数').toBe(18); // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 23）。
+    expect(Object.values(actual).reduce((a, b) => a + b, 0), '候选清单总数').toBe(10); // 2026-11-09 开票、报关装箱、内部调拨、面料独家旧服务删除后重算（原 18）。
     // 阳性对照：**同一个文件里**既有收敛完成态又有原始取用时，本判据必须只放过前者、仍数到后者
     expect(countLeaksIn([
       "import { safeRouteError } from '../shared/routeError';",
@@ -281,8 +271,8 @@ it('★ 未接真源的那一半（B22 欠债本体）只许减不许增，且�
   it('★ 基线自身不是空表（空表 = 恒绿 = 没守卫）', () => {
     const total = Object.values(RAW_MESSAGE_LEAK_BASELINE).reduce((a, b) => a + b, 0);
     const unfiltered = Object.values(UNFILTERED_LEAK_BASELINE).reduce((a, b) => a + b, 0);
-    expect(total).toBe(31); // 2026-11-09 agent/events 退役 −1。 // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 105 / 42）；orderChangeRequestService 收敛 −1。
-    expect(Object.keys(RAW_MESSAGE_LEAK_BASELINE).length).toBe(16);
+    expect(total).toBe(23); // 2026-11-09 开票、报关装箱、内部调拨、面料独家旧服务删除 −8；agent/events 退役 −1。 // 2026-11-06 删除旧主 API 死代码后按保留文件重算（原 105 / 42）；orderChangeRequestService 收敛 −1。
+    expect(Object.keys(RAW_MESSAGE_LEAK_BASELINE).length).toBe(11); // 2026-11-09 五个旧服务文件删除（原 16）。
     // 114 / 38：2026-09-22 v2.73 清掉 `systemConfigRoute` 的 3 处后同步（那批只同步了根侧那把尺，server 侧这三份基线漏改 ⇒ server 全量当场红）。
 // 105 / 39：2026-09-21 G-4 起 原口径 ↓ `invoiceMutationService` 因 import 真源而被分类到另一侧
     //   ⇒ **未接真源侧少 1 处、已接真源侧多 1 处，总量表 117 一处未动**。

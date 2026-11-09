@@ -1,4 +1,5 @@
 import {notifyMist} from './mistNotifications';
+import { isCalendarDay } from './mistBusinessClock';
 import {assertReplacementOrder} from './mistClaimReplacement';
 import {normalizeGarmentFulfillment,normalizeInternalSupply,assertInternalFabricOrderChange,GARMENT_FULFILLMENT_LABELS,CMT_INCLUDED_ITEM_LABELS,type InternalSupply} from './mistInternalFabric';
 /** Formal order approval and proposed commercial changes, independent of the Mist view layer. */
@@ -50,7 +51,7 @@ export type OrderGovernanceCommand=
 type GovernedOrder=MistOrder&{governance?:OrderGovernanceFields};
 function fail(message:string,code='VALIDATION'):never{throw new MistCommandError(code,message,code==='FORBIDDEN'?403:422);}
 function text(v:unknown,label:string,required=false,max=4000){if(typeof v!=='string'||v.length>max||required&&!v.trim())return fail(label+'未填写或格式无效');return v.trim();}
-function date(v:unknown){const s=text(v,'交期',true);if(!/^\d{4}-\d{2}-\d{2}$/.test(s)||!Number.isFinite(Date.parse(s+'T00:00:00Z'))||new Date(s+'T00:00:00Z').toISOString().slice(0,10)!==s)return fail('交期格式无效');return s;}
+function date(v:unknown){const s=text(v,'交期',true);if(!/^\d{4}-\d{2}-\d{2}$/.test(s)||!Number.isFinite(Date.parse(s+'T00:00:00Z'))||!isCalendarDay(s))return fail('交期格式无效');return s;}
 function currency(v:unknown){const s=text(v,'币种',true).toUpperCase();return /^[A-Z]{3}$/.test(s)?s:fail('币种须为三位代码');}
 function tolerance(i:Partial<OrderGovernanceInput>){const over=normalizeTolerancePercent(i.overPercent,'溢装上限'),short=normalizeTolerancePercent(i.shortPercent,'短装下限');return{...(over!==null?{overPercent:over}:{}),...(short!==null?{shortPercent:short}:{})};}
 function normalize(input:Partial<OrderGovernanceInput>|undefined):OrderGovernanceInput{

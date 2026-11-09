@@ -92,11 +92,16 @@ const FROZEN_NO_TRUTH_ROUTES: string[] = [
   //     quotation 3 处含 `NOT_FOUND` 早退臂），由 B22 的逐文件表盯着（挪表说明见 `rawErrorLeakRatchet.test.ts`）。
 
 
+  // 2026-11-09 复核（systemConfigRoute 随旧配置路由删除）：下列现行路由不引通用真源，但每个 catch 只答
+  // 类型化业务错误（CompanyAccessError / SupplierContractError / MistApiError 的 code+status+业务句）
+  // 或固定中文文案；Mist 走本模块 publicError（非 4xx 一律 MIST_REQUEST_FAILED 500）。同批修掉
+  // auth/route.ts 验证码发送把邮件通道原始异常拼进 message 的外泄。
+  'auth/accountAccess.ts',
   'auth/route.ts',
-  // BusinessLine now uses actual safeRouteError for every public failure.
-
-  'config/systemConfigRoute.ts',
-  // Native QC branches now import/use truth; other customs raw sites remain in the separate raw-message inventory.
+  'mist/route.ts',
+  'platform/route.ts',
+  'platform/settings.ts',
+  'procurement/supplierApprovalAuthorityRoute.ts',
 
   // email/templateRoute.ts：S0-A2 第 10 批起该文件 import 了 `shared/routeError` ⇒ 按本守卫的判据不再违规。
   //   ★ 判据的真实形状（见上面 `isNoTruthRoute`，别照抄这句注释）：

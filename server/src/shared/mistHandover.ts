@@ -9,6 +9,7 @@
 import { MistCommandError, type MistContext, type MistCustomer, type MistState } from './mistWorkspace';
 import { MIST_BUSINESS_GROUPS, MIST_BUSINESS_GROUP_LABEL, accountOwnedObjects, resolveMember, type MistOwnedObject } from './mistAccounts';
 import { reassignInternalDeliveryReceiver } from './mistInternalDelivery';
+import { mistBusinessDate } from './mistBusinessClock';
 
 export type MistCustomerHandover = { id: string; at: string; actor: string; fromId: string; from: string; toId: string; to: string; reason: string; orders: string[]; opportunities: string[]; tasks: number };
 /** 成员离职 / 调岗：按账号把名下全部负责对象一次交给新负责人（所有者在成员管理办理）。 */
@@ -92,7 +93,7 @@ function applyAccountHandover(root: MistState, p: Extract<HandoverCommand, { typ
   ((root as MistState & { memberHandovers?: MistAccountHandover[] }).memberHandovers ||= []).push(record);
   const summary = Object.entries(counts).map(([k, n]) => `${MIST_OWNED_KIND_LABEL[k as MistOwnedObject['kind']]} ${n}`).join('、') || '无负责对象';
   root.events.unshift({ id: c.id(), entityType: 'workspace', entityId: fromId, actor: c.actorName, at: c.now, text: `成员交接：${from}→${to.name}；${summary}；改派待办 ${pendingTasks.length} 条。原因：${reason}`, fileIds: [] });
-  const due = new Date(Date.parse(c.now) + 3 * 86400000).toISOString().slice(0, 10);
+  const due = mistBusinessDate(new Date(Date.parse(c.now) + 3 * 86400000));
   root.tasks.unshift({ id: c.id(), title: `接手 ${from} 的业务（${summary}）：核对在手订单、报价、未收款与供应商`, due, done: false, kind: 'account-handover', target: { view: 'relations' }, assigneeIds: [to.id] });
   return { id: record.id };
 }
@@ -133,7 +134,7 @@ export function applyHandoverCommand(root: MistState, command: HandoverCommand, 
   const heading=fromId===to.id?`在手业务交接给 ${to.name}`:`客户交接：${from || '未指定'}→${to.name}`;
   const summary = `${heading}；订单 ${record.orders.length} 张${record.orders.length ? `（${record.orders.join('、')}）` : ''}、商机 ${record.opportunities.length} 个、改派待办 ${tasks} 条。原因：${reason}`;
   for (const entityId of new Set([customer.id, relation?.id].filter(Boolean) as string[])) root.events.unshift({ id: c.id(), entityType: entityId === customer.id ? 'customer' : 'market.relation', entityId, actor: c.actorName, at: c.now, text: summary, fileIds: [] });
-  const due = new Date(Date.parse(c.now) + 3 * 86400000).toISOString().slice(0, 10);
+  const due = mistBusinessDate(new Date(Date.parse(c.now) + 3 * 86400000));
   root.tasks.unshift({ id: c.id(), title: `接手客户 · ${customer.name}`, due, done: false, kind: 'customer-handover', target: { view: 'relations', id: relation?.id || customer.id }, assigneeIds: [to.id] });
   return { id: record.id };
 }

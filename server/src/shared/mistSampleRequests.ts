@@ -5,6 +5,7 @@
  * 样品费发票没有订单，回链客户与申请单（invoice.sampleRequestId），核销走开发费同一条“无订单应收”通道。
  */
 import { MistCommandError, type MistContext, type MistInvoice, type MistState } from './mistWorkspace';
+import { isCalendarDay } from './mistBusinessClock';
 import { applyFulfillmentCommand } from './mistFulfillment';
 import { platformBusinessDate } from './mistPlatform';
 import { sampleUnitAllowsDecimal } from './mistDevelopmentDomain';
@@ -26,7 +27,7 @@ type Root = MistState & { sampleRequests?: MistSampleRequest[] };
 
 const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCommandError(code, message); };
 const text = (v: unknown, label: string, required = true, max = 2000) => { const s = typeof v === 'string' ? v.trim() : ''; if (required && !s) fail(`请填写${label}`); if (s.length > max) fail(`${label}过长`); return s; };
-const day = (v: unknown, label: string) => { const s = text(v, label, true, 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || new Date(s + 'T00:00:00Z').toISOString().slice(0, 10) !== s) fail(`${label}格式无效`); return s; };
+const day = (v: unknown, label: string) => { const s = text(v, label, true, 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || !isCalendarDay(s)) fail(`${label}格式无效`); return s; };
 const positive = (v: unknown, label: string) => typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= 1e9 && Math.abs(v * 10000 - Math.round(v * 10000)) < 1e-6 ? v : fail(`${label}须为大于零的数字`);
 const round2 = (n: number) => Math.round(n * 100) / 100;
 /** mar18：客户停用即其关系档案归档。 */

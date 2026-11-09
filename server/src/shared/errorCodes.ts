@@ -182,6 +182,11 @@ export const ERROR_CODES: Record<string, ErrorCodeSpec> = {
   // hr 域（S0-A2 逐域收敛之一）：路由侧 fallback 码 —— 未预期异常时的可行动中文文案。
   // 状态一律 500（这些码只在"服务端自己出故障"时出现；有意的业务拒绝由 HrError 自带码与状态透传）。
   // 口径同 risk：一码一文案，文案说清"哪件事没成 + 接下来做什么"，不带内部细节。
+  HR_DEPARTMENT_CREATE_FAILED: { status: 500, message: '部门未能新建，本次没有写入任何数据，请稍后重试。' },
+  HR_DEPARTMENT_UPDATE_FAILED: { status: 500, message: '部门未能保存，本次没有改动原记录，请稍后重试。' },
+  HR_MEMBER_CANDIDATES_FAILED: { status: 500, message: '可选成员加载失败，请稍后重试。' },
+  DEV_ACCOUNTS_LIST_FAILED: { status: 500, message: '演示账号列表加载失败，请稍后重试。' },
+  SCENARIO_IDENTITY_FAILED: { status: 500, message: '演示身份未能切换，请稍后重试。' },
   HR_PERSONNEL_FETCH_FAILED: { status: 500, message: '人事档案列表加载失败，请稍后重试；持续失败请联系管理员核对人事数据。' },
   HR_POSITION_CREATE_FAILED: { status: 500, message: '岗位未能新建，本次没有写入任何数据，请检查表单后重试；持续失败请联系管理员。' },
   HR_POSITION_UPDATE_FAILED: { status: 500, message: '岗位未能保存，本次没有改动原记录，请检查表单后重试；持续失败请联系管理员。' },

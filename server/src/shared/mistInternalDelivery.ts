@@ -1,5 +1,6 @@
 /** Internal finished-goods handover is separate from supplier acceptance and external shipment. */
 import {MistCommandError,type MistContext,type MistState,type MistCommandResult} from './mistWorkspace';
+import { isCalendarDay } from './mistBusinessClock';
 import {resolveMember} from './mistAccounts';
 import {assertOrderApproved,assertOrderWritable} from './mistOrderGovernance';
 import {assertOrderLineOpen} from './mistOrderClosure';
@@ -35,7 +36,7 @@ const number=(value:bigint)=>Number(value)/10000;
 const plus=(values:number[])=>values.reduce((n,v)=>n+minor(v),BigInt(0));
 const physicalKey=(line:MistState['orderLines'][number])=>{const value=line as typeof line&{breakdown?:unknown;specification?:string;sourceProductId?:string;sourceDevId?:string;sourceVersionId?:string};return stableJson({style:line.style,unit:line.unit,specification:value.specification||'',breakdown:value.breakdown,sourceProductId:value.sourceProductId,sourceDevId:value.sourceDevId,sourceVersionId:value.sourceVersionId});};
 const stamp=(ctx:MistContext,evidence:string):Audit=>({at:ctx.now,actorId:ctx.actorId||fail('无法核对经办账号','FORBIDDEN'),actor:ctx.actorName,evidence});
-function date(value:unknown,ctx:MistContext){const s=text(value,'实际日期');if(!/^\d{4}-\d{2}-\d{2}$/.test(s)||!Number.isFinite(Date.parse(s+'T00:00:00Z'))||new Date(s+'T00:00:00Z').toISOString().slice(0,10)!==s||s>platformBusinessDate(ctx.now))fail('实际日期无效或晚于今天','VALIDATION');return s;}
+function date(value:unknown,ctx:MistContext){const s=text(value,'实际日期');if(!/^\d{4}-\d{2}-\d{2}$/.test(s)||!Number.isFinite(Date.parse(s+'T00:00:00Z'))||!isCalendarDay(s)||s>platformBusinessDate(ctx.now))fail('实际日期无效或晚于今天','VALIDATION');return s;}
 export function internalDeliveryTotals(row:InternalDelivery){
  const active=row.checks.filter(check=>!check.reversed),accepted=plus(active.map(c=>c.accepted)),rejected=plus(active.map(c=>c.rejected)),returned=plus(row.returns.map(r=>r.quantity));
  return {accepted:number(accepted),rejected:number(rejected),returned:number(returned),pending:row.cancelled?0:number(minor(row.quantity)-accepted-rejected),reserved:row.cancelled?0:number(minor(row.quantity)-returned)};

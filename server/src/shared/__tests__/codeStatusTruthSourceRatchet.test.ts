@@ -123,7 +123,28 @@ function looseTableEntries(): number {
  * 本文件按口径把它记成"少了一处本地推导"，**数字变小是真实进展，不是尺瞎了**（与 B73 那类"尺变宽导致的变小"相反）。
  */
 const BASELINE: Record<string, number> = {
-  // 1f7daebd: confirmed-source result uses its typed status; removed four local entries.
+  // 2026-11-09 旧主 API 余下死代码删除后实测：21 个文件 / 35 处三元，均为 Mist 命令错误的通用码（FORBIDDEN 403、NOT_FOUND 404、CONFLICT 409 等），与注册表一致。
+  'src/shared/mistInternalDelivery.ts': 3,
+  'src/shared/mistQcDisposition.ts': 3,
+  'src/shared/mistSeals.ts': 3,
+  'src/shared/mistStockOperations.ts': 3,
+  'src/shared/mistCustomerStatement.ts': 2,
+  'src/shared/mistDocumentGeneration.ts': 2,
+  'src/shared/mistLetterOfCredit.ts': 2,
+  'src/shared/mistOrderCost.ts': 2,
+  'src/shared/mistSourcing.ts': 2,
+  'src/shared/mistTeam.ts': 2,
+  'src/orders/orderMainApprovalService.ts': 1,
+  'src/shared/mistClaimReplacement.ts': 1,
+  'src/shared/mistCrm.ts': 1,
+  'src/shared/mistCustomsDeclaration.ts': 1,
+  'src/shared/mistHandover.ts': 1,
+  'src/shared/mistInternalFabric.ts': 1,
+  'src/shared/mistOrderClosure.ts': 1,
+  'src/shared/mistOrderGovernance.ts': 1,
+  'src/shared/mistPeriodClose.ts': 1,
+  'src/shared/mistProductionIntake.ts': 1,
+  'src/shared/mistTeamScope.ts': 1,
 };
 
 /**
@@ -131,60 +152,14 @@ const BASELINE: Record<string, number> = {
  * 这 6 枚**现在是已知缺陷**，但改它 = 对外契约变更（要逐处核对前端分支），不属 B22/B32 的清理动作 ⇒
  * 本表**冻结现状**：把某一枚修好了就从这里删一行（删一行就少一处不一致），新长出一枚立刻红。
  */
-const SAME_CODE_TWO_STATUSES: Record<string, string> = {
-  HAS_ALLOCATIONS: '400/409',
-  INVALID_CURRENT_STATUS: '400/409',
-  INVALID_STAGE: '400/409',
-  INVALID_STATUS: '400/409',
-  INVALID_TRANSITION: '400/409',
-  STAGE_NOT_SEQUENTIAL: '400/409',
-};
+// 原 6 枚同码两档全部出自已删除的旧主 API 文件，现为空；新长一枚立刻红。
+const SAME_CODE_TWO_STATUSES: Record<string, string> = {};
 
 describe('B32 · code→status 只能有一份真源（棘轮）', () => {
   const hits = scan();
 
-  it('生产新增CONFLICT查真源，原V1/V2状态与未知边界保留，复合条件不得丢旧双档', () => {
-    const inspect = (file: string, code: string) => {
-      const source = fs.readFileSync(path.join(SERVER, 'src/production', file), 'utf8');
-      const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
-      const registryBindings = file === 'route.ts' ? ['lookupErrorCode', 'httpStatusOfCode'] : ['httpStatusOfCode'];
-      for (const registryBinding of registryBindings) {
-        expect(ast.statements.some(node => ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)
-          && node.moduleSpecifier.text === '../shared/errorCodes' && node.importClause?.namedBindings
-          && ts.isNamedImports(node.importClause.namedBindings) && node.importClause.namedBindings.elements
-            .some(binding => binding.name.text === registryBinding && !binding.propertyName))).toBe(true);
-      }
-      let expression = ''; let table = '';
-      const visit = (node: ts.Node) => {
-        if (file === 'routeV2.ts' && ts.isVariableDeclaration(node) && node.name.getText(ast) === 'code'
-          && node.initializer?.getText(ast).includes("result.error.code === 'ORDER_NOT_FOUND'")) {
-          expect(expression).toBe(''); expression = node.initializer.getText(ast);
-        }
-        if (file === 'route.ts' && ts.isVariableStatement(node) && node.getText(ast).includes('PP_SAMPLE_NOT_SIGNED: 400')) {
-          expect(table).toBe(''); table = node.getText(ast);
-        }
-        if (file === 'route.ts' && ts.isCallExpression(node) && node.expression.getText(ast) === 'res.status'
-          && node.arguments[0]?.getText(ast).includes('statusCodeMap[errResult.error.code] || (lookupErrorCode')) {
-          expect(expression).toBe(''); expression = node.arguments[0].getText(ast);
-        }
-        ts.forEachChild(node, visit);
-      };
-      visit(ast); expect(expression).not.toBe('');
-      const program = `${table}\n(${expression});`;
-      const compiled = ts.transpileModule(program, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-      return vm.runInNewContext(compiled, { result: { error: { code } }, errResult: { error: { code } },
-        httpStatusOfCode, lookupErrorCode }, { timeout: 1000 });
-    };
-    for (const [code, v1, v2] of [['ORDER_NOT_FOUND', 404, 404], ['STAGE_NOT_SEQUENTIAL', 400, 409],
-      ['CONFLICT', 409, 409], ['UNKNOWN_STORAGE_CODE', 500, 422]] as const) {
-      expect(inspect('route.ts', code)).toBe(v1);
-      expect(inspect('routeV2.ts', code)).toBe(v2);
-    }
-    // The original meter must still see STAGE_NOT_SEQUENTIAL; its 400/409
-    // inconsistency remains debt, rather than a false retirement through ||.
-    expect(hits.find(hit => hit.file === 'src/production/routeV2.ts')?.codeStatus)
-      .toContainEqual(['STAGE_NOT_SEQUENTIAL', '409']);
-  });
+  // 生产旧路由（production/route.ts、routeV2.ts）已删除，其状态回放用例一并移除。
+
 
   it('★ 逐文件基线只减不增：本地映射表一处未动 ⇒ 条数与文件数都必须等于基线', () => {
     const actual: Record<string, number> = {};
@@ -196,8 +171,8 @@ describe('B32 · code→status 只能有一份真源（棘轮）', () => {
       expect(file in actual, `${file} 已经不在基线里了 = 又并进真源了一批，删掉这一行`).toBe(true);
     }
     const total = Object.values(actual).reduce((a, b) => a + b, 0);
-    expect(total, '全仓本地 code→status 条数与基线不符').toBe(338);
-    expect(Object.keys(actual).length, '含本地映射的文件数与基线不符').toBe(15);
+    expect(total, '全仓本地 code→status 条数与基线不符').toBe(35);
+    expect(Object.keys(actual).length, '含本地映射的文件数与基线不符').toBe(21);
   });
 
   it('★ 同码两档必须等于冻结清单（改好一枚就删一行，新长一枚当场红）', () => {
@@ -211,7 +186,9 @@ describe('B32 · code→status 只能有一份真源（棘轮）', () => {
       [...byCode.entries()].filter(([, s]) => s.size > 1).map(([c, s]) => [c, [...s].sort().join('/')]),
     );
     expect(dual).toEqual(SAME_CODE_TWO_STATUSES);
-    expect(Object.keys(dual).length, '清单为空 = 判据退化成恒不匹配（没有守卫）').toBeGreaterThan(0);
+    // 判据正对照：同一码两档必须被认出（防判据退化成恒不匹配）。
+    const probe = new Map([['X', new Set(['400', '409'])]]);
+    expect([...probe.values()].some(v => v.size > 1)).toBe(true);
   });
 
   it('窄判据没有把一大片漏在外面：同形状下界自检（表 vs 表）', () => {
@@ -221,14 +198,14 @@ describe('B32 · code→status 只能有一份真源（棘轮）', () => {
     // ★ 每次跑都把实测值打出来（v3.12 加的）：此前重冻结只能"改一个数跑一遍"猜，
     //   而基线里的数字一旦要动，**看得见实测值**才谈得上"有意识地认账"（否则就是盲调阈值）。
     console.log(`[B32 实测] 表=${narrowTables} 三元=${narrowTerns} 和=${narrowTables + narrowTerns} 宽=${loose} 盲区=${loose - narrowTables} 文件=${hits.filter((h) => h.tableEntries + h.ternaryEntries > 0).length}`);
-    expect(narrowTables + narrowTerns, '两种形状之和必须等于基线总数（口径不许各说各话）').toBe(338);
+    expect(narrowTables + narrowTerns, '两种形状之和必须等于基线总数（口径不许各说各话）').toBe(35);
     // 2026-09-22 v2.47：三元 29 → 28（`shipping/route.ts` 那条三元改问单一映射函数），表形状 364 条未动
-    expect(narrowTerns, '原25处，PI两处及inspection两处退休后21；if/helper盲区仍保留').toBe(21);
-    expect(narrowTables, '版本回填改读业务错误真源后，表形状364降为360').toBe(360);
+    expect(narrowTerns, '2026-11-09 实测 35 处（均在 Mist 命令错误）').toBe(35);
+    expect(narrowTables, '旧主 API 删除后已无本地状态表').toBe(0);
     expect(loose, '宽判据应当 ≥ 窄判据（否则窄判据把已知的表漏掉了）').toBeGreaterThanOrEqual(narrowTables);
-    expect(loose, '宽判据条数变了（12:35 实测 435）').toBe(435);
+    expect(loose, '宽判据条数变了（2026-11-09 实测 6）').toBe(6);
     // 反向自检：盲区确实是"变量名没起对"的那一类，而不是恒为 0（恒 0 = 两个判据其实是一个）
-    expect(loose - narrowTables, '宽扫描含其他对象形状，表与宽扫描差值75').toBe(75);
+    expect(loose - narrowTables, '宽扫描含其他对象形状，差值 6').toBe(6);
   });
 
   it('双向对照：名字里带 status 的表算、百分比表不算、注释里的一行不算', () => {

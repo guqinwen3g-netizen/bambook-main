@@ -1,5 +1,6 @@
 /** Shared order trade vocabulary. Dates retain their own milestone semantics. */
 import { extractIncotermCode, KNOWN_INCOTERMS } from '../_shared/incoterm';
+import { isCalendarDay } from './mistBusinessClock';
 export const ORDER_INCOTERMS = KNOWN_INCOTERMS.filter(code => !['DAT', 'DES', 'DEQ', 'DAF'].includes(code));
 export type OrderIncoterm = typeof ORDER_INCOTERMS[number];
 export function orderIncoterm(value: unknown): OrderIncoterm | null {
@@ -60,8 +61,7 @@ export function orderTradeTermsError(order: Record<string, unknown>): string | n
     const value = order[key];
     if (value == null || value === '') continue;
     if (typeof value !== 'string') return '日期格式不正确。';
-    const date = new Date(`${value}T00:00:00Z`);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) return '请填写有效的日期。';
+    if (!isCalendarDay(value)) return '请填写有效的日期。';
     if (['contractDeliveryDate', 'expectedArrivalDate', 'agreedArrivalDate'].includes(key)
       && typeof order.clientDate === 'string' && order.clientDate && value < order.clientDate) return '合同交货或到达日期不能早于出厂交期。';
   }

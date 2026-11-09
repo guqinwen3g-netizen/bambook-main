@@ -146,7 +146,7 @@ function collectOccupiedCallbacks(): Array<{ file: string; snippet: string }> {
 describe('occupied 回调软删语义（跨模块）', () => {
   it('仓里确实有多处 occupied 回调（守卫不是空集）', () => {
     const cbs = collectOccupiedCallbacks();
-    expect(cbs.length).toBeGreaterThanOrEqual(5);
+    expect(cbs.length).toBeGreaterThanOrEqual(2); // 2026-11-09 旧服务删除后余 2 处。
   });
 
   it('★ 没有任何 occupied 回调过滤 deletedAt（过滤即撞号）', () => {

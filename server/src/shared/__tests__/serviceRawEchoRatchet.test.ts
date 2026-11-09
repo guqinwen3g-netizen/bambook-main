@@ -142,7 +142,6 @@ describe('B33 · 服务层「原文 || 文案」当对外文案（只减不增�
  * 基线 2026-09-20 14:48 实测：① **10 处 / 5 文件**、② **18 处 / 8 文件**，合计 **28 处 / 13 文件**。只减不增。
  */
 const B36_STRING_COPY_BASELINE: Record<string, number> = {
-  'src/finance/billingItemService.ts': 1,
 };
 const B36_CODE_PASSTHROUGH_BASELINE: Record<string, number> = {
 };
@@ -151,9 +150,9 @@ function countByFileB36(which: 'stringCopy' | 'codePassthrough'): Record<string,
 }
 
 describe('B36 · 同一条通道的另外两种形状（只减不增）', () => {
-  it('① 文案位 = String(原文)：1 处 / 1 文件（2026-11-06 删除死代码后；原 10 / 5）', () => {
+  it('① 文案位 = String(原文)：已归零（2026-11-09 billingItemService 删除；2026-11-06 为 1 / 1，原 10 / 5），新增即红', () => {
     const actual = countByFileB36('stringCopy');
-    expect(Object.values(actual).reduce((a, b) => a + b, 0)).toBe(1);
+    expect(Object.values(actual).reduce((a, b) => a + b, 0)).toBe(0);
     expect(actual).toEqual(B36_STRING_COPY_BASELINE);
   });
 
@@ -216,7 +215,7 @@ describe('B37 · B33/B36 都认不到的第四种写法（只减不增）', () =
       expect(both, '同一位置被两支判据同时命中 ⇒ 两支不再互斥').toEqual([]);
       files += 1;
     }
-    expect(files, '一个文件都没比对 = 这条守卫恒真').toBeGreaterThan(400);
+    expect(files, '一个文件都没比对 = 这条守卫恒真').toBeGreaterThan(300); // 2026-11-09 旧服务删除后约 345 份。
   });
 
   it('双向对照：B33 必须**看不见**这一形（证明是盲区而不是重复计量），改对了才算 0', () => {
@@ -291,15 +290,14 @@ describe('B37 · B33/B36 都认不到的第四种写法（只减不增）', () =
  *   ⇒ 是本站点里第一处「导出但无消费者」的出口，**不声称它是活的上屏路径**（另 5 处由端到端用例钉住）。
  */
 const B39_BASELINE: Record<string, number> = {
-  'src/finance/billingItemService.ts': 4, // 2026-11-06: actual remaining sites (main measured 4 here; the earlier 6 was stale).
 };
 
 describe('B39 · 位置参数内插原文（只减不增）', () => {
   const actual = countByFile(scanSources(SERVER), b39Sites);
 
-  it('逐文件基线：4 处 / 1 文件（原 9 / 2），涨了红、偷偷少了也红', () => {
-    expect(Object.values(actual).reduce((a, b) => a + b, 0), '全仓 B39 站点总数').toBe(4); // 2026-11-06 删除死代码后按保留文件的原基线重算（原 9 / 2）。
-    expect(Object.keys(actual).length, '含 B39 站点的文件数').toBe(1);
+  it('逐文件基线：已归零（2026-11-09 billingItemService 删除；2026-11-06 为 4 / 1，原 9 / 2），新增即红', () => {
+    expect(Object.values(actual).reduce((a, b) => a + b, 0), '全仓 B39 站点总数').toBe(0);
+    expect(Object.keys(actual).length, '含 B39 站点的文件数').toBe(0);
     expect(actual).toEqual(B39_BASELINE);
   });
 
@@ -328,7 +326,7 @@ describe('B39 · 位置参数内插原文（只减不增）', () => {
       files += 1;
     }
     expect(overlaps, '同一处被两支判据同时命中 ⇒ 清一批时总数会被重复扣').toEqual([]);
-    expect(files, '一个文件都没比对 = 这条守卫恒真').toBeGreaterThan(400);
+    expect(files, '一个文件都没比对 = 这条守卫恒真').toBeGreaterThan(300); // 2026-11-09 旧服务删除后约 345 份。
   });
 
   it('双向对照：本型必须被数到，相邻四型必须不被数（防判据互相吞并）', () => {

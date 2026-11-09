@@ -6,6 +6,7 @@
  * 已批准的订单拆分或合并后回到草稿，按新内容重新提交主单审批。审批中、已作废、已取消、补发、内部用途订单不办理。
  */
 import { MistCommandError, MIST_ORDER_CHECKLIST, type MistContext, type MistOrder, type MistOrderLine, type MistState } from './mistWorkspace';
+import { isCalendarDay } from './mistBusinessClock';
 import type { OrderGovernanceFields } from './mistOrderGovernance';
 
 export type OrderSplitCommand =
@@ -16,7 +17,7 @@ type Root = MistState & Record<string, any>;
 
 const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCommandError(code, message); };
 const text = (v: unknown, label: string, max = 1000) => { const s = typeof v === 'string' ? v.trim() : ''; if (!s) fail(`请填写${label}`); if (s.length > max) fail(`${label}过长`); return s; };
-const day = (v: unknown) => { const s = text(v, '交期', 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || new Date(s + 'T00:00:00Z').toISOString().slice(0, 10) !== s) fail('交期格式无效'); return s; };
+const day = (v: unknown) => { const s = text(v, '交期', 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || !isCalendarDay(s)) fail('交期格式无效'); return s; };
 const q4 = (n: number) => Math.round(n * 10000) / 10000;
 
 /** 订单已有的后续业务（有任何一项就不能拆分或合并）。 */

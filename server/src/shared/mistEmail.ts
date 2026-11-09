@@ -7,7 +7,7 @@
 import { MistCommandError, type MistContext, type MistState } from './mistWorkspace';
 import type { MailRemoteRef, MailStateObservation, MailStateField } from './mistMailState';
 import { reviewEmailAnalysis, type EmailAnalysis, type EmailExtractionReview, type EmailReviewInput } from './mistEmailReview';
-import { mistBusinessDate } from './mistBusinessClock';
+import { mistBusinessDate, shiftCalendarDay } from './mistBusinessClock';
 
 export type EmailAddress = { name: string; address: string };
 export type EmailFolder = 'inbox' | 'drafts' | 'outbox' | 'sent' | 'archive' | 'trash';
@@ -732,7 +732,7 @@ function beginSend(root: MistState, payload: Extract<EmailCommand, { type: 'emai
 
 /** 演示公司的合成邮件：全部标注示例、使用 example.invalid 地址，不代表真实收信。 */
 export function seedEmailExamples(root: MistState, context: MistContext) {
-  const day = (offset: number, time: string) => { const date = new Date(context.now); date.setUTCDate(date.getUTCDate() - offset); return date.toISOString().slice(0, 10) + 'T' + time + ':00Z'; };
+  const day = (offset: number, time: string) => shiftCalendarDay(mistBusinessDate(context.now), -offset) + 'T' + time + ':00Z';
   // 示例个人邮箱是业务员顾言的地址（gu.yan@），显示名与签名固定为顾言，不随建公司的人变化。
   const me = '顾言';
   root.email.accounts.push(

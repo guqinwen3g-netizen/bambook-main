@@ -159,7 +159,7 @@ export function createDevPanelRouter(options: { prisma: PrismaClient }) {
       }));
       return res.json({ ok: true, count: list.length, accounts: list });
     } catch (e: any) {
-      const r = safeRouteError(e, { fallbackCode: 'LIST_FAILED' });
+      const r = safeRouteError(e, { fallbackCode: 'DEV_ACCOUNTS_LIST_FAILED' });
       return res.status(r.status).json({ ok: false, error: r.code, message: r.message });
     }
   });

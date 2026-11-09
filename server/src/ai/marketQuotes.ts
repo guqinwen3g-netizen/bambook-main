@@ -14,6 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { mistBusinessDate } from '../shared/mistBusinessClock';
 
 export const EXA_MCP_URL = 'https://mcp.exa.ai/mcp';
 export const BOC_FX_URL = 'https://www.boc.cn/sourcedb/whpj/';
@@ -81,7 +82,7 @@ export function pickMaterial(hits: Hit[], def: typeof MATERIALS[number], today: 
 }
 
 export async function fetchMarketSnapshot(now: Date, fetchImpl: typeof fetch = fetch): Promise<MarketSnapshot> {
-  const missing: string[] = [], today = now.toISOString().slice(0, 10);
+  const missing: string[] = [], today = mistBusinessDate(now);
   let fx: FxQuote[] = [];
   try { fx = parseBocFx(await exaCall('web_fetch_exa', { urls: [BOC_FX_URL], maxCharacters: 20000 }, fetchImpl)); } catch (e) { missing.push('中国银行外汇牌价：' + (e instanceof Error ? e.message : '读取失败')); }
   for (const code of Object.keys(FX_CURRENCIES)) if (!fx.some(q => q.currency === code)) missing.push(`${code} 现汇买入价`);
@@ -114,8 +115,8 @@ export class MarketQuoteWorker {
   private timer?: ReturnType<typeof setInterval>; private running = false;
   constructor(private readonly store: MarketStore, private readonly options: { now?: () => Date; fetchImpl?: typeof fetch; hourBeijing?: number; onError?: (code: string) => void } = {}) {}
   private due(now: Date) {
-    const last = this.store.latest(), beijing = new Date(now.getTime() + 8 * 3600000), day = beijing.toISOString().slice(0, 10);
-    const lastDay = last ? new Date(Date.parse(last.fetchedAt) + 8 * 3600000).toISOString().slice(0, 10) : '';
+    const last = this.store.latest(), beijing = new Date(now.getTime() + 8 * 3600000), day = mistBusinessDate(now);
+    const lastDay = last ? mistBusinessDate(last.fetchedAt) : '';
     return lastDay !== day && beijing.getUTCHours() >= (this.options.hourBeijing ?? 10);
   }
   async tick() {

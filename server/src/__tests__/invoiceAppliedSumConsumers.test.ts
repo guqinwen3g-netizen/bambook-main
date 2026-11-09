@@ -40,7 +40,6 @@ function importersOfSource(): string[] {
 /** 必须走真源的消费点（语义 = 「该发票已收/还欠多少」） */
 const MUST_USE = [
   'credit/creditService.ts',                 // 授信净额
-  'shipping/orderShipmentBatchService.ts',   // 批次结清（paid）+ 订单已收合计
 ];
 
 describe('消费点登记：已核销合计必须走 shared/invoiceAppliedSum', () => {

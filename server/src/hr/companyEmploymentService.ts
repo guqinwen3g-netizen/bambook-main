@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isCalendarDay } from '../shared/mistBusinessClock';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { HrError, type EmploymentEventType } from './hrService';
 
@@ -27,7 +28,7 @@ const TARGET: Partial<Record<EmploymentEventType, string>> = {
 };
 function date(value: unknown, label: string): asserts value is string {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)
-    || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) {
+    || !Number.isFinite(Date.parse(value)) || !isCalendarDay(value)) {
     throw new HrError('VALIDATION_FAILED', label + '无效。');
   }
 }

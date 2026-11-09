@@ -1,4 +1,5 @@
 import {notifyMist,notificationOwners} from './mistNotifications';
+import { isCalendarDay } from './mistBusinessClock';
 /** Physical customer returns use the sole Mist stock ledger; approval is owned by Claims. */
 import {MistCommandError,mistOrderOwnerIds,type MistState,type MistContext,type MistCommandResult} from './mistWorkspace';
 import {getExecutedClaimGoodsSource,platformBusinessDate,type PlatformClaimGoodsSource,type PlatformClaimGoods} from './mistPlatform';
@@ -34,7 +35,7 @@ const amount=(value:unknown,label='数量'):number=>typeof value==='number'&&Num
 const units=(value:number)=>Math.round(value*10000);
 const total=(values:number[])=>values.reduce((sum,value)=>sum+units(value),0)/10000;
 const same=(a:unknown,b:unknown)=>JSON.stringify(a&&typeof a==='object'?Object.entries(a).sort(([x],[y])=>x.localeCompare(y)):a)===JSON.stringify(b&&typeof b==='object'?Object.entries(b).sort(([x],[y])=>x.localeCompare(y)):b);
-function day(value:unknown,label:string){const result=text(value,label,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(result)||!Number.isFinite(Date.parse(result+'T00:00:00Z'))||new Date(result+'T00:00:00Z').toISOString().slice(0,10)!==result)fail(label+'须为有效日期');return result;}
+function day(value:unknown,label:string){const result=text(value,label,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(result)||!Number.isFinite(Date.parse(result+'T00:00:00Z'))||!isCalendarDay(result))fail(label+'须为有效日期');return result;}
 function files(root:MistState,ids:unknown){if(!Array.isArray(ids)||ids.length>100)fail('凭据附件格式无效');return [...new Set((ids as unknown[]).map(id=>{const value=text(id,'附件编号',200);if(!root.files.some(file=>file.id===value))fail('凭据附件不属于本公司');return value;}))];}
 function repairEvidence(root:MistState,ids:unknown,allowed:string[]){const result=files(root,ids);if(result.some(id=>!allowed.includes(id)))fail('返修凭据须已归入本案件');return result;}
 function actor(context:MistContext){return {actorId:text(context.actorId,'实际登录账号',200),actor:text(context.actorName,'实际经手业务员',200)};}

@@ -1,5 +1,6 @@
 /** Offline execution facts are evidence, never a production release or a financial posting. */
 import { MistCommandError, assertMistOrderApproved, assertMistOrderOpen, type MistContext, type MistState, type MistCommandResult } from './mistWorkspace';
+import { isCalendarDay } from './mistBusinessClock';
 import { platformBusinessDate } from './mistPlatform';
 import { reviewDecision, type MistReviewTask } from './mistReview';
 import type { FulfillmentProductionFact } from './mistFulfillment';
@@ -28,7 +29,7 @@ export type ProductionIntakeCommand =
 const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCommandError(code, message, code === 'FORBIDDEN' ? 403 : 422); };
 const text = (value: unknown, label: string, max = 4000) => typeof value === 'string' && value.trim() && value.length <= max ? value.trim() : fail(`${label}未填写或格式无效`);
 function day(value: unknown, label: string) {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value + 'T00:00:00Z')) || new Date(value + 'T00:00:00Z').toISOString().slice(0, 10) !== value) return fail(`${label}格式无效`);
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value + 'T00:00:00Z')) || !isCalendarDay(value)) return fail(`${label}格式无效`);
   return value;
 }
 export function productionIntake(root: Pick<MistState, 'fulfillment'>, productionId: string) {

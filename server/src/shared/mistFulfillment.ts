@@ -1,4 +1,5 @@
 import {notifyMist,notificationOwners,notificationTargetOwners} from './mistNotifications';
+import { isCalendarDay } from './mistBusinessClock';
 import {packingBreakdownBlocker,packingFabricSpecification,packingFabricColorError,packingPhysicalKey,packingSkuError,canonicalPackingSkus,canSupplementPacking,type PackingSku} from './mistPackingBreakdown';
 import {recordReplacementExportReview,replacementDeclaredUnitPrice,type ReplacementExportCommand,type ReplacementExportReview} from './mistClaimReplacement';
 import { normalizeFabricStageTerms, fabricStageSubmitProblem, fabricStageTermsText, type FabricStageTerms } from './mistFabricStage';
@@ -881,7 +882,7 @@ const get = <T extends {
     id: string;
 }>(rows: T[], id: string, label: string): T => rows.find(row => row.id === id) || fail(`${label}不存在`, 'NOT_FOUND');
 const day = (v: unknown, label = '日期', required = true): string => { const s = text(v, label, required, 40); if (!s && !required)
-    return s; return /^\d{4}-\d{2}-\d{2}$/.test(s) && Number.isFinite(Date.parse(s)) && new Date(s).toISOString().slice(0, 10) === s ? s : fail(`${label}无效`); };
+    return s; return /^\d{4}-\d{2}-\d{2}$/.test(s) && Number.isFinite(Date.parse(s)) && isCalendarDay(s) ? s : fail(`${label}无效`); };
 const instant = (v: unknown, ctx: MistContext, label = '实际时间'): string => { const s = text(v, label), n = Date.parse(s); return Number.isFinite(n) && n <= Date.parse(ctx.now) + 1000 ? new Date(n).toISOString() : fail(`${label}必须是已发生的实际时间`); };
 function files(root: MistState, value: unknown): string[] { if (!Array.isArray(value) || value.length > 100)
     fail('附件格式无效'); return [...new Set((value as unknown[]).map(id => get(root.files, text(id, '附件'), '附件').id))]; }

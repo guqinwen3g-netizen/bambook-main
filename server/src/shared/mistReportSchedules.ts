@@ -5,6 +5,7 @@
  * 对外发信始终由本人确认（不做无人自动外发）；发出后在订阅上登记本期已发。
  */
 import { MistCommandError, type MistContext, type MistState } from './mistWorkspace';
+import { shiftCalendarDay } from './mistBusinessClock';
 import { platformBusinessDate } from './mistPlatform';
 
 export const REPORT_SCHEDULE_KINDS = { sales: '客户销售额', aging: '应收账龄', orders: '订单进度', cash: '资金月报', margin: '订单毛利' } as const;
@@ -24,7 +25,7 @@ export type ReportScheduleCommand =
 type Root = MistState & { reportSchedules?: MistReportSchedule[] };
 
 const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCommandError(code, message); };
-const addDays = (day: string, n: number) => new Date(Date.parse(day + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+const addDays = (day: string, n: number) => shiftCalendarDay(day, n);
 const weekday = (day: string) => { const w = new Date(day + 'T00:00:00Z').getUTCDay(); return w === 0 ? 7 : w; };
 
 export const readReportSchedules = (root: Pick<Root, 'reportSchedules'>) => root.reportSchedules || [];
@@ -37,7 +38,7 @@ export function reportSchedulePeriod(s: Pick<MistReportSchedule, 'every' | 'day'
   if (s.every === 'week') { const due = addDays(today, -((weekday(today) - s.day + 7) % 7)); return { period: due, due }; }
   const month = today.slice(0, 7), due = `${month}-${String(s.day).padStart(2, '0')}`;
   if (due <= today) return { period: month, due };
-  const [y, m] = month.split('-').map(Number), prev = new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 7);
+  const [y, m] = month.split('-').map(Number), prev = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
   return { period: prev, due: `${prev}-${String(s.day).padStart(2, '0')}` };
 }
 /** 当前账号到期未发的订阅（供首页待办派生）。 */

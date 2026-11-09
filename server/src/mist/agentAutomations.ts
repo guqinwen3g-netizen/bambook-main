@@ -6,7 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import type { TokenPayload } from '../auth/service';
 import type { MistState } from '../shared/mistWorkspace';
-import { mistBusinessDate } from '../shared/mistBusinessClock';
+import {mistBusinessDate,shiftCalendarDay} from '../shared/mistBusinessClock';
 import { fail } from './errors';
 
 export const AUTOMATION_PREFIX = 'mist-revision:agent-automation:';
@@ -90,8 +90,9 @@ export async function dueAutomations(db: any, take: number): Promise<AutomationJ
   return rows.flatMap((row: any) => { const c = row.result?.[AUTOMATION_FIELD] as AutomationRecord; return c?.schemaVersion === 1 && c.enabled && c.authority && !c.halted && row.workspaceId === c.workspaceId && row.actorId === c.ownerId ? [{ workspaceId: c.workspaceId, id: c.id, authority: c.authority }] : []; });
 }
 
-const clock = (now: number) => new Date(now + 8 * 3600_000).toISOString().slice(11, 16);
-const addDays = (day: string, days: number) => new Date(Date.parse(day + 'T00:00:00Z') + days * 86400_000).toISOString().slice(0, 10);
+const SHANGHAI_CLOCK = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+const clock = (now: number) => SHANGHAI_CLOCK.format(new Date(now));
+const addDays = (day: string, days: number) => shiftCalendarDay(day, days);
 export type AutomationDecision = { next: Pick<AutomationRecord, 'seen' | 'primed' | 'lastDay' | 'since'>; fire?: { detail: string; facts: string } };
 /** 只判断要不要触发。state 是规则所有者的权限投影，看不到的邮件和到账不会触发。 */
 export function evaluateAutomation(c: AutomationRecord, state: MistState, now: number): AutomationDecision {

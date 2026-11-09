@@ -105,7 +105,7 @@ export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) 
     sections: [{ id: 'trend', label: '趋势', fields: ['name', 'type', 'seasonId', 'source', 'note'] }, { id: 'products', label: '关联面料', fields: pickable.map(p => `p:${p.id}`) }],
     initialValues: { ...(t ? { name: t.name, type: t.type, seasonId: t.seasonId, source: t.source, note: t.note } : { name: '', type: 'fabric', seasonId: seasons.find(s => s.status === 'Active')?.id || seasons[0]?.id || '', source: '', note: '' }), ...Object.fromEntries(pickable.map(p => [`p:${p.id}`, !!t?.productIds.includes(p.id)])) },
     fields: [{ key: 'name', label: '趋势名称', required: true }, { key: 'type', label: '类别', type: 'select', options: (Object.keys(TREND_TYPE) as MarketTrend['type'][]).map(k => ({ value: k, label: TREND_TYPE[k] })) },
-      { key: 'seasonId', label: '季节', type: 'select', required: true, options: seasonOptions.slice(1) }, { key: 'source', label: '来源依据', required: true, hint: '例如展会趋势区、色彩报告、客户简报' },
+      { key: 'seasonId', label: '季节', type: 'select', required: true, options: seasonOptions.slice(1) }, { key: 'source', label: '来源依据', required: true },
       { key: 'note', label: '观察内容', type: 'textarea' }, ...pickable.map(p => ({ key: `p:${p.id}`, label: `${p.sku} · ${p.name}`, type: 'checkbox' as const }))],
     submit: v => { const productIds = pickable.filter(p => v[`p:${p.id}`] === true).map(p => p.id);
       return run({ type: 'market.trend.save', payload: { id: t?.id, input: { name: String(v.name ?? ''), type: String(v.type) as MarketTrend['type'], seasonId: String(v.seasonId ?? ''), source: String(v.source ?? ''), productIds, note: String(v.note ?? ''), fileIds: t?.fileIds || [] } } }); },

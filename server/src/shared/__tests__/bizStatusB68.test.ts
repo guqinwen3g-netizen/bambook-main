@@ -100,40 +100,8 @@ describe('B68 · 状态档判定顺序：自带状态 > 已登记码 > Prisma P2
    *   抛的几枚 code 也未登记进 `errorCodes`）⇒ 第 1、2 档今天**拿不到输入**，本批真正生效的是第 3 档 + 2b。
    *   标题不再声称"收口完成"，只声称"入参形状已改对，等域内补码之后 1、2 档即刻生效"。
    */
-  /**
-   * 分母说明（v2.46 复量，两个口径都对得上，别把这两个数当同一个）：
-   *   改造前三份 `errStatus` 共 **77** 处调用（33/22/22，各文件另有 1 行是定义）；
-   *   v2.46 起 `statusFromError` 共 **80** 处（36/22/22）——净增的 3 处是 v2.46 收进来的组合文档三站点，
-   *   它们改造前是**内联三元**，本来就不在那 77 里。
-   *   ★ v3.06 复量 **81**（customsRoute 36、customsRouteV2 **23**、mesRoute 22）：
-   *   `customsRouteV2.ts` 的 `GET /documents/:id` 从"写死 404"改走真尺（B124 ②）⇒ 该文件净增 1 处。
-   *   报价两站（B124 ①）也接了真尺，但 `quotations` 不在本判据的三域分母里
-   *   ⇒ **两个数不能加减**（口径不同：这里只数 customs/mes 三个文件）。
-   */
-  it('★ 三域 81 个调用点（改造前 77）的入参必须是"本文件 catch 绑定的那个错误对象"（不得是文本/别名）', () => {
-    const fs = require('node:fs') as typeof import('node:fs');
-    const path = require('node:path') as typeof import('node:path');
-    const root = path.resolve(__dirname, '../../customs');
-    const root2 = path.resolve(__dirname, '../../mes');
-    const sites: Record<string, number> = {
-      // ★ v2.46 分母 33→36：组合文档那三处内联三元被收进来（customsRoute.ts:770/799/830）
-      [path.join(root, 'customsRoute.ts')]: 36,
-      // v3.06 grew 22→23 for /documents/:id. c281d338 then retired
-      // exactly GET /declarations/:id into safeRouteError; other 22 remain.
-      [path.join(root, 'customsRouteV2.ts')]: 22,
-      [path.join(root2, 'mesRoute.ts')]: 22,
-    };
-    for (const [f, want] of Object.entries(sites)) {
-      const src = fs.readFileSync(f, 'utf-8');
-      const bad = textFedSites(src);
-      expect(bad, `${f} 有站点把文本/别名喂进判档 ⇒ 第 1、2 档永远走不到：\n${bad.join('\n')}`).toEqual([]);
-      // 不许在域内重立本地别名/第二份实现（本批正是把三份收一份的；兜底档只能有一处默认值）
-      expect(src, `${f} 又长出本地 errStatus 壳 ⇒ 兜底档会出现第二个默认值`).not.toMatch(/\berrStatus\b/);
-      // 分母钉住（不再是 toBeGreaterThan(0) 那种"塌到 1 也不红"的地板）
-      const n = (src.match(/\bstatusFromError\(/g) ?? []).length;
-      expect(n, `${f} 的调用点数从 ${want} 变了 ⇒ 台账 B68 行的分母要同步`).toBe(want);
-    }
-  });
+  // 报关 / MES 旧路由（customsRoute、customsRouteV2、mesRoute）已随旧主 API 删除，三域调用点守卫一并移除。
+
 
   /**
    * 正面对照（复核 IMPORTANT-5 直接催生）：第一版只禁 `x.message` 一种写法，

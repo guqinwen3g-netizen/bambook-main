@@ -51,43 +51,9 @@ describe('task_mqxxxu1g: actorIdFromRequest', () => {
   });
 });
 
-const INVOICE_SERVICE = fs.readFileSync(path.resolve(__dirname, '../../finance/invoiceMutationService.ts'), 'utf-8');
 const ROUTE_AUDIT = fs.readFileSync(path.resolve(__dirname, '../routeAudit.ts'), 'utf-8');
 
-describe('task_mqxxxu1g: finance route 事务闭环（业务+sync+AuditLog 同事务）', () => {
-  it('invoice mutation service 使用 $transaction', () => {
-    expect((INVOICE_SERVICE.match(/\.\$transaction/g) || []).length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('create_invoice: service 内业务 create + sync + AuditLog 全在 $transaction 内', () => {
-    const idx = INVOICE_SERVICE.indexOf('export async function createInvoice');
-    const end = INVOICE_SERVICE.indexOf('export async function updateInvoice', idx);
-    const section = INVOICE_SERVICE.slice(idx, end);
-    expect(section).toContain('tx.invoice.create');
-    expect(section).toContain('syncInvoiceReferences');
-    expect(section).toContain(', tx);');
-    expect(section).toContain('writeRouteAuditLog');
-    expect(section).toContain('prisma: tx');
-  });
-
-  it('update_invoice: service 内 existing + update + sync + AuditLog 全在 $transaction 内', () => {
-    const idx = INVOICE_SERVICE.indexOf('export async function updateInvoice');
-    const section = INVOICE_SERVICE.slice(idx);
-    expect(section).toContain('tx.invoice.findUnique');
-    expect(section).toContain('tx.invoice.update');
-    expect(section).toContain('syncInvoiceReferences');
-    expect(section).toContain(', tx);');
-    expect(section).toContain('before');
-    expect(section).toContain('after');
-  });
-
-});
-
-describe('task_mqxxxu1g: NOT_FOUND 错误契约（404 不漂成 500）', () => {
-  it('NOT_FOUND 在 invoice service 中稳定返回', () => {
-    expect(INVOICE_SERVICE).toContain("code: 'NOT_FOUND'");
-  });
-});
+// 旧开票服务（invoiceMutationService）已随旧主 API 退役删除，其事务闭环源码断言一并移除。
 
 describe('task_mqxxxu1g: 事务失败时业务回滚（sync 失败场景）', () => {
   it('模拟 $transaction 内 sync 失败 → 整个事务 reject（业务+audit 都回滚）', async () => {

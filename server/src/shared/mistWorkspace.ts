@@ -17,7 +17,7 @@ import {createFulfillmentState,applyFulfillmentCommand,ensureDevelopmentQcTasks,
 import {createMarketState,applyMarketCommand,backfillQuoteLineFamilies,marketCommandPermission,getMarketReviews,type MarketState,type MarketCommand} from './mistMarket';
 import {createCrmState,applyCrmCommand,crmCommandPermission,type CrmState,type CrmCommand} from './mistCrm';
 import {seedDemoModules,DEMO_SEED_VERSION} from './mistDemoSeed';
-import {mistBusinessDate} from './mistBusinessClock';
+import {mistBusinessDate,isCalendarDay,shiftCalendarDay} from './mistBusinessClock';
 import {getQcConcessionReviews} from './mistQcDisposition';
 import {getStockCountReviews} from './mistStockOperations';
 import {applyDocumentGeneration,documentGenerationPermission,type DocumentGenerationCommand} from './mistDocumentGeneration';
@@ -525,7 +525,7 @@ export const lineAmount = (qty: number, price: number) => {
 };
 const date = (value: unknown, label = '日期'): string => {
   const source = text(value, label, true, 40);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(source) || !Number.isFinite(Date.parse(source + 'T00:00:00Z')) || new Date(source + 'T00:00:00Z').toISOString().slice(0, 10) !== source) throw new MistCommandError('VALIDATION', label + '格式无效');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(source) || !Number.isFinite(Date.parse(source + 'T00:00:00Z')) || !isCalendarDay(source)) throw new MistCommandError('VALIDATION', label + '格式无效');
   return source;
 };
 const instant = (value: unknown, context: MistContext): string => {
@@ -844,7 +844,7 @@ export function createMistState(context: MistContext, seed: 'demo'|'empty' = 'de
   state.productions=Seed.PRODS.map(source=>{const order=state.orders.find(o=>o.code===source.order)!, line=state.orderLines.find(l=>l.orderId===order.id&&l.name===source.name)||state.orderLines.find(l=>l.orderId===order.id)!;return {...source,code:source.id,orderId:order.id,lineId:line.id,col:source.col as MistProduction['col'],img:source.img as MistImage,due:iso(source.due,context)};});
   state.receipts=Seed.RECEIPTS.map(row=>({...row,code:row.id,state:row.state as MistReceipt['state'],date:iso(row.date,context),remaining:row.amount}));
   // 演示应收按出运后 30 天账期：开票日 = 到期日 − 30 天（不晚于今天）。
-  state.invoices=Seed.INVOICES.map(row=>{const due=iso(row.due,context),issued=new Date(Date.parse(due+'T00:00:00Z')-30*86400000).toISOString().slice(0,10),today=context.now.slice(0,10);return {...row,code:row.id,orderId:state.orders.find(o=>o.code===row.order)!.id,due,issuedAt:issued<today?issued:today};});
+  state.invoices=Seed.INVOICES.map(row=>{const due=iso(row.due,context),issued=shiftCalendarDay(due,-30),today=mistBusinessDate(context.now);return {...row,code:row.id,orderId:state.orders.find(o=>o.code===row.order)!.id,due,issuedAt:issued<today?issued:today};});
   for(const receipt of state.receipts) if(receipt.state==='matched'&&receipt.suggest){
     const invoice=state.invoices.find(row=>row.code===receipt.suggest);
     if(invoice) state.allocations.push({id:context.id(),receiptId:receipt.id,invoiceId:invoice.id,amount:receipt.amount,currency:receipt.currency,createdAt:context.now,actor:'财务'});
@@ -1018,7 +1018,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const customer=developmentCustomer(state,v);assertRequester(state,v);
       const id=context.id(), code='DEV-'+context.now.slice(0,4)+'-'+String(state.devs.length+1).padStart(4,'0');
       const dev:MistDev={id,code,name:v.name,style:v.style,owner:owner.name,ownerId:owner.id,due:v.due,dueRel:'',stage:0,state:'开发计划',tone:'neutral',ver:'—',fac:v.factories.length,img:developmentDomain(v)==='fabric'?'clay':v.category.includes('西装')?'suit':v.category.includes('Blazer')?'blazer':'coat',factory:v.factories[0]?factoryName(state,v.factories[0]):'待定',sample:'—',fabric:v.fabric,goal:v.goal,customer:customer?.name||'',customerId:customer?.id||'',currentVersionId:null,versionIds:[],values:{...v,customer:customer?.name||''},fileIds,createdAt:context.now,updatedAt:context.now};
-      state.devs.unshift(dev); if(v.factories.length)createRound(state,dev,{factories:v.factories,requirements:v.goal||v.name,targetDate:v.due||context.now.slice(0,10),fileIds:[],...(v.stages?{stages:v.stages}:{})},context); updateDev(state,dev,context);
+      state.devs.unshift(dev); if(v.factories.length)createRound(state,dev,{factories:v.factories,requirements:v.goal||v.name,targetDate:v.due||mistBusinessDate(context.now),fileIds:[],...(v.stages?{stages:v.stages}:{})},context); updateDev(state,dev,context);
       if(p.draftId)state.drafts=state.drafts.filter(d=>d.id!==p.draftId);
       state.tasks.unshift({id:context.id(),title:'推进 '+dev.name,due:dev.due,done:false,kind:'development',target:{view:'development/detail',id:dev.id},assigneeIds:dev.ownerId?[dev.ownerId]:[]});
       event(state,context,'development',id,'创建开发案 '+code,{view:'development/detail',id}); result={id,devId:id,versionId:dev.currentVersionId||undefined}; break;
@@ -1032,7 +1032,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(developmentDomain(v)!==developmentDomain(dev.values))throw new MistCommandError('PRECONDITION','已有开发案不能改变业务域，请另建案');
       {const added=v.factories.filter(f=>!dev.values.factories.includes(f));if(added.length)assertDevelopmentFactories(state,added,developmentDomain(v)==='fabric',context);}
       dev.values={...v,customer:customer?.name||''}; dev.name=v.name;dev.style=v.style;dev.customer=customer?.name||'';dev.customerId=customer?.id||'';dev.goal=v.goal;dev.fabric=v.fabric;dev.due=v.due;
-      if(!dev.versionIds.length&&v.factories.length)createRound(state,dev,{factories:v.factories,requirements:v.goal||v.name,targetDate:v.due||context.now.slice(0,10),fileIds:[],...(v.stages?{stages:v.stages}:{})},context);
+      if(!dev.versionIds.length&&v.factories.length)createRound(state,dev,{factories:v.factories,requirements:v.goal||v.name,targetDate:v.due||mistBusinessDate(context.now),fileIds:[],...(v.stages?{stages:v.stages}:{})},context);
       updateDev(state,dev,context);event(state,context,'development',dev.id,'更新开发计划');result={devId:dev.id,versionId:dev.currentVersionId||undefined};break;
     }
     case 'development.saveConfirmationDraft': {
@@ -1105,7 +1105,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
     case 'development.revise': {
       const [dev,previous]=versionOf(state,p.devId,p.versionId), note=text(p.note,'改版说明');
       const chain=previous.stages?.map(({factoryId,process})=>({factoryId,process}));
-      const {round,versions}=createRound(state,dev,{factories:chain?chain.map(row=>row.factoryId):[previous.factoryId],requirements:note,referenceVersionIds:[previous.id],targetDate:dev.due||context.now.slice(0,10),fileIds:[],...(chain?{stages:chain}:{})},context),version=versions[0];
+      const {round,versions}=createRound(state,dev,{factories:chain?chain.map(row=>row.factoryId):[previous.factoryId],requirements:note,referenceVersionIds:[previous.id],targetDate:dev.due||mistBusinessDate(context.now),fileIds:[],...(chain?{stages:chain}:{})},context),version=versions[0];
       updateDev(state,dev,context);
       event(state,context,'development',dev.id,'创建改版 '+version.label,{view:'development/detail',id:dev.id,versionId:version.id},'general',notificationOwners(state,'development',dev.id));result={devId:dev.id,versionId:version.id,roundId:round.id};break;
     }
@@ -1256,7 +1256,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(p.versionId&&!dev.versionIds.includes(p.versionId))throw new MistCommandError('VALIDATION','费用必须关联本案版本');
       const fee=sampleFee({amount:p.amount,currency:p.currency}),expenseDate=date(p.date,'费用日期');
       if(fee.amount<=0)throw new MistCommandError('VALIDATION','金额须大于零');
-      if(expenseDate>context.now.slice(0,10))throw new MistCommandError('VALIDATION','费用日期不得在未来');
+      if(expenseDate>mistBusinessDate(context.now))throw new MistCommandError('VALIDATION','费用日期不得在未来');
       const id=context.id();(dev.billing||={makingFees:[]}).expenses||=[];
       dev.billing.expenses.push({id,...fee,description:text(p.description,'费用说明'),date:expenseDate,...(p.versionId?{versionId:p.versionId}:{}),at:context.now,actor:context.actorName});
       dev.updatedAt=context.now;event(state,context,'development',dev.id,'登记公司支出 '+fee.amount+' '+fee.currency,{view:'development/detail',id:dev.id},'general',notificationOwners(state,'development',dev.id));result={id,devId:dev.id};break;
@@ -1812,7 +1812,7 @@ function convertLeadToCrm(state:MistState,p:Extract<MarketCommand,{type:'market.
   if(customerId){if(!state.customers.some(c=>c.id===customerId))throw new MistCommandError('NOT_FOUND','客户不存在',404);}
   else{
     const same=state.customers.find(c=>c.name.trim().toLowerCase()===lead.company.trim().toLowerCase());if(same)throw new MistCommandError('CONFLICT',`已有同名客户 ${same.name}（${same.code}），请选择该客户`,409);
-    const created=applyMarketCommand(state,{type:'market.customer.create',payload:{input:{name:lead.company,country:'',city:'',industry:'',ownerId:lead.ownerId||context.actorId||'',grade:'',currency:lead.currency||'USD',terms:'',incoterm:'',categories:'',creditLimit:0,since:context.now.slice(0,10)}}},context);customerId=String(created.customerId||created.id);
+    const created=applyMarketCommand(state,{type:'market.customer.create',payload:{input:{name:lead.company,country:'',city:'',industry:'',ownerId:lead.ownerId||context.actorId||'',grade:'',currency:lead.currency||'USD',terms:'',incoterm:'',categories:'',creditLimit:0,since:mistBusinessDate(context.now)}}},context);customerId=String(created.customerId||created.id);
     applyMarketCommand(state,{type:'market.contact.save',payload:{kind:'customer',parentId:customerId,name:lead.name,role:'',email:lead.email,phone:lead.phone,primary:true}},context);
   }
   let opportunityId='';
