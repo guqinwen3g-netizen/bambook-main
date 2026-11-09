@@ -153,7 +153,8 @@ it('keeps design showcase navigation out of the business client in development b
 
 it.each(['design-system', 'states'])('does not expose the %s showcase through a business-client URL', async view => {
   await signIn(); history.replaceState(null, '', '/?intro=0&view='+view); await mount();
-  await waitFor(() => expect(host!.textContent).toContain('没有查看权限'));
+  await waitFor(() => expect(host!.textContent).toContain('没有找到此页面'));
+  expect(host!.textContent).not.toMatch(/设计系统|设计组件展示/);
 });
 
 describe('one Mist entry with real authentication and workspace state', () => {
