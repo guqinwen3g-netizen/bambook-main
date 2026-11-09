@@ -46,7 +46,7 @@ export async function invokePlatformTaskTool(repository:MistRepository,actor:Age
 /** Opt-in platform tasks only; no legacy/external task is automatically taken over. */
 export class MistPlatformTaskWorker{
   private enabled=false;private timer?:ReturnType<typeof setInterval>;private initial?:ReturnType<typeof setTimeout>;private scanning=false;private scanDone:Promise<void>=Promise.resolve();
-  private runs=new Map<string,{abort:AbortController;done:Promise<void>}>();private readonly complete:(input:LlmCompletionInput)=>Promise<string>;private readonly id='platform-'+randomUUID();
+  private runs=new Map<string,{abort:AbortController;done:Promise<void>}>();private readonly owners=new Map<string,string>();private readonly complete:(input:LlmCompletionInput)=>Promise<string>;private readonly id='platform-'+randomUUID();
   private conditionCursor?:{createdAt:string;id:string};
   constructor(private readonly repository:MistRepository,private readonly options:PlatformTaskWorkerOptions){this.complete=options.complete??createLlmCompleter({platformProfile:'agent-task'});}
   get running(){return this.enabled;}
@@ -73,13 +73,23 @@ export class MistPlatformTaskWorker{
       // neither a model call nor a run slot, and cannot bury newer queued work.
       for(let scan=0;scan<50&&startsLeft>0&&this.enabled;scan++){
         const room=Math.min(startsLeft,capacity-this.runs.size);if(room<=0)break;
-        const jobs=await this.repository.duePlatformTasks(Date.now(),room);let progressed=false;
+        // 公平：多取一些候选；每次启动都选当前在跑任务最少的人，同样少时按原排队顺序，不让一个人的排队任务挡住其他人。
+        const jobs=await this.repository.duePlatformTasks(Date.now(),Math.min(room*4,20));let progressed=false;
+        const load=new Map<string,number>();for(const owner of this.owners.values())load.set(owner,(load.get(owner)??0)+1);
+        const runnable:PlatformTaskJob[]=[];
         for(const job of jobs){
           if(!this.enabled)break;const key=job.workspaceId+':'+job.taskId;if(this.runs.has(key)||seen.has(key))continue;seen.add(key);
           if(job.exhausted){await this.repository.deferPlatformTaskJob(job);progressed=true;continue;}
           if(job.waitingCondition){await this.repository.checkPlatformTaskCondition(job).catch(()=>this.repository.deferPlatformTaskJob(job));progressed=true;continue;}
-          const abort=new AbortController(),run={abort,done:Promise.resolve()};this.runs.set(key,run);startsLeft--;progressed=true;run.done=this.perform(job,abort).finally(()=>this.runs.delete(key));
+          runnable.push(job);
         }
+        while(runnable.length&&startsLeft>0&&this.runs.size<capacity&&this.enabled){
+          let pick=0;for(let i=1;i<runnable.length;i++)if((load.get(runnable[i].ownerId)??0)<(load.get(runnable[pick].ownerId)??0))pick=i;
+          const job=runnable.splice(pick,1)[0],key=job.workspaceId+':'+job.taskId;
+          const abort=new AbortController(),run={abort,done:Promise.resolve()};this.runs.set(key,run);this.owners.set(key,job.ownerId);load.set(job.ownerId,(load.get(job.ownerId)??0)+1);startsLeft--;progressed=true;run.done=this.perform(job,abort).finally(()=>{this.runs.delete(key);this.owners.delete(key);});
+        }
+        // 本轮没轮到的候选留给下一次扫描。
+        for(const job of runnable)seen.delete(job.workspaceId+':'+job.taskId);
         if(!jobs.length||!progressed)break;
       }
     }catch{this.options.onError?.('PLATFORM_TASK_SCAN_FAILED');}finally{this.scanning=false;end();}

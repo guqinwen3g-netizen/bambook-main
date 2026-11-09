@@ -15,7 +15,10 @@ export const AUTOMATION_FIELD = '__agentAutomation';
 export const AUTOMATION_TRIGGERS = ['new_mail', 'new_receipt', 'due_soon', 'daily'] as const;
 export type AutomationTrigger = typeof AUTOMATION_TRIGGERS[number];
 export const AUTOMATION_RULE_LIMIT = 20, AUTOMATION_DAY_LIMIT = 24, DUE_SOON_DAYS = 3;
-const SEEN_LIMIT = 500, RUN_LOG = 20, FACT_LIMIT = 20;
+const SEEN_LIMIT = 3000, RUN_LOG = 20, FACT_LIMIT = 20;
+/** 新邮件 / 新到账按时间窗判断：比已见最新时间早出窗口的旧记录永远不算新；窗口内仍按编号去重，迟到的邮件不会漏。 */
+const FRESH_WINDOW_MS: Record<'new_mail' | 'new_receipt', number> = { new_mail: 7 * 86400_000, new_receipt: 45 * 86400_000 };
+export const AUTOMATION_FAILURE_LIMIT = 5, AUTOMATION_FAILURE_SPAN_MS = 30 * 60_000;
 const ENDED_ORDER_STATES = ['已出运', '履约完成', '已完成', '已取消', '已作废', '待收尾款', '内部交付完成', '已交接'];
 export type AutomationAuthority = { ownerId: string; companyId?: string; issuedAt: number; credentialVersion?: string };
 export type AutomationRun = { at: string; taskId: string; detail: string };
@@ -24,6 +27,8 @@ export type AutomationRecord = {
   name: string; trigger: AutomationTrigger; time: string; instructions: string; enabled: boolean;
   createdAt: string; updatedAt: string; authority?: AutomationAuthority;
   seen: string[]; primed: boolean; lastDay?: string; day?: { date: string; count: number }; runs: AutomationRun[];
+  /** 已见记录的最新时间（毫秒）；旧规则没有时重新记起点。 */ since?: number;
+  /** 连续无法运行的次数；成功一次清零，达到上限停用并写明原因。 */ failures?: { count: number; since: number };
   halted?: { code: string; message: string }; removed?: boolean;
 };
 export type AutomationView = Pick<AutomationRecord, 'id' | 'name' | 'trigger' | 'time' | 'instructions' | 'enabled' | 'version' | 'createdAt' | 'updatedAt' | 'runs' | 'halted'>;
@@ -67,7 +72,7 @@ export async function saveAutomation(db: any, actor: TokenPayload, workspaceId: 
     const { row, value: c } = await ownAutomation(db, actor, workspaceId, id);
     // 改了触发条件就重新记起点，已有邮件和到账不算新事件。
     const reset = c.trigger !== fields.trigger;
-    const next: AutomationRecord = { ...c, ...fields, version: c.version + 1, updatedAt: at, authority: fields.enabled ? authority : undefined, halted: undefined, ...(reset ? { seen: [], primed: false, lastDay: undefined } : {}) };
+    const next: AutomationRecord = { ...c, ...fields, version: c.version + 1, updatedAt: at, authority: fields.enabled ? authority : undefined, halted: undefined, failures: undefined, ...(reset ? { seen: [], primed: false, lastDay: undefined, since: undefined } : {}) };
     await writeAutomation(db, row, c, next); return next;
   }
   if ((await listAutomations(db, workspaceId, actor.userId)).length >= AUTOMATION_RULE_LIMIT) fail('PRECONDITION', `每人最多 ${AUTOMATION_RULE_LIMIT} 条规则`, 422);
@@ -87,20 +92,28 @@ export async function dueAutomations(db: any, take: number): Promise<AutomationJ
 
 const clock = (now: number) => new Date(now + 8 * 3600_000).toISOString().slice(11, 16);
 const addDays = (day: string, days: number) => new Date(Date.parse(day + 'T00:00:00Z') + days * 86400_000).toISOString().slice(0, 10);
-export type AutomationDecision = { next: Pick<AutomationRecord, 'seen' | 'primed' | 'lastDay'>; fire?: { detail: string; facts: string } };
+export type AutomationDecision = { next: Pick<AutomationRecord, 'seen' | 'primed' | 'lastDay' | 'since'>; fire?: { detail: string; facts: string } };
 /** 只判断要不要触发。state 是规则所有者的权限投影，看不到的邮件和到账不会触发。 */
 export function evaluateAutomation(c: AutomationRecord, state: MistState, now: number): AutomationDecision {
-  const base = { seen: c.seen, primed: c.primed, lastDay: c.lastDay }, day = mistBusinessDate(new Date(now));
+  const base = { seen: c.seen, primed: c.primed, lastDay: c.lastDay, since: c.since }, day = mistBusinessDate(new Date(now));
   if (c.trigger === 'new_mail' || c.trigger === 'new_receipt') {
-    const rows: Array<{ id: string; line: string }> = c.trigger === 'new_mail'
-      ? ((state as any).email?.messages ?? []).filter((m: any) => m.folder === 'inbox').map((m: any) => ({ id: m.id, line: `email ${m.id}：${String(m.subject ?? '').slice(0, 80)}` }))
-      : ((state as any).receipts ?? []).map((r: any) => ({ id: r.id, line: `receipt_record ${r.id}：${r.payer ?? ''} ${r.amount ?? ''} ${r.currency ?? ''}` }));
-    const known = new Set(c.seen), fresh = rows.filter(r => !known.has(r.id)), seen = [...c.seen, ...fresh.map(r => r.id)].slice(-SEEN_LIMIT);
-    // 第一次只记起点：开启规则时已有的邮件和到账不算新事件。
-    if (!c.primed) return { next: { ...base, seen, primed: true } };
-    if (!fresh.length) return { next: base };
+    const time = (v: unknown) => { const t = typeof v === 'string' ? Date.parse(v) : NaN; return Number.isFinite(t) ? t : 0; };
+    const rows: Array<{ id: string; line: string; at: number }> = c.trigger === 'new_mail'
+      ? ((state as any).email?.messages ?? []).filter((m: any) => m.folder === 'inbox').map((m: any) => ({ id: m.id, at: time(m.at), line: `email ${m.id}：${String(m.subject ?? '').slice(0, 80)}` }))
+      : ((state as any).receipts ?? []).map((r: any) => ({ id: r.id, at: time(r.date), line: `receipt_record ${r.id}：${r.payer ?? ''} ${r.amount ?? ''} ${r.currency ?? ''}` }));
+    const window = FRESH_WINDOW_MS[c.trigger], newest = rows.reduce((m, r) => Math.max(m, r.at), 0);
+    const inWindow = (since: number) => rows.filter(r => r.at >= since - window);
+    // 第一次（或旧规则没有时间起点）只记起点：开启规则时已有的邮件和到账不算新事件。
+    if (!c.primed || c.since === undefined) {
+      const since = Math.max(c.since ?? 0, newest);
+      return { next: { ...base, seen: inWindow(since).map(r => r.id).slice(-SEEN_LIMIT), primed: true, since } };
+    }
+    const known = new Set(c.seen), fresh = inWindow(c.since).filter(r => !known.has(r.id));
+    const since = Math.max(c.since, ...fresh.map(r => r.at)), keep = new Set(inWindow(since).map(r => r.id));
+    const seen = [...c.seen.filter(id => keep.has(id)), ...fresh.map(r => r.id)].slice(-SEEN_LIMIT);
+    if (!fresh.length) return { next: seen.length === c.seen.length ? base : { ...base, seen } };
     const label = c.trigger === 'new_mail' ? '封新邮件' : '笔新到账';
-    return { next: { ...base, seen }, fire: { detail: `${fresh.length} ${label}`, facts: fresh.slice(0, FACT_LIMIT).map(r => r.line).join('\n') } };
+    return { next: { ...base, seen, since }, fire: { detail: `${fresh.length} ${label}`, facts: fresh.slice(0, FACT_LIMIT).map(r => r.line).join('\n') } };
   }
   if (c.lastDay === day || clock(now) < c.time) return { next: base };
   const next = { ...base, primed: true, lastDay: day };
@@ -112,6 +125,6 @@ export function evaluateAutomation(c: AutomationRecord, state: MistState, now: n
 export const automationInstructions = (c: AutomationRecord, facts: string) => `【自动规则：${c.name}】\n${c.instructions}\n\n【本次触发】\n${facts}`.slice(0, 4000);
 export function recordAutomationRun(c: AutomationRecord, decision: AutomationDecision, taskId: string | undefined, detail: string, now: number): AutomationRecord {
   const at = new Date(now).toISOString(), date = mistBusinessDate(new Date(now)), count = c.day?.date === date ? c.day.count : 0;
-  return { ...c, ...decision.next, version: c.version + 1, ...(taskId ? { day: { date, count: count + 1 }, runs: [{ at, taskId, detail }, ...c.runs].slice(0, RUN_LOG) } : {}) };
+  return { ...c, ...decision.next, version: c.version + 1, failures: undefined, ...(taskId ? { day: { date, count: count + 1 }, runs: [{ at, taskId, detail }, ...c.runs].slice(0, RUN_LOG) } : {}) };
 }
 export const automationOverLimit = (c: AutomationRecord, now: number) => c.day?.date === mistBusinessDate(new Date(now)) && c.day.count >= AUTOMATION_DAY_LIMIT;

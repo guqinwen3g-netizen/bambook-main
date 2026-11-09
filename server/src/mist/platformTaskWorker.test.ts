@@ -49,6 +49,15 @@ it('does not spin or invoke the model when a concurrent metadata change leaves t
  const complete=vi.fn(async()=>''),job={workspaceId:randomUUID(),taskId:randomUUID(),ownerId:'owner',version:1,exhausted:true},due=vi.fn(async()=>[job]),defer=vi.fn(async()=>{});
  const {MistPlatformTaskWorker}=await import('./platformTaskWorker');const worker=new MistPlatformTaskWorker({duePlatformTasks:due,duePlatformTaskConditions:async()=>[],deferPlatformTaskJob:defer}as unknown as MistRepository,{complete,makeCredential:()=>'',tickMs:3_600_000});workers.push(worker);worker.start(3_600_000);await worker.tick();await worker.settled();expect(due.mock.calls.length).toBeLessThanOrEqual(2);expect(defer).toHaveBeenCalledTimes(1);expect(complete).not.toHaveBeenCalled();
 });
+it('starts other owners before a second task from someone who already has work running',async()=>{
+ const job=(owner:string,n:number)=>({workspaceId:'w',taskId:owner+n,ownerId:owner,version:1});
+ const queue=[job('a',1),job('a',2),job('a',3),job('b',1),job('c',1)],due=vi.fn(async(_now:number,take:number)=>queue.slice(0,take));
+ const {MistPlatformTaskWorker}=await import('./platformTaskWorker');const worker=new MistPlatformTaskWorker({duePlatformTasks:due,duePlatformTaskConditions:async()=>[],deferPlatformTaskJob:async()=>{}}as unknown as MistRepository,{complete:async()=>'',makeCredential:()=>'',tickMs:3_600_000,concurrency:2});workers.push(worker);
+ const started:string[]=[],release:Array<()=>void>=[];vi.spyOn(worker as any,'perform').mockImplementation((j:any)=>{started.push(j.taskId);return new Promise<void>(r=>release.push(r));});
+ worker.start(3_600_000);await worker.tick();expect(started).toEqual(['a1','b1']);
+ release.splice(1,1)[0]();await new Promise(r=>setTimeout(r,0));queue.splice(0,1);queue.splice(2,1);await worker.tick();expect(started).toEqual(['a1','b1','c1']);
+ release.forEach(r=>r());
+});
 it('releases timed waits for other work, wakes on the same budget and requires fresh business facts before completion',async()=>{
  let count=0,mail='';const replies=()=>[tool('bambook_get',{type:'email',id:mail}),tool('bambook_task',{action:'wait',delaySeconds:60,summary:'到约定时间重新核对。'}),tool('bambook_get',{type:'email',id:mail}),tool('bambook_task',{action:'finish',outcome:'succeeded',result:'其他任务已核对。'}),tool('bambook_task',{action:'status'}),tool('bambook_task',{action:'finish',outcome:'succeeded',result:'旧上下文不能直接结束。'}),tool('bambook_get',{type:'email',id:mail}),tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已按当前原件核对。'})];const complete=vi.fn(async()=>replies()[count++]);
  const f=await fixture(complete,{concurrency:1});mail=f.workspace.state.email.messages[0].id;const clock=Date.now(),now=vi.spyOn(Date,'now').mockReturnValue(clock);f.worker.start(3_600_000);const first=await f.create('platform');await f.drain();const waiting=await f.current(first.id);expect(waiting.state).toBe('waiting_time');expect(complete).toHaveBeenCalledTimes(2);const before=(await f.human.get(f.base).expect(200)).body.workspace;

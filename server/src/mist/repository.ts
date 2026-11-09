@@ -43,7 +43,7 @@ import { AGENT_AUDIT_FIELD, AGENT_AUDIT_HASH, AGENT_AUDIT_PREFIX, agentAuditRece
 import { auditFromReceipt, auditMatchesParent, auditEntry, projectAgentAudit, readableCommand } from './agentAuditRead';
 import { markAgentProposalConfirmed, agentCommandRisk, AI_WRITE_SCOPES, AGENT_RISK_LABEL } from '../shared/mistAgentProposals';
 import { listConversationMeta, saveConversationMeta } from './agentConversations';
-import { automationInstructions, automationOverLimit, automationRecord, automationView, dueAutomations, evaluateAutomation, listAutomations, recordAutomationRun, removeAutomation, saveAutomation, writeAutomation, type AutomationDecision, type AutomationRecord } from './agentAutomations';
+import { AUTOMATION_FAILURE_LIMIT, AUTOMATION_FAILURE_SPAN_MS, automationInstructions, automationOverLimit, automationRecord, automationView, dueAutomations, evaluateAutomation, listAutomations, recordAutomationRun, removeAutomation, saveAutomation, writeAutomation, type AutomationDecision, type AutomationRecord } from './agentAutomations';
 import { canGenerateScopedStatement, scopedMaterialIssueTargets, scopedFabricAccess, scopedReferenceViolation, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
 import { buildTeamScopeGraph, resolveTeamScope, normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
 import { accountOwnedObjects, buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
@@ -552,19 +552,21 @@ export class MistRepository {
   async runAutomation(prior:TokenPayload,workspaceId:string,id:string,make:MakeServiceCredential,now=Date.now()){
     let decision:AutomationDecision,rule:AutomationRecord;
     try{
-      const read=await this.transact(async db=>{const{row,actor}=await this.own(db,prior,workspaceId,'ai:chat');const{value}=await automationRecord(db,workspaceId,id);if(value.ownerId!==actor.userId)fail('NOT_FOUND','规则不存在',404);const last=value.runs[0]?.taskId;let busy=false;if(last){const task=await taskRecord(db,workspaceId,last).catch(()=>null);busy=!!task&&['queued','running','waiting_time','waiting_condition'].includes(task.value.state);}return{rule:value,busy,decision:evaluateAutomation(value,this.view(row,actor).state,now)};});
+      const read=await this.transact(async db=>{const{row,actor}=await this.own(db,prior,workspaceId,'ai:chat');const{value}=await automationRecord(db,workspaceId,id);if(value.ownerId!==actor.userId)fail('NOT_FOUND','规则不存在',404);const last=value.runs[0]?.taskId;let busy=false;if(last){const task=await taskRecord(db,workspaceId,last).catch(()=>null);busy=!!task&&task.value.expiresAt>now&&['queued','running','waiting_time','waiting_condition','waiting_human'].includes(task.value.state);}return{rule:value,busy,decision:evaluateAutomation(value,this.view(row,actor).state,now)};});
       rule=read.rule;decision=read.decision;
       if(read.busy||!rule.enabled||automationOverLimit(rule,now)&&decision.fire)return{fired:false};
-    }catch(error:any){if([401,403].includes(error?.status)){await this.haltAutomation(workspaceId,id,'权限已变化，请重新启用规则',now);return{fired:false};}throw error;}
+    }catch(error:any){if([401,403].includes(error?.status)){await this.haltAutomation(workspaceId,id,'权限已变化，请重新启用规则',now);return{fired:false};}await this.automationFailed(workspaceId,id,error,now).catch(()=>undefined);throw error;}
     let taskId:string|undefined;
     if(decision.fire){
       try{const task=await this.assignPersonalAgentTask(prior,workspaceId,{requestId:'auto-'+rule.id+'-'+rule.version,name:(rule.name+' · '+decision.fire.detail).slice(0,60),instructions:automationInstructions(rule,decision.fire.facts),locale:'zh-CN'},make,rule.id);taskId=task.id;}
-      catch(error:any){if(error?.code==='AGENT_TASK_LIMIT'||error?.status===503)return{fired:false};if([401,403,422].includes(error?.status)){await this.haltAutomation(workspaceId,id,error?.message||'规则无法运行，请重新启用',now);return{fired:false};}throw error;}
+      catch(error:any){if(error?.code==='AGENT_TASK_LIMIT'||error?.status===503)return{fired:false};if([401,403,422].includes(error?.status)){await this.haltAutomation(workspaceId,id,error?.message||'规则无法运行，请重新启用',now);return{fired:false};}await this.automationFailed(workspaceId,id,error,now).catch(()=>undefined);throw error;}
     }
-    const changed=taskId||JSON.stringify(decision.next)!==JSON.stringify({seen:rule.seen,primed:rule.primed,lastDay:rule.lastDay});
+    const changed=taskId||rule.failures||JSON.stringify(decision.next)!==JSON.stringify({seen:rule.seen,primed:rule.primed,lastDay:rule.lastDay,since:rule.since});
     if(changed)await this.connectionTransaction(async db=>{const{row,value}=await automationRecord(db,workspaceId,id);await writeAutomation(db,row,value,recordAutomationRun(value,decision,taskId,decision.fire?.detail??'',now));});
     return{fired:!!taskId,taskId};
   }
+  /** 意外失败计次：连续达到上限后停用并写明原因，不再每 30 秒静默重试。 */
+  private async automationFailed(workspaceId:string,id:string,error:any,now:number){await this.connectionTransaction(async db=>{const{row,value}=await automationRecord(db,workspaceId,id);if(!value.enabled)return;const failures={count:(value.failures?.count??0)+1,since:value.failures?.since??now},stop=failures.count>=AUTOMATION_FAILURE_LIMIT&&now-failures.since>=AUTOMATION_FAILURE_SPAN_MS;const reason=typeof error?.message==='string'&&error.message.length<=120&&/[\u4e00-\u9fff]/.test(error.message)?error.message:'系统暂时无法创建任务';await writeAutomation(db,row,value,stop?{...value,version:value.version+1,enabled:false,authority:undefined,failures:undefined,updatedAt:new Date(now).toISOString(),halted:{code:'AUTOMATION_FAILED',message:`持续无法运行（${failures.count} 次）：${reason}`}}:{...value,version:value.version+1,failures});});}
   private async haltAutomation(workspaceId:string,id:string,message:string,now:number){await this.connectionTransaction(async db=>{const{row,value}=await automationRecord(db,workspaceId,id);await writeAutomation(db,row,value,{...value,version:value.version+1,enabled:false,authority:undefined,updatedAt:new Date(now).toISOString(),halted:{code:'AUTOMATION_HALTED',message}});});}
   async createAgentTask(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>,automationId?:string){
     if(isAgentActor(prior))fail('FORBIDDEN','任务须由本人安排',403);
