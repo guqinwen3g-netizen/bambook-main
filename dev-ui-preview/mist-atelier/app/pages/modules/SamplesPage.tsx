@@ -135,6 +135,7 @@ export function SamplesPage() {
   const sampleSources = hasShipmentContext ? [emptyOption, ...shipmentProductions.map(branch => ({ value: 'production:' + branch.id, label: `${branch.order} · ${branch.code} · ${branch.factory}` }))]
     : hasProductionContext ? (contextProduction ? [{ value: 'production:' + contextProduction.id, label: `${contextProduction.order} · ${contextProduction.code} · ${contextProduction.factory}` }] : [emptyOption])
     : [{ value: 'manual', label: '手工 / 无系统来源' }, ...sourceOptions(state, true).filter(option => option.value && !option.value.startsWith('line:'))];
+  const contextRole = hasShipmentContext ? 'shipping' : route.productionId ? (state?.orders.find(order => order.id === state.productions.find(branch => branch.id === route.productionId)?.orderId)?.type === 'fabric' ? 'pioneer' : 'pp') : '';
   const productionSources = sampleSources.filter(option => option.value.startsWith('production:')).map(option => option.value);
   const roleOptions = hasShipmentContext ? [{ value: 'shipping', label: '船样' }] : [emptyOption, ...(!contextShelf || contextShelf==='garment' ? [{ value: 'pp', label: '成衣产前样' }] : []), ...(!contextShelf || contextShelf==='fabric' ? [{ value: 'pioneer', label: '面料先锋样' }] : []), { value: 'shipping', label: '船样' }];
   const shipmentOptions = hasShipmentContext ? (sourceShipment ? [{ value: sourceShipment.id, label: sourceShipment.code }] : [emptyOption]) : [emptyOption, ...(state?.fulfillment.shipments || []).filter(shipment => shipment.state !== 'cancelled').map(shipment => ({ value: shipment.id, label: shipment.code }))];
@@ -152,10 +153,11 @@ export function SamplesPage() {
       { ...field('role', '样品用途', 'select', true, roleOptions), readonly: hasShipmentContext, when:{key:'source',values:productionSources} },
       { ...field('shipmentId', '出运批次', 'select', true, shipmentOptions), readonly: hasShipmentContext, when:[{key:'source',values:productionSources},{key:'role',values:['shipping']}] },
       choiceField('form', '形态', SAMPLE_FORMS), ...(shippingGarment?[field('sizeQuantities','尺码与件数','textarea')]:[field('quantity', '数量 / 长度', 'number'), { ...field('sizeQuantities', '多件按尺码（每行 M:2）', 'textarea', false), when: { key: 'category', values: ['成衣'] } }]), {...field('unit', '单位', 'select', true, choices(['米', '码', '公斤', '份', '张', '个', '色位', '卡', '件', '套'])),readonly:shippingGarment},
-      ...(!shippingGarment?[field('size', '尺码', 'text', false)]:[]), field('color', '颜色', 'text', false), field('location', '存放位置', 'text', false), field('note', '备注', 'textarea', false)],
+      ...(!shippingGarment?[{ ...field('size', '尺码', 'text', false), requiredIf: v => productionSources.includes(String(v.source || '')) && v.category === '成衣' && v.role === 'pp' }]:[]), field('color', '颜色', 'text', false), field('location', '存放位置', 'text', false), field('note', '备注', 'textarea', false)],
     initialValues: { category: defaultCategory, categoryCustom: '', name: contextLine?.name || '', source: hasShipmentContext ? (sourceProduction ? 'production:' + sourceProduction.id : '') : contextProduction ? 'production:' + contextProduction.id : 'manual', sourceText: '',
-      role: hasShipmentContext ? 'shipping' : route.productionId ? (state?.orders.find(order => order.id === state.productions.find(branch => branch.id === route.productionId)?.orderId)?.type === 'fabric' ? 'pioneer' : 'pp') : '',
-      shipmentId: sourceShipment?.id || '', form: hasShipmentContext ? '船样' : '', quantity: 1,sizeQuantities:'',unit: defaultCategory === '面料' ? '' : '件', size: '', color: '', location: '', note: '' },
+      role: contextRole,
+      shipmentId: sourceShipment?.id || '', form: hasShipmentContext ? '船样' : contextRole === 'pp' ? '产前样' : '', quantity: 1,sizeQuantities:'',unit: defaultCategory === '面料' ? '' : '件', size: '', color: '', location: '', note: '' },
+    derive: (key, value) => key === 'role' && (value === 'pp' || value === 'shipping') ? { form: value === 'pp' ? '产前样' : '船样' } : {},
     submitLabel: '登记样品',
     submit: async values => {
       if (!state) return; if (invalidShipment || invalidProduction || hasProductionContext && contextProduction?.closed) throw new Error('生产来源已不可用');
