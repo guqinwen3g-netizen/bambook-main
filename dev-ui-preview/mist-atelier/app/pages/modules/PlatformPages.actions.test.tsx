@@ -161,6 +161,16 @@ describe('platform form and return-path actions',()=>{
   // 最近业务记录按北京时间显示，不直接显示 UTC 原文。
   expect(host.textContent).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z/);
  });
+ it('data center lists a broken link and enables the issue export',async()=>{
+  const line={...bridge.current.state.orderLines[0],id:'orphan-line',orderId:'missing-order',style:'ORPHAN-01'};
+  bridge.current.state.orderLines=[...bridge.current.state.orderLines,line];
+  await mount(DataCenterPage,'data-center');
+  const row=[...host.querySelectorAll('[role="row"]')].find(r=>r.textContent?.includes('ORPHAN-01'));
+  expect(row?.textContent).toContain('订单条目');expect(row?.textContent).toContain('关联订单不可见或不存在');
+  expect(host.textContent).not.toContain('已检查关联没有发现问题');
+  const exportButton=[...host.querySelectorAll('button')].find(b=>b.textContent?.includes('导出问题清单')) as HTMLButtonElement|undefined;
+  expect(exportButton?.disabled).toBe(false);
+ });
  it('reloads data center through the real workspace refresh action',async()=>{await mount(DataCenterPage,'data-center');await click('刷新数据');expect(bridge.current.refresh).toHaveBeenCalledTimes(1);});
  it('reports a failed original-request recovery without discarding the pending operation',async()=>{bridge.current.pending={requestId:'original-operation'};bridge.current.recover.mockRejectedValueOnce(new Error('原请求仍待核对'));await mount(PricingPage,'pricing');await click('核对原请求');expect(document.body.textContent).toContain('原请求仍待核对');expect(bridge.current.pending.requestId).toBe('original-operation');expect(bridge.current.run).not.toHaveBeenCalled();});
  it('exports the selected report date cohort without mixing it with excluded orders',async()=>{await mount(ReportsPage,'reports');await click('导出 CSV');expect(bridge.export.mock.calls.at(-1)![2]).toHaveLength(1);await field('起日','2099-01-01');await click('导出 CSV');expect(bridge.export.mock.calls.at(-1)![2]).toEqual([]);expect(bridge.current.run).not.toHaveBeenCalled();});
