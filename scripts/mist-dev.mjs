@@ -4,6 +4,7 @@ import https from 'node:https';
 import {fileURLToPath} from 'node:url';
 import {createMistDevRunner} from '../server/scripts/mist-dev.mjs';
 import {MIST_SHARED_DEVELOPMENT_ORIGIN,mistDevelopmentProxy} from './mist-dev-target.mjs';
+import { isCliEntry } from './lib/acceptance-selfcheck.mjs';
 export {MIST_SHARED_DEVELOPMENT_ORIGIN,mistDevelopmentProxy};
 
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -68,7 +69,7 @@ export async function startMistDevelopment({probe=probeLocalApi,createRunner=cre
   }catch(error){await close();throw error;}
 }
 
-if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
+if (isCliEntry(import.meta.url)) {
   let running,stopping=false;
   const stop=()=>{stopping=true;void running?.close().finally(()=>process.exit(0));};
   process.once('SIGINT',stop);process.once('SIGTERM',stop);

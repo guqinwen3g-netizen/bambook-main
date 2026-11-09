@@ -145,19 +145,24 @@ describe('B120 派生与 schema 源文本对撞（抓"生成物过期"这种静�
     // `ApprovalRequest` 有 requesterId + reviewerId 两根**各自单列**的 FK ⇒ 按"每根关系单列"算合法；
     // 这里禁的是"一根关系两列"，那条形状由上面的合成打靶钉住。
     expect(multi.sort(), '这些模型有多根指向 UserAccount 的 FK ⇒ markerOwnedElsewhereWhere 必须按行取并集，不许按列相加')
-      .toEqual(['ApprovalRequest'].sort());
+      .toEqual(['ApprovalRequest', 'FabricSearchTask'].sort()); // FabricSearchTask：requesterId / assigneeId / responsibleHeadId 各自单列
   });
 
   it('★ V1 六个新增事实关系逐条登记；DMMF 与独立源文本仍必须对撞', () => {
     const blocking = fromDmmf.filter((r: any) => r.blocking).map((r: any) => `${r.model}.${r.fk}`).sort();
-    expect(fromDmmf.length, '历史13 + 已审定V1事实关系6；未登记的任何关系变化仍拒绝').toBe(19);
-    expect(blocking.length, '历史7 + 六个 mandatory actor fact FK；不是放宽删除/跳过预算').toBe(13);
+    expect(fromDmmf.length, '历史13 + V1 事实关系6 + 2026-10/11 业务事实与样品/面料/客户证据关系16；未登记的任何关系变化仍拒绝').toBe(35);
+    expect(blocking.length, '历史7 + 六个 V1 mandatory actor fact FK + 十一个 2026-10/11 mandatory actor fact FK；不是放宽删除/跳过预算').toBe(24);
     expect(blocking, 'blocking 集合').toEqual([
       'AgentMessage.userId', 'AgentSession.userId', 'ApprovalRequest.requesterId', 'AuditLog.actorId',
+      'BusinessConfirmation.recordedBy',
       'CreditNoteRefund.requesterId', 'CreditNoteRefundEvent.actorId', 'CreditNoteRefundEvidence.uploadedBy',
       'CreditNoteRefundReturn.actorId',
-      'EmployeeProfile.userId', 'Notification.userId', 'NotificationPreference.userId',
+      'CustomerEvidence.createdBy', 'CustomerEvidenceFile.createdBy', 'EmailSendAttempt.actorId',
+      'EmployeeProfile.userId', 'FabricSearchTask.requesterId',
+      'FabricUseAuthorizationRequest.recordedBy', 'FabricUseAuthorizationUse.recordedBy', 'FabricUseAuthorizationVersion.recordedBy',
+      'Notification.userId', 'NotificationPreference.userId',
       'OrderCostReview.confirmedBy', 'OrderCostReviewEvidence.createdBy',
+      'OrderSampleCommandCancellation.actorId', 'OrderSampleEvent.actorId', 'OrderSampleSource.createdBy',
     ]);
   });
 });
@@ -206,7 +211,6 @@ describe('B120 的"别人名下"那一刀：一份列知识 + 四段口径', () 
     'scripts/acceptance-invoice-amount-recalc.mjs': 10,
     'scripts/acceptance-pending-cancel-path.mjs': 10,
     'scripts/acceptance-third-party-payment.mjs': 10,
-    'scripts/acceptance-zero-amount-invoice-credit-gate.ts': 8,
     'scripts/acceptance-cancel-settle-recalc.mjs': 7,
     'scripts/acceptance-cif-fob-strip.mjs': 7,
     'scripts/acceptance-claims-ui.mjs': 5,

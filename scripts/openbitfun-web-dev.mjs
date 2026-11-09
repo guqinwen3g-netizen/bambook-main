@@ -4,6 +4,7 @@ import path from 'node:path';
 import { ensureBambookOverlayIntegration } from './openbitfun-overlay-integration.mjs';
 import { ensureBambookInitialThemeIntegration } from './openbitfun-initial-theme-integration.mjs';
 import { OPENBITFUN_REVISION, runtimeHealth } from './openbitfun-runtime.mjs';
+import { isCliEntry } from './lib/acceptance-selfcheck.mjs';
 
 const parents = ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:4173', 'http://127.0.0.1:4173'];
 
@@ -62,7 +63,7 @@ export async function createWebDevHost({ webRoot, port = 1422, hmrPort = 1421, c
   return server;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+if (isCliEntry(import.meta.url)) {
   const webRoot = path.resolve(process.argv[2]);
   const port = Number(process.env.OPENBITFUN_DEV_PORT || 1422);
   const hmrPort = Number(process.env.OPENBITFUN_DEV_HMR_PORT || 1421);

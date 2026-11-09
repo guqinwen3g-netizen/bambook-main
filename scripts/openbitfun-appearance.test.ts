@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { installBambookAppearance } from '../tmp/upstream/OpenBitFun/src/web-ui/src/bambookAppearance';
+import { existsSync, readFileSync } from 'node:fs';
+
+// 需先 `npm run openbitfun:prepare` 取得并打补丁的上游源码；未准备时整份跳过（不是通过）。
+const UPSTREAM = 'tmp/upstream/OpenBitFun/src/web-ui/src/bambookAppearance.ts';
+const prepared = existsSync(UPSTREAM);
+const { installBambookAppearance } = prepared ? await import('../' + UPSTREAM.replace(/\.ts$/, '')) : { installBambookAppearance: undefined as any };
 
 let cleanup: (() => void) | undefined;
 afterEach(() => { cleanup?.(); document.body.replaceChildren(); vi.restoreAllMocks(); });
@@ -13,7 +17,7 @@ function fixture() {
     target.dispatchEvent(new MessageEvent('message', { data, origin, source })) };
 }
 const theme = (value: string) => ({ type: 'bambook:appearance', version: 1, theme: value });
-describe('Bambook appearance-only boundary', () => {
+describe.skipIf(!prepared)('Bambook appearance-only boundary', () => {
   it('applies the initial URL theme synchronously and keeps all upstream flags stable before a host message', async () => {
     const events = new EventTarget();
     const doc = document.implementation.createHTMLDocument('theme fixture');

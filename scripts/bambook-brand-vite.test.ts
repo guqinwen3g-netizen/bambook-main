@@ -14,13 +14,16 @@ describe('explicit Bambook brand host adapter',()=>{
     expect(p.resolveId('./brand/OpenBitFunMark','/unrelated/brand.ts')).toBeUndefined();
     expect(p.resolveId('react',path.join(designSystemSource,'brand.ts'))).toBeUndefined();
   });
-  it('emits every static asset for a build, with the 12 final kit exports unchanged',()=>{
+  it('emits every static asset for a build, with the 12 committed brand exports unchanged',()=>{
     const p=plugin(), emitted:any[]=[];
     p.configResolved({command:'build'});
     p.buildStart.call({emitFile:(asset:any)=>emitted.push(asset)});
     expect(emitted).toHaveLength(18);
+    // 品牌源文件以已入库的 public/brand 为准（设计交接包 brand/final 只在本机，不入库）。
     for(const name of brandAssetNames.slice(0,12)){
-      expect(readFileSync(path.join(root,'public/brand',name))).toEqual(readFileSync(path.join(root,'dev-ui-preview/brand/final',name)));
+      const asset=emitted.find(a=>a.fileName==='brand/'+name);
+      expect(asset,name).toBeTruthy();
+      expect(Buffer.from(asset.source)).toEqual(readFileSync(path.join(root,'public/brand',name)));
     }
     expect(emitted.every(asset=>asset.fileName.startsWith('brand/')&&(asset.fileName.endsWith('.png') ? asset.source.subarray(1,4).toString()==='PNG' : asset.source.toString().includes('<svg')))).toBe(true);
   });

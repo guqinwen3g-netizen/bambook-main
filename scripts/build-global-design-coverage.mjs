@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { isCliEntry } from './lib/acceptance-selfcheck.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const ledgerPath = 'docs/design/global/2026-10-06/08-2026-10-06-对话设计决策总账.md';
@@ -81,7 +82,7 @@ export function renderCoverage(matrix) {
   }).join('\n') + '\n';
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isCliEntry(import.meta.url)) {
   const source = fs.readFileSync(path.join(root, ledgerPath), 'utf8');
   const destination = path.join(root, outputDir, 'decision-coverage.json');
   const previous = fs.existsSync(destination) ? JSON.parse(fs.readFileSync(destination, 'utf8')) : {};

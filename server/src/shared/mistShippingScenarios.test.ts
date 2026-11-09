@@ -198,6 +198,17 @@ describe('后勤场景：分批、合票、取消、单据重开和退关', () =
     expect(f.state.fulfillment.customs[0].channel).toBe('general');
   });
 
+  it('rejects packing rows without a positive net and gross weight', () => {
+    const f = scenario(), id = f.shipment([{ ...f.line(), quantity: 4 }]);
+    const s = f.state.fulfillment.shipments.find(x => x.id === id)!;
+    const pack = (netWeight: number, grossWeight: number) => f.run({ type: 'fulfillment.shipments.pack', payload: { id, lines: s.lines.map((l, i) => ({ lineId: l.lineId, productionId: l.productionId, carton: String(i + 1), quantity: l.quantity, netWeight, grossWeight, volume: 0, note: '' })) } }, 'logistics');
+    expect(() => pack(0, 0)).toThrow('净重须为正数');
+    expect(() => pack(1, 0)).toThrow('毛重须为正数');
+    expect(f.state.fulfillment.packing.filter(p => p.shipmentId === id)).toEqual([]);
+    pack(1, 1.2);
+    expect(f.state.fulfillment.packing.filter(p => p.shipmentId === id)).toHaveLength(1);
+  });
+
   it.each(['submitted', 'cleared'] as const)('rejects stale generated declaration quantities before marking %s', status => {
     const f = scenario(), id = f.shipment([{ ...f.line(), quantity: 4 }]); f.pack(id); f.classify();
     const customsId = f.customs(id, 'draft');

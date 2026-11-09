@@ -94,15 +94,15 @@ const SCAN_GROUPS = [
   { name: 'server', label: 'server/src（后端）', roots: ['server/src'], exts: ['.ts'] },
   {
     name: 'frontend',
-    label: '前端主应用：components/ services/ utils/ lib/ + App.tsx index.tsx types.ts appTheme.ts',
+    label: '前端共享：components/ services/ utils/ lib/ + index.tsx types.ts appTheme.ts',
     roots: ['components', 'services', 'utils', 'lib'],
-    files: ['App.tsx', 'index.tsx', 'types.ts', 'appTheme.ts'],
+    files: ['index.tsx', 'types.ts', 'appTheme.ts'],
     exts: ['.ts', '.tsx'],
   },
   {
     name: 'portal',
-    label: 'customer-portal/src（独立前端 MVP，G5/B7 范围内）',
-    roots: ['customer-portal/src'],
+    label: 'Mist 前端：dev-ui-preview/mist-atelier/app（2026-11-09 起取代已删除的 customer-portal）',
+    roots: ['dev-ui-preview/mist-atelier/app'],
     exts: ['.ts', '.tsx'],
   },
 ];
@@ -1075,7 +1075,7 @@ function main() {
 
   if (!asJson) {
     console.log('═══ G3 fail-open 存量清单（L-A / L-B / 待核实 分离）═══');
-    console.log(`覆盖：server/src ${scanned.server} 文件 · 前端主应用 ${scanned.frontend} · customer-portal/src ${scanned.portal}（合计 ${files.length}；测试/node_modules/构建产物/注释/字符串已排除）`);
+    console.log(`覆盖：server/src ${scanned.server} 文件 · 前端主应用 ${scanned.frontend} · Mist 前端 ${scanned.portal}（合计 ${files.length}；测试/node_modules/构建产物/注释/字符串已排除）`);
     if (missing.length) console.log(`未覆盖：${missing.join(' · ')}`);
   }
 

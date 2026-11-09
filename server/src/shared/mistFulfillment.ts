@@ -2339,7 +2339,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (!Array.isArray(p.lines) || !p.lines.length)
                 fail('请登记装箱分配');
             const allocation: FulfillmentPacking[] = p.lines.map((l: any) => { const candidates = s.lines.filter(i => i.lineId === l.lineId), line = candidates.find(i => i.productionId === l.productionId) || (l.productionId === undefined && candidates.length === 1 ? candidates[0] : undefined); if (!line)
-                fail('请选择本票准确条目与生产分支'); const netWeight = qty(l.netWeight, '净重', true), grossWeight = qty(l.grossWeight, '毛重', true); if (grossWeight < netWeight)
+                fail('请选择本票准确条目与生产分支'); const netWeight = qty(l.netWeight, '净重'), grossWeight = qty(l.grossWeight, '毛重'); if (grossWeight < netWeight)
                 fail('毛重不能小于净重'); return { id: ctx.id(), shipmentId: s.id, lineId: l.lineId, ...(line!.productionId ? { productionId: line!.productionId } : {}), carton: text(l.carton, '箱号'), quantity: qty(l.quantity), netWeight, grossWeight, volume: qty(l.volume, '体积', true), note: text(l.note, '备注', false), ...(l.assortment!==undefined?{assortment:l.assortment}: {}), ...(l.fabricColor!==undefined?{fabricColor:text(l.fabricColor,'颜色',false)}:{}) }; });
             for (const line of s.lines)
                 if (sum(allocation.filter(a => a.lineId === line.lineId && a.productionId === line.productionId).map(a => a.quantity)) !== line.quantity)

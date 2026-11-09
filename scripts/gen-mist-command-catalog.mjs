@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isCliEntry } from './lib/acceptance-selfcheck.mjs';
 
 /**
  * 源码保留、但不向 Agent 登记的命令（目录外的类型 MCP 一律拒绝执行）。逐条写明原因；agentCommandCatalogGuard.test.ts 同样认这份名单。
@@ -103,7 +104,7 @@ export function buildCatalog() {
   return [...found.values()].sort((a, b) => a.type.localeCompare(b.type));
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isCliEntry(import.meta.url)) {
   const entries = buildCatalog();
   const next = `// 由 scripts/gen-mist-command-catalog.mjs 生成，请勿手改。\nexport const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string; types?: Record<string, string>; source: string }> = ${JSON.stringify(entries, null, 1)};\n`;
   if (process.argv.includes('--check')) {

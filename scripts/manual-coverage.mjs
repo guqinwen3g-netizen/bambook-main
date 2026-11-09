@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readLessonCatalog } from './manual-catalog.mjs';
+import { isCliEntry } from './lib/acceptance-selfcheck.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const STATES = ['待实现', '未核对', '待录制', '变更后待复核', '播放待验', '员工待验', '已验证'];
@@ -115,7 +116,7 @@ export function renderCoverage({ rows, stages, totals, catalog }, modes) {
 }
 
 const DOC = path.join(ROOT, 'docs/manual-coverage.md');
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isCliEntry(import.meta.url)) {
   const coverage = buildCoverage();
   const matrix = JSON.parse(fs.readFileSync(path.join(ROOT, 'wiki/matrix/coverage.json'), 'utf8'));
   const doc = renderCoverage(coverage, matrix.modes) + '\n';

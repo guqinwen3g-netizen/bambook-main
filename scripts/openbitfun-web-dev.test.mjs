@@ -4,6 +4,8 @@ import { mkdtemp, mkdir, writeFile, symlink, rm, realpath } from 'node:fs/promis
 import { createServer } from 'node:net';
 import { request } from 'node:http';
 import os from 'node:os';
+import { existsSync } from 'node:fs';
+import test from 'node:test';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { createWebDevHost } from './openbitfun-web-dev.mjs';
@@ -24,6 +26,10 @@ function get(port, headers = {}, method = 'GET') {
     }).on('error', reject).end();
   });
 }
+// 需先 `npm run openbitfun:prepare` 取得上游 web-ui 与依赖；未准备时显式跳过（不是通过）。
+if (!existsSync('tmp/upstream/OpenBitFun/src/web-ui/node_modules')) {
+  test('OpenBitFun web development host (HMR)', { skip: 'OpenBitFun upstream not prepared' }, () => {});
+} else {
 const fixtureRoot = await realpath(await mkdtemp(path.join(os.tmpdir(), 'bambook-obf-hmr-')));
 const root = path.join(fixtureRoot, 'apps', 'workbench');
 await mkdir(root, { recursive: true });
@@ -80,4 +86,5 @@ if (import.meta.hot) import.meta.hot.accept('./label.js', module => { document.q
   await host?.close();
   // Only this test's uniquely created fixture directory is removed.
   await rm(fixtureRoot, { recursive: true, force: true });
+}
 }

@@ -1,10 +1,12 @@
 // Source-boundary regressions only. Live multi-turn/model context proof is separate.
-import {readFileSync} from 'node:fs';
+import {existsSync,readFileSync} from 'node:fs';
 import {describe,expect,it} from 'vitest';
+// 需先 `npm run openbitfun:prepare` 取得并打补丁的上游源码；未准备时整份跳过（不是通过）。
 const base='tmp/upstream/OpenBitFun/src/crates/interfaces/app-server/src/server/';
-const host=readFileSync(base+'bambook_host.rs','utf8');
-const fallback=readFileSync(base+'fallback.rs','utf8');
-describe('embedded session readiness owner',()=>{
+const prepared=existsSync(base+'bambook_host.rs');
+const host=prepared?readFileSync(base+'bambook_host.rs','utf8'):'';
+const fallback=prepared?readFileSync(base+'fallback.rs','utf8'):'';
+describe.skipIf(!prepared)('embedded session readiness owner',()=>{
   it('routes the desktop readiness request into the runtime-backed host handler',()=>{
     expect(host.slice(0,host.indexOf('#[derive'))).toContain('"ensure_coordinator_session"');
     expect(fallback).toMatch(/matches!\(method\.as_str\(\),[^\n]+"ensure_coordinator_session"\)/);
