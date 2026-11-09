@@ -12,7 +12,8 @@ import { businessNow } from '../../runtime/businessClock';
 import { FailureNotice } from '../../runtime/FailureNotice';
 import { AgentTasks } from '../AgentTasks';
 
-type Usage = { month: string; scope: 'mine' | 'company'; items: Array<{ ownerId: string; ownerName: string; tasks: number; modelTurns: number; runtimeMs: number }> };
+type Usage = { month: string; scope: 'mine' | 'company'; items: Array<{ ownerId: string; ownerName: string; tasks: number; modelTurns: number; runtimeMs: number }>;
+  today?: { tasks: number; turns: number; taskLimit: number; turnLimit: number; companyTurns?: number; companyTurnLimit?: number } };
 
 export function XiaozhuTasks({ open, onClose, refreshSignal }: { open: boolean; onClose: () => void; refreshSignal?: number }) {
   const w = useMistWorkspace(), session = useMistSession(), { go } = useNav();
@@ -31,6 +32,10 @@ export function XiaozhuTasks({ open, onClose, refreshSignal }: { open: boolean; 
     {!canChat ? <Banner tone="warn" title={uiText('无 AI 使用权限')} /> : <div className="mist-col">
       {error && <FailureNotice title={'未完成'} detail={error} />}
       <AgentTasks onConnections={() => go('account', undefined, { section: 'connections' })} refreshSignal={refreshSignal} />
+      {usage?.today && <KeyValue items={[
+        { label: uiText('今日用量'), value: `${usage.today.tasks} / ${usage.today.taskLimit} 项 · 模型调用 ${usage.today.turns} / ${usage.today.turnLimit} 次` },
+        ...(usage.today.companyTurnLimit !== undefined ? [{ label: uiText('公司今日'), value: `模型调用 ${usage.today.companyTurns ?? 0} / ${usage.today.companyTurnLimit} 次` }] : []),
+      ]} />}
       {usage && (usage.items.length ? <KeyValue items={usage.items.map(u => ({ label: usage.scope === 'company' ? u.ownerName : uiText('本月用量'), value: `${u.tasks} 项 · 模型调用 ${u.modelTurns} 次` }))} /> : <span className="mist-note">{uiText('本月还没有用量')}</span>)}
     </div>}
   </Drawer>;

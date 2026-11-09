@@ -10,3 +10,9 @@ export const agentTaskLimits = (env: NodeJS.ProcessEnv = process.env) => ({
   runtimeMs: limitFromEnv('MIST_AGENT_TASK_RUNTIME_MINUTES', 30, 5, 240, env) * 60_000,
   activePerUser: limitFromEnv('MIST_AGENT_TASK_ACTIVE_PER_USER', 10, 1, 50, env),
 });
+/** 小竹每日用量上限（按上海营业日）：每人任务数与模型调用次数，以及全公司模型调用次数。 */
+export const agentDailyLimits = (env: NodeJS.ProcessEnv = process.env) => ({
+  tasksPerUser: limitFromEnv('MIST_AGENT_DAILY_TASKS_PER_USER', 50, 1, 1000, env),
+  turnsPerUser: limitFromEnv('MIST_AGENT_DAILY_TURNS_PER_USER', 400, 10, 20000, env),
+  turnsPerCompany: limitFromEnv('MIST_AGENT_DAILY_TURNS_PER_COMPANY', 3000, 10, 200000, env),
+});

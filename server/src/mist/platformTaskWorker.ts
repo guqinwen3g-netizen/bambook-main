@@ -101,7 +101,7 @@ export class MistPlatformTaskWorker{
     try{return await Promise.race([this.complete({...input,signal:child.signal}),cancelled]);}finally{clearTimeout(timer);signal.removeEventListener('abort',stop);child.signal.removeEventListener('abort',onAbort);}
   }
   private async perform(job:PlatformTaskJob,abort:AbortController){
-    let actor:AgentActor|null=null,phase:'model'|'tool'|'store'='store',issue:'model_unavailable'|'model_response_invalid'|undefined,pulse:ReturnType<typeof setInterval>|undefined,pulsing=false;
+    let actor:AgentActor|null=null,phase:'model'|'tool'|'store'='store',issue:'model_unavailable'|'model_response_invalid'|'daily_limit'|undefined,pulse:ReturnType<typeof setInterval>|undefined,pulsing=false;
     try{
       actor=await this.repository.claimPlatformTask(job,this.id,this.options.makeCredential);if(!actor)return;
       pulse=setInterval(()=>{if(pulsing)return;pulsing=true;void this.repository.pulsePlatformTask(actor!).catch(()=>abort.abort()).finally(()=>{pulsing=false;});},this.options.pulseMs??5000);pulse.unref?.();
@@ -109,7 +109,9 @@ export class MistPlatformTaskWorker{
         phase='store';const context=await this.repository.platformTaskContext(actor);let step=context.steps.at(-1);
         if(!step||step.result!==undefined){
           if(context.steps.length>=PLATFORM_TASK_TURN_LIMIT){await this.repository.agentTaskRuntime(actor,job.workspaceId,'finish',{requestId:'platform-limit-'+job.taskId,outcome:'failed',result:'本次执行已达轮次上限，请核对原业务和已办记录后接续。'});return;}
-          if(!this.available)throw Error('MODEL_UNAVAILABLE');phase='model';
+          if(!this.available)throw Error('MODEL_UNAVAILABLE');
+          if(!await this.repository.platformTaskDailyRoom(actor)){issue='daily_limit';return;}
+          phase='model';
           const facts={task:context.task,clock:platformTaskClock(Date.now()),requiresRead:context.requiresRead,decisions:context.decisions,history:platformTaskHistory(context.steps)};
           const response=await this.model({systemPrompt:SYSTEM+'\n'+responseLanguagePrompt(context.locale)+'\n工具：'+JSON.stringify(taskMcpTools()),messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts)),context.locale)}],temperature:0.1,jsonMode:true},abort.signal);
           if(abort.signal.aborted)return;const plan=parsePlatformTaskPlan(response);phase='store';step=await this.repository.savePlatformTaskPlan(actor,plan);
