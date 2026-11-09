@@ -221,6 +221,16 @@ it('bounds text, image and result sizes without losing stable object links; rela
   expect(() => agentQuery(state, owner, { q: [] })).toThrow(/查询文字/);
 });
 
+it('lists the visible attachments a record references, including nested confirmations and lines, and nothing else', () => {
+  const owner = actor();
+  const state = { files: [{ id: 'f1', name: '合同.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', size: 10, storageKey: 'k1', createdAt: '' }, { id: 'f2', name: 'PL.xlsx', mimeType: 'x', size: 20, storageKey: 'k2', createdAt: '' }, { id: 'f3', name: '他单.pdf', mimeType: 'application/pdf', size: 30, storageKey: 'k3', createdAt: '' }],
+    orders: [{ id: 'o1', code: 'SO-1', fileIds: ['f1', 'gone'], lines: [{ id: 'l1', confirmationFileIds: ['f2', 'f1'] }] }, { id: 'o2', code: 'SO-2', fileIds: ['f3'] }, { id: 'o3', code: 'SO-3' }] } as any;
+  const got = agentGet(state, owner, 'order', 'o1');
+  expect(got.attachments).toEqual([{ fileId: 'f1', name: '合同.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', size: 10 }, { fileId: 'f2', name: 'PL.xlsx', mimeType: 'x', size: 20 }]);
+  expect(JSON.stringify(got.attachments)).not.toContain('storageKey');
+  expect(agentGet(state, owner, 'order', 'o3').attachments).toBeUndefined();
+});
+
 it('exposes receipts and the payable chain so an Agent can find ids for settlement, payment and refund commands', () => {
   const state = {
     fulfillment: { purchases: [{ id: 'po1', code: 'PO-1', supplierId: 's1' }], receipts: [{ id: 'rc1', purchaseId: 'po1', quantity: 2380, rejected: 20 }] },

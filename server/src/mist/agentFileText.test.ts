@@ -23,7 +23,8 @@ it('says plainly when a file cannot be read instead of guessing',async()=>{
  expect(await extractFileText({name:'x.pdf',mimeType:'application/pdf'},bytes('not a pdf'),500)).toMatchObject({kind:'unreadable'});
  expect(await extractFileText({name:'x.pdf',mimeType:'application/pdf'},bytes('%PDF-1.4 garbage'),500)).toMatchObject({kind:'unreadable',text:''});
  expect(await extractFileText({name:'photo.png',mimeType:'image/png'},new Uint8Array([137,80,78,71]),500)).toMatchObject({kind:'unsupported',text:''});
- expect(await extractFileText({name:'sheet.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},new Uint8Array(10),500)).toMatchObject({kind:'unsupported'});
+ expect(await extractFileText({name:'sheet.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},new Uint8Array(10),500)).toMatchObject({kind:'unreadable'});
+ expect(await extractFileText({name:'old.xls',mimeType:'application/vnd.ms-excel'},new Uint8Array(10),500)).toMatchObject({kind:'unsupported',reason:expect.stringContaining('旧版')});
  expect(await extractFileText({name:'bin.txt',mimeType:'text/plain'},new Uint8Array(Array.from({length:200},()=>0xff)),500)).toMatchObject({kind:'unreadable'});
 });
 it('refuses oversized sources and validates the character limit',async()=>{

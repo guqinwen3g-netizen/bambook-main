@@ -1,7 +1,7 @@
 /**
  * 工作助手业务读取（bambook_query / bambook_get / bambook_expand）。
  * 只在“按当前执行者权限裁剪后的公司状态”上运行：仓储先按账号权限 ∩ 委托上限投影，这里再按对象类型的读权限复核一次。
- * 列表返回摘要；单对象在响应预算内返回完整结构，超限明确标记不完整。不返回图片/附件字节。
+ * 列表返回摘要；单对象在响应预算内返回完整结构，超限明确标记不完整；单对象附带它引用且本人可见的附件清单（名称、类型、大小），不返回图片/附件字节。
  */
 import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
@@ -208,10 +208,30 @@ function find(state: MistState, actor: TokenPayload, typeName: unknown, id: unkn
   return { type, row };
 }
 
-export function agentGet(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown):ReturnType<typeof ref>&{data:Record<string,unknown>;truncated:boolean;readHint?:string} {
+const FILE_KEY = /^(fileId|fileIds|[a-z][A-Za-z]*FileIds?)$/;
+const ATTACHMENTS_MAX = 30;
+/** 对象（含明细、确认、邮件附件等嵌套记录）引用、且当前账号可见的附件；与 bambook_file_text 同一可见范围。 */
+function attachmentsOf(state: MistState, row: unknown) {
+  const ids = new Set<string>(); let nodes = 0;
+  const walk = (value: any, depth: number) => {
+    if (!value || typeof value !== 'object' || depth > 6 || ++nodes > 5_000) return;
+    if (Array.isArray(value)) { for (const item of value) walk(item, depth + 1); return; }
+    for (const [key, v] of Object.entries(value)) {
+      if (FILE_KEY.test(key)) { if (typeof v === 'string' && v) ids.add(v); else if (Array.isArray(v)) for (const x of v) if (typeof x === 'string' && x) ids.add(x); }
+      else if (v && typeof v === 'object') walk(v, depth + 1);
+    }
+  };
+  walk(row, 0);
+  const files = new Map((state.files ?? []).map(f => [f.id, f]));
+  const found = [...ids].flatMap(id => { const f = files.get(id); return f ? [{ fileId: f.id, name: f.name, mimeType: f.mimeType, size: f.size }] : []; });
+  return found.length > ATTACHMENTS_MAX ? { attachments: found.slice(0, ATTACHMENTS_MAX), attachmentsTotal: found.length } : found.length ? { attachments: found } : {};
+}
+
+export function agentGet(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown):ReturnType<typeof ref>&{data:Record<string,unknown>;truncated:boolean;readHint?:string;attachments?:Array<{fileId:string;name:string;mimeType:string;size:number}>;attachmentsTotal?:number} {
   const { type, row } = find(state, actor, typeName, id);
+  const files=attachmentsOf(state,row);
   const complete=completeDataWithinLimit(row);
-  if(complete)return{...ref(type,row),data:complete,truncated:false};
+  if(complete)return{...ref(type,row),data:complete,truncated:false,...files};
   const mail=['email','email_draft','email_send'].includes(type.type);
   let data = compact(row, mail ? 5 : 3) as Record<string, unknown>;
   if(mail&&typeof row.body==='string')data.body=row.body.slice(0,10_000);
@@ -222,7 +242,7 @@ export function agentGet(state: MistState, actor: TokenPayload, typeName: unknow
     text = JSON.stringify(data);
   }
   if (text.length > GET_LIMIT) { data = summary(row);if(type.type==='email_send')Object.assign(data,{recipientCounts:row.recipientCounts,attemptCount:row.attemptCount,latestAttempt:compact(row.latestAttempt,3)}); }
-  return { ...ref(type, row), data, truncated:true,readHint:'超出单次读取范围；当前结果不完整，请读取关联明细或交本人核对。' };
+  return { ...ref(type, row), data, truncated:true,readHint:'超出单次读取范围；当前结果不完整，请读取关联明细或交本人核对。',...files };
 }
 
 /** 关联对象：本对象字段直接引用的对象，以及字段引用了本对象的其它对象（均限当前可读类型）。 */
