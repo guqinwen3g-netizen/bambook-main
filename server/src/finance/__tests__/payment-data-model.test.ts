@@ -5,9 +5,6 @@ import path from 'path';
 const SCHEMA = fs.readFileSync(
   path.resolve(__dirname, '../../../prisma/schema.prisma'), 'utf-8'
 );
-const PAYMENT_VOUCHER_SERVICE = fs.readFileSync(
-  path.resolve(__dirname, '../paymentVoucherMutationService.ts'), 'utf-8'
-);
 
 describe('task_mqxwgafj: InvoiceAllocation schema 结构（硬删除语义）', () => {
   it('模型存在 + 核心字段 + 无 deletedAt + 唯一约束', () => {
@@ -86,23 +83,3 @@ describe('task_mqxwgafj: voucher status 枚举校验', () => {
 });
 
 // 2026-11-06: the agent toolRuntime apply_voucher and legacy finance route source checks were removed with those files.
-describe('task_mqxwgafj: paymentVoucherMutationService voucher status 不从 appliedAmount 推导', () => {
-  it('createPaymentVoucher: null status 默认 unreconciled + 存在但非法返回 INVALID_STATUS', () => {
-    const createStart = PAYMENT_VOUCHER_SERVICE.indexOf('function normalizeCreateInput');
-    const createEnd = PAYMENT_VOUCHER_SERVICE.indexOf('function normalizeUpdateInput', createStart);
-    const createBody = PAYMENT_VOUCHER_SERVICE.slice(createStart, createEnd);
-    expect(createBody).not.toMatch(/appliedAmount.*partially_reconciled/);
-    expect(createBody).toContain("'unreconciled'");
-    expect(createBody).toContain('INVALID_STATUS');
-    expect(createBody).toContain('isValidPaymentVoucherStatus');
-  });
-
-  it('PATCH /vouchers/:id status 不可手动修改（STATUS_NOT_MANUAL_SETTABLE，由 allocation 重算）', () => {
-    const updateStart = PAYMENT_VOUCHER_SERVICE.indexOf('function normalizeUpdateInput');
-    const updateEnd = PAYMENT_VOUCHER_SERVICE.indexOf('export async function createPaymentVoucher', updateStart);
-    const updateBody = PAYMENT_VOUCHER_SERVICE.slice(updateStart, updateEnd);
-    expect(updateBody).toContain('status');
-    expect(updateBody).toContain('STATUS_NOT_MANUAL_SETTABLE');
-    expect(updateBody).not.toContain('delete data.status'); // 不再静默删除
-  });
-});

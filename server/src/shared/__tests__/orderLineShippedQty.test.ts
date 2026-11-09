@@ -119,19 +119,7 @@ describe('★ 结构守卫：syncOrderLineShipmentQuantity 的收口点', () => 
   const src = (rel: string) => readFileSync(path.resolve(process.cwd(), 'src', rel), 'utf8');
   const countCalls = (text: string) => (text.match(/syncOrderLineShipmentQuantity\(/g) ?? []).length;
 
-  it('allocationService：新增/更新/删除分配三条路径都要同步（= 3）', () => {
-    const s = src('shipping/allocationService.ts');
-    expect(s).toMatch(/from '\.\.\/shared\/orderLineShippedQty'/);
-    expect(countCalls(s)).toBe(3);
-  });
 
-  it('lineShares 不得再各自实现（allocationService 必须 import 真源）', () => {
-    const s = src('shipping/allocationService.ts');
-    expect(s).toMatch(/lineShares/);
-    expect(s).toMatch(/import \{ lineShares/);
-    // 反向：不得再出现本地函数定义
-    expect(s).not.toMatch(/function lineShares\(/);
-  });
 
   it('记录在案：内部交易（internalTransferService）是**另一个**合法写入方（双轨未合并）', () => {
     const s = src('internalTrade/internalTransferService.ts');

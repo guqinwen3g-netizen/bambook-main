@@ -196,16 +196,14 @@ describe('B36 · 同一条通道的另外两种形状（只减不增）', () => 
  * 基线 2026-09-20 15:54 实测：**7 个文件 / 8 处**。
  */
 const B37_BASELINE: Record<string, number> = {
-  'src/paymentRequests/paymentRequestService.ts': 2,
   'src/exceptions/exceptionService.ts': 1,
-  'src/orderChanges/orderChangeRequestService.ts': 1,
 };
 
 describe('B37 · B33/B36 都认不到的第四种写法（只减不增）', () => {
   const actual = countByFile(scanSources(SERVER), b37Sites);
 
-  it('逐文件基线：4 处 / 3 文件（2026-11-06 删除死代码后按保留文件的原基线重算；原 7 / 6），涨了红、偷偷少了也红', () => {
-    expect(Object.values(actual).reduce((a, b) => a + b, 0)).toBe(4);
+  it('逐文件基线：1 处 / 1 文件（2026-11-09 付款申请与改单旧服务退役后重算；2026-11-06 为 4 / 3，原 7 / 6），涨了红、偷偷少了也红', () => {
+    expect(Object.values(actual).reduce((a, b) => a + b, 0)).toBe(1);
     expect(actual).toEqual(B37_BASELINE);
   });
 

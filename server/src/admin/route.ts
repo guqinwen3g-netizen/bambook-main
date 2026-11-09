@@ -16,7 +16,6 @@ import { EmailService, buildApprovalApprovedEmail, createEmailService } from '..
 import { SYSTEM_ROLE_IDS, systemRoleCode } from '../_shared/rolePermissionMatrix';
 import { logger } from '../lib/logger';
 import { safeRouteError } from '../shared/routeError';
-import { createApprovalDecisionService, type OnApprovalDecided } from '../approvals/approvalDecisionService';
 import { createOrderMainApprovalService, OrderMainApprovalError } from '../orders/orderMainApprovalService';
 import { passwordProblem } from '../auth/passwordPolicy';
 import { initialGeneralManagerEligibility } from './initialGeneralManager';
@@ -25,7 +24,6 @@ import { createAccountAccessService, type Delivery } from '../auth/accountAccess
 type AdminRouterOptions = {
   prisma: PrismaClient;
   email?: EmailService;
-  onDecided?: OnApprovalDecided;
   /** 是否启用认证（默认 true，与历史行为一致：admin 路由始终要求 owner/admin JWT）。 */
   requireAuth?: boolean;
   /** 允许的 API-Key 集合（默认空集——admin 不接受 API-Key，仅 JWT）。 */
@@ -160,7 +158,6 @@ function publicAccountMetadata(metadata: unknown) {
 export function createAdminRouter(options: AdminRouterOptions) {
   const router = Router();
   const auth = createAuthService();
-  const decisions = createApprovalDecisionService(options.prisma, { onDecided: options.onDecided });
   const orderMainApprovals = createOrderMainApprovalService(options.prisma);
   const email = options.email || createEmailService();
   const accountAccess = options.accountAccess ?? createAccountAccessService(options.prisma, { email });
@@ -898,29 +895,6 @@ export function createAdminRouter(options: AdminRouterOptions) {
       await tx.auditLog.create({ data: { id: auditId(), actorId: actor?.userId || 'system', action: 'delete_role', targetType: 'Role', targetId: role.id, detail: { name: role.name, description: role.description }, ip: req.ip } });
     });
     res.json({ ok: true });
-  }));
-
-  // ---- Approvals ----
-  router.get('/approvals', withRouteErrorGuard(async (_req: Request, res: Response) => {
-    const approvals = await options.prisma.approvalRequest.findMany({
-      where: { status: 'pending' },
-      orderBy: { createdAt: 'desc' },
-    });
-    res.json({ ok: true, approvals });
-  }));
-
-  router.patch('/approvals/:id', withRouteErrorGuard(async (req: Request, res: Response) => {
-    const { id } = req.params;
-    const { status, decisionNote } = req.body || {};
-    if (!['approved', 'rejected'].includes(status)) {
-      return res.status(400).json({ ok: false, error: 'INVALID_STATUS' });
-    }
-    const actor = (req as any).actor;
-    if (!actor?.userId) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
-    const note = typeof decisionNote === 'string' ? decisionNote.trim() : undefined;
-    const { sync, eventDelivery } = await decisions.decide({ id, actor, decision: status, decisionNote: note,
-      source: 'api:admin', ip: req.ip });
-    res.json({ ok: true, ...(sync ? { sync } : {}), ...(eventDelivery ? { eventDelivery } : {}) });
   }));
 
   // ---- Suggestions ----

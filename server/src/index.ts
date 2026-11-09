@@ -19,8 +19,6 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { createAccountStatusGuard } from './auth/accountStatusGuard';
 import { createAuthorizationSnapshotGuard } from './auth/authorizationSnapshotGuard';
 import { createSupplierApprovalAuthorityRouter } from './procurement/supplierApprovalAuthorityRoute';
-import { registerPaymentRequestApprovalHook } from './paymentRequests/paymentRequestApprovalHook';
-import { createExceptionService } from './exceptions/exceptionService';
 import { logger } from './lib/logger';
 import { loadAgentApiKeyActors, setDefaultAgentApiKeyActors } from './auth/agentPrincipal';
 import { attachPrismaSlowQueryLogger, createRequestTimingMiddleware } from './lib/requestTiming';
@@ -33,10 +31,6 @@ import { DEV_COMPANIES } from './devPanel/companies';
 import { dbUrlFor, getActiveDb, isDualMode } from './devPanel/activeDb';
 import { createAdminRouter } from './admin/route';
 import { createPlatformRouter } from './platform/route';
-import type { OnApprovalDecided } from './approvals/approvalDecisionService';
-import { createApprovalRoutingService } from './approvals/approvalRoutingService';
-import { createApprovalCreateService } from './approvals/approvalCreateService';
-import { createOrderChangeRequestService } from './orderChanges/orderChangeRequestService';
 import { createHRRouter } from './hr/route';
 import { TokenPayload } from './auth/service';
 import { partitionApiKeys, redactKey } from './auth/apiKeySafety';
@@ -268,41 +262,12 @@ app.use('/api/auth', createAuthRouter({
 // 开发调试面板（公司切换 / 账号一键登录 / 环境信息）。仅当 BAMBOOK_DEV_PANEL=1 且非 production 时生效，否则路由返回 404。
 app.use('/api/dev', createDevPanelRouter({ prisma }));
 
-// 审批决策后同步业务单据状态（OrderChangeRequest / DR-013 例外申请），供 /api/admin 审批决策使用。
-const orderChangeApprovalSyncService = createOrderChangeRequestService({
-    prisma,
-    approvalCreateService: createApprovalCreateService({
-        prisma,
-        routingService: createApprovalRoutingService({ prisma }),
-    }),
-});
-const onApprovalDecided: OnApprovalDecided = async (approval) => {
-        const result = approval.targetType === 'Dr013ExceptionRequest'
-          ? await createExceptionService({ prisma, approvalCreateService: createApprovalCreateService({
-              prisma, routingService: createApprovalRoutingService({ prisma }),
-            }) }).syncFromApprovalDecision({ approvalRequestId: approval.id })
-          : approval.targetType === 'OrderChangeRequest'
-          ? await orderChangeApprovalSyncService.syncFromApprovalDecision({
-            approvalRequestId: approval.id,
-            decision: approval.status,
-            decisionNote: approval.decisionNote,
-            actorId: approval.actualDecisionActor,
-        }) : null;
-        if (result && !result.ok) {
-            // The decision is already committed; all entry points expose a
-            // retryable sync failure through the same decision service.
-            throw new Error(result.error.message);
-        }
-};
 app.use('/api/admin', createAdminRouter({ prisma, email: emailService,
-    requireAuth: SDK_CONFIG.requireAuth, apiKeys: SDK_CONFIG.apiKeys, onDecided: onApprovalDecided }));
+    requireAuth: SDK_CONFIG.requireAuth, apiKeys: SDK_CONFIG.apiKeys }));
 // 平台后台：跨公司运营入口，仅 platformRole='platform_admin' 可访问。
 app.use('/api/platform', createPlatformRouter({ prisma }));
 
 app.use('/api/hr', createHRRouter({ prisma, requireAuth: SDK_CONFIG.requireAuth, apiKeys: SDK_CONFIG.apiKeys }));
-
-// DR-017 审批决议钩子：/api/admin 审批决策发出 approvalEventBus resolved 后回写付款申请状态。
-registerPaymentRequestApprovalHook({ prisma });
 
 // 公司「审批资格」页使用的供应商承诺审批名单（旧 /api/v1/procurement 其余接口已删除）。
 app.use('/api/v1/procurement/contracts/approval-authority', createSupplierApprovalAuthorityRouter({

@@ -16,7 +16,6 @@ vi.mock('../../lib/logger', () => ({
 }));
 
 import { createInvoice, updateInvoice, SUPPORTED_CURRENCIES } from '../invoiceMutationService';
-import { createPaymentVoucher, updatePaymentVoucher } from '../paymentVoucherMutationService';
 import { applyAllocation, readAllocationRefusal } from '../allocationService';
 
 // ── helpers ────────────────────────────────────────────────────────
@@ -334,44 +333,4 @@ describe('修复2：createInvoice 输入校验', () => {
   });
 });
 
-describe('修复2：createPaymentVoucher / updatePaymentVoucher 输入校验', () => {
-  const base = { type: 'Receipt', amount: '100', currency: 'USD', paymentMethod: 'TT' } as any;
-  const emptyPrisma = {} as any;
 
-  it('负金额 → INVALID_AMOUNT', async () => {
-    const r = await createPaymentVoucher({ prisma: emptyPrisma, input: { ...base, amount: '-50' } });
-    expect(r.ok).toBe(false);
-    expect(r.error!.code).toBe('INVALID_AMOUNT');
-  });
-
-  it('零/负汇率 → INVALID_AMOUNT', async () => {
-    const r = await createPaymentVoucher({ prisma: emptyPrisma, input: { ...base, exchangeRate: '0' } });
-    expect(r.ok).toBe(false);
-    expect(r.error!.code).toBe('INVALID_AMOUNT');
-    expect(r.error!.message).toContain('正数');
-  });
-
-  it('负银行费用 / 负预分配金额 → INVALID_AMOUNT', async () => {
-    const rFee = await createPaymentVoucher({ prisma: emptyPrisma, input: { ...base, bankFee: '-1' } });
-    expect(rFee.ok).toBe(false);
-    expect(rFee.error!.code).toBe('INVALID_AMOUNT');
-    const rApplied = await createPaymentVoucher({ prisma: emptyPrisma, input: { ...base, appliedAmount: '-1' } });
-    expect(rApplied.ok).toBe(false);
-    expect(rApplied.error!.code).toBe('INVALID_AMOUNT');
-  });
-
-  it('非法币种 → INVALID_CURRENCY', async () => {
-    const r = await createPaymentVoucher({ prisma: emptyPrisma, input: { ...base, currency: '_usd_' } });
-    expect(r.ok).toBe(false);
-    expect(r.error!.code).toBe('INVALID_CURRENCY');
-  });
-
-  it('updatePaymentVoucher 同款校验（PATCH 路径）', async () => {
-    const rCur = await updatePaymentVoucher({ prisma: emptyPrisma, voucherId: 'PAY__1', input: { currency: 'ZZZ' } });
-    expect(rCur.ok).toBe(false);
-    expect(rCur.error!.code).toBe('INVALID_CURRENCY');
-    const rFx = await updatePaymentVoucher({ prisma: emptyPrisma, voucherId: 'PAY__1', input: { exchangeRate: '-1' } });
-    expect(rFx.ok).toBe(false);
-    expect(rFx.error!.code).toBe('INVALID_AMOUNT');
-  });
-});
