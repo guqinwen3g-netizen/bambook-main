@@ -273,7 +273,6 @@
   "城市": "City",
   "行业": "Industry",
   "客户经理": "Account Manager",
-  "按账号选择本公司成员": "Select a company member by account",
   "等级": "Level",
   "结算币种": "Settlement Currency",
   "付款条款": "Payment Terms",
@@ -2000,7 +1999,6 @@
   "{0} · 分色分码": "{0} · By Color and Size",
   "总金额": "Total Amount",
   "订单状态": "Order Status",
-  "合同 / 用途": "Contract / Purpose",
   "付款条件": "Payment Terms",
   "溢短装": "Over/Short Shipment",
   "确认附件": "Confirm Attachment",
@@ -2046,7 +2044,6 @@
   "待交接后勤": "Logistics pending handover",
   "整体进度": "Overall Progress",
   "合同与主单审批": "Contract and master order approval",
-  "PO / 内部用途": "PO / Internal use",
   "定金比例": "Deposit ratio",
   "合同付款条款": "Contract payment terms",
   "贸易术语 / 地点": "Trade terms / Location",
@@ -6587,5 +6584,9 @@
   "语音连接失败，请重试": "Voice connection failed. Try again.",
   "语音网络拥堵，请重新连接": "Voice network is congested. Reconnect.",
   "语音播放失败，请重试": "Voice playback failed. Try again.",
-  "语音响应无效，请重试": "Invalid voice response. Try again."
+  "语音响应无效，请重试": "Invalid voice response. Try again.",
+  "还没有可下单的客户": "No customer is available for ordering yet",
+  "去建立客户": "Create a customer",
+  "请业务负责人先建立客户档案": "Ask the sales lead to create the customer record first",
+  "信用额度（结算币种）": "Credit limit (settlement currency)"
 }

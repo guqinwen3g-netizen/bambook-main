@@ -76,7 +76,7 @@ export function IdentityHeader({ thumb, meta, title, facts, actions }: { thumb?:
         {meta && <div className="mist-idrow-meta">{meta.map((m, i) => <React.Fragment key={i}>{i > 0 && <i />}<span>{m}</span></React.Fragment>)}</div>}
         <h1 className="mist-h1">{uiText(title)}</h1>
       </div>
-      <div className="mist-idrow-people">{facts?.map((f, i) => <div key={i}><small>{uiText(f.label)}</small><b>{f.value}</b></div>)}{actions}</div>
+      <div className="mist-idrow-people">{facts?.map((f, i) => <div key={i}><small>{uiText(f.label)}</small><b>{f.value}</b></div>)}{actions && <div className="mist-idrow-actions">{actions}</div>}</div>
     </section>
   );
 }
