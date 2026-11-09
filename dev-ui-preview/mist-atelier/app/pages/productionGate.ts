@@ -41,7 +41,8 @@ export function productionReleaseGate(state: MistState, branch: MistProduction, 
 /** 本分支最新的生产 QC 是否为 NOK（且尚未由业务继续）。 */
 export function productionNok(state: MistState, branch: MistProduction) {
   const f = state.fulfillment;
-  return (f?.qcTasks || []).find(task => task.kind === 'production' && task.source.kind === 'orderLine' && task.source.productionId === branch.id && f.qcReports.find(report => report.id === task.reportIds.at(-1))?.result === 'reject' && !task.businessContinued);
+  // A rejected production inspection or production-bound sample (PP / shipping) both block this branch.
+  return (f?.qcTasks || []).find(task => (task.kind === 'production' || task.kind === 'sample') && task.source.kind === 'orderLine' && task.source.productionId === branch.id && f.qcReports.find(report => report.id === task.reportIds.at(-1))?.result === 'reject' && !task.businessContinued);
 }
 
 /** Business continuation resolves the pause, not the report's recorded qualifications. */
