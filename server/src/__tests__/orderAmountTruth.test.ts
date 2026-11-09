@@ -189,12 +189,9 @@ describe('findOrderAmountConflict —— 主档与明细行打架自检', () => 
  *    所以它仍是人工维护的清单。但它**不是**「不得写内联口径」的白名单：
  *    后者见下方 ③ 测试，已改为**全仓扫描**（v1 只查这 5 个文件 ⇒ 白名单外的漂移无人管）。
  */
+// 原 5 个消费点中 dashboard / seasons / reconciliation / 旧 Dashboard 页随旧主 API 与旧前端退役删除，仅余发运批次服务。
 const CONSUMERS = [
-  'server/src/dashboard/dashboardService.ts',
-  'server/src/seasons/seasonService.ts',
-  'server/src/finance/reconciliationService.ts',
   'server/src/shipping/orderShipmentBatchService.ts',
-  'components/Dashboard.tsx',
 ];
 
 /**
@@ -209,7 +206,7 @@ const CONSUMERS = [
  *   取证：加根后**本条 ③ 的命中数不变（仍为 0）** —— 见 E 步骤0 的只读复量，
  *   所以这一步是"多覆盖"，不是"新增违规"。
  */
-const SCAN_ROOTS = ['server/src', 'server/scripts', 'components', 'services', 'lib', 'scripts', 'customer-portal'];
+const SCAN_ROOTS = ['server/src', 'server/scripts', 'components', 'services', 'lib', 'scripts', 'dev-ui-preview/mist-atelier/app']; // customer-portal 已删除。
 const SCAN_EXTS = new Set(['.ts', '.tsx', '.mjs', '.cjs', '.js']);
 const SCAN_SKIP_DIRS = new Set(['node_modules', '__tests__', 'dist', 'out', 'build', '.git']);
 
@@ -306,7 +303,7 @@ function inlineHitsInLine(line: string): string[] {
 }
 
 describe('结构守卫：订单金额口径不得再散落', () => {
-  it('① 已知 5 个消费点文件都存在（防止清单本身腐烂）', () => {
+  it('① 保留的消费点文件都存在（防止清单本身腐烂）', () => {
     for (const rel of CONSUMERS) {
       expect(fs.existsSync(path.join(ROOT, rel)), `${rel} 应存在`).toBe(true);
     }
@@ -429,7 +426,11 @@ const RE_E2 = new RegExp(`(?:^|[{,(])\\s*['"]?(?:${TOTALISH_KEYS})['"]?\\s*:\\s*
  *   · 只按文件匹配 ⇒ 别处同名写法照样被抓（不接受"全局豁免某个形状"）；
  *   · 条目若在该文件里**已匹配不到任何行** ⇒ 红（防止代码改了、通行证还留着）。
  */
-const DISPLAY_EXEMPTIONS: { file: string; anchor: string; why: string }[] = [];
+const DISPLAY_EXEMPTIONS: { file: string; anchor: string; why: string }[] = [
+  // money() 在此是供应商合同行金额的解析校验（非订单金额，也不上屏），orderAmountOf 不适用。
+  { file: 'server/src/finance/supplierVatPayableSource.ts', anchor: 'money(line.contractAmount', why: '供应商合同行占用金额解析' },
+  { file: 'server/src/finance/supplierVatPayableSource.ts', anchor: 'money(row.contractAmount', why: '供应商合同行占用金额解析' },
+];
 
 /** 一行命中几种形状（已剥注释、跳过含 orderAmountOf 的行与类型声明行） */
 function displayHitsInLine(line: string): string[] {
@@ -459,7 +460,7 @@ function hitsOf(sample: string): string[] {
 }
 
 describe('⑤ 对外展示口径守卫（E-1 钱上屏 / E-2 键说谎）', () => {
-  it('★ 全仓（含 customer-portal）不得把非真源字段当"订单金额"展示', () => {
+  it('★ 全仓（含 Mist 前端）不得把非真源字段当"订单金额"展示', () => {
     const offenders: string[] = [];
     let scanned = 0;
     for (const root of SCAN_ROOTS) {
@@ -476,10 +477,8 @@ describe('⑤ 对外展示口径守卫（E-1 钱上屏 / E-2 键说谎）', () =
       }
     }
     // 分母自检：门户真的在扫描面里（否则"加了根但没扫"照样绿）
-    const portalFiles = SCAN_ROOTS.includes('customer-portal')
-      ? walkSources(path.join(ROOT, 'customer-portal')).length
-      : 0;
-    expect(portalFiles, 'customer-portal 必须真的被扫到（加根 ≠ 扫到）').toBeGreaterThan(5);
+    const mistFiles = walkSources(path.join(ROOT, 'dev-ui-preview/mist-atelier/app')).length;
+    expect(mistFiles, 'Mist 前端必须真的被扫到（加根 ≠ 扫到）').toBeGreaterThan(5);
     expect(scanned, '全仓扫描必须真的扫到源码文件').toBeGreaterThan(100);
     expect(
       offenders,

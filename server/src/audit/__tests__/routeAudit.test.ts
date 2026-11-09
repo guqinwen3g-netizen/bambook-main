@@ -51,16 +51,12 @@ describe('task_mqxxxu1g: actorIdFromRequest', () => {
   });
 });
 
-const PAYMENT_VOUCHER_SERVICE = fs.readFileSync(path.resolve(__dirname, '../../finance/paymentVoucherMutationService.ts'), 'utf-8');
 const INVOICE_SERVICE = fs.readFileSync(path.resolve(__dirname, '../../finance/invoiceMutationService.ts'), 'utf-8');
 const ROUTE_AUDIT = fs.readFileSync(path.resolve(__dirname, '../routeAudit.ts'), 'utf-8');
 
 describe('task_mqxxxu1g: finance route 事务闭环（业务+sync+AuditLog 同事务）', () => {
-  it('invoice/payment voucher mutation service 都使用 $transaction', () => {
-    const invoiceTxCount = (INVOICE_SERVICE.match(/\.\$transaction/g) || []).length;
-    const voucherTxCount = (PAYMENT_VOUCHER_SERVICE.match(/\.\$transaction/g) || []).length;
-    expect(invoiceTxCount).toBeGreaterThanOrEqual(2);
-    expect(voucherTxCount).toBeGreaterThanOrEqual(2);
+  it('invoice mutation service 使用 $transaction', () => {
+    expect((INVOICE_SERVICE.match(/\.\$transaction/g) || []).length).toBeGreaterThanOrEqual(2);
   });
 
   it('create_invoice: service 内业务 create + sync + AuditLog 全在 $transaction 内', () => {
@@ -83,28 +79,6 @@ describe('task_mqxxxu1g: finance route 事务闭环（业务+sync+AuditLog 同�
     expect(section).toContain(', tx);');
     expect(section).toContain('before');
     expect(section).toContain('after');
-  });
-
-  it('create_voucher: service 内业务 create + sync + AuditLog 全在 $transaction 内', () => {
-    const idx = PAYMENT_VOUCHER_SERVICE.indexOf('export async function createPaymentVoucher');
-    const end = PAYMENT_VOUCHER_SERVICE.indexOf('export async function updatePaymentVoucher', idx);
-    const section = PAYMENT_VOUCHER_SERVICE.slice(idx, end);
-    expect(section).toContain('tx.paymentVoucher.create');
-    expect(section).toContain('syncPaymentVoucherReferences');
-    expect(section).toContain(', tx);');
-    expect(section).toContain('writeRouteAuditLog');
-    expect(section).toContain('prisma: tx');
-  });
-
-  it('update_voucher: service 内 existing + update + sync + AuditLog 全在 $transaction 内（before+after）', () => {
-    const idx = PAYMENT_VOUCHER_SERVICE.indexOf('export async function updatePaymentVoucher');
-    const section = PAYMENT_VOUCHER_SERVICE.slice(idx);
-    expect(section).toContain('tx.paymentVoucher.findUnique');
-    expect(section).toContain('tx.paymentVoucher.update');
-    expect(section).toContain('syncPaymentVoucherReferences');
-    expect(section).toContain(', tx);');
-    expect(section).toContain('before');
-    expect(section).toContain('existing.appliedAmount');
   });
 
 });

@@ -19,6 +19,8 @@ function buildPrismaMock(target: { metadata: any } | null) {
       findUnique: vi.fn(async () => target),
       update: vi.fn(async () => ({})),
     },
+    // 非老板重置前先核对目标岗位（老板账号防线）；此处目标为普通账号。
+    userRole: { findMany: vi.fn(async () => []) },
     auditLog: { create: vi.fn(async () => ({})) },
   } as any;
 }

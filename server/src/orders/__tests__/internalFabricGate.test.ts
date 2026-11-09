@@ -13,15 +13,17 @@ function database() {
   const db = {
     fabricLineAllocation: { findUnique: vi.fn(async () => allocation), findMany: vi.fn(async () => [allocation]) },
     order: { findFirst: vi.fn(async () => supply) }, orderLine: { findUnique: vi.fn(async () => sourceLine) },
-    team: { findFirst: vi.fn(async () => ({ id: 'actual-team', name: '成衣组', status: 'active', metadata: { businessFamily: 'garment' } })) },
+    team: { findFirst: vi.fn(async () => ({ id: 'actual-team', name: '成衣组', status: 'active', deletedAt: null, departmentId: DEPT.id, department: DEPT })) },
     teamMember: { findFirst: vi.fn(async () => ({ userId: 'receiver', leftAt: null })) },
-    userAccount: { findFirst: vi.fn(async () => ({ id: 'receiver', status: 'active' })) },
+    userAccount: { findFirst: vi.fn(async () => ({ id: 'receiver', status: 'active', primaryDeptId: DEPT.id })) },
     approvalRequest: { findFirst: vi.fn(async () => ({ id: 'actual-approval' })) },
     auditLog: { findUnique: vi.fn(async () => ({ id: 'audit', action: 'allocate_internal_fabric', targetType: 'FabricLineAllocation', targetId: allocation.id,
       detail: { after: { ...allocation, metres: allocation.metres.toString() } } })) },
   };
   return { db, allocation, supply, sourceLine };
 }
+// 业务组属性来自所在部门（成衣业务部）；接收人须在该部门。
+const DEPT = { id: 'dept-garment', status: 'active', parentId: 'company-root', metadata: { businessAttributes: ['garment_business'] } };
 describe('accurate garment material consumption', () => {
   it('retains an unknown historical mode as blocked, and CMT needs no internal fabric lookup', async () => {
     await expect(resolveGarmentMaterialProof({}, order, { id: line.id })).rejects.toThrow('请选择成衣');
