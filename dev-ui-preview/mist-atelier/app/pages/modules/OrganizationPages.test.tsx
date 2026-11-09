@@ -256,6 +256,33 @@ describe('人事管理', () => {
     await click('保存');
     expect(bridge.calls.find(c => c.method === 'POST' && c.url === '/api/hr/departments')?.body).toEqual({ name: '成衣业务部', parentId: 'root', businessAttributes: ['garment_business'] });
   });
+  it('retires a department into a receiving department, and keeps the dialog open with the reason when refused', async () => {
+    bridge.routes['GET /api/hr/personnel'] = () => ({ ok: true, departments: [...departments, { id: 'd2', name: '成衣业务部', parentId: 'root', businessAttributes: ['garment_business'] }], positions: [], personnel: [] });
+    bridge.routes['POST /api/hr/departments/d1/retire'] = () => { throw new Error('部门仍有在职人员，请选择承接部门。'); };
+    await render(HrOrganizationPage, 'hr');
+    const row = [...document.querySelectorAll('[role="row"]')].find(r => r.textContent?.includes('面料业务部')) as HTMLElement;
+    await act(async () => row.click());
+    await click('裁撤部门');
+    expect(document.body.textContent).toContain('裁撤「面料业务部」');
+    await click('确认');
+    expect(bridge.calls.find(c => c.method === 'POST' && c.url === '/api/hr/departments/d1/retire')?.body).toEqual({});
+    expect(document.body.textContent).toContain('部门仍有在职人员，请选择承接部门。');
+    expect(document.body.textContent).toContain('裁撤「面料业务部」');
+    bridge.routes['POST /api/hr/departments/d1/retire'] = () => ({ ok: true, result: {} });
+    await type(document.querySelector('select[aria-label="承接部门"]') as HTMLSelectElement, 'd2');
+    await click('确认');
+    expect(bridge.calls.filter(c => c.method === 'POST' && c.url === '/api/hr/departments/d1/retire').at(-1)?.body).toEqual({ targetDepartmentId: 'd2' });
+    expect(document.body.textContent).not.toContain('裁撤「面料业务部」');
+  });
+  it('dissolves a team after confirmation', async () => {
+    bridge.routes['POST /api/hr/teams/t1/dissolve'] = () => ({ ok: true });
+    await render(HrOrganizationPage, 'hr', 'teams', 't1');
+    await click('解散小组');
+    expect(document.body.textContent).toContain('解散「面料一组」');
+    await click('确认');
+    expect(bridge.calls.some(c => c.method === 'POST' && c.url === '/api/hr/teams/t1/dissolve')).toBe(true);
+    expect(document.body.textContent).not.toContain('解散「面料一组」');
+  });
   it('lists people with their team and offers to create a missing employee profile', async () => {
     await render(HrOrganizationPage, 'hr', 'people');
     expect(document.body.textContent).toContain('李四');
