@@ -59,9 +59,7 @@ export function AdminApprovalAuthorities() {
     { key: 'action', header: '', width: '96px', align: 'right', render: row => <Button size="sm" icon={Pencil} disabled={!canEdit(row)} onClick={() => open(row)} aria-label={uiText('调整' + row.label + '审批人')}>{uiText("调整")}</Button> },
   ];
   return <>
-    <Toolbar right={<Button icon={RefreshCw} loading={loading} onClick={() => void load()}>{uiText("重新读取")}</Button>}>
-      <span className="mist-note">{uiText("审批人仍须持有相应岗位权限，服务器保存与审批时复核。")}</span>
-    </Toolbar>
+    <Toolbar right={<Button icon={RefreshCw} loading={loading} onClick={() => void load()}>{uiText("重新读取")}</Button>} />
     {error && <FailureNotice title={"审批资格读取失败"} detail={error} />}
     {missing.length > 0 && <Banner tone="warn" title={uiText('尚有 ' + missing.length + ' 项审批资格未配置')}>{missing.map(row => row.label).join('、')}{uiText("在配置前无法提交审批。")}</Banner>}
     {data && !supplierWriter && <Banner tone="neutral" title={uiText("供应商承诺审批人仅老板或管理员可修改")}>{uiText("当前账号可调整订单审批负责人；供应商承诺审批人须由持有数据字典写入权限的老板或管理员办理。")}</Banner>}

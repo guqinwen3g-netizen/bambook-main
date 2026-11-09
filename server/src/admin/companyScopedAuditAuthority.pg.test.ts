@@ -34,6 +34,13 @@ describe.skipIf(!url)('company-scoped audit log and approval authority on Postgr
       await db.role.create({ data: { id: `role-super-admin@${companies[i]}`, companyId: companies[i], code: 'role-super-admin', name: `Owner ${i} ${key}`, isSystem: true } });
       for (const id of [owners[i], members[i]]) await db.companyMember.create({ data: { companyId: companies[i], userId: id } });
       await db.userRole.create({ data: { id: randomUUID(), userId: owners[i], roleId: `role-super-admin@${companies[i]}` } });
+      // 订单主审批资格要求订单写入权限：成员按业务岗位持有 orders:write。
+      const salesRole = `role-sales-${key}@${companies[i]}`, orderWrite = await db.permission.upsert({ where: { scope: 'orders:write' }, create: { id: 'perm-orders-write', scope: 'orders:write' }, update: {} });
+      await db.role.create({ data: { id: salesRole, companyId: companies[i], name: `Sales ${i} ${key}`, isSystem: false } });
+      await db.rolePermission.create({ data: { id: randomUUID(), roleId: salesRole, permissionId: orderWrite.id } });
+      const root = `dept-root-${key}-${i}`, dept = `dept-sales-${key}-${i}`; await db.department.create({ data: { id: root, companyId: companies[i], name: `Root ${i} ${key}` } });
+      await db.department.create({ data: { id: dept, companyId: companies[i], name: `Sales ${i} ${key}`, parentId: root, metadata: { businessAttributes: ['fabric_business', 'garment_business'] } } });
+      await db.userRole.create({ data: { id: randomUUID(), userId: members[i], roleId: salesRole, departmentId: dept } });
     }
     app = express(); app.use(express.json());
     app.use('/api', createAuthorizationSnapshotGuard({ prisma: db }), tenantSurfaceGuard);
@@ -47,6 +54,8 @@ describe.skipIf(!url)('company-scoped audit log and approval authority on Postgr
     await db.orderApprovalAuthority.deleteMany({ where: { userId: { in: users } } });
     await db.userRole.deleteMany({ where: { userId: { in: users } } });
     await db.role.deleteMany({ where: { companyId: { in: companies } } });
+    await db.department.deleteMany({ where: { companyId: { in: companies }, parentId: { not: null } } });
+    await db.department.deleteMany({ where: { companyId: { in: companies } } });
     await db.company.deleteMany({ where: { id: { in: companies } } });
     await db.userAccount.deleteMany({ where: { id: { in: users } } });
     await db.$disconnect();

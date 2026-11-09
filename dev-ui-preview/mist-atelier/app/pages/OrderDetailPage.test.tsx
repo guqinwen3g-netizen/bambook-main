@@ -151,7 +151,7 @@ it('lets the business attach contract evidence and submit the entire draft for a
   const set=(label:string,value:string)=>{const node=getByLabelText(document.body,label) as HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement;act(()=>{if(node instanceof HTMLSelectElement){node.value=value;node.dispatchEvent(new Event('change',{bubbles:true}));return;}Object.getOwnPropertyDescriptor(node.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new Event('input',{bubbles:true}));});};
   set('PO / 合同号','CUSTOMER-PO');set('付款条款','T/T 30% 定金，70% 发货前付清');set('贸易术语','FOB');set('指定地点 / 港口','上海');
   await act(async()=>{const file=getByRole(document.body,'dialog',{name:'合同与审批资料'}).querySelector<HTMLInputElement>('input[type="file"]')!;Object.defineProperty(file,'files',{value:[new File(['purchase order'],'po.pdf',{type:'application/pdf'})],configurable:true});file.dispatchEvent(new Event('change',{bubbles:true}));});
-  await act(async()=>getByRole(document.body,'button',{name:'保存合同资料'}).click());await act(async()=>getByRole(host,'button',{name:'提交主单审批'}).click());
+  await act(async()=>getByRole(document.body,'button',{name:'保存合同资料'}).click());await act(async()=>getByRole(host,'button',{name:'提交主单审批'}).click());await act(async()=>getByRole(document.body,'button',{name:'保存并提交主单审批'}).click());
   expect(store.state!.orders[0].governance?.status).toBe('pending');expect(store.state!.orders[0].governance?.rounds[0].snapshot.lines).toHaveLength(1);expect(store.state!.orders[0].governance?.rounds[0].snapshot.contract.confirmationFileIds).toEqual(['po-evidence']);expect(queryByRoleSafe('交接后勤')).toBeNull();
 });
 function queryByRoleSafe(name:string){return [...host.querySelectorAll('button')].find(button=>button.textContent===name)||null;}
@@ -253,7 +253,7 @@ it('corrects a rejected order from 10 at 11 to 10 at 12 and preserves the reject
   await lineInput('销售单价','12');await act(async()=>getByRole(document.body,'button',{name:'保存条目'}).click());
   expect(store.state!.orderLines[0]).toMatchObject({id:lineId,qty:10,price:12});expect(store.state!.orders[0].amount).toBe(120);
   expect(store.state!.orders[0].governance?.status).toBe('draft');expect(store.state!.orders[0].governance?.rounds[0].snapshot.lines[0].price).toBe(11);
-  await act(async()=>getByRole(host,'button',{name:'提交主单审批'}).click());
+  await act(async()=>getByRole(host,'button',{name:'提交主单审批'}).click());await act(async()=>getByRole(document.body,'button',{name:'保存并提交主单审批'}).click());
   const approved=applyMistCommand(store.state!,{type:'order.governance.decide',payload:{id:orderId,decision:'approved',note:'已修正12 USD单价'}},{...actor,actorId:'leader'}).state;
   expect(approved.orders[0].amount).toBe(120);expect(approved.orders[0].governance?.rounds.map(round=>round.status)).toEqual(['rejected','approved']);
   expect(approved.orders[0].governance?.rounds.map(round=>round.snapshot.lines[0].price)).toEqual([11,12]);
@@ -570,7 +570,7 @@ it('retains a completed shipment node after the order is financially closed',()=
 });
 
 it('keeps one actionable handoff error and retained input on a standalone page',async()=>{
- store.state!.orders[0].governance!.status='approved';store.run.mockRejectedValueOnce(new Error('请先核对三项准备'));render();await act(async()=>getByRole(host,'button',{name:'交接后勤'}).click());const note=getByRole(document.body,'textbox',{name:'交接说明'}) as HTMLTextAreaElement;
+ store.state!.orders[0].governance!.status='approved';store.state!.orders[0].checklist.forEach(item=>{item.done=true;});store.run.mockRejectedValueOnce(new Error('请先核对三项准备'));render();await act(async()=>getByRole(host,'button',{name:'交接后勤'}).click());const note=getByRole(document.body,'textbox',{name:'交接说明'}) as HTMLTextAreaElement;
  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(note,'原交接内容');note.dispatchEvent(new Event('input',{bubbles:true}));});
  await act(async()=>getByRole(document.body,'button',{name:'确认交接'}).click());expect(document.body.querySelectorAll('[role="alert"]')).toHaveLength(1);expect(note.value).toBe('原交接内容');expect(document.body.textContent?.split('请先核对三项准备')).toHaveLength(2);
  presentedError='请先核对三项准备';render();expect(within(getByRole(document.body,'dialog',{name:'交接后勤'})).getByRole('alert').textContent).toContain('请先核对三项准备');expect(document.body.querySelectorAll('[role="alert"]')).toHaveLength(1);expect(note.value).toBe('原交接内容');
@@ -599,4 +599,39 @@ it('shows final completion instead of an earlier offline percentage on the origi
  fact.observations=[{id:'old-progress',asOf:'2026-10-07',stage:'sew',percent:40,quantity:4,sourceName:'工厂反馈',evidence:'当时进度',fileIds:[],recordedAt:context.now,recordedBy:'业务员',recordedById:'sales'}];
  const before=structuredClone(fact.observations);render();const table=getByRole(host,'table',{name:'订单条目'});
  expect(table.textContent).toContain('已完工');expect(table.textContent).not.toContain('工厂进度 40%');expect(fact.observations).toEqual(before);
+});
+
+it('opens the contract dialog with the missing items instead of submitting an incomplete draft',async()=>{
+  render();await act(async()=>getByRole(host,'button',{name:'提交主单审批'}).click());
+  const dialog=getByRole(document.body,'dialog',{name:'合同与审批资料'});
+  expect(dialog.textContent).toContain('提交审批前请补齐');expect(dialog.textContent).toContain('PO或合同号');
+  expect((getByRole(dialog,'button',{name:'保存并提交主单审批'}) as HTMLButtonElement).disabled).toBe(true);expect(store.run).not.toHaveBeenCalled();
+});
+
+it('keeps the saved contract and offers approver setup when no order approver can review the order',async()=>{
+  const ctx={...context,actorId:'sales',authority:{supplier:{},orderReviewerIds:{garment:[],fabric:[]}}};
+  const order=store.state!.orders[0];store.state!.files.push({id:'po-evidence',name:'po.pdf',mimeType:'application/pdf',size:1,storageKey:'workspace/po-evidence',createdAt:context.now} as any);
+  order.governance!.contract={...order.governance!.contract,poNumber:'PO-1',paymentNote:'T/T 30% 定金，70% 发货前付清',incoterm:'FOB',deliveryPlace:'上海',preShipmentPercent:100,confirmationFileIds:['po-evidence']};
+  store.run.mockImplementation(async(command:any)=>{const next=applyMistCommand(store.state!,command,ctx);store.state=next.state;return{requestId:'governance',revision:1,result:next.result};});
+  render();await act(async()=>getByRole(host,'button',{name:'提交主单审批'}).click());
+  await act(async()=>getByRole(document.body,'button',{name:'保存并提交主单审批'}).click());
+  const dialog=getByRole(document.body,'dialog',{name:'合同与审批资料'});
+  expect(dialog.textContent).toContain('资料已保存，审批未提交');expect(dialog.textContent).toContain('还没有可审批本单的订单审批人');
+  expect(store.state!.orders[0].governance?.status).toBe('draft');
+  await act(async()=>getByRole(dialog,'button',{name:'设置审批资格'}).click());
+  expect(go).toHaveBeenCalledWith('settings',undefined,{section:'approvals'});
+});
+
+it('shows the handoff readiness checks in the dialog and enables handoff only after all three are confirmed',async()=>{
+ const ctx={...context,authority:{supplier:{},orderReviewerIds:{garment:['leader'],fabric:[]}}};
+ store.state!.files.push({id:'po-evidence',name:'po.pdf',mimeType:'application/pdf',size:1,storageKey:'workspace/po-evidence',createdAt:context.now} as any);
+ const contract={...store.state!.orders[0].governance!.contract,poNumber:'PO-1',paymentNote:'T/T 30% 定金，70% 发货前付清',incoterm:'FOB',deliveryPlace:'上海',preShipmentPercent:100,confirmationFileIds:['po-evidence']};
+ for(const [command,actor] of [[{type:'order.governance.saveDraft',payload:{orderId,input:contract}},ctx],[{type:'order.governance.submit',payload:{orderId}},ctx],[{type:'order.governance.decide',payload:{id:orderId,decision:'approved',note:'通过'}},{...ctx,actorId:'leader'}]] as const)store.state=applyMistCommand(store.state!,command as any,actor as any).state;
+ store.run.mockImplementation(async(command:any)=>{const next=applyMistCommand(store.state!,command,ctx);store.state=next.state;render();return{requestId:'checklist',revision:1,result:next.result};});
+ render();await act(async()=>getByRole(host,'button',{name:'交接后勤'}).click());
+ const dialog=()=>getByRole(document.body,'dialog',{name:'交接后勤'});const group=()=>within(dialog()).getByRole('group',{name:'交接前核对'});
+ expect((within(dialog()).getByRole('button',{name:'确认交接'}) as HTMLButtonElement).disabled).toBe(true);
+ for(const label of ['拟发范围确认','收货与贸易条款确认','收款条件核对'])await act(async()=>within(group()).getByRole('checkbox',{name:label}).click());
+ expect(store.state!.orders[0].checklist.filter(item=>item.done).map(item=>item.label)).toEqual(expect.arrayContaining(['拟发范围确认','收货与贸易条款确认','收款条件核对']));
+ expect((within(dialog()).getByRole('button',{name:'确认交接'}) as HTMLButtonElement).disabled).toBe(false);
 });

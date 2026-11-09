@@ -96,9 +96,19 @@ describe('company-scoped order approval authority service', () => {
     await expect(createOrderMainApprovalService(prisma).replaceAuthorityConfig({ businessLine: 'fabric', userIds: ['outsider'], actorId: 'owner-1', companyId: A }))
       .rejects.toMatchObject({ code: 'ORDER_APPROVAL_AUTHORITY_INVALID_USER' });
     expect(tx.orderApprovalAuthority.updateMany).not.toHaveBeenCalled();
-    const ok = db(); await createOrderMainApprovalService(ok.prisma).replaceAuthorityConfig({ businessLine: 'fabric', userIds: ['m1'], actorId: 'owner-1', companyId: A });
+    const ok = db(); await createOrderMainApprovalService(ok.prisma, { canApprove: async () => true }).replaceAuthorityConfig({ businessLine: 'fabric', userIds: ['m1'], actorId: 'owner-1', companyId: A });
     expect(ok.tx.orderApprovalAuthority.updateMany.mock.calls[0][0].where).toEqual({ businessLine: 'fabric', companyId: A });
     expect(ok.tx.orderApprovalAuthority.create.mock.calls[0][0].data).toMatchObject({ companyId: A, userId: 'm1' });
     expect(ok.tx.auditLog.create.mock.calls[0][0].data.companyId).toBe(A);
+  });
+  it('replace rejects members without order write permission and lists only eligible candidates', async () => {
+    const { tx, prisma } = db(); tx.userAccount.findMany.mockResolvedValueOnce([{ id: 'qc' }]).mockResolvedValue([{ id: 'm1', roles: [] }, { id: 'qc', roles: [] }]);
+    const canApprove = vi.fn(async (_db: any, id: string) => id === 'm1');
+    await expect(createOrderMainApprovalService(prisma, { canApprove }).replaceAuthorityConfig({ businessLine: 'garment', userIds: ['qc'], actorId: 'owner-1', companyId: A }))
+      .rejects.toMatchObject({ code: 'ORDER_APPROVAL_AUTHORITY_INVALID_USER', message: '审批人须持有订单写入权限。' });
+    expect(tx.orderApprovalAuthority.updateMany).not.toHaveBeenCalled();
+    const listed = await createOrderMainApprovalService(prisma, { canApprove }).listAuthorityConfig(A);
+    expect(listed.users.map((user: any) => user.id)).toEqual(['m1']);
+    expect(canApprove).toHaveBeenCalledWith(expect.anything(), 'qc', A);
   });
 });

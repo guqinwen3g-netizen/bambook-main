@@ -164,6 +164,9 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const dailyDigest=mistDailyDigest(state,platformBusinessDate(businessNow()),view=>session.canAccessView(view as View));
   const canDevelopment=session.canAccessView('development' as View), canOrders=session.canAccessView('orders' as View), canCustomers=session.canAccessView('crm' as View), canProduction=session.canAccessView('production-board' as View);
   const [route, setRoute] = React.useState<Route>(readMistRoute);
+  // 已被服务端明确拒绝的操作提示属于原页面；换页后撤下，不让它带着“重新读取”跟到别的页面。
+  const dismissRejection = workspace.dismissRejection;
+  React.useEffect(() => { dismissRejection?.(); }, [route.view, route.id, dismissRejection]);
   const personalSection = personalSettingsSection(route);
   const documentTitle = pageDocumentTitle(personalSection ? 'account' : session.status === 'anonymous' && publicEntryForHost(location.host) === 'platform' ? 'platform-login' : route.view, { anonymous: session.status === 'anonymous', loading: session.status === 'loading', platformOnly, mustChangePassword: !session.localMode && session.user?.mustChangePassword, invitation: new URLSearchParams(location.search).get('kind') === 'invite' });
   React.useEffect(() => { document.title = localizedPageTitle(documentTitle); }, [documentTitle, locale]);

@@ -38,6 +38,8 @@ export interface MistWorkspaceContext {
   downloadCreditDocument: (creditId: string, versionId: string) => Promise<void>;
   fileUrl: (file: MistFile) => string;
   refresh: () => Promise<void>; recover: () => Promise<MistRunReceipt | undefined>;
+  /** 撤下上一条已明确被服务端拒绝（结果确定、无需核对）的操作提示；离开页面时由外壳调用。 */
+  dismissRejection?: () => void;
   switchWorkspace: (id: string) => Promise<void>;
   createWorkspace: (name: string, seed?: 'demo' | 'empty') => Promise<void>;
   archivedWorkspaces?:ArchivedMistWorkspace[];
@@ -240,6 +242,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
   const [workspaces, setWorkspaces] = React.useState<Array<{ id: string; name: string; shared?: boolean }>>([]);
   const [archivedWorkspaces,setArchivedWorkspaces]=React.useState<ArchivedMistWorkspace[]>([]);
   const [loading, setLoading] = React.useState(true), [saving, setSaving] = React.useState(false), [error, setError] = React.useState('');
+  const rejection = React.useRef('');
   const [pending, setPending] = React.useState<Pending | null>(null);
   const [pendingCreate, setPendingCreate] = React.useState<MistPendingCreate | null>(null);
   const [commandRecovery,setCommandRecovery]=React.useState<MistCommandRecovery|null>(null);
@@ -451,6 +454,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
           if (mounted.current && live.current.key === bound.key && live.current.userId === bound.userId && live.current.status === 'authenticated'
             && scopeEpoch.current === operationEpoch && readEpoch.current === generation && snapshot.current?.id === intent.workspaceId && !pendingRef.current && !pendingCreateRef.current) setError(message);
         } else setError(message);
+        rejection.current = known ? message : '';
       }
       throw failure;
     }
@@ -717,7 +721,8 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
   },[authority.key,authority.userId,authority.status,boundEpoch,boundWorkspaceId,archivedWorkspaces,assertIdentity,assertSource,lock,performLifecycle,unlock]);
   const noticeScope=agentTaskNoticeScope(session.sessionKey,visible?.id,session.user);
   const agentTaskNotices=useAgentTaskNotices(noticeScope,visible?.id,mistApiRequest,JSON.stringify([session.user?.id,visible?.id]));
-  return <Context.Provider value={{ agentTaskNotices,state: visible?.state ?? null, workspace: visible, workspaces: scopeIsCurrent ? workspaces : [], archivedWorkspaces:scopeIsCurrent?archivedWorkspaces:[],refreshArchived,archiveWorkspace:()=>changeArchive('archive'),restoreWorkspace:id=>changeArchive('restore',id),changeMember,mail,closeMailReview,loading: scopeIsCurrent ? loading : session.status !== 'anonymous', error: scopeIsCurrent && !pending ? error : '', saving: scopeIsCurrent ? saving : false, pending: scopeIsCurrent ? pending : null, pendingCreate: scopeIsCurrent ? pendingCreate : null, commandRecovery:scopeIsCurrent&&commandRecovery?.workspaceId===visible?.id&&commandRecovery?.actorId===session.user?.id?commandRecovery:null, run, uploadFile, downloadFile, readFile, prepareCreditDocument, issueCreditDocument, downloadCreditDocument, fileUrl, refresh, recover, switchWorkspace, createWorkspace }}><AssistantConversationProvider scope={session.sessionKey+':'+(visible?.id??'')}>{uiText(children)}</AssistantConversationProvider></Context.Provider>;
+  const dismissRejection = React.useCallback(() => { const message = rejection.current; if (!message) return; rejection.current = ''; setError(previous => previous === message ? '' : previous); }, []);
+  return <Context.Provider value={{ dismissRejection,agentTaskNotices,state: visible?.state ?? null, workspace: visible, workspaces: scopeIsCurrent ? workspaces : [], archivedWorkspaces:scopeIsCurrent?archivedWorkspaces:[],refreshArchived,archiveWorkspace:()=>changeArchive('archive'),restoreWorkspace:id=>changeArchive('restore',id),changeMember,mail,closeMailReview,loading: scopeIsCurrent ? loading : session.status !== 'anonymous', error: scopeIsCurrent && !pending ? error : '', saving: scopeIsCurrent ? saving : false, pending: scopeIsCurrent ? pending : null, pendingCreate: scopeIsCurrent ? pendingCreate : null, commandRecovery:scopeIsCurrent&&commandRecovery?.workspaceId===visible?.id&&commandRecovery?.actorId===session.user?.id?commandRecovery:null, run, uploadFile, downloadFile, readFile, prepareCreditDocument, issueCreditDocument, downloadCreditDocument, fileUrl, refresh, recover, switchWorkspace, createWorkspace }}><AssistantConversationProvider scope={session.sessionKey+':'+(visible?.id??'')}>{uiText(children)}</AssistantConversationProvider></Context.Provider>;
 }
 export function useMistWorkspace(): MistWorkspaceContext {
   const context = React.useContext(Context); if (!context) throw new Error('useMistWorkspace must be used inside MistWorkspaceProvider'); return context;

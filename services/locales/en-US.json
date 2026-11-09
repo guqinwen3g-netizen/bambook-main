@@ -2669,7 +2669,6 @@
   "已配置": "Configured",
   "配置版本": "Configuration version",
   "调整": "Adjustment",
-  "审批人仍须持有相应岗位权限，服务器保存与审批时复核。": "Approvers still need to have the corresponding job permissions; the server saves and reviews during approval.",
   "审批资格读取失败": "Failed to read approval qualifications",
   "尚有": "Still have",
   "项审批资格未配置": "Some approval qualifications are not configured",
@@ -6588,5 +6587,12 @@
   "还没有可下单的客户": "No customer is available for ordering yet",
   "去建立客户": "Create a customer",
   "请业务负责人先建立客户档案": "Ask the sales lead to create the customer record first",
-  "信用额度（结算币种）": "Credit limit (settlement currency)"
+  "信用额度（结算币种）": "Credit limit (settlement currency)",
+  "保存并提交主单审批": "Save and submit for order approval",
+  "资料已保存，审批未提交": "Saved; approval not submitted",
+  "提交审批前请补齐": "Complete before submitting for approval",
+  "还没有可审批本单的订单审批人": "No order approver can review this order yet",
+  "设置审批资格": "Set approvers",
+  "请管理员在 设置 · 审批资格 中指定": "Ask an administrator to assign one in Settings · Approvers",
+  "交接前核对": "Pre-handoff checks"
 }

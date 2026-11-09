@@ -10,7 +10,7 @@ import {Nav,type Route} from '../nav';
 
 const bridge=vi.hoisted(()=>({session:{sessionKey:'session-a',status:'authenticated',user:{id:'actor-a'},canAccessView:(_:string)=>true} as any,workspaceId:'workspace-a',status:'pending',version:0,listeners:new Set<()=>void>(),refresh:vi.fn(),extra:null as any}));
 vi.mock('./auth',()=>({useMistSession:()=>bridge.session}));
-vi.mock('./workspace',async()=>{const React=await import('react');const {createMistState}=await import('../../../../server/src/shared/mistWorkspace');const base=createMistState({actorName:'测试',actorId:'actor-a',now:'2026-10-13T00:00:00.000Z',id:()=>crypto.randomUUID()},'empty');return{useMistWorkspace:()=>{React.useSyncExternalStore(listener=>{bridge.listeners.add(listener);return()=>{bridge.listeners.delete(listener);};},()=>bridge.version);return{workspace:{id:bridge.workspaceId,name:'本公司',revision:1,ownerId:'owner-x'},state:{...base,...(bridge.extra||{}),orderStatus:bridge.status},refresh:bridge.refresh};}};});
+vi.mock('./workspace',async()=>{const React=await import('react');const {createMistState}=await import('../../../../server/src/shared/mistWorkspace');const base=createMistState({actorName:'测试',actorId:'actor-a',now:'2026-10-13T00:00:00.000Z',id:()=>crypto.randomUUID()},'empty');return{useMistWorkspace:()=>{React.useSyncExternalStore(listener=>{bridge.listeners.add(listener);return()=>{bridge.listeners.delete(listener);};},()=>bridge.version);return{workspace:{id:bridge.workspaceId,name:'本公司',revision:(bridge as any).revision??1,ownerId:'owner-x'},state:{...base,...(bridge.extra||{}),orderStatus:bridge.status},refresh:bridge.refresh};}};});
 vi.mock('../../../../services/apiService',()=>({apiService:{getAuthHeaders:()=>({'Content-Type':'application/json','X-Test-Actor':bridge.session.user.id})}}));
 import {useMistWorkspace} from './workspace';
 import {MistReviewButton,MistReviewProvider} from './reviews';
@@ -35,7 +35,7 @@ async function typeNote(value:string){const input=getByLabelText(document.body,'
 async function prepareDecision(){await openRow();await typeNote('核对合同通过');}
 function deferred(){let resolve!:(value:any)=>void;const promise=new Promise<any>(yes=>{resolve=yes;});return{promise,resolve};}
 beforeEach(()=>{
- (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;localStorage.clear();bridge.listeners.clear();bridge.session={sessionKey:'session-a',status:'authenticated',user:{id:'actor-a'},canAccessView:()=>true};bridge.workspaceId='workspace-a';bridge.status='pending';bridge.version=0;bridge.extra=null;serverStatus='pending';postCount=0;intercept=undefined;rows=undefined;route={view:'approvals'};go.mockReset();
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;localStorage.clear();bridge.listeners.clear();bridge.session={sessionKey:'session-a',status:'authenticated',user:{id:'actor-a'},canAccessView:()=>true};bridge.workspaceId='workspace-a';bridge.status='pending';(bridge as any).revision=1;bridge.version=0;bridge.extra=null;serverStatus='pending';postCount=0;intercept=undefined;rows=undefined;route={view:'approvals'};go.mockReset();
  bridge.refresh=vi.fn(async()=>{bridge.status=serverStatus;publish();});
  vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('fetch',vi.fn(async(url:string,init:RequestInit={})=>{
   const intercepted=intercept?.(String(url),init);if(intercepted)return intercepted;
@@ -177,4 +177,10 @@ it('shows who decided a handled approval, when, and the note',async()=>{
   // 带签字的已批准事项：按图片加载归档签字。
   expect(document.querySelector('[data-approval-signature]')?.getAttribute('src')).toMatch(/^blob:/);
  }finally{rows=undefined;intercept=undefined;route={view:'approvals'};}
+});
+
+it('reloads the approval queue as soon as the company data revision changes',async()=>{
+ rows=[];await render();expect(tableRows()).toHaveLength(0);
+ rows=[row({requesterId:'actor-a'})];(bridge as any).revision=2;await act(async()=>{publish();});await act(async()=>{await Promise.resolve();});
+ expect(tableRows().some(r=>r.textContent?.includes('SO-ONE'))).toBe(true);
 });
