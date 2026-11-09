@@ -31,6 +31,12 @@ beforeEach(() => { vi.clearAllMocks(); });
 // 纯函数：periodKeyForDate
 // ═══════════════════════════════════════════════════════════════
 describe('periodKeyForDate 周期键计算', () => {
+  it('按北京时间日历取键：UTC 18:00 已是北京次日', () => {
+    const date = new Date('2026-12-31T18:00:00Z');
+    expect(periodKeyForDate('day', date)).toBe('2027-01-01');
+    expect(periodKeyForDate('year', date)).toBe('2027');
+    expect(renderFormatTemplate('{prefix}-{year}{month}{day}-{seq:03}', { prefix: 'EXC', seq: 7, date })).toBe('EXC-20270101-007');
+  });
   const date = new Date(2026, 7, 15); // 2026-08-15 (month 0-indexed)
 
   it('year → 4 位年', () => {

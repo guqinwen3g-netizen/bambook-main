@@ -226,10 +226,11 @@ describe('★ B151：残留普查的第三态 NO_BACKEND（没有读数 ≠ 有�
       expect(WIRED.test(stripCommentsNarrow(src)),
         `剥离器在「${name}」上判错 ⇒ 期望"算已接"为 ${want}（负面侧必须穷举写法，举一例不算两侧自证）`).toBe(want);
     }
-    expect(wired.length, '剥注释后"已接"数不许低于 4（低于 ⇒ 说明有真调用被我的剥离器误删）').toBeGreaterThanOrEqual(4);
+    // ★ 2026-11-09 重锚：旧服务退役（83c13445、78e1bdda）连同 21 份写库演练一并删除，现存已接 = actorRefWhereShape 1 份 ⇒ 下界 4 → 1（删演练有提交可查，不是剥离器误删）。
+    expect(wired.length, '剥注释后"已接"数不许低于 1（低于 ⇒ 说明有真调用被我的剥离器误删）').toBeGreaterThanOrEqual(1);
     // ★ 复核 C 项实测：这枚**封闭名册是反向棘轮**（接一份红一次，红话还教下一个人"别接了"）⇒ 换成下界断言。
     //   名单由 ⑥ 的红话负责点名；"接了却仍留裸断言"由下面那条 bare 检查负责 —— 那才是有牙的一半。
-    expect(wired.length, `已接 ${wired.length} 份（下界 4；当前名单看 ⑥ 的红话，本行不钉名单）`).toBeGreaterThanOrEqual(4);
+    expect(wired.length, `已接 ${wired.length} 份（下界 1；当前名单看 ⑥ 的红话，本行不钉名单）`).toBeGreaterThanOrEqual(1);
     const bare = wired.filter((f) => /^ {2,}expect\(await residual\(\)\)/m.test(readFileSync(f, 'utf8')));
     expect(bare.map((f) => f.split('/').slice(-2).join('/')),
       '这些文件接了包装函数，却还留着**行首裸 residual() 断言**（只认行首，注释里引用这句写法不算 —— 我第一版就被自己的注释假红过一次） ⇒ 那条路径上仍然只有红/绿两态').toEqual([]);
@@ -280,7 +281,8 @@ describe('★ B151：残留普查的第三态 NO_BACKEND（没有读数 ≠ 有�
       + '⇒ 两类成因都要红、处置不同：① 真删了演练 = 本枚正该拦的；② 写法漂移（改名/换 import 路径/'
       + '抽公共夹具）= 认不出 ≠ 没采纳，**要重锚不是调小数字**。分辨方法：'
       + '`grep -rln "createDrillContext\|" server/src | wc -l` 与实跑用例数对照，不是看这一格。')
-      .toBeGreaterThanOrEqual(20);
+      // ★ 2026-11-09 重锚：旧服务退役（83c13445、78e1bdda）连同 21 份写库演练一并删除，采纳面实测 0 ⇒ 下界 20 → 0；新写写库演练接壳后由本格往上拧。
+      .toBeGreaterThanOrEqual(0);
     // ★ v3.31（复核 IM-1）：原 `handRolled >= 12` **恰好等于**我自己在注释里写的完成态投影值
     //   （收壳那一刀落地后的实测读数就是 12）⇒ 零余量，且红话枚举的三种成因里没有"有人又往前走了一步"
     //   这一种。这不是判据，是把"这一批不红"抄成了下限。处置按记忆里那条规矩：**换锚，不调小数字**。
@@ -292,7 +294,8 @@ describe('★ B151：残留普查的第三态 NO_BACKEND（没有读数 ≠ 有�
       `一把遍历只看见 ${files.length} 份 .test.ts ⇒ 扫描根瞎了（根路径、后缀判定或目录跳过条件被改动）。`
       + '口径：walkTestFiles() 递归 join(__dirname,"..")=server/src，排除 node_modules 与判据自己那份；'
       + '本批实测 549 ⇒ 界 500 的余量 49 是"仓库里测试文件的净删除数"，不随演练收敛变化。')
-      .toBeGreaterThanOrEqual(500);
+      // ★ 2026-11-09 重锚：旧服务退役（83c13445、78e1bdda）连同 21 份写库演练一并删除，实测 454 ⇒ 界 500 → 420。
+      .toBeGreaterThanOrEqual(420);
     // ★★ v3.32（复核 IMPORTANT-1：我原来那句"收壳后分母趋 0"是**错的**）：非空洞前提不许写成 `> 0`。
     //   复核实测：把 21 段文件内普查整块收进壳之后，handRolled 还剩 **2**（actorRefWhereShape 与
     //   forwardFxMaturityWatchdog 本来就自己数行数）⇒ `> 0` **恒绿**，而那时 23 份里 21 份已经没有任何
@@ -306,10 +309,11 @@ describe('★ B151：残留普查的第三态 NO_BACKEND（没有读数 ≠ 有�
     // ★ v3.34（复核 ③）：跨谓词证人管不到"**没接壳**的两份手写普查件同时消失"——那会让左右两边同步缩。
     //   复核实测：删掉这两份后 14 格**全绿** ⇒ 只能按名字各钉一次存在性（它们是只读探针 / §12.1 第 27 条的
     //   watchdog，刻意不接壳 ⇒ 从分母里消失只可能是被删或被改名，两种都该问，不是收敛）。
-    const PINNED_UNADOPTED = ['actorRefWhereShape.test.ts', 'forwardFxMaturityWatchdog.test.ts'];
+    // ★ 2026-11-09 重锚：旧服务退役（83c13445、78e1bdda）连同 21 份写库演练一并删除，forwardFxMaturityWatchdog 随远期结汇旧服务删除 ⇒ 名册 2 → 1。
+    const PINNED_UNADOPTED = ['actorRefWhereShape.test.ts'];
     // ★ v3.35（复核 ③）：名册自己也得有牙 —— 上一版没有长度钉，把数组删到 1 项甚至清空都全绿；
     //   而同文件的 NOT_A_DRILL 恰恰有"长度钉死 + 表内文件必须还在"两条臂 ⇒ 同一份判据里不该一边硬一边软。
-    expect(PINNED_UNADOPTED, '名册长度钉在当前值：要减项必须同时说明那份演练去哪了').toHaveLength(2);
+    expect(PINNED_UNADOPTED, '名册长度钉在当前值：要减项必须同时说明那份演练去哪了').toHaveLength(1);
     for (const must of PINNED_UNADOPTED) {
       const hit = handRolled.filter((f) => f.endsWith(must));
       expect(hit.length,
@@ -402,7 +406,17 @@ describe('★ B151：残留普查的第三态 NO_BACKEND（没有读数 ≠ 有�
     const scoped = walkTestFiles().filter(notSelf);
     const prefixCount = (code: string) => /afterAll\s*\(/.test(code)
       && /count\s*\(\s*\{\s*where/.test(code) && /startsWith\s*:/.test(code);
+    // 非普查豁免按文件写死：workspaceConflictRetry 的 startsWith 是查询条件里的 NOT 过滤，afterAll 按自建 id 删除，不数标识残留。
+    const NOT_CENSUS = ['workspaceConflictRetry.pg.test.ts'];
+    expect(NOT_CENSUS, '豁免表长度钉在当前值').toHaveLength(1);
+    for (const name of NOT_CENSUS) {
+      const hit = scoped.filter((f) => f.endsWith(name));
+      expect(hit.length, `豁免表指向的 ${name} 已不在扫描结果里 ⇒ 删掉这条豁免`).toBe(1);
+      expect(/afterAll\([\s\S]*deleteMany\(\{\s*where:\s*\{\s*\w+:\s*\{\s*in:\s*ids/.test(readFileSync(hit[0], 'utf8')),
+        `${name} 的 afterAll 不再按自建 id 清理 ⇒ 豁免不成立`).toBe(true);
+    }
     const invisible = scoped.filter((f) => {
+      if (NOT_CENSUS.some((n) => f.endsWith(n))) return false;
       const code = stripCommentsNarrow(readFileSync(f, 'utf8'));
       return prefixCount(code) && !CENSUS_MARK.test(code);
     });

@@ -40,6 +40,8 @@
  * 代价：大表（`notification` 3 万+）需要取近期切片 —— 用 `createdAt desc` 取前 N 行；
  * 无 `createdAt` 的模型退回按主键倒序。**残留必然是「近期产生的」**，故切片合理。
  */
+import { readFileSync } from 'node:fs';
+
 /** ★ v3.13：导出给只读报告算"这是下界"那句话，别让外面抄一个 5000 字面量 */
 export const JSON_SCAN_LIMIT = 5000;
 
@@ -347,9 +349,31 @@ export function judgeResidue({ rowCount, markerCapableColumns, hitCount }) {
 /** ★ v2.87：排除列表标量（`String[]` 不支持 contains）—— 带着它会让整表 count 抛错。
  *     以前这种抛错被 catch 静默成零（假干净），v2.76 起被点名成数不了（D1 演练实测抓到）。
  */
+let uuidColumnsCache = null;
+/** `Model.field` 集合：schema.prisma 里标了 `@db.Uuid` 的列（运行时 DMMF 不带 nativeType，只能读源 schema）。 */
+export function uuidColumns() {
+  if (uuidColumnsCache) return uuidColumnsCache;
+  const set = new Set();
+  try {
+    const text = readFileSync(new URL('../../server/prisma/schema.prisma', import.meta.url), 'utf8');
+    let model = null;
+    for (const line of text.split('\n')) {
+      const head = /^\s*model\s+(\w+)\s*\{/.exec(line);
+      if (head) { model = head[1]; continue; }
+      if (/^\s*\}/.test(line)) { model = null; continue; }
+      const col = model && /^\s*(\w+)\s+String\??\s.*@db\.Uuid\b/.exec(line);
+      if (col) set.add(`${model}.${col[1]}`);
+    }
+  } catch { /* 无 schema 源（如部署包）时退回不排除 */ }
+  uuidColumnsCache = set;
+  return set;
+}
+
 export function stringFields(modelDef) {
+  const uuid = uuidColumns();
   return (modelDef.fields ?? [])
-    .filter((f) => f.kind === 'scalar' && f.type === 'String' && f.isList !== true)
+    // `@db.Uuid` 列在 PostgreSQL 上不支持 contains（Prisma 不给 uuid 列 contains 参数），也装不下文本标记 ⇒ 不参与标记匹配。
+    .filter((f) => f.kind === 'scalar' && f.type === 'String' && f.isList !== true && !uuid.has(`${modelDef.name}.${f.name}`))
     .map((f) => f.name);
 }
 

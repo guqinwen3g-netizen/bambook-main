@@ -24,6 +24,28 @@ import { todayLocalKey } from '../../shared/localDate';
 const prisma = new PrismaClient();
 const DAY = todayLocalKey().replace(/-/g, '');
 const REG_KEY = `SEQREG_exceptionRequest_${todayLocalKey()}`;
+// 自带申请人与 ADMIN 兜底审批人（空库也能跑）；只建缺的那几行，afterAll 只删自己建的。
+const REQUESTER = 'usr_b274_requester';
+const REVIEWER = 'usr_b274_reviewer';
+const ADMIN_ROLE = 'role_admin';
+const ownFixtures: { users: string[]; roles: string[]; userRoles: string[] } = { users: [], roles: [], userRoles: [] };
+async function ensureFixtures() {
+  if (!(await prisma.role.findUnique({ where: { id: ADMIN_ROLE } }))) {
+    await prisma.role.create({ data: { id: ADMIN_ROLE, name: '管理员', isSystem: true } });
+    ownFixtures.roles.push(ADMIN_ROLE);
+  }
+  for (const [id, displayName] of [[REQUESTER, '回滚证人申请人'], [REVIEWER, '回滚证人审批人']]) {
+    if (!(await prisma.userAccount.findUnique({ where: { id } }))) {
+      await prisma.userAccount.create({ data: { id, displayName } });
+      ownFixtures.users.push(id);
+    }
+  }
+  const urId = 'ur_b274_reviewer_admin';
+  if (!(await prisma.userRole.findUnique({ where: { id: urId } }))) {
+    await prisma.userRole.create({ data: { id: urId, userId: REVIEWER, roleId: ADMIN_ROLE } });
+    ownFixtures.userRoles.push(urId);
+  }
+}
 
 const input = (tag: string) => ({
   exceptionCategory: 'price_deviation', subCategory: 'realdb_rollback', bypassedApprovalIds: [],
@@ -32,7 +54,7 @@ const input = (tag: string) => ({
   riskMitigationPlan: '限定本单一次性放行，本件跑完按自造自清口径删除自己建的行',
   targetType: 'Order', targetId: 'o_realdb_probe', action: 'shipment:release',
   validUntil: new Date(Date.now() + 86400000).toISOString(), maxUses: 1,
-  responsibleOwnerId: 'usr_demo_boss', requesterId: 'usr_demo_boss', notes: '', attachments: [],
+  responsibleOwnerId: REQUESTER, requesterId: REQUESTER, notes: '', attachments: [],
   clientSuppliedReviewerId: null,
 } as any);
 
@@ -94,6 +116,13 @@ afterAll(async () => {
     await prisma.dr013ExceptionRequest.delete({ where: { id: row.id } });
     if (row.approvalRequestId) await prisma.approvalRequest.delete({ where: { id: row.approvalRequestId } });
   }
+  if (ownFixtures.userRoles.length) await prisma.userRole.deleteMany({ where: { id: { in: ownFixtures.userRoles } } });
+  if (ownFixtures.users.length) {
+    await prisma.auditLog.deleteMany({ where: { actorId: { in: ownFixtures.users } } });
+    await prisma.notification.deleteMany({ where: { userId: { in: ownFixtures.users } } });
+    await prisma.userAccount.deleteMany({ where: { id: { in: ownFixtures.users } } });
+  }
+  if (ownFixtures.roles.length) await prisma.role.deleteMany({ where: { id: { in: ownFixtures.roles } } });
   await prisma.$disconnect();
 });
 
@@ -102,6 +131,7 @@ describe('B274 真库回滚：审批单已写入后失败 ⇒ PostgreSQL 当场�
   let seqBefore = 0;
 
   beforeAll(async () => {
+    await ensureFixtures();
     before = await counts();
     seqBefore = await seqValue();
   });

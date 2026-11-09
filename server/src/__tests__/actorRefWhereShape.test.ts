@@ -6,7 +6,7 @@
  *   必选列上放 `null` 会让整条 where 被拒（实测：`notification.count(...)` ⇒ `Argument \`userId\` is missing.`）。
  *   ⇒ 上一批的形状是"单测 13 例全绿、真库里那一刀永远数不到"。这条测试就是把**只有真客户端能给的证据**入门禁。
  *
- * ⚠️ 本文件**一行都不写**：全程 `count`（含只读的 `findMany` 取一个"已知非零对照"用的 actor id）。
+ * ⚠️ 本文件**一行都不写**：全程 `count`；"已知非零对照"在回滚事务里自造一行，事务结束不留任何行。
  *    所以它不进 B35 的候选集（候选按"代码行里自造 `TEST_<族>_` 标记"认，这里一个那种字面量都没有；
  *    `DRILL_ACTOR_PREFIX` 从基座取，不在此处手抄）⇒ 也不会给 §12.1 第 25/26 条那本残留账添新行。
  * ⚠️ 它**需要** `DATABASE_URL`（server 场域本来就连库跑演练）。没有 env 时会以连接错误红 ⇒ 那是环境问题，
@@ -69,17 +69,22 @@ describe('B120：普查与 foreign 的 where 形状必须被真 Prisma 接受（
   });
 
   it('★ 已知非零对照：上面那些 0 是因为探针不存在，不是因为查询恒零', async () => {
-    // 库里确有演练执行者（§12.1 第 25 条那本账）⇒ 按前缀取一个真 id，再问"谁钉着它"必须数得到东西
-    const actors = await db.userAccount.findMany({
-      where: { id: { startsWith: DRILL_ACTOR_PREFIX } }, select: { id: true }, take: 5,
-    });
-    expect(actors.length, '库里一个演练执行者都没有 ⇒ 这条对照失去输入，不能读成"普查没问题"（B109 同族）').toBeGreaterThan(0);
-    const ids = actors.map((a: any) => a.id);
+    // 在回滚事务里自造一个演练执行者并让一条通知钉住它，再问"谁钉着它"必须数得到东西；
+    // 事务最后抛出回滚 ⇒ 库里不留任何行，结论不依赖共享库里恰好有没有历史残留。
+    const ROLLBACK = new Error('rollback-control');
+    const actorId = `${DRILL_ACTOR_PREFIX}shape_control`;
     let maxOnOne = 0;
-    for (const r of RELS) {
-      const n = await delegateOf(r.model).count({ where: { [r.fk]: { in: ids } } });
-      maxOnOne = Math.max(maxOnOne, n);
-    }
-    expect(maxOnOne, '13 根列对 5 个真执行者全部数到 0 ⇒ 与 §9.1 记的"Notification 钉住演练账号"矛盾 ⇒ 先疑尺').toBeGreaterThan(0);
+    await db.$transaction(async (tx: any) => {
+      await tx.userAccount.create({ data: { id: actorId, displayName: 'control' } });
+      await tx.notification.create({ data: { userId: actorId, type: 'briefing', title: 'control', body: 'control' } });
+      for (const r of RELS) {
+        const delegate = tx[r.model.charAt(0).toLowerCase() + r.model.slice(1)];
+        const n = await delegate.count({ where: { [r.fk]: { in: [actorId] } } });
+        maxOnOne = Math.max(maxOnOne, n);
+      }
+      throw ROLLBACK;
+    }).catch((e: unknown) => { if (e !== ROLLBACK) throw e; });
+    expect(maxOnOne, '对自造并钉住的执行者全部数到 0 ⇒ 普查 where 恒零 ⇒ 先疑尺').toBeGreaterThan(0);
+    expect(await db.userAccount.count({ where: { id: actorId } }), '对照行必须随事务回滚').toBe(0);
   });
 });
