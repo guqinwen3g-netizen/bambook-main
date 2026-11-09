@@ -49,15 +49,9 @@ const SITES: Array<{ file: string; fn: string; type: string; label: string }> = 
     type: 'exceptionRequest',
     label: '异常处置单号 EXC-YYYYMMDD-NNN',
   },
-  {
-    file: '../../orderChanges/orderChangeRequestService.ts',
-    fn: 'nextRequestNumber',
-    type: 'orderChangeRequest',
-    label: '改单申请号 OCR-YYYYMMDD-NNN',
-  },
 ];
 
-describe('B274：取号不许把查询失败吞成 0，也不许退回"数一遍再 +1"（评审 I-19 两处）', () => {
+describe('B274：取号不许把查询失败吞成 0，也不许退回"数一遍再 +1"（评审 I-19；改单服务已删除，余异常域一处）', () => {
   for (const s of SITES) {
     const body = () => fnBody(readFileSync(fileURLToPath(new URL(s.file, import.meta.url)), 'utf8'), s.fn);
 

@@ -77,6 +77,6 @@ export function supplierContractMemoryFixture() {
   put('approvalRequest', { id: 'main-approved', actionType: 'order:main_approval', targetType: 'Order', targetId: 'order-1', status: 'approved', payload: { contentFingerprint: 'a'.repeat(64) }, createdAt: new Date() });
   put('relation', { id: 'supplier-1', name: 'Actual raw material supplier', category: 'Supplier', isOrganization: true, deletedAt: null });
   put('relation', { id: 'processor-1', name: 'Actual processing supplier', category: 'Supplier', isOrganization: true, deletedAt: null });
-  put('teamMember', { id: 'business-fabric', userId: 'business', leftAt: null, team: { id: 'fabric-team', status: 'active', deletedAt: null, metadata: { businessFamily: 'fabric' } } });
+  put('teamMember', { id: 'business-fabric', userId: 'business', leftAt: null, team: { id: 'fabric-team', status: 'active', deletedAt: null, department: { id: 'dept-fabric', status: 'active', parentId: 'company-root', metadata: { businessAttributes: ['fabric_business'] } } } });
   return { db, tables, put, all: (name: string) => [...tables.get(name)!.values()] };
 }

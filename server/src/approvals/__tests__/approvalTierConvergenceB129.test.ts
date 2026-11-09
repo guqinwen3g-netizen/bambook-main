@@ -107,16 +107,15 @@ function assertReachedApprovalBranch(res: any) {
     expect(r2.error.statusCode, '认不出的错误显式兜底 500 ⇒ 这正是每站都要写第二个参数的理由（默认档是 400）').toBe(500);
   });
 
-  it('④ 源码级断言：四站都不再自带"码→档"手写表（判据自己也要证明它认得出旧形状；claims/claimRoute.ts 已删除）', () => {
+  it('④ 源码级断言：保留两站都不再自带"码→档"手写表（判据自己也要证明它认得出旧形状；claimRoute、改单与付款申请服务已删除）', () => {
     const files = [
       'src/exceptions/exceptionService.ts',
-      'src/internalTrade/internalTransferService.ts', 'src/orderChanges/orderChangeRequestService.ts',
-      'src/paymentRequests/paymentRequestService.ts',
+      'src/internalTrade/internalTransferService.ts',
     ];
     const OLD = /NO_REVIEWER_RESOLVED['"]?\s*\?\s*4\d\d|includes\('NO_REVIEWER_RESOLVED'\)/;
     // 正面对照：detector 对"改前的形状"必须真的认（否则这一组是恒绿的）
     expect(OLD.test("const status = e?.code === 'NO_REVIEWER_RESOLVED' ? 409 : 500;"),
-      'detector 认不出改前的写法 ⇒ 下面那圈"四站都干净"是空的').toBe(true);
+      'detector 认不出改前的写法 ⇒ 下面那圈"各站都干净"是空的').toBe(true);
     for (const f of files) {
       // ★ 必须先剥注释再判（B76 那一课：注释里的旧写法会把守卫刷成一堵墙）——
       //   本批我在 routeV2 的注释里引用了改前写法做说明，不剥注释就会自我打脸。

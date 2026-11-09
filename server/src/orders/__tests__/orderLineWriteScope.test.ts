@@ -7,6 +7,8 @@ import { currentOrderLineWriteActor } from '../orderLineWriteAccess';
 const prior: TokenPayload = { userId: 'sales-current', roles: ['owner'], permissions: ['*'], departmentIds: [] };
 function storage(scopes = ['orders:write'], roleId = 'role-sales') {
   const user = { id: prior.userId, status: 'active', deletedAt: null as Date | null, primaryDeptId: 'sales-dept',
+    // 订单写入须由服装 / 面料业务部门成员持有（部门属性约束现有授权，不另行授予）。
+    primaryDepartment: { id: 'sales-dept', status: 'active', parentId: 'company-root', metadata: { businessAttributes: ['garment_business'] } },
     roles: [{ roleId, role: { id: roleId, permissions: scopes.map(scope => ({ permission: { scope } })) } }] };
   const tx = { userAccount: { findFirst: vi.fn(async (): Promise<typeof user | null> => user) }, userPermissionOverrides: { findMany: vi.fn(async () => []) } };
   return { tx, user };

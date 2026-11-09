@@ -9,7 +9,7 @@ import { listClaimCases } from '../claimCaseService';
 
 const actor = { userId: 'u', roles: ['sales'], permissions: ['aftersales:read'], authorizationLoaded: true } as any;
 function database(roleId = 'role-sales') {
-  const user = { id: 'u', status: 'active', deletedAt: null, roles: [{ roleId, role: { permissions: [] } }] };
+  const user = { id: 'u', status: 'active', deletedAt: null, roles: [{ roleId, role: { id: roleId, permissions: [] } }] };
   const delegate = () => ({ findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]),
     count: vi.fn().mockResolvedValue(0), findUnique: vi.fn().mockResolvedValue(null) });
   const db: any = { userAccount: delegate(), userPermissionOverrides: delegate(), relation: delegate(),
@@ -17,6 +17,7 @@ function database(roleId = 'role-sales') {
     claimCase: delegate(), claimDisposition: delegate(), returnReceipt: delegate(), returnReceiptLine: delegate(),
     repairWorkOrder: delegate(), creditNote: { ...delegate(), aggregate: vi.fn().mockResolvedValue({ _sum: { openAmount: null } }) } };
   db.userAccount.findFirst.mockResolvedValue(user);
+  db.userAccount.findUnique.mockResolvedValue(user); // 数据范围按当前账号（findUnique）重载
   db.relation.findMany.mockResolvedValue([{ id: 'R_OWN' }]);
   return { db, user };
 }

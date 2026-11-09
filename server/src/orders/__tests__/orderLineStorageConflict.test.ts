@@ -16,6 +16,7 @@ const prior: TokenPayload = { userId: 'u_actual_order_line_storage', roles: [], 
 function storage() {
   const order = { id: 'O_actual_storage', customer: 'Synthetic current customer', type: 'fabric', status: 'Pending', deletedAt: null };
   const user = { id: prior.userId, status: 'active', deletedAt: null,
+    primaryDepartment: { id: 'dept-fabric', status: 'active', parentId: 'company-root', metadata: { businessAttributes: ['fabric_business'] } },
     roles: [{ roleId: 'role-admin', role: { id: 'role-admin', permissions: [{ permission: { scope: 'orders:write' } }] } }] };
   const tx: any = {
     userAccount: { findFirst: vi.fn(async () => user), findUnique: vi.fn(async () => user) },

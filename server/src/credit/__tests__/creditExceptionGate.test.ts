@@ -9,6 +9,10 @@
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
+// 本文件只测信用门禁；MOQ 门禁（含"无条目订单不能确认"）由 moq 测试覆盖，此处按合规放行。
+vi.mock('../../moq/moqValidationService', () => ({
+  createMoqValidationService: () => ({ validateCreate: async () => ({ ok: true, lines: [] }) }),
+}));
 vi.mock('../../lib/logger', () => ({
   logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
 }));
@@ -142,6 +146,11 @@ function makeException(overrides: any = {}) {
   };
 }
 
+// 待确认订单须先通过业务域主单审批；本文件只测确认门禁，主单审批视为已通过。
+const GATE_ACTOR = { id: 'user_1', status: 'active', deletedAt: null, displayName: '业务员', metadata: {}, primaryDepartment: null, roles: [] };
+const mainApprovalOr = (other: unknown) => async ({ where }: any = {}) =>
+  where?.actionType === 'order:main_approval' ? { id: 'ar_main_approved' } : other;
+
 function makePrisma(opts: {
   order?: any;
   creditLimit?: any;
@@ -181,6 +190,7 @@ function makePrisma(opts: {
       findUnique: vi.fn().mockResolvedValue(order),
       update: vi.fn().mockImplementation(async ({ where, data }: any) => ({ ...order, ...data, id: where.id })),
     },
+    approvalRequest: { findFirst: vi.fn().mockImplementation(mainApprovalOr(null)) },
     orderStatusTransition: { create: vi.fn().mockResolvedValue({}) },
     auditLog: { create: vi.fn().mockResolvedValue({}) },
     dr013ExceptionRequest,
@@ -202,11 +212,16 @@ function makePrisma(opts: {
     creditLimit: { findFirst: vi.fn().mockResolvedValue(opts.creditLimit ?? null), findMany: vi.fn().mockResolvedValue([]) },
     invoice: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
     approvalRequest: {
-      findFirst: vi.fn().mockResolvedValue(null),
+      findFirst: vi.fn().mockImplementation(mainApprovalOr(null)),
       findUnique: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
     },
     dr013ExceptionRequest,
+    // MOQ 门禁读取实际订单行与经办人当前授权；本文件订单无条目，经办人为在职业务员。
+    orderLine: { findMany: vi.fn().mockResolvedValue([]) },
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    userAccount: { findFirst: vi.fn().mockResolvedValue(GATE_ACTOR), findUnique: vi.fn().mockResolvedValue(GATE_ACTOR) },
+    userPermissionOverrides: { findMany: vi.fn().mockResolvedValue([]) },
     entityLink: tx.entityLink,
     entityReference: tx.entityReference,
     $transaction: vi.fn(async (fn: any) => fn(tx)),
