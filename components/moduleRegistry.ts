@@ -102,7 +102,7 @@ export const BAMBOOK_NAV_GROUP_LABELS: Record<BambookNavGroup, string> = {
   customer: '客户与市场',
   fulfillment: '订单履约',
   finance: '财务与成本',
-  platform: '平台',
+  platform: '管理与工具',
 };
 
 export type MainCompilerSurfaceConfig = {
