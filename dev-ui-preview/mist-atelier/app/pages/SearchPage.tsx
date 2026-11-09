@@ -29,7 +29,7 @@ export function SearchPage() {
     </Toolbar></form>
     {!state ? <Banner tone="neutral" title={uiText("还没有打开公司")}>{uiText("进入一个公司后再搜索。")}</Banner>
       : !query.trim() ? <EmptyState icon={Search} title={uiText("输入关键词开始搜索")} description={uiText("也可以随时按 ⌘K 快速搜索。")} />
-      : !hits.length ? <EmptyState icon={Search} title={ui`没有找到「${query}」`} description={uiText("换个关键词或编号；看不到的页面中的记录不会出现在这里。")} />
+      : !hits.length ? <EmptyState icon={Search} title={ui`没有找到「${query}」`} description={uiText("换个关键词或编号。")} />
       : <>
         <Tabs value={group} onChange={setGroup} options={[{ value: 'all', label: '全部', count: hits.length }, ...groups.map(g => ({ value: g, label: g, count: hits.filter(h => h.group === g).length }))]} />
         {shown.map(g => {

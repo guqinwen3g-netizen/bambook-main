@@ -311,7 +311,6 @@ export function QuotationFeedbackPage() {
         )}
         <EmptyState
           title={uiText(w.loading ? "正在读取准确报价" : "未找到指定报价或被更正反馈")}
-          description={uiText("不将反馈记到另一份报价或另一条反馈。")}
           action={<Button onClick={back}>{uiText("返回报价")}</Button>}
         />
       </MistPage>
@@ -573,7 +572,7 @@ export function QuotationFeedbackPage() {
                 {input.kind === "counteroffer" && (
                   <FormSection
                     title={uiText("客户提出的还价与条件")}
-                    description={uiText("原币与原计价单位保持不变；空价格表示客户未提出价格，不代零。跨币种 / 单位请求写入条件，不能直接比价或换算。")}
+                    description={uiText("空价格表示客户未提出价格；跨币种 / 单位的请求写入条件。")}
                   >
                     {q.lines.map((line) => {
                       const r = input.lines.find((x) => x.lineId === line.id);
@@ -777,7 +776,6 @@ export function QuotationFeedbackPage() {
       ) : (
         <EmptyState
           title={uiText("尚无结构化客户反馈")}
-          description={uiText("旧客户接受 / 未接受依据继续保留在报价主线，不替历史记录补造原因。")}
         />
       )}
       {!editing && records.length > 0 && (

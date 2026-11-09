@@ -84,7 +84,7 @@ export function ProductProfile({ product }: { product: MarketProduct }) {
     </section>
     <section className="mist-product-section" aria-label={uiText("客户编码表")}>
       <CardHeader title={uiText("客户编码表")} tools={canWrite ? <Button size="sm" onClick={() => setEditing(true)}>{uiText("编辑")}</Button> : undefined} />
-      {product.customerCodes?.length ? <KeyValue items={product.customerCodes.map(c => ({ label: w.state?.customers.find(x => x.id === c.customerId)?.name || '客户已不存在', value: c.code, mono: true }))} /> : <EmptyState compact title={uiText("未登记客户编码")} description={uiText("客户使用自有编码下单时，在这里登记对照。")} />}
+      {product.customerCodes?.length ? <KeyValue items={product.customerCodes.map(c => ({ label: w.state?.customers.find(x => x.id === c.customerId)?.name || '客户已不存在', value: c.code, mono: true }))} /> : <EmptyState compact title={uiText("未登记客户编码")} />}
     </section>
     <ProductSources product={product} canWrite={canWrite} />
     <section className="mist-product-section" aria-label={uiText("来源链")}>
@@ -94,7 +94,7 @@ export function ProductProfile({ product }: { product: MarketProduct }) {
         <li><span>{uiText("准确版本")}</span><strong>{uiText(version ? version.label : '版本已不存在')}</strong>{version && <small>{version.factory}</small>}</li>
         <li><span>{uiText("QC 结论")}</span><strong>{uiText(version?.qc ? ({ pass: '通过', conditional: '有保留通过 · 需关注', reject: '不通过' } as const)[version.qc.result] : '无记录')}</strong>{version?.qc && <small>{version.qc.reviewer} · {version.qc.report}</small>}{version?.qc?.result === 'conditional' && <small>{uiText("QC 意见：")}{version.qc.opinion || '见 QC 报告'}</small>}</li>
         <li><span>{uiText("数字档案")}</span><strong><Mono>{product.sku}</Mono></strong><small>{businessDate(product.createdAt)}{uiText(" 建档")}</small></li>
-      </ol> : <EmptyState compact title={uiText("手工建档")} description={uiText("此档案未关联开发版本，规格以档案登记为准。")} />}
+      </ol> : <EmptyState compact title={uiText("手工建档")} />}
     </section>
     <section className="mist-product-section" aria-label={uiText("引用记录")}>
       <CardHeader title={uiText("引用记录")} sub={uiText(refs.length ? `${refs.length} 条` : undefined)} />

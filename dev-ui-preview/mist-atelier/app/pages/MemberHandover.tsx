@@ -33,7 +33,7 @@ export function MemberHandover({ state, directory, busy: outerBusy }: { state: M
     finally { setBusy(false); }
   };
   const records = [...accountHandovers(state)].reverse().slice(0, 10);
-  return <FormSection title={uiText("成员交接")} description={uiText("成员离职或调岗时，把其名下的客户、订单、开发案、面料寻样、商机、供应商经手与未完成待办一次交给新负责人。只交接负责关系，不改单据内容；审批中的订单须审批后再交接。")}>
+  return <FormSection title={uiText("成员交接")} description={uiText("审批中的订单须审批后再交接。")}>
     {error && <FailureNotice title={"交接未完成"} detail={error} />}
     {done && <Banner variant="status" tone="ok" title={uiText("交接完成")}>{done}</Banner>}
     <div className="mist-row" data-member-handover>
