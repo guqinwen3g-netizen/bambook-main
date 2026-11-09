@@ -312,7 +312,7 @@ export function QuotationHistoryPage() {
           >{uiText("导出当前对照")}</Button>
         }
       />
-      <Banner title={uiText("人工证据对照，不是推荐报价")}>{uiText("只读取当前授权公司；列表客户名称沿当前档案显示，不冒充历史冻结名称。默认同客户、同来源标识、同币种同单位；标识相同不代表规格与商业条件相同。草稿及审批中记录不作为已对客历史，本次整份报价不列入候选。不自动取均价、换算、复制价格或推算客户承受区间；税费、MOQ、品质、交期及其他费用仍需从原始依据人工核对。")}</Banner>
+      <Banner title={uiText("人工证据对照，不是推荐报价")}>{uiText("标识相同不代表规格与商业条件相同；税费、MOQ、交期请按原始依据核对。")}</Banner>
       {w.error && (
         <FailureNotice title={"历史读取未完成"} detail={w.error} retry={() => void retry()} retryLabel="重试读取" />
       )}
