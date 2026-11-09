@@ -1,5 +1,5 @@
 import {notifyMist,notificationOwners} from './mistNotifications';
-import { shiftCalendarDay } from './mistBusinessClock';
+import { nextBusinessCode, shiftCalendarDay } from './mistBusinessClock';
 import {recoveryOtherFulfilledMinor} from './mistClaimRecoveryReceipts';
 import {openQcChargebacks} from './mistQcDisposition';
 import {openReturnCharges} from './mistReturnCharges';
@@ -674,9 +674,7 @@ function files(root: Root, value: unknown) {
 const fx = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export const nextPayableCode = (prefix: string, existing: Array<{ code: string }>, now: string) => nextCode(prefix, existing, now);
 const nextCode = (prefix: string, existing: Array<{ code: string }>, now: string) => {
-  const head = prefix + '-' + now.slice(0, 4) + '-'; let n = existing.filter(r => r.code.startsWith(head)).length + 1;
-  while (existing.some(r => r.code === head + String(n).padStart(4, '0'))) n++;
-  return head + String(n).padStart(4, '0');
+  return nextBusinessCode(prefix, existing.map(r => r.code), now);
 };
 function allocate(root: Root, c: MistContext, payment: SupplierPayment, input: unknown) {
   if (input === undefined) return 0;

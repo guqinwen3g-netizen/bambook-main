@@ -1,4 +1,5 @@
 import {replacementDeclaredUnitPrice} from './mistClaimReplacement';
+import { nextSerialCode } from './mistBusinessClock';
 import {packingBreakdownBlocker,packingFabricSpecification} from './mistPackingBreakdown';
 /**
  * 报关申报资料（2026-10-18 按《中华人民共和国海关进出口货物报关单填制规范》与《规范申报目录》的通行做法确定首版）。
@@ -189,7 +190,7 @@ export function applyCustomsDeclarationCommand(root: MistState, command: Customs
     if(colors.length>30)fail('适用颜色不能超过 30 个');
     if(family!=='fabric'&&colors.length)fail('按颜色限定仅适用于面料归类');
     for (const s of styles) { const other = list.find(c => !c.voided && c.id !== old?.id && c.styles.some(x => styleKey(x) === styleKey(s)) && (!colors.length || !c.colors?.length || colors.some(color=>c.colors!.some(value=>colorKey(value)===colorKey(color))))); if (other) fail(`款号 ${s} 已在归类 ${other.code}（${other.declaredName}）中`); }
-    const row: CustomsClassification = { id: old?.id || ctx.id(), code: old?.code || `HSC-${String(list.length + 1).padStart(4, '0')}`, family, hsCode: hs, declaredName, brandType, preference, elements, legalUnit, secondUnit, styles, ...(colors.length||old?.colors?.length?{colors}:{}), note: str(p.note, '备注', false, 500), createdAt: old?.createdAt || ctx.now, actor: old?.actor || ctx.actorName, ...(old ? { updatedAt: ctx.now } : {}) };
+    const row: CustomsClassification = { id: old?.id || ctx.id(), code: old?.code || nextSerialCode('HSC-', list.map(x => x.code)), family, hsCode: hs, declaredName, brandType, preference, elements, legalUnit, secondUnit, styles, ...(colors.length||old?.colors?.length?{colors}:{}), note: str(p.note, '备注', false, 500), createdAt: old?.createdAt || ctx.now, actor: old?.actor || ctx.actorName, ...(old ? { updatedAt: ctx.now } : {}) };
     if (old) Object.assign(old, row); else list.push(row);
     event(row.id, `${old ? '修改' : '建立'}商品归类 ${row.code}：${hs} ${declaredName}（款号 ${styles.join('、')}）`);
     return { id: row.id };

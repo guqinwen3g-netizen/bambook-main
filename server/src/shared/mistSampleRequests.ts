@@ -5,7 +5,7 @@
  * 样品费发票没有订单，回链客户与申请单（invoice.sampleRequestId），核销走开发费同一条“无订单应收”通道。
  */
 import { MistCommandError, type MistContext, type MistInvoice, type MistState } from './mistWorkspace';
-import { isCalendarDay } from './mistBusinessClock';
+import { isCalendarDay, nextBusinessCode } from './mistBusinessClock';
 import { applyFulfillmentCommand } from './mistFulfillment';
 import { platformBusinessDate } from './mistPlatform';
 import { sampleUnitAllowsDecimal } from './mistDevelopmentDomain';
@@ -60,7 +60,7 @@ export function applySampleRequestCommand(root: Root, command: SampleRequestComm
         fee = { amount: round2(positive(p.feeAmount, '样品费')), currency };
       }
       const row: MistSampleRequest = {
-        id: existing?.id || c.id(), code: existing?.code || `SR-${c.now.slice(0, 4)}-${String(list.length + 1).padStart(4, '0')}`, customerId: customer.id, customer: customer.name, ...(orderId ? { orderId } : {}),
+        id: existing?.id || c.id(), code: existing?.code || nextBusinessCode('SR', list.map(x => x.code), c.now), customerId: customer.id, customer: customer.name, ...(orderId ? { orderId } : {}),
         description: text(p.description, '样品要求'), quantity, unit, recipient: text(p.recipient, '收件人', true, 200), address: text(p.address, '寄送地址', true, 500), neededBy: day(p.neededBy, '需要日期'), note: text(p.note, '备注', false),
         ...(fee ? { fee } : {}), state: 'open', requesterId: existing?.requesterId || c.actorId || '', requester: existing?.requester || c.actorName, createdAt: existing?.createdAt || c.now, shipments: [],
       };
