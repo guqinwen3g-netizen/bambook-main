@@ -105,16 +105,6 @@ describe('★ 结构守卫：不许再内联一份「已发运」集合', () => 
   it('★ 不得再内联一份订单「已出运」集合（内容与真源完全一致即红）', () => {
     expect(inlineDuplicatesOf(SHIPPED_ORDER_STATUSES)).toEqual([]);
   });
-  it('★ 原内联点中仍保留的两个都必须引用真源（另三处所在文件已于 2026-11-06 删除）', () => {
-    const consumers = [
-      'shipping/allocationService.ts',
-      'orderChanges/orderChangeRequestService.ts',
-    ];
-    for (const rel of consumers) {
-      const src = readFileSync(path.join(srcRoot, rel), 'utf8');
-      expect(src, `${rel} 未引用 shared/shippingLock`).toMatch(/from '\.\.\/shared\/shippingLock'/);
-    }
-  });
 });
 
 // ── 极小的 fs 帮助（避免引入额外依赖） ──

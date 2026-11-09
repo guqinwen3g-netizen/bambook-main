@@ -5,8 +5,6 @@ vi.mock('../../audit/routeAudit', () => ({ writeRouteAuditLog: vi.fn(async () =>
 import { FIXED_BUSINESS_TIME_ISO } from '../businessClock';
 import { nextBusinessNumber } from '../businessNumberService';
 import { renderFormatTemplate } from '../../sequence/sequenceService';
-import { actualFinancialDate } from '../../paymentRequests/supplierPaymentExecutionService';
-import { cashDate } from '../../finance/companyCashAccountService';
 import { orderSampleDate } from '../../samples/orderSampleSourceContract';
 import { evaluateLcEligibility } from '../../customs/lcGate';
 import { resolveCreditException } from '../../credit/creditExceptionGate';
@@ -36,7 +34,7 @@ describe('business consumers retain the development as-of date when process time
   });
 
   it('keeps actual financial and sample dates explicit instead of replacing historical input with today', () => {
-    for (const validate of [actualFinancialDate, cashDate, orderSampleDate]) {
+    for (const validate of [orderSampleDate]) {
       expect(validate('2024-02-29')).toBe('2024-02-29');
       for (const invalid of ['2026-02-29', '2026-02-30', '2026-10-08T00:18:00Z']) {
         expect(() => validate(invalid)).toThrow();

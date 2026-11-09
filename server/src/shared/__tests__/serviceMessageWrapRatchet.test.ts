@@ -39,12 +39,9 @@ const SERVER = path.resolve(HERE, '..', '..', '..');       // server/
 const WRAP_BASELINE: Record<string, number> = {
   'src/orders/orderLifecycleService.ts': 5,
   'src/index.ts': 0, // 2026-11-06：旧主 API 路由删除后归零，保留零基线防回潮。
-  'src/market/autoQuoteSources.ts': 2,
   'src/development/convertService.ts': 0,
-  'src/market/marketQuoteService.ts': 1,
   // 内部分类字段：LLM_ALL_PROVIDERS_FAILED 的逐 provider 摘要只供 mist/assistant.ts 分类，不回给用户、不写日志。
   'src/ai/llmProviders.ts': 1,
-  'src/orderChanges/orderChangeRequestService.ts': 0, // 2026-11-06：直接取消兜底改为固定文案，原文只进日志。
 };
 
 const WRAP_RE = /(?:message|error|reason)\s*:\s*(?:`[^`]*\$\{[^`]*?(?:\.message|String\([^)]*[Ee]rr|\?\?\s*e\b|\|\|\s*e\b)[^`]*`|'[^']*'\s*\+\s*[A-Za-z_]\w*\??\.message)/g;
@@ -109,7 +106,7 @@ describe('B30 服务层把原文拼进业务文案 · 逐文件棘轮（只许�
 
   it('★ 基线自身不是空表（空表 = 恒绿 = 没守卫）', () => {
     const sum = Object.values(WRAP_BASELINE).reduce((a, b) => a + b, 0);
-    expect(sum).toBe(9); // 2026-11-06：删除旧主 API 死代码后按保留文件重算（原 28）。
-    expect(Object.values(WRAP_BASELINE).filter((n) => n > 0).length).toBe(4); // 零基线条目保留以防回潮。
+    expect(sum).toBe(6); // 2026-11-09：旧行情报价服务退役后重算（2026-11-06 为 9，原 28）。
+    expect(Object.values(WRAP_BASELINE).filter((n) => n > 0).length).toBe(2); // 零基线条目保留以防回潮。
   });
 });

@@ -507,69 +507,6 @@ describe('admin SuperAdmin 角色权限编辑防线', () => {
 });
 
 /** Administrative transport uses the same business ownership and atomic audit rules. */
-describe('legacy admin approval decision boundaries', () => {
-  function approvalFixture(overrides: Record<string, any> = {}, auditFail = false) {
-    let row: any = { id: 'admin-approval', requesterId: 'requester', reviewerId: 'admin-1',
-      status: 'pending', actionType: 'test:approval-kernel-contract', targetType: 'KernelContract', targetId: 'q1',
-      payload: { businessScope: ['line1'] }, decidedAt: null, decisionNote: null, ...overrides };
-    const read = async () => ({ ...row });
-    const auditCreate = vi.fn(async () => {
-      if (auditFail) throw Object.assign(new Error('SQL fault sentinel'), { code: 'P2003' });
-      return {};
-    });
-    const prisma: any = {
-      approvalRequest: {
-        findUnique: vi.fn(read), findUniqueOrThrow: vi.fn(read),
-        updateMany: vi.fn(async ({ data }: any) => { row = { ...row, ...data }; return { count: 1 }; }),
-      },
-      userRole: { findMany: vi.fn().mockResolvedValue([{ roleId: 'role-admin' }]) },
-      // Decision commits the requester's result receipt in the same transaction.
-      notification: { createMany: vi.fn().mockResolvedValue({ count: 1 }) },
-      auditLog: { create: auditCreate }, $queryRaw: vi.fn().mockResolvedValue([{ id: row.id }]),
-      $transaction: vi.fn(async (callback: any) => {
-        const before = row;
-        try { return await callback(prisma); } catch (error) { row = before; throw error; }
-      }),
-    };
-    return { prisma, auditCreate, getRow: () => row };
-  }
-
-  it.each([
-    [{ reviewerId: 'another-reviewer' }, 403, 'APPROVAL_NOT_ASSIGNED'],
-    [{ requesterId: 'admin-1' }, 403, 'SELF_APPROVAL_FORBIDDEN'],
-    [{ status: 'approved', decisionNote: 'original decision' }, 409, 'APPROVAL_ALREADY_RESOLVED'],
-    [{ status: 'rejected', decisionNote: 'original rejection' }, 409, 'APPROVAL_ALREADY_RESOLVED'],
-  ] as const)('refuses unsafe legacy PATCH (%j)', async (overrides, status, code) => {
-    const f = approvalFixture(overrides);
-    const before = { ...f.getRow() };
-    const response = await request(makeApp(f.prisma)).patch('/admin/approvals/admin-approval')
-      .set('Authorization', `Bearer ${plainAdminToken()}`).send({ status: 'approved', decisionNote: 'attempted rewrite' });
-    expect(response.status).toBe(status); expect(response.body).toMatchObject({ ok: false, error: code });
-    expect(f.getRow()).toEqual(before); expect(f.auditCreate).not.toHaveBeenCalled();
-  });
-
-  it('valid assigned admin writes its real actor; a supplied reviewerId cannot forge the audit', async () => {
-    const f = approvalFixture();
-    const response = await request(makeApp(f.prisma)).patch('/admin/approvals/admin-approval')
-      .set('Authorization', `Bearer ${plainAdminToken()}`).send({ status: 'approved', reviewerId: 'forged-user' });
-    expect(response.status).toBe(200); expect(response.body).toEqual({ ok: true });
-    expect(f.getRow()).toMatchObject({ status: 'approved', reviewerId: 'admin-1' });
-    expect(f.auditCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
-      actorId: 'admin-1', action: 'approve', targetType: 'ApprovalRequest', targetId: 'admin-approval',
-      detail: expect.objectContaining({ approvalDecisionFact: expect.objectContaining({ decisionActorId: 'admin-1' }) }),
-    }) }));
-  });
-
-  it('mandatory audit error rolls back PATCH state rather than leaving an approved row behind a 500', async () => {
-    const f = approvalFixture({}, true); const before = { ...f.getRow() };
-    const response = await request(makeApp(f.prisma)).patch('/admin/approvals/admin-approval')
-      .set('Authorization', `Bearer ${plainAdminToken()}`).send({ status: 'approved', decisionNote: 'attempted decision' });
-    expect(response.status).toBe(500); expect(response.body.error).toBe('INTERNAL_ERROR');
-    expect(response.body.message).not.toContain('SQL'); expect(f.getRow()).toEqual(before);
-  });
-});
-
-/** 自定义角色：老板按公司实际岗位新建 / 改名 / 删除角色并组合权限；系统角色只能调权限。 */
 describe('admin custom roles', () => {
   function makeStore() {
     const roles = new Map<string, any>([

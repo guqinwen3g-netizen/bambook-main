@@ -62,16 +62,12 @@ import { InventoryStockInsufficientError } from '../../inventory/inventoryServic
 import { ProformaAccessError } from '../../finance/proformaInvoiceAccess';
 import { DevelopmentDomainError } from '../../development/developmentOperationalGuard';
 import { releaseQuantity } from '../../production/releaseBatchBinding';
-import { PurchaseOrderDomainError } from '../../procurement/purchaseOrderErrors';
-import { ReceiptDomainError } from '../../procurement/receiptWarehouseAccess';
 import { QcAssignmentError } from '../../qc/qcAssignmentAccess';
 import { QcReportError, qcReportFailure } from '../../qc/qcReportAuthority';
 import { ClaimVisibilityError } from '../../claims/claimVisibility';
 import { CashRefundError } from '../../claims/claimCashRefundFact';
 import { ClaimTransactionError } from '../../claims/claimApprovalFact';
-import { ApprovalDecisionError } from '../../approvals/approvalDecisionService';
 import { OrderLineWriteError, orderLineWriteFailure, currentOrderLineWriteActor } from '../../orders/orderLineWriteAccess';
-import { PricingDomainError } from '../../pricing/pricingError';
 import { stripComments } from './utils/sourceScan';
 import { classifyPrivateResultBoundaries } from '../../../../scripts/lib/tierMessageSources.mjs';
 
@@ -118,10 +114,6 @@ const USER_FACING: Array<[string, Error, ShapeSpec]> = [
     { code: 'DEVELOPMENT_CLOSED', status: 409, message: '开发已结案，请按变更流程继续' }],
   ['ProformaAccessError', new ProformaAccessError('FORBIDDEN', '当前账号不能处理原发票'),
     { code: 'FORBIDDEN', status: 403, message: '当前账号不能处理原发票' }],
-  ['PurchaseOrderDomainError', new PurchaseOrderDomainError('采购单已变化，请刷新', 'CONFLICT'),
-    { code: 'CONFLICT', status: 409, message: '采购单已变化，请刷新' }],
-  ['ReceiptDomainError', new ReceiptDomainError('收料来源不存在', 'NOT_FOUND'),
-    { code: 'NOT_FOUND', status: 404, message: '收料来源不存在' }],
   ['QcAssignmentError', new QcAssignmentError('UNAUTHORIZED', '请登录后处理验货任务'),
     { code: 'UNAUTHORIZED', status: 401, message: '请登录后处理验货任务' }],
   ['CreditExceptionConsumptionError', new CreditExceptionConsumptionError('EXCEPTION_NOT_FOUND', '受控例外不存在，请重新核对'),
@@ -134,8 +126,6 @@ const USER_FACING: Array<[string, Error, ShapeSpec]> = [
     { code: 'INVALID_STATE', status: 409, message: '退款没有准确付款批准事实' }],
   ['ClaimTransactionError', new ClaimTransactionError({ code: 'VALIDATION_FAILED', message: '索赔金额必须为有效正数' }),
     { code: 'VALIDATION_FAILED', status: 400, message: '索赔金额必须为有效正数' }],
-  ['ApprovalDecisionError', new ApprovalDecisionError('SELF_APPROVAL_FORBIDDEN', 403, '申请人不能审批自己的申请'),
-    { code: 'SELF_APPROVAL_FORBIDDEN', status: 403, message: '申请人不能审批自己的申请' }],
   ['HrError', new HrError('VALIDATION_FAILED', 'KPI 权重总和 120 超过 100'),
     { code: 'VALIDATION_FAILED', status: 400, message: 'KPI 权重总和 120 超过 100' }],
   ['CrmValidationError', new CrmValidationError('body.totalLimit 必填且须为正数（信用额度）'),
@@ -279,20 +269,14 @@ describe('V1 新增公共错误类：逐码 HTTP/文案及未知存储边界', (
     ['UNAUTHORIZED', 401], ['ACCOUNT_DISABLED', 401], ['FORBIDDEN', 403],
     ['AUTHORIZATION_UNAVAILABLE', 503], ['CONFLICT', 409], ['ORDER_NOT_FOUND', 404], ['ORDER_LINE_NOT_FOUND', 404],
   ] as const;
-  const pricingCases = [['VALIDATION_FAILED', 400], ['NOT_FOUND', 404], ['INVALID_MULTIPLIER', 400]] as const;
 
   it.each(orderLineCases)('OrderLineWriteError %s 真实两件套保留 %i 与公开文案', (code, status) => {
     expect(safeRouteError(new OrderLineWriteError(code, message), { fallbackCode: FALLBACK_NOT_IN_TABLE }))
       .toMatchObject({ code, status, message, passthrough: status < 500 });
   });
-  it.each(pricingCases)('PricingDomainError %s 保留独立核定状态 %i', (code, status) => {
-    expect(safeRouteError(new PricingDomainError(code, message), { fallbackCode: FALLBACK_NOT_IN_TABLE }))
-      .toMatchObject({ code, status, message, passthrough: true });
-  });
   it.each(['订单不存在', 'INVALID_STATE', '金额必须为正数'])('含 %s 的真实未知 SQL 形状不能伪装新增公共类', fragment => {
     const error = Object.assign(new Error(`SQL private_table.private_column ${fragment} /private/path`), { code: 'P2022' });
     expect(error).not.toBeInstanceOf(OrderLineWriteError);
-    expect(error).not.toBeInstanceOf(PricingDomainError);
     expect(orderLineWriteFailure(error)).toBeNull();
     const result = safeRouteError(error, { fallbackCode: 'INTERNAL_ERROR' });
     expect(result).toMatchObject({ code: 'INTERNAL_ERROR', status: 500, passthrough: false, message: GENERIC_ROUTE_ERROR_MESSAGE });
@@ -957,9 +941,9 @@ describe('★ 全仓 error class 普查：所有类逐个核定，新增类必�
     'HrError', 'RoleWriteRejectedError', 'SealValidationError',
     'StockMovementCasConflictError',
     'CreditExceptionConsumptionError', 'InventoryStockInsufficientError', 'ClaimVisibilityError', 'CashRefundError',
-    'ClaimTransactionError', 'ApprovalDecisionError',
-    'OrderLineWriteError', 'PricingDomainError',
-    'DevelopmentDomainError', 'ProformaAccessError', 'PurchaseOrderDomainError', 'ReceiptDomainError', 'QcAssignmentError',
+    'ClaimTransactionError',
+    'OrderLineWriteError',
+    'DevelopmentDomainError', 'ProformaAccessError', 'QcAssignmentError',
     'ManualInvoiceAbort', // Source-bound TX-result contract below; no public/raw exemption.
     'ReleaseGateError', // Private open contract: independent native consumer controls above; no finite exemption.
     'ProductionBatchFactsError', 'ReleaseBatchBindingError',

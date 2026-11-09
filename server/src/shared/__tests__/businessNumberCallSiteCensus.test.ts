@@ -93,7 +93,6 @@ describe('nextBusinessNumber 调用点族级守卫（占用追平不许漏）', 
         'finance/billingItemService.ts', // CostRecord
         'finance/invoiceMutationService.ts',
         'finance/paymentVoucherMutationService.ts',
-        'procurement/procurementService.ts',
         'quotations/quotationService.ts',
       ].sort(),
     );
