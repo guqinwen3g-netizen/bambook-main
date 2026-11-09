@@ -104,6 +104,8 @@ it('answers a question from business data in the conversation', async () => {
   order = c.workspace.state.orders[0].id;
   const t = await c.ask('哪些订单要跟进？'); expect(t.executor).toBe('platform'); await c.drain();
   const done = await c.read(t.id); expect(done).toMatchObject({ state: 'succeeded', result: '有 1 张订单需要跟进' });
+  expect(done.trail.map((x: any) => x.label)).toEqual(expect.arrayContaining([expect.stringContaining('查询订单'), expect.stringContaining('读取订单')]));
+  expect(done.trail.find((x: any) => x.ref)?.ref).toMatchObject({ type: 'order', id: order }); expect(JSON.stringify(done.trail)).not.toContain('customer');
   const mine = (await c.human.get(c.base + '/agent-identities?scope=mine').expect(200)).body.items.find((i: any) => i.kind === 'personal');
   const listed = (await c.human.get(c.base + '/agent-tasks').expect(200)).body.items; expect(listed.find((x: any) => x.id === t.id)).toMatchObject({ executor: 'platform', identityId: mine.id });
   expect((await c.human.get(c.base + '/agent-task-capabilities').expect(200)).body.platformAvailable).toBe(true);

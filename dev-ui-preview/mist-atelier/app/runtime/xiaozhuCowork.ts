@@ -45,7 +45,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if (run !== version.current || live.current !== bound) return;
       const own = mine.items.find(i => i.kind === 'personal') ?? null;
       setAvailable(caps.platformAvailable === true && own?.state !== 'disabled');
-      setTasks(page.items.filter(t => t.executor === 'platform' && !t.automationId && (!own || t.identityId === own.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-THREAD_LIMIT));
+      setTasks(page.items.filter(t => t.executor === 'platform' && (!own || t.identityId === own.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-THREAD_LIMIT));
       setError('');
     } catch (e) {
       // 任务通道读不到时退回只读问答，不把原因当作对话内容。
@@ -67,11 +67,11 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     return () => { stopped = true; clearInterval(timer); };
   }, [activeIds, base, available]);
   const post = async (path: string, body: object) => mistApiRequest(base + path, { method: 'POST', body: JSON.stringify(body) }) as Promise<{ item?: AgentTaskView }>;
-  const send = async (text: string): Promise<AgentTaskView | null> => {
+  const send = async (text: string, history: AgentTaskView[] = tasks.filter(t => !t.automationId)): Promise<AgentTaskView | null> => {
     const message = text.trim(); if (!message || busy || !base) return null;
     const bound = scope; setBusy(true); setError('');
     try {
-      const input = { name: message.slice(0, 60), instructions: composeInstructions(tasks, message), locale: interfaceLocale() };
+      const input = { name: message.slice(0, 60), instructions: composeInstructions(history, message), locale: interfaceLocale() };
       const fingerprint = JSON.stringify([base, input]);
       if (pending.current?.fingerprint !== fingerprint) pending.current = { fingerprint, id: crypto.randomUUID() };
       const r = await post('/personal-agent/tasks', { requestId: pending.current.id, ...input }) as { item: AgentTaskView };
@@ -87,5 +87,5 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const cancel = async (task: AgentTaskView) => {
     try { await post('/agent-tasks/' + encodeURIComponent(task.id) + '/cancel', { requestId: crypto.randomUUID(), version: task.version }); } catch (e) { setError(e instanceof Error ? e.message : '未能停止'); } finally { await load(); }
   };
-  return { available, tasks, loading, error, busy, send, answer, cancel, reload: load, track: (task: AgentTaskView) => setTasks(old => [...old.filter(t => t.id !== task.id), task]) };
+  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, error, busy, send, answer, cancel, reload: load, track: (task: AgentTaskView) => setTasks(old => [...old.filter(t => t.id !== task.id), task]) };
 }

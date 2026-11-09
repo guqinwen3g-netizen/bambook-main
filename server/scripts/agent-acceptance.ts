@@ -22,7 +22,9 @@ function plan(text: string) {
   if (facts.requiresRead) return tool('bambook_get', { type: mail ? 'email' : 'order', id: done.find((d: any) => d.name === 'bambook_query').result.results[0].id });
   if (asked.includes('问我') && !(task.questions ?? []).length) return tool('bambook_task', { action: 'question', question: '要看哪个客户？' });
   if (mail && count('bambook_execute') === 0) return tool('bambook_execute', { command: { type: 'email.move', payload: { id: done.find((d: any) => d.name === 'bambook_query').result.results[0].id, folder: 'archive' } } });
-  return finish(`已读取 ${done.find((d: any) => d.name === 'bambook_query')?.result?.results?.length ?? 0} 张订单。本机验收回答：${asked.slice(-40)}`);
+  const rows: any[] = done.find((d: any) => d.name === 'bambook_query')?.result?.results ?? [];
+  const table = rows.slice(0, 4).map((r: any) => `| ${r.label} | ${String(r.summary?.customer ?? r.summary?.state ?? '').slice(0, 14)} | ${String(r.summary?.due ?? '—')} |`).join('\n');
+  return finish(`## 交期最近的订单\n\n共查到 **${rows.length}** 张，需要优先跟进的是：\n\n| 订单 | 客户/状态 | 交期 |\n| --- | --- | --- |\n${table}\n\n**建议下一步**\n\n1. 先核对 ${rows[0]?.label ?? ''} 的备料进度\n2. 与客户 Cedar & Crown 确认出运窗口\n3. 逾期订单逐张说明原因\n\n> 以上只读，没有改动任何记录。`);
 }
 const local = createMistLocalRuntime({ directory: await mkdtemp(path.join(tmpdir(), 'agent-acceptance-')) });
 const complete = async (input: any) => { const user = input.messages?.at?.(-1)?.content ?? input.user ?? JSON.stringify(input); const text = String(user); return plan(text.slice(text.indexOf('User request:') + 13)); };

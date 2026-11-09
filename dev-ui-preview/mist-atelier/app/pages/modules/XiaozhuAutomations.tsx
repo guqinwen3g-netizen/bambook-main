@@ -17,7 +17,7 @@ const TRIGGERS: Array<{ value: Trigger; label: string; name: string; instruction
 const timed = (t: Trigger) => t === 'daily' || t === 'due_soon';
 const label = (t: Trigger) => TRIGGERS.find(x => x.value === t)!.label;
 
-export function XiaozhuAutomations({ open, onClose, workspaceId }: { open: boolean; onClose: () => void; workspaceId?: string }) {
+export function XiaozhuAutomations({ open, onClose, workspaceId, seed, newRule }: { open: boolean; onClose: () => void; workspaceId?: string; seed?: string; newRule?: number }) {
   const { go } = useNav(), toast = useToast(), base = workspaceId ? '/api/mist/workspaces/' + encodeURIComponent(workspaceId) + '/agent-automations' : '';
   const [rules, setRules] = React.useState<Rule[]>([]), [loading, setLoading] = React.useState(false), [error, setError] = React.useState('');
   const rulesRef = React.useRef(rules); rulesRef.current = rules;
@@ -27,6 +27,8 @@ export function XiaozhuAutomations({ open, onClose, workspaceId }: { open: boole
     try { setRules(((await mistApiRequest(base)) as { items: Rule[] }).items); setError(''); } catch (e) { setError(e instanceof Error ? e.message : '读取失败'); } finally { setLoading(false); }
   }, [base]);
   React.useEffect(() => { if (open) void load(); else setDraft(null); }, [open, load]);
+  React.useEffect(() => { if (open && seed) setDraft({ trigger: 'daily', name: seed.slice(0, 20), instructions: seed, time: '09:00' }); }, [open, seed]);
+  React.useEffect(() => { if (open && newRule) start(); }, [open, newRule]);
   React.useEffect(() => { if (!open) return; const timer = setInterval(() => { if (document.visibilityState !== 'hidden') void load(); }, 10_000); return () => clearInterval(timer); }, [open, load]);
   const start = () => { const t = TRIGGERS[0]; setDraft({ trigger: t.value, name: t.name, instructions: t.instructions, time: '09:00' }); };
   const pick = (value: Trigger) => { const t = TRIGGERS.find(x => x.value === value)!; setDraft(d => d && { ...d, trigger: value, name: t.name, instructions: t.instructions }); };

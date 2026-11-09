@@ -1,0 +1,6 @@
+import {expect,it} from 'vitest';
+import {linkRecords,recordIndex} from './xiaozhuRecords';
+const state:any={orders:[{id:'o1',code:'SO-1001'},{id:'o2',code:'SO-1001-B'}],customers:[{id:'c1',code:'CUS-1',name:'Cedar & Crown'}],devs:[],fulfillment:{purchases:[],shipments:[]},invoices:[],market:{quotations:[],suppliers:[]}};
+it('indexes codes and names longest first',()=>{const i=recordIndex(state);expect(i.map(r=>r.text)).toEqual(['Cedar & Crown','SO-1001-B','SO-1001','CUS-1']);expect(i[0]).toMatchObject({view:'crm',id:'c1'});});
+it('links known numbers but not code spans, existing links or partial matches',()=>{const i=recordIndex(state),at=(t:string)=>i.findIndex(r=>r.text===t);const text=linkRecords('跟进 SO-1001 和 SO-1001-B，`SO-1001` 不改，[SO-1001](x) 不改，XSO-1001 不改，客户 Cedar & Crown。\n```\nSO-1001\n```',i);expect(text).toContain(`[SO-1001](bambook://r/${at('SO-1001')})`);expect(text).toContain(`[SO-1001-B](bambook://r/${at('SO-1001-B')})`);expect(text).toContain('`SO-1001` 不改');expect(text).toContain('[SO-1001](x) 不改');expect(text).toContain('XSO-1001 不改');expect(text).toContain(`[Cedar & Crown](bambook://r/${at('Cedar & Crown')})`);expect(text.split('```')[1]).toBe('\nSO-1001\n');});
+it('does nothing without a state or records',()=>{expect(recordIndex(null)).toEqual([]);expect(linkRecords('SO-1',[])).toBe('SO-1');});
