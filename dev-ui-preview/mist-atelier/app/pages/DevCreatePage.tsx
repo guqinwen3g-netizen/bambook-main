@@ -193,6 +193,6 @@ export function DevCreatePage(){
       </fieldset></Card>
     </div>
     <InlineDevelopmentFactoryDialog open={factoryDialog} domain={domain} onClose={()=>setFactoryDialog(false)} onCreated={(_name,id)=>{set('factories',[...new Set([...f.factories,id])]);}}/>
-    <Dialog open={leave} onClose={()=>setLeave(false)} title={uiText("离开未保存的开发案？")} description={uiText("可以先保存草稿，稍后从开发列表继续填写。")} footer={<>{recovery}<Button variant="quiet" onClick={()=>setLeave(false)}>{uiText("继续编辑")}</Button><Button variant="quiet" onClick={backToSource}>{uiText("放弃并返回")}</Button><Button variant="primary" loading={busy} onClick={()=>void save(false)}>{uiText("保存草稿")}</Button></>} />
+    <Dialog open={leave} onClose={()=>setLeave(false)} title={uiText("离开未保存的开发案？")} footer={<>{recovery}<Button variant="quiet" onClick={()=>setLeave(false)}>{uiText("继续编辑")}</Button><Button variant="quiet" onClick={backToSource}>{uiText("放弃并返回")}</Button><Button variant="primary" loading={busy} onClick={()=>void save(false)}>{uiText("保存草稿")}</Button></>} />
   </MistPage>;
 }

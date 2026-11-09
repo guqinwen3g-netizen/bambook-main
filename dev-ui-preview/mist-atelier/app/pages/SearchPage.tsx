@@ -28,7 +28,7 @@ export function SearchPage() {
       <TextInput aria-label={uiText("搜索关键词")} icon={Search} placeholder={uiText("名称、编号、客户、供应商… 多个词用空格分开")} value={draft} onChange={e => setDraft(e.target.value)} />
     </Toolbar></form>
     {!state ? <Banner tone="neutral" title={uiText("还没有打开公司")}>{uiText("进入一个公司后再搜索。")}</Banner>
-      : !query.trim() ? <EmptyState icon={Search} title={uiText("输入关键词开始搜索")} description={uiText("也可以随时按 ⌘K 快速搜索。")} />
+      : !query.trim() ? <EmptyState icon={Search} title={uiText("输入关键词开始搜索")} />
       : !hits.length ? <EmptyState icon={Search} title={ui`没有找到「${query}」`} description={uiText("换个关键词或编号。")} />
       : <>
         <Tabs value={group} onChange={setGroup} options={[{ value: 'all', label: '全部', count: hits.length }, ...groups.map(g => ({ value: g, label: g, count: hits.filter(h => h.group === g).length }))]} />
