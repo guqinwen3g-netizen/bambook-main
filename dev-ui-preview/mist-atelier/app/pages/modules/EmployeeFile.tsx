@@ -13,7 +13,7 @@ type ProfileForm = { kind: 'profile'; exists: boolean; hireDate: string; regular
 type EventForm = { kind: 'event'; fromStatus: string; type: string; effectiveDate: string; toDeptId: string; toRoleId: string; reason: string; acknowledged: boolean };
 
 const message = (e: unknown, fallback: string) => e instanceof Error ? e.message : fallback;
-const today = () => businessNow().toLocaleDateString('sv-SE');
+const today = () => businessNow().toLocaleDateString('sv-SE',{timeZone:'Asia/Shanghai',});
 const eventChoices = (status: string) => EMPLOYMENT_EVENTS.filter(e => e.from.includes(status));
 const profileForm = (p: EmployeeProfile | null): ProfileForm => ({ kind: 'profile', exists: !!p, hireDate: p?.hireDate ?? '', regularDate: p?.regularDate ?? '', contractType: p?.contractType ?? '', contractEnd: p?.contractEnd ?? '', phone: p?.phone ?? '', emergencyContact: p?.emergencyContact ?? '', workLocation: p?.workLocation ?? '', notes: p?.notes ?? '' });
 

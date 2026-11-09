@@ -5,7 +5,7 @@ import { Button, KeyValue } from '../../../../components/mist';
 import { loadMistVersion, type MistVersion } from './versionData';
 
 export type { MistVersion } from './versionData';
-const time = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '未知' : d.toLocaleString(interfaceLocale(), { hour12: false }); };
+const time = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '未知' : d.toLocaleString(interfaceLocale(), {timeZone:'Asia/Shanghai',  hour12: false }); };
 
 /** 账号面板：开发时实时读取 Git；构建版本随应用打包，数据类型来自公司设置。 */
 export function MistVersionInfo({ demoSeed }: { demoSeed?: { version: number; seededAt: string } }) {

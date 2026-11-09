@@ -26,7 +26,7 @@ const STATUS: Record<MistReviewTask['status'], { tone: Tone; label: string }> = 
 export const APPROVAL_NOT_CONNECTED = ['受控例外'];
 const rowKey = (r: Pick<Row, 'workspaceId' | 'id'>) => r.workspaceId + '|' + r.id;
 const day = (at: string) => { try { return platformBusinessDate(at); } catch { return at.slice(0, 10); } };
-const when = (at: string) => { const d = new Date(at); return Number.isNaN(d.getTime()) ? at : d.toLocaleString(interfaceLocale(), { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }); };
+const when = (at: string) => { const d = new Date(at); return Number.isNaN(d.getTime()) ? at : d.toLocaleString(interfaceLocale(), {timeZone:'Asia/Shanghai',  year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }); };
 
 /** 按页签筛选：待我审批 = 我能决定的待审；我发起的 = 我提交的（含本公司里仅本人可见的）；已处理 = 已批准 / 已退回；空间内其他 = 我是所有者但不由我审批的待审。 */
 export function approvalRows(rows: Row[], tab: ApprovalTab, me: string) {

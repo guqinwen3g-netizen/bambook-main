@@ -16,7 +16,7 @@ import { FailureNotice } from '../../runtime/FailureNotice';
 
 const SUPER_ADMIN = new Set(['role-super-admin', '老板', '超级管理员', 'SuperAdmin', 'super-admin']);
 const isSuperAdmin = (role: AdminRole) => SUPER_ADMIN.has(role.id.split('@')[0]) || SUPER_ADMIN.has(role.name);
-const when = (at: string | null | undefined) => at ? new Date(at).toLocaleString(interfaceLocale(), { hour12: false }) : '—';
+const when = (at: string | null | undefined) => at ? new Date(at).toLocaleString(interfaceLocale(), {timeZone:'Asia/Shanghai',  hour12: false }) : '—';
 const message = (e: unknown, fallback: string) => e instanceof Error ? e.message : fallback;
 
 type Directory = { users: AdminAccount[]; departments: OrgDepartment[]; roles: AdminRole[]; canAppointInitialGeneralManager: boolean };

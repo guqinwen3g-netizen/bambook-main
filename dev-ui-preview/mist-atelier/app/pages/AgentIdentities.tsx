@@ -5,7 +5,7 @@ import {useMistSession} from '../runtime/auth';import {mistApiRequest,useMistWor
 import type {AgentIdentityPage,AgentIdentityView,AgentIdentityEvent} from '../../../../server/src/shared/mistAgentIdentities';
 import {agentConnectionEndpoint} from './AgentConnections';
 import { FailureNotice } from '../runtime/FailureNotice';
-const date=(v:string)=>new Date(v).toLocaleString(interfaceLocale(),{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
+const date=(v:string)=>new Date(v).toLocaleString(interfaceLocale(),{timeZone:'Asia/Shanghai', year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
 const states:Record<AgentIdentityView['state'],string>={pending:'待责任人启用',active:'凭据有效',disabled:'已停用',revoked:'已撤销',expired:'已过期',invalid:'已失效'};
 const actions:Record<AgentIdentityEvent['action'],string>={created:'新建',configured:'配置',issued:'签发密钥',revoked:'撤销密钥'};
 type ConfigPlan={id:string;name:string;ownerId:string;ownerName:string;mode:'read'|'operate';enabled:boolean;version:number;requestId:string};

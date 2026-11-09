@@ -139,7 +139,7 @@ export function SettingsPage() {
             </FormGrid>
             </FormSection>}
             {sec === 'activity' && <FormSection title={uiText("公司设置变更记录")}>
-            <DataTable ariaLabel={uiText("公司设置变更记录")} rows={state.events.filter(item=>item.entityType==='settings').slice(0,100)} rowKey={item=>item.id} columns={[{key:'time',header:'时间',render:item=>new Date(item.at).toLocaleString(interfaceLocale())},{key:'actor',header:'操作人',render:item=>item.actor},{key:'text',header:'变更内容',render:item=>item.text}]} empty={<EmptyState title={uiText("暂无设置变更记录")} description={uiText("之后保存的公司设置将记录在这里。")} compact/>}/>
+            <DataTable ariaLabel={uiText("公司设置变更记录")} rows={state.events.filter(item=>item.entityType==='settings').slice(0,100)} rowKey={item=>item.id} columns={[{key:'time',header:'时间',render:item=>new Date(item.at).toLocaleString(interfaceLocale(),{timeZone:'Asia/Shanghai',hour12:false})},{key:'actor',header:'操作人',render:item=>item.actor},{key:'text',header:'变更内容',render:item=>item.text}]} empty={<EmptyState title={uiText("暂无设置变更记录")} description={uiText("之后保存的公司设置将记录在这里。")} compact/>}/>
           </FormSection>}
             {sec === 'notify' && <FormSection title={uiText("通知")}>
             <SettingRow title={uiText("QC 报告回传")} control={<Switch ariaLabel={uiText("QC 报告回传")} checked={settings.notifications.qc} disabled={settingsLocked} onChange={value => notify('qc', value)} />} />

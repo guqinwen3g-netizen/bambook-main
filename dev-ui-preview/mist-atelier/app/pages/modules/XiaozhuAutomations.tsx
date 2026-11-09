@@ -53,7 +53,7 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, seed, newRule }
           <IconButton icon={Trash2} label={uiText(`删除 ${r.name}`)} disabled={busy} onClick={() => void remove(r)} /></div>
         {r.halted && <Banner tone="warn" title={uiText(r.halted.message)} />}
         <p className="mist-sub">{r.instructions}</p>
-        {r.runs.slice(0, 3).map(run => <div className="mist-row" key={run.taskId}><span className="mist-note">{new Date(run.at).toLocaleString(interfaceLocale())} · {run.detail}</span><span className="mist-spacer" /><Button size="sm" variant="quiet" onClick={() => go('assistant', run.taskId, { section: 'tasks' })}>{uiText('查看')}</Button></div>)}
+        {r.runs.slice(0, 3).map(run => <div className="mist-row" key={run.taskId}><span className="mist-note">{new Date(run.at).toLocaleString(interfaceLocale(),{timeZone:'Asia/Shanghai',hour12:false})} · {run.detail}</span><span className="mist-spacer" /><Button size="sm" variant="quiet" onClick={() => go('assistant', run.taskId, { section: 'tasks' })}>{uiText('查看')}</Button></div>)}
       </div>)}
     </div>
   </Drawer>;

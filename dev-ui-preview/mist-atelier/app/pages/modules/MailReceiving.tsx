@@ -9,7 +9,7 @@ import type { MailReceivingPage, MailReceivingView } from '../../../../../server
 type Plan = { accountId: string; enabled: boolean; version: number; sourceGeneration: number; requestId: string };
 const empty = (): MailReceivingPage => ({ serviceAvailable: false, items: [] });
 const labels: Record<MailReceivingView['state'], string> = { off: '已关闭', waiting: '等待收件', running: '收件中', retrying: '稍后重试', blocked: '需要重新开启' };
-const time = (value: string) => new Date(value).toLocaleString(interfaceLocale(), { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+const time = (value: string) => new Date(value).toLocaleString(interfaceLocale(), {timeZone:'Asia/Shanghai',  month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 
 export function useMailReceiving(accounts: EmailAccount[]) {
   const session = useMistSession(), { workspace } = useMistWorkspace();
