@@ -14,6 +14,7 @@
  * - 撤回：未到账的申报可撤回（写原因），发票与报关单释放，可重新申报。
  * 不代替电子税务局申报，只登记已发生的事实与金额勾稽。
  */
+import { nextBusinessCode } from './mistBusinessClock';
 import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
 import { platformBusinessDate } from './mistPlatform';
 import type { FulfillmentCustoms } from './mistFulfillment';
@@ -209,9 +210,7 @@ export function orderRebate(root: Root, orderId: string) {
 }
 
 const nextCode = (prefix: string, existing: Array<{ code: string }>, now: string) => {
-  const head = prefix + '-' + now.slice(0, 4) + '-'; let n = existing.filter(r => r.code.startsWith(head)).length + 1;
-  while (existing.some(r => r.code === head + String(n).padStart(4, '0'))) n++;
-  return head + String(n).padStart(4, '0');
+  return nextBusinessCode(prefix, existing.map(r => r.code), now);
 };
 function event(root: Root, c: MistContext, entityId: string, message: string) { root.events.unshift({ id: c.id(), entityType: 'rebate', entityId, actor: c.actorName, at: c.now, text: message, fileIds: [] }); }
 function files(root: Root, value: unknown) {

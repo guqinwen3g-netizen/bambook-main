@@ -6,7 +6,7 @@
  * 已批准的订单拆分或合并后回到草稿，按新内容重新提交主单审批。审批中、已作废、已取消、补发、内部用途订单不办理。
  */
 import { MistCommandError, MIST_ORDER_CHECKLIST, type MistContext, type MistOrder, type MistOrderLine, type MistState } from './mistWorkspace';
-import { isCalendarDay } from './mistBusinessClock';
+import { isCalendarDay, nextBusinessCode } from './mistBusinessClock';
 import type { OrderGovernanceFields } from './mistOrderGovernance';
 
 export type OrderSplitCommand =
@@ -72,7 +72,7 @@ export function applyOrderSplitCommand(root: Root, command: OrderSplitCommand, c
       return { line, qty }; });
     if (new Set(picks.map(x => x.line.id)).size !== picks.length) fail('同一条目只能列一次');
     if (picks.every(x => x.qty === x.line.qty) && picks.length === own.length) fail('至少保留一个条目在原订单');
-    const id = c.id(), code = `SO-${order.type === 'fabric' ? 'F' : 'G'}-${c.now.slice(0, 4)}-${String(root.orders.length + 1).padStart(4, '0')}`;
+    const id = c.id(), code = nextBusinessCode(`SO-${order.type === 'fabric' ? 'F' : 'G'}`, root.orders.map(o => o.code), c.now);
     const due = p.due ? day(p.due) : order.due;
     const next: Governed = { ...structuredClone(order), id, code, due, governance: { contract: structuredClone(g.contract), status: 'draft', rounds: [], effectiveVersion: 0 }, progress: 0, state: '订单草稿', tone: 'neutral',
       checklist: MIST_ORDER_CHECKLIST.map((label, index) => ({ id: id + '-check-' + index, label, done: false, note: '' })), handoffAt: null, createdAt: c.now, updatedAt: c.now };

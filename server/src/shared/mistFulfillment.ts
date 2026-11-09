@@ -1,5 +1,5 @@
 import {notifyMist,notificationOwners,notificationTargetOwners} from './mistNotifications';
-import { isCalendarDay } from './mistBusinessClock';
+import { isCalendarDay, nextBusinessCode } from './mistBusinessClock';
 import {packingBreakdownBlocker,packingFabricSpecification,packingFabricColorError,packingPhysicalKey,packingSkuError,canonicalPackingSkus,canSupplementPacking,type PackingSku} from './mistPackingBreakdown';
 import {recordReplacementExportReview,replacementDeclaredUnitPrice,type ReplacementExportCommand,type ReplacementExportReview} from './mistClaimReplacement';
 import { normalizeFabricStageTerms, fabricStageSubmitProblem, fabricStageTermsText, type FabricStageTerms } from './mistFabricStage';
@@ -926,7 +926,7 @@ function audit(root: MistState, ctx: MistContext, entity: string, id: string, me
     notifyMist(root, ctx, { title: message, detail: ctx.actorName, target: to, category:entity==='qc'?'qc':['shipment','customs','document'].includes(entity)?'shipping':'general' }, recipientIds); }
 const code = (prefix: string, rows: {
     code: string;
-}[], ctx: MistContext) => `${prefix}-${ctx.now.slice(0, 4)}-${String(rows.length + 1).padStart(5, '0')}`;
+}[], ctx: MistContext) => nextBusinessCode(prefix, rows.map(r => r.code), ctx.now, 5);
 type PositionedStock = { location: string; available: number; positions?: FulfillmentPosition[] };
 /** Old records have one known location; new partial returns keep separate real balances. */
 export function fulfillmentPositions(row: PositionedStock): FulfillmentPosition[] {

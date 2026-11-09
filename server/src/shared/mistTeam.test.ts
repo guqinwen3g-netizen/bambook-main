@@ -21,7 +21,7 @@ describe('主管团队视角', () => {
   it('每人在手：逾期/临近订单、逾期待办、逾期应收按币种、久未跟进客户，并按关注程度排序', () => {
     const f = fixture(), s = f.state;
     const sales = teamRow(s, { id: 'demo-sales', name: '顾言' }, today);
-    expect(sales.orders.map(o => o.code)).toEqual(['SO-G-2026-018', 'SO-F-2026-0006', 'SO-G-2026-015']);
+    expect(sales.orders.map(o => o.code)).toEqual(['SO-G-2026-018', 'SO-F-2026-0001', 'SO-G-2026-015']);
     expect(sales.orders.every(o => o.status === 'ontrack')).toBe(true);
     // Two overdue order tasks plus the CRM follow-up carried over from the converted show lead.
     expect(sales.tasks.filter(t => t.overdue).length).toBe(3);

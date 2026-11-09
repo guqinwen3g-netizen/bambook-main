@@ -6,7 +6,7 @@
 import { MistCommandError, type MistContext, type MistState, type MistCommandResult } from './mistWorkspace';
 import { reviewDecision, type MistReviewTask } from './mistReview';
 import { addAtPosition, consumeReservations, freeQuantity, removeAtPosition, reservationOpen, stockIssueRemaining, OTHER_RECEIPT_REASONS, type FulfillmentShipment, type FulfillmentStock, type OtherReceiptReason, type StockRoll } from './mistFulfillment';
-import { mistBusinessDate } from './mistBusinessClock';
+import { mistBusinessDate, nextBusinessCode } from './mistBusinessClock';
 
 export type StockCountLine = { stockId: string; location: string; counted: number };
 export type StockCount = { id: string; code: string; warehouseId?: string; lines: Array<StockCountLine & { book: number; difference: number }>; note: string; state: 'pending' | 'approved' | 'rejected'; requesterId: string; requester: string; at: string; reviewerIds: string[]; decision?: { actorId: string; actor: string; at: string; decision: 'approved' | 'rejected'; note: string } };
@@ -27,7 +27,7 @@ const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCo
 const text = (v: unknown, label: string, max = 2000) => typeof v === 'string' && v.trim() && v.length <= max ? v.trim() : fail(`${label}未填写或格式无效`);
 const qty = (v: unknown, label: string, zero = false) => typeof v === 'number' && Number.isFinite(v) && (zero ? v >= 0 : v > 0) && v <= 1e9 && Math.abs(v * 10000 - Math.round(v * 10000)) < 1e-6 ? v : fail(`${label}须为${zero ? '非负' : '正'}数，最多四位小数`);
 const sum = (values: number[]) => Math.round(values.reduce((a, b) => a + Math.round(b * 10000), 0)) / 10000;
-const code = (prefix: string, rows: { code: string }[], ctx: MistContext) => `${prefix}-${ctx.now.slice(0, 4)}-${String(rows.length + 1).padStart(5, '0')}`;
+const code = (prefix: string, rows: { code: string }[], ctx: MistContext) => nextBusinessCode(prefix, rows.map(r => r.code), ctx.now, 5);
 type Ops = { stockCounts: StockCount[]; stockTransfers: StockTransfer[] };
 const stockOps = (root: MistState): Ops => { const f = root.fulfillment; f.stockCounts ||= []; f.stockTransfers ||= []; return f as Ops; };
 const stockOf = (root: MistState, id: unknown) => root.fulfillment.stock.find(s => s.id === id) || fail('库存批次不存在', 'NOT_FOUND');

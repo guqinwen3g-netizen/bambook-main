@@ -46,3 +46,19 @@ export function alignMistScenarioTime<T extends {settings: {businessClock?: Mist
  };
  walk(next);next.settings.businessClock={mode:'fixed',at:fixedAt,timezone:'Asia/Shanghai'};return next;
 }
+
+/** 按既有最大序号续号（不按条数计，补零位数不同的旧号也能识别）。 */
+export function nextSerialCode(head: string, codes: Iterable<string | undefined>, width = 4): string {
+  let max = 0;
+  for (const code of codes) {
+    if (!code || !code.startsWith(head)) continue;
+    const tail = code.slice(head.length);
+    if (/^\d+$/.test(tail)) max = Math.max(max, Number(tail));
+  }
+  return head + String(max + 1).padStart(width, '0');
+}
+
+/** 业务年度编号：`PREFIX-YYYY-0001`，年份取上海业务日。 */
+export function nextBusinessCode(prefix: string, codes: Iterable<string | undefined>, now: string, width = 4): string {
+  return nextSerialCode(`${prefix}-${mistBusinessDate(now).slice(0, 4)}-`, codes, width);
+}
