@@ -1311,7 +1311,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "market.lead.transition",
-  "payload": "{id:string;status:MarketLead['status'];customerId?:string;actualValue?:string;note:string}",
+  "payload": "{id:string;status:MarketLead['status'];customerId?:string;actualValue?:string;note:string;followUpDate?:string}",
   "types": {
    "MarketLead": "RecordBase & { ownerId?:string; owner?:string; name:string; company:string; email:string; phone:string; demand:string; source:'campaign'|'show'; parentId:string; customerId:string; status:'New'|'Contacted'|'Qualified'|'Following'|'Converted'|'Lost'; followUpDate:string; estimatedValue:string; actualValue:string; currency:string; convertedAt:string|null; opportunityId?:string; communication?:{actor:string;actorId?:string;at:string}; followUps?:Array<{at:string;actor:string;actorId?:string;status:string;note:string}> }",
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }"

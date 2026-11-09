@@ -227,7 +227,7 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
     if (borrowerId !== me) continue;
     const sample = f.samples.find(sample => sample.id === loan.sampleId);
     if (!sample) continue;
-    push({ id: 'sample-return:' + loan.id, source: 'task', title: sample.name, meta: `${sampleLoanRemaining(state, loan.id)} ${sample.unit}`, when: '待归还', urgent: !!loan.expectedReturn && loan.expectedReturn < today,
+    push({ id: 'sample-return:' + loan.id, source: 'task', title: sample.name, meta: [`${sampleLoanRemaining(state, loan.id)} ${sample.unit}`, loan.expectedReturn && `${uiText('应还')} ${loan.expectedReturn}`].filter(Boolean).join(' · '), when: '待归还', urgent: !!loan.expectedReturn && loan.expectedReturn < today,
       at: loan.at, due: loan.expectedReturn, target: { view: 'samples', id: sample.id, detail: 'full' } });
   }
   if (canRead('qc-workbench')) for (const task of state.fulfillment.qcTasks) {

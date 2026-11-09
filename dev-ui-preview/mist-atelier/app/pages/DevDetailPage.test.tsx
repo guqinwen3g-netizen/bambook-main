@@ -177,7 +177,7 @@ describe('BB-DEV-7 QC gate on the detail page',()=>{
   it('blocks confirmation on a failed QC and offers rework, resample and abandon for garments',async()=>{
     fail(bridge.current.state,'va');await mount();
     expect(host.textContent).toContain('QC 不通过 · 不能记录确认');expect(host.textContent).toContain('袖长超差 1.5cm');
-    expect(button('保存确认')!.disabled).toBe(true);expect(button('整改复检')).toBeTruthy();expect(button('重新打样')).toBeTruthy();expect(button('放弃本版')).toBeTruthy();
+    expect(button('保存确认')).toBeUndefined();expect(host.textContent).not.toContain('请填写确认人');expect(button('整改复检')).toBeTruthy();expect(button('重新打样')).toBeTruthy();expect(button('放弃本版')).toBeTruthy();
     expect(button('更新报告')!.disabled).toBe(true);
     await click('整改复检');await fill('整改要求','袖长改短');await click('确认整改复检');
     expect(bridge.current.run).toHaveBeenCalledWith({type:'development.qc.decide',payload:{devId:'dev-a',versionId:'va',decision:'rework',note:'袖长改短'}});

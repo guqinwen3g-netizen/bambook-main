@@ -21,7 +21,7 @@ describe('development CSV',()=>{
   it('computes due labels by local calendar days, including near midnight',()=>{
     const now=new Date(2026,9,13,23,59);
     expect(developmentDueDays('2026-10-14',now)).toBe(1);expect(developmentDueText('2026-10-14',now)).toBe('1 天后');
-    expect(developmentDueText('2026-10-13',now)).toBe('今天');expect(developmentDueText('2026-10-12',now)).toBe('1 天前');expect(developmentDueDays('2026-02-30',now)).toBeNull();
+    expect(developmentDueText('2026-10-13',now)).toBe('今天');expect(developmentDueText('2026-10-12',now)).toBe('逾期 1 天');expect(developmentDueDays('2026-02-30',now)).toBeNull();
   });
 });
 

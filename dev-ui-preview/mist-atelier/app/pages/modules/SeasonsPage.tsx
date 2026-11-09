@@ -11,6 +11,8 @@ import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
+/** 记跟进时默认一周后再跟进（营业日）。 */
+const nextFollowUpDefault = () => new Date(Date.parse(marketBusinessDate(businessNow()) + 'T00:00:00Z') + 7 * 86400000).toISOString().slice(0, 10);
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, businessWhen, shortWhen, useListDetailRoute } from './pageKit';
 import { quotationStage } from './QuotationsPage';
@@ -53,7 +55,7 @@ export function SeasonTimeline({ seasons, day, selected, onPick }: { seasons: Ma
   const pos = (d: string) => `${((dayNum(d) - start) / span) * 100}%`;
   const months: string[] = []; { const c = new Date(start); c.setUTCDate(1); while (c.getTime() <= end) { if (c.getTime() >= start) months.push(c.toISOString().slice(0, 10)); c.setUTCMonth(c.getUTCMonth() + 3); } }
   return <Card><div className="mist-card-body mist-season-timeline" data-season-timeline aria-label={uiText("季节时间线")}>
-    <div className="mist-season-axis">{months.map(m => <span key={m} style={{ left: pos(m) }}>{m.slice(0, 7).replace('-', '/')}</span>)}<i className="mist-season-today" style={{ left: pos(day) }} title={ui`今天 ${day}`}><b>{uiText("今天")}</b></i></div>
+    <div className="mist-season-axis">{months.filter(m => Math.abs(dayNum(m) - dayNum(day)) / span > 0.06).map(m => <span key={m} style={{ left: pos(m) }}>{m.slice(0, 7).replace('-', '/')}</span>)}<i className="mist-season-today" style={{ left: pos(day) }} title={ui`今天 ${day}`}><b>{uiText("今天")}</b></i></div>
     {rows.map(s => <button key={s.id} type="button" className="mist-season-row" aria-pressed={s.id === selected} onClick={() => onPick(s)}>
       <span className="mist-season-label"><Mono>{s.code}</Mono><small className="mist-muted">{uiText(SEASON_STATUS[s.status].label)}</small></span>
       <span className="mist-season-track"><span className="mist-season-bar" data-status={s.status} style={{ left: pos(s.startDate), width: `calc(${pos(s.endDate)} - ${pos(s.startDate)})` }} />
@@ -125,7 +127,7 @@ export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) 
   });
   const convertSpec = (l: MarketLead): ModuleEditorSpec => {
     const same = state?.customers.find(c => c.name.trim().toLowerCase() === l.company.trim().toLowerCase());
-    return { title: `把 ${l.name} · ${l.company} 转入 CRM`, submitLabel: '转入 CRM', description: same ? `已有同名客户 ${same.name}，默认关联该客户，不重复建档。` : '选择“新建客户”会按线索公司建立客户档案，并把联系人一并登记。',
+    return { title: `把 ${l.name} · ${l.company} 转入 CRM`, submitLabel: '转入 CRM', description: same ? `已有同名客户 ${same.name}，默认关联该客户，不重复建档。` : undefined,
       initialValues: { customerId: same?.id || '', withOpportunity: true, title: `${l.company} · ${l.demand.slice(0, 24)}`, domain: /面料|米|码|fabric/i.test(l.demand) ? 'fabric' : 'garment', amount: l.estimatedValue || '0', currency: l.currency, expectedDate: new Date(dayNum(day) + 30 * 86400000).toISOString().slice(0, 10) },
       fields: [{ key: 'customerId', label: '客户', type: 'select', options: [...(same ? [] : [{ value: '', label: `新建客户：${l.company}` }]), ...(state?.customers || []).map(c => ({ value: c.id, label: `${c.name} · ${c.code}` }))] },
         { key: 'withOpportunity', label: '同时建立商机', type: 'checkbox' }, { key: 'title', label: '商机名称' }, { key: 'domain', label: '业务板块', type: 'select', options: [{ value: 'garment', label: '成衣' }, { value: 'fabric', label: '面料' }] },
@@ -134,7 +136,7 @@ export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) 
         if (opp && (!opp.title || !opp.expectedDate)) throw new Error('建立商机须填写商机名称与预计成交日');
         await run({ type: 'market.lead.convertToCrm', payload: { id: l.id, customerId: String(v.customerId ?? '') || undefined, opportunity: opp } }); } };
   };
-  const progressSpec = (l: MarketLead, next: 'Following' | 'Lost'): ModuleEditorSpec => ({ title: next === 'Lost' ? `标记 ${l.name} 已流失` : `记录 ${l.name} 跟进`, submitLabel: '保存', initialValues: { note: '' }, fields: [{ key: 'note', label: next === 'Lost' ? '流失原因' : '跟进内容', type: 'textarea', required: true }], submit: v => run({ type: 'market.showLead.transition', payload: { id: l.id, status: next, note: String(v.note ?? '') } }) });
+  const progressSpec = (l: MarketLead, next: 'Following' | 'Lost'): ModuleEditorSpec => ({ title: next === 'Lost' ? `标记 ${l.name} 已流失` : `记录 ${l.name} 跟进`, submitLabel: '保存', initialValues: { note: '', followUpDate: next === 'Lost' ? '' : nextFollowUpDefault() }, fields: [{ key: 'note', label: next === 'Lost' ? '流失原因' : '跟进内容', type: 'textarea', required: true }, ...(next === 'Lost' ? [] : [{ key: 'followUpDate', label: '下次跟进', type: 'date' as const, required: true }])], submit: v => run({ type: 'market.showLead.transition', payload: { id: l.id, status: next, note: String(v.note ?? ''), ...(next === 'Lost' ? {} : { followUpDate: String(v.followUpDate ?? '') }) } }) });
 
   const seasonRows = [...seasons].sort((a, b) => ({ Active: 0, Planning: 1, Closed: 2 })[a.status] - ({ Active: 0, Planning: 1, Closed: 2 })[b.status] || a.startDate.localeCompare(b.startDate));
   const trendRows = [...trends].sort((a, b) => seasonName(a.seasonId).localeCompare(seasonName(b.seasonId)) || a.type.localeCompare(b.type));

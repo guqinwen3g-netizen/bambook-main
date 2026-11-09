@@ -571,7 +571,7 @@ describe('rejected development samples and outstanding sample loans', () => {
     expect(mistWorkQueue(state, options)).toEqual([expect.objectContaining({ id: 'sample-return:loan', module: 'samples', urgent: true, when: '待归还', due: '2026-10-14' })]);
     expect(mistWorkQueue(state, { ...options, today: '2026-10-14' })[0].urgent).toBe(false);
     state.fulfillment.sampleMovements.push({ id: 'return', kind: 'return', sampleId: 's', loanId: 'loan', quantity: 0.25 } as any);
-    expect(mistWorkQueue(state, options)[0].meta).toBe('1 米');
+    expect(mistWorkQueue(state, options)[0].meta).toBe('1 米 · 应还 2026-10-14');
     state.fulfillment.sampleMovements.push({ id: 'other-return', kind: 'return', sampleId: 's', loanId: 'other-loan', quantity: 1 } as any);
     expect(mistWorkQueue(state, options)).toHaveLength(1);
     state.fulfillment.sampleMovements.push({ id: 'final-return', kind: 'return', sampleId: 's', loanId: 'loan', quantity: 1 } as any);
