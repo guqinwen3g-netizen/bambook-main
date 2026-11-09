@@ -17,7 +17,7 @@ import { InvoicePage } from './InvoicePage';
 export { InvoicePage } from './InvoicePage';
 import { useRouteDraft, useRouteScope } from './useRouteDraft';
 import { useAssistantConversation } from '../../runtime/assistantConversation';
-import { ArrowRight, ArrowUp, Calculator, Download, FileText, ListChecks, MessageSquarePlus, ArrowDown, PanelRight, RefreshCw, Sparkles, Square, X, Package, Receipt, ShieldCheck, Users, Database, Building2 } from 'lucide-react';
+import { ArrowRight, ArrowUp, Calculator, Download, FileText, ArrowDown, PanelRightClose, PanelRightOpen, SquarePen, History, RefreshCw, Sparkles, Square, X, Package, Receipt, ShieldCheck, Users, Database, Building2 } from 'lucide-react';
 import { AIBadge, AssistantEyes, Banner, Button, Card, CardHeader, DataTable, Dialog, Drawer, EmptyState, Icon, IconButton, Field, FormGrid, KeyValue, Meter, MistPage, Mono, PageHeader, Pill, Select, StatCard, StatGrid, SummaryBar, Tabs, TextArea, TextInput, Toolbar, UploadZone, useToast, type Column } from '../../../../../components/mist';
 import { apiService, type CompanyExporterProfileValue } from '../../../../../services/apiService';
 import { calculatePlatformBom, calculatePlatformPricing, platformBusinessDate, platformCreditRemaining, platformCreditEffectiveAmount, getPlatformClaimSourceOptions, canEditPlatformClaimDraft, type PlatformState, type PlatformBom, type PlatformBomLine, type PlatformClaim, type PlatformCommand, type PlatformRisk, type PlatformClaimDisposition } from '../../../../../server/src/shared/mistPlatform';
@@ -194,17 +194,17 @@ export function AssistantPage(){
   // 回答排版、卡片展开等会在渲染后改变高度；停在底部时跟着到底。
   React.useEffect(()=>{const el=scrollRef.current,content=el?.firstElementChild;if(!el||!content||typeof ResizeObserver==='undefined')return;const watch=new ResizeObserver(()=>{if(atBottomRef.current)el.scrollTop=el.scrollHeight;});watch.observe(content);return()=>watch.disconnect();},[hasThread]);
   const composer=<XiaozhuComposer value={question} onChange={setQuestion} onSend={()=>void send()} ready={ready} busy={busy} onStop={!cowork.available?()=>active.current?.abort():undefined} sources={selected} onRemoveSource={toggle} onAttach={()=>setPicker(true)} voice={voice} voiceAvailable={cowork.available} field={field} placeholder={uiText(canChat?'问小竹，或交代一件事':'当前账号无模型助手权限')} disabled={!canChat}/>;
-  const rail=<XiaozhuRail proposals={proposals} active={cowork.all} rules={automationRules.rules} onProposal={id=>{setPanelDrawer(false);setProposalId(id);}} onOpenTasks={()=>{setPanelDrawer(false);nav.go('assistant',undefined,{section:'tasks'});}} onOpenAutomations={()=>{setPanelDrawer(false);setAutomations(true);}} onNewRule={()=>{setPanelDrawer(false);setNewRule(n=>n+1);setAutomations(true);}} onToggle={(rule,on)=>void automationRules.toggle(rule,on)} onOpenTask={t=>{setPanelDrawer(false);nav.go('assistant',t.id,{section:'tasks'});}}/>;
+  const rail=<XiaozhuRail proposals={proposals} active={cowork.all} rules={automationRules.rules} onProposal={id=>{setPanelDrawer(false);setProposalId(id);}} onOpenTasks={()=>{setPanelDrawer(false);nav.go('assistant',undefined,{section:'tasks'});}} onOpenAutomations={()=>{setPanelDrawer(false);setAutomations(true);}} onNewRule={()=>{setPanelDrawer(false);setNewRule(n=>n+1);setAutomations(true);}} onToggle={(rule,on)=>void automationRules.toggle(rule,on)} onOpenTask={t=>{setPanelDrawer(false);nav.go('assistant',t.id,{section:'tasks'});}} drafts={saved} onOpenDrafts={()=>{setPanelDrawer(false);setDrafts(true);}}/>;
   const older=cowork.available&&olderCount>0?<div className="mist-xz-older"><Button size="sm" variant="quiet" onClick={()=>setShowOlder(true)}>{uiText('显示更早的 '+olderCount+' 条')}</Button></div>:null;
   return <MistPage><ErrorNotice/><XiaozhuAutomations open={automations} onClose={()=>{setAutomations(false);setAutomationSeed('');}} workspaceId={w.workspace?.id} seed={automationSeed} newRule={newRule}/><XiaozhuTasks refreshSignal={cowork.tasks.length} open={tasksOpen} onClose={()=>nav.go('assistant')}/><AgentProposalDialog state={w.state} proposal={proposals.find(p=>p.id===proposalId)} onClose={()=>setProposalId('')} run={(command,options)=>w.run(command,options)} onDone={message=>{toast(uiText(message));void cowork.reload();}}/>
-    <Drawer open={panelDrawer} onClose={()=>setPanelDrawer(false)} title={uiText('动态')} tone="ai">{rail}</Drawer>
+    <Drawer open={panelDrawer} onClose={()=>setPanelDrawer(false)} title={uiText('事项')} tone="ai">{rail}</Drawer>
     <div className="mist-xz" data-panel={cowork.available&&panel||undefined}>
       <div className="mist-xz-main">
-        <div className="mist-xz-head"><h1 className="mist-xz-title">{uiText('小竹')}</h1>{!cowork.available&&status}{!cowork.available&&<IconButton icon={RefreshCw} label={uiText("检查模型配置")} disabled={checking||busy} onClick={()=>void check()}/>}<span className="mist-spacer"/>
-          <IconButton icon={MessageSquarePlus} label={uiText('新对话')} disabled={!hasThread} onClick={newConversation}/>
-          <IconButton icon={FileText} label={uiText('草稿')} count={saved.length||undefined} onClick={()=>setDrafts(true)}/>
-          {cowork.available&&<IconButton icon={ListChecks} label={uiText('任务')} onClick={()=>nav.go('assistant',undefined,{section:'tasks'})}/>}
-          {cowork.available&&<IconButton icon={PanelRight} label={uiText('动态')} count={activity||undefined} aria-pressed={panel} onClick={togglePanel}/>}
+        <div className="mist-xz-head"><h1 className="mist-sr-only">{uiText('小竹')}</h1>{!cowork.available&&status}{!cowork.available&&<IconButton icon={RefreshCw} label={uiText("检查模型配置")} disabled={checking||busy} onClick={()=>void check()}/>}<span className="mist-spacer"/>
+          {!hasThread&&cowork.available&&olderCount>0&&<IconButton icon={History} label={uiText('之前的对话')} onClick={()=>setShowOlder(true)}/>}
+          {hasThread&&<IconButton icon={SquarePen} label={uiText('新对话')} onClick={newConversation}/>}
+          {!cowork.available&&<IconButton icon={FileText} label={uiText('草稿')} count={saved.length||undefined} onClick={()=>setDrafts(true)}/>}
+          {cowork.available&&<IconButton icon={panel?PanelRightClose:PanelRightOpen} label={uiText(panel?'收起事项':'事项')} count={!panel&&activity||undefined} aria-pressed={panel} onClick={togglePanel}/>}
         </div>
         {!cowork.available&&configuration&&!configuration.configured&&<div className="mist-xz-col mist-xz-banner"><Banner tone="warn" title={uiText("生成模型尚未连接到此公司")}>{uiText(configuration.subscription?'请平台管理员连接平台模型。':'服务器未配置可用模型。')}{uiText("仍可引用业务记录并保存文字草稿。")}</Banner></div>}
         {cowork.error&&cowork.available&&<div className="mist-xz-col mist-xz-banner"><Banner tone="warn" title={uiText(cowork.error)}/></div>}
@@ -220,9 +220,9 @@ export function AssistantPage(){
           </div>
           {!atBottom&&<IconButton className="mist-xz-tobottom" icon={ArrowDown} label={uiText('回到最新')} onClick={()=>toBottom()}/>}
           <div className="mist-xz-dock"><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</div></div>
-        </>:<div className="mist-xz-scroll"><div className="mist-xz-col">{older}{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}<XiaozhuEmpty name={w.session.user?.displayName} suggestions={xiaozhuSuggestions(w.state)} onPick={p=>{setQuestion(uiText(p));field.current?.focus();}}>{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</XiaozhuEmpty></div></div>}
+        </>:<div className="mist-xz-scroll"><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}<XiaozhuEmpty name={w.session.user?.displayName} suggestions={xiaozhuSuggestions(w.state)} onPick={p=>{setQuestion(uiText(p));field.current?.focus();}}>{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</XiaozhuEmpty></div></div>}
       </div>
-      {cowork.available&&panel&&<aside className="mist-xz-side" aria-label={uiText('动态')}>{rail}</aside>}
+      {cowork.available&&panel&&<aside className="mist-xz-side" aria-label={uiText('事项')}>{rail}</aside>}
     </div>
     <Drawer open={picker} onClose={()=>setPicker(false)} title={uiText("引用业务记录")} sub={uiText("选中的记录会随下一个问题提供给小竹，最多 12 条。")}>
       <Toolbar><Select aria-label={uiText("检索对象")} value={kind} options={[{value:'orders',label:'订单'},{value:'customers',label:'客户'},{value:'purchases',label:'采购'},{value:'shipments',label:'出运'},{value:'developments',label:'开发案'},{value:'invoices',label:'发票'},{value:'risks',label:'风险'}]} onChange={e=>setKind(e.target.value)}/><TextInput aria-label={uiText("业务关键词")} placeholder={uiText("编号、客户或状态")} value={query} onChange={e=>setQuery(e.target.value)}/></Toolbar>

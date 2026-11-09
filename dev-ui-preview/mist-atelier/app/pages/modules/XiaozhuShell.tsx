@@ -1,6 +1,6 @@
 /** 小竹页的输入区、通话条和空对话：输入区始终在对话下方居中，空对话时和问候一起居中。 */
 import React from 'react';
-import { ArrowUp, Mic, MicOff, Paperclip, PhoneOff, Square, X, CalendarClock, Landmark, Mail, ListTodo, Sparkles } from 'lucide-react';
+import { ArrowUp, AtSign, AudioLines, Mic, MicOff, PhoneOff, Square, X, CalendarClock, Landmark, Mail, ListTodo, Sparkles } from 'lucide-react';
 import { AIBadge, AssistantEyes, Icon, IconButton } from '../../../../../components/mist';
 import { uiText } from '../../../../../services/interfaceLanguage';
 import type { usePersonalAgentVoice } from '../../runtime/personalAgentVoice';
@@ -25,10 +25,11 @@ export function XiaozhuComposer({ value, onChange, onSend, ready, busy, onStop, 
     {sources.length > 0 && <div className="mist-xz-sources">{sources.map(s => <span key={s.id} className="mist-xz-source"><span>{uiText(s.label)}</span><IconButton size="sm" icon={X} label={uiText('移除 ' + s.label)} disabled={busy} onClick={() => onRemoveSource(s)} /></span>)}</div>}
     <textarea ref={field as React.RefObject<HTMLTextAreaElement>} rows={1} aria-label={uiText('向助手提问')} placeholder={placeholder} value={value} maxLength={4000} disabled={busy || disabled} onChange={e => onChange(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); onSend(); } }} />
     <div className="mist-xz-tools">
-      <IconButton icon={Paperclip} label={uiText('引用业务记录')} disabled={busy || disabled} onClick={onAttach} />
-      {voiceAvailable && <IconButton icon={Mic} label={uiText('语音通话')} disabled={busy} onClick={() => void voice.start()} />}
+      <IconButton icon={AtSign} label={uiText('引用业务记录')} disabled={busy || disabled} onClick={onAttach} />
       <span className="mist-spacer" />
-      {busy && onStop ? <IconButton icon={Square} label={uiText('停止生成')} onClick={onStop} /> : <button type="button" className="mist-send" aria-label={uiText('发送')} disabled={!ready} onClick={onSend}><Icon icon={ArrowUp} size="sm" /></button>}
+      {busy && onStop ? <button type="button" className="mist-send" data-kind="stop" aria-label={uiText('停止生成')} onClick={onStop}><Icon icon={Square} size="sm" /></button>
+        : !value.trim() && voiceAvailable && !busy ? <button type="button" className="mist-send" data-kind="voice" aria-label={uiText('语音通话')} title={uiText('语音通话')} onClick={() => void voice.start()}><Icon icon={AudioLines} size="sm" /></button>
+        : <button type="button" className="mist-send" aria-label={uiText('发送')} disabled={!ready} onClick={onSend}><Icon icon={ArrowUp} size="sm" /></button>}
     </div>
   </div>;
 }

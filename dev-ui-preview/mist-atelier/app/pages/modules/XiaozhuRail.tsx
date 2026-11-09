@@ -1,6 +1,6 @@
 /** 小竹页右侧：一眼看到待我确认、正在办理和自动规则，不用开抽屉。 */
 import React from 'react';
-import { ListChecks, Plus, ShieldCheck, Zap } from 'lucide-react';
+import { FileText, ListChecks, Plus, ShieldCheck, Zap } from 'lucide-react';
 import { Button, Pill, Switch, type Tone } from '../../../../../components/mist';
 import type { AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
 import { agentCommandRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../../server/src/shared/mistAgentProposals';
@@ -22,8 +22,8 @@ export function useAutomationRules(workspaceId: string | undefined, enabled: boo
   return { rules, toggle, reload: load };
 }
 
-export function XiaozhuRail({ proposals, active, rules, onProposal, onOpenTasks, onOpenAutomations, onNewRule, onToggle, onOpenTask }: {
-  proposals: AgentProposal[]; active: AgentTaskView[]; rules: AutomationRule[];
+export function XiaozhuRail({ proposals, active, rules, onProposal, onOpenTasks, onOpenAutomations, onNewRule, onToggle, onOpenTask, drafts = [], onOpenDrafts }: {
+  proposals: AgentProposal[]; active: AgentTaskView[]; rules: AutomationRule[]; drafts?: Array<{ id: string; title: string }>; onOpenDrafts?: () => void;
   onProposal: (id: string) => void; onOpenTasks: () => void; onOpenAutomations: () => void; onNewRule: () => void; onToggle: (rule: AutomationRule, on: boolean) => void; onOpenTask: (task: AgentTaskView) => void;
 }) {
   const running = active.filter(t => COWORK_ACTIVE.includes(t.state) && t.state !== 'waiting_human');
@@ -35,5 +35,7 @@ export function XiaozhuRail({ proposals, active, rules, onProposal, onOpenTasks,
     <section><header><Zap size={14} /><b>{uiText('自动规则')}</b><span className="mist-spacer" /><Button size="sm" variant="quiet" onClick={rules.length ? onOpenAutomations : onNewRule}>{uiText(rules.length ? '管理' : '新建')}</Button></header>
       {rules.length ? <div className="mist-xz-list">{rules.slice(0, 6).map(r => <div key={r.id} className="mist-xz-item mist-xz-rule"><span className="mist-xz-item-t">{r.name}<small>{uiText(TRIGGER_LABEL[r.trigger])}{r.halted ? ' · ' + r.halted.message : r.runs[0] ? ' · ' + r.runs[0].detail : ''}</small></span><Switch ariaLabel={uiText(`开启 ${r.name}`)} checked={r.enabled} onChange={on => onToggle(r, on)} /></div>)}
         <Button size="sm" variant="quiet" icon={Plus} onClick={onNewRule}>{uiText('新建规则')}</Button></div> : <p className="mist-xz-quiet">{uiText('还没有自动规则')}</p>}</section>
+    {onOpenDrafts && <section><header><FileText size={14} /><b>{uiText('草稿')}</b><span className="mist-spacer" />{drafts.length > 0 && <Button size="sm" variant="quiet" onClick={onOpenDrafts}>{uiText('全部草稿')}</Button>}</header>
+      {drafts.length ? <div className="mist-xz-list">{drafts.slice(0, 3).map(d => <button type="button" key={d.id} className="mist-xz-item" onClick={onOpenDrafts}><span className="mist-xz-item-t">{d.title}</span></button>)}</div> : <p className="mist-xz-quiet">{uiText('还没有草稿')}</p>}</section>}
   </div>;
 }

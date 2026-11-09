@@ -1247,7 +1247,9 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .mist-root::-webkit-scrollbar,
 /* 对话输入不画全局键盘焦点框（只框住一行，视觉突兀）；外框的 focus-within 底色已标示焦点。表单输入保持焦点框。 */
 .mist-root .mist-xz-composer textarea:focus-visible, .mist-root .mist-xz-answer input:focus-visible { outline: none; }
 .mist-xz-tools { display: flex; align-items: center; gap: 2px; margin-left: -6px; }
-.mist-xz-tools .mist-send { width: 34px; height: 34px; }
+.mist-xz-tools .mist-send { width: 34px; height: 34px; border-radius: 50%; cursor: pointer; transition: background var(--mist-dur-fast) var(--mist-ease); }
+.mist-xz-tools .mist-send:disabled { background: var(--mist-fill); color: var(--mist-ink-4); cursor: default; }
+.mist-xz-tools .mist-send[data-kind="stop"] { background: var(--mist-ink); color: var(--mist-card); }
 .mist-xz-sources { display: flex; flex-wrap: wrap; gap: 6px; }
 .mist-xz-source { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; padding: 2px 2px 2px 10px; border-radius: var(--mist-r-pill); background: var(--mist-ai-tint); color: var(--mist-ai-ink); font-size: var(--mist-text-xs); }
 .mist-xz-source > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
