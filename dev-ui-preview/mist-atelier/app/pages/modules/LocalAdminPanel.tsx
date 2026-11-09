@@ -141,7 +141,7 @@ export function LocalAdminPanel({ embedded = false }: { embedded?: boolean } = {
   </>;
   const fields = section === 'company' ? COMPANY_FIELDS : EXPORT_FIELDS;
   return <MistPage>
-    <PageHeader eyebrow={uiText("平台 · 本机演示公司")} title={uiText("管理后台")} actions={<Pill tone="neutral">{uiText("本地开发模式")}</Pill>} />
+    <PageHeader eyebrow={uiText("管理与工具 · 本机演示公司")} title={uiText("管理后台")} actions={<Pill tone="neutral">{uiText("本地开发模式")}</Pill>} />
     {(error || workspace.error) && <FailureNotice title="资料尚未保存" detail={error || workspace.error} retry={workspace.error && !busy ? () => void workspace.refresh() : undefined} retryLabel="重新读取" />}
     {workspace.pending && <Banner tone="warn" title={uiText("上一次保存结果待核对")} actions={<Button disabled={busy || workspace.saving} onClick={() => void recover()}>{uiText("核对原请求")}</Button>}>{uiText("输入已保留，核对完成后再继续保存。")}</Banner>}
     <div className="mist-wizard">

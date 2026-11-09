@@ -52,7 +52,7 @@ export function LocalMesPage() {
   const detail = selected && state ? <LocalMesDetail purchase={selected} state={state} orderCode={orderCode} go={go} />
     : <EmptyState icon={History} title={uiText("加工记录详情")} description={uiText(loading ? '正在读取加工记录' : '从列表选择一份加工合同，查看实际交付与来源')} compact />;
   return <MistPage width="wide">
-    <PageHeader eyebrow={uiText("订单履约")} title={uiText("历史加工记录")}
+    <PageHeader eyebrow={uiText("管理与工具")} title={uiText("历史加工记录")}
       actions={<>
         <Button icon={Download} disabled={!rows.length} onClick={() => downloadModuleCsv('加工履行记录.csv', ['合同', '订单', '加工方', '加工内容', '合同数量', '单位', '已交付', '交期', '状态'], rows.map(p => [p.code, orderCode(p.orderId), p.supplier, p.description, p.quantity, p.unit, p.received, p.due, STAGE[stageOf(p)].label]))}>{uiText("导出")}</Button>
         {session.canAccessView(View.ProductionBoard) && <Button icon={Factory} variant="primary" onClick={() => go('production-board')}>{uiText("前往生产进度")}</Button>}
