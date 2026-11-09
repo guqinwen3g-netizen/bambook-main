@@ -525,3 +525,11 @@ it('defaults a new purchase due date before the order delivery and treats mainla
  expect(isDomesticSupplier({country:'中国'})).toBe(true);expect(isDomesticSupplier({country:'China'})).toBe(true);
  expect(isDomesticSupplier({country:'中国香港'})).toBe(false);expect(isDomesticSupplier({country:'Vietnam'})).toBe(false);
 });
+it('points to supplier setup when no supplier can take a purchase order',async()=>{
+  store.state!.suppliers=[];render();
+  expect(host.textContent).toContain('还没有可下采购单的供应商');
+  await click(getByRole(host,'button',{name:'去建立供应商'}));expect(go).toHaveBeenCalledWith('suppliers');
+  session.denied.add('suppliers:write');render();
+  expect(queryByRole(host,'button',{name:'去建立供应商'})).toBeNull();expect(host.textContent).toContain('请采购负责人先建立供应商档案');
+  session.denied.add('procurement:write');render();expect(host.textContent).not.toContain('还没有可下采购单的供应商');
+});
