@@ -7,7 +7,7 @@ import { isRecognizedMistInvoice } from '../../../../server/src/shared/mistWorks
 import {isInternalDeliveryTask} from '../../../../server/src/shared/mistInternalDelivery';
 import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
-import {businessNow} from '../runtime/businessClock';
+import {businessNow,businessToday} from '../runtime/businessClock';
 /** T1 工作台：保留 Mist 的问候、统计、焦点、简报、任务与日程构图。 */
 import React from 'react';
 import { ArrowRight, BadgeCheck, FileText, Layers, Plus, Ship, SlidersHorizontal, Sparkles, Wallet, ArrowUpRight } from 'lucide-react';
@@ -41,7 +41,7 @@ export function HomePage() {
   const [proposalId, setProposalId] = React.useState('');
   const { state, loading, saving, pending } = workspace;
   const [range, setRange] = React.useState<'today' | 'week'>('today');
-  const [today, setToday] = React.useState(() => dateKey(businessNow()));
+  const [today, setToday] = React.useState(() => businessToday());
   const [day, setDay] = React.useState(today);
   const [sort, setSort] = React.useState<'due' | 'title'>('due');
   const [taskDialog, setTaskDialog] = React.useState(false), [selectedTask, setSelectedTask] = React.useState(''), [taskDone, setTaskDone] = React.useState(false);
@@ -53,11 +53,11 @@ export function HomePage() {
   const hiddenStats = { development: hidden.has('products')||!session.hasPermission('products:read'), qc: hidden.has('products')||hidden.has('qc')||!session.hasPermission('products:read')||!session.hasPermission('qc:read'), shipping: hidden.has('shipments')||!session.hasPermission('shipments:read'), invoices: hidden.has('receivables')||!session.hasPermission('invoices:read') };
   React.useEffect(() => { if (statView && hiddenStats[statView]) setStatView(null); }, [statView, hiddenStats.development, hiddenStats.qc, hiddenStats.shipping, hiddenStats.invoices]);
   const scope = `${session.sessionKey}:${workspace.workspace?.id ?? ''}`, activeScope = React.useRef(scope); activeScope.current = scope;
-  React.useEffect(()=>{const current=dateKey(businessNow());setToday(current);setDay(current);},[scope,state?.settings.businessClock?.at]);
+  React.useEffect(()=>{const current=businessToday();setToday(current);setDay(current);},[scope,state?.settings.businessClock?.at]);
   const alive=React.useRef(true);React.useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const busy = loading || saving || !!pending, operation = React.useRef(false);
   React.useEffect(() => { setTaskDialog(false); setSelectedTask(''); setReportVersion(null); setStatView(null); setError(''); operation.current = false; }, [scope]);
-  React.useEffect(() => { const update = () => setToday(dateKey(businessNow())); const timer = window.setInterval(update, 60000); window.addEventListener('focus', update); return () => { window.clearInterval(timer); window.removeEventListener('focus', update); }; }, []);
+  React.useEffect(() => { const update = () => setToday(businessToday()); const timer = window.setInterval(update, 60000); window.addEventListener('focus', update); return () => { window.clearInterval(timer); window.removeEventListener('focus', update); }; }, []);
   const days = weekDays(today), weekStart = days[0].key, weekEnd = days[6].key;
   const reviews = useOptionalMistReviews(), waitingReviews = reviews?.rows.filter(row => row.canDecide).length ?? 0;
   // 与侧栏同一口径：只列指定给我或我岗位的事项，「N 件事」= 侧栏「我的工作」数字。
@@ -97,7 +97,7 @@ export function HomePage() {
   const weekShipments=state?.fulfillment.shipments.filter(shipment=>shipment.state!=='cancelled'&&[shipment.plannedDate,shipment.departedAt?.slice(0,10)].some(date=>date&&date>=weekStart&&date<=weekEnd))||[];
   const statTitles={development:'在途开发案',qc:'待 QC 评审',shipping:'本周出运',invoices:'应收待核销'};
   const statRows:Array<{id:string;label:string;detail:string;target:MistTarget}>=statView==='development'?activeDevs.map(dev=>({id:dev.id,label:dev.code,detail:dev.name,target:{view:'development/detail',id:dev.id}})):statView==='qc'?[...qcTasks.map(task=>({id:task.id,label:task.code,detail:`${task.factory} · ${task.kind==='production'?'生产检验':'样品评审'}`,target:{view:'qc-workbench',id:task.id}})),...qcVersions.map(version=>({id:version.id,label:`${state?.devs.find(dev=>dev.id===version.devId)?.code||''} · ${version.label}`,detail:version.factory,target:{view:'development/detail',id:version.devId,versionId:version.id}}))]:statView==='shipping'?weekShipments.map(shipment=>({id:shipment.id,label:shipment.code,detail:`${shipment.customer} · ${shipment.plannedDate||shipment.departedAt?.slice(0,10)||''}`,target:{view:'shipments',id:shipment.id}})):(state?.invoices.filter(invoice=>invoice.open>0)||[]).map(invoice=>({id:invoice.id,label:invoice.code,detail:`${invoice.customer} · ${money(invoice.open)} ${invoice.currency}`,target:{view:'payment-vouchers',id:invoice.id}}));
-  const hour = businessNow().getHours(), greeting = hour < 6 ? '夜深了' : hour < 12 ? '上午好' : hour < 14 ? '中午好' : hour < 18 ? '下午好' : '晚上好';
+  const hour = (businessNow().getUTCHours() + 8) % 24, greeting = hour < 6 ? '夜深了' : hour < 12 ? '上午好' : hour < 14 ? '中午好' : hour < 18 ? '下午好' : '晚上好';
   const unread = visibleMistNotifications(state,view=>session.canAccessView(view as View),workspace.agentTaskNotices?.items).filter(notification=>!notification.readAt&&(!canAI||state?.settings.notifications.suggestions!==false||notification.id.startsWith('agent-task:')));
   const brief: Array<{ strong: React.ReactNode; text: React.ReactNode; onClick?: () => void }> = unread.slice(0, 3).map(notification => ({ strong: uiText(notification.title), text: notification.detail,
     onClick: () => void run(async () => { const bound=scope;await readMistNotice(workspace,notification); if(alive.current&&activeScope.current===bound)go(notification.target.view, notification.target.id, notification.target); }) }));

@@ -26,7 +26,8 @@ function plan(text: string) {
   const table = rows.slice(0, 4).map((r: any) => `| ${r.label} | ${String(r.summary?.customer ?? r.summary?.state ?? '').slice(0, 14)} | ${String(r.summary?.due ?? '—')} |`).join('\n');
   return finish(`## 交期最近的订单\n\n共查到 **${rows.length}** 张，需要优先跟进的是：\n\n| 订单 | 客户/状态 | 交期 |\n| --- | --- | --- |\n${table}\n\n**建议下一步**\n\n1. 先核对 ${rows[0]?.label ?? ''} 的备料进度\n2. 与客户 Cedar & Crown 确认出运窗口\n3. 逾期订单逐张说明原因\n\n> 以上只读，没有改动任何记录。`);
 }
-const local = createMistLocalRuntime({ directory: await mkdtemp(path.join(tmpdir(), 'agent-acceptance-')) });
+// AGENT_ACCEPTANCE_DIR 指定时续用既有本地数据目录（接着上次的走查），否则每次新建临时目录。
+const local = createMistLocalRuntime({ directory: process.env.AGENT_ACCEPTANCE_DIR || await mkdtemp(path.join(tmpdir(), 'agent-acceptance-')) });
 // AGENT_MODEL=haiku（或 sonnet）时改用本机 Claude 命令行作真实模型，看真实回答在界面上的样子；默认仍是脚本化模型。
 const realModel = process.env.AGENT_MODEL;
 async function askClaude(system: string, user: string): Promise<string> {

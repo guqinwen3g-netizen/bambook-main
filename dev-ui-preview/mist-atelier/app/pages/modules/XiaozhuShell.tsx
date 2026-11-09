@@ -36,7 +36,7 @@ export function XiaozhuComposer({ value, onChange, onSend, ready, busy, working,
 
 const TILE_ICON = [CalendarClock, Landmark, Mail, ListTodo];
 export function greeting(name: string | undefined, now = new Date()) {
-  const h = now.getHours(), part = h < 5 ? '夜深了' : h < 11 ? '早上好' : h < 13 ? '中午好' : h < 18 ? '下午好' : '晚上好';
+  const h = (now.getUTCHours() + 8) % 24, part = h < 5 ? '夜深了' : h < 11 ? '早上好' : h < 13 ? '中午好' : h < 18 ? '下午好' : '晚上好';
   return name ? `${part}，${name}` : part;
 }
 export function XiaozhuEmpty({ name, suggestions, onPick, children }: { name?: string; suggestions: string[]; onPick: (text: string) => void; children: React.ReactNode }) {

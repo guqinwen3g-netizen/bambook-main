@@ -13,7 +13,7 @@ import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { takeComposeIntent } from '../../runtime/composeIntent';
 import { Events } from './fulfillmentKit';
-import { ActionBar, DetailBlock, DetailBody, DetailSurface, shortWhen, todayIso, useCompactLayout, type ReasonedAction } from './pageKit';
+import { ActionBar, BUSINESS_TZ, DetailBlock, DetailBody, DetailSurface, shortWhen, todayIso, useCompactLayout, type ReasonedAction } from './pageKit';
 import { FileName } from '../../runtime/files';
 import { FailureNotice } from '../../runtime/FailureNotice';
 
@@ -65,7 +65,7 @@ export const EMAIL_TEMPLATES: Array<{ value: string; label: string; subject: str
 const isFollowUp = (state: MistState, m: EmailMessage) => m.followUpTaskIds.some(id => state.tasks.some(task => task.id === id && !task.done));
 const addressText = (rows: Array<{ name: string; address: string }>) => rows.map(row => row.name ? `${row.name} <${row.address}>` : row.address).join('，');
 const initialOf = (name: string) => (name.trim().match(/[\p{L}\p{N}]/u)?.[0] || '?').toUpperCase();
-const when = (at: string) => { const date = new Date(at); return Number.isFinite(date.getTime()) ? `${shortWhen(at)} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}` : '—'; };
+const when = (at: string) => { const date = new Date(at); return Number.isFinite(date.getTime()) ? `${shortWhen(at)} ${date.toLocaleTimeString('en-GB', { timeZone: BUSINESS_TZ, hour: '2-digit', minute: '2-digit', hour12: false })}` : '—'; };
 const sizeText = (bytes: number) => bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 /** Server and network problems carry their reason; anything else still says what to do next. */
 const problemText = (problem: unknown, fallback: string) => problem instanceof Error ? problem.message : typeof problem === 'string' && problem.trim() ? problem : problem && typeof problem === 'object' && typeof (problem as { message?: unknown }).message === 'string' ? (problem as { message: string }).message : fallback;
