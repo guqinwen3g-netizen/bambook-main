@@ -244,7 +244,7 @@ export function FinancePage() {
       if (!payment.date || !payment.payee.trim() || !Number.isFinite(Number(payment.amount)) || Number(payment.amount) <= 0) { setFailure('请填写付款日期、收款方和大于零的金额。'); return; }
       const { accountId, ...fields } = payment; void execute({ type: 'finance.payment.save', payload: { ...fields, amount: Number(payment.amount), ...(accountId ? { accountId } : {}) } }, () => { setPaymentOpen(false); setPayment(value => ({ ...value, payee: '', amount: '', ref: '' })); toast('付款凭证已保存'); });
     }}>{uiText("保存付款")}</Button>}>
-      {failure && <Banner tone="bad" title={uiText("付款尚未保存")}>{failure}</Banner>}<Banner title={uiText("只登记已发生的付款事实")}>{uiText("不发起银行付款，也不分配到供应商应付；供应商货款请在“应付待办”登记供应商付款。")}</Banner><FormGrid>
+      {failure && <Banner tone="bad" title={uiText("付款尚未保存")}>{failure}</Banner>}<Banner title={uiText("只登记已发生的付款事实")}>{uiText("供应商货款请在“应付待办”登记。")}</Banner><FormGrid>
         <Field label={uiText("付款日期")} required><TextInput type="date" value={payment.date} onChange={event => setPayment(value => ({ ...value, date: event.target.value }))} /></Field>
         <Field label={uiText("收款方")} required><TextInput value={payment.payee} onChange={event => setPayment(value => ({ ...value, payee: event.target.value }))} /></Field>
         <Field label={uiText("金额")} required><TextInput type="number" min="0.01" step="0.01" value={payment.amount} onChange={event => setPayment(value => ({ ...value, amount: event.target.value }))} /></Field>
