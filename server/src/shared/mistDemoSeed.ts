@@ -188,13 +188,13 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
     if (lukas) run('show lead 2 convert', { type: 'market.lead.convertToCrm', payload: { id: lukas, opportunity: { title: 'Berg 外套塔丝隆 SS27', domain: 'fabric', amount: '9500.00', currency: 'USD', expectedDate: day(45) } } });
     run('show lead 3', { type: 'market.showLead.save', payload: { input: { name: 'Anna Rossi', company: 'Studio Rossi Milano', email: 'anna@studiorossi.it', phone: '', demand: '精纺西装面料色卡', source: 'show', parentId: show, customerId: '', followUpDate: day(-6), estimatedValue: '4000.00', actualValue: '', currency: 'EUR', fileIds: [], note: '' } } });
   }
-  const demoBook = coatProduct ? id(run('lookbook', { type: 'market.lookbook.save', payload: { input: { name: 'Cedar & Crown AW27 大衣画册', customerId: c0.id, productIds: [coatProduct], fileIds: [], note: '内部选品资料，待业务确认后发送客户' } } })) : '';
+  const demoBook = coatProduct ? id(run('lookbook', { type: 'market.lookbook.save', payload: { input: { name: 'Cedar & Crown AW27 大衣画册', customerId: c0.id, productIds: [coatProduct], fileIds: [], note: 'AW27 双面呢大衣精选，面料与颜色可按需调整。' } } })) : '';
   if (demoBook) run('lookbook prepared', { type: 'market.lookbook.status', payload: { id: demoBook, status: 'Prepared' } });
   if (campaign) {
     const kenji = state.market.leads.find(l => l.source === 'campaign' && l.parentId === campaign && l.name === 'Kenji Mori');
     if (kenji) run('campaign lead convert', { type: 'market.lead.convertToCrm', payload: { id: kenji.id, opportunity: { title: 'Atelier Mori 精纺面料打样', domain: 'fabric', amount: '8000.00', currency: 'USD', expectedDate: day(35) } } });
     run('campaign overdue lead', { type: 'market.lead.save', payload: { input: { name: 'Emma Lind', company: 'Nordform Studio', email: 'emma.lind@nordform-studio.se', phone: '+46 8 410 239 18', demand: '羊毛混纺大衣 200 件试单', source: 'campaign', parentId: campaign, customerId: '', followUpDate: day(-3), estimatedValue: '14000.00', actualValue: '0', currency: 'USD', fileIds: [], note: '推广邮件回复后待跟进的明确线索' } } });
-    const paused = id(run('campaign paused demo', { type: 'market.campaign.save', payload: { input: { name: 'SS27 功能面料推广（暂停）', type: '面料资料推广', seasonId: ss27, showId: '', startDate: day(-8), endDate: day(20), target: '功能外套客户', budget: '2000.00', actualCost: '2300.00', currency: 'EUR', owner: '沈禾', productIds: [nylon].filter(Boolean), fileIds: [], note: '费用超预算，暂停核对投放渠道与后续预算' } } }));
+    const paused = id(run('campaign paused demo', { type: 'market.campaign.save', payload: { input: { name: 'SS27 功能面料推广', type: '面料资料推广', seasonId: ss27, showId: '', startDate: day(-8), endDate: day(20), target: '功能外套客户', budget: '2000.00', actualCost: '2300.00', currency: 'EUR', owner: '沈禾', productIds: [nylon].filter(Boolean), fileIds: [], note: '费用超预算，暂停核对投放渠道与后续预算' } } }));
     if (paused) { run('campaign start demo', { type: 'market.campaign.status', payload: { id: paused, status: 'Active' } }); run('campaign pause demo', { type: 'market.campaign.status', payload: { id: paused, status: 'Paused' } }); }
   }
 

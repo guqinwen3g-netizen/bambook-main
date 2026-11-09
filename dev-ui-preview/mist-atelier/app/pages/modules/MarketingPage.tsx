@@ -22,7 +22,8 @@ export const CAMPAIGN_STATUS: Record<MarketCampaign['status'], { label: string; 
 export const CAMPAIGN_NEXT: Record<MarketCampaign['status'], MarketCampaign['status'][]> = {
   Draft: ['Active', 'Cancelled'], Active: ['Paused', 'Completed', 'Cancelled'], Paused: ['Active', 'Completed', 'Cancelled'], Completed: [], Cancelled: [],
 };
-const transitionLabel: Partial<Record<MarketCampaign['status'], string>> = { Active: '开始 / 恢复活动', Paused: '暂停活动', Completed: '完成活动', Cancelled: '取消活动' };
+const transitionLabel: Partial<Record<MarketCampaign['status'], string>> = { Active: '开始活动', Paused: '暂停活动', Completed: '完成活动', Cancelled: '取消活动' };
+const transitionText = (from: MarketCampaign['status'], next: MarketCampaign['status']) => next === 'Active' && from === 'Paused' ? '恢复活动' : transitionLabel[next]!;
 export function campaignLeads(leads: MarketLead[], id: string) { return leads.filter(l => l.source === 'campaign' && l.parentId === id); }
 export function leadOverdue(l: MarketLead, day: string) { return !['Converted', 'Lost'].includes(l.status) && !!l.followUpDate && l.followUpDate < day; }
 export function campaignReminder(c: MarketCampaign, leads: MarketLead[], day: string) {
@@ -52,7 +53,7 @@ export function CampaignWorkbench({ tabs, input, onEdit, products, attachments, 
   const reset = () => { setQuery(''); setStage('all'); setReminder('all'); };
   const transition = (c: MarketCampaign, next: MarketCampaign['status']) => {
     if (!can || busy || !CAMPAIGN_NEXT[c.status].includes(next)) return;
-    setDialog({ title: `${transitionLabel[next]} · ${c.name}`, submitLabel: '确认', description: next === 'Completed' || next === 'Cancelled' ? '这是活动记录的终态，不能直接恢复。线索与客户业务仍保留；本操作不发送邮件或代表外部推广已执行。' : '只更新本公司的活动状态，不发送邮件或启动外部推广。',
+    setDialog({ title: `${transitionText(c.status, next)} · ${c.name}`, submitLabel: '确认', description: next === 'Completed' || next === 'Cancelled' ? '这是活动记录的终态，不能直接恢复。线索与客户业务仍保留；本操作不发送邮件或代表外部推广已执行。' : '只更新本公司的活动状态，不发送邮件或启动外部推广。',
       initialValues: {}, fields: [], submit: () => w.run({ type: 'market.campaign.status', payload: { id: c.id, status: next } }) });
   };
   const columns: Column<MarketCampaign>[] = [
@@ -71,11 +72,11 @@ export function CampaignWorkbench({ tabs, input, onEdit, products, attachments, 
     <ActionBar busy={busy} actions={[
       { label: '编辑活动', icon: Pencil, onClick: () => onEdit(input(current)), reason: !can ? '没有营销写权限' : !['Draft', 'Paused'].includes(current.status) ? '仅策划中或暂停的活动可编辑' : false },
       { label: '管理线索', icon: Users, onClick: () => go('marketing', undefined, { section: `campaign-leads:${current.id}` }) },
-      ...CAMPAIGN_NEXT[current.status].map(next => ({ label: transitionLabel[next]!, onClick: () => transition(current, next), reason: !can && '没有营销写权限' })),
+      ...CAMPAIGN_NEXT[current.status].map(next => ({ label: transitionText(current.status, next), onClick: () => transition(current, next), reason: !can && '没有营销写权限' })),
       { label: '发送推广邮件', onClick: () => { const to = campaignLeads(leads, current.id).filter(l => l.email && l.status !== 'Lost').map(l => l.email); setComposeIntent({ subject: current.name, body: current.target ? current.target + '\n' : '', ...(to.length ? { bcc: to.join(', ') } : {}) }); go('emails'); }, reason: !can ? '没有营销写权限' : !session.hasPermission('emails:write') ? '需要邮件权限' : !campaignLeads(leads, current.id).some(l => l.email && l.status !== 'Lost') ? '本活动线索没有邮箱' : false },
     ]} />
     <DetailBlock title={uiText("实际费用与目标")}><Facts items={[{ label: '预算', value: `${current.currency} ${current.budget}` }, { label: '实际费用', value: `${current.currency} ${current.actualCost}` }, { label: '负责人', value: current.owner }, { label: '期间', value: `${current.startDate} — ${current.endDate}` }, { label: '目标客户群', value: current.target }, { label: '说明', value: current.note || '未填写' }]} />
-      {campaignReminder(current, leads, day).overBudget && <Banner tone="warn" title={uiText("实际费用超出预算")}>{uiText("同一活动原币比较；不与其他币种活动合计。")}</Banner>}
+      {campaignReminder(current, leads, day).overBudget && <Banner tone="warn" title={uiText("实际费用超出预算")}>{ui`超出 ${current.currency} ${(Number(current.actualCost) - Number(current.budget)).toFixed(2)}`}</Banner>}
     </DetailBlock>
     <DetailBlock title={uiText("来源与产品")}><div className="mist-row">{current.seasonId && <Button onClick={() => go('seasons', current.seasonId)}>{uiText("关联季节")}</Button>}{current.showId && <Button onClick={() => go('seasons', current.showId, { section: 'shows' })}>{uiText("关联展会")}</Button>}</div>{products(current, can && ['Draft', 'Paused'].includes(current.status))}</DetailBlock>
     {/* mar54：投入产出（原币）：实际费用对比已转 CRM 线索的实际成交额与转出商机的预计金额，币种不同不合计。 */}
@@ -84,7 +85,7 @@ export function CampaignWorkbench({ tabs, input, onEdit, products, attachments, 
       const actual = sum(won.filter(l => Number(l.actualValue) > 0).map(l => ({ currency: l.currency, amount: Number(l.actualValue) }))), pipeline = sum(opps.filter(o => o.stage !== 'lost').map(o => ({ currency: o.currency, amount: Number(o.amount) })));
       const sameCurrency = won.filter(l => l.currency === current.currency).reduce((n, l) => n + (Number(l.actualValue) || 0), 0), cost = Number(current.actualCost) || 0;
       return <DetailBlock title={uiText('投入产出')}><Facts items={[{ label: '实际费用', value: `${current.currency} ${current.actualCost}` }, { label: '已成交（线索实际额）', value: actual }, { label: '转出商机（预计）', value: pipeline }, ...(cost > 0 && sameCurrency > 0 ? [{ label: `同币种产出 / 费用`, value: `${(sameCurrency / cost).toFixed(1)} 倍` }] : [])]} /></DetailBlock>; })()}
-    <DetailBlock title={uiText("线索接续")}><Facts items={[{ label: '来源线索', value: campaignLeads(leads, current.id).length }, { label: '已转 CRM', value: campaignLeads(leads, current.id).filter(l => l.status === 'Converted').length }, { label: '跟进逾期', value: campaignReminder(current, leads, day).overdue }]} /><span className="mist-note">{uiText("预计金额不是成交收入；转 CRM 后由客户主线继续跟进。")}</span></DetailBlock>
+    <DetailBlock title={uiText("线索接续")}><Facts items={[{ label: '来源线索', value: campaignLeads(leads, current.id).length }, { label: '已转 CRM', value: campaignLeads(leads, current.id).filter(l => l.status === 'Converted').length }, { label: '跟进逾期', value: campaignReminder(current, leads, day).overdue }]} /></DetailBlock>
     {attachments(current, !can)}{history(current.id)}
   </DetailBody> : <EmptyState compact title={uiText("活动详情")} description={uiText("选择活动，核对费用、线索与下一步操作。")} />;
   return <MistPage width="wide"><PageHeader eyebrow={uiText("客户与市场 · 营销")} title={uiText("营销推广")} actions={<><Button icon={Download} onClick={() => downloadModuleCsv('营销活动.csv', ['活动', '状态', '负责人', '预算', '费用', '币种'], shown.map(c => [c.name, CAMPAIGN_STATUS[c.status].label, c.owner, c.budget, c.actualCost, c.currency]))}>{uiText("导出")}</Button><Button icon={RefreshCw} disabled={busy} onClick={() => void w.refresh()}>{uiText("刷新")}</Button>{can && <Button variant="primary" icon={Plus} disabled={busy} onClick={() => onEdit(input())}>{uiText("创建活动")}</Button>}</>} />

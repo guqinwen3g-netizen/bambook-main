@@ -101,6 +101,14 @@ describe('线索逐次跟进历史', () => {
     expect(records.find(f => f.nextTaskId)).toMatchObject({ content: entries.at(-1)!.note, nextDate: '2026-10-20' });
     expect(out.state.calendar.filter(e => e.target?.id === out.result.customerId)).toHaveLength(1);
   });
+  it('记跟进时约定下次跟进日，不能早于今天；未填时沿用原日期', () => {
+    const { c, s } = demo(), lead = s.market.leads.find(l => l.name === 'Anna Rossi')!;
+    const followed = run(s, { type: 'market.showLead.transition', payload: { id: lead.id, status: 'Following', note: '电话沟通', followUpDate: '2026-10-21' } }, c).state;
+    expect(followed.market.leads.find(l => l.id === lead.id)).toMatchObject({ status: 'Following', followUpDate: '2026-10-21' });
+    expect(() => run(followed, { type: 'market.showLead.transition', payload: { id: lead.id, status: 'Following', note: '再沟通', followUpDate: '2026-10-13' } }, c)).toThrow(/不能早于今天/);
+    const kept = run(followed, { type: 'market.showLead.transition', payload: { id: lead.id, status: 'Following', note: '补充' } }, c).state;
+    expect(kept.market.leads.find(l => l.id === lead.id)!.followUpDate).toBe('2026-10-21');
+  });
   it('没有账号 ID 的经办也保留姓名时间；失败的 transition 不追加历史', () => {
     const { c, s } = demo(), lead = s.market.leads.find(l => l.source === 'show')!;
     delete lead.followUps;

@@ -35,7 +35,7 @@ export function developmentDueDays(value:string,now=businessNow()):number|null {
   if(date.getUTCFullYear()!==year||date.getUTCMonth()!==month-1||date.getUTCDate()!==day)return null;
   return Math.round((date.getTime()-Date.UTC(now.getFullYear(),now.getMonth(),now.getDate()))/86_400_000);
 }
-export function developmentDueText(value:string,now=businessNow()) {const days=developmentDueDays(value,now);return days===null?'日期待确认':days===0?'今天':days>0?`${days} 天后`:`${-days} 天前`;}
+export function developmentDueText(value:string,now=businessNow()) {const days=developmentDueDays(value,now);return days===null?'日期待确认':days===0?'今天':days>0?`${days} 天后`:`逾期 ${-days} 天`;}
 const late=(value:string)=>{const days=developmentDueDays(value);return days!==null&&days<0;};
 /** 三个页签的数量与各自未筛选列表一致：开发案按保存的业务线计数（草稿单独以「草稿 N」显示），寻样按寻样任务计数。 */
 export function developmentTabCounts(devs:ReadonlyArray<Pick<MistDev,'values'>>,drafts:ReadonlyArray<{values:MistDev['values']}>,fabrics:ReadonlyArray<unknown>):Record<DevelopmentListTab,number>&{drafts:Record<'garment'|'fabric',number>} {
@@ -98,7 +98,7 @@ function DevListTabPage({tab}:{tab:DevelopmentListTab}){
     {key:'obj',header:'开发对象',width:'minmax(200px,2.2fr)',render:dev=><ObjectCell thumb={<DevelopmentThumb state={state} dev={dev}/>} name={dev.name} meta={<><Mono>{dev.style}</Mono> · {dev.code} · {developmentInitiatorLabel(dev.values)}</>} />,sortValue:dev=>dev.name},
     {key:'owner',header:'负责人',width:'44px',hideOnMobile:true,render:dev=><Avatar name={dev.owner} identityKey={dev.ownerId} size="sm" />},
     {key:'stage',header:'阶段',width:'112px',hideOnMobile:true,render:dev=><><StageProgress total={5} current={dev.stage} label={uiText(STAGES[dev.stage])} /><span className="mist-cell-sub" style={{marginTop:7}}>{STAGES[dev.stage]} · {dev.ver}</span></>,sortValue:dev=>dev.stage},
-    {key:'due',header:'目标日期',width:'76px',hideOnMobile:true,render:dev=><div className={late(dev.due)?'mist-cell-late':undefined}><b className="mist-cell-strong">{shortDate(dev.due)}</b><span className="mist-cell-sub">{developmentDueText(dev.due)}</span></div>,sortValue:dev=>dev.due},
+    {key:'due',header:'目标日期',width:'76px',hideOnMobile:true,render:dev=>{const done=dev.stage>=STAGES.length-1;return <div className={!done&&late(dev.due)?'mist-cell-late':undefined}><b className="mist-cell-strong">{shortDate(dev.due)}</b>{!done&&<span className="mist-cell-sub">{developmentDueText(dev.due)}</span>}</div>;},sortValue:dev=>dev.due},
     {key:'state',header:'当前状态',width:'118px',render:dev=><Pill tone={dev.tone}>{dev.state}</Pill>},
     {key:'go',header:'',width:'16px',hideOnMobile:true,render:()=> <span className="mist-go"><Icon icon={ChevronRight} size="sm" /></span>},
   ];

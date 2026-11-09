@@ -107,7 +107,7 @@ export function CustomerPage() {
       <StatCard icon={BadgeDollarSign} label={uiText("今年下单")} value={fmt(currencyOrders.filter(order => new Date(order.createdAt).getFullYear() === businessNow().getFullYear()).reduce((sum, order) => sum + order.amount, 0), 2)} unit={uiText(customer.currency)} foot={`共 ${orders.length} 个订单`} />
       <StatCard icon={ClipboardList} label={uiText("在途订单")} value={active.length} unit={uiText("单")} foot={active.map(order => order.code).join(' · ')} onClick={() => setTab('orders')} />
       <StatCard icon={Wallet} label={uiText("应收余额")} value={fmt(currencyInvoices.reduce((sum, invoice) => sum + invoice.open, 0), 2)} unit={uiText(customer.currency)} foot={`${invoices.length} 张发票`} onClick={() => go('payment-vouchers')} />
-      <StatCard icon={CalendarClock} label={uiText("合作时长")} value={years} unit={uiText("年")} foot={`首单 ${customer.since}`} />
+      <StatCard icon={CalendarClock} label={uiText("合作时长")} value={years} unit={uiText("年")} foot={customer.since ? `${uiText("起始")} ${customer.since}` : undefined} />
     </StatGrid>
     <div className="mist-detail" data-layout="main-rail">
       <div>

@@ -59,7 +59,7 @@ import { buildPurchaseDocument, bindPurchaseDocument } from './purchasePrint';
 import { preparePurchaseDocumentSnapshot } from '../shared/mistPurchaseDocument';
 import { bindDevelopmentNotice, buildDevelopmentNotice, prepareDevelopmentNoticeSnapshot } from './developmentNoticePrint';
 import { bindCustomerStatement, buildCustomerStatement, prepareCustomerStatementSnapshot } from './customerStatementPrint';
-import { bindGeneratedDocument, buildGeneratedDocument } from './generatedDocumentPrint';
+import { bindGeneratedDocument, buildGeneratedDocument, generatedDocumentImages } from './generatedDocumentPrint';
 import { GENERATING_COMMANDS, prepareGeneratedSnapshot } from '../shared/mistDocumentGeneration';
 import { mistCommandRequiresSignature, normalizeSignatureSvg, signatureEntityId, type MistDecisionSignature } from '../shared/mistSignatures';
 import { prepareSeal, requestsSeal, sealFileIds, SEAL_COMMANDS, SEAL_IMAGE_MIME_TYPES, withoutSeal, type MistSealStamp } from '../shared/mistSeals';
@@ -1015,7 +1015,8 @@ export class MistRepository {
         }
         if (input.command && GENERATING_COMMANDS.has(input.command.type)) {
           const snapshot = prepareGeneratedSnapshot(row.state, sealPlan ? withoutSeal(input.command) : input.command, context);
-          const prepared = await buildGeneratedDocument(snapshot, this.quotationPdfRenderer, { sealDataUrl });
+          const images = await generatedDocumentImages(snapshot, row.state.files, file => this.files.read(workspaceId, file as MistStoredFile));
+          const prepared = await buildGeneratedDocument(snapshot, this.quotationPdfRenderer, { sealDataUrl, images });
           stored = await this.files.write(workspaceId, prepared.file, context.now);
           (context as typeof context & { generatedDocument?: unknown }).generatedDocument = bindGeneratedDocument(prepared, stored, { id: context.id, workspaceId, requestId: input.requestId });
           if (sealPlan) context.sealStamp = { sealId: sealPlan.seal.id, reason: sealPlan.reason, fileId: stored.id };

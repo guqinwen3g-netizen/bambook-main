@@ -106,7 +106,7 @@ export function ModuleEditorDialog({spec,onClose,onSaved}:{spec:ModuleEditorSpec
   </Dialog>;
 }
 /** confirmTitle：点按后先弹确认（mar52 / mar58 等归档类动作），确认后才执行 run。 */
-export type ModuleRowAction<T>={label:string;run:(row:T)=>Promise<unknown>|void;disabled?:(row:T)=>boolean;confirmTitle?:(row:T)=>string};
+export type ModuleRowAction<T>={label:string|((row:T)=>string);run:(row:T)=>Promise<unknown>|void;disabled?:(row:T)=>boolean;confirmTitle?:(row:T)=>string};
 /** T2 quick preview: only what is needed to recognise the record and decide whether to open it.
  * Long sections (tables, attachments, history) belong to the full detail page, never to the 340px column. */
 export type ModulePreviewSummary=PreviewSummaryData;
@@ -129,7 +129,7 @@ export function ModuleWorkbench<T extends {id:string}>({title,eyebrow,descriptio
   const locked=acting||workspace.saving||!!workspace.pending||!!workspace.pendingCreate;
   const act=async(action:ModuleRowAction<T>,row:T)=>{if(locked||actionLock.current)return;const origin=routeContext,rowId=getKey(row);actionLock.current=true;setActing(true);setFailure('');try{await action.run(row);}catch(problem){if(active.current&&currentContext.current===origin&&currentSelection.current===rowId)setFailure(problem instanceof Error?problem.message:'操作未完成');}finally{actionLock.current=false;if(active.current)setActing(false);}};
   const editSpec=current?edit?.(current):undefined;
-  const controls=current&&(editSpec||rowActions.length)?<div className="mist-row mist-module-actions">{editSpec&&<Button icon={Edit3} disabled={locked} onClick={()=>setEditor(editSpec)}>{uiText("编辑")}</Button>}{rowActions.map(a=><Button key={a.label} disabled={locked||a.disabled?.(current)} onClick={()=>{if(a.confirmTitle){setEditor({title:a.confirmTitle(current),submitLabel:uiText(a.label),fields:[],initialValues:{},submit:async()=>{await a.run(current);}});return;}void act(a,current);}}>{uiText(a.label)}</Button>)}</div>:null;
+  const controls=current&&(editSpec||rowActions.length)?<div className="mist-row mist-module-actions">{editSpec&&<Button icon={Edit3} disabled={locked} onClick={()=>setEditor(editSpec)}>{uiText("编辑")}</Button>}{rowActions.map((a,index)=>{const label=typeof a.label==='function'?a.label(current):a.label;return <Button key={index} disabled={locked||a.disabled?.(current)} onClick={()=>{if(a.confirmTitle){setEditor({title:a.confirmTitle(current),submitLabel:uiText(label),fields:[],initialValues:{},submit:async()=>{await a.run(current);}});return;}void act(a,current);}}>{uiText(label)}</Button>;})}</div>:null;
   const recordDetail=current?detail?.(current):<EmptyState title={uiText(workspace.loading?'正在读取记录':selectionKey?'未找到这条记录':'选择一条记录')} compact />;
   const body=<div className="mist-col" data-module-detail>{controls}{recordDetail}</div>;
   const previewSummary=preview&&current&&summary?summary(current):null;
