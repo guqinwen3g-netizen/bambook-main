@@ -7,6 +7,8 @@
 import express, { type Router } from 'express';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createAuthRouter } from '../auth/route';
 import { createAdminRouter } from '../admin/route';
@@ -89,6 +91,15 @@ describe('写接口匿名访问普查', () => {
     }
     const listed = new Set(all.map(r => `${r.method} ${r.path}`));
     expect([...PUBLIC].filter(k => !listed.has(k)), '公开名单里有已不存在的接口').toEqual([]);
+  });
+
+  it('普查挂载表与服务端实际挂载的 /api/* 路由器一致（新挂路由器必须进普查）', () => {
+    const mounted = new Set<string>();
+    for (const file of ['../index.ts', '../mist/server.ts']) {
+      const src = readFileSync(path.join(__dirname, file), 'utf8');
+      for (const m of src.matchAll(/app\.use\(\s*'(\/api\/[^']+)'/g)) mounted.add(m[1]);
+    }
+    expect([...mounted].sort()).toEqual(mounts.map(([prefix]) => prefix).sort());
   });
 
   it('非公开写接口匿名请求一律在触库前被拒（401/403/404）', async () => {
