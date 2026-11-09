@@ -14,6 +14,8 @@ export type AgentProposal = {
   /** Response-only access state; never accepted as a client authority claim. */
   unavailable?: boolean; taskBlocked?: string;
   sourceRevision?: number;
+  /** 确认执行后生成的文件（单据、对账单、通知等），供对话里直接打开与续办时引用。 */
+  produced?: { fileId: string; fileName: string };
 };
 export type AgentProposalCommand =
   | { type: 'agent.proposal.create'; payload: { command: AgentProposalCommandBody; summary: string[] } }
@@ -114,10 +116,11 @@ export function applyAgentProposalCommand(state: MistState, command: AgentPropos
 }
 
 /** 仓储在执行原命令后、落库前调用：本人、待确认、命令与提议完全一致，才记为已确认。 */
-export function markAgentProposalConfirmed(state: MistState, id: string, executed: AgentProposalCommandBody, actorId: string, now: string) {
+export function markAgentProposalConfirmed(state: MistState, id: string, executed: AgentProposalCommandBody, actorId: string, now: string, result?: Record<string, unknown>) {
   const proposal = state.agentProposals?.find(p => p.id === id);
   if (!proposal || proposal.ownerId !== actorId) fail('提议不存在或不属于当前账号', 'NOT_FOUND');
   if (proposal!.state !== 'pending') fail('提议已处理', 'CONFLICT');
   if (stable(proposal!.command) !== stable({ type: executed.type, payload: executed.payload })) fail('提议内容已变化，请刷新后重新核对', 'CONFLICT');
-  Object.assign(proposal!, { state: 'confirmed', decidedAt: now });
+  const fileId = typeof result?.fileId === 'string' ? result.fileId : undefined, file = fileId ? state.files?.find(f => f.id === fileId) : undefined;
+  Object.assign(proposal!, { state: 'confirmed', decidedAt: now, ...(file ? { produced: { fileId: file.id, fileName: file.name } } : {}) });
 }

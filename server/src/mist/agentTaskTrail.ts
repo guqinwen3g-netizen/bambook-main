@@ -1,12 +1,12 @@
 /** 小竹的办理过程：只给本人看“做了什么、读了哪条记录”，不带任何读取到的内容。 */
 import { AGENT_OBJECT_TYPES } from './agentRead';
+import { commandLabel } from './agentCommandLabel';
 import type { AgentTaskTrailItem } from '../shared/mistAgentTasks';
 import type { PlatformTaskStep } from './platformTaskPlan';
 
 const TRAIL_LIMIT = 30;
 const typeLabel = (type: unknown) => AGENT_OBJECT_TYPES.find(t => t.type === type)?.label ?? '业务记录';
 const text = (value: unknown, limit = 40) => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, limit) : '';
-const COMMAND = (type: unknown) => text(type, 60);
 // 读取尚未返回时只有内部编号；UUID 之类对人无意义，宁可只写对象类型。
 const humanId = (value: unknown) => { const v = text(value, 24); return /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(v) ? '' : v; };
 /** 读取结果自带的 bambook://open 链接 → 页面、编号与锚点；没有链接时不给跳转。 */
@@ -33,8 +33,8 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined): AgentTaskT
       case 'bambook_audit': out.push({ ...base, kind: 'read', label: '查看操作记录' }); break;
       case 'bambook_file_text': { const file = text(result?.file?.name, 60); out.push({ ...base, kind: 'read', label: file ? `读取附件 ${file}` : '读取附件正文' }); break; }
       case 'bambook_mail_receiving': out.push({ ...base, kind: 'read', label: '查看邮箱收件状态' }); break;
-      case 'bambook_preview': out.push({ ...base, kind: 'write', label: `预演 ${COMMAND(args.command?.type)}` }); break;
-      case 'bambook_execute': out.push({ ...base, kind: 'write', label: result?.status === 'awaiting_confirmation' ? `提交待你确认 ${COMMAND(args.command?.type)}` : `执行 ${COMMAND(args.command?.type)}` }); break;
+      case 'bambook_preview': out.push({ ...base, kind: 'write', label: `预演：${commandLabel(args.command)}` }); break;
+      case 'bambook_execute': out.push({ ...base, kind: 'write', label: result?.status === 'awaiting_confirmation' ? `提交待你确认：${commandLabel(args.command)}` : `${commandLabel(args.command)}` }); break;
       case 'bambook_task': {
         const a = args.action;
         if (a === 'question') out.push({ ...base, kind: 'ask', label: '向你提问' });

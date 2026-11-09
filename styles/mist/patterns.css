@@ -1193,6 +1193,12 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .mist-root::-webkit-scrollbar,
 .mist-xz-ai-meta b { color: var(--mist-ink); font-size: var(--mist-text-sm); font-weight: var(--mist-fw-medium); }
 .mist-xz-note { margin: 0; color: var(--mist-ink-2); font-size: var(--mist-text-sm); }
 .mist-xz-acts { display: flex; align-items: center; gap: 2px; margin-left: -6px; min-height: 28px; }
+.mist-xz-files { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.mist-xz-file { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-width: 0; padding: 8px 12px; border: 0; border-radius: var(--mist-r-md); background: var(--mist-fill); color: var(--mist-ink); font: inherit; font-size: var(--mist-text-sm); cursor: pointer; transition: background var(--mist-dur-fast) var(--mist-ease); }
+.mist-xz-file:hover { background: var(--mist-fill-2); }
+.mist-xz-file > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mist-xz-file > svg:first-child { color: var(--mist-ink-2); }
+.mist-xz-file > svg:last-child { color: var(--mist-ink-3); }
 .mist-xz-acts:empty { display: none; }
 @media (hover: hover) { .mist-xz-turn .mist-xz-acts :is(.mist-icon-btn, .mist-xz-time) { opacity: 0; transition: opacity var(--mist-dur-fast) var(--mist-ease); } .mist-xz-turn:hover .mist-xz-acts :is(.mist-icon-btn, .mist-xz-time), .mist-xz-acts:focus-within :is(.mist-icon-btn, .mist-xz-time), .mist-xz-turn:last-child .mist-xz-acts :is(.mist-icon-btn, .mist-xz-time) { opacity: 1; } }
 

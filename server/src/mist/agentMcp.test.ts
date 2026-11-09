@@ -338,9 +338,33 @@ describe('External Agent confirmation uses the proposed source version',()=>{
 });
 
 describe('proposal fallback summary', () => {
+  it('turns a document generation into a proposal without a preview, named by the document and the order, and produces nothing before the owner confirms', async () => {
+    const local = createMistLocalRuntime({ directory });
+    const app = createMistServer(undefined, { local });
+    const { client, workspace, tool } = await as(app, 'demo-sales');
+    const order = workspace.state.orders.find((o: any) => o.state === 'approved') ?? workspace.state.orders[0];
+    const command = { type: 'order.document.generate', payload: { orderId: order.id, kind: 'PI' } };
+    const filesBefore = workspace.state.files.length;
+    const preview = await tool('bambook_preview', { workspaceId: workspace.id, command });
+    expect(preview.isError).toBeUndefined();
+    expect(preview.structuredContent).toMatchObject({ via: 'confirm', previewUnsupported: true });
+    const first = await tool('bambook_execute', { workspaceId: workspace.id, command, requestId: 'pi-1' });
+    expect(first.isError).toBeUndefined();
+    expect(first.structuredContent).toMatchObject({ status: 'awaiting_confirmation', summary: [`生成PI（形式发票）：${order.code}`, '确认后生成正式文件'] });
+    const after = (await client.get('/api/mist/workspaces/' + workspace.id).expect(200)).body.workspace;
+    expect(after.state.files.length).toBe(filesBefore);
+    expect(after.state.agentProposals.filter((p: any) => p.state === 'pending')).toHaveLength(1);
+    expect((await tool('bambook_execute', { workspaceId: workspace.id, command, requestId: 'pi-1' })).structuredContent).toMatchObject({ status: 'awaiting_confirmation', replayed: true });
+  });
+
   it('names the business action instead of the internal command', async () => {
     const { proposalFallbackSummary } = await import('./agentMcp');
     expect(proposalFallbackSummary({ type: 'task.save', payload: { title: '跟进面料确认', due: '2026-11-08' } })).toBe('保存待办：跟进面料确认');
     expect(proposalFallbackSummary({ type: 'fulfillment.unknownThing', payload: {} })).toBe('办理履约');
+    const { commandLabel } = await import('./agentCommandLabel');
+    expect(commandLabel({ type: 'order.document.generate', payload: { orderId: 'o', kind: 'SC' } })).toBe('生成SC（销售合同）');
+    expect(commandLabel({ type: 'fulfillment.documents.generate', payload: { shipmentId: 's', type: 'PL' } })).toBe('生成PL（装箱单）');
+    expect(commandLabel({ type: 'email.move', payload: {} })).toBe('移动邮件');
+    expect(commandLabel({})).toBe('业务操作');
   });
 });
