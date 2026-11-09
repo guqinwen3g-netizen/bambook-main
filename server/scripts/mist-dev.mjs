@@ -3,6 +3,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createRequire} from 'node:module';
 import {spawn} from 'node:child_process';
+import { isCliEntry } from '../../scripts/lib/acceptance-selfcheck.mjs';
 
 const SERVER_ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const isTestFile=file=>/\.(?:test|spec)\.ts$/.test(file);
@@ -68,7 +69,7 @@ export function createMistDevRunner({root=SERVER_ROOT,pollMs=500,debounceMs=200,
   return{start,stop,scan};
 }
 
-if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
+if (isCliEntry(import.meta.url)) {
   const runner=createMistDevRunner();
   let closing=false;
   const stop=()=>{if(closing)return;closing=true;void runner.stop().finally(()=>process.exit(0));};

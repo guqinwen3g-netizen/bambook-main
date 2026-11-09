@@ -15,6 +15,7 @@ export function expandCartonRange(input: { from: string; to: string; quantity: n
   if (end < start) throw new Error('结束箱号不能小于开始箱号');
   if (end - start + 1 > 2000) throw new Error('一次最多 2000 箱');
   if (!(input.quantity > 0)) throw new Error('每箱数量须大于零');
+  if (!(input.netWeight > 0)) throw new Error('每箱净重须大于零');
   if (input.grossWeight < input.netWeight) throw new Error('毛重不能小于净重');
   return Array.from({ length: end - start + 1 }, (_, i) => ({ ...source, carton: a[1] + String(start + i).padStart(width, '0'), quantity: input.quantity, netWeight: input.netWeight, grossWeight: input.grossWeight, volume: input.volume, note: '' }));
 }
@@ -25,15 +26,17 @@ export function parseRollPacking(raw: string, source: Pick<Source, 'lineId' | 'p
   const seen = new Set<string>();
   return lines.map((line, i) => {
     const [roll, q, net, gross, vol, ...rest] = line.split(/[\s,，\t]+/);
-    const quantity = Number(q), netWeight = Number(net ?? 0), grossWeight = gross === undefined ? netWeight : Number(gross), volume = vol === undefined ? 0 : Number(vol);
+    const quantity = Number(q), netWeight = Number(net), grossWeight = gross === undefined ? netWeight : Number(gross), volume = vol === undefined ? 0 : Number(vol);
+    if (roll && quantity > 0 && net === undefined) throw new Error(`码单第 ${i + 1} 行缺少净重`);
     if (!roll || rest.length || !(quantity > 0) || ![netWeight, grossWeight, volume].every(n => Number.isFinite(n) && n >= 0)) throw new Error(`码单第 ${i + 1} 行格式无效`);
+    if (!(netWeight > 0)) throw new Error(`码单第 ${i + 1} 行缺少净重`);
     if (grossWeight < netWeight) throw new Error(`码单第 ${i + 1} 行毛重小于净重`);
     if (seen.has(roll)) throw new Error(`卷号 ${roll} 重复`);
     seen.add(roll);
     return { ...source, carton: roll, quantity, netWeight, grossWeight, volume, note: '' };
   });
 }
-export const rollsText = (stock: FulfillmentStock) => (stock.rolls || []).map(r => [r.roll, r.quantity, r.weightKg ?? 0, r.weightKg ?? 0].join(' ')).join('\n');
+export const rollsText = (stock: FulfillmentStock) => (stock.rolls || []).map(r => [r.roll, r.quantity, ...(r.weightKg ? [r.weightKg, r.weightKg] : [])].join(' ')).join('\n');
 
 export function PackingRangeDialog({ fabric, sources, lots, unit, onClose, onApply }: { fabric: boolean; sources: Source[]; lots: Array<{ stock: FulfillmentStock; lineId: string; label: string }>; unit: (lineId: string) => string; onClose: () => void; onApply: (rows: PackingRow[], replace: boolean) => void }) {
   const [source, setSource] = React.useState(sources[0]?.value || ''), [replace, setReplace] = React.useState(true), [error, setError] = React.useState('');

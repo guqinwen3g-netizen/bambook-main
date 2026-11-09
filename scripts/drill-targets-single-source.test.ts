@@ -21,6 +21,11 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DRILL_TARGETS, DRILL_ACTOR_PREFIX, DRILL_PROBE_FX, drillTargets, drillWhere, derivedLinkTargets, handCopyHits } from './lib/drill-residue.mjs';
 
+/**
+ * 2026-11-09 旧主 API（远期结汇、佣金、运单、订单、库存项等服务及其演练）删除后，源码不再写这些族；
+ * 清理清单仍保留它们，以便共享库里历史演练残留仍能被诊断与定向清理。新增死认领照样红。
+ */
+const RETIRED_CLAIMED_FAMILIES = ['TEST_D6FX_', 'TEST_D6WD_', 'TEST_D4CM_', 'TEST_D5SCH_', 'TEST_D2PC_', 'TEST_C6OWN_', 'TEST_D1LOT_'];
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIAG = 'server/scripts/diag-test-residue.mjs';
 const CLEAN = 'server/scripts/cleanup-test-residue.mjs';
@@ -102,25 +107,10 @@ function familiesWithMarkConst(): Set<string> {
  *      源码里"有字面量但没有 MARK 常量"的族窄尺看不见 ⇒ 见下面"两把尺的差额本身就是账"那条（窄尺是**下界**）。
  */
 const UNCLAIMED_MARK_FAMILIES = [
-  'TEST_B58ACTOR_', 'TEST_C1CT_', 'TEST_C2SM_', 'TEST_C3QTY_', 'TEST_CNA_', 'TEST_DCNL_', 'TEST_MCC_',
-  'TEST_NCI_', 'TEST_SHIPDL_', 'TEST_SHPDUP_', 'TEST_SHPLOCK_', 'TEST_SHPRB_', 'TEST_TPA_',
-  // v3.13：壳自己那份单测的新用例（`drillTouchLog.test.ts` 里造"客户端没有委托"这一格）——
-  //   它只在**替身客户端**上跑，一行都不进库 ⇒ 认领清单不该为它加删除目标（加了反而是给删除面凭空多一族）。
+  // 2026-11-09：旧主 API 及其真库演练删除后只剩壳自己那份单测（`drillTouchLog.test.ts`）的两族，
+  //   它们只在替身客户端上跑、一行都不进库 ⇒ 认领清单不为它们加删除目标。
+  'TEST_C1CT_',
   'TEST_C8DG_',
-  // v3.234：对账单那两份**自清理**的真库测试件（B266 名字兜底 / B269 内部 id 不外泄）——
-  //   照 TEST_TPA_ 那条既有先例：它们 afterAll 里按自己写入的前缀删干净并断言残值为 0，
-  //   所以认领清单不为它们加删除目标（加了＝给删除面凭空多两族，越 §8.2 那条边界）。
-  //   ⚠️ 这一格换来的代价要说清：用例**中途红**时那两族会留残值，而认领尺看不见它——
-  //   能看见的是那个文件自己的残值断言（它会一起红），不是 watchdog。
-  'TEST_B266_',
-  'TEST_B269_',
-  // v3.24x（2026-09-29 晚）：**短装门禁**那份真库演练（`server/src/shipping/__tests__/shortShipmentGate.test.ts`）
-  //   **已接壳**（`createDrillContext({prefix:'TEST_SHORTSHIP_'})`）：
-  //   删/数两侧都走 `ctx.mark`，收尾由 `ctx.residual()` 按**运行时真正写过的表**对撞 ⇒ 自清理自证。
-  //   ⚠️ 与 `TEST_TPA_`/`TEST_NCI_` 同一先例：**不为它加删除目标**（加了 = 给删除面凭空多一族）。
-  //   ⚠️ 代价照写：用例**中途红**时这族会留残值，能看见它的是**本文件自己的** `ctx.residual()` 断言，
-  //      不是 watchdog 那本账。
-  'TEST_SHORTSHIP_',
 ];
 
 
@@ -189,13 +179,14 @@ describe('B35 第二刀：演练认领目标只有基座一份', () => {
    */
   it('★ 方向一：认领的每一个前缀必须在源码里真的被写过（抓死认领 / 拼写漂移）', () => {
     const written = familiesWrittenAsLiteral();
-    expect(written.size, '源码里一个演练族字面量都扫不到 ⇒ 这把尺瞎了，别把"零命中"当"没问题"').toBeGreaterThan(20);
+    expect(written.size, '源码里一个演练族字面量都扫不到 ⇒ 这把尺瞎了，别把"零命中"当"没问题"').toBeGreaterThan(3); // 2026-11-09 旧主 API 演练删除后实测 6
     const claimed = [...new Set(DRILL_TARGETS.map((t) => t.prefix).filter((p) => p && p !== DRILL_ACTOR_PREFIX))];
     expect(claimed.length, '认领前缀集为空 ⇒ 本条在测空气').toBeGreaterThan(8);
     expect(claimed, 'actor 面走"前缀族 + 源码派生"那条判据（见下面 TEST_ACTOR 一节）；它若不在清单里，方向一的豁免就是漏网')
       .not.toContain(DRILL_ACTOR_PREFIX);
     expect(DRILL_TARGETS.some((t) => t.prefix === DRILL_ACTOR_PREFIX), 'actor 认领条目必须仍在册').toBe(true);
-    expect(claimed.filter((p) => !written.has(p)), `这些认领前缀在源码里不存在 ⇒ 死认领（账面"已覆盖"，实际一行都认领不到）`).toEqual([]);
+    expect(claimed.filter((p) => !written.has(p) && !RETIRED_CLAIMED_FAMILIES.includes(p)), `这些认领前缀在源码里不存在 ⇒ 死认领（账面"已覆盖"，实际一行都认领不到）`).toEqual([]);
+    expect(RETIRED_CLAIMED_FAMILIES.filter((p) => written.has(p) || !claimed.includes(p)), '退役族重新出现在源码或已移出清单 ⇒ 同批把它从退役名单删掉').toEqual([]);
     // 恒真检查（把缺陷放回另一种写法：本批修掉的那条就是它）：`TEST_C4_` 必须**不在**派生集、真族必须在
     expect(written.has('TEST_C4_'), '对照：死认领的拼法不该在源码派生集里（它若在了，上面那条就是恒绿判据）').toBe(false);
     expect(written.has('TEST_C4OWN_'), '对照：源码真实使用的族必须在派生集里（否则"零死认领"是瞎出来的）').toBe(true);
@@ -203,15 +194,15 @@ describe('B35 第二刀：演练认领目标只有基座一份', () => {
 
   it('★ 方向二：源派生的 MARK 族与认领清单**双向**对得上，未认领的只能是登记过的那批族', () => {
     const marks = familiesWithMarkConst();
-    expect(marks.size, '一个 const MARK 都没扫到 ⇒ 尺瞎了').toBeGreaterThan(15);
+    expect(marks.size, '一个 const MARK 都没扫到 ⇒ 尺瞎了').toBeGreaterThan(3); // 2026-11-09 实测 5
     const claimed = new Set(DRILL_TARGETS.map((t) => t.prefix).filter((p) => p && p !== DRILL_ACTOR_PREFIX));
     // 已认领的族必须逐个是 MARK 常量族（比方向一更严：认领不许靠"源码里出现过子串"混进来）
-    expect([...claimed].filter((c) => !marks.has(c)), '认领前缀不是任何一处 const MARK 的族 ⇒ 要么死认领，要么该族换了写法').toEqual([]);
+    expect([...claimed].filter((c) => !marks.has(c) && !RETIRED_CLAIMED_FAMILIES.includes(c)), '认领前缀不是任何一处 const MARK 的族 ⇒ 要么死认领，要么该族换了写法').toEqual([]);
     const unclaimed = [...marks].filter((m) => !claimed.has(m)).sort();
     expect(unclaimed, '未认领的 MARK 族与登记清单不一致：新族要认领，或认领掉之后要把清单里那行**删掉**（两者都得在 diff 里看得见）')
       .toEqual([...UNCLAIMED_MARK_FAMILIES].sort());
     // 恒真检查：本条不能是恒等式 —— 源派生必须**严格多于**已认领族，否则"相等"这句没有内容
-    expect(marks.size, '源派生族数必须严格多于已认领族数 ⇒ 否则方向二退化成恒等式').toBeGreaterThan(claimed.size);
+    expect(marks.size, '源派生族数必须严格多于已认领族数 ⇒ 否则方向二退化成恒等式').toBeGreaterThan([...claimed].filter((c) => !RETIRED_CLAIMED_FAMILIES.includes(c)).length);
     // 反向证据：登记清单不是抄来的字符串集，它必须逐条真的能在源码里找到（清单自己也会腐烂）
     for (const f of UNCLAIMED_MARK_FAMILIES) expect(marks.has(f), `登记的未认领族 ${f} 在源码里已找不到 ⇒ 清单过时`).toBe(true);
   });
@@ -350,7 +341,7 @@ describe('B35 第二刀：演练认领目标只有基座一份', () => {
     // ★ v2.93 换锚（复核 BLOCK-2 成立）：原先这里钉 derived.length > 8，与 v2.91 删掉的 > 10 是**同一条**
     //   "源码里还剩几个写死身份"的反向下界（现量 10、余量 2 ⇒ 再接壳必红）。改成钉**扫描面**：
     //   分母 = 走到的文件数（1017 实测），它不随采纳变化 ⇒ 只会因"路径/后缀写错"而红，不会因改进而红。
-    expect(scanned, '扫描面塌了（根路径或后缀白名单写错）⇒ 本文件所有派生结论都不成立').toBeGreaterThan(900);
+    expect(scanned, '扫描面塌了（根路径或后缀白名单写错）⇒ 本文件所有派生结论都不成立').toBeGreaterThan(700); // 2026-11-09 实测 820
     console.log(`[actor 普查] 扫到 ${scanned} 个文件 · 源里写死的 TEST_ACTOR_* 字面量 ${derived.length} 个（**只作读数，不再当判据**）`);
     /**
      * ★ v2.75（复核 **B-2** 的处置）：**删掉**上一批我自己宣布的"三颗不腐烂的钉子" ——

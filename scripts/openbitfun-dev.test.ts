@@ -24,11 +24,11 @@ ${exits ? 'process.exit(0);' : 'setInterval(() => {}, 1000);'}
 const waitForStart = 'for i in {1..100}; do [ -f "$FIXTURE_ROOT/started" ] && break; sleep 0.02; done; test -f "$FIXTURE_ROOT/started"';
 
 describe('OpenBitFun browser development startup', () => {
-  it('is part of npm run dev without an implicit heavyweight build', async () => {
+  it('is part of npm run dev:stack without an implicit heavyweight build', async () => {
     const pkg = JSON.parse(await readFile('package.json', 'utf8'));
     const stack = await readFile('scripts/dev-stack.sh', 'utf8');
     const leaf = await readFile(helper, 'utf8');
-    expect(pkg.scripts.dev).toBe('npm run dev:stack');
+    expect(pkg.scripts.dev).toBe('npm run dev:mist'); // 2026-10-13 起默认前端入口为 Mist；全栈与 OpenBitFun 走 dev:stack
     expect(pkg.scripts['dev:stack']).toBe('bash scripts/dev-stack.sh');
     expect(stack).toContain('source "$ROOT/scripts/openbitfun-dev.sh"');
     expect(stack).toContain('start_openbitfun_dev "$ROOT"');

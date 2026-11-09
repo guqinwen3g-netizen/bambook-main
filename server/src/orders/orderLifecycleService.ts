@@ -13,6 +13,7 @@ import { syncOrderEntityReferences, deactivateEntityLinks } from '../entities/sy
 import { publishBusinessEvent, persistBusinessEventInTransaction, type BusinessEvent } from '../events/businessEventBus';
 import { logger } from '../lib/logger';
 import { createCreditService } from '../credit/creditService';
+import { orderAmountOrNull } from '../shared/orderAmount';
 import { createMoqConfigService } from '../moq/moqConfigService';
 import { createMoqResolutionService } from '../moq/moqResolutionService';
 import { buildActualMoqLines, findCurrentMoqApproval, actualMoqFamily, lockMoqBasisRows } from '../moq/moqApprovalBasis';
@@ -407,6 +408,7 @@ export async function evaluateOrderConfirmGates(params: {
     select: {
       id: true, status: true, deletedAt: true, type: true, businessLine: true,
       quantity: true, unit: true, fieldSources: true, capsuleExemption: true, moqSnapshot: true, customerRelationId: true, quoteAmount: true,
+      totalNet: true, lines: { select: { netValue: true } },
       // ★ 必须带上：矩阵写的 `paymentMethod` 在 Order 上**不存在**（真库 information_schema 实测），
       //   真实字段是 `paymentInstrument`。select 漏了它 ⇒ gateOrder.paymentInstrument === undefined
       //   ⇒ 门禁**永不触发**且测试全绿（静默 fail-open）。这是本门禁最容易做出假门禁的一处。
@@ -428,7 +430,8 @@ export async function evaluateOrderConfirmGates(params: {
       const creditSvc = createCreditService({ prisma });
       const credit = await creditSvc.checkCreditAvailable({
         relationId: gateOrder.customerRelationId,
-        amount: Number(gateOrder.quoteAmount ?? 0) || undefined,
+        // 金额走唯一真源（明细行净额 → totalNet → quoteAmount）；只看报价额会让无报价额的订单跳过额度判定。
+        amount: orderAmountOrNull(gateOrder) || undefined,
       });
       if (!credit.ok) {
         logger.error('[OrderLifecycle] 信用门禁校验失败（fail-closed 阻断 Confirmed）', { orderId, logScope, error: credit.error.message });

@@ -2341,6 +2341,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const allocation: FulfillmentPacking[] = p.lines.map((l: any) => { const candidates = s.lines.filter(i => i.lineId === l.lineId), line = candidates.find(i => i.productionId === l.productionId) || (l.productionId === undefined && candidates.length === 1 ? candidates[0] : undefined); if (!line)
                 fail('请选择本票准确条目与生产分支'); const netWeight = qty(l.netWeight, '净重', true), grossWeight = qty(l.grossWeight, '毛重', true); if (grossWeight < netWeight)
                 fail('毛重不能小于净重'); return { id: ctx.id(), shipmentId: s.id, lineId: l.lineId, ...(line!.productionId ? { productionId: line!.productionId } : {}), carton: text(l.carton, '箱号'), quantity: qty(l.quantity), netWeight, grossWeight, volume: qty(l.volume, '体积', true), note: text(l.note, '备注', false), ...(l.assortment!==undefined?{assortment:l.assortment}: {}), ...(l.fabricColor!==undefined?{fabricColor:text(l.fabricColor,'颜色',false)}:{}) }; });
+            // 新登记或改动的装箱须有实际重量；补充明细只核对原装箱不变（原件已签发，不在此处改重量）。
+            if(!supplement)for(const row of allocation){if(!(row.netWeight>0))fail('净重须为正数，最多四位小数');if(!(row.grossWeight>0))fail('毛重须为正数，最多四位小数');}
             for (const line of s.lines)
                 if (sum(allocation.filter(a => a.lineId === line.lineId && a.productionId === line.productionId).map(a => a.quantity)) !== line.quantity)
                     fail('逐条目装箱数量必须等于本次计划数量');

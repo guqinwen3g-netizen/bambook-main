@@ -56,6 +56,7 @@
     "deploy:all": "npm run deploy:server && npm run deploy:web",
     "test": "vitest run dev-ui-preview/mist-atelier/app components/mist",
     "test:mist:tooling": "vitest run scripts/mist-version.test.ts",
+    "test:scripts": "node scripts/run-script-tests.mjs",
     "test:mist:server": "npm --prefix server run test:mist",
     "test:access:server": "npm --prefix server run test:access",
     "typecheck:mist": "tsc -p tsconfig.mist.json",

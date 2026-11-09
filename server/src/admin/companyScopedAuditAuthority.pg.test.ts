@@ -165,10 +165,11 @@ describe.skipIf(!url || !psql || !existsSync(psql))('company-scoped audit/author
       // 'left' 曾在 A、现在 B：其历史审计不能归给 B（可能是 A 的业务），保持 NULL。
       expect(audit).toEqual({ ambiguous: '', baddetail: '', detail: b, leftmember: '', nomember: '', single: a, target: a });
       expect(ok('SELECT string_agg(id || \'=\' || coalesce("companyId"::text, \'\'), \',\' ORDER BY id) FROM "OrderApprovalAuthority"')).toBe(`r1=${a},r2=,r3=`);
-      expect(ok('SELECT string_agg(id || \':\' || version, \',\' ORDER BY id) FROM "SystemConfig"'))
-        .toBe([`company:${a}::supplierCommitment.approvers.mixed.fabric:5`, `company:${a}::supplierCommitment.approvers.processing.fabric:2`, `company:${a}::supplierCommitment.approvers.purchase.fabric:3`, `company:${a}::supplierCommitment.approvers.purchase.garment:1`,
+      // 两家公司 id 随机生成，排序先后不固定 ⇒ 按集合比对。
+      expect(ok('SELECT string_agg(id || \':\' || version, \',\' ORDER BY id) FROM "SystemConfig"').split(',').sort())
+        .toEqual([`company:${a}::supplierCommitment.approvers.mixed.fabric:5`, `company:${a}::supplierCommitment.approvers.processing.fabric:2`, `company:${a}::supplierCommitment.approvers.purchase.fabric:3`, `company:${a}::supplierCommitment.approvers.purchase.garment:1`,
           `company:${b}::supplierCommitment.approvers.mixed.fabric:5`, `company:${b}::supplierCommitment.approvers.purchase.garment:1`,
-          'global::supplierCommitment.approvers.legacy.fabric:1', 'global::supplierCommitment.approvers.mixed.fabric:5', 'global::supplierCommitment.approvers.processing.fabric:2', 'global::supplierCommitment.approvers.processing.garment:1', 'global::supplierCommitment.approvers.purchase.fabric:3', 'global::supplierCommitment.approvers.purchase.garment:1'].join(','));
+          'global::supplierCommitment.approvers.legacy.fabric:1', 'global::supplierCommitment.approvers.mixed.fabric:5', 'global::supplierCommitment.approvers.processing.fabric:2', 'global::supplierCommitment.approvers.processing.garment:1', 'global::supplierCommitment.approvers.purchase.fabric:3', 'global::supplierCommitment.approvers.purchase.garment:1'].sort());
       // 每家公司只拿到“全局名单 ∩ 本公司在职成员”（one 在 A，two 在 B，nobody 不在任何公司），无效名单不复制。
       const ids = (company: string, key: string) => ok(`SELECT value->>'userIds' FROM "SystemConfig" WHERE id = 'company:${company}::supplierCommitment.approvers.${key}'`);
       expect(ids(a, 'mixed.fabric')).toBe('["one"]');

@@ -1074,7 +1074,8 @@ describe('验收脚本 env 纪律普查（G-3c 第 11 批·复核处置）', () 
   });
 
   it('★ 自建 PrismaClient 的验收脚本，100% 在**构造之前**先过本仓 env 真源（loadEnvForScript）', () => {
-    const { noEnv, lateEnv } = discipline(acceptanceFiles());
+    // node:test 工具自检件（*.test.mjs / *.test.cjs）只在临时目录里造 @prisma 替身文件、从不构造客户端 ⇒ 不在本条口径内。
+    const { noEnv, lateEnv } = discipline(acceptanceFiles().filter((f) => !/\.test\.(mjs|cjs)$/.test(f)));
     expect(noEnv, `这些脚本会让 Prisma 去借主 checkout 的 env：\n${noEnv.join('\n')}`).toEqual([]);
     expect(lateEnv, `这些脚本接了 env 但接在 new PrismaClient() **之后** ⇒ 等于没接：\n${lateEnv.join('\n')}`).toEqual([]);
   });
