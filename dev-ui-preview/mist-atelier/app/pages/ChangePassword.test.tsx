@@ -58,10 +58,10 @@ it('explains a first-login password change differently from an administrator res
   await act(async () => root.render(<ToastProvider><ForcedPasswordChangePage /></ToastProvider>));
   expect(document.body.textContent).toContain('首次登录');
   expect(document.body.textContent).toContain('初始密码');
-  expect(document.body.textContent).not.toContain('管理员为你重置了密码');
+  expect(document.body.textContent).not.toContain('密码已重置');
   session.user = { email: 'a@x.test', mustChangePassword: true, passwordChangeReason: 'reset' };
   await act(async () => root.render(<ToastProvider><ForcedPasswordChangePage key="reset" /></ToastProvider>));
-  expect(document.body.textContent).toContain('管理员为你重置了密码');
+  expect(document.body.textContent).toContain('密码已重置');
   expect(document.body.textContent).toContain('临时密码');
   session.user = { email: 'a@x.test', mustChangePassword: false };
 });

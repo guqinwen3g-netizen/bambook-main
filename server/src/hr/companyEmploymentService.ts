@@ -131,6 +131,12 @@ export function createCompanyEmploymentService(prisma: PrismaClient, companyId: 
         if (input.regularDate && input.regularDate < (input.hireDate || existing!.hireDate)) throw new HrError('VALIDATION_FAILED', '转正日期不能早于入职日期。');
         if (!creating && input.regularDate !== undefined && input.regularDate !== existing!.regularDate) throw new HrError('STATUS_VIA_EVENT_ONLY', '请通过转正办理在职变动。');
         if (input.contractType && !['FixedTerm', 'OpenEnded', 'PartTime', 'Intern'].includes(input.contractType)) throw new HrError('VALIDATION_FAILED', '合同类型无效。');
+        // 固定期限劳动合同必须约定终止日期，且终止日期须晚于入职日期。
+        const nextContractType = input.contractType !== undefined ? input.contractType : creating ? null : existing!.contractType;
+        const nextContractEnd = input.contractEnd !== undefined ? input.contractEnd : creating ? null : existing!.contractEnd;
+        const nextHireDate = input.hireDate || (creating ? undefined : existing!.hireDate);
+        if (nextContractType === 'FixedTerm' && !nextContractEnd) throw new HrError('VALIDATION_FAILED', '固定期限合同请填写合同到期日。');
+        if (nextContractEnd && nextHireDate && nextContractEnd <= nextHireDate) throw new HrError('VALIDATION_FAILED', '合同到期日须晚于入职日期。');
         if (input.positionId !== undefined && input.positionId !== null && input.positionId !== jobOf(person.user)) throw new HrError('STATUS_VIA_EVENT_ONLY', '请通过调岗调整岗位。');
         const fields = ['hireDate', 'regularDate', 'contractType', 'contractEnd', 'phone', 'emergencyContact', 'workLocation', 'notes'] as const;
         const patch = Object.fromEntries(fields.filter(k => input[k] !== undefined).map(k => [k, input[k] || null]));

@@ -210,6 +210,8 @@
   "保存日程": "Save event",
   "至少 {0} 位": "At least {0} characters",
   "请先修改登录密码": "Please change your login password first",
+  "密码已重置，请先修改登录密码": "Your password was reset. Please change it first",
+  "首次登录，请先设置登录密码": "First sign-in: set your password",
   "管理员为你重置了密码。为保护账号安全，请用收到的临时密码设置一个只有你知道的新密码，再继续使用系统。": "The admin has reset your password. To protect the security of your account, please use the temporary password you received to set a new password only known to you before continuing to use the system.",
   "未修改": "Not changed",
   "修改并继续": "Change and continue",

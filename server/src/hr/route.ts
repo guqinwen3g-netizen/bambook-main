@@ -137,7 +137,8 @@ export function createHRRouter(options: HRRouterOptions) {
         status: u.companyMembers[0]?.status === 'suspended' ? 'disabled' : u.status }));
       const users = (projected ?? usersRaw).filter(u => {
         const metadata = (u.metadata || {}) as any;
-        return u.status !== 'pending' && !metadata.personnelOnly && !!u.passwordHash && !metadata.erased && metadata.deletionMode !== 'erase-personal-data';
+        // 'system' 是审计外键哨兵账号，不是人员。
+        return u.id !== 'system' && u.status !== 'pending' && !metadata.personnelOnly && !!u.passwordHash && !metadata.erased && metadata.deletionMode !== 'erase-personal-data';
       });
 
       const departments = await prisma.department.findMany({

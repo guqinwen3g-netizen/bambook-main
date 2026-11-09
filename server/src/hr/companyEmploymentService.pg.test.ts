@@ -130,6 +130,8 @@ describe.skipIf(!url)('company employment lifecycle on PostgreSQL', () => {
     expect((await call('put', '/employees/' + newHire).send({ hireDate: '2026-02-30' })).status).toBe(400);
     expect((await call('put', '/employees/' + newHire).send({ hireDate: '2999-01-01' })).status).toBe(400);
     expect((await call('put', '/employees/' + newHire).send({ hireDate: '2026-10-26', positionId: 'role-sales@' + b })).status).toBe(409);
+    expect((await call('put', '/employees/' + newHire).send({ hireDate: '2026-10-26', contractType: 'FixedTerm' })).status).toBe(400);
+    expect((await call('put', '/employees/' + newHire).send({ hireDate: '2026-10-26', contractType: 'FixedTerm', contractEnd: '2026-10-01' })).status).toBe(400);
     expect(await db.employeeProfile.count({ where: { companyId: a, userId: newHire } })).toBe(0);
     expect(await db.employmentEvent.count({ where: { companyId: a, userId: newHire } })).toBe(0);
   });
