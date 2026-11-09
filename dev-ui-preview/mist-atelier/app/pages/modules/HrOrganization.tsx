@@ -129,7 +129,7 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
     if (ok) { if (confirm.kind !== 'remove') setOpen(null); setConfirm(null); }
   };
 
-  if (session.localMode) return <Banner variant="status" tone="neutral" title={uiText("本机演示模式没有组织架构")}>{uiText("部门、小组与员工档案保存在公司服务器账号体系中；连接公司服务器登录后在此维护。")}</Banner>;
+  if (session.localMode) return <Banner variant="status" tone="neutral" title={uiText("本机演示模式没有组织架构")}>{uiText("连接公司服务器后维护。")}</Banner>;
   if (!canRead) return <Banner variant="status" tone="neutral" title={uiText("当前账号没有人事查看权限")} />;
   const refresh = <Button icon={RefreshCw} loading={loading} onClick={() => void load()}>{uiText("重新读取")}</Button>;
 
