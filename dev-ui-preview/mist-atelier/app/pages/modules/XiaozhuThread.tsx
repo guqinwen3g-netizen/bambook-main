@@ -54,14 +54,17 @@ function ProposalCard({ proposal, onOpen, onDecide }: { proposal: AgentProposal;
 
 export type ThreadActions = { onAnswer: (task: AgentTaskView, id: string, text: string) => void; onCancel: (task: AgentTaskView) => void; onRetry: (text: string) => void; onCopy: (text: string) => void; onDraft: (text: string) => void; onAutomate: (text: string) => void; onOpenRecord: (view: string, id: string) => void; onProposal: (id: string) => void; onDecide?: (id: string, confirm: boolean) => Promise<void> };
 
-export function XiaozhuTurnShell({ children, time, status }: { children: React.ReactNode; time?: string; status?: React.ReactNode }) {
-  return <div className="mist-xz-ai"><span className="mist-xz-avatar"><AIBadge icon={AssistantEyes} /></span><div className="mist-xz-ai-b"><div className="mist-xz-ai-meta"><b>{uiText('小竹')}</b>{status}{time && <span>{time}</span>}</div>{children}</div></div>;
+export function XiaozhuTurnShell({ children, status }: { children: React.ReactNode; status?: React.ReactNode }) {
+  // 头像已表明是小竹，不再逐条写名字；状态只在未完成时出现，时间放在操作行。
+  return <div className="mist-xz-ai"><span className="mist-xz-avatar" aria-label={uiText('小竹')}><AIBadge icon={AssistantEyes} /></span><div className="mist-xz-ai-b">{status && <div className="mist-xz-ai-meta">{status}</div>}{children}</div></div>;
 }
 
 export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: AgentTaskView[]; index: RecordRef[]; proposals: AgentProposal[] } & ThreadActions) {
   let lastDay = '';
+  // 对话跨天时才分日期；单日对话的日期已在左栏分组里。
+  const multiDay = new Set(tasks.map(t => dayKey(t.createdAt))).size > 1;
   return <div className="mist-xz-thread">{tasks.map(t => {
-    const day = dayKey(t.createdAt), divider = day !== lastDay; lastDay = day;
+    const day = dayKey(t.createdAt), divider = multiDay && day !== lastDay; lastDay = day;
     const active = COWORK_ACTIVE.includes(t.state), asking = t.state === 'waiting_human' && (t.questions ?? []).some(q => !q.answeredAt);
     const pending = t.waitingProposalIds.map(id => proposals.find(p => p.id === id && p.state === 'pending')).filter((p): p is AgentProposal => !!p);
     const request = splitRequest(t.instructions), done = !active && t.state !== 'waiting_human', working = active && !asking && !pending.length;
@@ -69,7 +72,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
     return <div className="mist-xz-turn" key={t.id} data-task-state={t.state}>
       {divider && <div className="mist-xz-day"><span>{dayLabel(t.createdAt)}</span></div>}
       <div className="mist-xz-user">{request}</div>
-      <XiaozhuTurnShell time={clock(t.updatedAt || t.createdAt)} status={status}>
+      <XiaozhuTurnShell status={status}>
         {(!!t.trail?.length || working) && <Trail items={t.trail ?? []} active={working} onOpen={actions.onOpenRecord} />}
         {t.result && <XiaozhuMarkdown text={t.result} index={index} onOpen={actions.onOpenRecord} />}
         {active && t.checkpoint && !t.result && !working && <p className="mist-xz-note">{t.checkpoint}</p>}
@@ -77,10 +80,11 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         {asking && <Question task={t} onAnswer={actions.onAnswer} />}
         {pending.map(p => <ProposalCard key={p.id} proposal={p} onOpen={actions.onProposal} onDecide={actions.onDecide} />)}
         <div className="mist-xz-acts">
-          {active && t.canControl && <Button size="sm" variant="quiet" icon={Square} onClick={() => actions.onCancel(t)}>{uiText('停止')}</Button>}
+          {/* 办理中的停止在输入框；等待中的任务在这里停。 */}{active && t.canControl && !['queued', 'running'].includes(t.state) && <Button size="sm" variant="quiet" icon={Square} onClick={() => actions.onCancel(t)}>{uiText('停止')}</Button>}
           {done && t.result && <><IconButton size="sm" icon={Copy} label={uiText('复制')} onClick={() => actions.onCopy(t.result)} /><IconButton size="sm" icon={FileText} label={uiText('保存草稿')} onClick={() => actions.onDraft(t.result)} /></>}
           {done && <IconButton size="sm" icon={RotateCcw} label={uiText('重新提问')} onClick={() => actions.onRetry(request)} />}
           {done && t.state === 'succeeded' && <IconButton size="sm" icon={Zap} label={uiText('设为自动规则')} onClick={() => actions.onAutomate(request)} />}
+          {done && <time className="mist-xz-time" dateTime={t.updatedAt}>{clock(t.updatedAt || t.createdAt)}</time>}
         </div>
       </XiaozhuTurnShell>
     </div>;

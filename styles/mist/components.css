@@ -406,6 +406,9 @@
 .mist-autocomplete-menu > button[aria-selected="true"] { background: var(--mist-accent-tint); }
 .mist-autocomplete-menu > button small { color: var(--mist-ink-3); font-size: var(--mist-text-xs); }
 .mist-menu-wrap { position: relative; display: inline-flex; }
+.mist-action-menu:focus { outline: none; }
+.mist-action-menu > button[data-tone="bad"] { color: var(--mist-bad); }
+.mist-action-menu > button[data-tone="bad"]:hover { background: var(--mist-bad-tint, var(--mist-accent-tint)); }
 .mist-input > input:is([type="date"], [type="datetime-local"], [type="month"], [type="time"])::-webkit-calendar-picker-indicator { display: none; }
 .mist-date-trigger, .mist-date-head > button { flex: none; display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: var(--mist-r-sm); color: var(--mist-ink-2); }
 .mist-date-trigger:hover, .mist-date-head > button:hover { background: var(--mist-fill-2); }

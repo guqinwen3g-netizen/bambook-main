@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React,{act} from 'react';import {createRoot,type Root} from 'react-dom/client';import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {getByRole,getByLabelText} from '@testing-library/dom';
+import {getByRole,queryByRole,getByLabelText} from '@testing-library/dom';
 import {MistRoot} from '../../../../../components/mist';
 import {XiaozhuThread,dayLabel} from './XiaozhuThread';
 let host:HTMLDivElement,root:Root;
@@ -11,7 +11,8 @@ const fns=()=>({onAnswer:vi.fn(),onCancel:vi.fn(),onRetry:vi.fn(),onCopy:vi.fn()
 const paint=(tasks:any[],f=fns(),proposals:any[]=[])=>act(async()=>root.render(<MistRoot><XiaozhuThread tasks={tasks} index={index} proposals={proposals} {...f}/></MistRoot>));
 beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
-it('shows progress with a stop control, and the latest step while it works',async()=>{const f=fns();await paint([task({trail:[{at:'',kind:'read',label:'查询订单 · 8 条'}]})],f);expect(host.textContent).toContain('核对订单');expect(host.textContent).toContain('查询订单 · 8 条');await act(async()=>getByRole(host,'button',{name:'停止'}).click());expect(f.onCancel).toHaveBeenCalledOnce();});
+it('shows the latest step while it works, leaving stop to the composer; a waiting request can be stopped in place',async()=>{const f=fns();await paint([task({trail:[{at:'',kind:'read',label:'查询订单 · 8 条'}]})],f);expect(host.textContent).toContain('核对订单');expect(host.textContent).toContain('查询订单 · 8 条');expect(queryByRole(host,'button',{name:'停止'})).toBeNull();
+  await paint([task({state:'waiting_time'})],f);await act(async()=>getByRole(host,'button',{name:'停止'}).click());expect(f.onCancel).toHaveBeenCalledOnce();});
 it('renders a finished answer as formatted content with openable record numbers',async()=>{const f=fns();await paint([task({state:'succeeded',result:'## 结论\n\n- 先跟进 SO-1001\n\n| 订单 | 交期 |\n| --- | --- |\n| SO-1001 | 11-08 |'})],f);expect(host.querySelector('h2')?.textContent).toBe('结论');expect(host.querySelector('table')).toBeTruthy();const chips=[...host.querySelectorAll('button.mist-xz-ref')];expect(chips.length).toBe(2);await act(async()=>(chips[0] as HTMLButtonElement).click());expect(f.onOpenRecord).toHaveBeenCalledWith('orders/detail','o1');});
 it('never renders raw html from a model answer',async()=>{await paint([task({state:'succeeded',result:'<img src=x onerror="window.__xss=1"> 正文 <script>window.__xss=2</script>'})]);expect(host.querySelector('img')).toBeNull();expect(host.querySelector('script')).toBeNull();expect((window as any).__xss).toBeUndefined();});
 it('offers copy, draft, retry and make-rule only once the request is finished',async()=>{const f=fns();await paint([task({state:'succeeded',result:'答复正文'})],f);for(const name of ['复制','保存草稿','重新提问','设为自动规则'])await act(async()=>getByRole(host,'button',{name}).click());expect(f.onCopy).toHaveBeenCalledWith('答复正文');expect(f.onDraft).toHaveBeenCalledWith('答复正文');expect(f.onRetry).toHaveBeenCalledWith('核对订单');expect(f.onAutomate).toHaveBeenCalledWith('核对订单');});

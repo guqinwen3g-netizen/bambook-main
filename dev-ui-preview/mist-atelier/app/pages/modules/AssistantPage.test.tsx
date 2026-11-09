@@ -81,7 +81,9 @@ it('works with Xiaozhu as a coworker: a request becomes a platform task whose pr
   expect(JSON.parse(post[1].body).conversationId).toMatch(/^c_[0-9a-f]{32}$/);
   expect(mock.fetch.mock.calls.some(([u])=>String(u).endsWith('/assistant'))).toBe(false);
   expect(host.textContent).toContain('哪些订单交期临近？');
+  expect(host.querySelector('[aria-label="停止生成"]')).not.toBeNull();
   await act(async()=>{await new Promise(r=>setTimeout(r,3300));});
+  expect(host.querySelector('[aria-label="停止生成"]')).toBeNull();
   expect(polls).toBeGreaterThan(0);expect(host.textContent).toContain('本周有 2 张订单交期临近');
   expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('');
 });

@@ -203,6 +203,40 @@ export function Dropdown<V extends string>({ label, value, options, onChange }: 
   );
 }
 
+/* ───────────── ActionMenu (IconButton + Menu) ───────────── */
+/** 行内“更多”菜单：图标按钮触发，portal 菜单；方向键导航，Esc 关闭并回到触发器。 */
+export type ActionMenuItem = { label: string; icon?: LucideIcon; tone?: 'bad'; onSelect: () => void };
+export function ActionMenu({ label, icon, items, className, size = 'sm' }: { label: string; icon: LucideIcon; items: ActionMenuItem[]; className?: string; size?: 'sm' | 'md' }) {
+  const [open, setOpen] = React.useState(false), [active, setActive] = React.useState(0);
+  const [position, setPosition] = React.useState<React.CSSProperties>({ left: 0, top: 0 });
+  const wrap = React.useRef<HTMLSpanElement>(null), menu = React.useRef<HTMLDivElement>(null), target = useMistPortalTarget();
+  // 鼠标打开时焦点放在菜单本身，不给第一项画键盘焦点框；键盘打开仍直接落到第一项。
+  const byPointer = React.useRef(false);
+  const trigger = () => wrap.current?.querySelector('button') ?? null;
+  const close = (restore = true) => { setOpen(false); if (restore) trigger()?.focus(); };
+  React.useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => { const a = trigger()?.getBoundingClientRect(); if (!a) return; const h = menu.current?.getBoundingClientRect().height ?? 0, w = menu.current?.getBoundingClientRect().width ?? 200; setPosition({ left: Math.max(8, Math.min(a.right - w, window.innerWidth - w - 8)), top: a.bottom + 6 + h <= window.innerHeight - 8 ? a.bottom + 6 : Math.max(8, a.top - h - 6) }); };
+    place();
+    if (byPointer.current) { menu.current?.focus(); setActive(-1); } else { menu.current?.querySelectorAll<HTMLButtonElement>('button')[0]?.focus(); setActive(0); }
+    window.addEventListener('resize', place); window.addEventListener('scroll', place, true);
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); };
+  }, [open, target]);
+  React.useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (!wrap.current?.contains(e.target as Node) && !menu.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+  const move = (i: number) => { setActive(i); menu.current?.querySelectorAll<HTMLButtonElement>('button')[i]?.focus(); };
+  return <span ref={wrap} className={'mist-menu-wrap' + (className ? ' ' + className : '')} data-open={open || undefined}>
+    <IconButton size={size} icon={icon} label={label} aria-haspopup="menu" aria-expanded={open} onClick={e => { e.stopPropagation(); byPointer.current = e.detail > 0; open ? close() : setOpen(true); }} />
+    {open && <Portal><div ref={menu} className="mist-menu mist-action-menu" role="menu" tabIndex={-1} aria-label={uiText(label)} style={position}
+      onKeyDown={e => { if (['ArrowDown', 'ArrowUp'].includes(e.key)) { e.preventDefault(); const down = e.key === 'ArrowDown'; move(active < 0 ? (down ? 0 : items.length - 1) : (active + (down ? 1 : -1) + items.length) % items.length); } else if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); close(); } }}>
+      {items.map((it, i) => <button key={it.label} type="button" role="menuitem" tabIndex={i === active ? 0 : -1} data-tone={it.tone} onFocus={() => setActive(i)} onClick={e => { e.stopPropagation(); close(false); it.onSelect(); }}>{it.icon && <Icon icon={it.icon} size="sm" />}{uiText(it.label)}</button>)}
+    </div></Portal>}
+  </span>;
+}
+
 /* ───────────── Toast ───────────── */
 type ToastState = { id: number; text: string; tone?: 'ok' | 'bad' } | null;
 const ToastCtx = React.createContext<(text: string, tone?: 'ok' | 'bad') => void>(() => {});

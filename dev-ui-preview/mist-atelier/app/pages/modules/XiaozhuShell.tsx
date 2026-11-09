@@ -8,8 +8,8 @@ import type { usePersonalAgentVoice } from '../../runtime/personalAgentVoice';
 type Voice = ReturnType<typeof usePersonalAgentVoice>;
 export const voiceInCall = (voice: Voice) => voice.state === 'connecting' || voice.state === 'listening' || voice.state === 'speaking';
 
-export function XiaozhuComposer({ value, onChange, onSend, ready, busy, onStop, sources, onRemoveSource, onAttach, voice, voiceAvailable, field, placeholder, disabled }: {
-  value: string; onChange: (v: string) => void; onSend: () => void; ready: boolean; busy: boolean; onStop?: () => void;
+export function XiaozhuComposer({ value, onChange, onSend, ready, busy, working, onStop, sources, onRemoveSource, onAttach, voice, voiceAvailable, field, placeholder, disabled }: {
+  value: string; onChange: (v: string) => void; onSend: () => void; ready: boolean; busy: boolean; working?: boolean; onStop?: () => void;
   sources: Array<{ id: string; label: string }>; onRemoveSource: (s: { id: string; label: string }) => void; onAttach: () => void;
   voice: Voice; voiceAvailable: boolean; field: React.RefObject<HTMLTextAreaElement | null>; placeholder: string; disabled?: boolean;
 }) {
@@ -27,7 +27,7 @@ export function XiaozhuComposer({ value, onChange, onSend, ready, busy, onStop, 
     <div className="mist-xz-tools">
       <IconButton icon={AtSign} label={uiText('引用业务记录')} disabled={busy || disabled} onClick={onAttach} />
       <span className="mist-spacer" />
-      {busy && onStop ? <button type="button" className="mist-send" data-kind="stop" aria-label={uiText('停止生成')} onClick={onStop}><Icon icon={Square} size="sm" /></button>
+      {(busy || working && !value.trim()) && onStop ? <button type="button" className="mist-send" data-kind="stop" aria-label={uiText('停止生成')} onClick={onStop}><Icon icon={Square} size="sm" /></button>
         : !value.trim() && voiceAvailable && !busy ? <button type="button" className="mist-send" data-kind="voice" aria-label={uiText('语音通话')} title={uiText('语音通话')} onClick={() => void voice.start()}><Icon icon={AudioLines} size="sm" /></button>
         : <button type="button" className="mist-send" aria-label={uiText('发送')} disabled={!ready} onClick={onSend}><Icon icon={ArrowUp} size="sm" /></button>}
     </div>
