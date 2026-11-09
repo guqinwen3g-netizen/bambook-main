@@ -24,7 +24,7 @@ afterEach(async () => {
   vi.unstubAllEnvs(); await fs.rm(directory, { recursive: true, force: true });
 });
 
-async function fixture(profileId = 'demo-buyer', mode: 'read' | 'operate' = 'operate', autoNegotiate = false) {
+async function fixture(profileId = 'demo-buyer', mode: 'read' | 'operate' = 'operate', autoNegotiate = false, bearer = false) {
   const local = createMistLocalRuntime({ directory });
   const app = createMistServer(undefined, { local });
   const human = request.agent(app);
@@ -36,15 +36,28 @@ async function fixture(profileId = 'demo-buyer', mode: 'read' | 'operate' = 'ope
   await new Promise<void>(resolve => server.once('listening', resolve));
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing loopback address');
   const endpoint = new URL(`http://127.0.0.1:${address.port}/api/mist/mcp`);
-  const headers = { [AGENT_DELEGATION_HEADER]: issued.token };
+  const headers: Record<string, string> = bearer ? { Authorization: 'Bearer ' + issued.token } : { [AGENT_DELEGATION_HEADER]: issued.token };
   const client = new Client({ name: 'bambook-interoperability', version: '1' }, { versionNegotiation: { mode: autoNegotiate ? 'auto' : 'legacy' } }); clients.push(client);
   const transport = new StreamableHTTPClientTransport(endpoint, { requestInit: { headers } });
   await client.connect(transport);
   const tool = async (name: string, args: Record<string, unknown> = {}) => client.callTool({ name, arguments: args });
-  return { app, human, workspace, endpoint, headers, client, tool };
+  return { app, human, workspace, endpoint, headers, client, tool, issued };
 }
 
 describe('Official MCP client over a real loopback HTTP connection', () => {
+  it('accepts the connection credential as a standard Bearer token on the MCP endpoint only', async () => {
+    const { app, workspace, tool, issued } = await fixture('demo-sales', 'read', false, true);
+    const workspaces = await tool('bambook_workspaces');
+    expect(workspaces.isError).not.toBe(true);
+    expect(JSON.stringify(workspaces.structuredContent)).toContain(workspace.id);
+    // 其他接口不把 Bearer 当作 Agent 凭据，也不会借此变成本人会话。
+    await request(app).get(`/api/mist/workspaces/${workspace.id}`).set('Authorization', 'Bearer ' + issued.token).expect(401);
+    // 同时带专用头和 Bearer 时以专用头为准，不叠加两种凭据。
+    const both = await request(app).post('/api/mist/mcp').set({ Authorization: 'Bearer ' + issued.token, [AGENT_DELEGATION_HEADER]: issued.token, Accept: 'application/json, text/event-stream', 'Content-Type': 'application/json', 'MCP-Protocol-Version': '2025-06-18' }).send({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+    expect(both.status).toBe(200);
+    await request(app).post('/api/mist/mcp').set({ Authorization: 'Bearer not.a-valid-token-signature', Accept: 'application/json, text/event-stream', 'Content-Type': 'application/json', 'MCP-Protocol-Version': '2025-06-18' }).send({ jsonrpc: '2.0', id: 1, method: 'tools/list' }).expect(401);
+  });
+
   it.each(['read', 'operate'] as const)('reads mailbox receiving status in %s mode but cannot grant background access', async mode => {
     const { app, human, workspace, headers, tool } = await fixture('demo-sales', mode);
     const created = await human.post(`/api/mist/workspaces/${workspace.id}/commands`).send({ requestId: randomUUID(), expectedRevision: workspace.revision, command: { type: 'email.account.save', payload: { input: { address: 'qa@example.test', displayName: 'QA', kind: 'personal', memberIds: [], aliases: [], signature: '', transport: { imapHost: 'mail.example.test', imapPort: 993, imapSecure: true, smtpHost: 'mail.example.test', smtpPort: 465, smtpSecure: true, username: 'qa@example.test' } } } } }).expect(200);

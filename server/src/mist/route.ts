@@ -49,6 +49,19 @@ function publicError(res: Response, error: any) {
   const known = error instanceof MistApiError || (typeof error?.code === 'string' && Number(error?.status) >= 400 && Number(error?.status) < 500);
   res.status(known ? Number(error.status) : 500).json({ ok: false, error: { code: known ? error.code : 'MIST_REQUEST_FAILED', message: known ? error.message : '公司操作未完成，请查询原请求回执或稍后重试' } });
 }
+/**
+ * 通用 MCP 客户端多只支持 `Authorization: Bearer`：仅在 /mcp 上，把可识别的 Agent 凭据转成对应的专用头。
+ * 本人登录令牌（三段 JWT）与其他格式保持原样，照常走本人认证。
+ */
+export function bearerAsAgentCredential(req: Request) {
+  if (!/^\/mcp\/?$/.test(req.path) || [AGENT_DELEGATION_HEADER, SERVICE_KEY_HEADER, TASK_HEADER, TASK_CONTROL_HEADER].some(h => req.headers[h] !== undefined)) return;
+  const match = /^Bearer\s+([A-Za-z0-9._-]{16,4096})\s*$/i.exec(req.get('authorization') ?? '');
+  if (!match) return;
+  const token = match[1];
+  const target = token.startsWith('bma1_') ? SERVICE_KEY_HEADER : token.startsWith('bmc1_') ? TASK_CONTROL_HEADER : /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token) ? AGENT_DELEGATION_HEADER : undefined;
+  if (!target) return;
+  req.headers[target] = token; delete req.headers.authorization;
+}
 export function createMistRouter(options: { prisma?: any; voice?: MistVoiceService; voiceSettings?: PlatformVoiceStore; marketStore?: MarketStore; platformProviders?: PlatformProviderStore; filesRoot?: string; repository?: MistRepository; contract?: MistContract; authenticate?: RequestHandler; subscriptions?: CodexSubscriptionService; mail?: MistMailService; mailReceiver?: MistMailReceiver; mailTransport?: MailTransport; mailCredentialsRoot?: string; delegation?: AgentDelegation; delegationGuard?: (req: Request) => void }) {
   const repository = options.repository ?? new MistRepository(options.prisma, options.contract ?? require('../shared/mistWorkspace') as MistContract, new MistPrivateFiles(options.filesRoot ?? path.resolve(__dirname, '../../private/mist-files')));
   const router = Router();
@@ -56,6 +69,7 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   const delegation = options.delegation ?? defaultAgentDelegation();
   // 带委托头的请求一律按工作助手身份处理（比本人会话更窄），且只放行工作助手读取接口。
   router.use((req, res, next) => {
+    bearerAsAgentCredential(req);
     const header = req.headers[AGENT_DELEGATION_HEADER];
     const serviceKey=req.headers[SERVICE_KEY_HEADER];
     const taskKey=req.headers[TASK_HEADER];

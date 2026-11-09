@@ -4,7 +4,7 @@ import {getByRole,getAllByRole,getByLabelText,getByText,queryByRole} from '@test
 const seam=vi.hoisted(()=>({api:vi.fn(),copy:vi.fn(),identity:'A',userId:'A'}));
 vi.mock('../runtime/auth',()=>({useMistSession:()=>({sessionKey:seam.identity,user:{id:seam.userId}})}));
 vi.mock('../runtime/workspace',()=>({mistApiRequest:(...args:any[])=>seam.api(...args),useMistWorkspace:()=>({workspace:{id:'workspace'}})}));
-import {AgentConnections,agentConnectionEndpoint} from './AgentConnections';
+import {AgentConnections,agentConnectionEndpoint,agentClientConfig} from './AgentConnections';
 let host:HTMLDivElement,root:Root;
 const row=(version=1,state='active')=>({id:'connection',name:'采购助手',mode:'read',state,version,createdAt:new Date().toISOString(),expiresAt:new Date(Date.now()+7200000).toISOString()});
 const page=()=>({items:[row()],canConnect:true,nextCursor:null});
@@ -21,7 +21,7 @@ it('creates through the real API contract, masks credentials and copies a usable
  await act(async()=>{const input=getByLabelText(document.body,'连接名称') as HTMLInputElement;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'本机 MCP');input.dispatchEvent(new Event('input',{bubbles:true}));});
  await act(async()=>getByRole(document.body,'button',{name:'创建连接'}).click());await flush();
  const secret=getByLabelText(document.body,'连接凭据',{selector:'input'}) as HTMLInputElement;expect(secret.type).toBe('password');expect(secret.value).toBe('private-test-token');expect(document.body.textContent).not.toContain('private-test-token');
- await act(async()=>getByRole(document.body,'button',{name:'复制配置'}).click());const config=JSON.parse(seam.copy.mock.calls[0][0]);expect(config.mcpServers.bambook.url).toBe(new URL('/api/mist/mcp',location.origin).href);expect(config.mcpServers.bambook.headers['x-bambook-delegation']).toBe('private-test-token');
+ await act(async()=>getByRole(document.body,'button',{name:'复制配置'}).click());const endpoint=new URL('/api/mist/mcp',location.origin).href;expect(seam.copy.mock.calls[0][0]).toBe(`claude mcp add --transport http bambook ${endpoint} --header "Authorization: Bearer private-test-token"`);
  await act(async()=>getAllByRole(document.body,'button',{name:'关闭',exact:true})[0].click());expect(queryByRole(document.body,'dialog')).toBeNull();expect(document.body.innerHTML).not.toContain('private-test-token');expect(JSON.stringify(localStorage)).not.toContain('private-test-token');
 });
 it('retries a renewal with the same request id and version after an unknown network outcome',async()=>{
@@ -40,4 +40,11 @@ it('requires explicit revocation and displays terminal state without showing a c
  let revoked=false;seam.api.mockImplementation((url:string,init:any)=>{if(init?.method==='POST'){revoked=true;return Promise.resolve({connection:row(2,'revoked')});}return Promise.resolve({...page(),items:[row(revoked?2:1,revoked?'revoked':'active')]});});
  act(paint);await flush();await act(async()=>getByRole(host,'button',{name:'撤销',exact:true}).click());expect(seam.api.mock.calls.filter(([,init])=>init?.method==='POST')).toHaveLength(0);
  await act(async()=>getByRole(document.body,'button',{name:'确认撤销'}).click());await flush();expect(getByText(host,'已撤销')).toBeTruthy();expect(queryByRole(host,'button',{name:'续签',exact:true})).toBeNull();expect(queryByRole(document.body,'dialog')).toBeNull();
+});
+
+it('gives each client its own config, all sending the credential as a Bearer token',()=>{
+ const url='https://bambook.example/api/mist/mcp';
+ expect(agentClientConfig('codex',url,'tok')).toBe('[mcp_servers.bambook]\nurl = "https://bambook.example/api/mist/mcp"\nhttp_headers = { "Authorization" = "Bearer tok" }');
+ expect(JSON.parse(agentClientConfig('cursor',url,'tok'))).toEqual({mcpServers:{bambook:{url,headers:{Authorization:'Bearer tok'}}}});
+ expect(JSON.parse(agentClientConfig('json',url,'tok'))).toEqual({mcpServers:{bambook:{type:'http',url,headers:{Authorization:'Bearer tok'}}}});
 });

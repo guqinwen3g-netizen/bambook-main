@@ -10,11 +10,20 @@ const stamp=(at:string)=>new Date(at).toLocaleString(interfaceLocale(),{year:'nu
 type Action={kind:'create';id:string;name:string;mode:'read'|'operate'}|{kind:'renew'|'revoke';row:AgentConnectionView;requestId:string};
 type Issued={connection:AgentConnectionView;delegation:{token:string;expiresAt:string}};
 export function agentConnectionEndpoint(origin:string):string|null{try{const url=new URL(origin);return ['http:','https:'].includes(url.protocol)&&url.origin===origin?new URL('/api/mist/mcp',origin).href:null;}catch{return null;}}
+export type AgentClient='claude-code'|'codex'|'cursor'|'json';
+export const AGENT_CLIENTS:Array<{value:AgentClient;label:string}>=[{value:'claude-code',label:'Claude Code'},{value:'codex',label:'Codex'},{value:'cursor',label:'Cursor'},{value:'json',label:'其他 MCP 客户端'}];
+/** 各客户端的接入配置；凭据统一以 Authorization: Bearer 发送（服务端在 /mcp 上识别）。 */
+export function agentClientConfig(client:AgentClient,endpoint:string,token:string):string{
+ const bearer='Bearer '+token;
+ if(client==='claude-code')return `claude mcp add --transport http bambook ${endpoint} --header "Authorization: ${bearer}"`;
+ if(client==='codex')return `[mcp_servers.bambook]\nurl = ${JSON.stringify(endpoint)}\nhttp_headers = { "Authorization" = ${JSON.stringify(bearer)} }`;
+ return JSON.stringify({mcpServers:{bambook:{...(client==='json'?{type:'http'}:{}),url:endpoint,headers:{Authorization:bearer}}}},null,2);
+}
 export function AgentConnections(){const s=useMistSession(),w=useMistWorkspace(),endpoint=agentConnectionEndpoint(location.origin);if(!endpoint)return <EmptyState title={uiText('请在公司网页中管理连接')}/>;return w.workspace?<ConnectionList key={JSON.stringify([s.sessionKey,s.user?.id,w.workspace.id])} workspaceId={w.workspace.id} endpoint={endpoint}/>:<EmptyState title={uiText('尚未进入公司')}/>;}
 export function ConnectionList({workspaceId,endpoint}:{workspaceId:string;endpoint:string}){
  const base='/api/mist/workspaces/'+encodeURIComponent(workspaceId)+'/agent-connections',toast=useToast();
  const [rows,setRows]=React.useState<AgentConnectionView[]>([]),[cursor,setCursor]=React.useState<string|null>(null),[canConnect,setCanConnect]=React.useState(false),[loading,setLoading]=React.useState(true),[error,setError]=React.useState('');
- const [action,setAction]=React.useState<Action|null>(null),[issued,setIssued]=React.useState<Issued|null>(null),[busy,setBusy]=React.useState(false),[failure,setFailure]=React.useState(''),[attempted,setAttempted]=React.useState(false),[clock,setClock]=React.useState(Date.now());
+ const [action,setAction]=React.useState<Action|null>(null),[issued,setIssued]=React.useState<Issued|null>(null),[busy,setBusy]=React.useState(false),[failure,setFailure]=React.useState(''),[attempted,setAttempted]=React.useState(false),[clock,setClock]=React.useState(Date.now()),[client,setClient]=React.useState<AgentClient>('claude-code');
  const alive=React.useRef(true),sequence=React.useRef(0),operation=React.useRef(0),readAbort=React.useRef<AbortController|null>(null),writeAbort=React.useRef<AbortController|null>(null);
  const load=React.useCallback(async(after:string|null=null)=>{const serial=++sequence.current;readAbort.current?.abort();const abort=new AbortController();readAbort.current=abort;setLoading(true);setError('');if(!after){setRows([]);setCursor(null);}
   try{const page:AgentConnectionPage=await mistApiRequest(base+(after?'?cursor='+encodeURIComponent(after):''),{signal:abort.signal});if(!alive.current||serial!==sequence.current)return;setRows(old=>after?[...old,...page.items.filter(item=>!old.some(r=>r.id===item.id))]:page.items);setCursor(page.nextCursor);setCanConnect(page.canConnect);}
@@ -31,7 +40,7 @@ export function ConnectionList({workspaceId,endpoint}:{workspaceId:string;endpoi
   catch(e){if(!alive.current||abort.signal.aborted||serial!==operation.current)return;setFailure(e instanceof Error?e.message:'操作未完成，请重试');}
   finally{if(alive.current&&serial===operation.current)setBusy(false);}
  };
- const copy=async(config:boolean)=>{if(!issued||Date.parse(issued.delegation.expiresAt)<=Date.now())return;const text=config?JSON.stringify({mcpServers:{bambook:{url:endpoint,headers:{'x-bambook-delegation':issued.delegation.token}}}},null,2):issued.delegation.token;try{await navigator.clipboard.writeText(text);if(alive.current)toast(uiText('已复制'),'ok');}catch{if(alive.current)setFailure('复制失败，请重试');}};
+ const copy=async(config:boolean)=>{if(!issued||Date.parse(issued.delegation.expiresAt)<=Date.now())return;const text=config?agentClientConfig(client,endpoint,issued.delegation.token):issued.delegation.token;try{await navigator.clipboard.writeText(text);if(alive.current)toast(uiText('已复制'),'ok');}catch{if(alive.current)setFailure('复制失败，请重试');}};
  const expired=!!issued&&Date.parse(issued.delegation.expiresAt)<=clock;
  return <div className="mist-col">
   <div className="mist-row" data-wrap><Button icon={RefreshCw} disabled={loading} onClick={()=>void load()}>{uiText('刷新')}</Button>{canConnect&&<Button variant="primary" icon={Plus} onClick={()=>begin({kind:'create',id:crypto.randomUUID(),name:'',mode:'read'})}>{uiText('新建连接')}</Button>}</div>
@@ -44,7 +53,7 @@ export function ConnectionList({workspaceId,endpoint}:{workspaceId:string;endpoi
    <div className="mist-col">{failure&&<Banner tone="bad" title={uiText(failure)}/>} {action?.kind==='create'?<><FormGrid cols={1}><Field label={uiText('连接名称')} required><TextInput aria-label={uiText('连接名称')} value={action.name} maxLength={60} disabled={attempted} onChange={e=>setAction({...action,name:e.target.value})}/></Field><Field label={uiText('权限')} required><Select aria-label={uiText('权限')} value={action.mode} disabled={attempted} onChange={e=>setAction({...action,mode:e.target.value as 'read'|'operate'})} options={[{value:'read',label:uiText('只读')},{value:'operate',label:uiText('可办理')}]}/></Field></FormGrid>{action.mode==='operate'&&<Banner tone="warn" title={uiText('审批、资金等操作仍须本人确认')}/>}</>:action&&<KeyValue items={[{label:uiText('连接名称'),value:action.row.name},{label:uiText('权限'),value:uiText(action.row.mode==='read'?'只读':'可办理')}]}/>}</div>
   </Dialog>
   <Dialog open={!!issued} onClose={()=>{setIssued(null);setFailure('');}} title={uiText('连接凭据')} footer={<><Button onClick={()=>{setIssued(null);setFailure('');}}>{uiText('关闭')}</Button><Button variant="primary" icon={Copy} disabled={expired} onClick={()=>void copy(true)}>{uiText('复制配置')}</Button></>}>
-   {issued&&<div className="mist-col">{failure&&<Banner tone="bad" title={uiText(failure)}/>} {expired&&<Banner tone="warn" title={uiText('凭据已过期，请续签')}/>}<FormGrid cols={1}><Field label={uiText('连接地址')}><TextInput value={endpoint} readOnly/></Field><Field label={uiText('凭据')}><TextInput aria-label={uiText('连接凭据')} type="password" value={issued.delegation.token} readOnly autoComplete="off"/></Field></FormGrid><KeyValue items={[{label:uiText('连接名称'),value:issued.connection.name},{label:uiText('到期时间'),value:stamp(issued.delegation.expiresAt)}]}/><Button icon={Copy} disabled={expired} onClick={()=>void copy(false)}>{uiText('复制凭据')}</Button></div>}
+   {issued&&<div className="mist-col">{failure&&<Banner tone="bad" title={uiText(failure)}/>} {expired&&<Banner tone="warn" title={uiText('凭据已过期，请续签')}/>}<FormGrid cols={1}><Field label={uiText('客户端')}><Select aria-label={uiText('客户端')} value={client} onChange={e=>setClient(e.target.value as AgentClient)} options={AGENT_CLIENTS.map(c=>({value:c.value,label:uiText(c.label)}))}/></Field><Field label={uiText('连接地址')}><TextInput value={endpoint} readOnly/></Field><Field label={uiText('凭据')}><TextInput aria-label={uiText('连接凭据')} type="password" value={issued.delegation.token} readOnly autoComplete="off"/></Field></FormGrid><KeyValue items={[{label:uiText('连接名称'),value:issued.connection.name},{label:uiText('到期时间'),value:stamp(issued.delegation.expiresAt)}]}/><Button icon={Copy} disabled={expired} onClick={()=>void copy(false)}>{uiText('复制凭据')}</Button></div>}
   </Dialog>
  </div>;
 }
