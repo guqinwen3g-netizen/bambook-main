@@ -241,7 +241,7 @@ export async function releasePlatformTask(db:any,actor:AgentActor,lease:AgentTas
   if(c.executor!=='platform'||actor.agentExecutor!=='platform'||!c.platform)fail('FORBIDDEN','请使用平台任务执行器',403);
   if(issue==='daily_limit'){
     // 用量上限不是模型故障：立即暂停、不计失败次数；本人次日恢复后从原步骤继续。
-    const requestId=randomUUID(),n={...next(c,now,'model_paused',requestId,['daily_limit']),state:'paused' as const,controlVersion:c.controlVersion+1,runtimeUsedMs:usedRuntime(c,now),lease:undefined,checkpoint:'今日小竹用量已达上限，任务已暂停；明天恢复后可从原步骤继续。',platform:{...c.platform,nextRunAt:now+1000,retryAt:undefined,checkpointBeforeIssue:c.platform.checkpointBeforeIssue??c.checkpoint}};
+    const requestId=randomUUID(),n={...next(c,now,'model_paused',requestId,['daily_limit']),state:'paused' as const,controlVersion:c.controlVersion+1,runtimeUsedMs:usedRuntime(c,now),lease:undefined,checkpoint:'今日小竹用量已达上限，任务已暂停；额度恢复后可在任务到期前继续。',platform:{...c.platform,nextRunAt:now+1000,retryAt:undefined,checkpointBeforeIssue:c.platform.checkpointBeforeIssue??c.checkpoint}};
     await save(db,row,c,n);await event(db,n,actor,'model_paused',requestId,now);return;
   }
   const failures=issue?(c.platform.failures??0)+1:c.platform.failures??0,retryAt=now+(issue?Math.min(300_000,10_000*2**Math.min(failures,5)):1000),paused=!!issue&&failures>=3;
