@@ -46,6 +46,15 @@ describe('shipment document generation', () => {
     const doc = f.state.fulfillment.documents.find(d => d.id === result.id)!;
     expect(doc.content).not.toMatch(/·\s+·/);
   });
+  it('merges consecutive identical cartons into one PL range with summed quantity and weights', () => {
+    const { f, shipmentId } = ready(), line = f.state.fulfillment.shipments.find(s => s.id === shipmentId)!.lines[0];
+    const carton = (n: number, netWeight: number) => ({ lineId: line.lineId, productionId: line.productionId, carton: String(n), quantity: 2, netWeight, grossWeight: 1.5, volume: 0.1, note: '' });
+    f.run({ type: 'fulfillment.shipments.pack', payload: { id: shipmentId, lines: [carton(1, 1), carton(2, 1), carton(3, 1), carton(4, 1), carton(5, 1.2)] } } as MistCommand);
+    const { snapshot } = generate(f, { type: 'fulfillment.documents.generate', payload: { shipmentId, type: 'PL' } });
+    expect(snapshot.table!.rows).toHaveLength(2);
+    expect(snapshot.table!.rows[0]).toMatchObject({ carton: '1-4', qty: '8 件 (4 × 2)', nw: '4.00', gw: '6.00', cbm: '0.4' });
+    expect(snapshot.table!.rows[1]).toMatchObject({ carton: '5', qty: '2 件', nw: '1.20' });
+  });
   it('refuses client content, missing letterhead and types that need prior facts', () => {
     const { f, shipmentId } = ready();
     expect(() => prepareGeneratedSnapshot(f.state, { type: 'fulfillment.documents.generate', payload: { shipmentId, type: 'SO', content: 'x' } }, f.context)).toThrow('服务端');

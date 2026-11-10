@@ -202,6 +202,13 @@ describe('到账导入边界', () => {
     expect(f.balance(f.usd)).toBe(3); expect(f.balance(usd2)).toBe(3);
   });
 
+  it('到账日期晚于今天的流水整批拒绝', () => {
+    const f = setup(), row = { date: '2026-11-05', payer: 'Cedar', amount: 10, currency: 'USD', ref: 'TODAY' };
+    expect(() => f.run({ type: 'finance.importReceipts', payload: { accountId: f.usd, receipts: [row, { ...row, date: '2026-11-06', ref: 'TOMORROW' }] } })).toThrow('晚于今天');
+    expect(f.state.receipts).toHaveLength(0);
+    expect(f.run({ type: 'finance.importReceipts', payload: { accountId: f.usd, receipts: [row] } })).toEqual({ imported: 1, skipped: 0 });
+  });
+
   it('批内后续流水无效时不保留已处理行；无参考号的两笔相同款项不擅自去重', () => {
     const f = setup(), row = { date: '2026-10-05', payer: 'Cedar', amount: 0.03, currency: 'USD', ref: '' };
     f.rejectUnchanged({ type: 'finance.importReceipts', payload: { accountId: f.usd, receipts: [row, { ...row, amount: 0.031 }] } }, '两位小数');

@@ -33,7 +33,7 @@ export function productionReleaseGate(state: MistState, branch: MistProduction, 
   for (const row of scopedSamples ?? productionSampleRequirements(state, branch, role)) {
     items.push({ key: row.key, label: uiText(roleLabel) + (row.label ? ` · ${row.label}` : ''), ok: row.ok,
       detail: uiText(row.ok && (row as ProductionSampleRequirement).evidence?.result === 'conditional' ? '有保留通过' : row.reason),
-      target: row.taskId ? { view: 'qc-workbench', id: row.taskId } : { view: 'samples' } });
+      target: row.taskId ? { view: 'qc-workbench', id: row.taskId } : row.sampleId ? { view: 'samples', id: row.sampleId } : { view: 'samples' } });
   }
   return items;
 }

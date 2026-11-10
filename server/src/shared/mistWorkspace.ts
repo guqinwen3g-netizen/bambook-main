@@ -1436,6 +1436,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       let imported=0,skipped=0;
       const into=p.accountId===undefined||p.accountId===''?undefined:find(state.bankAccounts||[],text(p.accountId,'入账账户'),'入账账户');
       for(const row of p.receipts){const amount=positive(row.amount,'到账金额');mistMoneyMinor(amount);const value={date:date(row.date),payer:text(row.payer,'付款方'),amount,currency:text(row.currency,'币种',true,3).toUpperCase(),ref:text(row.ref,'附言',false)};if(!/^[A-Z]{3}$/.test(value.currency))throw new MistCommandError('VALIDATION','币种无效');
+        if(value.date>platformBusinessDate(context.now))throw new MistCommandError('VALIDATION',`到账日期 ${value.date} 晚于今天，请核对银行流水`);
         if(into)assertAccountUsable(into,value.currency,value.date);
         if(value.ref&&state.receipts.some(r=>r.date===value.date&&r.payer===value.payer&&r.amount===value.amount&&r.currency===value.currency&&r.ref===value.ref&&(!into||!r.accountId||r.accountId===into.id))){skipped++;continue;}
         const id=context.id();state.receipts.push({id,code:'BR-'+platformBusinessDate(context.now).replace(/-/g,'')+'-'+String(state.receipts.length+1).padStart(3,'0'),...value,remaining:amount,state:'unmatched',...(into?{accountId:into.id}:{})});imported++;}

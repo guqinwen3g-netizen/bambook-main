@@ -3,6 +3,7 @@ import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import {fulfillmentDocumentFamily} from '../../../../../server/src/shared/mistFulfillment';
 import {BL_KIND_LABEL,DOCUMENT_TYPE_LABEL,DOCUMENT_TYPES,OWN_DOCUMENT_TYPES,PER_ORDER_TYPES,POST_DEPARTURE_TYPES,isOwnDocumentType,type BillOfLadingKind,type OwnDocumentType} from '../../../../../server/src/shared/mistDocumentTypes';
 import {documentGenerationBlocker} from '../../../../../server/src/shared/mistDocumentGeneration';
+import {suggestedReceivableDue} from '../../../../../server/src/shared/mistTradeTerms';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import { View } from '../../../../../types';
 /** 单据中心：按准确出运与合同保留单据版本（新版本不覆盖旧版本）、正式文件与签发 / 归档记录；我方签发 CI / PL，外部机构单据只归档原件；CI 签发回到财务应收。 */
@@ -114,7 +115,8 @@ export function DocumentCenterPage() {
         { ...field('orderId', '对应订单', 'select', true, [emptyOption, ...(orderOptions.length ? orderOptions : (state?.orders || []).map(o => ({ value: o.id, label: o.code })))]), when: { key: 'type', values: [...PER_ORDER_TYPES] } },
         { ...field('dueDate', '应收到期日', 'date'), when: [{ key: 'type', values: ['CI'] }, { key: 'orderId', values: plainOrders }] },
       ],
-      initialValues: { shipmentId: target?.id || '', type: presetType || 'CI', orderId: presetOrder || (orderOptions.length === 1 ? orderOptions[0].value : ''), dueDate: firstCi?.dueDate || '' },
+      initialValues: (() => { const orderId = presetOrder || (orderOptions.length === 1 ? orderOptions[0].value : ''), contract = state?.orders.find(o => o.id === orderId)?.governance?.contract;
+        return { shipmentId: target?.id || '', type: presetType || 'CI', orderId, dueDate: firstCi?.dueDate || suggestedReceivableDue(contract?.paymentNote, target?.transport?.etd || target?.plannedDate) }; })(),
       submit: async v => {
         const shipmentId = target?.id || text(v, 'shipmentId'), type = text(v, 'type') as OwnDocumentType, orderId = PER_ORDER_TYPES.includes(type) ? text(v, 'orderId') : undefined;
         const blocked = state ? documentGenerationBlocker(state, f?.shipments.find(row => row.id === shipmentId), type, orderId) : null;

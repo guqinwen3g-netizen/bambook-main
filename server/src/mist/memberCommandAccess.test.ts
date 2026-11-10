@@ -107,10 +107,13 @@ describe('个人通知已读与共享事项动作均受当前账号可见来源�
 function paymentFixture(reconcile = false) {
   auth.users.get('other')!.permissions = ['invoices:read', 'vouchers:read', 'vouchers:write', ...(reconcile ? ['invoices:reconcile'] : [])];
   const state = db.workspaces.get(workspaceId).state;
+  // 付款申请须冻结已核实的收款账户，付款时与供应商现有账户一致。
+  const bank = { id: 'bank', currency: 'CNY', accountName: '隔离供应商', bankName: '测试银行', accountNo: '6222000011112222', verification: '电话核实', addedAt: '2026-09-01T00:00:00.000Z', addedBy: '财务', state: 'active' };
+  state.market.suppliers.push({ id: 'supplier', name: '隔离供应商', bankAccounts: [bank] });
   state.fulfillment.purchases.push({ id: 'purchase', supplierId: 'supplier', supplier: '隔离供应商', state: 'approved', kind: 'material', currency: 'CNY', amount: 1000, terms: '合同付款条件', lines: [] });
   state.payables.bills.push({ id: 'bill', code: 'AP-TEST', supplierId: 'supplier', supplier: '隔离供应商', invoiceNo: 'VAT-TEST', invoiceDate: '2026-10-13', currency: 'CNY', amount: 1000, taxAmount: 0, taxRate: '', lines: [], terms: [], due: '2026-11-14', dueBasis: '合同付款条件', fileIds: [], note: '', state: 'open', registeredAt: now, registeredBy: 'owner' });
   // 所有付款须先有主管已批准的付款申请：票据付款申请带分配，预付款申请不带。
-  const approved = { reviewerIds: ['manager'], requesterId: 'sales', requester: '业务', submittedAt: '2026-10-12T01:00:00.000Z', reason: '按合同付款', fileIds: [], snapshot: [], state: 'approved', paymentHistory: [], decision: { actorId: 'manager', actor: '主管', at: '2026-10-12T02:00:00.000Z', decision: 'approved', note: '同意' },
+  const approved = { payee: { accountId: 'bank', accountName: '隔离供应商', bankName: '测试银行', accountNo: '6222000011112222', addedAt: '2026-09-01T00:00:00.000Z' }, reviewerIds: ['manager'], requesterId: 'sales', requester: '业务', submittedAt: '2026-10-12T01:00:00.000Z', reason: '按合同付款', fileIds: [], snapshot: [], state: 'approved', paymentHistory: [], decision: { actorId: 'manager', actor: '主管', at: '2026-10-12T02:00:00.000Z', decision: 'approved', note: '同意' },
     // 分档规则（M4）下已批准申请须带提交时冻结的档位：600 元、该供应商首笔付款 → ≤5 万元级 + 新供应商首笔级，两级由不同人签。
     tier: { cnyAmount: 600, cumulativeCnyAmount: 600, rate: '1', rateSource: '人民币', firstPayment: true, levels: [{ level: 'pay_lt5', reviewerIds: ['manager'] }, { level: 'pay_new_supplier', reviewerIds: ['owner'] }] },
     approvals: [{ level: 'pay_lt5', actorId: 'manager', actor: '主管', at: '2026-10-12T02:00:00.000Z', decision: 'approved', note: '同意' }, { level: 'pay_new_supplier', actorId: 'owner', actor: '总经理', at: '2026-10-12T02:00:00.000Z', decision: 'approved', note: '同意' }] };

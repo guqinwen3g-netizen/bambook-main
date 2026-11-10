@@ -85,6 +85,17 @@ function ciSnapshot(root: MistState, s: FulfillmentShipment, order: MistOrder) {
     amountInWords: amountInWords(total, order.currency),
   };
 }
+/** 装箱单按行业惯例合并连续且内容完全相同的箱号段（如 1-100），数量与毛净重、体积按段合计。 */
+function cartonRanges<R extends { lineId: string; productionId?: string; carton: string; quantity: number; netWeight: number; grossWeight: number; volume: number }>(items: Array<{ row: R; detail: string }>) {
+  const out: Array<{ row: R; detail: string; first: string; last: string; count: number }> = [];
+  for (const item of items) {
+    const prev = out[out.length - 1], r = item.row, n = /^\d+$/.test(r.carton) ? Number(r.carton) : NaN;
+    if (prev && Number.isFinite(n) && /^\d+$/.test(prev.last) && Number(prev.last) + 1 === n && prev.row.lineId === r.lineId && (prev.row.productionId || '') === (r.productionId || '') && prev.detail === item.detail
+      && prev.row.quantity === r.quantity && prev.row.netWeight === r.netWeight && prev.row.grossWeight === r.grossWeight && prev.row.volume === r.volume) { prev.last = r.carton; prev.count += 1; continue; }
+    out.push({ ...item, first: r.carton, last: r.carton, count: 1 });
+  }
+  return out;
+}
 function plSnapshot(root: MistState, s: FulfillmentShipment) {
   const rows = packingOf(root, s);
   if (!rows.length) fail('请先登记装箱分配');
@@ -93,7 +104,7 @@ function plSnapshot(root: MistState, s: FulfillmentShipment) {
     parties: [buyerParty(root, s), consigneeParty(s)],
     facts: [...transportFacts(s), { label: { zh: fabric ? '件数' : '箱数', en: 'Packages' }, value: String(pack.packages) }],
     table: { columns: [{ key: 'carton', label: fabric ? { zh: '卷 / 包号', en: 'Roll / Bale' } : { zh: '箱号', en: 'Carton' } }, { key: 'style', label: { zh: '款号 / 品名', en: 'Style / Description' } }, { key: 'detail', label: { zh: fabric ? '颜色' : '分色分码', en: fabric ? 'Colour' : 'Assortment' } }, { key: 'qty', label: { zh: '数量', en: 'Quantity' }, num: true }, { key: 'nw', label: { zh: '净重 kg', en: 'N.W.' }, num: true }, { key: 'gw', label: { zh: '毛重 kg', en: 'G.W.' }, num: true }, { key: 'cbm', label: { zh: '体积 m³', en: 'CBM' }, num: true }],
-      rows: rows.map(r => { const line = lineOf(root, r.lineId); return { carton: r.carton, style: `${line?.style || ''} ${line ? externalGoodsName(line) : ''}`.trim(), detail: r.fabricColor || (r.assortment || []).filter(a => a.quantity > 0).map(a => `${a.color} ${a.size}×${a.quantity}`).join(' / '), qty: `${qtyText(r.quantity)} ${line?.unit || ''}`, nw: money2(r.netWeight), gw: money2(r.grossWeight), cbm: qtyText(r.volume) }; }),
+      rows: cartonRanges(rows.map(r => ({ row: r, detail: r.fabricColor || (r.assortment || []).filter(a => a.quantity > 0).map(a => `${a.color} ${a.size}×${a.quantity}`).join(' / ') }))).map(({ row: r, detail, first, last, count }) => { const line = lineOf(root, r.lineId), unit = line?.unit || ''; return { carton: count > 1 ? `${first}-${last}` : r.carton, style: `${line?.style || ''} ${line ? externalGoodsName(line) : ''}`.trim(), detail, qty: count > 1 ? `${qtyText(r4(r.quantity * count))} ${unit} (${count} × ${qtyText(r.quantity)})` : `${qtyText(r.quantity)} ${unit}`, nw: money2(r.netWeight * count), gw: money2(r.grossWeight * count), cbm: qtyText(r4(r.volume * count)) }; }),
       totals: { qty: [...new Set(rows.map(r => lineOf(root, r.lineId)?.unit || ''))].map(u => `${qtyText(r4(rows.filter(r => (lineOf(root, r.lineId)?.unit || '') === u).reduce((n, r) => n + r.quantity, 0)))} ${u}`).join(' / '), nw: money2(pack.net), gw: money2(pack.gross), cbm: qtyText(pack.volume) } },
   };
 }

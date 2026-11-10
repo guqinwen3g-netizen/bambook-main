@@ -43,7 +43,7 @@ export function CustomerStatementCard({ customerId }: { customerId?: string }) {
       const url = URL.createObjectURL(new Blob([await response.arrayBuffer()], { type: 'application/pdf' })); if (win) win.location.href = url; else window.open(url, '_blank'); window.setTimeout(() => URL.revokeObjectURL(url), 60000); })().catch(cause => toast(cause instanceof Error ? cause.message : '对账单打开失败'));
   };
   return <Card id="mist-customer-statements">
-    <CardHeader title={uiText("客户对账单")} sub={ui`截至 ${today} · 按币种列未结应收、待核销到账与账龄，不跨币种折算`} tools={<div className="mist-row" style={{ gap: 8 }}>
+    <CardHeader title={uiText("客户对账单")} sub={ui`截至 ${today}`} tools={<div className="mist-row" style={{ gap: 8 }}>
       {!customerId && <Select aria-label={uiText("对账客户")} value={target} disabled={busy || !customers.length} onChange={e => setPicked(e.target.value)} options={customers.length ? customers.map(c => ({ value: c.id, label: c.name })) : [{ value: '', label: '暂无可对账客户' }]} />}
       <Button size="sm" icon={FileText} disabled={busy || !!blocker} title={uiText(blocker || undefined)} onClick={() => void generate()}>{uiText("生成对账单")}</Button></div>} />
     {blocker && canWrite && <div style={{ padding: '0 22px 8px' }}><span className="mist-note">{blocker}</span></div>}
@@ -58,7 +58,7 @@ export function CustomerStatementCard({ customerId }: { customerId?: string }) {
         <Button size="sm" variant="quiet" icon={ExternalLink} disabled={busy} onClick={() => open(r.fileId)}>{uiText("打开")}</Button>
       </div>)}
       {partials.map(r => <div key={r.id} role="listitem" className="mist-col" data-statement={r.statementNo} style={{ gap: 8, padding: '8px 0' }}><div className="mist-row"><Mono>{r.statementNo}</Mono><span>{nameOf(r.customerId)} · {uiText("部分可见")}</span><span className="mist-spacer"/><span>{uiText('另含其他范围业务')}</span></div>{r.sections.flatMap(section => section.lines.map(line => <div className="mist-row" key={section.currency + ':' + line.invoiceId}><Mono>{line.code}</Mono><span className="mist-spacer"/><span>{line.open} {section.currency}</span></div>))}</div>)}
-      {!records.length && !partials.length && <span className="mist-note">{uiText("尚未生成。生成后按当时台账冻结内容并归档原件；台账变动后重新生成新编号，旧份保留。")}</span>}
+      {!records.length && !partials.length && <span className="mist-note">{uiText("尚未生成")}</span>}
     </div>
   </Card>;
 }

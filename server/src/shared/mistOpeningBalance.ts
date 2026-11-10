@@ -32,10 +32,14 @@ export function mistInvoiceCustomerName(root: Pick<MistState, 'orders' | 'devs' 
   const id = mistInvoiceCustomerId(root, invoice);
   return (id && root.customers.find(c => c.id === id)?.name) || invoice.customer;
 }
-/** 付款方是否与应收客户同名：开票时客户名或当前档案名任一相同即视为同名。 */
-export function mistPayerMatchesInvoice(root: Pick<MistState, 'orders' | 'devs' | 'customers'>, invoice: Pick<MistInvoice, 'orderId' | 'customer'> & { devId?: string; customerId?: string }, payer: string): boolean {
-  const norm = (v: string) => v.trim().toLocaleLowerCase();
-  return [invoice.customer, mistInvoiceCustomerName(root, invoice)].some(name => !!name && norm(name) === norm(payer));
+/** 银行流水的付款方名常为大写、无标点的英文名：比较时忽略大小写、空白与标点，并统一 Limited/Company 等常见缩写。 */
+export const payerNameKey = (v: string) => v.normalize('NFKC').toLocaleLowerCase().replace(/\blimited\b/g, 'ltd').replace(/\bcompany\b/g, 'co').replace(/\bcorporation\b/g, 'corp').replace(/[\s.,，。、·'"’()（）&\-_/]+/g, '');
+/** 付款方是否与应收客户同名：开票时客户名、当前档案名，或关系智库中该客户的名称与别名（如英文名）任一相同即视为同名。 */
+export function mistPayerMatchesInvoice(root: Pick<MistState, 'orders' | 'devs' | 'customers'> & { market?: { relations?: Array<{ customerId?: string; name: string; aliases?: string[] }> } }, invoice: Pick<MistInvoice, 'orderId' | 'customer'> & { devId?: string; customerId?: string }, payer: string): boolean {
+  const key = payerNameKey(payer), customerId = mistInvoiceCustomerId(root, invoice);
+  if (!key) return false;
+  const relationNames = customerId ? (root.market?.relations || []).filter(r => r.customerId === customerId).flatMap(r => [r.name, ...(r.aliases || [])]) : [];
+  return [invoice.customer, mistInvoiceCustomerName(root, invoice), ...relationNames].some(name => !!name && payerNameKey(name) === key);
 }
 export const isOpeningInvoice = (invoice: { opening?: unknown }) => !!invoice.opening;
 

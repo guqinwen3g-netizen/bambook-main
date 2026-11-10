@@ -663,7 +663,7 @@ const currentTierReviewers = (c: MistContext, level: PaymentApprovalLevel) => [.
 
 function event(root: Root, c: MistContext, entityId: string, message: string, recipientIds: string[] = []) {
   root.events.unshift({ id: c.id(), entityType: 'payable', entityId, actor: c.actorName, at: c.now, text: message, fileIds: [] });
-  notifyMist(root,c,{title:message,detail:c.actorName,target:{view:'payables',id:entityId},category:'general'},recipientIds);
+  notifyMist(root,c,{title:message,detail:c.actorName,target:{view:'payment-vouchers',section:'payables',id:entityId},category:'general'},recipientIds);
 }
 function files(root: Root, value: unknown) {
   if (value === undefined) return [];
@@ -814,7 +814,8 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       if (amount !== mistMoneyMinor(request.amount)) fail('实付金额须与已批准申请一致；金额不同请撤回申请并重新提交审批');
       if (p.currency !== undefined && text(p.currency, '币种', true, 3).toUpperCase() !== request.currency) fail('币种与已批准申请不一致');
       if (p.supplierId !== undefined && text(p.supplierId, '收款供应商') !== request.supplierId) fail('收款供应商与已批准申请不一致');
-      if (request.payee && supplierPayee(root as any, request.supplierId, request.currency)?.accountId !== request.payee.accountId) fail('供应商收款账户在申请后已变更，请撤回申请，按新账户重新提交审批', 'PRECONDITION');
+      if (!request.payee) fail(`${request.code} 审批时未冻结收款账户，请撤回申请，在供应商档案登记收款账户后重新提交审批`, 'PRECONDITION');
+      if (supplierPayee(root as any, request.supplierId, request.currency)?.accountId !== request.payee.accountId) fail('供应商收款账户在申请后已变更，请撤回申请，按新账户重新提交审批', 'PRECONDITION');
       const reference = text(p.reference, '银行流水号 / 参考号', true, 120);
       if (s.payments.some(x => x.supplierId === request.supplierId && key(x.reference) === key(reference) && !paymentReversed(root, x.id))) fail(`流水号 ${reference} 已登记过这家供应商的付款，请核对是否重复`, 'CONFLICT');
       const input = Array.isArray(p.allocations) ? p.allocations as AllocationInput : [];
@@ -933,7 +934,8 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       request.reviewerIds = [...new Set(request.tier.levels.flatMap(l => l.reviewerIds))];
       // 冻结收款账户并写入审批快照，审批人看到钱付到哪里。
       const payee = supplierPayee(root as any, request.supplierId, request.currency);
-      if (payee) request.payee = payee;
+      if (!payee) fail(`${request.supplier} 未登记 ${request.currency} 收款账户，请先在供应商档案登记并核实后再申请付款`, 'PRECONDITION');
+      request.payee = payee;
       const at = request.snapshot.findIndex(row => row.label === '供应商');
       request.snapshot.splice(at < 0 ? request.snapshot.length : at + 1, 0, { label: '收款账户', value: payeeText(payee, c.now) });
       s.requests.push(request);

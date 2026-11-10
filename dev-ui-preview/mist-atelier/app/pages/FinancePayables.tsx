@@ -15,6 +15,7 @@ import { payableBills, payableSources, supplierPayableSummary, supplierPayments,
 import { useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
 import { useNav } from '../nav';
+import { View as AppView } from '../../../../types';
 import { DraftFiles } from './modules/fulfillmentKit';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, RecordDisclosure } from './modules/pageKit';
 import { downloadMistCsv } from './OrderListPage';
@@ -242,6 +243,7 @@ export function FinancePayables() {
     void execute(command, () => { setReasonDraft(null); toast(REASON[kind].done); });
   };
   const askReason = (kind: ReasonKind, id: string) => { setFailure(''); setReasonDraft({ kind, id, reason: '' }); };
+  const openSupplier = (supplierId: string, close: () => void) => session.canAccessView(AppView.Suppliers) ? () => { close(); go('suppliers', supplierId); } : undefined;
   const reasonAllowed = (kind: ReasonKind) => kind === 'void' || kind === 'cancel-plan' ? canBill : kind === 'reverse-payment' ? canPay && canAllocate : kind === 'reverse-allocation' || kind === 'return-settlement' || kind === 'reverse-settlement' || kind === 'reverse-deduction' || kind === 'reverse-prepayment' ? canConfirm : kind === 'cancel-settlement' ? canSettle : canRequest;
 
   const billColumns: Column<PayableBillView>[] = [
@@ -331,7 +333,7 @@ export function FinancePayables() {
     {request.decision && <Banner variant="status" tone={request.decision.decision === 'approved' ? 'ok' : 'bad'} title={uiText(request.decision.decision === 'approved' ? '主管已批准' : '主管已退回')}>{request.decision.note}（{request.decision.actor} · {fmtDay(request.decision.at)}）</Banner>}
     {request.cancelled && <Banner variant="status" tone="neutral" title={uiText("已撤回")}>{request.cancelled.reason}（{request.cancelled.actor} · {fmtDay(request.cancelled.at)}）</Banner>}
     <ActionBar busy={busy} actions={[
-      { label: '登记实付', onClick: () => startPayRequest(request), reason: !canPay ? '需要付款登记权限' : request.purpose === 'bill' && !canAllocate ? '票据付款需同时具备核销分配权限' : undefined, hidden: !(canPay && (request.purpose !== 'bill' || canAllocate)) || request.state !== 'approved' },
+      { label: '登记实付', onClick: () => startPayRequest(request), reason: !canPay ? '需要付款登记权限' : request.purpose === 'bill' && !canAllocate ? '票据付款需同时具备核销分配权限' : !request.payee ? '审批时未冻结收款账户，须由申请人撤回后重新提交审批' : undefined, hidden: !(canPay && (request.purpose !== 'bill' || canAllocate)) || request.state !== 'approved' },
       { label: '撤回申请', onClick: () => askReason('cancel-request', request.id), reason: !canRequest ? '需要付款申请权限' : undefined, hidden: !(canRequest && request.requesterId === session.user?.id) || request.state !== 'pending' && request.state !== 'approved' },
       { label: '查看付款', onClick: () => { setView('payments'); open(request.supplierPaymentId!); }, hidden: !request.supplierPaymentId },
     ]} />
@@ -434,13 +436,13 @@ export function FinancePayables() {
     <Dialog open={!!payDraft} onClose={() => { if (!busy) setPayDraft(null); }} width={760}
       title={uiText(payDraft?.mode === 'allocate' ? '分配付款到应付' : payDraft?.mode === 'pay' ? '按已批准申请登记实付' : '申请票据付款')}
       description={uiText(existing ? `${existing.code} · 还有 ${apMoney(existing.unallocated, existing.currency)} 未分配` : payRequest ? `${payRequest.code} · ${payRequest.supplier}` : undefined)}
-      footer={<><Button disabled={busy} onClick={() => setPayDraft(null)}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !(existing ? canAllocate : payRequest ? canPay : canRequest)} onClick={submitPay}>{uiText(existing ? '确认分配' : payRequest ? '登记实付' : '提交审批')}</Button></>}>
+      footer={<><Button disabled={busy} onClick={() => setPayDraft(null)}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !(existing ? canAllocate : payRequest ? canPay && !!payRequest.payee : canRequest && !!state && !!payDraft?.supplierId && !!supplierPayee(state, payDraft.supplierId, payDraft.currency))} onClick={submitPay}>{uiText(existing ? '确认分配' : payRequest ? '登记实付' : '提交审批')}</Button></>}>
       {payDraft && <div className="mist-col">
         {failure && <Banner tone="bad" title={uiText("还不能保存")}>{failure}</Banner>}
         {payRequest && state && (() => {
           // 按申请冻结的收款账户付款；申请后账户被变更时服务端拒绝，这里先提示。
           const current = supplierPayee(state, payRequest.supplierId, payRequest.currency), frozen = payRequest.payee;
-          if (!frozen) return <Banner tone="warn" title={uiText('申请未冻结收款账户')}>{uiText(current ? `供应商现有账户：${payeeText(current, businessNow().toISOString())}，付款前请核实。` : '供应商未登记收款账户，请先在供应商档案登记并核实。')}</Banner>;
+          if (!frozen) return <Banner tone="bad" title={uiText('审批时未冻结收款账户')}>{uiText('请申请人撤回后按供应商现有账户重新提交审批。')}</Banner>;
           if (current?.accountId !== frozen.accountId) return <Banner tone="bad" title={uiText('收款账户在申请后已变更')}>{uiText('请撤回申请，按新账户重新提交审批。')}</Banner>;
           return <Facts items={[{ label: '收款账户', value: payeeText(frozen, businessNow().toISOString()) }]} />;
         })()}
@@ -448,7 +450,7 @@ export function FinancePayables() {
           <Field label={uiText("收款供应商")} required><Select aria-label={uiText("收款供应商")} value={payDraft.supplierId} options={[{ value: '', label: '请选择供应商' }, ...suppliers]} onChange={e => setPayDraft({ ...payDraft, supplierId: e.target.value, allocations: {} })} /></Field>
           <Field label={uiText("币种")} required><Select aria-label={uiText("币种")} value={payDraft.currency} options={payCurrencies} onChange={e => setPayDraft({ ...payDraft, currency: e.target.value, allocations: {} })} /></Field>
         </FormGrid>}
-        {payDraft.mode === 'request' && state && payDraft.supplierId && <RequestPayee state={state} supplierId={payDraft.supplierId} currency={payDraft.currency} />}
+        {payDraft.mode === 'request' && state && payDraft.supplierId && <RequestPayee state={state} supplierId={payDraft.supplierId} currency={payDraft.currency} onOpenSupplier={openSupplier(payDraft.supplierId, () => setPayDraft(null))} />}
         {payDraft.mode === 'request' && (() => { const pos = new Set(payBills.filter(b => (payDraft.allocations[b.id] || '').trim()).flatMap(b => b.lines.map(l => l.purchaseId))), schedule = plans.filter(x => x.state === 'active' && x.stage !== 'prepayment' && x.supplierId === payDraft.supplierId && x.currency === payDraft.currency && x.available > 0 && pos.has(x.purchaseId)); return schedule.length ? <Field label={uiText("对应付款计划")} hint={uiText("合同约定了进度款 / 尾款时选择，便于跟踪计划已申请和已付")}><Select aria-label={uiText("对应付款计划")} value={payDraft.planId || ''} options={[{ value: '', label: '不对应计划' }, ...schedule.map(x => ({ value: x.id, label: `${x.code} · ${paymentPlanStageLabel(x.stage)} · ${x.purchaseCode} · 可申请 ${apMoney(x.available, x.currency)}` }))]} onChange={e => setPayDraft({ ...payDraft, planId: e.target.value || undefined })} /></Field> : null; })()}
         {payRequest && <FormGrid cols={3}>
           <Field label={uiText("付款金额")}><TextInput aria-label={uiText("付款金额")} readOnly value={apMoney(payRequest.amount, payRequest.currency)} /></Field>
@@ -485,11 +487,11 @@ export function FinancePayables() {
     </Dialog>
 
     <Dialog open={!!preDraft} onClose={() => { if (!busy) setPreDraft(null); }} width={600} title={uiText("申请预付款")} description={uiText(prePlan ? `${prePlan.code} · ${prePlan.purchaseCode} · ${prePlan.supplier} · 剩余可申请 ${apMoney(prePlan.available, prePlan.currency)}` : '')}
-      footer={<><Button disabled={busy} onClick={() => setPreDraft(null)}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canRequest} onClick={submitPre}>{uiText("提交审批")}</Button></>}>
+      footer={<><Button disabled={busy} onClick={() => setPreDraft(null)}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canRequest || !state || !prePlan || !supplierPayee(state, prePlan.supplierId, prePlan.currency)} onClick={submitPre}>{uiText("提交审批")}</Button></>}>
       {preDraft && prePlan && <div className="mist-col">
         {failure && <Banner tone="bad" title={uiText("还不能提交")}>{failure}</Banner>}
         <Facts items={[{ label: '付款触发条件', value: prePlan.trigger }, { label: '合同条款依据', value: prePlan.basis }]} />
-        {state && <RequestPayee state={state} supplierId={prePlan.supplierId} currency={prePlan.currency} />}
+        {state && <RequestPayee state={state} supplierId={prePlan.supplierId} currency={prePlan.currency} onOpenSupplier={openSupplier(prePlan.supplierId, () => setPreDraft(null))} />}
         <Field label={uiText("申请金额")} required><TextInput aria-label={uiText("申请金额")} type="number" min="0.01" step="0.01" value={preDraft.amount} onChange={e => setPreDraft({ ...preDraft, amount: e.target.value })} /></Field>
         <Field label={uiText("付款依据")} required><TextArea aria-label={uiText("付款依据")} rows={3} value={preDraft.reason} onChange={e => setPreDraft({ ...preDraft, reason: e.target.value })} /></Field>
         <Field label={uiText("申请附件")}><DraftFiles ids={preDraft.fileIds || []} onChange={fileIds => setPreDraft({ ...preDraft, fileIds })} hint={uiText("上传回签合同等付款依据")} /></Field>
@@ -512,9 +514,9 @@ export function FinancePayables() {
   </div></PayableDialogRecovery>;
 }
 
-/** 提交申请时冻结的收款账户：申请人提交前即可核对，未登记时提示由财务先登记。 */
-function RequestPayee({ state, supplierId, currency }: { state: MistState; supplierId: string; currency: string }) {
+/** 提交申请时冻结的收款账户：申请人提交前核对；未登记不能提交，由财务先在供应商档案登记并核实。 */
+function RequestPayee({ state, supplierId, currency, onOpenSupplier }: { state: MistState; supplierId: string; currency: string; onOpenSupplier?: () => void }) {
   const payee = supplierPayee(state, supplierId, currency);
   return payee ? <Facts items={[{ label: '收款账户', value: payeeText(payee, businessNow().toISOString()) }]} />
-    : <Banner tone="warn" title={uiText('供应商未登记收款账户')}>{uiText('可以先提交；付款前须由财务在供应商档案登记并核实。')}</Banner>;
+    : <Banner tone="bad" title={ui`供应商未登记 ${currency} 收款账户`} actions={onOpenSupplier ? <Button size="sm" onClick={onOpenSupplier}>{uiText('打开供应商档案')}</Button> : undefined}>{uiText('由财务在供应商档案登记并核实后再申请付款。')}</Banner>;
 }

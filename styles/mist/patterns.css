@@ -878,6 +878,8 @@ button.mist-sync:hover { background: var(--mist-fill); color: var(--mist-ink); }
 .mist-table[data-fit="stack"] > .mist-tr { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; column-gap: 14px; row-gap: 6px; padding: 10px 14px; }
 .mist-table[data-fit="stack"] > .mist-tr > :first-child { flex: 1 1 180px; min-width: 0; }
 .mist-table[data-fit="stack"] > .mist-tr > :not(:first-child) { flex: 0 0 auto; max-width: 100%; }
+/* 堆叠时表头隐藏：含输入控件的单元格补回列名，避免一排无标签的输入框。 */
+.mist-table[data-fit="stack"] > .mist-tr > [data-label]:has(input, select, textarea)::before { content: attr(data-label); display: block; margin-bottom: 4px; font-size: var(--mist-text-xs); color: var(--mist-ink-3); }
 .mist-thead > span, .mist-thead > button { min-width: 0; white-space: normal; line-height: 1.25; }
 .mist-thead { height: auto; min-height: 44px; }
 .mist-tr > [role="cell"] { overflow-wrap: anywhere; }

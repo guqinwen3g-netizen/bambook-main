@@ -290,3 +290,22 @@ it('keeps signed carton assortment available to read after editing is frozen',as
  render('recorded');await click(getByRole(host,'button',{name:'逐箱明细'}));expect(host.textContent).toContain('蓝 · M 10');
  expect((getByRole(host,'button',{name:'分配装箱'}) as HTMLButtonElement).disabled).toBe(true);
 });
+
+it('registers missing contract terms from the new shipment form, prefilled from the order, and returns to the same source with the contract incoterm',async()=>{
+  const s=store.state!;(s.orders[0] as any).governance={status:'approved',contract:{kind:'external',poNumber:'PO-77',incoterm:'CIF 洛杉矶',deliveryPlace:''}};
+  s.productions.push({id:'p',code:'PR-1',orderId:'o',lineId:'l',order:'SO-1',name:'大衣',factory:'工厂',qty:10,due:'2026-11-01',pct:100,img:'coat',col:'done'});
+  render();await click(host.querySelectorAll<HTMLButtonElement>('button').values().find(b=>b.textContent==='新建出运')!);
+  const select=getByRole(host,'combobox',{name:'来源条目 1'}) as HTMLSelectElement;
+  act(()=>{select.value='production:p';select.dispatchEvent(new Event('change',{bubbles:true}));});
+  expect(host.textContent).toContain('来源订单尚未核对合同收货条款');
+  await click(getByRole(host,'button',{name:'核对合同收货条款'}));
+  expect(host.textContent).toContain('核对来源合同收货与分批条款');
+  expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('客户 PO PO-77');
+  s.fulfillment.shippingTerms.push({orderId:'o',consignee:'Cedar DC',partialAllowed:true,mode:'sea',confirmedAt:'2026-10-12',evidence:'客户 PO PO-77'} as any);
+  await click(getByRole(host,'button',{name:'返回列表'}));
+  expect((getByRole(host,'combobox',{name:'来源条目 1'}) as HTMLSelectElement).value).toBe('production:p');
+  expect(host.textContent).toContain('Cedar DC');
+  typeInto(host.querySelector('input[type="number"]') as HTMLInputElement,'10');
+  await click(getByRole(host,'button',{name:'下一步'}));
+  expect([...host.querySelectorAll('select')].map(x=>x.getAttribute('aria-label')+'='+x.value).join(';')).toContain('贸易术语=CIF');
+});

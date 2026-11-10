@@ -14,7 +14,7 @@ vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:sess
 import {QcWorkbenchPage} from './QcWorkbenchPage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let host:HTMLElement,root:Root;const go=vi.fn();
-function render(id?:string,mode:'full'|'list'=id?'full':'list',source:{versionId?:string}={}){const detail=mode==='full'?mode:undefined;act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'qc-workbench',id,detail,...source},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><QcWorkbenchPage/></Nav.Provider></ToastProvider></MistRoot>));}
+function render(id?:string,mode:'full'|'list'=id?'full':'list',source:{versionId?:string;productionId?:string}={}){const detail=mode==='full'?mode:undefined;act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'qc-workbench',id,detail,...source},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><QcWorkbenchPage/></Nav.Provider></ToastProvider></MistRoot>));}
 async function click(node:HTMLElement){await act(async()=>node.click());}
 function choose(select:HTMLSelectElement,value:string){act(()=>{select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));});}
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
@@ -313,4 +313,14 @@ it('computes the AQL decision in the production report and lets the warehouse re
   const dialog=getByRole(document.body,'dialog',{name:'放行入库'});typeInto(within(dialog).getByRole('textbox',{name:'放行依据'}) as HTMLTextAreaElement,'IQC-1 合格');
   await click(within(dialog).getByRole('button',{name:'放行'}));
   expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.incoming.close',payload:{id:'iqc',evidence:'IQC-1 合格'}});
+});
+
+it('defaults a production inspection to the supplier site and opens the new task',async()=>{
+  const st=store.state! as any;st.market.suppliers.push({id:'sup-site',name:'嘉禾制衣',address:'嘉兴秀洲工业园 18 号'});
+  st.fulfillment.purchases.push({id:'po-site',supplierId:'sup-site'});
+  st.productions.push({id:'prod-site',code:'FUL-1',orderId:'o',lineId:'l',factory:'嘉禾制衣',sourcePurchaseId:'po-site',qty:10,col:'cut'});
+  store.run.mockResolvedValue({result:{id:'new-qc'}});
+  render(undefined,'list',{productionId:'prod-site'});await click(getAllByRole(host,'button',{name:'从来源发起QC'})[0]);
+  await click(getByRole(host,'button',{name:'下一步'}));
+  expect((getByRole(host,'textbox',{name:'实际检查地点'}) as HTMLInputElement).value).toBe('嘉兴秀洲工业园 18 号');
 });

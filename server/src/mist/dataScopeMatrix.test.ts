@@ -14,7 +14,9 @@ import { MemoryMistDatabase, testAuthority } from './__tests__/support';
 
 // 规格 §2 / P3：岗位 × 越权读写矩阵。示例数据：customer-0、customer-2 跟进人 demo-sales，customer-1 跟进人 demo-buyer。
 const COMPANY = '11111111-1111-4111-8111-111111111111';
-const ALL_ORDERS = ['id-330', 'id-311', 'id-167', 'SO-G-2026-018', 'SO-G-2026-017', 'SO-G-2026-015', 'SO-G-2026-012', 'SO-G-2026-009'];
+// 面料订单的 id 由种子生成，按单号取，不依赖生成顺序。
+let F1 = '', F2 = '', F3 = '', ALL_ORDERS: string[] = [];
+const GARMENT_ORDERS = ['SO-G-2026-018', 'SO-G-2026-017', 'SO-G-2026-015', 'SO-G-2026-012', 'SO-G-2026-009'];
 const contract: MistContract = { createMistState, applyMistCommand, mistCommandPermission };
 const PEOPLE: Record<string, { role: SystemRoleId | 'owner' }> = {
   boss: { role: 'owner' }, finance: { role: SYSTEM_ROLE_IDS.FINANCE }, qc: { role: SYSTEM_ROLE_IDS.QC }, logistics: { role: SYSTEM_ROLE_IDS.LOGISTICS },
@@ -34,6 +36,8 @@ beforeEach(async () => {
   db.teams.push({ id: 'team-lune', name: 'Maison Lune 组', companyId: COMPANY }); db.teamMembers.push({ teamId: 'team-lune', userId: 'teammate' });
   let n = 0; const state: any = createMistState({ id: () => `id-${++n}`, now: '2026-10-13T00:00:00Z', actorName: 'boss' } as any, 'demo');
   state.teamScopes = [{ teamId: 'team-lune', teamName: 'Maison Lune 组', conditions: [{ id: 'c1', customerId: 'customer-2' }], picks: [], exclusions: [], updatedAt: '', updatedById: 'boss', updatedBy: 'boss', history: [] }];
+  const byCode = (code: string) => state.orders.find((o: any) => o.code === code)!.id as string;
+  F1 = byCode('SO-F-2026-0001'); F2 = byCode('SO-F-2026-0002'); F3 = byCode('SO-F-2026-0003'); ALL_ORDERS = [F3, F2, F1, ...GARMENT_ORDERS];
   workspaceId = randomUUID();
   db.workspaces.set(workspaceId, { id: workspaceId, ownerId: 'boss', companyId: COMPANY, slug: `company@${COMPANY}`, name: '公司', revision: 0, state, createdAt: new Date(), updatedAt: new Date() });
   repo = new MistRepository(db, contract, new MistPrivateFiles(root), auth.authorize, () => new Date('2026-10-13T04:00:00Z'));
@@ -88,9 +92,9 @@ describe('row-level data scope by role', () => {
     expect(await orders(userId)).toEqual([...ALL_ORDERS].sort());
   });
   it('a salesperson sees own orders and orders of customers they follow, with their downstream only', async () => {
-    expect(await orders('demo-sales')).toEqual(['SO-G-2026-009', 'SO-G-2026-012', 'SO-G-2026-015', 'SO-G-2026-018', 'id-167']);
+    expect(await orders('demo-sales')).toEqual(['SO-G-2026-009', 'SO-G-2026-012', 'SO-G-2026-015', 'SO-G-2026-018', F1]);
     const state = (await repo.get(actor('demo-sales'), workspaceId)).state;
-    expect(state.orderLines.every(line => ['SO-G-2026-009', 'SO-G-2026-012', 'SO-G-2026-015', 'SO-G-2026-018', 'id-167'].includes(line.orderId))).toBe(true);
+    expect(state.orderLines.every(line => ['SO-G-2026-009', 'SO-G-2026-012', 'SO-G-2026-015', 'SO-G-2026-018', F1].includes(line.orderId))).toBe(true);
     expect(state.fulfillment.purchases.every(p => p.orderId !== 'SO-G-2026-017')).toBe(true);
     expect(state.tasks.some(task => task.target?.view === 'orders/detail' && task.target.id === 'SO-G-2026-017' && !task.assigneeIds?.includes('demo-sales'))).toBe(false); // 指派给本人的待办保留
     expect(state.customers).toHaveLength(6); // 档案全公司共享
@@ -153,7 +157,7 @@ describe('row-level data scope by role', () => {
     expect(source.events.some(row => row.id === 'hidden-order-event')).toBe(true);
   });
   it('a department head sees members of the department and its sub-departments', async () => {
-    expect(await orders('head')).toEqual(expect.arrayContaining(['SO-G-2026-017', 'id-330', 'id-311']));
+    expect(await orders('head')).toEqual(expect.arrayContaining(['SO-G-2026-017', F3, F2]));
     expect(await orders('head')).not.toContain('SO-G-2026-018');
   });
   it('a group member sees the group scope and nothing else', async () => {
@@ -186,13 +190,13 @@ describe('row-level data scope by role', () => {
       command: { type: 'member.groups.set', payload: { userId: 'head', groups } },
     });
     await setGroups(['fabric'], 'manage-fabric');
-    expect(await orders('head')).toContain('id-167');
+    expect(await orders('head')).toContain(F1);
     await setGroups([], 'stop-managing-fabric');
-    expect(await orders('head')).not.toContain('id-167');
+    expect(await orders('head')).not.toContain(F1);
     expect(await orders('head')).toContain('SO-G-2026-017');
     const before = structuredClone(db.workspaces.get(workspaceId)), receipts = db.receipts.size;
     await expect(repo.execute(actor('head'), workspaceId, { requestId: 'old-line-write', expectedRevision: before.revision,
-      command: { type: 'order.checklist', payload: { orderId: 'id-167', itemId: 'id-167-check-0', done: true } } } as any)).rejects.toMatchObject({ status: 404 });
+      command: { type: 'order.checklist', payload: { orderId: F1, itemId: `${F1}-check-0`, done: true } } } as any)).rejects.toMatchObject({ status: 404 });
     expect(db.workspaces.get(workspaceId)).toEqual(before);
     expect(db.receipts.size).toBe(receipts);
   });
@@ -312,11 +316,11 @@ describe('row-level data scope by role', () => {
   it('a line supervisor adds its managed line to existing department access', async () => {
     const row: any = db.workspaces.get(workspaceId);
     row.state.memberGroups = [{ userId: 'head', name: 'head', groups: ['fabric'], updatedAt: '', updatedBy: 'boss' }, { userId: 'demo-sales', name: 'demo-sales', groups: ['garment'], updatedAt: '', updatedBy: 'boss' }];
-    expect(await orders('head')).toContain('id-167');
+    expect(await orders('head')).toContain(F1);
     expect(await orders('head')).not.toContain('SO-G-2026-018');
     (db.workspaces.get(workspaceId) as any).state.memberGroups[0].groups = ['garment'];
     expect(await orders('head')).toEqual(expect.arrayContaining(['SO-G-2026-018', 'SO-G-2026-015', 'SO-G-2026-009']));
-    expect(await orders('head')).not.toContain('id-167');
+    expect(await orders('head')).not.toContain(F1);
     // 管理业务线只对主管权限生效；业务员设置了也不扩大范围。
     expect(await orders('demo-sales')).not.toContain('SO-G-2026-017');
   });
