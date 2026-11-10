@@ -69,6 +69,8 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
     const handlerIds = type === '成衣加工' ? { garment: 'demo-sales' } : type === '辅料' ? { garment: 'demo-buyer', fabric: 'demo-buyer' } : { fabric: 'demo-buyer' };
     const sid = id(run('supplier ' + name, { type: 'market.supplier.save', payload: { id: existing?.id, input: { code, name, type, country: '中国', address, capabilities, capacity, capacityUnit, leadDays, fileIds: [], note: '', handlerIds } } }));
     if (sid) run('supplier contact ' + name, { type: 'market.contact.save', payload: { kind: 'supplier', parentId: sid, name: contact[0], role: contact[1], email: contact[2], phone: contact[3], primary: true } });
+    // 付款申请须冻结已核实的收款账户；演示供应商按合同所列电话核实过人民币账户。
+    if (sid && !state.market.suppliers.find(s => s.id === sid)?.bankAccounts?.some(a => a.state === 'active' && a.currency === 'CNY')) run('supplier bank ' + name, { type: 'market.supplier.bank.save', payload: { supplierId: sid, currency: 'CNY', accountName: name, bankName: '中国工商银行', accountNo: '62220210' + code.replace(/\D/g, '').padStart(8, '0'), verification: `致电${contact[0]}（合同所列电话 ${contact[3]}）核实` } }, actor('林舒', 'demo-finance'));
     return sid;
   };
   const jiangnan = supplier('SUP-0001', '江南成衣', '成衣加工', '大衣 · 西装 · 双面呢手工', 6000, '件/月', 35, '浙江嘉兴秀洲区新塍镇工业园 8 号', ['王建国', '厂长', 'wang@jiangnan-garment.cn', '0573-8312 6608']);

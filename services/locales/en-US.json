@@ -6612,5 +6612,11 @@
   "尚未生成": "Not generated yet",
   "来源订单尚未核对合同收货条款": "Contract delivery terms of the source order are not checked yet",
   "为本票款号建立归类": "Classify this shipment's styles",
-  "尺码与件数（每行 M:1）": "Sizes and pieces (one per line, e.g. M:1)"
+  "尺码与件数（每行 M:1）": "Sizes and pieces (one per line, e.g. M:1)",
+  "打开供应商档案": "Open supplier record",
+  "供应商未登记 {0} 收款账户": "Supplier has no {0} payee account on file",
+  "由财务在供应商档案登记并核实后再申请付款。": "Finance must register and verify it in the supplier record before you request payment.",
+  "审批时未冻结收款账户": "No payee account was locked at approval",
+  "请申请人撤回后按供应商现有账户重新提交审批。": "Ask the requester to withdraw and resubmit for approval with the supplier's current account.",
+  "审批时未冻结收款账户，须由申请人撤回后重新提交审批": "No payee account was locked at approval; the requester must withdraw and resubmit"
 }

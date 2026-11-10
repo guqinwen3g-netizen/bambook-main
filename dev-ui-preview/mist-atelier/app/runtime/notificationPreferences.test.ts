@@ -48,3 +48,9 @@ it('summarises the legacy generated claim notice without rewriting the stored me
  const state=fixture(),detail='业务员 林澈 已通知质检、跟单与工厂（平湖启程服饰）配合核实；通知工厂不代表认定责任或答应客户金额。';state.notifications=[{id:'claim-notice',title:'CLM-1 · 新客诉待关注',detail,at:'2026-10-13',readAt:null,category:'general',target:{view:'claims',id:'claim'}}];const before=structuredClone(state.notifications);
  expect(visibleMistNotifications(state,()=>true)[0]).toMatchObject({title:'CLM-1 · 新客诉',detail:'林澈 · 平湖启程服饰',target:{view:'claims',id:'claim'}});expect(state.notifications).toEqual(before);
 });
+it('opens legacy payables reminders on the finance payables tab and checks that page permission',()=>{
+ const state=fixture();state.notifications=[{id:'n',title:'付款申请待审批',detail:'陈沐',at:'2026-11-10T00:00:00Z',readAt:null,target:{view:'payables',id:'pr'}} as any];
+ expect(visibleMistNotifications(state,view=>view==='payment-vouchers').map(item=>item.target)).toEqual([{view:'payment-vouchers',section:'payables',id:'pr'}]);
+ expect(state.notifications[0].target.view).toBe('payables');
+ expect(visibleMistNotifications(state,view=>view==='payables')).toEqual([]);
+});

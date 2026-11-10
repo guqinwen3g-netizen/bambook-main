@@ -4,8 +4,10 @@ import type {MistNotification,MistState,MistTarget} from '../../../../server/src
 type CanRead=(view:string)=>boolean;
 /** Mist's personal-account route uses a different name from the canonical permission view. */
 export const notificationPermissionView=(view:string)=>view==='account'?'account-settings':view.split('/')[0];
+/** 早期应付提醒写成了不存在的 payables 视图；展示时改指财务管理的应付页，存量记录不改写。 */
+const currentTarget=(item:MistNotification):MistNotification=>item.target.view==='payables'?{...item,target:{...item.target,view:'payment-vouchers',section:'payables'}}:item;
 export function visibleMistNotifications(state:MistState|null|undefined,canRead:CanRead,personal:MistNotification[]=[]){
-  return (state?[...state.notifications,...personal]:[]).filter(item=>{
+  return (state?[...state.notifications,...personal]:[]).map(currentTarget).filter(item=>{
     if(!canRead(notificationPermissionView(item.target.view)))return false;
     const category=item.category??'general',prefs=state!.settings.notifications;
     return category==='qc'?prefs.qc:category==='shipping'?prefs.shipping:category==='suggestion'?prefs.suggestions:true;

@@ -48,16 +48,20 @@ export const VIEW_PERMISSION_DEFINITIONS: Record<View, ViewPermissionDefinition>
 export function getViewPermissionDefinition(view: View): ViewPermissionDefinition {
   return VIEW_PERMISSION_DEFINITIONS[view];
 }
+/** 未登记的视图（如旧数据里的过期路由）没有定义，一律按不可访问处理。 */
+function knownViewDefinition(view: View): ViewPermissionDefinition | undefined {
+  return VIEW_PERMISSION_DEFINITIONS[view];
+}
 
 export function getViewPermission(view: View): string | undefined {
-  const permissions = getViewPermissionDefinition(view);
-  return permissions.policy === 'permission' ? permissions.required : undefined;
+  const permissions = knownViewDefinition(view);
+  return permissions?.policy === 'permission' ? permissions.required : undefined;
 }
 
 export function isAuthenticatedPublicView(view: View): boolean {
-  return getViewPermissionDefinition(view).policy === 'public-authenticated';
+  return knownViewDefinition(view)?.policy === 'public-authenticated';
 }
 
 export function isDevOnlyView(view: View): boolean {
-  return getViewPermissionDefinition(view).policy === 'dev-only';
+  return knownViewDefinition(view)?.policy === 'dev-only';
 }

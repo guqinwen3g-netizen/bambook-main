@@ -81,11 +81,11 @@ describe('付款申请与主管审批', () => {
     const bank = (st: MistState, accountNo: string, verification = '致电供应商财务张敏（合同所列电话）确认') => as('财务-林', st, { type: 'market.supplier.bank.save', payload: { supplierId: po1.supplierId, currency: 'CNY', accountName: '华盛毛纺有限公司', bankName: '工商银行嘉兴分行', accountNo, verification } });
     expect(err(() => bank(state, '12'))).toContain('账号格式');
     expect(err(() => bank(state, '1204 0012 3456 7788', '已核'))).toContain('核实方式');
+    state.market.suppliers.find(x => x.id === po1.supplierId)!.bankAccounts = [];
     let s = run(state, bill(po1.supplierId, [{ purchaseId: po1.id, amount: 30000 }])).state;
     const a = payableBills(s, today)[0];
-    // 没有收款账户也能申请，但审批快照明确提示未登记。
-    const bare = as('业务-王', s, billRequest(po1.supplierId, [{ billId: a.id, amount: 100 }]));
-    expect(getMistReviewTasks(bare.state).find(t => t.id === 'payment:' + bare.result.id)!.details.find(d => d.label === '收款账户')!.value).toContain('未登记收款账户');
+    // 没有已核实的收款账户不能申请：审批人须看到钱付到哪里。
+    expect(err(() => as('业务-王', s, billRequest(po1.supplierId, [{ billId: a.id, amount: 100 }])))).toContain('未登记 CNY 收款账户');
     s = bank(s, '1204 0012 3456 7788', '致电供应商财务张敏（合同所列电话）确认').state;
     const req = as('业务-王', s, billRequest(po1.supplierId, [{ billId: a.id, amount: 30000 }]));
     s = req.state; const id = String(req.result.id);
@@ -96,6 +96,9 @@ describe('付款申请与主管审批', () => {
     const pay = (st: MistState) => as('财务-林', st, { type: 'payable.payment.register', payload: { requestId: id, date: '2026-10-14', amount: 30000, reference: 'BANK-1', allocations: [{ billId: a.id, amount: 30000 }] } });
     expect(err(() => pay(changed))).toContain('收款账户在申请后已变更');
     expect(() => pay(s)).not.toThrow();
+    // 规则生效前批准、未冻结账户的申请：不能付款，须撤回后按现有账户重新审批。
+    const legacy = structuredClone(s); delete legacy.payables!.requests!.find(r => r.id === id)!.payee;
+    expect(err(() => pay(legacy))).toContain('审批时未冻结收款账户');
     // 停用：只停在用账户，须写原因；停用后按原申请不能付款，同币种可再登记新账户。
     expect(mistCommandPermission({ type: 'market.supplier.bank.disable', payload: {} } as any)).toBe('invoices:write');
     const accounts = changed.market.suppliers.find(x => x.id === po1.supplierId)!.bankAccounts!;
@@ -136,6 +139,8 @@ describe('付款申请与主管审批', () => {
     expect(err(() => applyMistCommand(s, decide(id) as any, { ...ctx('主管-周'), authority: { supplier: {}, paymentTierReviewerIds: {} } } as MistContext))).toContain('有效审批主管');
     s = review(s, id).state;
     expect(getPayableReviews(s)[0].status).toBe('approved');
+    expect(s.notifications.filter(n => n.target.id === id).map(n => n.target)).toContainEqual({ view: 'payment-vouchers', section: 'payables', id });
+    expect(s.notifications.some(n => n.target.view === 'payables')).toBe(false);
     expect(err(() => pay(s, { amount: 39999 }))).toContain('须与已批准申请一致');
     expect(err(() => pay(s, { allocations: [{ billId: a.id, amount: 40000 }] }))).toContain('须与已批准申请');
     expect(err(() => pay(s, { date: '2026-10-13' }))).toContain('早于主管批准');
@@ -798,7 +803,7 @@ describe('付款审批分档：金额档、首笔付款加签、外币折算', (
   /** po1 的供应商已有一笔有效付款（非首笔）；可选改成外币合同。 */
   function setup(opts: { paid?: boolean; currency?: string; amount?: number } = {}) {
     const { state, po1 } = demo();
-    if (opts.currency) po1.currency = opts.currency;
+    if (opts.currency) { po1.currency = opts.currency; const sup = state.market.suppliers.find(x => x.id === po1.supplierId)!; sup.bankAccounts = [...(sup.bankAccounts || []), { id: 'bank-' + opts.currency, currency: opts.currency, accountName: sup.name, bankName: '中国银行张家港支行', accountNo: 'FX' + opts.currency + '00012345', swift: 'BKCHCNBJ', verification: '致电供应商财务（合同所列电话）核实', addedAt: '2026-08-01T00:00:00Z', addedBy: '财务-林', state: 'active' }]; }
     if (opts.paid !== false) state.payables!.payments.push({ id: 'old-pay', paymentId: 'old-v', code: 'SP-OLD', supplierId: po1.supplierId, supplier: po1.supplier, date: '2026-09-01', amount: 1, currency: po1.currency, reference: 'OLD', fileIds: [], note: '', createdAt: '2026-09-01T00:00:00Z', actor: '财务', backfill: true });
     const s = run(state, bill(po1.supplierId, [{ purchaseId: po1.id, amount: opts.amount ?? 60000 }], { currency: po1.currency })).state;
     return { s, po1, billId: payableBills(s, today)[0].id };

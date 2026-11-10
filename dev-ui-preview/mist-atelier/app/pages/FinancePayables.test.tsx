@@ -11,7 +11,7 @@ import { PAYMENT_REQUEST_SCOPES, SETTLEMENT_SCOPES } from '../../../../server/sr
 import { Nav } from '../nav';
 const store = vi.hoisted(() => ({ value: null as any }));
 vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => store.value }));
-vi.mock('../runtime/auth', () => { const useMistSession = () => ({ user:{id:store.value?.userId||'finance'}, hasPermission: (scope: string) => store.value?.canWrite !== false && (!store.value?.permissions || store.value.permissions.includes(scope)) }); return { useMistSession, useOptionalMistSession: useMistSession }; });
+vi.mock('../runtime/auth', () => { const useMistSession = () => ({ canAccessView: () => true, user:{id:store.value?.userId||'finance'}, hasPermission: (scope: string) => store.value?.canWrite !== false && (!store.value?.permissions || store.value.permissions.includes(scope)) }); return { useMistSession, useOptionalMistSession: useMistSession }; });
 import { FinancePayables, termsPrepayment } from './FinancePayables';
 import { signPads } from '../runtime/signTestUtils';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
