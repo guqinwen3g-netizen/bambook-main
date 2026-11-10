@@ -1824,7 +1824,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (!ctx.actorId) return fail('审批需要当前真实账号');
             const key = purchaseCommitmentKey(purchase), config = ctx.authority?.supplier?.[key];
             const reviewerIds = [...new Set(config?.userIds || [])].filter(id => id !== ctx.actorId);
-            if (!config || !reviewerIds.length) return fail('尚未配置当前业务的供应商承诺审批人', 'PRECONDITION');
+            if (!config?.userIds?.length) return fail('尚未配置当前业务的供应商承诺审批人', 'PRECONDITION');
+            if (!reviewerIds.length) return fail('合同变更须由申请人以外的供应商承诺审批人审批，请先增设一名审批人', 'PRECONDITION');
             const amendment: FulfillmentPurchaseAmendment = { id: ctx.id(), from, to, reason: text(p.reason, '变更原因', true, 1000), evidence: text(p.evidence, '供应商同意依据', true, 2000), fileIds: files(root, p.fileIds ?? []), state: 'pending', requesterId: ctx.actorId, requester: ctx.actorName, submittedAt: ctx.now, reviewerIds, configVersions: { [key]: config.version } };
             (purchase.amendments ||= []).push(amendment);
             audit(root, ctx, 'procurement', purchase.id, `提交合同变更：${purchaseAmendmentText(purchase, amendment)}；${amendment.reason}`);

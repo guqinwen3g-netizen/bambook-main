@@ -650,11 +650,11 @@ function paymentTier(root: Root, request: Pick<PaymentRequest, 'id' | 'amount' |
   return tier;
 }
 /** 多级审批须能由不同的人各签一级（申请人已排除）：仍只有同一人能签全部级别时拒绝提交，指出缺哪一级。 */
-function assertDistinctReviewers(tier: PaymentTier, c: MistContext) {
+function assertDistinctReviewers(root: Root, tier: PaymentTier, c: MistContext) {
   if (tier.levels.length < 2) return;
   const everyone = new Set(tier.levels.flatMap(l => l.reviewerIds));
   if (everyone.size >= tier.levels.length) return;
-  const only = [...everyone][0], name = c.members?.find(m => m.id === only)?.name || only;
+  const only = [...everyone][0], name = c.members?.find(m => m.id === only)?.name || root.members?.find(m => m.userId === only)?.name || '同一位审批人';
   const missing = tier.levels.filter(l => !l.reviewerIds.some(id => id !== only)).map(l => `「${PAYMENT_APPROVAL_LABEL[l.level]}」`);
   fail(`本次付款需要 ${tier.levels.map(l => PAYMENT_APPROVAL_LABEL[l.level]).join(' + ')} 两级审批，须由不同的人各签一级；当前只有 ${name} 能审批，缺少第二位审批人。请联系管理员为另一位领导授予${missing.join('或')}审批权限`, 'PRECONDITION');
 }
@@ -929,7 +929,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       const held = relationHoldReason(root, { supplierId: request.supplierId });
       if (held) fail(held, 'PRECONDITION');
       // 按折合人民币金额与是否首笔付款冻结审批档位；每级审批人由服务端按申请人重建。
-      request.tier = paymentTier(root, request, today, c); request.approvals = []; assertDistinctReviewers(request.tier, c);
+      request.tier = paymentTier(root, request, today, c); request.approvals = []; assertDistinctReviewers(root, request.tier, c);
       request.reviewerIds = [...new Set(request.tier.levels.flatMap(l => l.reviewerIds))];
       // 冻结收款账户并写入审批快照，审批人看到钱付到哪里。
       const payee = supplierPayee(root as any, request.supplierId, request.currency);

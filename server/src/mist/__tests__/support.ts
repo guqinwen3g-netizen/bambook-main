@@ -16,6 +16,8 @@ export class MemoryMistDatabase {
   accounts = new Map<string, { displayName?: string; status?: string; deletedAt?: Date | null }>();
   /** 公司成员表（公司单库名册）：仅公司会话的测试需要登记。 */
   companyMembers: Array<{ companyId: string; userId: string; status: string; joinedAt?: Date; createdAt?: Date }> = [];
+  /** 公司注册资料：仅需要公司名称 / 抬头的测试登记。 */
+  companies: Array<{ id: string; name: string; legalName?: string | null; englishName?: string | null }> = [];
   /** 人事小组（经部门归属公司）：仅小组范围测试需要登记。 */
   teams: Array<{ id: string; name: string; companyId: string; status?: string; deletedAt?: bigint | null }> = [];
   /** 小组成员、部门（负责人与上下级）与账号所属部门：仅行级范围测试需要登记。 */
@@ -34,6 +36,9 @@ export class MemoryMistDatabase {
       },
       department: {
         findMany: async ({ where }: any) => this.departments.filter(d => d.companyId === where.companyId && (d.status ?? 'active') === where.status).map(({ id, parentId, headId }) => ({ id, parentId, headId })),
+      },
+      company: {
+        findFirst: async ({ where }: any) => this.companies.find(c => c.id === where.id) ?? null,
       },
       companyMember: {
         findMany: async ({ where }: any) => this.companyMembers.filter(m => m.companyId === where.companyId && (!where.status || m.status === where.status)).flatMap(m => {

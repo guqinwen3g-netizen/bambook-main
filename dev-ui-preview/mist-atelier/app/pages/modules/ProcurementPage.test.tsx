@@ -167,7 +167,7 @@ it('explains why delivery cannot be recorded before the supplier confirms and op
   const detail=host.querySelector('[data-purchase-detail="sent"]') as HTMLElement;
   expect(detail.textContent).toContain('合同已发出 · 待供应商确认');
   expect((getByRole(detail,'button',{name:'登记本次交付'}) as HTMLButtonElement).disabled).toBe(true);
-  expect(detail.textContent).toContain('登记本次交付：请先登记合同线下发出和供应商确认');
+  expect(detail.textContent).toContain('登记本次交付：请先登记供应商确认');
   expect(queryByRole(detail,'button',{name:'登记合同线下发出'})).toBeNull();
   await click(getByRole(detail,'button',{name:'登记供应商确认'}));
   const dialog=getByRole(document.body,'dialog');
@@ -524,4 +524,12 @@ it('defaults a new purchase due date before the order delivery and treats mainla
  expect(factoryDueFor(undefined,'2026-10-31')).toBe('2026-10-31');
  expect(isDomesticSupplier({country:'中国'})).toBe(true);expect(isDomesticSupplier({country:'China'})).toBe(true);
  expect(isDomesticSupplier({country:'中国香港'})).toBe(false);expect(isDomesticSupplier({country:'Vietnam'})).toBe(false);
+});
+it('points to supplier setup when no supplier can take a purchase order',async()=>{
+  store.state!.suppliers=[];render();
+  expect(host.textContent).toContain('还没有可下采购单的供应商');
+  await click(getByRole(host,'button',{name:'去建立供应商'}));expect(go).toHaveBeenCalledWith('suppliers');
+  session.denied.add('suppliers:write');render();
+  expect(queryByRole(host,'button',{name:'去建立供应商'})).toBeNull();expect(host.textContent).toContain('请采购负责人先建立供应商档案');
+  session.denied.add('procurement:write');render();expect(host.textContent).not.toContain('还没有可下采购单的供应商');
 });

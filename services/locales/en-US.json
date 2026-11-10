@@ -6594,5 +6594,14 @@
   "还没有可审批本单的订单审批人": "No order approver can review this order yet",
   "设置审批资格": "Set approvers",
   "请管理员在 设置 · 审批资格 中指定": "Ask an administrator to assign one in Settings · Approvers",
-  "交接前核对": "Pre-handoff checks"
+  "交接前核对": "Pre-handoff checks",
+  "还没有可下采购单的供应商": "No supplier available for purchase orders",
+  "去建立供应商": "Set up a supplier",
+  "请采购负责人先建立供应商档案": "Ask the procurement lead to set up a supplier first",
+  "补全公司资料": "Complete company profile",
+  "请管理员在 设置 · 公司资料 中补全": "Ask an administrator to complete it in Settings · Company profile",
+  "请先登记合同线下发出和供应商确认": "Record the contract dispatch and supplier confirmation first",
+  "请先登记供应商确认": "Record the supplier confirmation first",
+  "配置岗位权限": "Configure job permissions",
+  "请管理员在 设置 · 岗位与权限 中授予该档审批权限": "Ask an administrator to grant this tier in Settings · Jobs & permissions"
 }

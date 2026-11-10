@@ -91,6 +91,12 @@ describe('sup11 approved contract amendment', () => {
     expect(po.revisionHistory!.at(-1)).toMatchObject({ revision: 2, snapshot: { quantity: 12, price: 2.5 }, decision: { decision: 'approved' } });
     expect(po.dueChanges!.at(-1)).toMatchObject({ from: '2026-11-01', to: '2026-11-05' });
   });
+  it('tells the requester to add another reviewer when they are the only commitment approver', () => {
+    const f = setup(), id = purchase(f); approve(f, id);
+    const key = Object.keys(f.ctx.authority!.supplier!).find(k => k.includes('purchase.garment'))!;
+    f.ctx.authority!.supplier![key] = { ...f.ctx.authority!.supplier![key], userIds: ['business'] };
+    expect(() => amend(f, id, { quantity: 12 })).toThrow('申请人以外');
+  });
   it('keeps received and billed facts; withdraw and reject leave the contract unchanged', () => {
     const f = setup(), id = purchase(f); approve(f, id);
     f.run({ type: 'fulfillment.procurement.receive', payload: { id, quantity: 5, rejected: 0, destination: 'warehouse', location: '上海仓', date: '2026-10-13', evidence: '收货单', fileIds: [] } });

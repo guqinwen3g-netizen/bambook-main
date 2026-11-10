@@ -112,6 +112,12 @@
 /* Shell status and new-notice cards: small cards at the bottom right of the canvas, above any form footer. They take no
    page-flow space and stay clear of the page title and its actions. The card is neutral; the state colour only marks the dot. */
 .mist-shell-notices { position: absolute; bottom: calc(var(--mist-form-footer-height, 0px) + 20px); right: 24px; z-index: var(--mist-z-sticky); display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 8px; width: min(400px, calc(100% - 48px)); pointer-events: none; }
+/* 抽屉或对话框打开时操作失败的提示仍要看得见、点得到：移到抽屉左侧并压过遮罩；窄屏放到顶部。 */
+.mist-root:has(> .mist-dialog) .mist-shell-notices { z-index: calc(var(--mist-z-overlay) + 2); }
+.mist-root:has(> .mist-drawer) .mist-shell-notices { z-index: calc(var(--mist-z-overlay) + 2); right: 434px; }
+.mist-root:has(> .mist-drawer[data-size="lg"]) .mist-shell-notices { right: 594px; }
+@media (max-width: 1080px) { .mist-root:has(> .mist-drawer) .mist-shell-notices { right: 24px; bottom: auto; top: 20px; } }
+@media (max-width: 1240px) { .mist-root:has(> .mist-drawer[data-size="lg"]) .mist-shell-notices { right: 24px; bottom: auto; top: 20px; } }
 .mist-shell-notice { pointer-events: auto; width: 100%; border-radius: var(--mist-r-lg); background: var(--mist-card); box-shadow: var(--mist-shadow-overlay); animation: mist-shell-notice .18s ease-out; }
 .mist-shell-notice .mist-banner { background: transparent; color: var(--mist-ink); padding: 12px 14px; gap: 10px; align-items: center; flex-wrap: wrap; }
 .mist-shell-notice .mist-banner::before { content: ''; flex: none; align-self: flex-start; width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--mist-accent); }

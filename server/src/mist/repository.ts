@@ -25,7 +25,7 @@ import { payablesCommandPermissions, financialDisposalViews } from '../shared/mi
 import { marketCommandExtraPermissions } from '../shared/mistMarket';
 import { exportRebateExtraPermissions } from '../shared/mistExportRebate';
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
-import { applyRoster, canMaintainCompany, companyDataScope, companyTeamIds, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
+import { applyCompanyRoster, canMaintainCompany, companyDataScope, companyTeamIds, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
 import { isAgentActor, type AgentActor } from './agentDelegation';
 import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, assertTaskLease, assertTaskAuthority, assertTaskViewAuthority, acknowledgePlatformStep, advanceTaskSources, answerTaskQuestion, askTaskQuestion, changeTask, checkpointTask, claimTask, deferPlatformJob, duePlatformTasks, createTask, finishTask, finishTaskSession, heartbeatTask, issueTaskControl, listTasks, readTaskRecord, reserveTaskStep, resolveTaskControl, resolveTaskCredential, releasePlatformTask, savePlatformPlan, saveTaskSources, settleTaskProposal, taskHistory, taskRecord, taskView, waitTaskForProposal, type MakeTaskCredential, type MakeTaskControl, type TaskRecord, type PlatformTaskJob } from './agentTasks';
 import { collectTaskSources, knownCommandSourcesVisible, taskScopeHash, taskSourcesVisible } from './agentTaskVisibility';
@@ -289,7 +289,7 @@ export class MistRepository {
     const task=isAgentActor(prior)&&prior.agentTaskLease?(await assertTaskLease(db,taskActor,prior.agentTaskLease,Date.now(),lock)).value:undefined;
     if((prior as MailSyncActor).mailSyncLease)await assertReceivingLease(db,actor,(prior as MailSyncActor).mailSyncLease!,row,Date.now(),lock);
     if (lock && captureAuditBefore) ORIGINAL_WRITE_STATE.set(row, structuredClone(row.state));
-    if (companyRow(row)) { applyRoster(row.state, await companyRoster(db, row.companyId!)); const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); OWN_TEAMS.set(row, scope?.teamIds ?? await companyTeamIds(db, row.companyId!, actor.userId)); }
+    if (companyRow(row)) { await applyCompanyRoster(db, row, row.companyId!); const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); OWN_TEAMS.set(row, scope?.teamIds ?? await companyTeamIds(db, row.companyId!, actor.userId)); }
     this.contract.normalizeMistState?.(row.state,this.context(actor));
     if(task){if(taskActor===actor)this.assertTaskSources(row,actor,task);else{const taskScope=await companyDataScope(db,row,taskActor),visible=projectState(row.state,taskActor,this.emptyState(taskActor),fileOwner(row),taskScope).state;if(!taskSourcesVisible(task.sources,task.scopeHash,visible,row.state,taskScope))fail('AGENT_TASK_SCOPE_CHANGED','任务可见范围已变化',403);}}
     await this.prepareTaskProposalAccess(db,row,actor);
@@ -373,7 +373,7 @@ export class MistRepository {
     const fabricAccess=scope&&hasScope(actor,'orders:read')&&hasScope(actor,'orders:write')?scopedFabricAccess(row.state,scope,actor.userId,actor.displayName||actor.userId,hasScope(actor,'production:read')&&hasScope(actor,'products:read')&&hasScope(actor,'qc:read')):undefined;
     return { ...publicWorkspace({ ...row, state: projected.state }), access,...(projected.costMaterialBasis!==undefined?{costMaterialBasis:projected.costMaterialBasis}:{}),...(materialIssueTargets?{materialIssueTargets}:{}),...(financialDisposals?{financialDisposals}:{}),...(fabricAccess?{scopedFabricAccess:fabricAccess}:{}) };
   }
-  async list(prior: TokenPayload) { return this.transact(async db => { if(isAgentActor(prior)&&prior.agentWorkspaceId){const {row,actor}=await this.own(db,prior,prior.agentWorkspaceId);return[this.view(row,actor)];}const actor = await this.authorize(db, prior); const rows: MistWorkspaceRow[] = await db.mistWorkspace.findMany({ where: this.accessibleWhere(actor), orderBy: { updatedAt: 'desc' } }); const out = []; for (const row of rows.filter(row=>this.accessible(row,actor))) { if (companyRow(row)) { applyRoster(row.state, await companyRoster(db, row.companyId!)); const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); OWN_TEAMS.set(row, scope?.teamIds ?? await companyTeamIds(db, row.companyId!, actor.userId)); } this.contract.normalizeMistState?.(row.state,this.context(actor)); out.push(this.view(row,actor)); } return out; }); }
+  async list(prior: TokenPayload) { return this.transact(async db => { if(isAgentActor(prior)&&prior.agentWorkspaceId){const {row,actor}=await this.own(db,prior,prior.agentWorkspaceId);return[this.view(row,actor)];}const actor = await this.authorize(db, prior); const rows: MistWorkspaceRow[] = await db.mistWorkspace.findMany({ where: this.accessibleWhere(actor), orderBy: { updatedAt: 'desc' } }); const out = []; for (const row of rows.filter(row=>this.accessible(row,actor))) { if (companyRow(row)) { await applyCompanyRoster(db, row, row.companyId!); const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); OWN_TEAMS.set(row, scope?.teamIds ?? await companyTeamIds(db, row.companyId!, actor.userId)); } this.contract.normalizeMistState?.(row.state,this.context(actor)); out.push(this.view(row,actor)); } return out; }); }
   /** 公司会话只看本公司唯一的库；本机空间看自己拥有或被授权的。 */
   private accessibleWhere(actor: TokenPayload) { return companyLibrary(actor) ? { companyId: actor.companyId } : { ...(actor.companyId ? { companyId: actor.companyId } : {}), OR: [{ ownerId: actor.userId }, { state: { path: ['memberIds'], array_contains: [actor.userId] } }] }; }
   private accessible(row: MistWorkspaceRow, actor: TokenPayload) { return !archived(row) && (companyLibrary(actor) ? row.companyId === actor.companyId : isOwner(row, actor) || isMember(row, actor)); }
@@ -639,13 +639,17 @@ export class MistRepository {
         const library: MistWorkspaceRow | null = await db.mistWorkspace.findFirst({ where: { companyId: actor.companyId } });
         if (library) {
           if (!defaultOnly) singleLibrary();
-          applyRoster(library.state, await companyRoster(db, actor.companyId!)); { const scope = await companyDataScope(db, library, actor); if (scope) ROW_SCOPE.set(library, scope); OWN_TEAMS.set(library, scope?.teamIds ?? await companyTeamIds(db, library.companyId!, actor.userId)); }
+          await applyCompanyRoster(db, library, actor.companyId!); { const scope = await companyDataScope(db, library, actor); if (scope) ROW_SCOPE.set(library, scope); OWN_TEAMS.set(library, scope?.teamIds ?? await companyTeamIds(db, library.companyId!, actor.userId)); }
           this.contract.normalizeMistState?.(library.state, this.context(actor));
           return this.view(library, actor);
         }
-        const state = this.contract.createMistState(this.context(actor), 'empty'); state.settings.workspaceName = name;
-        const row = await db.mistWorkspace.create({ data: { id: randomUUID(), ownerId: actor.userId, companyId: actor.companyId, slug: companySlug(actor.companyId!), name, revision: 0, state } });
-        applyRoster(row.state, await companyRoster(db, actor.companyId!)); { const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); OWN_TEAMS.set(row, scope?.teamIds ?? await companyTeamIds(db, row.companyId!, actor.userId)); }
+        // 公司库用注册时的公司名称和抬头起步，不用通用占位名；抬头空着时单据生成会提示去补全。
+        const company = await db.company.findFirst({ where: { id: actor.companyId! }, select: { name: true, legalName: true, englishName: true } });
+        const libraryName = defaultOnly && company?.name?.trim() ? company.name.trim().slice(0, 120) : name;
+        const state = this.contract.createMistState(this.context(actor), 'empty'); state.settings.workspaceName = libraryName;
+        if (company?.legalName?.trim() && !state.settings.companyProfile?.legalName) state.settings.companyProfile = { legalName: company.legalName.trim(), englishName: company.englishName?.trim() || '', address: '', englishAddress: '', phone: '', email: '', taxId: '', customsCode: '', bankName: '', bankAccount: '', swift: '', defaultCurrency: '' };
+        const row = await db.mistWorkspace.create({ data: { id: randomUUID(), ownerId: actor.userId, companyId: actor.companyId, slug: companySlug(actor.companyId!), name: libraryName, revision: 0, state } });
+        await applyCompanyRoster(db, row, actor.companyId!); { const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); OWN_TEAMS.set(row, scope?.teamIds ?? await companyTeamIds(db, row.companyId!, actor.userId)); }
         await this.authorize(db, prior);
         return this.view(row, actor);
       }
@@ -1256,7 +1260,7 @@ export class MistRepository {
     try{return await this.writeTransact(workspaceId,async db=>{
       const actor=await this.authorize(db,prior);
       await db.$queryRawUnsafe('SELECT "id" FROM "MistWorkspace" WHERE "id" = $1::uuid FOR UPDATE',workspaceId);
-      const row=await db.mistWorkspace.findFirst({where:{id:workspaceId}});if(row&&(row.companyId||actor.companyId)&&(row.companyId??null)!==(actor.companyId??null))fail('NOT_FOUND','审批对象不存在',404);if(!row||archived(row))fail('NOT_FOUND','审批对象不存在',404);if(companyRow(row))applyRoster(row.state,await companyRoster(db,row.companyId));
+      const row=await db.mistWorkspace.findFirst({where:{id:workspaceId}});if(row&&(row.companyId||actor.companyId)&&(row.companyId??null)!==(actor.companyId??null))fail('NOT_FOUND','审批对象不存在',404);if(!row||archived(row))fail('NOT_FOUND','审批对象不存在',404);if(companyRow(row))await applyCompanyRoster(db, row, row.companyId!);
       const previous=await db.mistCommandReceipt.findUnique({where:{workspaceId_requestId:{workspaceId,requestId:input.requestId}}});
       if(previous){if(previous.actorId!==actor.userId||previous.inputHash!==hash)fail('REQUEST_CONFLICT','原请求编号用于另一项决定',409);return {receipt:{requestId:previous.requestId,...publicCommandReceiptResult(previous.result)},replayed:true};}
       const task=this.reviews(row.state).find(t=>t.id===reviewId);

@@ -261,6 +261,8 @@ export function ProcurementPage() {
       extra: flags.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{flags.map(flag => <Pill key={flag.key} tone="bad">{uiText(flag.label)}</Pill>)}</div> : undefined,
     }} />; })() : null;
   const readOnlyBanner = !can ? <div className="mist-section"><Banner variant="status" tone="neutral" title={uiText("只读查看")} /></div> : null;
+  // 新公司还没有可合作的供应商时，采购单无从选择供应商：在列表页给出去处，而不是让人填到一半才发现。
+  const noSupplierBanner = can && state && !supplierOptions().length ? <div className="mist-section"><Banner variant="status" tone="warn" title={uiText('还没有可下采购单的供应商')} actions={session.hasPermission('suppliers:write') ? <Button onClick={() => go('suppliers')}>{uiText('去建立供应商')}</Button> : undefined}>{session.hasPermission('suppliers:write') ? undefined : uiText('请采购负责人先建立供应商档案')}</Banner></div> : null;
   if (full.active && selected && state) return <ListDetailPage backLabel="采购管理" onBack={full.back} before={readOnlyBanner} after={<ModuleEditorDialog spec={canDialog ? dialog : null} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage width="wide">
     <PageHeader description={uiText(sourceHint || (sourceLine && sourceOrder ? `${sourceOrder.code} · ${sourceLine.style}` : undefined))} eyebrow={uiText("订单履约 · 采购与委外")} title={uiText("采购管理")}
@@ -271,6 +273,7 @@ export function ProcurementPage() {
         {!rfqTab && createButton}
       </>} />
     {readOnlyBanner}
+    {noSupplierBanner}
     <div className="mist-section"><Segmented<Domain> ariaLabel={uiText("业务板块")} value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${inScope.filter(p => p.domain === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${inScope.filter(p => p.domain === 'fabric').length}` }]} /></div>
     <Tabs<Entry | 'rfq'> value={rfqTab ? 'rfq' : entry} onChange={value => { if (value === 'rfq') setRfqTab(true); else { setRfqTab(false); changeEntry(value); } }} options={[{ value: 'purchase', label: '采购订单', count: domainRows.filter(p => entryOf(p) === 'purchase').length }, { value: 'processing', label: '委外加工单', count: domainRows.filter(p => entryOf(p) === 'processing').length }, { value: 'rfq', label: '询价比价', count: state ? readRfqs(state).filter(r => r.domain === domain && r.state === 'open' && (!route.orderLineId || r.lineId === route.orderLineId)).length : 0 }]} />
     {rfqTab ? <>
@@ -389,7 +392,7 @@ function PurchaseDetail({ purchase: p, state, incoming, day, me, can, canApprove
       { label: '退回修改', icon: Undo2, onClick: () => onDecide('rejected'), hidden: !canReview || stage !== 'pending' },
       { label: '登记合同线下发出', icon: Send, onClick: onSend, primary: !p.offlineSend, reason: writeReason, hidden: !can || p.state !== 'approved' || !!p.offlineSend },
       { label: '登记供应商确认', icon: FileSignature, onClick: onConfirm, primary: true, reason: writeReason, hidden: !can || p.state !== 'approved' || !p.offlineSend || !!p.supplierConfirmation },
-      { label: processing ? '登记加工回交' : '登记本次交付', icon: PackageCheck, onClick: onReceive, primary: !!p.supplierConfirmation && stage !== 'done', reason: writeReason || (!p.offlineSend || !p.supplierConfirmation ? '请先登记合同线下发出和供应商确认' : false), hidden: !can || p.state !== 'approved' },
+      { label: processing ? '登记加工回交' : '登记本次交付', icon: PackageCheck, onClick: onReceive, primary: !!p.supplierConfirmation && stage !== 'done', reason: writeReason || (!p.offlineSend ? '请先登记合同线下发出和供应商确认' : !p.supplierConfirmation ? '请先登记供应商确认' : false), hidden: !can || p.state !== 'approved' },
       { label: processing ? '生成加工合同' : '生成采购单', icon: Download, onClick: onDownload, reason: writeReason, hidden: !can || p.state !== 'approved' },
       { label: '取消合同', icon: Undo2, onClick: onCancel, reason: cancelReason, hidden: !can || p.state !== 'approved' || stage === 'done' || receipts.length > 0 },
       { label: '转给其他供应商', onClick: onTransfer, reason: transferReason, hidden: !can || p.state !== 'approved' || stage === 'done' || receipts.length > 0 },
