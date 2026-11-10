@@ -132,7 +132,7 @@
 
 ## 5. 下一步与待办（按优先级）
 
-**当前停点（2026-11-10，邮箱 OAuth，工作分支 `golive`）**：本工作包已推送，PR [#694](https://github.com/guqinwen3g-netizen/bambook-main/pull/694) 已开。初版功能提交 `d3effde7`，后续修正随同一 PR 更新。旧 worktree `codex/mail-oauth` 停在前端骨架 `db06ebc2`。PR #691–#693 已合入；本工作包合入和部署前，已核实的 main / 开发站版本是 `0a46cafa`。
+**当前停点（2026-11-10，邮箱 OAuth，工作分支 `golive`）**：按用户要求暂停邮箱接入和实测。恢复时先核实项目所有者的两步验证状态，再继续配置同一个 Google 测试项目。本工作包已推送，PR [#694](https://github.com/guqinwen3g-netizen/bambook-main/pull/694) 已开。初版功能提交 `d3effde7`，后续修正随同一 PR 更新。旧 worktree `codex/mail-oauth` 停在前端骨架 `db06ebc2`。PR #691–#693 已合入；本工作包合入和部署前，已核实的 main / 开发站版本是 `0a46cafa`。
 
 **本地实现与复验**：智能邮箱内选择 Google / Microsoft 后走官方网页授权，回到已登录的账号与公司，按实际连接记录选择发件人并恢复未发草稿。旧服务商账号使用相同入口。服务端校验 PKCE、签名身份、会话和邮箱权限，验证 IMAP/SMTP 后加密保存授权。新版桌面通过系统浏览器和限时回环端口回到原窗口；回程端口、服务商和随机状态有服务端签名，桌面仅接受本次请求。旧客户端可用网页版。指定私有测试邮箱在连接时从 IMAP UIDNEXT 建立各文件夹起点，重连保留进度，UIDVALIDITY 改变时重新取起点。服务商未配置的按钮保留管理员配置提示，员工步骤见 `wiki/sop/mail-receiving.md`；运维见 `docs/ops/dev-server-access.md`。
 
@@ -752,6 +752,8 @@
 - 开发服务器访问：`docs/ops/dev-server-access.md`（默认本机验证、直接发布；GitHub 自动部署已取消，正式环境不在范围）。
 
 ## 7. 进度记录
+
+- **2026-11-10 · 邮箱接入暂停**：代码提交至 `50b3ad15`，Google 测试项目创建记录见 `d713dcdb`。PR #694 待合入，本轮未部署；Gmail 和 Outlook 均未完成真实授权或互发验收。
 
 - **2026-11-10 · Gmail 测试项目**：已收到 Google Cloud 创建回执。两步验证待项目所有者办理，Gmail OAuth 客户端尚未创建。本机复验两家 IMAP 加密连接通过；两家 SMTP 仍在身份验证前断开。两个真实邮箱均未绑定。
 
