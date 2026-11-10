@@ -118,6 +118,44 @@ describe('order documents and lookbook', () => {
     expect(snapshot.table!.rows).toEqual([{ sku: 'SKU-1', name: '羊毛大衣', spec: '100% wool' }]);
     expect(f.state.market.lookbooks[0].fileIds).toContain(fileId);
   });
+  it('keeps generated lookbook history when saving a revised draft and continues its numbering', () => {
+    const f = fixture(); f.state.settings.companyProfile = { ...company };
+    f.state.market.products.push({ id: 'p1', sku: 'SKU-1', name: '羊毛大衣', category: 'garment', status: 'active', specification: '100% wool', createdAt: '', updatedAt: '', fileIds: [], note: '' } as any);
+    const id = f.run({ type: 'market.lookbook.save', payload: { input: { name: '秋冬画册', customerId: 'customer', productIds: ['p1'], fileIds: [], note: '首版' } } }).id!;
+    f.run({ type: 'market.lookbook.status', payload: { id, status: 'Prepared' } });
+    const first = generate(f, { type: 'market.lookbook.document', payload: { id } });
+    const history = structuredClone((f.state.market.lookbooks[0] as any).documents);
+    f.run({ type: 'market.lookbook.status', payload: { id, status: 'Draft' } });
+    // A client cannot replace the archived records or nominate a current file while saving a draft.
+    f.run({ type: 'market.lookbook.save', payload: { id, input: { name: '秋冬画册', customerId: 'customer', productIds: ['p1'], fileIds: [first.fileId], note: '新版说明', documents: [], currentDocumentId: history[0].id } } } as any);
+    expect((f.state.market.lookbooks[0] as any).documents).toEqual(history);
+    expect((f.state.market.lookbooks[0] as any).currentDocumentId).toBeUndefined();
+    f.run({ type: 'market.lookbook.status', payload: { id, status: 'Prepared' } });
+    const second = generate(f, { type: 'market.lookbook.document', payload: { id } });
+    const records = (f.state.market.lookbooks[0] as any).documents;
+    expect(second.snapshot.number).toBe(first.snapshot.number + '-2');
+    expect(records).toHaveLength(2); expect(records[0]).toEqual(history[0]);
+    expect(records[1].snapshot.paragraphs).toEqual([{ text: '新版说明' }]);
+  });
+  it('selects a newly generated current PDF, clears that selection for a new preparation and keeps it on archive', () => {
+    const f = fixture(); f.state.settings.companyProfile = { ...company };
+    f.state.market.products.push({ id: 'p1', sku: 'SKU-1', name: '羊毛大衣', category: 'garment', status: 'active', specification: '100% wool', createdAt: '', updatedAt: '', fileIds: [], note: '' } as any);
+    const id = f.run({ type: 'market.lookbook.save', payload: { input: { name: '秋冬画册', customerId: 'customer', productIds: ['p1'], fileIds: [], note: '' } } }).id!;
+    f.run({ type: 'market.lookbook.status', payload: { id, status: 'Prepared' } });
+    generate(f, { type: 'market.lookbook.document', payload: { id } });
+    let book = f.state.market.lookbooks[0] as any;
+    expect(book.currentDocumentId).toBe(book.documents.at(-1).id);
+    f.run({ type: 'market.lookbook.status', payload: { id, status: 'Draft' } });
+    expect((f.state.market.lookbooks[0] as any).currentDocumentId).toBeUndefined();
+    f.run({ type: 'market.lookbook.status', payload: { id, status: 'Prepared' } });
+    expect((f.state.market.lookbooks[0] as any).currentDocumentId).toBeUndefined();
+    generate(f, { type: 'market.lookbook.document', payload: { id } });
+    book = f.state.market.lookbooks[0] as any;
+    expect(book.currentDocumentId).toBe(book.documents.at(-1).id);
+    const current = book.currentDocumentId;
+    f.run({ type: 'market.lookbook.status', payload: { id, status: 'Archived' } });
+    expect((f.state.market.lookbooks[0] as any).currentDocumentId).toBe(current);
+  });
 });
 
 it('writes amounts in words the way invoices and drafts do', () => {

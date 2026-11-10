@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MARKET_PAGES } from './MarketPages';
 import { CAMPAIGN_NEXT, campaignLeads, campaignReminder } from './MarketingPage';
 import { Nav } from '../../nav';
+import { takeComposeIntent } from '../../runtime/composeIntent';
 import { createMistState, type MistState } from '../../../../../server/src/shared/mistWorkspace';
 const bridge = vi.hoisted(() => ({ current: null as any, permissions: true as boolean | string[] }));
 vi.mock('../../runtime/workspace', () => ({ useMistWorkspace: () => bridge.current }));
@@ -91,6 +92,29 @@ describe('营销推广工作台', () => {
     await mount(b.id, 'lookbooks', 'full'); expect(host.textContent).toContain('冻结产品名称'); expect(host.textContent).toContain('冻结规格');
     expect(button('生成画册 PDF')!.disabled).toBe(false); expect(button('用邮箱发送')!.disabled).toBe(true);
     expect(bridge.current.run).not.toHaveBeenCalled();
+  });
+  it.each([
+    { status: 'Draft', current: true, allowed: false },
+    { status: 'Prepared', current: false, allowed: false },
+    { status: 'Prepared', current: true, allowed: true },
+    { status: 'Archived', current: true, allowed: true },
+  ] as const)('画册 $status 当前文件=$current，邮箱交接=$allowed', async ({ status, current, allowed }) => {
+    takeComposeIntent();
+    const b = state.market.lookbooks[0] as any;
+    b.status = status; b.documents = [{ id: 'print-current', kind: 'LOOKBOOK', fileId: 'book-pdf', number: 'LB-1' }];
+    b.currentDocumentId = current ? 'print-current' : undefined;
+    state.files.push({ id: 'book-pdf', name: 'lookbook.pdf', mimeType: 'application/pdf', size: 100, storageKey: 'ws/book-pdf', createdAt: '2026-10-14T01:00:00Z' });
+    await mount(b.id, 'lookbooks', 'full');
+    expect(button('用邮箱发送')!.disabled).toBe(!allowed);
+    if (allowed) {
+      await click('用邮箱发送');
+      expect(takeComposeIntent()?.fileIds).toEqual(['book-pdf']);
+      expect(go).toHaveBeenCalledWith('emails');
+    } else {
+      expect(button('下载历史 PDF')).toBeTruthy();
+      expect(button('下载 PDF')).toBeUndefined();
+      await click('用邮箱发送'); expect(go).not.toHaveBeenCalled();
+    }
   });
   it('失效来源深链不提供新建线索入口', async () => {
     await mount(undefined, 'campaign-leads:missing'); expect(host.textContent).toContain('来源活动不存在'); expect(button('新建')).toBeUndefined();

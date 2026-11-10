@@ -1325,12 +1325,13 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "market.lookbook.save",
-  "payload": "{id?:string;input:Omit<Input<MarketLookbook>,'preparedAt'|'snapshots'>}",
+  "payload": "{id?:string;input:Omit<Input<MarketLookbook>,'preparedAt'|'snapshots'|'documents'|'currentDocumentId'>}",
   "types": {
    "Input": "Omit<T,keyof RecordBase|'status'> & {fileIds?:string[];note?:string}",
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }",
-   "MarketLookbook": "RecordBase & { name:string; customerId:string; productIds:string[]; status:'Draft'|'Prepared'|'Archived'; preparedAt:string|null; snapshots:LookbookSnapshot[] }",
-   "LookbookSnapshot": "{id:string;sku:string;name:string;specification:string;customerCode?:string;composition?:string;color?:string;imageFileId?:string}"
+   "MarketLookbook": "RecordBase & { name:string; customerId:string; productIds:string[]; status:'Draft'|'Prepared'|'Archived'; preparedAt:string|null; snapshots:LookbookSnapshot[]; documents?:GeneratedDocRecord[]; currentDocumentId?:string }",
+   "LookbookSnapshot": "{id:string;sku:string;name:string;specification:string;customerCode?:string;composition?:string;color?:string;imageFileId?:string}",
+   "GeneratedDocRecord": "{ id: string; kind: string; number: string; fileId: string; fileName: string; sha256: string; bytes: number; templateVersion: number; snapshotFingerprint: string; snapshot: GeneratedDocSnapshot; generatedAt: string; generatedBy: string; sealUseId?: string }"
   },
   "source": "server/src/shared/mistMarket.ts"
  },
@@ -1338,9 +1339,10 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "market.lookbook.status",
   "payload": "{id:string;status:MarketLookbook['status']}",
   "types": {
-   "MarketLookbook": "RecordBase & { name:string; customerId:string; productIds:string[]; status:'Draft'|'Prepared'|'Archived'; preparedAt:string|null; snapshots:LookbookSnapshot[] }",
+   "MarketLookbook": "RecordBase & { name:string; customerId:string; productIds:string[]; status:'Draft'|'Prepared'|'Archived'; preparedAt:string|null; snapshots:LookbookSnapshot[]; documents?:GeneratedDocRecord[]; currentDocumentId?:string }",
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }",
-   "LookbookSnapshot": "{id:string;sku:string;name:string;specification:string;customerCode?:string;composition?:string;color?:string;imageFileId?:string}"
+   "LookbookSnapshot": "{id:string;sku:string;name:string;specification:string;customerCode?:string;composition?:string;color?:string;imageFileId?:string}",
+   "GeneratedDocRecord": "{ id: string; kind: string; number: string; fileId: string; fileName: string; sha256: string; bytes: number; templateVersion: number; snapshotFingerprint: string; snapshot: GeneratedDocSnapshot; generatedAt: string; generatedBy: string; sealUseId?: string }"
   },
   "source": "server/src/shared/mistMarket.ts"
  },
