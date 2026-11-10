@@ -30,6 +30,7 @@ import { CURRENCIES, SUPPLIER_PAYMENT_TERMS, UNITS } from '../../runtime/tradeOp
 import { businessWhen } from './pageKit';
 import { usePageFailure } from '../../runtime/errorPresentation';
 import { relationHoldReason } from '../../../../../server/src/shared/mistRelationHold';
+import { View as AppView } from '../../../../../types';
 
 type ProcurementEditorSpec = ModuleEditorSpec & { approvalFor?: string };
 const AMENDMENT_STATE = { pending: '待审批', approved: '已生效', rejected: '已退回', withdrawn: '已撤回' } as const;
@@ -246,7 +247,8 @@ export function ProcurementPage() {
         onDownload={() => void act(async () => { const receipt = await run({ type: 'fulfillment.procurement.document', payload: { id: selected.id } }); const fileId = receipt.result.fileId; if (typeof fileId === 'string') await downloadFile({ id: fileId, name: `${selected.code}.pdf`, mimeType: 'application/pdf', size: 0, storageKey: '', createdAt: '' }); }, '采购单已生成')}
         onAttach={ids => run({ type: 'fulfillment.procurement.save', payload: { ...selected, fileIds: ids } })}
         onInventory={() => go('inventory', undefined, { section: selected.id })} onSupplier={() => go('suppliers', selected.supplierId)}
-        onCancel={() => setDialog(cancelSpec(selected))} onTransfer={() => setDialog(transferSpec(selected))} onOpenPurchase={id => go('procurement', id)} onPayables={() => { const plan = state.payables?.plans?.find(x => x.purchaseId === selected.id && (x.stage || 'prepayment') === 'prepayment'); go('payment-vouchers', plan?.id, { section: 'payables' }); }} />
+        onCancel={() => setDialog(cancelSpec(selected))} onTransfer={() => setDialog(transferSpec(selected))} onOpenPurchase={id => go('procurement', id)} onPayables={() => { const plan = state.payables?.plans?.find(x => x.purchaseId === selected.id && (x.stage || 'prepayment') === 'prepayment'); go('payment-vouchers', plan?.id, { section: 'payables' }); }}
+        onSettle={session.canAccessView(AppView.PaymentVouchers) ? () => go('payment-vouchers', selected.id, { section: 'payables' }) : undefined} />
     : <EmptyState icon={entry === 'processing' ? Workflow : ShoppingCart} title={uiText(loading ? '正在读取采购' : '未选择单据')} compact />;
 
   const summary = selected && state ? (() => { const p = selected, stage = purchaseStage(p), flags = purchaseFlags(p, day).filter(flag => flag.key !== 'returned');
@@ -325,11 +327,11 @@ function FabricStageBalancePanel({ balance: b }: { balance: FabricStageBalance }
     ]} />}
   </DetailBlock>;
 }
-function PurchaseDetail({ purchase: p, state, incoming, day, me, can, canApprove, inventory, finance, locked, onEdit, onSubmit, onDecide, onAmend, onAmendWithdraw, onSend, onConfirm, onReceive, onRejectReceived, onReturn, onReturnReverse, onDownload, onAttach, onInventory, onSupplier, onCancel, onTransfer, onOpenPurchase, onPayables }: {
+function PurchaseDetail({ purchase: p, state, incoming, day, me, can, canApprove, inventory, finance, locked, onEdit, onSubmit, onDecide, onAmend, onAmendWithdraw, onSend, onConfirm, onReceive, onRejectReceived, onReturn, onReturnReverse, onDownload, onAttach, onInventory, onSupplier, onCancel, onTransfer, onOpenPurchase, onPayables, onSettle }: {
   purchase: FulfillmentPurchase; state: MistState; incoming:import('../../../../../server/src/shared/mistInternalFabric').MaterialDeliveryRow[]; day: string; me: string; can: boolean; canApprove: boolean; inventory: boolean; finance: boolean; locked: boolean;
   onEdit: () => void; onSubmit: () => void; onDecide: (decision: 'approved' | 'rejected') => void; onAmend: () => void; onAmendWithdraw: (id: string) => void; onSend: () => void; onConfirm: () => void; onReceive: () => void; onDownload: () => void;
   onRejectReceived: (receipt: FulfillmentReceipt) => void; onReturn: (receipt: FulfillmentReceipt) => void; onReturnReverse: (receipt: FulfillmentReceipt, row: FulfillmentReceiptReturn) => void;
-  onAttach: (ids: string[]) => Promise<unknown>; onInventory: () => void; onSupplier: () => void; onCancel: () => void; onTransfer: () => void; onOpenPurchase: (id: string) => void; onPayables: () => void;
+  onAttach: (ids: string[]) => Promise<unknown>; onInventory: () => void; onSupplier: () => void; onCancel: () => void; onTransfer: () => void; onOpenPurchase: (id: string) => void; onPayables: () => void; onSettle?: () => void;
 }) {
   const stage = purchaseStage(p), flags = purchaseFlags(p, day), processing = p.kind === 'processing';
   const receipts = state.fulfillment.receipts.filter(receipt => receipt.purchaseId === p.id);
@@ -396,6 +398,8 @@ function PurchaseDetail({ purchase: p, state, incoming, day, me, can, canApprove
       { label: processing ? '生成加工合同' : '生成采购单', icon: Download, onClick: onDownload, reason: writeReason, hidden: !can || p.state !== 'approved' },
       { label: '取消合同', icon: Undo2, onClick: onCancel, reason: cancelReason, hidden: !can || p.state !== 'approved' || stage === 'done' || receipts.length > 0 },
       { label: '转给其他供应商', onClick: onTransfer, reason: transferReason, hidden: !can || p.state !== 'approved' || stage === 'done' || receipts.length > 0 },
+      // 交付后由采购发起结算（按实收），财务复核确认后才能关联票据付款。
+      { label: '提交结算', icon: FileSignature, onClick: () => onSettle?.(), primary: stage === 'done' && !settled.length, reason: writeReason, hidden: !can || !onSettle || p.state !== 'approved' || p.received <= 0 || finalSt },
       { label: '查看预付去向', onClick: onPayables, hidden: p.state !== 'cancelled' || !(prepay.plans.length || prepay.moves.length || p.cancellation?.prepaid) },
     ]} />
     <Facts items={[

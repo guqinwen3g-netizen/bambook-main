@@ -533,3 +533,11 @@ it('points to supplier setup when no supplier can take a purchase order',async()
   expect(queryByRole(host,'button',{name:'去建立供应商'})).toBeNull();expect(host.textContent).toContain('请采购负责人先建立供应商档案');
   session.denied.add('procurement:write');render();expect(host.textContent).not.toContain('还没有可下采购单的供应商');
 });
+
+it('offers settlement submission once goods are delivered and opens it in payables',async()=>{
+  store.state!.fulfillment.purchases.push(purchase('fresh',approved()),purchase('done',approved({received:100})));
+  render('fresh');expect(queryByRole(host,'button',{name:'提交结算'})).toBeNull();
+  render('done');await click(getByRole(host,'button',{name:'提交结算'}));
+  expect(go).toHaveBeenCalledWith('payment-vouchers','done',{section:'payables'});
+  session.denied.add('procurement:write');render('done');expect(queryByRole(host,'button',{name:'提交结算'})).toBeNull();
+});

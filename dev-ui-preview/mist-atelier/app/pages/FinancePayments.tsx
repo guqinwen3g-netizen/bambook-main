@@ -12,6 +12,15 @@ import { DetailBlock } from './modules/pageKit';
 
 const money = (amount: number, currency: string) => `${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
 const cents = (value: string) => { const n = Number(value); return value.trim() && Number.isFinite(n) ? Math.round(n * 100) : NaN; };
+/** 可用于付款的公司账户：同币种、未销户、期初不晚于付款日。 */
+export const payingAccounts = (state: MistState | null | undefined, currency: string, date: string) => (state?.bankAccounts || []).filter(a => a.currency === currency && !a.closed && (!date || a.openingDate <= date));
+/** 只有一个可用账户时默认选中，其余由财务选择；不选则付款暂不归属账户。 */
+export const defaultPayingAccount = (state: MistState | null | undefined, currency: string, date: string) => { const list = payingAccounts(state, currency, date); return list.length === 1 ? list[0].id : ''; };
+export function PayingAccountField({ state, currency, date, value, onChange }: { state: MistState | null | undefined; currency: string; date: string; value: string; onChange: (id: string) => void }) {
+  const list = payingAccounts(state, currency, date);
+  if (!list.length) return null;
+  return <Field label={uiText('付款账户')}><Select aria-label={uiText('付款账户')} value={value} options={[{ value: '', label: '暂不指定' }, ...list.map(a => ({ value: a.id, label: `${a.name} · ${a.bankName} · 尾号 ${a.accountNo.slice(-4)}` }))]} onChange={e => onChange(e.target.value)} /></Field>;
+}
 type Execute = (command: PayablesCommand, done: (result: Record<string, unknown>) => void) => void;
 type Common = { state: MistState; busy: boolean; allowed: boolean; failure: string; onClose: () => void; execute: Execute; onDone: (result: Record<string, unknown>) => void };
 
@@ -52,14 +61,14 @@ export function AdvanceRequestDialog({ state, settlement: st, busy, allowed, fai
 /** 历史补登：系统上线前已付的款，按凭证补到计划这一期；不走审批，记录操作人。 */
 export function BackfillDialog({ state, plan, busy, allowed, failure, onClose, execute, onDone }: Common & { plan: PrepaymentPlanView }) {
   const day = platformBusinessDate(businessNow()), bills = plan.stage === 'prepayment' ? [] : backfillBillOptions(state, plan.id);
-  const [amount, setAmount] = React.useState(String(plan.available)), [date, setDate] = React.useState(''), [reference, setReference] = React.useState(''), [billId, setBillId] = React.useState(bills[0]?.bill.id || ''), [note, setNote] = React.useState(''), [local, setLocal] = React.useState('');
+  const [amount, setAmount] = React.useState(String(plan.available)), [date, setDate] = React.useState(''), [reference, setReference] = React.useState(''), [billId, setBillId] = React.useState(bills[0]?.bill.id || ''), [note, setNote] = React.useState(''), [local, setLocal] = React.useState(''), [accountId, setAccountId] = React.useState('');
   const submit = () => {
     const value = cents(amount);
     if (!(value > 0)) return setLocal('补登金额必须大于零。');
     if (value > Math.round(plan.available * 100)) return setLocal('补登金额超过计划剩余（已扣除申请和已补登）。');
     if (!date || !reference.trim()) return setLocal('请填写实际付款日期和付款凭证号。');
     if (plan.stage !== 'prepayment' && !billId) return setLocal('进度款 / 尾款须对应已登记的供应商票据。');
-    setLocal(''); execute({ type: 'payable.payment.backfill', payload: { planId: plan.id, date, amount: value / 100, reference, note, ...(plan.stage !== 'prepayment' ? { billId } : {}) } }, onDone);
+    setLocal(''); execute({ type: 'payable.payment.backfill', payload: { planId: plan.id, date, amount: value / 100, reference, note, ...(accountId ? { accountId } : {}), ...(plan.stage !== 'prepayment' ? { billId } : {}) } }, onDone);
   };
   const message = local || failure;
   return <Dialog open onClose={() => { if (!busy) onClose(); }} width={620} title={uiText("历史付款补登")} description={ui`${plan.code} · ${paymentPlanStageLabel(plan.stage)} · ${plan.purchaseCode} · 剩余 ${money(plan.available, plan.currency)}。只用于系统上线前已经付掉的款：不再走付款申请和审批，补登记录标“历史补登”并留操作人，错了可冲回。`}
@@ -73,6 +82,7 @@ export function BackfillDialog({ state, plan, busy, allowed, failure, onClose, e
         <Field label={uiText("实际付款日期")} required><TextInput aria-label={uiText("实际付款日期")} type="date" max={day} value={date} onChange={e => setDate(e.target.value)} /></Field>
       </FormGrid>
       <Field label={uiText("付款凭证号 / 银行流水号")} required><TextInput aria-label={uiText("付款凭证号")} value={reference} onChange={e => setReference(e.target.value)} /></Field>
+      <PayingAccountField state={state} currency={plan.currency} date={date} value={accountId} onChange={setAccountId} />
       <Field label={uiText("补登说明")}><TextArea aria-label={uiText("补登说明")} rows={2} value={note} onChange={e => setNote(e.target.value)} /></Field>
     </div>
   </Dialog>;

@@ -1768,7 +1768,6 @@
   "结汇划转": "Currency settlement & transfer",
   "账户余额": "Account balance",
   "暂无公司银行账户": "No company bank accounts available",
-  "点上方“新增账户”登记账户与期初余额。": "Click 'Add Account' above to register an account and opening balance.",
   "锁汇与结汇记录": "Locked & settled currency records",
   "锁汇": "Locked currency",
   "结汇": "Settled currency",
@@ -6618,5 +6617,6 @@
   "由财务在供应商档案登记并核实后再申请付款。": "Finance must register and verify it in the supplier record before you request payment.",
   "审批时未冻结收款账户": "No payee account was locked at approval",
   "请申请人撤回后按供应商现有账户重新提交审批。": "Ask the requester to withdraw and resubmit for approval with the supplier's current account.",
-  "审批时未冻结收款账户，须由申请人撤回后重新提交审批": "No payee account was locked at approval; the requester must withdraw and resubmit"
+  "审批时未冻结收款账户，须由申请人撤回后重新提交审批": "No payee account was locked at approval; the requester must withdraw and resubmit",
+  "暂不指定": "Not specified"
 }
