@@ -78,7 +78,7 @@ function log(root: MistState, context: MistContext, entityId: string, value: str
 export function scheduleCrmFollowUp(root: MistState, context: MistContext, input: { title: string; content: string; nextDate: string; target: import('./mistWorkspace').MistTarget }) {
   const id = context.id();
   root.tasks.unshift({ id, title: input.title, due: input.nextDate, done: false, kind: 'crm-follow-up', target: input.target, assigneeIds: context.actorId ? [context.actorId] : [] });
-  root.calendar.push({ id: context.id(), title: input.title, date: input.nextDate, time: '09:00', note: input.content.slice(0, 200), target: input.target, ...(context.actorId ? { ownerId: context.actorId, owner: context.actorName } : {}) });
+  root.calendar.push({ id: context.id(), sourceTaskId: id, title: input.title, date: input.nextDate, time: '09:00', note: input.content.slice(0, 200), target: input.target, ...(context.actorId ? { ownerId: context.actorId, owner: context.actorName } : {}) });
   return id;
 }
 

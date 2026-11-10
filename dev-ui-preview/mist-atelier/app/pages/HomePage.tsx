@@ -1,4 +1,4 @@
-import { ModuleEditorDialog } from './modules/ModuleWorkbench';
+import { ModuleEditorDialog, type ModuleEditorSpec } from './modules/ModuleWorkbench';
 import { businessWhen } from './modules/pageKit';
 import { SetupChecklist } from './SetupChecklist';
 import { memberSelectOptions, workspaceMembers } from '../runtime/members';
@@ -12,7 +12,7 @@ import {businessNow,businessToday} from '../runtime/businessClock';
 import React from 'react';
 import { ArrowRight, BadgeCheck, FileText, Layers, Plus, Ship, SlidersHorizontal, Sparkles, Wallet, ArrowUpRight } from 'lucide-react';
 import { AIBrief, Agenda, Button, Card, CardBody, CardHeader, Dialog, Dropdown, EmptyState, Field, FormGrid, HeroFocus, KeyValue, MistPage, PageHeader, Segmented, Select, Skeleton, StatCard, StatGrid, Switch, TaskList, TextLink, WeekStrip, useToast, type TaskItem } from '../../../../components/mist';
-import { MIST_LOGISTICS_DUTY, type MistTarget } from '../../../../server/src/shared/mistWorkspace';
+import { MIST_LOGISTICS_DUTY, type MistTarget, type MistTask } from '../../../../server/src/shared/mistWorkspace';
 import { IMG, STAGES } from '../data';
 import { useNav } from '../nav';
 import { useMistSession } from '../runtime/auth';
@@ -23,7 +23,7 @@ import { visibleMistNotifications } from '../runtime/notificationPreferences';
 import {readMistNotice} from '../runtime/agentTaskNotices';
 import { useOptionalMistReviews } from '../runtime/reviews';
 import { AgentProposalDialog } from './AgentProposalDialog';
-import { mistWorkQueue, mistMyTasks, mistEmailFollowUpTaskIds, type MistWorkOptions } from '../runtime/workQueue';
+import { mistWorkQueue, mistMyTasks, isMyMistTask, mistEmailFollowUpTaskIds, type MistWorkOptions } from '../runtime/workQueue';
 import type { View } from '../../../../types';
 import { firstWorkspaceImage, useWorkspaceImage } from '../runtime/useWorkspaceImage';
 import { FailureNotice } from '../runtime/FailureNotice';
@@ -46,7 +46,7 @@ export function HomePage() {
   const [sort, setSort] = React.useState<'due' | 'title'>('due');
   const [taskDialog, setTaskDialog] = React.useState(false), [selectedTask, setSelectedTask] = React.useState(''), [taskDone, setTaskDone] = React.useState(false);
   // mar64：新建 / 改期 / 转派待办。
-  const me = session.user?.id || '', [todo, setTodo] = React.useState<{ id: string; title: string; due: string; assigneeId: string; note: string } | null>(null), members = workspaceMembers(workspace.workspace, workspace.state, session.user);
+  const me = session.user?.id || '', [todoSpec, setTodoSpec] = React.useState<ModuleEditorSpec | null>(null), members = workspaceMembers(workspace.workspace, workspace.state, session.user);
   const [reportVersion, setReportVersion] = React.useState<string | null>(null), [error, setError] = React.useState('');
   const [statView,setStatView]=React.useState<'development'|'qc'|'shipping'|'invoices'|null>(null);
   const hidden = new Set(workspace.workspace?.access?.hidden?.map(section => section.key) ?? []);
@@ -56,13 +56,15 @@ export function HomePage() {
   React.useEffect(()=>{const current=businessToday();setToday(current);setDay(current);},[scope,state?.settings.businessClock?.at]);
   const alive=React.useRef(true);React.useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const busy = loading || saving || !!pending, operation = React.useRef(false);
-  React.useEffect(() => { setTaskDialog(false); setSelectedTask(''); setReportVersion(null); setStatView(null); setError(''); operation.current = false; }, [scope]);
+  React.useEffect(() => { setTodoSpec(null); setTaskDialog(false); setSelectedTask(''); setReportVersion(null); setStatView(null); setError(''); operation.current = false; }, [scope]);
   React.useEffect(() => { const update = () => setToday(businessToday()); const timer = window.setInterval(update, 60000); window.addEventListener('focus', update); return () => { window.clearInterval(timer); window.removeEventListener('focus', update); }; }, []);
   const days = weekDays(today), weekStart = days[0].key, weekEnd = days[6].key;
   const reviews = useOptionalMistReviews(), waitingReviews = reviews?.rows.filter(row => row.canDecide).length ?? 0;
   // 与侧栏同一口径：只列指定给我或我岗位的事项，「N 件事」= 侧栏「我的工作」数字。
   const workOptions: MistWorkOptions = { canRead: view => session.canAccessView(view as View), can: permission => session.hasPermission(permission), me: session.user?.id ?? '', reviews: reviews?.rows, today, now: businessNow().toISOString(), workspaceId: workspace.workspace?.id, financialDisposals: workspace.workspace?.financialDisposals };
   const allTasks = mistMyTasks(state, workOptions);
+  const followUpIds = new Set(state?.crm?.followUps.filter(f => !f.voided).map(f => f.nextTaskId));
+  const manageable = [...allTasks, ...(state?.tasks ?? []).filter(t => t.done && t.kind === 'crm-follow-up' && followUpIds.has(t.id) && isMyMistTask(t, workOptions, true))];
   const inRange = (date: string) => !date || (range === 'today' ? date <= today : date <= weekEnd);
   const tasks = allTasks.filter(task => (task.kind === 'shipping' && task.permission === MIST_LOGISTICS_DUTY) || inRange(task.due)).slice().sort((a, b) => sort === 'title' ? a.title.localeCompare(b.title, 'zh-CN') : (a.due || '9999').localeCompare(b.due || '9999') || a.title.localeCompare(b.title, 'zh-CN'));
   const queue = mistWorkQueue(state, workOptions);
@@ -103,15 +105,26 @@ export function HomePage() {
     onClick: () => void run(async () => { const bound=scope;await readMistNotice(workspace,notification); if(alive.current&&activeScope.current===bound)go(notification.target.view, notification.target.id, notification.target); }) }));
   if (!brief.length) (state?.events.slice().sort((a, b) => b.at.localeCompare(a.at)).slice(0, 3) ?? []).forEach(event => brief.push({ strong: event.actor, text: mistActivityTitle(state,event.text,{view:({order:'orders/detail',production:'production-board',procurement:'procurement',qc:'qc-workbench'} as Record<string,string>)[event.entityType]||'cockpit',id:event.entityId}), onClick: canAI ? () => openAI(`说明这条工作记录：${event.text}`) : undefined }));
   if (!brief.length) brief.push({ strong: '暂无工作动态', text: '', onClick: session.hasPermission('products:write') ? () => go('development/new') : undefined });
-  const beginTask = () => { const task = tasks[0] ?? allTasks[0]; setSelectedTask(task?.id ?? ''); setTaskDone(task?.done ?? false); setTaskDialog(true); };
-  const chosenTask = state?.tasks.find(task => task.id === selectedTask);
+  const openTodo = (task?: MistTask) => {
+    setTaskDialog(false);
+    // Keep the same form while the workspace publishes its saving state and acknowledgement.
+    setTodoSpec({title:task?'调整待办':'新建待办',submitLabel:'保存',fields:[
+      {key:'title',label:'事项',required:true,readonly:!!task && task.kind!=='personal'},
+      {key:'due',label:'期限',type:'date',required:true},
+      {key:'assigneeId',label:'负责人',type:'select',required:true,options:memberSelectOptions(members)},
+      {key:'note',label:'备注',type:'textarea'},
+    ],initialValues:{title:task?.title||'',due:task?.due||today,assigneeId:task?.assigneeIds?.[0]||me,note:task?.note||''},
+    submit:async v=>{await workspace.run({type:'task.save',payload:{...(task?{id:task.id}:{}),title:String(v.title||''),due:String(v.due||''),assigneeId:String(v.assigneeId||''),note:String(v.note||'')}});toast(uiText(task?'待办已调整':'待办已创建'));}});
+  };
+  const beginTask = () => { const task = tasks[0] ?? manageable[0]; setSelectedTask(task?.id ?? ''); setTaskDone(task?.done ?? false); setTaskDialog(true); };
+  const chosenTask = manageable.find(task => task.id === selectedTask);
   const taskControlled=isInternalDeliveryTask(chosenTask);
   const dateLabel = new Date(`${today}T12:00:00`).toLocaleDateString(interfaceLocale(), { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
   return (
     <MistPage>
       <PageHeader description={!state ? uiText(loading ? '正在读取公司业务…' : '公司业务尚未读取成功，请重试。') : undefined} variant="greeting" eyebrow={uiText(`${dateLabel} · ${workspace.workspace?.name ?? '公司工作台'}`)} title={<>{uiText(greeting)}{interfaceLocale() === 'en-US' ? ', ' : '，'}<em>{myName || uiText('同事')}</em></>}
         actions={<><Segmented<'today' | 'week'> ariaLabel={uiText("时间范围")} value={range} onChange={setRange} options={[{ value: 'today', label: '今天' }, { value: 'week', label: '本周' }]} />
-          <Button icon={Plus} disabled={busy || !state} onClick={() => setTodo({ id: '', title: '', due: today, assigneeId: me, note: '' })}>{uiText("新建待办")}</Button><Button variant="primary" icon={Plus} disabled={busy || !state || !session.hasPermission('products:write')} onClick={() => go('development/new')}>{uiText("新建开发案")}</Button></>} />
+          <Button icon={Plus} disabled={busy || !state} onClick={() => openTodo()}>{uiText("新建待办")}</Button><Button variant="primary" icon={Plus} disabled={busy || !state || !session.hasPermission('products:write')} onClick={() => go('development/new')}>{uiText("新建开发案")}</Button></>} />
       {state && <SetupChecklist state={state} workspace={workspace.workspace} canAdmin={session.hasPermission('users:admin')} go={go} />}
       {(error || workspace.error) && <FailureNotice title="操作未完成" detail={error || workspace.error} retry={() => { setError(''); void workspace.refresh(); }} retryLabel="重新读取" />}
       {Object.values(hiddenStats).some(value=>!value)&&<StatGrid cols={Object.values(hiddenStats).filter(value=>!value).length}>
@@ -128,7 +141,7 @@ export function HomePage() {
           actions={<><Button variant="white" disabled={busy || !focus} iconRight={ArrowRight} onClick={() => focus && openTarget(focus.target)}>{uiText("打开事项")}</Button>{version?.qc&&<Button variant="glass" disabled={busy} icon={FileText} onClick={() => setReportVersion(version.id)}>{uiText("QC 报告")}</Button>}</>} />
         <AIBrief className="mist-col-4" icon={Sparkles} onAsk={canAI?() => openAI('请根据当前可见业务记录，整理下一步行动建议。'):undefined} items={canAI&&state?.settings.notifications.suggestions===false&&!unread.length?[{strong:'主动建议已关闭',text:'仍可手动打开小竹。',onClick:()=>openAI('请根据当前可见业务记录，整理下一步行动建议。')}]:brief} />
         <Card className="mist-col-8">
-          <CardHeader title={uiText("接着完成")} tools={<><Dropdown<'due' | 'title'> label={uiText("排序")} value={sort} onChange={setSort} options={[{ value: 'due', label: '按期限' }, { value: 'title', label: '按名称' }]} />{reviews && <Button variant="quiet" size="sm" icon={BadgeCheck} onClick={() => go('approvals')}>{uiText(waitingReviews ? `待我审批 ${waitingReviews}` : '审批与放行')}</Button>}<Button variant="quiet" size="sm" icon={SlidersHorizontal} disabled={busy || !state?.tasks.length} onClick={beginTask}>{uiText("管理任务")}</Button></>}><span className="mist-muted" style={{ fontSize: 13 }}>{taskRows.length}{uiText(" 项")}</span></CardHeader>
+          <CardHeader title={uiText("接着完成")} tools={<><Dropdown<'due' | 'title'> label={uiText("排序")} value={sort} onChange={setSort} options={[{ value: 'due', label: '按期限' }, { value: 'title', label: '按名称' }]} />{reviews && <Button variant="quiet" size="sm" icon={BadgeCheck} onClick={() => go('approvals')}>{uiText(waitingReviews ? `待我审批 ${waitingReviews}` : '审批与放行')}</Button>}<Button variant="quiet" size="sm" icon={SlidersHorizontal} disabled={busy || !manageable.length} onClick={beginTask}>{uiText("管理任务")}</Button></>}><span className="mist-muted" style={{ fontSize: 13 }}>{taskRows.length}{uiText(" 项")}</span></CardHeader>
           {loading ? <CardBody><Skeleton height={72} /><Skeleton height={72} /></CardBody> : taskRows.length ? <TaskList items={taskRows} onOpen={item => { const target = queue.find(entry => entry.id === item.id)?.target ?? tasks.find(task => task.id === item.id)?.target; if (target) openTarget(target); }} /> : <EmptyState compact title={uiText("这个时间范围没有待办")} />}
         </Card>
         <Card className="mist-col-4">
@@ -138,11 +151,10 @@ export function HomePage() {
           {!loading && !calendarWithDerived(state).some(event => event.date === day) && <EmptyState compact title={uiText("这一天没有安排")} action={<TextLink onClick={() => go('calendar',undefined,{section:day})}>{uiText("添加日程")}</TextLink>} />}
         </Card>
       </section>
-      <ModuleEditorDialog spec={todo ? { title: todo.id ? '调整待办' : '新建待办', submitLabel: '保存', fields: [{ key: 'title', label: '事项', required: true, readonly: !!todo.id && state?.tasks.find(t => t.id === todo.id)?.kind !== 'personal' }, { key: 'due', label: '期限', type: 'date', required: true }, { key: 'assigneeId', label: '负责人', type: 'select', required: true, options: memberSelectOptions(members) }, { key: 'note', label: '备注', type: 'textarea' }], initialValues: { ...todo },
-        submit: async v => { await workspace.run({ type: 'task.save', payload: { ...(todo.id ? { id: todo.id } : {}), title: String(v.title || ''), due: String(v.due || ''), assigneeId: String(v.assigneeId || ''), note: String(v.note || '') } }); toast(uiText(todo.id ? '待办已调整' : '待办已创建')); } } : null} onClose={() => setTodo(null)} />
+      <ModuleEditorDialog spec={todoSpec} onClose={()=>setTodoSpec(null)} />
       <AgentProposalDialog state={workspace.state} proposal={workspace.state?.agentProposals?.find(p => p.id === proposalId && p.state === 'pending')} onClose={() => setProposalId('')} run={(command, options) => workspace.run(command, options)} onDone={message => toast(uiText(message))} />
-      <Dialog open={taskDialog} onClose={() => setTaskDialog(false)} title={uiText("任务状态")} footer={<><Button variant="quiet" onClick={() => setTaskDialog(false)}>{uiText("关闭")}</Button>{taskControlled?<Button variant="primary" disabled={busy||!chosenTask?.target} onClick={()=>{setTaskDialog(false);if(chosenTask?.target)openTarget(chosenTask.target);}}>{uiText("打开事项")}</Button>:<Button variant="primary" disabled={busy || !chosenTask || chosenTask.done === taskDone} onClick={() => void run(async () => { await workspace.run({ type: 'task.complete', payload: { id: selectedTask, done: taskDone } }); if (alive.current && activeScope.current === scope) setTaskDialog(false); }, taskDone ? '已完成事项' : '已重新打开事项')}>{uiText("保存状态")}</Button>}</>}>
-        <FormGrid cols={1}><Field label={uiText("事项")}><Select aria-label={uiText("选择事项")} value={selectedTask} onChange={event => { const task = state?.tasks.find(item => item.id === event.target.value); setSelectedTask(event.target.value); setTaskDone(task?.done ?? false); }} options={(chosenTask && !allTasks.some(task=>task.id===chosenTask.id) ? [chosenTask, ...allTasks] : allTasks).map(task => ({ value: task.id, label: task.title }))} /></Field><Switch label={uiText("已完成")} checked={taskDone} disabled={busy||taskControlled} onChange={setTaskDone} /></FormGrid>
+      <Dialog open={taskDialog} onClose={() => setTaskDialog(false)} title={uiText("任务状态")} footer={<><Button variant="quiet" onClick={() => setTaskDialog(false)}>{uiText("关闭")}</Button>{chosenTask&&!chosenTask.done&&(chosenTask.kind==='crm-follow-up'||chosenTask.kind==='personal')&&<Button disabled={busy} onClick={()=>openTodo(chosenTask)}>{uiText("调整待办")}</Button>}{taskControlled?<Button variant="primary" disabled={busy||!chosenTask?.target} onClick={()=>{setTaskDialog(false);if(chosenTask?.target)openTarget(chosenTask.target);}}>{uiText("打开事项")}</Button>:<Button variant="primary" disabled={busy || !chosenTask || chosenTask.done === taskDone} onClick={() => void run(async () => { await workspace.run({ type: 'task.complete', payload: { id: selectedTask, done: taskDone } }); if (alive.current && activeScope.current === scope) setTaskDialog(false); }, taskDone ? '已完成事项' : '已重新打开事项')}>{uiText("保存状态")}</Button>}</>}>
+        <FormGrid cols={1}><Field label={uiText("事项")}><Select aria-label={uiText("选择事项")} value={selectedTask} onChange={event => { const task = state?.tasks.find(item => item.id === event.target.value); setSelectedTask(event.target.value); setTaskDone(task?.done ?? false); }} options={manageable.map(task => ({ value: task.id, label: task.done ? `${uiText('已完成')} · ${task.title}` : task.title }))} /></Field><Switch label={uiText("已完成")} checked={taskDone} disabled={busy||taskControlled} onChange={setTaskDone} /></FormGrid>
       </Dialog>
       <Dialog open={!!reportVersion} onClose={() => setReportVersion(null)} title={uiText(report?.qc?.report || 'QC 评审')}>
         {report?.qc ? <KeyValue items={[{ label: '版本', value: report.label }, { label: '评审人', value: report.qc.reviewer }, { label: '结论', value: ({ pass: '通过', conditional: '有保留通过', reject: '不通过' })[report.qc.result] }, { label: '评审时间', value: businessWhen(report.qc.reviewedAt) }, { label: '意见', value: report.qc.opinion }]} /> : <EmptyState compact title={uiText("此版本没有可读取的评审记录")} />}

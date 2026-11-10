@@ -16,6 +16,7 @@ import {assignFactoryLetters,defaultFactoryTask,developmentClosure,developmentRo
 import {createFulfillmentState,applyFulfillmentCommand,ensureDevelopmentQcTasks,recordDevelopmentQcOnTasks,fulfillmentCommandPermission,getFulfillmentReviews,assertProductionTransition,fulfillmentProductionFact,fulfillmentProductionColumn,type FulfillmentState,type FulfillmentCommand} from './mistFulfillment';
 import {createMarketState,applyMarketCommand,backfillQuoteLineFamilies,marketCommandPermission,getMarketReviews,type MarketState,type MarketCommand} from './mistMarket';
 import {createCrmState,applyCrmCommand,crmCommandPermission,type CrmState,type CrmCommand} from './mistCrm';
+import {crmCalendarTaskLinks} from './mistCrmCalendar';
 import {seedDemoModules,DEMO_SEED_VERSION} from './mistDemoSeed';
 import {mistBusinessDate,isCalendarDay,shiftCalendarDay,nextBusinessCode,nextSerialCode} from './mistBusinessClock';
 import {getQcConcessionReviews} from './mistQcDisposition';
@@ -318,7 +319,7 @@ export function mistOrderOwnerIds(root: Pick<MistState, 'orders'>, orderId: stri
 export type MistNotification = { recipientIds: string[]; readBy?: Record<string, string>; id: string; title: string; detail: string; at: string; readAt: string | null; target: MistTarget; category?:'qc'|'shipping'|'suggestion'|'general' };
 /** ownerId：日程归属人（mar60，只看我的）；旧日程没有时视为公司共享。 */
 /** mar60：参与人（本公司成员）、提前提醒（分钟）、重复（每周 / 每月，至结束日；读取时展开）。 */
-export type MistCalendarEvent = { id: string; title: string; date: string; time: string; note: string; target?: MistTarget; ownerId?: string; owner?: string;
+export type MistCalendarEvent = { id: string; sourceTaskId?: string; title: string; date: string; time: string; note: string; target?: MistTarget; ownerId?: string; owner?: string;
   participants?: Array<{ id: string; name: string }>; remindMinutes?: number; repeat?: { every: 'week' | 'month'; until: string } };
 export type MistCompanyProfile={legalName:string;englishName:string;address:string;englishAddress:string;registeredAddress?:string;registeredEnglishAddress?:string;phone:string;email:string;taxId:string;customsCode:string;bankName:string;bankAddress?:string;bankAccount:string;swift:string;defaultCurrency:string};
 export type MistSettings = { businessClock?: MistBusinessClock; companyProfile?:MistCompanyProfile; theme: 'light' | 'dark' | 'system'; density: 'compact' | 'default' | 'comfy'; reducedMotion: boolean; notifications: { qc: boolean; shipping: boolean; suggestions: boolean; digest: boolean }; workspaceName: string; profileName: string; profileEmail: string; locale: string; /** 仅演示公司：示例数据版本；客户端不可设置。 */ demoSeed?: { version: number; seededAt: string }; /** 开发 / 验收公司经营基线的内部版本；只由服务端种子写入。 */ companyBaseline?: { version: number; seededAt: string; dataset: string } };
@@ -1727,11 +1728,12 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       state.notifications.forEach(n => { if (context.actorId && n.recipientIds?.includes(context.actorId) && (!visible || visible.has(n.id))) (n.readBy ??= {})[context.actorId] = context.now; });
       result={};break;
     }
-    case 'task.complete': {const task=find(state.tasks,p.id,'事项');if(task.kind==='email-extraction-review')throw new MistCommandError('PRECONDITION','请在原邮件中记录处理结果');if(isInternalDeliveryTask(task))throw new MistCommandError('PRECONDITION','请在内部交付记录中办理');task.done=!!p.done;if(task.done){task.doneAt=context.now;task.doneBy=context.actorName;}else{delete task.doneAt;delete task.doneBy;}result={id:p.id};break;}
+    case 'task.complete': {const task=find(state.tasks,p.id,'事项');if(!p.done&&task.kind==='crm-follow-up'&&state.crm?.followUps.some(f=>f.nextTaskId===task.id&&f.voided))throw new MistCommandError('PRECONDITION','原跟进记录已作废，不能重开待办');if(task.kind==='email-extraction-review')throw new MistCommandError('PRECONDITION','请在原邮件中记录处理结果');if(isInternalDeliveryTask(task))throw new MistCommandError('PRECONDITION','请在内部交付记录中办理');task.done=!!p.done;if(task.done){task.doneAt=context.now;task.doneBy=context.actorName;}else{delete task.doneAt;delete task.doneBy;}result={id:p.id};break;}
     case 'calendar.save': {
-      const id=p.id||context.id();if(p.id)find(state.calendar,id,'日程');
+      const id=p.id||context.id();const existing=p.id?find(state.calendar,id,'日程'):undefined;
+      if(existing && (existing.sourceTaskId || crmCalendarTaskLinks(state).has(id)))throw new MistCommandError('PRECONDITION','请在跟进待办中调整安排');
       if(!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(p.time))throw new MistCommandError('VALIDATION','时间无效');
-      const old=state.calendar.find(e=>e.id===id),mine=p.personal===undefined?old?.ownerId:p.personal?(old?.ownerId||context.actorId):undefined;
+      const old=existing,mine=p.personal===undefined?old?.ownerId:p.personal?(old?.ownerId||context.actorId):undefined;
       if(old?.ownerId&&old.ownerId!==context.actorId){
         if(!old.participants?.some(x=>x.id===context.actorId))throw new MistCommandError('FORBIDDEN','只能修改本人或参与的个人日程',403);
         if(p.personal===false)throw new MistCommandError('FORBIDDEN','只能由本人将个人日程改为共享日程',403);
@@ -1749,7 +1751,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
     }
     case 'calendar.delete': {
       // mar59：删除日程（个人日程只能本人删）。派生的季节 / 展会日程不在 state.calendar 中，不能删。
-      const e=find(state.calendar,p.id,'日程');if(e.ownerId&&e.ownerId!==context.actorId)throw new MistCommandError('FORBIDDEN','只能删除本人的个人日程',403);
+      const e=find(state.calendar,p.id,'日程');if(e.sourceTaskId||crmCalendarTaskLinks(state).has(e.id))throw new MistCommandError('PRECONDITION','请在原跟进记录或待办中处理');if(e.ownerId&&e.ownerId!==context.actorId)throw new MistCommandError('FORBIDDEN','只能删除本人的个人日程',403);
       state.calendar=state.calendar.filter(x=>x.id!==e.id);result={id:e.id};break;
     }
     case 'task.save': {
@@ -1757,6 +1759,10 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const old=p.id?find(state.tasks,p.id,'事项'):undefined;if(old?.done)throw new MistCommandError('PRECONDITION','已完成的事项请先重开');if(old?.kind==='email-extraction-review')throw new MistCommandError('PRECONDITION','请在原邮件中记录处理结果');if(old&&isInternalDeliveryTask(old))throw new MistCommandError('PRECONDITION','请在内部交付记录中办理');
       const assignee=p.assigneeId?resolveMember(context,p.assigneeId,'负责人'):{id:context.actorId||'',name:context.actorName};
       const due=date(p.due),note=text(p.note||'','备注',false,1000);
+      if(old?.kind==='crm-follow-up'){
+        // Bind an unambiguous old appointment before its original assignee is changed.
+        const links=crmCalendarTaskLinks(state);for(const e of state.calendar)if(links.get(e.id)?.id===old.id)e.sourceTaskId=old.id;
+      }
       if(old){if(old.kind==='personal')old.title=text(p.title,'事项',true,200);old.due=due;old.assigneeIds=assignee.id?[assignee.id]:old.assigneeIds;if(note)old.note=note;event(state,context,'task',old.id,`调整事项 ${old.title}：${due}${assignee.name?' · '+assignee.name:''}${note?' · '+note:''}`);notifyMist(state,context,{title:'指派事项 '+old.title,detail:context.actorName,target:old.target},[assignee.id]);result={id:old.id};}
       else{const id=context.id();state.tasks.unshift({id,title:text(p.title,'事项',true,200),due,done:false,kind:'personal',target:p.target||{view:'cockpit'},assigneeIds:assignee.id?[assignee.id]:[],...(note?{note}:{})});notifyMist(state,context,{title:'指派事项 '+text(p.title,'事项',true,200),detail:context.actorName,target:p.target||{view:'cockpit'}},[assignee.id]);result={id};}
       break;

@@ -42,6 +42,8 @@
 | 业务阶段 | 页面 | 规则真源 |
 |---|---|---|
 | 首页待办、审批、通知 | `HomePage.tsx`、`ApprovalsPage.tsx`、`NotificationsPage.tsx` | `mistReview.ts`、`mistTeam.ts`；派生在 `app/runtime/workQueue.ts` |
+| 业务日历与跟进 | `CalendarPage.tsx`、`HomePage.tsx` | `mistCrm.ts#scheduleCrmFollowUp` 记录待办 ID；`mistCrmCalendar.ts#currentCrmCalendar` 随待办改期、改派、完成、重开与作废读取，之后再按公司、个人与来源权限裁剪。旧独立记录只有原始字段双方唯一匹配才联动，歧义不合并。 |
+| 客户销售额与资金月报 | `modules/PlatformReports.tsx` | `buildCustomerSales` 按生效外部合同及所选业务日筛订单，`mistFinanceReports.ts#monthlyFinanceSummary` 按实际收付款日期分币种；导出使用当前筛选行。 |
 | 客户、联系人、CRM | `CustomerPage.tsx`、`CustomerRelations.tsx` | `mistMarket.ts`、`mistCrm.ts`、`mistRelationHold.ts` |
 | 供应商与收款账户 | `modules/SuppliersPage.tsx` | `mistMarket.ts`、`mistSupplierStatus.ts` |
 | 开发、轮次、样品 | `DevListPage.tsx`、`DevDetailPage.tsx`、`DevRounds.tsx`、`modules/SamplesPage.tsx` | `mistDevelopmentDomain.ts`、`mistDevelopmentRounds.ts`、`mistDevelopmentSamples.ts`、`mistDevelopmentBilling.ts`、`mistSampleSending.ts` |
