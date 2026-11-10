@@ -53,7 +53,8 @@ const configured = (): NodeJS.ProcessEnv => ({ MIST_MAIL_GOOGLE_CLIENT_ID: 'goog
   MIST_MAIL_MICROSOFT_CLIENT_SECRET: 'microsoft-secret', MIST_MAIL_CREDENTIAL_KEY: 'k'.repeat(48), MIST_MAIL_CREDENTIAL_DIR: path.join(directory, 'mail-credentials'), MIST_MAIL_OAUTH_ORIGIN: ORIGIN });
 async function setup(env: NodeJS.ProcessEnv = configured()) {
   const oauth = new MistMailOAuthProvider(env, { fetch: fakeFetch, keys: () => async () => key.publicKey });
-  const local = createMistLocalRuntime({ directory }), app = createMistServer(undefined, { local, mailResolve: async () => ['203.0.113.10'], mailTransport: fakeTransport(), mailOAuth: oauth });
+  const transport = fakeTransport();
+  const local = createMistLocalRuntime({ directory }), app = createMistServer(undefined, { local, mailResolve: async () => ['203.0.113.10'], mailTransport: transport, mailOAuth: oauth });
   const owner = request.agent(app); await owner.get('/api/mist/session').expect(200);
   let ws = (await owner.get(W + 'default').expect(200)).body.workspace;
   const latest = async (client = owner) => (ws = (await client.get(W + ws.id).expect(200)).body.workspace);
@@ -82,7 +83,7 @@ async function setup(env: NodeJS.ProcessEnv = configured()) {
   };
   const accounts = async () => (await latest()).state.email.accounts.filter((a: any) => !a.example) as any[];
   const vault = async () => { const dir = path.join(directory, 'mail-credentials', ws.id); return (await fs.readdir(dir).catch(() => [] as string[])).filter(name => name.endsWith('.json')); };
-  return { app, oauth, owner, get ws() { return ws; }, latest, command, start, grant, callback, outcome, connect, accounts, vault };
+  return { app, oauth, transport, owner, get ws() { return ws; }, latest, command, start, grant, callback, outcome, connect, accounts, vault };
 }
 
 describe('邮箱 OAuth 连接（服务端全链路）', () => {
@@ -186,6 +187,17 @@ describe('邮箱 OAuth 连接（服务端全链路）', () => {
     expect(bounce.text).toContain('bounce=1'); expect(bounce.text).not.toContain('<script'); expect(bounce.text).not.toContain('bad'); expect(bounce.headers['content-security-policy']).toBe("default-src 'none'");
     await request(t.app).get(CALLBACK + 'google').query({ state: stolen.state, code: 'one-time-code', bounce: '1' }).expect(401);
     expect(await t.accounts()).toHaveLength(0); expect(await t.vault()).toEqual([]); expect(seen).toEqual([]);
+  });
+
+  it.each([
+    ['imap', 'ETIMEDOUT', 'MAIL_OAUTH_IMAP_UNAVAILABLE'],
+    ['smtpVerify', 'ESOCKET', 'MAIL_OAUTH_SMTP_UNAVAILABLE'],
+    ['smtpVerify', 'CERT_HAS_EXPIRED', 'MAIL_TLS_UNTRUSTED'],
+  ] as const)('returns a safe connection error for %s at %s', async (method, code, expected) => {
+    const t = await setup();
+    vi.spyOn(t.transport, method).mockRejectedValueOnce(Object.assign(new Error('private provider response'), { code }));
+    expect(await t.connect('google', 'owner@example.test')).toMatchObject({ status: 'failed', accountId: null, code: expected });
+    expect(await t.vault()).toEqual([]); expect(await t.accounts()).toHaveLength(0);
   });
 
   it('收信或发信登录未通过、权限不全时不保存授权也不建邮箱', async () => {

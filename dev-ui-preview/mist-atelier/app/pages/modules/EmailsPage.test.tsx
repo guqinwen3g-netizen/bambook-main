@@ -350,10 +350,14 @@ it('leaves only for the official provider page and keeps the message being writt
   leave.mockRestore();
 });
 it('keeps password fields out of an existing Gmail account before its first authorization',async()=>{
-  providersOn(); store.state=oauthState(); delete store.state.email.accounts.find((a:any)=>a.id==='acc-gmail')!.oauth;
+  providersOn(); store.state=oauthState();
+  const legacy = store.state.email.accounts.find((a:any)=>a.id==='acc-gmail')!;
+  delete legacy.oauth; legacy.credentialSet=false;
+  legacy.lastError = { code: 'MAIL_AUTH_FAILED', message: '收信服务器拒绝登录：用户名或密码不正确', at: ctx.now };
   render(); await click(button('邮箱账号')!); await flush();
   const card=document.querySelector('[data-email-account="acc-gmail"]')!;
   expect(card.textContent).toContain('连接 Gmail');
+  expect(card.textContent).not.toMatch(/密码不正确|绑定邮箱凭据|imap\.gmail\.com/);
   expect([...card.querySelectorAll('button')].some(b=>b.textContent?.includes('绑定凭据'))).toBe(false);
   await click([...card.querySelectorAll('button')].find(b=>b.textContent?.trim()==='修改设置')!);
   expect(document.querySelector('[aria-label="密码或授权码"]')).toBeNull();
@@ -403,7 +407,12 @@ it.each([['connected','acc-real','邮箱连接结果未确认，请在邮箱账�
   expect(document.body.textContent).toContain(message);expect(document.body.textContent).not.toContain('已连接 me@gmail.com');expect(document.body.textContent).not.toContain('已连接 sales@sylway.cloud');
   expect(document.body.textContent).toContain('邮箱账号');expect(window.location.search).toBe('?view=emails');
 });
-it('shows the specific reason when the provider returned a different mailbox',async()=>{
-  store.state=oauthState();window.history.replaceState(null,'','/?view=emails&mailConnect=failed&mailConnectCode=MAIL_OAUTH_ADDRESS_MISMATCH');render();await flush();
-  expect(document.body.textContent).toContain('授权的邮箱与当前邮箱不一致，请选择原邮箱');
+it.each([
+  ['MAIL_OAUTH_ADDRESS_MISMATCH', '授权的邮箱与当前邮箱不一致，请选择原邮箱'],
+  ['MAIL_OAUTH_SMTP_UNAVAILABLE', '无法连接发信服务器，请联系平台管理员'],
+  ['MAIL_OAUTH_IMAP_UNAVAILABLE', '无法连接收信服务器，请联系平台管理员'],
+  ['MAIL_TLS_UNTRUSTED', '邮箱服务器证书验证失败，请联系平台管理员'],
+])('shows the appropriate recovery for %s', async (code, message) => {
+  store.state=oauthState();window.history.replaceState(null,'','/?view=emails&mailConnect=failed&mailConnectCode='+code);render();await flush();
+  expect(document.body.textContent).toContain(message);
 });

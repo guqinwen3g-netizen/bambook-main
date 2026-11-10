@@ -22,12 +22,21 @@ export function mailOAuthProvider(account: EmailAccount): EmailOAuthProvider | u
   if (host === 'outlook.office365.com' || host === 'imap-mail.outlook.com') return 'microsoft';
   return undefined;
 }
+export function mailConnectionError(account: EmailAccount, error?: { code: string; message: string } | null): string {
+  if (error?.code === 'MAIL_AUTH_FAILED' && mailOAuthProvider(account)) {
+    return account.credentialSet ? '邮箱服务商拒绝登录，请重新连接' : '';
+  }
+  return error?.message || '';
+}
 export function mailOAuthOutcome(): { status: 'connected' | 'cancelled' | 'failed'; accountId: string; message: string } | null {
   const query = new URLSearchParams(window.location.search), status = query.get('mailConnect');
   if (status !== 'connected' && status !== 'cancelled' && status !== 'failed') return null;
   const messages: Record<string, string> = {
     MAIL_OAUTH_STATE_INVALID: '连接已过期或登录已变化，请重新连接', MAIL_OAUTH_SCOPE_MISSING: '收信或发信权限未授权，请重新连接',
     MAIL_OAUTH_IDENTITY_INVALID: '邮箱身份验证失败，请重新连接', MAIL_OAUTH_ADDRESS_MISMATCH: '授权的邮箱与当前邮箱不一致，请选择原邮箱',
+    MAIL_OAUTH_IMAP_UNAVAILABLE: '无法连接收信服务器，请联系平台管理员',
+    MAIL_OAUTH_SMTP_UNAVAILABLE: '无法连接发信服务器，请联系平台管理员',
+    MAIL_TLS_UNTRUSTED: '邮箱服务器证书验证失败，请联系平台管理员',
     MAIL_OAUTH_RECONNECT: '邮箱授权已失效，请重新连接', MAIL_HOST_NOT_ALLOWED: '邮箱服务商连接受限，请联系平台管理员', FORBIDDEN: '当前账号无权连接此邮箱',
   };
   return { status, accountId: query.get('mailAccount') || '', message: status === 'cancelled' ? '已取消邮箱连接' : status === 'failed' ? messages[query.get('mailConnectCode') || ''] || '邮箱连接未完成，请重试' : '' };

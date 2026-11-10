@@ -13,7 +13,7 @@ import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { takeComposeIntent } from '../../runtime/composeIntent';
 import { saveMailOAuthDraft, takeMailOAuthDraft } from '../../runtime/mailOAuthDraft';
-import { MailOAuthChoices, clearMailOAuthOutcome, mailOAuthOutcome, mailOAuthProvider, useMailOAuth } from './MailOAuth';
+import { MailOAuthChoices, clearMailOAuthOutcome, mailConnectionError, mailOAuthOutcome, mailOAuthProvider, useMailOAuth } from './MailOAuth';
 import { Events } from './fulfillmentKit';
 import { ActionBar, BUSINESS_TZ, DetailBlock, DetailBody, DetailSurface, shortWhen, todayIso, useCompactLayout, type ReasonedAction } from './pageKit';
 import { FileName } from '../../runtime/files';
@@ -674,11 +674,12 @@ function AccountsDrawer({ state, me, can, canAdmin, locked, run, mail, notice = 
     </div>
     : state.email.accounts.length ? <div className="mist-col" style={{ gap: 12 }}>{state.email.accounts.map(a => {
       const c = connectionLabel(a), owner = !a.example && (!me || a.ownerId === me), provider = mailOAuthProvider(a), providerReason = provider ? oauth.reason(provider) : '';
+      const lastError = mailConnectionError(a, a.lastError);
       return <Card key={a.id} className="mist-col" style={{ gap: 8 }} data-email-account={a.id}>
         <div className="mist-row" style={{ flexWrap: 'wrap' }}><b>{a.displayName}</b><small className="mist-muted">{a.address}</small><span className="mist-spacer" /><Pill>{uiText(a.kind === 'shared' ? '共享邮箱' : '个人邮箱')}</Pill><Pill tone={c.tone}>{uiText(c.label)}</Pill></div>
-        {a.lastError && <span className="mist-note" data-tone="bad">{a.lastError.message}（{when(a.lastError.at)}）</span>}
+        {a.lastError && lastError && <span className="mist-note" data-tone="bad">{uiText(lastError)}（{when(a.lastError.at)}）</span>}
         {(a.folders || []).filter(row => row.error).map(row => <span key={row.remote} className="mist-note">{row.remote}：{row.error}</span>)}
-        <small className="mist-muted">{uiText(a.example ? '演示公司合成数据，不连接服务器' : `接入人 ${a.ownerName}${a.kind === 'shared' ? ` · 成员 ${a.memberNames.join('、') || '无'}` : ''}${a.transport ? ` · ${a.transport.imapHost}:${a.transport.imapPort} / ${a.transport.smtpHost}:${a.transport.smtpPort}` : ''}`)}</small>
+        <small className="mist-muted">{uiText(a.example ? '演示公司合成数据，不连接服务器' : `接入人 ${a.ownerName}${a.kind === 'shared' ? ` · 成员 ${a.memberNames.join('、') || '无'}` : ''}${!provider && a.transport ? ` · ${a.transport.imapHost}:${a.transport.imapPort} / ${a.transport.smtpHost}:${a.transport.smtpPort}` : ''}`)}</small>
         <MailReceivingControl account={a} control={receiving} locked={locked}/>
         {owner && can && (!provider && binding?.id === a.id
           ? <div className="mist-row" style={{ flexWrap: 'wrap' }}><TextInput aria-label={ui`${a.displayName} 密码或授权码`} type="password" autoComplete="new-password" value={binding.password} onChange={event => setBinding({ id: a.id, password: event.target.value })} /><Button onClick={() => setBinding(null)}>{uiText("取消")}</Button><Button variant="primary" disabled={locked || !binding.password} onClick={() => void attempt(() => mail({ kind: 'bind', accountId: a.id, password: binding.password }), '凭据验证通过，已绑定').then(ok => { if (ok) setBinding(null); })}>{uiText("验证并绑定")}</Button></div>

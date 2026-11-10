@@ -3,6 +3,7 @@ import { Banner, Button, Pill, Switch } from '../../../../../components/mist';
 import { uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { useMistSession } from '../../runtime/auth';
 import { mistApiRequest, useMistWorkspace } from '../../runtime/workspace';
+import { mailConnectionError, mailOAuthProvider } from './MailOAuth';
 import type { EmailAccount } from '../../../../../server/src/shared/mistEmail';
 import type { MailReceivingPage, MailReceivingView } from '../../../../../server/src/shared/mistMailReceiving';
 
@@ -70,11 +71,12 @@ export function MailReceivingNotice({ control }: { control: ReturnType<typeof us
 export function MailReceivingControl({ account, control, locked }: { account: EmailAccount; control: ReturnType<typeof useMailReceiving>; locked: boolean }) {
   if (!control.available || account.example) return null;
   const row = control.page.items.find(r => r.accountId === account.id), pending = control.pending?.accountId === account.id;
+  const error = mailConnectionError(account, row?.error);
   const disabled = locked || control.busy || !!control.pending || !row || (row.enabled ? !row.canDisable : !row.canEnable || !control.page.serviceAvailable);
   return <div className="mist-col" data-gap="sm">
     <div className="mist-row" data-wrap><span>{uiText('自动收件')}</span><Switch ariaLabel={account.displayName + ' ' + uiText('自动收件')} checked={row?.enabled ?? false} disabled={disabled} onChange={enabled => control.toggle(account, enabled)} /><Pill tone={row?.state === 'blocked' || row?.state === 'retrying' ? 'warn' : 'neutral'}>{uiText(pending ? '待核对' : !row ? '正在读取' : !control.page.serviceAvailable ? '收件服务未运行' : labels[row.state])}</Pill></div>
     {row?.lastSuccessAt && <span className="mist-note">{uiText('最近收件')} {time(row.lastSuccessAt)}{row.pending ? ` · ${uiText('待收取')} ${row.pending}` : ''}</span>}
-    {row?.error && <span className="mist-note" data-tone="warn">{uiText(row.error.message)}</span>}
-    {!account.credentialSet && <span className="mist-note">{uiText('请先绑定邮箱凭据')}</span>}
+    {error && <span className="mist-note" data-tone="warn">{uiText(error)}</span>}
+    {!account.credentialSet && !mailOAuthProvider(account) && <span className="mist-note">{uiText('请先绑定邮箱凭据')}</span>}
   </div>;
 }

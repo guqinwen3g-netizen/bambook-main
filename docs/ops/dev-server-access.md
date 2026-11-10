@@ -139,11 +139,11 @@ magpie 暂不登录订阅。平台 AI（小竹、报价审阅、汇总、对账�
 - 密钥：本机回环来的请求不带网关密钥也能调用，安全边界是只监听回环；网关密钥用于按调用方区分用量和设限额（`magpie gateway-key limit`）。
 - 备份：`/var/lib/magpie` 暂未纳入每日备份；接入正式订阅后再加入。
 
-
+## 邮箱接入
 
 Google 与 Microsoft 邮箱由平台各注册一次 Web OAuth 应用。服务端设置 `MIST_MAIL_OAUTH_ORIGIN` 为当前公司入口的完整 origin，并配置对应的 `MIST_MAIL_GOOGLE_CLIENT_ID / CLIENT_SECRET` 或 `MIST_MAIL_MICROSOFT_CLIENT_ID / CLIENT_SECRET`（各变量均带同一服务商前缀）。同时设置下方凭据目录与加密密钥。回调分别登记为该 origin 加 `/api/mist/email/oauth/callback/google` 或 `/api/mist/email/oauth/callback/microsoft`。测试应用的用户范围仅含受邀测试人。Google 申请 IMAP/SMTP 邮箱权限；Microsoft 应用需支持个人账号与组织账号，并使用 Exchange Online 的委托权限 IMAP.AccessAsUser.All、SMTP.Send 与 offline_access。[Google 网页授权](https://developers.google.com/identity/protocols/oauth2/web-server) · [Microsoft 邮箱委托权限](https://learn.microsoft.com/en-us/exchange/client-developer/legacy-protocols/how-to-authenticate-an-imap-pop-smtp-application-by-using-oauth)
 
-桌面沿用同一已登记回调。系统浏览器只将结果带回发起电脑的临时回环端口，应用在原公司会话中完成验证。代理和访问日志应省略回调查询串。私有验收运行可通过 `MIST_MAIL_NEW_ONLY_ADDRESSES` 指定逗号分隔的测试邮箱；连接时按文件夹记录 UID 起点，首次同步从起点之后读取。文件夹新增或 UIDVALIDITY 变化时重新取起点。既有连接重连保留同一代的进度。
+桌面沿用同一已登记回调。系统浏览器只将结果带回发起电脑的临时回环端口，应用在原公司会话中完成验证。入口代理的回调访问日志只记录路径、方法、状态等信息。新装环境使用部署脚本中的专用日志格式；现有代理需在启用服务商前应用同样的配置，检查日志不含查询参数。私有验收运行可通过 `MIST_MAIL_NEW_ONLY_ADDRESSES` 指定逗号分隔的测试邮箱；连接时按文件夹记录 UID 起点，首次同步从起点之后读取。文件夹新增或 UIDVALIDITY 变化时重新取起点。既有连接重连保留同一代的进度。
 
 公司在智能邮箱填写 IMAP/SMTP 地址后，服务端按 `mist/mail/service.ts#checkHosts` 校验。`MIST_MAIL_ALLOWED_HOSTS` 非空时默认是严格白名单，未登记的公网主机也会被拒绝；为空时允许标准端口（143/465/587/993）的公网主机。`MIST_MAIL_ALLOW_PUBLIC_HOSTS=1` 模式用于让白名单内的验收邮箱与租户公网邮箱并存，仅字面量 `1` 开启；未配置、`0` 或 `true` 均不会放宽非空白名单。生产开通前须单独确认接入与收件域范围，缺省仍保留严格限制。公网路径必须检查全部解析结果并钉住实际连接地址，TLS 证书按原主机名校验；回环、私网、链路本地（含云元数据 169.254.169.254）、CGNAT、基准测试、组播或 IPv6 内部地址均拒绝，混合公网/内网结果也拒绝。显式列入运维白名单的主机保持现有受信连接规则；该名单不是允许任意内网的通配授权。公网模式不改变 TLS 例外名单、收件域白名单或本人确认发送规则。
 

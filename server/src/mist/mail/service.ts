@@ -169,7 +169,14 @@ export class MistMailService {
           }
         } finally { await imap.close(); }
         stage = 'smtp'; await this.smtpVerify(candidate, target, secret);
-      } catch (error) { const reason = describeMailError(error, stage); return fail(reason.code, reason.message, 422); }
+      } catch (error) {
+        const reason = describeMailError(error, stage);
+        if (reason.code === 'MAIL_CONNECT_FAILED' || reason.code === 'MAIL_TIMEOUT') {
+          const networkCode = stage === 'smtp' ? 'MAIL_OAUTH_SMTP_UNAVAILABLE' : 'MAIL_OAUTH_IMAP_UNAVAILABLE';
+          return fail(networkCode, reason.message, 422);
+        }
+        return fail(reason.code, reason.message, 422);
+      }
       const credentialId = randomUUID();
       try {
         await this.credentials.save(flow.workspaceId, credentialId, secret);

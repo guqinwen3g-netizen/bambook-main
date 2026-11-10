@@ -68,8 +68,10 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
     // 本机会话 Cookie 为 SameSite=Strict：服务商跳回属于跨站导航，浏览器不带会话。先在本机地址内原样再导航一次，
     // 第二次请求才进入回调；这一步不读取、不保存任何授权参数，回调仍由请求 Cookie 与 state 校验。
     app.get('/api/mist/email/oauth/callback/:provider',(req,res,next)=>{
-      const desktopReturn = typeof req.query.state === 'string' && req.query.state.startsWith('desktop.') && req.query.finish === undefined;
-      if(desktopReturn||req.query.bounce!==undefined||req.headers['sec-fetch-site']!=='cross-site'&&req.cookies?.bambook_mist_local!==undefined){next();return;}
+      // Electron sends the final request inside the original window. A missing session there must go to authentication.
+      const desktopFlow = typeof req.query.state === 'string' && req.query.state.startsWith('desktop.');
+      const hasSameSiteSession = req.headers['sec-fetch-site'] !== 'cross-site' && req.cookies?.bambook_mist_local !== undefined;
+      if (desktopFlow || req.query.bounce !== undefined || hasSameSiteSession) return next();
       const query=new URLSearchParams();
       for(const [name,value] of Object.entries(req.query))if(typeof value==='string'&&value.length<=8192&&/^[a-z_]{1,40}$/.test(name))query.set(name,value);
       query.set('bounce','1');

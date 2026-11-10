@@ -413,7 +413,7 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
       else accountId = (await mail.connectOAuth(actor(req), flow, req.query.code)).accountId;
     } catch (error: any) {
       status = 'failed';
-      const allowed = new Set(['MAIL_OAUTH_STATE_INVALID', 'MAIL_OAUTH_SCOPE_MISSING', 'MAIL_OAUTH_IDENTITY_INVALID', 'MAIL_OAUTH_ADDRESS_MISMATCH', 'MAIL_OAUTH_RECONNECT', 'MAIL_HOST_NOT_ALLOWED', 'FORBIDDEN']);
+      const allowed = new Set(['MAIL_OAUTH_STATE_INVALID', 'MAIL_OAUTH_SCOPE_MISSING', 'MAIL_OAUTH_IDENTITY_INVALID', 'MAIL_OAUTH_ADDRESS_MISMATCH', 'MAIL_OAUTH_RECONNECT', 'MAIL_HOST_NOT_ALLOWED', 'MAIL_OAUTH_IMAP_UNAVAILABLE', 'MAIL_OAUTH_SMTP_UNAVAILABLE', 'MAIL_TLS_UNTRUSTED', 'FORBIDDEN']);
       code = allowed.has(error?.code) ? error.code : 'MAIL_OAUTH_FAILED';
     }
     const target = new URL('/', origin); target.searchParams.set('view', 'emails'); target.searchParams.set('mailConnect', status);
