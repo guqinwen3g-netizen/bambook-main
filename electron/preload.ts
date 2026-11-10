@@ -27,6 +27,13 @@ contextBridge.exposeInMainWorld('bambook', {
 // frameless window. Each method is a thin wrapper around the matching
 // ipcMain.handle in electron/main.ts. Kept separate from the `bambook`
 // namespace so the surface area is obvious during security review.
+contextBridge.exposeInMainWorld('bambookMailOAuth', {
+    prepare: (provider: string) => ipcRenderer.invoke('mail-oauth:prepare', provider),
+    open: (id: string, url: string) => ipcRenderer.invoke('mail-oauth:open', id, url),
+    finish: (id: string) => ipcRenderer.invoke('mail-oauth:finish', id),
+    cancel: (id: string) => ipcRenderer.invoke('mail-oauth:cancel', id),
+});
+
 contextBridge.exposeInMainWorld('bambookWindow', {
     setTrafficLights: (visible: boolean) =>
         ipcRenderer.invoke('window:set-traffic-lights', visible),

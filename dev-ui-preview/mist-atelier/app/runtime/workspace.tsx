@@ -54,7 +54,7 @@ export interface MistWorkspaceContext {
   closeMailReview?:()=>Promise<void>;
 }
 export type MistMailAction =
-  | { kind: 'oauthStart'; provider: 'google' | 'microsoft'; accountId?: string }
+  | { kind: 'oauthStart'; provider: 'google' | 'microsoft'; accountId?: string; desktopPort?: number }
   | { kind: 'bind'; accountId: string; password: string }
   | { kind: 'disconnect'; accountId: string }
   | { kind: 'sync'; accountId: string }
@@ -496,7 +496,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
     if(pendingCreateRef.current)throw new RequestError(createNotice(pendingCreateRef.current));
     if(pendingRef.current)throw new RequestError('存在待核对的操作，请先核对原请求结果');
     const ws=encodeURIComponent(boundWorkspaceId!),id=(value:string)=>encodeURIComponent(value);
-    const call:{path:string;method:string;body?:unknown}=action.kind==='oauthStart'?{path:'oauth/start',method:'POST',body:{provider:action.provider,...(action.accountId?{accountId:action.accountId}:{})}}:action.kind==='bind'?{path:'accounts/'+id(action.accountId)+'/credential',method:'PUT',body:{password:action.password}}
+    const call:{path:string;method:string;body?:unknown}=action.kind==='oauthStart'?{path:'oauth/start',method:'POST',body:{provider:action.provider,...(action.desktopPort?{desktopPort:action.desktopPort}:{}),...(action.accountId?{accountId:action.accountId}:{})}}:action.kind==='bind'?{path:'accounts/'+id(action.accountId)+'/credential',method:'PUT',body:{password:action.password}}
       :action.kind==='disconnect'?{path:'accounts/'+id(action.accountId)+'/credential',method:'DELETE'}
       :action.kind==='sync'?{path:'accounts/'+id(action.accountId)+'/sync',method:'POST',body:{}}
       :action.kind==='analyze'?{path:'messages/'+id(action.messageId)+'/analyze',method:'POST',body:{consent:action.consent}}

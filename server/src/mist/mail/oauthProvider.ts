@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createRemoteJWKSet, EncryptJWT, jwtDecrypt, jwtVerify, type JWTVerifyGetKey } from 'jose';
@@ -85,8 +85,30 @@ export class MistMailOAuthProvider {
     if (!value || value.length < 32) fail('MAIL_OAUTH_NOT_CONFIGURED', '平台尚未配置邮箱连接', 503);
     return createHash('sha256').update('bambook-mail-oauth-state\0').update(value!).digest();
   }
-  async start(input: Pick<MailOAuthFlow, 'provider' | 'userId' | 'sessionId' | 'workspaceId' | 'accountId'>) {
-    const config = this.settings(input.provider), flow: MailOAuthFlow = { ...input, state: opaque(), verifier: opaque(), nonce: opaque() };
+  private desktopSignature(provider: MailOAuthProvider, value: string) {
+    return createHmac('sha256', this.cookieKey()).update(provider + '/' + value).digest('base64url');
+  }
+  desktopReturn(provider: MailOAuthProvider, state: string, code: unknown, error: unknown) {
+    const match = /^(desktop\.(\d{4,5})\.(\d{10})\.[\w-]{43})\.([\w-]{43})$/.exec(state);
+    if (!match || Number(match[2]) < 1024 || Number(match[2]) > 65535 || Number(match[3]) <= this.now() / 1000 ||
+      !equal(match[4], this.desktopSignature(provider, match[1]))) return fail('MAIL_OAUTH_STATE_INVALID', '邮箱连接已过期，请重新连接', 400);
+    // Only a locally allocated port can vary. The host, path, provider and expiry are fixed or authenticated.
+    const target = new URL('http://127.0.0.1:' + match[2] + '/mail/oauth/' + provider);
+    target.searchParams.set('state', state);
+    if (typeof error === 'string' && error) target.searchParams.set('error', error === 'access_denied' ? error : 'failed');
+    else if (typeof code === 'string' && code && code.length <= 8192) target.searchParams.set('code', code);
+    else return fail('MAIL_OAUTH_FAILED', '邮箱授权未完成，请重新连接', 400);
+    return target.toString();
+  }
+  async start(input: Pick<MailOAuthFlow, 'provider' | 'userId' | 'sessionId' | 'workspaceId' | 'accountId'>, desktopPort?: number) {
+    const config = this.settings(input.provider);
+    let state = opaque();
+    if (desktopPort !== undefined) {
+      if (!Number.isSafeInteger(desktopPort) || desktopPort < 1024 || desktopPort > 65535) return fail('INVALID_INPUT', '桌面回程端口无效', 400);
+      const value = ['desktop', desktopPort, Math.floor(this.now() / 1000) + 600, state].join('.');
+      state = value + '.' + this.desktopSignature(input.provider, value);
+    }
+    const flow: MailOAuthFlow = { ...input, state, verifier: opaque(), nonce: opaque() };
     const url = new URL(PROVIDERS[input.provider].authorization);
     const values = { client_id: config.clientId, redirect_uri: config.redirectUri, response_type: 'code', scope: PROVIDERS[input.provider].scopes.join(' '),
       state: flow.state, nonce: flow.nonce, code_challenge: createHash('sha256').update(flow.verifier).digest('base64url'), code_challenge_method: 'S256',

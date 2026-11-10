@@ -6,6 +6,11 @@ import type { EmailAccount, EmailOAuthProvider } from '../../../../../server/src
 import { mistApiRequest, useMistWorkspace, type MistMailAction, type MistMailResult } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 
+type DesktopMail = {
+  prepare(provider: EmailOAuthProvider): Promise<{ id: string; port: number }>;
+  open(id: string, url: string): Promise<void>; finish(id: string): Promise<void>; cancel(id: string): Promise<void>;
+};
+const desktopWindow = () => window as Window & { bambook?: { versions?: { electron?: string } }; bambookMailOAuth?: DesktopMail };
 type Provider = { provider: EmailOAuthProvider; available: boolean; reason: string };
 const LABELS = { google: '连接 Gmail', microsoft: '连接 Outlook' } as const;
 /** The only place that leaves the app for a provider page. */
@@ -35,7 +40,10 @@ export function useMailOAuth(can: boolean, mail: (action: MistMailAction) => Pro
   const { workspace } = useMistWorkspace(), session = useMistSession(), workspaceId = workspace?.id;
   const scope = session.sessionKey + ':' + workspaceId, live = React.useRef(scope); live.current = scope;
   const [providers, setProviders] = React.useState<Provider[]>([]), [error, setError] = React.useState(''), [loading, setLoading] = React.useState(false), [busy, setBusy] = React.useState(false);
-  const connecting = React.useRef(false), request = React.useRef(0), mounted = React.useRef(false);
+  const active = React.useRef<AbortController | null>(null), keepDraft = React.useRef(beforeConnect);
+  keepDraft.current = beforeConnect;
+  React.useEffect(() => { setBusy(false); return () => { active.current?.abort(); active.current = null; }; }, [scope, can]);
+  const request = React.useRef(0), mounted = React.useRef(false);
   React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; ++request.current; }; }, []);
   const load = React.useCallback(async (signal?: AbortSignal) => {
     if (!can || !workspaceId) return;
@@ -49,20 +57,35 @@ export function useMailOAuth(can: boolean, mail: (action: MistMailAction) => Pro
     finally { if (!signal?.aborted && live.current === scope && serial === request.current) setLoading(false); }
   }, [can, workspaceId, scope]);
   React.useEffect(() => { const abort = new AbortController(); void load(abort.signal); return () => abort.abort(); }, [load]);
-  const reason = (provider: EmailOAuthProvider) => !can ? '需要邮件权限' : loading ? '正在读取邮箱连接设置' : error ? '无法读取邮箱连接设置' : providers.find(p => p.provider === provider)?.available ? '' : providers.find(p => p.provider === provider)?.reason || '平台尚未配置邮箱连接';
+  const needsUpdate = !!desktopWindow().bambook?.versions?.electron && !desktopWindow().bambookMailOAuth;
+  const reason = (provider: EmailOAuthProvider) => needsUpdate ? '请更新 Bambook 桌面版或在网页版连接邮箱' : !can ? '需要邮件权限' : loading ? '正在读取邮箱连接设置' : error ? '无法读取邮箱连接设置' : providers.find(p => p.provider === provider)?.available ? '' : providers.find(p => p.provider === provider)?.reason || '平台尚未配置邮箱连接';
   const connect = async (provider: EmailOAuthProvider, accountId?: string) => {
-    if (connecting.current) return;
+    if (active.current) return;
     const blocked = reason(provider); if (blocked) throw new Error(blocked);
-    connecting.current = true; setBusy(true);
+    const controller = new AbortController(); active.current = controller; setBusy(true);
+    const desktop = desktopWindow().bambookMailOAuth;
+    const current = () => !controller.signal.aborted && mounted.current && live.current === scope;
+    let ticket: { id: string; port: number } | undefined;
+    const cancel = () => { if (desktop && ticket) void desktop.cancel(ticket.id).catch(() => undefined); };
     try {
-      const result = await mail({ kind: 'oauthStart', provider, ...(accountId ? { accountId } : {}) });
-      if (!mounted.current || live.current !== scope) throw new Error('登录或公司已变化，请重新连接');
+      if (desktop) {
+        ticket = await desktop.prepare(provider);
+        if (!current()) return;
+        controller.signal.addEventListener('abort', cancel, { once: true });
+      }
+      const result = await mail({ kind: 'oauthStart', provider, ...(ticket ? { desktopPort: ticket.port } : {}), ...(accountId ? { accountId } : {}) });
+      if (!current()) return;
       let url: URL;
       try { url = new URL(result.oauth?.authorizationUrl || ''); } catch { throw new Error('邮箱授权地址无效'); }
       const expected = provider === 'google' ? 'https://accounts.google.com/o/oauth2/v2/auth' : 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
       if (url.username || url.password || url.origin + url.pathname !== expected) throw new Error('邮箱授权地址无效');
-      beforeConnect(); mailOAuthNavigation.leave(url.toString());
-    } finally { connecting.current = false; if (mounted.current && live.current === scope) setBusy(false); }
+      if (desktop && ticket) {
+        await desktop.open(ticket.id, url.toString());
+        if (!current()) return;
+        keepDraft.current(); await desktop.finish(ticket.id);
+      } else { keepDraft.current(); mailOAuthNavigation.leave(url.toString()); }
+    } catch (failure) { if (current()) throw failure; }
+    finally { controller.signal.removeEventListener('abort', cancel); cancel(); if (active.current === controller) { active.current = null; if (mounted.current) setBusy(false); } }
   };
   return { reason, connect, loading, busy, error, retry: () => void load() };
 }

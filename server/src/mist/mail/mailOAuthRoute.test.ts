@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
+import { prepareMailReturn } from '../../../../electron/mailOAuth';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,6 +20,8 @@ beforeAll(async () => { key = await generateKeyPair('RS256'); });
 const fakeFetch = vi.fn<typeof fetch>();
 type Seen = { stage: 'imap' | 'smtp' | 'send'; host: string; user: string; token?: string; password?: string };
 let seen: Seen[], rejectTokens: Set<string>, smtpDown: boolean;
+let mailbox = { uidValidity: 1, uidNext: 1 };
+const searches: number[] = [];
 const fakeTransport = (): MailTransport => {
   const check = (stage: Seen['stage'], config: any, secret: any) => {
     seen.push({ stage, host: stage === 'imap' ? config.imapServername || config.imapHost : config.smtpServername || config.smtpHost, user: secret.username, token: secret.oauth?.accessToken, password: secret.password });
@@ -29,7 +32,7 @@ const fakeTransport = (): MailTransport => {
       check('imap', config, secret);
       const session: MailImapSession = {
         async folders() { return [{ path: 'INBOX', attribs: [] }, { path: 'Sent', attribs: ['\\Sent'] }]; },
-        async open() { return { uidValidity: 1, uidNext: 1 }; }, async uidsAfter() { return []; }, async fetch() { return []; },
+        async open() { return mailbox; }, async uidsAfter(uid) { searches.push(uid); return []; }, async fetch() { return []; },
         async hasMessageId() { return false; }, async append() { /* noop */ }, async close() { /* noop */ },
       };
       return session;
@@ -39,6 +42,7 @@ const fakeTransport = (): MailTransport => {
   };
 };
 beforeEach(async () => {
+  mailbox = { uidValidity: 1, uidNext: 1 }; searches.length = 0;
   directory = await fs.mkdtemp(path.join(os.tmpdir(), 'mist-mail-oauth-')); seen = []; rejectTokens = new Set(); smtpDown = false; fakeFetch.mockReset();
   vi.stubEnv('MIST_LOCAL_WORKSPACE', '1'); vi.stubEnv('NODE_ENV', 'test'); vi.stubEnv('MIST_MAIL_ALLOWED_HOSTS', '127.0.0.1'); vi.stubEnv('MIST_MAIL_INSECURE_TLS_HOSTS', '127.0.0.1'); vi.stubEnv('MIST_MAIL_ALLOW_PUBLIC_HOSTS', '1');
   vi.stubEnv('MIST_MAIL_CREDENTIAL_DIR', path.join(directory, 'mail-credentials')); vi.stubEnv('MIST_MAIL_CREDENTIAL_KEY', 'k'.repeat(48));
@@ -55,8 +59,8 @@ async function setup(env: NodeJS.ProcessEnv = configured()) {
   const latest = async (client = owner) => (ws = (await client.get(W + ws.id).expect(200)).body.workspace);
   const command = async (type: string, payload: unknown, client = owner) => { await latest(client); return client.post(W + ws.id + '/commands').send({ requestId: 'oauth-test-' + (++n), expectedRevision: ws.revision, command: { type, payload } }); };
   /** 发起连接；返回服务商将带回的 state、回调 Cookie 与该请求的 nonce（替身签发身份令牌用）。 */
-  const start = async (provider: MailOAuthProvider, accountId?: string, client = owner, userId = ws.ownerId as string) => {
-    const r = await client.post(W + ws.id + '/email/oauth/start').set('Origin', ORIGIN).send({ provider, ...(accountId ? { accountId } : {}) }).expect(200);
+  const start = async (provider: MailOAuthProvider, accountId?: string, client = owner, userId = ws.ownerId as string, desktopPort?: number) => {
+    const r = await client.post(W + ws.id + '/email/oauth/start').set('Origin', ORIGIN).send({ provider, ...(accountId ? { accountId } : {}), ...(desktopPort ? { desktopPort } : {}) }).expect(200);
     const url = new URL(r.body.oauth.authorizationUrl), state = url.searchParams.get('state')!, setCookie = ([] as string[]).concat(r.headers['set-cookie'] || []).find(c => c.startsWith('bambook_mail_oauth_' + provider + '='))!;
     const cookie = decodeURIComponent(setCookie.split(';')[0].split('=').slice(1).join('='));
     const flow = await oauth.readFlow(cookie, provider, state, userId, '');
@@ -120,6 +124,41 @@ describe('邮箱 OAuth 连接（服务端全链路）', () => {
     const replay = t.outcome(await t.owner.get(CALLBACK + provider).set('Cookie', started.setCookie.split(';')[0]).query({ state: started.state, code: 'one-time-code' }).expect(303));
     expect(replay).toMatchObject({ status: 'failed', code: 'MAIL_OAUTH_STATE_INVALID', accountId: null });
     expect(await t.accounts()).toHaveLength(1); expect(fakeFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['google', 'microsoft'] as const)('%s desktop return stays on this machine and can only finish in the initiating session', async provider => {
+    const t = await setup(), desktop = await prepareMailReturn(ORIGIN, provider);
+    try {
+      const start = await t.start(provider, undefined, t.owner, t.ws.ownerId, desktop.port);
+      await expect(desktop.open('https://evil.example/authorize', async () => undefined)).rejects.toThrow();
+      const opened = desktop.open(start.url.toString(), async () => undefined);
+      const response = await request(t.app).get(CALLBACK + provider).query({ state: start.state, code: 'example-code' }).expect(303);
+      const loopback = new URL(response.headers.location);
+      expect(loopback.origin).toBe('http://127.0.0.1:' + desktop.port);
+      expect((await fetch(loopback.toString().replace(start.state, 'wrong'))).status).toBe(404);
+      await request(t.app).get(CALLBACK + provider).query({ state: start.state.replace('.' + desktop.port + '.', '.1024.'), code: 'c' }).expect(400);
+      expect((await fetch(loopback)).status).toBe(200); await opened;
+      const finish = new URL(desktop.finish());
+      expect(finish.origin).toBe(ORIGIN);
+      await request(t.app).get(finish.pathname + finish.search).expect(401);
+      expect(await t.accounts()).toHaveLength(0);
+      await t.grant(provider, start.nonce, 'owner@example.test');
+      expect(t.outcome(await t.owner.get(finish.pathname + finish.search).expect(303)).status).toBe('connected');
+      expect(t.outcome(await t.owner.get(finish.pathname + finish.search).expect(303)).status).toBe('failed');
+    } finally { desktop.cancel(); }
+  });
+
+  it('starts designated mailboxes at connection time, preserves progress on reconnect and skips history on a UID reset', async () => {
+    vi.stubEnv('MIST_MAIL_NEW_ONLY_ADDRESSES', 'owner@example.test');
+    const t = await setup(); mailbox.uidNext = 101;
+    const { accountId } = await t.connect('google', 'owner@example.test');
+    expect((await t.accounts())[0].folders.map((f: any) => f.lastUid)).toEqual([100, 100]);
+    mailbox.uidNext = 111;
+    await t.connect('google', 'owner@example.test', accountId);
+    const sync = () => t.owner.post(W + t.ws.id + '/email/accounts/' + accountId + '/sync').send({}).expect(200);
+    await sync(); expect(searches.splice(0)).toEqual([100, 100]);
+    mailbox = { uidValidity: 2, uidNext: 0 }; await sync(); expect(searches).toEqual([]);
+    mailbox.uidNext = 501; await sync(); expect(searches).toEqual([500, 500]);
   });
 
   it('取消授权、缺少回调 Cookie、其他账号或被改写的 state 都不会建立邮箱', async () => {

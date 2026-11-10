@@ -46,12 +46,12 @@ const isReal = (a?: EmailAccount) => !!a && !a.example && !!a.transport;
 export function sendBlocked(a?: EmailAccount): string | false {
   if (!a) return '请选择发件邮箱';
   if (a.example) return '示例邮箱只用于演示，不能发送真实邮件';
-  if (!a.transport || !a.credentialSet || a.connection === 'not_connected') return '该邮箱尚未绑定凭据 · 邮箱账号中绑定后可发送';
+  if (!a.transport || !a.credentialSet || a.connection === 'not_connected') return mailOAuthProvider(a) ? '请在邮箱账号中连接此邮箱后发送' : '该邮箱尚未绑定凭据 · 邮箱账号中绑定后可发送';
   return false;
 }
 export function connectionLabel(a: EmailAccount): { label: string; tone: Tone } {
   if (a.example || a.connection === 'example') return { label: `示例 · 同步于 ${a.lastSyncAt ? when(a.lastSyncAt) : '—'}`, tone: 'neutral' };
-  if (!a.credentialSet || a.connection === 'not_connected') return { label: '未绑定凭据', tone: 'neutral' };
+  if (!a.credentialSet || a.connection === 'not_connected') return { label: mailOAuthProvider(a) ? '未连接' : '未绑定凭据', tone: 'neutral' };
   if (a.connection === 'syncing') return { label: '同步中', tone: 'accent' };
   if (a.connection === 'error') return { label: '连接失败', tone: 'bad' };
   if (a.connection === 'partial' || a.failedFolders.length) return { label: '部分文件夹失败', tone: 'warn' };
@@ -632,7 +632,8 @@ function AccountsDrawer({ state, me, can, canAdmin, locked, run, mail, notice = 
   const [confirming, setConfirming] = React.useState<{ kind: 'disconnect' | 'remove'; id: string; name: string } | null>(null), [removeReason, setRemoveReason] = React.useState('');
   const receiving=useMailReceiving(state.email.accounts), oauth = useMailOAuth(can, mail, beforeConnect);
   const connect = (provider: EmailOAuthProvider, accountId?: string) => { setProblem(''); void oauth.connect(provider, accountId).catch(failure => setProblem(problemText(failure, '邮箱连接未完成，请重试'))); };
-  const managed = !!(editing?.id && state.email.accounts.find(a => a.id === editing.id)?.oauth);
+  const editedAccount = state.email.accounts.find(a => a.id === editing?.id);
+  const managed = !!(editedAccount && mailOAuthProvider(editedAccount));
   const members = ((state as MistState & { members?: Array<{ userId: string; name: string }> }).members || []).filter(row => row.userId !== me);
   const attempt = async (work: () => Promise<unknown>, done: string) => { setProblem(''); try { await work(); toast(done); return true; } catch (failure) { setProblem(problemText(failure, '操作未完成，请重试')); return false; } };
   const save = async () => {
@@ -679,12 +680,12 @@ function AccountsDrawer({ state, me, can, canAdmin, locked, run, mail, notice = 
         {(a.folders || []).filter(row => row.error).map(row => <span key={row.remote} className="mist-note">{row.remote}：{row.error}</span>)}
         <small className="mist-muted">{uiText(a.example ? '演示公司合成数据，不连接服务器' : `接入人 ${a.ownerName}${a.kind === 'shared' ? ` · 成员 ${a.memberNames.join('、') || '无'}` : ''}${a.transport ? ` · ${a.transport.imapHost}:${a.transport.imapPort} / ${a.transport.smtpHost}:${a.transport.smtpPort}` : ''}`)}</small>
         <MailReceivingControl account={a} control={receiving} locked={locked}/>
-        {owner && can && (binding?.id === a.id
+        {owner && can && (!provider && binding?.id === a.id
           ? <div className="mist-row" style={{ flexWrap: 'wrap' }}><TextInput aria-label={ui`${a.displayName} 密码或授权码`} type="password" autoComplete="new-password" value={binding.password} onChange={event => setBinding({ id: a.id, password: event.target.value })} /><Button onClick={() => setBinding(null)}>{uiText("取消")}</Button><Button variant="primary" disabled={locked || !binding.password} onClick={() => void attempt(() => mail({ kind: 'bind', accountId: a.id, password: binding.password }), '凭据验证通过，已绑定').then(ok => { if (ok) setBinding(null); })}>{uiText("验证并绑定")}</Button></div>
           : <div className="mist-row" style={{ flexWrap: 'wrap' }}>
             <Button size="sm" icon={Settings2} disabled={locked||a.kind==='shared'&&!canAdmin} title={uiText(a.kind==='shared'&&!canAdmin?'需要邮件账户管理权限':undefined)} onClick={() => { setProblem(''); setEditing({ id: a.id, form: accountForm(a) }); }}>{uiText("修改设置")}</Button>
             {provider && <Button size="sm" icon={Link2} disabled={locked || oauth.busy || !!providerReason} title={uiText(providerReason || undefined)} onClick={() => connect(provider, a.id)}>{uiText(a.oauth ? '重新连接' : provider === 'google' ? '连接 Gmail' : '连接 Outlook')}</Button>}
-            {!a.oauth && <Button size="sm" icon={KeyRound} disabled={locked || !a.transport} onClick={() => setBinding({ id: a.id, password: '' })}>{uiText(a.credentialSet ? '重新绑定凭据' : '绑定凭据')}</Button>}
+            {!provider && <Button size="sm" icon={KeyRound} disabled={locked || !a.transport} onClick={() => setBinding({ id: a.id, password: '' })}>{uiText(a.credentialSet ? '重新绑定凭据' : '绑定凭据')}</Button>}
             {a.credentialSet && <Button size="sm" icon={Unlink} disabled={locked} onClick={() => setConfirming({ kind: 'disconnect', id: a.id, name: a.address })}>{uiText("断开")}</Button>}
             {!a.credentialSet && !a.example && <Button size="sm" variant="quiet" disabled={locked} onClick={() => setConfirming({ kind: 'remove', id: a.id, name: a.address })}>{uiText("移除邮箱")}</Button>}
           </div>)}

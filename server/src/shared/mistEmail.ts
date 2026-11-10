@@ -27,7 +27,7 @@ export type EmailAccount = {
   /** 真实账号的归属：按用户 ID 控制可见与可操作范围；个人邮箱只有本人，共享邮箱为本人 + 授权成员。 */
   ownerId?: string; memberIds?: string[]; transport?: EmailTransport; credentialSet?: boolean; lastError?: EmailProblem | null; folders?: EmailFolderSync[]; syncStartedAt?: string | null;
   /** Server-owned connection method and private-vault reference. Tokens never enter company state. */
-  oauth?: { provider: EmailOAuthProvider; credentialId: string; connectedAt: string };
+  oauth?: { provider: EmailOAuthProvider; credentialId: string; connectedAt: string; newMailOnly?: boolean };
   /**
    * 收信来源代际：邮箱地址、收信服务器、端口、加密方式或登录用户名变化即视为换了一个远端邮箱，代际 +1 并清空文件夹游标；
    * 之后同步的去重键与 Message-ID 合并都只在当前代际内进行，旧来源已同步的邮件原样保留。缺省按 1。
@@ -104,7 +104,7 @@ export type EmailCommand =
   // 以下 email.server.* 只能由服务端邮件服务在真实 IMAP / SMTP 操作后提交。
   | { type: 'email.server.analysis'; payload: { id: string; analysis: EmailAnalysis } }
   | { type: 'email.server.account'; payload: { id: string; connection?: EmailConnection; credentialSet?: boolean; lastError?: EmailProblem | null; syncStartedAt?: string | null } }
-  | { type: 'email.server.oauth'; payload: { id?: string; provider: EmailOAuthProvider; credentialId: string; address: string; displayName: string; transport: EmailTransport } }
+  | { type: 'email.server.oauth'; payload: { id?: string; provider: EmailOAuthProvider; credentialId: string; address: string; displayName: string; transport: EmailTransport; initialFolders?: EmailFolderSync[] } }
   | { type: 'email.server.sync'; payload: { accountId: string; source?: number; at: string; folders: EmailFolderSync[]; messages: EmailSyncedMessage[]; files: StoredFile[]; lastError: EmailProblem | null; observations?: MailStateObservation[] } }
   | { type: 'email.server.state'; payload: { accountId: string; source: number; operationId: string; attemptId: string; observation: MailStateObservation } }
   | { type: 'email.server.send.begin'; payload: { mode: 'new'; requestKey: string; draftId?: string; input: EmailDraftInput; forwardOfId?: string; messageId: string } | { mode: 'retry'; id: string; confirmUnknown?: boolean } }
@@ -473,7 +473,12 @@ export function applyEmailCommand(root: MistState, command: EmailCommand, contex
       const result = saveAccount(root, { id: v.id, input: { address: v.address, displayName: old?.displayName || v.displayName, kind: old?.kind || 'personal',
         memberIds: old?.memberIds || [], aliases: old?.aliases || [], signature: old?.signature || '', transport: v.transport } }, context, true);
       const row = account(root, result.id, context);
-      row.oauth = { provider: v.provider, credentialId: v.credentialId, connectedAt: context.now };
+      if (v.initialFolders) {
+        // Keep a live cursor on reconnect. The first restricted connection starts at the observed tail.
+        const priorFolders = row.oauth?.newMailOnly ? row.folders || [] : [];
+        row.folders = v.initialFolders.map(initial => priorFolders.find(f => f.remote === initial.remote && f.uidValidity === initial.uidValidity) || initial);
+      }
+      row.oauth = { provider: v.provider, credentialId: v.credentialId, connectedAt: context.now, ...(v.initialFolders ? { newMailOnly: true } : {}) };
       row.credentialSet = true; row.connection = 'connected'; row.lastError = null;
       log(root, context, row.id, `已通过 ${v.provider === 'google' ? 'Google' : 'Microsoft'} 授权连接邮箱 ${row.address}`);
       return result;

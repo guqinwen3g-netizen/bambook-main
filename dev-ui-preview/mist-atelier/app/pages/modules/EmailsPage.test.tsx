@@ -349,6 +349,28 @@ it('leaves only for the official provider page and keeps the message being writt
   expect(kept).toMatchObject({actorId:'sales',workspaceId:'company-1',draft:{input:{body:'尚未发出的正文',accountId:'acc-real'}}});
   leave.mockRestore();
 });
+it('keeps password fields out of an existing Gmail account before its first authorization',async()=>{
+  providersOn(); store.state=oauthState(); delete store.state.email.accounts.find((a:any)=>a.id==='acc-gmail')!.oauth;
+  render(); await click(button('邮箱账号')!); await flush();
+  const card=document.querySelector('[data-email-account="acc-gmail"]')!;
+  expect(card.textContent).toContain('连接 Gmail');
+  expect([...card.querySelectorAll('button')].some(b=>b.textContent?.includes('绑定凭据'))).toBe(false);
+  await click([...card.querySelectorAll('button')].find(b=>b.textContent?.trim()==='修改设置')!);
+  expect(document.querySelector('[aria-label="密码或授权码"]')).toBeNull();
+  expect(document.querySelector('[aria-label="IMAP 服务器"]')).toBeNull();
+});
+it('uses the desktop listener and restores the draft before returning to the original session', async()=>{
+  providersOn(); const bridge={prepare:vi.fn(async()=>({port:51234,id:'mock'})),open:vi.fn(async()=>{}),finish:vi.fn(async()=>{}),cancel:vi.fn(async()=>{})};
+  vi.stubGlobal('bambookMailOAuth',bridge);
+  try {
+    render(); await click(button('邮箱账号')!); await click(button('接入邮箱')!); await flush();
+    const url='https://accounts.google.com/o/oauth2/v2/auth?state=desktop.51234.mock';
+    store.mail.mockResolvedValueOnce({oauth:{authorizationUrl:url}});
+    await click(button('连接 Gmail')!); await flush();
+    expect(store.mail).toHaveBeenLastCalledWith({kind:'oauthStart',provider:'google',desktopPort:51234});
+    expect(bridge.open).toHaveBeenCalledWith('mock',url); expect(bridge.finish).toHaveBeenCalledWith('mock');
+  } finally {vi.unstubAllGlobals();}
+});
 it('reconnects an authorized mailbox through the provider and never offers a password or server fields for it',async()=>{
   const {mailOAuthNavigation}=await import('./MailOAuth');const leave=vi.spyOn(mailOAuthNavigation,'leave').mockImplementation(()=>undefined);
   providersOn();store.state=oauthState();render();await click(button('邮箱账号')!);await flush();
