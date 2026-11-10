@@ -6597,5 +6597,7 @@
   "交接前核对": "Pre-handoff checks",
   "还没有可下采购单的供应商": "No supplier available for purchase orders",
   "去建立供应商": "Set up a supplier",
-  "请采购负责人先建立供应商档案": "Ask the procurement lead to set up a supplier first"
+  "请采购负责人先建立供应商档案": "Ask the procurement lead to set up a supplier first",
+  "补全公司资料": "Complete company profile",
+  "请管理员在 设置 · 公司资料 中补全": "Ask an administrator to complete it in Settings · Company profile"
 }

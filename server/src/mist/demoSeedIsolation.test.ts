@@ -51,6 +51,13 @@ describe('demo seed never reaches a real company', () => {
     stored().forEach(expectNoDemo);
   });
 
+  it('names the company library after the registered company and starts its letterhead from the registration', async () => {
+    db.companies.push({ id: COMPANY, name: '云锦服饰', legalName: '云锦服饰进出口有限公司', englishName: 'Yunjin Apparel Co., Ltd.' });
+    const created = await repo.create(company(), { name: '公司业务', seed: 'empty' }, true);
+    expect(created.name).toBe('云锦服饰');
+    expect(created.state.settings).toMatchObject({ workspaceName: '云锦服饰', companyProfile: { legalName: '云锦服饰进出口有限公司', englishName: 'Yunjin Apparel Co., Ltd.' } });
+  });
+
   it('ignores an explicit demo seed when a company member creates the library through POST', async () => {
     await repo.create(company(), { name: '公司', slug: 'explicit', seed: 'demo' });
     expect(db.workspaces.size).toBe(1);

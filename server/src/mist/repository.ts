@@ -643,8 +643,12 @@ export class MistRepository {
           this.contract.normalizeMistState?.(library.state, this.context(actor));
           return this.view(library, actor);
         }
-        const state = this.contract.createMistState(this.context(actor), 'empty'); state.settings.workspaceName = name;
-        const row = await db.mistWorkspace.create({ data: { id: randomUUID(), ownerId: actor.userId, companyId: actor.companyId, slug: companySlug(actor.companyId!), name, revision: 0, state } });
+        // 公司库用注册时的公司名称和抬头起步，不用通用占位名；抬头空着时单据生成会提示去补全。
+        const company = await db.company.findFirst({ where: { id: actor.companyId! }, select: { name: true, legalName: true, englishName: true } });
+        const libraryName = defaultOnly && company?.name?.trim() ? company.name.trim().slice(0, 120) : name;
+        const state = this.contract.createMistState(this.context(actor), 'empty'); state.settings.workspaceName = libraryName;
+        if (company?.legalName?.trim() && !state.settings.companyProfile?.legalName) state.settings.companyProfile = { legalName: company.legalName.trim(), englishName: company.englishName?.trim() || '', address: '', englishAddress: '', phone: '', email: '', taxId: '', customsCode: '', bankName: '', bankAccount: '', swift: '', defaultCurrency: '' };
+        const row = await db.mistWorkspace.create({ data: { id: randomUUID(), ownerId: actor.userId, companyId: actor.companyId, slug: companySlug(actor.companyId!), name: libraryName, revision: 0, state } });
         applyRoster(row.state, await companyRoster(db, actor.companyId!)); { const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); OWN_TEAMS.set(row, scope?.teamIds ?? await companyTeamIds(db, row.companyId!, actor.userId)); }
         await this.authorize(db, prior);
         return this.view(row, actor);

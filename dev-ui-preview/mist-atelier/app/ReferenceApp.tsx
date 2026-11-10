@@ -59,6 +59,12 @@ const GROUPS: Record<string, string> = { overview: '我的事务', customer: '�
 
 /** 服务端因未配置审批人而拒绝提交（订单、出运、供应商承诺等）。 */
 export const approverMissing = (message: string) => /尚未配置.*审批(负责)?人|尚无除申请人外的有效订单审批负责人|未能解析独立的业务审批负责人|申请人以外的.*审批人/.test(message);
+/** 只能由管理员在公司设置里补上的缺口：失败提示直接给出去处，而不是“重新读取”。 */
+export function settingsGap(message: string): { section: 'approvals' | 'profile'; label: string; ask: string } | null {
+  if (approverMissing(message)) return { section: 'approvals', label: '设置审批资格', ask: '请管理员在 设置 · 审批资格 中指定' };
+  if (/补全公司抬头/.test(message)) return { section: 'profile', label: '补全公司资料', ask: '请管理员在 设置 · 公司资料 中补全' };
+  return null;
+}
 export function readMistRoute(): Route {
   const qs = new URLSearchParams(location.search);
   const view = qs.get('view') || 'cockpit', id = qs.get('id') || undefined;
@@ -397,14 +403,14 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const name = (workspace.workspace?.ownerId === user.id ? workspaceProfileName : '') || user.displayName || user.email;
   const roles = platformOnly ? '平台管理员' : platformCompany ? '平台管理' : user.roleLabels?.filter(role => !role.name.endsWith('标准岗位补充')).map(role => role.name).join(' · ') || user.roles.map(role => ({ owner: '负责人', admin: '管理员', manager: '管理者', merchandiser: '业务员', finance: '财务', sales: '业务员', viewer: '查看人员', agent_operator: '助手操作员' })[role]).join(' · ');
   // Shell status floats under the topbar (MistAppShell notices) instead of pushing the page title down.
-  const canSetApprovers = session.hasRole('owner', 'admin') || session.hasPermission('users:admin');
+  const canAdminister = session.hasRole('owner', 'admin') || session.hasPermission('users:admin'), errorGap = workspace.error ? settingsGap(workspace.error) : null;
   const shellNoticeList = [
     platformCompany && <Banner variant="inline" key="platform" tone="neutral" title={ui`公司管理 · ${platformCompany.companyName}`} actions={<Button loading={exitingSupport} onClick={()=>void exitManagement()}>{uiText("返回平台")}</Button>}/>,
     workspace.pendingCreate && !workspace.saving && <Banner variant="inline" key="create" tone="warn" title={uiText("历史数据创建结果需要核对")} actions={<Button onClick={()=>void workspace.createWorkspace(workspace.pendingCreate!.name,workspace.pendingCreate!.seed).catch(report)}>{uiText("核对创建结果")}</Button>}>{workspace.pendingCreate.name}{uiText("：将查询并继续同一次创建。")}</Banner>,
     workspace.pending && !workspace.saving && !pendingClaimed && !(workspace.pending.kind==='mail-send'&&route.view==='emails') && !(workspace.pending.kind==='command'&&route.view==='calendar') && !(workspace.pending.kind==='upload'&&claimedUpload===workspace.pending.requestId) && <Banner variant="inline" key="pending" tone="warn" title={uiText("上次操作的结果需要核对")} actions={<Button loading={workspace.saving} onClick={()=>void workspace.recover().catch(report)}>{uiText("核对原请求")}</Button>}>{uiText("核对前会保留原请求，避免重复保存。")}{uiText(workspace.pending.kind==='upload'?'如尚未上传成功，请在原页面重新选择同一附件。':workspace.pending.kind==='mail-send'?'上次邮件发送未收到服务器回执；核对时使用原发送请求，已登记的不会重复投递。':'')}</Banner>,
-    // 审批人未配置是设置缺口，重新读取解决不了：管理员直接去 设置 · 审批资格，其他人知道该找谁。
-    workspace.error && !workspace.pending && (approverMissing(workspace.error)
-      ? <Banner variant="inline" key="error" tone="bad" title={uiText(workspace.error)} actions={canSetApprovers ? <Button onClick={()=>go('settings',undefined,{section:'approvals'})}>{uiText("设置审批资格")}</Button> : undefined}>{canSetApprovers ? undefined : uiText('请管理员在 设置 · 审批资格 中指定')}</Banner>
+    // 审批人、公司抬头等设置缺口，重新读取解决不了：管理员直接去对应设置，其他人知道该找谁。
+    workspace.error && !workspace.pending && (errorGap
+      ? <Banner variant="inline" key="error" tone="bad" title={uiText(workspace.error)} actions={canAdminister ? <Button onClick={()=>go('settings',undefined,{section:errorGap.section})}>{uiText(errorGap.label)}</Button> : undefined}>{canAdminister ? undefined : uiText(errorGap.ask)}</Banner>
       : <Banner variant="inline" key="error" tone="bad" title={uiText(workspace.error)} actions={<Button onClick={()=>void workspace.refresh()}>{uiText("重新读取")}</Button>} />),
     // A page's own failure that the shell already shows (same text) is not repeated.
     ...pageFailures.filter(item => item.detail !== workspace.error).map(item => <Banner variant="inline" key={'page:'+item.id} tone="bad" title={uiText(item.title)} actions={item.retry ? <Button onClick={item.retry}>{uiText("重试")}</Button> : undefined}>{item.detail}</Banner>)
