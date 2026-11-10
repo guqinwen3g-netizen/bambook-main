@@ -896,6 +896,9 @@ describe('付款审批分档：金额档、首笔付款加签、外币折算', (
     const msg = err(() => submit(f, 60000, { ...tiers(['主管'], ['总经理'], ['总经理']), paymentTierAlternateIds: { pay_lt5: ['副总'], pay_gt5: [], pay_new_supplier: [] } }));
     expect(msg).toContain('缺少第二位审批人');
     expect(msg).toContain('请联系管理员为另一位领导授予「5 万元以上档」或「首笔付款加签（总经理级）」审批权限');
+    // 上下文没带成员目录时也用名册里的姓名，不把账号编号露给用户。
+    f.s.members = [{ userId: '总经理', name: '周总', addedBy: 'company', addedByName: '公司成员', addedAt: '' }] as any;
+    expect(err(() => submit(f, 60000, { ...tiers(['主管'], ['总经理'], ['总经理']), paymentTierAlternateIds: { pay_lt5: ['副总'], pay_gt5: [], pay_new_supplier: [] } }))).toContain('当前只有 周总 能审批');
   });
   it('分档规则前批准、没有冻结档位的申请不能登记付款；申请人撤回后重新提交得到正确档位', () => {
     const f = setup({ paid: false }), r = submit(f, 60000, tiers(['主管'], ['总监'], ['总经理'])), id = String(r.result.id);

@@ -392,7 +392,7 @@ function PurchaseDetail({ purchase: p, state, incoming, day, me, can, canApprove
       { label: '退回修改', icon: Undo2, onClick: () => onDecide('rejected'), hidden: !canReview || stage !== 'pending' },
       { label: '登记合同线下发出', icon: Send, onClick: onSend, primary: !p.offlineSend, reason: writeReason, hidden: !can || p.state !== 'approved' || !!p.offlineSend },
       { label: '登记供应商确认', icon: FileSignature, onClick: onConfirm, primary: true, reason: writeReason, hidden: !can || p.state !== 'approved' || !p.offlineSend || !!p.supplierConfirmation },
-      { label: processing ? '登记加工回交' : '登记本次交付', icon: PackageCheck, onClick: onReceive, primary: !!p.supplierConfirmation && stage !== 'done', reason: writeReason || (!p.offlineSend || !p.supplierConfirmation ? '请先登记合同线下发出和供应商确认' : false), hidden: !can || p.state !== 'approved' },
+      { label: processing ? '登记加工回交' : '登记本次交付', icon: PackageCheck, onClick: onReceive, primary: !!p.supplierConfirmation && stage !== 'done', reason: writeReason || (!p.offlineSend ? '请先登记合同线下发出和供应商确认' : !p.supplierConfirmation ? '请先登记供应商确认' : false), hidden: !can || p.state !== 'approved' },
       { label: processing ? '生成加工合同' : '生成采购单', icon: Download, onClick: onDownload, reason: writeReason, hidden: !can || p.state !== 'approved' },
       { label: '取消合同', icon: Undo2, onClick: onCancel, reason: cancelReason, hidden: !can || p.state !== 'approved' || stage === 'done' || receipts.length > 0 },
       { label: '转给其他供应商', onClick: onTransfer, reason: transferReason, hidden: !can || p.state !== 'approved' || stage === 'done' || receipts.length > 0 },

@@ -37,6 +37,18 @@ export async function companyRoster(db: any, companyId: string): Promise<Company
  * 把公司名册覆盖到本次读取的库状态上（只在内存中）：成员目录、负责人选择、审批候选都以公司在职成员为准，
  * 已离职的库创建人不再出现。历史 memberIds/members 授权名单在公司库中不再生效。
  */
+/** 首次进入时自动建立的公司库曾用的占位名。 */
+export const DEFAULT_LIBRARY_NAME = '公司业务';
+/** 名册之外，仍是占位名的公司库按公司注册名称显示；租户下次保存时随设置自然落库，不另做批量改写。 */
+export async function applyCompanyRoster(db: any, row: { name: string; state: MistState }, companyId: string) {
+  applyRoster(row.state, await companyRoster(db, companyId));
+  if (row.name !== DEFAULT_LIBRARY_NAME || typeof db.company?.findFirst !== 'function') return;
+  const company = await db.company.findFirst({ where: { id: companyId }, select: { name: true } });
+  const name = typeof company?.name === 'string' ? company.name.trim().slice(0, 120) : '';
+  if (!name) return;
+  row.name = name;
+  if (row.state.settings?.workspaceName === DEFAULT_LIBRARY_NAME) row.state.settings.workspaceName = name;
+}
 export function applyRoster(state: MistState, roster: CompanyRosterEntry[]) {
   state.memberIds = roster.map(entry => entry.userId);
   state.members = roster.map((entry): MistWorkspaceMember => ({ userId: entry.userId, name: entry.name, addedBy: 'company', addedByName: '公司成员', addedAt: entry.joinedAt }));

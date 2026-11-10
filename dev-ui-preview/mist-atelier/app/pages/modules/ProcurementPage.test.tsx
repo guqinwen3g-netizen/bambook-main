@@ -167,7 +167,7 @@ it('explains why delivery cannot be recorded before the supplier confirms and op
   const detail=host.querySelector('[data-purchase-detail="sent"]') as HTMLElement;
   expect(detail.textContent).toContain('合同已发出 · 待供应商确认');
   expect((getByRole(detail,'button',{name:'登记本次交付'}) as HTMLButtonElement).disabled).toBe(true);
-  expect(detail.textContent).toContain('登记本次交付：请先登记合同线下发出和供应商确认');
+  expect(detail.textContent).toContain('登记本次交付：请先登记供应商确认');
   expect(queryByRole(detail,'button',{name:'登记合同线下发出'})).toBeNull();
   await click(getByRole(detail,'button',{name:'登记供应商确认'}));
   const dialog=getByRole(document.body,'dialog');

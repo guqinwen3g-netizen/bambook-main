@@ -60,7 +60,8 @@ const GROUPS: Record<string, string> = { overview: '我的事务', customer: '�
 /** 服务端因未配置审批人而拒绝提交（订单、出运、供应商承诺等）。 */
 export const approverMissing = (message: string) => /尚未配置.*审批(负责)?人|尚无除申请人外的有效订单审批负责人|未能解析独立的业务审批负责人|申请人以外的.*审批人/.test(message);
 /** 只能由管理员在公司设置里补上的缺口：失败提示直接给出去处，而不是“重新读取”。 */
-export function settingsGap(message: string): { section: 'approvals' | 'profile'; label: string; ask: string } | null {
+export function settingsGap(message: string): { section: 'approvals' | 'profile' | 'jobs'; label: string; ask: string } | null {
+  if (/没有可审批「[^」]+」的审批人|授予「[^」]+」.*审批权限/.test(message)) return { section: 'jobs', label: '配置岗位权限', ask: '请管理员在 设置 · 岗位与权限 中授予该档审批权限' };
   if (approverMissing(message)) return { section: 'approvals', label: '设置审批资格', ask: '请管理员在 设置 · 审批资格 中指定' };
   if (/补全公司抬头/.test(message)) return { section: 'profile', label: '补全公司资料', ask: '请管理员在 设置 · 公司资料 中补全' };
   return null;

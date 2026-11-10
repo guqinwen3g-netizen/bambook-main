@@ -512,5 +512,7 @@ it('recognizes server rejections caused by a missing approver setup', () => {
 it('maps setup gaps to the company settings section that fixes them', () => {
   expect(settingsGap('尚未配置当前业务的供应商承诺审批人')?.section).toBe('approvals');
   expect(settingsGap('请先补全公司抬头')?.section).toBe('profile');
+  expect(settingsGap('当前没有可审批「5 万元以上档」的审批人，请联系管理员配置部门主管或授予该档审批权限')?.section).toBe('jobs');
+  expect(settingsGap('本次付款需要两级审批；当前只有 周岚 能审批，缺少第二位审批人。请联系管理员为另一位领导授予「5 万元以上档」或「首笔付款加签（总经理级）」审批权限')?.section).toBe('jobs');
   expect(settingsGap('采购单不存在')).toBeNull();
 });
