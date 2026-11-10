@@ -23,7 +23,7 @@ class FakeMail {
   rejectRcpt = new Set<string>();
   add(address: string, password = SECRET) { this.boxes.set(address, { password, boxes: new Map([['INBOX', { uidValidity: 7, nextUid: 1, attribs: [], messages: [] }], ['Sent', { uidValidity: 9, nextUid: 1, attribs: ['\\Sent'], messages: [] }], ['Trash', { uidValidity: 3, nextUid: 1, attribs: ['\\Trash'], messages: [] }]]) }); }
   put(address: string, folder: string, raw: Buffer, seen = false) { const box = this.boxes.get(address)!.boxes.get(folder)!; box.messages.push({ uid: box.nextUid++, raw, seen }); }
-  login(user: string, password: string) { const box = this.boxes.get(user); if (!box || box.password !== password) throw Object.assign(new Error('Invalid credentials (Failure)'), { textCode: 'AUTHENTICATIONFAILED', source: 'authentication' }); return box; }
+  login(user: string, password: string | undefined) { const box = this.boxes.get(user); if (!box || box.password !== password) throw Object.assign(new Error('Invalid credentials (Failure)'), { textCode: 'AUTHENTICATIONFAILED', source: 'authentication' }); return box; }
   transport(): MailTransport {
     const self = this;
     return {

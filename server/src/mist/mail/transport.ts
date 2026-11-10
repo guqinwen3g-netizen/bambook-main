@@ -2,6 +2,7 @@ import imaps from 'imap-simple';
 import { isIP } from 'node:net';
 import SMTPConnection from 'nodemailer/lib/smtp-connection';
 import MailComposer from 'nodemailer/lib/mail-composer';
+import XOAuth2 from 'nodemailer/lib/xoauth2';
 import type { EmailTransport } from '../../shared/mistEmail';
 import type { MistMailSecret } from './credentials';
 
@@ -183,7 +184,11 @@ function smtpSession(config: MailConnectTarget, secret: MistMailSecret, insecure
     connection.once('end', () => finish(Object.assign(new Error('Connection closed unexpectedly'), { code: 'ECONNECTION' })));
     connection.connect(() => {
       stage = 'login';
-      connection.login({ user: secret.username, pass: secret.password } as any, (error: any) => {
+      const auth = secret.oauth ? { method: 'XOAUTH2', oauth2: new XOAuth2({ user: secret.username, accessToken: secret.oauth.accessToken, expires: secret.oauth.expiresAt,
+        // Refresh belongs to the encrypted provider store. Never let Nodemailer fall back to its Google refresh endpoint.
+        provisionCallback: (_user, _renew, callback) => callback(Object.assign(new Error('Mailbox authorization expired'), { code: 'MAIL_OAUTH_RECONNECT' }), '', 0),
+      }) } : { user: secret.username, pass: secret.password };
+      connection.login(auth as any, (error: any) => {
         if (error) return finish(error);
         if (!deliver) return finish(null, { response: '', accepted: [], rejected: [] });
         stage = 'send';
@@ -199,7 +204,7 @@ function smtpSession(config: MailConnectTarget, secret: MistMailSecret, insecure
 export const imapSmtpTransport: MailTransport = {
   async imap(config, secret, insecureTls) {
     const connection = await imaps.connect({ imap: {
-      user: secret.username, password: secret.password, host: config.imapHost, port: config.imapPort, tls: config.imapSecure, autotls: config.imapSecure ? 'never' : 'required',
+      user: secret.username, ...(secret.oauth ? { xoauth2: Buffer.from(`user=${secret.username}\x01auth=Bearer ${secret.oauth.accessToken}\x01\x01`).toString('base64') } : { password: secret.password }), host: config.imapHost, port: config.imapPort, tls: config.imapSecure, autotls: config.imapSecure ? 'never' : 'required',
       authTimeout: 15000, connTimeout: 15000, socketTimeout:60000,tlsOptions: mailTls(config.imapServername || config.imapHost, insecureTls),
     } } as any);
     // 断线等异步错误不能让进程退出；当前操作会因连接失效而得到明确错误。
@@ -220,6 +225,7 @@ export function classifySmtpError(error: any): 'failed' | 'unknown' {
 /** 把底层协议错误转为可展示的中文原因；不包含凭据。 */
 export function describeMailError(error: any, stage: 'imap' | 'smtp'): { code: string; message: string } {
   const code = String(error?.code || ''), text = String(error?.textCode || error?.source || ''), detail = String(error?.message || ''), label = stage === 'imap' ? '收信服务器' : '发信服务器';
+  if (code === 'MAIL_OAUTH_RECONNECT') return { code, message: '邮箱授权已失效，请重新连接' };
   if(code==='MAIL_MESSAGE_TOO_LARGE')return{code,message:'邮件原件超过64MB上限，请在原邮箱处理后再同步'};
   if(code==='MAIL_MESSAGE_SIZE_UNKNOWN')return{code,message:'收信服务器未提供邮件大小，请联系维护人员'};
   if (code === 'EAUTH' || /AUTHENTICATIONFAILED|authentication/i.test(text) || /auth/i.test(detail) && /fail|invalid/i.test(detail)) return { code: 'MAIL_AUTH_FAILED', message: `${label}拒绝登录：用户名或密码不正确` };
