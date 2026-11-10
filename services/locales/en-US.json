@@ -6604,5 +6604,12 @@
   "请先登记供应商确认": "Record the supplier confirmation first",
   "配置岗位权限": "Configure job permissions",
   "请管理员在 设置 · 岗位与权限 中授予该档审批权限": "Ask an administrator to grant this tier in Settings · Jobs & permissions",
-  "待送检": "Not sent for QC"
+  "待送检": "Not sent for QC",
+  "待客户确认": "Awaiting customer approval",
+  "记录客户样品确认": "Record customer sample decision",
+  "客户决定": "Customer decision",
+  "客户确认": "Customer approval",
+  "记录客户确认": "Record customer approval",
+  "由业务员记录客户决定": "The account manager records the customer decision",
+  "客户确认依据": "Customer approval evidence"
 }
