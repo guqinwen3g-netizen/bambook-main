@@ -36,7 +36,7 @@ export function productionSampleRequirements(state: MistState, branch: MistProdu
     const evidence = current ? { sampleId: sample.id, sampleCode: sample.code, color: sample.color, form: sample.form, size: sample.size, quantity: sample.quantity, unit: sample.unit,...(sample.sizeQuantities?{sizeQuantities:structuredClone(sample.sizeQuantities)}:{}),
       reportId: report.id, reportNumber: report.report, result: report.result as 'pass' | 'conditional', opinion: report.opinion } : undefined;
     const external = state.orders.find(order => order.id === branch.orderId)?.governance?.contract.kind === 'external';
-    const reason = !report ? '待QC' : report.scopeRevision !== (sample.qualityRevision || 1) ? '待复验' : report.result === 'reject' ? 'QC未通过' : !current ? '待QC'
+    const reason = !task ? '待送检' : !report ? '待QC' : report.scopeRevision !== (sample.qualityRevision || 1) ? '待复验' : report.result === 'reject' ? 'QC未通过' : !current ? '待QC'
       : task.businessConfirmation?.result === 'rejected' ? '未采用' : task.businessConfirmation?.result !== 'approved' ? external ? '待客户确认' : '待需求方确认'
       : task.businessContinued?.reportId !== report.id ? '待业务确认' : '已确认';
     return { key, label, ok, reason, sampleId: sample.id, sampleCode: sample.code, taskId: task?.id, evidence };

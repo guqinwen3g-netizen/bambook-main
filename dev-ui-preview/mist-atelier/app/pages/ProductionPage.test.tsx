@@ -104,6 +104,9 @@ describe('Mist production gates, delay and pause',()=>{
   const release=getByRole(document.body,'button',{name:'放行开产'});expect(release.hasAttribute('disabled')).toBe(true);expect(release.getAttribute('title')).toContain('产前样');
   expect(host.querySelector('.mist-sumbar')!.textContent).toContain('待业务放行1');
   expect(queryByRole(document.body,'button',{name:'异常暂停'})).toBeNull();
+  // 未满足的核对项直接给出去处，不让人自己找模块。
+  const links=[...gate.querySelectorAll('button')].filter(button=>button.textContent==='去处理');expect(links.length).toBeGreaterThan(0);
+  go.mockClear();await act(async()=>links[0].click());expect(go).toHaveBeenCalledTimes(1);
  });
  it('records a delay with new date, reason and customer notice into the branch risk',async()=>{
   await mount({view:'production-board',productionId:'production-b'});await click('登记延期');

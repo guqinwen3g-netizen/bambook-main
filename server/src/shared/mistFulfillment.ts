@@ -1975,7 +1975,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 if (other.some(item => item.kind !== purchase.kind)) fail('同一订单条目不得混用加工与成品履约模式');
                 if (sum([...other.map(item => item.quantity), purchase.quantity]) > line.qty) fail('批准的生产分配总量超过订单条目数量');
                 const productionId = ctx.id();
-                root.productions.push({ id: productionId, sourcePurchaseId: purchase.id, code: 'FUL-' + purchase.code, orderId: order.id, lineId: line.id, order: order.code, name: purchase.description, factory: purchase.supplier, qty: purchase.quantity, due: purchase.due, pct: 0, img: line.img, col: purchase.kind === 'processing' ? 'cut' : 'finish', risk: '' });
+                root.productions.push({ id: productionId, sourcePurchaseId: purchase.id, code: 'FUL-' + purchase.code, orderId: order.id, lineId: line.id, order: order.code, name: purchase.description, factory: purchase.supplier, qty: purchase.quantity, due: purchase.due, pct: 0, img: line.img, col: 'cut', risk: '' });
                 productionFact(root, productionId);
             }
             audit(root,ctx,'procurement',purchase.id,`采购审批${p.decision === 'approved' ? '通过' : '退回'}：${note}`,{ view: 'procurement', id: purchase.id },[purchase.requesterId]);

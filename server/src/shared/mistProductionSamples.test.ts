@@ -45,6 +45,11 @@ it.each([{stage:'qc',reason:'待QC'},{stage:'reject',reason:'QC未通过'},{stag
   const x=fixture();x.add('M',stage);expect(x.requirements()[0].reason).toBe(reason);
 });
 
+it('says a registered PP sample has not been sent for QC yet and points at the sample',()=>{
+  const x=fixture(),{id,taskId}=x.add('M','qc');x.f.state.fulfillment.qcTasks=x.f.state.fulfillment.qcTasks.filter(task=>task.id!==taskId);
+  expect(x.requirements()[0]).toMatchObject({reason:'待送检',sampleId:id,taskId:undefined});
+});
+
 it('requires fresh inspection after the physical quality revision changes',()=>{
   const x=fixture(),sample=x.add('M');x.f.state.fulfillment.samples.find(s=>s.id===sample.id)!.qualityRevision=2;
   expect(x.requirements()[0]).toMatchObject({ok:false,reason:'待复验'});expect(()=>x.release()).toThrow('待复验');

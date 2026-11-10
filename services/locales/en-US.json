@@ -2129,7 +2129,7 @@
   "已完成出运": "Shipment Completed",
   "条目阶段": "Entry Stage",
   "{0}受阻": "{0} Blocked",
-  "去处理": "To Handle",
+  "去处理": "Resolve",
   "（前序阶段完成后解锁）": "(Unlocked After Previous Stage Completion)",
   "查看来源记录": "View Source Record",
   "分批与尾数": "Batch & Remainder",
@@ -6603,5 +6603,6 @@
   "请先登记合同线下发出和供应商确认": "Record the contract dispatch and supplier confirmation first",
   "请先登记供应商确认": "Record the supplier confirmation first",
   "配置岗位权限": "Configure job permissions",
-  "请管理员在 设置 · 岗位与权限 中授予该档审批权限": "Ask an administrator to grant this tier in Settings · Jobs & permissions"
+  "请管理员在 设置 · 岗位与权限 中授予该档审批权限": "Ask an administrator to grant this tier in Settings · Jobs & permissions",
+  "待送检": "Not sent for QC"
 }
