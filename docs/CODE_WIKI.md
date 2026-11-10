@@ -29,6 +29,7 @@
 
 - **权限点**：`server/src/_shared/rolePermissionMatrix.ts#PERMISSION_SCOPES`。命令到权限点的映射在 `mistWorkspace.ts#mistCommandPermission`；财务细分见 `mistFinancePermissions.ts`。
 - **岗位配置界面**：`app/runtime/jobPermissions.ts`（`JOB_AREAS`：按模块配 读/写/审批）+ `pages/modules/JobPermissionEditor.tsx`；成员与小组在 `pages/WorkspaceMembers.tsx`、`pages/TeamScopesSection.tsx`（`teamScope.save`）。
+- **开发入口（2026-11-09）**：成衣/面料开发、样品及产品档案沿用 `products:write`；开发新建的路由门禁见 `app/routeAccess.ts`，营销线索的客户开发入口见 `pages/modules/MarketPages.tsx#LeadList`。不要用已退役的 `development:write` 决定入口，测试须按具体权限集合核对允许和拒绝，不能只以全权限替身验证。
 - **账号引用（2026-11-09）**：解析负责人、经手人或借用人账号的命令，须登记于 `server/src/shared/mistAccounts.ts#MIST_MEMBER_DIRECTORY_COMMANDS`，由 `repository.ts#executeInternal` 在当前事务构建成员目录；预演复用同一路径。样品借出 `fulfillment.samples.move` 也在此列，提交账号 ID 后以服务端姓名落快照，拒绝公司外或停用账号。仓储回归见 `mist/memberCommandAccess.test.ts`，不能仅用带手工目录的领域单测代替真实调用链。
 - **行级范围**：`server/src/shared/mistDataScope.ts`。读投影按小组/指定人裁剪；写入用写前目标检查 + 写后差异检查。跨组交接（如内部面料、内部交付）只开放该记录的最小投影（`scopedFabricAccess` 等），不公开隐藏来源订单的商业信息。
 - **审批**：不能审批本人提交的单据；审批权限与额度见 `pages/modules/AdminApprovalAuthorities.tsx` 及各领域 `decide` 命令。

@@ -270,7 +270,7 @@ export function EmailsPage() {
 
   const emptyList = isOutbox
     ? <EmptyState icon={Upload} title={uiText("没有待发送邮件")} description={uiText("发送失败或结果不确定的邮件会停留在这里，供核对与重发。")} compact />
-    : !accounts.length && !loading ? <EmptyState icon={Mail} title={uiText("未接入任何邮箱")} description={uiText("在邮箱账号中接入个人邮箱（共享邮箱需邮件账户管理权限）并绑定凭据后，同步的邮件会出现在这里。")} action={<Button icon={Settings2} onClick={toAccounts}>{uiText("打开邮箱账号")}</Button>} compact />
+    : !accounts.length && !loading ? <EmptyState icon={Mail} title={uiText("未接入任何邮箱")} action={<Button icon={Settings2} onClick={toAccounts}>{uiText("打开邮箱账号")}</Button>} compact />
     : scoped.length ? <EmptyState icon={SearchX} title={uiText("没有符合条件的邮件")} description={uiText("换个关键词或清除分类筛选。")} action={<Button onClick={() => { setQuery(''); setCategory('all'); }}>{uiText("清除筛选")}</Button>} compact />
     : <EmptyState icon={isDrafts ? PenLine : Inbox} title={ui`${scopeLabel}为空`} description={uiText(isDrafts ? '写邮件后保存草稿，会出现在这里。' : '当前邮箱在这里没有邮件。')} compact />;
   const itemOf = (row: Row) => {
@@ -335,7 +335,7 @@ export function EmailsPage() {
       : selected.kind === 'send'
         ? <SendDetail send={selected.send} state={state} can={can} me={me} locked={locked} onRetry={row => void retrySend(row)} onVerify={row => void verifySend(row)} onConfirmResend={setConfirmResend} />
         : <MessageDetail message={uiText(selected.message)} state={state} can={can} locked={locked} exec={exec} onOpen={(view, id) => go(view, id)} onRespond={mode => respond(selected.message, mode)} onFollowUp={() => setFollowUp(selected.message)} onDownload={id => void downloadAttachment(id)} />
-    : <div className="mist-mail-read-empty"><EmptyState icon={MailOpen} title={uiText(rows.length ? '选择一封邮件阅读' : '没有可阅读的邮件')} description={uiText(loading ? '正在读取邮箱' : '↑ ↓ 键可在列表中切换邮件')} compact /></div>;
+    : <div className="mist-mail-read-empty"><EmptyState icon={MailOpen} title={uiText(rows.length ? '选择一封邮件阅读' : '没有可阅读的邮件')} description={loading ? uiText('正在读取邮箱') : undefined} compact /></div>;
   const sendCompose = async (input: EmailDraftInput, requestKey: string) => { if (compose) setPendingSend({ input, requestKey, ...(compose.id ? { draftId: compose.id } : {}), ...(compose.forwardOfId ? { forwardOfId: compose.forwardOfId } : {}), ...(compose.afterSent ? { afterSent: compose.afterSent } : {}), source: 'compose' }); };
   const saveDraft = async (input: EmailDraftInput, id?: string) => { const receipt = await exec({ type: 'email.draft.save', payload: { ...(id ? { id } : {}), input } }, '草稿已保存'); if (receipt) setCompose(null); };
   const createFollowUp = async (ownerId: string, due: string, note: string) => { if (followUp && await exec({ type: 'email.followUp', payload: { id: followUp.id, ownerId, due, note } }, '已生成跟进待办，并写入日历')) setFollowUp(null); };
@@ -659,7 +659,7 @@ function AccountsDrawer({ state, me, can, canAdmin, locked, run, mail, onClose }
           </div>)}
         {!owner && !a.example && <span className="mist-note">{uiText("由 ")}{a.ownerName}{uiText(" 接入；只有接入人可以修改设置或凭据。")}</span>}
       </Card>; })}</div>
-    : <EmptyState icon={Mail} title={uiText("还没有邮箱")} description={uiText(can ? '接入个人邮箱后可以真实收发邮件。' : '你的账号没有邮件编辑权限，不能接入邮箱。')} compact />}
+    : <EmptyState icon={Mail} title={uiText("还没有邮箱")} description={can ? undefined : uiText('你的账号没有邮件编辑权限，不能接入邮箱。')} compact />}
     {canAdmin && !editing && <TemplateManager state={state} locked={locked} run={run} />}
     <Dialog open={!!confirming} title={uiText(confirming?.kind === 'remove' ? '移除邮箱' : '断开邮箱')} onClose={() => setConfirming(null)} footer={<><Button onClick={() => setConfirming(null)}>{uiText('取消')}</Button><Button variant="danger" disabled={locked || confirming?.kind === 'remove' && !removeReason.trim()} onClick={() => { const c = confirming!; setConfirming(null); void (c.kind === 'disconnect' ? attempt(() => mail({ kind: 'disconnect', accountId: c.id }), '已断开，凭据已删除') : attempt(() => run({ type: 'email.account.remove', payload: { id: c.id, reason: removeReason.trim() } }), '邮箱已移除')); setRemoveReason(''); }}>{uiText(confirming?.kind === 'remove' ? '移除' : '断开')}</Button></>}>
       {confirming?.kind === 'remove' ? <><p className="mist-sub">{uiText(`${confirming.name} 移除后不再收发，已有邮件保留。`)}</p><Field label={uiText('移除原因')} required><TextInput aria-label={uiText('移除原因')} value={removeReason} onChange={e => setRemoveReason(e.target.value)} /></Field></> : <p className="mist-sub">{uiText(`${confirming?.name || ''} 断开后立即停止同步与发信，需重新绑定凭据。`)}</p>}
