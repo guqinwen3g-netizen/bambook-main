@@ -129,7 +129,7 @@ function LeadList({source,parentId,onBack}:{source:'campaign'|'show';parentId:st
  const parent=source==='campaign'?w.market.campaigns.find(x=>x.id===parentId):w.market.shows.find(x=>x.id===parentId);
  const convert=(r:MarketLead):ModuleEditorSpec=>{
   const same=w.state?.customers.find(c=>c.name.trim().toLowerCase()===r.company.trim().toLowerCase());
-  return {title:'转入 CRM · '+r.company,submitLabel:'转入 CRM',description:same?'默认关联同名客户，不重复建档。':'选择新建客户时按线索公司与联系人建立档案；不代表成交或收到货款。',initialValues:{customerId:r.customerId||same?.id||'',withOpportunity:false,title:r.company+' · '+r.demand.slice(0,24),domain:'',amount:r.estimatedValue,currency:r.currency,expectedDate:''},
+  return {title:'转入 CRM · '+r.company,submitLabel:'转入 CRM',description:same?'默认关联同名客户，不重复建档。':'选择新建客户时按线索公司与联系人建立档案；不代表成交或收到货款。',initialValues:{customerId:r.customerId||same?.id||'',withOpportunity:false,title:parent?.name?`${r.company} · ${parent.name}`:r.company,domain:'',amount:r.estimatedValue,currency:r.currency,expectedDate:''},
    fields:[field('customerId','客户',{type:'select',options:[...(same?[]:[{value:'',label:'新建客户：'+r.company}]),...(w.state?.customers||[]).map(c=>({value:c.id,label:c.name}))]}),field('withOpportunity','同时建立商机',{type:'checkbox'}),field('title','商机名称'),field('domain','业务板块',{type:'select',options:[{value:'',label:'请选择业务板块'},{value:'garment',label:'成衣'},{value:'fabric',label:'面料'}]}),field('amount','预计金额'),field('currency','币种',{type:'choice',options:CURRENCIES,strict:true}),field('expectedDate','预计成交日',{type:'date'})],
    submit:async v=>{if(v.withOpportunity&&(!text(v,'title').trim()||!['garment','fabric'].includes(text(v,'domain'))||!text(v,'expectedDate')))throw new Error('请填写商机名称、业务板块与预计成交日');return w.command({type:'market.lead.convertToCrm',payload:{id:r.id,customerId:text(v,'customerId')||undefined,opportunity:v.withOpportunity?{title:text(v,'title'),domain:text(v,'domain') as 'garment'|'fabric',amount:text(v,'amount'),currency:text(v,'currency'),expectedDate:text(v,'expectedDate')}:null}});}};
  };
@@ -145,7 +145,7 @@ function LeadList({source,parentId,onBack}:{source:'campaign'|'show';parentId:st
  <ActionBar busy={w.saving||!!w.pending} actions={[
  {label:'记录进展',onClick:()=>setDialog(progress(r)),reason:!can?'没有线索写权限':r.status==='Converted'?'已转 CRM，请从客户主线跟进':false},
  {label:'转入 CRM',onClick:()=>setDialog(convert(r)),reason:!canCrm?'需要客户关系写权限':r.status==='Converted'?'已转 CRM，无需重复转入':r.status==='Lost'?'请先恢复联系，再转入 CRM':false},
- ...(r.customerId?[{label:'客户业务 · 商机',onClick:()=>w.go('crm',r.customerId,{customerId:r.customerId,section:'opportunities'})},{label:'从客户发起开发',onClick:()=>w.go('development/new',undefined,{customerId:r.customerId}),reason:!w.session.hasPermission('development:write')?'需要开发写权限':false as const}]:[{label:'从客户发起开发',onClick:()=>{},reason:'请先转入 CRM，确定客户后再发起开发'}])
+ ...(r.customerId?[{label:'客户业务 · 商机',onClick:()=>w.go('crm',r.customerId,{customerId:r.customerId,section:'opportunities'})},{label:'从客户发起开发',onClick:()=>w.go('development/new',undefined,{customerId:r.customerId}),reason:!w.session.hasPermission('products:write')?'需要开发写权限':false as const}]:[{label:'从客户发起开发',onClick:()=>{},reason:'请先转入 CRM，确定客户后再发起开发'}])
  ]}/></MarketDetailCard><Attachments kind={source==='show'?'showLead':'lead'} row={r} locked={!can||r.status==='Converted'}/><History id={r.id}/></>}/>
  <ModuleEditorDialog spec={dialog} onClose={()=>setDialog(null)}/></>;
 }

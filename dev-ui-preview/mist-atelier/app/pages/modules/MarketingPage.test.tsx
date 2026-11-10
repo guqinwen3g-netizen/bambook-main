@@ -6,9 +6,9 @@ import { MARKET_PAGES } from './MarketPages';
 import { CAMPAIGN_NEXT, campaignLeads, campaignReminder } from './MarketingPage';
 import { Nav } from '../../nav';
 import { createMistState, type MistState } from '../../../../../server/src/shared/mistWorkspace';
-const bridge = vi.hoisted(() => ({ current: null as any, permissions: true }));
+const bridge = vi.hoisted(() => ({ current: null as any, permissions: true as boolean | string[] }));
 vi.mock('../../runtime/workspace', () => ({ useMistWorkspace: () => bridge.current }));
-vi.mock('../../runtime/auth', () => { const useMistSession = () => ({ user: { id: 'sales' }, hasPermission: () => bridge.permissions, hasRole: () => false, canAccessView: () => true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
+vi.mock('../../runtime/auth', () => { const useMistSession = () => ({ user: { id: 'sales' }, hasPermission: (permission: string) => Array.isArray(bridge.permissions) ? bridge.permissions.includes(permission) : bridge.permissions, hasRole: () => false, canAccessView: () => true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
 let host: HTMLDivElement, root: Root | undefined, state: MistState; const go = vi.fn();
 beforeEach(() => {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; go.mockReset(); bridge.permissions = true;
@@ -67,6 +67,16 @@ describe('营销推广工作台', () => {
     const d = document.querySelector('[role="dialog"]')!; expect(d.textContent).toContain(`新建客户：${l.company}`);
     expect((d.querySelector('[aria-label="业务板块"]') as HTMLSelectElement).value).toBe('');
     await click('转入 CRM', d); expect(bridge.current.run).toHaveBeenCalledWith({ type: 'market.lead.convertToCrm', payload: { id: l.id, customerId: undefined, opportunity: null } });
+  });
+  it.each([true, false])('营销线索发起开发沿用现行 products:write，允许=%s', async allowed => {
+    bridge.permissions = ['marketing:read', 'marketing:write', 'relations:read', 'relations:write', 'products:read', allowed ? 'products:write' : 'development:write'];
+    const c = state.market.campaigns.find(c => c.name.startsWith('AW27'))!, l = state.market.leads.find(x => x.source === 'campaign' && x.parentId === c.id)!;
+    l.status = 'Converted'; l.customerId = state.customers[0].id;
+    await mount(l.id, `campaign-leads:${c.id}`);
+    expect(button('从客户发起开发')!.disabled).toBe(!allowed);
+    await click('从客户发起开发');
+    if (allowed) expect(go).toHaveBeenCalledWith('development/new', undefined, { customerId: l.customerId });
+    else expect(go).not.toHaveBeenCalled();
   });
   it('已转线索可回客户和开发，已流失必须先恢复联系', async () => {
     const c = state.market.campaigns.find(c => c.name.startsWith('AW27'))!, l = state.market.leads.find(x => x.source === 'campaign' && x.parentId === c.id && x.status !== 'Converted')!;
