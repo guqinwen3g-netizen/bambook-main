@@ -67,6 +67,19 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   const router = Router();
   const authenticate = options.authenticate ?? requireAuth;
   const delegation = options.delegation ?? defaultAgentDelegation();
+  const mail = options.mail ?? new MistMailService(repository, new MistMailCredentials(options.mailCredentialsRoot ?? process.env.MIST_MAIL_CREDENTIAL_DIR ?? path.resolve(__dirname, '../../private/mist-mail-credentials')), options.mailTransport);
+  // The system browser has no Bambook credentials. It may only return to the initiating machine.
+  router.get('/email/oauth/callback/:provider', (req, res, next) => {
+    const state = req.query.state;
+    if (typeof state !== 'string' || !state.startsWith('desktop.') || req.query.finish !== undefined) return next();
+    res.set({ 'Cache-Control': 'private, no-store', 'Referrer-Policy': 'no-referrer' });
+    createPublicEntryHostGuard('mist')(req, res, () => {
+      try {
+        const provider = mail.oauth.provider(req.params.provider);
+        res.redirect(303, mail.oauth.desktopReturn(provider, state, req.query.code, req.query.error));
+      } catch (error) { publicError(res, error); }
+    });
+  });
   // 带委托头的请求一律按工作助手身份处理（比本人会话更窄），且只放行工作助手读取接口。
   router.use((req, res, next) => {
     bearerAsAgentCredential(req);
@@ -358,7 +371,6 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
     res.json(await repository.execute(actor(req), req.params.id, body as any));
   }));
   // 智能邮箱真实收发：凭据只写入服务端，响应只含公司投影与操作结果。
-  const mail = options.mail ?? new MistMailService(repository, new MistMailCredentials(options.mailCredentialsRoot ?? process.env.MIST_MAIL_CREDENTIAL_DIR ?? path.resolve(__dirname, '../../private/mist-mail-credentials')), options.mailTransport);
   const mailCall = (handler: (req: Request) => Promise<any>) => run(async (req, res) => { res.setHeader('Cache-Control', 'private, no-store'); const result = await handler(req); res.json({ workspace: result.workspace, receipt: result.receipt, ...(result.sync ? { sync: result.sync } : {}), ...(result.send ? { send: result.send } : {}) }); });
   router.get('/workspaces/:id/agent/files/:fileId/text',run(async(req,res)=>{
     exactBody(req.query,['maxChars']);
@@ -373,6 +385,42 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   router.get('/workspaces/:id/email/receiving',run(async(req,res)=>{exactBody(req.query,[]);res.setHeader('Cache-Control','private, no-store');res.json({serviceAvailable:options.mailReceiver?.running===true,items:await mail.receivingViews(actor(req),req.params.id)});}));
   router.put('/workspaces/:id/email/accounts/:accountId/receiving',run(async(req,res)=>{const body=exactBody(req.body??{},['enabled','requestId','version','sourceGeneration']);if(body.enabled===true&&!options.mailReceiver?.running)fail('MAIL_RECEIVER_UNAVAILABLE','自动收件服务未运行，请稍后重试',503);res.setHeader('Cache-Control','private, no-store');res.json({item:await mail.setReceiving(actor(req),req.params.id,req.params.accountId,body)});}));
   router.put('/workspaces/:id/email/accounts/:accountId/credential', mailCall(req => mail.bindCredential(actor(req), req.params.id, req.params.accountId, exactBody(req.body, ['password']).password)));
+  router.get('/workspaces/:id/email/oauth', run(async (req, res) => {
+    exactBody(req.query, []); await repository.mailSnapshot(actor(req), req.params.id);
+    res.setHeader('Cache-Control', 'private, no-store'); res.json({ providers: mail.oauth.status() });
+  }));
+  router.post('/workspaces/:id/email/oauth/start', run(async (req, res) => {
+    const body = exactBody(req.body, ['provider', 'accountId', 'desktopPort']), provider = mail.oauth.provider(body.provider);
+    if (req.get('Origin') !== mail.oauth.origin(provider)) fail('FORBIDDEN', '请从当前网页入口连接邮箱', 403);
+    if (body.accountId !== undefined && (typeof body.accountId !== 'string' || !body.accountId)) fail('INVALID_INPUT', '邮箱编号无效', 400);
+    const result = await mail.startOAuth(actor(req), req.params.id, provider, body.accountId as string | undefined, body.desktopPort);
+    const callbackPath = '/api/mist/email/oauth/callback/' + provider;
+    res.cookie('bambook_mail_oauth_' + provider, result.cookie, { httpOnly: true, secure: mail.oauth.origin(provider).startsWith('https:'), sameSite: 'lax', path: callbackPath, maxAge: 600_000 });
+    res.setHeader('Cache-Control', 'private, no-store'); res.json({ oauth: { authorizationUrl: result.authorizationUrl } });
+  }));
+  router.get('/email/oauth/callback/:provider', run(async (req, res) => {
+    const provider = mail.oauth.provider(req.params.provider), origin = mail.oauth.origin(provider);
+    res.setHeader('Cache-Control', 'private, no-store'); res.setHeader('Referrer-Policy', 'no-referrer');
+    const name = 'bambook_mail_oauth_' + provider;
+    let status = 'connected', code = '', accountId = '';
+    try {
+      const flow = await mail.oauth.readFlow(req.cookies?.[name], provider, req.query.state, actor(req).userId, actor(req).sessionId || '');
+      await repository.mailSnapshot(actor(req), flow.workspaceId);
+      if (flow.state.startsWith('desktop.') && req.query.finish !== '1') fail('MAIL_OAUTH_STATE_INVALID', '请从桌面完成邮箱连接', 400);
+      await mail.oauth.consumeFlow(flow);
+      res.clearCookie(name, { httpOnly: true, secure: origin.startsWith('https:'), sameSite: 'lax', path: '/api/mist/email/oauth/callback/' + provider });
+      if (req.query.error) { status = req.query.error === 'access_denied' ? 'cancelled' : 'failed'; }
+      else accountId = (await mail.connectOAuth(actor(req), flow, req.query.code)).accountId;
+    } catch (error: any) {
+      status = 'failed';
+      const allowed = new Set(['MAIL_OAUTH_STATE_INVALID', 'MAIL_OAUTH_SCOPE_MISSING', 'MAIL_OAUTH_IDENTITY_INVALID', 'MAIL_OAUTH_ADDRESS_MISMATCH', 'MAIL_OAUTH_RECONNECT', 'MAIL_HOST_NOT_ALLOWED', 'MAIL_OAUTH_IMAP_UNAVAILABLE', 'MAIL_OAUTH_SMTP_UNAVAILABLE', 'MAIL_TLS_UNTRUSTED', 'FORBIDDEN']);
+      code = allowed.has(error?.code) ? error.code : 'MAIL_OAUTH_FAILED';
+    }
+    const target = new URL('/', origin); target.searchParams.set('view', 'emails'); target.searchParams.set('mailConnect', status);
+    if (code) target.searchParams.set('mailConnectCode', code);
+    if (accountId) target.searchParams.set('mailAccount', accountId);
+    res.redirect(303, target.toString());
+  }));
   router.delete('/workspaces/:id/email/accounts/:accountId/credential', mailCall(req => mail.disconnect(actor(req), req.params.id, req.params.accountId)));
   router.post('/workspaces/:id/email/accounts/:accountId/sync', mailCall(req => { exactBody(req.body ?? {}, []); return mail.sync(actor(req), req.params.id, req.params.accountId); }));
   router.post('/workspaces/:id/email/messages/:messageId/analyze', mailCall(req => {

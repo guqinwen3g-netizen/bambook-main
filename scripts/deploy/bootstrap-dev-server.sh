@@ -189,6 +189,8 @@ proxy_buffering off;
 proxy_read_timeout 300s;
 NGINX
 cat > /etc/nginx/sites-available/bambook-dev <<'NGINX'
+# The authorization code and state arrive in the query string.
+log_format bambook_mail_callback '$remote_addr [$time_local] "$request_method $uri $server_protocol" $status $body_bytes_sent';
 server {
     listen 127.0.0.1:8080;
     server_name _;
@@ -200,6 +202,11 @@ server {
         include snippets/bambook-dev-proxy.conf;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+    }
+    location ^~ /api/mist/email/oauth/callback/ {
+        access_log /var/log/nginx/access.log bambook_mail_callback;
+        proxy_pass http://127.0.0.1:8082;
+        include snippets/bambook-dev-proxy.conf;
     }
     location /api/mist/ {
         proxy_pass http://127.0.0.1:8082;

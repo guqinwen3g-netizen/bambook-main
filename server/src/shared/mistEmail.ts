@@ -15,6 +15,7 @@ export type EmailMessageFolder = 'inbox' | 'sent' | 'archive' | 'trash';
 export type EmailLinkKind = 'customer' | 'development' | 'order' | 'invoice' | 'supplier' | 'purchase' | 'quotation' | 'rfq';
 export type EmailLink = { kind: EmailLinkKind; id: string };
 export type EmailConnection = 'not_connected' | 'example' | 'connected' | 'syncing' | 'partial' | 'error';
+export type EmailOAuthProvider = 'google' | 'microsoft';
 /** 收发服务器设置（非秘密）。smtpSecure=false 表示先明文连接再强制 STARTTLS。 */
 export type EmailTransport = { imapHost: string; imapPort: number; imapSecure: boolean; smtpHost: string; smtpPort: number; smtpSecure: boolean; username: string };
 export type EmailProblem = { code: string; message: string; at: string };
@@ -25,6 +26,8 @@ export type EmailAccount = {
   connection: EmailConnection; lastSyncAt: string | null; failedFolders: string[]; example: boolean;
   /** 真实账号的归属：按用户 ID 控制可见与可操作范围；个人邮箱只有本人，共享邮箱为本人 + 授权成员。 */
   ownerId?: string; memberIds?: string[]; transport?: EmailTransport; credentialSet?: boolean; lastError?: EmailProblem | null; folders?: EmailFolderSync[]; syncStartedAt?: string | null;
+  /** Server-owned connection method and private-vault reference. Tokens never enter company state. */
+  oauth?: { provider: EmailOAuthProvider; credentialId: string; connectedAt: string; newMailOnly?: boolean };
   /**
    * 收信来源代际：邮箱地址、收信服务器、端口、加密方式或登录用户名变化即视为换了一个远端邮箱，代际 +1 并清空文件夹游标；
    * 之后同步的去重键与 Message-ID 合并都只在当前代际内进行，旧来源已同步的邮件原样保留。缺省按 1。
@@ -101,6 +104,7 @@ export type EmailCommand =
   // 以下 email.server.* 只能由服务端邮件服务在真实 IMAP / SMTP 操作后提交。
   | { type: 'email.server.analysis'; payload: { id: string; analysis: EmailAnalysis } }
   | { type: 'email.server.account'; payload: { id: string; connection?: EmailConnection; credentialSet?: boolean; lastError?: EmailProblem | null; syncStartedAt?: string | null } }
+  | { type: 'email.server.oauth'; payload: { id?: string; provider: EmailOAuthProvider; credentialId: string; address: string; displayName: string; transport: EmailTransport; initialFolders?: EmailFolderSync[] } }
   | { type: 'email.server.sync'; payload: { accountId: string; source?: number; at: string; folders: EmailFolderSync[]; messages: EmailSyncedMessage[]; files: StoredFile[]; lastError: EmailProblem | null; observations?: MailStateObservation[] } }
   | { type: 'email.server.state'; payload: { accountId: string; source: number; operationId: string; attemptId: string; observation: MailStateObservation } }
   | { type: 'email.server.send.begin'; payload: { mode: 'new'; requestKey: string; draftId?: string; input: EmailDraftInput; forwardOfId?: string; messageId: string } | { mode: 'retry'; id: string; confirmUnknown?: boolean } }
@@ -460,6 +464,25 @@ export function applyEmailCommand(root: MistState, command: EmailCommand, contex
       root.email.drafts = root.email.drafts.filter(row => row.id !== target!.id); return { id: target!.id };
     }
     case 'email.account.save': { const old = command.payload.id ? root.email.accounts.find(a => a.id === command.payload.id) : undefined; if (old?.removed) fail('该邮箱已移除', 'PRECONDITION'); return saveAccount(root, command.payload, context); }
+    case 'email.server.oauth': {
+      const v = command.payload, old = v.id ? account(root, v.id, context) : undefined;
+      if (!['google', 'microsoft'].includes(v.provider) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v.credentialId)) fail('邮箱授权记录无效');
+      if (old && (old.removed || old.example || old.ownerId !== context.actorId)) fail('只有接入本人可重新连接邮箱', 'FORBIDDEN');
+      if (old && old.address !== v.address.trim().toLowerCase()) fail('授权的邮箱与当前邮箱不一致，请选择原邮箱', 'CONFLICT');
+      // Reconnection changes credentials only: sharing, aliases and signature are taken from the current server record.
+      const result = saveAccount(root, { id: v.id, input: { address: v.address, displayName: old?.displayName || v.displayName, kind: old?.kind || 'personal',
+        memberIds: old?.memberIds || [], aliases: old?.aliases || [], signature: old?.signature || '', transport: v.transport } }, context, true);
+      const row = account(root, result.id, context);
+      if (v.initialFolders) {
+        // Keep a live cursor on reconnect. The first restricted connection starts at the observed tail.
+        const priorFolders = row.oauth?.newMailOnly ? row.folders || [] : [];
+        row.folders = v.initialFolders.map(initial => priorFolders.find(f => f.remote === initial.remote && f.uidValidity === initial.uidValidity) || initial);
+      }
+      row.oauth = { provider: v.provider, credentialId: v.credentialId, connectedAt: context.now, ...(v.initialFolders ? { newMailOnly: true } : {}) };
+      row.credentialSet = true; row.connection = 'connected'; row.lastError = null;
+      log(root, context, row.id, `已通过 ${v.provider === 'google' ? 'Google' : 'Microsoft'} 授权连接邮箱 ${row.address}`);
+      return result;
+    }
     case 'email.server.account': {
       const row = account(root, p.id, context); if (row.example) fail('示例邮箱没有真实连接', 'PRECONDITION');
       const v = command.payload;
@@ -545,7 +568,7 @@ function finishSend(root: MistState, v: Extract<EmailCommand, { type: 'email.ser
   return done();
 }
 
-function saveAccount(root: MistState, payload: { id?: string; input: EmailAccountInput }, context: MistContext): { id: string } {
+function saveAccount(root: MistState, payload: { id?: string; input: EmailAccountInput }, context: MistContext, oauthVerified = false): { id: string } {
   if (!context.actorId) fail('需要登录账号才能接入邮箱', 'FORBIDDEN');
   const input = (payload?.input || {}) as EmailAccountInput;
   const address = text(input.address, '邮箱地址', true, 254).toLowerCase(); if (!EMAIL_RE.test(address)) fail('邮箱地址格式无效');
@@ -567,6 +590,7 @@ function saveAccount(root: MistState, payload: { id?: string; input: EmailAccoun
     // 先比较再写入：收信来源（地址/收信服务器/端口/加密/用户名）变化 → 新代际并清空游标；仅发信设置变化 → 只需重新校验凭据，保留收信游标与历史。
     const before = existing.transport, sourceChanged = imapSourceKey(existing.address, before) !== imapSourceKey(address, transport);
     const smtpChanged = !before || before.smtpHost !== transport.smtpHost || before.smtpPort !== transport.smtpPort || before.smtpSecure !== transport.smtpSecure;
+    if (existing.oauth && (sourceChanged || smtpChanged) && !oauthVerified) fail('已授权邮箱的地址和服务器由服务商管理，请重新连接或另建邮箱', 'PRECONDITION');
     const rebind = sourceChanged || smtpChanged, kept = root.email.messages.filter(row => row.accountId === existing.id && !row.example).length;
     Object.assign(existing, { address, displayName, kind, memberIds, memberNames, aliases, signature, transport });
     if (rebind) Object.assign(existing, { credentialSet: false, connection: 'not_connected', lastError: null });

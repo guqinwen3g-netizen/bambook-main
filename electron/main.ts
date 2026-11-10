@@ -20,6 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { OpenBitFunRuntime } from '../scripts/openbitfun-runtime.mjs';
 import { resolveBambookIconPath } from './brandAssets';
+import { prepareMailReturn } from './mailOAuth';
 import { desktopAppOrigin, isTrustedOrigin, trustedOrigins } from './appOrigin';
 
 let openbitfunRuntime: OpenBitFunRuntime | null = null;
@@ -553,6 +554,31 @@ function requireTrustedMainFrame(event: Electron.IpcMainInvokeEvent): void {
     if (!trustedMainFrame(event)) throw new Error('Untrusted caller');
 }
 
+let desktopMail: Awaited<ReturnType<typeof prepareMailReturn>> | undefined;
+ipcMain.handle('mail-oauth:prepare', async (event, provider) => {
+    requireTrustedMainFrame(event);
+    const origin = new URL(event.senderFrame!.url).origin;
+    const flow = await prepareMailReturn(origin, provider);
+    if (!trustedMainFrame(event) || new URL(event.senderFrame!.url).origin !== origin) { flow.cancel(); throw new Error('登录已变化'); }
+    desktopMail?.cancel(); desktopMail = flow;
+    return { id: flow.id, port: flow.port };
+});
+function activeDesktopMail(event: Electron.IpcMainInvokeEvent, id: string) {
+    requireTrustedMainFrame(event);
+    if (!desktopMail || desktopMail.id !== id || desktopMail.origin !== new URL(event.senderFrame!.url).origin) throw new Error('邮箱连接已变化');
+    return desktopMail;
+}
+ipcMain.handle('mail-oauth:open', async (event, id, url) => { await activeDesktopMail(event, id).open(url, value => shell.openExternal(value)); });
+ipcMain.handle('mail-oauth:finish', (event, id) => {
+    const url = activeDesktopMail(event, id).finish(); desktopMail = undefined;
+    focusMainWindow();
+    return event.sender.loadURL(url).catch(() => { throw new Error('无法返回邮箱，请重新连接'); });
+});
+ipcMain.handle('mail-oauth:cancel', (event, id) => {
+    requireTrustedMainFrame(event);
+    if (desktopMail?.id === id) { desktopMail?.cancel(); desktopMail = undefined; }
+});
+
 ipcMain.handle('window:set-traffic-lights', (event, visible: boolean) => {
     requireTrustedMainFrame(event);
     // macOS only — toggles native red/yellow/green circle visibility. No-op
@@ -898,6 +924,7 @@ function createWindow(): void {
         if (isMainFrame) showLoadError('网络被重定向到其他站点');
     });
     mainWindow.on('closed', () => {
+        desktopMail?.cancel(); desktopMail = undefined;
         mainWindow = null;
         if (agentPetWindow && !agentPetWindow.isDestroyed()) {
             agentPetWindow.close();

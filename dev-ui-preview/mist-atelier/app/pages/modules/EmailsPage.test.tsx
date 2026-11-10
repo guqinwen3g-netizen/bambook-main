@@ -5,9 +5,10 @@ import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import {Nav} from '../../nav';
-const store=vi.hoisted(()=>({state:null as MistState|null,loading:false,error:'',saving:false,pending:null as any,run:vi.fn(),refresh:vi.fn(),recover:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn(),mail:vi.fn(),closeMailReview:vi.fn()}));
+const store=vi.hoisted(()=>({state:null as MistState|null,loading:false,error:'',saving:false,pending:null as any,run:vi.fn(),refresh:vi.fn(),recover:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn(),mail:vi.fn(),closeMailReview:vi.fn(),workspace:{id:'company-1'}}));
+const api=vi.hoisted(()=>({request:vi.fn()}));
 const session=vi.hoisted(()=>({denied:new Set<string>()}));
-vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
+vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store,mistApiRequest:api.request}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:'sales',displayName:'顾言'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 import {EmailsPage,contactSuggestion} from './EmailsPage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
@@ -17,7 +18,7 @@ function render(id?:string){act(()=>root.render(<MistRoot><ToastProvider><Nav.Pr
 const button=(label:string)=>[...document.querySelectorAll('button')].find(b=>b.textContent?.trim()===label) as HTMLButtonElement|undefined;
 function analysisMail() { const m=store.state!.email.messages[0];m.example=false;m.analysis={id:'analysis-1',at:ctx.now,actor:'顾言',sourceHash:'test',category:'订单往来',summary:'待确认的订单需求',fields:[{id:'field-1',field:'数量',value:'1,200 件',source:'body',quote:'双面羊毛城市大衣 1,200 件'}],warnings:[],truncated:false,attachmentCount:1};return m; }
 async function click(node:HTMLElement){await act(async()=>node.click());}
-beforeEach(()=>{session.denied=new Set();store.state=createMistState(ctx,'demo');store.run.mockReset();store.run.mockResolvedValue({result:{}});store.mail.mockReset();store.recover.mockReset();store.closeMailReview.mockReset();store.pending=null;store.saving=false;store.downloadFile.mockReset();go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
+beforeEach(()=>{session.denied=new Set();store.state=createMistState(ctx,'demo');store.run.mockReset();store.run.mockResolvedValue({result:{}});store.mail.mockReset();store.recover.mockReset();store.closeMailReview.mockReset();store.pending=null;store.saving=false;store.downloadFile.mockReset();go.mockReset();api.request.mockReset();api.request.mockResolvedValue({providers:[{provider:'google',available:false,reason:'平台尚未配置 Google 邮箱连接'},{provider:'microsoft',available:false,reason:'平台尚未配置 Microsoft 邮箱连接'}]});sessionStorage.clear();window.history.replaceState(null,'','/?view=emails');host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 
 it('requires explicit AI consent and does not call the model when cancelled',async()=>{
@@ -252,6 +253,8 @@ it('connects a mailbox: saves settings without the password, then binds the cred
   store.state=createMistState(ctx,'empty');store.run.mockResolvedValue({result:{id:'acc-new'}});store.mail.mockResolvedValue({});render();
   await click(button('打开邮箱账号')!);
   await click(button('接入邮箱')!);
+  expect(document.querySelector('[aria-label="IMAP 服务器"]')).toBeNull();
+  await click(button('其他邮箱')!);
   type('邮箱地址','sales@sylway.cloud');type('显示名称','业务邮箱');type('IMAP 服务器','mail.sylway.cloud');type('SMTP 服务器','mail.sylway.cloud');type('密码或授权码','s3cret-value');
   await click(button('保存并验证登录')!);
   const command=store.run.mock.calls.at(-1)![0];
@@ -319,4 +322,97 @@ it('a server-confirmed recovered result for a lost intent says nothing was resen
   await click(button('核对发送结果')!);render();
   expect(document.body.textContent).toContain('已有发送记录，未重复投递');expect(host.textContent).not.toContain('待人工核对');
   expect(store.mail).not.toHaveBeenCalled();expect(store.recover).toHaveBeenCalledTimes(1);
+});
+
+const providersOn=()=>api.request.mockResolvedValue({providers:[{provider:'google',available:true,reason:''},{provider:'microsoft',available:true,reason:''}]});
+const flush=async()=>{await act(async()=>{await Promise.resolve();await Promise.resolve();});};
+function oauthState(){const s=realState() as any;s.email.accounts.push({...s.email.accounts[0],id:'acc-gmail',address:'me@gmail.com',displayName:'Gmail',transport:{...transport,imapHost:'imap.gmail.com',smtpHost:'smtp.gmail.com'},oauth:{provider:'google',credentialId:'c0ffee00-0000-4000-8000-000000000001',connectedAt:ctx.now}});return s;}
+
+it('offers Gmail and Outlook first and explains an unconfigured platform instead of a dead button',async()=>{
+  store.state=createMistState(ctx,'empty');render();await click(button('打开邮箱账号')!);await click(button('接入邮箱')!);await flush();
+  expect(api.request).toHaveBeenCalledWith('/api/mist/workspaces/company-1/email/oauth',expect.anything());
+  expect(button('连接 Gmail')!.disabled).toBe(true);expect(button('连接 Outlook')!.disabled).toBe(true);
+  expect(document.body.textContent).toContain('平台尚未配置 Google 邮箱连接');expect(store.mail).not.toHaveBeenCalled();
+});
+it('leaves only for the official provider page and keeps the message being written',async()=>{
+  const {mailOAuthNavigation}=await import('./MailOAuth');const leave=vi.spyOn(mailOAuthNavigation,'leave').mockImplementation(()=>undefined);
+  providersOn();store.state=realState();render();await click(button('写邮件')!);type('正文','尚未发出的正文');
+  await click(button('邮箱账号')!);await click(button('接入邮箱')!);await flush();
+  store.mail.mockResolvedValueOnce({oauth:{authorizationUrl:'https://accounts.google.com.evil.example/o/oauth2/v2/auth?x=1'}});
+  await click(button('连接 Gmail')!);await flush();
+  expect(leave).not.toHaveBeenCalled();expect(document.body.textContent).toContain('邮箱授权地址无效');expect(sessionStorage.getItem('bambook:mail-oauth-draft')).toBeNull();
+  store.mail.mockResolvedValueOnce({oauth:{authorizationUrl:'https://accounts.google.com/o/oauth2/v2/auth?client_id=a&state=b'}});
+  await click(button('连接 Gmail')!);await flush();
+  expect(store.mail).toHaveBeenLastCalledWith({kind:'oauthStart',provider:'google'});
+  expect(leave).toHaveBeenCalledWith('https://accounts.google.com/o/oauth2/v2/auth?client_id=a&state=b');
+  const kept=JSON.parse(sessionStorage.getItem('bambook:mail-oauth-draft')!);
+  expect(kept).toMatchObject({actorId:'sales',workspaceId:'company-1',draft:{input:{body:'尚未发出的正文',accountId:'acc-real'}}});
+  leave.mockRestore();
+});
+it('keeps password fields out of an existing Gmail account before its first authorization',async()=>{
+  providersOn(); store.state=oauthState();
+  const legacy = store.state.email.accounts.find((a:any)=>a.id==='acc-gmail')!;
+  delete legacy.oauth; legacy.credentialSet=false;
+  legacy.lastError = { code: 'MAIL_AUTH_FAILED', message: '收信服务器拒绝登录：用户名或密码不正确', at: ctx.now };
+  render(); await click(button('邮箱账号')!); await flush();
+  const card=document.querySelector('[data-email-account="acc-gmail"]')!;
+  expect(card.textContent).toContain('连接 Gmail');
+  expect(card.textContent).not.toMatch(/密码不正确|绑定邮箱凭据|imap\.gmail\.com/);
+  expect([...card.querySelectorAll('button')].some(b=>b.textContent?.includes('绑定凭据'))).toBe(false);
+  await click([...card.querySelectorAll('button')].find(b=>b.textContent?.trim()==='修改设置')!);
+  expect(document.querySelector('[aria-label="密码或授权码"]')).toBeNull();
+  expect(document.querySelector('[aria-label="IMAP 服务器"]')).toBeNull();
+});
+it('uses the desktop listener and restores the draft before returning to the original session', async()=>{
+  providersOn(); const bridge={prepare:vi.fn(async()=>({port:51234,id:'mock'})),open:vi.fn(async()=>{}),finish:vi.fn(async()=>{}),cancel:vi.fn(async()=>{})};
+  vi.stubGlobal('bambookMailOAuth',bridge);
+  try {
+    render(); await click(button('邮箱账号')!); await click(button('接入邮箱')!); await flush();
+    const url='https://accounts.google.com/o/oauth2/v2/auth?state=desktop.51234.mock';
+    store.mail.mockResolvedValueOnce({oauth:{authorizationUrl:url}});
+    await click(button('连接 Gmail')!); await flush();
+    expect(store.mail).toHaveBeenLastCalledWith({kind:'oauthStart',provider:'google',desktopPort:51234});
+    expect(bridge.open).toHaveBeenCalledWith('mock',url); expect(bridge.finish).toHaveBeenCalledWith('mock');
+  } finally {vi.unstubAllGlobals();}
+});
+it('reconnects an authorized mailbox through the provider and never offers a password or server fields for it',async()=>{
+  const {mailOAuthNavigation}=await import('./MailOAuth');const leave=vi.spyOn(mailOAuthNavigation,'leave').mockImplementation(()=>undefined);
+  providersOn();store.state=oauthState();render();await click(button('邮箱账号')!);await flush();
+  const card=document.querySelector('[data-email-account="acc-gmail"]')!;const inCard=(label:string)=>[...card.querySelectorAll('button')].find(b=>b.textContent?.trim()===label) as HTMLButtonElement|undefined;
+  expect(inCard('绑定凭据')).toBeUndefined();expect(inCard('重新绑定凭据')).toBeUndefined();
+  store.mail.mockResolvedValueOnce({oauth:{authorizationUrl:'https://accounts.google.com/o/oauth2/v2/auth?state=z'}});
+  await click(inCard('重新连接')!);await flush();
+  expect(store.mail).toHaveBeenLastCalledWith({kind:'oauthStart',provider:'google',accountId:'acc-gmail'});expect(leave).toHaveBeenCalledTimes(1);
+  await click(inCard('修改设置')!);
+  expect(document.querySelector('[aria-label="IMAP 服务器"]')).toBeNull();expect(document.querySelector('[aria-label="密码或授权码"]')).toBeNull();
+  expect((document.querySelector('[aria-label="邮箱地址"]') as HTMLInputElement).disabled).toBe(true);
+  type('签名','新的签名');await click(button('保存设置')!);
+  expect(store.run.mock.calls.at(-1)![0]).toMatchObject({type:'email.account.save',payload:{id:'acc-gmail',input:{signature:'新的签名',transport:{imapHost:'imap.gmail.com',smtpHost:'smtp.gmail.com'}}}});
+  expect(store.mail).not.toHaveBeenCalledWith(expect.objectContaining({kind:'bind'}));leave.mockRestore();
+});
+it('on return confirms the connection from company data, restores the kept message and selects the connected sender',async()=>{
+  const {saveMailOAuthDraft}=await import('../../runtime/mailOAuthDraft');
+  store.state=oauthState();
+  saveMailOAuthDraft({actorId:'sales',workspaceId:'company-1'},{input:{accountId:'',from:'',to:'buyer@example.test',cc:'',bcc:'',subject:'Quotation',body:'保留的正文',template:'',fileIds:['file-a','file-gone'],links:[]},afterSent:{type:'market.quotation.status',payload:{id:'q1'}} as any});
+  window.history.replaceState(null,'','/?view=emails&mailConnect=connected&mailAccount=acc-gmail');render();await flush();
+  expect(window.location.search).toBe('?view=emails');
+  expect((document.querySelector('[aria-label="正文"]') as HTMLTextAreaElement).value).toBe('保留的正文');
+  expect(document.body.textContent).toContain('已连接 me@gmail.com');expect(document.body.textContent).toContain('报价单.pdf');
+  expect(sessionStorage.getItem('bambook:mail-oauth-draft')).toBeNull();
+  await click(button('发送')!);await click(button('确认发送')!);
+  expect(store.mail.mock.calls.at(-1)![0]).toMatchObject({kind:'send',input:{accountId:'acc-gmail',from:'me@gmail.com',fileIds:['file-a']}});
+});
+it.each([['connected','acc-real','邮箱连接结果未确认，请在邮箱账号中查看'],['connected','','邮箱连接结果未确认，请在邮箱账号中查看'],['cancelled','','已取消邮箱连接'],['failed','','邮箱连接未完成，请重试']])('does not claim a connection from the address bar alone: %s %s',async(status,accountId,message)=>{
+  store.state=oauthState();window.history.replaceState(null,'','/?view=emails&mailConnect='+status+(accountId?'&mailAccount='+accountId:''));render();await flush();
+  expect(document.body.textContent).toContain(message);expect(document.body.textContent).not.toContain('已连接 me@gmail.com');expect(document.body.textContent).not.toContain('已连接 sales@sylway.cloud');
+  expect(document.body.textContent).toContain('邮箱账号');expect(window.location.search).toBe('?view=emails');
+});
+it.each([
+  ['MAIL_OAUTH_ADDRESS_MISMATCH', '授权的邮箱与当前邮箱不一致，请选择原邮箱'],
+  ['MAIL_OAUTH_SMTP_UNAVAILABLE', '无法连接发信服务器，请联系平台管理员'],
+  ['MAIL_OAUTH_IMAP_UNAVAILABLE', '无法连接收信服务器，请联系平台管理员'],
+  ['MAIL_TLS_UNTRUSTED', '邮箱服务器证书验证失败，请联系平台管理员'],
+])('shows the appropriate recovery for %s', async (code, message) => {
+  store.state=oauthState();window.history.replaceState(null,'','/?view=emails&mailConnect=failed&mailConnectCode='+code);render();await flush();
+  expect(document.body.textContent).toContain(message);
 });

@@ -1,9 +1,10 @@
 import { constants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
+import type { MailOAuthGrant } from './oauthProvider';
 
 /** 邮箱登录凭据：只写入服务端私有目录（目录 0700、文件 0600），不进入公司状态、接口响应、仓库或日志。 */
-export type MistMailSecret = { username: string; password: string };
+export type MistMailSecret = { username: string } & ({ password: string; oauth?: never } | { oauth: MailOAuthGrant; password?: never });
 const ID = /^[A-Za-z0-9-]{1,120}$/;
 
 export class MistMailCredentials {
@@ -32,7 +33,15 @@ export class MistMailCredentials {
       plain = Buffer.concat([decipher.update(Buffer.from(value.data, 'base64')), decipher.final()]);
     }
     const parsed = JSON.parse(plain.toString('utf8'));
-    return typeof parsed.username === 'string' && typeof parsed.password === 'string' ? { username: parsed.username, password: parsed.password } : null;
+    if (typeof parsed.username !== 'string') return null;
+    if (parsed.oauth) {
+      const o = parsed.oauth;
+      if (value.plain || !['google', 'microsoft'].includes(o.provider) || typeof o.subject !== 'string' || !o.subject ||
+        typeof o.accessToken !== 'string' || !o.accessToken || typeof o.refreshToken !== 'string' || !o.refreshToken ||
+        typeof o.expiresAt !== 'number' || !Number.isFinite(o.expiresAt) || o.tenantId !== undefined && typeof o.tenantId !== 'string') return null;
+      return { username: parsed.username, oauth: { provider: o.provider, subject: o.subject, accessToken: o.accessToken, refreshToken: o.refreshToken, expiresAt: o.expiresAt, ...(o.tenantId ? { tenantId: o.tenantId } : {}) } };
+    }
+    return typeof parsed.password === 'string' ? { username: parsed.username, password: parsed.password } : null;
   }
   /** Production must not keep a reversible plain copy, nor store passwords inside a release directory that each deploy replaces. */
   static productionProblem(env: NodeJS.ProcessEnv = process.env): string | null {
@@ -42,6 +51,8 @@ export class MistMailCredentials {
     return null;
   }
   async save(workspaceId: string, accountId: string, secret: MistMailSecret) {
+    // OAuth grants are always encrypted, including local development and tests.
+    if (secret.oauth && (!this.key || this.key.length < 32)) throw Object.assign(new Error('邮箱授权存储尚未配置'), { code: 'MAIL_CREDENTIAL_STORE_UNAVAILABLE' });
     const problem = MistMailCredentials.productionProblem(this.env);
     if (problem) { console.error('[mail-credentials]', problem); throw Object.assign(new Error(problem), { code: 'MAIL_CREDENTIAL_STORE_UNAVAILABLE' }); }
     const { dir, file } = this.file(workspaceId, accountId);

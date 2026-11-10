@@ -37,4 +37,17 @@ describe('邮箱凭据存储（生产前置条件）', () => {
     expect(log).toHaveBeenCalledWith('[mail-credentials] save failed', expect.any(String));
     expect(JSON.stringify(log.mock.calls)).not.toContain('secret-value');expect(JSON.stringify(log.mock.calls)).not.toContain(root);
   });
+
+  it('requires encryption for OAuth even in development and round-trips only the private grant', async () => {
+    const root = await dir(), secret = { username: 'owner@example.test', oauth: { provider: 'google' as const, subject: 'provider-user', accessToken: 'private-access', refreshToken: 'private-refresh', expiresAt: Date.now() + 3600_000 } };
+    await expect(new MistMailCredentials(root, undefined, { NODE_ENV: 'development' }).save('ws-1', 'grant-1', secret)).rejects.toMatchObject({ code: 'MAIL_CREDENTIAL_STORE_UNAVAILABLE' });
+    const store = new MistMailCredentials(root, 'k'.repeat(48), { NODE_ENV: 'test' });
+    await store.save('ws-1', 'grant-1', secret);
+    const raw = await fs.readFile(path.join(root, 'ws-1', 'grant-1.json'), 'utf8');
+    expect(raw).not.toContain('private-access'); expect(raw).not.toContain('private-refresh'); expect(JSON.parse(raw)).not.toHaveProperty('plain');
+    await expect(store.load('ws-1', 'grant-1')).resolves.toEqual(secret);
+    const legacyPlain = { v: 1, plain: Buffer.from(JSON.stringify(secret)).toString('base64') };
+    await fs.writeFile(path.join(root, 'ws-1', 'grant-1.json'), JSON.stringify(legacyPlain));
+    await expect(store.load('ws-1', 'grant-1')).resolves.toBeNull();
+  });
 });

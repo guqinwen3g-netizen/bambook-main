@@ -54,6 +54,7 @@ export interface MistWorkspaceContext {
   closeMailReview?:()=>Promise<void>;
 }
 export type MistMailAction =
+  | { kind: 'oauthStart'; provider: 'google' | 'microsoft'; accountId?: string; desktopPort?: number }
   | { kind: 'bind'; accountId: string; password: string }
   | { kind: 'disconnect'; accountId: string }
   | { kind: 'sync'; accountId: string }
@@ -61,7 +62,7 @@ export type MistMailAction =
   | { kind: 'send'; requestKey: string; draftId?: string; input?: Record<string, unknown>; forwardOfId?: string }
   | { kind: 'retry'; sendId: string; confirmUnknown?: boolean }
   | { kind: 'verify'; sendId: string };
-export interface MistMailResult { sync?: { remaining?: number; failedFolders?: string[]; error?: string | null; [key: string]: unknown }; send?: { id: string; status: string; message?: string; replayed?: boolean; recovered?: boolean; recoveredFor?: string; found?: boolean; foundIn?: string[]; confirmed?: boolean; recipients?: Array<{ address: string; status: string }> } }
+export interface MistMailResult { oauth?: { authorizationUrl: string }; sync?: { remaining?: number; failedFolders?: string[]; error?: string | null; [key: string]: unknown }; send?: { id: string; status: string; message?: string; replayed?: boolean; recovered?: boolean; recoveredFor?: string; found?: boolean; foundIn?: string[]; confirmed?: boolean; recipients?: Array<{ address: string; status: string }> } }
 const Context = React.createContext<MistWorkspaceContext | null>(null);
 const BASE = '/api/mist/workspaces';
 const nonempty = (value: unknown): value is string => typeof value === 'string' && !!value.trim();
@@ -495,7 +496,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
     if(pendingCreateRef.current)throw new RequestError(createNotice(pendingCreateRef.current));
     if(pendingRef.current)throw new RequestError('存在待核对的操作，请先核对原请求结果');
     const ws=encodeURIComponent(boundWorkspaceId!),id=(value:string)=>encodeURIComponent(value);
-    const call:{path:string;method:string;body?:unknown}=action.kind==='bind'?{path:'accounts/'+id(action.accountId)+'/credential',method:'PUT',body:{password:action.password}}
+    const call:{path:string;method:string;body?:unknown}=action.kind==='oauthStart'?{path:'oauth/start',method:'POST',body:{provider:action.provider,...(action.desktopPort?{desktopPort:action.desktopPort}:{}),...(action.accountId?{accountId:action.accountId}:{})}}:action.kind==='bind'?{path:'accounts/'+id(action.accountId)+'/credential',method:'PUT',body:{password:action.password}}
       :action.kind==='disconnect'?{path:'accounts/'+id(action.accountId)+'/credential',method:'DELETE'}
       :action.kind==='sync'?{path:'accounts/'+id(action.accountId)+'/sync',method:'POST',body:{}}
       :action.kind==='analyze'?{path:'messages/'+id(action.messageId)+'/analyze',method:'POST',body:{consent:action.consent}}
@@ -510,7 +511,9 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
     try{
       if(intent)persist(intent,authority);
       const data=await request(BASE+'/'+ws+'/email/'+call.path,{method:call.method,...(call.body!==undefined?{body:JSON.stringify(call.body)}:{})});
-      assertSource(authority,boundEpoch,boundWorkspaceId);const value=envelope(data.workspace,authority.userId!,boundWorkspaceId);
+      assertSource(authority,boundEpoch,boundWorkspaceId);
+      if(action.kind==='oauthStart'){if(!object(data.oauth)||!nonempty(data.oauth.authorizationUrl))throw new RequestError('邮箱授权地址无效');return {oauth:{authorizationUrl:data.oauth.authorizationUrl}};}
+      const value=envelope(data.workspace,authority.userId!,boundWorkspaceId);
       if(intent)writeMailClaim(authority.userId!,mailSendAcknowledged(data,value,intent,authority.userId!));
       put(value,authority);if(intent)clearPending(authority);
       return {...(data.sync?{sync:data.sync}:{}),...(data.send?{send:data.send}:{})};
