@@ -1,7 +1,7 @@
 import {describe,it,expect} from 'vitest';
 import {applyMistCommand,createMistState,type MistContext,type MistState} from './mistWorkspace';
 import {createMarketState,applyMarketCommand,type MarketState,type MarketCommand} from './mistMarket';
-import {CUSTOMER_PAYMENT_TERMS,paymentTermContract,quotationContract} from './mistTradeTerms';
+import {CUSTOMER_PAYMENT_TERMS,paymentTermContract,quotationContract,suggestedReceivableDue} from './mistTradeTerms';
 
 const setup=()=>{let n=0;const ctx:MistContext={id:()=>`tt-${++n}`,now:'2026-10-27T08:00:00.000Z',actorName:'业务员',actorId:'sales',authority:{supplier:{},businessReviewerId:'leader'}};const s=createMistState(ctx) as MistState&{market:MarketState};s.market=createMarketState(ctx,s);return {ctx,s};};
 const run=(s:MistState,c:MarketCommand,ctx:MistContext)=>applyMarketCommand(s,c,ctx);
@@ -39,4 +39,13 @@ describe('报价条款承接到订单合同',()=>{
   const {ctx,s}=setup(),id=accepted(s,ctx,{deliveryTerms:'CIF Felixstowe',paymentTerms:'OA，发票日起 45 天'});
   expect(convert(s,ctx,id).governance?.contract).toMatchObject({incoterm:'CIF',deliveryPlace:'Felixstowe',paymentNote:'OA，发票日起 45 天',paymentMethod:'TT',depositPercent:null});
  });
+});
+
+describe('suggested receivable due date', () => {
+  it('uses the ship date for before-shipment and B/L-copy terms and adds the credit days otherwise', () => {
+    expect(suggestedReceivableDue('T/T 30% 定金，70% 发货前付清', '2026-11-20')).toBe('2026-11-20');
+    expect(suggestedReceivableDue('T/T 见提单副本', '2026-11-20')).toBe('2026-11-20');
+    expect(suggestedReceivableDue('O/A 60 天', '2026-11-20')).toBe('2027-01-19');
+    expect(suggestedReceivableDue('O/A 30 天', '')).toBe('');
+  });
 });

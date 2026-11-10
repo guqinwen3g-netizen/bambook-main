@@ -117,3 +117,10 @@ it('keeps a 100-percent order in current business until fulfilled and excludes v
  expect(relationBusiness(state,relation).orders.map(row=>row.id)).toContain(order.id);for(const id of ['void-row','cancelled-row','fulfilled-row'])expect(relationBusiness(state,relation).orders.map(row=>row.id)).not.toContain(id);
  await mount(relation.id);const detail=host.querySelector('[data-relation-detail]')!;expect(detail.textContent).toContain(order.code);await click('打开');expect(go.mock.calls.at(-1)?.slice(0,2)).toEqual(['orders/detail',order.id]);
 });
+
+describe('relation aliases', () => {
+  it('keeps commas inside English company names and splits only on 、 or new lines', async () => {
+    const { splitRelationAliases } = await import('./RelationsPage');
+    expect(splitRelationAliases('BeiAn Apparel Co., Ltd.、北岸\nNorth Bank Inc.')).toEqual(['BeiAn Apparel Co., Ltd.', '北岸', 'North Bank Inc.']);
+  });
+});

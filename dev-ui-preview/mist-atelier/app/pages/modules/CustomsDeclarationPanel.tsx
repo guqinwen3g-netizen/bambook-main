@@ -5,7 +5,7 @@ import { Ban, Download, FileText, ListChecks, Pencil, Plus } from 'lucide-react'
 import { Banner, Button, Card, CardHeader, DataTable, Facts, Mono, Pill, type Column } from '../../../../../components/mist';
 import type { MistCommand, MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentCustoms } from '../../../../../server/src/shared/mistFulfillment';
-import { CUSTOMS_BRAND_TYPES, CUSTOMS_ELEMENT_LABELS, CUSTOMS_FIELD_LABEL, CUSTOMS_FAMILY_LABEL, CUSTOMS_PREFERENCES, customsItemsStale, defaultLegalUnits, draftCustomsDeclaration, generatedItem, readCustomsClassifications, type CustomsClassification, type CustomsDeclarationItem, type CustomsFamily } from '../../../../../server/src/shared/mistCustomsDeclaration';
+import { CUSTOMS_BRAND_TYPES, CUSTOMS_ELEMENT_LABELS, CUSTOMS_FIELD_LABEL, CUSTOMS_FAMILY_LABEL, CUSTOMS_PREFERENCES, classificationForStyle, customsItemsStale, defaultLegalUnits, hsDigits, draftCustomsDeclaration, generatedItem, readCustomsClassifications, type CustomsClassification, type CustomsDeclarationItem, type CustomsFamily } from '../../../../../server/src/shared/mistCustomsDeclaration';
 import { downloadModuleXlsx, type ModuleEditorSpec, type ModuleValues } from './ModuleWorkbench';
 import { documentGenerationBlocker } from '../../../../../server/src/shared/mistDocumentGeneration';
 import { field, number, text } from './fulfillmentKit';
@@ -16,7 +16,7 @@ const hsText = (hs: string) => hs.length === 10 ? `${hs.slice(0, 4)}.${hs.slice(
 const money = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const elementKey = (i: number) => 'element' + i;
 
-export function classificationSpec(family: CustomsFamily, run: (c: MistCommand) => Promise<unknown>, old?: CustomsClassification): ModuleEditorSpec {
+export function classificationSpec(family: CustomsFamily, run: (c: MistCommand) => Promise<unknown>, old?: CustomsClassification, seed?: { hsCode: string; declaredName: string; styles: string[] }): ModuleEditorSpec {
   const labels = CUSTOMS_ELEMENT_LABELS[family], defaults = defaultLegalUnits(family === 'garment' ? '6203' : '5112');
   return {
     title: old ? `修改商品归类 ${old.code}` : `新建${CUSTOMS_FAMILY_LABEL[family]}商品归类`, submitLabel: old ? '保存修改' : '建立归类',
@@ -32,7 +32,7 @@ export function classificationSpec(family: CustomsFamily, run: (c: MistCommand) 
       { ...field('secondUnit', '法定第二单位', 'choice', false, CUSTOMS_UNITS), strict: true, hint: `默认${defaults.secondUnit || '无'}` },
       field('note', '备注', 'textarea', false),
     ],
-    initialValues: { hsCode: old?.hsCode || '', declaredName: old?.declaredName || '', styles: old?.styles.join(', ') || '', colors:old?.colors?.join(', ')||'', brandType: old?.brandType || '0', preference: old?.preference || '0', ...Object.fromEntries(labels.map((_, i) => [elementKey(i), old?.elements[i] || (labels[i] === '品牌' ? '无品牌' : '')])), legalUnit: old?.legalUnit || '', secondUnit: old ? old.secondUnit : defaults.secondUnit, note: old?.note || '' },
+    initialValues: { hsCode: old?.hsCode || seed?.hsCode || '', declaredName: old?.declaredName || seed?.declaredName || '', styles: old?.styles.join(', ') || seed?.styles.join(', ') || '', colors:old?.colors?.join(', ')||'', brandType: old?.brandType || '0', preference: old?.preference || '0', ...Object.fromEntries(labels.map((_, i) => [elementKey(i), old?.elements[i] || (labels[i] === '品牌' ? '无品牌' : '')])), legalUnit: old?.legalUnit || '', secondUnit: old ? old.secondUnit : defaults.secondUnit, note: old?.note || '' },
     submit: (v: ModuleValues) => run({ type: 'fulfillment.customs.classify.save', payload: { ...(old ? { id: old.id } : {}), family, hsCode: text(v, 'hsCode'), declaredName: text(v, 'declaredName'), styles: text(v, 'styles').split(/[,，、\s]+/).filter(Boolean), ...(family==='fabric'?{colors:text(v,'colors').split(/[,，、]/).map(value=>value.trim()).filter(Boolean)}:{}), brandType: text(v, 'brandType'), preference: text(v, 'preference'), elements: labels.map((_, i) => text(v, elementKey(i))), legalUnit: text(v, 'legalUnit'), secondUnit: text(v, 'secondUnit'), note: text(v, 'note') } } as MistCommand),
   };
 }
@@ -81,6 +81,10 @@ export function CustomsItemsBlock({ record: c, state, can, locked, run, open, on
   const closed = !s || s.state === 'departed' || s.state === 'cancelled';
   const reason = !can ? '需要报关单证权限' : c.status === 'cleared' ? '已放行的报关记录不可改动' : closed ? '出运已离港或已取消' : draft?.blockers.length ? '先处理下列问题' : false;
   const editable = can && c.status !== 'cleared' && !closed;
+  // 本票尚未归类的款号：从报关记录直接建立归类，预填款号、品名与记录上的 10 位商品编号。
+  const family: CustomsFamily = s?.domain === 'fabric' ? 'fabric' : 'garment';
+  const unclassified = s ? [...new Map(s.lines.map(l => state.orderLines.find(ol => ol.id === l.lineId)).filter((ol): ol is NonNullable<typeof ol> => !!ol?.style && !classificationForStyle(state, ol.style)).map(ol => [ol.style, ol])).values()] : [];
+  const seed = unclassified.length ? { hsCode: hsDigits(c.hsCode || '').length === 10 && !c.hsCode.includes('/') ? hsDigits(c.hsCode) : '', declaredName: unclassified.length === 1 ? unclassified[0].name : '', styles: unclassified.map(ol => ol.style) } : undefined;
   const totals = new Map<string, number>(); for (const i of items) totals.set(i.currency, Math.round(((totals.get(i.currency) || 0) + i.amount) * 100) / 100);
   const columns: Column<CustomsDeclarationItem>[] = [
     { key: 'no', header: '项号', width: '52px', render: i => i.no },
@@ -100,6 +104,7 @@ export function CustomsItemsBlock({ record: c, state, can, locked, run, open, on
     {c.status !== 'cleared' && draft && draft.blockers.length > 0 && <Banner tone="warn" title={uiText("还不能生成")}>{draft.blockers.join('；')}</Banner>}
     {can && c.status !== 'cleared' && <ActionBar busy={locked} actions={[
       { label: items.length ? '重新生成商品项' : '生成申报商品项', icon: ListChecks, primary: !items.length || stale, reason, onClick: () => void run({ type: 'fulfillment.customs.items', payload: { id: c.id } } as MistCommand) },
+      ...(seed && editable ? [{ label: '为本票款号建立归类', icon: Plus, onClick: () => open(classificationSpec(family, run, undefined, seed)) }] : []),
       { label: '维护商品归类', onClick: onClassify },
     ] as ReasonedAction[]} />}
     {s && <ActionBar busy={locked} actions={[

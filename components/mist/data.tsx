@@ -113,7 +113,7 @@ export function DataTable<T>({ columns, rows, rowKey, selectedKey, onRowClick, o
             onClick={onRowClick ? e => { if (!rowEventFromControl(e)) onRowClick(r); } : undefined}
             onDoubleClick={onRowDoubleClick ? e => { if (!rowEventFromControl(e)) onRowDoubleClick(r); } : undefined}
             onKeyDown={onRowClick ? e => { if (e.key === 'Enter' && e.target === e.currentTarget) (onRowDoubleClick ?? onRowClick)(r); } : undefined}>
-            {columns.map((c, ci) => <div key={c.key} role="cell" className={c.align === 'right' ? 'mist-cell-r' : undefined} data-hide-sm={c.hideOnMobile || undefined} data-col={ci} style={{ minWidth: 0 }}>{uiText(c.render(r, i))}</div>)}
+            {columns.map((c, ci) => <div key={c.key} role="cell" className={c.align === 'right' ? 'mist-cell-r' : undefined} data-hide-sm={c.hideOnMobile || undefined} data-col={ci} data-label={typeof c.header === 'string' && c.header ? uiText(c.header) : undefined} style={{ minWidth: 0 }}>{uiText(c.render(r, i))}</div>)}
           </div>
         );
       })}

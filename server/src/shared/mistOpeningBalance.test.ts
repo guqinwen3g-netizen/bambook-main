@@ -28,6 +28,18 @@ describe('期初未结应收', () => {
     expect(mistPayerMatchesInvoice(f.state, invoice, 'Nordic Wear AB')).toBe(true);
     expect(mistPayerMatchesInvoice(f.state, invoice, '其他公司')).toBe(false);
   });
+  it('付款方按关系智库别名（英文名）及忽略大小写、标点的写法视为同名', () => {
+    const f = fixture();
+    f.run({ type: 'opening.receivable.import', payload: { rows: [row()] } });
+    const invoice = f.state.invoices[0], customerId = f.state.customers.find(c => c.code === 'C-NW')!.id;
+    expect(mistPayerMatchesInvoice(f.state, invoice, 'NORDIC WEAR AB.')).toBe(true);
+    expect(mistPayerMatchesInvoice(f.state, invoice, 'NORDIC KLADER AKTIEBOLAG')).toBe(false);
+    const relations = ((f.state as unknown as { market: { relations: Array<{ customerId?: string; name: string; aliases: string[] }> } }).market.relations ||= []);
+    const relation = relations.find(r => r.customerId === customerId);
+    if (relation) relation.aliases = [...(relation.aliases || []), 'Nordic Kläder Aktiebolag']; else relations.push({ customerId, name: 'Nordic Wear AB', aliases: ['Nordic Kläder Aktiebolag'] });
+    expect(mistPayerMatchesInvoice(f.state, invoice, 'NORDIC KLÄDER AKTIEBOLAG')).toBe(true);
+    expect(mistPayerMatchesInvoice(f.state, invoice, 'Other Trading Ltd')).toBe(false);
+  });
   it('权限为开票权；市场导入不接受期初类型', () => {
     expect(mistCommandPermission({ type: 'opening.receivable.import', payload: { rows: [] } } as unknown as MistCommand)).toBe('invoices:write');
     expect(mistCommandPermission({ type: 'opening.receivable.void', payload: { invoiceId: 'x', reason: 'y' } } as unknown as MistCommand)).toBe('invoices:write');

@@ -38,6 +38,8 @@ export function relationContacts(state: MistState | null, r: MarketRelation): Ma
   if (!r.customerId) return r.contacts;
   return (state?.contacts || []).filter(c => c.customerId === r.customerId).map(c => ({ id: c.id, name: c.name, role: c.role, email: c.email, phone: c.phone, primary: !!r.contacts.find(x => x.id === c.id)?.primary }));
 }
+/** 别名按顿号或换行分隔；英文名中的逗号（如 Co., Ltd.）属于名称本身。 */
+export const splitRelationAliases = (value: string) => value.split(/[、\n]/).map(x => x.trim()).filter(Boolean);
 export type RelationWorkbenchProps = { attachments: (r: MarketRelation, locked: boolean) => React.ReactNode; history: (id: string) => React.ReactNode };
 
 export function RelationWorkbench({ attachments, history }: RelationWorkbenchProps) {
@@ -75,7 +77,7 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
       { key: 'country', label: '国家地区', type: 'choice', options: COUNTRIES, readonly: linked(r) && !!r?.supplierId && !r?.customerId }, { key: 'address', label: '地址', readonly: linked(r) && !!r?.supplierId && !r?.customerId },
       { key: 'aliases', label: '别名', hint: '用顿号分隔' }, { key: 'note', label: '偏好与备注', type: 'textarea' },
     ],
-    submit: async v => { const res = await run({ type: 'market.relation.save', payload: { id: r?.id, input: { name: String(v.name ?? ''), category: String(v.category) as MarketRelation['category'], customerId: r?.customerId || '', supplierId: r?.supplierId || '', country: String(v.country ?? ''), address: String(v.address ?? ''), aliases: String(v.aliases ?? '').split(/[、,\n]/).map(x => x.trim()).filter(Boolean), note: String(v.note ?? ''), fileIds: r?.fileIds || [] } } }); const id = String((res.result as { id?: string }).id || ''); if (!r && id) { setPicked(id); go('relations', id); } },
+    submit: async v => { const res = await run({ type: 'market.relation.save', payload: { id: r?.id, input: { name: String(v.name ?? ''), category: String(v.category) as MarketRelation['category'], customerId: r?.customerId || '', supplierId: r?.supplierId || '', country: String(v.country ?? ''), address: String(v.address ?? ''), aliases: splitRelationAliases(String(v.aliases ?? '')), note: String(v.note ?? ''), fileIds: r?.fileIds || [] } } }); const id = String((res.result as { id?: string }).id || ''); if (!r && id) { setPicked(id); go('relations', id); } },
   });
   const holdSpec = (r: MarketRelation, frozen: boolean): RelationEditorSpec => {
     const effects = [r.customerId && '暂停新报价和订单，出运须逐票批准。', r.supplierId && '暂停新采购。'].filter(Boolean).join('');

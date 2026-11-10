@@ -42,3 +42,12 @@ export function quotationContract(quote: { deliveryTerms?: string; paymentTerms?
   const place = code ? terms.slice(code.length).replace(/^[\s,，.]+/, '').trim() : '';
   return { ...(code ? { incoterm: code, deliveryPlace: place } : terms ? { incoterm: terms } : {}), ...(quote.paymentTerms?.trim() ? paymentTermContract(quote.paymentTerms.trim()) : {}) };
 }
+
+/** 按客户付款条件推算出运应收的建议到期日：发货前 / 预付类以计划出运日为限，见提单 / 即期以 ETD 为准，「N 天」类在 ETD 后顺延 N 天。仅作预填，业务可改。 */
+export function suggestedReceivableDue(paymentNote: string | undefined, shipDate: string | undefined): string {
+  if (!shipDate || !/^\d{4}-\d{2}-\d{2}$/.test(shipDate)) return '';
+  const days = Number((paymentNote || '').match(/(\d+)\s*天/)?.[1] || 0);
+  if (!days) return shipDate;
+  const [y, m, d] = shipDate.split('-').map(Number), at = new Date(Date.UTC(y, m - 1, d + days)), pad = (n: number) => String(n).padStart(2, '0');
+  return `${at.getUTCFullYear()}-${pad(at.getUTCMonth() + 1)}-${pad(at.getUTCDate())}`;
+}
