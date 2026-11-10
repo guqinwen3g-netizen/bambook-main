@@ -21,6 +21,27 @@ function fabric(id:string,form:string,unit:string,quantity:number,available:numb
 beforeEach(()=>{presentedError=undefined;store.error='';write.allowed=true;store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'业务员'},'empty');store.run.mockReset();go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 
+it('opens a linked sample on compact screens and opens the next linked sample after closing',async()=>{
+  const matchMedia=window.matchMedia;
+  window.matchMedia=vi.fn().mockImplementation((query:string)=>({matches:query==='(max-width: 1180px)',media:query,addEventListener:vi.fn(),removeEventListener:vi.fn()}));
+  try{
+    store.state!.fulfillment.samples.push(
+      {...fabric('smp-one','开发样','件',1,1),category:'成衣',name:'羊毛短大衣'},
+      {...fabric('smp-two','开发样','件',1,1),category:'成衣',name:'棉麻夹克'},
+    );
+    render('smp-one');
+    let drawer=getByRole(document.body,'dialog',{name:'羊毛短大衣'});
+    expect(drawer.textContent).toContain('SMP-ONE');
+    await act(async()=>getByRole(drawer,'button',{name:'关闭',exact:true}).click());
+    expect(queryByRole(document.body,'dialog')).toBeNull();
+    render('smp-two');
+    drawer=getByRole(document.body,'dialog',{name:'棉麻夹克'});
+    expect(drawer.textContent).toContain('SMP-TWO');
+    render();
+    expect(queryByRole(document.body,'dialog')).toBeNull();
+  }finally{window.matchMedia=matchMedia;}
+});
+
 it.each([{domain:'fabric',category:'羊毛混纺斜纹'},{domain:'garment',category:'面料拼接夹克'}] as const)('sends a returned sample to its explicit $domain QC domain',async({domain,category})=>{
   store.state!.devs.push({id:'dev',code:'DEV-DOMAIN',values:{domain,category}} as any);
   store.state!.versions.push({id:'ver',devId:'dev',factory:'试样厂',label:'R1-A'} as any);

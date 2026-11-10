@@ -33,6 +33,39 @@ beforeEach(async () => {
 });
 afterEach(async () => { await rm(directory, { recursive: true, force: true }); });
 
+describe('样品借出使用当前公司成员目录', () => {
+  async function createSample() {
+    auth.users.get('owner')!.permissions.push('products:write');
+    db.accounts.set('other', { displayName: '陈沐', status: 'active' });
+    const created = await execute({ type: 'fulfillment.samples.create', payload: { name: '羊毛短大衣', category: '成衣', form: '开发样', quantity: 1, unit: '件', location: 'A-01', size: 'M', color: '燕麦色', source: { kind: 'manual', description: '工厂来样' }, fileIds: [], note: '' } }, 'create-loan-sample', actor('owner'));
+    return created.receipt.result.id!;
+  }
+  it('预演不落库，实际借给同事后绑定账号与服务端姓名，再按原借出归还', async () => {
+    const id = await createSample();
+    const command: MistCommand = { type: 'fulfillment.samples.move', payload: { id, kind: 'lend', quantity: 1, borrowerId: 'other', person: '客户端伪造姓名', location: '样品评审室', expectedReturn: '2026-10-20', note: '' } };
+    const input = { requestId: 'lend-to-colleague', expectedRevision: db.workspaces.get(workspaceId).revision, command };
+    const before = structuredClone(db.workspaces.get(workspaceId)), receipts = db.receipts.size;
+    await repo.preview(actor('owner'), workspaceId, input);
+    expect(db.workspaces.get(workspaceId)).toEqual(before);
+    expect(db.receipts.size).toBe(receipts);
+    const loan = await repo.execute(actor('owner'), workspaceId, input);
+    let state = db.workspaces.get(workspaceId).state;
+    expect(state.fulfillment.sampleMovements.find((move: any) => move.id === loan.receipt.result.id)).toMatchObject({ borrowerId: 'other', person: '陈沐', actor: 'owner', quantity: 1 });
+    expect(state.fulfillment.samples.find((sample: any) => sample.id === id).available).toBe(0);
+    await execute({ type: 'fulfillment.samples.move', payload: { id, kind: 'return', quantity: 1, loanId: loan.receipt.result.id!, person: '陈沐', location: 'A-01', note: '' } }, 'return-colleague-loan', actor('owner'));
+    state = db.workspaces.get(workspaceId).state;
+    expect(state.fulfillment.samples.find((sample: any) => sample.id === id).available).toBe(1);
+  });
+  it.each(['foreign', 'inactive'])('拒绝 %s 借用人，余额、版本及回执保持不变', async condition => {
+    const id = await createSample();
+    if (condition === 'inactive') db.accounts.set('other', { displayName: '陈沐', status: 'disabled' });
+    const before = structuredClone(db.workspaces.get(workspaceId)), receipts = db.receipts.size;
+    await expect(execute({ type: 'fulfillment.samples.move', payload: { id, kind: 'lend', quantity: 1, borrowerId: condition === 'foreign' ? 'foreign-user' : 'other', person: '陈沐', location: '', note: '' } }, 'invalid-borrower', actor('owner'))).rejects.toThrow(condition === 'foreign' ? /本公司/ : /停用/);
+    expect(db.workspaces.get(workspaceId)).toEqual(before);
+    expect(db.receipts.size).toBe(receipts);
+  });
+});
+
 describe('个人通知已读与共享事项动作均受当前账号可见来源约束', () => {
   for (const subject of ['other', 'owner']) {
     it.each([

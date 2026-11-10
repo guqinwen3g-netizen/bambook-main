@@ -81,8 +81,8 @@ export function SamplesPage() {
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
   const [syncError, setSyncError] = useRouteDraft(''), [syncing, setSyncing] = React.useState(false);
   const [query, setQuery] = React.useState(''), [form, setForm] = React.useState('all'), [origin, setOrigin] = React.useState('all'), [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all');
-  const [page, setPage] = React.useState(1), [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(false);
-  React.useEffect(() => { setPicked(route.id || null); }, [route.id]);
+  const [page, setPage] = React.useState(1), [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
+  React.useEffect(() => { setPicked(route.id || null); setDrawer(!!route.id); }, [route.id]);
   const day = today(), can = session.hasPermission('products:write'), locked = saving || !!pending;
 
   // Shipment context: only this shipment's shipping samples, bound to its exact production branch.
