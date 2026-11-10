@@ -6620,5 +6620,7 @@
   "审批时未冻结收款账户，须由申请人撤回后重新提交审批": "No payee account was locked at approval; the requester must withdraw and resubmit",
   "暂不指定": "Not specified",
   "还没有可报价的产品或开发版本": "No products or development versions to quote yet",
-  "新建开发": "New development"
+  "新建开发": "New development",
+  "暂无成衣开发案": "No garment development cases yet",
+  "暂无面料开发案": "No fabric development cases yet"
 }

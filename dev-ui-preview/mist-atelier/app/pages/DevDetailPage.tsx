@@ -249,7 +249,7 @@ export function DevDetailPage(){
         <Card id="mist-dev-sample"><CardHeader title={uiText("版本附件")} />{files.length?files.map(file=><div className="mist-row" key={file!.id} style={{padding:'10px 22px'}}><FileName file={file!} files={files} /><ImageRoleTag files={state?.files} ids={version?.fileIds||dev.fileIds} id={file!.id} /><span className="mist-spacer" /><TextLink icon={Download} onClick={()=>void downloadFile(file!).catch(cause=>setFailure(String(cause)))}>{uiText("下载")}</TextLink></div>):<EmptyState compact title={uiText("本版暂无附件")} />}</Card>
       </div>
       <div>
-        <Card clip id="mist-dev-confirmation">
+        <Card clip id="mist-dev-confirmation" style={version&&!version.qc&&!version.qcDecision?{order:1}:undefined}>
           <div className="mist-action-top"><span className="mist-eyebrow">{uiText("04 · 需求方确认")}</span><h2 className="mist-h1">{uiText("确认这一版。")}</h2><div className="mist-action-src"><b style={{fontWeight:500,color:'var(--mist-ink)'}}>{version?.factory||'待安排工厂'} · {version?.label||'未建立版本'}</b><span className="mist-sep" /><Pill tone={version?.qc?.result==='reject'?'bad':version?.qc?.result==='conditional'?'warn':version?.qc?'ok':'neutral'}>{uiText(version?.qc?`QC ${qcLabel[version.qc.result]}`:'QC 待评审')}</Pill>{version?.qc?.result==='conditional'&&<Pill tone="warn">{uiText("需关注")}</Pill>}</div></div>
           {qcGate&&<div style={{padding:'4px 24px 8px'}}>{qcGate}</div>}
           {!(qcFailed||version?.qcDecision)&&<><div style={{padding:'4px 24px 0'}}><ChoiceCards ariaLabel={uiText("确认结论")} value={form.result} onChange={value=>set('result',value)} options={[{value:'approved',title:'认可',icon:CircleCheck},{value:'needs_adjustment',title:'需修改',icon:Pencil},{value:'rejected',title:'不采用',icon:X}]} /></div>
