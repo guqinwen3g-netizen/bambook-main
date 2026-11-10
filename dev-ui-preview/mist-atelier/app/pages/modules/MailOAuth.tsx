@@ -1,4 +1,5 @@
 import React from 'react';
+import { Mail } from 'lucide-react';
 import { Button } from '../../../../../components/mist';
 import { uiText } from '../../../../../services/interfaceLanguage';
 import type { EmailAccount, EmailOAuthProvider } from '../../../../../server/src/shared/mistEmail';
@@ -7,6 +8,8 @@ import { useMistSession } from '../../runtime/auth';
 
 type Provider = { provider: EmailOAuthProvider; available: boolean; reason: string };
 const LABELS = { google: '连接 Gmail', microsoft: '连接 Outlook' } as const;
+/** The only place that leaves the app for a provider page. */
+export const mailOAuthNavigation = { leave: (url: string) => window.location.assign(url) };
 export function mailOAuthProvider(account: EmailAccount): EmailOAuthProvider | undefined {
   if (account.oauth) return account.oauth.provider;
   const host = account.transport?.imapHost.trim().toLowerCase();
@@ -46,7 +49,7 @@ export function useMailOAuth(can: boolean, mail: (action: MistMailAction) => Pro
     finally { if (!signal?.aborted && live.current === scope && serial === request.current) setLoading(false); }
   }, [can, workspaceId, scope]);
   React.useEffect(() => { const abort = new AbortController(); void load(abort.signal); return () => abort.abort(); }, [load]);
-  const reason = (provider: EmailOAuthProvider) => !can ? '需要邮件权限' : loading ? '正在读取邮箱连接设置' : providers.find(p => p.provider === provider)?.available ? '' : providers.find(p => p.provider === provider)?.reason || '平台尚未配置邮箱连接';
+  const reason = (provider: EmailOAuthProvider) => !can ? '需要邮件权限' : loading ? '正在读取邮箱连接设置' : error ? '无法读取邮箱连接设置' : providers.find(p => p.provider === provider)?.available ? '' : providers.find(p => p.provider === provider)?.reason || '平台尚未配置邮箱连接';
   const connect = async (provider: EmailOAuthProvider, accountId?: string) => {
     if (connecting.current) return;
     const blocked = reason(provider); if (blocked) throw new Error(blocked);
@@ -58,14 +61,17 @@ export function useMailOAuth(can: boolean, mail: (action: MistMailAction) => Pro
       try { url = new URL(result.oauth?.authorizationUrl || ''); } catch { throw new Error('邮箱授权地址无效'); }
       const expected = provider === 'google' ? 'https://accounts.google.com/o/oauth2/v2/auth' : 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
       if (url.username || url.password || url.origin + url.pathname !== expected) throw new Error('邮箱授权地址无效');
-      beforeConnect(); window.location.assign(url.toString());
+      beforeConnect(); mailOAuthNavigation.leave(url.toString());
     } finally { connecting.current = false; if (mounted.current && live.current === scope) setBusy(false); }
   };
   return { reason, connect, loading, busy, error, retry: () => void load() };
 }
 export function MailOAuthChoices({ control, locked, connect }: { control: ReturnType<typeof useMailOAuth>; locked: boolean; connect: (provider: EmailOAuthProvider) => void }) {
-  return <div className="mist-col" style={{ gap: 12 }}>{(['google', 'microsoft'] as const).map(provider => {
-    const reason = control.reason(provider);
-    return <div key={provider} className="mist-col" style={{ gap: 6 }}><Button disabled={locked || control.busy || !!reason} loading={control.loading} onClick={() => connect(provider)}>{uiText(LABELS[provider])}</Button>{reason && <span className="mist-note">{uiText(reason)}</span>}</div>;
-  })}{control.error && <><span className="mist-note" data-tone="bad">{control.error}</span><Button size="sm" onClick={control.retry}>{uiText('重试')}</Button></>}</div>;
+  const reasons = [...new Set((['google', 'microsoft'] as const).map(provider => control.reason(provider)).filter(Boolean))];
+  return <div className="mist-col" style={{ gap: 10 }}>
+    <div className="mist-row" style={{ flexWrap: 'wrap', gap: 10 }}>{(['google', 'microsoft'] as const).map(provider =>
+      <Button key={provider} variant="primary" icon={Mail} disabled={locked || control.busy || !!control.reason(provider)} loading={control.loading} onClick={() => connect(provider)}>{uiText(LABELS[provider])}</Button>)}</div>
+    {control.error ? <div className="mist-row" style={{ flexWrap: 'wrap', gap: 8 }}><span className="mist-note" data-tone="bad">{uiText(control.error)}</span><Button size="sm" onClick={control.retry}>{uiText('重试')}</Button></div>
+      : !control.loading && reasons.map(reason => <span key={reason} className="mist-note">{uiText(reason)}</span>)}
+  </div>;
 }

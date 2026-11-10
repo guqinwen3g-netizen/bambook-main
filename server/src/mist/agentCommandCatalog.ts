@@ -395,6 +395,15 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistEmail.ts"
  },
  {
+  "type": "email.server.oauth",
+  "payload": "{ id?: string; provider: EmailOAuthProvider; credentialId: string; address: string; displayName: string; transport: EmailTransport }",
+  "types": {
+   "EmailOAuthProvider": "'google' | 'microsoft'",
+   "EmailTransport": "{ imapHost: string; imapPort: number; imapSecure: boolean; smtpHost: string; smtpPort: number; smtpSecure: boolean; username: string }"
+  },
+  "source": "server/src/shared/mistEmail.ts"
+ },
+ {
   "type": "email.server.send.begin",
   "payload": "{ mode: 'new'; requestKey: string; draftId?: string; input: EmailDraftInput; forwardOfId?: string; messageId: string } | { mode: 'retry'; id: string; confirmUnknown?: boolean }",
   "types": {

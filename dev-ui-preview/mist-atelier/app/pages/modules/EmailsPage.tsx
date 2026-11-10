@@ -688,10 +688,11 @@ function AccountsDrawer({ state, me, can, canAdmin, locked, run, mail, notice = 
             {a.credentialSet && <Button size="sm" icon={Unlink} disabled={locked} onClick={() => setConfirming({ kind: 'disconnect', id: a.id, name: a.address })}>{uiText("断开")}</Button>}
             {!a.credentialSet && !a.example && <Button size="sm" variant="quiet" disabled={locked} onClick={() => setConfirming({ kind: 'remove', id: a.id, name: a.address })}>{uiText("移除邮箱")}</Button>}
           </div>)}
+        {owner && can && providerReason && !oauth.loading && <span className="mist-note">{uiText(providerReason)}</span>}
         {!owner && !a.example && <span className="mist-note">{uiText("由 ")}{a.ownerName}{uiText(" 接入；只有接入人可以修改设置或凭据。")}</span>}
       </Card>; })}</div>
     : <EmptyState icon={Mail} title={uiText("还没有邮箱")} description={can ? undefined : uiText('你的账号没有邮件编辑权限，不能接入邮箱。')} compact />}
-    {canAdmin && !editing && <TemplateManager state={state} locked={locked} run={run} />}
+    {canAdmin && !editing && !adding && <TemplateManager state={state} locked={locked} run={run} />}
     <Dialog open={!!confirming} title={uiText(confirming?.kind === 'remove' ? '移除邮箱' : '断开邮箱')} onClose={() => setConfirming(null)} footer={<><Button onClick={() => setConfirming(null)}>{uiText('取消')}</Button><Button variant="danger" disabled={locked || confirming?.kind === 'remove' && !removeReason.trim()} onClick={() => { const c = confirming!; setConfirming(null); void (c.kind === 'disconnect' ? attempt(() => mail({ kind: 'disconnect', accountId: c.id }), '已断开，凭据已删除') : attempt(() => run({ type: 'email.account.remove', payload: { id: c.id, reason: removeReason.trim() } }), '邮箱已移除')); setRemoveReason(''); }}>{uiText(confirming?.kind === 'remove' ? '移除' : '断开')}</Button></>}>
       {confirming?.kind === 'remove' ? <><p className="mist-sub">{uiText(`${confirming.name} 移除后不再收发，已有邮件保留。`)}</p><Field label={uiText('移除原因')} required><TextInput aria-label={uiText('移除原因')} value={removeReason} onChange={e => setRemoveReason(e.target.value)} /></Field></> : <p className="mist-sub">{uiText(`${confirming?.name || ''} 断开后立即停止同步与发信。`)}</p>}
     </Dialog>
