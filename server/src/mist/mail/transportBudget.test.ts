@@ -1,3 +1,4 @@
+import SMTPConnection from 'nodemailer/lib/smtp-connection';
 import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EmailTransport } from '../../shared/mistEmail';
@@ -85,5 +86,30 @@ describe('IMAP raw receive resource budget', () => {
     const session = await imapSmtpTransport.imap(config, { password: 'test' } as any, false);
     await session.close(true);
     expect(f.destroy).toHaveBeenCalledOnce(); expect(f.end).not.toHaveBeenCalled();
+  });
+});
+
+describe('provider mail authentication', () => {
+  it('passes only an access token to IMAP and SMTP and leaves token renewal to Bambook', async () => {
+    const username = 'owner@example.test';
+    const oauth = { provider: 'microsoft' as const, subject: 'owner', accessToken: 'short-lived', refreshToken: 'server-only', expiresAt: Date.now() + 60_000 };
+    const sasl = Buffer.from('user=' + username + '\x01auth=Bearer short-lived\x01\x01').toString('base64');
+    connect.mockResolvedValue({});
+    await imapSmtpTransport.imap(config, { username, oauth }, false);
+    const imap = connect.mock.calls[0][0].imap;
+    expect(imap.xoauth2).toBe(sasl); expect(imap.password).toBeUndefined();
+    expect(JSON.stringify(imap)).not.toContain(oauth.refreshToken);
+    const proto = SMTPConnection.prototype;
+    vi.spyOn(proto, 'connect').mockImplementation(callback => { callback!(); });
+    vi.spyOn(proto, 'quit').mockImplementation(() => undefined);
+    const login = vi.spyOn(proto, 'login').mockImplementation((_auth, callback) => { callback(null as any); });
+    try {
+      await imapSmtpTransport.smtpVerify({ ...config, smtpHost: 'smtp.example.test', smtpPort: 587, smtpSecure: false }, { username, oauth }, false);
+      const auth = login.mock.calls[0][0] as any;
+      expect(auth.method).toBe('XOAUTH2'); expect(auth.oauth2.options.refreshToken).toBeUndefined();
+      const token = (renew: boolean) => new Promise<string>((ok, fail) => auth.oauth2.getToken(renew, (err: Error | null, value: string) => err ? fail(err) : ok(value)));
+      expect(auth.oauth2.buildXOAuth2Token(await token(false))).toBe(sasl);
+      await expect(token(true)).rejects.toMatchObject({ code: 'MAIL_OAUTH_RECONNECT' });
+    } finally { vi.restoreAllMocks(); }
   });
 });
