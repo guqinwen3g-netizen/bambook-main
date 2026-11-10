@@ -9,7 +9,7 @@ import { platformBusinessDate } from '../../../../../server/src/shared/mistPlatf
 import { isActiveMistInvoice, isRecognizedMistInvoice, mistMoneyMinor, type MistState } from '../../../../../server/src/shared/mistWorkspace';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
-import { useNav } from '../../nav';
+import { rememberMistSource, useNav } from '../../nav';
 import { downloadModuleCsv, downloadModuleXlsx } from './ModuleWorkbench';
 import { ReportSchedules } from './ReportSchedules';
 import { OrderActualCostPanel } from './OrderActualCostPanel';
@@ -36,7 +36,7 @@ export function salesBasisDay(state: MistState, o: MistState['orders'][number], 
   return state.invoices.filter(i => i.orderId === o.id && isRecognizedMistInvoice(i) && i.issuedAt).map(i => businessDay(i.issuedAt!)).sort()[0] || '';
 }
 export function buildCustomerSales(state: MistState, from = '', to = '', currency = '', basis: SalesBasis = 'order'): CustomerSalesRow[] {
-  const orders = state.orders.filter(o => o.governance?.contract?.kind !== 'internal').filter(o => { const d = salesBasisDay(state, o, basis); return !!d && (!from || d >= from) && (!to || d <= to) && (!currency || o.currency === currency); });
+  const orders = state.orders.filter(o => o.governance?.contract?.kind !== 'internal' && (!o.governance || o.governance.status === 'approved')).filter(o => { const d = salesBasisDay(state, o, basis); return !!d && (!from || d >= from) && (!to || d <= to) && (!currency || o.currency === currency); });
   const map = new Map<string, { customerId: string; customer: string; currency: string; orders: number; amount: number; invoiced: number; open: number }>();
   for (const o of orders) {
     const key = (o.customerId || o.customer) + '|' + o.currency, row = map.get(key) ?? { customerId: o.customerId, customer: o.customer, currency: o.currency, orders: 0, amount: 0, invoiced: 0, open: 0 };
@@ -142,14 +142,28 @@ export function PlatformReportsPage() {
   const canSeeMargin = session.hasPermission('reports:admin');
   const tab: ReportTab = route.section === 'aging' || route.section === 'orders' || (route.section === 'cash' && canSeeMargin) || ((route.section === 'margin' || route.section === 'actual') && canSeeMargin) ? route.section : 'sales';
   const asOf = platformBusinessDate(businessNow());
-  const [from, setFrom] = React.useState(''), [to, setTo] = React.useState(''), [currency, setCurrency] = React.useState(''), [progressFilter, setProgressFilter] = React.useState('');
+  const scope = `${session.sessionKey}:${workspace.workspace?.id || ''}`;
+  const saved = route.sourcePosition?.view === 'reports' && route.sourcePosition.scope === scope ? route.sourcePosition : undefined;
+  const [from, setFrom] = React.useState(saved?.from ?? ''), [to, setTo] = React.useState(saved?.to ?? ''), [currency, setCurrency] = React.useState(saved?.currency ?? ''), [progressFilter, setProgressFilter] = React.useState(saved?.progress ?? '');
   // 默认口径：有实际结汇用实际结汇，否则有月末汇率用月末暂估，都没有则原币。
-  const [viewChoice, setView] = React.useState<MarginView | null>(null), view: MarginView = viewChoice ?? ((state?.fxRecords || []).some(r => r.kind === 'settlement' && !r.reversed) ? 'actual' : (state?.fxPeriodRates || []).some(r => !r.voided) ? 'period' : 'none'), [fxMonth, setFxMonth] = React.useState(asOf.slice(0, 7));
+  const [viewChoice, setView] = React.useState<MarginView | null>(saved?.fxView ?? null), view: MarginView = viewChoice ?? ((state?.fxRecords || []).some(r => r.kind === 'settlement' && !r.reversed) ? 'actual' : (state?.fxPeriodRates || []).some(r => !r.voided) ? 'period' : 'none'), [fxMonth, setFxMonth] = React.useState(saved?.fxMonth ?? asOf.slice(0, 7));
   const invalid = !!from && !!to && from > to;
-  const currencies = [...new Set([...(state?.orders ?? []).map(o => o.currency), ...(state?.invoices ?? []).map(i => i.currency)])].filter(Boolean).sort();
-  const [salesBasis, setSalesBasis] = React.useState<SalesBasis>('order');
+  const cashRows = state && !invalid && tab === 'cash' ? monthlyFinanceSummary(state, from, to) : [];
+  const currencies = [...new Set([...(state?.orders ?? []).map(o => o.currency), ...(state?.invoices ?? []).map(i => i.currency), ...cashRows.map(r => r.currency), currency])].filter(Boolean).sort();
+  const [salesBasis, setSalesBasis] = React.useState<SalesBasis>(saved?.basis ?? 'order');
+  const previousScope = React.useRef(scope);
+  React.useEffect(() => {
+    if (!saved && previousScope.current === scope) return;
+    previousScope.current = scope;
+    setFrom(saved?.from ?? '');setTo(saved?.to ?? '');setCurrency(saved?.currency ?? '');setSalesBasis(saved?.basis ?? 'order');
+    setProgressFilter(saved?.progress ?? '');setView(saved?.fxView ?? null);setFxMonth(saved?.fxMonth ?? asOf.slice(0, 7));
+  }, [scope,saved,asOf]);
+  const openSource: typeof go = (...args) => {
+    rememberMistSource(route,{view:'reports',scope,from,to,currency,basis:salesBasis,progress:progressFilter,fxView:viewChoice,fxMonth});
+    go(...args);
+  };
   const sales = state && !invalid ? buildCustomerSales(state, from, to, currency, salesBasis) : [];
-  const cash = state && !invalid && tab === 'cash' ? monthlyFinanceSummary(state, from, to).filter(r => !currency || r.currency === currency) : [];
+  const cash = cashRows.filter(r => !currency || r.currency === currency);
   const margin = state && !invalid && tab === 'margin' && view === 'none' ? buildOrderMargin(state, from, to, currency) : [];
   const cny = state && !invalid && tab === 'margin' && view !== 'none' ? buildOrderMarginCny(state, view, fxMonth, asOf, from, to, currency) : [];
   const unallocated = state && tab === 'margin' && view === 'actual' ? fxUnallocatedSettlements(state, asOf) : [];
@@ -170,7 +184,7 @@ export function PlatformReportsPage() {
   const currencyFilter = <Field label={uiText("币种")}><Select aria-label={uiText("币种")} value={currency} onChange={e => setCurrency(e.target.value)} options={[{ value: '', label: '全部币种（分别统计）' }, ...currencies.map(c => ({ value: c, label: c }))]} /></Field>;
 
   const salesColumns: Column<CustomerSalesRow>[] = [
-    { key: 'customer', header: '客户', width: 'minmax(180px,2fr)', render: r => r.customerId ? <Button variant="quiet" onClick={() => go('crm', r.customerId, { customerId: r.customerId })}>{r.customer}</Button> : r.customer, sortValue: r => r.customer },
+    { key: 'customer', header: '客户', width: 'minmax(180px,2fr)', render: r => r.customerId ? <Button variant="quiet" onClick={() => openSource('crm', r.customerId, { customerId: r.customerId })}>{r.customer}</Button> : r.customer, sortValue: r => r.customer },
     { key: 'currency', header: '币种', width: '72px', render: r => r.currency },
     { key: 'orders', header: '订单数', width: '80px', align: 'right', render: r => r.orders, sortValue: r => r.orders },
     { key: 'amount', header: '订单金额', align: 'right', render: r => money(r.amount), sortValue: r => r.amount },
@@ -179,7 +193,7 @@ export function PlatformReportsPage() {
     { key: 'open', header: '未收', align: 'right', render: r => money(r.open), sortValue: r => r.open },
   ];
   const marginColumns: Column<OrderMarginRow>[] = [
-    { key: 'code', header: '订单', width: 'minmax(130px,1fr)', render: r => <Button variant="quiet" onClick={() => go('orders/detail', r.id)}>{r.code}</Button>, sortValue: r => r.code },
+    { key: 'code', header: '订单', width: 'minmax(130px,1fr)', render: r => <Button variant="quiet" onClick={() => openSource('orders/detail', r.id)}>{r.code}</Button>, sortValue: r => r.code },
     { key: 'customer', header: '客户', width: 'minmax(140px,1.4fr)', render: r => r.customer, sortValue: r => r.customer },
     { key: 'currency', header: '币种', width: '64px', render: r => r.currency },
     { key: 'revenue', header: '销售收入', align: 'right', render: r => money(r.revenue), sortValue: r => r.revenue },
@@ -190,7 +204,7 @@ export function PlatformReportsPage() {
     { key: 'status', header: '说明', width: 'minmax(150px,1.4fr)', render: r => <><Pill tone={MARGIN_STATUS[r.status].tone}>{uiText(MARGIN_STATUS[r.status].label)}</Pill>{r.foreign && <div className="mist-note">{uiText("另有 ")}{r.foreign}</div>}{r.pending > 0 && <div className="mist-note">{r.pending}{uiText(" 张采购未批准，未计入")}</div>}</> },
   ];
   const cnyColumns: Column<OrderMarginCnyRow>[] = [
-    { key: 'code', header: '订单', width: 'minmax(130px,1fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><Button variant="quiet" onClick={() => go('orders/detail', r.id)}>{r.code}</Button><small className="mist-muted">{r.customer}</small></div>, sortValue: r => r.code },
+    { key: 'code', header: '订单', width: 'minmax(130px,1fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><Button variant="quiet" onClick={() => openSource('orders/detail', r.id)}>{r.code}</Button><small className="mist-muted">{r.customer}</small></div>, sortValue: r => r.code },
     { key: 'revenue', header: '收入', align: 'right', render: r => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span>{uiText(r.revenueCny === null ? '—' : money(r.revenueCny))}</span><small className="mist-muted">{r.currency} {money(r.revenue)}</small></div>, sortValue: r => r.revenueCny ?? -Infinity },
     { key: 'fx', header: '汇率', width: 'minmax(120px,1fr)', hideOnMobile: true, render: r => r.fx ? <div className="mist-col" style={{ gap: 2 }}><span>{uiText(r.fx.label)}</span>{r.estimated && <small className="mist-tone-warn">{uiText("暂估")}</small>}</div> : <span className="mist-tone-bad">{uiText("缺 ")}{r.currency}{uiText(" 汇率")}</span> },
     { key: 'cost', header: '采购成本', align: 'right', render: r => r.costCny === null || !r.purchases ? <span className="mist-note">—</span> : money(r.costCny), sortValue: r => r.costCny ?? 0 },
@@ -206,14 +220,16 @@ export function PlatformReportsPage() {
     { key: 'total', header: '未收合计', align: 'right', render: r => <b>{money(r.total)}</b>, sortValue: r => r.total },
   ];
   const progressColumns: Column<OrderProgressRow>[] = [
-    { key: 'code', header: '订单', width: 'minmax(140px,1fr)', render: r => <Button variant="quiet" onClick={() => go('orders/detail', r.id)}>{r.code}</Button>, sortValue: r => r.code },
+    { key: 'code', header: '订单', width: 'minmax(140px,1fr)', render: r => <Button variant="quiet" onClick={() => openSource('orders/detail', r.id)}>{r.code}</Button>, sortValue: r => r.code },
     { key: 'customer', header: '客户', width: 'minmax(140px,1.5fr)', render: r => r.customer },
     { key: 'due', header: '交期', width: '110px', render: r => r.due || '—', sortValue: r => r.due },
     { key: 'progress', header: '进度', width: '80px', align: 'right', render: r => r.progress + '%', sortValue: r => r.progress },
     { key: 'status', header: '交期状态', width: '120px', render: r => <Pill tone={PROGRESS_STATUS[r.status].tone}>{uiText(PROGRESS_STATUS[r.status].label)}{uiText(r.status === 'overdue' ? ` ${r.lateDays} 天` : '')}</Pill> },
     { key: 'state', header: '当前环节', render: r => r.state },
   ];
+  const cannotExport = !state || (invalid && (tab === 'sales' || tab === 'margin' || tab === 'cash'));
   const exportCurrent = (format: 'csv' | 'xlsx' = 'csv') => {
+    if (cannotExport) return;
     const out = (name: string, headers: string[], rows: unknown[][]) => format === 'xlsx' ? downloadModuleXlsx(name.replace(/\.csv$/, '.xlsx'), [{ name: name.replace(/\.csv$/, ''), headers, rows }]) : downloadModuleCsv(name, headers, rows);
     if (tab === 'sales') out('客户销售额.csv', ['客户', '币种', '订单数', '订单金额', '已开票', '已收', '未收'], sales.map(r => [r.customer, r.currency, r.orders, r.amount, r.invoiced, r.received, r.open]));
     else if (tab === 'margin' && view !== 'none') out(`订单毛利-人民币-${FX_BASIS_LABEL[view]}.csv`, ['订单', '客户', '币种', '原币收入', '汇率口径', '汇率', '暂估', '收入CNY', '采购成本CNY', '毛利不含退税', '毛利率不含退税%', '退税核准或应退', '退税应退', '退税到账', '毛利含退税', '毛利率含退税%', '说明'], cny.map(r => [r.code, r.customer, r.currency, r.revenue, FX_BASIS_LABEL[view], r.fx ? Math.round(r.fx.rate * 1e6) / 1e6 : '', r.estimated ? '是' : '', r.revenueCny ?? '', r.costCny ?? '', r.marginEx ?? '', r.rateEx === null ? '' : Math.round(r.rateEx * 1000) / 10, ...(rebateShown ? [r.rebate.approved, r.rebate.expected, r.rebate.received, r.marginIn ?? '', r.rateIn === null ? '' : Math.round(r.rateIn * 1000) / 10] : Array(5).fill(rebateHidden)), CNY_STATUS[r.status].label + (r.missing.length ? ' ' + r.missing.join('/') : '')]));
@@ -224,11 +240,11 @@ export function PlatformReportsPage() {
   };
 
   return <MistPage>
-    <PageHeader title={uiText("报表中心")} actions={<>{tab !== 'actual' && <><Button icon={Download} disabled={!state || ((tab === 'sales' || tab === 'margin') && invalid)} onClick={() => exportCurrent('csv')}>{uiText("导出 CSV")}</Button><Button icon={Download} disabled={!state || ((tab === 'sales' || tab === 'margin') && invalid)} onClick={() => exportCurrent('xlsx')}>{uiText("导出 Excel")}</Button></>}</>} />
+    <PageHeader title={uiText("报表中心")} actions={<>{tab !== 'actual' && <><Button icon={Download} disabled={cannotExport} onClick={() => exportCurrent('csv')}>{uiText("导出 CSV")}</Button><Button icon={Download} disabled={cannotExport} onClick={() => exportCurrent('xlsx')}>{uiText("导出 Excel")}</Button></>}</>} />
     {workspace.error && <FailureNotice title={"读取失败"} detail={workspace.error} />}
     {state && <ReportSchedules state={state} canAdmin={canSeeMargin} asOf={asOf} />}
     <Tabs<ReportTab> value={tab} onChange={next => go('reports', undefined, { section: next })} options={[{ value: 'sales', label: '客户销售额' }, ...(canSeeMargin ? [{ value: 'margin' as const, label: '订单毛利' }, { value: 'actual' as const, label: '订单核算' }] : []), { value: 'aging', label: '应收账龄' }, ...(canSeeMargin ? [{ value: 'cash' as const, label: '资金月报' }] : []), { value: 'orders', label: '订单进度与逾期', count: progress.filter(r => r.status === 'overdue').length || undefined }]} />
-    <section className="mist-section">{tab === 'sales' ? <>
+    <section className="mist-section" data-report-results>{tab === 'sales' ? <>
       <Toolbar><Field label={uiText("统计日期")}><Select aria-label={uiText("统计日期")} value={salesBasis} onChange={e => setSalesBasis(e.target.value as SalesBasis)} options={(Object.keys(SALES_BASIS_LABEL) as SalesBasis[]).map(k => ({ value: k, label: SALES_BASIS_LABEL[k] }))} /></Field><Field label={uiText("起日")}><TextInput type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field><Field label={uiText("止日")}><TextInput type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>{currencyFilter}</Toolbar>
       {invalid && <Banner tone="bad" title={uiText("起始日期不能晚于结束日期")} />}
       <StatGrid><StatCard icon={Package} label={uiText("订单金额")} value={totals(sales, r => r.amount)} /><StatCard icon={Receipt} label={uiText("已收")} value={totals(sales, r => r.received)} /><StatCard icon={Clock} label={uiText("未收")} value={totals(sales, r => r.open)} /></StatGrid>
@@ -274,7 +290,7 @@ export function PlatformReportsPage() {
       <Toolbar right={<span className="mist-note">{uiText("截至 ")}{asOf}</span>}>{currencyFilter}</Toolbar>
       <StatGrid>{AGING_BUCKETS.map(b => <StatCard key={b.key} icon={Clock} label={uiText(b.label)} value={totals(aging, r => r[b.key])} />)}</StatGrid>
       <section className="mist-section"><Card><DataTable ariaLabel={uiText("应收账龄")} rows={aging} rowKey={r => r.id} loading={workspace.loading} columns={agingColumns} empty={<EmptyState title={uiText("没有未收应收")} description={uiText("有效发票均已收清。")} />} /></Card></section>
-      <div className="mist-row"><Button onClick={() => go('invoices')}>{uiText("查看发票")}</Button><Button onClick={() => go('payment-vouchers')}>{uiText("查看到账与核销")}</Button></div>
+      <div className="mist-row"><Button onClick={() => openSource('invoices')}>{uiText("查看发票")}</Button><Button onClick={() => openSource('payment-vouchers')}>{uiText("查看到账与核销")}</Button></div>
     </> : <>
       <Toolbar right={<span className="mist-note">{uiText("截至 ")}{asOf}{uiText(" · 只含尚未履行完毕的订单")}</span>}><Field label={uiText("交期状态")}><Select aria-label={uiText("交期状态")} value={progressFilter} onChange={e => setProgressFilter(e.target.value)} options={[{ value: '', label: '全部' }, ...Object.entries(PROGRESS_STATUS).map(([value, s]) => ({ value, label: s.label }))]} /></Field></Toolbar>
       <StatGrid>{(Object.keys(PROGRESS_STATUS) as Array<keyof typeof PROGRESS_STATUS>).map(k => <StatCard key={k} icon={Package} label={uiText(PROGRESS_STATUS[k].label)} value={progress.filter(r => r.status === k).length} onClick={() => setProgressFilter(k)} />)}</StatGrid>

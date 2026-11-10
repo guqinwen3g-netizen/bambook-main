@@ -42,8 +42,8 @@ const MODULE_ALIAS: Record<string, string> = { invoices: 'payment-vouchers' };
 export const mistWorkModule = (view: string | undefined) => { const base = (view || '').split('/')[0] || 'cockpit'; return MODULE_ALIAS[base] ?? base; };
 
 /** 工作事项是否等我处理：指定给我，或属于我持有权限的岗位。都没写的事项不属于任何人。 */
-export function isMyMistTask(task: MistTask, options: Pick<MistWorkOptions, 'me' | 'can' | 'canRead'>) {
-  if (task.done) return false;
+export function isMyMistTask(task: MistTask, options: Pick<MistWorkOptions, 'me' | 'can' | 'canRead'>, includeCompleted = false) {
+  if (task.done && !includeCompleted) return false;
   const mine = (!!options.me && (task.assigneeIds ?? []).includes(options.me)) || (!!task.permission && !!options.can?.(task.permission));
   return mine && options.canRead(mistWorkModule(task.target?.view));
 }

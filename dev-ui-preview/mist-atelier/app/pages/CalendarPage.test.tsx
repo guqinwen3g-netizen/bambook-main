@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyMistCommand, createMistState, type MistCommand } from '../../../../server/src/shared/mistWorkspace';
 import { CalendarPage, calendarFormError, calendarWeek } from './CalendarPage';
-import { Nav } from '../nav';
+import { Nav, type Route } from '../nav';
 
 const bridge=vi.hoisted(()=>({current:null as any,sessionKey:'session-a'}));
 vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>bridge.current}));
@@ -19,12 +19,30 @@ beforeEach(()=>{
   bridge.current={state,workspace:{id:'workspace-a'},loading:false,saving:false,error:'',pending:null,refresh:vi.fn(async()=>{}),recover:vi.fn(),run:vi.fn(async(command:MistCommand)=>{const result=applyMistCommand(bridge.current.state,command,context);bridge.current.state=result.state;return{requestId:'request-a',revision:1,result:result.result};})};
 });
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();});
-const view=()=> <Nav.Provider value={{route:{view:'calendar'},go,theme:'light' as const,toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><CalendarPage/></Nav.Provider>;
-async function mount(){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(view()));}
+const view=(section?:string,sourcePosition?:Route['sourcePosition'])=> <Nav.Provider value={{route:{view:'calendar',section,sourcePosition},go,theme:'light' as const,toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><CalendarPage/></Nav.Provider>;
+async function mount(section?:string){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(view(section)));}
 async function click(text:string){const button=[...document.querySelectorAll('button')].find(item=>item.textContent?.trim()===text||item.getAttribute('aria-label')===text);expect(button,text).toBeTruthy();await act(async()=>button!.click());}
 async function fill(label:string,value:string){const field=[...document.querySelectorAll('label')].find(item=>item.querySelector('.mist-field-label')?.textContent?.replace('*','')===label);const control=field?.querySelector('input,textarea') as HTMLInputElement|HTMLTextAreaElement;expect(control,label).toBeTruthy();await act(async()=>{const prototype=control.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(prototype,'value')!.set!.call(control,value);control.dispatchEvent(new Event('input',{bubbles:true}));control.dispatchEvent(new Event('change',{bubbles:true}));});}
 
 describe('Mist calendar',()=>{
+  it('moves by whole months in month view and clamps January 31 to leap day',async()=>{
+    await mount('2024-01-31');await click('月');await click('下个月');
+    expect(host.querySelector('.mist-week [aria-pressed="true"] b')?.textContent).toBe('29');
+    expect(host.querySelectorAll('.mist-week button')).toHaveLength(29);
+    await click('上个月');expect(host.querySelectorAll('.mist-week button')).toHaveLength(31);
+    await click('周');expect(host.querySelectorAll('.mist-week button')).toHaveLength(7);
+  });
+  it('restores the calendar date and filters from the source entry only in the same session and workspace',async()=>{
+    const returnTo:Route['sourcePosition']={view:'calendar',scope:'session-a:workspace-a',date:'2026-10-31',mode:'month',mineOnly:true};
+    await mount('2026-09-01');await act(async()=>root!.render(view('2026-09-01',returnTo)));
+    expect(host.querySelector('.mist-week [aria-pressed="true"] b')?.textContent).toBe('31');
+    expect(host.querySelectorAll('.mist-week button')).toHaveLength(31);
+    expect(host.querySelector<HTMLInputElement>('input[type=checkbox]')?.checked).toBe(true);
+    bridge.sessionKey='session-b';await act(async()=>root!.render(view('2026-09-01',returnTo)));
+    expect(host.querySelectorAll('.mist-week button')).toHaveLength(7);
+    expect(host.querySelector('.mist-week [aria-pressed="true"] b')?.textContent).toBe('1');
+    expect(host.querySelector<HTMLInputElement>('input[type=checkbox]')?.checked).toBe(false);
+  });
   it('builds a Monday-first week across the year boundary and validates date/time values',()=>{
     expect(calendarWeek('2026-12-31').map(day=>day.key)).toEqual(['2026-12-28','2026-12-29','2026-12-30','2026-12-31','2027-01-01','2027-01-02','2027-01-03']);
     expect(calendarFormError({title:'评审',date:'2026-02-31',time:'14:00'})).toContain('日期');
@@ -79,3 +97,13 @@ describe('Mist calendar',()=>{
   });
 });
 it('clears the saved business association when the user selects no association',async()=>{await mount();await click('已保存的评审');const select=document.querySelector('[data-calendar-editor] select') as HTMLSelectElement;await act(async()=>{select.value='';select.dispatchEvent(new Event('change',{bubbles:true}));});await click('保存日程');expect(bridge.current.run).toHaveBeenCalledWith({type:'calendar.save',payload:{id:'event-a',title:'已保存的评审',date:today(),time:'14:00',note:'原始说明'}});expect(bridge.current.state.calendar[0]).not.toHaveProperty('target');});
+
+it('requires confirmation before deleting every occurrence of a repeating appointment',async()=>{
+  const event=bridge.current.state.calendar[0];event.repeat={every:'week',until:today()};
+  await mount();await click('已保存的评审');await click('删除日程');
+  const dialog=()=>document.querySelector<HTMLElement>('[role="dialog"]');expect(dialog()?.textContent).toContain('删除整组重复日程');
+  expect(bridge.current.run).not.toHaveBeenCalled();await act(async()=>[...dialog()!.querySelectorAll('button')].find(b=>b.textContent==='取消')!.click());
+  expect(dialog()).toBeNull();expect(bridge.current.state.calendar).toHaveLength(1);
+  await click('删除日程');await act(async()=>[...dialog()!.querySelectorAll('button')].find(b=>b.textContent==='删除')!.click());
+  expect(bridge.current.run).toHaveBeenCalledExactlyOnceWith({type:'calendar.delete',payload:{id:'event-a'}});
+});

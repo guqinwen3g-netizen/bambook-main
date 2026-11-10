@@ -197,3 +197,25 @@ it('deduplicates a presented handover by business task ID and completes the orig
 });
 
 it('does not offer AI questioning without ai chat permission',()=>{seam.session.hasPermission=(scope:string)=>scope.endsWith(':read');render();expect(host.querySelector('.mist-brief-ask')).toBeNull();});
+
+it('lets the assignee reopen a completed customer follow-up without putting completed, void or other-person items in the queue',async()=>{
+  const state=seam.value.state,c=state.customers[0];
+  const task=(id:string,owner:string)=>({id,title:id,done:true,due:'2026-11-10',kind:'crm-follow-up',target:{view:'crm',id:c.id},assigneeIds:[owner]});
+  state.tasks=[task('my-follow-up','owner'),task('void-follow-up','owner'),task('other-follow-up','other')];
+  state.crm.followUps=state.tasks.map((t:any)=>({id:'source-'+t.id,customerId:c.id,nextTaskId:t.id,...(t.id==='void-follow-up'?{voided:{reason:'重复'}}:{})}));
+  render();expect(host.querySelector('.mist-task')).toBeNull();await click(button('管理任务'));
+  const dialog=host.querySelector('[role="dialog"]')!,select=dialog.querySelector('select')!;
+  expect([...select.options].map(o=>o.value)).toEqual(['my-follow-up']);
+  await click(dialog.querySelector<HTMLInputElement>('input[type="checkbox"]')!);await click(button('保存状态',dialog));
+  expect(seam.value.run).toHaveBeenCalledWith({type:'task.complete',payload:{id:'my-follow-up',done:false}});
+});
+
+it('opens the existing adjustment form with the selected CRM task and its due date',async()=>{
+  seam.value.workspace.ownerId='owner';const task=seam.value.state.tasks[0];Object.assign(task,{kind:'crm-follow-up',due:'2026-11-19',assigneeIds:['owner']});
+  render();await click(button('管理任务'));await click(button('调整待办',host.querySelector('[role="dialog"]')!));
+  const dialog=host.querySelector('[role="dialog"]')!;expect(dialog.textContent).toContain('调整待办');
+  expect(dialog.querySelector<HTMLInputElement>('input[type="date"]')?.value).toBe('2026-11-19');
+  let finish!:()=>void;seam.value.run.mockImplementationOnce(async()=>{seam.value.saving=true;paint();await new Promise<void>(r=>{finish=r;});seam.value.saving=false;paint();return {result:{id:task.id}};});
+  await click(button('保存',dialog));await act(async()=>finish());
+  expect(seam.value.run).toHaveBeenCalledTimes(1);expect(host.querySelector('[role="dialog"]')).toBeNull();
+});

@@ -8,6 +8,11 @@ const invoice = (id: string, orderId: string, o: Record<string, unknown> = {}) =
 const state = (orders: any[], invoices: any[] = []) => ({ orders, invoices } as any);
 
 describe('报表中心', () => {
+  it('counts only effective external contracts in customer sales, keeping the approved version during a change', () => {
+    const statuses = ['draft', 'pending', 'rejected', 'cancelled', 'void', 'approved'];
+    const s = state(statuses.map(status => order(status, {governance:{status, changeDraft:{status:'pending'}}})));
+    expect(buildCustomerSales(s).map(r => [r.orders, r.amount])).toEqual([[1,100]]);
+  });
   it('excludes internal budgets from customer sales and sales-order margins',()=>{
     const s={...state([order('external'),order('internal',{amount:500,governance:{status:'approved',contract:{kind:'internal'}}})]),fulfillment:{purchases:[]},payables:{bills:[]}};
     expect(buildCustomerSales(s).map(row=>[row.orders,row.amount])).toEqual([[1,100]]);

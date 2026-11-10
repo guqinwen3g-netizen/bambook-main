@@ -10,6 +10,7 @@ import { accountHandovers, type MistAccountHandover } from '../shared/mistHandov
 import { COMPANY_MAINTAIN_SCOPE, LINE_SUPERVISOR_SCOPE } from './companyLibrary';
 import { PERMISSION_SCOPES } from '../_shared/rolePermissionMatrix';
 import { projectSeals } from '../shared/mistSeals';
+import { currentCrmCalendar } from '../shared/mistCrmCalendar';
 /**
  * 公司访问与读投影。
  * - 成员资格只决定"能不能进这家公司"，看到哪些业务数据仍由账号自身现有岗位的读权限决定；
@@ -201,7 +202,8 @@ function projectMemberHandovers(next: MistState, actor: TokenPayload) {
 const canManageMemberHandover = (actor: TokenPayload, ownerId?: string) => hasScope(actor, COMPANY_MAINTAIN_SCOPE as PermissionScope) || !!ownerId && ownerId === actor.userId;
 /** 按账号自身读权限裁剪状态；被隐藏的数据结构用空公司的同名结构替换，保证页面结构完整。 */
 export function projectState(state: MistState, actor: TokenPayload, empty: () => MistState, ownerId?: string, scope?: MistDataScope): { state: MistState; hidden: Section[];costMaterialBasis?:InternalFabricCostBasis[] | null } {
-  const hidden = hiddenSections(actor), next: MistState = scope ? applyDataScope(state, scope, actor.userId) : { ...state };
+  const calendarState = { ...state, calendar: currentCrmCalendar(state) };
+  const hidden = hiddenSections(actor), next: MistState = scope ? applyDataScope(calendarState, scope, actor.userId) : calendarState;
   // Legacy company activity had no recipients. Keep it in events, never broadcast it to accounts.
   next.notifications = (next.notifications || []).filter(item => item.recipientIds?.includes(actor.userId)).map(item => {
     const {readBy, ...notification} = item;
