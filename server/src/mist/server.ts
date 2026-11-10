@@ -65,6 +65,17 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
       res.status(403).set('Cache-Control','private, no-store').json({ok:false,error:{code:'AGENT_FORBIDDEN',message:'工作助手委托不能操作本人登录会话'}});
     });
     app.get('/api/mist/session',local.sessionGet);app.post('/api/mist/session',local.sessionPost);
+    // 本机会话 Cookie 为 SameSite=Strict：服务商跳回属于跨站导航，浏览器不带会话。先在本机地址内原样再导航一次，
+    // 第二次请求才进入回调；这一步不读取、不保存任何授权参数，回调仍由请求 Cookie 与 state 校验。
+    app.get('/api/mist/email/oauth/callback/:provider',(req,res,next)=>{
+      if(req.query.bounce!==undefined||req.headers['sec-fetch-site']!=='cross-site'&&req.cookies?.bambook_mist_local!==undefined){next();return;}
+      const query=new URLSearchParams();
+      for(const [name,value] of Object.entries(req.query))if(typeof value==='string'&&value.length<=8192&&/^[a-z_]{1,40}$/.test(name))query.set(name,value);
+      query.set('bounce','1');
+      const target=`/api/mist/email/oauth/callback/${req.params.provider==='microsoft'?'microsoft':'google'}?${query}`.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+      res.status(200).set({'Cache-Control':'private, no-store','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'",'Content-Type':'text/html; charset=utf-8'})
+        .send(`<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${target}"><title>Bambook</title>`);
+    });
     const repository=new MistRepository(local.database,mistContract as MistContract,new MistPrivateFiles(path.join(local.database.directory,'files')),local.authorize,undefined,undefined,undefined,(db,userId,password)=>local.verifyPassword(db,userId,password));
     agentRuntime(repository,local.agentDelegation);
     app.use('/api/mist',createMistRouter({repository,marketStore,voice,voiceSettings,...mailRuntime(repository),authenticate:local.authenticate,delegation:local.agentDelegation,delegationGuard:local.requestGuard}));

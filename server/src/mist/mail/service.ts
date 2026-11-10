@@ -159,7 +159,8 @@ export class MistMailService {
         const result = await this.write(prior, flow.workspaceId, 'email.server.oauth', { ...(existing ? { id: existing.id } : {}), provider: flow.provider,
           credentialId, address: identity.address, displayName: identity.displayName, transport: config });
         if (existing) await this.credentials.remove(flow.workspaceId, existing.oauth?.credentialId || existing.id).catch(() => undefined);
-        return result;
+        // The callback names the connected mailbox from the committed record, never from a request parameter.
+        return { ...result, accountId: result.workspace.state.email.accounts.find(row => row.oauth?.credentialId === credentialId)?.id || '' };
       } catch (error) { await this.credentials.remove(flow.workspaceId, credentialId).catch(() => undefined); throw error; }
     });
   }

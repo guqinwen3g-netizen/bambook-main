@@ -391,13 +391,13 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
     res.setHeader('Cache-Control', 'private, no-store'); res.setHeader('Referrer-Policy', 'no-referrer');
     const name = 'bambook_mail_oauth_' + provider;
     res.clearCookie(name, { httpOnly: true, secure: origin.startsWith('https:'), sameSite: 'lax', path: '/api/mist/email/oauth/callback/' + provider });
-    let status = 'connected', code = '';
+    let status = 'connected', code = '', accountId = '';
     try {
       const flow = await mail.oauth.readFlow(req.cookies?.[name], provider, req.query.state, actor(req).userId, actor(req).sessionId || '');
       await repository.mailSnapshot(actor(req), flow.workspaceId);
       await mail.oauth.consumeFlow(flow);
       if (req.query.error) { status = req.query.error === 'access_denied' ? 'cancelled' : 'failed'; }
-      else await mail.connectOAuth(actor(req), flow, req.query.code);
+      else accountId = (await mail.connectOAuth(actor(req), flow, req.query.code)).accountId;
     } catch (error: any) {
       status = 'failed';
       const allowed = new Set(['MAIL_OAUTH_STATE_INVALID', 'MAIL_OAUTH_SCOPE_MISSING', 'MAIL_OAUTH_IDENTITY_INVALID', 'MAIL_OAUTH_ADDRESS_MISMATCH', 'MAIL_OAUTH_RECONNECT', 'MAIL_HOST_NOT_ALLOWED', 'FORBIDDEN']);
@@ -405,6 +405,7 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
     }
     const target = new URL('/', origin); target.searchParams.set('view', 'emails'); target.searchParams.set('mailConnect', status);
     if (code) target.searchParams.set('mailConnectCode', code);
+    if (accountId) target.searchParams.set('mailAccount', accountId);
     res.redirect(303, target.toString());
   }));
   router.delete('/workspaces/:id/email/accounts/:accountId/credential', mailCall(req => mail.disconnect(actor(req), req.params.id, req.params.accountId)));
