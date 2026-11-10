@@ -1876,7 +1876,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "payable.payment.backfill",
-  "payload": "{ planId: string; date: string; amount: number; reference: string; billId?: string; note?: string; fileIds?: string[] }",
+  "payload": "{ planId: string; date: string; amount: number; reference: string; accountId?: string; billId?: string; note?: string; fileIds?: string[] }",
   "source": "server/src/shared/mistPayables.ts"
  },
  {
@@ -1886,7 +1886,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "payable.payment.register",
-  "payload": "{ requestId?: string; supplierId?: string; date: string; amount: number; currency?: string; reference: string; fileIds?: string[]; note?: string; allocations?: AllocationInput }",
+  "payload": "{ requestId?: string; supplierId?: string; date: string; amount: number; currency?: string; reference: string; accountId?: string; fileIds?: string[]; note?: string; allocations?: AllocationInput }",
   "types": {
    "AllocationInput": "Array<{ billId: string; amount: number }>"
   },
