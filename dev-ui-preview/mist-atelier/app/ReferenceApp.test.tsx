@@ -60,7 +60,7 @@ vi.mock('./pages/ProductionPage', () => ({ ProductionPage: () => null }));
 vi.mock('./pages/StatesPage', () => ({ StatesPage: () => null }));
 vi.mock('./pages/DesignSystemPage', () => ({ DesignSystemPage: () => null }));
 vi.mock('./pages/ModuleTemplatePage', () => ({ ModuleTemplatePage: () => null }));
-import { ReferenceApp } from './ReferenceApp';
+import { ReferenceApp, approverMissing } from './ReferenceApp';
 
 // Pages that these tests render for real are lazy chunks. A cold first import (MarketPages alone takes
 // ~1.5 s here, longer in a loaded full run) raced the short polling in waitFor, so whichever test reached
@@ -503,3 +503,8 @@ it('keeps the owner custom workspace nickname on the owner account',async()=>{
 });
 
 it('hides AI entry points and creation commands for a read-only account',async()=>{await signIn('read-only',['products:read','orders:read','crm:read']);await mount();expect(queryByRole(host!,'button',{name:'问小竹'})).toBeNull();expect(queryByRole(host!,'button',{name:/小竹 查询/})).toBeNull();act(()=>window.dispatchEvent(new KeyboardEvent('keydown',{key:'j',metaKey:true,bubbles:true})));expect(queryByRole(host!,'dialog',{name:'小竹'})).toBeNull();await openSearch();input(searchInput(),'新建');const dialog=getByRole(host!,'dialog',{name:'搜索'});expect(dialog.textContent).not.toContain('新建成衣开发案');expect(dialog.textContent).not.toContain('新建面料开发案');});
+
+it('recognizes server rejections caused by a missing approver setup', () => {
+  for (const message of ['尚未配置当前业务的供应商承诺审批人', '尚未配置当前业务域的有效订单审批负责人', '超量出运须审批，但尚未配置除申请人外的订单审批负责人', '尚无除申请人外的有效订单审批负责人', '合同变更须由申请人以外的供应商承诺审批人审批，请先增设一名审批人']) expect(approverMissing(message)).toBe(true);
+  expect(approverMissing('数据已被他人修改，请刷新')).toBe(false);
+});
