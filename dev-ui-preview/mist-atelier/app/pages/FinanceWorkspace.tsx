@@ -147,7 +147,7 @@ export function FinanceAccounts() {
       { key: 'fx', header: '结汇划转', width: '150px', align: 'right', hideOnMobile: true, render: r => <span className="mist-num">{money(r.fxIn - r.fxOut, r.account.currency)}</span> },
       { key: 'balance', header: '账户余额', width: '150px', align: 'right', render: r => <span className="mist-num">{money(r.balance, r.account.currency)}</span> },
       { key: 'status', header: '状态', width: '170px', render: r => <AccountStatusCell account={r.account} balance={r.balance} /> },
-    ]} empty={<EmptyState title={uiText("暂无公司银行账户")} description={uiText("点上方“新增账户”登记账户与期初余额。")} />} /></Card>
+    ]} empty={<EmptyState title={uiText("暂无公司银行账户")} />} /></Card>
     {viewingRow && <Dialog open onClose={() => setViewing('')} width={640} title={ui`${viewingRow.account.code} · ${viewingRow.account.name}`}
       footer={<><Button onClick={() => setViewing('')}>{uiText("关闭")}</Button>{canWrite && <Button variant="primary" onClick={() => { setViewing(''); setEditing(editAccountDraft(viewingRow.account)); }}>{uiText("编辑")}</Button>}</>}>
       <Facts items={[{ label: '开户行', value: viewingRow.account.bankName }, { label: '账号', value: viewingRow.account.accountNo }, { label: '币种', value: viewingRow.account.currency }, { label: '期初日', value: viewingRow.account.openingDate }, { label: '期初余额', value: money(viewingRow.account.openingBalance, viewingRow.account.currency) }, { label: '账户余额', value: money(viewingRow.balance, viewingRow.account.currency) }, { label: '归属到账', value: ui`${money(viewingRow.receipts, viewingRow.account.currency)} · ${viewingRow.receiptCount} 笔` }, { label: '归属付款', value: ui`${money(viewingRow.payments, viewingRow.account.currency)} · ${viewingRow.paymentCount} 笔` }]} />

@@ -32,7 +32,7 @@ import { receiptReturnedQuantity } from './mistFulfillment';
  */
 import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
 import { reviewDecision, type MistReviewTask } from './mistReview';
-import { MistCommandError, mistMoneyMinor, type MistState, type MistContext, type MistPayment } from './mistWorkspace';
+import { MistCommandError, mistMoneyMinor, assertAccountUsable, type MistState, type MistContext, type MistPayment } from './mistWorkspace';
 import { platformBusinessDate } from './mistPlatform';
 import { relationHoldReason } from './mistRelationHold';
 
@@ -76,6 +76,13 @@ export type PrepaymentPlan = {
 export type PaymentPayee = { accountId: string; accountName: string; bankName: string; accountNo: string; swift?: string; addedAt: string };
 /** 新增或变更不满 30 天的收款账户，审批与付款时提示按已知电话再次核实。 */
 export const PAYEE_RECENT_DAYS = 30;
+/** 付款账户（公司银行账户）：选填；选了须同币种、已开立、未销户，计入该账户余额。 */
+function payingAccount(root: { bankAccounts?: MistState['bankAccounts'] }, accountId: unknown, currency: string, date: string): { accountId?: string } {
+  if (accountId === undefined || accountId === null || accountId === '') return {};
+  const account = (root.bankAccounts || []).find(a => a.id === accountId) || fail('付款账户不存在', 'NOT_FOUND');
+  assertAccountUsable(account, currency, date);
+  return { accountId: account.id };
+}
 export function supplierPayee(root: { market?: { suppliers?: Array<{ id: string; bankAccounts?: Array<{ id: string; state: string; currency: string; accountName: string; bankName: string; accountNo: string; swift?: string; addedAt: string }> }> } }, supplierId: string, currency: string): PaymentPayee | undefined {
   const a = root.market?.suppliers?.find(x => x.id === supplierId)?.bankAccounts?.find(x => x.state === 'active' && x.currency === currency);
   return a ? { accountId: a.id, accountName: a.accountName, bankName: a.bankName, accountNo: a.accountNo, ...(a.swift ? { swift: a.swift } : {}), addedAt: a.addedAt } : undefined;
@@ -190,8 +197,8 @@ export type PayablesCommand =
   | { type: 'payable.request.submit'; payload: { purpose: 'prepayment'; planId: string; amount: number; reason: string; fileIds?: string[] } | { purpose: 'settlement'; settlementId: string; amount: number; reason: string; fileIds?: string[] } | { purpose: 'bill'; supplierId: string; currency: string; lines: Array<{ billId: string; amount: number }>; planId?: string; reason: string; fileIds?: string[] } }
   | { type: 'payable.request.decide'; payload: { id: string; decision: 'approved' | 'rejected'; note: string } }
   | { type: 'payable.request.cancel'; payload: { id: string; reason: string } }
-  | { type: 'payable.payment.register'; payload: { requestId?: string; supplierId?: string; date: string; amount: number; currency?: string; reference: string; fileIds?: string[]; note?: string; allocations?: AllocationInput } }
-  | { type: 'payable.payment.backfill'; payload: { planId: string; date: string; amount: number; reference: string; billId?: string; note?: string; fileIds?: string[] } }
+  | { type: 'payable.payment.register'; payload: { requestId?: string; supplierId?: string; date: string; amount: number; currency?: string; reference: string; accountId?: string; fileIds?: string[]; note?: string; allocations?: AllocationInput } }
+  | { type: 'payable.payment.backfill'; payload: { planId: string; date: string; amount: number; reference: string; accountId?: string; billId?: string; note?: string; fileIds?: string[] } }
   | { type: 'payable.payment.plan'; payload: { supplierPaymentId: string; planId: string | null; note?: string } }
   | { type: 'payable.purchase.cancel'; payload: { purchaseId: string; reason: string; prepayment?: 'refund' | 'transfer'; targetPurchaseId?: string } }
   | { type: 'payable.payment.allocate'; payload: { supplierPaymentId: string; allocations: AllocationInput } }
@@ -826,7 +833,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
         if (input.length !== want.size || input.some(r => want.get(r?.billId) !== (typeof r?.amount === 'number' ? mistMoneyMinor(r.amount) : NaN))) fail('付款分配须与已批准申请的票据和金额一致');
       }
       const id = c.id(), paymentId = c.id(), code = nextCode('PAY', root.payments, c.now);
-      root.payments.push({ id: paymentId, code, date, payee: request.supplier, amount: major(amount), currency: request.currency, ref: reference } as MistPayment);
+      root.payments.push({ id: paymentId, code, date, payee: request.supplier, amount: major(amount), currency: request.currency, ref: reference, ...payingAccount(root, p.accountId, request.currency, date) } as MistPayment);
       const payment: SupplierPayment = { id, paymentId, code, supplierId: request.supplierId, supplier: request.supplier, date, amount: major(amount), currency: request.currency, reference, fileIds: files(root, p.fileIds), note: text(p.note, '备注', false), createdAt: c.now, actor: c.actorName, requestId: request.id, purpose: request.purpose, ...(request.purpose === 'prepayment' ? { purchaseId: request.purchaseId, planId: request.planId } : request.purpose === 'settlement' ? { purchaseId: request.purchaseId, settlementId: request.settlementId } : request.planId ? { planId: request.planId } : {}) };
       s.payments.push(payment);
       const applied = request.purpose === 'bill' ? allocate(root, c, payment, input) : 0;
@@ -1203,7 +1210,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
         if (amount > room) fail(`${bill.code} 可补登 ${fx(major(Math.max(0, room)))} ${bill.currency}（未付扣除待付申请），本次超出`);
       }
       const id = c.id(), paymentId = c.id(), code = nextCode('PAY', root.payments, c.now);
-      root.payments.push({ id: paymentId, code, date, payee: plan.supplier, amount: major(amount), currency: plan.currency, ref: reference } as MistPayment);
+      root.payments.push({ id: paymentId, code, date, payee: plan.supplier, amount: major(amount), currency: plan.currency, ref: reference, ...payingAccount(root, p.accountId, plan.currency, date) } as MistPayment);
       const payment: SupplierPayment = { id, paymentId, code, supplierId: plan.supplierId, supplier: plan.supplier, date, amount: major(amount), currency: plan.currency, reference, fileIds: files(root, p.fileIds), note: text(p.note, '补登说明', false, 1000), createdAt: c.now, actor: c.actorName, purpose: stage === 'prepayment' ? 'prepayment' : 'bill', planId: plan.id, backfill: true, ...(stage === 'prepayment' ? { purchaseId: po.id } : {}) };
       s.payments.push(payment);
       if (bill) allocate(root, c, payment, [{ billId: bill.id, amount: major(amount) }]);

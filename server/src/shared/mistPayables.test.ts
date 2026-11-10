@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyMistCommand, createMistState, mistCommandPermission, type MistContext, type MistState } from './mistWorkspace';
+import { applyMistCommand, createMistState, mistBankAccountBalances, mistCommandPermission, type MistContext, type MistState } from './mistWorkspace';
 import { shortClosureBlocker, supplierSettlements, invoiceableSettlements, payablesCommandPermission, payableBills, payableSources, supplierPayableSummary, supplierPayments, purchasePayableReadback, prepaymentPlans, paymentRequests, purchasePrepaymentReadback, getPayableReviews, payablesCommandPermissions, supplierDeductions, deductibleRecoveries, prepaymentMoves, prepaymentTransferTargets } from './mistPayables';
 import { getMistReviewTasks } from './mistWorkspace';
 import { payablesAging, paymentOutlook, supplierStatement } from './mistPayableViews';
@@ -75,6 +75,25 @@ function approvedPay(st: MistState, supplierId: string, lines: Array<{ billId: s
 }
 
 describe('付款申请与主管审批', () => {
+  it('付款账户：选填；选了须同币种未销户，付款计入该公司账户余额，冲回也回到该账户', () => {
+    const { state, po1 } = demo();
+    let s = run(state, bill(po1.supplierId, [{ purchaseId: po1.id, amount: 30000 }])).state;
+    s = as('财务-林', s, { type: 'finance.account.save', payload: { name: '基本户', bankName: '测试银行', accountNo: 'BASIC-CNY-001', currency: 'CNY', openingDate: '2026-01-01', openingBalance: 100000 } }).state;
+    s = as('财务-林', s, { type: 'finance.account.save', payload: { name: '美元户', bankName: '测试银行', accountNo: 'USD-001', currency: 'USD', openingDate: '2026-01-01', openingBalance: 0 } }).state;
+    const cny = s.bankAccounts!.find(a => a.currency === 'CNY')!, usd = s.bankAccounts!.find(a => a.currency === 'USD')!;
+    const a = payableBills(s, today)[0], req = as('业务-王', s, billRequest(po1.supplierId, [{ billId: a.id, amount: 30000 }])), id = String(req.result.id);
+    s = review(req.state, id).state;
+    const pay = (accountId?: string) => as('财务-林', s, { type: 'payable.payment.register', payload: { requestId: id, date: '2026-10-14', amount: 30000, reference: 'BANK-ACC', accountId, allocations: [{ billId: a.id, amount: 30000 }] } });
+    expect(err(() => pay(usd.id))).toContain('币种');
+    expect(err(() => pay('missing'))).toContain('付款账户不存在');
+    const paid = pay(cny.id).state;
+    expect(mistBankAccountBalances(paid).accounts.find(x => x.account.id === cny.id)!.balance).toBe(70000);
+    expect(mistBankAccountBalances(paid).unassigned.payments).toBe(mistBankAccountBalances(s).unassigned.payments);
+    const sp = paid.payables!.payments.at(-1)!;
+    const reversed = as('财务-林', paid, { type: 'payable.payment.reverse', payload: { supplierPaymentId: sp.id, reason: '流水号录错，冲回重登' } }).state;
+    expect(mistBankAccountBalances(reversed).accounts.find(x => x.account.id === cny.id)!.balance).toBe(100000);
+    expect(pay().state.payments.at(-1)!.accountId).toBeUndefined();
+  });
   it('收款账户：财务登记并核实；申请冻结账户并写入审批快照；批准后账户变更则不能按原申请付款', () => {
     const { state, po1 } = demo();
     expect(mistCommandPermission({ type: 'market.supplier.bank.save', payload: {} } as any)).toBe('invoices:write');
