@@ -96,7 +96,7 @@ function ProductLinks({kind,row,canWrite}:{kind:'trend'|'campaign'|'lookbook';ro
  const save=async()=>{
   if(kind==='trend')await w.command({type:'market.trend.save',payload:{id:row.id,input:{...(row as MarketTrend),productIds:selected}}});
   else if(kind==='campaign')await w.command({type:'market.campaign.save',payload:{id:row.id,input:{...(row as MarketCampaign),productIds:selected}}});
-  else await w.command({type:'market.lookbook.save',payload:{id:row.id,input:{...(row as MarketLookbook),productIds:selected}}});
+  else await w.command({type:'market.lookbook.save',payload:{id:row.id,input:{name:row.name,customerId:(row as MarketLookbook).customerId,productIds:selected,note:row.note,fileIds:row.fileIds}}});
   setOpen(false);
  };
  return <><div className="mist-row mist-module-actions">{row.productIds.map(id=><Button key={id} onClick={()=>w.go('products',id)}>{w.market.products.find(p=>p.id===id)?.name||'产品档案'}</Button>)}{canWrite&&<Button onClick={()=>{setSelected([...row.productIds]);setOpen(true);}}>{uiText("管理关联产品")}</Button>}</div><Dialog open={open} title={uiText("管理关联产品")} onClose={()=>{if(!op.busy)setOpen(false);}} footer={<><Button disabled={op.busy} onClick={()=>setOpen(false)}>{uiText("取消")}</Button><Button variant="primary" loading={op.busy} onClick={()=>void op.execute(save)}>{uiText("保存关联")}</Button></>}>{op.error&&<Banner tone="bad" title={uiText("关联未保存")}>{op.error}</Banner>}{allowed.length?<FormGrid cols={1}>{allowed.map(p=><Checkbox key={p.id} label={uiText(`${p.sku} · ${p.name}${p.status==='archived'?'（已归档）':''}`)} checked={selected.includes(p.id)} disabled={op.busy||p.status==='archived'&&!selected.includes(p.id)} onChange={checked=>setSelected(ids=>checked?[...ids,p.id]:ids.filter(id=>id!==p.id))}/>)}</FormGrid>:<EmptyState title={uiText("没有可关联的产品")} description={uiText("先建立产品档案后再选择。")}/>}</Dialog></>;
@@ -150,13 +150,15 @@ function LeadList({source,parentId,onBack}:{source:'campaign'|'show';parentId:st
  <ModuleEditorDialog spec={dialog} onClose={()=>setDialog(null)}/></>;
 }
 function LookbookActions({row,can}:{row:MarketLookbook;can:boolean}){
- const w=useMarket(),op=useOperation(),docs=(row as MarketLookbook&{documents?:Array<{fileId:string;number:string}>}).documents||[],latest=docs.at(-1),file=latest&&w.state?.files.find(f=>f.id===latest.fileId);
+ const w=useMarket(),op=useOperation(),docs=row.documents||[],latest=docs.at(-1);
+ const current=row.status!=='Draft'?docs.find(doc=>doc.id===row.currentDocumentId):undefined;
+ const currentFile=current&&w.state?.files.find(f=>f.id===current.fileId),file=currentFile||(latest&&w.state?.files.find(f=>f.id===latest.fileId));
  const customer=w.state?.customers.find(c=>c.id===row.customerId),contact=w.state?.contacts.find(c=>c.customerId===row.customerId&&c.email);
  const prepared=row.status==='Prepared';
- return <>{op.error&&<FailureNotice title={'操作未完成'} detail={op.error} />}<ActionBar busy={op.busy} actions={[
-  {label:latest?'重新生成 PDF':'生成画册 PDF',icon:FileText,primary:!latest,onClick:()=>void op.execute(async()=>{const r=await w.run({type:'market.lookbook.document',payload:{id:row.id}});if(typeof r.result.fileId==='string')await w.downloadFile({id:r.result.fileId,name:`${row.name}.pdf`,mimeType:'application/pdf',size:0,storageKey:'',createdAt:''});}),reason:!can?'需要营销写权限':!prepared?'请先准备画册':false},
-  {label:'下载 PDF',icon:Download,onClick:()=>{if(file)void op.execute(()=>w.downloadFile(file));},hidden:!file},
-  {label:'用邮箱发送',icon:Send,primary:!!latest,onClick:()=>{setComposeIntent({to:contact?.email||'',subject:`${row.name}${customer?' · '+customer.name:''}`,fileIds:latest?[latest.fileId]:[],links:customer?[{kind:'customer',id:customer.id}]:[]});w.go('emails');},reason:!latest?'请先生成画册 PDF':!w.session.hasPermission('emails:write')?'需要邮件权限':false},
+ return <>{op.error&&<FailureNotice title={'操作未完成'} detail={op.error} />}<ActionBar busy={op.busy||w.saving||!!w.pending} actions={[
+  {label:latest?'重新生成 PDF':'生成画册 PDF',icon:FileText,primary:!currentFile,onClick:()=>void op.execute(async()=>{const r=await w.run({type:'market.lookbook.document',payload:{id:row.id}});if(typeof r.result.fileId==='string')await w.downloadFile({id:r.result.fileId,name:`${row.name}.pdf`,mimeType:'application/pdf',size:0,storageKey:'',createdAt:''});}),reason:!can?'需要营销写权限':!prepared?'请先准备画册':false},
+  {label:currentFile?'下载 PDF':'下载历史 PDF',icon:Download,onClick:()=>{if(file)void op.execute(()=>w.downloadFile(file));},hidden:!file},
+  {label:'用邮箱发送',icon:Send,primary:!!currentFile,onClick:()=>{if(!current||!currentFile)return;setComposeIntent({to:contact?.email||'',subject:`${row.name}${customer?' · '+customer.name:''}`,fileIds:[current.fileId],links:customer?[{kind:'customer',id:customer.id}]:[]});w.go('emails');},reason:row.status==='Draft'?'请先准备画册':!currentFile?'请先生成本版画册 PDF':!w.session.hasPermission('emails:write')?'需要邮件权限':false},
  ]}/></>;
 }
 function MarketingPage(){const w=useMarket(),tab=w.route.section==='lookbooks'?'lookbooks':w.route.section==='leads'?'leads':'campaigns',leadParent=w.route.section?.startsWith('campaign-leads:')?w.route.section.slice('campaign-leads:'.length):null;const [editor,setEditor]=useRouteDraft<ModuleEditorSpec|null>(null);const can=w.session.hasPermission('marketing:write');const productOptions=[{value:'',label:'未选择'},...w.market.products.filter(p=>p.status==='active').map(p=>({value:p.id,label:p.sku+' '+p.name}))];

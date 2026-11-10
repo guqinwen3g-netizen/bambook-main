@@ -278,8 +278,9 @@ export function applyDocumentGeneration(root: MistState, command: DocumentGenera
   }
   if (command.type === 'market.lookbook.document') {
     const snapshot = prepareLookbookSnapshot(root, command.payload, ctx), artifact = bound(root, snapshot, ctx);
-    const book = root.market.lookbooks.find(b => b.id === command.payload.id)! as MarketLookbook & { documents?: GeneratedDocRecord[] };
+    const book = root.market.lookbooks.find(b => b.id === command.payload.id)!;
     book.documents = [...(book.documents || []), structuredClone(artifact.record)];
+    book.currentDocumentId = artifact.record.id;
     book.fileIds = [...new Set([...book.fileIds, artifact.file.id])];
     event(root, ctx, 'lookbook', book.id, `生成画册 PDF ${snapshot.number}`, [artifact.file.id]);
     return { id: book.id, fileId: artifact.file.id };
