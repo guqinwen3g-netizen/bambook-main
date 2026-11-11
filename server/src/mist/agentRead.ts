@@ -22,6 +22,7 @@ export const AGENT_OBJECT_TYPES: ObjectType[] = [
   { type: 'order', label: '订单', scope: 'orders:read', path: ['orders'], view: 'orders/detail' },
   { type: 'order_line', label: '订单行', scope: 'orders:read', path: ['orderLines'], view: 'orders/detail', linkId: r => r.orderId },
   { type: 'development', label: '开发单', scope: 'products:read', path: ['devs'], view: 'development/detail' },
+  { type: 'development_draft', label: '开发草稿', scope: 'products:read', path: ['drafts'], view: 'development/new' },
   { type: 'dev_version', label: '开发版本', scope: 'products:read', path: ['versions'], view: 'development/detail', linkId: r => r.devId },
   { type: 'product', label: '产品档案', scope: 'products:read', path: ['market', 'products'], view: 'products' },
   { type: 'sample', label: '样品', scope: 'products:read', path: ['fulfillment', 'samples'], view: 'samples' },
@@ -163,14 +164,16 @@ function completeDataWithinLimit(row:unknown):Record<string,unknown>|undefined{
   };
   const data=read(row,0);return complete&&data&&JSON.stringify(data).length<=GET_LIMIT?data:undefined;
 }
-function summary(row: any) {
+function summary(row: any, type?:ObjectType) {
+  // Draft values stay nested in detail reads so task source fingerprints still match storage.
+  if(type?.type==='development_draft')return Object.fromEntries(Object.entries({id:row.id,name:row.values?.name,customer:row.values?.customer,style:row.values?.style,domain:row.values?.domain,updatedAt:row.updatedAt}).filter(([,v])=>v!==undefined).map(([k,v])=>[k,compact(v,0)]));
   return Object.fromEntries(Object.entries(row).filter(([k, v]) => k !== 'img' && (v === null || ['string', 'number', 'boolean'].includes(typeof v))).slice(0, 14).map(([k, v]) => [k, compact(v, 0)]));
 }
 function link(type: ObjectType, row: any) {
   const id = type.linkId ? type.linkId(row) : row.id;
   return typeof id === 'string' && id ? `bambook://open?${new URLSearchParams({view:type.view,id,...(type.section?{section:type.section}:{}),...(type.type==='dev_version'?{versionId:row.id}:{}),...(type.type==='order_line'?{orderLineId:row.id}:{})})}` : null;
 }
-function ref(type: ObjectType, row: any) { return { type: type.type, id: row.id as string, label: labelOf(row), link: link(type, row) }; }
+function ref(type: ObjectType, row: any) { return { type: type.type, id: row.id as string, label: labelOf(type.type==='development_draft'?{id:row.id,name:row.values?.name}:row), link: link(type, row) }; }
 
 export function agentCatalog(actor: TokenPayload) {
   return readable(actor).map(t => ({ type: t.type, label: t.label }));
@@ -188,12 +191,12 @@ export function agentQuery(state: MistState, actor: TokenPayload, input: { type?
   let total = 0, size = 0;
   for (const type of types) for (const row of rows(state, type)) {
     if (terms.length) {
-      const hay = JSON.stringify(summary(row)).toLowerCase();
+      const hay = JSON.stringify(summary(row,type)).toLowerCase();
       if (!terms.every(term => hay.includes(term))) continue;
     }
     total++;
     if (matches.length < limit) {
-      const result = { ...ref(type, row), summary: summary(row) }, length = JSON.stringify(result).length + 1;
+      const result = { ...ref(type, row), summary: summary(row,type) }, length = JSON.stringify(result).length + 1;
       if (size + length <= QUERY_RESULT_MAX) { matches.push(result); size += length; }
     }
   }

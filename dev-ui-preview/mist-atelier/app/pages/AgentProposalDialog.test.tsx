@@ -120,3 +120,17 @@ describe('signature on Agent-drafted approvals', () => {
   expect(commandRequiresSignature({ type: 'market.quotation.decide', payload: { decision: 'approved' } })).toBe(false);
  });
 });
+
+it('shows development draft business fields and source filenames without internal wrapper paths',()=>{
+ const state=createMistState({id:()=> 'id',now:'2026-11-11T00:00:00Z',actorName:'Test'},'empty');state.drafts=[{id:'draft-private',values:{name:'羊毛大衣'},fileIds:['file-private']} as any];state.files=[{id:'file-private',name:'RFQ.docx'} as any];
+ const p={id:'p',ownerId:'u',owner:'顾言',summary:['保存开发草稿'],state:'pending',createdAt:'2026-11-11',command:{type:'development.saveDraft',payload:{draftId:'draft-private',values:{name:'羊毛大衣',style:'NW-31',fabric:'80% wool',kind:'new',target:'',factories:[],sampleQuantity:2},fileIds:['file-private']}}};
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
+ try{
+  const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={p as any} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
+  const confirm=()=>Array.from(host.querySelectorAll('button')).find(b=>b.textContent==='确认执行')!;
+  render();const text=host.textContent||'';expect(text).toContain('客户款号 · NW-31');expect(text).toContain('面料 · 80% wool');expect(text).toContain('RFQ.docx');expect(text).not.toContain('draft-private');expect(text).not.toContain('file-private');expect(text).not.toContain('values');expect(confirm().disabled).toBe(false);
+  const drafts=state.drafts;state.drafts=[];render();expect(host.textContent).toContain('草稿或附件已不可见，请重新核对');expect(confirm().disabled).toBe(true);
+  state.drafts=drafts;state.files=[];render();expect(host.textContent).toContain('附件已不可见');expect(confirm().disabled).toBe(true);
+ }
+ finally{act(()=>root.unmount());host.remove();}
+});

@@ -161,6 +161,9 @@
 
 ### 6.2.1 业务附件读取与原件回程（2026-11-11）
 
+- 开发草稿可经 `development_draft` 查询与读取（`products:read`），按草稿名、客户、款号或 ID 查找，链接回 `development/new?id=草稿ID`。摘要从 values 取业务字段，详情保持原始结构，避免改变任务来源指纹；附件仍按当前账号可见范围返回。
+- 工作区默认入口、列表、直接读取和命令回执统一经 `repository.preparedView` 准备任务提议可见性。任务源或权限失效仍隐去 payload，不能用未准备的缓存代替授权。开发草稿提议列明业务字段和附件名称；源草稿/附件不可见时禁用确认，服务端继续独立校验。
+
 - 当前正文入口为 `bambook_file_text` / `GET /agent/files/:fileId/text`，文件 ID 从 `bambook_get.attachments` 取得；仓储 `fileText` 复用下载权限，不因 Agent 身份扩大附件可见性。先上传再在业务记录中关联，未关联文件不应被当作该记录的附件。
 - `agentFileWindow.ts`：首段不传 cursor，后续将 nextCursor 原样传回同一 fileId。maxChars 每次 200–20,000（默认 8,000）。文本、Word、Excel、PPT 可在正文内继续；PDF 每个提取窗口最多 20 页，窗口内先按字符补读，再从第 21、41…页继续。range 为窗口内 UTF-16 半开字符范围；跨 PDF 窗口时字符偏移归零，pageFrom 接前一窗口 pageTo+1。
 - sourceHash 绑定实际内容及格式元数据，cursor 也绑定工作区和附件 ID，只是位置而非授权凭据。`repository.fileText` 每次复用下载权限，异步提取后再次核验权限与内容。文件变化返回 FILE_TEXT_SOURCE_CHANGED（409），从首段重读；非法位置返回 400。
