@@ -163,6 +163,7 @@
 
 - 开发草稿可经 `development_draft` 查询与读取（`products:read`），按草稿名、客户、款号或 ID 查找，链接回 `development/new?id=草稿ID`。摘要从 values 取业务字段，详情保持原始结构，避免改变任务来源指纹；附件仍按当前账号可见范围返回。
 - 工作区默认入口、列表、直接读取和命令回执统一经 `repository.preparedView` 准备任务提议可见性。任务源或权限失效仍隐去 payload，不能用未准备的缓存代替授权。开发草稿提议列明业务字段和附件名称；源草稿/附件不可见时禁用确认，服务端继续独立校验。
+- 公司维护附件上传（2026-11-11）：`repository.uploadPermission` 对当前真人公司管理员复用 `canMaintainCompany` / `users:admin` 门槛，供印章等公司资料上传；不要求或补授订单、开发等业务写权限。普通业务上传仍按既有模块授权，Agent不继承这条管理上传通道；关联业务、案件附件及用印各自继续校验原权限，未引用文件只给上传人。真实数据库回归见 `companyConfigurationFiles.pg.test.ts`，覆盖非库所有者管理员上传/登记、业务写入仍拒绝、只读/跨公司及撤权后的图片读取拒绝。
 - 报价草稿提议（`AgentProposalDialog` / `market.quotation.save`）按当前可见数据显示报价编号、客户、准确来源版本与附件名；报价、源开发案/版本、客户、产品或附件消失时禁用确认。审批历史、成本依据、板块及最低毛利率由 `mistMarket#sourceLine/save` 依据已保存数据生成，不作为客户端可改字段展示，原命令不被前端改写。本人改动后旧提议仍由服务端冲突门禁拒绝；弹窗内呈现失败，关闭后可查看工作区错误，避免全局错误条遮挡拒绝操作。
 
 - 当前正文入口为 `bambook_file_text` / `GET /agent/files/:fileId/text`，文件 ID 从 `bambook_get.attachments` 取得；仓储 `fileText` 复用下载权限，不因 Agent 身份扩大附件可见性。先上传再在业务记录中关联，未关联文件不应被当作该记录的附件。
