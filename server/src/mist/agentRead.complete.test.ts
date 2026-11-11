@@ -24,3 +24,9 @@ it('does not expose embedded image bytes or revive internal mail send request an
 it('still gates the entire record with the caller current type permission',()=>{
  const s=state();s.orders.push({id:'order',code:'SO-1',detail:{nested:{secret:'not allowed'}}} as any);expect(()=>agentGet(s,{...actor,permissionCeiling:[]},'order','order')).toThrow('无权读取');
 });
+
+it('returns to the exact development version or order line rather than the current version',()=>{
+ const s=state();s.versions.push({id:'old-version',devId:'development'} as any);s.orderLines.push({id:'line-2',orderId:'order'} as any);
+ expect(agentGet(s,{...actor,permissions:['products:read','orders:read']},'dev_version','old-version').link).toContain('versionId=old-version');
+ expect(agentGet(s,actor,'order_line','line-2').link).toContain('orderLineId=line-2');
+});

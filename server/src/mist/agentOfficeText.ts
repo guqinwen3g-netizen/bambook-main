@@ -4,6 +4,7 @@
  * 不用 xlsx(SheetJS 0.18) 解析外部文件：该版本对构造文件有原型污染与正则回溯问题。
  */
 import JSZip from 'jszip';
+import { posix } from 'node:path';
 
 const ENTRY_MAX = 30 * 1024 * 1024;
 const TOTAL_MAX = 60 * 1024 * 1024;
@@ -36,6 +37,18 @@ export function decodeXml(text: string): string {
   });
 }
 const attr = (tag: string, name: string) => { const m = new RegExp(`\\s${name}="([^"]*)"`).exec(tag); return m ? decodeXml(m[1]) : undefined; };
+
+/** Resolve package-local relationships only; never fetch an external document. */
+function partTargets(xml: string, directory: string) {
+  const targets = new Map<string,string>();
+  for (const m of xml.matchAll(/<Relationship\b[^>]*>/g)) {
+    const id=attr(m[0],'Id'),target=attr(m[0],'Target');
+    if(!id||!target||attr(m[0],'TargetMode')==='External'||/^[a-z][a-z0-9+.-]*:|^\/\/|\\/i.test(target))continue;
+    const path=posix.normalize(target.startsWith('/')?target.slice(1):directory+'/'+target);
+    if(path.startsWith(directory+'/')&&!path.includes('\0'))targets.set(id,path);
+  }
+  return targets;
+}
 
 /** 按条目原始大小限额后读取文本；条目不存在返回 undefined。 */
 function reader(zip: JSZip) {
@@ -104,13 +117,17 @@ export function sheetRows(xml: string, shared: string[], dates: Set<number>, dat
       if (type === 's') value = shared[Number(raw)] ?? '';
       else if (type === 'inlineStr') value = [...body.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map(t => decodeXml(t[1])).join('');
       else if (type === 'b') value = raw === '1' ? 'TRUE' : raw === '0' ? 'FALSE' : '';
-      else if (raw !== undefined) { const v = decodeXml(raw); const n = Number(v); value = !type && dates.has(style) && Number.isFinite(n) ? serialDate(n, date1904) : v; }
+      else if (raw !== undefined) { const v = decodeXml(raw); const n = Number(v); value = (!type || type === 'n') && dates.has(style) && Number.isFinite(n) ? serialDate(n, date1904) : v; }
       cells[col] = cellText(value);
     }
     while (cells.length && !cells[cells.length - 1]) cells.pop();
     if (!cells.length) continue;
     const line = Array.from(cells, v => v ?? '').join('\t');
-    if (used + line.length + 1 > budget) { truncated = true; break; }
+    if (used + line.length + 1 > budget) {
+      const remaining=Math.max(0,budget-used-1);
+      if(remaining)lines.push(line.slice(0,remaining));
+      truncated = true; break;
+    }
     lines.push(line); used += line.length + 1;
   }
   return { lines, truncated };
@@ -118,10 +135,9 @@ export function sheetRows(xml: string, shared: string[], dates: Set<number>, dat
 
 async function xlsxText(read: (p: string) => Promise<string | undefined>, limit: number): Promise<OfficeText> {
   const workbook = await read('xl/workbook.xml');
-  if (!workbook) return { text: '', truncated: false, reason: '不是有效的 Excel 工作簿' };
+  if (!workbook) throw new Error('Missing workbook');
   const rels = (await read('xl/_rels/workbook.xml.rels')) ?? '';
-  const target = new Map<string, string>();
-  for (const m of rels.matchAll(/<Relationship\b[^>]*>/g)) { const id = attr(m[0], 'Id'), t = attr(m[0], 'Target'); if (id && t) target.set(id, t.startsWith('/') ? t.slice(1) : 'xl/' + t.replace(/^\.\//, '')); }
+  const target = partTargets(rels,'xl');
   const sharedXml = (await read('xl/sharedStrings.xml')) ?? '';
   const shared = [...sharedXml.matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/g)].map(si => [...si[1].replace(/<rPh\b[\s\S]*?<\/rPh>/g, '').matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map(t => decodeXml(t[1])).join(''));
   const dates = dateStyles(await read('xl/styles.xml'));
@@ -131,23 +147,28 @@ async function xlsxText(read: (p: string) => Promise<string | undefined>, limit:
   for (const sheet of sheets.slice(0, SHEETS_MAX)) {
     const path = sheet.rid && target.get(sheet.rid);
     const xml = path ? await read(path) : undefined;
-    if (!xml) continue;
+    if (!xml) throw new Error('Missing worksheet');
     const head = `## 工作表：${sheet.name}`;
     const { lines, truncated: cut } = sheetRows(xml, shared, dates, date1904, Math.max(0, limit - used - head.length - 2));
     truncated ||= cut;
-    const block = [head, ...(lines.length ? lines : ['（空）'])].join('\n');
+    const block = [head, ...(lines.length ? lines : [cut?'（正文超出本次摘录范围）':'（空）'])].join('\n');
     parts.push(block); used += block.length + 2;
     if (used >= limit) { truncated = true; break; }
   }
   return { text: parts.join('\n\n'), truncated, sheets: sheets.map(s => s.name) };
 }
 
-async function pptxText(zip: JSZip, read: (p: string) => Promise<string | undefined>): Promise<OfficeText> {
-  const slides = Object.keys(zip.files).map(p => /^ppt\/slides\/slide(\d+)\.xml$/.exec(p)).filter((m): m is RegExpExecArray => !!m).map(m => ({ path: m[0], n: Number(m[1]) })).sort((a, b) => a.n - b.n);
+async function pptxText(read: (p: string) => Promise<string | undefined>): Promise<OfficeText> {
+  const presentation=await read('ppt/presentation.xml');
+  if(!presentation)throw new Error('Missing presentation');
+  const targets=partTargets((await read('ppt/_rels/presentation.xml.rels'))??'','ppt');
+  const slides=[...presentation.matchAll(/<p:sldId\b[^>]*>/g)].map((m,i)=>({path:targets.get(attr(m[0],'r:id')||''),n:i+1}));
   const parts: string[] = [];
   for (const slide of slides.slice(0, SLIDES_MAX)) {
-    const xml = (await read(slide.path)) ?? '';
-    const paras = [...xml.matchAll(/<a:p\b[^>]*>([\s\S]*?)<\/a:p>/g)].map(p => [...p[1].matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map(t => decodeXml(t[1])).join('')).filter(s => s.trim());
+    if(!slide.path)throw new Error('Missing slide relationship');
+    const xml = await read(slide.path);
+    if(!xml)throw new Error('Missing slide');
+    const paras = [...xml.matchAll(/<a:p\b[^>]*>([\s\S]*?)<\/a:p>/g)].map(p => [...p[1].matchAll(/<a:t\b[^>]*>([\s\S]*?)<\/a:t>/g)].map(t => decodeXml(t[1])).join('')).filter(s => s.trim());
     if (paras.length) parts.push(`## 第 ${slide.n} 页\n${paras.join('\n')}`);
   }
   return { text: parts.join('\n\n'), truncated: slides.length > SLIDES_MAX, pages: slides.length };
@@ -166,7 +187,7 @@ export async function extractOfficeText(kind: OfficeKind, bytes: Uint8Array, lim
       return { text: docxText(xml), truncated: false };
     }
     if (kind === 'xlsx') return await xlsxText(read, limit);
-    return await pptxText(zip, read);
+    return await pptxText(read);
   } catch (error) {
     if (error instanceof OfficeLimit) return { text: '', truncated: false, unreadable: true, reason: '文档解压后过大，不提取正文' };
     return { text: '', truncated: false, unreadable: true, reason: 'Office 文档无法解析' };

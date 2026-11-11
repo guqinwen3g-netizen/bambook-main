@@ -22,7 +22,7 @@ const clock = (iso: string) => new Date(iso).toLocaleTimeString(interfaceLocale(
 // 旧记录没有服务端给出的页面时按类型兜底；新记录用 ref.view / section。
 const VIEW: Record<string, string> = { order: 'orders/detail', customer: 'crm', development: 'development/detail', purchase: 'procurement', shipment: 'shipments', invoice: 'invoices', quotation: 'quotations', supplier: 'suppliers', email: 'emails', production: 'production-board', risk: 'risks', claim: 'claims' };
 
-type OpenRecord = (view: string, id: string, section?: string) => void;
+type OpenRecord = (view: string, id: string, target?: import('../../nav').RouteTarget) => void;
 function Trail({ items, active, onOpen }: { items: AgentTaskTrailItem[]; active: boolean; onOpen: OpenRecord }) {
   const [open, setOpen] = React.useState(false);
   const reads = items.filter(i => i.kind === 'read').length, writes = items.filter(i => i.kind === 'write').length, last = items.at(-1);
@@ -30,7 +30,7 @@ function Trail({ items, active, onOpen }: { items: AgentTaskTrailItem[]; active:
   if (active) return <div className="mist-xz-trail"><span className="mist-xz-shimmer">{uiText(last?.label ?? '正在办理')}</span></div>;
   return <div className="mist-xz-trail" data-open={open || undefined}>
     <button type="button" className="mist-xz-trail-h" aria-expanded={open} onClick={() => setOpen(v => !v)}>{uiText(summary)}<ChevronRight size={13} /></button>
-    {open && <ol className="mist-xz-steps">{items.map((i, n) => <li key={n} data-failed={i.failed || undefined}><Icon icon={KIND_ICON[i.kind]} size="xs" />{i.ref && (i.ref.view || VIEW[i.ref.type]) ? <button type="button" className="mist-xz-ref" onClick={() => onOpen(i.ref!.view ?? VIEW[i.ref!.type], i.ref!.id, i.ref!.section)}>{i.label}</button> : <span>{i.label}</span>}</li>)}</ol>}
+    {open && <ol className="mist-xz-steps">{items.map((i, n) => <li key={n} data-failed={i.failed || undefined}><Icon icon={KIND_ICON[i.kind]} size="xs" />{i.ref && (i.ref.view || VIEW[i.ref.type]) ? <button type="button" className="mist-xz-ref" onClick={() => onOpen(i.ref!.view ?? VIEW[i.ref!.type], i.ref!.id, i.ref!.section ? {section:i.ref!.section} : undefined)}>{i.label}</button> : <span>{i.label}</span>}</li>)}</ol>}
   </div>;
 }
 
@@ -53,7 +53,7 @@ function ProposalCard({ proposal, onOpen, onDecide }: { proposal: AgentProposal;
     <div className="mist-row">{quick ? <><Button size="sm" variant="ai" loading={busy} disabled={busy} onClick={() => void decide(true)}>{uiText('确认执行')}</Button><Button size="sm" variant="quiet" disabled={busy} onClick={() => void decide(false)}>{uiText('拒绝')}</Button><span className="mist-spacer" /><Button size="sm" variant="quiet" disabled={busy} onClick={() => onOpen(proposal.id)}>{uiText('查看并确认')}</Button></> : <Button size="sm" variant="ai" onClick={() => onOpen(proposal.id)}>{uiText('查看并确认')}</Button>}</div></div>;
 }
 
-export type ThreadActions = { onAnswer: (task: AgentTaskView, id: string, text: string) => void; onCancel: (task: AgentTaskView) => void; onRetry: (text: string) => void; onCopy: (text: string) => void; onDraft: (text: string) => void; onAutomate: (text: string) => void; onOpenRecord: (view: string, id: string, section?: string) => void; onProposal: (id: string) => void; onDecide?: (id: string, confirm: boolean) => Promise<void>; onOpenFile?: (fileId: string) => void };
+export type ThreadActions = { onAnswer: (task: AgentTaskView, id: string, text: string) => void; onCancel: (task: AgentTaskView) => void; onRetry: (text: string) => void; onCopy: (text: string) => void; onDraft: (text: string) => void; onAutomate: (text: string) => void; onOpenRecord: OpenRecord; onProposal: (id: string) => void; onDecide?: (id: string, confirm: boolean) => Promise<void>; onOpenFile?: (fileId: string) => void };
 
 /** 本轮确认后生成的文件：放在回答下方，点开即下载。 */
 function ProducedFiles({ proposals, onOpen }: { proposals: AgentProposal[]; onOpen: (fileId: string) => void }) {
