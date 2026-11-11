@@ -6631,5 +6631,18 @@
   "请先生成本版画册 PDF": "Generate the current lookbook PDF first",
   "目标价": "Target price",
   "样品单位": "Sample unit",
-  "草稿或附件已不可见，请重新核对": "The draft or attachment is no longer accessible. Check the source again."
+  "草稿或附件已不可见，请重新核对": "The draft or attachment is no longer accessible. Check the source again.",
+  "报价草稿": "Quotation draft",
+  "来源版本": "Source version",
+  "参考成本价": "Reference cost",
+  "尺码段": "Size range",
+  "主面料": "Main fabric",
+  "MOQ 数量": "MOQ quantity",
+  "MOQ 单位": "MOQ unit",
+  "报价已不可见": "Quotation no longer accessible",
+  "客户已不可见": "Customer no longer accessible",
+  "产品已不可见": "Product no longer accessible",
+  "开发案已不可见": "Development no longer accessible",
+  "版本已不可见": "Version no longer accessible",
+  "报价或来源资料已不可见，请重新核对": "The quotation or source is no longer accessible. Check it again."
 }

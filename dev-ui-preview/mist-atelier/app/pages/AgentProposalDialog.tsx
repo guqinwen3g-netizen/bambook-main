@@ -39,11 +39,23 @@ export function proposalFieldLabel(path: string): string {
 }
 
 const DEVELOPMENT_LABEL:Record<string,string>={draftId:'开发草稿',name:'开发对象',customer:'客户',style:'客户款号',season:'季节',category:'品类',kind:'开发类型',domain:'业务类型',fabric:'面料',color:'颜色',target:'目标价',sizeBase:'基码',goal:'开发要求',factories:'工厂',due:'目标日期',collaborators:'协作人',sampleQuantity:'样品数量',fileIds:'附件',initiator:'发起方',requestType:'客户要求类型',requestNote:'要求说明',charged:'收费',sampleForm:'样品形态',sampleUnit:'样品单位',targetCurrency:'目标价币种',targetUnit:'计价单位'};
+const QUOTATION_LABEL:Record<string,string>={id:'报价草稿',previousId:'来源报价',customerId:'客户',season:'季节',validUntil:'有效期',deliveryTerms:'贸易术语',paymentTerms:'付款条件',fxRate:'报价汇率',fileIds:'附件',lines:'条目',productId:'产品档案',sourceDevId:'来源开发案',sourceVersionId:'来源版本',name:'品名',style:'客户款号',specification:'规格',unit:'计价单位',cost:'参考成本价',specs:'规格',sizeRange:'尺码段',mainFabric:'主面料',composition:'成分',weight:'克重（g/m²）',width:'门幅（cm）',moqQty:'MOQ 数量',moqUnit:'MOQ 单位'};
+function quotationSourceMissing(command:AgentProposal['command'],state?:MistState|null){
+  if(command.type!=='market.quotation.save'||!state)return false;
+  const p=command.payload,input=p.input as Record<string,unknown>|undefined;
+  if(!input||typeof input!=='object'||Array.isArray(input))return true;
+  const missing=(id:unknown,rows:Array<{id:string}>)=>typeof id==='string'&&!!id&&!rows.some(r=>r.id===id);
+  return missing(p.id,state.market.quotations)||missing(input.previousId,state.market.quotations)||missing(input.customerId,state.customers)
+    ||Array.isArray(input.fileIds)&&input.fileIds.some(id=>missing(id,state.files))
+    ||Array.isArray(input.lines)&&input.lines.some(line=>line&&typeof line==='object'&&(missing(line.productId,state.market.products)||missing(line.sourceDevId,state.devs)||missing(line.sourceVersionId,state.versions)));
+}
 export function proposalFieldChanges(command: AgentProposal['command'], full = false, state?:MistState|null): { rows: Array<{ field: string; path: string; value: string }>; omitted: number } {
   const rows: Array<{ field: string; path: string; value: string }> = [], limit = full ? 200 : 40;
-  const development=command.type==='development.saveDraft';
+  const development=command.type==='development.saveDraft',quotation=command.type==='market.quotation.save';
   let omitted = 0;
   const walk = (value: unknown, path: string) => {
+    // mistMarket#sourceLine/save derives these from saved data; the input cannot set them.
+    if(quotation&&/^(input\.(approvalHistory|requiresApproval)|input\.lines\.\d+\.(costBasis|family|marginFloor))(\.|$)/.test(path))return;
     if (value && typeof value === 'object') {
       const entries = Array.isArray(value) ? value.map((child, i) => [String(i + 1), child] as const) : Object.entries(value);
       if (entries.length) { for (const [key, child] of entries) walk(child, path ? path + '.' + key : key); return; }
@@ -56,6 +68,18 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
       else if(/^fileIds\.\d+$/.test(path)&&state)text=state.files.find(f=>f.id===value)?.name||'附件已不可见';
       else if(path==='values.kind')text=({new:'全新开发',rev:'基于已有改版',copy:'复制其他客户款'} as Record<string,string>)[text]||text;
       else if(path==='values.domain')text=({garment:'成衣',fabric:'面料'} as Record<string,string>)[text]||text;
+      else if(typeof value==='boolean')text=value?'是':'否';
+      else if(text==='[]')text='未指定';
+      if(!text)text='未填写';
+    }
+    if(quotation){
+      field=path.split('.').filter(p=>p!=='input').map(p=>/^\d+$/.test(p)?'第'+p+'项':QUOTATION_LABEL[p]||FIELD_LABEL[p]||p).join(' · ');
+      if(path==='id'||path==='input.previousId')text=state?.market.quotations.find(q=>q.id===value)?.code||'报价已不可见';
+      else if(path==='input.customerId')text=state?.customers.find(c=>c.id===value)?.name||'客户已不可见';
+      else if(/^input\.fileIds\.\d+$/.test(path))text=state?.files.find(f=>f.id===value)?.name||'附件已不可见';
+      else if(/\.productId$/.test(path))text=value?state?.market.products.find(p=>p.id===value)?.name||'产品已不可见':'未指定';
+      else if(/\.sourceDevId$/.test(path))text=value?state?.devs.find(d=>d.id===value)?.code||'开发案已不可见':'未指定';
+      else if(/\.sourceVersionId$/.test(path))text=value?state?.versions.find(v=>v.id===value)?.label||'版本已不可见':'未指定';
       else if(typeof value==='boolean')text=value?'是':'否';
       else if(text==='[]')text='未指定';
       if(!text)text='未填写';
@@ -113,6 +137,7 @@ export function AgentProposalDialog({ proposal, state, onClose, run, onDone }: {
   const draftSourceMissing=proposal.command.type==='development.saveDraft'&&state&&(
     proposal.command.payload.draftId&&!state.drafts.some(d=>d.id===proposal.command.payload.draftId)
     ||Array.isArray(proposal.command.payload.fileIds)&&proposal.command.payload.fileIds.some(id=>!state.files.some(f=>f.id===id)));
+  const quoteSourceMissing=quotationSourceMissing(proposal.command,state);
   // 公司收款账户只对照银行字段；同一命令里的其他设置仍逐项列出。
   const changes = account && proposal.command.type !== 'settings.update' ? [] : account ? fields.rows.filter(r => !/^companyProfile\.(bankName|bankAccount|swift|bankAddress)$/.test(r.path)) : fields.rows;
   const incomplete = risk === 'high' && fields.omitted > 0;
@@ -127,10 +152,11 @@ export function AgentProposalDialog({ proposal, state, onClose, run, onDone }: {
   return <Dialog open onClose={() => { if (!busy) onClose(); }} width={560} title={uiText('确认 Agent 提议')}
     footer={<><Button disabled={busy} onClick={onClose}>{uiText('稍后')}</Button>
       <Button disabled={busy} onClick={() => void decide({ type: 'agent.proposal.reject', payload: { id: proposal.id, ...(note.trim() ? { note: note.trim() } : {}) } }, '已拒绝提议')}>{uiText('拒绝')}</Button>
-      <Button variant="primary" loading={busy} disabled={busy || !!mail?.reason || !!proposal.taskBlocked || proposal.unavailable || !!draftSourceMissing || incomplete || (risk === 'high' && !password) || (signing && !signature)} onClick={() => void decide({ type: 'agent.proposal.confirm', payload: { id: proposal.id } }, '已确认并执行', risk === 'high' ? { password } : undefined, signing && signature ? { svg: signature.svg } : undefined)}>{uiText('确认执行')}</Button></>}>
-    <div className="mist-col">
+      <Button variant="primary" loading={busy} disabled={busy || !!mail?.reason || !!proposal.taskBlocked || proposal.unavailable || !!draftSourceMissing || quoteSourceMissing || incomplete || (risk === 'high' && !password) || (signing && !signature)} onClick={() => void decide({ type: 'agent.proposal.confirm', payload: { id: proposal.id } }, '已确认并执行', risk === 'high' ? { password } : undefined, signing && signature ? { svg: signature.svg } : undefined)}>{uiText('确认执行')}</Button></>}>
+    <div className="mist-col" data-agent-proposal-dialog>
       {failure && <Banner tone="bad" title={uiText('没有执行')}>{failure}</Banner>}
       {draftSourceMissing&&<Banner tone="warn" title={uiText('草稿或附件已不可见，请重新核对')} />}
+      {quoteSourceMissing&&<Banner tone="warn" title={uiText('报价或来源资料已不可见，请重新核对')} />}
       {proposal.taskBlocked && <Banner tone="warn" title={uiText(proposal.taskBlocked)} />}
       <div className="mist-col" data-agent-proposal-summary>{proposal.summary.map((line, i) => <span key={i}>{line}</span>)}</div>
       <KeyValue items={[{ label: uiText('提出'), value: `${proposal.agentIdentity?.name || 'Agent'} · ${businessDate(proposal.createdAt)}` }, { label: uiText('执行身份'), value: proposal.owner }]} />

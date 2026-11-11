@@ -114,6 +114,8 @@
 .mist-shell-notices { position: absolute; bottom: calc(var(--mist-form-footer-height, 0px) + 20px); right: 24px; z-index: var(--mist-z-sticky); display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 8px; width: min(400px, calc(100% - 48px)); pointer-events: none; }
 /* 抽屉或对话框打开时操作失败的提示仍要看得见、点得到：移到抽屉左侧并压过遮罩；窄屏放到顶部。 */
 .mist-root:has(> .mist-dialog) .mist-shell-notices { z-index: calc(var(--mist-z-overlay) + 2); }
+/* Agent 提议在弹窗内展示执行失败；隐藏全局提示，避免挡住确认/拒绝，不清除错误状态。 */
+.mist-root:has(> .mist-dialog [data-agent-proposal-dialog]) .mist-shell-notices { visibility: hidden; }
 .mist-root:has(> .mist-drawer) .mist-shell-notices { z-index: calc(var(--mist-z-overlay) + 2); right: 434px; }
 .mist-root:has(> .mist-drawer[data-size="lg"]) .mist-shell-notices { right: 594px; }
 @media (max-width: 1080px) { .mist-root:has(> .mist-drawer) .mist-shell-notices { right: 24px; bottom: auto; top: 20px; } }
