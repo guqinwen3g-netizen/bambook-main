@@ -1,5 +1,5 @@
 import express from 'express';import request from 'supertest';
-import {afterEach,beforeEach,expect,it} from 'vitest';
+import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import path from 'node:path';
 import {MistRepository,type MistContract} from './repository';import {createMistRouter} from './route';import {MistPrivateFiles} from './files';
 import {MemoryMistDatabase,testActor,testAuthority,testContract} from './__tests__/support';
@@ -35,6 +35,20 @@ it('serves the excerpt to the desktop assistant route with workspace identity an
  expect((await request(app).get(url+'?maxChars=5').set('x-test-user','owner')).status).toBe(400);
  expect((await request(app).get(url+'?maxChars=abc').set('x-test-user','owner')).status).toBe(400);
  expect((await request(app).get(url+'?other=1').set('x-test-user','owner')).status).toBe(400);
+ expect((await request(app).get(url+'?cursor=invalid').set('x-test-user','owner')).status).toBe(400);
+ expect((await request(app).get(url+'?cursor[]=invalid').set('x-test-user','owner')).status).toBe(400);
  auth.users.set('stranger',{active:true,permissions:['ai:chat']});expect((await request(app).get(url).set('x-test-user','stranger')).status).toBe(404);
  expect((await request(app).get(url)).status).toBe(401);
+});
+it('rechecks live authority and source identity on every continuation',async()=>{
+ const saved=await repo.upload(testActor(),workspaceId,{requestId:'long-evidence',expectedRevision:db.workspaces.get(workspaceId).revision,claimId:'claim-active'},{name:'long.txt',mimeType:'text/plain',bytes:Buffer.from('Evidence '.repeat(120))});
+ const id=saved.workspace.state.files.find(f=>f.name==='long.txt')!.id,first=await repo.fileText(testActor(),workspaceId,id,200);expect(first.hasMore).toBe(true);expect(first.nextCursor).toBeTruthy();
+ const second=await repo.fileText(testActor(),workspaceId,id,200,first.nextCursor);expect(second.range.start).toBe(first.range.end);expect(second.sourceHash).toBe(first.sourceHash);expect(second.complete).toBe(false);
+ const file=db.workspaces.get(workspaceId).state.files.find((f:any)=>f.id===id);file.name='changed.txt';await expect(repo.fileText(testActor(),workspaceId,id,200,first.nextCursor)).rejects.toMatchObject({status:409,code:'FILE_TEXT_SOURCE_CHANGED'});
+ auth.users.get('owner')!.active=false;await expect(repo.fileText(testActor(),workspaceId,id,200,first.nextCursor)).rejects.toMatchObject({status:401});
+});
+
+it('rechecks authorization after parsing before returning text',async()=>{
+ const download=repo.download.bind(repo);vi.spyOn(repo,'download').mockImplementationOnce(async(...args)=>{const r=await download(...args);auth.users.get('owner')!.active=false;return r;});
+ await expect(repo.fileText(testActor(),workspaceId,fileId)).rejects.toMatchObject({status:401});
 });

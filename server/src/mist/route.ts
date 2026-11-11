@@ -361,9 +361,9 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   const mail = options.mail ?? new MistMailService(repository, new MistMailCredentials(options.mailCredentialsRoot ?? process.env.MIST_MAIL_CREDENTIAL_DIR ?? path.resolve(__dirname, '../../private/mist-mail-credentials')), options.mailTransport);
   const mailCall = (handler: (req: Request) => Promise<any>) => run(async (req, res) => { res.setHeader('Cache-Control', 'private, no-store'); const result = await handler(req); res.json({ workspace: result.workspace, receipt: result.receipt, ...(result.sync ? { sync: result.sync } : {}), ...(result.send ? { send: result.send } : {}) }); });
   router.get('/workspaces/:id/agent/files/:fileId/text',run(async(req,res)=>{
-    exactBody(req.query,['maxChars']);
+    exactBody(req.query,['maxChars','cursor']);
     const raw=req.query.maxChars,maxChars=raw===undefined?undefined:/^\d+$/.test(String(raw))?Number(raw):NaN;
-    let object;try{object=await repository.fileText(actor(req),req.params.id,req.params.fileId,maxChars);}catch(error){if(error instanceof RangeError)fail('INVALID_INPUT',error.message,400);throw error;}
+    let object;try{object=await repository.fileText(actor(req),req.params.id,req.params.fileId,maxChars,req.query.cursor);}catch(error){if(error instanceof RangeError)fail('INVALID_INPUT',error.message,400);throw error;}
     const {workspace}=await repository.getForAgent(actor(req),req.params.id);
     const result={workspace:{id:workspace.id,name:workspace.name,revision:workspace.revision},object};
     await repository.recordAgentTaskRead(actor(req),req.params.id,result);res.setHeader('Cache-Control','private, no-store');res.json(result);

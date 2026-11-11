@@ -162,7 +162,9 @@
 ### 6.2.1 业务附件读取与原件回程（2026-11-11）
 
 - 当前正文入口为 `bambook_file_text` / `GET /agent/files/:fileId/text`，文件 ID 从 `bambook_get.attachments` 取得；仓储 `fileText` 复用下载权限，不因 Agent 身份扩大附件可见性。先上传再在业务记录中关联，未关联文件不应被当作该记录的附件。
-- `agentFileText.ts` / `agentOfficeText.ts`：纯文本与 OOXML 有界摘录，PDF 最多前 20 页；单文件 20 MB、单次正文最多 20,000 字符。Excel 读取可见工作表与已有单元格值，不计算公式；显式数字类型也按日期格式解析，长行返回前段并标记截断。缺工作表或外部关系不能回报空表。PPT 按 presentation 关系中的实际页序读取，不读孤立旧页面；空白 PDF 不把页码当作正文，未读取的后续页保持不完整标记。OCR、完整长文分页与超过 PDF 页数上限的补读尚未实现。
+- `agentFileWindow.ts`：首段不传 cursor，后续将 nextCursor 原样传回同一 fileId。maxChars 每次 200–20,000（默认 8,000）。文本、Word、Excel、PPT 可在正文内继续；PDF 每个提取窗口最多 20 页，窗口内先按字符补读，再从第 21、41…页继续。range 为窗口内 UTF-16 半开字符范围；跨 PDF 窗口时字符偏移归零，pageFrom 接前一窗口 pageTo+1。
+- sourceHash 绑定实际内容及格式元数据，cursor 也绑定工作区和附件 ID，只是位置而非授权凭据。`repository.fileText` 每次复用下载权限，异步提取后再次核验权限与内容。文件变化返回 FILE_TEXT_SOURCE_CHANGED（409），从首段重读；非法位置返回 400。
+- complete 只表示本次响应是否包含全部可提取正文，末段 hasMore=false 不能代替此前已读证明。跨段必须累计连续 range 与一致 sourceHash；pagesWithoutText 标明本窗口无可提取文字的页，其他页正常也不能据此称全文完整。平台执行器保留文件自己的续读提示。单文件仍限 20 MB，单提取窗口最多 2,000,000 字符，Office 仍有 20 张可见工作表 / 200 张幻灯片及解压安全上限；超出后明确不完整。扫描件 OCR 未实现。Excel 不重新计算公式，PPT 按实际关系页序读取。
 - `agentRead.ts#link` 为开发版本、订单行保留 `versionId` / `orderLineId`。小竹对话与任务报告经 `runtime/agentSource.ts` 解析受限的内部来源链接，保留准确版本等路由字段；外部协议不作为内部导航，权限仍由目标页与服务端检查。
 - 本轮本地模拟资料已通过实际模型“客诉 → Excel/PPT → 带来源回答”和“不完整/损坏附件 → 明确缺失”两条任务，以及官方 MCP 客户端的正文读取、准确版本、只读写入拒绝。没有把资料文字转为用户授权，没有发送邮箱或修改共享业务。
 
