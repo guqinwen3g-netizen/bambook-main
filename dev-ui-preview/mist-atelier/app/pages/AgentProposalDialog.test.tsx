@@ -127,10 +127,25 @@ it('shows development draft business fields and source filenames without interna
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
  try{
   const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={p as any} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
-  const confirm=()=>Array.from(host.querySelectorAll('button')).find(b=>b.textContent==='确认执行')!;
-  render();const text=host.textContent||'';expect(text).toContain('客户款号 · NW-31');expect(text).toContain('面料 · 80% wool');expect(text).toContain('RFQ.docx');expect(text).not.toContain('draft-private');expect(text).not.toContain('file-private');expect(text).not.toContain('values');expect(confirm().disabled).toBe(false);
-  const drafts=state.drafts;state.drafts=[];render();expect(host.textContent).toContain('草稿或附件已不可见，请重新核对');expect(confirm().disabled).toBe(true);
-  state.drafts=drafts;state.files=[];render();expect(host.textContent).toContain('附件已不可见');expect(confirm().disabled).toBe(true);
+  const confirmButton=()=>Array.from(host.querySelectorAll('button')).find(b=>b.textContent==='确认执行')!;
+  render();const text=host.textContent||'';expect(text).toContain('客户款号 · NW-31');expect(text).toContain('面料 · 80% wool');expect(text).toContain('RFQ.docx');expect(text).not.toContain('draft-private');expect(text).not.toContain('file-private');expect(text).not.toContain('values');expect(confirmButton().disabled).toBe(false);
+  const drafts=state.drafts;state.drafts=[];render();expect(host.textContent).toContain('草稿或附件已不可见，请重新核对');expect(confirmButton().disabled).toBe(true);
+  state.drafts=drafts;state.files=[];render();expect(host.textContent).toContain('附件已不可见');expect(confirmButton().disabled).toBe(true);
+ }
+ finally{act(()=>root.unmount());host.remove();}
+});
+
+it('shows quotation business references and exact version, and blocks missing sources',()=>{
+ const state=createMistState({id:()=> 'id',now:'2026-11-11T00:00:00Z',actorName:'Test'},'empty');
+ state.customers=[{id:'customer-private',name:'Cedar & Crown'} as any];state.devs=[{id:'dev-private',code:'DEV-31',currentVersionId:'current-private'} as any];state.versions=[{id:'version-private',devId:'dev-private',label:'R2-B-1'} as any];state.files=[{id:'file-private',name:'RFQ.docx'} as any];state.market.quotations=[{id:'quote-private',code:'QT-2026-0007',revision:1} as any];
+ const proposal={id:'p',ownerId:'u',owner:'顾言',summary:['更新报价'],state:'pending',createdAt:'2026-11-11',command:{type:'market.quotation.save',payload:{id:'quote-private',input:{customerId:'customer-private',currency:'USD',fxRate:'7.10',season:'AW27',validUntil:'2026-11-30',deliveryTerms:'FOB Shanghai',paymentTerms:'T/T',fileIds:['file-private'],lines:[{productId:'',sourceDevId:'dev-private',sourceVersionId:'version-private',name:'羊毛大衣',style:'GA-2711',qty:'640',unit:'件',price:'72.50',cost:'58.00',specs:{sizeRange:'M',mainFabric:'双面羊毛'},costBasis:'unverified',family:'garment',marginFloor:{id:'floor-private',version:1,minMarginPercent:'15'}}],approvalHistory:[],requiresApproval:false}}}};
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
+ try{
+  const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal as any} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
+  const confirmButton=()=>Array.from(host.querySelectorAll('button')).find(b=>b.textContent==='确认执行')!;
+  render();const text=host.textContent||'';for(const value of ['报价草稿 · QT-2026-0007','客户 · Cedar & Crown','有效期 · 2026-11-30','报价汇率 · 7.10','来源开发案 · DEV-31','来源版本 · R2-B-1','数量 · 640','单价 · 72.50','RFQ.docx'])expect(text).toContain(value);
+  for(const value of ['input','sourceVersionId','-private','marginFloor','costBasis'])expect(text).not.toContain(value);expect(confirmButton().disabled).toBe(false);
+  for(const [owner,key]of [[state.market,'quotations'],[state,'customers'],[state,'devs'],[state,'versions'],[state,'files']] as const){const rows=owner[key as keyof typeof owner];(owner as any)[key]=[];render();expect(host.textContent).toContain('报价或来源资料已不可见，请重新核对');expect(confirmButton().disabled).toBe(true);(owner as any)[key]=rows;}
  }
  finally{act(()=>root.unmount());host.remove();}
 });
