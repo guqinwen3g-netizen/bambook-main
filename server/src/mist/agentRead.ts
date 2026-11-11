@@ -168,7 +168,7 @@ function summary(row: any) {
 }
 function link(type: ObjectType, row: any) {
   const id = type.linkId ? type.linkId(row) : row.id;
-  return typeof id === 'string' && id ? `bambook://open?${new URLSearchParams({view:type.view,id,...(type.section?{section:type.section}:{})})}` : null;
+  return typeof id === 'string' && id ? `bambook://open?${new URLSearchParams({view:type.view,id,...(type.section?{section:type.section}:{}),...(type.type==='dev_version'?{versionId:row.id}:{}),...(type.type==='order_line'?{orderLineId:row.id}:{})})}` : null;
 }
 function ref(type: ObjectType, row: any) { return { type: type.type, id: row.id as string, label: labelOf(row), link: link(type, row) }; }
 

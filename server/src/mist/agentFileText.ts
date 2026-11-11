@@ -32,9 +32,9 @@ export async function extractFileText(file: { name: string; mimeType: string }, 
     let parser: PDFParse | undefined;
     try {
       parser = new PDFParse({ data: new Uint8Array(bytes) });
-      const result = await parser.getText({ first: PDF_PAGES_MAX });
+      const result = await parser.getText({ first: PDF_PAGES_MAX, pageJoiner: '' });
       const text = clean(result.text ?? '');
-      if (!text) return { kind: 'pdf', text: '', truncated: false, pages: result.total, reason: '未提取到文字，可能是扫描件或图片' };
+      if (!text) return { kind: 'pdf', text: '', truncated: result.total > PDF_PAGES_MAX, pages: result.total, reason: result.total > PDF_PAGES_MAX ? '前 20 页未提取到文字，后续页未读取，请本人查看原件' : '未提取到文字，可能是扫描件或图片' };
       const out = cut(text, limit);
       return { kind: 'pdf', ...out, truncated: out.truncated || result.total > PDF_PAGES_MAX, pages: result.total };
     } catch { return { kind: 'unreadable', text: '', truncated: false, reason: 'PDF 无法解析（可能已加密或损坏）' }; }

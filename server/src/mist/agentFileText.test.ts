@@ -1,6 +1,18 @@
 import {expect,it} from 'vitest';
 import {extractFileText,fileTextLimit,FILE_TEXT_DEFAULT} from './agentFileText';
 const bytes=(text:string)=>new TextEncoder().encode(text);
+function blankPdf(count:number){
+ const objects=['<</Type/Catalog/Pages 2 0 R>>',`<</Type/Pages/Kids[${Array.from({length:count},(_,i)=>`${3+i*2} 0 R`).join(' ')}]/Count ${count}>>`];
+ for(let i=0;i<count;i++){objects.push(`<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 100]/Contents ${4+i*2} 0 R/Resources<<>>>>`);objects.push('<</Length 0>>\nstream\n\nendstream');}
+ let out='%PDF-1.4\n';const offsets:number[]=[];for(const [i,o] of objects.entries()){offsets.push(out.length);out+=`${i+1} 0 obj\n${o}\nendobj\n`;}
+ const xref=out.length;out+=`xref\n0 ${objects.length+1}\n0000000000 65535 f \n${offsets.map(o=>String(o).padStart(10,'0')+' 00000 n \n').join('')}trailer\n<</Size ${objects.length+1}/Root 1 0 R>>\nstartxref\n${xref}\n%%EOF`;return bytes(out);
+}
+it.each([1,21])('does not turn PDF page counters into business text, preserving the page limit (%i pages)',async count=>{
+ const r=await extractFileText({name:'scan.pdf',mimeType:'application/pdf'},blankPdf(count),200);
+ expect(r).toMatchObject({kind:'pdf',text:'',truncated:count>20,pages:count});
+ expect(r.reason).toContain('未提取到文字');
+ if(count>20)expect(r.reason).toContain('20');
+});
 /** Smallest valid one-page PDF whose content stream draws the given text. */
 function pdf(text:string){
  const objects=['<</Type/Catalog/Pages 2 0 R>>','<</Type/Pages/Kids[3 0 R]/Count 1>>','<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 100]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>',null,'<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>'];

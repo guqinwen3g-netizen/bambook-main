@@ -94,3 +94,8 @@ it('creates an explicit platform task without issuing any external credential',a
 it('does not offer a platform task as ready when the runtime is unavailable, while retaining external creation',async()=>{
  act(paint);await flush();await click(getByRole(host,'button',{name:'新建任务'}));await act(async()=>fireEvent.change(getByLabelText(document.body,/执行方式/,{selector:'select'}),{target:{value:'platform'}}));expect(getByText(document.body,'平台执行暂不可用')).toBeTruthy();expect((getByRole(document.body,'button',{name:'安排任务',exact:true}) as HTMLButtonElement).disabled).toBe(true);
 });
+it('opens the exact attachment source version from a formatted task report',async()=>{
+ const finished={...row(),state:'succeeded',result:'[来源版本](bambook://open?view=development/detail&id=dev&versionId=old)\n\n| 规格 | 数量 |\n| --- | --- |\n| A | 1200 |',canControl:false};
+ seam.routeId='task';seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:finished}:url.includes('/history')?{items:[],nextCursor:null}:url.includes('agent-identities')?{items:[identity()]}:{items:[finished],nextCursor:null}));
+ act(paint);await flush();expect(document.querySelector('p table')).toBeNull();await click(getByRole(document.body,'button',{name:'来源版本'}));expect(seam.go).toHaveBeenCalledWith('development/detail','dev',{versionId:'old'});
+});
