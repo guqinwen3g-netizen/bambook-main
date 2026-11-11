@@ -2,7 +2,7 @@ import {expect,it} from 'vitest';
 import {randomUUID} from 'node:crypto';
 import {createMistState} from '../shared/mistWorkspace';
 import type {TokenPayload} from '../auth/service';
-import {agentGet} from './agentRead';
+import {agentGet,agentQuery} from './agentRead';
 
 const actor={userId:'owner',permissions:['emails:read','orders:read'],roles:[],departmentIds:[],authorizationLoaded:true} as TokenPayload;
 const state=()=>createMistState({id:randomUUID,actorName:'Test',now:'2026-11-01T00:00:00Z'},'empty');
@@ -29,4 +29,12 @@ it('returns to the exact development version or order line rather than the curre
  const s=state();s.versions.push({id:'old-version',devId:'development'} as any);s.orderLines.push({id:'line-2',orderId:'order'} as any);
  expect(agentGet(s,{...actor,permissions:['products:read','orders:read']},'dev_version','old-version').link).toContain('versionId=old-version');
  expect(agentGet(s,actor,'order_line','line-2').link).toContain('orderLineId=line-2');
+});
+it('finds a development draft by its business fields and reads the exact draft with attachment references',()=>{
+ const s=state();s.drafts.push({id:'draft',values:{name:'羊毛大衣',style:'NW-31',customer:'Northwind',fabric:'80% wool'},fileIds:['source'],updatedAt:'2026-11-11',ownerId:'sales'} as any);s.files.push({id:'source',name:'RFQ.docx',mimeType:'application/octet-stream',size:100} as any);
+ const permitted={...actor,permissions:['products:read']};
+ expect(agentQuery(s,permitted,{type:'development_draft',q:'NW-31'}).results.map(r=>r.id)).toEqual(['draft']);
+ expect(agentQuery(s,permitted,{type:'development_draft',q:'draft'}).results.map(r=>r.id)).toEqual(['draft']);
+ const result=agentGet(s,permitted,'development_draft','draft');expect(result.link).toContain('view=development%2Fnew');expect(result.link).toContain('id=draft');expect(result.data).toEqual(s.drafts[0]);expect(result.label).toBe('羊毛大衣');expect(result.attachments?.[0].fileId).toBe('source');
+ expect(()=>agentGet(s,{...actor,permissionCeiling:[]},'development_draft','draft')).toThrow('无权读取');
 });

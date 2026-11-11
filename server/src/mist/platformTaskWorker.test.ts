@@ -170,3 +170,19 @@ it('turns a business command the model executes into an owner proposal, waits fo
  await f.command('agent.proposal.confirm',{id:state.waitingProposalIds[0]});await f.drain();state=await f.current(task.id);expect(state.state).toBe('succeeded');expect(complete).toHaveBeenCalledTimes(4);
  ws=(await f.human.get(f.base).expect(200)).body.workspace.state;expect(ws.customers.find((c:any)=>c.id===customer).terms).toBe('T/T 30% 预付');
 });
+it.each([false,true])('keeps a valid development draft proposal visible across reads and rejects stale source (changed: %s)',async changed=>{
+ let calls=0,draft='';const values={name:'大衣',customer:'Cedar & Crown',style:'',season:'',category:'',kind:'new',fabric:'',color:'',target:'',sizeBase:'',goal:'',factories:[],due:'',collaborators:[],sampleQuantity:1};
+ const complete=vi.fn(async()=>++calls===1||calls===3?tool('bambook_get',{type:'development_draft',id:draft}):calls===2?tool('bambook_execute',{command:{type:'development.saveDraft',payload:{draftId:draft,values:{...values,style:'NW-31'},fileIds:[]}}}):tool('bambook_task',{action:'finish',outcome:'succeeded',result:'草稿已核对。'}));
+ const ceiling:{value:string[]|null}={value:null};const f=await fixture(complete,{ceiling});draft=(await f.command('development.saveDraft',{values,fileIds:[]})).body.receipt.result.draftId;f.worker.start(3_600_000);const task=await f.create('platform');await f.drain();expect((await f.current(task.id)).state).toBe('waiting_human');
+ const direct=(await f.human.get(f.base).expect(200)).body.workspace,proposal=direct.state.agentProposals.find((p:any)=>p.taskId===task.id);expect(proposal.unavailable).not.toBe(true);
+ for(const ws of [(await f.human.get('/api/mist/workspaces/default').expect(200)).body.workspace,...(await f.human.get('/api/mist/workspaces').expect(200)).body.workspaces]){
+  if(ws.id===f.workspace.id)expect(ws.state.agentProposals.find((p:any)=>p.id===proposal.id)).toMatchObject({command:{type:'development.saveDraft'}});
+ }
+ ceiling.value=['ai:chat','products:read','products:write'];const hidden=(await f.human.get('/api/mist/workspaces/default').expect(200)).body.workspace.state.agentProposals.find((p:any)=>p.id===proposal.id);expect(hidden).toMatchObject({unavailable:true,command:{type:'unavailable',payload:{}}});ceiling.value=null;
+ expect(direct.state.drafts.find((d:any)=>d.id===draft).values.style).toBe('');if(changed){
+  await f.command('development.saveDraft',{draftId:draft,values:{...values,style:'HUMAN-EDIT'},fileIds:[]});const before=(await f.human.get(f.base).expect(200)).body.workspace;
+  const rejected=await f.human.post(f.base+'/commands').send({requestId:randomUUID(),expectedRevision:before.revision,command:{type:'agent.proposal.confirm',payload:{id:proposal.id}}});expect(rejected.status).toBe(409);
+  const after=(await f.human.get(f.base).expect(200)).body.workspace;expect(after.state.drafts.find((d:any)=>d.id===draft).values.style).toBe('HUMAN-EDIT');expect(after.revision).toBe(before.revision);return;
+ }
+ await f.command('agent.proposal.confirm',{id:proposal.id});await f.drain();const after=(await f.human.get(f.base).expect(200)).body.workspace;expect(after.state.drafts.find((d:any)=>d.id===draft).values.style).toBe('NW-31');expect(after.state.drafts).toHaveLength(direct.state.drafts.length);expect(after.state.devs).toHaveLength(direct.state.devs.length);
+});
