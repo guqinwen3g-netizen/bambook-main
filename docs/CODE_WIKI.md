@@ -216,6 +216,10 @@
 
 当前源码支持本人明确选择「平台执行」，不自动接管既有外部任务。发布状态以GO-LIVE和对应提交的deployment状态为准。员工步骤见[长期Agent任务SOP](../wiki/sop/agent-tasks.md)；本节记录维护契约。
 
+**经营日期与运行时间（2026-11-12）**：`repository.platformTaskContext`从当前有权公司状态经`mistBusinessInstant`计算`businessAt`；执行器把它作为`businessClock`送给模型，用于报价有效期、账龄、交期和报表判断。原`clock`继续表示实际运行时间，任务期限、等待、执行预算、租约及凭据不随模拟经营日期冻结。正常公司两者一致，雾织固定场景按原经营时钟，客户端不能借此修改内部场景配置。`platformTaskWorker.test.ts`在真实仓储→任务执行器→模型输入这一链上验证固定/正常公司日期与真实到期时间，避免用服务器当前日期误报模拟场景报价过期。发布状态仍以GO-LIVE为准。
+
+**任务月度用量**同样按实际北京时间计量：`XiaozhuTasks.tsx`用实际日期的上海月份查询，`agentTasks.platformTaskUsage`按任务真实创建时间换算上海月份聚合；冻结经营月及UTC月份均不能替代用量月份。固定场景前端、UTC月末前端和服务端月初/月末边界已有回归；当前真实任务的11月用量在本地新版页面经已部署API读回为2项/21次，未生成额外任务。
+
 ```mermaid
 flowchart LR
   U[本人安排任务] --> R[受保护任务登记]

@@ -469,8 +469,8 @@ export async function platformTaskUsage(db: any, workspaceId: string, month: str
   const rows = await db.mistCommandReceipt.findMany({ where: { workspaceId, inputHash: TASK_HASH, requestId: { startsWith: TASK_PREFIX }, ...(ownerId ? { actorId: ownerId } : {}) } });
   const out = new Map<string, { ownerId: string; ownerName: string; tasks: number; modelTurns: number; runtimeMs: number }>();
   for (const row of rows) {
-    let c: TaskRecord; try { c = record(row, workspaceId); } catch { continue; }
-    if (c.executor !== 'platform' || !c.createdAt.startsWith(month)) continue;
+    let c: TaskRecord;
+    try { c = record(row, workspaceId); if(c.executor!=='platform'||mistBusinessDate(c.createdAt).slice(0,7)!==month)continue; } catch { continue; }
     const u = out.get(c.ownerId) ?? { ownerId: c.ownerId, ownerName: c.ownerName, tasks: 0, modelTurns: 0, runtimeMs: 0 };
     u.tasks++; u.modelTurns += c.platform?.steps?.length ?? 0; u.runtimeMs += c.runtimeUsedMs || 0; out.set(c.ownerId, u);
   }

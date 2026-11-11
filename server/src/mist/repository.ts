@@ -239,7 +239,7 @@ export class MistRepository {
   }
   async platformTaskContext(prior:AgentActor):Promise<PlatformTaskContext>{
     if(prior.agentExecutor!=='platform'||!prior.agentTaskLease)fail('FORBIDDEN','请使用平台任务执行器',403);
-    return this.transact(async db=>{const{actor,row}=await this.own(db,prior,prior.agentTaskLease!.workspaceId,'ai:chat'),c=(await taskRecord(db,row.id,prior.agentTaskLease!.taskId)).value;const visible=(await this.preparedView(db,row,actor)).state;return{task:taskView(c,actor,Date.now()),locale:c.locale??'zh-CN',requiresRead:c.platform?.requiresRead===true||!!c.requiredRead,steps:structuredClone(c.platform?.steps??[]),decisions:(visible.agentProposals??[]).filter(p=>p.taskId===c.id&&p.ownerId===actor.userId).map(p=>({id:p.id,state:p.state,...(p.note?{note:p.note}:{}),...(p.produced?{produced:{fileId:p.produced.fileId,fileName:p.produced.fileName}}:{})}))};});
+    return this.transact(async db=>{const{actor,row}=await this.own(db,prior,prior.agentTaskLease!.workspaceId,'ai:chat'),c=(await taskRecord(db,row.id,prior.agentTaskLease!.taskId)).value;const visible=(await this.preparedView(db,row,actor)).state;return{task:taskView(c,actor,Date.now()),locale:c.locale??'zh-CN',businessAt:this.context(actor,row.state).now,requiresRead:c.platform?.requiresRead===true||!!c.requiredRead,steps:structuredClone(c.platform?.steps??[]),decisions:(visible.agentProposals??[]).filter(p=>p.taskId===c.id&&p.ownerId===actor.userId).map(p=>({id:p.id,state:p.state,...(p.note?{note:p.note}:{}),...(p.produced?{produced:{fileId:p.produced.fileId,fileName:p.produced.fileName}}:{})}))};});
   }
   async pulsePlatformTask(prior:AgentActor){
     if(prior.agentExecutor!=='platform'||!prior.agentTaskLease)fail('FORBIDDEN','请使用平台任务执行器',403);
