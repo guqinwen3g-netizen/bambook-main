@@ -40,6 +40,16 @@ it('requires a fresh business read before reporting an owner-declined stop',asyn
 it('provides a real offset-qualified business clock across a UTC month boundary without changing the instant',()=>{
  const now=Date.parse('2026-10-31T16:00:00Z'),clock=platformTaskClock(now);expect(clock).toEqual({now:'2026-11-01T00:00:00.000+08:00',utc:'2026-10-31T16:00:00.000Z',timeZone:'Asia/Shanghai'});expect(Date.parse(clock.now)).toBe(now);expect(Date.parse(clock.utc)).toBe(now);
 });
+it.each([true,false])('supplies the company business date separately from real task time (fixed=%s)',async fixed=>{
+ let customer='',calls=0;const complete=vi.fn(async(_input:LlmCompletionInput)=>calls++===0?tool('bambook_get',{type:'customer',id:customer}):tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对客户资料。'})),f=await fixture(complete);customer=f.workspace.state.customers[0].id;
+ const businessAt='2026-10-08T00:18:00.000Z';
+ if(fixed)await f.local.database.$transaction(async db=>{await db.mistWorkspace.update({where:{id:f.workspace.id},data:{state:{...f.workspace.state,settings:{...f.workspace.state.settings,businessClock:{mode:'fixed',at:businessAt,timezone:'Asia/Shanghai'}}}}});});
+ const started=Date.now();f.worker.start(3_600_000);const task=await f.create('platform');await f.drain();
+ const message=String(complete.mock.calls[0][0].messages[0].content),facts=JSON.parse(message.slice(message.indexOf('{"task":')));
+ expect(Date.parse(facts.clock.utc)).toBeGreaterThanOrEqual(started);expect(Date.parse(task.expiresAt)).toBeGreaterThan(started+23*60*60_000);
+ if(fixed){expect(facts.businessClock.now).toBe('2026-10-08T08:18:00.000+08:00');expect(facts.businessClock.utc).toBe(businessAt);}else expect(Math.abs(Date.parse(facts.businessClock.utc)-Date.parse(facts.clock.utc))).toBeLessThan(1000);
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded'});
+});
 async function usedBudget(f:Awaited<ReturnType<typeof fixture>>,id:string,milliseconds:number){
  await f.local.database.$transaction(async db=>{const{row,value:c}=await taskRecord(db,f.workspace.id,id);await db.mistCommandReceipt.updateMany({where:{id:row.id},data:{result:{revision:0,__agentTask:{...c,version:c.version+1,runtimeUsedMs:milliseconds}}}});});
 }

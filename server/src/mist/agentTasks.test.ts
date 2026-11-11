@@ -5,6 +5,7 @@ import { createIdentity, identityRecord, identityView, issueServiceKey, revokeSe
 import { answerTaskQuestion, askTaskQuestion, assertTaskLease, changeTask, checkTaskCondition, checkpointTask, claimTask, createTask, finishTask, heartbeatTask, issueTaskControl, reserveTaskStep, saveTaskSources, settleTaskProposal, taskRecord, taskView, waitTaskForProposal, waitTaskUntil, type AgentTaskLease } from './agentTasks';
 import type { AgentActor } from './agentDelegation';
 import type { TokenPayload } from '../auth/service';
+import {platformTaskUsage} from './agentTasks';
 
 let db: MemoryMistDatabase, actor: TokenPayload, service: AgentActor, workspaceId: string, identityId: string, taskId: string;
 let now: number;
@@ -26,6 +27,15 @@ async function claim(requestId = randomUUID(), workerId = 'worker') {
   return { result, lease: { taskId, workspaceId, runId: c.lease!.id, grantHash: digest(result.token!), serviceLease: c.authority } as AgentTaskLease };
 }
 const conditionTarget={type:'order',id:'source-order'},preparedCondition=()=>({...conditionTarget,label:'SO-1',hash:'server-full-read-hash'});
+it('aggregates platform usage by actual Shanghai month at both UTC boundaries',async()=>{
+ const start=Date.parse('2026-10-01T00:00:00Z'),identity=await tx(d=>createIdentity(d,actor,workspaceId,{id:randomUUID(),name:'月度核对',ownerId:actor.userId,mode:'read'},{id:actor.userId,name:actor.displayName!},start));
+ await tx(d=>issueServiceKey(d,actor,workspaceId,identity.id,{requestId:randomUUID(),version:identity.version},(_w,_i,g)=>'month-key-'+g,start));
+ for(const at of ['2026-10-31T15:59:59.999Z','2026-10-31T16:00:00.000Z','2026-11-30T15:59:59.999Z','2026-11-30T16:00:00.000Z'])await tx(d=>createTask(d,actor,workspaceId,{requestId:randomUUID(),identityId:identity.id,name:'月度核对',instructions:'只读核对本人业务。',executor:'platform'},Date.parse(at)));
+ expect(await tx(d=>platformTaskUsage(d,workspaceId,'2026-10',actor.userId))).toMatchObject([{tasks:1}]);
+ expect(await tx(d=>platformTaskUsage(d,workspaceId,'2026-11',actor.userId))).toMatchObject([{tasks:2}]);
+ expect(await tx(d=>platformTaskUsage(d,workspaceId,'2026-12',actor.userId))).toMatchObject([{tasks:1}]);
+ expect(await tx(d=>platformTaskUsage(d,workspaceId,'2026-11','another-owner'))).toEqual([]);
+});
 it('checks a condition on a bounded cadence without a lease or runtime charge, then requires the exact original full read',async()=>{
  const first=await claim();now+=5000;const requestId=randomUUID(),input={requestId,delaySeconds:120,condition:conditionTarget,summary:'等待原订单变化。'};
  const waiting=await tx(d=>waitTaskUntil(d,service,first.lease,input,now,preparedCondition));expect(waiting).toMatchObject({state:'waiting_condition',runtimeUsedMs:5000,waitingFor:{...conditionTarget,label:'SO-1'}});

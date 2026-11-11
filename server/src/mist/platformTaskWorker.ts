@@ -113,8 +113,9 @@ export class MistPlatformTaskWorker{
           if(!this.available)throw Error('MODEL_UNAVAILABLE');
           if(!await this.repository.platformTaskDailyRoom(actor)){issue='daily_limit';return;}
           phase='model';
-          const facts={task:context.task,clock:platformTaskClock(Date.now()),requiresRead:context.requiresRead,decisions:context.decisions,history:platformTaskHistory(context.steps)};
-          const response=await this.model({systemPrompt:SYSTEM+'\n'+responseLanguagePrompt(context.locale)+'\n工具：'+JSON.stringify(taskMcpTools()),messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts)),context.locale)}],temperature:0.1,jsonMode:true},abort.signal);
+          // Business scenarios may freeze company dates; task leases and waiting keep real time.
+          const now=Date.now(),facts={task:context.task,clock:platformTaskClock(now),businessClock:platformTaskClock(context.businessAt?Date.parse(context.businessAt):now),requiresRead:context.requiresRead,decisions:context.decisions,history:platformTaskHistory(context.steps)};
+          const response=await this.model({systemPrompt:SYSTEM+'\n业务日期判断（报价有效期、账龄、交期和报表）使用businessClock；clock是实际运行时间，仅用于任务等待、预算和任务到期。两者不同也不能擅自修改公司的经营日期。\n'+responseLanguagePrompt(context.locale)+'\n工具：'+JSON.stringify(taskMcpTools()),messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts)),context.locale)}],temperature:0.1,jsonMode:true},abort.signal);
           if(abort.signal.aborted)return;const plan=parsePlatformTaskPlan(response);phase='store';step=await this.repository.savePlatformTaskPlan(actor,plan);
         }
         if(abort.signal.aborted)return;phase='tool';const result:any=await invokePlatformTaskTool(this.repository,actor,step);
