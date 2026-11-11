@@ -26,6 +26,17 @@ async function fixture(complete:(input:LlmCompletionInput)=>Promise<string>,opti
  return{local,app,human,workspace,base,id,key,worker,repository,create,current,command,drain};
 }
 const tool=(name:string,args:Record<string,unknown>)=>JSON.stringify({name,arguments:args});
+
+it.each(['rejected','confirmed'] as const)('distinguishes an owner refusal from a genuine failed finish (%s)',async decision=>{
+ let calls=0,customer='';const complete=vi.fn(async()=>[tool('bambook_get',{type:'customer',id:customer}),tool('bambook_execute',{command:{type:'customer.update',payload:{id:customer,patch:{terms:'T/T 30% 预付'}}}}),tool('bambook_get',{type:'customer',id:customer}),tool('bambook_task',{action:'finish',outcome:'stopped',result:'本人拒绝后已停止，原业务未修改。'}),tool('bambook_task',{action:'finish',outcome:'failed',result:'没有本人拒绝依据，不能报告为按本人决定停止。'})][calls++]);
+ const f=await fixture(complete);customer=f.workspace.state.customers[0].id;f.worker.start(3_600_000);const task=await f.create('platform');await f.drain();const waiting=await f.current(task.id);expect(waiting.state).toBe('waiting_human');await f.command('agent.proposal.'+(decision==='rejected'?'reject':'confirm'),{id:waiting.waitingProposalIds[0]});await f.drain();
+ const ended=await f.current(task.id);expect(ended.state).toBe(decision==='rejected'?'cancelled':'failed');expect(ended.stopReason).toBe(decision==='rejected'?'owner_declined':undefined);const notices=(await f.human.get(f.base+'/agent-task-notices').expect(200)).body.items;expect(notices.find((n:any)=>n.taskId===task.id)?.title).toBe(decision==='rejected'?'Agent已按本人决定停止':'Agent执行失败');
+});
+
+it('requires a fresh business read before reporting an owner-declined stop',async()=>{
+ let calls=0,customer='';const complete=vi.fn(async()=>[tool('bambook_get',{type:'customer',id:customer}),tool('bambook_execute',{command:{type:'customer.update',payload:{id:customer,patch:{terms:'T/T 30% 预付'}}}}),tool('bambook_task',{action:'finish',outcome:'stopped',result:'本人拒绝，停止。'}),tool('bambook_get',{type:'customer',id:customer}),tool('bambook_task',{action:'finish',outcome:'stopped',result:'已读回原客户，按本人拒绝停止，未修改业务。'})][calls++]);
+ const f=await fixture(complete);customer=f.workspace.state.customers[0].id;f.worker.start(3_600_000);const task=await f.create('platform');await f.drain();const before=(await f.human.get(f.base).expect(200)).body.workspace.state.customers.find((c:any)=>c.id===customer);await f.command('agent.proposal.reject',{id:(await f.current(task.id)).waitingProposalIds[0]});await f.drain();expect(await f.current(task.id)).toMatchObject({state:'cancelled',stopReason:'owner_declined'});expect(complete).toHaveBeenCalledTimes(5);expect((await f.human.get(f.base).expect(200)).body.workspace.state.customers.find((c:any)=>c.id===customer)).toEqual(before);
+});
 it('provides a real offset-qualified business clock across a UTC month boundary without changing the instant',()=>{
  const now=Date.parse('2026-10-31T16:00:00Z'),clock=platformTaskClock(now);expect(clock).toEqual({now:'2026-11-01T00:00:00.000+08:00',utc:'2026-10-31T16:00:00.000Z',timeZone:'Asia/Shanghai'});expect(Date.parse(clock.now)).toBe(now);expect(Date.parse(clock.utc)).toBe(now);
 });

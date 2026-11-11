@@ -254,9 +254,10 @@ export class MistRepository {
   setMailStateWake(wake: () => void) { this.mailStateWake = wake; }
   constructor(private readonly prisma: any, private readonly contract: MistContract, private readonly files: MistPrivateFiles, private readonly authorize: FreshAuthority = freshMistAuthority, private readonly now = () => new Date(), private readonly creditArchiveBuilder: (snapshot: MistCreditPrintSnapshot, options?: {draft?: boolean}) => Promise<PreparedCreditIssueArchive> = buildIssueArchive, private readonly quotationPdfRenderer?: (html: string) => Promise<PdfRenderResult>, private readonly verifyPassword: MistPasswordVerifier = verifyAccountPassword, private reauthLimiter?: LoginRateLimiter) {}
   private context(actor: TokenPayload, state?: MistState): MistContext { const auditNow=this.now().toISOString();return { id: randomUUID, now: mistBusinessInstant(state,auditNow), auditNow, actorName: actor.displayName || actor.userId, actorId:actor.userId, can: scope => hasScope(actor, scope as any) }; }
-  /** 普通附件上传：只落私有文件、不改业务记录；持有任一业务写入权限即可（后勤的 CI/PL、财务的水单、质检的报告都要先上传再关联）。关联到哪条记录仍由各自业务命令按权限校验。 */
+  /** 上传只落私有文件；公司管理员还需上传印章等公司资料。关联或办理业务仍由各自命令独立校验。 */
   private async uploadPermission(db: any, prior: TokenPayload) {
     const actor = await this.authorize(db, prior);
+    if(actor.companyId&&!isAgentActor(prior)&&canMaintainCompany(actor))return 'users:admin';
     return MIST_UPLOAD_SCOPES.find(scope => hasScope(actor, scope as any)) ?? MIST_UPLOAD_SCOPES[0];
   }
   private async authorizeCompoundCommand(db: any, prior: TokenPayload, command?: MistCommand) {

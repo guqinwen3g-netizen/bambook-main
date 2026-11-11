@@ -15,11 +15,11 @@ export async function taskNoticeCandidates(db:any,workspaceId:string,ownerId:str
 
 /** A stable state boundary, not a heartbeat/version number. New human work is a new reminder. */
 export function taskNotice(c:TaskRecord,view:AgentTaskView):AgentTaskNotice|null{
-  if(view.state==='cancelled')return null;
+  if(view.state==='cancelled'&&view.stopReason!=='owner_declined')return null;
   // 自动规则结束时不逐次提醒：要处理的提议已在「接着完成」，运行记录在规则里。
   if(c.automationId&&view.state==='succeeded')return null;
   const waiting=['waiting_human','paused'].includes(view.state),question=waiting?view.questions?.filter(q=>!q.answeredAt)??[]:[],pending=waiting?view.waitingProposalIds:[];
-  const title=view.state==='access_changed'?'Agent任务权限已变化':view.state==='expired'?'Agent任务已到期':view.state==='budget_exhausted'?'Agent任务达到限额':question.length?'Agent待补充资料':pending.length?'Agent待本人确认':view.state==='paused'&&view.executionIssue?'Agent任务需处理':view.state==='failed'?'Agent执行失败':null;
+  const title=view.state==='cancelled'&&view.stopReason==='owner_declined'?'Agent已按本人决定停止':view.state==='access_changed'?'Agent任务权限已变化':view.state==='expired'?'Agent任务已到期':view.state==='budget_exhausted'?'Agent任务达到限额':question.length?'Agent待补充资料':pending.length?'Agent待本人确认':view.state==='paused'&&view.executionIssue?'Agent任务需处理':view.state==='failed'?'Agent执行失败':null;
   if(!title)return null;
   const key=createHash('sha256').update(JSON.stringify([title,question.map(q=>q.id),pending,title==='Agent任务需处理'?c.controlVersion:null,view.executionIssue?.code??null])).digest('hex');
   return{recipientIds:[c.ownerId],id:'agent-task:'+c.id+':'+key.slice(0,20),taskId:c.id,key,title,detail:view.name,at:question.at(-1)?.askedAt??c.updatedAt,readAt:c.noticeRead?.key===key?c.noticeRead.at:null,category:'general',target:{view:'assistant',id:c.id,section:'tasks'}};

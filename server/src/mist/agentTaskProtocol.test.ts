@@ -120,6 +120,16 @@ it('works with an actual standard MCP client over HTTP through waiting and resum
  const read=await client.callTool({name:'bambook_get',arguments:{type:'email',id}});expect((read.structuredContent as any).object.data.folder).toBe('archive');
  const finished=await client.callTool({name:'bambook_task',arguments:{action:'finish',requestId:randomUUID(),outcome:'succeeded',result:'已从当前记录核对归档。'}});expect((finished.structuredContent as any).item.state).toBe('succeeded');
 });
+it('uses the official control client to stop only after a real owner refusal',async()=>{
+ const f=await setup(),issued=(await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/issue').send({requestId:randomUUID(),version:1}).expect(200)).body;
+ const server=f.app.listen(0,'127.0.0.1');servers.push(server);await new Promise<void>(resolve=>server.once('listening',resolve));const address=server.address();if(!address||typeof address==='string')throw Error('Missing loopback port');
+ const client=new Client({name:'owner-refusal-client',version:'1'},{versionNegotiation:{mode:'auto'}});clients.push(client);await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/api/mist/mcp`),{requestInit:{headers:{[TASK_CONTROL_HEADER]:issued.token}}}));
+ const finish=()=>client.callTool({name:'bambook_task',arguments:{action:'finish',requestId:randomUUID(),outcome:'stopped',result:'按本人拒绝停止，未修改业务。'}});
+ expect((await finish()).isError).toBe(true);const customer=f.workspace.state.customers[0];await client.callTool({name:'bambook_get',arguments:{type:'customer',id:customer.id}});
+ const proposed=await client.callTool({name:'bambook_execute',arguments:{requestId:randomUUID(),command:{type:'customer.update',payload:{id:customer.id,patch:{terms:'T/T 30% 预付'}}}}});expect((proposed.structuredContent as any).status).toBe('awaiting_confirmation');await f.command('agent.proposal.reject',{id:(proposed.structuredContent as any).receipt.result.id});
+ expect((await finish()).isError).toBe(true);await client.callTool({name:'bambook_query',arguments:{type:'customer',q:customer.name}});expect((await finish()).isError).toBe(true);await client.callTool({name:'bambook_get',arguments:{type:'customer',id:customer.id}});const stopped=await finish();expect(stopped.isError).not.toBe(true);expect((stopped.structuredContent as any).item).toMatchObject({state:'cancelled',stopReason:'owner_declined'});expect(JSON.stringify(stopped)).not.toMatch(/bma1_|bmt1_|bmc1_/);
+ expect((await f.human.get(f.base).expect(200)).body.workspace.state.customers.find((c:any)=>c.id===customer.id)).toEqual(customer);
+});
 it('uses the official client for a full-read condition, preserves pause, and cannot substitute a summary or another record on wake',async()=>{
  const clock=Date.now(),now=vi.spyOn(Date,'now').mockReturnValue(clock);
  try{
