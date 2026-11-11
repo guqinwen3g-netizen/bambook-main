@@ -225,6 +225,20 @@ it('a finished task cannot be executed again', async () => {
   await expect(tx(d => assertTaskLease(d, actor, lease, now))).rejects.toMatchObject({ status: 401 });
   await expect(claim()).rejects.toMatchObject({ code: 'AGENT_TASK_NOT_READY' });
 });
+
+it('does not accept an owner-declined stop without an actual rejected proposal',async()=>{
+ const {lease}=await claim();await expect(tx(d=>finishTask(d,actor,lease,{requestId:'stop-without-decision',outcome:'stopped',result:'按本人决定停止。'},now))).rejects.toMatchObject({code:'AGENT_TASK_STOP_NOT_AUTHORIZED',status:422});
+ const view=taskView((await tx(d=>taskRecord(d,workspaceId,taskId))).value,actor,now);expect(view.state).toBe('running');expect(view).not.toHaveProperty('stopReason');
+});
+
+it('persists an owner rejection as the reason for a stopped result and keeps real failures separate',async()=>{
+ let current=await claim();const proposalId=randomUUID();await tx(d=>waitTaskForProposal(d,actor,current.lease,proposalId,'proposal-wait',now));
+ await tx(d=>settleTaskProposal(d,actor,workspaceId,taskId,proposalId,'human-reject','rejected',now));current=await claim();
+ await expect(tx(d=>finishTask(d,actor,current.lease,{requestId:'stop-without-readback',outcome:'stopped',result:'按本人拒绝停止。'},now))).rejects.toMatchObject({code:'AGENT_TASK_READ_REQUIRED',status:422});await tx(d=>saveTaskSources(d,actor,current.lease,[],now,{type:'customer',id:'customer-readback'}));
+ const view=await tx(d=>finishTask(d,actor,current.lease,{requestId:'stop-after-refusal',outcome:'stopped',result:'本人拒绝后停止，未修改业务。'},now));expect(view).toMatchObject({state:'cancelled',stopReason:'owner_declined',canControl:false});expect(view.result).toContain('本人拒绝');
+ expect(taskView((await tx(d=>taskRecord(d,workspaceId,taskId))).value,{...actor,permissions:[]},now)).not.toHaveProperty('stopReason');
+ await expect(claim()).rejects.toMatchObject({code:'AGENT_TASK_NOT_READY'});
+});
 it('accumulates runtime across pause/resume and refuses renewal beyond the total runtime budget', async () => {
   const first = await claim(); now += 20_000; await tx(d => heartbeatTask(d, actor, first.lease, 1, now));
   const c = (await tx(d => taskRecord(d, workspaceId, taskId))).value;

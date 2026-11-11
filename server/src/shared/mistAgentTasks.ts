@@ -9,6 +9,8 @@ export type AgentTaskView = {
   stepsUsed: number; stepLimit: number; runtimeUsedMs: number; runtimeLimitMs: number;
   lastHeartbeatAt: string | null; checkpoint: string; waitingProposalIds: string[]; result: string;
   canControl: boolean;
+  /** Only the server can record that this terminal stop follows a real owner refusal. */
+  stopReason?:'owner_declined';
   executor?:'external'|'platform';
   automationId?:string;
   conversationId?:string;

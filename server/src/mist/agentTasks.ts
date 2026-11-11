@@ -57,6 +57,8 @@ export type TaskRecord = {
   lastHeartbeatAt?:number;
   control?:{generation:string;hash:string;issuedAt:number};
   stepsUsed: number; runtimeUsedMs: number; checkpoint: string; result: string; waitingProposalIds: string[];
+  lastProposalDecision?:{proposalId:string;outcome:'confirmed'|'rejected';readBack?:boolean};
+  stopReason?:'owner_declined';
   questions?:AgentTaskQuestion[];
   /** 由自动规则触发：遇到待确认提议时本次运行结束，提议留给本人。 */
   automationId?:string;
@@ -93,7 +95,7 @@ const hasUnansweredQuestion=(c:TaskRecord)=>(c.questions??[]).some(q=>!q.answere
 export function taskView(c: TaskRecord, actor: TokenPayload, now: number, authorityValid = true): AgentTaskView {
   owner(actor, c); const readable = authorityValid && canReadContents(c, actor) && c.credentialVersion === actor.credentialVersion, ended = ['succeeded', 'failed', 'cancelled'].includes(c.state);
   const state = ended ? c.state : !readable ? 'access_changed' : now >= c.expiresAt ? 'expired' : (usedRuntime(c, now) >= RUNTIME_LIMIT || c.stepsUsed >= STEP_LIMIT && (!c.lease||c.lease.expiresAt<=now)) ? 'budget_exhausted' : c.state === 'running' && (!c.lease || c.lease.expiresAt <= now) ? 'queued' : c.state;
-  return { ...(c.automationId?{automationId:c.automationId}:{}), ...(c.conversationId?{conversationId:c.conversationId}:{}), ...(readable&&c.platform?.steps?.length?{trail:platformTrail(c.platform.steps)}:{}), id: c.id, identityId: c.identityId, identityName: c.identityName, name: readable ? c.name : 'Agent任务', ownerId: c.ownerId, ownerName: c.ownerName, instructions: readable ? c.instructions : '', mode:c.mode, state, version: c.controlVersion, createdAt: c.createdAt, updatedAt: c.updatedAt, expiresAt: new Date(c.expiresAt).toISOString(), stepsUsed: c.stepsUsed, stepLimit: STEP_LIMIT, runtimeUsedMs: usedRuntime(c, now), runtimeLimitMs: RUNTIME_LIMIT, lastHeartbeatAt: c.lastHeartbeatAt ? new Date(c.lastHeartbeatAt).toISOString() : c.lease ? new Date(c.lease.heartbeatAt).toISOString() : null, checkpoint: readable ? c.checkpoint : '', result: readable ? c.result : '', waitingProposalIds: readable ? c.waitingProposalIds : [], canControl: !ended, executor:c.executor??'external', ...(c.platform?.issue?{executionIssue:{code:c.platform.issue,...(c.platform.retryAt?{retryAt:new Date(c.platform.retryAt).toISOString()}:{} )}}:{}), questions:readable?c.questions??[]:[],resumeAt:readable&&c.resumeAt?new Date(c.resumeAt).toISOString():null,waitingFor:readable&&c.condition?{type:c.condition.type,id:c.condition.id,label:c.condition.label,...(c.condition.link?{link:c.condition.link}:{})}:null,nextCheckAt:readable&&c.condition?new Date(c.condition.nextCheckAt).toISOString():null,...(readable&&c.wakeReason?{wakeReason:c.wakeReason}:{}),requiredRead:readable?c.requiredRead??null:null };
+  return { ...(c.automationId?{automationId:c.automationId}:{}), ...(c.conversationId?{conversationId:c.conversationId}:{}), ...(readable&&c.platform?.steps?.length?{trail:platformTrail(c.platform.steps)}:{}), id: c.id, identityId: c.identityId, identityName: c.identityName, name: readable ? c.name : 'Agent任务', ownerId: c.ownerId, ownerName: c.ownerName, instructions: readable ? c.instructions : '', mode:c.mode, state, version: c.controlVersion, createdAt: c.createdAt, updatedAt: c.updatedAt, expiresAt: new Date(c.expiresAt).toISOString(), stepsUsed: c.stepsUsed, stepLimit: STEP_LIMIT, runtimeUsedMs: usedRuntime(c, now), runtimeLimitMs: RUNTIME_LIMIT, lastHeartbeatAt: c.lastHeartbeatAt ? new Date(c.lastHeartbeatAt).toISOString() : c.lease ? new Date(c.lease.heartbeatAt).toISOString() : null, checkpoint: readable ? c.checkpoint : '', result: readable ? c.result : '', waitingProposalIds: readable ? c.waitingProposalIds : [], canControl: !ended, executor:c.executor??'external',...(readable&&c.stopReason?{stopReason:c.stopReason}:{}), ...(c.platform?.issue?{executionIssue:{code:c.platform.issue,...(c.platform.retryAt?{retryAt:new Date(c.platform.retryAt).toISOString()}:{} )}}:{}), questions:readable?c.questions??[]:[],resumeAt:readable&&c.resumeAt?new Date(c.resumeAt).toISOString():null,waitingFor:readable&&c.condition?{type:c.condition.type,id:c.condition.id,label:c.condition.label,...(c.condition.link?{link:c.condition.link}:{})}:null,nextCheckAt:readable&&c.condition?new Date(c.condition.nextCheckAt).toISOString():null,...(readable&&c.wakeReason?{wakeReason:c.wakeReason}:{}),requiredRead:readable?c.requiredRead??null:null };
 }
 async function save(db: any, row: any, before: TaskRecord, next: TaskRecord) {
   const changed = await db.mistCommandReceipt.updateMany({ where: { id: row.id, workspaceId: before.workspaceId, inputHash: TASK_HASH, result: { path: [TASK_FIELD, 'version'], equals: before.version } }, data: { result: { revision: 0, [TASK_FIELD]: next } } });
@@ -383,6 +385,7 @@ export async function settleTaskProposal(db: any, actor: TokenPayload, workspace
   if (outcome === 'confirmed') await assertTaskAuthority(db, actor, c, now);
   if ((outcome === 'confirmed' && c.expiresAt <= now) || !c.waitingProposalIds.includes(proposalId)) fail('AGENT_TASK_NOT_READY', '所属任务或提议已失效', 409);
   const n = next(c, now, outcome, requestId, [proposalId]); n.waitingProposalIds = c.waitingProposalIds.filter(p => p !== proposalId); n.lease = undefined;
+  n.lastProposalDecision={proposalId,outcome};
   if (c.state !== 'paused') n.state = n.waitingProposalIds.length||hasUnansweredQuestion(c) ? 'waiting_human' : 'queued';
   n.checkpoint = outcome === 'confirmed' ? '本人已确认上一步提议；续办前核对业务结果。' : '本人已拒绝上一步提议；续办前查看拒绝原因。';
   if(n.platform)n.platform={...n.platform,nextRunAt:0,requiresRead:true};
@@ -394,24 +397,33 @@ export async function assertHumanTaskProposal(db: any, actor: TokenPayload, work
   if (c.automationId) return;
   if (!['waiting_human','paused'].includes(c.state) || c.expiresAt <= now || !c.waitingProposalIds.includes(proposalId)) fail('AGENT_TASK_NOT_READY', '所属任务或提议已停止', 409);
 }
+function taskCompletion(c:TaskRecord,outcome:unknown):'succeeded'|'failed'|'cancelled'{
+  if(outcome!=='failed')assertTaskBusinessRead(c);
+  if(outcome==='stopped'){
+    if(c.lastProposalDecision?.outcome!=='rejected')fail('AGENT_TASK_STOP_NOT_AUTHORIZED','尚无本人拒绝的提议，不能按此原因停止',422);
+    if(!c.lastProposalDecision.readBack||c.platform?.requiresRead)fail('AGENT_TASK_READ_REQUIRED','请先回源读取当前业务，再报告停止结果',422);
+    return 'cancelled';
+  }
+  return outcome as 'succeeded'|'failed';
+}
 export async function finishTask(db: any, actor: TokenPayload, lease: AgentTaskLease, input: Record<string, unknown>, now: number) {
-  if (Object.keys(input).some(k => !['requestId','result','outcome'].includes(k)) || !['succeeded','failed'].includes(String(input.outcome))) fail('INVALID_INPUT', '任务结果无效', 400);
+  if (Object.keys(input).some(k => !['requestId','result','outcome'].includes(k)) || !['succeeded','failed','stopped'].includes(String(input.outcome))) fail('INVALID_INPUT', '任务结果无效', 400);
   const requestId = rid(input.requestId), result = plain(input.result, 4000, '执行结果');
   const { row, value: c } = await assertTaskLease(db, actor, lease, now);
   if (await pastOperation(db, c, requestId, 'finished', [input.outcome,result])) return taskView(c, actor, now);
-  if(input.outcome==='succeeded')assertTaskBusinessRead(c);
+  const completion=taskCompletion(c,input.outcome);
   if (c.waitingProposalIds.length) fail('AGENT_TASK_NOT_READY', '请先处理待确认提议', 409);
-  const n = next(c, now, 'finished', requestId, [input.outcome,result]); n.state = input.outcome as 'succeeded'|'failed'; n.result = result; n.runtimeUsedMs = usedRuntime(c, now); n.lease = undefined;platformEffect(n,requestId,{status:'finished',outcome:input.outcome});
+  const n = next(c, now, 'finished', requestId, [input.outcome,result]); n.state = completion;if(input.outcome==='stopped')n.stopReason='owner_declined'; n.result = result; n.runtimeUsedMs = usedRuntime(c, now); n.lease = undefined;platformEffect(n,requestId,{status:'finished',outcome:input.outcome});
   await save(db, row, c, n); await event(db, n, actor, 'finished', requestId, now); return taskView(n, actor, now);
 }
 export async function finishTaskSession(db:any,actor:TokenPayload,control:AgentTaskControlLease,workerId:string,input:Record<string,unknown>,now:number){
-  if(Object.keys(input).some(k=>!['requestId','result','outcome'].includes(k))||!['succeeded','failed'].includes(String(input.outcome)))fail('INVALID_INPUT','任务结果无效',400);
+  if(Object.keys(input).some(k=>!['requestId','result','outcome'].includes(k))||!['succeeded','failed','stopped'].includes(String(input.outcome)))fail('INVALID_INPUT','任务结果无效',400);
   const requestId=rid(input.requestId),result=plain(input.result,4000,'执行结果');await lockTaskRecord(db,control.workspaceId,control.taskId);const{row,value:c}=await taskRecord(db,control.workspaceId,control.taskId);await assertTaskControl(db,actor,control,now);
   if(c.state==='waiting_time'||c.state==='waiting_condition')fail('AGENT_TASK_NOT_READY','请到约定时间后重新读取再报告',409);
-  if(input.outcome==='succeeded')assertTaskBusinessRead(c);
+  const completion=taskCompletion(c,input.outcome);
   if(c.state==='paused'||c.state==='waiting_human'||c.waitingProposalIds.length)fail('AGENT_TASK_NOT_READY','任务已暂停或等待本人确认',409);
   if(c.lease&&c.lease.expiresAt>now&&c.lease.workerId!==workerId)fail('AGENT_TASK_BUSY','任务已由其他执行器领取',409);
-  const n=next(c,now,'finished',requestId,[input.outcome,result]);n.state=input.outcome as 'succeeded'|'failed';n.result=result;n.runtimeUsedMs=usedRuntime(c,now);n.lease=undefined;platformEffect(n,requestId,{status:'finished',outcome:input.outcome});
+  const n=next(c,now,'finished',requestId,[input.outcome,result]);n.state=completion;if(input.outcome==='stopped')n.stopReason='owner_declined';n.result=result;n.runtimeUsedMs=usedRuntime(c,now);n.lease=undefined;platformEffect(n,requestId,{status:'finished',outcome:input.outcome});
   await save(db,row,c,n);await event(db,n,actor,'finished',requestId,now);return taskView(n,actor,now);
 }
 export async function resolveTaskCredential(db: any, token: unknown, now: number): Promise<AgentActor> {
@@ -486,8 +498,9 @@ export function assertTaskBusinessRead(c:TaskRecord){if(c.requiredRead)fail('AGE
 export async function saveTaskSources(db: any, actor: TokenPayload, lease: AgentTaskLease, sources: TaskSourceRef[], now: number,fullRead?:TaskConditionTarget) {
   const {row,value:c}=await assertTaskLease(db,actor,lease,now);
   const satisfied=!!fullRead&&c.requiredRead?.type===fullRead.type&&c.requiredRead.id===fullRead.id;
-  if(JSON.stringify(c.sources)===JSON.stringify(sources)&&!satisfied)return;
-  await save(db,row,c,{...c,version:c.version+1,sources,...(satisfied?{requiredRead:undefined}:{})});
+  const refusalRead=!!fullRead&&c.lastProposalDecision?.outcome==='rejected'&&!c.lastProposalDecision.readBack;
+  if(JSON.stringify(c.sources)===JSON.stringify(sources)&&!satisfied&&!refusalRead)return;
+  await save(db,row,c,{...c,version:c.version+1,sources,...(satisfied?{requiredRead:undefined}:{}),...(refusalRead?{lastProposalDecision:{...c.lastProposalDecision!,readBack:true}}:{})});
 }
 export async function advanceTaskSources(db:any,actor:TokenPayload,workspaceId:string,taskId:string,keys:string[][]|null,revision:number){
   if(!keys)return;const{row,value:c}=await taskRecord(db,workspaceId,taskId);owner(actor,c);let changed=false;
