@@ -370,7 +370,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
   const productionQty = task.source.kind === 'orderLine' ? state?.productions.find(job => job.id === (task.source as { productionId?: string }).productionId)?.qty : undefined;
   const [aql, setAql] = React.useState<AqlDraft>(() => emptyAql(task.incoming?.quantity || productionQty || 0)), [fabricCheck, setFabricCheck] = React.useState<FabricDraft>(emptyFabric);
   const useAql = sampling && task.domain === 'garment', useFabric = sampling && task.domain === 'fabric';
-  const fabricDevelopment = task.source.kind === 'version' && task.domain === 'fabric';
+  const fabricQc = task.domain === 'fabric';
   const [fabricMeasurements,setFabricMeasurements] = React.useState<FabricFactDraft[]>([]);
   const [measurements, setMeasurements] = React.useState<Measurement[]>([]), [ids, setIds] = React.useState<string[]>([]), [failure, setFailure] = useRouteDraft(''), [busy, setBusy] = React.useState(false), [confirming, setConfirming] = React.useState(false);
   const fact = state?.fulfillment.productionFacts?.find(item => task.source.kind === 'orderLine' && item.productionId === task.source.productionId);
@@ -396,7 +396,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
     if (garmentProduction && !checked.length) return '请至少记录一个本次实际检查尺码';
     for (const check of checked) if (!(check.inspected > 0) || !check.evidence.trim()) return `尺码 ${check.size} 需填写实际检查件数和检查依据`;
     if (checked.some(check => check.result === 'reject') && result !== 'reject') return '存在尺码不通过时，总结论必须选择不通过';
-    if (fabricDevelopment) { try { fabricQcFacts(fabricMeasurements); } catch (error) { return error instanceof Error ? error.message : '面料实测尚未完整'; } }
+    if (fabricQc) { try { fabricQcFacts(fabricMeasurements); } catch (error) { return error instanceof Error ? error.message : '面料实测尚未完整'; } }
     if (measurements.some(item => !item.point.trim())) return '请填写每个测量点的名称，或移除空白测量点';
     return '';
   };
@@ -406,7 +406,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
     setBusy(true); setFailure('');
     try {
       const aqlInput = useAql ? aqlFromDraft(aql) : null, fabricInput = useFabric ? fabricFromDraft(fabricCheck) : null;
-      await run({ type: 'fulfillment.qc.report', payload: { id: task.id, domain: task.domain, result, report, opinion, location, reviewedAt: businessInputInstant(at), measurements: fabricDevelopment ? [] : measurements, ...(fabricDevelopment ? {fabricMeasurements:fabricQcFacts(fabricMeasurements)} : {}), fileIds: ids, sizeChecks: sizeChecks.filter(check => check.result).map(check => ({ ...check, result: check.result as 'pass' | 'reject' })), ...(aqlInput ? { aql: aqlInput } : {}), ...(fabricInput ? { fabricInspection: fabricInput } : {}) } });
+      await run({ type: 'fulfillment.qc.report', payload: { id: task.id, domain: task.domain, result, report, opinion, location, reviewedAt: businessInputInstant(at), measurements: fabricQc ? [] : measurements, ...(fabricQc ? {fabricMeasurements:fabricQcFacts(fabricMeasurements)} : {}), fileIds: ids, sizeChecks: sizeChecks.filter(check => check.result).map(check => ({ ...check, result: check.result as 'pass' | 'reject' })), ...(aqlInput ? { aql: aqlInput } : {}), ...(fabricInput ? { fabricInspection: fabricInput } : {}) } });
       onClose();
     } catch (e) { setFailure(e instanceof Error ? e.message : '报告未保存'); setConfirming(false); }
     finally { setBusy(false); }
@@ -441,14 +441,14 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
             <Field label={uiText("尺码检查依据")} full><TextInput aria-label={ui`尺码 ${check.size} · 检查依据`} value={check.evidence} disabled={!check.result} onChange={event => updateSize(index, { evidence: event.target.value })} /></Field>
           </FormGrid>)}</div></CardBody>
         </Card>}
-        {!fabricDevelopment && <Card>
+        {!fabricQc && <Card>
           <CardHeader title={uiText("测量记录")} tools={<Button size="sm" icon={Plus} onClick={() => setMeasurements(rows => [...rows, { point: '', standard: 0, actual: 0, tolerance: 0 }])}>{uiText("增加测量点")}</Button>} />
           <CardBody>{measurements.length ? <div className="mist-col">{measurements.map((item, i) => <FormGrid key={i}>
             {(['point', 'standard', 'actual', 'tolerance'] as const).map((key, j) => <Field key={key} label={uiText(['测量点', '标准', '实测', '容差'][j])}><TextInput aria-label={uiText(`${['测量点', '标准', '实测', '容差'][j]} ${i + 1}`)} type={key === 'point' ? 'text' : 'number'} step="0.0001" value={item[key]} onChange={e => setMeasurements(rows => rows.map((row, n) => n === i ? { ...row, [key]: key === 'point' ? e.target.value : Number(e.target.value) } : row))} /></Field>)}
             <Button size="sm" variant="quiet" onClick={() => setMeasurements(rows => rows.filter((_, n) => n !== i))}>{uiText("移除本点")}</Button>
           </FormGrid>)}</div> : <span className="mist-note">{uiText("还没有测量点")}</span>}</CardBody>
         </Card>}
-        {fabricDevelopment && <Card>
+        {fabricQc && <Card>
           <CardHeader title={uiText("面料实测")} tools={<Button size="sm" icon={Plus} disabled={blocked||fabricMeasurements.length>=200} onClick={()=>setFabricMeasurements(rows=>[...rows,{key:crypto.randomUUID(),property:'',actual:'',unit:''}])}>{uiText("添加面料实测")}</Button>} />
           <CardBody>{fabricMeasurements.map((row,index)=><FormGrid key={row.key}>
             <Field label={ui`实测项目 ${index+1}`} required><TextInput aria-label={ui`实测项目 ${index+1}`} value={row.property} disabled={blocked} maxLength={120} onChange={e=>setFabricMeasurements(rows=>rows.map(item=>item.key===row.key?{...item,property:e.target.value}:item))}/></Field>

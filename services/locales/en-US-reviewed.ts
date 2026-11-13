@@ -12,6 +12,7 @@ export const reviewedEnglish: Record<string, string> = {
   '询价或报价依据已不可用，请重新核对': 'The RFQ or quotation source is unavailable. Review it again.',
   '询价单已不可见': 'The RFQ is no longer visible',
   '本类QC不接收面料开发实测': 'This QC task does not accept fabric development measurements.',
+  '本类QC不接收面料实测': 'This QC task does not accept fabric measurements.',
   '移除面料实测 {0}': 'Remove fabric measurement {0}',
   '面料实测尚未完整': 'Complete the fabric measurement records.',
   '更多记录': 'More records',

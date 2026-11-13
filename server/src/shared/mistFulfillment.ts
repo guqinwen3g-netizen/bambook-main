@@ -1623,7 +1623,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const fabricDevelopment = t.source.kind === 'version' && t.domain === 'fabric';
             const fabricMeasurements = normalizeFabricQcMeasurements(p.fabricMeasurements);
             if (fabricDevelopment && measurements.length) fail('面料开发不套成衣尺寸公差，请填写面料实测');
-            if (!fabricDevelopment && fabricMeasurements.length) fail('本类QC不接收面料开发实测');
+            if (t.domain !== 'fabric' && fabricMeasurements.length) fail('本类QC不接收面料实测');
             const fileIds = files(root, p.fileIds);
             if (t.source.kind === 'version') {
                 const v = get(root.versions, t.source.versionId, '版本');
