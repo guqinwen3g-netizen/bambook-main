@@ -1,6 +1,7 @@
 import {claimRecoveryReceiptUsedMinor} from './mistClaimRecoveryReceipts';
 import {rebateReceiptUsedMinor} from './mistExportRebate';
 import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
+import { mistInvoiceCustomerId } from './mistOpeningBalance';
 import { MistCommandError, isRecognizedMistInvoice, mistAllocationReceiptMinor, mistMoneyMinor, type MistState, type MistContext, type MistCommandResult } from './mistWorkspace';
 
 export type OrderFundingAssignment = {
@@ -22,38 +23,47 @@ export function orderFundingCommandPermission(command:OrderFundingCommand){if(co
 
 /** Customer balances can fund that customer's invoices; order deposits cannot be spent on another order. */
 function receiptFundingUse(root:Root,receipt:Root['receipts'][number]){
-  const customers=new Map<string,{unassigned:number;orders:Map<string,{assigned:number;allocated:number}>}>();
-  const group=(id:string)=>{if(!customers.has(id))customers.set(id,{unassigned:0,orders:new Map()});return customers.get(id)!;};
+  const customers=new Map<string,CustomerFundingUse>();
+  const group=(id:string)=>{if(!customers.has(id))customers.set(id,{unassigned:0,nonOrderAllocated:0,orders:new Map()});return customers.get(id)!;};
   const orderBucket=(customerId:string,orderId:string)=>{const customer=group(customerId);if(!customer.orders.has(orderId))customer.orders.set(orderId,{assigned:0,allocated:0});return customer.orders.get(orderId)!;};
   for(const row of active(root).filter(row=>row.receiptId===receipt.id)){
    if(row.currency!==receipt.currency||!root.customers.some(c=>c.id===row.customerId))fail('资金归属客户或币种与到账来源不一致');
    const amount=cents(row.amount);if(row.orderId){const order=root.orders.find(o=>o.id===row.orderId);if(!order||order.customerId!==row.customerId||order.currency!==row.currency)fail('资金归属订单、客户或币种不一致');orderBucket(row.customerId,row.orderId).assigned+=amount;}else group(row.customerId).unassigned+=amount;
   }
-  let development=0;
+  let unattributed=0;
   for(const allocation of root.allocations.filter(a=>a.receiptId===receipt.id)){
    const invoice=root.invoices.find(i=>i.id===allocation.invoiceId);
    const crossCurrency=allocation.receiptAmount!==undefined&&allocation.receiptCurrency===receipt.currency;
-   if(invoice&&((invoice as {devId?:string}).devId||(invoice as {sampleRequestId?:string}).sampleRequestId||(invoice as {opening?:unknown}).opening||crossCurrency)){if(invoice.currency!==allocation.currency||!crossCurrency&&allocation.currency!==receipt.currency)fail('核销来源或币种不一致');development+=mistAllocationReceiptMinor(allocation);continue;}
+   if(invoice&&((invoice as {devId?:string}).devId||(invoice as {sampleRequestId?:string}).sampleRequestId||(invoice as {opening?:unknown}).opening||crossCurrency)){
+    if(invoice.currency!==allocation.currency||!crossCurrency&&allocation.currency!==receipt.currency)fail('核销来源或币种不一致');
+    const customerId=mistInvoiceCustomerId(root,invoice),used=mistAllocationReceiptMinor(allocation);
+    if(customerId&&root.customers.some(c=>c.id===customerId))group(customerId).nonOrderAllocated+=used;
+    else unattributed+=used;
+    continue;
+   }
    const order=root.orders.find(o=>o.id===invoice?.orderId);
    if(!invoice||!order||invoice.currency!==receipt.currency||allocation.currency!==receipt.currency)fail('核销来源或币种不一致');
    orderBucket(order.customerId,order.id).allocated+=mistMoneyMinor(allocation.amount);
   }
-  // Development-fee invoices have no order; their allocations still consume this receipt.
-  let reserved=development+rebateReceiptUsedMinor(root,receipt.id)+claimRecoveryReceiptUsedMinor(root,receipt.id);for(const customer of customers.values()){
-   const orders=[...customer.orders.values()],assigned=orders.reduce((n,o)=>n+o.assigned,0),used=orders.reduce((n,o)=>n+Math.max(o.assigned,o.allocated),0);
-   reserved+=Math.max(assigned+customer.unassigned,used);
+  // Non-order invoices can consume that customer's generic balance, while
+  // specific order earmarks and other customers' balances remain reserved.
+  let reserved=unattributed+rebateReceiptUsedMinor(root,receipt.id)+claimRecoveryReceiptUsedMinor(root,receipt.id);for(const customer of customers.values()){
+   const {assigned,held}=customerFundingTotals(customer);
+   reserved+=Math.max(assigned,held);
   }
   return {customers,reserved};
+}
+type CustomerFundingUse={unassigned:number;nonOrderAllocated:number;orders:Map<string,{assigned:number;allocated:number}>};
+function customerFundingTotals(customer?:CustomerFundingUse){
+ const orders=[...(customer?.orders.values()??[])],nonOrder=customer?.nonOrderAllocated??0;
+ return {assigned:(customer?.unassigned??0)+orders.reduce((n,o)=>n+o.assigned,0),held:nonOrder+orders.reduce((n,o)=>n+Math.max(o.assigned,o.allocated),0),allocated:nonOrder+orders.reduce((n,o)=>n+o.allocated,0)};
 }
 /** Unapplied ownership in receipt currency. Named-payer fallback may use only genuinely unreserved cash. */
 export function customerReceiptUnappliedMinor(root:Root,receiptId:string,customerId:string,includeUnassigned=false):number{
  const receipt=root.receipts.find(row=>row.id===receiptId);if(!receipt||receipt.remaining<=0)return 0;
  const {customers,reserved}=receiptFundingUse(root,receipt),amount=mistMoneyMinor(receipt.amount);
  if(reserved>amount)fail('到账资金归属与核销不一致，不能计算客户余额','PRECONDITION');
- const customer=customers.get(customerId),orders=[...(customer?.orders.values()??[])];
- const assigned=(customer?.unassigned??0)+orders.reduce((n,row)=>n+row.assigned,0);
- const held=orders.reduce((n,row)=>n+Math.max(row.assigned,row.allocated),0);
- const allocated=orders.reduce((n,row)=>n+row.allocated,0);
+ const {assigned,held,allocated}=customerFundingTotals(customers.get(customerId));
  const owned=Math.max(assigned,held)-allocated,free=includeUnassigned?amount-reserved:0;
  return Math.max(0,Math.min(mistMoneyMinor(receipt.remaining),owned+free));
 }
@@ -89,13 +99,15 @@ export function orderFundingReconciliationLimit(root:Root,receiptId:string,invoi
  const {customers,reserved}=receiptFundingUse(root,receipt);
  const free=mistMoneyMinor(receipt.amount)-reserved;
  let allowed=free;
- if(!(invoice as {devId?:string;opening?:unknown}).devId&&!(invoice as {sampleRequestId?:string}).sampleRequestId&&!(invoice as {opening?:unknown}).opening){
+ if((invoice as {devId?:string;opening?:unknown}).devId||(invoice as {sampleRequestId?:string}).sampleRequestId||(invoice as {opening?:unknown}).opening){
+  const customerId=mistInvoiceCustomerId(root,invoice),customer=customerId?customers.get(customerId):undefined;
+  const {assigned,held}=customerFundingTotals(customer);
+  allowed+=Math.max(0,assigned-held);
+ }else{
   const order=root.orders.find(o=>o.id===invoice.orderId);if(!order)return 0;
   const customer=customers.get(order.customerId),bucket=customer?.orders.get(order.id);
   const assignedRoom=Math.max(0,(bucket?.assigned??0)-(bucket?.allocated??0));
-  const buckets=[...(customer?.orders.values()??[])];
-  const customerAssigned=buckets.reduce((n,b)=>n+b.assigned,0)+(customer?.unassigned??0);
-  const customerUsed=buckets.reduce((n,b)=>n+Math.max(b.assigned,b.allocated),0);
+  const {assigned:customerAssigned,held:customerUsed}=customerFundingTotals(customer);
   allowed=Math.min(free+Math.max(0,customerAssigned-customerUsed)+assignedRoom,orderCollectibleMinor(root,order)-mistMoneyMinor(orderFundingCoveredAmount(root,order.id))+assignedRoom);
  }
  return Math.max(0,Math.min(mistMoneyMinor(receipt.remaining),mistMoneyMinor(invoice.open),allowed))/100;

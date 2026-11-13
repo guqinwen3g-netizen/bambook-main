@@ -11,13 +11,19 @@ it('keeps an upstream development read-only when a team only collaborates on its
     market: { quotations: [], suppliers: [] },
     orders: [{ id: 'order', customerId: 'customer', ownerId: 'another', type: 'garment' }],
     orderLines: [{ id: 'line', orderId: 'order', sourceDevId: 'upstream' }],
+    invoices: [{ id: 'dev-invoice', devId: 'upstream', orderId: '' }],
     teamScopes: [{ teamId: 'team', conditions: [], picks: [{ kind: 'order', id: 'order' }], exclusions: [] }],
     fulfillment: {}, platform: {}, events: [], tasks: [], notifications: [], calendar: [],
   };
   const scope = { userIds: ['member'], teamIds: ['team'] };
   expect(applyDataScope(state, scope, 'member').devs).toHaveLength(1);
+  expect(applyDataScope(state, scope, 'member').invoices.map((row: any) => row.id)).toEqual(['dev-invoice']);
   const after = structuredClone(state); after.devs[0].name = 'changed';
   expect(scopedWriteViolation(state, after, scope)).toMatchObject({ path: 'devs', id: 'upstream' });
+  const invoiceChanged = structuredClone(state); invoiceChanged.invoices[0].amount = 999;
+  expect(scopedWriteViolation(state, invoiceChanged, scope)).toMatchObject({ path: 'invoices', id: 'dev-invoice' });
+  const invoiceAdded = structuredClone(state); invoiceAdded.invoices.push({ id: 'new-invoice', devId: 'upstream', orderId: '' });
+  expect(scopedWriteViolation(state, invoiceAdded, scope)).toMatchObject({ path: 'invoices', id: 'new-invoice' });
 });
 
 it('does not expose totals for receipts allocated to out-of-scope invoices', () => {

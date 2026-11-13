@@ -82,6 +82,10 @@
 
 ## 5. 跨模块交接（主线）
 
+开发发票范围（2026-11-14）：`mistDataScope.ts#scopedVisibility`按`invoice.devId`追溯准确开发案；该类发票没有销售订单，不能仅靠`orderId`。范围用于读投影与写后校验，归档不切断开发费用/收费/财务交接；同客户其他开发案不因此共享，上游只读关联仍不能新建或修改票据。模块操作权限、财务应收确认和附件引用权限继续独立校验。`dataScopeMatrix.test.ts`覆盖业务开票/财务退回后重开与同客越界拒绝，`mistDataScope.test.ts`覆盖只读上游。
+
+无订单应收的客户余额（2026-11-14）：`mistOrderFunding.ts#receiptFundingUse/customerFundingTotals`将开发、样品、期初及跨币种核销按可确认的发票客户归集，以到账原币占用该客户的一般余额；指定订单预留仍独立占用，其他客户余额不重叠，客户身份未知只可使用真正空闲资金。`orderFundingReconciliationLimit`与`customerReceiptUnappliedMinor`共用此口径，避免核销后继续把同一预收列作未核销余额；冲回后按原归属恢复，不修改银行到账或归属历史。跨币种使用`mistAllocationReceiptMinor`，不把发票币种金额当作到账金额。单位及快照回归见`mistOrderFunding.test.ts`、`mistCustomerStatementFunding.test.ts`；实际浏览器链与完整验证另记GO-LIVE。
+
 开发面料实测（2026-11-14）：`fulfillment.qc.report`与`development.recordQc`共用`mistQcInspection.ts#normalizeFabricQcMeasurements`，按项目/有限非负数/原单位保留最多200行；不套成衣标准/容差，不自动以偏差裁决。仅面料开发来源接受`fabricMeasurements`，报告与准确开发版本双向保存，任务仍只由当前专业认领人提交；正常生产AQL/四分制路径不改。前端`QcWorkbenchPage.tsx`用面料专用编辑/回读表，`fabricQcFacts.ts`与开发页共用输入校验；旧报告不迁移或重写。相关契约回归在`mistDevelopmentQcTasks.test.ts`及两个页面测试，真实返样/QC/业务接续证据仍须分别核验。
 
 出运条款回程（2026-11-13）：`ShipmentsPage.tsx#ShipmentEditor/ShipmentEditorDraft`在就地核对合同条款前保存完整本机草稿，返回时恢复来源行、数量、工厂确认日及运输字段；保存/取消均不丢输入，恢复不重复按合同覆盖运输草稿，之后主动更换来源仍重新预填合同。`useRouteDraft`绑定账号与工作区，草稿不写成正式出运；真实出运仍由用户确认请求。

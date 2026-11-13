@@ -87,6 +87,9 @@ export function scopedVisibility(state: MistState, scope: MistDataScope, include
   for (const draft of state.drafts ?? []) if (users.has(draft.ownerId ?? '') || users.has(draft.values?.requesterId ?? '') || !!draft.values?.sourceDevId && collaboratingDevs.has(draft.values.sourceDevId)) add('drafts', draft.id);
   for (const row of state.versions ?? []) if (devs.has(row.devId)) add('versions', row.id);
   for (const row of state.rounds ?? []) if (devs.has(row.devId)) add('rounds', row.id);
+  // Development billing has no sales order. Follow its exact source development,
+  // including read-only upstream reachability, without sharing all customer AR.
+  for (const row of state.invoices ?? []) if (row.devId && devs.has(row.devId)) add('invoices', row.id);
   for (const row of state.allocations ?? []) if (has('invoices', row.invoiceId)) add('allocations', row.id);
   for (const row of f.qcTasks ?? []) if (row.source?.kind === 'version' && devs.has(row.source.devId)) add('fulfillment.qcTasks', row.id);
   for (const row of f.qcReports ?? []) if (has('fulfillment.qcTasks', row.taskId)) add('fulfillment.qcReports', row.id);

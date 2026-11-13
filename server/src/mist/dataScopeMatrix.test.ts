@@ -25,6 +25,43 @@ const PEOPLE: Record<string, { role: SystemRoleId | 'owner' }> = {
 let root: string, db: MemoryMistDatabase, repo: MistRepository, workspaceId: string, auth: ReturnType<typeof testAuthority>;
 const actor = (userId: string): any => { const role = PEOPLE[userId].role; return role === 'owner' ? { userId, displayName: userId, roles: ['owner'], departmentIds: [], companyId: COMPANY } : { userId, displayName: userId, roles: [], roleIds: [`${role}@${COMPANY}`], departmentIds: [], companyId: COMPANY, authorizationLoaded: true }; };
 const orders = async (userId: string) => (await repo.get(actor(userId), workspaceId)).state.orders.map(o => o.id).sort();
+
+describe('development invoices follow the exact development scope', () => {
+  const seedBilling = () => {
+    const state = db.workspaces.get(workspaceId)!.state;
+    const original = structuredClone(state.devs[0]);
+    const version = structuredClone(state.versions.find((v: any) => v.devId === original.id));
+    const dev = { ...original, id: 'billing-dev', ownerId: 'loner', owner: 'loner', customerId: 'customer-1', customer: state.customers.find((c: any) => c.id === 'customer-1').name,
+      values: { ...original.values, initiator: 'customer', charged: true }, versionIds: ['billing-version'], currentVersionId: 'billing-version', billing: { makingFees: [] }, closure: { kind: 'archived', reason: '业务已结束', at: '2026-10-13T00:00:00Z', by: 'loner' } };
+    state.devs.push(dev);
+    state.versions.push({ ...version, id: 'billing-version', devId: dev.id });
+    state.files.push({ id: 'billing-original', name: 'invoice.pdf', mimeType: 'application/pdf', size: 5, storageKey: 'fixture', createdAt: '2026-10-13T00:00:00Z', uploadedBy: 'loner' });
+    return dev;
+  };
+  it('lets the scoped business owner issue, read and correct an archived development invoice', async () => {
+    const dev = seedBilling();
+    const run = async (user: string, command: any) => repo.execute(actor(user), workspaceId, { requestId: randomUUID(), expectedRevision: db.workspaces.get(workspaceId)!.revision, command });
+    const charge = await run('loner', { type: 'development.charge.add', payload: { devId: dev.id, versionIds: ['billing-version'], description: '开发服务', amount: 180, currency: 'USD', evidence: '客户书面约定' } });
+    const issued = await run('loner', { type: 'development.billing.issue', payload: { devId: dev.id, chargeIds: [charge.receipt.result.id], number: 'DI-SCOPE-1', due: '2026-10-20', fileIds: ['billing-original'] } });
+    const id = issued.receipt.result.id;
+    expect(issued.workspace.state.invoices.find(i => i.id === id)).toMatchObject({ devId: dev.id, financeStatus: 'pending', amount: 180, open: 0 });
+    expect((await repo.get(actor('loner'), workspaceId)).state.invoices.some(i => i.id === id)).toBe(true);
+    await run('finance', { type: 'finance.receivable.reject', payload: { invoiceId: id, reason: '更正原件' } });
+    const corrected = await run('loner', { type: 'development.billing.issue', payload: { devId: dev.id, chargeIds: [charge.receipt.result.id], number: 'DI-SCOPE-2', due: '2026-10-20', fileIds: ['billing-original'] } });
+    expect(corrected.workspace.state.invoices.find(i => i.id === id)).toMatchObject({ financeStatus: 'rejected', open: 0 });
+    expect(corrected.workspace.state.invoices.find(i => i.id === corrected.receipt.result.id)).toMatchObject({ financeStatus: 'pending', amount: 180 });
+  });
+  it('keeps another development invoice hidden even for the same customer and denies issuance on it atomically', async () => {
+    const dev = seedBilling(), state = db.workspaces.get(workspaceId)!.state;
+    state.devs.push({ ...structuredClone(dev), id: 'hidden-billing-dev', ownerId: 'demo-buyer', versionIds: [], currentVersionId: null });
+    state.invoices.push({ id: 'hidden-dev-invoice', code: 'DI-PRIVATE', devId: 'hidden-billing-dev', customerId: dev.customerId, customer: dev.customer, orderId: '', order: '', amount: 91, open: 91, currency: 'USD', due: '2026-10-20', financeStatus: 'confirmed' });
+    expect((await repo.get(actor('loner'), workspaceId)).state.invoices.some(i => i.id === 'hidden-dev-invoice')).toBe(false);
+    const before = structuredClone(db.workspaces.get(workspaceId)!.state), count = db.receipts.size;
+    await expect(repo.execute(actor('loner'), workspaceId, { requestId: randomUUID(), expectedRevision: 0, command: { type: 'development.billing.issue', payload: { devId: 'hidden-billing-dev', chargeIds: [], number: 'NO', due: '2026-10-20', fileIds: [] } } })).rejects.toMatchObject({ status: 404 });
+    expect(db.workspaces.get(workspaceId)!.state).toEqual(before);
+    expect(db.receipts.size).toBe(count);
+  });
+});
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), 'mist-scope-matrix-'));
   db = new MemoryMistDatabase(); auth = testAuthority();

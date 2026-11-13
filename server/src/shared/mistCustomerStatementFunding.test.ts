@@ -16,6 +16,19 @@ it('uses explicit customer ownership over a same-name payer and permits a prepay
  const s=fixture();s.receipts=[bank('r',120)];s.orderFunding!.assignments=[assign('a','r','owner',120)];const before=structuredClone(s);
  expect(pending(s,'payer')).toBeUndefined();expect(pending(s,'owner')).toBe('120.00');expect(customerStatementBlocker(s,'owner',day)).toBeNull();expect(s).toEqual(before);
 });
+it('shows only unused customer balance after a development application and restores it on reversal',()=>{
+ const s=fixture();s.receipts=[bank('r',120,70)];s.orderFunding!.assignments=[assign('a','r','owner',120)];
+ s.invoices=[{id:'di',code:'DI',orderId:'',devId:'development',customerId:'owner',customer:'Owner',currency:'USD',amount:180,open:130,due:day}] as any;s.allocations=[allocation('applied','r','di',50)];
+ const section=customerStatementContent(s,'owner',day).sections.find(x=>x.currency==='USD')!;
+ expect(section.totalUnapplied).toBe('70.00');expect(section.net).toBe('60.00');expect(pending(s,'payer')).toBeUndefined();
+ s.allocations=[];s.receipts[0].remaining=120;s.invoices[0].open=180;
+ const restored=customerStatementContent(s,'owner',day).sections.find(x=>x.currency==='USD')!;expect(restored.totalUnapplied).toBe('120.00');expect(restored.net).toBe('60.00');
+});
+it('deducts receipt-side currency from the same customer advance for a cross-currency development invoice',()=>{
+ const s=fixture();s.receipts=[bank('r',100,60,'Third party','EUR')];s.orderFunding!.assignments=[assign('a','r','owner',100,null,'EUR')];
+ s.invoices=[{id:'di',code:'DI',orderId:'',devId:'development',customerId:'owner',customer:'Owner',currency:'USD',amount:100,open:50,due:day}] as any;s.allocations=[{...allocation('applied','r','di',50),receiptAmount:40,receiptCurrency:'EUR',rate:'1.25'} as any];
+ expect(pending(s,'owner','EUR')).toBe('60.00');expect(pending(s,'payer','EUR')).toBeUndefined();
+});
 it('splits one receipt between owners without counting applied cash or another customer reservation again',()=>{
  const s=fixture();s.receipts=[bank('r',1000,650)];s.orderFunding!.assignments=[assign('a','r','payer',500,'p1'),assign('b','r','owner',400,'o1')];
  s.invoices=[{id:'pi',orderId:'p1',code:'PI',customer:'Payer',currency:'USD',amount:1000,open:700,due:day},{id:'oi',orderId:'o1',code:'OI',customer:'Owner',currency:'USD',amount:1000,open:950,due:day}] as any;s.allocations=[allocation('a1','r','pi',300),allocation('a2','r','oi',50)];

@@ -1,7 +1,7 @@
 import {assertOrderShipmentPaymentCovered,orderShipmentPaymentCoverage} from './mistOrderFunding';
 import {describe,it,expect} from 'vitest';
 import {createMistState,applyMistCommand,type MistContext} from './mistWorkspace';
-import {applyOrderFundingCommand,assertOrderDepositCovered,assertOrderFundingIntegrity,orderDepositCoverage,orderFundingCoveredAmount,orderFundingCommandPermission,orderFundingReconciliationLimit} from './mistOrderFunding';
+import {applyOrderFundingCommand,assertOrderDepositCovered,assertOrderFundingIntegrity,customerReceiptUnappliedMinor,orderFundingNonCustomerReceiptLimit,orderDepositCoverage,orderFundingCoveredAmount,orderFundingCommandPermission,orderFundingReconciliationLimit} from './mistOrderFunding';
 function setup(){let n=0;const context:MistContext={id:()=>`fund-${++n}`,now:'2026-10-13T00:00:00Z',actorName:'财务',actorId:'finance'};const state=createMistState(context,'empty');state.customers=[{id:'c',name:'客户',code:'C',country:'',city:'',industry:'',owner:'',grade:'',currency:'USD',terms:'',incoterm:'',categories:'',creditLimit:0,since:''}];state.orders=[{id:'o',code:'O',customerId:'c',currency:'USD',amount:100,governance:{contract:{paymentMethod:'TT',depositPercent:30}}},{id:'other',code:'OTHER',customerId:'c',currency:'USD',amount:100,governance:{contract:{paymentMethod:'TT',depositPercent:30}}}] as any;state.receipts=[{id:'r',code:'R',payer:'客户',currency:'USD',amount:50,remaining:50,state:'unmatched',date:'2026-10-13',ref:'r'},{id:'r2',code:'R2',payer:'客户',currency:'USD',amount:20,remaining:20,state:'unmatched',date:'2026-10-13',ref:'r2'}];const assign=(amount:number,receiptId='r',orderId:string|null='o')=>applyOrderFundingCommand(state,{type:'funding.assign',payload:{receiptId,customerId:'c',orderId,amount,note:'实际到账归属依据'}},context);return{state,context,assign};}
 describe('order deposit funding',()=>{
  it('accepts multiple advance receipts without any CI and does not reconcile or consume either balance',()=>{const f=setup();f.assign(20);f.assign(10,'r2');expect(assertOrderDepositCovered(f.state,'o')).toMatchObject({required:30,received:30,status:'covered'});expect(f.state.receipts.map(r=>r.remaining)).toEqual([50,20]);expect(f.state.invoices).toEqual([]);expect(f.state.allocations).toEqual([]);});
@@ -85,10 +85,35 @@ describe('reconciliation headroom matches the authoritative funding guard',()=>{
  it('returns zero for a different currency or missing source',()=>{const f=setup();f.state.invoices=[{id:'eur',currency:'EUR',open:50} as any];expect(orderFundingReconciliationLimit(f.state,'r','eur')).toBe(0);expect(orderFundingReconciliationLimit(f.state,'missing','eur')).toBe(0);expect(orderFundingReconciliationLimit(f.state,'r','missing')).toBe(0);});
 });
 
-it('keeps customer-only balances out of another customer and development invoices',()=>{
+it('keeps customer-only balances out of another customer and invoices with no established customer',()=>{
  const f=setup();f.assign(50,'r',null);f.state.orders[1].customerId='other-customer';f.state.invoices=[{id:'foreign',orderId:'other',currency:'USD',amount:100,open:100} as any,{id:'opening',currency:'USD',amount:100,open:100,opening:{}} as any];
  expect(orderFundingReconciliationLimit(f.state,'r','foreign')).toBe(0);expect(orderFundingReconciliationLimit(f.state,'r','opening')).toBe(0);
  f.state.orderFunding!.assignments[0].state='released';expect(orderFundingReconciliationLimit(f.state,'r','foreign')).toBe(50);expect(orderFundingReconciliationLimit(f.state,'r','opening')).toBe(50);
+});
+
+describe('customer balances applied to invoices without sales orders',()=>{
+ it.each(['development','sample','opening','crossCurrency'] as const)('overlaps only the same customer generic balance for %s and restores it on reversal',kind=>{
+  const f=setup();f.assign(50,'r',null);f.state.receipts[0].payer='委托代付人';
+  f.state.invoices=[{id:'service',code:'SERVICE',orderId:'',customerId:'c',customer:'客户',currency:kind==='crossCurrency'?'EUR':'USD',amount:100,open:100,due:'2026-10-20',...(kind==='development'?{devId:'d'}:kind==='sample'?{sampleRequestId:'sample'}:kind==='opening'?{opening:{}}:{devId:'d'})}] as any;
+  if(kind!=='crossCurrency')expect(orderFundingReconciliationLimit(f.state,'r','service')).toBe(50);
+  const applied=applyMistCommand(f.state,{type:'finance.reconcile',payload:{receiptId:'r',invoiceId:'service',amount:kind==='crossCurrency'?25:20,payerBasis:'客户书面委托代付',...(kind==='crossCurrency'?{rate:'1.25',rateBasis:'客户书面确认汇率'}:{})}},f.context);
+  expect(applied.state.receipts[0].remaining).toBe(30);expect(customerReceiptUnappliedMinor(applied.state,'r','c')).toBe(3000);expect(orderFundingNonCustomerReceiptLimit(applied.state,'r')).toBe(0);expect(orderFundingCoveredAmount(applied.state,'o')).toBe(0);
+  expect(()=>assertOrderFundingIntegrity(applied.state)).not.toThrow();
+  const allocationId=applied.state.allocations[0].id;
+  const reversed=applyMistCommand(applied.state,{type:'finance.allocation.reverse',payload:{allocationId,reason:'退回原客户余额'}},f.context).state;
+  expect(reversed.receipts[0].remaining).toBe(50);expect(customerReceiptUnappliedMinor(reversed,'r','c')).toBe(5000);
+ });
+ it('preserves a specified order deposit and another customer balance when a service invoice consumes generic funds',()=>{
+  const f=setup();f.state.receipts[0].amount=100;f.state.receipts[0].remaining=100;f.assign(30);f.assign(20,'r',null);
+  f.state.orderLines=f.state.orders.map(o=>({id:'line-'+o.id,orderId:o.id,name:'商品',style:'A',img:'clay',qty:1,unit:'件',price:100,made:0,qc:0}));
+  f.state.customers.push({...f.state.customers[0],id:'foreign',name:'其他客户'});
+  applyOrderFundingCommand(f.state,{type:'funding.assign',payload:{receiptId:'r',customerId:'foreign',amount:40,note:'另一客户明确归属'}},f.context);
+  f.state.invoices=[{id:'service',code:'SERVICE',orderId:'',devId:'d',customerId:'c',customer:'客户',currency:'USD',amount:100,open:100,due:'2026-10-20'}] as any;
+  expect(orderFundingReconciliationLimit(f.state,'r','service')).toBe(30);
+  expect(()=>applyMistCommand(f.state,{type:'finance.reconcile',payload:{receiptId:'r',invoiceId:'service',amount:30.01}},f.context)).toThrow('不能重复计入');
+  const after=applyMistCommand(f.state,{type:'finance.reconcile',payload:{receiptId:'r',invoiceId:'service',amount:30}},f.context).state;
+  expect(customerReceiptUnappliedMinor(after,'r','c')).toBe(3000);expect(customerReceiptUnappliedMinor(after,'r','foreign')).toBe(4000);expect(orderFundingCoveredAmount(after,'o')).toBe(30);expect(orderFundingReconciliationLimit(after,'r','service')).toBe(0);
+ });
 });
 
 it('reserves tax-refund receipt usage instead of allowing the same money to become a customer deposit',()=>{
