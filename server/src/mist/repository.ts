@@ -51,7 +51,7 @@ import { accountOwnedObjects, buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMAN
 import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../auth/tokenHelpers';
 import { createLoginRateLimiter, type LoginRateLimiter } from '../auth/loginRateLimiter';
 import { primaryImageIds } from '../shared/mistPrimaryImage';
-import { MistPrivateFiles, validateFileInput, type MistFileInput, type MistStoredFile } from './files';
+import { MistPrivateFiles, MistFileIntegrityError, validateFileInput, type MistFileInput, type MistStoredFile } from './files';
 import type { ImagePreviewMode } from './imagePreview';
 import { prepareMistBusinessNumbers } from './businessNumbers';
 import { buildIssueArchive, bindIssueArchive, prepareCreditDocumentSnapshot, assertCreditIssuePayload, assertIssuedCreditArchive, type PreparedCreditIssueArchive } from './creditPrint';
@@ -282,6 +282,13 @@ export class MistRepository {
   }
   private accessView(row: MistWorkspaceRow, actor: TokenPayload, scope = scopeOf(row), state = row.state) {
     return projectState(state, actor, this.emptyState(actor), fileOwner(row), scope, this.filePrivacy(row, state));
+  }
+  private async issuedCreditBytes(workspaceId: string, file: MistStoredFile, version: Parameters<typeof assertIssuedCreditArchive>[0]) {
+    try { return assertIssuedCreditArchive(version, await this.files.read(workspaceId, file)); }
+    catch (error) {
+      if (error instanceof MistFileIntegrityError) fail('CREDIT_DOCUMENT_PRECONDITION', '正式CN归档原件校验失败', 422);
+      throw error;
+    }
   }
   /** 公司库：当前公司在职成员即可进入（R2），ownerOnly 的动作（回收站、成员授权）一律不适用。非公司（本机）空间：所有者或被明确授权的成员可进入，ownerOnly 只限所有者。 */
   private async own(db: any, prior: TokenPayload, id: string, permission?: string | null, lock = false, allowArchived = false, ownerOnly = false, captureAuditBefore = false): Promise<{ actor: TokenPayload; row: MistWorkspaceRow }> {
@@ -999,7 +1006,7 @@ export class MistRepository {
           const credit = row.state.platform.credits.find(note => note.id === payload.creditId);
           if (!payload.correctsPrintId && credit?.printVersions?.some(version => version.sourceVersionId === payload.versionId)) fail('CREDIT_ALREADY_ISSUED', '该来源版本已签发，请读取已归档的正式原件', 409);
           const printSnapshot = prepareCreditDocumentSnapshot(row.state, payload.creditId, payload.versionId, context,payload.correctsPrintId?{correctsPrintId:payload.correctsPrintId,reason:payload.reason!}:undefined);
-          if(payload.correctsPrintId){const prior=credit!.printVersions!.find(version=>version.id===payload.correctsPrintId)!,originalFile=row.state.files.find(file=>file.id===prior.fileId);if(!originalFile||originalFile.name!==prior.fileName||originalFile.mimeType!=='application/pdf'||originalFile.size!==prior.bytes)fail('CREDIT_DOCUMENT_INVALID','缺少准确归档原件，不能更正',422);assertIssuedCreditArchive(prior,await this.files.read(workspaceId,originalFile));}
+          if(payload.correctsPrintId){const prior=credit!.printVersions!.find(version=>version.id===payload.correctsPrintId)!,originalFile=row.state.files.find(file=>file.id===prior.fileId);if(!originalFile||originalFile.name!==prior.fileName||originalFile.mimeType!=='application/pdf'||originalFile.size!==prior.bytes)fail('CREDIT_DOCUMENT_INVALID','缺少准确归档原件，不能更正',422);if(!this.accessView(row,actor).state.files.some(file=>file.id===originalFile.id))fail('CREDIT_DOCUMENT_NOT_FOUND','该贷项没有可读取的已签发原件',404);await this.issuedCreditBytes(workspaceId,originalFile,prior);}
           const prepared = await this.creditArchiveBuilder(printSnapshot);
           stored = await this.files.write(workspaceId, prepared.file, context.now);
           context.creditDocumentIssue = bindIssueArchive(prepared, stored, { id: context.id, workspaceId, requestId: input.requestId });
@@ -1485,7 +1492,7 @@ export class MistRepository {
   async downloadCreditDocument(prior: TokenPayload, workspaceId: string, creditId: string, versionId: string) {
     identifier(creditId, '贷项编号'); identifier(versionId, '已签版本编号');
     return this.transact(async db => {
-      const { row } = await this.own(db, prior, workspaceId, 'aftersales:read');
+      const { row, actor } = await this.own(db, prior, workspaceId, 'aftersales:read');
       const scope = scopeOf(row);
       if (scope && !scopedVisibility(row.state, scope).get('platform.credits')?.has(creditId)) fail('CREDIT_DOCUMENT_NOT_FOUND', '该贷项没有所选版本', 404);
       const credit = row.state.platform.credits.find(note => note.id === creditId);
@@ -1495,7 +1502,8 @@ export class MistRepository {
       if (version!.snapshot.creditId !== credit!.id || version!.snapshot.sourceVersionId !== source!.id || version!.sourceFingerprint !== creditSourceFingerprint(source!) || version!.snapshotFingerprint !== creditDocumentFingerprint(version!.snapshot) || canonicalCreditDocument(version!.snapshot.sourceLines) !== canonicalCreditDocument(source!.lines)) fail('CREDIT_DOCUMENT_INVALID', '正式CN版本及冻结来源不一致', 422);
       const file = row.state.files.find(item => item.id === version!.fileId);
       if (!file || file.name !== version!.fileName || file.mimeType !== 'application/pdf' || file.size !== version!.bytes) fail('CREDIT_DOCUMENT_INVALID', '正式CN缺少匹配原件', 422);
-      const bytes = assertIssuedCreditArchive(version!, await this.files.read(workspaceId, file));
+      if (!this.accessView(row, actor).state.files.some(item => item.id === file.id)) fail('CREDIT_DOCUMENT_NOT_FOUND', '该贷项没有可读取的已签发原件', 404);
+      const bytes = await this.issuedCreditBytes(workspaceId, file, version!);
       await this.authorize(db, prior, 'aftersales:read');
       return { name: version!.fileName, bytes, sha256: version!.sha256 };
     });

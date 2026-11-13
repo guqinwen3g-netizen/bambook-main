@@ -1,12 +1,16 @@
 import { constants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { fail } from './errors';
+import { fail, MistApiError } from './errors';
 import { imagePreview, type ImagePreviewMode } from './imagePreview';
 import {automaticCutout,imageCutoutVersion} from './backgroundRemoval';
 export const MIST_FILE_MAX_BYTES = 50 * 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export type MistFileInput = { bytes: Buffer; name: string; mimeType: string; multipartFilename?: boolean };
+/** Public downloads keep a non-disclosing 404; archive workflows can retain their own integrity error contract. */
+export class MistFileIntegrityError extends MistApiError {
+  constructor() { super('FILE_NOT_FOUND', '附件原文件无法核验', 404); }
+}
 export type MistStoredFile = { id: string; name: string; mimeType: string; size: number; storageKey: string; createdAt: string; uploadedBy?: string; /** Server-computed content identity; existing archived files may not have it. */ sha256?: string };
 export function validateFileInput(input: MistFileInput) {
   if (!Buffer.isBuffer(input.bytes) || input.bytes.length < 1 || input.bytes.length > MIST_FILE_MAX_BYTES) fail('INVALID_FILE', '请上传一个不超过50MiB的实际文件', 400);
@@ -114,7 +118,7 @@ export class MistPrivateFiles {
     const handle = await this.originalHandle(workspaceId, file);
     try {
       const bytes = await handle.readFile();
-      if (file.sha256 && createHash('sha256').update(bytes).digest('hex') !== file.sha256) fail('FILE_NOT_FOUND', '附件原文件无法核验', 404);
+      if (file.sha256 && createHash('sha256').update(bytes).digest('hex') !== file.sha256) throw new MistFileIntegrityError();
       return bytes;
     } finally { await handle.close(); }
   }

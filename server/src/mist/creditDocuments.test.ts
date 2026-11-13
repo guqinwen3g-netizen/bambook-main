@@ -106,6 +106,15 @@ it('refuses same-size byte tampering and never renders a replacement from live c
  await repo.execute(testActor(),workspaceId,issue());const version=credit().printVersions![0],changed=Buffer.from(pdfBytes);changed[12]^=1;await writeFile(path.join(directory,workspaceId,version.fileId),changed);await expect(repo.downloadCreditDocument(testActor(),workspaceId,ids.credit,version.id)).rejects.toMatchObject({code:'CREDIT_DOCUMENT_PRECONDITION',status:422});await request(app).get(url(version.id,'document')).set('x-test-user','owner').expect(422);expect(renderPdf).toHaveBeenCalledOnce();expect(credit().printVersions).toHaveLength(1);
 });
 
+it('keeps a sensitive original restricted through the dedicated credit archive route',async()=>{
+ await repo.execute(testActor(),workspaceId,issue());const version=credit().printVersions![0];
+ state().payables!.bills.push({id:'tax-original',code:'AP',supplierId:'supplier',supplier:'Supplier',invoiceType:'vat-special',invoiceNo:'INV',invoiceDate:'2026-11-13',currency:'CNY',amount:100,taxAmount:1,taxRate:'1%',lines:[],terms:[],due:'2026-11-13',dueBasis:'Contract',fileIds:[version.fileId],note:'',state:'open',registeredAt:now,registeredBy:'Finance'});
+ const actor={...testActor(),roles:[]},limitedApp=express();limitedApp.use('/api/mist',createMistRouter({repository:repo,authenticate:(req,_res,next)=>{(req as any).actor=actor;next();}}));
+ const read=vi.spyOn(files,'read');await expect(repo.download(actor,workspaceId,version.fileId)).rejects.toMatchObject({status:404});
+ await expect(repo.downloadCreditDocument(actor,workspaceId,ids.credit,version.id)).rejects.toMatchObject({code:'CREDIT_DOCUMENT_NOT_FOUND',status:404});await request(limitedApp).get(url(version.id,'document')).expect(404);expect(read).not.toHaveBeenCalled();
+ auth.users.get('owner')!.permissions.push('sensitive:tax_base');expect((await repo.downloadCreditDocument(actor,workspaceId,ids.credit,version.id)).bytes).toEqual(pdfBytes);expect(renderPdf).toHaveBeenCalledOnce();
+});
+
 it('refuses print/source identity or frozen-source tampering before reading a private file',async()=>{
  await repo.execute(testActor(),workspaceId,issue());const version=credit().printVersions![0],read=vi.spyOn(files,'read');credit().sourceVersions![0].reason='tampered frozen history';await expect(repo.downloadCreditDocument(testActor(),workspaceId,ids.credit,version.id)).rejects.toMatchObject({code:'CREDIT_DOCUMENT_INVALID',status:422});expect(read).not.toHaveBeenCalled();expect(renderPdf).toHaveBeenCalledOnce();
 });
