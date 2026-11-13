@@ -126,6 +126,15 @@ function reviewLine(snapshot:OrderGovernanceSnapshot,line:OrderGovernanceLine):s
  }
  return parts.join('；');
 }
+/** Review the submitted lines, never a live order amount or a later change. */
+function reviewAmount(snapshot:OrderGovernanceSnapshot):string{
+ try{
+  if(!snapshot.lines.length)return '金额待核对';
+  const minor=snapshot.lines.reduce((sum,line)=>sum+BigInt(mistMoneyMinor(lineAmount(line.qty,line.price))),BigInt(0));
+  if(snapshot.contract.kind==='internal'&&snapshot.lines.every(line=>line.price===0))return '未定价';
+  return `${snapshot.currency} ${(minor/BigInt(100)).toLocaleString('en-US')}.${String(minor%BigInt(100)).padStart(2,'0')}`;
+ }catch{return '金额待核对';}
+}
 export function getOrderGovernanceReviews(root:MistState):MistReviewTask[]{
  const tasks=root.orders.flatMap(source=>{
   const order=source as GovernedOrder;
@@ -137,6 +146,7 @@ export function getOrderGovernanceReviews(root:MistState):MistReviewTask[]{
     ...(sourceCase?[{label:'来源案件',value:sourceCase.code}]:[]),
     {label:internal?'接收负责人':'客户',value:internal?contract.receiver:snapshot.customer},
     {label:internal?'内部用途':'合同',value:internal?contract.internalPurpose:contract.poNumber},
+    ...(!replacement?[{label:internal?'内部预算':'合同金额',value:reviewAmount(snapshot)}]:[]),
     ...(internal?[{label:'交接约定',value:contract.paymentNote}]:replacement?[{label:'客户收款',value:'无需收款'}]:[{label:'付款',value:(contract.paymentMethod==='OTHER'?'其他':contract.paymentMethod)+' · '+contract.paymentNote},...(contract.paymentMethod==='TT'?[{label:'出运前累计收款',value:contract.preShipmentPercent==null?'待核对':contract.preShipmentPercent+'%'}]:[])]),
     {label:'交期',value:snapshot.due},{label:internal?'交付方式 / 地点':'贸易条件',value:internal?[contract.incoterm,contract.deliveryPlace].filter(Boolean).join(' / '):contract.incoterm+' '+contract.deliveryPlace},{label:'溢短装',value:replacement?'按批准数量':toleranceText(contract)},...(snapshot.type==='garment'?[{label:'数量口径',value:contract.quantityBasis==='size'?'按尺码':contract.quantityBasis==='total'?'按总量':'待核对'},{label:'数量依据',value:contract.quantityBasisNote||'待核对'}]:[]),
     ...(round.reason?[{label:'变更原因',value:round.reason}]:[]),...(round.kind==='change'&&round.status==='pending'?orderChangeImpactDetails(orderChangeImpact(root,order,snapshot.lines)):[]),

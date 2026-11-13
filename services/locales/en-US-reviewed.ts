@@ -907,6 +907,7 @@ export const reviewedEnglish: Record<string, string> = {
   '合同数量': 'Contract quantity',
   '合同单价': 'Contract unit price',
   '合同金额': 'Contract amount',
+  '金额待核对': 'Amount needs verification',
   '本次实收': 'Received quantity selected',
   '已付预付': 'Prepayments made',
   '转入预付': 'Transferred-in prepayments',
