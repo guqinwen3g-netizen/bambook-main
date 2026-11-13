@@ -82,6 +82,8 @@
 
 ## 5. 跨模块交接（主线）
 
+内部预算与分色输入（2026-11-14）：`OrderDetailPage.tsx#OrderLineDialog`按当前拟议合同或有效合同用途显示“预算单价”或“销售单价”，可访问名称与显示一致；字段及计算不变。`OrderBreakdownEditor.tsx`的面料根节点复用现有`mist-breakdown`输入收缩规则，使颜色、数量、单位及移除按钮在窄屏仍处于同一容器内，不改变分色数据或成衣分码表的横向滚动规则。390浅/深、1180深及单/双颜色行已真实复验，取消编辑不产生业务命令；不把本局部验证当作全站窄屏通过。
+
 开发发票范围（2026-11-14）：`mistDataScope.ts#scopedVisibility`按`invoice.devId`追溯准确开发案；该类发票没有销售订单，不能仅靠`orderId`。范围用于读投影与写后校验，归档不切断开发费用/收费/财务交接；同客户其他开发案不因此共享，上游只读关联仍不能新建或修改票据。模块操作权限、财务应收确认和附件引用权限继续独立校验。`dataScopeMatrix.test.ts`覆盖业务开票/财务退回后重开与同客越界拒绝，`mistDataScope.test.ts`覆盖只读上游。
 
 无订单应收的客户余额（2026-11-14）：`mistOrderFunding.ts#receiptFundingUse/customerFundingTotals`将开发、样品、期初及跨币种核销按可确认的发票客户归集，以到账原币占用该客户的一般余额；指定订单预留仍独立占用，其他客户余额不重叠，客户身份未知只可使用真正空闲资金。`orderFundingReconciliationLimit`与`customerReceiptUnappliedMinor`共用此口径，避免核销后继续把同一预收列作未核销余额；冲回后按原归属恢复，不修改银行到账或归属历史。跨币种使用`mistAllocationReceiptMinor`，不把发票币种金额当作到账金额。单位及快照回归见`mistOrderFunding.test.ts`、`mistCustomerStatementFunding.test.ts`；实际浏览器链与完整验证另记GO-LIVE。

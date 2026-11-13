@@ -41,7 +41,7 @@ export function OrderBreakdownEditor({ type, value, seed, unit, disabled, label 
   }
   const set = (next: FabricBreakdown) => onChange(next);
   const measure = (text: string) => text.trim() === '' ? null : Number(text);
-  return <div className="mist-col" style={{ gap: 8 }} data-breakdown="fabric">
+  return <div className="mist-col mist-breakdown" style={{ gap: 8 }} data-breakdown="fabric">
     <FormGrid>
       <Field label={uiText("门幅（cm）")}><TextInput aria-label={ui`${prefix}门幅（cm）`} type="number" min="0" step="any" value={value.width ?? ''} disabled={disabled} onChange={event => set({ ...value, width: measure(event.target.value) })} /></Field>
       <Field label={uiText("克重（g/m²）")}><TextInput aria-label={ui`${prefix}克重（g/m²）`} type="number" min="0" step="any" value={value.weight ?? ''} disabled={disabled} onChange={event => set({ ...value, weight: measure(event.target.value) })} /></Field>

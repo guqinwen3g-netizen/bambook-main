@@ -6,6 +6,7 @@ export const reviewedEnglish: Record<string, string> = {
   ...auditEnglish,
   ...connectionEnglish,
   ...mailReceivingEnglish,
+  '预算单价': 'Budget unit price',
   '本类QC不接收面料开发实测': 'This QC task does not accept fabric development measurements.',
   '移除面料实测 {0}': 'Remove fabric measurement {0}',
   '面料实测尚未完整': 'Complete the fabric measurement records.',
