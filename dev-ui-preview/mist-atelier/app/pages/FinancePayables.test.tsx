@@ -66,11 +66,14 @@ it('does not open a settlement write form from a contract URL without submit per
 it('keeps a supplier-direct receipt unavailable for settlement while the recipient still has uncounted goods',()=>{
   prepaidWithReceipt(); const receipt=store.value.state.fulfillment.receipts.find((row:any)=>row.id==='rcpt-2') || store.value.state.fulfillment.receipts.at(-1);
   receipt.destination='supplier'; receipt.materialDelivery={productionId:'target-production',orderId:'target-order',lineId:'target-line',supplierId:'factory',supplier:'Factory',receiverId:'receiver',receiver:'Receiver'};
+  receipt.quantity=980;receipt.rejected=70;receipt.materialDelivery.sentQuantity='1000';receipt.materialDelivery.receivingChecks=[{id:'count-1',acceptedQuantity:'400',rejectedQuantity:'20',previousQuantity:'1000',previousRejected:'50',at:ctx.now,actorId:'receiver',actor:'Receiver',evidence:'First count'}];
   store.value.userId='sales';store.value.permissions=[SETTLEMENT_SCOPES.submit];route.id=po.id;render();
   const form=getByRole(document.body,'dialog',{name:'提交结算'});
   const row=form.querySelector(`[data-settle-receipt="${receipt.id}"]`)!;
   expect((getByRole(row as HTMLElement,'checkbox') as HTMLInputElement).disabled).toBe(true);
   expect(row.textContent).toContain('待接收人点收');
+  expect(row.textContent).toContain('交付 1000');expect(row.textContent).toContain('已点收 400');expect(row.textContent).toContain('待点收 580');expect(row.textContent).not.toContain('实收 '+receipt.quantity);
+  receipt.materialDelivery.receivingChecks.push({id:'count-2',acceptedQuantity:'580',rejectedQuantity:'0',previousQuantity:'980',previousRejected:'70',at:ctx.now,actorId:'receiver',actor:'Receiver',evidence:'Counted remaining'});render();const counted=getByRole(document.body,'dialog',{name:'提交结算'}).querySelector(`[data-settle-receipt="${receipt.id}"]`)!;expect((getByRole(counted as HTMLElement,'checkbox') as HTMLInputElement).disabled).toBe(false);expect(counted.textContent).toContain('实收 '+receipt.quantity);expect(counted.textContent).not.toContain('待接收人点收');
   expect(store.value.run).not.toHaveBeenCalled();
 });
 

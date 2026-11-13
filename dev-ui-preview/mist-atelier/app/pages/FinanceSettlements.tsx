@@ -7,6 +7,7 @@ import { Banner, Button, Checkbox, Facts, Field, FormGrid, Mono, ObjectCell, Pil
 import { type MistState } from '../../../../server/src/shared/mistWorkspace';
 import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
 import { receiptReturnedQuantity } from '../../../../server/src/shared/mistFulfillment';
+import { materialDeliveryRows } from '../../../../server/src/shared/mistInternalFabric';
 import { prepaymentMoves, purchaseContractMinor, purchaseInvoicedMinor, purchasePrepaymentReadback, settlementReceipts, settlementSuggestedPrepaymentMinor, shortClosureBlocker, type PayablesCommand, type SettlementView, settlementHasLiveAdvance } from '../../../../server/src/shared/mistPayables';
 import { ActionBar, DetailBlock, DetailBody } from './modules/pageKit';
 
@@ -88,6 +89,7 @@ export function SettlementSubmitDialog({ open, state, initialPurchaseId, busy, c
   const unavailable = !!initialPurchaseId && !purchases.some(purchase => purchase.id === initialPurchaseId);
   const po = purchases.find(p => p.id === draft.purchaseId);
   const rows = state && po ? settlementReceipts(state, po.id) : [];
+  const directRows=new Map(state&&po?materialDeliveryRows(state).filter(row=>row.kind==='direct'&&row.purchaseId===po.id).map(row=>[row.id,row]):[]);
   const chosen = rows.filter(r => draft.receipts[r.receipt.id] && !r.settled && !r.pendingReceiver);
   const qty = chosen.reduce((n, r) => n + r.receipt.quantity, 0), amount = po ? Math.round(qty * po.price * 100) : 0;
   const prepay = state && po ? purchasePrepaymentReadback(state, po.id) : null;
@@ -122,7 +124,7 @@ export function SettlementSubmitDialog({ open, state, initialPurchaseId, busy, c
       {po && <Facts items={[{label:'合同数量',value:`${po.quantity} ${po.unit}`},{label:'合同单价',value:money(po.price,po.currency)},{label:'合同金额',value:money(purchaseContractMinor(po)/100,po.currency)}]}/>}
       {po && <FieldGroup label={uiText("实际收货记录")} required>
         <div className="mist-col">{rows.map(({ receipt: r, settled, pendingReceiver }) => <div className="mist-row mist-module-actions" key={r.id} data-settle-receipt={r.id}>
-          <Checkbox checked={!!draft.receipts[r.id] && !settled && !pendingReceiver} disabled={settled || pendingReceiver || r.quantity <= 0} onChange={v => setDraft({ ...draft, receipts: { ...draft.receipts, [r.id]: v } })} label={<span>{r.date} · {r.location}{uiText(" · 实收 ")}{r.quantity}{uiText(r.rejected ? ` · 拒收 ${r.rejected}` : '')} {uiText(po.unit)}{uiText(settled ? ' · 已在结算中' : pendingReceiver ? ' · 待接收人点收' : r.quantity <= 0 ? ' · 无实收' : '')}{r.evidence?.trim() && <span className="mist-note"> · {r.evidence.trim()}</span>}</span>} /></div>)}
+          <Checkbox checked={!!draft.receipts[r.id] && !settled && !pendingReceiver} disabled={settled || pendingReceiver || r.quantity <= 0} onChange={v => setDraft({ ...draft, receipts: { ...draft.receipts, [r.id]: v } })} label={<span>{r.date} · {r.location}{uiText(pendingReceiver?" · 交付 ":" · 实收 ")}{pendingReceiver?(directRows.get(r.id)?.quantity??r.quantity):r.quantity}{pendingReceiver&&directRows.has(r.id)&&<span>{ui` · 已点收 ${directRows.get(r.id)!.accepted} · 待点收 ${directRows.get(r.id)!.pending}`}</span>}{uiText(r.rejected ? ` · 拒收 ${r.rejected}` : '')} {uiText(po.unit)}{uiText(settled ? ' · 已在结算中' : pendingReceiver ? ' · 待接收人点收' : r.quantity <= 0 ? ' · 无实收' : '')}{r.evidence?.trim() && <span className="mist-note"> · {r.evidence.trim()}</span>}</span>} /></div>)}
           {!rows.length && <span className="mist-note">{uiText("这张合同还没有实际收货记录；先在采购详情登记收货。")}</span>}</div>
       </FieldGroup>}
       {po && (() => { const all = state ? state.fulfillment.receipts.filter(r => r.purchaseId === po.id) : [], noReplace = all.reduce((n, r) => n + receiptReturnedQuantity(r, 'noReplace'), 0), open = all.reduce((n, r) => n + r.rejected - receiptReturnedQuantity(r), 0); return noReplace > 0 || open > 0 ? <Banner tone={open > 0 ? 'warn' : undefined} title={uiText("拒收与退换")}>{uiText(noReplace > 0 ? `供应商已确认不再补发 ${Math.round(noReplace * 10000) / 10000} ${po.unit}；如本合同不再交货，可勾选最终结算。` : '')}{uiText(open > 0 ? `还有 ${Math.round(open * 10000) / 10000} ${po.unit} 拒收未登记退换，请先在采购详情登记供应商补发或不再补发。` : '')}</Banner> : null; })()}

@@ -7,6 +7,8 @@ export const reviewedEnglish: Record<string, string> = {
   ...connectionEnglish,
   ...mailReceivingEnglish,
   '预算单价': 'Budget unit price',
+  ' · 交付 ': ' · Delivered ',
+  ' · 已点收 {0} · 待点收 {1}': ' · Counted {0} · Uncounted {1}',
   '报价原件': 'Quotation file',
   '谢绝依据原件': 'Decline evidence file',
   '询价或报价依据已不可用，请重新核对': 'The RFQ or quotation source is unavailable. Review it again.',
