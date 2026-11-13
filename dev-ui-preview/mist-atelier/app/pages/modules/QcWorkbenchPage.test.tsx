@@ -341,6 +341,26 @@ it('computes the AQL decision in the production report and lets the warehouse re
   expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.incoming.close',payload:{id:'iqc',evidence:'IQC-1 合格'}});
 });
 
+it.each([['套',83],['个',16]] as const)('keeps the incoming %s unit in sampling inputs, submission and saved reports',async(unit,quantity)=>{
+ store.state!.orders.push({id:'o',code:'SO-G',type:'garment',ownerId:'sales'} as any);store.state!.orderLines.push({id:'l',orderId:'o',name:'大衣',style:'CC-014',unit:'件',qty:80} as any);
+ const incoming=task('iqc-unit',{kind:'incoming',incoming:{receiptId:'rc',stockId:'st',quantity,unit,name:'配套物料'},state:'working',assignee:'QC甲',assigneeId:'qc-a'});store.state!.fulfillment.qcTasks.push(incoming);
+ render(incoming.id);await click(getByRole(host,'button',{name:'提交 / 追加复验报告'}));
+ expect((getByRole(host,'spinbutton',{name:`批量（${unit}）`}) as HTMLInputElement).value).toBe(String(quantity));
+ expect(queryByRole(host,'spinbutton',{name:'实际抽检件数'})).toBeNull();typeInto(getByRole(host,'spinbutton',{name:`实际抽检数量（${unit}）`}) as HTMLInputElement,String(quantity));
+ choose(getByRole(host,'combobox',{name:'本次结论'}) as HTMLSelectElement,'pass');typeInto(getByRole(host,'textbox',{name:'报告编号'}) as HTMLInputElement,'IQC-UNIT');typeInto(getByRole(host,'textbox',{name:'专业意见与影响范围'}) as HTMLTextAreaElement,'按本批原单位逐项核对');
+ await click(getByRole(host,'button',{name:'提交报告'}));await click(getByRole(getByRole(document.body,'dialog',{name:'确认提交QC报告'}),'button',{name:'确认提交'}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.report',payload:expect.objectContaining({aql:expect.objectContaining({lotSize:quantity,inspected:quantity})})}));
+ act(()=>root.unmount());root=createRoot(host);incoming.state='reported';incoming.reportIds=['unit-report'];
+ store.state!.fulfillment.qcReports.push({id:'unit-report',taskId:incoming.id,result:'pass',report:'IQC-UNIT',opinion:'按本批原单位逐项核对',measurements:[],fileIds:[],reviewer:'QC甲',reviewedAt:'2026-11-14T01:00:00Z',aql:{lotSize:quantity,inspected:quantity,critical:0,major:0,minor:0,outcome:{sampleSize:13,major:{accept:0,reject:1},minor:{accept:1,reject:2},result:'pass'}}} as any);
+ render(incoming.id);const report=host.querySelector('[data-qc-report="unit-report"]')!;
+ expect(report.textContent).toContain(`批量 ${quantity} ${unit} · 抽检 ${quantity} ${unit}（应抽 13 ${unit}）`);expect(report.textContent).not.toContain(`抽检 ${quantity} 件`);
+});
+
+it.each([0,16])('does not offer another IQC report after the lot was disposed with %s rejected',rejectedQuantity=>{
+ store.state!.fulfillment.qcTasks.push(task('closed-iqc',{kind:'incoming',incoming:{receiptId:'rc',stockId:'st',quantity:16,unit:'个',name:'外箱',releasedAt:'2026-11-14T01:00:00Z',rejectedQuantity},state:rejectedQuantity?'blocked':'reported',assignee:'QC甲',assigneeId:'qc-a'}));
+ render('closed-iqc');expect((getByRole(host,'button',{name:'提交 / 追加复验报告'}) as HTMLButtonElement).disabled).toBe(true);expect(host.textContent).toContain('本批已处置');
+});
+
 it('defaults a production inspection to the supplier site and opens the new task',async()=>{
   const st=store.state! as any;st.market.suppliers.push({id:'sup-site',name:'嘉禾制衣',address:'嘉兴秀洲工业园 18 号'});
   st.fulfillment.purchases.push({id:'po-site',supplierId:'sup-site'});

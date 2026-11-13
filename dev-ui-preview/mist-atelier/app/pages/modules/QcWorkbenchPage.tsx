@@ -39,6 +39,11 @@ const isNok = (task: FulfillmentQcTask) => task.state === 'blocked' || task.stat
 const isOpen = (task: FulfillmentQcTask, state?: MistState) => task.state !== 'reported' && (!state || !fulfillmentQcSourceBlocker(state, task.source));
 const isOverdue = (task: FulfillmentQcTask, day: string) => (task.state === 'pending' || task.state === 'working') && !!task.due && task.due < day;
 const branchKey = (task: FulfillmentQcTask) => task.source.kind === 'orderLine' && task.source.productionId ? task.source.productionId : task.id;
+// Incoming material is inspected in its received unit, independently of the garment order's unit.
+const qcSamplingUnit = (task: FulfillmentQcTask, state?: MistState | null) => {
+  const source = task.source;
+  return task.incoming?.unit || (source.kind === 'orderLine' ? state?.orderLines.find(line => line.id === source.lineId && line.orderId === source.orderId)?.unit : '') || '件';
+};
 
 /** Entry-card numbers per professional domain; never a mixed fabric + garment total. */
 export function qcDomainMetrics(tasks: FulfillmentQcTask[], domain: Domain, state?: MistState) {
@@ -286,7 +291,7 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, canRelease, locked,
   const sizes = fact?.completion?.sizeQuantities.length ? fact.completion.sizeQuantities : fact?.sizes || [];
   const sample = state.fulfillment.samples.find(item => item.id === task.sampleId);
   const claimReason = !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : sourceBlocker || (task.assigneeId && !mine ? `已由 ${task.assignee} 认领` : false);
-  const reportReason = !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : task.quarantine?.disposedAt ? '本批已处置' : sourceBlocker || (!task.assigneeId ? '请先认领任务' : !mine ? `仅当前QC（${task.assignee}）可提交` : false);
+  const reportReason = !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : task.quarantine?.disposedAt || task.incoming?.releasedAt ? '本批已处置' : sourceBlocker || (!task.assigneeId ? '请先认领任务' : !mine ? `仅当前QC（${task.assignee}）可提交` : false);
   const handoverReason = (verb: string) => !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : sourceBlocker || (task.state === 'reported' ? `已出结论，不能${verb}；需复验请追加报告` : task.assigneeId && !mine ? `仅当前QC（${task.assignee}）可${verb}` : false);
   const confirmable = task.kind === 'sample' && task.source.kind === 'orderLine' && task.state === 'reported';
   const ownerId = task.source.kind === 'orderLine' ? state.orders.find(order => order.id === (task.source as { orderId: string }).orderId)?.ownerId : undefined;
@@ -339,19 +344,19 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, canRelease, locked,
     </DetailBlock>}
     <QcDispositionPanel task={task} state={state} canDispose={canBusiness && (!ownerId || ownerId === me)} locked={locked} />
     <DetailBlock title={uiText(task.kind === 'production' ? `持续检查记录（${reports.length}）` : `评审报告（${reports.length}）`)}>
-      {reports.length ? reports.map((report, index) => <QcReportCard key={report.id} report={report} domain={task.domain} production={task.kind === 'production'} latest={index === 0} />) : <span className="mist-note">{uiText("暂无报告")}</span>}
+      {reports.length ? reports.map((report, index) => <QcReportCard key={report.id} report={report} domain={task.domain} unit={qcSamplingUnit(task,state)} production={task.kind === 'production'} latest={index === 0} />) : <span className="mist-note">{uiText("暂无报告")}</span>}
     </DetailBlock>
     <DetailBlock title={uiText("处理记录")}><Events entity="qc" id={task.id} /></DetailBlock>
   </DetailBody>;
 }
 
-function QcReportCard({ report, domain, production, latest }: { report: FulfillmentQcReport; domain: Domain; production: boolean; latest: boolean }) {
+function QcReportCard({ report, domain, unit, production, latest }: { report: FulfillmentQcReport; domain: Domain; unit: string; production: boolean; latest: boolean }) {
   return <div className="mist-col" data-qc-report={report.id}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><b>{report.report}</b><Pill tone={RESULT_TONE[report.result]}>{RESULT_LABEL[report.result]}</Pill>{report.previousReportId && <span className="mist-note">{uiText("复验")}</span>}{latest && <span className="mist-note">{uiText("当前")}</span>}<span className="mist-spacer" /><span className="mist-note">{report.reviewer} · {businessWhen(report.reviewedAt)}</span></div>
     {report.location && <div className="mist-row"><span>{uiText("检查地点")}</span><span>{report.location}</span></div>}
     {report.opinion && <p className="mist-sub">{report.opinion}</p>}
     {(production||!!report.sizeChecks?.length) && domain === 'garment' && <DataTable ariaLabel={ui`${report.report} · 生产尺码检查`} rows={report.sizeChecks || []} rowKey={check => check.size} columns={[{ key: 'size', header: '实际尺码', render: check => check.size }, { key: 'inspected', header: '实际检查件数', align: 'right', render: check => check.inspected }, { key: 'result', header: '各码结论', render: check => check.result === 'pass' ? '通过' : '不通过' }, { key: 'basis', header: '检查依据', render: check => check.evidence }]} empty={<EmptyState title={uiText("未记录本次实际尺码检查")} compact />} />}
-    {report.aql && <Facts cols={2} items={[{ label: 'AQL 抽样', value: `批量 ${report.aql.lotSize} · 抽检 ${report.aql.inspected} 件（应抽 ${report.aql.outcome.sampleSize}）` }, { label: '缺陷', value: `致命 ${report.aql.critical} · 严重 ${report.aql.major}（Ac ${report.aql.outcome.major.accept}）· 轻微 ${report.aql.minor}（Ac ${report.aql.outcome.minor.accept}）` }, { label: '抽样判定', value: report.aql.outcome.result === 'pass' ? '允收' : '拒收' }, ...(report.aql.defects ? [{ label: '缺陷内容', value: report.aql.defects }] : [])]} />}
+    {report.aql && <Facts cols={2} items={[{ label: 'AQL 抽样', value: `批量 ${report.aql.lotSize} ${unit} · 抽检 ${report.aql.inspected} ${unit}（应抽 ${report.aql.outcome.sampleSize} ${unit}）` }, { label: '缺陷', value: `致命 ${report.aql.critical} · 严重 ${report.aql.major}（Ac ${report.aql.outcome.major.accept}）· 轻微 ${report.aql.minor}（Ac ${report.aql.outcome.minor.accept}）` }, { label: '抽样判定', value: report.aql.outcome.result === 'pass' ? '允收' : '拒收' }, ...(report.aql.defects ? [{ label: '缺陷内容', value: report.aql.defects }] : [])]} />}
     {report.fabricInspection && <Facts cols={2} items={[{ label: '四分制', value: `${report.fabricInspection.rolls.length} 卷 · ${report.fabricInspection.outcome.totalYards} 码 · ${report.fabricInspection.outcome.pointsPer100} 分/100 平方码（允收 ${report.fabricInspection.limit}）` }, { label: '验布判定', value: report.fabricInspection.outcome.result === 'pass' ? '允收' : `拒收${report.fabricInspection.outcome.rejectedRolls.length ? ' · 超分卷 ' + report.fabricInspection.outcome.rejectedRolls.join('、') : ''}` }, ...Object.entries({ 色差: report.fabricInspection.lab.shade, 经向缩率: report.fabricInspection.lab.shrinkageWarp !== undefined ? report.fabricInspection.lab.shrinkageWarp + '%' : undefined, 纬向缩率: report.fabricInspection.lab.shrinkageWeft !== undefined ? report.fabricInspection.lab.shrinkageWeft + '%' : undefined, 色牢度: report.fabricInspection.lab.colourfastness }).filter(([, v]) => v !== undefined).map(([label, v]) => ({ label, value: String(v) }))]} />}
     {!!report.fabricMeasurements?.length && <DataTable ariaLabel={ui`${report.report} · 面料实测`} rows={report.fabricMeasurements.map((fact,index)=>({...fact,key:String(index)}))} rowKey={row=>row.key} columns={[{key:'property',header:'实测项目',render:row=>row.property},{key:'actual',header:'实测值',align:'right',render:row=>row.actual},{key:'unit',header:'原单位',render:row=>row.unit}]} />}
     {report.measurements.length > 0 && <MeasurementTable rows={report.measurements} unit={domain === 'fabric' ? '' : 'cm'} />}
@@ -431,7 +436,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
             <Field label={uiText("专业意见与影响范围")} full required><TextArea aria-label={uiText("专业意见与影响范围")} value={opinion} onChange={e => setOpinion(e.target.value)} /></Field>
           </FormGrid></CardBody>
         </Card>
-        {useAql && <AqlCard value={aql} onChange={setAql} />}
+        {useAql && <AqlCard value={aql} onChange={setAql} unit={qcSamplingUnit(task,state)} />}
         {useFabric && <FabricInspectionCard value={fabricCheck} onChange={setFabricCheck} />}
         {garmentProduction && sizeChecks.length > 0 && <Card>
           <CardHeader title={uiText("本次实际尺码检查")} />

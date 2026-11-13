@@ -14,20 +14,20 @@ export function aqlFromDraft(d: AqlDraft): AqlInspection | null {
 const outcomeOf = (value: AqlInspection | null) => { try { return value && Number.isSafeInteger(value.lotSize) && value.lotSize >= 2 ? aqlOutcome(value) : null; } catch { return null; } };
 const levelOptions = AQL_LEVELS.map(level => ({ value: level, label: `AQL ${level}` }));
 
-export function AqlCard({ value, onChange }: { value: AqlDraft; onChange: (value: AqlDraft) => void }) {
+export function AqlCard({ value, onChange, unit = '件' }: { value: AqlDraft; onChange: (value: AqlDraft) => void; unit?: string }) {
   const outcome = outcomeOf(aqlFromDraft({ ...value, inspected: value.inspected || '0' }));
   const set = (patch: Partial<AqlDraft>) => onChange({ ...value, ...patch });
   const num = (key: keyof AqlDraft, label: string) => <Field label={uiText(label)}><TextInput aria-label={uiText(label)} type="number" min={0} step="1" value={value[key] as string} onChange={e => set({ [key]: e.target.value } as Partial<AqlDraft>)} /></Field>;
   return <Card><CardHeader title={uiText('AQL 抽样（一般检验水平 II，正常一次抽样）')} />
     <CardBody><FormGrid>
-      {num('lotSize', '批量（件）')}
+      {num('lotSize', `批量（${unit}）`)}
       <Field label={uiText('严重缺陷 AQL')}><Select aria-label={uiText('严重缺陷 AQL')} value={value.majorAql} options={levelOptions} onChange={e => set({ majorAql: e.target.value as AqlLevel })} /></Field>
       <Field label={uiText('轻微缺陷 AQL')}><Select aria-label={uiText('轻微缺陷 AQL')} value={value.minorAql} options={levelOptions} onChange={e => set({ minorAql: e.target.value as AqlLevel })} /></Field>
-      {num('inspected', '实际抽检件数')}{num('critical', '致命缺陷')}{num('major', '严重缺陷')}{num('minor', '轻微缺陷')}
+      {num('inspected', unit === '件' ? '实际抽检件数' : `实际抽检数量（${unit}）`)}{num('critical', '致命缺陷')}{num('major', '严重缺陷')}{num('minor', '轻微缺陷')}
       <Field label={uiText('缺陷内容与部位')} full><TextArea aria-label={uiText('缺陷内容与部位')} value={value.defects} onChange={e => set({ defects: e.target.value })} /></Field>
     </FormGrid>
     {outcome && <Facts cols={2} items={[
-      { label: '应抽样本', value: `${outcome.sampleSize} 件（字码 ${outcome.major.letter}）` },
+      { label: '应抽样本', value: `${outcome.sampleSize} ${unit}（字码 ${outcome.major.letter}）` },
       { label: '严重 Ac / Re', value: `${outcome.major.accept} / ${outcome.major.reject}` },
       { label: '轻微 Ac / Re', value: `${outcome.minor.accept} / ${outcome.minor.reject}` },
       { label: '抽样判定', value: <Pill tone={outcome.result === 'pass' ? 'ok' : 'bad'}>{uiText(outcome.result === 'pass' ? '允收' : '拒收')}</Pill> },
