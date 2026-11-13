@@ -77,6 +77,7 @@ export function RecordFiles({ ids, onAttach }: {
   // 本记录发起、回执丢失的上传；只在同一记录页内核对后关联，换页即不再自动关联。
   const [lost, setLost] = useRouteDraft('');
   const owned = !!lost && pending?.kind === 'upload' && pending.requestId === lost;
+  const unavailable = state ? [...new Set(ids)].filter(id => !state.files.some(file => file.id === id)).length : 0;
   useUploadRecoveryClaim(owned ? lost : null);
   const attach = async (added: MistFile[]) => { setStaged(added); await onAttach?.([...ids, ...added.map(f => f.id)]); setStaged([]); };
   const add = async (files: File[]) => {
@@ -104,6 +105,7 @@ export function RecordFiles({ ids, onAttach }: {
   return <div className="mist-section">
     {owned && !saving && <Banner tone="warn" title={uiText("附件上传结果待核对")} actions={<Button disabled={busy} onClick={() => void verify()}>{uiText("核对并关联")}</Button>}>{uiText(failure || '核对后关联到本记录，不会重复上传。')}</Banner>}
     {failure && !owned && <FailureNotice title={"附件未完成保存"} detail={failure} />}
+    {unavailable > 0 && <Pill tone="neutral">{ui`${unavailable}份附件不可读`}</Pill>}
     {ids.map(id => { const f = state?.files.find(f => f.id === id); return f ? <div className="mist-row" key={id}><FileName file={f} files={ids.map(x => state?.files.find(y => y.id === x))} /><TextLink icon={Download} onClick={() => void downloadFile(f).catch(e => setFailure(String(e)))}>{uiText("下载")}</TextLink></div> : null; })}
     {onAttach && <UploadZone onFiles={files => { if (!busy && !saving && (!pending || owned)) void add(files); }}/>}
     {!!staged.length && <Button disabled={busy || saving || !!pending} onClick={() => void add([])}>{uiText("重试关联已上传附件")}</Button>}

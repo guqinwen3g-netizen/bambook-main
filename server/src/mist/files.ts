@@ -7,7 +7,7 @@ import {automaticCutout,imageCutoutVersion} from './backgroundRemoval';
 export const MIST_FILE_MAX_BYTES = 50 * 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export type MistFileInput = { bytes: Buffer; name: string; mimeType: string; multipartFilename?: boolean };
-export type MistStoredFile = { id: string; name: string; mimeType: string; size: number; storageKey: string; createdAt: string; uploadedBy?: string };
+export type MistStoredFile = { id: string; name: string; mimeType: string; size: number; storageKey: string; createdAt: string; uploadedBy?: string; /** Server-computed content identity; existing archived files may not have it. */ sha256?: string };
 export function validateFileInput(input: MistFileInput) {
   if (!Buffer.isBuffer(input.bytes) || input.bytes.length < 1 || input.bytes.length > MIST_FILE_MAX_BYTES) fail('INVALID_FILE', '请上传一个不超过50MiB的实际文件', 400);
   const name = path.basename(input.name.replace(/\\/g, '/')).replace(/[\u0000-\u001f\u007f]/g, '').trim();
@@ -24,7 +24,37 @@ function multipartDisplayName(name: string): string {
   } catch { return name; }
 }
 export class MistPrivateFiles {
+  private readonly digestCache = new Map<string, string>();
+  private readonly digestReads = new Map<string, Promise<string>>();
+  private digestReaders = 0;
+  private readonly digestWaiters: Array<() => void> = [];
   constructor(private readonly root: string,private readonly cutoutQueue=process.env.BAMBOOK_IMAGE_CUTOUT_QUEUE?.trim()||'') {}
+  private rememberDigest(key: string, digest: string) {
+    this.digestCache.delete(key); this.digestCache.set(key, digest);
+    if (this.digestCache.size > 4096) this.digestCache.delete(this.digestCache.keys().next().value!);
+  }
+  knownDigest(workspaceId: string, fileId: string) { return this.digestCache.get(`${workspaceId}/${fileId}`); }
+  private async digestSlot() {
+    if (this.digestReaders < 2) { this.digestReaders++; return; }
+    await new Promise<void>(resolve => this.digestWaiters.push(resolve));
+  }
+  private releaseDigestSlot() { const next = this.digestWaiters.shift(); if (next) next(); else this.digestReaders--; }
+  /** Original files are immutable (exclusive creation); no authorization result is cached. */
+  async digest(workspaceId: string, file: MistStoredFile): Promise<string> {
+    if (file.sha256 && /^[a-f0-9]{64}$/.test(file.sha256)) return file.sha256;
+    const key = `${workspaceId}/${file.id}`, cached = this.knownDigest(workspaceId, file.id);
+    if (cached) return cached;
+    const pending = this.digestReads.get(key); if (pending) return pending;
+    const read = (async () => { await this.digestSlot(); try {
+      // Classification returns only a digest, never the source bytes. Share the same path/integrity checks as downloads.
+      const handle = await this.originalHandle(workspaceId, file), hash = createHash('sha256');
+      try { for await (const chunk of handle.createReadStream({ autoClose: false })) hash.update(chunk); }
+      finally { await handle.close(); }
+      const digest = hash.digest('hex'); this.rememberDigest(key, digest); return digest;
+    } finally { this.releaseDigestSlot(); } })();
+    this.digestReads.set(key, read);
+    try { return await read; } finally { this.digestReads.delete(key); }
+  }
   private checked(workspaceId: string, fileId: string) {
     if (!UUID.test(workspaceId) || !UUID.test(fileId)) fail('INVALID_FILE_PATH', '附件路径无效', 400);
     const root = path.resolve(this.root), file = path.resolve(root, workspaceId, fileId);
@@ -41,7 +71,8 @@ export class MistPrivateFiles {
     const handle = await fs.open(target.file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     try { await handle.writeFile(input.bytes); } catch (error) { await handle.close(); await fs.unlink(target.file).catch(() => undefined); throw error; }
     await handle.close();
-    const stored={ id, name: input.multipartFilename ? multipartDisplayName(meta.name) : meta.name, mimeType: meta.mimeType, size: meta.size, storageKey: `${workspaceId}/${id}`, createdAt: now };
+    this.rememberDigest(`${workspaceId}/${id}`, meta.sha256);
+    const stored={ id, name: input.multipartFilename ? multipartDisplayName(meta.name) : meta.name, mimeType: meta.mimeType, size: meta.size, storageKey: `${workspaceId}/${id}`, createdAt: now, sha256: meta.sha256 };
     if (meta.mimeType.startsWith('image/')) {await Promise.allSettled((['thumb', 'display'] as const).map(mode => this.writePreview(target.file, input.bytes, meta.mimeType, mode)));}
     // 上传时不抠图：只有被用作主图的图片在首次请求抠图预览时才进入队列（见 shared/mistPrimaryImage）。
     return stored;
@@ -63,7 +94,7 @@ export class MistPrivateFiles {
     try{const handle=await fs.open(target,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);try{await handle.writeFile(JSON.stringify({workspaceId,file})+'\n');}finally{await handle.close();}}
     catch(error:any){if(error?.code!=='EEXIST')throw error;}
   }
-  async read(workspaceId: string, file: MistStoredFile): Promise<Buffer> {
+  private async originalHandle(workspaceId: string, file: MistStoredFile) {
     if (file.storageKey !== `${workspaceId}/${file.id}`) fail('INVALID_FILE_PATH', '附件不属于本公司', 404);
     const target = this.checked(workspaceId, file.id);
     let handle;
@@ -76,8 +107,16 @@ export class MistPrivateFiles {
     try {
       const stat = await handle!.stat();
       if (!stat.isFile() || stat.size !== file.size || stat.size > MIST_FILE_MAX_BYTES) fail('FILE_NOT_FOUND', '附件原文件无法核验', 404);
-      return await handle!.readFile();
-    } finally { await handle!.close(); }
+      return handle!;
+    } catch (error) { await handle!.close(); throw error; }
+  }
+  async read(workspaceId: string, file: MistStoredFile): Promise<Buffer> {
+    const handle = await this.originalHandle(workspaceId, file);
+    try {
+      const bytes = await handle.readFile();
+      if (file.sha256 && createHash('sha256').update(bytes).digest('hex') !== file.sha256) fail('FILE_NOT_FOUND', '附件原文件无法核验', 404);
+      return bytes;
+    } finally { await handle.close(); }
   }
   async readPreview(workspaceId: string, file: MistStoredFile, mode: ImagePreviewMode): Promise<Buffer> {
     if (file.storageKey !== `${workspaceId}/${file.id}`) fail('INVALID_FILE_PATH', '附件不属于本公司', 404);
@@ -104,6 +143,7 @@ export class MistPrivateFiles {
   async remove(workspaceId: string, file: MistStoredFile) {
     if (file.storageKey !== `${workspaceId}/${file.id}`) fail('INVALID_FILE_PATH', '附件不属于本公司', 404);
     const target = this.checked(workspaceId, file.id).file;
+    this.digestCache.delete(`${workspaceId}/${file.id}`);
     await Promise.all([target,...(['thumb','display','cutout-thumb','cutout-display'] as const).map(mode=>this.previewPath(target,mode))].map(filePath => fs.unlink(filePath).catch(error => { if (error.code !== 'ENOENT') throw error; })));
     if(this.cutoutQueue)await fs.unlink(path.join(this.cutoutQueue,`${workspaceId}.${file.id}.json`)).catch(error=>{if(error.code!=='ENOENT')throw error;});
   }

@@ -20,7 +20,8 @@ const REVIEW_COMMAND_BY_KIND = {
 const REVIEW_KIND_BY_COMMAND = new Map<string,MistReviewTask['kind']>(Object.entries(REVIEW_COMMAND_BY_KIND).map(([kind,type])=>[type,kind as MistReviewTask['kind']]));
 import { hasScope } from '../auth/permissionService';
 import {readFileTextWindow} from './agentFileWindow';
-import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projectState, canReadFile, canReadTarget, canHandleTask, isTaxBaseCommand, maskTaxBaseText, type MistWorkspaceAccess, type MistMemberLog } from './access';
+import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projectState, canReadTarget, canHandleTask, isTaxBaseCommand, maskTaxBaseText, type MistWorkspaceAccess, type MistMemberLog } from './access';
+import { prepareFilePrivacy, restrictedSensitiveFiles, restrictedUploadContent, type FilePrivacyContext } from './filePrivacy';
 import { payablesCommandPermissions, financialDisposalViews } from '../shared/mistPayables';
 import { marketCommandExtraPermissions } from '../shared/mistMarket';
 import { exportRebateExtraPermissions } from '../shared/mistExportRebate';
@@ -198,6 +199,7 @@ const fileOwner=(row:MistWorkspaceRow)=>companyRow(row)?undefined:row.ownerId;
 /** 审批候选与成员目录：公司库只取公司在职成员名册（已覆盖到 memberIds），不含已离职的库创建人。 */
 /** 本次读取时为该行解析的受限范围（undefined = 不裁剪）；随行对象存活，不写入状态。 */
 const ROW_SCOPE=new WeakMap<object,MistDataScope>();
+const ROW_FILE_PRIVACY = new WeakMap<object, FilePrivacyContext>();
 /** Exact state loaded under the write lock, before roster/normalization changes. Never serialized. */
 const ORIGINAL_WRITE_STATE = new WeakMap<object, MistState>();
 const OWN_TEAMS = new WeakMap<object, string[]>();
@@ -270,6 +272,17 @@ export class MistRepository {
       try { await this.authorize(db, prior, scope); } catch (error) { if (error instanceof MistApiError && error.status === 403) fail('FORBIDDEN', '退税申报、核准与到账勾稽需要「计税依据查看」权限', 403); throw error; }
     }
   }
+  private async prepareFileAccess(row: MistWorkspaceRow) {
+    ROW_FILE_PRIVACY.set(row, await prepareFilePrivacy(this.files, row.id, row.state));
+  }
+  private filePrivacy(row: MistWorkspaceRow, state = row.state): FilePrivacyContext {
+    const prepared = ROW_FILE_PRIVACY.get(row), digests = new Map(prepared?.digests);
+    for (const file of state.files || []) { const known = this.files.knownDigest?.(row.id, file.id); if (known) digests.set(file.id, known); }
+    return { digests, unavailable: prepared?.unavailable || new Set<string>(), current: row.state };
+  }
+  private accessView(row: MistWorkspaceRow, actor: TokenPayload, scope = scopeOf(row), state = row.state) {
+    return projectState(state, actor, this.emptyState(actor), fileOwner(row), scope, this.filePrivacy(row, state));
+  }
   /** 公司库：当前公司在职成员即可进入（R2），ownerOnly 的动作（回收站、成员授权）一律不适用。非公司（本机）空间：所有者或被明确授权的成员可进入，ownerOnly 只限所有者。 */
   private async own(db: any, prior: TokenPayload, id: string, permission?: string | null, lock = false, allowArchived = false, ownerOnly = false, captureAuditBefore = false): Promise<{ actor: TokenPayload; row: MistWorkspaceRow }> {
     if(isAgentActor(prior)&&prior.agentWorkspaceId&&prior.agentWorkspaceId!==id)fail('NOT_FOUND','公司不存在或当前账号无权访问',404);
@@ -292,7 +305,8 @@ export class MistRepository {
     if (lock && captureAuditBefore) ORIGINAL_WRITE_STATE.set(row, structuredClone(row.state));
     if (companyRow(row)) { await applyCompanyRoster(db, row, row.companyId!); const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); OWN_TEAMS.set(row, scope?.teamIds ?? await companyTeamIds(db, row.companyId!, actor.userId)); }
     this.contract.normalizeMistState?.(row.state,this.context(actor));
-    if(task){if(taskActor===actor)this.assertTaskSources(row,actor,task);else{const taskScope=await companyDataScope(db,row,taskActor),visible=projectState(row.state,taskActor,this.emptyState(taskActor),fileOwner(row),taskScope).state;if(!taskSourcesVisible(task.sources,task.scopeHash,visible,row.state,taskScope))fail('AGENT_TASK_SCOPE_CHANGED','任务可见范围已变化',403);}}
+    await this.prepareFileAccess(row);
+    if(task){if(taskActor===actor)this.assertTaskSources(row,actor,task);else{const taskScope=await companyDataScope(db,row,taskActor),visible=this.accessView(row, taskActor, taskScope).state;if(!taskSourcesVisible(task.sources,task.scopeHash,visible,row.state,taskScope))fail('AGENT_TASK_SCOPE_CHANGED','任务可见范围已变化',403);}}
     await this.prepareTaskProposalAccess(db,row,actor);
     return { actor, row };
   }
@@ -321,12 +335,12 @@ export class MistRepository {
   private async taskValidationActor(db:any,prior:TokenPayload,actor:TokenPayload){
     if(isAgentActor(prior)&&prior.agentTaskLease&&(prior as any).mailStateWorker===true){const c=(await taskRecord(db,prior.agentTaskLease.workspaceId,prior.agentTaskLease.taskId)).value;return this.authorize(db,{...prior,permissionCeiling:[...c.ceiling]});}return actor;
   }
-  private taskSourcesAllowed(row:MistWorkspaceRow,actor:TokenPayload,c:TaskRecord,visible?:MistState){return c.ownerId===actor.userId&&c.ceiling.every(scope=>hasScope(actor,scope as any))&&taskSourcesVisible(c.sources,c.scopeHash,visible??projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state,row.state,scopeOf(row));}
+  private taskSourcesAllowed(row:MistWorkspaceRow,actor:TokenPayload,c:TaskRecord,visible?:MistState){return c.ownerId===actor.userId&&c.ceiling.every(scope=>hasScope(actor,scope as any))&&taskSourcesVisible(c.sources,c.scopeHash,visible??this.accessView(row, actor, scopeOf(row)).state,row.state,scopeOf(row));}
   private assertTaskSources(row:MistWorkspaceRow,actor:TokenPayload,c:TaskRecord){if(!this.taskSourcesAllowed(row,actor,c))fail('AGENT_TASK_SCOPE_CHANGED','任务可见范围已变化，请重新安排任务',403);}
   private async refreshTaskCondition(db:any,actor:TokenPayload,row:MistWorkspaceRow,c:TaskRecord,now:number){
     if(c.state!=='waiting_condition')return c;
     const bounded={...actor,permissionCeiling:[...c.ceiling]};this.assertTaskSources(row,bounded,c);
-    const visible=projectState(row.state,bounded,this.emptyState(bounded),fileOwner(row),scopeOf(row)).state;
+    const visible=this.accessView(row, bounded, scopeOf(row)).state;
     return checkTaskCondition(db,bounded,c.workspaceId,c.id,now,condition=>taskConditionChanged(condition,visible,bounded));
   }
   private proposalReadable(row:MistWorkspaceRow,actor:TokenPayload,command:{type:string;payload:Record<string,unknown>}){
@@ -339,7 +353,7 @@ export class MistRepository {
     TASK_PROPOSAL_ACCESS.set(row,access);if(!proposals.length)return;
     const records=await db.mistCommandReceipt.findMany({where:{workspaceId:row.id,actorId:actor.userId,inputHash:TASK_HASH,requestId:{in:[...new Set(proposals.map(p=>TASK_PREFIX+p.taskId))]}}});
     const tasks=new Map<string,TaskRecord>();for(const r of records)try{const c=readTaskRecord(r,row.id);tasks.set(c.id,c);}catch(e){if(!(e instanceof MistApiError))throw e;}
-    const visible=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;
+    const visible=this.accessView(row, actor, scopeOf(row)).state;
     for(const p of proposals){const c=tasks.get(p.taskId!),allowed=!!c&&this.taskSourcesAllowed(row,actor,c,visible);if(!allowed){access.set(p.id,{visible:false});continue;}let blocked:string|undefined;
       if(p.state==='pending'&&!c!.automationId){if(!['waiting_human','paused'].includes(c!.state)||c!.expiresAt<=Date.now())blocked='所属任务已停止或过期';
       else try{await assertTaskAuthority(db,actor,c!,Date.now());}catch(e){if(!(e instanceof MistApiError))throw e;blocked='任务连接已失效';}}
@@ -350,11 +364,12 @@ export class MistRepository {
   /** Every envelope path (default, list, write acknowledgement and direct get)
    * uses the same task/source authorization. A missing cache remains fail-closed. */
   private async preparedView(db:any,row:MistWorkspaceRow,actor:TokenPayload){
+    await this.prepareFileAccess(row);
     if(!TASK_PROPOSAL_ACCESS.has(row))await this.prepareTaskProposalAccess(db,row,actor);
     return this.view(row,actor);
   }
   private view(row: MistWorkspaceRow, actor: TokenPayload) {
-    const projected = projectState(row.state, actor, this.emptyState(actor), fileOwner(row), scopeOf(row)), owner = isOwner(row, actor), company = companyRow(row);
+    const projected = this.accessView(row, actor, scopeOf(row)), owner = isOwner(row, actor), company = companyRow(row);
     const proposalSources=projected.state.agentProposals?.some(p=>!p.taskId)?knownCommandSourcesVisible(row.state,projected.state):undefined;
     if(projected.state.agentProposals)projected.state.agentProposals=projected.state.agentProposals.map(p=>{
       const access=p.taskId?TASK_PROPOSAL_ACCESS.get(row)?.get(p.id):undefined;
@@ -524,7 +539,7 @@ export class MistRepository {
   }
   async listAgentTasks(prior:TokenPayload,workspaceId:string,cursor?:unknown){
     if(isAgentActor(prior)&&(!prior.agentServiceLease||prior.agentTaskLease))fail('FORBIDDEN','请使用执行器管理连接',403);
-    return this.transact(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,isAgentActor(prior)?'ai:chat':undefined);const visible=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;return listTasks(db,{...prior,...actor},workspaceId,cursor,Date.now(),c=>this.taskSourcesAllowed(row,actor,c,visible));});
+    return this.transact(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,isAgentActor(prior)?'ai:chat':undefined);const visible=this.accessView(row, actor, scopeOf(row)).state;return listTasks(db,{...prior,...actor},workspaceId,cursor,Date.now(),c=>this.taskSourcesAllowed(row,actor,c,visible));});
   }
   async listAgentTaskNotices(prior:TokenPayload,workspaceId:string){
     if(isAgentActor(prior))fail('FORBIDDEN','提醒只供本人查看',403);
@@ -605,7 +620,7 @@ export class MistRepository {
       const{actor,row}=await this.own(db,prior,workspaceId);
       if((action==='question'||action==='wait'||action==='finish'&&input.outcome==='succeeded')&&await taskHasPendingMail(db,workspaceId,prior.agentTaskLease!.taskId))fail('PRECONDITION','请先核对待同步的邮箱操作',422);
       if(action==='wait')return waitTaskUntil(db,{...prior,...actor},prior.agentTaskLease!,input,Date.now(),(c,target)=>{
-        const bounded={...actor,permissionCeiling:[...c.ceiling]},visible=projectState(row.state,bounded,this.emptyState(bounded),fileOwner(row),scopeOf(row)).state;
+        const bounded={...actor,permissionCeiling:[...c.ceiling]},visible=this.accessView(row, bounded, scopeOf(row)).state;
         return prepareTaskCondition(target,c.sources,visible,bounded);
       });
       return action==='question'?askTaskQuestion(db,actor,prior.agentTaskLease!,input,Date.now()):action==='checkpoint'?checkpointTask(db,actor,prior.agentTaskLease!,input,Date.now()):finishTask(db,actor,prior.agentTaskLease!,input,Date.now());
@@ -617,7 +632,7 @@ export class MistRepository {
   }
   async recordAgentTaskRead(prior:TokenPayload,workspaceId:string,data:unknown){
     if(!isAgentActor(prior)||!prior.agentTaskLease)return;
-    return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId),c=(await taskRecord(db,workspaceId,prior.agentTaskLease!.taskId)).value;const visible=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state,object=(data as any)?.object;const full=object?.data&&object.truncated===false?{type:object.type,id:object.id}:undefined;await saveTaskSources(db,actor,prior.agentTaskLease!,collectTaskSources(data,visible,c.sources),Date.now(),full);});
+    return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId),c=(await taskRecord(db,workspaceId,prior.agentTaskLease!.taskId)).value;const visible=this.accessView(row, actor, scopeOf(row)).state,object=(data as any)?.object;const full=object?.data&&object.truncated===false?{type:object.type,id:object.id}:undefined;await saveTaskSources(db,actor,prior.agentTaskLease!,collectTaskSources(data,visible,c.sources),Date.now(),full);});
   }
   async agentTaskExpectedRevision(prior:TokenPayload,workspaceId:string,command:{type:string;payload:Record<string,unknown>}){
     if(!isAgentActor(prior)||!prior.agentTaskLease)return undefined;
@@ -766,8 +781,8 @@ export class MistRepository {
     if(!auditMatchesParent(audit!,parent))fail('NOT_FOUND','操作记录不存在或无权查看',404);
     const integer=(value:unknown,fallback:number,min:number,max:number)=>{if(value===undefined)return fallback;if((typeof value!=='string'&&typeof value!=='number')||!/^\d+$/.test(String(value))||Number(value)<min||Number(value)>max)fail('INVALID_INPUT','明细翻页参数无效',400);return Number(value);};
     if(input.includeCommand!==undefined&&![true,false,'true','false'].includes(input.includeCommand as any))fail('INVALID_INPUT','查询参数无效',400);
-    const visible=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;
-    return projectAgentAudit(audit!,{actor,current:row.state,visible,project:s=>projectState(s,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state,permission:c=>this.contract.mistCommandPermission(c),unrestricted:!scopeOf(row),offset:integer(input.offset,0,0,1000000),limit:integer(input.limit,25,1,50),includeCommand:input.includeCommand===true||input.includeCommand==='true'});
+    const visible=this.accessView(row, actor, scopeOf(row)).state;
+    return projectAgentAudit(audit!,{actor,current:row.state,visible,project:s=>this.accessView(row,actor,scopeOf(row),s).state,permission:c=>this.contract.mistCommandPermission(c),unrestricted:!scopeOf(row),offset:integer(input.offset,0,0,1000000),limit:integer(input.limit,25,1,50),includeCommand:input.includeCommand===true||input.includeCommand==='true'});
   });}
   async execute(prior: TokenPayload, workspaceId: string, input: MistCommandRequest) {
     if (!input.command || typeof input.command.type !== 'string' || !input.command.payload || typeof input.command.payload !== 'object' || Array.isArray(input.command.payload)) fail('INVALID_COMMAND', '业务命令格式无效', 400);
@@ -840,7 +855,7 @@ export class MistRepository {
         if(input.command?.type==='email.account.save'){const existing=row.state.email?.accounts.find(a=>a.id===input.command.payload?.id);if(existing?.kind==='shared'&&emailAccountAccessible(existing,actor.userId))await this.authorize(db,prior,'emails:admin');}
         await this.authorizeCompoundCommand(db, prior, input.command);
         if (input.command?.type === 'email.server.analysis' || input.command?.type === 'email.extraction.review') {
-          const visible = projectState(row.state, actor, this.emptyState(actor), fileOwner(row), scopeOf(row)).state;
+          const visible = this.accessView(row, actor, scopeOf(row)).state;
           const message = visible.email.messages.find(m => m.id === input.command!.payload.id);
           if (!message) fail('NOT_FOUND', '邮件不存在或当前账号不可见', 404);
           const expected = input.command.type === 'email.server.analysis' ? input.command.payload.analysis.sourceHash : message!.analysis?.sourceHash;
@@ -870,7 +885,7 @@ export class MistRepository {
           await this.authorizeAiWrite(db,prior,risk);
           if(high&&(!reauthGrant||reauthGrant.proposalId!==confirmProposalId||reauthGrant.command!==canonical(input.command)||(!!locked&&reauthGrant.command!==canonical(locked))))fail('REAUTH_REQUIRED','确认高风险 AI 提议须输入本人当前登录密码',403);
         }
-        if(humanTaskProposal&&!humanTaskProposal.taskId){const visible=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;if(!this.proposalReadable(row,actor,humanTaskProposal.command)||!knownCommandSourcesVisible(row.state,visible)(humanTaskProposal.command))fail('FORBIDDEN','提议来源已不可见，请拒绝后重新核对',403);}
+        if(humanTaskProposal&&!humanTaskProposal.taskId){const visible=this.accessView(row, actor, scopeOf(row)).state;if(!this.proposalReadable(row,actor,humanTaskProposal.command)||!knownCommandSourcesVisible(row.state,visible)(humanTaskProposal.command))fail('FORBIDDEN','提议来源已不可见，请拒绝后重新核对',403);}
         if(humanTaskProposal?.taskId){this.assertTaskSources(row,actor,(await taskRecord(db,workspaceId,humanTaskProposal.taskId)).value);await assertHumanTaskProposal(db,actor,workspaceId,humanTaskProposal.taskId,humanTaskProposal.id,Date.now());}
         // 版本落后时只在能证明安全时把本命令重新应用到最新状态；否则照旧明确拒绝。
         const concurrent = row.revision === input.expectedRevision ? undefined : await this.concurrentChanges(db, workspaceId, row.revision, input.expectedRevision, upload ? 'files.add' : input.command?.type);
@@ -897,7 +912,7 @@ export class MistRepository {
           if (Array.isArray(mailLinks) && mailLinks.length) {
             // Existence in company state is not enough: the target module and row
             // must both be readable. Stale links may still be explicitly unlinked.
-            const visible = projectState(row.state, actor, this.emptyState(actor), fileOwner(row), earlyScope).state;
+            const visible = this.accessView(row, actor, earlyScope).state;
             for (const link of mailLinks) if (link && emailLinkTarget(row.state, link) && !emailLinkTarget(visible, link)) fail('NOT_FOUND', '关联对象不存在或当前账号无权查看', 404);
           }
           if (input.command.type === 'email.followUp') {
@@ -908,7 +923,7 @@ export class MistRepository {
             if (!hasScope(recipient, 'emails:read') || !hasScope(recipient, 'emails:write')) fail('PRECONDITION', '负责人缺少邮件办理权限，请先核对岗位', 422);
           }
           if (input.command.type === 'email.submitExtraction') {
-            const visible = projectState(row.state, actor, this.emptyState(actor), fileOwner(row), earlyScope).state;
+            const visible = this.accessView(row, actor, earlyScope).state;
             const ownerId = emailBusinessOwner(visible, input.command.payload.link);
             if (!ownerId || !candidateIds(row).includes(ownerId)) fail('PRECONDITION', '请先核对业务负责人及其公司成员资格', 422);
             const recipient = await this.reviewSubject(db, actor, ownerId!, '业务负责人');
@@ -926,7 +941,7 @@ export class MistRepository {
             if(!hasScope(receiver,'orders:read')||!hasScope(receiver,'orders:write'))fail('PRECONDITION','接收账号缺少订单办理权限，请换人或由管理员调整岗位',422);
           }
           const known = new Set(row.state.files.map(file => file.id));
-          const allowed = new Set(projectState(row.state, actor, this.emptyState(actor), fileOwner(row), earlyScope).state.files.map(file => file.id));
+          const allowed = new Set(this.accessView(row, actor, earlyScope).state.files.map(file => file.id));
           // 印章图片不能被任何其他业务记录引用（邮件附件、审批附件等），只有维护印章本身可以引用。
           const sealImages = input.command.type === 'seal.save' ? new Set<string>() : sealFileIds(row.state);
           const check = (value: unknown): void => {
@@ -952,7 +967,7 @@ export class MistRepository {
         // 经 Agent（委托令牌）的写入在业务事件经办人后标注，账号与权限判断不受影响。
         if (isAgentActor(prior)) Object.assign(context, { actorName: `${context.actorName}（经 Agent）`, viaAgent: true, agentSessionId: prior.agentSessionId,...(prior.agentIdentity?{agentIdentity:prior.agentIdentity}:{}),...(prior.agentTaskLease?{agentTaskId:prior.agentTaskLease.taskId,agentTaskSourceRevision:prior.agentTaskSourceRevision}:{}) });
         if (MEMBER_PERSONAL_COMMANDS.includes(input.command?.type)) {
-          const visible = projectState(row.state, actor, this.emptyState(actor), fileOwner(row), scopeOf(row)).state;
+          const visible = this.accessView(row, actor, scopeOf(row)).state;
           const { type, payload } = input.command;
           // calendar.delete / task.save（改已有事项）同样只能作用于本账号可见的日程与事项。
           const collection = type === 'notification.read' ? visible.notifications : type === 'task.complete' || (type === 'task.save' && payload.id) ? visible.tasks : (type === 'calendar.save' && payload.id) || type === 'calendar.delete' ? visible.calendar : undefined;
@@ -973,7 +988,12 @@ export class MistRepository {
         const plan = input.command ? this.contract.getRequiredBusinessNumberPlan?.(row.state, input.command) ?? [] : [];
         const numbers = await prepareMistBusinessNumbers(db, row.state, plan, context.now);
         context.consumeBusinessNumber = prefix => numbers.consume(prefix);
-        if (upload) stored = { ...await this.files.write(workspaceId, upload, context.now), uploadedBy: actor.userId };
+        if (upload) {
+          const privacy = this.filePrivacy(row);
+          const hash = createHash('sha256').update(upload.bytes).digest('hex');
+          if (restrictedUploadContent(row.state, actor, fileOwner(row), privacy, hash, upload.bytes.length)) fail('FORBIDDEN', '该附件的原件受权限限制，请由有权限的岗位办理', 403);
+          stored = { ...await this.files.write(workspaceId, upload, context.now), uploadedBy: actor.userId };
+        }
         if (input.command?.type === 'platform.credit.issue') {
           const payload = assertCreditIssuePayload(input.command.payload);
           const credit = row.state.platform.credits.find(note => note.id === payload.creditId);
@@ -1228,7 +1248,21 @@ export class MistRepository {
   async listReviews(prior:TokenPayload){return this.transact(async db=>{
     const actor=await this.authorize(db,prior);
     const mine={state:{path:['reviewerIds'],array_contains:[actor.userId]}},rows=await db.mistWorkspace.findMany({where:companyLibrary(actor)?{companyId:actor.companyId,OR:[mine]}:{...(actor.companyId?{companyId:actor.companyId}:{}),OR:[{ownerId:actor.userId},mine]},orderBy:{updatedAt:'desc'},take:200});
-    return rows.filter((row:MistWorkspaceRow)=>!archived(row)).flatMap((row:MistWorkspaceRow)=>this.reviews(row.state).filter(t=>!companyRow(row)&&row.ownerId===actor.userId||(t.reviewerIds.includes(actor.userId)&&hasScope(actor,t.requiredPermission as any))).map(t=>({workspaceId:row.id,workspaceName:row.name,revision:row.revision,canDecide:t.status==='pending'&&t.reviewerIds.includes(actor.userId)&&hasScope(actor,t.requiredPermission as any),signatureRequired:mistCommandRequiresSignature({type:REVIEW_COMMAND_BY_KIND[t.kind],payload:{decision:'approved'}}),files:(t.fileIds||[]).flatMap(id=>{const file=row.state.files.find(f=>f.id===id);return file?[{id:file.id,name:file.name,size:file.size}]:[];}),...(()=>{const id=this.reviewSignatureFileId(row.state,t);return id&&row.state.files.some((f:MistStoredFile)=>f.id===id)?{signatureFileId:id}:{};})(),...t})));
+    const result = [];
+    for (const row of rows.filter((item:MistWorkspaceRow)=>!archived(item)) as MistWorkspaceRow[]) {
+      await this.prepareFileAccess(row);
+      const denied = restrictedSensitiveFiles(row.state,actor,fileOwner(row),this.filePrivacy(row),true);
+      const tasks = this.reviews(row.state).filter(t=>!companyRow(row)&&row.ownerId===actor.userId||(t.reviewerIds.includes(actor.userId)&&hasScope(actor,t.requiredPermission as any)));
+      for (const task of tasks) {
+        const signatureId = this.reviewSignatureFileId(row.state,task);
+        result.push({workspaceId:row.id,workspaceName:row.name,revision:row.revision,
+          canDecide:task.status==='pending'&&task.reviewerIds.includes(actor.userId)&&hasScope(actor,task.requiredPermission as any),
+          signatureRequired:mistCommandRequiresSignature({type:REVIEW_COMMAND_BY_KIND[task.kind],payload:{decision:'approved'}}),
+          files:(task.fileIds||[]).filter(id=>!denied.has(id)).flatMap(id=>{const file=row.state.files.find(f=>f.id===id);return file?[{id:file.id,name:file.name,size:file.size}]:[];}),
+          ...(signatureId&&!denied.has(signatureId)&&row.state.files.some(f=>f.id===signatureId)?{signatureFileId:signatureId}:{}),...task});
+      }
+    }
+    return result;
   });}
   async reviewFile(prior:TokenPayload,workspaceId:string,reviewId:string,fileId:string){return this.transact(async db=>{
     const actor=await this.authorize(db,prior),row=await db.mistWorkspace.findFirst({where:{id:workspaceId}});
@@ -1236,6 +1270,8 @@ export class MistRepository {
     if(!row||archived(row))fail('NOT_FOUND','审批不存在',404);
     const task=this.reviews(row.state).find(t=>t.id===reviewId);
     if(!task||((companyRow(row)||row.ownerId!==actor.userId)&&(!task.reviewerIds.includes(actor.userId)||!hasScope(actor,task.requiredPermission as any))))fail('NOT_FOUND','该审批不属于当前账号',404);
+    await this.prepareFileAccess(row);
+    if(restrictedSensitiveFiles(row.state,actor,fileOwner(row),this.filePrivacy(row),true).has(fileId))fail('FILE_NOT_FOUND','附件不在当前可读取的审批资料中',404);
     // 审批快照附件，或这次决定归档的签字（与列表同一匹配规则）；印章图片永远不经此下载。
     const signatureId=this.reviewSignatureFileId(row.state,task);
     if(!((task.fileIds||[]).includes(fileId)||fileId===signatureId)||sealFileIds(row.state).has(fileId))fail('FILE_NOT_FOUND','附件不在提交的审批快照中',404);
@@ -1337,15 +1373,15 @@ export class MistRepository {
   async mailSnapshot(prior: TokenPayload, workspaceId: string) {
     return this.transact(async db => {
       const { actor, row } = await this.own(db, prior, workspaceId, 'emails:write');
-      return { actor, revision: row.revision as number, state: projectState(row.state, actor, this.emptyState(actor), fileOwner(row), scopeOf(row)).state };
+      return { actor, revision: row.revision as number, state: this.accessView(row, actor, scopeOf(row)).state };
     });
   }
-  async mailStateViews(prior:TokenPayload,workspaceId:string) { return this.transact(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,'emails:read');const state=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;const items=await mailStateViews(db,workspaceId,state,actor);return isAgentActor(prior)?items.map(item=>({...item,canRetry:false})):items;}); }
+  async mailStateViews(prior:TokenPayload,workspaceId:string) { return this.transact(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,'emails:read');const state=this.accessView(row, actor, scopeOf(row)).state;const items=await mailStateViews(db,workspaceId,state,actor);return isAgentActor(prior)?items.map(item=>({...item,canRetry:false})):items;}); }
   async dueMailState(now=Date.now(),take=2) {return this.transact(db=>dueMailState(db,now,take));}
   async claimMailState(prior:TokenPayload,job:MailStateRecord,now=Date.now()) {
     return this.connectionTransaction(async db=>{
       const{actor,row}=await this.own(db,prior,job.workspaceId,'emails:write');
-      const state=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;
+      const state=this.accessView(row, actor, scopeOf(row)).state;
       const m=state.email.messages.find(m=>m.id===job.messageId),a=state.email.accounts.find(a=>a.id===job.accountId);
       if(!m||!a||!m.remote)fail('NOT_FOUND','邮件不存在或无权使用',404);
       if((a!.sourceGeneration||1)!==job.source||receiveSource(a!)!==job.sourceHash||(m!.source||1)!==job.source)fail('MAIL_SOURCE_CHANGED','邮箱来源已变化，请在原邮箱核对',409);
@@ -1363,7 +1399,7 @@ export class MistRepository {
   async mailReceivingViews(prior:TokenPayload,workspaceId:string,now=Date.now()) {
     return this.transact(async db=>{
       const {actor,row}=await this.own(db,prior,workspaceId,'emails:read');
-      const state=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;
+      const state=this.accessView(row, actor, scopeOf(row)).state;
       return Promise.all((state.email?.accounts??[]).filter(a=>!a.example).map(async account=>{const view=receivingView((await receivingRecord(db,workspaceId,account.id)).value,account,actor,now);return isAgentActor(prior)?{...view,canEnable:false,canDisable:false}:view;}));
     });
   }
@@ -1371,7 +1407,7 @@ export class MistRepository {
     if(isAgentActor(prior)||(prior as MailSyncActor).mailSyncLease||(prior as any).mailReceivingWorker)fail('FORBIDDEN','自动收件须由邮箱接入人本人设置',403);
     return this.connectionTransaction(async db=>{
       const {actor,row}=await this.own(db,prior,workspaceId,'emails:write');
-      const state=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;
+      const state=this.accessView(row, actor, scopeOf(row)).state;
       const account=state.email?.accounts.find(a=>a.id===accountId);if(!account)fail('NOT_FOUND','邮箱不存在或无权查看',404);
       return setReceiving(db,actor,workspaceId,account!,input,now,row.companyId??undefined);
     });
@@ -1379,7 +1415,7 @@ export class MistRepository {
   async claimMailSync(prior:TokenPayload,workspaceId:string,accountId:string,background=false,job?:ReceivingJob,leaseMs=RECEIVE_LEASE_MS,now=Date.now()):Promise<MailSyncActor> {
     return this.connectionTransaction(async db=>{
       const {actor,row}=await this.own(db,prior,workspaceId,'emails:write');
-      const state=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;
+      const state=this.accessView(row, actor, scopeOf(row)).state;
       const account=state.email?.accounts.find(a=>a.id===accountId);if(!account)fail('NOT_FOUND','邮箱不存在或无权查看',404);
       const lease=await claimReceiving(db,actor,workspaceId,account!,now,background,leaseMs,job);
       return {...prior,mailSyncLease:lease};
@@ -1390,7 +1426,7 @@ export class MistRepository {
   async dueMailReceiving(now=Date.now(),take=2){return this.transact(db=>dueReceiving(db,now,take));}
   async blockMailReceiving(job:ReceivingJob,problem:{code:string;message:string},now=Date.now()){return this.connectionTransaction(db=>blockReceiving(db,job,problem,now));}
   async invalidateMailReceiving(prior:TokenPayload,workspaceId:string,accountId:string,now=Date.now()) {
-    return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,'emails:write');const state=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;const a=state.email?.accounts.find(a=>a.id===accountId);if(!a||a.ownerId!==actor.userId)fail('FORBIDDEN','只有邮箱接入人可以断开',403);await invalidateReceiving(db,workspaceId,accountId,now);});
+    return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,'emails:write');const state=this.accessView(row, actor, scopeOf(row)).state;const a=state.email?.accounts.find(a=>a.id===accountId);if(!a||a.ownerId!==actor.userId)fail('FORBIDDEN','只有邮箱接入人可以断开',403);await invalidateReceiving(db,workspaceId,accountId,now);});
   }
   /** 邮件服务写回真实收发结果：每次读取最新版本作为基线，经同一命令事务（权限、成员、邮箱归属复核）落库。 */
   async executeMail(prior: TokenPayload, workspaceId: string, command: { type: string; payload: Record<string, unknown> }) {
@@ -1414,7 +1450,7 @@ export class MistRepository {
     const result = await this.transact(async db => {
       const { row, actor } = await this.own(db, prior, workspaceId);
       const file = Array.isArray(row.state.files) ? row.state.files.find((item: MistStoredFile) => item.id === fileId) : null;
-      if (!file || !canReadFile(row.state, actor, fileId, this.emptyState(actor), fileOwner(row), scopeOf(row))) fail('FILE_NOT_FOUND', '附件不存在或不属于此公司', 404);
+      if (!file || !this.accessView(row, actor).state.files.some(item => item.id === fileId)) fail('FILE_NOT_FOUND', '附件不存在或不属于此公司', 404);
       // 只有主图提供抠图；补充图请求抠图尺寸时退回同尺寸普通预览，且不进入抠图队列。
       const cutoutRequested=!!preview?.startsWith('cutout-'),cutoutAllowed=cutoutRequested&&primaryImageIds(row.state).has(file.id),mode:ImagePreviewMode|undefined=cutoutRequested&&!cutoutAllowed?(preview==='cutout-thumb'?'thumb':'display'):preview;
       const previewReady=mode?await this.files.previewReady(workspaceId,file,mode):undefined,bytes = mode ? await this.files.readPreview(workspaceId, file, mode) : await this.files.read(workspaceId, file);

@@ -65,7 +65,7 @@ function ModuleFilesInput({label,ids,disabled,onChange,onError}:{label:string;id
   const {state,uploadFile}=useMistWorkspace(),[busy,setBusy]=React.useState(false);
   const add=async(files:File[])=>{setBusy(true);onError('');const next=[...ids];try{for(const file of files)next.push((await uploadFile(file)).id);onChange(next);}catch(e){onError(e instanceof Error?e.message:'附件上传失败');onChange(next);}finally{setBusy(false);}};
   return <div className="mist-col">{!disabled&&!busy&&<UploadZone title={uiText(label)} onFiles={files=>void add(files)} />}{busy&&<span className="mist-note">{uiText('上传中…')}</span>}
-    {ids.map(id=><div key={id} className="mist-row"><span>{state?.files.find(f=>f.id===id)?.name||id}</span><span className="mist-spacer" />{!disabled&&<Button size="sm" variant="quiet" onClick={()=>onChange(ids.filter(x=>x!==id))}>{uiText('移除')}</Button>}</div>)}</div>;
+    {ids.map(id=><div key={id} className="mist-row"><span>{state?.files.find(f=>f.id===id)?.name||uiText('附件不可读')}</span><span className="mist-spacer" />{!disabled&&<Button size="sm" variant="quiet" onClick={()=>onChange(ids.filter(x=>x!==id))}>{uiText('移除')}</Button>}</div>)}</div>;
 }
 export function ModuleEditorDialog({spec,onClose,onSaved}:{spec:ModuleEditorSpec|null;onClose:()=>void;onSaved?:()=>void}){
   const workspace=useMistWorkspace(),{saving,pending,pendingCreate}=workspace,toast=useToast(),recovery=useRecoveredModuleCommand(spec,workspace);

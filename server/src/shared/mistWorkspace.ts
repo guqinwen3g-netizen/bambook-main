@@ -94,7 +94,7 @@ export type DevelopmentValues = {
   /** 面料分段委外：建案首轮按此工序链出一个版本；不填为并行比样。 */
   stages?: DevStagePlan[];
 };
-export type MistFile = { id: string; name: string; mimeType: string; size: number; storageKey: string; createdAt: string; uploadedBy?: string; url?: string };
+export type MistFile = { id: string; name: string; mimeType: string; size: number; storageKey: string; createdAt: string; uploadedBy?: string; url?: string; /** Computed from original bytes by the server, never a caller-supplied authority. */ sha256?: string };
 export type MistDraft = { id: string; values: DevelopmentValues; fileIds: string[]; updatedAt: string; /** Server-assigned creator; old drafts may not have attribution. */ ownerId?: string };
 export type MistConfirmation = { id: string; result: 'approved' | 'needs_adjustment' | 'rejected'; confirmer: string; organization: string; confirmedAt: string; basis: string; originalText: string; recordedAt: string; recordedBy: string;
   /** BB-DEV-6：面料版本有多条实物时，本次确认针对的准确实物（记录时快照编号与形态）。旧记录没有该字段。 */
