@@ -64,6 +64,17 @@ it('groups fabric forms of one archive into a single row and never sums differen
   expect(host.querySelectorAll('[data-sample-form]')).toHaveLength(2);
 });
 
+it('identifies each physical fabric specimen and uploads evidence to that specimen',async()=>{
+ const old={...fabric('smp-old','米样','米',2.5,2.5),note:'原批次 P1',fileIds:['old-file']},current={...fabric('smp-new','米样','米',2.5,2.5),note:'重送批次 P2'};store.state!.fulfillment.samples.push(old,current);store.state!.files.push({id:'old-file',name:'P1.txt'} as any,{id:'new-upload',name:'P2.txt'} as any);store.uploadFile.mockReset();store.uploadFile.mockResolvedValue({id:'new-upload',name:'P2.txt'});
+ render('smp-new');const form=host.querySelector('[data-sample-form="smp-new"]') as HTMLElement;expect(form.textContent).toContain('SMP-NEW');expect(form.textContent).toContain('重送批次 P2');const files=host.querySelector('[data-sample-files="smp-new"]') as HTMLElement;expect(files).toBeTruthy();
+ await act(async()=>{const input=files.querySelector('input[type="file"]')!;Object.defineProperty(input,'files',{value:[new File(['P2'],'P2.txt',{type:'text/plain'})],configurable:true});input.dispatchEvent(new Event('change',{bubbles:true}));});
+ expect(store.run).toHaveBeenCalledWith({type:'fulfillment.samples.edit',payload:{id:'smp-new',location:'A-01',note:'重送批次 P2',fileIds:['new-upload']}});expect(old.fileIds).toEqual(['old-file']);
+});
+it('edits the selected specimen and can remove a misassociated attachment without editing its sibling',async()=>{
+ store.state!.fulfillment.samples.push({...fabric('smp-old','米样','米',2.5,2.5),note:'原批次 P1',fileIds:['old-file']},{...fabric('smp-new','米样','米',2.5,2.5),note:'重送批次 P2',fileIds:['new-file']});store.state!.files.push({id:'old-file',name:'P1.txt'} as any,{id:'new-file',name:'P2.txt'} as any);render('smp-new');const form=host.querySelector('[data-sample-form="smp-new"]') as HTMLElement;
+ await act(async()=>getByRole(form,'button',{name:'编辑资料',exact:true}).click());getByRole(host,'heading',{name:'编辑样品资料'});const d=host;expect((getByRole(d,'textbox',{name:'备注'}) as HTMLInputElement).value).toBe('重送批次 P2');expect(d.textContent).toContain('P2.txt');expect(d.textContent).not.toContain('P1.txt');await act(async()=>getByRole(d,'button',{name:'移除',exact:true}).click());await act(async()=>getByRole(d,'button',{name:'下一步',exact:true}).click());await act(async()=>getByRole(d,'button',{name:'确认保存',exact:true}).click());
+ expect(store.run).toHaveBeenCalledWith({type:'fulfillment.samples.edit',payload:expect.objectContaining({id:'smp-new',note:'重送批次 P2',fileIds:[]})});
+});
 it('keeps return available for an open loan and hides it when no loan remains',()=>{
   const sample=fabric('smp-m','米样','米',10,8);store.state!.fulfillment.samples.push(sample);
   store.state!.fulfillment.sampleMovements.push({id:'loan',sampleId:'smp-m',kind:'lend',quantity:2,person:'李工',location:'工厂',note:'',at:'2026-10-01T08:00:00Z',actor:'业务员',expectedReturn:'2026-10-05'});
@@ -76,10 +87,11 @@ it('keeps return available for an open loan and hides it when no loan remains',(
 });
 
 it('keeps the ledger readable and hides unauthorized actions',()=>{
-  write.allowed=false;store.state!.fulfillment.samples.push(fabric('smp-m','米样','米',10,10));render('smp-m');
+  write.allowed=false;store.state!.fulfillment.samples.push(fabric('smp-m','米样','米',10,10),fabric('smp-new','米样','米',2.5,2.5));render('smp-m');
   expect(getByRole(host,'table',{name:'样品台账'})).toBeTruthy();
   for(const label of ['借出','寄出','归还','移位','查看 / 发起本样品QC'])expect(getAllByRole(host,'button').some(button=>button.textContent===label)).toBe(false);
   expect(host.textContent).not.toContain('新建样品');
+  expect(queryByRole(host,'button',{name:'编辑资料'})).toBeNull();expect(host.querySelectorAll('[data-sample-files] input[type=file]')).toHaveLength(0);
 });
 
 it('opens a quick movement dialog over the ledger instead of replacing the page',async()=>{
