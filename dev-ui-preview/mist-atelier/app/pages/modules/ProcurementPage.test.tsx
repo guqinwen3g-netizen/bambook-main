@@ -321,6 +321,21 @@ function postReceiptFixture(){
   store.state!.fulfillment.receipts.push({id:'r-post',purchaseId:'post',quantity:110,rejected:0,destination:'warehouse',location:'上海仓',date:'2026-10-12',evidence:'原收货单',fileIds:[],actor:'仓库',createdAt:'2026-10-12T02:00:00Z'});
   store.state!.fulfillment.stock.push({id:'stock-post',receiptId:'r-post',purchaseId:'post',quantity:110,available:110,location:'上海仓'} as any);
 }
+function wholeGarmentPurchase(){
+ store.state!.orderLines[0].fulfillmentMode='full_package';
+ return purchase('whole',approved({kind:'finished',unit:'件',offlineSend:{at:'2026-10-10T08:00:00Z',actor:'经办人',evidence:'线下发出',fileIds:[]},supplierConfirmation:{at:'2026-10-11T08:00:00Z',actor:'经办人',confirmedDue:'2026-10-30',evidence:'供方确认',fileIds:[]}}));
+}
+it('blocks fractional finished garment receipt and rejection before sending a command',async()=>{
+ store.state!.fulfillment.purchases.push(wholeGarmentPurchase());render('whole');await click(getByRole(host,'button',{name:'登记本次交付'}));const dialog=getByRole(document.body,'dialog',{name:'登记成品交接'});
+ typeInto(getByRole(dialog,'spinbutton',{name:'接收数量（件）'}) as HTMLInputElement,'0.5');typeInto(getByRole(dialog,'textbox',{name:'点数与交接依据'}) as HTMLTextAreaElement,'点数交接');await click(getByRole(dialog,'button',{name:'登记本次交付'}));expect(store.run).not.toHaveBeenCalled();expect(dialog.textContent).toContain('成衣接收数量须为整数');
+ typeInto(getByRole(dialog,'spinbutton',{name:'接收数量（件）'}) as HTMLInputElement,'1');typeInto(getByRole(dialog,'spinbutton',{name:'拒收数量（件）'}) as HTMLInputElement,'0.5');await click(getByRole(dialog,'button',{name:'登记本次交付'}));expect(store.run).not.toHaveBeenCalled();expect(dialog.textContent).toContain('成衣拒收数量须为整数');
+});
+it('blocks fractional finished garment post-receipt rejection before changing inventory',async()=>{
+ postReceiptFixture();Object.assign(store.state!.fulfillment.purchases[0],{kind:'finished',unit:'件'});store.state!.orderLines[0].fulfillmentMode='full_package';render('post');await click(getByRole(host,'button',{name:'转为拒收'}));const dialog=getByRole(document.body,'dialog');typeInto(getByRole(dialog,'spinbutton',{name:'转拒收数量（件）'}) as HTMLInputElement,'0.5');typeInto(getByRole(dialog,'textbox',{name:'拒收货物位置'}) as HTMLInputElement,'拒收区');typeInto(getByRole(dialog,'textbox',{name:'拒收依据'}) as HTMLTextAreaElement,'复核');await click(getByRole(dialog,'button',{name:'确认拒收'}));expect(store.run).not.toHaveBeenCalled();expect(dialog.textContent).toContain('成衣转拒收数量须为整数');
+});
+it('blocks fractional finished garment return before consuming rejected quantities',async()=>{
+ const p=wholeGarmentPurchase();p.received=98;store.state!.fulfillment.purchases.push(p);store.state!.fulfillment.receipts.push({id:'r-whole',purchaseId:p.id,quantity:98,rejected:2,destination:'warehouse',location:'仓库',date:'2026-10-12',evidence:'点数',fileIds:[],actor:'仓库',createdAt:'2026-10-12T02:00:00Z'});render(p.id);await click(getByRole(host,'button',{name:'登记退货 / 换货'}));const dialog=getByRole(document.body,'dialog');typeInto(getByRole(dialog,'spinbutton',{name:'退回数量（件）'}) as HTMLInputElement,'0.5');typeInto(getByRole(dialog,'textbox',{name:'供应商确认依据'}) as HTMLTextAreaElement,'供方同意');await click(getByRole(dialog,'button',{name:'登记退换'}));expect(store.run).not.toHaveBeenCalled();expect(dialog.textContent).toContain('成衣退换数量须为整数');
+});
 it('submits a post-receipt rejection for the exact receipt and defaults to its over-delivery',async()=>{
   postReceiptFixture();render('post');await click(getByRole(host,'button',{name:'转为拒收'}));
   const dialog=getByRole(document.body,'dialog');

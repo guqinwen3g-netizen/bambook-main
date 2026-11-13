@@ -10,7 +10,7 @@ import { applyDocumentGeneration, type DocumentGenerationCommand } from './mistD
 import { applyStockOperation, autoIssueForDeparture, stockOperationPermission, STOCK_OPERATION_COMMANDS, type StockCount, type StockOperationCommand, type StockTransfer } from './mistStockOperations';
 import { applyQcDispositionCommand, qcConcessionReleases, type QcDisposition, type QcDispositionCommand } from './mistQcDisposition';
 import { applyProductionIntake, productionIntake, type ProductionIntakeCommand, type ProductionIntakeRound, type ProductionObservation } from './mistProductionIntake';
-import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,garmentFinishedPurchaseProblem,normalizeInternalSupply,materialDeliveryRequired,isFabricStageMaterial,isFabricIntermediateProcessing,isFabricStageSource,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,assertMaterialReturnReversal,materialIssueReturnTotals,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
+import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,garmentFinishedPurchaseProblem,garmentDeliveryQuantityProblem,normalizeInternalSupply,materialDeliveryRequired,isFabricStageMaterial,isFabricIntermediateProcessing,isFabricStageSource,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,assertMaterialReturnReversal,materialIssueReturnTotals,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
 import {sampleSendPurpose,sampleSendBlocker,SAMPLE_SEND_PURPOSES,type SampleSendPurpose} from './mistSampleSending';
 import {assertOrderFundingAfterInvoiceRemoval,assertOrderShipmentPaymentCovered} from './mistOrderFunding';
 import { preparePurchaseDocumentSnapshot, purchaseDocumentFingerprint, type PurchaseDocumentArtifact, type PurchaseDocumentRecord } from './mistPurchaseDocument';
@@ -1997,6 +1997,11 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const intermediate = isFabricIntermediateProcessing(purchase);
             if (production && (purchase.kind === 'processing' || purchase.domain === 'garment' && purchase.kind === 'finished')) requireProductionRelease(root, production, ctx);
             const quantity = qty(p.quantity, '实收数量', true), rejected = qty(p.rejected, '拒收数量', true), location = text(p.location, '实际收货地点'), date = day(p.date, '收货日期'), evidence = text(p.evidence, '交接依据'), fileIds = files(root, p.fileIds);
+            const order = get(root.orders, purchase.orderId, '订单');
+            for (const [value,label] of [[quantity,'实收数量'],[rejected,'拒收数量']] as const) {
+                const problem = garmentDeliveryQuantityProblem(order,purchase.kind,value,label);
+                if (problem) fail(problem);
+            }
             if (completion && sum([purchase.received, quantity]) > completion.quantity) fail('累计实收不能超过已登记的最终完工数量');
             if (sum([quantity, rejected]) <= 0) fail('实收与拒收数量至少有一项大于零');
             if (date > platformBusinessDate(ctx.now))
@@ -2046,6 +2051,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (blocker) fail(blocker, 'PRECONDITION');
             const purchase = get(f.purchases, receipt.purchaseId, '采购');
             const quantity = qty(p.quantity, '转拒收数量'), location = text(p.location, '拒收货物位置'), evidence = text(p.evidence, '拒收依据');
+            const problem = garmentDeliveryQuantityProblem(get(root.orders,purchase.orderId,'订单'),purchase.kind,quantity,'转拒收数量');
+            if (problem) fail(problem);
             if (quantity > receipt.quantity) fail('转拒收数量超过本次合格实收数量');
             const stock = f.stock.find(row => row.receiptId === receipt.id && row.purchaseId === purchase.id)!;
             if (quantity > stock.available) fail('本次收货的可用库存不足');
@@ -2073,6 +2080,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const purchase = get(f.purchases, receipt.purchaseId, '采购');
             if (purchase.state !== 'approved') fail('仅已批准采购可登记退换', 'PRECONDITION');
             const quantity = qty(p.quantity, '退换数量'), date = day(p.date, '退换日期'), evidence = text(p.evidence, '退换依据');
+            const problem = garmentDeliveryQuantityProblem(get(root.orders,purchase.orderId,'订单'),purchase.kind,quantity,'退换数量');
+            if (problem) fail(problem);
             if (!['replace', 'noReplace'].includes(p.disposition)) fail('请选择供应商补发或不再补发');
             if (date > platformBusinessDate(ctx.now)) fail('退换日期不得在未来');
             if (date < receipt.date) fail('退换日期不能早于收货日期');

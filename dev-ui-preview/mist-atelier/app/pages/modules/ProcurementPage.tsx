@@ -2,7 +2,7 @@ import { businessInputInstant } from '../../runtime/businessClock';
 import { MaterialDeliveryPanel } from '../MaterialDeliveryPanel';
 import {isDomesticSupplier, procurementCurrencyProblem} from '../../../../../server/src/shared/mistProcurementCurrency';
 export {isDomesticSupplier} from '../../../../../server/src/shared/mistProcurementCurrency';
-import { assertGarmentProcurement, garmentFinishedPurchaseProblem, deliveryContractId, hasMaterialAtFactory, materialDeliveryRequired, materialDeliveryTargets, materialDeliveryRows } from '../../../../../server/src/shared/mistInternalFabric';
+import { assertGarmentProcurement, garmentFinishedPurchaseProblem, garmentDeliveryQuantityProblem, deliveryContractId, hasMaterialAtFactory, materialDeliveryRequired, materialDeliveryTargets, materialDeliveryRows } from '../../../../../server/src/shared/mistInternalFabric';
 import { purchaseName } from '../businessNames';
 import { fabricStageBalance, fabricStageLinks, fabricStageTermsText, type FabricStageBalance } from '../../../../../server/src/shared/mistFabricStage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
@@ -182,6 +182,9 @@ export function ProcurementPage() {
       initialValues: { quantity: Math.max(0, round(p.quantity - p.received)), rejected: 0, destination: p.kind === 'processing' && !fabricProcessing ? 'supplier' : 'warehouse', location: p.destination, date: today(), evidence: '', files: '', targetProductionId: targets.length === 1 ? targets[0].value : '', warehouseId: warehouses.length === 1 ? warehouses[0].value : '', dyeLot: '', shade: '', rolls: '' },
       submit: values => {
         const quantity = number(values, 'quantity'), destination = text(values, 'destination') as 'warehouse' | 'supplier';
+        for (const [value,label] of [[quantity,'接收数量'],[number(values,'rejected'),'拒收数量']] as const) {
+          const problem=garmentDeliveryQuantityProblem({type:p.domain},p.kind,value,label);if(problem)throw new Error(problem);
+        }
         if (linked && destination === 'supplier' && quantity > 0 && !text(values, 'targetProductionId')) throw new Error('请选择直送加工单');
         const payload = { id: p.id, quantity, rejected: number(values, 'rejected'), location: text(values, 'location'), date: text(values, 'date'), evidence: text(values, 'evidence'), fileIds: moduleFileIds(values.files) };
         const rolls = destination === 'warehouse' ? parseRolls(text(values, 'rolls')) : undefined;
@@ -196,12 +199,16 @@ export function ProcurementPage() {
     return { title: '收货后转为拒收', submitLabel: '确认拒收',
       fields: [{ ...field('quantity', `转拒收数量（${p.unit}）`, 'number'), min: 0.000001 }, ...(positions.length > 1 ? [field('sourceLocation', '原库存位置', 'select', true, [emptyOption, ...positions.map(row => ({ value: row.location, label: `${row.location} · ${row.available} ${p.unit}` }))])] : []), field('location', '拒收货物位置'), field('evidence', '拒收依据', 'textarea')],
       initialValues: { quantity: Math.min(r.quantity, stock?.available || 0, Math.max(0, p.received - p.quantity)) || '', sourceLocation: '', location: '', evidence: '' },
-      submit: values => run({ type: 'fulfillment.procurement.rejectReceived', payload: { receiptId: r.id, quantity: number(values, 'quantity'), location: text(values, 'location'), evidence: text(values, 'evidence'), ...(positions.length > 1 ? { sourceLocation: text(values, 'sourceLocation') } : {}) } }) };
+      submit: values => {const quantity=number(values,'quantity'),problem=garmentDeliveryQuantityProblem({type:p.domain},p.kind,quantity,'转拒收数量');if(problem)throw new Error(problem);return run({ type: 'fulfillment.procurement.rejectReceived', payload: { receiptId: r.id, quantity, location: text(values, 'location'), evidence: text(values, 'evidence'), ...(positions.length > 1 ? { sourceLocation: text(values, 'sourceLocation') } : {}) } });} };
   };
   const returnSpec = (p: FulfillmentPurchase, r: FulfillmentReceipt): ModuleEditorSpec => ({ title: '登记拒收货物退换', submitLabel: '登记退换',
     fields: [{ ...field('quantity', `退回数量（${p.unit}）`, 'number'), min: 0.0001 }, field('disposition', '供应商处理', 'select', true, [{ value: 'replace', label: '供应商补发（补货另行收货）' }, { value: 'noReplace', label: '不再补发' }]), field('date', '退回日期', 'date'), field('returnNo', '退货单号', 'text', false), { ...field('freight', `退货运费（${p.currency}）`, 'number', false), min: 0 }, field('freightBy', '运费承担', 'select', false, [{ value: 'supplier', label: '供应商承担' }, { value: 'us', label: '我方承担' }]), { ...field('deduction', `扣款金额（${p.currency}）`, 'number', false), min: 0 }, field('evidence', '供应商确认依据', 'textarea')],
     initialValues: { quantity: round(r.rejected - receiptReturnedQuantity(r)), disposition: 'replace', date: today(), returnNo: '', freight: '', freightBy: 'supplier', deduction: '', evidence: '' },
-    submit: values => run({ type: 'fulfillment.procurement.return', payload: { receiptId: r.id, quantity: number(values, 'quantity'), disposition: text(values, 'disposition') as FulfillmentReceiptReturn['disposition'], date: text(values, 'date'), evidence: text(values, 'evidence'), returnNo: text(values, 'returnNo'), freight: Number(values.freight) || 0, freightBy: text(values, 'freightBy') as 'supplier' | 'us', deduction: Number(values.deduction) || 0 } }) });
+    submit: values => {
+      const quantity=number(values,'quantity'),problem=garmentDeliveryQuantityProblem({type:p.domain},p.kind,quantity,'退换数量');
+      if(problem)throw new Error(problem);
+      return run({ type: 'fulfillment.procurement.return', payload: { receiptId: r.id, quantity, disposition: text(values, 'disposition') as FulfillmentReceiptReturn['disposition'], date: text(values, 'date'), evidence: text(values, 'evidence'), returnNo: text(values, 'returnNo'), freight: Number(values.freight) || 0, freightBy: text(values, 'freightBy') as 'supplier' | 'us', deduction: Number(values.deduction) || 0 } });
+    } });
   const returnReverseSpec = (p: FulfillmentPurchase, r: FulfillmentReceipt, row: FulfillmentReceiptReturn): ModuleEditorSpec => ({ title: '冲回退换登记', description: `${row.date} 退回 ${row.quantity} ${p.unit}（${row.disposition === 'replace' ? '供应商补发' : '不再补发'}）。原记录保留并标记已冲回。`, submitLabel: '确认冲回',
     fields: [field('reason', '冲回原因', 'textarea')], initialValues: { reason: '' }, submit: values => run({ type: 'fulfillment.procurement.return.reverse', payload: { receiptId: r.id, returnId: row.id, reason: text(values, 'reason') } }) });
   const cancelSpec = (p: FulfillmentPurchase): ModuleEditorSpec => {

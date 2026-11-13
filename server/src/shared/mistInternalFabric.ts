@@ -151,6 +151,10 @@ export function garmentFinishedPurchaseProblem(order:Pick<MistOrder,'type'>,line
   if(!Number.isInteger(quantity))return '成衣成品数量须为整数';
   return '';
 }
+/** Finished garments and garment processing handovers count physical pieces/sets; materials retain their own quantity precision. */
+export function garmentDeliveryQuantityProblem(order:Pick<MistOrder,'type'>,kind:string,quantity:number,label:string):string{
+  return order.type==='garment'&&(kind==='finished'||kind==='processing')&&!Number.isSafeInteger(quantity)?`成衣${label}须为整数`:'';
+}
 export function assertGarmentProcurement(order: Pick<MistOrder, 'type'> & {id?:string}, line: GarmentFulfillmentFields & {id?:string}, kind: string, materialKind: unknown, root?:MistState, purchaseId?:string): MistMaterialKind | undefined {
   if (order.type === 'garment' && kind === 'finished' && normalizeGarmentFulfillment(line).fulfillmentMode !== 'full_package') fail('仅全包条目可采购成衣成品');
   if(order.type==='garment'&&root&&order.id&&line.id){

@@ -72,7 +72,7 @@
 
 订单审批金额（2026-11-13）：`mistOrderGovernance.ts#getOrderGovernanceReviews/reviewAmount` 从本轮冻结快照逐条计算金额并按分相加，主单和变更均显示该轮合同总额，不读取当前主单缓存金额或后续草稿。内部未定价显示「未定价」，损坏历史金额显示「金额待核对」，补发单仍按无需客户收款呈现。新增字段只在读取审批时派生，不改审批、签字或经营历史。
 
-成衣成品采购（2026-11-13）：`mistInternalFabric.ts#garmentFinishedPurchaseProblem` 要求与订单条目同单位且合同数量为整数；`mistFulfillment.ts` 在保存和提交/批准/发出/确认/收货的合同重查，以及变更提出/批准时共用该规则。材料不套用此限制，面料仍支持实际小数数量，不自动换算或改写历史。该约束针对合同及变更数量，实际收货、拒收和退回数量不能据此推定已覆盖，另随物理流转场景验证。
+成衣成品采购（2026-11-13）：`mistInternalFabric.ts#garmentFinishedPurchaseProblem` 要求与订单条目同单位且合同数量为整数；`mistFulfillment.ts` 在保存和提交/批准/发出/确认/收货的合同重查，以及变更提出/批准时共用该规则。实际物理流转另由`garmentDeliveryQuantityProblem`约束成衣成品和成衣加工交付的实收、拒收、收货后转拒收及退换数量；`ProcurementPage.tsx`提交前共用校验，服务端在累计量、库存和退换记录修改前重查，失败不留部分写入。材料不套用此限制，面料仍支持实际小数数量，不自动换算或改写历史。对应`mistGarmentReceiptQuantities.test.ts`覆盖错误拒绝/状态不变及整件、面料小数正例；浏览器实走198件接收/2件拒收→1件转拒收→3件退换→3件补货，最终实收与库存均200件，拒收补货历史保留。
 
 ## 5. 跨模块交接（主线）
 
