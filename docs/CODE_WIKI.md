@@ -350,6 +350,7 @@ flowchart LR
 #### 内部面料分配与交接
 
 - **完整内供与分批票据核算（2026-11-14，适用于当前成本口径）**：`mistPayables.ts#purchasePrepaymentAppliedMinor/purchasePrepaymentAvailableMinor/payableBills`分别跟踪结算已确认抵扣、剩余可抵预付及关联票据抵扣，不把抵票再记一次现金。最后一批数量加已确认结算数量达到合同量时，`FinanceSettlements`自动带最终标志，财务每笔确认重新签字。`mistOrderCost.ts#orderActualCost`按到票和未到票分列成本，内部采购通过`internalFabricCostShare/financialMaterialCostBasis`归最终订单；无加成且已全部转给成衣、没有来源余料时，来源内部单的未分摊成本为0，成衣只计一次该采购成本，内部不生成外部应收。当前核算沿价税合计口径、退税单独列示，不擅自从已到票成本再扣一次票面税额；未到票加工及未开票销售仍保留暂估标志。角色裁剪和税基限制不因已结算解除。
+- **供应商一票多合同（2026-11-14，现行接口）**：`payable.bill.register`的`lines`按同供应商、同币种的各合同保存本票金额，并分别关联本合同已确认的`settlementId`；票面`taxAmount`在整票保存一次。`mistOrderCost.ts#orderActualCost`按各合同对应金额归集，不把整张`bill.amount`重复计到每个合同；内部供料成本仍按准确分配归最终订单。票据形成应付不产生现金，预付按对应合同抵扣，不借用其他供应商的预款；税基与专票原件权限覆盖全部关联合同。旧票/结算/现金不重写，当前业务实测及发布状态见GO-LIVE。
 
 - **待点清的结算数量（2026-11-14，单页增量待发布）**：`FinanceSettlements.tsx#SettlementSubmitDialog`在直送未点清时从`materialDeliveryRows`展示原交付总量、已点收与待点收；不把扣除已拒收后的临时收货数标成确认实收。点清后才按收货记录的合格数量展示“实收”并允许勾选。`settlementReceipts/assertSettlementReceiptsCounted`的服务端整笔点清规则保持不变，显示修复不改业务数量或核销。`FinancePayables.test.tsx`覆盖部分点收兼有拒收、补点清后的选择/数量切换。
 
