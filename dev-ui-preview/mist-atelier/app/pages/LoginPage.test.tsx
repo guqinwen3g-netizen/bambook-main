@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MistRoot, ToastProvider } from '../../../../components/mist';
 import { Nav } from '../nav';
-const seam = vi.hoisted(() => ({ session: { signingIn: false, status: 'anonymous', error: '', login: vi.fn(), clearError: vi.fn() } }));
+const seam = vi.hoisted(() => ({ session: { signingIn: false,signingOut:false,logoutUnconfirmed:false, status: 'anonymous', error: '', login: vi.fn(),logout:vi.fn().mockResolvedValue(undefined), clearError: vi.fn() } }));
 vi.mock('../runtime/auth', () => { const useMistSession = () => seam.session; return { useMistSession, useOptionalMistSession: useMistSession }; });
 import { LoginPage } from './LoginPage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -13,9 +13,18 @@ const go = vi.fn();
 function render(view = 'login', entry: 'company' | 'platform' = 'company') { host = document.createElement('div'); document.body.append(host); root = createRoot(host); act(() => root!.render(<MistRoot><ToastProvider><Nav.Provider value={{ route: { view }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><LoginPage entry={entry} /></Nav.Provider></ToastProvider></MistRoot>)); return host; }
 function input(type: string, value: string) { const element = host!.querySelector<HTMLInputElement>(`input[type="${type}"]`)!; act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(element, value); element.dispatchEvent(new Event('input', { bubbles: true })); }); }
 async function submit() { await act(async () => { host!.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); }); }
-beforeEach(() => { vi.clearAllMocks(); seam.session.signingIn = false; seam.session.status = 'anonymous'; seam.session.error = ''; });
+beforeEach(() => { vi.clearAllMocks(); seam.session.signingIn = false;seam.session.signingOut=false;seam.session.logoutUnconfirmed=false; seam.session.status = 'anonymous'; seam.session.error = ''; });
 afterEach(() => { if (root) act(() => root!.unmount()); host?.remove(); root = undefined; host = undefined; vi.useRealTimers(); });
 describe('original Mist login with real-session binding', () => {
+  it('keeps pending logout recovery visible when a later password login fails',()=>{
+    seam.session.logoutUnconfirmed=true;seam.session.error='账号或密码错误';const h=render();expect([...h.querySelectorAll('button')].some(b=>b.textContent==='重试退出')).toBe(true);expect(h.querySelector('[role="alert"]')?.textContent).toContain('账号或密码错误');
+  });
+  it('holds a new login while the previous logout can still clear the browser cookie',()=>{
+    seam.session.signingOut=true;const h=render();expect([...h.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.type==='submit')?.disabled).toBe(true);expect(h.querySelector<HTMLInputElement>('input[type="email"]')?.disabled).toBe(true);
+  });
+  it('lets a locally signed-out user retry server logout without marking the password invalid',async()=>{
+    seam.session.error='服务器退出未确认，请重试。';const h=render();const retry=[...h.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='重试退出')!;expect(retry).toBeTruthy();expect(h.querySelector('input[type="password"]')?.getAttribute('aria-invalid')).toBe('false');await act(async()=>retry.click());expect(seam.session.logout).toHaveBeenCalledOnce();expect(seam.session.login).not.toHaveBeenCalled();
+  });
   it('retains the reference brand/form composition and never pretends password reset succeeded', () => {
     const host = render();
     expect([...host.querySelector('.mist-auth')!.children].map(element => element.className)).toEqual(['mist-auth-brand', 'mist-auth-panel']);

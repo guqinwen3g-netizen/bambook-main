@@ -75,5 +75,5 @@ it('logs out every device only after confirmation, then ends the local session',
   expect(document.body.textContent).toContain('未能退出所有设备'); expect(session.logout).not.toHaveBeenCalled();
   logoutAll.mockResolvedValueOnce(undefined);
   await act(async () => button('确认退出').click());
-  expect(logoutAll).toHaveBeenCalledTimes(2); expect(session.logout).toHaveBeenCalledTimes(1);
+  expect(logoutAll).toHaveBeenCalledTimes(2); expect(session.logout).not.toHaveBeenCalled();
 });

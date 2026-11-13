@@ -16,6 +16,8 @@ export type TokenPayload = {
   grantedPermissions?: string[];
   userId: string;
   credentialVersion?: string;
+  /** Verified credential issuance retained on hydrated request actors; not a new login time. */
+  credentialIssuedAt?:number;
   platformOnly?: boolean;
   /** 当前会话所属公司（租户）。null/缺省表示尚未归属公司的历史会话。 */
   companyId?: string | null;
@@ -76,6 +78,10 @@ export function createAuthService(options: AuthServiceOptions = {}) {
     const decoded = jwt.verify(token, jwtSecret) as TokenPayload;
     return decoded;
   }
+  /** Revocation only: an expired pre-refresh token may still identify a live login family. Never use this to authorize access. */
+  function verifyLogoutToken(token:string):TokenPayload{
+    return jwt.verify(token,jwtSecret,{ignoreExpiration:true}) as TokenPayload;
+  }
 
   function refreshToken(token: string): string {
     // Legacy cryptographic primitive only. Public session refresh must reload
@@ -96,5 +102,5 @@ export function createAuthService(options: AuthServiceOptions = {}) {
     } catch { return null; }
   }
 
-  return { hashPassword, verifyPassword, signToken, verifyToken, refreshToken, signPurposeToken, verifyPurposeToken };
+  return { hashPassword, verifyPassword, signToken, verifyToken,verifyLogoutToken, refreshToken, signPurposeToken, verifyPurposeToken };
 }

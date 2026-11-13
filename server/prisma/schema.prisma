@@ -1262,6 +1262,17 @@ model SystemAsset {
 // Enterprise Agent OS
 // ------------------------------------------------------------------
 
+/// Revoked login families. Only a one-way key is retained; no bearer credential is stored.
+model AuthSessionRevocation {
+  id        String   @id
+  userId    String
+  expiresAt DateTime
+  revokedAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
 model UserAccount {
   fabricSearchRequested FabricSearchTask[] @relation("FabricSearchRequester")
   fabricSearchAssigned FabricSearchTask[] @relation("FabricSearchAssignee")

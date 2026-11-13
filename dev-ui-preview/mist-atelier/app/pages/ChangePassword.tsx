@@ -70,12 +70,11 @@ export function ChangePasswordRow() {
 
 /** 设置 · 安全：退出所有设备（含当前设备），用于设备丢失或怀疑密码外泄。 */
 export function LogoutAllRow() {
-  const session = useMistSession();
   const [open, setOpen] = React.useState(false), [busy, setBusy] = React.useState(false), [error, setError] = React.useState('');
   const submit = async () => {
     if (busy) return;
     setBusy(true); setError('');
-    try { await logoutAllSessions(); setOpen(false); await session.logout(); }
+    try { await logoutAllSessions(); setOpen(false); }
     catch (e) { setError(explain(e) === '密码未修改，请重试' ? '未能退出所有设备，请重试' : explain(e)); }
     finally { setBusy(false); }
   };

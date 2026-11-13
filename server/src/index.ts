@@ -17,6 +17,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { createAccountStatusGuard } from './auth/accountStatusGuard';
+import {createCurrentSessionGuard} from './auth/currentSessionRevocation';
 import { createAuthorizationSnapshotGuard } from './auth/authorizationSnapshotGuard';
 import { createSupplierApprovalAuthorityRouter } from './procurement/supplierApprovalAuthorityRoute';
 import { logger } from './lib/logger';
@@ -178,6 +179,7 @@ app.use((req, _res, next) => {
 
 // 主 API 只保留在用路径，其余旧接口在鉴权与查库之前直接 404（见 http/liveApiSurface.ts）。
 app.use('/api', liveApiSurface);
+app.use('/api',createCurrentSessionGuard(prisma));
 app.use('/api', createAuthorizationSnapshotGuard({ prisma, apiKeys: SDK_CONFIG.apiKeys, apiKeyActors: AGENT_API_KEY_ACTORS }));
 app.use('/api', createPublicEntryHostGuard());
 app.use('/api', tenantSurfaceGuard);

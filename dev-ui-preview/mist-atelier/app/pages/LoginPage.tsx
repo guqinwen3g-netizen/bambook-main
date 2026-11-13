@@ -5,7 +5,7 @@ import { uiText, ui } from '../../../../services/interfaceLanguage';
 import React from 'react';
 import { BAMBOOK_BRAND } from '../../../../server/src/shared/brand';
 import { ArrowRight, KeyRound, Mail } from 'lucide-react';
-import { Button, Checkbox, Field, MistMark, MistWordmark, PasswordInput, TextInput, TextLink } from '../../../../components/mist';
+import { Banner, Button, Checkbox, Field, MistMark, MistWordmark, PasswordInput, TextInput, TextLink } from '../../../../components/mist';
 import { useNav } from '../nav';
 import { useMistSession } from '../runtime/auth';
 import { mapAuthErrorMessage } from '../../../../services/authService';
@@ -19,7 +19,7 @@ export function LoginPage({ entry = 'company' }: { entry?: 'company' | 'platform
   const [email, setEmail] = React.useState(() => typeof route?.id === 'string' && route.id.includes('@') ? route.id : '');
   const [pw, setPw] = React.useState('');
   const [remember, setRemember] = React.useState(true);
-  const busy = session.signingIn;
+  const busy = session.signingIn||session.signingOut;
   const [cooldown, setCooldown] = React.useState(0);
   const cooldownTimer = React.useRef<number | undefined>(undefined);
   const mounted = React.useRef(true);
@@ -64,7 +64,9 @@ export function LoginPage({ entry = 'company' }: { entry?: 'company' | 'platform
     await doLogin();
   };
   const shownError = err || session.error;
-  const errorNode = shownError ? <span id="mist-login-error" role="alert">{shownError}</span> : undefined;
+  const logoutError=shownError?.startsWith('服务器退出未确认');
+  const logoutUnconfirmed=session.logoutUnconfirmed===true||logoutError;
+  const errorNode = shownError&&!logoutError ? <span id="mist-login-error" role="alert">{shownError}</span> : undefined;
   return (
     <div className="mist-auth">
       <div className="mist-auth-brand">
@@ -77,6 +79,7 @@ export function LoginPage({ entry = 'company' }: { entry?: 'company' | 'platform
       </div>
       <div className="mist-auth-panel">
         <form className="mist-auth-form" aria-label={uiText("登录")} onSubmit={submit}>
+          {logoutUnconfirmed&&<Banner tone="warn" title={uiText('服务器退出未确认')} actions={<Button loading={session.signingOut} disabled={busy} onClick={()=>{setErr('');void session.logout().catch(()=>undefined);}}>{uiText('重试退出')}</Button>}/>}
           {companies.length > 0 ? (<>
             <div><h2 className="mist-h1" style={{ fontSize: 28 }}>{uiText("选择公司")}</h2><p className="mist-sub" style={{ marginTop: 6 }}>{uiText("请选择本次登录的公司。")}</p></div>
             <div style={{ display: 'grid', gap: 8 }}>
@@ -90,7 +93,7 @@ export function LoginPage({ entry = 'company' }: { entry?: 'company' | 'platform
           </>) : (<>
           <div><h2 className="mist-h1" style={{ fontSize: 28 }}>{uiText(platform ? "平台管理" : "登录")}</h2></div>
           <Field label={uiText("工作邮箱")}><TextInput icon={Mail} type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} disabled={busy} required /></Field>
-          <Field label={uiText("密码")} error={errorNode}><PasswordInput icon={KeyRound} autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} placeholder={uiText("输入密码")} disabled={busy} aria-invalid={!!(err || session.error)} aria-describedby={err || session.error ? "mist-login-error" : undefined} /></Field>
+          <Field label={uiText("密码")} error={errorNode}><PasswordInput icon={KeyRound} autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} placeholder={uiText("输入密码")} disabled={busy} aria-invalid={!!errorNode} aria-describedby={errorNode ? "mist-login-error" : undefined} /></Field>
           <div className="mist-row"><Checkbox checked={remember} onChange={setRemember} disabled={busy} label={uiText("保持登录")} /><span className="mist-spacer" /><TextLink disabled={busy} title={uiText("找回密码")} onClick={()=>go('account-recovery')}>{uiText("找回密码")}</TextLink></div>
           <Button type="submit" variant="primary" size="lg" block loading={busy} disabled={busy || cooldown > 0 || session.status === 'loading'} iconRight={busy ? undefined : ArrowRight}>{uiText(cooldown > 0 ? `请稍候 ${cooldown}s` : '登录')}</Button>
           {!platform && <p className="mist-auth-switch"><TextLink disabled={busy} onClick={() => go('register')}>{uiText("账户开通")}</TextLink></p>}

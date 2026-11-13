@@ -18,8 +18,13 @@ import { createAuthService } from '../service';
 const auth = createAuthService();
 const DAY = 24 * 3600;
 let user: any;
+let revoked: Map<string, any>, revocationFailure: boolean;
 function app() {
   const known: any = {
+    authSessionRevocation: {
+      findUnique: async ({where}:any) => revoked.get(where.id) ?? null,
+      createMany: async ({data}:any) => {if(revocationFailure)throw new Error('store unavailable');let count=0;for(const row of data)if(!revoked.has(row.id)){revoked.set(row.id,structuredClone(row));count++;}return{count};},
+    },
     userAccount: {
       findFirst: async () => structuredClone(user), findUnique: async ({ where }: any) => (where.id === user.id ? structuredClone(user) : null),
       update: async ({ data }: any) => { Object.assign(user, structuredClone(data)); return structuredClone(user); },
@@ -36,7 +41,66 @@ const claims = (token: string) => jwt.decode(token) as any;
 const login = (remember?: boolean) => request(app()).post('/auth/login').send({ email: 'staff@example.test', password: 'Current-pass-1', ...(remember === undefined ? {} : { remember }) });
 const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
 beforeEach(async () => {
+  revoked=new Map();revocationFailure=false;
   user = { id: 'u1', email: 'staff@example.test', displayName: 'U', status: 'active', deletedAt: null, platformRole: null, roles: [], primaryDepartment: null, passwordHash: await auth.hashPassword('Current-pass-1'), metadata: { credentialVersion: 'v1' } };
+});
+
+describe('current device logout',()=>{
+ it('issues a logout-only capability that survives loss of cookies and login storage',async()=>{
+  const first=await login(true),other=await login(true),ticket=first.body.logoutTicket;expect(typeof ticket).toBe('string');expect(auth.verifyLogoutToken(ticket)).toMatchObject({kind:'session-logout'});expect(auth.verifyLogoutToken(ticket).userId).toBeUndefined();
+  for(const path of ['me','companies'])expect((await request(app()).get('/auth/'+path).set(bearer(ticket))).status).toBe(401);
+  expect((await request(app()).post('/auth/refresh').set(bearer(ticket))).status).toBe(401);
+  const out=await request(app()).post('/auth/logout').send({logoutTicket:ticket});expect(out.status).toBe(200);expect(out.body.revokedSession).toBe(true);expect((await request(app()).get('/auth/me').set(bearer(first.body.token))).status).toBe(401);expect((await request(app()).get('/auth/me').set(bearer(other.body.token))).status).toBe(200);
+ });
+ it('rejects forged logout tickets and never substitutes an unrelated passive cookie',async()=>{
+  const first=await login(true),other=await login(true),parts=first.body.logoutTicket.split('.');parts[2]='invalid';const bad=await request(app()).post('/auth/logout').set('Cookie',cookieOf(other).split(';')[0]).send({logoutTicket:parts.join('.')});expect(bad.status).toBe(400);expect(bad.headers['set-cookie']).toBeUndefined();expect((await request(app()).get('/auth/me').set(bearer(other.body.token))).status).toBe(200);
+  const good=await request(app()).post('/auth/logout').set('Cookie',cookieOf(other).split(';')[0]).send({logoutTicket:first.body.logoutTicket});expect(good.status).toBe(200);expect(good.headers['set-cookie']).toBeUndefined();expect((await request(app()).get('/auth/me').set(bearer(first.body.token))).status).toBe(401);expect((await request(app()).get('/auth/me').set(bearer(other.body.token))).status).toBe(200);
+ });
+ it('does not label an anonymous acknowledgement as a session revocation',async()=>{const r=await request(app()).post('/auth/logout');expect(r.status).toBe(200);expect(r.body.revokedSession).toBe(false);});
+ it('revokes a still-active family even when the presented pre-refresh token has expired',async()=>{
+  const issued=Math.floor(Date.now()/1000)-13*3600,base={userId:'u1',roles:[],permissions:[],departmentIds:[],credentialVersion:'v1',sessionId:'expired-original',authTime:issued};
+  const expired=auth.signToken({...base,iat:issued} as any,{expiresInSec:12*3600}),current=auth.signToken(base);
+  expect((await request(app()).get('/auth/me').set(bearer(current))).status).toBe(200);expect((await request(app()).post('/auth/logout').set(bearer(expired))).status).toBe(200);expect((await request(app()).get('/auth/me').set(bearer(current))).status).toBe(401);
+ });
+ it('revokes the device session and its refreshed token while preserving another device',async()=>{
+  const current=(await login(true)).body.token,other=(await login(true)).body.token;
+  const refreshed=await request(app()).post('/auth/refresh').set(bearer(current));expect(refreshed.status).toBe(200);
+  expect((await request(app()).post('/auth/logout').set(bearer(current))).status).toBe(200);
+  for(const token of [current,refreshed.body.token]){
+   expect((await request(app()).get('/auth/me').set(bearer(token))).status).toBe(401);
+   expect((await request(app()).get('/auth/companies').set(bearer(token))).status).toBe(401);
+   expect((await request(app()).post('/auth/refresh').set(bearer(token))).status).toBe(401);
+  }
+  expect((await request(app()).get('/auth/me').set(bearer(other))).status).toBe(200);
+  expect((await request(app()).post('/auth/refresh').set(bearer(other))).status).toBe(200);
+ });
+ it('persists cookie-only logout across router instances without storing credentials',async()=>{
+  const first=await login(true),token=first.body.token;
+  expect((await request(app()).post('/auth/logout').set('Cookie',cookieOf(first).split(';')[0])).status).toBe(200);
+  expect((await request(app()).get('/auth/me').set(bearer(token))).status).toBe(401);
+  expect(revoked.size).toBe(1);expect(JSON.stringify([...revoked.values()])).not.toContain(token);
+  expect((await request(app()).post('/auth/logout').set(bearer(token))).status).toBe(200);expect(revoked.size).toBe(1);
+ });
+ it('does not revoke a passive cookie session when another session is selected explicitly',async()=>{
+  const current=await login(true),other=await login(true);
+  const out=await request(app()).post('/auth/logout').set(bearer(current.body.token)).set('Cookie',cookieOf(other).split(';')[0]).send({userId:'forged',sessionId:auth.verifyToken(other.body.token).sessionId});expect(out.status).toBe(200);expect(out.headers['set-cookie']).toBeUndefined();
+  expect((await request(app()).get('/auth/me').set(bearer(current.body.token))).status).toBe(401);
+  expect((await request(app()).get('/auth/me').set(bearer(other.body.token))).status).toBe(200);
+ });
+ it('keeps legacy token refreshes in the same revocable family',async()=>{
+  const token=auth.signToken({userId:'u1',roles:[],permissions:[],departmentIds:[],credentialVersion:'v1'});
+  const refreshed=await request(app()).post('/auth/refresh').set(bearer(token));expect(refreshed.status).toBe(200);
+  expect((await request(app()).post('/auth/logout').set(bearer(token))).status).toBe(200);
+  expect((await request(app()).get('/auth/me').set(bearer(token))).status).toBe(401);
+  expect((await request(app()).get('/auth/me').set(bearer(refreshed.body.token))).status).toBe(401);
+ });
+ it('does not acknowledge server logout when the revocation cannot be persisted',async()=>{
+  const token=(await login(true)).body.token;revocationFailure=true;
+  const res=await request(app()).post('/auth/logout').set(bearer(token));expect(res.status).toBe(503);expect(res.body.ok).toBe(false);
+ });
+});
+it('logout-all invalidates tokens from the same second while allowing a fresh password login',async()=>{
+ vi.useFakeTimers({toFake:['Date']});try{const token=(await login(true)).body.token;expect((await request(app()).post('/auth/logout-all').set(bearer(token))).status).toBe(200);expect((await request(app()).get('/auth/me').set(bearer(token))).status).toBe(401);expect((await request(app()).get('/auth/companies').set(bearer(token))).status).toBe(401);const fresh=await login(true);expect(fresh.status).toBe(200);expect((await request(app()).get('/auth/me').set(bearer(fresh.body.token))).status).toBe(200);}finally{vi.useRealTimers();}
 });
 
 describe('保持登录', () => {

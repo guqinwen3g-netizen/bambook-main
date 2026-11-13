@@ -17,7 +17,8 @@ import { buildLoadedAuthTokenPayload, platformCompanyUser, loadUserWithRoles, se
 import { createLoginRateLimiter } from './loginRateLimiter';
 import { pickRequestToken } from './middleware';
 import { invalidateAccountStatusCache } from './accountStatusGuard';
-import { isTokenRevoked } from './sessionRevocation';
+import { isTokenRevoked,revokeAllSessions } from './sessionRevocation';
+import {createCurrentSessionGuard,currentSessionKey,currentLogoutTarget,issueLogoutTicket,targetFromLogoutTicket,revokeLogoutTarget} from './currentSessionRevocation';
 import { newSession, sessionOf, writeSession, type SessionClaims } from './sessionLifetime';
 
 type AuthRouterOptions = {
@@ -47,6 +48,9 @@ function normalizeLoginIdentifier(value: unknown): string {
 export function createAuthRouter(options: AuthRouterOptions) {
   const router = Router();
   const auth = createAuthService();
+  router.use((_req,res,next)=>{res.set('Cache-Control','private, no-store');next();});
+  router.use(createCurrentSessionGuard(options.prisma,{employeeOnly:true}));
+  const issuedSession=(token:string)=>({token,logoutTicket:issueLogoutTicket(auth,auth.verifyToken(token),token)});
   const email = options.email || createEmailService();
   const verification = options.verification || createVerificationStore();
   router.use('/account-access', accountAccessRouter(options.prisma, { email }));
@@ -206,7 +210,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
     return res.json({
       ok: true,
       user: serializeAuthUser(user, roles, permissions, departmentIds, { companyId: tokenPayload.companyId, newRoleIds, authorizationLoaded: tokenPayload.authorizationLoaded }),
-      token,
+      ...issuedSession(token),
       ...(company ? { company } : {}),
     });
   }
@@ -393,6 +397,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
       return res.json({
         ok: true,
         user: { ...serializeAuthUser(shownUser, roles, permissions, departmentIds, { companyId: tokenPayload.companyId, newRoleIds, authorizationLoaded: tokenPayload.authorizationLoaded, permissionCeiling: payload.permissionCeiling }), ...(tokenPayload.platformCompany ? { platformCompany: tokenPayload.platformCompany } : {}) },
+        logoutTicket:issueLogoutTicket(auth,payload,token),
         ...(company ? { company } : {}),
       });
     } catch {
@@ -407,7 +412,12 @@ export function createAuthRouter(options: AuthRouterOptions) {
     if (!token) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Not logged in.' });
     let prior: ReturnType<typeof auth.verifyToken>;
     try { prior = auth.verifyToken(token); } catch { return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Token expired or invalid.' }); }
-    const rows = await loadCompanyMemberships(prior.userId);
+    let rows:Awaited<ReturnType<typeof loadCompanyMemberships>>;
+    try{
+      const user=await options.prisma.userAccount.findUnique({where:{id:prior.userId},select:{status:true,deletedAt:true,metadata:true}});
+      if(!user||user.status!=='active'||user.deletedAt!=null||isTokenRevoked(user.metadata,(prior as any).iat,prior.credentialVersion))return res.status(401).json({ok:false,error:'SESSION_REVOKED',message:'登录已失效，请重新登录。'});
+      rows=await loadCompanyMemberships(prior.userId);
+    }catch{return res.status(503).json({ok:false,error:'AUTHORIZATION_UNAVAILABLE',message:'暂时无法核验登录状态，请稍后重试。'});}
     return res.json({
       ok: true,
       currentCompanyId: prior.companyId ?? null,
@@ -444,19 +454,32 @@ export function createAuthRouter(options: AuthRouterOptions) {
     if (prior.permissionCeiling !== undefined) current.permissionCeiling = [...prior.permissionCeiling];
     if (isTokenRevoked(user.metadata, (prior as any).iat, prior.credentialVersion)) return res.status(401).json({ ok: false, error: 'SESSION_REVOKED', message: '登录已失效，请重新登录。' });
     let next: string;
-    try { next = writeSession(res, auth, current, sessionOf(prior)); }
+    try { next = writeSession(res, auth, current, sessionOf(prior,token)); }
     catch { res.clearCookie(COOKIE_NAME, { path: '/' }); return res.status(401).json({ ok: false, error: 'SESSION_EXPIRED', message: '登录已超过 90 天，请重新登录。' }); }
     return res.json({
       ok: true,
-      token: next,
+      ...issuedSession(next),
       user: serializeAuthUser(user, current.roles, current.permissions, current.departmentIds, { companyId: current.companyId, newRoleIds: current.roleIds, authorizationLoaded: true }),
       company: { id: membership.company.id, name: membership.company.name, slug: membership.company.slug },
     });
   });
 
-  router.post('/logout', (_req: Request, res: Response) => {
-    res.clearCookie(COOKIE_NAME, { path: '/' });
-    return res.json({ ok: true });
+  router.post('/logout', async (req: Request, res: Response) => {
+    const token=pickRequestToken(req),bearer=pickRequestToken({headers:req.headers});let target:ReturnType<typeof currentLogoutTarget>=null;
+    const ticket=!bearer?req.body?.logoutTicket:undefined;
+    if(ticket!==undefined){try{if(typeof ticket!=='string')throw Error('invalid ticket');target=targetFromLogoutTicket(auth,ticket);}catch{return res.status(400).json({ok:false,error:'INVALID_LOGOUT_TICKET',message:'退出凭据不可用，请重新登录后退出所有设备。'});}}
+    else try{if(token)target=currentLogoutTarget(auth.verifyLogoutToken(token),token);}catch{/* An invalid signature cannot identify a session to revoke. */}
+    try{
+      if(target)await revokeLogoutTarget(options.prisma,target);
+      // An explicit bearer may select an old session while the passive cookie belongs to a newer login.
+      const cookie=req.cookies?.[COOKIE_NAME];let clear=!cookie||(ticket===undefined&&cookie===token);
+      if(!clear)try{clear=!!target&&target.id===currentSessionKey(auth.verifyLogoutToken(cookie),cookie);}catch{clear=true;}
+      if(clear)res.clearCookie(COOKIE_NAME, { path: '/' });
+      return res.json({ ok: true,revokedSession:!!target });
+    }catch(error){
+      logger.warn('[auth] current logout could not be persisted',{error:error instanceof Error?error.message:'unknown'});
+      return res.status(503).json({ok:false,error:'SESSION_REVOCATION_UNAVAILABLE',message:'服务器退出未确认，请重试。'});
+    }
   });
 
   // 退出所有设备：写入 sessionsRevokedAt，此前签发的令牌（含本次请求所用）全部失效。
@@ -471,7 +494,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
       if (!user) return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: 'User not found.' });
       const metadata = (user.metadata && typeof user.metadata === 'object' && !Array.isArray(user.metadata)) ? user.metadata as Record<string, unknown> : {};
       const at = new Date().toISOString();
-      await options.prisma.userAccount.update({ where: { id: userId }, data: { metadata: { ...metadata, sessionsRevokedAt: at } as any } });
+      await options.prisma.userAccount.update({ where: { id: userId }, data: { metadata: revokeAllSessions(metadata,new Date(at)) as any } });
       invalidateAccountStatusCache(userId);
       await options.prisma.auditLog.create({ data: { id: `alog_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, actorId: userId, action: 'logout_all_sessions', targetType: 'UserAccount', targetId: userId, ip: req.ip } });
       res.clearCookie(COOKIE_NAME, { path: '/' });
@@ -549,9 +572,9 @@ export function createAuthRouter(options: AuthRouterOptions) {
       // the old JWT, even if every current role permission has been revoked.
       const current = await buildLoadedAuthTokenPayload(options.prisma, user, prior.companyId ?? null, prior.platformCompany);
       if (prior.permissionCeiling !== undefined) current.permissionCeiling = [...prior.permissionCeiling];
-      const refreshed = writeSession(res, auth, current, sessionOf(prior));
+      const refreshed = writeSession(res, auth, current, sessionOf(prior,token));
       const payload = auth.verifyToken(refreshed);
-      return res.json({ ok: true, user: payload, token: refreshed });
+      return res.json({ ok: true, user: payload,...issuedSession(refreshed) });
     } catch {
       res.clearCookie(COOKIE_NAME, { path: '/' });
       return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Token expired or invalid.' });
@@ -591,19 +614,19 @@ export function createAuthRouter(options: AuthRouterOptions) {
       // 新凭据代次：其他设备上的旧令牌（含同一秒签发的）全部失效，也不能续期复活。
       await options.prisma.userAccount.update({ where: { id: payload.userId }, data: { passwordHash: newHash, metadata: { ...metadata, ...(metadata.forceChangePassword ? { forceChangePassword: false } : {}), credentialVersion: randomUUID(), passwordChangedAt: at, sessionsRevokedAt: at } as any } });
       invalidateAccountStatusCache(payload.userId);
-      let token: string | undefined;
+      let refreshedToken: string | undefined;
       try {
         const loaded = await loadUserWithRoles(options.prisma, payload.userId);
         if (loaded) {
           const current = await buildLoadedAuthTokenPayload(options.prisma, loaded, payload.companyId ?? null, payload.platformCompany);
           if (payload.permissionCeiling !== undefined) current.permissionCeiling = [...payload.permissionCeiling];
-          token = writeSession(res, auth, current, sessionOf(payload));
+          refreshedToken = writeSession(res, auth, current, sessionOf(payload,token));
         }
       } catch (err) {
         logger.error('[auth] change-password token reissue failed', { userId: payload.userId, error: (err as Error).message });
       }
-      if (!token) res.clearCookie(COOKIE_NAME, { path: '/' });
-      return res.json({ ok: true, otherSessionsRevoked: true, ...(token ? { token } : { reloginRequired: true }) });
+      if (!refreshedToken) res.clearCookie(COOKIE_NAME, { path: '/' });
+      return res.json({ ok: true, otherSessionsRevoked: true, ...(refreshedToken ? issuedSession(refreshedToken) : { reloginRequired: true }) });
     } catch (err) {
       logger.error('[auth] change-password failed', { userId: payload.userId, error: (err as Error).message });
       return res.status(500).json({ ok: false, error: 'INTERNAL_ERROR', message: '密码未修改，请稍后重试。' });

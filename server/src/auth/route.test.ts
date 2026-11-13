@@ -4,6 +4,7 @@ import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import { createAuthService } from './service';
 import { createAuthRouter } from './route';
+import {sessionRevocationStore} from './__tests__/sessionRevocationStore';
 
 function authToken() {
   return createAuthService().signToken({
@@ -19,7 +20,7 @@ function makeApp(prisma: any) {
   const app = express();
   app.use(cookieParser());
   app.use(express.json({ limit: '10mb' }));
-  app.use('/auth', createAuthRouter({ prisma, requireEmailVerification: false }));
+  app.use('/auth', createAuthRouter({ prisma:{...prisma,authSessionRevocation:sessionRevocationStore()}, requireEmailVerification: false }));
   return app;
 }
 

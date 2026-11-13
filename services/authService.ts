@@ -1,6 +1,7 @@
 import { getApiBaseUrl, getDefaultBambookEndpoint, normalizeDataCenterEndpoint } from './apiBase';
 import { View } from '../types';
 import { getViewPermission, isAuthenticatedPublicView, isDevOnlyView } from '../lib/modulePermissions';
+import {storeLogoutCapability,queueLogoutCapability,pendingLogoutCapabilities,confirmLogoutCapability,confirmUserLogoutCapabilities,clearActiveLogoutCapability,type LogoutCapability} from './logoutCapabilities';
 
 export type AgentRole = 'owner' | 'admin' | 'manager' | 'merchandiser' | 'finance' | 'sales' | 'viewer' | 'agent_operator';
 
@@ -36,6 +37,7 @@ export interface AuthState {
   user: AuthUser | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  logoutUnconfirmed?: boolean;
 }
 
 type AuthListener = (state: AuthState) => void;
@@ -45,6 +47,10 @@ const initialState: AuthState = { user: null, isLoading: true, isAuthenticated: 
 const listeners = new Set<AuthListener>();
 const AUTH_TOKEN_KEY = 'bambook_auth_token';
 const AUTH_USER_CACHE_KEY = 'bambook_auth_user';
+const AUTH_SIGNED_OUT_KEY='bambook_auth_signed_out';
+type LogoutMarker='pending'|'confirmed';
+function logoutMarkers():Record<string,LogoutMarker>{try{const value=JSON.parse(localStorage.getItem(AUTH_SIGNED_OUT_KEY)||'{}');return value&&typeof value==='object'&&!Array.isArray(value)?value:{};}catch{return{};}}
+function markSignedOut(base:string,state?:LogoutMarker):void{try{const values=logoutMarkers();if(state)values[base]=state;else delete values[base];localStorage.setItem(AUTH_SIGNED_OUT_KEY,JSON.stringify(values));}catch{/* Local state is still cleared when storage is unavailable. */}}
 // 默认认证端点：DEV 闭环本地 8081 后端；PROD 走生产数据中心（与 apiBase 同口径，构建期静态分流）。
 const DEFAULT_AUTH_ENDPOINT = getDefaultBambookEndpoint();
 const AUTH_FETCH_TIMEOUT_MS = 8000;
@@ -226,6 +232,10 @@ export async function checkAuth(): Promise<AuthState> {
   const refresh = ++authRefreshSequence;
   const base = getAuthApiBase();
   const storedToken = getStoredAuthToken();
+  const signedOut=logoutMarkers()[base];
+  if(!storedToken&&(signedOut==='pending'||signedOut==='confirmed')){
+    currentState={user:null,isLoading:false,isAuthenticated:false,...(signedOut==='pending'?{logoutUnconfirmed:true}:{})};notify();return currentState;
+  }
   const isCurrent = () => epoch === authMutationEpoch && refresh === authRefreshSequence
     && storedToken === getStoredAuthToken() && base === getAuthApiBase();
   const canRenderFromCachedUser = currentState.isAuthenticated && Boolean(currentState.user);
@@ -246,6 +256,7 @@ export async function checkAuth(): Promise<AuthState> {
       const data = await readJsonResponse(res);
       if (!isCurrent()) return currentState;
       currentState = { user: normalizeAuthUser(data.user && data.company && !data.user.company ? { ...data.user, company: data.company } : data.user), isLoading: false, isAuthenticated: true };
+      if(currentState.user)storeLogoutCapability(base,data.logoutTicket,currentState.user.id);
       cacheAuthUser(currentState.user);
     } else if (canRenderFromCachedUser && keepCachedAuthOnRefreshFailure(res.status)) {
       currentState = { ...currentState, isLoading: false, isAuthenticated: true };
@@ -350,6 +361,7 @@ export async function registerJoinCompany(input: SelfRegistrationAccount & ({ co
  * 与服务端 Cookie 的持久 / 会话属性一一对应。
  */
 function storeAuthToken(token: string, remember: boolean): void {
+  markSignedOut(getAuthApiBase());
   try { if (remember) localStorage.setItem(AUTH_TOKEN_KEY, token); else localStorage.removeItem(AUTH_TOKEN_KEY); } catch { /* storage restrictions */ }
   try { sessionStorage.setItem(AUTH_TOKEN_KEY, token); } catch { /* storage restrictions */ }
 }
@@ -392,6 +404,7 @@ export async function login(identifier: string, password: string, companyId?: st
   if (data.mfaRequired) throw new Error('登录服务版本未更新，请刷新页面后重试或联系管理员');
   if (data.token) storeAuthToken(data.token, remember);
   const user = normalizeAuthUser(data.user);
+  if(user)storeLogoutCapability(base,data.logoutTicket,user.id);
   currentState = { user, isLoading: false, isAuthenticated: true };
   cacheAuthUser(user);
   notify();
@@ -408,8 +421,11 @@ export async function devLoginAs(token: string, user: AuthUser): Promise<AuthUse
 }
 
 /** 换用服务端刚签发的会话（开发面板切换账号、平台切换管理公司）。 */
-export async function adoptIssuedSession(token: string, user: AuthUser): Promise<AuthUser> {
+export async function adoptIssuedSession(token: string, user: AuthUser,logoutTicket?:string): Promise<AuthUser> {
   authMutationEpoch += 1;
+  markSignedOut(getAuthApiBase());
+  clearActiveLogoutCapability(getAuthApiBase());
+  storeLogoutCapability(getAuthApiBase(),logoutTicket,user.id);
   if (token) {
     localStorage.setItem(AUTH_TOKEN_KEY, token);
     sessionStorage.setItem(AUTH_TOKEN_KEY, token);
@@ -446,17 +462,48 @@ async function fetchAuth(
   }
 }
 
-export async function logout(): Promise<void> {
+type LogoutRequest={base:string;headers:Record<string,string>;capability?:LogoutCapability};
+const unconfirmedLogouts=new Map<string,LogoutRequest>();
+function forgetLocalSession(pending=false):void{
   authMutationEpoch += 1;
-  const logoutBase = getAuthApiBase();
-  localStorage.removeItem(AUTH_TOKEN_KEY);
-  sessionStorage.removeItem(AUTH_TOKEN_KEY);
+  markSignedOut(getAuthApiBase(),pending?'pending':'confirmed');
+  try{localStorage.removeItem(AUTH_TOKEN_KEY);}catch{/* Browser storage may be restricted. */}
+  try{sessionStorage.removeItem(AUTH_TOKEN_KEY);}catch{/* The in-memory identity must still be cleared. */}
   cacheAuthUser(null);
   currentState = { user: null, isLoading: false, isAuthenticated: false };
   notify();
+}
+export async function logout(): Promise<void> {
+  const logoutBase = getAuthApiBase();
+  const token=getStoredAuthToken(),knownUser=!!currentState.user,previousPending=logoutMarkers()[logoutBase]==='pending';
+  const active=queueLogoutCapability(logoutBase,currentState.user?.id),capabilities=pendingLogoutCapabilities(logoutBase);
+  if(!active&&(token||knownUser))unconfirmedLogouts.set(logoutBase,{base:logoutBase,headers:authHeaders()});
+  const legacy=unconfirmedLogouts.get(logoutBase);
+  const requests:LogoutRequest[]=[...capabilities.map(capability=>({base:logoutBase,headers:{'Content-Type':'application/json'},capability})),...(legacy?[legacy]:[])];
+  if(!requests.length)requests.push({base:logoutBase,headers:authHeaders()});
+  const hadTarget=knownUser||!!token||previousPending||currentState.logoutUnconfirmed===true||capabilities.length>0||!!legacy;
+  forgetLocalSession(true);
+  const epoch=authMutationEpoch;
   // Invalidate immediately; a slow logout acknowledgement must never clear a
   // token or user that a newer login has already installed.
-  await fetch(`${logoutBase}/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => undefined);
+  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),15_000);
+  try{
+    let failed=false;
+    for(const request of requests)try{
+      const send=(credentials:RequestCredentials)=>fetch(`${request.base}/auth/logout`, { method: 'POST', credentials,headers:request.headers,signal:controller.signal,...(request.capability?{body:JSON.stringify({logoutTicket:request.capability.ticket})}:{}) });
+      const response=await send('include').catch(failure=>{if(failure instanceof TypeError&&!controller.signal.aborted&&(request.capability||request.headers.Authorization))return send('omit');throw failure;});
+      if(!response.ok)throw Error('unconfirmed');
+      if(hadTarget){const receipt=await readJsonResponse(response);if(receipt.revokedSession!==true)throw Error('unconfirmed');}
+      if(request.capability)confirmLogoutCapability(logoutBase,request.capability);
+      else if(unconfirmedLogouts.get(logoutBase)===request)unconfirmedLogouts.delete(logoutBase);
+    }catch{failed=true;}
+    if(failed||pendingLogoutCapabilities(logoutBase).length||unconfirmedLogouts.has(logoutBase))throw Error('unconfirmed');
+    if(epoch===authMutationEpoch&&logoutBase===getAuthApiBase()&&!getStoredAuthToken()){markSignedOut(logoutBase,'confirmed');currentState={user:null,isLoading:false,isAuthenticated:false};notify();}
+  }catch{
+    if(epoch===authMutationEpoch&&logoutBase===getAuthApiBase()&&!getStoredAuthToken()){currentState={user:null,isLoading:false,isAuthenticated:false,logoutUnconfirmed:true};notify();}
+    throw new Error('服务器退出未确认，请重试。');
+  }
+  finally{clearTimeout(timeout);}
 }
 
 export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
@@ -474,6 +521,7 @@ export async function changePassword(currentPassword: string, newPassword: strin
   if (typeof data.token === 'string' && data.token) {
     authMutationEpoch += 1;
     storeAuthToken(data.token, tokenIsRemembered());
+    if(currentState.user)storeLogoutCapability(getAuthApiBase(),data.logoutTicket,currentState.user.id);
   }
 }
 
@@ -505,7 +553,7 @@ export function renewSessionIfDue(): Promise<boolean> {
       const res = await fetchAuth('/auth/refresh', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, credentials: 'include' }, { fallbackToOmitCredentials: true });
       if (epoch !== authMutationEpoch || base !== getAuthApiBase() || token !== getStoredAuthToken()) return false;
       const data = await readJsonResponse(res).catch(() => ({}));
-      if (res.ok && typeof data.token === 'string' && data.token) { storeAuthToken(data.token, remember); return true; }
+      if (res.ok && typeof data.token === 'string' && data.token) { storeAuthToken(data.token, remember);if(currentState.user)storeLogoutCapability(base,data.logoutTicket,currentState.user.id); return true; }
       if (res.status === 401) await checkAuth();
       return false;
     } catch { return false; }
@@ -516,6 +564,7 @@ export function renewSessionIfDue(): Promise<boolean> {
 
 /** 退出所有设备：服务器使此前签发的全部令牌失效（含当前会话），随后需重新登录。 */
 export async function logoutAllSessions(): Promise<void> {
+  const epoch=++authMutationEpoch,token=getStoredAuthToken(),base=getAuthApiBase(),userId=currentState.user?.id;
   const res = await fetchAuth('/auth/logout-all', {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
@@ -524,6 +573,13 @@ export async function logoutAllSessions(): Promise<void> {
   }, { fallbackToOmitCredentials: true });
   const data = await readJsonResponse(res);
   if (!res.ok) throw new Error(data.message || data.error || `Logout-all failed (HTTP ${res.status})`);
+  // The server already revoked every old credential and cleared its cookie.
+  // A later login owns its own state; never clear it from this older acknowledgement.
+  if(epoch===authMutationEpoch&&token===getStoredAuthToken()&&base===getAuthApiBase()){
+    if(userId)confirmUserLogoutCapabilities(base,userId);
+    unconfirmedLogouts.delete(base);forgetLocalSession(pendingLogoutCapabilities(base).length>0);
+    if(pendingLogoutCapabilities(base).length){currentState={user:null,isLoading:false,isAuthenticated:false,logoutUnconfirmed:true};notify();}
+  }
 }
 
 export async function updateMyProfile(input: { avatarUrl?: string | null; displayName?: string }): Promise<AuthUser> {

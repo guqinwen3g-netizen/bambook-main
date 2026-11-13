@@ -24,15 +24,21 @@ beforeEach(async () => {
     requests.push({ path: url.pathname, method: init.method ?? 'GET', body });
     const special = override?.(url, init); if (special) return special;
     if(url.pathname==='/api/mist/session')return json({message:'Not found'},404);
-    if (url.pathname.endsWith('/auth/logout')) return json({ ok: true });
+    if (url.pathname.endsWith('/auth/logout')) return json({ ok: true,revokedSession:true });
     if (url.pathname.endsWith('/auth/login')) { actor = user(String(body.identifier)); return json({ user: actor, token: `token-${actor.id}` }); }
     if (url.pathname.endsWith('/auth/me')) return actor ? json({ user: actor }) : json({ message: '未登录' }, 401);
     throw new Error(`Unexpected test request: ${url.pathname}`);
   }));
-  await auth.logout(); requests = [];
+  await auth.logout();localStorage.removeItem('bambook_auth_signed_out'); requests = [];
 });
 afterEach(() => { if (root) act(() => root!.unmount()); host?.remove(); root = undefined; host = undefined; vi.unstubAllGlobals(); });
 describe('Mist session adapter with production auth service', () => {
+  it('keeps an explicit confirmed logout anonymous instead of restoring a surviving cookie',async()=>{
+    await auth.login('signed-out','password');await auth.logout();requests=[];await mount();await waitFor(()=>expect(session.status).toBe('anonymous'));expect(requests.map(r=>r.path)).toEqual(['/api/mist/session']);expect(session.user).toBeNull();
+  });
+  it('retains an unconfirmed logout and supports retry without passive cookie restoration',async()=>{
+    await auth.login('signed-out','password');override=url=>url.pathname.endsWith('/auth/logout')?Promise.reject(new TypeError('offline')):null;await expect(auth.logout()).rejects.toThrow('服务器退出未确认');override=undefined;requests=[];await mount();await waitFor(()=>expect(session.status).toBe('anonymous'));expect(session.error).toContain('服务器退出未确认');expect(requests.some(r=>r.path.endsWith('/auth/me'))).toBe(false);await act(async()=>session.logout());expect(session.error).toBe('');expect(session.user).toBeNull();
+  });
   it('retries an unverified discovery into company authentication only after a confirmed server response',async()=>{
     override=url=>url.pathname==='/api/mist/session'?Promise.resolve(json({message:'Service unavailable'},503)):null;
     await mount();await waitFor(()=>expect(session.status).toBe('anonymous'));
@@ -106,7 +112,7 @@ describe('Mist session adapter with production auth service', () => {
     const response = deferred<Response>(); override = url => url.pathname.endsWith('/auth/logout') ? response.promise : null;
     let logout!: Promise<void>; act(() => { logout = session.logout(); });
     await act(async () => session.login('second', 'password'));
-    await act(async () => response.resolve(json({ ok: true }))); await logout;
+    await act(async () => response.resolve(json({ ok: true,revokedSession:true }))); await logout;
     expect(session.user?.id).toBe('second'); expect(session.status).toBe('authenticated'); expect(localStorage.getItem('bambook_auth_token')).toBe('token-second');
   });
   it('uses session-only token persistence when keep-login is unchecked', async () => {

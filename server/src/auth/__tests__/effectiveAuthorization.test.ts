@@ -10,6 +10,7 @@ import request from 'supertest';
 import bcrypt from 'bcryptjs';
 import { describe, expect, it, vi } from 'vitest';
 import { createAuthRouter } from '../route';
+import {sessionRevocationStore} from './sessionRevocationStore';
 import { createAuthService, type TokenPayload } from '../service';
 import { createPermissionService, hasScope } from '../permissionService';
 import { buildAuthTokenPayload, buildLoadedAuthTokenPayload, serializeAuthUser } from '../tokenHelpers';
@@ -29,6 +30,7 @@ function database(roleId = 'role-sales', scopes: string[] = ['orders:read'], gra
       isSystem: roleId === 'role-sales', permissions: scopes.map(scope => ({ permission: { scope } })) } }],
   };
   const prisma: any = {
+    authSessionRevocation:sessionRevocationStore(),
     userAccount: {
       findFirst: vi.fn(async () => user),
       findUnique: vi.fn(async (query: any) => {

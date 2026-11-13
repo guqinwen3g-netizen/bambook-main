@@ -50,9 +50,9 @@ describe('落点普查 · 不许留第二份顺序', () => {
     expect(routeSrc.match(/req\.cookies\?\.\[COOKIE_NAME\] \|\| bearer/g)?.length ?? 0).toBe(0);
   });
 
-  it('原三处、refresh、退出所有设备、公司列表与切换公司都调用同一份实现', () => {
-    // 两步验证接口退役后保留 7 处；公司列表与切换公司仍只走 pickRequestToken。
-    expect(routeSrc.match(/pickRequestToken\(req\)/g)?.length ?? 0).toBe(7);
+  it('原三处、refresh、当前设备及所有设备退出、公司列表与切换公司都调用同一份实现', () => {
+    // 当前设备退出也必须沿同一凭据选择规则，不以被动 cookie 覆盖显式身份。
+    expect(routeSrc.match(/pickRequestToken\(req\)/g)?.length ?? 0).toBe(8);
   });
 
   it('中间件自己也住在这份实现里（规则不再散在两个文件）', () => {
@@ -102,10 +102,12 @@ describe('Verified JWT identity and trusted same-subject loaded authorization', 
     });
   });
 
-  it('the extractor returns the same trusted object, including the marker, after verifying its JWT subject', () => {
+  it('the extractor retains current grants and binds the verified session without mutating the trusted snapshot', () => {
     const current = loadedActor();
-    const req = { ...reqWith(signActor()), actor: current };
-    expect(extractActorFromRequest(req)).toBe(current);
+    const token=signActor({sessionId:'verified-device',authTime:100,credentialVersion:'signed-version'}),req = { ...reqWith(token), actor: current };
+    const result=extractActorFromRequest(req);
+    expect(result).toMatchObject({userId:current.userId,permissions:current.permissions,roles:current.roles,authorizationLoaded:true,sessionId:'verified-device',authTime:100,credentialVersion:'signed-version'});
+    expect(current.sessionId).toBeUndefined();
   });
 
   it('requireRole uses a current revoked role rather than granting the legacy JWT role again', async () => {

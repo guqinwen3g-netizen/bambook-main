@@ -17,6 +17,7 @@ export interface MistSession {
   /** Opaque invalidation key. Never contains tokens, endpoints or user data. */
   sessionKey: string;
   error: string;
+  logoutUnconfirmed?:boolean;
   refreshing: boolean;
   signingIn: boolean;
   signingOut: boolean;
@@ -39,7 +40,8 @@ const AUTH_TOKEN_KEY = 'bambook_auth_token';
 // The user cache is a startup/display aid, never an authentication signal.
 // Treating its writes/removals as credential changes makes signed-in and guest
 // tabs revalidate each other indefinitely and retires an in-progress login.
-const SESSION_STORAGE_KEYS = new Set([AUTH_TOKEN_KEY, 'panda_system_config', 'cloudEndpoint']);
+const AUTH_SIGNED_OUT_KEY='bambook_auth_signed_out';
+const SESSION_STORAGE_KEYS = new Set([AUTH_TOKEN_KEY,AUTH_SIGNED_OUT_KEY, 'panda_system_config', 'cloudEndpoint']);
 /** 使用中续期的检查间隔；只有令牌已用过约一天时才真正请求换发。 */
 const RENEW_CHECK_MS = 10 * 60 * 1000;
 
@@ -122,6 +124,7 @@ function ProductionMistSessionProvider({ children }: { children: React.ReactNode
     void revalidate(true);
     const onStorage = (event: StorageEvent) => {
       if (event.key !== null && !SESSION_STORAGE_KEYS.has(event.key)) return;
+      if(event.key===AUTH_SIGNED_OUT_KEY){verificationBaseline.current=undefined;void revalidate(false);return;}
       // Even A→B→A storage events retire the previous page's requests.
       setRevision(value => value + 1);
       commandSequence.current += 1; setSigningIn(false); setSigningOut(false);
@@ -195,7 +198,7 @@ function ProductionMistSessionProvider({ children }: { children: React.ReactNode
   const canAccessView = React.useCallback((view: View) => publicStatus.current === 'authenticated' && authCanAccessView(view), []);
   const hasPermission = React.useCallback((...permissions: string[]) => publicStatus.current === 'authenticated' && authHasPermission(...permissions), []);
   const hasRole = React.useCallback((...roles: AgentRole[]) => publicStatus.current === 'authenticated' && authHasRole(...roles), []);
-  const value: MistSession = { status, user: status === 'authenticated' ? auth.user : null, sessionKey: `${instanceId}:${revision}`, error, refreshing, signingIn, signingOut, login, logout, refresh, clearError, canAccessView, hasPermission, hasRole };
+  const value: MistSession = { status, user: status === 'authenticated' ? auth.user : null, sessionKey: `${instanceId}:${revision}`, error:error||(auth.logoutUnconfirmed?'服务器退出未确认，请重试。':''),logoutUnconfirmed:auth.logoutUnconfirmed===true, refreshing, signingIn, signingOut, login, logout, refresh, clearError, canAccessView, hasPermission, hasRole };
   return <SessionContext.Provider value={value}>{uiText(children)}</SessionContext.Provider>;
 }
 

@@ -49,7 +49,7 @@ export function AccountPage() {
         {section==='connections'&&<FormSection title={uiText('Agent 连接')}><AgentConnections/><AgentIdentities/></FormSection>}
         {section === 'security' && <FormSection title={uiText('安全')}>
           {!session.localMode && <><ChangePasswordRow /><LogoutAllRow />
-            <SettingRow title={uiText('当前设备')} control={<Button icon={LogOut} loading={session.signingOut} onClick={() => void session.logout().catch(failure => toast(failure instanceof Error ? failure.message : '退出失败', 'bad'))}>{uiText('退出登录')}</Button>} />
+            <SettingRow title={uiText('当前设备')} control={<Button icon={LogOut} loading={session.signingOut} onClick={() => void session.logout().catch(()=>undefined)}>{uiText('退出登录')}</Button>} />
           </>}
           {session.localMode && <Button loading={session.refreshing} onClick={() => void session.refresh()}>{uiText('重新进入本地身份')}</Button>}
         </FormSection>}

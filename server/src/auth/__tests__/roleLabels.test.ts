@@ -3,6 +3,7 @@ import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { beforeEach, expect, it } from 'vitest';
 import { createAuthRouter } from '../route';
+import {sessionRevocationStore} from './sessionRevocationStore';
 import { createAuthService } from '../service';
 import { buildAuthTokenPayload, serializeAuthUser } from '../tokenHelpers';
 
@@ -16,6 +17,7 @@ const assigned = (id: string, name: string) => ({ roleId: id, departmentId: 'com
 function storage() {
   const rows = new Map([[own.id, own], [other.id, other]]);
   return {
+    authSessionRevocation:sessionRevocationStore(),
     userAccount: {
       findUnique: async ({ where }: any) => structuredClone(rows.get(where.id) || null),
       update: async ({ where, data }: any) => { const row = rows.get(where.id); if (!row) throw new Error('missing own user'); updates.push(structuredClone(data)); Object.assign(row, data); return structuredClone(row); },
