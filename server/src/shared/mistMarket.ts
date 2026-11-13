@@ -214,6 +214,11 @@ export function quoteLineFamily(state:{devs:Array<{id:string;values:{domain?:'fa
 export function quoteUnitOptions(family:QuoteFamily|undefined):readonly string[]|undefined{return family?QUOTE_UNITS[family]:undefined;}
 /** 单位对该板块合法时原样返回，否则返回空（留空由人工选择）。 */
 export function legalQuoteUnit(family:QuoteFamily|undefined,unit:string|undefined):string{const options=quoteUnitOptions(family),u=(unit||'').trim();return !options||options.includes(u)?u:'';}
+/** Archive unit cost is usable only on the same currency and pricing unit; no implicit FX or unit conversion. */
+export function quotationProductCost(product:Pick<MarketProduct,'cost'|'currency'|'unit'>|undefined,quoteCurrency:string,quoteUnit:string):string|null{
+ if(!product||product.currency!==quoteCurrency.trim().toUpperCase()||!quoteUnit.trim()||product.unit.trim()!==quoteUnit.trim())return null;
+ try{return decimal(product.cost,'产品成本',4).minor>BigInt(0)?product.cost:null;}catch{return null;}
+}
 /** 客户专属开发案（开发案有客户）只能报给该客户；与转订单校验（mistOrderSource）同一口径，避免报价走完审批、发送、接受后才在转单时被拒。 */
 export function quoteSourceCustomerProblem(root:Pick<MistState,'devs'>,customerId:string,sourceDevId:string,label:string):string|null{const d=sourceDevId?root.devs.find(x=>x.id===sourceDevId):undefined;return d?.customerId&&d.customerId!==customerId?`条目「${label}」的来源开发案 ${d.code} 属于 ${d.customer||'其他客户'}，不能报给本报价客户`:null;}
 function sourceLine(root:MistState,m:MarketState,input:Omit<MarketQuoteLine,'id'|'amount'>,ctx:MistContext,quoteCurrency:string,customerId:string):MarketQuoteLine{
@@ -223,10 +228,10 @@ function sourceLine(root:MistState,m:MarketState,input:Omit<MarketQuoteLine,'id'
  validateSource(root,sourceDevId,sourceVersionId);
  {const p=quoteSourceCustomerProblem(root,customerId,sourceDevId,String(input.name||input.style||''));if(p)fail(p,'PRECONDITION');}
  const price=decimal(input.price,'单价').text,qty=decimal(input.qty,'数量',4,true).text,product=productId?find(m.products,productId,'产品'):undefined;
- const costBasis=product&&product.currency===quoteCurrency&&decimal(product.cost,'产品成本').minor>BigInt(0)?'product':'unverified';
- const cost=costBasis==='product'?product!.cost:input.cost?decimal(input.cost,'参考成本价',4).text:'';
  const unit=str(input.unit,'单位'),family=quoteLineFamily(root,m,{productId,sourceDevId}),units=quoteUnitOptions(family);
  if(units&&!units.includes(unit))fail(`${QUOTE_FAMILY_LABEL[family!]}条目「${str(input.name,'品名')}」计价单位只能是 ${units.join(' / ')}，不能用“${unit}”；不自动换算`);
+ const productCost=quotationProductCost(product,quoteCurrency,unit),costBasis=productCost!==null?'product':'unverified';
+ const cost=productCost??(input.cost?decimal(input.cost,'参考成本价',4).text:'');
  const name=str(input.name,'品名'),specs=family?normalizeQuoteSpecs(family,(input as {specs?:unknown}).specs,QUOTE_UNITS[family],name,fail):{};
  return {id:ctx.id(),productId,sourceDevId,sourceVersionId,name,style:str(input.style,'款号'),specification:str(input.specification,'规格',false),qty,unit,price,cost,costBasis,amount:marketLineAmount(qty,price),...(Object.keys(specs).length?{specs}:{}),family:family||null};
 }

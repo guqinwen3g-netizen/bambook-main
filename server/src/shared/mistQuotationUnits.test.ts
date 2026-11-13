@@ -11,6 +11,16 @@ const line=(source:{productId?:string;sourceDevId?:string;sourceVersionId?:strin
 const save=(s:MistState&{market:MarketState},ctx:MistContext,lines:ReturnType<typeof line>[])=>run(s,{type:'market.quotation.save',payload:{input:{...header,lines,fileIds:[],note:''}}},ctx);
 
 describe('BB-QUO-1 quotation pricing units',()=>{
+ it('does not treat archive cost per metre as verified cost per yard or kilogram',()=>{
+  const {ctx,s}=setup(),id=product(s,ctx,'fabric','米');
+  for(const unit of ['码','公斤']){
+   const qid=save(s,ctx,[line({productId:id},unit)]).id;
+   const q=s.market.quotations.find(q=>q.id===qid)!;
+   expect(q.lines[0]).toMatchObject({unit,cost:'',costBasis:'unverified'});
+  }
+  const qid=save(s,ctx,[{...line({productId:id},'码'),cost:'0.9144'}]).id;
+  expect(s.market.quotations.find(q=>q.id===qid)!.lines[0]).toMatchObject({unit:'码',cost:'0.9144',costBasis:'unverified'});
+ });
  it('only accepts 米 / 码 / 公斤 for fabric and 件 / 套 for garment product lines',()=>{
   const {ctx,s}=setup(),fabric=product(s,ctx,'fabric','米'),garment=product(s,ctx,'garment','件');
   expect(()=>save(s,ctx,[line({productId:fabric},'件')])).toThrow(/面料条目「条目」计价单位只能是 米 \/ 码 \/ 公斤/);
