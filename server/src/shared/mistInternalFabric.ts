@@ -35,7 +35,7 @@ export type MaterialDeliveryLink = {
   receivingChecks?: MaterialReceivingCheck[];
 };
 export type MaterialReceivingCheck = { id: string; acceptedQuantity: string; rejectedQuantity: string; previousQuantity: string; previousRejected: string; at: string; actorId: string; actor: string; evidence: string };
-export type MaterialDeliveryRow = { id: string; kind: 'issue' | 'direct'; purchaseId: string; sourcePurchaseCode?:string; quantity: string; outstanding: string; accepted: string; rejected: string; pending: string; returned: string; unit: string; at: string; location: string; evidence: string; delivery: MaterialDeliveryLink };
+export type MaterialDeliveryRow = { id: string; kind: 'issue' | 'direct'; purchaseId: string; sourcePurchaseCode?:string; fileIds?:string[]; quantity: string; outstanding: string; accepted: string; rejected: string; pending: string; returned: string; unit: string; at: string; location: string; evidence: string; delivery: MaterialDeliveryLink };
 export const GARMENT_FULFILLMENT_LABELS: Record<GarmentFulfillmentMode, string> = { cmt: '纯 CMT', trims_cmt: '辅料 + CMT', full_package: '全包' };
 export const CMT_INCLUDED_ITEM_LABELS: Record<CmtIncludedItem, string> = { trims: '辅料', packaging: '包装' };
 export const MATERIAL_KIND_LABELS: Record<MistMaterialKind, string> = { fabric: '面料', greige: '坯布 / 纱线', trims: '辅料', packaging: '包装', other: '其他原料' };
@@ -301,7 +301,7 @@ export function materialDeliveryRows(root: MistState): MaterialDeliveryRow[] {
     const allReturned = (r.returns || []).filter(row => !row.reversed).reduce((sum, row) => sum + quantityMinor(row.quantity), BigInt(0));
     const receiverReturned = allReturned > senderRejected ? allReturned - senderRejected : BigInt(0);
     const returned = receiverReturned < rejected ? receiverReturned : rejected;
-    result.push({ id: r.id, kind: 'direct', purchaseId: p.id, quantity: metresText(quantity), outstanding: metresText(quantity - returned), accepted: metresText(accepted), rejected: metresText(rejected), pending: metresText(quantity - accepted - rejected), returned: metresText(returned), unit: p.unit, at: r.date, location: r.location, evidence: r.evidence, delivery });
+    result.push({ id: r.id, kind: 'direct', purchaseId: p.id, ...(r.fileIds?.length?{fileIds:[...r.fileIds]}:{}), quantity: metresText(quantity), outstanding: metresText(quantity - returned), accepted: metresText(accepted), rejected: metresText(rejected), pending: metresText(quantity - accepted - rejected), returned: metresText(returned), unit: p.unit, at: r.date, location: r.location, evidence: r.evidence, delivery });
   }
   return result;
 }

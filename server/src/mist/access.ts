@@ -3,7 +3,7 @@ import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
 import type { PermissionScope } from '../_shared/rolePermissionMatrix';
 import { emailVisibleScope } from '../shared/mistEmail';
-import { applyDataScope, scopedHiddenFiles, type MistDataScope } from '../shared/mistDataScope';
+import { applyDataScope, scopedHiddenFiles, scopedMaterialDeliveryFileIds, type MistDataScope } from '../shared/mistDataScope';
 import type { MistCalendarEvent, MistState, MistTask, MistWorkspaceMember, MistWorkspaceMemberLog, MistWorkspaceAccess as SharedAccess } from '../shared/mistWorkspace';
 import { MIST_BUSINESS_GROUPS, MIST_BUSINESS_GROUP_LABEL, type MistOwnedObject } from '../shared/mistAccounts';
 import { accountHandovers, type MistAccountHandover } from '../shared/mistHandover';
@@ -293,7 +293,8 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
   for (const id of projectSeals(state, next, actor.userId, maintainer, (actor as { actorKind?: unknown }).actorKind === 'agent')) restrictedFiles.add(id);
   // Re-uploading identical bytes does not remove an existing source restriction.
   for (const id of restrictedSensitiveFiles(state, actor, ownerId, privacy)) restrictedFiles.add(id);
-  next.files = visibleFiles(state, next, actor.userId, ownerId).filter(file => !restrictedFiles.has(file.id));
+  const handoffFiles=scope&&hasScope(actor,'orders:read')&&hasScope(actor,'orders:write')?scopedMaterialDeliveryFileIds(state,scope,actor.userId):new Set<string>();
+  next.files = visibleFiles(state, next, actor.userId, ownerId,handoffFiles).filter(file => !restrictedFiles.has(file.id));
   const costVisible=hasScope(actor,'reports:admin')&&!hidden.some(s=>['orders','procurement','receivables','payables'].includes(s.key));
   return { state: next, hidden,...(costVisible?{costMaterialBasis:scope ? null : financialMaterialCostBasis(state)}:{}) };
 }
@@ -309,9 +310,9 @@ function referencedFiles(state: MistState): Set<string> {
   return found;
 }
 /** 已引用附件须有可见来源；尚未引用的附件只给上传人/公司所有者。 */
-function visibleFiles(full: MistState, projected: MistState, actorId: string, ownerId?: string) {
+function visibleFiles(full: MistState, projected: MistState, actorId: string, ownerId?: string,extra:ReadonlySet<string>=new Set()) {
   const visible = referencedFiles(projected), referenced = referencedFiles(full);
-  return (full.files || []).filter(file => visible.has(file.id) || !referenced.has(file.id) && (actorId === ownerId || file.uploadedBy === actorId));
+  return (full.files || []).filter(file => visible.has(file.id) || extra.has(file.id) || !referenced.has(file.id) && (actorId === ownerId || file.uploadedBy === actorId));
 }
 export function canReadFile(state: MistState, actor: TokenPayload, fileId: string, empty: () => MistState, ownerId?: string, scope?: MistDataScope, privacy?: FilePrivacyContext) {
   return projectState(state, actor, empty, ownerId, scope, privacy).state.files.some(file => file.id === fileId);

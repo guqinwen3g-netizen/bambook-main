@@ -45,7 +45,7 @@ import { auditFromReceipt, auditMatchesParent, auditEntry, projectAgentAudit, re
 import { markAgentProposalConfirmed, agentCommandRisk, AI_WRITE_SCOPES, AGENT_RISK_LABEL } from '../shared/mistAgentProposals';
 import { listConversationMeta, saveConversationMeta } from './agentConversations';
 import { AUTOMATION_FAILURE_LIMIT, AUTOMATION_FAILURE_SPAN_MS, automationInstructions, automationOverLimit, automationRecord, automationView, dueAutomations, evaluateAutomation, listAutomations, recordAutomationRun, removeAutomation, saveAutomation, writeAutomation, type AutomationDecision, type AutomationRecord } from './agentAutomations';
-import { canGenerateScopedStatement, scopedMaterialIssueTargets, scopedFabricAccess, scopedFabricDestinations, scopedReferenceViolation, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
+import { canGenerateScopedStatement, scopedMaterialIssueTargets, scopedMaterialDeliveryTargets, scopedFabricAccess, scopedFabricDestinations, scopedReferenceViolation, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
 import { buildTeamScopeGraph, resolveTeamScope, normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
 import { accountOwnedObjects, buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
 import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../auth/tokenHelpers';
@@ -398,10 +398,11 @@ export class MistRepository {
     }
     const access: MistWorkspaceAccess = { role: owner ? 'owner' : 'member', canManageMembers: owner && !company, canManageCompany: company ? canMaintainCompany(actor) : owner, ...(company ? { companyLibrary: true, teamViews } : {}), ...(scopeOf(row) ? {manageableCustomerIds: (row.state.customers??[]).filter(customer=>scopeOf(row)!.userIds.includes(customer.ownerId)).map(customer=>customer.id)} : {}), hidden: projected.hidden.map(s => ({ key: s.key, label: s.label, permissions: [...s.permissions] })) };
     const scope=scopeOf(row), materialIssueTargets=scope&&hasScope(actor,'inventory:read')&&hasScope(actor,'inventory:write')?scopedMaterialIssueTargets(row.state,scope):undefined;
+    const directTargets=scope&&hasScope(actor,'procurement:read')&&hasScope(actor,'procurement:write')?Object.fromEntries(Object.entries(scopedMaterialDeliveryTargets(row.state,scope)).filter(([id])=>projected.state.fulfillment.purchases.some(p=>p.id===id))):undefined;
     const financialDisposals=hasScope(actor,'invoices:read')&&hasScope(actor,'vouchers:read')&&hasScope(actor,'procurement:read')?financialDisposalViews(row.state,new Set((projected.state.fulfillment?.purchases||[]).map(p=>p.id))):undefined;
     const fabricAccess=scope&&hasScope(actor,'orders:read')&&hasScope(actor,'orders:write')?scopedFabricAccess(row.state,scope,actor.userId,actor.displayName||actor.userId,hasScope(actor,'production:read')&&hasScope(actor,'products:read')&&hasScope(actor,'qc:read')):undefined;
     const fabricDestinations=scope&&hasScope(actor,'orders:read')?scopedFabricDestinations(row.state,scope):undefined;
-    return { ...publicWorkspace({ ...row, state: projected.state }), access,...(projected.costMaterialBasis!==undefined?{costMaterialBasis:projected.costMaterialBasis}:{}),...(materialIssueTargets?{materialIssueTargets}:{}),...(financialDisposals?{financialDisposals}:{}),...(fabricAccess?{scopedFabricAccess:fabricAccess}:{}),...(fabricDestinations?{scopedFabricDestinations:fabricDestinations}:{}) };
+    return { ...publicWorkspace({ ...row, state: projected.state }), access,...(projected.costMaterialBasis!==undefined?{costMaterialBasis:projected.costMaterialBasis}:{}),...(materialIssueTargets?{materialIssueTargets}:{}),...(directTargets?{materialDeliveryTargets:directTargets}:{}),...(financialDisposals?{financialDisposals}:{}),...(fabricAccess?{scopedFabricAccess:fabricAccess}:{}),...(fabricDestinations?{scopedFabricDestinations:fabricDestinations}:{}) };
   }
   async list(prior: TokenPayload) { return this.transact(async db => { if(isAgentActor(prior)&&prior.agentWorkspaceId){const {row,actor}=await this.own(db,prior,prior.agentWorkspaceId);return[await this.preparedView(db,row,actor)];}const actor = await this.authorize(db, prior); const rows: MistWorkspaceRow[] = await db.mistWorkspace.findMany({ where: this.accessibleWhere(actor), orderBy: { updatedAt: 'desc' } }); const out = []; for (const row of rows.filter(row=>this.accessible(row,actor))) { if (companyRow(row)) { await applyCompanyRoster(db, row, row.companyId!); const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); OWN_TEAMS.set(row, scope?.teamIds ?? await companyTeamIds(db, row.companyId!, actor.userId)); } this.contract.normalizeMistState?.(row.state,this.context(actor)); out.push(await this.preparedView(db,row,actor)); } return out; }); }
   /** 公司会话只看本公司唯一的库；本机空间看自己拥有或被授权的。 */
@@ -963,12 +964,14 @@ export class MistRepository {
         const scopeManagement = input.command?.type?.startsWith('teamScope.') || REVIEW_KIND_BY_COMMAND.has(input.command?.type);
         const crossIssue=input.command?.type==='fulfillment.materials.issue'?input.command.payload:undefined;
         const crossTarget=earlyScope&&crossIssue&&scopedMaterialIssueTargets(row.state,earlyScope)[crossIssue.id]?.some(option=>option.value===crossIssue.targetProductionId)?crossIssue.targetProductionId:undefined;
+        const directHandoff=input.command?.type==='fulfillment.materials.deliver'||input.command?.type==='fulfillment.procurement.receive'&&input.command.payload.destination==='supplier'?input.command.payload:undefined;
+        const crossDirectTarget=earlyScope&&directHandoff&&hasScope(actor,'procurement:read')&&hasScope(actor,'procurement:write')&&scopedMaterialDeliveryTargets(row.state,earlyScope)[directHandoff.id]?.some(option=>option.value===directHandoff.targetProductionId)?directHandoff.targetProductionId:undefined;
         const fabricAccess=earlyScope&&hasScope(actor,'orders:read')&&hasScope(actor,'orders:write')?scopedFabricAccess(row.state,earlyScope,actor.userId,actor.displayName||actor.userId):undefined;
         const allocating=input.command?.type==='order.fabric.allocate'?input.command.payload:undefined;
         const fabricCandidate=allocating&&fabricAccess?.[allocating.lineId]?.candidates.find(c=>c.fabricOrderId===allocating.fabricOrderId&&c.fabricLineId===allocating.fabricLineId&&row.state.orderLines.some(l=>l.id===allocating.lineId&&l.orderId===allocating.orderId));
         const confirming=input.command?.type==='fulfillment.materials.confirm'?input.command.payload:undefined;
-        const incoming=confirming?.kind==='issue'?Object.values(fabricAccess||{}).flatMap(a=>a.deliveries).find(d=>d.id===confirming.id):undefined;
-        const crossRefs=new Set([...(crossTarget?[crossTarget]:[]),...(fabricCandidate?[fabricCandidate.fabricOrderId,fabricCandidate.fabricLineId]:[]),...(incoming?[incoming.id]:[])]);
+        const incoming=confirming?Object.values(fabricAccess||{}).flatMap(a=>a.deliveries).find(d=>d.id===confirming.id&&d.kind===confirming.kind):undefined;
+        const crossRefs=new Set([...(crossTarget?[crossTarget]:[]),...(crossDirectTarget?[crossDirectTarget]:[]),...(fabricCandidate?[fabricCandidate.fabricOrderId,fabricCandidate.fabricLineId]:[]),...(incoming?[incoming.id]:[])]);
         if (earlyScope && !scopeManagement && scopedReferenceViolation(row.state, earlyScope, input.command?.payload, ['market.quotation.save','order.create','order.governance.saveDraft'].includes(input.command?.type),crossRefs)) fail('NOT_FOUND', '来源记录不存在或不在当前账号的业务范围内', 404);
         if(upload&&input.claimId!==undefined)activeUploadClaim(row.state,input.claimId);
         const context = this.context(actor, input.command?.type?.startsWith('email.') ? undefined : row.state);
@@ -1113,7 +1116,7 @@ export class MistRepository {
         // 行级范围写侧：受限岗位不能改看不到的业务，也不能在看不到的业务下新建。
         const incomingSource=incoming&&row.state.fulfillment.purchases.find(p=>p.id===incoming.purchaseId);
         const internalIncoming=['order.internal.receive','order.internal.reverseCheck'].includes(input.command?.type)?row.state.internalDeliveries?.find(d=>d.id===input.command.payload.id&&d.receiverId===actor.userId):undefined;
-        const scope = scopeOf(row), violation = scope ? scopedWriteViolation(row.state, applied.state, scope, incoming&&incomingSource?{issueId:incoming.id,sourceOrderId:incomingSource.orderId}:undefined,internalIncoming?{deliveryId:internalIncoming.id,sourceOrderId:internalIncoming.orderId}:undefined) : null;
+        const scope = scopeOf(row), violation = scope ? scopedWriteViolation(row.state, applied.state, scope, incoming&&incomingSource?{...(incoming.kind==='issue'?{issueId:incoming.id}:{receiptId:incoming.id,purchaseId:incoming.purchaseId,actorId:actor.userId}),sourceOrderId:incomingSource.orderId}:undefined,internalIncoming?{deliveryId:internalIncoming.id,sourceOrderId:internalIncoming.orderId}:undefined) : null;
         if (violation) fail('NOT_FOUND', '记录不存在或不在当前账号的业务范围内', 404);
         if (concurrent) {
           if (!changeKeys) fail('REVISION_CONFLICT', '公司已被他人更新，本次修改范围过大无法自动合并，请刷新后重试', 409);

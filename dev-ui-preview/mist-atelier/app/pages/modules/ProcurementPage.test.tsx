@@ -9,7 +9,7 @@ import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentPurchase} from '../../../../../server/src/shared/mistFulfillment';
 import {Nav} from '../../nav';
-const store=vi.hoisted(()=>({state:null as MistState|null,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
+const store=vi.hoisted(()=>({state:null as MistState|null,workspace:null as any,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
 const session=vi.hoisted(()=>({id:'buyer',denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:session.id,displayName:'经办人'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
@@ -37,6 +37,14 @@ it('generates supplier PDFs through the server and keeps archived files availabl
   expect(host.textContent).toContain('合同文件');expect(host.textContent).toContain('PO-V1-01.pdf');
   expect(queryByRole(host,'button',{name:'下载批准单据'})).toBeNull();
 });
+function scopedHandoffFixture(){const f=materialDeliveryFixture(20,false);store.state=f.state;store.state.orders=store.state.orders.filter(o=>o.id===f.source.orderId);store.state.orderLines=store.state.orderLines.filter(l=>l.orderId===f.source.orderId);store.state.productions=store.state.productions.filter(p=>p.id!==f.productionId);store.state.fulfillment.purchases=store.state.fulfillment.purchases.filter(p=>p.id===f.purchaseId);return f;}
+it('uses the scoped direct handoff options without needing the destination order or contract in state',async()=>{
+ const f=scopedHandoffFixture();
+ store.workspace={id:'workspace',materialDeliveryTargets:{[f.purchaseId]:[{value:f.productionId,label:'PO-CMT · 接收工厂 · 可发20米',remaining:'20'}]}};render(f.purchaseId);await click(getByRole(host,'button',{name:'登记本次交付',exact:true}));const d=getByRole(document.body,'dialog',{name:'登记收料'}),path=getByRole(d,'combobox',{name:'交付路径'}) as HTMLSelectElement;act(()=>{path.value='supplier';path.dispatchEvent(new Event('change',{bubbles:true}));});const target=getByRole(d,'combobox',{name:'直送加工单'}) as HTMLSelectElement;expect([...target.options].map(o=>o.value)).toContain(f.productionId);act(()=>{target.value=f.productionId;target.dispatchEvent(new Event('change',{bubbles:true}));});typeInto(getByRole(d,'spinbutton',{name:'接收数量（米）'}) as HTMLInputElement,'5');typeInto(getByRole(d,'textbox',{name:'点数与交接依据'}) as HTMLTextAreaElement,'DO-A');await click(getByRole(d,'button',{name:'登记本次交付',exact:true}));expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.materials.deliver',payload:expect.objectContaining({id:f.purchaseId,quantity:5,targetProductionId:f.productionId})}));
+});
+it('blocks a scoped direct handoff while preserving the source quality gate',async()=>{
+ const f=scopedHandoffFixture();store.workspace={id:'workspace',materialDeliveryTargets:{[f.purchaseId]:[{value:f.productionId,label:'PO-CMT · 接收工厂',remaining:'20',blocker:'来源面料生产QC未通过'}]}};render(f.purchaseId);await click(getByRole(host,'button',{name:'登记本次交付',exact:true}));const d=getByRole(document.body,'dialog',{name:'登记收料'}),target=getByRole(d,'combobox',{name:'直送加工单'}) as HTMLSelectElement,option=[...target.options].find(o=>o.value===f.productionId)!;expect(option.textContent).toContain('来源面料生产QC未通过');const path=getByRole(d,'combobox',{name:'交付路径'}) as HTMLSelectElement;act(()=>{path.value='supplier';path.dispatchEvent(new Event('change',{bubbles:true}));target.value=f.productionId;target.dispatchEvent(new Event('change',{bubbles:true}));});typeInto(getByRole(d,'textbox',{name:'点数与交接依据'}) as HTMLTextAreaElement,'DO-BLOCKED');await click(getByRole(d,'button',{name:'登记本次交付',exact:true}));expect(d.textContent).toContain('来源面料生产QC未通过');expect(store.run).not.toHaveBeenCalled();
+});
 it('keeps generation hidden for read-only procurement access',()=>{
   session.denied.add('procurement:write');store.state!.fulfillment.purchases.push(purchase('readonly',approved({kind:'processing'})));
   render('readonly');expect(queryByRole(host,'button',{name:'生成加工合同'})).toBeNull();
@@ -51,7 +59,7 @@ it('recognizes counted direct deliveries while keeping rejected goods awaiting r
   store.state=f.state;render(f.processingId);expect(host.textContent).toContain('1 笔已收 · 0 笔待收');
   expect(host.textContent).not.toContain('1 笔拒收待退');
 });
-beforeEach(()=>{session.id='buyer';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');store.state.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',currency:'USD'} as any);store.state.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',img:'coat',qty:100,unit:'件',price:10,made:0,qc:0,fulfillmentMode:'trims_cmt',cmtIncludedItems:[]});store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
+beforeEach(()=>{store.workspace=null;session.id='buyer';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');store.state.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',currency:'USD'} as any);store.state.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',img:'coat',qty:100,unit:'件',price:10,made:0,qc:0,fulfillmentMode:'trims_cmt',cmtIncludedItems:[]});store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();vi.useRealTimers();});
 
 it('shows isolated stock disposal on its source purchase only to an inventory reader',()=>{

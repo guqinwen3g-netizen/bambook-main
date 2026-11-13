@@ -2,7 +2,12 @@ import { expect, it } from 'vitest';
 import { createMistState } from '../../../../server/src/shared/mistWorkspace';
 import { applyDataScope } from '../../../../server/src/shared/mistDataScope';
 import { orderFundingCoveredAmount } from '../../../../server/src/shared/mistOrderFunding';
-import { ALL_TEAMS, teamOrigins, teamViewState, teamViewFabricDestinations } from './teamView';
+import { ALL_TEAMS, teamOrigins, teamViewState, teamViewFabricDestinations,teamViewMaterialDeliveryTargets } from './teamView';
+
+it('keeps direct handoff options only for source purchases retained in the selected group view',()=>{
+ const targets={visible:[{value:'processing',label:'Factory',remaining:'20'}],hidden:[{value:'other',label:'Other'}]},state:any={fulfillment:{purchases:[{id:'visible'}]}};
+ expect(teamViewMaterialDeliveryTargets(targets,state)).toEqual({visible:targets.visible});expect(teamViewMaterialDeliveryTargets(targets,null)).toEqual({});expect(teamViewMaterialDeliveryTargets(undefined,state)).toBeUndefined();expect(Object.keys(targets)).toHaveLength(2);
+});
 
 it('keeps destination identifiers only for retained source lines and active allocations in the selected group view',()=>{
  const hints={source:[{allocationId:'active',orderCode:'VISIBLE',lineStyle:'V',lineName:'Coat'},{allocationId:'cancelled',orderCode:'CANCELLED',lineStyle:'C',lineName:'Old'},{allocationId:'outside',orderCode:'OUTSIDE',lineStyle:'O',lineName:'Other'}],hidden:[{allocationId:'hidden',orderCode:'HIDDEN',lineStyle:'H',lineName:'Hidden'}]};

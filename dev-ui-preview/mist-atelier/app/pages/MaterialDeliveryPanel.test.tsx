@@ -4,13 +4,14 @@ import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { getByRole, queryByRole } from '@testing-library/dom';
 import { MistRoot, ToastProvider } from '../../../../components/mist';
+import { Nav } from '../nav';
 import { materialDeliveryFixture } from '../../../../server/src/mist/__tests__/materialDelivery';
 import { materialDeliveryRows } from '../../../../server/src/shared/mistInternalFabric';
 import type { MistState } from '../../../../server/src/shared/mistWorkspace';
-const store = vi.hoisted(() => ({ state: null as MistState | null, workspace: { id: 'workspace' }, saving: false, pending: null, run: vi.fn() }));
+const store = vi.hoisted(() => ({ state: null as MistState | null, workspace: { id: 'workspace' }, saving: false, pending: null, run: vi.fn(),downloadFile:vi.fn().mockResolvedValue(undefined) }));
 const auth = vi.hoisted(() => ({ user: { id: 'garment' }, sessionKey: 'session', hasPermission: vi.fn(() => true) }));
 vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => store }));
-vi.mock('../runtime/auth', () => ({ useOptionalMistSession: () => auth }));
+vi.mock('../runtime/auth', () => ({ useOptionalMistSession: () => auth,useMistSession:()=>auth }));
 import { MaterialDeliveryPanel } from './MaterialDeliveryPanel';
 let host: HTMLElement, root: Root, f: ReturnType<typeof materialDeliveryFixture>, deliveryId: string;
 beforeEach(() => {
@@ -19,7 +20,10 @@ beforeEach(() => {
   auth.user.id = 'garment'; auth.hasPermission.mockReturnValue(true); host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
-const render = () => act(() => root.render(<MistRoot><ToastProvider><MaterialDeliveryPanel rows={materialDeliveryRows(store.state!)} /></ToastProvider></MistRoot>));
+const render = () => act(() => root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'orders/detail',id:f.target.orderId},go:vi.fn(),theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><MaterialDeliveryPanel rows={materialDeliveryRows(store.state!)} /></Nav.Provider></ToastProvider></MistRoot>));
+it('shows only the exact direct handoff proof as a read-only download',async()=>{
+ f=materialDeliveryFixture(20,false);const file={id:'do-file',name:'DO-1.txt',mimeType:'text/plain',size:4,storageKey:'do',createdAt:f.context.now};f.state.files.push(file);f.run({type:'fulfillment.materials.deliver',payload:{id:f.purchaseId,quantity:20,rejected:0,targetProductionId:f.productionId,location:'factory',date:'2026-10-24',evidence:'DO-1',fileIds:[file.id]}});store.state=f.state;store.downloadFile.mockClear();render();await act(async()=>getByRole(host,'button',{name:'交接记录',exact:true}).click());expect(getByRole(host,'button',{name:'DO-1.txt',exact:true})).toBeTruthy();expect(host.querySelector('input[type=file]')).toBeNull();await act(async()=>getByRole(host,'button',{name:'下载',exact:true}).click());expect(store.downloadFile).toHaveBeenCalledWith(file);expect(store.run).not.toHaveBeenCalled();
+});
 const fill = async (input: HTMLInputElement | HTMLTextAreaElement, value: string) => act(async () => {
   Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(input, value);
   input.dispatchEvent(new Event('input', { bubbles: true }));

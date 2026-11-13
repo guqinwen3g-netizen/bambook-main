@@ -345,6 +345,10 @@ flowchart LR
 
 #### 内部面料分配与交接
 
+- **直送接收与原件（2026-11-14，分支待发布）**：`scopedFabricAccess`同时返回仓库发料与供应商直送的最小交接记录；`MaterialDeliveryPanel`按交接展示只读送货依据。当前有订单读写权的准确接收人通过`scopedMaterialDeliveryFileIds`获得该笔直送附件的元信息、下载和有界正文权限，仍经过印章/敏感原件/同字节限制；来源报价、合同和其他交接文件不因此开放。办理点收时，仓储只承认该接收记录引用；`scopedWriteViolation`按四位小数精确验证追加点收及对应拒收差量，来源采购仅允许匹配的`received`差量、来源订单仅允许派生状态/色调；价格、附件、其他条目和旧点收不得改写。新回归覆盖部分接收/拒收、旧式整笔确认、来源字段篡改、其他成员与权限收回。该授权不写入业务状态，既有业务门禁继续由`confirmMaterialDelivery`复核。
+
+- **直送的跨组目标（2026-11-14，分支待发布）**：`scopedMaterialDeliveryTargets`按当前可写、已批准/发出/供方确认的来源采购，复用`materialDeliveryTargets`派生响应专用候选；`materialDeliveryTargets[purchaseId]`只含目标编号值、加工合同/工厂标签、剩余量和来源质量阻断，不开放目标订单/采购/生产正文或金额。仓储仅为`fulfillment.materials.deliver`及供应商路径的`fulfillment.procurement.receive`放行本次合法目标引用，业务层继续重验分配、数量、质量和接收资格；取消分配或改用其他目标仍拒绝。响应按当前采购读取/办理权限和可见来源过滤，小组视角再按保留采购过滤；不存业务状态。采购交付弹窗消费该最小候选，质量阻断不能提交直送。回归见`materialCrossGroupRepository.test.ts`、`ProcurementPage.test.tsx`、`teamView.test.ts`。
+
 - 当前页面入口为 `dev-ui-preview/mist-atelier/app/main.tsx` → `ReferenceApp.tsx`；分配与点收界面分别在 `pages/InternalFabricPanel.tsx`、`pages/MaterialDeliveryPanel.tsx`，库存入口在 `pages/modules/InventoryPage.tsx`，开产核对在 `pages/productionGate.ts`。
 - 业务真源在 `server/src/shared/mistInternalFabric.ts`。成衣订单条目使用有效分配指向面料订单；仓库发料记录与接收点收保留独立历史，旧分配版本的交接不得用于新版本的发料限额或短结判断。
 - 行级范围按 `server/src/shared/mistDataScope.ts` 与 `server/src/mist/repository.ts` 执行。指定接收人通过响应中的 `scopedFabricAccess` 获取目标条目的最小候选、门禁和交接摘要；隐藏来源订单的商业信息不因此公开。接收动作在服务端重新核对身份、来源、状态和写入范围。生产页展示该条目的服务端门禁摘要，放行仍以服务端校验为准。

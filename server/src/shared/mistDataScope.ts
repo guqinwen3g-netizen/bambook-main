@@ -33,6 +33,7 @@ export const SCOPED_COLLECTIONS = [
 export type ScopedCollection = typeof SCOPED_COLLECTIONS[number];
 export type ScopedVisibility = Map<string, Set<string>>;
 export type ScopedMaterialIssueTargets = Record<string,ReturnType<typeof materialDeliveryTargets>>;
+export type ScopedMaterialDeliveryTargets = Record<string,ReturnType<typeof materialDeliveryTargets>>;
 export type ScopedSampleGate = Pick<ProductionSampleRequirement,'key'|'label'|'ok'|'reason'|'taskId'|'sampleId'>;
 export type ScopedFabricAccess = Record<string,{candidates:InternalFabricCandidate[];blocker:string;deliveries:MaterialDeliveryRow[];sampleRequirements:Record<string,ScopedSampleGate[]>}>;
 export type ScopedFabricDestinations = Record<string,Array<{allocationId:string;orderCode:string;lineStyle:string;lineName:string}>>;
@@ -57,11 +58,19 @@ export function scopedFabricAccess(state:MistState,scope:MistDataScope,actorId:s
   const context={actorId,actorName,members}, result:ScopedFabricAccess={};
   for(const order of state.orders.filter(o=>o.type==='garment'&&o.ownerId===actorId&&visible.get('orders')!.has(o.id)))for(const line of state.orderLines.filter(l=>l.orderId===order.id)){
     let candidates:InternalFabricCandidate[]=[];try{candidates=internalFabricCandidates(state,order.id,line.id,context).filter(c=>state.orders.find(o=>o.id===c.fabricOrderId)?.governance?.contract.internalSupply?.receiverId===actorId);}catch{continue;}
-    const deliveries=materialDeliveryRows(state).filter(r=>r.kind==='issue'&&r.delivery.orderId===order.id&&r.delivery.lineId===line.id&&materialReceiverIds(state,r).includes(actorId)).map(r=>({...r,sourcePurchaseCode:state.fulfillment.purchases.find(p=>p.id===r.purchaseId)?.code}));
+    const deliveries=materialDeliveryRows(state).filter(r=>r.delivery.orderId===order.id&&r.delivery.lineId===line.id&&materialReceiverIds(state,r).includes(actorId)).map(r=>({...r,sourcePurchaseCode:state.fulfillment.purchases.find(p=>p.id===r.purchaseId)?.code}));
     const sampleRequirements=includeSampleGates?Object.fromEntries(state.productions.filter(p=>p.orderId===order.id&&p.lineId===line.id&&!p.closed).map(p=>[p.id,productionSampleRequirements(state,p,'pp').map(r=>({key:r.key,label:r.label,ok:r.ok,reason:r.ok&&r.evidence?.result==='conditional'?'有保留通过':r.reason,...(r.taskId&&visible.get('fulfillment.qcTasks')!.has(r.taskId)?{taskId:r.taskId}:{}),...(r.sampleId&&visible.get('fulfillment.samples')!.has(r.sampleId)?{sampleId:r.sampleId}:{})}))])):{};
     result[line.id]={candidates,blocker:garmentMaterialBlocker(state,order.id,line.id,context),deliveries,sampleRequirements};
   }
   return result;
+}
+/** Proof files addressed to the exact current garment receiver; source contracts and quotes stay private. */
+export function scopedMaterialDeliveryFileIds(state:MistState,scope:MistDataScope,actorId:string):Set<string> {
+  const orders=scopedVisibility(state,scope,false).get('orders')!;
+  return new Set(materialDeliveryRows(state).filter(row=>{
+    const order=state.orders.find(o=>o.id===row.delivery.orderId);
+    return row.kind==='direct'&&order?.type==='garment'&&order.ownerId===actorId&&orders.has(order.id)&&state.orderLines.some(l=>l.id===row.delivery.lineId&&l.orderId===order.id)&&materialReceiverIds(state,row).includes(actorId);
+  }).flatMap(row=>row.fileIds||[]));
 }
 const HIDDEN_FILES = Symbol('scoped-hidden-files');
 export const scopedHiddenFiles = (state: MistState): Set<string> => (state as any)[HIDDEN_FILES] ?? new Set<string>();
@@ -175,6 +184,16 @@ export function scopedMaterialIssueTargets(state:MistState,scope:MistDataScope):
     if(!visible.has(stock.id) || !stock.purchaseId || !materialDeliveryRequired(state,stock.purchaseId))continue;
     const targets=materialDeliveryTargets(state,stock.purchaseId,stock.id);
     if(targets.length)result[stock.id]=targets;
+  }
+  return result;
+}
+
+/** Direct handoffs need the same minimal destinations, keyed by a writable source purchase rather than stock. */
+export function scopedMaterialDeliveryTargets(state:MistState,scope:MistDataScope):ScopedMaterialDeliveryTargets {
+  const visible=scopedVisibility(state,scope,false).get('fulfillment.purchases')!,result:ScopedMaterialDeliveryTargets={};
+  for(const purchase of state.fulfillment?.purchases||[]){
+    if(!visible.has(purchase.id)||purchase.state!=='approved'||!purchase.offlineSend||!purchase.supplierConfirmation||!materialDeliveryRequired(state,purchase.id))continue;
+    result[purchase.id]=materialDeliveryTargets(state,purchase.id);
   }
   return result;
 }
@@ -414,7 +433,38 @@ export function scopedTargetViolation(state: MistState, scope: MistDataScope, co
 }
 
 /** 写入校验：每条改动的受限记录，原有的须本来可见，新建的须建成后可见（不能改看不到的业务，也不能在看不到的业务下新建）。返回第一条越权记录。 */
-export function scopedWriteViolation(before: MistState, after: MistState, scope: MistDataScope, incoming?:{issueId:string;sourceOrderId:string},internalIncoming?:{deliveryId:string;sourceOrderId:string}): { path: string; id: string } | null {
+type MaterialReceivingWrite = {issueId?:string;receiptId?:string;purchaseId?:string;actorId?:string;sourceOrderId:string};
+const deliveryUnits=(value:unknown):bigint|null=>{
+  if(typeof value!=='number'&&typeof value!=='string')return null;
+  const match=/^(\d+)(?:\.(\d{1,4}))?$/.exec(String(value));
+  return match?BigInt(match[1])*BigInt(10000)+BigInt((match[2]||'').padEnd(4,'0')):null;
+};
+/** Only an append-only count, its matching rejected quantity and the original sent total may cross source scope. */
+function directReceivingRejected(a:any,b:any,actorId?:string):bigint|null {
+  if(!a?.materialDelivery||!b?.materialDelivery||!actorId)return null;
+  const left=structuredClone(a),right=structuredClone(b),old=left.materialDelivery,next=right.materialDelivery;
+  const oldChecks=old.receivingChecks||[],checks=next.receivingChecks||[];
+  if(checks.length===oldChecks.length){
+    if(old.confirmation||!next.confirmation||next.confirmation.actorId!==actorId||typeof next.confirmation.evidence!=='string'||!next.confirmation.evidence.trim())return null;
+    delete old.confirmation;delete next.confirmation;
+    return JSON.stringify(left)===JSON.stringify(right)?BigInt(0):null;
+  }
+  if(checks.length!==oldChecks.length+1||JSON.stringify(checks.slice(0,-1))!==JSON.stringify(oldChecks)||old.confirmation||next.confirmation)return null;
+  const check=checks.at(-1),keys=new Set(['id','acceptedQuantity','rejectedQuantity','previousQuantity','previousRejected','at','actorId','actor','evidence']);
+  if(check.actorId!==actorId||typeof check.id!=='string'||!check.id||typeof check.at!=='string'||!check.at||typeof check.evidence!=='string'||!check.evidence.trim()||Object.keys(check).some(key=>!keys.has(key))||oldChecks.some((row:any)=>row.id===check.id))return null;
+  const quantity=deliveryUnits(a.quantity),rejected=deliveryUnits(a.rejected),acceptedDelta=deliveryUnits(check.acceptedQuantity),rejectedDelta=deliveryUnits(check.rejectedQuantity),sent=deliveryUnits(old.sentQuantity??a.quantity);
+  if(quantity===null||rejected===null||acceptedDelta===null||rejectedDelta===null||sent===null)return null;
+  let counted=BigInt(0);for(const row of oldChecks){const accepted=deliveryUnits(row.acceptedQuantity),refused=deliveryUnits(row.rejectedQuantity);if(accepted===null||refused===null)return null;counted+=accepted+refused;}
+  if(acceptedDelta+rejectedDelta<=BigInt(0)||acceptedDelta+rejectedDelta>sent-counted||rejectedDelta>quantity)return null;
+  if(deliveryUnits(check.previousQuantity)!==quantity||deliveryUnits(check.previousRejected)!==rejected||deliveryUnits(b.quantity)!==quantity-rejectedDelta||deliveryUnits(b.rejected)!==rejected+rejectedDelta||deliveryUnits(next.sentQuantity)!==sent)return null;
+  delete left.quantity;delete right.quantity;delete left.rejected;delete right.rejected;
+  for(const meta of [old,next]){delete meta.receivingChecks;delete meta.sentQuantity;delete meta.confirmation;}
+  return JSON.stringify(left)===JSON.stringify(right)?rejectedDelta:null;
+}
+export function scopedWriteViolation(before: MistState, after: MistState, scope: MistDataScope, incoming?:MaterialReceivingWrite,internalIncoming?:{deliveryId:string;sourceOrderId:string}): { path: string; id: string } | null {
+  const directBefore=incoming?.receiptId?before.fulfillment.receipts.find(r=>r.id===incoming.receiptId&&r.purchaseId===incoming.purchaseId):undefined;
+  const directAfter=incoming?.receiptId?after.fulfillment.receipts.find(r=>r.id===incoming.receiptId):undefined;
+  const directRejected=directBefore?directReceivingRejected(directBefore,directAfter,incoming?.actorId):null;
   let pre: ScopedVisibility | undefined, post: ScopedVisibility | undefined;
   for (const path of SCOPED_COLLECTIONS) {
     const left = get(before, path), right = get(after, path);
@@ -431,10 +481,12 @@ export function scopedWriteViolation(before: MistState, after: MistState, scope:
         const partialLc = lc?.orderIds?.some((orderId: string) => !pre!.get('orders')!.has(orderId));
         const derivedOnly = path === 'platform.claims' && verifiedReplacementSync(left.find(row => rowKey(path, row) === id), right.find(row => rowKey(path, row) === id), after);
         const receivingOnly=path==='fulfillment.stockMovements'&&id===incoming?.issueId&&(()=>{const a=structuredClone(left.find(row=>rowKey(path,row)===id)),b=structuredClone(right.find(row=>rowKey(path,row)===id));if(!a?.materialDelivery||!b?.materialDelivery)return false;delete a.materialDelivery.receivingChecks;delete b.materialDelivery.receivingChecks;delete a.materialDelivery.confirmation;delete b.materialDelivery.confirmation;return JSON.stringify(a)===JSON.stringify(b);})();
+        const directReceivingOnly=path==='fulfillment.receipts'&&id===incoming?.receiptId&&directRejected!==null;
+        const directPurchaseOnly=path==='fulfillment.purchases'&&id===incoming?.purchaseId&&directRejected!==null&&(()=>{const a=structuredClone(left.find(row=>rowKey(path,row)===id)),b=structuredClone(right.find(row=>rowKey(path,row)===id));const received=deliveryUnits(a?.received);if(received===null||deliveryUnits(b?.received)!==received-directRejected!)return false;delete a.received;delete b.received;return JSON.stringify(a)===JSON.stringify(b);})();
         // Receiving recalculates both the source order's status and its display tone.
-        const sourceStateOnly=path==='orders'&&(id===incoming?.sourceOrderId||id===internalIncoming?.sourceOrderId)&&(()=>{const a=structuredClone(left.find(row=>rowKey(path,row)===id)),b=structuredClone(right.find(row=>rowKey(path,row)===id));if(!a||!b)return false;delete a.state;delete b.state;delete a.tone;delete b.tone;return JSON.stringify(a)===JSON.stringify(b);})();
+        const sourceStateOnly=path==='orders'&&(id===incoming?.sourceOrderId&&(!!incoming?.issueId||directRejected!==null)||id===internalIncoming?.sourceOrderId)&&(()=>{const a=structuredClone(left.find(row=>rowKey(path,row)===id)),b=structuredClone(right.find(row=>rowKey(path,row)===id));if(!a||!b)return false;delete a.state;delete b.state;delete a.tone;delete b.tone;return JSON.stringify(a)===JSON.stringify(b);})();
         const internalReceivingOnly=path==='internalDeliveries'&&id===internalIncoming?.deliveryId&&(()=>{const a=structuredClone(left.find(row=>rowKey(path,row)===id)),b=structuredClone(right.find(row=>rowKey(path,row)===id));if(!a||!b)return false;delete a.checks;delete b.checks;return JSON.stringify(a)===JSON.stringify(b);})();
-        if ((!pre.get(path)!.has(id) && !derivedOnly && !receivingOnly && !sourceStateOnly && !internalReceivingOnly) || path === 'receipts' && partialReceipt(before, pre, id).partial || partialShipment || partialLc) return { path, id };
+        if ((!pre.get(path)!.has(id) && !derivedOnly && !receivingOnly && !directReceivingOnly && !directPurchaseOnly && !sourceStateOnly && !internalReceivingOnly) || path === 'receipts' && partialReceipt(before, pre, id).partial || partialShipment || partialLc) return { path, id };
       }
       else { post ??= scopedVisibility(after, scope, false); if (!post.get(path)!.has(id)) return { path, id }; }
     }
