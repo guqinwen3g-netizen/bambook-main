@@ -130,13 +130,13 @@ beforeEach(async () => {
     const special = override?.(url, init); if (special) return special;
     if(url.pathname==='/api/hr/teams/mine')return json({ok:true,teams:[]});
     if(url.pathname==='/api/mist/session')return json({message:'Not found'},404);
-    if (url.pathname.endsWith('/auth/logout')) return json({ ok: true });
+    if (url.pathname.endsWith('/auth/logout')) return json({ ok: true,revokedSession:true });
     if (url.pathname.endsWith('/auth/login')) { const signedIn = actor && actor.id === body.identifier ? actor : user(body.identifier); actor = signedIn; return json({ user: signedIn, token: `token-${signedIn.id}` }); }
     if(url.pathname.endsWith('/api/mist/reviews')) return json({reviews:[]});
     if (url.pathname.endsWith('/auth/me')) return actor ? json({ user: actor }) : json({ message: '未登录' }, 401);
     throw new Error(`Unexpected entry test request: ${url.pathname}`);
   }));
-  await auth.logout(); requests = [];
+  await auth.logout();localStorage.removeItem('bambook_auth_signed_out'); requests = [];
 });
 afterEach(() => {
   if (root) act(() => root!.unmount()); host?.remove(); root = undefined; host = undefined;
