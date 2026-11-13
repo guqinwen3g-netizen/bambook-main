@@ -82,6 +82,8 @@
 
 ## 5. 跨模块交接（主线）
 
+开发面料实测（2026-11-14）：`fulfillment.qc.report`与`development.recordQc`共用`mistQcInspection.ts#normalizeFabricQcMeasurements`，按项目/有限非负数/原单位保留最多200行；不套成衣标准/容差，不自动以偏差裁决。仅面料开发来源接受`fabricMeasurements`，报告与准确开发版本双向保存，任务仍只由当前专业认领人提交；正常生产AQL/四分制路径不改。前端`QcWorkbenchPage.tsx`用面料专用编辑/回读表，`fabricQcFacts.ts`与开发页共用输入校验；旧报告不迁移或重写。相关契约回归在`mistDevelopmentQcTasks.test.ts`及两个页面测试，真实返样/QC/业务接续证据仍须分别核验。
+
 出运条款回程（2026-11-13）：`ShipmentsPage.tsx#ShipmentEditor/ShipmentEditorDraft`在就地核对合同条款前保存完整本机草稿，返回时恢复来源行、数量、工厂确认日及运输字段；保存/取消均不丢输入，恢复不重复按合同覆盖运输草稿，之后主动更换来源仍重新预填合同。`useRouteDraft`绑定账号与工作区，草稿不写成正式出运；真实出运仍由用户确认请求。
 
 生成单据分页（2026-11-13）：`server/src/templates/generatedDocument.ts#renderGeneratedDocumentHtml`保留跨页重复表头，整票合计仅随最后一行打印，不使用浏览器默认的重复表尾。仅修打印样式；快照、数量金额、归档与签发规则不变。已生成原件不会自动替换；草稿从单据中心重新生成，旧PDF及摘要仍在生成历史中保留。

@@ -1,6 +1,8 @@
 import { businessInputInstant, businessInputValue } from '../runtime/businessClock';
 import {useOptionalMistSession} from '../runtime/auth';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
+import {fabricQcFacts,type FabricFactDraft} from './fabricQcFacts';
+export {fabricQcFacts} from './fabricQcFacts';
 import {businessNow} from '../runtime/businessClock';
 import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { DevStageChainCard } from './DevStageChain';
@@ -50,9 +52,7 @@ const qcLabel={pass:'通过',conditional:'有保留通过',reject:'不通过'};
 type Form={confirmer:string;organization:string;confirmedAt:string;basis:string;originalText:string;result:MistConfirmation['result']};
 const emptyForm=(organization='',confirmer=''):Form=>({confirmer,organization,confirmedAt:localConfirmationTime(),basis:'',originalText:'',result:'approved'});
 type MeasurementDraft={key:string;point:string;standard:string;actual:string;tolerance:string};
-type FabricFactDraft={key:string;property:string;actual:string;unit:string};
 type QcForm=Omit<MistQc,'measurements'|'appearanceDefects'|'fabricMeasurements'> & {measurements:MeasurementDraft[];fabricMeasurements:FabricFactDraft[];appearanceDefects:string};
-export function fabricQcFacts(rows:FabricFactDraft[]):NonNullable<MistQc['fabricMeasurements']>{return rows.map((row,index)=>{if(!row.property.trim()||!row.unit.trim()||!row.actual.trim()||!Number.isFinite(Number(row.actual))||Number(row.actual)<0)throw Error(`请完整填写面料实测 ${index+1} 的项目、有限非负数和单位`);return{property:row.property.trim(),actual:Number(row.actual),unit:row.unit.trim()};});}
 const newMeasurement=():MeasurementDraft=>({key:crypto.randomUUID(),point:'',standard:'',actual:'',tolerance:''});
 const qcForm=(value:MistQc|null|undefined,reviewer=''):QcForm=>({result:value?.result||'pass',reviewer:value?.reviewer||reviewer,reviewedAt:value?localConfirmationTime(new Date(value.reviewedAt)):localConfirmationTime(),report:value?.report||'',opinion:value?.opinion||'',measurements:(value?.measurements||[]).map(row=>({...row,key:crypto.randomUUID(),standard:String(row.standard),actual:String(row.actual),tolerance:String(row.tolerance)})),fabricMeasurements:(value?.fabricMeasurements||[]).map(row=>({...row,key:crypto.randomUUID(),actual:String(row.actual)})),appearanceDefects:value?.appearanceDefects===undefined?'':String(value.appearanceDefects)});
 export function qcMeasurementFacts(form:QcForm):Pick<MistQc,'measurements'|'appearanceDefects'>{

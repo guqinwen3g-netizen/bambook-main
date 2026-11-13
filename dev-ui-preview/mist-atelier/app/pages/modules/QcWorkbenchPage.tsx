@@ -5,6 +5,7 @@ import React from 'react';
 import { CalendarClock, ChevronDown, ChevronRight, ClipboardCheck, Columns3, Layers, List, Plus, RefreshCw, Repeat2, SearchX, Shirt, UserRoundCheck } from 'lucide-react';
 import { FormFooter, BackLink, Banner, Button, Card, CardBody, CardButton, CardHeader, DataTable, Dialog, Dropdown, EmptyState, Facts, Field, FormGrid, Icon, Kanban, MeasurementTable, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Select, Tabs, TextArea, TextInput, Tile, Toolbar, UploadZone, useToast, type Tone } from '../../../../../components/mist';
 import { developmentDomain } from '../../../../../server/src/shared/mistDevelopmentDomain';
+import {fabricQcFacts,type FabricFactDraft} from '../fabricQcFacts';
 import type { MistQc, MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentCommand, FulfillmentQcReport, FulfillmentQcTask } from '../../../../../server/src/shared/mistFulfillment';
 import { fulfillmentQcSourceBlocker, fulfillmentSampleRoleLabel, fulfillmentSourceLabel } from '../../../../../server/src/shared/mistFulfillment';
@@ -352,6 +353,7 @@ function QcReportCard({ report, domain, production, latest }: { report: Fulfillm
     {(production||!!report.sizeChecks?.length) && domain === 'garment' && <DataTable ariaLabel={ui`${report.report} · 生产尺码检查`} rows={report.sizeChecks || []} rowKey={check => check.size} columns={[{ key: 'size', header: '实际尺码', render: check => check.size }, { key: 'inspected', header: '实际检查件数', align: 'right', render: check => check.inspected }, { key: 'result', header: '各码结论', render: check => check.result === 'pass' ? '通过' : '不通过' }, { key: 'basis', header: '检查依据', render: check => check.evidence }]} empty={<EmptyState title={uiText("未记录本次实际尺码检查")} compact />} />}
     {report.aql && <Facts cols={2} items={[{ label: 'AQL 抽样', value: `批量 ${report.aql.lotSize} · 抽检 ${report.aql.inspected} 件（应抽 ${report.aql.outcome.sampleSize}）` }, { label: '缺陷', value: `致命 ${report.aql.critical} · 严重 ${report.aql.major}（Ac ${report.aql.outcome.major.accept}）· 轻微 ${report.aql.minor}（Ac ${report.aql.outcome.minor.accept}）` }, { label: '抽样判定', value: report.aql.outcome.result === 'pass' ? '允收' : '拒收' }, ...(report.aql.defects ? [{ label: '缺陷内容', value: report.aql.defects }] : [])]} />}
     {report.fabricInspection && <Facts cols={2} items={[{ label: '四分制', value: `${report.fabricInspection.rolls.length} 卷 · ${report.fabricInspection.outcome.totalYards} 码 · ${report.fabricInspection.outcome.pointsPer100} 分/100 平方码（允收 ${report.fabricInspection.limit}）` }, { label: '验布判定', value: report.fabricInspection.outcome.result === 'pass' ? '允收' : `拒收${report.fabricInspection.outcome.rejectedRolls.length ? ' · 超分卷 ' + report.fabricInspection.outcome.rejectedRolls.join('、') : ''}` }, ...Object.entries({ 色差: report.fabricInspection.lab.shade, 经向缩率: report.fabricInspection.lab.shrinkageWarp !== undefined ? report.fabricInspection.lab.shrinkageWarp + '%' : undefined, 纬向缩率: report.fabricInspection.lab.shrinkageWeft !== undefined ? report.fabricInspection.lab.shrinkageWeft + '%' : undefined, 色牢度: report.fabricInspection.lab.colourfastness }).filter(([, v]) => v !== undefined).map(([label, v]) => ({ label, value: String(v) }))]} />}
+    {!!report.fabricMeasurements?.length && <DataTable ariaLabel={ui`${report.report} · 面料实测`} rows={report.fabricMeasurements.map((fact,index)=>({...fact,key:String(index)}))} rowKey={row=>row.key} columns={[{key:'property',header:'实测项目',render:row=>row.property},{key:'actual',header:'实测值',align:'right',render:row=>row.actual},{key:'unit',header:'原单位',render:row=>row.unit}]} />}
     {report.measurements.length > 0 && <MeasurementTable rows={report.measurements} unit={domain === 'fabric' ? '' : 'cm'} />}
     <RecordFiles key={report.id} ids={report.fileIds} />
   </div>;
@@ -368,6 +370,8 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
   const productionQty = task.source.kind === 'orderLine' ? state?.productions.find(job => job.id === (task.source as { productionId?: string }).productionId)?.qty : undefined;
   const [aql, setAql] = React.useState<AqlDraft>(() => emptyAql(task.incoming?.quantity || productionQty || 0)), [fabricCheck, setFabricCheck] = React.useState<FabricDraft>(emptyFabric);
   const useAql = sampling && task.domain === 'garment', useFabric = sampling && task.domain === 'fabric';
+  const fabricDevelopment = task.source.kind === 'version' && task.domain === 'fabric';
+  const [fabricMeasurements,setFabricMeasurements] = React.useState<FabricFactDraft[]>([]);
   const [measurements, setMeasurements] = React.useState<Measurement[]>([]), [ids, setIds] = React.useState<string[]>([]), [failure, setFailure] = useRouteDraft(''), [busy, setBusy] = React.useState(false), [confirming, setConfirming] = React.useState(false);
   const fact = state?.fulfillment.productionFacts?.find(item => task.source.kind === 'orderLine' && item.productionId === task.source.productionId);
   const sampleConcerns = task.kind === 'production' ? fact?.release?.sampleChecks?.filter(sample => sample.result === 'conditional') || [] : [];
@@ -392,6 +396,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
     if (garmentProduction && !checked.length) return '请至少记录一个本次实际检查尺码';
     for (const check of checked) if (!(check.inspected > 0) || !check.evidence.trim()) return `尺码 ${check.size} 需填写实际检查件数和检查依据`;
     if (checked.some(check => check.result === 'reject') && result !== 'reject') return '存在尺码不通过时，总结论必须选择不通过';
+    if (fabricDevelopment) { try { fabricQcFacts(fabricMeasurements); } catch (error) { return error instanceof Error ? error.message : '面料实测尚未完整'; } }
     if (measurements.some(item => !item.point.trim())) return '请填写每个测量点的名称，或移除空白测量点';
     return '';
   };
@@ -401,7 +406,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
     setBusy(true); setFailure('');
     try {
       const aqlInput = useAql ? aqlFromDraft(aql) : null, fabricInput = useFabric ? fabricFromDraft(fabricCheck) : null;
-      await run({ type: 'fulfillment.qc.report', payload: { id: task.id, domain: task.domain, result, report, opinion, location, reviewedAt: businessInputInstant(at), measurements, fileIds: ids, sizeChecks: sizeChecks.filter(check => check.result).map(check => ({ ...check, result: check.result as 'pass' | 'reject' })), ...(aqlInput ? { aql: aqlInput } : {}), ...(fabricInput ? { fabricInspection: fabricInput } : {}) } });
+      await run({ type: 'fulfillment.qc.report', payload: { id: task.id, domain: task.domain, result, report, opinion, location, reviewedAt: businessInputInstant(at), measurements: fabricDevelopment ? [] : measurements, ...(fabricDevelopment ? {fabricMeasurements:fabricQcFacts(fabricMeasurements)} : {}), fileIds: ids, sizeChecks: sizeChecks.filter(check => check.result).map(check => ({ ...check, result: check.result as 'pass' | 'reject' })), ...(aqlInput ? { aql: aqlInput } : {}), ...(fabricInput ? { fabricInspection: fabricInput } : {}) } });
       onClose();
     } catch (e) { setFailure(e instanceof Error ? e.message : '报告未保存'); setConfirming(false); }
     finally { setBusy(false); }
@@ -436,13 +441,22 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
             <Field label={uiText("尺码检查依据")} full><TextInput aria-label={ui`尺码 ${check.size} · 检查依据`} value={check.evidence} disabled={!check.result} onChange={event => updateSize(index, { evidence: event.target.value })} /></Field>
           </FormGrid>)}</div></CardBody>
         </Card>}
-        <Card>
+        {!fabricDevelopment && <Card>
           <CardHeader title={uiText("测量记录")} tools={<Button size="sm" icon={Plus} onClick={() => setMeasurements(rows => [...rows, { point: '', standard: 0, actual: 0, tolerance: 0 }])}>{uiText("增加测量点")}</Button>} />
           <CardBody>{measurements.length ? <div className="mist-col">{measurements.map((item, i) => <FormGrid key={i}>
             {(['point', 'standard', 'actual', 'tolerance'] as const).map((key, j) => <Field key={key} label={uiText(['测量点', '标准', '实测', '容差'][j])}><TextInput aria-label={uiText(`${['测量点', '标准', '实测', '容差'][j]} ${i + 1}`)} type={key === 'point' ? 'text' : 'number'} step="0.0001" value={item[key]} onChange={e => setMeasurements(rows => rows.map((row, n) => n === i ? { ...row, [key]: key === 'point' ? e.target.value : Number(e.target.value) } : row))} /></Field>)}
             <Button size="sm" variant="quiet" onClick={() => setMeasurements(rows => rows.filter((_, n) => n !== i))}>{uiText("移除本点")}</Button>
           </FormGrid>)}</div> : <span className="mist-note">{uiText("还没有测量点")}</span>}</CardBody>
-        </Card>
+        </Card>}
+        {fabricDevelopment && <Card>
+          <CardHeader title={uiText("面料实测")} tools={<Button size="sm" icon={Plus} disabled={blocked||fabricMeasurements.length>=200} onClick={()=>setFabricMeasurements(rows=>[...rows,{key:crypto.randomUUID(),property:'',actual:'',unit:''}])}>{uiText("添加面料实测")}</Button>} />
+          <CardBody>{fabricMeasurements.map((row,index)=><FormGrid key={row.key}>
+            <Field label={ui`实测项目 ${index+1}`} required><TextInput aria-label={ui`实测项目 ${index+1}`} value={row.property} disabled={blocked} maxLength={120} onChange={e=>setFabricMeasurements(rows=>rows.map(item=>item.key===row.key?{...item,property:e.target.value}:item))}/></Field>
+            <Field label={ui`实测值 ${index+1}`} required><TextInput aria-label={ui`实测值 ${index+1}`} inputMode="decimal" value={row.actual} disabled={blocked} onChange={e=>setFabricMeasurements(rows=>rows.map(item=>item.key===row.key?{...item,actual:e.target.value}:item))}/></Field>
+            <Field label={ui`原单位 ${index+1}`} required><TextInput aria-label={ui`原单位 ${index+1}`} value={row.unit} disabled={blocked} maxLength={120} onChange={e=>setFabricMeasurements(rows=>rows.map(item=>item.key===row.key?{...item,unit:e.target.value}:item))}/></Field>
+            <Button size="sm" variant="quiet" aria-label={ui`移除面料实测 ${index+1}`} disabled={blocked} onClick={()=>setFabricMeasurements(rows=>rows.filter(item=>item.key!==row.key))}>{uiText("移除此项")}</Button>
+          </FormGrid>)}</CardBody>
+        </Card>}
         <Card>
           <CardHeader title={uiText("现场照片与完整报告")} />
           <CardBody>

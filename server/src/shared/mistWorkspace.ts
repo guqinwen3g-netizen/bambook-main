@@ -7,6 +7,7 @@ import {sampleSendPurpose,sampleSendBlocker,type SampleSendPurpose} from './mist
 import type {MistBusinessClock} from './mistBusinessClock';
 import{stableJson}from'./stableJson';
 import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
+import { normalizeFabricQcMeasurements } from './mistQcInspection';
 import {applyOpeningCommand,mistPayerMatchesInvoice,openingCommandPermission,type OpeningCommand} from './mistOpeningBalance';
 import {developmentCharged,developmentDomain,developmentInitiator,emptyFabricRequirements,fabricRequirementError,validFabricSample,sampleUnitAllowsDecimal,type DevelopmentDomain,type DevelopmentInitiator,type DevelopmentRequestType,type FabricDevelopmentRequirements} from './mistDevelopmentDomain';
 import { relationHoldReason } from './mistRelationHold';
@@ -1076,8 +1077,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(v.confirmations.length)throw new MistCommandError('PRECONDITION','本版已有需求方确认记录，不能改写 QC');
       if((p.domain||'garment')!==developmentDomain(dev.values))throw new MistCommandError('VALIDATION','QC专业权限域与准确开发版本不一致');
       if(developmentDomain(dev.values)==='fabric'&&p.qc?.measurements?.length)throw new MistCommandError('VALIDATION','面料开发不套成衣尺寸公差，请填写面料实测');
-      const fabricMeasurements=p.qc?.fabricMeasurements||[];if(!Array.isArray(fabricMeasurements)||fabricMeasurements.length>200)throw new MistCommandError('VALIDATION','面料实测最多支持200行');
-      const fabricFacts=fabricMeasurements.map((row:any)=>{if(!row||typeof row.actual!=='number'||!Number.isFinite(row.actual)||row.actual<0)throw new MistCommandError('VALIDATION','面料实测须为有限非负数');return{property:text(row.property,'实测项目',true,120),actual:row.actual,unit:text(row.unit,'实测单位',true,120)};});
+      const fabricFacts=normalizeFabricQcMeasurements(p.qc?.fabricMeasurements);
       if(developmentDomain(dev.values)==='garment'&&fabricFacts.length)throw new MistCommandError('VALIDATION','成衣QC不接收面料实测');
       if(!['pass','conditional','reject'].includes(p.qc?.result))throw new MistCommandError('VALIDATION','QC结论无效');
       const measurements=p.qc.measurements===undefined?[]:p.qc.measurements;

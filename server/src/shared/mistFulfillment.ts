@@ -3,7 +3,7 @@ import { isCalendarDay, nextBusinessCode } from './mistBusinessClock';
 import {packingBreakdownBlocker,packingFabricSpecification,packingFabricColorError,packingPhysicalKey,packingSkuError,canonicalPackingSkus,canSupplementPacking,type PackingSku} from './mistPackingBreakdown';
 import {recordReplacementExportReview,replacementDeclaredUnitPrice,type ReplacementExportCommand,type ReplacementExportReview} from './mistClaimReplacement';
 import { normalizeFabricStageTerms, fabricStageSubmitProblem, fabricStageTermsText, type FabricStageTerms } from './mistFabricStage';
-import { aqlOutcome, assertConclusionMatches, fabricOutcome, normalizeAql, normalizeFabricInspection, type AqlInspection, type AqlOutcome, type FabricInspection, type FabricOutcome } from './mistQcInspection';
+import { aqlOutcome, assertConclusionMatches, fabricOutcome, normalizeAql, normalizeFabricInspection, normalizeFabricQcMeasurements, type AqlInspection, type AqlOutcome, type FabricInspection, type FabricOutcome } from './mistQcInspection';
 import { DOCUMENT_TYPES, isOwnDocumentType, POST_DEPARTURE_TYPES, type BillOfLadingDetails, type ShipmentDocumentType } from './mistDocumentTypes';
 import type { GeneratedDocRecord } from './mistGeneratedDocument';
 import { applyDocumentGeneration, type DocumentGenerationCommand } from './mistDocumentGeneration';
@@ -156,6 +156,7 @@ export type FulfillmentQcReport = {
     report: string;
     opinion: string;
     measurements: NonNullable<MistQc['measurements']>;
+    fabricMeasurements?: NonNullable<MistQc['fabricMeasurements']>;
     fileIds: string[];
     reviewer: string;
     reviewedAt: string;
@@ -580,6 +581,8 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
         report: string;
         opinion: string;
         measurements: NonNullable<MistQc['measurements']>;
+        /** Development fabric facts, in their original measurement units. */
+        fabricMeasurements?: NonNullable<MistQc['fabricMeasurements']>;
         fileIds: string[];
         reviewedAt: string;
         sizeChecks?: NonNullable<FulfillmentQcReport['sizeChecks']>;
@@ -1343,7 +1346,7 @@ export function recordDevelopmentQcOnTasks(root: MistState, devId: string, versi
     for (const t of open) {
         if (t.assigneeId && t.assigneeId !== ctx.actorId) fail(`${t.code} 已由 ${t.assignee} 认领，请在 QC 工作台由认领人提交`, 'CONFLICT');
         const id = ctx.id(), previous = t.reportIds.at(-1);
-        f.qcReports.push({ id, taskId: t.id, location: t.location, result: qc.result, report: qc.report, opinion: qc.opinion, measurements: qc.measurements || [], fileIds: [], reviewer: qc.reviewer, reviewedAt: qc.reviewedAt, scopeRevision: scopeRevision(root, t), sizeChecks: [], ...(previous ? { previousReportId: previous } : {}) });
+        f.qcReports.push({ id, taskId: t.id, location: t.location, result: qc.result, report: qc.report, opinion: qc.opinion, measurements: qc.measurements || [], ...(qc.fabricMeasurements?.length ? { fabricMeasurements: structuredClone(qc.fabricMeasurements) } : {}), fileIds: [], reviewer: qc.reviewer, reviewedAt: qc.reviewedAt, scopeRevision: scopeRevision(root, t), sizeChecks: [], ...(previous ? { previousReportId: previous } : {}) });
         t.reportIds.push(id);
         if (!t.assigneeId && ctx.actorId) { t.assignee = ctx.actorName; t.assigneeId = ctx.actorId; }
         t.state = qc.result === 'reject' ? 'blocked' : 'reported';
@@ -1617,12 +1620,16 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (!Array.isArray(p.measurements) || p.measurements.length > 200)
                 fail('测量点最多200项');
             const measurements = p.measurements.map((m: any) => ({ point: text(m.point, '测量点'), standard: qty(m.standard, '标准值', true), actual: qty(m.actual, '实测值', true), tolerance: qty(m.tolerance, '容差', true) }));
+            const fabricDevelopment = t.source.kind === 'version' && t.domain === 'fabric';
+            const fabricMeasurements = normalizeFabricQcMeasurements(p.fabricMeasurements);
+            if (fabricDevelopment && measurements.length) fail('面料开发不套成衣尺寸公差，请填写面料实测');
+            if (!fabricDevelopment && fabricMeasurements.length) fail('本类QC不接收面料开发实测');
             const fileIds = files(root, p.fileIds);
             if (t.source.kind === 'version') {
                 const v = get(root.versions, t.source.versionId, '版本');
                 if (v.archivedAt || v.confirmations.length)
                     fail('已有需求方决定或留档的版本不可改写QC，请创建新版本');
-                v.qc = { result: p.result, reviewer: ctx.actorName, reviewedAt, report, opinion, measurements };
+                v.qc = { result: p.result, reviewer: ctx.actorName, reviewedAt, report, opinion, measurements, ...(fabricMeasurements.length ? { fabricMeasurements: structuredClone(fabricMeasurements) } : {}) };
                 const d = get(root.devs, t.source.devId, '开发案');
                 if (d.currentVersionId === v.id) {
                     d.stage = p.result === 'reject' ? 2 : 3;
@@ -1658,7 +1665,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (p.fabricInspection !== undefined && t.domain !== 'fabric') fail('成衣检验请用 AQL 抽样');
             const aql = p.aql === undefined ? undefined : (() => { const row = normalizeAql(p.aql); const outcome = aqlOutcome(row); assertConclusionMatches(p.result, outcome); return { ...row, outcome }; })();
             const fabricInspection = p.fabricInspection === undefined ? undefined : (() => { const row = normalizeFabricInspection(p.fabricInspection); const outcome = fabricOutcome(row); assertConclusionMatches(p.result, outcome); return { ...row, outcome }; })();
-            f.qcReports.push({ ...(aql ? { aql } : {}), ...(fabricInspection ? { fabricInspection } : {}), id, taskId: t.id, location, result: p.result, report, opinion, measurements, fileIds, reviewer: ctx.actorName, reviewedAt, scopeRevision: scopeRevision(root, t), sizeChecks, ...(previous ? { previousReportId: previous } : {}) });
+            f.qcReports.push({ ...(aql ? { aql } : {}), ...(fabricInspection ? { fabricInspection } : {}), id, taskId: t.id, location, result: p.result, report, opinion, measurements, ...(fabricMeasurements.length ? { fabricMeasurements } : {}), fileIds, reviewer: ctx.actorName, reviewedAt, scopeRevision: scopeRevision(root, t), sizeChecks, ...(previous ? { previousReportId: previous } : {}) });
             t.reportIds.push(id);
             t.state = p.result === 'reject' ? 'blocked' : (t.kind === 'production' || t.kind === 'patrol') && (needsResume || p.result === 'conditional') ? 'awaiting_business' : 'reported';
             if (t.source.kind === 'orderLine' && t.source.productionId) {
