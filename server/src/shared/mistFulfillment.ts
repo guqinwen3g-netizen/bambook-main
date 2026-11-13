@@ -10,7 +10,7 @@ import { applyDocumentGeneration, type DocumentGenerationCommand } from './mistD
 import { applyStockOperation, autoIssueForDeparture, stockOperationPermission, STOCK_OPERATION_COMMANDS, type StockCount, type StockOperationCommand, type StockTransfer } from './mistStockOperations';
 import { applyQcDispositionCommand, qcConcessionReleases, type QcDisposition, type QcDispositionCommand } from './mistQcDisposition';
 import { applyProductionIntake, productionIntake, type ProductionIntakeCommand, type ProductionIntakeRound, type ProductionObservation } from './mistProductionIntake';
-import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,materialDeliveryRequired,isFabricStageMaterial,isFabricIntermediateProcessing,isFabricStageSource,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,assertMaterialReturnReversal,materialIssueReturnTotals,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
+import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,garmentFinishedPurchaseProblem,normalizeInternalSupply,materialDeliveryRequired,isFabricStageMaterial,isFabricIntermediateProcessing,isFabricStageSource,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,assertMaterialReturnReversal,materialIssueReturnTotals,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
 import {sampleSendPurpose,sampleSendBlocker,SAMPLE_SEND_PURPOSES,type SampleSendPurpose} from './mistSampleSending';
 import {assertOrderFundingAfterInvoiceRemoval,assertOrderShipmentPaymentCovered} from './mistOrderFunding';
 import { preparePurchaseDocumentSnapshot, purchaseDocumentFingerprint, type PurchaseDocumentArtifact, type PurchaseDocumentRecord } from './mistPurchaseDocument';
@@ -1037,6 +1037,8 @@ const purchaseCommitmentKey = (p: FulfillmentPurchase) => `supplierCommitment.ap
 /** sup11：变更前置条件，申请和批准时都按当时事实重新核对；返回首个阻断原因。 */
 function purchaseAmendmentProblem(root: MistState, p: FulfillmentPurchase, to: FulfillmentPurchaseTerms): string {
     if (p.state !== 'approved') return '仅已批准的合同可以变更';
+    const finishedProblem = garmentFinishedPurchaseProblem(get(root.orders,p.orderId,'来源订单'),get(root.orderLines,p.lineId,'来源订单条目'),p.kind,p.unit,to.quantity);
+    if (finishedProblem) return finishedProblem;
     const payables = root.payables, settlements = (payables?.settlements || []).filter(s => s.purchaseId === p.id);
     const settled = sum(settlements.filter(s => s.state === 'confirmed').map(s => s.quantity)), settling = settlements.some(s => s.state === 'pending');
     const billed = (payables?.bills || []).filter(b => b.state === 'open').flatMap(b => b.lines).filter(l => l.purchaseId === p.id).reduce((n, l) => n + mistMoneyMinor(l.amount), 0);
@@ -1362,6 +1364,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
     if (['fulfillment.procurement.submit','fulfillment.procurement.send','fulfillment.procurement.confirm','fulfillment.procurement.receive'].includes(command.type) || command.type === 'fulfillment.procurement.decide' && p.decision === 'approved') {
         const purchase = get(f.purchases, p.id, '采购'), order = get(root.orders, purchase.orderId, '订单'), line = get(root.orderLines, purchase.lineId, '订单条目');
         assertGarmentProcurement(order, line, purchase.kind, purchase.materialKind, root, purchase.id);
+        const finishedProblem = garmentFinishedPurchaseProblem(order,line,purchase.kind,purchase.unit,purchase.quantity);
+        if (finishedProblem) fail(finishedProblem);
         if (order.governance?.contract.internalSupply && ['fulfillment.procurement.submit','fulfillment.procurement.send','fulfillment.procurement.confirm'].includes(command.type)) normalizeInternalSupply(order.governance.contract, order, ctx);
     }
     switch (command.type) {
@@ -1885,6 +1889,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (!['material', 'finished', 'processing'].includes(p.kind))
                 fail('采购类型无效');
             const quantity = qty(p.quantity), price = qty(p.price, '单价', true);
+            const finishedProblem = garmentFinishedPurchaseProblem(order,get(root.orderLines,p.lineId,'订单条目'),p.kind,text(p.unit,'单位'),quantity);
+            if (finishedProblem) fail(finishedProblem);
             lineAmount(quantity, price);
             const supplierId = text(p.supplierId, '供应商ID'), supplierRecord = get(root.market.suppliers, supplierId, '供应商');
             const supplierBlocked = productionSupplierUnavailableReason(supplierRecord, supplierBusinessDay(ctx.now));

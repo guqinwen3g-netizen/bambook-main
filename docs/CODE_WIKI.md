@@ -33,6 +33,7 @@
 - **账号引用（2026-11-09）**：解析负责人、经手人或借用人账号的命令，须登记于 `server/src/shared/mistAccounts.ts#MIST_MEMBER_DIRECTORY_COMMANDS`，由 `repository.ts#executeInternal` 在当前事务构建成员目录；预演复用同一路径。样品借出 `fulfillment.samples.move` 也在此列，提交账号 ID 后以服务端姓名落快照，拒绝公司外或停用账号。仓储回归见 `mist/memberCommandAccess.test.ts`，不能仅用带手工目录的领域单测代替真实调用链。
 - **行级范围**：`server/src/shared/mistDataScope.ts`。读投影按小组/指定人裁剪；写入用写前目标检查 + 写后差异检查。跨组交接（如内部面料、内部交付）只开放该记录的最小投影（`scopedFabricAccess` 等），不公开隐藏来源订单的商业信息。
 - **审批**：不能审批本人提交的单据；审批权限与额度见 `pages/modules/AdminApprovalAuthorities.tsx` 及各领域 `decide` 命令。
+- **默认审批策略（2026-11-13核实）**：`mist/context.ts#mistApprovalAuthority` 对主单、采购及加工，在无有效显式名单时按公司组织关系查找当前有资格的部门主管或上级。设置页空名单显示「按组织审批」，不据此宣称提交阻塞，也不保证每位发起人都有可用审批人；提交和决定时仍重载资格、业务域与公司边界。配置并发版本留在请求与存储中，不作为员工界面字段展示。
 - **已确认规则**：教学与验证不在共享环境变更账号权限；岗位示例只在本地演示公司演示。
 
 ## 4. 业务真源索引（按业务链）
@@ -70,6 +71,8 @@
 报价成本口径（2026-11-13）：`mistMarket.ts#quotationProductCost/sourceLine` 仅在档案与报价的币种、计价单位均一致且成本为正时采用档案成本；不把每码、每米、每公斤或每件成本直接互用，也不隐式折汇。`MarketPages.tsx#QuotationEditor` 同步使用该规则，匹配的档案成本只读，改变币种或单位后清掉沿用成本。人工参考成本保持 `unverified` 并进入业务审批；需要结构化换算及依据时沿既有条目专业核算办理。新保存规则不回写旧报价、批准记录或正式单据。
 
 订单审批金额（2026-11-13）：`mistOrderGovernance.ts#getOrderGovernanceReviews/reviewAmount` 从本轮冻结快照逐条计算金额并按分相加，主单和变更均显示该轮合同总额，不读取当前主单缓存金额或后续草稿。内部未定价显示「未定价」，损坏历史金额显示「金额待核对」，补发单仍按无需客户收款呈现。新增字段只在读取审批时派生，不改审批、签字或经营历史。
+
+成衣成品采购（2026-11-13）：`mistInternalFabric.ts#garmentFinishedPurchaseProblem` 要求与订单条目同单位且合同数量为整数；`mistFulfillment.ts` 在保存和提交/批准/发出/确认/收货的合同重查，以及变更提出/批准时共用该规则。材料不套用此限制，面料仍支持实际小数数量，不自动换算或改写历史。该约束针对合同及变更数量，实际收货、拒收和退回数量不能据此推定已覆盖，另随物理流转场景验证。
 
 ## 5. 跨模块交接（主线）
 

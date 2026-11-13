@@ -144,6 +144,13 @@ export function garmentMaterialBlocker(root: MistState, orderId: string, lineId:
   try { assertGarmentMaterial(root, orderId, lineId, context); return ''; } catch (error) { if (error instanceof MistCommandError) return error.message; throw error; }
 }
 /** Material classification is a stored business field, never inferred from a description. */
+/** A finished garment purchase supplies the same physical pieces as its order line; materials keep their own units. */
+export function garmentFinishedPurchaseProblem(order:Pick<MistOrder,'type'>,line:Pick<MistOrderLine,'unit'>,kind:string,unit:string,quantity:number):string{
+  if(order.type!=='garment'||kind!=='finished')return '';
+  if(unit.trim()!==line.unit.trim())return `成衣成品计量单位须与订单条目一致（${line.unit}）；系统不自动换算`;
+  if(!Number.isInteger(quantity))return '成衣成品数量须为整数';
+  return '';
+}
 export function assertGarmentProcurement(order: Pick<MistOrder, 'type'> & {id?:string}, line: GarmentFulfillmentFields & {id?:string}, kind: string, materialKind: unknown, root?:MistState, purchaseId?:string): MistMaterialKind | undefined {
   if (order.type === 'garment' && kind === 'finished' && normalizeGarmentFulfillment(line).fulfillmentMode !== 'full_package') fail('仅全包条目可采购成衣成品');
   if(order.type==='garment'&&root&&order.id&&line.id){
