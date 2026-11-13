@@ -94,6 +94,8 @@
 
 来料计量与已处置入口（2026-11-14，分支待发布）：`QcWorkbenchPage.tsx#qcSamplingUnit`优先取准确来料任务的`incoming.unit`，再取对应订单条目单位；`QcSampling.tsx#AqlCard`与报告卡片共用该单位，不用成衣主单的“件”覆盖辅料“套”或外箱“个”。仅改变显示，不换算数量、不修改AQL数据或重写历史报告。来料已经`releasedAt`时，工作台禁用追加报告，提前对齐`mistFulfillment.ts#fulfillment.qc.report`既有的已处置约束；仓库解除待检仍由`fulfillment.qc.incoming.close`办理。来料报告通过不会自动解锁、发料或点收，发料沿`materialDelivery`关联准确加工分支与接收人。相关界面回归覆盖原单位录入/提交/回读、成衣件数默认及已放行/拒收批次锁定，实际走查范围见GO-LIVE。
 
+QC质量决定与工厂费用（2026-11-14，分支待发布）：`mistQcDisposition.ts#currentQcDisposition`在准确当前报告内优先取最近的返工/让步决定，仅有费用记录时才回落到扣款；财务追加记录不能替代质量决定或遮住其审批。`fulfillment.qc.dispose`允许两类记录按任意先后顺序追加，已批准让步的原NOK报告仍可登记工厂费用，原报告/审批/业务继续不变。质量方案仍互斥、扣款单独不能放行、新报告不继承旧让步、负责人/有效审批资格和禁止自批、最终结算后改走索赔的约束保留。`QcDispositionPanel`在待批/已批准让步下保留追加费用入口；`openQcChargebacks`仍仅把未携带费用传入结算的争议栏，不改结算原金额或自动实付。组合回归覆盖两种顺序、返工与让步、审批前后、过期报告、准确门禁及结算携带一次；浏览器和完整验证状态见GO-LIVE。
+
 出运条款回程（2026-11-13）：`ShipmentsPage.tsx#ShipmentEditor/ShipmentEditorDraft`在就地核对合同条款前保存完整本机草稿，返回时恢复来源行、数量、工厂确认日及运输字段；保存/取消均不丢输入，恢复不重复按合同覆盖运输草稿，之后主动更换来源仍重新预填合同。`useRouteDraft`绑定账号与工作区，草稿不写成正式出运；真实出运仍由用户确认请求。
 
 生成单据分页（2026-11-13）：`server/src/templates/generatedDocument.ts#renderGeneratedDocumentHtml`保留跨页重复表头，整票合计仅随最后一行打印，不使用浏览器默认的重复表尾。仅修打印样式；快照、数量金额、归档与签发规则不变。已生成原件不会自动替换；草稿从单据中心重新生成，旧PDF及摘要仍在生成历史中保留。

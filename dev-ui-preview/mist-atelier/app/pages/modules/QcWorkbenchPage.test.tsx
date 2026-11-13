@@ -323,6 +323,17 @@ it('lets the order owner choose a rework and requires the customer file for a co
   expect(store.run).not.toHaveBeenCalled();expect(again.textContent).toContain('附文件');
 });
 
+it.each(['pending','approved'] as const)('keeps financial deductions separate from a %s concession in the current report',async status=>{
+ session.id='sales';store.state!.orders.push({id:'o',code:'SO-G',type:'garment',ownerId:'sales'} as any);store.state!.orderLines.push({id:'l',orderId:'o',name:'大衣',style:'CC-014',unit:'件',qty:80} as any);
+ store.state!.productions.push({id:'prod',orderId:'o',lineId:'l',sourcePurchaseId:'po',factory:'江南成衣',qty:80} as any);store.state!.fulfillment.purchases.push({id:'po',code:'PO-9',currency:'CNY'} as any);
+ store.state!.fulfillment.qcReports.push({id:'r1',taskId:'nok',result:'reject',report:'QC-B02',measurements:[],fileIds:[],reviewer:'QC甲',reviewedAt:'2026-11-14T01:00:00Z'} as any);
+ store.state!.fulfillment.qcTasks.push(task('nok',{kind:'production',source:{kind:'orderLine',orderId:'o',lineId:'l',productionId:'prod'},state:status==='approved'?'reported':'blocked',reportIds:['r1'],dispositions:[{id:'concession',kind:'concession',reportId:'r1',status,scope:'L码6件',customerEvidence:'客户文件',note:'范围接受',fileIds:[],requesterId:'sales',requester:'业务员',at:'2026-11-14'},{id:'deduction',kind:'chargeback',reportId:'r1',status:'open',amount:120,currency:'CNY',purchaseId:'po',purchaseCode:'PO-9',note:'费用折让',fileIds:[],requesterId:'sales',requester:'业务员',at:'2026-11-14'}]}));
+ render('nok');expect(queryByRole(host,'button',{name:'选择处置方式'})).toBeNull();await click(getByRole(host,'button',{name:'登记工厂扣款'}));
+ const dialog=getByRole(document.body,'dialog',{name:'不合格处置'});expect(within(dialog).queryByRole('radio',{name:/让步接收/})).toBeNull();expect(within(dialog).queryByRole('radio',{name:/返工/})).toBeNull();
+ typeInto(within(dialog).getByRole('spinbutton',{name:'扣款金额'}) as HTMLInputElement,'12.5');typeInto(within(dialog).getByRole('textbox',{name:'处置说明'}) as HTMLTextAreaElement,'另一笔独立质量费用');await click(within(dialog).getByRole('button',{name:'保存'}));
+ expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.dispose',payload:expect.objectContaining({id:'nok',kind:'chargeback',amount:12.5})});
+});
+
 it('computes the AQL decision in the production report and lets the warehouse release an inspected incoming lot',async()=>{
   store.state!.orders.push({id:'o',code:'SO-G',type:'garment',ownerId:'sales'} as any);store.state!.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',unit:'件',qty:1200} as any);
   store.state!.productions.push({id:'prod',code:'FUL-1',orderId:'o',lineId:'l',order:'SO-G',name:'风衣',factory:'华美制衣',qty:1200,due:'2026-10-30',pct:50,img:'coat',col:'sew'} as any);

@@ -56,6 +56,37 @@ describe('production QC NOK disposition',()=>{
   expect(st.disputes).toEqual([expect.objectContaining({description:'QC 扣款：返修费由工厂承担',amount:12.5})]);
   expect(openQcChargebacks(t.f.state,t.purchaseId)).toHaveLength(0);
  });
+ it.each(['rework','concession'] as const)('adds a financial chargeback without replacing the current %s decision',kind=>{
+  const t=failed();
+  t.run({type:'fulfillment.qc.dispose',payload:{id:t.taskId,kind,note:'准确缺陷的质量处置',...(kind==='rework'?{factory:'本地验收工厂',due:'2026-10-20'}:{scope:'M码4件',customerEvidence:'客户书面同意',fileIds:['buyer-ok']})}});
+  const physical=structuredClone(currentQcDisposition(t.task())!);
+  t.run({type:'fulfillment.qc.dispose',payload:{id:t.taskId,kind:'chargeback',note:'同批工厂质量折让',amount:12.5}});
+  expect(currentQcDisposition(t.task())).toEqual(physical);expect(openQcChargebacks(t.f.state,t.purchaseId)).toHaveLength(1);expect(t.task().state).toBe('blocked');
+  expect(()=>assertProductionTransition(t.f.state,t.branch(),'done',100)).toThrow('质量');
+  if(kind==='concession'){
+   expect(getMistReviewTasks(t.f.state).find(x=>x.entityId===physical.id)).toMatchObject({status:'pending'});
+   t.run({type:'fulfillment.qc.concession.decide',payload:{id:physical.id,decision:'approved',note:'按准确客户范围同意'}},'reviewer');
+   expect(()=>assertProductionTransition(t.f.state,t.branch(),'done',100)).not.toThrow();
+  }
+ });
+ it.each(['rework','concession'] as const)('allows %s after a chargeback without treating money as a quality release',kind=>{
+  const t=failed();t.run({type:'fulfillment.qc.dispose',payload:{id:t.taskId,kind:'chargeback',note:'先明确工厂费用',amount:12.5}});
+  expect(()=>assertProductionTransition(t.f.state,t.branch(),'done',100)).toThrow('质量');
+  t.run({type:'fulfillment.qc.dispose',payload:{id:t.taskId,kind,note:'质量仍需独立处理',...(kind==='rework'?{due:'2026-10-20'}:{scope:'M码4件',customerEvidence:'客户书面同意',fileIds:['buyer-ok']})}});
+  const physical=structuredClone(currentQcDisposition(t.task())!);expect(physical.kind).toBe(kind);expect(openQcChargebacks(t.f.state,t.purchaseId)).toHaveLength(1);
+  expect(()=>t.run({type:'fulfillment.qc.dispose',payload:{id:t.taskId,kind:'rework',note:'不得另选',due:'2026-10-20'}})).toThrow('已选择');
+  t.f.report(t.taskId,'reject');expect(currentQcDisposition(t.task())).toBeUndefined();expect(openQcChargebacks(t.f.state,t.purchaseId)).toHaveLength(1);
+  if(kind==='concession')expect(()=>t.run({type:'fulfillment.qc.concession.decide',payload:{id:physical.id,decision:'approved',note:'旧报告不得批准'}},'reviewer')).toThrow('新的QC报告');
+ });
+ it('keeps an approved concession effective when its chargeback is recorded later and carries only the money into settlement',()=>{
+  const t=failed();const r=t.run({type:'fulfillment.qc.dispose',payload:{id:t.taskId,kind:'concession',note:'外观范围接受',scope:'M码4件',customerEvidence:'客户书面同意',fileIds:['buyer-ok']}}) as {dispositionId:string};
+  t.run({type:'fulfillment.qc.concession.decide',payload:{id:r.dispositionId,decision:'approved',note:'同意'}},'reviewer');const continued=structuredClone(t.task().businessContinued),report=structuredClone(t.f.state.fulfillment.qcReports.at(-1));
+  t.run({type:'fulfillment.qc.dispose',payload:{id:t.taskId,kind:'chargeback',note:'供方另承担费用',amount:12.5}});
+  expect(currentQcDisposition(t.task())).toMatchObject({id:r.dispositionId,status:'approved'});expect(t.task().businessContinued).toEqual(continued);expect(t.f.state.fulfillment.qcReports.at(-1)).toEqual(report);
+  expect(()=>assertProductionTransition(t.f.state,t.branch(),'done',100)).not.toThrow();
+  const receipt=t.f.state.fulfillment.receipts.find(x=>x.purchaseId===t.purchaseId)!;t.run({type:'payable.settlement.submit',payload:{purchaseId:t.purchaseId,receiptIds:[receipt.id]}});
+  expect(t.f.state.payables!.settlements.at(-1)!.disputes).toEqual([expect.objectContaining({amount:12.5,description:'QC 扣款：供方另承担费用'})]);expect(openQcChargebacks(t.f.state,t.purchaseId)).toHaveLength(0);
+ });
  it('only the order owner disposes, and only a failed production task',()=>{
   const t=failed();
   expect(()=>t.run({type:'fulfillment.qc.dispose',payload:{id:t.taskId,kind:'rework',note:'x',due:'2026-10-20'}},'qc-user')).toThrow('订单负责人');
