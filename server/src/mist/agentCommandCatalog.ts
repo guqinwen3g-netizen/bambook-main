@@ -497,7 +497,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "files.add",
   "payload": "{ file: MistFile }",
   "types": {
-   "MistFile": "{ id: string; name: string; mimeType: string; size: number; storageKey: string; createdAt: string; uploadedBy?: string; url?: string }"
+   "MistFile": "{ id: string; name: string; mimeType: string; size: number; storageKey: string; createdAt: string; uploadedBy?: string; url?: string; sha256?: string }"
   },
   "source": "server/src/shared/mistWorkspace.ts"
  },

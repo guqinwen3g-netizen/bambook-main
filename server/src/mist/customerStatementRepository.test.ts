@@ -4,7 +4,8 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import * as contract from '../shared/mistWorkspace';
-import {customerStatementContent,customerStatementsOf,statementAge} from '../shared/mistCustomerStatement';
+import {customerStatementContent,customerStatementsOf,statementAge,CUSTOMER_STATEMENT_TEMPLATE_VERSION} from '../shared/mistCustomerStatement';
+import {renderCustomerStatementHtml} from '../templates/customerStatement';
 import {MistRepository,type MistCommandRequest} from './repository';
 import {MistPrivateFiles} from './files';
 import {MemoryMistDatabase,testActor,testAuthority} from './__tests__/support';
@@ -34,6 +35,24 @@ beforeEach(async()=>{
 afterEach(async()=>{vi.restoreAllMocks();await rm(directory,{recursive:true,force:true});});
 
 describe('客户对账单',()=>{
+ it('separates active bank fees and write-offs from received cash, excludes reversals, and leaves posted balances unchanged',async()=>{
+  const s=state(),invoice=s.invoices.find(i=>i.code==='INV-G-2026-0412')!;invoice.amount=1000;invoice.open=885;
+  invoice.bankCharges=[{id:'fee',receiptId:'r',amount:3,currency:'USD',reason:'Bank notice',at:now,actor:'Finance'},{id:'old-fee',receiptId:'r',amount:7,currency:'USD',reason:'Old notice',at:now,actor:'Finance',reversed:{at:now,actor:'Finance',reason:'Correction'}}];
+  invoice.writeoffs=[{id:'writeoff',kind:'difference',amount:2,currency:'USD',reason:'Approved difference',at:now,actor:'Finance'},{id:'old-writeoff',kind:'difference',amount:11,currency:'USD',reason:'Old difference',at:now,actor:'Finance',reversed:{at:now,actor:'Finance',reason:'Correction'}}];
+  s.allocations=s.allocations.filter(a=>a.invoiceId!==invoice.id);s.allocations.push({id:'cash',invoiceId:invoice.id,receiptId:'r',amount:100,currency:'USD',createdAt:now,actor:'Finance'});
+  s.platform.creditApplications=s.platform.creditApplications.filter(a=>a.invoiceId!==invoice.id);s.platform.creditApplications.push({id:'credit',creditId:'cn',invoiceId:invoice.id,amount:10,at:now,actor:'Finance'});
+  const ledger=structuredClone({invoices:s.invoices,allocations:s.allocations,receipts:s.receipts,bankAccounts:s.bankAccounts});
+  await generate('adjustments',{customerId:'customer-0'});const rec=customerStatementsOf(state(),'customer-0')[0],line=rec.snapshot.sections[0].lines.find(l=>l.invoiceId===invoice.id)!;
+  expect(line).toMatchObject({amount:'1000.00',received:'100.00',credited:'10.00',bankCharges:'3.00',writtenOff:'2.00',open:'885.00'});expect(CUSTOMER_STATEMENT_TEMPLATE_VERSION).toBe(2);expect(rec.templateVersion).toBe(2);
+  expect(Number(line.amount)-Number(line.received)-Number(line.credited)-Number(line.bankCharges)-Number(line.writtenOff)).toBe(Number(line.open));
+  const html=htmls[0],adjustments=html.match(/<tr data-invoice-adjustments="INV-G-2026-0412">[\s\S]*?<\/tr>/)?.[0];expect(adjustments).toContain('Bank charges');expect(adjustments).toContain('3.00');expect(adjustments).toContain('Write-off adjustments');expect(adjustments).toContain('2.00');expect(adjustments).not.toContain('7.00');expect(adjustments).not.toContain('11.00');
+  expect({invoices:state().invoices,allocations:state().allocations,receipts:state().receipts,bankAccounts:state().bankAccounts}).toEqual(ledger);
+ });
+ it('keeps archived v1 snapshots renderable without new fields and does not invent an adjustment for them',async()=>{
+  await generate('legacy',{customerId:'customer-1'});const snapshot=structuredClone(customerStatementsOf(state(),'customer-1')[0].snapshot);snapshot.templateVersion=1;
+  for(const section of snapshot.sections)for(const line of section.lines){delete line.bankCharges;delete line.writtenOff;}
+  const before=structuredClone(snapshot),html=renderCustomerStatementHtml(snapshot);expect(html).toContain('Template v1');expect(html).not.toContain('<tr data-invoice-adjustments');expect(html).not.toContain('NaN');expect(snapshot).toEqual(before);
+ });
  it('按币种列未结应收、同名待核销到账、账龄与净欠款，冻结快照并归档 PDF',async()=>{
   await generate('soa-1',{customerId:'customer-1'});
   const [rec]=customerStatementsOf(state(),'customer-1');

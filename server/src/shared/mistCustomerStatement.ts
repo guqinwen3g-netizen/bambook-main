@@ -6,18 +6,18 @@
  * 收款账户按币种取未销户的公司银行账户，缺省回落到公司档案的开户行与账号。
  */
 import { mistInvoiceCustomerId } from './mistOpeningBalance';
-import { MistCommandError, isRecognizedMistInvoice, type MistCompanyProfile, type MistContext, type MistState } from './mistWorkspace';
+import { MistCommandError, isRecognizedMistInvoice, mistInvoiceBankChargeMinor, mistInvoiceWriteoffMinor, type MistCompanyProfile, type MistContext, type MistState } from './mistWorkspace';
 import { platformBusinessDate } from './mistPlatform';
 import { creditDocumentFingerprint } from './mistCreditDocuments';
 
-export const CUSTOMER_STATEMENT_TEMPLATE_VERSION = 1 as const;
+export const CUSTOMER_STATEMENT_TEMPLATE_VERSION = 2 as const;
 export type StatementAgeBucket = 'not-due' | '1-30' | '31-60' | '61-90' | '90+' | 'unknown';
 export const STATEMENT_AGE_BUCKETS: StatementAgeBucket[] = ['not-due', '1-30', '31-60', '61-90', '90+', 'unknown'];
 export const STATEMENT_AGE_LABEL: Record<StatementAgeBucket, { zh: string; en: string }> = {
   'not-due': { zh: '未到期', en: 'Not due' }, '1-30': { zh: '逾期 1–30 天', en: '1–30 days' }, '31-60': { zh: '逾期 31–60 天', en: '31–60 days' },
   '61-90': { zh: '逾期 61–90 天', en: '61–90 days' }, '90+': { zh: '逾期 90 天以上', en: 'Over 90 days' }, unknown: { zh: '到期日未记录', en: 'No due date' },
 };
-export type StatementLine = { invoiceId: string; code: string; reference: string; issuedAt: string; due: string; amount: string; received: string; credited: string; open: string; daysOverdue: number | null; bucket: StatementAgeBucket };
+export type StatementLine = { invoiceId: string; code: string; reference: string; issuedAt: string; due: string; amount: string; received: string; credited: string; /** Absent in immutable v1 archives. */ bankCharges?: string; writtenOff?: string; open: string; daysOverdue: number | null; bucket: StatementAgeBucket };
 export type StatementUnapplied = { receiptId: string; code: string; date: string; reference: string; amount: string };
 export type StatementRemit = { bankName: string; accountName: string; accountNo: string; swift: string };
 export type StatementSection = { currency: string; lines: StatementLine[]; unapplied: StatementUnapplied[]; totalOpen: string; totalUnapplied: string; net: string; aging: Array<{ bucket: StatementAgeBucket; amount: string }>; remit: StatementRemit[] };
@@ -65,7 +65,7 @@ export function customerStatementContent(root: MistState, customerId: string, as
       const received = root.allocations.filter(a => a.invoiceId === i.id && a.currency === currency).reduce((n, a) => n + minor(a.amount), 0);
       const credited = credits.filter(a => a.invoiceId === i.id).reduce((n, a) => n + minor(a.amount), 0), age = statementAge(i.due, asOf);
       const reference = i.devId ? (root.devs.find(d => d.id === i.devId)?.code || '') : (i.order || root.orders.find(o => o.id === i.orderId)?.code || '');
-      return { invoiceId: i.id, code: i.code, reference, issuedAt: i.issuedAt || '', due: i.due || '', amount: fmt(minor(i.amount)), received: fmt(received), credited: fmt(credited), open: fmt(minor(i.open)), daysOverdue: age.days, bucket: age.bucket };
+      return { invoiceId: i.id, code: i.code, reference, issuedAt: i.issuedAt || '', due: i.due || '', amount: fmt(minor(i.amount)), received: fmt(received), credited: fmt(credited), bankCharges: fmt(mistInvoiceBankChargeMinor(i)), writtenOff: fmt(mistInvoiceWriteoffMinor(i)), open: fmt(minor(i.open)), daysOverdue: age.days, bucket: age.bucket };
     });
     const unapplied = receipts.filter(r => r.currency === currency).sort((a, b) => a.date.localeCompare(b.date) || a.code.localeCompare(b.code)).map(r => ({ receiptId: r.id, code: r.code, date: r.date, reference: r.ref || '', amount: fmt(minor(r.remaining)) }));
     const totalOpen = lines.reduce((n, l) => n + Math.round(Number(l.open) * 100), 0), totalUnapplied = unapplied.reduce((n, u) => n + Math.round(Number(u.amount) * 100), 0);

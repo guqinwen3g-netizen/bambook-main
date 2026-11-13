@@ -88,7 +88,7 @@
 
 报关数量（2026-11-13）：`mistCustomsDeclaration.ts#customsQuantityProblem/customsQuantityStep`按每个实际法定单位校验，件、套、条、双、个须为安全整数；第一、第二单位同样约束。米、千克等连续数量保留四位小数，不能舍入成0后保存。生成商品项和手工调整均校验；`CustomsDeclarationPanel.tsx#adjustItemSpec`使用同一规则在界面保存前阻止错误输入，保留原有调整依据与历史，不改成交数量、价格或库存。
 
-应收台账分项（2026-11-13）：`InvoicePage.tsx#invoiceFinancialFacts/exportRows`分别列到账核销、贷项抵扣、银行扣费、核销调整、未收和待核对差额；按票据原币勾稽，不跨币种合计。核销采用`mistInvoiceWriteoffMinor`的有效记录，扣费与核销冲回后不再计入，真实未解释差额保留，不倒填余额或虚构现金。页面与CSV共用该读模型；客户对账单使用独立的`mistCustomerStatement.ts`快照及PDF模板，不能据此宣告对账单口径已经验收。
+应收台账分项（2026-11-13）：`InvoicePage.tsx#invoiceFinancialFacts/exportRows`分别列到账核销、贷项抵扣、银行扣费、核销调整、未收和待核对差额；按票据原币勾稽，不跨币种合计。核销采用`mistInvoiceWriteoffMinor`的有效记录，扣费与核销冲回后不再计入，真实未解释差额保留，不倒填余额或虚构现金。页面与CSV共用该读模型。客户对账单使用独立的`mistCustomerStatement.ts`快照及`templates/customerStatement.ts`：v2新增有效银行扣费/核销调整，打印为对应票据下的金额行，未收继续取正式台账；v1历史字段可缺省、归档原件不重写。不得把这些账务调整当作实际现金。资金归属与同名待核销口径尚待独立收口，分项通过不等于整份对账单验收通过。
 
 离港表单恢复（2026-11-13）：`ShipmentDepartureDialog.tsx`依据当前工作区的授权快照核实来源；已出运、取消、不可见、仅部分可见或切换公司时撤下旧表单，不能继续用打开时的旧对象提交。未知网络结果显示“待核对”，原请求仍走既有核对入口；不把其他对象的回执当成本票成功。库存扣减由同一离港事务及幂等回执保护，关闭表单不新增写入。相关回归已覆盖，完整丢回执场景须在新版本的下一票真实模拟出运重演。
 
