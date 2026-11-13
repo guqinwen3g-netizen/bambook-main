@@ -77,6 +77,8 @@ export function ProcurementPage() {
   // The shell already shows a workspace read error; this card only carries the page's own operation failure.
   usePageFailure('采购操作未完成', failure);
   const [rfqTab, setRfqTab] = React.useState(!!route.section?.startsWith('rfq'));
+  const routedRfq=state?readRfqs(state).find(r=>r.id===route.id):undefined;
+  React.useEffect(()=>{if(route.section?.startsWith('rfq')||routedRfq)setRfqTab(true);},[route.id,route.section,!!routedRfq]);
   const presetSupplierId = route.section?.startsWith('rfq:') ? route.section.slice(4) : undefined;
   React.useEffect(() => { if (route.id) { setPicked(route.id); setDomainChoice(null); setEntryChoice(null); } }, [route.id]);
   const day = supplierBusinessDay(businessNow());
@@ -90,7 +92,7 @@ export function ProcurementPage() {
   const all = state?.fulfillment.purchases || [];
   const inScope = all.filter(p => !route.orderLineId || (!!sourceLine && p.lineId === sourceLine.id && p.orderId === sourceLine.orderId));
   const routed = all.find(p => p.id === route.id);
-  const domain: Domain = domainChoice || routed?.domain || sourceOrder?.type || (inScope.some(p => p.domain === 'garment') || !inScope.some(p => p.domain === 'fabric') ? 'garment' : 'fabric');
+  const domain: Domain = domainChoice || routedRfq?.domain || routed?.domain || sourceOrder?.type || (inScope.some(p => p.domain === 'garment') || !inScope.some(p => p.domain === 'fabric') ? 'garment' : 'fabric');
   const domainRows = inScope.filter(p => p.domain === domain);
   const entry: Entry = entryChoice || (routed && routed.domain === domain ? entryOf(routed) : domainRows.some(p => entryOf(p) === 'purchase') || !domainRows.some(p => entryOf(p) === 'processing') ? 'purchase' : 'processing');
   const entryRows = domainRows.filter(p => entryOf(p) === entry);
@@ -291,7 +293,7 @@ export function ProcurementPage() {
     <Tabs<Entry | 'rfq'> value={rfqTab ? 'rfq' : entry} onChange={value => { if (value === 'rfq') setRfqTab(true); else { setRfqTab(false); changeEntry(value); } }} options={[{ value: 'purchase', label: '采购订单', count: domainRows.filter(p => entryOf(p) === 'purchase').length }, { value: 'processing', label: '委外加工单', count: domainRows.filter(p => entryOf(p) === 'processing').length }, { value: 'rfq', label: '询价比价', count: state ? readRfqs(state).filter(r => r.domain === domain && r.state === 'open' && (!route.orderLineId || r.lineId === route.orderLineId)).length : 0 }]} />
     {rfqTab ? <>
       <Toolbar><SearchField value={query} onChange={setQuery} placeholder={uiText("搜索询价单号、内容、来源订单或供应商")} /></Toolbar>
-      <RfqLedger state={state || undefined} day={day} domain={domain} needle={needle} can={can} locked={locked} loading={loading} open={setDialog} run={run} presetSupplierId={presetSupplierId} sourceLineId={route.orderLineId} blockedSource={blockedSource || sourceHint}
+      <RfqLedger key={JSON.stringify([workspace?.id,session.sessionKey,session.user?.id,domain,route.orderLineId])} selectedId={route.id} state={state || undefined} day={day} domain={domain} needle={needle} can={can} locked={locked} loading={loading} open={setDialog} run={run} presetSupplierId={presetSupplierId} sourceLineId={route.orderLineId} blockedSource={blockedSource || sourceHint}
         onPurchase={id => { setRfqTab(false); setPicked(id); setDrawer(true); setEntryChoice(null); go('procurement', id); }} onSupplier={id => go('suppliers', id)} />
     </> : <>
     <Toolbar>

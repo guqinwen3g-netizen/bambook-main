@@ -300,6 +300,18 @@ it.each(['dialog','page'])('renders a checkbox label once in a %s and retains it
  expect(submit).toHaveBeenCalledWith({move:false});
 });
 
+it.each(['dialog','page'])('uploads file fields and submits references from a %s',async surface=>{
+ const file={id:'technical-file-id',name:'报价原件.pdf',mimeType:'application/pdf',size:5,storageKey:'test/file',createdAt:'2026-11-14T01:00:00Z'};
+ bridge.workspace.state={files:[file]};bridge.workspace.uploadFile=vi.fn(async()=>file);
+ const submit=vi.fn(async()=>({})),spec:ModuleEditorSpec={title:'登记报价',submitLabel:'确认保存',initialValues:{files:''},fields:[{key:'files',label:'报价原件',type:'files',required:true}],submit};
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<MistRoot><ToastProvider>{surface==='page'?<ModuleEditorPage spec={spec} onClose={vi.fn()}/>:<ModuleEditorDialog spec={spec} onClose={vi.fn()}/>}</ToastProvider></MistRoot>));
+ expect(getByRole(document.body,'button',{name:'报价原件'})).toBeTruthy();expect(queryByRole(document.body,'textbox',{name:'报价原件'})).toBeNull();
+ const input=document.body.querySelector('input[type=file]') as HTMLInputElement;Object.defineProperty(input,'files',{value:[new File(['%PDF'],file.name,{type:'application/pdf'})]});await act(async()=>input.dispatchEvent(new Event('change',{bubbles:true})));
+ expect(bridge.workspace.uploadFile).toHaveBeenCalledTimes(1);expect(document.body.textContent).toContain(file.name);
+ if(surface==='page'){await act(async()=>getByRole(host,'button',{name:'下一步'}).click());expect(host.textContent).toContain(file.name);expect(host.textContent).not.toContain(file.id);}
+ await act(async()=>getByRole(document.body,'button',{name:'确认保存'}).click());expect(submit).toHaveBeenCalledWith({files:file.id});
+});
+
 it('translates dialog interface descriptions without translating business input values',async()=>{
  const original=readDevice('locale');try{writeDevice('locale','en-US');const spec:ModuleEditorSpec={title:'解冻往来',description:'Maison Lune · 当前负责人 林澈',initialValues:{reason:'原业务依据保持中文'},fields:[{key:'reason',label:'解冻说明',type:'textarea'}],submit:vi.fn()};host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<MistRoot><ToastProvider><ModuleEditorDialog spec={spec} onClose={vi.fn()}/></ToastProvider></MistRoot>));expect(getByRole(document.body,'dialog',{name:'Restore trading'})).toBeTruthy();expect(document.body.textContent).toContain('Maison Lune · Current owner: 林澈');expect((document.body.querySelector('textarea') as HTMLTextAreaElement).value).toBe('原业务依据保持中文');expect(spec.submit).not.toHaveBeenCalled();}finally{writeDevice('locale',original);}
 });

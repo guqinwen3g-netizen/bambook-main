@@ -128,6 +128,8 @@
 
 ### 6.0.1 普通提议的当前可见性
 
+- **询价原件与回程（2026-11-14，分支待发布）**：`SourcingRequests.tsx`将报价/谢绝的原件交给现有文件上传与`rfq.quote.fileIds`，当前与历史答复分别显示只读附件；`mistSourcing.ts`对两类答复共用文件存在校验，缺失引用不能覆盖旧答复。`ModuleEditorPage`沿用对话框的`ModuleFilesInput`，复核页显示授权文件名。`AgentProposalDialog`将询价、供应商、准确报价及附件引用解析为当前可读对象，报价/定标来源缺失时禁止确认；服务端权限与业务门禁继续独立复核。`agentRead.ts`为RFQ链接添加`section=rfq`，`ProcurementPage/RfqLedger`按当前授权数据恢复准确板块和详情，也识别旧版通用采购链接；不因路由ID授予读取权。
+
 - `repository.ts#view` 不只按ownerId返回普通提议，还复用`agentAuditRead.ts#readableCommand`的模块读取边界，并通过`agentTaskVisibility.ts#knownCommandSourcesVisible`核对当前已存在的业务引用。索引来源是权威业务集合，提议载荷、快照及另一集合的同名ID不授予来源可见性。公司银行账户、邮件草稿/发送记录及整单/部分财务记录同样受控；只有部分明细时不返回旧完整提议的整单内容。
 - 无法再查看来源时，返回最小编号/经办人/时间/状态与unavailable标记；原命令、摘要及可能含商业资料的备注不回传。本人仍可拒绝。`member.groups.set`复用现行公司维护权限（公司库users:write，非公司库所有者），不虚构users:read或以公司库创建人替代当前管理员。确认的初查与实际提交事务都重新校验，避免页面看过后权限收回仍能提交。任务提议继续使用6.3的冻结来源与部分覆盖，不用普通提议的保守整单判断取代精确任务来源。
 - 当前边界核验为普通提议的模块、已存在引用和当前行级范围；不把未知自由文字当作新的业务来源证明，也不宣称旧普通提议拥有任务连接的完整读取溯源。测试入口`mist/agentProposalVisibility.test.ts`覆盖跨组、跨集合重名ID、读取权收回、提交事务中的权限变化、安全拒绝、合法新建及公司银行信息。员工步骤见[Agent连接与提议确认SOP](../wiki/sop/agent-connections.md)。

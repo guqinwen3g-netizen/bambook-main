@@ -55,7 +55,7 @@ export const AGENT_OBJECT_TYPES: ObjectType[] = [
   { type: 'bank_account', label: '公司银行账户', scope: 'vouchers:write', path: ['bankAccounts'], view: 'receipts' },
   { type: 'fx_record', label: '锁汇结汇', scope: 'vouchers:read', path: ['fxRecords'], view: 'receipts' },
   { type: 'letter_of_credit', label: '信用证', scope: 'customs:read', path: ['letterOfCredits'], view: 'shipments' },
-  { type: 'rfq', label: '供应商询价', scope: 'procurement:read', path: ['rfqs'], view: 'procurement' },
+  { type: 'rfq', label: '供应商询价', scope: 'procurement:read', path: ['rfqs'], view: 'procurement', section: 'rfq' },
   { type: 'sample_request', label: '客户索样', scope: 'products:read', path: ['sampleRequests'], view: 'samples' },
   { type: 'report_schedule', label: '报表订阅', scope: 'reports:read', path: ['reportSchedules'], view: 'reports' },
   // 出口退税：嵌在 exportRebate 内，读权限 tax:read；计税基数由仓储投影按 sensitive:tax_base 脱敏（金额置 0，标 taxMasked），这里不另行处理。

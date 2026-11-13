@@ -286,6 +286,15 @@ it('transfers an approved contract without receipts to another active supplier a
   expect(go).toHaveBeenCalledWith('procurement','moved');
 });
 
+it.each(['rfq',undefined])('opens the exact fabric RFQ from a return link with section %s',section=>{
+ const f=materialDeliveryFixture(20);store.state=f.state;session.id='owner';
+ store.state.rfqs=[{id:'rfq-return',code:'RFQ-RETURN',orderId:f.source.orderId,lineId:f.source.lineId,kind:'finished',domain:'fabric',description:'Twill supply',quantity:20,unit:'米',currency:'CNY',due:'2099-01-31',destination:'Factory',deadline:'2099-01-10',supplierIds:['mill','factory'],quotes:[],note:'',state:'open',createdAt:'2026-11-14',actor:'Fabric'}];
+ render('rfq-return','list',section?{section}:{});
+ expect((getByRole(host,'tab',{name:/^询价比价/}) as HTMLElement).getAttribute('aria-selected')).toBe('true');
+ expect((getByRole(host,'button',{name:/^面料业务/}) as HTMLElement).getAttribute('aria-pressed')).toBe('true');
+ expect(document.querySelector('[data-rfq-detail="rfq-return"]')?.textContent).toContain('Twill supply');
+ expect(store.run).not.toHaveBeenCalled();
+});
 it('compares RFQ quotes in CNY, requires a reason to award a non-lowest quote, and preselects the supplier the user came from',async()=>{
   const st=store.state!,base={type:'成衣加工',country:'CN',address:'',capabilities:'',capacity:100,capacityUnit:'件',leadDays:7,blockReason:'',contacts:[],fileIds:[],note:'',createdAt:'',updatedAt:'',status:'active' as const};
   st.market.suppliers=[{...base,id:'a',code:'A',name:'江南成衣',ratings:[{id:'r',grade:'A',period:'2026 Q3',note:'',at:'',actor:''}]},{...base,id:'b',code:'B',name:'远山服装'},{...base,id:'c',code:'C',name:'恒彩印花',status:'paused',statusFrom:'2026-10-01'}] as any;

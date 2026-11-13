@@ -6,6 +6,10 @@ import {agentGet,agentQuery} from './agentRead';
 
 const actor={userId:'owner',permissions:['emails:read','orders:read'],roles:[],departmentIds:[],authorizationLoaded:true} as TokenPayload;
 const state=()=>createMistState({id:randomUUID,actorName:'Test',now:'2026-11-01T00:00:00Z'},'empty');
+it('identifies the RFQ section in a supplier inquiry return link',()=>{
+ const s=state();s.rfqs=[{id:'rfq-return',code:'RFQ-RETURN'} as any];const result=agentGet(s,{...actor,permissions:['procurement:read']},'rfq','rfq-return'),url=new URL(result.link!);
+ expect(url.searchParams.get('view')).toBe('procurement');expect(url.searchParams.get('section')).toBe('rfq');expect(url.searchParams.get('id')).toBe('rfq-return');
+});
 it('returns a small deep review record in full rather than dropping it at an arbitrary nesting depth',()=>{
  const s=state(),mail={id:'mail',subject:'Production request',body:'Original message',submissions:[{items:[{source:{review:{details:[{result:'accepted',note:'Complete original fact'}]}}}]}]};s.email.messages.push(mail as any);
  const result=agentGet(s,actor,'email','mail');expect(result.truncated).toBe(false);expect(result.data).toEqual(mail);

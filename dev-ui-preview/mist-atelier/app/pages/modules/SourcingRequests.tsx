@@ -10,10 +10,10 @@ import { fulfillmentSourceLabel, type FulfillmentPurchase } from '../../../../..
 import { RFQ_STATE_LABEL, readRfqs, rfqAwardFlags, rfqComparison, rfqCurrentQuotes, type MistRfq, type RfqComparisonRow } from '../../../../../server/src/shared/mistSourcing';
 import { productionSupplierUnavailableReason } from '../../../../../server/src/shared/mistSupplierStatus';
 import { developmentDomain } from '../../../../../server/src/shared/mistDevelopmentDomain';
-import { downloadModuleXlsx, type ModuleEditorSpec } from './ModuleWorkbench';
+import { downloadModuleXlsx, moduleFileIds, type ModuleEditorSpec } from './ModuleWorkbench';
 import { setComposeIntent } from '../../runtime/composeIntent';
 import { useNav } from '../../nav';
-import { choiceField, emptyOption, Events, field, parseSource, sourceOptions, text, today } from './fulfillmentKit';
+import { choiceField, emptyOption, Events, field, parseSource, sourceOptions, text, today, RecordFiles } from './fulfillmentKit';
 import { parsePurchaseContent, purchaseChoices, purchaseContent, sourceOrderBlocker } from './purchaseContent';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen, type ReasonedAction } from './pageKit';
 import { CURRENCIES, SUPPLIER_PAYMENT_TERMS, UNITS } from '../../runtime/tradeOptions';
@@ -24,11 +24,15 @@ const STATE_TONE: Record<MistRfq['state'], Tone> = { open: 'accent', awarded: 'o
 const num = (v: Record<string, unknown>, key: string) => String(v[key] ?? '').trim();
 const price = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
 
-export function RfqLedger({ state, day, domain, needle, can, locked, loading, open, run, presetSupplierId, sourceLineId, blockedSource, onPurchase, onSupplier }: {
-  state: MistState | undefined; day: string; domain: FulfillmentPurchase['domain']; needle: string; can: boolean; locked: boolean; loading: boolean; presetSupplierId?: string; sourceLineId?: string; blockedSource?: string;
+export function RfqLedger({ state, day, domain, needle, can, locked, loading, open, run, presetSupplierId, sourceLineId, blockedSource, onPurchase, onSupplier, selectedId }: {
+  state: MistState | undefined; day: string; domain: FulfillmentPurchase['domain']; needle: string; can: boolean; locked: boolean; loading: boolean; presetSupplierId?: string; sourceLineId?: string; blockedSource?: string; selectedId?:string;
   open: (spec: ModuleEditorSpec) => void; run: (command: MistCommand) => Promise<unknown>; onPurchase: (id: string) => void; onSupplier: (id: string) => void;
 }) {
-  const [picked, setPicked] = React.useState<string | null>(null), [drawer, setDrawer] = React.useState(false);
+  const {route,go}=useNav();
+  const [picked, setPicked] = React.useState<string | null>(selectedId||null), [drawer, setDrawer] = React.useState(!!selectedId);
+  React.useEffect(()=>{if(selectedId){setPicked(selectedId);setDrawer(true);}},[selectedId]);
+  const selectRfq=(r:MistRfq)=>{setPicked(r.id);setDrawer(true);const{view:_view,id:_id,detail:_detail,...target}=route;go('procurement',r.id,{...target,section:'rfq'},{keepScroll:true});};
+  const closeRfq=()=>{setDrawer(false);if(selectedId){const{view:_view,id:_id,detail:_detail,...target}=route;go('procurement',undefined,{...target,section:'rfq'},{keepScroll:true});}};
   const all = state ? readRfqs(state).filter(r => r.domain === domain && (!sourceLineId || r.lineId === sourceLineId)) : [];
   const sourceLine = state?.orderLines.find(line => line.id === sourceLineId);
   const sourceOrder = state?.orders.find(order => order.id === sourceLine?.orderId);
@@ -36,7 +40,7 @@ export function RfqLedger({ state, day, domain, needle, can, locked, loading, op
   const devOptions = (state?.devs || []).filter(d => !d.closure && developmentDomain(d.values) === domain).map(d => ({ value: 'dev:' + d.id, label: `开发 ${d.code} · ${d.name}` }));
   const rows = all.filter(r => !needle || `${r.code} ${r.description} ${label(r)} ${r.quotes.map(q => q.supplier).join(' ')}`.toLowerCase().includes(needle))
     .sort((a, b) => Number(a.state !== 'open') - Number(b.state !== 'open') || a.deadline.localeCompare(b.deadline));
-  const selected = rows.find(r => r.id === picked) || all.find(r => r.id === picked);
+  const selected = rows.find(r => r.id === (selectedId||picked)) || all.find(r => r.id === (selectedId||picked));
   const available = (state?.market.suppliers || []).filter(s => !productionSupplierUnavailableReason(s, day));
   const preset = presetSupplierId ? state?.market.suppliers.find(s => s.id === presetSupplierId) : undefined;
 
@@ -61,12 +65,12 @@ export function RfqLedger({ state, day, domain, needle, can, locked, loading, op
   const invited = (r: MistRfq) => r.supplierIds.map(id => ({ value: id, label: state?.market.suppliers.find(s => s.id === id)?.name || id }));
   const quoteSpec = (r: MistRfq): ModuleEditorSpec => ({
     title: '登记报价', submitLabel: '登记报价', description: `${r.code} · ${r.description} ${r.quantity} ${r.unit}，需求交期 ${r.due}`,
-    sections: [{id:'quote',label:'报价',fields:['supplierId','price','currency','moq']},{id:'delivery',label:'交付约定',fields:['promisedDue','terms','validUntil','note']}],
-    fields: [field('supplierId', '供应商', 'select', true, [emptyOption, ...invited(r)]), field('price', `单价（每${r.unit}）`, 'number'), choiceField('currency', '报价币种', CURRENCIES, true, true), field('moq', `MOQ（${r.unit}）`, 'number', false), field('promisedDue', '承诺交期', 'date'), choiceField('terms', '付款条件', SUPPLIER_PAYMENT_TERMS), field('validUntil', '报价有效期', 'date'), field('note', '备注', 'textarea', false)],
-    initialValues: { supplierId: '', price: '', currency: r.currency, moq: '', promisedDue: r.due, terms: '', validUntil: '', note: '' },
-    submit: v => run({ type: 'rfq.quote', payload: { id: r.id, supplierId: text(v, 'supplierId'), price: num(v, 'price'), currency: text(v, 'currency'), moq: num(v, 'moq'), promisedDue: text(v, 'promisedDue'), terms: text(v, 'terms'), validUntil: text(v, 'validUntil'), note: text(v, 'note') } }) });
-  const declineSpec = (r: MistRfq): ModuleEditorSpec => ({ title: '登记谢绝报价', submitLabel: '登记谢绝', fields: [field('supplierId', '供应商', 'select', true, [emptyOption, ...invited(r)]), field('declineReason', '谢绝原因', 'textarea')], initialValues: { supplierId: '', declineReason: '' },
-    submit: v => run({ type: 'rfq.quote', payload: { id: r.id, supplierId: text(v, 'supplierId'), declined: true, declineReason: text(v, 'declineReason') } }) });
+    sections: [{id:'quote',label:'报价',fields:['supplierId','price','currency','moq']},{id:'delivery',label:'交付约定',fields:['promisedDue','terms','validUntil','note','files']}],
+    fields: [field('supplierId', '供应商', 'select', true, [emptyOption, ...invited(r)]), field('price', `单价（每${r.unit}）`, 'number'), choiceField('currency', '报价币种', CURRENCIES, true, true), field('moq', `MOQ（${r.unit}）`, 'number', false), field('promisedDue', '承诺交期', 'date'), choiceField('terms', '付款条件', SUPPLIER_PAYMENT_TERMS), field('validUntil', '报价有效期', 'date'), field('note', '备注', 'textarea', false),field('files','报价原件','files',false)],
+    initialValues: { supplierId: '', price: '', currency: r.currency, moq: '', promisedDue: r.due, terms: '', validUntil: '', note: '', files: '' },
+    submit: v => run({ type: 'rfq.quote', payload: { id: r.id, supplierId: text(v, 'supplierId'), price: num(v, 'price'), currency: text(v, 'currency'), moq: num(v, 'moq'), promisedDue: text(v, 'promisedDue'), terms: text(v, 'terms'), validUntil: text(v, 'validUntil'), note: text(v, 'note'), ...(moduleFileIds(v.files).length?{fileIds:moduleFileIds(v.files)}:{}) } }) });
+  const declineSpec = (r: MistRfq): ModuleEditorSpec => ({ title: '登记谢绝报价', submitLabel: '登记谢绝', fields: [field('supplierId', '供应商', 'select', true, [emptyOption, ...invited(r)]), field('declineReason', '谢绝原因', 'textarea'),field('files','谢绝依据原件','files',false)], initialValues: { supplierId: '', declineReason: '', files:'' },
+    submit: v => run({ type: 'rfq.quote', payload: { id: r.id, supplierId: text(v, 'supplierId'), declined: true, declineReason: text(v, 'declineReason'), ...(moduleFileIds(v.files).length?{fileIds:moduleFileIds(v.files)}:{}) } }) });
   const inviteSpec = (r: MistRfq): ModuleEditorSpec => { const rest = available.filter(s => !r.supplierIds.includes(s.id)); return { title: '追加邀请供应商', submitLabel: '追加邀请', fields: rest.map(s => field(`s:${s.id}`, `${s.name} · ${s.type}`, 'checkbox', false)), initialValues: Object.fromEntries(rest.map(s => [`s:${s.id}`, false])),
     submit: v => run({ type: 'rfq.invite', payload: { id: r.id, supplierIds: rest.filter(s => v[`s:${s.id}`] === true).map(s => s.id) } }) }; };
   const awardSpec = (r: MistRfq, row: RfqComparisonRow): ModuleEditorSpec => { const flags = state ? rfqAwardFlags(state, r, row.quote.id, day) : [];
@@ -90,10 +94,10 @@ export function RfqLedger({ state, day, domain, needle, can, locked, loading, op
     : <EmptyState icon={Scale} title={uiText("选择询价单")} compact />;
   return <>
     {preset && productionSupplierUnavailableReason(preset,day) && <div className="mist-section"><Banner tone="warn" title={preset.name}>{uiText(productionSupplierUnavailableReason(preset,day))}</Banner></div>}
-    <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${selected.description}` : '询价详情'} drawerSub={selected ? RFQ_STATE_LABEL[selected.state] : undefined}
+    <ListDetail drawerOpen={(drawer||!!selectedId) && !!selected} onDrawerClose={closeRfq} drawerTitle={selected ? `${selected.code} · ${selected.description}` : '询价详情'} drawerSub={selected ? RFQ_STATE_LABEL[selected.state] : undefined}
       list={<Card>
         <CardHeader title={ui`询价比价 · ${all.length}`} tools={can ? <Button variant="primary" icon={Plus} disabled={locked || !!blockedSource} title={uiText(blockedSource || undefined)} onClick={() => open(createSpec())}>{uiText("发起询价")}</Button> : undefined} />
-        <DataTable ariaLabel={uiText("询价单列表")} loading={loading} rows={rows} rowKey={r => r.id} selectedKey={selected?.id} density="comfy" onRowClick={r => { setPicked(r.id); setDrawer(true); }} columns={columns}
+        <DataTable ariaLabel={uiText("询价单列表")} loading={loading} rows={rows} rowKey={r => r.id} selectedKey={selected?.id} density="comfy" onRowClick={selectRfq} columns={columns}
           empty={needle && all.length ? <EmptyState icon={SearchX} title={uiText("没有符合条件的询价单")} description={uiText("换个关键词试试。")} /> : <EmptyState icon={Scale} title={ui`还没有${domain === 'fabric' ? '面料' : '成衣'}询价`} />} />
       </Card>}
       detail={detail} />
@@ -140,13 +144,14 @@ function RfqDetail({ rfq: r, state, day, can, locked, label, canInvite, onQuote,
         { key: 'rank', header: '排名', render: x => x.lowest ? <Pill tone="ok">{uiText("最低价")}</Pill> : x.rank ? `第 ${x.rank}` : <span className="mist-muted">—</span> },
         ...(can && isOpen ? [{ key: 'act', header: '', align: 'right' as const, render: (x: RfqComparisonRow) => x.valid ? <Button size="sm" icon={Award} disabled={locked} aria-label={ui`定标 ${x.quote.supplier}`} onClick={() => onAward(x)}>{uiText("定标")}</Button> : null }] : []),
       ]} /> : <span className="mist-note">{uiText("还没有报价。")}</span>}
+      {cmp.rows.filter(x=>x.quote.fileIds?.length).map(x=><div key={x.quote.id} className="mist-col" style={{gap:4}}><small className="mist-muted">{x.quote.supplier}</small><RecordFiles ids={x.quote.fileIds}/></div>)}
       {isOpen && pendingSuppliers.length > 0 && <span className="mist-note">{uiText("待报价：")}{pendingSuppliers.join('、')}</span>}
       <ActionBar busy={locked} actions={[
         { label: '导出比价表', icon: Download, onClick: () => downloadModuleXlsx(`${r.code}-比价.xlsx`, [{ name: '比价', headers: ['供应商', '评级', '单价', '币种', '折人民币', 'MOQ', '承诺交期', '付款条件', '有效期', '排名', '备注'], rows: cmp.rows.map(x => [x.quote.supplier, x.grade, x.quote.declined ? '' : x.quote.price, x.quote.currency, x.cnyUnit ?? '', x.quote.moq || '', x.quote.promisedDue, x.quote.terms, x.quote.validUntil, x.lowest ? '最低价' : x.rank ?? '', x.quote.declined ? '谢绝：' + x.quote.declineReason : [x.late ? '晚于需求交期' : '', x.moqOver ? 'MOQ 超出需求' : '', x.valid ? '' : '报价已过期'].filter(Boolean).join('；')]) }, { name: '需求', headers: ['项目', '内容'], rows: [['询价单', r.code], ['来源条目', label], ['需求', `${r.quantity} ${r.unit} · ${r.description}`], ['需求交期', r.due], ['交付地点', r.destination], ['报价截止', r.deadline]] }]), reason: !cmp.rows.length ? '还没有报价' : false },
         { label: '用邮箱发询价函', icon: Send, onClick: () => { const pending = r.supplierIds.filter(id => !rfqCurrentQuotes(r).some(q => q.supplierId === id)).map(id => state.market.suppliers.find(x => x.id === id)).filter(Boolean); setComposeIntent({ to: pending.map(x => x!.contacts.find(c => c.primary && c.email)?.email || x!.contacts.find(c => c.email)?.email).filter(Boolean).join(', '), subject: `询价 ${r.code} · ${r.description}`, body: `您好，\n\n请就以下需求报价：\n品名 / 规格：${r.description}\n数量：${r.quantity} ${r.unit}\n需求交期：${r.due}\n交付地点：${r.destination}\n报价币种：${r.currency}\n请于 ${r.deadline} 前回复单价、MOQ、交期与付款条件。${r.note ? '\n\n' + r.note : ''}\n`, links: [{ kind: 'rfq', id: r.id }] }); go('emails'); }, reason: !isOpen ? `询价单${RFQ_STATE_LABEL[r.state]}` : false, hidden: !can },
       ] as ReasonedAction[]} />
     </DetailBlock>
-    {history.length > 0 && <DetailBlock title={ui`历史报价 · ${history.length}`}><div className="mist-col">{history.map(q => <small key={q.id} className="mist-muted">{q.supplier} · {uiText(q.declined ? `谢绝：${q.declineReason}` : `${price(q.price)} ${q.currency} · 交期 ${q.promisedDue}`)} · {shortWhen(q.at)}，{shortWhen(q.supersededAt!)}{uiText(" 更新")}</small>)}</div></DetailBlock>}
+    {history.length > 0 && <DetailBlock title={ui`历史报价 · ${history.length}`}><div className="mist-col">{history.map(q => <div key={q.id} className="mist-col" style={{gap:4}}><small className="mist-muted">{q.supplier} · {uiText(q.declined ? `谢绝：${q.declineReason}` : `${price(q.price)} ${q.currency} · 交期 ${q.promisedDue}`)} · {shortWhen(q.at)}，{shortWhen(q.supersededAt!)}{uiText(" 更新")}</small>{!!q.fileIds?.length&&<RecordFiles ids={q.fileIds}/>}</div>)}</div></DetailBlock>}
     <DetailBlock title={uiText("记录")}><Events entity="procurement" id={r.id} /></DetailBlock>
   </DetailBody>;
 }

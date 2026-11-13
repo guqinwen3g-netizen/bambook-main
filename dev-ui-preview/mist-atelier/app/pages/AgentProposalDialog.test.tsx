@@ -6,6 +6,25 @@ import { MistRoot } from '../../../../components/mist';
 import { createMistState } from '../../../../server/src/shared/mistWorkspace';
 import { AgentProposalDialog } from './AgentProposalDialog';
 
+it('identifies supplier quote sources and filenames before allowing confirmation',()=>{
+ const state=createMistState({id:()=> 'id',now:'2026-11-14T00:00:00Z',actorName:'Test'},'empty');
+ state.market.suppliers=[{id:'supplier-private',name:'江南成衣'} as any];state.files=[{id:'file-private',name:'CMT-V2.pdf'} as any];state.rfqs=[{id:'rfq-private',code:'RFQ-2026-0003',state:'open',unit:'件',supplierIds:['supplier-private'],quotes:[]} as any];
+ const proposal={id:'p',ownerId:'u',owner:'顾言',summary:['更新供应报价'],state:'pending',createdAt:'2026-11-14',command:{type:'rfq.quote',payload:{id:'rfq-private',supplierId:'supplier-private',price:'131.25',currency:'CNY',moq:'50',promisedDue:'2026-12-20',validUntil:'2026-11-30',terms:'20%预付',fileIds:['file-private']}}};
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
+ try{const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal as any} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));const confirmButton=()=>getConfirm(host);render();const text=host.textContent!;
+  for(const value of ['询价单 · RFQ-2026-0003','供应商 · 江南成衣','CMT-V2.pdf','承诺交期 · 2026-12-20','报价有效期 · 2026-11-30','单价 · 131.25'])expect(text).toContain(value);
+  for(const value of ['rfq-private','supplier-private','file-private','fileIds','promisedDue','validUntil','moq ·'])expect(text).not.toContain(value);expect(confirmButton().disabled).toBe(false);
+  const files=state.files;state.files=[];render();expect(confirmButton().disabled).toBe(true);state.files=files;state.rfqs=[];render();expect(confirmButton().disabled).toBe(true);
+ }finally{act(()=>root.unmount());host.remove();}
+});
+it('identifies the exact awarded quote and blocks a superseded quote source',()=>{
+ const state=createMistState({id:()=> 'id',now:'2026-11-14T00:00:00Z',actorName:'Test'},'empty'),quote={id:'quote-private',supplierId:'supplier-private',supplier:'江南成衣',price:131.25,currency:'CNY',fileIds:[],declined:false};state.rfqs=[{id:'rfq-private',code:'RFQ-2026-0003',state:'open',unit:'件',supplierIds:['supplier-private'],quotes:[quote]} as any];
+ const proposal={id:'p',ownerId:'u',owner:'顾言',summary:['定标'],state:'pending',createdAt:'2026-11-14',command:{type:'rfq.award',payload:{id:'rfq-private',quoteId:'quote-private',reason:'按有效报价'}}};(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
+ try{const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal as any} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));render();expect(host.textContent).toContain('江南成衣 · 131.25 CNY/件');expect(host.textContent).not.toContain('quote-private');(quote as any).supersededAt='2026-11-14T01:00:00Z';render();expect(getConfirm(host).disabled).toBe(true);
+ }finally{act(()=>root.unmount());host.remove();}
+});
+function getConfirm(host:HTMLElement){return [...host.querySelectorAll('button')].find(b=>b.textContent==='确认执行')!;}
+
 it('shows precise proposed mail values and evidence, and disables confirmation when the analyzed source is stale', async () => {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   const state = createMistState({ id: () => 'id', now: '2026-11-01T00:00:00Z', actorName: 'Test' }, 'demo'), mail = state.email.messages[0];

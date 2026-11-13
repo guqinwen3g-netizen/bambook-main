@@ -150,10 +150,10 @@ export function applyRfqCommand(root: Root, command: RfqCommand, c: MistContext)
       if (!declined) {
         if (q.validUntil < today) fail('报价有效期不能早于今天');
         if (q.promisedDue < today) fail('承诺交期不能早于今天');
-        const ids = [...new Set((Array.isArray(p.fileIds) ? p.fileIds as unknown[] : []).map(String))];
-        for (const id of ids) if (!root.files.some(f => f.id === id)) fail('附件不存在', 'NOT_FOUND');
-        q.fileIds = ids;
       }
+      const ids = [...new Set((Array.isArray(p.fileIds) ? p.fileIds as unknown[] : []).map(String))];
+      for (const id of ids) if (!root.files.some(f => f.id === id)) fail('附件不存在', 'NOT_FOUND');
+      q.fileIds = ids;
       const prev = rfqCurrentQuotes(r).find(x => x.supplierId === supplierId); if (prev) prev.supersededAt = c.now;
       r.quotes.push(q);
       event(root, c, r, declined ? `${s.name} 谢绝报价：${q.declineReason}` : `${prev ? '更新' : '登记'} ${s.name} 报价：${q.price} ${q.currency}/${r.unit}，MOQ ${q.moq || '无'}，承诺交期 ${q.promisedDue}，有效至 ${q.validUntil}`);

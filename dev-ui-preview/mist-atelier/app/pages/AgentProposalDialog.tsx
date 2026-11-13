@@ -40,6 +40,14 @@ export function proposalFieldLabel(path: string): string {
 
 const DEVELOPMENT_LABEL:Record<string,string>={draftId:'开发草稿',name:'开发对象',customer:'客户',style:'客户款号',season:'季节',category:'品类',kind:'开发类型',domain:'业务类型',fabric:'面料',color:'颜色',target:'目标价',sizeBase:'基码',goal:'开发要求',factories:'工厂',due:'目标日期',collaborators:'协作人',sampleQuantity:'样品数量',fileIds:'附件',initiator:'发起方',requestType:'客户要求类型',requestNote:'要求说明',charged:'收费',sampleForm:'样品形态',sampleUnit:'样品单位',targetCurrency:'目标价币种',targetUnit:'计价单位'};
 const QUOTATION_LABEL:Record<string,string>={id:'报价草稿',previousId:'来源报价',customerId:'客户',season:'季节',validUntil:'有效期',deliveryTerms:'贸易术语',paymentTerms:'付款条件',fxRate:'报价汇率',fileIds:'附件',lines:'条目',productId:'产品档案',sourceDevId:'来源开发案',sourceVersionId:'来源版本',name:'品名',style:'客户款号',specification:'规格',unit:'计价单位',cost:'参考成本价',specs:'规格',sizeRange:'尺码段',mainFabric:'主面料',composition:'成分',weight:'克重（g/m²）',width:'门幅（cm）',moqQty:'MOQ 数量',moqUnit:'MOQ 单位'};
+const RFQ_LABEL:Record<string,string>={id:'询价单',quoteId:'供应商报价',supplierId:'供应商',supplierIds:'供应商',fileIds:'附件',moq:'MOQ 数量',promisedDue:'承诺交期',validUntil:'报价有效期',declined:'谢绝报价',declineReason:'谢绝原因',orderId:'来源订单',lineId:'来源条目',deadline:'报价截止日',description:'采购内容',destination:'交付地点',kind:'采购内容',materialKind:'物料类别'};
+function rfqSourceMissing(command:AgentProposal['command'],state?:MistState|null){
+ if(command.type!=='rfq.quote'&&command.type!=='rfq.award')return false;
+ const p=command.payload,r=state?.rfqs?.find(r=>r.id===p.id);if(!state||!r||r.state!=='open')return true;
+ const filesMissing=(ids:unknown)=>Array.isArray(ids)&&ids.some(id=>typeof id==='string'&&!state.files.some(f=>f.id===id));
+ if(command.type==='rfq.quote')return !r.supplierIds.includes(String(p.supplierId))||(!state.market.suppliers.some(s=>s.id===p.supplierId)&&!r.quotes.some(q=>q.supplierId===p.supplierId&&q.supplier))||filesMissing(p.fileIds);
+ const q=r.quotes.find(q=>q.id===p.quoteId&&!q.supersededAt&&!q.declined);return !q||filesMissing(q.fileIds);
+}
 function quotationSourceMissing(command:AgentProposal['command'],state?:MistState|null){
   if(command.type!=='market.quotation.save'||!state)return false;
   const p=command.payload,input=p.input as Record<string,unknown>|undefined;
@@ -51,7 +59,8 @@ function quotationSourceMissing(command:AgentProposal['command'],state?:MistStat
 }
 export function proposalFieldChanges(command: AgentProposal['command'], full = false, state?:MistState|null): { rows: Array<{ field: string; path: string; value: string }>; omitted: number } {
   const rows: Array<{ field: string; path: string; value: string }> = [], limit = full ? 200 : 40;
-  const development=command.type==='development.saveDraft',quotation=command.type==='market.quotation.save';
+  const development=command.type==='development.saveDraft',quotation=command.type==='market.quotation.save',rfqCommand=command.type.startsWith('rfq.');
+  const rfq=rfqCommand?state?.rfqs?.find(r=>r.id===command.payload.id):undefined;
   let omitted = 0;
   const walk = (value: unknown, path: string) => {
     // mistMarket#sourceLine/save derives these from saved data; the input cannot set them.
@@ -80,6 +89,20 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
       else if(/\.productId$/.test(path))text=value?state?.market.products.find(p=>p.id===value)?.name||'产品已不可见':'未指定';
       else if(/\.sourceDevId$/.test(path))text=value?state?.devs.find(d=>d.id===value)?.code||'开发案已不可见':'未指定';
       else if(/\.sourceVersionId$/.test(path))text=value?state?.versions.find(v=>v.id===value)?.label||'版本已不可见':'未指定';
+      else if(typeof value==='boolean')text=value?'是':'否';
+      else if(text==='[]')text='未指定';
+      if(!text)text='未填写';
+    }
+    if(rfqCommand){
+      const key=path.split('.').at(-1);
+      field=path.split('.').filter(p=>p!=='input').map(p=>/^\d+$/.test(p)?'第'+p+'项':RFQ_LABEL[p]||FIELD_LABEL[p]||p).join(' · ');
+      if(path==='id')text=rfq?.code||'询价单已不可见';
+      else if(path==='quoteId'){const q=rfq?.quotes.find(q=>q.id===value);text=q?`${q.supplier} · ${q.price} ${q.currency}/${rfq!.unit}`:'报价已不可见';}
+      else if(key==='supplierId'||/supplierIds\.\d+$/.test(path))text=state?.market.suppliers.find(s=>s.id===value)?.name||rfq?.quotes.find(q=>q.supplierId===value)?.supplier||'供应商已不可见';
+      else if(/fileIds\.\d+$/.test(path))text=state?.files.find(f=>f.id===value)?.name||'附件已不可见';
+      else if(key==='orderId')text=state?.orders.find(o=>o.id===value)?.code||'订单已不可见';
+      else if(key==='lineId'){const line=state?.orderLines.find(l=>l.id===value);text=line?.style||line?.name||'条目已不可见';}
+      else if(key==='kind')text=({processing:'加工服务',finished:'成品',material:'材料'} as Record<string,string>)[text]||text;
       else if(typeof value==='boolean')text=value?'是':'否';
       else if(text==='[]')text='未指定';
       if(!text)text='未填写';
@@ -138,6 +161,7 @@ export function AgentProposalDialog({ proposal, state, onClose, run, onDone }: {
     proposal.command.payload.draftId&&!state.drafts.some(d=>d.id===proposal.command.payload.draftId)
     ||Array.isArray(proposal.command.payload.fileIds)&&proposal.command.payload.fileIds.some(id=>!state.files.some(f=>f.id===id)));
   const quoteSourceMissing=quotationSourceMissing(proposal.command,state);
+  const rfqSourceUnavailable=rfqSourceMissing(proposal.command,state);
   // 公司收款账户只对照银行字段；同一命令里的其他设置仍逐项列出。
   const changes = account && proposal.command.type !== 'settings.update' ? [] : account ? fields.rows.filter(r => !/^companyProfile\.(bankName|bankAccount|swift|bankAddress)$/.test(r.path)) : fields.rows;
   const incomplete = risk === 'high' && fields.omitted > 0;
@@ -152,11 +176,12 @@ export function AgentProposalDialog({ proposal, state, onClose, run, onDone }: {
   return <Dialog open onClose={() => { if (!busy) onClose(); }} width={560} title={uiText('确认 Agent 提议')}
     footer={<><Button disabled={busy} onClick={onClose}>{uiText('稍后')}</Button>
       <Button disabled={busy} onClick={() => void decide({ type: 'agent.proposal.reject', payload: { id: proposal.id, ...(note.trim() ? { note: note.trim() } : {}) } }, '已拒绝提议')}>{uiText('拒绝')}</Button>
-      <Button variant="primary" loading={busy} disabled={busy || !!mail?.reason || !!proposal.taskBlocked || proposal.unavailable || !!draftSourceMissing || quoteSourceMissing || incomplete || (risk === 'high' && !password) || (signing && !signature)} onClick={() => void decide({ type: 'agent.proposal.confirm', payload: { id: proposal.id } }, '已确认并执行', risk === 'high' ? { password } : undefined, signing && signature ? { svg: signature.svg } : undefined)}>{uiText('确认执行')}</Button></>}>
+      <Button variant="primary" loading={busy} disabled={busy || !!mail?.reason || !!proposal.taskBlocked || proposal.unavailable || !!draftSourceMissing || quoteSourceMissing || rfqSourceUnavailable || incomplete || (risk === 'high' && !password) || (signing && !signature)} onClick={() => void decide({ type: 'agent.proposal.confirm', payload: { id: proposal.id } }, '已确认并执行', risk === 'high' ? { password } : undefined, signing && signature ? { svg: signature.svg } : undefined)}>{uiText('确认执行')}</Button></>}>
     <div className="mist-col" data-agent-proposal-dialog>
       {failure && <Banner tone="bad" title={uiText('没有执行')}>{failure}</Banner>}
       {draftSourceMissing&&<Banner tone="warn" title={uiText('草稿或附件已不可见，请重新核对')} />}
       {quoteSourceMissing&&<Banner tone="warn" title={uiText('报价或来源资料已不可见，请重新核对')} />}
+      {rfqSourceUnavailable&&<Banner tone="warn" title={uiText('询价或报价依据已不可用，请重新核对')} />}
       {proposal.taskBlocked && <Banner tone="warn" title={uiText(proposal.taskBlocked)} />}
       <div className="mist-col" data-agent-proposal-summary>{proposal.summary.map((line, i) => <span key={i}>{line}</span>)}</div>
       <KeyValue items={[{ label: uiText('提出'), value: `${proposal.agentIdentity?.name || 'Agent'} · ${businessDate(proposal.createdAt)}` }, { label: uiText('执行身份'), value: proposal.owner }]} />
