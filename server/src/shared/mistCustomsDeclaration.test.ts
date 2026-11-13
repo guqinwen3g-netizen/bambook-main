@@ -112,6 +112,37 @@ describe('报关申报资料',()=>{
     f.state.fulfillment.customs[0].status='cleared';
     expect(()=>f.run('fulfillment.customs.items',{id:f.customsId})).toThrow('已放行');
   });
+  it.each(['件','套','条','双','个','PCS'])('拒绝把按%s计的法定数量调整成半件并保留原商品项',unit=>{
+    const f=fixture(),ship=f.state.fulfillment.shipments[0];
+    f.state.orderLines.find(line=>line.id===ship.lines[0].lineId)!.unit=unit;
+    f.run('fulfillment.customs.classify.save',{...suit,legalUnit:unit});
+    f.run('fulfillment.customs.items',{id:f.customsId});
+    const before=structuredClone(f.state),item=f.state.fulfillment.customs[0].items![0];
+    expect(()=>f.run('fulfillment.customs.item.adjust',{id:f.customsId,no:1,declaredName:item.declaredName,elements:item.elements,legalQty:0.5,secondQty:item.secondQty,reason:'核对法定数量'})).toThrow(/法定数量.*整数/);
+    expect(f.state).toEqual(before);
+  });
+  it('第二法定单位按件计时也不能保存小数，公斤数量仍可含小数',()=>{
+    const f=fixture();f.run('fulfillment.customs.classify.save',{...suit,legalUnit:'千克',secondUnit:'件'});f.run('fulfillment.customs.items',{id:f.customsId});
+    const item=f.state.fulfillment.customs[0].items![0],base={id:f.customsId,no:1,declaredName:item.declaredName,elements:item.elements,legalQty:478.125,reason:'核对磅单'};
+    expect(()=>f.run('fulfillment.customs.item.adjust',{...base,secondQty:499.5})).toThrow(/第二数量.*整数/);
+    f.run('fulfillment.customs.item.adjust',{...base,secondQty:500});
+    expect(f.state.fulfillment.customs[0].items![0]).toMatchObject({legalQty:478.125,secondQty:500});
+  });
+  it('拒绝连续单位舍入后归零的数量，保留四位小数的正数',()=>{
+    const f=fixture();f.run('fulfillment.customs.classify.save',suit);f.run('fulfillment.customs.items',{id:f.customsId});
+    const item=f.state.fulfillment.customs[0].items![0],base={id:f.customsId,no:1,declaredName:item.declaredName,elements:item.elements,legalQty:500,reason:'核对磅单'};
+    expect(()=>f.run('fulfillment.customs.item.adjust',{...base,secondQty:0.00001})).toThrow('第二数量须大于 0');
+    f.run('fulfillment.customs.item.adjust',{...base,secondQty:0.0001});
+    expect(f.state.fulfillment.customs[0].items![0].secondQty).toBe(0.0001);
+  });
+  it.each([500.5,500.0001])('生成商品项也拒绝件制来源中的小数%s，不将半件写入申报草稿',quantity=>{
+    const f=fixture(),ship=f.state.fulfillment.shipments[0],line=f.state.orderLines.find(row=>row.id===ship.lines[0].lineId)!;
+    line.unit='件';ship.lines[0].quantity=quantity;f.state.fulfillment.packing.filter(row=>row.shipmentId===ship.id).forEach((row,index)=>row.quantity=index===0?quantity:0);
+    f.run('fulfillment.customs.classify.save',suit);
+    expect(draftCustomsDeclaration(f.state,ship).blockers.join('；')).toMatch(/法定数量.*整数/);
+    expect(()=>f.run('fulfillment.customs.items',{id:f.customsId})).toThrow(/法定数量.*整数/);
+    expect(f.state.fulfillment.customs[0].items).toBeUndefined();
+  });
   it('生成后可逐项手工调整品名、要素与法定数量：留痕、不算出运变化；重新生成时自动值未变的调整保留',()=>{
     const f=fixture();
     f.run('fulfillment.customs.classify.save',suit);

@@ -28,6 +28,20 @@ function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act((
 function choose(select:HTMLSelectElement,value:string){act(()=>{select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));});expect(select.value).toBe(value);}
 const shipment=(id:string,patch:Partial<FulfillmentShipment>={}):FulfillmentShipment=>({id,code:id.toUpperCase(),customerId:'c',customer:'Cedar',domain:'garment',consignee:'Cedar DC',mode:'sea',portOfLoading:'上海',portOfDischarge:'Felixstowe',incoterm:'FOB',plannedDate:'2099-01-01',booking:'',lines:[{orderId:'o',lineId:'l',productionId:'p',quantity:10,factoryConfirmedAt:'2026-10-09'}],note:'',fileIds:[],state:'preparing',requestedBy:'业务',requesterId:'biz',createdAt:'2026-10-08T08:00:00Z',...patch});
 const pack=(shipmentId:string,quantity:number)=>({id:shipmentId+quantity,shipmentId,lineId:'l',productionId:'p',carton:'1',quantity,netWeight:9,grossWeight:10,volume:0.1,note:''});
+
+it.each([false,true])('申报调整按真实第一/第二法定单位拦截半件，连续单位仍可保存小数（第二单位按件：%s）',async countOnSecond=>{
+  const st=store.state!,f=st.fulfillment;f.shipments.push(shipment('unit-check'));
+  const item={no:1,classificationId:'class-unit',lineKeys:['l:p'],styles:[],hsCode:'6203310000',declaredName:'羊毛西服上衣',elements:'3|0|机织|西服上衣|男式|100%羊毛|Northwind|货号S',quantity:10,unit:'件',legalQty:countOnSecond?9:10,legalUnit:countOnSecond?'千克':'件',secondQty:countOnSecond?10:9,secondUnit:countOnSecond?'件':'千克',unitPrice:10,amount:100,currency:'USD',origin:'中国',destination:'英国'};
+  f.customs.push(customs('unit-check','draft',{items:[item]} as any));render('cus-unit-check');
+  await click(getByRole(host,'button',{name:'调整商品项 1'}));const dialog=getByRole(host,'dialog');
+  const countField=getByRole(dialog,'spinbutton',{name:countOnSecond?'第二数量（件）':'法定数量（件）'}) as HTMLInputElement;
+  const continuousField=getByRole(dialog,'spinbutton',{name:countOnSecond?'法定数量（千克）':'第二数量（千克）'}) as HTMLInputElement;
+  typeInto(getByRole(dialog,'textbox',{name:'调整原因'}) as HTMLTextAreaElement,'核对法定数量与磅单');typeInto(countField,'0.5');
+  await click(getByRole(dialog,'button',{name:'保存调整'}));expect(store.run).not.toHaveBeenCalled();expect(dialog.textContent).toContain('整数');
+  typeInto(countField,'10');typeInto(continuousField,'0.00001');await click(getByRole(dialog,'button',{name:'保存调整'}));expect(store.run).not.toHaveBeenCalled();expect(dialog.textContent).toContain('须大于 0');
+  typeInto(continuousField,'9.125');await click(getByRole(dialog,'button',{name:'保存调整'}));
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.customs.item.adjust',payload:expect.objectContaining({id:'cus-unit-check',no:1,legalQty:countOnSecond?9.125:10,secondQty:countOnSecond?10:9.125})});
+});
 const customs=(shipmentId:string,status:FulfillmentCustoms['status'],patch:Partial<FulfillmentCustoms>={}):FulfillmentCustoms=>({id:'cus-'+shipmentId,shipmentId,code:'CUS-'+shipmentId.toUpperCase(),status,declarationNo:status==='draft'?'':'D-'+shipmentId,broker:'上港报关',hsCode:'6202.13',origin:'CN',tradeMode:'一般贸易',declaredAt:status==='draft'?'':'2026-10-12',clearedAt:status==='cleared'?'2026-10-13':'',evidence:'',fileIds:[],note:'',...patch});
 const ci=(shipmentId:string,invoiceId?:string):FulfillmentDocument=>({id:'ci-'+shipmentId,shipmentId,orderId:'o',type:'CI',number:'CI-'+shipmentId,version:1,title:'CI',dueDate:'2026-11-01',content:'',fileIds:[],status:'issued',createdAt:'2026-10-10T08:00:00Z',actor:'后勤',...(invoiceId?{invoiceId}:{})} as FulfillmentDocument);
 beforeEach(()=>{session.denied=new Set();const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'后勤'},'empty');

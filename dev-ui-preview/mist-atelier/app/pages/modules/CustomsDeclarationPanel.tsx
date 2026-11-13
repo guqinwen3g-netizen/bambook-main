@@ -5,7 +5,7 @@ import { Ban, Download, FileText, ListChecks, Pencil, Plus } from 'lucide-react'
 import { Banner, Button, Card, CardHeader, DataTable, Facts, Mono, Pill, type Column } from '../../../../../components/mist';
 import type { MistCommand, MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentCustoms } from '../../../../../server/src/shared/mistFulfillment';
-import { CUSTOMS_BRAND_TYPES, CUSTOMS_ELEMENT_LABELS, CUSTOMS_FIELD_LABEL, CUSTOMS_FAMILY_LABEL, CUSTOMS_PREFERENCES, classificationForStyle, customsItemsStale, defaultLegalUnits, hsDigits, draftCustomsDeclaration, generatedItem, readCustomsClassifications, type CustomsClassification, type CustomsDeclarationItem, type CustomsFamily } from '../../../../../server/src/shared/mistCustomsDeclaration';
+import { CUSTOMS_BRAND_TYPES, CUSTOMS_ELEMENT_LABELS, CUSTOMS_FIELD_LABEL, CUSTOMS_FAMILY_LABEL, CUSTOMS_PREFERENCES, classificationForStyle, customsItemsStale, customsQuantityProblem, customsQuantityStep, defaultLegalUnits, hsDigits, draftCustomsDeclaration, generatedItem, readCustomsClassifications, type CustomsClassification, type CustomsDeclarationItem, type CustomsFamily } from '../../../../../server/src/shared/mistCustomsDeclaration';
 import { downloadModuleXlsx, type ModuleEditorSpec, type ModuleValues } from './ModuleWorkbench';
 import { documentGenerationBlocker } from '../../../../../server/src/shared/mistDocumentGeneration';
 import { field, number, text } from './fulfillmentKit';
@@ -65,11 +65,12 @@ export function adjustItemSpec(c: FulfillmentCustoms, item: CustomsDeclarationIt
     fields: [
       { ...field('declaredName', '申报品名'), hint: `自动值：${auto.declaredName}` },
       { ...field('elements', '申报要素', 'textarea'), hint: `按“|”分隔；自动值：${auto.elements}` },
-      { ...field('legalQty', `法定数量（${item.legalUnit}）`, 'number'), hint: `自动值：${auto.legalQty}` },
-      ...(item.secondUnit ? [{ ...field('secondQty', `第二数量（${item.secondUnit}）`, 'number'), hint: `自动值：${auto.secondQty ?? '—'}` }] : []),
+      { ...field('legalQty', `法定数量（${item.legalUnit}）`, 'number'), min: customsQuantityStep(item.legalUnit), step: customsQuantityStep(item.legalUnit), hint: `自动值：${auto.legalQty}` },
+      ...(item.secondUnit ? [{ ...field('secondQty', `第二数量（${item.secondUnit}）`, 'number'), min: customsQuantityStep(item.secondUnit), step: customsQuantityStep(item.secondUnit), hint: `自动值：${auto.secondQty ?? '—'}` }] : []),
       { ...field('reason', '调整原因', 'textarea'), hint: undefined },
     ],
     initialValues: { declaredName: item.declaredName, elements: item.elements, legalQty: item.legalQty, ...(item.secondUnit ? { secondQty: item.secondQty ?? '' } : {}), reason: '' },
+    issue: v => customsQuantityProblem(Number(v.legalQty), item.legalUnit, '法定数量') || (item.secondUnit ? customsQuantityProblem(Number(v.secondQty), item.secondUnit, '第二数量') : ''),
     submit: v => run({ type: 'fulfillment.customs.item.adjust', payload: { id: c.id, no: item.no, declaredName: text(v, 'declaredName'), elements: text(v, 'elements'), legalQty: number(v, 'legalQty'), ...(item.secondUnit ? { secondQty: number(v, 'secondQty') } : {}), reason: text(v, 'reason') } } as MistCommand),
   };
 }
