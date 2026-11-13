@@ -345,6 +345,8 @@ flowchart LR
 
 #### 内部面料分配与交接
 
+- **完整内供与分批票据核算（2026-11-14，适用于当前成本口径）**：`mistPayables.ts#purchasePrepaymentAppliedMinor/purchasePrepaymentAvailableMinor/payableBills`分别跟踪结算已确认抵扣、剩余可抵预付及关联票据抵扣，不把抵票再记一次现金。最后一批数量加已确认结算数量达到合同量时，`FinanceSettlements`自动带最终标志，财务每笔确认重新签字。`mistOrderCost.ts#orderActualCost`按到票和未到票分列成本，内部采购通过`internalFabricCostShare/financialMaterialCostBasis`归最终订单；无加成且已全部转给成衣、没有来源余料时，来源内部单的未分摊成本为0，成衣只计一次该采购成本，内部不生成外部应收。当前核算沿价税合计口径、退税单独列示，不擅自从已到票成本再扣一次票面税额；未到票加工及未开票销售仍保留暂估标志。角色裁剪和税基限制不因已结算解除。
+
 - **待点清的结算数量（2026-11-14，单页增量待发布）**：`FinanceSettlements.tsx#SettlementSubmitDialog`在直送未点清时从`materialDeliveryRows`展示原交付总量、已点收与待点收；不把扣除已拒收后的临时收货数标成确认实收。点清后才按收货记录的合格数量展示“实收”并允许勾选。`settlementReceipts/assertSettlementReceiptsCounted`的服务端整笔点清规则保持不变，显示修复不改业务数量或核销。`FinancePayables.test.tsx`覆盖部分点收兼有拒收、补点清后的选择/数量切换。
 
 - **直送接收与原件（2026-11-14，分支待发布）**：`scopedFabricAccess`同时返回仓库发料与供应商直送的最小交接记录；`MaterialDeliveryPanel`按交接展示只读送货依据。当前有订单读写权的准确接收人通过`scopedMaterialDeliveryFileIds`获得该笔直送附件的元信息、下载和有界正文权限，仍经过印章/敏感原件/同字节限制；来源报价、合同和其他交接文件不因此开放。办理点收时，仓储只承认该接收记录引用；`scopedWriteViolation`按四位小数精确验证追加点收及对应拒收差量，来源采购仅允许匹配的`received`差量、来源订单仅允许派生状态/色调；价格、附件、其他条目和旧点收不得改写。新回归覆盖部分接收/拒收、旧式整笔确认、来源字段篡改、其他成员与权限收回。该授权不写入业务状态，既有业务门禁继续由`confirmMaterialDelivery`复核。
