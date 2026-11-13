@@ -45,6 +45,18 @@ function receiptFundingUse(root:Root,receipt:Root['receipts'][number]){
   }
   return {customers,reserved};
 }
+/** Unapplied ownership in receipt currency. Named-payer fallback may use only genuinely unreserved cash. */
+export function customerReceiptUnappliedMinor(root:Root,receiptId:string,customerId:string,includeUnassigned=false):number{
+ const receipt=root.receipts.find(row=>row.id===receiptId);if(!receipt||receipt.remaining<=0)return 0;
+ const {customers,reserved}=receiptFundingUse(root,receipt),amount=mistMoneyMinor(receipt.amount);
+ if(reserved>amount)fail('到账资金归属与核销不一致，不能计算客户余额','PRECONDITION');
+ const customer=customers.get(customerId),orders=[...(customer?.orders.values()??[])];
+ const assigned=(customer?.unassigned??0)+orders.reduce((n,row)=>n+row.assigned,0);
+ const held=orders.reduce((n,row)=>n+Math.max(row.assigned,row.allocated),0);
+ const allocated=orders.reduce((n,row)=>n+row.allocated,0);
+ const owned=Math.max(assigned,held)-allocated,free=includeUnassigned?amount-reserved:0;
+ return Math.max(0,Math.min(mistMoneyMinor(receipt.remaining),owned+free));
+}
 /**
  * 订单可收款上限：合同金额；溢装 / 已批准超量出运按实际开出更高的销售发票时，以财务已确认的发票合计为准。
  * 待确认、已驳回或已作废的 CI 不抬高上限（与核销口径 isRecognizedMistInvoice 一致）。except 用于预判作废 / 驳回某张发票之后的上限。

@@ -1,14 +1,15 @@
 /**
  * 客户对账单（Statement of Account，2026-10-18）。外贸通行的“未结项对账单”（open-item statement）：
  * 截至对账日按币种列出该客户全部未结应收（票面、已到账核销、贷项抵扣、未收、到期日、逾期天数）、
- * 已到账但尚未核销的款项（付款方与客户同名的到账余额，作为预收/待核销抵减），以及账龄分段与净欠款。
+ * 已到账但尚未核销的款项（按明确归属，未归属部分才按付款方同名确认），以及账龄分段与净欠款。
  * 不跨币种折算合计。服务端按冻结快照渲染 PDF 归档（SOA-YYYY-NNNN，按年连续），只追加不改写；不记录发送状态。
- * 收款账户按币种取未销户的公司银行账户，缺省回落到公司档案的开户行与账号。
+ * 收款账户只取对应币种未销户的公司银行账户，不把未确认币种的抬头账户当作多币种账户。
  */
 import { mistInvoiceCustomerId } from './mistOpeningBalance';
 import { MistCommandError, isRecognizedMistInvoice, mistInvoiceBankChargeMinor, mistInvoiceWriteoffMinor, type MistCompanyProfile, type MistContext, type MistState } from './mistWorkspace';
 import { platformBusinessDate } from './mistPlatform';
 import { creditDocumentFingerprint } from './mistCreditDocuments';
+import { customerReceiptUnappliedMinor } from './mistOrderFunding';
 
 export const CUSTOMER_STATEMENT_TEMPLATE_VERSION = 2 as const;
 export type StatementAgeBucket = 'not-due' | '1-30' | '31-60' | '61-90' | '90+' | 'unknown';
@@ -51,13 +52,14 @@ export function statementAge(due: string, asOf: string): { days: number | null; 
   return { days, bucket: days === 0 ? 'not-due' : days <= 30 ? '1-30' : days <= 60 ? '31-60' : days <= 90 ? '61-90' : '90+' };
 }
 function invoiceOwner(root: MistState, inv: { devId?: string; orderId: string; customerId?: string }) { return mistInvoiceCustomerId(root, inv); }
+const openStatementInvoices = (root: MistState, customerId: string, asOf: string) => root.invoices.filter(i => isRecognizedMistInvoice(i) && minor(i.open) > 0 && invoiceOwner(root, i) === customerId && (!i.issuedAt || i.issuedAt <= asOf));
 
 /** 截至对账日的对账单内容（不含编号、生成人与时间）。 */
 export function customerStatementContent(root: MistState, customerId: string, asOf: string): StatementContent {
   const c = root.customers.find(row => row.id === customerId) || fail('客户不存在', 'NOT_FOUND');
   const issuer = root.settings.companyProfile;
-  const invoices = root.invoices.filter(i => isRecognizedMistInvoice(i) && minor(i.open) > 0 && invoiceOwner(root, i) === c.id && (!i.issuedAt || i.issuedAt <= asOf));
-  const receipts = root.receipts.filter(r => minor(r.remaining) > 0 && sameName(r.payer, c.name) && r.date <= asOf);
+  const invoices = openStatementInvoices(root, c.id, asOf);
+  const receipts = root.receipts.filter(r => minor(r.remaining) > 0 && r.date <= asOf).map(r => ({ ...r, statementAmount: customerReceiptUnappliedMinor(root, r.id, c.id, sameName(r.payer, c.name)) })).filter(r => r.statementAmount > 0);
   const currencies = [...new Set([...invoices.map(i => i.currency), ...receipts.map(r => r.currency)])].sort();
   const credits = root.platform?.creditApplications || [];
   const sections = currencies.map((currency): StatementSection => {
@@ -67,12 +69,12 @@ export function customerStatementContent(root: MistState, customerId: string, as
       const reference = i.devId ? (root.devs.find(d => d.id === i.devId)?.code || '') : (i.order || root.orders.find(o => o.id === i.orderId)?.code || '');
       return { invoiceId: i.id, code: i.code, reference, issuedAt: i.issuedAt || '', due: i.due || '', amount: fmt(minor(i.amount)), received: fmt(received), credited: fmt(credited), bankCharges: fmt(mistInvoiceBankChargeMinor(i)), writtenOff: fmt(mistInvoiceWriteoffMinor(i)), open: fmt(minor(i.open)), daysOverdue: age.days, bucket: age.bucket };
     });
-    const unapplied = receipts.filter(r => r.currency === currency).sort((a, b) => a.date.localeCompare(b.date) || a.code.localeCompare(b.code)).map(r => ({ receiptId: r.id, code: r.code, date: r.date, reference: r.ref || '', amount: fmt(minor(r.remaining)) }));
+    const unapplied = receipts.filter(r => r.currency === currency).sort((a, b) => a.date.localeCompare(b.date) || a.code.localeCompare(b.code)).map(r => ({ receiptId: r.id, code: r.code, date: r.date, reference: r.ref || '', amount: fmt(r.statementAmount) }));
     const totalOpen = lines.reduce((n, l) => n + Math.round(Number(l.open) * 100), 0), totalUnapplied = unapplied.reduce((n, u) => n + Math.round(Number(u.amount) * 100), 0);
     const aging = STATEMENT_AGE_BUCKETS.map(bucket => ({ bucket, amount: fmt(lines.filter(l => l.bucket === bucket).reduce((n, l) => n + Math.round(Number(l.open) * 100), 0)) })).filter(a => a.bucket !== 'unknown' || a.amount !== '0.00');
     const accounts = (root.bankAccounts || []).filter(a => a.currency === currency && !a.closed).sort((a, b) => a.code.localeCompare(b.code));
-    const remit = accounts.length ? accounts.map(a => ({ bankName: a.bankName, accountName: issuer?.englishName || issuer?.legalName || a.name, accountNo: a.accountNo, swift: issuer?.swift || '' }))
-      : issuer?.bankAccount ? [{ bankName: issuer.bankName || '', accountName: issuer.englishName || issuer.legalName, accountNo: issuer.bankAccount, swift: issuer.swift || '' }] : [];
+    const remit = accounts.map(a => ({ bankName: a.bankName, accountName: issuer?.englishName || issuer?.legalName || a.name, accountNo: a.accountNo,
+      swift: a.bankName === issuer?.bankName && a.accountNo.replace(/\s/g,'') === issuer?.bankAccount?.replace(/\s/g,'') ? issuer?.swift || '' : '' }));
     return { currency, lines, unapplied, totalOpen: fmt(totalOpen), totalUnapplied: fmt(totalUnapplied), net: fmt(totalOpen - totalUnapplied), aging, remit };
   });
   return {
@@ -81,8 +83,15 @@ export function customerStatementContent(root: MistState, customerId: string, as
   };
 }
 
-/** 截至对账日有未结应收或同名待核销到账（可出对账单）。 */
-export const customerHasStatementItems = (root: MistState, customerId: string, asOf: string) => root.customers.some(c => c.id === customerId) && customerStatementContent(root, customerId, asOf).sections.length > 0;
+/** Visibility probes may receive a partial projection; actual server snapshots still require complete funding sources. */
+export function customerHasStatementItems(root: MistState, customerId: string, asOf: string): boolean {
+  if (!root.customers.some(c => c.id === customerId)) return false;
+  try { return customerStatementContent(root, customerId, asOf).sections.length > 0; }
+  catch (error) {
+    if (!(error instanceof MistCommandError)) throw error;
+    return openStatementInvoices(root, customerId, asOf).length > 0;
+  }
+}
 /** 不能生成对账单的原因；可以生成时返回 null。 */
 export function customerStatementBlocker(root: MistState, customerId: string, asOf: string): string | null {
   if (!root.customers.some(c => c.id === customerId)) return '客户不存在';

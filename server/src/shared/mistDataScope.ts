@@ -12,6 +12,7 @@ import type { MistState } from './mistWorkspace';
 import type { OrderCostState } from './mistOrderCost';
 import { buildTeamScopeGraph, resolveTeamScope, type MistTeamScope, type TeamScopeRef } from './mistTeamScope';
 import { mistInvoiceCustomerId } from './mistOpeningBalance';
+import { customerReceiptUnappliedMinor } from './mistOrderFunding';
 import { materialDeliveryRequired, materialDeliveryTargets, internalFabricCandidates, garmentMaterialBlocker, materialDeliveryRows, materialReceiverIds, type InternalFabricCandidate, type MaterialDeliveryRow } from './mistInternalFabric';
 import { productionSampleRequirements, type ProductionSampleRequirement } from './mistProductionSamples';
 
@@ -189,7 +190,7 @@ export function canGenerateScopedStatement(state: MistState, scope: MistDataScop
   const visible = scopedVisibility(state, scope, false);
   if ((state.invoices ?? []).some(row => mistInvoiceCustomerId(state, row) === customerId && !visible.get('invoices')!.has(row.id))) return false;
   const payer = customer.name.trim().toLocaleLowerCase();
-  return !(state.receipts ?? []).some(row => row.remaining > 0 && row.payer.trim().toLocaleLowerCase() === payer && (!visible.get('receipts')!.has(row.id) || partialReceipt(state, visible, row.id).partial));
+  return !(state.receipts ?? []).some(row => row.remaining > 0 && customerReceiptUnappliedMinor(state,row.id,customerId,row.payer.trim().toLocaleLowerCase()===payer)>0 && (!visible.get('receipts')!.has(row.id) || partialReceipt(state, visible, row.id).partial));
 }
 
 /** 按受限范围裁剪状态（不改原对象）。动态、待办、通知、日历按其指向的记录同步裁剪；本人被指派的待办始终保留。 */

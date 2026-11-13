@@ -6,6 +6,7 @@ export const reviewedEnglish: Record<string, string> = {
   ...auditEnglish,
   ...connectionEnglish,
   ...mailReceivingEnglish,
+  '到账资金归属与核销不一致，不能计算客户余额': 'Receipt ownership and applications do not reconcile. The customer balance cannot be calculated.',
   '{0}份附件不可读': '{0} attachment(s) unavailable',
   '附件不可读': 'Attachment unavailable',
   '该附件的原件受权限限制，请由有权限的岗位办理': 'The source file is restricted. An authorized role must handle this attachment.',
