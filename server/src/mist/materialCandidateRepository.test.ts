@@ -1,6 +1,33 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import path from 'node:path';import {randomUUID} from 'node:crypto';
 import * as contract from '../shared/mistWorkspace';import {materialDeliveryFixture} from './__tests__/materialDelivery';import {MemoryMistDatabase,testActor,testAuthority} from './__tests__/support';import {MistPrivateFiles} from './files';import {MistRepository} from './repository';
 vi.mock('./context',()=>({mistApprovalAuthority:async()=>({supplier:{}})}));let dir:string;beforeEach(async()=>{dir=await mkdtemp(path.join(tmpdir(),'fabric-candidate-'));});afterEach(async()=>{await rm(dir,{recursive:true,force:true});});
+it('identifies active garment destinations for the fabric source without exposing the target order or granting edits',async()=>{
+ const company='11111111-1111-4111-8111-111111111111',db=new MemoryMistDatabase(),auth=testAuthority(),f=materialDeliveryFixture(20),wid=randomUUID();
+ const target=f.state.orders.find(o=>o.id===f.target.orderId)!,line=f.state.orderLines.find(l=>l.id===f.target.lineId)!;
+ target.customer='PRIVATE-CUSTOMER';target.governance!.contract.paymentNote='PRIVATE-TERMS';line.name='Wool coat';line.style='CC-001';line.price=12345;
+ target.governance!.contract.confirmationFileIds=['PRIVATE-FILE'];f.state.files.push({id:'PRIVATE-FILE',name:'Private PO.pdf',mimeType:'application/pdf',size:5,storageKey:'private-po',createdAt:f.context.now,uploadedBy:'garment'});
+ const unrelated=f.create('garment');f.state.orders.find(o=>o.id===unrelated.orderId)!.code='UNRELATED-ORDER';
+ const allocation=f.state.internalFabricAllocations![0];
+ f.state.internalFabricAllocations!.push({...structuredClone(allocation),id:'cancelled-destination',orderId:unrelated.orderId,lineId:unrelated.lineId,status:'cancelled'});
+ for(const id of ['owner','garment','reviewer','warehouse']){db.companyMembers.push({companyId:company,userId:id,status:'active'});db.accounts.set(id,{status:'active',displayName:id});}
+ auth.users.set('owner',{active:true,permissions:['orders:read']});auth.users.set('garment',{active:true,permissions:['orders:read','orders:write']});
+ db.workspaces.set(wid,{id:wid,ownerId:'boss',companyId:company,slug:`company@${company}`,name:'Company',revision:0,state:structuredClone(f.state),createdAt:new Date(),updatedAt:new Date()});
+ const repo=new MistRepository(db,contract,new MistPrivateFiles(dir),auth.authorize,()=>new Date(f.context.now)),sender={...testActor('owner'),roles:[],companyId:company},recipient={...testActor('garment'),roles:[],companyId:company};
+ const visible=await repo.get(sender,wid),hints=(visible as any).scopedFabricDestinations;
+ expect(hints).toEqual({[f.source.lineId]:[{allocationId:allocation.id,orderCode:target.code,lineStyle:'CC-001',lineName:'Wool coat'}]});
+ expect(db.workspaces.get(wid).state).not.toHaveProperty('scopedFabricDestinations');
+ expect(visible.state.orders.some(o=>o.id===target.id)).toBe(false);expect(visible.state.orderLines.some(l=>l.id===line.id)).toBe(false);
+ expect(visible.state.files.some(file=>file.id==='PRIVATE-FILE')).toBe(false);
+ expect(JSON.stringify(hints)).not.toMatch(/PRIVATE|12345|UNRELATED/);
+ expect((await repo.get(recipient,wid) as any).scopedFabricDestinations).toEqual({});
+ expect((await repo.get({...sender,permissionCeiling:[]},wid) as any).scopedFabricDestinations).toBeUndefined();
+ auth.users.set('owner',{active:true,permissions:['orders:read','orders:write']});
+ const before=structuredClone(db.workspaces.get(wid));
+ await expect(repo.execute(sender,wid,{requestId:'source-forged-checklist',expectedRevision:before.revision,command:{type:'order.checklist',payload:{orderId:target.id,itemId:target.checklist[0].id,done:true}}})).rejects.toMatchObject({status:404});
+ expect(db.workspaces.get(wid)).toEqual(before);
+ auth.users.set('owner',{active:true,permissions:[]});
+ expect((await repo.get(sender,wid) as any).scopedFabricDestinations).toBeUndefined();
+});
 it('lets the exact recipient allocate and receive a hidden source without exposing its order or other targets',async()=>{
  const company='11111111-1111-4111-8111-111111111111',db=new MemoryMistDatabase(),auth=testAuthority(),f=materialDeliveryFixture(20),wid=randomUUID();
  const source=f.create('fabric'),secret=f.create('fabric');f.state.orders.find(o=>o.id===secret.orderId)!.governance!.contract.internalSupply!.receiverId='warehouse';

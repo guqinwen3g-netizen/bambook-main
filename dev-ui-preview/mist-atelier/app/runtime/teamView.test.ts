@@ -2,7 +2,15 @@ import { expect, it } from 'vitest';
 import { createMistState } from '../../../../server/src/shared/mistWorkspace';
 import { applyDataScope } from '../../../../server/src/shared/mistDataScope';
 import { orderFundingCoveredAmount } from '../../../../server/src/shared/mistOrderFunding';
-import { ALL_TEAMS, teamOrigins, teamViewState } from './teamView';
+import { ALL_TEAMS, teamOrigins, teamViewState, teamViewFabricDestinations } from './teamView';
+
+it('keeps destination identifiers only for retained source lines and active allocations in the selected group view',()=>{
+ const hints={source:[{allocationId:'active',orderCode:'VISIBLE',lineStyle:'V',lineName:'Coat'},{allocationId:'cancelled',orderCode:'CANCELLED',lineStyle:'C',lineName:'Old'},{allocationId:'outside',orderCode:'OUTSIDE',lineStyle:'O',lineName:'Other'}],hidden:[{allocationId:'hidden',orderCode:'HIDDEN',lineStyle:'H',lineName:'Hidden'}]};
+ const state:any={orderLines:[{id:'source'}],internalFabricAllocations:[{id:'active',status:'active'},{id:'cancelled',status:'cancelled'}]};
+ expect(teamViewFabricDestinations(hints,state)).toEqual({source:[hints.source[0]]});
+ expect(teamViewFabricDestinations(hints,null)).toEqual({});expect(teamViewFabricDestinations(undefined,state)).toBeUndefined();
+ expect(hints.source).toHaveLength(3);
+});
 
 // 示例数据：customer-2 名下只有订单 SO-G-2026-012。
 const demo = () => { let n = 0; const state: any = createMistState({ id: () => `id-${++n}`, now: '2026-10-13T00:00:00Z', actorName: 'boss' } as any, 'demo');

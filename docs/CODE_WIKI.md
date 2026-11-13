@@ -82,6 +82,8 @@
 
 ## 5. 跨模块交接（主线）
 
+面料分配去向标识（2026-11-14）：`mistDataScope.ts#scopedFabricDestinations`仅对当前行级协作范围内的内部面料供给行，按有效、来源/目标父行匹配的分配派生`allocationId/orderCode/lineStyle/lineName`。`repository.ts#view`在当前`orders:read`及委托上限内放入`MistWorkspaceEnvelope.scopedFabricDestinations`，不写公司业务状态，不下发成衣金额、客户、条款或附件，不让成衣整单变为可读/可写。`InternalFabricPanel.tsx`用该标识显示准确去向；成衣记录本来不可见时不提供打开动作。`teamView.tsx#teamViewFabricDestinations`随所选小组保留源行及有效分配过滤，切换为空视角不残留其他标识。角色撤权、只读来源不继承旁支、取消/不匹配分配、私有附件与跨改成衣拒绝由共享函数/仓储/页面回归覆盖；本次工作区读回修复不代替后续Agent业务读取验收。
+
 内部预算与分色输入（2026-11-14）：`OrderDetailPage.tsx#OrderLineDialog`按当前拟议合同或有效合同用途显示“预算单价”或“销售单价”，可访问名称与显示一致；字段及计算不变。`OrderBreakdownEditor.tsx`的面料根节点复用现有`mist-breakdown`输入收缩规则，使颜色、数量、单位及移除按钮在窄屏仍处于同一容器内，不改变分色数据或成衣分码表的横向滚动规则。390浅/深、1180深及单/双颜色行已真实复验，取消编辑不产生业务命令；不把本局部验证当作全站窄屏通过。
 
 开发发票范围（2026-11-14）：`mistDataScope.ts#scopedVisibility`按`invoice.devId`追溯准确开发案；该类发票没有销售订单，不能仅靠`orderId`。范围用于读投影与写后校验，归档不切断开发费用/收费/财务交接；同客户其他开发案不因此共享，上游只读关联仍不能新建或修改票据。模块操作权限、财务应收确认和附件引用权限继续独立校验。`dataScopeMatrix.test.ts`覆盖业务开票/财务退回后重开与同客越界拒绝，`mistDataScope.test.ts`覆盖只读上游。

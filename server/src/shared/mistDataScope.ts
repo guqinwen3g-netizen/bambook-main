@@ -35,6 +35,21 @@ export type ScopedVisibility = Map<string, Set<string>>;
 export type ScopedMaterialIssueTargets = Record<string,ReturnType<typeof materialDeliveryTargets>>;
 export type ScopedSampleGate = Pick<ProductionSampleRequirement,'key'|'label'|'ok'|'reason'|'taskId'|'sampleId'>;
 export type ScopedFabricAccess = Record<string,{candidates:InternalFabricCandidate[];blocker:string;deliveries:MaterialDeliveryRow[];sampleRequirements:Record<string,ScopedSampleGate[]>}>;
+export type ScopedFabricDestinations = Record<string,Array<{allocationId:string;orderCode:string;lineStyle:string;lineName:string}>>;
+
+/** Source handlers need exact allocation identifiers, not the garment contract or write access. */
+export function scopedFabricDestinations(state:MistState,scope:MistDataScope):ScopedFabricDestinations {
+ const visible=scopedVisibility(state,scope,false),result:ScopedFabricDestinations={};
+ const sources=new Set(state.orders.filter(o=>o.type==='fabric'&&o.governance?.contract.kind==='internal'&&o.governance.contract.internalSupply&&visible.get('orders')!.has(o.id)).map(o=>o.id));
+ const orders=new Map(state.orders.filter(o=>o.type==='garment').map(o=>[o.id,o])),lines=new Map(state.orderLines.map(line=>[line.id,line]));
+ for(const row of state.internalFabricAllocations??[]){
+  if(row.status!=='active'||!sources.has(row.fabricOrderId)||!visible.get('orderLines')!.has(row.fabricLineId))continue;
+  const sourceLine=lines.get(row.fabricLineId),order=orders.get(row.orderId),line=lines.get(row.lineId);
+  if(sourceLine?.orderId!==row.fabricOrderId||!order||line?.orderId!==order.id)continue;
+  (result[row.fabricLineId]??=[]).push({allocationId:row.id,orderCode:order.code,lineStyle:line.style,lineName:line.name});
+ }
+ return result;
+}
 
 /** Exact recipient's own garment lines and source records explicitly addressed to them. */
 export function scopedFabricAccess(state:MistState,scope:MistDataScope,actorId:string,actorName:string,includeSampleGates=false):ScopedFabricAccess {

@@ -1,6 +1,17 @@
 import { expect,it } from 'vitest';
 import { materialDeliveryFixture } from '../mist/__tests__/materialDelivery';
-import { applyDataScope,scopedFabricAccess,scopedReferenceViolation,scopedWriteViolation,scopedMaterialIssueTargets } from './mistDataScope';
+import { applyDataScope,scopedFabricAccess,scopedFabricDestinations,scopedReferenceViolation,scopedWriteViolation,scopedMaterialIssueTargets } from './mistDataScope';
+
+it('derives destination names only from an active exact allocation owned through its internal fabric source',()=>{
+ const f=materialDeliveryFixture(20),scope={userIds:['owner'],teamIds:[]},a=f.state.internalFabricAllocations![0],original=structuredClone(f.state);
+ const target=f.state.orders.find(o=>o.id===f.target.orderId)!,line=f.state.orderLines.find(l=>l.id===f.target.lineId)!;
+ expect(scopedFabricDestinations(f.state,scope)).toEqual({[f.source.lineId]:[{allocationId:a.id,orderCode:target.code,lineStyle:line.style,lineName:line.name}]});expect(f.state).toEqual(original);
+ expect(scopedFabricDestinations(f.state,{userIds:['garment'],teamIds:[]})).toEqual({});
+ for(const change of [(s:typeof f.state)=>{s.internalFabricAllocations![0].status='cancelled';},(s:typeof f.state)=>{s.orderLines.find(l=>l.id===f.target.lineId)!.orderId='foreign';},(s:typeof f.state)=>{s.orderLines.find(l=>l.id===f.source.lineId)!.orderId='foreign';},(s:typeof f.state)=>{s.orders.find(o=>o.id===f.source.orderId)!.governance!.contract.kind='external';}]){
+  const state=structuredClone(f.state);change(state);expect(scopedFabricDestinations(state,scope)).toEqual({});
+ }
+ target.code='UPDATED-CODE';line.style='UPDATED-STYLE';expect(scopedFabricDestinations(f.state,scope)[f.source.lineId][0]).toMatchObject({orderCode:'UPDATED-CODE',lineStyle:'UPDATED-STYLE'});
+});
 
 it('exposes only an authorized source stock and exact allocated processing target to the source owner',()=>{
  const f=materialDeliveryFixture(20),scope={userIds:['owner'],teamIds:[]},stock=f.state.fulfillment.stock[0];
