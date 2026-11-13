@@ -15,6 +15,7 @@ import { MistPrivateFiles } from './files';
 import { CodexSubscriptionService } from '../ai/codexSubscription';
 import { createPlatformProviderStore } from '../ai/platformProviders';
 import { createAuthService } from '../auth/service';
+import {sessionRevocationStore} from '../auth/__tests__/sessionRevocationStore';
 import * as contract from '../shared/mistWorkspace';
 
 const auth = createAuthService();
@@ -32,6 +33,7 @@ afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
 
 function app() {
   const prisma: any = {
+    authSessionRevocation:sessionRevocationStore(),
     userAccount: {
       findFirst: async ({ where }: any) => (users[where.id] && !(where.deletedAt === null && users[where.id].deletedAt != null) ? structuredClone(users[where.id]) : null),
       findUnique: async ({ where }: any) => (users[where.id] ? structuredClone(users[where.id]) : null),
