@@ -100,7 +100,26 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
       authority.supplier[key]={version:valid?row.version:0,userIds};
     }
   }
-  if(kind.startsWith('platform.claim.')){try{const reviewerId=(await routing.resolveClaimLeader(actor.userId)).reviewerId;const user=reviewerId&&reviewerId!==actor.userId?await loadUserWithRoles(db,reviewerId):null;if(user&&user.status==='active'&&!user.deletedAt&&hasScope(await buildLoadedAuthTokenPayload(db,user,actor.companyId??null),'aftersales:approve'))authority.claimReviewerId=reviewerId;}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}}
+  if(kind==='platform.claim.submit'||kind==='platform.claim.decide'){
+    try{const reviewerId=(await routing.resolveClaimLeader(actor.userId)).reviewerId;const user=reviewerId&&reviewerId!==actor.userId?await loadUserWithRoles(db,reviewerId):null;if(user&&user.status==='active'&&!user.deletedAt&&hasScope(await buildLoadedAuthTokenPayload(db,user,actor.companyId??null),'aftersales:approve'))authority.claimReviewerId=reviewerId;}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}
+    if(!authority.claimReviewerId&&actor.companyId&&eligibleReviewerIds){
+      // Tenant general managers need not have the legacy ADMIN role. Require a
+      // unique, currently granted company-wide approver; department supervisors
+      // and ambiguous leadership must not become the claim leader by fallback.
+      const candidates:string[]=[];
+      for(const id of new Set(eligibleReviewerIds)){
+        if(id===actor.userId)continue;
+        const user=await loadUserWithRoles(db,id);if(!user||user.status!=='active'||user.deletedAt)continue;
+        const fresh=await buildLoadedAuthTokenPayload(db,user,actor.companyId);
+        if(fresh.companyId===actor.companyId&&fresh.globalBusinessScope===true&&hasScope({...fresh,roles:[]},'aftersales:approve'))candidates.push(id);
+      }
+      if(candidates.length===1){
+        const companyRouting=createApprovalRoutingService({prisma:db,companyId:actor.companyId,eligibleReviewerIds:candidates});
+        try{const id=(await companyRouting.resolveReviewerByDepartment(actor.userId))?.reviewerId;if(id&&candidates.includes(id))authority.claimReviewerId=id;}
+        catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}
+      }
+    }
+  }
   // 付款申请分档：每一档先找申请人所在部门主管，主管没有该档权限时上抬到总领导；
   // 审批人必须当前在职、同时持有付款申请审批权与该档权限，且不能是申请人本人。
   if(kind.startsWith('payable.request.')){
@@ -116,7 +135,7 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
       if(leader===null)leader=await resolve(()=>routing.resolveClaimLeader(actor.userId));
       let reviewer=await qualified(leader??undefined)?leader:undefined;
       if(!reviewer&&actor.companyId&&eligibleReviewerIds){
-        // Claim escalation accepts ADMIN only; payment tiers also reach a qualified company general manager.
+        // The legacy claim role route accepts ADMIN only; payment tiers also reach a qualified company general manager.
         // Keep the existing department/upper-manager rules, filtering by this tier before routing.
         const candidates:string[]=[];for(const id of eligibleReviewerIds)if(await qualified(id))candidates.push(id);
         if(candidates.length){

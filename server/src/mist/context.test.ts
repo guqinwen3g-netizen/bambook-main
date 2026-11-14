@@ -120,6 +120,38 @@ describe('company context across approval transaction callbacks',()=>{
 });
 
 describe('Mist claim leader authority',()=>{
+ it.each(['platform.claim.create','platform.claim.updateDraft','platform.claim.attachFiles','platform.claim.notify','platform.claim.verify','platform.claim.execute','platform.claim.recovery.open'])('does not load unrelated reviewer accounts for %s',async kind=>{
+  mocks.claim.mockRejectedValue(new Error('review routing is unavailable'));
+  expect((await mistApprovalAuthority({}, {...actor,companyId:'company-a'},kind,['boss'])).claimReviewerId).toBeUndefined();
+  expect(mocks.claim).not.toHaveBeenCalled();expect(mocks.build).not.toHaveBeenCalled();
+ });
+ it.each(['platform.claim.submit','platform.claim.decide'])('routes %s to the current company general manager when the legacy ADMIN-only route has no reviewer',async kind=>{
+  mocks.users.set('head',{id:'head',status:'active',permissions:['aftersales:approve'],globalBusinessScope:false});
+  mocks.users.set('boss',{id:'boss',status:'active',permissions:['aftersales:approve'],globalBusinessScope:true});
+  mocks.build.mockImplementation(async(_db:any,user:any,companyId?:string)=>({userId:user.id,companyId,roles:[],departmentIds:[],permissions:user.permissions,globalBusinessScope:user.globalBusinessScope===true,authorizationLoaded:true}));
+  const upper=vi.fn().mockResolvedValue({reviewerId:'boss'});
+  mocks.routes.set('["boss"]',{resolveReviewerByDepartment:upper,resolveClaimLeader:mocks.claim});
+  const authority=await mistApprovalAuthority({}, {...actor,companyId:'company-a'},kind,['head','boss']);
+  expect(authority.claimReviewerId).toBe('boss');expect(upper).toHaveBeenCalledWith(actor.userId);
+  for(const call of mocks.build.mock.calls)expect(call[2]).toBe('company-a');
+ });
+ it.each(['disabled','revoked','not-companywide','outside-members','self','unresolved','foreign-result','missing-company'])('does not invent a company claim leader for %s',async condition=>{
+  const id=condition==='self'?actor.userId:'boss';
+  mocks.users.set(id,{id,status:condition==='disabled'?'disabled':'active',permissions:condition==='revoked'?[]:['aftersales:approve'],globalBusinessScope:condition!=='not-companywide'});
+  mocks.build.mockImplementation(async(_db:any,user:any,companyId?:string)=>({userId:user.id,companyId,roles:[],departmentIds:[],permissions:user.permissions,globalBusinessScope:user.globalBusinessScope===true,authorizationLoaded:true}));
+  const upper=condition==='unresolved'?vi.fn().mockRejectedValue(Object.assign(new Error('none'),{code:'NO_REVIEWER_RESOLVED'})):vi.fn().mockResolvedValue({reviewerId:condition==='foreign-result'?'outsider':id});
+  mocks.routes.set('["boss"]',{resolveReviewerByDepartment:upper,resolveClaimLeader:mocks.claim});
+  const authority=await mistApprovalAuthority({}, {...actor,...(condition==='missing-company'?{}:{companyId:'company-a'})},'platform.claim.submit',condition==='outside-members'?[]:[id]);
+  expect(authority.claimReviewerId).toBeUndefined();
+ });
+ it('keeps multiple company-wide claim leaders ambiguous instead of choosing the first account',async()=>{
+  for(const id of ['boss','second'])mocks.users.set(id,{id,status:'active',permissions:['aftersales:approve'],globalBusinessScope:true});
+  mocks.build.mockImplementation(async(_db:any,user:any,companyId?:string)=>({userId:user.id,companyId,roles:[],departmentIds:[],permissions:user.permissions,globalBusinessScope:user.globalBusinessScope,authorizationLoaded:true}));
+  const upper=vi.fn().mockResolvedValue({reviewerId:'boss'});
+  mocks.routes.set('["boss","second"]',{resolveReviewerByDepartment:upper,resolveClaimLeader:mocks.claim});
+  expect((await mistApprovalAuthority({}, {...actor,companyId:'company-a'},'platform.claim.submit',['boss','second'])).claimReviewerId).toBeUndefined();
+  expect(upper).not.toHaveBeenCalled();
+ });
  it('keeps the current company and checks the leader current approval grant before nomination',async()=>{
   mocks.claim.mockResolvedValue({reviewerId:'leader'});mocks.users.set('leader',{id:'leader',status:'active',permissions:['aftersales:approve']});
   expect((await mistApprovalAuthority({},{...actor,companyId:'company-a'},'platform.claim.submit')).claimReviewerId).toBe('leader');
