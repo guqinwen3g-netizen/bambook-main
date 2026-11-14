@@ -157,6 +157,7 @@ export function getOrderGovernanceReviews(root:MistState):MistReviewTask[]{
  return[...tasks,...closureReviews(root),...overShipReviews(root),...cancelReviews(root)];
 }
 export function applyOrderGovernanceCommand(root:MistState,command:OrderGovernanceCommand,context:MistContext):MistCommandResult{
+ if(command.type==='order.governance.decide'&&(typeof command.payload?.id!=='string'||!command.payload.id.trim()))fail('订单审批标识无效');
  if(command.type==='order.governance.decide'&&command.payload.id.includes(CLOSE_MARK))return decideClosure(root,command.payload,context);
  if(command.type==='order.governance.closeLine')return closeLine(root,command.payload,context);
  if(command.type==='order.governance.decide'&&command.payload.id.includes(OVER_MARK))return decideOverShip(root,command.payload,context);

@@ -27,6 +27,8 @@
 
 ## 3. 权限、岗位与行级范围
 
+订单决定标识（2026-11-14）：通用命令`order.governance.decide`使用`payload.id`指定订单或复合审批事项，待处理轮由领域服务查找；审批接口路径里的`order:roundId`通过服务端映射到该标识，不能把`orderId/roundId`字段直接当作通用命令参数。`mistOrderGovernance.ts#applyOrderGovernanceCommand`在解释短交、超装或取消等标识分支前验证非空字符串，缺失/错误类型以422拒绝；合法请求仍校验本次冻结名单与当前有效审批资格。格式拒绝不产生业务版本、签字或回执，不代表通过权限校验。
+
 - **权限点**：`server/src/_shared/rolePermissionMatrix.ts#PERMISSION_SCOPES`。命令到权限点的映射在 `mistWorkspace.ts#mistCommandPermission`；财务细分见 `mistFinancePermissions.ts`。
 - **岗位配置界面**：`app/runtime/jobPermissions.ts`（`JOB_AREAS`：按模块配 读/写/审批）+ `pages/modules/JobPermissionEditor.tsx`；成员与小组在 `pages/WorkspaceMembers.tsx`、`pages/TeamScopesSection.tsx`（`teamScope.save`）。
 - **开发入口（2026-11-09）**：成衣/面料开发、样品及产品档案沿用 `products:write`；开发新建的路由门禁见 `app/routeAccess.ts`，营销线索的客户开发入口见 `pages/modules/MarketPages.tsx#LeadList`。不要用已退役的 `development:write` 决定入口，测试须按具体权限集合核对允许和拒绝，不能只以全权限替身验证。
