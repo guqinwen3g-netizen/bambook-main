@@ -46,6 +46,24 @@ it('uses neutral package labels for fabric while keeping carton labels for garme
  expect(host.textContent).toContain('1 箱');
 });
 
+it('shows the actual unit on each mixed-unit packing input and follows source changes without converting quantities',async()=>{
+ const s=store.state!,f=s.fulfillment;s.orders[0].type='fabric';Object.assign(s.orderLines[0],{unit:'米',qty:130.5});
+ s.orderLines.push({...s.orderLines[0],id:'yards',name:'塔丝隆',unit:'码',qty:110});
+ f.shipments.push(shipment('mixed-units',{domain:'fabric',lines:[{orderId:'o',lineId:'l',productionId:'p',quantity:130.5,factoryConfirmedAt:'2026-10-09'},{orderId:'o',lineId:'yards',productionId:'py',quantity:110,factoryConfirmedAt:'2026-10-09'}]}));
+ render('mixed-units');await click(getByRole(host,'button',{name:'分配装箱'}));
+ const metres=getByRole(host,'spinbutton',{name:'装箱数量（米）'}) as HTMLInputElement,yards=getByRole(host,'spinbutton',{name:'装箱数量（码）'}) as HTMLInputElement;
+ expect(metres.value).toBe('130.5');expect(yards.value).toBe('110');
+ expect(metres.closest('.mist-input')?.querySelector('.mist-input-suffix')?.textContent).toBe('米');
+ expect(yards.closest('.mist-input')?.querySelector('.mist-input-suffix')?.textContent).toBe('码');
+ const source=getAllByRole(host,'combobox',{name:'装箱来源条目'})[0];
+ act(()=>fireEvent.change(source,{target:{value:'yards::py'}}));
+ expect(getAllByRole(host,'spinbutton',{name:'装箱数量（码）'})).toHaveLength(2);
+ expect((getAllByRole(host,'spinbutton',{name:'装箱数量（码）'})[0] as HTMLInputElement).value).toBe('130.5');
+ act(()=>fireEvent.change(source,{target:{value:'l::p'}}));
+ await click(getByRole(host,'button',{name:'保存装箱分配'}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.shipments.pack',payload:expect.objectContaining({lines:expect.arrayContaining([expect.objectContaining({lineId:'l',quantity:130.5}),expect.objectContaining({lineId:'yards',quantity:110})])})}));
+});
+
 it('supplements signed fabric package colours without permitting physical edits',async()=>{
  const st=store.state!,f=st.fulfillment;st.orders[0].type='fabric';Object.assign(st.orderLines[0],{unit:'米',breakdown:{kind:'fabric',composition:'棉',width:150,weight:141,rows:[{color:'本白',quantity:5},{color:'藏蓝',quantity:5}]}});
  f.shipments.push(shipment('fab',{domain:'fabric',booking:'BK',packingDetailVersion:2}));f.packing.push({...pack('fab',5),id:'p1',carton:'R1'},{...pack('fab',5),id:'p2',carton:'R2'});f.documents.push(doc('pl','fab','PL'));
@@ -200,7 +218,7 @@ it('keeps standalone packing failures but suppresses the same error already show
  store.state!.fulfillment.shipments.push(shipment('packing-feedback'));render('packing-feedback');await click(getByRole(host,'button',{name:'分配装箱'}));
  store.run.mockRejectedValueOnce(new Error('逐条目装箱数量必须等于本次计划数量'));await click(getByRole(host,'button',{name:'保存装箱分配'}));expect(host.querySelectorAll('[role="alert"]')).toHaveLength(1);
  presentedError='另一个错误';render('packing-feedback');expect(host.querySelectorAll('[role="alert"]')).toHaveLength(1);
- presentedError='逐条目装箱数量必须等于本次计划数量';render('packing-feedback');expect(host.querySelectorAll('[role="alert"]')).toHaveLength(0);expect((getByRole(host,'spinbutton',{name:'装箱数量'}) as HTMLInputElement).value).toBe('10');expect(getByRole(host,'button',{name:'保存装箱分配'}).hasAttribute('disabled')).toBe(false);
+ presentedError='逐条目装箱数量必须等于本次计划数量';render('packing-feedback');expect(host.querySelectorAll('[role="alert"]')).toHaveLength(0);expect((getByRole(host,'spinbutton',{name:/^装箱数量/}) as HTMLInputElement).value).toBe('10');expect(getByRole(host,'button',{name:'保存装箱分配'}).hasAttribute('disabled')).toBe(false);
 });
 
 it.each([
@@ -274,7 +292,7 @@ it('locks signed physical packing fields while supplementing missing colour-size
  state.fulfillment.shipments.push(shipment('signed-sku'));state.fulfillment.packing.push(pack('signed-sku',10));state.fulfillment.documents.push(doc('pl','signed-sku','PL'));
  render('signed-sku');await click(getByRole(host,'button',{name:'补充分色分码'}));
  expect((getByRole(host,'textbox',{name:'箱号'}) as HTMLInputElement).disabled).toBe(true);
- expect((getByRole(host,'spinbutton',{name:'装箱数量'}) as HTMLInputElement).disabled).toBe(true);
+ expect((getByRole(host,'spinbutton',{name:/^装箱数量/}) as HTMLInputElement).disabled).toBe(true);
  expect((getByRole(host,'button',{name:'增加装箱行'}) as HTMLButtonElement).disabled).toBe(true);
  expect(getByRole(host,'textbox',{name:'原单核对依据'})).toBeTruthy();
  expect((getByRole(host,'button',{name:'补充分色分码'}) as HTMLButtonElement).disabled).toBe(true);
