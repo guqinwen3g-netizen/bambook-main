@@ -16,7 +16,7 @@ import { mistBusinessDate } from './mistBusinessClock';
 import { platformBusinessDate } from './mistPlatform';
 import { MIST_COMPANY_PROFILE } from './mistCompanyIdentity';
 
-export const DEMO_SEED_VERSION = 23;
+export const DEMO_SEED_VERSION = 24;
 export type DemoSeedFailure = { step: string; message: string };
 
 const DAY = 86400000;
@@ -120,7 +120,7 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
   const coatProduct = coatDev && coatVersion ? id(run('product coat', { type: 'market.product.fromVersion', payload: { devId: coatDev.id, versionId: coatVersion.id, sku: 'GA-2711', supplierId: jiangnan, supplierCode: 'JX-C88' } })) : '';
   const fabricProduct = fabricDevId ? id(run('product fabric', { type: 'market.product.fromVersion', payload: { devId: fabricDevId, versionId: fabricVersionId, sku: 'FB-2701', supplierId: huasheng, supplierCode: 'HS-W3302' } })) : '';
   const product = (step: string, input: Parameters<typeof productInput>[0]) => id(run(step, { type: 'market.product.save', payload: { input: productInput(input) } }));
-  const nylon = product('product nylon', { sku: 'FB-2702', name: '再生涤纶塔丝隆', category: 'fabric', supplierId: huasheng, supplierCode: 'HS-N210', composition: '再生涤纶 100', color: '黑色', unit: '码', cost: '1.35', currency: 'USD', refPrice: '1.90', specs: { weight: '95', width: '150', weave: '平纹', finish: '防泼水' } });
+  const nylon = product('product nylon', { sku: 'FB-2702', name: '再生涤纶塔丝隆', category: 'fabric', supplierId: huasheng, supplierCode: 'HS-N210', composition: '再生涤纶 100%', color: '黑色', unit: '码', cost: '1.35', currency: 'USD', refPrice: '1.90', specs: { weight: '95', width: '150', weave: '平纹', finish: '防泼水' } });
   const vest = product('product vest', { sku: 'GA-2712', name: '轻量填充马甲', category: 'garment', supplierId: yuanshan, supplierCode: 'YS-V12', composition: '面 再生涤纶 / 填充 仿羽绒棉', color: '黑色', unit: '件', cost: '21.00', currency: 'USD', refPrice: '29.50', specs: { garmentCategory: '马甲', sizeRange: 'S–XXL', mainFabric: 'FB-2702' } });
   const button = product('product button', { sku: 'TR-0301', name: '牛角纹树脂扣 24L', category: 'trimming', supplierId: baotai, supplierCode: 'BT-24L', composition: '树脂', color: '深棕', unit: '粒', cost: '0.08', currency: 'CNY', refPrice: '0.12', specs: { trimType: '纽扣', size: '24L / 15mm', moq: '5000 粒' } });
   const withDetails = (pid: string, patch: { refPrice?: string; customerCodes?: Array<{ customerId: string; code: string }>; cost?: string }) => {
