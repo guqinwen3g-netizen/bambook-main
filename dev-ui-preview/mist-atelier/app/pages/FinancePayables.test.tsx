@@ -25,7 +25,7 @@ let po: any, ctx: any;
 beforeEach(() => {
   let serial = 0; const context = ctx = { id: () => `ui-${++serial}`, actorName: '财务', actorId: 'finance', now: new Date().toISOString(), authority: { supplier: {}, paymentTierReviewerIds: { pay_lt5: ['manager'], pay_gt5: ['manager'], pay_new_supplier: ['director'] } } };
   const state = createMistState(context, 'demo'); state.payables!.bills = []; /* 演示自带出口退税专票；本组从没有票据开始 */ po = state.fulfillment.purchases.find(p => p.code === 'PO-2026-00001');
-  store.value = { state, workspace: { id: 'space' }, loading: false, saving: false, pending: null, run: vi.fn(async (command: any) => { const r = applyMistCommand(store.value.state, command, context); store.value.state = r.state; render(); return { requestId: 'req', revision: 1, result: r.result }; }) };
+  store.value = { state, workspace: { id: 'space', supportsSignedSettlementAllowance: true }, loading: false, saving: false, pending: null, run: vi.fn(async (command: any) => { const r = applyMistCommand(store.value.state, command, context); store.value.state = r.state; render(); return { requestId: 'req', revision: 1, result: r.result }; }) };
   go.mockReset(); route = { view: 'payment-vouchers', section: 'payables' };
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
@@ -49,6 +49,12 @@ it('确认扣款须核金额、原件和新签字，开票默认使用扣后净�
 });
 it('扣款缺原件时保留财务输入并拒绝确认',async()=>{
  disputedSettlement(false);await click('确认结算');const cd=dialog('确认结算');input('价款折让金额','500');reviewNote('金额正确但还未取得书面原件');await click('确认结算',cd);expect(cd.textContent).toMatch(/扣款.*(原件|文件|依据)/);expect(store.value.state.payables.settlements[0].state).toBe('pending');expect((getByLabelText(cd,'价款折让金额') as HTMLInputElement).value).toBe('500');
+});
+it('服务未声明价款折让能力时不提交已填写的折让，不让旧服务忽略金额',async()=>{
+ disputedSettlement();await click('确认结算');const cd=dialog('确认结算');input('价款折让金额','500');reviewNote('供方已同意价款折让');
+ delete store.value.workspace.supportsSignedSettlementAllowance;render();expect((getByLabelText(cd,'价款折让金额') as HTMLInputElement).disabled).toBe(true);await click('确认结算',cd);
+ expect(cd.textContent).toContain('请更新服务后再确认价款折让');expect(store.value.run).not.toHaveBeenCalled();expect(store.value.state.payables.settlements[0].state).toBe('pending');
+ store.value.workspace.supportsSignedSettlementAllowance=true;render();expect((getByLabelText(cd,'价款折让金额') as HTMLInputElement).disabled).toBe(false);expect((getByLabelText(cd,'价款折让金额') as HTMLInputElement).value).toBe('500');
 });
 
 it('requires an explicit no-compensation basis before closing a disposal review',async()=>{

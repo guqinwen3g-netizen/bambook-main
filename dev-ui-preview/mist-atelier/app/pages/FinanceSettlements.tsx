@@ -152,6 +152,7 @@ export function SettlementConfirmDialog({ settlement: st, busy, canConfirm, fail
   execute: (command: PayablesCommand, done: (result: Record<string, unknown>) => void, signature?: { svg: string }) => void; onDone: () => void;
 }) {
   const { state, workspace } = useMistWorkspace();
+  const allowanceSupported = workspace?.supportsSignedSettlementAllowance === true;
   const [applied, setApplied] = React.useState(''), [adjust, setAdjust] = React.useState(''), [note, setNote] = React.useState(''), [local, setLocal] = React.useState(''), [signature, setSignature] = React.useState<SignatureValue | null>(null);
   const [deduction, setDeduction] = React.useState('0'), [deductionFiles, setDeductionFiles] = React.useState<string[]>([]), [uploading, setUploading] = React.useState(false);
   // Initialise per record/company; uploads refresh state without discarding this confirmation draft.
@@ -165,6 +166,7 @@ export function SettlementConfirmDialog({ settlement: st, busy, canConfirm, fail
   const net = Math.max(0, gross - (Number.isFinite(deducted) ? deducted : 0)), suggested = Math.min(Math.round(st.suggested * 100), net), changed = value !== suggested, locked = busy || uploading;
   const changeDeduction = (next: string) => { const amount = cents(next || '0'); if (value === suggested && Number.isFinite(amount)) setApplied(String(Math.min(Math.round(st.suggested * 100), Math.max(0, gross - amount)) / 100)); setDeduction(next); };
   const submit = () => {
+    if (deducted > 0 && !allowanceSupported) return setLocal('请更新服务后再确认价款折让');
     if (!Number.isFinite(deducted) || deducted < 0 || Math.abs(Number(deduction) * 100 - deducted) > 0.000001) return setLocal('确认扣款须为非负金额，最多两位小数。');
     if (deducted > disputed || deducted > gross) return setLocal('确认扣款不得超过登记争议金额或原结算金额。');
     if (deducted > 0 && !note.trim()) return setLocal('确认扣款须填写复核意见。');
@@ -182,7 +184,7 @@ export function SettlementConfirmDialog({ settlement: st, busy, canConfirm, fail
     <div className="mist-col">
       {message && <Banner tone="bad" title={uiText("还不能确认")}>{message}</Banner>}
       <Facts items={[{ label: '实收结算数量', value: `${st.quantity} ${uiText(st.unit)} × ${money(st.price, st.currency)}` }, { label: '结算金额', value: money(st.amount, st.currency) }, ...(st.disputes.length ? [{ label: '待核对争议', value: st.disputes.map(d => `${d.description} ${money(d.amount, st.currency)}`).join('；') }, { label: '扣后结算', value: money(net / 100, st.currency) }] : []), { label: '建议预付抵扣', value: money(suggested / 100, st.currency) }, { label: '合同剩余可抵扣', value: money(st.available, st.currency) }]} />
-      {!!st.disputes.length && <Field label={uiText('价款折让金额')} required><TextInput aria-label={uiText('价款折让金额')} type="number" min="0" max={Math.min(disputed, gross) / 100} step="0.01" value={deduction} disabled={locked || !canConfirm} onChange={e => changeDeduction(e.target.value)}/></Field>}
+      {!!st.disputes.length && <Field label={uiText('价款折让金额')} required error={!allowanceSupported ? uiText('请更新服务后再确认价款折让') : undefined}><TextInput aria-label={uiText('价款折让金额')} type="number" min="0" max={Math.min(disputed, gross) / 100} step="0.01" value={deduction} disabled={locked || !canConfirm || !allowanceSupported} onChange={e => changeDeduction(e.target.value)}/></Field>}
       {deducted > 0 && <Field label={uiText('折让文件')} required><DraftFiles ids={deductionFiles} onChange={setDeductionFiles} onBusyChange={setUploading} disabled={busy || !canConfirm} hint=""/></Field>}
       <Field label={uiText("本次预付抵扣")} required><TextInput aria-label={uiText("本次预付抵扣")} type="number" min="0" step="0.01" value={applied} disabled={locked} onChange={e => setApplied(e.target.value)} /></Field>
       {changed && <Field label={uiText("调整原因")} required><TextInput aria-label={uiText("调整原因")} value={adjust} disabled={locked} onChange={e => setAdjust(e.target.value)} /></Field>}

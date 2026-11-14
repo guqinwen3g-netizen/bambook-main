@@ -191,7 +191,7 @@ function activeUploadClaim(state:MistState,claimId:string){
   if(!claim)fail('CLAIM_NOT_FOUND','案件不存在或不属于本公司',404);
   if(claim!.state==='Closed'||claim!.state==='Cancelled')fail('CLAIM_CLOSED','案件已结束，不能上传新的案件凭据',409);
 }
-export function publicWorkspace(row: MistWorkspaceRow) { return { id: row.id, ownerId: row.ownerId, name: row.name, revision: row.revision, state: row.state }; }
+export function publicWorkspace(row: MistWorkspaceRow) { return { id: row.id, ownerId: row.ownerId, name: row.name, revision: row.revision, state: row.state, supportsSignedSettlementAllowance: true }; }
 /** 公司库没有回收站：历史上误标的回收站标记对公司库不生效。 */
 const archived=(row:MistWorkspaceRow)=>!companyRow(row)&&!!row.state.workspaceArchive;
 /** 文件可见性所用的“所有者”：公司库没有所有者特权（未引用附件只对上传人可见）。 */
