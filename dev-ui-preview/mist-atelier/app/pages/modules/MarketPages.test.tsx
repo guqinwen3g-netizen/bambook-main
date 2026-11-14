@@ -183,3 +183,32 @@ it('keeps product pages usable while an image belongs to a loading or retired wo
  await act(async()=>root!.render(<Nav.Provider value={{route:{view:'products',id:p.id,detail:'full'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><Page/></Nav.Provider>));
  expect(bridge.current.fileUrl).toHaveBeenCalled();expect(host.textContent).toContain(p.name);
 });
+
+describe('quotation editor source concurrency',()=>{
+ it('refuses a new version when the source quotation changes while its draft stays open',async()=>{
+  bridge.current.workspace={id:'workspace',revision:7};bridge.current.state.market.quotations=[{...routeQuote('source'),status:'Sent'}];
+  await mount('quotations','source');await click('新建版本');await fill('有效期','2026-12-01');await fill('报价备注','新版本未保存');
+  bridge.current.state=structuredClone(bridge.current.state);bridge.current.state.market.quotations[0].status='Accepted';bridge.current.workspace={id:'workspace',revision:8};await reroute('quotations','source');
+  await click('下一步');await click('下一步');await click('保存报价草稿');
+  expect(bridge.current.run).not.toHaveBeenCalled();expect(host.textContent).toContain('报价已更新，请重新打开后核对');
+ });
+ it('keeps a stale local draft but refuses to overwrite a quotation changed by a real workspace refresh',async()=>{
+  bridge.current.workspace={id:'workspace',revision:7};
+  bridge.current.state.market.quotations=[routeQuote('concurrent')];
+  await mount('quotations','concurrent');await click('编辑草稿');await fill('报价备注','我的未保存备注');
+  bridge.current.state=structuredClone(bridge.current.state);
+  bridge.current.state.market.quotations[0].note='主管已保存的备注';bridge.current.workspace={id:'workspace',revision:8};
+  await reroute('quotations','concurrent');
+  expect((host.querySelector('[aria-label="报价备注"]') as HTMLTextAreaElement).value).toBe('我的未保存备注');
+  await click('下一步');await click('下一步');await click('保存报价草稿');
+  expect(bridge.current.run).not.toHaveBeenCalled();expect(host.textContent).toContain('报价已更新，请重新打开后核对');
+  await click('上一步');await click('上一步');expect((host.querySelector('[aria-label="报价备注"]') as HTMLTextAreaElement).value).toBe('我的未保存备注');
+ });
+ it('allows an unrelated workspace refresh and binds saving to that same checked revision',async()=>{
+  bridge.current.workspace={id:'workspace',revision:7};bridge.current.state.market.quotations=[routeQuote('concurrent')];
+  await mount('quotations','concurrent');await click('编辑草稿');await fill('报价备注','本次修改');
+  bridge.current.state=structuredClone(bridge.current.state);bridge.current.workspace={id:'workspace',revision:8};await reroute('quotations','concurrent');
+  await click('下一步');await click('下一步');await click('保存报价草稿');
+  expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.quotation.save',payload:expect.objectContaining({id:'concurrent',input:expect.objectContaining({note:'本次修改'})})}),{expectedRevision:8});
+ });
+});
