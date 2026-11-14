@@ -573,3 +573,30 @@ it('offers settlement submission once goods are delivered and opens it in payabl
   expect(go).toHaveBeenCalledWith('payment-vouchers','done',{section:'payables'});
   session.denied.add('procurement:write');render('done');expect(queryByRole(host,'button',{name:'提交结算'})).toBeNull();
 });
+
+function draftConcurrencyFixture(){
+ store.workspace={id:'workspace',revision:7};
+ store.state!.market.suppliers=[{id:'s',name:'青禾辅料',country:'CN',status:'active'} as any];
+ store.state!.fulfillment.purchases=[purchase('draft-race',{supplierId:'s',supplier:'青禾辅料',materialKind:'trims',price:0.3,terms:'到货验收合格后付款'})];
+}
+async function advanceDraftToReview(){for(let i=0;i<3;i++)await click(getByRole(host,'button',{name:'下一步',exact:true}));}
+it('retains the local purchase draft but refuses to overwrite a new supplier price received in the background',async()=>{
+ draftConcurrencyFixture();render('draft-race');await click(getByRole(host,'button',{name:'编辑草稿',exact:true}));
+ store.state=structuredClone(store.state);store.state!.fulfillment.purchases[0].price=0.4;store.workspace={id:'workspace',revision:8};render('draft-race');
+ await advanceDraftToReview();await click(getByRole(host,'button',{name:'保存草稿',exact:true}));
+ expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('采购草稿已更新，请重新打开后核对');
+ await click(getByRole(host,'button',{name:'上一步',exact:true}));await click(getByRole(host,'button',{name:'上一步',exact:true}));
+ expect((getByRole(host,'spinbutton',{name:'含税 / 约定单价',exact:true}) as HTMLInputElement).value).toBe('0.3');
+});
+it('allows unrelated workspace updates while binding the purchase save to its checked revision',async()=>{
+ draftConcurrencyFixture();render('draft-race');await click(getByRole(host,'button',{name:'编辑草稿',exact:true}));
+ store.state=structuredClone(store.state);store.workspace={id:'workspace',revision:8};render('draft-race');
+ await advanceDraftToReview();await click(getByRole(host,'button',{name:'保存草稿',exact:true}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.procurement.save',payload:expect.objectContaining({id:'draft-race',price:0.3})}),{expectedRevision:8});
+});
+it('refuses a stale purchase editor after another actor submits that draft for approval',async()=>{
+ draftConcurrencyFixture();render('draft-race');await click(getByRole(host,'button',{name:'编辑草稿',exact:true}));
+ store.state=structuredClone(store.state);store.state!.fulfillment.purchases[0].state='pending';store.workspace={id:'workspace',revision:8};render('draft-race');
+ await advanceDraftToReview();await click(getByRole(host,'button',{name:'保存草稿',exact:true}));
+ expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('采购草稿已更新，请重新打开后核对');
+});

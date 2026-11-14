@@ -9,9 +9,10 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 /** 采购管理：面料 / 成衣业务组下分“采购订单”“委外加工单”两个入口；阶段流水线 + 单据详情轨迹，所有对外动作都登记真实依据。 */
 import React from 'react';
+import { stableJson } from '../../../../../server/src/shared/stableJson';
 import { CheckCircle2, Download, FileSignature, PackageCheck, Pencil, Plus, SearchX, Send, ShoppingCart, Undo2, Workflow } from 'lucide-react';
 import { Banner, Button, Card, Checklist, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Tabs, TextLink, Timeline, Toolbar, useToast, type Column, type Tone } from '../../../../../components/mist';
-import { MistCommandError, type MistState } from '../../../../../server/src/shared/mistWorkspace';
+import { MistCommandError, type MistCommand, type MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentPurchase, FulfillmentReceipt, FulfillmentReceiptReturn } from '../../../../../server/src/shared/mistFulfillment';
 import { fulfillmentPositions, fulfillmentSourceLabel, purchaseAmendmentText, receiptRejectionBlocker, receiptReturnedQuantity } from '../../../../../server/src/shared/mistFulfillment';
 import { prepaymentTransferTargets, purchaseContractMinor, purchasePayableReadback, purchasePrepaymentReadback, supplierSettlements } from '../../../../../server/src/shared/mistPayables';
@@ -69,6 +70,7 @@ const round = (value: number) => Math.round(value * 10000) / 10000;
 
 export function ProcurementPage() {
   const { state, workspace, run, error, refresh, loading, saving, pending, downloadFile } = useMistWorkspace(), session = useMistSession(), editor = useEditor(), { go, route } = useNav();
+  const liveSource=React.useRef({state,revision:workspace?.revision});liveSource.current={state,revision:workspace?.revision};
   const [domainChoice, setDomainChoice] = React.useState<Domain | null>(null), [entryChoice, setEntryChoice] = React.useState<Entry | null>(null);
   const [stageFilter, setStageFilter] = React.useState<StageFilter>('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [query, setQuery] = React.useState('');
   const full = useListDetailRoute();
@@ -123,8 +125,10 @@ export function ProcurementPage() {
   const supplierOptions = (currentId?: string) => (state?.market.suppliers || [])
     .filter(s => s.id === currentId || !productionSupplierUnavailableReason(s, day))
     .map(s => { const reason = productionSupplierUnavailableReason(s, day); return { value: s.id, label: reason ? `${s.name} · 原供应商（${reason}）` : s.name }; });
-  const purchaseSpec = (p?: FulfillmentPurchase): ModuleEditorSpec => ({
-    title: p ? `修订${ENTRY_LABEL[entryOf(p)]}草稿` : `新建${ENTRY_LABEL[entry]}`, submitLabel: p ? '保存草稿' : '保存为草稿',
+  const purchaseSpec = (p?: FulfillmentPurchase): ModuleEditorSpec => {
+    const baseline=p?stableJson(p):undefined;
+    return {
+    title: p ? `编辑 ${p.code}` : `新建${ENTRY_LABEL[entry]}`, submitLabel: p ? '保存草稿' : '保存为草稿',
     sections: [
       { id: 'source', label: '来源与供应商', fields: ['source', 'kind', 'supplierId', 'description'] },
       { id: 'commercial', label: '数量与费用', fields: ['quantity', 'unit', 'kgPerMetre', 'lossPercent', 'intermediate', 'price', 'currency'] },
@@ -146,7 +150,10 @@ export function ProcurementPage() {
       catch (error) { return error instanceof MistCommandError ? error.message : ''; }
     },
     submit: async values => {
-      if (!state) return;
+      // This long-lived form validates and submits against the same live source snapshot.
+      const checked=liveSource.current,state=checked.state;
+      if (!state) throw new Error('采购资料不可用，请重新打开后核对');
+      if(p){const current=state.fulfillment.purchases.find(row=>row.id===p.id);if(!current||stableJson(current)!==baseline)throw new Error('采购草稿已更新，请重新打开后核对');}
       const source = parseSource(state, text(values, 'source'));
       if (source.kind !== 'orderLine') throw new Error('采购必须关联订单条目');
       const supplier = state.market.suppliers.find(s => s.id === text(values, 'supplierId'));
@@ -163,11 +170,13 @@ export function ProcurementPage() {
       const kgPerMetre = optional('kgPerMetre'), lossPercent = optional('lossPercent');
       const deliverTo = text(values, 'deliverToSupplierId'), deliverable = kind === 'material' && materialKind === 'greige' || kind === 'processing' && values.intermediate === true;
       const stageTerms = { ...(kgPerMetre !== undefined ? { kgPerMetre } : {}), ...(lossPercent !== undefined ? { lossPercent } : {}), ...(values.intermediate === true ? { intermediate: true } : {}), ...(deliverable && deliverTo ? { deliverToSupplierId: deliverTo } : {}) };
-      const saved = await run({ type: 'fulfillment.procurement.save', payload: { ...(p ? { id: p.id } : {}), orderId: source.orderId, lineId: source.lineId, kind, ...(kind === 'material' ? { materialKind } : {}), ...(Object.keys(stageTerms).length ? { stageTerms } : {}), ...(kind === 'material' && values.iqcRequired === true ? { iqcRequired: true } : {}), supplierId: supplier.id, supplier: supplier.name, description: text(values, 'description'), quantity: number(values, 'quantity'), unit: text(values, 'unit'), price: number(values, 'price'), currency: text(values, 'currency'), due: text(values, 'due'), terms: text(values, 'terms'), destination: text(values, 'destination'), note: text(values, 'note'), fileIds: p?.fileIds || [] } });
+      const command: MistCommand = { type: 'fulfillment.procurement.save', payload: { ...(p ? { id: p.id } : {}), orderId: source.orderId, lineId: source.lineId, kind, ...(kind === 'material' ? { materialKind } : {}), ...(Object.keys(stageTerms).length ? { stageTerms } : {}), ...(kind === 'material' && values.iqcRequired === true ? { iqcRequired: true } : {}), supplierId: supplier.id, supplier: supplier.name, description: text(values, 'description'), quantity: number(values, 'quantity'), unit: text(values, 'unit'), price: number(values, 'price'), currency: text(values, 'currency'), due: text(values, 'due'), terms: text(values, 'terms'), destination: text(values, 'destination'), note: text(values, 'note'), fileIds: p?.fileIds || [] } };
+      const saved = await(p&&checked.revision!==undefined?run(command,{expectedRevision:checked.revision}):run(command));
       const id = String(saved?.result?.id || p?.id || '');
       if (id) { setPicked(id); setEntryChoice(text(values, 'kind') === 'processing' ? 'processing' : 'purchase'); }
     },
-  });
+    };
+  };
   const sendSpec = (p: FulfillmentPurchase): ModuleEditorSpec => ({ title: '登记批准合同线下发出', submitLabel: '登记发出', fields: [field('at', '实际发出时间', 'datetime-local'), field('evidence', '发出方式与依据', 'textarea'), field('files', '发出的合同 / 回签件', 'files', false)], initialValues: { at: localNow(), evidence: '', files: '' }, submit: values => run({ type: 'fulfillment.procurement.send', payload: { id: p.id, at: businessInputInstant(text(values, 'at')), evidence: text(values, 'evidence'), fileIds: moduleFileIds(values.files) } }) });
   const confirmSpec = (p: FulfillmentPurchase): ModuleEditorSpec => ({ title: '登记供应商线下确认', submitLabel: '登记确认', fields: [field('at', '实际确认时间', 'datetime-local'), field('confirmedDue', '确认交期', 'date'), field('evidence', '供应商确认依据', 'textarea'), { ...field('dueChangeReason', '交期变更原因', 'textarea', false), hint: '确认交期与合同不同时填写' }, field('files', '供应商回签 / 确认件', 'files', false)], initialValues: { at: localNow(), confirmedDue: p.due, evidence: '', dueChangeReason: '', files: '' }, submit: values => run({ type: 'fulfillment.procurement.confirm', payload: { id: p.id, at: businessInputInstant(text(values, 'at')), confirmedDue: text(values, 'confirmedDue'), evidence: text(values, 'evidence'), ...(text(values, 'confirmedDue') !== p.due ? { dueChangeReason: text(values, 'dueChangeReason') } : {}), fileIds: moduleFileIds(values.files) } }) });
   const receiveSpec = (p: FulfillmentPurchase): ModuleEditorSpec => {
