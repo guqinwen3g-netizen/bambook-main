@@ -17,7 +17,7 @@ import { signPads } from '../runtime/signTestUtils';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLElement, root: Root, route: { view: string; id?: string; section?: string };
 const go = vi.fn(), day = platformBusinessDate(new Date());
-function render() { act(() => root.render(<MistRoot><ToastProvider><Nav.Provider value={{ route, go, theme: 'light', toggleTheme: vi.fn(), openAI: vi.fn(), openPalette: vi.fn() } as any}><FinancePayables /></Nav.Provider></ToastProvider></MistRoot>)); }
+function render() { act(() => root.render(<MistRoot><ToastProvider><Nav.Provider value={{ route, go, theme: 'light', toggleTheme: vi.fn(), openAI: vi.fn(), openPalette: vi.fn() } as any}>{store.value.shellError&&store.value.error&&<div role="alert">{store.value.error}</div>}<FinancePayables /></Nav.Provider></ToastProvider></MistRoot>)); }
 const click = async (name: string | RegExp, scope: HTMLElement = document.body) => { await act(async () => (getAllByRole(scope, 'button', { name })[0] as HTMLButtonElement).click()); };
 function input(label: string, value: string) { const c = getByLabelText(document.body, label) as HTMLInputElement; act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(c, value); c.dispatchEvent(new Event('input', { bubbles: true })); }); }
 function select(label: string, value: string) { const c = getByLabelText(document.body, label) as HTMLSelectElement; act(() => { c.value = value; c.dispatchEvent(new Event('change', { bubbles: true })); }); }
@@ -127,6 +127,56 @@ it('从待登记来源登记供应商票据：形成应付，合同还没收到�
   expect(store.value.state.payables.bills[0]).toMatchObject({ invoiceNo: 'VAT-HS-01', amount: 33480 });
   expect(getByRole(host, 'table', { name: '供应商应付汇总' }).textContent).toContain('33,480.00 CNY');
   expect(go).toHaveBeenLastCalledWith('payment-vouchers', store.value.state.payables.bills[0].id, { section: 'payables' }, { keepScroll: true });
+});
+
+async function openRejectedBillEditor(){
+  render();await click(/待登记来源/);await click('登记票据',getByRole(host,'table',{name:'待登记来源合同'}));
+  input(po.code+' 本票金额','33480');input('供应商发票号','VAT-FAILED-01');input('税额','3851.68');input('到期日',day);
+  return getByRole(document.body,'dialog',{name:'登记供应商票据'});
+}
+it.each([false,true])('preserves a bill editor across responsive detail changes from compact=%s',async initialCompact=>{
+  let compact=initialCompact;const listeners=new Set<()=>void>();
+  const media={get matches(){return compact;},addEventListener:(_type:string,listener:()=>void)=>listeners.add(listener),removeEventListener:(_type:string,listener:()=>void)=>listeners.delete(listener)};
+  vi.stubGlobal('matchMedia',vi.fn((query:string)=>query==='(max-width: 1180px)'?media:{matches:false,addEventListener:vi.fn(),removeEventListener:vi.fn()}));
+  try{
+    const id=disputedSettlement(),settlement=store.value.state.payables.settlements.find((row:any)=>row.id===id);
+    settlement.state='confirmed';settlement.confirmation={actorId:'finance',actor:'财务',at:ctx.now,prepaymentApplied:0,suggestedPrepayment:0,adjustReason:'',note:'已确认'};render();
+    await click('按结算登记票据');const editor=getByRole(document.body,'dialog',{name:'登记供应商票据'});
+    input('供应商发票号','VAT-RESPONSIVE-01');
+    await act(async()=>{compact=!initialCompact;listeners.forEach(listener=>listener());});
+    expect(queryAllByRole(document.body,'dialog')).toHaveLength(initialCompact?2:1);
+    expect(editor.contains(document.activeElement)).toBe(true);
+    expect((getByLabelText(editor,'供应商发票号') as HTMLInputElement).value).toBe('VAT-RESPONSIVE-01');
+    await click('取消',editor);
+    expect(queryByRole(document.body,'dialog',{name:'登记供应商票据'})).toBeNull();
+    expect(queryAllByRole(document.body,'dialog')).toHaveLength(initialCompact?0:1);
+    if(!initialCompact)expect(getByRole(document.body,'dialog',{name:'ST-ALLOWANCE'})).toBeTruthy();
+    expect(store.value.run).not.toHaveBeenCalled();
+  }finally{vi.unstubAllGlobals();}
+});
+it('keeps a confirmed supplier-bill failure in its dialog once without losing the entered amount',async()=>{
+  const message='本票对应金额超过结算未开票金额';store.value.shellError=true;store.value.error='';
+  store.value.dismissError=vi.fn((expected:string)=>{if(store.value.error===expected){store.value.error='';render();}});
+  store.value.run=vi.fn(async()=>{store.value.error=message;render();throw new Error(message);});
+  const editor=await openRejectedBillEditor();await click('登记应付',editor);
+  expect(document.body.textContent!.split(message)).toHaveLength(2);expect(store.value.dismissError).toHaveBeenCalledWith(message);
+  expect((getByLabelText(editor,po.code+' 本票金额') as HTMLInputElement).value).toBe('33480');
+});
+it('does not dismiss an uncertain supplier-bill command or hide its original recovery action',async()=>{
+  store.value.dismissError=vi.fn();store.value.run=vi.fn(async(command:any)=>{
+    store.value.pending={kind:'command',workspaceId:'space',requestId:'bill-uncertain',actorId:'finance',command};render();
+    throw Object.assign(new Error('结果待核对'),{mistPendingCommand:{workspaceId:'space',requestId:'bill-uncertain',actorId:'finance'}});
+  });
+  const editor=await openRejectedBillEditor();await click('登记应付',editor);
+  expect(store.value.dismissError).not.toHaveBeenCalled();expect(store.value.pending.requestId).toBe('bill-uncertain');
+  expect(getByRole(editor,'button',{name:'核对原操作结果'})).toBeTruthy();
+});
+it.each(['route','unmount'])('does not consume a new error when an old bill fails after %s',async change=>{
+  let reject!:(error:Error)=>void;store.value.dismissError=vi.fn();store.value.run=vi.fn(()=>new Promise((_yes,no)=>{reject=no;}));
+  const editor=await openRejectedBillEditor();await click('登记应付',editor);
+  if(change==='route'){route={...route,id:po.id};render();}else await act(async()=>root.render(<div>其它页面</div>));
+  store.value.error='新页面失败';await act(async()=>reject(new Error('旧票据失败')));
+  expect(store.value.dismissError).not.toHaveBeenCalled();expect(store.value.error).toBe('新页面失败');
 });
 
 it('有付款的票据不能作废，按钮写明原因；没有付款的作废要写原因', async () => {

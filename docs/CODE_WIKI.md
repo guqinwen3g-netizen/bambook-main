@@ -54,6 +54,8 @@
 
 账号入口的错误反馈（2026-11-14，本地候选）：`ChangePassword.tsx#ForcedPasswordChangePage` 与 `AccountAccessPage.tsx` 在工作台外壳出现前直接使用现有 `Banner` 展示错误；此时 `AppInner` 已登记全局错误宿主，但状态卡尚未渲染，不能把错误送入该卡而令用户看不到。工作台内与浮层的既有 `FailureNotice` 行为保持。`OrderDetailPage.tsx#OrderLineDialog` 仅在仍挂载且提交代际相同时接管精确同文的全局失败，并将自己的错误滚入弹窗当前可视区；取消清本地错误，迟到回调不消费新页面错误。宿主条件反例见两页同名测试；没有改动认证、邀请或邮件服务。
 
+财务操作失败与响应式详情（2026-11-14，本地候选）：`FinancePayables.tsx#execute` 仅在当前作用域仍有效、且没有待核对请求时精确接管全局同文错误；本页负责弹窗内反馈或 `usePageFailure`，未知结果仍沿原请求核对。票据错误滚入本弹窗视口。`modules/pageKit.tsx#ListDetail` 的可选 `freezeLayout` 在财务操作期间保持原预览/抽屉布局，防止缩窄时新的底层Drawer盖住现有编辑，也防止放大时撤掉编辑的父抽屉；操作关闭后才应用当前视口，默认调用保持实时响应式。未改变全局浮层样式或优先级，回归见 `FinancePayables.test.tsx`。
+
 本包新增`AuthSessionRevocation`迁移，仅在隔离本地库应用；正式发布须把该受控迁移列入最终授权。回滚包须保留会话撤销层及表结构，不能因回退业务版本而忽略已登记的撤销；统一发布前仍须制作并验证相应回滚包。发布及全局验收状态以GO-LIVE为准。
 
 页面路径相对 `dev-ui-preview/mist-atelier/app/pages/`，规则路径相对 `server/src/shared/`。测试与源码同名 `*.test.ts`。

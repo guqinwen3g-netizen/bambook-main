@@ -33,10 +33,13 @@ export function DetailBody({ heading, children, ...rest }: { heading?: React.Rea
 /** T2 list + sticky detail card. On compact layouts the same detail opens in a drawer after an explicit pick.
  * With `summary` (null while nothing is picked) the desktop column is the narrow T2 quick preview and the
  * complete detail moves to its own page (see useListDetailRoute / ListDetailPage); the compact drawer keeps the complete detail. */
-export function ListDetail({ list, detail, summary, drawerTitle, drawerSub, drawerOpen, onDrawerClose }: {
-  list: React.ReactNode; detail: React.ReactNode; summary?: React.ReactNode | null; drawerTitle: React.ReactNode; drawerSub?: React.ReactNode; drawerOpen: boolean; onDrawerClose: () => void;
+export function ListDetail({ list, detail, summary, drawerTitle, drawerSub, drawerOpen, onDrawerClose, freezeLayout = false }: {
+  list: React.ReactNode; detail: React.ReactNode; summary?: React.ReactNode | null; drawerTitle: React.ReactNode; drawerSub?: React.ReactNode; drawerOpen: boolean; onDrawerClose: () => void; freezeLayout?: boolean;
 }) {
-  const compact = useCompactLayout(), summaryMode = summary !== undefined;
+  const mediaCompact = useCompactLayout(), [compact,setCompact] = React.useState(mediaCompact), summaryMode = summary !== undefined;
+  // A responsive detail drawer must not mount above an active editor or remove
+  // its parent drawer. Apply the current viewport once that action has closed.
+  React.useLayoutEffect(()=>{if(!freezeLayout)setCompact(mediaCompact);},[mediaCompact,freezeLayout]);
   return <div className="mist-split" data-list-detail="" data-preview-summary={summaryMode ? '' : undefined}>
     {list}
     {!compact && <Card as="aside" className="mist-preview" aria-label={uiText(summaryMode ? '记录预览' : undefined)}>{uiText(summaryMode ? summary ?? detail : detail)}</Card>}
