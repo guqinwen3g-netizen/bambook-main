@@ -9,6 +9,7 @@
  * 营销与季节类共享资料仅按模块权限控制；财务来源按可证明的业务关系裁剪，银行及外汇全局资料仅供全公司岗位。
  */
 import type { MistState } from './mistWorkspace';
+import { crmCalendarTaskLinks } from './mistCrmCalendar';
 import type { OrderCostState } from './mistOrderCost';
 import { buildTeamScopeGraph, resolveTeamScope, type MistTeamScope, type TeamScopeRef } from './mistTeamScope';
 import { mistInvoiceCustomerId } from './mistOpeningBalance';
@@ -366,7 +367,23 @@ export function applyDataScope(state: MistState, scope: MistDataScope, actorId: 
   });
   next.tasks = (state.tasks ?? []).filter(task => task.assigneeIds?.includes(actorId) || targetOk(task.target));
   next.notifications = (state.notifications ?? []).filter(item => targetOk(item.target));
-  next.calendar = (state.calendar ?? []).filter(item => targetOk(item.target));
+  // An opportunity owner may read its exact follow-up without owning the whole
+  // customer. Prove the appointment from the source record and system task;
+  // neither a shared customer ID nor a copied task pointer proves its contents.
+  const calendarLinks=crmCalendarTaskLinks(state);
+  const calendarSources=new Map<string,{id:string;customerId:string;content:string;voided?:unknown}|null>();
+  for(const follow of state.crm?.followUps??[]){
+    if(!follow.nextTaskId)continue;
+    calendarSources.set(follow.nextTaskId,calendarSources.has(follow.nextTaskId)?null:follow);
+  }
+  next.calendar = (state.calendar ?? []).filter(item => {
+    if(targetOk(item.target))return true;
+    const task=calendarLinks.get(item.id),source=task&&calendarSources.get(task.id);
+    return !!source&&!source.voided&&hasAny(source.id,['crm.followUps'])
+      &&item.target?.view==='crm'&&item.target.id===source.customerId
+      &&task?.target?.view==='crm'&&task.target.id===source.customerId
+      &&item.title===task.title&&item.note===source.content.slice(0,200);
+  });
   return next;
 }
 
