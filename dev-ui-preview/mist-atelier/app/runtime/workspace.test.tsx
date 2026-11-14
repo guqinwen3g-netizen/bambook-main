@@ -113,6 +113,18 @@ async function resolve<T>(wait: ReturnType<typeof deferred<T>>, value: T) { awai
 const posts = () => calls.filter(call => call.method === 'POST');
 const capture = <T,>(promise: Promise<T>): Promise<T | Error> => promise.catch(error => error as Error);
 
+it('keeps the editor source revision even after background data has refreshed',async()=>{
+ await mount();const sourceRevision=api.workspace!.revision,newer=clone(stores.get(A)!);newer.revision++;newer.state.settings.profileName='另一岗位已保存';stores.set(A,newer);
+ await act(async()=>{await api.refresh();});expect(api.workspace!.revision).toBe(1);
+ await act(async()=>{expect(await capture(api.run(command('旧表单'),{expectedRevision:sourceRevision}))).toBeInstanceOf(Error);});
+ expect(JSON.parse(posts()[0].init.body as string).expectedRevision).toBe(0);expect(stores.get(A)!.state.settings.profileName).toBe('另一岗位已保存');expect(api.pending).toBeNull();
+ await act(async()=>{await api.run(command('已核对的新提交'));});expect(stores.get(A)!.state.settings.profileName).toBe('已核对的新提交');
+});
+
+it('refuses invalid editor source revisions before posting a command',async()=>{
+ await mount();for(const expectedRevision of [-1,0.5,NaN,1])await expect(api.run(command('不应保存'),{expectedRevision})).rejects.toThrow('编辑版本无效');expect(posts()).toHaveLength(0);
+});
+
 beforeEach(() => {
   localStorage.clear(); strict = false; intercept = undefined;
   auth.session = { sessionKey: 'session-a', user: { id: 'actor-a' }, status: 'authenticated' };

@@ -7,7 +7,7 @@ import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentShipment,FulfillmentDocument} from '../../../../../server/src/shared/mistFulfillment';
 import {Nav} from '../../nav';
-const store=vi.hoisted(()=>({state:null as MistState|null,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
+const store=vi.hoisted(()=>({state:null as MistState|null,workspace:{revision:0},loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
 const session=vi.hoisted(()=>({id:'biz',denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:session.id,displayName:'经办人'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
@@ -22,7 +22,7 @@ const shipment=(id:string,patch:Partial<FulfillmentShipment>={}):FulfillmentShip
 const doc=(id:string,shipmentId:string,type:FulfillmentDocument['type'],status:FulfillmentDocument['status']='issued'):FulfillmentDocument=>({id,shipmentId,orderId:type==='CI'?'o':'',type,number:type+'-'+id,version:1,title:type,dueDate:'',content:'',fileIds:[],status,createdAt:'2026-10-10T08:00:00Z',actor:'后勤'});
 const pack=(shipmentId:string,quantity:number)=>({id:shipmentId+quantity,shipmentId,lineId:'l',productionId:'p',carton:'1',quantity,netWeight:9,grossWeight:10,volume:0.1,note:''});
 const customs=(shipmentId:string,status:'draft'|'submitted'|'cleared')=>({id:'cus-'+shipmentId,shipmentId,code:'CUS-'+shipmentId,status,declarationNo:'D1',broker:'报关行',hsCode:'6202',origin:'CN',tradeMode:'一般贸易',declaredAt:'2026-10-13',clearedAt:'',evidence:'',fileIds:[],note:''});
-beforeEach(()=>{presentedError=undefined;store.error='';session.id='biz';session.denied=new Set();const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');
+beforeEach(()=>{store.workspace.revision=0;presentedError=undefined;store.error='';session.id='biz';session.denied=new Set();const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');
   s.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',customer:'Cedar',currency:'USD',amount:100,governance:{contract:{preShipmentPercent:0}}} as any);s.orderLines.push({id:'l',orderId:'o',name:'大衣',style:'COAT-1',img:'coat',qty:10,unit:'件',price:10,made:10,qc:10});
   store.state=s;store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
@@ -74,6 +74,24 @@ it('supplements signed fabric package colours without permitting physical edits'
  typeInto(getByRole(host,'textbox',{name:'原单核对依据'}) as HTMLTextAreaElement,'按已签装箱单逐件核对');
  await click(getByRole(host,'button',{name:'补充颜色明细'}));
  expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.shipments.pack',payload:expect.objectContaining({id:'fab',packingColorVersion:1,supplementEvidence:'按已签装箱单逐件核对',lines:expect.arrayContaining([expect.objectContaining({carton:'R1',fabricColor:'本白'}),expect.objectContaining({carton:'R2',fabricColor:'藏蓝'})])})}));
+});
+
+it('preserves a transport draft and blocks saving after live synchronization changes its source',async()=>{
+ const f=store.state!.fulfillment;f.shipments.push(shipment('transport-conflict',{booking:'BK'}));render('transport-conflict');
+ await click(getByRole(host,'button',{name:'更新运输安排'}));
+ const note=getByRole(document.body,'textbox',{name:'运输安排说明'}) as HTMLTextAreaElement;typeInto(note,'尚未提交的说明');
+ store.state=structuredClone(store.state!);store.state!.fulfillment.shipments[0].note='另一岗位已核实的说明';render('transport-conflict');
+ await click(getByRole(document.body,'button',{name:'保存',exact:true}));
+ expect(store.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('运输安排已更新，请重新打开后核对');
+ expect((getByRole(document.body,'textbox',{name:'运输安排说明'}) as HTMLTextAreaElement).value).toBe('尚未提交的说明');
+});
+
+it('allows transport edits when synchronization only changes unrelated data',async()=>{
+ store.state!.fulfillment.shipments.push(shipment('transport-unchanged',{booking:'BK'}));render('transport-unchanged');
+ await click(getByRole(host,'button',{name:'更新运输安排'}));typeInto(getByRole(document.body,'textbox',{name:'运输安排说明'}) as HTMLTextAreaElement,'本票核实说明');
+ store.state=structuredClone(store.state!);store.workspace.revision=1;store.state!.settings.profileName='新的公司简称';render('transport-unchanged');
+ await click(getByRole(document.body,'button',{name:'保存',exact:true}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.shipments.updateTransport',payload:expect.objectContaining({note:'本票核实说明'})}),{expectedRevision:1});
 });
 
 it('shows why the requester cannot cancel a booked shipment with issued documents',()=>{

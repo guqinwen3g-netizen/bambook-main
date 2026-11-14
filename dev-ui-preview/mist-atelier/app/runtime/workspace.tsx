@@ -27,8 +27,9 @@ export interface MistWorkspaceContext {
   pendingCreate?: MistPendingCreate | null;
   commandRecovery?:MistCommandRecovery|null;
   /** reauth：只在确认高风险 Agent 提议时随本次请求发送，不写入本机待核对记录。
-   *  signature：合同与资金类批准的当场手写签字；属于请求内容，随待核对记录保存以便按原请求重发。 */
-  run: (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string } }) => Promise<MistRunReceipt>;
+   *  signature：合同与资金类批准的当场手写签字；属于请求内容，随待核对记录保存以便按原请求重发。
+   *  expectedRevision：编辑器实际核对的来源版本；与该来源快照一起绑定，不随后台同步偷换。 */
+  run: (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string }; expectedRevision?: number }) => Promise<MistRunReceipt>;
   uploadFile: (file: File, options?:MistUploadOptions) => Promise<MistFile>;
   downloadFile: (file: MistFile) => Promise<void>;
   /** 读取附件原件（带登录凭据），供在线预览使用；不会触发下载。 */
@@ -524,13 +525,17 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       throw failure;
     }finally{if(token)unlock(token,authority);}
   },[authority.key,authority.userId,authority.status,boundEpoch,boundWorkspaceId,assertSource,lock,load,put,unlock,persist,clearPending,holdForReview]);
-  const run = React.useCallback(async (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string } }) => {
+  const run = React.useCallback(async (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string }; expectedRevision?: number }) => {
     assertSource(authority, boundEpoch, boundWorkspaceId);
+    // Editors can bind a command to the same source snapshot they validated,
+    // rather than silently adopting a revision received between render and submit.
+    const expectedRevision=options?.expectedRevision??snapshot.current!.revision;
+    if(!Number.isSafeInteger(expectedRevision)||expectedRevision<0||expectedRevision>snapshot.current!.revision)throw new RequestError('编辑版本无效，请重新打开后核对');
     if (pendingCreateRef.current) throw new RequestError(createNotice(pendingCreateRef.current));
     if (pendingRef.current) throw new RequestError('存在待核对的操作，请先核对原请求结果');
     const token = lock();
     try {
-      const intent: Pending = { workspaceId: boundWorkspaceId!, requestId: crypto.randomUUID(), expectedRevision: snapshot.current!.revision, actorId: authority.userId, kind: 'command', command: JSON.parse(JSON.stringify(command)), ...(options?.signature ? { signature: { svg: options.signature.svg } } : {}) };
+      const intent: Pending = { workspaceId: boundWorkspaceId!, requestId: crypto.randomUUID(), expectedRevision, actorId: authority.userId, kind: 'command', command: JSON.parse(JSON.stringify(command)), ...(options?.signature ? { signature: { svg: options.signature.svg } } : {}) };
       const audible = !['settings.update','notification.read','notification.readAll','email.flag','email.move'].includes(command.type);
       try{const result=await perform(intent, JSON.stringify({ requestId: intent.requestId, expectedRevision: intent.expectedRevision, command: intent.command, ...(intent.signature ? { signature: intent.signature } : {}), ...(options?.reauth && command.type === 'agent.proposal.confirm' ? { reauth: { password: options.reauth.password } } : {}) }), authority); if(audible)playFeedbackSound('success');return result;}
       catch(failure){

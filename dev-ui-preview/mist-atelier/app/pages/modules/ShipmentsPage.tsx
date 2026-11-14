@@ -13,6 +13,7 @@ import { Anchor, Boxes, CheckCircle2, Download, FileText, Pencil, Plane, Plus, S
 import { useToast, FormFooter, BackLink, Banner, Button, Card, CardHeader, Checklist, DataTable, Dropdown, EmptyState, Facts, Field, FormGrid, FormSection, KeyValue, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Select, TextArea, TextInput, TextLink, Timeline, Toolbar, VerticalSteps, type Column, type Tone } from '../../../../../components/mist';
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentShipment } from '../../../../../server/src/shared/mistFulfillment';
+import {stableJson} from '../../../../../server/src/shared/stableJson';
 import { fulfillmentSourceLabel, shipmentCancelBlockers, shipmentHandoverBlocker, stockIssueRemaining } from '../../../../../server/src/shared/mistFulfillment';
 import { heldShipmentRelease } from '../../../../../server/src/shared/mistRelationHold';
 import { OVER_SHIP_REQUIRED, SHORT_SHIP_HINT, pendingOverShip, shipmentToleranceCheck } from '../../../../../server/src/shared/mistOrderClosure';
@@ -155,6 +156,7 @@ export const STAGE_LABEL: Record<Stage, string> = { intake: '待物流接手', l
 export const shipmentStageLabel = (s: FulfillmentShipment, stage: Stage) => stage === 'departure' ? s.mode === 'air' ? '待起飞' : '待离港' : stage === 'departed' ? s.mode === 'air' ? '已起飞' : '已离港' : STAGE_LABEL[stage];
 export const STAGE_TONE: Record<Stage, Tone> = { intake: 'warn', logistics: 'accent', business: 'warn', departure: 'accent', departed: 'ok', cancelled: 'neutral' };
 export const MODE_LABEL: Record<FulfillmentShipment['mode'], string> = { sea: '海运', air: '空运' };
+const transportFingerprint=(s:FulfillmentShipment)=>stableJson({booking:s.booking,plannedDate:s.plannedDate,note:s.note,transport:s.transport||null});
 const round = (value: number) => Math.round(value * 10000) / 10000;
 export const packedFor = (root: MistState, s: FulfillmentShipment, line: FulfillmentShipment['lines'][number]) => round(root.fulfillment.packing.filter(row => row.shipmentId === s.id && row.lineId === line.lineId && row.productionId === line.productionId).reduce((sum, row) => sum + row.quantity, 0));
 export const packingClientBlocker = (root:MistState,s:FulfillmentShipment) => {
@@ -189,7 +191,8 @@ function readyBlocker(root: MistState, s: FulfillmentShipment) {
 
 export function ShipmentsPage() {
   const presentedError = React.useContext(MistPresentedErrorContext);
-  const { state, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav(), editor = useEditor();
+  const { state, workspace, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav(), editor = useEditor();
+  const liveSource=React.useRef({state,revision:workspace?.revision});liveSource.current={state,revision:workspace?.revision};
   const [resumeDraft,setResumeDraft]=useRouteDraft<ShipmentEditorDraft|null>(null), [editing, setEditing] = useRouteDraft<FulfillmentShipment | 'new' | null>(null), [packing, setPacking] = useRouteDraft<FulfillmentShipment | null>(null);
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null), [failure, setFailure] = useRouteDraft('');
   const [departure, setDeparture] = useRouteDraft<FulfillmentShipment | null>(null);
@@ -230,7 +233,7 @@ export function ShipmentsPage() {
   const forwarders = (state?.market.relations || []).filter(r => r.category === 'Agent' && r.status === 'active').map(r => ({ value: r.id, label: r.name }));
   const containersText = (s: FulfillmentShipment) => (s.transport?.containers || []).map(c => [c.type, c.number, c.seal].join(' ')).join('\n');
   const parseContainers = (v: string) => v.split(/\n+/).map(l => l.trim()).filter(Boolean).map(l => { const [type = '', number = '', seal = ''] = l.split(/\s+/); return { type, number, seal }; });
-  const transportSpec = (s: FulfillmentShipment): ModuleEditorSpec => ({ title: '更新运输安排',
+  const transportSpec = (s: FulfillmentShipment): ModuleEditorSpec => { const baseline=transportFingerprint(s);return { title: '更新运输安排',
     sections: [{ id: 'book', label: '订舱', fields: ['booking', 'plannedDate', 'note', 'changeFee', 'changeFeeCurrency'] }, { id: 'vessel', label: '船期与货代', fields: ['vessel', 'voyage', 'etd', 'eta', 'cutoff', 'forwarderRelationId', 'forwarder'] }, { id: 'box', label: '集装箱与唛头', fields: ['containers', 'mainMark', 'sideMark'] }],
     fields: [field('booking', '订舱号', 'text', false), field('plannedDate', '计划出运日', 'date', false), { ...field('note', '运输安排说明', 'textarea', false), hint: s.booking ? '更换已登记的订舱号时须写明原因。' : undefined },
       ...(s.booking ? [{ ...field('changeFee', '改船费用', 'number', false), min: 0 }, field('changeFeeCurrency', '改船费用币种', 'select', false, ['USD', 'CNY', 'EUR'].map(c => ({ value: c, label: c })))] : []),
@@ -238,9 +241,9 @@ export function ShipmentsPage() {
       field('forwarderRelationId', '货代（关系智库）', 'select', false, [{ value: '', label: '手填' }, ...forwarders]), { ...field('forwarder', '货代', 'text', false), when: { key: 'forwarderRelationId', values: [''] } },
       { ...field('containers', '柜型 柜号 封条号（每柜一行）', 'textarea', false), hint: '如 40HQ CBHU1234567 SL001' }, field('mainMark', '正唛', 'textarea', false), field('sideMark', '侧唛', 'textarea', false)],
     initialValues: { booking: s.booking, plannedDate: s.plannedDate, note: s.note, changeFee: '', changeFeeCurrency: 'USD', vessel: s.transport?.vessel || '', voyage: s.transport?.voyage || '', etd: s.transport?.etd || '', eta: s.transport?.eta || '', cutoff: s.transport?.cutoff || '', forwarderRelationId: s.transport?.forwarderRelationId || '', forwarder: s.transport?.forwarder || '', containers: containersText(s), mainMark: s.transport?.mainMark || '', sideMark: s.transport?.sideMark || '' },
-    submit: v => run({ type: 'fulfillment.shipments.updateTransport', payload: { id: s.id, booking: text(v, 'booking'), plannedDate: text(v, 'plannedDate'), note: text(v, 'note'),
+    submit: v => {const current=liveSource.current.state?.fulfillment.shipments.find(row=>row.id===s.id);if(!current||transportFingerprint(current)!==baseline)throw new Error('运输安排已更新，请重新打开后核对');return run({ type: 'fulfillment.shipments.updateTransport', payload: { id: s.id, booking: text(v, 'booking'), plannedDate: text(v, 'plannedDate'), note: text(v, 'note'),
       ...(Number(v.changeFee) > 0 ? { changeFee: { amount: Number(v.changeFee), currency: text(v, 'changeFeeCurrency') || 'USD' } } : {}),
-      transport: { vessel: text(v, 'vessel'), voyage: text(v, 'voyage'), etd: text(v, 'etd'), eta: text(v, 'eta'), cutoff: text(v, 'cutoff'), ...(text(v, 'forwarderRelationId') ? { forwarderRelationId: text(v, 'forwarderRelationId') } : { forwarder: text(v, 'forwarder') }), containers: parseContainers(text(v, 'containers')), mainMark: text(v, 'mainMark'), sideMark: text(v, 'sideMark') } } }) });
+      transport: { vessel: text(v, 'vessel'), voyage: text(v, 'voyage'), etd: text(v, 'etd'), eta: text(v, 'eta'), cutoff: text(v, 'cutoff'), ...(text(v, 'forwarderRelationId') ? { forwarderRelationId: text(v, 'forwarderRelationId') } : { forwarder: text(v, 'forwarder') }), containers: parseContainers(text(v, 'containers')), mainMark: text(v, 'mainMark'), sideMark: text(v, 'sideMark') } } },{expectedRevision:liveSource.current.revision});} };};
   // sup46：离港后的到港与客户签收（POD）。
   const arriveSpec = (s: FulfillmentShipment): ModuleEditorSpec => ({ title: '登记到港', submitLabel: '登记到港', fields: [field('at', '实际到港时间', 'datetime-local'), field('evidence', '到港依据', 'textarea')], initialValues: { at: localNow(), evidence: '' }, submit: v => run({ type: 'fulfillment.shipments.arrive', payload: { id: s.id, at: businessInputInstant(text(v, 'at')), evidence: text(v, 'evidence') } }) });
   const deliverSpec = (s: FulfillmentShipment): ModuleEditorSpec => ({ title: '登记客户签收', submitLabel: '登记签收', fields: [field('at', '签收时间', 'datetime-local'), field('receiver', '签收人'), field('evidence', '签收依据（POD）', 'textarea'), field('files', 'POD 附件', 'files', false)], initialValues: { at: localNow(), receiver: '', evidence: '', files: '' }, submit: v => run({ type: 'fulfillment.shipments.deliver', payload: { id: s.id, at: businessInputInstant(text(v, 'at')), receiver: text(v, 'receiver'), evidence: text(v, 'evidence'), fileIds: moduleFileIds(v.files) } }) });

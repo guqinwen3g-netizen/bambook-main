@@ -25,6 +25,8 @@
 5. **预演**：`repository.preview` 走同一事务和同一套校验后整笔回滚，返回业务事件说明；生成文件的命令不支持预演。
 6. **结果回主线**：命令写入的审计、待办与通知由领域模块产生；前端首页「接着完成」由 `runtime/workQueue.ts#mistWorkQueue` / `mistMyWork` 从状态派生，审批由 `runtime/reviews.tsx` 与 `pages/ApprovalsPage.tsx` 展示。待办不是手工勾选：例如内部交付任务由实际点收派生完成，`task.complete` 拒绝手工改完成。
 
+运输编辑的来源保护（2026-11-14）：`ShipmentsPage.tsx#transportSpec` 打开时冻结订舱号、计划日、说明及运输字段的指纹，保存时与当前同步来源比较。运输本身被其他岗位改动时保留草稿并阻止覆盖，其他资料更新不误拦；提交通过 `runtime/workspace.tsx#run` 的可选 `expectedRevision` 绑定实际核对来源的同一版本，避免 React 渲染与后台同步之间偷换版本。未同步时仍由服务端版本冲突保护；新选项随原请求保存及重放，不更改默认调用。已用仓储/管理员两个正常登录的浏览器复现同步后旧表单覆盖，并实测修复后不发第二笔写入、输入保留及重开读取最新资料；该结论仅覆盖本运输编辑，不能外推为所有编辑器均已防覆盖。
+
 ## 3. 权限、岗位与行级范围
 
 订单决定标识（2026-11-14）：通用命令`order.governance.decide`使用`payload.id`指定订单或复合审批事项，待处理轮由领域服务查找；审批接口路径里的`order:roundId`通过服务端映射到该标识，不能把`orderId/roundId`字段直接当作通用命令参数。`mistOrderGovernance.ts#applyOrderGovernanceCommand`在解释短交、超装或取消等标识分支前验证非空字符串，缺失/错误类型以422拒绝；合法请求仍校验本次冻结名单与当前有效审批资格。格式拒绝不产生业务版本、签字或回执，不代表通过权限校验。
