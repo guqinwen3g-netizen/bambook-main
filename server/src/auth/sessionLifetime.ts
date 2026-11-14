@@ -46,7 +46,14 @@ export function writeSession(res: Response, signer: Signer, payload: TokenPayloa
   const lifetime = sessionLifetime(claims);
   if (lifetime <= 0) throw new SessionExpiredError();
   const token = signer.signToken({ ...payload, ...claims }, { expiresInSec: lifetime });
-  res.cookie(SESSION_COOKIE, token, {
+  // Browsers reject oversized cookies. Permission/grant snapshots belong in
+  // the existing response token, not the browser credential. Current authority
+  // is loaded from storage on every protected request; an unhydrated cookie
+  // must have no scopes or legacy role fallback. Keep signed session, tenant,
+  // credential and delegation/platform bounds intact.
+  const {roles:_roles,roleIds:_roleIds,permissions:_permissions,grantedPermissions:_grants,departmentIds:_departments,businessAttributes:_attributes,globalBusinessScope:_global,authorizationLoaded:_loaded,...identity}=payload;
+  const cookieToken=signer.signToken({...identity,...claims,roles:[],permissions:[],departmentIds:[],authorizationLoaded:true},{expiresInSec:lifetime});
+  res.cookie(SESSION_COOKIE, cookieToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',

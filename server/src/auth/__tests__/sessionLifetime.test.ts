@@ -104,6 +104,16 @@ it('logout-all invalidates tokens from the same second while allowing a fresh pa
 });
 
 describe('保持登录', () => {
+  it('refreshes through Cookie and revokes the same family through Bearer plus Cookie',async()=>{
+    const first=await login(true),firstCookie=cookieOf(first).split(';')[0];
+    expect((await request(app()).get('/auth/me').set('Cookie',firstCookie)).status).toBe(200);
+    const renewed=await request(app()).post('/auth/refresh').set('Cookie',firstCookie);expect(renewed.status).toBe(200);
+    const renewedCookie=cookieOf(renewed).split(';')[0];
+    const out=await request(app()).post('/auth/logout').set(bearer(renewed.body.token)).set('Cookie',renewedCookie);
+    expect(out.status).toBe(200);expect(out.body.revokedSession).toBe(true);expect(cookieOf(out)).toMatch(/Expires=Thu, 01 Jan 1970/);
+    for(const cookie of [firstCookie,renewedCookie])expect((await request(app()).get('/auth/me').set('Cookie',cookie)).status).toBe(401);
+    for(const token of [first.body.token,renewed.body.token])expect((await request(app()).get('/auth/me').set(bearer(token))).status).toBe(401);
+  });
   it('勾选：令牌与 Cookie 都是 30 天', async () => {
     const res = await login(true);
     expect(res.status).toBe(200);
