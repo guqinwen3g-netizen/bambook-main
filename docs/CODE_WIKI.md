@@ -72,6 +72,8 @@
 | 邮箱 | `modules/EmailsPage.tsx` | `mistEmail.ts`；服务端收发 `server/src/mist/mail/` |
 | 公司、成员、交接 | `SettingsPage.tsx`、`WorkspaceMembers.tsx`、`MemberHandover.tsx` | `mistCompanyIdentity.ts`、`mistTeamScope.ts`、`mistHandover.ts` |
 
+到账、核销与结汇（2026-11-14）：`mistWorkspace.ts#finance.fx.settle`将原币账户卖出额和本币账户实际入账额写入`fxRecords`，`mistBankAccountBalances`计算两端划转；不改期初余额，不新增客户到账。`FinanceBankAccounts.tsx#ReceiptLinksField`及服务端`settlementLinks`以到账原额减已对应结汇额计算可分配额，与发票核销后的`remaining`分开。`mistFxRates.ts#fxOrderActual`通过准确到账/核销归属计算订单已收已结汇收入，未对应的结汇不猜配到订单；`mistOrderCost.ts#orderActualCost`分别保留实际结汇、月末暂估和报价预计口径。原币应收结清不代表已结汇；缺报价汇率不生成预计收入或毛利。结汇原单号重复、账户币种一致、原币余额不足或到账被超额对应均拒绝且不改账。
+
 报关PDF取数（2026-11-14）：`mistDocumentGeneration.ts#shipmentDocContent`生成CD时优先采用本票`fulfillment.customs.items`已保存的品名、申报要素、法定第一/第二数量；未建立商品项时仍提供当前归类的待核对预览。`documentGenerationBlocker`沿用`mistCustomsDeclaration.ts#customsItemsStale`：商品项已有而数量、单价、净毛重或件数与当前来源不符时，先重新生成并核对商品项，禁止混用旧项目和新合计。人工调整的原自动值仍用于过期比较，不会被误报为过期。快照、PDF及单据正文共用同一已核对数据，重新生成保留旧文件及摘要，不迁移或覆盖历史原件。
 
 CompanySeals preview (2026-11-14): `modules/CompanySeals.tsx#SealImage` waits for workspace loading to finish before calling the company-bound `readFile`; the preview is keyed by the exact reader and file ID. Loading, file visibility or reader changes hide the old blob immediately and dispose its URL; the ready reader retries the same file. Server authorization and the workspace source guard remain authoritative.
