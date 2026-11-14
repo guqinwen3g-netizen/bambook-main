@@ -42,10 +42,18 @@ describe('报价条款承接到订单合同',()=>{
 });
 
 describe('suggested receivable due date', () => {
+  it.each([
+    ['O/A30 days from actual air dispatch; final quantity95yards', '2026-12-15'],
+    ['Net 45 DAYS from dispatch', '2026-12-30'],
+    ['T/T 1 day after shipment', '2026-11-16'],
+  ])('recognises explicit English credit days in %s', (note, due) => {
+    expect(suggestedReceivableDue(note, '2026-11-15')).toBe(due);
+  });
   it('uses the ship date for before-shipment and B/L-copy terms and adds the credit days otherwise', () => {
     expect(suggestedReceivableDue('T/T 30% 定金，70% 发货前付清', '2026-11-20')).toBe('2026-11-20');
     expect(suggestedReceivableDue('T/T 见提单副本', '2026-11-20')).toBe('2026-11-20');
     expect(suggestedReceivableDue('O/A 60 天', '2026-11-20')).toBe('2027-01-19');
     expect(suggestedReceivableDue('O/A 30 天', '')).toBe('');
+    expect(suggestedReceivableDue('95 yards; release in daytime', '2026-11-15')).toBe('2026-11-15');
   });
 });

@@ -152,3 +152,10 @@ it('generates a CI from the shipment with its due date and shows the receivable 
   await click(getByRole(host.querySelector('[data-document-detail="ci"]') as HTMLElement,'button',{name:'签发'}));
   expect(getByRole(document.body,'dialog',{name:/签发/}).textContent).toContain('将生成应收 USD 100.00，到期 2026-12-01');
 });
+it('prefills an English OA credit term from the shipment ETD without changing the contract',async()=>{
+ const s=store.state!;s.orders[0].governance={contract:{kind:'external',paymentNote:'O/A30 days from actual air dispatch; final quantity95yards'}} as any;
+ s.fulfillment.shipments[0].plannedDate='2026-11-14';s.fulfillment.shipments[0].transport={etd:'2026-11-15'} as any;
+ render(undefined,'s');await click(getAllByRole(host,'button',{name:'生成单据'})[0]);
+ expect((getByLabelText(getByRole(document.body,'dialog',{name:'生成单据'}),'应收到期日') as HTMLInputElement).value).toBe('2026-12-15');
+ expect(store.run).not.toHaveBeenCalled();expect(s.orders[0].governance?.contract.paymentNote).toContain('O/A30 days');
+});
