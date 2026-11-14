@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyMistCommand, createMistState, mistCommandPermission, type MistCommand, type MistContext, type MistState } from './mistWorkspace';
 import { activeExpenses, orderActualCost, shipmentOrderBases, splitMinor } from './mistOrderCost';
+import {frozenCreditDocumentFixture,appendFrozenCreditDocumentV2,CREDIT_DOCUMENT_IDS} from '../mist/__tests__/creditDocumentsFixture';
 
 function fixture() {
   let i = 0; const ctx = { id: () => `oc-${++i}`, now: '2026-10-18T02:00:00Z', actorName: '财务李', actorId: 'demo-reviewer' } as unknown as MistContext;
@@ -17,6 +18,20 @@ function fixture() {
 }
 
 describe('订单实际成本与费用分摊', () => {
+  it('deducts an executed customer credit once and includes only active cash recovery allocations without changing the invoice or ledger',()=>{
+    const state=appendFrozenCreditDocumentV2(frozenCreditDocumentFixture({id:'proof',name:'approval.txt',mimeType:'text/plain',size:1} as any));
+    const id=CREDIT_DOCUMENT_IDS.order;
+    state.fxPeriodRates=[{id:'period',currency:'USD',month:'2026-10',rate:'1'}] as any;
+    state.invoices[0].bankCharges=[{id:'fee',amount:2,currency:'USD'}] as any;
+    state.fulfillment.purchases=[{id:'claim-po',code:'PO-CLAIM',orderId:id,lineId:'line-fixture',kind:'finished',state:'approved',quantity:1,price:30,currency:'CNY'} as any];state.payables!.bills=[];
+    state.platform.claims[0].coordination={notices:[],verifications:[],recoveries:[{id:'recovery',currency:'CNY',state:'Settled',settled:8,settlements:[{id:'first',kind:'receipt',amount:4,currency:'CNY',receiptId:'bank'},{id:'old',kind:'receipt',amount:2,currency:'CNY',receiptId:'bank',reversed:{reason:'corrected'}},{id:'new',kind:'receipt',amount:2,currency:'CNY',receiptId:'bank'},{id:'noncash',kind:'noncash',amount:2,currency:'CNY'}]}]} as any;
+    state.platform.creditApplications=[{id:'application-a',creditId:CREDIT_DOCUMENT_IDS.credit,amount:8},{id:'application-b',creditId:CREDIT_DOCUMENT_IDS.credit,amount:12}] as any;
+    const before=structuredClone(state),result=orderActualCost(state,id,'actual','2026-10','2026-10-14');
+    expect(result).toMatchObject({revenueCny:46,purchaseCny:30,expenseCny:2,marginEx:14});
+    expect((result.includedCredits??[]).map(row=>row.amount)).toEqual([-20]);expect(state).toEqual(before);
+    state.platform.claims[0].coordination!.recoveries[0].settlements![2].reversed={reason:'pending reallocation'} as any;
+    expect(orderActualCost(state,id,'actual','2026-10','2026-10-14').revenueCny).toBe(44);
+  });
   it('exposes the actual-basis fallback exchange source and marks the foreign expense estimate without changing money or state',()=>{
     const state=createMistState({id:()=>'',now:'2026-10-08T00:18:00Z',actorName:'财务'},'empty') as MistState & Record<string,any>;
     state.orders.push({id:'free',code:'SO-FREE',customer:'客户',currency:'USD',amount:0} as any);
@@ -25,6 +40,17 @@ describe('订单实际成本与费用分摊', () => {
     const before=structuredClone(state),result=orderActualCost(state,'free','actual','2026-10','2026-10-08');
     expect(result).toMatchObject({revenueCny:0,expenseCny:462.67,marginEx:null,estimated:true,status:'nocost'});
     expect(result.expenses[0]).toMatchObject({amount:65,cny:462.67,estimated:true,fx:{rate:7.118,label:'2026-09 月末 7.1180（暂估）',estimated:true}});expect(state).toEqual(before);
+  });
+  it.each([false,true])('converts net sales after credits using only their actual/period FX coverage (missing period %s)',missingPeriod=>{
+    const state=appendFrozenCreditDocumentV2(frozenCreditDocumentFixture({id:'proof',name:'approval.txt',mimeType:'text/plain',size:1} as any)),id=CREDIT_DOCUMENT_IDS.order;
+    state.payables!.bills=[];state.fulfillment.purchases=[{id:'po',code:'PO',orderId:id,lineId:'line-fixture',kind:'finished',state:'approved',quantity:1,price:30,currency:'CNY'} as any];
+    state.payables!.bills=[{id:'bill',code:'AP',state:'open',currency:'CNY',amount:30,lines:[{purchaseId:'po',amount:30}]} as any];
+    const settled=missingPeriod?50:30;state.fxPeriodRates=missingPeriod?[]:[{id:'period',currency:'USD',month:'2026-10',rate:'7'}] as any;
+    state.receipts=[{id:'received',date:'2026-10-13',currency:'USD',amount:settled,remaining:0} as any];state.allocations=[{id:'allocated',receiptId:'received',invoiceId:CREDIT_DOCUMENT_IDS.invoice,amount:settled,currency:'USD'} as any];
+    state.fxRecords=[{id:'converted',kind:'settlement',date:'2026-10-13',currency:'USD',amount:settled,localCurrency:'CNY',localAmount:settled*6,receipts:[{receiptId:'received',amount:settled}]} as any];
+    const result=orderActualCost(state,id,'actual','2026-10','2026-10-14');
+    expect(result).toMatchObject({revenueCny:missingPeriod?240:250,marginEx:missingPeriod?210:220,status:'ok',estimated:!missingPeriod});
+    expect(result.revenue.reduce((sum,row)=>sum+row.amount,0)).toBe(40);expect(result.includedCredits![0].amount).toBe(-20);
   });
 
   it('does not report a margin for an external order without an approved purchase (fin37)', () => {

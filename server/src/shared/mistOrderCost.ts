@@ -7,7 +7,7 @@
  *   · 按订单：直接指定一个或多个订单，按货值、件数、平均或手工金额分摊。
  *   登记时把分摊结果冻结成每单金额（最大余数法到分），之后装箱、出运变化不改历史；作废保留原记录并注明原因。
  *   费用台账只用于成本核算，不产生应付或付款。
- * - 订单实际核算（orderActualCost）：收入 = 已确认的销售发票（未开票部分按合同金额暂估并标注）；
+ * - 订单实际核算（orderActualCost）：收入 = 已确认销售发票减已执行贷项，再加实际工厂补偿对应（不重复计退款或货款扣减）；未开票按合同暂估；
  *   采购 = 已批准采购合同已到票金额，扣除供应商索赔扣款（按票内行金额比例），未到票部分按合同金额暂估并标注；
  *   费用 = 分摊到本单的费用；退税 = 本单分摊的出口退税（已核准按核准额，否则按应退额）。
  *   全部按所选汇率口径折人民币；缺任何币种汇率不出结果，不猜。
@@ -15,6 +15,7 @@
 import { MistCommandError, isRecognizedMistInvoice, mistMoneyMinor, type MistContext, type MistState } from './mistWorkspace';
 import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
 import { platformBusinessDate } from './mistPlatform';
+import {orderClaimCostLines,type OrderClaimCostBasis} from './mistClaimCost';
 import { fxOrderActual, fxRateFor, type FxBasis, type FxResolved } from './mistFxRates';
 import { orderRebate } from './mistExportRebate';
 import { createPayablesState, nextPayableCode, settlementDeductionMinor, settlementNetMinor, type SupplierBill } from './mistPayables';
@@ -161,6 +162,8 @@ export function applyOrderCostCommand(root: MistState, command: OrderCostCommand
 export type OrderCostLine = { key: string; label: string; currency: string; amount: number; cny: number | null; estimated?: boolean; note?: string; fx?: FxResolved };
 export type OrderActualCost = {
   orderId: string; code: string; customer: string; currency: string;
+  /** Documentary credits already included in actual-FX net revenue; never summed twice. */
+  includedCredits?:OrderCostLine[];
   revenue: OrderCostLine[]; purchases: OrderCostLine[]; expenses: OrderCostLine[]; rebate: { expected: number; approved: number; received: number; used: number };
   revenueCny: number | null; purchaseCny: number | null; expenseCny: number | null; marginEx: number | null; marginIn: number | null; rateIn: number | null;
   /** nocost：对外订单还没有已批准采购，成本不全，不算毛利也不进合计；pendingPurchases 为未批准（草稿 / 待审）采购数。 */
@@ -176,7 +179,7 @@ export type OrderActualCost = {
 /** Markup on internal fabric supply agreed on the fabric order; undefined = at cost. */
 const internalMarkup = (root: MistState, fabricOrderId: string) => root.orders.find(o => o.id === fabricOrderId)?.governance?.contract.internalSupply?.markupPercent;
 /** 单个订单的实际核算；金额单位为元，人民币按 basis 口径折算。 */
-export function orderActualCost(root: MistState, orderId: string, basis: FxBasis, month: string, asOf: string,materialCostBasis?:ReadonlyArray<InternalFabricCostBasis>|null): OrderActualCost {
+export function orderActualCost(root: MistState, orderId: string, basis: FxBasis, month: string, asOf: string,materialCostBasis?:ReadonlyArray<InternalFabricCostBasis>|null,claimCostBasis?:ReadonlyArray<OrderClaimCostBasis>|null): OrderActualCost {
   const order = root.orders.find(o => o.id === orderId); if (!order) return fail('订单不存在或不可见', 'NOT_FOUND');
   const o = order!, internal = o.governance?.contract.kind === 'internal', rates = new Map<string, FxResolved | undefined>();
   const rateOf = (cur: string) => { if (cur === 'CNY') return { rate: 1, label: '人民币', estimated: false } as FxResolved; if (!rates.has(cur)) rates.set(cur, fxRateFor(root, cur, basis, { month, asOf, orderId })); return rates.get(cur); };
@@ -184,16 +187,31 @@ export function orderActualCost(root: MistState, orderId: string, basis: FxBasis
   // 收入：已确认销售发票；未开票部分按合同暂估
   const invoices = internal ? [] : root.invoices.filter(i => i.orderId === orderId && isRecognizedMistInvoice(i));
   const revenue: OrderCostLine[] = invoices.map(i => line('inv:' + i.id, `发票 ${i.code}`, i.currency, mistMoneyMinor(i.amount)));
+  const claimLines=internal?[]:orderClaimCostLines(root,orderId,claimCostBasis),credits=claimLines.filter(row=>row.kind==='credit');
   const invoicedSame = invoices.filter(i => i.currency === o.currency).reduce((n, i) => n + mistMoneyMinor(i.amount), 0), rest = mistMoneyMinor(o.amount) - invoicedSame;
   if (!internal && rest > 0) revenue.push(line('rev:rest', invoices.length ? '未开票部分（按合同暂估）' : '合同金额（尚未开票，暂估）', o.currency, rest, { estimated: true }));
+  let includedCredits:OrderCostLine[]=[];
+  const creditRows=credits.map(credit=>line(credit.key,credit.label,credit.currency,-mistMoneyMinor(credit.amount)));
+  revenue.push(...creditRows);
   if (!internal && basis === 'actual' && o.currency !== 'CNY') {
-    // 实际结汇口径：本币种收入整体按“已收已结汇 → 实际汇率、其余 → 月末暂估”折算（fxOrderActual），其他币种发票仍逐张按月末暂估。
-    const same = revenue.filter(r => r.currency === o.currency), total = same.reduce((n, r) => n + mistMoneyMinor(r.amount), 0), act = fxOrderActual(root, { id: o.id, currency: o.currency, amount: major(total) }, month, asOf);
-    revenue.splice(0, revenue.length, ...revenue.filter(r => r.currency !== o.currency));
-    if (act) rates.delete(o.currency); else rates.set(o.currency, undefined);
-    if (act?.settledMinor) revenue.push({ key: 'rev:settled', label: `已收已结汇（结汇实际汇率 ${act.settledRate}）`, currency: o.currency, amount: major(act.settledMinor), cny: major(act.settledCnyMinor) });
-    if (!act || act.estimatedMinor) revenue.push({ key: 'rev:unsettled', label: act ? `未结汇（按 ${act.period!.month} 月末 ${act.period!.rate} 暂估）` : `未结汇（缺 ${month} 及以前的月末汇率）`, currency: o.currency, amount: major(act ? act.estimatedMinor : total), cny: act ? major(act.cnyMinor - act.settledCnyMinor) : null, estimated: true });
+    const same=revenue.filter(row=>row.currency===o.currency),total=same.reduce((sum,row)=>sum+(row.amount<0?-mistMoneyMinor(-row.amount):mistMoneyMinor(row.amount)),0);
+    if(total<0)fail('客户贷项超过本币种销售收入');
+    const sameCredits=credits.filter(row=>row.currency===o.currency),creditMinor=sameCredits.reduce((sum,row)=>sum+mistMoneyMinor(row.amount),0);
+    const gross=creditMinor?fxOrderActual(root,{id:o.id,currency:o.currency,amount:major(total+creditMinor)},month,asOf):undefined;
+    let act=fxOrderActual(root,{id:o.id,currency:o.currency,amount:major(total)},month,asOf);
+    // Historical gross receipts may exceed sales after a credit. Limit the
+    // recognised settled portion to net sales, retaining its actual weighted FX.
+    if(act&&act.settledMinor>total){const numerator=BigInt(act.settledCnyMinor)*BigInt(total),denominator=BigInt(act.settledMinor),cny=Number((numerator*BigInt(2)+denominator)/(denominator*BigInt(2)));act={...act,cnyMinor:cny,settledMinor:total,settledCnyMinor:cny,estimatedMinor:0,estimated:false,rate:total?cny/total:0};}
+    revenue.splice(0,revenue.length,...revenue.filter(row=>row.currency!==o.currency));
+    if(act)rates.delete(o.currency);else rates.set(o.currency,undefined);
+    if(act?.settledMinor)revenue.push({key:'rev:settled',label:`已收已结汇（结汇实际汇率 ${act.settledRate}）`,currency:o.currency,amount:major(act.settledMinor),cny:major(act.settledCnyMinor)});
+    if(!act||act.estimatedMinor)revenue.push({key:'rev:unsettled',label:act?`未结汇（按 ${act.period!.month} 月末 ${act.period!.rate} 暂估）`:`未结汇（缺 ${month} 及以前的月末汇率）`,currency:o.currency,amount:major(act?act.estimatedMinor:total),cny:act?major(act.cnyMinor-act.settledCnyMinor):null,estimated:true});
+    // Retain the original credit sources separately from the net FX segments.
+    // Their cash refunds/applications are settlements, not another income loss.
+    const delta=gross&&act?act.cnyMinor-gross.cnyMinor:null,parts=delta===null||!sameCredits.length?null:splitMinor(Math.abs(delta),sameCredits.map(credit=>mistMoneyMinor(credit.amount)));
+    includedCredits=sameCredits.map((credit,index)=>{const part=parts?(parts[index]?-parts[index]:0):null;return {key:credit.key,label:credit.label,currency:credit.currency,amount:-credit.amount,cny:part===null?null:major(part),...(delta!==null?{fx:{rate:Math.abs(delta)/creditMinor,label:'原收入折减',estimated:!!gross?.estimatedMinor}}:{}),estimated:!!gross?.estimatedMinor};});
   }
+  for(const recovery of claimLines.filter(row=>row.kind==='recovery'))revenue.push(line(recovery.key,recovery.label,recovery.currency,mistMoneyMinor(recovery.amount)));
   // 采购：已到票金额 − 索赔扣款；未到票按合同暂估
   const bills = (root.payables?.bills || []).filter(b => b.state !== 'void'), deductions = (root.payables?.deductions || []).filter(d => !d.reversed);
   const purchases: OrderCostLine[] = [];
@@ -252,7 +270,7 @@ export function orderActualCost(root: MistState, orderId: string, basis: FxBasis
   // Internal revenue is separate from external sales/margins; never add it to company sales.
   const internalSale: OrderActualCost['internalSale'] = markupOwn && status === 'ok' && internalRevenueMinor
     ? { revenueCny: major(internalRevenueMinor), profitCny: major(internalProfitMinor), markupPercent: markupOwn } : null;
-  return { orderId, code: o.code, customer: o.customer, currency: o.currency, revenue, purchases, expenses, rebate: { ...rebateRaw, used },
+  return { orderId, code: o.code, customer: o.customer, currency: o.currency, revenue, includedCredits, purchases, expenses, rebate: { ...rebateRaw, used },
     revenueCny: rv === null ? null : major(rv), purchaseCny: pc === null ? null : major(pc), expenseCny: ex === null ? null : major(ex),
     marginEx: marginEx === null ? null : major(marginEx), marginIn: marginIn === null ? null : major(marginIn), rateIn: marginIn === null || !rv ? null : marginIn / rv,
     estimated: transferEstimated || [...revenue, ...purchases].some(r => r.estimated) || [...rates.values()].some(r => r?.estimated), missing, status, pendingPurchases,

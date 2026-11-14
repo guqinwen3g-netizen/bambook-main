@@ -24,5 +24,5 @@ export function frozenCreditDocumentFixture(proof:MistFile):MistState{
 export function appendFrozenCreditDocumentV2(input:MistState):MistState{
  const state=structuredClone(input),credit=state.platform.credits.find(row=>row.id===CREDIT_DOCUMENT_IDS.credit)!,previous=credit.sourceVersions!.at(-1)!,line=approvedLine('disposition-v2',5,previous.lines[0].reviewFileIds[0]);
  const next:MistCreditSourceVersion={...structuredClone(previous),id:'source-v2',version:2,previousVersionId:previous.id,amount:20,lines:[...structuredClone(previous.lines),line],createdAt:'2026-10-13T04:00:00.000Z',reason:'本地测试第二次批准执行来源'};
- credit.sourceVersions=appendClaimCreditSourceVersion(credit.sourceVersions!,next);credit.currentVersionId=next.id;credit.currentAmount=next.amount;credit.amount=next.amount;state.platform.claims.find(row=>row.id===CREDIT_DOCUMENT_IDS.claim)!.dispositions.push(disposition(line));return state;
+ credit.sourceVersions=appendClaimCreditSourceVersion(credit.sourceVersions!,next);credit.currentVersionId=next.id;credit.currentAmount=next.amount;state.platform.claims.find(row=>row.id===CREDIT_DOCUMENT_IDS.claim)!.dispositions.push(disposition(line));return state;
 }

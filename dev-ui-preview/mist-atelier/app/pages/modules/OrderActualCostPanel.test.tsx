@@ -15,6 +15,11 @@ function type(node:Element,value:string){act(()=>{const set=Object.getOwnPropert
 beforeEach(()=>{state=createMistState(ctx,'demo');(state as any).fxPeriodRates=[{id:'fx',currency:'USD',month:'2026-10',rate:'7.100000'},{id:'fx2',currency:'EUR',month:'2026-10',rate:'7.800000'}];run.mockReset();run.mockResolvedValue({result:{id:'x'}});host=document.createElement('div');document.body.appendChild(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 
+it('does not show or export a margin when hidden aftersales totals are unavailable',()=>{
+ act(()=>root.render(<MistRoot><ToastProvider><OrderActualCostPanel state={state} asOf="2026-10-18" canWrite busy={false} run={run} claimCostBasis={null}/></ToastProvider></MistRoot>));
+ expect(host.textContent).toContain('售后核算依据未读取');expect(queryByRole(host,'table',{name:'订单实际核算'})).toBeNull();expect(queryByRole(host,'button',{name:'导出 CSV'})).toBeNull();expect(run).not.toHaveBeenCalled();
+});
+
 it('keeps server validation inside the expense dialog without repeating the same shell error',async()=>{
  const message='手工分摊合计 899.99 与费用金额 900.00 不一致';
  function Frame(){const [shared,setShared]=React.useState('');const fail=async()=>{setShared(message);throw new Error(message);};return <>{shared&&<div role="alert">{shared}</div>}<OrderActualCostPanel state={state} asOf="2026-10-18" canWrite busy={false} run={fail} onErrorPresented={text=>setShared(current=>current===text?'':current)}/></>;}

@@ -1,4 +1,6 @@
 import {financialMaterialCostBasis,type InternalFabricCostBasis} from '../shared/mistInternalFabric';
+import {financialClaimCostBasis,type OrderClaimCostBasis} from '../shared/mistClaimCost';
+import {MistCommandError} from '../shared/mistWorkspace';
 import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
 import type { PermissionScope } from '../_shared/rolePermissionMatrix';
@@ -210,7 +212,7 @@ function projectMemberHandovers(next: MistState, actor: TokenPayload) {
 }
 const canManageMemberHandover = (actor: TokenPayload, ownerId?: string) => hasScope(actor, COMPANY_MAINTAIN_SCOPE as PermissionScope) || !!ownerId && ownerId === actor.userId;
 /** 按账号自身读权限裁剪状态；被隐藏的数据结构用空公司的同名结构替换，保证页面结构完整。 */
-export function projectState(state: MistState, actor: TokenPayload, empty: () => MistState, ownerId?: string, scope?: MistDataScope, privacy?: FilePrivacyContext): { state: MistState; hidden: Section[];costMaterialBasis?:InternalFabricCostBasis[] | null } {
+export function projectState(state: MistState, actor: TokenPayload, empty: () => MistState, ownerId?: string, scope?: MistDataScope, privacy?: FilePrivacyContext): { state: MistState; hidden: Section[];costMaterialBasis?:InternalFabricCostBasis[] | null;costClaimBasis?:OrderClaimCostBasis[]|null } {
   const calendarState = { ...state, calendar: currentCrmCalendar(state) };
   const hidden = hiddenSections(actor), next: MistState = scope ? applyDataScope(calendarState, scope, actor.userId) : calendarState;
   // Legacy company activity had no recipients. Keep it in events, never broadcast it to accounts.
@@ -227,6 +229,7 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
   if (taxBaseHidden && !hidden.some(section => section.key === 'bankAccounts') && (state.receipts || []).some(r => rebateReceiptIds(state).has(r.id))) hidden.push(MIST_READ_SECTIONS.find(section => section.key === 'bankAccounts')!);
   // Financial read metadata belongs to the response envelope, never to restorable business state.
   delete (next as MistState&{costMaterialBasis?:unknown}).costMaterialBasis;
+  delete (next as MistState&{costClaimBasis?:unknown}).costClaimBasis;
   // Group scope conditions and notes may reference company-wide business; match the management API's permission boundary.
   // Agent 提议含待执行命令，只给提议所属账号本人。
   if (next.agentProposals) next.agentProposals = next.agentProposals.filter(proposal => proposal.ownerId === actor.userId);
@@ -296,7 +299,9 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
   const handoffFiles=scope&&hasScope(actor,'orders:read')&&hasScope(actor,'orders:write')?scopedMaterialDeliveryFileIds(state,scope,actor.userId):new Set<string>();
   next.files = visibleFiles(state, next, actor.userId, ownerId,handoffFiles).filter(file => !restrictedFiles.has(file.id));
   const costVisible=hasScope(actor,'reports:admin')&&!hidden.some(s=>['orders','procurement','receivables','payables'].includes(s.key));
-  return { state: next, hidden,...(costVisible?{costMaterialBasis:scope ? null : financialMaterialCostBasis(state)}:{}) };
+  let costClaimBasis:OrderClaimCostBasis[]|null=null;
+  if(costVisible)try{costClaimBasis=financialClaimCostBasis(state,new Set(next.orders.map(order=>order.id)));}catch(error){if(!(error instanceof MistCommandError))throw error;}
+  return { state: next, hidden,...(costVisible?{costMaterialBasis:scope ? null : financialMaterialCostBasis(state),costClaimBasis}:{}) };
 }
 /** 精确匹配附件 ID，不用全文子串判断，避免相似文本开放隐藏附件。 */
 function referencedFiles(state: MistState): Set<string> {
