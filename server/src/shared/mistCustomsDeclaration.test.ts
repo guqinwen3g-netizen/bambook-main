@@ -12,6 +12,15 @@ function fixture(){
 const suit={family:'garment',hsCode:'6203.3100.00',declaredName:'男式羊毛西服上衣',brandType:'3',preference:'0',elements:['机织','西服上衣','男式','100%羊毛','Northwind'],styles:['cc-aw27-suit-102']};
 
 describe('报关申报资料',()=>{
+  it.each([{unit:'码',quantity:110,expected:100.584},{unit:'YDS',quantity:110,expected:100.584},{unit:'yard',quantity:1,expected:0.9144},{unit:'米',quantity:100.584,expected:100.584}])('retains four-place legal length precision for $quantity $unit',({unit,quantity,expected})=>{
+    const f=fixture(),s=f.state,ship=s.fulfillment.shipments[0],line=s.orderLines.find(x=>x.id===ship.lines[0].lineId)!;
+    s.orders.find(x=>x.id===line.orderId)!.type='fabric';Object.assign(line,{style:'FAB-YARD',unit,qty:quantity,price:1.75});ship.domain='fabric';ship.lines[0].quantity=quantity;
+    s.fulfillment.packing=s.fulfillment.packing.filter(x=>x.shipmentId!==ship.id);s.fulfillment.packing.push({id:'yard-roll',shipmentId:ship.id,lineId:line.id,productionId:ship.lines[0].productionId,carton:'R1',quantity,netWeight:14.34,grossWeight:15.34,volume:0.065,note:''});
+    f.run('fulfillment.customs.classify.save',{family:'fabric',hsCode:'5407520000',declaredName:'染色聚酯变形长丝机织物',brandType:'0',preference:'0',styles:['FAB-YARD'],elements:['机织','染色','聚酯变形长丝100%','150cm，95g/m²','无品牌'],legalUnit:'米',secondUnit:'千克'});
+    f.run('fulfillment.customs.items',{id:f.customsId});const item=f.state.fulfillment.customs.find(x=>x.id===f.customsId)!.items![0];
+    expect(item.legalQty).toBe(expected);expect(item.legalUnit).toBe('米');expect(item.quantity).toBe(quantity);expect(item.unit).toBe(normalizeUnit(unit));expect(item.secondQty).toBe(14.34);expect(item.unitPrice).toBe(1.75);
+    expect(f.state.orderLines.find(x=>x.id===line.id)).toMatchObject({qty:quantity,unit,price:1.75});expect(customsItemsStale(f.state,f.state.fulfillment.customs.find(x=>x.id===f.customsId)!)).toBe(false);
+  });
   it('splits one fabric style by recorded package colour and explicit classification',()=>{
     const f=fixture(),s=f.state,ship=s.fulfillment.shipments[0],line=s.orderLines.find(l=>l.id===ship.lines[0].lineId)!;
     s.orders.find(o=>o.id===line.orderId)!.type='fabric';Object.assign(line,{style:'FAB-1',unit:'米',price:3.8,qty:10,breakdown:{kind:'fabric',composition:'65%涤纶/35%棉',width:150,weight:141,rows:[{color:'本白',quantity:5},{color:'藏蓝',quantity:5}]}});

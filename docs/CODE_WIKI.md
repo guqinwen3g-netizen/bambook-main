@@ -29,6 +29,8 @@
 
 合票单证的范围（2026-11-14）：`mistDocumentGeneration.ts#ciSnapshot` 的货物、金额与包装汇总均限定当前订单，`packingTotals(root,s,order.id)` 从本票该订单的条目筛选装箱行；本订单无装箱行时不借用其他订单的件数重量。PL及其他整票单证继续按整票汇总，混合单位分别展示。正常仓储界面已实测同一票两张CI：A四卷净95.46/毛98.46kg、B一卷净43.51/毛44.51kg，PL五卷净138.97/毛142.97kg；重生成草稿后旧PDF及摘要仍可核对，不覆盖历史原件。
 
+申报法定长度（2026-11-14）：`mistCustomsDeclaration.ts#draftCustomsDeclaration` 的长度换算统一调用 `unitConversion.ts#convertLength`，保留模型支持的四位小数，不把法定数量按金额的两位精度处理。110码应为100.584米；成交量110码、每码单价、总价及按装箱净重取得的第二数量分别保留。实测旧100.58米草稿会被来源过期门禁阻止申报；正常重新生成后，页面、商品项Excel及CD草稿PDF均100.584米，原订单、发票、装箱和QC不变。整数计件单位与重量口径沿用既有校验。
+
 ## 3. 权限、岗位与行级范围
 
 订单决定标识（2026-11-14）：通用命令`order.governance.decide`使用`payload.id`指定订单或复合审批事项，待处理轮由领域服务查找；审批接口路径里的`order:roundId`通过服务端映射到该标识，不能把`orderId/roundId`字段直接当作通用命令参数。`mistOrderGovernance.ts#applyOrderGovernanceCommand`在解释短交、超装或取消等标识分支前验证非空字符串，缺失/错误类型以422拒绝；合法请求仍校验本次冻结名单与当前有效审批资格。格式拒绝不产生业务版本、签字或回执，不代表通过权限校验。

@@ -1,6 +1,7 @@
 import {replacementDeclaredUnitPrice} from './mistClaimReplacement';
 import { nextSerialCode } from './mistBusinessClock';
 import {packingBreakdownBlocker,packingFabricSpecification} from './mistPackingBreakdown';
+import {convertLength} from '../lib/unitConversion';
 /**
  * 报关申报资料（2026-10-18 按《中华人民共和国海关进出口货物报关单填制规范》与《规范申报目录》的通行做法确定首版）。
  * - 商品归类库：单证员按款号建立归类档案——10 位商品编号（HS）、申报品名、申报要素（品牌类型、出口享惠情况及按章节的必报要素）、法定第一 / 第二计量单位。
@@ -128,7 +129,7 @@ export function draftCustomsDeclaration(root: MistState, shipment: FulfillmentSh
   for (const g of groups.values()) {
     const quantity = round(g.lines.reduce((s, l) => s + l.quantity, 0)), net = round(g.lines.reduce((s, l) => s + l.net, 0), 2), amountMinor = g.lines.reduce((s, l) => s + l.amountMinor, 0);
     const styles = [...new Set(g.lines.map(l => l.style).filter(Boolean))];
-    const convert = (target: string): number | null => { const t = normalizeUnit(target); if (!t) return null; if (t === g.unit) return quantity; if (g.unit === '码' && t === '米') return round(quantity * 0.9144, 2); if (t === '千克') return net > 0 ? net : null; return null; };
+    const convert = (target: string): number | null => { const t = normalizeUnit(target); if (!t) return null; if (t === g.unit) return quantity; if (t === '千克') return net > 0 ? net : null; return convertLength(quantity,g.unit,t); };
     const legalQty = convert(g.cls.legalUnit), secondQty = g.cls.secondUnit ? convert(g.cls.secondUnit) : null;
     if (legalQty === null && packing.length) blockers.push(`${g.cls.declaredName}（${styles.join('/')}）：成交单位“${g.unit}”无法换算为法定单位“${g.cls.legalUnit}”，请核对归类档案的法定单位`);
     if (g.cls.secondUnit && secondQty === null && packing.length) blockers.push(`${g.cls.declaredName}（${styles.join('/')}）：第二单位“${g.cls.secondUnit}”取不到装箱净重`);
