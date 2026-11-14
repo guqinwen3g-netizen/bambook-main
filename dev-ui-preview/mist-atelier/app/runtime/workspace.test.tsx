@@ -113,6 +113,23 @@ async function resolve<T>(wait: ReturnType<typeof deferred<T>>, value: T) { awai
 const posts = () => calls.filter(call => call.method === 'POST');
 const capture = <T,>(promise: Promise<T>): Promise<T | Error> => promise.catch(error => error as Error);
 
+it('lets a dialog own only its exact confirmed error without any extra request',async()=>{
+ await mount();intercept=request=>request.method==='POST'?failure(422):undefined;await act(async()=>{await capture(api.run(command('被拒绝')));});const message=api.error,before=clone(api.state),count=calls.length;expect(message).toBeTruthy();
+ await act(async()=>{api.dismissError!('不同错误');});expect(api.error).toBe(message);
+ await act(async()=>{api.dismissError!(message);});expect(api.error).toBe('');expect(api.state).toEqual(before);expect(calls).toHaveLength(count);
+});
+
+it('keeps the unresolved request notice when a dialog tries to own its error',async()=>{
+ await mount();intercept=request=>request.method==='POST'?Promise.reject(new Error('network unavailable')):undefined;await act(async()=>{await capture(api.run(command('待核对')));});const message=api.error,request=api.pending?.requestId;expect(request).toBeTruthy();
+ await act(async()=>{api.dismissError!(message);});expect(api.error).toBe(message);expect(api.pending?.requestId).toBe(request);
+});
+
+it('refuses an error dismissal retained from another workspace',async()=>{
+ await mount();const old=api.dismissError!;await act(async()=>{await api.switchWorkspace(B);});intercept=request=>request.method==='POST'?failure(422):undefined;await act(async()=>{await capture(api.run(command('新公司错误')));});const message=api.error;
+ await act(async()=>{old(message);});expect(api.error).toBe(message);
+ await act(async()=>{api.dismissError!(message);});expect(api.error).toBe('');
+});
+
 it('keeps the editor source revision even after background data has refreshed',async()=>{
  await mount();const sourceRevision=api.workspace!.revision,newer=clone(stores.get(A)!);newer.revision++;newer.state.settings.profileName='另一岗位已保存';stores.set(A,newer);
  await act(async()=>{await api.refresh();});expect(api.workspace!.revision).toBe(1);

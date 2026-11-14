@@ -2,7 +2,7 @@
 import React,{act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {getByRole,queryByRole} from '@testing-library/dom';
+import {getByRole,getAllByRole,queryByRole} from '@testing-library/dom';
 import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {applyMistCommand,createMistState,type MistCommand,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import {OrderActualCostPanel} from './OrderActualCostPanel';
@@ -14,6 +14,23 @@ async function click(node:Element){await act(async()=>(node as HTMLElement).clic
 function type(node:Element,value:string){act(()=>{const set=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(node),'value')!.set!;set.call(node,value);node.dispatchEvent(new Event('input',{bubbles:true}));node.dispatchEvent(new Event('change',{bubbles:true}));});}
 beforeEach(()=>{state=createMistState(ctx,'demo');(state as any).fxPeriodRates=[{id:'fx',currency:'USD',month:'2026-10',rate:'7.100000'},{id:'fx2',currency:'EUR',month:'2026-10',rate:'7.800000'}];run.mockReset();run.mockResolvedValue({result:{id:'x'}});host=document.createElement('div');document.body.appendChild(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
+
+it('keeps server validation inside the expense dialog without repeating the same shell error',async()=>{
+ const message='手工分摊合计 899.99 与费用金额 900.00 不一致';
+ function Frame(){const [shared,setShared]=React.useState('');const fail=async()=>{setShared(message);throw new Error(message);};return <>{shared&&<div role="alert">{shared}</div>}<OrderActualCostPanel state={state} asOf="2026-10-18" canWrite busy={false} run={fail} onErrorPresented={text=>setShared(current=>current===text?'':current)}/></>;}
+ act(()=>root.render(<MistRoot><ToastProvider><Frame/></ToastProvider></MistRoot>));
+ await click(getByRole(host,'button',{name:'登记费用'}));const dialog=getByRole(document.body,'dialog',{name:'登记费用'});
+ type(getByRole(dialog,'textbox',{name:'费用金额'}),'900');type(getByRole(dialog,'combobox',{name:'出运'}),state.fulfillment.shipments[0].id);
+ await click(getByRole(dialog,'button',{name:'登记并分摊'}));
+ expect(getAllByRole(document.body,'alert')).toHaveLength(1);expect(getByRole(dialog,'alert').textContent).toContain(message);expect((getByRole(dialog,'textbox',{name:'费用金额'}) as HTMLInputElement).value).toBe('900');
+});
+
+it('does not dismiss a late failure after its expense dialog has left the screen',async()=>{
+ let reject!:(error:Error)=>void;run.mockReturnValueOnce(new Promise((_yes,no)=>{reject=no;}));const dismissed=vi.fn();
+ act(()=>root.render(<MistRoot><ToastProvider><OrderActualCostPanel state={state} asOf="2026-10-18" canWrite busy={false} run={run} onErrorPresented={dismissed}/></ToastProvider></MistRoot>));
+ await click(getByRole(host,'button',{name:'登记费用'}));const dialog=getByRole(document.body,'dialog',{name:'登记费用'});type(getByRole(dialog,'textbox',{name:'费用金额'}),'900');type(getByRole(dialog,'combobox',{name:'出运'}),state.fulfillment.shipments[0].id);await click(getByRole(dialog,'button',{name:'登记并分摊'}));
+ act(()=>root.render(<div>已离开</div>));await act(async()=>{reject(new Error('保存失败'));});expect(dismissed).not.toHaveBeenCalled();
+});
 
 it('lists every effective order with actual revenue, purchase, expenses and margin, and opens the line detail',async()=>{
   state=applyMistCommand(state,{type:'cost.expense.register',payload:{category:'freight',date:'2026-10-15',currency:'USD',amount:800,scope:'shipment',shipmentId:state.fulfillment.shipments[0].id,basis:'volume'}} as MistCommand,ctx).state;

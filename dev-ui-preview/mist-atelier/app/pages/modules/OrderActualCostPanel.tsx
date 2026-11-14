@@ -18,7 +18,7 @@ const SHIPMENT_BASES: AllocationBasis[] = ['volume', 'weight', 'value', 'quantit
 const ORDER_BASES: AllocationBasis[] = ['value', 'quantity', 'equal', 'manual'];
 
 const STATUS_ORDER = { ok: 0, norate: 1, nocost: 2 } as const;
-export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,materialCostBasis,initialOrderId,rebate: rebateChoice }: { materialCostBasis?:ReadonlyArray<InternalFabricCostBasis>|null;initialOrderId?:string;state: MistState; asOf: string; canWrite: boolean; busy: boolean; run: (c: MistCommand) => Promise<unknown>; rebate?: RebateAccess }) {
+export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,onErrorPresented,materialCostBasis,initialOrderId,rebate: rebateChoice }: { materialCostBasis?:ReadonlyArray<InternalFabricCostBasis>|null;initialOrderId?:string;state: MistState; asOf: string; canWrite: boolean; busy: boolean; run: (c: MistCommand) => Promise<unknown>; onErrorPresented?:(message:string)=>void; rebate?: RebateAccess }) {
   const toast = useToast();
   // 退税金额不可读时不显示退税，也不显示可反推退税的含退税毛利；毛利改按不含退税口径。
   const access = rebateChoice ?? rebateAccess(state), shown = access === 'full', hiddenText = access === 'full' ? '' : REBATE_ACCESS_TEXT[access];
@@ -86,7 +86,7 @@ export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,material
         ]}/></CardBody></Card></>}
       </div>}
     </Drawer>
-    {register && <RegisterExpense state={state} asOf={asOf} busy={busy} run={run} onClose={() => setRegister(false)} onDone={() => { setRegister(false); toast('费用已登记并分摊'); }} />}
+    {register && <RegisterExpense state={state} asOf={asOf} busy={busy} run={run} onErrorPresented={onErrorPresented} onClose={() => setRegister(false)} onDone={() => { setRegister(false); toast('费用已登记并分摊'); }} />}
     <Dialog open={!!voiding} onClose={() => setVoiding(null)} tone="bad" title={ui`作废 ${voiding?.code ?? ''}`} description={uiText("作废后不再计入订单成本，原记录保留。")} footer={<><Button onClick={() => setVoiding(null)}>{uiText("取消")}</Button><Button variant="danger" disabled={busy || !reason.trim()} onClick={() => void doVoid().catch(() => undefined)}>{uiText("作废")}</Button></>}>
       <Field label={uiText("作废原因")}><TextInput aria-label={uiText("作废原因")} value={reason} onChange={e => setReason(e.target.value)} /></Field>
     </Dialog>
@@ -111,7 +111,8 @@ function CostBlock({ title, rows }: { title: string; rows: OrderCostLine[] }) {
   return <section className="mist-section"><Card><CardHeader title={uiText(title)} />{sources.length>0&&<CardBody><Facts items={sources.map(r=>({label:uiText("汇率依据"),value:r.currency+" · "+uiText(r.fx!.label.replace(/（暂估）$/,''))}))}/></CardBody>}<DataTable ariaLabel={uiText(title)} rows={rows} rowKey={r => r.key} columns={cols} empty={<EmptyState title={uiText("无")} compact />} /></Card></section>;
 }
 
-function RegisterExpense({ state, asOf, busy, run, onClose, onDone }: { state: MistState; asOf: string; busy: boolean; run: (c: MistCommand) => Promise<unknown>; onClose: () => void; onDone: () => void }) {
+function RegisterExpense({ state, asOf, busy, run, onErrorPresented, onClose, onDone }: { state: MistState; asOf: string; busy: boolean; run: (c: MistCommand) => Promise<unknown>; onErrorPresented?:(message:string)=>void; onClose: () => void; onDone: () => void }) {
+  const live=React.useRef(true);React.useEffect(()=>{live.current=true;return()=>{live.current=false;};},[]);
   const shipments = state.fulfillment.shipments.filter(s => s.state !== 'cancelled');
   const orders = state.orders.filter(o => !o.governance || o.governance.status === 'approved');
   const [v, setV] = React.useState({ category: 'freight' as ExpenseCategory, vendor: '', ref: '', date: asOf, currency: 'USD', amount: '', note: '', scope: (shipments.length ? 'shipment' : 'orders') as 'shipment' | 'orders', shipmentId: '', basis: 'volume' as AllocationBasis });
@@ -125,7 +126,7 @@ function RegisterExpense({ state, asOf, busy, run, onClose, onDone }: { state: M
     try {
       await run({ type: 'cost.expense.register', payload: { ...v, amount: v.amount, ...(v.scope === 'shipment' ? { shipmentId: v.shipmentId } : { orderIds: picked }), ...(v.basis === 'manual' ? { manual: scopeOrders.map(orderId => ({ orderId, amount: manual[orderId] ?? '' })) } : {}) } } as MistCommand);
       onDone();
-    } catch (e) { setError(e instanceof Error ? e.message : '登记失败'); }
+    } catch (e) { if(live.current){const message=e instanceof Error?e.message:'登记失败';setError(message);onErrorPresented?.(message);} }
   };
   return <Dialog open onClose={() => !busy && onClose()} title={uiText("登记费用")} width={640}
     footer={<><Button onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" disabled={busy || !v.amount || !scopeOrders.length} onClick={() => void submit()}>{uiText("登记并分摊")}</Button></>}>
