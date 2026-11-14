@@ -59,7 +59,7 @@ export function NotificationCenter({ open, onClose, items, digest, digestEnabled
   </Drawer>;
 }
 
-/** A new notice arriving: one small card at the top right, the same surface as shell status. Several at once merge into one. */
+/** New unread notices use the shell feedback area. Dialogs suppress these informational popups, not unread records or recovery/error cards. */
 export function NotificationToast({ items, onOpen, onOpenAll, onDismiss }: { items: MistNotification[]; onOpen: (n: MistNotification) => void; onOpenAll: () => void; onDismiss: () => void }) {
   if (!items.length) return null;
   const single = items.length === 1 ? items[0] : null;
