@@ -300,7 +300,7 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
   next.files = visibleFiles(state, next, actor.userId, ownerId,handoffFiles).filter(file => !restrictedFiles.has(file.id));
   const costVisible=hasScope(actor,'reports:admin')&&!hidden.some(s=>['orders','procurement','receivables','payables'].includes(s.key));
   let costClaimBasis:OrderClaimCostBasis[]|null=null;
-  if(costVisible)try{costClaimBasis=financialClaimCostBasis(state,new Set(next.orders.map(order=>order.id)));}catch(error){if(!(error instanceof MistCommandError))throw error;}
+  if(costVisible)try{costClaimBasis=financialClaimCostBasis(state,new Set((next.orders??[]).map(order=>order.id)));}catch(error){if(!(error instanceof MistCommandError))throw error;}
   return { state: next, hidden,...(costVisible?{costMaterialBasis:scope ? null : financialMaterialCostBasis(state),costClaimBasis}:{}) };
 }
 /** 精确匹配附件 ID，不用全文子串判断，避免相似文本开放隐藏附件。 */

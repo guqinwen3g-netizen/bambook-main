@@ -28,3 +28,7 @@ it('keeps ordinary workspace data readable while a malformed credit blocks only 
   const state=fixture();state.platform.credits[0].currentAmount=999;const before=structuredClone(state),view=projectState(state,actor(),empty);
   expect(view.costClaimBasis).toBeNull();expect(view.state.orders[0].id).toBe(ids.order);expect(state).toEqual(before);
 });
+it('keeps a minimal workspace readable before its orders module has been initialised',()=>{
+  const state=empty() as any;delete state.orders;const before=structuredClone(state),view=projectState(state,actor(),empty);
+  expect(view.costClaimBasis).toEqual([]);expect(state).toEqual(before);
+});
