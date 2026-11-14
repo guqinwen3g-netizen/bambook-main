@@ -31,6 +31,26 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
+function disputedSettlement(withFile = true) {
+ const s = store.value.state, id = 'deduction-st';
+ s.files.push({id:'allowance-file',name:'factory-allowance.txt',mimeType:'text/plain',size:4,storageKey:'unit/allowance',createdAt:ctx.now});
+ s.fulfillment.receipts = [{id:'allowance-rc',purchaseId:po.id,quantity:2400,rejected:0,destination:'warehouse',location:'嘉兴仓',date:day,evidence:'准确收货',fileIds:[],actor:'仓库',createdAt:ctx.now}];po.received=2400;
+ s.fulfillment.qcTasks.push({id:'allowance-qc',code:'QC-ALLOWANCE',kind:'production',domain:'fabric',source:{kind:'orderLine',orderId:po.orderId,lineId:po.lineId},state:'reported',reportIds:['qc-report'],dispositions:[{id:'allowance-decision',kind:'chargeback',reportId:'qc-report',status:'open',amount:500,purchaseId:po.id,fileIds:withFile?['allowance-file']:[],note:'供方书面折让'}]});
+ s.payables.settlements=[{id,code:'ST-ALLOWANCE',purchaseId:po.id,purchaseCode:po.code,supplierId:po.supplierId,supplier:po.supplier,currency:po.currency,unit:po.unit,price:po.price,receiptIds:['allowance-rc'],quantity:2400,rejected:0,amount:111600,final:true,disputes:[{description:'供方书面质量折让',amount:500,qcDispositionId:'allowance-decision'}],note:'按实际收货结算',fileIds:[],state:'pending',submitterId:'sales',submittedBy:'业务员',submittedAt:ctx.now}];
+ route={view:'payment-vouchers',section:'payables',id};render();return id;
+}
+function reviewNote(value:string) { const node=getByLabelText(document.body,'复核意见') as HTMLTextAreaElement;act(()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new Event('input',{bubbles:true}));}); }
+it('确认扣款须核金额、原件和新签字，开票默认使用扣后净额',async()=>{
+ const id=disputedSettlement();await click('确认结算');let cd=dialog('确认结算');
+ input('价款折让金额','500.01');await click('确认结算',cd);expect(cd.textContent).toMatch(/扣款.*超过/);expect((getByLabelText(cd,'价款折让金额') as HTMLInputElement).value).toBe('500.01');
+ input('价款折让金额','500');expect(cd.textContent).toContain('factory-allowance.txt');reviewNote('已核对供方书面折让500元，按扣后111100元结算');expect(cd.textContent).toContain('111,100.00 CNY');await click('确认结算',cd);expect(cd.textContent).toContain('请先手写签字');
+ await signPads(cd);await click('确认结算',cd);expect(store.value.state.payables.settlements.find((x:any)=>x.id===id)).toMatchObject({state:'confirmed',amount:111600,confirmation:{deductionAmount:500,deductionFileIds:['allowance-file'],prepaymentApplied:0}});
+ await click('按结算登记票据');cd=dialog('登记供应商票据');expect((getByLabelText(cd,po.code+' 本票金额') as HTMLInputElement).value).toBe('111100');
+});
+it('扣款缺原件时保留财务输入并拒绝确认',async()=>{
+ disputedSettlement(false);await click('确认结算');const cd=dialog('确认结算');input('价款折让金额','500');reviewNote('金额正确但还未取得书面原件');await click('确认结算',cd);expect(cd.textContent).toMatch(/扣款.*(原件|文件|依据)/);expect(store.value.state.payables.settlements[0].state).toBe('pending');expect((getByLabelText(cd,'价款折让金额') as HTMLInputElement).value).toBe('500');
+});
+
 it('requires an explicit no-compensation basis before closing a disposal review',async()=>{
  store.value.workspace.financialDisposals=[{returnId:'ret',purchaseId:'p',purchaseCode:'PO-1',supplier:'供应商',quantity:2,unit:'米',currency:'CNY',referenceAmount:32,decision:'scrap',disposalEvidence:'实际报废',report:'QC-1',settlementConfirmed:true,noRecovery:{actor:'主管',evidence:'确认不追偿'}}];
  store.value.run=vi.fn(async()=>({result:{id:'r'}}));render();await click('核对');

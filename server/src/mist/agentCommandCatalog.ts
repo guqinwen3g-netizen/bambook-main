@@ -1954,7 +1954,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "payable.settlement.confirm",
-  "payload": "{ id: string; prepaymentApplied: number; adjustReason?: string; note?: string }",
+  "payload": "{ id: string; prepaymentApplied: number; adjustReason?: string; note?: string; deductionAmount?: number; deductionFileIds?: string[] }",
   "source": "server/src/shared/mistPayables.ts"
  },
  {

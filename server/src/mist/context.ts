@@ -114,7 +114,18 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
       const qualified=async(id?:string)=>{const p=id?await fresh(id):null;return !!p&&hasScope(p,'finance:payment_request:approve' as any)&&hasScope(p,scope as any);};
       if(await qualified(head)){authority.paymentTierReviewerIds[level]=[head!];continue;}
       if(leader===null)leader=await resolve(()=>routing.resolveClaimLeader(actor.userId));
-      authority.paymentTierReviewerIds[level]=await qualified(leader??undefined)?[leader!]:[];
+      let reviewer=await qualified(leader??undefined)?leader:undefined;
+      if(!reviewer&&actor.companyId&&eligibleReviewerIds){
+        // Claim escalation accepts ADMIN only; payment tiers also reach a qualified company general manager.
+        // Keep the existing department/upper-manager rules, filtering by this tier before routing.
+        const candidates:string[]=[];for(const id of eligibleReviewerIds)if(await qualified(id))candidates.push(id);
+        if(candidates.length){
+          const tierRouting=createApprovalRoutingService({prisma:db,companyId:actor.companyId,eligibleReviewerIds:candidates});
+          const next=await resolve(()=>tierRouting.resolveReviewerByDepartment(actor.userId));
+          if(await qualified(next))reviewer=next;
+        }
+      }
+      authority.paymentTierReviewerIds[level]=reviewer?[reviewer]:[];
     }
     // H1：首笔付款的金额档与首笔加签须由不同的人签。原路由让两级落到同一人时（主管没有该档、上抬到同一位总领导，
     // 或申请人本人就是主管），另给出本空间成员中当前合格持有该档权限的其他人（申请人已由 fresh 排除）；

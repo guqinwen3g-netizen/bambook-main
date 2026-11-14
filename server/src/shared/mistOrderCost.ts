@@ -17,7 +17,7 @@ import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
 import { platformBusinessDate } from './mistPlatform';
 import { fxOrderActual, fxRateFor, type FxBasis, type FxResolved } from './mistFxRates';
 import { orderRebate } from './mistExportRebate';
-import { createPayablesState, nextPayableCode, type SupplierBill } from './mistPayables';
+import { createPayablesState, nextPayableCode, settlementDeductionMinor, settlementNetMinor, type SupplierBill } from './mistPayables';
 import { internalFabricCostShare,type InternalFabricCostBasis } from './mistInternalFabric';
 
 export const EXPENSE_CATEGORIES = { freight: '海运/空运费', trucking: '拖车/内陆运输', customs: '报关/港杂', inspection: '商检/验货', courier: '快递/寄样', insurance: '保险', commission: '佣金', bank: '银行手续费', claim: '客户索赔赔付', sample: '样品/打样', cancelLoss: '订单取消损失', other: '其他' } as const;
@@ -211,7 +211,7 @@ export function orderActualCost(root: MistState, orderId: string, basis: FxBasis
     const settlements = root.payables?.settlements?.filter(s => s.purchaseId === p.id && s.state === 'confirmed') || [];
     // 已确认最终结算（含短交结案的零数量最终结算）后合同已按实际关闭：成本以已确认结算金额为准，不再暂估未交部分。
     const finalSettled = settlements.some(s => s.final);
-    const contract = finalSettled ? settlements.reduce((sum, s) => sum + mistMoneyMinor(s.amount), 0) : Math.max(0, Math.round(p.quantity * p.price * 100));
+    const contract = finalSettled ? settlements.reduce((sum, s) => sum + settlementNetMinor(s), 0) : Math.max(0, Math.round(p.quantity * p.price * 100) - settlements.reduce((sum, s) => sum + settlementDeductionMinor(s), 0));
     // Staged fabric costs read as 坯布 + 染整 on the same item, so both stages are named on their cost lines.
     const stage = p.domain === 'fabric' ? p.kind === 'processing' ? p.stageTerms?.intermediate ? '前道加工 ' : '染整加工 ' : p.materialKind === 'greige' ? '坯布 ' : '' : '';
     const unbilled = Math.max(0, contract - billed), share = (minor: number) => internalFabricCostShare(root, p.id, orderId, minor,materialCostBasis), suffix = p.orderId === orderId ? '' : ' 内部面料';

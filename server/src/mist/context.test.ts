@@ -1,11 +1,11 @@
 import {beforeEach,afterEach,describe,it,expect,vi} from 'vitest';
-const mocks=vi.hoisted(()=>({resolve:vi.fn(),dept:vi.fn(),claim:vi.fn(),users:new Map<string,any>(),build:vi.fn()}));
-vi.mock('../approvals/approvalRoutingService',()=>({createApprovalRoutingService:()=>({resolveReviewerByDepartment:mocks.dept,resolveClaimLeader:mocks.claim})}));
+const mocks=vi.hoisted(()=>({resolve:vi.fn(),dept:vi.fn(),claim:vi.fn(),users:new Map<string,any>(),routes:new Map<string,any>(),build:vi.fn()}));
+vi.mock('../approvals/approvalRoutingService',()=>({createApprovalRoutingService:(options:any)=>mocks.routes.get(JSON.stringify(options?.eligibleReviewerIds))||({resolveReviewerByDepartment:mocks.dept,resolveClaimLeader:mocks.claim})}));
 vi.mock('../orders/orderMainApprovalService',()=>({createOrderMainApprovalService:()=>({resolveEligibleReviewerIds:mocks.resolve})}));
 vi.mock('../auth/tokenHelpers',()=>({loadUserWithRoles:async(_db:any,id:string)=>mocks.users.get(id)||null,buildLoadedAuthTokenPayload:mocks.build}));
 import {mistApprovalAuthority} from './context';
 const actor={userId:'owner',roles:[],permissions:['orders:write'],departmentIds:[]} as any;
-beforeEach(()=>{mocks.resolve.mockReset();mocks.dept.mockReset();mocks.claim.mockReset();mocks.claim.mockRejectedValue(Object.assign(new Error('none'),{code:'NO_REVIEWER_RESOLVED'}));mocks.users.clear();mocks.build.mockReset();mocks.build.mockImplementation(async(_db:any,user:any,companyId?:string)=>({userId:user.id,companyId,roles:[],departmentIds:[],permissions:user.permissions,authorizationLoaded:true}));vi.stubEnv('MIST_LOCAL_WORKSPACE','0');vi.stubEnv('NODE_ENV','test');});
+beforeEach(()=>{mocks.resolve.mockReset();mocks.dept.mockReset();mocks.claim.mockReset();mocks.claim.mockRejectedValue(Object.assign(new Error('none'),{code:'NO_REVIEWER_RESOLVED'}));mocks.users.clear();mocks.routes.clear();mocks.build.mockReset();mocks.build.mockImplementation(async(_db:any,user:any,companyId?:string)=>({userId:user.id,companyId,roles:[],departmentIds:[],permissions:user.permissions,authorizationLoaded:true}));vi.stubEnv('MIST_LOCAL_WORKSPACE','0');vi.stubEnv('NODE_ENV','test');});
 afterEach(()=>vi.unstubAllEnvs());
 describe('Mist order reviewer authority',()=>{
  it('uses both built-in local identities for both domains without querying the old account database',async()=>{vi.stubEnv('MIST_LOCAL_WORKSPACE','1');const value=await mistApprovalAuthority({}, {...actor,mistLocal:true},'order.governance.submit');expect(value.orderReviewerIds).toEqual({garment:['local-operator','local-reviewer','local-manager'],fabric:['local-operator','local-reviewer','local-manager']});expect(mocks.resolve).not.toHaveBeenCalled();});
@@ -54,6 +54,17 @@ describe('Mist payment request reviewer authority',()=>{
  it('local identities give a second, different reviewer for the larger and first-payment tiers',async()=>{
   vi.stubEnv('MIST_LOCAL_WORKSPACE','1');
   expect((await mistApprovalAuthority({},{...actor,mistLocal:true},'payable.request.submit') as any).paymentTierAlternateIds).toEqual({pay_lt5:[],pay_gt5:['local-operator'],pay_new_supplier:['local-operator']});
+ });
+ it.each(['payable.request.submit','payable.request.decide'])('routes %s to a tier-qualified company manager when the claim-only ADMIN route excludes the general manager',async kind=>{
+  mocks.dept.mockResolvedValue({reviewerId:'head'});mocks.users.set('head',{id:'head',status:'active',permissions:['finance:payment_request:approve','vouchers:approve:pay_lt5']});mocks.users.set('boss',{id:'boss',status:'active',permissions:ALL});
+  const upper=vi.fn().mockResolvedValue({reviewerId:'boss'});mocks.routes.set('["boss"]',{resolveReviewerByDepartment:upper,resolveClaimLeader:mocks.claim});
+  const authority=await mistApprovalAuthority({}, {...actor,companyId:'company-a'},kind,['head','boss']);
+  expect(authority.paymentTierReviewerIds).toEqual({pay_lt5:['head'],pay_gt5:['boss'],pay_new_supplier:['boss']});expect(upper).toHaveBeenCalledWith('owner');
+ });
+ it.each(['disabled','revoked','outside-members','self','unresolved'])('keeps the tier escalation closed for %s',async condition=>{
+  mocks.dept.mockResolvedValue({reviewerId:'head'});mocks.users.set('head',{id:'head',status:'active',permissions:['finance:payment_request:approve','vouchers:approve:pay_lt5']});mocks.users.set('boss',{id:'boss',status:condition==='disabled'?'disabled':'active',permissions:condition==='revoked'?[]:ALL});mocks.users.set('owner',{id:'owner',status:'active',permissions:ALL});
+  const upper=condition==='unresolved'?vi.fn().mockRejectedValue(Object.assign(new Error('none'),{code:'NO_REVIEWER_RESOLVED'})):vi.fn().mockResolvedValue({reviewerId:condition==='self'?'owner':'boss'});mocks.routes.set('["boss"]',{resolveReviewerByDepartment:upper,resolveClaimLeader:mocks.claim});
+  const authority=await mistApprovalAuthority({}, {...actor,companyId:'company-a'},'payable.request.submit',condition==='outside-members'?['head']:['head','boss']);expect(authority.paymentTierReviewerIds).toEqual({pay_lt5:['head'],pay_gt5:[],pay_new_supplier:[]});
  });
  it('when both levels route to the same leader, nominates other current members holding that tier; none when there is no conflict',async()=>{
   mocks.dept.mockResolvedValue({reviewerId:'head'});mocks.users.set('head',{id:'head',status:'active',permissions:['finance:payment_request:approve','vouchers:approve:pay_lt5']});

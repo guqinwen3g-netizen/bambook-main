@@ -8,8 +8,10 @@ import { type MistState } from '../../../../server/src/shared/mistWorkspace';
 import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
 import { receiptReturnedQuantity } from '../../../../server/src/shared/mistFulfillment';
 import { materialDeliveryRows } from '../../../../server/src/shared/mistInternalFabric';
-import { prepaymentMoves, purchaseContractMinor, purchaseInvoicedMinor, purchasePrepaymentReadback, settlementReceipts, settlementSuggestedPrepaymentMinor, shortClosureBlocker, type PayablesCommand, type SettlementView, settlementHasLiveAdvance } from '../../../../server/src/shared/mistPayables';
+import { prepaymentMoves, purchaseContractMinor, purchasePrepaymentReadback, payableSources, settlementReceipts, settlementSuggestedPrepaymentMinor, shortClosureBlocker, type PayablesCommand, type SettlementView, settlementHasLiveAdvance } from '../../../../server/src/shared/mistPayables';
 import { ActionBar, DetailBlock, DetailBody } from './modules/pageKit';
+import { DraftFiles, RecordFiles } from './modules/fulfillmentKit';
+import { useMistWorkspace } from '../runtime/workspace';
 
 const money = (amount: number, currency: string) => `${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
 const cents = (value: string) => { const n = Number(value); return value.trim() && Number.isFinite(n) ? Math.round(n * 100) : NaN; };
@@ -33,20 +35,21 @@ export function SettlementDetail({ settlement: st, state, me, busy, canSettle, c
   const moved = st.final && st.state === 'confirmed' && prepaymentMoves(state).some(m => !m.reversed && m.purchaseId === st.purchaseId);
   const receipts = state.fulfillment.receipts.filter(r => st.receiptIds.includes(r.id));
   const own = st.submitterId === me;
-  const purchase=state.fulfillment.purchases.find(row=>row.id===st.purchaseId);
-  const unregisteredMinor=purchase?Math.max(0,purchaseContractMinor(purchase)-purchaseInvoicedMinor(state,purchase.id)):0;
+  const unregisteredMinor=Math.min(Math.round(st.uninvoiced*100),Math.round((payableSources(state).find(row=>row.purchase.id===st.purchaseId)?.uninvoiced||0)*100));
   const heldBills=(state.payables?.bills||[]).filter(bill=>bill.state==='open'&&bill.supplierId===st.supplierId&&bill.currency===st.currency&&bill.lines.some(line=>line.purchaseId===st.purchaseId&&line.awaitingSettlement&&!line.settlementId));
   return <DetailBody data-settlement={st.id} heading={<h2 className="mist-h2">{st.code}</h2>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={SETTLEMENT_STATE[st.state].tone}>{uiText(SETTLEMENT_STATE[st.state].label)}</Pill>{st.final && <Pill tone="accent">{uiText("最终结算")}</Pill>}<span className="mist-note">{st.submittedBy}{uiText(" · 提交于 ")}{fmtDay(st.submittedAt)}</span></div>
     <Facts items={[
       { label: '来源合同', value: <Mono>{st.purchaseCode}</Mono> }, { label: '供应商', value: st.supplier },
       { label: '实收结算数量', value: `${st.quantity} ${st.unit} × ${st.price} ${st.currency}` }, { label: '结算金额', value: money(st.amount, st.currency) },
+      ...(st.confirmation?.deductionAmount ? [{ label: '确认折让', value: money(st.confirmation.deductionAmount, st.currency) }, { label: '扣后结算', value: money(st.amount - st.confirmation.deductionAmount, st.currency) }] : []),
       ...(st.rejected ? [{ label: '拒收（不计结算）', value: `${st.rejected} ${st.unit}` }] : []),
       ...(st.state === 'confirmed' ? [{ label: '预付抵扣', value: money(st.confirmation?.prepaymentApplied || 0, st.currency) + (st.confirmation && st.confirmation.prepaymentApplied !== st.confirmation.suggestedPrepayment ? `（建议 ${money(st.confirmation.suggestedPrepayment, st.currency)}）` : '') }, { label: '抵扣后应付', value: money(st.net, st.currency) }, {label:'已关联票额',value:money(st.invoiced,st.currency)},{label:'待关联票额',value:money(st.uninvoiced,st.currency)}] : []),
       ...(st.state === 'pending' ? [{ label: '建议预付抵扣', value: money(st.suggested, st.currency) + ` · 合同剩余可抵扣 ${money(st.available, st.currency)}` }] : []),
       ...(st.note ? [{ label: '结算说明', value: st.note }] : []),
     ]} />
     {st.confirmation && <Banner variant="status" tone="ok" title={uiText("财务已确认")}>{st.confirmation.actor} · {fmtDay(st.confirmation.at)}{uiText(st.confirmation.adjustReason ? `。抵扣调整原因：${st.confirmation.adjustReason}` : '')}{uiText(st.confirmation.note ? `。${st.confirmation.note}` : '')}</Banner>}
+    {!!st.confirmation?.deductionFileIds?.length && <DetailBlock title={uiText('折让依据')}><RecordFiles ids={st.confirmation.deductionFileIds}/></DetailBlock>}
     {st.returned && <Banner variant="status" tone="bad" title={uiText("财务已退回")}>{st.returned.reason}（{st.returned.actor} · {fmtDay(st.returned.at)}{uiText("）。收货记录已释放，可修正后重新提交。")}</Banner>}
     {st.cancelled && <Banner variant="status" tone="neutral" title={uiText("已撤回")}>{st.cancelled.reason}（{st.cancelled.actor} · {fmtDay(st.cancelled.at)}）</Banner>}
     {st.reversed && <Banner variant="status" tone="neutral" title={uiText("已冲回")}>{st.reversed.reason}（{st.reversed.actor} · {fmtDay(st.reversed.at)}{uiText("）。原记录保留；收货记录和预付抵扣已释放。")}</Banner>}
@@ -67,7 +70,7 @@ export function SettlementDetail({ settlement: st, state, me, busy, canSettle, c
     </DetailBlock>}
     <DetailBlock title={uiText("对应收货记录")}>{receipts.map(r => <div className="mist-row mist-module-actions" key={r.id}><span>{r.date}</span><span className="mist-note">{r.location} · {r.evidence}</span><span className="mist-spacer" /><span className="mist-num">{uiText("实收 ")}{r.quantity}{uiText(r.rejected ? ` · 拒收 ${r.rejected}` : '')} {uiText(st.unit)}</span></div>)}
       {!receipts.length && <span className="mist-note">{uiText(st.receiptIds.length ? "收货记录未找到。" : "短交结案：不含新收货，按已结算数量关闭合同。")}</span>}</DetailBlock>
-    <DetailBlock title={uiText("争议 / 未确认扣款")}>{st.disputes.map((d, i) => <div className="mist-row mist-module-actions" key={i}><span>{d.description}</span><span className="mist-spacer" /><span className="mist-num">{money(d.amount, st.currency)}</span></div>)}
+    <DetailBlock title={uiText(st.confirmation?.deductionAmount ? '争议记录' : '争议 / 未确认扣款')}>{st.disputes.map((d, i) => <div className="mist-row mist-module-actions" key={i}><span>{d.description}</span><span className="mist-spacer" /><span className="mist-num">{money(d.amount, st.currency)}</span></div>)}
       {!st.disputes.length && <span className="mist-note">{uiText("没有登记争议或扣款。")}</span>}</DetailBlock>
     {uiText(children)}
   </DetailBody>;
@@ -148,28 +151,43 @@ export function SettlementConfirmDialog({ settlement: st, busy, canConfirm, fail
   settlement: SettlementView | undefined; busy: boolean; canConfirm: boolean; failure: string; onClose: () => void;
   execute: (command: PayablesCommand, done: (result: Record<string, unknown>) => void, signature?: { svg: string }) => void; onDone: () => void;
 }) {
+  const { state, workspace } = useMistWorkspace();
   const [applied, setApplied] = React.useState(''), [adjust, setAdjust] = React.useState(''), [note, setNote] = React.useState(''), [local, setLocal] = React.useState(''), [signature, setSignature] = React.useState<SignatureValue | null>(null);
-  React.useEffect(() => { if (st) { setApplied(String(st.suggested)); setAdjust(''); setNote(''); setLocal(''); setSignature(null); } }, [st?.id]);
+  const [deduction, setDeduction] = React.useState('0'), [deductionFiles, setDeductionFiles] = React.useState<string[]>([]), [uploading, setUploading] = React.useState(false);
+  // Initialise per record/company; uploads refresh state without discarding this confirmation draft.
+  React.useEffect(() => { if (st) {
+    setApplied(String(st.suggested)); setAdjust(''); setNote(''); setLocal(''); setSignature(null); setDeduction('0'); setUploading(false);
+    const proposals = state?.fulfillment.qcTasks.flatMap(task => task.dispositions || []) || [];
+    setDeductionFiles([...new Set(st.disputes.flatMap(row => proposals.find(proposal => proposal.id === row.qcDispositionId && proposal.purchaseId === st.purchaseId)?.fileIds || []))].filter(id => state?.files.some(file => file.id === id)));
+  } }, [st?.id, workspace?.id]);
   if (!st) return null;
-  const value = cents(applied || '0'), changed = value !== Math.round(st.suggested * 100);
+  const value = cents(applied || '0'), deducted = cents(deduction || '0'), gross = Math.round(st.amount * 100), disputed = st.disputes.reduce((sum, row) => sum + Math.round(row.amount * 100), 0);
+  const net = Math.max(0, gross - (Number.isFinite(deducted) ? deducted : 0)), suggested = Math.min(Math.round(st.suggested * 100), net), changed = value !== suggested, locked = busy || uploading;
+  const changeDeduction = (next: string) => { const amount = cents(next || '0'); if (value === suggested && Number.isFinite(amount)) setApplied(String(Math.min(Math.round(st.suggested * 100), Math.max(0, gross - amount)) / 100)); setDeduction(next); };
   const submit = () => {
+    if (!Number.isFinite(deducted) || deducted < 0 || Math.abs(Number(deduction) * 100 - deducted) > 0.000001) return setLocal('确认扣款须为非负金额，最多两位小数。');
+    if (deducted > disputed || deducted > gross) return setLocal('确认扣款不得超过登记争议金额或原结算金额。');
+    if (deducted > 0 && !note.trim()) return setLocal('确认扣款须填写复核意见。');
+    if (deducted > 0 && !deductionFiles.length) return setLocal('确认扣款须附供应商同意的依据文件。');
     if (Number.isNaN(value) || value < 0) return setLocal('预付抵扣格式无效。');
     if (value > Math.round(st.available * 100)) return setLocal('预付抵扣超过合同剩余可抵扣预付。');
-    if (value > Math.round(st.amount * 100)) return setLocal('预付抵扣不能超过结算金额。');
+    if (value > net) return setLocal('预付抵扣不能超过扣后结算净额。');
     if (changed && !adjust.trim()) return setLocal('抵扣额与建议不同，请写明调整原因。');
     if (!signature) return setLocal('请先手写签字。');
-    setLocal(''); execute({ type: 'payable.settlement.confirm', payload: { id: st.id, prepaymentApplied: value / 100, adjustReason: changed ? adjust : undefined, note } }, onDone, { svg: signature.svg });
+    setLocal(''); execute({ type: 'payable.settlement.confirm', payload: { id: st.id, prepaymentApplied: value / 100, adjustReason: changed ? adjust : undefined, note, ...(deducted ? { deductionAmount: deducted / 100, deductionFileIds: deductionFiles } : {}) } }, onDone, { svg: signature.svg });
   };
   const message = local || failure;
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={640} title={uiText("确认结算")} description={ui`${st.code} · ${st.purchaseCode}`}
-    footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canConfirm} onClick={submit}>{uiText("确认结算")}</Button></>}>
+  return <Dialog open onClose={() => { if (!locked) onClose(); }} width={640} title={uiText("确认结算")} description={ui`${st.code} · ${st.purchaseCode}`}
+    footer={<><Button disabled={locked} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={locked} disabled={locked || !canConfirm} onClick={submit}>{uiText("确认结算")}</Button></>}>
     <div className="mist-col">
       {message && <Banner tone="bad" title={uiText("还不能确认")}>{message}</Banner>}
-      <Facts items={[{ label: '实收结算数量', value: `${st.quantity} ${uiText(st.unit)} × ${money(st.price, st.currency)}` }, { label: '结算金额', value: money(st.amount, st.currency) }, { label: '建议预付抵扣', value: money(st.suggested, st.currency) + (st.final && !st.receiptIds.length ? '（短交结案：不抵扣，剩余预付确认后退款或转抵）' : st.final ? '（最终结算：抵扣剩余全部预付，不超过结算金额）' : '（按结算数量比例）') }, { label: '合同剩余可抵扣', value: money(st.available, st.currency) }, ...(st.disputes.length ? [{ label: '争议 / 扣款（不抵减）', value: st.disputes.map(d => `${d.description} ${money(d.amount, st.currency)}`).join('；') }] : [])]} />
-      <Field label={uiText("本次预付抵扣")} required><TextInput aria-label={uiText("本次预付抵扣")} type="number" min="0" step="0.01" value={applied} onChange={e => setApplied(e.target.value)} /></Field>
-      {changed && <Field label={uiText("调整原因")} required><TextInput aria-label={uiText("调整原因")} value={adjust} onChange={e => setAdjust(e.target.value)} /></Field>}
-      <Field label={uiText("复核意见")}><TextArea aria-label={uiText("复核意见")} rows={2} value={note} onChange={e => setNote(e.target.value)} /></Field>
-      <Field label={uiText("确认签字")} required><SignaturePad key={st.id} ariaLabel="确认签字" disabled={busy || !canConfirm} onChange={setSignature} /></Field>
+      <Facts items={[{ label: '实收结算数量', value: `${st.quantity} ${uiText(st.unit)} × ${money(st.price, st.currency)}` }, { label: '结算金额', value: money(st.amount, st.currency) }, ...(st.disputes.length ? [{ label: '待核对争议', value: st.disputes.map(d => `${d.description} ${money(d.amount, st.currency)}`).join('；') }, { label: '扣后结算', value: money(net / 100, st.currency) }] : []), { label: '建议预付抵扣', value: money(suggested / 100, st.currency) }, { label: '合同剩余可抵扣', value: money(st.available, st.currency) }]} />
+      {!!st.disputes.length && <Field label={uiText('价款折让金额')} required><TextInput aria-label={uiText('价款折让金额')} type="number" min="0" max={Math.min(disputed, gross) / 100} step="0.01" value={deduction} disabled={locked || !canConfirm} onChange={e => changeDeduction(e.target.value)}/></Field>}
+      {deducted > 0 && <Field label={uiText('折让文件')} required><DraftFiles ids={deductionFiles} onChange={setDeductionFiles} onBusyChange={setUploading} disabled={busy || !canConfirm} hint=""/></Field>}
+      <Field label={uiText("本次预付抵扣")} required><TextInput aria-label={uiText("本次预付抵扣")} type="number" min="0" step="0.01" value={applied} disabled={locked} onChange={e => setApplied(e.target.value)} /></Field>
+      {changed && <Field label={uiText("调整原因")} required><TextInput aria-label={uiText("调整原因")} value={adjust} disabled={locked} onChange={e => setAdjust(e.target.value)} /></Field>}
+      <Field label={uiText("复核意见")} required={deducted > 0}><TextArea aria-label={uiText("复核意见")} rows={2} value={note} disabled={locked} onChange={e => setNote(e.target.value)} /></Field>
+      <Field label={uiText("确认签字")} required><SignaturePad key={`${workspace?.id||''}:${st.id}`} ariaLabel="确认签字" disabled={locked || !canConfirm} onChange={setSignature} /></Field>
     </div>
   </Dialog>;
 }

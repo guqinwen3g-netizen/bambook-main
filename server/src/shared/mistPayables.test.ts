@@ -3,6 +3,8 @@ import { applyMistCommand, createMistState, mistBankAccountBalances, mistCommand
 import { shortClosureBlocker, supplierSettlements, invoiceableSettlements, payablesCommandPermission, payableBills, payableSources, supplierPayableSummary, supplierPayments, purchasePayableReadback, prepaymentPlans, paymentRequests, purchasePrepaymentReadback, getPayableReviews, payablesCommandPermissions, supplierDeductions, deductibleRecoveries, prepaymentMoves, prepaymentTransferTargets } from './mistPayables';
 import { getMistReviewTasks } from './mistWorkspace';
 import { payablesAging, paymentOutlook, supplierStatement } from './mistPayableViews';
+import { settlementAdvanceRoomMinor } from './mistPayables';
+import { orderActualCost } from './mistOrderCost';
 
 function ctx(actorName = '财务-林', now = '2026-10-14T02:00:00.000Z'): MistContext { let n = 0; return { id: () => `ap-${actorName}-${++n}`, now, actorName, actorId: actorName } as MistContext; }
 const today = '2026-10-14';
@@ -306,6 +308,62 @@ describe('结算确认、预付抵扣与票据关联', () => {
   }
   const submit = (st: MistState, purchaseId: string, receiptIds: string[], extra: Record<string, unknown> = {}, actor = '业务-王') => as(actor, st, { type: 'payable.settlement.submit', payload: { purchaseId, receiptIds, ...extra } });
   const confirm = (st: MistState, id: string, prepaymentApplied: number, extra: Record<string, unknown> = {}, actor = '财务-林') => as(actor, st, { type: 'payable.settlement.confirm', payload: { id, prepaymentApplied, ...extra } });
+
+  const allowanceEvidence = (s: MistState) => { s.files.push({ id: 'allowance-agreement', name: 'factory-allowance.txt', mimeType: 'text/plain', size: 4, storageKey: 'unit/allowance', createdAt: '2026-10-14T02:00:00.000Z' } as any); };
+  it('财务确认扣款后按净额开票、完整抵预付及付款，不把已扣部分继续暂估为成本', () => {
+    let { s, po1 } = prepaid(); allowanceEvidence(s);
+    const submitted = submit(s, po1.id, [receive(s, po1.id, 2400)], { disputes: [{ description: '供方书面质量折让', amount: 500 }] }); s = submitted.state;
+    s = confirm(s, submitted.result.id, 33480, { deductionAmount: 500, deductionFileIds: ['allowance-agreement'], note: '按供方协议确认折让500元，余款按净额办理' }).state;
+    const st = supplierSettlements(s).find(x => x.id === submitted.result.id)!;
+    expect(st).toMatchObject({ amount: 111600, uninvoiced: 111100, net: 77620, confirmation: { deductionAmount: 500, deductionFileIds: ['allowance-agreement'], prepaymentApplied: 33480 } });
+    expect(invoiceableSettlements(s, po1.id)[0].left).toBe(111100); expect(settlementAdvanceRoomMinor(s, st.id)).toBe(7762000);
+    expect(payableSources(s).find(x => x.purchase.id === po1.id)).toMatchObject({ contract: 111600, uninvoiced: 111100 });
+    expect(orderActualCost(s, po1.orderId, 'period', '2026-10', today).purchases.find(x => x.key === 'est:' + po1.id)?.amount).toBe(111100);
+    expect(err(() => run(s, { type: 'payable.plan.register', payload: { purchaseId: po1.id, stage: 'final', amount: 77620.01, trigger: '最终验收后', basis: '已确认净额' } }))).toMatch(/净额/);
+    expect(err(() => run(s, bill(po1.supplierId, [{ purchaseId: po1.id, settlementId: st.id, amount: 111100.01 } as any])))).toMatch(/净额|未开票/);
+    s = run(s, bill(po1.supplierId, [{ purchaseId: po1.id, settlementId: st.id, amount: 60000 } as any], { invoiceNo: 'NET-A' })).state;
+    s = run(s, bill(po1.supplierId, [{ purchaseId: po1.id, settlementId: st.id, amount: 51100 } as any], { invoiceNo: 'NET-B' })).state;
+    const bills = payableBills(s, today); expect(bills.reduce((n, x) => n + x.prepaymentCredit, 0)).toBe(33480); expect(bills.reduce((n, x) => n + x.open, 0)).toBe(77620);
+    expect(invoiceableSettlements(s, po1.id)).toEqual([]); expect(settlementAdvanceRoomMinor(s, st.id)).toBe(0); expect(payableSources(s).find(x => x.purchase.id === po1.id)!.uninvoiced).toBe(0);
+    const cost = orderActualCost(s, po1.orderId, 'period', '2026-10', today); expect(cost.purchases.find(x => x.key === 'pur:' + po1.id)?.amount).toBe(111100); expect(cost.purchases.some(x => x.key === 'est:' + po1.id)).toBe(false);
+  });
+  it.each([-1, 1.001, 500.01, NaN, Infinity])('拒绝超争议、负数或无效扣款 %s，原待审结算不变', deductionAmount => {
+    let { s, po1 } = prepaid(); allowanceEvidence(s); const submitted = submit(s, po1.id, [receive(s, po1.id, 2400)], { disputes: [{ description: '书面折让', amount: 500 }] }); s = submitted.state;
+    const before = structuredClone(s.payables!.settlements);
+    expect(err(() => confirm(s, submitted.result.id, 33480, { deductionAmount, deductionFileIds: ['allowance-agreement'], note: '核对' }))).toMatch(/扣款/); expect(s.payables!.settlements).toEqual(before);
+  });
+  it('确认扣款须有复核意见和有效原件，不能把争议登记直接当作已扣款', () => {
+    let { s, po1 } = prepaid(); allowanceEvidence(s); const submitted = submit(s, po1.id, [receive(s, po1.id, 2400)], { disputes: [{ description: '书面折让', amount: 500 }] }); s = submitted.state;
+    expect(err(() => confirm(s, submitted.result.id, 33480, { deductionAmount: 500 }))).toMatch(/复核意见|依据/);
+    expect(err(() => confirm(s, submitted.result.id, 33480, { deductionAmount: 500, note: '协议已核' }))).toMatch(/原件|文件|依据/);
+    expect(err(() => confirm(s, submitted.result.id, 33480, { deductionAmount: 500, deductionFileIds: ['missing'], note: '协议已核' }))).toMatch(/附件|文件/);
+    const unchanged = confirm(s, submitted.result.id, 33480, { note: '尚未接受争议，按原额确认' }).state;
+    expect(invoiceableSettlements(unchanged, po1.id)[0].left).toBe(111600);
+  });
+  it('扣后净额小于已付预款时，抵扣上限随之降低，剩余预款保留可退', () => {
+    let { s, po1 } = prepaid(); allowanceEvidence(s); const submitted = submit(s, po1.id, [receive(s, po1.id, 2400)], { disputes: [{ description: '供方接受大额质量折让', amount: 80000 }] }); s = submitted.state;
+    expect(err(() => confirm(s, submitted.result.id, 33480, { deductionAmount: 80000, deductionFileIds: ['allowance-agreement'], note: '按实际协议' }))).toMatch(/扣后|结算净额/);
+    s = confirm(s, submitted.result.id, 31600, { deductionAmount: 80000, deductionFileIds: ['allowance-agreement'], note: '按实际协议' }).state;
+    expect(supplierSettlements(s)[0].confirmation).toMatchObject({ suggestedPrepayment: 31600, prepaymentApplied: 31600 }); expect(purchasePrepaymentReadback(s, po1.id)).toMatchObject({ applied: 31600, available: 1880, residualAfterFinal: 1880 });
+  });
+  it('扣款确认冲回后恢复开票口径与预付，但保留原签认金额和原件历史', () => {
+    let { s, po1 } = prepaid(); allowanceEvidence(s); const submitted = submit(s, po1.id, [receive(s, po1.id, 2400)], { disputes: [{ description: '折让待核', amount: 500 }] }); s = submitted.state;
+    s = confirm(s, submitted.result.id, 33480, { deductionAmount: 500, deductionFileIds: ['allowance-agreement'], note: '原核对依据' }).state;
+    const id = submitted.result.id, original = structuredClone(s.payables!.settlements.find(x => x.id === id)!.confirmation);
+    expect(original).toMatchObject({ deductionAmount: 500, deductionFileIds: ['allowance-agreement'] });
+    s = as('财务-林', s, { type: 'payable.settlement.reverse', payload: { id, reason: '协议金额需重新核对' } }).state;
+    expect(s.payables!.settlements.find(x => x.id === id)).toMatchObject({ state: 'reversed', confirmation: original }); expect(purchasePrepaymentReadback(s, po1.id)).toMatchObject({ applied: 0, available: 33480 });
+    expect(payableSources(s).find(x => x.purchase.id === po1.id)!.uninvoiced).toBe(111600);
+  });
+  it('已到票金额高于折让后额度时先核对更正票据，不静默改写原票', () => {
+    let { s, po1 } = prepaid(); allowanceEvidence(s); const submitted = submit(s, po1.id, [receive(s, po1.id, 2400)], { disputes: [{ description: '价款折让', amount: 500 }] }); s = submitted.state;
+    const registered = run(s, bill(po1.supplierId, [{ purchaseId: po1.id, amount: 111600, awaitingSettlement: true } as any])); s = registered.state;
+    expect(err(() => confirm(s, submitted.result.id, 33480, { deductionAmount: 500, deductionFileIds: ['allowance-agreement'], note: '待核对折让票额' }))).toMatch(/票据金额.*超过/);
+    expect(s.payables!.bills.find(x => x.id === registered.result.id)?.amount).toBe(111600);
+    s = run(s, { type: 'payable.bill.void', payload: { id: registered.result.id, reason: '供方更正为折让后票额，原票保留' } }).state;
+    s = confirm(s, submitted.result.id, 33480, { deductionAmount: 500, deductionFileIds: ['allowance-agreement'], note: '旧票已按实际更正，净额确认' }).state;
+    expect(invoiceableSettlements(s, po1.id)[0].left).toBe(111100); expect(s.payables!.bills.find(x => x.id === registered.result.id)?.state).toBe('void');
+  });
 
   it('权限：业务员按合同经办权限提交，财务按核销权限复核、退回、冲回', () => {
     expect(payablesCommandPermission({ type: 'payable.settlement.submit', payload: {} } as any)).toBe('procurement:write');
