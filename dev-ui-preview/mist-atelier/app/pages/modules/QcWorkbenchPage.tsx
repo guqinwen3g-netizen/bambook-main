@@ -6,7 +6,8 @@ import { CalendarClock, ChevronDown, ChevronRight, ClipboardCheck, Columns3, Lay
 import { FormFooter, BackLink, Banner, Button, Card, CardBody, CardButton, CardHeader, DataTable, Dialog, Dropdown, EmptyState, Facts, Field, FormGrid, Icon, Kanban, MeasurementTable, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Select, Tabs, TextArea, TextInput, Tile, Toolbar, UploadZone, useToast, type Tone } from '../../../../../components/mist';
 import { developmentDomain } from '../../../../../server/src/shared/mistDevelopmentDomain';
 import {fabricQcFacts,type FabricFactDraft} from '../fabricQcFacts';
-import type { MistQc, MistState } from '../../../../../server/src/shared/mistWorkspace';
+import type { MistCommand, MistQc, MistState } from '../../../../../server/src/shared/mistWorkspace';
+import {stableJson} from '../../../../../server/src/shared/stableJson';
 import type { FulfillmentCommand, FulfillmentQcReport, FulfillmentQcTask } from '../../../../../server/src/shared/mistFulfillment';
 import { fulfillmentQcSourceBlocker, fulfillmentSampleRoleLabel, fulfillmentSourceLabel } from '../../../../../server/src/shared/mistFulfillment';
 import { useMistWorkspace } from '../../runtime/workspace';
@@ -79,6 +80,8 @@ function qcGate(task: FulfillmentQcTask, state?: MistState | null): { tone: Tone
 }
 
 type TaskGroup = { key: string; factory: string; location: string; tasks: FulfillmentQcTask[]; open: number; earliest: string; contacts: string[] };
+/** Reports are append-only; decisions must stay on the report and business outcome actually reviewed. */
+const decisionFingerprint=(task:FulfillmentQcTask)=>stableJson({source:task.source,domain:task.domain,kind:task.kind,sampleId:task.sampleId,state:task.state,reportIds:task.reportIds,confirmation:task.businessConfirmation||null,continued:task.businessContinued||null,dispositions:task.dispositions||[]});
 /** Factory × inspection site groups: open work first, earliest planned inspection first. */
 function groupTasks(tasks: FulfillmentQcTask[], state?: MistState): TaskGroup[] {
   const groups = new Map<string, TaskGroup>();
@@ -106,6 +109,8 @@ function taskSubject(state: MistState, task: FulfillmentQcTask) {
 
 export function QcWorkbenchPage() {
   const { state, run, error, refresh, loading, saving, pending, workspace } = useMistWorkspace(), session = useMistSession(), { route, go } = useNav(), editor = useEditor(), toast = useToast();
+  const liveSource=React.useRef({state,workspaceId:workspace?.id,revision:workspace?.revision??0});
+  liveSource.current={state,workspaceId:workspace?.id,revision:workspace?.revision??0};
   const [domain, setDomain] = React.useState<Domain>(() => session.hasPermission('qc:fabric_chain:write') && !session.hasPermission('qc:garment_chain:write') ? 'fabric' : 'garment'), [kind, setKind] = React.useState<Kind>('sample');
   const [query, setQuery] = React.useState(''), [stateFilter, setStateFilter] = React.useState<StateFilter>('all'), [owner, setOwner] = React.useState<Owner>('all'), [mode, setMode] = React.useState<'groups' | 'board'>('groups');
   const [selected, setSelected] = useRouteDraft(route.id || ''), [reportTaskId, setReportTaskId] = useRouteDraft(''), [failure, setFailure] = useRouteDraft('');
@@ -169,14 +174,19 @@ export function QcWorkbenchPage() {
       setDomain(taskDomain); setKind(taskKind); setSelected(String(saved.result.id || '')); setDrawer(true); go('qc-workbench', String(saved.result.id || ''));
     },
   });
-  const confirmSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: externalCustomer(task, state) ? '记录客户样品确认' : '记录需求方样品确认', submitLabel: '记录确认', fields: [field('result', externalCustomer(task, state) ? '客户决定' : '需求方决定', 'select', true, [emptyOption, { value: 'approved', label: '确认采用' }, { value: 'rejected', label: '不采用' }]), field('note', externalCustomer(task, state) ? '客户确认依据' : '需求方确认依据', 'textarea')], initialValues: { result: '', note: '' }, submit: values => run({ type: 'fulfillment.qc.confirm', payload: { id: task.id, result: text(values, 'result') as 'approved' | 'rejected', note: text(values, 'note') } }) });
+  const runDecision=(id:string,baseline:string,workspaceId:string|undefined,command:MistCommand)=>{
+    const current=liveSource.current.state?.fulfillment.qcTasks.find(task=>task.id===id);
+    if(liveSource.current.workspaceId!==workspaceId||!current||decisionFingerprint(current)!==baseline)throw new Error('QC资料已更新，请重新打开后核对');
+    return run(command,{expectedRevision:liveSource.current.revision});
+  };
+  const confirmSpec = (task: FulfillmentQcTask): ModuleEditorSpec => {const baseline=decisionFingerprint(task),workspaceId=workspace?.id;return { title: externalCustomer(task, state) ? '记录客户样品确认' : '记录需求方样品确认', submitLabel: '记录确认', fields: [field('result', externalCustomer(task, state) ? '客户决定' : '需求方决定', 'select', true, [emptyOption, { value: 'approved', label: '确认采用' }, { value: 'rejected', label: '不采用' }]), field('note', externalCustomer(task, state) ? '客户确认依据' : '需求方确认依据', 'textarea')], initialValues: { result: '', note: '' }, submit: values => runDecision(task.id,baseline,workspaceId,{ type: 'fulfillment.qc.confirm', payload: { id: task.id, result: text(values, 'result') as 'approved' | 'rejected', note: text(values, 'note') } }) };};
   const transferSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: `转交 ${task.code}`, submitLabel: '转交', fields: [field('assigneeId', '接收QC', 'select', true, [emptyOption, ...memberSelectOptions(workspaceMembers(workspace, state, session.user)).filter(option => option.value !== task.assigneeId)]), field('reason', '转交原因', 'textarea')], initialValues: { assigneeId: '', reason: '' }, submit: values => run({ type: 'fulfillment.qc.transfer', payload: { id: task.id, domain: task.domain, assigneeId: text(values, 'assigneeId'), reason: text(values, 'reason') } }) });
   const rescheduleSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: `改期 ${task.code}`, submitLabel: '改期', description: task.due ? `原检查日 ${task.due}` : undefined, fields: [field('due', '新检查日', 'date'), field('reason', '改期原因', 'textarea')], initialValues: { due: task.due && task.due >= today() ? task.due : today(), reason: '' }, submit: values => run({ type: 'fulfillment.qc.reschedule', payload: { id: task.id, domain: task.domain, due: text(values, 'due'), reason: text(values, 'reason') } }) });
   const releaseSpec = (task: FulfillmentQcTask): ModuleEditorSpec => { const rejected = state?.fulfillment.qcReports.find(r => r.id === task.reportIds.at(-1))?.result === 'reject'; return { title: rejected ? '登记来料拒收' : '放行入库', submitLabel: rejected ? '登记拒收' : '放行', fields: [field('evidence', rejected ? '拒收依据' : '放行依据', 'textarea')], initialValues: { evidence: '' }, submit: values => run({ type: 'fulfillment.qc.incoming.close', payload: { id: task.id, evidence: text(values, 'evidence') } }) }; };
   // QC opens its own patrol / final inspection on a released branch of this business line.
   const patrolSpec = (): ModuleEditorSpec => ({ title: '新建巡检', submitLabel: '新建巡检', fields: [field('productionId', '生产分支', 'select', true, [emptyOption, ...(state?.productions || []).filter(job => !job.closed && state?.orders.find(o => o.id === job.orderId)?.type === domain && state.fulfillment.productionFacts?.some(fact => fact.productionId === job.id && fact.release)).map(job => ({ value: job.id, label: `${job.code} · ${job.factory}` }))]), field('purpose', '巡检目的', 'select', true, [emptyOption, ...['中期巡检', '尾期检验', '复查整改', '首件确认'].map(value => ({ value, label: value }))]), field('location', '检查地点'), field('contact', '现场联系人', 'text', false), field('due', '预计检查日', 'date')], initialValues: { productionId: '', purpose: '', location: '', contact: '', due: today() },
     submit: async values => { const saved = await run({ type: 'fulfillment.qc.patrol', payload: { productionId: text(values, 'productionId'), purpose: text(values, 'purpose'), location: text(values, 'location'), contact: text(values, 'contact'), due: text(values, 'due') } }); setKind('patrol'); setSelected(String(saved.result.id || '')); } });
-  const continueSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: task.kind === 'production' ? '确认继续生产' : '业务确认继续', submitLabel: task.kind === 'production' ? '确认继续生产' : '确认继续', fields: [field('note', '业务处理与恢复依据', 'textarea')], initialValues: { note: '' }, submit: values => run({ type: 'fulfillment.qc.continue', payload: { id: task.id, note: text(values, 'note') } }) });
+  const continueSpec = (task: FulfillmentQcTask): ModuleEditorSpec => {const baseline=decisionFingerprint(task),workspaceId=workspace?.id;return { title: task.kind === 'production' ? '确认继续生产' : '业务确认继续', submitLabel: task.kind === 'production' ? '确认继续生产' : '确认继续', fields: [field('note', '业务处理与恢复依据', 'textarea')], initialValues: { note: '' }, submit: values => runDecision(task.id,baseline,workspaceId,{ type: 'fulfillment.qc.continue', payload: { id: task.id, note: text(values, 'note') } }) };};
 
   const metrics = { fabric: qcDomainMetrics(all, 'fabric', state || undefined), garment: qcDomainMetrics(all, 'garment', state || undefined) };
   const stateCount = (value: StateFilter) => value === 'all' ? searched.length : searched.filter(t => t.state === value).length;

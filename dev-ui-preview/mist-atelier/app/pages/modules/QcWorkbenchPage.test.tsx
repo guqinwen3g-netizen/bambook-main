@@ -7,7 +7,7 @@ import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentQcTask} from '../../../../../server/src/shared/mistFulfillment';
 import {Nav} from '../../nav';
-const store=vi.hoisted(()=>({state:null as MistState|null,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
+const store=vi.hoisted(()=>({state:null as MistState|null,workspace:{id:'space',revision:0},loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
 const session=vi.hoisted(()=>({id:'qc-a',denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:session.id,displayName:'QC甲'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
@@ -19,7 +19,7 @@ async function click(node:HTMLElement){await act(async()=>node.click());}
 function choose(select:HTMLSelectElement,value:string){act(()=>{select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));});}
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 function task(id:string,patch:Partial<FulfillmentQcTask>={}):FulfillmentQcTask{return {id,code:id.toUpperCase(),source:{kind:'orderLine',orderId:'o',lineId:'l'},domain:'garment',kind:'sample',factory:'华美制衣',location:'一号车间',contact:'',due:'2026-10-20',requestedBy:'业务员',assignee:'',state:'pending',reportIds:[],createdAt:'2026-10-10T08:00:00Z',...patch};}
-beforeEach(()=>{session.id='qc-a';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'QC甲'},'empty');store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
+beforeEach(()=>{store.workspace={id:'space',revision:0};session.id='qc-a';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'QC甲'},'empty');store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 
 function fabricDevelopmentTask(){
  store.state!.devs.push({id:'fabric-dev',code:'DEV-FABRIC',values:{domain:'fabric'},versionIds:['fabric-version']} as any);store.state!.versions.push({id:'fabric-version',devId:'fabric-dev',label:'R1-A-1',returnedAt:'2026-10-13T08:00:00Z',confirmations:[],fileIds:[],qc:null} as any);
@@ -258,7 +258,7 @@ it('keeps business resume available to business users and absent for QC-only acc
   expect(host.querySelector('[data-list-detail-page]')).not.toBeNull();
   typeInto(getByRole(dialog,'textbox',{name:'业务处理与恢复依据'}) as HTMLTextAreaElement,'整改已复核');
   await click(getByRole(dialog,'button',{name:'确认继续生产'}));
-  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.continue',payload:{id:'resume',note:'整改已复核'}});
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.continue',payload:{id:'resume',note:'整改已复核'}},{expectedRevision:0});
   session.denied=new Set(['orders:write','products:write']);
   render('resume');
   expect(queryByRole(host,'button',{name:'确认继续生产'})).toBeNull();
@@ -380,4 +380,23 @@ it('defaults a production inspection to the supplier site and opens the new task
   render(undefined,'list',{productionId:'prod-site'});await click(getAllByRole(host,'button',{name:'从来源发起QC'})[0]);
   await click(getByRole(host,'button',{name:'下一步'}));
   expect((getByRole(host,'textbox',{name:'实际检查地点'}) as HTMLInputElement).value).toBe('嘉兴秀洲工业园 18 号');
+});
+
+function decisionFixture(continued=false){
+ store.state!.orders.push({id:'o',code:'SO-DECISION',type:'garment',customerId:'c',customer:'Cedar',governance:{contract:{kind:'external'}}} as any);
+ const t=task('decision',{state:'reported',reportIds:['r1'],...(continued?{businessConfirmation:{result:'approved' as const,note:'客户认可R1',actor:'业务',at:'2026-10-13T10:00:00Z'}}:{})});
+ store.state!.fulfillment.qcTasks.push(t);store.state!.fulfillment.qcReports.push({id:'r1',taskId:t.id,report:'R1',result:'pass',measurements:[],fileIds:[],reviewer:'QC甲',reviewedAt:'2026-10-13T10:00:00Z'} as any);return t;
+}
+it.each(['confirm','continue'] as const)('keeps the old %s draft but refuses it when a new QC report arrives',async action=>{
+ const t=decisionFixture(action==='continue');render(t.id);await click(getByRole(host,'button',{name:action==='confirm'?'记录客户确认':'业务确认继续'}));const d=getByRole(document.body,'dialog');
+ if(action==='confirm')choose(getByRole(d,'combobox',{name:'客户决定'}) as HTMLSelectElement,'approved');
+ const label=action==='confirm'?'客户确认依据':'业务处理与恢复依据';typeInto(getByRole(d,'textbox',{name:label}) as HTMLTextAreaElement,'仅针对R1的原始依据');
+ store.state=structuredClone(store.state!);const current=store.state!.fulfillment.qcTasks.find(x=>x.id===t.id)!;current.reportIds.push('r2');delete current.businessConfirmation;store.state!.fulfillment.qcReports.push({id:'r2',taskId:t.id,report:'R2',result:'pass',measurements:[],fileIds:[],reviewer:'QC甲',reviewedAt:'2026-10-13T11:00:00Z'} as any);store.workspace.revision=1;render(t.id);
+ await click(getByRole(d,'button',{name:action==='confirm'?'记录确认':'确认继续'}));expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('QC资料已更新');expect((getByRole(d,'textbox',{name:label}) as HTMLTextAreaElement).value).toBe('仅针对R1的原始依据');
+});
+it.each(['confirm','continue'] as const)('allows %s after an unrelated synchronization and binds the current checked revision',async action=>{
+ const t=decisionFixture(action==='continue');render(t.id);await click(getByRole(host,'button',{name:action==='confirm'?'记录客户确认':'业务确认继续'}));const d=getByRole(document.body,'dialog');
+ if(action==='confirm')choose(getByRole(d,'combobox',{name:'客户决定'}) as HTMLSelectElement,'approved');
+ typeInto(getByRole(d,'textbox',{name:action==='confirm'?'客户确认依据':'业务处理与恢复依据'}) as HTMLTextAreaElement,'核对R1后的有效依据');store.state=structuredClone(store.state!);store.state!.files.push({id:'unrelated',name:'other.txt'} as any);store.workspace.revision=7;render(t.id);
+ await click(getByRole(d,'button',{name:action==='confirm'?'记录确认':'确认继续'}));expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.'+action,payload:expect.objectContaining({id:t.id,note:'核对R1后的有效依据'})}),{expectedRevision:7});
 });
