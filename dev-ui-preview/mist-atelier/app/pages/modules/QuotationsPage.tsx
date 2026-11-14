@@ -281,7 +281,7 @@ function QuotationDetail({ q, state, canMaintainCompany, all, day, me, can, canO
       { label: '退回修改', icon: Undo2, onClick: () => onDecide('rejected'), reason: decideReason, hidden: stage !== 'pending' },
       { label: '用邮箱发送', icon: Send, onClick: () => { const formal = documents.filter(d => !d.draft).at(-1), contact = state.contacts.find(c => c.customerId === q.customerId && c.email); setComposeIntent({ to: contact?.email || '', subject: `Quotation ${q.code}${customer ? ' · ' + customer : ''}`, fileIds: formal ? [formal.fileId] : [], links: [{ kind: 'quotation', id: q.id }, ...(q.customerId ? [{ kind: 'customer' as const, id: q.customerId }] : [])] }); go('emails'); }, primary: !needsApproval || approved, reason: sendReason || (!documents.some(d => !d.draft) ? '请先生成正式报价单' : false), hidden: stage !== 'draft' && stage !== 'sent' },
       { label: '登记已发送', icon: Send, onClick: () => onStatus('Sent'), reason: sendReason, hidden: stage !== 'draft' },
-      { label: '客户接受', icon: ThumbsUp, onClick: () => onStatus('Accepted'), primary: true, reason: writeReason, hidden: stage !== 'sent' },
+      { label: '客户接受', icon: ThumbsUp, onClick: () => onStatus('Accepted'), primary: true, reason: writeReason || (expired ? '报价已过有效期，请新建版本后重新确认' : false), hidden: stage !== 'sent' },
       { label: '客户未接受', icon: ThumbsDown, onClick: () => onStatus('Rejected'), reason: writeReason, hidden: stage !== 'sent' },
       { label: '标记已失效', icon: TimerOff, onClick: () => onStatus('Expired'), reason: writeReason || (!expired ? `有效期至 ${q.validUntil}，到期后才能标记` : false), hidden: stage !== 'sent' },
       { label: started ? '转剩余条目' : '核对并转订单', icon: ShoppingBag, onClick: onConvert, primary: true, reason: convertReason, hidden: stage !== 'accepted' },
