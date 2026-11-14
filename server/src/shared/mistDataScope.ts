@@ -325,13 +325,16 @@ export function applyDataScope(state: MistState, scope: MistDataScope, actorId: 
   const financePaths = ['invoices', 'allocations', 'payments', 'financeReversals', 'payables.bills', 'payables.payments', 'payables.requests', 'payables.settlements', 'payables.plans', 'payables.allocations', 'payables.reversals'];
   const actualDocuments = new Set((next.fulfillment?.documents ?? []).map((row: any) => row.id));
   const actualCustoms = new Set((next.fulfillment?.customs ?? []).map((row: any) => row.id));
+  // CRM follow-up tasks navigate to the responsible customer's main page. The
+  // shared directory alone must not grant access to another customer's activity.
+  const ownedCustomerIds = new Set((state.customers ?? []).filter(customer => scope.userIds.includes(customer.ownerId)).map(customer => customer.id));
   const targetOk = (target?: { view?: string; id?: string;section?:string }) => {
     // Sample-request notices use the samples route, not an order/development target.
     if (target?.view === 'samples') return !!target.id && hasAny(target.id, target.section === 'requests' ? ['sampleRequests'] : ['fulfillment.samples']);
     if(target?.section==='internal-deliveries'&&['orders','orders/list'].includes(target.view||''))return !!target.id&&hasAny(target.id,['internalDeliveries']);
     if (!target?.id) return !target?.view || !(target.view in VIEW_COLLECTION || ['payment-vouchers', 'finance', 'crm', 'inventory'].includes(target.view));
     if (target.view === 'payment-vouchers' || target.view === 'finance') return safeReceiptIds.has(target.id) || hasAny(target.id, financePaths);
-    if (target.view === 'crm') return hasAny(target.id, ['crm.opportunities', 'crm.followUps']);
+    if (target.view === 'crm') return ownedCustomerIds.has(target.id) || hasAny(target.id, ['crm.opportunities', 'crm.followUps']);
     if (target.view === 'inventory') return hasAny(target.id, ['fulfillment.stock']);
     if (target.view === 'shipments' && partialShipmentIds.has(target.id)) return false;
     const path = target.view ? VIEW_COLLECTION[target.view] : undefined;
