@@ -288,6 +288,46 @@ async function lineInput(label:string,value:string){
   await act(async()=>{Object.getOwnPropertyDescriptor(control.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value')!.set!.call(control,value);control.dispatchEvent(new Event('input',{bubbles:true}));});
 }
 
+it('header editor refuses a synchronized due-date change and retains its season',async()=>{
+ render();act(()=>getByRole(host,'button',{name:'编辑',exact:true}).click());
+ const select=getByRole(document.body,'combobox',{name:'季节',exact:true}) as HTMLSelectElement;
+ act(()=>{select.value='__custom__';select.dispatchEvent(new Event('change',{bubbles:true}));});
+ await lineInput('季节（手动填写）','SS29');
+ store.state=structuredClone(store.state!);store.state.orders[0].due='2026-11-02';store.workspace.revision=2;render();
+ await act(async()=>getByRole(document.body,'button',{name:'保存',exact:true}).click());
+ expect(store.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('订单资料已更新，请重新打开后核对');expect((getByLabelText(document.body,'季节（手动填写）') as HTMLInputElement).value).toBe('SS29');
+});
+
+it('header editor binds the whole header save to its checked revision',async()=>{
+ store.run.mockResolvedValue({revision:8,result:{orderId}});render();act(()=>getByRole(host,'button',{name:'编辑',exact:true}).click());store.workspace.revision=7;render();
+ await act(async()=>getByRole(document.body,'button',{name:'保存',exact:true}).click());
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'order.governance.saveDraft'}),{expectedRevision:7});
+});
+
+it('header editor binds approved owner-only maintenance without creating a contract proposal',async()=>{
+ lineEditorFixture('approved');store.run.mockResolvedValue({revision:8,result:{orderId}});render();act(()=>getByRole(host,'button',{name:'编辑',exact:true}).click());store.workspace.revision=7;render();
+ await act(async()=>getByRole(document.body,'button',{name:'保存',exact:true}).click());
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'order.update'}),{expectedRevision:7});
+});
+
+it('line editor refuses a synchronized price change without overwriting its local name',async()=>{
+ lineEditorFixture('draft');store.run.mockReset();render();await openLineEditor();await lineInput('英文品名','LOCAL ENGLISH NAME');store.state=structuredClone(store.state!);store.state.orderLines[0].price=13;store.workspace.revision=2;render();
+ await act(async()=>getByRole(document.body,'button',{name:'保存条目',exact:true}).click());
+ expect(store.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('订单条目资料已更新，请重新打开后核对');expect((getByLabelText(document.body,'英文品名') as HTMLInputElement).value).toBe('LOCAL ENGLISH NAME');
+});
+
+it('line editor refuses another changed commercial line in the same reviewed order',async()=>{
+ lineEditorFixture('draft');const second={...store.state!.orderLines[0],id:'other-source-line',name:'其他条目',style:'SECOND',price:7};store.state!.orderLines.push(second);store.run.mockReset();render();await openLineEditor();store.state=structuredClone(store.state!);store.state.orderLines[1].price=9;store.workspace.revision=2;render();
+ await act(async()=>getByRole(document.body,'button',{name:'保存条目',exact:true}).click());
+ expect(store.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('订单条目资料已更新，请重新打开后核对');
+});
+
+it('line editor binds unchanged commercial data to the checked current revision',async()=>{
+ lineEditorFixture('draft');store.run.mockResolvedValue({revision:8,result:{orderId}});render();await openLineEditor();store.workspace.revision=7;render();await lineInput('英文品名','LOCAL ENGLISH NAME');
+ await act(async()=>getByRole(document.body,'button',{name:'保存条目',exact:true}).click());
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'order.governance.saveDraft'}),{expectedRevision:7});
+});
+
 it('saves and clears an English line name through the line editor',async()=>{
   lineEditorFixture('rejected');render();await openLineEditor();
   await lineInput('英文品名','  COTTON STRETCH TWILL NAVY ');await act(async()=>getByRole(document.body,'button',{name:'保存条目'}).click());
@@ -404,7 +444,7 @@ it('saves a proposed due date restored to the live date without losing the amend
 
 it('keeps the owner-only shortcut for an approved order with no proposed change',async()=>{
   const actor=lineEditorFixture('approved',4,12);const members=[{id:'sales',name:'业务员甲',active:true,groups:[]},{id:'sales-b',name:'业务员乙',active:true,groups:[]}];
-  store.state!.members=[{userId:'sales-b',name:'业务员乙',addedBy:'sales',addedByName:'业务员甲',addedAt:context.now}];(store as any).workspace={id:'w',ownerId:'sales'};
+  store.state!.members=[{userId:'sales-b',name:'业务员乙',addedBy:'sales',addedByName:'业务员甲',addedAt:context.now}];(store as any).workspace={id:'w',ownerId:'sales',revision:1};
   store.run.mockImplementation(async(command:Parameters<typeof applyMistCommand>[1])=>{const result=applyMistCommand(store.state!,command,{...actor,members});store.state=result.state;render();return{requestId:'owner',revision:1,result:result.result};});
   render();await act(async()=>getByRole(host,'button',{name:/^编辑$/}).click());
   const owner=getByLabelText(document.body,'负责人') as HTMLSelectElement;expect([...owner.options].map(o=>o.textContent)).toEqual(['业务员甲','业务员乙']);
