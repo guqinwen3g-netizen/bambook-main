@@ -94,6 +94,37 @@ it('allows transport edits when synchronization only changes unrelated data',asy
  expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.shipments.updateTransport',payload:expect.objectContaining({note:'本票核实说明'})}),{expectedRevision:1});
 });
 
+it('shows flight and cargo-cutoff fields for a new air arrangement without empty sea-only inputs',async()=>{
+ store.state!.fulfillment.shipments.push(shipment('air-fields',{mode:'air'}));render('air-fields');
+ await click(getByRole(host,'button',{name:'更新运输安排'}));
+ expect(getByRole(document.body,'textbox',{name:'航班号'})).toBeTruthy();
+ expect(getByRole(document.body,'textbox',{name:'截货时间'})).toBeTruthy();
+ expect(queryByRole(document.body,'textbox',{name:'航次'})).toBeNull();
+ expect(queryByRole(document.body,'textbox',{name:/柜型 柜号/})).toBeNull();
+ typeInto(getByRole(document.body,'textbox',{name:'货代'}) as HTMLInputElement,'远川国际物流');
+ await click(getByRole(document.body,'button',{name:'保存',exact:true}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.shipments.updateTransport',payload:expect.objectContaining({transport:expect.objectContaining({forwarder:'远川国际物流',voyage:'',containers:[]})})}),{expectedRevision:0});
+});
+
+it('keeps sea voyage and container entry while omitting its repeated teaching hint',async()=>{
+ store.state!.fulfillment.shipments.push(shipment('sea-fields'));render('sea-fields');
+ await click(getByRole(host,'button',{name:'更新运输安排'}));
+ expect(getByRole(document.body,'textbox',{name:'航次'})).toBeTruthy();
+ expect(getByRole(document.body,'textbox',{name:'柜型 柜号 封条号（每柜一行）'})).toBeTruthy();
+ expect(document.body.textContent).not.toContain('如 40HQ CBHU1234567 SL001');
+});
+
+it('keeps nonempty historical voyage and container records editable on an air shipment',async()=>{
+ const transport={vessel:'OLD-FLIGHT',voyage:'OLD-LEG',containers:[{type:'LD3',number:'ULD-1',seal:'S1'}]};
+ store.state!.fulfillment.shipments.push(shipment('air-records',{mode:'air',transport}));render('air-records');
+ await click(getByRole(host,'button',{name:'更新运输安排'}));
+ expect((getByRole(document.body,'textbox',{name:'航次（已有记录）'}) as HTMLInputElement).value).toBe('OLD-LEG');
+ expect((getByRole(document.body,'textbox',{name:'容器资料（已有记录，每柜一行）'}) as HTMLTextAreaElement).value).toBe('LD3 ULD-1 S1');
+ typeInto(getByRole(document.body,'textbox',{name:'运输安排说明'}) as HTMLTextAreaElement,'核对当前运输说明');
+ await click(getByRole(document.body,'button',{name:'保存',exact:true}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({payload:expect.objectContaining({transport:expect.objectContaining(transport)})}),{expectedRevision:0});
+});
+
 it('shows why the requester cannot cancel a booked shipment with issued documents',()=>{
   const f=store.state!.fulfillment;f.shipments.push(shipment('k',{booking:'BK-9',requesterId:'biz'}));f.documents.push(doc('ci','k','CI'));
   render('k');
