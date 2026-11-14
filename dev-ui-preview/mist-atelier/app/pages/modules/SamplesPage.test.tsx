@@ -8,7 +8,7 @@ import {createMistState,type MistState} from '../../../../../server/src/shared/m
 import type {FulfillmentSample} from '../../../../../server/src/shared/mistFulfillment';
 import {Nav} from '../../nav';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
-const store=vi.hoisted(()=>({state:null as MistState|null,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
+const store=vi.hoisted(()=>({state:null as MistState|null,workspace:{id:'workspace',revision:1},loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
 const write=vi.hoisted(()=>({allowed:true}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:'sales',displayName:'业务员'},sessionKey:'s',hasPermission:()=>write.allowed,canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
@@ -18,7 +18,7 @@ let host:HTMLElement,root:Root;let presentedError:string|undefined;const go=vi.f
 function render(id?:string,context:Record<string,string>={}){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'samples',id,...context},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><MistPresentedErrorContext.Provider value={presentedError}><SamplesPage/></MistPresentedErrorContext.Provider></Nav.Provider></ToastProvider></MistRoot>));}
 const version={kind:'version' as const,devId:'dev',versionId:'ver'};
 function fabric(id:string,form:string,unit:string,quantity:number,available:number):FulfillmentSample{return {id,code:id.toUpperCase(),name:'亚麻平纹',category:'面料',form,unit,quantity,available,location:'A-01',size:'',color:'',source:version,fileIds:[],note:'',createdAt:'2026-10-10T08:00:00Z'};}
-beforeEach(()=>{presentedError=undefined;store.error='';write.allowed=true;store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'业务员'},'empty');store.run.mockReset();go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
+beforeEach(()=>{store.workspace={id:'workspace',revision:1};presentedError=undefined;store.error='';write.allowed=true;store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'业务员'},'empty');store.run.mockReset();go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 
 it('opens a linked sample on compact screens and opens the next linked sample after closing',async()=>{
@@ -68,7 +68,7 @@ it('identifies each physical fabric specimen and uploads evidence to that specim
  const old={...fabric('smp-old','米样','米',2.5,2.5),note:'原批次 P1',fileIds:['old-file']},current={...fabric('smp-new','米样','米',2.5,2.5),note:'重送批次 P2'};store.state!.fulfillment.samples.push(old,current);store.state!.files.push({id:'old-file',name:'P1.txt'} as any,{id:'new-upload',name:'P2.txt'} as any);store.uploadFile.mockReset();store.uploadFile.mockResolvedValue({id:'new-upload',name:'P2.txt'});
  render('smp-new');const form=host.querySelector('[data-sample-form="smp-new"]') as HTMLElement;expect(form.textContent).toContain('SMP-NEW');expect(form.textContent).toContain('重送批次 P2');const files=host.querySelector('[data-sample-files="smp-new"]') as HTMLElement;expect(files).toBeTruthy();
  await act(async()=>{const input=files.querySelector('input[type="file"]')!;Object.defineProperty(input,'files',{value:[new File(['P2'],'P2.txt',{type:'text/plain'})],configurable:true});input.dispatchEvent(new Event('change',{bubbles:true}));});
- expect(store.run).toHaveBeenCalledWith({type:'fulfillment.samples.edit',payload:{id:'smp-new',location:'A-01',note:'重送批次 P2',fileIds:['new-upload']}});expect(old.fileIds).toEqual(['old-file']);
+ expect(store.run).toHaveBeenCalledWith({type:'fulfillment.samples.edit',payload:{id:'smp-new',location:'A-01',note:'重送批次 P2',fileIds:['new-upload']}},{expectedRevision:1});expect(old.fileIds).toEqual(['old-file']);
 });
 it('edits the selected specimen and can remove a misassociated attachment without editing its sibling',async()=>{
  store.state!.fulfillment.samples.push({...fabric('smp-old','米样','米',2.5,2.5),note:'原批次 P1',fileIds:['old-file']},{...fabric('smp-new','米样','米',2.5,2.5),note:'重送批次 P2',fileIds:['new-file']});store.state!.files.push({id:'old-file',name:'P1.txt'} as any,{id:'new-file',name:'P2.txt'} as any);render('smp-new');const form=host.querySelector('[data-sample-form="smp-new"]') as HTMLElement;
@@ -227,4 +227,11 @@ it('keeps workspace conflicts in their existing presentation without reporting a
  expect(host.querySelectorAll('[role="alert"]')).toHaveLength(0);
  presentedError=undefined;render();expect(host.textContent).toContain('样品操作未完成');
  expect(host.querySelectorAll('[role="alert"]')).toHaveLength(1);
+});
+it('appends uploaded evidence using the current specimen location, note and file references',async()=>{
+ store.state!.fulfillment.samples.push({...fabric('sample-files','米样','米',2.5,2.5),note:'旧备注',fileIds:['old']});let finish!:(value:unknown)=>void;store.uploadFile.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
+ render('sample-files');const input=host.querySelector('[data-sample-files="sample-files"] input[type="file"]')!;Object.defineProperty(input,'files',{configurable:true,value:[new File(['new'],'new.txt',{type:'text/plain'})]});await act(async()=>{input.dispatchEvent(new Event('change',{bubbles:true}));});
+ store.state=structuredClone(store.state);Object.assign(store.state!.fulfillment.samples[0],{location:'B-02',note:'另一岗位已复核',fileIds:['old','peer']});store.workspace={id:'workspace',revision:2};render('sample-files');
+ await act(async()=>{finish({id:'upload',name:'new.txt',mimeType:'text/plain',size:3,storageKey:'workspace/upload',createdAt:''});});
+ expect(store.run).toHaveBeenCalledWith({type:'fulfillment.samples.edit',payload:{id:'sample-files',location:'B-02',note:'另一岗位已复核',fileIds:['old','peer','upload']}},{expectedRevision:2});
 });

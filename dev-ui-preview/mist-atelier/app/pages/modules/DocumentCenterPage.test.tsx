@@ -8,7 +8,7 @@ import {createMistState,type MistState} from '../../../../../server/src/shared/m
 import type {FulfillmentShipment,FulfillmentDocument} from '../../../../../server/src/shared/mistFulfillment';
 import {Nav} from '../../nav';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
-const store=vi.hoisted(()=>({state:null as MistState|null,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
+const store=vi.hoisted(()=>({state:null as MistState|null,workspace:{id:'workspace',revision:1},loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
 const session=vi.hoisted(()=>({denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:'ops',displayName:'后勤'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:(view:string)=>view!=='system-settings'||!session.denied.has('settings:system:read')}); return { useMistSession, useOptionalMistSession: useMistSession }; });
@@ -21,7 +21,7 @@ function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act((
 const shipment=(id:string,patch:Partial<FulfillmentShipment>={}):FulfillmentShipment=>({id,code:id.toUpperCase(),customerId:'c',customer:'Cedar',domain:'garment',consignee:'Cedar DC',mode:'sea',portOfLoading:'上海',portOfDischarge:'Felixstowe',incoterm:'FOB',plannedDate:'2099-01-01',booking:'',lines:[{orderId:'o',lineId:'l',productionId:'p',quantity:10,factoryConfirmedAt:'2026-10-09'}],note:'',fileIds:[],state:'preparing',requestedBy:'业务',requesterId:'biz',createdAt:'2026-10-08T08:00:00Z',...patch});
 const doc=(id:string,type:FulfillmentDocument['type'],patch:Partial<FulfillmentDocument>={}):FulfillmentDocument=>({id,shipmentId:'s',orderId:type==='CI'?'o':'',type,number:type+'-'+id,version:1,title:type+' 标题',dueDate:type==='CI'?'2026-11-01':'',content:'正文',fileIds:['file'],status:'draft',createdAt:'2026-10-10T08:00:00Z',actor:'后勤',...patch});
 const pack=(quantity:number)=>({id:'pk'+quantity,shipmentId:'s',lineId:'l',productionId:'p',carton:'1',quantity,netWeight:9,grossWeight:10,volume:0.1,note:''});
-beforeEach(()=>{presentedError=undefined;store.error='';session.denied=new Set();const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'后勤'},'empty');
+beforeEach(()=>{store.workspace={id:'workspace',revision:1};presentedError=undefined;store.error='';session.denied=new Set();const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'后勤'},'empty');
   s.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',customer:'Cedar',currency:'USD'} as any);s.orderLines.push({id:'l',orderId:'o',name:'大衣',style:'COAT-1',img:'coat',qty:10,unit:'件',price:10,made:10,qc:10} as any);
   s.fulfillment.shipments.push(shipment('s'));
   store.state=s;store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
@@ -158,4 +158,9 @@ it('prefills an English OA credit term from the shipment ETD without changing th
  render(undefined,'s');await click(getAllByRole(host,'button',{name:'生成单据'})[0]);
  expect((getByLabelText(getByRole(document.body,'dialog',{name:'生成单据'}),'应收到期日') as HTMLInputElement).value).toBe('2026-12-15');
  expect(store.run).not.toHaveBeenCalled();expect(s.orders[0].governance?.contract.paymentNote).toContain('O/A30 days');
+});
+it('preserves a revised draft document body and its current originals while associating a late upload',async()=>{
+ store.state!.fulfillment.documents.push(doc('file-doc','PL',{content:'旧正文',fileIds:['old']}));let finish!:(value:unknown)=>void;store.uploadFile.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));render('file-doc');const input=host.querySelector('input[type="file"]')!;expect(input).toBeTruthy();Object.defineProperty(input,'files',{configurable:true,value:[new File(['new'],'new.txt',{type:'text/plain'})]});await act(async()=>{input.dispatchEvent(new Event('change',{bubbles:true}));});
+ store.state=structuredClone(store.state);Object.assign(store.state!.fulfillment.documents[0],{content:'另一岗位已复核的正文',fileIds:['old','peer']});store.workspace={id:'workspace',revision:2};render('file-doc');await act(async()=>{finish({id:'upload',name:'new.txt',mimeType:'text/plain',size:3,storageKey:'workspace/upload',createdAt:''});});
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.documents.save',payload:expect.objectContaining({id:'file-doc',content:'另一岗位已复核的正文',fileIds:['old','peer','upload']})}),{expectedRevision:2});
 });

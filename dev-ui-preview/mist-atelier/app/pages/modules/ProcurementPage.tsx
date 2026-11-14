@@ -21,7 +21,7 @@ import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { ModuleEditorDialog, ModuleEditorPage, moduleFileIds, moduleSignature, signatureField, type ModuleEditorSpec } from './ModuleWorkbench';
-import { choiceField, deliveryTargetPayload, emptyOption, Events, exportRecords, field, localNow, number, parseRolls, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
+import { useRecordAttachment, choiceField, deliveryTargetPayload, emptyOption, Events, exportRecords, field, localNow, number, parseRolls, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, RecordDisclosure, shortWhen, useListDetailRoute } from './pageKit';
 import { RfqLedger } from './SourcingRequests';
@@ -70,6 +70,7 @@ const round = (value: number) => Math.round(value * 10000) / 10000;
 
 export function ProcurementPage() {
   const { state, workspace, run, error, refresh, loading, saving, pending, downloadFile } = useMistWorkspace(), session = useMistSession(), editor = useEditor(), { go, route } = useNav();
+  const attachFiles=useRecordAttachment();
   const liveSource=React.useRef({state,revision:workspace?.revision});liveSource.current={state,revision:workspace?.revision};
   const [domainChoice, setDomainChoice] = React.useState<Domain | null>(null), [entryChoice, setEntryChoice] = React.useState<Entry | null>(null);
   const [stageFilter, setStageFilter] = React.useState<StageFilter>('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [query, setQuery] = React.useState('');
@@ -277,7 +278,7 @@ export function ProcurementPage() {
         onSend={() => setDialog(sendSpec(selected))} onConfirm={() => setDialog(confirmSpec(selected))} onReceive={() => setDialog(receiveSpec(selected))} onRejectReceived={r => setDialog(rejectReceivedSpec(selected, r))}
         onReturn={r => setDialog(returnSpec(selected, r))} onReturnReverse={(r, row) => setDialog(returnReverseSpec(selected, r, row))}
         onDownload={() => void act(async () => { const receipt = await run({ type: 'fulfillment.procurement.document', payload: { id: selected.id } }); const fileId = receipt.result.fileId; if (typeof fileId === 'string') await downloadFile({ id: fileId, name: `${selected.code}.pdf`, mimeType: 'application/pdf', size: 0, storageKey: '', createdAt: '' }); }, '采购单已生成')}
-        onAttach={ids => run({ type: 'fulfillment.procurement.save', payload: { ...selected, fileIds: ids } })}
+        onAttach={added => attachFiles(root=>root.fulfillment.purchases.find(row=>row.id===selected.id),(current,fileIds)=>{if(!['draft','rejected'].includes(current.state))throw new Error('采购已不在草稿状态，请重新打开后关联附件');return {type:'fulfillment.procurement.save',payload:{...current,fileIds}};},added)}
         onInventory={() => go('inventory', undefined, { section: selected.id })} onSupplier={() => go('suppliers', selected.supplierId)}
         onCancel={() => setDialog(cancelSpec(selected))} onTransfer={() => setDialog(transferSpec(selected))} onOpenPurchase={id => go('procurement', id)} onPayables={() => { const plan = state.payables?.plans?.find(x => x.purchaseId === selected.id && (x.stage || 'prepayment') === 'prepayment'); go('payment-vouchers', plan?.id, { section: 'payables' }); }}
         onSettle={session.canAccessView(AppView.PaymentVouchers) ? () => go('payment-vouchers', selected.id, { section: 'payables' }) : undefined} />

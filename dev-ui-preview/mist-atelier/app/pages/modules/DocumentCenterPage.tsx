@@ -18,7 +18,7 @@ import { useNav } from '../../nav';
 import { fmt } from '../../data';
 import { ModuleEditorDialog, type ModuleEditorSpec, type ModuleField } from './ModuleWorkbench';
 import { SEAL_KIND_LABEL, usableSeals } from './CompanySeals';
-import { documentTypeLabel, choices, emptyOption, Events, exportRecords, field, localNow, RecordFiles, text } from './fulfillmentKit';
+import { useRecordAttachment, documentTypeLabel, choices, emptyOption, Events, exportRecords, field, localNow, RecordFiles, text } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen, type ReasonedAction } from './pageKit';
 import { MODE_LABEL, packingMatched } from './ShipmentsPage';
@@ -60,6 +60,7 @@ function voidBlocker(root: MistState, d: FulfillmentDocument) {
 }
 
 export function DocumentCenterPage() {
+  const attachFiles=useRecordAttachment();
   const presentedError = React.useContext(MistPresentedErrorContext);
   const { state, run, error, refresh, loading, saving, pending, downloadFile } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
   const can = session.hasPermission('customs:write'), canInvoices = session.hasPermission('invoices:read');
@@ -164,7 +165,7 @@ export function DocumentCenterPage() {
     ? <DocumentDetail doc={selected} state={state} can={can} canInvoices={canInvoices} locked={locked} onPick={pick}
         onEdit={() => setDialog(docSpec(selected))} onVersion={() => setDialog(docSpec(undefined, selected))} onArchive={() => setDialog(archiveSpec(selected))} onVoid={() => setDialog(voidSpec(selected))}
         onIssue={() => setDialog(issueSpec(selected))} onBl={() => setDialog(blSpec(selected))} onRegenerate={() => setDialog(generateSpec(f?.shipments.find(row => row.id === selected.shipmentId), selected.type as OwnDocumentType, selected.orderId || undefined))}
-        onAttach={ids => run({ type: 'fulfillment.documents.save', payload: { id: selected.id, shipmentId: selected.shipmentId, orderId: selected.orderId, type: selected.type, number: selected.number, title: selected.title, dueDate: selected.dueDate, content: selected.content, fileIds: ids } })}
+        onAttach={added => attachFiles(root=>root.fulfillment.documents.find(row=>row.id===selected.id),(current,fileIds)=>{if(current.status!=='draft')throw new Error('单据已不在草稿状态，请重新打开后核对附件');return {type:'fulfillment.documents.save',payload:{id:current.id,shipmentId:current.shipmentId,orderId:current.orderId,type:current.type,number:current.number,title:current.title,dueDate:current.dueDate,content:current.content,fileIds}};},added)}
         onShipment={() => go('shipments', selected.shipmentId)} onInvoice={id => go('invoices', id)} />
     : <EmptyState icon={FileText} title={uiText("单据详情")} description={uiText(loading ? '正在读取单据' : '从列表选择一份单据，查看版本、正式文件与签发记录')} compact />;
   const profile = state?.settings.companyProfile;

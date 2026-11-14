@@ -5,13 +5,13 @@ import {businessNow,businessToday} from '../../runtime/businessClock';
 import React from 'react';
 import { Download } from 'lucide-react';
 import { Banner, Button, DataTable, Pill, TextLink, Timeline, UploadZone } from '../../../../../components/mist';
-import type { MistState, MistFile } from '../../../../../server/src/shared/mistWorkspace';
+import type { MistState, MistFile, MistCommand } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentDocument, FulfillmentSource, FulfillmentSample, FulfillmentShipment, FulfillmentStock, StockRoll } from '../../../../../server/src/shared/mistFulfillment';
 import { fulfillmentSourceLabel, fulfillmentPositions } from '../../../../../server/src/shared/mistFulfillment';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useUploadRecoveryClaim } from '../../runtime/errorPresentation';
 import { useNav } from '../../nav';
-import { useRouteDraft } from './useRouteDraft';
+import { useRouteDraft, useRouteScope } from './useRouteDraft';
 import { ModuleEditorDialog, ModuleEditorPage, downloadModuleCsv, type ModuleEditorSpec, type ModuleField, type ModuleValues } from './ModuleWorkbench';
 import { FileName } from '../../runtime/files';
 import { businessWhen } from './pageKit';
@@ -68,18 +68,44 @@ export function shipmentReturnTarget(state:MistState|null,shipment:FulfillmentSh
     const order=state?.orders.find(order=>orderIds.size===1&&orderIds.has(order.id)&&order.customerId===shipment.customerId);
     return order?{section:'order:'+order.id,customerId:order.customerId}:{customerId:shipment.customerId};
 }
+export type RecordAttachmentRun = (command:MistCommand,options?:{expectedRevision?:number})=>Promise<unknown>;
+/** Merge only this upload's IDs into the same committed source snapshot used for the write. */
+export function useRecordAttachment(execute?:RecordAttachmentRun){
+  const workspace=useMistWorkspace(),scope=useRouteScope();
+  const source=React.useRef({state:workspace.state,revision:workspace.workspace?.revision});
+  React.useLayoutEffect(()=>{source.current={state:workspace.state,revision:workspace.workspace?.revision};},[workspace.state,workspace.workspace?.revision]);
+  return async function attach<T extends {fileIds?:string[]}>(resolve:(state:MistState)=>T|undefined,command:(record:T,fileIds:string[],state:MistState)=>MistCommand,addedIds:string[]){
+    if(!scope.isCurrent())throw new Error('页面目标已变更，请重新打开后关联附件');
+    const checked=source.current;
+    if(!checked.state||!Number.isSafeInteger(checked.revision))throw new Error('业务资料尚未就绪，请稍后重试');
+    const record=resolve(checked.state);
+    if(!record)throw new Error('记录已变化，请重新打开后关联附件');
+    if(addedIds.some(id=>typeof id!=='string'||!id))throw new Error('附件回执缺少文件，请核对原上传');
+    const added=[...new Set(addedIds)].filter(id=>!record.fileIds?.includes(id));
+    if(!added.length)return;
+    const fileIds=[...new Set([...(record.fileIds||[]),...added])];
+    return (execute||workspace.run)(command(record,fileIds,checked.state),{expectedRevision:checked.revision});
+  };
+}
+
 export function RecordFiles({ ids, onAttach }: {
     ids: string[];
-    onAttach?: (ids: string[]) => Promise<unknown>;
+    /** Newly uploaded/recovered IDs only; the owner merges against its current record. */
+    onAttach?: (addedIds: string[]) => Promise<unknown>;
 }) {
   const { state, uploadFile, downloadFile, recover, pending, saving } = useMistWorkspace();
+  const scope=useRouteScope();
   const [failure, setFailure] = useRouteDraft(''), [busy, setBusy] = React.useState(false), [staged, setStaged] = useRouteDraft<MistFile[]>([]);
   // 本记录发起、回执丢失的上传；只在同一记录页内核对后关联，换页即不再自动关联。
   const [lost, setLost] = useRouteDraft('');
   const owned = !!lost && pending?.kind === 'upload' && pending.requestId === lost;
   const unavailable = state ? [...new Set(ids)].filter(id => !state.files.some(file => file.id === id)).length : 0;
   useUploadRecoveryClaim(owned ? lost : null);
-  const attach = async (added: MistFile[]) => { setStaged(added); await onAttach?.([...ids, ...added.map(f => f.id)]); setStaged([]); };
+  // A shell-level receipt recovery can confirm association after this widget saw a lost reply.
+  React.useEffect(()=>{
+    if(scope.isCurrent()&&!busy&&!pending&&staged.length&&staged.every(file=>ids.includes(file.id))){setFailure('');setStaged([]);}
+  },[busy,pending,staged,ids,scope.isCurrent]);
+  const attach = async (added: MistFile[]) => { if(!scope.isCurrent())throw new Error('页面目标已变更，请重新打开后关联附件'); setStaged(added); if(!onAttach)throw new Error('当前记录不能关联附件，请重新打开后核对'); await onAttach([...new Set(added.map(f=>f.id))]); setStaged([]); };
   const add = async (files: File[]) => {
     setBusy(true); setFailure('');
     const added = [...staged];
@@ -97,7 +123,8 @@ export function RecordFiles({ ids, onAttach }: {
     try {
       const receipt = await recover(), id = receipt?.result.fileId || receipt?.result.id;
       setLost('');
-      if (typeof id === 'string') await attach([...staged, { id } as MistFile]);
+      if(typeof id!=='string'||!id)throw new Error('附件回执缺少文件，请核对原上传');
+      await attach([...staged, { id } as MistFile]);
     } catch (e) {
       setFailure(e instanceof Error && 'status' in e && (e as { status: number }).status === 404 ? '服务器未收到原附件，请重新选择同一附件' : e instanceof Error ? e.message : '核对未完成');
     } finally { setBusy(false); }
@@ -108,7 +135,7 @@ export function RecordFiles({ ids, onAttach }: {
     {unavailable > 0 && <Pill tone="neutral">{ui`${unavailable}份附件不可读`}</Pill>}
     {ids.map(id => { const f = state?.files.find(f => f.id === id); return f ? <div className="mist-row" key={id}><FileName file={f} files={ids.map(x => state?.files.find(y => y.id === x))} /><TextLink icon={Download} onClick={() => void downloadFile(f).catch(e => setFailure(String(e)))}>{uiText("下载")}</TextLink></div> : null; })}
     {onAttach && <UploadZone onFiles={files => { if (!busy && !saving && (!pending || owned)) void add(files); }}/>}
-    {!!staged.length && <Button disabled={busy || saving || !!pending} onClick={() => void add([])}>{uiText("重试关联已上传附件")}</Button>}
+    {!!staged.length && <Button disabled={busy || saving || !!pending || !onAttach} onClick={() => void add([])}>{uiText("重试关联已上传附件")}</Button>}
   </div>;
 }
 /** 表单草稿附件：上传新文件或移除，变化只写回草稿 ids，随表单一并提交。 */

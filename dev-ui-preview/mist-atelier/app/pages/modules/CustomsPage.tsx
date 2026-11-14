@@ -12,7 +12,7 @@ import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { fmt } from '../../data';
 import { ModuleEditorDialog, ModuleEditorPage, moduleFileIds, type ModuleEditorSpec } from './ModuleWorkbench';
-import { documentTypeLabel, emptyOption, Events, exportRecords, field, RecordFiles, SourceLink, text, today } from './fulfillmentKit';
+import { useRecordAttachment, documentTypeLabel, emptyOption, Events, exportRecords, field, RecordFiles, SourceLink, text, today } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen, type ReasonedAction } from './pageKit';
 import { CustomsClassificationLedger, CustomsItemsBlock } from './CustomsDeclarationPanel';
@@ -65,6 +65,7 @@ export function rebateEvidence(root: MistState, c: FulfillmentCustoms) {
 const openText = (open: Array<{ currency: string; amount: number }>) => open.map(row => `${row.currency} ${fmt(row.amount, 2)}`).join(' / ');
 
 export function CustomsPage() {
+  const attachFiles=useRecordAttachment();
   const { state, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
   const can = session.hasPermission('customs:write'), canClear = session.hasPermission('customs:clear'), canInvoices = session.hasPermission('invoices:read');
   const canRebate = session.hasPermission('tax:write'), canRebateApprove = session.hasPermission('tax:approve'), canTaxRead = session.hasPermission('tax:read'), canReconcile = session.hasPermission('invoices:reconcile');
@@ -154,7 +155,7 @@ export function CustomsPage() {
     ? <CustomsDetail record={selected} state={state} onAmend={kind => setDialog(amendSpec(selected, kind))} can={can} canClear={canClear} canInvoices={canInvoices&&canTaxRead} canRebate={canRebate} canRebateApprove={canRebateApprove} canReconcile={canReconcile} locked={locked} open={setDialog} run={run}
         onBill={id => go('payment-vouchers', id, { section: 'payables' })} onReceipt={id => go('payment-vouchers', id)}
         onEdit={() => setDialog(editSpec(selected))} onDeclare={() => setDialog(declareSpec(selected, selected.status === 'submitted'))} onRelease={() => { if (canClear) setDialog(releaseSpec(selected)); }}
-        onAttach={ids => run({ type: 'fulfillment.customs.save', payload: payload(selected, { fileIds: ids }) })}
+        onAttach={added => attachFiles(root=>root.fulfillment.customs.find(row=>row.id===selected.id),(current,fileIds)=>{if(current.status==='cleared')throw new Error('报关记录已放行，请重新打开后核对附件');return {type:'fulfillment.customs.save',payload:payload(current,{fileIds})};},added)}
         onClassify={() => {if(hasContext){setTab('hs');setDrawer(false);}else changeTab('hs');}} onShipment={() => go('shipments', selected.shipmentId)} onDocuments={() => go('document-center', undefined, { section: selected.shipmentId })} onInvoice={id => go('invoices', id)} />
     : <EmptyState icon={Stamp} title={uiText("报关详情")} description={uiText(loading ? '正在读取报关记录' : tab === 'rebate' ? '从列表选择一张报关单，查看放行、收汇与退税资料' : '从列表选择一条报关记录，查看申报、放行与装箱核对')} compact />;
   const pendingShown = allPending ? pendingShipments : pendingShipments.slice(0, 3);

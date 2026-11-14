@@ -16,7 +16,7 @@ import { useMistSession } from '../../runtime/auth';
 import { memberSelectOptions, workspaceMembers } from '../../runtime/members';
 import { useNav } from '../../nav';
 import { ModuleEditorDialog, moduleFileIds, type ModuleEditorSpec } from './ModuleWorkbench';
-import { choiceField, choices, emptyOption, exportRecords, field, number, parseSource, PositionSummary, RecordFiles, shipmentReturnTarget, SourceLink, sourceOptions, text, today, useEditor } from './fulfillmentKit';
+import { useRecordAttachment, choiceField, choices, emptyOption, exportRecords, field, number, parseSource, PositionSummary, RecordFiles, shipmentReturnTarget, SourceLink, sourceOptions, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen } from './pageKit';
 import { SAMPLE_FORMS } from '../../runtime/tradeOptions';
@@ -77,6 +77,7 @@ const locationSummary = (row: LedgerRow) => {
 export function SamplesPage() {
   const presentedError = React.useContext(MistPresentedErrorContext);
   const { state, loading, error, run, saving, pending, workspace } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav(), editor = useEditor();
+  const attachFiles=useRecordAttachment();
   const members = workspaceMembers(workspace, state, session.user);
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
   const [syncError, setSyncError] = useRouteDraft(''), [syncing, setSyncing] = React.useState(false);
@@ -228,7 +229,7 @@ export function SamplesPage() {
 
   const detail = selected && state ? <SampleDetail row={selected} state={state} day={day} can={can} locked={locked}
     onMove={movement} onEdit={sample => editor.open(editSpec(sample))} onQc={openSampleQc}
-    onAttach={(sample, ids) => run({ type: 'fulfillment.samples.edit', payload: { id: sample.id, location: sample.location, note: sample.note, fileIds: ids } })} />
+    onAttach={(sample,added) => attachFiles(root=>root.fulfillment.samples.find(row=>row.id===sample.id),(current,fileIds)=>({type:'fulfillment.samples.edit',payload:{id:current.id,location:current.location,note:current.note,fileIds}}),added)} />
     : <EmptyState icon={shelf === 'garment' ? Shirt : Layers} title={uiText("样品详情")} description={uiText(loading ? '正在读取样品' : '从列表选择一条样品记录')} compact />;
 
   return <MistPage>

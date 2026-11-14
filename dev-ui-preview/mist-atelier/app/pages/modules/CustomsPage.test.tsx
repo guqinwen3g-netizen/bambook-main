@@ -7,7 +7,7 @@ import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentShipment,FulfillmentDocument,FulfillmentCustoms} from '../../../../../server/src/shared/mistFulfillment';
 import {Nav} from '../../nav';
-const store=vi.hoisted(()=>({state:null as MistState|null,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
+const store=vi.hoisted(()=>({state:null as MistState|null,workspace:{id:'workspace',revision:1},loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
 const session=vi.hoisted(()=>({denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:'ops',displayName:'后勤'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
@@ -44,7 +44,7 @@ it.each([false,true])('申报调整按真实第一/第二法定单位拦截半�
 });
 const customs=(shipmentId:string,status:FulfillmentCustoms['status'],patch:Partial<FulfillmentCustoms>={}):FulfillmentCustoms=>({id:'cus-'+shipmentId,shipmentId,code:'CUS-'+shipmentId.toUpperCase(),status,declarationNo:status==='draft'?'':'D-'+shipmentId,broker:'上港报关',hsCode:'6202.13',origin:'CN',tradeMode:'一般贸易',declaredAt:status==='draft'?'':'2026-10-12',clearedAt:status==='cleared'?'2026-10-13':'',evidence:'',fileIds:[],note:'',...patch});
 const ci=(shipmentId:string,invoiceId?:string):FulfillmentDocument=>({id:'ci-'+shipmentId,shipmentId,orderId:'o',type:'CI',number:'CI-'+shipmentId,version:1,title:'CI',dueDate:'2026-11-01',content:'',fileIds:[],status:'issued',createdAt:'2026-10-10T08:00:00Z',actor:'后勤',...(invoiceId?{invoiceId}:{})} as FulfillmentDocument);
-beforeEach(()=>{session.denied=new Set();const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'后勤'},'empty');
+beforeEach(()=>{store.workspace={id:'workspace',revision:1};session.denied=new Set();const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'后勤'},'empty');
   s.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',customer:'Cedar',currency:'USD',due:'2026-11-08'} as any);s.orderLines.push({id:'l',orderId:'o',name:'大衣',style:'COAT-1',img:'coat',qty:10,unit:'件',price:10,made:10,qc:10} as any);
   store.state=s;store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
@@ -354,4 +354,16 @@ it('hides the tax approval and receipt matching actions when the rebate amounts 
   const actions=async(masked:boolean,state:string)=>{(st as any).exportRebate={rates:[],claims:[claim(masked,state)]};store.state={...st};act(()=>root.unmount());root=createRoot(host);render('cus-m');const detail=host.querySelector('[data-customs-detail="cus-m"]') as HTMLElement;return {approve:!!queryByRole(detail,'button',{name:'登记税务核准'}),receive:!!queryByRole(detail,'button',{name:'勾稽到账'})};};
   expect((await actions(false,'filed')).approve).toBe(true);expect((await actions(false,'approved')).receive).toBe(true);
   expect(await actions(true,'filed')).toEqual({approve:false,receive:false});expect(await actions(true,'approved')).toEqual({approve:false,receive:false});
+});
+it('keeps another declarant note and file when an earlier attachment upload finishes',async()=>{
+ store.state!.fulfillment.shipments.push(shipment('file-source'));store.state!.fulfillment.customs.push(customs('file-source','draft',{note:'旧备注',fileIds:['old']}));let finish!:(value:unknown)=>void;store.uploadFile.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
+ render('cus-file-source');const input=host.querySelector('[data-customs-detail="cus-file-source"] input[type="file"]')!;expect(input).toBeTruthy();Object.defineProperty(input,'files',{configurable:true,value:[new File(['new'],'new.txt',{type:'text/plain'})]});await act(async()=>{input.dispatchEvent(new Event('change',{bubbles:true}));});
+ store.state=structuredClone(store.state);Object.assign(store.state!.fulfillment.customs[0],{note:'另一单证员已复核',fileIds:['old','peer']});store.workspace={id:'workspace',revision:2};render('cus-file-source');await act(async()=>{finish({id:'upload',name:'new.txt',mimeType:'text/plain',size:3,storageKey:'workspace/upload',createdAt:''});});
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.customs.save',payload:expect.objectContaining({id:'cus-file-source',note:'另一单证员已复核',fileIds:['old','peer','upload']})}),{expectedRevision:2});
+});
+it('includes all current credit originals when adding an uploaded amendment letter',async()=>{
+ store.state!.orders[0].governance={status:'approved',contract:{paymentMethod:'LC'}} as any;store.state!.letterOfCredits=[{id:'lc-files',code:'LC-FILES',lcNo:'LC-FILES',customerId:'c',customer:'Cedar',orderIds:['o'],issuingBank:'Bank',advisingBank:'Bank',currency:'USD',amount:1000,latestShipmentDate:'2099-01-01',expiryDate:'2099-01-31',expiryPlace:'中国',availableBy:'sight',usanceDays:0,tolerancePercent:0,allowPartial:true,allowTransshipment:true,presentationDays:21,requiredDocuments:[],presentations:[],amendments:[],fileIds:['old'],note:''} as any];let finish!:(value:unknown)=>void;store.uploadFile.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
+ render();await click(getByRole(host,'tab',{name:/信用证/}));await click(getByRole(getByRole(host,'table',{name:'信用证台账'}),'row',{name:/LC-FILES/}));const input=host.querySelector('[data-lc-detail="lc-files"] input[type="file"]')!;expect(input).toBeTruthy();Object.defineProperty(input,'files',{configurable:true,value:[new File(['new'],'new.txt',{type:'text/plain'})]});await act(async()=>{input.dispatchEvent(new Event('change',{bubbles:true}));});
+ store.state=structuredClone(store.state);store.state!.letterOfCredits![0].fileIds=['old','peer'];store.workspace={id:'workspace',revision:2};render();await act(async()=>{finish({id:'upload',name:'new.txt',mimeType:'text/plain',size:3,storageKey:'workspace/upload',createdAt:''});});
+ expect(store.run).toHaveBeenCalledWith({type:'lc.files',payload:{id:'lc-files',fileIds:['old','peer','upload']}},{expectedRevision:2});
 });

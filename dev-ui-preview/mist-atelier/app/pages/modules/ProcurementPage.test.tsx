@@ -9,7 +9,7 @@ import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentPurchase} from '../../../../../server/src/shared/mistFulfillment';
 import {Nav} from '../../nav';
-const store=vi.hoisted(()=>({state:null as MistState|null,workspace:null as any,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
+const store=vi.hoisted(()=>({state:null as MistState|null,workspace:null as any,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn(),recover:vi.fn()}));
 const session=vi.hoisted(()=>({id:'buyer',denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:session.id,displayName:'经办人'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
@@ -59,7 +59,7 @@ it('recognizes counted direct deliveries while keeping rejected goods awaiting r
   store.state=f.state;render(f.processingId);expect(host.textContent).toContain('1 笔已收 · 0 笔待收');
   expect(host.textContent).not.toContain('1 笔拒收待退');
 });
-beforeEach(()=>{store.workspace=null;session.id='buyer';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');store.state.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',currency:'USD'} as any);store.state.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',img:'coat',qty:100,unit:'件',price:10,made:0,qc:0,fulfillmentMode:'trims_cmt',cmtIncludedItems:[]});store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
+beforeEach(()=>{store.pending=null;store.saving=false;store.uploadFile.mockReset();store.recover.mockReset();store.workspace=null;session.id='buyer';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');store.state.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',currency:'USD'} as any);store.state.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',img:'coat',qty:100,unit:'件',price:10,made:0,qc:0,fulfillmentMode:'trims_cmt',cmtIncludedItems:[]});store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();vi.useRealTimers();});
 
 it('shows isolated stock disposal on its source purchase only to an inventory reader',()=>{
@@ -630,4 +630,44 @@ it('refuses an old contract-change dialog when a new pending proposal arrives wi
  approvedAmendmentFixture();render('amend-race');await click(getByRole(host,'button',{name:'变更合同',exact:true}));const d=await fillAmendmentDialog();
  store.state=structuredClone(store.state);store.state!.fulfillment.purchases[0].amendments=[{id:'other-proposal',state:'pending',from:{quantity:100,price:0.3,due:'2026-10-30'},to:{quantity:100,price:0.4,due:'2026-10-30'}} as any];store.workspace={id:'workspace',revision:8};render('amend-race');
  await click(getByRole(d,'button',{name:'提交审批',exact:true}));expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('采购合同已更新，请重新打开后核对');
+});
+
+async function startRecordUpload(file:File){
+ const input=host.querySelector('input[type="file"]') as HTMLInputElement;expect(input).toBeTruthy();
+ Object.defineProperty(input,'files',{configurable:true,value:[file]});
+ await act(async()=>{input.dispatchEvent(new Event('change',{bubbles:true}));});
+}
+it('associates a recovered upload against current purchase values and files, without restoring a removed old reference',async()=>{
+ draftConcurrencyFixture();const p=store.state!.fulfillment.purchases[0];p.fileIds=['removed-old'];
+ const meta=(id:string)=>({id,name:id+'.txt',mimeType:'text/plain',size:1,storageKey:'workspace/'+id,createdAt:''});
+ store.state!.files=[meta('removed-old')];
+ store.uploadFile.mockImplementation(async()=>{store.pending={kind:'upload',workspaceId:'workspace',requestId:'lost-upload'} as any;throw new Error('上传回执丢失');});
+ let finish!:(value:unknown)=>void;store.recover.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
+ render('draft-race');await startRecordUpload(new File(['new'],'new.txt',{type:'text/plain'}));
+ await click(getByRole(host,'button',{name:'核对并关联',exact:true}));
+ store.state=structuredClone(store.state);store.state!.fulfillment.purchases[0].price=0.4;store.state!.fulfillment.purchases[0].fileIds=['peer-added'];store.state!.files.push(meta('peer-added'),meta('new-upload'));store.workspace={id:'workspace',revision:8};store.pending=null;render('draft-race');
+ await act(async()=>{finish({requestId:'lost-upload',revision:8,result:{fileId:'new-upload'}});});
+ expect(store.run).toHaveBeenCalledTimes(1);expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.procurement.save',payload:expect.objectContaining({id:'draft-race',price:0.4,fileIds:['peer-added','new-upload']})}),{expectedRevision:8});
+ expect(store.uploadFile).toHaveBeenCalledTimes(1);expect(store.recover).toHaveBeenCalledTimes(1);
+});
+it('does not associate a late upload to its former record after the page target changes',async()=>{
+ draftConcurrencyFixture();store.state!.fulfillment.purchases.push(purchase('other-record',{materialKind:'trims'}));let finish!:(value:unknown)=>void;store.uploadFile.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
+ render('draft-race');await startRecordUpload(new File(['new'],'new.txt',{type:'text/plain'}));render('other-record');
+ await act(async()=>{finish({id:'new-upload',name:'new.txt',mimeType:'text/plain',size:3,storageKey:'workspace/new-upload',createdAt:''});});
+ expect(store.run).not.toHaveBeenCalled();
+});
+it('retains uploaded files for recovery when the purchase becomes locked before association',async()=>{
+ draftConcurrencyFixture();let finish!:(value:unknown)=>void;store.uploadFile.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
+ render('draft-race');await startRecordUpload(new File(['new'],'new.txt',{type:'text/plain'}));store.state=structuredClone(store.state);store.state!.fulfillment.purchases[0].state='pending';store.workspace={id:'workspace',revision:8};render('draft-race');
+ await act(async()=>{finish({id:'new-upload',name:'new.txt',mimeType:'text/plain',size:3,storageKey:'workspace/new-upload',createdAt:''});});
+ expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('采购已不在草稿状态');expect((getByRole(host,'button',{name:'重试关联已上传附件',exact:true}) as HTMLButtonElement).disabled).toBe(true);
+});
+it('keeps attachment additions available on a rejected purchase that can be revised',async()=>{
+ draftConcurrencyFixture();store.state!.fulfillment.purchases[0].state='rejected';store.uploadFile.mockResolvedValue({id:'new-upload',name:'new.txt',mimeType:'text/plain',size:3,storageKey:'workspace/new-upload',createdAt:''});
+ render('draft-race');await startRecordUpload(new File(['new'],'new.txt',{type:'text/plain'}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.procurement.save',payload:expect.objectContaining({id:'draft-race',fileIds:['new-upload']})}),{expectedRevision:7});
+});
+it('does not rewrite a purchase when a recovered file is already associated',async()=>{
+ draftConcurrencyFixture();store.state!.fulfillment.purchases[0].fileIds=['same-upload'];store.uploadFile.mockResolvedValue({id:'same-upload',name:'same.txt',mimeType:'text/plain',size:3,storageKey:'workspace/same-upload',createdAt:''});
+ render('draft-race');await startRecordUpload(new File(['new'],'same.txt',{type:'text/plain'}));expect(store.run).not.toHaveBeenCalled();expect(queryByRole(host,'button',{name:'重试关联已上传附件',exact:true})).toBeNull();
 });
