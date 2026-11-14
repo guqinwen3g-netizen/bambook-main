@@ -252,3 +252,8 @@ it('records other receipts with source, evidence and packing list',async()=>{
   typeInto(getByRole(form,'textbox',{name:'来源单位 / 单号'}) as HTMLInputElement,'客户来料 DN-88');typeInto(getByRole(form,'textbox',{name:'入库依据'}) as HTMLTextAreaElement,'送货单');
   expect(form.textContent).toContain('其他入库');
 });
+it('identifies a leftover receipt by its recorded source in the detail heading',()=>{
+  store.state!.fulfillment.stock.push(stock('leftover',{sourceKind:'other',purchaseId:undefined,receiptId:undefined,orderId:'of',lineId:'lf',name:'府绸余料',otherReceipt:{reason:'leftover',source:'工厂退料 DN-89',evidence:'原供料 DN-88'}}));
+  render('leftover');const detail=host.querySelector('[data-stock-detail="leftover"]') as HTMLElement;
+  expect(detail.querySelector('.mist-mono')?.textContent).toBe('工厂退料 DN-89');expect(detail.textContent).not.toContain('来源采购不可用');
+});

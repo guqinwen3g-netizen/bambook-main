@@ -95,6 +95,16 @@ describe('stock count', () => {
 });
 
 describe('other receipts', () => {
+  it('preserves measured roll weight when leftover fabric returns with its original source', () => {
+    const f = fixture();
+    const id = f.run({ type: 'fulfillment.stock.receiveOther', payload: { orderId: 'o', lineId: 'l', reason: 'leftover', source: '工厂退料 DN-89', name: '余料', unit: '米', quantity: 2.6, warehouseId: 'w1', location: 'C-2', evidence: '原供料单 DN-88、退料点收 DN-89', rolls: [{ roll: 'R2-RETURN', quantity: 2.6, weightKg: 1.04 }] } }).id!;
+    expect(f.root.fulfillment.stock.find(s => s.id === id)?.rolls).toEqual([{ roll: 'R2-RETURN', quantity: 2.6, weightKg: 1.04 }]);
+  });
+  it.each([0, -1, NaN, Infinity, 1.00001])('rejects invalid optional return roll weight %s before creating stock', weightKg => {
+    const f = fixture(), before = structuredClone(f.root);
+    expect(() => f.run({ type: 'fulfillment.stock.receiveOther', payload: { orderId: 'o', lineId: 'l', reason: 'leftover', source: '工厂退料', name: '余料', unit: '米', quantity: 2.6, location: 'C-2', evidence: '退料点收', rolls: [{ roll: 'R2', quantity: 2.6, weightKg }] } })).toThrow('重量');
+    expect(f.root).toEqual(before);
+  });
   it('records customer-supplied material with its source, evidence, roll list and ownership', () => {
     const f = fixture();
     expect(() => f.run({ type: 'fulfillment.stock.receiveOther', payload: { orderId: 'o', lineId: 'l', reason: 'customer', source: '客户来料', name: '里布', unit: '米', quantity: 30, location: 'C-1', evidence: '送货单 88', rolls: [{ roll: 'R1', quantity: 10 }] } })).toThrow('码单合计');

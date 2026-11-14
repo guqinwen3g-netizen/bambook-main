@@ -303,7 +303,7 @@ function StockDetail({ stock, issueBlocker, state, can, locked, canClaims, canQc
     : { tone: 'neutral', title: '已出清', text: '' };
   const returnedReason = '退回隔离库存须按批准去向处置，不能通用领出或移位';
   return <DetailBody data-stock-detail={stock.id} heading={<div>
-      <span className="mist-mono mist-muted">{uiText(returned ? returnCode(state, stock) || '退货单不可用' : purchase?.code || '来源采购不可用')}{uiText(stock.batchNumber ? ` · ${stock.batchNumber}` : '')}</span>
+      <span className="mist-mono mist-muted">{uiText(returned ? returnCode(state, stock) || '退货单不可用' : other ? stock.otherReceipt!.source : purchase?.code || '来源采购不可用')}{uiText(stock.batchNumber ? ` · ${stock.batchNumber}` : '')}</span>
       <div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{stockName(state, stock)}</div>
     </div>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATE_TONE[current]}>{STATE_LABEL[current]}</Pill><Pill>{uiText(returned ? '退货入库' : other ? OTHER_RECEIPT_REASONS[stock.otherReceipt!.reason] : '采购交付入库')}</Pill>{current === 'available' && age > SLOW_DAYS && <Pill tone="warn">{uiText(`呆滞 ${age} 天`)}</Pill>}{counting && <Pill tone="warn">{uiText('盘点待审批')}</Pill>}{domain && <Pill>{uiText(domain === 'fabric' ? '面料业务' : '成衣业务')}</Pill>}{out > 0 && <Pill>{uiText("已出库 ")}{out} {uiText(stock.unit)}</Pill>}</div>

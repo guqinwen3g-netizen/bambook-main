@@ -52,7 +52,7 @@ export function applyStockOperation(root: MistState, command: StockOperationComm
       const warehouseId = p.warehouseId === undefined ? undefined : warehouseOf(root, p.warehouseId).id;
       let unitCost: number | undefined, currency: string | undefined;
       if (p.unitCost !== undefined) { unitCost = qty(p.unitCost, '单位成本', true); currency = text(p.currency, '成本币种', 3).toUpperCase(); if (!/^[A-Z]{3}$/.test(currency)) fail('成本币种须为三位字母'); }
-      const rolls = p.rolls === undefined ? undefined : (Array.isArray(p.rolls) && p.rolls.length && p.rolls.length <= 1000 ? (p.rolls as any[]).map((r, i) => ({ roll: text(r?.roll, `第 ${i + 1} 卷卷号`, 60), quantity: qty(r?.quantity, `第 ${i + 1} 卷数量`) })) : fail('码单格式无效'));
+      const rolls = p.rolls === undefined ? undefined : (Array.isArray(p.rolls) && p.rolls.length && p.rolls.length <= 1000 ? (p.rolls as any[]).map((r, i) => ({ roll: text(r?.roll, `第 ${i + 1} 卷卷号`, 60), quantity: qty(r?.quantity, `第 ${i + 1} 卷数量`), ...(r?.weightKg !== undefined && r.weightKg !== null && r.weightKg !== '' ? { weightKg: qty(r.weightKg, `第 ${i + 1} 卷重量`) } : {}) })) : fail('码单格式无效'));
       if (rolls && new Set(rolls.map(r => r.roll)).size !== rolls.length) fail('码单卷号不能重复');
       if (rolls && sum(rolls.map(r => r.quantity)) !== quantity) fail('码单合计与入库数量不一致');
       const id = ctx.id();

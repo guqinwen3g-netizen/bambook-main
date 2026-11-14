@@ -72,6 +72,8 @@
 | 邮箱 | `modules/EmailsPage.tsx` | `mistEmail.ts`；服务端收发 `server/src/mist/mail/` |
 | 公司、成员、交接 | `SettingsPage.tsx`、`WorkspaceMembers.tsx`、`MemberHandover.tsx` | `mistCompanyIdentity.ts`、`mistTeamScope.ts`、`mistHandover.ts` |
 
+余料入库码单（2026-11-14）：`mistStockOperations.ts#applyStockOperation`的`fulfillment.stock.receiveOther`沿采购收货的既有可选重量规则，保存每卷`weightKg`并在改库存前校验有限正数/四位小数，省略仍兼容。其他入库保留来源类型、原供料订单条目、来源单号和依据，只记实物库存/流水，不形成采购或资金。`InventoryPage.tsx`的其他入库详情标题取`otherReceipt.source`，不套用缺失采购的错误提示；码单表沿既有公斤列回读。原库存出库交回仍走准确`issueId`退回，保留原量和接收历史。
+
 命令全集以生成目录 `server/src/mist/agentCommandCatalog.ts` 为准（由 `scripts/gen-mist-command-catalog.mjs` 从上述 `server/src/shared/*.ts` 生成，当前 313 条；`agentCommandCatalogGuard.test.ts` 守住声明、处理分支与权限映射不漂移）。
 
 报价成本口径（2026-11-13）：`mistMarket.ts#quotationProductCost/sourceLine` 仅在档案与报价的币种、计价单位均一致且成本为正时采用档案成本；不把每码、每米、每公斤或每件成本直接互用，也不隐式折汇。`MarketPages.tsx#QuotationEditor` 同步使用该规则，匹配的档案成本只读，改变币种或单位后清掉沿用成本。人工参考成本保持 `unverified` 并进入业务审批；需要结构化换算及依据时沿既有条目专业核算办理。新保存规则不回写旧报价、批准记录或正式单据。
