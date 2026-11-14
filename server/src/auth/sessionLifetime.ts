@@ -43,16 +43,18 @@ export class SessionExpiredError extends Error { constructor() { super('SESSION_
 
 /** 签发会话令牌并写 Cookie：保持登录写持久 Cookie，否则写会话 Cookie。 */
 export function writeSession(res: Response, signer: Signer, payload: TokenPayload, claims: SessionClaims): string {
-  const lifetime = sessionLifetime(claims);
+  const issuedAt=Math.floor(Date.now()/1000),lifetime = sessionLifetime(claims,issuedAt);
   if (lifetime <= 0) throw new SessionExpiredError();
-  const token = signer.signToken({ ...payload, ...claims }, { expiresInSec: lifetime });
+  const responsePayload:TokenPayload&{iat:number}={...payload,...claims,iat:issuedAt};
+  const token = signer.signToken(responsePayload, { expiresInSec: lifetime });
   // Browsers reject oversized cookies. Permission/grant snapshots belong in
   // the existing response token, not the browser credential. Current authority
   // is loaded from storage on every protected request; an unhydrated cookie
   // must have no scopes or legacy role fallback. Keep signed session, tenant,
   // credential and delegation/platform bounds intact.
   const {roles:_roles,roleIds:_roleIds,permissions:_permissions,grantedPermissions:_grants,departmentIds:_departments,businessAttributes:_attributes,globalBusinessScope:_global,authorizationLoaded:_loaded,...identity}=payload;
-  const cookieToken=signer.signToken({...identity,...claims,roles:[],permissions:[],departmentIds:[],authorizationLoaded:true},{expiresInSec:lifetime});
+  const cookiePayload:TokenPayload&{iat:number}={...identity,...claims,iat:issuedAt,roles:[],permissions:[],departmentIds:[],authorizationLoaded:true};
+  const cookieToken=signer.signToken(cookiePayload,{expiresInSec:lifetime});
   res.cookie(SESSION_COOKIE, cookieToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',

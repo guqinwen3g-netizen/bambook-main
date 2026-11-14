@@ -46,4 +46,12 @@ describe('bounded browser session credentials',()=>{
   expect(f.stored.options.secure).toBe(process.env.NODE_ENV==='production');
   if(remember)expect(f.stored.options.maxAge).toBe(ttl*1000);else expect(f.stored.options.maxAge).toBeUndefined();
  });
+
+ it('uses the same issuance boundary when the two signatures cross a clock tick',()=>{
+  let cookie='',calls=0;
+  const signer={signToken:(payload:TokenPayload,options?:{expiresInSec?:number})=>{const token=auth.signToken(payload,options);if(++calls===1)vi.setSystemTime(new Date(Date.now()+2000));return token;}};
+  const token=writeSession({cookie:(_name:string,value:string)=>{cookie=value;}} as unknown as Response,signer,{userId:'tick-user',roles:['sales'],permissions:['orders:read'],departmentIds:[]},newSession(true));
+  const body=auth.verifyToken(token) as any,credential=auth.verifyToken(cookie) as any;
+  expect(credential.iat).toBe(body.iat);expect(credential.exp).toBe(body.exp);
+ });
 });
