@@ -85,7 +85,7 @@ export function ModuleEditorDialog({spec,onClose,onSaved}:{spec:ModuleEditorSpec
     }
     const run=++generation.current;lock.current=true;setBusy(true);setError('');
     try{await spec.submit(converted);if(mounted.current&&run===generation.current){onSaved?.();onClose();toast('已保存');}}
-    catch(problem){if(mounted.current&&run===generation.current){recovery.failed(problem);setError(problem instanceof Error?problem.message:'保存未完成，请重试');}}
+    catch(problem){if(mounted.current&&run===generation.current){recovery.failed(problem);const message=problem instanceof Error?problem.message:'保存未完成，请重试';setError(message);workspace.dismissError?.(message);}}
     finally{if(mounted.current&&run===generation.current){lock.current=false;setBusy(false);}}
   };
   const change=(key:string,value:ModuleValue)=>setValues(v=>{const next={...v,[key]:value};return spec?.derive?{...next,...spec.derive(key,value,next)} as ModuleValues:next;});

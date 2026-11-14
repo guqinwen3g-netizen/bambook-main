@@ -3,7 +3,7 @@ import React,{act} from 'react';
 import {readFileSync} from 'node:fs';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
-import {getByRole,queryByRole,getByText,queryByText} from '@testing-library/dom';
+import {getByRole,queryByRole,getByText,getAllByText,queryByText} from '@testing-library/dom';
 import {Card,MistRoot,ToastProvider,type Column} from '../../../../../components/mist';
 import {readDevice,writeDevice} from '../../runtime/devicePreferences';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
@@ -54,6 +54,32 @@ function conditionalEditor(submit=vi.fn(async(_values:any)=>({id:'saved'}))):Mod
  {key:'amount',label:'补偿金额',type:'number',required:true,min:0.01,when:{key:'kind',values:['Allowance']}},
  {key:'replacementSpec',label:'补发规格',required:true,when:{key:'kind',values:['Replace']}},
 ],initialValues:{id:'source-id',kind:'Repair',name:'来源已核实',amount:'not-a-number',replacementSpec:''}};}
+describe('ModuleEditorDialog rejected save feedback',()=>{
+ const refundSpec=(submit:ModuleEditorSpec['submit'],amount='91'):ModuleEditorSpec=>({title:'登记退款',submitLabel:'保存',submit,fields:[{key:'amount',label:'退款金额',type:'number',required:true},{key:'reference',label:'付款凭据',required:true}],initialValues:{amount,reference:'SIM-REFUND-90'}});
+ const dialog=(spec:ModuleEditorSpec)=><React.StrictMode><MistRoot><ToastProvider><ModuleEditorDialog spec={spec} onClose={vi.fn()}/></ToastProvider></MistRoot></React.StrictMode>;
+ it('shows one rejection inside the dialog, preserves input and removes it on cancel',async()=>{
+  const message='退款超过贷项余额';let showGlobal!:(value:string)=>void,clearGlobal!:(value:string)=>void;
+  bridge.workspace.dismissError=vi.fn((value:string)=>clearGlobal(value));
+  const spec=refundSpec(vi.fn(async()=>{showGlobal(message);throw new Error(message);}));
+  function Harness(){const[globalError,setGlobalError]=React.useState(''),[open,setOpen]=React.useState(true);showGlobal=setGlobalError;clearGlobal=value=>setGlobalError(current=>current===value?'':current);return <>{globalError&&<div data-global-error>{globalError}</div>}<ModuleEditorDialog spec={open?spec:null} onClose={()=>setOpen(false)}/></>;}
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<React.StrictMode><MistRoot><ToastProvider><Harness/></ToastProvider></MistRoot></React.StrictMode>));
+  await click('保存');const panel=getByRole(document.body,'dialog',{name:'登记退款'});
+  expect(getAllByText(document.body,message,{exact:true})).toHaveLength(1);expect(getByText(panel,message)).toBeTruthy();expect(host.querySelector('[data-global-error]')).toBeNull();
+  expect((getByRole(panel,'spinbutton',{name:'退款金额'}) as HTMLInputElement).value).toBe('91');expect((getByRole(panel,'textbox',{name:'付款凭据'}) as HTMLInputElement).value).toBe('SIM-REFUND-90');
+  await click('取消');expect(queryByRole(document.body,'dialog')).toBeNull();expect(queryByText(document.body,message)).toBeNull();
+ });
+ it('does not claim an error after the dialog has unmounted',async()=>{
+  let reject!:(error:Error)=>void;const spec=refundSpec(()=>new Promise((_resolve,no)=>reject=no));bridge.workspace.dismissError=vi.fn();
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(dialog(spec)));await click('保存');await act(async()=>root!.render(<p>新页面读取失败</p>));await act(async()=>reject(new Error('旧退款失败')));
+  expect(bridge.workspace.dismissError).not.toHaveBeenCalled();expect(getByText(host,'新页面读取失败')).toBeTruthy();
+ });
+ it('does not clear or decorate a replacement dialog with an earlier rejection',async()=>{
+  let reject!:(error:Error)=>void;const old=refundSpec(()=>new Promise((_resolve,no)=>reject=no)),next=refundSpec(vi.fn(),'77');bridge.workspace.dismissError=vi.fn();
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(dialog(old)));await click('保存');await act(async()=>root!.render(dialog(next)));await act(async()=>reject(new Error('旧退款失败')));
+  expect(bridge.workspace.dismissError).not.toHaveBeenCalled();expect(queryByText(document.body,'旧退款失败')).toBeNull();expect((getByRole(document.body,'spinbutton',{name:'退款金额'}) as HTMLInputElement).value).toBe('77');
+ });
+});
+
 describe('ModuleWorkbench applicable business fields',()=>{
  it('keeps an inapplicable field out of both explicit sections and fallbacks',()=>{const spec=conditionalEditor();spec.sections=[{id:'money',label:'款项',fields:['amount']}];expect(moduleVisibleFields(spec).map(f=>f.key)).toEqual(['kind','name']);expect(moduleEditorSections(spec).flatMap(g=>g.fields.map(f=>f.key))).toEqual(['kind','name']);expect(moduleVisibleFields(spec,{...spec.initialValues,kind:'Replace'}).map(f=>f.key)).toEqual(['kind','name','replacementSpec']);});
  it('does not validate or submit hidden required amounts in a short dialog, retaining source metadata',async()=>{

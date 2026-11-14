@@ -14,8 +14,8 @@
 | `SidebarPresentationProps` | — | `type SidebarPresentationProps = { sections: NavSection[]; activeId: string; onNavigate: (id: string) => void; collapsed: boolean; onToggleCollapsed: () => void; workspace?: { symbol: string; lead?: React.ReactNode; name: string; caption?: string; onClick?: () => void; expanded?: boolean; disclosure?: React.ReactNode }; account: { name: string; identityKey?: string; caption?: string; avatarUrl?: string; onClick?: () => void }; onSearch?: () => void; assistant?: { title: string; text: React.ReactNode; onClick: () => void }; };` |
 | `MistSidebarPresentation` | 侧栏（纯展示，无数据依赖）。生产环境用 MistSidebar（已接好模块注册表与权限）。 | `({ sections, activeId, onNavigate, collapsed, onToggleCollapsed, workspace, account, onSearch, assistant }: SidebarPresentationProps)` |
 | `Crumb` | — | `type Crumb = { label: React.ReactNode; onClick?: () => void; mono?: boolean; hideOnMobile?: boolean };` |
-| `MistTopbar` | — | `({ crumbs, scrolled, sync, theme, onToggleTheme, onSearch, notifications, onAsk, extra, onBack, backLabel = '返回' }: { crumbs: Crumb[]; scrolled?: boolean; sync?: { state?: 'ok' \| 'syncing' \| 'offline'; text: string }; theme?: ThemeMode; onToggleTheme?: () => void; onSearch?: () => void; notifications?: { unread: boolean; onClick: () => void }; onAsk?: () => void; extra?: React.ReactNode; onBack?: () => void; backLabel?: string; })` |
-| `MistAppShell` | 整站外壳：侧栏 + 圆角画布（顶栏 + 滚动区）。 children 放 <MistPage>。scrollKey 变化时滚动回顶部（切换页面时传 view id）。 | `({ sidebar, topbar, collapsed, children, scrollKey }: { sidebar: React.ReactNode; topbar: (scrolled: boolean) => React.ReactNode; collapsed?: boolean; children: React.ReactNode; scrollKey?: string })` |
+| `MistTopbar` | — | `({ crumbs, scrolled, sync, theme, onToggleTheme, onSearch, notifications, onAsk, extra, onBack, backLabel = '返回' }: { crumbs: Crumb[]; scrolled?: boolean; sync?: { state?: 'ok' \| 'syncing' \| 'offline'; text: string; onClick?: () => void; expanded?: boolean }; theme?: ThemeMode; onToggleTheme?: () => void; onSearch?: () => void; notifications?: { unread: boolean; onClick: () => void }; onAsk?: () => void; extra?: React.ReactNode; onBack?: () => void; backLabel?: string; })` |
+| `MistAppShell` | 整站外壳：侧栏 + 圆角画布（顶栏 + 滚动区）。 children 放 <MistPage>。scrollKey 变化时滚动回顶部（切换页面时传 view id）。 notices：外壳级状态（读取失败、待核对请求、公司管理模式等）。浮在顶栏下方、盖住内容顶端，不进入页面流， 出现或消失时页面标题与模块不移动。页面内与具体对象相关的提示仍由页面自己放。 | `({ sidebar, topbar, collapsed, children, scrollKey, notices, onCloseNotices }: { sidebar: React.ReactNode; topbar: (scrolled: boolean) => React.ReactNode; collapsed?: boolean; children: React.ReactNode; scrollKey?: string; notices?: React.ReactNode; onCloseNotices?: () => void })` |
 | `MistPage` | 页面容器：最大宽 1240，入场动画。width='narrow' 用于表单/设置，'wide' 用于看板。 | `({ children, width }: { children: React.ReactNode; width?: 'narrow' \| 'wide' })` |
 | `PageHeader` | 页头：eyebrow（所属分组）+ 标题 + 一句话说明 + 右侧操作（最多 1 个 primary）。 | `({ eyebrow, title, description, actions, variant }: { eyebrow?: React.ReactNode; title: React.ReactNode; description?: React.ReactNode; actions?: React.ReactNode; variant?: 'greeting' })` |
 | `BackLink` | — | `({ children, onClick }: { children: React.ReactNode; onClick: () => void })` |
@@ -43,8 +43,8 @@
 | `ButtonVariant` | — | `type ButtonVariant = 'primary' \| 'secondary' \| 'quiet' \| 'danger' \| 'ai' \| 'white' \| 'glass';` |
 | `ButtonProps` | — | `type ButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & { variant?: ButtonVariant; size?: 'sm' \| 'md' \| 'lg'; icon?: LucideIcon; iconRight?: LucideIcon; block?: boolean; loading?: boolean; children?: React.ReactNode; };` |
 | `Button` | 按钮。一屏只放一个 primary。 secondary = 浅填充（旧称 ghost），quiet = 无底文字按钮，white/glass 仅用于 Hero 大卡上。 | `forwardRef<HTMLButtonElement, ButtonProps>` |
-| `IconButtonProps` | — | `type IconButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & { icon: LucideIcon; label: string; size?: 'sm' \| 'md'; dot?: boolean };` |
-| `IconButton` | 纯图标按钮。label 必填（无障碍 + tooltip）。dot = 右上角红点（未读通知）。 | `({ icon, label, size = 'md', dot, className, type = 'button', ...rest }: IconButtonProps)` |
+| `IconButtonProps` | — | `type IconButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & { icon: LucideIcon; label: string; size?: 'sm' \| 'md'; dot?: boolean; count?: number };` |
+| `IconButton` | 纯图标按钮。label 必填（无障碍 + tooltip）。dot = 右上角红点（未读通知）；count > 0 时改为数字角标（待处理条数）。 | `({ icon, label, size = 'md', dot, count, className, type = 'button', ...rest }: IconButtonProps)` |
 | `TextLink` | — | `({ icon, iconRight, children, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { icon?: LucideIcon; iconRight?: LucideIcon })` |
 | `Pill` | 状态标签（只读）。带圆点；plain 去掉圆点。tone 语义见 docs/03-components.md#状态色 | `({ tone = 'neutral', plain, children }: { tone?: Tone; plain?: boolean; children: React.ReactNode })` |
 | `Chip` | 筛选芯片（可点击，打开下拉）。label 灰，value 加粗。 | `({ label, value, icon, iconRight, pressed, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { label: React.ReactNode; value?: React.ReactNode; icon?: LucideIcon; iconRight?: LucideIcon; pressed?: boolean })` |
@@ -72,8 +72,8 @@
 | `Mono` | — | `({ children }: { children: React.ReactNode })` |
 | `EmptyState` | — | `({ icon, title, description, action, compact }: { icon?: LucideIcon; title: React.ReactNode; description?: React.ReactNode; action?: React.ReactNode; compact?: boolean })` |
 | `Skeleton` | — | `({ width = '100%', height = 12, radius }: { width?: number \| string; height?: number; radius?: number })` |
-| `Banner` | `status` 为对象状态色点行，`notice` 为必须原位保留的中性阻断卡，`inline` 用于外壳悬浮卡与 AI 建议。默认 `notice`（`tone='ai'` 默认 `inline`）。 | `({ tone = 'accent', icon, title, children, actions, variant }: { tone?: Tone; icon?: LucideIcon; title: React.ReactNode; children?: React.ReactNode; actions?: React.ReactNode; variant?: 'inline' \| 'status' \| 'notice' })` |
-| `FailureNotice` | 运行前端专用：`app/runtime/FailureNotice.tsx`。有外壳时将页面级失败送入右下角状态卡；在 `Dialog` / `Drawer` 内或独立页面中原位显示。字段校验仍靠近字段。 | `{ title: ReactNode; detail?: ReactNode; retry?: () => void; retryLabel?: string }` |
+| `BannerVariant` | 页面内提示，不是弹窗。variant： - inline（默认）：原有色块，用于弹窗内与 AI 建议。 - status：对象的当前状态说明，一行色点 + 短文字，放在标题下方，不染整块背景。 - notice：动手前必须看清的阻断或风险，白底、左侧细色条，保留在原位。 | `type BannerVariant = 'inline' \| 'status' \| 'notice';` |
+| `Banner` | — | `({ tone = 'accent', icon, title, children, actions, variant: requested }: { tone?: Tone; icon?: LucideIcon; title: React.ReactNode; children?: React.ReactNode; actions?: React.ReactNode; variant?: BannerVariant })` |
 | `Pagination` | — | `({ page, pages, onChange }: { page: number; pages: number; onChange: (p: number) => void })` |
 
 ## 表单 · `components/mist/form.tsx`
@@ -117,6 +117,7 @@
 | `MistDensityContext` | — | — |
 | `Column` | — | `type Column<T> = { key: string; header: React.ReactNode; width?: string; align?: 'left' \| 'right'; render: (row: T, index: number) => React.ReactNode; sortValue?: (row: T) => string \| number; hideOnMobile?: boolean; };` |
 | `DataTableProps` | — | `type DataTableProps<T> = { columns: Column<T>[]; rows: T[]; rowKey: (row: T) => string; selectedKey?: string \| null; onRowClick?: (row: T) => void; onRowDoubleClick?: (row: T) => void; density?: 'compact' \| 'default' \| 'comfy'; empty?: React.ReactNode; footer?: React.ReactNode; loading?: boolean; minWidth?: number; ariaLabel?: string; };` |
+| `rowEventFromControl` | — | `(event: React.SyntheticEvent<HTMLElement>): boolean` |
 | `DataTable` | 通用数据表（div grid 实现，行可整行点击）。 - 选中行 = 强调色浅底 + 左侧 3px 指示条（不是描边）。 - 行之间唯一 1px 分隔线。 | `({ columns, rows, rowKey, selectedKey, onRowClick, onRowDoubleClick, density: explicitDensity, empty, footer, loading, minWidth, ariaLabel }: DataTableProps<T>)` |
 | `fitTrack` | 列宽 → grid 轨道。fr 列允许收缩但保留可读的最小宽度（放不下时由 DataTable 降级为隐藏次要列/堆叠，而不是撑宽页面）。 | `(width?: string)` |
 | `Sparkline` | — | `({ points, width = 96, height = 28, tone = 'accent' }: { points: number[]; width?: number; height?: number; tone?: 'accent' \| 'ok' \| 'warn' \| 'bad' })` |
@@ -161,6 +162,8 @@
 
 | 导出 | 说明 | Props / 签名 |
 |---|---|---|
+| `InModalContext` | True inside a Dialog or Drawer: page-level feedback there must stay in the overlay, not go to the shell behind the scrim. | — |
+| `useInModal` | — | `()` |
 | `useModalFocus` | 顶层浮层独占 Esc/焦点，关闭后回到触发器；允许自身的 portal 菜单。 | `(open: boolean, onClose: () => void, ref: React.RefObject<HTMLElement \| null>)` |
 | `Portal` | 浮层统一挂到 .mist-root 内（保证 token 生效），没有则挂 body。 | `({ children }: { children: React.ReactNode })` |
 | `DialogProps` | — | `type DialogProps = { open: boolean; onClose: () => void; title: React.ReactNode; description?: React.ReactNode; icon?: LucideIcon; tone?: 'accent' \| 'bad' \| 'warn' \| 'ok'; children?: React.ReactNode; footer?: React.ReactNode; width?: number };` |
@@ -170,6 +173,8 @@
 | `CommandItem` | — | `type CommandItem = { id: string; group: string; label: string; hint?: string; hintMono?: boolean; icon?: LucideIcon; image?: string; keywords?: string; run: () => void };` |
 | `CommandPalette` | ⌘K 命令面板：搜索跳转 + 操作。↑↓ 选择，↵ 执行，Esc 关闭。 | `({ open, onClose, items, query, onQueryChange, placeholder = '搜索开发案、订单、客户，或输入命令…' }: { open: boolean; onClose: () => void; items: CommandItem[]; query?: string; onQueryChange?: (query: string) => void; placeholder?: string })` |
 | `Dropdown` | 筛选下拉：portal 菜单；方向键/Home/End 导航，Esc 回到触发器，Tab 接续下一控件。 | `({ label, value, options, onChange }: { label: React.ReactNode; value: V; options: Array<{ value: V; label: string }>; onChange: (v: V) => void })` |
+| `ActionMenuItem` | 行内“更多”菜单：图标按钮触发，portal 菜单；方向键导航，Esc 关闭并回到触发器。 | `type ActionMenuItem = { label: string; icon?: LucideIcon; tone?: 'bad'; onSelect: () => void };` |
+| `ActionMenu` | — | `({ label, icon, items, className, size = 'sm' }: { label: string; icon: LucideIcon; items: ActionMenuItem[]; className?: string; size?: 'sm' \| 'md' })` |
 | `ToastProvider` | 在 MistRoot 内包一层即可，任何组件 useToast()('已保存') | `({ children }: { children: React.ReactNode })` |
 | `useToast` | — | `()` |
 | `ToastScope` | Keep feedback from unconnected reference pages visibly scoped as a preview. | `({ children, prefix }: { children: React.ReactNode; prefix?: string })` |
@@ -179,7 +184,7 @@
 | 导出 | 说明 | Props / 签名 |
 |---|---|---|
 | `ChatMessage` | — | `type ChatMessage = \| { role: 'user'; text: string } \| { role: 'assistant'; html?: string; content?: React.ReactNode; sources?: string[]; actions?: React.ReactNode } \| { role: 'typing' };` |
-| `AssistantDrawer` | 小竹抽屉。只负责展示；消息状态与发送逻辑由调用方管理（接真实 Agent 接口）。 html 字段仅用于可信的内部模板；来自模型的文本请用 content（React 节点）渲染。 | `({ open, onClose, messages, onSend, suggestions = [], title = '小竹', sub = '基于本公司的业务数据回答', icon = AssistantEyes }: { open: boolean; onClose: () => void; messages: ChatMessage[]; onSend: (text: string) => void; suggestions?: string[]; title?: string; sub?: string; icon?: LucideIcon; })` |
+| `AssistantDrawer` | 小竹抽屉。只负责展示；消息状态与发送逻辑由调用方管理（接真实 Agent 接口）。 html 字段仅用于可信的内部模板；来自模型的文本请用 content（React 节点）渲染。 | `({ open, onClose, messages, onSend, suggestions = [], title = '小竹', sub = '基于本公司的业务数据回答', icon = AssistantEyes, onExpand }: { open: boolean; onClose: () => void; messages: ChatMessage[]; onSend: (text: string) => void; suggestions?: string[]; title?: string; sub?: string; icon?: LucideIcon; onExpand?: () => void; })` |
 
 ## 品牌 · `components/mist/MistMark.tsx`
 
@@ -200,4 +205,4 @@
 | `cx` | — | `(...parts: Array<string \| false \| null \| undefined>)` |
 
 
-共 136 个导出声明（105 个组件/函数/值，31 个类型）。重导出别名不重复计数。
+共 142 个导出声明（109 个组件/函数/值，33 个类型）。重导出别名不重复计数。
