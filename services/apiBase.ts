@@ -1,11 +1,12 @@
 import { BAMBOOK_PUBLIC_ORIGINS } from '../server/src/shared/bambookPublicOrigins';
+import { publicEntryApiBase } from './publicEntryApi';
 /**
  * 统一 API 根路径：
  *
  * 优先级（从高到低）：
- * 1. 环境变量 VITE_API_BASE_URL   — 仅允许数据中心/相对 API 路径
- * 2. 用户在设置页填的 cloudEndpoint — Cloudflare / Bambook 数据入口
- * 3. 兜底                          — DEV 闭环本地 8081 后端；PROD 走生产数据中心
+ * 1. 相对 VITE_API_BASE_URL；公开入口的本域 API（忽略其他域名）
+ * 2. 非公开入口的绝对环境地址、用户 cloudEndpoint
+ * 3. 兜底：DEV 本地 8081；PROD 公司数据中心
  */
 
 const PROD_BAMBOOK_ENDPOINT = BAMBOOK_PUBLIC_ORIGINS.company;
@@ -97,8 +98,11 @@ export function getAgentRuntimeDevHeaders(): Record<string, string> {
 }
 
 export function getApiBaseUrl(): string {
-  // 1. 环境变量最高优先，但账号/业务数据不能指向本机库。
+  // 相对代理保持原语义；公开入口的认证与业务请求不跨域。
   const envUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+  if (envUrl?.trim().startsWith('/')) return normalizeExplicitApiBase(envUrl);
+  const publicBase = publicEntryApiBase();
+  if (publicBase) return publicBase;
   if (envUrl?.trim()) {
     const apiBase = normalizeExplicitApiBase(envUrl);
     if (apiBase) return apiBase;

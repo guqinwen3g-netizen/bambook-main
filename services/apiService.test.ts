@@ -73,18 +73,18 @@ describe('apiService shipment export declaration completion', () => {
     vi.stubGlobal('sessionStorage', createStorage());
   });
 
-  it('posts only the external completion fact and proof reference to the shipment route', async () => {
+  it('delegates external completion facts to the authorized typed shipment service', async () => {
     const shipment = { id: 'SHIP-1', exportDeclarationCompletedAt: '2026-10-07T02:00:00.000Z', exportDeclarationEvidenceDocumentId: 'DOC-EDP-1' };
     const fetchMock = vi.fn(async () => ({ ok: true, json: async () => shipment }));
     vi.stubGlobal('fetch', fetchMock);
-    await expect(apiService.completeShipmentExportDeclaration('SHIP-1', {
-      completedAt: shipment.exportDeclarationCompletedAt, evidenceDocumentId: shipment.exportDeclarationEvidenceDocumentId, reference: 'DECL-42',
-    }, 'https://test.example.com')).resolves.toEqual(shipment);
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const [url, options] = fetchMock.mock.calls[0] as any;
-    expect(url).toContain('/v1/shipping/SHIP-1/export-declaration-completion');
-    expect(options.method).toBe('POST');
-    expect(JSON.parse(options.body)).toEqual({ completedAt: shipment.exportDeclarationCompletedAt, evidenceDocumentId: 'DOC-EDP-1', reference: 'DECL-42' });
+    const { shipmentService } = await import('./shipmentService');
+    const complete = vi.spyOn(shipmentService, 'completeExportDeclaration').mockResolvedValue(shipment as any);
+    const input = { completedAt: shipment.exportDeclarationCompletedAt, evidenceDocumentId: shipment.exportDeclarationEvidenceDocumentId, reference: 'DECL-42' };
+    try {
+      await expect(apiService.completeShipmentExportDeclaration('SHIP-1', input, 'https://test.example.com')).resolves.toEqual(shipment);
+      expect(complete).toHaveBeenCalledExactlyOnceWith('SHIP-1', input, 'https://test.example.com');
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally { complete.mockRestore(); }
   });
 });
 

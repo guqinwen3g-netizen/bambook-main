@@ -1,4 +1,5 @@
 import { getApiBaseUrl, getDefaultBambookEndpoint, normalizeDataCenterEndpoint } from './apiBase';
+import { publicEntryApiBase } from './publicEntryApi';
 import { View } from '../types';
 import { getViewPermission, isAuthenticatedPublicView, isDevOnlyView } from '../lib/modulePermissions';
 import {storeLogoutCapability,queueLogoutCapability,pendingLogoutCapabilities,confirmLogoutCapability,confirmUserLogoutCapabilities,clearActiveLogoutCapability,type LogoutCapability} from './logoutCapabilities';
@@ -158,6 +159,8 @@ export function getAuthApiBase(): string {
   // 排除，登录请求绕过代理直打生产 DEFAULT_AUTH_ENDPOINT，本地账号全部登录失败）。
   const envBase = String(import.meta.env.VITE_API_BASE_URL || '').trim();
   if (envBase.startsWith('/')) return envBase.replace(/\/$/, '');
+  const publicBase = publicEntryApiBase();
+  if (publicBase) return publicBase;
 
   try {
     const raw = localStorage.getItem('panda_system_config');
