@@ -45,8 +45,9 @@ const lineOf = (root: MistState, id: string) => root.orderLines.find(l => l.id =
 const shipmentOrders = (root: MistState, s: FulfillmentShipment) => [...new Set(s.lines.map(l => l.orderId))].map(id => root.orders.find(o => o.id === id)).filter(Boolean) as MistOrder[];
 const lcFor = (root: MistState, s: FulfillmentShipment) => readLetterOfCredits(root).find(lc => !lc.cancelled && s.lines.some(l => lc.orderIds.includes(l.orderId)));
 const packingOf = (root: MistState, s: FulfillmentShipment) => root.fulfillment.packing.filter(p => p.shipmentId === s.id);
-function packingTotals(root: MistState, s: FulfillmentShipment) {
-  const rows = packingOf(root, s);
+function packingTotals(root: MistState, s: FulfillmentShipment, orderId?: string) {
+  const lineIds=orderId?new Set(s.lines.filter(line=>line.orderId===orderId).map(line=>line.lineId)):null;
+  const rows = packingOf(root, s).filter(row=>!lineIds||lineIds.has(row.lineId));
   return { packages: new Set(rows.map(r => r.carton)).size, net: r2(rows.reduce((n, r) => n + r.netWeight, 0)), gross: r2(rows.reduce((n, r) => n + r.grossWeight, 0)), volume: r4(rows.reduce((n, r) => n + r.volume, 0)) };
 }
 /** Unit price for the CI of an order on this shipment: the order line price, or the reviewed declared value for a replacement. */
@@ -73,7 +74,7 @@ const externalGoodsName = (line: Pick<MistOrderLine, 'name' | 'nameEn'>) => line
 function ciSnapshot(root: MistState, s: FulfillmentShipment, order: MistOrder) {
   const lines = goodsLines(root, s, order.id);
   const rows = lines.map(g => { const price = unitPriceOf(root, s, order, g.line.id); return { style: g.line.style, desc: externalGoodsName(g.line) + (g.detail ? '\n' + g.detail : ''), qty: `${qtyText(g.quantity)} ${g.line.unit}`, price: money2(price), amount: money2(lineAmount(g.quantity, price)), _amount: lineAmount(g.quantity, price) }; });
-  const total = r2(rows.reduce((n, r) => n + r._amount, 0)), pack = packingTotals(root, s), lc = lcFor(root, s);
+  const total = r2(rows.reduce((n, r) => n + r._amount, 0)), pack = packingTotals(root, s, order.id), lc = lcFor(root, s);
   return {
     parties: [buyerParty(root, s), consigneeParty(s)], total,
     facts: [{ label: { zh: '订单 / 合同号', en: 'Order / Contract' }, value: [order.code, order.governance?.contract.poNumber].filter(Boolean).join(' · ') }, ...transportFacts(s), { label: { zh: '币种', en: 'Currency' }, value: order.currency },

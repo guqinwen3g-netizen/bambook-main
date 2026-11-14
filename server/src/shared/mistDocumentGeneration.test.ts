@@ -30,6 +30,23 @@ function customsReady() {
 }
 
 describe('shipment document generation', () => {
+  it('keeps each consolidated CI package and weight totals within its own order',()=>{
+    const {f,shipmentId}=ready(),s=f.state.fulfillment.shipments.find(x=>x.id===shipmentId)!,order=f.state.orders.find(x=>x.id===f.orderId)!,line=f.state.orderLines.find(x=>x.orderId===order.id)!;
+    Object.assign(order,{type:'fabric',currency:'EUR'});Object.assign(line,{qty:130.5,unit:'米',price:7.8});
+    const secondOrder={...structuredClone(order),id:'order-b',code:'SO-F-B'},yards={...structuredClone(line),id:'line-yards',qty:110,unit:'码',price:1.75},secondLine={...structuredClone(line),id:'line-b',orderId:secondOrder.id,qty:70};
+    f.state.orders.push(secondOrder);f.state.orderLines.push(yards,secondLine);s.domain='fabric';
+    s.lines=[{...s.lines[0],quantity:130.5},{...s.lines[0],lineId:yards.id,productionId:'job-yards',quantity:110},{...s.lines[0],orderId:secondOrder.id,lineId:secondLine.id,productionId:'job-b',quantity:70}];
+    const rows=[{lineId:line.id,productionId:s.lines[0].productionId,carton:'A1',quantity:65.25,netWeight:40.56,grossWeight:41.56,volume:0.12},{lineId:line.id,productionId:s.lines[0].productionId,carton:'A2',quantity:65.25,netWeight:40.56,grossWeight:41.56,volume:0.12},{lineId:yards.id,productionId:'job-yards',carton:'T1',quantity:60,netWeight:7.82,grossWeight:8.32,volume:0.035},{lineId:yards.id,productionId:'job-yards',carton:'T2',quantity:50,netWeight:6.52,grossWeight:7.02,volume:0.03},{lineId:secondLine.id,productionId:'job-b',carton:'B1',quantity:70,netWeight:43.51,grossWeight:44.51,volume:0.13}];
+    f.state.fulfillment.packing=rows.map((r,i)=>({...r,id:'packed-'+i,shipmentId,note:''}));
+    const snapshot=(type:string,orderId?:string)=>prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId,type,...(orderId?{orderId,dueDate:'2026-12-01'}:{})}},f.context);
+    const a=snapshot('CI',order.id),b=snapshot('CI',secondOrder.id),pl=snapshot('PL');
+    const weights=(doc:typeof a)=>doc.facts?.find(x=>x.label.en==='Packages / Weights')?.value;
+    expect(weights(a)).toBe('4 · N.W. 95.46 kg · G.W. 98.46 kg');expect(weights(b)).toBe('1 · N.W. 43.51 kg · G.W. 44.51 kg');
+    expect(a.table!.totals!.amount).toBe('EUR 1,210.40');expect(b.table!.totals!.amount).toBe('EUR 546.00');
+    expect(pl.facts?.find(x=>x.label.en==='Packages')?.value).toBe('5');expect(pl.table!.totals).toMatchObject({qty:'200.5 米 / 110 码',nw:'138.97',gw:'142.97',cbm:'0.435'});
+    f.state.fulfillment.packing=f.state.fulfillment.packing.filter(x=>x.lineId!==secondLine.id);
+    expect(weights(snapshot('CI',secondOrder.id))).toBeUndefined();
+  });
   it('generates a CI draft from shipment and order prices, then issues it through the receivable rule', () => {
     const { f, shipmentId } = ready();
     const { result, snapshot, fileId } = generate(f, { type: 'fulfillment.documents.generate', payload: { shipmentId, type: 'CI', orderId: f.orderId, dueDate: '2026-12-01' } });
