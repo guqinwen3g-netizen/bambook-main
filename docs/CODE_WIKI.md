@@ -62,6 +62,8 @@
 | 采购合同、收货、退货 | `modules/ProcurementPage.tsx` | `mistFulfillment.ts`（`fulfillment.procurement.*`）、`mistProcurementCurrency.ts`、`mistPurchaseDocument.ts` |
 | 结算、票据、付款 | `FinancePayables.tsx`、`FinanceSettlements.tsx`、`FinancePayments.tsx`、`PayableDialog.tsx` | `mistPayables.ts`、`mistAccounts.ts` |
 | 产前样、放行、生产 | `ProductionPage.tsx`、`productionGate.ts`、`ProductionSampleNotes.tsx` | `mistProductionSamples.ts`、`mistProductionIntake.ts`、`mistProductionQuantity.ts`、`mistFulfillment.ts`（`fulfillment.production.*`） |
+
+订单生产进度由 `mistWorkspace.ts#recalculate` 调用 `mistProductionQuantity.ts#aggregateProductionProgress`：有效来源分支取采购单位，缺省取对应订单行单位；米/码通过 `unitConversion.ts` 换成可比长度后按数量加权，同单位保留数量加权。不可互换的单位按订单行平均，各行内部的拆分来源仍按可比数量加权，不能直接相加米数、公斤或件数。无有效分支保留原进度，关闭分支不参与；仅计算进度权重，不改合同数量、单位、价格，也不替代订单数量分组显示。2026-11-14 本地多行面料单中间快照已只读复验130.5米完成/110码未完成为56%，原54%为直接相加不同单位的缺陷。
 | QC | `modules/QcWorkbenchPage.tsx` | `mistFulfillment.ts`（`fulfillment.qc.*`） |
 | 内部面料、发料、回交、内部交付 | `InternalFabricPanel.tsx`、`MaterialDeliveryPanel.tsx`、`InternalDeliveryPanel.tsx`、`modules/InventoryPage.tsx` | `mistInternalFabric.ts`、`mistInternalDelivery.ts` |
 | 库存、隔离、退供、报废 | `modules/InventoryPage.tsx` | `mistFulfillment.ts`（`fulfillment.inventory.*`）、`mistPayables.ts`（处置财务核对） |

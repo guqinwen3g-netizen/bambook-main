@@ -1,4 +1,5 @@
 import {notifyMist,notificationOwners} from './mistNotifications';
+import {aggregateProductionProgress} from './mistProductionQuantity';
 import {applyInternalDeliveryCommand,assertInternalDeliveryIntegrity,internalDeliveryState,syncInternalDeliveryTasks,isInternalDeliveryTask,type InternalDelivery,type InternalDeliveryCommand} from './mistInternalDelivery';
 import {syncClaimReplacementShipments,type ClaimReplacementSource} from './mistClaimReplacement';
 import {claimRecoveryReceiptUsedMinor} from './mistClaimRecoveryReceipts';
@@ -783,8 +784,9 @@ function recalculate(state: MistState) {
     const rows=state.orderLines.filter(line=>line.orderId===order.id);
     order.lines=rows.length; order.qty=rows.reduce((s,row)=>s+row.qty,0);
     order.amount=moneySum(rows.map(row=>lineAmount(row.qty,row.price)));
-    const jobs=state.productions.filter(job=>job.orderId===order.id&&!job.closed), quantity=jobs.reduce((s,p)=>s+p.qty,0);
-    if(quantity) order.progress=Math.round(jobs.reduce((s,p)=>s+p.qty*p.pct,0)/quantity);
+    const jobs=state.productions.filter(job=>job.orderId===order.id&&!job.closed);
+    const progress=aggregateProductionProgress(jobs.map(job=>({...job,unit:state.fulfillment?.purchases.find(p=>p.id===job.sourcePurchaseId)?.unit||rows.find(line=>line.id===job.lineId)?.unit})));
+    if(progress!==undefined)order.progress=progress;
     const shipments=(state.fulfillment?.shipments||[]).filter(s=>s.lines.some(line=>line.orderId===order.id)&&s.state!=='cancelled');
     const departed=shipments.filter(s=>s.state==='departed');
     const internalState=internalDeliveryState(state,order.id);

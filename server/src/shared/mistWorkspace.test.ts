@@ -11,6 +11,19 @@ function approvedOrderFixture(amount=100){
  return{ctx,orderId,run,get state(){return state;}};
 }
 describe('Mist workspace domain integrity',()=>{
+  it.each([
+    {label:'metres and yards',units:['米','码'],qty:[130.5,110],pct:[100,0],expected:56},
+    {label:'equivalent all-metre representation',units:['米','米'],qty:[130.5,100.584],pct:[100,0],expected:56},
+    {label:'length aliases',units:['M','yd'],qty:[130.5,110],pct:[100,0],expected:56},
+    {label:'same-unit quantity weighting',units:['件','件'],qty:[197,3],pct:[100,0],expected:99},
+    {label:'non-comparable units',units:['米','公斤'],qty:[100,1000],pct:[100,0],expected:50},
+  ])('rolls order production progress without adding incompatible quantities: $label',row=>{
+    const ctx=context(),s=createMistState(ctx,'empty');
+    s.orders.push({id:'progress-order',code:'SO-P',type:'fabric',customerId:'c',customer:'客户',season:'AW',lines:2,qty:0,amount:0,currency:'EUR',due:'2026-12-01',progress:0,state:'',tone:'neutral',owner:'业务',img:'fabric',checklist:[],createdAt:ctx.now,updatedAt:ctx.now} as any);
+    for(let i=0;i<2;i++){s.orderLines.push({id:'progress-line-'+i,orderId:'progress-order',name:'面料'+i,style:'P'+i,img:'fabric',qty:row.qty[i],unit:row.units[i],price:1,made:0,qc:0});s.productions.push({id:'progress-job-'+i,lineId:'progress-line-'+i,orderId:'progress-order',code:'FUL-P'+i,order:'SO-P',name:'面料'+i,factory:'供方',qty:row.qty[i],due:'2026-12-01',pct:row.pct[i],img:'fabric',col:'cut',risk:''});}
+    const before=structuredClone(s.orderLines),result=applyMistCommand(s,{type:'settings.update',payload:{density:'compact'}},ctx).state;
+    expect(result.orders[0].progress).toBe(row.expected);expect(result.orderLines.map(x=>({qty:x.qty,unit:x.unit,price:x.price}))).toEqual(before.map(x=>({qty:x.qty,unit:x.unit,price:x.price})));expect(s.orders[0].progress).toBe(0);
+  });
   it('retains factory identity when a B version is revised',()=>{
     const ctx=context(),s=createMistState(ctx),v=s.versions.find(v=>v.label.includes('-B-'))!;
     const result=applyMistCommand(s,{type:'development.revise',payload:{devId:v.devId,versionId:v.id,note:'新一轮比样'}},ctx);
