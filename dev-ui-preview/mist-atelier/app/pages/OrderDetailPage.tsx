@@ -45,15 +45,42 @@ import { InternalSupplyFields } from './InternalSupplyFields';
 import { InternalFabricPanel } from './InternalFabricPanel';
 import { InternalDeliveryPanel, InternalDeliveryCreate } from './InternalDeliveryPanel';
 import { RecordFiles, useRecordAttachment } from './modules/fulfillmentKit';
+import { stableJson } from '../../../../server/src/shared/stableJson';
+
+function orderContractSource(order:MistOrder,lines:MistOrderLine[]){
+ return stableJson({id:order.id,type:order.type,customerId:order.customerId,season:order.season,currency:order.currency,due:order.due,ownerId:order.ownerId,governance:order.governance,lines:lines.filter(line=>line.orderId===order.id).map(editableLineSnapshot)});
+}
 
 function OrderContractDialog({order,open,submit=false,onClose}:{order:MistOrder&{governance?:OrderGovernanceFields};open:boolean;submit?:boolean;onClose:()=>void}){
  const w=useMistWorkspace(),toast=useToast(),session=useOptionalMistSession(),{go}=useNav(),members=workspaceMembers(w.workspace,w.state,session?.user);const [contract,setContract]=React.useState<OrderGovernanceInput>(()=>createOrderGovernance({id:()=>'',now:'',actorName:''}).contract),[reason,setReason]=React.useState(''),[failure,setFailure]=React.useState(''),[saved,setSaved]=React.useState(false),[busy,setBusy]=React.useState(false);
  const active=React.useRef(true),lock=React.useRef(false);React.useEffect(()=>{active.current=true;return()=>{active.current=false;};},[]);
- React.useEffect(()=>{if(open){setContract(structuredClone(order.governance?.changeDraft?.contract||order.governance?.contract||createOrderGovernance({id:()=>'',now:'',actorName:''}).contract));setReason(order.governance?.changeDraft?.reason||'');setFailure('');setSaved(false);}},[open,order.id]);
+ const source=React.useRef(''),liveSource=React.useRef({state:w.state,revision:w.workspace?.revision});
+ React.useLayoutEffect(()=>{liveSource.current={state:w.state,revision:w.workspace?.revision};},[w.state,w.workspace?.revision]);
+ React.useEffect(()=>{if(open){source.current=orderContractSource(order,w.state?.orderLines||[]);setContract(structuredClone(order.governance?.changeDraft?.contract||order.governance?.contract||createOrderGovernance({id:()=>'',now:'',actorName:''}).contract));setReason(order.governance?.changeDraft?.reason||'');setFailure('');setSaved(false);}},[open,order.id]);
  const requiredFields=orderContractRequiredFields(contract),submitting=submit&&!order.governance?.changeDraft&&order.governance?.status!=='approved',missing=submitting?missingOrderSubmissionFields(contract,!!order.replacementSource):[];
  const disabled=busy||w.loading||w.saving||!!w.pending||orderLocked(order)||order.governance?.status==='pending'||order.governance?.changeDraft?.status==='pending';
- const save=async()=>{if(lock.current||disabled)return;if(contract.internalSupply&&!members.some(member=>member.id===contract.internalSupply?.receiverId)){setFailure('请选择成衣接收负责人');return;}lock.current=true;setBusy(true);setFailure('');setSaved(false);try{await w.run({type:'order.governance.saveDraft',payload:{orderId:order.id,input:contract,...(order.governance?.changeDraft?{lines:order.governance.changeDraft.lines,orderPatch:order.governance.changeDraft.orderPatch}:{}),...(order.governance?.status==='approved'?{reason}: {})}});if(submitting){if(active.current)setSaved(true);try{await w.run({type:'order.governance.submit',payload:{orderId:order.id}});}catch(e){if(active.current)setFailure(e instanceof Error?e.message:'主单审批未提交');return;}if(active.current){toast('已提交订单主单审批');onClose();}return;}if(active.current){toast(order.governance?.status==='approved'?'变更草稿已保存，原批准内容继续生效':'合同资料已保存');onClose();}}catch(e){if(active.current)setFailure(e instanceof Error?e.message:'合同资料未保存');}finally{lock.current=false;if(active.current)setBusy(false);}};
- const upload=async(files:File[])=>{if(lock.current||disabled)return;lock.current=true;setBusy(true);setFailure('');try{for(const file of files){const stored=await w.uploadFile(file);if(active.current)setContract(c=>({...c,confirmationFileIds:[...new Set([...c.confirmationFileIds,stored.id])]}));}}catch(e){if(active.current)setFailure(e instanceof Error?e.message:'原件上传未完成');}finally{lock.current=false;if(active.current)setBusy(false);}};
+ const save=async()=>{
+  if(lock.current||disabled||!active.current)return;
+  const checked=liveSource.current,current=checked.state?.orders.find(row=>row.id===order.id);
+  // A synchronized workspace must not lend its new version to an older contract form.
+  if(!current||!checked.state||source.current!==orderContractSource(current,checked.state.orderLines)){setFailure('订单合同资料已更新，请重新打开后核对');return;}
+  if(typeof checked.revision!=='number'||!Number.isSafeInteger(checked.revision)){setFailure('订单资料不可用，请重新打开后核对');return;}
+  if(contract.internalSupply&&!members.some(member=>member.id===contract.internalSupply?.receiverId)){setFailure('请选择成衣接收负责人');return;}
+  lock.current=true;setBusy(true);setFailure('');setSaved(false);
+  try{
+   const receipt=await w.run({type:'order.governance.saveDraft',payload:{orderId:order.id,input:contract,...(current.governance?.changeDraft?{lines:current.governance.changeDraft.lines,orderPatch:current.governance.changeDraft.orderPatch}:{}),...(current.governance?.status==='approved'?{reason}: {})}},{expectedRevision:checked.revision});
+   if(!active.current)return;
+   if(submitting){
+    setSaved(true);
+    try{await w.run({type:'order.governance.submit',payload:{orderId:order.id}},{expectedRevision:receipt.revision});}
+    catch(e){if(active.current){const message=e instanceof Error?e.message:'主单审批未提交';setFailure(message);w.dismissError?.(message);}return;}
+    if(active.current){toast('已提交订单主单审批');onClose();}return;
+   }
+   toast(current.governance?.status==='approved'?'变更草稿已保存，原批准内容继续生效':'合同资料已保存');onClose();
+  }catch(e){if(active.current){const message=e instanceof Error?e.message:'合同资料未保存';setFailure(message);w.dismissError?.(message);}}
+  finally{lock.current=false;if(active.current)setBusy(false);}
+ };
+ const upload=async(files:File[])=>{if(lock.current||disabled)return;lock.current=true;setBusy(true);setFailure('');try{for(const file of files){const stored=await w.uploadFile(file);if(active.current)setContract(c=>({...c,confirmationFileIds:[...new Set([...c.confirmationFileIds,stored.id])]}));}}catch(e){if(active.current){const message=e instanceof Error?e.message:'原件上传未完成';setFailure(message);w.dismissError?.(message);}}finally{lock.current=false;if(active.current)setBusy(false);}};
  return <Dialog open={open} onClose={()=>{if(!busy)onClose();}} title={uiText(order.governance?.status==='approved'?'拟议合同变更':'合同与审批资料')} width={820} footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={disabled||missing.length>0} onClick={()=>void save()}>{uiText(submitting?'保存并提交主单审批':order.governance?.status==='approved'?'保存变更草稿':'保存合同资料')}</Button></>}>
   {failure&&<Banner tone="bad" title={uiText(saved?'资料已保存，审批未提交':'资料未保存')}>{failure.includes('订单审批负责人')?<>{uiText('还没有可审批本单的订单审批人')}{' '}{session?.hasRole?.('owner','admin')||session?.hasPermission('users:admin')?<Button size="sm" onClick={()=>{onClose();go('settings',undefined,{section:'approvals'});}}>{uiText('设置审批资格')}</Button>:uiText('请管理员在 设置 · 审批资格 中指定')}</>:failure}</Banner>}{missing.length>0&&<Banner tone="warn" title={uiText('提交审批前请补齐')}>{missing.join('、')}</Banner>}<FormGrid>
    <Field label={uiText("订单用途")}><Select value={contract.kind} disabled={disabled||!!order.replacementSource} onChange={e=>setContract(c=>{const {internalSupply:_old,...rest}=c;return {...rest,kind:e.target.value as OrderGovernanceInput['kind']};})} options={[{value:'external',label:'外部客户订单'},{value:'internal',label:'内部用途订单'}]}/></Field>

@@ -157,6 +157,54 @@ it('lets the business attach contract evidence and submit the entire draft for a
 });
 function queryByRoleSafe(name:string){return [...host.querySelectorAll('button')].find(button=>button.textContent===name)||null;}
 
+it('contract editor refuses a synchronized contract change and keeps its input',async()=>{
+ render();act(()=>getByRole(host,'button',{name:'合同与审批资料',exact:true}).click());
+ const input=getByRole(document.body,'spinbutton',{name:'短装下限 %',exact:true}) as HTMLInputElement;
+ act(()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'1.5');input.dispatchEvent(new Event('input',{bubbles:true}));});
+ store.state=structuredClone(store.state!);store.state.orders[0].governance!.contract.overPercent=2.5;store.workspace.revision=2;render();
+ await act(async()=>getByRole(document.body,'button',{name:'保存合同资料',exact:true}).click());
+ expect(store.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('订单合同资料已更新，请重新打开后核对');expect(input.value).toBe('1.5');
+});
+
+it('contract editor refuses changed commercial lines without resetting the open contract',async()=>{
+ render();act(()=>getByRole(host,'button',{name:'合同与审批资料',exact:true}).click());
+ store.state=structuredClone(store.state!);store.state.orderLines[0].price=2;store.workspace.revision=2;render();
+ await act(async()=>getByRole(document.body,'button',{name:'保存合同资料',exact:true}).click());
+ expect(store.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('订单合同资料已更新，请重新打开后核对');
+});
+
+it('contract editor binds unchanged reviewed data to the current checked revision',async()=>{
+ store.run.mockResolvedValue({revision:8,result:{orderId}});render();act(()=>getByRole(host,'button',{name:'合同与审批资料',exact:true}).click());
+ store.workspace.revision=7;render();await act(async()=>getByRole(document.body,'button',{name:'保存合同资料',exact:true}).click());
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'order.governance.saveDraft'}),{expectedRevision:7});
+});
+
+function readyContract(){store.state!.orders[0].governance!.contract={...store.state!.orders[0].governance!.contract,poNumber:'CUSTOMER-PO',paymentNote:'O/A 30 days',paymentMethod:'OA',depositPercent:0,incoterm:'FOB',deliveryPlace:'上海',confirmationFileIds:['po-evidence']};}
+it('contract editor submits approval against its saved receipt revision',async()=>{
+ readyContract();store.workspace.revision=7;store.run.mockResolvedValueOnce({revision:8,result:{orderId}}).mockResolvedValueOnce({revision:9,result:{orderId}});render();
+ act(()=>getByRole(host,'button',{name:'提交主单审批',exact:true}).click());await act(async()=>getByRole(document.body,'button',{name:'保存并提交主单审批',exact:true}).click());
+ expect(store.run).toHaveBeenNthCalledWith(1,expect.objectContaining({type:'order.governance.saveDraft'}),{expectedRevision:7});
+ expect(store.run).toHaveBeenNthCalledWith(2,{type:'order.governance.submit',payload:{orderId}},{expectedRevision:8});
+});
+
+it('contract editor stops after saving when its order route has changed',async()=>{
+ readyContract();let finish!:(value:unknown)=>void;store.run.mockReturnValue(new Promise(resolve=>finish=resolve));render();act(()=>getByRole(host,'button',{name:'提交主单审批',exact:true}).click());
+ await act(async()=>getByRole(document.body,'button',{name:'保存并提交主单审批',exact:true}).click());expect(store.run).toHaveBeenCalledTimes(1);
+ store.state!.orders.push({...store.state!.orders[0],id:'other-contract',code:'OTHER-CONTRACT'});orderId='other-contract';render();
+ await act(async()=>finish({revision:2,result:{orderId:'old'}}));expect(store.run).toHaveBeenCalledTimes(1);
+});
+
+it('contract editor keeps a confirmed server failure inside the modal and dismisses only its duplicate',async()=>{
+ store.run.mockRejectedValue(new Error('合同版本冲突'));store.error='合同版本冲突';presentedError='合同版本冲突';render();act(()=>getByRole(host,'button',{name:'合同与审批资料',exact:true}).click());
+ await act(async()=>getByRole(document.body,'button',{name:'保存合同资料',exact:true}).click());
+ expect(getByRole(document.body,'dialog',{name:'合同与审批资料'}).textContent).toContain('合同版本冲突');expect(store.dismissError).toHaveBeenCalledWith('合同版本冲突');
+});
+
+it('contract editor does not dismiss a later workspace failure after leaving its order',async()=>{
+ let reject!:(error:Error)=>void;store.run.mockReturnValue(new Promise((_,fail)=>reject=fail));render();act(()=>getByRole(host,'button',{name:'合同与审批资料',exact:true}).click());await act(async()=>getByRole(document.body,'button',{name:'保存合同资料',exact:true}).click());
+ store.state!.orders.push({...store.state!.orders[0],id:'later-contract',code:'LATER-CONTRACT'});orderId='later-contract';render();store.error='新订单的错误';await act(async()=>reject(new Error('旧合同错误')));expect(store.dismissError).not.toHaveBeenCalled();expect(store.error).toBe('新订单的错误');
+});
+
 it.each(['draft','approved'] as const)('opens an exact line procurement draft from a %s order without executing fulfillment',async status=>{
   store.state!.orders[0].governance!.status=status;
   store.state!.orderLines.push({...store.state!.orderLines[0],id:'unselected-line',name:'另一条目',style:'OTHER'});
