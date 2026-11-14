@@ -54,6 +54,8 @@
 
 公司人事访问变动（2026-11-14，本地候选）：`hr/companyEmploymentService.ts#recordEmploymentEvent`的停职、复职、离职、解除及返聘，与公司账号管理共用`revokeAllSessions`。会员状态、凭据代次、员工状态、事件及审计在同一事务提交，成功后才清账号状态缓存；失败全部回滚。恢复访问后旧凭据继续失效，须重新密码登录；这是既有账号级撤销，其他公司会话同样须重登，但其会员、岗位与人事记录不变。普通建档/改档和转正不作访问恢复，不重置凭据。
 
+公司小组解散（同上候选）：`hr/companyClient.ts`仅为既有解散事务补入`teamDataGrant.updateMany`，按小组所属部门的公司过滤，撤销本组生效中的旧共享授权；其他公司、既有撤销历史保持。旧授权独立接口及创建、读取、删除仍关闭，不为修复解散放开通用旧数据接口；POST解散和DELETE入口复用同一服务，重复解散409。公司内业务范围仍走当前Mist公司业务入口。
+
 账号入口的错误反馈（2026-11-14，本地候选）：`ChangePassword.tsx#ForcedPasswordChangePage` 与 `AccountAccessPage.tsx` 在工作台外壳出现前直接使用现有 `Banner` 展示错误；此时 `AppInner` 已登记全局错误宿主，但状态卡尚未渲染，不能把错误送入该卡而令用户看不到。工作台内与浮层的既有 `FailureNotice` 行为保持。`OrderDetailPage.tsx#OrderLineDialog` 仅在仍挂载且提交代际相同时接管精确同文的全局失败，并将自己的错误滚入弹窗当前可视区；取消清本地错误，迟到回调不消费新页面错误。宿主条件反例见两页同名测试；没有改动认证、邀请或邮件服务。
 
 财务操作失败与响应式详情（2026-11-14，本地候选）：`FinancePayables.tsx#execute` 仅在当前作用域仍有效、且没有待核对请求时精确接管全局同文错误；本页负责弹窗内反馈或 `usePageFailure`，未知结果仍沿原请求核对。票据错误滚入本弹窗视口。`modules/pageKit.tsx#ListDetail` 的可选 `freezeLayout` 在财务操作期间保持原预览/抽屉布局，防止缩窄时新的底层Drawer盖住现有编辑，也防止放大时撤掉编辑的父抽屉；操作关闭后才应用当前视口，默认调用保持实时响应式。未改变全局浮层样式或优先级，回归见 `FinancePayables.test.tsx`。

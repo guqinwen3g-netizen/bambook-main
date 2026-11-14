@@ -10,6 +10,8 @@ import { setCompanyAccountAccess } from '../admin/companyAccountLifecycle';
 import { createAuthService } from '../auth/service';
 import { createAuthorizationSnapshotGuard } from '../auth/authorizationSnapshotGuard';
 import { tenantSurfaceGuard } from '../auth/tenantSurfaceGuard';
+import { runWithCompanyContext } from '../auth/requestCompanyContext';
+import { companyHrClient } from './companyClient';
 
 const url = process.env.MIST_PG_CONFLICT_TEST_URL;
 describe.skipIf(!url)('company employment lifecycle on PostgreSQL', () => {
@@ -211,6 +213,48 @@ describe.skipIf(!url)('company employment lifecycle on PostgreSQL', () => {
     expect((await call('post', '/teams/' + ta + '/members').send({ userId: newHire })).status).toBe(200);
     expect((await call('post', '/teams/' + ta + '/members').send({ userId: shared })).status).toBe(200);
     expect((await db.teamMember.findUniqueOrThrow({ where: { teamId_userId: { teamId: tb, userId: shared } } })).leftAt).toBeNull();
+  });
+  it.each(['delete', 'post'] as const)('dissolves only the current company team through %s and preserves grant history', async method => {
+    const teamId = 'hr-dissolve-' + method + key, own = 'hr-grant-own-' + method + key, foreign = 'hr-grant-other-' + method + key, historical = 'hr-grant-history-' + method + key;
+    await db.team.create({ data: { id: teamId, name: 'Development', departmentId: d1 } });
+    await db.teamDataGrant.createMany({ data: [
+      { id: own, teamId, entityType: 'relation', entityId: 'current', grantedBy: owner },
+      { id: historical, teamId, entityType: 'relation', entityId: 'history', grantedBy: owner, revokedAt: new Date('2026-10-01'), revokedBy: owner, revokeReason: 'prior withdrawal' },
+      { id: foreign, teamId: tb, entityType: 'relation', entityId: 'other', grantedBy: owner },
+    ] });
+    try {
+      const oldHistory = await db.teamDataGrant.findUniqueOrThrow({ where: { id: historical } }), other = await db.teamDataGrant.findUniqueOrThrow({ where: { id: foreign } }), otherTeam = await db.team.findUniqueOrThrow({ where: { id: tb } });
+      const path = '/teams/' + teamId + (method === 'post' ? '/dissolve' : '');
+      const forbidden = await request(app)[method]('/api/hr' + path).set('Authorization', 'Bearer ' + tokens.reader).send({});
+      expect(forbidden.status).toBe(403);
+      const cross = await request(app)[method]('/api/hr' + path).set('Authorization', 'Bearer ' + tokens[b]).send({});
+      expect(cross.status).toBe(404);
+      const result = await request(app)[method]('/api/hr' + path).set('Authorization', 'Bearer ' + tokens[a]).send({});
+      expect(result.status).toBe(200);
+      expect(result.body.revokedGrants).toBe(1);
+      expect(await db.teamDataGrant.findUniqueOrThrow({ where: { id: own } })).toMatchObject({ revokedAt: expect.any(Date), revokedBy: owner, revokeReason: 'team dissolved' });
+      expect(await db.teamDataGrant.findUniqueOrThrow({ where: { id: historical } })).toEqual(oldHistory);
+      expect(await db.teamDataGrant.findUniqueOrThrow({ where: { id: foreign } })).toEqual(other);
+      expect(await db.team.findUniqueOrThrow({ where: { id: tb } })).toEqual(otherTeam);
+      expect((await db.team.findUniqueOrThrow({ where: { id: teamId } })).deletedAt).not.toBeNull();
+      const ownGrants = await call('get', '/teams/' + teamId + '/grants'), foreignGrants = await call('get', '/teams/' + tb + '/grants');
+      // The SaaS surface deliberately keeps standalone legacy grant endpoints closed.
+      expect(ownGrants.status).toBe(403);
+      expect(foreignGrants.status).toBe(403);
+      expect((await request(app)[method]('/api/hr' + path).set('Authorization', 'Bearer ' + tokens[a]).send({})).status).toBe(409);
+    } finally {
+      await db.teamDataGrant.deleteMany({ where: { id: { in: [own, foreign, historical] } } });
+      await db.team.delete({ where: { id: teamId } });
+    }
+  });
+  it('keeps grant creation and deletion unavailable through the HR company adapter', async () => {
+    const scoped = companyHrClient(db), before = await db.teamDataGrant.findMany({ where: { teamId: ta } });
+    await runWithCompanyContext(a, async () => {
+      await expect(scoped.teamDataGrant.create({ data: { teamId: ta, entityType: 'relation', entityId: 'unreviewed', grantedBy: owner } })).rejects.toMatchObject({ code: 'TENANT_ROUTE_UNAVAILABLE' });
+      await expect(scoped.teamDataGrant.deleteMany({ where: { teamId: ta } })).rejects.toMatchObject({ code: 'TENANT_ROUTE_UNAVAILABLE' });
+      await expect(scoped.teamDataGrant.findMany({ where: { teamId: ta } })).rejects.toMatchObject({ code: 'TENANT_ROUTE_UNAVAILABLE' });
+    });
+    expect(await db.teamDataGrant.findMany({ where: { teamId: ta } })).toEqual(before);
   });
   it('rolls back a new profile and event if audit persistence fails', async () => {
     const failing = new Proxy(db, { get(target, name) {

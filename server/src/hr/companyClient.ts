@@ -25,10 +25,13 @@ export function companyHrClient(client: PrismaClient): PrismaClient {
           department: { companyId }, role: { companyId }, userAccount: member,
           userRole: { role: { companyId } }, team: { department: { companyId } },
           teamMember: { team: { department: { companyId } } }, jobPosition: { department: { companyId } },
+          teamDataGrant: { team: { department: { companyId } } },
           employeeProfile: { companyId },
         };
         const scope = scopes[String(key)];
-        if (!scope) {
+        // HR only revokes these legacy grants while dissolving a team.
+        // Their standalone endpoints and all other operations remain unavailable.
+        if (!scope || key === 'teamDataGrant' && operation !== 'updateMany') {
           if (key === 'auditLog' && operation === 'create') return fn.call(model, args);
           throw new CompanyAccessError('TENANT_ROUTE_UNAVAILABLE', '此人事接口尚未支持公司隔离。');
         }
