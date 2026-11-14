@@ -26,13 +26,16 @@ const ACCEPT = 'image/png';
 type Draft = { id?: string; name: string; kind: SealKind; fileId: string; userIds: string[] };
 
 function SealImage({ fileId, state }: { fileId?: string; state: MistState }) {
-  const { readFile } = useMistWorkspace(), file = fileId ? state.files.find(f => f.id === fileId) : undefined;
-  const [url, setUrl] = React.useState('');
+  const { readFile, loading } = useMistWorkspace(), file = fileId ? state.files.find(f => f.id === fileId) : undefined;
+  const [preview, setPreview] = React.useState<{ fileId: string; reader: typeof readFile; url: string } | null>(null);
+  const url = !loading && file && preview?.fileId === file.id && preview.reader === readFile ? preview.url : '';
   React.useEffect(() => {
-    if (!file) return; let live = true, made = '';
-    void readFile(file as MistFile).then(blob => { if (!live) return; made = URL.createObjectURL(blob); setUrl(made); }).catch(() => undefined);
+    // Reader identity follows the company/user binding: retry when ready and never display a blob from the previous scope.
+    setPreview(null);
+    if (!file || loading) return; let live = true, made = '';
+    void readFile(file as MistFile).then(blob => { if (!live) return; made = URL.createObjectURL(blob); setPreview({ fileId: file.id, reader: readFile, url: made }); }).catch(() => undefined);
     return () => { live = false; if (made) URL.revokeObjectURL(made); };
-  }, [file?.id]);
+  }, [file?.id, readFile, loading]);
   return <span className="mist-seal-image" data-empty={!url || undefined}>{url ? <img src={url} alt={uiText('印章图片')} /> : <Stamp size={22} aria-hidden="true" />}</span>;
 }
 
