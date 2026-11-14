@@ -7,7 +7,7 @@ import { MistRoot, ToastProvider } from '../../../../components/mist';
 import { applyMistCommand, createMistState, type MistState } from '../../../../server/src/shared/mistWorkspace';
 import type {OrderFundingAssignment} from '../../../../server/src/shared/mistOrderFunding';
 import { Nav } from '../nav';
-const store = vi.hoisted(() => ({ state: null as MistState | null, loading: false, error: '', run: vi.fn(), refresh: vi.fn(), uploadFile: vi.fn(), downloadFile: vi.fn() }));
+const store = vi.hoisted(() => ({ state: null as MistState | null, loading: false, error: '', run: vi.fn(), dismissError: vi.fn(), refresh: vi.fn(), uploadFile: vi.fn(), downloadFile: vi.fn() }));
 vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => store }));
 const permissions=vi.hoisted(()=>({ordersWrite:true,shippingRead:true}));
 vi.mock('../runtime/auth',()=>{const session=()=>({user:{id:'sales',displayName:'业务员甲'},sessionKey:'detail-session',hasPermission:(p:string)=>p==='orders:write'?permissions.ordersWrite:p==='shipments:read'?permissions.shippingRead:true,canAccessView:(view:string)=>view==='shipments'?permissions.shippingRead:true});return{useOptionalMistSession:session,useMistSession:session};});
@@ -22,7 +22,7 @@ function render() {
   act(() => root.render(<MistRoot><ToastProvider><Nav.Provider value={{ route: { view: 'orders/detail', id: orderId }, go, openAI: vi.fn(), theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn() }}><MistPresentedErrorContext.Provider value={presentedError}><OrderDetailPage /></MistPresentedErrorContext.Provider></Nav.Provider></ToastProvider></MistRoot>));
 }
 beforeEach(() => {
-  sequence = 0;presentedError=undefined;store.error='';permissions.ordersWrite=true;permissions.shippingRead=true;go.mockClear();store.run.mockReset();store.uploadFile.mockReset();store.downloadFile.mockReset();
+  sequence = 0;presentedError=undefined;store.error='';permissions.ordersWrite=true;permissions.shippingRead=true;go.mockClear();store.run.mockReset();store.dismissError.mockReset();store.uploadFile.mockReset();store.downloadFile.mockReset();
   const empty = createMistState(context, 'empty');
   empty.customers.push({ id: 'customer-a', code: 'C-A', name: '客户甲', country: '', city: '', industry: '', owner: '业务员甲', grade: 'A', currency: 'USD', terms: '', incoterm: '', categories: '', creditLimit: 0, since: '2026-01-01' });
   const result = applyMistCommand(empty, { type: 'order.create', payload: { type: 'garment', customerId: 'customer-a', season: 'AW28', currency: 'USD', due: '2026-10-30', ownerId:'sales', lines: [{ name: '精确金额条目', style: 'ROUND-01', img: 'coat', fulfillmentMode:'cmt', cmtIncludedItems:[], qty: 1.005, unit: '件', price: 1 }] } }, context);
@@ -287,6 +287,28 @@ it('retains edited input when an existing fulfillment fact prevents an approved 
   render();await openLineEditor();await lineInput('订单数量','3');await lineInput('销售单价','12');await lineInput('变更原因','客户修订PO');await act(async()=>getByRole(document.body,'button',{name:'保存条目'}).click());
   expect(getByRole(document.body,'dialog',{name:'编辑订单条目'})).toBeTruthy();expect((getByLabelText(document.body,'销售单价') as HTMLInputElement).value).toBe('12');expect((getByLabelText(document.body,'订单数量') as HTMLInputElement).value).toBe('3');
   expect(document.body.textContent).toContain('低于下限 6 件');expect(store.state!.orderLines[0].price).toBe(11);expect(store.state!.orders[0].governance?.changeDraft).toBeUndefined();
+});
+
+it('presents a rejected line change once in the active dialog and retains its draft',async()=>{
+  lineEditorFixture('approved');const message='新数量低于已完工下限';
+  const renderHosted=()=>act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'orders/detail',id:orderId},go,openAI:vi.fn(),theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn()}}><MistPresentedErrorContext.Provider value={store.error||undefined}>{store.error&&<div role="alert">{store.error}</div>}<OrderDetailPage/></MistPresentedErrorContext.Provider></Nav.Provider></ToastProvider></MistRoot>));
+  store.run.mockImplementation(async()=>{store.error=message;renderHosted();throw new Error(message);});
+  store.dismissError.mockImplementation(expected=>{if(store.error===expected){store.error='';renderHosted();}});
+  renderHosted();await openLineEditor();await lineInput('订单数量','3');await lineInput('变更原因','客户数量确认');
+  await act(async()=>getByRole(document.body,'button',{name:'保存条目'}).click());
+  expect(document.body.textContent!.split(message)).toHaveLength(2);
+  expect(store.dismissError).toHaveBeenCalledWith(message);
+  expect((getByLabelText(document.body,'订单数量') as HTMLInputElement).value).toBe('3');
+});
+
+it('does not consume a new page error when an abandoned line save rejects late',async()=>{
+  lineEditorFixture('approved');let reject!:(error:Error)=>void;
+  store.run.mockImplementation(()=>new Promise((_resolve,fail)=>{reject=fail;}));
+  render();await openLineEditor();await lineInput('订单数量','3');await lineInput('变更原因','客户数量确认');
+  await act(async()=>getByRole(document.body,'button',{name:'保存条目'}).click());
+  await act(async()=>root.render(<div>其它页面</div>));store.error='新页面操作失败';
+  await act(async()=>reject(new Error('旧条目保存失败')));
+  expect(store.dismissError).not.toHaveBeenCalled();expect(store.error).toBe('新页面操作失败');
 });
 
 it.each(['contract-first','header-first'] as const)('merges price, amended contract and header due into one pending proposal in %s order',async sequence=>{
