@@ -10,6 +10,7 @@
  */
 
 import crypto from 'crypto';
+import { documentFontStyles } from './documentFont';
 
 let browserPromise: Promise<any> | null = null;
 
@@ -69,6 +70,14 @@ export async function renderHtmlToPdf(
   const page = await context.newPage();
   try {
     await page.setContent(html, { waitUntil: 'networkidle' });
+    await page.addStyleTag({ content: documentFontStyles() });
+    const loaded = await page.evaluate(async () => {
+      const faces = await Promise.all([400, 700].map(weight =>
+        document.fonts.load(`${weight} 12px "Bambook Document CJK"`, '长至禾辰')));
+      await document.fonts.ready;
+      return faces.every(group => group.length > 0 && group.every(face => face.status === 'loaded'));
+    });
+    if (!loaded) throw new Error('Document CJK font did not load');
     const pdfBuffer: Buffer = await page.pdf({
       format: options.format ?? 'A4',
       landscape: options.landscape ?? false,

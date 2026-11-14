@@ -4,13 +4,12 @@
  * 2026-08-22 全系统文档体系裁决：从 finance/route.ts 提取为共享模块——
  * 服务端模板统一真源（B1 架构底座），发票/装箱单/合同/PO/QC 报告/对账单
  * 等所有服务端单据模板共用此基座。
- * ⚠️ 双端同步纪律：与前端 components/tools/printDocument.ts BASE_PRINT_STYLES 同源副本，
- *    任一侧修改必须同步另一侧。
+ * 服务端 PDF 的 CJK 字体由 pdf.ts 嵌入；浏览器 HTML 预览仍可使用后续系统字体。
  */
 
 export const DOC_PRINT_BASE_STYLES = `
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; color: #1a202c; background: #fff; padding: 40px; font-size: 12px; line-height: 1.6; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { font-family: 'Bambook Document CJK', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; color: #1a202c; background: #fff; padding: 40px; font-size: 12px; line-height: 1.6; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .doc-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1a202c; padding-bottom: 16px; margin-bottom: 24px; }
   .doc-title-block h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.5px; }
   .doc-title-block .subtitle { font-size: 11px; color: #718096; margin-top: 4px; letter-spacing: 1px; text-transform: uppercase; }
