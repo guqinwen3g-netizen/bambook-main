@@ -71,6 +71,11 @@ describe.skipIf(!url)('company employment lifecycle on PostgreSQL', () => {
   const call = (method: 'get' | 'put' | 'post', path: string, company = a) =>
     request(app)[method]('/api/hr' + path).set('Authorization', 'Bearer ' + tokens[company]);
   const change = (type: string, extra = {}) => call('post', '/employment-events').send({ userId: shared, type, effectiveDate: '2026-10-26', ...extra });
+  const freshSession = async (companyId = a) => {
+    const user = await db.userAccount.findUniqueOrThrow({ where: { id: shared } });
+    return createAuthService().signToken({ userId: shared, companyId, roles: [], permissions: [], departmentIds: [], credentialVersion: (user.metadata as any)?.credentialVersion });
+  };
+  const access = (token: string) => request(app).get('/api/hr/teams/mine').set('Authorization', 'Bearer ' + token);
 
   it('returns only the current company team and active company roster for its own member', async () => {
     for (const userId of [owner, reader, newHire]) await db.teamMember.create({data:{id:randomUUID(),teamId:ta,userId}});
@@ -152,18 +157,43 @@ describe.skipIf(!url)('company employment lifecycle on PostgreSQL', () => {
     expect((await call('get', '/employees/' + shared, b)).body.profile.positionId).toBe('role-sales@' + b);
   });
   it('suspends this company access and restores the prior probation state', async () => {
+    const old = await freshSession(), before = await db.userAccount.findUniqueOrThrow({ where: { id: shared } });
     expect((await change('Suspend')).status).toBe(200);
+    const stopped = await access(old), suspended = await db.userAccount.findUniqueOrThrow({ where: { id: shared } });
     expect((await db.companyMember.findUniqueOrThrow({ where: { companyId_userId: { companyId: a, userId: shared } } })).status).toBe('suspended');
+    const otherCompany = await freshSession(b);
+    expect((await access(otherCompany)).status).toBe(200);
     expect((await change('Resume')).status).toBe(200);
     expect((await call('get', '/employees/' + shared)).body.profile.employmentStatus).toBe('Probation');
+    expect(stopped.status).toBe(401);
+    expect((suspended.metadata as any)?.credentialVersion).not.toBe((before.metadata as any)?.credentialVersion);
+    expect((await access(old)).status).toBe(401);
+    expect((await access(otherCompany)).status).toBe(401);
+    expect((await access(await freshSession())).status).toBe(200);
   });
   it('offboards and rehires without changing the shared identity or other company', async () => {
+    const old = await freshSession();
     expect((await change('Resign')).status).toBe(200);
+    const stopped = await access(old), otherCompany = await freshSession(b);
     expect((await db.userAccount.findUniqueOrThrow({ where: { id: shared } })).status).toBe('active');
     expect((await db.companyMember.findUniqueOrThrow({ where: { companyId_userId: { companyId: b, userId: shared } } })).status).toBe('active');
     await expect(setCompanyAccountAccess(db, { companyId: a, userId: shared, actorId: owner, enabled: true })).rejects.toMatchObject({ code: 'EMPLOYMENT_RESTORATION_REQUIRED' });
     expect((await change('Onboard')).status).toBe(200);
     expect((await call('get', '/employees/' + shared)).body.profile.employmentStatus).toBe('Probation');
+    expect(stopped.status).toBe(401);
+    expect((await access(old)).status).toBe(401);
+    expect((await access(otherCompany)).status).toBe(401);
+    expect((await access(await freshSession())).status).toBe(200);
+  });
+  it('revokes terminated sessions even after rehire without changing another company membership', async () => {
+    const old = await freshSession();
+    expect((await change('Terminate')).status).toBe(200);
+    const stopped = await access(old);
+    expect((await change('Onboard')).status).toBe(200);
+    expect(stopped.status).toBe(401);
+    expect((await access(old)).status).toBe(401);
+    expect((await access(await freshSession())).status).toBe(200);
+    expect((await db.companyMember.findUniqueOrThrow({ where: { companyId_userId: { companyId: b, userId: shared } } })).status).toBe('active');
   });
   it('keeps read-only HR viewers out of writes and other companies', async () => {
     const ro = (method: 'get' | 'put', path: string) => request(app)[method]('/api/hr' + path).set('Authorization', 'Bearer ' + tokens.reader);
@@ -190,5 +220,12 @@ describe.skipIf(!url)('company employment lifecycle on PostgreSQL', () => {
     await expect(createCompanyEmploymentService(failing, a, owner).upsertProfile({ userId: newHire, hireDate: '2026-10-26' })).rejects.toThrow('audit unavailable');
     expect(await db.employeeProfile.count({ where: { companyId: a, userId: newHire } })).toBe(0);
     expect(await db.employmentEvent.count({ where: { companyId: a, userId: newHire } })).toBe(0);
+    const user = await db.userAccount.findUniqueOrThrow({ where: { id: shared } }), profile = await db.employeeProfile.findUniqueOrThrow({ where: { companyId_userId: { companyId: a, userId: shared } } });
+    const events = await db.employmentEvent.count({ where: { companyId: a, userId: shared } });
+    await expect(createCompanyEmploymentService(failing, a, owner).recordEmploymentEvent(owner, { userId: shared, type: 'Suspend', effectiveDate: '2026-10-26' })).rejects.toThrow('audit unavailable');
+    expect((await db.userAccount.findUniqueOrThrow({ where: { id: shared } })).metadata).toEqual(user.metadata);
+    expect(await db.employeeProfile.findUniqueOrThrow({ where: { id: profile.id } })).toEqual(profile);
+    expect((await db.companyMember.findUniqueOrThrow({ where: { companyId_userId: { companyId: a, userId: shared } } })).status).toBe('active');
+    expect(await db.employmentEvent.count({ where: { companyId: a, userId: shared } })).toBe(events);
   });
 });
