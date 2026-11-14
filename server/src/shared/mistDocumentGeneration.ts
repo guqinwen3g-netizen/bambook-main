@@ -13,7 +13,7 @@
 import { MistCommandError, lineAmount, type MistContext, type MistState, type MistOrder, type MistOrderLine } from './mistWorkspace';
 import type { FulfillmentDocument, FulfillmentShipment } from './mistFulfillment';
 import { platformBusinessDate } from './mistPlatform';
-import { draftCustomsDeclaration } from './mistCustomsDeclaration';
+import { customsItemsStale, draftCustomsDeclaration } from './mistCustomsDeclaration';
 import { breakdownSummary, type OrderLineBreakdown } from './mistOrderBreakdown';
 import { readLetterOfCredits } from './mistLetterOfCredit';
 import { replacementDeclaredUnitPrice } from './mistClaimReplacement';
@@ -136,6 +136,8 @@ function shipmentDocContent(root: MistState, s: FulfillmentShipment, type: OwnDo
     case 'CD': {
       const draft = draftCustomsDeclaration(root, s), pack = packingTotals(root, s);
       const customs = root.fulfillment.customs.find(x => x.shipmentId === s.id);
+      // Saved declaration items include the broker's reviewed adjustments; the classification draft is only a fallback before items exist.
+      const items = customs?.items?.length ? customs.items : draft.items;
       // No port/country mapping or structured consignee address exists; use the customer country, never infer from free text.
       const destinationCountry = root.customers.find(x => x.id === s.customerId)?.country || '';
       return { parties: [{ label: { zh: '境内发货人', en: 'Exporter' }, name: c.legalName, detail: [c.customsCode && '海关编码 ' + c.customsCode, c.taxId && '税号 ' + c.taxId].filter(Boolean).join(' · ') }, { label: { zh: '境外收货人', en: 'Overseas consignee' }, name: s.consignee, detail: '' }],
@@ -146,7 +148,7 @@ function shipmentDocContent(root: MistState, s: FulfillmentShipment, type: OwnDo
           { label: { zh: '运抵国 / 最终目的国', en: 'Country of destination' }, value: destinationCountry },
         ] : []), { label: { zh: '件数 / 毛重 / 净重', en: 'Packages / G.W. / N.W.' }, value: `${pack.packages} · ${money2(pack.gross)} kg · ${money2(pack.net)} kg` }],
         table: { columns: [{ key: 'no', label: { zh: '项号', en: 'No.' } }, { key: 'hs', label: { zh: '商品编号', en: 'HS code' } }, { key: 'name', label: { zh: '商品名称及规格型号', en: 'Description / elements' } }, { key: 'qty', label: { zh: '数量及单位', en: 'Quantity' }, num: true }, { key: 'price', label: { zh: '单价', en: 'Unit price' }, num: true }, { key: 'amount', label: { zh: '总价 / 币制', en: 'Amount' }, num: true }],
-          rows: draft.items.map(i => ({ no: String(i.no), hs: i.hsCode, name: `${i.declaredName}\n${i.elements}`, qty: [`${qtyText(i.quantity)} ${i.unit}`, `${qtyText(i.legalQty)} ${i.legalUnit}`, i.secondUnit && i.secondQty !== null ? `${qtyText(i.secondQty)} ${i.secondUnit}` : ''].filter(Boolean).join('\n'), price: money2(i.unitPrice), amount: `${money2(i.amount)} ${i.currency}` })),
+          rows: items.map(i => ({ no: String(i.no), hs: i.hsCode, name: `${i.declaredName}\n${i.elements}`, qty: [`${qtyText(i.quantity)} ${i.unit}`, `${qtyText(i.legalQty)} ${i.legalUnit}`, i.secondUnit && i.secondQty !== null ? `${qtyText(i.secondQty)} ${i.secondUnit}` : ''].filter(Boolean).join('\n'), price: money2(i.unitPrice), amount: `${money2(i.amount)} ${i.currency}` })),
           totals: { amount: draft.totals.map(t => `${money2(t.amount)} ${t.currency}`).join(' / ') } },
         paragraphs: draft.blockers.length ? [{ title: { zh: '待补资料', en: 'Open items' }, text: draft.blockers.join('\n') }] : [] };
     }
@@ -166,6 +168,8 @@ export function documentGenerationBlocker(root: MistState, s: FulfillmentShipmen
   if (PER_ORDER_TYPES.includes(type) && (!orderId || !s.lines.some(l => l.orderId === orderId))) return '请选择本票的准确订单';
   if (type === 'CI' && root.orders.find(o => o.id === orderId)?.governance?.contract.kind === 'internal') return '内部订单不生成销售发票';
   if (type === 'PL' && !packingOf(root, s).length) return '请先登记装箱分配';
+  const customs = type === 'CD' ? root.fulfillment.customs.find(c => c.shipmentId === s.id) : undefined;
+  if (customs && customsItemsStale(root, customs)) return '报关商品项已过期，请先重新生成商品项';
   if (type === 'BC' && !lcFor(root, s)) return '本票没有对应的有效信用证';
   if (type === 'DFT' && !root.fulfillment.documents.some(d => d.shipmentId === s.id && d.orderId === orderId && d.type === 'CI' && d.status === 'issued')) return '请先签发本订单 CI';
   const family = root.fulfillment.documents.filter(d => d.shipmentId === s.id && d.type === type && d.orderId === (PER_ORDER_TYPES.includes(type) ? orderId : ''));

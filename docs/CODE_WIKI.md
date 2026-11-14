@@ -72,6 +72,8 @@
 | 邮箱 | `modules/EmailsPage.tsx` | `mistEmail.ts`；服务端收发 `server/src/mist/mail/` |
 | 公司、成员、交接 | `SettingsPage.tsx`、`WorkspaceMembers.tsx`、`MemberHandover.tsx` | `mistCompanyIdentity.ts`、`mistTeamScope.ts`、`mistHandover.ts` |
 
+报关PDF取数（2026-11-14）：`mistDocumentGeneration.ts#shipmentDocContent`生成CD时优先采用本票`fulfillment.customs.items`已保存的品名、申报要素、法定第一/第二数量；未建立商品项时仍提供当前归类的待核对预览。`documentGenerationBlocker`沿用`mistCustomsDeclaration.ts#customsItemsStale`：商品项已有而数量、单价、净毛重或件数与当前来源不符时，先重新生成并核对商品项，禁止混用旧项目和新合计。人工调整的原自动值仍用于过期比较，不会被误报为过期。快照、PDF及单据正文共用同一已核对数据，重新生成保留旧文件及摘要，不迁移或覆盖历史原件。
+
 余料入库码单（2026-11-14）：`mistStockOperations.ts#applyStockOperation`的`fulfillment.stock.receiveOther`沿采购收货的既有可选重量规则，保存每卷`weightKg`并在改库存前校验有限正数/四位小数，省略仍兼容。其他入库保留来源类型、原供料订单条目、来源单号和依据，只记实物库存/流水，不形成采购或资金。`InventoryPage.tsx`的其他入库详情标题取`otherReceipt.source`，不套用缺失采购的错误提示；码单表沿既有公斤列回读。原库存出库交回仍走准确`issueId`退回，保留原量和接收历史。
 
 命令全集以生成目录 `server/src/mist/agentCommandCatalog.ts` 为准（由 `scripts/gen-mist-command-catalog.mjs` 从上述 `server/src/shared/*.ts` 生成，当前 313 条；`agentCommandCatalogGuard.test.ts` 守住声明、处理分支与权限映射不漂移）。

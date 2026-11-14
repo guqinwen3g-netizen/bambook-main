@@ -20,6 +20,14 @@ function ready() {
   (f.state as MistState).settings.companyProfile = { ...company };
   return { f, shipmentId };
 }
+function customsReady() {
+  const { f, shipmentId } = ready(), line = f.state.orderLines[0], productionId = f.state.fulfillment.shipments.find(s => s.id === shipmentId)!.lines[0].productionId;
+  f.run({ type: 'fulfillment.shipments.pack', payload: { id: shipmentId, lines: [{ lineId: line.id, productionId, carton: 'C1', quantity: 10, netWeight: 5, grossWeight: 6, volume: 0.5, note: '' }] } });
+  const id = f.run({ type: 'fulfillment.customs.save', payload: { shipmentId, status: 'draft', declarationNo: '', broker: '报关行', hsCode: '', origin: '中国', tradeMode: '一般贸易', declaredAt: '', clearedAt: '', evidence: '', fileIds: [], note: '' } }).id!;
+  f.run({ type: 'fulfillment.customs.classify.save', payload: { family: 'garment', hsCode: '6203310000', declaredName: '男式羊毛西服上衣', brandType: '3', preference: '0', elements: ['机织', '西服上衣', '男式', '100%羊毛', '无品牌'], styles: [line.style], legalUnit: '件', secondUnit: '千克' } });
+  f.run({ type: 'fulfillment.customs.items', payload: { id } });
+  return { f, shipmentId, id };
+}
 
 describe('shipment document generation', () => {
   it('generates a CI draft from shipment and order prices, then issues it through the receivable rule', () => {
@@ -196,5 +204,22 @@ describe('external goods descriptions and customs facts',()=>{
   const {f,shipmentId}=ready();const {snapshot}=generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CD'}});
   expect(snapshot.facts.some(fact=>fact.label.zh==='监管方式')).toBe(false);
   expect(snapshot.paragraphs[0].text).toContain('尚未建立商品归类');
+ });
+ it('CD honors the saved manual declaration fields in its snapshot and rendered document',()=>{
+  const {f,shipmentId,id}=customsReady();
+  f.run({type:'fulfillment.customs.item.adjust',payload:{id,no:1,declaredName:'本批毛制上衣',elements:'本批70%羊毛30%涤纶',legalQty:10,secondQty:5.25,reason:'按本批实物及重新称重的申报依据核对'}});
+  const before=structuredClone(f.state),snapshot=prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CD'}},f.context);
+  expect(snapshot.table!.rows[0]).toMatchObject({name:'本批毛制上衣\n本批70%羊毛30%涤纶',qty:'10 件\n10 件\n5.25 千克',price:'10.00',amount:'100.00 USD'});
+  expect(renderGeneratedDocumentHtml(snapshot)).toContain('本批70%羊毛30%涤纶');expect(renderGeneratedDocumentHtml(snapshot)).not.toContain('100%羊毛');expect(f.state).toEqual(before);
+ });
+ it.each(['quantity','price','netWeight','packages'] as const)('CD refuses stale saved declaration items after %s changes',change=>{
+  const {f,shipmentId}=customsReady(),shipment=f.state.fulfillment.shipments.find(s=>s.id===shipmentId)!;
+  if(change==='quantity')shipment.lines[0].quantity=9;
+  if(change==='price')f.state.orderLines[0].price=11;
+  const packing=f.state.fulfillment.packing.find(r=>r.shipmentId===shipmentId)!;
+  if(change==='netWeight')packing.netWeight=6;
+  if(change==='packages'){packing.quantity=5;packing.netWeight=2.5;packing.grossWeight=3;f.state.fulfillment.packing.push({...packing,id:'second-carton',carton:'C2'});}
+  const before=structuredClone(f.state);expect(documentGenerationBlocker(f.state,shipment,'CD')).toContain('重新生成商品项');
+  expect(()=>prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CD'}},f.context)).toThrow('重新生成商品项');expect(f.state).toEqual(before);
  });
 });
