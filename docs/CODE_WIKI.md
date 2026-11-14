@@ -52,6 +52,8 @@
 
 `services/logoutCapabilities.ts`只暂存服务端签发、不能登录或访问业务的退出用途凭据，待确认记录按API地址隔离并跨刷新保留；`authService.ts`清除登录令牌后仍可重试，不把匿名成功响应当成已撤销证明，失败不靠旧Cookie恢复身份。新密码登录可建立新会话；未完成的旧退出记录继续按原用途收口，不借用新账号身份。界面仅在失败时提供“重试退出”，确认所有设备退出后由服务统一清本机状态，不再追加第二次退出请求。
 
+账号入口的错误反馈（2026-11-14，本地候选）：`ChangePassword.tsx#ForcedPasswordChangePage` 与 `AccountAccessPage.tsx` 在工作台外壳出现前直接使用现有 `Banner` 展示错误；此时 `AppInner` 已登记全局错误宿主，但状态卡尚未渲染，不能把错误送入该卡而令用户看不到。工作台内与浮层的既有 `FailureNotice` 行为保持。宿主条件反例见两页同名测试；没有改动认证、邀请或邮件服务。
+
 本包新增`AuthSessionRevocation`迁移，仅在隔离本地库应用；正式发布须把该受控迁移列入最终授权。回滚包须保留会话撤销层及表结构，不能因回退业务版本而忽略已登记的撤销；统一发布前仍须制作并验证相应回滚包。发布及全局验收状态以GO-LIVE为准。
 
 页面路径相对 `dev-ui-preview/mist-atelier/app/pages/`，规则路径相对 `server/src/shared/`。测试与源码同名 `*.test.ts`。

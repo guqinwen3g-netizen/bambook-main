@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../../../components/mist';
 import { ChangePasswordRow, ForcedPasswordChangePage, LogoutAllRow } from './ChangePassword';
+import { usePageFailureHost } from '../runtime/errorPresentation';
 
 const change = vi.hoisted(() => vi.fn());
 const logoutAll = vi.hoisted(() => vi.fn());
@@ -63,6 +64,27 @@ it('explains a first-login password change differently from an administrator res
   await act(async () => root.render(<ToastProvider><ForcedPasswordChangePage key="reset" /></ToastProvider>));
   expect(document.body.textContent).toContain('密码已重置');
   expect(document.body.textContent).toContain('临时密码');
+  session.user = { email: 'a@x.test', mustChangePassword: false };
+});
+it.each(['initial', 'reset'])('keeps %s password failures visible before the workbench shell is rendered', async reason => {
+  session.user = { email: 'a@x.test', mustChangePassword: true, passwordChangeReason: reason };
+  // AppInner registers the error host before its forced-password early return;
+  // the workbench status card has not been rendered in this state.
+  function BeforeWorkbench() { usePageFailureHost(); return <ForcedPasswordChangePage />; }
+  await act(async () => root.render(<ToastProvider><BeforeWorkbench /></ToastProvider>));
+  await fill(['temp-pass-1', 'new-pass-22', 'different-pass-33']);
+  await act(async () => button('修改并继续').click());
+  expect(document.body.textContent).toContain('两次输入的新密码不一致');
+  expect(change).not.toHaveBeenCalled();
+  change.mockRejectedValueOnce(new Error('Current password is incorrect.'));
+  await fill(['wrong-pass-1', 'new-pass-22', 'new-pass-22']);
+  await act(async () => button('修改并继续').click());
+  expect(document.body.textContent).toContain('当前密码不正确');
+  change.mockResolvedValueOnce(undefined);
+  await fill(['temp-pass-1', 'new-pass-22', 'new-pass-22']);
+  await act(async () => button('修改并继续').click());
+  expect(session.refresh).toHaveBeenCalledTimes(1);
+  expect(document.body.textContent).not.toContain('当前密码不正确');
   session.user = { email: 'a@x.test', mustChangePassword: false };
 });
 it('logs out every device only after confirmation, then ends the local session', async () => {
