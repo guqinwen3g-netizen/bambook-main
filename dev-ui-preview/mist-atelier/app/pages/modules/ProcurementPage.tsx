@@ -242,10 +242,18 @@ export function ProcurementPage() {
       submit: async values => { const r = await run({ type: 'sourcing.purchase.transfer', payload: { purchaseId: p.id, supplierId: text(values, 'supplierId'), price: number(values, 'price'), currency: text(values, 'currency'), due: text(values, 'due'), terms: text(values, 'terms'), reason: text(values, 'reason') } } as any); const id = String((r.result as { id?: string }).id || ''); if (id) go('procurement', id); } };
   };
   // sup11：已批准合同变更数量、单价或交期，审批通过后生效。
-  const amendSpec = (p: FulfillmentPurchase): ModuleEditorSpec => ({ title: `变更合同 ${p.code}`, submitLabel: '提交审批',
+  const amendSpec = (p: FulfillmentPurchase): ModuleEditorSpec => {
+    const baseline=stableJson(p);
+    return { title: `变更合同 ${p.code}`, submitLabel: '提交审批',
     fields: [{ ...field('quantity', `数量（${p.unit}）`, 'number'), min: 0.0001 }, field('price', `单价（${p.currency}）`, 'number'), field('due', '交期', 'date'), field('reason', '变更原因', 'textarea'), field('evidence', '供应商同意依据', 'textarea'), field('files', '供应商确认件', 'files', false)],
     initialValues: { quantity: p.quantity, price: p.price, due: p.due, reason: '', evidence: '', files: '' },
-    submit: values => run({ type: 'fulfillment.procurement.amend', payload: { id: p.id, quantity: number(values, 'quantity'), price: number(values, 'price'), due: text(values, 'due'), reason: text(values, 'reason'), evidence: text(values, 'evidence'), fileIds: moduleFileIds(values.files) } }) });
+    submit: values => {
+      const checked=liveSource.current,current=checked.state?.fulfillment.purchases.find(row=>row.id===p.id);
+      if(!current||stableJson(current)!==baseline)throw new Error('采购合同已更新，请重新打开后核对');
+      const command:MistCommand={ type: 'fulfillment.procurement.amend', payload: { id: p.id, quantity: number(values, 'quantity'), price: number(values, 'price'), due: text(values, 'due'), reason: text(values, 'reason'), evidence: text(values, 'evidence'), fileIds: moduleFileIds(values.files) } };
+      return checked.revision!==undefined?run(command,{expectedRevision:checked.revision}):run(command);
+    } };
+  };
   const decideSpec = (p: FulfillmentPurchase, decision: 'approved' | 'rejected'): ProcurementEditorSpec => ({ approvalFor:p.id, title: decision === 'approved' ? '批准采购承诺' : '退回采购', submitLabel: decision === 'approved' ? '批准' : '退回修改', fields: [field('note', '审批意见', 'textarea'), ...(decision === 'approved' ? [signatureField()] : [])], initialValues: { note: '', signature: '' }, submit: values => run({ type: 'fulfillment.procurement.decide', payload: { id: p.id, decision, note: text(values, 'note') } }, { signature: moduleSignature(values.signature) }) });
 
   const stageCount = (value: StageFilter) => value === 'all' ? searched.length : searched.filter(p => purchaseStage(p) === value).length;

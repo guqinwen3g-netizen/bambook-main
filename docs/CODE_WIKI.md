@@ -21,7 +21,7 @@
 1. 页面调用 `runtime/workspace.tsx` 发送 `POST /api/mist/workspaces/:id/commands`，请求体 `{requestId, expectedRevision, command:{type,payload}}`。只有类型化命令，没有整份状态覆盖。
 2. `server/src/mist/repository.ts#execute` → `executeInternal`：重新加载账号与成员资格 → 校验命令权限 `mistCommandPermission`（`server/src/shared/mistWorkspace.ts`）→ 行级范围 `scopedTargetViolation`（写前）→ 应用 `applyMistCommand`（同文件，分派到各 `server/src/shared/mist*.ts` 领域模块）→ `scopedWriteViolation`（写后差异）→ 状态与回执同事务提交。
 3. **幂等重试**：相同 `requestId` + 相同输入只回放原回执；同编号换输入报冲突。网络重试必须沿用原编号。
-4. **并发**：`expectedRevision` 过期时，仅当中间修订都留有 `mist-revision:<n>` 标记且写入位置不重叠才在最新状态上重跑；同记录写入、`decide/confirm/issue/release/document` 类命令一律 `REVISION_CONFLICT`。细节见 `server/src/mist/README.md`。
+4. **并发**：`expectedRevision` 过期时，仅当中间修订都留有 `mist-revision:<n>` 标记且实际写入位置不重叠才在最新状态上重跑；带 id 的记录以整条记录比较，同记录写入拒绝合并。当前 `concurrentChanges` 对后缀 `.issue` / `.document` 及 `development.notice.generate` / `finance.statement.generate` 直接要求最新版本；其他命令仍先按最新状态执行领域门禁，再比较写集。因此已有待审批采购变更可先返回422 `CONFLICT`，已生效合同的旧来源写入会返回409 `REVISION_CONFLICT`。细节见 `server/src/mist/README.md`。
 5. **预演**：`repository.preview` 走同一事务和同一套校验后整笔回滚，返回业务事件说明；生成文件的命令不支持预演。
 6. **结果回主线**：命令写入的审计、待办与通知由领域模块产生；前端首页「接着完成」由 `runtime/workQueue.ts#mistWorkQueue` / `mistMyWork` 从状态派生，审批由 `runtime/reviews.tsx` 与 `pages/ApprovalsPage.tsx` 展示。待办不是手工勾选：例如内部交付任务由实际点收派生完成，`task.complete` 拒绝手工改完成。
 
@@ -30,6 +30,8 @@
 报价编辑的来源保护（2026-11-15）：`MarketPages.tsx#QuotationEditor` 为原报价/新版本来源冻结完整指纹。后台同步保留本地输入，但原报价变化时保存被拦；其他工作区记录更新仍允许保存。`saveQuotation` 对同一渲染快照核验来源并传 `expectedRevision`，`useMarket#command` 只将该可选参数交给既有 `run`，不改变其他默认调用或服务端命令。未同步则由真实409触发来源刷新，原输入保留，重新打开最新版后才正常保存。两个正常账号浏览器已验同步后零写入、同步断网后的409、保留输入与重开保存；新版本来源变化和无关刷新另有前端回归。此项与运输编辑分别收口，其他编辑器仍须逐一走查。
 
 采购草稿的来源保护（2026-11-15）：`ProcurementPage.tsx#purchaseSpec` 打开原草稿时冻结采购记录指纹，`liveSource` 必须在长表单提前返回前随当前工作区更新。提交先核对记录仍与打开时一致，再用同一快照中的订单/供应商与版本校验并发送；不能用表单闭包里的旧状态配同步后的新版本号。已同步的单价、数量或审批状态变更会保留输入并阻止覆盖；未同步则由真实409保护，重开最新记录后可保存。无关更新仍可提交，新建采购的默认调用不变。编辑标题显示准确采购编号。已用两个正常岗位浏览器核对单价与数量、保留输入、重开保存，另有状态变化与无关刷新回归；此项不外推到合同变更、转供应商等其他表单。
+
+采购合同变更的来源保护（2026-11-15）：`ProcurementPage.tsx#amendSpec` 打开时冻结原采购完整指纹，提交时通过同一 `liveSource` 核对来源并绑定所核对版本。其他变更已生效或有新申请时，旧弹窗保留输入、零请求拦截；未同步且来源已生效时由服务端同记录409保护，刷新后的旧弹窗再次提交也被拦。重开最新版可只改交期而保留当前单价。已有待审批申请的422与版本409分别验收，不把领域拒绝混作版本冲突。独立模拟采购的原件、供应商补充确认、四次签批、退回/撤回与当前版本分别留档；当前合同金额不等于已收货或实付。附件关联、转供应商等入口仍需独立核对。
 
 合票单证的范围（2026-11-14）：`mistDocumentGeneration.ts#ciSnapshot` 的货物、金额与包装汇总均限定当前订单，`packingTotals(root,s,order.id)` 从本票该订单的条目筛选装箱行；本订单无装箱行时不借用其他订单的件数重量。PL及其他整票单证继续按整票汇总，混合单位分别展示。正常仓储界面已实测同一票两张CI：A四卷净95.46/毛98.46kg、B一卷净43.51/毛44.51kg，PL五卷净138.97/毛142.97kg；重生成草稿后旧PDF及摘要仍可核对，不覆盖历史原件。
 

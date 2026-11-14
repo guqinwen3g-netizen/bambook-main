@@ -600,3 +600,34 @@ it('refuses a stale purchase editor after another actor submits that draft for a
  await advanceDraftToReview();await click(getByRole(host,'button',{name:'保存草稿',exact:true}));
  expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('采购草稿已更新，请重新打开后核对');
 });
+
+function approvedAmendmentFixture(){
+ store.workspace={id:'workspace',revision:7};
+ store.state!.market.suppliers=[{id:'s',name:'青禾辅料',country:'CN',status:'active'} as any];
+ store.state!.fulfillment.purchases=[purchase('amend-race',{...approved(),materialKind:'trims',price:0.3})];
+}
+async function fillAmendmentDialog(){
+ const d=getByRole(document.body,'dialog',{name:'变更合同 AMEND-RACE',exact:true});
+ typeInto(d.querySelector('input[aria-label="交期"]') as HTMLInputElement,'2026-11-24');
+ typeInto(getByRole(d,'textbox',{name:'变更原因',exact:true}) as HTMLTextAreaElement,'仅调整交期，数量和单价保持现行合同。');
+ typeInto(getByRole(d,'textbox',{name:'供应商同意依据',exact:true}) as HTMLTextAreaElement,'供方同意11月24日交货，其他条款保持。');
+ return d;
+}
+it('preserves a local contract-change draft but refuses an old price after another approved amendment syncs',async()=>{
+ approvedAmendmentFixture();render('amend-race');await click(getByRole(host,'button',{name:'变更合同',exact:true}));const d=await fillAmendmentDialog();
+ store.state=structuredClone(store.state);store.state!.fulfillment.purchases[0].price=0.4;store.workspace={id:'workspace',revision:8};render('amend-race');
+ await click(getByRole(d,'button',{name:'提交审批',exact:true}));expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('采购合同已更新，请重新打开后核对');
+ expect((getByRole(d,'spinbutton',{name:'单价（CNY）',exact:true}) as HTMLInputElement).value).toBe('0.3');
+ expect((d.querySelector('input[aria-label="交期"]') as HTMLInputElement).value).toBe('2026-11-24');
+});
+it('allows unrelated changes while binding a contract-change proposal to the checked workspace revision',async()=>{
+ approvedAmendmentFixture();render('amend-race');await click(getByRole(host,'button',{name:'变更合同',exact:true}));const d=await fillAmendmentDialog();
+ store.state=structuredClone(store.state);store.workspace={id:'workspace',revision:8};render('amend-race');
+ await click(getByRole(d,'button',{name:'提交审批',exact:true}));expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.procurement.amend',payload:expect.objectContaining({id:'amend-race',price:0.3,due:'2026-11-24'})}),{expectedRevision:8});
+});
+
+it('refuses an old contract-change dialog when a new pending proposal arrives without changing effective terms',async()=>{
+ approvedAmendmentFixture();render('amend-race');await click(getByRole(host,'button',{name:'变更合同',exact:true}));const d=await fillAmendmentDialog();
+ store.state=structuredClone(store.state);store.state!.fulfillment.purchases[0].amendments=[{id:'other-proposal',state:'pending',from:{quantity:100,price:0.3,due:'2026-10-30'},to:{quantity:100,price:0.4,due:'2026-10-30'}} as any];store.workspace={id:'workspace',revision:8};render('amend-race');
+ await click(getByRole(d,'button',{name:'提交审批',exact:true}));expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('采购合同已更新，请重新打开后核对');
+});
