@@ -21,6 +21,8 @@ export function customerRows(state: MistState): Row[] {
 function OpportunityBoard({ state, onOpen }: { state: MistState; onOpen: (customerId: string) => void }) {
   const [owner, setOwner] = React.useState('all'), [month, setMonth] = React.useState('all'), [stage, setStage] = React.useState<'open' | CrmStage>('open');
   const all = state.crm?.opportunities || [], name = (id: string) => state.customers.find(c => c.id === id)?.name || '—';
+  const filtered = owner !== 'all' || month !== 'all' || stage !== 'open';
+  const clearFilters = () => { setOwner('all'); setMonth('all'); setStage('open'); };
   const rows = all.filter(o => (owner === 'all' || o.ownerId === owner) && (month === 'all' || o.expectedDate.slice(0, 7) === month) && (stage === 'open' ? !['won', 'lost'].includes(o.stage) : o.stage === stage));
   const funnel = (['intent', 'sampling', 'quoting', 'won', 'lost'] as CrmStage[]).map(st => { const list = all.filter(o => o.stage === st && (owner === 'all' || o.ownerId === owner)); const sums = [...list.reduce((m, o) => m.set(o.currency, (m.get(o.currency) || 0) + Number(o.amount)), new Map<string, number>())].map(([c, n]) => `${n.toLocaleString()} ${c}`).join(' / '); return { st, count: list.length, sums }; });
   const owners = [...new Map(all.map(o => [o.ownerId, o.owner])).entries()], months = [...new Set(all.map(o => o.expectedDate.slice(0, 7)))].sort();
@@ -38,7 +40,7 @@ function OpportunityBoard({ state, onOpen }: { state: MistState; onOpen: (custom
       <Dropdown label={uiText('负责人')} value={owner} onChange={setOwner} options={[{ value: 'all', label: '全部' }, ...owners.map(([id, n]) => ({ value: id, label: n }))]} />
       <Dropdown label={uiText('预计成交月')} value={month} onChange={setMonth} options={[{ value: 'all', label: '全部' }, ...months.map(m => ({ value: m, label: m }))]} />
     </Toolbar>
-    <Card><DataTable ariaLabel={uiText('商机总览')} rows={rows} rowKey={o => o.id} columns={columns} onRowClick={o => onOpen(o.customerId)} empty={<EmptyState title={uiText('没有符合条件的商机')} />} /></Card>
+    <Card><DataTable ariaLabel={uiText('商机总览')} rows={rows} rowKey={o => o.id} columns={columns} onRowClick={o => onOpen(o.customerId)} empty={<EmptyState title={uiText('没有符合条件的商机')} action={filtered && <Button variant="quiet" onClick={clearFilters}>{uiText('清除筛选')}</Button>} />} /></Card>
   </>;
 }
 
@@ -46,6 +48,8 @@ export function CustomerList({ state, actions, onOpen }: { state: MistState; act
   const [view, setView] = React.useState<'customers' | 'opportunities'>('customers');
   const [query, setQuery] = React.useState(''), [country, setCountry] = React.useState('all'), [grade, setGrade] = React.useState('all'), [owner, setOwner] = React.useState('all'), [status, setStatus] = React.useState('active');
   const all = customerRows(state), needle = query.trim().toLowerCase();
+  const filtered = !!needle || country !== 'all' || grade !== 'all' || owner !== 'all' || status !== 'active';
+  const clearFilters = () => { setQuery(''); setCountry('all'); setGrade('all'); setOwner('all'); setStatus('active'); };
   const rows = all.filter(c => (!needle || `${c.code} ${c.name} ${c.city} ${c.industry} ${c.categories}`.toLowerCase().includes(needle)) && (country === 'all' || c.country === country) && (grade === 'all' || c.grade === grade) && (owner === 'all' || c.ownerId === owner) && (status === 'all' || (status === 'archived') === c.archived))
     .sort((a, b) => b.lastOrder.localeCompare(a.lastOrder) || a.name.localeCompare(b.name, 'zh-CN'));
   const opts = (values: string[]) => [{ value: 'all', label: '全部' }, ...[...new Set(values.filter(Boolean))].sort().map(v => ({ value: v, label: v }))];
@@ -70,7 +74,7 @@ export function CustomerList({ state, actions, onOpen }: { state: MistState; act
       <Dropdown label={uiText('客户经理')} value={owner} onChange={setOwner} options={[{ value: 'all', label: '全部' }, ...owners.map(([id, name]) => ({ value: id, label: name }))]} />
       <Dropdown label={uiText('状态')} value={status} onChange={setStatus} options={[{ value: 'active', label: '合作中' }, { value: 'archived', label: '已停用' }, { value: 'all', label: '全部' }]} />
     </Toolbar>
-    <Card><DataTable ariaLabel={uiText('客户清单')} rows={rows} rowKey={c => c.id} columns={columns} onRowClick={c => onOpen(c.id)} empty={<EmptyState title={uiText('没有符合条件的客户')} />} /></Card>
+    <Card><DataTable ariaLabel={uiText('客户清单')} rows={rows} rowKey={c => c.id} columns={columns} onRowClick={c => onOpen(c.id)} empty={<EmptyState title={uiText('没有符合条件的客户')} action={filtered && <Button variant="quiet" onClick={clearFilters}>{uiText('清除筛选')}</Button>} />} /></Card>
     </>}
   </MistPage>;
 }
