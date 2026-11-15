@@ -1007,4 +1007,7 @@ export const reviewedEnglish: Record<string, string> = {
   '待核销金额': 'Amount pending reconciliation',
   '登记成品交接': 'Record finished-goods handover',
   '工厂或指定地点交接': 'Handover at factory or agreed location',
+  '提交时审批人': 'Reviewers at submission',
+  '当前账号没有本次审批资格': 'You are not authorized to approve this item.',
+  '未评级': 'Unrated',
 };
