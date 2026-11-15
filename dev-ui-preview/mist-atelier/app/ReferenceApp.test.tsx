@@ -9,7 +9,7 @@ import type { MistState } from '../../../server/src/shared/mistWorkspace';
 import type { MistWorkspaceContext } from './runtime/workspace';
 
 const probes = vi.hoisted(() => ({ home: vi.fn(), development: vi.fn(), detail: vi.fn(), order: vi.fn(), customer: vi.fn(), settings: vi.fn() }));
-const pageBackProbe=vi.hoisted(()=>({enabled:false,guardTopbar:false}));
+const pageBackProbe=vi.hoisted(()=>({enabled:false,guardTopbar:false,requested:undefined as (()=>void)|undefined}));
 const workspaces = vi.hoisted(() => ({ version: 0, listeners: new Set<() => void>(), actors: new Map<string, any>(), empty: null as any }));
 vi.mock('./runtime/workspace', async () => {
   const React = await import('react'), { useMistSession } = await import('./runtime/auth');
@@ -34,11 +34,12 @@ vi.mock('./pages/DevListPage', async () => {
   return { DevListPage: function List() { const workspace = useMistWorkspace(); probes.development(); return <section aria-label="开发列表测试接缝">{workspace.state?.devs.map(item => item.name).join(',')}</section>; } };
 });
 vi.mock('./pages/DevDetailPage', async () => {
-  const React = await import('react'), { useNav } = await import('./nav'),{BackLink,Dialog}=await import('../../../components/mist');
+  const React = await import('react'), { useNav } = await import('./nav'),{BackLink,Dialog}=await import('../../../components/mist'),{usePageNavigationGuard}=await import('../../../components/mist/pageNavigation');
   return { DevDetailPage: function Detail() {
-    const nav = useNav(); probes.detail(); const [draft, setDraft] = React.useState(''),[leaving,setLeaving]=React.useState(false);const back=()=>draft?setLeaving(true):nav.go('development');
+    const nav = useNav(); probes.detail(); const [draft, setDraft] = React.useState(''),[leaving,setLeaving]=React.useState(false),pending=React.useRef<(()=>void)|undefined>(undefined);const back=()=>draft?setLeaving(true):nav.go('development');
+    usePageNavigationGuard(proceed=>{if(draft){pending.current=proceed;pageBackProbe.requested=proceed;setLeaving(true);}else proceed();},pageBackProbe.enabled&&pageBackProbe.guardTopbar&&!!draft);
     return <section aria-label="准确对象测试接缝"><output data-testid="exact-route">{JSON.stringify(nav.route)}</output>
-      {pageBackProbe.enabled&&<><BackLink onClick={back} onTopbarBack={pageBackProbe.guardTopbar?back:undefined}>页面自己的返回</BackLink><button onClick={()=>nav.go('orders/detail','order-a')}>转到订单测试页</button><Dialog open={leaving} title="离开测试草稿？" onClose={()=>setLeaving(false)}><button onClick={()=>setLeaving(false)}>继续编辑测试草稿</button></Dialog></>}
+      {pageBackProbe.enabled&&<><BackLink onClick={back} onTopbarBack={pageBackProbe.guardTopbar?back:undefined}>页面自己的返回</BackLink><button onClick={()=>nav.go('orders/detail','order-a')}>转到订单测试页</button><Dialog open={leaving} title="离开测试草稿？" onClose={()=>{pending.current=undefined;setLeaving(false);}}><button onClick={()=>{pending.current=undefined;setLeaving(false);}}>继续编辑测试草稿</button><button onClick={()=>{const proceed=pending.current;pending.current=undefined;setDraft('');setLeaving(false);proceed?.();}}>放弃测试草稿并继续</button></Dialog></>}
       <input aria-label="本批次草稿" value={draft} onChange={event => setDraft(event.target.value)} />
       <button onClick={() => nav.go('development/detail', nav.route.id, { versionId: 'version-a', batchId: 'batch-b', section: 'qc', customerId: 'customer-a', orderLineId: 'line-a', productionId: 'production-a' })}>切换同版本批次</button>
       <button onClick={() => nav.go('development/detail', nav.route.id, { versionId: 'version-b', batchId: 'batch-c', section: 'overview', customerId: 'customer-b', orderLineId: 'line-b', productionId: 'production-b' })}>切换工厂版本</button></section>;
@@ -120,7 +121,7 @@ async function openSearch() {
 }
 function searchInput() { return getByRole(getByRole(host!, 'dialog', { name: '搜索' }), 'textbox') as HTMLInputElement; }
 beforeEach(async () => {
-  pageBackProbe.enabled=false;pageBackProbe.guardTopbar=false;
+  pageBackProbe.enabled=false;pageBackProbe.guardTopbar=false;pageBackProbe.requested=undefined;
   Object.values(probes).forEach(probe => probe.mockClear()); workspaces.actors.clear(); workspaces.listeners.clear(); workspaces.version++;
   workspaces.empty = { ...context('anonymous'), state: null, workspace: null, workspaces: [], loading: false };
   actor = null; override = undefined; requests = []; localStorage.clear(); sessionStorage.clear();
@@ -161,6 +162,24 @@ it.each(['design-system', 'states'])('does not expose the %s showcase through a 
 });
 
 describe('one Mist entry with real authentication and workspace state', () => {
+  it('keeps a dirty page through two queued browser Back requests',async()=>{
+    pageBackProbe.enabled=true;pageBackProbe.guardTopbar=true;await signIn();await mount();await waitFor(()=>expect(probes.home).toHaveBeenCalled());await click(getByRole(host!,'button',{name:'打开准确版本'}));await click(getByRole(host!,'button',{name:'切换同版本批次'}));const depth=history.state.mistDepth,draft=getByRole(host!,'textbox',{name:'本批次草稿'}) as HTMLInputElement;input(draft,'连续返回前的未保存资料');act(()=>{history.back();history.back();});await waitFor(()=>expect(queryByRole(host!,'dialog',{name:'离开测试草稿？'})).not.toBeNull());expect(history.state.mistDepth).toBe(depth);expect(currentRoute().batchId).toBe('batch-b');await click(getByRole(host!,'button',{name:'继续编辑测试草稿'}));expect(draft.value).toBe('连续返回前的未保存资料');
+  });
+  it('does not execute a deferred navigation after the declaring identity has exited',async()=>{
+    pageBackProbe.enabled=true;pageBackProbe.guardTopbar=true;await signIn();await mount();await waitFor(()=>expect(probes.home).toHaveBeenCalled());await click(getByRole(host!,'button',{name:'打开准确版本'}));input(getByRole(host!,'textbox',{name:'本批次草稿'}) as HTMLInputElement,'退出身份前未保存资料');await click(getByRole(getByRole(host!,'navigation',{name:'主导航'}),'button',{name:'开发与寻样'}));const pending=pageBackProbe.requested;expect(pending).toBeTruthy();await act(async()=>auth.logout());await waitFor(()=>expect(queryByRole(host!,'form',{name:'登录'})).not.toBeNull());const url=location.href;await act(async()=>pending?.());expect(location.href).toBe(url);expect(queryByRole(host!,'textbox',{name:'本批次草稿'})).toBeNull();
+  });
+  it('guards browser Forward and keeps the original index when editing continues',async()=>{
+    pageBackProbe.enabled=true;pageBackProbe.guardTopbar=true;await signIn();await mount();await waitFor(()=>expect(probes.home).toHaveBeenCalled());await click(getByRole(host!,'button',{name:'打开准确版本'}));await click(getByRole(host!,'button',{name:'转到订单测试页'}));act(()=>history.back());await waitFor(()=>expect(currentRoute().view).toBe('development/detail'));const depth=history.state.mistDepth,draft=getByRole(host!,'textbox',{name:'本批次草稿'}) as HTMLInputElement;input(draft,'未保存的前进前资料');act(()=>history.forward());await waitFor(()=>expect(queryByRole(host!,'dialog',{name:'离开测试草稿？'})).not.toBeNull());expect(currentRoute().view).toBe('development/detail');expect(history.state.mistDepth).toBe(depth);await click(getByRole(host!,'button',{name:'继续编辑测试草稿'}));expect(draft.value).toBe('未保存的前进前资料');act(()=>history.forward());await waitFor(()=>expect(queryByRole(host!,'dialog',{name:'离开测试草稿？'})).not.toBeNull());await click(getByRole(host!,'button',{name:'放弃测试草稿并继续'}));await waitFor(()=>expect(currentRoute().view).toBe('orders/detail'));
+  });
+  it('guards a multi-entry browser traversal without deleting the current draft or history position',async()=>{
+    pageBackProbe.enabled=true;pageBackProbe.guardTopbar=true;await signIn();await mount();await waitFor(()=>expect(probes.home).toHaveBeenCalled());await click(getByRole(host!,'button',{name:'打开准确版本'}));await click(getByRole(host!,'button',{name:'切换同版本批次'}));const depth=history.state.mistDepth,draft=getByRole(host!,'textbox',{name:'本批次草稿'}) as HTMLInputElement;input(draft,'跨两条历史前的未保存资料');act(()=>history.go(-2));await waitFor(()=>expect(queryByRole(host!,'dialog',{name:'离开测试草稿？'})).not.toBeNull());expect(history.state.mistDepth).toBe(depth);expect(currentRoute().batchId).toBe('batch-b');await click(getByRole(host!,'button',{name:'继续编辑测试草稿'}));expect(draft.value).toBe('跨两条历史前的未保存资料');act(()=>history.go(-2));await waitFor(()=>expect(queryByRole(host!,'dialog',{name:'离开测试草稿？'})).not.toBeNull());await click(getByRole(host!,'button',{name:'放弃测试草稿并继续'}));await waitFor(()=>expect(queryByRole(host!,'region',{name:'首页测试接缝'})).not.toBeNull());
+  });
+  it('asks the page before sidebar navigation and commits only the confirmed destination',async()=>{
+    pageBackProbe.enabled=true;pageBackProbe.guardTopbar=true;await signIn();await mount();await waitFor(()=>expect(probes.home).toHaveBeenCalled());await click(getByRole(host!,'button',{name:'打开准确版本'}));const draft=getByRole(host!,'textbox',{name:'本批次草稿'}) as HTMLInputElement;input(draft,'尚未保存的侧栏切页资料');await click(getByRole(getByRole(host!,'navigation',{name:'主导航'}),'button',{name:'开发与寻样'}));await waitFor(()=>expect(queryByRole(host!,'dialog',{name:'离开测试草稿？'})).not.toBeNull());expect(currentRoute().id).toBe('dev-a');await click(getByRole(host!,'button',{name:'继续编辑测试草稿'}));expect(draft.value).toBe('尚未保存的侧栏切页资料');await click(getByRole(getByRole(host!,'navigation',{name:'主导航'}),'button',{name:'开发与寻样'}));await click(getByRole(host!,'button',{name:'放弃测试草稿并继续'}));await waitFor(()=>expect(new URLSearchParams(location.search).get('view')).toBe('development'));
+  });
+  it('restores browser history while a page decides whether to leave its unsaved draft',async()=>{
+    pageBackProbe.enabled=true;pageBackProbe.guardTopbar=true;await signIn();await mount();await waitFor(()=>expect(probes.home).toHaveBeenCalled());await click(getByRole(host!,'button',{name:'打开准确版本'}));const draft=getByRole(host!,'textbox',{name:'本批次草稿'}) as HTMLInputElement;input(draft,'尚未保存的浏览器返回资料');act(()=>history.back());await waitFor(()=>expect(queryByRole(host!,'dialog',{name:'离开测试草稿？'})).not.toBeNull());expect(currentRoute().id).toBe('dev-a');expect(new URLSearchParams(location.search).get('view')).toBe('development/detail');await click(getByRole(host!,'button',{name:'继续编辑测试草稿'}));expect(draft.value).toBe('尚未保存的浏览器返回资料');act(()=>history.back());await waitFor(()=>expect(queryByRole(host!,'dialog',{name:'离开测试草稿？'})).not.toBeNull());await click(getByRole(host!,'button',{name:'放弃测试草稿并继续'}));await waitFor(()=>expect(queryByRole(host!,'region',{name:'首页测试接缝'})).not.toBeNull());
+  });
   it('does not label an unsaved local form as company data already saved',async()=>{
     await signIn();await mount();await waitFor(()=>expect(probes.home).toHaveBeenCalled());await click(getByRole(host!,'button',{name:'打开准确版本'}));input(getByRole(host!,'textbox',{name:'本批次草稿'}) as HTMLInputElement,'尚未提交的开发参数');expect(host!.querySelector('.mist-sync')?.textContent||'').not.toContain('已保存');expect(workspaces.actors.get('staff-a').run).not.toHaveBeenCalled();
   });

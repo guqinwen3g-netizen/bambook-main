@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {getByRole} from '@testing-library/dom';
 import { DevCreatePage, developmentFormErrors, firstInvalidDevelopmentStep, developmentFactoryOptions } from './DevCreatePage';
 import { Nav } from '../nav';
+import {PageNavigationGuardContext,usePageNavigationController} from '../../../../components/mist/pageNavigation';
 import type { DevelopmentValues, MistState } from '../../../../server/src/shared/mistWorkspace';
 
 const bridge=vi.hoisted(()=>({current:null as any}));
@@ -17,6 +18,8 @@ const values = () => ({
 
 let root:Root|undefined,host:HTMLDivElement;
 const go=vi.fn();
+function GuardedDevelopment(){const navigation=usePageNavigationController();return <PageNavigationGuardContext.Provider value={navigation.register}><Nav.Provider value={{route:{view:'development/new'},go:(view,id,target,options)=>navigation.attempt(()=>go(view,id,target,options)),theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><button onClick={()=>navigation.attempt(()=>go('inventory'))}>查看库存测试入口</button><DevCreatePage/></Nav.Provider></PageNavigationGuardContext.Provider>;}
+async function mountGuarded(){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<GuardedDevelopment/>));}
 const savedValues=():DevelopmentValues=>{const {files,...rest}=values();return {...rest,collaborators:['顾言','沈禾'],sampleQuantity:3};};
 beforeEach(()=>{
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;go.mockReset();
@@ -33,6 +36,15 @@ async function pickType(title='复刻'){const button=[...document.body.querySele
 async function click(text:string){const button=[...document.body.querySelectorAll('button')].find(item=>item.textContent?.trim()===text);expect(button,text).toBeTruthy();await act(async()=>button!.click());}
 
 describe('persisted five-step development creation',()=>{
+  it('continues to the requested page after recovering the original draft save without issuing another write',async()=>{
+    await mountGuarded();await fill('开发对象名称','城市羊毛大衣');await pickType();await fill('客户款号','STYLE-17');await click('查看库存测试入口');bridge.current.pending={kind:'command',command:{type:'development.saveDraft'}};bridge.current.recover=vi.fn(async()=>({requestId:'original-draft',revision:8,result:{draftId:'recovered-draft'}}));await act(async()=>root!.render(<GuardedDevelopment/>));await click('核对原操作结果');expect(bridge.current.run).not.toHaveBeenCalled();expect(bridge.current.recover).toHaveBeenCalledTimes(1);expect(go).toHaveBeenCalledTimes(1);expect(go).toHaveBeenCalledWith('inventory');
+  });
+  it('saves the current draft before continuing to the requested page and releases unload protection',async()=>{
+    bridge.current.run.mockResolvedValue({requestId:'draft-save',revision:1,result:{draftId:'saved-draft'}});await mountGuarded();await fill('开发对象名称','城市羊毛大衣');await pickType();await fill('客户款号','STYLE-17');const before=new Event('beforeunload',{cancelable:true});window.dispatchEvent(before);expect(before.defaultPrevented).toBe(true);await click('查看库存测试入口');expect(getByRole(document.body,'dialog',{name:'离开未保存的开发案？'})).toBeTruthy();await click('保存草稿');expect(bridge.current.run).toHaveBeenCalledTimes(1);expect(bridge.current.run.mock.calls[0][0].type).toBe('development.saveDraft');expect(go).toHaveBeenCalledTimes(1);expect(go).toHaveBeenCalledWith('inventory');const after=new Event('beforeunload',{cancelable:true});window.dispatchEvent(after);expect(after.defaultPrevented).toBe(false);
+  });
+  it('keeps the draft and destination on save failure, and clears the destination when editing continues',async()=>{
+    bridge.current.run.mockRejectedValueOnce(new Error('保存未完成'));await mountGuarded();await fill('开发对象名称','城市羊毛大衣');await pickType();await fill('客户款号','STYLE-17');await click('查看库存测试入口');await click('保存草稿');expect(go).not.toHaveBeenCalled();expect((getByRole(host,'textbox',{name:/^开发对象名称/}) as HTMLInputElement).value).toBe('城市羊毛大衣');const blocked=new Event('beforeunload',{cancelable:true});window.dispatchEvent(blocked);expect(blocked.defaultPrevented).toBe(true);await click('继续编辑');bridge.current.run.mockResolvedValue({requestId:'draft-save-retry',revision:1,result:{draftId:'saved-draft'}});await click('存为草稿');expect(go).toHaveBeenCalledTimes(1);expect(go.mock.calls[0][0]).toBe('development');
+  });
   it('names initiator and request-type options by their own labels',async()=>{
     await mount();const initiators=getByRole(host,'radiogroup',{name:'发起方'}),requests=getByRole(host,'radiogroup',{name:'客户要求类型'});
     expect(getByRole(initiators,'radio',{name:'客户要求'}).getAttribute('aria-checked')).toBe('true');

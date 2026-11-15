@@ -7,6 +7,7 @@ import { ManualLink } from './pages/ManualLink';
 import { exitCompanyManagement } from './runtime/platformAdmin';
 import React from 'react';
 import {PageBackRegistrationContext,usePageBackAction} from '../../../components/mist/pageBack';
+import {PageNavigationGuardContext,usePageNavigationController} from '../../../components/mist/pageNavigation';
 import { buildPages, MODULE_VIEW_SET, PageLoadBoundary, AccountPage, PlatformSettingsPage, PlatformCompanySettingsPage } from './pageRegistry';
 import { PageLoading } from './PageLoading';
 import { ExportConfirmHost } from './runtime/ExportConfirmHost';
@@ -250,12 +251,16 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   // ord7：未查看过时按本人所在业务线落页签：只属面料组的员工默认「面料开发」。
   const myGroups = workspace.state?.memberGroups?.find(g => g.userId === session.user?.id)?.groups ?? [];
   const defaultDevelopmentTab: DevelopmentListTab = myGroups.includes('fabric') && !myGroups.includes('garment') ? 'fabric' : 'garment';
+  const {register:registerNavigationGuard,attempt:attemptNavigation,hasGuard:hasNavigationGuard}=usePageNavigationController();
+  const historyPosition=React.useRef({url:location.href,state:history.state,depth:Number(history.state?.mistDepth)||0});
   const go = React.useCallback((view: string, id?: string, target: RouteTarget = {}, options: GoOptions = {}) => {
+    attemptNavigation(()=>{
     const next = { view, id, ...target }, list = isListState(next, options);
     scrollPosition.current = { key: nextScrollKey(scrollPosition.current, next, list), route: next, list };
-    setRoute(next); writeMistRoute(next, options); setPalette(false); setAI(false); setNotifications(false);
+    setRoute(next); writeMistRoute(next, options); historyPosition.current={url:location.href,state:history.state,depth:Number(history.state?.mistDepth)||0}; setPalette(false); setAI(false); setNotifications(false);
     if (view === 'cockpit') window.dispatchEvent(new CustomEvent('bambook:mist-workbench-refresh'));
-  }, [toast]);
+    });
+  }, [toast,attemptNavigation]);
   // 平台会话退出后回到平台管理登录，不落到公司登录页。
   const platformSession = React.useRef(false);
   React.useEffect(() => {
@@ -273,10 +278,36 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
     try { await exitCompanyManagement(); go('platform-admin', platformCompany?.companyId); } catch (failure) { report(failure); } finally { setExitingSupport(false); }
   };
   React.useEffect(() => { if (personalSection && session.status === 'authenticated') go('account', undefined, { section: personalSection }); }, [personalSection, session.status, go]);
-  React.useEffect(() => {
-    const back = () => { const next = readMistRoute(), list = typeof history.state?.mistListState === 'boolean' ? history.state.mistListState : isListState(next); scrollPosition.current = { key: nextScrollKey(scrollPosition.current, next, list), route: next, list }; setRoute(next); setPalette(false); setAI(false); if (next.view === 'cockpit') window.dispatchEvent(new CustomEvent('bambook:mist-workbench-refresh')); };
-    window.addEventListener('popstate', back); return () => window.removeEventListener('popstate', back);
-  }, []);
+  React.useEffect(()=>{
+    type Position={url:string;state:any;depth:number;route:Route};
+    let restoring:{origin:typeof historyPosition.current;target:Position;delta:number}|undefined;
+    let allowed:Position|undefined;
+    const capture=():Position=>({url:location.href,state:history.state,depth:Number(history.state?.mistDepth)||0,route:readMistRoute()});
+    const apply=(target:Position)=>{
+      const next=target.route,list=typeof target.state?.mistListState==='boolean'?target.state.mistListState:isListState(next);
+      historyPosition.current={url:target.url,state:target.state,depth:target.depth};
+      scrollPosition.current={key:nextScrollKey(scrollPosition.current,next,list),route:next,list};
+      setRoute(next);setPalette(false);setAI(false);
+      if(next.view==='cockpit')window.dispatchEvent(new CustomEvent('bambook:mist-workbench-refresh'));
+    };
+    const back=()=>{
+      const target=capture();
+      if(allowed&&target.url===allowed.url&&target.depth===allowed.depth){allowed=undefined;apply(target);return;}
+      allowed=undefined;
+      if(restoring){
+        if(target.depth!==restoring.origin.depth){history.go(restoring.origin.depth-target.depth);return;}
+        const blocked=restoring;restoring=undefined;historyPosition.current={url:target.url,state:target.state,depth:target.depth};
+        attemptNavigation(()=>{allowed=blocked.target;history.go(-blocked.delta);});return;
+      }
+      if(!hasNavigationGuard()){apply(target);return;}
+      const origin=historyPosition.current,delta=origin.depth-target.depth;
+      if(delta){restoring={origin,target,delta};history.go(delta);return;}
+      // Unknown/legacy history positions still retain the current editor until the page decides.
+      history.replaceState(origin.state,'',origin.url);
+      attemptNavigation(()=>{history.replaceState(target.state,'',target.url);apply(target);});
+    };
+    window.addEventListener('popstate',back);return()=>window.removeEventListener('popstate',back);
+  },[attemptNavigation,hasNavigationGuard]);
   React.useEffect(() => { setPalette(false); setAI(false); setNotifications(false); setOrganizationOpen(false); setMsgs([]); }, [session.sessionKey, workspace.workspace?.id]);
   const previousLocalActor = React.useRef<string|undefined>(undefined);
   React.useEffect(() => {
@@ -431,7 +462,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const shellNotices = (shellNoticeList.length && !noticesHidden) || toastNotice ? [...(noticesHidden ? [] : shellNoticeList), ...(toastNotice ? [toastNotice] : [])] : undefined;
   return (
     <AvatarDirectory people={[...(state?.members ?? []).map(member=>({id:member.userId,name:member.name})),...organization.teams.flatMap(team=>(team.members ?? []).map(person=>({id:person.id,name:person.name,src:person.avatarUrl}))),{id:user.id,name:user.displayName || user.email,src:user.avatarUrl}]}><Nav.Provider value={nav}><MistReviewProvider><MistDensityContext.Provider value={density||'default'}>
-      <PageBackRegistrationContext.Provider value={registerPageBack}><MistAppShell collapsed={collapsed} scrollKey={scrollPosition.current.key} notices={shellNotices} onCloseNotices={() => setHiddenNoticeKey(shellNoticeKey)}
+      <PageNavigationGuardContext.Provider value={registerNavigationGuard}><PageBackRegistrationContext.Provider value={registerPageBack}><MistAppShell collapsed={collapsed} scrollKey={scrollPosition.current.key} notices={shellNotices} onCloseNotices={() => setHiddenNoticeKey(shellNoticeKey)}
         sidebar={<CountedSidebar sections={sections} activeId={base === 'development' ? 'development' : COMPANY_ADMIN_VIEWS.has(base) && !(platformOnly && ['system-settings','settings'].includes(base)) ? 'company-settings' : base}
           onNavigate={navigateModule} collapsed={collapsed} onToggleCollapsed={() => setCollapsed(value => !value)}
           workspace={platformOnly ? { symbol: 'S', name: 'Sylway Cloud', caption: '平台运营', onClick:()=>go('platform-admin') } : platformCompany ? { symbol: platformCompany.companyName.slice(0,1), name: platformCompany.companyName, caption: '平台管理', onClick:()=>go('company-settings') } : { ...organizationEntry({ organization:{...organization,teams:organization.teams.map(team=>({...team,members:team.members?.map(person=>person.id===user.id?{...person,avatarUrl:user.avatarUrl ?? undefined}:person)}))}, department: user.department, teamId: teamView.teamId, onSelect: id => { teamView.select(id); setOrganizationOpen(false); },
@@ -450,7 +481,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
           : !permitted ? <EmptyState icon={ShieldCheck} title={uiText("没有查看权限")} description={uiText("当前账号无法访问此业务。")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />
           : Page ? <TeamViewScope teamId={COMPANY_ADMIN_VIEWS.has(base) || base === 'account' ? 'all' : teamView.teamId} actorId={user.id} teams={organization.teams}><MistPresentedErrorContext.Provider value={workspace.error||undefined}><PageLoadBoundary resetKey={route.view} fallback={retry=><MistPage><Banner tone="bad" title={uiText('页面未能加载')} actions={<Button onClick={retry}>{uiText('重新加载')}</Button>}/></MistPage>}><React.Suspense fallback={<PageLoading />}><Page key={session.sessionKey + ':' + workspace.workspace?.id + ':' + (stablePageRoute?route.view:JSON.stringify(route))} /></React.Suspense></PageLoadBoundary></MistPresentedErrorContext.Provider></TeamViewScope>
           : <EmptyState title={uiText("没有找到此页面")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />}
-      </MistAppShell></PageBackRegistrationContext.Provider>
+      </MistAppShell></PageBackRegistrationContext.Provider></PageNavigationGuardContext.Provider>
       <ExportConfirmHost scope={JSON.stringify([session.sessionKey, user.id, user.companyId, user.roles, user.roleIds, user.permissions, user.permissionCeiling, user.businessAttributes, user.globalBusinessScope, workspace.workspace?.id, workspace.workspace?.access, teamView.teamId, route])} />
       <CommandPalette open={palette} onClose={() => setPalette(false)} query={query} onQueryChange={setQuery} items={commands} />
       <AssistantDrawer key={aiScope} open={ai} onClose={() => setAI(false)} onExpand={aiBusy?undefined:expandAI} messages={[overview(),...msgs,...(aiBusy?[{role:'typing'} as ChatMessage]:[])]} onSend={question=>void send(question)} sub={uiText(aiBusy?'正在生成':undefined)} suggestions={aiBusy?[]:['根据当前事实建议下一步','哪些信息还需要核实']} />

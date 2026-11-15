@@ -14,6 +14,7 @@
 | 组件与样式 | Mist 组件库与令牌 | `components/mist/`、`styles/mist/`；规范见 `docs/mist-atelier/`、`.qoder/skills/bambook-ui/SKILL.md` |
 | 分步编辑焦点（2026-11-16） | 台账、订单、开发、出运及核算/反馈/生产专项编辑器共用轻量 Hook，在编辑区域出现或换步时交给当前控件，无输入/被禁用时交给具名步骤；稳定 callback ref 同时覆盖只读页重开，来源刷新不重抢输入。专项步骤名包含序号，避免与业务字段重名 | `app/runtime/editorFocus.ts#useEditorStepFocus`；`ModuleWorkbench.tsx`、`OrderCreatePage.tsx`、`DevCreatePage.tsx`、`ShipmentsPage.tsx`、`ProductionIntakeEditor.tsx`、`QuotationCostingPage.tsx`、`QuotationFeedbackPage.tsx`、`MarketPages.tsx` |
 | 顶部返回保护（2026-11-16） | `BackLink.onTopbarBack` 显式声明页面接管，顶部复用当前页的保护及业务回程；未声明者保留原历史/所属模块回退。动作保持最新且卸载清理，不以全局历史绕过开发页的未保存确认 | `components/mist/pageBack.ts#usePageBackAction`、`shell.tsx#BackLink`；`ReferenceApp.tsx`；`DevCreatePage.tsx` |
+| 未保存导航（2026-11-16） | 页面显式登记保护；普通导航先决策，浏览器遍历先恢复原历史位置，确认后只重放已请求目标。继续编辑/身份卸载取消旧意图；开发页用同步 dirty ref，保存或恢复原请求成功后继续原目标，失败留页，不重复写入；关闭/刷新使用原生 beforeunload | `components/mist/pageNavigation.ts`；`ReferenceApp.tsx#go` 与 popstate；`DevCreatePage.tsx` |
 | API | `/api/mist/*`：工作区、类型化命令、审批、文件、助手、MCP | `server/src/mist/route.ts`；端点清单见 [`server/src/mist/README.md`](../server/src/mist/README.md) |
 | 本地开发 | `npm run dev:mist`：本地 API 8082 + 前端 3001，数据在 `server/private/mist-local/`（不入库） | `server/src/mist/local.ts`、`standalone.ts` |
 | 员工手册 | `/manual/`（应用顶栏与账号页「使用手册」） | `scripts/manual-site.ts`，见第 7 节 |
