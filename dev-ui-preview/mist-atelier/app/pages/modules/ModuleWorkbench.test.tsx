@@ -359,6 +359,18 @@ it.each(['dialog','page'])('uploads file fields and submits references from a %s
  await act(async()=>getByRole(document.body,'button',{name:'确认保存'}).click());expect(submit).toHaveBeenCalledWith({files:file.id});
 });
 
+it('hands full-page editor focus to the current step without stealing input on a source refresh',async()=>{
+ const submit=vi.fn(async()=>({id:'saved'})),spec:ModuleEditorSpec={title:'新建客户',initialValues:{name:'Pine Studio',note:'原始要求',quantity:'2'},fields:[{key:'name',label:'客户名称',required:true},{key:'note',label:'业务说明',type:'textarea'},{key:'quantity',label:'数量',type:'number',required:true}],sections:[{id:'identity',label:'客户资料',fields:['name','note']},{id:'terms',label:'业务条件',fields:['quantity']}],submit};
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ const page=(input:ModuleEditorSpec)=><MistRoot><ToastProvider><ModuleEditorPage spec={input} onClose={vi.fn()}/></ToastProvider></MistRoot>;
+ await act(async()=>root!.render(page(spec)));expect(document.activeElement).toBe(getByRole(host,'textbox',{name:'客户名称'}));
+ const note=getByRole(host,'textbox',{name:'业务说明'});note.focus();await fill('业务说明','正在输入的业务要求');
+ await act(async()=>root!.render(page({...spec,description:'更新的可用来源'})));expect(document.activeElement).toBe(note);expect((note as HTMLTextAreaElement).value).toBe('正在输入的业务要求');
+ await click('下一步');expect(document.activeElement).toBe(getByRole(host,'spinbutton',{name:'数量'}));
+ await click('下一步');expect(document.activeElement).toBe(getByRole(host,'group',{name:'确认提交'}));expect(getByRole(host,'group',{name:'确认提交'}).textContent).toContain('正在输入的业务要求');
+ await click('上一步');expect(document.activeElement).toBe(getByRole(host,'spinbutton',{name:'数量'}));expect(submit).not.toHaveBeenCalled();
+});
+
 it('translates dialog interface descriptions without translating business input values',async()=>{
  const original=readDevice('locale');try{writeDevice('locale','en-US');const spec:ModuleEditorSpec={title:'解冻往来',description:'Maison Lune · 当前负责人 林澈',initialValues:{reason:'原业务依据保持中文'},fields:[{key:'reason',label:'解冻说明',type:'textarea'}],submit:vi.fn()};host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<MistRoot><ToastProvider><ModuleEditorDialog spec={spec} onClose={vi.fn()}/></ToastProvider></MistRoot>));expect(getByRole(document.body,'dialog',{name:'Restore trading'})).toBeTruthy();expect(document.body.textContent).toContain('Maison Lune · Current owner: 林澈');expect((document.body.querySelector('textarea') as HTMLTextAreaElement).value).toBe('原业务依据保持中文');expect(spec.submit).not.toHaveBeenCalled();}finally{writeDevice('locale',original);}
 });
