@@ -33,6 +33,12 @@ async function pickType(title='复刻'){const button=[...document.body.querySele
 async function click(text:string){const button=[...document.body.querySelectorAll('button')].find(item=>item.textContent?.trim()===text);expect(button,text).toBeTruthy();await act(async()=>button!.click());}
 
 describe('persisted five-step development creation',()=>{
+  it('names initiator and request-type options by their own labels',async()=>{
+    await mount();const initiators=getByRole(host,'radiogroup',{name:'发起方'}),requests=getByRole(host,'radiogroup',{name:'客户要求类型'});
+    expect(getByRole(initiators,'radio',{name:'客户要求'}).getAttribute('aria-checked')).toBe('true');
+    const replicate=getByRole(requests,'radio',{name:'复刻'});await act(async()=>replicate.click());expect(replicate.getAttribute('aria-checked')).toBe('true');
+    expect(getByRole(getByRole(host,'radiogroup',{name:'开发类型'}),'radio',{name:'全新开发'}).getAttribute('aria-checked')).toBe('true');expect(bridge.current.run).not.toHaveBeenCalled();
+  });
   it.each([undefined,'fabric'])('hands focus to the development name on %s entry without creating a record',async(section)=>{
     await mount(undefined,undefined,section);expect(document.activeElement).toBe(getByRole(host,'textbox',{name:/^开发对象名称/}));expect(bridge.current.run).not.toHaveBeenCalled();
   });

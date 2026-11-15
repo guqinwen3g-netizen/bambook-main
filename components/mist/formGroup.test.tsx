@@ -2,7 +2,21 @@
 import React,{act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {expect,it} from 'vitest';
-import {Checkbox,Field,TextInput} from './form';
+import {Checkbox,ChoiceCards,Field,TextInput} from './form';
+import {getAllByRole,getByRole} from '@testing-library/dom';
+
+it('moves and selects radio cards with arrow keys and keeps a single Tab stop',async()=>{
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);const changed:string[]=[];
+ function Example(){const[value,setValue]=React.useState('fabric');return <Field group label="业务类型"><ChoiceCards ariaLabel="业务类型" value={value} onChange={next=>{changed.push(next);setValue(next);}} options={[{value:'fabric',title:'面料'},{value:'garment',title:'成衣'},{value:'service',title:'服务'}]}/></Field>;}
+ const key=async(name:string)=>act(async()=>{document.activeElement!.dispatchEvent(new KeyboardEvent('keydown',{key:name,bubbles:true,cancelable:true}));});
+ try{await act(async()=>root.render(<Example/>));let radios=getAllByRole(host,'radio');expect(radios.map(r=>r.tabIndex)).toEqual([0,-1,-1]);radios[0].focus();await key('ArrowRight');radios=getAllByRole(host,'radio');expect(document.activeElement).toBe(radios[1]);expect(radios[1].getAttribute('aria-checked')).toBe('true');expect(radios.map(r=>r.tabIndex)).toEqual([-1,0,-1]);await key('ArrowUp');expect(document.activeElement).toBe(radios[0]);await key('ArrowLeft');expect(document.activeElement).toBe(radios[2]);await key('Home');expect(document.activeElement).toBe(radios[0]);await key('End');expect(document.activeElement).toBe(radios[2]);expect(changed).toEqual(['garment','fabric','service','fabric','service']);const event=new KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true});document.activeElement!.dispatchEvent(event);expect(event.defaultPrevented).toBe(false);
+ }finally{act(()=>root.unmount());host.remove();}
+});
+it('offers the first unselected radio card on Tab and leaves disabled cards inert',async()=>{
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);const changed:string[]=[];const options=[{value:'a',title:'客户要求'},{value:'b',title:'内部需求'}];
+ try{await act(async()=>root.render(<ChoiceCards ariaLabel="发起方" value="" options={options} onChange={v=>changed.push(v)}/>));expect(getAllByRole(host,'radio').map(r=>r.tabIndex)).toEqual([0,-1]);await act(async()=>root.render(<ChoiceCards ariaLabel="发起方" value="a" options={options} disabled onChange={v=>changed.push(v)}/>));const radio=getByRole(host,'radio',{name:'客户要求'});await act(async()=>{radio.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));});expect(getAllByRole(host,'radio').map(r=>r.tabIndex)).toEqual([-1,-1]);expect(changed).toEqual([]);
+ }finally{act(()=>root.unmount());host.remove();}
+});
 
 it('gives a multi-checkbox group its own name without changing individual control labels or toggling them from the group caption',async()=>{
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);let changes=0;

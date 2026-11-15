@@ -79,10 +79,19 @@ export function Switch({ checked, onChange, label, disabled, ariaLabel }: { chec
 export type Choice<V extends string> = { value: V; title: React.ReactNode; description?: React.ReactNode; icon?: LucideIcon };
 /** 选择卡（大单选）：用于「认可 / 需修改 / 不采用」这类关键决策。 */
 export function ChoiceCards<V extends string>({ options, value, onChange, cols = 3, ariaLabel, disabled }: { options: Choice<V>[]; value: V; onChange: (v: V) => void; cols?: number; ariaLabel?: string; disabled?: boolean }) {
+  const groupRef=React.useRef<HTMLDivElement>(null),tabStop=Math.max(0,options.findIndex(option=>option.value===value));
+  const move=(event:React.KeyboardEvent<HTMLButtonElement>,index:number)=>{
+    if(disabled||!['ArrowRight','ArrowDown','ArrowLeft','ArrowUp','Home','End'].includes(event.key))return;
+    event.preventDefault();
+    const next=event.key==='Home'?0:event.key==='End'?options.length-1:(index+(['ArrowLeft','ArrowUp'].includes(event.key)?-1:1)+options.length)%options.length;
+    const option=options[next];if(!option)return;
+    groupRef.current?.querySelectorAll<HTMLButtonElement>('button[role="radio"]')[next]?.focus();
+    if(option.value!==value)onChange(option.value);
+  };
   return (
-    <div className="mist-choices" role="radiogroup" aria-label={uiText(ariaLabel)} style={{ ['--mist-choice-cols' as string]: cols }}>
-      {options.map(o => (
-        <button key={o.value} type="button" disabled={disabled} role="radio" aria-checked={o.value === value} className="mist-choice" onClick={() => onChange(o.value)}>
+    <div ref={groupRef} className="mist-choices" role="radiogroup" aria-label={uiText(ariaLabel)} style={{ ['--mist-choice-cols' as string]: cols }}>
+      {options.map((o,index) => (
+        <button key={o.value} type="button" disabled={disabled} role="radio" aria-checked={o.value === value} tabIndex={!disabled&&index===tabStop?0:-1} className="mist-choice" onKeyDown={event=>move(event,index)} onClick={() => onChange(o.value)}>
           <b>{o.icon && <Icon icon={o.icon} size="sm" />}{uiText(o.title)}<span className="mist-choice-check" aria-hidden="true"><Icon icon={Check} size="sm" /></span></b>
           {o.description && <small>{uiText(o.description)}</small>}
         </button>

@@ -2,6 +2,7 @@
 import React,{act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
+import {getByRole} from '@testing-library/dom';
 import {MARKET_PAGES} from './MarketPages';
 import {Nav} from '../../nav';
 import {ExportConfirmHost} from '../../runtime/ExportConfirmHost';
@@ -52,6 +53,10 @@ describe('Market explicit detail sections',()=>{
  });
 });
 describe('Mist market screens',()=>{
+ it('hands a new quotation focus to its customer and preserves focus while editing terms',async()=>{
+  await mount('quotations');await click('新建报价');expect(document.activeElement).toBe(getByRole(host,'combobox',{name:'客户'}));
+  const place=host.querySelector('[aria-label="贸易术语指定地点"]') as HTMLInputElement;place.focus();await fill('贸易术语指定地点','上海');expect(document.activeElement).toBe(place);expect(bridge.current.run).not.toHaveBeenCalled();
+ });
  it('carries the exact development customer into a product quotation and saves that customer',async()=>{
   const state=bridge.current.state,product=state.market.products[0];
   state.customers.push({...state.customers[0],id:'c2',name:'来源客户'});

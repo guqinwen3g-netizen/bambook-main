@@ -12,7 +12,7 @@
 | 页面注册 | `view` 即页面身份；模块页按三张映射懒加载 | `app/pageRegistry.tsx`（`MODULE_VIEWS`、`buildPages`）；`moduleMap.ts` 只是迁移期模块清单，其中 `entry` 列不代表当前文件 |
 | 导航与访问 | 路由、页面可见性、公司管理分区 | `app/nav.tsx`、`app/routeAccess.ts`、`app/runtime/accountAccess.ts` |
 | 组件与样式 | Mist 组件库与令牌 | `components/mist/`、`styles/mist/`；规范见 `docs/mist-atelier/`、`.qoder/skills/bambook-ui/SKILL.md` |
-| 分步编辑焦点（2026-11-16） | 台账、独立出运和开发编辑器用同一轻量 Hook 在首次进入/换步交给当前可编辑控件，确认步或输入被 fieldset 禁用时交给具当前步骤名称的分组；来源刷新不重置输入焦点。页内日程、Dialog/Drawer 与移动独立操作栏分别验证 | `app/runtime/editorFocus.ts#useEditorStepFocus`；`ModuleWorkbench.tsx#ModuleEditorPage`、`ShipmentsPage.tsx#ShipmentEditor`、`DevCreatePage.tsx` |
+| 分步编辑焦点（2026-11-16） | 台账、独立出运、开发和报价编辑器用同一轻量 Hook 在首次进入/换步交给当前可编辑控件，确认步或输入被 fieldset 禁用时交给具当前步骤名称的分组；来源刷新不重置输入焦点。页内日程、Dialog/Drawer 与移动独立操作栏分别验证 | `app/runtime/editorFocus.ts#useEditorStepFocus`；`ModuleWorkbench.tsx#ModuleEditorPage`、`ShipmentsPage.tsx#ShipmentEditor`、`DevCreatePage.tsx`、`MarketPages.tsx#QuotationEditor` |
 | API | `/api/mist/*`：工作区、类型化命令、审批、文件、助手、MCP | `server/src/mist/route.ts`；端点清单见 [`server/src/mist/README.md`](../server/src/mist/README.md) |
 | 本地开发 | `npm run dev:mist`：本地 API 8082 + 前端 3001，数据在 `server/private/mist-local/`（不入库） | `server/src/mist/local.ts`、`standalone.ts` |
 | 员工手册 | `/manual/`（应用顶栏与账号页「使用手册」） | `scripts/manual-site.ts`，见第 7 节 |
