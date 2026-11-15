@@ -464,3 +464,24 @@ it('binds an implicit request company at operation time without sharing it betwe
  expect(results.map(row=>row.reviewerId)).toEqual(['leader-a','leader-b']);
  expect((await runWithCompanyContext('b',()=>createApprovalRoutingService({prisma,companyId:'a'}).resolveClaimLeader('requester-a'))).reviewerId).toBe('leader-a');
 });
+
+it.each(['active','inactive'])('prefers the current company job department over a stale %s global primary department',async status=>{
+ const active=(id:string,dept:string|null=null):User=>({...u(id,dept),companyMembers:[{companyId:'company-a',status:'active'}]});
+ const sales:Role={id:'sales-a',companyId:'company-a',code:'role-sales',isSystem:true,name:'业务员'},manager:Role={id:'manager-a',companyId:'company-a',code:'role-sales-manager',isSystem:true,name:'主管'},admin:Role={id:'admin-a',companyId:'company-a',code:'role-super-admin',isSystem:true,name:'总经理'};
+ const prisma=makePrisma({users:[active('requester','old'),active('old-head','old'),active('head','current'),active('boss')],roles:[sales,manager,admin],departments:[{...d('old','old-head'),companyId:'company-a',status},{...d('current','head'),companyId:'company-a'}],userRoles:[ur('requester',sales.id,'current'),ur('head',manager.id,'current'),ur('old-head',manager.id,'old'),ur('boss',admin.id)]});
+ const routing=createApprovalRoutingService({prisma,companyId:'company-a'});
+ expect(await routing.resolveOrderMainReviewers('requester')).toEqual({reviewerIds:['head','boss'],departmentSnapshotId:'current'});
+ expect((await routing.resolveReviewerByDepartment('requester')).reviewerId).toBe('head');
+ expect(await routing.resolveRequesterDepartmentSnapshot('requester')).toEqual({departmentSnapshotId:'current'});
+});
+it('resolves a validated submitted department without reopening an ended requester, within the current company and candidate ceiling',async()=>{
+ const member=(id:string):User=>({...u(id),companyMembers:[{companyId:'company-a',status:'active'}]}),admin:Role={id:'admin-a',companyId:'company-a',code:'role-super-admin',isSystem:true,name:'总经理'};
+ const prisma=makePrisma({users:[member('head'),member('boss')],roles:[admin],departments:[{...d('original','head'),companyId:'company-a'},{...d('foreign','head'),companyId:'company-b'}],userRoles:[ur('boss',admin.id)]});
+ const service=createApprovalRoutingService({prisma,companyId:'company-a',eligibleReviewerIds:['head','boss']});expect(await service.resolveSubmittedOrderMainReviewers('original')).toEqual({reviewerIds:['head','boss'],departmentSnapshotId:'original'});await expect(service.resolveSubmittedOrderMainReviewers('foreign')).rejects.toThrow('提交部门不可核验');
+ await expect(createApprovalRoutingService({prisma,companyId:'company-a',eligibleReviewerIds:[]}).resolveSubmittedOrderMainReviewers('original')).rejects.toMatchObject({code:NO_REVIEWER_RESOLVED});
+});
+it('rejects multiple current company job departments even when the global primary department names one of them',async()=>{
+ const member=(id:string,dept:string|null):User=>({...u(id,dept),companyMembers:[{companyId:'company-a',status:'active'}]}),sales:Role={id:'sales-a',companyId:'company-a',code:'role-sales',isSystem:true,name:'业务员'},second:Role={...sales,id:'second-job',isSystem:false};
+ const prisma=makePrisma({users:[member('requester','one'),member('head-one','one'),member('head-two','two')],roles:[sales,second],departments:[{...d('one','head-one'),companyId:'company-a'},{...d('two','head-two'),companyId:'company-a'}],userRoles:[ur('requester',sales.id,'one'),ur('requester',second.id,'two')]});
+ await expect(createApprovalRoutingService({prisma,companyId:'company-a'}).resolveOrderMainReviewers('requester')).rejects.toThrow('部门归属不唯一');
+});

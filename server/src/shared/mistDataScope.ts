@@ -481,7 +481,7 @@ function directReceivingRejected(a:any,b:any,actorId?:string):bigint|null {
   for(const meta of [old,next]){delete meta.receivingChecks;delete meta.sentQuantity;delete meta.confirmation;}
   return JSON.stringify(left)===JSON.stringify(right)?rejectedDelta:null;
 }
-export function scopedWriteViolation(before: MistState, after: MistState, scope: MistDataScope, incoming?:MaterialReceivingWrite,internalIncoming?:{deliveryId:string;sourceOrderId:string}): { path: string; id: string } | null {
+export function scopedWriteViolation(before: MistState, after: MistState, scope: MistDataScope, incoming?:MaterialReceivingWrite,internalIncoming?:{deliveryId:string;sourceOrderId:string},mainReview?:{orderId:string}): { path: string; id: string } | null {
   const directBefore=incoming?.receiptId?before.fulfillment.receipts.find(r=>r.id===incoming.receiptId&&r.purchaseId===incoming.purchaseId):undefined;
   const directAfter=incoming?.receiptId?after.fulfillment.receipts.find(r=>r.id===incoming.receiptId):undefined;
   const directRejected=directBefore?directReceivingRejected(directBefore,directAfter,incoming?.actorId):null;
@@ -493,6 +493,9 @@ export function scopedWriteViolation(before: MistState, after: MistState, scope:
     const fresh = new Map(right.map(row => [rowKey(path, row), JSON.stringify(row)]));
     for (const id of new Set([...old.keys(), ...fresh.keys()])) {
       if (old.get(id) === fresh.get(id)) continue;
+      // A server-authorized submitted review grants only its exact contract and lines,
+      // never the submitter's other records or an ordinary editor on this order.
+      if(mainReview&&(path==='orders'&&id===mainReview.orderId||path==='orderLines'&&[left.find(row=>rowKey(path,row)===id),right.find(row=>rowKey(path,row)===id)].every(row=>!row||row.orderId===mainReview.orderId)))continue;
       if (old.has(id)) {
         pre ??= scopedVisibility(before, scope, false);
         const shipment = path === 'fulfillment.shipments' ? get(before, path).find(row => row.id === id) : null;

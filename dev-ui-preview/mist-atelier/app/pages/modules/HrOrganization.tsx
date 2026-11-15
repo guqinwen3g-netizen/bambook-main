@@ -80,6 +80,12 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
     return p.status==='active'&&(!profiles.length||profiles.some(e=>e.employmentStatus==='Probation'||e.employmentStatus==='Regular'));
   });
   const selectedHead=form?.kind==='dept'&&form.headId?person(form.headId):undefined;
+  const hasOldMainReviews=form?.kind==='dept'&&!!form.id&&canAssignHead&&session.hasPermission('orders:read')&&(form.headId||null)!==form.originalHeadId&&(workspace.state?.orders??[]).some(order=>order.governance?.rounds?.some(round=>{
+    if(round.status!=='pending')return false;
+    const source=round.approvalSource;
+    return source?.schemaVersion===1&&source.companyId===session.user?.companyId&&source.departmentSnapshotId===form.id||!!form.originalHeadId&&round.reviewerIds.includes(form.originalHeadId);
+  }));
+  const headHint=[selectedHead?.department&&form?.kind==='dept'&&selectedHead.departmentId!==form.id?ui`负责人来自${selectedHead.department}`:'',hasOldMainReviews?uiText('原主单待审保留原指派'):''].filter(Boolean).join(' · ');
   const headOptions=headCandidates.map(p=>({value:p.id,label:p.displayName+(p.department?' · '+p.department:'')}));
   if(form?.kind==='dept'&&form.headId&&!headOptions.some(o=>o.value===form.headId))headOptions.unshift({value:form.headId,label:ui`${selectedHead?.displayName||uiText('原负责人')}（已不可用）`});
   const activeMembers = (team: OrgTeam) => team.members.filter(m => !m.leftAt);
@@ -250,7 +256,7 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
         {formError && <Banner tone="bad" title={uiText("未保存")}>{formError}</Banner>}
         {form.kind === 'dept' ? <FormGrid>
           <Field label={uiText("部门名称")} required full><TextInput value={form.name} disabled={busy} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
-          {canAssignHead&&<Field label={uiText('部门负责人')} full hint={selectedHead?.department&&selectedHead.departmentId!==form.id?ui`负责人来自${selectedHead.department}`:undefined}><Select aria-label={uiText('部门负责人')} value={form.headId} disabled={busy} placeholder={uiText('未指定')} options={headOptions} onChange={e=>setForm({...form,headId:e.target.value})}/></Field>}
+          {canAssignHead&&<Field label={uiText('部门负责人')} full hint={headHint||undefined}><Select aria-label={uiText('部门负责人')} value={form.headId} disabled={busy} placeholder={uiText('未指定')} options={headOptions} onChange={e=>setForm({...form,headId:e.target.value})}/></Field>}
           <Field label={uiText("业务属性")} full hint={uiText("影响本部门全部成员")}><div className="mist-col">{BUSINESS_ATTRIBUTES.map(a => <Checkbox key={a.value} label={uiText(a.label)} checked={form.attributes.includes(a.value)} disabled={busy} onChange={on => setForm({ ...form, attributes: on ? [...form.attributes, a.value] : form.attributes.filter(v => v !== a.value) })} />)}</div></Field>
         </FormGrid> : <FormGrid>
           <Field label={uiText("小组名称")} required><TextInput value={form.name} disabled={busy} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>

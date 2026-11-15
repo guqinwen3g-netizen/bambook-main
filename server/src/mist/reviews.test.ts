@@ -4,16 +4,19 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';import path from 'node:path';
 import {MistRepository} from './repository';import {MistPrivateFiles} from './files';import {MemoryMistDatabase,testActor,testAuthority,testContract} from './__tests__/support';
 import { TEST_SIGNATURE } from './__tests__/signature';
-const observed=vi.hoisted(()=>({requester:'',orderMain:undefined as boolean|undefined,calls:0,mainReviewers:['reviewer'],fabricReviewers:null as string[]|null,unavailable:new Set<string>(),failure:null as Error|null}));
-vi.mock('../auth/tokenHelpers',()=>({loadUserWithRoles:async(_db:any,id:string)=>observed.unavailable.has(id)?null:({id,status:'active',deletedAt:null}),buildLoadedAuthTokenPayload:async(_db:any,u:any)=>({userId:u.id,permissions:['approvals:write'],roles:[],departmentIds:[]})}));
-vi.mock('./context',()=>({mistApprovalAuthority:async(_db:any,actor:any,_kind?:string,_members?:string[],options?:{orderMain?:boolean})=>{
+import {CompanyAccessError} from '../auth/companyAccess';
+const observed=vi.hoisted(()=>({requester:'',orderMain:undefined as boolean|undefined,calls:0,submitted:[] as any[],byDepartment:new Map<string,string[]>(),mainReviewers:['reviewer'],fabricReviewers:null as string[]|null,unavailable:new Set<string>(),companyDenied:new Set<string>(),buildFailure:null as Error|null,failure:null as Error|null}));
+vi.mock('../auth/tokenHelpers',()=>({loadUserWithRoles:async(_db:any,id:string)=>observed.unavailable.has(id)?null:({id,status:'active',deletedAt:null}),buildLoadedAuthTokenPayload:async(_db:any,u:any)=>{if(observed.buildFailure)throw observed.buildFailure;if(observed.companyDenied.has(u.id))throw new CompanyAccessError('COMPANY_ACCESS_DENIED','成员已离开');return{userId:u.id,permissions:['approvals:write'],roles:[],departmentIds:[]};}}));
+vi.mock('./context',()=>({mistApprovalAuthority:async(_db:any,actor:any,_kind?:string,_members?:string[],options?:{orderMain?:boolean;submittedOrderMain?:any})=>{
  observed.requester=actor.userId;observed.orderMain=options?.orderMain;observed.calls++;if(observed.failure)throw observed.failure;
- return {supplier:{},businessReviewerId:'reviewer',orderReviewerIds:{garment:[...observed.mainReviewers],fabric:[...(observed.fabricReviewers??observed.mainReviewers)]}};
+ observed.submitted.push(options?.submittedOrderMain);const scoped=options?.submittedOrderMain&&observed.byDepartment.get(options.submittedOrderMain.source.departmentSnapshotId);
+ const family=options?.submittedOrderMain?.source?.businessLine;
+ return {supplier:{},businessReviewerId:'reviewer',orderReviewerIds:{garment:family&&family!=='garment'?[]:[...(scoped??observed.mainReviewers)],fabric:family&&family!=='fabric'?[]:[...(observed.fabricReviewers??scoped??observed.mainReviewers)]}};
 }}));
 let db:MemoryMistDatabase,auth:ReturnType<typeof testAuthority>,repo:MistRepository,dir:string,wid:string;
 const task=()=>({id:'review-1',kind:'quotation' as const,entityId:'quote-1',title:'报价复核',requesterId:'owner',reviewerIds:['reviewer'],status:'pending' as const,submittedAt:'2026-10-13',requiredPermission:'approvals:write',target:{view:'quotations',id:'quote-1'},details:[{label:'金额',value:'100 USD'}],fileIds:[] as string[]});
 beforeEach(async()=>{
- observed.mainReviewers=['reviewer'];observed.calls=0;observed.fabricReviewers=null;observed.unavailable.clear();observed.failure=null;
+ observed.mainReviewers=['reviewer'];observed.calls=0;observed.submitted=[];observed.byDepartment.clear();observed.fabricReviewers=null;observed.unavailable.clear();observed.companyDenied.clear();observed.buildFailure=null;observed.failure=null;
  dir=await mkdtemp(path.join(tmpdir(),'mist-review-'));db=new MemoryMistDatabase();auth=testAuthority();auth.users.set('reviewer',{active:true,permissions:['approvals:write']});
  const contract:any={...testContract,mistCommandPermission:(command:any)=>command.type==='order.governance.decide'?'orders:write':testContract.mistCommandPermission(command),getMistReviewTasks:(state:any)=>state.reviewTasks||[],applyMistCommand:(state:any,command:any,context:any)=>{if(!['market.quotation.decide','order.governance.decide'].includes(command.type))return testContract.applyMistCommand(state,command,context);const row=state.reviewTasks.find((t:any)=>t.entityId===command.payload.id&&t.status==='pending');if(context.actorId!=='reviewer'||(row.kind==='order'?!context.authority.orderReviewerIds.garment.includes('reviewer'):context.authority.businessReviewerId!=='reviewer'))throw new Error('Wrong authority');if(row.kind==='order'&&command.type!=='order.governance.decide')throw new Error('Wrong order decision command');row.status=command.payload.decision;row.details.push({label:'意见',value:command.payload.note});return{state,result:{id:command.payload.id}};}};
  repo=new MistRepository(db,contract,new MistPrivateFiles(dir),auth.authorize);const w=await repo.create(testActor(),{name:'Private'});wid=w.id;db.workspaces.get(wid).state.reviewTasks=[task()];db.workspaces.get(wid).state.reviewerIds=['reviewer'];
@@ -23,6 +26,41 @@ function seedMainReview(){
  auth.users.get('reviewer')!.permissions.push('orders:write');const row=db.workspaces.get(wid);
  row.state.orders=[{id:'order-1',type:'garment'}];row.state.reviewTasks=[{...task(),id:'order:round-1',kind:'order',entityId:'order-1',requiredPermission:'orders:write',target:{view:'orders/detail',id:'order-1'}}];return row;
 }
+function seedSubmittedMain(){
+ const row=seedMainReview();row.companyId='company-a';db.companyMembers.push({companyId:'company-a',userId:'reviewer',status:'active'});
+ const source={schemaVersion:1,mode:'organization',companyId:'company-a',businessLine:'garment',requesterId:'owner',departmentSnapshotId:'original-department'};
+ row.state.orders[0].governance={rounds:[{id:'round-1',status:'pending',requesterId:'owner',reviewerIds:['reviewer'],approvalSource:source}]};return{row,source,actor:{...testActor('reviewer'),companyId:'company-a'}};
+}
+describe('server-bound submitted main provenance',()=>{
+ it('keeps an old unversioned task read-only when the requester account exists but its company membership ended',async()=>{
+  const{row,actor}=seedSubmittedMain();delete row.state.orders[0].governance.rounds[0].approvalSource;observed.companyDenied.add('owner');expect((await repo.listReviews(actor))[0].canDecide).toBe(false);await expect(repo.decideReview(actor,wid,'order:round-1',{requestId:'legacy-ended-member',expectedRevision:0,decision:'rejected',note:'不得执行'})).rejects.toMatchObject({code:'REQUESTER_UNAVAILABLE',status:409});expect(db.workspaces.get(wid).state.reviewTasks[0].status).toBe('pending');
+ });
+ it('does not mask a real requester directory failure as an ended membership',async()=>{
+  const{row,actor}=seedSubmittedMain();delete row.state.orders[0].governance.rounds[0].approvalSource;observed.buildFailure=new Error('requester directory database unavailable');await expect(repo.listReviews(actor)).rejects.toThrow('requester directory database unavailable');
+ });
+ it('keeps an assigned pending task decidable after the original requester is unavailable',async()=>{
+  const{actor,source}=seedSubmittedMain();observed.unavailable.add('owner');const list=await repo.listReviews(actor);expect(list[0].canDecide).toBe(true);expect(observed.submitted[0]).toEqual({source,reviewerIds:['reviewer']});expect(observed.requester).toBe('reviewer');
+ });
+ it.each(['review','command'])('passes the exact stored provenance through the %s decision entry without reloading an ended requester',async entry=>{
+  const{actor,source}=seedSubmittedMain();observed.unavailable.add('owner');
+  if(entry==='review')await repo.decideReview(actor,wid,'order:round-1',{requestId:'source-decision',expectedRevision:0,decision:'rejected',note:'请补充确认'});
+  else await repo.execute(actor,wid,{requestId:'source-command',expectedRevision:0,command:{type:'order.governance.decide',payload:{id:'order-1',decision:'rejected',note:'请补充确认'}}});
+  expect(observed.submitted.at(-1)).toEqual({source,reviewerIds:['reviewer']});expect(db.workspaces.get(wid).state.reviewTasks[0].status).toBe('rejected');
+ });
+ it('does not share authority between submissions from different original departments by the same requester',async()=>{
+  const{row,source,actor}=seedSubmittedMain();row.state.orders.push({id:'order-2',type:'garment',governance:{rounds:[{id:'round-2',status:'pending',requesterId:'owner',reviewerIds:['reviewer'],approvalSource:{...source,departmentSnapshotId:'second-department'}}]}});row.state.reviewTasks.push({...row.state.reviewTasks[0],id:'order:round-2',entityId:'order-2'});observed.byDepartment.set('original-department',['reviewer']);observed.byDepartment.set('second-department',[]);
+  const list=await repo.listReviews(actor);expect(list.find(r=>r.entityId==='order-1')?.canDecide).toBe(true);expect(list.find(r=>r.entityId==='order-2')?.canDecide).toBe(false);expect(observed.calls).toBe(2);
+ });
+ it('keeps the same requester and department separate when submitted reviews belong to different business lines',async()=>{
+  const{row,source,actor}=seedSubmittedMain();row.state.orders.push({id:'fabric-order',type:'fabric',governance:{rounds:[{id:'fabric-round',status:'pending',requesterId:'owner',reviewerIds:['reviewer'],approvalSource:{...source,businessLine:'fabric'}}]}});row.state.reviewTasks.push({...row.state.reviewTasks[0],id:'order:fabric-round',entityId:'fabric-order'});const list=await repo.listReviews(actor);expect(list.every(r=>r.canDecide)).toBe(true);expect(observed.calls).toBe(2);
+ });
+ it.each([{companyId:'company-b'},{requesterId:'someone-else'},{businessLine:'fabric'},{schemaVersion:2}])('keeps invalid stored source %j read-only and rejects its decision without writes',async patch=>{
+  const{row,actor}=seedSubmittedMain();Object.assign(row.state.orders[0].governance.rounds[0].approvalSource,patch);const before=structuredClone(row);expect((await repo.listReviews(actor))[0].canDecide).toBe(false);expect(observed.calls).toBe(0);await expect(repo.decideReview(actor,wid,'order:round-1',{requestId:'bad-source',expectedRevision:0,decision:'rejected',note:'不得执行'})).rejects.toMatchObject({status:409});expect(db.workspaces.get(wid)).toEqual(before);
+ });
+ it('does not treat a source supplied in the command payload as stored provenance',async()=>{
+  const{row,actor}=seedSubmittedMain();delete row.state.orders[0].governance.rounds[0].approvalSource;observed.unavailable.add('owner');await expect(repo.execute(actor,wid,{requestId:'forged-source',expectedRevision:0,command:{type:'order.governance.decide',payload:{id:'order-1',decision:'rejected',note:'不得执行',approvalSource:{schemaVersion:1,mode:'organization',companyId:'company-a',businessLine:'garment',requesterId:'owner',departmentSnapshotId:'forged'}}}} as any)).rejects.toMatchObject({status:409});expect(db.workspaces.get(wid).state.reviewTasks[0].status).toBe('pending');
+ });
+});
 it('makes a frozen main review read-only after current approval qualification is revoked, and allows a later valid restoration',async()=>{
  const row=seedMainReview(),before=structuredClone(row),receipts=db.receipts.size;
  expect((await repo.listReviews(testActor('reviewer')))[0].canDecide).toBe(true);

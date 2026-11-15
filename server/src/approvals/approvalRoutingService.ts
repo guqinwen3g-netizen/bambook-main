@@ -86,24 +86,26 @@ export function createApprovalRoutingService(opts: ApprovalRoutingServiceOptions
   }
   async function requesterSource(requesterId: string) {
     const requester = await prisma.userAccount.findFirst({ where: { id: requesterId, ...activeUserWhere() }, select: { id: true, primaryDeptId: true } });
-    if (!requester) throw noReviewerError(requesterId, DEPT_NONE, '申请人不是当前公司的在职成员');
+    if (!requester) throw noReviewerError(requesterId, DEPT_NONE, '申请人不是当前公司的在职成员','REQUESTER_UNAVAILABLE');
     let dept = requester.primaryDeptId ? await readDepartment(requester.primaryDeptId) : null;
-    // A shared account's primary department may belong to another company. Only use an unambiguous assignment here.
-    if (companyId && !dept) {
+    // Company job assignments are authoritative after transfers/retirement. The shared
+    // account's primary field can still name an older department in this same company.
+    if (companyId) {
       const rows = await prisma.userRole.findMany({ where: { userId: requesterId, role: { companyId }, department: { companyId, status: 'active' } }, select: { departmentId: true } });
       const ids = [...new Set(rows.map(row => row.departmentId).filter((id): id is string => !!id))];
-      if (ids.length > 1) throw noReviewerError(requesterId, DEPT_NONE, '当前公司部门归属不唯一');
+      if (ids.length > 1) throw noReviewerError(requesterId, DEPT_NONE, '当前公司部门归属不唯一','REQUESTER_DEPARTMENT_AMBIGUOUS');
       if (ids.length === 1) dept = await readDepartment(ids[0]);
     }
     return { requester, dept, departmentSnapshotId: dept?.id ?? (companyId ? DEPT_NONE : requester.primaryDeptId ?? DEPT_NONE) };
   }
 
   // ── 内部：构造 fail-closed 错误 ──
-  function noReviewerError(requesterId: string, snapshotId: string, reason: string): Error & { code: string } {
+  function noReviewerError(requesterId: string, snapshotId: string, reason: string,sourceFailure?:string): Error & { code: string;sourceFailure?:string } {
     const err = new Error(
       `${NO_REVIEWER_RESOLVED}: 申请人 ${requesterId}（部门快照=${snapshotId}）解析不到任何审批人 — ${reason}`,
     ) as Error & { code: string };
     err.code = NO_REVIEWER_RESOLVED;
+    if(sourceFailure)Object.assign(err,{sourceFailure});
     return err;
   }
 
@@ -230,7 +232,26 @@ export function createApprovalRoutingService(opts: ApprovalRoutingServiceOptions
     const requestCompany = opts.companyId !== undefined ? opts.companyId : currentCompanyId();
     if (client && client !== prisma || requestCompany !== companyId) return createApprovalRoutingService({ prisma: client ?? prisma, companyId: requestCompany, eligibleReviewerIds }).resolveOrderMainReviewers(requesterId);
     if (!companyId) throw noReviewerError(requesterId, DEPT_NONE, '主单组织审批须绑定当前公司');
-    const { dept, departmentSnapshotId } = await requesterSource(requesterId), ids = new Set<string>(), seen = new Set<string>();
+    const { dept, departmentSnapshotId } = await requesterSource(requesterId);
+    return mainDepartmentReviewers(dept,departmentSnapshotId,requesterId);
+  }
+  async function resolveRequesterDepartmentSnapshot(requesterId:string,client?:any):Promise<{departmentSnapshotId:string}>{
+    const requestCompany=opts.companyId!==undefined?opts.companyId:currentCompanyId();
+    if(client&&client!==prisma||requestCompany!==companyId)return createApprovalRoutingService({prisma:client??prisma,companyId:requestCompany,eligibleReviewerIds}).resolveRequesterDepartmentSnapshot(requesterId);
+    if(!companyId)throw noReviewerError(requesterId,DEPT_NONE,'主单归属须绑定当前公司');
+    return{departmentSnapshotId:(await requesterSource(requesterId)).departmentSnapshotId};
+  }
+  /** Only a server-validated submitted source may call this; an ended requester is not re-routed. */
+  async function resolveSubmittedOrderMainReviewers(departmentSnapshotId:string,client?:any):Promise<OrderMainReviewerResolution>{
+    const requestCompany=opts.companyId!==undefined?opts.companyId:currentCompanyId();
+    if(client&&client!==prisma||requestCompany!==companyId)return createApprovalRoutingService({prisma:client??prisma,companyId:requestCompany,eligibleReviewerIds}).resolveSubmittedOrderMainReviewers(departmentSnapshotId);
+    if(!companyId)throw noReviewerError('submitted-order',departmentSnapshotId,'主单归属须绑定当前公司');
+    const dept=departmentSnapshotId===DEPT_NONE?null:await readDepartment(departmentSnapshotId);
+    if(!dept&&departmentSnapshotId!==DEPT_NONE)throw noReviewerError('submitted-order',departmentSnapshotId,'提交部门不可核验');
+    return mainDepartmentReviewers(dept,departmentSnapshotId,'submitted-order');
+  }
+  async function mainDepartmentReviewers(dept:Awaited<ReturnType<typeof readDepartment>>,departmentSnapshotId:string,requesterId:string):Promise<OrderMainReviewerResolution>{
+    const ids = new Set<string>(), seen = new Set<string>();
     let cursor: string | null = dept?.status === 'active' ? dept.id : null;
     for (let depth = 0; depth < MAX_UPSTREAM_DEPTH && cursor && !seen.has(cursor); depth++) {
       seen.add(cursor);
@@ -275,7 +296,7 @@ export function createApprovalRoutingService(opts: ApprovalRoutingServiceOptions
     throw noReviewerError(requesterId, departmentSnapshotId, '索赔须配置有效 ADMIN 总领导；多位候选时请明确部门领导后重新提交');
   }
 
-  return { resolveReviewerByDepartment, resolveOrderMainReviewers, resolveClaimLeader };
+  return { resolveReviewerByDepartment, resolveOrderMainReviewers, resolveRequesterDepartmentSnapshot, resolveSubmittedOrderMainReviewers, resolveClaimLeader };
 }
 
 export type ApprovalRoutingService = ReturnType<typeof createApprovalRoutingService>;

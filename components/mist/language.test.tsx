@@ -125,3 +125,6 @@ it('translates order readiness labels, quantity summaries and receipts without c
 it('translates department appointments and stale-head recovery while preserving the department name',()=>{
  writeDevice('locale','en-US');expect(uiText('部门负责人')).toBe('Department head');expect(ui`负责人来自${'面料一部'}`).toBe('Head belongs to 面料一部');expect(ui`${'林一'}（已不可用）`).toBe('林一 (unavailable)');expect(uiText('部门负责人已更新，请重新打开后核对。')).toBe('The department head has changed. Reopen the department and review it.');writeDevice('locale','zh-CN');expect(ui`负责人来自${'面料一部'}`).toBe('负责人来自面料一部');
 });
+it('translates the retained main assignment fact without exposing technical source fields',()=>{
+ writeDevice('locale','en-US');expect(uiText('原主单待审保留原指派')).toBe('Existing main reviews keep their assigned reviewers');expect(uiText('原订单审批归属不可核验，请联系管理员')).toBe('The submitted order review source cannot be verified. Contact an administrator.');expect(uiText('申请人的部门归属不可核验，请联系管理员')).toBe('The requester’s department cannot be verified. Contact an administrator.');writeDevice('locale','zh-CN');expect(uiText('原主单待审保留原指派')).toBe('原主单待审保留原指派');
+});

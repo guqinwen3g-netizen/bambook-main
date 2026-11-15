@@ -3,6 +3,15 @@ import { applyDataScope, scopedWriteViolation } from './mistDataScope';
 import { assertOrderDepositCovered, orderDepositCoverage, orderFundingCoveredAmount } from './mistOrderFunding';
 import { projectState } from '../mist/access';
 
+it('limits a server-authorized main decision to its exact contract and line changes',()=>{
+ const before:any={customers:[],crm:{opportunities:[],followUps:[]},devs:[],market:{quotations:[],suppliers:[]},orders:[{id:'reviewed',ownerId:'other',type:'fabric'},{id:'unrelated',ownerId:'other',type:'fabric'}],orderLines:[{id:'reviewed-line',orderId:'reviewed',qty:1},{id:'unrelated-line',orderId:'unrelated',qty:1}],fulfillment:{},platform:{},events:[],tasks:[],notifications:[],calendar:[]},scope={userIds:['reviewer'],teamIds:[]};
+ const after=structuredClone(before);after.orders[0].governance={status:'approved'};after.orderLines[0].qty=2;expect(scopedWriteViolation(before,after,scope)).toMatchObject({path:'orders',id:'reviewed'});expect(scopedWriteViolation(before,after,scope,undefined,undefined,{orderId:'reviewed'})).toBeNull();
+ const replaced=structuredClone(after);replaced.orderLines=replaced.orderLines.filter((l:any)=>l.id!=='reviewed-line');replaced.orderLines.push({id:'new-reviewed-line',orderId:'reviewed',qty:3});expect(scopedWriteViolation(before,replaced,scope,undefined,undefined,{orderId:'reviewed'})).toBeNull();
+ const otherOrder=structuredClone(after);otherOrder.orders[1].due='2026-12-28';expect(scopedWriteViolation(before,otherOrder,scope,undefined,undefined,{orderId:'reviewed'})).toMatchObject({path:'orders',id:'unrelated'});
+ const otherLine=structuredClone(after);otherLine.orderLines[1].qty=2;expect(scopedWriteViolation(before,otherLine,scope,undefined,undefined,{orderId:'reviewed'})).toMatchObject({path:'orderLines',id:'unrelated-line'});
+ const reparented=structuredClone(after);reparented.orderLines[1].orderId='reviewed';expect(scopedWriteViolation(before,reparented,scope,undefined,undefined,{orderId:'reviewed'})).toMatchObject({path:'orderLines',id:'unrelated-line'});
+});
+
 it('keeps an upstream development read-only when a team only collaborates on its order', () => {
   const state: any = {
     customers: [{ id: 'customer', ownerId: 'another' }],

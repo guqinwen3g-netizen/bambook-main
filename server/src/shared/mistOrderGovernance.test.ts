@@ -3,6 +3,23 @@ import {applyMistCommand,createMistState,type MistContext,type MistState} from '
 import {createOrderGovernance,applyOrderGovernanceCommand,assertOrderApproved,getOrderGovernanceReviews,type OrderGovernanceFields,type OrderGovernanceInput,type OrderGovernanceCommand} from './mistOrderGovernance';
 import {assertOrderFundingIntegrity,orderFundingCoveredAmount} from './mistOrderFunding';
 function fixture(){let n=0;const c:MistContext={id:()=>`gov-${++n}`,now:'2026-10-13T08:00:00Z',actorName:'业务员',actorId:'sales',authority:{supplier:{},orderReviewerIds:{garment:['leader','sales'],fabric:['fabric-leader']}}};const state=createMistState(c,'empty');state.customers.push({id:'customer',name:'客户',code:'C',country:'CN',city:'',industry:'',owner:'业务员',grade:'',currency:'USD',terms:'',incoterm:'',categories:'',creditLimit:0,since:''});state.files.push({id:'contract-file',name:'confirmed.pdf',mimeType:'application/pdf',size:10,storageKey:'workspace/contract-file',createdAt:c.now});const contract:OrderGovernanceInput={kind:'external',poNumber:'PO-001',confirmationFileIds:['contract-file'],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,preShipmentPercent:30,paymentNote:'30%定金，余款按合同',incoterm:'FOB',deliveryPlace:'上海'};const order={id:'order',code:'SO-1',type:'garment' as const,customerId:'customer',customer:'客户',season:'AW26',lines:1,qty:10,amount:100,currency:'USD',due:'2026-12-01',progress:0,state:'订单草稿',tone:'neutral' as const,owner:'业务员',img:'coat' as const,checklist:[],handoffAt:null,createdAt:c.now,updatedAt:c.now,governance:createOrderGovernance(c,contract)};state.orders.push(order);state.orderLines.push({id:'line',orderId:order.id,fulfillmentMode:'cmt' as const,cmtIncludedItems:[],name:'外套',style:'A',img:'coat',qty:10,unit:'件',price:10,made:0,qc:0});const run=(command:OrderGovernanceCommand,actor=c)=>applyOrderGovernanceCommand(state,command,actor);return{state,c,contract,order,run};}
+describe('submitted main review organization source',()=>{
+ const source=()=>({schemaVersion:1,mode:'organization',companyId:'company-a',businessLine:'garment',requesterId:'sales',departmentSnapshotId:'original-department'});
+ it('freezes only the trusted server source and does not keep a mutable authority reference',()=>{
+  const f=fixture(),origin=source();(f.c.authority as any).orderMainApprovalSources={garment:origin};
+  f.run({type:'order.governance.submit',payload:{orderId:'order',approvalSource:{...origin,departmentSnapshotId:'forged-client-department'}}} as any);
+  expect((f.order.governance.rounds[0] as any).approvalSource).toEqual(source());origin.departmentSnapshotId='later-department';expect((f.order.governance.rounds[0] as any).approvalSource.departmentSnapshotId).toBe('original-department');
+ });
+ it('does not accept a client source when no server source was supplied',()=>{
+  const f=fixture();f.run({type:'order.governance.submit',payload:{orderId:'order',approvalSource:source()}} as any);expect((f.order.governance.rounds[0] as any).approvalSource).toBeUndefined();
+ });
+ it.each([{schemaVersion:0},{companyId:''},{businessLine:'fabric'},{requesterId:'someone-else'},{departmentSnapshotId:''},{mode:{toString:null}},{reviewerIds:['forged-reviewer']}])('rejects a mismatched or incomplete trusted source %j without a partial round',patch=>{
+  const f=fixture(),before=structuredClone(f.state);(f.c.authority as any).orderMainApprovalSources={garment:{...source(),...patch}};expect(()=>f.run({type:'order.governance.submit',payload:{orderId:'order'}})).toThrow('审批归属');expect(f.state).toEqual(before);
+ });
+ it('keeps the old returned source when a new submission uses a different department',()=>{
+  const f=fixture();(f.c.authority as any).orderMainApprovalSources={garment:source()};f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.run({type:'order.governance.decide',payload:{id:'order',decision:'rejected',note:'补充书面确认'}},{...f.c,actorId:'leader'});const old=structuredClone(f.order.governance.rounds[0]);(f.c.authority as any).orderMainApprovalSources={garment:{...source(),departmentSnapshotId:'new-department'}};f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:f.contract}});f.run({type:'order.governance.submit',payload:{orderId:'order'}});expect(f.order.governance.rounds[0]).toEqual(old);expect((f.order.governance.rounds[1] as any).approvalSource.departmentSnapshotId).toBe('new-department');
+ });
+});
 describe('formal order governance',()=>{
  it.each([undefined,null,0,{},[],'',' '])('rejects an invalid approval identifier %s before interpreting review variants',id=>{
   const f=fixture(),before=structuredClone(f.state);let error:unknown;

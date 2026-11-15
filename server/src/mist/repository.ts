@@ -9,6 +9,8 @@ import type { MistState, MistCommand, MistContext } from '../shared/mistWorkspac
 import { freshMistAuthority, type FreshAuthority } from './authority';
 import { fail, MistApiError } from './errors';
 import { mistApprovalAuthority } from './context';
+import {parseOrderMainApprovalSource,type SubmittedOrderMain} from '../shared/mistOrderApprovalSource';
+import {CompanyAccessError} from '../auth/companyAccess';
 import type { MistReviewTask } from '../shared/mistReview';
 const REVIEW_COMMAND_BY_KIND = {
   procurement:'fulfillment.procurement.decide',procurementAmendment:'fulfillment.procurement.amend.decide',quotation:'market.quotation.decide',
@@ -989,6 +991,7 @@ export class MistRepository {
         const fabricCandidate=allocating&&fabricAccess?.[allocating.lineId]?.candidates.find(c=>c.fabricOrderId===allocating.fabricOrderId&&c.fabricLineId===allocating.fabricLineId&&row.state.orderLines.some(l=>l.id===allocating.lineId&&l.orderId===allocating.orderId));
         const confirming=input.command?.type==='fulfillment.materials.confirm'?input.command.payload:undefined;
         const incoming=confirming?Object.values(fabricAccess||{}).flatMap(a=>a.deliveries).find(d=>d.id===confirming.id&&d.kind===confirming.kind):undefined;
+        const assignedMainReview=input.command?.type==='order.governance.decide'?this.reviews(row.state).find(t=>t.kind==='order'&&t.id.startsWith('order:')&&t.status==='pending'&&t.entityId===input.command.payload.id&&t.reviewerIds.includes(actor.userId)&&hasScope(actor,t.requiredPermission as any)):undefined;
         const crossRefs=new Set([...(crossTarget?[crossTarget]:[]),...(crossDirectTarget?[crossDirectTarget]:[]),...(fabricCandidate?[fabricCandidate.fabricOrderId,fabricCandidate.fabricLineId]:[]),...(incoming?[incoming.id]:[])]);
         if (earlyScope && !scopeManagement && scopedReferenceViolation(row.state, earlyScope, input.command?.payload, ['market.quotation.save','order.create','order.governance.saveDraft'].includes(input.command?.type),crossRefs)) fail('NOT_FOUND', '来源记录不存在或不在当前账号的业务范围内', 404);
         if(upload&&input.claimId!==undefined)activeUploadClaim(row.state,input.claimId);
@@ -1011,9 +1014,10 @@ export class MistRepository {
           const reviews=kind?this.reviews(row.state):[];
           const matches=(task:MistReviewTask)=>task.kind===kind&&(kind==='risk'?task.entityId===payload?.escalationId&&task.target.id===payload?.id:task.entityId===payload?.id);
           const review=reviews.find(task=>task.status==='pending'&&matches(task))??reviews.find(matches);
-          const subject=review?await this.reviewSubject(db,actor,review.requesterId):actor;
           const orderMain=input.command.type==='order.governance.submit'||input.command.type==='order.governance.decide'&&review?.id.startsWith('order:')===true;
-          context.authority = await mistApprovalAuthority(db,subject,input.command.type,candidateIds(row),{orderMain});
+          const submittedOrderMain=orderMain&&review?this.submittedMainReview(row,review):undefined;
+          const subject=submittedOrderMain?actor:review?await this.reviewSubject(db,actor,review.requesterId):actor;
+          context.authority = await mistApprovalAuthority(db,subject,input.command.type,candidateIds(row),{orderMain,submittedOrderMain});
         }
         if(input.command && (MIST_MEMBER_DIRECTORY_COMMANDS.includes(input.command.type) || input.command.type === 'seal.save')) context.members = await this.memberDirectory(db,row,actor);
         if(input.command?.type?.startsWith('teamScope.')) context.teams = await companyTeams(db,row.companyId);
@@ -1140,7 +1144,7 @@ export class MistRepository {
         // 行级范围写侧：受限岗位不能改看不到的业务，也不能在看不到的业务下新建。
         const incomingSource=incoming&&row.state.fulfillment.purchases.find(p=>p.id===incoming.purchaseId);
         const internalIncoming=['order.internal.receive','order.internal.reverseCheck'].includes(input.command?.type)?row.state.internalDeliveries?.find(d=>d.id===input.command.payload.id&&d.receiverId===actor.userId):undefined;
-        const scope = scopeOf(row), violation = scope ? scopedWriteViolation(row.state, applied.state, scope, incoming&&incomingSource?{...(incoming.kind==='issue'?{issueId:incoming.id}:{receiptId:incoming.id,purchaseId:incoming.purchaseId,actorId:actor.userId}),sourceOrderId:incomingSource.orderId}:undefined,internalIncoming?{deliveryId:internalIncoming.id,sourceOrderId:internalIncoming.orderId}:undefined) : null;
+        const scope = scopeOf(row), violation = scope ? scopedWriteViolation(row.state, applied.state, scope, incoming&&incomingSource?{...(incoming.kind==='issue'?{issueId:incoming.id}:{receiptId:incoming.id,purchaseId:incoming.purchaseId,actorId:actor.userId}),sourceOrderId:incomingSource.orderId}:undefined,internalIncoming?{deliveryId:internalIncoming.id,sourceOrderId:internalIncoming.orderId}:undefined,assignedMainReview?{orderId:assignedMainReview.entityId}:undefined) : null;
         if (violation) fail('NOT_FOUND', '记录不存在或不在当前账号的业务范围内', 404);
         if (concurrent) {
           if (!changeKeys) fail('REVISION_CONFLICT', '公司已被他人更新，本次修改范围过大无法自动合并，请刷新后重试', 409);
@@ -1272,6 +1276,15 @@ export class MistRepository {
     return record.id;
   }
   /** Both command and review entry points rebuild routing from the current requester, while the actor remains the decision maker. */
+  private submittedMainReview(row:MistWorkspaceRow,task:MistReviewTask):SubmittedOrderMain|undefined{
+    if(task.kind!=='order'||!task.id.startsWith('order:'))return;
+    const order=row.state.orders?.find(o=>o.id===task.entityId),round=order?.governance?.rounds.find(r=>'order:'+r.id===task.id);
+    // Unversioned historical rounds keep their old gate; never infer/backfill a past appointment.
+    if(round?.approvalSource===undefined)return;
+    const source=parseOrderMainApprovalSource(round.approvalSource,{companyId:row.companyId??'',businessLine:order!.type,requesterId:task.requesterId});
+    if(!source||round.requesterId!==task.requesterId||!Array.isArray(round.reviewerIds)||!round.reviewerIds.length||round.reviewerIds.some(id=>typeof id!=='string'||!id||id!==id.trim()))fail('REQUESTER_UNAVAILABLE','原订单审批归属不可核验，请联系管理员',409);
+    return{source,reviewerIds:[...new Set(round.reviewerIds)]};
+  }
   private async reviewSubject(db:any,actor:TokenPayload,requesterId:string,label='申请账号'):Promise<TokenPayload>{
     if((actor as any).mistLocal===true && process.env.MIST_LOCAL_WORKSPACE==='1' && process.env.NODE_ENV!=='production'){
       if(!MIST_LOCAL_PROFILES.some(p=>p.id===requesterId))fail('REQUESTER_UNAVAILABLE',label==='申请账号'?'本地申请身份无效':`${label}无效`,409);
@@ -1279,7 +1292,8 @@ export class MistRepository {
     }
     const requester=await loadUserWithRoles(db,requesterId);
     if(!requester||requester.status!=='active'||requester.deletedAt)fail('REQUESTER_UNAVAILABLE',`${label}当前不可核验，请联系管理员`,409);
-    return buildLoadedAuthTokenPayload(db,requester,actor.companyId ?? null);
+    try{return await buildLoadedAuthTokenPayload(db,requester,actor.companyId ?? null);}
+    catch(error){if(error instanceof CompanyAccessError)fail('REQUESTER_UNAVAILABLE',`${label}当前不可核验，请联系管理员`,409);throw error;}
   }
   async listReviews(prior:TokenPayload){return this.transact(async db=>{
     const actor=await this.authorize(db,prior);
@@ -1297,17 +1311,17 @@ export class MistRepository {
           const order=(row.state as MistState).orders?.find(item=>item.id===task.entityId);
           if(!order||!['garment','fabric'].includes(order.type))canDecide=false;
           else{
-            if(!mainAuthorities.has(task.requesterId)){
-              try{
-                const subject=await this.reviewSubject(db,actor,task.requesterId);
-                mainAuthorities.set(task.requesterId,await mistApprovalAuthority(db,subject,'order.governance.decide',candidateIds(row),{orderMain:true}));
-              }catch(error){
-                if(!(error instanceof MistApiError)||error.code!=='REQUESTER_UNAVAILABLE')throw error;
-                mainAuthorities.set(task.requesterId,null);
+            try{
+              const submittedOrderMain=this.submittedMainReview(row,task),key=submittedOrderMain?JSON.stringify([task.requesterId,submittedOrderMain.source,[...submittedOrderMain.reviewerIds].sort()]):task.requesterId;
+              if(!mainAuthorities.has(key)){
+                const subject=submittedOrderMain?actor:await this.reviewSubject(db,actor,task.requesterId);
+                mainAuthorities.set(key,await mistApprovalAuthority(db,subject,'order.governance.decide',candidateIds(row),{orderMain:true,submittedOrderMain}));
               }
+              canDecide=mainAuthorities.get(key)?.orderReviewerIds?.[order.type]?.includes(actor.userId)===true;
+            }catch(error){
+              if(!(error instanceof MistApiError)||error.code!=='REQUESTER_UNAVAILABLE')throw error;
+              canDecide=false;
             }
-            // Keep the submitted reviewer snapshot readable; only current decision eligibility changes.
-            canDecide=mainAuthorities.get(task.requesterId)?.orderReviewerIds?.[order.type]?.includes(actor.userId)===true;
           }
         }
         result.push({workspaceId:row.id,workspaceName:row.name,revision:row.revision,
@@ -1365,14 +1379,15 @@ export class MistRepository {
       if(!task||!task.reviewerIds.includes(actor.userId))fail('NOT_FOUND','该审批不属于当前账号',404);
       await this.authorize(db,prior,task.requiredPermission);
       if(task.status!=='pending')fail('REVIEW_RESOLVED','审批已处理，请刷新记录',409);
-      const subject=await this.reviewSubject(db,actor,task.requesterId);
+      const submittedOrderMain=this.submittedMainReview(row,task);
+      const subject=submittedOrderMain?actor:await this.reviewSubject(db,actor,task.requesterId);
       const type=REVIEW_COMMAND_BY_KIND[task.kind];
       // 风险申请：审批结果回到原风险记录（target.id），并精确对应本次申请（entityId）。
       const command={type,payload:task.kind==='risk'?{id:task.target.id,escalationId:task.entityId,decision:input.decision,note:input.note}:{id:task.entityId,decision:input.decision,note:input.note}} as MistCommand;
       if(!mistCommandRequiresSignature(command)&&signatureSvg)fail('INVALID_INPUT','该操作不需要签字',422);
       // 审批人所见版本落后时：只要期间没有人改过本次审批写入的同一记录，就在最新状态上重新执行审批门禁后落库；否则要求刷新核对。
       const concurrent=row.revision===input.expectedRevision?undefined:await this.concurrentChanges(db,workspaceId,row.revision,input.expectedRevision,type);
-      const context=this.context(actor,row.state);context.authority=await mistApprovalAuthority(db,subject,type,candidateIds(row),{orderMain:task.kind==='order'&&task.id.startsWith('order:')});
+      const context=this.context(actor,row.state);context.authority=await mistApprovalAuthority(db,subject,type,candidateIds(row),{orderMain:task.kind==='order'&&task.id.startsWith('order:'),submittedOrderMain});
       if(MIST_MEMBER_DIRECTORY_COMMANDS.includes(type))context.members=await this.memberDirectory(db,row,actor);
       const applied=this.contract.applyMistCommand(structuredClone(row.state),command,context);
       requireSignature(command,signatureSvg);

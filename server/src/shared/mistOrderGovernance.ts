@@ -4,6 +4,7 @@ import {assertReplacementOrder} from './mistClaimReplacement';
 import {normalizeGarmentFulfillment,normalizeInternalSupply,assertInternalFabricOrderChange,GARMENT_FULFILLMENT_LABELS,CMT_INCLUDED_ITEM_LABELS,type InternalSupply} from './mistInternalFabric';
 /** Formal order approval and proposed commercial changes, independent of the Mist view layer. */
 import{stableJson}from'./stableJson';
+import{parseOrderMainApprovalSource,type OrderMainApprovalSource}from'./mistOrderApprovalSource';
 import {MistCommandError,mistOrderOwnerIds,lineAmount,mistMoneyMinor,isActiveMistInvoice,type MistContext,type MistState,type MistOrder,type MistOrderLine,type MistCommandResult} from './mistWorkspace';
 import {reviewDecision,type MistReviewTask} from './mistReview';
 import {ownerChangeText,resolveMember} from './mistAccounts';
@@ -39,7 +40,7 @@ export function missingOrderSubmissionFields(contract: OrderGovernanceInput, rep
 }
 export type OrderGovernanceLine=Pick<MistOrderLine,'id'|'name'|'nameEn'|'style'|'img'|'qty'|'unit'|'price'|'fulfillmentMode'|'cmtIncludedItems'> & {sourceProductId?:string;sourceDevId?:string;sourceVersionId?:string;breakdown?:OrderLineBreakdown};
 export type OrderGovernanceSnapshot={orderId:string;code:string;type:MistOrder['type'];customerId:string;customer:string;season:string;currency:string;due:string;contract:OrderGovernanceInput;lines:OrderGovernanceLine[]};
-export type OrderGovernanceRound={id:string;kind:'initial'|'change';status:'pending'|'approved'|'rejected';requesterId:string;reviewerIds:string[];submittedAt:string;snapshot:OrderGovernanceSnapshot;reason:string;decidedBy?:string;decidedName?:string;decidedAt?:string;note?:string};
+export type OrderGovernanceRound={id:string;kind:'initial'|'change';status:'pending'|'approved'|'rejected';requesterId:string;reviewerIds:string[];approvalSource?:OrderMainApprovalSource;submittedAt:string;snapshot:OrderGovernanceSnapshot;reason:string;decidedBy?:string;decidedName?:string;decidedAt?:string;note?:string};
 export type OrderGovernanceProposal={contract:OrderGovernanceInput;orderPatch:{season:string;currency:string;due:string};lines:OrderGovernanceLine[];reason:string;status:'draft'|'pending'|'rejected'};
 /** BB-ORD-7：整单取消申请与终止记录（作废 / 已取消）。 */
 export type OrderCancellation={id:string;status:'pending'|'approved'|'rejected';reason:string;requesterId:string;requesterName:string;requestedAt:string;reviewerIds:string[];decidedBy?:string;decidedName?:string;decidedAt?:string;note?:string};
@@ -190,7 +191,9 @@ export function applyOrderGovernanceCommand(root:MistState,command:OrderGovernan
   // BB-ORD-2：主单提交审批时再核一次全部条目来源仍有效（版本未撤销认可 / 未归档，产品档案仍有效）
   if(proposal)assertOrderChangeAllowed(root,order,s.lines,s.currency);
   if(!proposal)for(const line of s.lines)assertOrderLineSource(root,{type:order.type,customerId:order.customerId,internal:s.contract.kind==='internal'},line,line.name);const eligible=reviewers(context,order.type);if(!context.actorId||!eligible.length)fail('尚未配置当前业务域的有效订单审批负责人','PRECONDITION');
-  const round:OrderGovernanceRound={id:context.id(),kind:proposal?'change':'initial',status:'pending',requesterId:context.actorId,reviewerIds:eligible,submittedAt:context.now,snapshot:s,reason:proposal?.reason||''};g.rounds.push(round);if(proposal)proposal.status='pending';else{g.status='pending';order.state='待主单审批';order.tone='warn';}
+  const suppliedSource=context.authority?.orderMainApprovalSources?.[order.type],source=suppliedSource===undefined?undefined:parseOrderMainApprovalSource(suppliedSource,{requesterId:context.actorId,businessLine:order.type});
+  if(suppliedSource!==undefined&&!source)fail('订单审批归属不可核验','PRECONDITION');
+  const round:OrderGovernanceRound={id:context.id(),kind:proposal?'change':'initial',status:'pending',requesterId:context.actorId,reviewerIds:eligible,...(source?{approvalSource:structuredClone(source)}:{}),submittedAt:context.now,snapshot:s,reason:proposal?.reason||''};g.rounds.push(round);if(proposal)proposal.status='pending';else{g.status='pending';order.state='待主单审批';order.tone='warn';}
   root.tasks.unshift({id:context.id(),title:'跟进订单主单审批 '+order.code,due:order.due,done:false,kind:'order-approval',target:{view:'orders/detail',id},assigneeIds:[context.actorId]});event(root,context,order,proposal?'提交订单变更审批':'提交订单主单审批');order.updatedAt=context.now;return{id,orderId:id,reviewId:'order:'+round.id};
  }
  if(command.type!=='order.governance.decide')fail('未知订单治理操作');
