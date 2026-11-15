@@ -46,10 +46,14 @@ export function supplierPerformance(state: MistState | null, supplierId: string)
   const receiptsOf = (p: FulfillmentPurchase) => (state?.fulfillment.receipts || []).filter(r => r.purchaseId === p.id);
   const arrived = (p: FulfillmentPurchase) => receiptsOf(p).reduce((n, r) => n + r.quantity + r.rejected, 0);
   const promised = (p: FulfillmentPurchase) => p.supplierConfirmation?.confirmedDue || p.due;
-  const open = purchases.filter(p => p.state !== 'rejected' && p.state !== 'cancelled' && arrived(p) < p.quantity);
+  // A confirmed final settlement ends further supply even when the original contract was short.
+  // Keep the contracted quantity and full-delivery KPI unchanged; pending/reversed settlements do not close work.
+  const finalIds = new Set((state?.payables?.settlements || []).filter(s => s.state === 'confirmed' && s.final).map(s => s.purchaseId));
+  const shortClosed = purchases.filter(p => p.state === 'approved' && finalIds.has(p.id) && arrived(p) < p.quantity);
+  const open = purchases.filter(p => p.state !== 'rejected' && p.state !== 'cancelled' && !finalIds.has(p.id) && arrived(p) < p.quantity);
   const completed = purchases.filter(p => p.state === 'approved' && arrived(p) >= p.quantity).map(p => { const last = receiptsOf(p).map(r => r.date).sort().pop() || ''; return { purchase: p, last, promised: promised(p), onTime: !!last && last <= promised(p) }; });
   const receipts = purchases.flatMap(receiptsOf);
-  return { purchases, open, completed, onTime: completed.filter(c => c.onTime).length, receipts: receipts.length, clean: receipts.filter(r => r.rejected === 0).length, arrived, promised };
+  return { purchases, open, shortClosed, completed, onTime: completed.filter(c => c.onTime).length, receipts: receipts.length, clean: receipts.filter(r => r.rejected === 0).length, arrived, promised };
 }
 const rate = (part: number, whole: number) => whole ? Math.round(part / whole * 100) + '%' : '—';
 const purchaseStage = (p: FulfillmentPurchase) => p.state === 'draft' ? '草稿' : p.state === 'pending' ? '待审批' : p.state === 'rejected' ? '已退回' : p.supplierConfirmation ? '供应商已确认' : p.offlineSend ? '已发送待确认' : '已批准待发送';
@@ -289,6 +293,11 @@ function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure,
       </div>)}</div> : <span className="mist-muted">{uiText("没有进行中的采购单。")}</span>}
     </DetailBlock>
     }
+    {!!perf.shortClosed.length && <DetailBlock title={uiText("短交结案")}>
+      <div className="mist-col" style={{ gap: 0 }} role="list" aria-label={uiText("短交结案采购单")}>{perf.shortClosed.map(p => <div key={p.id} role="listitem" className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0', flexWrap: 'wrap' }}>
+        <Mono>{p.code}</Mono><span style={{ flex: '1 1 160px', minWidth: 0 }}>{p.description}<small className="mist-cell-sub">{perf.arrived(p)} / {p.quantity} {uiText(p.unit)}{uiText(" 已到")}</small></span><Pill>{uiText("短交结案")}</Pill><Button variant="quiet" onClick={() => onOpen('procurement', p.id)}>{uiText("打开")}</Button>
+      </div>)}</div>
+    </DetailBlock>}
     {!!perf.completed.length && <DetailBlock title={uiText("交付记录")}>
       <div className="mist-col" style={{ gap: 0 }} role="list" aria-label={uiText("已完成采购单")}>{perf.completed.map(c => <div key={c.purchase.id} role="listitem" className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0', flexWrap: 'wrap' }}>
         <Mono>{c.purchase.code}</Mono><span style={{ flex: '1 1 160px', minWidth: 0 }}>{c.purchase.description}<small className="mist-cell-sub">{uiText("到货 ")}{c.last}{uiText(" · 承诺 ")}{c.promised}</small></span><Pill tone={c.onTime ? 'ok' : 'bad'}>{uiText(c.onTime ? '准时' : '延迟')}</Pill>

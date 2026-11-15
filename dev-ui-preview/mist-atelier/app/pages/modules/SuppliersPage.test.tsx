@@ -26,6 +26,37 @@ const button = (label: string) => [...document.body.querySelectorAll('button')].
 async function click(label: string) { const b = button(label); expect(b, label).toBeTruthy(); await act(async () => b!.click()); }
 
 describe('供应商管理', () => {
+  it('excludes a confirmed final short closure from open work while preserving original quantity and delivery KPIs', async () => {
+    const supplier = named('华盛毛纺'), po = supplierPerformance(state, supplier.id).open[0];
+    po.state = 'approved';
+    const before = supplierPerformance(state, supplier.id), originalQuantity = po.quantity;
+    state.payables.settlements.push({ id: 'final-short', purchaseId: po.id, final: true, state: 'confirmed' } as any);
+    const after = supplierPerformance(state, supplier.id);
+    expect(after.open.some(p => p.id === po.id)).toBe(false);
+    expect(after.completed).toEqual(before.completed);
+    expect(after.onTime).toBe(before.onTime);
+    expect(po.quantity).toBe(originalQuantity);
+    await mount(supplier.id, 'full');
+    expect(queryByRole(document.body, 'list', { name: '在手采购单' })).toBeNull();
+    const closed = getByRole(document.body, 'list', { name: '短交结案采购单' });
+    expect(closed.textContent).toContain(po.code);
+    expect(closed.textContent).toContain('短交结案');
+    expect(closed.textContent).toContain(String(originalQuantity));
+    await act(async () => fireEvent.click(getByRole(closed, 'button', { name: '打开', exact: true })));
+    expect(go).toHaveBeenCalledWith('procurement', po.id);
+  });
+  it.each(['pending', 'returned', 'cancelled', 'reversed'] as const)('does not close supplier work for a %s final settlement', status => {
+    const supplier = named('华盛毛纺'), po = supplierPerformance(state, supplier.id).open[0];
+    state.payables.settlements.push({ id: 'not-final-confirmed', purchaseId: po.id, final: true, state: status } as any);
+    expect(supplierPerformance(state, supplier.id).open.some(p => p.id === po.id)).toBe(true);
+  });
+  it('keeps partial confirmed settlements and other suppliers from closing an open purchase', () => {
+    const supplier = named('华盛毛纺'), po = supplierPerformance(state, supplier.id).open[0];
+    state.payables.settlements.push({ id: 'partial-confirmed', purchaseId: po.id, final: false, state: 'confirmed' } as any,
+      { id: 'different-purchase', purchaseId: 'other-po', final: true, state: 'confirmed' } as any);
+    expect(supplierPerformance(state, supplier.id).open.some(p => p.id === po.id)).toBe(true);
+  });
+
   it('switches a service provider form to service details and submits no factory capacity',async()=>{
     await mount();await click('新增供应商');
     const type=getByRole(document.body,'combobox',{name:'供应商类型'});
