@@ -42,4 +42,13 @@ describe('mar59/mar60/mar64 calendar delete, personal events and personal tasks'
     f.run({ type: 'task.save', payload: { id: 'sys', title: '改名', due: '2026-10-21', assigneeId: 'b' } });
     expect(f.state.tasks.find(t => t.id === 'sys')).toMatchObject({ title: '核对 SO-1 出运交接', due: '2026-10-21', assigneeIds: ['b'] });
   });
+  it.each(['personal','shipping'] as const)('preserves an omitted note but clears an explicitly empty note on %s tasks with a factual history', kind => {
+    const f=fixture(),id=f.run({type:'task.save',payload:{title:'核对订单资料',due:'2026-10-20',note:'原始备注'}}).id;
+    f.state.tasks.find(task=>task.id===id)!.kind=kind;
+    const payload={id,title:'核对订单资料',due:'2026-10-20',assigneeId:'a'};
+    f.run({type:'task.save',payload});expect(f.state.tasks.find(task=>task.id===id)!.note).toBe('原始备注');
+    f.run({type:'task.save',payload:{...payload,note:''}});expect(f.state.tasks.find(task=>task.id===id)!.note).toBeUndefined();
+    expect(f.state.events.some(event=>event.entityId===id&&event.text.includes('清空备注'))).toBe(true);
+    expect(f.state.tasks.find(task=>task.id===id)).toMatchObject({title:'核对订单资料',assigneeIds:['a'],due:'2026-10-20'});
+  });
 });

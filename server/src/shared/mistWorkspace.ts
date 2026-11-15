@@ -1764,11 +1764,12 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const old=p.id?find(state.tasks,p.id,'事项'):undefined;if(old?.done)throw new MistCommandError('PRECONDITION','已完成的事项请先重开');if(old?.kind==='email-extraction-review')throw new MistCommandError('PRECONDITION','请在原邮件中记录处理结果');if(old&&isInternalDeliveryTask(old))throw new MistCommandError('PRECONDITION','请在内部交付记录中办理');
       const assignee=p.assigneeId?resolveMember(context,p.assigneeId,'负责人'):{id:context.actorId||'',name:context.actorName};
       const due=date(p.due),note=text(p.note||'','备注',false,1000);
+      const clearingNote=p.note!==undefined&&!note&&!!old?.note;
       if(old?.kind==='crm-follow-up'){
         // Bind an unambiguous old appointment before its original assignee is changed.
         const links=crmCalendarTaskLinks(state);for(const e of state.calendar)if(links.get(e.id)?.id===old.id)e.sourceTaskId=old.id;
       }
-      if(old){if(old.kind==='personal')old.title=text(p.title,'事项',true,200);old.due=due;old.assigneeIds=assignee.id?[assignee.id]:old.assigneeIds;if(note)old.note=note;event(state,context,'task',old.id,`调整事项 ${old.title}：${due}${assignee.name?' · '+assignee.name:''}${note?' · '+note:''}`);notifyMist(state,context,{title:'指派事项 '+old.title,detail:context.actorName,target:old.target},[assignee.id]);result={id:old.id};}
+      if(old){if(old.kind==='personal')old.title=text(p.title,'事项',true,200);old.due=due;old.assigneeIds=assignee.id?[assignee.id]:old.assigneeIds;if(p.note!==undefined){if(note)old.note=note;else delete old.note;}event(state,context,'task',old.id,`调整事项 ${old.title}：${due}${assignee.name?' · '+assignee.name:''}${note?' · '+note:clearingNote?' · 清空备注':''}`);notifyMist(state,context,{title:'指派事项 '+old.title,detail:context.actorName,target:old.target},[assignee.id]);result={id:old.id};}
       else{const id=context.id();state.tasks.unshift({id,title:text(p.title,'事项',true,200),due,done:false,kind:'personal',target:p.target||{view:'cockpit'},assigneeIds:assignee.id?[assignee.id]:[],...(note?{note}:{})});notifyMist(state,context,{title:'指派事项 '+text(p.title,'事项',true,200),detail:context.actorName,target:p.target||{view:'cockpit'}},[assignee.id]);result={id};}
       break;
     }
