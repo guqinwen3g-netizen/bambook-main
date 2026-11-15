@@ -53,7 +53,7 @@
 | `Kbd` | — | `({ children }: { children: React.ReactNode })` |
 | `Option` | — | `type Option<V extends string> = { value: V; label?: React.ReactNode; icon?: LucideIcon; ariaLabel?: string; count?: number };` |
 | `Segmented` | 分段器：2–4 个互斥视图（今天/本周、列表/看板）。 | `({ options, value, onChange, ariaLabel }: { options: Option<V>[]; value: V; onChange: (v: V) => void; ariaLabel?: string })` |
-| `Tabs` | 页面级 Tabs（下划线指示）。用于同一模块内的子视图切换。 | `({ options, value, onChange }: { options: Option<V>[]; value: V; onChange: (v: V) => void })` |
+| `Tabs` | 页面级标签：左右键/Home/End 移动焦点，Enter/Space 或点击切换；Tab 进出只停一项。 | `({ options, value, onChange }: { options: Option<V>[]; value: V; onChange: (v: V) => void })` |
 | `useAvatarSource` | 预设头像（dicebear:v1:…）按需加载生成器，转为可直接显示的 SVG 地址；普通图片地址原样返回。 | `(src?: string \| null, onError?: () => void): string \| undefined` |
 | `Avatar` | — | `({ name, src, tone, size, identityKey }: { name: string; src?: string \| null; tone?: Tone; size?: 'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl'; identityKey?: string })` |
 | `AvatarStack` | overlap：小组头像沿用个人配色，主题框色分隔重叠边缘。 | `({ people, size = 'sm', max = 4, overlap = false }: { people: Array<{ name: string; tone?: Tone; src?: string; identityKey?: string }>; size?: 'xs' \| 'sm'; max?: number; overlap?: boolean })` |
@@ -81,8 +81,8 @@
 | 导出 | 说明 | Props / 签名 |
 |---|---|---|
 | `FormGrid` | 表单栅格：默认两列；字段加 full 占满一行。 | `({ cols = 2, children, style }: { cols?: 1 \| 2 \| 3; children: React.ReactNode; style?: React.CSSProperties })` |
-| `FieldProps` | — | `type FieldProps = { label: React.ReactNode; required?: boolean; hint?: React.ReactNode; error?: React.ReactNode; full?: boolean; children: React.ReactNode; htmlFor?: string; group?: boolean };` |
-| `Field` | 字段外框：标签 + 控件 + 提示/错误。多控件时用 group，让组名与各控件标签独立；默认单控件标签不变。error 存在时整个输入底变红色 tint。 | `({ label, required, hint, error, full, children, htmlFor, group = false }: FieldProps)` |
+| `FieldProps` | — | `type FieldProps = { label: React.ReactNode; required?: boolean; hint?: React.ReactNode; error?: React.ReactNode; full?: boolean; children: React.ReactNode; htmlFor?: string;group?:boolean };` |
+| `Field` | 字段外框：标签 + 控件 + 提示/错误。多控件时用 group，让组名与各控件标签独立；默认单控件标签不变。error 存在时整个输入底变红色 tint。 | `({ label, required, hint, error, full, children, htmlFor,group=false }: FieldProps)` |
 | `TextInput` | 单行输入。外层是填充底（无描边），聚焦变强调色浅底。 | `forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement> & InputBase>` |
 | `PasswordInput` | 密码输入：右侧眼睛按钮切换明文显示。按下按钮不夺走输入焦点，光标位置保持不变。 | `forwardRef<HTMLInputElement, Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> & Omit<InputBase, 'suffix'>>` |
 | `CodeInput` | 分格验证码：逐位输入自动跳格，可整段粘贴，退格回到上一格；填满时触发 onComplete。 | `({ length = 6, value, onChange, onComplete, disabled, autoFocus, ariaLabel = '验证码' }: { length?: number; value: string; onChange: (value: string) => void; onComplete?: (value: string) => void; disabled?: boolean; autoFocus?: boolean; ariaLabel?: string })` |

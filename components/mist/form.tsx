@@ -13,7 +13,7 @@ export function FormGrid({ cols = 2, children, style }: { cols?: 1 | 2 | 3; chil
 }
 
 export type FieldProps = { label: React.ReactNode; required?: boolean; hint?: React.ReactNode; error?: React.ReactNode; full?: boolean; children: React.ReactNode; htmlFor?: string;group?:boolean };
-/** 字段外框：标签 + 控件 + 提示/错误。error 存在时整个输入底变红色 tint。 */
+/** 字段外框：标签 + 控件 + 提示/错误。多控件时用 group，让组名与各控件标签独立；默认单控件标签不变。error 存在时整个输入底变红色 tint。 */
 export function Field({ label, required, hint, error, full, children, htmlFor,group=false }: FieldProps) {
   const labelId=React.useId();
   const content=<>
