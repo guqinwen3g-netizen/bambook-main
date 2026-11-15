@@ -30,6 +30,11 @@ function customsReady() {
 }
 
 describe('shipment document generation', () => {
+  it('keeps ordinary sales CI payable rather than labelling its value as a free replacement',()=>{
+    const {f,shipmentId}=ready();
+    const snapshot=prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId,orderId:f.orderId,type:'CI',dueDate:'2026-12-01'}},f.context);
+    expect(renderGeneratedDocumentHtml(snapshot)).not.toMatch(/no charge|value for customs purposes only/i);
+  });
   it('keeps each consolidated CI package and weight totals within its own order',()=>{
     const {f,shipmentId}=ready(),s=f.state.fulfillment.shipments.find(x=>x.id===shipmentId)!,order=f.state.orders.find(x=>x.id===f.orderId)!,line=f.state.orderLines.find(x=>x.orderId===order.id)!;
     Object.assign(order,{type:'fabric',currency:'EUR'});Object.assign(line,{qty:130.5,unit:'米',price:7.8});

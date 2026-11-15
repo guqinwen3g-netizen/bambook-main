@@ -116,6 +116,8 @@
 
 快件路径边界（2026-11-15）：`CustomsPage.tsx#createSpec` 的 `channel:express` 选项只称“快件 / 邮寄”；`mistFulfillment.ts#FulfillmentCustoms.channel` 区分系统登记路径，不代表免于海关申报或随附单证。[海关快件办事指南](https://online.customs.gov.cn/static/pages/guides/000629017002/000629017002.html)列有按快件类别提交的报关单及其他材料，不能把运单替代本系统普通报关单编号的录入口径写成普遍免申报结论。本次只纠正文案和类型注释，申报、放行、权限及离港门禁不变。
 
+免费补发CI（2026-11-15）：`mistDocumentGeneration.ts#ciSnapshot`对`order.replacementSource`增加中英文货值用途，明确免费补发、无需付款及仅供报关估值；申报单价仍来自`mistClaimReplacement.ts#replacementDeclaredUnitPrice`的独立核对，绝不取合同零价充作申报价，也不把该值当客户应收。普通销售CI不带此说明。事实写入同一生成快照，后续生成保留旧快照/文件；新模板不改已生成或已签发原件。采用[DHL无收款货物单证指引](https://www.dhl.com/fr-en/home/freight/help-center-for-european-road-and-rail/faqs-for-european-road-freight.html)所区分的货值用途，不据此认定税费豁免。
+
 CompanySeals preview (2026-11-14): `modules/CompanySeals.tsx#SealImage` waits for workspace loading to finish before calling the company-bound `readFile`; the preview is keyed by the exact reader and file ID. Loading, file visibility or reader changes hide the old blob immediately and dispose its URL; the ready reader retries the same file. Server authorization and the workspace source guard remain authoritative.
 
 余料入库码单（2026-11-14）：`mistStockOperations.ts#applyStockOperation`的`fulfillment.stock.receiveOther`沿采购收货的既有可选重量规则，保存每卷`weightKg`并在改库存前校验有限正数/四位小数，省略仍兼容。其他入库保留来源类型、原供料订单条目、来源单号和依据，只记实物库存/流水，不形成采购或资金。`InventoryPage.tsx`的其他入库详情标题取`otherReceipt.source`，不套用缺失采购的错误提示；码单表沿既有公斤列回读。原库存出库交回仍走准确`issueId`退回，保留原量和接收历史。

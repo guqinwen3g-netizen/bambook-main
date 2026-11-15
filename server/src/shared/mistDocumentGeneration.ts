@@ -78,6 +78,7 @@ function ciSnapshot(root: MistState, s: FulfillmentShipment, order: MistOrder) {
   return {
     parties: [buyerParty(root, s), consigneeParty(s)], total,
     facts: [{ label: { zh: '订单 / 合同号', en: 'Order / Contract' }, value: [order.code, order.governance?.contract.poNumber].filter(Boolean).join(' · ') }, ...transportFacts(s), { label: { zh: '币种', en: 'Currency' }, value: order.currency },
+      ...(order.replacementSource ? [{ label: { zh: '货值用途', en: 'Value purpose' }, value: '免费补发，无需付款。仅供报关估值。 / Free replacement, no charge. Value for customs purposes only.' }] : []),
       ...(order.governance?.contract.paymentMethod ? [{ label: { zh: '付款方式', en: 'Payment' }, value: [order.governance.contract.paymentMethod, order.governance.contract.paymentNote].filter(Boolean).join(' · ') }] : []),
       ...(lc ? [{ label: { zh: '信用证号', en: 'L/C no.' }, value: `${lc.lcNo} · ${lc.issuingBank}` }] : []),
       ...(pack.packages ? [{ label: { zh: '件数 / 毛净重', en: 'Packages / Weights' }, value: `${pack.packages} · N.W. ${money2(pack.net)} kg · G.W. ${money2(pack.gross)} kg` }] : [])],
