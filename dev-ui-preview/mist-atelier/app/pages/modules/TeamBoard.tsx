@@ -6,7 +6,7 @@ import { AlertTriangle, Archive, BellRing, ChevronLeft, ChevronRight, ClipboardL
 import { Banner, Button, Card, CardHeader, DataTable, Drawer, EmptyState, Pill, Segmented, StatCard, StatGrid, TextLink, useToast, type Column, type Tone } from '../../../../../components/mist';
 import type { MistCommand, MistState, MistTarget } from '../../../../../server/src/shared/mistWorkspace';
 import { MIST_BUSINESS_GROUP_LABEL, type MistBusinessGroup } from '../../../../../server/src/shared/mistAccounts';
-import { TEAM_DORMANT_DAYS, addBusinessDays, myTeamReport, teamOverview, teamWeeklyReport, teamWeeklyText, formatTeamShipmentQuantities, weekStartOf, type TeamAttention, type TeamMoney, type TeamRow, type TeamWeekRow } from '../../../../../server/src/shared/mistTeam';
+import { addBusinessDays, myTeamReport, teamOverview, teamWeeklyReport, teamWeeklyText, formatTeamShipmentQuantities, weekStartOf, type TeamAttention, type TeamMoney, type TeamRow, type TeamWeekRow } from '../../../../../server/src/shared/mistTeam';
 import { platformBusinessDate } from '../../../../../server/src/shared/mistPlatform';
 import type { MistMemberOption } from '../../runtime/members';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec, type ModuleValues } from './ModuleWorkbench';
@@ -66,7 +66,7 @@ export function TeamBoard({ state, members, viewer, can, busy, run, go, initialM
   ];
   return <>
     <div className="mist-section mist-row" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-      <span className="mist-note">{uiText("范围：")}{scopeNote}{uiText("。统计只含你有权查看的数据；交期 ")}{7}{uiText(" 天内为临近，客户超过 ")}{TEAM_DORMANT_DAYS}{uiText(" 天无跟进且无在手订单为久未跟进。")}</span>
+      <span className="mist-note">{uiText("范围：")}{scopeNote}</span>
       <span className="mist-row"><Segmented<'now' | 'week'> ariaLabel={uiText("团队视图")} value={mode} onChange={setMode} options={[{ value: 'now', label: '在手' }, { value: 'week', label: '周报' }]} />
 </span>
     </div>
@@ -165,8 +165,8 @@ export function TeamWeekly({ state, members, viewer, group, today, initialWeek, 
       <span className="mist-row" style={{ flexWrap: 'wrap' }}><Button size="sm" icon={ChevronLeft} aria-label={uiText("上一周")} onClick={() => setWeek(addBusinessDays(week, -7))} /><b style={{ whiteSpace: 'nowrap' }}>{report.weekStart}{uiText(" 至 ")}{report.weekEnd}</b>{week === current && <Pill tone="accent">{uiText("本周 · 统计到 ")}{today}</Pill>}<Button size="sm" icon={ChevronRight} aria-label={uiText("下一周")} disabled={week >= current} onClick={() => setWeek(addBusinessDays(week, 7))} /></span>
       <span className="mist-row" style={{ flexWrap: 'wrap' }}>{ended && !archived && canArchive && run && <Button size="sm" variant="primary" icon={Archive} disabled={busy} onClick={() => void archive()}>{uiText("生成并存档")}</Button>}<Button size="sm" icon={Copy} onClick={() => void copy()}>{uiText("复制周报文字")}</Button><Button size="sm" icon={Download} disabled={!report.rows.length} onClick={exportCsv}>{uiText("导出 CSV")}</Button></span>
     </div>
-    {archived ? <Banner variant="status" tone="ok" title={ui`已存档 · ${archived.scope}`}>{uiText("由 ")}{archived.generatedBy}{uiText(" 于 ")}{businessWhen(archived.generatedAt)}{uiText(" 生成；以下是生成那一刻的数据，之后的补录不会改变它。")}</Banner>
-      : ended && canArchive && run ? <Banner tone="warn" title={uiText("这一周已结束，尚未存档")}>{uiText("点“生成并存档”把此刻的数据冻结成正式周报，之后可随时回看、复制或导出。")}</Banner> : null}
+    {archived ? <Banner variant="status" tone="ok" title={ui`已存档 · ${archived.scope}`}>{uiText("由 ")}{archived.generatedBy}{uiText(" 于 ")}{businessWhen(archived.generatedAt)}</Banner>
+      : ended && canArchive && run ? <Banner tone="warn" title={uiText("尚未存档")} /> : null}
     <StatGrid>
       <StatCard icon={Package} label={uiText("新接订单")} value={t.newOrders} unit={uiText("单")} foot={sums(t.newOrderAmount) || '本周没有新单'} />
       <StatCard icon={Ship} label={uiText("出运")} value={t.shipments} unit={uiText("票")} foot={formatTeamShipmentQuantities(t.shippedQuantities, uiText)} />
@@ -177,6 +177,5 @@ export function TeamWeekly({ state, members, viewer, group, today, initialWeek, 
       <CardHeader title={uiText("成员本周")} sub={ui`新单按建单日、出运按离港日、回款按到账日（已核销到该成员订单的发票）；${archived ? '“当前”两列是存档时的状态。' : '“当前”两列是此刻的状态，不是当周历史值。'}`} />
       <DataTable ariaLabel={uiText("团队周报")} rows={report.rows} rowKey={r => r.id} columns={columns} empty={<EmptyState icon={Users} title={uiText("范围内没有成员")} compact />} />
     </Card></section>
-    <span className="mist-note">{uiText("本系统只生成周报内容；复制或导出后由你自行发送。")}</span>
   </div>;
 }
