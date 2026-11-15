@@ -207,3 +207,24 @@ it('keeps company bank accounts with finance staff and transaction facts readabl
 });
 
 it('labels partially visible receipts without showing an invented original total or balance',()=>{store.value.state.receipts=[];store.value.state.partialReceipts=[{id:'r-part',code:'R-PART',date:today(),payer:'客户',currency:'EUR',visibleAllocatedAmount:40,hiddenCount:1}];render();const partial=getByRole(host,'list',{name:'部分可见到账'});expect(partial.textContent).toContain('R-PART');expect(partial.textContent).toContain('本范围已核销');expect(partial.textContent).toContain('40.00');expect(partial.textContent).toContain('另含其他范围业务');expect(partial.textContent).not.toContain('100.00');expect(getByText(host,'到账待核销').parentElement?.textContent).toContain('部分到账余额不可见');expect(getByText(host,'待核销到账').parentElement?.textContent).toContain('部分到账余额不可见');});
+
+it('allows closing an uncertain bank dialog to recover the original request without issuing another command',async()=>{
+  route={view:'payment-vouchers',section:'accounts'};render();await click('新增账户');
+  store.value.pending={kind:'command',command:{type:'finance.account.save',payload:{name:'备用户'}}};render();
+  const dialog=getByRole(document.body,'dialog',{name:'新增银行账户'});
+  expect((getByRole(dialog,'button',{name:'保存账户'}) as HTMLButtonElement).disabled).toBe(true);
+  const close=getAllByRole(dialog,'button',{name:'关闭',exact:true})[0] as HTMLButtonElement;
+  expect(getAllByRole(dialog,'button',{name:'关闭',exact:true}).some(button=>button.textContent==='关闭')).toBe(true);
+  expect(close.disabled).toBe(false);await act(async()=>close.click());
+  expect(queryByRole(document.body,'dialog',{name:'新增银行账户'})).toBeNull();
+  store.value.recover.mockImplementation(async()=>{store.value.pending=null;render();return{result:{id:'account'}};});
+  await click('核对原操作结果');expect(store.value.recover).toHaveBeenCalledTimes(1);expect(store.value.run).not.toHaveBeenCalled();
+});
+it('keeps a bank dialog locked while its original save is actually in flight',async()=>{
+  route={view:'payment-vouchers',section:'accounts'};render();await click('新增账户');
+  input('账户名称','备用户');input('开户行','中国银行');input('银行账号','SIM-ZERO');input('币种','CNY');input('期初余额','0');
+  let resolve!:(value:unknown)=>void;store.value.run.mockReturnValue(new Promise(done=>resolve=done));await click('保存账户');
+  const dialog=getByRole(document.body,'dialog',{name:'新增银行账户'});
+  expect((getByRole(dialog,'button',{name:'取消',exact:true})as HTMLButtonElement).disabled).toBe(true);
+  await act(async()=>resolve({result:{id:'account'}}));
+});

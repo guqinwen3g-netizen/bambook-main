@@ -22,14 +22,15 @@ export const accountLabel = (a: MistBankAccount) => `${a.name} · ${a.bankName} 
 export function useBankAccountCommand() {
   const { run, loading, saving, pending } = useMistWorkspace(), session = useMistSession();
   const [working, setWorking] = React.useState(false), [failure, setFailure] = React.useState('');
-  const busy = working || loading || saving || !!pending, canWrite = session.hasPermission(MIST_FINANCE_SCOPES.voucher), canLock = session.hasPermission('fx:lock');
+  // Unknown acknowledgements keep mutations locked, but the user must be able to close the dialog and reach page recovery.
+  const inFlight = working || loading || saving, busy = inFlight || !!pending, canWrite = session.hasPermission(MIST_FINANCE_SCOPES.voucher), canLock = session.hasPermission('fx:lock');
   const execute = async (command: MistCommand, done: () => void) => {
     const permission = mistCommandPermission(command);
     if (permission && !session.hasPermission(permission as any)) { setFailure('没有办理此项财务动作的权限。'); return; }
     if (busy) return; setWorking(true); setFailure('');
     try { await run(command); done(); } catch (problem) { setFailure(problem instanceof Error ? problem.message : '操作失败，请重试'); } finally { setWorking(false); }
   };
-  return { execute, busy, failure, setFailure, canWrite, canLock };
+  return { execute, busy, inFlight, pending: !!pending, failure, setFailure, canWrite, canLock };
 }
 
 type AccountDraft = { id?: string; name: string; bankName: string; accountNo: string; currency: string; openingDate: string; openingBalance: string };
@@ -37,7 +38,7 @@ export const newAccountDraft = (): AccountDraft => ({ name: '', bankName: '', ac
 export const editAccountDraft = (a: MistBankAccount): AccountDraft => ({ id: a.id, name: a.name, bankName: a.bankName, accountNo: a.accountNo, currency: a.currency, openingDate: a.openingDate, openingBalance: String(a.openingBalance) });
 
 export function BankAccountDialog({ draft, used, onClose }: { draft: AccountDraft; used: boolean; onClose: () => void }) {
-  const { execute, busy, failure, canWrite } = useBankAccountCommand(), toast = useToast();
+  const { execute, busy, inFlight, pending, failure, canWrite } = useBankAccountCommand(), toast = useToast();
   const [form, setForm] = React.useState(draft), [local, setLocal] = React.useState('');
   const set = (key: keyof AccountDraft) => (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [key]: e.target.value });
   const submit = () => {
@@ -49,8 +50,8 @@ export function BankAccountDialog({ draft, used, onClose }: { draft: AccountDraf
     void execute({ type: 'finance.account.save', payload: { ...(form.id ? { id: form.id } : {}), name: form.name, bankName: form.bankName, accountNo: form.accountNo, currency: form.currency.trim().toUpperCase(), openingDate: form.openingDate, openingBalance: opening } }, () => { toast(form.id ? '账户已更新' : '账户已登记，可把流水归属到该账户'); onClose(); });
   };
   const message = local || failure;
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={640} title={uiText(form.id ? '编辑银行账户' : '新增银行账户')} description={uiText("一个账户一个币种。期初余额为期初日期当天开始前的银行余额，期初日之前的流水不能归属到该账户。")}
-    footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canWrite} onClick={submit}>{uiText("保存账户")}</Button></>}>
+  return <Dialog open onClose={() => { if (!inFlight) onClose(); }} width={640} title={uiText(form.id ? '编辑银行账户' : '新增银行账户')} description={uiText("一个账户一个币种。期初余额为期初日期当天开始前的银行余额，期初日之前的流水不能归属到该账户。")}
+    footer={<><Button disabled={inFlight} onClick={onClose}>{uiText(pending ? "关闭" : "取消")}</Button><Button variant="primary" loading={inFlight} disabled={busy || !canWrite} onClick={submit}>{uiText("保存账户")}</Button></>}>
     <div className="mist-col">
       {message && <Banner tone="bad" title={uiText("还不能保存")}>{message}</Banner>}
       {!canWrite && <Banner tone="warn" title={uiText("只读")}>{uiText("需要付款凭证权限才能维护账户。")}</Banner>}
@@ -69,7 +70,7 @@ export function BankAccountDialog({ draft, used, onClose }: { draft: AccountDraf
 
 /** 流水归属账户：只列同币种、期初日不晚于交易日的账户；改归属或解除须写原因。 */
 export function AccountAssignDialog({ state, kind, row, onClose }: { state: MistState; kind: 'receipt' | 'payment'; row: MistReceipt | MistPayment; onClose: () => void }) {
-  const { execute, busy, failure, canWrite } = useBankAccountCommand(), toast = useToast();
+  const { execute, busy, inFlight, pending, failure, canWrite } = useBankAccountCommand(), toast = useToast();
   const options = (state.bankAccounts || []).filter(a => !a.closed && a.currency === row.currency && a.openingDate <= row.date);
   const [accountId, setAccountId] = React.useState(row.accountId || options[0]?.id || ''), [reason, setReason] = React.useState(''), [local, setLocal] = React.useState('');
   const changing = !!row.accountId, same = (row.accountId || '') === accountId;
@@ -80,8 +81,8 @@ export function AccountAssignDialog({ state, kind, row, onClose }: { state: Mist
     void execute({ type: 'finance.account.assign', payload: { kind, id: row.id, accountId: accountId || null, ...(reason.trim() ? { reason } : {}) } }, () => { toast(accountId ? '已归属账户，余额已重算' : '已解除账户归属'); onClose(); });
   };
   const message = local || failure;
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={560} title={uiText("归属公司银行账户")} description={uiText(`${row.code} · ${row.date} · ${bankMoney(row.amount, row.currency)}`)}
-    footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canWrite || (!options.length && !changing)} onClick={submit}>{uiText(accountId || !changing ? '确认归属' : '解除归属')}</Button></>}>
+  return <Dialog open onClose={() => { if (!inFlight) onClose(); }} width={560} title={uiText("归属公司银行账户")} description={uiText(`${row.code} · ${row.date} · ${bankMoney(row.amount, row.currency)}`)}
+    footer={<><Button disabled={inFlight} onClick={onClose}>{uiText(pending ? "关闭" : "取消")}</Button><Button variant="primary" loading={inFlight} disabled={busy || !canWrite || (!options.length && !changing)} onClick={submit}>{uiText(accountId || !changing ? '确认归属' : '解除归属')}</Button></>}>
     <div className="mist-col">
       {message && <Banner tone="bad" title={uiText("还不能保存")}>{message}</Banner>}
       {!options.length && <Banner tone="warn" title={ui`没有可用的 ${row.currency} 账户`}>{uiText("请先在“账户与余额”新增 ")}{row.currency}{uiText(" 账户，且期初日期不晚于 ")}{row.date}。</Banner>}
@@ -103,7 +104,7 @@ const amountOk = (v: string) => /^\d+(\.\d{1,2})?$/.test(v.trim()) && Number(v) 
 
 /** 锁汇：登记银行远期合同；结汇：按银行水单登记卖出原币与入账本币，汇率由实际金额得出。 */
 export function FxDialog({ state, draft, onClose }: { state: MistState; draft: FxDraft; onClose: () => void }) {
-  const { execute, busy, failure, canWrite: canVoucher, canLock } = useBankAccountCommand(), toast = useToast();
+  const { execute, busy, inFlight, pending, failure, canWrite: canVoucher, canLock } = useBankAccountCommand(), toast = useToast();
   const canWrite = draft.kind === 'lock' ? canLock : canVoucher;
   const [form, setForm] = React.useState(draft), [local, setLocal] = React.useState(''), [links, setLinks] = React.useState<Links>({});
   const set = (key: keyof FxDraft) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm({ ...form, [key]: e.target.value });
@@ -129,8 +130,8 @@ export function FxDialog({ state, draft, onClose }: { state: MistState; draft: F
     void execute({ type: 'finance.fx.lock', payload: { date: form.date, bankName: form.bankName, currency: form.currency.trim().toUpperCase(), amount: Number(form.amount), rate: form.rate.trim(), localCurrency: form.localCurrency.trim().toUpperCase(), settleBy: form.settleBy, ref: form.ref, note: form.note } }, () => { toast('锁汇已登记'); onClose(); });
   };
   const message = local || failure, accountOptions = (pick: (a: MistBankAccount) => boolean) => [{ value: '', label: '请选择账户' }, ...accounts.filter(a => !a.closed && pick(a)).map(a => ({ value: a.id, label: `${a.code} · ${a.currency} · ${accountLabel(a)}` }))];
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={680} title={uiText(settle ? '登记结汇' : '登记锁汇')}
-    footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canWrite} onClick={submit}>{uiText(settle ? '保存结汇' : '保存锁汇')}</Button></>}>
+  return <Dialog open onClose={() => { if (!inFlight) onClose(); }} width={680} title={uiText(settle ? '登记结汇' : '登记锁汇')}
+    footer={<><Button disabled={inFlight} onClick={onClose}>{uiText(pending ? "关闭" : "取消")}</Button><Button variant="primary" loading={inFlight} disabled={busy || !canWrite} onClick={submit}>{uiText(settle ? '保存结汇' : '保存锁汇')}</Button></>}>
     <div className="mist-col">
       {message && <Banner tone="bad" title={uiText("还不能保存")}>{message}</Banner>}
       {!canWrite && <Banner tone="warn" title={uiText("只读")}>{uiText("需要付款凭证权限才能登记。")}</Banner>}
@@ -184,7 +185,7 @@ const linkTotalMinor = (rows: Array<{ amount: number }>) => rows.reduce((n, r) =
 
 /** 为已登记的结汇补登对应到账（只追加，合计不超过卖出金额）。 */
 export function FxAllocateDialog({ state, record, onClose }: { state: MistState; record: MistFxRecord; onClose: () => void }) {
-  const { execute, busy, failure, canWrite } = useBankAccountCommand(), toast = useToast();
+  const { execute, busy, inFlight, pending, failure, canWrite } = useBankAccountCommand(), toast = useToast();
   const [links, setLinks] = React.useState<Links>({}), [local, setLocal] = React.useState(''), left = fxUnallocatedMinor(record);
   const submit = () => {
     const { rows, error } = linkRows(links); if (error) return setLocal(error);
@@ -192,8 +193,8 @@ export function FxAllocateDialog({ state, record, onClose }: { state: MistState;
     if (linkTotalMinor(rows) > left) return setLocal(`分配合计不能超过未对应金额 ${bankMoney(left / 100, record.currency)}。`);
     setLocal(''); void execute({ type: 'finance.fx.allocate', payload: { id: record.id, receipts: rows } }, () => { toast(record.code + ' 已补登对应到账'); onClose(); });
   };
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={680} title={uiText("补登对应到账")} description={ui`${record.code} · ${record.date} · 卖出 ${bankMoney(record.amount, record.currency)} @${record.rate}；未对应到账 ${bankMoney(left / 100, record.currency)}。`}
-    footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canWrite} onClick={submit}>{uiText("保存")}</Button></>}>
+  return <Dialog open onClose={() => { if (!inFlight) onClose(); }} width={680} title={uiText("补登对应到账")} description={ui`${record.code} · ${record.date} · 卖出 ${bankMoney(record.amount, record.currency)} @${record.rate}；未对应到账 ${bankMoney(left / 100, record.currency)}。`}
+    footer={<><Button disabled={inFlight} onClick={onClose}>{uiText(pending ? "关闭" : "取消")}</Button><Button variant="primary" loading={inFlight} disabled={busy || !canWrite} onClick={submit}>{uiText("保存")}</Button></>}>
     <div className="mist-col">
       {(local || failure) && <Banner tone="bad" title={uiText("还不能保存")}>{local || failure}</Banner>}
       <ReceiptLinksField state={state} accountId={record.fromAccountId || ''} date={record.date} value={links} onChange={setLinks} />
@@ -202,11 +203,11 @@ export function FxAllocateDialog({ state, record, onClose }: { state: MistState;
 }
 
 export function FxReverseDialog({ record, onClose }: { record: MistFxRecord; onClose: () => void }) {
-  const { execute, busy, failure, canWrite } = useBankAccountCommand(), toast = useToast();
+  const { execute, busy, inFlight, pending, failure, canWrite } = useBankAccountCommand(), toast = useToast();
   const [reason, setReason] = React.useState(''), [local, setLocal] = React.useState('');
   const submit = () => { if (!reason.trim()) return setLocal('请填写冲回原因。'); setLocal(''); void execute({ type: 'finance.fx.reverse', payload: { id: record.id, reason } }, () => { toast(record.code + ' 已冲回，原记录保留'); onClose(); }); };
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={520} title={uiText(record.kind === 'lock' ? '冲回锁汇' : '冲回结汇')} description={ui`${record.code} · ${record.ref} · ${bankMoney(record.amount, record.currency)} → ${bankMoney(record.localAmount, record.localCurrency)}`}
-    footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canWrite} onClick={submit}>{uiText("确认冲回")}</Button></>}>
+  return <Dialog open onClose={() => { if (!inFlight) onClose(); }} width={520} title={uiText(record.kind === 'lock' ? '冲回锁汇' : '冲回结汇')} description={ui`${record.code} · ${record.ref} · ${bankMoney(record.amount, record.currency)} → ${bankMoney(record.localAmount, record.localCurrency)}`}
+    footer={<><Button disabled={inFlight} onClick={onClose}>{uiText(pending ? "关闭" : "取消")}</Button><Button variant="primary" loading={inFlight} disabled={busy || !canWrite} onClick={submit}>{uiText("确认冲回")}</Button></>}>
     <div className="mist-col">
       {(local || failure) && <Banner tone="bad" title={uiText("还不能冲回")}>{local || failure}</Banner>}
       <Field label={uiText("冲回原因")} required><TextInput aria-label={uiText("冲回原因")} value={reason} onChange={e => setReason(e.target.value)} /></Field>
