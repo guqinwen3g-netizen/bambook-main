@@ -6,8 +6,11 @@ import { Banner, Button, Dialog, Field, KeyValue, PasswordInput, Pill, Signature
 import { commandRequiresSignature } from '../runtime/signatureRules';
 import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../server/src/shared/mistAgentProposals';
 import type { MistCommand, MistState } from '../../../../server/src/shared/mistWorkspace';
+import type { OrderGovernanceInput } from '../../../../server/src/shared/mistOrderGovernance';
 import { reviewEmailAnalysis } from '../../../../server/src/shared/mistEmailReview';
 import { emailLinkTarget } from '../../../../server/src/shared/mistEmail';
+import { orderAmounts } from './orderAmounts';
+import { paymentMethodLabel } from '../runtime/tradeOptions';
 
 export function mailProposalDetails(proposal: AgentProposal, state?: MistState | null) {
   const { type, payload: p } = proposal.command;
@@ -58,9 +61,26 @@ function quotationSourceMissing(command:AgentProposal['command'],state?:MistStat
     ||Array.isArray(input.fileIds)&&input.fileIds.some(id=>missing(id,state.files))
     ||Array.isArray(input.lines)&&input.lines.some(line=>line&&typeof line==='object'&&(missing(line.productId,state.market.products)||missing(line.sourceDevId,state.devs)||missing(line.sourceVersionId,state.versions)));
 }
+const ORDER_LABEL:Record<string,string>={type:'订单类型',season:'季节 / 批次',due:'交期',name:'品名',nameEn:'英文品名',style:'款号 / 品号',unit:'单位',governance:'合同',poNumber:'PO / 合同号',confirmationFileIds:'客户依据',internalPurpose:'内部用途',receiver:'接收团队 / 负责人',paymentMethod:'付款方式',depositPercent:'定金比例（%）',preShipmentPercent:'出运前累计收款（%）',paymentNote:'付款条款',incoterm:'贸易术语',deliveryPlace:'交付地点',overPercent:'溢装上限（%）',shortPercent:'短装下限（%）',quantityBasis:'数量口径',quantityBasisNote:'数量依据',breakdown:'规格明细',composition:'成分',width:'门幅（cm）',weight:'克重（g/m²）',rows:'颜色明细',color:'颜色 / 色号',sizes:'尺码',quantities:'各码数量',sourceProductId:'来源产品',sourceDevId:'来源开发案',sourceVersionId:'来源版本',sourceQuotationId:'来源报价',sourceQuotationLineId:'来源报价条目',internalSupply:'内部供料',receiverId:'接收负责人',markupPercent:'内部加价（%）'};
+function orderSourceMissing(command:AgentProposal['command'],state?:MistState|null){
+  if(command.type!=='order.create')return false;
+  if(!state)return true;
+  const p=command.payload,contract=p.governance as Partial<OrderGovernanceInput>|undefined,missing=(id:unknown,rows:Array<{id:string}>)=>typeof id==='string'&&!!id&&!rows.some(row=>row.id===id);
+  const memberMissing=(id:unknown)=>typeof id==='string'&&!!id&&!state.members?.some(m=>m.userId===id);
+  return missing(p.customerId,state.customers)||memberMissing(p.ownerId)||memberMissing(contract?.internalSupply?.receiverId)
+    ||Array.isArray(contract?.confirmationFileIds)&&contract.confirmationFileIds.some(id=>missing(id,state.files))
+    ||Array.isArray(p.lines)&&p.lines.some(line=>line&&typeof line==='object'&&(missing(line.sourceProductId,state.market.products)||missing(line.sourceDevId,state.devs)||missing(line.sourceVersionId,state.versions)||missing(line.sourceQuotationId,state.market.quotations)
+      ||typeof line.sourceQuotationLineId==='string'&&!!line.sourceQuotationLineId&&!state.market.quotations.find(q=>q.id===line.sourceQuotationId)?.lines.some(l=>l.id===line.sourceQuotationLineId)));
+}
 export function proposalFieldChanges(command: AgentProposal['command'], full = false, state?:MistState|null): { rows: Array<{ field: string; path: string; value: string }>; omitted: number } {
   const rows: Array<{ field: string; path: string; value: string }> = [], limit = full ? 200 : 40;
   const development=command.type==='development.saveDraft',quotation=command.type==='market.quotation.save',rfqCommand=command.type.startsWith('rfq.');
+  const orderCreate=command.type==='order.create';
+  if(orderCreate){
+    const lines=command.payload.lines,contract=command.payload.governance as Partial<OrderGovernanceInput>|undefined;
+    const total=orderAmounts(Array.isArray(lines)?lines.map(line=>({qty:line?.qty,price:line?.price})):[]);
+    rows.push({field:contract?.kind==='internal'?'内部预算':'订单总金额',path:'order.total',value:total.total===null||!Array.isArray(lines)||!lines.length?'金额无效':total.total.toFixed(2)+' '+String(command.payload.currency||'')});
+  }
   const rfq=rfqCommand?state?.rfqs?.find(r=>r.id===command.payload.id):undefined;
   const customerUpdate=['market.customer.update','customer.update'].includes(command.type),customer=customerUpdate?state?.customers.find(c=>c.id===command.payload.id):undefined;
   const creditChange=!!customer&&customerCommandChangesCredit(command,state);
@@ -74,6 +94,8 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
     if(creditChange&&['id','patch.creditLimit','patch.currency'].includes(path))return;
     // mistMarket#sourceLine/save derives these from saved data; the input cannot set them.
     if(quotation&&/^(input\.(approvalHistory|requiresApproval)|input\.lines\.\d+\.(costBasis|family|marginFloor))(\.|$)/.test(path))return;
+    // Image tokens select decoration, not a commercial term or a source object.
+    if(orderCreate&&/^lines\.\d+\.img$/.test(path))return;
     if (value && typeof value === 'object') {
       const entries = Array.isArray(value) ? value.map((child, i) => [String(i + 1), child] as const) : Object.entries(value);
       if (entries.length) { for (const [key, child] of entries) walk(child, path ? path + '.' + key : key); return; }
@@ -81,6 +103,24 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
     if (rows.length >= limit) { omitted++; return; }
     let text = typeof value === 'string' ? value : JSON.stringify(value) ?? '',field=proposalFieldLabel(path);
     if(customerUpdate&&path==='id')text=customer?customer.name+' · '+customer.code:'客户已不可见';
+    if(orderCreate){
+      const key=path.split('.').at(-1);
+      field=path.split('.').map(p=>/^\d+$/.test(p)?'第'+p+'项':ORDER_LABEL[p]||FIELD_LABEL[p]||p).join(' · ');
+      if(path==='customerId')text=state?.customers.find(c=>c.id===value)?.name||'客户已不可见';
+      else if(path==='ownerId'||key==='receiverId')text=state?.members?.find(m=>m.userId===value)?.name||'负责人已不可见';
+      else if(/^governance\.confirmationFileIds\.\d+$/.test(path))text=state?.files.find(f=>f.id===value)?.name||'附件已不可见';
+      else if(key==='sourceProductId')text=value?state?.market.products.find(p=>p.id===value)?.name||'产品已不可见':'未指定';
+      else if(key==='sourceDevId')text=value?state?.devs.find(d=>d.id===value)?.code||'开发案已不可见':'未指定';
+      else if(key==='sourceVersionId')text=value?state?.versions.find(v=>v.id===value)?.label||'版本已不可见':'未指定';
+      else if(key==='sourceQuotationId')text=value?state?.market.quotations.find(q=>q.id===value)?.code||'报价已不可见':'未指定';
+      else if(key==='sourceQuotationLineId')text=value?state?.market.quotations.flatMap(q=>q.lines).find(l=>l.id===value)?.name||'报价条目已不可见':'未指定';
+      else if(path==='type'||key==='group'||path.endsWith('breakdown.kind'))text=({garment:'成衣',fabric:'面料'} as Record<string,string>)[text]||text;
+      else if(path==='governance.kind')text=({external:'外部客户订单',internal:'内部用途订单'} as Record<string,string>)[text]||text;
+      else if(key==='paymentMethod')text=paymentMethodLabel(text);
+      else if(key==='quantityBasis')text=({total:'按总量',size:'按尺码'} as Record<string,string>)[text]||text;
+      else if(typeof value==='boolean')text=value?'是':'否';
+      if(!text)text='未填写';
+    }
     if(development){
       field=path.split('.').filter(p=>p!=='values').map(p=>/^\d+$/.test(p)?'第'+p+'项':DEVELOPMENT_LABEL[p]||FIELD_LABEL[p]||p).join(' · ');
       if(path==='draftId')text=state?.drafts.find(d=>d.id===value)?.values.name||'开发草稿';
@@ -171,15 +211,17 @@ export function AgentProposalDialog({ proposal, state, scopeKey = '', onClose, r
   // 风险等级与服务端共用 agentProposalRisk：未登记的普通写入按中风险，付款、核销、审批等按高风险须输入密码。服务端仍会独立校验档位、密码与原业务权限。
   const risk = agentProposalRisk(proposal, state), detailed = risk !== 'low' && !mail;
   const account = detailed ? proposalAccountRows(proposal.command, state) : null;
-  const fields = detailed ? proposalFieldChanges(proposal.command, risk === 'high', state) : { rows: [], omitted: 0 };
+  const orderCreate=proposal.command.type==='order.create';
+  const fields = detailed ? proposalFieldChanges(proposal.command, risk === 'high'||orderCreate, state) : { rows: [], omitted: 0 };
   const draftSourceMissing=proposal.command.type==='development.saveDraft'&&state&&(
     proposal.command.payload.draftId&&!state.drafts.some(d=>d.id===proposal.command.payload.draftId)
     ||Array.isArray(proposal.command.payload.fileIds)&&proposal.command.payload.fileIds.some(id=>!state.files.some(f=>f.id===id)));
   const quoteSourceMissing=quotationSourceMissing(proposal.command,state);
   const rfqSourceUnavailable=rfqSourceMissing(proposal.command,state);
+  const orderSourceUnavailable=orderSourceMissing(proposal.command,state);
   // 公司收款账户只对照银行字段；同一命令里的其他设置仍逐项列出。
   const changes = account && proposal.command.type !== 'settings.update' ? [] : account ? fields.rows.filter(r => !/^companyProfile\.(bankName|bankAccount|swift|bankAddress)$/.test(r.path)) : fields.rows;
-  const incomplete = risk === 'high' && fields.omitted > 0;
+  const incomplete = (risk === 'high'||orderCreate) && fields.omitted > 0;
   // Agent 起草的合同与资金类批准，由确认人本人当场签字；Agent 不能代签。
   const signing = commandRequiresSignature(proposal.command);
   const decide = async (command: MistCommand, message: string, reauth?: { password: string }, signed?: { svg: string }) => {
@@ -195,12 +237,13 @@ export function AgentProposalDialog({ proposal, state, scopeKey = '', onClose, r
   return <Dialog open onClose={() => { if (!busy) onClose(); }} width={560} title={uiText('确认 Agent 提议')}
     footer={<><Button disabled={busy} onClick={onClose}>{uiText('稍后')}</Button>
       <Button disabled={busy||pendingFailure} onClick={() => void decide({ type: 'agent.proposal.reject', payload: { id: proposal.id, ...(note.trim() ? { note: note.trim() } : {}) } }, '已拒绝提议')}>{uiText('拒绝')}</Button>
-      <Button variant="primary" loading={busy} disabled={busy || pendingFailure || !!mail?.reason || !!proposal.taskBlocked || proposal.unavailable || !!draftSourceMissing || quoteSourceMissing || rfqSourceUnavailable || incomplete || (risk === 'high' && !password) || (signing && !signature)} onClick={() => void decide({ type: 'agent.proposal.confirm', payload: { id: proposal.id } }, '已确认并执行', risk === 'high' ? { password } : undefined, signing && signature ? { svg: signature.svg } : undefined)}>{uiText('确认执行')}</Button></>}>
+      <Button variant="primary" loading={busy} disabled={busy || pendingFailure || !!mail?.reason || !!proposal.taskBlocked || proposal.unavailable || !!draftSourceMissing || quoteSourceMissing || rfqSourceUnavailable || orderSourceUnavailable || incomplete || (risk === 'high' && !password) || (signing && !signature)} onClick={() => void decide({ type: 'agent.proposal.confirm', payload: { id: proposal.id } }, '已确认并执行', risk === 'high' ? { password } : undefined, signing && signature ? { svg: signature.svg } : undefined)}>{uiText('确认执行')}</Button></>}>
     <div className="mist-col" data-agent-proposal-dialog>
       {failure && <div ref={failureRef}><Banner tone={pendingFailure?'warn':'bad'} title={uiText(pendingFailure?'结果待核对':'没有执行')}>{failure}</Banner></div>}
       {draftSourceMissing&&<Banner tone="warn" title={uiText('草稿或附件已不可见，请重新核对')} />}
       {quoteSourceMissing&&<Banner tone="warn" title={uiText('报价或来源资料已不可见，请重新核对')} />}
       {rfqSourceUnavailable&&<Banner tone="warn" title={uiText('询价或报价依据已不可用，请重新核对')} />}
+      {orderSourceUnavailable&&<Banner tone="warn" title={uiText('订单或来源资料已不可见，请重新核对')} />}
       {proposal.taskBlocked && <Banner tone="warn" title={uiText(proposal.taskBlocked)} />}
       <div className="mist-col" data-agent-proposal-summary>{proposal.summary.map((line, i) => <span key={i}>{line}</span>)}</div>
       <KeyValue items={[{ label: uiText('提出'), value: `${proposal.agentIdentity?.name || 'Agent'} · ${businessDate(proposal.createdAt)}` }, { label: uiText('执行身份'), value: proposal.owner }]} />
