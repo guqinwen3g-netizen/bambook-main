@@ -150,6 +150,13 @@ export function applyTeamCommand(root: MistState, command: TeamCommand, c: MistC
 }
 
 /* ---------------- 主管周报（按周一至周日，Asia/Shanghai 业务日） ---------------- */
+export type TeamReportSourceKind = 'orders'|'orderLines'|'shipments'|'shipmentLines'|'invoices'|'receipts'|'customers'|'devs'|'followUps'|'opportunities'|'tasks';
+export type TeamReportSource = { kind: TeamReportSourceKind; id: string };
+export type TeamReportReadProof = { version: 1; workspaceId: string; companyId: string | null; generatedById: string; weekStart: string; permissions: string[]; sources: TeamReportSource[] };
+export type TeamReportInput = { state: MistState; workspaceId: string; companyId: string | null; permissions: string[] };
+export const TEAM_REPORT_READ_GATES = [['orders:read'],['products:read'],['crm:read'],['relations:read'],['shipments:read'],['invoices:read'],['invoices:read','vouchers:read']] as const;
+export const teamShipmentLineSourceId = (shipmentId: string, line: {orderId:string;lineId:string;productionId?:string}) => JSON.stringify([shipmentId,line.orderId,line.lineId,line.productionId??null]);
+type CaptureTeamSource = (kind: TeamReportSourceKind, id: string) => void;
 export type TeamMoney = Array<{ currency: string; amount: number }>;
 /** Physical units are never added to each other; decimal strings retain four-place source precision. */
 export type TeamShipmentQuantities = Array<{ unit: string | null; quantity: string }>;
@@ -205,18 +212,37 @@ export function weekStartOf(day: string) { const n = dayNo(day), dow = (new Date
 export const addBusinessDays = (day: string, n: number) => shiftCalendarDay(day.slice(0, 10), n);
 const bizDay = (at: string | undefined) => !at ? '' : /^\d{4}-\d{2}-\d{2}$/.test(at) ? at : platformBusinessDate(at);
 
-export function teamWeekRow(state: MistState, member: { id: string; name: string }, weekStart: string, today: string, former = false): TeamWeekRow {
+export function teamWeekRow(state: MistState, member: { id: string; name: string }, weekStart: string, today: string, former = false, capture?: CaptureTeamSource): TeamWeekRow {
   const weekEnd = addBusinessDays(weekStart, 6), inWeek = (at: string | undefined) => { const d = bizDay(at); return !!d && d >= weekStart && d <= weekEnd; };
   const id = member.id, owned = state.orders.filter(o => o.ownerId === id), ownedIds = new Set(owned.map(o => o.id));
   const fresh = owned.filter(o => inWeek(o.createdAt) && !isOrderTerminated(o));
   const shipments = weekShipments(state, ownedIds, weekStart);
   const ownedCustomerIds = new Set(state.customers.filter(c => c.ownerId === id).map(c => c.id));
   const invoices = new Map(state.invoices.filter(i => ownedIds.has(i.orderId) || !!i.opening && !!i.customerId && ownedCustomerIds.has(i.customerId)).map(i => [i.id, i]));
-  const collected = state.allocations.filter(a => invoices.has(a.invoiceId)).map(a => ({ a, date: state.receipts.find(r => r.id === a.receiptId)?.date || a.createdAt })).filter(x => inWeek(x.date)).map(x => ({ currency: x.a.currency, amount: x.a.amount }));
+  const collectionRecords = state.allocations.filter(a => invoices.has(a.invoiceId)).map(a => ({ a, date: state.receipts.find(r => r.id === a.receiptId)?.date || a.createdAt })).filter(x => inWeek(x.date));
+  const collected = collectionRecords.map(x => ({ currency: x.a.currency, amount: x.a.amount }));
   const customers = new Set(state.customers.filter(c => c.ownerId === id).map(c => c.id));
   const opps = (state.crm?.opportunities || []).filter(o => o.ownerId === id);
   const tasks = (state.tasks as TeamTask[]).filter(t => (t.assigneeIds || []).includes(id));
   const snapshot = teamRow(state, member, today, { former });
+  if (capture) {
+    for (const order of fresh) capture('orders', order.id);
+    for (const order of snapshot.orders.filter(order => order.status === 'overdue')) capture('orders', order.id);
+    for (const invoice of snapshot.receivables) capture('invoices', invoice.id);
+    for (const shipment of shipments) {
+      capture('shipments', shipment.id);
+      for (const line of shipment.lines.filter(line => ownedIds.has(line.orderId))) {
+        capture('orders', line.orderId); capture('shipmentLines', teamShipmentLineSourceId(shipment.id, line));
+        if (state.orderLines.some(row => row.id === line.lineId && row.orderId === line.orderId)) capture('orderLines', line.lineId);
+      }
+    }
+    for (const { a } of collectionRecords) { capture('invoices', a.invoiceId); if (state.receipts.some(receipt => receipt.id === a.receiptId)) capture('receipts', a.receiptId); }
+    for (const dev of state.devs || []) if (dev.ownerId === id && inWeek(dev.createdAt)) capture('devs', dev.id);
+    for (const follow of state.crm?.followUps || []) if (customers.has(follow.customerId) && inWeek(follow.at)) { capture('followUps', follow.id); capture('customers', follow.customerId); }
+    for (const opportunity of opps) if (opportunity.history?.some(h => ['won','lost'].includes(h.to) && inWeek(h.at))) capture('opportunities', opportunity.id);
+    for (const task of tasks) if (task.done && inWeek(task.doneAt) || task.nudge && (inWeek(task.nudge.at) || !task.done && !!task.due && task.due < today)) capture('tasks', task.id);
+  }
+
   return {
     id, name: member.name, former,
     newOrders: fresh.length, newOrderAmount: sumBy(fresh.map(o => ({ currency: o.currency, amount: o.amount }))),
@@ -232,9 +258,9 @@ export function teamWeekRow(state: MistState, member: { id: string; name: string
 }
 
 /** 团队周报：范围与团队一览一致；本周未结束时统计到今天。 */
-export function teamWeeklyReport(state: MistState, directory: TeamMember[], viewer: { id: string; owner: boolean }, weekStart: string, today: string, group: MistBusinessGroup | 'all' = 'all'): TeamWeekReport {
+export function teamWeeklyReport(state: MistState, directory: TeamMember[], viewer: { id: string; owner: boolean }, weekStart: string, today: string, group: MistBusinessGroup | 'all' = 'all', capture?: CaptureTeamSource): TeamWeekReport {
   const people = teamOverview(state, directory, viewer, today, group).map(r => ({ id: r.id, name: r.name, former: r.former }));
-  const rows = people.map(p => teamWeekRow(state, p, weekStart, today, p.former));
+  const rows = people.map(p => teamWeekRow(state, p, weekStart, today, p.former, capture));
   const n = (k: keyof TeamWeekRow) => rows.reduce((s, r) => s + (r[k] as number), 0);
   const m = (k: 'newOrderAmount' | 'collected' | 'overdueReceivable') => sumBy(rows.flatMap(r => r[k]));
   const weekEnd = addBusinessDays(weekStart, 6);
@@ -260,8 +286,10 @@ export function teamWeeklyText(report: TeamWeekReport, title = '团队周报') {
 }
 
 /* ---------------- 周报存档：每周一起提醒主管生成上周周报，服务端按此刻数据冻结一份 ---------------- */
-export type TeamWeeklyArchive = { id: string; weekStart: string; weekEnd: string; generatedAt: string; generatedById: string; generatedBy: string; scope: string; report: TeamWeekReport; text: string };
-export const teamReports = (root: MistState) => (root as MistState & { teamReports?: TeamWeeklyArchive[] }).teamReports || [];
+export type TeamWeeklyArchive = { id: string; weekStart: string; weekEnd: string; generatedAt: string; generatedById: string; generatedBy: string; scope: string; report: TeamWeekReport; text: string; readProof?: TeamReportReadProof; unavailable?: false };
+export type TeamWeeklyUnavailable = Omit<TeamWeeklyArchive, 'report'|'text'|'readProof'|'unavailable'> & { unavailable: true };
+export type TeamWeeklyArchiveView = TeamWeeklyArchive | TeamWeeklyUnavailable;
+export const teamReports = (root: MistState) => (root as MistState & { teamReports?: TeamWeeklyArchiveView[] }).teamReports || [];
 export const myTeamReport = (root: MistState, viewerId: string, weekStart: string) => teamReports(root).find(r => r.generatedById === viewerId && r.weekStart === weekStart);
 /** 已结束、尚未由本人存档的最近一周（每周一起出现在“我的工作”）。 */
 export function pendingWeeklyArchive(root: MistState, viewerId: string, today: string): string | null {
@@ -283,11 +311,13 @@ function archiveWeekly(root: MistState, p: { weekStart?: unknown }, c: MistConte
   const directory = c.members!.filter(m => m.active).map(m => ({ id: m.id, name: m.name, groups: m.groups, owner: m.owner }));
   const me = c.members!.find(m => m.id === c.actorId);
   const viewer = { id: c.actorId!, owner: !!me?.owner };
-  const report = teamWeeklyReport(root, directory, viewer, weekStart, today);
+  const input = c.teamReportInput, sources = new Map<string, TeamReportSource>();
+  const report = teamWeeklyReport(input?.state ?? root, directory, viewer, weekStart, today, 'all', input ? (kind,id) => { if(id) sources.set(JSON.stringify([kind,id]), {kind,id}); } : undefined);
   const scope = viewer.owner || !me?.groups.length ? '全部成员' : `全部成员（管理业务线：${me.groups.map(g => g === 'garment' ? '成衣' : '面料').join('、')}）`;
   const id = c.id();
   const row: TeamWeeklyArchive = { id, weekStart, weekEnd, generatedAt: c.now, generatedById: c.actorId!, generatedBy: c.actorName, scope, report, text: teamWeeklyText(report, `团队周报 · ${scope}`) };
+  if (input) row.readProof = { version: 1, workspaceId: input.workspaceId, companyId: input.companyId, generatedById: c.actorId!, weekStart, permissions: [...input.permissions], sources: [...sources.values()] };
   const all = root as MistState & { teamReports?: TeamWeeklyArchive[] };
-  all.teamReports = [...teamReports(root), row].slice(-520);
+  all.teamReports = [...((root as MistState & {teamReports?:TeamWeeklyArchive[]}).teamReports || []), row].slice(-520);
   return { id };
 }

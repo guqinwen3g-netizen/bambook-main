@@ -11,6 +11,8 @@ import {provisionCompanyRoles,companyRoleId} from '../platform/companyProvisioni
 import {SYSTEM_ROLE_IDS} from '../_shared/rolePermissionMatrix';
 import {createMistState} from '../shared/mistWorkspace';
 import {TEST_SIGNATURE} from './__tests__/signature';
+import {addBusinessDays, weekStartOf} from '../shared/mistTeam';
+import {platformBusinessDate} from '../shared/mistPlatform';
 
 const url=process.env.MIST_PG_CONFLICT_TEST_URL;
 describe.skipIf(!url)('submitted main source with real company grants on PostgreSQL',()=>{
@@ -73,5 +75,35 @@ describe.skipIf(!url)('submitted main source with real company grants on Postgre
  });
  it('rejects a departed reviewer while keeping the other assigned reviewer queue available',async()=>{
   const first=await submit();await db.companyMember.updateMany({where:{companyId,userId:oldHead},data:{status:'suspended'}});expect((await reviews(boss)).find((r:any)=>r.id===first.reviewId)?.canDecide).toBe(true);const before=await raw(),result=await decide(oldHead,first.reviewId);expect([401,403]).toContain(result.status);expect(await raw()).toEqual(before);
+ });
+ it('persists only caller-visible weekly inputs and rechecks current source access on PostgreSQL',async()=>{
+  const scopes=['relations:admin','orders:read','products:read','crm:read','relations:read','shipments:read','invoices:read','vouchers:read'];
+  const permissions=await db.permission.findMany({where:{scope:{in:scopes}}});expect(permissions).toHaveLength(scopes.length);
+  await db.rolePermission.createMany({data:permissions.map(p=>({id:randomUUID(),roleId:noOrdersRole,permissionId:p.id}))});
+  try{
+   await db.userAccount.update({where:{id:boss},data:{primaryDeptId:root}});await db.userAccount.update({where:{id:oldHead},data:{primaryDeptId:support}});
+   await db.userRole.deleteMany({where:{userId:oldHead,role:{companyId}}});await db.userRole.create({data:{id:randomUUID(),userId:oldHead,roleId:noOrdersRole,departmentId:support}});
+   const today=platformBusinessDate(new Date()),weekStart=addBusinessDays(weekStartOf(today),-7),state=(await raw()).state as any;
+   const demo=createMistState({id:randomUUID,now:new Date().toISOString(),actorName:boss,actorId:boss},'demo');
+   state.customers.push({...structuredClone(state.customers[0]),id:'foreign-customer',name:'Foreign Studio',code:'FOREIGN',owner:boss,ownerId:boss});
+   state.orders=[{...structuredClone(demo.orders[0]),id:'fabric-visible',type:'fabric',customerId:'customer',owner,ownerId:owner,createdAt:weekStart+'T04:00:00Z'}, {...structuredClone(demo.orders[0]),id:'garment-hidden',type:'garment',customerId:'foreign-customer',owner:boss,ownerId:boss,createdAt:weekStart+'T04:00:00Z'}];
+   state.orderLines=state.orders.map((o:any,i:number)=>({...structuredClone(demo.orderLines[0]),id:'weekly-line-'+i,orderId:o.id,unit:i?'件':'米'}));
+   await db.mistWorkspace.update({where:{id:wid},data:{state}});
+   expect((await workspace(oldHead)).state.orders.map((o:any)=>o.id)).toEqual(['fabric-visible']);
+   expect((await command(boss,'team.weekly.archive',{weekStart})).status).toBe(200);
+   const full=(await workspace(boss)).state.teamReports.find((a:any)=>a.generatedById===boss);expect(full.report.totals.newOrders).toBe(2);
+   expect((await workspace(oldHead)).state.teamReports).toEqual([]);
+   expect((await command(oldHead,'team.weekly.archive',{weekStart,report:{total:{newOrders:999999}}})).status).toBe(200);
+   const own=(await workspace(oldHead)).state.teamReports.find((a:any)=>a.generatedById===oldHead);expect(own.report.totals.newOrders).toBe(1);expect(own).not.toHaveProperty('readProof');
+   const stored=(await raw()).state as any,archive=stored.teamReports.find((a:any)=>a.generatedById===oldHead);
+   expect(archive.readProof).toMatchObject({version:1,workspaceId:wid,companyId,generatedById:oldHead,weekStart});
+   expect(archive.readProof.sources).toContainEqual({kind:'orders',id:'fabric-visible'});expect(archive.readProof.sources).not.toContainEqual({kind:'orders',id:'garment-hidden'});
+   await db.department.update({where:{id:fabric},data:{headId:null}});
+   const unavailable=(await workspace(oldHead)).state.teamReports.find((a:any)=>a.generatedById===oldHead);expect(unavailable.unavailable).toBe(true);expect(unavailable).not.toHaveProperty('report');expect(unavailable).not.toHaveProperty('text');expect(unavailable).not.toHaveProperty('readProof');
+   expect((await command(oldHead,'team.weekly.archive',{weekStart})).status).toBe(409);
+   expect((await raw()).state).toEqual(stored);
+   await db.department.update({where:{id:fabric},data:{headId:oldHead}});
+   expect((await workspace(oldHead)).state.teamReports.find((a:any)=>a.generatedById===oldHead)).toEqual(own);expect((await raw()).state).toEqual(stored);
+  }finally{await db.rolePermission.deleteMany({where:{roleId:noOrdersRole}});}
  });
 });

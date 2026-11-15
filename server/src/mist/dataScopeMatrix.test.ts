@@ -11,6 +11,7 @@ import { agentGet, agentQuery, agentRelated } from './agentRead';
 import { handleMcpMessage } from './agentMcp';
 import { runMistAssistant } from './assistant';
 import { MemoryMistDatabase, testAuthority } from './__tests__/support';
+import { teamWeeklyReport } from '../shared/mistTeam';
 
 // 规格 §2 / P3：岗位 × 越权读写矩阵。示例数据：customer-0、customer-2 跟进人 demo-sales，customer-1 跟进人 demo-buyer。
 const COMPANY = '11111111-1111-4111-8111-111111111111';
@@ -464,4 +465,75 @@ describe('read-only exits use the current repository projection', () => {
       expect(read).not.toHaveBeenCalled();
     } finally { read.mockRestore(); }
   });
+});
+
+
+describe('weekly archives keep the caller business projection', () => {
+  const weekStart = '2026-10-05';
+  beforeEach(() => { const raw=db.workspaces.get(workspaceId)!.state; raw.orders.find((order:any)=>order.ownerId==='demo-buyer')!.createdAt='2026-10-07T01:00:00Z'; });
+  it('generates from the same allowed state as the live report, ignoring client report data', async () => {
+    const visible = await repo.get(actor('head'), workspaceId);
+    const expected = teamWeeklyReport(visible.state, visible.state.members as any, { id: 'head', owner: false }, weekStart, '2026-10-13');
+    await repo.execute(actor('head'), workspaceId, { requestId: randomUUID(), expectedRevision: 0,
+      command: { type: 'team.weekly.archive', payload: { weekStart, report: { totals: { newOrders: 999999 } } } } as any });
+    const raw = db.workspaces.get(workspaceId)!.state as any;
+    expect(raw.teamReports[0].report.totals).toEqual(expected.totals);
+    expect(raw.orders.map((o: any) => o.id).sort()).toEqual([...ALL_ORDERS].sort());
+    expect(raw.teamReports[0].readProof).toMatchObject({ version: 1, workspaceId, companyId: COMPANY, generatedById: 'head', weekStart });
+  });
+  it('does not expose another supervisor full-company aggregate outside the current allowed records', async () => {
+    await repo.execute(actor('boss'), workspaceId, { requestId: randomUUID(), expectedRevision: 0, command: { type: 'team.weekly.archive', payload: { weekStart } } });
+    const limited = await repo.get(actor('head'), workspaceId);
+    expect((limited.state as any).teamReports?.some((r: any) => r.generatedById === 'boss' && r.report)).toBe(false);
+  });
+  it('keeps a frozen own report readable as data grows, hides its body on scope loss, and restores it when access returns', async () => {
+    await repo.execute(actor('head'), workspaceId, { requestId: randomUUID(), expectedRevision: 0, command: { type: 'team.weekly.archive', payload: { weekStart } } });
+    const raw = db.workspaces.get(workspaceId)!.state as any, original = structuredClone(raw.teamReports[0]);
+    const before = await repo.get(actor('head'), workspaceId); expect((before.state as any).teamReports[0].report).toEqual(original.report);
+    const extra = structuredClone(raw.orders.find((o: any) => o.ownerId === 'demo-buyer')); extra.id = 'new-visible-order'; raw.orders.push(extra);
+    const grown = await repo.get(actor('head'), workspaceId); expect((grown.state as any).teamReports[0].report).toEqual(original.report);
+    db.departments.find(d => d.id === 'sales-dept')!.headId = null;
+    const lost = await repo.get(actor('head'), workspaceId), record = (lost.state as any).teamReports.find((r: any) => r.id === original.id);
+    expect(record).toMatchObject({ id: original.id, weekStart, unavailable: true }); expect(record.report).toBeUndefined(); expect(record.text).toBeUndefined();
+    db.departments.find(d => d.id === 'sales-dept')!.headId = 'head';
+    const restored = await repo.get(actor('head'), workspaceId); expect((restored.state as any).teamReports[0].report).toEqual(original.report);
+    expect(raw.teamReports[0]).toEqual(original);
+  });
+  it('withholds immutable values after a source-read permission is revoked, without losing archive identity', async () => {
+    await repo.execute(actor('head'), workspaceId, {requestId:randomUUID(),expectedRevision:0,command:{type:'team.weekly.archive',payload:{weekStart}}});
+    const raw=db.workspaces.get(workspaceId)!.state as any,original=structuredClone(raw.teamReports[0]),grants=[...auth.users.get('head')!.permissions];
+    expect(original.readProof.permissions).toContain('orders:read');auth.users.get('head')!.permissions=grants.filter(p=>p!=='orders:read');
+    const denied=await repo.get(actor('head'),workspaceId),record=(denied.state as any).teamReports[0];
+    expect(record).toMatchObject({id:original.id,unavailable:true});expect(Object.keys(record).sort()).toEqual(['generatedAt','generatedBy','generatedById','id','scope','unavailable','weekEnd','weekStart'].sort());
+    auth.users.get('head')!.permissions=grants;const restored=await repo.get(actor('head'),workspaceId);
+    expect((restored.state as any).teamReports[0].report).toEqual(original.report);expect((restored.state as any).teamReports[0].readProof).toBeUndefined();expect(raw.teamReports[0]).toEqual(original);
+  });
+  it('does not infer historical sources for an old unbound scoped archive or allow duplicate regeneration', async () => {
+    await repo.execute(actor('head'),workspaceId,{requestId:randomUUID(),expectedRevision:0,command:{type:'team.weekly.archive',payload:{weekStart}}});
+    const raw=db.workspaces.get(workspaceId)!.state as any;delete raw.teamReports[0].readProof;const original=structuredClone(raw.teamReports[0]);
+    const view=await repo.get(actor('head'),workspaceId);expect((view.state as any).teamReports[0]).toMatchObject({id:original.id,unavailable:true});
+    await expect(repo.execute(actor('head'),workspaceId,{requestId:randomUUID(),expectedRevision:1,command:{type:'team.weekly.archive',payload:{weekStart}}})).rejects.toMatchObject({code:'CONFLICT'});
+    expect(raw.teamReports).toEqual([original]);
+  });
+  it('binds new read proof to the real workspace, company, author and version rather than treating malformed proof as legacy', async () => {
+    await repo.execute(actor('head'),workspaceId,{requestId:randomUUID(),expectedRevision:0,command:{type:'team.weekly.archive',payload:{weekStart}}});
+    const raw=db.workspaces.get(workspaceId)!.state as any,proof=structuredClone(raw.teamReports[0].readProof);
+    for(const change of [{workspaceId:randomUUID()},{companyId:randomUUID()},{generatedById:'boss'},{version:'1'},{permissions:['*']}]){
+      raw.teamReports[0].readProof={...proof,...change};const view=await repo.get(actor('head'),workspaceId);
+      expect((view.state as any).teamReports[0]).toMatchObject({unavailable:true});expect((view.state as any).teamReports[0].report).toBeUndefined();
+    }
+    raw.teamReports[0].readProof=proof;
+  });
+
+  it('uses the same trusted source when a human confirms an Agent weekly proposal', async () => {
+    const grants=auth.users.get('head')!.permissions;for(const scope of ['ai:chat','ai:write:medium'])if(!grants.includes(scope))grants.push(scope);
+    const visible=await repo.get(actor('head'),workspaceId),expected=teamWeeklyReport(visible.state,visible.state.members as any,{id:'head',owner:false},weekStart,'2026-10-13');
+    const raw=db.workspaces.get(workspaceId)!.state as any;
+    raw.agentProposals=[{id:'weekly-agent-proposal',ownerId:'head',owner:'head',state:'pending',risk:'medium',createdAt:'2026-10-13T01:00:00Z',summary:['生成可见范围周报'],command:{type:'team.weekly.archive',payload:{weekStart}}}];
+    await repo.execute(actor('head'),workspaceId,{requestId:randomUUID(),expectedRevision:0,command:{type:'agent.proposal.confirm',payload:{id:'weekly-agent-proposal'}}});
+    const after=db.workspaces.get(workspaceId)!.state as any;
+    expect(after.teamReports[0].report.totals).toEqual(expected.totals);expect(after.teamReports[0].readProof).toMatchObject({workspaceId,companyId:COMPANY,generatedById:'head'});
+    expect(after.agentProposals[0].state).toBe('confirmed');
+  });
+
 });

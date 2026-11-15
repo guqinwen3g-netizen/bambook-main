@@ -1,3 +1,4 @@
+import { teamReportReadPermissions } from './teamReportAccess';
 import {assertCustomerCommandFieldAuthority} from '../shared/mistCustomerFieldAuthority';
 import {mistBusinessInstant} from '../shared/mistBusinessClock';
 import { EMAIL_SERVER_COMMAND, emailAccountAccessible, emailBusinessOwner, emailLinkTarget } from '../shared/mistEmail';
@@ -291,7 +292,7 @@ export class MistRepository {
     return { digests, unavailable: prepared?.unavailable || new Set<string>(), current: row.state };
   }
   private accessView(row: MistWorkspaceRow, actor: TokenPayload, scope = scopeOf(row), state = row.state) {
-    return projectState(state, actor, this.emptyState(actor), fileOwner(row), scope, this.filePrivacy(row, state));
+    return projectState(state, actor, this.emptyState(actor), fileOwner(row), scope, this.filePrivacy(row, state), row.id);
   }
   private async issuedCreditBytes(workspaceId: string, file: MistStoredFile, version: Parameters<typeof assertIssuedCreditArchive>[0]) {
     try { return assertIssuedCreditArchive(version, await this.files.read(workspaceId, file)); }
@@ -996,6 +997,7 @@ export class MistRepository {
         if (earlyScope && !scopeManagement && scopedReferenceViolation(row.state, earlyScope, input.command?.payload, ['market.quotation.save','order.create','order.governance.saveDraft'].includes(input.command?.type),crossRefs)) fail('NOT_FOUND', '来源记录不存在或不在当前账号的业务范围内', 404);
         if(upload&&input.claimId!==undefined)activeUploadClaim(row.state,input.claimId);
         const context = this.context(actor, input.command?.type?.startsWith('email.') ? undefined : row.state);
+        if (input.command?.type === 'team.weekly.archive') context.teamReportInput = { state: this.accessView(row,actor,scopeOf(row)).state, workspaceId: row.id, companyId: actor.companyId ?? null, permissions: teamReportReadPermissions(actor) };
         // 经 Agent（委托令牌）的写入在业务事件经办人后标注，账号与权限判断不受影响。
         if (isAgentActor(prior)) Object.assign(context, { actorName: `${context.actorName}（经 Agent）`, viaAgent: true, agentSessionId: prior.agentSessionId,...(prior.agentIdentity?{agentIdentity:prior.agentIdentity}:{}),...(prior.agentTaskLease?{agentTaskId:prior.agentTaskLease.taskId,agentTaskSourceRevision:prior.agentTaskSourceRevision}:{}) });
         if (MEMBER_PERSONAL_COMMANDS.includes(input.command?.type)) {

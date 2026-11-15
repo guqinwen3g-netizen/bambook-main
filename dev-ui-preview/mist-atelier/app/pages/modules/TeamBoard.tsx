@@ -139,6 +139,7 @@ export function TeamWeekly({ state, members, viewer, group, today, initialWeek, 
   const [week, setWeek] = React.useState(initialWeek && weekStartOf(initialWeek) === initialWeek && initialWeek <= current ? initialWeek : current);
   /** 已结束的周：本人存档过就显示存档版本（数据冻结在生成那一刻），否则显示实时计算并可存档。 */
   const archived = myTeamReport(state, viewer.id, week);
+  if (archived?.unavailable) return <div data-team-weekly={week}><div className="mist-row" style={{flexWrap:'wrap'}}><Button size="sm" icon={ChevronLeft} aria-label={uiText('上一周')} onClick={()=>setWeek(addBusinessDays(week,-7))}/><b>{archived.weekStart}{uiText(' 至 ')}{archived.weekEnd}</b><Button size="sm" icon={ChevronRight} aria-label={uiText('下一周')} disabled={week>=current} onClick={()=>setWeek(addBusinessDays(week,7))}/></div><Banner tone="warn" title={uiText('存档当前不可查看')}/></div>;
   const live = teamWeeklyReport(state, members, viewer, week, today, group);
   const report = archived ? archived.report : live, t = report.totals;
   const text = archived ? archived.text : teamWeeklyText(report);

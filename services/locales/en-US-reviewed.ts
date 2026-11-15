@@ -1029,4 +1029,5 @@ export const reviewedEnglish: Record<string, string> = {
   '未评级': 'Unrated',
   '数量未分单位': 'Quantity was not recorded by unit',
   '单位未记录': 'Unit not recorded',
+  '存档当前不可查看': 'This archived report is not currently accessible',
 };

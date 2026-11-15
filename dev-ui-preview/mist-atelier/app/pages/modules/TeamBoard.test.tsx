@@ -100,6 +100,16 @@ it('does not invent units or rebuild an older frozen report, while preserving it
   expect(host.textContent).toContain('数量未分单位');expect(host.textContent).not.toContain('1185.5');
   await click(getByRole(host,'button',{name:'复制周报文字'}));expect(writeText).toHaveBeenCalledWith('原始存档文字');expect(JSON.stringify(old)).toBe(original);expect(run).not.toHaveBeenCalled();
 });
+
+it('keeps an inaccessible archive distinct from an ungenerated week and restores the original frozen body when access returns',()=>{
+  const today=platformBusinessDate(new Date()),last=addBusinessDays(weekStartOf(today),-7),report=teamWeeklyReport(state,members,{id:'demo-reviewer',owner:true},last,today);
+  const metadata={id:'locked',weekStart:last,weekEnd:addBusinessDays(last,6),generatedAt:'2026-10-19T01:30:00Z',generatedById:'demo-reviewer',generatedBy:'周敏',scope:'',unavailable:true};
+  const show=()=>act(()=>root.render(<MistRoot><ToastProvider><TeamBoard state={state} members={members} viewer={{id:'demo-reviewer',owner:true}} can busy={false} run={run} go={go} initialMode="week" initialWeek={last}/></ToastProvider></MistRoot>));
+  (state as any).teamReports=[metadata];show();expect(host.textContent).toContain('存档当前不可查看');
+  for(const name of ['生成并存档','复制周报文字','导出 CSV'])expect(queryByRole(host,'button',{name})).toBeNull();expect(host.textContent).not.toContain('尚未存档');
+  (state as any).teamReports=[{...metadata,unavailable:undefined,scope:'全部成员',report,text:'冻结原文'}];show();
+  expect(host.textContent).toContain('已存档');expect(host.textContent).not.toContain('存档当前不可查看');expect(queryByRole(host,'button',{name:'生成并存档'})).toBeNull();expect(run).not.toHaveBeenCalled();
+});
 it('does not offer archiving to viewers without supervisor permission',()=>{
   const today=platformBusinessDate(new Date()),last=addBusinessDays(weekStartOf(today),-7);
   act(()=>root.render(<MistRoot><ToastProvider><TeamBoard state={state} members={members} viewer={{id:'demo-sales',owner:false}} can={false} busy={false} run={run} go={go} initialMode="week" initialWeek={last}/></ToastProvider></MistRoot>));

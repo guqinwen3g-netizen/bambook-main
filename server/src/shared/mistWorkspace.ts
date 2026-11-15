@@ -71,6 +71,8 @@ export type MistContext = {
   id: () => string; now: string; actorName: string; actorId?: string; auditNow?: string;
   /** 服务端从实时读投影生成，不能由命令 payload 扩大；不重构共享通知的数据模型。 */
   visibleNotificationIds?: string[];
+  /** Trusted server read projection for weekly output; never accepted from command payload. */
+  teamReportInput?: import('./mistTeam').TeamReportInput;
   /** 本公司在用的人事小组（服务端按当前公司加载），小组范围命令据此核对小组归属。 */
   teams?: TeamScopeTeam[];
   /** 服务端按本次执行账号的实时有效权限生成；领域处理内二次校验用，缺省视为无权（失败关闭）。 */

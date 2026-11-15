@@ -1,3 +1,4 @@
+import { projectTeamReports } from './teamReportAccess';
 import {financialMaterialCostBasis,type InternalFabricCostBasis} from '../shared/mistInternalFabric';
 import {financialClaimCostBasis,type OrderClaimCostBasis} from '../shared/mistClaimCost';
 import {MistCommandError} from '../shared/mistWorkspace';
@@ -212,7 +213,7 @@ function projectMemberHandovers(next: MistState, actor: TokenPayload) {
 }
 const canManageMemberHandover = (actor: TokenPayload, ownerId?: string) => hasScope(actor, COMPANY_MAINTAIN_SCOPE as PermissionScope) || !!ownerId && ownerId === actor.userId;
 /** 按账号自身读权限裁剪状态；被隐藏的数据结构用空公司的同名结构替换，保证页面结构完整。 */
-export function projectState(state: MistState, actor: TokenPayload, empty: () => MistState, ownerId?: string, scope?: MistDataScope, privacy?: FilePrivacyContext): { state: MistState; hidden: Section[];costMaterialBasis?:InternalFabricCostBasis[] | null;costClaimBasis?:OrderClaimCostBasis[]|null } {
+export function projectState(state: MistState, actor: TokenPayload, empty: () => MistState, ownerId?: string, scope?: MistDataScope, privacy?: FilePrivacyContext, reportWorkspaceId?: string): { state: MistState; hidden: Section[];costMaterialBasis?:InternalFabricCostBasis[] | null;costClaimBasis?:OrderClaimCostBasis[]|null } {
   const calendarState = { ...state, calendar: currentCrmCalendar(state) };
   const hidden = hiddenSections(actor), next: MistState = scope ? applyDataScope(calendarState, scope, actor.userId) : calendarState;
   // Legacy company activity had no recipients. Keep it in events, never broadcast it to accounts.
@@ -301,6 +302,7 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
   const costVisible=hasScope(actor,'reports:admin')&&!hidden.some(s=>['orders','procurement','receivables','payables'].includes(s.key));
   let costClaimBasis:OrderClaimCostBasis[]|null=null;
   if(costVisible)try{costClaimBasis=financialClaimCostBasis(state,new Set((next.orders??[]).map(order=>order.id)));}catch(error){if(!(error instanceof MistCommandError))throw error;}
+  if ('teamReports' in state) (next as MistState & {teamReports?:import('../shared/mistTeam').TeamWeeklyArchiveView[]}).teamReports = projectTeamReports(state,next,actor,scope,reportWorkspaceId);
   return { state: next, hidden,...(costVisible?{costMaterialBasis:scope ? null : financialMaterialCostBasis(state),costClaimBasis}:{}) };
 }
 /** 精确匹配附件 ID，不用全文子串判断，避免相似文本开放隐藏附件。 */
