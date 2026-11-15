@@ -117,3 +117,14 @@ it('keeps a late contact failure out of the next workspace',async()=>{
   bridge.current.workspace={id:'other',ownerId:'local',revision:0,state:bridge.current.state};await rerenderCustomer('a');bridge.current.error='新公司错误';await act(async()=>reject(new Error('旧联系人失败')));
   expect(bridge.current.dismissError).not.toHaveBeenCalled();expect(document.body.textContent).not.toContain('旧联系人失败');expect(bridge.current.error).toBe('新公司错误');
 });
+it('owns a confirmed rejection even when rendered pending has not caught up with the cleared durable intent',async()=>{
+  bridge.current.state.customers=[customer('a')];bridge.current.dismissError=vi.fn();
+  bridge.current.run.mockImplementationOnce(async()=>{bridge.current.pending={kind:'command',requestId:'transient',workspaceId:'w'};await rerenderCustomer('a');bridge.current.pending=null;throw new Error('已确认拒绝');});
+  await mount('a');await click('编辑客户资料');const d=getByRole(document.body,'dialog',{name:'编辑客户资料'});await act(async()=>getByRole(d,'button',{name:'保存资料'}).click());expect(bridge.current.dismissError).toHaveBeenCalledWith('已确认拒绝');expect(occurrences('已确认拒绝')).toBe(1);
+});
+it('reveals a new drawer failure in its own scroll area',async()=>{
+  const prior=HTMLElement.prototype.scrollIntoView,scroll=vi.fn();HTMLElement.prototype.scrollIntoView=scroll;
+  try{bridge.current.state.customers=[customer('a')];bridge.current.dismissError=vi.fn();bridge.current.run.mockRejectedValueOnce(new Error('滚入当前抽屉'));
+    await mount('a');await click('编辑客户资料');const d=getByRole(document.body,'dialog',{name:'编辑客户资料'});await act(async()=>getByRole(d,'button',{name:'保存资料'}).click());expect(scroll).toHaveBeenCalledWith({block:'nearest'});expect(scroll.mock.instances.some(node=>d.contains(node)&&node.textContent?.includes('滚入当前抽屉'))).toBe(true);
+  }finally{if(prior)HTMLElement.prototype.scrollIntoView=prior;else delete(HTMLElement.prototype as any).scrollIntoView;}
+});

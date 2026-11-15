@@ -57,6 +57,9 @@ export function CustomerPage() {
   const [editOrigin, setEditOrigin] = React.useState<string | null>(null);
   const [deleteContact, setDeleteContact] = React.useState(false), [frequency, setFrequency] = React.useState(false);
   const [busy, setBusy] = React.useState(false), [failure, setFailure] = React.useState('');
+  const localFailure = React.useRef<HTMLDivElement>(null);
+  React.useLayoutEffect(() => { if (failure) localFailure.current?.scrollIntoView?.({ block: 'nearest' }); }, [failure]);
+  const showFailure = (message: string) => { if (message === failure) localFailure.current?.scrollIntoView?.({ block: 'nearest' }); setFailure(message); };
   const routeScope = useRouteScope();
   const actionScope = JSON.stringify([session.sessionKey, session.user?.id, workspace?.id, customer?.id]);
   const activeScope = React.useRef(actionScope); activeScope.current = actionScope;
@@ -84,28 +87,28 @@ export function CustomerPage() {
     setBusy(true); setFailure('');
     try { await run(command, { expectedRevision }); if (available()) done(); }
     catch (problem) { if (available()) {
-      const message = problem instanceof Error ? problem.message : '操作失败，请重试'; setFailure(message);
+      const message = problem instanceof Error ? problem.message : '操作失败，请重试'; showFailure(message);
       // Only the live modal owns this confirmed failure. Unknown results keep their original recovery notice.
-      if (!(problem as { mistPendingCommand?: unknown })?.mistPendingCommand && !live.current.pending) dismissError?.(message);
+      if (!(problem as { mistPendingCommand?: unknown })?.mistPendingCommand) dismissError?.(message); // The provider checks its synchronous durable intent; rendered pending can lag a rejection.
     } } finally { if (available()) setBusy(false); }
   };
   const checkedWorkspace = () => {
     const current = live.current.workspace;
-    if (!current || !Number.isSafeInteger(current.revision)) { setFailure('公司资料尚未读取，请重试。'); return null; }
+    if (!current || !Number.isSafeInteger(current.revision)) { showFailure('公司资料尚未读取，请重试。'); return null; }
     return current;
   };
   const checkedContact = () => {
     const current = checkedWorkspace(); if (!current || !customer || !contact) return null;
     if (contact.id) {
       const source = currentContact(current.state, customer.id, contact.id);
-      if (!source || contactOrigin !== contactSource(source)) { setFailure('联系人资料已更新，请重新打开后核对。'); return null; }
+      if (!source || contactOrigin !== contactSource(source)) { showFailure('联系人资料已更新，请重新打开后核对。'); return null; }
     }
     return current;
   };
   const saveContact = async () => {
     if (!canMaintainCustomer || !contact || !customer || busy) return;
-    if (!contact.name?.trim()) { setFailure('请填写联系人姓名'); return; }
-    if (contact.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email)) { setFailure('请填写有效邮箱'); return; }
+    if (!contact.name?.trim()) { showFailure('请填写联系人姓名'); return; }
+    if (contact.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact.email)) { showFailure('请填写有效邮箱'); return; }
     const current = checkedContact(); if (!current) return;
     await execute({ type: 'market.contact.save', payload: { kind:'customer',parentId:customer.id,id: contact.id,primary:!!contact.primary, name: contact.name, role: contact.role ?? '', email: contact.email ?? '', phone: contact.phone ?? '' } }, () => { setContact(null); setContactOrigin(null); toast('联系人已保存'); }, current.revision);
   };
@@ -113,7 +116,7 @@ export function CustomerPage() {
     if (!canMaintainCustomer || !edit || busy) return;
     const current = checkedWorkspace(); if (!current) return;
     const source = current.state.customers.find(item => item.id === edit.id);
-    if (!source || editOrigin !== customerProfileSource(source)) { setFailure('客户资料已更新，请重新打开后核对。'); return; }
+    if (!source || editOrigin !== customerProfileSource(source)) { showFailure('客户资料已更新，请重新打开后核对。'); return; }
     const { id, owner: _owner, ...patch } = edit;
     await execute({ type: 'market.customer.update', payload: { id, patch } }, () => { setEdit(null); setEditOrigin(null); toast('客户资料已保存'); }, current.revision);
   };
@@ -198,14 +201,14 @@ export function CustomerPage() {
       </div>
     </div>
     <Drawer open={!!contact} onClose={closeContact} title={uiText(!canMaintainCustomer?'联系人':contact?.id ? '编辑联系人' : '添加联系人')} footer={<><Button disabled={busy} onClick={closeContact}>{uiText(canMaintainCustomer?'取消':'关闭')}</Button>{canMaintainCustomer&&contact?.id && <Button variant="danger" disabled={busy} onClick={() => { setFailure(''); setDeleteContact(true); }}>{uiText("删除")}</Button>}{canMaintainCustomer&&<Button variant="primary" loading={busy} disabled={!!pending} onClick={() => void saveContact()}>{uiText("保存")}</Button>}</>}>
-      {failure && !deleteContact && <Banner tone={pending ? 'warn' : 'bad'} title={uiText(pending ? '结果待核对' : '联系人未保存')}>{failure}</Banner>}<FormGrid>{(['name', 'role', 'email', 'phone'] as const).map((key, index) => <Field key={key} label={uiText(['姓名', '职责', '邮箱', '电话'][index])} required={key === 'name'}><TextInput aria-label={uiText(['姓名', '职责', '邮箱', '电话'][index])} readOnly={!canMaintainCustomer} type={key === 'email' ? 'email' : 'text'} value={contact?.[key] ?? ''} onChange={event => setContact(value => ({ ...value, [key]: event.target.value }))} /></Field>)}{canMaintainCustomer ? <Checkbox label={uiText('主联系人')} checked={!!contact?.primary} onChange={primary => setContact(value => ({ ...value, primary }))} /> : contact?.primary ? <span className="mist-note">{uiText('主联系人')}</span> : null}</FormGrid>
+      {failure && !deleteContact && <div ref={localFailure}><Banner tone={pending ? 'warn' : 'bad'} title={uiText(pending ? '结果待核对' : '联系人未保存')}>{failure}</Banner></div>}<FormGrid>{(['name', 'role', 'email', 'phone'] as const).map((key, index) => <Field key={key} label={uiText(['姓名', '职责', '邮箱', '电话'][index])} required={key === 'name'}><TextInput aria-label={uiText(['姓名', '职责', '邮箱', '电话'][index])} readOnly={!canMaintainCustomer} type={key === 'email' ? 'email' : 'text'} value={contact?.[key] ?? ''} onChange={event => setContact(value => ({ ...value, [key]: event.target.value }))} /></Field>)}{canMaintainCustomer ? <Checkbox label={uiText('主联系人')} checked={!!contact?.primary} onChange={primary => setContact(value => ({ ...value, primary }))} /> : contact?.primary ? <span className="mist-note">{uiText('主联系人')}</span> : null}</FormGrid>
       {canMail&&contact?.email && <Button icon={Mail} disabled={!emailValid(contact.email)} title={uiText("使用本机邮件应用撰写，Bambook不会发送邮件")} onClick={() => writeMail(contact.email)}>{uiText("写邮件")}</Button>}
     </Drawer>
     <Dialog open={deleteContact} onClose={closeDelete} title={uiText("删除联系人？")} description={uiText(contact?.name)} footer={<><Button disabled={busy} onClick={closeDelete}>{uiText("取消")}</Button><Button variant="danger" loading={busy} disabled={!!pending} onClick={() => void removeContact()}>{uiText("删除联系人")}</Button></>}>
-      {failure && <Banner tone={pending ? 'warn' : 'bad'} title={uiText(pending ? '结果待核对' : '删除未完成')}>{failure}</Banner>}
+      {failure && <div ref={localFailure}><Banner tone={pending ? 'warn' : 'bad'} title={uiText(pending ? '结果待核对' : '删除未完成')}>{failure}</Banner></div>}
     </Dialog>
     <Drawer open={!!edit} onClose={closeProfile} title={uiText("编辑客户资料")} size="lg" footer={<Button variant="primary" loading={busy} disabled={!!pending} onClick={() => void saveProfile()}>{uiText("保存资料")}</Button>}>
-      {failure && <Banner tone={pending ? 'warn' : 'bad'} title={uiText(pending ? '结果待核对' : '资料未保存')}>{failure}</Banner>}<FormGrid>{(['name', 'country', 'city', 'industry', 'grade', 'terms', 'incoterm', 'categories', 'since'] as const).map((key, index) => <Field key={key} label={uiText(['客户名称', '国家', '城市', '行业', '等级', '付款条款', '贸易术语', '主要品类', '合作起始日'][index])}>{key === 'incoterm' ? <IncotermPlaceInput value={edit?.incoterm ?? ''} onChange={incoterm => setEdit(value => value ? { ...value, incoterm } : value)} /> : CUSTOMER_CHOICES[key] ? <OptionInput ariaLabel={['客户名称', '国家', '城市', '行业', '等级', '付款条款', '贸易术语', '主要品类', '合作起始日'][index]} options={CUSTOMER_CHOICES[key]!} value={edit?.[key] ?? ''} onChange={next => setEdit(value => value ? { ...value, [key]: next } : value)} /> : <TextInput type={key === 'since' ? 'date' : 'text'} value={edit?.[key] ?? ''} onChange={event => setEdit(value => value ? { ...value, [key]: event.target.value } : value)} />}</Field>)}<Field label={uiText("客户经理")}><Select aria-label={uiText("客户经理")} disabled={!canChangeOwner} value={edit?.ownerId ?? ''} onChange={event => setEdit(value => value ? { ...value, ownerId: event.target.value } : value)} options={memberSelectOptions(members, { current: { id: edit?.ownerId, name: edit?.owner } })} /></Field><Field label={uiText("结算币种")}><Select aria-label={uiText("结算币种")} value={edit?.currency ?? 'USD'} onChange={event => setEdit(value => value ? { ...value, currency: event.target.value } : value)} options={withCurrent(CURRENCIES, edit?.currency || 'USD')} /></Field><Field label={uiText("信用额度（结算币种）")}><TextInput type="number" min={0} value={edit?.creditLimit ?? 0} onChange={event => setEdit(value => value ? { ...value, creditLimit: Number(event.target.value) } : value)} /></Field></FormGrid>
+      {failure && <div ref={localFailure}><Banner tone={pending ? 'warn' : 'bad'} title={uiText(pending ? '结果待核对' : '资料未保存')}>{failure}</Banner></div>}<FormGrid>{(['name', 'country', 'city', 'industry', 'grade', 'terms', 'incoterm', 'categories', 'since'] as const).map((key, index) => <Field key={key} label={uiText(['客户名称', '国家', '城市', '行业', '等级', '付款条款', '贸易术语', '主要品类', '合作起始日'][index])}>{key === 'incoterm' ? <IncotermPlaceInput value={edit?.incoterm ?? ''} onChange={incoterm => setEdit(value => value ? { ...value, incoterm } : value)} /> : CUSTOMER_CHOICES[key] ? <OptionInput ariaLabel={['客户名称', '国家', '城市', '行业', '等级', '付款条款', '贸易术语', '主要品类', '合作起始日'][index]} options={CUSTOMER_CHOICES[key]!} value={edit?.[key] ?? ''} onChange={next => setEdit(value => value ? { ...value, [key]: next } : value)} /> : <TextInput type={key === 'since' ? 'date' : 'text'} value={edit?.[key] ?? ''} onChange={event => setEdit(value => value ? { ...value, [key]: event.target.value } : value)} />}</Field>)}<Field label={uiText("客户经理")}><Select aria-label={uiText("客户经理")} disabled={!canChangeOwner} value={edit?.ownerId ?? ''} onChange={event => setEdit(value => value ? { ...value, ownerId: event.target.value } : value)} options={memberSelectOptions(members, { current: { id: edit?.ownerId, name: edit?.owner } })} /></Field><Field label={uiText("结算币种")}><Select aria-label={uiText("结算币种")} value={edit?.currency ?? 'USD'} onChange={event => setEdit(value => value ? { ...value, currency: event.target.value } : value)} options={withCurrent(CURRENCIES, edit?.currency || 'USD')} /></Field><Field label={uiText("信用额度（结算币种）")}><TextInput type="number" min={0} value={edit?.creditLimit ?? 0} onChange={event => setEdit(value => value ? { ...value, creditLimit: Number(event.target.value) } : value)} /></Field></FormGrid>
     </Drawer>
     <Dialog open={frequency} onClose={() => setFrequency(false)} title={uiText("业务动态统计")}><KeyValue items={[{ label: '全部业务动态', value: events.length }, { label: '最近 30 天业务动态', value: events.filter(event => businessNow().getTime() - new Date(event.at).getTime() <= 30 * 86400000).length }, { label: '最近业务动态', value: events[0] ? new Date(events[0].at).toLocaleString(interfaceLocale(),{timeZone:'Asia/Shanghai',hour12:false}) : '暂无记录' }]} /></Dialog>
   </MistPage>;
