@@ -5,7 +5,7 @@ import { hasScope } from '../auth/permissionService';
 import { createApprovalRoutingService } from '../approvals/approvalRoutingService';
 import type { PaymentTierAuthority } from '../shared/mistPayables';
 /** Approval authority is rebuilt in the same DB transaction as the business command. */
-export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:string,eligibleReviewerIds?:readonly string[]):Promise<NonNullable<MistContext['authority']>>{
+export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:string,eligibleReviewerIds?:readonly string[],options?:{orderMain?:boolean}):Promise<NonNullable<MistContext['authority']>>{
   const authority:NonNullable<MistContext['authority']>={supplier:{}};
   // 风险处理权：按当前账号此刻的岗位权限重建（risk:write 不限来源；否则只认本人客户/订单 + 现有订单写/客户档案写权限）。
   if(kind.startsWith('platform.risk.'))authority.risk={all:hasScope(actor,'risk:write' as any),orders:hasScope(actor,'orders:write' as any),customers:hasScope(actor,'relations:write' as any)};
@@ -28,6 +28,8 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
     return authority;
   }
   const routing=createApprovalRoutingService({prisma:db,companyId:actor.companyId??null,eligibleReviewerIds});
+  // The decision command also carries cancellation/quantity exceptions; only the server's real main task opts in.
+  const orderMain=kind==='order.governance.submit'||kind==='order.governance.decide'&&options?.orderMain===true;
   if(kind.startsWith('order.governance.') || kind.startsWith('fulfillment.production.intake') || kind==='fulfillment.qc.dispose' || kind==='fulfillment.qc.concession.decide' || kind==='fulfillment.stock.count' || kind==='fulfillment.stock.count.decide'){
     const {createOrderMainApprovalService}=await import('../orders/orderMainApprovalService');
     const service=createOrderMainApprovalService(db);authority.orderReviewerIds={garment:[],fabric:[]};
@@ -54,12 +56,17 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
       // and decide (the repository supplies reviewSubject for decisions).
       if(actor.companyId && !authority.orderReviewerIds[domain].length && eligibleReviewerIds){
         const candidates:string[]=[];
-        for(const id of eligibleReviewerIds)if(id!==actor.userId&&await current(id,true))candidates.push(id);
+        for(const id of eligibleReviewerIds)if((orderMain||id!==actor.userId)&&await current(id,true))candidates.push(id);
         if(candidates.length){
           const companyRouting=createApprovalRoutingService({prisma:db,companyId:actor.companyId,eligibleReviewerIds:candidates});
           try{
-            const id=(await companyRouting.resolveReviewerByDepartment(actor.userId))?.reviewerId;
-            if(id&&id!==actor.userId&&candidates.includes(id))authority.orderReviewerIds[domain].push(id);
+            if(orderMain){
+              const ids=(await companyRouting.resolveOrderMainReviewers(actor.userId)).reviewerIds;
+              authority.orderReviewerIds[domain].push(...ids.filter(id=>candidates.includes(id)));
+            }else{
+              const id=(await companyRouting.resolveReviewerByDepartment(actor.userId))?.reviewerId;
+              if(id&&id!==actor.userId&&candidates.includes(id))authority.orderReviewerIds[domain].push(id);
+            }
           }catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}
         }
       }

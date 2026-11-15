@@ -1008,9 +1008,12 @@ export class MistRepository {
         }
         if(input.command) {
           const kind=REVIEW_KIND_BY_COMMAND.get(input.command.type),payload=input.command.payload as {id?:unknown;escalationId?:unknown}|undefined;
-          const review=kind?this.reviews(row.state).find(task=>task.kind===kind&&(kind==='risk'?task.entityId===payload?.escalationId&&task.target.id===payload?.id:task.entityId===payload?.id)):undefined;
+          const reviews=kind?this.reviews(row.state):[];
+          const matches=(task:MistReviewTask)=>task.kind===kind&&(kind==='risk'?task.entityId===payload?.escalationId&&task.target.id===payload?.id:task.entityId===payload?.id);
+          const review=reviews.find(task=>task.status==='pending'&&matches(task))??reviews.find(matches);
           const subject=review?await this.reviewSubject(db,actor,review.requesterId):actor;
-          context.authority = await mistApprovalAuthority(db,subject,input.command.type,candidateIds(row));
+          const orderMain=input.command.type==='order.governance.submit'||input.command.type==='order.governance.decide'&&review?.id.startsWith('order:')===true;
+          context.authority = await mistApprovalAuthority(db,subject,input.command.type,candidateIds(row),{orderMain});
         }
         if(input.command && (MIST_MEMBER_DIRECTORY_COMMANDS.includes(input.command.type) || input.command.type === 'seal.save')) context.members = await this.memberDirectory(db,row,actor);
         if(input.command?.type?.startsWith('teamScope.')) context.teams = await companyTeams(db,row.companyId);
@@ -1297,7 +1300,7 @@ export class MistRepository {
             if(!mainAuthorities.has(task.requesterId)){
               try{
                 const subject=await this.reviewSubject(db,actor,task.requesterId);
-                mainAuthorities.set(task.requesterId,await mistApprovalAuthority(db,subject,'order.governance.decide',candidateIds(row)));
+                mainAuthorities.set(task.requesterId,await mistApprovalAuthority(db,subject,'order.governance.decide',candidateIds(row),{orderMain:true}));
               }catch(error){
                 if(!(error instanceof MistApiError)||error.code!=='REQUESTER_UNAVAILABLE')throw error;
                 mainAuthorities.set(task.requesterId,null);
@@ -1369,7 +1372,7 @@ export class MistRepository {
       if(!mistCommandRequiresSignature(command)&&signatureSvg)fail('INVALID_INPUT','该操作不需要签字',422);
       // 审批人所见版本落后时：只要期间没有人改过本次审批写入的同一记录，就在最新状态上重新执行审批门禁后落库；否则要求刷新核对。
       const concurrent=row.revision===input.expectedRevision?undefined:await this.concurrentChanges(db,workspaceId,row.revision,input.expectedRevision,type);
-      const context=this.context(actor,row.state);context.authority=await mistApprovalAuthority(db,subject,type,candidateIds(row));
+      const context=this.context(actor,row.state);context.authority=await mistApprovalAuthority(db,subject,type,candidateIds(row),{orderMain:task.kind==='order'&&task.id.startsWith('order:')});
       if(MIST_MEMBER_DIRECTORY_COMMANDS.includes(type))context.members=await this.memberDirectory(db,row,actor);
       const applied=this.contract.applyMistCommand(structuredClone(row.state),command,context);
       requireSignature(command,signatureSvg);

@@ -4,10 +4,10 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';import path from 'node:path';
 import {MistRepository} from './repository';import {MistPrivateFiles} from './files';import {MemoryMistDatabase,testActor,testAuthority,testContract} from './__tests__/support';
 import { TEST_SIGNATURE } from './__tests__/signature';
-const observed=vi.hoisted(()=>({requester:'',calls:0,mainReviewers:['reviewer'],fabricReviewers:null as string[]|null,unavailable:new Set<string>(),failure:null as Error|null}));
+const observed=vi.hoisted(()=>({requester:'',orderMain:undefined as boolean|undefined,calls:0,mainReviewers:['reviewer'],fabricReviewers:null as string[]|null,unavailable:new Set<string>(),failure:null as Error|null}));
 vi.mock('../auth/tokenHelpers',()=>({loadUserWithRoles:async(_db:any,id:string)=>observed.unavailable.has(id)?null:({id,status:'active',deletedAt:null}),buildLoadedAuthTokenPayload:async(_db:any,u:any)=>({userId:u.id,permissions:['approvals:write'],roles:[],departmentIds:[]})}));
-vi.mock('./context',()=>({mistApprovalAuthority:async(_db:any,actor:any)=>{
- observed.requester=actor.userId;observed.calls++;if(observed.failure)throw observed.failure;
+vi.mock('./context',()=>({mistApprovalAuthority:async(_db:any,actor:any,_kind?:string,_members?:string[],options?:{orderMain?:boolean})=>{
+ observed.requester=actor.userId;observed.orderMain=options?.orderMain;observed.calls++;if(observed.failure)throw observed.failure;
  return {supplier:{},businessReviewerId:'reviewer',orderReviewerIds:{garment:[...observed.mainReviewers],fabric:[...(observed.fabricReviewers??observed.mainReviewers)]}};
 }}));
 let db:MemoryMistDatabase,auth:ReturnType<typeof testAuthority>,repo:MistRepository,dir:string,wid:string;
@@ -15,7 +15,7 @@ const task=()=>({id:'review-1',kind:'quotation' as const,entityId:'quote-1',titl
 beforeEach(async()=>{
  observed.mainReviewers=['reviewer'];observed.calls=0;observed.fabricReviewers=null;observed.unavailable.clear();observed.failure=null;
  dir=await mkdtemp(path.join(tmpdir(),'mist-review-'));db=new MemoryMistDatabase();auth=testAuthority();auth.users.set('reviewer',{active:true,permissions:['approvals:write']});
- const contract:any={...testContract,getMistReviewTasks:(state:any)=>state.reviewTasks||[],applyMistCommand:(state:any,command:any,context:any)=>{if(!['market.quotation.decide','order.governance.decide'].includes(command.type))return testContract.applyMistCommand(state,command,context);const row=state.reviewTasks.find((t:any)=>t.entityId===command.payload.id);if(context.actorId!=='reviewer'||(row.kind==='order'?!context.authority.orderReviewerIds.garment.includes('reviewer'):context.authority.businessReviewerId!=='reviewer'))throw new Error('Wrong authority');if(row.kind==='order'&&command.type!=='order.governance.decide')throw new Error('Wrong order decision command');row.status=command.payload.decision;row.details.push({label:'意见',value:command.payload.note});return{state,result:{id:command.payload.id}};}};
+ const contract:any={...testContract,mistCommandPermission:(command:any)=>command.type==='order.governance.decide'?'orders:write':testContract.mistCommandPermission(command),getMistReviewTasks:(state:any)=>state.reviewTasks||[],applyMistCommand:(state:any,command:any,context:any)=>{if(!['market.quotation.decide','order.governance.decide'].includes(command.type))return testContract.applyMistCommand(state,command,context);const row=state.reviewTasks.find((t:any)=>t.entityId===command.payload.id&&t.status==='pending');if(context.actorId!=='reviewer'||(row.kind==='order'?!context.authority.orderReviewerIds.garment.includes('reviewer'):context.authority.businessReviewerId!=='reviewer'))throw new Error('Wrong authority');if(row.kind==='order'&&command.type!=='order.governance.decide')throw new Error('Wrong order decision command');row.status=command.payload.decision;row.details.push({label:'意见',value:command.payload.note});return{state,result:{id:command.payload.id}};}};
  repo=new MistRepository(db,contract,new MistPrivateFiles(dir),auth.authorize);const w=await repo.create(testActor(),{name:'Private'});wid=w.id;db.workspaces.get(wid).state.reviewTasks=[task()];db.workspaces.get(wid).state.reviewerIds=['reviewer'];
 });
 afterEach(async()=>{await rm(dir,{recursive:true,force:true});});
@@ -50,6 +50,13 @@ it('preserves processed main history without reauthorizing an unavailable old re
 it('does not turn an unexpected main qualification database failure into an ordinary read-only review',async()=>{
  seedMainReview();observed.failure=new Error('qualification database unavailable');
  await expect(repo.listReviews(testActor('reviewer'))).rejects.toThrow('qualification database unavailable');
+});
+it.each(['review','command'])('routes a new main amendment from its pending requester through the %s entry',async(entry)=>{
+ const row=seedMainReview(),pending={...row.state.reviewTasks[0],requesterId:'new-owner'};
+ row.state.reviewTasks=[{...pending,id:'order:old-round',status:'approved',requesterId:'old-owner'},pending];observed.unavailable.add('old-owner');
+ if(entry==='review')await repo.decideReview(testActor('reviewer'),wid,pending.id,{requestId:'new-round-only',expectedRevision:0,decision:'approved',note:'Approve the current submitted amendment',signature:TEST_SIGNATURE});
+ else{row.ownerId='reviewer';await repo.execute(testActor('reviewer'),wid,{requestId:'new-round-command',expectedRevision:0,command:{type:'order.governance.decide',payload:{id:'order-1',decision:'approved',note:'Approve the current submitted amendment'}},signature:TEST_SIGNATURE} as any);}
+ expect(observed.requester).toBe('new-owner');expect(observed.orderMain).toBe(true);expect(db.workspaces.get(wid).state.reviewTasks.map((x:any)=>x.status)).toEqual(['approved','approved']);
 });
 describe('scoped cross-account Mist review',()=>{
  it('routes an order snapshot decision through the order command and replays it once across accounts',async()=>{auth.users.get('reviewer')!.permissions.push('orders:write');const row=db.workspaces.get(wid);row.state.orders=[{id:'order-1',type:'garment'}];row.state.reviewTasks=[{...task(),id:'order:round-1',kind:'order',entityId:'order-1',requiredPermission:'orders:write',target:{view:'orders/detail',id:'order-1'}}];const input={requestId:'order-decision',expectedRevision:0,decision:'approved' as const,note:'核对订单冻结条款',signature:TEST_SIGNATURE};const visible=await repo.listReviews(testActor('reviewer'));expect(visible[0]).toMatchObject({kind:'order',canDecide:true,target:{view:'orders/detail',id:'order-1'}});await repo.decideReview(testActor('reviewer'),wid,'order:round-1',input);expect((await repo.decideReview(testActor('reviewer'),wid,'order:round-1',input)).replayed).toBe(true);expect(db.workspaces.get(wid).state.reviewTasks[0].status).toBe('approved');expect(db.workspaces.get(wid).revision).toBe(1);await expect(repo.get(testActor('reviewer'),wid)).rejects.toMatchObject({status:404});});
