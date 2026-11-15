@@ -47,6 +47,12 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
+it('hands focus into manual order steps without taking focus back while typing',async()=>{
+ const purpose=getByRole(host,'combobox',{name:'订单用途'});expect(document.activeElement).toBe(purpose);
+ const season=getByLabelText(host,/^季节 \/ 批次/) as HTMLInputElement;season.focus();input('季节 / 批次','AW28');expect(document.activeElement).toBe(season);
+ await next();expect(document.activeElement).toBe(getByRole(host,'textbox',{name:/^品名/}));await act(async()=>getByRole(host,'button',{name:'上一步'}).click());expect(document.activeElement).toBe(getByRole(host,'combobox',{name:'订单用途'}));expect(store.run).not.toHaveBeenCalled();
+});
+
 it('shows the same half-cent rounded line and total as the server through submission', async () => {
   await enterLine('1.005', '1'); await next(); input('交期', '2026-10-30');input('出运前累计收款（%）','0'); await next();
   expect(amount('订单总金额')).toBe('1.01 USD');
@@ -79,7 +85,7 @@ it.each([
   expect((getByLabelText(host, /^数量/) as HTMLInputElement).value).toBe(qty);
   expect(store.run).not.toHaveBeenCalled();
   input('数量', '1.005'); input('单价 USD', '1'); await next();
-  expect(getByLabelText(host, /^交期/)).toBeTruthy();
+  expect(getByLabelText(host, /^交期\s*\*?$/)).toBeTruthy();
 });
 it('preserves entered units and quantities when the business type is changed',async()=>{await enterLine('5','2');await act(async()=>getByRole(host,'button',{name:'上一步'}).click());const select=getByRole(host,'combobox',{name:'订单类型'}) as HTMLSelectElement;act(()=>{select.value='fabric';select.dispatchEvent(new Event('change',{bubbles:true}));});await next();expect((getByLabelText(host,/^单位/) as HTMLInputElement).value).toBe('件');expect((getByLabelText(host,/^数量/) as HTMLInputElement).value).toBe('5');});
 it('does not navigate from an old create acknowledgement after switching workspaces',async()=>{await enterLine('1','2');await next();input('交期','2026-10-30');input('出运前累计收款（%）','0');await next();await next();let finish!:(value:unknown)=>void;store.run.mockReturnValue(new Promise(resolve=>finish=resolve));await act(async()=>getByRole(host,'button',{name:'创建订单草稿'}).click());store.workspace={id:'b'};act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'orders/new',customerId:'customer-a'},go,openAI:vi.fn(),theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn()}}><OrderCreatePage/></Nav.Provider></ToastProvider></MistRoot>));await act(async()=>finish({result:{id:'old-order'}}));expect(go).not.toHaveBeenCalled();expect(getByRole(host,'button',{name:'下一步'})).toBeTruthy();expect((getByLabelText(host,/^季节/) as HTMLInputElement).value).toBe('');});
