@@ -122,7 +122,7 @@ export function HomePage() {
   const dateLabel = new Date(`${today}T12:00:00`).toLocaleDateString(interfaceLocale(), { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
   return (
     <MistPage>
-      <PageHeader description={!state ? uiText(loading ? '正在读取公司业务…' : '公司业务尚未读取成功，请重试。') : undefined} variant="greeting" eyebrow={uiText(`${dateLabel} · ${workspace.workspace?.name ?? '公司工作台'}`)} title={<>{uiText(greeting)}{interfaceLocale() === 'en-US' ? ', ' : '，'}<em>{myName || uiText('同事')}</em></>}
+      <PageHeader description={!state ? uiText(loading ? '正在读取公司业务…' : '公司业务尚未读取成功，请重试。') : undefined} variant="greeting" eyebrow={dateLabel} title={<>{uiText(greeting)}{interfaceLocale() === 'en-US' ? ', ' : '，'}<em>{myName || uiText('同事')}</em></>}
         actions={<><Segmented<'today' | 'week'> ariaLabel={uiText("时间范围")} value={range} onChange={setRange} options={[{ value: 'today', label: '今天' }, { value: 'week', label: '本周' }]} />
           <Button icon={Plus} disabled={busy || !state} onClick={() => openTodo()}>{uiText("新建待办")}</Button><Button variant="primary" icon={Plus} disabled={busy || !state || !session.hasPermission('products:write')} onClick={() => go('development/new')}>{uiText("新建开发案")}</Button></>} />
       {state && <SetupChecklist state={state} workspace={workspace.workspace} canAdmin={session.hasPermission('users:admin')} go={go} />}
