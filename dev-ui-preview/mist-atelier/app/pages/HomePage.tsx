@@ -64,7 +64,7 @@ export function HomePage() {
   const workOptions: MistWorkOptions = { canRead: view => session.canAccessView(view as View), can: permission => session.hasPermission(permission), me: session.user?.id ?? '', reviews: reviews?.rows, today, now: businessNow().toISOString(), workspaceId: workspace.workspace?.id, financialDisposals: workspace.workspace?.financialDisposals };
   const allTasks = mistMyTasks(state, workOptions);
   const followUpIds = new Set(state?.crm?.followUps.filter(f => !f.voided).map(f => f.nextTaskId));
-  const manageable = [...allTasks, ...(state?.tasks ?? []).filter(t => t.done && t.kind === 'crm-follow-up' && followUpIds.has(t.id) && isMyMistTask(t, workOptions, true))];
+  const manageable = [...allTasks, ...(state?.tasks ?? []).filter(t => t.done && (t.kind === 'personal' || t.kind === 'crm-follow-up' && followUpIds.has(t.id)) && isMyMistTask(t, workOptions, true))];
   const inRange = (date: string) => !date || (range === 'today' ? date <= today : date <= weekEnd);
   const tasks = allTasks.filter(task => (task.kind === 'shipping' && task.permission === MIST_LOGISTICS_DUTY) || inRange(task.due)).slice().sort((a, b) => sort === 'title' ? a.title.localeCompare(b.title, 'zh-CN') : (a.due || '9999').localeCompare(b.due || '9999') || a.title.localeCompare(b.title, 'zh-CN'));
   const queue = mistWorkQueue(state, workOptions);

@@ -219,3 +219,13 @@ it('opens the existing adjustment form with the selected CRM task and its due da
   await click(button('保存',dialog));await act(async()=>finish());
   expect(seam.value.run).toHaveBeenCalledTimes(1);expect(host.querySelector('[role="dialog"]')).toBeNull();
 });
+
+it('lets the assignee reopen their completed personal task while excluding another person and controlled business tasks',async()=>{
+  const state=seam.value.state;
+  const task=(id:string,assignee:string,kind='personal')=>({id,title:id,done:true,due:businessToday(),kind,target:{view:'cockpit'},assigneeIds:[assignee]});
+  state.tasks=[task('my-personal','owner'),task('other-personal','other'),task('controlled','owner','internal-delivery')];render();
+  expect([...host.querySelectorAll('.mist-task')].some(row=>row.textContent?.includes('my-personal'))).toBe(false);
+  expect(button('管理任务').disabled).toBe(false);await click(button('管理任务'));const dialog=host.querySelector('[role="dialog"]')!,select=dialog.querySelector('select')!;
+  expect([...select.options].map(option=>option.value)).toEqual(['my-personal']);await click(dialog.querySelector<HTMLInputElement>('input[type="checkbox"]')!);await click(button('保存状态',dialog));
+  expect(seam.value.run).toHaveBeenCalledWith({type:'task.complete',payload:{id:'my-personal',done:false}});expect(seam.value.state.tasks.find((task:any)=>task.id==='my-personal').done).toBe(false);
+});
