@@ -157,7 +157,7 @@ export function CalendarPage() {
         <Field label={uiText("提醒")}><Select aria-label={uiText("提醒")} value={extra.remind} onChange={event=>setExtra(x=>({...x,remind:event.target.value}))} options={[{value:'',label:'不提醒'},{value:'15',label:'提前 15 分钟'},{value:'60',label:'提前 1 小时'},{value:'1440',label:'提前 1 天'}]} /></Field>
         <Field label={uiText("重复")}><Select aria-label={uiText("重复")} value={extra.repeat} onChange={event=>setExtra(x=>({...x,repeat:event.target.value as ''|'week'|'month'}))} options={[{value:'',label:'不重复'},{value:'week',label:'每周'},{value:'month',label:'每月'}]} /></Field>
         {extra.repeat&&<Field label={uiText("重复至")} required><TextInput aria-label={uiText("重复至")} type="date" value={extra.until} onChange={event=>setExtra(x=>({...x,until:event.target.value}))} /></Field>}
-        {!!members.length&&<div className="mist-field" data-full role="group" aria-labelledby="mist-calendar-participants" title={canManageParticipants?undefined:'仅创建人可改参与人'}>
+        {!!members.length&&<div className="mist-field" data-full role="group" aria-labelledby="mist-calendar-participants" title={canManageParticipants?undefined:uiText('仅创建人可改参与人')}>
           <span className="mist-field-label" id="mist-calendar-participants">{uiText("参与人")}</span>
           <div className="mist-row" style={{flexWrap:'wrap',gap:12}}>{members.map(m=><Checkbox key={m.id} label={m.name} disabled={!canManageParticipants} checked={extra.participantIds.includes(m.id)} onChange={on=>setExtra(x=>({...x,participantIds:on?[...x.participantIds,m.id]:x.participantIds.filter(id=>id!==m.id)}))} />)}</div>
         </div>}
