@@ -5,6 +5,7 @@ import { memberSelectOptions, workspaceMembers } from '../runtime/members';
 import { calendarWithDerived } from '../runtime/derivedCalendar';
 import { isRecognizedMistInvoice } from '../../../../server/src/shared/mistWorkspace';
 import {isInternalDeliveryTask} from '../../../../server/src/shared/mistInternalDelivery';
+import {stableJson} from '../../../../server/src/shared/stableJson';
 import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow,businessToday} from '../runtime/businessClock';
@@ -53,6 +54,8 @@ export function HomePage() {
   const hiddenStats = { development: hidden.has('products')||!session.hasPermission('products:read'), qc: hidden.has('products')||hidden.has('qc')||!session.hasPermission('products:read')||!session.hasPermission('qc:read'), shipping: hidden.has('shipments')||!session.hasPermission('shipments:read'), invoices: hidden.has('receivables')||!session.hasPermission('invoices:read') };
   React.useEffect(() => { if (statView && hiddenStats[statView]) setStatView(null); }, [statView, hiddenStats.development, hiddenStats.qc, hiddenStats.shipping, hiddenStats.invoices]);
   const scope = `${session.sessionKey}:${workspace.workspace?.id ?? ''}`, activeScope = React.useRef(scope); activeScope.current = scope;
+  const liveWorkspace=React.useRef(workspace);
+  React.useLayoutEffect(()=>{liveWorkspace.current=workspace;},[workspace]);
   React.useEffect(()=>{const current=businessToday();setToday(current);setDay(current);},[scope,state?.settings.businessClock?.at]);
   const alive=React.useRef(true);React.useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const busy = loading || saving || !!pending, operation = React.useRef(false);
@@ -107,6 +110,8 @@ export function HomePage() {
   if (!brief.length) brief.push({ strong: '暂无工作动态', text: '', onClick: session.hasPermission('products:write') ? () => go('development/new') : undefined });
   const openTodo = (task?: MistTask) => {
     setTaskDialog(false);
+    const original=task?liveWorkspace.current.state?.tasks.find(item=>item.id===task.id):undefined;
+    const source=original?stableJson(original):'',bound=scope;
     // Keep the same form while the workspace publishes its saving state and acknowledgement.
     setTodoSpec({title:task?'调整待办':'新建待办',submitLabel:'保存',fields:[
       {key:'title',label:'事项',required:true,readonly:!!task && task.kind!=='personal'},
@@ -114,7 +119,14 @@ export function HomePage() {
       {key:'assigneeId',label:'负责人',type:'select',required:true,options:memberSelectOptions(members)},
       {key:'note',label:'备注',type:'textarea'},
     ],initialValues:{title:task?.title||'',due:task?.due||today,assigneeId:task?.assigneeIds?.[0]||me,note:task?.note||''},
-    submit:async v=>{await workspace.run({type:'task.save',payload:{...(task?{id:task.id}:{}),title:String(v.title||''),due:String(v.due||''),assigneeId:String(v.assigneeId||''),note:String(v.note||'')}});toast(uiText(task?'待办已调整':'待办已创建'));}});
+    submit:async v=>{
+      if(!alive.current||activeScope.current!==bound)throw new Error('当前公司已变化，请重新打开待办');
+      const checked=liveWorkspace.current,current=task?checked.state?.tasks.find(item=>item.id===task.id):undefined,revision=checked.workspace?.revision;
+      // A newer workspace must not lend its revision to an older task draft.
+      if(task&&(!current||source!==stableJson(current)))throw new Error('待办资料已更新，请重新打开后核对');
+      if(typeof revision!=='number'||!Number.isSafeInteger(revision)||revision<0)throw new Error('待办资料不可用，请重新读取后核对');
+      await checked.run({type:'task.save',payload:{...(task?{id:task.id}:{}),title:String(v.title||''),due:String(v.due||''),assigneeId:String(v.assigneeId||''),note:String(v.note||'')}},{expectedRevision:revision});
+    }});
   };
   const beginTask = () => { const task = tasks[0] ?? manageable[0]; setSelectedTask(task?.id ?? ''); setTaskDone(task?.done ?? false); setTaskDialog(true); };
   const chosenTask = manageable.find(task => task.id === selectedTask);
