@@ -1,3 +1,4 @@
+import {useEditorStepFocus} from '../../runtime/editorFocus';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 import React from "react";
@@ -221,6 +222,7 @@ export function QuotationFeedbackPage() {
     [target] = useRouteDraft(() => (q ? quotationFeedbackTarget(q) : "")),
     [failure, setFailure] = useRouteDraft(""),
     [busy, setBusy] = useRouteDraft(false);
+  const stepRef=useEditorStepFocus(step);
   const lock = React.useRef(false),
     key = session.user?.id + ":" + w.workspace?.id,
     activeKey = React.useRef(key);
@@ -422,7 +424,7 @@ export function QuotationFeedbackPage() {
         </Banner>
       )}
       {editing && can && !frozen ? (
-        <div className="mist-wizard">
+        <div ref={stepRef} className="mist-wizard" role="group" aria-label={uiText('第 ')+(step+1)+uiText(' 步')+' · '+uiText(['反馈事实与来源','原因、还价与跟进','核对并追加'][step])} tabIndex={-1}>
           <VerticalSteps
             current={String(step)}
             onSelect={(v) => {

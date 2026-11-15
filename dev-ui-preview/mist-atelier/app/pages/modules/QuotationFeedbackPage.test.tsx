@@ -145,6 +145,7 @@ it("opens feedback from exact quote and never backfills legacy response evidence
   });
   expect(host.textContent).toContain("尚无结构化客户反馈");
   await click("登记反馈");
+  expect(host.querySelector('.mist-wizard')!.contains(document.activeElement)).toBe(true);
   expect((getByLabelText(host, "反馈类型") as HTMLSelectElement).value).toBe(
     "",
   );

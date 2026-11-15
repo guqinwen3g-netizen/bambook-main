@@ -1,3 +1,4 @@
+import {useEditorStepFocus} from '../runtime/editorFocus';
 import React from 'react';
 import { BackLink, Banner, Button, Card, Checkbox, Field, FormFooter, FormGrid, FormSection, KeyValue, MistPage, PageHeader, Select, TextArea, TextInput, VerticalSteps, useToast } from '../../../../components/mist';
 import { OBSERVED_PRODUCTION_STAGES, observedProductionStages, productionIntake, productionObservation, type ProductionObservationInput } from '../../../../server/src/shared/mistProductionIntake';
@@ -19,6 +20,7 @@ export function ProductionIntakeEditor({ productionId, initial, onClose }: { pro
   const existingFiles=(order?.fileIds||[]).flatMap(id=>{const file=workspace.state?.files.find(f=>f.id===id);return file?[file]:[];});
   const [values, setValues] = React.useState({ asOf: businessToday(), startedOn: previous?.startedOn || '', stage: '', percent: '', quantity: '', sourceName: '', evidence: '' });
   const [fileIds, setFileIds] = React.useState<string[]>([]), [step, setStep] = React.useState(0), [busy, setBusy] = React.useState(false), [uploading, setUploading] = React.useState(false), [failure, setFailure] = React.useState('');
+  const stepRef=useEditorStepFocus(step);
   const alive = React.useRef(true), lock = React.useRef(false);
   const scope = `${workspace.workspace?.id}|${session.user?.id}|${productionId}`, origin = React.useRef(scope), currentScope = React.useRef(scope); currentScope.current = scope;
   React.useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
@@ -53,7 +55,7 @@ export function ProductionIntakeEditor({ productionId, initial, onClose }: { pro
     <PageHeader title={uiText(initial ? '登记线下在制' : '登记实际进度')} />
     {failure && presentedError!==failure && <FailureNotice title={'未能保存'} detail={failure} />}
     {(workspace.pending || workspace.pendingCreate) && <Banner tone="warn" title={uiText('请先核对上次操作')} actions={<Button disabled={busy || workspace.saving} onClick={()=>void recover()}>{uiText('核对原请求')}</Button>} />}
-    <div className="mist-wizard"><VerticalSteps current={String(step)} onSelect={id => { if (!blocked && Number(id) < step) setStep(Number(id)); }} steps={[{ id: '0', label: '生产事实', done: step > 0 }, { id: '1', label: '来源依据', done: step > 1 }, { id: '2', label: '确认' }]} /><Card>
+    <div ref={stepRef} className="mist-wizard" role="group" aria-label={uiText('第 ')+(step+1)+uiText(' 步')+' · '+uiText(['生产事实','来源依据','确认'][step])} tabIndex={-1}><VerticalSteps current={String(step)} onSelect={id => { if (!blocked && Number(id) < step) setStep(Number(id)); }} steps={[{ id: '0', label: '生产事实', done: step > 0 }, { id: '1', label: '来源依据', done: step > 1 }, { id: '2', label: '确认' }]} /><Card>
       <FormSection title={uiText(['生产事实','来源依据','确认'][step])}>{step === 2 ? <><KeyValue items={[{label:'生产单',value:branch?.code||''},{label:'工厂',value:branch?.factory||''},{label:'计划数量',value:branch?`${branch.qty} ${unit}`:''},{label:'进度截至日',value:values.asOf},{label:'实际开产日',value:values.startedOn||'待核'},{label:'实际工序',value:values.stage?labels[values.stage as keyof typeof OBSERVED_PRODUCTION_STAGES]:'待核'},{label:'工厂进度',value:values.percent===''?'待核':values.percent+'%'},{label:'本工序已完成数量',value:values.quantity?`${values.quantity} ${unit}`:'待核'},{label:'资料来源',value:values.sourceName},{label:'事实依据',value:values.evidence}]}/><RecordFiles ids={fileIds}/></> : step === 0 ? <FormGrid>
         <Field label={uiText('进度截至日')} required><TextInput aria-label={uiText('进度截至日')} type="date" value={values.asOf} disabled={blocked} onChange={e => change('asOf', e.target.value)} /></Field>
         <Field label={uiText('实际开产日')}><TextInput aria-label={uiText('实际开产日')} type="date" value={values.startedOn} disabled={blocked} onChange={e => change('startedOn', e.target.value)} /></Field>
