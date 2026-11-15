@@ -54,7 +54,7 @@ describe('team weekly physical quantities', () => {
     expect(teamWeekRow(f.s, { id: 'demo-buyer', name: '经办' }, '2026-10-12', '2026-10-18').shippedQuantities).toEqual([]);
   });
   it('rejects invalid source precision or non-finite quantities without mutating business data', () => {
-    for (const quantity of [NaN, -1, 0.00001]) {
+    for (const quantity of [NaN, -1, 0.00001, null as any, '1' as any, { amount: 1 } as any]) {
       const f = fixture(); f.s.fulfillment.shipments[0].lines[0].quantity = quantity; const before = structuredClone(f.s);
       expect(() => teamWeeklyReport(f.s, f.directory, f.viewer, '2026-10-12', '2026-10-18')).toThrow('出运数量无法核对');
       expect(f.s).toEqual(before);

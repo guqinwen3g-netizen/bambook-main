@@ -162,8 +162,9 @@ function quantityGroups(items: Array<{ unit: string | null; scaled: bigint }>): 
   });
 }
 function quantityScale(quantity: number): bigint {
+  if (typeof quantity !== 'number' || !Number.isFinite(quantity) || quantity < 0) fail('出运数量无法核对', 'PRECONDITION');
   const scaled = Math.round(quantity * 10000);
-  if (!Number.isFinite(quantity) || quantity < 0 || !Number.isSafeInteger(scaled) || Math.abs(quantity * 10000 - scaled) > 0.00001) fail('出运数量无法核对', 'PRECONDITION');
+  if (!Number.isSafeInteger(scaled) || Math.abs(quantity * 10000 - scaled) > 0.00001) fail('出运数量无法核对', 'PRECONDITION');
   return BigInt(scaled);
 }
 function mergeQuantities(rows: TeamShipmentQuantities): TeamShipmentQuantities {
