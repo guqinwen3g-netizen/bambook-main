@@ -66,7 +66,7 @@ import { ReferenceApp, approverMissing, settingsGap } from './ReferenceApp';
 // ~1.5 s here, longer in a loaded full run) raced the short polling in waitFor, so whichever test reached
 // a page first failed depending on run order. Load the real page modules once before any test.
 beforeAll(async () => {
-  await Promise.all([import('./pages/modules/EmailsPage'), import('./pages/modules/MarketPages'), import('./pages/ApprovalsPage'), import('./pages/NotificationsPage'), import('./pages/AccountPage')]);
+  await Promise.all([import('./pages/modules/EmailsPage'), import('./pages/modules/MarketPages'), import('./pages/ApprovalsPage'), import('./pages/NotificationsPage'), import('./pages/AccountPage'), import('./pages/SearchPage')]);
 }, 60000);
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -158,6 +158,20 @@ it.each(['design-system', 'states'])('does not expose the %s showcase through a 
 });
 
 describe('one Mist entry with real authentication and workspace state', () => {
+  it('keeps the real search input and keyboard focus through URL query changes without executing business commands', async () => {
+    vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} });
+    await signIn(); history.replaceState(null, '', '/?view=search'); await mount();
+    await waitFor(() => expect(queryByRole(host!, 'textbox', { name: '搜索关键词' })).not.toBeNull());
+    const field = getByRole(host!, 'textbox', { name: '搜索关键词' }) as HTMLInputElement;
+    for (const query of ['ZXQ-FIRST', 'ZXQ-SECOND']) {
+      input(field, query); await act(async () => field.focus());
+      await act(async () => field.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+      await waitFor(() => expect(new URLSearchParams(location.search).get('section')).toBe(query));
+      expect(getByRole(host!, 'textbox', { name: '搜索关键词' })).toBe(field);
+      expect(document.activeElement).toBe(field); expect(field.value).toBe(query);
+    }
+    expect(currentContext().run).not.toHaveBeenCalled();
+  });
   it('automatically enters the server-backed local workspace and switches identities without a password form', async () => {
     const profiles=[{id:'local-operator',name:'本地业务员'},{id:'local-reviewer',name:'本地审批人'}];
     let profileId='local-operator';
