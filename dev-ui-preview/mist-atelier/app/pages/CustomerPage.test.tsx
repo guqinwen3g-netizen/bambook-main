@@ -10,7 +10,7 @@ const bridge=vi.hoisted(()=>({current:null as any,canCreate:true,canAdmin:true,l
 vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>bridge.current}));
 vi.mock('../runtime/auth', () => { const useMistSession = ()=>({user:{id:'local',displayName:'本地操作员'},localMode:bridge.localMode,hasPermission:(scope:string)=>scope==='relations:admin'?bridge.canAdmin:scope.endsWith(':read')||bridge.canCreate,canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 let host:HTMLDivElement,root:Root|undefined;const go=vi.fn(),openAI=vi.fn();
-beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;go.mockReset();openAI.mockReset();bridge.canCreate=true;bridge.canAdmin=true;bridge.localMode=true;const state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T08:00:00Z',actorName:'本地操作员'},'empty');bridge.current={state,workspace:{id:'w',ownerId:'local'},loading:false,saving:false,pending:null,pendingCreate:null,error:'',run:vi.fn(async()=>({requestId:'saved',revision:1,result:{id:'created-customer',customerId:'created-customer'}})),refresh:vi.fn(),downloadFile:vi.fn()};});
+beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;go.mockReset();openAI.mockReset();bridge.canCreate=true;bridge.canAdmin=true;bridge.localMode=true;const state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T08:00:00Z',actorName:'本地操作员'},'empty');bridge.current={state,workspace:{id:'w',ownerId:'local',revision:0,state},loading:false,saving:false,pending:null,pendingCreate:null,error:'',run:vi.fn(async()=>({requestId:'saved',revision:1,result:{id:'created-customer',customerId:'created-customer'}})),refresh:vi.fn(),downloadFile:vi.fn()};});
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();});
 async function mount(id?:string){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<Nav.Provider value={{route:{view:'crm',id},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI}}><CustomerPage/></Nav.Provider>));}
 async function click(label:string){await act(async()=>getByRole(host,'button',{name:label}).click());}
@@ -29,7 +29,7 @@ describe('CRM relation and contact command routing',()=>{
  it('preserves a primary contact and keeps the dialog open after a failed synchronized save',async()=>{
   bridge.current.state.customers=[customer('a')];bridge.current.state.contacts=[{id:'contact-a',customerId:'a',name:'采购甲',role:'采购',email:'old@example.com',phone:'123',tone:'neutral'}];bridge.current.state.market.relations=[{id:'relation-a',customerId:'a',supplierId:'',category:'Customer',name:'客户-a',country:'CN',address:'',aliases:[],status:'active',contacts:[{id:'contact-a',name:'采购甲',role:'采购',email:'old@example.com',phone:'123',primary:true}],fileIds:[],note:'',createdAt:'',updatedAt:''}];bridge.current.run.mockRejectedValueOnce(new Error('联系人未同步'));
   await mount('a');const contact=[...document.body.querySelectorAll('button')].find(b=>b.textContent?.includes('采购甲'))!;await act(async()=>contact.click());const dialog=getByRole(document.body,'dialog',{name:'编辑联系人'}),email=dialog.querySelector<HTMLInputElement>('input[type="email"]')!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(email,'new@example.com');email.dispatchEvent(new Event('input',{bubbles:true}));});await act(async()=>getByRole(dialog,'button',{name:'保存',exact:true} as any).click());
-  expect(bridge.current.run).toHaveBeenCalledWith({type:'market.contact.save',payload:expect.objectContaining({kind:'customer',parentId:'a',id:'contact-a',email:'new@example.com',primary:true})});expect(dialog.textContent).toContain('联系人未同步');expect(email.value).toBe('new@example.com');
+  expect(bridge.current.run).toHaveBeenCalledWith({type:'market.contact.save',payload:expect.objectContaining({kind:'customer',parentId:'a',id:'contact-a',email:'new@example.com',primary:true})},{expectedRevision:0});expect(dialog.textContent).toContain('联系人未同步');expect(email.value).toBe('new@example.com');
  });
 });
 
@@ -59,3 +59,61 @@ it('keeps the customer owner selector disabled without customer-management permi
 it('keeps another customer archive readable without offering maintenance to a salesperson',async()=>{bridge.canAdmin=false;bridge.localMode=false;bridge.current.state.customers=[{...customer('a'),ownerId:'another'}];await mount('a');expect(host.textContent).toContain('客户-a');expect(queryByRole(host,'button',{name:'编辑客户资料'})).toBeNull();expect(queryByRole(host,'button',{name:'添加联系人'})).toBeNull();});
 
 it('uses the server customer-maintenance scope for a department manager',async()=>{bridge.localMode=false;bridge.current.workspace.access={role:'member',canManageMembers:false,hidden:[],manageableCustomerIds:[]};bridge.current.state.customers=[{...customer('a'),ownerId:'another'}];await mount('a');expect(queryByRole(host,'button',{name:'编辑客户资料'})).toBeNull();});
+
+async function rerenderCustomer(id:string){await act(async()=>root!.render(<Nav.Provider value={{route:{view:'crm',id},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI}}><CustomerPage/></Nav.Provider>));}
+const occurrences=(text:string)=>document.body.textContent?.split(text).length!-1;
+it('owns a confirmed profile failure only in the active drawer and clears it on close',async()=>{
+  bridge.current.state.customers=[customer('a')];bridge.current.dismissError=vi.fn();bridge.current.run.mockRejectedValueOnce(new Error('信用额度校验失败'));
+  await mount('a');await click('编辑客户资料');const d=getByRole(document.body,'dialog',{name:'编辑客户资料'});
+  await act(async()=>getByRole(d,'button',{name:'保存资料'}).click());
+  expect(bridge.current.dismissError).toHaveBeenCalledWith('信用额度校验失败');expect(occurrences('信用额度校验失败')).toBe(1);
+  await act(async()=>getByRole(d,'button',{name:'关闭',exact:true}).click());expect(occurrences('信用额度校验失败')).toBe(0);
+});
+it('preserves pending acknowledgement recovery instead of dismissing its original error',async()=>{
+  bridge.current.state.customers=[customer('a')];bridge.current.dismissError=vi.fn();
+  bridge.current.run.mockImplementationOnce(async()=>{bridge.current.pending={kind:'command',requestId:'original',workspaceId:'w'};throw Object.assign(new Error('回执尚未确认'),{mistPendingCommand:bridge.current.pending});});
+  await mount('a');await click('编辑客户资料');const d=getByRole(document.body,'dialog',{name:'编辑客户资料'});await act(async()=>getByRole(d,'button',{name:'保存资料'}).click());
+  expect(bridge.current.dismissError).not.toHaveBeenCalled();expect(bridge.current.pending.requestId).toBe('original');expect(queryByRole(document.body,'dialog',{name:'编辑客户资料'})).not.toBeNull();
+});
+it('does not let an old customer rejection clear the next customer error',async()=>{
+  bridge.current.state.customers=[customer('a'),customer('b')];bridge.current.dismissError=vi.fn();let reject!:(error:Error)=>void;
+  bridge.current.run.mockReturnValueOnce(new Promise((_yes,no)=>reject=no));await mount('a');await click('编辑客户资料');const d=getByRole(document.body,'dialog',{name:'编辑客户资料'});await act(async()=>getByRole(d,'button',{name:'保存资料'}).click());
+  await rerenderCustomer('b');bridge.current.error='新客户当前错误';await act(async()=>reject(new Error('原客户迟到失败')));
+  expect(bridge.current.dismissError).not.toHaveBeenCalled();expect(document.body.textContent).not.toContain('资料未保存');expect(bridge.current.error).toBe('新客户当前错误');expect(document.body.textContent).not.toContain('原客户迟到失败');
+});
+it('keeps a contact deletion failure inside its active confirmation rather than under the overlay',async()=>{
+  bridge.current.state.customers=[customer('a')];bridge.current.state.contacts=[{id:'contact-a',customerId:'a',name:'采购甲',role:'采购',email:'a@example.invalid',phone:'123',tone:'neutral'}];bridge.current.dismissError=vi.fn();bridge.current.run.mockRejectedValueOnce(new Error('联系人已变化'));
+  await mount('a');const contact=[...document.body.querySelectorAll('button')].find(b=>b.textContent?.includes('采购甲'))!;await act(async()=>contact.click());
+  const drawer=getByRole(document.body,'dialog',{name:'编辑联系人'});await act(async()=>getByRole(drawer,'button',{name:'删除',exact:true}).click());const d=getByRole(document.body,'dialog',{name:'删除联系人？'});await act(async()=>getByRole(d,'button',{name:'删除联系人',exact:true}).click());
+  expect(d.textContent).toContain('联系人已变化');expect(occurrences('联系人已变化')).toBe(1);expect(bridge.current.dismissError).toHaveBeenCalledWith('联系人已变化');
+});
+
+it('rejects a synchronized credit change instead of carrying the old whole customer profile into a newer revision',async()=>{
+  bridge.current.state.customers=[customer('a')];await mount('a');await click('编辑客户资料');const d=getByRole(document.body,'dialog',{name:'编辑客户资料'});
+  const next={...bridge.current.state,customers:[{...customer('a'),creditLimit:12500.5,city:'Manchester'}]};bridge.current={...bridge.current,state:next,workspace:{id:'w',ownerId:'local',revision:1,state:next}};await rerenderCustomer('a');
+  const city=getByRole(d,'textbox',{name:'城市',exact:true})as HTMLInputElement;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(city,'York');city.dispatchEvent(new Event('input',{bubbles:true}));});
+  await act(async()=>getByRole(d,'button',{name:'保存资料'}).click());expect(bridge.current.run).not.toHaveBeenCalled();expect(d.textContent).toContain('客户资料已更新');expect(city.value).toBe('York');expect(bridge.current.state.customers[0].creditLimit).toBe(12500.5);
+});
+it('saves through an unrelated refresh using the exact checked workspace revision',async()=>{
+  bridge.current.state.customers=[customer('a')];await mount('a');await click('编辑客户资料');const d=getByRole(document.body,'dialog',{name:'编辑客户资料'});
+  const next={...bridge.current.state,events:[{id:'unrelated',entityId:'another',text:'无关动态'}]};bridge.current={...bridge.current,state:next,workspace:{id:'w',ownerId:'local',revision:2,state:next}};await rerenderCustomer('a');
+  await act(async()=>getByRole(d,'button',{name:'保存资料'}).click());expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.customer.update',payload:expect.objectContaining({id:'a',patch:expect.objectContaining({creditLimit:0})})}),{expectedRevision:2});
+});
+
+function contactFixture(){bridge.current.state.customers=[customer('a')];bridge.current.state.contacts=[{id:'contact-a',customerId:'a',name:'采购甲',role:'采购',email:'a@example.invalid',phone:'111',tone:'neutral'}];bridge.current.state.market.relations=[{id:'relation-a',customerId:'a',contacts:[{id:'contact-a',name:'采购甲',role:'采购',email:'a@example.invalid',phone:'111',primary:true}]}];}
+async function openContact(){const b=[...document.body.querySelectorAll('button')].find(b=>b.textContent?.includes('采购甲'))!;await act(async()=>b.click());return getByRole(document.body,'dialog',{name:'编辑联系人'});}
+it.each(['phone','primary'])('rejects a synchronized contact %s change without overwriting the peer source',async key=>{
+  contactFixture();await mount('a');const d=await openContact(),next=structuredClone(bridge.current.state);
+  if(key==='phone'){next.contacts[0].phone='222';next.market.relations[0].contacts[0].phone='222';}else next.market.relations[0].contacts[0].primary=false;
+  bridge.current={...bridge.current,state:next,workspace:{id:'w',ownerId:'local',revision:1,state:next}};await rerenderCustomer('a');
+  await act(async()=>getByRole(d,'button',{name:'保存',exact:true}).click());expect(bridge.current.run).not.toHaveBeenCalled();expect(d.textContent).toContain('联系人资料已更新');
+});
+it('does not delete a contact whose source changed while its drawer was open',async()=>{
+  contactFixture();await mount('a');const drawer=await openContact(),next=structuredClone(bridge.current.state);next.contacts[0].phone='222';next.market.relations[0].contacts[0].phone='222';bridge.current={...bridge.current,state:next,workspace:{id:'w',ownerId:'local',revision:1,state:next}};await rerenderCustomer('a');
+  await act(async()=>getByRole(drawer,'button',{name:'删除',exact:true}).click());const d=getByRole(document.body,'dialog',{name:'删除联系人？'});await act(async()=>getByRole(d,'button',{name:'删除联系人',exact:true}).click());expect(bridge.current.run).not.toHaveBeenCalled();expect(d.textContent).toContain('联系人资料已更新');
+});
+it('keeps a late contact failure out of the next workspace',async()=>{
+  contactFixture();bridge.current.dismissError=vi.fn();let reject!:(error:Error)=>void;bridge.current.run.mockReturnValueOnce(new Promise((_yes,no)=>reject=no));await mount('a');const d=await openContact();await act(async()=>getByRole(d,'button',{name:'保存',exact:true}).click());
+  bridge.current.workspace={id:'other',ownerId:'local',revision:0,state:bridge.current.state};await rerenderCustomer('a');bridge.current.error='新公司错误';await act(async()=>reject(new Error('旧联系人失败')));
+  expect(bridge.current.dismissError).not.toHaveBeenCalled();expect(document.body.textContent).not.toContain('旧联系人失败');expect(bridge.current.error).toBe('新公司错误');
+});
