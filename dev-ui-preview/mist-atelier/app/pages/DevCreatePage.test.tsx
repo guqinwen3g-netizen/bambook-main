@@ -2,6 +2,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {getByRole} from '@testing-library/dom';
 import { DevCreatePage, developmentFormErrors, firstInvalidDevelopmentStep, developmentFactoryOptions } from './DevCreatePage';
 import { Nav } from '../nav';
 import type { DevelopmentValues, MistState } from '../../../../server/src/shared/mistWorkspace';
@@ -32,6 +33,12 @@ async function pickType(title='复刻'){const button=[...document.body.querySele
 async function click(text:string){const button=[...document.body.querySelectorAll('button')].find(item=>item.textContent?.trim()===text);expect(button,text).toBeTruthy();await act(async()=>button!.click());}
 
 describe('persisted five-step development creation',()=>{
+  it.each([undefined,'fabric'])('hands focus to the development name on %s entry without creating a record',async(section)=>{
+    await mount(undefined,undefined,section);expect(document.activeElement).toBe(getByRole(host,'textbox',{name:/^开发对象名称/}));expect(bridge.current.run).not.toHaveBeenCalled();
+  });
+  it('keeps initial focus in the named step when source inputs are disabled',async()=>{
+    bridge.current.loading=true;await mount();expect(document.activeElement).toBe(getByRole(host,'group',{name:'基本信息'}));expect(bridge.current.run).not.toHaveBeenCalled();
+  });
   it.each([[undefined,'garment','新建成衣开发案'],['fabric','fabric','新建面料开发案']])('enters the %s create flow directly and returns to the same development tab',async(section,tab,title)=>{
     await mount(undefined,undefined,section);expect(document.body.querySelector('h1')?.textContent).toBe(title);
     await click('开发与寻样');expect(go).toHaveBeenCalledWith('development',undefined,{section:tab});

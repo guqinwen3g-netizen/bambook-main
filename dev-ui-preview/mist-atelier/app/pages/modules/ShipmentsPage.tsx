@@ -20,7 +20,8 @@ import { OVER_SHIP_REQUIRED, SHORT_SHIP_HINT, pendingOverShip, shipmentTolerance
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
-import { ModuleEditorDialog, moduleFileIds, useEditorStepFocus, type ModuleEditorSpec } from './ModuleWorkbench';
+import { ModuleEditorDialog, moduleFileIds, type ModuleEditorSpec } from './ModuleWorkbench';
+import {useEditorStepFocus} from '../../runtime/editorFocus';
 import { documentTypeLabel, emptyOption, Events, exportRecords, field, localNow, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ShipmentDepartureDialog } from './ShipmentDepartureDialog';

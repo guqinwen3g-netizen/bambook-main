@@ -1,6 +1,7 @@
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** Shared T2/T3 lists and T4 editors. Domain pages own fields, transitions and authority. */
 import React from 'react';
+import {useEditorStepFocus} from '../../runtime/editorFocus';
 import { ArrowLeft, ArrowRight, Download, Edit3, Plus } from 'lucide-react';
 import { UploadZone, FormFooter, BackLink, Banner, Button, Card, Checkbox, DataTable, Dialog, EmptyState, Field, FormGrid, FormSection, KeyValue, MistPage, Mono, PageHeader, Pagination, SearchField, Select, SignaturePad, TextArea, TextInput, Toolbar, VerticalSteps, useToast, type Column } from '../../../../../components/mist';
 import { useMistWorkspace,type MistWorkspaceContext,type MistCommandRecovery } from '../../runtime/workspace';
@@ -185,16 +186,6 @@ export function downloadModuleXlsx(filename:string,sheets:Array<{name:string;hea
     const bytes=XLSX.write(book,{type:'array',bookType:'xlsx'});
     downloadGeneratedBlob(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),filename);
   }});
-}
-/** Full-page editors move focus on entry/step changes; source refreshes must preserve active input. */
-export function useEditorStepFocus(step:number){
-  const ref=React.useRef<HTMLDivElement>(null);
-  React.useEffect(()=>{
-    const section=ref.current;
-    const field=section?.querySelector<HTMLElement>('.mist-form-section input:not([type="hidden"]):not([type="file"]):not([disabled]), .mist-form-section textarea:not([disabled]), .mist-form-section select:not([disabled]), .mist-form-section button[role="combobox"]:not([disabled])');
-    (field??section)?.focus();
-  },[step]);
-  return ref;
 }
 export function ModuleEditorPage({spec,onClose}:{spec:ModuleEditorSpec;onClose:()=>void}){
   const presentedError=React.useContext(MistPresentedErrorContext);

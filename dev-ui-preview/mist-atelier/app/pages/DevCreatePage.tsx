@@ -8,6 +8,7 @@ import { FormFooter, BackLink, Banner, Button, Card, Checkbox, ChoiceCards, Dial
 import { isServiceSupplier } from '../../../../server/src/shared/mistSupplierStatus';
 import type { DevelopmentValues, MistFile, MistState } from '../../../../server/src/shared/mistWorkspace';
 import { useMistWorkspace } from '../runtime/workspace';
+import {useEditorStepFocus} from '../runtime/editorFocus';
 import { ImageRoleTag, imageRole } from './modules/PrimaryImage';
 import { withPrimaryImage } from '../../../../server/src/shared/mistPrimaryImage';
 import { useNav } from '../nav';
@@ -85,6 +86,7 @@ export function InlineDevelopmentFactoryDialog({open,onClose,onCreated,domain='g
 export function DevCreatePage(){
   const {go,route}=useNav();const {state,loading,error,run,uploadFile,downloadFile,pending,recover,saving}=useMistWorkspace();const toast=useToast();
   const [step,setStep]=React.useState('basic'),[done,setDone]=React.useState<Record<string,boolean>>({});
+  const stepRef=useEditorStepFocus(step);
   const [f,setF]=React.useState<DevelopmentFormValues>(()=>emptyForm());const [fileIds,setFileIds]=React.useState<string[]>([]);
   const [draftId,setDraftId]=React.useState<string|undefined>(route.id),[touched,setTouched]=React.useState(false),[busy,setBusy]=React.useState(false),[message,setMessage]=React.useState(''),[dirty,setDirty]=React.useState(false),[leave,setLeave]=React.useState(false),[factoryDialog,setFactoryDialog]=React.useState(false);
   const loaded=React.useRef<string|undefined>(undefined);const busyRef=React.useRef(false);const active=React.useRef(true);React.useEffect(()=>{active.current=true;return()=>{active.current=false;};},[]);
@@ -122,7 +124,7 @@ export function DevCreatePage(){
     <PageHeader eyebrow={ui`订单履约 · ${fabricDomain?'面料开发':'成衣开发'}`} title={uiText(draftId?'继续开发草稿':fabricDomain?'新建面料开发案':'新建成衣开发案')} actions={<Button variant="quiet" loading={busy} disabled={!state} onClick={()=>void save(false)}>{uiText("存为草稿")}</Button>} />
     {(message||error)&&<FailureNotice title={"暂时无法保存"} detail={message||error} />}
     {pending&&!saving&&<div className="mist-section"><Banner tone="warn" title={uiText("原操作结果尚待核对")} actions={recovery}>{uiText("请先核对已发出的请求，避免重复创建。")}</Banner></div>}
-    <div className="mist-wizard">
+    <div ref={stepRef} className="mist-wizard" role="group" aria-label={uiText(steps[idx]?.label||STEPS[0].label)} tabIndex={-1}>
       <VerticalSteps steps={steps.map(item=>({...item,done:done[item.id]}))} current={step} onSelect={id=>{if(busy)return;setStep(id);setTouched(false);}} />
       <Card><fieldset disabled={busy||loading||!state||!!pending} style={{border:0,padding:0,margin:0,minWidth:0}}>
         {step==='basic'&&<>
