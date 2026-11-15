@@ -94,7 +94,7 @@ export function ApprovalsPage() {
   const targetBase = selected?.target.view.split('/')[0] ?? '';
   const sameSpace = !!selected && selected.workspaceId === current?.id;
   const openReason = !selected ? '' : !sameSpace ? `该审批属于公司“${selected.workspaceName}”，请先切换到该公司再打开原业务` : !session.canAccessView(targetBase as View) ? '当前账号没有原业务的查看权限' : undefined;
-  const decideReason = !selected ? '' : selected.status !== 'pending' ? '这项审批已处理' : selected.local ? '你是发起人，不能审批本人提交的事项' : !selected.canDecide ? '你不在本次审批人名单中，或缺少该类审批权限' : reviews.intent&&!reviews.busy ? '上一次审批结果待核对，请先核对原请求' : undefined;
+  const decideReason = !selected ? '' : selected.status !== 'pending' ? '这项审批已处理' : selected.local ? '当前账号没有本次审批资格' : !selected.canDecide ? '你不在本次审批人名单中，或缺少该类审批权限' : reviews.intent&&!reviews.busy ? '上一次审批结果待核对，请先核对原请求' : undefined;
   const unavailableEvidence = selected ? [...new Set(selected.fileIds || [])].filter(id => !selected.files?.some(file => file.id === id)).length : 0;
   const detail = selected ? <DetailBody data-approval={selected.id} heading={<h2 className="mist-h2">{localizedPageTitle(selected.title)}</h2>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATUS[selected.status].tone}>{uiText(STATUS[selected.status].label)}</Pill><Pill tone="neutral">{APPROVAL_KIND_LABEL[selected.kind]}</Pill></div>

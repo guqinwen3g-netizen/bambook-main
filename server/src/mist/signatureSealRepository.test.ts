@@ -11,7 +11,7 @@ import { fixture } from './__tests__/professionalFulfillment';
 import { TEST_SIGNATURE, TEST_SIGNATURE_SVG } from './__tests__/signature';
 import { normalizeSignatureSvg } from '../shared/mistSignatures';
 
-vi.mock('./context', () => ({ mistApprovalAuthority: async () => ({ supplier: {} }) }));
+vi.mock('./context', () => ({ mistApprovalAuthority: async () => ({ supplier: {}, orderReviewerIds: {garment:['owner'],fabric:['owner']} }) }));
 vi.mock('../auth/tokenHelpers', () => ({ loadUserWithRoles: async (_db: any, id: string) => ({ id, status: 'active', deletedAt: null }), buildLoadedAuthTokenPayload: async (_db: any, u: any) => ({ userId: u.id, permissions: [], roles: [], departmentIds: [] }) }));
 const now = '2026-10-13T12:00:00.000Z', digest = (b: Buffer) => createHash('sha256').update(b).digest('hex'), htmls: string[] = [];
 const renderPdf = vi.fn(async (html: string) => { htmls.push(html); const pdf = Buffer.from('%PDF-1.4\n' + digest(Buffer.from(html)) + '\n%%EOF'); return { pdf, sha: digest(pdf), bytes: pdf.length, generatedAt: now, format: 'A4' }; });
@@ -41,7 +41,7 @@ describe('审批手写签字', () => {
   const approve = { type: 'order.governance.decide', payload: { id: 'order-1', decision: 'approved', note: '同意' } };
   beforeEach(async () => {
     auth = testAuthority(); repo = new MistRepository(db, decisions, files, auth.authorize, () => new Date(now));
-    wid = (await repo.create(testActor(), { name: '签字' })).id; state().reviewTasks = [structuredClone(task)]; state().orders = [{ id: 'order-1' }]; state().invoices = [{ id: 'inv-1' }];
+    wid = (await repo.create(testActor(), { name: '签字' })).id; state().reviewTasks = [structuredClone(task)]; state().orders = [{ id: 'order-1',type:'garment' }]; state().invoices = [{ id: 'inv-1' }];
   });
 
   it('批准须附签字；驳回与尾差核销不得附签字', async () => {

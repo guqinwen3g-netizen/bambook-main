@@ -59,6 +59,8 @@
 
 订单决定标识（2026-11-14）：通用命令`order.governance.decide`使用`payload.id`指定订单或复合审批事项，待处理轮由领域服务查找；审批接口路径里的`order:roundId`通过服务端映射到该标识，不能把`orderId/roundId`字段直接当作通用命令参数。`mistOrderGovernance.ts#applyOrderGovernanceCommand`在解释短交、超装或取消等标识分支前验证非空字符串，缺失/错误类型以422拒绝；合法请求仍校验本次冻结名单与当前有效审批资格。格式拒绝不产生业务版本、签字或回执，不代表通过权限校验。
 
+主单当前资格（2026-11-15，本地候选）：`repository.ts#listReviews` 的待审主单 `canDecide` 同时要求本次冻结名单/模块权限与当前原申请人路由的准确业务域资格；按公司库、原申请人缓存一次当前权威，但面料/成衣分别判断。撤销资格不抹去冻结名单、审批资料或已处理历史；缺订单/申请人不可核验不提供决定，数据库异常正常上报。决定入口原有当前权威复核、资金等特定自审限制不改；合格主单申请人没有通用自审禁令。公司设置的审批资格与模块权限分开，不能因岗位显示名而自动授予；原生走查状态见GO-LIVE，回归见 `mist/reviews.test.ts`。
+
 - **权限点**：`server/src/_shared/rolePermissionMatrix.ts#PERMISSION_SCOPES`。命令到权限点的映射在 `mistWorkspace.ts#mistCommandPermission`；财务细分见 `mistFinancePermissions.ts`。
 - **岗位配置界面**：`app/runtime/jobPermissions.ts`（`JOB_AREAS`：按模块配 读/写/审批）+ `pages/modules/JobPermissionEditor.tsx`；成员与小组在 `pages/WorkspaceMembers.tsx`、`pages/TeamScopesSection.tsx`（`teamScope.save`）。
 - **开发入口（2026-11-09）**：成衣/面料开发、样品及产品档案沿用 `products:write`；开发新建的路由门禁见 `app/routeAccess.ts`，营销线索的客户开发入口见 `pages/modules/MarketPages.tsx#LeadList`。不要用已退役的 `development:write` 决定入口，测试须按具体权限集合核对允许和拒绝，不能只以全权限替身验证。

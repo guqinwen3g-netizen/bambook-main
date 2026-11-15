@@ -1286,10 +1286,29 @@ export class MistRepository {
       await this.prepareFileAccess(row);
       const denied = restrictedSensitiveFiles(row.state,actor,fileOwner(row),this.filePrivacy(row),true);
       const tasks = this.reviews(row.state).filter(t=>!companyRow(row)&&row.ownerId===actor.userId||(t.reviewerIds.includes(actor.userId)&&hasScope(actor,t.requiredPermission as any)));
+      const mainAuthorities=new Map<string,NonNullable<MistContext['authority']>|null>();
       for (const task of tasks) {
         const signatureId = this.reviewSignatureFileId(row.state,task);
+        let canDecide=task.status==='pending'&&task.reviewerIds.includes(actor.userId)&&hasScope(actor,task.requiredPermission as any);
+        if(canDecide&&task.kind==='order'&&task.id.startsWith('order:')){
+          const order=(row.state as MistState).orders?.find(item=>item.id===task.entityId);
+          if(!order||!['garment','fabric'].includes(order.type))canDecide=false;
+          else{
+            if(!mainAuthorities.has(task.requesterId)){
+              try{
+                const subject=await this.reviewSubject(db,actor,task.requesterId);
+                mainAuthorities.set(task.requesterId,await mistApprovalAuthority(db,subject,'order.governance.decide',candidateIds(row)));
+              }catch(error){
+                if(!(error instanceof MistApiError)||error.code!=='REQUESTER_UNAVAILABLE')throw error;
+                mainAuthorities.set(task.requesterId,null);
+              }
+            }
+            // Keep the submitted reviewer snapshot readable; only current decision eligibility changes.
+            canDecide=mainAuthorities.get(task.requesterId)?.orderReviewerIds?.[order.type]?.includes(actor.userId)===true;
+          }
+        }
         result.push({workspaceId:row.id,workspaceName:row.name,revision:row.revision,
-          canDecide:task.status==='pending'&&task.reviewerIds.includes(actor.userId)&&hasScope(actor,task.requiredPermission as any),
+          canDecide,
           signatureRequired:mistCommandRequiresSignature({type:REVIEW_COMMAND_BY_KIND[task.kind],payload:{decision:'approved'}}),
           files:(task.fileIds||[]).filter(id=>!denied.has(id)).flatMap(id=>{const file=row.state.files.find(f=>f.id===id);return file?[{id:file.id,name:file.name,size:file.size}]:[];}),
           ...(signatureId&&!denied.has(signatureId)&&row.state.files.some(f=>f.id===signatureId)?{signatureFileId:signatureId}:{}),...task});

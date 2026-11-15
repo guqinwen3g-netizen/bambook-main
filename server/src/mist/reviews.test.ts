@@ -4,19 +4,55 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';import path from 'node:path';
 import {MistRepository} from './repository';import {MistPrivateFiles} from './files';import {MemoryMistDatabase,testActor,testAuthority,testContract} from './__tests__/support';
 import { TEST_SIGNATURE } from './__tests__/signature';
-const observed=vi.hoisted(()=>({requester:''}));
-vi.mock('../auth/tokenHelpers',()=>({loadUserWithRoles:async(_db:any,id:string)=>({id,status:'active',deletedAt:null}),buildLoadedAuthTokenPayload:async(_db:any,u:any)=>({userId:u.id,permissions:['approvals:write'],roles:[],departmentIds:[]})}));
-vi.mock('./context',()=>({mistApprovalAuthority:async(_db:any,actor:any)=>{observed.requester=actor.userId;return {supplier:{},businessReviewerId:'reviewer',orderReviewerIds:{garment:['reviewer'],fabric:['reviewer']}};}}));
+const observed=vi.hoisted(()=>({requester:'',calls:0,mainReviewers:['reviewer'],fabricReviewers:null as string[]|null,unavailable:new Set<string>(),failure:null as Error|null}));
+vi.mock('../auth/tokenHelpers',()=>({loadUserWithRoles:async(_db:any,id:string)=>observed.unavailable.has(id)?null:({id,status:'active',deletedAt:null}),buildLoadedAuthTokenPayload:async(_db:any,u:any)=>({userId:u.id,permissions:['approvals:write'],roles:[],departmentIds:[]})}));
+vi.mock('./context',()=>({mistApprovalAuthority:async(_db:any,actor:any)=>{
+ observed.requester=actor.userId;observed.calls++;if(observed.failure)throw observed.failure;
+ return {supplier:{},businessReviewerId:'reviewer',orderReviewerIds:{garment:[...observed.mainReviewers],fabric:[...(observed.fabricReviewers??observed.mainReviewers)]}};
+}}));
 let db:MemoryMistDatabase,auth:ReturnType<typeof testAuthority>,repo:MistRepository,dir:string,wid:string;
 const task=()=>({id:'review-1',kind:'quotation' as const,entityId:'quote-1',title:'报价复核',requesterId:'owner',reviewerIds:['reviewer'],status:'pending' as const,submittedAt:'2026-10-13',requiredPermission:'approvals:write',target:{view:'quotations',id:'quote-1'},details:[{label:'金额',value:'100 USD'}],fileIds:[] as string[]});
 beforeEach(async()=>{
+ observed.mainReviewers=['reviewer'];observed.calls=0;observed.fabricReviewers=null;observed.unavailable.clear();observed.failure=null;
  dir=await mkdtemp(path.join(tmpdir(),'mist-review-'));db=new MemoryMistDatabase();auth=testAuthority();auth.users.set('reviewer',{active:true,permissions:['approvals:write']});
  const contract:any={...testContract,getMistReviewTasks:(state:any)=>state.reviewTasks||[],applyMistCommand:(state:any,command:any,context:any)=>{if(!['market.quotation.decide','order.governance.decide'].includes(command.type))return testContract.applyMistCommand(state,command,context);const row=state.reviewTasks.find((t:any)=>t.entityId===command.payload.id);if(context.actorId!=='reviewer'||(row.kind==='order'?!context.authority.orderReviewerIds.garment.includes('reviewer'):context.authority.businessReviewerId!=='reviewer'))throw new Error('Wrong authority');if(row.kind==='order'&&command.type!=='order.governance.decide')throw new Error('Wrong order decision command');row.status=command.payload.decision;row.details.push({label:'意见',value:command.payload.note});return{state,result:{id:command.payload.id}};}};
  repo=new MistRepository(db,contract,new MistPrivateFiles(dir),auth.authorize);const w=await repo.create(testActor(),{name:'Private'});wid=w.id;db.workspaces.get(wid).state.reviewTasks=[task()];db.workspaces.get(wid).state.reviewerIds=['reviewer'];
 });
 afterEach(async()=>{await rm(dir,{recursive:true,force:true});});
+function seedMainReview(){
+ auth.users.get('reviewer')!.permissions.push('orders:write');const row=db.workspaces.get(wid);
+ row.state.orders=[{id:'order-1',type:'garment'}];row.state.reviewTasks=[{...task(),id:'order:round-1',kind:'order',entityId:'order-1',requiredPermission:'orders:write',target:{view:'orders/detail',id:'order-1'}}];return row;
+}
+it('makes a frozen main review read-only after current approval qualification is revoked, and allows a later valid restoration',async()=>{
+ const row=seedMainReview(),before=structuredClone(row),receipts=db.receipts.size;
+ expect((await repo.listReviews(testActor('reviewer')))[0].canDecide).toBe(true);
+ observed.mainReviewers=[];const revoked=await repo.listReviews(testActor('reviewer'));
+ expect(revoked[0]).toMatchObject({canDecide:false,reviewerIds:['reviewer'],status:'pending'});expect(observed.requester).toBe('owner');
+ observed.mainReviewers=['reviewer'];expect((await repo.listReviews(testActor('reviewer')))[0].canDecide).toBe(true);
+ expect(db.workspaces.get(wid)).toEqual(before);expect(db.receipts.size).toBe(receipts);
+});
+it('keeps an explicitly qualified main requester able to decide their own review',async()=>{
+ const row=seedMainReview();row.state.reviewTasks[0].requesterId='reviewer';
+ expect((await repo.listReviews(testActor('reviewer')))[0].canDecide).toBe(true);expect(observed.requester).toBe('reviewer');
+});
+it('uses the underlying order business line when current qualification differs between fabric and garment',async()=>{
+ const row=seedMainReview();observed.fabricReviewers=[];row.state.orders.push({id:'fabric-order',type:'fabric'});row.state.reviewTasks.push({...row.state.reviewTasks[0],id:'order:fabric-round',entityId:'fabric-order',target:{view:'orders/detail',id:'fabric-order'}});
+ const rows=await repo.listReviews(testActor('reviewer'));expect(rows.find(r=>r.entityId==='order-1')?.canDecide).toBe(true);expect(rows.find(r=>r.entityId==='fabric-order')?.canDecide).toBe(false);expect(observed.calls).toBe(1);
+});
+it.each(['missing-order','unavailable-requester'])('does not offer a pending main decision with %s',async(reason)=>{
+ const row=seedMainReview();if(reason==='missing-order')row.state.orders=[];else observed.unavailable.add('owner');
+ expect((await repo.listReviews(testActor('reviewer')))[0]).toMatchObject({canDecide:false,status:'pending'});
+});
+it('preserves processed main history without reauthorizing an unavailable old requester',async()=>{
+ const row=seedMainReview();row.state.reviewTasks[0].status='approved';observed.unavailable.add('owner');observed.failure=new Error('must not resolve completed history');
+ expect((await repo.listReviews(testActor('reviewer')))[0]).toMatchObject({canDecide:false,status:'approved',reviewerIds:['reviewer']});
+});
+it('does not turn an unexpected main qualification database failure into an ordinary read-only review',async()=>{
+ seedMainReview();observed.failure=new Error('qualification database unavailable');
+ await expect(repo.listReviews(testActor('reviewer'))).rejects.toThrow('qualification database unavailable');
+});
 describe('scoped cross-account Mist review',()=>{
- it('routes an order snapshot decision through the order command and replays it once across accounts',async()=>{auth.users.get('reviewer')!.permissions.push('orders:write');const row=db.workspaces.get(wid);row.state.reviewTasks=[{...task(),id:'order:round-1',kind:'order',entityId:'order-1',requiredPermission:'orders:write',target:{view:'orders/detail',id:'order-1'}}];const input={requestId:'order-decision',expectedRevision:0,decision:'approved' as const,note:'核对订单冻结条款',signature:TEST_SIGNATURE};const visible=await repo.listReviews(testActor('reviewer'));expect(visible[0]).toMatchObject({kind:'order',canDecide:true,target:{view:'orders/detail',id:'order-1'}});await repo.decideReview(testActor('reviewer'),wid,'order:round-1',input);expect((await repo.decideReview(testActor('reviewer'),wid,'order:round-1',input)).replayed).toBe(true);expect(db.workspaces.get(wid).state.reviewTasks[0].status).toBe('approved');expect(db.workspaces.get(wid).revision).toBe(1);await expect(repo.get(testActor('reviewer'),wid)).rejects.toMatchObject({status:404});});
+ it('routes an order snapshot decision through the order command and replays it once across accounts',async()=>{auth.users.get('reviewer')!.permissions.push('orders:write');const row=db.workspaces.get(wid);row.state.orders=[{id:'order-1',type:'garment'}];row.state.reviewTasks=[{...task(),id:'order:round-1',kind:'order',entityId:'order-1',requiredPermission:'orders:write',target:{view:'orders/detail',id:'order-1'}}];const input={requestId:'order-decision',expectedRevision:0,decision:'approved' as const,note:'核对订单冻结条款',signature:TEST_SIGNATURE};const visible=await repo.listReviews(testActor('reviewer'));expect(visible[0]).toMatchObject({kind:'order',canDecide:true,target:{view:'orders/detail',id:'order-1'}});await repo.decideReview(testActor('reviewer'),wid,'order:round-1',input);expect((await repo.decideReview(testActor('reviewer'),wid,'order:round-1',input)).replayed).toBe(true);expect(db.workspaces.get(wid).state.reviewTasks[0].status).toBe('approved');expect(db.workspaces.get(wid).revision).toBe(1);await expect(repo.get(testActor('reviewer'),wid)).rejects.toMatchObject({status:404});});
  it('lists only assigned snapshots without exposing workspace state',async()=>{const list=await repo.listReviews(testActor('reviewer'));expect(list).toHaveLength(1);expect(list[0].details[0].value).toBe('100 USD');expect(list[0]).not.toHaveProperty('state');expect(await repo.listReviews(testActor('other'))).toEqual([]);});
  it('allows the assigned real actor to decide with authority anchored to requester',async()=>{const r=await repo.decideReview(testActor('reviewer'),wid,'review-1',{requestId:'decision-1',expectedRevision:0,decision:'approved',note:'同意当前冻结金额'});expect(r.receipt.revision).toBe(1);expect(observed.requester).toBe('owner');expect(db.workspaces.get(wid).state.reviewTasks[0].status).toBe('approved');});
  it('rejects unassigned actor and revoked approve scope',async()=>{const input={requestId:'one',expectedRevision:0,decision:'approved' as const,note:'同意'};await expect(repo.decideReview(testActor('other'),wid,'review-1',input)).rejects.toMatchObject({status:404});auth.users.get('reviewer')!.permissions=[];await expect(repo.decideReview(testActor('reviewer'),wid,'review-1',input)).rejects.toMatchObject({status:403});expect(db.workspaces.get(wid).revision).toBe(0);});
