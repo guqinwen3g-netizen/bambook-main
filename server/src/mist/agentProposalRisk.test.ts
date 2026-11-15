@@ -1,7 +1,7 @@
 import {afterEach,beforeEach,describe,expect,it} from 'vitest';
 import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import path from 'node:path';import {randomUUID} from 'node:crypto';
 import {createMistState,applyMistCommand,mistCommandPermission} from '../shared/mistWorkspace';
-import {agentCommandRisk,AGENT_COMMAND_RISK,HIGH_RISK_COMMANDS,HIGH_RISK_PREFIXES,HIGH_RISK_VERB,type AgentCommandRisk} from '../shared/mistAgentProposals';
+import {agentCommandRisk,agentProposalRisk,AGENT_COMMAND_RISK,HIGH_RISK_COMMANDS,HIGH_RISK_PREFIXES,HIGH_RISK_VERB,type AgentCommandRisk} from '../shared/mistAgentProposals';
 import {MemoryMistDatabase,testAuthority} from './__tests__/support';
 import {MIST_COMMAND_CATALOG} from './agentCommandCatalog';
 import {MistRepository} from './repository';import {createLoginRateLimiter} from '../auth/loginRateLimiter';import {MistPrivateFiles} from './files';
@@ -160,3 +160,12 @@ describe('AI 提议三级确认',()=>{
   });
  });
 });
+
+function creditCustomer(){const state=db.workspaces.get(workspaceId).state;state.customers=[{id:'customer',code:'BCS',name:'Birchline',ownerId:'staff',owner:'Staff',country:'英国',city:'Leeds',industry:'品牌',grade:'B',currency:'GBP',terms:'OA30',incoterm:'FCA上海',categories:'成衣',creditLimit:1000,since:'2026-11-01'}];auth.users.get('staff')!.permissions.push('relations:read','relations:write','risk:admin');}
+it('requires high-risk reauthentication for an actual customer credit grant',async()=>{creditCustomer();propose({type:'market.customer.update',payload:{id:'customer',patch:{creditLimit:2000}}});await expect(confirm()).rejects.toMatchObject({status:403,code:'REAUTH_REQUIRED'});expect(db.workspaces.get(workspaceId).state.customers[0].creditLimit).toBe(1000);expect(proposalState()).toBe('pending');});
+it('confirms an authorized credit grant with the existing high-risk password flow',async()=>{creditCustomer();propose({type:'customer.update',payload:{id:'customer',patch:{creditLimit:2000}}});await confirm({password:PASSWORD});expect(db.workspaces.get(workspaceId).state.customers[0].creditLimit).toBe(2000);expect(checked).toEqual(['staff']);expect(proposalState()).toBe('confirmed');expect(db.workspaces.get(workspaceId).state.agentProposals[0].risk).toBe('high');expect((await repo.getForAgent(actor,workspaceId)).workspace.state.agentProposals[0].risk).toBe('high');});
+it('does not escalate a normal city edit merely for carrying unchanged credit fields',async()=>{creditCustomer();auth.users.get('staff')!.permissions=auth.users.get('staff')!.permissions.filter(p=>!['risk:admin','ai:write:high'].includes(p));propose({type:'market.customer.update',payload:{id:'customer',patch:{city:'York',creditLimit:1000,currency:'GBP',grade:'B'}}});await confirm();expect(db.workspaces.get(workspaceId).state.customers[0]).toMatchObject({city:'York',creditLimit:1000});expect(checked).toEqual([]);});
+it('treats changing a nonzero credit denomination as a high-risk change',async()=>{creditCustomer();propose({type:'market.customer.update',payload:{id:'customer',patch:{currency:'USD'}}});await expect(confirm()).rejects.toMatchObject({status:403,code:'REAUTH_REQUIRED'});expect(db.workspaces.get(workspaceId).state.customers[0].currency).toBe('GBP');});
+it('does not let high-risk credit import hide behind an ordinary archive command',async()=>{creditCustomer();propose({type:'market.import',payload:{kind:'customer',rows:[{name:'New',code:'NEW',currency:'GBP',creditLimit:'500'}]}});await expect(confirm()).rejects.toMatchObject({status:403,code:'REAUTH_REQUIRED'});expect(db.workspaces.get(workspaceId).state.customers).toHaveLength(1);});
+
+it('keeps an executed medium-risk history stable after a later credit change',async()=>{creditCustomer();propose({type:'market.customer.update',payload:{id:'customer',patch:{city:'York',creditLimit:1000,currency:'GBP'}}});await confirm();const state=db.workspaces.get(workspaceId).state,p=state.agentProposals[0];expect(p.risk).toBe('medium');state.customers[0].creditLimit=3000;expect(agentProposalRisk(p,state)).toBe('medium');expect((await repo.getForAgent(actor,workspaceId)).workspace.state.agentProposals[0].risk).toBe('medium');});

@@ -1,9 +1,10 @@
+import {customerCommandChangesCredit} from '../../../../server/src/shared/mistCustomerFieldAuthority';
 import React from 'react';
 import { ui, uiText } from '../../../../services/interfaceLanguage';
 import { businessDate } from '../runtime/businessClock';
 import { Banner, Button, Dialog, Field, KeyValue, PasswordInput, Pill, SignaturePad, TextArea, type SignatureValue } from '../../../../components/mist';
 import { commandRequiresSignature } from '../runtime/signatureRules';
-import { agentCommandRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../server/src/shared/mistAgentProposals';
+import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../server/src/shared/mistAgentProposals';
 import type { MistCommand, MistState } from '../../../../server/src/shared/mistWorkspace';
 import { reviewEmailAnalysis } from '../../../../server/src/shared/mistEmailReview';
 import { emailLinkTarget } from '../../../../server/src/shared/mistEmail';
@@ -30,7 +31,7 @@ export function mailProposalDetails(proposal: AgentProposal, state?: MistState |
  * 确认时列出将要执行的内容：按提议命令的 payload 逐项展开（嵌套对象按路径，数组逐项）。
  * 中风险超长值截断；高风险不截断——本人输入密码确认的必须是完整内容。超出显示上限时返回 omitted，调用方须禁用确认。
  */
-const FIELD_LABEL: Record<string, string> = { title: '标题', due: '期限', name: '名称', note: '备注', notes: '备注', amount: '金额', currency: '币种', date: '日期', start: '开始', end: '结束', status: '状态', reason: '原因', assigneeId: '负责人', ownerId: '负责人', customerId: '客户', supplierId: '供应商', orderId: '订单', quantity: '数量', qty: '数量', price: '单价', unitPrice: '单价', terms: '条款', email: '邮箱', phone: '电话', address: '地址', subject: '主题', body: '正文', to: '收件人', cc: '抄送', code: '编号', kind: '类型', type: '类型', decision: '决定', allocations: '分配', lines: '明细', items: '明细', billId: '应付单', invoiceId: '发票', paymentId: '付款', receiptId: '到账', id: '对象', target: '关联对象', view: '页面', tags: '标签', remark: '备注' };
+const FIELD_LABEL: Record<string, string> = { grade:'客户等级', creditLimit:'信用额度', title: '标题', due: '期限', name: '名称', note: '备注', notes: '备注', amount: '金额', currency: '币种', date: '日期', start: '开始', end: '结束', status: '状态', reason: '原因', assigneeId: '负责人', ownerId: '负责人', customerId: '客户', supplierId: '供应商', orderId: '订单', quantity: '数量', qty: '数量', price: '单价', unitPrice: '单价', terms: '条款', email: '邮箱', phone: '电话', address: '地址', subject: '主题', body: '正文', to: '收件人', cc: '抄送', code: '编号', kind: '类型', type: '类型', decision: '决定', allocations: '分配', lines: '明细', items: '明细', billId: '应付单', invoiceId: '发票', paymentId: '付款', receiptId: '到账', id: '对象', target: '关联对象', view: '页面', tags: '标签', remark: '备注' };
 /** 字段路径转成业务名称；包装层 patch / payload 不显示，未登记的字段保留原名，避免误译。 */
 export function proposalFieldLabel(path: string): string {
   if (!path) return '内容';
@@ -61,8 +62,16 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
   const rows: Array<{ field: string; path: string; value: string }> = [], limit = full ? 200 : 40;
   const development=command.type==='development.saveDraft',quotation=command.type==='market.quotation.save',rfqCommand=command.type.startsWith('rfq.');
   const rfq=rfqCommand?state?.rfqs?.find(r=>r.id===command.payload.id):undefined;
+  const customerUpdate=['market.customer.update','customer.update'].includes(command.type),customer=customerUpdate?state?.customers.find(c=>c.id===command.payload.id):undefined;
+  const creditChange=!!customer&&customerCommandChangesCredit(command,state);
+  if(creditChange){
+    const p=command.payload.patch as Record<string,unknown>,amount=p.creditLimit??customer!.creditLimit,denomination=String(p.currency??customer!.currency);
+    const money=(value:unknown,currency:string)=>typeof value==='number'&&Number.isFinite(value)?value.toFixed(2)+' '+currency:'金额无效';
+    rows.push({field:'客户',path:'customer',value:customer!.name+' · '+customer!.code},{field:'原信用额度',path:'credit.before',value:money(customer!.creditLimit,customer!.currency)},{field:'拟设信用额度',path:'credit.after',value:money(amount,denomination)});
+  }
   let omitted = 0;
   const walk = (value: unknown, path: string) => {
+    if(creditChange&&['id','patch.creditLimit','patch.currency'].includes(path))return;
     // mistMarket#sourceLine/save derives these from saved data; the input cannot set them.
     if(quotation&&/^(input\.(approvalHistory|requiresApproval)|input\.lines\.\d+\.(costBasis|family|marginFloor))(\.|$)/.test(path))return;
     if (value && typeof value === 'object') {
@@ -71,6 +80,7 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
     }
     if (rows.length >= limit) { omitted++; return; }
     let text = typeof value === 'string' ? value : JSON.stringify(value) ?? '',field=proposalFieldLabel(path);
+    if(customerUpdate&&path==='id')text=customer?customer.name+' · '+customer.code:'客户已不可见';
     if(development){
       field=path.split('.').filter(p=>p!=='values').map(p=>/^\d+$/.test(p)?'第'+p+'项':DEVELOPMENT_LABEL[p]||FIELD_LABEL[p]||p).join(' · ');
       if(path==='draftId')text=state?.drafts.find(d=>d.id===value)?.values.name||'开发草稿';
@@ -153,8 +163,8 @@ export function AgentProposalDialog({ proposal, state, onClose, run, onDone }: {
   React.useEffect(() => { setNote(''); setFailure(''); setPassword(''); setSignature(null); }, [proposal?.id]);
   if (!proposal) return null;
   const mail = mailProposalDetails(proposal, state);
-  // 风险等级与服务端共用 agentCommandRisk：未登记的普通写入按中风险，付款、核销、审批等按高风险须输入密码。服务端仍会独立校验档位、密码与原业务权限。
-  const risk = agentCommandRisk(proposal.command.type), detailed = risk !== 'low' && !mail;
+  // 风险等级与服务端共用 agentProposalRisk：未登记的普通写入按中风险，付款、核销、审批等按高风险须输入密码。服务端仍会独立校验档位、密码与原业务权限。
+  const risk = agentProposalRisk(proposal, state), detailed = risk !== 'low' && !mail;
   const account = detailed ? proposalAccountRows(proposal.command, state) : null;
   const fields = detailed ? proposalFieldChanges(proposal.command, risk === 'high', state) : { rows: [], omitted: 0 };
   const draftSourceMissing=proposal.command.type==='development.saveDraft'&&state&&(
@@ -203,7 +213,7 @@ export function AgentProposalDialog({ proposal, state, onClose, run, onDone }: {
           {mail.note && <span className="mist-sub">{mail.note}</span>}
         </>}
       </div>}
-      {risk === 'high' && <Field label={uiText('本人登录密码')} required hint={uiText('付款、核销、审批、作废等资金或不可逆操作，确认前须重新验证本人密码')}><PasswordInput aria-label={uiText('本人登录密码')} autoComplete="current-password" value={password} disabled={busy} onChange={event => setPassword(event.target.value)} /></Field>}
+      {risk === 'high' && <Field label={uiText('本人登录密码')} required><PasswordInput aria-label={uiText('本人登录密码')} autoComplete="current-password" value={password} disabled={busy} onChange={event => setPassword(event.target.value)} /></Field>}
       {signing && <Field label={uiText('确认签字')} required><SignaturePad key={proposal.id} ariaLabel="确认签字" disabled={busy} onChange={setSignature} /></Field>}
       <Field label={uiText('拒绝原因')}><TextArea aria-label={uiText('拒绝原因')} rows={2} value={note} onChange={event => setNote(event.target.value)} /></Field>
     </div>

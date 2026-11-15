@@ -1,3 +1,4 @@
+import {assertCustomerFieldAuthority} from './mistCustomerFieldAuthority';
 import { scheduleCrmFollowUp } from './mistCrm';
 import { isCalendarDay, nextBusinessCode } from './mistBusinessClock';
 import { primaryImageId } from './mistPrimaryImage';
@@ -329,6 +330,7 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    if(patch.currency!==undefined)next.currency=currency(patch.currency);
    if(patch.since!==undefined)next.since=day(patch.since,'合作起始日',true);
    if(patch.creditLimit!==undefined){if(typeof patch.creditLimit!=='number')fail('信用额度格式无效');mistMoneyMinor(patch.creditLimit);next.creditLimit=patch.creditLimit;}
+   assertCustomerFieldAuthority(ctx,customer,next);
    Object.assign(customer,next);customerRelation(root,m,id,ctx).updatedAt=ctx.now;
    root.devs.filter(d=>d.customerId===id).forEach(d=>{d.customer=next.name;d.values.customer=next.name;});root.orders.filter(o=>o.customerId===id).forEach(o=>o.customer=next.name);
    history(root,ctx,'customer',id,'更新客户档案 '+customer.name+ownerText);return{id,customerId:id};
@@ -354,6 +356,7 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    mistMoneyMinor(input.creditLimit);
    const customer:MistCustomer={id:ctx.id(),code,name:str(input.name,'客户名称'),country:str(input.country,'国家',false),city:str(input.city,'城市',false),industry:str(input.industry,'行业',false),...(()=>{if((input as Record<string,unknown>).owner!==undefined)fail('负责人须按账号选择');const owner=resolveMember(ctx,input.ownerId,'客户负责人');return{owner:owner.name,ownerId:owner.id};})(),grade:str(input.grade,'等级',false),currency:currency(input.currency),terms:str(input.terms,'付款条款',false),incoterm:str(input.incoterm,'贸易术语',false),categories:str(input.categories,'主要品类',false),creditLimit:input.creditLimit,since:day(input.since,'合作起始日',true)};
    const relation:MarketRelation={...base(root,ctx,{}),name:customer.name,category:'Customer',customerId:customer.id,supplierId:'',country:customer.country,address:customer.city,aliases:[],status:'active',contacts:[]};
+   assertCustomerFieldAuthority(ctx,undefined,customer);
    root.customers.push(customer);m.relations.push(relation);
    history(root,ctx,'customer',customer.id,'创建客户档案 '+customer.name);
    return {id:customer.id,customerId:customer.id,relationId:relation.id};

@@ -1,3 +1,4 @@
+import {assertCustomerCommandFieldAuthority} from '../shared/mistCustomerFieldAuthority';
 import {mistBusinessInstant} from '../shared/mistBusinessClock';
 import { EMAIL_SERVER_COMMAND, emailAccountAccessible, emailBusinessOwner, emailLinkTarget } from '../shared/mistEmail';
 import { emailAnalysisHash } from './mail/intelligence';
@@ -42,7 +43,7 @@ import { enqueueMailState, taskHasPendingMail, mailStateViews, pendingMailFields
 import type { MailStateObservation } from '../shared/mistMailState';
 import { AGENT_AUDIT_FIELD, AGENT_AUDIT_HASH, AGENT_AUDIT_PREFIX, agentAuditReceiptId, createAgentCommandAudit, publicCommandReceiptResult } from './agentAudit';
 import { auditFromReceipt, auditMatchesParent, auditEntry, projectAgentAudit, readableCommand } from './agentAuditRead';
-import { markAgentProposalConfirmed, agentCommandRisk, AI_WRITE_SCOPES, AGENT_RISK_LABEL } from '../shared/mistAgentProposals';
+import { markAgentProposalConfirmed, agentCommandRisk, effectiveAgentCommandRisk, AI_WRITE_SCOPES, AGENT_RISK_LABEL } from '../shared/mistAgentProposals';
 import { listConversationMeta, saveConversationMeta } from './agentConversations';
 import { AUTOMATION_FAILURE_LIMIT, AUTOMATION_FAILURE_SPAN_MS, automationInstructions, automationOverLimit, automationRecord, automationView, dueAutomations, evaluateAutomation, listAutomations, recordAutomationRun, removeAutomation, saveAutomation, writeAutomation, type AutomationDecision, type AutomationRecord } from './agentAutomations';
 import { canGenerateScopedStatement, scopedMaterialIssueTargets, scopedMaterialDeliveryTargets, scopedFabricAccess, scopedFabricDestinations, scopedReferenceViolation, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
@@ -263,6 +264,13 @@ export class MistRepository {
     return MIST_UPLOAD_SCOPES.find(scope => hasScope(actor, scope as any)) ?? MIST_UPLOAD_SCOPES[0];
   }
   private async authorizeCompoundCommand(db: any, prior: TokenPayload, command?: MistCommand) {
+    if(command?.type==='agent.proposal.create'){
+      const original=command.payload?.command;
+      if(original&&typeof original.type==='string'&&!original.type.startsWith('agent.')&&original.payload&&typeof original.payload==='object'&&!Array.isArray(original.payload)){
+        await this.authorize(db,prior,this.contract.mistCommandPermission(original as MistCommand));
+        await this.authorizeCompoundCommand(db,prior,original as MistCommand);
+      }
+    }
     if (command?.type === 'email.server.analysis') await this.authorize(db, prior, 'ai:chat');
     if (command?.type === 'email.server.analysis' || command?.type.startsWith('email.extraction.')) await this.authorize(db, prior, 'emails:read');
     if(command?.type==='fulfillment.inventory.quarantine.recovery'||command?.type==='fulfillment.inventory.quarantine.recovery.revoke'||command?.type==='fulfillment.inventory.quarantine.noRecovery'||command?.type==='fulfillment.inventory.quarantine.noRecovery.revoke')await this.authorize(db,prior,'inventory:read');
@@ -353,6 +361,10 @@ export class MistRepository {
   private proposalReadable(row:MistWorkspaceRow,actor:TokenPayload,command:{type:string;payload:Record<string,unknown>}){
     // This owner/admin-only command has no module read scope. Reuse its real maintenance gate.
     if(command.type==='member.groups.set')return companyRow(row)?canMaintainCompany(actor):isOwner(row,actor);
+    if(['market.customer.update','customer.update'].includes(command.type)){
+      const customer=row.state.customers.find(c=>c.id===command.payload.id),scope=scopeOf(row);
+      if(!customer||companyRow(row)&&scope&&!scope.userIds.includes(customer.ownerId))return false;
+    }
     return readableCommand(command,actor,this.contract.mistCommandPermission);
   }
   private async prepareTaskProposalAccess(db:any,row:MistWorkspaceRow,actor:TokenPayload){
@@ -380,7 +392,7 @@ export class MistRepository {
     const proposalSources=projected.state.agentProposals?.some(p=>!p.taskId)?knownCommandSourcesVisible(row.state,projected.state):undefined;
     if(projected.state.agentProposals)projected.state.agentProposals=projected.state.agentProposals.map(p=>{
       const access=p.taskId?TASK_PROPOSAL_ACCESS.get(row)?.get(p.id):undefined;
-      if(this.proposalReadable(row,actor,p.command)&&(p.taskId?access?.visible:proposalSources?.(p.command)))return {...p,...(access?.blocked?{taskBlocked:access.blocked}:{})};
+      if(this.proposalReadable(row,actor,p.command)&&(p.taskId?access?.visible:proposalSources?.(p.command)))return {...p,risk:p.state==='pending'?effectiveAgentCommandRisk(p.command,row.state):p.risk??agentCommandRisk(p.command.type),...(access?.blocked?{taskBlocked:access.blocked}:{})};
       return {id:p.id,ownerId:p.ownerId,owner:p.owner,createdAt:p.createdAt,state:p.state,...(p.taskId?{taskId:p.taskId}:{}),command:{type:'unavailable',payload:{}},summary:['提议来源已不可见'],unavailable:true,taskBlocked:p.taskId?'请停止任务或拒绝此提议':'请拒绝此提议后重新核对'};
     });
     // Ship only already-authorized record references for the user's own groups.
@@ -797,6 +809,7 @@ export class MistRepository {
     if (!input.command || typeof input.command.type !== 'string' || !input.command.payload || typeof input.command.payload !== 'object' || Array.isArray(input.command.payload)) fail('INVALID_COMMAND', '业务命令格式无效', 400);
     if (input.command.type === 'files.add') fail('INVALID_COMMAND', '附件只能通过真实上传接口添加', 400);
     if (EMAIL_SERVER_COMMAND.test(input.command.type)) fail('INVALID_COMMAND', '收信、发信与连接结果只能由服务端邮件服务写入', 400);
+    if(isAgentActor(prior)&&!['agent.proposal.create','agent.proposal.confirm','agent.proposal.reject'].includes(input.command.type)&&agentCommandRisk(input.command.type)!=='low')fail('FORBIDDEN','Agent 不能直接执行此操作，请先提交提议由本人确认',403);
     if (input.command.type === 'agent.proposal.confirm') {
       // 本人确认 Agent 提议：换成提议里的原命令，按本人身份走完整门禁；同一事务内再核对提议未变后记为已确认。
       if (isAgentActor(prior)) fail('FORBIDDEN', 'Agent 不能确认提议，须本人在系统中确认', 403);
@@ -809,7 +822,7 @@ export class MistRepository {
       if(SEAL_COMMANDS.includes(proposal!.command.type)||requestsSeal(proposal!.command))fail('FORBIDDEN','印章须由本人在系统中操作，不能经 Agent 提议',403);
       const proposalSignature = decisionSignature(prior, proposal!.command, input.signature);
       // 高风险：在取工作区行锁之前复验密码（bcrypt 不占用锁）；复验只对这一条提议的这一份命令有效，锁内按最新状态再核。
-      const grant = agentCommandRisk(proposal!.command.type) === 'high' ? await this.reauthenticate(prior, workspaceId, id, proposal!.command, input.reauth) : undefined;
+      const grant = (proposal!.risk ?? effectiveAgentCommandRisk(proposal!.command,workspace.state)) === 'high' ? await this.reauthenticate(prior, workspaceId, id, proposal!.command, input.reauth) : undefined;
       return this.executeInternal(prior, workspaceId, { ...input, command: proposal!.command }, { command: input.command, ...(proposalSignature ? { signature: proposalSignature } : {}) }, undefined, false, id, grant, proposalSignature);
     }
     const signature = decisionSignature(prior, input.command, input.signature);
@@ -884,13 +897,15 @@ export class MistRepository {
         }
         if(isAgentActor(prior)&&prior.agentTaskLease&&input.command?.type==='agent.proposal.create'&&await taskHasPendingMail(db,workspaceId,prior.agentTaskLease.taskId))fail('PRECONDITION','请先核对待同步的邮箱操作',422);
         const humanTaskProposal=confirmProposalId?row.state.agentProposals?.find(p=>p.id===confirmProposalId):undefined;
+        let executedProposalRisk:ReturnType<typeof agentCommandRisk>|undefined;
         // AI 写入三级确认：确认人须持有该命令风险等级对应的 ai:write:* 码（等级按 agentCommandRisk 规则，未登记的普通写入为中）；高风险的密码复验已在取锁前完成（reauthenticate），
         // 这里按锁内最新提议与将执行的命令再判风险：任一为高时，复验凭证必须属于同一提议、同一份命令，否则拒绝。
         // 原命令本身的业务权限已在上面按原命令重新校验，不能借 AI 越权。
         if(confirmProposalId){
           const locked=row.state.agentProposals?.find(p=>p.id===confirmProposalId)?.command;
-          const high=agentCommandRisk(input.command?.type)==='high'||(!!locked&&agentCommandRisk(locked.type)==='high');
-          const risk=high?'high':agentCommandRisk(input.command?.type);
+          const high=effectiveAgentCommandRisk(input.command as any,row.state)==='high'||(!!locked&&effectiveAgentCommandRisk(locked,row.state)==='high');
+          const risk=high?'high':effectiveAgentCommandRisk(input.command as any,row.state);
+          executedProposalRisk=risk;
           await this.authorizeAiWrite(db,prior,risk);
           if(high&&(!reauthGrant||reauthGrant.proposalId!==confirmProposalId||reauthGrant.command!==canonical(input.command)||(!!locked&&reauthGrant.command!==canonical(locked))))fail('REAUTH_REQUIRED','确认高风险 AI 提议须输入本人当前登录密码',403);
         }
@@ -899,12 +914,15 @@ export class MistRepository {
         // 版本落后时只在能证明安全时把本命令重新应用到最新状态；否则照旧明确拒绝。
         const concurrent = row.revision === input.expectedRevision ? undefined : await this.concurrentChanges(db, workspaceId, row.revision, input.expectedRevision, upload ? 'files.add' : input.command?.type);
         const earlyScope = scopeOf(row);
-        if (companyRow(row) && ['market.customer.update','customer.update'].includes(input.command?.type)) {
-          const customer = row.state.customers.find(item => item.id === input.command.payload?.id);
-          const ownerId = input.command.payload?.patch?.ownerId;
-          if (customer && ownerId !== undefined && ownerId !== customer.ownerId && !hasScope(actor, 'relations:admin')) fail('FORBIDDEN', '客户负责人变更需要客户管理权限', 403);
-          if (customer && earlyScope && !earlyScope.userIds.includes(customer.ownerId)) fail('NOT_FOUND', '客户不在当前可维护范围内', 404);
+        const customerCommand = input.command?.type === 'agent.proposal.create' ? input.command.payload?.command : input.command;
+        // Resolve the actual target before field authority, so a guessed private amount cannot become an existence oracle.
+        if (companyRow(row) && ['market.customer.update','customer.update'].includes(customerCommand?.type)) {
+          const customer = row.state.customers.find(item => item.id === customerCommand.payload?.id);
+          if (!customer || earlyScope && !earlyScope.userIds.includes(customer.ownerId)) fail('NOT_FOUND', '客户不在当前可维护范围内', 404);
+          const ownerId = customerCommand.payload?.patch?.ownerId;
+          if (ownerId !== undefined && ownerId !== customer!.ownerId && !hasScope(actor, 'relations:admin')) fail('FORBIDDEN', '客户负责人变更需要客户管理权限', 403);
         }
+        const customerPermissions=customerCommand?assertCustomerCommandFieldAuthority({can:scope=>hasScope(actor,scope as any)},row.state,customerCommand):[];
         if (earlyScope && ['market.contact.save','market.contact.delete','contact.save'].includes(input.command?.type)) {
           const payload=input.command.payload, customerId=input.command.type==='contact.save'?payload?.customerId:payload?.kind==='customer'?payload.parentId:payload?.kind==='relation'?row.state.market.relations.find(item=>item.id===payload.parentId)?.customerId:undefined;
           const customer = row.state.customers.find(item => item.id === customerId);
@@ -1101,7 +1119,10 @@ export class MistRepository {
           stored = { ...await this.files.write(workspaceId, { bytes: Buffer.from(signatureSvg, 'utf8'), name: signatureFileName(input.requestId), mimeType: 'image/svg+xml' }, context.now), uploadedBy: actor.userId };
           applied.result = { ...applied.result, signatureId: this.archiveSignature(applied.state, command, stored!, actor, context, input.requestId) };
         }
-        if (confirmProposalId) markAgentProposalConfirmed(applied.state, confirmProposalId, command, actor.userId, context.now, applied.result);
+        if (confirmProposalId) {
+          markAgentProposalConfirmed(applied.state, confirmProposalId, command, actor.userId, context.now, applied.result);
+          const decided=applied.state.agentProposals?.find(p=>p.id===confirmProposalId);if(decided)decided.risk=executedProposalRisk;
+        }
         if(isAgentActor(prior)&&prior.agentTaskLease&&command.type==='agent.proposal.create')await waitTaskForProposal(db,actor,prior.agentTaskLease,String(applied.result.id),input.requestId,Date.now());
         const rejectedTaskProposal=command.type==='agent.proposal.reject'?row.state.agentProposals?.find(p=>p.id===command.payload.id):undefined;
         if(humanTaskProposal?.taskId)await settleTaskProposal(db,actor,workspaceId,humanTaskProposal.taskId,humanTaskProposal.id,input.requestId,'confirmed',Date.now());
@@ -1155,6 +1176,7 @@ export class MistRepository {
         await this.markRevision(db, workspaceId, actor.userId, row.revision, nextRevision, changeKeys);
         await this.authorize(db, prior, permission);
         await this.authorizeCompoundCommand(db, prior, input.command);
+        for(const scope of customerPermissions)await this.authorize(db,prior,scope);
         if(isAgentActor(prior)&&prior.agentTaskLease){
           if(command.type==='agent.proposal.create'){const c=(await taskRecord(db,workspaceId,prior.agentTaskLease.taskId)).value;await assertTaskAuthority(db,actor,c,Date.now());if(!c.automationId&&(c.state!=='waiting_human'||!c.waitingProposalIds.includes(String(applied.result.id))))fail('AGENT_TASK_LEASE_INVALID','任务已停止',401);}
           else await assertTaskLease(db,await this.taskValidationActor(db,prior,actor),prior.agentTaskLease,Date.now());

@@ -2,7 +2,7 @@
 import React from 'react';
 import { FileText, ListChecks, MoreHorizontal, PenLine, Search, ShieldCheck, SquarePen, Trash2, Zap } from 'lucide-react';
 import { ActionMenu, Button, Icon, Pill, type Tone } from '../../../../../components/mist';
-import { agentCommandRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../../server/src/shared/mistAgentProposals';
+import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../../server/src/shared/mistAgentProposals';
 import { uiText } from '../../../../../services/interfaceLanguage';
 import { mistApiRequest } from '../../runtime/workspace';
 import type { XiaozhuConversation } from '../../runtime/xiaozhuCowork';
@@ -75,5 +75,5 @@ export function XiaozhuNav({ conversations, activeId, onSelect, onNew, confirmCo
 /** 「待我确认」抽屉：小竹（含自动规则）留下的待确认事项。 */
 export function XiaozhuProposalList({ proposals, onOpen }: { proposals: AgentProposal[]; onOpen: (id: string) => void }) {
   if (!proposals.length) return <p className="mist-xz-quiet">{uiText('没有待确认事项')}</p>;
-  return <div className="mist-xz-list">{proposals.map(p => { const risk = agentCommandRisk(p.command.type); return <button type="button" key={p.id} className="mist-xz-item" onClick={() => onOpen(p.id)}><span className="mist-xz-item-t">{p.summary[0] ?? p.command.type}</span><Pill tone={RISK_TONE[risk]}>{uiText(AGENT_RISK_LABEL[risk])}</Pill></button>; })}</div>;
+  return <div className="mist-xz-list">{proposals.map(p => { const risk = agentProposalRisk(p); return <button type="button" key={p.id} className="mist-xz-item" onClick={() => onOpen(p.id)}><span className="mist-xz-item-t">{p.summary[0] ?? p.command.type}</span><Pill tone={RISK_TONE[risk]}>{uiText(AGENT_RISK_LABEL[risk])}</Pill></button>; })}</div>;
 }

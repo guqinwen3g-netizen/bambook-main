@@ -3,7 +3,7 @@ import React from 'react';
 import { ChevronRight, Copy, Download, FileText, RotateCcw, Zap, ShieldCheck, Search, PenLine, HelpCircle, Clock, Check, Square } from 'lucide-react';
 import { AIBadge, AssistantEyes, Button, Icon, IconButton, Pill, type Tone } from '../../../../../components/mist';
 import type { AgentTaskTrailItem, AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
-import { agentCommandRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../../server/src/shared/mistAgentProposals';
+import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../../server/src/shared/mistAgentProposals';
 import { uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { COWORK_ACTIVE, splitRequest } from '../../runtime/xiaozhuCowork';
 import type { RecordRef } from '../../runtime/xiaozhuRecords';
@@ -46,7 +46,7 @@ function Question({ task, onAnswer }: { task: AgentTaskView; onAnswer: (task: Ag
 }
 
 function ProposalCard({ proposal, onOpen, onDecide }: { proposal: AgentProposal; onOpen: (id: string) => void; onDecide?: (id: string, confirm: boolean) => Promise<void> }) {
-  const risk = agentCommandRisk(proposal.command.type), quick = !!onDecide && risk !== 'high' && !commandRequiresSignature(proposal.command), [busy, setBusy] = React.useState(false);
+  const risk = agentProposalRisk(proposal), quick = !!onDecide && risk !== 'high' && !commandRequiresSignature(proposal.command), [busy, setBusy] = React.useState(false);
   const decide = async (confirm: boolean) => { if (!onDecide) return; setBusy(true); try { await onDecide(proposal.id, confirm); } finally { setBusy(false); } };
   return <div className="mist-xz-card"><div className="mist-xz-card-h"><Icon icon={ShieldCheck} size="sm" /><b>{uiText('需要你确认')}</b><Pill tone={RISK_TONE[risk]}>{uiText(AGENT_RISK_LABEL[risk])}</Pill></div>
     <ul>{proposal.summary.slice(0, 5).map((line, i) => <li key={i}>{line}</li>)}</ul>

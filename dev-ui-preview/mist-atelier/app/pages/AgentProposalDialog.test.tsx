@@ -168,3 +168,9 @@ it('shows quotation business references and exact version, and blocks missing so
  }
  finally{act(()=>root.unmount());host.remove();}
 });
+
+it('shows a customer credit grant with the exact old/new currency values and requires the existing high-risk password',()=>{
+ const state=createMistState({id:()=> 'id',now:'2026-11-18T04:00:00Z',actorName:'Test'},'empty');state.customers=[{id:'customer-private',code:'BCS',name:'Birchline',grade:'B',creditLimit:1000,currency:'GBP'} as any];
+ const proposal:any={id:'credit-proposal',ownerId:'u',owner:'Manager',summary:['调整信用额度'],state:'pending',createdAt:'2026-11-18',risk:'high',command:{type:'market.customer.update',payload:{id:'customer-private',patch:{creditLimit:2000}}}};
+ const host=document.createElement('div'),root=createRoot(host);document.body.append(host);try{act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));const body=document.body.textContent!;for(const text of ['Birchline · BCS','原信用额度','1000.00 GBP','拟设信用额度','2000.00 GBP','高风险','本人登录密码'])expect(body).toContain(text);expect(body).not.toContain('customer-private');expect(body).not.toContain('creditLimit');expect(getConfirm(host).disabled).toBe(true);}finally{act(()=>root.unmount());host.remove();}
+});

@@ -6,11 +6,11 @@ import {getByRole,queryByRole} from '@testing-library/dom';
 import {CustomerPage} from './CustomerPage';
 import {Nav} from '../nav';
 import {createMistState} from '../../../../server/src/shared/mistWorkspace';
-const bridge=vi.hoisted(()=>({current:null as any,canCreate:true,canAdmin:true,localMode:true}));
+const bridge=vi.hoisted(()=>({current:null as any,canCreate:true,canAdmin:true,canCredit:true,localMode:true}));
 vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>bridge.current}));
-vi.mock('../runtime/auth', () => { const useMistSession = ()=>({user:{id:'local',displayName:'本地操作员'},localMode:bridge.localMode,hasPermission:(scope:string)=>scope==='relations:admin'?bridge.canAdmin:scope.endsWith(':read')||bridge.canCreate,canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
+vi.mock('../runtime/auth', () => { const useMistSession = ()=>({user:{id:'local',displayName:'本地操作员'},localMode:bridge.localMode,hasPermission:(scope:string)=>scope==='relations:admin'?bridge.canAdmin:scope==='risk:admin'?bridge.canCredit:scope.endsWith(':read')||bridge.canCreate,canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 let host:HTMLDivElement,root:Root|undefined;const go=vi.fn(),openAI=vi.fn();
-beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;go.mockReset();openAI.mockReset();bridge.canCreate=true;bridge.canAdmin=true;bridge.localMode=true;const state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T08:00:00Z',actorName:'本地操作员'},'empty');bridge.current={state,workspace:{id:'w',ownerId:'local',revision:0,state},loading:false,saving:false,pending:null,pendingCreate:null,error:'',run:vi.fn(async()=>({requestId:'saved',revision:1,result:{id:'created-customer',customerId:'created-customer'}})),refresh:vi.fn(),downloadFile:vi.fn()};});
+beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;go.mockReset();openAI.mockReset();bridge.canCreate=true;bridge.canAdmin=true;bridge.canCredit=true;bridge.localMode=true;const state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T08:00:00Z',actorName:'本地操作员'},'empty');bridge.current={state,workspace:{id:'w',ownerId:'local',revision:0,state},loading:false,saving:false,pending:null,pendingCreate:null,error:'',run:vi.fn(async()=>({requestId:'saved',revision:1,result:{id:'created-customer',customerId:'created-customer'}})),refresh:vi.fn(),downloadFile:vi.fn()};});
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();});
 async function mount(id?:string){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<Nav.Provider value={{route:{view:'crm',id},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI}}><CustomerPage/></Nav.Provider>));}
 async function click(label:string){await act(async()=>getByRole(host,'button',{name:label}).click());}
@@ -127,4 +127,18 @@ it('reveals a new drawer failure in its own scroll area',async()=>{
   try{bridge.current.state.customers=[customer('a')];bridge.current.dismissError=vi.fn();bridge.current.run.mockRejectedValueOnce(new Error('滚入当前抽屉'));
     await mount('a');await click('编辑客户资料');const d=getByRole(document.body,'dialog',{name:'编辑客户资料'});await act(async()=>getByRole(d,'button',{name:'保存资料'}).click());expect(scroll).toHaveBeenCalledWith({block:'nearest'});expect(scroll.mock.instances.some(node=>d.contains(node)&&node.textContent?.includes('滚入当前抽屉'))).toBe(true);
   }finally{if(prior)HTMLElement.prototype.scrollIntoView=prior;else delete(HTMLElement.prototype as any).scrollIntoView;}
+});
+
+it('keeps grade, positive credit and its denomination read-only for an ordinary owner while saving normal fields',async()=>{
+  bridge.canAdmin=false;bridge.canCredit=false;bridge.localMode=false;bridge.current.state.customers=[{...customer('a'),ownerId:'local',creditLimit:1000}];await mount('a');await click('编辑客户资料');const d=getByRole(document.body,'dialog',{name:'编辑客户资料'});
+  expect((getByRole(d,'combobox',{name:'等级',exact:true})as HTMLSelectElement).disabled).toBe(true);expect((getByRole(d,'spinbutton',{name:'信用额度（结算币种）',exact:true})as HTMLInputElement).readOnly).toBe(true);expect((getByRole(d,'combobox',{name:'结算币种',exact:true})as HTMLSelectElement).disabled).toBe(true);
+  await act(async()=>getByRole(d,'button',{name:'保存资料'}).click());expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.customer.update',payload:expect.objectContaining({patch:expect.objectContaining({grade:'A',creditLimit:1000,currency:'USD'})})}),{expectedRevision:0});
+});
+it('does not expose initial grade or credit grants on the ordinary creation wizard',async()=>{
+  bridge.canAdmin=false;bridge.canCredit=false;bridge.localMode=false;await mount();await click('新建客户');await fill('客户名称','Unrated customer');
+  for(let n=0;n<4&&queryByRole(host,'button',{name:'下一步',exact:true});n++){expect(host.querySelector('[aria-label="等级"]')).toBeNull();expect(host.querySelector('[aria-label="信用额度（结算币种）"]')).toBeNull();await click('下一步');}
+  await click('创建客户档案');expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.customer.create',payload:{input:expect.objectContaining({grade:'',creditLimit:0})}}));
+});
+it('allows a grade manager to rate without exposing credit grant controls',async()=>{
+  bridge.canAdmin=true;bridge.canCredit=false;bridge.localMode=false;bridge.current.state.customers=[{...customer('a'),ownerId:'local',creditLimit:1000}];await mount('a');await click('编辑客户资料');const d=getByRole(document.body,'dialog',{name:'编辑客户资料'});expect((getByRole(d,'combobox',{name:'等级',exact:true})as HTMLSelectElement).disabled).toBe(false);expect((getByRole(d,'spinbutton',{name:'信用额度（结算币种）',exact:true})as HTMLInputElement).readOnly).toBe(true);
 });
