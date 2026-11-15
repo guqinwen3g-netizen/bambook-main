@@ -76,7 +76,7 @@ export function createHRRouter(options: HRRouterOptions) {
   });
 
   const departmentAuthority=(req:Request)=>{const actor=extractActorFromRequest(req);return{canAssignHead:!!actor&&hasScope(actor,'users:admin')};};
-  const departmentAudit=(req:Request,action:'create'|'edit'|'retire')=>async(tx:Prisma.TransactionClient,before:Department|null,after:unknown)=>{
+  const departmentAudit=(req:Request,action:'create'|'edit'|'retire')=>async(tx:Prisma.TransactionClient,before:Department|null,after:Record<string,unknown>)=>{
     await writeRouteAuditLog({prisma:tx,actorId:actorIdFromRequest(req),companyId:extractActorFromRequest(req)?.companyId,source:`route:hr:${action}_department`,operation:`${action}_department`,targetType:'Department',targetId:before?.id||(after as Department).id,before,after,ip:req.ip||null});
   };
   router.post('/departments', async (req, res) => {

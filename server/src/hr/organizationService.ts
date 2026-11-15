@@ -7,7 +7,7 @@ export class OrganizationError extends Error {
   constructor(message: string, public status = 400) { super(message); }
 }
 
-type DepartmentWriteOptions={canAssignHead?:boolean;audit?:(tx:Prisma.TransactionClient,before:Department|null,after:unknown)=>Promise<void>};
+type DepartmentWriteOptions={canAssignHead?:boolean;audit?:(tx:Prisma.TransactionClient,before:Department|null,after:Record<string,unknown>)=>Promise<void>};
 type DepartmentInput={name?:string;businessAttributes?:unknown;headId?:unknown;expectedHeadId?:unknown;expectedUpdatedAt?:unknown};
 const hasHead=(input:DepartmentInput)=>Object.prototype.hasOwnProperty.call(input,'headId');
 function headReference(value:unknown):string|null{
