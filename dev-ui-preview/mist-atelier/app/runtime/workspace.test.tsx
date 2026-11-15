@@ -1037,14 +1037,16 @@ it('company sign-in rechecks the server default instead of restoring a personal 
   expect(api.workspace?.id).toBe(A);
 });
 
-it('company sign-in preserves the exact source of an unresolved write', async () => {
+it('company sign-in verifies its shared default before restoring the exact unresolved source', async () => {
   auth.session.user = { id: 'actor-a', companyId: 'company-a' } as typeof auth.session.user;
-  localStorage.setItem('bambook.mist.selected-workspace:actor-a', A);
-  localStorage.setItem('bambook.mist.pending:actor-a', JSON.stringify({ actorId: 'actor-a', workspaceId: B, requestId: 'company-pending', expectedRevision: 0, kind: 'command', command: command('原对象') }));
+  localStorage.setItem('bambook.mist.selected-workspace:actor-a', B);
+  const original = { actorId: 'actor-a', workspaceId: A, requestId: 'company-pending', expectedRevision: 0, kind: 'command', command: command('原对象') };
+  localStorage.setItem('bambook.mist.pending:actor-a', JSON.stringify(original));
   await mount();
-  expect(calls[0].url).toBe(BASE + '/' + B);
-  expect(api.workspace?.id).toBe(B);
-  expect(api.pending?.workspaceId).toBe(B);
+  expect(calls[0].url).toBe(BASE + '/default');
+  expect(api.workspace?.id).toBe(A);
+  expect(api.pending).toEqual(original);
+  expect(calls.some(call => call.url === BASE + '/' + B)).toBe(false);
 });
 
 it('sounds once for newly synchronized unread notices visible to this account, without replaying history',async()=>{
@@ -1110,4 +1112,55 @@ it('lets the shell dismiss a definitive rejection but keeps an unconfirmed resul
   intercept=request=>request.url.endsWith('/commands')?failure(503):undefined;
   await act(async()=>{await capture(api.run(command('结果未确认')));});expect(api.pending).not.toBeNull();
   act(()=>api.dismissRejection?.());expect(api.pending).not.toBeNull();
+});
+
+function companyFixture() {
+  (auth.session.user as any).companyId='company-a';
+  intercept=request=>{
+    const selected=(auth.session.user as any).companyId==='company-a'?A:B;
+    if(request.url===BASE+'/default')return response({workspace:clone(stores.get(selected)!)});
+    if(request.url===BASE+'?summary=1')return response({workspaces:[{id:selected,name:selected,ownerId:'actor-a'}]});
+    if(request.url===BASE+'/'+(selected===A?B:A))return failure(404);
+    if(request.method==='POST'&&request.url.endsWith('/commands')){commit(request);throw new TypeError('Acknowledgement lost');}
+    return undefined;
+  };
+}
+async function chooseCompany(companyId:string){(auth.session.user as any).companyId=companyId;await render();await waitFor(()=>!api.loading&&!!api.workspace);}
+it('does not reopen another company from the same user legacy pending request',async()=>{
+  companyFixture();(auth.session.user as any).companyId='company-b';
+  const saved={actorId:'actor-a',workspaceId:A,requestId:'legacy-north',expectedRevision:0,kind:'command',command:command('北辰原请求')};
+  localStorage.setItem('bambook.mist.pending:actor-a',JSON.stringify(saved));
+  localStorage.setItem('bambook.mist.pending-create:actor-a',JSON.stringify({actorId:'actor-a',slug:'private-old',name:'原公司创建资料',seed:'empty'}));
+  await mount();expect(api.workspace?.id).toBe(B);expect(api.pending).toBeNull();expect(api.pendingCreate).toBeNull();
+  expect(calls.some(r=>r.url===BASE+'/'+A)).toBe(false);expect(localStorage.getItem('bambook.mist.pending:actor-a')).not.toBeNull();
+  await chooseCompany('company-a');expect(api.workspace?.id).toBe(A);expect(api.pending?.requestId).toBe(saved.requestId);
+  expect(localStorage.getItem('bambook.mist.pending:actor-a:company-a')).toBe(JSON.stringify(saved));
+  expect(localStorage.getItem('bambook.mist.pending:actor-a')).toBeNull();
+});
+it('keeps two unresolved company requests independently for one user and clears only the recovered source',async()=>{
+  companyFixture();await mount();await act(async()=>{await capture(api.run(command('North committed')));});
+  const north=api.pending!;expect(north).not.toBeNull();expect(localStorage.getItem('bambook.mist.pending:actor-a:company-a')).not.toBeNull();
+  await chooseCompany('company-b');expect(api.workspace?.id).toBe(B);expect(api.pending).toBeNull();
+  await act(async()=>{await capture(api.run(command('Harbor committed')));});const harbor=api.pending!;
+  expect(harbor.requestId).not.toBe(north.requestId);expect(localStorage.getItem('bambook.mist.pending:actor-a:company-b')).not.toBeNull();
+  await chooseCompany('company-a');expect(api.workspace?.id).toBe(A);expect(api.pending?.requestId).toBe(north.requestId);
+  await act(async()=>{await api.recover();});expect(api.pending).toBeNull();expect(posts()).toHaveLength(2);
+  expect(localStorage.getItem('bambook.mist.pending:actor-a:company-a')).toBeNull();
+  expect(JSON.parse(localStorage.getItem('bambook.mist.pending:actor-a:company-b')!).requestId).toBe(harbor.requestId);
+  await chooseCompany('company-b');expect(api.workspace?.id).toBe(B);expect(api.pending?.requestId).toBe(harbor.requestId);
+});
+it('does not apply a misplaced scoped pending record to the current shared company',async()=>{
+  companyFixture();const saved={actorId:'actor-a',workspaceId:B,requestId:'wrong-company',expectedRevision:0,kind:'command',command:command('不应显示')};
+  localStorage.setItem('bambook.mist.pending:actor-a:company-a',JSON.stringify(saved));await mount();
+  expect(api.workspace?.id).toBe(A);expect(api.pending).toBeNull();expect(calls.some(r=>r.url===BASE+'/'+B)).toBe(false);
+  expect(localStorage.getItem('bambook.mist.pending:actor-a:company-a')).not.toBeNull();expect(posts()).toHaveLength(0);
+});
+
+it('preserves an exact legacy request when scoped storage migration fails and clears it only after recovery',async()=>{
+  companyFixture();const saved={actorId:'actor-a',workspaceId:A,requestId:'migration-failed-original',expectedRevision:0,kind:'command',command:command('Already committed')};
+  commit({url:BASE+'/'+A+'/commands',method:'POST',actor:'actor-a',init:{body:JSON.stringify({requestId:saved.requestId,expectedRevision:0,command:saved.command})}});
+  localStorage.setItem('bambook.mist.pending:actor-a',JSON.stringify(saved));
+  const original=Storage.prototype.setItem,writing=vi.spyOn(Storage.prototype,'setItem').mockImplementation(function(key,value){if(key==='bambook.mist.pending:actor-a:company-a')throw new Error('Storage full');return original.call(this,key,value);});
+  await mount();expect(api.pending?.requestId).toBe(saved.requestId);expect(localStorage.getItem('bambook.mist.pending:actor-a')).toBe(JSON.stringify(saved));
+  writing.mockRestore();await act(async()=>{await api.recover();});expect(api.pending).toBeNull();expect(localStorage.getItem('bambook.mist.pending:actor-a')).toBeNull();expect(posts()).toHaveLength(0);
 });
