@@ -252,6 +252,10 @@ describe('人事管理', () => {
     bridge.routes['GET /api/hr/employees']=()=>({ok:true,employees:[{userId:'ended',employmentStatus:'Resigned'}]});
   };
   const openDepartment=async()=>{const row=[...document.querySelectorAll('[role="row"]')].find(r=>r.textContent?.includes('面料业务部')) as HTMLElement;await act(async()=>row.click());};
+  it('names each business-attribute checkbox separately instead of labelling the first with the whole group',async()=>{
+    await render(HrOrganizationPage,'hr');await openDepartment();await click('修改部门');const caption=[...document.querySelectorAll('.mist-field-label')].find(e=>e.textContent==='业务属性')!,field=caption.closest('.mist-field')!,first=field.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    expect([...first.labels!].map(l=>l.textContent?.trim())).toEqual(['面料业务']);expect(field.getAttribute('role')).toBe('group');expect(document.getElementById(field.getAttribute('aria-labelledby')!)?.textContent).toBe('业务属性');const checked=first.checked;await act(async()=> (caption as HTMLElement).click());expect(first.checked).toBe(checked);
+  });
   it('restores focus to the department edit trigger after closing the top editor with Escape',async()=>{
     await render(HrOrganizationPage,'hr');await openDepartment();const trigger=[...document.querySelectorAll('button')].find(b=>b.textContent==='修改部门')!;act(()=>trigger.focus());await click('修改部门');
     await act(async()=>document.activeElement!.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));expect(document.activeElement).toBe(trigger);expect(trigger.isConnected).toBe(true);expect(bridge.calls.some(c=>c.method==='PATCH')).toBe(false);

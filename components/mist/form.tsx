@@ -12,16 +12,18 @@ export function FormGrid({ cols = 2, children, style }: { cols?: 1 | 2 | 3; chil
   return <div className="mist-form" data-cols={cols === 2 ? undefined : cols} style={style}>{uiText(children)}</div>;
 }
 
-export type FieldProps = { label: React.ReactNode; required?: boolean; hint?: React.ReactNode; error?: React.ReactNode; full?: boolean; children: React.ReactNode; htmlFor?: string };
+export type FieldProps = { label: React.ReactNode; required?: boolean; hint?: React.ReactNode; error?: React.ReactNode; full?: boolean; children: React.ReactNode; htmlFor?: string;group?:boolean };
 /** 字段外框：标签 + 控件 + 提示/错误。error 存在时整个输入底变红色 tint。 */
-export function Field({ label, required, hint, error, full, children, htmlFor }: FieldProps) {
-  return (
-    <label className="mist-field" data-full={full || undefined} data-error={error ? true : undefined} htmlFor={htmlFor}>
-      <span className="mist-field-label">{uiText(label)}{required && <em>*</em>}</span>
+export function Field({ label, required, hint, error, full, children, htmlFor,group=false }: FieldProps) {
+  const labelId=React.useId();
+  const content=<>
+      <span className="mist-field-label" id={group?labelId:undefined}>{uiText(label)}{required && <em>*</em>}</span>
       {uiText(children)}
       {(error || hint) && <span className="mist-field-hint">{uiText(error || hint)}</span>}
-    </label>
-  );
+    </>;
+  // Multiple individually labelled controls must not sit inside an implicit single-control label.
+  return group?<div className="mist-field" data-full={full||undefined} data-error={error?true:undefined} role="group" aria-labelledby={labelId}>{content}</div>
+    :<label className="mist-field" data-full={full||undefined} data-error={error?true:undefined} htmlFor={htmlFor}>{content}</label>;
 }
 
 type InputBase = { icon?: LucideIcon; suffix?: React.ReactNode; disabled?: boolean };
