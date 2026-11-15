@@ -112,6 +112,8 @@
 
 到账、核销与结汇（2026-11-14）：`mistWorkspace.ts#finance.fx.settle`将原币账户卖出额和本币账户实际入账额写入`fxRecords`，`mistBankAccountBalances`计算两端划转；不改期初余额，不新增客户到账。`FinanceBankAccounts.tsx#ReceiptLinksField`及服务端`settlementLinks`以到账原额减已对应结汇额计算可分配额，与发票核销后的`remaining`分开。`mistFxRates.ts#fxOrderActual`通过准确到账/核销归属计算订单已收已结汇收入，未对应的结汇不猜配到订单；`mistOrderCost.ts#orderActualCost`分别保留实际结汇、月末暂估和报价预计口径。原币应收结清不代表已结汇；缺报价汇率不生成预计收入或毛利。结汇原单号重复、账户币种一致、原币余额不足或到账被超额对应均拒绝且不改账。
 
+管理核算中的贷项与汇率（2026-11-15）：`mistOrderCost.ts#orderActualCost`在贷项使净销售额低于历史已结汇到账时，将已实现收入限制到净销售额并保留准确到账的加权结汇比例；`includedCredits`显示原收入折减来源，不把已含收入的贷项或其退款再次计为费用。工厂补偿按实际到账归集为收入，不同时冲减采购。银行费等外币成本没有独立本币结算来源时，`fxRateFor`仍用所选月份及以前的月末汇率并保留暂估；不能借用某笔客户结汇汇率冒充该成本的实际折算。三种口径是订单管理核算，不替代法定银行会计。
+
 报关PDF取数（2026-11-14）：`mistDocumentGeneration.ts#shipmentDocContent`生成CD时优先采用本票`fulfillment.customs.items`已保存的品名、申报要素、法定第一/第二数量；未建立商品项时仍提供当前归类的待核对预览。`documentGenerationBlocker`沿用`mistCustomsDeclaration.ts#customsItemsStale`：商品项已有而数量、单价、净毛重或件数与当前来源不符时，先重新生成并核对商品项，禁止混用旧项目和新合计。人工调整的原自动值仍用于过期比较，不会被误报为过期。快照、PDF及单据正文共用同一已核对数据，重新生成保留旧文件及摘要，不迁移或覆盖历史原件。
 
 快件路径边界（2026-11-15）：`CustomsPage.tsx#createSpec` 的 `channel:express` 选项只称“快件 / 邮寄”；`mistFulfillment.ts#FulfillmentCustoms.channel` 区分系统登记路径，不代表免于海关申报或随附单证。[海关快件办事指南](https://online.customs.gov.cn/static/pages/guides/000629017002/000629017002.html)列有按快件类别提交的报关单及其他材料，不能把运单替代本系统普通报关单编号的录入口径写成普遍免申报结论。本次只纠正文案和类型注释，申报、放行、权限及离港门禁不变。
