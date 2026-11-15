@@ -103,10 +103,10 @@ export function CompanySealsSection({ canManage }: { canManage: boolean }) {
         <FormGrid>
           <Field label={uiText('印章名称')} required><TextInput aria-label={uiText('印章名称')} value={draft.name} maxLength={60} disabled={busy} onChange={e => setDraft({ ...draft, name: e.target.value })} /></Field>
           <Field label={uiText('类型')} required><Select aria-label={uiText('印章类型')} value={draft.kind} disabled={busy} options={(Object.keys(SEAL_KIND_LABEL) as SealKind[]).map(k => ({ value: k, label: uiText(SEAL_KIND_LABEL[k]) }))} onChange={e => setDraft({ ...draft, kind: e.target.value as SealKind })} /></Field>
-          <Field label={uiText('印章图片')} required full hint={uiText('透明底 PNG')}>{draft.fileId
+          <Field group label={uiText('印章图片')} required full hint={uiText('透明底 PNG')}>{draft.fileId
             ? <div className="mist-row" style={{ gap: 12 }}><SealImage fileId={draft.fileId} state={state} /><Button size="sm" variant="quiet" disabled={busy} onClick={() => setDraft({ ...draft, fileId: '' })}>{uiText('更换')}</Button></div>
             : <UploadZone title={uiText(uploading ? '上传中…' : '上传印章图片')} accept={ACCEPT} multiple={false} onFiles={files => void upload(files)} />}</Field>
-          <Field label={uiText('用印人')} required full>
+          <Field group label={uiText('用印人')} required full>
             <div className="mist-col" style={{ gap: 6 }}>{members.map(m => <Checkbox key={m.id} label={m.name} checked={draft.userIds.includes(m.id)} disabled={busy}
               onChange={on => setDraft({ ...draft, userIds: on ? [...draft.userIds, m.id] : draft.userIds.filter(id => id !== m.id) })} />)}</div>
           </Field>

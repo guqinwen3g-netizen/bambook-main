@@ -33,6 +33,13 @@ function mockImageUrls() {
   return () => { URL.createObjectURL = create; URL.revokeObjectURL = revoke; };
 }
 
+it('keeps each authorized seal user independently named inside its group',async()=>{
+  const restore=mockImageUrls();try{await render(true);await click(getByRole(host,'button',{name:'编辑',exact:true}));const dialog=getByRole(document.body,'dialog',{name:'编辑印章'});expect(getByRole(dialog,'checkbox',{name:'陈晓',exact:true})).toBeTruthy();expect(getByRole(dialog,'checkbox',{name:'顾言',exact:true})).toBeTruthy();expect(store.run).not.toHaveBeenCalled();}finally{restore();}
+});
+it('names the existing seal image replacement action by its visible operation',async()=>{
+  const restore=mockImageUrls();try{await render(true);await click(getByRole(host,'button',{name:'编辑',exact:true}));const dialog=getByRole(document.body,'dialog',{name:'编辑印章'});expect(getByRole(dialog,'button',{name:'更换',exact:true})).toBeTruthy();expect(store.run).not.toHaveBeenCalled();}finally{restore();}
+});
+
 it('waits for company loading to finish even when its file and reader identities stay the same', async () => {
   const restore = mockImageUrls(); store.state.seals = [seal]; store.loading = true;
   store.readFile.mockImplementation(async () => { if (store.loading) throw new Error('公司已切换，请在本公司重新操作'); return new Blob(['seal'], { type: 'image/png' }); });
