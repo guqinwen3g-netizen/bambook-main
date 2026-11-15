@@ -14,6 +14,8 @@ import { AGENT_AUDIT_FIELD } from './agentAudit';
 const gatedContract: MistContract = {
   ...testContract,
   applyMistCommand: (state: any, command: any, context: any) => {
+    // A real low-risk command name reaches the audit/retry path; this fixture only models notes.
+    if (command.type === 'calendar.save') command = { ...command, type: 'notes.add' };
     if (command.type === 'settings.lock') { state.settings.locked = true; return { state, result: {} }; }
     if (command.type === 'notes.confirm') { Object.assign(state.notes.find((note: any) => note.id === command.payload.id), { confirmed: true, confirmedBy: context.actorId }); return { state, result: {} }; }
     if (command.type === 'notes.add' && state.settings.locked) throw Object.assign(new Error('空间已锁定，不能新增'), { code: 'LOCKED', status: 409 });
@@ -42,6 +44,7 @@ let root: string, db: MemoryMistDatabase, auth: ReturnType<typeof testAuthority>
 const owner = testActor('owner'), other = testActor('other');
 const repoFor = (database: any, rules: MistContract = gatedContract) => new MistRepository(database, rules, files, auth.authorize);
 const note = (requestId: string, expectedRevision: number, text = requestId) => ({ requestId, expectedRevision, command: { type: 'notes.add', payload: { text } } });
+const agentNote = (...args: Parameters<typeof note>) => { const input = note(...args); return { ...input, command: { ...input.command, type: 'calendar.save' } }; };
 const money = (requestId: string, expectedRevision: number, cents: number) => ({ requestId, expectedRevision, command: { type: 'money.add', payload: { cents } } });
 async function sharedWorkspace(repo: MistRepository, database: MemoryMistDatabase = db) {
   const workspace = await repo.create(owner, { name: '并发保存', seed: 'empty' });
@@ -56,7 +59,7 @@ describe('多人保存冲突自动重试：只在最新状态上重新执行可�
   it('Agent事务重试仅保留最后一次实际提交的审计，公开回执不携带内部差异', async () => {
     const database = new FlakyDatabase(), repo = repoFor(database), id = await sharedWorkspace(repo, database);
     database.failures = 2;
-    const result = await repo.execute({ ...owner, actorKind: 'agent', agentMode: 'operate', agentSessionId: 'retry-session' } as any, id, note('agent-retry', 0));
+    const result = await repo.execute({ ...owner, actorKind: 'agent', agentMode: 'operate', agentSessionId: 'retry-session' } as any, id, agentNote('agent-retry', 0));
     const saved = [...database.receipts.values()].filter(row => row.result[AGENT_AUDIT_FIELD]);
     expect(saved).toHaveLength(1);
     expect(database.workspaces.get(id).state.notes).toHaveLength(1);
@@ -71,8 +74,8 @@ describe('多人保存冲突自动重试：只在最新状态上重新执行可�
     database.failures = 1;
     // Separate client/connection pool: a competitor must not wait on this request's in-process write queue.
     const competitor = repoFor(new Proxy(database, {}));
-    database.beforeFailure = async () => { await competitor.execute({ ...actor, agentSessionId: 'committed-session' }, id, note('same-operation', 0)); };
-    const result = await repo.execute(actor, id, note('same-operation', 0));
+    database.beforeFailure = async () => { await competitor.execute({ ...actor, agentSessionId: 'committed-session' }, id, agentNote('same-operation', 0)); };
+    const result = await repo.execute(actor, id, agentNote('same-operation', 0));
     expect(result.replayed).toBe(true);
     const saved = [...database.receipts.values()].filter(row => row.result[AGENT_AUDIT_FIELD]);
     expect(saved).toHaveLength(1);

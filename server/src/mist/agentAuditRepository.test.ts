@@ -9,10 +9,12 @@ import { MemoryMistDatabase, testActor, testAuthority, testContract } from './__
 
 let directory: string, db: MemoryMistDatabase, repo: MistRepository;
 const authority = () => testAuthority().authorize;
+// Exercise the real low-risk admission gate while retaining this suite's small notes state machine.
+const auditContract = { ...testContract, applyMistCommand: (state: any, command: any, context: any) => testContract.applyMistCommand(state, command.type === 'calendar.save' ? { ...command, type: 'notes.add' } : command, context) };
 const agent = () => ({ ...testActor(), actorKind: 'agent' as const, agentSessionId: 'external-session', agentMode: 'operate' as const });
-const write = (requestId: string, expectedRevision = 0) => ({ requestId, expectedRevision, command: { type: 'notes.add', payload: { text: 'Received documents', apiKey: 'must-not-be-retained' } } } as any);
+const write = (requestId: string, expectedRevision = 0) => ({ requestId, expectedRevision, command: { type: 'calendar.save', payload: { text: 'Received documents', apiKey: 'must-not-be-retained' } } } as any);
 const audits = () => [...db.receipts.values()].filter(row => row.result[AGENT_AUDIT_FIELD]);
-beforeEach(async () => { directory = await mkdtemp(path.join(tmpdir(), 'mist-agent-audit-')); db = new MemoryMistDatabase(); repo = new MistRepository(db, testContract, new MistPrivateFiles(directory), authority()); });
+beforeEach(async () => { directory = await mkdtemp(path.join(tmpdir(), 'mist-agent-audit-')); db = new MemoryMistDatabase(); repo = new MistRepository(db, auditContract, new MistPrivateFiles(directory), authority()); });
 afterEach(async () => { await rm(directory, { recursive: true, force: true }); });
 
 describe('Agent audit is part of the business receipt transaction', () => {
@@ -27,7 +29,7 @@ describe('Agent audit is part of the business receipt transaction', () => {
     const first = await repo.execute(agent(), workspace.id, write('one'));
     expect(audits()).toHaveLength(1);
     const audit = audits()[0].result[AGENT_AUDIT_FIELD] as AgentCommandAudit;
-    expect(audit).toMatchObject({ workspaceId: workspace.id, requestId: 'one', actor: { id: 'owner', name: 'owner' }, source: 'agent', agentSessionId: 'external-session', phase: 'executed', requestedRevision: 0, baseRevision: 0, committedRevision: 1, command: { type: 'notes.add', payload: { apiKey: '[redacted]' } } });
+    expect(audit).toMatchObject({ workspaceId: workspace.id, requestId: 'one', actor: { id: 'owner', name: 'owner' }, source: 'agent', agentSessionId: 'external-session', phase: 'executed', requestedRevision: 0, baseRevision: 0, committedRevision: 1, command: { type: 'calendar.save', payload: { apiKey: '[redacted]' } } });
     expect(audit.changes.some(change => change.path[0] === 'k:notes' && change.operation === 'add')).toBe(true);
     expect(JSON.stringify(audit)).not.toContain('must-not-be-retained');
     const replay = await repo.execute(agent(), workspace.id, write('one'));
@@ -70,7 +72,7 @@ describe('Agent audit is part of the business receipt transaction', () => {
         });
       }
     }
-    const database = new AuditFailDatabase(), repository = new MistRepository(database, testContract, new MistPrivateFiles(directory), authority());
+    const database = new AuditFailDatabase(), repository = new MistRepository(database, auditContract, new MistPrivateFiles(directory), authority());
     const workspace = await repository.create(testActor(), { name: 'Audit', seed: 'empty' });
     database.failAudit = true;
     await expect(repository.execute(agent(), workspace.id, write('no-partial-commit'))).rejects.toThrow('audit unavailable');
@@ -91,7 +93,7 @@ describe('Agent audit is part of the business receipt transaction', () => {
 
   it('includes normalization changes actually committed by this command', async () => {
     let normalize = false;
-    const contract = { ...testContract, normalizeMistState: (state: any) => { if (normalize) state.normalized = true; } };
+    const contract = { ...auditContract, normalizeMistState: (state: any) => { if (normalize) state.normalized = true; } };
     const repository = new MistRepository(db, contract, new MistPrivateFiles(directory), authority());
     const workspace = await repository.create(testActor(), { name: 'Audit', seed: 'empty' });
     normalize = true;

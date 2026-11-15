@@ -128,7 +128,7 @@ it('writes a low-risk record directly and leaves an audit trail', async () => {
 });
 
 it('stops a change for confirmation, runs it only after the person confirms, then finishes', async () => {
-  const clone = (w: any, name: string) => { const { id: _id, code: _code, owner: _owner, ...rest } = w.state.customers[0]; return { ...rest, name, ownerId: 'local-operator' }; };
+  const clone = (w: any, name: string) => { const { id: _id, code: _code, owner: _owner, ...rest } = w.state.customers[0]; return { ...rest, name, ownerId: 'local-operator', grade: '', creditLimit: 0 }; };
   let customer = '', input: any; const c = await cowork((p, n) => n === 1 ? tool('bambook_get', { type: 'customer', id: customer }) : n === 2 ? tool('bambook_execute', { command: { type: 'market.customer.create', payload: { input } } }) : n === 3 ? tool('bambook_get', { type: 'customer', id: customer }) : finish('客户已建好'));
   customer = c.workspace.state.customers[0].id; input = clone(c.workspace, '验收新客户');
   const t = await c.ask('新建一个客户'); await c.drain();

@@ -341,7 +341,7 @@ describe('row-level data scope by role', () => {
   it.each(['market.customer.update','customer.update'])('does not let a salesperson acquire another customer’s scope through %s',async(type)=>{
     const state=db.workspaces.get(workspaceId)!.state, customer=state.customers.find((row:any)=>row.ownerId==='demo-buyer');
     expect(customer).toBeTruthy();const before=structuredClone(db.workspaces.get(workspaceId));
-    await expect(repo.execute(actor('demo-sales'),workspaceId,{requestId:'take-customer',expectedRevision:0,command:{type,payload:{id:customer.id,patch:{ownerId:'demo-sales'}}}} as any)).rejects.toMatchObject({status:403});
+    await expect(repo.execute(actor('demo-sales'),workspaceId,{requestId:'take-customer',expectedRevision:0,command:{type,payload:{id:customer.id,patch:{ownerId:'demo-sales'}}}} as any)).rejects.toMatchObject({status:404});
     expect(db.workspaces.get(workspaceId)).toEqual(before);
   });
   it('keeps customer archives readable company-wide but limits maintenance to the responsible scope',async()=>{
