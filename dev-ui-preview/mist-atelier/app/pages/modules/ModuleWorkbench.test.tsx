@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {getByRole,queryByRole,getByText,getAllByText,queryByText} from '@testing-library/dom';
-import {Card,MistRoot,ToastProvider,type Column} from '../../../../../components/mist';
+import {Button,Card,MistRoot,ToastProvider,type Column} from '../../../../../components/mist';
 import {readDevice,writeDevice} from '../../runtime/devicePreferences';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import {ModuleWorkbench,ModuleEditorDialog,ModuleEditorPage,moduleEditorSections,moduleVisibleFields,type ModuleEditorSpec} from './ModuleWorkbench';
@@ -39,6 +39,27 @@ function recordDetailPage(){return getByRole(document.body,'heading',{name:'业�
 async function click(name:string){await act(async()=>getByRole(document.body,'button',{name}).click());}
 async function fill(name:string,value:string,role:'textbox'|'spinbutton'|'combobox'='textbox'){const input=getByRole(document.body,role,{name}) as HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement;await act(async()=>{const prototype=input.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:input.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(prototype,'value')!.set!.call(input,value);input.dispatchEvent(new Event(input.tagName==='SELECT'?'change':'input',{bubbles:true}));});return input;}
 async function confirmStep(){await click('新建');await click('下一步');await click('下一步');expect(getByRole(document.body,'button',{name:'确认创建'})).toBeTruthy();}
+
+it('clears a no-result search without losing the exact selected business record or executing a command',async()=>{
+ bridge.route={view:'test-ledger',id:'row-a'};await mount(undefined,undefined,undefined,true);
+ await fill('搜索业务台账','ZXQ-NOMATCH');expect(getByText(document.body,'没有匹配的记录')).toBeTruthy();
+ expect(document.querySelector('[data-testid="exact-detail"]')?.textContent).toBe(rows[0].detail);
+ await click('清除筛选');expect((getByRole(document.body,'textbox',{name:'搜索业务台账'})as HTMLInputElement).value).toBe('');
+ expect(getByText(document.body,'记录乙')).toBeTruthy();expect(document.querySelector('[data-testid="exact-detail"]')?.textContent).toBe(rows[0].detail);
+ expect(bridge.workspace.run).not.toHaveBeenCalled();expect(bridge.go).not.toHaveBeenCalled();
+});
+
+it('restores parent filters and the first page together while retaining an out-of-filter selected original',async()=>{
+ const all=[rows[0],...Array.from({length:25},(_,i)=>({id:'extra-'+i,name:'记录'+i,detail:'原始依据'+i}))],cleared=vi.fn();
+ function List(){const[hidden,setHidden]=React.useState(false);return <ModuleWorkbench title="业务台账" rows={hidden?[]:all} allRows={all} columns={columns} preview
+  detail={row=><p data-testid="exact-detail">{row.detail}</p>} filtersActive={hidden} onClearFilters={()=>{cleared();setHidden(false);}}
+  toolbar={<Button onClick={()=>setHidden(true)}>外部筛选</Button>}/>;}
+ bridge.route={view:'test-ledger',id:'row-a'};host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<MistRoot><ToastProvider><List/></ToastProvider></MistRoot>));await click('下一页');expect(getByText(document.body,'2 / 3')).toBeTruthy();
+ await click('外部筛选');expect(document.querySelector('[data-testid="exact-detail"]')?.textContent).toBe(rows[0].detail);
+ await click('清除筛选');expect(cleared).toHaveBeenCalledTimes(1);expect(getByText(document.body,'1 / 3')).toBeTruthy();
+ expect(document.querySelector('[data-testid="exact-detail"]')?.textContent).toBe(rows[0].detail);expect(bridge.workspace.run).not.toHaveBeenCalled();expect(bridge.go).not.toHaveBeenCalled();
+});
 
 describe('ModuleWorkbench real Mist T9 workflow',()=>{
   it('closes a successfully saved long form under React StrictMode',async()=>{const submit=vi.fn(async(_values:any)=>({id:'saved'}));await mount(editor(submit));await confirmStep();await click('确认创建');expect(submit).toHaveBeenCalledTimes(1);expect(submit).toHaveBeenCalledWith({name:'初始业务',quantity:2.5,category:'blue',due:'2026-10-13',note:'原始说明',active:true,source:'原始凭据'});expect(queryByRole(document.body,'heading',{name:'创建业务记录'})).toBeNull();expect(getByRole(document.body,'heading',{name:'业务台账'})).toBeTruthy();expect(getByText(document.body,'已保存',{exact:true})).toBeTruthy();});

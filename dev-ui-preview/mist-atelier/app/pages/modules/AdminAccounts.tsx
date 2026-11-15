@@ -135,7 +135,7 @@ export function AdminAccounts() {
       <Field label={uiText("状态")}><Select aria-label={uiText("账号状态")} value={status} onChange={e => setStatus(e.target.value)} options={[{ value: '', label: '全部状态' }, ...Object.entries(ACCOUNT_STATUS).map(([value, s]) => ({ value, label: s.label }))]} /></Field>
     </Toolbar>
     <Card><DataTable ariaLabel={uiText("公司账号")} rows={users} rowKey={u => u.id} loading={loading && !data} selectedKey={selected} onRowClick={u => setSelected(u.id)} columns={columns}
-      empty={<EmptyState title={uiText(data?.users.length ? '没有符合条件的账号' : '还没有公司账号')} description={uiText(data?.users.length ? '调整搜索或状态后再看。' : '用“新建账号”创建第一位成员。')} />} /></Card>
+      empty={<EmptyState title={uiText(data?.users.length ? '没有符合条件的账号' : '还没有公司账号')} action={(query||status)&&<Button variant="quiet" onClick={()=>{setQuery('');setStatus('');}}>{uiText('清除筛选')}</Button>} />} /></Card>
     <Drawer open={!!current && !form} onClose={() => setSelected(null)} title={uiText(current?.displayName ?? '')} sub={uiText(current?.email)}
       footer={current && <div className="mist-row">
         {current.status === 'pending' && <><Button variant="primary" onClick={() => { setFormError(''); setForm({ ...blank(), mode: 'approve', account: current, displayName: current.displayName, email: current.email, departmentId: current.departmentId ?? '', roles: current.roleIds }); }}>{uiText("审批通过")}</Button><Button onClick={() => setConfirm({ kind: 'reject', account: current })}>{uiText("拒绝")}</Button></>}
