@@ -1763,7 +1763,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       // mar64：个人待办新建、改期、转派、加备注；系统生成的业务待办只改期限与指派，不改标题。
       const old=p.id?find(state.tasks,p.id,'事项'):undefined;if(old?.done)throw new MistCommandError('PRECONDITION','已完成的事项请先重开');if(old?.kind==='email-extraction-review')throw new MistCommandError('PRECONDITION','请在原邮件中记录处理结果');if(old&&isInternalDeliveryTask(old))throw new MistCommandError('PRECONDITION','请在内部交付记录中办理');
       const assignee=p.assigneeId?resolveMember(context,p.assigneeId,'负责人'):{id:context.actorId||'',name:context.actorName};
-      const due=date(p.due),note=text(p.note||'','备注',false,1000);
+      const due=date(p.due),note=text(p.note===undefined?'':p.note,'备注',false,1000);
       const clearingNote=p.note!==undefined&&!note&&!!old?.note;
       if(old?.kind==='crm-follow-up'){
         // Bind an unambiguous old appointment before its original assignee is changed.

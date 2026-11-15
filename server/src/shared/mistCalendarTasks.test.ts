@@ -51,4 +51,10 @@ describe('mar59/mar60/mar64 calendar delete, personal events and personal tasks'
     expect(f.state.events.some(event=>event.entityId===id&&event.text.includes('清空备注'))).toBe(true);
     expect(f.state.tasks.find(task=>task.id===id)).toMatchObject({title:'核对订单资料',assigneeIds:['a'],due:'2026-10-20'});
   });
+  it.each([null,0,false,[],{}])('rejects non-text note %j without clearing the original task note', note => {
+    const f=fixture(),id=f.run({type:'task.save',payload:{title:'核对订单资料',due:'2026-10-20',note:'保留原始备注'}}).id;
+    const before=structuredClone(f.state);
+    expect(()=>f.run({type:'task.save',payload:{id,title:'核对订单资料',due:'2026-10-20',note} as any})).toThrow('备注');
+    expect(f.state).toEqual(before);
+  });
 });
