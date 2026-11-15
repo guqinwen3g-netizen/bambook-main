@@ -53,7 +53,7 @@ export function CustomerList({ state, actions, onOpen }: { state: MistState; act
   const columns: Column<Row>[] = [
     { key: 'name', header: '客户', width: 'minmax(200px,2fr)', render: c => <ObjectCell name={c.name} meta={<Mono>{c.code}</Mono>} />, sortValue: c => c.name },
     { key: 'country', header: '国家 / 城市', width: '140px', render: c => [c.country, c.city].filter(Boolean).join(' · ') || '—', sortValue: c => c.country },
-    { key: 'grade', header: '等级', width: '72px', render: c => c.grade || '—', sortValue: c => c.grade },
+    { key: 'grade', header: '等级', width: '72px', render: c => c.grade || uiText('未评级'), sortValue: c => c.grade },
     { key: 'owner', header: '客户经理', width: '110px', render: c => c.owner || '—', sortValue: c => c.owner },
     { key: 'open', header: '在手订单', width: '88px', align: 'right', render: c => c.openOrders || '—', sortValue: c => c.openOrders },
     { key: 'last', header: '最近下单', width: '110px', render: c => c.lastOrder || '—', sortValue: c => c.lastOrder },

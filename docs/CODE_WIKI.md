@@ -70,6 +70,8 @@
 
 浏览器会话凭据（2026-11-15）：`auth/sessionLifetime.ts#writeSession` 保留登录/续期JSON响应中的完整JWT；HttpOnly Cookie改为仅认证的已签凭据，不携带角色/岗位/权限/部门/业务范围快照，并以空权限和显式标记禁止未加载时回退旧角色默认权限。Core的`createAuthorizationSnapshotGuard`及Mist的`freshMistAuthority`仍须在受保护业务判定前加载当前数据库授权。公司、平台进入公司上下文、权限上限（缺省与空数组不同）、凭据版本、会话ID、原密码登录时间与保持登录方式均保留；响应与Cookie共用同一签发/到期边界，当前设备退出按同一会话族撤销。生产Secure/HttpOnly/SameSite、30天/会话Cookie及90天重新登录规则不变，无用户角色或数据迁移。Cookie中的空权限不代表当前账号无权，不能把原始Cookie载荷当作当前授权。
 
+客户字段权限（2026-11-15，本地候选）：`mistCustomerFieldAuthority.ts` 按有效差异独立要求客户等级的 `relations:admin`、信用额度及正额度币种的 `risk:admin`；普通资料带回未变受保护值可保存，普通业务员可建未评级/零额度客户，零额度币种仍可修改。创建、旧别名、批量、预演与提议共用校验，事务提交前再核被冻结的必要权限；先核对象可维护范围，避免用字段猜值取得他人客户信息。`risk:admin` 已从悬空豁免移入已消费阳性对照，回归为 `mist/customerFieldAuthority.test.ts`、`shared/mistCustomerFieldAuthority.test.ts` 和 `auth/__tests__/danglingScopeConsumption.test.ts`。
+
 ## 4. 业务真源索引（按业务链）
 
 登录退出（2026-11-13，本地候选）：`auth/currentSessionRevocation.ts`按真实账号和稳定会话标识校验持久撤销记录，主API、独立Mist服务、认证私有入口及Mist事务授权均接续；权限重载保留签发时刻、安全代次与真实会话标识，不以新授权快照掩盖凭据来源；记录覆盖90天绝对会话上限，原始JWT及会话标识不入撤销表。续期、改密和公司切换沿用同一会话，旧格式换发保留可撤销来源；普通鉴权仍拒绝过期凭据，过期原凭据仅可用于撤销其会话。全部退出另换凭据代次，避免同秒旧令牌漏过；私有公司列表同样复核当前账号和退出状态。
@@ -205,6 +207,8 @@ QC质量决定与工厂费用（2026-11-14，分支待发布）：`mistQcDisposi
 - `repository.ts#view` 不只按ownerId返回普通提议，还复用`agentAuditRead.ts#readableCommand`的模块读取边界，并通过`agentTaskVisibility.ts#knownCommandSourcesVisible`核对当前已存在的业务引用。索引来源是权威业务集合，提议载荷、快照及另一集合的同名ID不授予来源可见性。公司银行账户、邮件草稿/发送记录及整单/部分财务记录同样受控；只有部分明细时不返回旧完整提议的整单内容。
 - 无法再查看来源时，返回最小编号/经办人/时间/状态与unavailable标记；原命令、摘要及可能含商业资料的备注不回传。本人仍可拒绝。`member.groups.set`复用现行公司维护权限（公司库users:write，非公司库所有者），不虚构users:read或以公司库创建人替代当前管理员。确认的初查与实际提交事务都重新校验，避免页面看过后权限收回仍能提交。任务提议继续使用6.3的冻结来源与部分覆盖，不用普通提议的保守整单判断取代精确任务来源。
 - 当前边界核验为普通提议的模块、已存在引用和当前行级范围；不把未知自由文字当作新的业务来源证明，也不宣称旧普通提议拥有任务连接的完整读取溯源。测试入口`mist/agentProposalVisibility.test.ts`覆盖跨组、跨集合重名ID、读取权收回、提交事务中的权限变化、安全拒绝、合法新建及公司银行信息。员工步骤见[Agent连接与提议确认SOP](../wiki/sop/agent-connections.md)。
+
+信用提议与错误归属（2026-11-15，本地候选）：`mistAgentProposals.ts#effectiveAgentCommandRisk` 对实际授信变动使用既有高风险本人密码复验；普通资料含未变额度仍为中风险，决定时把实际风险留档，后续额度修改不改写已确认/拒绝的风险历史。非低风险 Agent 命令不能绕过提议直接进入仓储执行。`AgentProposalDialog` 的确定拒绝仅由当前公司/本人/提议的弹窗接管；首页与小竹传入 `dismissError`，服务方仍以同步原请求状态及精确同文做最终校验。未知结果保留原请求核对，弹窗禁止再次确认/拒绝；迟到回调不改另一提议或公司。回归见该弹窗同名测试；原生确认、重放及停用证明以 GO-LIVE 当前状态为准。
 
 ### 6.1 当前 Mist 邮箱边界
 

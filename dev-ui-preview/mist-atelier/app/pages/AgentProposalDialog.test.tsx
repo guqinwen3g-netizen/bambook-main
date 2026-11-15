@@ -6,6 +6,31 @@ import { MistRoot } from '../../../../components/mist';
 import { createMistState } from '../../../../server/src/shared/mistWorkspace';
 import { AgentProposalDialog } from './AgentProposalDialog';
 
+it.each([false,true])('keeps a rejected confirmation local while preserving an uncertain original request (%s)',async(uncertain)=>{
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const proposal:any={id:'failure-proposal',ownerId:'u',owner:'User',summary:['Update customer'],state:'pending',createdAt:'2026-11-15T00:00:00Z',command:{type:'customer.update',payload:{id:'customer',patch:{city:'York'}}}};
+ const failure=Object.assign(new Error('Confirmation failed'),uncertain?{mistPendingCommand:true}:{}),onRejection=vi.fn(),run=vi.fn().mockRejectedValue(failure);
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ try{
+  act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} run={run} onRejection={onRejection} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
+  await act(async()=>{[...document.querySelectorAll('button')].find(b=>b.textContent==='确认执行')!.click();});
+  expect(document.body.textContent).toContain(uncertain?'结果待核对':'没有执行');
+  expect(document.body.textContent).toContain('Confirmation failed');
+  expect(onRejection.mock.calls).toEqual(uncertain?[]:[['Confirmation failed']]);
+  if(uncertain)for(const label of ['确认执行','拒绝'])expect([...document.querySelectorAll('button')].find(b=>b.textContent===label)!.disabled).toBe(true);
+ }finally{act(()=>root.unmount());host.remove();}
+});
+
+it.each(['proposal','company'])('does not report a late rejection in a different %s or consume its global failure',async(change)=>{
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const make=(id:string):any=>({id,ownerId:'u',owner:'User',summary:[id],state:'pending',createdAt:'2026-11-15T00:00:00Z',command:{type:'customer.update',payload:{id:'customer',patch:{city:'York'}}}});
+ let reject!:(error:Error)=>void;const run=vi.fn(()=>new Promise((_ok,no)=>{reject=no;})),onRejection=vi.fn();
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ const show=(id:string,scope='a')=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={make(id)} scopeKey={scope} run={run} onRejection={onRejection} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
+ try{show('old');await act(async()=>{[...document.querySelectorAll('button')].find(b=>b.textContent==='确认执行')!.click();});show(change==='proposal'?'new':'old',change==='company'?'b':'a');await act(async()=>reject(new Error('Old failure')));expect(document.body.textContent).not.toContain('Old failure');expect(onRejection).not.toHaveBeenCalled();expect([...document.querySelectorAll('button')].find(b=>b.textContent==='确认执行')!.disabled).toBe(false);}
+ finally{act(()=>root.unmount());host.remove();}
+});
+
 it('identifies supplier quote sources and filenames before allowing confirmation',()=>{
  const state=createMistState({id:()=> 'id',now:'2026-11-14T00:00:00Z',actorName:'Test'},'empty');
  state.market.suppliers=[{id:'supplier-private',name:'江南成衣'} as any];state.files=[{id:'file-private',name:'CMT-V2.pdf'} as any];state.rfqs=[{id:'rfq-private',code:'RFQ-2026-0003',state:'open',unit:'件',supplierIds:['supplier-private'],quotes:[]} as any];
