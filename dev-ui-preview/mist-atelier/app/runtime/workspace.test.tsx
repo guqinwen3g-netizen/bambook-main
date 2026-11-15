@@ -1126,6 +1126,31 @@ function companyFixture() {
   };
 }
 async function chooseCompany(companyId:string){(auth.session.user as any).companyId=companyId;await render();await waitFor(()=>!api.loading&&!!api.workspace);}
+it('keeps a clean company login clean when an earlier initialization read is superseded',async()=>{
+  companyFixture();strict=true;const first=deferred<ResponseData>(),second=deferred<ResponseData>();let reads=0;
+  intercept=request=>request.url===BASE+'/default'?(++reads===1?first.promise:second.promise):undefined;
+  await render();expect(reads).toBe(2);
+  await resolve(first,response({workspace:clone(stores.get(A)!)}));
+  expect(localStorage.getItem('bambook.mist.pending:actor-a:company-a')).toBeNull();
+  await resolve(second,response({workspace:clone(stores.get(A)!)}));await waitFor(()=>!api.loading&&!!api.workspace);
+  expect(api.workspace?.id).toBe(A);expect(api.pending).toBeNull();expect(api.error).toBe('');
+  expect(localStorage.getItem('bambook.mist.pending:actor-a:company-a')).toBeNull();expect(posts()).toHaveLength(0);
+});
+it.each([403,503])('does not invent a pending record when company loading fails with %s',async(status)=>{
+  companyFixture();intercept=request=>request.url===BASE+'/default'?failure(status):undefined;
+  await render();await waitFor(()=>!api.loading);
+  expect(api.workspace).toBeNull();expect(api.pending).toBeNull();expect(api.error).toBe('请求被拒绝');
+  expect(localStorage.getItem('bambook.mist.pending:actor-a:company-a')).toBeNull();
+  expect(localStorage.getItem('bambook.mist.pending:actor-a')).toBeNull();expect(posts()).toHaveLength(0);
+});
+it('preserves the exact legacy request when company loading fails before identifying its workspace',async()=>{
+  companyFixture();const saved=JSON.stringify({actorId:'actor-a',workspaceId:A,requestId:'legacy-unconfirmed',expectedRevision:0,kind:'command',command:command('待核对')});
+  localStorage.setItem('bambook.mist.pending:actor-a',saved);
+  intercept=request=>request.url===BASE+'/default'?failure(503):undefined;
+  await render();await waitFor(()=>!api.loading);
+  expect(localStorage.getItem('bambook.mist.pending:actor-a')).toBe(saved);
+  expect(localStorage.getItem('bambook.mist.pending:actor-a:company-a')).toBeNull();expect(api.pending).toBeNull();expect(posts()).toHaveLength(0);
+});
 it('does not reopen another company from the same user legacy pending request',async()=>{
   companyFixture();(auth.session.user as any).companyId='company-b';
   const saved={actorId:'actor-a',workspaceId:A,requestId:'legacy-north',expectedRevision:0,kind:'command',command:command('北辰原请求')};

@@ -387,7 +387,9 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
           if (!mounted.current || live.current.key !== authority.key || live.current.userId !== authority.userId || live.current.status !== 'authenticated') return;
           const workspaceId = snapshot.current?.id;
           let candidate = restored?.workspaceId === workspaceId ? restored : null;
-          if (!restored && legacy?.workspaceId === workspaceId) {
+          // A failed/superseded read can leave no workspace. Missing legacy data must never
+          // compare equal to that missing ID and become a literal "null" recovery record.
+          if (!restored && legacy && workspaceId && legacy.workspaceId === workspaceId) {
             candidate = legacy;
             try {
               localStorage.setItem(recoveryStorageKey('pending', authority), JSON.stringify(legacy));
