@@ -419,7 +419,7 @@ export type FulfillmentCustoms = {
     evidence: string;
     fileIds: string[];
     note: string;
-    /** sup52：报关方式；express（快件 / 邮寄）不需要正式报关单，登记快件运单即可离港。旧记录为 general。 */
+    /** sup52：业务登记路径。express 记录快件运单、申报与放行事实，不表示免于海关申报或随附单证；旧记录为 general。 */
     channel?: 'general' | 'express';
     /** sup50：放行后的改单 / 退关记录与补充附件，原记录不改写。 */
     amendments?: Array<{ kind: 'amend' | 'withdraw' | 'attach'; reason: string; fileIds: string[]; at: string; actor: string }>;
