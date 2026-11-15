@@ -133,3 +133,16 @@ it('retains input after an actual revision rejection and does not submit it agai
 it('cannot recreate an appointment removed while its old editor remains open',async()=>{
   await mount();await click('已保存的评审');bridge.current.state={...bridge.current.state,calendar:[]};bridge.current.workspace={id:'workspace-a',revision:1};await act(async()=>root!.render(view()));await click('保存日程');expect(bridge.current.run).not.toHaveBeenCalled();expect(host.textContent).toContain('日程已更新，请重新打开后核对');
 });
+it('keeps a confirmed edit failure in the form and dismisses only the matching shared error',async()=>{
+  bridge.current.dismissError=vi.fn();bridge.current.run.mockRejectedValueOnce(new Error('此日程不能保存'));
+  await mount();await click('已保存的评审');await click('保存日程');
+  expect(bridge.current.dismissError).toHaveBeenCalledWith('此日程不能保存');expect((host.textContent?.match(/此日程不能保存/g)||[])).toHaveLength(1);expect(host.textContent).not.toContain('日程操作未完成');
+});
+it('preserves unknown-result recovery without duplicating a second pending warning in the editor',async()=>{
+  bridge.current.dismissError=vi.fn();bridge.current.run.mockImplementationOnce(async()=>{bridge.current.pending={kind:'command',command:{type:'calendar.save'},requestId:'unknown'};await act(async()=>root!.render(view()));throw Object.assign(new Error('回执未收到'),{mistPendingCommand:{workspaceId:'workspace-a',actorId:'owner',requestId:'unknown'}});});
+  await mount();await click('已保存的评审');await click('保存日程');
+  expect(bridge.current.dismissError).not.toHaveBeenCalled();expect(host.textContent).toContain('原操作结果尚待核对');expect(host.textContent).not.toContain('保存结果待核对');expect(document.querySelector<HTMLFieldSetElement>('[data-calendar-editor] fieldset')?.disabled).toBe(true);
+});
+it('does not carry a discarded form failure into the calendar after cancel',async()=>{
+  bridge.current.run.mockRejectedValueOnce(new Error('该输入不能保存'));await mount();await click('已保存的评审');await click('保存日程');expect(host.textContent).toContain('该输入不能保存');await click('取消');expect(document.querySelector('[data-calendar-editor]')).toBeNull();expect(host.textContent).not.toContain('该输入不能保存');expect(host.textContent).not.toContain('日程操作未完成');
+});

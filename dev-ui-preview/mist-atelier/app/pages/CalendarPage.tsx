@@ -43,7 +43,7 @@ function calendarExtras(x:{participantIds:string[];remind:string;repeat:''|'week
   return {...(x.participantIds.length||old?.participants?.length?{participantIds:x.participantIds}:{}),...(Number(x.remind)||old?.remindMinutes?{remindMinutes:Number(x.remind)||0}:{}),...(x.repeat?{repeat:{every:x.repeat,until:x.until}}:old?.repeat?{repeat:null}:{})};
 }
 export function CalendarPage() {
-  const {go,route}=useNav();const {state,workspace,loading,error,run,refresh,pending,recover,saving}=useMistWorkspace();const session=useMistSession();const toast=useToast();
+  const {go,route}=useNav();const {state,workspace,loading,error,run,refresh,pending,recover,saving,dismissError}=useMistWorkspace();const session=useMistSession();const toast=useToast();
   const scopeKey=`${session.sessionKey}:${workspace?.id||''}`;
   const [selected,setSelected]=React.useState(()=>dayKey(businessNow()));
   const [mode,setMode]=React.useState<'week'|'month'>('week'),[mineOnly,setMineOnly]=React.useState(false),[personal,setPersonal]=React.useState(false);
@@ -106,7 +106,7 @@ export function CalendarPage() {
     const ticket=++sequence.current,owns=()=>live.current&&scope.current===scopeKey&&sequence.current===ticket;
     locked.current=true;setBusy(true);setFailure('');
     try {await run({type:'calendar.save',payload:{...(editing?{id:editing}:{}),title:form.title.trim(),date:form.date,time:form.time,note:form.note,...(target?{target}:{}),...(personal?{personal:true}:current?.ownerId?{personal:false}:{}),...calendarExtras(extra,current)}},{expectedRevision:revision});if(owns()){setSelected(form.date);setEditing(undefined);toast(editing?'日程已更新':'日程已创建');}}
-    catch(cause){if(owns())setFailure(cause instanceof Error?cause.message:'日程保存失败，请重试');}
+    catch(cause){if(owns()){const message=cause instanceof Error?cause.message:'日程保存失败，请重试';setFailure(message);if(!(cause as {mistPendingCommand?:unknown})?.mistPendingCommand)dismissError?.(message);}}
     finally{if(owns()){locked.current=false;setBusy(false);}}
   };
   const remove = async () => {
@@ -117,7 +117,7 @@ export function CalendarPage() {
     const id=deleteId,ticket=++sequence.current,owns=()=>live.current&&scope.current===scopeKey&&sequence.current===ticket;
     setDeleteId(null);locked.current=true;setBusy(true);setFailure('');
     try {await run({type:'calendar.delete',payload:{id}},{expectedRevision:revision});if(owns()){setEditing(undefined);toast('日程已删除');}}
-    catch(cause){if(owns())setFailure(cause instanceof Error?cause.message:'日程删除失败');}
+    catch(cause){if(owns()){const message=cause instanceof Error?cause.message:'日程删除失败';setFailure(message);if(!(cause as {mistPendingCommand?:unknown})?.mistPendingCommand)dismissError?.(message);}}
     finally{if(owns()){locked.current=false;setBusy(false);}}
   };
   const retry = async () => {if(locked.current)return;const bound=scopeKey;setFailure('');try{await refresh();}catch(cause){if(live.current&&scope.current===bound)setFailure(String(cause));}};
@@ -132,7 +132,7 @@ export function CalendarPage() {
       <Segmented ariaLabel={uiText('视图')} value={mode} onChange={v=>setMode(v as 'week'|'month')} options={[{value:'week',label:'周'},{value:'month',label:'月'}]} />
       <Checkbox label={uiText('只看我的')} checked={mineOnly} onChange={setMineOnly} />
     </Toolbar>
-    {!pending&&(visibleFailure||error)&&<FailureNotice title={"日程操作未完成"} detail={visibleFailure||error} retry={()=>void retry()} retryLabel="重试读取" />}
+    {!pending&&activeEditing===undefined&&(visibleFailure||error)&&<FailureNotice title={"日程操作未完成"} detail={visibleFailure||error} retry={()=>void retry()} retryLabel="重试读取" />}
     {pending&&!saving&&<div className="mist-section"><Banner tone="warn" title={uiText("原操作结果尚待核对")} actions={recovery}>{uiText("核对原请求后再继续保存。")}</Banner></div>}
     <Card>
       <CardHeader title={uiText(parseDay(selected).toLocaleDateString(interfaceLocale(),{year:'numeric',month:'long',day:'numeric',weekday:'long'}))} tools={<span className="mist-muted">{events.length}{uiText(" 项安排")}</span>} />
@@ -142,7 +142,7 @@ export function CalendarPage() {
     {activeEditing!==undefined&&<Card as="section" id="mist-calendar-editor" className="mist-section" aria-label={uiText(editing?'编辑日程':'新建日程')} data-calendar-editor>
       <CardHeader title={uiText(editing?'编辑日程':'新建日程')} />
       <form onSubmit={event=>{event.preventDefault();void save();}}><CardBody>
-      {visibleFailure&&<Banner tone={pending?'warn':'bad'} title={uiText(pending?'保存结果待核对':'日程未保存')}>{pending?uiText('请先核对原请求，不要重复保存。'):visibleFailure}</Banner>}
+      {visibleFailure&&!pending&&<Banner tone="bad" title={uiText('日程未保存')}>{visibleFailure}</Banner>}
       <fieldset disabled={busy||saving||!!pending} style={{border:0,padding:0,margin:0}}><FormGrid>
         <Field label={uiText("日程名称")} required full><TextInput aria-label={uiText("日程名称")} value={form.title} onChange={event=>setForm(previous=>({...previous,title:event.target.value}))} /></Field>
         <Field label={uiText("日期")} required><TextInput aria-label={uiText("日期")} type="date" value={form.date} onChange={event=>setForm(previous=>({...previous,date:event.target.value}))} /></Field>
@@ -158,7 +158,7 @@ export function CalendarPage() {
         </div>}
         <Checkbox label={uiText('仅本人与参与人可见')} checked={personal} onChange={setPersonal} />
       </FormGrid></fieldset>
-      </CardBody><CardFooter>{recovery}<span className="mist-spacer" />{editing&&<Button variant="danger" disabled={busy||saving||!!pending} onClick={()=>setDeleteId(editing)}>{uiText('删除日程')}</Button>}<Button variant="quiet" disabled={busy} onClick={()=>setEditing(undefined)}>{uiText("取消")}</Button><Button type="submit" variant="primary" loading={busy} disabled={!state||loading||saving||!!pending}>{uiText("保存日程")}</Button></CardFooter></form>
+      </CardBody><CardFooter>{recovery}<span className="mist-spacer" />{editing&&<Button variant="danger" disabled={busy||saving||!!pending} onClick={()=>setDeleteId(editing)}>{uiText('删除日程')}</Button>}<Button variant="quiet" disabled={busy} onClick={()=>{setEditing(undefined);setFailure('');}}>{uiText("取消")}</Button><Button type="submit" variant="primary" loading={busy} disabled={!state||loading||saving||!!pending}>{uiText("保存日程")}</Button></CardFooter></form>
     </Card>}
     <Dialog open={!!deleteId&&deleteId===activeEditing} onClose={()=>setDeleteId(null)} tone="bad"
       title={state?.calendar.find(e=>e.id===deleteId)?.repeat?uiText('删除整组重复日程？'):uiText('删除日程？')}
