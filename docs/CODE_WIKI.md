@@ -105,6 +105,7 @@
 | 业务阶段 | 页面 | 规则真源 |
 |---|---|---|
 | 首页待办、审批、通知 | `HomePage.tsx`、`ApprovalsPage.tsx`、`NotificationsPage.tsx` | `mistReview.ts`、`mistTeam.ts`；派生在 `app/runtime/workQueue.ts` |
+| 团队周报数量与存档（2026-11-16） | `modules/TeamBoard.tsx#TeamWeekly` | `mistTeam.ts#teamWeekRow` 从已离港条目 `lineId + orderId` 核对订单条目的原单位，按四位数量精度分别累计为 `shippedQuantities`（十进制字符串），不换算或混加件/米/码；团队总票数按可见范围的物理出运 ID 去重，成员行仍计各自参与的票。页面、生成文字、CSV、新存档使用同一分单位结果，`formatTeamShipmentQuantities` 只格式化、不补算。来源单位缺失明确标未记录；旧冻结周报缺少分单位字段时显示未分单位，原报告及存档文字不回填或重算。存档权限、期间、归属和币种口径不变；字段变化的发布/回滚核验保留在 GO-LIVE 最终边界。 |
 | 业务日历与跟进 | `CalendarPage.tsx`、`HomePage.tsx` | `mistCrm.ts#scheduleCrmFollowUp` 记录待办 ID；`mistCrmCalendar.ts#currentCrmCalendar` 随待办改期、改派、完成、重开与作废读取，之后再按公司、个人与来源权限裁剪。`mistDataScope.ts#applyDataScope` 的 CRM 来源既识别准确可见商机/跟进 ID，也识别范围内负责客户的主页 ID；共享客户目录或任意 `customerId` 提示不构成其它客户活动的读取授权。2026-11-15 补商机个别负责人日程：客户主页目标本身不足时，`applyDataScope` 仅从唯一的可见跟进和 `crmCalendarTaskLinks` 确认系统待办，再核对客户、标题及跟进原文，保留该准确日程；不据共享客户或借用的指针、歧义来源扩权。私人归属、当前业务可见性、CRM模块权限及完成/作废过滤继续生效，原日程/跟进/待办存储不改写。客户交接后按当前待办负责人展示同一日程，原跟进经办人与底层日历不改写。回归见 `mist/crmCalendarProjection.test.ts`。旧独立记录只有原始字段双方唯一匹配才联动，歧义不合并。 |
 | 客户销售额与资金月报 | `modules/PlatformReports.tsx` | `buildCustomerSales` 按生效外部合同及所选业务日筛订单，`mistFinanceReports.ts#monthlyFinanceSummary` 按实际收付款日期分币种；导出使用当前筛选行。 |
 | 客户、联系人、CRM | `CustomerPage.tsx`、`CustomerRelations.tsx` | `mistMarket.ts`、`mistCrm.ts`、`mistRelationHold.ts` |

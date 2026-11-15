@@ -1027,4 +1027,6 @@ export const reviewedEnglish: Record<string, string> = {
   '提交时审批人': 'Reviewers at submission',
   '当前账号没有本次审批资格': 'You are not authorized to approve this item.',
   '未评级': 'Unrated',
+  '数量未分单位': 'Quantity was not recorded by unit',
+  '单位未记录': 'Unit not recorded',
 };

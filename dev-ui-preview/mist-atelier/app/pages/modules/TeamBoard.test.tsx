@@ -88,6 +88,18 @@ it('opens last week from the work reminder, archives it on the server, then show
   await click(getByRole(host,'button',{name:'复制周报文字'}));
   expect(writeText).toHaveBeenCalledWith('存档文字');
 });
+
+it('does not invent units or rebuild an older frozen report, while preserving its original stored text',async()=>{
+  const today=platformBusinessDate(new Date()),last=addBusinessDays(weekStartOf(today),-7);
+  const report:any=teamWeeklyReport(state,members,{id:'demo-reviewer',owner:true},last,today);
+  delete report.totals.shippedQuantities;report.totals.shippedQty=1185.5;
+  for(const row of report.rows){delete row.shippedQuantities;row.shippedQty=12;}
+  const old={id:'older',weekStart:last,weekEnd:addBusinessDays(last,6),generatedAt:'2026-10-19T01:30:00Z',generatedById:'demo-reviewer',generatedBy:'周敏',scope:'全部成员',report,text:'原始存档文字'};
+  (state as any).teamReports=[old];const original=JSON.stringify(old),writeText=vi.fn().mockResolvedValue(undefined);Object.defineProperty(navigator,'clipboard',{value:{writeText},configurable:true});
+  act(()=>root.render(<MistRoot><ToastProvider><TeamBoard state={state} members={members} viewer={{id:'demo-reviewer',owner:true}} can busy={false} run={run} go={go} initialMode="week" initialWeek={last}/></ToastProvider></MistRoot>));
+  expect(host.textContent).toContain('数量未分单位');expect(host.textContent).not.toContain('1185.5');
+  await click(getByRole(host,'button',{name:'复制周报文字'}));expect(writeText).toHaveBeenCalledWith('原始存档文字');expect(JSON.stringify(old)).toBe(original);expect(run).not.toHaveBeenCalled();
+});
 it('does not offer archiving to viewers without supervisor permission',()=>{
   const today=platformBusinessDate(new Date()),last=addBusinessDays(weekStartOf(today),-7);
   act(()=>root.render(<MistRoot><ToastProvider><TeamBoard state={state} members={members} viewer={{id:'demo-sales',owner:false}} can={false} busy={false} run={run} go={go} initialMode="week" initialWeek={last}/></ToastProvider></MistRoot>));
