@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createMistState, type MistContext } from './mistWorkspace';
+import { applyMistCommand, createMistState, type MistContext } from './mistWorkspace';
 import { DEMO_SEED_VERSION } from './mistDemoSeed';
 import { isDemoFile, renderDemoFile } from './mistDemoFiles';
 
@@ -83,3 +83,5 @@ describe('演示公司数据', () => {
     expect(state.orders).toEqual([]); expect(state.market.products).toEqual([]); expect(state.fulfillment.samples).toEqual([]); expect(state.files).toEqual([]);
   });
 });
+
+it('initializes the fixed dual-identity rating/credit without granting the caller those write permissions',()=>{const ctx=context(),state=createMistState(ctx,'demo'),customer=state.customers.find(c=>c.name==='博远纺织贸易')!;expect(customer).toMatchObject({grade:'B',creditLimit:200000,ownerId:'demo-sales'});expect(ctx.can).toBeUndefined();expect(()=>applyMistCommand(state,{type:'market.customer.update',payload:{id:customer.id,patch:{creditLimit:200001}}},ctx)).toThrow(/信用管理权限/);});

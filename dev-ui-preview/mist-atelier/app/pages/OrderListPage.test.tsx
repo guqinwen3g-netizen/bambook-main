@@ -11,7 +11,7 @@ import { MistRoot, ToastProvider } from '../../../../components/mist';
 import type { MistState } from '../../../../server/src/shared/mistWorkspace';
 import { Nav } from '../nav';
 import { usePageFailures } from '../runtime/errorPresentation';
-const store = vi.hoisted(() => ({ state: null as MistState | null, canWrite:true, loading: false, error: '', workspace: { id: 'w', ownerId: 'test-user' }, run: vi.fn(), refresh: vi.fn(), downloadFile: vi.fn(), uploadFile: vi.fn() }));
+const store = vi.hoisted(() => ({ state: null as MistState | null, canWrite:true, loading: false, error: '', workspace: { id: 'w', ownerId: 'test-user', revision: 0, state: null as MistState|null }, run: vi.fn(), refresh: vi.fn(), downloadFile: vi.fn(), uploadFile: vi.fn() }));
 vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => store }));
 vi.mock('../runtime/auth', () => { const useMistSession = () => ({ status:'authenticated', sessionKey:'order-test', user:{id:'test-user',displayName:'负责人'}, hasPermission:(scope:string)=>scope.endsWith(':read')||store.canWrite,canAccessView:()=>true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
 import { OrderListPage } from './OrderListPage';
@@ -69,7 +69,7 @@ function select(label: string, value: string) {
 function deferred<T>() { let resolve!: (value: T) => void, reject!: (reason: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 beforeEach(() => {
   store.canWrite=true;
-  store.state = fixture(); store.loading = false; store.error = ''; store.run.mockReset(); store.refresh.mockReset(); store.downloadFile.mockReset(); go.mockReset();
+  store.state = fixture(); store.workspace={id:'w',ownerId:'test-user',revision:0,state:store.state}; store.loading = false; store.error = ''; store.run.mockReset(); store.refresh.mockReset(); store.downloadFile.mockReset(); go.mockReset();
   store.run.mockResolvedValue({ requestId: 'r1', revision: 2, result: {} });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });

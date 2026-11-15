@@ -1,3 +1,4 @@
+import {CUSTOMER_GRADE_SCOPE,CUSTOMER_CREDIT_SCOPE} from './mistCustomerFieldAuthority';
 import {sampleConfirmationBlocker} from './mistSampleSending';
 import {seedInternalFabricPlan} from './mistDemoInternalFabric';
 /**
@@ -376,7 +377,8 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
 
   /* ───────── 关系智库：一家同时是客户和供应商的组织；一个因逾期冻结的往来 ───────── */
   const boyuanSupplier = supplier('SUP-0006', '博远纺织贸易', '面料贸易', '现货里布 · 衬布 · 小批量面料调货', 50000, '米/月', 7, '浙江绍兴柯桥区中国轻纺城东区 2 号楼', ['何静', '采购与销售', 'hejing@boyuan-textile.cn', '0575-8566 1027']);
-  const boyuan = run('customer boyuan', { type: 'market.customer.create', payload: { input: { name: '博远纺织贸易', country: '中国', city: '绍兴', industry: '面料贸易', ownerId: 'demo-sales', grade: 'B', currency: 'CNY', terms: '月结 30 天', incoterm: 'EXW', categories: '面料', creditLimit: 200000, since: day(-200) } } });
+  // Fixed demo initialization assigns its existing rating/credit through a narrowly authorized setup context; it never escapes to ordinary operations.
+  const boyuan = run('customer boyuan', { type: 'market.customer.create', payload: { input: { name: '博远纺织贸易', country: '中国', city: '绍兴', industry: '面料贸易', ownerId: 'demo-sales', grade: 'B', currency: 'CNY', terms: '月结 30 天', incoterm: 'EXW', categories: '面料', creditLimit: 200000, since: day(-200) } } }, { ...reviewer, can: scope => scope===CUSTOMER_GRADE_SCOPE||scope===CUSTOMER_CREDIT_SCOPE||reviewer.can?.(scope)===true });
   const boyuanRelation = boyuan ? String((boyuan as { relationId?: string }).relationId || '') : '';
   if (boyuanRelation && boyuanSupplier) run('relation link boyuan', { type: 'market.relation.linkSupplier', payload: { id: boyuanRelation, supplierId: boyuanSupplier } });
   const luneRelation = state.market.relations.find(r => r.customerId === c2.id);
