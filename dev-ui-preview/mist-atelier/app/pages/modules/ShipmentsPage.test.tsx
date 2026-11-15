@@ -17,6 +17,12 @@ import {ShipmentsPage,shipmentStage} from './ShipmentsPage';
 let host:HTMLElement,root:Root;let presentedError:string|undefined;const go=vi.fn();
 function render(id?:string){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'shipments',id,...(id?{detail:'full' as const}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><MistPresentedErrorContext.Provider value={presentedError}><ShipmentsPage/></MistPresentedErrorContext.Provider></Nav.Provider></ToastProvider></MistRoot>));}
 async function click(node:HTMLElement){await act(async()=>node.click());}
+it('hands a new shipment request focus to its source without taking focus back during refresh',async()=>{
+ render();await click(getAllByRole(host,'button',{name:'新建出运'})[0]);
+ const source=getByRole(host,'combobox',{name:'来源条目 1'});expect(document.activeElement).toBe(source);
+ const quantity=host.querySelector('input[type="number"]') as HTMLInputElement;quantity.focus();typeInto(quantity,'8');render();
+ expect(document.activeElement).toBe(quantity);expect(quantity.value).toBe('8');expect(store.run).not.toHaveBeenCalled();
+});
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 const shipment=(id:string,patch:Partial<FulfillmentShipment>={}):FulfillmentShipment=>({id,code:id.toUpperCase(),customerId:'c',customer:'Cedar',domain:'garment',consignee:'Cedar DC',mode:'sea',portOfLoading:'上海',portOfDischarge:'Felixstowe',incoterm:'FOB',plannedDate:'2099-01-01',booking:'',lines:[{orderId:'o',lineId:'l',productionId:'p',quantity:10,factoryConfirmedAt:'2026-10-09'}],note:'',fileIds:[],state:'preparing',requestedBy:'经办人',requesterId:'biz',createdAt:'2026-10-08T08:00:00Z',...patch});
 const doc=(id:string,shipmentId:string,type:FulfillmentDocument['type'],status:FulfillmentDocument['status']='issued'):FulfillmentDocument=>({id,shipmentId,orderId:type==='CI'?'o':'',type,number:type+'-'+id,version:1,title:type,dueDate:'',content:'',fileIds:[],status,createdAt:'2026-10-10T08:00:00Z',actor:'后勤'});

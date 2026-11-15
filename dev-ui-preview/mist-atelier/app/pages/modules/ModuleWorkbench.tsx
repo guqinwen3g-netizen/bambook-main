@@ -186,6 +186,16 @@ export function downloadModuleXlsx(filename:string,sheets:Array<{name:string;hea
     downloadGeneratedBlob(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),filename);
   }});
 }
+/** Full-page editors move focus on entry/step changes; source refreshes must preserve active input. */
+export function useEditorStepFocus(step:number){
+  const ref=React.useRef<HTMLDivElement>(null);
+  React.useEffect(()=>{
+    const section=ref.current;
+    const field=section?.querySelector<HTMLElement>('.mist-form-section input:not([type="hidden"]):not([type="file"]):not([disabled]), .mist-form-section textarea:not([disabled]), .mist-form-section select:not([disabled]), .mist-form-section button[role="combobox"]:not([disabled])');
+    (field??section)?.focus();
+  },[step]);
+  return ref;
+}
 export function ModuleEditorPage({spec,onClose}:{spec:ModuleEditorSpec;onClose:()=>void}){
   const presentedError=React.useContext(MistPresentedErrorContext);
   const workspace=useMistWorkspace(),toast=useToast(),recovery=useRecoveredModuleCommand(spec,workspace);
@@ -194,13 +204,7 @@ export function ModuleEditorPage({spec,onClose}:{spec:ModuleEditorSpec;onClose:(
   const visible=moduleVisibleFields(spec,values),groups=moduleEditorSections(spec,values),shownStep=Math.min(step,groups.length-1);
   React.useEffect(()=>{setStep(previous=>Math.min(previous,groups.length-1));},[groups.length]);
   const current=groups[shownStep],last=shownStep===groups.length-1,blocked=busy||workspace.saving||!!workspace.pending||!!workspace.pendingCreate||recovery.completed;
-  const stepRef=React.useRef<HTMLDivElement>(null);
-  React.useEffect(()=>{
-    const section=stepRef.current;
-    const field=section?.querySelector<HTMLElement>('.mist-form-section input:not([type="hidden"]):not([type="file"]):not([disabled]), .mist-form-section textarea:not([disabled]), .mist-form-section select:not([disabled]), .mist-form-section button[role="combobox"]:not([disabled])');
-    (field??section)?.focus();
-    // Source refreshes recreate spec objects while the user types. Only entering a page/step moves focus.
-  },[shownStep]);
+  const stepRef=useEditorStepFocus(shownStep);
   const validate=(fields:ModuleField[])=>{for(const f of fields){if(fieldRequired(f,values)&&(values[f.key]===undefined||String(values[f.key]).trim()===''))return '请填写'+f.label;const invalid=selectError(f,values[f.key]);if(invalid)return invalid;if(f.type==='number'&&values[f.key]!==''&&values[f.key]!==undefined&&(!Number.isFinite(Number(values[f.key]))||(f.min!==undefined&&Number(values[f.key])<f.min)))return f.label+'无效';}return spec.issue?.({...spec.initialValues,...values})||'';};
   const save=async()=>{if(blocked||lock.current)return;const problem=validate(visible);if(problem){setError(problem);return;}lock.current=true;setBusy(true);const converted=applicableValues(spec,values);for(const f of visible)if(f.type==='number'&&values[f.key]!==''&&values[f.key]!==undefined)converted[f.key]=Number(values[f.key]);try{await spec.submit(converted);if(live.current){onClose();toast('已保存');}}catch(e){if(live.current){recovery.failed(e);setError(e instanceof Error?e.message:'保存未完成');}}finally{if(live.current){lock.current=false;setBusy(false);}}};
   const set=(key:string,v:ModuleValue)=>{setValues(old=>{const next={...old,[key]:v};return spec.derive?{...next,...spec.derive(key,v,next)} as ModuleValues:next;});setError('');};
