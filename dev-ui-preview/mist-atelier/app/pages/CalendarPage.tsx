@@ -10,6 +10,7 @@ import {
   MistPage, PageHeader, Select, Skeleton, TextArea, TextInput, TextLink, Toolbar, WeekStrip, useToast, Segmented, Checkbox,
 } from '../../../../components/mist';
 import type { MistCalendarEvent, MistTarget } from '../../../../server/src/shared/mistWorkspace';
+import { stableJson } from '../../../../server/src/shared/stableJson';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
 import { rememberMistSource, useNav } from '../nav';
@@ -65,6 +66,8 @@ export function CalendarPage() {
   const [busy,setBusy]=React.useState(false),[failure,setFailure]=React.useState('');
   const [formScope,setFormScope]=React.useState(scopeKey);
   const live=React.useRef(true),locked=React.useRef(false),scope=React.useRef(scopeKey),sequence=React.useRef(0);
+  const source=React.useRef(''),liveSource=React.useRef({state,revision:workspace?.revision});
+  React.useLayoutEffect(()=>{liveSource.current={state,revision:workspace?.revision};},[state,workspace?.revision]);
   if(scope.current!==scopeKey){scope.current=scopeKey;sequence.current++;locked.current=false;}
   const activeEditing=formScope===scopeKey?editing:undefined;
   const visibleFailure=formScope===scopeKey?failure:'';
@@ -84,8 +87,9 @@ export function CalendarPage() {
   const open = (event?: MistCalendarEvent) => {
     if(locked.current||activeEditing!==undefined||loading||saving||pending||!state)return;
     const targetKey=event?.target ? 'original' : '';
-    const source=event?state?.calendar.find(e=>e.id===calendarSourceId(event.id))||event:undefined;
-    setDeleteId(null);setFormScope(scopeKey);setEditing(source?.id??null);setForm({title:source?.title||'',date:source?.date||selected,time:source?.time||'09:00',note:source?.note||'',targetKey});setOriginalTarget(source?.target);setPersonal(!!source?.ownerId);setExtra({participantIds:source?.participants?.map(p=>p.id)||[],remind:source?.remindMinutes?String(source.remindMinutes):'',repeat:source?.repeat?.every||'',until:source?.repeat?.until||''});setFailure('');
+    const original=event?state?.calendar.find(e=>e.id===calendarSourceId(event.id))||event:undefined;
+    source.current=original?stableJson(original):'';
+    setDeleteId(null);setFormScope(scopeKey);setEditing(original?.id??null);setForm({title:original?.title||'',date:original?.date||selected,time:original?.time||'09:00',note:original?.note||'',targetKey});setOriginalTarget(original?.target);setPersonal(!!original?.ownerId);setExtra({participantIds:original?.participants?.map(p=>p.id)||[],remind:original?.remindMinutes?String(original.remindMinutes):'',repeat:original?.repeat?.every||'',until:original?.repeat?.until||''});setFailure('');
   };
   const link = (target:MistTarget) => {
     rememberMistSource(route,{view:'calendar',scope:scopeKey,date:selected,mode,mineOnly});
@@ -95,17 +99,24 @@ export function CalendarPage() {
     if(locked.current||!state||loading||saving||pending||formScope!==scopeKey)return;const invalid=calendarFormError(form);if(invalid){setFailure(invalid);return;}
     const target=form.targetKey==='original'?originalTarget:targets.find(choice=>choice.value===form.targetKey)?.target;
     if(form.targetKey&&form.targetKey!=='original'&&!target){setFailure('关联业务已不可用，请重新选择或取消关联');return;}
+    const checked=liveSource.current,current=checked.state?.calendar.find(event=>event.id===editing),revision=checked.revision;
+    // A refreshed workspace cannot lend its revision to an older calendar form.
+    if(editing&&(!current||source.current!==stableJson(current))){setFailure('日程已更新，请重新打开后核对');return;}
+    if(typeof revision!=='number'||!Number.isSafeInteger(revision)||revision<0){setFailure('日程资料不可用，请重新读取后核对');return;}
     const ticket=++sequence.current,owns=()=>live.current&&scope.current===scopeKey&&sequence.current===ticket;
     locked.current=true;setBusy(true);setFailure('');
-    try {await run({type:'calendar.save',payload:{...(editing?{id:editing}:{}),title:form.title.trim(),date:form.date,time:form.time,note:form.note,...(target?{target}:{}),...(personal?{personal:true}:editing&&state?.calendar.find(e=>e.id===editing)?.ownerId?{personal:false}:{}),...calendarExtras(extra,editing?state?.calendar.find(e=>e.id===editing):undefined)}});if(owns()){setSelected(form.date);setEditing(undefined);toast(editing?'日程已更新':'日程已创建');}}
+    try {await run({type:'calendar.save',payload:{...(editing?{id:editing}:{}),title:form.title.trim(),date:form.date,time:form.time,note:form.note,...(target?{target}:{}),...(personal?{personal:true}:current?.ownerId?{personal:false}:{}),...calendarExtras(extra,current)}},{expectedRevision:revision});if(owns()){setSelected(form.date);setEditing(undefined);toast(editing?'日程已更新':'日程已创建');}}
     catch(cause){if(owns())setFailure(cause instanceof Error?cause.message:'日程保存失败，请重试');}
     finally{if(owns()){locked.current=false;setBusy(false);}}
   };
   const remove = async () => {
     if(!deleteId || deleteId!==activeEditing || formScope!==scopeKey || locked.current || loading || saving || pending)return;
+    const checked=liveSource.current,current=checked.state?.calendar.find(event=>event.id===deleteId),revision=checked.revision;
+    if(!current||source.current!==stableJson(current)){setDeleteId(null);setFailure('日程已更新，请重新打开后核对');return;}
+    if(typeof revision!=='number'||!Number.isSafeInteger(revision)||revision<0){setDeleteId(null);setFailure('日程资料不可用，请重新读取后核对');return;}
     const id=deleteId,ticket=++sequence.current,owns=()=>live.current&&scope.current===scopeKey&&sequence.current===ticket;
     setDeleteId(null);locked.current=true;setBusy(true);setFailure('');
-    try {await run({type:'calendar.delete',payload:{id}});if(owns()){setEditing(undefined);toast('日程已删除');}}
+    try {await run({type:'calendar.delete',payload:{id}},{expectedRevision:revision});if(owns()){setEditing(undefined);toast('日程已删除');}}
     catch(cause){if(owns())setFailure(cause instanceof Error?cause.message:'日程删除失败');}
     finally{if(owns()){locked.current=false;setBusy(false);}}
   };
