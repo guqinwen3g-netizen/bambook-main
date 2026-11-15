@@ -2,18 +2,19 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getByRole } from '@testing-library/dom';
 import { applyMistCommand, createMistState, type MistCommand } from '../../../../server/src/shared/mistWorkspace';
 import { CalendarPage, calendarFormError, calendarWeek } from './CalendarPage';
 import { Nav, type Route } from '../nav';
 
-const bridge=vi.hoisted(()=>({current:null as any,sessionKey:'session-a'}));
+const bridge=vi.hoisted(()=>({current:null as any,sessionKey:'session-a',userId:'owner'}));
 vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>bridge.current}));
-vi.mock('../runtime/auth', () => { const useMistSession = ()=>({sessionKey:bridge.sessionKey}); return { useMistSession, useOptionalMistSession: useMistSession }; });
+vi.mock('../runtime/auth', () => { const useMistSession = ()=>({sessionKey:bridge.sessionKey,user:{id:bridge.userId,displayName:'当前日程用户'}}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
 const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
 const originalTarget={view:'development/detail',id:'dev-a',versionId:'original-version'};
 beforeEach(()=>{
-  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;go.mockReset();bridge.sessionKey='session-a';let sequence=0;
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;go.mockReset();bridge.sessionKey='session-a';bridge.userId='owner';let sequence=0;
   const context={id:()=>`calendar-${++sequence}`,now:new Date().toISOString(),actorName:'日程创建人'};
   const state=createMistState(context,'empty');state.calendar=[{id:'event-a',title:'已保存的评审',date:today(),time:'14:00',note:'原始说明',target:originalTarget}];
   bridge.current={state,workspace:{id:'workspace-a',revision:0},loading:false,saving:false,error:'',pending:null,refresh:vi.fn(async()=>{}),recover:vi.fn(),run:vi.fn(async(command:MistCommand)=>{const result=applyMistCommand(bridge.current.state,command,context);bridge.current.state=result.state;return{requestId:'request-a',revision:1,result:result.result};})};
@@ -76,7 +77,7 @@ describe('Mist calendar',()=>{
     expect([...host.querySelectorAll('button')].find(button=>button.textContent?.trim()==='新建日程')?.disabled).toBe(true);
   });
   it('recovers the original calendar command without issuing a second save',async()=>{
-    await mount();await click('已保存的评审');bridge.current.pending={kind:'command',command:{type:'calendar.save'}};bridge.current.recover.mockResolvedValue({requestId:'original',revision:2,result:{id:'event-a'}});await act(async()=>root!.render(view()));
+    await mount();await click('已保存的评审');bridge.current.pending={kind:'command',command:{type:'calendar.save',payload:{id:'event-a',title:'已保存的评审',date:today(),time:'14:00',note:'原始说明'}}};bridge.current.recover.mockResolvedValue({requestId:'original',revision:2,result:{id:'event-a'}});await act(async()=>root!.render(view()));
     await click('核对原操作结果');expect(bridge.current.run).not.toHaveBeenCalled();expect(document.querySelector('[data-calendar-editor]')).toBeNull();
   });
   it.each(['workspace','session'])('clears the editor and its original target after a %s change',async kind=>{
@@ -145,4 +146,21 @@ it('preserves unknown-result recovery without duplicating a second pending warni
 });
 it('does not carry a discarded form failure into the calendar after cancel',async()=>{
   bridge.current.run.mockRejectedValueOnce(new Error('该输入不能保存'));await mount();await click('已保存的评审');await click('保存日程');expect(host.textContent).toContain('该输入不能保存');await click('取消');expect(document.querySelector('[data-calendar-editor]')).toBeNull();expect(host.textContent).not.toContain('该输入不能保存');expect(host.textContent).not.toContain('日程操作未完成');
+});
+it('selects the original saved date after recovering a future appointment without another save',async()=>{
+  const event={id:'future',title:'月度排程',date:'2026-12-31',time:'09:30',note:''};bridge.current.state.calendar.push(event);bridge.current.pending={kind:'command',command:{type:'calendar.save',payload:{title:event.title,date:event.date,time:event.time,note:''}}};bridge.current.recover.mockResolvedValue({requestId:'created',revision:1,result:{id:event.id}});
+  await mount('2026-11-18');await click('核对原操作结果');expect(host.querySelector('.mist-week [aria-pressed="true"] b')?.textContent).toBe('31');expect(host.textContent).toContain('月度排程');expect(bridge.current.run).not.toHaveBeenCalled();
+});
+function personalFixture(){bridge.current.state.members=[{userId:'owner',name:'陆衡'},{userId:'participant',name:'顾言'},{userId:'other',name:'陈晓'}];Object.assign(bridge.current.state.calendar[0],{ownerId:'owner',owner:'陆衡',participants:[{id:'participant',name:'顾言'}]});}
+it('lets participants edit content while disabling owner-only publication, recipients and deletion',async()=>{
+  personalFixture();bridge.userId='participant';await mount();await click('已保存的评审');const form=document.querySelector<HTMLElement>('[data-calendar-editor]')!;
+  expect((getByRole(form,'checkbox',{name:'仅本人与参与人可见'}) as HTMLInputElement).disabled).toBe(true);expect((getByRole(form,'button',{name:'删除日程'}) as HTMLButtonElement).disabled).toBe(true);
+  const group=getByRole(form,'group',{name:'参与人'});expect([...group.querySelectorAll('input')].every(input=>input.disabled)).toBe(true);expect((getByRole(form,'textbox',{name:'安排说明'}) as HTMLTextAreaElement).disabled).toBe(false);await fill('安排说明','参与人补充资料');expect(bridge.current.run).not.toHaveBeenCalled();
+});
+it('keeps personal-owner controls enabled and prevents privatizing an existing shared appointment',async()=>{
+  personalFixture();await mount();await click('已保存的评审');let form=document.querySelector<HTMLElement>('[data-calendar-editor]')!;expect((getByRole(form,'checkbox',{name:'仅本人与参与人可见'}) as HTMLInputElement).disabled).toBe(false);expect((getByRole(form,'button',{name:'删除日程'}) as HTMLButtonElement).disabled).toBe(false);await click('取消');delete bridge.current.state.calendar[0].ownerId;delete bridge.current.state.calendar[0].owner;await act(async()=>root!.render(view()));await click('已保存的评审');form=document.querySelector<HTMLElement>('[data-calendar-editor]')!;expect((getByRole(form,'checkbox',{name:'仅本人与参与人可见'}) as HTMLInputElement).disabled).toBe(true);expect((getByRole(form,'button',{name:'删除日程'}) as HTMLButtonElement).disabled).toBe(false);await click('取消');await click('新建日程');form=document.querySelector<HTMLElement>('[data-calendar-editor]')!;expect((getByRole(form,'checkbox',{name:'仅本人与参与人可见'}) as HTMLInputElement).disabled).toBe(false);
+});
+it('does not move a new company calendar when an old company recovery finishes late',async()=>{
+  let finish!:(result:any)=>void;bridge.current.pending={kind:'command',command:{type:'calendar.save',payload:{title:'旧公司月度安排',date:'2026-12-31',time:'09:30',note:''}}};bridge.current.recover.mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
+  await mount('2026-11-18');await click('核对原操作结果');bridge.current.workspace={id:'workspace-b',revision:0};bridge.current.state={...bridge.current.state,calendar:[]};bridge.current.pending=null;await act(async()=>root!.render(view('2027-02-15')));await act(async()=>finish({requestId:'old',revision:1,result:{id:'old'}}));expect(host.querySelector('.mist-week [aria-pressed="true"] b')?.textContent).toBe('15');expect(bridge.current.run).not.toHaveBeenCalled();
 });
