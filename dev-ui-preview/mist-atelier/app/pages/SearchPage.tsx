@@ -36,9 +36,9 @@ export function SearchPage() {
           const rows = hits.filter(h => h.group === g), full = group !== 'all' || expanded === g, visible = full ? rows : rows.slice(0, PREVIEW);
           return <section key={g} className="mist-section"><Card>
             <div className="mist-card-h"><b>{g}</b><span className="mist-note">{rows.length}{uiText(" 条")}</span></div>
-            <div role="list" aria-label={uiText(g)}>{visible.map(hit => <button key={hit.view + hit.id} type="button" role="listitem" className="mist-palette-it" style={{ width: '100%' }} onClick={() => open(hit)}>
-              <span>{uiText(hit.label)}</span>{hit.hint && <small>{uiText(hit.hint)}</small>}
-            </button>)}</div>
+            <div role="list" aria-label={uiText(g)}>{visible.map(hit => <div key={hit.view + hit.id} role="listitem"><button type="button" className="mist-palette-it" style={{ width: '100%' }} onClick={() => open(hit)}>
+              <span>{uiText(hit.label)}</span>{hit.hint && <>{' '}<small>{uiText(hit.hint)}</small></>}
+            </button></div>)}</div>
             {!full && rows.length > PREVIEW && <div className="mist-card-body"><Button variant="quiet" size="sm" onClick={() => setExpanded(g)}>{uiText("显示全部 ")}{rows.length}{uiText(" 条")}</Button></div>}
           </Card></section>;
         })}
