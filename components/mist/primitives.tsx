@@ -104,30 +104,42 @@ export function Segmented<V extends string>({ options, value, onChange, ariaLabe
     </div>
   );
 }
+/** 横向标签键盘：tablist 的直接子按钮复用，左右键/Home/End 只移动焦点，原生按钮确认切换。 */
+export function useTabNavigation<V extends string>(values: readonly V[], value: V) {
+  const [focusValue, setFocusValue] = React.useState(value);
+  const entry = values.includes(value) ? value : values[0];
+  const stop = values.includes(focusValue) ? focusValue : entry;
+  React.useEffect(() => setFocusValue(value), [value]);
+  const listProps = { onBlur: (event: React.FocusEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.contains(event.relatedTarget) && entry !== undefined) setFocusValue(entry);
+  } };
+  // Focus navigation must not trigger data fetching, domain resets or other business-page callbacks.
+  const tabProps = (tabValue: V) => ({
+    tabIndex: tabValue === stop ? 0 : -1,
+    onFocus: () => setFocusValue(tabValue),
+    onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => {
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      const index = values.indexOf(tabValue);
+      const next = event.key === 'ArrowRight' ? (index + 1) % values.length
+        : event.key === 'ArrowLeft' ? (index + values.length - 1) % values.length
+        : event.key === 'Home' ? 0 : event.key === 'End' ? values.length - 1 : -1;
+      if (index < 0 || next < 0) return;
+      event.preventDefault();
+      const tabs = Array.from(event.currentTarget.parentElement?.children ?? [])
+        .filter((element): element is HTMLButtonElement => element instanceof HTMLButtonElement && element.getAttribute('role') === 'tab');
+      tabs[next]?.focus();
+    },
+  });
+  return { listProps, tabProps };
+}
 /** 页面级标签：左右键/Home/End 移动焦点，Enter/Space 或点击切换；Tab 进出只停一项。 */
 export function Tabs<V extends string>({ options, value, onChange }: { options: Option<V>[]; value: V; onChange: (v: V) => void }) {
-  const [focusValue, setFocusValue] = React.useState(value);
-  const buttons = React.useRef(new Map<V, HTMLButtonElement>());
-  const entry = options.find(option => option.value === value)?.value ?? options[0]?.value;
-  const stop = options.some(option => option.value === focusValue) ? focusValue : entry;
-  React.useEffect(() => setFocusValue(value), [value]);
-  // Focus navigation is separate from activation: changing a business page may fetch data or reset a form.
-  const move = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
-    if (event.altKey || event.ctrlKey || event.metaKey) return;
-    const next = event.key === 'ArrowRight' ? (index + 1) % options.length
-      : event.key === 'ArrowLeft' ? (index + options.length - 1) % options.length
-      : event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1 : -1;
-    if (next < 0) return;
-    event.preventDefault(); buttons.current.get(options[next].value)?.focus();
-  };
+  const keyboard = useTabNavigation(options.map(option => option.value), value);
   return (
-    <div className="mist-tabs" role="tablist" data-mist-scroll="x" onBlur={event => {
-      if (!event.currentTarget.contains(event.relatedTarget) && entry !== undefined) setFocusValue(entry);
-    }}>
-      {options.map((o, index) => (
-        <button key={o.value} ref={button => { if (button) buttons.current.set(o.value, button); else buttons.current.delete(o.value); }}
-          type="button" role="tab" aria-selected={o.value === value} tabIndex={o.value === stop ? 0 : -1}
-          onFocus={() => setFocusValue(o.value)} onKeyDown={event => move(event, index)} onClick={() => onChange(o.value)}>
+    <div className="mist-tabs" role="tablist" data-mist-scroll="x" {...keyboard.listProps}>
+      {options.map(o => (
+        <button key={o.value} type="button" role="tab" aria-selected={o.value === value}
+          {...keyboard.tabProps(o.value)} onClick={() => onChange(o.value)}>
           {o.icon && <Icon icon={o.icon} size="sm" />}{uiText(o.label)}{o.count != null && <span className="mist-tab-count">{o.count}</span>}
         </button>
       ))}

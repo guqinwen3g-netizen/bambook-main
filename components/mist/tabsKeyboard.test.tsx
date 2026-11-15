@@ -2,7 +2,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { Tabs } from './primitives';
+import { CardButton, Tabs, useTabNavigation } from './primitives';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 const options = [{ value: 'orders', label: '订单' }, { value: 'payments', label: '付款' }, { value: 'history', label: '历史' }];
@@ -51,4 +51,23 @@ it('leaves vertical scrolling, modifier shortcuts and other keys to the browser'
   for (const value of ['ArrowDown', 'ArrowUp', 'Enter', ' ', 'Tab']) expect((await key(buttons()[0], value)).defaultPrevented).toBe(false);
   expect((await key(buttons()[0], 'ArrowRight', { ctrlKey: true })).defaultPrevented).toBe(false);
   expect(document.activeElement).toBe(buttons()[0]); expect(change).not.toHaveBeenCalled();
+});
+
+it('uses the same manual navigation for existing domain cards without changing their structure or business selection', async () => {
+  const change = vi.fn();
+  function Domains() {
+    const [value, setValue] = React.useState('fabric'), navigation = useTabNavigation(['fabric', 'garment'], value);
+    return <><div className="mist-domains" role="tablist" {...navigation.listProps}>
+      {['fabric', 'garment'].map(domain => <CardButton key={domain} role="tab" aria-selected={domain === value} className="mist-domain"
+        {...navigation.tabProps(domain)} onClick={() => { change(domain); setValue(domain); }}>
+        <span className="mist-domain-h">{domain}</span><span className="mist-domain-nums">12</span>
+      </CardButton>)}
+    </div><input aria-label="搜索" /></>;
+  }
+  await act(async () => root.render(<Domains />)); const [fabric, garment] = buttons();
+  expect(fabric.className).toBe('mist-card mist-domain'); expect(fabric.querySelector('.mist-domain-nums')?.textContent).toBe('12');
+  await act(async () => fabric.focus()); await key(fabric, 'ArrowRight');
+  expect(document.activeElement).toBe(garment); expect(garment.tabIndex).toBe(0); expect(fabric.getAttribute('aria-selected')).toBe('true'); expect(change).not.toHaveBeenCalled();
+  await act(async () => garment.click()); expect(change.mock.calls).toEqual([['garment']]); expect(garment.getAttribute('aria-selected')).toBe('true');
+  await act(async () => host.querySelector('input')!.focus()); expect(buttons().map(b => b.tabIndex)).toEqual([-1, 0]);
 });

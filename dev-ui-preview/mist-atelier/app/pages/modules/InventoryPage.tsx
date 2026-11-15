@@ -7,7 +7,7 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 库存与仓储：面料 / 成衣业务组各自的实物台账；按单位分开汇总，详情为“事实 → 可做的动作 → 流水”。 */
 import React from 'react';
 import { ArrowRightLeft, Bookmark, Boxes, ClipboardCheck, Download, Layers, PackageMinus, PackagePlus, Plus, SearchX, Shirt, Trash2, Truck, Undo2, Warehouse } from 'lucide-react';
-import { Banner, Button, Card, CardButton, DataTable, Dropdown, EmptyState, Facts, KeyValue, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Select, TextLink, Tile, Timeline, Toolbar, type Column, type Tone } from '../../../../../components/mist';
+import { Banner, Button, Card, CardButton, useTabNavigation, DataTable, Dropdown, EmptyState, Facts, KeyValue, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Select, TextLink, Tile, Timeline, Toolbar, type Column, type Tone } from '../../../../../components/mist';
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentStock } from '../../../../../server/src/shared/mistFulfillment';
 import { freeQuantity, fulfillmentPositions, fulfillmentSourceLabel, OTHER_RECEIPT_REASONS, reservationOpen, stockIssueRemaining, stockReservedQuantity } from '../../../../../server/src/shared/mistFulfillment';
@@ -87,6 +87,7 @@ export function InventoryPage() {
   const sourceMode = !!route.section||!!receipt;
   const routedDomain = state && incomingStock ? domainOf(state, incomingStock) : undefined;
   const domain: Domain = domainChoice || routedDomain || (!state || scoped.some(stock => domainOf(state, stock) === 'garment') || !scoped.some(stock => domainOf(state, stock) === 'fabric') ? 'garment' : 'fabric');
+  const domainTabs = useTabNavigation(['fabric', 'garment'] as const, domain);
   const domainRows = sourceMode || !state ? scoped : scoped.filter(stock => { const value = domainOf(state, stock); return !value || value === domain; });
   const needle = query.trim().toLowerCase();
   const purchaseOf = (stock: FulfillmentStock) => f?.purchases.find(purchase => purchase.id === stock.purchaseId);
@@ -241,8 +242,8 @@ export function InventoryPage() {
       </div>
       {can && receivingBlocked && receivingReason && !['请先选择退货条目','本条目已全部收货'].includes(receivingReason) && <span className="mist-note">{uiText("登记收货：")}{receivingReason}</span>}
     </div></Card></div>}
-    {!sourceMode && <div className="mist-domains" role="tablist" aria-label={uiText("库存业务板块")}>
-      {(['fabric', 'garment'] as const).map(value => { const m = metrics(value); return <CardButton key={value} role="tab" aria-selected={domain === value} className="mist-domain" onClick={() => changeDomain(value)}>
+    {!sourceMode && <div className="mist-domains" role="tablist" aria-label={uiText("库存业务板块")} {...domainTabs.listProps}>
+      {(['fabric', 'garment'] as const).map(value => { const m = metrics(value); return <CardButton key={value} role="tab" aria-selected={domain === value} className="mist-domain" {...domainTabs.tabProps(value)} onClick={() => changeDomain(value)}>
         <span className="mist-domain-h"><Tile icon={value === 'fabric' ? Layers : Shirt} tone={domain === value ? 'accent' : undefined} /><b>{DOMAIN_LABEL[value]}</b><span className="mist-spacer" /><span className="mist-note">{m.count}{uiText(" 个批次 · 按单位分开")}</span></span>
         <span className="mist-domain-nums">
           <span><small>{uiText("可用")}</small><UnitLines totals={m.available} /></span>

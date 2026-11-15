@@ -53,6 +53,7 @@
 | `Kbd` | — | `({ children }: { children: React.ReactNode })` |
 | `Option` | — | `type Option<V extends string> = { value: V; label?: React.ReactNode; icon?: LucideIcon; ariaLabel?: string; count?: number };` |
 | `Segmented` | 分段器：2–4 个互斥视图（今天/本周、列表/看板）。 | `({ options, value, onChange, ariaLabel }: { options: Option<V>[]; value: V; onChange: (v: V) => void; ariaLabel?: string })` |
+| `useTabNavigation` | 横向标签键盘：tablist 的直接子按钮复用，左右键/Home/End 只移动焦点，原生按钮确认切换。 | `(values: readonly V[], value: V)` |
 | `Tabs` | 页面级标签：左右键/Home/End 移动焦点，Enter/Space 或点击切换；Tab 进出只停一项。 | `({ options, value, onChange }: { options: Option<V>[]; value: V; onChange: (v: V) => void })` |
 | `useAvatarSource` | 预设头像（dicebear:v1:…）按需加载生成器，转为可直接显示的 SVG 地址；普通图片地址原样返回。 | `(src?: string \| null, onError?: () => void): string \| undefined` |
 | `Avatar` | — | `({ name, src, tone, size, identityKey }: { name: string; src?: string \| null; tone?: Tone; size?: 'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl'; identityKey?: string })` |
@@ -205,4 +206,4 @@
 | `cx` | — | `(...parts: Array<string \| false \| null \| undefined>)` |
 
 
-共 142 个导出声明（109 个组件/函数/值，33 个类型）。重导出别名不重复计数。
+共 143 个导出声明（110 个组件/函数/值，33 个类型）。重导出别名不重复计数。

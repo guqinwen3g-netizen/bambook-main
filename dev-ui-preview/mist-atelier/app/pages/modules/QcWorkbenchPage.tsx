@@ -3,7 +3,7 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** QC 工作台：先选面料 / 成衣专业板块，再分样品评审 / 生产检验；任务按工厂与检查地点分组，详情承接报告、门禁与业务恢复。 */
 import React from 'react';
 import { CalendarClock, ChevronDown, ChevronRight, ClipboardCheck, Columns3, Layers, List, Plus, RefreshCw, Repeat2, SearchX, Shirt, UserRoundCheck } from 'lucide-react';
-import { FormFooter, BackLink, Banner, Button, Card, CardBody, CardButton, CardHeader, DataTable, Dialog, Dropdown, EmptyState, Facts, Field, FormGrid, Icon, Kanban, MeasurementTable, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Select, Tabs, TextArea, TextInput, Tile, Toolbar, UploadZone, useToast, type Tone } from '../../../../../components/mist';
+import { FormFooter, BackLink, Banner, Button, Card, CardBody, CardButton, useTabNavigation, CardHeader, DataTable, Dialog, Dropdown, EmptyState, Facts, Field, FormGrid, Icon, Kanban, MeasurementTable, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Select, Tabs, TextArea, TextInput, Tile, Toolbar, UploadZone, useToast, type Tone } from '../../../../../components/mist';
 import { developmentDomain } from '../../../../../server/src/shared/mistDevelopmentDomain';
 import {fabricQcFacts,type FabricFactDraft} from '../fabricQcFacts';
 import type { MistCommand, MistQc, MistState } from '../../../../../server/src/shared/mistWorkspace';
@@ -112,6 +112,7 @@ export function QcWorkbenchPage() {
   const liveSource=React.useRef({state,workspaceId:workspace?.id,revision:workspace?.revision??0});
   liveSource.current={state,workspaceId:workspace?.id,revision:workspace?.revision??0};
   const [domain, setDomain] = React.useState<Domain>(() => session.hasPermission('qc:fabric_chain:write') && !session.hasPermission('qc:garment_chain:write') ? 'fabric' : 'garment'), [kind, setKind] = React.useState<Kind>('sample');
+  const domainTabs = useTabNavigation(['fabric', 'garment'] as const, domain);
   const [query, setQuery] = React.useState(''), [stateFilter, setStateFilter] = React.useState<StateFilter>('all'), [owner, setOwner] = React.useState<Owner>('all'), [mode, setMode] = React.useState<'groups' | 'board'>('groups');
   const [selected, setSelected] = useRouteDraft(route.id || ''), [reportTaskId, setReportTaskId] = useRouteDraft(''), [failure, setFailure] = useRouteDraft('');
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null), [drawer, setDrawer] = React.useState(!!route.id), [collapsed, setCollapsed] = React.useState<string[]>([]), [busy, setBusy] = React.useState(false);
@@ -260,8 +261,8 @@ export function QcWorkbenchPage() {
         {canRequest ? <Button variant="primary" icon={Plus} onClick={request}>{uiText("从来源发起QC")}</Button> : <span className="mist-note">{uiText('送检由业务员在准确来源发起')}</span>}
       </>} />
     {(error || failure) && <FailureNotice title="QC操作未完成" detail={failure || error} retry={error ? () => void refresh() : undefined} />}
-    <div className="mist-domains" role="tablist" aria-label={uiText("QC 专业板块")}>
-      {(['fabric', 'garment'] as const).map(value => { const m = metrics[value]; return <CardButton key={value} role="tab" aria-selected={domain === value} className="mist-domain" onClick={() => changeDomain(value)}>
+    <div className="mist-domains" role="tablist" aria-label={uiText("QC 专业板块")} {...domainTabs.listProps}>
+      {(['fabric', 'garment'] as const).map(value => { const m = metrics[value]; return <CardButton key={value} role="tab" aria-selected={domain === value} className="mist-domain" {...domainTabs.tabProps(value)} onClick={() => changeDomain(value)}>
         <span className="mist-domain-h"><Tile icon={value === 'fabric' ? Layers : Shirt} tone={domain === value ? 'accent' : undefined} /><b>{DOMAIN_LABEL[value]}</b><span className="mist-spacer" /><span className="mist-note">{uiText(canQc(value) ? '可处理' : '只读')}{uiText(" · 共 ")}{m.total}{uiText(" 条")}</span></span>
         <span className="mist-domain-nums">
           <span><small>{uiText("待处理样品")}</small><b>{m.samples}</b></span>
