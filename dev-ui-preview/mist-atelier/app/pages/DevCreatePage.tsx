@@ -120,7 +120,7 @@ export function DevCreatePage(){
   const recovery=pending?<Button loading={busy||saving} onClick={()=>void recoverWrite()}>{uiText("核对原操作结果")}</Button>:null;
   const back=()=>dirty?setLeave(true):backToSource();
   return <MistPage>
-    <BackLink onClick={back}>{uiText(route.customerId?'返回客户档案':'开发与寻样')}</BackLink>
+    <BackLink onClick={back} onTopbarBack={back}>{uiText(route.customerId?'返回客户档案':'开发与寻样')}</BackLink>
     <PageHeader eyebrow={ui`订单履约 · ${fabricDomain?'面料开发':'成衣开发'}`} title={uiText(draftId?'继续开发草稿':fabricDomain?'新建面料开发案':'新建成衣开发案')} actions={<Button variant="quiet" loading={busy} disabled={!state} onClick={()=>void save(false)}>{uiText("存为草稿")}</Button>} />
     {(message||error)&&<FailureNotice title={"暂时无法保存"} detail={message||error} />}
     {pending&&!saving&&<div className="mist-section"><Banner tone="warn" title={uiText("原操作结果尚待核对")} actions={recovery}>{uiText("请先核对已发出的请求，避免重复创建。")}</Banner></div>}

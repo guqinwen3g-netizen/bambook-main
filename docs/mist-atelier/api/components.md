@@ -18,7 +18,7 @@
 | `MistAppShell` | 整站外壳：侧栏 + 圆角画布（顶栏 + 滚动区）。 children 放 <MistPage>。scrollKey 变化时滚动回顶部（切换页面时传 view id）。 notices：外壳级状态（读取失败、待核对请求、公司管理模式等）。浮在顶栏下方、盖住内容顶端，不进入页面流， 出现或消失时页面标题与模块不移动。页面内与具体对象相关的提示仍由页面自己放。 | `({ sidebar, topbar, collapsed, children, scrollKey, notices, onCloseNotices }: { sidebar: React.ReactNode; topbar: (scrolled: boolean) => React.ReactNode; collapsed?: boolean; children: React.ReactNode; scrollKey?: string; notices?: React.ReactNode; onCloseNotices?: () => void })` |
 | `MistPage` | 页面容器：最大宽 1240，入场动画。width='narrow' 用于表单/设置，'wide' 用于看板。 | `({ children, width }: { children: React.ReactNode; width?: 'narrow' \| 'wide' })` |
 | `PageHeader` | 页头：eyebrow（所属分组）+ 标题 + 一句话说明 + 右侧操作（最多 1 个 primary）。 | `({ eyebrow, title, description, actions, variant }: { eyebrow?: React.ReactNode; title: React.ReactNode; description?: React.ReactNode; actions?: React.ReactNode; variant?: 'greeting' })` |
-| `BackLink` | — | `({ children, onClick }: { children: React.ReactNode; onClick: () => void })` |
+| `BackLink` | — | `({ children, onClick, onTopbarBack }: { children: React.ReactNode; onClick: () => void; onTopbarBack?:()=>void })` |
 | `Toolbar` | — | `({ children, right }: { children?: React.ReactNode; right?: React.ReactNode })` |
 | `MistSplash` | 启动画面（应用首次加载）。 | `({ visible }: { visible: boolean })` |
 

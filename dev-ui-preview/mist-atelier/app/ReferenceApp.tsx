@@ -6,6 +6,7 @@ import { AccountAccessPage } from './pages/AccountAccessPage';
 import { ManualLink } from './pages/ManualLink';
 import { exitCompanyManagement } from './runtime/platformAdmin';
 import React from 'react';
+import {PageBackRegistrationContext,usePageBackAction} from '../../../components/mist/pageBack';
 import { buildPages, MODULE_VIEW_SET, PageLoadBoundary, AccountPage, PlatformSettingsPage, PlatformCompanySettingsPage } from './pageRegistry';
 import { PageLoading } from './PageLoading';
 import { ExportConfirmHost } from './runtime/ExportConfirmHost';
@@ -377,6 +378,10 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
     go(target.view, target.id, target.target);
   }
   const nav = { route, go, theme, toggleTheme, openPalette: () => setPalette(true), openAI };
+  const {register:registerPageBack,back:goBack}=usePageBackAction(()=>{
+    if((Number(history.state?.mistDepth)||0)>0)history.back();
+    else if(route.view.includes('/'))go(route.view.split('/')[0]);
+  });
   // 找回密码：公司员工与平台人员同一页面；platform-recovery 仅为兼容旧链接。
   if (['account-access','account-recovery','platform-recovery'].includes(route.view)) return <Nav.Provider value={nav}><AccountAccessPage key={route.view}/></Nav.Provider>;
   if (route.view === 'register' && publicEntryForHost(location.host) !== 'platform') return <Nav.Provider value={nav}><RegisterPage/></Nav.Provider>;
@@ -400,7 +405,6 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
     : PAGES[route.view] ?? null;
   // 二级页（详情 / 新建）：应用内有上一页时按历史返回，直接打开链接时回到所属模块。
   const backTarget = route.view.includes('/') ? { view: base, label: (module && productName(module)) ?? LABELS[base] ?? '' } : null;
-  const goBack = () => { if ((Number(history.state?.mistDepth) || 0) > 0) history.back(); else if (backTarget) go(backTarget.view); };
   const user = session.user!;
   const workspaceProfileName = state?.settings.profileName?.trim() || '';
   const name = (workspace.workspace?.ownerId === user.id ? workspaceProfileName : '') || user.displayName || user.email;
@@ -427,7 +431,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const shellNotices = (shellNoticeList.length && !noticesHidden) || toastNotice ? [...(noticesHidden ? [] : shellNoticeList), ...(toastNotice ? [toastNotice] : [])] : undefined;
   return (
     <AvatarDirectory people={[...(state?.members ?? []).map(member=>({id:member.userId,name:member.name})),...organization.teams.flatMap(team=>(team.members ?? []).map(person=>({id:person.id,name:person.name,src:person.avatarUrl}))),{id:user.id,name:user.displayName || user.email,src:user.avatarUrl}]}><Nav.Provider value={nav}><MistReviewProvider><MistDensityContext.Provider value={density||'default'}>
-      <MistAppShell collapsed={collapsed} scrollKey={scrollPosition.current.key} notices={shellNotices} onCloseNotices={() => setHiddenNoticeKey(shellNoticeKey)}
+      <PageBackRegistrationContext.Provider value={registerPageBack}><MistAppShell collapsed={collapsed} scrollKey={scrollPosition.current.key} notices={shellNotices} onCloseNotices={() => setHiddenNoticeKey(shellNoticeKey)}
         sidebar={<CountedSidebar sections={sections} activeId={base === 'development' ? 'development' : COMPANY_ADMIN_VIEWS.has(base) && !(platformOnly && ['system-settings','settings'].includes(base)) ? 'company-settings' : base}
           onNavigate={navigateModule} collapsed={collapsed} onToggleCollapsed={() => setCollapsed(value => !value)}
           workspace={platformOnly ? { symbol: 'S', name: 'Sylway Cloud', caption: '平台运营', onClick:()=>go('platform-admin') } : platformCompany ? { symbol: platformCompany.companyName.slice(0,1), name: platformCompany.companyName, caption: '平台管理', onClick:()=>go('company-settings') } : { ...organizationEntry({ organization:{...organization,teams:organization.teams.map(team=>({...team,members:team.members?.map(person=>person.id===user.id?{...person,avatarUrl:user.avatarUrl ?? undefined}:person)}))}, department: user.department, teamId: teamView.teamId, onSelect: id => { teamView.select(id); setOrganizationOpen(false); },
@@ -446,7 +450,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
           : !permitted ? <EmptyState icon={ShieldCheck} title={uiText("没有查看权限")} description={uiText("当前账号无法访问此业务。")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />
           : Page ? <TeamViewScope teamId={COMPANY_ADMIN_VIEWS.has(base) || base === 'account' ? 'all' : teamView.teamId} actorId={user.id} teams={organization.teams}><MistPresentedErrorContext.Provider value={workspace.error||undefined}><PageLoadBoundary resetKey={route.view} fallback={retry=><MistPage><Banner tone="bad" title={uiText('页面未能加载')} actions={<Button onClick={retry}>{uiText('重新加载')}</Button>}/></MistPage>}><React.Suspense fallback={<PageLoading />}><Page key={session.sessionKey + ':' + workspace.workspace?.id + ':' + (stablePageRoute?route.view:JSON.stringify(route))} /></React.Suspense></PageLoadBoundary></MistPresentedErrorContext.Provider></TeamViewScope>
           : <EmptyState title={uiText("没有找到此页面")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />}
-      </MistAppShell>
+      </MistAppShell></PageBackRegistrationContext.Provider>
       <ExportConfirmHost scope={JSON.stringify([session.sessionKey, user.id, user.companyId, user.roles, user.roleIds, user.permissions, user.permissionCeiling, user.businessAttributes, user.globalBusinessScope, workspace.workspace?.id, workspace.workspace?.access, teamView.teamId, route])} />
       <CommandPalette open={palette} onClose={() => setPalette(false)} query={query} onQueryChange={setQuery} items={commands} />
       <AssistantDrawer key={aiScope} open={ai} onClose={() => setAI(false)} onExpand={aiBusy?undefined:expandAI} messages={[overview(),...msgs,...(aiBusy?[{role:'typing'} as ChatMessage]:[])]} onSend={question=>void send(question)} sub={uiText(aiBusy?'正在生成':undefined)} suggestions={aiBusy?[]:['根据当前事实建议下一步','哪些信息还需要核实']} />

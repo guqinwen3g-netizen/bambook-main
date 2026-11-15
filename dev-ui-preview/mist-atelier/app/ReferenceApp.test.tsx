@@ -9,6 +9,7 @@ import type { MistState } from '../../../server/src/shared/mistWorkspace';
 import type { MistWorkspaceContext } from './runtime/workspace';
 
 const probes = vi.hoisted(() => ({ home: vi.fn(), development: vi.fn(), detail: vi.fn(), order: vi.fn(), customer: vi.fn(), settings: vi.fn() }));
+const pageBackProbe=vi.hoisted(()=>({enabled:false,guardTopbar:false}));
 const workspaces = vi.hoisted(() => ({ version: 0, listeners: new Set<() => void>(), actors: new Map<string, any>(), empty: null as any }));
 vi.mock('./runtime/workspace', async () => {
   const React = await import('react'), { useMistSession } = await import('./runtime/auth');
@@ -33,10 +34,11 @@ vi.mock('./pages/DevListPage', async () => {
   return { DevListPage: function List() { const workspace = useMistWorkspace(); probes.development(); return <section aria-label="开发列表测试接缝">{workspace.state?.devs.map(item => item.name).join(',')}</section>; } };
 });
 vi.mock('./pages/DevDetailPage', async () => {
-  const React = await import('react'), { useNav } = await import('./nav');
+  const React = await import('react'), { useNav } = await import('./nav'),{BackLink,Dialog}=await import('../../../components/mist');
   return { DevDetailPage: function Detail() {
-    const nav = useNav(); probes.detail(); const [draft, setDraft] = React.useState('');
+    const nav = useNav(); probes.detail(); const [draft, setDraft] = React.useState(''),[leaving,setLeaving]=React.useState(false);const back=()=>draft?setLeaving(true):nav.go('development');
     return <section aria-label="准确对象测试接缝"><output data-testid="exact-route">{JSON.stringify(nav.route)}</output>
+      {pageBackProbe.enabled&&<><BackLink onClick={back} onTopbarBack={pageBackProbe.guardTopbar?back:undefined}>页面自己的返回</BackLink><button onClick={()=>nav.go('orders/detail','order-a')}>转到订单测试页</button><Dialog open={leaving} title="离开测试草稿？" onClose={()=>setLeaving(false)}><button onClick={()=>setLeaving(false)}>继续编辑测试草稿</button></Dialog></>}
       <input aria-label="本批次草稿" value={draft} onChange={event => setDraft(event.target.value)} />
       <button onClick={() => nav.go('development/detail', nav.route.id, { versionId: 'version-a', batchId: 'batch-b', section: 'qc', customerId: 'customer-a', orderLineId: 'line-a', productionId: 'production-a' })}>切换同版本批次</button>
       <button onClick={() => nav.go('development/detail', nav.route.id, { versionId: 'version-b', batchId: 'batch-c', section: 'overview', customerId: 'customer-b', orderLineId: 'line-b', productionId: 'production-b' })}>切换工厂版本</button></section>;
@@ -118,6 +120,7 @@ async function openSearch() {
 }
 function searchInput() { return getByRole(getByRole(host!, 'dialog', { name: '搜索' }), 'textbox') as HTMLInputElement; }
 beforeEach(async () => {
+  pageBackProbe.enabled=false;pageBackProbe.guardTopbar=false;
   Object.values(probes).forEach(probe => probe.mockClear()); workspaces.actors.clear(); workspaces.listeners.clear(); workspaces.version++;
   workspaces.empty = { ...context('anonymous'), state: null, workspace: null, workspaces: [], loading: false };
   actor = null; override = undefined; requests = []; localStorage.clear(); sessionStorage.clear();
@@ -158,6 +161,18 @@ it.each(['design-system', 'states'])('does not expose the %s showcase through a 
 });
 
 describe('one Mist entry with real authentication and workspace state', () => {
+  it('lets the topbar back use the current page unsaved-change action before history navigation',async()=>{
+    pageBackProbe.enabled=true;pageBackProbe.guardTopbar=true;await signIn();await mount();await waitFor(()=>expect(probes.home).toHaveBeenCalled());await click(getByRole(host!,'button',{name:'打开准确版本'}));
+    const draft=getByRole(host!,'textbox',{name:'本批次草稿'}) as HTMLInputElement;input(draft,'尚未保存的开发参数');await click(getByRole(host!,'button',{name:'返回开发与寻样'}));
+    await waitFor(()=>expect(queryByRole(host!,'dialog',{name:'离开测试草稿？'})).not.toBeNull());expect(currentRoute().id).toBe('dev-a');expect(draft.value).toBe('尚未保存的开发参数');
+    await click(getByRole(host!,'button',{name:'继续编辑测试草稿'}));input(draft,'继续编辑后的开发参数');await click(getByRole(host!,'button',{name:'返回开发与寻样'}));expect(getByRole(host!,'dialog',{name:'离开测试草稿？'})).toBeTruthy();expect(draft.value).toBe('继续编辑后的开发参数');
+  });
+  it('removes a previous page back action before falling back to navigation history',async()=>{
+    pageBackProbe.enabled=true;pageBackProbe.guardTopbar=true;await signIn();await mount();await waitFor(()=>expect(probes.home).toHaveBeenCalled());await click(getByRole(host!,'button',{name:'打开准确版本'}));await click(getByRole(host!,'button',{name:'转到订单测试页'}));expect(currentRoute().view).toBe('orders/detail');await click(getByRole(host!,'button',{name:'返回订单管理'}));await waitFor(()=>expect(currentRoute().view).toBe('development/detail'));expect(currentRoute().id).toBe('dev-a');
+  });
+  it('keeps ordinary detail history navigation when a page has not opted into topbar handling',async()=>{
+    pageBackProbe.enabled=true;await signIn();await mount();await waitFor(()=>expect(probes.home).toHaveBeenCalled());await click(getByRole(host!,'button',{name:'打开准确版本'}));await click(getByRole(host!,'button',{name:'返回开发与寻样'}));await waitFor(()=>expect(queryByRole(host!,'region',{name:'首页测试接缝'})).not.toBeNull());expect(queryByRole(host!,'region',{name:'开发列表测试接缝'})).toBeNull();
+  });
   it('keeps the real search input and keyboard focus through URL query changes without executing business commands', async () => {
     vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} });
     await signIn(); history.replaceState(null, '', '/?view=search'); await mount();

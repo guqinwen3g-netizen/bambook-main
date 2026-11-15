@@ -13,6 +13,7 @@
 | 导航与访问 | 路由、页面可见性、公司管理分区 | `app/nav.tsx`、`app/routeAccess.ts`、`app/runtime/accountAccess.ts` |
 | 组件与样式 | Mist 组件库与令牌 | `components/mist/`、`styles/mist/`；规范见 `docs/mist-atelier/`、`.qoder/skills/bambook-ui/SKILL.md` |
 | 分步编辑焦点（2026-11-16） | 台账、独立出运、开发、报价与手工订单编辑器用同一轻量 Hook 在首次进入/换步交给当前可编辑控件，确认步或输入被 fieldset 禁用时交给具当前步骤名称的分组；来源刷新不重置输入焦点。页内日程、Dialog/Drawer 与移动独立操作栏分别验证 | `app/runtime/editorFocus.ts#useEditorStepFocus`；`ModuleWorkbench.tsx#ModuleEditorPage`、`ShipmentsPage.tsx#ShipmentEditor`、`DevCreatePage.tsx`、`MarketPages.tsx#QuotationEditor`、`OrderCreatePage.tsx` |
+| 顶部返回保护（2026-11-16） | `BackLink.onTopbarBack` 显式声明页面接管，顶部复用当前页的保护及业务回程；未声明者保留原历史/所属模块回退。动作保持最新且卸载清理，不以全局历史绕过开发页的未保存确认 | `components/mist/pageBack.ts#usePageBackAction`、`shell.tsx#BackLink`；`ReferenceApp.tsx`；`DevCreatePage.tsx` |
 | API | `/api/mist/*`：工作区、类型化命令、审批、文件、助手、MCP | `server/src/mist/route.ts`；端点清单见 [`server/src/mist/README.md`](../server/src/mist/README.md) |
 | 本地开发 | `npm run dev:mist`：本地 API 8082 + 前端 3001，数据在 `server/private/mist-local/`（不入库） | `server/src/mist/local.ts`、`standalone.ts` |
 | 员工手册 | `/manual/`（应用顶栏与账号页「使用手册」） | `scripts/manual-site.ts`，见第 7 节 |
