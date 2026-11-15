@@ -161,6 +161,9 @@ it.each(['design-system', 'states'])('does not expose the %s showcase through a 
 });
 
 describe('one Mist entry with real authentication and workspace state', () => {
+  it('does not label an unsaved local form as company data already saved',async()=>{
+    await signIn();await mount();await waitFor(()=>expect(probes.home).toHaveBeenCalled());await click(getByRole(host!,'button',{name:'打开准确版本'}));input(getByRole(host!,'textbox',{name:'本批次草稿'}) as HTMLInputElement,'尚未提交的开发参数');expect(host!.querySelector('.mist-sync')?.textContent||'').not.toContain('已保存');expect(workspaces.actors.get('staff-a').run).not.toHaveBeenCalled();
+  });
   it('lets the topbar back use the current page unsaved-change action before history navigation',async()=>{
     pageBackProbe.enabled=true;pageBackProbe.guardTopbar=true;await signIn();await mount();await waitFor(()=>expect(probes.home).toHaveBeenCalled());await click(getByRole(host!,'button',{name:'打开准确版本'}));
     const draft=getByRole(host!,'textbox',{name:'本批次草稿'}) as HTMLInputElement;input(draft,'尚未保存的开发参数');await click(getByRole(host!,'button',{name:'返回开发与寻样'}));

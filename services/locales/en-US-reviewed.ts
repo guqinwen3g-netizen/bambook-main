@@ -3,6 +3,7 @@ import { auditEnglish } from './en-US-audit';
 import {connectionEnglish} from './en-US-connections';
 import { mailReceivingEnglish } from './en-US-mail-receiving';
 export const reviewedEnglish: Record<string, string> = {
+  '查看提示': 'View notices',
   ...auditEnglish,
   ...connectionEnglish,
   ...mailReceivingEnglish,
