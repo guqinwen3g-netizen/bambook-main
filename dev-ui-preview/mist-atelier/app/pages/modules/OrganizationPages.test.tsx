@@ -277,6 +277,14 @@ describe('人事管理', () => {
   it('keeps the selected head and original snapshot when the server rejects a stale appointment',async()=>{
     headFixture();bridge.perms.push('users:admin');bridge.routes['PATCH /api/hr/departments/d1']=()=>{throw new Error('部门负责人已更新，请重新打开后核对。');};await render(HrOrganizationPage,'hr');await openDepartment();await click('修改部门');await type(document.querySelector('select[aria-label="部门负责人"]') as HTMLSelectElement,'u2');await click('保存');expect(document.body.textContent).toContain('部门负责人已更新，请重新打开后核对。');expect((document.querySelector('select[aria-label="部门负责人"]') as HTMLSelectElement).value).toBe('u2');expect(bridge.calls.find(c=>c.method==='PATCH'&&c.url==='/api/hr/departments/d1')?.body.expectedHeadId).toBe('u1');
   });
+  it('preserves the old input on conflict, then reopens the current department source for a fresh save',async()=>{
+    let peerChanged=false;const next='2026-11-15T00:00:01.000Z';bridge.routes['GET /api/hr/personnel']=()=>({ok:true,departments:departments.map(d=>d.id==='d1'&&peerChanged?{...d,updatedAt:next,businessAttributes:['fabric_business','marketing']}:d),personnel:[],jobs:[],positionNames:{}});
+    bridge.routes['PATCH /api/hr/departments/d1']=(body:any)=>{peerChanged=true;if(body.expectedUpdatedAt!==next)throw new Error('部门资料已更新，请重新打开后核对。');return{ok:true,result:{}};};
+    await render(HrOrganizationPage,'hr');await openDepartment();await click('修改部门');await type(labelled('部门名称'),'面料一部');await click('保存');expect(document.body.textContent).toContain('部门资料已更新，请重新打开后核对。');expect(labelled('部门名称').value).toBe('面料一部');await click('取消');await click('修改部门');await type(labelled('部门名称'),'面料一部');await click('保存');expect(bridge.calls.filter(c=>c.method==='PATCH'&&c.url==='/api/hr/departments/d1').at(-1)?.body).toEqual({name:'面料一部',businessAttributes:['fabric_business','marketing'],expectedUpdatedAt:next});
+  });
+  it('allows closing a rejected editor while its source refresh is still waiting',async()=>{
+    let resolve!:(value:any)=>void,reads=0;const waiting=new Promise(resolveRead=>{resolve=resolveRead;}),base={ok:true,departments,personnel:[],jobs:[],positionNames:{}};bridge.routes['GET /api/hr/personnel']=()=>++reads>1?waiting:base;bridge.routes['PATCH /api/hr/departments/d1']=()=>{throw new Error('部门资料已更新，请重新打开后核对。');};await render(HrOrganizationPage,'hr');await openDepartment();await click('修改部门');await type(labelled('部门名称'),'面料一部');await click('保存');expect(button('保存')!.disabled).toBe(true);expect(button('取消')!.disabled).toBe(false);expect(labelled('部门名称').value).toBe('面料一部');await click('取消');expect(button('修改部门')!.disabled).toBe(true);await act(async()=>resolve(base));expect(button('修改部门')!.disabled).toBe(false);
+  });
   it('shows departments with business attributes and creates a department under the company root', async () => {
     await render(HrOrganizationPage, 'hr');
     expect(document.body.textContent).toContain('面料业务部');

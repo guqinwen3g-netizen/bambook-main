@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Prisma,PrismaClient } from '@prisma/client';
+import type { Department,Prisma,PrismaClient } from '@prisma/client';
 import { validateDepartmentBusinessAttributes } from './departmentBusinessAttributes';
 import { currentCompanyId } from '../auth/requestCompanyContext';
 
@@ -7,7 +7,7 @@ export class OrganizationError extends Error {
   constructor(message: string, public status = 400) { super(message); }
 }
 
-type HeadAuthority={canAssignHead?:boolean};
+type DepartmentWriteOptions={canAssignHead?:boolean;audit?:(tx:Prisma.TransactionClient,before:Department|null,after:unknown)=>Promise<void>};
 type DepartmentInput={name?:string;businessAttributes?:unknown;headId?:unknown;expectedHeadId?:unknown;expectedUpdatedAt?:unknown};
 const hasHead=(input:DepartmentInput)=>Object.prototype.hasOwnProperty.call(input,'headId');
 function headReference(value:unknown):string|null{
@@ -25,11 +25,11 @@ async function checkedHead(tx:Prisma.TransactionClient,companyId:string|null,hea
   if(profiles.length&&!profiles.some(p=>p.employmentStatus==='Regular'||p.employmentStatus==='Probation'))throw new OrganizationError('请选择本公司在职且已启用的负责人。');
   return id;
 }
-function requireHeadAuthority(input:DepartmentInput,authority:HeadAuthority){
+function requireHeadAuthority(input:DepartmentInput,authority:DepartmentWriteOptions){
   if(hasHead(input)&&!authority.canAssignHead)throw new OrganizationError('设置部门负责人需要账号与岗位管理权限。',403);
 }
 
-export async function createOrganizationDepartment(prisma: PrismaClient, input: DepartmentInput&{parentId?:string}, authority:HeadAuthority={}) {
+export async function createOrganizationDepartment(prisma: PrismaClient, input: DepartmentInput&{parentId?:string}, authority:DepartmentWriteOptions={}) {
   requireHeadAuthority(input,authority);
   const name = typeof input.name === 'string' ? input.name.trim() : '';
   if (!name) throw new OrganizationError('请输入部门名称。');
@@ -41,7 +41,8 @@ export async function createOrganizationDepartment(prisma: PrismaClient, input: 
     if (duplicate) throw new OrganizationError('该公司已有同名部门。', 409);
     const attributes = checkedAttributes(input.businessAttributes ?? []);
     const head=hasHead(input)?{headId:await checkedHead(tx,company.companyId,input.headId)}:{};
-    return tx.department.create({ data: { id: randomUUID(), name, parentId: company.id, status: 'active', metadata: { businessAttributes: attributes },...head } });
+    const created=await tx.department.create({ data: { id: randomUUID(), name, parentId: company.id, status: 'active', metadata: { businessAttributes: attributes },...head } });
+    await authority.audit?.(tx,null,created);return created;
   });
 }
 
@@ -49,7 +50,7 @@ function checkedAttributes(value: unknown) {
   try { return validateDepartmentBusinessAttributes(value); }
   catch { throw new OrganizationError('请选择有效的部门业务属性。'); }
 }
-export async function updateOrganizationDepartment(prisma: PrismaClient, id: string, input: DepartmentInput, authority:HeadAuthority={}) {
+export async function updateOrganizationDepartment(prisma: PrismaClient, id: string, input: DepartmentInput, authority:DepartmentWriteOptions={}) {
   requireHeadAuthority(input,authority);
   return prisma.$transaction(async tx => {
     const current = await tx.department.findUnique({ where: { id } });
@@ -72,10 +73,10 @@ export async function updateOrganizationDepartment(prisma: PrismaClient, id: str
     const data={name,metadata:{...metadata,businessAttributes:checkedAttributes(input.businessAttributes??(metadata as any).businessAttributes??[])},...head,updatedAt:new Date(Math.max(Date.now(),version.getTime()+1))};
     const changed=await tx.department.updateMany({where:{id,status:'active',updatedAt:version,...(hasHead(input)?{headId:headReference(input.expectedHeadId)}:{})},data});
     if(changed.count!==1)throw new OrganizationError('部门资料已更新，请重新打开后核对。',409);
-    return tx.department.findUniqueOrThrow({where:{id}});
+    const updated=await tx.department.findUniqueOrThrow({where:{id}});await authority.audit?.(tx,current,updated);return updated;
   });
 }
-export async function retireOrganizationDepartment(prisma: PrismaClient, id: string, input: { targetDepartmentId?: string }) {
+export async function retireOrganizationDepartment(prisma: PrismaClient, id: string, input: { targetDepartmentId?: string },options:DepartmentWriteOptions={}) {
   return prisma.$transaction(async tx => {
     const current = await tx.department.findUnique({ where: { id } });
     if (!current?.parentId || current.status !== 'active') throw new OrganizationError('请选择有效部门。');
@@ -94,6 +95,7 @@ export async function retireOrganizationDepartment(prisma: PrismaClient, id: str
       await tx.jobPosition.updateMany({ where: { departmentId: id, deletedAt: null }, data: { departmentId: target.id } });
     }
     await tx.department.update({ where: { id }, data: { status: 'inactive' } });
-    return { retired: true, transferred: { teams, people, positions }, targetDepartmentId: input.targetDepartmentId || null };
+    const result={ retired: true, transferred: { teams, people, positions }, targetDepartmentId: input.targetDepartmentId || null };
+    await options.audit?.(tx,current,result);return result;
   });
 }

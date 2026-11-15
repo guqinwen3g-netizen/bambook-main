@@ -4,7 +4,7 @@ import { Router, Request, Response } from 'express';
 import { createOrganizationDepartment, updateOrganizationDepartment, retireOrganizationDepartment, OrganizationError } from './organizationService';
 import { addExistingTeamMember, listTeamMemberCandidates } from './teamMembershipService';
 import { departmentBusinessAttributes } from './departmentBusinessAttributes';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient,type Prisma,type Department } from '@prisma/client';
 import { extractActorFromRequest } from '../auth/middleware';
 import { requirePermission } from '../auth/permissionGuard';
 import { hasScope } from '../auth/permissionService';
@@ -76,10 +76,12 @@ export function createHRRouter(options: HRRouterOptions) {
   });
 
   const departmentAuthority=(req:Request)=>{const actor=extractActorFromRequest(req);return{canAssignHead:!!actor&&hasScope(actor,'users:admin')};};
+  const departmentAudit=(req:Request,action:'create'|'edit'|'retire')=>async(tx:Prisma.TransactionClient,before:Department|null,after:unknown)=>{
+    await writeRouteAuditLog({prisma:tx,actorId:actorIdFromRequest(req),companyId:extractActorFromRequest(req)?.companyId,source:`route:hr:${action}_department`,operation:`${action}_department`,targetType:'Department',targetId:before?.id||(after as Department).id,before,after,ip:req.ip||null});
+  };
   router.post('/departments', async (req, res) => {
     try {
-      const department = await createOrganizationDepartment(prisma, req.body || {},departmentAuthority(req));
-      await writeRouteAuditLog({ prisma, actorId: actorIdFromRequest(req),companyId:extractActorFromRequest(req)?.companyId, source: 'route:hr:create_department', operation: 'create_department', targetType: 'Department', targetId: department.id, after: { name: department.name, parentId: department.parentId,headId:department.headId }, ip: req.ip || null });
+      const department = await createOrganizationDepartment(prisma, req.body || {},{...departmentAuthority(req),audit:departmentAudit(req,'create')});
       res.json({ ok: true, department });
     } catch (error) {
       if (error instanceof OrganizationError) return res.status(error.status).json({ ok: false, error: 'VALIDATION_FAILED', message: error.message });
@@ -91,9 +93,8 @@ export function createHRRouter(options: HRRouterOptions) {
   for (const action of ['edit', 'retire'] as const) {
     router[action === 'edit' ? 'patch' : 'post'](`/departments/:id${action === 'retire' ? '/retire' : ''}`, async (req, res) => {
       try {
-        const before = await prisma.department.findUnique({ where: { id: req.params.id } });
-        const result = action === 'edit' ? await updateOrganizationDepartment(prisma, req.params.id, req.body || {},departmentAuthority(req)) : await retireOrganizationDepartment(prisma, req.params.id, req.body || {});
-        await writeRouteAuditLog({ prisma, actorId: actorIdFromRequest(req),companyId:extractActorFromRequest(req)?.companyId, source: `route:hr:${action}_department`, operation: `${action}_department`, targetType: 'Department', targetId: req.params.id, before, after: result, ip: req.ip || null });
+        const options={...departmentAuthority(req),audit:departmentAudit(req,action)};
+        const result = action === 'edit' ? await updateOrganizationDepartment(prisma, req.params.id, req.body || {},options) : await retireOrganizationDepartment(prisma, req.params.id, req.body || {},options);
         invalidateTeamMembershipCache();
         res.json({ ok: true, result });
       } catch (error) {

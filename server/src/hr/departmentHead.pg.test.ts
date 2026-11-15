@@ -36,9 +36,17 @@ describe.skipIf(!url)('department head appointments on PostgreSQL',()=>{
   if(!db)return;
   await db.auditLog.deleteMany({where:{actorId:{in:people}}});await db.employeeProfile.deleteMany({where:{companyId:{in:[a,b]}}});
   await db.userRole.deleteMany({where:{userId:{in:people}}});await db.role.deleteMany({where:{companyId:{in:[a,b]}}});
-  await db.department.deleteMany({where:{id:{in:[dept,other,deptB,rootA,rootB]}}});await db.company.deleteMany({where:{id:{in:[a,b]}}});await db.userAccount.deleteMany({where:{id:{in:people}}});await db.$disconnect();
+  await db.department.deleteMany({where:{companyId:{in:[a,b]}}});await db.company.deleteMany({where:{id:{in:[a,b]}}});await db.userAccount.deleteMany({where:{id:{in:people}}});await db.$disconnect();
  });
  const patch=(body:Record<string,unknown>,token=bossToken,target=dept)=>request(app).patch('/api/hr/departments/'+target).set('Authorization','Bearer '+token).send({expectedUpdatedAt:originalVersion,...body});
+ const auditFailingApp=()=>{
+  const failAudit=(client:any):any=>new Proxy(client,{get(target,key){
+   if(key==='$transaction'&&typeof target.$transaction==='function')return(work:any)=>target.$transaction((tx:any)=>work(failAudit(tx)));
+   if(key==='auditLog')return new Proxy(target.auditLog,{get(delegate,method){if(method==='create')return async()=>{throw new Error('Injected organization audit failure');};return delegate[method];}});
+   const value=target[key];return typeof value==='function'?value.bind(target):value;
+  }});
+  const failing=express();failing.use(express.json());failing.use('/api',createAuthorizationSnapshotGuard({prisma:db}),tenantSurfaceGuard);failing.use('/api/hr',createHRRouter({prisma:failAudit(db)}));return failing;
+ };
  it('requires current account administration instead of trusting old JWT permissions or HR write permission',async()=>{
   const result=await patch({headId:first,expectedHeadId:null},hrToken);expect(result.status).toBe(403);expect((await db.department.findUniqueOrThrow({where:{id:dept}})).headId).toBeNull();
  });
@@ -63,5 +71,15 @@ describe.skipIf(!url)('department head appointments on PostgreSQL',()=>{
  it('rejects an old name-only editor instead of restoring its previous business attributes',async()=>{
   const peer=await patch({businessAttributes:['fabric_business','marketing']},hrToken);expect(peer.status).toBe(200);const latest=await db.department.findUniqueOrThrow({where:{id:dept}});const stale=await patch({name:'旧表单名称',businessAttributes:['fabric_business']},hrToken);expect(stale.status).toBe(409);expect(await db.department.findUniqueOrThrow({where:{id:dept}})).toEqual(latest);
   const reopened=await patch({name:'面料二部',businessAttributes:['fabric_business','marketing'],expectedUpdatedAt:peer.body.result.updatedAt},hrToken);expect(reopened.status).toBe(200);expect((await db.department.findUniqueOrThrow({where:{id:dept}})).metadata).toEqual({businessAttributes:['fabric_business','marketing']});
+ });
+ it('rolls back the appointment and every edited field if its audit cannot be written',async()=>{
+  const failing=auditFailingApp();
+  const before=await db.department.findUniqueOrThrow({where:{id:dept}});const result=await request(failing).patch('/api/hr/departments/'+dept).set('Authorization','Bearer '+bossToken).send({name:'must roll back',businessAttributes:['marketing'],headId:first,expectedHeadId:null,expectedUpdatedAt:originalVersion});expect(result.status).toBe(500);expect(await db.department.findUniqueOrThrow({where:{id:dept}})).toEqual(before);
+ });
+ it('does not create a department if its creation audit fails',async()=>{
+  const result=await request(auditFailingApp()).post('/api/hr/departments').set('Authorization','Bearer '+bossToken).send({name:'must not exist',parentId:rootA,businessAttributes:['marketing'],headId:first});expect(result.status).toBe(500);expect(await db.department.count({where:{companyId:a,name:'must not exist'}})).toBe(0);
+ });
+ it('rolls back retirement and all role transfers if the retirement audit fails',async()=>{
+  const before=await db.department.findUniqueOrThrow({where:{id:dept}}),roles=await db.userRole.findMany({where:{role:{companyId:a}},orderBy:{id:'asc'}});const result=await request(auditFailingApp()).post('/api/hr/departments/'+dept+'/retire').set('Authorization','Bearer '+bossToken).send({targetDepartmentId:other});expect(result.status).toBe(500);expect(await db.department.findUniqueOrThrow({where:{id:dept}})).toEqual(before);expect(await db.userRole.findMany({where:{role:{companyId:a}},orderBy:{id:'asc'}})).toEqual(roles);
  });
 });

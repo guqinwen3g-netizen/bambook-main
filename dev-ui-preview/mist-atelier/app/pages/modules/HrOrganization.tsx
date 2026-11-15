@@ -132,7 +132,12 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
       }
       toast(form.id ? '已保存' : form.kind === 'dept' ? '部门已新建' : '小组已新建');
       setForm(null); await load();
-    } catch (e) { setFormError(message(e, '保存未完成')); }
+    } catch (e) {
+      setFormError(message(e, '保存未完成'));
+      // Keep this editor's input/version, but let a reopened editor use the actual current source.
+      // A slow refresh must not trap the user in the rejected form.
+      if(form.kind==='dept'&&form.id){setBusy(false);await load();}
+    }
     finally { setBusy(false); }
   };
   const decide = async () => {
@@ -188,7 +193,7 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
     <Drawer open={!!openDept} onClose={() => setOpen(null)} title={uiText(openDept?.name ?? '')} sub={uiText("部门")}
       footer={openDept && canWrite && <div className="mist-row">
         <Button variant="primary" icon={Plus} onClick={() => { setFormError(''); setForm({ kind: 'team', departmentId: openDept.id, name: '', description: '' }); }}>{uiText("新建小组")}</Button>
-        <Button onClick={() => { setFormError(''); setForm({ kind: 'dept', id: openDept.id, name: openDept.name, attributes: [...(openDept.businessAttributes ?? [])],headId:openDept.headId??'',originalHeadId:openDept.headId??null,originalUpdatedAt:openDept.updatedAt }); }}>{uiText("修改部门")}</Button>
+        <Button disabled={loading} onClick={() => { setFormError(''); setForm({ kind: 'dept', id: openDept.id, name: openDept.name, attributes: [...(openDept.businessAttributes ?? [])],headId:openDept.headId??'',originalHeadId:openDept.headId??null,originalUpdatedAt:openDept.updatedAt }); }}>{uiText("修改部门")}</Button>
         <Button onClick={() => setConfirm({ kind: 'retire', department: openDept, target: '' })}>{uiText("裁撤部门")}</Button>
       </div>}>
       {openDept && <>
@@ -240,7 +245,7 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
     </Drawer>
 
     <Drawer open={!!form} onClose={() => !busy && setForm(null)} title={uiText(form?.kind === 'dept' ? (form.id ? '修改部门' : '新建部门') : form?.id ? '修改小组' : '新建小组')}
-      footer={<div className="mist-row"><Button variant="primary" loading={busy} onClick={() => void submit()}>{uiText('保存')}</Button><Button disabled={busy} onClick={() => setForm(null)}>{uiText("取消")}</Button></div>}>
+      footer={<div className="mist-row"><Button variant="primary" loading={busy} disabled={loading} onClick={() => void submit()}>{uiText('保存')}</Button><Button disabled={busy} onClick={() => setForm(null)}>{uiText("取消")}</Button></div>}>
       {form && <>
         {formError && <Banner tone="bad" title={uiText("未保存")}>{formError}</Banner>}
         {form.kind === 'dept' ? <FormGrid>
