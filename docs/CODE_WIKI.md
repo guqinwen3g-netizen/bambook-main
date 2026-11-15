@@ -78,6 +78,8 @@
 
 客户字段权限（2026-11-15，本地候选）：`mistCustomerFieldAuthority.ts` 按有效差异独立要求客户等级的 `relations:admin`、信用额度及正额度币种的 `risk:admin`；普通资料带回未变受保护值可保存，普通业务员可建未评级/零额度客户，零额度币种仍可修改。创建、旧别名、批量、预演与提议共用校验，事务提交前再核被冻结的必要权限；先核对象可维护范围，避免用字段猜值取得他人客户信息。`risk:admin` 已从悬空豁免移入已消费阳性对照，回归为 `mist/customerFieldAuthority.test.ts`、`shared/mistCustomerFieldAuthority.test.ts` 和 `auth/__tests__/danglingScopeConsumption.test.ts`。
 
+部门任命与编辑来源（2026-11-15，本地候选）：`HrOrganization.tsx`→`runtime/organization.ts`→`hr/route.ts`→`organizationService.ts`写既有`Department.headId`，不写账号岗位或单据审批名单。任命同时要求人事写入与账号/岗位管理权限；目标必须为本公司有效启用账号，有员工档案时至少有一份当前在职档案。跨部门任命保留业务入口并显示实际来源部门，模块能力及业务域仍独立校验。人员目录返回`headId/updatedAt`；所有部门编辑携带打开时的`expectedUpdatedAt`，任命另带`expectedHeadId`，服务端同事务条件更新且版本严格递增，旧名称表单不能带回旧业务属性或旧任命。普通人事编辑省略负责人字段；审计保留同公司与前后值，刷新既有小组范围缓存。父抽屉在子编辑期间保留，使用Mist现有栈恢复触发器焦点。负责人变更不会改写既有审批提交名单；待审申请人的调岗/离职恢复另行验收。
+
 ## 4. 业务真源索引（按业务链）
 
 登录退出（2026-11-13，本地候选）：`auth/currentSessionRevocation.ts`按真实账号和稳定会话标识校验持久撤销记录，主API、独立Mist服务、认证私有入口及Mist事务授权均接续；权限重载保留签发时刻、安全代次与真实会话标识，不以新授权快照掩盖凭据来源；记录覆盖90天绝对会话上限，原始JWT及会话标识不入撤销表。续期、改密和公司切换沿用同一会话，旧格式换发保留可撤销来源；普通鉴权仍拒绝过期凭据，过期原凭据仅可用于撤销其会话。全部退出另换凭据代次，避免同秒旧令牌漏过；私有公司列表同样复核当前账号和退出状态。

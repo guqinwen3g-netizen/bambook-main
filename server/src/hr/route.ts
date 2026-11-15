@@ -75,10 +75,11 @@ export function createHRRouter(options: HRRouterOptions) {
     res.status(410).json({ ok: false, error: 'FEATURE_RETIRED', message: '当前版本不提供项目和项目任务功能。' });
   });
 
+  const departmentAuthority=(req:Request)=>{const actor=extractActorFromRequest(req);return{canAssignHead:!!actor&&hasScope(actor,'users:admin')};};
   router.post('/departments', async (req, res) => {
     try {
-      const department = await createOrganizationDepartment(prisma, req.body || {});
-      await writeRouteAuditLog({ prisma, actorId: actorIdFromRequest(req), source: 'route:hr:create_department', operation: 'create_department', targetType: 'Department', targetId: department.id, after: { name: department.name, parentId: department.parentId }, ip: req.ip || null });
+      const department = await createOrganizationDepartment(prisma, req.body || {},departmentAuthority(req));
+      await writeRouteAuditLog({ prisma, actorId: actorIdFromRequest(req),companyId:extractActorFromRequest(req)?.companyId, source: 'route:hr:create_department', operation: 'create_department', targetType: 'Department', targetId: department.id, after: { name: department.name, parentId: department.parentId,headId:department.headId }, ip: req.ip || null });
       res.json({ ok: true, department });
     } catch (error) {
       if (error instanceof OrganizationError) return res.status(error.status).json({ ok: false, error: 'VALIDATION_FAILED', message: error.message });
@@ -91,8 +92,8 @@ export function createHRRouter(options: HRRouterOptions) {
     router[action === 'edit' ? 'patch' : 'post'](`/departments/:id${action === 'retire' ? '/retire' : ''}`, async (req, res) => {
       try {
         const before = await prisma.department.findUnique({ where: { id: req.params.id } });
-        const result = action === 'edit' ? await updateOrganizationDepartment(prisma, req.params.id, req.body || {}) : await retireOrganizationDepartment(prisma, req.params.id, req.body || {});
-        await writeRouteAuditLog({ prisma, actorId: actorIdFromRequest(req), source: `route:hr:${action}_department`, operation: `${action}_department`, targetType: 'Department', targetId: req.params.id, before, after: result, ip: req.ip || null });
+        const result = action === 'edit' ? await updateOrganizationDepartment(prisma, req.params.id, req.body || {},departmentAuthority(req)) : await retireOrganizationDepartment(prisma, req.params.id, req.body || {});
+        await writeRouteAuditLog({ prisma, actorId: actorIdFromRequest(req),companyId:extractActorFromRequest(req)?.companyId, source: `route:hr:${action}_department`, operation: `${action}_department`, targetType: 'Department', targetId: req.params.id, before, after: result, ip: req.ip || null });
         invalidateTeamMembershipCache();
         res.json({ ok: true, result });
       } catch (error) {
@@ -169,6 +170,8 @@ export function createHRRouter(options: HRRouterOptions) {
           id: d.id,
           name: d.name,
           parentId: d.parentId,
+          headId: d.headId,
+          updatedAt: d.updatedAt,
           status: d.status,
           businessAttributes: departmentBusinessAttributes(d),
         })),

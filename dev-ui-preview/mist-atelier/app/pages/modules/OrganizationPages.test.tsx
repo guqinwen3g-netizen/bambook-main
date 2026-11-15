@@ -11,7 +11,8 @@ vi.mock('../../runtime/auth', () => { const useMistSession = () => ({ user: { id
 vi.mock('../../runtime/workspace', () => ({ useMistWorkspace: () => ({ state: { members: bridge.members, teamScopes: bridge.teamScopes, customers: bridge.customers, market: { suppliers: [] } }, workspace: { id: 'w', name: '空间', ownerId: 'owner-1', access: { canManageMembers: bridge.roles.includes('owner'), companyLibrary: !!bridge.companyId } }, changeMember: bridge.changeMember }) }));
 vi.mock('../../../../../services/apiService', () => ({ apiService: { getAuthHeaders: () => ({ Authorization: 'Bearer t' }), getCompanyExporterProfile: vi.fn(async () => ({ value: { nameEn: 'X' }, version: 1 })), updateCompanyExporterProfile: vi.fn() } }));
 
-const departments = [{ id: 'root', name: '公司', parentId: null }, { id: 'd1', name: '面料业务部', parentId: 'root', businessAttributes: ['fabric_business'] }];
+const departmentVersion='2026-11-15T00:00:00.000Z';
+const departments = [{ id: 'root', name: '公司', parentId: null,updatedAt:departmentVersion }, { id: 'd1', name: '面料业务部', parentId: 'root', businessAttributes: ['fabric_business'],updatedAt:departmentVersion }];
 const roles: Array<{ id: string; name: string; description: string | null; isSystem: boolean; permissions: string[] }> = [{ id: 'role-super-admin', name: '老板', description: null, isSystem: true, permissions: ['*'] }, { id: 'role-sales', name: '业务员', description: null, isSystem: true, permissions: ['orders:read'] }];
 let root: Root | undefined, host: HTMLDivElement; const go = vi.fn();
 beforeEach(() => {
@@ -245,6 +246,37 @@ describe('人事管理', () => {
   });
   // 只有人事权限时，“人员”分区显示人事名册；有账号管理权限时显示账号列表（见“管理后台 · 账号”）。
   beforeEach(() => { bridge.roles = []; bridge.perms = ['hr:read', 'hr:write']; });
+  const headFixture=()=>{
+    const people=[{id:'u1',displayName:'林一',email:'one@test.local',status:'active',departmentId:'d1',department:'面料业务部',roles:[]},{id:'u2',displayName:'林二',email:'two@test.local',status:'active',departmentId:'d2',department:'成衣业务部',roles:[]},{id:'disabled',displayName:'停用人员',email:'off@test.local',status:'disabled',departmentId:'d1',roles:[]},{id:'ended',displayName:'已离职人员',email:'ended@test.local',status:'active',departmentId:'d1',roles:[]}];
+    bridge.routes['GET /api/hr/personnel']=()=>({ok:true,departments:departments.map(d=>({...d,headId:d.id==='d1'?'u1':null})),personnel:people,jobs:[],positionNames:{}});
+    bridge.routes['GET /api/hr/employees']=()=>({ok:true,employees:[{userId:'ended',employmentStatus:'Resigned'}]});
+  };
+  const openDepartment=async()=>{const row=[...document.querySelectorAll('[role="row"]')].find(r=>r.textContent?.includes('面料业务部')) as HTMLElement;await act(async()=>row.click());};
+  it('restores focus to the department edit trigger after closing the top editor with Escape',async()=>{
+    await render(HrOrganizationPage,'hr');await openDepartment();const trigger=[...document.querySelectorAll('button')].find(b=>b.textContent==='修改部门')!;act(()=>trigger.focus());await click('修改部门');
+    await act(async()=>document.activeElement!.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));expect(document.activeElement).toBe(trigger);expect(trigger.isConnected).toBe(true);expect(bridge.calls.some(c=>c.method==='PATCH')).toBe(false);
+  });
+  it('shows the appointed department head but keeps ordinary HR edits from submitting appointment fields',async()=>{
+    headFixture();await render(HrOrganizationPage,'hr');await openDepartment();const term=[...document.querySelectorAll('dt')].find(t=>t.textContent==='部门负责人');expect(term?.nextElementSibling?.textContent).toBe('林一');await click('修改部门');expect(document.querySelector('select[aria-label="部门负责人"]')).toBeNull();await type(labelled('部门名称'),'面料一部');await click('保存');const call=bridge.calls.find(c=>c.method==='PATCH'&&c.url==='/api/hr/departments/d1');expect(call?.body).toEqual({name:'面料一部',businessAttributes:['fabric_business'],expectedUpdatedAt:departmentVersion});
+  });
+  it('lets account administrators appoint an active department head with the exact original head snapshot',async()=>{
+    headFixture();bridge.perms.push('users:admin');await render(HrOrganizationPage,'hr');await openDepartment();await click('修改部门');const select=document.querySelector('select[aria-label="部门负责人"]') as HTMLSelectElement;expect(select).not.toBeNull();expect(select.value).toBe('u1');expect([...select.options].map(o=>o.value)).toEqual(['','u1','u2']);await type(select,'u2');expect(document.body.textContent).toContain('负责人来自成衣业务部');await click('保存');expect(bridge.calls.find(c=>c.method==='PATCH'&&c.url==='/api/hr/departments/d1')?.body).toEqual({name:'面料业务部',businessAttributes:['fabric_business'],expectedUpdatedAt:departmentVersion,headId:'u2',expectedHeadId:'u1'});
+  });
+  it('omits an unchanged department head so a name edit cannot replace a newer appointment',async()=>{
+    headFixture();bridge.perms.push('users:admin');await render(HrOrganizationPage,'hr');await openDepartment();await click('修改部门');await type(labelled('部门名称'),'面料一部');await click('保存');expect(bridge.calls.find(c=>c.method==='PATCH'&&c.url==='/api/hr/departments/d1')?.body).toEqual({name:'面料一部',businessAttributes:['fabric_business'],expectedUpdatedAt:departmentVersion});
+  });
+  it('clears the department head with an explicit null and preserves the original snapshot',async()=>{
+    headFixture();bridge.perms.push('users:admin');await render(HrOrganizationPage,'hr');await openDepartment();await click('修改部门');await type(document.querySelector('select[aria-label="部门负责人"]') as HTMLSelectElement,'');await click('保存');expect(bridge.calls.find(c=>c.method==='PATCH'&&c.url==='/api/hr/departments/d1')?.body).toEqual({name:'面料业务部',businessAttributes:['fabric_business'],expectedUpdatedAt:departmentVersion,headId:null,expectedHeadId:'u1'});
+  });
+  it('does not silently drop an appointment if account administration is revoked while editing',async()=>{
+    headFixture();bridge.perms.push('users:admin');await render(HrOrganizationPage,'hr');await openDepartment();await click('修改部门');await type(document.querySelector('select[aria-label="部门负责人"]') as HTMLSelectElement,'u2');bridge.perms=bridge.perms.filter(p=>p!=='users:admin');await render(HrOrganizationPage,'hr');await click('保存');expect(document.body.textContent).toContain('当前账号不能设置部门负责人');expect(bridge.calls.some(c=>c.method==='PATCH')).toBe(false);
+  });
+  it('does not submit an existing department editor without its checked source version',async()=>{
+    bridge.routes['GET /api/hr/personnel']=()=>({ok:true,departments:departments.map(({updatedAt,...d})=>d),personnel:[],jobs:[],positionNames:{}});await render(HrOrganizationPage,'hr');await openDepartment();await click('修改部门');await type(labelled('部门名称'),'面料一部');await click('保存');expect(document.body.textContent).toContain('部门资料不可用，请重新打开后核对。');expect(bridge.calls.some(c=>c.method==='PATCH')).toBe(false);
+  });
+  it('keeps the selected head and original snapshot when the server rejects a stale appointment',async()=>{
+    headFixture();bridge.perms.push('users:admin');bridge.routes['PATCH /api/hr/departments/d1']=()=>{throw new Error('部门负责人已更新，请重新打开后核对。');};await render(HrOrganizationPage,'hr');await openDepartment();await click('修改部门');await type(document.querySelector('select[aria-label="部门负责人"]') as HTMLSelectElement,'u2');await click('保存');expect(document.body.textContent).toContain('部门负责人已更新，请重新打开后核对。');expect((document.querySelector('select[aria-label="部门负责人"]') as HTMLSelectElement).value).toBe('u2');expect(bridge.calls.find(c=>c.method==='PATCH'&&c.url==='/api/hr/departments/d1')?.body.expectedHeadId).toBe('u1');
+  });
   it('shows departments with business attributes and creates a department under the company root', async () => {
     await render(HrOrganizationPage, 'hr');
     expect(document.body.textContent).toContain('面料业务部');

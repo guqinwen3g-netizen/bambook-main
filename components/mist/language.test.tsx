@@ -121,3 +121,7 @@ it('adapts new trading and handover copy while preserving record names and leavi
 it('translates order readiness labels, quantity summaries and receipts without changing the local Chinese default',()=>{
  writeDevice('locale','en-US');for(const [key,value] of [['草稿待补齐','Draft'],['作废订单','Void order'],['待核对','Pending review'],['拟发范围确认','Shipment scope confirmed'],['收货与贸易条款确认','Consignee and trade terms confirmed'],['收款条件核对','Payment terms checked']])expect(uiText(key)).toBe(value);expect(uiText('2 色 × 3 码')).toBe('2 colours × 3 sizes');expect(uiText('溢装 +0% / 短装 −0%')).toBe('Over +0% / short −0%');expect(uiText('已收 0%')).toBe('Received 0%');writeDevice('locale','zh-CN');expect(interfaceLocale()).toBe('zh-CN');
 });
+
+it('translates department appointments and stale-head recovery while preserving the department name',()=>{
+ writeDevice('locale','en-US');expect(uiText('部门负责人')).toBe('Department head');expect(ui`负责人来自${'面料一部'}`).toBe('Head belongs to 面料一部');expect(ui`${'林一'}（已不可用）`).toBe('林一 (unavailable)');expect(uiText('部门负责人已更新，请重新打开后核对。')).toBe('The department head has changed. Reopen the department and review it.');writeDevice('locale','zh-CN');expect(ui`负责人来自${'面料一部'}`).toBe('负责人来自面料一部');
+});
