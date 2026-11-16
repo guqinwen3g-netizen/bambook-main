@@ -1,3 +1,4 @@
+import {isCalendarDay} from '../../../../../server/src/shared/mistBusinessClock';
 import { interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
@@ -105,19 +106,19 @@ type MarginView = 'none' | FxBasis;
 const MARGIN_STATUS = { ok: { label: '已计算', tone: 'ok' }, foreign: { label: '含异币种采购', tone: 'warn' }, nocost: { label: '无已批准采购', tone: 'neutral' } } as const;
 const percent = (r: number | null) => r === null ? '—' : (r * 100).toFixed(1) + '%';
 
-export const AGING_BUCKETS = [{ key: 'current', label: '未到期' }, { key: 'd30', label: '逾期 1–30 天' }, { key: 'd60', label: '31–60 天' }, { key: 'd90', label: '61–90 天' }, { key: 'over', label: '90 天以上' }] as const;
+export const AGING_BUCKETS = [{ key: 'current', label: '未到期' }, { key: 'd30', label: '逾期 1–30 天' }, { key: 'd60', label: '31–60 天' }, { key: 'd90', label: '61–90 天' }, { key: 'over', label: '90 天以上' },{key:'unknown',label:'待核对账期'}] as const;
 type Bucket = typeof AGING_BUCKETS[number]['key'];
-export const agingBucket = (due: string, asOf: string): Bucket => { const late = days(due, asOf); return late <= 0 ? 'current' : late <= 30 ? 'd30' : late <= 60 ? 'd60' : late <= 90 ? 'd90' : 'over'; };
+export const agingBucket = (due: string, asOf: string): Bucket => { if(!isCalendarDay(due)||!isCalendarDay(asOf))return 'unknown';const late = days(due, asOf); return late <= 0 ? 'current' : late <= 30 ? 'd30' : late <= 60 ? 'd60' : late <= 90 ? 'd90' : 'over'; };
 export type AgingRow = { id: string; customer: string; currency: string; invoices: number; total: number } & Record<Bucket, number>;
 /** 只统计有效且仍有未收余额的发票；按到期日计算逾期天数。 */
 export function buildReceivableAging(state: MistState, asOf: string): AgingRow[] {
   const map = new Map<string, { customer: string; currency: string; invoices: number } & Record<Bucket | 'total', number>>();
   for (const i of state.invoices) {
-    if (!isActiveMistInvoice(i) || !(i.open > 0)) continue;
-    const name = mistInvoiceCustomerName(state, i), key = (mistInvoiceCustomerId(state, i) || name) + '|' + i.currency, row = map.get(key) ?? { customer: name, currency: i.currency, invoices: 0, total: 0, current: 0, d30: 0, d60: 0, d90: 0, over: 0 };
+    if (!isRecognizedMistInvoice(i) || !(i.open > 0)) continue;
+    const name = mistInvoiceCustomerName(state, i), key = (mistInvoiceCustomerId(state, i) || name) + '|' + i.currency, row = map.get(key) ?? { customer: name, currency: i.currency, invoices: 0, total: 0, current: 0, d30: 0, d60: 0, d90: 0, over: 0,unknown:0 };
     const value = minor(i.open); row.invoices++; row.total += value; row[agingBucket(i.due, asOf)] += value; map.set(key, row);
   }
-  return [...map.entries()].map(([id, r]) => ({ id, customer: r.customer, currency: r.currency, invoices: r.invoices, total: r.total / 100, current: r.current / 100, d30: r.d30 / 100, d60: r.d60 / 100, d90: r.d90 / 100, over: r.over / 100 }))
+  return [...map.entries()].map(([id, r]) => ({ id, customer: r.customer, currency: r.currency, invoices: r.invoices, total: r.total / 100, current: r.current / 100, d30: r.d30 / 100, d60: r.d60 / 100, d90: r.d90 / 100, over: r.over / 100,unknown:r.unknown/100 }))
     .sort((a, b) => a.currency.localeCompare(b.currency) || b.total - a.total);
 }
 

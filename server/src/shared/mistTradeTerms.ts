@@ -4,6 +4,21 @@
  */
 import { orderIncoterm } from './orderTradeTerms';
 import type { OrderGovernanceInput } from './mistOrderGovernance';
+import {isCalendarDay,shiftCalendarDay} from './mistBusinessClock';
+
+export type ReceivableDueCondition={kind:'deliveryAcceptance';days:number;terms:string};
+/** Explicit customer delivery acceptance is a separate fact from scheduled dispatch or POD. */
+export function receivableAcceptanceTerms(value:string|undefined):ReceivableDueCondition|null{
+  const terms=(value||'').trim();
+  const normalized=terms.normalize('NFKC');
+  const match=normalized.match(/(?:交付|客户)\s*验收(?:合格|完成)?后\s*(\d+)\s*天/)||normalized.match(/(\d+)\s*days?\s*(?:after|from)\s*(?:delivery|goods)\s+acceptance/i);
+  if(!match)return null;
+  const days=Number(match[1]);return Number.isSafeInteger(days)&&days>=0?{kind:'deliveryAcceptance',days,terms}:null;
+}
+export function dueAfterAcceptance(day:string,days:number):string{
+  if(!isCalendarDay(day)||!Number.isSafeInteger(days)||days<0)return '';
+  try{const due=shiftCalendarDay(day,days);return isCalendarDay(due)?due:'';}catch{return '';}
+}
 
 export type PaymentMethod = OrderGovernanceInput['paymentMethod'];
 export type CustomerPaymentTerm = { value: string; method: PaymentMethod; deposit?: number; preShipment?: number };
@@ -45,7 +60,8 @@ export function quotationContract(quote: { deliveryTerms?: string; paymentTerms?
 
 /** 按客户付款条件推算出运应收的建议到期日：发货前 / 预付类以计划出运日为限，见提单 / 即期以 ETD 为准，明确的「N 天 / N days」在 ETD 后顺延 N 天。仅作预填，业务可改。 */
 export function suggestedReceivableDue(paymentNote: string | undefined, shipDate: string | undefined): string {
-  if (!shipDate || !/^\d{4}-\d{2}-\d{2}$/.test(shipDate)) return '';
+  if(/(?:交付|客户)\s*验收|(?:delivery|goods)\s+acceptance/i.test(paymentNote||''))return '';
+  if (!isCalendarDay(shipDate)) return '';
   const days = Number((paymentNote || '').match(/(\d+)\s*(?:天|days?\b)/i)?.[1] || 0);
   if (!days) return shipDate;
   const [y, m, d] = shipDate.split('-').map(Number), at = new Date(Date.UTC(y, m - 1, d + days)), pad = (n: number) => String(n).padStart(2, '0');

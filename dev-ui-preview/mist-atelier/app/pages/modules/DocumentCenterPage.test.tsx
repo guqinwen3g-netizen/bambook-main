@@ -164,3 +164,15 @@ it('preserves a revised draft document body and its current originals while asso
  store.state=structuredClone(store.state);Object.assign(store.state!.fulfillment.documents[0],{content:'另一岗位已复核的正文',fileIds:['old','peer']});store.workspace={id:'workspace',revision:2};render('file-doc');await act(async()=>{finish({id:'upload',name:'new.txt',mimeType:'text/plain',size:3,storageKey:'workspace/upload',createdAt:''});});
  expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.documents.save',payload:expect.objectContaining({id:'file-doc',content:'另一岗位已复核的正文',fileIds:['old','peer','upload']})}),{expectedRevision:2});
 });
+
+it('keeps a CI on acceptance terms without inventing a fixed due date before acceptance',async()=>{
+ const s=store.state!;s.settings.companyProfile={legalName:'竹语'} as any;
+ s.orders[0].governance={contract:{kind:'external',paymentMethod:'OA',paymentNote:'交付验收后30天付款'}} as any;
+ s.fulfillment.shipments[0].plannedDate='2026-11-19';s.fulfillment.shipments[0].transport={etd:'2026-11-19'};
+ store.run.mockResolvedValue({result:{id:'gen'}});render(undefined,'s');await click(getAllByRole(host,'button',{name:'生成单据'})[0]);
+ const d=getByRole(document.body,'dialog',{name:'生成单据'});
+ expect(queryByLabelText(d,'应收到期日')).toBeNull();
+ expect((getByRole(d,'textbox',{name:'合同账期'}) as HTMLInputElement).value).toBe('交付验收后30天付款');
+ await click(getByRole(d,'button',{name:'生成'}));
+ expect(store.run).toHaveBeenCalledWith({type:'fulfillment.documents.generate',payload:{shipmentId:'s',type:'CI',orderId:'o'}});
+});

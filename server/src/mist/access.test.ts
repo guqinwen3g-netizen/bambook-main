@@ -128,3 +128,14 @@ describe('lead follow-up history projection', () => {
     expect(state).toEqual(before);
   });
 });
+
+it('gives invoice readers only the linked payment-anchor date without granting transport or POD contents',()=>{
+ const s=empty(),condition={kind:'deliveryAcceptance' as const,days:30,terms:'交付验收后30天付款'};
+ s.invoices.push({id:'ar-condition',code:'CI-C',orderId:'o',order:'SO-C',customer:'Buyer',currency:'USD',due:'',amount:100,open:100,financeStatus:'confirmed',sourceDocumentId:'ci-condition',receivableDueCondition:condition});
+ s.fulfillment.documents.push({id:'ci-condition',type:'CI',status:'issued',orderId:'o',invoiceId:'ar-condition',shipmentId:'ship-condition',receivableDueCondition:condition} as any);
+ s.fulfillment.shipments.push({id:'ship-condition',lines:[],delivered:{at:'2026-10-20T10:00:00Z',receiver:'POD-SECRET-RECEIVER',evidence:'POD-SECRET-CONTENT',fileIds:['secret-pod'],recordedBy:'Ops'}} as any);
+ const before=structuredClone(s),view=projectState(s,actor(['invoices:read']),empty).state;
+ expect(view.invoices[0].receivableDueSource).toEqual({sourceCurrent:true,shipmentId:'ship-condition',deliveryAt:'2026-10-20T10:00:00Z'});
+ expect(view.fulfillment.shipments).toEqual([]);expect(view.fulfillment.documents).toEqual([]);expect(JSON.stringify(view)).not.toContain('POD-SECRET');expect(JSON.stringify(view)).not.toContain('secret-pod');expect(s).toEqual(before);
+ expect(projectState(s,actor(['shipments:read']),empty).state.invoices).toEqual([]);
+});

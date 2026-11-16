@@ -57,3 +57,12 @@ describe('suggested receivable due date', () => {
     expect(suggestedReceivableDue('95 yards; release in daytime', '2026-11-15')).toBe('2026-11-15');
   });
 });
+
+it('does not replace an unobserved customer delivery-acceptance date with planned ETD',()=>{
+ expect(suggestedReceivableDue('交付验收后30天付款','2026-11-19')).toBe('');
+ expect(suggestedReceivableDue('O/A 30 days after delivery acceptance','2026-11-19')).toBe('');
+});
+
+it('does not suggest a payment date from an impossible calendar base',()=>{
+ expect(suggestedReceivableDue('O/A 30 天','2026-02-30')).toBe('');
+});

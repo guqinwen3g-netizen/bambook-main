@@ -228,3 +228,8 @@ it('keeps a bank dialog locked while its original save is actually in flight',as
   expect((getByRole(dialog,'button',{name:'取消',exact:true})as HTMLButtonElement).disabled).toBe(true);
   await act(async()=>resolve({result:{id:'account'}}));
 });
+
+it('does not turn a confirmed receivable with an unresolved due date into overdue debt',()=>{
+ store.value.state.invoices[0].due='';route={view:'payment-vouchers',section:'overdue:fabric'};render();
+ const card=[...host.querySelectorAll<HTMLElement>('.mist-sumbar > div')].find(el=>el.textContent?.includes('逾期应收'));expect(card?.textContent).toContain('0.00');expect(host.querySelector('[aria-label="发票"]')?.textContent||'').not.toContain('INV-EUR');
+});

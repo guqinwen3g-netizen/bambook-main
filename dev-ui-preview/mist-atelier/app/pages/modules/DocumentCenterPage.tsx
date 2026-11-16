@@ -3,7 +3,7 @@ import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import {fulfillmentDocumentFamily} from '../../../../../server/src/shared/mistFulfillment';
 import {BL_KIND_LABEL,DOCUMENT_TYPE_LABEL,DOCUMENT_TYPES,OWN_DOCUMENT_TYPES,PER_ORDER_TYPES,POST_DEPARTURE_TYPES,isOwnDocumentType,type BillOfLadingKind,type OwnDocumentType} from '../../../../../server/src/shared/mistDocumentTypes';
 import {documentGenerationBlocker} from '../../../../../server/src/shared/mistDocumentGeneration';
-import {suggestedReceivableDue} from '../../../../../server/src/shared/mistTradeTerms';
+import {suggestedReceivableDue,receivableAcceptanceTerms} from '../../../../../server/src/shared/mistTradeTerms';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import { View } from '../../../../../types';
 /** 单据中心：按准确出运与合同保留单据版本（新版本不覆盖旧版本）、正式文件与签发 / 归档记录；我方签发 CI / PL，外部机构单据只归档原件；CI 签发回到财务应收。 */
@@ -91,6 +91,11 @@ export function DocumentCenterPage() {
   const pick = (d: FulfillmentDocument) => { setPicked(d.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, d.id, target, { keepScroll: true }); };
   const changeDomain = (value: Domain) => { setDomainChoice(value); setStatusFilter('active'); setPicked(null); };
   const shipments = (f?.shipments || []).filter(s => s.state !== 'cancelled' && (!hasContext || s.id === route.section));
+  const acceptanceOrderIds=(state?.orders||[]).filter(order=>!order.replacementSource&&receivableAcceptanceTerms(order.governance?.contract.paymentNote)).map(order=>order.id);
+  const fixedDueOrderIds=(state?.orders||[]).filter(order=>!order.replacementSource&&!acceptanceOrderIds.includes(order.id)).map(order=>order.id);
+  const acceptanceTermsValue=(orderId:string)=>receivableAcceptanceTerms(state?.orders.find(order=>order.id===orderId)?.governance?.contract.paymentNote)?.terms||'';
+  const ciDueFields:ModuleField[]=[{...field('dueDate','应收到期日','date'),when:[{key:'type',values:['CI']},{key:'orderId',values:fixedDueOrderIds}]},{...field('acceptanceTerms','合同账期','text',false),readonly:true,when:[{key:'type',values:['CI']},{key:'orderId',values:acceptanceOrderIds}]}];
+  const dueOrderChange=(key:string,value:unknown,values:Record<string,unknown>)=>{const orderId=key==='orderId'?String(value):String(values.orderId||'');return {acceptanceTerms:acceptanceTermsValue(orderId),...(acceptanceOrderIds.includes(orderId)?{dueDate:''}:{})};};
   const docSpec = (d?: FulfillmentDocument, base?: FulfillmentDocument): ModuleEditorSpec => {
     const src = d || base, fixed = !!src;
     const s = src ? f?.shipments.find(row => row.id === src.shipmentId) : contextShipment;
@@ -100,29 +105,31 @@ export function DocumentCenterPage() {
         ...(fixed ? [] : [field('shipmentId', '准确出运', 'select', true, [emptyOption, ...shipments.map(row => ({ value: row.id, label: `${row.code} · ${row.customer}` }))]), field('type', '单据类型', 'select', true, (DOCUMENT_TYPES as readonly DocType[]).map(value => ({ value, label: TYPE_LABEL[value] })))]),
         ...(fixed ? [] : [{ ...field('orderId', '对应订单', 'select', true, [emptyOption, ...(orderOptions.length ? orderOptions : (state?.orders || []).map(o => ({ value: o.id, label: o.code })))]), when: {key:'type',values:[...PER_ORDER_TYPES]} }]),
         field('number', '实际单据编号'), field('title', '标题'),
-        ...(!fixed || src?.type === 'CI' ? [{...field('dueDate', '应收到期日', 'date'),when:[{key:'type',values:['CI']},{key:'orderId',values:(state?.orders||[]).filter(order=>!order.replacementSource).map(order=>order.id)}]}] : []),
+        ...(!fixed || src?.type === 'CI' ? ciDueFields : []),
         field('content', '单据正文', 'textarea'),
       ],
-      initialValues: { shipmentId: src?.shipmentId || (hasContext ? route.section || '' : ''), type: src?.type || 'PL', orderId: src?.orderId || '', number: d?.number || '', title: src?.title || '', dueDate: src?.dueDate || '', content: src?.content || '' },
-      submit: v => run({ type: 'fulfillment.documents.save', payload: { ...(d ? { id: d.id } : {}), ...(base ? { baseDocumentId: base.id } : {}), shipmentId: src?.shipmentId || text(v, 'shipmentId'), orderId: src ? src.orderId : text(v, 'orderId'), type: (src?.type || text(v, 'type')) as DocType, number: text(v, 'number'), title: text(v, 'title'), dueDate: text(v, 'dueDate'), content: text(v, 'content'), fileIds: d?.fileIds || [] } }) };
+      initialValues: { shipmentId: src?.shipmentId || (hasContext ? route.section || '' : ''), type: src?.type || 'PL', orderId: src?.orderId || '', number: d?.number || '', title: src?.title || '', dueDate: acceptanceOrderIds.includes(src?.orderId||'')?'':src?.dueDate||'',acceptanceTerms:acceptanceTermsValue(src?.orderId||''), content: src?.content || '' },
+      derive:dueOrderChange,
+      submit: v => run({ type: 'fulfillment.documents.save', payload: { ...(d ? { id: d.id } : {}), ...(base ? { baseDocumentId: base.id } : {}), shipmentId: src?.shipmentId || text(v, 'shipmentId'), orderId: src ? src.orderId : text(v, 'orderId'), type: (src?.type || text(v, 'type')) as DocType, number: text(v, 'number'), title: text(v, 'title'), dueDate: acceptanceOrderIds.includes(src?src.orderId:text(v,'orderId'))?'':text(v, 'dueDate'), content: text(v, 'content'), fileIds: d?.fileIds || [] } }) };
   };
   const generateSpec = (s?: FulfillmentShipment, presetType?: OwnDocumentType, presetOrder?: string): ModuleEditorSpec => {
     const target = s || contextShipment, orderOptions = (target ? [...new Set(target.lines.map(line => line.orderId))] : []).map(id => ({ value: id, label: orderCode(id) || '订单不可用' }));
-    const plainOrders = (state?.orders || []).filter(o => !o.replacementSource).map(o => o.id), firstCi = (f?.documents || []).find(d => d.shipmentId === target?.id && d.type === 'CI');
+    const firstCi = (f?.documents || []).find(d => d.shipmentId === target?.id && d.type === 'CI');
     return { title: '生成单据', submitLabel: '生成',
       fields: [
         ...(target ? [] : [field('shipmentId', '准确出运', 'select', true, [emptyOption, ...shipments.map(row => ({ value: row.id, label: `${row.code} · ${row.customer}` }))])]),
         field('type', '单据类型', 'select', true, (OWN_DOCUMENT_TYPES as readonly OwnDocumentType[]).map(value => ({ value, label: TYPE_LABEL[value] }))),
         { ...field('orderId', '对应订单', 'select', true, [emptyOption, ...(orderOptions.length ? orderOptions : (state?.orders || []).map(o => ({ value: o.id, label: o.code })))]), when: { key: 'type', values: [...PER_ORDER_TYPES] } },
-        { ...field('dueDate', '应收到期日', 'date'), when: [{ key: 'type', values: ['CI'] }, { key: 'orderId', values: plainOrders }] },
+        ...ciDueFields,
       ],
       initialValues: (() => { const orderId = presetOrder || (orderOptions.length === 1 ? orderOptions[0].value : ''), contract = state?.orders.find(o => o.id === orderId)?.governance?.contract;
-        return { shipmentId: target?.id || '', type: presetType || 'CI', orderId, dueDate: firstCi?.dueDate || suggestedReceivableDue(contract?.paymentNote, target?.transport?.etd || target?.plannedDate) }; })(),
+        return { shipmentId: target?.id || '', type: presetType || 'CI', orderId, dueDate: acceptanceOrderIds.includes(orderId)?'':firstCi?.dueDate || suggestedReceivableDue(contract?.paymentNote, target?.transport?.etd || target?.plannedDate),acceptanceTerms:acceptanceTermsValue(orderId) }; })(),
+      derive:dueOrderChange,
       submit: async v => {
         const shipmentId = target?.id || text(v, 'shipmentId'), type = text(v, 'type') as OwnDocumentType, orderId = PER_ORDER_TYPES.includes(type) ? text(v, 'orderId') : undefined;
         const blocked = state ? documentGenerationBlocker(state, f?.shipments.find(row => row.id === shipmentId), type, orderId) : null;
         if (blocked) throw new Error(blocked);
-        const receipt = await run({ type: 'fulfillment.documents.generate', payload: { shipmentId, type, ...(orderId ? { orderId } : {}), ...(type === 'CI' && text(v, 'dueDate') ? { dueDate: text(v, 'dueDate') } : {}) } });
+        const receipt = await run({ type: 'fulfillment.documents.generate', payload: { shipmentId, type, ...(orderId ? { orderId } : {}), ...(type === 'CI' && !acceptanceOrderIds.includes(orderId||'') && text(v, 'dueDate') ? { dueDate: text(v, 'dueDate') } : {}) } });
         const id = String(receipt?.result?.id || ''), fileId = receipt?.result?.fileId;
         if (id) { setPicked(id); setDrawer(true); }
         if (typeof fileId === 'string') void downloadFile({ id: fileId, name: `${TYPE_LABEL[type]}-${target?.code || ''}.pdf`, mimeType: 'application/pdf', size: 0, storageKey: '', createdAt: '' }).catch(() => undefined);
@@ -144,7 +151,7 @@ export function DocumentCenterPage() {
     // 指定用印人签发系统生成的单据时可选章盖印；其他人签发不带章，不显示这两项。
     const seals = d.generated?.length ? usableSeals(state, session.user?.id) : [];
     const sealFields: ModuleField[] = seals.length ? [field('sealId', '加盖印章', 'select', false, [{ value: '', label: '不盖章' }, ...seals.map(seal => ({ value: seal.id, label: `${seal.name} · ${SEAL_KIND_LABEL[seal.kind]}` }))]), { ...field('sealReason', '用印事由', 'text', true), when: { key: 'sealId', values: seals.map(seal => seal.id) } }] : [];
-    return { title: `签发 ${d.number} · V${d.version}`, submitLabel: '确认签发', ...(amount !== null ? { description: `将生成应收 ${order!.currency} ${fmt(amount, 2)}，到期 ${d.dueDate}，待财务确认。` } : {}), fields: sealFields, initialValues: seals.length ? { sealId: '', sealReason: '' } : {},
+    return { title: `签发 ${d.number} · V${d.version}`, submitLabel: '确认签发', ...(amount !== null ? { description: d.receivableDueCondition?`将生成应收 ${order!.currency} ${fmt(amount,2)}，${d.receivableDueCondition.terms}，待财务核对验收资料。`:`将生成应收 ${order!.currency} ${fmt(amount, 2)}，到期 ${d.dueDate}，待财务确认。` } : {}), fields: sealFields, initialValues: seals.length ? { sealId: '', sealReason: '' } : {},
       submit: v => run({ type: 'fulfillment.documents.issue', payload: { id: d.id, ...(text(v, 'sealId') ? { sealId: text(v, 'sealId'), sealReason: text(v, 'sealReason').trim() } : {}) } } as never) };
   };
   const archiveSpec = (d: FulfillmentDocument): ModuleEditorSpec => ({ title: '归档外部机构原件', submitLabel: '归档原件', description: `${TYPE_LABEL[d.type]} ${d.number} · 以外部机构签发的原件为准。`, fields: [field('issuer', '外部签发机构', 'choice', true, DOCUMENT_ISSUERS), field('at', '实际签发时间', 'datetime-local'), field('evidence', '原件来源依据', 'textarea')], initialValues: { issuer: '', at: localNow(), evidence: '' }, submit: v => run({ type: 'fulfillment.documents.archiveExternal', payload: { id: d.id, issuer: text(v, 'issuer'), at: businessInputInstant(text(v, 'at')), evidence: text(v, 'evidence') } }) });

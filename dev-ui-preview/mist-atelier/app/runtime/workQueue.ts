@@ -1,6 +1,6 @@
 import { sampleLoanRemaining } from '../../../../server/src/shared/mistFulfillment';
 import { uiText, ui, localizedPageTitle } from '../../../../services/interfaceLanguage';
-import { isPendingFinanceMistInvoice, mistFxLockUsage, mistMoneyMinor, MIST_LOGISTICS_DUTY, type MistState, type MistTarget, type MistTask } from '../../../../server/src/shared/mistWorkspace';
+import { isActiveMistInvoice, isPendingFinanceMistInvoice, mistFxLockUsage, mistMoneyMinor, MIST_LOGISTICS_DUTY, type MistState, type MistTarget, type MistTask } from '../../../../server/src/shared/mistWorkspace';
 import type { MistReview } from './reviews';
 import { addBusinessDays, pendingWeeklyArchive } from '../../../../server/src/shared/mistTeam';
 import { shipmentStage } from './shipmentStage';
@@ -343,7 +343,7 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
       push({ id: 'receipt:' + receipt.id, source: 'finance', title: `${receipt.payer || '到账'} · ${display.label === '部分核销' ? `${receipt.currency} ${(remaining / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : uiText(display.label === '未认领' ? '到账未认领' : '匹配建议待确认')}`, meta: [`${receipt.currency} ${receipt.remaining.toLocaleString('en-US')}`, receipt.date].filter(Boolean).join(' · '),
         when: display.label, urgent: display.label === '未认领', at: receipt.date || '', target: { view: 'payment-vouchers', id: receipt.id } });
     }
-    if (can('invoices:write')) for (const invoice of (state.invoices ?? []).filter(isPendingFinanceMistInvoice))
+    if (canRead('invoices')&&can('invoices:write')) for (const invoice of (state.invoices ?? []).filter(isPendingFinanceMistInvoice))
       push({ id: 'invoice:' + invoice.id, source: 'finance', title: ui`${invoice.code} · 发票待财务确认`, meta: [invoice.customer, invoice.order].filter(Boolean).join(' · '), when: '待确认', urgent: false, at: invoice.due || '',
         due: invoice.due || undefined, target: { view: 'invoices', section: 'pending', id: invoice.id } as MistTarget });
     if (can(MIST_FINANCE_SCOPES.voucher)) for (const request of requests) {
@@ -360,6 +360,15 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
       push({ id: 'finance:' + request.id, source: 'finance', title: ui`${request.code} · 付款申请被退回`, meta: [request.supplier, request.decision?.actor && '退回人 ' + request.decision.actor, request.decision?.note].filter(Boolean).join(' · '), when: '被退回', urgent: true, at: request.decision?.at || request.submittedAt, target: { view: 'payment-vouchers', id: request.id, section: 'payables' } });
     }
   }
+    if (!canRead('payment-vouchers')&&canRead('invoices')&&can('invoices:write')) for (const invoice of (state.invoices ?? []).filter(isPendingFinanceMistInvoice))
+      push({ id: 'invoice:' + invoice.id, source: 'finance', title: ui`${invoice.code} · 发票待财务确认`, meta: [invoice.customer, invoice.order].filter(Boolean).join(' · '), when: '待确认', urgent: false, at: invoice.due || '',
+        due: invoice.due || undefined, target: { view: 'invoices', section: 'pending', id: invoice.id } as MistTarget });
+    if(canRead('invoices')&&can('invoices:write'))for(const invoice of state.invoices||[]){
+      if(!isActiveMistInvoice(invoice)||!invoice.receivableDueCondition||invoice.dueConfirmation)continue;
+      const document=state.fulfillment.documents.find(d=>d.id===invoice.sourceDocumentId&&d.invoiceId===invoice.id&&d.status==='issued'),shipment=state.fulfillment.shipments.find(s=>s.id===document?.shipmentId);
+      const deliveryAt=invoice.receivableDueSource?(invoice.receivableDueSource.sourceCurrent?invoice.receivableDueSource.deliveryAt:undefined):shipment?.delivered?.at;if(!deliveryAt)continue;
+      push({id:'invoice-due:'+invoice.id,source:'finance',title:ui`${invoice.code} · 待核对验收账期`,meta:[invoice.customer,invoice.order].filter(Boolean).join(' · '),when:'待核对',urgent:false,at:deliveryAt,target:{view:'invoices',id:invoice.id}});
+    }
   // fin63：报表订阅到期，提醒本人生成并发送。
   if (me && canRead('reports')) for (const due of dueReportSchedules(state, me, today))
     push({ id: `report-schedule:${due.schedule.id}:${due.period}`, source: 'report', title: ui`发送${REPORT_SCHEDULE_KINDS[due.schedule.kind]}`, meta: due.schedule.to, when: '待发送', urgent: due.due < today, at: due.due, due: due.due, target: { view: 'reports', section: due.schedule.kind } as MistTarget });

@@ -1,3 +1,5 @@
+import {isCalendarDay} from './mistBusinessClock';
+import {receivableAcceptanceTerms} from './mistTradeTerms';
 /**
  * P1-3 document generation. Builds frozen snapshots from current business records and applies the generate commands.
  *
@@ -192,7 +194,9 @@ export function prepareShipmentDocumentSnapshot(root: MistState, payload: unknow
   const blocked = documentGenerationBlocker(root, s, p.type, p.orderId); if (blocked) fail(blocked, blocked === '出运不存在' ? 'NOT_FOUND' : 'PRECONDITION');
   if (!ctx.actorId) fail('缺少真实生成人');
   const order = PER_ORDER_TYPES.includes(p.type) ? root.orders.find(o => o.id === p.orderId) : undefined;
-  const due = p.type === 'CI' && !order?.replacementSource ? (typeof p.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.dueDate) ? p.dueDate : fail('请填写应收到期日', 'VALIDATION')) : '';
+  const condition=p.type==='CI'&&!order?.replacementSource?receivableAcceptanceTerms(order?.governance?.contract.paymentNote):null;
+  if(condition&&p.dueDate)fail('本合同按客户验收确定到期日，不能预设固定日期','VALIDATION');
+  const due = p.type === 'CI' && !order?.replacementSource && !condition ? (isCalendarDay(p.dueDate) ? p.dueDate : fail('请填写应收到期日', 'VALIDATION')) : '';
   const { number } = nextNumber(root, s!, p.type, order), content = shipmentDocContent(root, s!, p.type, order, due);
   const { total, ...rest } = content;
   const snapshot: GeneratedDocSnapshot = { templateVersion: GENERATED_DOCUMENT_TEMPLATE_VERSION, kind: p.type, number, date: platformBusinessDate(ctx.now), title: { zh: ZH_TITLE[p.type], en: EN_TITLE[p.type] }, issuer: issuerOf(root.settings.companyProfile)!, signatures: [{ label: { zh: '授权签字及公司盖章', en: 'Authorized signature' }, name: root.settings.companyProfile!.englishName || root.settings.companyProfile!.legalName }], ...rest, paragraphs: rest.paragraphs || [], generatedAt: ctx.now, generatedBy: ctx.actorName, generatedById: ctx.actorId! };
@@ -265,8 +269,10 @@ export function applyDocumentGeneration(root: MistState, command: DocumentGenera
     const { version, draft } = nextNumber(root, s, p.type, order);
     // A regenerated draft replaces its own earlier generated file; files uploaded by people stay attached.
     const generatedIds = new Set(((draft as FulfillmentDocument & { generated?: GeneratedDocRecord[] })?.generated || []).map(g => g.fileId));
-    const row = draft || { id: ctx.id(), shipmentId: s.id, orderId: order?.id || '', type: p.type, number: snapshot.number, version, title: '', dueDate: '', content: '', fileIds: [], status: 'draft' as const, createdAt: ctx.now, actor: ctx.actorName };
-    Object.assign(row, { title: `${ZH_TITLE[p.type]} ${s.code}${order ? ' · ' + order.code : ''}`, dueDate: p.type === 'CI' && !order?.replacementSource ? p.dueDate : row.dueDate, content: contentText(snapshot), fileIds: [...row.fileIds.filter(id => !generatedIds.has(id)), artifact.file.id] });
+    const row:FulfillmentDocument = draft || { id: ctx.id(), shipmentId: s.id, orderId: order?.id || '', type: p.type, number: snapshot.number, version, title: '', dueDate: '', content: '', fileIds: [], status: 'draft' as const, createdAt: ctx.now, actor: ctx.actorName };
+    Object.assign(row, { title: `${ZH_TITLE[p.type]} ${s.code}${order ? ' · ' + order.code : ''}`, dueDate: p.type === 'CI' && !order?.replacementSource ? (receivableAcceptanceTerms(order?.governance?.contract.paymentNote)?'':p.dueDate||'') : row.dueDate, content: contentText(snapshot), fileIds: [...row.fileIds.filter(id => !generatedIds.has(id)), artifact.file.id] });
+    const dueCondition=p.type==='CI'&&!order?.replacementSource?receivableAcceptanceTerms(order?.governance?.contract.paymentNote):null;
+    if(dueCondition)row.receivableDueCondition=dueCondition;else delete row.receivableDueCondition;
     (row as FulfillmentDocument & { generated?: GeneratedDocRecord[] }).generated = [...((row as FulfillmentDocument & { generated?: GeneratedDocRecord[] }).generated || []), structuredClone(artifact.record)];
     if (!draft) root.fulfillment.documents.push(row as FulfillmentDocument);
     event(root, ctx, 'document', row.id, `生成${DOCUMENT_TYPE_LABEL[p.type]} ${snapshot.number}`, [artifact.file.id]);

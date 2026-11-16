@@ -245,3 +245,82 @@ describe('external goods descriptions and customs facts',()=>{
   expect(()=>prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CD'}},f.context)).toThrow('重新生成商品项');expect(f.state).toEqual(before);
  });
 });
+
+const acceptanceTerms={kind:'deliveryAcceptance' as const,days:30,terms:'交付验收后30天付款'};
+function withAcceptanceContract(){const r=ready(),order=r.f.state.orders.find(o=>o.id===r.f.orderId)!;Object.assign(order.governance!.contract,{paymentMethod:'OA',paymentNote:acceptanceTerms.terms,depositPercent:0,preShipmentPercent:0});if(order.governance!.approvedSnapshot)order.governance!.approvedSnapshot.contract=structuredClone(order.governance!.contract);return r;}
+function pendingAcceptanceInvoice(){
+ const {f,shipmentId}=withAcceptanceContract();
+ f.state.fulfillment.documents.push({id:'acceptance-ci',shipmentId,orderId:f.orderId,type:'CI',number:'CI-ACCEPTANCE',version:1,title:'CI',dueDate:'',content:'O/A 30 days after delivery acceptance',fileIds:['contract'],status:'issued',createdAt:f.context.now,actor:'业务',invoiceId:'acceptance-ar',receivableDueCondition:acceptanceTerms} as any);
+ f.state.invoices.push({id:'acceptance-ar',code:'CI-ACCEPTANCE',orderId:f.orderId,order:'SO-LOCAL',customer:'客户',currency:'USD',amount:100,open:0,due:'',financeStatus:'pending',sourceDocumentId:'acceptance-ci',receivableDueCondition:acceptanceTerms} as any);
+ const shipment=f.state.fulfillment.shipments.find(s=>s.id===shipmentId)!;shipment.state='departed';shipment.departedAt='2026-10-19T04:00:00.000Z';
+ return {f,shipmentId,shipment,invoiceId:'acceptance-ar'};
+}
+it('generates and issues an acceptance-based CI with contract terms and an unresolved date',()=>{
+ const {f,shipmentId}=withAcceptanceContract();
+ const {result,snapshot}=generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CI',orderId:f.orderId}});
+ const d=f.state.fulfillment.documents.find(d=>d.id===result.id)!;
+ expect(d).toMatchObject({dueDate:'',receivableDueCondition:acceptanceTerms});
+ expect(snapshot.facts.some(f=>String(f.value).includes(acceptanceTerms.terms))).toBe(true);
+ expect(snapshot.paragraphs.some(p=>p.text.includes('2026-'))).toBe(false);
+ f.run({type:'fulfillment.documents.issue',payload:{id:d.id}});
+ expect(f.state.invoices.at(-1)).toMatchObject({financeStatus:'pending',open:0,due:'',receivableDueCondition:acceptanceTerms});
+});
+it('refuses a fixed date that would override an acceptance-based generated CI',()=>{
+ const {f,shipmentId}=withAcceptanceContract();
+ expect(()=>generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CI',orderId:f.orderId,dueDate:'2026-12-19'}})).toThrow('验收');
+});
+it('keeps manually registered acceptance-based CI terms unresolved as well',()=>{
+ const {f,shipmentId}=withAcceptanceContract();
+ const made=f.run({type:'fulfillment.documents.save',payload:{shipmentId,orderId:f.orderId,type:'CI',number:'MANUAL-ACCEPTANCE',title:'CI',dueDate:'',content:'O/A 30 days after delivery acceptance',fileIds:['contract']}});
+ expect(f.state.fulfillment.documents.find(d=>d.id===made.id)).toMatchObject({dueDate:'',receivableDueCondition:acceptanceTerms});
+});
+it('allows finance to confirm the amount while the due date awaits actual acceptance',()=>{
+ const {f,invoiceId}=pendingAcceptanceInvoice(),ctx={...f.context,now:'2026-10-22T04:00:00Z',actorId:'fin',actorName:'财务'};
+ f.run({type:'finance.receivable.confirm',payload:{invoiceId}},ctx);
+ expect(f.state.invoices.find(i=>i.id===invoiceId)).toMatchObject({financeStatus:'confirmed',open:100,due:''});
+ const before=structuredClone(f.state);expect(()=>f.run({type:'finance.receivable.due',payload:{invoiceId,acceptanceDate:'2026-10-21',acceptanceBasis:'AC1'}},ctx)).toThrow('签收');expect(f.state).toEqual(before);
+});
+it('computes and corrects only the due date from actual acceptance, preserving amount and issued CI',()=>{
+ const {f,shipmentId,invoiceId}=pendingAcceptanceInvoice(),ctx={...f.context,now:'2026-10-22T04:00:00Z',actorId:'fin',actorName:'财务'};
+ f.run({type:'finance.receivable.confirm',payload:{invoiceId}},ctx);
+ f.state.fulfillment.shipments.find(s=>s.id===shipmentId)!.delivered={at:'2026-10-20T10:00:00Z',receiver:'Customer',evidence:'POD-1',fileIds:['contract'],recordedBy:'ops'};
+ for(const acceptanceDate of ['2026-10-19','2026-10-23']){const before=structuredClone(f.state);expect(()=>f.run({type:'finance.receivable.due',payload:{invoiceId,acceptanceDate,acceptanceBasis:'AC1'}},ctx)).toThrow();expect(f.state).toEqual(before);}
+ expect(()=>f.run({type:'finance.receivable.due',payload:{invoiceId,acceptanceDate:'2026-10-21',acceptanceBasis:''}},ctx)).toThrow('依据');
+ f.run({type:'finance.receivable.due',payload:{invoiceId,acceptanceDate:'2026-10-21',acceptanceBasis:'Customer AC1 and POD1'}},ctx);
+ expect(f.state.invoices.find(i=>i.id===invoiceId)).toMatchObject({financeStatus:'confirmed',amount:100,open:100,due:'2026-11-20',dueConfirmation:{acceptanceDate:'2026-10-21',basis:'Customer AC1 and POD1',actorId:'fin',shipmentId}});
+ const beforeCorrection=structuredClone(f.state);expect(()=>f.run({type:'finance.receivable.due',payload:{invoiceId,acceptanceDate:'2026-10-22',acceptanceBasis:'Corrected AC2'}},ctx)).toThrow('更正原因');expect(f.state).toEqual(beforeCorrection);
+ f.run({type:'finance.receivable.due',payload:{invoiceId,acceptanceDate:'2026-10-22',acceptanceBasis:'Corrected AC2',reason:'Original date was recorded one day early'}},ctx);
+ const invoice=f.state.invoices.find(i=>i.id===invoiceId)!;expect(invoice).toMatchObject({financeStatus:'confirmed',amount:100,open:100,due:'2026-11-21',dueConfirmation:{acceptanceDate:'2026-10-22'},dueHistory:[{acceptanceDate:'2026-10-21',due:'2026-11-20',replacementReason:'Original date was recorded one day early'}]});
+ expect(f.state.fulfillment.documents.find(d=>d.id==='acceptance-ci')!.dueDate).toBe('');
+});
+it('issues a valid conditional CI after JSON storage reordered its metadata keys',()=>{
+ const {f,shipmentId}=withAcceptanceContract(),made=generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CI',orderId:f.orderId}}),d=f.state.fulfillment.documents.find(d=>d.id===made.result.id)!;
+ d.receivableDueCondition={days:30,terms:acceptanceTerms.terms,kind:'deliveryAcceptance'};
+ expect(()=>f.run({type:'fulfillment.documents.issue',payload:{id:d.id}})).not.toThrow();
+});
+it('does not let the historical independent-invoice API bypass acceptance-based CI evidence',()=>{
+ const {f}=withAcceptanceContract(),draft=f.run({type:'platform.invoice.save',payload:{orderId:f.orderId,due:'2026-12-19',amount:100,note:'旧接口草稿'}}),before=structuredClone(f.state);
+ expect(()=>f.run({type:'platform.invoice.issue',payload:{id:draft.id as string}})).toThrow('验收账期');
+ expect(f.state).toEqual(before);
+});
+
+it('rejects an acceptance condition that no longer matches the exact issued CI',()=>{
+ const {f,shipment,invoiceId}=pendingAcceptanceInvoice();shipment.delivered={at:'2026-10-20T10:00:00Z',receiver:'Customer',evidence:'POD',fileIds:[],recordedBy:'ops'};
+ f.state.invoices.find(i=>i.id===invoiceId)!.receivableDueCondition={...acceptanceTerms,days:29};const before=structuredClone(f.state);
+ expect(()=>f.run({type:'finance.receivable.due',payload:{invoiceId,acceptanceDate:'2026-10-21',acceptanceBasis:'AC1'}},{...f.context,now:'2026-10-22T04:00:00Z'})).toThrow('来源不一致');expect(f.state).toEqual(before);
+});
+
+it('rejects an impossible fixed due date instead of freezing it into a CI PDF',()=>{
+ const {f,shipmentId}=ready();expect(()=>generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CI',orderId:f.orderId,dueDate:'2026-02-30'}})).toThrow('到期日');expect(f.state.fulfillment.documents.some(d=>d.type==='CI')).toBe(false);
+});
+
+it('does not accept caller-supplied money or credit days in a due-date review',()=>{
+ const {f,shipment,invoiceId}=pendingAcceptanceInvoice();shipment.delivered={at:'2026-10-20T10:00:00Z',receiver:'Buyer',evidence:'POD',fileIds:[],recordedBy:'Ops'};const before=structuredClone(f.state);
+ expect(()=>f.run({type:'finance.receivable.due',payload:{invoiceId,acceptanceDate:'2026-10-21',acceptanceBasis:'AC1',days:90,amount:1}} as any,{...f.context,now:'2026-10-22T04:00:00Z'})).toThrow('字段无效');expect(f.state).toEqual(before);
+});
+
+it('can verify an actual due date without also confirming the pending invoice amount',()=>{
+ const {f,shipment,invoiceId}=pendingAcceptanceInvoice();shipment.delivered={at:'2026-10-20T10:00:00Z',receiver:'Buyer',evidence:'POD',fileIds:[],recordedBy:'Ops'};
+ f.run({type:'finance.receivable.due',payload:{invoiceId,acceptanceDate:'2026-10-21',acceptanceBasis:'Customer AC1'}},{...f.context,now:'2026-10-22T04:00:00Z'});
+ expect(f.state.invoices.find(i=>i.id===invoiceId)).toMatchObject({financeStatus:'pending',open:0,amount:100,due:'2026-11-20'});expect(f.state.invoices.find(i=>i.id===invoiceId)!.financeConfirmedAt).toBeUndefined();
+});

@@ -303,6 +303,13 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
   let costClaimBasis:OrderClaimCostBasis[]|null=null;
   if(costVisible)try{costClaimBasis=financialClaimCostBasis(state,new Set((next.orders??[]).map(order=>order.id)));}catch(error){if(!(error instanceof MistCommandError))throw error;}
   if ('teamReports' in state) (next as MistState & {teamReports?:import('../shared/mistTeam').TeamWeeklyArchiveView[]}).teamReports = projectTeamReports(state,next,actor,scope,reportWorkspaceId);
+  // Invoice readers need the payment anchor date, not unrestricted transport or POD evidence.
+  next.invoices=(next.invoices||[]).map(invoice=>{
+    const {receivableDueSource:_untrusted,...safe}=invoice;if(!invoice.receivableDueCondition)return safe;
+    const document=state.fulfillment.documents.find(d=>d.id===invoice.sourceDocumentId&&d.invoiceId===invoice.id&&d.orderId===invoice.orderId&&d.type==='CI'),shipment=state.fulfillment.shipments.find(s=>s.id===document?.shipmentId),condition=document?.receivableDueCondition;
+    const sourceCurrent=!invoice.voidedAt&&document?.status==='issued'&&!!shipment&&condition?.kind===invoice.receivableDueCondition.kind&&condition.days===invoice.receivableDueCondition.days&&condition.terms===invoice.receivableDueCondition.terms;
+    return {...safe,receivableDueSource:{sourceCurrent,...(sourceCurrent?{shipmentId:shipment!.id,...(shipment!.delivered?{deliveryAt:shipment!.delivered.at}:{})}:{})}};
+  });
   return { state: next, hidden,...(costVisible?{costMaterialBasis:scope ? null : financialMaterialCostBasis(state),costClaimBasis}:{}) };
 }
 /** 精确匹配附件 ID，不用全文子串判断，避免相似文本开放隐藏附件。 */

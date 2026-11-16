@@ -258,3 +258,10 @@ it('shows a customer credit grant with the exact old/new currency values and req
  const proposal:any={id:'credit-proposal',ownerId:'u',owner:'Manager',summary:['调整信用额度'],state:'pending',createdAt:'2026-11-18',risk:'high',command:{type:'market.customer.update',payload:{id:'customer-private',patch:{creditLimit:2000}}}};
  const host=document.createElement('div'),root=createRoot(host);document.body.append(host);try{act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));const body=document.body.textContent!;for(const text of ['Birchline · BCS','原信用额度','1000.00 GBP','拟设信用额度','2000.00 GBP','高风险','本人登录密码'])expect(body).toContain(text);expect(body).not.toContain('customer-private');expect(body).not.toContain('creditLimit');expect(getConfirm(host).disabled).toBe(true);}finally{act(()=>root.unmount());host.remove();}
 });
+
+it('labels customer acceptance facts in an existing finance confirmation proposal',()=>{
+ const {state}=orderProposalFixture();state.invoices=[{id:'ar-private',code:'CI-ACCEPTANCE',orderId:'',order:'',customer:'Buyer',currency:'USD',amount:100,open:0,due:'',financeStatus:'pending'}];
+ const proposal:any={id:'accept-proposal',ownerId:'u',owner:'财务',summary:['确认应收'],state:'pending',createdAt:'2026-11-18',command:{type:'finance.receivable.due',payload:{invoiceId:'ar-private',acceptanceDate:'2026-11-18',acceptanceBasis:'Customer AC-1 and POD-1'}}};
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
+ try{act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));expect(host.textContent).toContain('客户验收日');expect(host.textContent).toContain('验收依据');expect(host.textContent).toContain('Customer AC-1 and POD-1');expect(host.textContent).not.toContain('acceptanceDate');expect(host.textContent).not.toContain('acceptanceBasis');}finally{act(()=>root.unmount());host.remove();}
+});

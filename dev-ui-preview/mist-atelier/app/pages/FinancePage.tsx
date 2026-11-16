@@ -8,7 +8,7 @@ import React from 'react';
 import { ArrowRight, Download, Landmark, Link2, Sparkles, Upload } from 'lucide-react';
 import { Banner, Button, Card, CardFooter, CardHeader, DataTable, Dialog, Drawer, EmptyState, Facts, Field, FormGrid, KeyValue, MistPage, Mono, PageHeader, Pill, Select, SummaryBar, Tabs, TextInput, Tile, useToast, type Column } from '../../../../components/mist';
 import type { MistCommand, MistInvoice, MistReceipt, MistAllocation } from '../../../../server/src/shared/mistWorkspace';
-import { isActiveMistInvoice, isPendingFinanceMistInvoice, mistCommandPermission, mistPaymentReverseBlock } from '../../../../server/src/shared/mistWorkspace';
+import { isOverdueMistInvoice, isActiveMistInvoice, isPendingFinanceMistInvoice, mistCommandPermission, mistPaymentReverseBlock } from '../../../../server/src/shared/mistWorkspace';
 import { fmt } from '../data';
 import { useNav } from '../nav';
 import { XiaozhuLink } from './modules/XiaozhuLink';
@@ -104,7 +104,7 @@ export function FinancePage() {
   const hasInvoiceFilter=route.section==='open'||overdueScope||!!route.customerId;
   const visibleInvoices=invoices.filter(invoice=>{
     const order=state?.orders.find(order=>order.id===invoice.orderId);
-    return (!route.customerId||order?.customerId===route.customerId)&&(!hasInvoiceFilter||isActiveMistInvoice(invoice)&&invoice.open>0)&&(!overdueScope||invoice.due<today)&&(!orderType||order?.type===orderType);
+    return (!route.customerId||order?.customerId===route.customerId)&&(!hasInvoiceFilter||isActiveMistInvoice(invoice)&&invoice.open>0)&&(!overdueScope||isOverdueMistInvoice(invoice,today))&&(!orderType||order?.type===orderType);
   });
   React.useEffect(()=>{operation.current=false;fileSequence.current++;routed.current='';setWorking(false);setFailure('');setImportRows([]);setPaymentOpen(false);setInvoiceId(null);setSel('');setPick(undefined);setPayment({date:financeDay(businessNow()),payee:'',amount:'',currency:'USD',ref:'',accountId:''});setImportAccount('');},[scope]);
   React.useEffect(()=>{const key=scope+':'+(route.id||'')+':'+(route.section||'');if(routed.current===key)return;if(route.id&&invoices.some(invoice=>invoice.id===route.id)){setInvoiceId(route.id);setTab('inv');routed.current=key;}else if(route.id&&receipts.some(receipt=>receipt.id===route.id)){setSel(route.id);setTab('recv');routed.current=key;}else if(sourceInvoiceId){setInvoiceId(null);setTab('recv');const target=invoices.find(item=>item.id===sourceInvoiceId),available=receipts.filter(item=>item.remaining>0&&item.currency===target?.currency);const linked=available.find(item=>fundingRows.some(row=>row.receiptId===item.id&&row.orderId===target?.orderId&&row.state==='active')),suggested=available.find(item=>item.suggest===sourceInvoiceId);setSel((linked||suggested)?.id||'');setPick(sourceInvoiceId);routed.current=key;}else if(sourceOrderId){setTab('recv');routed.current=key;}else if(hasInvoiceFilter){setTab('inv');routed.current=key;}},[route.id,route.section,scope,invoices,receipts,hasInvoiceFilter]);
@@ -144,7 +144,7 @@ export function FinancePage() {
   const displayCurrency=previewInvoice?.currency||receipt?.currency||(currencies.includes('USD')?'USD':currencies[0])||'USD';
   const now=businessNow(),monthAllocations=allocations.filter(item=>{const date=mistDate(item.createdAt);return date&&date.getFullYear()===now.getFullYear()&&date.getMonth()===now.getMonth();});
   // The overdue card follows the same scope as the list (e.g. only fabric orders when opened from the fabric order card).
-  const overdueInvoices=(hasInvoiceFilter?visibleInvoices:invoices).filter(item=>isActiveMistInvoice(item)&&item.open>0&&item.due<today);
+  const overdueInvoices=(hasInvoiceFilter?visibleInvoices:invoices).filter(item=>isOverdueMistInvoice(item,today));
   const pendingAmount=cashTotal(pendingReceipts.filter(item=>item.currency===displayCurrency).map(item=>item.remaining));
   const otherPending=currencies.filter(currency=>currency!==displayCurrency).map(currency=>`${fmt(cashTotal(pendingReceipts.filter(item=>item.currency===currency).map(item=>item.remaining)),2)} ${currency}`).join(' · ');
   const resolvePending=async()=>{if(working||saving||loading||operation.current)return;const bound=scope,original=pending;operation.current=true;setWorking(true);setFailure('');try{const receipt=await recover();if(receipt&&alive.current&&activeScope.current===bound&&routeScope.isCurrent()){if(original?.command?.type==='finance.importReceipts')setImportRows([]);if(original?.command?.type==='finance.payment.save')setPaymentOpen(false);toast('原操作结果已核对');}}catch(error){if(alive.current&&activeScope.current===bound)setFailure(error instanceof Error?error.message:'原请求核对失败');}finally{if(alive.current&&activeScope.current===bound){operation.current=false;setWorking(false);}}};

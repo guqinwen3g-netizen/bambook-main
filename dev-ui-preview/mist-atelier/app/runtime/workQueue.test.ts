@@ -597,3 +597,15 @@ describe('rejected development samples and outstanding sample loans', () => {
     expect(mistWorkQueue(state, options)).toEqual([]);
   });
 });
+
+it('returns a delivered invoice with unresolved acceptance terms to finance without inventing an overdue deadline',()=>{
+ const state=base(),options={canRead:all,can:(p:string)=>p==='invoices:write',me:'fin',today:'2026-11-18'};
+ state.invoices.push({id:'ar-due',code:'CI-DUE',orderId:'o',order:'SO-DUE',customer:'Buyer',due:'',amount:100,open:100,currency:'USD',financeStatus:'confirmed',sourceDocumentId:'ci-due',receivableDueCondition:{kind:'deliveryAcceptance',days:30,terms:'交付验收后30天付款'}});
+ state.fulfillment.documents.push({id:'ci-due',invoiceId:'ar-due',shipmentId:'ship-due',type:'CI',status:'issued'} as any);state.fulfillment.shipments.push({id:'ship-due',state:'departed',lines:[]} as any);
+ expect(mistWorkQueue(state,options).some(t=>t.id==='invoice-due:ar-due')).toBe(false);
+ state.fulfillment.shipments[0].delivered={at:'2026-11-17T04:00:00Z',receiver:'Buyer',evidence:'POD',fileIds:[],recordedBy:'Ops'};
+ const before=structuredClone(state),item=mistWorkQueue(state,options).find(t=>t.id==='invoice-due:ar-due');expect(item).toMatchObject({source:'finance',when:'待核对',urgent:false,target:{view:'invoices',id:'ar-due'}});expect(item?.due).toBeUndefined();expect(state).toEqual(before);
+ expect(mistWorkQueue(state,{...options,can:()=>false}).some(t=>t.id==='invoice-due:ar-due')).toBe(false);
+ state.invoices[0].dueConfirmation={acceptanceDate:'2026-11-17',basis:'AC1',due:'2026-12-17',shipmentId:'ship-due',sourceDocumentId:'ci-due',deliveryAt:'2026-11-17T04:00:00Z',at:'2026-11-18T04:00:00Z',actor:'Fin'};
+ expect(mistWorkQueue(state,options).some(t=>t.id==='invoice-due:ar-due')).toBe(false);
+});
