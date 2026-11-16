@@ -80,6 +80,7 @@ const supplierContactSource=(c:MarketSupplier['contacts'][number])=>stableJson({
 const supplierIdentitySource=(s:MarketSupplier)=>stableJson({id:s.id,code:s.code,name:s.name});
 const supplierPrimarySource=(s:MarketSupplier)=>stableJson(s.contacts.filter(c=>c.primary).map(c=>c.id).sort());
 const supplierCertificateSource=(c:SupplierCertificate)=>stableJson({id:c.id,name:c.name,number:c.number,issuer:c.issuer,validUntil:c.validUntil,fileIds:c.fileIds});
+const supplierBankSource=(a?:NonNullable<MarketSupplier['bankAccounts']>[number])=>a?stableJson(a):'';
 
 export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchProps) {
   const work=useMistWorkspace(),{ state, run, error, refresh, loading, saving, pending, workspace } = work, session = useMistSession(), { go, route } = useNav();
@@ -155,19 +156,34 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   // 收款账户：财务登记；更换须写明核实方式（按合同或既有记录中的电话回拨、盖章变更函），原账户保留为已替换。
   const bankSpec = (s: MarketSupplier, currency = 'CNY'): ModuleEditorSpec => {
     const current = s.bankAccounts?.find(a => a.state === 'active' && a.currency === currency);
+    const sources=new Map((s.bankAccounts||[]).filter(a=>a.state==='active').map(a=>[a.currency,supplierBankSource(a)])),identity=supplierIdentitySource(s),workspaceId=workspace?.id,actorId=session.user?.id;
     return { title: current ? `变更 ${s.name} 的收款账户` : `登记 ${s.name} 的收款账户`, submitLabel: '保存',
       description: current ? '变更后，按原账户提交的付款申请需撤回重新审批。' : undefined,
       initialValues: { currency, accountName: current?.accountName || s.name, bankName: '', accountNo: '', swift: '', verification: '' },
       fields: [{ key: 'currency', label: '币种', type: 'select', required: true, options: CURRENCIES.map(c => ({ value: c.value, label: c.label })) }, { key: 'accountName', label: '账户名称', required: true }, { key: 'bankName', label: '开户行', required: true },
         { key: 'accountNo', label: '账号', required: true }, { key: 'swift', label: 'SWIFT（境外）' }, { key: 'verification', label: '核实记录', type: 'textarea', required: true, hint: '向谁、通过合同或既有记录中的电话核实，或盖章变更函' }],
-      submit: v => run({ type: 'market.supplier.bank.save', payload: { supplierId: s.id, currency: String(v.currency ?? 'CNY'), accountName: String(v.accountName ?? ''), bankName: String(v.bankName ?? ''), accountNo: String(v.accountNo ?? ''), swift: String(v.swift ?? ''), verification: String(v.verification ?? '') } }) };
+      submit: async v => {
+        const checked=live.current.work,source=checked.state?.market.suppliers.find(row=>row.id===s.id),selectedCurrency=String(v.currency??'CNY').trim().toUpperCase(),active=source?.bankAccounts?.find(a=>a.state==='active'&&a.currency===selectedCurrency),revision=checked.workspace?.revision;
+        if(!routeScope.isCurrent()||checked.workspace?.id!==workspaceId||live.current.session.user?.id!==actorId)throw new Error('当前账号或公司已变化，请重新打开收款账户');
+        if(!checked.state||checked.loading||typeof revision!=='number'||!Number.isSafeInteger(revision)||revision<0)throw new Error('收款资料不可用，请重新读取后核对');
+        if(!source||supplierIdentitySource(source)!==identity||supplierBankSource(active)!==(sources.get(selectedCurrency)||''))throw new Error('收款账户已更新，请重新打开后核对');
+        return checked.run({type:'market.supplier.bank.save',payload:{supplierId:s.id,currency:selectedCurrency,accountName:String(v.accountName??''),bankName:String(v.bankName??''),accountNo:String(v.accountNo??''),swift:String(v.swift??''),verification:String(v.verification??'')}},{expectedRevision:revision});
+      } };
   };
-  const bankDisableSpec = (s: MarketSupplier, a: NonNullable<MarketSupplier['bankAccounts']>[number]): ModuleEditorSpec => ({
+  const bankDisableSpec = (s: MarketSupplier, a: NonNullable<MarketSupplier['bankAccounts']>[number]): ModuleEditorSpec => {
+    const original=supplierBankSource(a),identity=supplierIdentitySource(s),workspaceId=workspace?.id,actorId=session.user?.id;
+    return {
     title: `停用收款账户 ${a.currency} · 尾号 ${a.accountNo.slice(-4)}`, submitLabel: '停用', submitVariant: 'danger',
     description: '按该账户提交的付款申请需撤回，按新账户重新审批。', initialValues: { reason: '' },
     fields: [{ key: 'reason', label: '停用原因', type: 'textarea', required: true }],
-    submit: v => run({ type: 'market.supplier.bank.disable', payload: { supplierId: s.id, accountId: a.id, reason: String(v.reason ?? '') } }),
-  });
+    submit: async v => {
+      const checked=live.current.work,source=checked.state?.market.suppliers.find(row=>row.id===s.id),current=source?.bankAccounts?.find(row=>row.id===a.id),revision=checked.workspace?.revision;
+      if(!routeScope.isCurrent()||checked.workspace?.id!==workspaceId||live.current.session.user?.id!==actorId)throw new Error('当前账号或公司已变化，请重新打开收款账户');
+      if(!checked.state||checked.loading||typeof revision!=='number'||!Number.isSafeInteger(revision)||revision<0)throw new Error('收款资料不可用，请重新读取后核对');
+      if(!source||supplierIdentitySource(source)!==identity||!current||current.state!=='active'||supplierBankSource(current)!==original)throw new Error('收款账户已更新，请重新打开后核对');
+      return checked.run({type:'market.supplier.bank.disable',payload:{supplierId:s.id,accountId:a.id,reason:String(v.reason??'')}},{expectedRevision:revision});
+    },
+  };};
   const deleteCertSpec = (s: MarketSupplier, c: SupplierCertificate): ModuleEditorSpec => certSpec(s,c,true);
   const rateSpec = (s: MarketSupplier): ModuleEditorSpec => ({
     title: `评级 ${s.name}`, submitLabel: '保存评级', description: '每次评级单独记录，历史评级保留。',
