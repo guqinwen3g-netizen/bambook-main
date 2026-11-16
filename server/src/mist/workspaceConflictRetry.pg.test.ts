@@ -5,6 +5,8 @@ import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { MistPrivateFiles } from './files';
 import { MistRepository } from './repository';
+import * as actualContract from '../shared/mistWorkspace';
+import { MIST_READ_SECTIONS } from './access';
 import { testActor, testAuthority, testContract } from './__tests__/support';
 
 /**
@@ -25,6 +27,16 @@ describe.skipIf(!url)('真实 PostgreSQL：多人同时保存自动重试', () =
   const note = (requestId: string, text = requestId) => ({ requestId, expectedRevision: 0, command: { type: 'notes.add', payload: { text } } });
   const row = (id: string) => prisma.mistWorkspace.findUniqueOrThrow({ where: { id } }) as any;
   const requests = (id: string) => prisma.mistCommandReceipt.count({ where: { workspaceId: id, NOT: { requestId: { startsWith: 'mist-revision:' } } } });
+
+  it('rejects a stale physical stock count instead of reading a newer book balance; a rechecked count succeeds', async () => {
+    const auth=testAuthority(),all=[...new Set(MIST_READ_SECTIONS.flatMap(section=>section.permissions)),'inventory:write'];auth.users.get('owner')!.permissions=all;auth.users.get('other')!.permissions=all;
+    const actual=new MistRepository(prisma,actualContract,files,auth.authorize),created=await actual.create(owner,{name:'Physical count',slug:'pg-count-'+Math.random().toString(36).slice(2),seed:'demo'});ids.push(created.id);
+    const state=(await row(created.id)).state,line=state.orderLines[0];state.memberIds=['other'];state.fulfillment.stock=[{id:'count-stock',sourceKind:'other',orderId:line.orderId,lineId:line.id,name:'Buttons',unit:'个',quantity:12,available:12,location:'A',owner:'Company',createdAt:'2026-11-18T04:00:00Z',otherReceipt:{reason:'other',source:'DN1',evidence:'Counted'}}];await prisma.mistWorkspace.update({where:{id:created.id},data:{state}});
+    await actual.execute(testActor('other'),created.id,{requestId:'move-before-count',expectedRevision:0,command:{type:'fulfillment.inventory.move',payload:{id:'count-stock',kind:'move',quantity:1,location:'B',person:'other',note:'Physical move'}}}as any);
+    const input={requestId:'old-count',expectedRevision:0,command:{type:'fulfillment.stock.count',payload:{lines:[{stockId:'count-stock',location:'A',counted:11},{stockId:'count-stock',location:'B',counted:1}],note:'Physical count'}}}as any,before=await row(created.id),receipts=await requests(created.id);
+    await expect(actual.execute(owner,created.id,input)).rejects.toMatchObject({code:'REVISION_CONFLICT',status:409});expect(await row(created.id)).toEqual(before);expect(await requests(created.id)).toBe(receipts);
+    const fresh=await actual.execute(owner,created.id,{...input,requestId:'fresh-count',expectedRevision:1});expect(fresh.workspace.state.fulfillment.stockCounts.at(-1)).toMatchObject({state:'approved',lines:[{book:11,counted:11,difference:0},{book:1,counted:1,difference:0}]});
+  });
 
   it('两人基于同一版本同时保存不同记录：两条都保留', async () => {
     const id = await workspace();

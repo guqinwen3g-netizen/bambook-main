@@ -145,7 +145,9 @@ const retryableTransaction = (error: any) => RETRYABLE_TRANSACTION_CODES.include
  * 审批、确认、放行只针对所办理的那条记录：期间他人改了同一记录（写入位置重叠）照旧拒绝、要求刷新核对；
  * 改的是别的记录则在最新状态上重新执行全部业务门禁后合并，避免多人同时办公时每次审批都因无关更新被退回。
  */
-const NON_REBASABLE_COMMAND = /\.(issue|document)$/;
+// A physical count must retain the book balance inspected by its requester.
+// Reapplying its writes to a newer stock snapshot would silently invent a variance.
+const NON_REBASABLE_COMMAND = /\.(issue|document)$|^fulfillment\.stock\.count$/;
 function requestIdentifier(value: unknown, maxLength = 120): string {
   const id = identifier(value, '请求编号', maxLength);
   if (id.startsWith(REVISION_MARKER_PREFIX)) fail('INVALID_INPUT', '请求编号无效', 400);
