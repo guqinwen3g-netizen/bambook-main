@@ -5,6 +5,30 @@ import type {TokenPayload} from '../auth/service';
 import {getMistAssistantStatus,runMistAssistant,type MistAssistantDependencies} from './assistant';
 function fixture(){let i=0;const state=createMistState({id:()=>`assistant-test-${++i}`,now:'2026-10-13T00:00:00Z',actorName:'测试人'},'empty');state.orders.push({id:'order',code:'SO-TEST',type:'garment',customerId:'customer',customer:'测试客户',season:'AW',lines:1,qty:2,amount:20,currency:'USD',due:'2026-11-01',progress:0,state:'待生产',tone:'neutral',owner:'测试人',img:'coat',checklist:[],handoffAt:null,createdAt:'2026-10-13T00:00:00Z',updatedAt:'2026-10-13T00:00:00Z'});state.invoices.push({id:'invoice',code:'CI-TEST',orderId:'order',order:'SO-TEST',customer:'测试客户',due:'2026-11-01',amount:20,open:20,currency:'USD'});state.contacts.push({id:'private-contact',customerId:'customer',name:'不应发送的联系人',role:'采购',email:'private@example.test',phone:'secret-phone',tone:'neutral'});const workspace:MistWorkspaceEnvelope={id:'workspace',ownerId:'user',name:'测试公司',revision:7,state};const actor={userId:'user',roles:[],permissions:['ai:chat','orders:read','invoices:read','risk:read'],authorizationLoaded:true,departmentIds:[]} as unknown as TokenPayload;const complete=vi.fn(async(_input:any)=> '根据 SO-TEST，这里是可审阅建议。');const deps:MistAssistantDependencies={providers:()=>[{id:'primary',baseUrl:'https://model.invalid/v1',apiKey:'server-only-test-secret',model:'test-model'}],complete};return{workspace,actor,complete,deps};}
 afterEach(()=>{vi.unstubAllEnvs();vi.unstubAllGlobals();});
+it('includes the selected order quantity and unit from its visible lines',async()=>{
+ const f=fixture();f.workspace.state.orderLines.push({id:'selected',orderId:'order',qty:12,unit:'件'} as any,{id:'unrelated',orderId:'other',qty:999,unit:'件'} as any);
+ await runMistAssistant({...f,body:{message:'核对销售数量',sourceIds:['orders:order']}},f.deps);
+ const facts=JSON.parse(f.complete.mock.calls[0][0].messages[0].content.split('\n').slice(1).join('\n'));
+ expect(facts.sources[0].quantity).toMatchObject({state:'single_unit',quantity:'12',unit:'PC',groups:[{quantity:'12',unit:'PC'}],markedPartial:false});
+ expect(JSON.stringify(facts)).not.toContain('999');
+});
+it('keeps mixed order units separate in the model facts',async()=>{
+ const f=fixture();f.workspace.state.orderLines.push({id:'metres',orderId:'order',qty:130.5,unit:'米'} as any,{id:'yards',orderId:'order',qty:110,unit:'码'} as any);
+ await runMistAssistant({...f,body:{message:'核对面料数量',sourceIds:['orders:order']}},f.deps);
+ const facts=JSON.parse(f.complete.mock.calls[0][0].messages[0].content.split('\n').slice(1).join('\n'));
+ expect(facts.sources[0].quantity).toMatchObject({state:'mixed_units',quantity:null,unit:null,groups:[{quantity:'130.5',unit:'M'},{quantity:'110',unit:'YD'}]});
+});
+it('does not invent pieces for an order header with no recorded unit or lines',async()=>{
+ const f=fixture();await runMistAssistant({...f,body:{message:'核对数量',sourceIds:['orders:order']}},f.deps);
+ const facts=JSON.parse(f.complete.mock.calls[0][0].messages[0].content.split('\n').slice(1).join('\n'));
+ expect(facts.sources[0].quantity).toMatchObject({state:'legacy_unit_unrecorded',quantity:null,unit:null,legacyQuantity:'2',markedPartial:true});
+});
+it('marks malformed quantity as unresolved without blocking other selected facts',async()=>{
+ const f=fixture();f.workspace.state.orderLines.push({id:'incomplete',orderId:'order',qty:undefined,unit:'件'} as any);
+ await runMistAssistant({...f,body:{message:'核对订单',sourceIds:['orders:order']}},f.deps);
+ const facts=JSON.parse(f.complete.mock.calls[0][0].messages[0].content.split('\n').slice(1).join('\n'));
+ expect(facts.sources[0]).toMatchObject({order:'SO-TEST',quantity:{state:'unresolved',quantity:null,unit:null,markedPartial:true}});
+});
 describe('Mist configured read-only assistant',()=>{
  it('calls the existing configured LLM completer with mocked network transport',async()=>{const f=fixture();vi.stubEnv('ARK_API_KEY','mock-server-key');vi.stubEnv('BAMBOOK_MODEL_BASE_URL','https://provider.invalid/v1');vi.stubEnv('BAMBOOK_MODEL_NAME','mock-existing-model');const network=vi.fn(async(_url:any,_init?:any)=>new Response(JSON.stringify({choices:[{message:{content:'Existing provider response'}}]}),{status:200}));vi.stubGlobal('fetch',network);const result=await runMistAssistant({...f,body:{message:'read-only question'}});expect(result.text).toBe('Existing provider response');expect(network).toHaveBeenCalledTimes(1);expect(network.mock.calls[0][0]).toBe('https://provider.invalid/v1/chat/completions');expect(JSON.stringify(result)).not.toContain('mock-server-key');});
  it('returns safe configuration metadata without key or endpoint',()=>{const f=fixture();expect(getMistAssistantStatus(f.deps)).toEqual({configured:true,models:['test-model'],mode:'read_only'});expect(JSON.stringify(getMistAssistantStatus(f.deps))).not.toMatch(/server-only|model.invalid/);});
