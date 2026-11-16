@@ -104,8 +104,9 @@ it('shows isolated stock disposal on its source purchase only to an inventory re
   store.state!.fulfillment.purchases.push(purchase('p1',approved()));
   store.state!.fulfillment.stock.push({id:'lot',purchaseId:'p1',orderId:'o',lineId:'l'} as any);
   store.state!.fulfillment.stockMovements.push({id:'ret',stockId:'lot',kind:'return',quarantinedQuantity:2,quarantineDisposition:{decision:'supplierReturn',actor:'仓库',at:'2026-10-13',evidence:'供应商已签收'}} as any);
-  render('p1');expect(host.textContent).toContain('退供应商 2 个');expect(host.textContent).toContain('供应商已签收');expect(host.textContent).toContain('采购结算待核对');
+  render('p1');expect(host.textContent).toContain('退供应商 2 个');expect(host.textContent).toContain('供应商已签收');expect(host.textContent).toContain('采购结算待核对');expect(getByRole(host,'button',{name:'查看来源库存',exact:true})).toBeTruthy();
   session.denied.add('inventory:read');render('p1');expect(host.textContent).not.toContain('供应商已签收');
+  expect(queryByRole(host,'button',{name:'查看来源库存',exact:true})).toBeNull();
 });
 
 it('offers garment supplies and processing without a fabric purchase shortcut',async()=>{

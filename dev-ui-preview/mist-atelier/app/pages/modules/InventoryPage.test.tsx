@@ -23,12 +23,33 @@ function choose(select:HTMLSelectElement,value:string){act(()=>{select.value=val
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 const stock=(id:string,patch:Partial<FulfillmentStock>={}):FulfillmentStock=>({id,sourceKind:'purchase',purchaseId:'po',receiptId:'rc',orderId:'og',lineId:'lg',name:'主唛',unit:'个',quantity:100,available:100,location:'A-1',owner:'公司货权',warehouseId:'wh',createdAt:'2026-10-10T08:00:00Z',...patch});
 const movement=(id:string,stockId:string,kind:FulfillmentStockMovement['kind'],quantity:number,patch:Partial<FulfillmentStockMovement>={}):FulfillmentStockMovement=>({id,stockId,kind,quantity,location:'嘉兴厂',person:'江南成衣',note:'供料',at:'2026-10-11T08:00:00Z',actor:'经办人',...patch});
-beforeEach(()=>{session.denied=new Set();store.workspace=null;const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');
+beforeEach(()=>{store.loading=false;store.error='';session.denied=new Set();store.workspace=null;const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');
   s.orders.push({id:'og',code:'SO-G',type:'garment',customerId:'c',currency:'USD'} as any,{id:'of',code:'SO-F',type:'fabric',customerId:'c',currency:'USD'} as any);
   s.orderLines.push({id:'lg',orderId:'og',name:'风衣',style:'TR-1',img:'coat',qty:100,unit:'件',price:10,made:0,qc:0},{id:'lf',orderId:'of',name:'府绸',style:'F-1',img:'fabric',qty:500,unit:'米',price:3,made:0,qc:0});
   s.fulfillment.warehouses.push({id:'wh',code:'WH-1',name:'松江仓',address:'上海',active:true});
   store.state=s;store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
+
+it.each([false,true])('blocks inventory entry before the workspace is read (loading %s)',loading=>{
+ store.state=null;store.loading=loading;render();
+ expect(host.textContent).toContain(loading?'正在读取库存资料':'库存资料未读取');
+ for(const name of['导出','仓库目录','新增仓库','其他入库'])expect((getByRole(host,'button',{name,exact:true}) as HTMLButtonElement).disabled).toBe(true);
+ expect(host.textContent).not.toContain('还没有库存');expect(host.querySelector('.mist-pipeline')).toBeNull();
+ expect(queryByRole(host,'tablist',{name:'库存业务板块'})).toBeNull();
+});
+it('keeps genuinely read empty inventory actionable',()=>{
+ render();expect(host.textContent).toContain('还没有库存');expect(host.textContent).not.toContain('库存资料未读取');
+ for(const name of['仓库目录','新增仓库','其他入库'])expect((getByRole(host,'button',{name,exact:true}) as HTMLButtonElement).disabled).toBe(false);
+});
+it('does not present an unread warehouse catalog as an empty editable collection',async()=>{
+ const state=store.state!;render();await click(getByRole(host,'button',{name:'仓库目录',exact:true}));
+ store.state=null;render();expect(host.textContent).toContain('库存资料未读取');expect(queryByRole(host,'button',{name:'新增',exact:true})).toBeNull();
+ store.state=state;render();expect(host.textContent).toContain('仓库目录');expect(host.textContent).toContain('松江仓');expect(store.run).not.toHaveBeenCalled();
+});
+it('retains the requested batch when the inventory read recovers',()=>{
+ const state=store.state!;state.fulfillment.stock.push(stock('recover',{name:'面料批次'}));store.state=null;render('recover');expect(host.textContent).toContain('库存资料未读取');
+ store.state=state;render('recover');expect(host.textContent).toContain('面料批次');expect(host.textContent).not.toContain('库存资料未读取');expect(store.run).not.toHaveBeenCalled();
+});
 
 it('summarises each business group per unit without ever adding different units together',async()=>{
   store.state!.fulfillment.stock.push(stock('a',{available:400}),stock('b',{name:'里布',unit:'米',available:860,quantity:860}),stock('c',{name:'主唛补单',available:20}),stock('f',{orderId:'of',lineId:'lf',name:'府绸坯布',unit:'米',available:300,quantity:300}));
