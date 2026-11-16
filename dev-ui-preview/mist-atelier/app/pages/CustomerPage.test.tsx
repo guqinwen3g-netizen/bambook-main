@@ -4,7 +4,7 @@ import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {getByRole,queryByRole} from '@testing-library/dom';
 import {CustomerPage} from './CustomerPage';
-import {Nav} from '../nav';
+import {Nav,type Route} from '../nav';
 import {createMistState} from '../../../../server/src/shared/mistWorkspace';
 const bridge=vi.hoisted(()=>({current:null as any,canCreate:true,canAdmin:true,canCredit:true,localMode:true}));
 vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>bridge.current}));
@@ -12,11 +12,28 @@ vi.mock('../runtime/auth', () => { const useMistSession = ()=>({user:{id:'local'
 let host:HTMLDivElement,root:Root|undefined;const go=vi.fn(),openAI=vi.fn();
 beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;go.mockReset();openAI.mockReset();bridge.canCreate=true;bridge.canAdmin=true;bridge.canCredit=true;bridge.localMode=true;const state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T08:00:00Z',actorName:'本地操作员'},'empty');bridge.current={state,workspace:{id:'w',ownerId:'local',revision:0,state},loading:false,saving:false,pending:null,pendingCreate:null,error:'',run:vi.fn(async()=>({requestId:'saved',revision:1,result:{id:'created-customer',customerId:'created-customer'}})),refresh:vi.fn(),downloadFile:vi.fn()};});
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();});
-async function mount(id?:string){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<Nav.Provider value={{route:{view:'crm',id},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI}}><CustomerPage/></Nav.Provider>));}
+async function mount(id?:string,sourcePosition?:Route['sourcePosition'],section?:string){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<Nav.Provider value={{route:{view:'crm',id,sourcePosition,section},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI}}><CustomerPage/></Nav.Provider>));}
 async function click(label:string){await act(async()=>getByRole(host,'button',{name:label}).click());}
 async function fill(label:string,value:string){const element=host.querySelector(`[aria-label="${label}"]`) as HTMLInputElement|HTMLSelectElement;expect(element,label).toBeTruthy();await act(async()=>{const proto=element.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(proto,'value')!.set!.call(element,value);element.dispatchEvent(new Event('input',{bubbles:true}));element.dispatchEvent(new Event('change',{bubbles:true}));});}
 async function complete(){await click('新建客户');await fill('客户名称','新客户贸易公司');await fill('国家','中国');await fill('城市','上海');await click('下一步');await fill('付款条款','T/T 30% 定金，70% 发货前付清');await fill('贸易术语','FOB');await fill('贸易术语指定地点','上海');await fill('合作起始日','2026-10-13');await click('下一步');await fill('信用额度（结算币种）','1000');await click('下一步');}
 const customer=(id:string)=>({id,code:'CUS-'+id,name:'客户-'+id,country:'CN',city:'上海',industry:'服装',owner:'本地操作员',grade:'A',currency:'USD',terms:'T/T',incoterm:'FOB',categories:'成衣',creditLimit:0,since:'2026-10-13'});
+it.each([undefined,'one'])('distinguishes unread customer data from empty or missing records (%s)',async id=>{
+ const loaded=bridge.current.state;loaded.customers.push(customer('one'));bridge.current={...bridge.current,state:null,workspace:null,error:'读取失败'};await mount(id);
+ expect(host.textContent).toContain('客户资料未读取');expect(host.textContent).not.toContain('还没有客户档案');expect(host.textContent).not.toContain('没有找到指定客户');expect((getByRole(host,'button',{name:'新建客户'})as HTMLButtonElement).disabled).toBe(true);expect((getByRole(host,'combobox',{name:'选择客户'})as HTMLSelectElement).disabled).toBe(true);await click('重新读取');expect(bridge.current.refresh).toHaveBeenCalledOnce();expect(bridge.current.run).not.toHaveBeenCalled();
+});
+it('keeps genuine empty and genuinely missing customer states distinct after a successful read',async()=>{
+ await mount();expect(host.textContent).toContain('还没有客户档案');expect((getByRole(host,'button',{name:'新建客户'})as HTMLButtonElement).disabled).toBe(false);
+ const loaded=bridge.current.state;loaded.customers.push(customer('one'));await act(async()=>root!.render(<Nav.Provider value={{route:{view:'crm',id:'missing'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI}}><CustomerPage/></Nav.Provider>));expect(host.textContent).toContain('没有找到指定客户');expect(host.textContent).not.toContain('客户资料未读取');
+});
+it.each([['orders','订单'],['dev','开发'],['contacts','联系人'],['files','文件']])('restores the same customer tab from its scoped history position: %s',async(tab,label)=>{
+ bridge.current.state.customers.push(customer('one'));const scope=JSON.stringify([undefined,'local','w','one']);await mount('one',{view:'crm',scope,customerId:'one',tab}as any,'followups');expect(getByRole(host,'tab',{name:new RegExp('^'+label)}).getAttribute('aria-selected')).toBe('true');
+});
+it.each(['different-scope','different-customer'])('does not restore a foreign customer history position: %s',async kind=>{
+ bridge.current.state.customers.push(customer('one'));const scope=JSON.stringify([undefined,'local','w','one']);await mount('one',{view:'crm',scope:kind==='different-scope'?'another-scope':scope,customerId:kind==='different-customer'?'another-customer':'one',tab:'orders'}as any);expect(getByRole(host,'tab',{name:'概览'}).getAttribute('aria-selected')).toBe('true');
+});
+it('remembers user tab selection without pushing another navigation',async()=>{
+ bridge.current.state.customers.push(customer('one'));await mount('one');await act(async()=>getByRole(host,'tab',{name:/^订单/}).click());expect(history.state?.mistRoute?.sourcePosition).toMatchObject({view:'crm',customerId:'one',tab:'orders'});expect(go).not.toHaveBeenCalled();
+});
 describe('Mist customer creation and selection',()=>{
  it('offers first-customer creation from an empty workspace and navigates by the saved customer ID',async()=>{await mount();expect(host.textContent).toContain('还没有客户档案');await complete();await click('创建客户档案');expect(bridge.current.run).toHaveBeenCalledWith({type:'market.customer.create',payload:{input:expect.objectContaining({name:'新客户贸易公司',ownerId:'local',currency:'USD',country:'中国',city:'上海',terms:'T/T 30% 定金，70% 发货前付清',incoterm:'FOB 上海',since:'2026-10-13',creditLimit:1000})}});expect(go).toHaveBeenCalledWith('crm','created-customer',{customerId:'created-customer'});});
  it('keeps the new customer form and entered values after a failed save',async()=>{bridge.current.run.mockRejectedValueOnce(new Error('本地保存失败'));await mount();await complete();await click('创建客户档案');expect(host.textContent).toContain('本地保存失败');expect(go).not.toHaveBeenCalled();await click('上一步');expect((host.querySelector('[aria-label="信用额度（结算币种）"]') as HTMLInputElement).value).toBe('1000');await click('上一步');expect((host.querySelector('[aria-label="贸易术语"]') as HTMLSelectElement).value).toBe('FOB');expect((host.querySelector('[aria-label="贸易术语指定地点"]') as HTMLSelectElement).value).toBe('上海');await click('上一步');expect((host.querySelector('[aria-label="客户名称"]') as HTMLInputElement).value).toBe('新客户贸易公司');});
