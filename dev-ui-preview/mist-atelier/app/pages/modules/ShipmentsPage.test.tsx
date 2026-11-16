@@ -158,7 +158,7 @@ it('shows the actual unit on each mixed-unit packing input and follows source ch
  expect((getAllByRole(host,'spinbutton',{name:'装箱数量（码）'})[0] as HTMLInputElement).value).toBe('130.5');
  act(()=>fireEvent.change(source,{target:{value:'l::p'}}));
  await click(getByRole(host,'button',{name:'保存装箱分配'}));
- expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.shipments.pack',payload:expect.objectContaining({lines:expect.arrayContaining([expect.objectContaining({lineId:'l',quantity:130.5}),expect.objectContaining({lineId:'yards',quantity:110})])})}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.shipments.pack',payload:expect.objectContaining({lines:expect.arrayContaining([expect.objectContaining({lineId:'l',quantity:130.5}),expect.objectContaining({lineId:'yards',quantity:110})])})}),{expectedRevision:0});
 });
 
 it('supplements signed fabric package colours without permitting physical edits',async()=>{
@@ -170,7 +170,7 @@ it('supplements signed fabric package colours without permitting physical edits'
  act(()=>{fireEvent.change(white,{target:{value:'本白'}});fireEvent.change(navy,{target:{value:'藏蓝'}});});
  typeInto(getByRole(host,'textbox',{name:'原单核对依据'}) as HTMLTextAreaElement,'按已签装箱单逐件核对');
  await click(getByRole(host,'button',{name:'补充颜色明细'}));
- expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.shipments.pack',payload:expect.objectContaining({id:'fab',packingColorVersion:1,supplementEvidence:'按已签装箱单逐件核对',lines:expect.arrayContaining([expect.objectContaining({carton:'R1',fabricColor:'本白'}),expect.objectContaining({carton:'R2',fabricColor:'藏蓝'})])})}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.shipments.pack',payload:expect.objectContaining({id:'fab',packingColorVersion:1,supplementEvidence:'按已签装箱单逐件核对',lines:expect.arrayContaining([expect.objectContaining({carton:'R1',fabricColor:'本白'}),expect.objectContaining({carton:'R2',fabricColor:'藏蓝'})])})}),{expectedRevision:0});
 });
 
 it('preserves a transport draft and blocks saving after live synchronization changes its source',async()=>{
@@ -431,7 +431,7 @@ it('records each carton colour and size without inferring the ordered ratio',asy
  expect((getByRole(dialog,'spinbutton',{name:'蓝 · M 数量'}) as HTMLInputElement).value).toBe('0');
  typeInto(getByRole(dialog,'spinbutton',{name:'蓝 · M 数量'}) as HTMLInputElement,'6');typeInto(getByRole(dialog,'spinbutton',{name:'蓝 · L 数量'}) as HTMLInputElement,'4');
  await click(getByRole(dialog,'button',{name:'确定'}));await click(getByRole(host,'button',{name:'保存装箱分配'}));
- expect(store.run).toHaveBeenCalledWith({type:'fulfillment.shipments.pack',payload:expect.objectContaining({packingDetailVersion:2,lines:[expect.objectContaining({assortment:[{color:'蓝',size:'M',quantity:6},{color:'蓝',size:'L',quantity:4}]})]})});
+ expect(store.run).toHaveBeenCalledWith({type:'fulfillment.shipments.pack',payload:expect.objectContaining({packingDetailVersion:2,lines:[expect.objectContaining({assortment:[{color:'蓝',size:'M',quantity:6},{color:'蓝',size:'L',quantity:4}]})]})},{expectedRevision:0});
 });
 it('locks signed physical packing fields while supplementing missing colour-size details',async()=>{
  const state=store.state!;state.orderLines[0].breakdown={kind:'garment',sizes:['M'],rows:[{color:'蓝',quantities:[10]}]} as any;
@@ -479,4 +479,37 @@ it('registers missing contract terms from the new shipment form, prefilled from 
 it('retains all source rows and entered quantities when contract checking is cancelled',async()=>{
  const s=store.state!;(s.orders[0] as any).governance={status:'approved',contract:{kind:'external',poNumber:'PO-77',incoterm:'FOB 上海'}};s.productions.push({id:'p',code:'PR-1',orderId:'o',lineId:'l',order:'SO-1',name:'大衣',factory:'工厂',qty:10,due:'2026-11-01',pct:100,img:'coat',col:'done'});
  render();await click(getAllByRole(host,'button',{name:'新建出运'})[0]);const select=getByRole(host,'combobox',{name:'来源条目 1'}) as HTMLSelectElement;act(()=>{select.value='production:p';select.dispatchEvent(new Event('change',{bubbles:true}));});typeInto(host.querySelector('input[type="number"]') as HTMLInputElement,'8');await click(getByRole(host,'button',{name:'增加来源条目'}));const quantities=getAllByRole(host,'spinbutton') as HTMLInputElement[];typeInto(quantities[1],'3');await click(getByRole(host,'button',{name:'核对合同收货条款'}));await click(getByRole(host,'button',{name:'返回列表'}));expect((getByRole(host,'combobox',{name:'来源条目 1'}) as HTMLSelectElement).value).toBe('production:p');expect((getByRole(host,'combobox',{name:'来源条目 2'}) as HTMLSelectElement).value).toBe('');expect((getAllByRole(host,'spinbutton') as HTMLInputElement[]).map(x=>x.value)).toEqual(['8','3']);expect(store.run).not.toHaveBeenCalled();
+});
+
+async function packingEditorDraft(){
+ const state=store.state!;state.fulfillment.shipments.push(shipment('packing-source'));
+ state.fulfillment.packing.push(pack('packing-source',10));render('packing-source');
+ await click(getByRole(host,'button',{name:'分配装箱'}));
+ typeInto(getByRole(host,'spinbutton',{name:'毛重'}) as HTMLInputElement,'11');
+ return state;
+}
+it('retains the old packing input and refuses to overwrite a colleague packing update after sync',async()=>{
+ const state=await packingEditorDraft();
+ store.state={...state,fulfillment:{...state.fulfillment,packing:state.fulfillment.packing.map(row=>({...row,netWeight:7,grossWeight:8}))}};
+ store.workspace.revision=7;render('packing-source');await click(getByRole(host,'button',{name:'保存装箱分配'}));
+ expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('装箱来源已更新，请重新打开后核对');
+ expect((getByRole(host,'spinbutton',{name:'毛重'}) as HTMLInputElement).value).toBe('11');
+});
+it('refuses an old packing plan when the shipment source quantity changed',async()=>{
+ const state=await packingEditorDraft();
+ store.state={...state,fulfillment:{...state.fulfillment,shipments:state.fulfillment.shipments.map(row=>({...row,lines:row.lines.map(line=>({...line,quantity:8}))}))}};
+ store.workspace.revision=7;render('packing-source');await click(getByRole(host,'button',{name:'保存装箱分配'}));
+ expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('装箱来源已更新，请重新打开后核对');
+ expect((getByRole(host,'spinbutton',{name:'装箱数量（件）'}) as HTMLInputElement).value).toBe('10');
+});
+it('binds packing to the checked revision while allowing an unrelated task event',async()=>{
+ const state=await packingEditorDraft();
+ store.state={...state,events:[...state.events,{id:'other-event',entityType:'task',entityId:'other-task',actor:'同事',at:'2026-10-13T10:01:00Z',text:'新增个人待办',fileIds:[]}]};
+ store.workspace.revision=7;render('packing-source');await click(getByRole(host,'button',{name:'保存装箱分配'}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.shipments.pack',payload:expect.objectContaining({lines:[expect.objectContaining({grossWeight:11})]})}),{expectedRevision:7});
+});
+it('keeps an unread packing source from submitting while retaining entered weights',async()=>{
+ await packingEditorDraft();store.state=null;render('packing-source');await click(getByRole(host,'button',{name:'保存装箱分配'}));
+ expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('装箱资料未读取，请重新打开后核对');
+ expect((getByRole(host,'spinbutton',{name:'毛重'}) as HTMLInputElement).value).toBe('11');
 });
