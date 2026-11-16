@@ -23,6 +23,45 @@ afterEach(async () => { if (root) await act(async () => root!.unmount()); root =
 async function mount(id?: string, mode: 'full' | 'list' = id ? 'full' : 'list') { const detail = mode === 'full' ? mode : undefined; host = document.createElement('div'); document.body.append(host); root = createRoot(host); const Page = MARKET_PAGES.relations; await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'relations', id, detail }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
 const button = (label: string) => [...document.body.querySelectorAll('button')].find(b => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
 async function click(label: string) { const b = button(label); expect(b, label).toBeTruthy(); await act(async () => b!.click()); }
+async function repaint(id: string) { const Page = MARKET_PAGES.relations; await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'relations', id, detail: 'full' }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
+async function fillProfile(label: string, value: string) {
+  const dialog = document.body.querySelector('[role="dialog"]')!;
+  const input = dialog.querySelector(`[aria-label="${label}"]`) as HTMLInputElement | HTMLTextAreaElement;
+  await act(async () => { Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
+}
+
+describe('relation profile concurrency', () => {
+  it.each(['address', 'note', 'aliases', 'status', 'supplierId', 'removed'])('keeps the draft and refuses a changed source: %s', async field => {
+    const relation = named('Cedar'); bridge.current.workspace = { id: 'workspace', revision: 7 };
+    await mount(relation.id); await click('编辑档案'); await fillProfile('别名', '新别名');
+    const changed = { ...relation, ...(field === 'aliases' ? { aliases: ['同事别名'] } : { [field]: field === 'status' ? 'archived' : '同事更新' }) };
+    state = { ...state, market: { ...state.market, relations: field === 'removed' ? state.market.relations.filter(r => r.id !== relation.id) : state.market.relations.map(r => r.id === relation.id ? changed : r) } } as MistState;
+    bridge.current = { ...bridge.current, state, workspace: { id: 'workspace', revision: 8 } }; await repaint(relation.id); await click('保存');
+    expect(bridge.current.run).not.toHaveBeenCalled(); expect(document.body.textContent).toContain('关系档案已更新，请重新打开后核对');
+    expect([...document.body.querySelectorAll<HTMLInputElement>('input')].some(input => input.value === '新别名')).toBe(true);
+  });
+  it('uses the checked revision and preserves newer attachments and contacts outside the profile fields', async () => {
+    const relation = named('Cedar'); bridge.current.workspace = { id: 'workspace', revision: 7 };
+    await mount(relation.id); await click('编辑档案'); await fillProfile('别名', '新别名');
+    const current = { ...relation, updatedAt: '2026-10-14T03:00:00Z', fileIds: ['peer-file'], contacts: [...relation.contacts, { id: 'peer', name: '同事', role: '', email: '', phone: '', primary: false }] };
+    state = { ...state, market: { ...state.market, relations: state.market.relations.map(r => r.id === relation.id ? current : r) } };
+    bridge.current = { ...bridge.current, state, workspace: { id: 'workspace', revision: 9 } }; await repaint(relation.id); await click('保存');
+    expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({ type: 'market.relation.save', payload: expect.objectContaining({ input: expect.objectContaining({ aliases: ['新别名'], fileIds: ['peer-file'] }) }) }), { expectedRevision: 9 });
+  });
+  it('keeps the form when a later server revision rejects the checked request', async () => {
+    const relation = named('Cedar'); bridge.current.workspace = { id: 'workspace', revision: 7 };
+    bridge.current.run.mockRejectedValue(new Error('资料版本已变化'));
+    await mount(relation.id); await click('编辑档案'); await fillProfile('别名', '保留输入'); await click('保存');
+    expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({ type: 'market.relation.save' }), { expectedRevision: 7 });
+    expect(document.body.textContent).toContain('资料版本已变化'); expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+  it.each(['workspace', 'missingRevision', 'invalidRevision'])('does not submit without the bound workspace and a usable revision: %s', async change => {
+    const relation = named('Cedar'); bridge.current.workspace = { id: 'workspace', revision: 7 };
+    await mount(relation.id); await click('编辑档案'); await fillProfile('别名', '保留输入');
+    bridge.current = { ...bridge.current, workspace: { id: change === 'workspace' ? 'elsewhere' : 'workspace', revision: change === 'missingRevision' ? undefined : change === 'invalidRevision' ? -1 : 8 } }; await repaint(relation.id); await click('保存');
+    expect(bridge.current.run).not.toHaveBeenCalled(); expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+});
 
 
 describe('关系智库', () => {
