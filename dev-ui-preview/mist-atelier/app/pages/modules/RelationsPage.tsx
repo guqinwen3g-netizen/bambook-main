@@ -173,14 +173,14 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
         onOpen={(view, id, extra) => go(view, id, extra)} attachments={attachments(selected, !can)} history={history(selected.id)} />
     : <EmptyState icon={Building2} title={uiText("组织档案")} description={uiText("从左侧列表选择一个组织，查看身份、联系人、信用与在手业务。")} compact />;
   const summary = selected ? (() => {
-    const b = business.get(selected.id), contacts = relationContacts(state, selected), main = contacts.find(c => c.primary) || contacts[0];
+    const b = business.get(selected.id), contacts = relationContacts(state, selected), main = contacts.find(c => c.primary);
     return <PreviewSummary openLabel="打开组织档案" onOpen={() => full.open(selected.id)} data={{
       code: [customer(selected)?.code, supplier(selected)?.code].filter(Boolean).join(' · ') || undefined,
       status: selected.hold ? <Pill tone="bad">{uiText("已冻结")}</Pill> : selected.status === 'archived' ? <Pill>{uiText("已归档")}</Pill> : <Pill tone="ok">{uiText("正常")}</Pill>,
       title: selected.name, description: [selected.aliases.length ? '别名 ' + selected.aliases.join('、') : '', selected.country].filter(Boolean).join(' · ') || undefined,
       facts: [
         { label: '身份', value: <span className="mist-row" style={{ gap: 4, flexWrap: 'wrap' }}>{identityPills(selected)}</span> },
-        { label: '主联系人', value: main ? main.name + (main.role ? ' · ' + main.role : '') : '未登记' },
+        { label: '主联系人', value: main ? main.name + (main.role ? ' · ' + main.role : '') : contacts.length ? '未指定' : '未登记' },
         { label: '在手业务', value: b?.total ? `${b.total} 项` : '无' },
         ...(b?.receivable.length ? [{ label: '未收款', value: b.receivable.map(([c, v]) => `${c} ${v.toLocaleString()}`).join('；') }] : []),
       ],

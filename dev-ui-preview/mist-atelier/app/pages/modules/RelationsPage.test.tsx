@@ -100,6 +100,13 @@ describe('relation contact concurrency', () => {
   });
 });
 
+it.each([false, true])('shows only a designated primary contact in the organization preview (%s)', async designated => {
+  const relation = { ...named('Cedar'), id: 'primary-preview', name: '远帆物流', category: 'Agent' as const, customerId: '', supplierId: '', contacts: [{ id: 'first', name: '周诚', role: '业务经理', email: '', phone: '', primary: false }, { id: 'second', name: '李晴', role: '单证专员', email: '', phone: '', primary: designated }] };
+  state.market.relations.push(relation); await mount(relation.id, 'list');
+  const label = [...host.querySelectorAll('.mist-facts small')].find(row => row.textContent === '主联系人')!;
+  expect(label.nextElementSibling?.textContent).toBe(designated ? '李晴 · 单证专员' : '未指定');
+});
+
 
 describe('关系智库', () => {
   it('同一组织同时是客户和供应商；冻结与在手业务由记录推出', () => {
