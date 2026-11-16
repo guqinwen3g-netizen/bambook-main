@@ -3,6 +3,7 @@ import { CustomerList } from './CustomerList';
 import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow} from '../runtime/businessClock';
+import {formatMoneyText} from '../../../../lib/moneyFormat';
 /** T7 客户档案：原 Mist 构图，所有 Tab 读取同一客户的关联实体。 */
 import { BaseDataImportButton } from './modules/BaseDataImport';
 import React from 'react';
@@ -26,6 +27,13 @@ import { FailureNotice } from '../runtime/FailureNotice';
 import { useRouteScope } from './modules/useRouteDraft';
 const CUSTOMER_CHOICES: Partial<Record<string, TradeOption[]>> = { country: COUNTRIES, industry: INDUSTRIES, grade: CUSTOMER_GRADES, terms: CUSTOMER_PAYMENT_TERMS, categories: PRODUCT_CATEGORIES };
 const CUSTOMER_TABS = ['overview', 'orders', 'dev', 'followups', 'opportunities', 'mail', 'contacts', 'files'];
+type CustomerCurrencyTotal = { currency:string;minor:number };
+function customerCurrencyTotals(rows:Array<{currency:string;amount:number}>,fallback:string):CustomerCurrencyTotal[]{
+  const amounts=new Map<string,number>();for(const row of rows)amounts.set(row.currency,(amounts.get(row.currency)||0)+Math.round(row.amount*100));
+  const totals=[...amounts].filter(([,minor])=>minor!==0).map(([currency,minor])=>({currency,minor})).sort((a,b)=>Number(b.currency===fallback)-Number(a.currency===fallback)||a.currency.localeCompare(b.currency));
+  return totals.length?totals:[{currency:fallback,minor:0}];
+}
+function CustomerCurrencyValues({totals}:{totals:CustomerCurrencyTotal[]}){return <span className="mist-col" style={{gap:6}}>{totals.map(row=><span key={row.currency} className="mist-row" style={{gap:6,alignItems:'baseline'}}>{formatMoneyText(row.minor/100)}<small>{row.currency}</small></span>)}</span>;}
 
 const customerProfileSource = (value: MistCustomer) => JSON.stringify([value.id, value.name, value.country, value.city, value.industry, value.ownerId, value.grade, value.currency, value.terms, value.incoterm, value.categories, value.creditLimit, value.since]);
 type CustomerContactDraft = Partial<MistContact> & { primary?: boolean };
@@ -158,7 +166,7 @@ export function CustomerPage() {
   // Mail goes out through the smart mailbox so it stays with the customer; the mailbox opens a draft linked to this customer.
   const writeMail = (email?: string) => { if (!emailValid(email)) { setFailure('请先为联系人填写有效邮箱'); return; } setComposeIntent({ to: email!, subject: '', links: customer ? [{ kind: 'customer', id: customer.id }] : [] }); go('emails'); };
   if (!customer) return <MistPage><PageHeader title={uiText("客户管理")} actions={customerActions}/><EmptyState title={uiText(!state ? loading ? '正在读取客户' : '客户资料未读取' : requestedId ? '没有找到指定客户' : '还没有客户档案')} action={!error && requestedId && state ? <Button onClick={() => void refresh()}>{uiText("重新读取")}</Button> : undefined} />{error && <FailureNotice title="客户资料未读取" detail={error} retry={() => void refresh()} retryLabel="重新读取" />}</MistPage>;
-  const currencyOrders = orders.filter(order => order.currency === customer.currency && !['已作废', '已取消'].includes(order.state)), currencyInvoices = invoices.filter(invoice => invoice.currency === customer.currency);
+  const yearOrders=orders.filter(order=>!['已作废','已取消'].includes(order.state)&&new Date(order.createdAt).getFullYear()===businessNow().getFullYear()),orderTotals=customerCurrencyTotals(yearOrders,customer.currency),receivableTotals=customerCurrencyTotals(invoices.map(invoice=>({currency:invoice.currency,amount:invoice.open})),customer.currency),receivableText=receivableTotals.map(row=>`${formatMoneyText(row.minor/100)} ${row.currency}`).join(' · ');
   const start = new Date(customer.since).getTime(), years = Number.isFinite(start) ? Math.max(0, (businessNow().getTime() - start) / (365.25 * 24 * 3600 * 1000)).toFixed(1) : '—';
   const contactList = <div className="mist-related">{contacts.length ? contacts.map(item => <button key={item.id} type="button" onClick={() => { openContact({ ...item, primary: !!relationContact(item.id)?.primary }); setFailure(''); }}><Avatar name={item.name} identityKey={`contact:${item.id}`} tone={item.tone} /><span><b>{item.name}</b><small>{item.role} · {item.email || item.phone || '待补充联系方式'}</small></span></button>) : <EmptyState compact title={uiText("还没有联系人")} action={canMaintainCustomer?<Button onClick={() => openContact({ name: '', role: '', email: '', phone: '' })}>{uiText("添加联系人")}</Button>:undefined} />}</div>;
   return <MistPage>
@@ -169,14 +177,14 @@ export function CustomerPage() {
     {!edit && !contact && !deleteContact && !pending && (error || failure) && <FailureNotice title={"操作尚未完成"} detail={failure || error} />}
     <Tabs value={tab} onChange={selectTab} options={[{ value: 'overview', label: '概览' }, { value: 'orders', label: '订单', count: orders.length }, { value: 'dev', label: '开发', count: devs.length }, { value: 'followups', label: '跟进', count: (state?.crm?.followUps ?? []).filter(row => row.customerId === customer.id).length }, { value: 'opportunities', label: '商机', count: (state?.crm?.opportunities ?? []).filter(row => row.customerId === customer.id && !['won', 'lost'].includes(row.stage)).length }, { value: 'mail', label: '邮件' }, { value: 'contacts', label: '联系人', count: contacts.length }, { value: 'files', label: '文件', count: files.length }]} />
     <StatGrid>
-      <StatCard icon={BadgeDollarSign} label={uiText("今年下单")} value={fmt(currencyOrders.filter(order => new Date(order.createdAt).getFullYear() === businessNow().getFullYear()).reduce((sum, order) => sum + order.amount, 0), 2)} unit={uiText(customer.currency)} foot={`共 ${orders.length} 个订单`} />
+      <StatCard icon={BadgeDollarSign} label={uiText("今年下单")} value={<CustomerCurrencyValues totals={orderTotals}/>} foot={`共 ${yearOrders.length} 个订单`} />
       <StatCard icon={ClipboardList} label={uiText("在途订单")} value={active.length} unit={uiText("单")} foot={active.map(order => order.code).join(' · ')} onClick={() => selectTab('orders')} />
-      <StatCard icon={Wallet} label={uiText("应收余额")} value={fmt(currencyInvoices.reduce((sum, invoice) => sum + invoice.open, 0), 2)} unit={uiText(customer.currency)} foot={`${invoices.length} 张发票`} onClick={() => go('payment-vouchers')} />
+      <StatCard icon={Wallet} label={uiText("应收余额")} value={<CustomerCurrencyValues totals={receivableTotals}/>} foot={`${invoices.length} 张发票`} onClick={() => go('payment-vouchers')} />
       <StatCard icon={CalendarClock} label={uiText("合作时长")} value={years} unit={uiText("年")} foot={customer.since ? `${uiText("起始")} ${customer.since}` : undefined} />
     </StatGrid>
     <div className="mist-detail" data-layout="main-rail">
       <div>
-        {tab === 'overview' && <Banner tone="ai" icon={Sparkles} title={uiText("小竹洞察")} actions={<Button size="sm" variant="ai" onClick={() => openAI(`仅根据以下已读取事实概括客户 ${customer.name}（${customer.code}）：${active.length} 个在途订单，${devs.length} 个开发案，待收 ${fmt(currencyInvoices.reduce((sum, invoice) => sum + invoice.open, 0), 2)} ${customer.currency}。说明缺失信息，不要推断未提供的对客沟通或承诺。`)}>{uiText("展开")}</Button>}>{customer.name}{uiText(" 当前有 ")}{active.length}{uiText(" 个在途订单、")}{devs.length}{uiText(" 个开发案；待收 ")}{fmt(currencyInvoices.reduce((sum, invoice) => sum + invoice.open, 0), 2)} {customer.currency}。</Banner>}
+        {tab === 'overview' && <Banner tone="ai" icon={Sparkles} title={uiText("小竹洞察")} actions={<Button size="sm" variant="ai" onClick={() => openAI(`仅根据以下已读取事实概括客户 ${customer.name}（${customer.code}）：${active.length} 个在途订单，${devs.length} 个开发案，待收 ${receivableText}。说明缺失信息，不要推断未提供的对客沟通或承诺。`)}>{uiText("展开")}</Button>}>{customer.name}{uiText(" 当前有 ")}{active.length}{uiText(" 个在途订单、")}{devs.length}{uiText(" 个开发案；待收 ")}{receivableText}。</Banner>}
         {(tab === 'overview' || tab === 'orders') && <Card><CardHeader title={uiText("订单")} tools={<Button variant="quiet" size="sm" onClick={() => go('orders', undefined, { customerId: customer.id })}>{uiText("全部订单")}</Button>} />
           <DataTable density={density} ariaLabel={uiText("客户订单")} rows={orders} rowKey={order => order.id} onRowClick={order => go('orders/detail', order.id, { customerId: customer.id })} empty={<EmptyState compact title={uiText("还没有订单")} action={<Button onClick={() => go('orders/new', undefined, { customerId: customer.id })}>{uiText("新建订单")}</Button>} />} columns={[
             { key: 'id', header: '订单', width: 'minmax(180px,1.6fr)', render: order => <ObjectCell thumb={<Thumb src={IMG[order.img]} icon={Layers} size="sm" />} name={<Mono>{order.code}</Mono>} meta={order.season} /> },
