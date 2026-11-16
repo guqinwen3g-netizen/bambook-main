@@ -216,7 +216,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
         attachments={attachments(selected, !can)} history={history(selected.id)} />
     : <EmptyState icon={Building2} title={uiText("供应商档案")} description={uiText("从左侧列表选择一家供应商，查看认证、评级、在手业务与交付表现。")} compact />;
   const summary = selected ? (() => {
-    const now = statusNow(selected), g = supplierGrade(selected), p = perf.get(selected.id), certs = selected.certificates || [], contact = selected.contacts.find(c => c.primary) || selected.contacts[0];
+    const now = statusNow(selected), g = supplierGrade(selected), p = perf.get(selected.id), certs = selected.certificates || [], contact = selected.contacts.find(c => c.primary);
     const alerts = supplierFlags(selected, day).filter(f => f.key === 'certExpired' || f.key === 'certExpiring' || f.key === 'scheduled');
     return <PreviewSummary openLabel="打开供应商档案" onOpen={() => full.open(selected.id)} data={{
       code: selected.code, status: <Pill tone={STATUS_TONE[now]}>{STATUS_LABEL[now]}</Pill>, title: selected.name,
@@ -224,7 +224,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
       facts: [
         { label: '评级', value: g ? g.grade : '未评级' }, { label: '认证', value: certs.length ? `${certs.length} 项` : '未登记' },
         ...(!isServiceSupplier(selected)?[{ label: '在手采购', value: `${p?.open.length || 0} 单` }, { label: '准交率', value: p?.completed.length ? rate(p.onTime, p.completed.length) : '暂无完成单' },
-        { label: '通常交付周期', value: `${selected.leadDays} 天` }]:[]), { label: '主联系人', value: contact ? contact.name : '未登记' },
+        { label: '通常交付周期', value: `${selected.leadDays} 天` }]:[]), { label: '主联系人', value: contact ? contact.name : selected.contacts.length ? '未指定' : '未登记' },
       ],
       extra: alerts.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{alerts.map(f => <Pill key={f.key} tone={f.tone}>{uiText(f.label)}</Pill>)}</div> : undefined,
     }} />;
@@ -277,7 +277,7 @@ function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure,
   const now = supplierStatusOn(s, day), grade = supplierGrade(s), flags = supplierFlags(s, day), certs = s.certificates || [];
   const products = state.market.products.filter(p => p.supplierId === s.id);
   const writeReason = !can ? '没有供应商写权限' : false, adminReason = !canAdmin ? '评级与合作状态须由主管（供应商管理权限）办理' : false;
-  const primary = s.contacts.find(c => c.primary) || s.contacts[0];
+  const primary = s.contacts.find(c => c.primary);
   const banner: { tone: Tone; title: string; text: string } | null =
     now !== 'active' ? { tone: now === 'paused' ? 'warn' : 'bad', title: `${STATUS_LABEL[now]} · ${s.statusFrom} 起`, text: `${s.blockReason}。不能新建采购单或引用建档；${perf.open.length ? `在手业务 ${perf.open.length} 单继续执行。` : '当前没有在手业务。'}` }
     : s.status !== 'active' ? { tone: 'warn', title: `将于 ${s.statusFrom} ${s.status === 'paused' ? '暂停合作' : '停用'}`, text: `${s.blockReason}。生效前仍可正常下单。` }
@@ -305,7 +305,7 @@ function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure,
       { label: '通常交付周期', value: `${s.leadDays} 天` },
       { label: '准交率', value: perf.completed.length ? `${rate(perf.onTime, perf.completed.length)}（${perf.onTime}/${perf.completed.length} 单）` : '暂无完成单' },
       { label: '来料无退货', value: perf.receipts ? `${perf.clean}/${perf.receipts} 批` : '暂无到货' }]:[]),
-      { label: '主联系人', value: primary ? `${primary.name}${primary.role ? ' · ' + primary.role : ''}` : '未登记' },
+      { label: '主联系人', value: primary ? `${primary.name}${primary.role ? ' · ' + primary.role : ''}` : s.contacts.length ? '未指定' : '未登记' },
       ...MIST_BUSINESS_GROUPS.map(g => ({ label: `${MIST_BUSINESS_GROUP_LABEL[g]}经手人`, value: s.handlers?.[g]?.name || '未指定' })),
     ]} />
     <DetailBlock title={uiText(service?"服务内容":"产能与工艺")}><p className="mist-sub" style={{ margin: 0 }}>{s.capabilities}</p>{s.note && <span className="mist-note">{s.note}</span>}</DetailBlock>

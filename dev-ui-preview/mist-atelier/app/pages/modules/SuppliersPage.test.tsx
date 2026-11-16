@@ -62,6 +62,12 @@ it('refuses deleting a certification updated after its confirmation opened',asyn
 it('allows profile/contact refresh and a newly uploaded file while binding certification to the checked revision',async()=>{
  const supplier=state.market.suppliers.find(s=>s.certificates?.length)!;await openCertificate(supplier);await fillProfile('证书编号','我的补充编号');state={...state,files:[...state.files,{id:'new-upload',name:'证据.pdf',size:1,mimeType:'application/pdf',storageKey:'new-upload',createdAt:'2026-10-14T03:00:00Z'}],market:{...state.market,suppliers:state.market.suppliers.map(s=>s.id===supplier.id?{...s,address:'同事新地址'}:s)}};bridge.current={...bridge.current,state,workspace:{id:'workspace',revision:9}};await repaint(supplier.id);await click('保存');expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.supplier.certificate.save',payload:expect.objectContaining({supplierId:supplier.id,number:'我的补充编号'})}),{expectedRevision:9});
 });
+it.each(['full','preview'])('does not infer a primary supplier contact from its first row: %s',async mode=>{
+ const supplier=state.market.suppliers.find(s=>s.contacts.length)!;supplier.contacts=supplier.contacts.map(c=>({...c,primary:false}));await mount(supplier.id,mode==='full'?'full':undefined);const label=[...host.querySelectorAll('.mist-facts small')].find(e=>e.textContent==='主联系人')!;expect(label.nextElementSibling?.textContent).toBe('未指定');
+});
+it.each(['full','preview'])('shows the explicitly designated supplier primary contact: %s',async mode=>{
+ const supplier=state.market.suppliers.find(s=>s.contacts.length)!,contact={...supplier.contacts[0],id:'chosen-contact',name:'指定联系人',role:''};supplier.contacts=[{...supplier.contacts[0],primary:false},{...contact,primary:true}];await mount(supplier.id,mode==='full'?'full':undefined);const label=[...host.querySelectorAll('.mist-facts small')].find(e=>e.textContent==='主联系人')!;expect(label.nextElementSibling?.textContent).toBe('指定联系人');
+});
 
 describe('供应商管理', () => {
   it('excludes a confirmed final short closure from open work while preserving original quantity and delivery KPIs', async () => {
