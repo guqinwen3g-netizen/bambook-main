@@ -54,7 +54,7 @@ function ShipmentEditor({ shipment, onClose, initialDraft, onCheckTerms }: {
     }
     catch { }
     const terms = state?.fulfillment.shippingTerms.find(term=>term.orderId===(!shipment&&sourceOrder?sourceOrder.id:first?.kind==='orderLine'?first.orderId:undefined));
-    const blocked = busy || saving || !!pending || invalidSource;
+    const blocked = !state || busy || saving || !!pending || invalidSource;
     // 从货运列表新建时，按所选来源订单的合同贸易术语与交货地点预填，避免默认 FOB 与合同不符。
     const contractOrderId = !shipment && !hasOrderContext && first?.kind === 'orderLine' ? first.orderId : '';
     const derivedContract=React.useRef<string|null>(initialDraft?contractOrderId:null);
@@ -229,7 +229,7 @@ export function ShipmentsPage() {
   const changeDomain = (value: Domain) => { setDomainChoice(value); setStageFilter('all'); setPicked(null); };
   const toast = useToast();
   const act = async (work: () => Promise<unknown>, done?: string) => { setFailure(''); try { await work(); if (done) toast(done); } catch (e) { setFailure(e instanceof Error ? e.message : String(e)); } };
-  const termsSpec = (orderId?: string): ModuleEditorSpec => ({ title: '核对来源合同收货与分批条款', fields: [field('orderId', '来源订单', 'select', true, [emptyOption, ...(state?.orders || []).filter(o => !hasOrderContext || o.id === sourceOrder?.id).map(o => ({ value: o.id, label: o.code }))]), field('consignee', '合同收货方'), field('partialAllowed', '合同允许分批', 'checkbox', false), field('mode', '约定运输方式', 'select', true, [{ value: 'sea', label: '海运' }, { value: 'air', label: '空运' }]), field('confirmedAt', '条款核实日', 'date'), field('evidence', '合同 / 信用证依据', 'textarea')], initialValues: (() => { const id = orderId || sourceOrder?.id || '', order = state?.orders.find(o => o.id === id), contract = order?.governance?.contract; return { orderId: id, consignee: contract?.kind === 'internal' ? contract.receiver || '' : order?.customer || '', partialAllowed: false, mode: 'sea', confirmedAt: today(), evidence: contract?.kind === 'external' && contract.poNumber ? `客户 PO ${contract.poNumber}` : '' }; })(), submit: v => run({ type: 'fulfillment.shipments.sourceTerms', payload: { orderId: text(v, 'orderId'), consignee: text(v, 'consignee'), partialAllowed: !!v.partialAllowed, mode: text(v, 'mode') as 'sea' | 'air', confirmedAt: text(v, 'confirmedAt'), evidence: text(v, 'evidence') } }) });
+  const termsSpec = (orderId?: string): ModuleEditorSpec => ({ title: '核对来源合同收货与分批条款', fields: [field('orderId', '来源订单', 'select', true, [emptyOption, ...(state?.orders || []).filter(o => !hasOrderContext || o.id === sourceOrder?.id).map(o => ({ value: o.id, label: o.code }))]), field('consignee', '合同收货方'), field('partialAllowed', '合同允许分批', 'checkbox', false), field('mode', '约定运输方式', 'select', true, [{ value: 'sea', label: '海运' }, { value: 'air', label: '空运' }]), field('confirmedAt', '条款核实日', 'date'), field('evidence', '合同 / 信用证依据', 'textarea')], initialValues: (() => { const id = orderId || sourceOrder?.id || '', order = state?.orders.find(o => o.id === id), contract = order?.governance?.contract; return { orderId: id, consignee: contract?.kind === 'internal' ? contract.receiver || '' : order?.customer || '', partialAllowed: false, mode: 'sea', confirmedAt: today(), evidence: contract?.kind === 'external' && contract.poNumber ? `客户 PO ${contract.poNumber}` : '' }; })(), submit: v => { if(!liveSource.current.state)throw new Error('出运资料未读取，请重新打开后核对');return run({ type: 'fulfillment.shipments.sourceTerms', payload: { orderId: text(v, 'orderId'), consignee: text(v, 'consignee'), partialAllowed: !!v.partialAllowed, mode: text(v, 'mode') as 'sea' | 'air', confirmedAt: text(v, 'confirmedAt'), evidence: text(v, 'evidence') } });} });
   if (editing) return <ShipmentEditor shipment={editing === 'new' ? undefined : editing} initialDraft={editing === 'new' ? resumeDraft??undefined : undefined} onCheckTerms={editing === 'new' && business ? (orderId, draft) => { setResumeDraft(draft); editor.open(termsSpec(orderId)); } : undefined} onClose={() => { setResumeDraft(null); setEditing(null); }} />;
   if (packing) return <PackingEditor shipment={packing} onClose={() => setPacking(null)} />;
   // sup41/42/43/mar34：运输与集装箱、唛头、改订舱费用；货代可从关系智库的代理选。
@@ -263,7 +263,7 @@ export function ShipmentsPage() {
     { key: 'date', header: '计划出运', width: '112px', hideOnMobile: true, render: s => <div className="mist-col" style={{ gap: 2 }}><span className={state && shipmentFlags(state, s, day).some(flag => flag.key === 'overdue') ? 'mist-tone-bad' : undefined}>{uiText(s.departedAt ? `ATD ${shortWhen(s.departedAt)}` : s.plannedDate || '未定')}</span><small className="mist-muted">{s.requestedBy}</small></div> },
     { key: 'stage', header: '阶段', width: '112px', render: s => state ? <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={s.hiddenCount ? 'neutral' : STAGE_TONE[shipmentStage(state, s)]}>{s.hiddenCount ? uiText('部分可见') : shipmentStageLabel(s, shipmentStage(state, s))}</Pill>{shipmentFlags(state, s, day).map(flag => <small key={flag.key} className="mist-tone-bad">{uiText(flag.label)}</small>)}</div> : null },
   ];
-  const canCreate = business ? <Button variant="primary" icon={Plus} disabled={hasOrderContext && !sourceOrder} onClick={() => setEditing('new')}>{uiText("新建出运")}</Button> : undefined;
+  const canCreate = business ? <Button variant="primary" icon={Plus} disabled={!state || hasOrderContext && !sourceOrder} onClick={() => setEditing('new')}>{uiText("新建出运")}</Button> : undefined;
   const empty = domainRows.length
     ? <EmptyState icon={SearchX} title={uiText("没有符合条件的出运")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setStageFilter('all'); setFlagFilter('all'); }}>{uiText("清除筛选")}</Button>} />
     : <EmptyState icon={Ship} title={uiText(invalidSource ? '来源不匹配' : sourceOrder ? '本订单还没有出运' : `还没有${domain === 'fabric' ? '面料' : '成衣'}出运`)} description={invalidSource ? uiText('请返回来源订单重新进入。') : undefined} action={canCreate && !invalidSource ? <Button icon={Plus} onClick={() => setEditing('new')}>{uiText("新建出运")}</Button> : undefined} />;
@@ -292,12 +292,12 @@ export function ShipmentsPage() {
         {sourceOrder && <Button onClick={() => go('orders/detail', sourceOrder.id, { customerId: sourceOrder.customerId, section: sourceOrder.type })}>{uiText("返回来源订单")}</Button>}
         {hasOrderContext && <Button onClick={() => go('shipments')}>{uiText("查看全部出运")}</Button>}
         <Button icon={Download} disabled={!rows.length} onClick={() => exportRecords('出运台账', ['编号', '客户', '收货方', '运输', '起运港', '目的港', '计划日', '阶段', '实际离港'], rows.map(s => [s.code, s.customer, s.consignee, MODE_LABEL[s.mode], s.portOfLoading, s.portOfDischarge, s.plannedDate, s.hiddenCount ? '部分可见' : shipmentStageLabel(s, shipmentStage(state!, s)), s.departedAt || '']))}>{uiText("导出")}</Button>
-        {business && <Button icon={ScrollText} disabled={hasOrderContext && !sourceOrder} onClick={() => editor.open(termsSpec())}>{uiText("核对合同收货条款")}</Button>}
+        {business && <Button icon={ScrollText} disabled={!state || hasOrderContext && !sourceOrder} onClick={() => editor.open(termsSpec())}>{uiText("核对合同收货条款")}</Button>}
         {canCreate}
       </>} />
     {!business && !logistics && <div className="mist-section"><Banner variant="status" tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有出运业务或后勤权限，可以查看出运与轨迹。")}</Banner></div>}
     {visibleFailure && <FailureNotice title="出运操作未完成" detail={visibleFailure} retry={error ? () => void refresh() : undefined} />}
-    {!hasOrderContext && <div className="mist-section"><Segmented<Domain> ariaLabel={uiText("业务板块")} value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${scoped.filter(s => s.domain === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${scoped.filter(s => s.domain === 'fabric').length}` }]} /></div>}
+    {!state ? <Card><EmptyState icon={Ship} title={uiText(loading?'正在读取出运资料':'出运资料未读取')} /></Card> : <>{!hasOrderContext && <div className="mist-section"><Segmented<Domain> ariaLabel={uiText("业务板块")} value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${scoped.filter(s => s.domain === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${scoped.filter(s => s.domain === 'fabric').length}` }]} /></div>}
     <Toolbar>
       <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索出运号、客户、收货方、港口、订舱号或来源订单")} />
       <Dropdown<FlagFilter> label={uiText("筛选")} value={flagFilter} onChange={setFlagFilter} options={[{ value: 'all', label: '全部' }, { value: 'mine', label: '我发起的' }, { value: 'overdue', label: '计划出运日已过' }, { value: 'packing', label: '装箱与计划不符' }]} />
@@ -313,7 +313,7 @@ export function ShipmentsPage() {
     ]} />
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${selected.customer}` : '出运详情'} drawerSub={selected ? `${MODE_LABEL[selected.mode]} · ${selected.portOfLoading} → ${selected.portOfDischarge}` : undefined}
       list={<Card><DataTable ariaLabel={uiText("出运列表")} loading={loading} rows={rows} rowKey={s => s.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
-      detail={detail} summary={summary} />
+      detail={detail} summary={summary} /></>}
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
     {departure && <ShipmentDepartureDialog key={departure.id} shipment={departure} onClose={() => setDeparture(null)} />}
   </MistPage>;

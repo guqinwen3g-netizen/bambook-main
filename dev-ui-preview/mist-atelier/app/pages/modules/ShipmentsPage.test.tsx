@@ -31,7 +31,35 @@ const customs=(shipmentId:string,status:'draft'|'submitted'|'cleared')=>({id:'cu
 beforeEach(()=>{store.workspace.revision=0;presentedError=undefined;store.error='';session.id='biz';session.denied=new Set();const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');
   s.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',customer:'Cedar',currency:'USD',amount:100,governance:{contract:{preShipmentPercent:0}}} as any);s.orderLines.push({id:'l',orderId:'o',name:'大衣',style:'COAT-1',img:'coat',qty:10,unit:'件',price:10,made:10,qc:10});
   store.state=s;store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
-afterEach(()=>{act(()=>root.unmount());host.remove();});
+afterEach(()=>{act(()=>root.unmount());host.remove();store.loading=false;});
+
+it.each([true,false])('distinguishes unread shipment data from an empty company (loading %s)',loading=>{
+ store.state=null;store.loading=loading;store.error=loading?'':'本次读取暂时不可用';presentedError=store.error||undefined;render();
+ expect(host.textContent).toContain(loading?'正在读取出运资料':'出运资料未读取');
+ expect(host.textContent).not.toContain('还没有成衣出运');expect(host.querySelector('.mist-pipeline')).toBeNull();
+ expect(queryByRole(host,'button',{name:'成衣业务 · 0'})).toBeNull();
+ expect((getByRole(host,'button',{name:'新建出运'}) as HTMLButtonElement).disabled).toBe(true);
+ expect((getByRole(host,'button',{name:'核对合同收货条款'}) as HTMLButtonElement).disabled).toBe(true);
+ expect((getByRole(host,'button',{name:'导出'}) as HTMLButtonElement).disabled).toBe(true);
+ expect(host.querySelectorAll('[role="alert"]')).toHaveLength(0);expect(store.run).not.toHaveBeenCalled();
+});
+
+it('keeps a genuine empty company available for a new shipment',()=>{
+ render();expect(host.textContent).toContain('还没有成衣出运');expect(host.querySelector('.mist-pipeline')).not.toBeNull();
+ expect(getAllByRole(host,'button',{name:'新建出运'}).every(b=>!(b as HTMLButtonElement).disabled)).toBe(true);
+ expect((getByRole(host,'button',{name:'核对合同收货条款'}) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('retains contract terms and prevents a command if their workspace becomes unread',async()=>{
+ render();await click(getByRole(host,'button',{name:'核对合同收货条款'}));
+ act(()=>fireEvent.change(getByRole(host,'combobox',{name:'来源订单'}),{target:{value:'o'}}));
+ typeInto(getByRole(host,'textbox',{name:'合同收货方'}) as HTMLInputElement,'Cedar DC');
+ typeInto(getByRole(host,'textbox',{name:'合同 / 信用证依据'}) as HTMLTextAreaElement,'已签客户合同');
+ await click(getByRole(host,'button',{name:'下一步'}));
+ store.state=null;render();await click(getByRole(host,'button',{name:'确认保存'}));
+ expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('出运资料未读取');
+ await click(getByRole(host,'button',{name:'上一步'}));expect((getByRole(host,'textbox',{name:'合同 / 信用证依据'}) as HTMLTextAreaElement).value).toBe('已签客户合同');
+});
 
 it('shows actual air departure states without sea-only labels or a duplicate instruction banner',()=>{
  const s=shipment('air',{mode:'air',state:'ready',documentsSentAt:'2026-10-13T08:00:00Z'});store.state!.fulfillment.shipments.push(s);render('air');expect(host.textContent).toContain('待起飞');expect(host.textContent).not.toContain('等待离港');expect(host.textContent).not.toContain('业务已对客发送；出口清关完成后才能登记实际离港。');s.state='departed';s.departedAt='2026-10-13T09:00:00Z';store.state={...store.state!};render('air');expect(host.textContent).toContain('已起飞');expect(host.textContent).not.toContain('已离港');
