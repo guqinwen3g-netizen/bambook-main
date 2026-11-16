@@ -23,12 +23,29 @@ afterEach(async () => { if (root) await act(async () => root!.unmount()); root =
 async function mount(id?: string, mode: 'full' | 'list' = id ? 'full' : 'list') { const detail = mode === 'full' ? mode : undefined; host = document.createElement('div'); document.body.append(host); root = createRoot(host); const Page = MARKET_PAGES.relations; await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'relations', id, detail }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
 const button = (label: string) => [...document.body.querySelectorAll('button')].find(b => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
 async function click(label: string) { const b = button(label); expect(b, label).toBeTruthy(); await act(async () => b!.click()); }
-async function repaint(id: string) { const Page = MARKET_PAGES.relations; await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'relations', id, detail: 'full' }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
+async function repaint(id?: string) { const Page = MARKET_PAGES.relations; await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'relations', id, detail: id ? 'full' : undefined }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
 async function fillProfile(label: string, value: string) {
   const dialog = document.body.querySelector('[role="dialog"]')!;
   const input = dialog.querySelector(`[aria-label="${label}"]`) as HTMLInputElement | HTMLTextAreaElement;
   await act(async () => { Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
 }
+
+it.each([true, false])('does not present an unread workspace as an empty editable organization list (loading %s)', async loading => {
+  bridge.current = { ...bridge.current, state: null, loading, error: loading ? '' : '读取失败', workspace: { id: 'workspace', revision: 7 } }; await mount();
+  expect(button('建立关系档案')!.disabled).toBe(true); expect(button('导出')!.disabled).toBe(true); expect(host.textContent).not.toContain('还没有关系档案'); expect(host.querySelector('.mist-pipeline')).toBeNull();
+  if (!loading) { expect(host.textContent).toContain('关系资料未读取'); await click('重试'); expect(bridge.current.refresh).toHaveBeenCalledOnce(); }
+  bridge.current = { ...bridge.current, state, loading: false, error: '' }; await repaint(); expect(button('建立关系档案')!.disabled).toBe(false); expect(button('导出')!.disabled).toBe(false);
+});
+
+it('keeps a new organization draft without posting when only workspace metadata remains available', async () => {
+  bridge.current.workspace = { id: 'workspace', revision: 7 }; await mount(); await click('建立关系档案'); await fillProfile('组织名称', '沅海物流');
+  bridge.current = { ...bridge.current, state: null, workspace: { id: 'workspace', revision: 8 }, error: '读取失败' }; await repaint(); await click('保存');
+  expect(bridge.current.run).not.toHaveBeenCalled(); expect(document.body.textContent).toContain('关系档案不可用，请重新读取后核对'); expect((document.querySelector('[aria-label="组织名称"]') as HTMLInputElement).value).toBe('沅海物流');
+});
+
+it('shows a real empty state and enables creation after an empty workspace was actually read', async () => {
+  state.market.relations = []; bridge.current.workspace = { id: 'workspace', revision: 7 }; await mount(); expect(host.textContent).toContain('还没有关系档案'); expect(button('建立关系档案')!.disabled).toBe(false); expect(host.textContent).not.toContain('关系资料未读取');
+});
 
 describe('relation profile concurrency', () => {
   it.each(['address', 'note', 'aliases', 'status', 'supplierId', 'removed'])('keeps the draft and refuses a changed source: %s', async field => {
@@ -152,6 +169,7 @@ describe('关系智库', () => {
     expect(detail.textContent).toContain('往来已冻结');
     expect(detail.textContent).toContain(lune.hold!.reason);
     expect(button('解冻')).toBeTruthy(); expect(button('冻结往来')).toBeUndefined();
+    expect(button('关联供应商身份')!.disabled).toBe(true);
     expect(button('归档')!.disabled).toBe(true);
     expect(detail.textContent).toMatch(/还有在手业务 \d+ 项/);
   });
