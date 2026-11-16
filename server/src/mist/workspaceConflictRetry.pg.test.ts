@@ -29,6 +29,26 @@ describe.skipIf(!url)('真实 PostgreSQL：多人同时保存自动重试', () =
   const row = (id: string) => prisma.mistWorkspace.findUniqueOrThrow({ where: { id } }) as any;
   const requests = (id: string) => prisma.mistCommandReceipt.count({ where: { workspaceId: id, NOT: { requestId: { startsWith: 'mist-revision:' } } } });
 
+  it.each([true,false])('checks a QC report physical source without refusing unrelated merging (related %s)',async related=>{
+    const auth=testAuthority(),all=[...new Set(MIST_READ_SECTIONS.flatMap(section=>section.permissions)),'orders:write','products:write','relations:write','qc:garment_chain:write'];auth.users.get('owner')!.permissions=all;auth.users.get('other')!.permissions=all;
+    const repo=new MistRepository(prisma,actualContract,files,auth.authorize),created=await repo.create(owner,{name:'QC source',slug:'pg-qc-source-'+Math.random().toString(36).slice(2),seed:'empty'}),f=shipmentFixture(),branch=f.released();ids.push(created.id);
+    const source={kind:'orderLine' as const,orderId:f.orderId,lineId:f.state.orderLines[0].id,productionId:branch.productionId};
+    const sampleId=f.run({type:'fulfillment.samples.create',payload:{name:'复核产前样',category:'成衣',form:'产前样',quantity:1,unit:'件',size:'M',color:'蓝',location:'样品室',source,role:'pp',fileIds:[],note:'独立物理样品'}}).id!;
+    const taskId=f.run({type:'fulfillment.qc.request',payload:{source,sampleId,domain:'garment',kind:'sample',factory:'工厂',location:'样品室',contact:'',due:'2026-10-13'}}).id!;
+    f.run({type:'fulfillment.qc.claim',payload:{id:taskId,domain:'garment'}},{...f.context,actorId:'owner',actorName:'QC'});
+    const state=structuredClone(f.state);state.memberIds=['other'];state.settings.businessClock={mode:'fixed',at:f.context.now,timezone:'Asia/Shanghai'};await prisma.mistWorkspace.update({where:{id:created.id},data:{state:JSON.parse(JSON.stringify(state))}});
+    const change=related?{type:'fulfillment.samples.edit',payload:{...state.fulfillment.samples.find(sample=>sample.id===sampleId),id:sampleId,color:'红'}}:{type:'contact.save',payload:{customerId:state.customers[0].id,name:'新联系人',role:'收货',email:'',phone:''}};
+    await repo.execute(testActor('other'),created.id,{requestId:'concurrent-qc-source',expectedRevision:0,command:change}as any);
+    if(related)expect((await row(created.id)).state.fulfillment.samples.find((sample:any)=>sample.id===sampleId).qualityRevision).toBe(2);
+    const command={type:'fulfillment.qc.report',payload:{id:taskId,domain:'garment',result:'pass',report:'QC-OLD-PHYSICAL',opinion:'原蓝色样品测量',measurements:[{point:'胸围',standard:100,actual:100.2,tolerance:1}],fileIds:[],reviewedAt:f.context.now}}as any;
+    const before=await row(created.id),receipts=await requests(created.id);
+    if(!related){const merged=await repo.execute(owner,created.id,{requestId:'old-qc-report',expectedRevision:0,command});expect(merged.receipt.revision).toBe(2);return;}
+    await expect(repo.execute(owner,created.id,{requestId:'old-qc-report',expectedRevision:0,command})).rejects.toMatchObject({code:'REVISION_CONFLICT',status:409});
+    expect(await row(created.id)).toEqual(before);expect(await requests(created.id)).toBe(receipts);
+    const fresh=await repo.execute(owner,created.id,{requestId:'checked-qc-report',expectedRevision:1,command:{...command,payload:{...command.payload,report:'QC-CURRENT-PHYSICAL',opinion:'重新核对当前红色实物'}}});
+    expect(fresh.workspace.state.fulfillment.qcReports.find((report:any)=>report.report==='QC-CURRENT-PHYSICAL').scopeRevision).toBe(2);
+  });
+
   it.each([['save',true],['save',false],['sourceTerms',true],['sourceTerms',false]] as const)('checks shipment %s read sources while preserving unrelated merging (related %s)',async(kind,related)=>{
     const auth=testAuthority(),all=[...new Set(MIST_READ_SECTIONS.flatMap(section=>section.permissions)),'orders:write','shipments:write','relations:write','products:write'];auth.users.get('owner')!.permissions=all;auth.users.get('other')!.permissions=all;
     const repo=new MistRepository(prisma,actualContract,files,auth.authorize),created=await repo.create(owner,{name:'Shipment source',slug:'pg-shipment-'+Math.random().toString(36).slice(2),seed:'empty'}),f=shipmentFixture();let command:any;

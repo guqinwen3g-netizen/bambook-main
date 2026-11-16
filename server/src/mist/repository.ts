@@ -204,6 +204,19 @@ function shipmentReadKeys(state:MistState,command:MistCommand|undefined):string[
     ...state.fulfillment.shipments.filter(row=>row.id===command.payload.id||row.lines.some(line=>lineIds.has(line.lineId))).map(row=>['k:fulfillment','k:shipments','i:'+row.id]),
   ];
 }
+/** A report's write set cannot prove that its inspected physical source stayed unchanged. */
+function qcReportReadKeys(state:MistState,command:MistCommand|undefined):string[][]{
+  if(command?.type!=='fulfillment.qc.report')return[];
+  const task=state.fulfillment.qcTasks.find(row=>row.id===command.payload.id);if(!task)return[];
+  const keys=[['k:fulfillment','k:qcTasks','i:'+task.id]];
+  if(task.sampleId)keys.push(['k:fulfillment','k:samples','i:'+task.sampleId]);
+  else if(task.source.kind==='version')keys.push(['k:versions','i:'+task.source.versionId]);
+  else if(task.source.kind==='orderLine'){
+    keys.push(['k:orderLines','i:'+task.source.lineId]);
+    if(task.source.productionId)keys.push(['k:productions','i:'+task.source.productionId],['k:fulfillment','k:productionFacts']);
+  }
+  return keys;
+}
 function claimIdentifier(value:unknown):string { const id=identifier(value,'案件编号');if(!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(id))fail('INVALID_INPUT','案件编号无效',400);return id; }
 function activeUploadClaim(state:MistState,claimId:string){
   const claim=Array.isArray(state.platform?.claims)?state.platform.claims.find(item=>item.id===claimId):undefined;
@@ -1176,6 +1189,7 @@ export class MistRepository {
         if (concurrent) {
           if (!changeKeys) fail('REVISION_CONFLICT', '公司已被他人更新，本次修改范围过大无法自动合并，请刷新后重试', 409);
           if(shipmentReadKeys(row.state,command).some(key=>concurrent.some(other=>overlapping(key,other))))fail('REVISION_CONFLICT','出运来源已更新，请刷新后重新核对',409);
+          if(qcReportReadKeys(row.state,command).some(key=>concurrent.some(other=>overlapping(key,other))))fail('REVISION_CONFLICT','QC实物或任务已更新，请刷新后重新核对',409);
           if (changeKeys!.some(key => concurrent.some(other => overlapping(key, other)))) fail('REVISION_CONFLICT', '其他人已修改同一记录，为避免覆盖对方的更新未自动合并，请刷新核对后重试', 409);
         }
         // 需要签字的批准：权限、范围、并发与业务门禁都已通过（结果仍在副本上）才要求签字；预演不落账，不要求签字。

@@ -402,9 +402,29 @@ function QcReportCard({ report, domain, unit, production, latest }: { report: Fu
 
 type SizeCheck = { size: string; inspected: number; result: string; evidence: string };
 type Measurement = { point: string; standard: number; actual: number; tolerance: number };
+function qcReportSource(state:MistState|null,taskId:string){
+  const task=state?.fulfillment.qcTasks.find(row=>row.id===taskId);if(!state||!task)return null;
+  const subject=task.source;
+  const sample=task.sampleId?state.fulfillment.samples.find(row=>row.id===task.sampleId):undefined;
+  if(task.sampleId&&!sample)return null;
+  const physical=sample?{id:sample.id,source:sample.source,revision:sample.qualityRevision||1,form:sample.form,size:sample.size,color:sample.color,quantity:sample.quantity,unit:sample.unit,role:sample.role,shipmentId:sample.shipmentId,sizeQuantities:sample.sizeQuantities,materialPlan:sample.materialPlan}
+    :subject.kind==='version'?state.versions.find(row=>row.id===subject.versionId)
+    :subject.kind==='orderLine'&&subject.productionId?{production:state.productions.find(row=>row.id===subject.productionId),fact:state.fulfillment.productionFacts.find(row=>row.productionId===subject.productionId)}
+    :subject.kind==='orderLine'?state.orderLines.find(row=>row.id===subject.lineId):subject;
+  return stableJson({task:{source:task.source,sampleId:task.sampleId,domain:task.domain,kind:task.kind,state:task.state,assigneeId:task.assigneeId,reportIds:task.reportIds,incoming:task.incoming,quarantine:task.quarantine},physical});
+}
+
 /** Full-page report form with a side guide; submission is confirmed because the conclusion is appended permanently to the source. */
 export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onClose: () => void }) {
-  const { state, run, uploadFile, pending, saving } = useMistWorkspace();
+  const { state, workspace, run, uploadFile, pending, saving } = useMistWorkspace();
+  const [source]=React.useState(()=>({workspaceId:workspace?.id,basis:qcReportSource(state,task.id)}));
+  const liveSource=React.useRef({state,workspaceId:workspace?.id,revision:workspace?.revision});liveSource.current={state,workspaceId:workspace?.id,revision:workspace?.revision};
+  const checkedSource=()=>{
+    const checked=liveSource.current;
+    if(!checked.state||!checked.workspaceId||typeof checked.revision!=='number'||!Number.isSafeInteger(checked.revision)||checked.revision<0)throw new Error('QC资料未读取，请重新打开后核对');
+    if(!source.basis||source.workspaceId!==checked.workspaceId||source.basis!==qcReportSource(checked.state,task.id))throw new Error('实物或QC任务已更新，请重新打开后核对');
+    return checked;
+  };
   const [location, setLocation] = React.useState(task.location);
   const [result, setResult] = React.useState<MistQc['result'] | ''>(''), [report, setReport] = React.useState(''), [opinion, setOpinion] = React.useState(''), [at, setAt] = React.useState(localNow());
   const sampling = task.kind === 'production' || task.kind === 'patrol' || task.kind === 'incoming';
@@ -441,13 +461,14 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
     if (measurements.some(item => !item.point.trim())) return '请填写每个测量点的名称，或移除空白测量点';
     return '';
   };
-  const review = () => { const problem = validate(); setFailure(problem); if (!problem) setConfirming(true); };
+  const review = () => { try{checkedSource();const problem = validate(); setFailure(problem); if (!problem) setConfirming(true);}catch(error){setFailure(error instanceof Error?error.message:'QC来源不可用');} };
   const save = async () => {
     if (!result) return;
     setBusy(true); setFailure('');
     try {
+      const checked=checkedSource(),problem=validate();if(problem)throw new Error(problem);
       const aqlInput = useAql ? aqlFromDraft(aql) : null, fabricInput = useFabric ? fabricFromDraft(fabricCheck) : null;
-      await run({ type: 'fulfillment.qc.report', payload: { id: task.id, domain: task.domain, result, report, opinion, location, reviewedAt: businessInputInstant(at), measurements: fabricQc ? [] : measurements, ...(fabricQc ? {fabricMeasurements:fabricQcFacts(fabricMeasurements)} : {}), fileIds: ids, sizeChecks: sizeChecks.filter(check => check.result).map(check => ({ ...check, result: check.result as 'pass' | 'reject' })), ...(aqlInput ? { aql: aqlInput } : {}), ...(fabricInput ? { fabricInspection: fabricInput } : {}) } });
+      await run({ type: 'fulfillment.qc.report', payload: { id: task.id, domain: task.domain, result, report, opinion, location, reviewedAt: businessInputInstant(at), measurements: fabricQc ? [] : measurements, ...(fabricQc ? {fabricMeasurements:fabricQcFacts(fabricMeasurements)} : {}), fileIds: ids, sizeChecks: sizeChecks.filter(check => check.result).map(check => ({ ...check, result: check.result as 'pass' | 'reject' })), ...(aqlInput ? { aql: aqlInput } : {}), ...(fabricInput ? { fabricInspection: fabricInput } : {}) } },{expectedRevision:checked.revision});
       onClose();
     } catch (e) { setFailure(e instanceof Error ? e.message : '报告未保存'); setConfirming(false); }
     finally { setBusy(false); }

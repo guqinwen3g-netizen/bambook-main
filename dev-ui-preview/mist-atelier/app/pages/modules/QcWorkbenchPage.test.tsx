@@ -25,19 +25,38 @@ function fabricDevelopmentTask(){
  store.state!.devs.push({id:'fabric-dev',code:'DEV-FABRIC',values:{domain:'fabric'},versionIds:['fabric-version']} as any);store.state!.versions.push({id:'fabric-version',devId:'fabric-dev',label:'R1-A-1',returnedAt:'2026-10-13T08:00:00Z',confirmations:[],fileIds:[],qc:null} as any);
  store.state!.fulfillment.qcTasks.push(task('fabric-dev-qc',{domain:'fabric',source:{kind:'version',devId:'fabric-dev',versionId:'fabric-version'},state:'working',assignee:'QC甲',assigneeId:'qc-a'}));
 }
+async function physicalReportDraft(){
+ fabricDevelopmentTask();const t=store.state!.fulfillment.qcTasks[0];t.sampleId='draft-physical';
+ store.state!.fulfillment.samples.push({id:'draft-physical',code:'SMP-DRAFT',source:t.source,name:'面料样',category:'面料',form:'米样',size:'幅宽150cm',color:'灰',quantity:1,available:1,unit:'米',fileIds:[],qualityRevision:1,location:'样品室',note:''} as any);
+ render(t.id);await click(getByRole(host,'button',{name:'提交 / 追加复验报告'}));
+ choose(getByRole(host,'combobox',{name:'本次结论'}) as HTMLSelectElement,'pass');typeInto(getByRole(host,'textbox',{name:'报告编号'}) as HTMLInputElement,'PHYSICAL-DRAFT');typeInto(getByRole(host,'textbox',{name:'专业意见与影响范围'}) as HTMLTextAreaElement,'按当前灰色实物核对');
+ await click(getByRole(host,'button',{name:'添加面料实测'}));typeInto(getByRole(host,'textbox',{name:'实测项目 1'}) as HTMLInputElement,'幅宽');typeInto(getByRole(host,'textbox',{name:'实测值 1'}) as HTMLInputElement,'150');typeInto(getByRole(host,'textbox',{name:'原单位 1'}) as HTMLInputElement,'cm');
+ await click(getByRole(host,'button',{name:'提交报告'}));return t.id;
+}
+it('retains a report draft and blocks final confirmation after the physical sample changed',async()=>{
+ const id=await physicalReportDraft();store.state=structuredClone(store.state!);store.state.fulfillment.samples[0].color='红';store.state.fulfillment.samples[0].qualityRevision=2;store.workspace.revision=1;render(id);
+ await click(getByRole(getByRole(document.body,'dialog',{name:'确认提交QC报告'}),'button',{name:'确认提交'}));
+ expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('实物或QC任务已更新，请重新打开后核对');
+ expect((getByRole(host,'textbox',{name:'实测值 1'}) as HTMLInputElement).value).toBe('150');
+});
+it('binds a checked report to the current revision after unrelated synchronization',async()=>{
+ const id=await physicalReportDraft();store.state=structuredClone(store.state!);store.state.settings.profileName='新简称';store.workspace.revision=7;render(id);
+ await click(getByRole(getByRole(document.body,'dialog',{name:'确认提交QC报告'}),'button',{name:'确认提交'}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.report',payload:expect.objectContaining({report:'PHYSICAL-DRAFT'})}),{expectedRevision:7});
+});
 it('submits fabric development values with original units instead of garment standards and tolerances',async()=>{
  fabricDevelopmentTask();render('fabric-dev-qc');await click(getByRole(host,'button',{name:'提交 / 追加复验报告'}));expect(queryByRole(host,'button',{name:'增加测量点'})).toBeNull();await click(getByRole(host,'button',{name:'添加面料实测'}));
  typeInto(getByRole(host,'textbox',{name:'实测项目 1'}) as HTMLInputElement,'克重');typeInto(getByRole(host,'textbox',{name:'实测值 1'}) as HTMLInputElement,'98');typeInto(getByRole(host,'textbox',{name:'原单位 1'}) as HTMLInputElement,'g/m²');
  await click(getByRole(host,'button',{name:'添加面料实测'}));typeInto(getByRole(host,'textbox',{name:'实测项目 2'}) as HTMLInputElement,'有效幅宽');typeInto(getByRole(host,'textbox',{name:'实测值 2'}) as HTMLInputElement,'144');typeInto(getByRole(host,'textbox',{name:'原单位 2'}) as HTMLInputElement,'cm');
  choose(getByRole(host,'combobox',{name:'本次结论'}) as HTMLSelectElement,'reject');typeInto(getByRole(host,'textbox',{name:'报告编号'}) as HTMLInputElement,'FABRIC-01');typeInto(getByRole(host,'textbox',{name:'专业意见与影响范围'}) as HTMLTextAreaElement,'克重与有效幅宽不符合本次要求');await click(getByRole(host,'button',{name:'提交报告'}));await click(getByRole(getByRole(document.body,'dialog',{name:'确认提交QC报告'}),'button',{name:'确认提交'}));
- expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.report',payload:expect.objectContaining({id:'fabric-dev-qc',domain:'fabric',measurements:[],fabricMeasurements:[{property:'克重',actual:98,unit:'g/m²'},{property:'有效幅宽',actual:144,unit:'cm'}]})}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.report',payload:expect.objectContaining({id:'fabric-dev-qc',domain:'fabric',measurements:[],fabricMeasurements:[{property:'克重',actual:98,unit:'g/m²'},{property:'有效幅宽',actual:144,unit:'cm'}]})}),{expectedRevision:0});
 });
 it.each(['sample','production'] as const)('records original units for fabric %s QC outside development',async kind=>{
  store.state!.fulfillment.qcTasks.push(task('fabric-physical',{domain:'fabric',kind,state:'working',assignee:'QC甲',assigneeId:'qc-a',source:{kind:'orderLine',orderId:'o',lineId:'l',productionId:'p'}}));
  render('fabric-physical');await click(getByRole(host,'button',{name:'提交 / 追加复验报告'}));expect(queryByRole(host,'button',{name:'增加测量点'})).toBeNull();await click(getByRole(host,'button',{name:'添加面料实测'}));
  typeInto(getByRole(host,'textbox',{name:'实测项目 1'}) as HTMLInputElement,'克重');typeInto(getByRole(host,'textbox',{name:'实测值 1'}) as HTMLInputElement,'418.5');typeInto(getByRole(host,'textbox',{name:'原单位 1'}) as HTMLInputElement,'g/m²');
  choose(getByRole(host,'combobox',{name:'本次结论'}) as HTMLSelectElement,'pass');typeInto(getByRole(host,'textbox',{name:'报告编号'}) as HTMLInputElement,'PHYSICAL-FABRIC');typeInto(getByRole(host,'textbox',{name:'专业意见与影响范围'}) as HTMLTextAreaElement,'仅本次实际检查范围');await click(getByRole(host,'button',{name:'提交报告'}));await click(getByRole(getByRole(document.body,'dialog',{name:'确认提交QC报告'}),'button',{name:'确认提交'}));
- expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.report',payload:expect.objectContaining({id:'fabric-physical',domain:'fabric',measurements:[],fabricMeasurements:[{property:'克重',actual:418.5,unit:'g/m²'}]})}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.report',payload:expect.objectContaining({id:'fabric-physical',domain:'fabric',measurements:[],fabricMeasurements:[{property:'克重',actual:418.5,unit:'g/m²'}]})}),{expectedRevision:0});
 });
 it('shows saved fabric development facts and units in the workbench report',()=>{
  fabricDevelopmentTask();const t=store.state!.fulfillment.qcTasks[0];t.state='reported';t.reportIds=['fabric-report'];store.state!.fulfillment.qcReports.push({id:'fabric-report',taskId:t.id,result:'reject',report:'FABRIC-01',opinion:'按本次要求退回',measurements:[],fabricMeasurements:[{property:'克重',actual:98,unit:'g/m²'}],fileIds:[],reviewer:'QC甲',reviewedAt:'2026-10-13T10:00:00Z'} as any);render(t.id);const table=getByRole(host,'table',{name:'FABRIC-01 · 面料实测'});expect(table.textContent).toContain('克重');expect(table.textContent).toContain('98');expect(table.textContent).toContain('g/m²');
@@ -247,7 +266,7 @@ it('validates garment size checks and confirms the consequence before appending 
   expect(dialog.textContent).toContain('不通过将阻断生产，需复验。');expect(dialog.textContent).toContain('提交后报告不可改写');
   expect(store.run).not.toHaveBeenCalled();
   await click(getByRole(dialog,'button',{name:'确认提交'}));
-  expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.report',payload:expect.objectContaining({id:'prod',result:'reject',report:'R-9',location:'上海仓 A-01',sizeChecks:[{size:'M',inspected:3,result:'reject',evidence:'袖长实测'}]})}));
+  expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.report',payload:expect.objectContaining({id:'prod',result:'reject',report:'R-9',location:'上海仓 A-01',sizeChecks:[{size:'M',inspected:3,result:'reject',evidence:'袖长实测'}]})}),{expectedRevision:0});
 });
 
 it('keeps business resume available to business users and absent for QC-only accounts',async()=>{
@@ -360,7 +379,7 @@ it.each([['套',83],['个',16]] as const)('keeps the incoming %s unit in samplin
  expect(queryByRole(host,'spinbutton',{name:'实际抽检件数'})).toBeNull();typeInto(getByRole(host,'spinbutton',{name:`实际抽检数量（${unit}）`}) as HTMLInputElement,String(quantity));
  choose(getByRole(host,'combobox',{name:'本次结论'}) as HTMLSelectElement,'pass');typeInto(getByRole(host,'textbox',{name:'报告编号'}) as HTMLInputElement,'IQC-UNIT');typeInto(getByRole(host,'textbox',{name:'专业意见与影响范围'}) as HTMLTextAreaElement,'按本批原单位逐项核对');
  await click(getByRole(host,'button',{name:'提交报告'}));await click(getByRole(getByRole(document.body,'dialog',{name:'确认提交QC报告'}),'button',{name:'确认提交'}));
- expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.report',payload:expect.objectContaining({aql:expect.objectContaining({lotSize:quantity,inspected:quantity})})}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.report',payload:expect.objectContaining({aql:expect.objectContaining({lotSize:quantity,inspected:quantity})})}),{expectedRevision:0});
  act(()=>root.unmount());root=createRoot(host);incoming.state='reported';incoming.reportIds=['unit-report'];
  store.state!.fulfillment.qcReports.push({id:'unit-report',taskId:incoming.id,result:'pass',report:'IQC-UNIT',opinion:'按本批原单位逐项核对',measurements:[],fileIds:[],reviewer:'QC甲',reviewedAt:'2026-11-14T01:00:00Z',aql:{lotSize:quantity,inspected:quantity,critical:0,major:0,minor:0,outcome:{sampleSize:13,major:{accept:0,reject:1},minor:{accept:1,reject:2},result:'pass'}}} as any);
  render(incoming.id);const report=host.querySelector('[data-qc-report="unit-report"]')!;
