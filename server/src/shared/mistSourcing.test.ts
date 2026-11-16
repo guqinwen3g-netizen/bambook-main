@@ -80,6 +80,19 @@ describe('供应商询价比价',()=>{
     g.run({type:'rfq.cancel',payload:{id:r2,reason:'客户取消该款'}} as MistCommand);
     expect(g.rfq.state).toBe('cancelled');
   });
+  it.each(['同色批生产，缝线顺直；藏青S2/M4/L4/XL2，按确认分码交付。',''])('转供方保留原规格字段，转移原因独立留档：%s',requirements=>{
+    const f=fixture(),source=f.state.fulfillment.purchases.find(p=>p.code==='PO-2026-00003')!;
+    source.note=requirements;
+    f.run({type:'fulfillment.procurement.submit',payload:{id:source.id}} as MistCommand);
+    f.as('leader',()=>f.run({type:'fulfillment.procurement.decide',payload:{id:source.id,decision:'approved',note:'批准原规格'}} as MistCommand));
+    const reason='原供方排期调整，书面确认同意转交';
+    const {id}=f.run({type:'sourcing.purchase.transfer',payload:{purchaseId:source.id,supplierId:f.sup('江南成衣'),price:88,currency:'CNY',due:'2026-11-18',reason}} as MistCommand);
+    const next=f.state.fulfillment.purchases.find(p=>p.id===id)!;
+    expect(next.note).toBe(requirements);
+    expect(f.state.fulfillment.purchases.find(p=>p.id===source.id)!.note).toBe(requirements);
+    expect(next.transferredFrom?.reason).toBe(reason);
+    expect(f.state.events.some(e=>e.entityId===next.id&&e.text.includes(reason))).toBe(true);
+  });
   it('在手合同转给其他供应商：已批准未收货整单转移，原合同取消、生产分支关闭，新供应商草稿重新审批',()=>{
     const f=fixture();const po=()=>f.state.fulfillment.purchases.find(p=>p.code==='PO-2026-00003')!;
     const transfer=(patch:Record<string,unknown>={})=>({type:'sourcing.purchase.transfer',payload:{purchaseId:po().id,supplierId:f.sup('江南成衣'),price:'88',currency:'CNY',due:'2026-11-18',reason:'远山服装产能被抽调，无法保交期',...patch}}) as MistCommand;
