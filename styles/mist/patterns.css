@@ -890,6 +890,10 @@ button.mist-sync:hover { background: var(--mist-fill); color: var(--mist-ink); }
 [data-report-results] .mist-tr > [data-label]::before { content: attr(data-label); display: var(--mist-report-label-display, none); margin-bottom: 4px; font-size: var(--mist-text-xs); color: var(--mist-ink-3); }
 /* 堆叠时表头隐藏：含输入控件的单元格补回列名，避免一排无标签的输入框。 */
 .mist-table[data-fit="stack"] > .mist-tr > [data-label]:has(input, select, textarea)::before { content: attr(data-label); display: block; margin-bottom: 4px; font-size: var(--mist-text-xs); color: var(--mist-ink-3); }
+/* Mobile hides the packing header even when the two-column grid fits. Keep each editable value identifiable. */
+@media (max-width: 760px) {
+  [data-packing-editor] .mist-tr > [data-label]:has(input, select, textarea)::before { content: attr(data-label); display: block; margin-bottom: 4px; font-size: var(--mist-text-xs); color: var(--mist-ink-3); }
+}
 .mist-thead > span, .mist-thead > button { min-width: 0; white-space: normal; line-height: 1.25; }
 .mist-thead { height: auto; min-height: 44px; }
 .mist-tr > [role="cell"] { overflow-wrap: anywhere; }
