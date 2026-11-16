@@ -33,7 +33,7 @@ function customerCurrencyTotals(rows:Array<{currency:string;amount:number}>,fall
   const totals=[...amounts].filter(([,minor])=>minor!==0).map(([currency,minor])=>({currency,minor})).sort((a,b)=>Number(b.currency===fallback)-Number(a.currency===fallback)||a.currency.localeCompare(b.currency));
   return totals.length?totals:[{currency:fallback,minor:0}];
 }
-function CustomerCurrencyValues({totals}:{totals:CustomerCurrencyTotal[]}){return <span className="mist-col" style={{gap:6}}>{totals.map(row=><span key={row.currency} className="mist-row" style={{gap:6,alignItems:'baseline'}}>{formatMoneyText(row.minor/100)}<small>{row.currency}</small></span>)}</span>;}
+function CustomerCurrencyValues({totals}:{totals:CustomerCurrencyTotal[]}){return <span className="mist-col" style={{gap:6,width:'100%',fontSize:'min(1em, 14cqi)'}}>{totals.map(row=><span key={row.currency} className="mist-row" style={{gap:6,alignItems:'baseline',flexWrap:'wrap',minWidth:0}}>{formatMoneyText(row.minor/100)}<small>{row.currency}</small></span>)}</span>;}
 
 const customerProfileSource = (value: MistCustomer) => JSON.stringify([value.id, value.name, value.country, value.city, value.industry, value.ownerId, value.grade, value.currency, value.terms, value.incoterm, value.categories, value.creditLimit, value.since]);
 type CustomerContactDraft = Partial<MistContact> & { primary?: boolean };
