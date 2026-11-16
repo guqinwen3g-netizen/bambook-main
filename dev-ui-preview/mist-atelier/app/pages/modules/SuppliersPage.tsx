@@ -76,6 +76,10 @@ export type SupplierWorkbenchProps = {
 };
 
 const supplierProfileSource=(s:MarketSupplier)=>stableJson({id:s.id,code:s.code,name:s.name,type:s.type,country:s.country,address:s.address,capabilities:s.capabilities,capacity:s.capacity,capacityUnit:s.capacityUnit,leadDays:s.leadDays,note:s.note,handlerIds:Object.fromEntries(MIST_BUSINESS_GROUPS.map(g=>[g,s.handlers?.[g]?.id||'']))});
+const supplierContactSource=(c:MarketSupplier['contacts'][number])=>stableJson({id:c.id,name:c.name,role:c.role||'',email:c.email||'',phone:c.phone||'',primary:!!c.primary});
+const supplierIdentitySource=(s:MarketSupplier)=>stableJson({id:s.id,code:s.code,name:s.name});
+const supplierPrimarySource=(s:MarketSupplier)=>stableJson(s.contacts.filter(c=>c.primary).map(c=>c.id).sort());
+const supplierCertificateSource=(c:SupplierCertificate)=>stableJson({id:c.id,name:c.name,number:c.number,issuer:c.issuer,validUntil:c.validUntil,fileIds:c.fileIds});
 
 export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchProps) {
   const work=useMistWorkspace(),{ state, run, error, refresh, loading, saving, pending, workspace } = work, session = useMistSession(), { go, route } = useNav();
@@ -132,12 +136,21 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
       const id=String((r.result as{id?:string}).id||'');if(!s&&id&&routeScope.isCurrent()&&live.current.work.workspace?.id===workspaceId&&live.current.session.user?.id===actorId){setPicked(id);go('suppliers',id);}
     },
   };};
-  const certSpec = (s: MarketSupplier, c?: SupplierCertificate): ModuleEditorSpec => ({
-    title: c ? `更新认证 ${c.name}` : `登记 ${s.name} 的认证`, submitLabel: '保存',
-    initialValues: c ? { name: c.name, number: c.number, issuer: c.issuer, validUntil: c.validUntil, files: (c.fileIds || []).join(',') } : { name: '', number: '', issuer: '', validUntil: '', files: '' },
-    fields: [{ key: 'name', label: '认证名称', type: 'choice', options: CERTIFICATES, required: true }, { key: 'number', label: '证书编号' }, { key: 'issuer', label: '发证机构' }, { key: 'validUntil', label: '有效期至', type: 'date', required: true }, { key: 'files', label: '证书扫描件', type: 'files' }],
-    submit: v => run({ type: 'market.supplier.certificate.save', payload: { supplierId: s.id, id: c?.id, name: String(v.name ?? ''), number: String(v.number ?? ''), issuer: String(v.issuer ?? ''), validUntil: String(v.validUntil ?? ''), fileIds: moduleFileIds(v.files) } }),
-  });
+  const certSpec = (s: MarketSupplier, c?: SupplierCertificate,remove=false): ModuleEditorSpec => {
+    const source=c?supplierCertificateSource(c):'',identity=supplierIdentitySource(s),workspaceId=workspace?.id,actorId=session.user?.id;
+    return {
+      title:remove?`删除认证 ${c?.name}`:c?`更新认证 ${c.name}`:`登记 ${s.name} 的认证`,submitLabel:remove?'删除':'保存',submitVariant:remove?'danger':undefined,description:remove?'仅限登记错误；过期认证请保留。':undefined,
+      initialValues:remove?{}:c?{name:c.name,number:c.number,issuer:c.issuer,validUntil:c.validUntil,files:(c.fileIds||[]).join(',')}:{name:'',number:'',issuer:'',validUntil:'',files:''},
+      fields:remove?[]:[{key:'name',label:'认证名称',type:'choice',options:CERTIFICATES,required:true},{key:'number',label:'证书编号'},{key:'issuer',label:'发证机构'},{key:'validUntil',label:'有效期至',type:'date',required:true},{key:'files',label:'证书扫描件',type:'files'}],
+      submit:async v=>{
+        const checked=live.current.work,current=checked.state?.market.suppliers.find(row=>row.id===s.id),cert=c?current?.certificates?.find(row=>row.id===c.id):undefined,revision=checked.workspace?.revision;
+        if(!routeScope.isCurrent()||checked.workspace?.id!==workspaceId||live.current.session.user?.id!==actorId)throw new Error('当前账号或公司已变化，请重新打开认证');
+        if(!checked.state||checked.loading||typeof revision!=='number'||!Number.isSafeInteger(revision)||revision<0)throw new Error('认证资料不可用，请重新读取后核对');
+        if(!current||supplierIdentitySource(current)!==identity||c&&(!cert||supplierCertificateSource(cert)!==source))throw new Error('认证资料已更新，请重新打开后核对');
+        return remove&&c?checked.run({type:'market.supplier.certificate.delete',payload:{supplierId:s.id,id:c.id}},{expectedRevision:revision}):checked.run({type:'market.supplier.certificate.save',payload:{supplierId:s.id,id:c?.id,name:String(v.name??''),number:String(v.number??''),issuer:String(v.issuer??''),validUntil:String(v.validUntil??''),fileIds:moduleFileIds(v.files)}},{expectedRevision:revision});
+      },
+    };
+  };
   // 收款账户：财务登记；更换须写明核实方式（按合同或既有记录中的电话回拨、盖章变更函），原账户保留为已替换。
   const bankSpec = (s: MarketSupplier, currency = 'CNY'): ModuleEditorSpec => {
     const current = s.bankAccounts?.find(a => a.state === 'active' && a.currency === currency);
@@ -154,7 +167,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
     fields: [{ key: 'reason', label: '停用原因', type: 'textarea', required: true }],
     submit: v => run({ type: 'market.supplier.bank.disable', payload: { supplierId: s.id, accountId: a.id, reason: String(v.reason ?? '') } }),
   });
-  const deleteCertSpec = (s: MarketSupplier, c: SupplierCertificate): ModuleEditorSpec => ({ title: `删除认证 ${c.name}`, submitLabel: '删除', description: '仅限登记错误；过期认证请保留。', initialValues: {}, fields: [], submit: () => run({ type: 'market.supplier.certificate.delete', payload: { supplierId: s.id, id: c.id } }) });
+  const deleteCertSpec = (s: MarketSupplier, c: SupplierCertificate): ModuleEditorSpec => certSpec(s,c,true);
   const rateSpec = (s: MarketSupplier): ModuleEditorSpec => ({
     title: `评级 ${s.name}`, submitLabel: '保存评级', description: '每次评级单独记录，历史评级保留。',
     initialValues: { grade: supplierGrade(s)?.grade || 'B', period: '', note: (() => { const p = perf.get(s.id); return p ? [p.completed.length ? `准交 ${rate(p.onTime, p.completed.length)}（${p.onTime}/${p.completed.length} 单）` : '', p.receipts ? `来料无退货 ${rate(p.clean, p.receipts)}（${p.clean}/${p.receipts} 次）` : ''].filter(Boolean).join('；') : ''; })() },
@@ -170,11 +183,21 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
           initialValues: { reason: '', effectiveDate: day }, fields: [{ key: 'reason', label: next === 'paused' ? '暂停原因' : '停用原因', type: 'textarea', required: true }, { key: 'effectiveDate', label: '生效日', type: 'date', required: true, hint: '不能早于今天' }],
           submit: v => run({ type: 'market.supplier.status', payload: { id: s.id, status: next, reason: String(v.reason ?? ''), effectiveDate: String(v.effectiveDate ?? '') } }) };
   };
-  const contactSpec = (s: MarketSupplier, c?: MarketSupplier['contacts'][number]): ModuleEditorSpec => ({
-    title: c ? `编辑联系人 ${c.name}` : `添加 ${s.name} 的联系人`, submitLabel: '保存', initialValues: c ? { ...c } : { name: '', role: '', email: '', phone: '', primary: !s.contacts.length },
-    fields: [{ key: 'name', label: '联系人姓名', required: true }, { key: 'role', label: '岗位' }, { key: 'email', label: '邮箱' }, { key: 'phone', label: '电话' }, { key: 'primary', label: '主联系人', type: 'checkbox' }],
-    submit: v => run({ type: 'market.contact.save', payload: { kind: 'supplier', parentId: s.id, id: c?.id, name: String(v.name ?? ''), role: String(v.role ?? ''), email: String(v.email ?? ''), phone: String(v.phone ?? ''), primary: !!v.primary } }),
-  });
+  const contactSpec = (s: MarketSupplier, c?: MarketSupplier['contacts'][number],remove=false): ModuleEditorSpec => {
+    const source=c?supplierContactSource(c):'',identity=supplierIdentitySource(s),primary=supplierPrimarySource(s),workspaceId=workspace?.id,actorId=session.user?.id;
+    return {
+      title:remove?`删除联系人 ${c?.name}`:c?`编辑联系人 ${c.name}`:`添加 ${s.name} 的联系人`,submitLabel:remove?'删除':'保存',submitVariant:remove?'danger':undefined,initialValues:remove?{}:c?{...c}:{name:'',role:'',email:'',phone:'',primary:!s.contacts.length},
+      fields:remove?[]:[{key:'name',label:'联系人姓名',required:true},{key:'role',label:'岗位'},{key:'email',label:'邮箱'},{key:'phone',label:'电话'},{key:'primary',label:'主联系人',type:'checkbox'}],
+      submit:async v=>{
+        const checked=live.current.work,current=checked.state?.market.suppliers.find(row=>row.id===s.id),contact=c?current?.contacts.find(row=>row.id===c.id):undefined,revision=checked.workspace?.revision;
+        if(!routeScope.isCurrent()||checked.workspace?.id!==workspaceId||live.current.session.user?.id!==actorId)throw new Error('当前账号或公司已变化，请重新打开联系人');
+        if(!checked.state||checked.loading||typeof revision!=='number'||!Number.isSafeInteger(revision)||revision<0)throw new Error('联系人资料不可用，请重新读取后核对');
+        if(!current||supplierIdentitySource(current)!==identity||c&&(!contact||supplierContactSource(contact)!==source))throw new Error('联系人资料已更新，请重新打开后核对');
+        if(!remove&&v.primary&&supplierPrimarySource(current)!==primary)throw new Error('主联系人已更新，请重新打开后核对');
+        return remove&&c?checked.run({type:'market.contact.delete',payload:{kind:'supplier',parentId:s.id,id:c.id}},{expectedRevision:revision}):checked.run({type:'market.contact.save',payload:{kind:'supplier',parentId:s.id,id:c?.id,name:String(v.name??''),role:String(v.role??''),email:String(v.email??''),phone:String(v.phone??''),primary:!!v.primary}},{expectedRevision:revision});
+      },
+    };
+  };
   const columns: Column<MarketSupplier>[] = [
     { key: 'name', header: '供应商', width: 'minmax(170px,1.3fr)', render: s => <ObjectCell name={s.name} meta={<><Mono>{s.code}</Mono> · {s.type}</>} /> },
     { key: 'grade', header: '评级', width: '64px', render: s => { const g = supplierGrade(s); return g ? <Pill tone={GRADE_TONE[g.grade]}>{g.grade}</Pill> : <span className="mist-muted">—</span>; } },
@@ -189,7 +212,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   const detail = selected && state
     ? <SupplierDetail s={selected} state={state} day={day} can={can} canAdmin={canAdmin} canContacts={canContacts} locked={locked} perf={perf.get(selected.id)!} canProcure={session.hasPermission('procurement:write')} canBank={session.hasPermission('invoices:write')} onBank={currency => setDialog(bankSpec(selected, currency))} onBankDisable={a => setDialog(bankDisableSpec(selected, a))} onRfq={() => go('procurement', undefined, { section: 'rfq:' + selected.id })}
         onEdit={() => setDialog(profileSpec(selected))} onRate={() => setDialog(rateSpec(selected))} onCert={c => setDialog(certSpec(selected, c))} onDeleteCert={c => setDialog(deleteCertSpec(selected, c))}
-        onStatus={n => setDialog(statusSpec(selected, n))} onContact={c => setDialog(contactSpec(selected, c))} onContactDelete={c => setDialog({ title: `删除联系人 ${c.name}`, submitLabel: '删除', submitVariant: 'danger', fields: [], initialValues: {}, submit: () => run({ type: 'market.contact.delete', payload: { kind: 'supplier', parentId: selected.id, id: c.id } }) })} onOpen={(view, id) => go(view, id)}
+        onStatus={n => setDialog(statusSpec(selected, n))} onContact={c => setDialog(contactSpec(selected, c))} onContactDelete={c => setDialog(contactSpec(selected,c,true))} onOpen={(view, id) => go(view, id)}
         attachments={attachments(selected, !can)} history={history(selected.id)} />
     : <EmptyState icon={Building2} title={uiText("供应商档案")} description={uiText("从左侧列表选择一家供应商，查看认证、评级、在手业务与交付表现。")} compact />;
   const summary = selected ? (() => {
