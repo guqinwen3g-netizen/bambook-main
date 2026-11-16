@@ -155,9 +155,10 @@ export function SamplesPage() {
       { ...field('shipmentId', '出运批次', 'select', true, shipmentOptions), readonly: hasShipmentContext, when:[{key:'source',values:productionSources},{key:'role',values:['shipping']}] },
       choiceField('form', '形态', SAMPLE_FORMS), ...(shippingGarment?[field('sizeQuantities','尺码与件数（每行 M:1）','textarea')]:[field('quantity', '数量 / 长度', 'number'), { ...field('sizeQuantities', '多件按尺码（每行 M:2）', 'textarea', false), when: { key: 'category', values: ['成衣'] } }]), {...field('unit', '单位', 'select', true, choices(['米', '码', '公斤', '份', '张', '个', '色位', '卡', '件', '套'])),readonly:shippingGarment},
       ...(!shippingGarment?[{ ...field('size', '尺码', 'text', false), requiredIf: v => productionSources.includes(String(v.source || '')) && v.category === '成衣' && v.role === 'pp' }]:[]), field('color', '颜色', 'text', false), field('location', '存放位置', 'text', false), field('note', '备注', 'textarea', false)],
+    // The operator records the actual specimen members; a production size plan does not identify these physical samples.
     initialValues: { category: defaultCategory, categoryCustom: '', name: contextLine?.name || '', source: hasShipmentContext ? (sourceProduction ? 'production:' + sourceProduction.id : '') : contextProduction ? 'production:' + contextProduction.id : 'manual', sourceText: '',
       role: contextRole,
-      shipmentId: sourceShipment?.id || '', form: hasShipmentContext ? '船样' : contextRole === 'pp' ? '产前样' : '', quantity: 1,sizeQuantities:shippingGarment&&sourceProduction?(state?.fulfillment.productionFacts?.find(fact=>fact.productionId===sourceProduction.id)?.sizes||[]).filter(row=>row.quantity>0).map(row=>`${row.size}:1`).join('\n'):'',unit: defaultCategory === '面料' ? '' : '件', size: '', color: '', location: '', note: '' },
+      shipmentId: sourceShipment?.id || '', form: hasShipmentContext ? '船样' : contextRole === 'pp' ? '产前样' : '', quantity: 1,sizeQuantities:'',unit: defaultCategory === '面料' ? '' : '件', size: '', color: '', location: '', note: '' },
     derive: (key, value) => key === 'role' && (value === 'pp' || value === 'shipping') ? { form: value === 'pp' ? '产前样' : '船样' } : {},
     submitLabel: '登记样品',
     submit: async values => {

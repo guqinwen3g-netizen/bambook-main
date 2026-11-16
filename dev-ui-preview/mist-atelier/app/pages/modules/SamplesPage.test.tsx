@@ -235,3 +235,19 @@ it('appends uploaded evidence using the current specimen location, note and file
  await act(async()=>{finish({id:'upload',name:'new.txt',mimeType:'text/plain',size:3,storageKey:'workspace/upload',createdAt:''});});
  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.samples.edit',payload:{id:'sample-files',location:'B-02',note:'另一岗位已复核',fileIds:['old','peer','upload']}},{expectedRevision:2});
 });
+
+it('requires actual shipping specimen size counts instead of inventing them from the factory plan',async()=>{
+ const s=store.state!;s.orders.push({id:'tail-order',code:'SO-TAIL',type:'garment'} as any);
+ s.orderLines.push({id:'tail-line',orderId:'tail-order',name:'Shirt',style:'SH',qty:12,unit:'件',price:42,img:'coat',made:12,qc:12});
+ s.productions.push({id:'tail-prod',orderId:'tail-order',lineId:'tail-line',order:'SO-TAIL',code:'PROD-TAIL',name:'Shirt',factory:'Factory',qty:12,pct:100,col:'done',img:'coat',due:'2026-12-01'});
+ s.fulfillment.productionFacts.push({productionId:'tail-prod',revision:1,sizes:[{size:'S',quantity:2},{size:'M',quantity:4},{size:'L',quantity:4},{size:'XL',quantity:2}]});
+ s.fulfillment.shipments.push({id:'tail-ship',code:'SHP-TAIL',domain:'garment',state:'preparing',customerId:'buyer',lines:[{orderId:'tail-order',lineId:'tail-line',productionId:'tail-prod',quantity:4}]} as any);
+ s.fulfillment.packing.push({id:'tail-pack',shipmentId:'tail-ship',lineId:'tail-line',productionId:'tail-prod',carton:'B01',quantity:4,netWeight:2,grossWeight:2.4,volume:0.028,note:'',assortment:[{color:'Blue',size:'M',quantity:2},{color:'Blue',size:'L',quantity:2}]});
+ render(undefined,{section:'shipment:tail-ship'});await act(async()=>getAllByRole(host,'button',{name:'新建样品',exact:true})[0].click());
+ const fill=async(name:RegExp,value:string)=>{const input=getByRole(host,'textbox',{name}) as HTMLInputElement|HTMLTextAreaElement;await act(async()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});};
+ await fill(/^名称/,'Shirt');await act(async()=>getByRole(host,'button',{name:'下一步'}).click());
+ expect((getByRole(host,'textbox',{name:/^尺码与件数/}) as HTMLTextAreaElement).value).toBe('');
+ await act(async()=>getByRole(host,'button',{name:'下一步'}).click());expect(host.textContent).toContain('请填写尺码与件数');expect(store.run).not.toHaveBeenCalled();
+ await fill(/^尺码与件数/,'M:1\nL:1');await act(async()=>getByRole(host,'button',{name:'下一步'}).click());await fill(/^存放位置/,'Warehouse B01');await act(async()=>getByRole(host,'button',{name:'下一步'}).click());await act(async()=>getByRole(host,'button',{name:'登记样品'}).click());
+ expect(store.run).toHaveBeenCalledWith({type:'fulfillment.samples.create',payload:expect.objectContaining({quantity:2,unit:'件',role:'shipping',shipmentId:'tail-ship',sizeQuantities:[{size:'M',quantity:1},{size:'L',quantity:1}],source:{kind:'orderLine',orderId:'tail-order',lineId:'tail-line',productionId:'tail-prod'}})});
+});
