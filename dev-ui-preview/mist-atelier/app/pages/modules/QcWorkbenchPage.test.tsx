@@ -264,7 +264,7 @@ it('keeps business resume available to business users and absent for QC-only acc
   expect(queryByRole(host,'button',{name:'确认继续生产'})).toBeNull();
   expect(host.textContent).not.toContain('由业务员确认恢复');
   render('resume','list');
-  expect(queryByRole(host,'button',{name:'从来源发起QC'})).toBeNull();expect(host.textContent).toContain('送检由业务员在准确来源发起');
+  expect(queryByRole(host,'button',{name:'从来源发起QC'})).toBeNull();expect(host.textContent).not.toContain('送检由业务员在准确来源发起');
   expect(queryByRole(document.body,'dialog')).toBeNull();
 });
 

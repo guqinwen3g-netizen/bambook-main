@@ -260,7 +260,7 @@ export function QcWorkbenchPage() {
       actions={<>
         <Button icon={RefreshCw} disabled={loading} onClick={() => void refresh()}>{uiText("刷新")}</Button>
         {canPatrol && <Button icon={Plus} disabled={locked} onClick={() => setDialog(patrolSpec())}>{uiText('新建巡检')}</Button>}
-        {canRequest ? <Button variant="primary" icon={Plus} disabled={locked} onClick={request}>{uiText("从来源发起QC")}</Button> : <span className="mist-note">{uiText('送检由业务员在准确来源发起')}</span>}
+        {canRequest && <Button variant="primary" icon={Plus} disabled={locked} onClick={request}>{uiText("从来源发起QC")}</Button>}
       </>} />
     {(failure || error&&error!==presentedError) && <FailureNotice title="QC操作未完成" detail={failure || error} retry={error ? () => void refresh() : undefined} />}
     {!state ? <Card><EmptyState icon={ClipboardCheck} title={uiText(loading?'正在读取QC资料':'QC资料未读取')} /></Card> : <><div className="mist-domains" role="tablist" aria-label={uiText("QC 专业板块")} {...domainTabs.listProps}>
