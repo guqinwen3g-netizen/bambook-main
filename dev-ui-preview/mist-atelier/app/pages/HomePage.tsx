@@ -17,7 +17,7 @@ import { MIST_LOGISTICS_DUTY, type MistTarget, type MistTask } from '../../../..
 import { IMG, STAGES } from '../data';
 import { useNav } from '../nav';
 import { useMistSession } from '../runtime/auth';
-import { useMistWorkspace } from '../runtime/workspace';
+import { useMistWorkspace, type MistCommandRecovery } from '../runtime/workspace';
 import { useMyDisplayName } from '../runtime/me';
 import {mistActivityTitle} from '../runtime/activityLabels';
 import { visibleMistNotifications } from '../runtime/notificationPreferences';
@@ -49,6 +49,11 @@ export function HomePage() {
   // mar64：新建 / 改期 / 转派待办。
   const me = session.user?.id || '', [todoSpec, setTodoSpec] = React.useState<ModuleEditorSpec | null>(null), members = workspaceMembers(workspace.workspace, workspace.state, session.user);
   const [reportVersion, setReportVersion] = React.useState<string | null>(null), [error, setError] = React.useState('');
+  const [failedCommand,setFailedCommand]=React.useState<Omit<MistCommandRecovery,'revision'>|null>(null);
+  const recovered=workspace.commandRecovery;
+  React.useEffect(()=>{
+    if(failedCommand&&recovered&&failedCommand.requestId===recovered.requestId&&failedCommand.workspaceId===recovered.workspaceId&&failedCommand.actorId===recovered.actorId&&recovered.workspaceId===workspace.workspace?.id&&recovered.actorId===me){setError('');setFailedCommand(null);}
+  },[failedCommand,recovered,workspace.workspace?.id,me]);
   const [statView,setStatView]=React.useState<'development'|'qc'|'shipping'|'invoices'|null>(null);
   const hidden = new Set(workspace.workspace?.access?.hidden?.map(section => section.key) ?? []);
   const hiddenStats = { development: hidden.has('products')||!session.hasPermission('products:read'), qc: hidden.has('products')||hidden.has('qc')||!session.hasPermission('products:read')||!session.hasPermission('qc:read'), shipping: hidden.has('shipments')||!session.hasPermission('shipments:read'), invoices: hidden.has('receivables')||!session.hasPermission('invoices:read') };
@@ -59,7 +64,7 @@ export function HomePage() {
   React.useEffect(()=>{const current=businessToday();setToday(current);setDay(current);},[scope,state?.settings.businessClock?.at]);
   const alive=React.useRef(true);React.useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const busy = loading || saving || !!pending, operation = React.useRef(false);
-  React.useEffect(() => { setTodoSpec(null); setTaskDialog(false); setSelectedTask(''); setReportVersion(null); setStatView(null); setError(''); operation.current = false; }, [scope]);
+  React.useEffect(() => { setTodoSpec(null); setTaskDialog(false); setSelectedTask(''); setReportVersion(null); setStatView(null); setError('');setFailedCommand(null); operation.current = false; }, [scope]);
   React.useEffect(() => { const update = () => setToday(businessToday()); const timer = window.setInterval(update, 60000); window.addEventListener('focus', update); return () => { window.clearInterval(timer); window.removeEventListener('focus', update); }; }, []);
   const days = weekDays(today), weekStart = days[0].key, weekEnd = days[6].key;
   const reviews = useOptionalMistReviews(), waitingReviews = reviews?.rows.filter(row => row.canDecide).length ?? 0;
@@ -81,9 +86,13 @@ export function HomePage() {
   const openTarget = (target: MistTarget) => { if (busy) return; if (target.section === 'agent-proposal' && target.id) { setProposalId(target.id); return; } go(target.view, target.id, target); };
   const run = async (work: () => Promise<unknown>, success?: string) => {
     if (busy || operation.current) return;
-    operation.current = true; const current = scope; setError('');
+    operation.current = true; const current = scope; setError('');setFailedCommand(null);
     try { await work(); if (alive.current && activeScope.current === current && success) toast(success); }
-    catch (failure) { if (alive.current && activeScope.current === current) { const message = failure instanceof Error ? failure.message : '操作未完成，请重试'; setError(message); toast(message, 'bad'); } }
+    catch (failure) { if (alive.current && activeScope.current === current) {
+      const message=failure instanceof Error?failure.message:'操作未完成，请重试',pending=failure&&typeof failure==='object'?(failure as {mistPendingCommand?:Partial<MistCommandRecovery>}).mistPendingCommand:undefined;
+      setFailedCommand(pending&&typeof pending.requestId==='string'&&pending.requestId&&typeof pending.workspaceId==='string'&&pending.workspaceId&&typeof pending.actorId==='string'&&pending.actorId?{requestId:pending.requestId,workspaceId:pending.workspaceId,actorId:pending.actorId}:null);
+      setError(message);toast(message,'bad');
+    } }
     finally { if (alive.current && activeScope.current === current) operation.current = false; }
   };
   const emailTasks = mistEmailFollowUpTaskIds(state);
@@ -138,7 +147,7 @@ export function HomePage() {
         actions={<><Segmented<'today' | 'week'> ariaLabel={uiText("时间范围")} value={range} onChange={setRange} options={[{ value: 'today', label: '今天' }, { value: 'week', label: '本周' }]} />
           <Button icon={Plus} disabled={busy || !state} onClick={() => openTodo()}>{uiText("新建待办")}</Button><Button variant="primary" icon={Plus} disabled={busy || !state || !session.hasPermission('products:write')} onClick={() => go('development/new')}>{uiText("新建开发案")}</Button></>} />
       {state && <SetupChecklist state={state} workspace={workspace.workspace} canAdmin={session.hasPermission('users:admin')} go={go} />}
-      {(error || workspace.error) && <FailureNotice title="操作未完成" detail={error || workspace.error} retry={() => { setError(''); void workspace.refresh(); }} retryLabel="重新读取" />}
+      {(error || workspace.error) && <FailureNotice title="操作未完成" detail={error || workspace.error} retry={() => { setError('');setFailedCommand(null); void workspace.refresh(); }} retryLabel="重新读取" />}
       {Object.values(hiddenStats).some(value=>!value)&&<StatGrid cols={Object.values(hiddenStats).filter(value=>!value).length}>
         {!hiddenStats.development&&<StatCard icon={Layers} label={uiText("在途开发案")} value={state ? activeDevs.length : '—'} unit={uiText('个')} onClick={() => setStatView('development')} />}
         {!hiddenStats.qc&&<StatCard icon={BadgeCheck} label={uiText("待 QC 评审")} value={state ? qcTasks.length+qcVersions.length : '—'} unit={uiText('项')} onClick={() => setStatView('qc')} />}
