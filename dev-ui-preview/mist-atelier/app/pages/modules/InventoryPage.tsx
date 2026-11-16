@@ -6,9 +6,10 @@ import { stockName } from '../businessNames';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 库存与仓储：面料 / 成衣业务组各自的实物台账；按单位分开汇总，详情为“事实 → 可做的动作 → 流水”。 */
 import React from 'react';
+import { stableJson } from '../../../../../server/src/shared/stableJson';
 import { ArrowRightLeft, Bookmark, Boxes, ClipboardCheck, Download, Layers, PackageMinus, PackagePlus, Plus, SearchX, Shirt, Trash2, Truck, Undo2, Warehouse } from 'lucide-react';
 import { Banner, Button, Card, CardButton, useTabNavigation, DataTable, Dropdown, EmptyState, Facts, KeyValue, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Select, TextLink, Tile, Timeline, Toolbar, type Column, type Tone } from '../../../../../components/mist';
-import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
+import type { MistCommand, MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentStock } from '../../../../../server/src/shared/mistFulfillment';
 import { freeQuantity, fulfillmentPositions, fulfillmentSourceLabel, OTHER_RECEIPT_REASONS, reservationOpen, stockIssueRemaining, stockReservedQuantity } from '../../../../../server/src/shared/mistFulfillment';
 import { stockAgeDays, stockInTransit, stockUnitCost } from '../../../../../server/src/shared/mistStockOperations';
@@ -71,6 +72,7 @@ function UnitLines({ totals, tone }: { totals: Array<[string, number]>; tone?: T
 export function InventoryPage() {
   const presentedError=React.useContext(MistPresentedErrorContext);
   const { state, workspace, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), editor = useEditor(), nav = useNav(), { route, go } = nav;
+  const liveSource=React.useRef({state,revision:workspace?.revision});liveSource.current={state,revision:workspace?.revision};
   const f=state?.fulfillment,receipt=f?.returnReceipts?.find(row=>row.id===route.id);
   const explicitClaim=route.section?.startsWith('claim:')===true,hasClaim=explicitClaim||!!receipt,claimId=explicitClaim?route.section!.slice(6):receipt?.claimId;
   const claim=state?.platform.claims.find(row=>row.id===claimId),incomingStock=f?.stock.find(row=>row.id===route.id);
@@ -102,7 +104,15 @@ export function InventoryPage() {
   const locked = !state || saving || !!pending;
   const canCost = session.hasPermission('procurement:read');
 
-  const warehouseSpec = (row?: ClaimInventoryWarehouse): ModuleEditorSpec => ({ title: row ? '更新真实仓库' : '新增仓库', fields: [field('code', '仓库代码'), field('name', '仓库名称'), field('address', '仓库地址'),field('custodian','保管方','select',true,[{value:'',label:'请选择'},{value:'company',label:'公司'},{value:'supplier',label:'合作方'}]),{...field('supplierId','保管单位','select',true,[{value:'',label:'请选择'},...(state?.market.suppliers||[]).map(row=>({value:row.id,label:row.name}))]),when:{key:'custodian',values:['supplier']}}, field('active', '当前启用', 'checkbox', false)], initialValues: { code: row?.code || '', name: row?.name || '', address: row?.address || '',custodian:row?(row.supplierId?'supplier':row.custodian||''):'company',supplierId:row?.supplierId||'', active: row?.active ?? true }, submit: v => run({ type: 'fulfillment.claimInventory.warehouse.save', payload: { ...(row ? { id: row.id } : {}), code: text(v, 'code'), name: text(v, 'name'), address: text(v, 'address'),custodian:text(v,'custodian') as 'company'|'supplier',supplierId:text(v,'custodian')==='supplier'?text(v,'supplierId'):'', active: !!v.active } }) });
+  const warehouseSpec = (row?: ClaimInventoryWarehouse): ModuleEditorSpec => {
+    const baseline=row?stableJson(row):'';
+    return { title: row ? '更新真实仓库' : '新增仓库', fields: [field('code', '仓库代码'), field('name', '仓库名称'), field('address', '仓库地址'),field('custodian','保管方','select',true,[{value:'',label:'请选择'},{value:'company',label:'公司'},{value:'supplier',label:'合作方'}]),{...field('supplierId','保管单位','select',true,[{value:'',label:'请选择'},...(state?.market.suppliers||[]).map(row=>({value:row.id,label:row.name}))]),when:{key:'custodian',values:['supplier']}}, field('active', '当前启用', 'checkbox', false)], initialValues: { code: row?.code || '', name: row?.name || '', address: row?.address || '',custodian:row?(row.supplierId?'supplier':row.custodian||''):'company',supplierId:row?.supplierId||'', active: row?.active ?? true }, submit: v => {
+      const checked=liveSource.current,current=checked.state?.fulfillment.warehouses.find(value=>value.id===row?.id);
+      if(row&&(!current||stableJson(current)!==baseline))throw new Error('仓库资料已更新，请重新打开后核对');
+      const command:MistCommand={ type: 'fulfillment.claimInventory.warehouse.save', payload: { ...(row ? { id: row.id } : {}), code: text(v, 'code'), name: text(v, 'name'), address: text(v, 'address'),custodian:text(v,'custodian') as 'company'|'supplier',supplierId:text(v,'custodian')==='supplier'?text(v,'supplierId'):'', active: !!v.active } };
+      return row&&checked.revision!==undefined?run(command,{expectedRevision:checked.revision}):run(command);
+    } };
+  };
   const receive = () => {
     if (!sourceGoods?.source || !state) return; const goods = sourceGoods, source = goods.source!, rt = f!.returnReceipts.find(row => row.id === goods.returnReceiptId)!;
     editor.open({ title: '退货收货', fields: [{ ...field('warehouseId', '收货仓库', 'select', true, (f?.warehouses || []).map(row => ({ value: row.id, label: row.code + ' · ' + row.name }))), readonly: true }, field('quantity', `本次实收数量（${source.unit}）`, 'number'), field('location', '库位'), field('batchNumber', '退货批号'), field('ownership', '货权', 'select', true, [emptyOption, ...(claim?.dispositions.find(row=>row.id===goods.dispositionId)?.kind==='Repair'?[]:[{ value: 'Owned', label: '我方货权' }]), { value: 'Transferred', label: '客户货权' }]), field('ownershipDate', '货权确认日期', 'date'), { ...field('ownershipEvidence', '货权依据', 'textarea') }, field('receivedAt', '收货日期', 'date'), { ...field('basis', '收货依据', 'textarea'), hint: `${source.style} · 批准 ${source.quantity}${source.unit}，已收 ${goods.receivedQuantity || 0}${source.unit}` }, field('fileId', '收货凭据', 'select', false, [emptyOption, ...state.files.map(file => ({ value: file.id, label: file.name }))])], initialValues: { warehouseId: rt.warehouseId, quantity: 0, location: '', batchNumber: '', ownership: '', ownershipDate: today(), ownershipEvidence: '', receivedAt: today(), basis: '', fileId: '' }, submit: v => run({ type: 'fulfillment.claimInventory.receive', payload: { goodsId: goods.id, quantity: number(v, 'quantity'), unit: source.unit, warehouseId: rt.warehouseId, location: text(v, 'location'), batchNumber: text(v, 'batchNumber'), ownership: text(v, 'ownership') as 'Owned' | 'Transferred', ownershipDate: text(v, 'ownershipDate'), ownershipEvidence: text(v, 'ownershipEvidence'), receivedAt: text(v, 'receivedAt'), basis: text(v, 'basis'), fileIds: text(v, 'fileId') ? [text(v, 'fileId')] : [] } }) });

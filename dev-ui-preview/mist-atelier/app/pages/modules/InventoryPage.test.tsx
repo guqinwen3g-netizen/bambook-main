@@ -278,3 +278,23 @@ it('identifies a leftover receipt by its recorded source in the detail heading',
   render('leftover');const detail=host.querySelector('[data-stock-detail="leftover"]') as HTMLElement;
   expect(detail.querySelector('.mist-mono')?.textContent).toBe('工厂退料 DN-89');expect(detail.textContent).not.toContain('来源采购不可用');
 });
+
+async function editWarehouseSource(){
+ store.state!.fulfillment.warehouses[0].custodian='company';
+ store.workspace={id:'workspace',revision:7};render();await click(getByRole(host,'button',{name:'仓库目录',exact:true}));
+ const row=getAllByRole(host,'row').find(row=>row.textContent?.includes('松江仓'))!;expect(row).toBeTruthy();await click(row);await click(getByRole(host,'button',{name:'编辑',exact:true}));
+ const address=getByRole(host,'textbox',{name:'仓库地址'}) as HTMLInputElement;typeInto(address,'上海松江备料区');
+ return{address,save:async()=>{let next:HTMLElement|null;for(let i=0;i<8&&(next=queryByRole(host,'button',{name:'下一步',exact:true}));i++)await click(next);await click(getByRole(host,'button',{name:'确认保存',exact:true}));}};
+}
+it('preserves a warehouse address draft and refuses an updated warehouse source',async()=>{
+ const{address,save}=await editWarehouseSource();store.state=structuredClone(store.state);store.state!.fulfillment.warehouses[0].name='松江周转仓';store.workspace={id:'workspace',revision:8};render();await save();
+ expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('仓库资料已更新，请重新打开后核对');expect(host.textContent).toContain('上海松江备料区');
+});
+it('rechecks the warehouse custodian before saving an older form',async()=>{
+ const{save}=await editWarehouseSource();store.state=structuredClone(store.state);Object.assign(store.state!.fulfillment.warehouses[0],{custodian:'supplier',supplierId:'supplier'});store.workspace={id:'workspace',revision:8};render();await save();
+ expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('仓库资料已更新，请重新打开后核对');
+});
+it('allows unrelated workspace updates while binding a warehouse save to the checked revision',async()=>{
+ const{save}=await editWarehouseSource();store.state=structuredClone(store.state);store.workspace={id:'workspace',revision:8};render();await save();
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.claimInventory.warehouse.save',payload:expect.objectContaining({id:'wh',name:'松江仓',address:'上海松江备料区'})}),{expectedRevision:8});
+});
