@@ -2,7 +2,7 @@
 import React,{act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {getByRole,getAllByRole,queryByRole,within} from '@testing-library/dom';
+import {getByRole,getAllByRole,getByLabelText,queryByRole,within} from '@testing-library/dom';
 import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentQcTask} from '../../../../../server/src/shared/mistFulfillment';
@@ -210,7 +210,7 @@ it('lets the current QC transfer to a named member and reschedule with reasons',
   dialog=getByRole(document.body,'dialog');
   typeInto(getByRole(dialog,'textbox',{name:/改期原因/}) as HTMLTextAreaElement,'工厂延期');
   await click(getByRole(dialog,'button',{name:'改期'}));
-  expect(store.run).toHaveBeenLastCalledWith(expect.objectContaining({type:'fulfillment.qc.reschedule',payload:expect.objectContaining({id:'mine',reason:'工厂延期'})}));
+  expect(store.run).toHaveBeenLastCalledWith(expect.objectContaining({type:'fulfillment.qc.reschedule',payload:expect.objectContaining({id:'mine',reason:'工厂延期'})}),{expectedRevision:0});
 });
 
 it('tells QC the production size plan is missing and blocks the report instead of failing on submit',async()=>{
@@ -414,4 +414,13 @@ it('keeps a genuine empty QC workspace actionable after reading succeeds',()=>{
 it('keeps the patrol editor above the QC detail when the viewport narrows',async()=>{
  const previous=window.matchMedia,listeners=new Set<()=>void>(),media={matches:false,addEventListener:(_type:string,fn:()=>void)=>listeners.add(fn),removeEventListener:(_type:string,fn:()=>void)=>listeners.delete(fn)};Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:()=>media});
  try{store.state!.fulfillment.qcTasks.push(task('layer',{code:'QC-LAYER'}));render('layer','list');await click(getByRole(host,'button',{name:'新建巡检',exact:true}));act(()=>{media.matches=true;listeners.forEach(fn=>fn());});expect(getAllByRole(document.body,'dialog')).toHaveLength(1);expect(getByRole(document.body,'dialog',{name:'新建巡检'})).toBeTruthy();expect(store.run).not.toHaveBeenCalled();}finally{Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:previous});}
+});
+async function oldScheduleDraft(){
+ store.workspace={id:'space',revision:7};store.state!.fulfillment.qcTasks.push(task('schedule-race',{state:'working',assignee:'QC甲',assigneeId:'qc-a',due:'2026-12-20'}));render('schedule-race');await click(getByRole(host,'button',{name:'改期',exact:true}));const d=getByRole(document.body,'dialog',{name:'改期 SCHEDULE-RACE',exact:true});typeInto(getByLabelText(d,'新检查日',{exact:true})as HTMLInputElement,'2026-12-18');typeInto(getByRole(d,'textbox',{name:'改期原因',exact:true})as HTMLTextAreaElement,'按现场安排提前检查，原记录保留。');return d;
+}
+it('refuses an older QC reschedule after its planned day changed without losing the draft',async()=>{
+ const d=await oldScheduleDraft();store.state=structuredClone(store.state);store.state!.fulfillment.qcTasks.find(t=>t.id==='schedule-race')!.due='2026-12-19';store.workspace={id:'space',revision:8};render('schedule-race');await click(getByRole(d,'button',{name:'改期',exact:true}));expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('QC任务已更新，请重新打开后核对');expect((getByRole(d,'textbox',{name:'改期原因',exact:true})as HTMLTextAreaElement).value).toContain('原记录保留');
+});
+it('allows a QC reschedule after unrelated synchronization using the checked version',async()=>{
+ const d=await oldScheduleDraft();store.state=structuredClone(store.state);store.workspace={id:'space',revision:8};render('schedule-race');await click(getByRole(d,'button',{name:'改期',exact:true}));expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.reschedule',payload:expect.objectContaining({due:'2026-12-18'})}),{expectedRevision:8});
 });
