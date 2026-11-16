@@ -43,6 +43,14 @@ export function relationContacts(state: MistState | null, r: MarketRelation): Ma
 export const splitRelationAliases = (value: string) => value.split(/[、\n]/).map(x => x.trim()).filter(Boolean);
 // Compare the fields this editor can replace, not contacts or attachments maintained elsewhere.
 const profileSource = (r: MarketRelation) => stableJson({ id: r.id, name: r.name, category: r.category, customerId: r.customerId || '', supplierId: r.supplierId || '', country: r.country, address: r.address, aliases: r.aliases, note: r.note, status: r.status });
+const contactSource = (c: MarketRelation['contacts'][number]) => stableJson({ id: c.id, name: c.name, role: c.role || '', email: c.email || '', phone: c.phone || '', primary: !!c.primary });
+function contactContext(state: MistState | null, kind: 'relation' | 'supplier', id: string) {
+  const parent = kind === 'supplier' ? state?.market.suppliers.find(row => row.id === id) : state?.market.relations.find(row => row.id === id);
+  if (!parent) return null;
+  const relation = kind === 'relation' ? parent as MarketRelation : undefined;
+  return { identity: stableJson({ id: parent.id, name: parent.name, status: parent.status, category: relation?.category, customerId: relation?.customerId || '', supplierId: relation?.supplierId || '' }), contacts: relation ? relationContacts(state, relation) : parent.contacts };
+}
+const primarySource = (contacts: MarketRelation['contacts']) => stableJson(contacts.filter(c => c.primary).map(c => c.id).sort());
 export type RelationWorkbenchProps = { attachments: (r: MarketRelation, locked: boolean) => React.ReactNode; history: (id: string) => React.ReactNode };
 
 export function RelationWorkbench({ attachments, history }: RelationWorkbenchProps) {
@@ -115,12 +123,23 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
     initialValues: { reason: '' }, fields: [{ key: 'reason', label: '撤销原因', type: 'textarea', required: true }],
     submit: v => run({ type: 'market.relation.unlinkSupplier', payload: { id: r.id, reason: String(v.reason ?? '') } }),
   });
-  const contactSpec = (kind: 'relation' | 'supplier', parentId: string, owner: string, c?: MarketRelation['contacts'][number]): ModuleEditorSpec => ({
+  const contactSpec = (kind: 'relation' | 'supplier', parentId: string, owner: string, c?: MarketRelation['contacts'][number]): ModuleEditorSpec => {
+    const original = contactContext(state, kind, parentId), source = c ? contactSource(c) : '', originalPrimary = primarySource(original?.contacts || []), workspaceId = workspace?.id, actorId = session.user?.id;
+    return {
     title: c ? `编辑联系人 ${c.name}` : `添加 ${owner} 联系人`, submitLabel: '保存', initialValues: c ? { ...c } : { name: '', role: '', email: '', phone: '', primary: false },
     // mar31：编辑时可勾选删除该联系人（后端 market.contact.delete）。
     fields: [{ key: 'name', label: '联系人姓名', required: true }, { key: 'role', label: '岗位' }, { key: 'email', label: '邮箱' }, { key: 'phone', label: '电话' }, { key: 'primary', label: '主联系人', type: 'checkbox' }, ...(c ? [{ key: 'remove', label: '删除该联系人', type: 'checkbox' as const }] : [])],
-    submit: v => c && v.remove === true ? run({ type: 'market.contact.delete', payload: { kind, parentId, id: c.id } }) : run({ type: 'market.contact.save', payload: { kind, parentId, id: c?.id, name: String(v.name ?? ''), role: String(v.role ?? ''), email: String(v.email ?? ''), phone: String(v.phone ?? ''), primary: !!v.primary } }),
-  });
+    submit: async v => {
+      const checked = live.current.work, context = contactContext(checked.state, kind, parentId), current = c ? context?.contacts.find(row => row.id === c.id) : undefined, revision = checked.workspace?.revision;
+      if (!routeScope.isCurrent() || checked.workspace?.id !== workspaceId || live.current.session.user?.id !== actorId) throw new Error('当前账号或公司已变化，请重新打开联系人');
+      if (!context || !original || context.identity !== original.identity || c && (!current || contactSource(current) !== source)) throw new Error('联系人资料已更新，请重新打开后核对');
+      if (v.remove !== true && v.primary && primarySource(context.contacts) !== originalPrimary) throw new Error('主联系人已更新，请重新打开后核对');
+      if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 0) throw new Error('联系人资料不可用，请重新读取后核对');
+      return c && v.remove === true
+        ? checked.run({ type: 'market.contact.delete', payload: { kind, parentId, id: c.id } }, { expectedRevision: revision })
+        : checked.run({ type: 'market.contact.save', payload: { kind, parentId, id: c?.id, name: String(v.name ?? ''), role: String(v.role ?? ''), email: String(v.email ?? ''), phone: String(v.phone ?? ''), primary: !!v.primary } }, { expectedRevision: revision });
+    },
+  }; };
   const handoverSpec = (r: MarketRelation): RelationEditorSpec | null => {
     const c = state?.customers.find(x => x.id === r.customerId); if (!state || !c) return null;
     const scope = customerHandoverScope(state, c.id), lockedOrders = scope.orders.filter(o => scope.locked(o)), movable = scope.orders.filter(o => !scope.locked(o));

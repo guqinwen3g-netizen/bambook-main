@@ -63,6 +63,43 @@ describe('relation profile concurrency', () => {
   });
 });
 
+describe('relation contact concurrency', () => {
+  const contact = { id: 'contact-a', name: '周诚', role: '经理', email: 'zhou@example.invalid', phone: '0000', primary: false };
+  function agent() {
+    const relation = { ...named('Cedar'), id: 'agent-contact-fixture', name: '远帆物流', category: 'Agent' as const, customerId: '', supplierId: '', contacts: [{ ...contact }] };
+    state.market.relations.push(relation); bridge.current.workspace = { id: 'workspace', revision: 7 }; return relation;
+  }
+  async function editContact(name = contact.name) { const row = [...document.querySelectorAll('.mist-quote-line')].find(row => row.textContent?.includes(name))!; await act(async () => (row.querySelector('button') as HTMLButtonElement).click()); await fillProfile('岗位', '单证经理'); }
+  it.each(['name', 'role', 'email', 'phone', 'primary', 'removed'])('refuses an updated or removed contact without dropping the draft: %s', async field => {
+    const relation = agent(); await mount(relation.id); await editContact();
+    const changed = { ...relation, contacts: field === 'removed' ? [] : [{ ...contact, [field]: field === 'primary' ? true : '同事更新' }] };
+    state = { ...state, market: { ...state.market, relations: state.market.relations.map(r => r.id === relation.id ? changed : r) } } as MistState;
+    bridge.current = { ...bridge.current, state, workspace: { id: 'workspace', revision: 8 } }; await repaint(relation.id); await click('保存');
+    expect(bridge.current.run).not.toHaveBeenCalled(); expect(document.body.textContent).toContain('联系人资料已更新，请重新打开后核对'); expect((document.querySelector('[aria-label="岗位"]') as HTMLInputElement).value).toBe('单证经理');
+  });
+  it('does not delete a contact updated by a colleague after this deletion form opened', async () => {
+    const relation = agent(); await mount(relation.id); await editContact(); await act(async () => (document.querySelectorAll('input[type="checkbox"]')[1] as HTMLInputElement).click());
+    state = { ...state, market: { ...state.market, relations: state.market.relations.map(r => r.id === relation.id ? { ...r, contacts: [{ ...contact, phone: '0001' }] } : r) } }; bridge.current = { ...bridge.current, state, workspace: { id: 'workspace', revision: 8 } }; await repaint(relation.id); await click('保存'); expect(bridge.current.run).not.toHaveBeenCalled();
+  });
+  it('reads linked customer contact fields from the canonical customer collection', async () => {
+    const relation = named('Cedar'), c = state.contacts.find(c => c.customerId === relation.customerId)!; bridge.current.workspace = { id: 'workspace', revision: 7 }; await mount(relation.id); await editContact(c.name);
+    state = { ...state, contacts: state.contacts.map(row => row.id === c.id ? { ...row, phone: '0001' } : row) }; bridge.current = { ...bridge.current, state, workspace: { id: 'workspace', revision: 8 } }; await repaint(relation.id); await click('保存'); expect(bridge.current.run).not.toHaveBeenCalled(); expect(document.body.textContent).toContain('联系人资料已更新，请重新打开后核对');
+  });
+  it('checks the independent supplier contact source in a dual-identity organization', async () => {
+    const relation = named('博远'), supplier = state.market.suppliers.find(s => s.id === relation.supplierId)!, c = supplier.contacts[0]; bridge.current.workspace = { id: 'workspace', revision: 7 }; await mount(relation.id); await editContact(c.name);
+    state = { ...state, market: { ...state.market, suppliers: state.market.suppliers.map(row => row.id === supplier.id ? { ...row, contacts: row.contacts.map(x => x.id === c.id ? { ...x, phone: '0001' } : x) } : row) } }; bridge.current = { ...bridge.current, state, workspace: { id: 'workspace', revision: 8 } }; await repaint(relation.id); await click('保存'); expect(bridge.current.run).not.toHaveBeenCalled();
+  });
+  it('preserves unrelated profile and contact changes and submits the checked current revision', async () => {
+    const relation = agent(); await mount(relation.id); await editContact();
+    state = { ...state, market: { ...state.market, relations: state.market.relations.map(r => r.id === relation.id ? { ...r, note: '同事备注', fileIds: ['peer-file'], contacts: [...r.contacts, { ...contact, id: 'contact-b', name: '李晴' }] } : r) } }; bridge.current = { ...bridge.current, state, workspace: { id: 'workspace', revision: 9 } }; await repaint(relation.id); await click('保存');
+    expect(bridge.current.run).toHaveBeenCalledWith({ type: 'market.contact.save', payload: { kind: 'relation', parentId: relation.id, ...contact, role: '单证经理' } }, { expectedRevision: 9 });
+  });
+  it('requires a fresh view before replacing a primary contact assigned by a colleague', async () => {
+    const relation = agent(); relation.contacts.push({ ...contact, id: 'contact-b', name: '李晴' }); await mount(relation.id); await editContact(); await act(async () => (document.querySelector('input[type="checkbox"]') as HTMLInputElement).click());
+    state = { ...state, market: { ...state.market, relations: state.market.relations.map(r => r.id === relation.id ? { ...r, contacts: r.contacts.map(c => c.id === 'contact-b' ? { ...c, primary: true } : c) } : r) } }; bridge.current = { ...bridge.current, state, workspace: { id: 'workspace', revision: 8 } }; await repaint(relation.id); await click('保存'); expect(bridge.current.run).not.toHaveBeenCalled(); expect(document.body.textContent).toContain('主联系人已更新，请重新打开后核对');
+  });
+});
+
 
 describe('关系智库', () => {
   it('同一组织同时是客户和供应商；冻结与在手业务由记录推出', () => {
