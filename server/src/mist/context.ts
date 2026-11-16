@@ -6,9 +6,31 @@ import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../auth/tokenHel
 import { hasScope } from '../auth/permissionService';
 import { createApprovalRoutingService } from '../approvals/approvalRoutingService';
 import type { PaymentTierAuthority } from '../shared/mistPayables';
-/** Approval authority is rebuilt in the same DB transaction as the business command. */
+/** Reload a proposed receiver's current company permissions; the caller also checks source visibility. */
+export async function mistQcTransferAuthority(db:any,actor:TokenPayload,eligibleIds:readonly string[],id?:string){
+  const allowed={garment:[] as string[],fabric:[] as string[]};
+  const result:{qcAssigneeIds:typeof allowed;actor?:TokenPayload}={qcAssigneeIds:allowed};
+  if(!id||!eligibleIds.includes(id))return result;
+  let fresh:TokenPayload;
+  if((actor as TokenPayload&{mistLocal?:boolean}).mistLocal===true&&process.env.MIST_LOCAL_WORKSPACE==='1'&&process.env.NODE_ENV!=='production'){
+    // Resolve this local test identity only when its runtime is explicitly enabled.
+    const{MIST_LOCAL_PROFILES,mistLocalPublicUser}=await import('./local');
+    if(!MIST_LOCAL_PROFILES.some(profile=>profile.id===id))return result;
+    const user=mistLocalPublicUser(id);
+    fresh={...user,userId:id,roles:user.roles.includes('owner')?['owner']:[],authorizationLoaded:true};
+  }else{
+    const user=await loadUserWithRoles(db,id);if(!user||user.status!=='active'||user.deletedAt)return result;
+    try{fresh=await buildLoadedAuthTokenPayload(db,user,actor.companyId??null);}catch(error){if(error instanceof CompanyAccessError)return result;throw error;}
+  }
+  for(const domain of ['garment','fabric'] as const)if(hasScope(fresh,'qc:read')&&hasScope(fresh,`qc:${domain}_chain:write`))allowed[domain].push(id);
+  result.actor=fresh;
+  return result;
+}
+
+/** Execution authority is rebuilt in the same DB transaction as the business command. */
 export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:string,eligibleReviewerIds?:readonly string[],options?:{orderMain?:boolean;submittedOrderMain?:SubmittedOrderMain}):Promise<NonNullable<MistContext['authority']>>{
   const authority:NonNullable<MistContext['authority']>={supplier:{}};
+  if(kind==='fulfillment.qc.transfer')return authority;
   // 风险处理权：按当前账号此刻的岗位权限重建（risk:write 不限来源；否则只认本人客户/订单 + 现有订单写/客户档案写权限）。
   if(kind.startsWith('platform.risk.'))authority.risk={all:hasScope(actor,'risk:write' as any),orders:hasScope(actor,'orders:write' as any),customers:hasScope(actor,'relations:write' as any)};
   if((actor as any).mistLocal===true && process.env.MIST_LOCAL_WORKSPACE==='1' && process.env.NODE_ENV!=='production'){

@@ -1577,6 +1577,9 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 const to = resolveMember(ctx, p.assigneeId, '接收QC');
                 if (to.id === t.assigneeId)
                     fail('接收人与当前QC相同');
+                const receivers=ctx.authority?.qcAssigneeIds?.[t.domain];
+                if(!receivers)fail('无法核对接收QC权限，请刷新后重试','PRECONDITION');
+                if(!receivers?.includes(to.id))throw new MistCommandError('FORBIDDEN',`接收人不具备${t.domain==='garment'?'成衣':'面料'}QC权限`,403);
                 const from = t.assignee || '待认领';
                 t.assignee = to.name;
                 t.assigneeId = to.id;

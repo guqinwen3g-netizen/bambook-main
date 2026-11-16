@@ -3,7 +3,7 @@ const mocks=vi.hoisted(()=>({resolve:vi.fn(),dept:vi.fn(),main:vi.fn(),source:vi
 vi.mock('../approvals/approvalRoutingService',()=>({createApprovalRoutingService:(options:any)=>({resolveReviewerByDepartment:mocks.dept,resolveOrderMainReviewers:mocks.main,resolveRequesterDepartmentSnapshot:mocks.source,resolveSubmittedOrderMainReviewers:mocks.submitted,resolveClaimLeader:mocks.claim,...mocks.routes.get(JSON.stringify(options?.eligibleReviewerIds))})}));
 vi.mock('../orders/orderMainApprovalService',()=>({createOrderMainApprovalService:()=>({resolveEligibleReviewerIds:mocks.resolve})}));
 vi.mock('../auth/tokenHelpers',()=>({loadUserWithRoles:async(_db:any,id:string)=>mocks.users.get(id)||null,buildLoadedAuthTokenPayload:mocks.build}));
-import {mistApprovalAuthority} from './context';
+import {mistApprovalAuthority,mistQcTransferAuthority} from './context';
 import {CompanyAccessError} from '../auth/companyAccess';
 const actor={userId:'owner',roles:[],permissions:['orders:write'],departmentIds:[]} as any;
 beforeEach(()=>{mocks.resolve.mockReset();mocks.dept.mockReset();mocks.main.mockReset();mocks.main.mockRejectedValue(Object.assign(new Error('none'),{code:'NO_REVIEWER_RESOLVED'}));mocks.source.mockReset();mocks.source.mockResolvedValue({departmentSnapshotId:'current-department'});mocks.submitted.mockReset();mocks.submitted.mockRejectedValue(Object.assign(new Error('none'),{code:'NO_REVIEWER_RESOLVED'}));mocks.claim.mockReset();mocks.claim.mockRejectedValue(Object.assign(new Error('none'),{code:'NO_REVIEWER_RESOLVED'}));mocks.users.clear();mocks.routes.clear();mocks.build.mockReset();mocks.build.mockImplementation(async(_db:any,user:any,companyId?:string)=>({userId:user.id,companyId,roles:[],departmentIds:[],permissions:user.permissions,globalBusinessScope:user.globalBusinessScope,businessAttributes:user.businessAttributes,authorizationLoaded:true}));vi.stubEnv('MIST_LOCAL_WORKSPACE','0');vi.stubEnv('NODE_ENV','test');});
@@ -272,4 +272,40 @@ it('keeps procurement fallback within current members, matching business domain 
  expect(mocks.build.mock.calls.some(call=>call[1].id==='foreign')).toBe(false);
  mocks.users.get('leader').permissions=[];
  expect((await mistApprovalAuthority(...args)).supplier['supplierCommitment.approvers.purchase.garment']?.userIds).toEqual([]);
+});
+
+describe('current professional QC transfer recipient authority',()=>{
+ const run=(id='receiver',members:readonly string[]=['receiver'])=>mistQcTransferAuthority({}, {...actor,companyId:'company-a'},members,id);
+ it.each([
+  [['qc:read','qc:garment_chain:write'],{garment:['receiver'],fabric:[]}],
+  [['qc:read','qc:fabric_chain:write'],{garment:[],fabric:['receiver']}],
+  [['qc:read','qc:garment_chain:write','qc:fabric_chain:write'],{garment:['receiver'],fabric:['receiver']}],
+  [['qc:read','qc:write'],{garment:[],fabric:[]}],
+  [['qc:garment_chain:write'],{garment:[],fabric:[]}],
+ ] as const)('uses the receiver current professional scopes %j',async(permissions,expected)=>{
+  mocks.users.set('receiver',{id:'receiver',status:'active',permissions:[...permissions]});expect((await run()).qcAssigneeIds).toEqual(expected);expect(mocks.build).toHaveBeenCalledWith(expect.anything(),expect.objectContaining({id:'receiver'}),'company-a');expect(mocks.main).not.toHaveBeenCalled();
+ });
+ it.each([{status:'disabled'},{status:'active',deletedAt:new Date()}])('rejects unavailable receivers %j',async flags=>{
+  mocks.users.set('receiver',{id:'receiver',permissions:['qc:read','qc:garment_chain:write'],...flags});expect((await run()).qcAssigneeIds).toEqual({garment:[],fabric:[]});expect(mocks.build).not.toHaveBeenCalled();
+ });
+ it('does not load a guessed nonmember or missing receiver',async()=>{
+  expect((await run('foreign',['receiver'])).qcAssigneeIds).toEqual({garment:[],fabric:[]});expect((await mistQcTransferAuthority({},actor,['receiver'])).qcAssigneeIds).toEqual({garment:[],fabric:[]});expect(mocks.build).not.toHaveBeenCalled();
+ });
+ it('rechecks revoked professional scope on the next transfer instead of using sender permissions',async()=>{
+  mocks.users.set('receiver',{id:'receiver',status:'active',permissions:['qc:read','qc:garment_chain:write']});expect((await run()).qcAssigneeIds?.garment).toEqual(['receiver']);mocks.users.get('receiver').permissions=['qc:write'];expect((await run()).qcAssigneeIds?.garment).toEqual([]);
+ });
+ it('rejects a receiver who lost the selected company context',async()=>{
+  mocks.users.set('receiver',{id:'receiver',status:'active',permissions:['qc:read','qc:garment_chain:write']});mocks.build.mockRejectedValue(new CompanyAccessError('COMPANY_ACCESS_DENIED','not this company'));expect((await run()).qcAssigneeIds).toEqual({garment:[],fabric:[]});
+ });
+ it('propagates an authority storage failure without granting eligibility',async()=>{
+  mocks.users.set('receiver',{id:'receiver',status:'active',permissions:['qc:read','qc:garment_chain:write']});mocks.build.mockRejectedValue(new Error('authority unavailable'));await expect(run()).rejects.toThrow('authority unavailable');
+ });
+ it.each([
+  ['demo-qc',{garment:['demo-qc'],fabric:['demo-qc']}],['demo-reviewer',{garment:['demo-reviewer'],fabric:['demo-reviewer']}],['demo-sales',{garment:[],fabric:[]}],['local-operator',{garment:['local-operator'],fabric:['local-operator']}],
+ ] as const)('uses only an explicitly enabled local professional profile %s',async(id,expected)=>{
+  vi.stubEnv('MIST_LOCAL_WORKSPACE','1');expect((await mistQcTransferAuthority({}, {...actor,mistLocal:true} as any,[id],id)).qcAssigneeIds).toEqual(expected);expect(mocks.build).not.toHaveBeenCalled();
+ });
+ it('cannot turn a normal production account into a local QC by setting the local flag',async()=>{
+  vi.stubEnv('MIST_LOCAL_WORKSPACE','1');vi.stubEnv('NODE_ENV','production');mocks.users.set('demo-qc',{id:'demo-qc',status:'active',permissions:[]});const result=await mistQcTransferAuthority({}, {...actor,mistLocal:true,companyId:'company-a'} as any,['demo-qc'],'demo-qc');expect(result.qcAssigneeIds).toEqual({garment:[],fabric:[]});expect(mocks.build).toHaveBeenCalled();
+ });
 });

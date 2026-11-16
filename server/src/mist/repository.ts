@@ -9,7 +9,7 @@ import type { TokenPayload } from '../auth/service';
 import type { MistState, MistCommand, MistContext } from '../shared/mistWorkspace';
 import { freshMistAuthority, type FreshAuthority } from './authority';
 import { fail, MistApiError } from './errors';
-import { mistApprovalAuthority } from './context';
+import { mistApprovalAuthority, mistQcTransferAuthority } from './context';
 import {parseOrderMainApprovalSource,type SubmittedOrderMain} from '../shared/mistOrderApprovalSource';
 import {CompanyAccessError} from '../auth/companyAccess';
 import type { MistReviewTask } from '../shared/mistReview';
@@ -1014,7 +1014,7 @@ export class MistRepository {
           if (type === 'notification.readAll') context.visibleNotificationIds = visible.notifications.map(item => item.id);
         }
         if(input.command) {
-          const kind=REVIEW_KIND_BY_COMMAND.get(input.command.type),payload=input.command.payload as {id?:unknown;escalationId?:unknown}|undefined;
+          const kind=REVIEW_KIND_BY_COMMAND.get(input.command.type),payload=input.command.payload as {id?:unknown;escalationId?:unknown;assigneeId?:unknown}|undefined;
           const reviews=kind?this.reviews(row.state):[];
           const matches=(task:MistReviewTask)=>task.kind===kind&&(kind==='risk'?task.entityId===payload?.escalationId&&task.target.id===payload?.id:task.entityId===payload?.id);
           const review=reviews.find(task=>task.status==='pending'&&matches(task))??reviews.find(matches);
@@ -1022,6 +1022,16 @@ export class MistRepository {
           const submittedOrderMain=orderMain&&review?this.submittedMainReview(row,review):undefined;
           const subject=submittedOrderMain?actor:review?await this.reviewSubject(db,actor,review.requesterId):actor;
           context.authority = await mistApprovalAuthority(db,subject,input.command.type,candidateIds(row),{orderMain,submittedOrderMain});
+          if(input.command.type==='fulfillment.qc.transfer'){
+            const recipient=await mistQcTransferAuthority(db,actor,candidateIds(row),typeof payload?.assigneeId==='string'?payload.assigneeId:undefined);
+            context.authority.qcAssigneeIds=recipient.qcAssigneeIds;
+            const task=row.state.fulfillment.qcTasks.find(task=>task.id===payload?.id);
+            if(task&&recipient.actor&&recipient.qcAssigneeIds[task.domain].includes(recipient.actor.userId)){
+              const receiverScope=await companyDataScope(db,row,recipient.actor);
+              const visible=projectState(row.state,recipient.actor,this.emptyState(recipient.actor),fileOwner(row),receiverScope,this.filePrivacy(row),row.id).state;
+              if(!knownCommandSourcesVisible(row.state,visible)(input.command))fail('FORBIDDEN','接收QC无权访问本任务来源',403);
+            }
+          }
         }
         if(input.command && (MIST_MEMBER_DIRECTORY_COMMANDS.includes(input.command.type) || input.command.type === 'seal.save')) context.members = await this.memberDirectory(db,row,actor);
         if(input.command?.type?.startsWith('teamScope.')) context.teams = await companyTeams(db,row.companyId);

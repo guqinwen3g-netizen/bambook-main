@@ -1,0 +1,46 @@
+import {afterAll,beforeAll,beforeEach,describe,expect,it,vi} from 'vitest';
+import {randomUUID} from 'node:crypto';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import request from 'supertest';
+import {PrismaClient} from '@prisma/client';
+import {createMistServer} from './server';
+import {createAuthService} from '../auth/service';
+import {buildLoadedAuthTokenPayload,loadUserWithRoles} from '../auth/tokenHelpers';
+import {provisionCompanyRoles,companyRoleId} from '../platform/companyProvisioning';
+import {SYSTEM_ROLE_IDS} from '../_shared/rolePermissionMatrix';
+import {createMistState} from '../shared/mistWorkspace';
+
+const url=process.env.MIST_PG_CONFLICT_TEST_URL;
+describe.skipIf(!url)('QC transfers use current company professional grants on PostgreSQL',()=>{
+ const companyId=randomUUID(),foreignId=randomUUID(),dept=randomUUID(),rootDept=randomUUID(),key=randomUUID();
+ const sender='qc-sender-'+key,receiver='qc-receiver-'+key,sales='qc-sales-'+key,fabric='qc-fabric-'+key,inactive='qc-inactive-'+key,foreign='qc-foreign-'+key;
+ const users=[sender,receiver,sales,fabric,inactive,foreign],garmentRole='qc-garment-'+key,fabricRole='qc-fabric-role-'+key;
+ let db:PrismaClient,app:ReturnType<typeof createMistServer>,directory:string,wid:string,taskId:string,garmentPermission:string;const tokens:Record<string,string>={},workspaces:string[]=[];
+ beforeAll(async()=>{
+  const target=new URL(url!);if(!['127.0.0.1','localhost'].includes(target.hostname)||!/^\/bambook_(account|acceptance|test)/.test(target.pathname))throw Error('A dedicated local acceptance database is required');
+  directory=await mkdtemp(path.join(tmpdir(),'qc-transfer-'));vi.stubEnv('NODE_ENV','test');vi.stubEnv('MIST_LOCAL_WORKSPACE','0');vi.stubEnv('MIST_FILES_DIR',path.join(directory,'files'));vi.stubEnv('MIST_MAIL_CREDENTIAL_DIR',path.join(directory,'mail'));vi.stubEnv('BAMBOOK_AI_SUBSCRIPTION_DIR',path.join(directory,'ai'));vi.stubEnv('BAMBOOK_MARKET_DIR',path.join(directory,'market'));
+  db=new PrismaClient({datasourceUrl:url});for(const id of[companyId,foreignId])await db.company.create({data:{id,slug:id,name:'QC company '+id}});await db.department.create({data:{id:rootDept,companyId,name:'Company'}});await db.department.create({data:{id:dept,companyId,parentId:rootDept,name:'Quality',metadata:{businessAttributes:['garment_business','fabric_business','garment_qc','fabric_qc']}}});await db.$transaction(tx=>provisionCompanyRoles(tx,companyId));
+  for(const scope of['qc:garment_chain:write','qc:fabric_chain:write']){const p=await db.permission.findFirstOrThrow({where:{scope}}),roleId=companyRoleId(SYSTEM_ROLE_IDS.QC,companyId);if(!await db.rolePermission.findFirst({where:{roleId,permissionId:p.id}}))await db.rolePermission.create({data:{id:randomUUID(),roleId,permissionId:p.id}});}
+  for(const[id,scopes]of[[garmentRole,['qc:read','qc:garment_chain:write','orders:read','production:read']],[fabricRole,['qc:read','qc:fabric_chain:write','orders:read']]]as const){await db.role.create({data:{id,companyId,name:id}});for(const scope of scopes){const p=await db.permission.findFirstOrThrow({where:{scope}});await db.rolePermission.create({data:{id:randomUUID(),roleId:id,permissionId:p.id}});if(scope==='qc:garment_chain:write')garmentPermission=p.id;}}
+  for(const id of users){await db.userAccount.create({data:{id,displayName:id,email:id+'@example.invalid',status:id===inactive?'disabled':'active',...(id===foreign?{}:{primaryDeptId:dept})}});await db.companyMember.create({data:{companyId:id===foreign?foreignId:companyId,userId:id}});if(id!==foreign)await db.userRole.create({data:{id:randomUUID(),userId:id,departmentId:dept,roleId:id===receiver?garmentRole:id===fabric?fabricRole:id===sales?companyRoleId(SYSTEM_ROLE_IDS.SALES,companyId):companyRoleId(SYSTEM_ROLE_IDS.QC,companyId)}});}
+  await db.department.update({where:{id:dept},data:{headId:receiver}});
+  const qualified=await buildLoadedAuthTokenPayload(db,(await loadUserWithRoles(db,sender))!,companyId);expect(qualified.permissions).toContain('qc:garment_chain:write');
+  const auth=createAuthService();for(const id of[sender,receiver])tokens[id]=auth.signToken({userId:id,companyId,roles:[],permissions:[],departmentIds:[dept]});app=createMistServer(db,{host:'127.0.0.1'});
+ });
+ beforeEach(async()=>{
+  if(workspaces.length){await db.mistCommandReceipt.deleteMany({where:{workspaceId:{in:workspaces}}});await db.mistWorkspace.deleteMany({where:{id:{in:workspaces}}});workspaces.length=0;}
+  wid=randomUUID();taskId=randomUUID();workspaces.push(wid);const now=new Date().toISOString(),state=createMistState({id:randomUUID,now,actorName:'Fixture'},'demo'),line=state.orderLines.find(l=>state.orders.find(o=>o.id===l.orderId)?.type==='garment')!,order=state.orders.find(o=>o.id===line.orderId)!;order.ownerId=sales;state.memberIds=[receiver,sales,fabric,inactive];state.members=[];state.reviewerIds=[];
+  state.fulfillment.qcTasks=[{id:taskId,code:'QC-TRANSFER',domain:'garment',kind:'production',state:'working',source:{kind:'orderLine',orderId:order.id,lineId:line.id},factory:'Factory',location:'Site',contact:'Contact',due:now.slice(0,10),createdAt:now,requestedBy:'Sender',requestedById:sender,assigneeId:sender,assignee:'Sender',reportIds:[]}];state.fulfillment.qcReports=[];await db.mistWorkspace.create({data:{id:wid,companyId,ownerId:sender,slug:'qc-transfer-'+wid,name:'QC handover',state:state as any}});
+ });
+ afterAll(async()=>{if(db){await db.mistCommandReceipt.deleteMany({where:{workspaceId:{in:workspaces}}});await db.mistWorkspace.deleteMany({where:{id:{in:workspaces}}});await db.auditLog.deleteMany({where:{OR:[{companyId:{in:[companyId,foreignId]}},{actorId:{in:users}}]}});await db.userRole.deleteMany({where:{userId:{in:users}}});await db.rolePermission.deleteMany({where:{role:{companyId}}});await db.role.deleteMany({where:{companyId}});await db.companyMember.deleteMany({where:{companyId:{in:[companyId,foreignId]}}});await db.userAccount.deleteMany({where:{id:{in:users}}});await db.department.deleteMany({where:{companyId}});await db.company.deleteMany({where:{id:{in:[companyId,foreignId]}}});await db.$disconnect();}vi.unstubAllEnvs();if(directory)await rm(directory,{recursive:true,force:true});});
+ const raw=()=>db.mistWorkspace.findUniqueOrThrow({where:{id:wid}});
+ const transfer=async(to:string,actor=sender,extra:Record<string,unknown>={})=>{const row=await raw();return request(app).post('/api/mist/workspaces/'+wid+'/commands').set('Authorization','Bearer '+tokens[actor]).send({requestId:randomUUID(),expectedRevision:row.revision,command:{type:'fulfillment.qc.transfer',payload:{id:taskId,domain:'garment',assigneeId:to,reason:'专业岗位交接',...extra}}});};
+ it.each([sales,fabric])('rejects a member without the matching professional scope %s',async id=>{const before=await raw();const r=await transfer(id);expect(r.status).toBe(403);expect(r.body.error.message).toContain('成衣QC权限');expect(await raw()).toEqual(before);});
+ it('accepts a qualified receiver and records its current identity and notification',async()=>{const r=await transfer(receiver);expect(r.status).toBe(200);const row=await raw(),state=row.state as any;expect(state.fulfillment.qcTasks.find((t:any)=>t.id===taskId)).toMatchObject({assigneeId:receiver,assignee:receiver,state:'working'});expect(state.notifications.some((n:any)=>n.recipientIds?.includes(receiver))).toBe(true);});
+ it('rechecks revoked scope using current grants even with the same cached login',async()=>{expect((await transfer(receiver)).status).toBe(200);expect((await transfer(sender,receiver)).status).toBe(200);await db.rolePermission.deleteMany({where:{roleId:garmentRole,permissionId:garmentPermission}});try{const before=await raw();expect((await transfer(receiver)).status).toBe(403);expect(await raw()).toEqual(before);}finally{await db.rolePermission.create({data:{id:randomUUID(),roleId:garmentRole,permissionId:garmentPermission}});}});
+ it.each([inactive,foreign])('rejects unavailable or other-company receivers without changing the task %s',async id=>{const before=await raw();const r=await transfer(id);expect([403,404,422]).toContain(r.status);expect(await raw()).toEqual(before);});
+ it('rejects a professional receiver whose current data scope cannot read the task source',async()=>{await db.department.update({where:{id:dept},data:{headId:null}});try{const before=await raw(),r=await transfer(receiver);expect(r.status).toBe(403);expect(r.body.error.message).toContain('无权访问本任务来源');expect(await raw()).toEqual(before);}finally{await db.department.update({where:{id:dept},data:{headId:receiver}});}});
+ it('does not accept receiver qualification claimed in the command payload',async()=>{const before=await raw();const r=await transfer(sales,sender,{qcAssigneeIds:{garment:[sales],fabric:[sales]},permissions:['qc:garment_chain:write']});expect(r.status).toBe(403);expect(await raw()).toEqual(before);});
+});
