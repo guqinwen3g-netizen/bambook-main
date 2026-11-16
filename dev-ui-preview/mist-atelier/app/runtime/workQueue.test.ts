@@ -9,6 +9,11 @@ let n = 0;
 const ctx = () => ({ id: () => `id-${++n}`, now: '2026-10-15T08:00:00.000Z', actorName: '当前员工' });
 const all = () => true;
 const base = () => { const state = createMistState(ctx(), 'empty'); state.fulfillment.qcTasks = []; state.fulfillment.shipments = []; return state; };
+it('keeps a generated account handover identity short without rewriting its original facts or free personal text',()=>{
+  const state=base(),title='接手 林舟 的业务（客户 1、商机 1）：核对在手订单、报价、未收款与供应商';
+  state.tasks=[{id:'account',title,kind:'account-handover',due:'2026-10-15',done:false,target:{view:'relations'},assigneeIds:['owner']},{id:'personal',title,kind:'personal',due:'2026-10-15',done:false,target:{view:'cockpit'},assigneeIds:['owner']}];
+  const rows=mistMyTasks(state,{me:'owner',canRead:all,can:all});expect(rows.find(row=>row.id==='account')?.title).toBe('接手业务 · 林舟');expect(rows.find(row=>row.id==='personal')?.title).toBe(title);expect(state.tasks[0].title).toBe(title);expect(rows.find(row=>row.id==='account')?.target).toEqual({view:'relations'});
+});
 describe('risk owner work', () => {
   const options: MistWorkOptions = { canRead: all, me: 'risk-owner', today: '2026-10-15' };
   const fixture = () => {

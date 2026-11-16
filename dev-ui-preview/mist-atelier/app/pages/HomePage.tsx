@@ -24,7 +24,7 @@ import { visibleMistNotifications } from '../runtime/notificationPreferences';
 import {readMistNotice} from '../runtime/agentTaskNotices';
 import { useOptionalMistReviews } from '../runtime/reviews';
 import { AgentProposalDialog } from './AgentProposalDialog';
-import { mistWorkQueue, mistMyTasks, isMyMistTask, mistEmailFollowUpTaskIds, type MistWorkOptions } from '../runtime/workQueue';
+import { mistWorkQueue, mistMyTasks, isMyMistTask, mistEmailFollowUpTaskIds, accountHandoverPresentation, type MistWorkOptions } from '../runtime/workQueue';
 import type { View } from '../../../../types';
 import { firstWorkspaceImage, useWorkspaceImage } from '../runtime/useWorkspaceImage';
 import { FailureNotice } from '../runtime/FailureNotice';
@@ -96,10 +96,19 @@ export function HomePage() {
     finally { if (alive.current && activeScope.current === current) operation.current = false; }
   };
   const emailTasks = mistEmailFollowUpTaskIds(state);
+  const handoverDetails=new Map<string,NonNullable<ReturnType<typeof accountHandoverPresentation>>>();
+  for(const task of state?.tasks||[]){const details=accountHandoverPresentation(task);if(details)handoverDetails.set(task.id,details);}
   const queueRows: TaskItem[] = queue.map(item => ({ id: item.id, when: item.when, urgent: item.urgent, title: item.title, meta: item.meta, status: { tone: item.urgent ? 'warn' : 'accent', label: item.sourceLabel } }));
+  const taskDeadlines=new Map<string,string>();
+  queue.forEach(item=>taskDeadlines.set(item.id,item.due||''));
+  tasks.forEach(item=>taskDeadlines.set(item.id,item.due||''));
   const taskRows: TaskItem[] = [...queueRows, ...tasks.map(task => ({ id: task.id, when: !task.due ? '未定期限' : task.due < today ? '已逾期' : task.due === today ? '今天' : task.due.slice(5), urgent: !!task.due && task.due <= today,
-    title: task.title, meta: [emailTasks.has(task.id) ? '邮件跟进' : task.kind === 'development' ? '开发事项' : task.kind === 'supervision' ? `主管督办${(task as { nudge?: { by: string } }).nudge?.by ? ' · ' + (task as { nudge?: { by: string } }).nudge!.by : ''}` : '工作事项', state?.devs.find(dev=>dev.id===task.target.id)?.code||state?.orders.find(order=>order.id===task.target.id)?.code, task.target.versionId ? state?.versions.find(v => v.id === task.target.versionId)?.label : undefined].filter(Boolean).join(' · '),
-    status: { tone: task.due && task.due < today ? 'warn' : 'accent', label: task.due && task.due < today ? '已逾期' : '待处理' } as TaskItem['status'] }))];
+    title: task.title, meta: [handoverDetails.get(task.id)?.scope,emailTasks.has(task.id) ? '邮件跟进' : task.kind === 'development' ? '开发事项' : task.kind === 'supervision' ? `主管督办${(task as { nudge?: { by: string } }).nudge?.by ? ' · ' + (task as { nudge?: { by: string } }).nudge!.by : ''}` : '工作事项', state?.devs.find(dev=>dev.id===task.target.id)?.code||state?.orders.find(order=>order.id===task.target.id)?.code, task.target.versionId ? state?.versions.find(v => v.id === task.target.versionId)?.label : undefined].filter(Boolean).join(' · '),
+    status: { tone: task.due && task.due < today ? 'warn' : 'accent', label: task.due && task.due < today ? '已逾期' : '待处理' } as TaskItem['status'] }))].sort((a,b)=>{
+      const name=String(a.title).localeCompare(String(b.title),'zh-CN');if(sort==='title')return name;
+      const first=taskDeadlines.get(a.id),second=taskDeadlines.get(b.id);
+      return first&&second?first.localeCompare(second)||name:first?-1:second?1:name;
+    });
   const outstanding = new Map<string, number>();
   state?.invoices.forEach(invoice => { if (isRecognizedMistInvoice(invoice) && invoice.open > 0) outstanding.set(invoice.currency, (outstanding.get(invoice.currency) ?? 0) + invoice.open); });
   const currencies = [...outstanding.entries()].sort(([a], [b]) => a.localeCompare(b));
@@ -139,6 +148,7 @@ export function HomePage() {
   };
   const beginTask = () => { const task = tasks[0] ?? manageable[0]; setSelectedTask(task?.id ?? ''); setTaskDone(task?.done ?? false); setTaskDialog(true); };
   const chosenTask = manageable.find(task => task.id === selectedTask);
+  const chosenHandover=chosenTask?handoverDetails.get(chosenTask.id):undefined;
   const taskControlled=isInternalDeliveryTask(chosenTask);
   const dateLabel = new Date(`${today}T12:00:00`).toLocaleDateString(interfaceLocale(), { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
   return (
@@ -175,7 +185,7 @@ export function HomePage() {
       <ModuleEditorDialog spec={todoSpec} onClose={()=>setTodoSpec(null)} />
       <AgentProposalDialog state={workspace.state} scopeKey={workspace.workspace?.id+':'+session.user?.id} onRejection={workspace.dismissError} proposal={workspace.state?.agentProposals?.find(p => p.id === proposalId && p.state === 'pending')} onClose={() => setProposalId('')} run={(command, options) => workspace.run(command, options)} onDone={message => toast(uiText(message))} />
       <Dialog open={taskDialog} onClose={() => setTaskDialog(false)} title={uiText("任务状态")} footer={<><Button variant="quiet" onClick={() => setTaskDialog(false)}>{uiText("关闭")}</Button>{chosenTask&&!chosenTask.done&&(chosenTask.kind==='crm-follow-up'||chosenTask.kind==='personal')&&<Button disabled={busy} onClick={()=>openTodo(chosenTask)}>{uiText("调整待办")}</Button>}{taskControlled?<Button variant="primary" disabled={busy||!chosenTask?.target} onClick={()=>{setTaskDialog(false);if(chosenTask?.target)openTarget(chosenTask.target);}}>{uiText("打开事项")}</Button>:<Button variant="primary" disabled={busy || !chosenTask || chosenTask.done === taskDone} onClick={() => void run(async () => { await workspace.run({ type: 'task.complete', payload: { id: selectedTask, done: taskDone } }); if (alive.current && activeScope.current === scope) setTaskDialog(false); }, taskDone ? '已完成事项' : '已重新打开事项')}>{uiText("保存状态")}</Button>}</>}>
-        <FormGrid cols={1}><Field label={uiText("事项")}><Select aria-label={uiText("选择事项")} value={selectedTask} onChange={event => { const task = state?.tasks.find(item => item.id === event.target.value); setSelectedTask(event.target.value); setTaskDone(task?.done ?? false); }} options={manageable.map(task => ({ value: task.id, label: task.done ? `${uiText('已完成')} · ${task.title}` : task.title }))} /></Field><Switch label={uiText("已完成")} checked={taskDone} disabled={busy||taskControlled} onChange={setTaskDone} /></FormGrid>
+        <FormGrid cols={1}><Field label={uiText("事项")}><Select aria-label={uiText("选择事项")} value={selectedTask} onChange={event => { const task = state?.tasks.find(item => item.id === event.target.value); setSelectedTask(event.target.value); setTaskDone(task?.done ?? false); }} options={manageable.map(task => ({ value: task.id, label: task.done ? `${uiText('已完成')} · ${task.title}` : task.title }))} /></Field>{chosenTask&&<KeyValue items={[{label:'期限',value:chosenTask.due||'未定期限'},...(chosenTask.note?[{label:'备注',value:chosenTask.note}]:[]),...(chosenHandover?[{label:'交接范围',value:chosenHandover.scope},{label:'核对内容',value:chosenHandover.checks}]:[])]}/>}<Switch label={uiText("已完成")} checked={taskDone} disabled={busy||taskControlled} onChange={setTaskDone} /></FormGrid>
       </Dialog>
       <Dialog open={!!reportVersion} onClose={() => setReportVersion(null)} title={uiText(report?.qc?.report || 'QC 评审')}>
         {report?.qc ? <KeyValue items={[{ label: '版本', value: report.label }, { label: '评审人', value: report.qc.reviewer }, { label: '结论', value: ({ pass: '通过', conditional: '有保留通过', reject: '不通过' })[report.qc.result] }, { label: '评审时间', value: businessWhen(report.qc.reviewedAt) }, { label: '意见', value: report.qc.opinion }]} /> : <EmptyState compact title={uiText("此版本没有可读取的评审记录")} />}

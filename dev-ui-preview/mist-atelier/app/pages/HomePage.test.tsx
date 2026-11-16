@@ -4,6 +4,7 @@ import {materialDeliveryFixture} from '../../../../server/src/mist/__tests__/mat
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getByRole } from '@testing-library/dom';
 import { createMistState, applyMistCommand, type MistCommand } from '../../../../server/src/shared/mistWorkspace';
 import { MistRoot, ToastProvider } from '../../../../components/mist';
 import { Nav } from '../nav';
@@ -59,7 +60,8 @@ describe('original Mist Home workspace functionality', () => {
     await click(button('QC 报告')); const dialog = host.querySelector('[role="dialog"]'); expect(dialog?.textContent).toContain('真实评审人'); expect(dialog?.textContent).toContain('有保留通过'); expect(dialog?.textContent).toContain('保留问题需跟进');
   });
   it('persists task completion and removes the item only after the command succeeds', async () => {
-    render(); await click(button('管理任务')); const dialog = host.querySelector('[role="dialog"]')!;
+    seam.value.state.tasks[0].note='完成前核对资料';render(); await click(button('管理任务')); const dialog = host.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain('完成前核对资料');expect(dialog.textContent).toContain(seam.value.state.tasks[0].due);
     await click(dialog.querySelector<HTMLInputElement>('input[type="checkbox"]')!); await click(button('保存状态', dialog));
     expect(seam.value.run).toHaveBeenCalledWith({ type: 'task.complete', payload: { id: 'task-exact', done: true } }); expect(seam.value.state.tasks[0].done).toBe(true); expect(host.querySelector('.mist-task')).toBeNull();
   });
@@ -245,4 +247,14 @@ it('clears a status failure only after its exact request, person and company ack
 });
 it('does not erase an unrelated definite failure when another command is recovered',async()=>{
   seam.value.run.mockRejectedValueOnce(new Error('无权办理'));render();await click(button('管理任务'));const dialog=host.querySelector('[role="dialog"]')!;await click(dialog.querySelector<HTMLInputElement>('input[type="checkbox"]')!);await click(button('保存状态',dialog));await click(button('关闭',dialog));seam.value={...seam.value,commandRecovery:{workspaceId:'workspace-one',requestId:'other',actorId:'owner',revision:1}};await act(async()=>paint());expect(host.textContent).toContain('操作未完成');expect(host.textContent).toContain('无权办理');
+});
+it.each(['due','title'] as const)('sorts the whole visible list including derived business and personal work by %s',async sort=>{
+  const state=createMistState(ctx(),'empty'),today=businessToday(),yesterday=new Date(Date.parse(today+'T00:00:00Z')-86400000).toISOString().slice(0,10);
+  state.tasks=[{id:'later',title:'Alpha',done:false,due:today,kind:'personal',target:{view:'cockpit'},assigneeIds:['finance']},{id:'earlier',title:'Zeta',done:false,due:yesterday,kind:'personal',target:{view:'cockpit'},assigneeIds:['finance']}];
+  state.payables!.requests=[{id:'approved-payment',code:'PR-BETA',state:'approved',purpose:'settlement',supplier:'供货工厂',currency:'CNY',amount:434,submittedAt:'2099-01-01T00:00:00Z',paymentHistory:[]} as any];seam.value={...seam.value,state};seam.session={...seam.session,user:{id:'finance',displayName:'财务'},hasPermission:(permission:string)=>permission==='vouchers:write'};render();
+  if(sort==='title'){await click(getByRole(host,'button',{name:/^排序/}));await click(getByRole(document.body,'menuitemradio',{name:'按名称'}));}
+  expect([...host.querySelectorAll('.mist-task-t')].map(row=>row.textContent)).toEqual(sort==='title'?['Alpha','PR-BETA · 待付款','Zeta']:['Zeta','Alpha','PR-BETA · 待付款']);
+});
+it('shows account handover scope and checks as fields instead of a long selection title',async()=>{
+  const title='接手 林舟 的业务（客户 1、商机 1）：核对在手订单、报价、未收款与供应商';seam.value.state.tasks=[{id:'account',title,kind:'account-handover',done:false,due:businessToday(),target:{view:'relations'},assigneeIds:['owner']}];render();await click(button('管理任务'));const dialog=host.querySelector('[role="dialog"]')!;expect([...dialog.querySelector('select')!.options].map(option=>option.textContent)).toEqual(['接手业务 · 林舟']);expect(dialog.textContent).toContain('交接范围');expect(dialog.textContent).toContain('客户 1、商机 1');expect(dialog.textContent).toContain('核对内容');expect(dialog.textContent).toContain('在手订单、报价、未收款与供应商');expect(seam.value.state.tasks[0].title).toBe(title);expect(seam.value.run).not.toHaveBeenCalled();
 });

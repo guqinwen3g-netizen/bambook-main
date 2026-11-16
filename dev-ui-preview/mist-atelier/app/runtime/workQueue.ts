@@ -47,8 +47,15 @@ export function isMyMistTask(task: MistTask, options: Pick<MistWorkOptions, 'me'
   const mine = (!!options.me && (task.assigneeIds ?? []).includes(options.me)) || (!!task.permission && !!options.can?.(task.permission));
   return mine && options.canRead(mistWorkModule(task.target?.view));
 }
+/** Split only the generated handover template; free task names and stored facts stay intact. */
+export function accountHandoverPresentation(task:Pick<MistTask,'kind'|'title'>|undefined){
+  if(task?.kind!=='account-handover')return null;
+  const parts=/^接手 (.+) 的业务（([^）]+)）：核对(.+)$/.exec(task.title);
+  return parts?{title:uiText('接手业务')+' · '+parts[1],scope:parts[2],checks:parts[3]}:null;
+}
 export function mistMyTasks(state: MistState | null | undefined, options: Pick<MistWorkOptions, 'me' | 'can' | 'canRead'>) {
   return (state?.tasks ?? []).map(task=>{
+    const handover=accountHandoverPresentation(task);if(handover)return {...task,title:handover.title};
     if(task.kind==='customer-handover'&&task.target.view==='relations'){
       const relation=state?.market.relations.find(row=>row.id===task.target.id),customer=state?.customers.find(row=>row.id===(relation?.customerId||task.target.id));
       if(customer)return {...task,title:localizedPageTitle('接手客户')+' · '+customer.name};
