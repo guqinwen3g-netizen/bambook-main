@@ -113,11 +113,18 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
     submit: v => run({ type: 'market.relation.linkSupplier', payload: { id: r.id, supplierId: String(v.supplierId ?? '') } }),
   });
   const linkableCustomers = (state?.customers || []).filter(c => !all.some(r => r.customerId === c.id && r.supplierId));
-  const linkCustomerSpec = (r: MarketRelation): ModuleEditorSpec => ({
+  const linkCustomerSpec = (r: MarketRelation): ModuleEditorSpec => {
+    const workspaceId = workspace?.id, actorId = session.user?.id;
+    return {
     title: `为 ${r.name} 关联客户身份`, submitLabel: '关联', description: '该供应商的关系档案并入所选客户的关系档案，别名与附件保留。',
     initialValues: { customerId: '' }, fields: [{ key: 'customerId', label: '客户', type: 'select', required: true, options: linkableCustomers.map(c => ({ value: c.id, label: `${c.code} · ${c.name}` })) }],
-    submit: v => run({ type: 'market.relation.linkCustomer', payload: { id: r.id, customerId: String(v.customerId ?? '') } }),
-  });
+    submit: async v => {
+      const res = await run({ type: 'market.relation.linkCustomer', payload: { id: r.id, customerId: String(v.customerId ?? '') } });
+      const id = String((res.result as { id?: string }).id || '');
+      // The supplier-only relation has been merged away; continue at the surviving organization.
+      if (id && routeScope.isCurrent() && live.current.work.workspace?.id === workspaceId && live.current.session.user?.id === actorId) { setPicked(id); go('relations', id, full.active ? { detail: 'full' } : undefined); }
+    },
+  }; };
   const unlinkSpec = (r: MarketRelation): ModuleEditorSpec => ({
     title: `撤销 ${r.name} 的供应商关联`, submitLabel: '撤销关联', submitVariant: 'danger', description: '供应商拆回独立的关系档案；客户与供应商的业务记录不变。',
     initialValues: { reason: '' }, fields: [{ key: 'reason', label: '撤销原因', type: 'textarea', required: true }],

@@ -107,6 +107,19 @@ it.each([false, true])('shows only a designated primary contact in the organizat
   expect(label.nextElementSibling?.textContent).toBe(designated ? '李晴 · 单证专员' : '未指定');
 });
 
+it('returns to the surviving customer organization after linking from its supplier identity', async () => {
+  const supplier = state.market.relations.find(r => r.supplierId && !r.customerId && !r.hold)!, target = named('Cedar'); bridge.current.workspace = { id: 'workspace', revision: 7 }; bridge.current.run.mockResolvedValue({ result: { id: target.id } });
+  await mount(supplier.id); await click('关联客户身份'); const select = document.querySelector('select[aria-label="客户"]') as HTMLSelectElement;
+  await act(async () => { select.value = target.customerId; select.dispatchEvent(new Event('change', { bubbles: true })); }); await click('关联');
+  expect(go).toHaveBeenCalledWith('relations', target.id, { detail: 'full' });
+});
+
+it('does not navigate away from another route when a former identity-link operation finishes late', async () => {
+  const supplier = state.market.relations.find(r => r.supplierId && !r.customerId && !r.hold)!, target = named('Cedar'); bridge.current.workspace = { id: 'workspace', revision: 7 }; let resolve!: (value: any) => void; bridge.current.run.mockImplementation(() => new Promise(done => { resolve = done; }));
+  await mount(supplier.id); await click('关联客户身份'); const select = document.querySelector('select[aria-label="客户"]') as HTMLSelectElement;
+  await act(async () => { select.value = target.customerId; select.dispatchEvent(new Event('change', { bubbles: true })); }); await click('关联'); await repaint(target.id); await act(async () => resolve({ result: { id: target.id } })); expect(go).not.toHaveBeenCalled();
+});
+
 
 describe('关系智库', () => {
   it('同一组织同时是客户和供应商；冻结与在手业务由记录推出', () => {
