@@ -69,8 +69,12 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
   const business = React.useMemo(() => new Map(all.map(r => [r.id, relationBusiness(state, r)])), [state, all, interfaceLocale()]);
   const needle = query.trim().toLowerCase();
   const flagged = (r: MarketRelation, f: FlagFilter) => f === 'all' || (f === 'hold' ? !!r.hold : f === 'dual' ? !!(r.customerId && r.supplierId) : !relationContacts(state, r).length && !(supplier(r)?.contacts.length));
-  const searched = all.filter(r => (statusFilter === 'any' || r.status === statusFilter) && flagged(r, flagFilter)
-    && (!needle || `${r.name} ${r.aliases.join(' ')} ${r.country} ${r.address} ${customer(r)?.code || ''} ${supplier(r)?.code || ''} ${relationContacts(state, r).map(c => c.name + ' ' + c.email).join(' ')}`.toLowerCase().includes(needle)));
+  const searched = all.filter(r => {
+    if ((statusFilter !== 'any' && r.status !== statusFilter) || !flagged(r, flagFilter)) return false;
+    if (!needle) return true;
+    const linkedSupplier = supplier(r), contacts = [...relationContacts(state, r), ...(linkedSupplier?.contacts || [])];
+    return [r.name, ...r.aliases, r.country, r.address, customer(r)?.code, linkedSupplier?.code, ...contacts.flatMap(c => [c.name, c.email, c.phone])].filter(Boolean).join(' ').toLowerCase().includes(needle);
+  });
   const count = (v: Identity) => searched.filter(r => v === 'all' || relationIdentities(r).includes(v)).length;
   const rows = searched.filter(r => identity === 'all' || relationIdentities(r).includes(identity)).sort((a, b) => Number(!!b.hold) - Number(!!a.hold) || a.name.localeCompare(b.name, 'zh'));
   const selected = rows.find(r => r.id === picked) || (picked ? all.find(r => r.id === picked) : undefined);

@@ -47,6 +47,17 @@ it('shows a real empty state and enables creation after an empty workspace was a
   state.market.relations = []; bridge.current.workspace = { id: 'workspace', revision: 7 }; await mount(); expect(host.textContent).toContain('还没有关系档案'); expect(button('建立关系档案')!.disabled).toBe(false); expect(host.textContent).not.toContain('关系资料未读取');
 });
 
+it.each(['customer-code', 'supplier-code', 'customer-name', 'customer-email', 'customer-phone', 'supplier-name', 'supplier-email', 'supplier-phone'])('finds a dual-identity organization by its readable identifiers: %s', async kind => {
+  const relation = named('博远'), customer = state.customers.find(r => r.id === relation.customerId)!, supplier = state.market.suppliers.find(r => r.id === relation.supplierId)!, c = { id: 'search-customer-contact', customerId: relation.customerId, name: '', role: '', email: '', phone: '', tone: 'accent' as const }, s = supplier.contacts[0];
+  state.contacts.push(c);
+  customer.code = 'CID-901'; supplier.code = 'SID-902'; Object.assign(c, { name: '客户独立联络', email: 'customer.unique@example.invalid', phone: '0000-010101' }); Object.assign(s, { name: '供方独立联络', email: 'supplier.unique@example.invalid', phone: '0000-020202' });
+  const queries: Record<string, string> = { 'customer-code': customer.code, 'supplier-code': supplier.code, 'customer-name': c.name, 'customer-email': c.email, 'customer-phone': c.phone, 'supplier-name': s.name, 'supplier-email': s.email, 'supplier-phone': s.phone };
+  await mount(); const input = host.querySelector<HTMLInputElement>('.mist-search input')!;
+  expect(input).toBeTruthy();
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, queries[kind]); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  const rows = [...host.querySelectorAll('[role="row"][tabindex]')]; expect(rows).toHaveLength(1); expect(rows[0].textContent).toContain(relation.name);
+});
+
 describe('relation profile concurrency', () => {
   it.each(['address', 'note', 'aliases', 'status', 'supplierId', 'removed'])('keeps the draft and refuses a changed source: %s', async field => {
     const relation = named('Cedar'); bridge.current.workspace = { id: 'workspace', revision: 7 };
