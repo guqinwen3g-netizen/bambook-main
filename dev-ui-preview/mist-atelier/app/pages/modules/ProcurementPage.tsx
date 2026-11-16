@@ -24,7 +24,7 @@ import { ModuleEditorDialog, ModuleEditorPage, moduleFileIds, moduleSignature, s
 import { useRecordAttachment, choiceField, deliveryTargetPayload, emptyOption, Events, exportRecords, field, localNow, number, parseRolls, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, RecordDisclosure, shortWhen, useListDetailRoute } from './pageKit';
-import { RfqLedger } from './SourcingRequests';
+import { RfqLedger, rfqLedgerExport, rfqLedgerRows } from './SourcingRequests';
 import { purchaseTransferBlocker, readRfqs } from '../../../../../server/src/shared/mistSourcing';
 import { parsePurchaseContent, purchaseChoices, purchaseContent, sourceOrderBlocker } from './purchaseContent';
 import { CURRENCIES, SUPPLIER_PAYMENT_TERMS, UNITS } from '../../runtime/tradeOptions';
@@ -296,6 +296,8 @@ export function ProcurementPage() {
       extra: flags.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{flags.map(flag => <Pill key={flag.key} tone="bad">{uiText(flag.label)}</Pill>)}</div> : undefined,
     }} />; })() : null;
   const readOnlyBanner = !can ? <div className="mist-section"><Banner variant="status" tone="neutral" title={uiText("只读查看")} /></div> : null;
+  const exportCount=rfqTab?rfqLedgerRows(state||undefined,domain,needle,route.orderLineId).length:rows.length;
+  const exportRfq=()=>{if(!state)return;const data=rfqLedgerExport(state,domain,needle,day,route.orderLineId);exportRecords(data.name,data.headers,data.rows);};
   // 新公司还没有可合作的供应商时，采购单无从选择供应商：在列表页给出去处，而不是让人填到一半才发现。
   const noSupplierBanner = can && state && !supplierOptions().length ? <div className="mist-section"><Banner variant="status" tone="warn" title={uiText('还没有可下采购单的供应商')} actions={session.hasPermission('suppliers:write') ? <Button onClick={() => go('suppliers')}>{uiText('去建立供应商')}</Button> : undefined}>{session.hasPermission('suppliers:write') ? undefined : uiText('请采购负责人先建立供应商档案')}</Banner></div> : null;
   if (full.active && selected && state) return <ListDetailPage backLabel="采购管理" onBack={full.back} before={readOnlyBanner} after={<ModuleEditorDialog spec={canDialog ? dialog : null} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
@@ -304,7 +306,7 @@ export function ProcurementPage() {
       actions={<>
         {sourceOrder && sourceLine && <Button onClick={() => go('orders/detail', sourceOrder.id, { orderLineId: sourceLine.id, customerId: sourceOrder.customerId, section: sourceOrder.type })}>{uiText("返回来源订单")}</Button>}
         {route.orderLineId && <Button onClick={() => go('procurement')}>{uiText("查看全部采购")}</Button>}
-        <Button icon={Download} disabled={!state || !rows.length} onClick={() => exportRecords('采购台账', ['编号', '入口', '供应商', '内容', '数量', '单位', '单价', '币种', '要求交期', '承诺交期', '审批', '阶段', '累计交付'], rows.map(p => [p.code, ENTRY_LABEL[entryOf(p)], p.supplier, p.description, p.quantity, p.unit, p.price, p.currency, p.due, p.supplierConfirmation?.confirmedDue || '', status[p.state], STAGE_LABEL[purchaseStage(p)], p.received]))}>{uiText("导出")}</Button>
+        <Button icon={Download} disabled={!state || !exportCount} onClick={() => rfqTab?exportRfq():exportRecords('采购台账', ['编号', '入口', '供应商', '内容', '数量', '单位', '单价', '币种', '要求交期', '承诺交期', '审批', '阶段', '累计交付'], rows.map(p => [p.code, ENTRY_LABEL[entryOf(p)], p.supplier, p.description, p.quantity, p.unit, p.price, p.currency, p.due, p.supplierConfirmation?.confirmedDue || '', status[p.state], STAGE_LABEL[purchaseStage(p)], p.received]))}>{uiText("导出")}</Button>
         {!rfqTab && createButton}
       </>} />
     {readOnlyBanner}

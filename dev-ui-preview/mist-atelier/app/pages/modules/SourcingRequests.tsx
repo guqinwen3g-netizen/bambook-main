@@ -24,6 +24,23 @@ const STATE_TONE: Record<MistRfq['state'], Tone> = { open: 'accent', awarded: 'o
 const num = (v: Record<string, unknown>, key: string) => String(v[key] ?? '').trim();
 const price = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
 
+function rfqSourceLabel(state: MistState, r: MistRfq) {
+  if (r.devId) { const d=state.devs.find(x=>x.id===r.devId);return d?`开发 ${d.code} · ${d.name}`:'开发案'; }
+  return fulfillmentSourceLabel(state,{kind:'orderLine',orderId:r.orderId,lineId:r.lineId});
+}
+export function rfqLedgerRows(state: MistState | undefined, domain: FulfillmentPurchase['domain'], needle: string, sourceLineId?: string) {
+  return (state ? readRfqs(state) : []).filter(r=>r.domain===domain&&(!sourceLineId||r.lineId===sourceLineId))
+    .filter(r=>!needle||`${r.code} ${r.description} ${rfqSourceLabel(state!,r)} ${r.quotes.map(q=>q.supplier).join(' ')}`.toLowerCase().includes(needle))
+    .sort((a,b)=>Number(a.state!=='open')-Number(b.state!=='open')||a.deadline.localeCompare(b.deadline));
+}
+export function rfqLedgerExport(state: MistState, domain: FulfillmentPurchase['domain'], needle: string, day: string, sourceLineId?: string) {
+  return {name:'询价台账',headers:['编号','来源','内容','数量','单位','需求交期','交付地点','报价截止','已报家数','受邀家数','最低报价','币种','最低报价供应商','状态','中标供应商','生成采购单'],
+    rows:rfqLedgerRows(state,domain,needle,sourceLineId).map(r=>{
+      const quotes=rfqCurrentQuotes(r),best=rfqComparison(state,r,day).rows.find(x=>x.lowest);
+      return [r.code,rfqSourceLabel(state,r),r.description,r.quantity,r.unit,r.due,r.destination,r.deadline,quotes.filter(q=>!q.declined).length,r.supplierIds.length,best?.quote.price??'',best?.quote.currency||'',best?.quote.supplier||'',RFQ_STATE_LABEL[r.state],r.award?.supplier||'',r.award?.purchaseCode||''];
+    })};
+}
+
 export function RfqLedger({ state, day, domain, needle, can, locked, loading, open, run, presetSupplierId, sourceLineId, blockedSource, onPurchase, onSupplier, selectedId }: {
   state: MistState | undefined; day: string; domain: FulfillmentPurchase['domain']; needle: string; can: boolean; locked: boolean; loading: boolean; presetSupplierId?: string; sourceLineId?: string; blockedSource?: string; selectedId?:string;
   open: (spec: ModuleEditorSpec) => void; run: (command: MistCommand) => Promise<unknown>; onPurchase: (id: string) => void; onSupplier: (id: string) => void;
@@ -36,10 +53,9 @@ export function RfqLedger({ state, day, domain, needle, can, locked, loading, op
   const all = state ? readRfqs(state).filter(r => r.domain === domain && (!sourceLineId || r.lineId === sourceLineId)) : [];
   const sourceLine = state?.orderLines.find(line => line.id === sourceLineId);
   const sourceOrder = state?.orders.find(order => order.id === sourceLine?.orderId);
-  const label = (r: MistRfq) => !state ? '' : r.devId ? (() => { const d = state.devs.find(x => x.id === r.devId); return d ? `开发 ${d.code} · ${d.name}` : '开发案'; })() : fulfillmentSourceLabel(state, { kind: 'orderLine', orderId: r.orderId, lineId: r.lineId });
+  const label = (r: MistRfq) => state ? rfqSourceLabel(state,r) : '';
   const devOptions = (state?.devs || []).filter(d => !d.closure && developmentDomain(d.values) === domain).map(d => ({ value: 'dev:' + d.id, label: `开发 ${d.code} · ${d.name}` }));
-  const rows = all.filter(r => !needle || `${r.code} ${r.description} ${label(r)} ${r.quotes.map(q => q.supplier).join(' ')}`.toLowerCase().includes(needle))
-    .sort((a, b) => Number(a.state !== 'open') - Number(b.state !== 'open') || a.deadline.localeCompare(b.deadline));
+  const rows = rfqLedgerRows(state,domain,needle,sourceLineId);
   const selected = rows.find(r => r.id === (selectedId||picked)) || all.find(r => r.id === (selectedId||picked));
   const available = (state?.market.suppliers || []).filter(s => !productionSupplierUnavailableReason(s, day));
   const preset = presetSupplierId ? state?.market.suppliers.find(s => s.id === presetSupplierId) : undefined;

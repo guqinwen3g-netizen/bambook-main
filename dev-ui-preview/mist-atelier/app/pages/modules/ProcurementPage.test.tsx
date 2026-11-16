@@ -57,6 +57,16 @@ it('opens the original requested purchase after the initial read recovers',()=>{
   store.state=state;render('recovered');expect(host.textContent).toContain('RECOVERED');
   expect(host.textContent).not.toContain('采购资料未读取');expect(store.run).not.toHaveBeenCalled();
 });
+it('enables RFQ export when the visible RFQ exists without purchase orders',()=>{
+  store.state!.rfqs=[{id:'rfq',code:'RFQ-1',orderId:'o',lineId:'l',kind:'material',domain:'garment',description:'Coat trims',quantity:100,unit:'个',currency:'CNY',due:'2099-01-31',destination:'Factory',deadline:'2099-01-10',supplierIds:[],quotes:[],note:'',state:'open',createdAt:'',actor:'Buyer'}];
+  render(undefined,'list',{section:'rfq'});
+  expect((getByRole(host,'button',{name:'导出',exact:true}) as HTMLButtonElement).disabled).toBe(false);
+});
+it('disables RFQ export for an empty RFQ ledger even when purchase orders exist',()=>{
+  store.state!.fulfillment.purchases.push(purchase('purchase-only'));
+  render(undefined,'list',{section:'rfq'});
+  expect((getByRole(host,'button',{name:'导出',exact:true}) as HTMLButtonElement).disabled).toBe(true);
+});
 it('generates supplier PDFs through the server and keeps archived files available',async()=>{
   store.state!.fulfillment.purchases.push(purchase('pdf',approved({documents:[{id:'doc',fileId:'pdf-file',fileName:'PO-V1-01.pdf'} as any]})));
   store.state!.files.push({id:'pdf-file',name:'PO-V1-01.pdf',mimeType:'application/pdf',size:100,storageKey:'private',createdAt:''});
