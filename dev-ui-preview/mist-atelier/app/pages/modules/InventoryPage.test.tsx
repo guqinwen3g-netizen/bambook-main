@@ -43,7 +43,7 @@ it('keeps genuinely read empty inventory actionable',()=>{
 });
 it('does not present an unread warehouse catalog as an empty editable collection',async()=>{
  const state=store.state!;render();await click(getByRole(host,'button',{name:'仓库目录',exact:true}));
- store.state=null;render();expect(host.textContent).toContain('库存资料未读取');expect(queryByRole(host,'button',{name:'新增',exact:true})).toBeNull();
+ store.state=null;render();expect(host.textContent).toContain('库存资料未读取');expect(queryByRole(host,'button',{name:'新建',exact:true})).toBeNull();
  store.state=state;render();expect(host.textContent).toContain('仓库目录');expect(host.textContent).toContain('松江仓');expect(store.run).not.toHaveBeenCalled();
 });
 it('retains the requested batch when the inventory read recovers',()=>{
