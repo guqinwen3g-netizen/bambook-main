@@ -1480,13 +1480,14 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "market.relation.save",
-  "payload": "{id?:string;input:Omit<Input<MarketRelation>,'contacts'|'hold'|'holdHistory'|'mergedRelationIds'>}",
+  "payload": "{id?:string;input:Omit<Input<MarketRelation>,'contacts'|'hold'|'holdHistory'|'holdHistoryKeys'|'supplierRelationSource'|'screenings'|'mergedRelationIds'>}",
   "types": {
    "Input": "Omit<T,keyof RecordBase|'status'> & {fileIds?:string[];note?:string}",
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }",
-   "MarketRelation": "RecordBase & { screenings?:RelationScreening[]; name:string; category:'Customer'|'Supplier'|'Agent'|'Partner'|'Government'|'Internal'|'Other'; customerId:string; supplierId:string; country:string; address:string; aliases:string[]; status:'active'|'archived'; hold?:{reason:string;at:string;actor:string}|null; holdHistory?:RelationHoldChange[]; mergedRelationIds?:string[]; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> }",
+   "MarketRelation": "RecordBase & { screenings?:RelationScreening[]; name:string; category:'Customer'|'Supplier'|'Agent'|'Partner'|'Government'|'Internal'|'Other'; customerId:string; supplierId:string; country:string; address:string; aliases:string[]; status:'active'|'archived'; hold?:{reason:string;at:string;actor:string}|null; holdHistory?:RelationHoldChange[]; holdHistoryKeys?:string[]; supplierRelationSource?:SupplierRelationSource; mergedRelationIds?:string[]; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> }",
    "RelationScreening": "{ id:string; kind:'sanctions'|'export_control'|'annual'|'other'; result:'clear'|'hit'|'review'; basis:string; screenedOn:string; nextReview:string; fileIds:string[]; at:string; actor:string }",
-   "RelationHoldChange": "{action:'freeze'|'release';reason:string;at:string;actor:string}"
+   "RelationHoldChange": "{action:'freeze'|'release';reason:string;at:string;actor:string}",
+   "SupplierRelationSource": "{ supplierId:string;supplierName:string; relation:Pick<RecordBase,'id'|'createdAt'|'fileIds'|'note'>&{aliases:string[];status:'active'|'archived';screenings?:RelationScreening[];holdHistory?:RelationHoldChange[];holdHistoryKeys?:string[];mergedRelationIds?:string[]}; customerAliases:string[];customerFileIds:string[];customerScreeningIds:string[];combinedHoldHistoryKeys:string[]; }"
   },
   "source": "server/src/shared/mistMarket.ts"
  },
@@ -1502,10 +1503,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "market.relation.status",
   "payload": "{id:string;status:MarketRelation['status']}",
   "types": {
-   "MarketRelation": "RecordBase & { screenings?:RelationScreening[]; name:string; category:'Customer'|'Supplier'|'Agent'|'Partner'|'Government'|'Internal'|'Other'; customerId:string; supplierId:string; country:string; address:string; aliases:string[]; status:'active'|'archived'; hold?:{reason:string;at:string;actor:string}|null; holdHistory?:RelationHoldChange[]; mergedRelationIds?:string[]; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> }",
+   "MarketRelation": "RecordBase & { screenings?:RelationScreening[]; name:string; category:'Customer'|'Supplier'|'Agent'|'Partner'|'Government'|'Internal'|'Other'; customerId:string; supplierId:string; country:string; address:string; aliases:string[]; status:'active'|'archived'; hold?:{reason:string;at:string;actor:string}|null; holdHistory?:RelationHoldChange[]; holdHistoryKeys?:string[]; supplierRelationSource?:SupplierRelationSource; mergedRelationIds?:string[]; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> }",
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }",
    "RelationScreening": "{ id:string; kind:'sanctions'|'export_control'|'annual'|'other'; result:'clear'|'hit'|'review'; basis:string; screenedOn:string; nextReview:string; fileIds:string[]; at:string; actor:string }",
-   "RelationHoldChange": "{action:'freeze'|'release';reason:string;at:string;actor:string}"
+   "RelationHoldChange": "{action:'freeze'|'release';reason:string;at:string;actor:string}",
+   "SupplierRelationSource": "{ supplierId:string;supplierName:string; relation:Pick<RecordBase,'id'|'createdAt'|'fileIds'|'note'>&{aliases:string[];status:'active'|'archived';screenings?:RelationScreening[];holdHistory?:RelationHoldChange[];holdHistoryKeys?:string[];mergedRelationIds?:string[]}; customerAliases:string[];customerFileIds:string[];customerScreeningIds:string[];combinedHoldHistoryKeys:string[]; }"
   },
   "source": "server/src/shared/mistMarket.ts"
  },
