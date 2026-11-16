@@ -40,6 +40,10 @@ type Entry = 'purchase' | 'processing';
 type Stage = 'draft' | 'pending' | 'supplier' | 'fulfilling' | 'done';
 type StageFilter = 'all' | Stage;
 type FlagFilter = 'all' | 'overdue' | 'variance' | 'returned';
+const purchaseClosureSource = (state:MistState,p:FulfillmentPurchase,day:string) => stableJson({
+  purchase:p,prepayment:purchasePrepaymentReadback(state,p.id),payable:purchasePayableReadback(state,p.id,day),
+  transferBlocker:purchaseTransferBlocker(state,p),hasProduction:state.productions.some(j=>j.sourcePurchaseId===p.id&&!j.closed),
+});
 
 const ENTRY_LABEL: Record<Entry, string> = { purchase: '采购订单', processing: '委外加工单' };
 const STAGE_LABEL: Record<Stage, string> = { draft: '需求草稿', pending: '待审批', supplier: '待供应商确认', fulfilling: '供应履约中', done: '已完成' };
@@ -226,21 +230,33 @@ export function ProcurementPage() {
   const returnReverseSpec = (p: FulfillmentPurchase, r: FulfillmentReceipt, row: FulfillmentReceiptReturn): ModuleEditorSpec => ({ title: '冲回退换登记', description: `${row.date} 退回 ${row.quantity} ${p.unit}（${row.disposition === 'replace' ? '供应商补发' : '不再补发'}）。原记录保留并标记已冲回。`, submitLabel: '确认冲回',
     fields: [field('reason', '冲回原因', 'textarea')], initialValues: { reason: '' }, submit: values => run({ type: 'fulfillment.procurement.return.reverse', payload: { receiptId: r.id, returnId: row.id, reason: text(values, 'reason') } }) });
   const cancelSpec = (p: FulfillmentPurchase): ModuleEditorSpec => {
+    const source=state?purchaseClosureSource(state,p,day):'';
     const r = state ? purchasePrepaymentReadback(state, p.id) : null, prepaid = r?.available || 0, targets = state && prepaid > 0 ? prepaymentTransferTargets(state, p.id) : [];
     const amount = prepaid.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ' + p.currency;
     return { title: '取消合同', description: `${p.code} · ${p.supplier}。只适用于还没收货、没有结算和票据的合同；取消后不恢复，需要时重新建单。${prepaid > 0 ? `已付预付 ${amount}，须选择让工厂退款（到账前算待退回），或转抵到这家工厂的其他合同。` : ''}`, submitLabel: '确认取消',
       fields: [field('reason', '取消原因与工厂确认依据', 'textarea'), ...(prepaid > 0 ? [field('prepayment', '已付预付怎么处理', 'select', true, [{ value: 'refund', label: `让工厂退款 ${amount}` }, ...(targets.length ? [{ value: 'transfer', label: '转抵到这家工厂的其他合同' }] : [])]), ...(targets.length ? [{ ...field('target', '转抵合同（选转抵时填写）', 'select', false, [{ value: '', label: '不转抵' }, ...targets.map(t => ({ value: t.id, label: `${t.code} · ${t.description}` }))]) }] : [])] : [])],
       initialValues: { reason: '', prepayment: 'refund', target: '' },
-      submit: values => run({ type: 'payable.purchase.cancel', payload: { purchaseId: p.id, reason: text(values, 'reason'), ...(prepaid > 0 ? { prepayment: text(values, 'prepayment') as 'refund' | 'transfer', ...(text(values, 'prepayment') === 'transfer' ? { targetPurchaseId: text(values, 'target') } : {}) } : {}) } } as any) };
+      submit: values => {
+        const checked=liveSource.current,current=checked.state?.fulfillment.purchases.find(row=>row.id===p.id);
+        if(!current||!checked.state||purchaseClosureSource(checked.state,current,day)!==source)throw new Error('采购合同已更新，请重新打开后核对');
+        const command:MistCommand={type:'payable.purchase.cancel',payload:{purchaseId:p.id,reason:text(values,'reason'),...(prepaid>0?{prepayment:text(values,'prepayment') as 'refund'|'transfer',...(text(values,'prepayment')==='transfer'?{targetPurchaseId:text(values,'target')}:{})}:{})}};
+        return checked.revision!==undefined?run(command,{expectedRevision:checked.revision}):run(command);
+      } };
   };
   const transferSpec = (p: FulfillmentPurchase): ModuleEditorSpec => {
+    const source=state?purchaseClosureSource(state,p,day):'';
     const prepaid = state ? purchasePrepaymentReadback(state, p.id).available : 0;
     const options = (state?.market.suppliers || []).filter(s => s.id !== p.supplierId && !productionSupplierUnavailableReason(s, day)).map(s => ({ value: s.id, label: `${s.name} · ${s.type}` }));
     return { title: '转给其他供应商', submitLabel: '确认转移',
       description: `${p.code} · ${p.supplier} · ${p.quantity} ${p.unit}。原合同按“未执行即取消”办理${prepaid > 0 ? `，已付预付 ${prepaid.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${p.currency} 由原供应商退回` : ''}${state?.productions.some(j => j.sourcePurchaseId === p.id && !j.closed) ? '，对应生产分支关闭（样品与 QC 记录保留）' : ''}；同时按新供应商报价生成采购草稿，须重新提交审批、线下发出并取得供应商确认。请先取得原供应商同意取消的书面确认。`,
       fields: [field('supplierId', '新供应商', 'select', true, [emptyOption, ...options]), { ...field('price', `新单价（每${p.unit}）`, 'number'), min: 0.0001 }, choiceField('currency', '币种', CURRENCIES, true, true), field('due', '新供应商交期', 'date'), choiceField('terms', '付款条件', SUPPLIER_PAYMENT_TERMS), field('reason', '转移原因与原供应商确认依据', 'textarea')],
       initialValues: { supplierId: '', price: p.price, currency: p.currency, due: p.due, terms: p.terms, reason: '' },
-      submit: async values => { const r = await run({ type: 'sourcing.purchase.transfer', payload: { purchaseId: p.id, supplierId: text(values, 'supplierId'), price: number(values, 'price'), currency: text(values, 'currency'), due: text(values, 'due'), terms: text(values, 'terms'), reason: text(values, 'reason') } } as any); const id = String((r.result as { id?: string }).id || ''); if (id) go('procurement', id); } };
+      submit: async values => {
+        const checked=liveSource.current,current=checked.state?.fulfillment.purchases.find(row=>row.id===p.id);
+        if(!current||!checked.state||purchaseClosureSource(checked.state,current,day)!==source)throw new Error('采购合同已更新，请重新打开后核对');
+        const command:MistCommand={type:'sourcing.purchase.transfer',payload:{purchaseId:p.id,supplierId:text(values,'supplierId'),price:number(values,'price'),currency:text(values,'currency'),due:text(values,'due'),terms:text(values,'terms'),reason:text(values,'reason')}};
+        const r=await(checked.revision!==undefined?run(command,{expectedRevision:checked.revision}):run(command));const id=String((r.result as {id?:string}).id||'');if(id)go('procurement',id);
+      } };
   };
   // sup11：已批准合同变更数量、单价或交期，审批通过后生效。
   const amendSpec = (p: FulfillmentPurchase): ModuleEditorSpec => {

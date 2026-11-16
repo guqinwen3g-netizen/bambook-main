@@ -8,6 +8,7 @@ import {getAllByRole,getByRole,queryByRole} from '@testing-library/dom';
 import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentPurchase} from '../../../../../server/src/shared/mistFulfillment';
+import {purchasePrepaymentReadback} from '../../../../../server/src/shared/mistPayables';
 import {Nav} from '../../nav';
 const store=vi.hoisted(()=>({state:null as MistState|null,workspace:null as any,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn(),recover:vi.fn()}));
 const session=vi.hoisted(()=>({id:'buyer',denied:new Set<string>()}));
@@ -645,6 +646,23 @@ function approvedAmendmentFixture(){
  store.state!.market.suppliers=[{id:'s',name:'青禾辅料',country:'CN',status:'active'} as any];
  store.state!.fulfillment.purchases=[purchase('amend-race',{...approved(),materialKind:'trims',price:0.3})];
 }
+async function closureDialog(action:'cancel'|'transfer'){
+ approvedAmendmentFixture();store.state!.market.suppliers.push({id:'next',name:'新供方',country:'CN',type:'辅料',status:'active'} as any);
+ render('amend-race');await click(getByRole(host,'button',{name:action==='cancel'?'取消合同':'转给其他供应商',exact:true}));
+ const d=getByRole(document.body,'dialog',{name:action==='cancel'?'取消合同':'转给其他供应商',exact:true});
+ const reason=getByRole(d,'textbox',{name:action==='cancel'?'取消原因与工厂确认依据':'转移原因与原供应商确认依据'}) as HTMLTextAreaElement;typeInto(reason,'原供方同意未执行合同终止，数量与规格须以当前合同核对。');
+ if(action==='transfer'){const supplier=getByRole(d,'combobox',{name:'新供应商'}) as HTMLSelectElement;act(()=>{supplier.value='next';supplier.dispatchEvent(new Event('change',{bubbles:true}));});}
+ return{d,reason,submit:()=>click(getByRole(d,'button',{name:action==='cancel'?'确认取消':'确认转移',exact:true}))};
+}
+it.each(['cancel','transfer'] as const)('refuses a %s form after the source contract changes without losing its reason',async action=>{
+ const{d,reason,submit}=await closureDialog(action);store.state=structuredClone(store.state);store.state!.fulfillment.purchases[0].price=0.4;store.workspace={id:'workspace',revision:8};render('amend-race');await submit();expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('采购合同已更新，请重新打开后核对');expect(reason.value).toContain('原供方同意');
+});
+it.each(['cancel','transfer'] as const)('refuses a %s form after a colleague posts new prepayment on its source',async action=>{
+ const{d,submit}=await closureDialog(action);store.state=structuredClone(store.state);store.state!.payables.payments.push({id:'new-prepay',paymentId:'cash',purpose:'prepayment',purchaseId:'amend-race',supplierId:'s',currency:'CNY',amount:10} as any);expect(purchasePrepaymentReadback(store.state!,'amend-race').available).toBe(10);store.workspace={id:'workspace',revision:8};render('amend-race');await submit();expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('采购合同已更新，请重新打开后核对');
+});
+it.each(['cancel','transfer'] as const)('permits unrelated changes for %s and binds the checked workspace revision',async action=>{
+ const{submit}=await closureDialog(action);store.state=structuredClone(store.state);store.workspace={id:'workspace',revision:8};render('amend-race');await submit();expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:action==='cancel'?'payable.purchase.cancel':'sourcing.purchase.transfer'}),{expectedRevision:8});
+});
 async function fillAmendmentDialog(){
  const d=getByRole(document.body,'dialog',{name:'变更合同 AMEND-RACE',exact:true});
  typeInto(d.querySelector('input[aria-label="交期"]') as HTMLInputElement,'2026-11-24');
