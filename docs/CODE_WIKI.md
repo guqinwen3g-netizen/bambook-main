@@ -24,7 +24,7 @@
 1. 页面调用 `runtime/workspace.tsx` 发送 `POST /api/mist/workspaces/:id/commands`，请求体 `{requestId, expectedRevision, command:{type,payload}}`。只有类型化命令，没有整份状态覆盖。
 2. `server/src/mist/repository.ts#execute` → `executeInternal`：重新加载账号与成员资格 → 校验命令权限 `mistCommandPermission`（`server/src/shared/mistWorkspace.ts`）→ 行级范围 `scopedTargetViolation`（写前）→ 应用 `applyMistCommand`（同文件，分派到各 `server/src/shared/mist*.ts` 领域模块）→ `scopedWriteViolation`（写后差异）→ 状态与回执同事务提交。
 3. **幂等重试**：相同 `requestId` + 相同输入只回放原回执；同编号换输入报冲突。网络重试必须沿用原编号。
-4. **并发**：`expectedRevision` 过期时，仅当中间修订都留有 `mist-revision:<n>` 标记且实际写入位置不重叠才在最新状态上重跑；带 id 的记录以整条记录比较，同记录写入拒绝合并。当前 `concurrentChanges` 对后缀 `.issue` / `.document` 及 `development.notice.generate` / `finance.statement.generate` 直接要求最新版本；其他命令仍先按最新状态执行领域门禁，再比较写集。因此已有待审批采购变更可先返回422 `CONFLICT`，已生效合同的旧来源写入会返回409 `REVISION_CONFLICT`。细节见 `server/src/mist/README.md`。
+4. **并发**：`expectedRevision` 过期时，仅当中间修订都留有 `mist-revision:<n>` 标记且实际写入位置及适用的业务来源不重叠才在最新状态上重跑；带 id 的记录以整条记录比较，同记录写入拒绝合并。当前 `concurrentChanges` 对后缀 `.issue` / `.document` 及 `development.notice.generate` / `finance.statement.generate` 直接要求最新版本；其他命令仍先按最新状态执行领域门禁，再比较写集。因此已有待审批采购变更可先返回422 `CONFLICT`，已生效合同的旧来源写入会返回409 `REVISION_CONFLICT`。细节见 `server/src/mist/README.md`。
 5. **预演**：`repository.preview` 走同一事务和同一套校验后整笔回滚，返回业务事件说明；生成文件的命令不支持预演。
 6. **结果回主线**：命令写入的审计、待办与通知由领域模块产生；前端首页「接着完成」由 `runtime/workQueue.ts#mistWorkQueue` / `mistMyWork` 从状态派生，审批由 `runtime/reviews.tsx` 与 `pages/ApprovalsPage.tsx` 展示。待办不是手工勾选：例如内部交付任务由实际点收派生完成，`task.complete` 拒绝手工改完成。
 

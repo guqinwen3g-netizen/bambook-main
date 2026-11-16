@@ -7,7 +7,7 @@ import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentShipment,FulfillmentDocument} from '../../../../../server/src/shared/mistFulfillment';
 import {Nav} from '../../nav';
-const store=vi.hoisted(()=>({state:null as MistState|null,workspace:{revision:0},loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
+const store=vi.hoisted(()=>({state:null as MistState|null,workspace:{id:'w',revision:0},loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
 const session=vi.hoisted(()=>({id:'biz',denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:session.id,displayName:'经办人'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
@@ -15,7 +15,7 @@ import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import {ShipmentsPage,shipmentStage} from './ShipmentsPage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let host:HTMLElement,root:Root;let presentedError:string|undefined;const go=vi.fn();
-function render(id?:string){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'shipments',id,...(id?{detail:'full' as const}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><MistPresentedErrorContext.Provider value={presentedError}><ShipmentsPage/></MistPresentedErrorContext.Provider></Nav.Provider></ToastProvider></MistRoot>));}
+function render(id?:string,detail:'full'|'list'='full'){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'shipments',id,...(id&&detail==='full'?{detail:'full' as const}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><MistPresentedErrorContext.Provider value={presentedError}><ShipmentsPage/></MistPresentedErrorContext.Provider></Nav.Provider></ToastProvider></MistRoot>));}
 async function click(node:HTMLElement){await act(async()=>node.click());}
 it('hands a new shipment request focus to its source without taking focus back during refresh',async()=>{
  render();await click(getAllByRole(host,'button',{name:'新建出运'})[0]);
@@ -50,6 +50,21 @@ it('keeps a genuine empty company available for a new shipment',()=>{
  expect((getByRole(host,'button',{name:'核对合同收货条款'}) as HTMLButtonElement).disabled).toBe(false);
 });
 
+it('keeps the mobile arrival editor parent until close when the viewport widens',async()=>{
+ const previous=window.matchMedia,listeners=new Set<()=>void>(),media={matches:true,addEventListener:(_type:string,fn:()=>void)=>listeners.add(fn),removeEventListener:(_type:string,fn:()=>void)=>listeners.delete(fn)};
+ Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:()=>media});
+ try{
+  store.state!.fulfillment.shipments.push(shipment('arrival-layer',{state:'departed',departedAt:'2026-10-12T08:00:00Z'}));render('arrival-layer','list');
+  await click(getByRole(document.body,'button',{name:'登记到港',exact:true}));
+  typeInto(getByRole(document.body,'textbox',{name:'到港依据'}) as HTMLTextAreaElement,'待核对到港通知');
+  act(()=>{media.matches=false;listeners.forEach(fn=>fn());});
+  expect(getAllByRole(document.body,'dialog')).toHaveLength(2);
+  expect((getByRole(document.body,'textbox',{name:'到港依据'}) as HTMLTextAreaElement).value).toBe('待核对到港通知');
+  await click(getByRole(getByRole(document.body,'dialog',{name:'登记到港'}),'button',{name:'取消',exact:true}));
+  expect(document.activeElement).toBe(host.querySelector('.mist-preview'));expect(store.run).not.toHaveBeenCalled();
+ }finally{Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:previous});}
+});
+
 it('retains contract terms and prevents a command if their workspace becomes unread',async()=>{
  render();await click(getByRole(host,'button',{name:'核对合同收货条款'}));
  act(()=>fireEvent.change(getByRole(host,'combobox',{name:'来源订单'}),{target:{value:'o'}}));
@@ -59,6 +74,54 @@ it('retains contract terms and prevents a command if their workspace becomes unr
  store.state=null;render();await click(getByRole(host,'button',{name:'确认保存'}));
  expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('出运资料未读取');
  await click(getByRole(host,'button',{name:'上一步'}));expect((getByRole(host,'textbox',{name:'合同 / 信用证依据'}) as HTMLTextAreaElement).value).toBe('已签客户合同');
+});
+
+async function requestEditorDraft(){
+ const state=store.state!;
+ state.fulfillment.shippingTerms.push({orderId:'o',consignee:'Cedar DC',partialAllowed:true,mode:'sea',confirmedAt:'2026-10-12',evidence:'已签合同'});
+ state.productions.push({id:'p',code:'PR-1',orderId:'o',lineId:'l',order:'SO-1',name:'大衣',factory:'工厂',qty:10,due:'2026-11-01',pct:100,img:'coat',col:'done'});
+ state.fulfillment.shipments.push(shipment('request-conflict'));render('request-conflict');
+ await click(getByRole(host,'button',{name:'编辑出运请求'}));await click(getByRole(host,'button',{name:'下一步'}));
+ typeInto(getByRole(host,'textbox',{name:'后勤要求'}) as HTMLTextAreaElement,'本次尚未提交的包装要求');
+ await click(getByRole(host,'button',{name:'下一步'}));
+ return state;
+}
+it('keeps a contract terms draft from replacing terms recorded after it opened',async()=>{
+ render();await click(getByRole(host,'button',{name:'核对合同收货条款'}));
+ act(()=>fireEvent.change(getByRole(host,'combobox',{name:'来源订单'}),{target:{value:'o'}}));
+ typeInto(getByRole(host,'textbox',{name:'合同收货方'}) as HTMLInputElement,'Cedar DC');
+ typeInto(getByRole(host,'textbox',{name:'合同 / 信用证依据'}) as HTMLTextAreaElement,'本次待提交的合同核对');
+ await click(getByRole(host,'button',{name:'下一步'}));
+ store.state=structuredClone(store.state!);store.state.fulfillment.shippingTerms.push({orderId:'o',consignee:'Cedar New DC',partialAllowed:true,mode:'air',confirmedAt:'2026-10-12',evidence:'另一岗位已核对条款'});render();
+ await click(getByRole(host,'button',{name:'确认保存'}));
+ expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('合同来源已更新，请重新打开后核对');
+ await click(getByRole(host,'button',{name:'上一步'}));expect((getByRole(host,'textbox',{name:'合同 / 信用证依据'}) as HTMLTextAreaElement).value).toBe('本次待提交的合同核对');
+});
+it('allows checked contract terms after unrelated synchronization with the checked revision',async()=>{
+ render();await click(getByRole(host,'button',{name:'核对合同收货条款'}));
+ act(()=>fireEvent.change(getByRole(host,'combobox',{name:'来源订单'}),{target:{value:'o'}}));
+ typeInto(getByRole(host,'textbox',{name:'合同收货方'}) as HTMLInputElement,'Cedar DC');
+ typeInto(getByRole(host,'textbox',{name:'合同 / 信用证依据'}) as HTMLTextAreaElement,'已签合同逐项核对');
+ await click(getByRole(host,'button',{name:'下一步'}));
+ store.state=structuredClone(store.state!);store.state.settings.profileName='新的公司简称';store.workspace.revision=9;render();
+ await click(getByRole(host,'button',{name:'确认保存'}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.shipments.sourceTerms',payload:expect.objectContaining({orderId:'o',evidence:'已签合同逐项核对'})}),{expectedRevision:9});
+});
+it.each(['request','terms','branch'] as const)('preserves a shipment request draft when synchronization changes its %s',async source=>{
+ const state=await requestEditorDraft();store.state=structuredClone(state);
+ if(source==='request')store.state.fulfillment.shipments[0].portOfDischarge='Hamburg';
+ else if(source==='terms')store.state.fulfillment.shippingTerms[0].mode='air';
+ else store.state.productions[0].qty=11;
+ render('request-conflict');
+ await click(getByRole(host,'button',{name:'保存出运请求'}));
+ expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('出运来源已更新，请重新打开后核对');
+ await click(getByRole(host,'button',{name:'上一步'}));expect((getByRole(host,'textbox',{name:'后勤要求'}) as HTMLTextAreaElement).value).toBe('本次尚未提交的包装要求');
+});
+
+it('saves a checked shipment request after unrelated synchronization with that exact revision',async()=>{
+ const state=await requestEditorDraft();store.state=structuredClone(state);store.state.settings.profileName='新的公司简称';store.workspace.revision=7;render('request-conflict');
+ await click(getByRole(host,'button',{name:'保存出运请求'}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.shipments.save',payload:expect.objectContaining({id:'request-conflict',note:'本次尚未提交的包装要求'})}),{expectedRevision:7});
 });
 
 it('shows actual air departure states without sea-only labels or a duplicate instruction banner',()=>{

@@ -7,6 +7,7 @@ import { MistPrivateFiles } from './files';
 import { MistRepository } from './repository';
 import * as actualContract from '../shared/mistWorkspace';
 import { MIST_READ_SECTIONS } from './access';
+import {fixture as shipmentFixture} from './__tests__/professionalFulfillment';
 import { testActor, testAuthority, testContract } from './__tests__/support';
 
 /**
@@ -27,6 +28,25 @@ describe.skipIf(!url)('真实 PostgreSQL：多人同时保存自动重试', () =
   const note = (requestId: string, text = requestId) => ({ requestId, expectedRevision: 0, command: { type: 'notes.add', payload: { text } } });
   const row = (id: string) => prisma.mistWorkspace.findUniqueOrThrow({ where: { id } }) as any;
   const requests = (id: string) => prisma.mistCommandReceipt.count({ where: { workspaceId: id, NOT: { requestId: { startsWith: 'mist-revision:' } } } });
+
+  it.each([['save',true],['save',false],['sourceTerms',true],['sourceTerms',false]] as const)('checks shipment %s read sources while preserving unrelated merging (related %s)',async(kind,related)=>{
+    const auth=testAuthority(),all=[...new Set(MIST_READ_SECTIONS.flatMap(section=>section.permissions)),'orders:write','shipments:write','relations:write','products:write'];auth.users.get('owner')!.permissions=all;auth.users.get('other')!.permissions=all;
+    const repo=new MistRepository(prisma,actualContract,files,auth.authorize),created=await repo.create(owner,{name:'Shipment source',slug:'pg-shipment-'+Math.random().toString(36).slice(2),seed:'empty'}),f=shipmentFixture();let command:any;
+    if(kind==='save'){
+      const branch=f.released();f.receiveAndComplete(branch.productionId,branch.purchaseId);const id=f.shipment(branch.productionId),s=f.state.fulfillment.shipments.find(row=>row.id===id)!;
+      command={type:'fulfillment.shipments.save',payload:{...s,note:'已核对本次出运要求'}};
+    }else{
+      f.approveOrder();command={type:'fulfillment.shipments.sourceTerms',payload:{orderId:f.orderId,consignee:'客户收货仓',partialAllowed:true,mode:'sea',confirmedAt:'2026-10-13',evidence:'已签合同'}};
+    }
+    const state=structuredClone(f.state);state.memberIds=['other'];await prisma.mistWorkspace.update({where:{id:created.id},data:{state:JSON.parse(JSON.stringify(state))}});ids.push(created.id);
+    const change=related?(kind==='save'?{type:'production.update',payload:{id:state.productions[0].id,pct:state.productions[0].pct,risk:'待复核出运安排'}}:{type:'order.checklist',payload:{orderId:f.orderId,itemId:state.orders[0].checklist[0].id,done:true}}):{type:'contact.save',payload:{customerId:state.customers[0].id,name:'新联系人',role:'收货',email:'',phone:''}};
+    await repo.execute(testActor('other'),created.id,{requestId:'concurrent-change',expectedRevision:0,command:change}as any);
+    const before=await row(created.id),receipts=await requests(created.id);
+    if(!related){const merged=await repo.execute(owner,created.id,{requestId:'old-shipment',expectedRevision:0,command});expect(merged.receipt.revision).toBe(2);return;}
+    await expect(repo.execute(owner,created.id,{requestId:'old-shipment',expectedRevision:0,command})).rejects.toMatchObject({code:'REVISION_CONFLICT',status:409});
+    expect(await row(created.id)).toEqual(before);expect(await requests(created.id)).toBe(receipts);
+    const fresh=await repo.execute(owner,created.id,{requestId:'checked-shipment',expectedRevision:1,command});expect(fresh.receipt.revision).toBe(2);
+  });
 
   it('rejects a stale physical stock count instead of reading a newer book balance; a rechecked count succeeds', async () => {
     const auth=testAuthority(),all=[...new Set(MIST_READ_SECTIONS.flatMap(section=>section.permissions)),'inventory:write'];auth.users.get('owner')!.permissions=all;auth.users.get('other')!.permissions=all;

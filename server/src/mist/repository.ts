@@ -191,6 +191,19 @@ export function mistChangeKeys(before: unknown, after: unknown): string[][] | nu
   return out.size > MAX_CHANGE_KEYS ? null : [...out.values()];
 }
 const overlapping = (a: string[], b: string[]) => { for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return false; return true; };
+/** Shipment forms inspect contract and physical sources as well as the row they write. */
+function shipmentReadKeys(state:MistState,command:MistCommand|undefined):string[][]{
+  if(command?.type==='fulfillment.shipments.sourceTerms')return[['k:orders','i:'+command.payload.orderId],['k:fulfillment','k:shippingTerms']];
+  if(command?.type!=='fulfillment.shipments.save')return[];
+  const lines=command.payload.lines,orderIds=new Set(lines.map(line=>line.orderId)),lineIds=new Set(lines.map(line=>line.lineId));
+  const branchIds=new Set([...lines.flatMap(line=>line.productionId?[line.productionId]:[]),...state.productions.filter(branch=>lineIds.has(branch.lineId)).map(branch=>branch.id)]);
+  return[
+    ...[...orderIds].map(id=>['k:orders','i:'+id]),...[...lineIds].map(id=>['k:orderLines','i:'+id]),...[...branchIds].map(id=>['k:productions','i:'+id]),
+    // These arrays have no record id, so revision markers represent the whole array.
+    ['k:fulfillment','k:productionFacts'],['k:fulfillment','k:shippingTerms'],
+    ...state.fulfillment.shipments.filter(row=>row.id===command.payload.id||row.lines.some(line=>lineIds.has(line.lineId))).map(row=>['k:fulfillment','k:shipments','i:'+row.id]),
+  ];
+}
 function claimIdentifier(value:unknown):string { const id=identifier(value,'案件编号');if(!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(id))fail('INVALID_INPUT','案件编号无效',400);return id; }
 function activeUploadClaim(state:MistState,claimId:string){
   const claim=Array.isArray(state.platform?.claims)?state.platform.claims.find(item=>item.id===claimId):undefined;
@@ -1162,6 +1175,7 @@ export class MistRepository {
         if (violation) fail('NOT_FOUND', '记录不存在或不在当前账号的业务范围内', 404);
         if (concurrent) {
           if (!changeKeys) fail('REVISION_CONFLICT', '公司已被他人更新，本次修改范围过大无法自动合并，请刷新后重试', 409);
+          if(shipmentReadKeys(row.state,command).some(key=>concurrent.some(other=>overlapping(key,other))))fail('REVISION_CONFLICT','出运来源已更新，请刷新后重新核对',409);
           if (changeKeys!.some(key => concurrent.some(other => overlapping(key, other)))) fail('REVISION_CONFLICT', '其他人已修改同一记录，为避免覆盖对方的更新未自动合并，请刷新核对后重试', 409);
         }
         // 需要签字的批准：权限、范围、并发与业务门禁都已通过（结果仍在副本上）才要求签字；预演不落账，不要求签字。

@@ -9,6 +9,7 @@ import { MistLocalDatabase } from './local';
 import { MIST_MAX_REBASE_GAP, MIST_MAX_SAVE_ATTEMPTS, MistRepository, mistChangeKeys, type MistContract } from './repository';
 import { MemoryMistDatabase, requestReceiptCount, testActor, testAuthority, testContract } from './__tests__/support';
 import { AGENT_AUDIT_FIELD } from './agentAudit';
+import {fixture as shipmentFixture} from './__tests__/professionalFulfillment';
 
 /** 业务门禁与需重新确认的命令：只用于本回归，验证自动合并在最新状态上重新执行规则。 */
 const gatedContract: MistContract = {
@@ -56,6 +57,24 @@ beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), 'mist-conflict
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
 describe('多人保存冲突自动重试：只在最新状态上重新执行可证明互不覆盖的命令', () => {
+  it.each([['save',true],['save',false],['sourceTerms',true],['sourceTerms',false]] as const)('checks shipment %s read sources while preserving unrelated merging (related %s)',async(kind,related)=>{
+    const all=[...new Set(MIST_READ_SECTIONS.flatMap(section=>section.permissions)),'orders:write','shipments:write','relations:write','products:write'];auth.users.get('owner')!.permissions=all;auth.users.get('other')!.permissions=all;
+    const repo=repoFor(db,contract),created=await repo.create(owner,{name:'Shipment source',seed:'empty'}),f=shipmentFixture();let command:any;
+    if(kind==='save'){
+      const branch=f.released();f.receiveAndComplete(branch.productionId,branch.purchaseId);const id=f.shipment(branch.productionId),s=f.state.fulfillment.shipments.find(row=>row.id===id)!;
+      command={type:'fulfillment.shipments.save',payload:{...s,note:'已核对本次出运要求'}};
+    }else{
+      f.approveOrder();command={type:'fulfillment.shipments.sourceTerms',payload:{orderId:f.orderId,consignee:'客户收货仓',partialAllowed:true,mode:'sea',confirmedAt:'2026-10-13',evidence:'已签合同'}};
+    }
+    const state=structuredClone(f.state);state.memberIds=['other'];db.workspaces.get(created.id).state=state;
+    const change=related?(kind==='save'?{type:'production.update',payload:{id:state.productions[0].id,pct:state.productions[0].pct,risk:'待复核出运安排'}}:{type:'order.checklist',payload:{orderId:f.orderId,itemId:state.orders[0].checklist[0].id,done:true}}):{type:'contact.save',payload:{customerId:state.customers[0].id,name:'新联系人',role:'收货',email:'',phone:''}};
+    await repo.execute(other,created.id,{requestId:'concurrent-change',expectedRevision:0,command:change}as any);
+    const before=structuredClone(db.workspaces.get(created.id)),receipts=requestReceiptCount(db);
+    if(!related){const merged=await repo.execute(owner,created.id,{requestId:'old-shipment',expectedRevision:0,command});expect(merged.receipt.revision).toBe(2);return;}
+    await expect(repo.execute(owner,created.id,{requestId:'old-shipment',expectedRevision:0,command})).rejects.toMatchObject({code:'REVISION_CONFLICT',status:409});
+    expect(db.workspaces.get(created.id)).toEqual(before);expect(requestReceiptCount(db)).toBe(receipts);
+    const fresh=await repo.execute(owner,created.id,{requestId:'checked-shipment',expectedRevision:1,command});expect(fresh.receipt.revision).toBe(2);
+  });
   it('Agent事务重试仅保留最后一次实际提交的审计，公开回执不携带内部差异', async () => {
     const database = new FlakyDatabase(), repo = repoFor(database), id = await sharedWorkspace(repo, database);
     database.failures = 2;

@@ -29,6 +29,21 @@ import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, Preview
 import { OptionInput } from '../OptionInput';
 import { DISCHARGE_AIRPORTS, DISCHARGE_PORTS, INCOTERMS, LOADING_AIRPORTS, LOADING_PORTS, splitIncoterm } from '../../runtime/tradeOptions';
 
+function shipmentRequestBasis(state:MistState|null,id:string|undefined,sources:readonly string[]){
+  if(!state)return null;
+  const selected=sources.map(value=>{
+    try{
+      const source=parseSource(state,value);if(source.kind!=='orderLine')return{value,source};
+      const branches=state.productions.filter(row=>row.lineId===source.lineId),branchIds=new Set(branches.map(row=>row.id));
+      return{value,source,order:state.orders.find(row=>row.id===source.orderId),line:state.orderLines.find(row=>row.id===source.lineId),branches,
+        facts:state.fulfillment.productionFacts.filter(row=>branchIds.has(row.productionId)),terms:state.fulfillment.shippingTerms.find(row=>row.orderId===source.orderId),
+        reservations:state.fulfillment.shipments.filter(row=>row.id!==id&&row.state!=='cancelled'&&row.lines.some(line=>line.lineId===source.lineId))};
+    }catch{return{value,missing:true};}
+  });
+  return stableJson({shipment:id?state.fulfillment.shipments.find(row=>row.id===id):null,selected});
+}
+const shippingContractBasis=(state:MistState|null,orderId:string)=>stableJson({order:state?.orders.find(row=>row.id===orderId),terms:state?.fulfillment.shippingTerms.find(row=>row.orderId===orderId)});
+
 type ShipmentEditorDraft={step:number;lines:Array<{source:string;quantity:number|'';factoryConfirmedAt:string}>;form:{portOfLoading:string;portOfDischarge:string;incoterm:string;plannedDate:string;booking:string;note:string}};
 function ShipmentEditor({ shipment, onClose, initialDraft, onCheckTerms }: {
     shipment?: FulfillmentShipment;
@@ -36,7 +51,9 @@ function ShipmentEditor({ shipment, onClose, initialDraft, onCheckTerms }: {
     initialDraft?:ShipmentEditorDraft;
     onCheckTerms?: (orderId: string, draft:ShipmentEditorDraft) => void;
 }) {
-    const { state, run, saving, pending } = useMistWorkspace(), {route}=useNav();
+    const { state, workspace, run, saving, pending } = useMistWorkspace(), {route}=useNav();
+    const baseline=React.useRef({state,workspaceId:workspace?.id});
+    const liveSource=React.useRef({state,workspaceId:workspace?.id,revision:workspace?.revision});liveSource.current={state,workspaceId:workspace?.id,revision:workspace?.revision};
     const hasOrderContext=route.section?.startsWith('order:')===true, sourceOrderId=hasOrderContext?route.section!.slice(6):undefined;
     const incomingOrder=state?.orders.find(order=>order.id===sourceOrderId);
     const sourceOrder=incomingOrder&&(!route.customerId||incomingOrder.customerId===route.customerId)?incomingOrder:undefined;
@@ -89,7 +106,10 @@ function ShipmentEditor({ shipment, onClose, initialDraft, onCheckTerms }: {
     const save = async () => { if (blocked)
         return; setFailure(''); setBusy(true); try {
         const values = validate();
-        await run({ type: 'fulfillment.shipments.save', payload: { ...(shipment ? { id: shipment.id } : {}), ...form, packingDetailVersion:2, ...(state&&values.some(line=>packingFabricSpecification(state,line.lineId))?{packingColorVersion:1 as const}:{}), consignee: terms!.consignee, mode: terms!.mode, lines: values, fileIds: shipment?.fileIds || [] } });
+        const checked=liveSource.current,sources=lines.map(line=>line.source);
+        if(!checked.state||!checked.workspaceId||typeof checked.revision!=='number'||!Number.isSafeInteger(checked.revision)||checked.revision<0)throw new Error('出运资料未读取，请重新打开后核对');
+        if(checked.workspaceId!==baseline.current.workspaceId||shipmentRequestBasis(checked.state,shipment?.id,sources)!==shipmentRequestBasis(baseline.current.state,shipment?.id,sources))throw new Error('出运来源已更新，请重新打开后核对');
+        await run({ type: 'fulfillment.shipments.save', payload: { ...(shipment ? { id: shipment.id } : {}), ...form, packingDetailVersion:2, ...(state&&values.some(line=>packingFabricSpecification(state,line.lineId))?{packingColorVersion:1 as const}:{}), consignee: terms!.consignee, mode: terms!.mode, lines: values, fileIds: shipment?.fileIds || [] } },{expectedRevision:checked.revision});
         onClose();
     }
     catch (e) {
@@ -195,7 +215,7 @@ function readyBlocker(root: MistState, s: FulfillmentShipment) {
 export function ShipmentsPage() {
   const presentedError = React.useContext(MistPresentedErrorContext);
   const { state, workspace, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav(), editor = useEditor();
-  const liveSource=React.useRef({state,revision:workspace?.revision});liveSource.current={state,revision:workspace?.revision};
+  const liveSource=React.useRef({state,workspaceId:workspace?.id,revision:workspace?.revision});liveSource.current={state,workspaceId:workspace?.id,revision:workspace?.revision};
   const [resumeDraft,setResumeDraft]=useRouteDraft<ShipmentEditorDraft|null>(null), [editing, setEditing] = useRouteDraft<FulfillmentShipment | 'new' | null>(null), [packing, setPacking] = useRouteDraft<FulfillmentShipment | null>(null);
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null), [failure, setFailure] = useRouteDraft('');
   const [departure, setDeparture] = useRouteDraft<FulfillmentShipment | null>(null);
@@ -229,7 +249,7 @@ export function ShipmentsPage() {
   const changeDomain = (value: Domain) => { setDomainChoice(value); setStageFilter('all'); setPicked(null); };
   const toast = useToast();
   const act = async (work: () => Promise<unknown>, done?: string) => { setFailure(''); try { await work(); if (done) toast(done); } catch (e) { setFailure(e instanceof Error ? e.message : String(e)); } };
-  const termsSpec = (orderId?: string): ModuleEditorSpec => ({ title: '核对来源合同收货与分批条款', fields: [field('orderId', '来源订单', 'select', true, [emptyOption, ...(state?.orders || []).filter(o => !hasOrderContext || o.id === sourceOrder?.id).map(o => ({ value: o.id, label: o.code }))]), field('consignee', '合同收货方'), field('partialAllowed', '合同允许分批', 'checkbox', false), field('mode', '约定运输方式', 'select', true, [{ value: 'sea', label: '海运' }, { value: 'air', label: '空运' }]), field('confirmedAt', '条款核实日', 'date'), field('evidence', '合同 / 信用证依据', 'textarea')], initialValues: (() => { const id = orderId || sourceOrder?.id || '', order = state?.orders.find(o => o.id === id), contract = order?.governance?.contract; return { orderId: id, consignee: contract?.kind === 'internal' ? contract.receiver || '' : order?.customer || '', partialAllowed: false, mode: 'sea', confirmedAt: today(), evidence: contract?.kind === 'external' && contract.poNumber ? `客户 PO ${contract.poNumber}` : '' }; })(), submit: v => { if(!liveSource.current.state)throw new Error('出运资料未读取，请重新打开后核对');return run({ type: 'fulfillment.shipments.sourceTerms', payload: { orderId: text(v, 'orderId'), consignee: text(v, 'consignee'), partialAllowed: !!v.partialAllowed, mode: text(v, 'mode') as 'sea' | 'air', confirmedAt: text(v, 'confirmedAt'), evidence: text(v, 'evidence') } });} });
+  const termsSpec = (orderId?: string): ModuleEditorSpec => ({ title: '核对来源合同收货与分批条款', fields: [field('orderId', '来源订单', 'select', true, [emptyOption, ...(state?.orders || []).filter(o => !hasOrderContext || o.id === sourceOrder?.id).map(o => ({ value: o.id, label: o.code }))]), field('consignee', '合同收货方'), field('partialAllowed', '合同允许分批', 'checkbox', false), field('mode', '约定运输方式', 'select', true, [{ value: 'sea', label: '海运' }, { value: 'air', label: '空运' }]), field('confirmedAt', '条款核实日', 'date'), field('evidence', '合同 / 信用证依据', 'textarea')], initialValues: (() => { const id = orderId || sourceOrder?.id || '', order = state?.orders.find(o => o.id === id), contract = order?.governance?.contract; return { orderId: id, consignee: contract?.kind === 'internal' ? contract.receiver || '' : order?.customer || '', partialAllowed: false, mode: 'sea', confirmedAt: today(), evidence: contract?.kind === 'external' && contract.poNumber ? `客户 PO ${contract.poNumber}` : '' }; })(), submit: v => { const checked=liveSource.current,orderId=text(v,'orderId');if(!checked.state||!checked.workspaceId||typeof checked.revision!=='number'||!Number.isSafeInteger(checked.revision)||checked.revision<0)throw new Error('出运资料未读取，请重新打开后核对');if(checked.workspaceId!==workspace?.id||shippingContractBasis(checked.state,orderId)!==shippingContractBasis(state,orderId))throw new Error('合同来源已更新，请重新打开后核对');return run({ type: 'fulfillment.shipments.sourceTerms', payload: { orderId: text(v, 'orderId'), consignee: text(v, 'consignee'), partialAllowed: !!v.partialAllowed, mode: text(v, 'mode') as 'sea' | 'air', confirmedAt: text(v, 'confirmedAt'), evidence: text(v, 'evidence') } },{expectedRevision:checked.revision});} });
   if (editing) return <ShipmentEditor shipment={editing === 'new' ? undefined : editing} initialDraft={editing === 'new' ? resumeDraft??undefined : undefined} onCheckTerms={editing === 'new' && business ? (orderId, draft) => { setResumeDraft(draft); editor.open(termsSpec(orderId)); } : undefined} onClose={() => { setResumeDraft(null); setEditing(null); }} />;
   if (packing) return <PackingEditor shipment={packing} onClose={() => setPacking(null)} />;
   // sup41/42/43/mar34：运输与集装箱、唛头、改订舱费用；货代可从关系智库的代理选。
@@ -311,7 +331,7 @@ export function ShipmentsPage() {
       { value: 'departed', label: '已出运', count: stageCount('departed'), color: 'var(--mist-ok)' },
       ...(cancelledCount ? [{ value: 'cancelled' as const, label: '已取消', count: cancelledCount, color: 'var(--mist-ink-3)' }] : []),
     ]} />
-    <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${selected.customer}` : '出运详情'} drawerSub={selected ? `${MODE_LABEL[selected.mode]} · ${selected.portOfLoading} → ${selected.portOfDischarge}` : undefined}
+    <ListDetail freezeLayout={!!dialog || !!departure} drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${selected.customer}` : '出运详情'} drawerSub={selected ? `${MODE_LABEL[selected.mode]} · ${selected.portOfLoading} → ${selected.portOfDischarge}` : undefined}
       list={<Card><DataTable ariaLabel={uiText("出运列表")} loading={loading} rows={rows} rowKey={s => s.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
       detail={detail} summary={summary} /></>}
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
