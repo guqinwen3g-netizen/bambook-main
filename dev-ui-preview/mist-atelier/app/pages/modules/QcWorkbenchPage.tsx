@@ -336,6 +336,7 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, canRelease, locked,
       ]} />
       {task.businessConfirmation && <RecordDisclosure key={task.id+':confirmation'} title={externalCustomer(task, state) ? "客户确认" : "需求方确认"}><Facts items={[{label:'经办人',value:task.businessConfirmation.actor},{label:'时间',value:shortWhen(task.businessConfirmation.at)}]} /><p>{task.businessConfirmation.note}</p></RecordDisclosure>}
       {task.businessContinued && <RecordDisclosure key={task.id+':continued'} title={task.kind === 'production' ? '业务恢复记录' : '业务继续记录'}><Facts items={[{label:'经办人',value:task.businessContinued.actor},{label:'时间',value:shortWhen(task.businessContinued.at)}]} /><p>{task.businessContinued.note}</p></RecordDisclosure>}
+      <QcBusinessHistory task={task} state={state} />
       {onBack && <Button block onClick={onBack}>{backLabel}</Button>}
     </DetailBlock>
     <DetailBlock title={uiText("现场信息")}>
@@ -371,6 +372,18 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, canRelease, locked,
     </DetailBlock>
     <DetailBlock title={uiText("处理记录")}><Events entity="qc" id={task.id} /></DetailBlock>
   </DetailBody>;
+}
+
+const BUSINESS_HISTORY_REASON:Record<NonNullable<FulfillmentQcTask['businessHistory']>[number]['reason'],string>={sample_changed:'实物资料变更',new_report:'新增报告',confirmation_changed:'确认变更',continuation_changed:'继续依据变更'};
+function QcBusinessHistory({task,state}:{task:FulfillmentQcTask;state:MistState}){
+  if(!task.businessHistory?.length)return null;
+  return <RecordDisclosure key={task.id+':business-history'} title="业务接续历史">
+    {task.businessHistory.slice().reverse().map(entry=>{const report=state.fulfillment.qcReports.find(row=>row.id===entry.reportId&&row.taskId===task.id);return <div className="mist-section" key={entry.id} data-qc-business-history={entry.id}>
+      <Facts items={[{label:'所据报告',value:<Mono>{report?.report||'未记录'}</Mono>},...(entry.qualityRevision!==undefined?[{label:'实物版次',value:`V${entry.qualityRevision}`}]:[]),{label:'归档原因',value:uiText(BUSINESS_HISTORY_REASON[entry.reason])},{label:'归档人',value:entry.archivedBy},{label:'归档时间',value:businessWhen(entry.archivedAt)}]} />
+      {entry.confirmation&&<><Facts items={[{label:'确认结果',value:uiText(entry.confirmation.result==='approved'?'确认采用':'不采用')},{label:'确认人',value:entry.confirmation.actor},{label:'确认时间',value:businessWhen(entry.confirmation.at)}]} /><p>{entry.confirmation.note}</p></>}
+      {entry.continued&&<><Facts items={[{label:'继续经办人',value:entry.continued.actor},{label:'继续时间',value:businessWhen(entry.continued.at)}]} /><p>{entry.continued.note}</p></>}
+    </div>;})}
+  </RecordDisclosure>;
 }
 
 function QcReportCard({ report, domain, unit, production, latest }: { report: FulfillmentQcReport; domain: Domain; unit: string; production: boolean; latest: boolean }) {

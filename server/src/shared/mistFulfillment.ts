@@ -114,6 +114,14 @@ export type SampleMovement = {
     fee?: { amount: number; currency: string; expenseId?: string };
     sendPurpose?:SampleSendPurpose;
 };
+export type QcBusinessConfirmation = { result:'approved'|'rejected';note:string;actor:string;actorId?:string;at:string;reportId?:string };
+export type QcBusinessContinuation = { reportId:string;actor:string;actorId?:string;at:string;note:string };
+export type QcBusinessEvidenceArchive = {
+    id:string;reportId?:string;qualityRevision?:number;
+    reason:'sample_changed'|'new_report'|'confirmation_changed'|'continuation_changed';
+    confirmation?:QcBusinessConfirmation;continued?:QcBusinessContinuation;
+    archivedAt:string;archivedBy:string;archivedById?:string;
+};
 export type FulfillmentQcTask = {
     id: string;
     code: string;
@@ -138,13 +146,10 @@ export type FulfillmentQcTask = {
     state: 'pending' | 'working' | 'reported' | 'blocked' | 'awaiting_business';
     reportIds: string[];
     createdAt: string;
-    businessConfirmation?: {
-        result: 'approved' | 'rejected';
-        note: string;
-        actor: string;
-        at: string;
-    };
-    businessContinued?: { reportId: string; actor: string; at: string; note: string };
+    businessConfirmation?: QcBusinessConfirmation;
+    businessContinued?: QcBusinessContinuation;
+    /** Superseded business evidence; never used as the current approval. */
+    businessHistory?: QcBusinessEvidenceArchive[];
     /** Production NOK handling (rework / concession / chargeback), append-only. */
     dispositions?: QcDisposition[];
 };
@@ -1147,6 +1152,16 @@ function normalizeSizes(value: unknown, total: number, required: boolean): Fulfi
     if (rows.length && sum(rows.map(row => row.quantity)) !== total) fail('尺码数量合计必须等于对应总数量');
     return rows;
 }
+/** Archive existing evidence before invalidating it; report IDs keep each decision with its original inspection. */
+function archiveQcBusiness(root:MistState,task:FulfillmentQcTask,ctx:MistContext,reason:QcBusinessEvidenceArchive['reason']) {
+    if(!task.businessConfirmation&&!task.businessContinued)return;
+    const reportId=task.businessConfirmation?.reportId||task.businessContinued?.reportId||task.reportIds.at(-1);
+    const report=root.fulfillment.qcReports.find(row=>row.id===reportId&&row.taskId===task.id);
+    (task.businessHistory??=[]).push({id:ctx.id(),...(reportId?{reportId}:{}),...(report?.scopeRevision!==undefined?{qualityRevision:report.scopeRevision}:{}),reason,
+        ...(task.businessConfirmation?{confirmation:structuredClone(task.businessConfirmation)}:{}),...(task.businessContinued?{continued:structuredClone(task.businessContinued)}:{}),
+        archivedAt:ctx.now,archivedBy:ctx.actorName,...(ctx.actorId?{archivedById:ctx.actorId}:{})});
+}
+
 function scopeRevision(root: MistState, task: FulfillmentQcTask): number {
     if (task.sampleId) return get(root.fulfillment.samples, task.sampleId, '准确实物样品').qualityRevision || 1;
     return task.source.kind === 'orderLine' && task.source.productionId ? fulfillmentProductionFact(root, task.source.productionId)?.revision || 1 : 1;
@@ -1431,7 +1446,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             s.fileIds = files(root, p.fileIds);
             if (changedPhysical) {
                 s.qualityRevision = (s.qualityRevision || 1) + 1;
-                for (const task of f.qcTasks.filter(task => task.sampleId === s.id)) { task.state = 'working'; delete task.businessConfirmation; delete task.businessContinued; }
+                for (const task of f.qcTasks.filter(task => task.sampleId === s.id)) { archiveQcBusiness(root,task,ctx,'sample_changed'); task.state = 'working'; delete task.businessConfirmation; delete task.businessContinued; }
             }
             audit(root, ctx, 'sample', s.id, '更新样品资料');
             return { id: s.id };
@@ -1642,6 +1657,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 }
             }
             const needsResume = t.state === 'blocked' || t.state === 'awaiting_business', previous = t.reportIds.at(-1), id = ctx.id();
+            archiveQcBusiness(root,t,ctx,'new_report');
             delete t.businessConfirmation;
             delete t.businessContinued;
             let sizeChecks: NonNullable<FulfillmentQcReport['sizeChecks']> = [];
@@ -1688,8 +1704,10 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const latest = get(f.qcReports, t.reportIds.at(-1) || '', 'QC报告');
             if (latest.result === 'reject' || latest.scopeRevision !== scopeRevision(root, t))
                 fail('不通过的QC报告不能确认采用');
+            const note=text(p.note,'需求方确认依据');
+            archiveQcBusiness(root,t,ctx,'confirmation_changed');
             delete t.businessContinued;
-            t.businessConfirmation = { result: p.result, note: text(p.note, '需求方确认依据'), actor: ctx.actorName, at: ctx.now };
+            t.businessConfirmation = { result: p.result, note, reportId:latest.id,actor: ctx.actorName,...(ctx.actorId?{actorId:ctx.actorId}:{}), at: ctx.now };
             audit(root,ctx,'qc',t.id,'业务记录需求方样品确认',target(t.source),notificationOwners(root,'qc',t.id));
             return { id: t.id };
         }
@@ -1700,8 +1718,9 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const latest = get(f.qcReports, t.reportIds.at(-1) || '', '当前报告');
             if (latest.result === 'reject' || latest.scopeRevision !== scopeRevision(root, t)) fail('当前实物需要有效复验报告');
             const note = text(p.note, '恢复依据');
+            if(t.businessContinued)archiveQcBusiness(root,t,ctx,'continuation_changed');
             t.state = 'reported';
-            t.businessContinued = { reportId: latest.id, actor: ctx.actorName, at: ctx.now, note };
+            t.businessContinued = { reportId: latest.id, actor: ctx.actorName,...(ctx.actorId?{actorId:ctx.actorId}:{}), at: ctx.now, note };
             if (t.source.kind === 'orderLine' && t.source.productionId) {
                 const job = liveBranch(root, t.source.productionId);
                 if (job.risk?.startsWith('QC 不通过：'))
