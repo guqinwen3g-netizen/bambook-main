@@ -29,6 +29,34 @@ async function advanceRfqNeed(){
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 function purchase(id:string,patch:Partial<FulfillmentPurchase>={}):FulfillmentPurchase{return {id,code:id.toUpperCase(),orderId:'o',lineId:'l',kind:'material',domain:'garment',supplierId:'s',supplier:'青禾辅料',description:'主唛与洗标',quantity:100,unit:'个',price:0.3,currency:'CNY',due:'2026-10-30',terms:'月结30天',destination:'江南成衣',note:'',fileIds:[],state:'draft',requesterId:'buyer',createdBy:'经办人',createdAt:'2026-10-01T08:00:00Z',reviewerIds:['boss'],configVersions:{},received:0,...patch};}
 const approved=(patch:Partial<FulfillmentPurchase>={})=>({state:'approved' as const,submittedAt:'2026-10-02T08:00:00Z',decision:{actorId:'boss',actor:'审批人',at:'2026-10-03T08:00:00Z',decision:'approved' as const,note:'同意'},...patch});
+it.each([false,true])('keeps procurement creation disabled without a read workspace (loading %s)',loading=>{
+  store.state=null;store.loading=loading;render();
+  for(const button of getAllByRole(host,'button',{name:'新建采购订单',exact:true}))expect((button as HTMLButtonElement).disabled).toBe(true);
+  expect(host.textContent).toContain(loading?'正在读取采购资料':'采购资料未读取');
+  expect(host.textContent).not.toContain('还没有成衣采购订单');
+  expect(host.textContent).not.toContain('成衣业务 · 0');
+  expect(host.querySelector('.mist-pipeline')).toBeNull();
+  store.loading=false;
+});
+it.each([false,true])('does not present unread RFQ sources as an empty ledger (loading %s)',loading=>{
+  store.state=null;store.loading=loading;render(undefined,'list',{section:'rfq'});
+  expect(host.textContent).toContain(loading?'正在读取采购资料':'采购资料未读取');
+  expect(host.textContent).not.toContain('还没有成衣询价');
+  expect(queryByRole(host,'button',{name:/新建询价/})).toBeNull();
+  expect(queryByRole(host,'table',{name:'询价单列表'})).toBeNull();
+  store.loading=false;
+});
+it('keeps a genuinely read empty procurement ledger actionable',()=>{
+  render();expect(host.textContent).toContain('还没有成衣采购订单');
+  for(const button of getAllByRole(host,'button',{name:'新建采购订单',exact:true}))expect((button as HTMLButtonElement).disabled).toBe(false);
+  expect(host.querySelector('.mist-pipeline')).not.toBeNull();
+});
+it('opens the original requested purchase after the initial read recovers',()=>{
+  const state=store.state!;state.fulfillment.purchases.push(purchase('recovered'));
+  store.state=null;render('recovered');expect(host.textContent).toContain('采购资料未读取');
+  store.state=state;render('recovered');expect(host.textContent).toContain('RECOVERED');
+  expect(host.textContent).not.toContain('采购资料未读取');expect(store.run).not.toHaveBeenCalled();
+});
 it('generates supplier PDFs through the server and keeps archived files available',async()=>{
   store.state!.fulfillment.purchases.push(purchase('pdf',approved({documents:[{id:'doc',fileId:'pdf-file',fileName:'PO-V1-01.pdf'} as any]})));
   store.state!.files.push({id:'pdf-file',name:'PO-V1-01.pdf',mimeType:'application/pdf',size:100,storageKey:'private',createdAt:''});
@@ -59,7 +87,7 @@ it('recognizes counted direct deliveries while keeping rejected goods awaiting r
   store.state=f.state;render(f.processingId);expect(host.textContent).toContain('1 笔已收 · 0 笔待收');
   expect(host.textContent).not.toContain('1 笔拒收待退');
 });
-beforeEach(()=>{store.pending=null;store.saving=false;store.uploadFile.mockReset();store.recover.mockReset();store.workspace=null;session.id='buyer';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');store.state.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',currency:'USD'} as any);store.state.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',img:'coat',qty:100,unit:'件',price:10,made:0,qc:0,fulfillmentMode:'trims_cmt',cmtIncludedItems:[]});store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
+beforeEach(()=>{store.loading=false;store.error='';store.pending=null;store.saving=false;store.uploadFile.mockReset();store.recover.mockReset();store.workspace=null;session.id='buyer';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');store.state.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',currency:'USD'} as any);store.state.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',img:'coat',qty:100,unit:'件',price:10,made:0,qc:0,fulfillmentMode:'trims_cmt',cmtIncludedItems:[]});store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();vi.useRealTimers();});
 
 it('shows isolated stock disposal on its source purchase only to an inventory reader',()=>{

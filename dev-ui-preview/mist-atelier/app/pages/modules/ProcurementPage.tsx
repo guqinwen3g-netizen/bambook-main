@@ -106,7 +106,7 @@ export function ProcurementPage() {
     .sort((a, b) => Number(purchaseFlags(b, day).length > 0) - Number(purchaseFlags(a, day).length > 0) || Number(purchaseStage(a) === 'done') - Number(purchaseStage(b) === 'done') || (a.due || '9').localeCompare(b.due || '9'));
   const selected = rows.find(p => p.id === picked) || (picked ? all.find(p => p.id === picked && p.domain === domain && entryOf(p) === entry) : undefined);
   const can = session.hasPermission('procurement:write'), canApprove = session.hasPermission('procurement:approve'), me = session.user?.id || '';
-  const locked = saving || !!pending;
+  const locked = !state || saving || !!pending;
   const dialogApproval = dialog?.approvalFor ? all.find(p=>p.id===dialog.approvalFor) : undefined;
   const canDialog = dialog?.approvalFor ? canApprove && !!dialogApproval && dialogApproval.state==='pending' && dialogApproval.reviewerIds.includes(me) : can;
   React.useEffect(()=>{if(!can)editor.open(null);if(dialog&&!canDialog)setDialog(null);},[can,canDialog,dialog]);
@@ -304,11 +304,12 @@ export function ProcurementPage() {
       actions={<>
         {sourceOrder && sourceLine && <Button onClick={() => go('orders/detail', sourceOrder.id, { orderLineId: sourceLine.id, customerId: sourceOrder.customerId, section: sourceOrder.type })}>{uiText("返回来源订单")}</Button>}
         {route.orderLineId && <Button onClick={() => go('procurement')}>{uiText("查看全部采购")}</Button>}
-        <Button icon={Download} disabled={!rows.length} onClick={() => exportRecords('采购台账', ['编号', '入口', '供应商', '内容', '数量', '单位', '单价', '币种', '要求交期', '承诺交期', '审批', '阶段', '累计交付'], rows.map(p => [p.code, ENTRY_LABEL[entryOf(p)], p.supplier, p.description, p.quantity, p.unit, p.price, p.currency, p.due, p.supplierConfirmation?.confirmedDue || '', status[p.state], STAGE_LABEL[purchaseStage(p)], p.received]))}>{uiText("导出")}</Button>
+        <Button icon={Download} disabled={!state || !rows.length} onClick={() => exportRecords('采购台账', ['编号', '入口', '供应商', '内容', '数量', '单位', '单价', '币种', '要求交期', '承诺交期', '审批', '阶段', '累计交付'], rows.map(p => [p.code, ENTRY_LABEL[entryOf(p)], p.supplier, p.description, p.quantity, p.unit, p.price, p.currency, p.due, p.supplierConfirmation?.confirmedDue || '', status[p.state], STAGE_LABEL[purchaseStage(p)], p.received]))}>{uiText("导出")}</Button>
         {!rfqTab && createButton}
       </>} />
     {readOnlyBanner}
     {noSupplierBanner}
+    {!state ? <Card><EmptyState icon={ShoppingCart} title={uiText(loading ? '正在读取采购资料' : '采购资料未读取')} /></Card> : <>
     <div className="mist-section"><Segmented<Domain> ariaLabel={uiText("业务板块")} value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${inScope.filter(p => p.domain === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${inScope.filter(p => p.domain === 'fabric').length}` }]} /></div>
     <Tabs<Entry | 'rfq'> value={rfqTab ? 'rfq' : entry} onChange={value => { if (value === 'rfq') setRfqTab(true); else { setRfqTab(false); changeEntry(value); } }} options={[{ value: 'purchase', label: '采购订单', count: domainRows.filter(p => entryOf(p) === 'purchase').length }, { value: 'processing', label: '委外加工单', count: domainRows.filter(p => entryOf(p) === 'processing').length }, { value: 'rfq', label: '询价比价', count: state ? readRfqs(state).filter(r => r.domain === domain && r.state === 'open' && (!route.orderLineId || r.lineId === route.orderLineId)).length : 0 }]} />
     {rfqTab ? <>
@@ -331,6 +332,7 @@ export function ProcurementPage() {
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${selected.description}` : '单据详情'} drawerSub={selected?.supplier}
       list={<Card><DataTable ariaLabel={ui`${ENTRY_LABEL[entry]}列表`} loading={loading} rows={rows} rowKey={p => p.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
       detail={detail} summary={summary} />
+    </>}
     </>}
     <ModuleEditorDialog spec={canDialog ? dialog : null} onClose={() => setDialog(null)} />
   </MistPage>;
