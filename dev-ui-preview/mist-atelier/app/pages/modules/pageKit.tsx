@@ -8,6 +8,7 @@ import { BackLink, Button, Card, Drawer, Facts, MistPage } from '../../../../../
 import { useNav } from '../../nav';
 
 const COMPACT_QUERY = '(max-width: 1180px)';
+const detailActionName=(button:HTMLElement)=>(button.getAttribute('aria-label')||button.textContent||'').trim();
 /** The sticky preview column is hidden by Mist CSS at ≤1180px; detail then opens in a drawer. */
 export function useCompactLayout(mediaQuery = COMPACT_QUERY) {
   const query = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(mediaQuery).matches;
@@ -37,12 +38,26 @@ export function ListDetail({ list, detail, summary, drawerTitle, drawerSub, draw
   list: React.ReactNode; detail: React.ReactNode; summary?: React.ReactNode | null; drawerTitle: React.ReactNode; drawerSub?: React.ReactNode; drawerOpen: boolean; onDrawerClose: () => void; freezeLayout?: boolean;
 }) {
   const mediaCompact = useCompactLayout(), [compact,setCompact] = React.useState(mediaCompact), summaryMode = summary !== undefined;
+  const surface=React.useRef<HTMLDivElement>(null), lastAction=React.useRef(''), wasFrozen=React.useRef(freezeLayout);
   // A responsive detail drawer must not mount above an active editor or remove
   // its parent drawer. Apply the current viewport once that action has closed.
-  React.useLayoutEffect(()=>{if(!freezeLayout)setCompact(mediaCompact);},[mediaCompact,freezeLayout]);
-  return <div className="mist-split" data-list-detail="" data-preview-summary={summaryMode ? '' : undefined}>
+  React.useLayoutEffect(()=>{
+    const released=wasFrozen.current&&!freezeLayout;wasFrozen.current=freezeLayout;
+    if(freezeLayout)return;
+    const returnToPreview=released&&compact&&!mediaCompact;setCompact(mediaCompact);
+    if(returnToPreview)queueMicrotask(()=>{
+      // Closing a mobile action can remove both its dialog and parent drawer.
+      // Restore the equivalent action only when their old focus is now unclaimed.
+      const root=surface.current;
+      if(!root?.isConnected||document.activeElement!==document.body||document.querySelector('[role="dialog"][aria-modal="true"]'))return;
+      const preview=root.querySelector<HTMLElement>('.mist-preview');
+      const target=Array.from(preview?.querySelectorAll<HTMLButtonElement>('button:not([disabled])')||[]).find(button=>detailActionName(button)===lastAction.current);
+      (target||preview)?.focus();
+    });
+  },[mediaCompact,freezeLayout,compact]);
+  return <div ref={surface} onFocusCapture={event=>{const button=(event.target as HTMLElement).closest('button');if(button)lastAction.current=detailActionName(button);}} className="mist-split" data-list-detail="" data-preview-summary={summaryMode ? '' : undefined}>
     {list}
-    {!compact && <Card as="aside" className="mist-preview" aria-label={uiText(summaryMode ? '记录预览' : undefined)}>{uiText(summaryMode ? summary ?? detail : detail)}</Card>}
+    {!compact && <Card as="aside" tabIndex={-1} className="mist-preview" aria-label={uiText(summaryMode ? '记录预览' : undefined)}>{uiText(summaryMode ? summary ?? detail : detail)}</Card>}
     {compact && <Drawer open={drawerOpen} onClose={onDrawerClose} title={uiText(drawerTitle)} sub={uiText(drawerSub)} size="lg"><DetailSurface.Provider value="drawer">{detail}</DetailSurface.Provider></Drawer>}
   </div>;
 }
