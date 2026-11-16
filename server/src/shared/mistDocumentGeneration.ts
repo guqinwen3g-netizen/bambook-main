@@ -16,7 +16,8 @@ import { MistCommandError, lineAmount, type MistContext, type MistState, type Mi
 import type { FulfillmentDocument, FulfillmentShipment } from './mistFulfillment';
 import { platformBusinessDate } from './mistPlatform';
 import { customsItemsStale, draftCustomsDeclaration } from './mistCustomsDeclaration';
-import { breakdownSummary, type OrderLineBreakdown } from './mistOrderBreakdown';
+import { breakdownSummary, fabricSpecText, type OrderLineBreakdown } from './mistOrderBreakdown';
+import {canonicalPackingSkus,packingSkuError,packingFabricColorError} from './mistPackingBreakdown';
 import { readLetterOfCredits } from './mistLetterOfCredit';
 import { replacementDeclaredUnitPrice } from './mistClaimReplacement';
 import { amountInWords, generatedDocContent, generatedDocFingerprint, GENERATED_DOCUMENT_TEMPLATE_VERSION, issuerOf, money2, qtyText, type GeneratedDocArtifact, type GeneratedDocRecord, type GeneratedDocSnapshot } from './mistGeneratedDocument';
@@ -64,11 +65,31 @@ const transportFacts = (s: FulfillmentShipment) => [
   ...(s.booking ? [{ label: { zh: '订舱号', en: 'Booking no.' }, value: s.booking }] : []),
   ...(s.plannedDate ? [{ label: { zh: '计划出运日', en: 'Planned date' }, value: s.plannedDate }] : []),
 ];
+/** CI specifications describe this physical batch, never the full contract ratio.
+ * Before complete detailed packing, keep only non-quantity fabric specifications. */
+function shipmentLineDetail(root:MistState,s:FulfillmentShipment,source:FulfillmentShipment['lines'][number],line:MistOrderLine&{breakdown?:OrderLineBreakdown}){
+  const spec=line.breakdown;if(!spec)return '';
+  const rows=packingOf(root,s).filter(row=>row.lineId===source.lineId&&(row.productionId||'')===(source.productionId||''));
+  const complete=rows.length>0&&r4(rows.reduce((sum,row)=>sum+row.quantity,0))===r4(source.quantity);
+  if(spec.kind==='fabric'){
+    if(!complete||rows.some(row=>packingFabricColorError(root,line.id,row.fabricColor)))return fabricSpecText(spec);
+    const normalize=(value:string)=>value.normalize('NFC').trim().toLowerCase();
+    const actual=spec.rows.map(color=>({color:color.color,quantity:r4(rows.filter(row=>normalize(row.fabricColor||'')===normalize(color.color)).reduce((sum,row)=>sum+row.quantity,0))})).filter(row=>row.quantity>0);
+    return breakdownSummary({...spec,rows:actual},line.unit);
+  }
+  if(!complete||rows.some(row=>packingSkuError(root,line.id,row.quantity,row.assortment)))return '';
+  const cells=canonicalPackingSkus(root,line.id,rows.flatMap(row=>row.assortment||[]));
+  const colors=spec.rows.map(color=>{
+    const sizes=spec.sizes.map(size=>({size,quantity:cells.filter(cell=>cell.color===color.color&&cell.size===size).reduce((sum,cell)=>sum+cell.quantity,0)})).filter(cell=>cell.quantity>0);
+    return sizes.length?`${color.color}：${sizes.map(cell=>`${cell.size} ${qtyText(cell.quantity)}`).join(' / ')}`:'';
+  }).filter(Boolean);
+  return colors.join('；')+`（合计 ${qtyText(source.quantity)} ${line.unit}）`;
+}
 function goodsLines(root: MistState, s: FulfillmentShipment, orderId?: string) {
   return s.lines.filter(l => !orderId || l.orderId === orderId).map(l => {
     const line = lineOf(root, l.lineId), order = root.orders.find(o => o.id === l.orderId);
     if (!line || !order) return fail('出运明细的订单条目不可用');
-    return { order, line, quantity: l.quantity, detail: line.breakdown ? breakdownSummary(line.breakdown, line.unit) : '' };
+    return { order, line, quantity: l.quantity, detail: shipmentLineDetail(root,s,l,line) };
   });
 }
 /** External goods names keep the identifier separate from specifications. */

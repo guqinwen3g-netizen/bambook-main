@@ -52,6 +52,32 @@ describe('shipment document generation', () => {
     f.state.fulfillment.packing=f.state.fulfillment.packing.filter(x=>x.lineId!==secondLine.id);
     expect(weights(snapshot('CI',secondOrder.id))).toBeUndefined();
   });
+  it('prints each partial garment CI assortment from its exact shipment and production packing',()=>{
+    const {f,shipmentId}=ready(),line=f.state.orderLines[0],s=f.state.fulfillment.shipments.find(row=>row.id===shipmentId)!;
+    line.qty=12;line.price=42;line.breakdown={kind:'garment',sizes:['S','M','L','XL'],rows:[{color:'Blue',quantities:[2,4,4,2]}]};
+    const source=s.lines[0];source.quantity=8;
+    const second={...structuredClone(s),id:'shipment-second',code:'SHP-B',lines:[{...source,quantity:4}]};f.state.fulfillment.shipments.push(second);
+    const pack=(id:string,shipmentId:string,productionId:string|undefined,counts:number[])=>({id,shipmentId,lineId:line.id,productionId,carton:id,quantity:counts.reduce((a,b)=>a+b,0),netWeight:1,grossWeight:2,volume:0.1,note:'',assortment:counts.map((quantity,i)=>({color:'Blue',size:['S','M','L','XL'][i],quantity}))});
+    f.state.fulfillment.packing=[pack('A1',s.id,source.productionId,[1,1,1,1]),pack('A2',s.id,source.productionId,[1,1,1,1]),pack('B1',second.id,source.productionId,[0,2,2,0]),pack('other-branch',s.id,'other-production',[0,20,0,0])];
+    const ci=(id:string)=>prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId:id,type:'CI',orderId:f.orderId,dueDate:'2026-12-01'}},f.context);
+    const before=structuredClone(f.state),a=ci(s.id),b=ci(second.id);
+    expect(a.table!.rows[0]).toMatchObject({qty:'8 件',price:'42.00',amount:'336.00'});expect(a.table!.rows[0].desc).toContain('Blue：S 2 / M 2 / L 2 / XL 2（合计 8 件）');
+    expect(b.table!.rows[0]).toMatchObject({qty:'4 件',amount:'168.00'});expect(b.table!.rows[0].desc).toContain('Blue：M 2 / L 2（合计 4 件）');
+    expect(a.table!.rows[0].desc).not.toContain('12 件');expect(b.table!.rows[0].desc).not.toContain('XL');expect(f.state).toEqual(before);
+  });
+  it('never invents partial garment assortment before actual detailed packing is available',()=>{
+    const {f,shipmentId}=ready(),line=f.state.orderLines[0],s=f.state.fulfillment.shipments.find(row=>row.id===shipmentId)!;
+    line.breakdown={kind:'garment',sizes:['S','M'],rows:[{color:'Blue',quantities:[4,6]}]};s.lines[0].quantity=4;
+    const snapshot=prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CI',orderId:f.orderId,dueDate:'2026-12-01'}},f.context);
+    expect(snapshot.table!.rows[0].desc).toBe(line.name);expect(snapshot.table!.rows[0].qty).toBe('4 件');
+  });
+  it('keeps fabric physical specifications but prints only the actual batch colour quantity and source unit',()=>{
+    const {f,shipmentId}=ready(),line=f.state.orderLines[0],s=f.state.fulfillment.shipments.find(row=>row.id===shipmentId)!;
+    f.state.orders[0].type='fabric';s.domain='fabric';line.unit='码';line.qty=100;line.breakdown={kind:'fabric',width:150,weight:180,composition:'Cotton',rows:[{color:'Blue',quantity:60},{color:'White',quantity:40}]};s.lines[0].quantity=32.5;
+    f.state.fulfillment.packing=[{id:'P1',shipmentId,lineId:line.id,productionId:s.lines[0].productionId,carton:'R1',quantity:32.5,netWeight:2,grossWeight:3,volume:0.1,note:'',fabricColor:'Blue'}];
+    const snapshot=prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CI',orderId:f.orderId,dueDate:'2026-12-01'}},f.context),desc=snapshot.table!.rows[0].desc;
+    expect(desc).toContain('门幅 150 cm');expect(desc).toContain('克重 180 g/m²');expect(desc).toContain('Cotton');expect(desc).toContain('Blue 32.5（合计 32.5 码）');expect(desc).not.toContain('White');expect(desc).not.toContain('100 码');
+  });
   it('generates a CI draft from shipment and order prices, then issues it through the receivable rule', () => {
     const { f, shipmentId } = ready();
     const { result, snapshot, fileId } = generate(f, { type: 'fulfillment.documents.generate', payload: { shipmentId, type: 'CI', orderId: f.orderId, dueDate: '2026-12-01' } });

@@ -249,7 +249,7 @@ function DocumentDetail({ doc: d, state, can, canInvoices, locked, onPick, onEdi
       { label: '客户', value: s?.customer || '—' },
       { label: '运输', value: s ? `${MODE_LABEL[s.mode]} · ${s.portOfLoading} → ${s.portOfDischarge}` : '—' },
       { label: '对应订单', value: order?.code || (d.orderId ? '订单不可用' : '整票出运') },
-      ...(d.type === 'CI'&&!order?.replacementSource ? [{ label: 'CI 合同应收日', value: d.dueDate || '未填写' }] : []),
+      ...(d.type === 'CI'&&!order?.replacementSource ? [{ label: d.receivableDueCondition?'合同账期':'CI 合同应收日', value: d.receivableDueCondition?.terms || d.dueDate || '未填写' }] : []),
       { label: '标题', value: d.title },
       { label: '创建', value: `${d.actor} · ${shortWhen(d.createdAt)}` },
       { label: '签发 / 归档', value: d.issuedAt ? shortWhen(d.issuedAt) : '尚未签发' },
@@ -259,7 +259,7 @@ function DocumentDetail({ doc: d, state, can, canInvoices, locked, onPick, onEdi
     <DetailBlock title={uiText("单据正文")}><p className="mist-sub" style={{ whiteSpace: 'pre-wrap' }}>{d.content}</p></DetailBlock>
     {d.type==='CI'&&order?.replacementSource&&<DetailBlock title={uiText('补发CI')}><Facts items={[{label:'客户收款',value:uiText('无需收款')},{label:'申报货值',value:d.replacementDeclaredAmount!==undefined?order.currency+' '+fmt(d.replacementDeclaredAmount,2):uiText('待签发')}]}/></DetailBlock>}
     {d.type === 'CI'&&!order?.replacementSource && <DetailBlock title={uiText("财务应收")} aside={invoice && canInvoices ? <TextLink icon={Receipt} onClick={() => onInvoice(invoice.id)}>{uiText("查看应收 ")}{invoice.code}</TextLink> : undefined}>
-      {invoice ? <Facts items={[{ label: '应收金额', value: `${invoice.currency} ${fmt(invoice.amount, 2)}` }, { label: '未收', value: invoice.voidedAt ? '已随 CI 作废' : isPendingFinanceMistInvoice(invoice) ? '待财务确认' : `${invoice.currency} ${fmt(invoice.open, 2)}` }, { label: '到期日', value: invoice.due }]} />
+      {invoice ? <Facts items={[{ label: '应收金额', value: `${invoice.currency} ${fmt(invoice.amount, 2)}` }, { label: '未收', value: invoice.voidedAt ? '已随 CI 作废' : isPendingFinanceMistInvoice(invoice) ? '待财务确认' : `${invoice.currency} ${fmt(invoice.open, 2)}` }, { label: '到期日', value: invoice.due || (invoice.receivableDueCondition?'待核对账期':'—') }]} />
         : <span className="mist-note">{uiText(d.status === 'draft' ? '待签发' : '未找到对应应收')}</span>}
     </DetailBlock>}
     <DetailBlock title={ui`版本（${versions.length}）`}>

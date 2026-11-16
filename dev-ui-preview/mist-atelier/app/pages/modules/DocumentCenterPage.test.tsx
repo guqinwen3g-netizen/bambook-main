@@ -176,3 +176,11 @@ it('keeps a CI on acceptance terms without inventing a fixed due date before acc
  await click(getByRole(d,'button',{name:'生成'}));
  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.documents.generate',payload:{shipmentId:'s',type:'CI',orderId:'o'}});
 });
+
+ it('shows frozen acceptance terms on the CI detail and unresolved receivable date without a false missing-input warning',()=>{
+  const terms={kind:'deliveryAcceptance' as const,days:30,terms:'交付验收后30天付款'};
+  store.state!.fulfillment.documents.push(doc('ci-terms','CI',{dueDate:'',receivableDueCondition:terms,status:'issued',invoiceId:'invoice-terms'}));
+  store.state!.invoices.push({id:'invoice-terms',code:'AR-TERMS',orderId:'o',order:'SO-1',customer:'Cedar',due:'',amount:100,open:100,currency:'USD',financeStatus:'confirmed',receivableDueCondition:terms});
+  render('ci-terms');const detail=host.querySelector('[data-document-detail="ci-terms"]') as HTMLElement;
+  expect(detail.textContent).toContain('合同账期交付验收后30天付款');expect(detail.textContent).toContain('待核对账期');expect(detail.textContent).not.toContain('CI 合同应收日未填写');
+ });
