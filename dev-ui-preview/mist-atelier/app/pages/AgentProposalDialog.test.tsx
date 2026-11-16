@@ -34,13 +34,14 @@ it.each(['order','file'])('blocks a saved contract proposal after its %s source 
   if(kind==='order')state.orders=[];else state.files=[];render();expect(getConfirm(host).disabled).toBe(true);expect(host.textContent).toContain('订单或来源资料已不可见，请重新核对');
  }finally{act(()=>root.unmount());host.remove();}
 });
-it('identifies the assigned owner and priced order line in a contract change and blocks a missing line',()=>{
+it('identifies the assigned owner and priced line, permits new proposed lines, and blocks another order line',()=>{
  const{state,proposal}=contractProposalFixture();state.orders[0].currency='GBP';state.orderLines=[{id:'line-private',orderId:'order-private',style:'HLB-T01',name:'塔丝隆',qty:10,unit:'米',price:1.95} as any];
  proposal.command.payload.orderPatch={ownerId:'owner-private'};proposal.command.payload.lines=[{...state.orderLines[0],price:2.25,img:'clay'}];
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
  try{const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));render();
   expect(host.textContent).toContain('负责人 · 沈禾');expect(host.textContent).toContain('单价 · 2.25 GBP');expect(host.textContent).not.toContain('line-private');expect(host.textContent).not.toContain('owner-private');expect(host.textContent).not.toContain('img ·');
-  state.orderLines=[];render();expect(getConfirm(host).disabled).toBe(true);
+  state.orderLines=[];render();expect(getConfirm(host).disabled).toBe(false);expect(host.textContent).toContain('HLB-T01');expect(host.textContent).not.toContain('line-private');
+  state.orderLines=[{id:'line-private',orderId:'another-order',style:'OTHER'} as any];render();expect(getConfirm(host).disabled).toBe(true);
  }finally{act(()=>root.unmount());host.remove();}
 });
 it('presents an order draft as named business objects, full terms and an exact currency total',()=>{

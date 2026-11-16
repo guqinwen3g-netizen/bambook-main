@@ -71,9 +71,11 @@ function orderSourceMissing(command:AgentProposal['command'],state?:MistState|nu
   const patch=p.orderPatch as {ownerId?:unknown}|undefined;
   if(contractDraft&&!state.orders.some(order=>order.id===p.orderId))return true;
   const memberMissing=(id:unknown)=>typeof id==='string'&&!!id&&!state.members?.some(m=>m.userId===id);
+  // Governance proposals can introduce new line IDs. Missing from the active
+  // order is therefore not enough to reject one; known cross-order IDs are invalid.
   return missing(p.customerId,state.customers)||memberMissing(contractDraft?patch?.ownerId:p.ownerId)||memberMissing(contract?.internalSupply?.receiverId)
     ||Array.isArray(contract?.confirmationFileIds)&&contract.confirmationFileIds.some(id=>missing(id,state.files))
-    ||Array.isArray(p.lines)&&p.lines.some(line=>line&&typeof line==='object'&&((contractDraft&&typeof line.id==='string'&&!state.orderLines.some(row=>row.id===line.id&&row.orderId===p.orderId))||missing(line.sourceProductId,state.market.products)||missing(line.sourceDevId,state.devs)||missing(line.sourceVersionId,state.versions)||missing(line.sourceQuotationId,state.market.quotations)
+    ||Array.isArray(p.lines)&&p.lines.some(line=>line&&typeof line==='object'&&((contractDraft&&typeof line.id==='string'&&state.orderLines.some(row=>row.id===line.id&&row.orderId!==p.orderId))||missing(line.sourceProductId,state.market.products)||missing(line.sourceDevId,state.devs)||missing(line.sourceVersionId,state.versions)||missing(line.sourceQuotationId,state.market.quotations)
       ||typeof line.sourceQuotationLineId==='string'&&!!line.sourceQuotationLineId&&!state.market.quotations.find(q=>q.id===line.sourceQuotationId)?.lines.some(l=>l.id===line.sourceQuotationLineId)));
 }
 export function proposalFieldChanges(command: AgentProposal['command'], full = false, state?:MistState|null): { rows: Array<{ field: string; path: string; value: string }>; omitted: number } {
@@ -119,7 +121,12 @@ export function proposalFieldChanges(command: AgentProposal['command'], full = f
       field=path.split('.').filter(p=>!orderContract||!['input','orderPatch'].includes(p)).map(p=>/^\d+$/.test(p)?'第'+p+'项':ORDER_LABEL[p]||FIELD_LABEL[p]||p).join(' · ');
       if(path==='orderId')text=currentOrder?.code||'订单已不可见';
       else if(path==='customerId')text=state?.customers.find(c=>c.id===value)?.name||'客户已不可见';
-      else if(/^lines\.\d+\.id$/.test(path)){const line=state?.orderLines.find(line=>line.id===value);text=line?.style||line?.name||'条目已不可见';}
+      else if(/^lines\.\d+\.id$/.test(path)){
+        const line=state?.orderLines.find(line=>line.id===value&&line.orderId===currentOrder?.id)??currentOrder?.governance?.changeDraft?.lines.find(line=>line.id===value);
+        const proposed=Array.isArray(command.payload.lines)?command.payload.lines.find(line=>line?.id===value):undefined;
+        const proposedName=typeof proposed?.style==='string'&&proposed.style||typeof proposed?.name==='string'&&proposed.name;
+        text=line?.style||line?.name||proposedName||'新增条目';
+      }
       else if(key==='ownerId'||key==='receiverId')text=state?.members?.find(m=>m.userId===value)?.name||'负责人已不可见';
       else if(orderContract&&/^lines\.\d+\.price$/.test(path))text=typeof value==='number'&&Number.isFinite(value)?value.toFixed(2)+' '+String(contractPatch?.currency||currentOrder?.governance?.changeDraft?.orderPatch?.currency||currentOrder?.currency||''):'金额无效';
       else if(/^(governance|input)\.confirmationFileIds\.\d+$/.test(path))text=state?.files.find(f=>f.id===value)?.name||'附件已不可见';
