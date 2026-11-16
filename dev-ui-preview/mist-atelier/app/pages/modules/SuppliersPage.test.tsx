@@ -18,12 +18,25 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-14T04:00:00Z'));
   let n = 0; const ctx: MistContext = { id: () => `s-test-${++n}`, actorName: '演示', now: '2026-10-14T02:00:00.000Z' };
   state = createMistState(ctx, 'demo');
-  bridge.current = { state, run: vi.fn(async () => ({ result: { id: 'saved' } })), error: '', refresh: vi.fn(), loading: false, saving: false, pending: null, upload: vi.fn() };
+  bridge.current = { state, workspace:{id:'workspace',revision:7}, run: vi.fn(async () => ({ result: { id: 'saved' } })), error: '', refresh: vi.fn(), loading: false, saving: false, pending: null, upload: vi.fn() };
 });
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; host?.remove(); vi.useRealTimers(); });
 async function mount(id?: string, detail?: 'full') { host = document.createElement('div'); document.body.append(host); root = createRoot(host); const Page = MARKET_PAGES.suppliers; await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'suppliers', id, detail }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
 const button = (label: string) => [...document.body.querySelectorAll('button')].find(b => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
 async function click(label: string) { const b = button(label); expect(b, label).toBeTruthy(); await act(async () => b!.click()); }
+async function repaint(id:string){const Page=MARKET_PAGES.suppliers;await act(async()=>root!.render(<Nav.Provider value={{route:{view:'suppliers',id,detail:'full'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><Page/></Nav.Provider>));}
+async function fillProfile(label:string,value:string){const input=document.querySelector(`[role="dialog"] [aria-label="${label}"]`)as HTMLInputElement|HTMLTextAreaElement;expect(input).toBeTruthy();await act(async()=>{Object.getOwnPropertyDescriptor(input.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
+
+it.each(['name','type','country','address','capabilities','capacity','capacityUnit','leadDays','note','handlers','removed'])('refuses stale supplier profile fields and keeps input: %s',async field=>{
+ const supplier=state.market.suppliers[0];await mount(supplier.id,'full');await click('编辑档案');await fillProfile('备注','我的补充');const patch=field==='handlers'?{handlers:{fabric:{id:'peer',name:'同事'}}}:field==='capacity'||field==='leadDays'?{[field]:999}:field==='type'?{type:'服务商'}:{[field]:'同事更新'};
+ state={...state,market:{...state.market,suppliers:field==='removed'?state.market.suppliers.filter(s=>s.id!==supplier.id):state.market.suppliers.map(s=>s.id===supplier.id?{...s,...patch}:s)}}as MistState;bridge.current={...bridge.current,state,workspace:{id:'workspace',revision:8}};await repaint(supplier.id);await click('保存');expect(bridge.current.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('供应商档案已更新，请重新打开后核对');expect((document.querySelector('[aria-label="备注"]')as HTMLTextAreaElement).value).toBe('我的补充');
+});
+it('keeps newer attachments and non-profile records while binding the checked revision',async()=>{
+ const supplier=state.market.suppliers[0];await mount(supplier.id,'full');await click('编辑档案');await fillProfile('备注','我的补充');const current={...supplier,fileIds:['peer-file'],contacts:[...supplier.contacts,{id:'peer-contact',name:'同事',role:'',email:'',phone:'',primary:false}],ratings:[...(supplier.ratings||[]),{id:'peer-rating',grade:'B' as const,period:'本季',note:'履约记录',at:'2026-10-14T03:00:00Z',actor:'主管'}]};state={...state,market:{...state.market,suppliers:state.market.suppliers.map(s=>s.id===supplier.id?current:s)}};bridge.current={...bridge.current,state,workspace:{id:'workspace',revision:9}};await repaint(supplier.id);await click('保存');expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.supplier.save',payload:expect.objectContaining({input:expect.objectContaining({note:'我的补充',fileIds:['peer-file']})})}),{expectedRevision:9});
+});
+it.each(['workspace','unread','revision'])('does not submit a supplier draft after source availability changes: %s',async kind=>{
+ const supplier=state.market.suppliers[0];await mount(supplier.id,'full');await click('编辑档案');await fillProfile('备注','保留输入');bridge.current={...bridge.current,state:kind==='unread'?null:state,workspace:{id:kind==='workspace'?'another':'workspace',revision:kind==='revision'?undefined:8}};await repaint(supplier.id);await click('保存');expect(bridge.current.run).not.toHaveBeenCalled();expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+});
 
 describe('供应商管理', () => {
   it('excludes a confirmed final short closure from open work while preserving original quantity and delivery KPIs', async () => {
@@ -68,7 +81,7 @@ describe('供应商管理', () => {
       await act(async()=>fireEvent.change(getByRole(document.body,'textbox',{name,exact:true}),{target:{value}}));
     }
     await click('保存');
-    expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.supplier.save',payload:expect.objectContaining({input:expect.objectContaining({type:'服务商',address:'上海',capabilities:'出口货运及报关',capacity:0,capacityUnit:'',leadDays:0})})}));
+    expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.supplier.save',payload:expect.objectContaining({input:expect.objectContaining({type:'服务商',address:'上海',capabilities:'出口货运及报关',capacity:0,capacityUnit:'',leadDays:0})})}), {expectedRevision:7});
   });
   it('shows service details and contacts without manufacturing KPIs or a production RFQ action',async()=>{
     const row={...named('华盛毛纺'),id:'service',code:'LOG-001',name:'浦江物流',type:'服务商',capabilities:'出口货运及报关',capacity:0,capacityUnit:'',leadDays:0,certificates:[],ratings:[]};state.market.suppliers.push(row);
@@ -145,6 +158,6 @@ it.each(['成衣加工','服务商'])('creates %s with only name and type and no
  await act(async()=>fireEvent.change(getByRole(document.body,'textbox',{name:'名称',exact:true}),{target:{value:'新供应商'}}));
  await act(async()=>fireEvent.change(getByRole(document.body,'combobox',{name:'供应商类型'}),{target:{value:type}}));
  await click('保存');
- expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.supplier.save',payload:expect.objectContaining({input:expect.objectContaining({name:'新供应商',type,capabilities:'',capacity:0,capacityUnit:'',leadDays:0})})}));
+ expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.supplier.save',payload:expect.objectContaining({input:expect.objectContaining({name:'新供应商',type,capabilities:'',capacity:0,capacityUnit:'',leadDays:0})})}), {expectedRevision:7});
  expect(bridge.current.run.mock.calls[0][0].payload.input.code).toBeUndefined();
 });

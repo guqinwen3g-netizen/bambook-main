@@ -10,6 +10,7 @@ import React from 'react';
 import { Award, Ban, Building2, Download, FileBadge, Mail, Pause, Pencil, Play, Plus, Scale, SearchX, UserPlus } from 'lucide-react';
 import { Banner, Button, Card, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, ObjectCell, PageHeader, Pill, Pipeline, SearchField, TextLink, Timeline, Toolbar, type Column, type Tone } from '../../../../../components/mist';
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
+import { stableJson } from '../../../../../server/src/shared/stableJson';
 import type { FulfillmentPurchase } from '../../../../../server/src/shared/mistFulfillment';
 import { SUPPLIER_GRADES, SUPPLIER_TYPES, marketBusinessDate, supplierGrade, type MarketSupplier, type SupplierCertificate } from '../../../../../server/src/shared/mistMarket';
 import { PAYEE_RECENT_DAYS } from '../../../../../server/src/shared/mistPayables';
@@ -21,7 +22,7 @@ import { MIST_BUSINESS_GROUPS, MIST_BUSINESS_GROUP_LABEL } from '../../../../../
 import { useNav } from '../../nav';
 import { setComposeIntent } from '../../runtime/composeIntent';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec , moduleFileIds } from './ModuleWorkbench';
-import { useRouteDraft } from './useRouteDraft';
+import { useRouteDraft, useRouteScope } from './useRouteDraft';
 import { ActionBar, businessDay, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
 import { CAPACITY_UNITS, CERTIFICATES, COUNTRIES } from '../../runtime/tradeOptions';
 import { fmt } from '../../data';
@@ -74,8 +75,11 @@ export type SupplierWorkbenchProps = {
   history: (id: string) => React.ReactNode;
 };
 
+const supplierProfileSource=(s:MarketSupplier)=>stableJson({id:s.id,code:s.code,name:s.name,type:s.type,country:s.country,address:s.address,capabilities:s.capabilities,capacity:s.capacity,capacityUnit:s.capacityUnit,leadDays:s.leadDays,note:s.note,handlerIds:Object.fromEntries(MIST_BUSINESS_GROUPS.map(g=>[g,s.handlers?.[g]?.id||'']))});
+
 export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchProps) {
-  const { state, run, error, refresh, loading, saving, pending, workspace } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
+  const work=useMistWorkspace(),{ state, run, error, refresh, loading, saving, pending, workspace } = work, session = useMistSession(), { go, route } = useNav();
+  const routeScope=useRouteScope(),live=React.useRef({work,session});React.useLayoutEffect(()=>{live.current={work,session};},[work,session]);
   const members = workspaceMembers(workspace, state, session.user);
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all'), [typeFilter, setTypeFilter] = React.useState('all'), [gradeFilter, setGradeFilter] = React.useState('all'), [countryFilter, setCountryFilter] = React.useState('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [query, setQuery] = React.useState('');
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
@@ -100,7 +104,9 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   const pick = (s: MarketSupplier) => { setPicked(s.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, s.id, target, { keepScroll: true }); };
   const typeOptions = (current = '') => [...SUPPLIER_TYPES, ...(current && !(SUPPLIER_TYPES as readonly string[]).includes(current) ? [current] : [])].map(t => ({ value: t, label: t }));
   const productionWhen = (s?:MarketSupplier) => ({key:'type',values:typeOptions(s?.type).map(t=>t.value).filter(t=>t!=='服务商')});
-  const profileSpec = (s?: MarketSupplier): ModuleEditorSpec => ({
+  const profileSpec = (s?: MarketSupplier): ModuleEditorSpec => {
+    const source=s?supplierProfileSource(s):'',workspaceId=workspace?.id,actorId=session.user?.id;
+    return {
     title: s ? `编辑供应商 ${s.name}` : '新增供应商', submitLabel: '保存',
     initialValues: { ...(s ? { code: s.code, name: s.name, type: s.type, country: s.country, address: s.address, capabilities: s.capabilities, capacity: s.capacity, capacityUnit: s.capacityUnit, leadDays: s.leadDays, note: s.note, serviceAddress: s.address, serviceCapabilities: s.capabilities } : { name: '', type: '', country: '', address: '', capabilities: '', capacity: '', capacityUnit: '', leadDays: '', note: '', serviceAddress: '', serviceCapabilities: '' }), ...Object.fromEntries(MIST_BUSINESS_GROUPS.map(g => ['handler:' + g, s?.handlers?.[g]?.id || ''])) },
     sections: [{ id: 'id', label: '身份', fields: ['code', 'name', 'type', 'country', 'address', 'serviceAddress'] }, { id: 'cap', label: '业务信息', fields: ['serviceCapabilities', 'capabilities', 'capacity', 'capacityUnit', 'leadDays', 'note'] }, { id: 'handlers', label: '经手人', fields: MIST_BUSINESS_GROUPS.map(g => 'handler:' + g) }],
@@ -116,8 +122,16 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
       { key: 'leadDays', label: '通常交付周期（天）', type: 'number', min: 0, when: productionWhen(s) }, { key: 'note', label: '备注', type: 'textarea' },
       ...MIST_BUSINESS_GROUPS.map(g => ({ key: 'handler:' + g, label: `${MIST_BUSINESS_GROUP_LABEL[g]}经手人`, type: 'select' as const, options: [{ value: '', label: '未指定' }, ...memberSelectOptions(members, { group: g, current: s?.handlers?.[g] })] })),
     ],
-    submit: async v => { const service=isServiceSupplier({type:String(v.type??'')}); const r = await run({ type: 'market.supplier.save', payload: { id: s?.id, input: { ...(s ? {code:s.code} : {}), name: String(v.name ?? ''), type: String(v.type ?? ''), country: String(v.country ?? ''), address: String((service?v.serviceAddress:v.address) ?? ''), capabilities: String((service?v.serviceCapabilities:v.capabilities) ?? ''), capacity: service?0:Number(v.capacity||0), capacityUnit: service?'':String(v.capacityUnit ?? ''), leadDays: service?0:Number(v.leadDays||0), note: String(v.note ?? ''), fileIds: s?.fileIds || [], handlerIds: Object.fromEntries(MIST_BUSINESS_GROUPS.map(g => [g, String(v['handler:' + g] ?? '')])) } } }); const id = String((r.result as { id?: string }).id || ''); if (!s && id) { setPicked(id); go('suppliers', id); } },
-  });
+    submit: async v => {
+      const checked=live.current.work,current=s?checked.state?.market.suppliers.find(row=>row.id===s.id):undefined,revision=checked.workspace?.revision;
+      if(!routeScope.isCurrent()||checked.workspace?.id!==workspaceId||live.current.session.user?.id!==actorId)throw new Error('当前账号或公司已变化，请重新打开供应商');
+      if(!checked.state||checked.loading||typeof revision!=='number'||!Number.isSafeInteger(revision)||revision<0)throw new Error('供应商资料不可用，请重新读取后核对');
+      if(s&&(!current||supplierProfileSource(current)!==source))throw new Error('供应商档案已更新，请重新打开后核对');
+      // The revision and attachment list belong to the same snapshot whose editable fields were checked.
+      const service=isServiceSupplier({type:String(v.type??'')});const r=await checked.run({type:'market.supplier.save',payload:{id:s?.id,input:{...(s?{code:s.code}:{}),name:String(v.name??''),type:String(v.type??''),country:String(v.country??''),address:String((service?v.serviceAddress:v.address)??''),capabilities:String((service?v.serviceCapabilities:v.capabilities)??''),capacity:service?0:Number(v.capacity||0),capacityUnit:service?'':String(v.capacityUnit??''),leadDays:service?0:Number(v.leadDays||0),note:String(v.note??''),fileIds:current?.fileIds||[],handlerIds:Object.fromEntries(MIST_BUSINESS_GROUPS.map(g=>[g,String(v['handler:'+g]??'')]))}}},{expectedRevision:revision});
+      const id=String((r.result as{id?:string}).id||'');if(!s&&id&&routeScope.isCurrent()&&live.current.work.workspace?.id===workspaceId&&live.current.session.user?.id===actorId){setPicked(id);go('suppliers',id);}
+    },
+  };};
   const certSpec = (s: MarketSupplier, c?: SupplierCertificate): ModuleEditorSpec => ({
     title: c ? `更新认证 ${c.name}` : `登记 ${s.name} 的认证`, submitLabel: '保存',
     initialValues: c ? { name: c.name, number: c.number, issuer: c.issuer, validUntil: c.validUntil, files: (c.fileIds || []).join(',') } : { name: '', number: '', issuer: '', validUntil: '', files: '' },
@@ -192,8 +206,8 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
       extra: alerts.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{alerts.map(f => <Pill key={f.key} tone={f.tone}>{uiText(f.label)}</Pill>)}</div> : undefined,
     }} />;
   })() : null;
-  if (full.active && selected && state) return <ListDetailPage backLabel="供应商管理" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
-  return <MistPage>
+  if (full.active && selected && state) return <><ListDetailPage backLabel="供应商管理" onBack={full.back}>{detail}</ListDetailPage><ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} /></>;
+  return <><MistPage>
     <PageHeader eyebrow={uiText("客户与市场 · 供应商")} title={uiText("供应商管理")}
       actions={<>
         {can && <BaseDataImportButton kind="supplier" />}
@@ -218,8 +232,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${selected.name}` : '供应商档案'} drawerSub={selected?.type}
       list={<Card><DataTable ariaLabel={uiText("供应商列表")} loading={loading} rows={rows} rowKey={s => s.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
       detail={detail} summary={summary} />
-    <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
-  </MistPage>;
+  </MistPage><ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} /></>;
 }
 
 /** Correspondence with this supplier: messages linked to it or exchanged with its contacts, and a mailbox draft addressed to them. */
