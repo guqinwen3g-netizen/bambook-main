@@ -2435,6 +2435,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (s.arrival) fail('已登记到港');
             const at = instant(p.at, ctx, '实际到港时间');
             if (s.departedAt && at < s.departedAt) fail('到港不得早于离港');
+            if (s.delivered && at > s.delivered.at) fail('到港不得晚于客户签收');
             s.arrival = { at, evidence: text(p.evidence, '到港依据'), actor: ctx.actorName };
             audit(root,ctx,'shipment',s.id,'已登记到港',{ view: 'shipments', id: s.id },notificationOwners(root,'shipment',s.id));
             return { id: s.id };

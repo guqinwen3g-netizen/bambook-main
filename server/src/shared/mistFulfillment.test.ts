@@ -305,6 +305,16 @@ describe('P2-3 shipment transport, booking history, arrival and customs amendmen
   f.run({type:'fulfillment.shipments.deliver',payload:{id,at:'2026-10-13T08:00:00Z',receiver:'客户仓库',evidence:'POD 签字',fileIds:[]}});
   expect(s().delivered).toMatchObject({receiver:'客户仓库'});
  });
+ it('refuses a later arrival when POD was recorded first, but permits a truthful earlier backfill',()=>{
+  const f=setup();terms(f);const id=shipment(f),s=()=>f.root.fulfillment.shipments.find(x=>x.id===id)!;
+  s().state='departed';s().departedAt='2026-10-10T08:00:00.000Z';
+  f.run({type:'fulfillment.shipments.deliver',payload:{id,at:'2026-10-12T08:00:00Z',receiver:'客户仓库',evidence:'客户签收原件',fileIds:[]}});
+  const before=structuredClone(f.root),pod=structuredClone(s().delivered);
+  expect(()=>f.run({type:'fulfillment.shipments.arrive',payload:{id,at:'2026-10-13T08:00:00Z',evidence:'时间矛盾的到港通知'}})).toThrow('到港不得晚于客户签收');
+  expect(f.root).toEqual(before);
+  f.run({type:'fulfillment.shipments.arrive',payload:{id,at:'2026-10-11T08:00:00Z',evidence:'后补承运到港原件'}});
+  expect(s().arrival?.at).toBe('2026-10-11T08:00:00.000Z');expect(s().delivered).toEqual(pod);
+ });
  it('adds amendments to a cleared declaration and lets a not-yet-departed shipment withdraw it',()=>{
   const f=setup();terms(f);const id=shipment(f);
   f.root.fulfillment.customs.push({id:'cus',shipmentId:id,code:'CUS-1',status:'cleared',declarationNo:'D1',broker:'B',hsCode:'6203',origin:'CN',tradeMode:'FOB',declaredAt:'2026-10-12',clearedAt:'2026-10-12',evidence:'放行',fileIds:[],note:''} as never);
