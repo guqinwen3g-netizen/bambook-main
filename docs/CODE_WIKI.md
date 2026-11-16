@@ -460,6 +460,8 @@ flowchart LR
 - 针对性回归入口：`server/src/mist/materialCandidateRepository.test.ts`、`server/src/shared/mistMaterialCrossGroup.test.ts`、`server/src/shared/mistMaterialShortClose.test.ts`、`dev-ui-preview/mist-atelier/app/pages/productionGate.test.ts`。
 - **产前样跨组门禁（2026-10-30）**：`productionSampleRequirements` 比对产前样与当前物料计划；接收人看不到面料来源时，不能在裁剪状态里重新计算指纹并据此声称“未登记”。`scopedFabricAccess` 在接收人具有订单读写、生产/产品/QC 读取权限时，按该接收人的订单条目和生产分支返回最小样品门禁状态；来源商业资料和报告正文不包含在摘要中，任务与样品 ID 只在相应行可见时返回。开产仍以服务端完整状态核验，物料计划修改后旧样品不能用于放行。青屿模拟通过报告、需求方采用及业务接续后，原生产页回读产前样已确认；此为 M 码样品的模拟评审，不代表生产已放行或全部实物已检验。
 
+- **QC报告草稿来源（2026-11-17，分支待发布）**：`QcWorkbenchPage.tsx#qcReportSource/checkedSource`在报告编辑打开时保留任务及准确实物的质量依据，复核与最终保存均比较当前来源并绑定同快照版本；同步改变后保留输入并要求重开。`repository.ts#qcReportReadKeys`在过期版本自动合并前核对任务、实物或对应生产事实/条目变更，冲突409且不留成功回执，无关待办更新仍允许合并。回归含`QcWorkbenchPage.test.tsx`、`workspaceConflictRetry.test.ts`及同名PG用例；独立本地原生双角色已验证同步拒绝、断同步409、恢复后旧稿拒绝、重开当前质量版次报告及无关更新合并，未改原商业数量或既有终检。
+
 #### 隔离处置与无补偿财务核对
 
 - 隔离退料从库存批次送复检，报告和处置保留来源；仓库实物退供/报废不自动改写原采购结算或形成退款。库存交互见 `pages/modules/InventoryPage.tsx`，财务界面见 `pages/FinancePayables.tsx`，规则与响应投影见 `server/src/shared/mistPayables.ts`。
