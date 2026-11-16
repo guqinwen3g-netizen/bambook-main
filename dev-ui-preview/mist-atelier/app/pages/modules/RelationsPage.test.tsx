@@ -58,6 +58,17 @@ it.each(['customer-code', 'supplier-code', 'customer-name', 'customer-email', 'c
   const rows = [...host.querySelectorAll('[role="row"][tabindex]')]; expect(rows).toHaveLength(1); expect(rows[0].textContent).toContain(relation.name);
 });
 
+it.each(['customer', 'supplier'] as const)('keeps linked location read-only while allowing relationship notes: %s', async kind => {
+  const relation = state.market.relations.find(r => kind === 'customer' ? r.customerId && !r.supplierId : r.supplierId && !r.customerId)!; await mount(relation.id); await click('编辑档案');
+  expect((document.querySelector('[aria-label="国家地区"]') as HTMLSelectElement).disabled).toBe(true); expect((document.querySelector('[aria-label="地址"]') as HTMLInputElement).disabled).toBe(true); expect((document.querySelector('[aria-label="偏好与备注"]') as HTMLTextAreaElement).disabled).toBe(false);
+});
+
+it.each(['customer', 'supplier'] as const)('includes readable canonical contact history and excludes unrelated financial history: %s', async kind => {
+  const relation = named('博远'), id = kind === 'customer' ? relation.customerId : relation.supplierId, marker = kind === 'customer' ? '客户历史标识' : '供方历史标识';
+  state.events.unshift({ id: 'contact-history', entityType: kind === 'customer' ? 'customer' : 'relation', entityId: id, actor: '经办人', at: '2026-10-14T02:00:00Z', text: '保存联系人 ' + marker, fileIds: [] }, { id: 'unrelated-history', entityType: 'supplier', entityId: id, actor: '其他岗位', at: '2026-10-14T02:00:00Z', text: '不应纳入的供方资金记录', fileIds: [] }, { id: 'other-customer-history', entityType: 'customer', entityId: 'another-customer', actor: '其他岗位', at: '2026-10-14T02:00:00Z', text: '其他客户私有记录', fileIds: [] });
+  await mount(relation.id); expect(host.textContent).toContain(marker); expect(host.textContent).not.toContain('不应纳入的供方资金记录'); expect(host.textContent).not.toContain('其他客户私有记录'); expect(bridge.current.run).not.toHaveBeenCalled();
+});
+
 describe('relation profile concurrency', () => {
   it.each(['address', 'note', 'aliases', 'status', 'supplierId', 'removed'])('keeps the draft and refuses a changed source: %s', async field => {
     const relation = named('Cedar'); bridge.current.workspace = { id: 'workspace', revision: 7 };

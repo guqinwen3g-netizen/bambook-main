@@ -58,9 +58,11 @@ function useOperation(){const scope=useRouteScope(),[error,setError]=useRouteDra
 function ActionEditor({spec,onClose}:{spec:ModuleEditorSpec|null;onClose:()=>void}){return spec&&spec.fields.length>3?<ModuleEditorPage spec={spec} onClose={onClose}/>:<ModuleEditorDialog spec={spec} onClose={onClose}/>;}
 function History({id,domain}:{id:string;domain?:'market.relation'}){
  const {state,market}=useMarket();
- const sourceIds=domain==='market.relation'?market.relations.find(r=>r.id===id)?.mergedRelationIds||[]:[];
+ const relation=domain==='market.relation'?market.relations.find(r=>r.id===id):undefined,sourceIds=relation?.mergedRelationIds||[];
  const ids=new Set([id,...sourceIds]);
- return <Card><CardHeader title={uiText("操作记录")}/><CardBody><Timeline events={(state?.events||[]).filter(e=>ids.has(e.entityId)).map(e=>({who:e.actor,when:new Date(e.at).toLocaleString(interfaceLocale(),{timeZone:'Asia/Shanghai',hour12:false}),text:businessEventText(e.text)}))}/></CardBody></Card>;
+ // Contact commands use canonical parent IDs; the supplier financial stream stays in its own module.
+ const events=(state?.events||[]).filter(e=>ids.has(e.entityId)||(!!relation?.customerId&&e.entityType==='customer'&&e.entityId===relation.customerId)||(!!relation?.supplierId&&e.entityType==='relation'&&e.entityId===relation.supplierId));
+ return <Card><CardHeader title={uiText("操作记录")}/><CardBody><Timeline events={events.map(e=>({who:e.actor,when:new Date(e.at).toLocaleString(interfaceLocale(),{timeZone:'Asia/Shanghai',hour12:false}),text:businessEventText(e.text)}))}/></CardBody></Card>;
 }
 function MarketDetailCard({children,preview=false}:{children:React.ReactNode;preview?:boolean}){const {route}=useNav();return preview&&route.detail!=='full'?<>{uiText(children)}</>:<Card><div className="mist-card-body mist-col">{uiText(children)}</div></Card>;}
 type AttachmentKind=Extract<MarketCommand,{type:'market.attachment.set'}>['payload']['kind'];

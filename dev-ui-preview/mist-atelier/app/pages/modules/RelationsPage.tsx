@@ -92,7 +92,7 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
     fields: [
       { key: 'category', label: '关系类别', type: 'select', required: true, readonly: linked(r), options: (linked(r) ? Object.keys(CATEGORY_LABEL) : ['Agent', 'Partner', 'Government', 'Internal', 'Other']).map(k => ({ value: k, label: CATEGORY_LABEL[k as MarketRelation['category']] })) },
       { key: 'name', label: '组织名称', required: !linked(r), readonly: linked(r) },
-      { key: 'country', label: '国家地区', type: 'choice', options: COUNTRIES, readonly: linked(r) && !!r?.supplierId && !r?.customerId }, { key: 'address', label: '地址', readonly: linked(r) && !!r?.supplierId && !r?.customerId },
+      { key: 'country', label: '国家地区', type: 'choice', options: COUNTRIES, readonly: linked(r) }, { key: 'address', label: '地址', readonly: linked(r) },
       { key: 'aliases', label: '别名', hint: '用顿号分隔' }, { key: 'note', label: '偏好与备注', type: 'textarea' },
     ],
     submit: async v => {

@@ -89,4 +89,11 @@ describe('organization identity provenance and split', () => {
     const command: MarketCommand = side === 'customer' ? { type: 'market.relation.linkSupplier', payload: { id: f.customerId, supplierId: f.supplierId } } : { type: 'market.relation.linkCustomer', payload: { id: f.source.id, customerId: 'customer' } };
     expect(() => f.run(command)).toThrow(/请先解冻/); expect(f.state).toEqual(before);
   });
+  it.each(['customer', 'supplier'] as const)('reads linked name and location only from the canonical master: %s', side => {
+    const f = fixture(), relation = side === 'customer' ? f.customer() : f.state.market.relations.find(r => r.id === f.source.id)!;
+    if (side === 'supplier') { const supplier = f.state.market.suppliers.find(s => s.id === f.supplierId)!; supplier.country = ''; supplier.address = ''; }
+    const master = side === 'customer' ? f.state.customers.find(c => c.id === 'customer')! : f.state.market.suppliers.find(s => s.id === f.supplierId)!;
+    f.run({ type: 'market.relation.save', payload: { id: relation.id, input: { ...relation, name: '非主档名称', country: '新加坡', address: '独立地址', note: '关系备注' } } });
+    const saved = f.state.market.relations.find(r => r.id === relation.id)!; expect(saved.name).toBe(master.name); expect(saved.country).toBe(master.country); expect(saved.address).toBe(side === 'customer' ? f.state.customers.find(c => c.id === 'customer')!.city : f.state.market.suppliers.find(s => s.id === f.supplierId)!.address); expect(saved.note).toBe('关系备注');
+  });
 });
