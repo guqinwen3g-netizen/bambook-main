@@ -9,6 +9,7 @@ import {createMistState,type MistState} from '../../../../../server/src/shared/m
 import {applyDataScope,scopedMaterialIssueTargets} from '../../../../../server/src/shared/mistDataScope';
 import type {FulfillmentStock,FulfillmentStockMovement} from '../../../../../server/src/shared/mistFulfillment';
 import {Nav} from '../../nav';
+import * as clock from '../../runtime/businessClock';
 const store=vi.hoisted(()=>({state:null as MistState|null,workspace:null as any,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
 const session=vi.hoisted(()=>({denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
@@ -297,4 +298,38 @@ it('rechecks the warehouse custodian before saving an older form',async()=>{
 it('allows unrelated workspace updates while binding a warehouse save to the checked revision',async()=>{
  const{save}=await editWarehouseSource();store.state=structuredClone(store.state);store.workspace={id:'workspace',revision:8};render();await save();
  expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.claimInventory.warehouse.save',payload:expect.objectContaining({id:'wh',name:'松江仓',address:'上海松江备料区'})}),{expectedRevision:8});
+});
+
+async function openCountSource(){
+ store.workspace={id:'workspace',revision:7};store.state!.fulfillment.stock.push(stock('count-race',{quantity:12,available:12}));render('count-race');await click(getByRole(host,'button',{name:'盘点',exact:true}));
+ const d=getByRole(document.body,'dialog',{name:'库存盘点',exact:true});const note=getByRole(d,'textbox',{name:'盘点说明'}) as HTMLTextAreaElement;typeInto(note,'本次按当前库位与实物点数，原记录保留。');
+ return{d,note,submit:()=>click(getByRole(d,'button',{name:'提交盘点',exact:true}))};
+}
+it('refuses a stock count when the recorded balance changes after opening it',async()=>{
+ const{d,submit}=await openCountSource();store.state=structuredClone(store.state);store.state!.fulfillment.stock[0].available=10;store.workspace={id:'workspace',revision:8};render('count-race');await submit();
+ expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('库存已更新，请重新打开后复点');expect((getByRole(d,'textbox',{name:'盘点说明'})as HTMLTextAreaElement).value).toContain('原记录保留');
+});
+it('rechecks counted positions even when the total stock balance is unchanged',async()=>{
+ const{d,submit}=await openCountSource();store.state=structuredClone(store.state);store.state!.fulfillment.stock[0].positions=[{location:'A-01',available:11},{location:'B-01',available:1}];store.workspace={id:'workspace',revision:8};render('count-race');await submit();
+ expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('库存已更新，请重新打开后复点');
+});
+it('binds an unchanged stock count to the checked revision after an unrelated update',async()=>{
+ const{submit}=await openCountSource();store.state=structuredClone(store.state);store.workspace={id:'workspace',revision:8};render('count-race');await submit();
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.stock.count'}),{expectedRevision:8});
+});
+it('ages an actual purchase receipt from its physical receipt date rather than its later registration time',()=>{
+ const now=vi.spyOn(clock,'businessNow').mockReturnValue(new Date('2026-11-18T04:00:00Z'));
+ try{store.state!.fulfillment.receipts.push({id:'rc-age',purchaseId:'po',date:'2026-11-10'} as any);store.state!.fulfillment.stock.push(stock('age',{receiptId:'rc-age',createdAt:'2026-11-13T12:00:00Z'}));render('age');expect(host.textContent).toContain('2026-11-10 · 8 天');}finally{now.mockRestore();}
+});
+it('refuses an older count form when another count is awaiting approval for that stock',async()=>{
+ const{d,submit}=await openCountSource();store.state=structuredClone(store.state);(store.state!.fulfillment.stockCounts??=[]).push({id:'other-count',state:'pending',lines:[{stockId:'count-race',location:'A-1',book:12,counted:11,difference:-1}]} as any);store.workspace={id:'workspace',revision:8};render('count-race');await submit();
+ expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('库存已更新，请重新打开后复点');
+});
+it('uses the Shanghai registration day consistently for receipts without a separate receipt date',()=>{
+ const now=vi.spyOn(clock,'businessNow').mockReturnValue(new Date('2026-11-18T04:00:00Z'));
+ try{store.state!.fulfillment.stock.push(stock('late',{sourceKind:'other',purchaseId:undefined,receiptId:undefined,createdAt:'2026-11-13T22:56:00Z',otherReceipt:{reason:'other',source:'DN-13',evidence:'点收'}}));render('late');expect(host.textContent).toContain('2026-11-14 · 4 天');}finally{now.mockRestore();}
+});
+it('shows the physical return receipt day and age independently of its audit timestamp',()=>{
+ const now=vi.spyOn(clock,'businessNow').mockReturnValue(new Date('2026-11-18T04:00:00Z'));
+ try{store.state!.fulfillment.stock.push(stock('returned-age',{sourceKind:'claimReturn',purchaseId:undefined,receiptId:undefined,available:0,onHand:2,locked:2,createdAt:'2026-11-18T04:00:00Z',goodsId:'g',claimId:'cl',returnReceiptId:'rt'}));store.state!.fulfillment.receivedRecords.push({id:'rr-age',stockId:'returned-age',receivedAt:'2026-11-17',fileIds:[],quantity:2,unit:'个',source:{shipmentId:'sh'}} as any);render('returned-age');expect(host.textContent).toContain('2026-11-17 · 1 天');}finally{now.mockRestore();}
 });

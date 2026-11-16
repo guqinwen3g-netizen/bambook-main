@@ -14,7 +14,7 @@ import type { FulfillmentStock } from '../../../../../server/src/shared/mistFulf
 import { freeQuantity, fulfillmentPositions, fulfillmentSourceLabel, OTHER_RECEIPT_REASONS, reservationOpen, stockIssueRemaining, stockReservedQuantity } from '../../../../../server/src/shared/mistFulfillment';
 import { stockAgeDays, stockInTransit, stockUnitCost } from '../../../../../server/src/shared/mistStockOperations';
 import { CURRENCIES, UNITS } from '../../runtime/tradeOptions';
-import { businessNow } from '../../runtime/businessClock';
+import { businessDate, businessNow } from '../../runtime/businessClock';
 import type { ClaimInventoryWarehouse } from '../../../../../server/src/shared/mistClaimInventory';
 import { View } from '../../../../../types';
 import { useMistWorkspace } from '../../runtime/workspace';
@@ -40,6 +40,14 @@ const confirmField = (label: string) => field('confirm', label, 'checkbox', fals
 const confirmed = (v: Record<string, unknown>): true => { if (v.confirm !== true) throw new Error('请勾选确认'); return true; };
 const round = (value: number) => Math.round(value * 10000) / 10000;
 const isReturn = (stock: FulfillmentStock) => stock.sourceKind === 'claimReturn';
+/** Physical receipt dates drive both aging and export; registration timestamps are only a fallback. */
+const stockReceiptDay = (state:MistState,stock:FulfillmentStock) => {
+  const received=stock.sourceKind==='claimReturn'?state.fulfillment.receivedRecords.find(row=>row.stockId===stock.id)?.receivedAt:state.fulfillment.receipts.find(row=>row.id===stock.receiptId)?.date;
+  const instant=received&&Number.isFinite(Date.parse(received))?received:stock.createdAt;
+  return Number.isFinite(Date.parse(instant))?businessDate(instant):'';
+};
+const inventoryAgeDays = (state:MistState,stock:FulfillmentStock,now:string) => stockAgeDays({createdAt:stockReceiptDay(state,stock)},now);
+const stockCountSource = (state:MistState,stock:FulfillmentStock) => stableJson({stock,pending:(state.fulfillment.stockCounts||[]).filter(row=>row.state==='pending'&&row.lines.some(line=>line.stockId===stock.id)).map(row=>row.id).sort()});
 /** Same basis as the finance projection's referenceAmount: isolated quantity × contract price. */
 const recoveryReference = (root: MistState, returnId: string) => { const f = root.fulfillment, row = f.stockMovements.find(m => m.id === returnId), stock = row && f.stock.find(x => x.id === row.stockId), purchase = stock && f.purchases.find(x => x.id === stock.purchaseId); return { amount: Math.round((row?.quarantinedQuantity || 0) * (purchase?.price || 0) * 100) / 100, currency: purchase?.currency || '' }; };
 
@@ -192,11 +200,17 @@ export function InventoryPage() {
   };
   const transferReceiveSpec = (id: string): ModuleEditorSpec => ({ title: '调拨到仓', submitLabel: '确认到仓', fields: [field('note', '点收依据', 'textarea')], initialValues: { note: '' }, submit: v => run({ type: 'fulfillment.stock.transfer.receive', payload: { id, note: text(v, 'note') } }) });
   const countSpec = (stock: FulfillmentStock): ModuleEditorSpec => {
+    const baseline=state?stockCountSource(state,stock):'';
     const positions = fulfillmentPositions(stock).filter(pos => pos.available > 0);
     return { title: '库存盘点', submitLabel: '提交盘点',
       fields: [...positions.map((pos, i) => ({ ...field(`count${i}`, `${pos.location || '位置未记录'} 实盘（账面 ${pos.available}${stock.unit}）`, 'number') })), field('note', '盘点说明', 'textarea')],
       initialValues: { ...Object.fromEntries(positions.map((pos, i) => [`count${i}`, pos.available])), note: '' },
-      submit: v => run({ type: 'fulfillment.stock.count', payload: { lines: positions.map((pos, i) => ({ stockId: stock.id, location: pos.location, counted: number(v, `count${i}`) })), note: text(v, 'note') } }) };
+      submit: v => {
+        const checked=liveSource.current,current=checked.state?.fulfillment.stock.find(row=>row.id===stock.id);
+        if(!current||!checked.state||stockCountSource(checked.state,current)!==baseline)throw new Error('库存已更新，请重新打开后复点');
+        const command:MistCommand={type:'fulfillment.stock.count',payload:{lines:positions.map((pos,i)=>({stockId:stock.id,location:pos.location,counted:number(v,`count${i}`)})),note:text(v,'note')}};
+        return checked.revision!==undefined?run(command,{expectedRevision:checked.revision}):run(command);
+      } };
   };
   if (editor.spec && state) return editor.view;
   const back = <>{hasClaim && claim && session.canAccessView(View.Claims) && <Button onClick={() => go('claims', claim.id)}>{uiText("返回来源案件")}</Button>}{hasClaim && <Button onClick={() => go('inventory')}>{uiText("查看全部库存")}</Button>}{!hasClaim && route.section && <Button onClick={() => go('procurement', route.section)}>{uiText("返回来源采购")}</Button>}</>;
@@ -213,10 +227,10 @@ export function InventoryPage() {
     { key: 'source', header: '订单条目', width: 'minmax(120px,1fr)', hideOnMobile: true, render: stock => <SourceLink source={{ kind: 'orderLine', orderId: stock.orderId, lineId: stock.lineId }} /> },
     { key: 'location', header: '位置 / 货权', width: 'minmax(120px,1fr)', hideOnMobile: true, render: stock => { const positions = fulfillmentPositions(stock); return <div className="mist-col" style={{ gap: 2 }}><span>{uiText(stock.warehouseId ? `${warehouseName(stock.warehouseId)} · ` : '')}{uiText(positions.length > 1 ? `${positions.length} 个位置` : stock.location || '位置未记录')}</span><small className="mist-muted">{stock.owner}</small></div>; } },
     { key: 'quantity', header: '数量', width: '188px', align: 'right', render: stock => { const out = state ? stockOutstanding(state, stock) : 0; return <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span className="mist-num" style={{ whiteSpace: 'nowrap' }}>{uiText(isReturn(stock) ? `可用 ${stock.available} / 现存 ${stock.onHand} / 隔离 ${stock.locked} ${stock.unit}` : `可用 ${stock.available} / 累计入库 ${stock.quantity} ${stock.unit}`)}</span>{out > 0 && <small className="mist-muted">{uiText("已出库 ")}{out} {uiText(stock.unit)}</small>}{stockReservedQuantity(stock) > 0 && <small className="mist-muted">{uiText("已预留 ")}{stockReservedQuantity(stock)} {uiText(stock.unit)}</small>}{state && stockInTransit(state, stock.id) > 0 && <small className="mist-muted">{uiText("在途 ")}{stockInTransit(state, stock.id)} {uiText(stock.unit)}</small>}</div>; } },
-    { key: 'age', header: '库龄', width: '72px', align: 'right', hideOnMobile: true, render: stock => { const days = stockAgeDays(stock, businessNow().toISOString()); return stock.available > 0 ? <span className="mist-num">{days}{uiText(" 天")}</span> : <span className="mist-muted">—</span>; } },
-    { key: 'state', header: '状态', width: '80px', render: stock => state ? stockState(state, stock) === 'available' && stockAgeDays(stock, businessNow().toISOString()) > SLOW_DAYS ? <Pill tone="warn">{uiText('呆滞')}</Pill> : <Pill tone={STATE_TONE[stockState(state, stock)]}>{STATE_PILL[stockState(state, stock)]}</Pill> : null },
+    { key: 'age', header: '库龄', width: '72px', align: 'right', hideOnMobile: true, render: stock => { const days = inventoryAgeDays(state!, stock, businessNow().toISOString()); return stock.available > 0 ? <span className="mist-num">{days}{uiText(" 天")}</span> : <span className="mist-muted">—</span>; } },
+    { key: 'state', header: '状态', width: '80px', render: stock => state ? stockState(state, stock) === 'available' && inventoryAgeDays(state!, stock, businessNow().toISOString()) > SLOW_DAYS ? <Pill tone="warn">{uiText('呆滞')}</Pill> : <Pill tone={STATE_TONE[stockState(state, stock)]}>{STATE_PILL[stockState(state, stock)]}</Pill> : null },
   ];
-  const exportRows = () => { const now = businessNow().toISOString(); exportRecords('库存来源台账', ['名称', '来源', '批号', '缸号', '订单条目', '累计入库', '在库数量', '隔离', '可用', '已预留', '在途', '已出库（净）', '单位', '入库日期', '库龄（天）', ...(canCost ? ['单位成本', '库存金额', '币种'] : []), '仓库', '位置', '货权'], rows.map(stock => { const cost = canCost ? stockUnitCost(state!, stock) : undefined; return [stock.name, isReturn(stock) ? returnCode(stock) : stock.sourceKind === 'other' ? stock.otherReceipt?.source : purchaseOf(stock)?.code || stock.receiptId, stock.batchNumber || '', stock.dyeLot || '', fulfillmentSourceLabel(state!, { kind: 'orderLine', orderId: stock.orderId, lineId: stock.lineId }), stock.quantity, stock.onHand ?? '', stock.locked ?? '', stock.available, stockReservedQuantity(stock), stockInTransit(state!, stock.id), stockOutstanding(state!, stock), stock.unit, stock.createdAt.slice(0, 10), stockAgeDays(stock, now), ...(canCost ? [cost?.unitCost ?? '', cost ? round(cost.unitCost * stock.available) : '', cost?.currency ?? ''] : []), warehouseName(stock.warehouseId), stock.location, stock.owner]; })); };
+  const exportRows = () => { const now = businessNow().toISOString(); exportRecords('库存来源台账', ['名称', '来源', '批号', '缸号', '订单条目', '累计入库', '在库数量', '隔离', '可用', '已预留', '在途', '已出库（净）', '单位', '入库日期', '库龄（天）', ...(canCost ? ['单位成本', '库存金额', '币种'] : []), '仓库', '位置', '货权'], rows.map(stock => { const cost = canCost ? stockUnitCost(state!, stock) : undefined; return [stock.name, isReturn(stock) ? returnCode(stock) : stock.sourceKind === 'other' ? stock.otherReceipt?.source : purchaseOf(stock)?.code || stock.receiptId, stock.batchNumber || '', stock.dyeLot || '', fulfillmentSourceLabel(state!, { kind: 'orderLine', orderId: stock.orderId, lineId: stock.lineId }), stock.quantity, stock.onHand ?? '', stock.locked ?? '', stock.available, stockReservedQuantity(stock), stockInTransit(state!, stock.id), stockOutstanding(state!, stock), stock.unit, stockReceiptDay(state!,stock), inventoryAgeDays(state!, stock, now), ...(canCost ? [cost?.unitCost ?? '', cost ? round(cost.unitCost * stock.available) : '', cost?.currency ?? ''] : []), warehouseName(stock.warehouseId), stock.location, stock.owner]; })); };
   const filtersOn = !!needle || stateFilter !== 'all' || sourceFilter !== 'all' || !!warehouseFilter;
   const empty = filtersOn && domainRows.length
     ? <EmptyState icon={SearchX} title={uiText("没有符合条件的库存")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setStateFilter('all'); setSourceFilter('all'); setWarehouseFilter(''); }}>{uiText("清除筛选")}</Button>} />
@@ -303,7 +317,7 @@ function StockDetail({ stock, issueBlocker, state, can, locked, canClaims, canQc
   const disposedQuantity = movements.filter(m=>m.quarantineDisposition&&m.quarantineDisposition.decision!=='release').reduce((n,m)=>round(n+(m.quarantinedQuantity||0)),0);
   const openIssues = movements.filter(movement => movement.kind === 'issue' && stockIssueRemaining(state, movement.id) > 0);
   const writeReason = can ? false : '需要库存写权限';
-  const other = stock.sourceKind === 'other', reserved = stockReservedQuantity(stock), free = freeQuantity(stock), cost = canCost ? stockUnitCost(state, stock) : undefined, age = stockAgeDays(stock, businessNow().toISOString());
+  const other = stock.sourceKind === 'other', reserved = stockReservedQuantity(stock), free = freeQuantity(stock), cost = canCost ? stockUnitCost(state, stock) : undefined, age = inventoryAgeDays(state!, stock, businessNow().toISOString());
   const transfers = (f.stockTransfers || []).filter(t => t.stockId === stock.id && t.state === 'inTransit'), reservations = (stock.reservations || []).filter(r => reservationOpen(r) > 0);
   const counting = (f.stockCounts || []).some(c => c.state === 'pending' && c.lines.some(l => l.stockId === stock.id));
   const claimOpen = !!sourceClaim && !['Closed', 'Cancelled'].includes(sourceClaim.state);
@@ -336,11 +350,11 @@ function StockDetail({ stock, issueBlocker, state, can, locked, canClaims, canQc
     ]} />
     {isRepair&&goods&&record&&<ClaimRepairWork goods={goods} state={state} receivedEventId={record.id} busy={locked}/>}
     {returned
-      ? <KeyValue items={[{ label: '来源订单', value: <SourceLink source={{ kind: 'orderLine', orderId: stock.orderId, lineId: stock.lineId }} /> }, { label: '正式退货单', value: returnCode(state, stock) || '不可用' }, { label: '来源案件', value: sourceClaim?.code || '不可用' }, { label: '来源CI', value: state.invoices.find(invoice => invoice.id === stock.invoiceId)?.code || '来源发票不可用' }, { label: '来源出运', value: f.shipments.find(shipment => shipment.id === record?.source.shipmentId)?.code || '来源出运不可用' }, { label: '批号', value: stock.batchNumber }, { label: '累计入库', value: `${stock.quantity} ${stock.unit}` }, { label: '在库数量', value: `${stock.onHand} ${stock.unit}` }, { label: '隔离数量', value: `${stock.locked} ${stock.unit}` }, { label: '可用数量', value: `${stock.available} ${stock.unit}` }, { label: '仓库', value: warehouse ? `${warehouse.code} · ${warehouse.name}` : '仓库不可用' }, { label: '位置', value: stock.location }, { label: '货权', value: stock.owner }, { label: '货权确认日期', value: stock.ownershipDate }, { label: '货权依据', value: stock.ownershipEvidence }, { label: '计量单位', value: stock.unit }]} />
+      ? <KeyValue items={[{ label: '来源订单', value: <SourceLink source={{ kind: 'orderLine', orderId: stock.orderId, lineId: stock.lineId }} /> }, { label: '入库日期 / 库龄', value: `${stockReceiptDay(state,stock)} · ${age} 天` }, { label: '正式退货单', value: returnCode(state, stock) || '不可用' }, { label: '来源案件', value: sourceClaim?.code || '不可用' }, { label: '来源CI', value: state.invoices.find(invoice => invoice.id === stock.invoiceId)?.code || '来源发票不可用' }, { label: '来源出运', value: f.shipments.find(shipment => shipment.id === record?.source.shipmentId)?.code || '来源出运不可用' }, { label: '批号', value: stock.batchNumber }, { label: '累计入库', value: `${stock.quantity} ${stock.unit}` }, { label: '在库数量', value: `${stock.onHand} ${stock.unit}` }, { label: '隔离数量', value: `${stock.locked} ${stock.unit}` }, { label: '可用数量', value: `${stock.available} ${stock.unit}` }, { label: '仓库', value: warehouse ? `${warehouse.code} · ${warehouse.name}` : '仓库不可用' }, { label: '位置', value: stock.location }, { label: '货权', value: stock.owner }, { label: '货权确认日期', value: stock.ownershipDate }, { label: '货权依据', value: stock.ownershipEvidence }, { label: '计量单位', value: stock.unit }]} />
       : <Facts items={[
         { label: '来源订单条目', value: <SourceLink source={{ kind: 'orderLine', orderId: stock.orderId, lineId: stock.lineId }} /> },
         other ? { label: '来源', value: stock.otherReceipt!.source } : { label: '来源采购', value: purchase ? <TextLink onClick={() => onPurchase(purchase.id)}>{purchase.code} · {purchase.supplier}</TextLink> : '来源采购不可用' },
-        { label: '入库日期 / 库龄', value: `${receipt?.date || shortWhen(stock.createdAt)} · ${age} 天` },
+        { label: '入库日期 / 库龄', value: `${stockReceiptDay(state,stock)} · ${age} 天` },
         ...(stock.dyeLot || stock.shade ? [{ label: '缸号 / 色号', value: [stock.dyeLot, stock.shade].filter(Boolean).join(' · ') }] : []),
         { label: '累计入库', value: `${stock.quantity} ${stock.unit}` },
         { label: '当前可用', value: reserved > 0 ? `${stock.available} ${stock.unit}（已预留 ${reserved}）` : `${stock.available} ${stock.unit}` },
