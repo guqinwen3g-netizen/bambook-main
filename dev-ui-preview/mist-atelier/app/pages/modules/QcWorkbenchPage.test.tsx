@@ -19,7 +19,7 @@ async function click(node:HTMLElement){await act(async()=>node.click());}
 function choose(select:HTMLSelectElement,value:string){act(()=>{select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));});}
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 function task(id:string,patch:Partial<FulfillmentQcTask>={}):FulfillmentQcTask{return {id,code:id.toUpperCase(),source:{kind:'orderLine',orderId:'o',lineId:'l'},domain:'garment',kind:'sample',factory:'华美制衣',location:'一号车间',contact:'',due:'2026-10-20',requestedBy:'业务员',assignee:'',state:'pending',reportIds:[],createdAt:'2026-10-10T08:00:00Z',...patch};}
-beforeEach(()=>{store.workspace={id:'space',revision:0};session.id='qc-a';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'QC甲'},'empty');store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
+beforeEach(()=>{store.loading=false;store.error='';store.saving=false;store.pending=null;store.workspace={id:'space',revision:0};session.id='qc-a';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'QC甲'},'empty');store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 
 function fabricDevelopmentTask(){
  store.state!.devs.push({id:'fabric-dev',code:'DEV-FABRIC',values:{domain:'fabric'},versionIds:['fabric-version']} as any);store.state!.versions.push({id:'fabric-version',devId:'fabric-dev',label:'R1-A-1',returnedAt:'2026-10-13T08:00:00Z',confirmations:[],fileIds:[],qc:null} as any);
@@ -399,4 +399,19 @@ it.each(['confirm','continue'] as const)('allows %s after an unrelated synchroni
  if(action==='confirm')choose(getByRole(d,'combobox',{name:'客户决定'}) as HTMLSelectElement,'approved');
  typeInto(getByRole(d,'textbox',{name:action==='confirm'?'客户确认依据':'业务处理与恢复依据'}) as HTMLTextAreaElement,'核对R1后的有效依据');store.state=structuredClone(store.state!);store.state!.files.push({id:'unrelated',name:'other.txt'} as any);store.workspace.revision=7;render(t.id);
  await click(getByRole(d,'button',{name:action==='confirm'?'记录确认':'确认继续'}));expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.'+action,payload:expect.objectContaining({id:t.id,note:'核对R1后的有效依据'})}),{expectedRevision:7});
+});
+it.each([false,true])('keeps unread QC data separate from an empty workload while loading %s',loading=>{
+ store.state=null;store.loading=loading;render();expect(host.textContent).toContain(loading?'正在读取QC资料':'QC资料未读取');
+ for(const name of['新建巡检','从来源发起QC'])expect((getByRole(host,'button',{name,exact:true})as HTMLButtonElement).disabled).toBe(true);
+ expect(queryByRole(host,'tablist',{name:'QC 专业板块'})).toBeNull();expect(host.querySelector('.mist-pipeline')).toBeNull();expect(store.run).not.toHaveBeenCalled();
+});
+it('restores the requested QC task after the initial read recovers',()=>{
+ const ready=store.state!;ready.fulfillment.qcTasks.push(task('recover-qc',{code:'QC-RECOVER',state:'reported'}));store.state=null;render('recover-qc');expect(host.textContent).toContain('QC资料未读取');store.state=ready;render('recover-qc');expect(host.textContent).toContain('QC-RECOVER');expect(host.textContent).not.toContain('QC资料未读取');expect(store.run).not.toHaveBeenCalled();
+});
+it('keeps a genuine empty QC workspace actionable after reading succeeds',()=>{
+ render();expect((getByRole(host,'button',{name:'新建巡检',exact:true})as HTMLButtonElement).disabled).toBe(false);for(const button of getAllByRole(host,'button',{name:'从来源发起QC',exact:true}))expect((button as HTMLButtonElement).disabled).toBe(false);expect(getByRole(host,'tablist',{name:'QC 专业板块'})).toBeTruthy();
+});
+it('keeps the patrol editor above the QC detail when the viewport narrows',async()=>{
+ const previous=window.matchMedia,listeners=new Set<()=>void>(),media={matches:false,addEventListener:(_type:string,fn:()=>void)=>listeners.add(fn),removeEventListener:(_type:string,fn:()=>void)=>listeners.delete(fn)};Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:()=>media});
+ try{store.state!.fulfillment.qcTasks.push(task('layer',{code:'QC-LAYER'}));render('layer','list');await click(getByRole(host,'button',{name:'新建巡检',exact:true}));act(()=>{media.matches=true;listeners.forEach(fn=>fn());});expect(getAllByRole(document.body,'dialog')).toHaveLength(1);expect(getByRole(document.body,'dialog',{name:'新建巡检'})).toBeTruthy();expect(store.run).not.toHaveBeenCalled();}finally{Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:previous});}
 });

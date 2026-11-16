@@ -1,4 +1,5 @@
 import { businessInputInstant } from '../../runtime/businessClock';
+import { MistPresentedErrorContext } from '../../runtime/errorPresentation';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** QC 工作台：先选面料 / 成衣专业板块，再分样品评审 / 生产检验；任务按工厂与检查地点分组，详情承接报告、门禁与业务恢复。 */
 import React from 'react';
@@ -108,6 +109,7 @@ function taskSubject(state: MistState, task: FulfillmentQcTask) {
 }
 
 export function QcWorkbenchPage() {
+  const presentedError=React.useContext(MistPresentedErrorContext);
   const { state, run, error, refresh, loading, saving, pending, workspace } = useMistWorkspace(), session = useMistSession(), { route, go } = useNav(), editor = useEditor(), toast = useToast();
   const liveSource=React.useRef({state,workspaceId:workspace?.id,revision:workspace?.revision??0});
   liveSource.current={state,workspaceId:workspace?.id,revision:workspace?.revision??0};
@@ -136,7 +138,7 @@ export function QcWorkbenchPage() {
   const canQc = (d: Domain) => session.hasPermission(`qc:${d}_chain:write`);
   const canRequest = session.hasPermission('orders:write') || session.hasPermission('products:write');
   const canPatrol = session.hasPermission('qc:inspect') && canQc(domain);
-  const locked = busy || saving || !!pending;
+  const locked = !state || busy || saving || !!pending;
   const reportTask = all.find(t => t.id === reportTaskId);
   if (reportTask) return <QcReportEditor task={reportTask} onClose={() => setReportTaskId('')} />;
   if (editor.spec) return editor.view;
@@ -257,11 +259,11 @@ export function QcWorkbenchPage() {
     <PageHeader eyebrow={uiText("订单履约 · 专业检验")} title={uiText("QC 工作台")}
       actions={<>
         <Button icon={RefreshCw} disabled={loading} onClick={() => void refresh()}>{uiText("刷新")}</Button>
-        {canPatrol && <Button icon={Plus} onClick={() => setDialog(patrolSpec())}>{uiText('新建巡检')}</Button>}
-        {canRequest ? <Button variant="primary" icon={Plus} onClick={request}>{uiText("从来源发起QC")}</Button> : <span className="mist-note">{uiText('送检由业务员在准确来源发起')}</span>}
+        {canPatrol && <Button icon={Plus} disabled={locked} onClick={() => setDialog(patrolSpec())}>{uiText('新建巡检')}</Button>}
+        {canRequest ? <Button variant="primary" icon={Plus} disabled={locked} onClick={request}>{uiText("从来源发起QC")}</Button> : <span className="mist-note">{uiText('送检由业务员在准确来源发起')}</span>}
       </>} />
-    {(error || failure) && <FailureNotice title="QC操作未完成" detail={failure || error} retry={error ? () => void refresh() : undefined} />}
-    <div className="mist-domains" role="tablist" aria-label={uiText("QC 专业板块")} {...domainTabs.listProps}>
+    {(failure || error&&error!==presentedError) && <FailureNotice title="QC操作未完成" detail={failure || error} retry={error ? () => void refresh() : undefined} />}
+    {!state ? <Card><EmptyState icon={ClipboardCheck} title={uiText(loading?'正在读取QC资料':'QC资料未读取')} /></Card> : <><div className="mist-domains" role="tablist" aria-label={uiText("QC 专业板块")} {...domainTabs.listProps}>
       {(['fabric', 'garment'] as const).map(value => { const m = metrics[value]; return <CardButton key={value} role="tab" aria-selected={domain === value} className="mist-domain" {...domainTabs.tabProps(value)} onClick={() => changeDomain(value)}>
         <span className="mist-domain-h"><Tile icon={value === 'fabric' ? Layers : Shirt} tone={domain === value ? 'accent' : undefined} /><b>{DOMAIN_LABEL[value]}</b><span className="mist-spacer" /><span className="mist-note">{uiText(canQc(value) ? '可处理' : '只读')}{uiText(" · 共 ")}{m.total}{uiText(" 条")}</span></span>
         <span className="mist-domain-nums">
@@ -284,8 +286,9 @@ export function QcWorkbenchPage() {
       { value: 'awaiting_business', label: '待业务恢复', count: stateCount('awaiting_business'), color: 'var(--mist-warn)' },
       { value: 'reported', label: '报告已回传', count: stateCount('reported'), color: 'var(--mist-ok)' },
     ]} />
-    <ListDetail list={list} detail={detail} summary={summary} drawerOpen={drawer && !!current} onDrawerClose={() => setDrawer(false)} drawerTitle={current ? `${current.code} · ${KIND_LABEL[current.kind]}` : 'QC任务'} drawerSub={current ? `${current.factory} · ${current.location}` : undefined} />
+    <ListDetail freezeLayout={!!dialog} list={list} detail={detail} summary={summary} drawerOpen={drawer && !!current} onDrawerClose={() => setDrawer(false)} drawerTitle={current ? `${current.code} · ${KIND_LABEL[current.kind]}` : 'QC任务'} drawerSub={current ? `${current.factory} · ${current.location}` : undefined} />
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
+    </>}
   </MistPage>;
 }
 
