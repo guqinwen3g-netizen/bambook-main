@@ -68,6 +68,18 @@ it.each(['full','preview'])('does not infer a primary supplier contact from its 
 it.each(['full','preview'])('shows the explicitly designated supplier primary contact: %s',async mode=>{
  const supplier=state.market.suppliers.find(s=>s.contacts.length)!,contact={...supplier.contacts[0],id:'chosen-contact',name:'指定联系人',role:''};supplier.contacts=[{...supplier.contacts[0],primary:false},{...contact,primary:true}];await mount(supplier.id,mode==='full'?'full':undefined);const label=[...host.querySelectorAll('.mist-facts small')].find(e=>e.textContent==='主联系人')!;expect(label.nextElementSibling?.textContent).toBe('指定联系人');
 });
+it.each([true,false])('does not present unread supplier data as an empty actionable list (loading %s)',async loading=>{
+ bridge.current={...bridge.current,state:null,loading,error:loading?'':'读取失败'};await mount();expect(button('新增供应商')!.disabled).toBe(true);expect(button('导出')!.disabled).toBe(true);expect(button('批量导入')!.disabled).toBe(true);expect(host.textContent).not.toContain('还没有供应商');expect(host.querySelector('.mist-pipeline')).toBeNull();if(!loading)expect(host.textContent).toContain('供应商资料未读取');expect(bridge.current.run).not.toHaveBeenCalled();
+});
+it('allows creation and import for a genuinely read empty supplier list',async()=>{
+ state.market.suppliers=[];await mount();expect(host.textContent).toContain('还没有供应商');expect(button('新增供应商')!.disabled).toBe(false);expect(button('批量导入')!.disabled).toBe(false);expect(host.textContent).not.toContain('供应商资料未读取');
+});
+it.each(['name','code','email','phone'])('finds the supplier through readable contact identifiers: %s',async kind=>{
+ const supplier=state.market.suppliers.find(s=>s.contacts.length)!;supplier.name='独立供应服务商';supplier.code='S-Q-999';Object.assign(supplier.contacts[0],{name:'联络标识',email:'unique.contact@example.invalid',phone:'0000-998877'});const query={name:supplier.contacts[0].name,code:supplier.code,email:supplier.contacts[0].email,phone:supplier.contacts[0].phone}[kind as 'name'|'code'|'email'|'phone'];await mount();const input=host.querySelector<HTMLInputElement>('.mist-search input')!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,query);input.dispatchEvent(new Event('input',{bubbles:true}));});const rows=[...host.querySelectorAll('[role="row"][tabindex]')];expect(rows).toHaveLength(1);expect(rows[0].textContent).toContain(supplier.name);
+});
+it('clears grade and country together with the remaining supplier filters',async()=>{
+ await mount();await act(async()=>getByRole(document.body,'button',{name:/^评级/}).click());await act(async()=>getByRole(document.body,'menuitemradio',{name:'A',exact:true}).click());await act(async()=>getByRole(document.body,'button',{name:/^国家地区/}).click());await act(async()=>getByRole(document.body,'menuitemradio',{name:'中国',exact:true}).click());const input=host.querySelector<HTMLInputElement>('.mist-search input')!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'ZXQ-NOMATCH');input.dispatchEvent(new Event('input',{bubbles:true}));});await click('清除筛选');expect(input.value).toBe('');expect(getByRole(document.body,'button',{name:/^评级/}).textContent).toContain('全部');expect(getByRole(document.body,'button',{name:/^国家地区/}).textContent).toContain('全部');expect([...host.querySelectorAll('[role="row"][tabindex]')]).toHaveLength(state.market.suppliers.length);
+});
 
 describe('供应商管理', () => {
   it('excludes a confirmed final short closure from open work while preserving original quantity and delivery KPIs', async () => {

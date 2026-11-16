@@ -86,6 +86,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   const routeScope=useRouteScope(),live=React.useRef({work,session});React.useLayoutEffect(()=>{live.current={work,session};},[work,session]);
   const members = workspaceMembers(workspace, state, session.user);
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all'), [typeFilter, setTypeFilter] = React.useState('all'), [gradeFilter, setGradeFilter] = React.useState('all'), [countryFilter, setCountryFilter] = React.useState('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [query, setQuery] = React.useState('');
+  const clearFilters=()=>{setQuery('');setStatusFilter('all');setTypeFilter('all');setGradeFilter('all');setCountryFilter('all');setFlagFilter('all');};
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
   const full = useListDetailRoute();
@@ -95,7 +96,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   const statusNow = (s: MarketSupplier) => supplierStatusOn(s, day);
   const needle = query.trim().toLowerCase();
   const legacyTypes = [...new Set(all.map(s => s.type).filter(t => !(SUPPLIER_TYPES as readonly string[]).includes(t)))];
-  const searched = all.filter(s => (!needle || `${s.code} ${s.name} ${s.type} ${s.capabilities} ${s.address} ${s.contacts.map(c => c.name).join(' ')}`.toLowerCase().includes(needle))
+  const searched = all.filter(s => (!needle || [s.code,s.name,s.type,s.capabilities,s.address,...s.contacts.flatMap(c=>[c.name,c.email,c.phone])].filter(Boolean).join(' ').toLowerCase().includes(needle))
     && (typeFilter === 'all' || s.type === typeFilter) && (flagFilter === 'all' || supplierFlags(s, day).some(f => f.key === flagFilter))
     && (gradeFilter === 'all' || (supplierGrade(s)?.grade || 'none') === gradeFilter) && (countryFilter === 'all' || s.country === countryFilter));
   const statusCount = (v: StatusFilter) => searched.filter(s => v === 'all' || statusNow(s) === v).length;
@@ -104,7 +105,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   const selected = rows.find(s => s.id === picked) || (picked ? all.find(s => s.id === picked) : undefined);
   // P6：档案 / 认证 / 联系人需 suppliers:write（业务员即有）；评级与暂停 / 停用 / 恢复需 suppliers:admin。服务端同样校验。
   const can = session.hasPermission('suppliers:write'), canAdmin = session.hasPermission('suppliers:admin'), canContacts = can;
-  const locked = saving || !!pending;
+  const unavailable=loading||!state,locked = unavailable || saving || !!pending;
   const pick = (s: MarketSupplier) => { setPicked(s.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, s.id, target, { keepScroll: true }); };
   const typeOptions = (current = '') => [...SUPPLIER_TYPES, ...(current && !(SUPPLIER_TYPES as readonly string[]).includes(current) ? [current] : [])].map(t => ({ value: t, label: t }));
   const productionWhen = (s?:MarketSupplier) => ({key:'type',values:typeOptions(s?.type).map(t=>t.value).filter(t=>t!=='服务商')});
@@ -206,15 +207,15 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
     { key: 'ontime', header: '准交率', width: '80px', align: 'right', hideOnMobile: true, render: s => { const p = perf.get(s.id); return p?.completed.length ? <span className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span className="mist-num">{rate(p.onTime, p.completed.length)}</span><small className="mist-muted">{p.onTime}/{p.completed.length}{uiText(" 单")}</small></span> : <span className="mist-muted">—</span>; } },
     { key: 'status', header: '状态', width: '92px', render: s => { const now = statusNow(s), scheduled = supplierFlags(s, day).find(f => f.key === 'scheduled'); return <span className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={STATUS_TONE[now]}>{STATUS_LABEL[now]}</Pill>{scheduled && <small className="mist-tone-warn">{uiText(scheduled.label)}</small>}</span>; } },
   ];
-  const empty = all.length
-    ? <EmptyState icon={SearchX} title={uiText("没有符合条件的供应商")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setStatusFilter('all'); setTypeFilter('all'); setFlagFilter('all'); }}>{uiText("清除筛选")}</Button>} />
+  const empty = !state ? <EmptyState icon={Building2} title={uiText("供应商资料未读取")} /> : all.length
+    ? <EmptyState icon={SearchX} title={uiText("没有符合条件的供应商")} action={<Button onClick={clearFilters}>{uiText("清除筛选")}</Button>} />
     : <EmptyState icon={Building2} title={uiText("还没有供应商")} action={can ? <Button icon={Plus} onClick={() => setDialog(profileSpec())}>{uiText("新增供应商")}</Button> : undefined} />;
   const detail = selected && state
     ? <SupplierDetail s={selected} state={state} day={day} can={can} canAdmin={canAdmin} canContacts={canContacts} locked={locked} perf={perf.get(selected.id)!} canProcure={session.hasPermission('procurement:write')} canBank={session.hasPermission('invoices:write')} onBank={currency => setDialog(bankSpec(selected, currency))} onBankDisable={a => setDialog(bankDisableSpec(selected, a))} onRfq={() => go('procurement', undefined, { section: 'rfq:' + selected.id })}
         onEdit={() => setDialog(profileSpec(selected))} onRate={() => setDialog(rateSpec(selected))} onCert={c => setDialog(certSpec(selected, c))} onDeleteCert={c => setDialog(deleteCertSpec(selected, c))}
         onStatus={n => setDialog(statusSpec(selected, n))} onContact={c => setDialog(contactSpec(selected, c))} onContactDelete={c => setDialog(contactSpec(selected,c,true))} onOpen={(view, id) => go(view, id)}
         attachments={attachments(selected, !can)} history={history(selected.id)} />
-    : <EmptyState icon={Building2} title={uiText("供应商档案")} description={uiText("从左侧列表选择一家供应商，查看认证、评级、在手业务与交付表现。")} compact />;
+    : <EmptyState icon={Building2} title={uiText("供应商档案")} compact />;
   const summary = selected ? (() => {
     const now = statusNow(selected), g = supplierGrade(selected), p = perf.get(selected.id), certs = selected.certificates || [], contact = selected.contacts.find(c => c.primary);
     const alerts = supplierFlags(selected, day).filter(f => f.key === 'certExpired' || f.key === 'certExpiring' || f.key === 'scheduled');
@@ -233,8 +234,8 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   return <><MistPage>
     <PageHeader eyebrow={uiText("客户与市场 · 供应商")} title={uiText("供应商管理")}
       actions={<>
-        {can && <BaseDataImportButton kind="supplier" />}
-        <Button icon={Download} onClick={() => downloadModuleCsv('供应商.csv', ['编码', '名称', '类型', '地址', '工艺与能力', '月产能', '产能单位', '交付周期天', '评级', '认证', '在手单', '准交', '状态'], rows.map(s => { const p = perf.get(s.id); return [s.code, s.name, s.type, s.address, s.capabilities, s.capacity, s.capacityUnit, s.leadDays, supplierGrade(s)?.grade || '', (s.certificates || []).map(c => `${c.name}(${c.validUntil})`).join('；'), p?.open.length || 0, p?.completed.length ? `${p.onTime}/${p.completed.length}` : '', STATUS_LABEL[statusNow(s)]]; }))}>{uiText("导出")}</Button>
+        {can && <BaseDataImportButton kind="supplier" disabled={unavailable} />}
+        <Button icon={Download} disabled={unavailable} onClick={() => downloadModuleCsv('供应商.csv', ['编码', '名称', '类型', '地址', '工艺与能力', '月产能', '产能单位', '交付周期天', '评级', '认证', '在手单', '准交', '状态'], rows.map(s => { const p = perf.get(s.id); return [s.code, s.name, s.type, s.address, s.capabilities, s.capacity, s.capacityUnit, s.leadDays, supplierGrade(s)?.grade || '', (s.certificates || []).map(c => `${c.name}(${c.validUntil})`).join('；'), p?.open.length || 0, p?.completed.length ? `${p.onTime}/${p.completed.length}` : '', STATUS_LABEL[statusNow(s)]]; }))}>{uiText("导出")}</Button>
         {can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => setDialog(profileSpec())}>{uiText("新增供应商")}</Button>}
       </>} />
     {!can && <div className="mist-section"><Banner variant="status" tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有供应商写权限，可以查看档案、认证与交付表现。")}</Banner></div>}
@@ -246,12 +247,12 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
       <Dropdown label={uiText("类型")} value={typeFilter} onChange={setTypeFilter} options={[{ value: 'all', label: '全部' }, ...[...SUPPLIER_TYPES, ...legacyTypes].map(t => ({ value: t, label: `${t} · ${all.filter(s => s.type === t).length}` }))]} />
       <Dropdown<FlagFilter> label={uiText("提醒")} value={flagFilter} onChange={setFlagFilter} options={[{ value: 'all', label: '全部' }, { value: 'certExpired', label: '认证已过期' }, { value: 'certExpiring', label: `认证 ${CERT_NEAR_DAYS} 天内到期` }, { value: 'noCert', label: '未登记认证' }, { value: 'unrated', label: '未评级' }, { value: 'scheduled', label: '即将暂停 / 停用' }]} />
     </Toolbar>
-    <Pipeline<StatusFilter> value={statusFilter} onChange={setStatusFilter} items={[
+    {state && <Pipeline<StatusFilter> value={statusFilter} onChange={setStatusFilter} items={[
       { value: 'all', label: '全部', count: statusCount('all'), color: 'var(--mist-ink-2)' },
       { value: 'active', label: '合作中', count: statusCount('active'), color: 'var(--mist-ok)' },
       { value: 'paused', label: '已暂停', count: statusCount('paused'), color: 'var(--mist-warn)' },
       { value: 'blocked', label: '已停用', count: statusCount('blocked'), color: 'var(--mist-bad)' },
-    ]} />
+    ]} />}
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${selected.name}` : '供应商档案'} drawerSub={selected?.type}
       list={<Card><DataTable ariaLabel={uiText("供应商列表")} loading={loading} rows={rows} rowKey={s => s.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
       detail={detail} summary={summary} />
