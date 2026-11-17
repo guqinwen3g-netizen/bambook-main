@@ -1,3 +1,4 @@
+import {isCalendarDay} from '../../../../../server/src/shared/mistBusinessClock';
 import { sampleUnitAllowsDecimal } from '../../../../../server/src/shared/mistDevelopmentDomain';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import {SAMPLE_SEND_PURPOSES,sampleSendPurpose} from '../../../../../server/src/shared/mistSampleSending';
@@ -49,6 +50,13 @@ function ledgerRows(samples: FulfillmentSample[]): LedgerRow[] {
     archives.set(key, row); rows.push(row);
   }
   return rows;
+}
+
+/** Incoming business dates are distinct from immutable recording timestamps. */
+function incomingMovementDay(sample:FulfillmentSample,movement:SampleMovement):string|undefined{
+  if(sample.source.kind!=='developmentIncoming')return;
+  const day=movement.kind==='receive'?sample.incoming?.receivedAt:movement.incomingTransfer?.occurredAt;
+  return isCalendarDay(day)?day:undefined;
 }
 
 function sampleFacts(state: MistState, sample: FulfillmentSample, day: string) {
@@ -182,7 +190,7 @@ export function SamplesPage() {
     const positions = fulfillmentPositions(sample);
     setDialog({ title: ({ lend: '登记借出', return: '登记分次归还', send: '登记永久寄出', move: '登记移位', scrap: '登记报废', returnFactory: '登记退还工厂' })[kind] + ` · ${sample.form}`,
       fields: [...(kind==='send'?[field('sendPurpose','寄送用途','select',true,Object.entries(SAMPLE_SEND_PURPOSES).map(([value,label])=>({value,label})))]:[]),...(kind !== 'return' && positions.length > 1 ? [field('sourceLocation', '本次出库位置', 'select', true, [{ value: '__choose__', label: '请选择位置' }, ...positions.map(position => ({ value: position.location, label: `${position.location || '位置未记录'} · ${position.available}${sample.unit}` }))])] : []),
-        ...(kind === 'return' ? [field('loanId', '原借出', 'select', true, [emptyOption, ...loans.map(loan => ({ value: loan.id, label: `${loan.person} · 未还 ${sampleLoanRemaining(state, loan.id)}${sample.unit} · ${platformBusinessDate(loan.at)}` }))])] : []),
+        ...(kind === 'return' ? [field('loanId', '原借出', 'select', true, [emptyOption, ...loans.map(loan => ({ value: loan.id, label: `${loan.person} · 未还 ${sampleLoanRemaining(state, loan.id)}${sample.unit} · ${incomingMovementDay(sample,loan)||platformBusinessDate(loan.at)}` }))])] : []),
         ...(kind !== 'move' ? [field('quantity', `本次数量（${sample.unit}）`, 'number')] : []),
         ...(kind === 'lend' ? [field('borrowerId', '借用人', 'select', true, [emptyOption, ...memberSelectOptions(members)])] : kind !== 'scrap' ? [field('person', kind === 'send' ? '收件人 / 公司' : kind === 'returnFactory' ? '退回工厂' : '经手人', 'text', kind === 'send' || kind === 'returnFactory')] : []),
         ...(kind === 'send' ? [field('destination', '寄送去向', 'text', false), field('carrier', '快递公司', 'text', false), field('trackingNo', '运单号', 'text', false), { ...field('feeAmount', '寄样费', 'number', false), min: 0 }, field('feeCurrency', '寄样费币种', 'select', false, ['CNY', 'USD', 'EUR'].map(c => ({ value: c, label: c })))] : kind === 'move' || kind === 'return' ? [field('location', '新位置', 'text', false)] : []),
@@ -281,7 +289,7 @@ function SampleDetail({ row, state, day, can, locked, onMove, onEdit, onQc, onAt
   const primary = row.primary, status = rowStatus(state, row, day);
   const shipment = state.fulfillment.shipments.find(item => item.id === primary.shipmentId);
   const events = row.samples.flatMap(sample => state.fulfillment.sampleMovements.filter(movement => movement.sampleId === sample.id).map(movement => ({ movement, sample })))
-    .sort((a, b) => b.movement.at.localeCompare(a.movement.at));
+    .sort((a, b) => (incomingMovementDay(b.sample,b.movement)||b.movement.at).localeCompare(incomingMovementDay(a.sample,a.movement)||a.movement.at)||b.movement.at.localeCompare(a.movement.at));
   const why = (sample: FulfillmentSample, kind: MoveKind): string | false => {
     if (!can) return '没有样品写权限';
     if(sample.source.kind==='developmentIncoming'&&kind!=='move'&&kind!=='scrap')return '请从开发案办理寄厂与原样退回';
@@ -296,6 +304,7 @@ function SampleDetail({ row, state, day, can, locked, onMove, onEdit, onQc, onAt
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill>{primary.category}</Pill><Pill tone={status.tone}>{uiText(status.label)}</Pill>{primary.role && <Pill tone="accent">{fulfillmentSampleRoleLabel(primary.role)}</Pill>}</div>
     <Facts items={[
       { label: '来源', value: <SourceLink source={primary.source} sampleId={primary.id} /> },
+      ...(primary.source.kind==='developmentIncoming'&&primary.incoming?[{label:'实际收样日',value:primary.incoming.receivedAt}]:[]),
       { label: row.shelf === 'fabric' ? '样品数' : '规格', value: row.shelf === 'fabric' ? `${row.samples.length}` : [primary.size, primary.color].filter(Boolean).join(' · ') || '未记录' },
       ...(shipment ? [{ label: '出运批次', value: <Mono>{shipment.code}</Mono> }] : []),
       ...(row.samples.length===1?[{ label: '登记', value: shortWhen(primary.createdAt) }]:[]),
@@ -328,7 +337,7 @@ function SampleDetail({ row, state, day, can, locked, onMove, onEdit, onQc, onAt
       {row.samples.map(sample=><div key={sample.id} className="mist-col" data-sample-files={sample.id} role="group" aria-label={sample.code+' · '+uiText('附件')}>{row.samples.length>1&&<span className="mist-mono">{sample.code}</span>}<RecordFiles ids={sample.fileIds} onAttach={can?ids=>onAttach(sample,ids):undefined}/></div>)}
     </DetailBlock>
     <DetailBlock title={uiText("流转记录")}>
-      {events.length ? <Timeline events={events.map(({ movement, sample }) => { const line = `${MOVE_LABEL[movement.kind]}${row.samples.length > 1 ? ' · ' + sample.form : ''}${movement.quantity ? ` ${movement.quantity}${sample.unit}` : ''}${movement.sendPurpose?' · '+uiText(SAMPLE_SEND_PURPOSES[movement.sendPurpose]):''}${movement.person ? ' · ' + movement.person : ''}${movement.location ? ' · ' + movement.location : ''}${movement.destination ? ' · ' + movement.destination : ''}${movement.carrier || movement.trackingNo ? ` · ${[movement.carrier, movement.trackingNo].filter(Boolean).join(' ')}` : ''}${movement.fee ? ` · 寄样费 ${movement.fee.amount} ${movement.fee.currency}` : ''}${movement.expectedReturn ? ` · 预计 ${movement.expectedReturn} 归还` : ''}${movement.note ? ' · ' + movement.note : ''}`, link = movement.development; return ({ who: movement.actor, when: businessWhen(movement.at), text: link ? <>{line} <TextLink onClick={() => go('development/detail', link.devId, { versionId: link.versionId })}>{uiText("查看开发案 ")}{state.devs.find(dev => dev.id === link.devId)?.code || ''}</TextLink></> : line }); })} />
+      {events.length ? <Timeline events={events.map(({ movement, sample }) => { const line = `${MOVE_LABEL[movement.kind]}${row.samples.length > 1 ? ' · ' + sample.form : ''}${movement.quantity ? ` ${movement.quantity}${sample.unit}` : ''}${movement.sendPurpose?' · '+uiText(SAMPLE_SEND_PURPOSES[movement.sendPurpose]):''}${movement.person ? ' · ' + movement.person : ''}${movement.location ? ' · ' + movement.location : ''}${movement.destination ? ' · ' + movement.destination : ''}${movement.carrier || movement.trackingNo ? ` · ${[movement.carrier, movement.trackingNo].filter(Boolean).join(' ')}` : ''}${movement.fee ? ` · 寄样费 ${movement.fee.amount} ${movement.fee.currency}` : ''}${movement.expectedReturn ? ` · 预计 ${movement.expectedReturn} 归还` : ''}${movement.note ? ' · ' + movement.note : ''}${incomingMovementDay(sample,movement)?' · '+uiText('登记')+' '+businessWhen(movement.at):''}`, link = movement.development; return ({ who: movement.actor, when: incomingMovementDay(sample,movement)||businessWhen(movement.at), text: link ? <>{line} <TextLink onClick={() => go('development/detail', link.devId, { versionId: link.versionId })}>{uiText("查看开发案 ")}{state.devs.find(dev => dev.id === link.devId)?.code || ''}</TextLink></> : line }); })} />
         : <span className="mist-note">{uiText("还没有流转记录")}</span>}
     </DetailBlock>
   </DetailBody>;
