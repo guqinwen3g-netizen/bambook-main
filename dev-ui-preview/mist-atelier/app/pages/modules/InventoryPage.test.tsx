@@ -30,6 +30,11 @@ beforeEach(()=>{store.loading=false;store.error='';session.denied=new Set();stor
   s.fulfillment.warehouses.push({id:'wh',code:'WH-1',name:'松江仓',address:'上海',active:true});
   store.state=s;store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
+it('shows warehouse and owned on-loan quantities separately and prevents ordinary release of physical sample debt',()=>{
+ const s=stock('loan-source',{owner:'公司',available:60,reservations:[{id:'sample-hold',orderId:'og',lineId:'lg',purpose:'商业内样借出',quantity:40,at:'2026-10-13T10:00:00Z',actor:'业务员',sampleLoan:{sampleId:'sample',loanId:'loan',unit:'个',sourceLocation:'A-1',returned:0,owned:true}}]});
+ store.state!.fulfillment.stock.push(s);store.state!.fulfillment.purchases.push({id:'po',code:'PO-1',price:2,currency:'CNY',unit:'个'}as any);render(s.id);
+ expect(host.textContent).toContain('借样在外');expect(host.textContent).toContain('40 个');expect(host.textContent).toContain('200 CNY');expect(host.textContent).toContain('按原借出归还');expect(queryByRole(host,'button',{name:'释放',exact:true})).toBeNull();expect(store.run).not.toHaveBeenCalled();
+});
 
 it.each([false,true])('blocks inventory entry before the workspace is read (loading %s)',loading=>{
  store.state=null;store.loading=loading;render();

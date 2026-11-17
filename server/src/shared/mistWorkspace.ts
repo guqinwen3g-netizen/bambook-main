@@ -520,6 +520,8 @@ export type MistWorkspaceEnvelope = { id: string; ownerId: string; name: string;
   developmentIncomingAccess?:import('./mistDevelopmentIncoming').DevelopmentIncomingAccess;
   /** Response-only exact associations for visible signatures; never persisted. */
   signatureReviewBindings?:import('./mistSignatures').MistSignatureReviewBinding[];
+  /** Response-only choices for a readable, writable commercial shipping sample; no inventory read grant. */
+  commercialSampleLoanSources?:Record<string,import('./mistCommercialSampleLoan').CommercialSampleLoanSources>;
 };
 
 export type MistRunReceipt = { requestId: string; /** Original request base, including commands safely applied after concurrent updates. */ expectedRevision?: number; revision: number; result: MistCommandResult };

@@ -42,9 +42,27 @@ it.each(['arrived','delivered'])('uses the same post-departure reconciliation UI
 it.each(['arrived','delivered'])('keeps the existing %s sample readable without creating a replacement shipping balance',phase=>{
  const sample=shippingCustodyFixture();(store.state!.fulfillment.shipments[0]as any).state=phase;render(sample.id,{section:'shipment:custody-ship',productionId:'custody-production'});expect(queryByRole(host,'button',{name:'新建样品',exact:true})).toBeNull();expect(host.querySelector('[data-sample-form="'+sample.id+'"]')).not.toBeNull();
 });
-it('offers onsite relocation but no independent loan or permanent disposition for declared included specimens',()=>{
+it('requires current commercial source capability before lending an included group and blocks permanent disposition',()=>{
  const sample=shippingCustodyFixture(),state=store.state!,ship=state.fulfillment.shipments[0];ship.state='ready';delete ship.departedAt;
- confirmShippingSampleBasis(state,{id:sample.id,kind:'included',sourceSnapshot:shippingSampleSourceSnapshot(state,sample),evidence:'Actual4 members are inside commercial8',fileIds:[]},{id:()=>crypto.randomUUID(),now:'2026-11-19T14:00:00Z',actorName:'Sales'});render(sample.id);const form=host.querySelector('[data-sample-form="'+sample.id+'"]')as HTMLElement;getByRole(form,'button',{name:'移位',exact:true});for(const name of ['借出','寄出','报废','退还工厂'])expect(queryByRole(form,'button',{name,exact:true})).toBeNull();expect(form.textContent).toContain('大货内随本批出运');
+ confirmShippingSampleBasis(state,{id:sample.id,kind:'included',sourceSnapshot:shippingSampleSourceSnapshot(state,sample),evidence:'Actual4 members are inside commercial8',fileIds:[]},{id:()=>crypto.randomUUID(),now:'2026-11-19T14:00:00Z',actorName:'Sales'});render(sample.id);const form=host.querySelector('[data-sample-form="'+sample.id+'"]')as HTMLElement;getByRole(form,'button',{name:'移位',exact:true});expect((getByRole(form,'button',{name:'借出',exact:true})as HTMLButtonElement).disabled).toBe(true);for(const name of ['寄出','报废','退还工厂'])expect(queryByRole(form,'button',{name,exact:true})).toBeNull();expect(form.textContent).toContain('大货内随本批出运');
+});
+it('selects the actual bounded commercial source without requiring inventory access or a free-text source',async()=>{
+ const sample=shippingCustodyFixture(),state=store.state!,ship=state.fulfillment.shipments[0];ship.state='ready';delete ship.departedAt;
+ confirmShippingSampleBasis(state,{id:sample.id,kind:'included',sourceSnapshot:shippingSampleSourceSnapshot(state,sample),evidence:'Actual original group',fileIds:[]},{id:()=>crypto.randomUUID(),now:'2026-11-19T14:00:00Z',actorName:'Sales'});
+ state.members=[{userId:'borrower',name:'借用同事',addedBy:'sales',addedByName:'业务员',addedAt:'2026-11-18T00:00:00Z'}];
+ (store.workspace as any).commercialSampleLoanSources={[sample.id]:{status:'available',kind:'warehouse',quantity:4,unit:'件',options:[{stockId:'stock-source',location:'仓内A01',label:'PO-1 · 批次甲 · A01',maxQuantity:4,unit:'件'}]}};
+ render(sample.id);await act(async()=>getByRole(host,'button',{name:'借出',exact:true}).click());const dialog=getByRole(document.body,'dialog',{name:'登记借出 · 船样'});
+ expect((getByRole(dialog,'spinbutton',{name:/商业来源 · PO-1/})as HTMLInputElement).value).toBe('4');
+ act(()=>fireEvent.change(getByRole(dialog,'combobox',{name:'借用人'}),{target:{value:'borrower'}}));await act(async()=>getByRole(dialog,'button',{name:'保存流转'}).click());
+ expect(store.run).toHaveBeenCalledWith({type:'fulfillment.samples.move',payload:expect.objectContaining({id:sample.id,kind:'lend',quantity:4,borrowerId:'borrower',commercialSources:[{stockId:'stock-source',location:'仓内A01',quantity:4}]})});
+ expect(JSON.stringify(store.run.mock.calls)).not.toContain('sampleLoan');
+});
+it('returns a commercial group through the original visible return facts while inventory identities remain absent',async()=>{
+ const sample=shippingCustodyFixture(),state=store.state!,ship=state.fulfillment.shipments[0];ship.state='ready';delete ship.departedAt;sample.available=0;sample.positions![0].available=0;
+ state.fulfillment.sampleMovements.push({id:'source-loan',sampleId:sample.id,kind:'lend',quantity:4,person:'借用同事',location:'',note:'原组借出',at:'2026-11-18T04:00:00Z',actor:'业务员',commercialReturn:{location:'A01',quantity:4,unit:'件'}});
+ render(sample.id);await act(async()=>getByRole(host,'button',{name:'归还',exact:true}).click());const dialog=getByRole(document.body,'dialog',{name:'登记整组归还 · 船样'});
+ expect((getByRole(dialog,'combobox',{name:'原借出'})as HTMLSelectElement).value).toBe('source-loan');expect((getByRole(dialog,'spinbutton',{name:'本次数量（件）'})as HTMLInputElement).value).toBe('4');expect((getByRole(dialog,'textbox',{name:'原归还位置'})as HTMLInputElement).value).toBe('A01');
+ await act(async()=>getByRole(dialog,'button',{name:'保存流转'}).click());expect(store.run).toHaveBeenCalledWith({type:'fulfillment.samples.move',payload:expect.objectContaining({kind:'return',loanId:'source-loan',quantity:4,location:'A01'})});expect(JSON.stringify(store.run.mock.calls)).not.toContain('commercialSources');
 });
 it('requires quantity classification before generic movement even while the shipment is still preparing',()=>{
  const sample=shippingCustodyFixture(),ship=store.state!.fulfillment.shipments[0];ship.state='preparing';delete ship.departedAt;render(sample.id);const form=host.querySelector('[data-sample-form="'+sample.id+'"]')as HTMLElement;getByRole(form,'button',{name:'确认数量口径',exact:true});for(const name of ['借出','寄出','移位','报废','退还工厂'])expect(queryByRole(form,'button',{name,exact:true})).toBeNull();

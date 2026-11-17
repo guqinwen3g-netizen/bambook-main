@@ -6,6 +6,7 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 样品仓库：面料按档案汇总形态余额，成衣按每件实物；详情卡承接借出、寄出、归还、移位与送检。 */
 import { parseShippingSampleSizes } from '../../../../../server/src/shared/mistShippingSample';
 import {shippingSampleSourceSnapshot,shippingSampleMovementBlocker,shipmentHasDeparted} from '../../../../../server/src/shared/mistShipmentSampleCustody';
+import type {CommercialSampleLoanSources} from '../../../../../server/src/shared/mistCommercialSampleLoan';
 import React from 'react';
 import { ArrowLeftRight, Download, Layers, Package, Pencil, Plus, RefreshCw, SearchX, Send, Shirt, Undo2 } from 'lucide-react';
 import { Banner, Button, Card, DataTable, Dropdown, EmptyState, Facts, Icon, MistPage, Mono, ObjectCell, PageHeader, Pagination, Pill, Pipeline, SearchField, Tabs, TextLink, Thumb, Timeline, Toolbar, type Column } from '../../../../../components/mist';
@@ -200,18 +201,29 @@ export function SamplesPage() {
   };
   const movement = (sample: FulfillmentSample, kind: MoveKind) => {
     if (!state) return;
+    const commercial=kind==='lend'&&sample.shippingQuantityBasis?.kind==='included';
+    const sources=workspace?.commercialSampleLoanSources?.[sample.id];
+    if(commercial&&sources?.status!=='available'){setBasisError(sources?sources.reason:'商业借样来源未读取，请刷新后重试');return;}
+    const options=commercial&&sources?.status==='available'&&sources.kind==='warehouse'?sources.options:[];
     const loans = state.fulfillment.sampleMovements.filter(item => item.sampleId === sample.id && item.kind === 'lend' && sampleLoanRemaining(state, item.id) > 0);
+    const originalReturn=(loan:SampleMovement|undefined)=>loan?.commercialReturn||(loan?.commercialLoan?{location:loan.commercialLoan.sampleLocation,quantity:loan.commercialLoan.quantity,unit:loan.commercialLoan.unit}:undefined);
+    const returnFacts=loans.length===1?originalReturn(loans[0]):undefined;
+    const singleReturn=returnFacts?{...returnFacts,quantity:sampleLoanRemaining(state,loans[0].id)}:undefined;
     const positions = fulfillmentPositions(sample);
-    setDialog({ title: ({ lend: '登记借出', return: '登记分次归还', send: '登记永久寄出', move: '登记移位', scrap: '登记报废', returnFactory: '登记退还工厂' })[kind] + ` · ${sample.form}`,
-      fields: [...(kind==='send'?[field('sendPurpose','寄送用途','select',true,Object.entries(SAMPLE_SEND_PURPOSES).map(([value,label])=>({value,label})))]:[]),...(kind !== 'return' && positions.length > 1 ? [field('sourceLocation', '本次出库位置', 'select', true, [{ value: '__choose__', label: '请选择位置' }, ...positions.map(position => ({ value: position.location, label: `${position.location || '位置未记录'} · ${position.available}${sample.unit}` }))])] : []),
+    setDialog({ title: ({ lend: '登记借出', return: sample.sizeQuantities?'登记整组归还':'登记分次归还', send: '登记永久寄出', move: '登记移位', scrap: '登记报废', returnFactory: '登记退还工厂' })[kind] + ` · ${sample.form}`,
+      fields: [...options.map((option,index)=>({...field('commercial'+index,`商业来源 · ${option.label}（最多${option.maxQuantity}${option.unit}）`,'number'),min:0,max:option.maxQuantity})),...(kind==='send'?[field('sendPurpose','寄送用途','select',true,Object.entries(SAMPLE_SEND_PURPOSES).map(([value,label])=>({value,label})))]:[]),...(kind !== 'return' && positions.length > 1 ? [field('sourceLocation', '本次出库位置', 'select', true, [{ value: '__choose__', label: '请选择位置' }, ...positions.map(position => ({ value: position.location, label: `${position.location || '位置未记录'} · ${position.available}${sample.unit}` }))])] : []),
         ...(kind === 'return' ? [field('loanId', '原借出', 'select', true, [emptyOption, ...loans.map(loan => ({ value: loan.id, label: `${loan.person} · 未还 ${sampleLoanRemaining(state, loan.id)}${sample.unit} · ${incomingMovementDay(sample,loan)||platformBusinessDate(loan.at)}` }))])] : []),
-        ...(kind !== 'move' ? [field('quantity', `本次数量（${sample.unit}）`, 'number')] : []),
+        ...(kind !== 'move' ? [{...field('quantity', `本次数量（${sample.unit}）`, 'number'),readonly:!!sample.sizeQuantities}] : []),
         ...(kind === 'lend' ? [field('borrowerId', '借用人', 'select', true, [emptyOption, ...memberSelectOptions(members)])] : kind !== 'scrap' ? [field('person', kind === 'send' ? '收件人 / 公司' : kind === 'returnFactory' ? '退回工厂' : '经手人', 'text', kind === 'send' || kind === 'returnFactory')] : []),
-        ...(kind === 'send' ? [field('destination', '寄送去向', 'text', false), field('carrier', '快递公司', 'text', false), field('trackingNo', '运单号', 'text', false), { ...field('feeAmount', '寄样费', 'number', false), min: 0 }, field('feeCurrency', '寄样费币种', 'select', false, ['CNY', 'USD', 'EUR'].map(c => ({ value: c, label: c })))] : kind === 'move' || kind === 'return' ? [field('location', '新位置', 'text', false)] : []),
+        ...(kind === 'send' ? [field('destination', '寄送去向', 'text', false), field('carrier', '快递公司', 'text', false), field('trackingNo', '运单号', 'text', false), { ...field('feeAmount', '寄样费', 'number', false), min: 0 }, field('feeCurrency', '寄样费币种', 'select', false, ['CNY', 'USD', 'EUR'].map(c => ({ value: c, label: c })))] : kind === 'move' ? [field('location','新位置','text',false)] : kind==='return' ? [
+          {...field('location','新位置','text',false),when:{key:'loanId',values:loans.filter(loan=>!originalReturn(loan)).map(loan=>loan.id)}},
+          ...loans.flatMap((loan,index)=>{const source=originalReturn(loan);return source?[{...field('returnLocation'+index,'原归还位置','text',false),readonly:true,when:{key:'loanId',values:[loan.id]}}]:[];})
+        ] : []),
         ...(kind === 'lend' ? [field('expectedReturn', '预计归还日', 'date', false)] : []), field('note', kind === 'scrap' || kind === 'returnFactory' ? '原因' : '交接说明', 'textarea', kind === 'scrap' || kind === 'returnFactory')],
-      initialValues: {sendPurpose:sample.source.kind==='manual'||sample.source.kind==='developmentIncoming'?'other':'confirmation',quantity: kind === 'return' ? 0 : sample.available, person: '', borrowerId: '', destination: '', carrier: '', trackingNo: '', feeAmount: '', feeCurrency: 'CNY', location: kind === 'return' || kind === 'send' || sample.location === '多个位置' ? '' : sample.location, note: '', loanId: '', expectedReturn: '', sourceLocation: '__choose__' },
+      initialValues: {...Object.fromEntries(options.map((option,index)=>['commercial'+index,options.length===1?sample.available:0])),...Object.fromEntries(loans.map((loan,index)=>['returnLocation'+index,originalReturn(loan)?.location||''])),sendPurpose:sample.source.kind==='manual'||sample.source.kind==='developmentIncoming'?'other':'confirmation',quantity: kind === 'return' ? sample.sizeQuantities?sample.quantity:singleReturn?.quantity??0 : sample.available, person: '', borrowerId: '', destination: '', carrier: '', trackingNo: '', feeAmount: '', feeCurrency: 'CNY', location: kind === 'return' || kind === 'send' || sample.location === '多个位置' ? '' : sample.location, note: '', loanId: loans.length===1?loans[0].id:'', expectedReturn: '', sourceLocation: '__choose__' },
       submitLabel: '保存流转',
-      submit: values => run({ type: 'fulfillment.samples.move', payload: { id: sample.id, kind,...(kind==='send'?{sendPurpose:sampleSendPurpose(text(values,'sendPurpose'),sample)}:{}),quantity: kind === 'move' ? 0 : number(values, 'quantity'), ...(kind === 'lend' ? { borrowerId: text(values, 'borrowerId'), person: members.find(m => m.id === text(values, 'borrowerId'))?.name || '' } : { person: text(values, 'person') }), location: text(values, 'location'), note: text(values, 'note'),
+      submit: values => run({ type: 'fulfillment.samples.move', payload: { id: sample.id, kind,...(kind==='send'?{sendPurpose:sampleSendPurpose(text(values,'sendPurpose'),sample)}:{}),quantity: kind === 'move' ? 0 : number(values, 'quantity'), ...(kind === 'lend' ? { borrowerId: text(values, 'borrowerId'), person: members.find(m => m.id === text(values, 'borrowerId'))?.name || '' } : { person: text(values, 'person') }), location: kind==='return'?originalReturn(loans.find(loan=>loan.id===text(values,'loanId')))?.location??text(values,'location'):text(values, 'location'), note: text(values, 'note'),
+        ...(options.length?{commercialSources:options.flatMap((option,index)=>number(values,'commercial'+index)>0?[{stockId:option.stockId,location:option.location,quantity:number(values,'commercial'+index)}]:[])}:{}),
         ...(kind === 'send' ? { destination: text(values, 'destination'), carrier: text(values, 'carrier'), trackingNo: text(values, 'trackingNo'), ...(Number(values.feeAmount) > 0 ? { fee: { amount: Number(values.feeAmount), currency: text(values, 'feeCurrency') || 'CNY' } } : {}) } : {}),
         ...(text(values, 'loanId') ? { loanId: text(values, 'loanId') } : {}), ...(text(values, 'expectedReturn') ? { expectedReturn: text(values, 'expectedReturn') } : {}), ...(text(values, 'sourceLocation') !== '__choose__' ? { sourceLocation: text(values, 'sourceLocation') } : {}) } }) });
   };
@@ -250,7 +262,7 @@ export function SamplesPage() {
   ];
   const statusCounts = (key: StatusFilter) => shelfRows.filter(row => key === 'all' || statusOf(row).key === key || (key === 'lent' && statusOf(row).key === 'overdue')).length;
 
-  const detail = selected && state ? <SampleDetail row={selected} state={state} day={day} can={can} locked={locked}
+  const detail = selected && state ? <SampleDetail row={selected} state={state} day={day} can={can} locked={locked} commercialSources={workspace?.commercialSampleLoanSources}
     onMove={movement} onBasis={confirmQuantityBasis} onEdit={sample => editor.open(editSpec(sample))} onQc={openSampleQc}
     onAttach={(sample,added) => attachFiles(root=>root.fulfillment.samples.find(row=>row.id===sample.id),(current,fileIds)=>({type:'fulfillment.samples.edit',payload:{id:current.id,location:current.location,note:current.note,fileIds}}),added)} />
     : <EmptyState icon={shelf === 'garment' ? Shirt : Layers} title={uiText("样品详情")} description={uiText(loading ? '正在读取样品' : '从列表选择一条样品记录')} compact />;
@@ -296,8 +308,9 @@ export function SamplesPage() {
   </MistPage>;
 }
 
-function SampleDetail({ row, state, day, can, locked, onMove, onBasis, onEdit, onQc, onAttach }: {
+function SampleDetail({ row, state, day, can, locked, commercialSources, onMove, onBasis, onEdit, onQc, onAttach }: {
   row: LedgerRow; state: MistState; day: string; can: boolean; locked: boolean;
+  commercialSources?:Record<string,CommercialSampleLoanSources>;
   onMove: (sample: FulfillmentSample, kind: MoveKind) => void; onBasis:(sample:FulfillmentSample)=>void; onEdit: (sample: FulfillmentSample) => void; onQc: (sample: FulfillmentSample) => void; onAttach: (sample: FulfillmentSample, ids: string[]) => Promise<unknown>;
 }) {
   const { go } = useNav(), session = useMistSession();
@@ -309,6 +322,7 @@ function SampleDetail({ row, state, day, can, locked, onMove, onBasis, onEdit, o
     if (!can) return '没有样品写权限';
     const custody=shippingSampleMovementBlocker(state,sample,kind);if(custody)return custody;
     if(sample.source.kind==='developmentIncoming'&&kind!=='move'&&kind!=='scrap')return '请从开发案办理寄厂与原样退回';
+    if(kind==='lend'&&sample.shippingQuantityBasis?.kind==='included'){const caps=commercialSources?.[sample.id];if(caps?.status!=='available')return caps?caps.reason:'商业借样来源未读取，请刷新后重试';}
     const facts = sampleFacts(state, sample, day);
     if (kind === 'return') return facts.openLoans.length ? false : '没有未归还的借出';
     return sample.available > 0 ? false : '当前没有可用数量';
@@ -337,7 +351,7 @@ function SampleDetail({ row, state, day, can, locked, onMove, onBasis, onEdit, o
           {sample.shippingQuantityBasis&&<Timeline events={[...(sample.shippingQuantityBasisHistory||[]),sample.shippingQuantityBasis].map(b=>({who:b.actor,when:businessWhen(b.at),text:<>{uiText(b.kind==='included'?'大货内随本批出运':'独立实物（不占本批大货）')} · {b.independentSource?b.independentSource+' · ':''}{b.evidence}{b.consumption&&<> · {uiText(b.consumption.retrospective?'补记随货':'随货出运')} · {shipment?.code}</>}</>}))}/>}
         </div>}
         {can && <ActionBar busy={locked} actions={[
-          { label: '借出', icon: ArrowLeftRight, onClick: () => onMove(sample, 'lend'), hidden: !!why(sample, 'lend') },
+          { label: '借出', icon: ArrowLeftRight, onClick: () => onMove(sample, 'lend'), reason: why(sample,'lend'), hidden: !can||sample.available<=0||sample.source.kind==='developmentIncoming'||!!shippingSampleMovementBlocker(state,sample,'lend') },
           { label: '寄出', icon: Send, onClick: () => onMove(sample, 'send'), hidden: !!why(sample, 'send') },
           { label: '归还', icon: Undo2, onClick: () => onMove(sample, 'return'), hidden: !!why(sample, 'return') },
           { label: '移位', onClick: () => onMove(sample, 'move'), hidden: !!why(sample, 'move') },

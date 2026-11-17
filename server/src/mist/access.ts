@@ -333,6 +333,13 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
     const sourceCurrent=!invoice.voidedAt&&document?.status==='issued'&&!!shipment&&condition?.kind===invoice.receivableDueCondition.kind&&condition.days===invoice.receivableDueCondition.days&&condition.terms===invoice.receivableDueCondition.terms;
     return {...safe,receivableDueSource:{sourceCurrent,...(sourceCurrent?{shipmentId:shipment!.id,...(shipment!.delivered?{deliveryAt:shipment!.delivered.at}:{})}:{})}};
   });
+  // Product-only readers can return the same physical sample without receiving inventory/receipt identities.
+  next.fulfillment.sampleMovements=next.fulfillment.sampleMovements.map(movement=>{
+    const {commercialReturn:_untrusted,...safe}=movement;
+    if(!safe.commercialLoan||hasScope(actor,'inventory:read'))return safe;
+    const {commercialLoan,...publicMovement}=safe;
+    return {...publicMovement,commercialReturn:{location:commercialLoan.sampleLocation,quantity:commercialLoan.quantity,unit:commercialLoan.unit}};
+  });
   return { state: next, hidden,...(costVisible?{costMaterialBasis:scope ? null : financialMaterialCostBasis(state),costClaimBasis}:{}) };
 }
 /** 精确匹配附件 ID，不用全文子串判断，避免相似文本开放隐藏附件。 */

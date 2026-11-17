@@ -1,6 +1,7 @@
 import {projectDevelopmentReferenceAccess,developmentReferenceTargetViolation,developmentReferenceWithdrawalException} from './developmentReferenceAccess';
 import {developmentReferenceReadKeys,type DevelopmentReferenceCommand} from '../shared/mistDevelopmentSampleReferences';
 import {developmentTaskClosePlan,developmentTaskLifecycleReadKeys} from '../shared/mistDevelopmentTaskLifecycle';
+import {projectCommercialSampleLoanSources} from './commercialSampleLoanAccess';
 import { teamReportReadPermissions } from './teamReportAccess';
 import {assertCustomerCommandFieldAuthority} from '../shared/mistCustomerFieldAuthority';
 import {mistBusinessInstant} from '../shared/mistBusinessClock';
@@ -437,7 +438,8 @@ export class MistRepository {
       for (const [signatureId, reviewId] of resolved) if (reviewId) signatureReviewBindings.push({ signatureId, reviewId });
     }
     // Response-only: deriving old associations must never alter row.state or a later unrelated write.
-    return { ...view, signatureReviewBindings };
+    const commercialSampleLoanSources=projectCommercialSampleLoanSources(row.state,view.state,actor,scopeOf(row),row.companyId);
+    return { ...view, signatureReviewBindings, ...(commercialSampleLoanSources?{commercialSampleLoanSources}:{}) };
   }
   private view(row: MistWorkspaceRow, actor: TokenPayload) {
     const projected = this.accessView(row, actor, scopeOf(row)), owner = isOwner(row, actor), company = companyRow(row);
