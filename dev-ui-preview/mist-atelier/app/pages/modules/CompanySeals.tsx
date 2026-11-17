@@ -8,6 +8,7 @@ import { Banner, Button, Checkbox, DataTable, Dialog, EmptyState, Field, FormGri
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useOptionalMistSession } from '../../runtime/auth';
 import { workspaceMembers } from '../../runtime/members';
+import { FileName } from '../../runtime/files';
 import { businessWhen } from './pageKit';
 
 export type SealKind = 'company' | 'contract' | 'finance' | 'customs' | 'other';
@@ -83,7 +84,11 @@ export function CompanySealsSection({ canManage }: { canManage: boolean }) {
   const useColumns: Column<MistSealUseView>[] = [
     { key: 'at', header: '时间', width: '150px', render: u => <span className="mist-num">{businessWhen(u.at)}</span> },
     { key: 'seal', header: '印章', width: 'minmax(120px,1fr)', render: u => u.sealName },
-    { key: 'doc', header: '单据', width: 'minmax(140px,1.2fr)', render: u => <Mono>{u.documentNumber}</Mono> },
+    { key: 'doc', header: '单据', width: 'minmax(140px,1.2fr)', render: u => {
+      // Review only the explicitly projected stamped PDF, never infer a newer file.
+      const file=!workspace.loading&&u.fileId?state.files.find(file=>file.id===u.fileId&&file.mimeType==='application/pdf'):undefined;
+      return file?<FileName file={file} label={<Mono>{u.documentNumber}</Mono>} />:<Mono>{u.documentNumber}</Mono>;
+    } },
     { key: 'actor', header: '用印人', width: '96px', render: u => u.actor },
     { key: 'reason', header: '事由', width: 'minmax(160px,2fr)', render: u => u.reason },
   ];

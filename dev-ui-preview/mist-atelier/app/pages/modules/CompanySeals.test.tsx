@@ -111,3 +111,30 @@ it('disabling a seal requires a reason', async () => {
   await click(getByRole(dialog, 'button', { name: '停用' }));
   expect(store.run).toHaveBeenCalledWith({ type: 'seal.disable', payload: { id: 'seal-1', reason: '印章遗失' } });
 });
+
+function archivedSealPdf(){
+ const file={id:'f',name:'CI-2026-1110-sealed.pdf',mimeType:'application/pdf',size:20,storageKey:'old-stamped',createdAt:''};
+ store.state.seals=[{...seal,fileId:undefined,status:'disabled'}];
+ store.state.files=[file,{...file,id:'newer-file',name:'newer-generation.pdf'}];
+ store.state.fulfillment.documents=[{id:'d',type:'CI',fileIds:['newer-file']}];
+ store.readFile.mockResolvedValue(new Blob(['%PDF-1.4\n%%EOF'],{type:'application/pdf'}));
+ return file;
+}
+it('opens the archived stamped file recorded by the use, and closes back to its ledger entry without a command',async()=>{
+ const restore=mockImageUrls(),file=archivedSealPdf();
+ try{await render(false);const entry=getByRole(host,'button',{name:'CI-2026-1110',exact:true});entry.focus();await click(entry);
+  expect(store.readFile).toHaveBeenCalledWith(file);expect(document.querySelector('[data-file-preview="f"]')).toBeTruthy();expect(store.readFile).not.toHaveBeenCalledWith(expect.objectContaining({id:'newer-file'}));
+  await click(getByRole(document.body,'button',{name:'关闭',exact:true}));expect(document.querySelector('[data-file-preview]')).toBeNull();expect(document.activeElement).toBe(entry);expect(store.run).not.toHaveBeenCalled();
+ }finally{restore();}
+});
+it.each(['hidden-reference','missing-file','image-not-pdf']as const)('keeps seal use metadata noninteractive for %s',async kind=>{
+ archivedSealPdf();if(kind==='hidden-reference')delete store.state.sealUses[0].fileId;if(kind==='missing-file')store.state.files=[];if(kind==='image-not-pdf')store.state.files[0].mimeType='image/png';
+ await render(false);expect(host.textContent).toContain('CI-2026-1110');expect(queryByRole(host,'button',{name:'CI-2026-1110',exact:true})).toBeNull();expect(store.readFile).not.toHaveBeenCalled();expect(store.run).not.toHaveBeenCalled();
+});
+it('closes the archived-file preview and removes its entry while company data is loading',async()=>{
+ const restore=mockImageUrls();archivedSealPdf();
+ try{await render(false);await click(getByRole(host,'button',{name:'CI-2026-1110',exact:true}));expect(document.querySelector('[data-file-preview="f"]')).toBeTruthy();
+  store.loading=true;await render(false);expect(queryByRole(host,'button',{name:'CI-2026-1110',exact:true})).toBeNull();expect(document.querySelector('[data-file-preview]')).toBeNull();
+  store.loading=false;await render(false);expect(getByRole(host,'button',{name:'CI-2026-1110',exact:true})).toBeTruthy();expect(document.querySelector('[data-file-preview]')).toBeNull();expect(store.run).not.toHaveBeenCalled();
+ }finally{restore();}
+});
