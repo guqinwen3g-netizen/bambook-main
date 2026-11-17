@@ -127,4 +127,6 @@ export const sampleCustodyEnglish: Record<string,string> = {
   '原申请资料':'Original request facts',
   '原申请资料未留存':'Original request facts not retained',
   '未留存':'Not retained',
+  '商业借样来源尚不可核对':'The commercial lending source cannot be verified yet.',
+  '请从样品仓库选择本次商业来源':'Select the commercial source from the sample warehouse.',
 };
