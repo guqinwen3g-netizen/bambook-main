@@ -2,12 +2,24 @@ import {expect,it} from 'vitest';
 import type {TokenPayload} from '../auth/service';
 import {createMistState,applyMistCommand} from '../shared/mistWorkspace';
 import {stockDepartureAtomicFixture} from './__tests__/stockDepartureAtomic';
-import {projectState} from './access';
+import {projectState,MIST_READ_SECTIONS} from './access';
 import {projectCommercialSampleLoanSources} from './commercialSampleLoanAccess';
 import {scopedWriteViolation} from '../shared/mistDataScope';
 const actor=(userId='sales',permissions=['products:read','products:write'])=>({userId,companyId:'company-a',roles:[],permissions,authorizationLoaded:true,departmentIds:[]}as TokenPayload);
 const empty=()=>createMistState({id:()=>'',now:'2026-10-13T12:00:00Z',actorName:'测试'},'empty');
 const scope={userIds:['sales'],teamIds:[]};
+it.each([false,true])('keeps a legal minimal projection without synthesizing sample collections (fulfillment present %s)',present=>{
+ const state=empty();if(present)(state as any).fulfillment={};else delete(state as any).fulfillment;const before=structuredClone(state),who=actor('sales',[...new Set(MIST_READ_SECTIONS.flatMap(section=>section.permissions))]);
+ const result=projectState(state,who,()=>structuredClone(before),'owner').state;
+ expect(Object.prototype.hasOwnProperty.call(result,'fulfillment')).toBe(present);
+ // The existing inventory projection supplies stockMovements; the loan projection must add neither sample collection.
+ if(present){expect(result.fulfillment).toEqual({stockMovements:[]});expect(result.fulfillment).not.toHaveProperty('sampleMovements');}expect(state).toEqual(before);
+});
+it.each(['raw missing','raw empty','visible missing','visible empty','visible non-array'])('withholds commercial capabilities for %s sample collections without changing the input contract',kind=>{
+ const x=stockDepartureAtomicFixture(),full=structuredClone(x.f.state),visible=structuredClone(full);
+ if(kind==='raw missing')delete(full as any).fulfillment;if(kind==='raw empty')(full as any).fulfillment={};if(kind==='visible missing')delete(visible as any).fulfillment;if(kind==='visible empty')(visible as any).fulfillment={};if(kind==='visible non-array')(visible.fulfillment as any).samples={};
+ const before=structuredClone([full,visible]);expect(projectCommercialSampleLoanSources(full,visible,actor(),undefined,'company-a')).toBeUndefined();expect([full,visible]).toEqual(before);
+});
 it('gives source-owner product writer a bounded action source without general inventory/financial reads',()=>{
  const x=stockDepartureAtomicFixture(),original=structuredClone(x.f.state),who=actor(),visible=projectState(structuredClone(original),who,empty,'owner',scope).state;
  expect(visible.fulfillment.stock).toEqual([]);expect(visible.fulfillment.purchases).toEqual([]);expect(visible.fulfillment.samples.some(s=>s.id===x.sampleId)).toBe(true);

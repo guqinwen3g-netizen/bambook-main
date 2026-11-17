@@ -7,6 +7,7 @@ import {commercialSampleLoanSources,type CommercialSampleLoanSources} from '../s
 /** Action-scoped source choices do not expose inventory or extend borrower/source reading. */
 export function projectCommercialSampleLoanSources(full:MistState,visible:MistState,actor:TokenPayload,scope?:MistDataScope,companyId?:string|null):Record<string,CommercialSampleLoanSources>|undefined{
  if(companyId&&actor.companyId!==companyId||!hasScope(actor,'products:read'))return;
+ if(!Array.isArray(full.fulfillment?.samples)||!Array.isArray(visible.fulfillment?.samples))return;
  const writable=scope?scopedVisibility(full,scope,false):undefined,result:Record<string,CommercialSampleLoanSources>={};
  for(const shown of visible.fulfillment.samples){
   if(shown.role!=='shipping'||shown.shippingQuantityBasis?.kind!=='included'||shown.shippingQuantityBasis.consumption)continue;

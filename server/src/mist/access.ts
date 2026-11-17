@@ -334,7 +334,7 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
     return {...safe,receivableDueSource:{sourceCurrent,...(sourceCurrent?{shipmentId:shipment!.id,...(shipment!.delivered?{deliveryAt:shipment!.delivered.at}:{})}:{})}};
   });
   // Product-only readers can return the same physical sample without receiving inventory/receipt identities.
-  next.fulfillment.sampleMovements=next.fulfillment.sampleMovements.map(movement=>{
+  if(Array.isArray(next.fulfillment?.sampleMovements))next.fulfillment.sampleMovements=next.fulfillment.sampleMovements.map(movement=>{
     const {commercialReturn:_untrusted,...safe}=movement;
     if(!safe.commercialLoan||hasScope(actor,'inventory:read'))return safe;
     const {commercialLoan,...publicMovement}=safe;
