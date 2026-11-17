@@ -122,6 +122,9 @@ export function scopedVisibility(state: MistState, scope: MistDataScope, include
       add('invoices', invoice.id);
     }
   }
+  // Establish request-backed invoices before deriving their allocations and collection records.
+  for (const row of get(state, 'sampleRequests')) if (ownedCustomers.has(row.customerId) || users.has(row.requesterId) || row.orderId && orders.has(row.orderId)) add('sampleRequests', row.id);
+  for (const row of state.invoices ?? []) if (row.sampleRequestId && has('sampleRequests', row.sampleRequestId)) add('invoices', row.id);
   for (const row of state.allocations ?? []) if (has('invoices', row.invoiceId)) add('allocations', row.id);
   for (const row of f.qcTasks ?? []) if (row.source?.kind === 'version' && devs.has(row.source.devId)) add('fulfillment.qcTasks', row.id);
   for (const row of f.qcReports ?? []) if (has('fulfillment.qcTasks', row.taskId)) add('fulfillment.qcReports', row.id);
@@ -170,9 +173,6 @@ export function scopedVisibility(state: MistState, scope: MistDataScope, include
     if (row.link?.id ? !!path && has(path, row.link.id) : ownedCustomers.has(row.customerId) || users.has((row as any).ownerId)) add('crm.followUps', row.id);
   }
   for (const row of get(state, 'customerStatements')) if (customers.has(row.customerId)) add('customerStatements', row.id);
-  // ord19：索样申请随跟进的客户或可见订单；样品费发票随申请。
-  for (const row of get(state, 'sampleRequests')) if (ownedCustomers.has(row.customerId) || users.has(row.requesterId) || row.orderId && orders.has(row.orderId)) add('sampleRequests', row.id);
-  for (const row of state.invoices ?? []) if (row.sampleRequestId && has('sampleRequests', row.sampleRequestId)) add('invoices', row.id);
   // Financial source facts must be provably linked to visible business; mixed bills remain hidden until a safe partial view exists.
   const purchases = out.get('fulfillment.purchases')!, payables: any = state.payables ?? {};
   for (const bill of payables.bills ?? []) if (Array.isArray(bill.lines) && bill.lines.length && bill.lines.every((line: any) => purchases.has(line.purchaseId))) add('payables.bills', bill.id);

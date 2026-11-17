@@ -108,6 +108,14 @@ it('keeps sample fee issuance in the business scope and posting in finance', asy
   expect(db.workspaces.get(workspaceId)!.revision).toBe(before + 1);
   const posted = await run('finance', confirm);
   expect(posted.workspace.state.invoices.find(i => i.id === invoiceId)).toMatchObject({ open: 12, financeStatus: 'confirmed' });
+  const collection = {
+    type: 'crm.followUp.save',
+    payload: {customerId:'customer-0',method:'call',at:'2026-10-13T00:00:00Z',content:'核对样品费',link:{kind:'invoice',id:invoiceId},collection:{level:1}},
+  };
+  const logged = await run('demo-sales', collection);
+  const followId = logged.receipt.result.id;
+  expect(logged.workspace.state.crm.followUps.find(f=>f.id===followId)?.link).toEqual(collection.payload.link);
+  expect((await repo.get(actor('demo-buyer'),workspaceId)).state.crm.followUps.some(f=>f.id===followId)).toBe(false);
 });
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), 'mist-scope-matrix-'));
