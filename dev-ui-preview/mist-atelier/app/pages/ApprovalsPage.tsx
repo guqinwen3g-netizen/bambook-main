@@ -54,7 +54,8 @@ export function projectedReviewEvidence(task: MistReviewTask, state: Pick<MistSt
   // Never lend a later signature to an ambiguous historical decision; audit and business clocks differ.
   const decisions = tasks.filter(row => SIGNED_REVIEW_COMMAND[row.kind] === command && row.entityId === task.entityId && row.status === task.status);
   if (decisions.length !== 1) return { files };
-  const signature = (state.decisionSignatures || []).filter(row => row.commandType === command && row.entityId === task.entityId && row.decision === task.status).at(-1);
+  const signatures = (state.decisionSignatures || []).filter(row => row.commandType === command && row.entityId === task.entityId && row.decision === task.status);
+  const signature = signatures.length === 1 ? signatures[0] : undefined;
   return { files, ...(signature && readable.has(signature.fileId) ? { signatureFileId: signature.fileId } : {}) };
 }
 

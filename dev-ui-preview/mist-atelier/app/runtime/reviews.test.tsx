@@ -243,6 +243,11 @@ it('does not fall back to an earlier readable signature when the matching final 
  const evidence=projectedReviewEvidence(task,{files:[{id:'earlier',name:'旧档.svg',size:20}] as any,decisionSignatures:[cancelSignature({entityId:task.entityId,fileId:'earlier'}),cancelSignature({entityId:task.entityId,fileId:'hidden-final'})]},[task]);
  expect(evidence.signatureFileId).toBeUndefined();
 });
+it('does not choose the latest of two readable signatures for one unbound approval',()=>{
+ const task=row({status:'approved',decision:{actor:'周敏',at:'2026-11-18T04:00:00.000Z'}});
+ const evidence=projectedReviewEvidence(task,{files:[{id:'first',name:'第一份.svg',size:20},{id:'second',name:'第二份.svg',size:20}] as any,decisionSignatures:[cancelSignature({id:'first-signature',requestId:'first-request',entityId:task.entityId,fileId:'first'}),cancelSignature({id:'second-signature',requestId:'second-request',entityId:task.entityId,fileId:'second'})]},[task]);
+ expect(evidence.signatureFileId).toBeUndefined();
+});
 it('keeps a server review attachment on its exact review snapshot route outside the selected projection',async()=>{
  bridge.workspaceId='workspace-b';const BaseURL=URL;vi.stubGlobal('URL',class extends BaseURL{static createObjectURL(){return 'blob:review-file';}static revokeObjectURL(){}});const anchor=vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{});
  intercept=url=>url.endsWith('/files/review-file')?Promise.resolve({ok:true,status:200,blob:async()=>new Blob(['审批快照依据'])}):undefined;
