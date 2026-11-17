@@ -1,3 +1,4 @@
+import {shippingSampleSourceSnapshot} from './mistShipmentSampleCustody';
 import {describe,expect,it} from 'vitest';
 import {applyMistCommand,createMistState,type MistCommand,type MistContext} from './mistWorkspace';
 import {productionSampleRequirements} from './mistProductionSamples';
@@ -45,7 +46,7 @@ it('rejects unrecognised quantity scope and missing evidence in the approval inp
 
 describe('one factory and shipment sample submission with actual size/count members',()=>{
  function ready(){const f=fixture(),ids=f.released();f.receiveAndComplete(ids.productionId,ids.purchaseId);f.report(f.productionTask(ids.productionId),'pass');return{f,...ids,shipmentId:f.shipment(ids.productionId)};}
- function create(x:ReturnType<typeof ready>,rows=[{size:'M',quantity:1},{size:'L',quantity:2}],quantity=3,shipmentId=x.shipmentId){return x.f.run({type:'fulfillment.samples.create',payload:{name:'Jacket',category:'成衣',form:'船样',unit:'件',quantity,size:'',sizeQuantities:rows,color:'Blue',location:'Sample room',role:'shipping',shipmentId,source:{kind:'orderLine',orderId:x.f.orderId,lineId:x.f.state.orderLines[0].id,productionId:x.productionId},fileIds:[],note:'Three separately made physical samples'}}).id!;}
+ function create(x:ReturnType<typeof ready>,rows=[{size:'M',quantity:1},{size:'L',quantity:2}],quantity=3,shipmentId=x.shipmentId){const id=x.f.run({type:'fulfillment.samples.create',payload:{name:'Jacket',category:'成衣',form:'船样',unit:'件',quantity,size:'',sizeQuantities:rows,color:'Blue',location:'Sample room',role:'shipping',shipmentId,source:{kind:'orderLine',orderId:x.f.orderId,lineId:x.f.state.orderLines[0].id,productionId:x.productionId},fileIds:[],note:'Three separately made physical samples'}}).id!;x.f.run({type:'fulfillment.samples.shippingBasis',payload:{id,kind:'independent',sourceSnapshot:shippingSampleSourceSnapshot(x.f.state,x.f.state.fulfillment.samples.find(s=>s.id===id)!),independentSource:'Three separately made physical QA specimens outside commercial goods',evidence:'Actual independent group checked',fileIds:[]}});return id;}
  it('records a single three-piece submission, rejects incomplete QC and requires customer approval plus business continuation',()=>{
   const x=ready(),id=create(x),f=x.f;expect(f.state.fulfillment.samples.find(s=>s.id===id)).toMatchObject({quantity:3,available:3,size:'M 1 / L 2',sizeQuantities:[{size:'M',quantity:1},{size:'L',quantity:2}]});
   const task=f.run({type:'fulfillment.qc.request',payload:{sampleId:id,source:{kind:'orderLine',orderId:f.orderId,lineId:f.state.orderLines[0].id,productionId:x.productionId},domain:'garment',kind:'sample',factory:'Factory',location:'Sample room',contact:'',due:'2026-10-13'}}).id!;f.run({type:'fulfillment.qc.claim',payload:{id:task,domain:'garment'}});

@@ -1,5 +1,5 @@
 import {cdDocumentIssueProblem} from './mistDocumentGeneration';
-import {confirmShippingSampleBasis,consumeShipmentSamples,shipmentSampleCustodyBlocker,shippingSampleMovementBlocker,type ShippingSampleBasisInput} from './mistShipmentSampleCustody';
+import {confirmShippingSampleBasis,consumeShipmentSamples,shipmentSampleCustodyBlocker,shippingSampleMovementBlocker,shipmentHasDeparted,type ShippingSampleBasisInput} from './mistShipmentSampleCustody';
 import {notifyMist,notificationOwners,notificationTargetOwners} from './mistNotifications';
 import {receivableAcceptanceTerms,type ReceivableDueCondition} from './mistTradeTerms';
 import {stableJson} from './stableJson';
@@ -1423,7 +1423,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         case 'fulfillment.materials.confirm': return confirmMaterialDelivery(root, p, ctx);
         case 'fulfillment.samples.create': {
             if (Object.prototype.hasOwnProperty.call(p, 'registeredById')) fail('样品登记人由系统记录');
-            if(p.role==='shipping'&&f.shipments.some(s=>s.id===p.shipmentId&&s.state==='departed'))fail('本批已出运，不能追加船样重建可用余额','PRECONDITION');
+            if(p.role==='shipping'&&f.shipments.some(s=>s.id===p.shipmentId&&shipmentHasDeparted(s)))fail('本批已出运，不能追加船样重建可用余额','PRECONDITION');
             const s = source(root, p.source);
             if (s.kind === 'version') {
                 const d = get(root.devs, s.devId, '开发案'), v = get(root.versions, s.versionId, '版本');
@@ -1485,7 +1485,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         }
         case 'fulfillment.samples.move': {
             const s = get(f.samples, p.id, '样品');
-            const custodyBlocker=shippingSampleMovementBlocker(root as MistState,s);if(custodyBlocker)fail(custodyBlocker,'PRECONDITION');
+            const custodyBlocker=shippingSampleMovementBlocker(root as MistState,s,p.kind);if(custodyBlocker)fail(custodyBlocker,'PRECONDITION');
             // Only the dedicated case command can establish exact factory custody and parcel cost.
             if(s.source.kind==='developmentIncoming'&&!['move','scrap'].includes(p.kind)&&!options?.developmentIncomingCustody)fail('开发来样请从开发案办理寄厂与原样退回','PRECONDITION');
             let quantity = p.kind === 'move' ? 0 : qty(p.quantity);
@@ -2517,6 +2517,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         }
         case 'fulfillment.shipments.depart': {
             const s = get(f.shipments, p.id, '出运');
+            if(shipmentHasDeparted(s))fail('本批已登记实际出运','PRECONDITION');
             if (s.state !== 'ready' || !s.documentsSentAt)
                 fail('需完成单据准备并由业务登记对客发送');
             if (!f.customs.some(c => c.shipmentId === s.id && c.status === 'cleared'))

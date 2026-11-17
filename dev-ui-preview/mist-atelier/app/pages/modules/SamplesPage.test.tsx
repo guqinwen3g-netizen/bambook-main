@@ -6,7 +6,7 @@ import {fireEvent,getAllByRole,getByRole,queryByRole} from '@testing-library/dom
 import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentSample} from '../../../../../server/src/shared/mistFulfillment';
-import {confirmShippingSampleBasis} from '../../../../../server/src/shared/mistShipmentSampleCustody';
+import {confirmShippingSampleBasis,shippingSampleSourceSnapshot} from '../../../../../server/src/shared/mistShipmentSampleCustody';
 import {Nav} from '../../nav';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 const store=vi.hoisted(()=>({state:null as MistState|null,workspace:{id:'workspace',revision:1},loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
@@ -34,6 +34,20 @@ it('shows consumed quantity and history without restoring movement or correction
  const sample=shippingCustodyFixture();const state=store.state!;
  const source={sampleId:sample.id,shipmentId:'custody-ship',orderId:'custody-order',lineId:'custody-line',productionId:'custody-production',quantity:4,unit:'件',color:'Blue',sizeQuantities:[{size:'M',quantity:4}],shipmentQuantity:8,commercialUnit:'件',packing:[{id:'custody-box',carton:'A01',quantity:8,color:'',assortment:[{color:'Blue',size:'M',quantity:8}]}]};
  confirmShippingSampleBasis(state,{id:sample.id,kind:'included',sourceSnapshot:source,evidence:'Original carrier evidence',fileIds:[],reconcileDeparted:true},{id:()=>crypto.randomUUID(),now:'2026-11-19T14:00:00Z',actorName:'Sales'});render(sample.id);const form=host.querySelector('[data-sample-form="'+sample.id+'"]')as HTMLElement;expect(form.textContent).toContain('已随货出运');expect(form.textContent).toContain('补记随货');expect(form.textContent).toContain('0 / 4');expect(queryByRole(form,'button',{name:'借出',exact:true})).toBeNull();expect(queryByRole(form,'button',{name:'更正口径',exact:true})).toBeNull();
+});
+it.each(['arrived','delivered'])('uses the same post-departure reconciliation UI and payload at %s',async phase=>{
+ const sample=shippingCustodyFixture();(store.state!.fulfillment.shipments[0]as any).state=phase;render(sample.id);const form=host.querySelector('[data-sample-form="'+sample.id+'"]')as HTMLElement;expect(queryByRole(form,'button',{name:'借出',exact:true})).toBeNull();await act(async()=>getByRole(form,'button',{name:'确认数量口径',exact:true}).click());
+ const dialog=getByRole(document.body,'dialog',{name:'补记样品数量口径'});act(()=>fireEvent.change(getByRole(dialog,'combobox',{name:'数量口径'}),{target:{value:'included'}}));act(()=>fireEvent.change(getByRole(dialog,'textbox',{name:'确认依据'}),{target:{value:'Original ATD and physical members checked'}}));await act(async()=>getByRole(dialog,'button',{name:'确认并补记'}).click());expect(store.run).toHaveBeenCalledWith({type:'fulfillment.samples.shippingBasis',payload:expect.objectContaining({id:sample.id,kind:'included',reconcileDeparted:true})});
+});
+it.each(['arrived','delivered'])('keeps the existing %s sample readable without creating a replacement shipping balance',phase=>{
+ const sample=shippingCustodyFixture();(store.state!.fulfillment.shipments[0]as any).state=phase;render(sample.id,{section:'shipment:custody-ship',productionId:'custody-production'});expect(queryByRole(host,'button',{name:'新建样品',exact:true})).toBeNull();expect(host.querySelector('[data-sample-form="'+sample.id+'"]')).not.toBeNull();
+});
+it('offers onsite relocation but no independent loan or permanent disposition for declared included specimens',()=>{
+ const sample=shippingCustodyFixture(),state=store.state!,ship=state.fulfillment.shipments[0];ship.state='ready';delete ship.departedAt;
+ confirmShippingSampleBasis(state,{id:sample.id,kind:'included',sourceSnapshot:shippingSampleSourceSnapshot(state,sample),evidence:'Actual4 members are inside commercial8',fileIds:[]},{id:()=>crypto.randomUUID(),now:'2026-11-19T14:00:00Z',actorName:'Sales'});render(sample.id);const form=host.querySelector('[data-sample-form="'+sample.id+'"]')as HTMLElement;getByRole(form,'button',{name:'移位',exact:true});for(const name of ['借出','寄出','报废','退还工厂'])expect(queryByRole(form,'button',{name,exact:true})).toBeNull();expect(form.textContent).toContain('大货内随本批出运');
+});
+it('requires quantity classification before generic movement even while the shipment is still preparing',()=>{
+ const sample=shippingCustodyFixture(),ship=store.state!.fulfillment.shipments[0];ship.state='preparing';delete ship.departedAt;render(sample.id);const form=host.querySelector('[data-sample-form="'+sample.id+'"]')as HTMLElement;getByRole(form,'button',{name:'确认数量口径',exact:true});for(const name of ['借出','寄出','移位','报废','退还工厂'])expect(queryByRole(form,'button',{name,exact:true})).toBeNull();
 });
 function fabric(id:string,form:string,unit:string,quantity:number,available:number):FulfillmentSample{return {id,code:id.toUpperCase(),name:'亚麻平纹',category:'面料',form,unit,quantity,available,location:'A-01',size:'',color:'',source:version,fileIds:[],note:'',createdAt:'2026-10-10T08:00:00Z'};}
 it('returns an incoming original to its exact development sample and does not offer factory-result QC',async()=>{

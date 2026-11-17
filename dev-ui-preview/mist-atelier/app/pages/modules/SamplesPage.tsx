@@ -5,7 +5,7 @@ import {SAMPLE_SEND_PURPOSES,sampleSendPurpose} from '../../../../../server/src/
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 样品仓库：面料按档案汇总形态余额，成衣按每件实物；详情卡承接借出、寄出、归还、移位与送检。 */
 import { parseShippingSampleSizes } from '../../../../../server/src/shared/mistShippingSample';
-import {shippingSampleSourceSnapshot,shippingSampleMovementBlocker} from '../../../../../server/src/shared/mistShipmentSampleCustody';
+import {shippingSampleSourceSnapshot,shippingSampleMovementBlocker,shipmentHasDeparted} from '../../../../../server/src/shared/mistShipmentSampleCustody';
 import React from 'react';
 import { ArrowLeftRight, Download, Layers, Package, Pencil, Plus, RefreshCw, SearchX, Send, Shirt, Undo2 } from 'lucide-react';
 import { Banner, Button, Card, DataTable, Dropdown, EmptyState, Facts, Icon, MistPage, Mono, ObjectCell, PageHeader, Pagination, Pill, Pipeline, SearchField, Tabs, TextLink, Thumb, Timeline, Toolbar, type Column } from '../../../../../components/mist';
@@ -108,7 +108,7 @@ export function SamplesPage() {
   const requestsTab = route.section === 'requests' && !hasShipmentContext && !hasProductionContext;
   const openRequests = state ? readSampleRequests(state).filter(r => r.state === 'open').length : 0;
   const invalidProduction = hasProductionContext && !!state && !contextProduction;
-  const canCreate = can && !invalidProduction && !(hasProductionContext && contextProduction?.closed) && !(hasShipmentContext&&sourceShipment?.state==='departed');
+  const canCreate = can && !invalidProduction && !(hasProductionContext && contextProduction?.closed) && !(hasShipmentContext&&shipmentHasDeparted(sourceShipment));
   const contextLine = state?.orderLines.find(line => line.id === contextProduction?.lineId && line.orderId === contextProduction.orderId);
   const contextDomain = sourceShipment?.domain || state?.orders.find(order => order.id === contextProduction?.orderId)?.type;
   const contextShelf: Shelf | undefined = contextDomain === 'fabric' || contextDomain === 'garment' ? contextDomain : undefined;
@@ -149,7 +149,7 @@ export function SamplesPage() {
   const contextRole = hasShipmentContext ? 'shipping' : route.productionId ? (state?.orders.find(order => order.id === state.productions.find(branch => branch.id === route.productionId)?.orderId)?.type === 'fabric' ? 'pioneer' : 'pp') : '';
   const productionSources = sampleSources.filter(option => option.value.startsWith('production:')).map(option => option.value);
   const roleOptions = hasShipmentContext ? [{ value: 'shipping', label: '船样' }] : [emptyOption, ...(!contextShelf || contextShelf==='garment' ? [{ value: 'pp', label: '成衣产前样' }] : []), ...(!contextShelf || contextShelf==='fabric' ? [{ value: 'pioneer', label: '面料先锋样' }] : []), { value: 'shipping', label: '船样' }];
-  const shipmentOptions = hasShipmentContext ? (sourceShipment ? [{ value: sourceShipment.id, label: sourceShipment.code }] : [emptyOption]) : [emptyOption, ...(state?.fulfillment.shipments || []).filter(shipment => shipment.state !== 'cancelled'&&shipment.state!=='departed').map(shipment => ({ value: shipment.id, label: shipment.code }))];
+  const shipmentOptions = hasShipmentContext ? (sourceShipment ? [{ value: sourceShipment.id, label: sourceShipment.code }] : [emptyOption]) : [emptyOption, ...(state?.fulfillment.shipments || []).filter(shipment => shipment.state !== 'cancelled'&&!shipmentHasDeparted(shipment)).map(shipment => ({ value: shipment.id, label: shipment.code }))];
   const defaultCategory = contextShelf ? (contextShelf === 'fabric' ? '面料' : '成衣') : shelf === 'garment' ? '成衣' : shelf === 'other' ? '其他' : '面料';
   const shippingGarment=hasShipmentContext&&sourceShipment?.domain==='garment';
   const createSpec: ModuleEditorSpec = {
@@ -191,12 +191,12 @@ export function SamplesPage() {
     let snapshot:ReturnType<typeof shippingSampleSourceSnapshot>;
     try{snapshot=shippingSampleSourceSnapshot(state,sample);}catch(error){setBasisError(error instanceof Error?error.message:String(error));return;}
     const shipment=state.fulfillment.shipments.find(s=>s.id===sample.shipmentId)!;
-    setDialog({title:shipment.state==='departed'?'补记样品数量口径':'确认样品数量口径',fields:[
+    setDialog({title:shipmentHasDeparted(shipment)?'补记样品数量口径':'确认样品数量口径',fields:[
       {...field('batch','出运批次','text',false),readonly:true},{...field('quantity','实物数量','text',false),readonly:true},
       field('kind','数量口径','select',true,[{value:'included',label:'大货内随本批出运'},{value:'independent',label:'独立实物（不占本批大货）'}]),
       {...field('independentSource','独立实物来源与保管依据','textarea'),when:{key:'kind',values:['independent']}},field('evidence','确认依据','textarea'),
-    ],initialValues:{batch:shipment.code,quantity:`${sample.quantity} ${sample.unit}`,kind:sample.shippingQuantityBasis?.kind||'',independentSource:sample.shippingQuantityBasis?.independentSource||'',evidence:''},submitLabel:shipment.state==='departed'?'确认并补记':'确认口径',
-    submit:values=>run({type:'fulfillment.samples.shippingBasis',payload:{id:sample.id,kind:text(values,'kind') as 'included'|'independent',sourceSnapshot:snapshot,evidence:text(values,'evidence'),independentSource:text(values,'independentSource'),fileIds:[...sample.fileIds],...(shipment.state==='departed'?{reconcileDeparted:true}:{})}})});
+    ],initialValues:{batch:shipment.code,quantity:`${sample.quantity} ${sample.unit}`,kind:sample.shippingQuantityBasis?.kind||'',independentSource:sample.shippingQuantityBasis?.independentSource||'',evidence:''},submitLabel:shipmentHasDeparted(shipment)?'确认并补记':'确认口径',
+    submit:values=>run({type:'fulfillment.samples.shippingBasis',payload:{id:sample.id,kind:text(values,'kind') as 'included'|'independent',sourceSnapshot:snapshot,evidence:text(values,'evidence'),independentSource:text(values,'independentSource'),fileIds:[...sample.fileIds],...(shipmentHasDeparted(shipment)?{reconcileDeparted:true}:{})}})});
   };
   const movement = (sample: FulfillmentSample, kind: MoveKind) => {
     if (!state) return;
@@ -307,7 +307,7 @@ function SampleDetail({ row, state, day, can, locked, onMove, onBasis, onEdit, o
     .sort((a, b) => (incomingMovementDay(b.sample,b.movement)||b.movement.at).localeCompare(incomingMovementDay(a.sample,a.movement)||a.movement.at)||b.movement.at.localeCompare(a.movement.at));
   const why = (sample: FulfillmentSample, kind: MoveKind): string | false => {
     if (!can) return '没有样品写权限';
-    const custody=shippingSampleMovementBlocker(state,sample);if(custody)return custody;
+    const custody=shippingSampleMovementBlocker(state,sample,kind);if(custody)return custody;
     if(sample.source.kind==='developmentIncoming'&&kind!=='move'&&kind!=='scrap')return '请从开发案办理寄厂与原样退回';
     const facts = sampleFacts(state, sample, day);
     if (kind === 'return') return facts.openLoans.length ? false : '没有未归还的借出';
@@ -357,7 +357,7 @@ function SampleDetail({ row, state, day, can, locked, onMove, onBasis, onEdit, o
       {row.samples.map(sample=><div key={sample.id} className="mist-col" data-sample-files={sample.id} role="group" aria-label={sample.code+' · '+uiText('附件')}>{row.samples.length>1&&<span className="mist-mono">{sample.code}</span>}<RecordFiles ids={sample.fileIds} onAttach={can?ids=>onAttach(sample,ids):undefined}/></div>)}
     </DetailBlock>
     <DetailBlock title={uiText("流转记录")}>
-      {events.length ? <Timeline events={events.map(({ movement, sample }) => { const line = `${MOVE_LABEL[movement.kind]}${row.samples.length > 1 ? ' · ' + sample.form : ''}${movement.quantity ? ` ${movement.quantity}${sample.unit}` : ''}${movement.sendPurpose?' · '+uiText(SAMPLE_SEND_PURPOSES[movement.sendPurpose]):''}${movement.person ? ' · ' + movement.person : ''}${movement.location ? ' · ' + movement.location : ''}${movement.destination ? ' · ' + movement.destination : ''}${movement.carrier || movement.trackingNo ? ` · ${[movement.carrier, movement.trackingNo].filter(Boolean).join(' ')}` : ''}${movement.fee ? ` · 寄样费 ${movement.fee.amount} ${movement.fee.currency}` : ''}${movement.expectedReturn ? ` · 预计 ${movement.expectedReturn} 归还` : ''}${movement.note ? ' · ' + movement.note : ''}${incomingMovementDay(sample,movement)?' · '+uiText('登记')+' '+businessWhen(movement.at):''}`, link = movement.development; return ({ who: movement.actor, when: incomingMovementDay(sample,movement)||businessWhen(movement.at), text: link ? <>{line} <TextLink onClick={() => go('development/detail', link.devId, { versionId: link.versionId })}>{uiText("查看开发案 ")}{state.devs.find(dev => dev.id === link.devId)?.code || ''}</TextLink></> : line }); })} />
+      {events.length ? <Timeline events={events.map(({ movement, sample }) => { const line = `${movement.shipmentLink?uiText(movement.shipmentLink.retrospective?'补记随货':'随货出运')+' · '+movement.shipmentLink.shipmentCode:MOVE_LABEL[movement.kind]}${row.samples.length > 1 ? ' · ' + sample.form : ''}${movement.quantity ? ` ${movement.quantity}${sample.unit}` : ''}${movement.sendPurpose&&!movement.shipmentLink?' · '+uiText(SAMPLE_SEND_PURPOSES[movement.sendPurpose]):''}${movement.shipmentLink?' · ATD '+businessWhen(movement.shipmentLink.departureAt):''}${movement.person ? ' · ' + movement.person : ''}${movement.location ? ' · ' + movement.location : ''}${movement.destination ? ' · ' + movement.destination : ''}${movement.carrier || movement.trackingNo ? ` · ${[movement.carrier, movement.trackingNo].filter(Boolean).join(' ')}` : ''}${movement.fee ? ` · 寄样费 ${movement.fee.amount} ${movement.fee.currency}` : ''}${movement.expectedReturn ? ` · 预计 ${movement.expectedReturn} 归还` : ''}${movement.note ? ' · ' + movement.note : ''}${incomingMovementDay(sample,movement)?' · '+uiText('登记')+' '+businessWhen(movement.at):''}`, link = movement.development; return ({ who: movement.actor, when: incomingMovementDay(sample,movement)||businessWhen(movement.at), text: link ? <>{line} <TextLink onClick={() => go('development/detail', link.devId, { versionId: link.versionId })}>{uiText("查看开发案 ")}{state.devs.find(dev => dev.id === link.devId)?.code || ''}</TextLink></> : line }); })} />
         : <span className="mist-note">{uiText("还没有流转记录")}</span>}
     </DetailBlock>
   </DetailBody>;

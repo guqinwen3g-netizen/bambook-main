@@ -48,17 +48,17 @@ it('keeps legitimate pre-departure corrections as history and consumes only the 
  ship.state='departed';ship.departedAt=f.context.now;consumeShipmentSamples(f.state,ship,{...f.context,can:scope=>scope==='shipments:write'});expect(f.state.fulfillment.samples[0].available).toBe(0);expect(f.state.fulfillment.sampleMovements).toHaveLength(1);
 });
 it('does not consume an independently held specimen when its related commercial shipment departs',()=>{
- const f=fixture(),ship=f.state.fulfillment.shipments[0];ship.state='ready';confirm(f,'independent');expect(shipmentSampleCustodyBlocker(f.state,ship)).toBe(false);ship.state='departed';consumeShipmentSamples(f.state,ship,f.context);expect(f.state.fulfillment.samples[0].available).toBe(4);expect(f.state.fulfillment.sampleMovements).toEqual([]);
+ const f=fixture(),ship=f.state.fulfillment.shipments[0];ship.state='ready';delete ship.departedAt;confirm(f,'independent');expect(shipmentSampleCustodyBlocker(f.state,ship)).toBe(false);ship.state='departed';consumeShipmentSamples(f.state,ship,f.context);expect(f.state.fulfillment.samples[0].available).toBe(4);expect(f.state.fulfillment.sampleMovements).toEqual([]);
 });
 it.each(['short','loan','unit','color','size','quantity'] as const)('refuses included confirmation when %s does not match the actual physical source',problem=>{
  const f=fixture(),sample=f.state.fulfillment.samples[0];if(problem==='short'){sample.available=3;sample.positions![0].available=3;}if(problem==='loan')f.state.fulfillment.sampleMovements.push({id:'loan',sampleId:'sample',kind:'lend',quantity:4} as any);if(problem==='unit')sample.unit='份';if(problem==='color')sample.color='Red';if(problem==='size')sample.sizeQuantities![0].size='XXL';if(problem==='quantity')f.state.fulfillment.shipments[0].lines[0].quantity=3;
  expect(()=>confirm(f,'included',{reconcileDeparted:true})).toThrow();expect(sample.shippingQuantityBasis).toBeUndefined();
 });
 it('rechecks outstanding loans and current packing before departure without changing QC or either ledger',()=>{
- const f=fixture(),ship=f.state.fulfillment.shipments[0];ship.state='ready';confirm(f,'included');const original=structuredClone(f.state);f.state.fulfillment.sampleMovements.push({id:'loan',sampleId:'sample',kind:'lend',quantity:4} as any);expect(shipmentSampleCustodyBlocker(f.state,ship)).toMatch(/归还/);f.state.fulfillment.sampleMovements=[];f.state.fulfillment.packing[0].assortment![0].quantity=1;expect(shipmentSampleCustodyBlocker(f.state,ship)).toMatch(/来源已变/);expect(f.state.fulfillment.samples).toEqual(original.fulfillment.samples);
+ const f=fixture(),ship=f.state.fulfillment.shipments[0];ship.state='ready';delete ship.departedAt;confirm(f,'included');const original=structuredClone(f.state);f.state.fulfillment.sampleMovements.push({id:'loan',sampleId:'sample',kind:'lend',quantity:4} as any);expect(shipmentSampleCustodyBlocker(f.state,ship)).toMatch(/归还/);f.state.fulfillment.sampleMovements=[];f.state.fulfillment.packing[0].assortment![0].quantity=1;expect(shipmentSampleCustodyBlocker(f.state,ship)).toMatch(/来源已变/);expect(f.state.fulfillment.samples).toEqual(original.fulfillment.samples);
 });
 it('counts all included specimens against one source and does not double-allocate the same size capacity',()=>{
- const f=fixture(),ship=f.state.fulfillment.shipments[0];ship.state='ready';confirm(f,'included');const second=structuredClone(f.state.fulfillment.samples[0]);second.id='sample-2';delete second.shippingQuantityBasis;second.sizeQuantities=[{size:'S',quantity:4}];f.state.fulfillment.samples.push(second);expect(()=>confirmShippingSampleBasis(f.state,{id:second.id,kind:'included',sourceSnapshot:shippingSampleSourceSnapshot(f.state,second),evidence:'Separate checked specimen',fileIds:[]},f.context)).toThrow(/分码/);
+ const f=fixture(),ship=f.state.fulfillment.shipments[0];ship.state='ready';delete ship.departedAt;confirm(f,'included');const second=structuredClone(f.state.fulfillment.samples[0]);second.id='sample-2';delete second.shippingQuantityBasis;second.sizeQuantities=[{size:'S',quantity:4}];f.state.fulfillment.samples.push(second);expect(()=>confirmShippingSampleBasis(f.state,{id:second.id,kind:'included',sourceSnapshot:shippingSampleSourceSnapshot(f.state,second),evidence:'Separate checked specimen',fileIds:[]},f.context)).toThrow(/分码/);
 });
 it('binds the exact sample, production, shipment and packing snapshot rather than free-text notes',()=>{
  const f=fixture(),sample=f.state.fulfillment.samples[0],snapshot=shippingSampleSourceSnapshot(f.state,sample);sample.note='Independent sample according to an unverified note';expect(()=>confirmShippingSampleBasis(f.state,{id:sample.id,kind:'included',sourceSnapshot:{...snapshot,shipmentId:'another'},evidence:'Written record',fileIds:[],reconcileDeparted:true},f.context)).toThrow(/来源已变/);sample.source={kind:'orderLine',orderId:'o',lineId:'l',productionId:'another'};expect(()=>shippingSampleSourceSnapshot(f.state,sample)).toThrow(/准确/);
@@ -70,7 +70,7 @@ it('does not let a new card recreate available shipping specimens for an already
  const f=fixture();expect(()=>applyMistCommand(f.state,{type:'fulfillment.samples.create',payload:{role:'shipping',shipmentId:'ship',source:{kind:'orderLine',orderId:'o',lineId:'l',productionId:'p'},name:'Duplicate physical group',category:'成衣',form:'船样',quantity:4,unit:'件',sizeQuantities:[{size:'M',quantity:4}],color:'Blue',location:'A01',fileIds:[],note:'Reusing a new card must not restore physical balance'}} as any,f.context)).toThrow(/不能追加船样/);
 });
 it('does not bind independent physical custody to later commercial packing or overstate same-colour fabric capacity',()=>{
- const f=fixture(),ship=f.state.fulfillment.shipments[0];ship.state='ready';confirm(f,'independent');f.state.fulfillment.packing[0].quantity=7;expect(shipmentSampleCustodyBlocker(f.state,ship)).toBe(false);
+ const f=fixture(),ship=f.state.fulfillment.shipments[0];ship.state='ready';delete ship.departedAt;confirm(f,'independent');f.state.fulfillment.packing[0].quantity=7;expect(shipmentSampleCustodyBlocker(f.state,ship)).toBe(false);
  const sample=f.state.fulfillment.samples[0];delete sample.shippingQuantityBasis;ship.domain='fabric';sample.unit='米';f.state.orderLines[0].unit='米';delete sample.sizeQuantities;sample.quantity=4;sample.available=4;sample.positions![0].available=4;f.state.fulfillment.packing[0].fabricColor='Blue';confirm(f,'included');const second=structuredClone(sample);second.id='fabric-second';delete second.shippingQuantityBasis;f.state.fulfillment.samples.push(second);expect(()=>confirmShippingSampleBasis(f.state,{id:second.id,kind:'included',sourceSnapshot:shippingSampleSourceSnapshot(f.state,second),evidence:'Must not allocate8 against7',fileIds:[]},f.context)).toThrow(/累计数量/);
 });
 it('checks the exact sample target against writable business scope before checking hidden source facts',()=>{
@@ -78,8 +78,44 @@ it('checks the exact sample target against writable business scope before checki
  expect(scopedTargetViolation(f.state,{userIds:['sales'],teamIds:[]},command)).toBeNull();expect(scopedTargetViolation(f.state,{userIds:['stranger'],teamIds:[]},command)).toEqual({path:'fulfillment.samples',id:'sample'});
 });
 it('compares persisted source objects without depending on PostgreSQL JSON key order',()=>{
- const f=fixture();f.state.fulfillment.shipments[0].state='ready';confirm(f,'included');const basis=f.state.fulfillment.samples[0].shippingQuantityBasis!;basis.sourceSnapshot=JSON.parse(JSON.stringify(Object.fromEntries(Object.entries(basis.sourceSnapshot).reverse())));expect(shipmentSampleCustodyBlocker(f.state,f.state.fulfillment.shipments[0])).toBe(false);
+ const f=fixture();f.state.fulfillment.shipments[0].state='ready';delete f.state.fulfillment.shipments[0].departedAt;confirm(f,'included');const basis=f.state.fulfillment.samples[0].shippingQuantityBasis!;basis.sourceSnapshot=JSON.parse(JSON.stringify(Object.fromEntries(Object.entries(basis.sourceSnapshot).reverse())));expect(shipmentSampleCustodyBlocker(f.state,f.state.fulfillment.shipments[0])).toBe(false);
 });
 it.each([{quantity:99},{reconcileDeparted:'yes'},{independentSource:'Contradictory independent origin'}])('rejects an unreviewable or contradictory quantity declaration %j',extra=>{
  const f=fixture();expect(()=>confirm(f,'included',{reconcileDeparted:true,...extra})).toThrow();expect(f.state.fulfillment.samples[0].shippingQuantityBasis).toBeUndefined();
+});
+it.each(['empty-unit','zero-quantity','inconsistent-position'] as const)('does not certify an invalid %s as independent physical stock',issue=>{
+ const f=fixture(),sample=f.state.fulfillment.samples[0];if(issue==='empty-unit')sample.unit='';if(issue==='zero-quantity')sample.quantity=0;if(issue==='inconsistent-position')sample.positions![0].available=3;expect(()=>confirm(f,'independent')).toThrow(/数量、单位或位置/);expect(sample.shippingQuantityBasis).toBeUndefined();
+});
+it.each(['arrived','delivered'] as const)('keeps post-departure custody and explicit reconciliation locked through %s',state=>{
+ const f=fixture();(f.state.fulfillment.shipments[0]as any).state=state;
+ expect(()=>applyMistCommand(f.state,{type:'fulfillment.samples.move',payload:{id:'sample',kind:'lend',quantity:4,person:'Customer',location:'A01',note:'No revival after delivery'}}as any,f.context)).toThrow(/数量口径/);
+ expect(()=>confirm(f,'included')).toThrow(/显式补记/);confirm(f,'included',{reconcileDeparted:true});expect(f.state.fulfillment.samples[0].available).toBe(0);expect(()=>confirm(f,'independent')).toThrow(/锁定/);
+ const independent=fixture();(independent.state.fulfillment.shipments[0]as any).state=state;confirm(independent,'independent');expect(independent.state.fulfillment.samples[0].available).toBe(4);
+});
+it('uses original ATD and subsequent physical milestones rather than only a presentation state',()=>{
+ const f=fixture();f.state.fulfillment.shipments[0].state='ready';f.state.fulfillment.shipments[0].arrival={at:f.context.now,evidence:'Arrived'}as any;
+ expect(()=>applyMistCommand(f.state,{type:'fulfillment.samples.move',payload:{id:'sample',kind:'lend',quantity:4,person:'Customer',location:'A01',note:'Already departed'}}as any,f.context)).toThrow(/数量口径/);expect(()=>confirm(f,'included')).toThrow(/显式补记/);confirm(f,'included',{reconcileDeparted:true});expect(f.state.fulfillment.samples[0].available).toBe(0);
+});
+it.each(['lend','send','scrap','returnFactory','move'])('requires a declared physical basis before a new unknown shipping sample can %s',kind=>{
+ const f=fixture();f.state.fulfillment.shipments[0].state='ready';delete f.state.fulfillment.shipments[0].departedAt;expect(()=>applyMistCommand(f.state,{type:'fulfillment.samples.move',payload:{id:'sample',kind,quantity:4,person:'Factory',location:'A01-QC',note:'Unknown is not independent'}}as any,f.context)).toThrow(/数量口径/);
+});
+it.each(['lend','send','scrap','returnFactory'])('does not let an included specimen %s independently from commercial goods',kind=>{
+ const f=fixture();const ship=f.state.fulfillment.shipments[0];ship.state='ready';delete ship.departedAt;confirm(f,'included');expect(()=>applyMistCommand(f.state,{type:'fulfillment.samples.move',payload:{id:'sample',kind,quantity:4,person:'Factory',location:'A01',note:'Must use shipment',sendPurpose:'other'}}as any,f.context)).toThrow(/仅可现场移位或归还/);
+});
+it('allows only onsite relocation for an included specimen and preserves both quantity ledgers',()=>{
+ const f=fixture(),ship=f.state.fulfillment.shipments[0];ship.state='ready';delete ship.departedAt;confirm(f,'included');const moved=applyMistCommand(f.state,{type:'fulfillment.samples.move',payload:{id:'sample',kind:'move',quantity:0,person:'Warehouse',location:'A01-QC',note:'Onsite inspection'}}as any,f.context);expect(moved.state.fulfillment.samples[0]).toMatchObject({quantity:4,available:4,location:'A01-QC'});expect(moved.state.fulfillment.stock).toEqual(f.state.fulfillment.stock);expect(moved.state.fulfillment.stockMovements).toEqual(f.state.fulfillment.stockMovements);
+});
+it('allows a tracked old loan to return before an included declaration, without creating a new commercial loan',()=>{
+ const f=fixture(),ship=f.state.fulfillment.shipments[0],sample=f.state.fulfillment.samples[0];ship.state='ready';delete ship.departedAt;sample.available=0;sample.positions![0].available=0;f.state.fulfillment.sampleMovements.push({id:'old-loan',sampleId:'sample',kind:'lend',quantity:4,person:'Sales',location:'A01',note:'Old tracked QA loan',at:'2026-11-18T04:00:00Z',actor:'Sales'});expect(()=>confirm(f,'included')).toThrow(/归还/);
+ const returned=applyMistCommand(f.state,{type:'fulfillment.samples.move',payload:{id:'sample',kind:'return',loanId:'old-loan',quantity:4,person:'',location:'A01',note:'Actual original set returned'}}as any,f.context);f.state=returned.state;confirm(f,'included');expect(f.state.fulfillment.samples[0]).toMatchObject({available:4,shippingQuantityBasis:{kind:'included'}});
+});
+it('does not reclassify a declared post-departure set or backdate a loan returned after original ATD',()=>{
+ const f=fixture(),ship=f.state.fulfillment.shipments[0];ship.state='ready';delete ship.departedAt;confirm(f,'included');ship.state='departed';ship.departedAt=f.context.now;expect(()=>confirm(f,'independent')).toThrow(/不能变更/);expect(()=>applyMistCommand(f.state,{type:'fulfillment.samples.move',payload:{id:'sample',kind:'lend',quantity:4,person:'Sales',location:'A01',note:'No revival'}}as any,f.context)).toThrow(/补记随货/);
+ const legacy=fixture();legacy.state.fulfillment.sampleMovements.push({id:'old-loan',sampleId:'sample',kind:'lend',quantity:4,at:'2026-11-18T04:00:00Z'}as any,{id:'late-return',sampleId:'sample',kind:'return',loanId:'old-loan',quantity:4,at:'2026-11-20T04:00:00Z'}as any);expect(()=>confirm(legacy,'included',{reconcileDeparted:true})).toThrow(/原出运前存在未归还/);
+});
+it.each(['lend','send','scrap','returnFactory'])('retains the existing %s flow for explicitly independent physical stock',kind=>{
+ const f=fixture();confirm(f,'independent');const next=applyMistCommand(f.state,{type:'fulfillment.samples.move',payload:{id:'sample',kind,quantity:4,person:'Factory',location:'A01',note:'Independent physical disposition',sendPurpose:'other'}}as any,f.context);expect(next.state.fulfillment.samples[0].available).toBe(0);expect(next.state.fulfillment.stock).toEqual(f.state.fulfillment.stock);
+});
+it('does not treat a normal unbound reference sample as commercial shipment stock',()=>{
+ const f=fixture(),sample=f.state.fulfillment.samples[0];delete sample.role;delete sample.shipmentId;sample.source={kind:'manual',description:'Extra reference from supplier'};const next=applyMistCommand(f.state,{type:'fulfillment.samples.move',payload:{id:'sample',kind:'lend',quantity:4,person:'Sales',location:'Reference room',note:'Independent ordinary reference'}}as any,f.context);expect(next.state.fulfillment.samples[0].available).toBe(0);
 });

@@ -1,5 +1,5 @@
 import {MistCommandError,type MistContext,type MistState} from './mistWorkspace';
-import type {FulfillmentSample,FulfillmentShipment} from './mistFulfillment';
+import type {FulfillmentSample,FulfillmentShipment,SampleMovement} from './mistFulfillment';
 import {stableJson} from './stableJson';
 
 export type ShippingSampleSourceSnapshot={
@@ -27,11 +27,16 @@ const label=(s:string)=>s.normalize('NFC').trim().toLowerCase();
 const units=(n:number):bigint=>{const m=String(n).match(/^(\d+)(?:\.(\d{1,4}))?$/);if(!m)fail('样品数量须为非负数且最多四位小数');return BigInt(m![1])*BigInt(10000)+BigInt((m![2]||'').padEnd(4,'0'));};
 const positions=(sample:FulfillmentSample)=>sample.positions?.length?sample.positions:[{location:sample.location,available:sample.available}];
 const openLoans=(state:MistState,id:string)=>state.fulfillment.sampleMovements.filter(m=>m.sampleId===id&&m.kind==='lend').map(m=>({id:m.id,remaining:m.quantity-state.fulfillment.sampleMovements.filter(r=>r.kind==='return'&&r.loanId===m.id).reduce((n,r)=>n+r.quantity,0)})).filter(m=>m.remaining>0);
+/** ATD and later physical facts remain authoritative through arrival, delivery and legacy display states. */
+export function shipmentHasDeparted(shipment:{state:string;departedAt?:string;arrival?:unknown;delivered?:unknown}|null|undefined):boolean{
+ return !!shipment&&(!!shipment.departedAt||!!shipment.arrival||!!shipment.delivered||['departed','arrived','delivered'].includes(shipment.state));
+}
 
 /** Only structured source facts bind the quantity basis. Notes and the shipping role never classify physical goods. */
 export function shippingSampleSourceSnapshot(state:MistState,sample:FulfillmentSample):ShippingSampleSourceSnapshot{
  const source=sample.source,shipment=state.fulfillment.shipments.find(s=>s.id===sample.shipmentId);
  if(sample.role!=='shipping'||source.kind!=='orderLine'||!source.productionId||!shipment||shipment.state==='cancelled')fail('本票船样来源已不可用');
+ if(!sample.unit?.trim()||units(sample.quantity)<=BigInt(0)||units(sample.available)>units(sample.quantity)||positions(sample).reduce((n,p)=>n+units(p.available),BigInt(0))!==units(sample.available))fail('样品数量、单位或位置余额无效');
  const line=state.orderLines.find(l=>l.id===source.lineId&&l.orderId===source.orderId),production=state.productions.find(p=>p.id===source.productionId&&p.orderId===source.orderId&&p.lineId===source.lineId);
  const matches=shipment.lines.filter(l=>l.orderId===source.orderId&&l.lineId===source.lineId&&l.productionId===source.productionId);
  if(!line||!production||matches.length!==1||(shipment as any).hiddenCount)fail('船样须对应本票准确订单、条目及生产来源');
@@ -60,10 +65,15 @@ function assertIncludedQuantity(state:MistState,sample:FulfillmentSample,snapsho
   for(const [color,count]of colors)if(count>snapshot.packing.filter(p=>label(p.color)===color).reduce((n,p)=>n+units(p.quantity),BigInt(0)))fail('随货面料颜色或数量与本批装箱不符');
  }
 }
-export function shippingSampleMovementBlocker(state:MistState,sample:FulfillmentSample):string|false{
+export function shippingSampleMovementBlocker(state:MistState,sample:FulfillmentSample,kind?:SampleMovement['kind']):string|false{
  const shipment=state.fulfillment.shipments.find(s=>s.id===sample.shipmentId);
  if(sample.shippingQuantityBasis?.consumption)return '本件已随本批出运，不能再次流转';
- if(sample.role==='shipping'&&shipment?.state==='departed'&&!sample.shippingQuantityBasis)return '本批已出运，请先确认样品数量口径';
+ if(sample.role!=='shipping'||!sample.shipmentId)return false;
+ if(!sample.shippingQuantityBasis)return kind==='return'?false:'请先确认样品数量口径';
+ if(sample.shippingQuantityBasis.kind==='included'){
+  if(!shipmentHasDeparted(shipment)&&(kind==='move'||kind==='return'))return false;
+  return shipmentHasDeparted(shipment)?'本批已出运，请按原依据补记随货':'大货内随货样品仅可现场移位或归还，出运请办理本票';
+ }
  return false;
 }
 function consume(state:MistState,sample:FulfillmentSample,shipment:FulfillmentShipment,context:MistContext,retrospective:boolean){
@@ -84,12 +94,17 @@ export function confirmShippingSampleBasis(state:MistState,input:ShippingSampleB
  if(input.kind==='independent'&&(typeof input.independentSource!=='string'||!input.independentSource.trim()||input.independentSource.length>2000))fail('请填写独立实物来源与当前保管依据');
  const snapshot=shippingSampleSourceSnapshot(state,sample);if(!same(snapshot,input.sourceSnapshot))fail('样品或装箱来源已变，请重新打开核对');
  const shipment=state.fulfillment.shipments.find(s=>s.id===snapshot.shipmentId)!;
- if(shipment.state==='departed'&&input.kind==='included'&&(!input.reconcileDeparted||!shipment.departedAt||!shipment.departureEvidence))fail('已出运随货样品须按原出运依据显式补记');
+ if(shipmentHasDeparted(shipment)&&sample.shippingQuantityBasis&&sample.shippingQuantityBasis.kind!==input.kind)fail('已出运的数量口径不能变更，请核对原确认');
+ if(shipmentHasDeparted(shipment)&&input.kind==='included'&&(!input.reconcileDeparted||!Number.isFinite(Date.parse(shipment.departedAt||''))||!shipment.departureEvidence))fail('已出运随货样品须按原出运依据显式补记');
  if(input.kind==='included')assertIncludedQuantity(state,sample,snapshot);
+ if(shipmentHasDeparted(shipment)&&input.kind==='included')for(const loan of state.fulfillment.sampleMovements.filter(m=>m.sampleId===sample.id&&m.kind==='lend')){
+  const at=Date.parse(shipment.departedAt!),before=Date.parse(loan.at),returned=state.fulfillment.sampleMovements.filter(m=>m.kind==='return'&&m.loanId===loan.id&&Date.parse(m.at)<=at).reduce((n,m)=>n+units(m.quantity),BigInt(0));
+  if(!Number.isFinite(before)||before>at||returned<units(loan.quantity))fail('原出运前存在未归还借出，请核对随货实物');
+ }
  if(sample.shippingQuantityBasis)(sample.shippingQuantityBasisHistory??=[]).push(structuredClone(sample.shippingQuantityBasis));
  const basis:ShippingSampleQuantityBasis={id:context.id(),kind:input.kind,sourceSnapshot:snapshot,evidence:input.evidence.trim(),...(input.kind==='independent'?{independentSource:input.independentSource!.trim()}:{}),fileIds:input.fileIds,at:context.now,actor:context.actorName,...(context.actorId?{actorId:context.actorId}:{}),custodySnapshot:{available:sample.available,positions:positions(sample).map(p=>({...p})),openLoans:openLoans(state,sample.id)}};
  sample.shippingQuantityBasis=basis;
- if(shipment.state==='departed'&&input.kind==='included')consume(state,sample,shipment,context,true);
+ if(shipmentHasDeparted(shipment)&&input.kind==='included')consume(state,sample,shipment,context,true);
  return {id:sample.id,quantityBasisId:basis.id,...(basis.consumption?{movementId:basis.consumption.movementId}: {})};
 }
 export function shipmentSampleCustodyBlocker(state:MistState,shipment:FulfillmentShipment):string|false{
