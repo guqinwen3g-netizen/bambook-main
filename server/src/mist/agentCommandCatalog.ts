@@ -188,6 +188,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
+  "type": "development.reopen",
+  "payload": "{ devId: string; closureId: string; expectedVersionId: string|null; reason: string }",
+  "source": "server/src/shared/mistWorkspace.ts"
+ },
+ {
   "type": "development.revise",
   "payload": "{ devId: string; versionId: string; note: string }",
   "source": "server/src/shared/mistWorkspace.ts"
