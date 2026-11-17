@@ -257,8 +257,17 @@ describe('external goods descriptions and customs facts',()=>{
   const {f,shipmentId,id}=customsReady();
   f.run({type:'fulfillment.customs.item.adjust',payload:{id,no:1,declaredName:'本批毛制上衣',elements:'本批70%羊毛30%涤纶',legalQty:10,secondQty:5.25,reason:'按本批实物及重新称重的申报依据核对'}});
   const before=structuredClone(f.state),snapshot=prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CD'}},f.context);
-  expect(snapshot.table!.rows[0]).toMatchObject({name:'本批毛制上衣\n本批70%羊毛30%涤纶',qty:'10 件\n10 件\n5.25 千克',price:'10.00',amount:'100.00 USD'});
+  expect(snapshot.table!.rows[0]).toMatchObject({name:'本批毛制上衣\n本批70%羊毛30%涤纶',qty:'10 件\n5.25 千克\n10 件',price:'10.00',amount:'100.00 USD'});
   expect(renderGeneratedDocumentHtml(snapshot)).toContain('本批70%羊毛30%涤纶');expect(renderGeneratedDocumentHtml(snapshot)).not.toContain('100%羊毛');expect(f.state).toEqual(before);
+ });
+
+ it('CD reserves the second legal quantity row when no legal second unit is recorded',()=>{
+  const {f,shipmentId,id}=customsReady(),cls=f.state.fulfillment.customsClassifications![0];
+  f.run({type:'fulfillment.customs.classify.save',payload:{id:cls.id,family:cls.family,hsCode:cls.hsCode,declaredName:cls.declaredName,brandType:cls.brandType,preference:cls.preference,elements:cls.elements,styles:cls.styles,legalUnit:cls.legalUnit,secondUnit:'',note:cls.note}});
+  f.run({type:'fulfillment.customs.items',payload:{id}});
+  const before=structuredClone(f.state),snapshot=prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CD'}},f.context);
+  expect(snapshot.table!.rows[0].qty).toBe('10 件\n\n10 件');expect(renderGeneratedDocumentHtml(snapshot)).toContain('10 件<br><br>10 件');
+  expect(snapshot.table!.rows[0]).toMatchObject({price:'10.00',amount:'100.00 USD'});expect(f.state).toEqual(before);
  });
  it.each(['quantity','price','netWeight','packages'] as const)('CD refuses stale saved declaration items after %s changes',change=>{
   const {f,shipmentId}=customsReady(),shipment=f.state.fulfillment.shipments.find(s=>s.id===shipmentId)!;

@@ -173,7 +173,9 @@ function shipmentDocContent(root: MistState, s: FulfillmentShipment, type: OwnDo
           { label: { zh: '运抵国 / 最终目的国', en: 'Country of destination' }, value: destinationCountry },
         ] : []), { label: { zh: '件数 / 毛重 / 净重', en: 'Packages / G.W. / N.W.' }, value: `${pack.packages} · ${money2(pack.gross)} kg · ${money2(pack.net)} kg` }],
         table: { columns: [{ key: 'no', label: { zh: '项号', en: 'No.' } }, { key: 'hs', label: { zh: '商品编号', en: 'HS code' } }, { key: 'name', label: { zh: '商品名称及规格型号', en: 'Description / elements' } }, { key: 'qty', label: { zh: '数量及单位', en: 'Quantity' }, num: true }, { key: 'price', label: { zh: '单价', en: 'Unit price' }, num: true }, { key: 'amount', label: { zh: '总价 / 币制', en: 'Amount' }, num: true }],
-          rows: items.map(i => ({ no: String(i.no), hs: i.hsCode, name: `${i.declaredName}\n${i.elements}`, qty: [`${qtyText(i.quantity)} ${i.unit}`, `${qtyText(i.legalQty)} ${i.legalUnit}`, i.secondUnit && i.secondQty !== null ? `${qtyText(i.secondQty)} ${i.secondUnit}` : ''].filter(Boolean).join('\n'), price: money2(i.unitPrice), amount: `${money2(i.amount)} ${i.currency}` })),
+          // Declaration rows: legal primary, legal secondary, trade.
+          // Keep the empty secondary row when it has no legal unit.
+          rows: items.map(i => ({ no: String(i.no), hs: i.hsCode, name: `${i.declaredName}\n${i.elements}`, qty: [`${qtyText(i.legalQty)} ${i.legalUnit}`, i.secondUnit && i.secondQty !== null ? `${qtyText(i.secondQty)} ${i.secondUnit}` : '', `${qtyText(i.quantity)} ${i.unit}`].join('\n'), price: money2(i.unitPrice), amount: `${money2(i.amount)} ${i.currency}` })),
           totals: { amount: draft.totals.map(t => `${money2(t.amount)} ${t.currency}`).join(' / ') } },
         paragraphs: draft.blockers.length ? [{ title: { zh: '待补资料', en: 'Open items' }, text: draft.blockers.join('\n') }] : [] };
     }
