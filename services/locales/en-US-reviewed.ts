@@ -5,6 +5,10 @@ import { mailReceivingEnglish } from './en-US-mail-receiving';
 import { sampleCustodyEnglish } from './en-US-sample-custody';
 export const reviewedEnglish: Record<string, string> = {
   ...sampleCustodyEnglish,
+  '原承诺 ': 'Former promise ',
+  '原跟进日 ': 'Former follow-up date ',
+  '同刻回款待核对': 'Verify payment timing',
+  '可确认的承诺后核销额 ': 'Verified receipts applied since the promise: ',
   '核对账期': 'Verify payment due date',
   '更正验收日': 'Correct acceptance date',
   '账期核对历史': 'Payment due date history',

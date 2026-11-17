@@ -26,7 +26,7 @@ describe('应收催收',()=>{
     const f=fixture();
     const {id}=f.run(save('customer-0','INV-G-2026-0412',{level:2,promisedDate:'2026-10-20',promisedAmount:'20000'},{nextDate:'2026-10-21'}));
     const row=f.state.crm.followUps.find(r=>r.id===id)!;
-    expect(row.collection).toEqual({level:2,promisedDate:'2026-10-20',promisedAmount:'20000',currency:'USD',openAtLog:42240});
+    expect(row.collection).toEqual({level:2,promisedDate:'2026-10-20',promisedAmount:'20000',currency:'USD',openAtLog:42240,priorSameInstantAllocations:[]});
     expect(f.state.tasks.find(t=>t.id===row.nextTaskId)).toMatchObject({kind:'crm-follow-up',due:'2026-10-21',target:{view:'invoices',id:'INV-G-2026-0412'}});
     expect(f.state.tasks.find(t=>t.id===row.nextTaskId)!.title).toContain('催收 INV-G-2026-0412');
     expect(f.state.events.some(e=>e.entityType==='invoice'&&e.entityId==='INV-G-2026-0412'&&e.text.includes('逾期催收'))).toBe(true);

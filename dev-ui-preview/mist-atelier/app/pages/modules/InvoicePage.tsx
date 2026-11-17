@@ -73,7 +73,7 @@ export function invoiceFinancialFacts(state: MistState | null, row: InvoiceLedge
   const writtenOff = mistInvoiceWriteoffMinor(invoice || row) / 100;
   return { allocations, credits, cash, credit, bankCharges, charged, writtenOff, unexplained: row.draft || row.state === 'void' || row.state === 'pending' ? 0 : (Math.round(row.amount * 100) - Math.round(cash * 100) - Math.round(credit * 100) - Math.round(charged * 100) - Math.round(writtenOff * 100) - Math.round(row.open * 100)) / 100 };
 }
-const PROMISE_LABEL = { pending: '待兑现', kept: '已兑现', broken: '承诺未兑现' } as const;
+const PROMISE_LABEL = { pending: '待兑现', kept: '已兑现', broken: '承诺未兑现', settled: '已结清', voided: '已作废', needsReview: '同刻回款待核对' } as const;
 const localNow = () => businessInputValue();
 export function invoiceCustomerId(state: MistState | null, row: Pick<MistInvoice, 'orderId' | 'devId' | 'customerId'>) { return row.customerId ? row.customerId : row.devId ? state?.devs.find(d => d.id === row.devId)?.customerId : state?.orders.find(o => o.id === row.orderId)?.customerId; }
 /** 催收摘要（列表用）：已催次数与最近承诺。 */
@@ -216,8 +216,19 @@ export function InvoicePage() {
       )}
       <Card><div className="mist-card-body mist-col"><DetailBlock title={uiText("贷项抵扣记录")}>{facts.credits.length ? facts.credits.map(a => { const credit = w.state?.platform?.credits.find(c => c.id === a.creditId); return <div className="mist-col" key={a.id}><div className="mist-row mist-module-actions"><Mono>{credit?.code || '贷项来源未找到'}</Mono><span>{money(a.amount, current.currency)}</span><Button disabled={!credit || !w.state?.platform?.claims.some(c=>c.id===credit.claimId)} onClick={() => go('claims', credit?.claimId, {section:'credit:'+a.creditId})}>{uiText("查看贷项来源案件")}</Button></div><span className="mist-note">{invoiceWhen(a.at)} · {a.actor}</span></div>; }) : <EmptyState compact title={uiText("尚无贷项抵扣")} />}</DetailBlock></div></Card>
       {current.state === 'open' || collectionRows.length ? <Card><div className="mist-card-body mist-col"><DetailBlock title={ui`催收记录${collection?.count ? ` · ${collection.count} 次` : ''}`}>
-        {collection?.promise && <Banner variant="status" tone={collection.promise.state === 'broken' ? 'bad' : collection.promise.state === 'kept' ? 'ok' : 'accent'} title={ui`客户承诺 ${collection.promise.date} 付 ${collection.promise.amount} ${collection.promise.currency} · ${PROMISE_LABEL[collection.promise.state]}`}>{uiText("承诺之后已核销 ")}{money(collection.promise.paidSince, collection.promise.currency)}。</Banner>}
-        {collectionRows.length ? collectionRows.map(f => <div className="mist-col" key={f.id} style={{ gap: 2 }}><span className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }}>{f.collection && <Pill tone={f.collection.level === 3 ? 'bad' : f.collection.level === 2 ? 'warn' : 'neutral'}>{CRM_COLLECTION_LEVEL_LABEL[f.collection.level]}</Pill>}<span>{CRM_METHOD_LABEL[f.method]}</span>{f.collection?.promisedDate && <Pill tone="accent">{uiText("承诺 ")}{f.collection.promisedDate} · {f.collection.promisedAmount} {f.collection.currency}</Pill>}{f.nextDate && <Pill tone="neutral">{uiText("下次 ")}{f.nextDate}</Pill>}</span><span style={{ whiteSpace: 'pre-wrap' }}>{f.content}</span><span className="mist-note">{businessWhen(f.at)} · {f.actor}{uiText(f.collection ? ` · 登记时未收 ${money(f.collection.openAtLog, f.collection.currency)}` : '')}</span></div>) : <span className="mist-note">{uiText("暂无催收记录")}</span>}
+        {collection?.promise && <Banner variant="status" tone={collection.promise.state === 'broken' ? 'bad' : collection.promise.state === 'kept' ? 'ok' : collection.promise.state === 'pending' ? 'accent' : 'neutral'} title={ui`客户承诺 ${collection.promise.date} 付 ${collection.promise.amount} ${collection.promise.currency} · ${PROMISE_LABEL[collection.promise.state]}`}>{uiText(collection.promise.state === 'needsReview' ? '可确认的承诺后核销额 ' : '承诺之后已核销 ')}{money(collection.promise.paidSince, collection.promise.currency)}。</Banner>}
+        {collectionRows.length ? collectionRows.map(f => <div className="mist-col" key={f.id} style={{ gap: 2 }}>
+          <span className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }}>
+            {f.voided && <Pill tone="neutral">{uiText('已作废')}</Pill>}
+            {f.collection && <Pill tone={f.voided ? 'neutral' : f.collection.level === 3 ? 'bad' : f.collection.level === 2 ? 'warn' : 'neutral'}>{CRM_COLLECTION_LEVEL_LABEL[f.collection.level]}</Pill>}
+            <span>{CRM_METHOD_LABEL[f.method]}</span>
+            {f.collection?.promisedDate && <Pill tone={f.voided ? 'neutral' : 'accent'}>{uiText(f.voided ? '原承诺 ' : '承诺 ')}{f.collection.promisedDate} · {f.collection.promisedAmount} {f.collection.currency}</Pill>}
+            {f.nextDate && <Pill tone="neutral">{uiText(f.voided ? '原跟进日 ' : '下次 ')}{f.nextDate}</Pill>}
+          </span>
+          <span style={{ whiteSpace: 'pre-wrap' }}>{f.content}</span>
+          {f.voided && <span className="mist-note">{f.voided.reason}</span>}
+          <span className="mist-note">{businessWhen(f.at)} · {f.actor}{uiText(f.collection ? ` · 登记时未收 ${money(f.collection.openAtLog, f.collection.currency)}` : '')}</span>
+        </div>) : <span className="mist-note">{uiText("暂无催收记录")}</span>}
         {current.state === 'open' && <ActionBar actions={[{ label: '登记催收', onClick: () => setDialog(collectSpec(current)), reason: !canCollect ? '需要客户关系登记权限（业务员）' : !customerId ? '未找到来源客户，不能登记催收' : false }]} />}
       </DetailBlock></div></Card> : null}
       <Card><div className="mist-card-body mist-col"><DetailBlock title={uiText("票据与来源操作记录")}>{events.length ? events.map(e => <div className="mist-col" key={e.id}><span>{e.text}</span><span className="mist-note">{invoiceWhen(e.at)} · {e.actor}</span></div>) : <span className="mist-note">{uiText("暂无操作记录")}</span>}</DetailBlock></div></Card>

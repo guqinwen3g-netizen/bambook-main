@@ -123,6 +123,23 @@ it('offers collection-backed bad debt independently of bank fees or cash allocat
   expect(getAllByRole(host, 'button').some(b => b.textContent === '登记银行扣费')).toBe(false);
 });
 
+it('shows a voided follow-up as history without offering its promise or enabling bad debt', () => {
+  route.id = 'a';
+  const state = store.value.state;
+  state.allocations = [];
+  state.crm.followUps.push({
+    id: 'void-follow', at: '2026-10-14T00:00:00Z', content: '核对原付款安排', method: 'call',
+    link: {kind:'invoice',id:'a'}, collection: {level:2, openAtLog:70,currency:'USD',promisedDate:'2026-10-17',promisedAmount:'70'},
+    voided: {at:'2026-10-15T00:00:00Z',actor:'业务',reason:'原记录写错票据'},
+  });
+  render();
+  expect(host.textContent).toContain('原记录写错票据');
+  expect(host.textContent).toContain('已作废');
+  expect(host.textContent).not.toContain('客户承诺 2026-10-17');
+  expect(host.textContent).toContain('原承诺 2026-10-17 · 70 USD');
+  expect((getByRole(host,'button',{name:'坏账核销'}) as HTMLButtonElement).disabled).toBe(true);
+});
+
 it('keeps the original non-cash adjustment available to reverse after it settles the invoice', async () => {
   route.id = 'a';
   Object.assign(store.value.state.invoices[0], { open: 0, writeoffs: [{ id: 'wo', kind: 'badDebt', amount: 70, currency: 'USD', actor: '财务', reason: '催收结论', at: '2026-10-14T00:00:00Z' }] });

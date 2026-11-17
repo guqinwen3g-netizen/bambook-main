@@ -4,6 +4,7 @@ import { isCalendarDay, mistBusinessDate } from './mistBusinessClock';
 import { MistCommandError, isRecognizedMistInvoice, type MistContext, type MistState } from './mistWorkspace';
 import { platformBusinessDate } from './mistPlatform';
 import { ownerChangeText, resolveMember } from './mistAccounts';
+import { creditDocumentFingerprint } from './mistCreditDocuments';
 
 export type CrmFollowUpMethod = 'call' | 'email' | 'meeting' | 'visit' | 'im' | 'other';
 export type CrmLinkKind = 'development' | 'quotation' | 'order' | 'opportunity' | 'invoice';
@@ -13,7 +14,13 @@ export type CrmLinkKind = 'development' | 'quotation' | 'order' | 'opportunity' 
  */
 export type CrmCollectionLevel = 1 | 2 | 3;
 export const CRM_COLLECTION_LEVEL_LABEL: Record<CrmCollectionLevel, string> = { 1: '到期提醒', 2: '逾期催收', 3: '最后通知' };
-export type CrmCollection = { level: CrmCollectionLevel; promisedDate: string; promisedAmount: string; currency: string; openAtLog: number };
+export type CrmCollection = {
+  level: CrmCollectionLevel; promisedDate: string; promisedAmount: string; currency: string; openAtLog: number;
+  /** Allocations already present at the same instant precede this promise. */
+  priorSameInstantAllocations?: string[];
+};
+type PromiseState = 'pending' | 'kept' | 'broken' | 'settled' | 'voided' | 'needsReview';
+const allocationKey = (invoiceId: string, allocationId: string) => creditDocumentFingerprint([invoiceId, allocationId]);
 export type CrmLink = { kind: CrmLinkKind; id: string };
 /** voided：作废的跟进保留原文与原因，不计入统计。 */
 export type CrmFollowUp = { id: string; customerId: string; method: CrmFollowUpMethod; content: string; at: string; nextDate: string; nextTaskId: string; link: CrmLink | null; actor: string; actorId?: string; createdAt: string; collection?: CrmCollection; voided?: { reason: string; at: string; actor: string } };
@@ -54,14 +61,34 @@ export function crmLinkTarget(root: MistState, customerId: string, link: CrmLink
 function customer(root: MistState, id: unknown) { return root.customers.find(row => row.id === id) || fail('客户不存在', 'NOT_FOUND'); }
 /** 应收票据的催收概况：次数、最近一次、最近一次承诺及是否兑现（承诺之后登记的核销合计 ≥ 承诺金额）。 */
 export function invoiceCollectionStatus(root: MistState, invoiceId: string, today: string) {
-  const rows = (root.crm?.followUps || []).filter(f => f.link?.kind === 'invoice' && f.link.id === invoiceId && f.collection).sort((a, b) => b.at.localeCompare(a.at));
+  const rows = (root.crm?.followUps || []).filter(f => !f.voided && f.link?.kind === 'invoice' && f.link.id === invoiceId && f.collection).sort((a, b) => b.at.localeCompare(a.at));
   const promised = rows.find(f => f.collection!.promisedDate);
-  let promise: { date: string; amount: string; currency: string; paidSince: number; state: 'pending' | 'kept' | 'broken' } | undefined;
+  let promise: { date: string; amount: string; currency: string; paidSince: number; state: PromiseState } | undefined;
   if (promised) {
-    const c = promised.collection!, paid = (root.allocations || []).filter(a => a.invoiceId === invoiceId && a.createdAt >= promised.createdAt).reduce((n, a) => n + Math.round(a.amount * 100), 0);
+    const c = promised.collection!;
+    const prior = new Set(c.priorSameInstantAllocations);
+    let paid = 0;
+    let hasUnorderedCash = false;
+    const promisedAt = Date.parse(promised.createdAt);
+    for (const a of root.allocations || []) {
+      if (a.invoiceId !== invoiceId || a.currency !== c.currency) continue;
+      const paidAt = Date.parse(a.createdAt);
+      if (!Number.isFinite(paidAt) || !Number.isFinite(promisedAt) || paidAt < promisedAt) continue;
+      if (paidAt === promisedAt) {
+        // Older records did not distinguish which allocations already existed at this timestamp.
+        if (!c.priorSameInstantAllocations) { hasUnorderedCash = true; continue; }
+        if (prior.size && prior.has(allocationKey(invoiceId, a.id))) continue;
+      }
+      paid += Math.round(a.amount * 100);
+    }
     const inv = root.invoices.find(i => i.id === invoiceId);
-    const kept = paid >= Math.round(Number(c.promisedAmount) * 100) || (!!inv && inv.open <= 0);
-    promise = { date: c.promisedDate, amount: c.promisedAmount, currency: c.currency, paidSince: paid / 100, state: kept ? 'kept' : c.promisedDate < today ? 'broken' : 'pending' };
+    let state: PromiseState = 'pending';
+    if (inv?.voidedAt) state = 'voided';
+    else if (paid >= Math.round(Number(c.promisedAmount) * 100)) state = 'kept';
+    else if (hasUnorderedCash) state = 'needsReview';
+    else if (inv?.open === 0) state = 'settled';
+    else if (c.promisedDate < today) state = 'broken';
+    promise = { date: c.promisedDate, amount: c.promisedAmount, currency: c.currency, paidSince: paid / 100, state };
   }
   return { count: rows.length, last: rows[0], level: rows[0]?.collection?.level, promise };
 }
@@ -106,6 +133,11 @@ export function applyCrmCommand(root: MistState, command: CrmCommand, context: M
         if (promisedAmount && (!/^\d{1,12}(\.\d{1,2})?$/.test(promisedAmount) || !(Number(promisedAmount) > 0))) fail('承诺金额须为大于零、最多两位小数的金额');
         if (promisedAmount && Math.round(Number(promisedAmount) * 100) > Math.round(inv.open * 100)) fail(`承诺金额不能超过当前未收 ${inv.open.toFixed(2)} ${inv.currency}`);
         collection = { level, promisedDate, promisedAmount, currency: inv.currency, openAtLog: inv.open };
+        if (promisedDate) {
+          const recordedAt = Date.parse(context.now);
+          const coincident = (root.allocations || []).filter(a => a.invoiceId === inv.id && Date.parse(a.createdAt) === recordedAt);
+          collection.priorSameInstantAllocations = coincident.map(a => allocationKey(inv.id, a.id));
+        }
       }
       const id = context.id(); let nextTaskId = '';
       const inv = link?.kind === 'invoice' ? root.invoices.find(i => i.id === link!.id) : undefined;
