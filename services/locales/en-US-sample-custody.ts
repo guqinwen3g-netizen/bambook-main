@@ -122,4 +122,9 @@ export const sampleCustodyEnglish: Record<string,string> = {
   '原借出数量':'Original loan quantity',
   '尚未归还':'Outstanding quantity',
   '交接说明':'Handover note',
+  '结案记录':'Closure history',
+  '条目结案申请记录':'Line closure requests',
+  '原申请资料':'Original request facts',
+  '原申请资料未留存':'Original request facts not retained',
+  '未留存':'Not retained',
 };
