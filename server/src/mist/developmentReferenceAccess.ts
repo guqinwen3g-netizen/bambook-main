@@ -1,3 +1,4 @@
+import {projectCommercialSampleLoanSources} from './commercialSampleLoanAccess';
 import type {TokenPayload} from '../auth/service';
 import {hasScope} from '../auth/permissionService';
 import {scopedVisibility,type MistDataScope} from '../shared/mistDataScope';
@@ -19,9 +20,12 @@ function independentScope(full:MistState,visible:MistState,scope?:MistDataScope)
 export function projectDevelopmentReferenceAccess(full:MistState,visible:MistState,actor:TokenPayload,scope?:MistDataScope):DevelopmentReferenceAccess{
  const canRead=hasScope(actor,'products:read'),canWrite=canRead&&hasScope(actor,'products:write'),eligible=independentScope(full,visible,scope),visibleSamples=new Map((visible.fulfillment?.samples||[]).map(s=>[s.id,s]));
  const readableDevIds=canRead?(visible.devs||[]).map(d=>d.id):[],writableDevIds=canWrite?[...eligible.devIds]:[],writableSampleIds=canWrite?[...eligible.sampleIds]:[];
+ const commercial=canRead?projectCommercialSampleLoanSources(full,visible,actor,scope,actor.companyId):undefined;
  const referencesByDev=Object.fromEntries(readableDevIds.map(devId=>[devId,(full.devs.find(d=>d.id===devId)?.sampleReferences||[]).map(ref=>{
   const sample=visibleSamples.get(ref.sampleId),readable=!!sample,caseWritable=canWrite&&eligible.devIds.has(devId),writable=caseWritable&&eligible.sampleIds.has(ref.sampleId),loans=developmentReferenceLoans(full,devId,ref.id),outstanding=loans.some(l=>developmentReferenceLoanRemaining(full,l)>0),closed=!!full.devs.find(d=>d.id===devId)?.closure;
-  const blocker=readable?(ref.withdrawn?'参考关系已撤回':sample!.source.kind==='developmentIncoming'?'请从原来样办理寄厂':ref.snapshots.at(-1)?.sourceHash!==developmentReferenceSourceHash(sample!)?'参考实物资料已变化，请重新核对引用':shippingSampleMovementBlocker(full,sample!,'lend')||undefined):undefined;
+  const source=sample?.role==='shipping'&&sample.shippingQuantityBasis?.kind==='included'?commercial?.[sample.id]:undefined;
+  const commercialBlocker=sample?.role==='shipping'&&sample.shippingQuantityBasis?.kind==='included'?(source?.status!=='available'?source?.reason||'商业借样来源尚不可核对':source.kind==='warehouse'&&source.options.length!==1?'请从样品仓库选择本次商业来源':undefined):undefined;
+  const blocker=readable?(ref.withdrawn?'参考关系已撤回':sample!.source.kind==='developmentIncoming'?'请从原来样办理寄厂':ref.snapshots.at(-1)?.sourceHash!==developmentReferenceSourceHash(sample!)?'参考实物资料已变化，请重新核对引用':shippingSampleMovementBlocker(full,sample!,'lend')||commercialBlocker||undefined):undefined;
   return{referenceId:ref.id,readable,withdrawn:!!ref.withdrawn,canRemove:caseWritable&&!ref.withdrawn&&!outstanding,canDispatch:writable&&!closed&&!blocker,canReturn:writable&&outstanding,...(blocker?{blocker}:{})};
  })]));return{readableDevIds,writableDevIds,writableSampleIds,referencesByDev};
 }
