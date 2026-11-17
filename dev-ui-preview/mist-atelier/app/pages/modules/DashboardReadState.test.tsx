@@ -31,6 +31,7 @@ it('labels completed production without claiming an unshipped order is fully ful
  seam.state.fulfillment.shipments=[{id:'first',state:'ready',lines:[{orderId:'production-complete',quantity:8}]},{id:'tail',state:'ready',lines:[{orderId:'production-complete',quantity:4}]}];
  const original=structuredClone(seam.state);render();
  expect(getByRole(host,'columnheader',{name:'生产进度',exact:true})).toBeTruthy();
+ expect(getByRole(host,'columnheader',{name:'生产进度',exact:true}).closest('[role="table"]')?.closest('[data-report-results]')).toBeTruthy();
  expect(host.textContent).not.toContain('履行进度');
  const row=getByRole(host,'row',{name:/SO-PRODUCTION-COMPLETE/});expect(row.textContent).toContain('100%');expect(row.textContent).toContain('出运准备中');
  expect(seam.state).toEqual(original);

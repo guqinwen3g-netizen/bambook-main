@@ -35,7 +35,7 @@ function completedProductionBeforeDeparture(){
 }
 it('names the 100 percent of an unshipped order as production progress',()=>{
  completedProductionBeforeDeparture();const original=structuredClone(seam.state);render('orders');
- const table=getByRole(host,'table',{name:'订单进度',exact:true});expect(getByRole(table,'columnheader',{name:'生产进度',exact:true})).toBeTruthy();
+ const table=getByRole(host,'table',{name:'订单进度',exact:true});expect(getByRole(table,'columnheader',{name:'生产进度',exact:true})).toBeTruthy();expect(table.closest('[data-report-results]')).toBeTruthy();
  const row=getByRole(table,'row',{name:/SO-PRODUCTION-COMPLETE/});expect(row.textContent).toContain('100%');expect(row.textContent).toContain('出运准备中');expect(seam.state).toEqual(original);
 });
 it('exports production progress with its explicit percent basis and unchanged shipping state',async()=>{
