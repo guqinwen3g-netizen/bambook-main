@@ -9,6 +9,7 @@
  *   Agent 永远不能签字。读投影（server/src/mist/access.ts）只把签字记录给签字人本人和能看到所签业务记录的人。
  */
 import { MistCommandError, type MistState } from './mistWorkspace';
+import type { ClosableLine } from './mistOrderClosure';
 
 export type MistDecisionSignature = {
   id: string; commandType: string; entityId: string; decision?: string;
@@ -86,7 +87,7 @@ export function decisionSignatureVisible(projected: MistState, row: MistDecision
   if (row.actorId === actorId) return true;
   const has = (list: Array<{ id: string }> | undefined) => !!list?.some(item => item.id === row.entityId);
   switch (row.commandType) {
-    case 'order.governance.decide': return has(projected.orders);
+    case 'order.governance.decide': return orderDecisionSourceVisible(projected, row.entityId);
     case 'fulfillment.procurement.decide': return has(projected.fulfillment?.purchases);
     case 'fulfillment.procurement.amend.decide': return !!projected.fulfillment?.purchases?.some(p => has(p.amendments));
     case 'fulfillment.stock.count.decide': return has(projected.fulfillment?.stockCounts);
@@ -96,4 +97,20 @@ export function decisionSignatureVisible(projected: MistState, row: MistDecision
     case 'rebate.claim.approve': return has(projected.exportRebate?.claims);
     default: return false;
   }
+}
+
+/** Composite approval IDs require an exact visible parent and actual child, never a prefix grant. */
+function orderDecisionSourceVisible(projected: MistState, entityId: string): boolean {
+  const orders = projected.orders || [], orderIds = new Set(orders.map(order => order.id));
+  if (orderIds.has(entityId)) return true;
+  for (const order of orders) {
+    const cancellation = order.governance?.cancellation;
+    if (cancellation?.id && entityId === order.id + '#cancel:' + cancellation.id) return true;
+  }
+  for (const line of (projected.orderLines || []) as ClosableLine[]) {
+    if (!orderIds.has(line.orderId)) continue;
+    if (line.closure && entityId === line.orderId + '#close:' + line.id) return true;
+    if (line.overShips?.some(request => entityId === line.orderId + '#overship:' + request.id)) return true;
+  }
+  return false;
 }
