@@ -6,6 +6,28 @@ import { MistRoot } from '../../../../components/mist';
 import { createMistState } from '../../../../server/src/shared/mistWorkspace';
 import { AgentProposalDialog } from './AgentProposalDialog';
 
+function reopenProposalFixture(){
+ const state=createMistState({id:()=>crypto.randomUUID(),now:'2026-11-18T04:00:00Z',actorName:'业务员'},'empty');
+ state.devs=[{id:'dev-private',code:'DEV-27',name:'羊毛外套',currentVersionId:'version-private',versionIds:['version-private'],closure:{id:'close-private',kind:'archived',at:'2026-11-18T04:00:00Z',by:'业务员',reason:'样衣阶段已告结束'}}as any];state.versions=[{id:'version-private',devId:'dev-private',label:'R2-A-2'}as any];
+ const proposal:any={id:'restore-proposal',ownerId:'owner',owner:'业务员',state:'pending',createdAt:'2026-11-18T04:00:00Z',summary:['development.reopen dev-private closureId close-private expectedVersionId version-private'],command:{type:'development.reopen',payload:{devId:'dev-private',closureId:'close-private',expectedVersionId:'version-private',reason:'继续下一轮版型核对'}}};
+ return{state,proposal};
+}
+it('presents a restore proposal as the exact business case/version and both reasons without exposing or trusting technical tokens',()=>{
+ const{state,proposal}=reopenProposalFixture();(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
+ try{act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));const text=document.body.textContent!;
+  for(const value of['恢复开发案','开发案 · DEV-27 · 羊毛外套','当前版本 · R2-A-2','关闭状态 · 已归档','原关闭原因 · 样衣阶段已告结束','本次恢复原因 · 继续下一轮版型核对','中风险'])expect(text).toContain(value);
+  for(const value of['dev-private','close-private','version-private','devId','closureId','expectedVersionId','development.reopen'])expect(text).not.toContain(value);expect(getConfirm(host).disabled).toBe(false);
+ }finally{act(()=>root.unmount());host.remove();}
+});
+it.each(['unread','case','version','foreign-version','closure','cycle','current-version','forged-token','empty-reason','extra-field'])('blocks restore confirmation after %s changes while keeping owner rejection available',async kind=>{
+ const{state,proposal}=reopenProposalFixture();let visible:any=state;const run=vi.fn(async()=>({}));(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
+ try{const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={visible} run={run} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));render();expect(getConfirm(host).disabled).toBe(false);
+  if(kind==='unread')visible=null;else if(kind==='case')state.devs=[];else if(kind==='version')state.versions=[];else if(kind==='foreign-version')state.versions[0].devId='another-case';else if(kind==='closure')delete state.devs[0].closure;else if(kind==='cycle')state.devs[0].closure!.id='new-close-same-clock';else if(kind==='current-version')state.devs[0].currentVersionId='new-version';else if(kind==='forged-token')proposal.command.payload.closureId='forged';else if(kind==='empty-reason')proposal.command.payload.reason=' ';else proposal.command.payload.hiddenChange='unreviewed';render();expect(getConfirm(host).disabled).toBe(true);
+  const reject=[...host.querySelectorAll('button')].find(b=>b.textContent?.trim()==='拒绝')!;expect(reject.disabled).toBe(false);for(const value of['dev-private','close-private','version-private','closureId','expectedVersionId'])expect(document.body.textContent).not.toContain(value);
+  if(kind==='unread'){await act(async()=>reject.click());expect(run).toHaveBeenCalledWith({type:'agent.proposal.reject',payload:{id:'restore-proposal'}},undefined);}
+ }finally{act(()=>root.unmount());host.remove();}
+});
+
 function orderProposalFixture(){
  const state=createMistState({id:()=> 'id',now:'2026-11-15T00:00:00Z',actorName:'Test'},'empty');
  state.customers=[{id:'customer-private',name:'Harborline Brands',code:'HLB'} as any];

@@ -1,4 +1,5 @@
 import {customerCommandChangesCredit} from '../../../../server/src/shared/mistCustomerFieldAuthority';
+import {developmentReopenSource} from '../../../../server/src/shared/mistDevelopmentLifecycle';
 import {stableJson} from '../../../../server/src/shared/stableJson';
 import React from 'react';
 import { ui, uiText } from '../../../../services/interfaceLanguage';
@@ -78,7 +79,23 @@ function orderSourceMissing(command:AgentProposal['command'],state?:MistState|nu
     ||Array.isArray(p.lines)&&p.lines.some(line=>line&&typeof line==='object'&&((contractDraft&&typeof line.id==='string'&&state.orderLines.some(row=>row.id===line.id&&row.orderId!==p.orderId))||missing(line.sourceProductId,state.market.products)||missing(line.sourceDevId,state.devs)||missing(line.sourceVersionId,state.versions)||missing(line.sourceQuotationId,state.market.quotations)
       ||typeof line.sourceQuotationLineId==='string'&&!!line.sourceQuotationLineId&&!state.market.quotations.find(q=>q.id===line.sourceQuotationId)?.lines.some(l=>l.id===line.sourceQuotationLineId)));
 }
+function reopenProposalDetails(command:AgentProposal['command'],state?:MistState|null):{reason:string;rows:Array<{field:string;path:string;value:string}>}|null{
+ if(command.type!=='development.reopen')return null;
+ const unavailable={reason:'恢复依据已变化或不可见，请重新核对',rows:[]};
+ if(!state)return{reason:'正在读取开发案，请稍后核对',rows:[]};
+ const p=command.payload;
+ if(Object.keys(p).some(key=>!['devId','closureId','expectedVersionId','reason'].includes(key)))return{reason:'恢复内容无法完整核对，请重新提交提议',rows:[]};
+ const dev=state.devs.find(dev=>dev.id===p.devId),source=dev?developmentReopenSource(state,dev):null;
+ if(!dev||!source||source.closureId!==p.closureId||source.expectedVersionId!==p.expectedVersionId)return unavailable;
+ const version=source.expectedVersionId?state.versions.find(version=>version.id===source.expectedVersionId&&version.devId===dev.id):undefined;
+ if(source.expectedVersionId&&!version)return unavailable;
+ if(typeof p.reason!=='string'||!p.reason.trim())return{reason:'请补全恢复原因后重新提交提议',rows:[]};
+ return{reason:'',rows:[{field:'开发案',path:'development',value:dev.code+' · '+dev.name},{field:'当前版本',path:'version',value:version?.label||'未指定'},
+  {field:'关闭状态',path:'closure.kind',value:({archived:'已归档',cancelled:'已取消',closed:'已结案'}as const)[source.closure.kind]},
+  {field:'原关闭原因',path:'closure.reason',value:source.closure.reason},{field:'本次恢复原因',path:'reason',value:p.reason.trim()}]};
+}
 export function proposalFieldChanges(command: AgentProposal['command'], full = false, state?:MistState|null): { rows: Array<{ field: string; path: string; value: string }>; omitted: number } {
+  const reopening=reopenProposalDetails(command,state);if(reopening)return{rows:reopening.rows,omitted:0};
   const rows: Array<{ field: string; path: string; value: string }> = [], limit = full ? 200 : 40;
   const development=command.type==='development.saveDraft',quotation=command.type==='market.quotation.save',rfqCommand=command.type.startsWith('rfq.');
   const orderCreate=command.type==='order.create',orderContract=command.type==='order.governance.saveDraft';
@@ -229,6 +246,7 @@ export function AgentProposalDialog({ proposal, state, scopeKey = '', onClose, r
   React.useEffect(() => { setNote(''); setFailure(''); setPassword(''); setSignature(null);setPendingFailure(false);setBusy(false); }, [proposal?.id,scopeKey]);
   if (!proposal) return null;
   const mail = mailProposalDetails(proposal, state);
+  const reopening=reopenProposalDetails(proposal.command,state);
   // 风险等级与服务端共用 agentProposalRisk：未登记的普通写入按中风险，付款、核销、审批等按高风险须输入密码。服务端仍会独立校验档位、密码与原业务权限。
   const risk = agentProposalRisk(proposal, state), detailed = risk !== 'low' && !mail;
   const account = detailed ? proposalAccountRows(proposal.command, state) : null;
@@ -258,15 +276,16 @@ export function AgentProposalDialog({ proposal, state, scopeKey = '', onClose, r
   return <Dialog open onClose={() => { if (!busy) onClose(); }} width={560} title={uiText('确认 Agent 提议')}
     footer={<><Button disabled={busy} onClick={onClose}>{uiText('稍后')}</Button>
       <Button disabled={busy||pendingFailure} onClick={() => void decide({ type: 'agent.proposal.reject', payload: { id: proposal.id, ...(note.trim() ? { note: note.trim() } : {}) } }, '已拒绝提议')}>{uiText('拒绝')}</Button>
-      <Button variant="primary" loading={busy} disabled={busy || pendingFailure || !!mail?.reason || !!proposal.taskBlocked || proposal.unavailable || !!draftSourceMissing || quoteSourceMissing || rfqSourceUnavailable || orderSourceUnavailable || incomplete || (risk === 'high' && !password) || (signing && !signature)} onClick={() => void decide({ type: 'agent.proposal.confirm', payload: { id: proposal.id } }, '已确认并执行', risk === 'high' ? { password } : undefined, signing && signature ? { svg: signature.svg } : undefined)}>{uiText('确认执行')}</Button></>}>
+      <Button variant="primary" loading={busy} disabled={busy || pendingFailure || !!mail?.reason || !!reopening?.reason || !!proposal.taskBlocked || proposal.unavailable || !!draftSourceMissing || quoteSourceMissing || rfqSourceUnavailable || orderSourceUnavailable || incomplete || (risk === 'high' && !password) || (signing && !signature)} onClick={() => void decide({ type: 'agent.proposal.confirm', payload: { id: proposal.id } }, '已确认并执行', risk === 'high' ? { password } : undefined, signing && signature ? { svg: signature.svg } : undefined)}>{uiText('确认执行')}</Button></>}>
     <div className="mist-col" data-agent-proposal-dialog>
       {failure && <div ref={failureRef}><Banner tone={pendingFailure?'warn':'bad'} title={uiText(pendingFailure?'结果待核对':'没有执行')}>{failure}</Banner></div>}
       {draftSourceMissing&&<Banner tone="warn" title={uiText('草稿或附件已不可见，请重新核对')} />}
       {quoteSourceMissing&&<Banner tone="warn" title={uiText('报价或来源资料已不可见，请重新核对')} />}
       {rfqSourceUnavailable&&<Banner tone="warn" title={uiText('询价或报价依据已不可用，请重新核对')} />}
       {orderSourceUnavailable&&<Banner tone="warn" title={uiText('订单或来源资料已不可见，请重新核对')} />}
+      {reopening?.reason&&<Banner tone="warn" title={uiText(reopening.reason)} />}
       {proposal.taskBlocked && <Banner tone="warn" title={uiText(proposal.taskBlocked)} />}
-      <div className="mist-col" data-agent-proposal-summary>{proposal.summary.map((line, i) => <span key={i}>{line}</span>)}</div>
+      <div className="mist-col" data-agent-proposal-summary>{(reopening?['恢复开发案']:proposal.summary).map((line, i) => <span key={i}>{reopening?uiText(line):line}</span>)}</div>
       <KeyValue items={[{ label: uiText('提出'), value: `${proposal.agentIdentity?.name || 'Agent'} · ${businessDate(proposal.createdAt)}` }, { label: uiText('执行身份'), value: proposal.owner }]} />
       <div className="mist-row" data-agent-proposal-risk={risk}><Pill tone={risk === 'high' ? 'bad' : risk === 'medium' ? 'warn' : 'neutral'}>{uiText(AGENT_RISK_LABEL[risk])}</Pill></div>
       {account && <div className="mist-col" data-agent-proposal-account><span className="mist-cell-strong">{uiText('收款账户')}</span>
@@ -277,7 +296,7 @@ export function AgentProposalDialog({ proposal, state, scopeKey = '', onClose, r
             : show(r.after) };
         })} />
       </div>}
-      {changes.length > 0 && <div className="mist-col" data-agent-proposal-changes><span className="mist-cell-strong">{uiText('将要改动的字段')}</span>{changes.map((c, i) => <span key={i}>{c.field} · {c.value}</span>)}{fields.omitted > 0 && <span className="mist-sub">{ui`另有 ${fields.omitted} 项未显示`}</span>}</div>}
+      {changes.length > 0 && <div className="mist-col" data-agent-proposal-changes><span className="mist-cell-strong">{uiText(reopening?'恢复依据':'将要改动的字段')}</span>{changes.map((c, i) => <span key={i}>{reopening?uiText(c.field):c.field} · {reopening&&c.path==='closure.kind'?uiText(c.value):c.value}</span>)}{fields.omitted > 0 && <span className="mist-sub">{ui`另有 ${fields.omitted} 项未显示`}</span>}</div>}
       {incomplete && <Banner tone="warn" title={uiText('内容过多，无法在此完整核对')}>{uiText('请拒绝后让 Agent 拆成较小的操作重新提交')}</Banner>}
       {mail && <div className="mist-col">
         {mail.reason ? <Banner tone="warn" title={uiText(mail.reason)} /> : <>
