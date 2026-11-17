@@ -1,11 +1,79 @@
 import { describe, expect, it } from 'vitest';
-import { mistCommandRequiresSignature, normalizeSignatureSvg, signatureEntityId } from './mistSignatures';
+import { mistCommandRequiresSignature, normalizeSignatureSvg, signatureEntityId, pendingSignatureReviewId, resolveReviewDecisionSignature, signatureReceiptFact } from './mistSignatures';
+import { createMistState, getMistReviewTasks } from './mistWorkspace';
+import { createOrderGovernance } from './mistOrderGovernance';
 import { signatureSvg } from '../../../components/mist/SignaturePad';
 import { TEST_SIGNATURE_SVG } from '../mist/__tests__/signature';
 
 const approve = (type: string) => ({ type, payload: { id: 'x', decision: 'approved', note: 'ok' } });
 const reject = (type: string) => ({ type, payload: { id: 'x', decision: 'rejected', note: 'no' } });
 const invalid = { code: 'VALIDATION', status: 422, message: '签字无效，请重新签字' };
+
+function historicalMain(count=2){
+ const state=createMistState({id:()=>crypto.randomUUID(),now:'2026-11-18T04:00:00.000Z',actorName:'业务'},'empty');
+ const rounds=Array.from({length:count},(_,index)=>({id:'round-'+index,kind:index?'change':'initial',status:'approved',requesterId:'sales',reviewerIds:['boss'],submittedAt:'2026-11-18T04:00:00.000Z',decidedBy:'boss',decidedName:'同名负责人',decidedAt:'2026-11-18T04:00:00.000Z',note:'核对',reason:'变更',snapshot:{orderId:'order-history',code:'SO-HISTORY',type:'garment',customerId:'client',customer:'客户',season:'AW',currency:'USD',due:'2026-12-'+String(index+10),contract:createOrderGovernance({id:()=>'',now:'',actorName:''}).contract,lines:[]}}));
+ state.orders=[{id:'order-history',code:'SO-HISTORY',type:'garment',governance:{contract:rounds.at(-1)!.snapshot.contract,rounds,effectiveVersion:count,status:'approved',approvedBy:'boss',approvedSnapshot:structuredClone(rounds.at(-1)!.snapshot)}}] as any;
+ state.decisionSignatures=rounds.map((_,index)=>({id:'sig-'+index,commandType:'order.governance.decide',entityId:'order-history',decision:'approved',fileId:'file-'+index,actorId:'boss',actor:'同名负责人',at:'2026-11-'+String(17-index)+'T09:00:00.000Z',requestId:'request-'+index}));
+ const receipts=state.decisionSignatures.map((s,index)=>signatureReceiptFact(s,{requestId:s.requestId,actorId:s.actorId,expectedRevision:index*3,result:{revision:index*3+1,result:{signatureId:s.id}}}));
+ return {state,tasks:getMistReviewTasks(state),receipts};
+}
+
+describe('exact approval signature identity',()=>{
+ it('binds a command only to a unique real pending source and frozen reviewer roster',()=>{
+  const f=historicalMain(1),task={...f.tasks[0],status:'pending' as const};
+  expect(pendingSignatureReviewId([task],{...approve('order.governance.decide'),payload:{...approve('order.governance.decide').payload,id:task.entityId,reviewId:'forged'}},'boss')).toBe(task.id);
+  expect(()=>pendingSignatureReviewId([task,{...task,id:'other'}],{type:'order.governance.decide',payload:{id:task.entityId,decision:'approved'}},'boss')).toThrow();
+  expect(()=>pendingSignatureReviewId([task],{type:'order.governance.decide',payload:{id:task.entityId,decision:'approved'}},'unassigned')).toThrow();
+  expect(()=>pendingSignatureReviewId([task],{type:'order.governance.decide',payload:{id:task.entityId,decision:'approved'}},'boss','forged')).toThrow();
+ });
+ it('reads distinct old main rounds from complete atomic append facts, not equal business or reversed audit clocks',()=>{
+  const {state,tasks,receipts}=historicalMain(3),before=structuredClone(state);
+  expect(tasks.map(t=>resolveReviewDecisionSignature(state,t,tasks,{receipts})?.fileId)).toEqual(['file-0','file-1','file-2']);
+  expect(state).toEqual(before);expect(state.decisionSignatures!.every(s=>s.reviewId===undefined)).toBe(true);
+ });
+ it.each(['missing signature','missing receipt','wrong actor','outside roster','reversed signatures','reversed rounds','wrong version count','duplicate request','conflicting receipt'])('refuses unsafe legacy inference: %s',kind=>{
+  const {state,tasks,receipts}=historicalMain(2);
+  if(kind==='missing signature')state.decisionSignatures!.pop();
+  if(kind==='missing receipt')receipts.pop();
+  if(kind==='wrong actor')state.orders[0].governance!.rounds[0].decidedBy='another';
+  if(kind==='outside roster')state.orders[0].governance!.rounds[0].reviewerIds=['another'];
+  if(kind==='reversed signatures')state.decisionSignatures!.reverse();
+  if(kind==='reversed rounds')state.orders[0].governance!.rounds.reverse();
+  if(kind==='wrong version count')state.orders[0].governance!.effectiveVersion=3;
+  if(kind==='duplicate request')state.decisionSignatures![1].requestId=state.decisionSignatures![0].requestId;
+  if(kind==='conflicting receipt')receipts[0].reviewId=tasks[1].id;
+  const fresh=getMistReviewTasks(state);expect(resolveReviewDecisionSignature(state,fresh[0],fresh,{receipts})).toBeUndefined();
+ });
+ it('prefers exact immutable review receipts even when a complete ordinal proof is unavailable',()=>{
+  const {state,tasks,receipts}=historicalMain(2);receipts[0].reviewId=tasks[0].id;receipts[1].reviewId=tasks[1].id;state.orders[0].governance!.effectiveVersion=99;
+  expect(resolveReviewDecisionSignature(state,tasks[0],tasks,{receipts})?.fileId).toBe('file-0');
+  expect(resolveReviewDecisionSignature(state,tasks[1],tasks,{receipts})?.fileId).toBe('file-1');
+ });
+ it('never replaces conflicting explicit metadata by an ordinal guess',()=>{
+  const {state,tasks,receipts}=historicalMain(2);state.decisionSignatures![0].reviewId=tasks[1].id;receipts[0].reviewId=tasks[0].id;
+  expect(resolveReviewDecisionSignature(state,tasks[0],tasks,{receipts})).toBeUndefined();
+ });
+ it('retains legacy command order alongside a new exact bound round without backfilling old metadata',()=>{
+  const {state,tasks,receipts}=historicalMain(3);state.decisionSignatures![2].reviewId=tasks[2].id;receipts[2].reviewId=tasks[2].id;
+  const before=structuredClone(state);
+  expect(tasks.map(t=>resolveReviewDecisionSignature(state,t,tasks,{receipts})?.fileId)).toEqual(['file-0','file-1','file-2']);
+  expect(state).toEqual(before);expect(state.decisionSignatures![0].reviewId).toBeUndefined();
+ });
+ it('does not infer a legacy main sequence with a malformed frozen roster',()=>{
+  const {state,tasks,receipts}=historicalMain(2);state.orders[0].governance!.rounds[0].reviewerIds=['boss','boss'];
+  expect(resolveReviewDecisionSignature(state,tasks[0],tasks,{receipts})).toBeUndefined();
+ });
+ it('does not identify a legacy cancellation by an approver display name when actor ID is absent',()=>{
+  const {state}=historicalMain(1);const order=state.orders[0];order.governance!.cancellation={id:'cancel',status:'approved',reason:'取消',requesterId:'sales',requesterName:'业务',reviewerIds:['boss'],requestedAt:'2026-11-18T04:00:00Z',decidedName:'同名负责人',decidedAt:'2026-11-18T04:00:00Z'};
+  state.decisionSignatures=[{id:'cancel-signature',commandType:'order.governance.decide',entityId:order.id+'#cancel:cancel',decision:'approved',fileId:'cancel-file',actorId:'boss',actor:'同名负责人',at:'2026-11-17T09:00:00Z',requestId:'cancel-request'}];
+  const tasks=getMistReviewTasks(state),task=tasks.find(t=>t.id==='order-cancel:cancel')!;expect(resolveReviewDecisionSignature(state,task,tasks)).toBeUndefined();
+ });
+ it.each(['signature','actor','request','revision','review'])('rejects a receipt with mismatched %s facts',field=>{
+  const {state}=historicalMain(1),sig=state.decisionSignatures![0],receipt:any={requestId:sig.requestId,actorId:sig.actorId,expectedRevision:0,result:{revision:1,result:{signatureId:sig.id,reviewId:'order:round-0'}}};
+  if(field==='signature')receipt.result.result.signatureId='other';if(field==='actor')receipt.actorId='other';if(field==='request')receipt.requestId='other';if(field==='revision')receipt.result.revision=0;if(field==='review')receipt.result.result.reviewId='';
+  expect(signatureReceiptFact(sig,receipt).unresolved).toBe(true);
+ });
+});
 
 describe('签字要求', () => {
   it.each(['order.governance.decide', 'fulfillment.procurement.decide', 'fulfillment.procurement.amend.decide', 'payable.request.decide', 'fulfillment.stock.count.decide'])('%s 仅批准需要签字', type => {

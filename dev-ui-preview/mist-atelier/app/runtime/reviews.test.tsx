@@ -188,7 +188,7 @@ it('reloads the approval queue as soon as the company data revision changes',asy
 });
 
 function submittedCancellation(signatures:any[],files:any[]){
- bridge.extra={orders:[{id:'own-order',code:'SO-CANCEL',type:'garment',customer:'本票客户',ownerId:'actor-a',governance:{rounds:[],status:'cancelled',cancellation:{id:'own-cancel',status:'approved',reason:'客户书面取消',requesterId:'actor-a',requesterName:'我',reviewerIds:['boss'],requestedAt:'2026-11-18T04:00:00.000Z',decidedName:'周敏',decidedAt:'2026-11-18T04:00:00.000Z',note:'保留原单历史'}}}],decisionSignatures:signatures,files};
+ bridge.extra={orders:[{id:'own-order',code:'SO-CANCEL',type:'garment',customer:'本票客户',ownerId:'actor-a',governance:{rounds:[],status:'cancelled',cancellation:{id:'own-cancel',status:'approved',reason:'客户书面取消',requesterId:'actor-a',requesterName:'我',reviewerIds:['boss'],requestedAt:'2026-11-18T04:00:00.000Z',decidedBy:'boss',decidedName:'周敏',decidedAt:'2026-11-18T04:00:00.000Z',note:'保留原单历史'}}}],decisionSignatures:signatures,files};
  rows=[];route={view:'approvals',section:'sent'};
 }
 const cancelSignature=(patch:any={})=>({id:'decision-signature',commandType:'order.governance.decide',entityId:'own-order#cancel:own-cancel',decision:'approved',fileId:'sig-cancel',actorId:'boss',actor:'周敏',at:'2026-11-17T09:32:08.000Z',requestId:'original-cancel-decision',...patch});
@@ -197,7 +197,7 @@ function stubSignatureFile(){
  intercept=url=>url.endsWith('/files/sig-cancel')?Promise.resolve({ok:true,status:200,arrayBuffer:async()=>new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>').buffer}):undefined;
 }
 it('shows the exact projected cancellation signature for my submitted read-only row using the company file route',async()=>{
- submittedCancellation([cancelSignature({entityId:'own-order',fileId:'main-signature'}),cancelSignature()],[{id:'main-signature',name:'主单签字.svg',size:20},{id:'sig-cancel',name:'取消签字.svg',size:30}]);stubSignatureFile();
+ submittedCancellation([cancelSignature({id:'main-record',requestId:'original-main-decision',entityId:'own-order',fileId:'main-signature'}),cancelSignature()],[{id:'main-signature',name:'主单签字.svg',size:20},{id:'sig-cancel',name:'取消签字.svg',size:30}]);stubSignatureFile();
  await render();await openRow('SO-CANCEL');await act(async()=>{await Promise.resolve();await Promise.resolve();});
  expect(document.querySelector('[data-approval-signature]')?.getAttribute('src')).toBe('blob:local-signature');
  expect(fetch).toHaveBeenCalledWith('/api/mist/workspaces/workspace-a/files/sig-cancel',expect.objectContaining({credentials:'include'}));
@@ -247,6 +247,14 @@ it('does not choose the latest of two readable signatures for one unbound approv
  const task=row({status:'approved',decision:{actor:'周敏',at:'2026-11-18T04:00:00.000Z'}});
  const evidence=projectedReviewEvidence(task,{files:[{id:'first',name:'第一份.svg',size:20},{id:'second',name:'第二份.svg',size:20}] as any,decisionSignatures:[cancelSignature({id:'first-signature',requestId:'first-request',entityId:task.entityId,fileId:'first'}),cancelSignature({id:'second-signature',requestId:'second-request',entityId:task.entityId,fileId:'second'})]},[task]);
  expect(evidence.signatureFileId).toBeUndefined();
+});
+it('uses only the exact response-only binding for old rounds and treats an empty binding map as unresolved',()=>{
+ const first=row({id:'order:first',status:'approved',decision:{actor:'周敏',at:'2026-11-18T04:00:00.000Z'}}),second={...first,id:'order:second'};
+ const state={files:[{id:'first-file',name:'第一轮.svg',size:20},{id:'second-file',name:'第二轮.svg',size:20}] as any,decisionSignatures:[cancelSignature({id:'first-signature',actorId:'actor-a',requestId:'first-request',entityId:first.entityId,fileId:'first-file'}),cancelSignature({id:'second-signature',actorId:'actor-a',requestId:'second-request',entityId:first.entityId,fileId:'second-file'})]};
+ const bindings=[{signatureId:'first-signature',reviewId:first.id},{signatureId:'second-signature',reviewId:second.id}];
+ expect(projectedReviewEvidence(first,state,[first,second],bindings).signatureFileId).toBe('first-file');
+ expect(projectedReviewEvidence(second,state,[first,second],bindings).signatureFileId).toBe('second-file');
+ expect(projectedReviewEvidence(first,state,[first,second],[]).signatureFileId).toBeUndefined();
 });
 it('keeps a server review attachment on its exact review snapshot route outside the selected projection',async()=>{
  bridge.workspaceId='workspace-b';const BaseURL=URL;vi.stubGlobal('URL',class extends BaseURL{static createObjectURL(){return 'blob:review-file';}static revokeObjectURL(){}});const anchor=vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{});

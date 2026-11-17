@@ -67,7 +67,7 @@ import { bindDevelopmentNotice, buildDevelopmentNotice, prepareDevelopmentNotice
 import { bindCustomerStatement, buildCustomerStatement, prepareCustomerStatementSnapshot } from './customerStatementPrint';
 import { bindGeneratedDocument, buildGeneratedDocument, generatedDocumentImages } from './generatedDocumentPrint';
 import { GENERATING_COMMANDS, prepareGeneratedSnapshot, cdDocumentIssueProblem } from '../shared/mistDocumentGeneration';
-import { mistCommandRequiresSignature, normalizeSignatureSvg, signatureEntityId, type MistDecisionSignature } from '../shared/mistSignatures';
+import { mistCommandRequiresSignature, normalizeSignatureSvg, signatureEntityId, pendingSignatureReviewId, resolveReviewDecisionSignature, signatureReceiptFact, REVIEW_SIGNATURE_COMMANDS, type MistDecisionSignature, type MistSignatureReceiptFact, type MistSignatureReviewBinding } from '../shared/mistSignatures';
 import { prepareSeal, requestsSeal, sealFileIds, SEAL_COMMANDS, SEAL_IMAGE_MIME_TYPES, withoutSeal, type MistSealStamp } from '../shared/mistSeals';
 import type { PdfRenderResult } from '../templates/pdf';
 import { canonicalCreditDocument, creditDocumentFingerprint, creditSourceFingerprint, type MistBusinessNumberNeed, type MistCreditPrintSnapshot } from '../shared/mistCreditDocuments';
@@ -417,7 +417,19 @@ export class MistRepository {
   private async preparedView(db:any,row:MistWorkspaceRow,actor:TokenPayload){
     await this.prepareFileAccess(row);
     if(!TASK_PROPOSAL_ACCESS.has(row))await this.prepareTaskProposalAccess(db,row,actor);
-    return this.view(row,actor);
+    const view = this.view(row,actor), visible = new Set((view.state.decisionSignatures || []).map(item => item.id)), readable = new Set(view.state.files.map(item => item.id));
+    const signatureReviewBindings: MistSignatureReviewBinding[] = [];
+    if (visible.size) {
+      const facts = await this.signatureReceiptFacts(db, row), tasks = this.reviews(row.state), resolved = new Map<string, string | null>();
+      for (const task of tasks) {
+        const signature = resolveReviewDecisionSignature(row.state, task, tasks, { receipts: facts });
+        if (!signature || !visible.has(signature.id) || !readable.has(signature.fileId)) continue;
+        resolved.set(signature.id, resolved.has(signature.id) && resolved.get(signature.id) !== task.id ? null : task.id);
+      }
+      for (const [signatureId, reviewId] of resolved) if (reviewId) signatureReviewBindings.push({ signatureId, reviewId });
+    }
+    // Response-only: deriving old associations must never alter row.state or a later unrelated write.
+    return { ...view, signatureReviewBindings };
   }
   private view(row: MistWorkspaceRow, actor: TokenPayload) {
     const projected = this.accessView(row, actor, scopeOf(row)), owner = isOwner(row, actor), company = companyRow(row);
@@ -1169,9 +1181,10 @@ export class MistRepository {
         if (command?.type === 'email.server.state') await completeMailState(db,workspaceId,command.payload.operationId,command.payload.attemptId,command.payload.observation,(prior as MailSyncActor).mailSyncLease!.id);
         numbers.assertConsumed();
         if (signatureSvg) {
+          const signatureReviewId = pendingSignatureReviewId(this.reviews(row.state), command, actor.userId);
           // 命令已通过全部业务门禁：归档本次签字并登记到所签记录；之后任何一步失败，私有文件按无回执清理。
           stored = { ...await this.files.write(workspaceId, { bytes: Buffer.from(signatureSvg, 'utf8'), name: signatureFileName(input.requestId), mimeType: 'image/svg+xml' }, context.now), uploadedBy: actor.userId };
-          applied.result = { ...applied.result, signatureId: this.archiveSignature(applied.state, command, stored!, actor, context, input.requestId) };
+          applied.result = { ...applied.result, signatureId: this.archiveSignature(applied.state, command, stored!, actor, context, input.requestId, signatureReviewId), ...(signatureReviewId ? { reviewId: signatureReviewId } : {}) };
         }
         if (confirmProposalId) {
           markAgentProposalConfirmed(applied.state, confirmProposalId, command, actor.userId, context.now, applied.result);
@@ -1309,18 +1322,24 @@ export class MistRepository {
     }
   }
   private reviews(state:MistState):MistReviewTask[]{return this.contract.getMistReviewTasks?.(state)||[];}
-  /** 已签字批准的审批：找到这次决定归档的签字文件（同一业务记录按审批命令匹配，取最近一次批准）。 */
-  private reviewSignatureFileId(state:MistState,task:MistReviewTask):string|undefined{
-    if(task.status==='pending')return undefined;
-    const command=REVIEW_COMMAND_BY_KIND[task.kind as keyof typeof REVIEW_COMMAND_BY_KIND];
-    const rows=(state.decisionSignatures||[]).filter(row=>row.commandType===command&&row.entityId===task.entityId&&(row.decision===undefined||row.decision===task.status));
-    return rows.at(-1)?.fileId;
+  private async signatureReceiptFacts(db:any,row:MistWorkspaceRow):Promise<MistSignatureReceiptFact[]>{
+    const signatures = row.state.decisionSignatures || [], requestIds = [...new Set(signatures.map(item => item.requestId).filter(id => typeof id === 'string' && !!id && id === id.trim()))], receipts = new Map<string, any>();
+    for (let offset = 0; offset < requestIds.length; offset += 500) {
+      const found = await db.mistCommandReceipt.findMany({ where: { workspaceId: row.id, requestId: { in: requestIds.slice(offset, offset + 500) } }, select: { requestId: true, actorId: true, expectedRevision: true, result: true } });
+      for (const receipt of found) receipts.set(receipt.requestId, receipt);
+    }
+    return signatures.map(item => signatureReceiptFact(item, receipts.get(item.requestId)));
+  }
+  /** Exact review identity or a proven legacy association; never the latest signature of another round. */
+  private reviewSignatureFileId(state:MistState,task:MistReviewTask,facts:readonly MistSignatureReceiptFact[]):string|undefined{
+    return resolveReviewDecisionSignature(state,task,this.reviews(state),{receipts:facts})?.fileId;
   }
   /** 把已写入私有存储的签字登记为附件与决定签字记录，返回签字记录编号。 */
-  private archiveSignature(state: MistState, command: { type: string; payload?: any }, file: MistStoredFile, actor: TokenPayload, context: MistContext, requestId: string): string {
+  private archiveSignature(state: MistState, command: { type: string; payload?: any }, file: MistStoredFile, actor: TokenPayload, context: MistContext, requestId: string, reviewId: string | undefined): string {
+    if (Object.values(REVIEW_SIGNATURE_COMMANDS).includes(command.type) && !reviewId) fail('PRECONDITION', '无法唯一核对本次审批，请重新读取后核对', 422);
     state.files.push(structuredClone(file) as MistState['files'][number]);
     const decision = typeof command.payload?.decision === 'string' ? command.payload.decision : undefined;
-    const record: MistDecisionSignature = { id: context.id(), commandType: command.type, entityId: signatureEntityId(command), ...(decision ? { decision } : {}), fileId: file.id, actorId: actor.userId, actor: actor.displayName || actor.userId, at: context.auditNow ?? context.now, requestId };
+    const record: MistDecisionSignature = { id: context.id(), commandType: command.type, entityId: signatureEntityId(command), ...(decision ? { decision } : {}), ...(reviewId ? { reviewId } : {}), fileId: file.id, actorId: actor.userId, actor: actor.displayName || actor.userId, at: context.auditNow ?? context.now, requestId };
     (state.decisionSignatures ??= []).push(record);
     return record.id;
   }
@@ -1351,10 +1370,11 @@ export class MistRepository {
     for (const row of rows.filter((item:MistWorkspaceRow)=>!archived(item)) as MistWorkspaceRow[]) {
       await this.prepareFileAccess(row);
       const denied = restrictedSensitiveFiles(row.state,actor,fileOwner(row),this.filePrivacy(row),true);
+      const signatureFacts = await this.signatureReceiptFacts(db,row);
       const tasks = this.reviews(row.state).filter(t=>!companyRow(row)&&row.ownerId===actor.userId||(t.reviewerIds.includes(actor.userId)&&hasScope(actor,t.requiredPermission as any)));
       const mainAuthorities=new Map<string,NonNullable<MistContext['authority']>|null>();
       for (const task of tasks) {
-        const signatureId = this.reviewSignatureFileId(row.state,task);
+        const signatureId = this.reviewSignatureFileId(row.state,task,signatureFacts);
         let canDecide=task.status==='pending'&&task.reviewerIds.includes(actor.userId)&&hasScope(actor,task.requiredPermission as any);
         if(canDecide&&task.kind==='order'&&task.id.startsWith('order:')){
           const order=(row.state as MistState).orders?.find(item=>item.id===task.entityId);
@@ -1391,7 +1411,7 @@ export class MistRepository {
     await this.prepareFileAccess(row);
     if(restrictedSensitiveFiles(row.state,actor,fileOwner(row),this.filePrivacy(row),true).has(fileId))fail('FILE_NOT_FOUND','附件不在当前可读取的审批资料中',404);
     // 审批快照附件，或这次决定归档的签字（与列表同一匹配规则）；印章图片永远不经此下载。
-    const signatureId=this.reviewSignatureFileId(row.state,task);
+    const signatureId=this.reviewSignatureFileId(row.state,task,await this.signatureReceiptFacts(db,row));
     if(!((task.fileIds||[]).includes(fileId)||fileId===signatureId)||sealFileIds(row.state).has(fileId))fail('FILE_NOT_FOUND','附件不在提交的审批快照中',404);
     const file=row.state.files.find((f:MistStoredFile)=>f.id===fileId);if(!file)fail('FILE_NOT_FOUND','附件不存在',404);
     const bytes=await this.files.read(workspaceId,file);await this.authorize(db,prior);return {file,bytes};
@@ -1440,7 +1460,7 @@ export class MistRepository {
       if(MIST_MEMBER_DIRECTORY_COMMANDS.includes(type))context.members=await this.memberDirectory(db,row,actor);
       const applied=this.contract.applyMistCommand(structuredClone(row.state),command,context);
       requireSignature(command,signatureSvg);
-      if(signatureSvg){stored={...await this.files.write(workspaceId,{bytes:Buffer.from(signatureSvg,'utf8'),name:signatureFileName(input.requestId),mimeType:'image/svg+xml'},context.now),uploadedBy:actor.userId};applied.result={...applied.result,signatureId:this.archiveSignature(applied.state,command,stored!,actor,context,input.requestId)};}
+      if(signatureSvg){const signatureReviewId=pendingSignatureReviewId(this.reviews(row.state),command,actor.userId,task.id);stored={...await this.files.write(workspaceId,{bytes:Buffer.from(signatureSvg,'utf8'),name:signatureFileName(input.requestId),mimeType:'image/svg+xml'},context.now),uploadedBy:actor.userId};applied.result={...applied.result,signatureId:this.archiveSignature(applied.state,command,stored!,actor,context,input.requestId,signatureReviewId)};}
       const previousEvents=new Set((row.state.events??[]).map((event:{id:string})=>event.id));
       for(const event of applied.state.events??[])if(!previousEvents.has(event.id))event.at=context.auditNow ?? context.now;
       (applied.state as any).reviewerIds=[...new Set(this.reviews(applied.state).flatMap(t=>t.reviewerIds))];
