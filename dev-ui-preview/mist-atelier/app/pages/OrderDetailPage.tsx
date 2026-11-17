@@ -31,7 +31,7 @@ import { OrderSplitMerge } from './OrderSplitMerge';
 import { OrderHistory } from './OrderHistory';
 import { fulfillmentProductionQcPassed, fulfillmentProductionFact } from '../../../../server/src/shared/mistFulfillment';
 import { lineShipping, lineStages } from './orderLineTrack';
-import { productionObservation } from '../../../../server/src/shared/mistProductionIntake';
+import { productionObservation, productionProgressText } from '../../../../server/src/shared/mistProductionIntake';
 import { ORDER_DOCUMENT_LABEL, type OrderDocumentRecord } from '../../../../server/src/shared/mistDocumentGeneration';
 import { isLineClosed } from '../../../../server/src/shared/mistOrderClosure';
 import { orderLineFacts } from '../../../../server/src/shared/mistOrderChangeImpact';
@@ -281,7 +281,7 @@ export function OrderDetailPage() {
     } },
     { key: 's', header: '小计', width: '90px', align: 'right' as const, render: (line: MistOrderLine) => <b className="mist-cell-strong mist-num">{amountLabel(internal&&!line.price?null:lineAmounts.get(line.id))}</b> },
   ];
-  if (!order) return <MistPage><BackLink onClick={() => go('orders')}>{uiText("订单管理")}</BackLink><Banner tone={error ? 'bad' : 'neutral'} title={uiText(loading ? '正在读取订单' : !state ? '订单资料未读取' : '没有找到此订单')} actions={<Button onClick={() => void refresh()}>{uiText("重新读取")}</Button>}>{error || undefined}</Banner></MistPage>;
+  if (!state || !order) return <MistPage><BackLink onClick={() => go('orders')}>{uiText("订单管理")}</BackLink><Banner tone={error ? 'bad' : 'neutral'} title={uiText(loading ? '正在读取订单' : !state ? '订单资料未读取' : '没有找到此订单')} actions={<Button onClick={() => void refresh()}>{uiText("重新读取")}</Button>}>{error || undefined}</Banner></MistPage>;
   const lateDays = !locked && order.due && order.state !== '已出运' && (order.progress ?? 0) < 100 ? Math.round((Date.parse(businessToday() + 'T00:00:00Z') - Date.parse(order.due + 'T00:00:00Z')) / 86400000) : 0;
   const replacement=!!order.replacementSource;
   if(route.section==='internal-delivery-new')return <InternalDeliveryCreate key={scope} order={order} onClose={()=>go('orders/detail',order.id,{section:order.type})}/>;
@@ -325,7 +325,7 @@ export function OrderDetailPage() {
         <CardHeader title={uiText("采购")} /><Button block disabled={busy||locked} onClick={()=>go('procurement',undefined,{orderLineId:selectedLine.id,section:'order:'+order.id,customerId:order.customerId})}>{uiText("准备采购草稿")}</Button>
         {!approved&&!locked&&<Banner variant="notice" tone="warn" title={uiText("仅可准备采购草稿")}>{uiText("主单批准前不能提交采购承诺、发出合同或进入生产。")}</Banner>}
         {purchases.filter(purchase=>purchase.lineId===selectedLine.id).map(purchase=><Button key={purchase.id} block onClick={()=>go('procurement',purchase.id,{orderLineId:selectedLine.id,section:'order:'+order.id,customerId:order.customerId})}>{uiText(['draft','rejected'].includes(purchase.state)?'查看采购草稿':'查看采购承诺')} {purchase.code}</Button>)}
-        <CardHeader title={uiText("生产单")} />{productions.filter(item => item.lineId === selectedLine.id).map(item => <React.Fragment key={item.id}><Button block onClick={() => go('production-board', undefined, { productionId: item.id, orderLineId: selectedLine.id })}>{item.code} · {item.factory} · {item.pct}%</Button><Button block variant="quiet" onClick={() => go('samples', undefined, { productionId: item.id, customerId: order.customerId })}>{uiText('产前样 / 船样')}</Button></React.Fragment>)}{shipments.filter(shipment=>shipment.lines.some(line=>line.lineId===selectedLine.id)).map(shipment=><Button key={shipment.id} block onClick={()=>go('shipments',shipment.id)}>{uiText("出运 ")}{shipment.code}</Button>)}</div>}
+        <CardHeader title={uiText("生产单")} />{productions.filter(item => item.lineId === selectedLine.id).map(item => <React.Fragment key={item.id}><Button block onClick={() => go('production-board', undefined, { productionId: item.id, orderLineId: selectedLine.id })}>{item.code} · {item.factory} · {uiText(fulfillmentProductionFact(state,item.id)?.completion ? '已完工' : productionProgressText(state,item))}</Button><Button block variant="quiet" onClick={() => go('samples', undefined, { productionId: item.id, customerId: order.customerId })}>{uiText('产前样 / 船样')}</Button></React.Fragment>)}{shipments.filter(shipment=>shipment.lines.some(line=>line.lineId===selectedLine.id)).map(shipment=><Button key={shipment.id} block onClick={()=>go('shipments',shipment.id)}>{uiText("出运 ")}{shipment.code}</Button>)}</div>}
     </Drawer>
     {/* ord35：放弃变更草稿前确认，列出将丢弃的变更。 */}
     <Dialog open={discardOpen && !!governance?.changeDraft} onClose={() => { if (!busy) setDiscardOpen(false); }} title={uiText('放弃变更草稿')} width={560}

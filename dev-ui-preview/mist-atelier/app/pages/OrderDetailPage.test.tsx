@@ -272,6 +272,24 @@ it('opens the exact existing procurement promise and excludes purchases from oth
   expect(store.run).not.toHaveBeenCalled();
 });
 
+it.each([
+  { percent: null, complete: false, label: '进度待核' },
+  { percent: 35, complete: false, label: '35%' },
+  { percent: null, complete: true, label: '已完工' },
+])('uses current factory facts in the production link ($label)', async ({percent,complete,label}) => {
+  const state=store.state!, line=state.orderLines[0], jobId='apron-cut';
+  state.productions.push({id:jobId,code:'AP-01',orderId,lineId:line.id,order:state.orders[0].code,name:'灰围裙',factory:'锦川',qty:24,due:'2026-12-02',pct:0,img:'coat',col:'cut'});
+  state.fulfillment.productionFacts.push({
+    productionId:jobId,sizes:[],revision:1,
+    observations:[{id:'cut-batch',asOf:'2026-11-18',sourceName:'裁床交接单',evidence:'累计8件份',fileIds:[],stage:'cut',percent,quantity:8,recordedAt:context.now,recordedBy:'业务员',recordedById:'sales'}],
+    ...(complete?{completion:{id:'done',quantity:24,sizeQuantities:[],date:'2026-12-02',at:context.now,actor:'跟单',evidence:'完工单',fileIds:[]}}:{}),
+  });
+  render();await act(async()=>getByRole(host,'row',{name:/精确金额条目/}).click());
+  const link=getByRole(document.body,'button',{name:'AP-01 · 锦川 · '+label,exact:true});
+  await act(async()=>link.click());
+  expect(go).toHaveBeenLastCalledWith('production-board',undefined,{productionId:jobId,orderLineId:line.id});
+});
+
 it('returns the receipt action to this exact order funding context without automatic reconciliation',async()=>{
   render();await act(async()=>getByRole(host,'button',{name:'查看收款核销'}).click());
   expect(go).toHaveBeenCalledWith('payment-vouchers',undefined,{section:'funding:'+orderId,customerId:'customer-a'});
