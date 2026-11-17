@@ -97,7 +97,7 @@ export function SampleRequests() {
       { value: 'open', label: '待寄出', count: count('open'), color: 'var(--mist-warn)' }, { value: 'sent', label: '已寄出', count: count('sent'), color: 'var(--mist-ok)' },
       { value: 'cancelled', label: '已取消', count: count('cancelled'), color: 'var(--mist-ink-3)' }, { value: 'all', label: '全部', count: count('all'), color: 'var(--mist-ink-2)' },
     ]} />
-    <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected?.customer || '索样申请'} drawerSub={selected?.code}
+    <ListDetail freezeLayout={!!dialog} drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected?.customer || '索样申请'} drawerSub={selected?.code}
       list={<Card><DataTable ariaLabel={uiText('索样申请')} loading={loading} rows={shown} rowKey={r => r.id} selectedKey={selected?.id} onRowClick={pick} columns={columns}
         empty={<EmptyState title={uiText(rows.length ? '没有符合条件的申请' : '还没有索样申请')} />} /></Card>}
       detail={detail} />

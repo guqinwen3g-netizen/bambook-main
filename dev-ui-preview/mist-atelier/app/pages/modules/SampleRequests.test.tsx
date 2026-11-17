@@ -12,12 +12,13 @@ vi.mock('../../runtime/auth',()=>{const useMistSession=()=>({user:{id:'sales',di
 import {SampleRequests} from './SampleRequests';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let host:HTMLElement,root:Root;const go=vi.fn();
+function render(){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'samples',section:'requests',id:'request'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><SampleRequests/></Nav.Provider></ToastProvider></MistRoot>));}
 beforeEach(()=>{
  store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-11-18T04:00:00Z',actorName:'业务员'},'empty');
  store.state.fulfillment.samples.push({id:'twill',code:'SMP-37',name:'棉斜纹米样',category:'面料',form:'米样',quantity:3,available:2.75,unit:'米',source:{kind:'manual',description:'留样'},location:'多个位置',positions:[{location:'B02',available:2},{location:'C03',available:.75},{location:'EMPTY',available:0}],size:'',color:'军绿',fileIds:[],note:'',createdAt:'2026-11-18T04:00:00Z'});
  (store.state as any).sampleRequests=[{id:'request',code:'SR-1',customerId:'customer',customer:'客户',description:'棉斜纹米样',quantity:.5,unit:'米',recipient:'收件人',address:'样品室',neededBy:'2026-11-20',note:'',state:'open',requesterId:'sales',requester:'业务员',createdAt:'2026-11-18T04:00:00Z',shipments:[]}];
  store.run.mockReset();store.run.mockResolvedValue({result:{id:'request'}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);
- act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'samples',section:'requests',id:'request'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><SampleRequests/></Nav.Provider></ToastProvider></MistRoot>));
+ render();
 });
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 const change=(label:string,value:string)=>act(()=>fireEvent.change(getByRole(document.body,'combobox',{name:label,exact:true}),{target:{value}}));
@@ -38,4 +39,13 @@ it('blocks a quantity above the chosen location even when total available is suf
 });
 it('allows a sole unrecorded position without inventing a location or leaking UI selection keys',async()=>{
  store.state!.fulfillment.samples[0].positions=[{location:'',available:2.75}];await open();expect((getByRole(document.body,'combobox',{name:'本次出库位置',exact:true})as HTMLSelectElement).value).toBe('0');await submit();expect(store.run.mock.calls[0][0].payload).toMatchObject({sourceLocation:'',quantity:.5});expect(Object.keys(store.run.mock.calls[0][0].payload).some(k=>k.startsWith('position:'))).toBe(false);
+});
+it('defers a newly narrow request drawer until the open fulfillment dialog closes',async()=>{
+ const previous=window.matchMedia,listeners=new Set<()=>void>(),media={matches:false,addEventListener:(_type:string,fn:()=>void)=>listeners.add(fn),removeEventListener:(_type:string,fn:()=>void)=>listeners.delete(fn)};
+ window.matchMedia=vi.fn(()=>media)as any;
+ try{
+  act(()=>root.unmount());root=createRoot(host);render();await act(async()=>getByRole(host,'row',{name:/SR-1/}).click());await open();act(()=>{media.matches=true;listeners.forEach(fn=>fn());});
+  expect(queryByRole(document.body,'dialog',{name:'客户',exact:true})).toBeNull();expect(getByRole(document.body,'dialog',{name:'据单寄出 SR-1',exact:true})).toBeTruthy();
+  await act(async()=>getByRole(getByRole(document.body,'dialog',{name:'据单寄出 SR-1',exact:true}),'button',{name:'取消',exact:true}).click());expect(getByRole(document.body,'dialog',{name:'客户',exact:true})).toBeTruthy();
+ }finally{window.matchMedia=previous;}
 });
