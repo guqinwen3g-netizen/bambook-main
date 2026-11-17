@@ -198,6 +198,9 @@ export function OrderDetailPage() {
   const locked=!!order&&orderLocked(order as MistOrder&{governance?:OrderGovernanceFields});
   const approvalPending=governance?.status==='pending'||governance?.changeDraft?.status==='pending'||locked;
   const terminated=governance?.status==='void'||governance?.status==='cancelled';
+  // A merge retires its source after moving every current line. Keep the unknown
+  // current amount as “—”; it is neither a collection task nor a historical zero.
+  const mergedSourceWithoutLines=governance?.status==='void'&&governance.termination?.kind==='void'&&lines.length===0;
   const approvalLabel=governance?.status==='void'?'已作废':governance?.status==='cancelled'?'已取消':governance?.cancellation?.status==='pending'?'取消审批中':approved?'已批准':approvalPending?'待审批':governance?.status==='rejected'?'已退回':'草稿待补齐';
   const amounts = orderAmounts(lines);
   const lineAmounts = new Map(lines.map((line, index) => [line.id, amounts.items[index].amount]));
@@ -309,7 +312,7 @@ export function OrderDetailPage() {
       <Card className={internal?"mist-col-12":"mist-col-8"}><CardHeader title={uiText("条目")} tools={<span className="mist-muted">{uiText("生产 · 已 QC")}</span>} /><DataTable density={density} ariaLabel={uiText("订单条目")} rows={lines} rowKey={line => line.id} onRowClick={line => {setLineId(line.id);go('orders/detail',order.id,{customerId:route.customerId,section:order.type,orderLineId:line.id});}} columns={columns} /></Card>
       {!internal&&<div className="mist-col mist-col-4">
         <Card><CardHeader title={uiText("出运准备")} tools={<span className="mist-muted">{order.checklist.filter(item => item.done).length} / {order.checklist.length}</span>} /><Checklist items={order.checklist} onToggle={busy||locked||!canWriteOrders ? undefined : index => { const item = order.checklist[index]; void act({ type: 'order.checklist', payload: { orderId: order.id, itemId: item.id, done: !item.done } }); }} /></Card>
-        <Card><CardHeader title={uiText("收款")} />{replacement?<KeyValue items={[{label:'客户收款',value:uiText('无需收款')}]}/>:remaining === null ? <Banner variant="notice" tone="warn" title={uiText("待核对订单金额")}>{uiText("金额核对完成后显示收款比例。")}</Banner> : <Donut centerLabel="已收" slices={[{ label: '已确认到账', value: received.total!, display: amountLabel(received.total), color: 'var(--mist-accent)' }, { label: '合同待收', value: remaining, display: amountLabel(remaining), color: 'transparent' }]} caption={<><span className="mist-note">{uiText("已核销 ")}{amountLabel(reconciled.total)} {order.currency}</span><Button variant="quiet" onClick={() => go('payment-vouchers',undefined,{section:'funding:'+order.id,customerId:order.customerId})}>{uiText("查看收款核销")}</Button></>} />}</Card>
+        {!mergedSourceWithoutLines&&<Card><CardHeader title={uiText("收款")} />{replacement?<KeyValue items={[{label:'客户收款',value:uiText('无需收款')}]}/>:remaining === null ? <Banner variant="notice" tone="warn" title={uiText("待核对订单金额")}>{uiText("金额核对完成后显示收款比例。")}</Banner> : <Donut centerLabel="已收" slices={[{ label: '已确认到账', value: received.total!, display: amountLabel(received.total), color: 'var(--mist-accent)' }, { label: '合同待收', value: remaining, display: amountLabel(remaining), color: 'transparent' }]} caption={<><span className="mist-note">{uiText("已核销 ")}{amountLabel(reconciled.total)} {order.currency}</span><Button variant="quiet" onClick={() => go('payment-vouchers',undefined,{section:'funding:'+order.id,customerId:order.customerId})}>{uiText("查看收款核销")}</Button></>} />}</Card>}
       </div>}
     </section>
     {state&&<OrderHistory state={state} orderId={order.id} go={go}/>}

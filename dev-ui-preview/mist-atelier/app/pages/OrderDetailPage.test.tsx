@@ -32,6 +32,24 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
+it('does not turn an empty merged void source into an amount-reconciliation todo or guess its former value',()=>{
+ const order=store.state!.orders[0];order.governance!.status='void';order.governance!.termination={kind:'void',reason:'并入 SO-DEST：统一交付',at:context.now,byId:'sales',byName:'业务员甲'};order.amount=7.6;store.state!.orderLines=[];
+ render();expect(host.textContent).not.toContain('待核对订单金额');expect(queryByRole(host,'button',{name:'查看收款核销'})).toBeNull();const summary=getByText(host,'订单金额').parentElement!.querySelector('.mist-sumbar-big')!;expect(summary.textContent).toContain('—');expect(summary.textContent).not.toContain('7.60');expect(summary.textContent).not.toContain('0.00');expect(store.run).not.toHaveBeenCalled();
+});
+
+it.each(['draft','approved','cancelled'] as const)('keeps the missing-current-amount guard for an empty %s order',status=>{
+ const order=store.state!.orders[0];order.governance!.status=status;store.state!.orderLines=[];render();expect(host.textContent).toContain('待核对订单金额');expect(getByText(host,'订单金额').parentElement!.querySelector('.mist-sumbar-big')!.textContent).toContain('—');
+});
+
+it('keeps an actual amount problem visible on a void order that still has current lines',()=>{
+ const order=store.state!.orders[0];order.governance!.status='void';order.governance!.termination={kind:'void',reason:'客户撤回',at:context.now,byId:'sales',byName:'业务员甲'};store.state!.orderLines[0].price=NaN;render();expect(host.textContent).toContain('待核对订单金额');
+});
+
+it('preserves the old approved snapshot when the current merged void source has no lines',async()=>{
+ const order=store.state!.orders[0];order.type='fabric';order.governance!.status='void';order.governance!.termination={kind:'void',reason:'合并后作废：统一交付',at:context.now,byId:'sales',byName:'业务员甲'};order.governance!.rounds=[{id:'old-approved',kind:'initial',status:'approved',submittedAt:context.now,requesterId:'sales',reviewerIds:['reviewer'],snapshot:{contract:{...order.governance!.contract,poNumber:'OLD-PO'},currency:'USD',lines:[{id:'old-line',style:'OLD',name:'旧面料',qty:4,unit:'码',price:1.9}]}}] as any;store.state!.orderLines=[];const frozen=structuredClone(order.governance!.rounds);
+ render();expect(host.textContent).not.toContain('待核对订单金额');await act(async()=>getByRole(host,'button',{name:'查看提交快照'}).click());const dialog=getByRole(document.body,'dialog',{name:'主单审批提交快照'});expect(dialog.textContent).toContain('OLD-PO');expect(dialog.textContent).toContain('4 码 × 1.9 USD');expect(order.governance!.rounds).toEqual(frozen);expect(store.run).not.toHaveBeenCalled();
+});
+
 it('makes the exact order operation history readable without inferring links from old prose',async()=>{
  const state=store.state!,peer={...state.orders[0],id:'split-peer',code:'SO-PEER'};state.orders.push(peer);
  state.events.push({id:'old-split',entityType:'order',entityId:orderId,actor:'原业务员',at:'2026-11-18T04:00:00Z',text:'拆分订单：A 4 件移至 SO-PEER；按批次交付',fileIds:[]});
