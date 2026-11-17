@@ -221,7 +221,7 @@ export function DocumentCenterPage() {
         { value: 'issued', label: '有效签发 / 归档', count: count('issued'), color: 'var(--mist-ok)' },
         { value: 'void', label: '已作废', count: count('void'), color: 'var(--mist-ink-3)' },
       ]} />
-      <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.number} · V${selected.version}` : '单据详情'} drawerSub={selected ? `${TYPE_LABEL[selected.type]} · ${shipmentOf(selected)?.code || ''}` : undefined}
+      <ListDetail freezeLayout={!!dialog} drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.number} · V${selected.version}` : '单据详情'} drawerSub={selected ? `${TYPE_LABEL[selected.type]} · ${shipmentOf(selected)?.code || ''}` : undefined}
         list={<Card><DataTable ariaLabel={uiText("单据列表")} loading={loading} rows={rows} rowKey={d => d.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
         detail={detail} />
     </>}
