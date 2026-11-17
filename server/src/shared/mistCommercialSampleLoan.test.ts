@@ -104,3 +104,21 @@ it('never borrows another order reservation and never consumes offsite goods thr
  const x=setup();x.f.run({type:'fulfillment.stock.reserve',payload:{stockId:x.stockId,orderId:x.otherOrderId,lineId:x.otherLineId,quantity:8,purpose:'另一订单硬预留'}});
  unchangedReject(x,{type:'fulfillment.samples.move',payload:{id:x.sampleId,kind:'lend',quantity:4,person:'',borrowerId:'borrower',location:'',note:'不能动他单预留'}},/不足/);
 });
+it('does not turn an existing counted stock shortage into a larger suspended reservation than the physical group',()=>{
+ const x=setup();x.f.run({type:'fulfillment.stock.reserve',payload:{stockId:x.stockId,orderId:stock(x).orderId,lineId:stock(x).lineId,quantity:10,purpose:'原单预留'}});const count=x.f.run({type:'fulfillment.stock.count',payload:{lines:[{stockId:x.stockId,location:'成品仓',counted:5}],note:'实际盘亏待核原预留'}}).id!;
+ x.f.run({type:'fulfillment.stock.count.decide',payload:{id:count,decision:'approved',note:'核实仓内盘亏'}},{...x.f.context,actorId:'reviewer'});expect(freeQuantity(stock(x))).toBe(-5);
+ unchangedReject(x,{type:'fulfillment.samples.move',payload:{id:x.sampleId,kind:'lend',quantity:4,person:'',borrowerId:'borrower',location:'',note:'先解决原占用差额'}},/商业库存/);
+});
+it('requires a new physical count if a commercial loan changed the warehouse book before count approval',()=>{
+ const x=setup(),id=x.f.run({type:'fulfillment.stock.count',payload:{lines:[{stockId:x.stockId,location:'成品仓',counted:9}],note:'借出前已登记的盘点差异'}}).id!;lend(x);const before=structuredClone(x.f.state);
+ expect(()=>x.f.run({type:'fulfillment.stock.count.decide',payload:{id,decision:'approved',note:'旧账面不能审批'}},{...x.f.context,actorId:'reviewer'})).toThrow(/账面已变化/);expect(x.f.state).toEqual(before);
+});
+it('does not reopen the receipt/completion fact to reject already completed stock while the commercial group is borrowed',()=>{
+ const x=setup();lend(x);const receipt=x.f.state.fulfillment.receipts.find(r=>r.purchaseId===x.purchaseId)!;
+ unchangedReject(x,{type:'fulfillment.procurement.rejectReceived',payload:{receiptId:receipt.id,quantity:1,location:'拒收区',evidence:'不能用拒收绕过完工源和借样债务'}},/完工|冻结|票据|结算/);
+});
+it('cannot rebuild an outstanding loan colour pool from changed planning, but can return its frozen original physical group',()=>{
+ const x=setup(),loanId=lend(x),sourceLine=x.f.state.orderLines.find(l=>l.id===stock(x).lineId)!;sourceLine.breakdown!.kind==='garment'&&(sourceLine.breakdown.rows[0].color='红');x.f.state.fulfillment.shipments.find(s=>s.id===x.shipmentId)!.lines[0].quantity=6;
+ expect(commercialSampleDepartureBlocker(x.f.state,x.shipmentId)).toMatch(/来源已变/);
+ x.f.run({type:'fulfillment.samples.move',payload:{id:x.sampleId,kind:'return',loanId:loanId,quantity:4,person:'',location:'A01',note:'原蓝色组合按原来源归还'}});expect(stock(x).available).toBe(10);expect(stockSampleLoanQuantity(stock(x))).toBe(0);
+});

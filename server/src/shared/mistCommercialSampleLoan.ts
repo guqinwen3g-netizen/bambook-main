@@ -6,7 +6,7 @@ import {stableJson} from './stableJson';
 import {packingSpecification,type PackingSku} from './mistPackingBreakdown';
 
 export type CommercialSampleSourceSelection={stockId:string;location:string;quantity:number};
-export type CommercialSampleLoan={kind:'warehouse'|'direct';sourceSnapshot:ShippingSampleSourceSnapshot;quantityBasisId:string;quantity:number;unit:string;qualityRevision:number;sampleLocation:string;purchaseId:string;receiptIds:string[];holds:Array<{stockId:string;reservationId:string;quantity:number;sourceLocation:string}>};
+export type CommercialSampleLoan={kind:'warehouse'|'direct';sourceSnapshot:ShippingSampleSourceSnapshot;/** Frozen completed physical colour/size pool; never rebuilt from a changed plan during return. */assortment?:PackingSku[];quantityBasisId:string;quantity:number;unit:string;qualityRevision:number;sampleLocation:string;purchaseId:string;receiptIds:string[];holds:Array<{stockId:string;reservationId:string;quantity:number;sourceLocation:string}>};
 export type CommercialSampleLoanSources={status:'available';kind:'warehouse'|'direct';quantity:number;unit:string;options:Array<{stockId:string;location:string;label:string;maxQuantity:number;unit:string}>}|{status:'unreadable'|'forbidden'|'unavailable'|'insufficient';reason:string};
 function fail(message:string):never{throw new MistCommandError('PRECONDITION',message);}
 const sum=(values:number[])=>Math.round(values.reduce((n,x)=>n+Math.round(x*10000),0))/10000;
@@ -34,7 +34,7 @@ export function commercialSampleLoanSources(state:MistState,sample:FulfillmentSa
   if(sourceProblem)return{status:'unavailable',reason:sourceProblem};
   if(!o.warehouse){const direct=o.receipts.filter(r=>r.destination==='supplier');if(direct.length!==1||direct[0].quantity<sample.available)return{status:'unavailable',reason:'原直交来源不能唯一核对，请先核对实物交接'};return{status:'available',kind:'direct',quantity:sample.available,unit:sample.unit,options:[]};}
   const options:Extract<CommercialSampleLoanSources,{status:'available'}>['options']=[];
-  for(const stock of o.stocks){if(stock.sourceKind==='claimReturn'||stock.unit!==sample.unit||!stockCompanyOwned(stock)||stock.locked)continue;const receipt=o.receipts.find(r=>r.id===stock.receiptId&&r.destination==='warehouse');if(!receipt)continue;const remaining=borrowable(stock);for(const position of fulfillmentPositions(stock)){const max=Math.min(remaining,position.available,sample.available);if(max<=0)continue;const warehouse=state.fulfillment.warehouses.find(w=>w.id===stock.warehouseId);const label=[o.purchase.code,stock.batchNumber||receipt.date,warehouse?.name,position.location].filter(Boolean).join(' · ');options.push({stockId:stock.id,location:position.location,label,maxQuantity:max,unit:stock.unit});}}
+  for(const stock of o.stocks){if(stock.sourceKind==='claimReturn'||stock.unit!==sample.unit||!stockCompanyOwned(stock)||stock.locked||freeQuantity(stock)<0)continue;const receipt=o.receipts.find(r=>r.id===stock.receiptId&&r.destination==='warehouse');if(!receipt)continue;const remaining=borrowable(stock);for(const position of fulfillmentPositions(stock)){const max=Math.min(remaining,position.available,sample.available);if(max<=0)continue;const warehouse=state.fulfillment.warehouses.find(w=>w.id===stock.warehouseId);const label=[o.purchase.code,stock.batchNumber||receipt.date,warehouse?.name,position.location].filter(Boolean).join(' · ');options.push({stockId:stock.id,location:position.location,label,maxQuantity:max,unit:stock.unit});}}
   if(!options.length)return{status:'insufficient',reason:'商业库存没有可核对的可借实物，请核对货权、交接与占用'};
   if(new Set(options.map(s=>s.label)).size!==options.length)return{status:'unavailable',reason:'原商业批次缺少可区分的来源标识，请先核对批次'};
   if(sample.sizeQuantities&&sum([...new Set(options.map(s=>s.stockId))].map(id=>Math.min(sample.quantity,borrowable(o.stocks.find(s=>s.id===id)!))))<sample.quantity)return{status:'insufficient',reason:'商业库存不足以借出完整实物组合'};
@@ -48,13 +48,14 @@ export function openCommercialSampleLoan(state:MistState,sample:FulfillmentSampl
  }
  const o=origin(state,sample),caps=commercialSampleLoanSources(state,sample);if(caps.status!=='available')fail(caps.reason);
  const data:CommercialSampleLoan={kind:caps.kind,sourceSnapshot:o.snapshot,quantityBasisId:o.basis.id,quantity,unit:sample.unit,qualityRevision:sample.qualityRevision||1,sampleLocation,purchaseId:o.purchase.id,receiptIds:o.receipts.map(r=>r.id),holds:[]};
+ const assortment=completedAssortment(state,o.snapshot.productionId);if(assortment)data.assortment=structuredClone(assortment);
  if(caps.kind==='direct'){if(selections!==undefined)fail('原直交样品不指定仓储来源');return data;}
  let chosen=selections;if(chosen===undefined){if(caps.options.length!==1)fail('请选择本次商业实物的准确库存来源');chosen=[{stockId:caps.options[0].stockId,location:caps.options[0].location,quantity}];}
  if(!Array.isArray(chosen)||!chosen.length||chosen.length>100||sum(chosen.map(s=>s.quantity))!==quantity)fail('商业来源数量合计须等于本次借出数量');
  const keys=new Set<string>();for(const row of chosen){if(!row||Object.keys(row).some(k=>!['stockId','location','quantity'].includes(k))||typeof row.quantity!=='number'||!Number.isFinite(row.quantity)||row.quantity<=0||Math.abs(row.quantity*10000-Math.round(row.quantity*10000))>1e-6)fail('商业来源选择或数量无效');const key=row.stockId+'\u0000'+row.location;if(keys.has(key))fail('同一商业来源位置不能重复选择');keys.add(key);const available=caps.options.find(s=>s.stockId===row.stockId&&s.location===row.location);if(!available||row.quantity>available.maxQuantity)fail('所选商业来源或可借数量已变化，请重新核对');}
  for(const id of new Set(chosen.map(s=>s.stockId)))if(sum(chosen.filter(s=>s.stockId===id).map(s=>s.quantity))>borrowable(state.fulfillment.stock.find(s=>s.id===id)!))fail('所选商业库存的可借总量已变化');
  for(const row of chosen){
-  const stock=state.fulfillment.stock.find(s=>s.id===row.stockId)!,reservationId=context.id(),ordinaryAllocations:NonNullable<StockSampleLoanHold['ordinaryAllocations']>=[];let needed=Math.max(0,sum([row.quantity,-freeQuantity(stock)]));
+  const stock=state.fulfillment.stock.find(s=>s.id===row.stockId)!,reservationId=context.id(),ordinaryAllocations:NonNullable<StockSampleLoanHold['ordinaryAllocations']>=[];let needed=Math.max(0,sum([row.quantity,-Math.max(0,freeQuantity(stock))]));
   for(const reservation of (stock.reservations||[]).filter(r=>!isSampleLoanHold(r)&&r.orderId===stock.orderId&&r.lineId===stock.lineId)){const take=Math.min(needed,reservationOpen(reservation));if(take<=0)continue;const allocations=reservation.sampleLoanAllocations??=[],prior=allocations.find(a=>a.loanId===loanId);if(prior)prior.quantity=sum([prior.quantity,take]);else allocations.push({loanId,quantity:take,returned:0});ordinaryAllocations.push({reservationId:reservation.id,quantity:take,returned:0});needed=sum([needed,-take]);}
   if(needed>0)fail('原订单预留或商业可借数量已变化');
   removeAtPosition(stock,row.quantity,row.location);if(stock.onHand!==undefined)stock.onHand=sum([stock.onHand,-row.quantity]);(stock.reservations??=[]).push({id:reservationId,orderId:o.snapshot.orderId,lineId:o.snapshot.lineId,purpose:'商业内样借出',quantity:row.quantity,at:context.now,actor:context.actorName,sampleLoan:{sampleId:sample.id,loanId,unit:sample.unit,sourceLocation:row.location,returned:0,owned:true,...(ordinaryAllocations.length?{ordinaryAllocations}:{})}});state.fulfillment.stockMovements.push({id:context.id(),stockId:stock.id,kind:'reserve',quantity:row.quantity,sourceLocation:row.location,location:row.location,person:context.actorName,note:'商业内样借出占用',at:context.now,actor:context.actorName,sampleLoan:{sampleId:sample.id,loanId}});data.holds.push({stockId:stock.id,reservationId,quantity:row.quantity,sourceLocation:row.location});
@@ -94,6 +95,7 @@ export function unresolvedCommercialLoanSource(state:MistState,stock:Fulfillment
 }
 
 const skuKey=(color:string,size:string)=>JSON.stringify([color.normalize('NFC').trim().toLowerCase(),size.normalize('NFC').trim().toLowerCase()]);
+const assortmentFacts=(rows:PackingSku[])=>[...new Set(rows.map(r=>skuKey(r.color,r.size)))].sort().map(key=>[key,sum(rows.filter(r=>skuKey(r.color,r.size)===key).map(r=>r.quantity))]);
 /** Only completed physical quantities or a complete actual packing partition establish a colour/size pool. */
 function completedAssortment(state:MistState,productionId:string):PackingSku[]|undefined{
  const production=state.productions.find(p=>p.id===productionId),completion=state.fulfillment.productionFacts.find(p=>p.productionId===productionId)?.completion;
@@ -121,6 +123,7 @@ function commercialAssortmentProblem(state:MistState,productionId:string,sample?
  const pendingIssues=state.fulfillment.stockMovements.filter(m=>m.kind==='issue'&&sourceStockIds.has(m.stockId)&&m.quantity>sum(state.fulfillment.stockMovements.filter(r=>r.issueId===m.id).map(r=>r.quantity))&&!state.fulfillment.shipments.some(s=>s.id===m.shipmentLink?.shipmentId&&shipmentHasDeparted(s)));
  if(pendingIssues.some(m=>!m.shipmentLink||m.shipmentCorrectionHold))return '原商业出库的颜色尺码尚未关联核对，不能重复分配实物';
  const pool=completedAssortment(state,productionId);if(!pool)return '原商业分色分码实物来源尚未核实';
+ if(loans.some(loan=>!loan.data.assortment||!same(assortmentFacts(loan.data.assortment),assortmentFacts(pool))))return '原商业分色分码来源已变，请先核对原借出实物';
  const usage: PackingSku[]=[];
  for(const ship of departed){const lines=ship.lines.filter(l=>l.productionId===productionId);if(!lines.length)continue;const rows=state.fulfillment.packing.filter(p=>p.shipmentId===ship.id&&p.productionId===productionId);if(rows.some(r=>!r.assortment)||sum(rows.map(r=>r.quantity))!==sum(lines.map(l=>l.quantity)))return '原已出运分色分码需核对';usage.push(...rows.flatMap(r=>r.assortment||[]));}
  usage.push(...loans.flatMap(l=>(l.data.sourceSnapshot.sizeQuantities||[]).map(row=>({color:l.data.sourceSnapshot.color,size:row.size,quantity:row.quantity}))));
