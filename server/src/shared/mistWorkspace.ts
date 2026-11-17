@@ -1,4 +1,5 @@
 import type {OrderMainApprovalSource} from './mistOrderApprovalSource';
+import {developmentReopenSource,type DevelopmentClosure,type DevelopmentLifecycleEvent} from './mistDevelopmentLifecycle';
 import {dueAfterAcceptance,type ReceivableDueCondition} from './mistTradeTerms';
 import {notifyMist,notificationOwners} from './mistNotifications';
 import {aggregateProductionProgress} from './mistProductionQuantity';
@@ -162,8 +163,8 @@ export type MistDev = {
   createdAt: string; updatedAt: string;
   /** 工厂（供应商 ID）→ 本案固定字母；首次参与时分配，之后不变。 */
   factoryLetters?: Record<string, string>;
-  /** 开发案级结束：取消 / 归档（手工，须写原因）；不收费开发案认可即结案按派生规则判断。 */
-  closure?: { kind: 'closed' | 'archived' | 'cancelled'; at: string; by: string; reason: string };
+  /** 整案只由业务员显式结束/恢复；版本认可、转档或财务结果不自动结束整案。 */
+  closure?: DevelopmentClosure;
   /** BB-DEV-9：开发费用（制作费）、开票申请与销账结案；只有收费案使用。 */
   billing?: MistDevBilling;
 };
@@ -318,7 +319,7 @@ export type MistFinanceReversal = { id: string; kind: 'allocation' | 'payment'; 
   allocation?: MistAllocation; receiptId?: string; invoiceId?: string; voucherId?: string };
 export type MistCustomer = { id: string; name: string; code: string; country: string; city: string; industry: string; owner: string; /** 同 MistOrder.ownerId。 */ ownerId: string; grade: string; currency: string; terms: string; incoterm: string; categories: string; creditLimit: number; since: string };
 export type MistContact = { id: string; customerId: string; name: string; role: string; email: string; phone: string; tone: MistTone };
-export type MistEvent = { id: string; entityType: string; entityId: string; actor: string; at: string; text: string; fileIds: string[]; businessRef?: { kind: 'opportunity' | 'followUp'; id: string } };
+export type MistEvent = { id: string; entityType: string; entityId: string; actor: string; at: string; text: string; fileIds: string[]; businessRef?: { kind: 'opportunity' | 'followUp'; id: string };developmentLifecycle?:DevelopmentLifecycleEvent };
 export type MistTarget = { view: string; id?: string; section?: string; versionId?: string; customerId?: string; orderLineId?: string; productionId?: string };
 /**
  * 工作事项必须写明由谁处理：assigneeIds 为指定账号；permission 为「持有该权限的任何人」（岗位事项，如财务开票、后勤接手）。
@@ -419,6 +420,7 @@ export type MistCommand = SealCommand | PeriodCloseCommand | Extract<DocumentGen
   | { type: 'development.billing.issue'; payload: { devId: string; chargeIds: string[]; number: string; due: string; fileIds: string[] } }
   | { type: 'development.version.recordMinor'; payload: { devId: string; versionId: string; change: string } }
   | { type: 'development.close'; payload: { devId: string; kind: 'archived' | 'cancelled'; reason: string } }
+  | { type: 'development.reopen'; payload: { devId: string; closureId: string; expectedVersionId: string|null; reason: string } }
   | { type: 'development.qc.decide'; payload: { devId: string; versionId: string; decision: 'rework' | 'abandon'; note: string } }
   /** 分段委外：登记前道工厂已把坯样交给下一道。 */
   | { type: 'development.stage.handover'; payload: { devId: string; versionId: string; stageIndex: number; quantity: number; unit: string; date: string; note: string } }
@@ -1128,8 +1130,19 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const dev=find(state.devs,p.devId,'开发案');
       if(p.kind!=='archived'&&p.kind!=='cancelled')throw new MistCommandError('VALIDATION','开发案结束方式无效');
       if(dev.closure)throw new MistCommandError('PRECONDITION','开发案已'+(dev.closure.kind==='cancelled'?'取消':dev.closure.kind==='archived'?'归档':'结案'));
-      dev.closure={kind:p.kind,at:context.now,by:context.actorName,reason:text(p.reason,'原因')};updateDev(state,dev,context);
-      event(state,context,'development',dev.id,(p.kind==='cancelled'?'取消开发案：':'归档开发案：')+dev.closure.reason,{view:'development/detail',id:dev.id},'general',notificationOwners(state,'development',dev.id));result={devId:dev.id};break;
+      dev.closure={id:context.id(),kind:p.kind,at:context.now,by:context.actorName,...(context.actorId?{byId:context.actorId}:{}),reason:text(p.reason,'原因')};updateDev(state,dev,context);
+      event(state,context,'development',dev.id,(p.kind==='cancelled'?'取消开发案：':'归档开发案：')+dev.closure.reason,{view:'development/detail',id:dev.id},'general',notificationOwners(state,'development',dev.id));
+      state.events[0].developmentLifecycle={action:'closed',closure:{...dev.closure,id:dev.closure.id!},...(context.actorId?{actorId:context.actorId}:{}),expectedVersionId:dev.currentVersionId??null};result={devId:dev.id};break;
+    }
+    case 'development.reopen': {
+      const dev=find(state.devs,p.devId,'开发案');if(!dev.closure)throw new MistCommandError('PRECONDITION','开发案尚未结束');
+      const reason=text(p.reason,'恢复原因'),source=developmentReopenSource(state,dev);if(!source)throw new MistCommandError('PRECONDITION','关闭记录无法核对，暂不能恢复');
+      if(text(p.closureId,'关闭记录')!==source.closureId)throw new MistCommandError('REVISION_CONFLICT','开发案关闭记录已变化，请重新核对后恢复',409);
+      if(p.expectedVersionId!==null&&typeof p.expectedVersionId!=='string')throw new MistCommandError('VALIDATION','请核对当前开发版本');
+      if(p.expectedVersionId!==source.expectedVersionId)throw new MistCommandError('REVISION_CONFLICT','当前版本已变化，请重新核对后恢复',409);
+      delete dev.closure;updateDev(state,dev,context);
+      event(state,context,'development',dev.id,'恢复开发案：'+reason,{view:'development/detail',id:dev.id,versionId:dev.currentVersionId||undefined},'general',notificationOwners(state,'development',dev.id));
+      state.events[0].developmentLifecycle={action:'reopened',closure:source.closure,reason,...(context.actorId?{actorId:context.actorId}:{}),expectedVersionId:source.expectedVersionId};result={devId:dev.id};break;
     }
     case 'development.qc.decide': {
       const [dev,v]=versionOf(state,p.devId,p.versionId);

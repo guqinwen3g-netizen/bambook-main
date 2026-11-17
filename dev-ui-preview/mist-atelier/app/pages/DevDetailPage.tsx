@@ -1,4 +1,5 @@
 import { businessInputInstant, businessInputValue } from '../runtime/businessClock';
+import {developmentReopenSource} from '../../../../server/src/shared/mistDevelopmentLifecycle';
 import {useOptionalMistSession} from '../runtime/auth';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {fabricQcFacts,type FabricFactDraft} from './fabricQcFacts';
@@ -68,10 +69,14 @@ export function qcMeasurementFacts(form:QcForm):Pick<MistQc,'measurements'|'appe
 
 export function DevDetailPage(){
   const qcSession=useOptionalMistSession();
-  const {go,route}=useNav();const {state,loading,error,run,uploadFile,downloadFile,fileUrl,pending,recover,saving}=useMistWorkspace();const myName=useMyDisplayName(useMistWorkspace().workspace,state);const toast=useToast();
+  const {go,route}=useNav();const {state,workspace,loading,error,run,uploadFile,downloadFile,fileUrl,pending,recover,saving}=useMistWorkspace();const myName=useMyDisplayName(workspace,state);const toast=useToast();
   const dev=state?.devs.find(item=>item.id===route.id),versions=state&&dev?devVersions(state,dev):[]; // 按开发案版本顺序，小版本紧跟所属大版本
   const fabricDomain=!!dev&&developmentDomain(dev.values)==='fabric';
-  const [versionId,setVersionId]=React.useState(route.versionId||''),[form,setForm]=React.useState<Form>(()=>emptyForm()),[dialog,setDialog]=React.useState<'confirm'|'actions'|'revise'|'minor'|'archive'|'sample'|'qc'|'edit'|'round'|'qcDecide'|'close'|'product'|null>(null),[busy,setBusy]=React.useState(false),[failure,setFailure]=React.useState('');
+  const [versionId,setVersionId]=React.useState(route.versionId||''),[form,setForm]=React.useState<Form>(()=>emptyForm()),[dialog,setDialog]=React.useState<'confirm'|'actions'|'revise'|'minor'|'archive'|'sample'|'qc'|'edit'|'round'|'qcDecide'|'close'|'reopen'|'product'|null>(null),[busy,setBusy]=React.useState(false),[failure,setFailure]=React.useState('');
+  const [reopenForm,setReopenForm]=React.useState<{devId:string;closureId:string;expectedVersionId:string|null;expectedRevision:number;reason:string}|null>(null);
+  const reopenSource=state&&dev?developmentReopenSource(state,dev):null,canReopen=qcSession?.hasPermission('products:write')===true;
+  const reopenChanged=!!reopenForm&&(reopenForm.devId!==dev?.id||reopenForm.closureId!==reopenSource?.closureId||reopenForm.expectedVersionId!==reopenSource?.expectedVersionId);
+  const openReopen=()=>{if(!dev||!reopenSource||!canReopen||!Number.isSafeInteger(workspace?.revision))return;setReopenForm({devId:dev.id,closureId:reopenSource.closureId,expectedVersionId:reopenSource.expectedVersionId,expectedRevision:workspace!.revision,reason:''});setFailure('');setDialog('reopen');};
   const [note,setNote]=React.useState(''),[sample,setSample]=React.useState({sample:'',quantity:'1',form:'',unit:'',location:'',color:'',returnedAt:localConfirmationTime()}),[qc,setQc]=React.useState<QcForm>(()=>qcForm(null)),[edit,setEdit]=React.useState({goal:'',due:'',factories:''}),[factoryDialog,setFactoryDialog]=React.useState(false),[roundInitial,setRoundInitial]=React.useState<Partial<NewRoundInput>|undefined>(),[decision,setDecision]=React.useState<{kind:'rework'|'abandon';note:string}>({kind:'rework',note:''}),[closure,setClosure]=React.useState<{kind:'archived'|'cancelled';reason:string}>({kind:'cancelled',reason:''});
   const version=versions.find(item=>item.id===(versionId||dev?.currentVersionId)),scope=React.useRef('');scope.current=`${dev?.id||''}:${version?.id||''}`;
   const fabricRequirements=version?.fabricRequirements||dev?.values.fabricRequirements;
@@ -90,8 +95,8 @@ export function DevDetailPage(){
   const set=<K extends keyof Form>(key:K,value:Form[K])=>{setTouched(true);setForm(previous=>({...previous,[key]:value}));};
   const chooseVersion=(id:string)=>{if(busy||!dev)return;setVersionId(id);setDialog(null);go('development/detail',dev.id,{versionId:id,...(route.customerId?{customerId:route.customerId}:{})});};
   const finish=(message:string)=>{setDialog(null);setFailure('');toast(message);};
-  const act=async(kind:'confirm'|'draft'|'revise'|'minor'|'archive'|'sample'|'qc'|'edit'|'qcDecide'|'close')=>{
-    if(!dev||busyRef.current||(!version&&kind!=='edit'&&kind!=='close'))return;const originalScope=scope.current;busyRef.current=true;setBusy(true);setFailure('');
+  const act=async(kind:'confirm'|'draft'|'revise'|'minor'|'archive'|'sample'|'qc'|'edit'|'qcDecide'|'close'|'reopen')=>{
+    if(!dev||busyRef.current||(!version&&kind!=='edit'&&kind!=='close'&&kind!=='reopen'))return;const originalScope=scope.current;busyRef.current=true;setBusy(true);setFailure('');
     try{
       if(kind==='draft'){await run({type:'development.saveConfirmationDraft',payload:{devId:dev.id,versionId:version!.id,draft:{...form,...(confirmSampleIds.length?{samples:versionSamples.filter(sample=>confirmSampleIds.includes(sample.id)).map(sampleRef)}:{}),confirmedAt:form.confirmedAt&&!Number.isNaN(new Date(form.confirmedAt).getTime())?businessInputInstant(form.confirmedAt):''}}});}
       else if(kind==='confirm'){
@@ -117,11 +122,17 @@ export function DevDetailPage(){
       }else if(kind==='close'){
         if(!closure.reason.trim())throw Error('请填写原因');
         await run({type:'development.close',payload:{devId:dev.id,kind:closure.kind,reason:closure.reason}});
+      }else if(kind==='reopen'){
+        if(!canReopen)throw Error('当前账号不能恢复开发案');
+        if(!reopenForm||reopenChanged)throw Error('关闭记录或当前版本已变化，请重新打开窗口核对');
+        if(!reopenForm.reason.trim())throw Error('请填写恢复原因');
+        const {expectedRevision,reason,devId,closureId,expectedVersionId}=reopenForm;
+        await run({type:'development.reopen',payload:{devId,closureId,expectedVersionId,reason:reason.trim()}},{expectedRevision});
       }else if(kind==='qcDecide'){
         if(decision.kind==='abandon'&&!decision.note.trim())throw Error('请填写放弃原因');
         await run({type:'development.qc.decide',payload:{devId:dev.id,versionId:version!.id,decision:decision.kind,note:decision.note}});
       }else await run({type:'development.update',payload:{devId:dev.id,patch:{goal:edit.goal,due:edit.due,factories:edit.factories.split(/[、,，\n]/).map(value=>value.trim()).filter(Boolean)}}});
-      if(live.current&&(kind==='revise'||kind==='minor'||scope.current===originalScope))finish(({draft:'本版确认草稿已保存',confirm:'已保存本版需求方确认',revise:'新版本已建立，原版记录已保留',minor:'小版本已生成，沿用大版本实物与 QC；需求方确认请对小版本单独记录',archive:'已保存本版成果留档',sample:'已保存本版返样实物',qc:'已保存本版 QC 报告',edit:'开发计划已更新',close:closure.kind==='cancelled'?'开发案已取消':'开发案已归档',qcDecide:decision.kind==='rework'?'已转为整改复检，原 QC 记录已保留':'本版已标记不采用，其他版本不受影响'})[kind]);
+      if(live.current&&(kind==='revise'||kind==='minor'||scope.current===originalScope))finish(({draft:'本版确认草稿已保存',confirm:'已保存本版需求方确认',revise:'新版本已建立，原版记录已保留',minor:'小版本已生成，沿用大版本实物与 QC；需求方确认请对小版本单独记录',archive:'已保存本版成果留档',sample:'已保存本版返样实物',qc:'已保存本版 QC 报告',edit:'开发计划已更新',close:closure.kind==='cancelled'?'开发案已取消':'开发案已归档',reopen:'开发案已恢复',qcDecide:decision.kind==='rework'?'已转为整改复检，原 QC 记录已保留':'本版已标记不采用，其他版本不受影响'})[kind]);
     }catch(cause){if(live.current&&scope.current===originalScope)setFailure(cause instanceof Error?cause.message:'操作失败，原内容已保留');}finally{busyRef.current=false;if(live.current)setBusy(false);}
   };
   const uploadReport=async(files:File[])=>{if(busyRef.current||pending)return;if(files.length!==1){setFailure('每次请选择一份 QC 报告');return;}const originalScope=scope.current;reportUploadScope.current=originalScope;busyRef.current=true;setBusy(true);try{const file=await uploadFile(files[0]);if(live.current&&scope.current===originalScope)setQc(previous=>({...previous,report:file.id}));reportUploadScope.current=null;}catch(cause){if(live.current&&scope.current===originalScope)setFailure(String(cause));}finally{busyRef.current=false;if(live.current)setBusy(false);}};
@@ -228,7 +239,7 @@ export function DevDetailPage(){
     <BackLink onClick={backToSource}>{uiText(route.customerId?'返回客户档案':'开发与寻样')}</BackLink>
     <IdentityHeader thumb={<Thumb src={picture} icon={fabricDomain?Layers:Shirt} size="lg" />} meta={[developmentInitiator(dev.values)==='internal'?developmentInitiatorLabel(dev.values):dev.customer,<Mono key="code">{dev.code}</Mono>,<Mono key="style">{dev.style}</Mono>]} title={uiText(dev.name)} facts={[{label:'负责人',value:<><Avatar name={dev.owner} identityKey={dev.ownerId} size="xs" />{dev.owner}</>},{label:'目标日期',value:dev.due},{label:'发起方',value:developmentInitiatorLabel(dev.values)},{label:'费用',value:developmentCharged(dev.values)?'收费':'不收费'},{label:'状态',value:<Pill tone={dev.tone}>{dev.state}</Pill>}]} actions={<IconButton icon={Ellipsis} label={uiText("更多")} onClick={()=>setDialog('actions')} />} />
     <Stepper steps={STAGES.map((label,index)=>({label,state:steps[index]}))} onSelect={index=>document.getElementById(['mist-dev-goal','mist-dev-sample','mist-dev-qc','mist-dev-confirmation','mist-dev-archive'][index])?.scrollIntoView({behavior:'smooth',block:'start'})} />
-    {(failure||error)&&<FailureNotice title={"操作未完成"} detail={failure||error} />}
+    {(failure||error)&&dialog!=='reopen'&&<FailureNotice title={"操作未完成"} detail={failure||error} />}
     {pending&&!saving&&<div className="mist-section"><Banner tone="warn" title={uiText("原操作结果尚待核对")} actions={recovery}>{uiText("已保留原请求，核对前请勿重复提交。")}</Banner></div>}
     {state&&compareOpen&&compareIds.length>=2&&<div className="mist-section"><DevCompareCard state={state} dev={dev} versionIds={compareIds} currentId={version?.id} onOpen={id=>{chooseVersion(id);reveal('mist-dev-version',true);}} onClose={()=>setCompareOpen(false)}/></div>}
     <div className="mist-detail">
@@ -292,7 +303,11 @@ export function DevDetailPage(){
       </div>
     </div>
     <Dialog open={dialog==='confirm'} onClose={()=>!busy&&setDialog(null)} icon={form.result==='rejected'?X:CircleCheck} tone={form.result==='rejected'?'bad':form.result==='needs_adjustment'?'warn':'ok'} title={ui`记录 ${version?.label||''}：${resultLabel[form.result]}？`} description={uiText("本次决定只记录在当前准确版本；原有报告和历史记录继续保留。")} footer={<>{recovery}<Button variant="quiet" disabled={busy} onClick={()=>setDialog(null)}>{uiText("取消")}</Button><Button variant={form.result==='rejected'?'danger':'primary'} loading={busy} onClick={()=>void act('confirm')}>{uiText("确认提交")}</Button></>}><KeyValue items={[{label:'实际确认人',value:form.confirmer},{label:'组织',value:form.organization},{label:'确认依据',value:form.basis}]} /></Dialog>
-    <Dialog open={dialog==='actions'} onClose={()=>setDialog(null)} title={uiText("开发版本操作")}><div className="mist-col"><Button disabled={!version||!!roundBlocker} title={uiText(roundBlocker||undefined)} onClick={()=>{setNote('');setDialog('revise');}}>{uiText("基于本版发起修改")}</Button>{!fabricDomain&&<><Button disabled={!!minorBlocker} title={uiText(minorBlocker||undefined)} onClick={()=>{setNote('');setFailure('');setDialog('minor');}}>{uiText("记录小调整")}</Button>{minorBlocker&&<p className="mist-note">{minorBlocker}</p>}</>}<Button disabled={!version||!!version.archivedAt} onClick={()=>setDialog('archive')}>{uiText("成果留档")}</Button><Button disabled={!!roundBlocker} title={uiText(roundBlocker||undefined)} onClick={()=>{setFailure('');setDialog('round');}}>{uiText("开新一轮")}</Button><Button onClick={openEdit}>{uiText("编辑开发计划")}</Button>{roundBlocker&&<p className="mist-note">{roundBlocker}</p>}{!dev.closure&&<><Button variant="quiet" onClick={()=>{setClosure({kind:'cancelled',reason:''});setFailure('');setDialog('close');}}>{uiText("取消开发案")}</Button><Button variant="quiet" onClick={()=>{setClosure({kind:'archived',reason:''});setFailure('');setDialog('close');}}>{uiText("归档开发案")}</Button></>}</div></Dialog>
+    <Dialog open={dialog==='actions'} onClose={()=>setDialog(null)} title={uiText("开发版本操作")}><div className="mist-col"><Button disabled={!version||!!roundBlocker} title={uiText(roundBlocker||undefined)} onClick={()=>{setNote('');setDialog('revise');}}>{uiText("基于本版发起修改")}</Button>{!fabricDomain&&<><Button disabled={!!minorBlocker} title={uiText(minorBlocker||undefined)} onClick={()=>{setNote('');setFailure('');setDialog('minor');}}>{uiText("记录小调整")}</Button>{minorBlocker&&<p className="mist-note">{minorBlocker}</p>}</>}<Button disabled={!version||!!version.archivedAt} onClick={()=>setDialog('archive')}>{uiText("成果留档")}</Button><Button disabled={!!roundBlocker} title={uiText(roundBlocker||undefined)} onClick={()=>{setFailure('');setDialog('round');}}>{uiText("开新一轮")}</Button><Button onClick={openEdit}>{uiText("编辑开发计划")}</Button>{roundBlocker&&<p className="mist-note">{roundBlocker}</p>}{dev.closure&&canReopen&&<Button variant="quiet" disabled={busy||saving||loading||!!pending||!!error||!reopenSource||!Number.isSafeInteger(workspace?.revision)} title={uiText(!reopenSource?'关闭记录无法核对，暂不能恢复':undefined)} onClick={openReopen}>{uiText('恢复开发案')}</Button>}{!dev.closure&&<><Button variant="quiet" onClick={()=>{setClosure({kind:'cancelled',reason:''});setFailure('');setDialog('close');}}>{uiText("取消开发案")}</Button><Button variant="quiet" onClick={()=>{setClosure({kind:'archived',reason:''});setFailure('');setDialog('close');}}>{uiText("归档开发案")}</Button></>}</div></Dialog>
+    <Dialog open={dialog==='reopen'} onClose={()=>!busy&&setDialog(null)} title={uiText('恢复开发案')} footer={<><Button variant="quiet" disabled={busy} onClick={()=>setDialog(null)}>{uiText('取消')}</Button><Button variant="primary" loading={busy} disabled={!canReopen||saving||loading||!!pending||!!error||!reopenForm?.reason.trim()||reopenChanged} onClick={()=>void act('reopen')}>{uiText('确认恢复')}</Button></>}>
+      {(failure||reopenChanged)&&<Banner tone="bad" title={uiText('尚未恢复')}>{uiText(failure||'关闭记录或当前版本已变化，请重新打开窗口核对')}</Banner>}
+      <Field label={uiText('恢复原因')} required full><TextArea aria-label={uiText('恢复原因')} aria-required value={reopenForm?.reason||''} onChange={event=>setReopenForm(previous=>previous?{...previous,reason:event.target.value}:null)} /></Field>
+    </Dialog>
     <Dialog open={dialog==='close'} onClose={()=>!busy&&setDialog(null)} icon={X} tone="warn" title={uiText(closure.kind==='cancelled'?'取消开发案':'归档开发案')} description={uiText("结束后不能再开新一轮、改版或重新打样；已有版本记录保留。")} footer={<><Button variant="quiet" disabled={busy} onClick={()=>setDialog(null)}>{uiText("返回")}</Button><Button variant="primary" loading={busy} disabled={!closure.reason.trim()} onClick={()=>void act('close')}>{uiText(closure.kind==='cancelled'?'确认取消':'确认归档')}</Button></>}>
       {failure&&<Banner tone="bad" title={uiText("尚未保存")}>{failure}</Banner>}
       <Field label={uiText("原因")} required full><TextArea value={closure.reason} onChange={event=>setClosure(previous=>({...previous,reason:event.target.value}))} /></Field>
