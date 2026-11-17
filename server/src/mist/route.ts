@@ -319,7 +319,7 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   }));
   router.get('/workspaces/:id/agent/objects/:type/:objectId', run(async (req, res) => {
     const { workspace, actor: current } = await repository.getForAgent(actor(req), req.params.id);
-    const result={ workspace: { id: workspace.id, name: workspace.name, revision: workspace.revision }, object: agentGet(workspace.state, current, req.params.type, req.params.objectId) };await repository.recordAgentTaskRead(actor(req),req.params.id,result);res.json(result);
+    const result={ workspace: { id: workspace.id, name: workspace.name, revision: workspace.revision }, object: agentGet(workspace.state, current, req.params.type, req.params.objectId,workspace) };await repository.recordAgentTaskRead(actor(req),req.params.id,result);res.json(result);
   }));
   router.get('/workspaces/:id/agent/objects/:type/:objectId/related', run(async (req, res) => {
     const { workspace, actor: current } = await repository.getForAgent(actor(req), req.params.id);

@@ -9,6 +9,7 @@ import type { PermissionScope } from '../_shared/rolePermissionMatrix';
 import type { MistState } from '../shared/mistWorkspace';
 import { emailSendEffectiveStatus, emailSendRecipients } from '../shared/mistEmail';
 import { developmentReopenSource } from '../shared/mistDevelopmentLifecycle';
+import {agentCommandSources,unavailableCommandSources,type AgentGetContext,type AgentCommandSources} from './agentReadCommandSources';
 import { MistApiError } from './errors';
 
 type ObjectType = { type: string; label: string; scope: PermissionScope; path: string[]; view: string; section?: string; linkId?: (row: any) => string | undefined; /** Rows that live inside parent records (generated documents) are flattened here instead of walked by `path`. */ flatten?: (state: MistState) => any[] };
@@ -237,15 +238,18 @@ function developmentReadMetadata(state:MistState,row:any):{reopenSource:{closure
   const source=developmentReopenSource(state,row),exact=(value:unknown):value is string=>typeof value==='string'&&!!value&&value===value.trim()&&value.length<=200&&!value.startsWith('data:');
   return{reopenSource:source&&exact(source.closureId)&&(source.expectedVersionId===null||exact(source.expectedVersionId))?{closureId:source.closureId,expectedVersionId:source.expectedVersionId}:null};
 }
-export function agentGet(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown):ReturnType<typeof ref>&{data:Record<string,unknown>;truncated:boolean;readHint?:string;attachments?:Array<{fileId:string;name:string;mimeType:string;size:number}>;attachmentsTotal?:number;reopenSource?:{closureId:string;expectedVersionId:string|null}|null} {
+export function agentGet(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown,context:AgentGetContext={}):ReturnType<typeof ref>&AgentCommandSources&{data:Record<string,unknown>;truncated:boolean;readHint?:string;attachments?:Array<{fileId:string;name:string;mimeType:string;size:number}>;attachmentsTotal?:number;reopenSource?:{closureId:string;expectedVersionId:string|null}|null} {
   const { type, row } = find(state, actor, typeName, id);
   const files=attachmentsOf(state,row);
   // Keep computed IDs outside data and preserve its existing source-fingerprint contract.
   // Computed identity consumes the existing record budget instead of enlarging it.
-  const metadata=type.type==='development'?developmentReadMetadata(state,row):{};
-  const dataLimit=type.type==='development'?GET_LIMIT-(JSON.stringify({data:null,...metadata}).length-4):GET_LIMIT;
+  const existing=type.type==='development'?developmentReadMetadata(state,row):{};
+  const commandSources=agentCommandSources(state,actor,type.type,row,context);
+  let metadata={...existing,...commandSources},metadataIncomplete=false;
+  if(JSON.stringify({data:{id:row.id},...metadata}).length>GET_LIMIT){metadata={...existing,...unavailableCommandSources(commandSources)};metadataIncomplete=true;}
+  const dataLimit=Object.keys(metadata).length?GET_LIMIT-(JSON.stringify({data:null,...metadata}).length-4):GET_LIMIT;
   const complete=completeDataWithinLimit(row,dataLimit);
-  if(complete)return{...ref(type,row),...metadata,data:complete,truncated:false,...files};
+  if(complete)return{...ref(type,row),...metadata,data:complete,truncated:metadataIncomplete,...(metadataIncomplete?{readHint:'命令来源资料超出单次读取范围；当前结果不完整，请交本人核对。'}:{}),...files};
   const mail=['email','email_draft','email_send'].includes(type.type);
   let data = compact(row, mail ? 5 : 3) as Record<string, unknown>;
   if(mail&&typeof row.body==='string')data.body=row.body.slice(0,10_000);
@@ -256,6 +260,7 @@ export function agentGet(state: MistState, actor: TokenPayload, typeName: unknow
     text = JSON.stringify(data);
   }
   if (text.length > dataLimit) { data = summary(row);if(type.type==='email_send')Object.assign(data,{recipientCounts:row.recipientCounts,attemptCount:row.attemptCount,latestAttempt:compact(row.latestAttempt,3)}); }
+  if(JSON.stringify(data).length>dataLimit)data=JSON.stringify({id:row.id}).length<=dataLimit?{id:row.id}:{};
   return { ...ref(type, row), ...metadata, data, truncated:true,readHint:'超出单次读取范围；当前结果不完整，请读取关联明细或交本人核对。',...files };
 }
 
