@@ -26,6 +26,7 @@ export const AGENT_OBJECT_TYPES: ObjectType[] = [
   { type: 'dev_version', label: '开发版本', scope: 'products:read', path: ['versions'], view: 'development/detail', linkId: r => r.devId },
   { type: 'product', label: '产品档案', scope: 'products:read', path: ['market', 'products'], view: 'products' },
   { type: 'sample', label: '样品', scope: 'products:read', path: ['fulfillment', 'samples'], view: 'samples' },
+  { type: 'sample_movement', label: '样品流转', scope: 'products:read', path: ['fulfillment', 'sampleMovements'], view: 'samples', linkId:r=>r.sampleId },
   { type: 'quotation', label: '报价', scope: 'quotations:read', path: ['market', 'quotations'], view: 'quotations' },
   { type: 'supplier', label: '供应商', scope: 'suppliers:read', path: ['market', 'suppliers'], view: 'suppliers' },
   { type: 'purchase', label: '采购合同', scope: 'procurement:read', path: ['fulfillment', 'purchases'], view: 'procurement' },
@@ -253,7 +254,7 @@ export function agentRelated(state: MistState, actor: TokenPayload, typeName: un
   const { type, row } = find(state, actor, typeName, id);
   const idsOf = (r: any): string[] => Object.entries(r).flatMap(([k, v]) => !/(Id|Ids)$/.test(k) ? [] : typeof v === 'string' && v ? [v] : Array.isArray(v) ? v.filter(x => typeof x === 'string') : []);
   // 明细行里的引用也算（如票据 lines[].purchaseId、付款申请 lines[].billId），只展开一层。
-  const scalarRefs = (r: any) => new Set([...idsOf(r), ...Object.values(r).flatMap(v => Array.isArray(v) ? v.filter(x => x && typeof x === 'object' && !Array.isArray(x)).flatMap(idsOf) : [])]);
+  const scalarRefs = (r: any) => new Set([...idsOf(r), ...(r.source?.kind==='developmentIncoming'&&typeof r.source.devId==='string'?[r.source.devId]:[]), ...Object.values(r).flatMap(v => Array.isArray(v) ? v.filter(x => x && typeof x === 'object' && !Array.isArray(x)).flatMap(idsOf) : [])]);
   const own = scalarRefs(row);
   const results: Array<ReturnType<typeof ref> & { relation: 'references' | 'referenced_by' }> = [];
   let total = 0;
