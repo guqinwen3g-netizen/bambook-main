@@ -1,6 +1,9 @@
 import {incomingProposalDetails} from './incomingProposalDetails';
 import {developmentTaskProposalDetails} from './developmentTaskProposalDetails';
 import {shippingSampleProposalDetails} from './shippingSampleProposalDetails';
+import {commercialSampleProposalDetails} from './commercialSampleProposalDetails';
+import {developmentReferenceProposalDetails} from './developmentReferenceProposalDetails';
+import type {DevelopmentReferenceAccess} from '../../../../server/src/shared/mistDevelopmentSampleReferences';
 import type {DevelopmentTaskClosePlan} from '../../../../server/src/shared/mistDevelopmentTaskLifecycle';
 import type {DevelopmentIncomingAccess} from '../../../../server/src/shared/mistDevelopmentIncoming';
 import {customerCommandChangesCredit} from '../../../../server/src/shared/mistCustomerFieldAuthority';
@@ -12,7 +15,7 @@ import { businessDate,businessNow } from '../runtime/businessClock';
 import { Banner, Button, Dialog, Field, KeyValue, PasswordInput, Pill, SignaturePad, TextArea, type SignatureValue } from '../../../../components/mist';
 import { commandRequiresSignature } from '../runtime/signatureRules';
 import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../server/src/shared/mistAgentProposals';
-import type { MistCommand, MistState } from '../../../../server/src/shared/mistWorkspace';
+import type { MistCommand, MistState, MistWorkspaceEnvelope } from '../../../../server/src/shared/mistWorkspace';
 import type { OrderGovernanceInput } from '../../../../server/src/shared/mistOrderGovernance';
 import { reviewEmailAnalysis } from '../../../../server/src/shared/mistEmailReview';
 import { emailLinkTarget } from '../../../../server/src/shared/mistEmail';
@@ -239,8 +242,8 @@ export function proposalAccountRows(command: AgentProposal['command'], state?: M
  * 本人确认 Agent 提议：确认后由服务端按本人身份执行提议里的原命令（完整权限与业务校验），失败时提议保持待确认。
  * 中、高风险都列出将要执行的具体内容；高风险另须本人密码。拒绝只记录结论，不改业务。
  */
-export function AgentProposalDialog({ proposal, state, incomingAccess, taskClosePlans, canConfirmShippingBasis = false, scopeKey = '', onClose, run, onDone, onRejection }: {
-  proposal: AgentProposal | undefined; state?: MistState | null; incomingAccess?:DevelopmentIncomingAccess; taskClosePlans?:Record<string,DevelopmentTaskClosePlan>; canConfirmShippingBasis?:boolean; scopeKey?: string; onClose: () => void; run: (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string } }) => Promise<unknown>; onDone: (message: string) => void; onRejection?: (message: string) => void;
+export function AgentProposalDialog({ proposal, state, incomingAccess, referenceAccess, taskClosePlans, commercialSampleLoanSources, canConfirmShippingBasis = false, scopeKey = '', onClose, run, onDone, onRejection }: {
+  proposal: AgentProposal | undefined; state?: MistState | null; incomingAccess?:DevelopmentIncomingAccess; referenceAccess?:DevelopmentReferenceAccess; taskClosePlans?:Record<string,DevelopmentTaskClosePlan>; commercialSampleLoanSources?:MistWorkspaceEnvelope['commercialSampleLoanSources']; canConfirmShippingBasis?:boolean; scopeKey?: string; onClose: () => void; run: (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string } }) => Promise<unknown>; onDone: (message: string) => void; onRejection?: (message: string) => void;
 }) {
   const [note, setNote] = React.useState(''), [busy, setBusy] = React.useState(false), [failure, setFailure] = React.useState(''), [password, setPassword] = React.useState(''), [signature, setSignature] = React.useState<SignatureValue | null>(null);
   const [pendingFailure,setPendingFailure]=React.useState(false),failureRef=React.useRef<HTMLDivElement>(null),alive=React.useRef(true);
@@ -250,7 +253,7 @@ export function AgentProposalDialog({ proposal, state, incomingAccess, taskClose
   React.useLayoutEffect(()=>{if(failure)failureRef.current?.scrollIntoView?.({block:'nearest'});},[failure]);
   React.useEffect(() => { setNote(''); setFailure(''); setPassword(''); setSignature(null);setPendingFailure(false);setBusy(false); }, [proposal?.id,scopeKey]);
   const incoming=proposal?incomingProposalDetails(proposal.command,state,incomingAccess,businessNow().toISOString()):null;
-  const sourceReview=proposal?(developmentTaskProposalDetails(proposal.command,state,taskClosePlans)||shippingSampleProposalDetails(proposal.command,state,canConfirmShippingBasis)):null;
+  const sourceReview=proposal?(developmentReferenceProposalDetails(proposal.command,state,referenceAccess,businessNow().toISOString())||commercialSampleProposalDetails(proposal.command,state,commercialSampleLoanSources,canConfirmShippingBasis,businessNow().toISOString())||developmentTaskProposalDetails(proposal.command,state,taskClosePlans)||shippingSampleProposalDetails(proposal.command,state,canConfirmShippingBasis)):null;
   const sourceBasis=React.useRef({key:'',fingerprint:''}),sourceKey=scopeKey+':'+proposal?.id;
   if(sourceBasis.current.key!==sourceKey)sourceBasis.current={key:sourceKey,fingerprint:''};
   if(sourceReview&&!sourceReview.reason&&!sourceBasis.current.fingerprint)sourceBasis.current.fingerprint=sourceReview.fingerprint;

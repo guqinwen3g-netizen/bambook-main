@@ -6,6 +6,9 @@ import {MistRoot} from '../../../../components/mist';
 import {createMistState} from '../../../../server/src/shared/mistWorkspace';
 import {shippingSampleSourceSnapshot} from '../../../../server/src/shared/mistShipmentSampleCustody';
 import {AgentProposalDialog} from './AgentProposalDialog';
+import {developmentReferenceFixture} from '../../../../server/src/shared/__tests__/utils/developmentReferences';
+import {stockDepartureAtomicFixture} from '../../../../server/src/mist/__tests__/stockDepartureAtomic';
+import {commercialSampleLoanSources} from '../../../../server/src/shared/mistCommercialSampleLoan';
 
 function taskFixture(){
  const state=createMistState({id:()=>crypto.randomUUID(),now:'2026-11-18T04:00:00Z',actorName:'业务员'},'empty');
@@ -47,4 +50,25 @@ it('uses actual shipping write authority rather than the proposal claim',()=>{
 });
 it('does not silently rebind a reviewed shipping proposal when physical custody changes',()=>{
  const f=shippingFixture(),props={...f,canConfirmShippingBasis:true},m=mounted(props);try{expect(m.button('确认执行').disabled).toBe(false);f.state.fulfillment.samples[0].positions=[{location:'A02',available:4}];m.render(props);expect(m.button('确认执行').disabled).toBe(true);expect(m.button('拒绝').disabled).toBe(false);}finally{m.close();}
+});
+it('reviews a reference with its original business specimen and blocks lost authority without blocking rejection',()=>{
+ const f=developmentReferenceFixture(),referenceAccess={readableDevIds:[f.devId],writableDevIds:[f.devId],writableSampleIds:[f.sampleId],referencesByDev:{[f.devId]:[]}};
+ const proposal:any={id:'reference-proposal',ownerId:'sales',owner:'业务员',createdAt:f.ctx.now,state:'pending',summary:['technical sampleId '+f.sampleId],command:{type:'development.reference.add',payload:{devId:f.devId,sampleId:f.sampleId,purpose:'仅作颜色手感对照，不裁切',fileIds:['reference-original']}}};
+ const props={state:f.state,proposal,referenceAccess},m=mounted(props);
+ try{expect(m.button('确认执行').disabled).toBe(false);expect(m.host.textContent).toContain('棉斜纹');expect(m.host.textContent).toContain('仅作颜色手感对照，不裁切');expect(m.host.textContent).not.toContain('technical sampleId');expect(m.host.textContent).not.toContain('reference-original');
+  m.render({...props,referenceAccess:{...referenceAccess,writableSampleIds:[]}});expect(m.button('确认执行').disabled).toBe(true);expect(m.button('拒绝').disabled).toBe(false);
+ }finally{m.close();}
+});
+it('pins reference source facts across a rendered proposal instead of silently accepting changed physical quantity',()=>{
+ const f=developmentReferenceFixture(),referenceAccess={readableDevIds:[f.devId],writableDevIds:[f.devId],writableSampleIds:[f.sampleId],referencesByDev:{[f.devId]:[]}},proposal:any={id:'reference-pin',ownerId:'sales',owner:'业务员',createdAt:f.ctx.now,state:'pending',summary:['引用实物'],command:{type:'development.reference.add',payload:{devId:f.devId,sampleId:f.sampleId,purpose:'参考颜色',fileIds:[]}}};
+ const props={state:f.state,proposal,referenceAccess},m=mounted(props);try{expect(m.button('确认执行').disabled).toBe(false);f.sample().available-=.25;m.render(props);expect(m.button('确认执行').disabled).toBe(true);expect(m.button('拒绝').disabled).toBe(false);}finally{m.close();}
+});
+it('uses the current commercial action capsule in unified review and keeps rejection available after its loss',()=>{
+ const f=stockDepartureAtomicFixture(),state=f.f.state,sample=state.fulfillment.samples.find(s=>s.id===f.sampleId)!;
+ state.members=[{userId:'borrower-private',name:'借用同事',addedBy:'sales',addedByName:'业务员',addedAt:f.f.context.now}];
+ const commercialSampleLoanSourcesBySample={[sample.id]:commercialSampleLoanSources(state,sample)},proposal:any={id:'commercial-review',ownerId:'sales',owner:'业务员',createdAt:f.f.context.now,state:'pending',summary:['technical commercialSources '+f.stockId],command:{type:'fulfillment.samples.move',payload:{id:sample.id,kind:'lend',quantity:4,borrowerId:'borrower-private',person:'借用同事',location:'A01',note:'整组原物归还'}}};
+ const props={state,proposal,commercialSampleLoanSources:commercialSampleLoanSourcesBySample,canConfirmShippingBasis:true},m=mounted(props);
+ try{expect(m.button('确认执行').disabled).toBe(false);expect(m.host.textContent).toContain(sample.code);expect(m.host.textContent).toContain('M × 1');expect(m.host.textContent).toContain('4 件');expect(m.host.textContent).toContain('借用同事');expect(m.host.textContent).not.toContain(f.stockId);expect(m.host.textContent).not.toContain('technical commercialSources');
+  m.render({...props,commercialSampleLoanSources:undefined});expect(m.button('确认执行').disabled).toBe(true);expect(m.button('拒绝').disabled).toBe(false);
+ }finally{m.close();}
 });

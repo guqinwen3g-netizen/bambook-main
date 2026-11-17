@@ -2,7 +2,9 @@
 import { auditEnglish } from './en-US-audit';
 import {connectionEnglish} from './en-US-connections';
 import { mailReceivingEnglish } from './en-US-mail-receiving';
+import { sampleCustodyEnglish } from './en-US-sample-custody';
 export const reviewedEnglish: Record<string, string> = {
+  ...sampleCustodyEnglish,
   '核对账期': 'Verify payment due date',
   '更正验收日': 'Correct acceptance date',
   '账期核对历史': 'Payment due date history',
