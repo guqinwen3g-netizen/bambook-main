@@ -1110,4 +1110,13 @@ export const reviewedEnglish: Record<string, string> = {
   '当前版本已变化，请重新核对后恢复': 'The current version has changed. Review it before reopening.',
   '开发案尚未结束': 'This development case is still open',
   '请核对当前开发版本': 'Review the current development version',
+  '恢复依据': 'Reopening details',
+  '当前版本': 'Current version',
+  '关闭状态': 'Closure status',
+  '原关闭原因': 'Original closure reason',
+  '本次恢复原因': 'Reason for reopening',
+  '恢复依据已变化或不可见，请重新核对': 'The reopening details have changed or are unavailable. Review them again.',
+  '正在读取开发案，请稍后核对': 'Loading the development case. Review it when loading finishes.',
+  '恢复内容无法完整核对，请重新提交提议': 'The reopening details cannot be fully verified. Submit a new proposal.',
+  '请补全恢复原因后重新提交提议': 'Add a reason for reopening and submit the proposal again.',
 };
