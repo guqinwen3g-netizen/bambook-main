@@ -709,6 +709,22 @@ it('keeps an approved order line readable without exposing closure to a reader',
  permissions.ordersWrite=false;store.state!.orders[0].governance!.status='approved';render();act(()=>getByText(host,'精确金额条目').click());expect(queryByRole(document.body,'button',{name:'按实际完工结案'})).toBeNull();expect(document.body.textContent).toContain('精确金额条目');expect(store.run).not.toHaveBeenCalled();
 });
 
+it('stops active stage guidance for an unfulfilled closed line without inventing delivery',async()=>{
+ lineEditorFixture('approved',4);const order=store.state!.orders[0],line=store.state!.orderLines[0];order.type='fabric';line.unit='码';Object.assign(line,{closure:{id:'closed',status:'closed',quantity:0,ordered:4,min:3.88,max:4.12,reason:'客户撤回',requesterId:'sales',requesterName:'业务员甲',requestedAt:context.now,reviewerIds:['leader']}});
+ render();await act(async()=>getByRole(host,'row',{name:/精确金额条目/}).click());const scope=document.body.querySelector('[data-line-fulfillment]') as HTMLElement,track=getByRole(scope,'navigation',{name:'条目阶段'});
+ expect(track.querySelector('[aria-current]')).toBeNull();expect(track.querySelector('[data-state="now"], [data-state="partial"], [data-state="blocked"]')).toBeNull();expect(track.querySelector('[data-state="done"]')).toBeNull();expect(scope.textContent).not.toContain('当前：');expect(scope.textContent).not.toContain('已完成出运');expect(scope.textContent).toContain('未建采购');expect(scope.querySelector('[data-stage-open]')).toBeNull();
+ expect(getByText(scope,'未排数量').parentElement!.textContent).toContain('4 码');expect(getByText(scope,'已离港').parentElement!.textContent).toContain('0 码');await act(async()=>getByRole(track,'button',{name:/坯布 \/ 染整/}).click());expect(scope.querySelector('[data-stage-open]')).not.toBeNull();expect(scope.textContent).not.toContain('前序阶段完成后解锁');expect(store.run).not.toHaveBeenCalled();expect(getByRole(host,'button',{name:'查看收款核销'})).toBeTruthy();
+});
+
+it.each(['open','pending'] as const)('keeps the real current stage for a %s line',async status=>{
+ lineEditorFixture('approved',4);const order=store.state!.orders[0],line=store.state!.orderLines[0];order.type='fabric';line.unit='码';if(status==='pending')Object.assign(line,{closure:{id:'pending',status:'pending',quantity:0,ordered:4,min:3.88,max:4.12,reason:'客户申请',requesterId:'sales',requesterName:'业务员甲',requestedAt:context.now,reviewerIds:['leader']}});render();await act(async()=>getByRole(host,'row',{name:/精确金额条目/}).click());const scope=document.body.querySelector('[data-line-fulfillment]') as HTMLElement,track=getByRole(scope,'navigation',{name:'条目阶段'});expect(track.querySelectorAll('[aria-current="step"]')).toHaveLength(1);expect(scope.textContent).toContain('当前：坯布 / 染整');expect(scope.querySelector('[data-stage-open]')).not.toBeNull();expect(store.run).not.toHaveBeenCalled();
+});
+
+it('keeps real completed source facts and their return available on a closed line',async()=>{
+ lineEditorFixture('approved',4);const order=store.state!.orders[0],line=store.state!.orderLines[0];order.type='fabric';line.unit='码';Object.assign(line,{closure:{id:'closed',status:'closed',quantity:0,ordered:4,min:3.88,max:4.12,reason:'客户撤回',requesterId:'sales',requesterName:'业务员甲',requestedAt:context.now,reviewerIds:['leader']}});store.state!.fulfillment.purchases=[{id:'existing-po',code:'PO-EXACT',orderId,lineId:line.id,kind:'material',state:'approved',quantity:4,received:4}] as any;
+ render();await act(async()=>getByRole(host,'row',{name:/精确金额条目/}).click());const scope=document.body.querySelector('[data-line-fulfillment]') as HTMLElement,track=getByRole(scope,'navigation',{name:'条目阶段'});expect(track.querySelector('[aria-current]')).toBeNull();expect(track.querySelector('[data-state="done"]')!.textContent).toContain('坯布 / 染整');await act(async()=>getByRole(track,'button',{name:/坯布 \/ 染整/}).click());await act(async()=>getByRole(document.body,'button',{name:/查看采购承诺\s*PO-EXACT/}).click());expect(go).toHaveBeenCalledWith('procurement','existing-po',{orderLineId:line.id,section:'order:'+orderId,customerId:order.customerId});expect(store.run).not.toHaveBeenCalled();
+});
+
 it('shows the current business state instead of presenting an old 100-percent field as overall completion',()=>{
  const order=store.state!.orders[0];order.progress=100;order.state='已批准待履约';order.governance!.status='approved';render();expect(host.textContent).not.toContain('整体进度');expect(getByText(host,'当前状态')).toBeTruthy();expect(host.textContent).toContain('已批准待履约');expect(store.run).not.toHaveBeenCalled();
 });

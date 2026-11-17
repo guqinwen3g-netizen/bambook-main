@@ -18,9 +18,10 @@ const SHIP_STATE: Record<string, string> = { preparing: '准备中', ready: '待
 const STATE_LABEL: Record<LineStage['state'], string> = { done: '已完成', now: '进行中', todo: '未开始', blocked: '受阻' };
 
 export function OrderLineFulfillment({ state, order, line, go, onCloseLine }: { state: MistState; order: MistOrder & { governance?: OrderGovernanceFields }; line: MistOrderLine; go: (view: string, id?: string, target?: Record<string, string | undefined>) => void; onCloseLine?: (reason: string) => Promise<unknown> }) {
-  const stages = lineStages(state, order, line), current = currentLineStage(stages), shipping = lineShipping(state, line);
-  const [openKey, setOpenKey] = React.useState(current?.key), [closing, setClosing] = React.useState(false);
+  const stages = lineStages(state, order, line), shipping = lineShipping(state, line);
   const tolerance = lineToleranceStatus(state, order, line), closure = tolerance.closure;
+  const closed=closure?.status==='closed',current=closed?null:currentLineStage(stages);
+  const [openKey, setOpenKey] = React.useState(current?.key), [closing, setClosing] = React.useState(false);
   React.useEffect(() => setOpenKey(current?.key), [line.id, current?.key]);
   const open = stages.find(stage => stage.key === openKey) || current;
   const factories = [...new Set(state.productions.filter(job => job.lineId === line.id && !job.closed).map(job => job.factory))];
@@ -40,13 +41,13 @@ export function OrderLineFulfillment({ state, order, line, go, onCloseLine }: { 
     ]} />
     <div className="mist-col" style={{ gap: 8 }}>
       {closure && <Banner variant="status" tone={closure.status === 'closed' ? 'ok' : closure.status === 'pending' ? 'warn' : 'bad'} title={uiText(closure.status === 'closed' ? '条目已结案' : closure.status === 'pending' ? '结案待审批' : '结案申请已退回')}><span data-line-closure={closure.status}>{closureLabel(closure)}</span>{closure.status !== 'rejected' && <span className="mist-note">{uiText(" · 不能再建出运或改数量；")}{CLOSE_SETTLEMENT_HINT}</span>}</Banner>}
-      <div className="mist-row"><b className="mist-h3">{uiText("阶段轨迹")}</b><span className="mist-spacer" />{orderLocked(order)?<Pill tone="neutral">{order.state}</Pill>:current ? <Pill tone={current.state === 'blocked' ? 'bad' : 'accent'}>{uiText("当前：")}{uiText(current.label)}</Pill> : <Pill tone="ok">{uiText("已完成出运")}</Pill>}</div>
+      <div className="mist-row"><b className="mist-h3">{uiText("阶段轨迹")}</b><span className="mist-spacer" />{closed?<Pill tone="neutral">{uiText('条目已结案')}</Pill>:orderLocked(order)?<Pill tone="neutral">{order.state}</Pill>:current ? <Pill tone={current.state === 'blocked' ? 'bad' : 'accent'}>{uiText("当前：")}{uiText(current.label)}</Pill> : <Pill tone="ok">{uiText("已完成出运")}</Pill>}</div>
       <nav className="mist-line-track" aria-label={uiText("条目阶段")} style={{ ['--mist-steps' as string]: stages.length }}>
-        {stages.map(stage => <button key={stage.key} type="button" data-state={stage.state === 'todo' ? undefined : stage.state === 'now' && stage.key !== current?.key ? 'partial' : stage.state} aria-current={stage.key === current?.key ? 'step' : undefined} aria-pressed={stage.key === open?.key} onClick={() => setOpenKey(stage.key)}><b>{uiText(stage.label)}</b><small>{stage.caption || STATE_LABEL[stage.state]}</small></button>)}
+        {stages.map(stage => <button key={stage.key} type="button" data-state={closed?(stage.state==='done'?'done':undefined):stage.state === 'todo' ? undefined : stage.state === 'now' && stage.key !== current?.key ? 'partial' : stage.state} aria-current={stage.key === current?.key ? 'step' : undefined} aria-pressed={stage.key === open?.key} onClick={() => setOpenKey(stage.key)}><b>{uiText(stage.label)}</b><small>{stage.caption || (closed&&stage.state!=='done'?uiText('未完成'):STATE_LABEL[stage.state])}</small></button>)}
       </nav>
       {open && <div className="mist-col" style={{ gap: 6 }} data-stage-open={open.key}>
-        {open.state === 'blocked' ? <Banner variant="notice" tone="bad" title={ui`${open.label}受阻`} actions={sourceTarget(open) && <Button onClick={sourceTarget(open)!}>{uiText("去处理")}</Button>}>{open.reason}</Banner>
-          : <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><span className="mist-note">{uiText(open.label)} · {STATE_LABEL[open.state]}{uiText(open.caption ? ` · ${open.caption}` : '')}{uiText(open.key !== current?.key && open.state === 'todo' ? '（前序阶段完成后解锁）' : '')}</span><span className="mist-spacer" />{sourceTarget(open) && <Button variant="quiet" onClick={sourceTarget(open)!}>{uiText("查看来源记录")}</Button>}</div>}
+        {open.state === 'blocked'&&!closed ? <Banner variant="notice" tone="bad" title={ui`${open.label}受阻`} actions={sourceTarget(open) && <Button onClick={sourceTarget(open)!}>{uiText("去处理")}</Button>}>{open.reason}</Banner>
+          : <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><span className="mist-note">{uiText(open.label)} · {closed?uiText(open.state==='done'?'已完成':'未完成'):STATE_LABEL[open.state]}{uiText(open.caption ? ` · ${open.caption}` : '')}{uiText(!closed&&open.key !== current?.key && open.state === 'todo' ? '（前序阶段完成后解锁）' : '')}</span><span className="mist-spacer" />{(!closed||open.target?.id)&&sourceTarget(open) && <Button variant="quiet" onClick={sourceTarget(open)!}>{uiText("查看来源记录")}</Button>}</div>}
       </div>}
     </div>
     <DetailBlock title={uiText("分批与尾数")}>
