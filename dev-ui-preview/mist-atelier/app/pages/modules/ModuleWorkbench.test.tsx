@@ -3,7 +3,7 @@ import React,{act} from 'react';
 import {readFileSync} from 'node:fs';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
-import {getByRole,queryByRole,getByText,getAllByText,queryByText} from '@testing-library/dom';
+import {getAllByRole,getByRole,queryByRole,getByText,getAllByText,queryByText} from '@testing-library/dom';
 import {Button,Card,MistRoot,ToastProvider,type Column} from '../../../../../components/mist';
 import {readDevice,writeDevice} from '../../runtime/devicePreferences';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
@@ -43,6 +43,9 @@ it.each([true,false])('keeps missing workspace data distinct from an empty ledge
 });
 it('does not identify a supplied old record as a current detail before its workspace is read',async()=>{
  bridge.workspace.state=null;bridge.workspace.error='服务读取失败';bridge.route={view:'test-ledger',id:'row-a'};await mount();expect(host.textContent).not.toContain('记录甲');expect(host.textContent).not.toContain('未找到这条记录');expect(host.querySelector('[data-testid="exact-detail"]')).toBeNull();expect(queryByRole(host,'button',{name:'执行当前记录',exact:true})).toBeNull();
+});
+it('locks both create entries on a known empty ledger while another operation is saving, and during refresh',async()=>{
+ const spec=editor(),empty=()=><MistRoot><ToastProvider><ModuleWorkbench title="业务台账" rows={[]} columns={columns} create={spec}/></ToastProvider></MistRoot>;bridge.workspace.saving=true;await mount();await act(async()=>root!.render(empty()));expect(getAllByRole(host,'button',{name:'新建',exact:true})).toHaveLength(2);expect(getAllByRole(host,'button',{name:'新建',exact:true}).every(button=>(button as HTMLButtonElement).disabled)).toBe(true);bridge.workspace.saving=false;bridge.workspace.loading=true;await act(async()=>root!.render(empty()));expect(getAllByRole(host,'button',{name:'新建',exact:true}).every(button=>(button as HTMLButtonElement).disabled)).toBe(true);bridge.workspace.loading=false;await act(async()=>root!.render(empty()));expect(getAllByRole(host,'button',{name:'新建',exact:true}).every(button=>!(button as HTMLButtonElement).disabled)).toBe(true);
 });
 async function click(name:string){await act(async()=>getByRole(document.body,'button',{name}).click());}
 async function fill(name:string,value:string,role:'textbox'|'spinbutton'|'combobox'='textbox'){const input=getByRole(document.body,role,{name}) as HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement;await act(async()=>{const prototype=input.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:input.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(prototype,'value')!.set!.call(input,value);input.dispatchEvent(new Event(input.tagName==='SELECT'?'change':'input',{bubbles:true}));});return input;}
