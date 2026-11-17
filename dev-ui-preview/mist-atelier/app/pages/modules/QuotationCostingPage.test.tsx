@@ -300,6 +300,9 @@ it("does not manufacture snapshots or another line for a missing exact target", 
   expect(host.textContent).not.toContain("供应商成品单价");
   expect(bridge.w.run).not.toHaveBeenCalled();
 });
+it.each(['line','history'])('distinguishes an unread costing %s source from an absent record',kind=>{
+ if(kind==='history')route.section='cost-history';bridge.w.state=null;bridge.w.error='读取失败';render();expect(host.textContent).toContain('报价资料未读取');expect(host.textContent).not.toContain('未找到指定报价条目');expect(host.textContent).not.toContain('本报价尚无核算历史');if(kind==='history')expect(host.textContent).toContain('报价核算历史');expect(bridge.w.run).not.toHaveBeenCalled();
+});
 it("keeps sent quote or unauthorized role read-only", () => {
   q().status = "Sent";
   render();

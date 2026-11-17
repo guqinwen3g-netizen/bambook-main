@@ -486,7 +486,7 @@ export function QuotationCostingPage() {
   if (!q || !line)
     return (
       <MistPage>
-        <PageHeader title={uiText("报价条目核算")} />
+        <PageHeader title={uiText(route.section === "cost-history" ? "报价核算历史" : "报价条目核算")} />
         {w.error && (
           <FailureNotice title={"读取失败"} detail={w.error} retry={() =>
                   void w.refresh().catch((e) => {
@@ -497,8 +497,7 @@ export function QuotationCostingPage() {
           <FailureNotice title={"重试未完成"} detail={failure} />
         )}
         <EmptyState
-          title={uiText(w.loading ? "正在读取准确条目" : "未找到指定报价条目")}
-          description={uiText(w.error || "不猜配其他产品或报价行。")}
+          title={uiText(w.loading ? route.section === "cost-history" ? "正在读取报价资料" : "正在读取准确条目" : !w.state ? "报价资料未读取" : "未找到指定报价条目")}
           action={<Button onClick={back}>{uiText("返回报价")}</Button>}
         />
       </MistPage>

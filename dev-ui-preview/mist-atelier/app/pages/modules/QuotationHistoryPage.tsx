@@ -112,8 +112,7 @@ export function QuotationHistoryPage() {
           <FailureNotice title={"读取未完成"} detail={w.error} retry={() => void retry()} retryLabel="重试读取" />
         )}
         <EmptyState
-          title={uiText("未找到指定报价条目")}
-          description={uiText("不自动匹配首条产品，也不打开其他报价。")}
+          title={uiText(w.state ? "未找到指定报价条目" : "报价资料未读取")}
           action={<Button onClick={back}>{uiText("返回报价")}</Button>}
         />
         {failure && (

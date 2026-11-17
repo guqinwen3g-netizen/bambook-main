@@ -367,3 +367,6 @@ it("retries a real read error rather than hiding it as empty data", async () => 
   await click("重试读取");
   expect(host.textContent).toContain("retry failed");
 });
+it('does not classify an unread feedback source as missing or corrected',()=>{
+ bridge.w.state=null;bridge.w.error='读取失败';render();expect(host.textContent).toContain('报价资料未读取');expect(host.textContent).not.toContain('未找到指定报价或被更正反馈');expect(bridge.w.run).not.toHaveBeenCalled();
+});

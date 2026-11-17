@@ -312,7 +312,7 @@ export function QuotationFeedbackPage() {
           <FailureNotice title={"读取失败"} detail={w.error} retry={() => void retry()} retryLabel="重试读取" />
         )}
         <EmptyState
-          title={uiText(w.loading ? "正在读取准确报价" : "未找到指定报价或被更正反馈")}
+          title={uiText(w.loading ? "正在读取准确报价" : !w.state ? "报价资料未读取" : "未找到指定报价或被更正反馈")}
           action={<Button onClick={back}>{uiText("返回报价")}</Button>}
         />
       </MistPage>

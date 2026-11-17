@@ -118,6 +118,9 @@ it('order detail renders only its own lines and does not invent a fallback order
   expect(host.textContent).toContain('本单产品'); expect(host.textContent).not.toContain('其他单产品');
   render(<OrderDetailPage />, { view: 'orders/detail', id: 'missing' }); expect(host.textContent).toContain('没有找到此订单'); expect(host.textContent).not.toContain('SO-A');
 });
+it('does not classify an unread order detail as a missing order',()=>{
+ store.state=null;store.error='读取失败';render(<OrderDetailPage/>,{view:'orders/detail',id:'order-a'});expect(host.textContent).toContain('订单资料未读取');expect(host.textContent).not.toContain('没有找到此订单');expect(host.textContent).not.toContain('订单可能已移除');expect(store.run).not.toHaveBeenCalled();
+});
 it('waits for the checklist acknowledgement and leaves data unchanged on rejection', async () => {
   const pending = deferred<unknown>(); store.run.mockReturnValue(pending.promise);
   render(<><OrderDetailPage /><ShellFailures /></>, { view: 'orders/detail', id: 'order-a' });

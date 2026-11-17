@@ -275,7 +275,7 @@ export function OrderDetailPage() {
     } },
     { key: 's', header: '小计', width: '90px', align: 'right' as const, render: (line: MistOrderLine) => <b className="mist-cell-strong mist-num">{amountLabel(internal&&!line.price?null:lineAmounts.get(line.id))}</b> },
   ];
-  if (!order) return <MistPage><BackLink onClick={() => go('orders')}>{uiText("订单管理")}</BackLink><Banner tone={error ? 'bad' : 'neutral'} title={uiText(loading ? '正在读取订单' : '没有找到此订单')} actions={<Button onClick={() => void refresh()}>{uiText("重新读取")}</Button>}>{error || (loading ? '请稍候' : '订单可能已移除，请返回订单列表。')}</Banner></MistPage>;
+  if (!order) return <MistPage><BackLink onClick={() => go('orders')}>{uiText("订单管理")}</BackLink><Banner tone={error ? 'bad' : 'neutral'} title={uiText(loading ? '正在读取订单' : !state ? '订单资料未读取' : '没有找到此订单')} actions={<Button onClick={() => void refresh()}>{uiText("重新读取")}</Button>}>{error || undefined}</Banner></MistPage>;
   const lateDays = !locked && order.due && order.state !== '已出运' && (order.progress ?? 0) < 100 ? Math.round((Date.parse(businessToday() + 'T00:00:00Z') - Date.parse(order.due + 'T00:00:00Z')) / 86400000) : 0;
   const replacement=!!order.replacementSource;
   if(route.section==='internal-delivery-new')return <InternalDeliveryCreate key={scope} order={order} onClose={()=>go('orders/detail',order.id,{section:order.type})}/>;
