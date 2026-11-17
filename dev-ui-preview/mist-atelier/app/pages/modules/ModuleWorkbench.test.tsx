@@ -7,7 +7,7 @@ import {getByRole,queryByRole,getByText,getAllByText,queryByText} from '@testing
 import {Button,Card,MistRoot,ToastProvider,type Column} from '../../../../../components/mist';
 import {readDevice,writeDevice} from '../../runtime/devicePreferences';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
-import {ModuleWorkbench,ModuleEditorDialog,ModuleEditorPage,moduleEditorSections,moduleVisibleFields,type ModuleEditorSpec} from './ModuleWorkbench';
+import {ModuleWorkbench,buildModuleXlsxFile,ModuleEditorDialog,ModuleEditorPage,moduleEditorSections,moduleVisibleFields,type ModuleEditorSpec} from './ModuleWorkbench';
 
 const bridge=vi.hoisted(()=>({workspace:null as any,route:{view:'test-ledger'} as any,go:vi.fn()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>bridge.workspace}));
@@ -373,4 +373,26 @@ it('hands full-page editor focus to the current step without stealing input on a
 
 it('translates dialog interface descriptions without translating business input values',async()=>{
  const original=readDevice('locale');try{writeDevice('locale','en-US');const spec:ModuleEditorSpec={title:'解冻往来',description:'Maison Lune · 当前负责人 林澈',initialValues:{reason:'原业务依据保持中文'},fields:[{key:'reason',label:'解冻说明',type:'textarea'}],submit:vi.fn()};host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<MistRoot><ToastProvider><ModuleEditorDialog spec={spec} onClose={vi.fn()}/></ToastProvider></MistRoot>));expect(getByRole(document.body,'dialog',{name:'Restore trading'})).toBeTruthy();expect(document.body.textContent).toContain('Maison Lune · Current owner: 林澈');expect((document.body.querySelector('textarea') as HTMLTextAreaElement).value).toBe('原业务依据保持中文');expect(spec.submit).not.toHaveBeenCalled();}finally{writeDevice('locale',original);}
+});
+
+async function readWorkbookFile(file:File){
+ const bytes=await new Promise<ArrayBuffer>((resolve,reject)=>{const reader=new FileReader();reader.onerror=()=>reject(reader.error);reader.onload=()=>resolve(reader.result as ArrayBuffer);reader.readAsArrayBuffer(file)});
+ const XLSX=await import('xlsx');return XLSX.read(bytes,{type:'array',cellStyles:true});
+}
+it('exports readable customs identifiers, Chinese headers and source metadata as real XLSX column widths',async()=>{
+ const book=await readWorkbookFile(await buildModuleXlsxFile('customs.xlsx',[
+  {name:'申报商品项',headers:['项号','商品编号','商品名称','申报要素','成交数量'],rows:[[1,'6205.20.00.99','棉制男式衬衫','0|0|机织|衬衫|男式|100%棉|无品牌|货号CC-SH-2702',8]]},
+  {name:'表头',headers:['项目','内容'],rows:[['出运','SHP-2026-00007'],['收货人','Cedar & Crown UK distribution'],['净重 kg',4]]},
+ ]));
+ const item=book.Sheets['申报商品项'],header=book.Sheets['表头'];
+ expect(item['!cols']?.[1]?.wch).toBeGreaterThanOrEqual(14);
+ expect(item['!cols']?.[2]?.wch).toBeGreaterThanOrEqual(14);
+ expect(item['!cols']?.[3]?.wch).toBeGreaterThanOrEqual(48);
+ expect(header['!cols']?.[1]?.wch).toBeGreaterThanOrEqual(29);
+ expect(item.B2).toMatchObject({t:'s',v:'6205.20.00.99'});expect(item.E2).toMatchObject({t:'n',v:8});expect(header.B4).toMatchObject({t:'n',v:4});
+});
+it('preserves zero, blanks, numeric amounts and literal formula-like text when formatting XLSX exports',async()=>{
+ const book=await readWorkbookFile(await buildModuleXlsxFile('source.xlsx',[{name:'来源/资料',headers:['文本','数量','金额','可选'],rows:[['=HYPERLINK("https://example.invalid")',0,-12.5,null],['正常资料',4,42,'']]}]));
+ expect(book.SheetNames).toEqual(['来源_资料']);const sheet=book.Sheets[book.SheetNames[0]];
+ expect(sheet.A2).toMatchObject({t:'s',v:"'=HYPERLINK(\"https://example.invalid\")"});expect(sheet.A2.f).toBeUndefined();expect(sheet.B2).toMatchObject({t:'n',v:0});expect(sheet.C2).toMatchObject({t:'n',v:-12.5});expect(sheet.D2?.v||'').toBe('');expect(sheet.C3).toMatchObject({t:'n',v:42});
 });

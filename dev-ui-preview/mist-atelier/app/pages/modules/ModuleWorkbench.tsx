@@ -174,17 +174,20 @@ export function downloadModuleCsv(filename:string,headers:string[],rows:Array<Ar
 export async function buildModuleXlsxFile(filename:string,sheets:Array<{name:string;headers:string[];rows:Array<Array<unknown>>}>):Promise<File>{
   const cell=(input:unknown)=>{if(input==null)return '';if(typeof input==='number')return Number.isFinite(input)?input:'';const value=String(input);return /^[=+@\t\r]/.test(value)||(/^-/.test(value)&&!/^-[\d.]+$/.test(value))?"'"+value:value;};
   const XLSX=await import('xlsx'),book=XLSX.utils.book_new();
-  for(const sheet of sheets)XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([sheet.headers,...sheet.rows.map(row=>row.map(cell))]),sheet.name.replace(/[\\/?*[\]:]/g,'_').slice(0,31)||'Sheet1');
-  const bytes=XLSX.write(book,{type:'array',bookType:'xlsx'});
+  // Count wide characters when sizing raw export columns; do not stringify numbers
+  // or truncate identifiers/content to make them fit. Excel limits column width.
+  const textWidth=(value:unknown)=>String(value??'').split(/\r?\n/).reduce((max,line)=>Math.max(max,Array.from(line).reduce((n,char)=>n+(char==='\t'?4:char.codePointAt(0)!>255?2:1),0)),0);
+  for(const sheet of sheets){
+    const values=[sheet.headers,...sheet.rows.map(row=>row.map(cell))],worksheet=XLSX.utils.aoa_to_sheet(values);
+    worksheet['!cols']=sheet.headers.map((_,index)=>({wch:Math.min(240,values.reduce((max,row)=>Math.max(max,textWidth(row[index])),10)+2)}));
+    XLSX.utils.book_append_sheet(book,worksheet,sheet.name.replace(/[\\/?*[\]:]/g,'_').slice(0,31)||'Sheet1');
+  }
+  const bytes=XLSX.write(book,{type:'array',bookType:'xlsx',cellStyles:true});
   return new File([bytes],filename,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
 }
 export function downloadModuleXlsx(filename:string,sheets:Array<{name:string;headers:string[];rows:Array<Array<unknown>>}>){
-  const cell=(input:unknown)=>{if(input==null)return '';if(typeof input==='number')return Number.isFinite(input)?input:'';const value=String(input);return /^[=+@\t\r]/.test(value)||(/^-/.test(value)&&!/^-[\d.]+$/.test(value))?"'"+value:value;};
   requestGeneratedExport({filename,rowCount:sheets.reduce((n,s)=>n+s.rows.length,0),run:async()=>{
-    const XLSX=await import('xlsx'),book=XLSX.utils.book_new();
-    for(const sheet of sheets)XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([sheet.headers,...sheet.rows.map(row=>row.map(cell))]),sheet.name.replace(/[\\/?*[\]:]/g,'_').slice(0,31)||'Sheet1');
-    const bytes=XLSX.write(book,{type:'array',bookType:'xlsx'});
-    downloadGeneratedBlob(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),filename);
+    downloadGeneratedBlob(await buildModuleXlsxFile(filename,sheets),filename);
   }});
 }
 export function ModuleEditorPage({spec,onClose}:{spec:ModuleEditorSpec;onClose:()=>void}){
