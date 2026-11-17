@@ -63,6 +63,8 @@ export function OrderListPage() {
   const customerId = route.customerId;
   const family = allOrders.filter(order => order.type === tab && (!customerId || order.customerId === customerId));
   const rows = family.filter(order => (approvalFilter==='all'?!isTerminatedOrder(order):approvalOf(order)===approvalFilter) && (status === 'all' || order.state === status) && (!q || `${order.code} ${order.customer} ${order.season}`.toLowerCase().includes(q.toLowerCase())));
+  const filtersActive=!!q||status!=='all'||approvalFilter!=='all';
+  const clearFilters=()=>{setQ('');setStatus('all');setApprovalFilter('all');};
   React.useEffect(() => setPage(1), [tab, q, status, customerId,approvalFilter]);
   const pages = Math.max(1, Math.ceil(rows.length / 20)), currentPage = Math.min(page, pages);
   const active = family.filter(order => approvalOf(order)==='approved' && !['已出运', '履约完成', '已完成', '已取消', '已作废', '待收尾款', '内部交付完成', '已交接'].includes(order.state));
@@ -104,7 +106,7 @@ export function OrderListPage() {
     <Tabs<'garment' | 'fabric'> value={tab} onChange={value=>{setTab(value);setStatus('all');}} options={[{ value: 'garment', label: '成衣订单', count: allOrders.filter(order => order.type === 'garment'&&(!customerId||order.customerId===customerId)).length }, { value: 'fabric', label: '面料订单', count: allOrders.filter(order => order.type === 'fabric'&&(!customerId||order.customerId===customerId)).length }]} />
     <Toolbar><SearchField value={q} onChange={setQ} placeholder={uiText("订单号、客户或季节")} /><Dropdown label={uiText("主单审批")} value={approvalFilter} onChange={setApprovalFilter} options={[{value:'all',label:'全部（不含作废 / 取消）'},{value:'draft',label:'草稿'},{value:'pending',label:'待审批'},{value:'approved',label:'已批准'},{value:'rejected',label:'已退回'},{value:'void',label:'已作废'},{value:'cancelled',label:'已取消'}]}/><Dropdown label={uiText("状态")} value={status} onChange={setStatus} options={[{ value: 'all', label: '全部' }, ...[...new Set(family.map(order => order.state))].map(value => ({ value, label: value }))]} />{customerId && <TextLink onClick={() => go('orders')}>{uiText("清除客户筛选")}</TextLink>}</Toolbar>
     <Card><DataTable density={density} ariaLabel={uiText("订单")} columns={cols} rows={rows.slice((currentPage - 1) * 20, currentPage * 20)} rowKey={order => order.id} loading={loading} onRowClick={order => go('orders/detail', order.id,{customerId,section:tab})}
-      empty={<EmptyState icon={SearchX} title={uiText(q || status !== 'all' ? '没有匹配的订单' : `还没有${tab === 'garment' ? '成衣' : '面料'}订单`)} action={q || status !== 'all' ? <TextLink onClick={() => { setQ(''); setStatus('all'); }}>{uiText("清除筛选")}</TextLink> : canWrite ? <Button icon={Plus} onClick={() => setCreateOpen(true)}>{uiText("新建订单")}</Button> : undefined} />}
+      empty={<EmptyState icon={SearchX} title={uiText(filtersActive ? '没有匹配的订单' : `还没有${tab === 'garment' ? '成衣' : '面料'}订单`)} action={filtersActive ? <TextLink onClick={clearFilters}>{uiText("清除筛选")}</TextLink> : canWrite ? <Button icon={Plus} onClick={() => setCreateOpen(true)}>{uiText("新建订单")}</Button> : undefined} />}
       footer={<><span>{rows.length}{uiText(" 个订单")}</span><Pagination page={currentPage} pages={pages} onChange={setPage} /></>} /></Card>
   </MistPage>;
 }

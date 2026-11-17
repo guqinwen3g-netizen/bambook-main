@@ -82,6 +82,9 @@ it.each([true,false])('does not present an unread order workspace as an empty bu
 it('does not offer order creation in a real empty list to a read-only role',()=>{
  store.canWrite=false;store.state!.orders=[];render(<OrderListPage/>);expect(host.textContent).toContain('还没有成衣订单');expect(queryByRole(host,'button',{name:'新建订单',exact:true})).toBeNull();expect(store.run).not.toHaveBeenCalled();
 });
+it.each([true,false])('treats an empty approval filter as no match and clears all list filters (write %s)',async canWrite=>{
+ store.canWrite=canWrite;render(<OrderListPage/>);await click(getByRole(host,'button',{name:/^主单审批/}));await click(getByRole(document.body,'menuitemradio',{name:'待审批',exact:true}));expect(host.textContent).toContain('没有匹配的订单');expect(host.textContent).not.toContain('还没有成衣订单');const search=getByRole(host,'textbox',{name:'订单号、客户或季节',exact:true})as HTMLInputElement;act(()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(search,'NO-MATCH');search.dispatchEvent(new Event('input',{bubbles:true}));});const first=store.state!.orders.find(o=>o.type==='garment')!;await click(getByRole(host,'button',{name:/^状态/}));await click(getByRole(document.body,'menuitemradio',{name:first.state,exact:true}));expect(host.textContent).toContain('没有匹配的订单');expect(host.textContent).not.toContain('还没有成衣订单');await click(getByRole(host,'button',{name:'清除筛选',exact:true}));expect(search.value).toBe('');expect(getByRole(host,'button',{name:/^主单审批\s*全部/})).toBeTruthy();expect(getByRole(host,'button',{name:/^状态\s*全部$/})).toBeTruthy();expect(host.textContent).toContain(first.code);if(!canWrite)expect(queryByRole(host,'button',{name:'新建订单',exact:true})).toBeNull();expect(store.run).not.toHaveBeenCalled();
+});
 
 it('finishes internal order stages without a shipment reminder or counting completed goods as in transit',()=>{
   const f=internalDeliveryFixture(),id=f.send();
