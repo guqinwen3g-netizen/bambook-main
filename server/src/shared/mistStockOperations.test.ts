@@ -131,8 +131,8 @@ describe('departure issue', () => {
     const f = fixture();
     f.run({ type: 'fulfillment.stock.reserve', payload: { stockId: 's', orderId: 'o2', lineId: 'l2', quantity: 90, purpose: 'SO-2' } });
     const shipment = { id: 'sh', code: 'SHP-1', consignee: '收货人', state: 'departed', lines: [{ orderId: 'o', lineId: 'l', productionId: 'p', quantity: 70 }] } as any;
-    autoIssueForDeparture(f.root, shipment, ctx);
-    expect(f.stock().available).toBe(90);
+    // This in-place helper is used within the outer command transaction; insufficient quantity is an error.
+    expect(()=>autoIssueForDeparture(f.root, shipment, ctx)).toThrow('来源库存可出库数量不足');
   });
   it('uses its own line reservation for the shipment', () => {
     const f = fixture();

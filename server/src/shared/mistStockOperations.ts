@@ -169,7 +169,10 @@ export function autoIssueForDeparture(root: MistState, shipment: FulfillmentShip
     const unit = root.orderLines.find(row => row.id === line.lineId)?.unit;
     const linked = sum(f.stockMovements.filter(m => m.kind === 'issue' && m.shipmentLink?.shipmentId === shipment.id && m.shipmentLink.productionId === branch.id).map(m => stockIssueRemaining(root, m.id)));
     let need = sum([line.quantity, -linked]);
-    const lots = f.stock.filter(s => s.purchaseId === purchase.id && s.orderId === line.orderId && s.lineId === line.lineId && s.unit === unit && s.sourceKind !== 'claimReturn' && s.available > 0).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const sourceStock=f.stock.filter(s=>s.purchaseId===purchase.id&&s.orderId===line.orderId&&s.lineId===line.lineId);
+    // Service/direct supplier handovers without a warehouse source never invent an inventory receipt.
+    if(!sourceStock.length&&!f.receipts.some(r=>r.purchaseId===purchase.id&&r.destination==='warehouse'&&r.quantity>0))continue;
+    const lots = sourceStock.filter(s => s.unit === unit && s.sourceKind !== 'claimReturn' && s.available > 0).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     for (const lot of lots) {
       let allowance = sum([freeQuantity(lot), ...(lot.reservations || []).filter(r => r.orderId === line.orderId && r.lineId === line.lineId).map(reservationOpen)]);
       for (const position of (lot.positions ?? [{ location: lot.location, available: lot.available }]).filter(pos => pos.available > 0).map(pos => ({ ...pos }))) {
@@ -181,6 +184,7 @@ export function autoIssueForDeparture(root: MistState, shipment: FulfillmentShip
         need = sum([need, -take]); allowance = sum([allowance, -take]);
       }
     }
+    if(need>0)fail(`${shipment.code} 来源库存可出库数量不足（尚缺 ${need} ${unit||''}）`,'PRECONDITION');
   }
 }
 /** Days since receipt, for stock age; uses the Beijing business day. */
