@@ -1,3 +1,4 @@
+import {DevelopmentReferenceBacklinks} from '../DevelopmentReferenceBacklinks';
 import {isCalendarDay} from '../../../../../server/src/shared/mistBusinessClock';
 import { sampleUnitAllowsDecimal } from '../../../../../server/src/shared/mistDevelopmentDomain';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
@@ -56,6 +57,7 @@ function ledgerRows(samples: FulfillmentSample[]): LedgerRow[] {
 
 /** Incoming business dates are distinct from immutable recording timestamps. */
 function incomingMovementDay(sample:FulfillmentSample,movement:SampleMovement):string|undefined{
+  if(movement.sampleId===sample.id&&isCalendarDay(movement.referenceTransfer?.occurredAt))return movement.referenceTransfer!.occurredAt;
   if(sample.source.kind!=='developmentIncoming')return;
   const day=movement.kind==='receive'?sample.incoming?.receivedAt:movement.incomingTransfer?.occurredAt;
   return isCalendarDay(day)?day:undefined;
@@ -339,6 +341,7 @@ function SampleDetail({ row, state, day, can, locked, commercialSources, onMove,
       ...(shipment ? [{ label: '出运批次', value: <TextLink onClick={()=>go('shipments',shipment.id,{detail:'full'})}><Mono>{shipment.code}</Mono></TextLink> }] : []),
       ...(row.samples.length===1?[{ label: '登记', value: shortWhen(primary.createdAt) }]:[]),
     ]} />
+    <DevelopmentReferenceBacklinks state={state} sampleIds={row.samples.map(sample=>sample.id)}/>
     <DetailBlock title={uiText(row.shelf === 'fabric' ? '形态与余额' : '数量与位置')}>
       {row.samples.map(sample => { const facts = sampleFacts(state, sample, day); return <div key={sample.id} className="mist-col" data-sample-form={sample.id} role="group" aria-label={sample.code}>
         {row.samples.length>1&&<div className="mist-row"><span className="mist-mono">{sample.code}</span><span className="mist-spacer"/><small className="mist-muted">{shortWhen(sample.createdAt)}</small></div>}
