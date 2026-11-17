@@ -32,6 +32,34 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
+it('makes the exact order operation history readable without inferring links from old prose',async()=>{
+ const state=store.state!,peer={...state.orders[0],id:'split-peer',code:'SO-PEER'};state.orders.push(peer);
+ state.events.push({id:'old-split',entityType:'order',entityId:orderId,actor:'原业务员',at:'2026-11-18T04:00:00Z',text:'拆分订单：A 4 件移至 SO-PEER；按批次交付',fileIds:[]});
+ state.events.push({id:'unrelated',entityType:'order',entityId:peer.id,actor:'另一业务员',at:'2026-11-18T04:00:00Z',text:'另一订单的内部记录',fileIds:[]});
+ render();await act(async()=>getByRole(host,'button',{name:'订单记录',exact:true}).click());
+ expect(host.textContent).toContain('原业务员');expect(host.textContent).toContain('A 4 件移至 SO-PEER；按批次交付');expect(host.textContent).not.toContain('另一订单的内部记录');
+ expect(queryByRole(host,'button',{name:'去向 SO-PEER',exact:true})).toBeNull();expect(store.run).not.toHaveBeenCalled();
+});
+
+it('links a split destination by its trusted id and the current readable order instead of a code in the reason',async()=>{
+ const state=store.state!,peer={...state.orders[0],id:'split-peer',code:'SO-EXACT',type:'fabric' as const};state.orders.push(peer);
+ state.events.push({id:'new-split',entityType:'order',entityId:orderId,actor:'原业务员',at:'2026-11-18T04:00:00Z',text:'拆分订单：A 4 件；原因提及 SO-DECOY',fileIds:[],orderFlow:{action:'split',sourceOrderId:orderId,targetOrderId:peer.id,lines:[{sourceLineId:'source-line',targetLineId:'copy-line',quantity:4,unit:'件'}]}} as any);
+ permissions.ordersWrite=false;render();await act(async()=>getByRole(host,'button',{name:'订单记录',exact:true}).click());await act(async()=>getByRole(host,'button',{name:'去向 SO-EXACT',exact:true}).click());
+ expect(go).toHaveBeenCalledWith('orders/detail','split-peer',{section:'fabric'});expect(queryByRole(host,'button',{name:'SO-DECOY',exact:true})).toBeNull();expect(store.run).not.toHaveBeenCalled();
+});
+
+it('keeps a generic record but does not expose an invisible or unrelated split counterpart',async()=>{
+ const state=store.state!;state.events.push({id:'hidden-flow',entityType:'order',entityId:orderId,actor:'业务员',at:'2026-11-18T04:00:00Z',text:'拆分订单：A 4 件；按批次交付',fileIds:[],orderFlow:{action:'split',sourceOrderId:orderId,targetOrderId:'hidden-order',lines:[{sourceLineId:'source-line',targetLineId:'hidden-line',quantity:4,unit:'件'}]}} as any);
+ const peer={...state.orders[0],id:'visible-peer',code:'SO-VISIBLE'};state.orders.push(peer);state.events.push({id:'wrong-owner-flow',entityType:'order',entityId:orderId,actor:'业务员',at:'2026-11-18T04:00:00Z',text:'普通记录',fileIds:[],orderFlow:{action:'merge',sourceOrderId:'not-this-order',targetOrderId:peer.id,lines:[{sourceLineId:'a',targetLineId:'a',quantity:4,unit:'件'}]}} as any);
+ render();await act(async()=>getByRole(host,'button',{name:'订单记录',exact:true}).click());expect(host.textContent).toContain('A 4 件；按批次交付');expect(host.textContent).not.toContain('hidden-order');expect(queryByRole(host,'button',{name:/^(来源|去向) /})).toBeNull();expect(go).not.toHaveBeenCalled();
+});
+
+it('opens the exact merge source from the destination history without creating a command',async()=>{
+ const state=store.state!,peer={...state.orders[0],id:'merged-source',code:'SO-SOURCE'};state.orders.push(peer);
+ state.events.push({id:'merge-record',entityType:'order',entityId:orderId,actor:'原业务员',at:'2026-11-18T04:00:00Z',text:'合并条目：A 4 件；统一交付',fileIds:[],orderFlow:{action:'merge',sourceOrderId:peer.id,targetOrderId:orderId,lines:[{sourceLineId:state.orderLines[0].id,targetLineId:state.orderLines[0].id,quantity:4,unit:'件'}]}});
+ render();await act(async()=>getByRole(host,'button',{name:'订单记录',exact:true}).click());await act(async()=>getByRole(host,'button',{name:'来源 SO-SOURCE',exact:true}).click());expect(go).toHaveBeenCalledWith('orders/detail',peer.id,{section:'garment'});expect(store.run).not.toHaveBeenCalled();
+});
+
 it('shows an internal budget without external collection or shipping actions',()=>{
   const order=store.state!.orders[0];order.governance!.contract={...order.governance!.contract,kind:'internal',internalPurpose:'Production supply',receiver:'Garment team'};
   render();expect(host.textContent).toContain('内部预算');expect(host.textContent).not.toContain('合同待收');

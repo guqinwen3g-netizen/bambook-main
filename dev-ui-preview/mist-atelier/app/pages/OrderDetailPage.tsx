@@ -28,6 +28,7 @@ import { OrderBreakdownEditor } from './OrderBreakdownEditor';
 import { OrderChangeImpactList } from './OrderChangeImpactList';
 import { OrderTerminationBanner, OrderTerminationButton, orderLocked } from './OrderTermination';
 import { OrderSplitMerge } from './OrderSplitMerge';
+import { OrderHistory } from './OrderHistory';
 import { fulfillmentProductionQcPassed, fulfillmentProductionFact } from '../../../../server/src/shared/mistFulfillment';
 import { lineShipping, lineStages } from './orderLineTrack';
 import { productionObservation } from '../../../../server/src/shared/mistProductionIntake';
@@ -311,6 +312,7 @@ export function OrderDetailPage() {
         <Card><CardHeader title={uiText("收款")} />{replacement?<KeyValue items={[{label:'客户收款',value:uiText('无需收款')}]}/>:remaining === null ? <Banner variant="notice" tone="warn" title={uiText("待核对订单金额")}>{uiText("金额核对完成后显示收款比例。")}</Banner> : <Donut centerLabel="已收" slices={[{ label: '已确认到账', value: received.total!, display: amountLabel(received.total), color: 'var(--mist-accent)' }, { label: '合同待收', value: remaining, display: amountLabel(remaining), color: 'transparent' }]} caption={<><span className="mist-note">{uiText("已核销 ")}{amountLabel(reconciled.total)} {order.currency}</span><Button variant="quiet" onClick={() => go('payment-vouchers',undefined,{section:'funding:'+order.id,customerId:order.customerId})}>{uiText("查看收款核销")}</Button></>} />}</Card>
       </div>}
     </section>
+    {state&&<OrderHistory state={state} orderId={order.id} go={go}/>}
     {internal&&<InternalDeliveryPanel key={scope} order={order}/>}
     <Drawer open={!!selectedLine} onClose={() => {setLineId(null);go('orders/detail',order.id,{customerId:route.customerId,section:order.type});}} title={uiText(selectedLine?.name ?? '订单条目')} sub={uiText(selectedLine?.style)} size="lg">
       {selectedLine && <div className="mist-col" data-module-detail>{state&&!internal&&<OrderLineFulfillment state={state} order={order} line={selectedLine} go={go} onCloseLine={canWriteOrders&&!locked?reason=>run({type:'order.governance.closeLine',payload:{orderId:order.id,lineId:selectedLine.id,reason}}):undefined}/>}<KeyValue items={[...(state?[{ label: '来源', value: <OrderLineSourceValue state={state} line={selectedLine} go={go}/> }]:[]),...(state&&lineQuotation(state,selectedLine,go)?[{ label: '来源报价', value: <OrderLineQuotationValue state={state} line={selectedLine} go={go}/> }]:[]), { label: '数量', value: `${formatOrderQuantity(selectedLine.qty)} ${selectedLine.unit}` }, { label: '单价', value: `${amountLabel(lineAmounts.get(selectedLine.id) == null ? null : selectedLine.price)} ${order.currency}` }, { label: '小计', value: `${amountLabel(lineAmounts.get(selectedLine.id))} ${order.currency}` }]} />

@@ -1,4 +1,5 @@
 import {heldShipmentRelease} from '../shared/mistRelationHold';
+import {projectOrderFlowEvents} from '../shared/mistOrderFlow';
 import { projectTeamReports } from './teamReportAccess';
 import {financialMaterialCostBasis,type InternalFabricCostBasis} from '../shared/mistInternalFabric';
 import {financialClaimCostBasis,type OrderClaimCostBasis} from '../shared/mistClaimCost';
@@ -309,6 +310,7 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
       next.calendar = (next.calendar || []).filter(item => allowed(item.target));
     }
   }
+  next.events = projectOrderFlowEvents(next.events || [], next.orders || []);
   const restrictedFiles = new Set(scopedHiddenFiles(next));
   // 印章图片只给公司管理员（本机空间为所有者）与该章用印人，Agent 一律不给；用印与签字记录按所涉业务记录裁剪（见 mistSeals）。
   const maintainer = fileMaintainer(actor, ownerId);

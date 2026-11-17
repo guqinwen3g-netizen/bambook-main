@@ -8,6 +8,22 @@ const empty = () => createMistState(context, 'empty');
 const actor = (permissions: string[], userId = 'member'): TokenPayload => ({ userId, roles: [], permissions, authorizationLoaded: true, departmentIds: [] } as TokenPayload);
 const file = (id: string, uploadedBy?: string): MistFile => ({ id, name: id + '.pdf', mimeType: 'application/pdf', size: 10, storageKey: 'space/' + id, createdAt: context.now, uploadedBy });
 
+function orderFlowFixture(){
+ const state=empty();state.orders=[{id:'own',code:'SO-OWN',ownerId:'member',owner:'业务员',type:'fabric'},{id:'peer',code:'SO-PEER',ownerId:'member',owner:'业务员',type:'fabric'}] as any;
+ state.orderLines=[{id:'line',orderId:'own',qty:6,unit:'米',price:9},{id:'copy',orderId:'peer',qty:4,unit:'米',price:9}] as any;
+ state.events=[{id:'flow',entityType:'order',entityId:'own',actor:'业务员',at:context.now,text:'拆分订单：A 4 米；分批',fileIds:[],orderFlow:{action:'split',sourceOrderId:'own',targetOrderId:'peer',lines:[{sourceLineId:'line',targetLineId:'copy',quantity:4,unit:'米'}]}} as any];return state;
+}
+it('removes the whole counterpart packet after row scope hides the other owner without rewriting raw history',()=>{
+ const state=orderFlowFixture();state.orders[1].ownerId='other-owner';const raw=structuredClone(state);
+ const view=projectState(state,actor(['orders:read']),empty,undefined,{userIds:['member'],teamIds:[]}).state;
+ expect(view.orders.map(o=>o.id)).toEqual(['own']);expect(view.orders[0].ownerId).toBe('member');expect(view.events).toHaveLength(1);expect((view.events[0] as any).orderFlow).toBeUndefined();expect(view.events[0].text).toBe(raw.events[0].text);expect(JSON.stringify(view.events)).not.toContain('peer');expect(state).toEqual(raw);
+});
+it('whitelists visible movement facts and does not smuggle price/cost/amount fields through history metadata',()=>{
+ const state=orderFlowFixture(),flow=(state.events[0] as any).orderFlow;flow.cost=717;flow.amount=81;flow.lines[0].price=9;flow.lines[0].supplierCost=7;const raw=structuredClone(state);
+ const view=projectState(state,actor(['orders:read']),empty).state;
+ expect((view.events[0] as any).orderFlow).toEqual({action:'split',sourceOrderId:'own',targetOrderId:'peer',lines:[{sourceLineId:'line',targetLineId:'copy',quantity:4,unit:'米'}]});expect(view.orders.map(o=>o.ownerId)).toEqual(['member','member']);expect(view.fulfillment.purchases).toEqual([]);expect(state).toEqual(raw);
+});
+
 describe('按已有业务查看权限投影，不因成员资格扩大权限', () => {
   it('keeps QC reading independent from writing and withholds QC records when read permission is absent', () => {
     const state = empty();
