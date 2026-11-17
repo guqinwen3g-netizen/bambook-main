@@ -70,6 +70,11 @@ function purchaseFlags(purchase: FulfillmentPurchase, day: string) {
   if (purchase.received > purchase.quantity) flags.push({ key: 'variance', label: `超收 ${round(purchase.received - purchase.quantity)} ${purchase.unit}` });
   return flags;
 }
+function deliveryOnHold(state: MistState | null, purchase: FulfillmentPurchase) {
+  if (!state || !(purchase.kind === 'processing' || purchase.domain === 'garment' && purchase.kind === 'finished')) return false;
+  const branch = state.productions.find(row => row.sourcePurchaseId === purchase.id);
+  return !!branch && !!state.fulfillment.productionFacts?.find(fact => fact.productionId === branch.id)?.hold;
+}
 const round = (value: number) => Math.round(value * 10000) / 10000;
 
 export function ProcurementPage() {
@@ -199,6 +204,7 @@ export function ProcurementPage() {
         field('evidence', '点数与交接依据', 'textarea'), field('files', '送货单 / 码单', 'files', false)],
       initialValues: { quantity: Math.max(0, round(p.quantity - p.received)), rejected: 0, destination: p.kind === 'processing' && !fabricProcessing ? 'supplier' : 'warehouse', location: p.destination, date: today(), evidence: '', files: '', targetProductionId: targets.length === 1 ? targets[0].value : '', warehouseId: warehouses.length === 1 ? warehouses[0].value : '', dyeLot: '', shade: '', rolls: '' },
       submit: values => {
+        if (deliveryOnHold(liveSource.current.state, p)) throw new Error('生产分支已暂停');
         const quantity = number(values, 'quantity'), destination = text(values, 'destination') as 'warehouse' | 'supplier';
         for (const [value,label] of [[quantity,'接收数量'],[number(values,'rejected'),'拒收数量']] as const) {
           const problem=garmentDeliveryQuantityProblem({type:p.domain},p.kind,value,label);if(problem)throw new Error(problem);
@@ -388,6 +394,7 @@ function PurchaseDetail({ purchase: p, state, incoming, day, me, can, canApprove
 }) {
   const stage = purchaseStage(p), flags = purchaseFlags(p, day), processing = p.kind === 'processing';
   const receipts = state.fulfillment.receipts.filter(receipt => receipt.purchaseId === p.id);
+  const held = deliveryOnHold(state, p);
   const stockIds = new Set(state.fulfillment.stock.filter(stock=>stock.purchaseId===p.id).map(stock=>stock.id));
   const disposed = inventory ? state.fulfillment.stockMovements.filter(m=>stockIds.has(m.stockId)&&m.quarantineDisposition&&m.quarantineDisposition.decision!=='release') : [];
   const prepay = purchasePrepaymentReadback(state, p.id);
@@ -411,7 +418,7 @@ function PurchaseDetail({ purchase: p, state, incoming, day, me, can, canApprove
     : p.received > p.quantity ? { tone: 'warn', title: `超收 ${round(p.received - p.quantity)} ${p.unit}`, text: '不接受的部分在收货记录上转为拒收并登记退回；接受的须先变更合同数量，结算以合同金额为上限。' }
     : stage === 'done' ? { tone: 'ok', title: processing ? '已全部回交' : '已全部交付', text: `${p.received} / ${p.quantity} ${p.unit}` }
     : processing && !p.stageTerms?.intermediate && !state.fulfillment.productionFacts?.some(fact => state.productions.some(branch => branch.id === fact.productionId && branch.sourcePurchaseId === p.id) && fact.release) ? { tone: 'accent', title: '待放行', text: '' }
-    : processing && state.fulfillment.productionFacts?.some(fact => state.productions.some(branch => branch.id === fact.productionId && branch.sourcePurchaseId === p.id) && fact.hold) ? { tone: 'warn', title: '已暂停', text: '' }
+    : held ? { tone: 'warn', title: '已暂停', text: '' }
     : { tone: 'accent', title: processing ? '加工中' : '供应履约中', text: `供应商承诺 ${p.supplierConfirmation.confirmedDue}；已${processing ? '回交' : '交付'} ${p.received} / ${p.quantity} ${p.unit}。` };
   const stageBalance = fabricStageBalance(state, p.id), links = fabricStageLinks(state, p.id);
   // A fabric intermediate contract both receives (from the previous step) and sends (to the next step).
@@ -447,7 +454,7 @@ function PurchaseDetail({ purchase: p, state, incoming, day, me, can, canApprove
       { label: '退回修改', icon: Undo2, onClick: () => onDecide('rejected'), hidden: !canReview || stage !== 'pending' },
       { label: '登记合同线下发出', icon: Send, onClick: onSend, primary: !p.offlineSend, reason: writeReason, hidden: !can || p.state !== 'approved' || !!p.offlineSend },
       { label: '登记供应商确认', icon: FileSignature, onClick: onConfirm, primary: true, reason: writeReason, hidden: !can || p.state !== 'approved' || !p.offlineSend || !!p.supplierConfirmation },
-      { label: processing ? '登记加工回交' : '登记本次交付', icon: PackageCheck, onClick: onReceive, primary: !!p.supplierConfirmation && stage !== 'done', reason: writeReason || (!p.offlineSend ? '请先登记合同线下发出和供应商确认' : !p.supplierConfirmation ? '请先登记供应商确认' : false), hidden: !can || p.state !== 'approved' },
+      { label: processing ? '登记加工回交' : '登记本次交付', icon: PackageCheck, onClick: onReceive, primary: !!p.supplierConfirmation && stage !== 'done', reason: writeReason || (!p.offlineSend ? '请先登记合同线下发出和供应商确认' : !p.supplierConfirmation ? '请先登记供应商确认' : held ? '生产分支已暂停' : false), hidden: !can || p.state !== 'approved' },
       { label: processing ? '生成加工合同' : '生成采购单', icon: Download, onClick: onDownload, reason: writeReason, hidden: !can || p.state !== 'approved' },
       { label: '取消合同', icon: Undo2, onClick: onCancel, reason: cancelReason, hidden: !can || p.state !== 'approved' || stage === 'done' || receipts.length > 0 },
       { label: '转给其他供应商', onClick: onTransfer, reason: transferReason, hidden: !can || p.state !== 'approved' || stage === 'done' || receipts.length > 0 },

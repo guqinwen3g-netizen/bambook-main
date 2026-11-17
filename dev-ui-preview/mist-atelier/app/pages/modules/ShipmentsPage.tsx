@@ -59,7 +59,12 @@ function ShipmentEditor({ shipment, onClose, initialDraft, onCheckTerms }: {
     const incomingOrder=state?.orders.find(order=>order.id===sourceOrderId);
     const sourceOrder=incomingOrder&&(!route.customerId||incomingOrder.customerId===route.customerId)?incomingOrder:undefined;
     const invalidSource=hasOrderContext&&!!state&&!sourceOrder;
-    const sourceOptionsForShipment=sourceOptions(state,false).filter(option=>!option.value||option.value.startsWith('production:')&&(!hasOrderContext||!!sourceOrder&&(!!shipment||state?.productions.find(branch=>branch.id===option.value.slice(11))?.orderId===sourceOrder.id)));
+    const heldSources = new Set(shipment ? [] : state?.fulfillment.productionFacts?.filter(fact => fact.hold).map(fact => 'production:' + fact.productionId));
+    const sourceOptionsForShipment = sourceOptions(state, false).filter(option => {
+        if (!option.value) return true;
+        if (!option.value.startsWith('production:') || heldSources.has(option.value)) return false;
+        return !hasOrderContext || !!sourceOrder && (!!shipment || state?.productions.find(branch => branch.id === option.value.slice(11))?.orderId === sourceOrder.id);
+    });
     const [step, setStep] = React.useState(initialDraft?.step??0), [failure, setFailure] = useRouteDraft(''), [busy, setBusy] = React.useState(false);
     const stepRef=useEditorStepFocus(step);
     const stepName=step===0?'来源与数量':step===1?'运输信息':'确认请求';
@@ -93,6 +98,7 @@ function ShipmentEditor({ shipment, onClose, initialDraft, onCheckTerms }: {
     const validate = () => {
         if (!state) throw new Error('公司尚未读取');
         if (invalidSource) throw new Error('指定订单不存在或客户不匹配，不能创建其他订单的出运');
+        if (lines.some(line => heldSources.has(line.source))) throw new Error('生产分支已暂停，请重新选择来源');
         if (!terms) throw new Error('请先为来源订单核对合同收货条款');
         const values = lines.map(row => {
             const src=parseSource(state,row.source);

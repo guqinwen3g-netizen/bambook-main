@@ -378,6 +378,30 @@ function postReceiptFixture(){
   store.state!.fulfillment.receipts.push({id:'r-post',purchaseId:'post',quantity:110,rejected:0,destination:'warehouse',location:'上海仓',date:'2026-10-12',evidence:'原收货单',fileIds:[],actor:'仓库',createdAt:'2026-10-12T02:00:00Z'});
   store.state!.fulfillment.stock.push({id:'stock-post',receiptId:'r-post',purchaseId:'post',quantity:110,available:110,location:'上海仓'} as any);
 }
+it.each(['finished','processing','material'] as const)('limits a production hold to matching delivery kinds: %s',async kind=>{
+ const state=store.state!,p={...wholeGarmentPurchase(),kind};
+ state.fulfillment.purchases.push(p,{...p,id:'other',code:'OTHER'});
+ state.productions.push({id:'paused',sourcePurchaseId:p.id,code:'PAUSED',orderId:'o',lineId:'l',order:'SO-1',name:'风衣',factory:'工厂',qty:100,due:p.due,pct:0,img:'coat',col:'cut'});
+ state.fulfillment.productionFacts.push({productionId:'paused',sizes:[],revision:1,hold:{actor:'业务员',at:'2026-10-13T10:00:00Z',category:'other',reason:'核对工艺'}});
+ const label=kind==='processing'?'登记加工回交':'登记本次交付';
+ render(p.id);const action=getByRole(host,'button',{name:label}) as HTMLButtonElement;
+ expect(action.disabled).toBe(kind!=='material');
+ if(kind!=='material'){expect(action.title).toContain('暂停');await click(action);expect(document.querySelector('[role="dialog"]')).toBeNull();}
+ render('other');expect((getByRole(host,'button',{name:label}) as HTMLButtonElement).disabled).toBe(false);
+ expect(store.run).not.toHaveBeenCalled();
+});
+
+it('stops a prepared garment delivery when its own production is put on hold',async()=>{
+ const state=store.state!,p=wholeGarmentPurchase();
+ state.fulfillment.purchases.push(p);state.productions.push({id:'branch',sourcePurchaseId:p.id,orderId:'o',lineId:'l',order:'SO-1',name:'风衣',factory:'工厂',code:'PR',qty:100,due:p.due,pct:0,img:'coat',col:'cut'});
+ render(p.id);await click(getByRole(host,'button',{name:'登记本次交付'}));
+ const dialog=getByRole(document.body,'dialog',{name:'登记成品交接'});
+ typeInto(getByRole(dialog,'textbox',{name:'点数与交接依据'}) as HTMLTextAreaElement,'待复核交接单');
+ state.fulfillment.productionFacts.push({productionId:'branch',sizes:[],revision:1,hold:{actor:'业务员',at:'2026-10-13T10:00:00Z',category:'other',reason:'待复核'}});
+ render(p.id);await click(getByRole(dialog,'button',{name:'登记本次交付'}));
+ expect(dialog.textContent).toContain('生产分支已暂停');expect(store.run).not.toHaveBeenCalled();
+});
+
 function wholeGarmentPurchase(){
  store.state!.orderLines[0].fulfillmentMode='full_package';
  return purchase('whole',approved({kind:'finished',unit:'件',offlineSend:{at:'2026-10-10T08:00:00Z',actor:'经办人',evidence:'线下发出',fileIds:[]},supplierConfirmation:{at:'2026-10-11T08:00:00Z',actor:'经办人',confirmedDue:'2026-10-30',evidence:'供方确认',fileIds:[]}}));

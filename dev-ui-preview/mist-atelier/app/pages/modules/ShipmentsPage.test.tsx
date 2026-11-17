@@ -33,6 +33,19 @@ beforeEach(()=>{store.workspace.revision=0;store.workspace.shipmentReleaseGates=
   store.state=s;store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();store.loading=false;});
 
+it('removes only the held branch from new shipment sources and blocks an already selected draft',async()=>{
+ const state=store.state!;
+ for(const id of ['first','second'])state.productions.push({id,code:id,orderId:'o',lineId:'l',order:'SO-1',name:'大衣',factory:'工厂',qty:10,due:'2026-11-01',pct:0,img:'coat',col:'cut'});
+ render();await click(getAllByRole(host,'button',{name:'新建出运'})[0]);
+ const select=getByRole(host,'combobox',{name:'来源条目 1'}) as HTMLSelectElement;
+ act(()=>{select.value='production:first';select.dispatchEvent(new Event('change',{bubbles:true}));});
+ state.fulfillment.productionFacts.push({productionId:'first',sizes:[],revision:1,hold:{actor:'业务员',at:'2026-10-13T10:00:00Z',category:'other',reason:'核对版本'}});
+ render();
+ expect([...select.options].map(option=>option.value)).toEqual(['','production:second']);
+ await click(getByRole(host,'button',{name:'下一步'}));expect(host.textContent).toContain('生产分支已暂停');expect(store.run).not.toHaveBeenCalled();
+ delete state.fulfillment.productionFacts[0].hold;render();expect([...select.options].map(option=>option.value)).toContain('production:first');
+});
+
 it.each([true,false])('distinguishes unread shipment data from an empty company (loading %s)',loading=>{
  store.state=null;store.loading=loading;store.error=loading?'':'本次读取暂时不可用';presentedError=store.error||undefined;render();
  expect(host.textContent).toContain(loading?'正在读取出运资料':'出运资料未读取');
