@@ -334,6 +334,24 @@ async function lineInput(label:string,value:string){
   await act(async()=>{Object.getOwnPropertyDescriptor(control.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value')!.set!.call(control,value);control.dispatchEvent(new Event('input',{bubbles:true}));});
 }
 
+it.each(['closed','pending'] as const)('locks the quantity of a %s closure while preserving lawful price changes',async status=>{
+ lineEditorFixture('approved',20);Object.assign(store.state!.orderLines[0],{closure:{id:'closure',status,quantity:0,ordered:20,min:19.4,max:20.6,reason:'客户撤回',requesterId:'sales',requesterName:'业务员甲',requestedAt:context.now,reviewerIds:['leader']}});
+ render();await openLineEditor();expect((getByLabelText(document.body,'订单数量') as HTMLInputElement).disabled).toBe(true);expect((getByLabelText(document.body,'销售单价') as HTMLInputElement).disabled).toBe(false);expect(store.run).not.toHaveBeenCalled();
+});
+
+it('preserves a lawful price amendment on a closed line and keeps its quantity unchanged',async()=>{
+ lineEditorFixture('approved',20);Object.assign(store.state!.orderLines[0],{closure:{id:'closure',status:'closed',quantity:0,ordered:20,min:19.4,max:20.6,reason:'客户撤回',requesterId:'sales',requesterName:'业务员甲',requestedAt:context.now,reviewerIds:['leader']}});render();await openLineEditor();await lineInput('销售单价','12');await lineInput('变更原因','按独立客户价格更正依据');await act(async()=>getByRole(document.body,'button',{name:'保存条目'}).click());expect(store.run).toHaveBeenCalledTimes(1);expect(store.state!.orders[0].governance!.changeDraft!.lines[0]).toMatchObject({qty:20,price:12});expect(store.state!.orderLines[0]).toMatchObject({qty:20,price:11});
+});
+
+it('retains an open draft but refuses submission after a new closure locks its source',async()=>{
+ lineEditorFixture('approved',20);render();await openLineEditor();await lineInput('订单数量','21');store.state=structuredClone(store.state!);Object.assign(store.state.orderLines[0],{closure:{id:'new-closure',status:'pending',quantity:0,ordered:20,min:19.4,max:20.6,reason:'客户撤回',requesterId:'sales',requesterName:'业务员甲',requestedAt:context.now,reviewerIds:['leader']}});store.workspace.revision=2;render();await lineInput('变更原因','原草稿');await act(async()=>getByRole(document.body,'button',{name:'保存条目'}).click());expect(store.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('订单条目资料已更新，请重新打开后核对');expect((getByLabelText(document.body,'订单数量') as HTMLInputElement).value).toBe('21');
+});
+
+it('shows each retained closure source and decision without borrowing current line or hidden file details',async()=>{
+ lineEditorFixture('approved',20);const line=store.state!.orderLines[0];Object.assign(line,{closureHistory:[{id:'first-close',status:'rejected',quantity:0,ordered:20,min:19.4,max:20.6,reason:'原申请原因',requesterId:'sales',requesterName:'原申请人',requestedAt:context.now,reviewerIds:['leader'],decidedBy:'leader',decidedName:'原审批人',decidedAt:context.now,note:'补充原件',source:{orderId,lineId:line.id,orderCode:'ORIGINAL-CODE',poNumber:'ORIGINAL-PO',style:'ORIGINAL-STYLE',name:'原面料',unit:'码',tolerance:{overPercent:3,shortPercent:3},fileIds:['hidden-closure-file']}}],closure:{id:'second-close',status:'pending',quantity:0,ordered:20,min:19.4,max:20.6,reason:'新申请',requesterId:'sales',requesterName:'业务员甲',requestedAt:context.now,reviewerIds:['leader']}});
+ render();await act(async()=>getByRole(host,'row',{name:/精确金额条目/}).click());await act(async()=>getByRole(document.body,'button',{name:'结案记录',exact:true}).click());const history=getByRole(document.body,'list',{name:'条目结案申请记录'});expect(within(history).getAllByRole('listitem')).toHaveLength(2);expect(history.textContent).toContain('ORIGINAL-STYLE · 原面料');expect(history.textContent).toContain('原申请原因');expect(history.textContent).toContain('原申请人');expect(history.textContent).toContain('原审批人');expect(history.textContent).toContain('补充原件');expect(history.textContent).toContain('19.4–20.6 码');expect(history.textContent).not.toContain('hidden-closure-file');expect(history.textContent).toContain('原申请资料未留存');expect(store.downloadFile).not.toHaveBeenCalled();expect(store.run).not.toHaveBeenCalled();
+});
+
 it('header editor refuses a synchronized due-date change and retains its season',async()=>{
  render();act(()=>getByRole(host,'button',{name:'编辑',exact:true}).click());
  const select=getByRole(document.body,'combobox',{name:'季节',exact:true}) as HTMLSelectElement;

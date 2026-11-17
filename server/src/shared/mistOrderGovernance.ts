@@ -10,7 +10,7 @@ import {reviewDecision,type MistReviewTask} from './mistReview';
 import {ownerChangeText,resolveMember} from './mistAccounts';
 import {assertOrderLineSource,normalizeOrderLineSource} from './mistOrderSource';
 import {breakdownSummary,lineQuantityFromBreakdown,type OrderLineBreakdown} from './mistOrderBreakdown';
-import {CLOSE_SETTLEMENT_HINT,closureLabel,lineShipmentFacts,normalizeTolerancePercent,toleranceRange,toleranceText,type ClosableLine,type OrderLineClosure,lineShipLimit,overShipLabel,pendingOverShip,assertOrderLineOpen,type OverShipRequest} from './mistOrderClosure';
+import {CLOSE_SETTLEMENT_HINT,closureLabel,closureSource,orderLineClosures,lineShipmentFacts,normalizeTolerancePercent,toleranceRange,toleranceText,type ClosableLine,type OrderLineClosure,lineShipLimit,overShipLabel,pendingOverShip,assertOrderLineOpen,type OverShipRequest} from './mistOrderClosure';
 import {assertOrderChangeAllowed,createOrderChangeTasks,orderChangeImpact,orderChangeImpactDetails} from './mistOrderChangeImpact';
 
 export type OrderGovernanceInput={
@@ -178,7 +178,7 @@ export function applyOrderGovernanceCommand(root:MistState,command:OrderGovernan
    const reason=text(p.reason||'','变更原因',true);
    // BB-ORD-4：已有履约事实时允许改数量/单价/交期/新增条目，但守住下限、不删有事实的条目、有票/收款不改币种
    assertOrderChangeAllowed(root,order,lines,orderPatch.currency);
-   for(const line of root.orderLines.filter(l=>l.orderId===id) as ClosableLine[]){if(!line.closure||line.closure.status==='rejected')continue;const next=lines.find(l=>l.id===line.id);if(!next||next.qty!==line.qty||stableJson(next.breakdown||null)!==stableJson((line as ClosableLine&{breakdown?:unknown}).breakdown||null))fail(`条目「${line.style} · ${line.name}」${line.closure.status==='closed'?'已结案':'结案审批中'}，不能再改数量`,'PRECONDITION');}
+   for(const line of root.orderLines.filter(l=>l.orderId===id) as ClosableLine[]){if(!line.closure||line.closure.status==='rejected')continue;const next=lines.find(l=>l.id===line.id);if(!next||next.qty!==line.qty||next.unit!==line.unit||stableJson(next.breakdown||null)!==stableJson((line as ClosableLine&{breakdown?:unknown}).breakdown||null))fail(`条目「${line.style} · ${line.name}」${line.closure.status==='closed'?'已结案':'结案审批中'}，不能再改数量`,'PRECONDITION');}
    g.changeDraft={contract,orderPatch,lines,reason,status:'draft'};event(root,context,order,'保存订单变更草稿，原批准内容继续生效');
   }else{g.contract=contract;g.status='draft';applySnapshot(root,order,{...snapshot(root,order),...orderPatch,contract,lines});order.state='订单草稿';order.tone='neutral';event(root,context,order,'保存订单合同草稿');}
   if((p.orderPatch as Record<string,unknown>|undefined)?.owner!==undefined)fail('负责人须按账号选择');
@@ -217,9 +217,11 @@ function closeLine(root:MistState,p:{orderId:string;lineId:string;reason:string}
  if(order.replacementSource&&Math.round(facts.departed*10000)!==Math.round(line.qty*10000))fail('补发货物尚未发齐，不能结案','PRECONDITION');
  if(facts.open.length)fail(`该条目还有未离港的有效出运（${facts.open.map(s=>s.code).join('、')}），须先离港或取消后再结案`,'PRECONDITION');
  const range=toleranceRange(line.qty,g.contract),within=facts.departed>=range.min&&facts.departed<=range.max;
- const closure:OrderLineClosure={id:context.id(),status:within?'closed':'pending',quantity:facts.departed,ordered:line.qty,min:range.min,max:range.max,reason,requesterId:context.actorId||'',requesterName:context.actorName,requestedAt:context.now,reviewerIds:[]};
+ const breakdown=(line as ClosableLine&{breakdown?:OrderLineBreakdown}).breakdown;
+ const closure:OrderLineClosure={id:context.id(),status:within?'closed':'pending',quantity:facts.departed,ordered:line.qty,min:range.min,max:range.max,reason,requesterId:context.actorId||'',requesterName:context.actorName,requestedAt:context.now,reviewerIds:[],source:{orderId:order.id,lineId:line.id,orderCode:order.code,poNumber:g.contract.poNumber,style:line.style,name:line.name,unit:line.unit,...(breakdown?{breakdown:structuredClone(breakdown)}:{}),tolerance:{overPercent:g.contract.overPercent??null,shortPercent:g.contract.shortPercent??null}}};
  if(!within){const eligible=reviewers(context,order.type).filter(id=>id!==context.actorId);if(!context.actorId||!eligible.length)fail('超出允许溢短装范围须审批，但尚未配置除申请人外的订单审批负责人','PRECONDITION');closure.reviewerIds=eligible;}
  else{closure.decidedBy=context.actorId;closure.decidedName=context.actorName;closure.decidedAt=context.now;}
+ if(line.closure?.status==='rejected'&&!line.closureHistory?.some(c=>c.id===line.closure!.id))line.closureHistory=[...(line.closureHistory||[]),structuredClone(line.closure)];
  line.closure=closure;event(root,context,order,(within?'条目按实际结案：':'提交条目结案审批：')+`${line.style} 实际 ${facts.departed} / 订单 ${line.qty} ${line.unit}（允许 ${range.min}–${range.max}），${reason}；${CLOSE_SETTLEMENT_HINT}`);order.updatedAt=context.now;
  return{id:order.id,orderId:order.id,lineId:line.id,closure:closure.status,...(within?{}:{reviewId:'order-close:'+closure.id})};
 }
@@ -236,9 +238,9 @@ function decideClosure(root:MistState,p:{id:string;decision:'approved'|'rejected
  return{id:order.id,orderId:order.id,lineId:line.id,closure:c!.status};
 }
 function closureReviews(root:MistState):MistReviewTask[]{
- return (root.orderLines as ClosableLine[]).filter(line=>line.closure&&line.closure.reviewerIds.length).map(line=>{const c=line.closure!,order=root.orders.find(o=>o.id===line.orderId) as GovernedOrder|undefined;
-  return{id:'order-close:'+c.id,kind:'order' as const,entityId:closureReviewEntity(line.orderId,line.id),title:`${order?.code||''} 条目结案审批 · ${line.style}`,requesterId:c.requesterId,reviewerIds:c.reviewerIds,status:c.status==='pending'?'pending':c.status==='closed'?'approved':'rejected',submittedAt:c.requestedAt,decision:reviewDecision(c.decidedName,c.decidedAt,c.note),requiredPermission:'orders:write',target:{view:'orders/detail',id:line.orderId},
-   details:[{label:'条目',value:`${line.style} · ${line.name}`},{label:'订单数量',value:`${c.ordered} ${line.unit}`},{label:'溢短装',value:toleranceText(order?.governance?.contract)},{label:'允许范围',value:`${c.min}–${c.max} ${line.unit}`},{label:'实际离港（结案数量）',value:`${c.quantity} ${line.unit}`},{label:'差异',value:`${Math.round((c.quantity-c.ordered)*10000)/10000} ${line.unit}`},{label:'结案原因',value:c.reason},{label:'申请人',value:c.requesterName},{label:'结算',value:CLOSE_SETTLEMENT_HINT},{label:'状态',value:closureLabel(c)}]};});
+ return (root.orderLines as ClosableLine[]).flatMap(line=>orderLineClosures(line).filter(c=>c.reviewerIds.length).map(c=>{const source=closureSource(line,c),unit=source?' '+source.unit:'';
+  return{id:'order-close:'+c.id,kind:'order' as const,entityId:closureReviewEntity(line.orderId,line.id),title:`${source?.orderCode||root.orders.find(o=>o.id===line.orderId)?.code||''} 条目结案审批${source?' · '+source.style:''}`,requesterId:c.requesterId,reviewerIds:c.reviewerIds,status:c.status==='pending'?'pending':c.status==='closed'?'approved':'rejected',submittedAt:c.requestedAt,decision:reviewDecision(c.decidedName,c.decidedAt,c.note),requiredPermission:'orders:write',target:{view:'orders/detail',id:line.orderId},
+   details:[...(source?[{label:'条目',value:`${source.style} · ${source.name}`},{label:'合同',value:source.poNumber},{label:'溢短装',value:toleranceText(source.tolerance)},...(source.breakdown?[{label:'规格 / 分色分码',value:breakdownSummary(source.breakdown,source.unit)}]:[])]:[{label:'原申请资料',value:'未留存'}]),{label:'订单数量',value:`${c.ordered}${unit}`},{label:'允许范围',value:`${c.min}–${c.max}${unit}`},{label:'实际离港（结案数量）',value:`${c.quantity}${unit}`},{label:'差异',value:`${Math.round((c.quantity-c.ordered)*10000)/10000}${unit}`},{label:'结案原因',value:c.reason},{label:'申请人',value:c.requesterName},{label:'结算',value:CLOSE_SETTLEMENT_HINT},{label:'状态',value:closureLabel(c)}]};}));
 }
 
 /* ── BB-ORD-6：超量出运申请 ── */
