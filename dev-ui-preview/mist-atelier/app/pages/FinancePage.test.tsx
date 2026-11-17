@@ -23,6 +23,37 @@ function input(label:string,value:string){const control=getByLabelText(document.
 beforeEach(()=>vi.stubGlobal('matchMedia',(query:string)=>({matches:false,media:query,onchange:null,addListener(){},removeListener(){},addEventListener(){},removeEventListener(){},dispatchEvent(){return true;}})));
 beforeEach(()=>{let serial=0;const context={id:()=>`test-${++serial}`,actorName:'财务',actorId:'finance',now:new Date().toISOString()};const state=createMistState(context,'empty');state.customers=[{id:'customer',name:'客户',currency:'EUR'}] as any;state.orders=[{id:'o',code:'ORDER',type:'fabric',customerId:'customer',customer:'客户',season:'',lines:1,qty:1,amount:100,currency:'EUR',due:today(),progress:0,state:'',tone:'neutral',owner:'',img:'clay',checklist:[],handoffAt:null,createdAt:'',updatedAt:''}];state.orderLines=[{id:'line',orderId:'o',name:'商品',style:'A',img:'clay',qty:1,unit:'件',price:100,made:0,qc:0}];state.invoices=[{id:'invoice',code:'INV-EUR',orderId:'o',order:'ORDER',customer:'客户',due:today(),amount:100,open:100,currency:'EUR'}];state.receipts=[{id:'receipt',code:'R-EUR',date:today(),payer:'客户',amount:50,remaining:50,currency:'EUR',ref:'测试',state:'unmatched'}];store.value={state,workspace:{id:'space-a'},loading:false,saving:false,pending:null,error:'',refresh:vi.fn(),recover:vi.fn(),run:vi.fn(async(command)=>{const applied=applyMistCommand(store.value.state,command,context);store.value.state=applied.state;render();return{requestId:'req',revision:1,result:applied.result};})};go.mockReset();route={view:'payment-vouchers'};host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
+it('keeps non-order invoices in the customer drilldown and opens the exact sample request',async()=>{
+  const s=store.value.state,base={...s.invoices[0],orderId:'',customerId:'customer',currency:'EUR',open:12};
+  s.devs=[{id:'dev',customerId:'customer'}];
+  s.sampleRequests=[{id:'request',customerId:'customer',code:'SR-93'}];
+  s.invoices.push({...base,id:'fee',code:'SF-93',sampleRequestId:'request'},{...base,id:'opening',code:'AR-OPEN',opening:{}},{...base,id:'dev-fee',code:'DI-8',customerId:undefined,devId:'dev'},{...base,id:'foreign',code:'AR-OTHER',customerId:'other'});
+  route={view:'payment-vouchers',section:'open',customerId:'customer',id:'fee'};render();
+  const list=getByRole(host,'table',{name:'发票'});for(const code of ['SF-93','AR-OPEN','DI-8'])expect(list.textContent).toContain(code);
+  expect(list.textContent).not.toContain('AR-OTHER');
+  const dialog=getByRole(document.body,'dialog',{name:'SF-93'});
+  expect(queryByRole(dialog,'button',{name:'打开关联订单'})).toBeNull();
+  await act(async()=>getByRole(dialog,'button',{name:'来源索样单'}).click());
+  expect(go).toHaveBeenLastCalledWith('samples','request',{section:'requests'});
+});
+it('limits the customer ledger and matching suggestions to confirmed open invoices of that customer',()=>{
+  const state=store.value.state,original=state.invoices[0];
+  state.invoices.push({...original,id:'foreign',code:'OTHER-AR',customerId:'another'}, {...original,id:'rejected',code:'REJECTED-AR',financeStatus:'rejected'});
+  Object.assign(state.receipts[0],{state:'suggested',suggest:'foreign',confidence:99,payer:original.customer});
+  route={view:'payment-vouchers',section:'open',customerId:'customer'};render();
+  const list=getByRole(host,'table',{name:'发票'});
+  expect(list.textContent).toContain(original.code);
+  expect(list.textContent).not.toContain('REJECTED-AR');expect(list.textContent).not.toContain('OTHER-AR');
+  expect(queryByRole(host,'button',{name:'核对并采纳'})).toBeNull();
+});
+it.each(['not-visible','wrong-customer','no-product-read'])('disables a sample invoice source for %s',condition=>{
+  const s=store.value.state;Object.assign(s.invoices[0],{orderId:'',customerId:'customer',sampleRequestId:'request'});
+  s.sampleRequests=condition==='not-visible'?[]:[{id:'request',customerId:condition==='wrong-customer'?'other':'customer'}];
+  if(condition==='no-product-read')store.value.denied=new Set(['products:read']);
+  route.id=s.invoices[0].id;render();
+  const d=getByRole(document.body,'dialog',{name:s.invoices[0].code});
+  expect((getByRole(d,'button',{name:'来源索样单'}) as HTMLButtonElement).disabled).toBe(true);
+});
 it.each([undefined,'payables','records','accounts'])('does not present unread %s financial data as zero bank activity or enable importing',section=>{
  const original=store.value.state;route.section=section;store.value={...store.value,state:null,loading:false,error:'无法读取公司数据'};render();expect(host.textContent).toContain('财务数据未读取');expect(host.textContent).not.toContain('还没有银行流水');expect(host.textContent).not.toContain('0 笔流水');expect(getAllByRole(host,'button').some(b=>b.textContent==='导入流水'||b.textContent==='登记付款'||b.textContent==='导出')).toBe(false);
  store.value={...store.value,state:original,loading:false,error:''};render();expect(host.textContent).not.toContain('财务数据未读取');expect(host.textContent).toContain('财务管理');expect(store.value.run).not.toHaveBeenCalled();
