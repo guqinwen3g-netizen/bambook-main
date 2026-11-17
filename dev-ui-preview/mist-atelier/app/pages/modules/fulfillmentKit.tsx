@@ -6,7 +6,7 @@ import React from 'react';
 import { Download } from 'lucide-react';
 import { Banner, Button, DataTable, Pill, TextLink, Timeline, UploadZone } from '../../../../../components/mist';
 import type { MistState, MistFile, MistCommand } from '../../../../../server/src/shared/mistWorkspace';
-import type { FulfillmentDocument, FulfillmentSource, FulfillmentSample, FulfillmentShipment, FulfillmentStock, StockRoll } from '../../../../../server/src/shared/mistFulfillment';
+import type { FulfillmentDocument, FulfillmentSource, FulfillmentSampleSource, FulfillmentSample, FulfillmentShipment, FulfillmentStock, StockRoll } from '../../../../../server/src/shared/mistFulfillment';
 import { fulfillmentSourceLabel, fulfillmentPositions } from '../../../../../server/src/shared/mistFulfillment';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useUploadRecoveryClaim } from '../../runtime/errorPresentation';
@@ -59,10 +59,10 @@ export function parseSource(s: MistState, value: string): Exclude<FulfillmentSou
         return { kind: 'orderLine', orderId: p.orderId, lineId: p.lineId, productionId: p.id };
 } throw new Error('请重新选择本公司的准确来源'); }
 export function sourceValue(source: FulfillmentSource) { return source.kind === 'version' ? 'version:' + source.versionId : source.kind === 'orderLine' ? source.productionId ? 'production:' + source.productionId : 'line:' + source.lineId : 'manual'; }
-export function SourceLink({ source }: {
-    source: FulfillmentSource;
+export function SourceLink({ source,sampleId }: {
+    source: FulfillmentSampleSource;sampleId?:string;
 }) { const { state } = useMistWorkspace(), { go } = useNav(); if (!state)
-    return null; if (source.kind === 'manual') return <span>{source.description}</span>; return <TextLink onClick={() => source.kind === 'version' ? go('development/detail', source.devId, { versionId: source.versionId }) : go('orders/detail', source.orderId, { orderLineId: source.lineId, productionId: source.productionId })}>{fulfillmentSourceLabel(state, source)}</TextLink>; }
+    return null; if (source.kind === 'manual') return <span>{source.description}</span>;if(source.kind==='developmentIncoming')return <TextLink onClick={()=>go('development/detail',source.devId,{section:sampleId?'incoming:'+sampleId:'incoming-receipt:'+source.receiptId})}>{fulfillmentSourceLabel(state,source)}</TextLink>; return <TextLink onClick={() => source.kind === 'version' ? go('development/detail', source.devId, { versionId: source.versionId }) : go('orders/detail', source.orderId, { orderLineId: source.lineId, productionId: source.productionId })}>{fulfillmentSourceLabel(state, source)}</TextLink>; }
 export function shipmentReturnTarget(state:MistState|null,shipment:FulfillmentShipment){
     const orderIds=new Set(shipment.lines.map(line=>line.orderId));
     const order=state?.orders.find(order=>orderIds.size===1&&orderIds.has(order.id)&&order.customerId===shipment.customerId);

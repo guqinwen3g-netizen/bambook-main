@@ -19,6 +19,12 @@ async function click(node:HTMLElement){await act(async()=>node.click());}
 function choose(select:HTMLSelectElement,value:string){act(()=>{select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));});}
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 function task(id:string,patch:Partial<FulfillmentQcTask>={}):FulfillmentQcTask{return {id,code:id.toUpperCase(),source:{kind:'orderLine',orderId:'o',lineId:'l'},domain:'garment',kind:'sample',factory:'华美制衣',location:'一号车间',contact:'',due:'2026-10-20',requestedBy:'业务员',assignee:'',state:'pending',reportIds:[],createdAt:'2026-10-10T08:00:00Z',...patch};}
+it('does not offer a development incoming original as a returned factory QC source',async()=>{
+ store.state!.devs.push({id:'incoming-dev',code:'DEV-IN',values:{domain:'fabric'}}as any);store.state!.versions.push({id:'factory-version',devId:'incoming-dev',label:'R1-A-1',factory:'试样厂',returnedAt:'2026-10-13T08:00:00Z'}as any);
+ const common={name:'棉斜纹',category:'面料',form:'米样',unit:'米',quantity:1,available:1,size:'',color:'',location:'A01',fileIds:[],note:'',createdAt:'2026-10-13T08:00:00Z'};
+ store.state!.fulfillment.samples.push({...common,id:'incoming-original',code:'SMP-INCOMING',source:{kind:'developmentIncoming',devId:'incoming-dev',receiptId:'receipt'}}as any,{...common,id:'returned-factory',code:'SMP-RETURNED',source:{kind:'version',devId:'incoming-dev',versionId:'factory-version'}}as any);
+ render();await click(getAllByRole(host,'button',{name:'从来源发起QC'})[0]);const select=getByRole(host,'combobox',{name:'送检来源'})as HTMLSelectElement;const values=[...select.options].map(option=>option.value);expect(values).toContain('sample:returned-factory');expect(values).not.toContain('sample:incoming-original');expect(store.run).not.toHaveBeenCalled();
+});
 beforeEach(()=>{store.loading=false;store.error='';store.saving=false;store.pending=null;store.workspace={id:'space',revision:0};session.id='qc-a';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'QC甲'},'empty');store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 
 function fabricDevelopmentTask(){

@@ -48,6 +48,12 @@ export type FulfillmentSource = {
     description: string;
 };
 export type FulfillmentPosition = { location: string; available: number };
+/** Incoming originals are case-owned physical samples, never factory results or QC sources. */
+export type DevelopmentIncomingSource={kind:'developmentIncoming';devId:string;receiptId:string};
+export type FulfillmentSampleSource=FulfillmentSource|DevelopmentIncomingSource;
+export type IncomingReceiptInfo={receivedAt:string;providerKind:'customer'|'internal';providerId:string;providerName:string;contact:string;recordedAt:string;recordedBy:string;recordedById:string};
+export type IncomingDelivery={kind:'courier'|'handover';recipient:string;address:string;carrier:string;trackingNo:string;evidence:string};
+export type IncomingTaskTransfer={dispatchId:string;devId:string;taskVersionId:string;supplierId:string;supplierName:string;returnExpected:boolean;direction:'out'|'return';occurredAt:string;delivery:IncomingDelivery;returnBatchId?:string;expenseId?:string;postage?:{amount:number;currency:string;zeroReason:string}};
 export type FulfillmentSampleRole = 'pp' | 'pioneer' | 'shipping';
 export type FulfillmentSizeQuantity = { size: string; quantity: number };
 export type FulfillmentProductionFact = {
@@ -80,7 +86,8 @@ export type FulfillmentSample = {
     /** One shipping submission's actual physical size/count members; never inferred from the production plan. */
     sizeQuantities?:FulfillmentSizeQuantity[];
     color: string;
-    source: FulfillmentSource;
+    source: FulfillmentSampleSource;
+    incoming?:IncomingReceiptInfo;
     /** Trusted registering account for a manual sample. Never inferred for legacy records or accepted from a client. */
     registeredById?: string;
     sourceSampleCode?: string;
@@ -118,6 +125,7 @@ export type SampleMovement = {
     /** ord17：寄出登记的寄样费，同时记入订单费用台账（expenseId）。 */
     fee?: { amount: number; currency: string; expenseId?: string };
     sendPurpose?:SampleSendPurpose;
+    incomingTransfer?:IncomingTaskTransfer;
 };
 export type QcBusinessConfirmation = { result:'approved'|'rejected';note:string;actor:string;actorId?:string;at:string;reportId?:string };
 export type QcBusinessContinuation = { reportId:string;actor:string;actorId?:string;at:string;note:string };
@@ -506,7 +514,7 @@ export type FulfillmentState = {
     documents: FulfillmentDocument[];
 };
 type PurchaseInput = Pick<FulfillmentPurchase, 'orderId' | 'lineId' | 'kind' | 'materialKind' | 'stageTerms' | 'iqcRequired' | 'supplierId' | 'supplier' | 'description' | 'quantity' | 'unit' | 'price' | 'currency' | 'due' | 'terms' | 'destination' | 'note' | 'fileIds'>;
-type SampleInput = Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'source' | 'fileIds' | 'note' | 'role' | 'shipmentId' | 'sizeQuantities'>;
+type SampleInput = Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'fileIds' | 'note' | 'role' | 'shipmentId' | 'sizeQuantities'>&{source:FulfillmentSource};
 type ShipmentInput = {packingDetailVersion?:2;packingColorVersion?:1} & Pick<FulfillmentShipment, 'consignee' | 'mode' | 'portOfLoading' | 'portOfDischarge' | 'incoterm' | 'plannedDate' | 'booking' | 'lines' | 'note' | 'fileIds'>;
 export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportCommand | QcDispositionCommand | {
     type: 'fulfillment.samples.create';
@@ -905,7 +913,7 @@ function liveBranch(root: MistState, id: string | undefined) {
     if (branch.closed) fail(`生产分支 ${branch.code} 已随合同取消关闭：${branch.closed.reason}`, 'PRECONDITION');
     return branch;
 }
-function source(root: MistState, s: FulfillmentSource, manual = true): FulfillmentSource {
+function source(root: MistState, s: FulfillmentSampleSource, manual = true): FulfillmentSource {
     if (!s || typeof s !== 'object')
         fail('请选择准确来源');
     if (s.kind === 'manual' && manual)
@@ -931,11 +939,11 @@ function source(root: MistState, s: FulfillmentSource, manual = true): Fulfillme
     }
     return fail('来源类型无效');
 }
-export function fulfillmentSourceLabel(root: MistState, s: FulfillmentSource): string { if (s.kind === 'manual')
+export function fulfillmentSourceLabel(root: MistState, s: FulfillmentSampleSource): string { if(s.kind==='developmentIncoming')return `开发来样 · ${root.devs.find(dev=>dev.id===s.devId)?.code||'开发案不可见'}`;if (s.kind === 'manual')
     return s.description; if (s.kind === 'version')
     return `${root.devs.find(d => d.id === s.devId)?.code || s.devId} · ${root.versions.find(v => v.id === s.versionId)?.label || s.versionId}`; return `${root.orders.find(o => o.id === s.orderId)?.code || s.orderId} · ${root.orderLines.find(l => l.id === s.lineId)?.style || s.lineId}`; }
-const sourceKey = (s: FulfillmentSource) => s.kind === 'version' ? `v:${s.versionId}` : s.kind === 'orderLine' ? `l:${s.lineId}:${s.productionId || ''}` : `m:${s.description}`;
-const target = (s: FulfillmentSource): MistTarget => s.kind === 'version' ? { view: 'development/detail', id: s.devId, versionId: s.versionId } : s.kind === 'orderLine' ? { view: 'orders/detail', id: s.orderId, orderLineId: s.lineId, productionId: s.productionId } : { view: 'samples' };
+const sourceKey = (s: FulfillmentSampleSource) => s.kind === 'version' ? `v:${s.versionId}` : s.kind === 'orderLine' ? `l:${s.lineId}:${s.productionId || ''}` : s.kind==='developmentIncoming'?`incoming:${s.receiptId}`:`m:${s.description}`;
+const target = (s: FulfillmentSampleSource): MistTarget => s.kind==='developmentIncoming'?{view:'development/detail',id:s.devId,section:'incoming-receipt:'+s.receiptId}:s.kind === 'version' ? { view: 'development/detail', id: s.devId, versionId: s.versionId } : s.kind === 'orderLine' ? { view: 'orders/detail', id: s.orderId, orderLineId: s.lineId, productionId: s.productionId } : { view: 'samples' };
 function audit(root: MistState, ctx: MistContext, entity: string, id: string, message: string, to?: MistTarget, recipientIds: string[] = []) { root.events.unshift({ id: ctx.id(), entityType: entity, entityId: id, actor: ctx.actorName, at: ctx.now, text: message, fileIds: [] }); if (to)
     notifyMist(root, ctx, { title: message, detail: ctx.actorName, target: to, category:entity==='qc'?'qc':['shipment','customs','document'].includes(entity)?'shipping':'general' }, recipientIds); }
 const code = (prefix: string, rows: {
@@ -1093,8 +1101,8 @@ function normalizeTransport(root: MistState, t: ShipmentTransport): ShipmentTran
     if (out.etd && out.eta && out.eta < out.etd) fail('ETA 不得早于 ETD');
     return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined && !(Array.isArray(v) && !v.length))) as ShipmentTransport;
 }
-function addSample(root: MistState, input: SampleInput, ctx: MistContext) {
-    const f = root.fulfillment, s = source(root, input.source), category = text(input.category, '类别'), quantity = qty(input.quantity), unit = text(input.unit, '单位');
+function addSample(root: MistState, input: Omit<SampleInput,'source'>&{source:FulfillmentSampleSource}, ctx: MistContext, trustedIncoming?:DevelopmentIncomingSource) {
+    const f = root.fulfillment, s = trustedIncoming||source(root, input.source), category = text(input.category, '类别'), quantity = qty(input.quantity), unit = text(input.unit, '单位');
     if (s.kind === 'version' && get(root.devs, s.devId, '来源开发案').billing?.request) fail(DEVELOPMENT_BILLING_LOCK, 'PRECONDITION');
     const groupedShipping=input.sizeQuantities!==undefined;
     if(groupedShipping&&category!=='成衣')fail('尺码件数组合仅用于成衣样品');
@@ -1128,6 +1136,11 @@ function addSample(root: MistState, input: SampleInput, ctx: MistContext) {
     f.samples.push({ id, code: code('SMP', f.samples, ctx), name: text(input.name, '名称'), category, form: text(input.form, '形态'), unit, quantity, available: quantity, location: text(input.location, '位置', false), size: sizeQuantities?sizeQuantities.map(row=>`${row.size} ${row.quantity}`).join(' / '):text(input.size, '尺码', false),...(sizeQuantities?{sizeQuantities}:{}), color: text(input.color, '颜色', false), source: s, ...(s.kind === 'manual' && ctx.actorId ? {registeredById:ctx.actorId} : {}), ...(s.kind === 'version' ? { sourceSampleCode: get(root.versions, s.versionId, '来源版本').sample } : {}), ...(input.role ? { role: input.role } : {}), ...(s.kind === 'orderLine' && input.role === 'pp' ? {materialPlan:garmentMaterialFingerprint(root,s.orderId,s.lineId)} : {}), ...(input.shipmentId ? { shipmentId: input.shipmentId } : {}), qualityRevision: 1, fileIds: files(root, input.fileIds), note: text(input.note, '备注', false), createdAt: ctx.now });
     f.sampleMovements.push({ id: ctx.id(), sampleId: id, kind: 'receive', quantity, person: ctx.actorName, location: input.location, note: input.note, at: ctx.now, actor: ctx.actorName });
     return id;
+}
+/** Called only by the development intake command after its case and receipt are verified. */
+export function registerDevelopmentIncomingSample(root:MistState,input:Omit<SampleInput,'source'>&{devId:string;receiptId:string},ctx:MistContext){
+    const dev=get(root.devs,input.devId,'来样开发案'),incoming:DevelopmentIncomingSource={kind:'developmentIncoming',devId:dev.id,receiptId:input.receiptId};
+    return addSample(root,{...input,source:incoming},ctx,incoming);
 }
 function sourceDomain(root: MistState, s: FulfillmentSource): 'garment' | 'fabric' { if (s.kind === 'orderLine')
     return get(root.orders, s.orderId, '订单').type; return s.kind === 'version' && developmentDomain(get(root.devs, s.devId, '开发案').values)==='fabric' ? 'fabric' : 'garment'; }
@@ -1373,7 +1386,7 @@ export function recordDevelopmentQcOnTasks(root: MistState, devId: string, versi
         t.state = qc.result === 'reject' ? 'blocked' : 'reported';
     }
 }
-export function applyFulfillmentCommand(root: MistState, command: FulfillmentCommand, ctx: MistContext): MistCommandResult {
+export function applyFulfillmentCommand(root: MistState, command: FulfillmentCommand, ctx: MistContext, options?:{externalBorrower?:boolean;loanStartedOn?:string}): MistCommandResult {
     const f = root.fulfillment || (root.fulfillment = createFulfillmentState(ctx, root));
     f.shippingTerms ||= [];
     f.productionFacts ||= [];
@@ -1476,9 +1489,10 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                     fail('归还量超过未还量');
             }
             else if (quantity > s.available) fail('可用样品不足');
+            if(options?.externalBorrower&&p.borrowerId)fail('外部收件不绑定公司借用账号');
             const borrower = p.kind === 'lend' && p.borrowerId ? resolveMember(ctx, p.borrowerId, '借用人') : undefined;
             const person = borrower?.name || text(p.person, p.kind === 'returnFactory' ? '退回工厂' : '借用人/收件人', p.kind === 'lend' || p.kind === 'send' || p.kind === 'returnFactory'), location = text(p.location, '位置', false), note = text(p.note, p.kind === 'scrap' || p.kind === 'returnFactory' ? '原因' : '备注', p.kind === 'scrap' || p.kind === 'returnFactory'), expectedReturn = p.expectedReturn ? day(p.expectedReturn, '预计归还日') : undefined;
-            if (expectedReturn && expectedReturn < platformBusinessDate(ctx.now))
+            if (expectedReturn && expectedReturn < (options?.loanStartedOn||platformBusinessDate(ctx.now)))
                 fail('预计归还日不能早于借出日');
             const sendPurpose=p.kind==='send'?sampleSendPurpose(p.sendPurpose,s):undefined;
             if(sendPurpose){const blocker=sampleSendBlocker(root,s,sendPurpose,note,p.sendPurpose!==undefined);if(blocker)fail(blocker,'PRECONDITION');}
@@ -1498,7 +1512,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 if (!/^[A-Z]{3}$/.test(currency)) fail('寄样费币种须为三位英文字母');
                 fee = { amount: Math.round(amount * 100) / 100, currency };
             }
-            const borrowers = borrower ? [borrower] : (ctx.members || (ctx.actorId ? [{ id: ctx.actorId, name: ctx.actorName, active: true }] : [])).filter(member => member.active && member.name === person);
+            const borrowers = options?.externalBorrower?[]:borrower ? [borrower] : (ctx.members || (ctx.actorId ? [{ id: ctx.actorId, name: ctx.actorName, active: true }] : [])).filter(member => member.active && member.name === person);
             f.sampleMovements.push({ id, sampleId: s.id, kind: p.kind, quantity, person, location, note, at: ctx.now, actor: ctx.actorName, ...shipping, ...(p.kind === 'lend' ? { borrowerId: borrowers.length === 1 ? borrowers[0].id : '' } : {}), ...(fee ? { fee } : {}), ...(sourceLocation === undefined ? {} : { sourceLocation }), ...(loan ? { loanId: loan.id } : {}), ...(expectedReturn ? { expectedReturn } : {}),...(sendPurpose?{sendPurpose}:{}) });
             // ord17：订单样品的寄样费记入该订单费用台账，客户样品等无订单来源的只记在流水上。
             if (fee && s.source.kind === 'orderLine') {

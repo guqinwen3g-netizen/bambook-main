@@ -147,7 +147,7 @@ export function QcWorkbenchPage() {
   const changeDomain = (value: Domain) => { setDomain(value); setSelected(''); setStateFilter('all'); go('qc-workbench', undefined, { section: kind }); };
   const changeKind = (value: Kind) => { setKind(value); setSelected(''); setStateFilter('all'); go('qc-workbench', undefined, { section: value }); };
   const act = async (command: FulfillmentCommand, done?: string) => { setFailure(''); setBusy(true); try { await run(command); if (done) toast(done); } catch (e) { setFailure(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); } };
-  const qcSources = [emptyOption, ...(state?.fulfillment.samples || []).filter(sample => sample.source.kind !== 'manual').map(sample => ({ value: 'sample:' + sample.id, label: `${sample.code} · ${sample.name} · ${sample.role ? fulfillmentSampleRoleLabel(sample.role) : '开发样'} · ${sample.size}` })), ...sourceOptions(state).filter(option => option.value.startsWith('version:') || option.value.startsWith('production:'))];
+  const qcSources = [emptyOption, ...(state?.fulfillment.samples || []).filter(sample => (sample.source.kind === 'version'||sample.source.kind === 'orderLine')).map(sample => ({ value: 'sample:' + sample.id, label: `${sample.code} · ${sample.name} · ${sample.role ? fulfillmentSampleRoleLabel(sample.role) : '开发样'} · ${sample.size}` })), ...sourceOptions(state).filter(option => option.value.startsWith('version:') || option.value.startsWith('production:'))];
   // 生产检验默认在供应商的实际生产地址；样品评审沿用样品所在位置。
   const productionSite = (productionId: string) => { const job = state?.productions.find(p => p.id === productionId), purchase = job?.sourcePurchaseId ? state?.fulfillment?.purchases.find(p => p.id === job.sourcePurchaseId) : undefined; return state?.market?.suppliers.find(s => s.id === purchase?.supplierId)?.address || state?.market?.suppliers.find(s => s.name === job?.factory)?.address || ''; };
   const request = () => editor.open({
@@ -170,7 +170,7 @@ export function QcWorkbenchPage() {
       if (!state) return;
       const sample = text(values, 'source').startsWith('sample:') ? state.fulfillment.samples.find(item => item.id === text(values, 'source').slice(7)) : undefined;
       const source = sample ? sample.source : parseSource(state, text(values, 'source'));
-      if (source.kind === 'manual') throw new Error('请选择准确系统实物');
+      if (source.kind !== 'version'&&source.kind!=='orderLine') throw new Error('请选择准确系统实物');
       const taskDomain = source.kind === 'version' ? developmentDomain(state.devs.find(d => d.id === source.devId)!.values) : state.orders.find(o => o.id === source.orderId)!.type;
       const taskKind = text(values, 'kind') as 'sample' | 'production';
       const saved = await run({ type: 'fulfillment.qc.request', payload: { source, ...(sample ? { sampleId: sample.id } : {}), domain: taskDomain, kind: taskKind, factory: text(values, 'factory'), location: text(values, 'location'), contact: text(values, 'contact'), due: text(values, 'due') } });

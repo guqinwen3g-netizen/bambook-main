@@ -1,4 +1,5 @@
 import type {OrderMainApprovalSource} from './mistOrderApprovalSource';
+import {applyDevelopmentIncomingCommand,type DevelopmentIncomingCommand} from './mistDevelopmentIncoming';
 import {developmentReopenSource,type DevelopmentClosure,type DevelopmentLifecycleEvent} from './mistDevelopmentLifecycle';
 import {dueAfterAcceptance,type ReceivableDueCondition} from './mistTradeTerms';
 import {notifyMist,notificationOwners} from './mistNotifications';
@@ -393,7 +394,7 @@ export type MistState = {
   seals?:MistSeal[]; sealUses?:MistSealUse[];
 };
 export type MistOrderInput = { type: 'garment' | 'fabric'; customerId: string; season: string; currency: string; due: string; ownerId: string; governance?:OrderGovernanceInput; lines: Array<Omit<MistOrderLine, 'id' | 'orderId' | 'made' | 'qc'> & OrderLineSource & {breakdown?:OrderLineBreakdown}> };
-export type MistCommand = SealCommand | PeriodCloseCommand | Extract<DocumentGenerationCommand, { type: 'order.document.generate' | 'market.lookbook.document' }> | AgentTaskCommand | AgentProposalCommand | InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | SampleRequestCommand | OrderSplitCommand | ReportScheduleCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
+export type MistCommand = DevelopmentIncomingCommand | SealCommand | PeriodCloseCommand | Extract<DocumentGenerationCommand, { type: 'order.document.generate' | 'market.lookbook.document' }> | AgentTaskCommand | AgentProposalCommand | InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | SampleRequestCommand | OrderSplitCommand | ReportScheduleCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
   | { type: 'development.saveDraft'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.submit'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.update'; payload: { devId: string; patch: Partial<DevelopmentValues> } }
@@ -1131,6 +1132,9 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const {round,versions}=createRound(state,dev,{factories:chain?chain.map(row=>row.factoryId):[previous.factoryId],requirements:note,referenceVersionIds:[previous.id],targetDate:dev.due||mistBusinessDate(context.now),fileIds:[],...(chain?{stages:chain}:{})},context),version=versions[0];
       updateDev(state,dev,context);
       event(state,context,'development',dev.id,'创建改版 '+version.label,{view:'development/detail',id:dev.id,versionId:version.id},'general',notificationOwners(state,'development',dev.id));result={devId:dev.id,versionId:version.id,roundId:round.id};break;
+    }
+    case 'development.incoming.receive':case 'development.incoming.dispatch':case 'development.incoming.return':{
+      result=applyDevelopmentIncomingCommand(state,command,context);break;
     }
     case 'development.close': {
       const dev=find(state.devs,p.devId,'开发案');

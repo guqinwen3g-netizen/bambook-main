@@ -18,6 +18,10 @@ let host:HTMLElement,root:Root;let presentedError:string|undefined;const go=vi.f
 function render(id?:string,context:Record<string,string>={}){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'samples',id,...context},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><MistPresentedErrorContext.Provider value={presentedError}><SamplesPage/></MistPresentedErrorContext.Provider></Nav.Provider></ToastProvider></MistRoot>));}
 const version={kind:'version' as const,devId:'dev',versionId:'ver'};
 function fabric(id:string,form:string,unit:string,quantity:number,available:number):FulfillmentSample{return {id,code:id.toUpperCase(),name:'亚麻平纹',category:'面料',form,unit,quantity,available,location:'A-01',size:'',color:'',source:version,fileIds:[],note:'',createdAt:'2026-10-10T08:00:00Z'};}
+it('returns an incoming original to its exact development sample and does not offer factory-result QC',async()=>{
+ store.state!.devs.push({id:'incoming-dev',code:'DEV-IN',values:{domain:'fabric'}}as any);const sample={...fabric('incoming-piece','米样','米',1,1),source:{kind:'developmentIncoming' as const,devId:'incoming-dev',receiptId:'receipt'}};store.state!.fulfillment.samples.push(sample);render(sample.id);
+ await act(async()=>getByRole(host,'button',{name:'开发来样 · DEV-IN',exact:true}).click());expect(go).toHaveBeenCalledWith('development/detail','incoming-dev',{section:'incoming:'+sample.id});expect(queryByRole(host,'button',{name:/发起本样品QC/})).toBeNull();expect(store.run).not.toHaveBeenCalled();
+});
 beforeEach(()=>{store.workspace={id:'workspace',revision:1};presentedError=undefined;store.error='';write.allowed=true;store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'业务员'},'empty');store.run.mockReset();go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 

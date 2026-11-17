@@ -58,6 +58,7 @@ import { createLoginRateLimiter, type LoginRateLimiter } from '../auth/loginRate
 import { primaryImageIds } from '../shared/mistPrimaryImage';
 import { MistPrivateFiles, MistFileIntegrityError, validateFileInput, type MistFileInput, type MistStoredFile } from './files';
 import type { ImagePreviewMode } from './imagePreview';
+import {developmentIncomingReadKeys,type DevelopmentIncomingCommand} from '../shared/mistDevelopmentIncoming';
 import { prepareMistBusinessNumbers } from './businessNumbers';
 import { buildIssueArchive, bindIssueArchive, prepareCreditDocumentSnapshot, assertCreditIssuePayload, assertIssuedCreditArchive, type PreparedCreditIssueArchive } from './creditPrint';
 import { buildQuotationDocument, bindQuotationDocument, nextQuotationDocumentSeq, prepareQuotationDocumentSnapshot } from './quotationPrint';
@@ -1210,6 +1211,7 @@ export class MistRepository {
           if (!changeKeys) fail('REVISION_CONFLICT', '公司已被他人更新，本次修改范围过大无法自动合并，请刷新后重试', 409);
           if(shipmentReadKeys(row.state,command).some(key=>concurrent.some(other=>overlapping(key,other))))fail('REVISION_CONFLICT','出运来源已更新，请刷新后重新核对',409);
           if(qcReportReadKeys(row.state,command).some(key=>concurrent.some(other=>overlapping(key,other))))fail('REVISION_CONFLICT','QC实物或任务已更新，请刷新后重新核对',409);
+          if(command?.type.startsWith('development.incoming.')&&developmentIncomingReadKeys(row.state,command as DevelopmentIncomingCommand).some(key=>concurrent.some(other=>overlapping(key,other))))fail('REVISION_CONFLICT','来样或工厂任务已更新，请刷新后重新核对',409);
           if (changeKeys!.some(key => concurrent.some(other => overlapping(key, other)))) fail('REVISION_CONFLICT', '其他人已修改同一记录，为避免覆盖对方的更新未自动合并，请刷新核对后重试', 409);
         }
         // 需要签字的批准：权限、范围、并发与业务门禁都已通过（结果仍在副本上）才要求签字；预演不落账，不要求签字。

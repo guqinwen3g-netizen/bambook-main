@@ -36,7 +36,7 @@ type LedgerRow = { id: string; shelf: Shelf; name: string; samples: FulfillmentS
 const MOVE_LABEL: Record<SampleMovement['kind'], string> = { receive: '入库', lend: '借出', return: '归还', send: '寄出', move: '移位', scrap: '报废', returnFactory: '退还工厂' };
 const shelfOf = (sample: FulfillmentSample): Shelf => sample.category === '面料' ? 'fabric' : sample.category === '成衣' ? 'garment' : 'other';
 const archiveKey = (sample: FulfillmentSample) => sample.source.kind === 'version' ? 'v:' + sample.source.versionId
-  : sample.source.kind === 'orderLine' ? `l:${sample.source.lineId}:${sample.source.productionId || ''}` : `m:${sample.name}|${sample.source.description}`;
+  : sample.source.kind === 'orderLine' ? `l:${sample.source.lineId}:${sample.source.productionId || ''}` : sample.source.kind==='developmentIncoming'?`incoming:${sample.source.receiptId}`:`m:${sample.name}|${sample.source.description}`;
 
 function ledgerRows(samples: FulfillmentSample[]): LedgerRow[] {
   const rows: LedgerRow[] = [], archives = new Map<string, LedgerRow>();
@@ -187,14 +187,14 @@ export function SamplesPage() {
         ...(kind === 'lend' ? [field('borrowerId', '借用人', 'select', true, [emptyOption, ...memberSelectOptions(members)])] : kind !== 'scrap' ? [field('person', kind === 'send' ? '收件人 / 公司' : kind === 'returnFactory' ? '退回工厂' : '经手人', 'text', kind === 'send' || kind === 'returnFactory')] : []),
         ...(kind === 'send' ? [field('destination', '寄送去向', 'text', false), field('carrier', '快递公司', 'text', false), field('trackingNo', '运单号', 'text', false), { ...field('feeAmount', '寄样费', 'number', false), min: 0 }, field('feeCurrency', '寄样费币种', 'select', false, ['CNY', 'USD', 'EUR'].map(c => ({ value: c, label: c })))] : kind === 'move' || kind === 'return' ? [field('location', '新位置', 'text', false)] : []),
         ...(kind === 'lend' ? [field('expectedReturn', '预计归还日', 'date', false)] : []), field('note', kind === 'scrap' || kind === 'returnFactory' ? '原因' : '交接说明', 'textarea', kind === 'scrap' || kind === 'returnFactory')],
-      initialValues: {sendPurpose:sample.source.kind==='manual'?'other':'confirmation',quantity: kind === 'return' ? 0 : sample.available, person: '', borrowerId: '', destination: '', carrier: '', trackingNo: '', feeAmount: '', feeCurrency: 'CNY', location: kind === 'return' || kind === 'send' || sample.location === '多个位置' ? '' : sample.location, note: '', loanId: '', expectedReturn: '', sourceLocation: '__choose__' },
+      initialValues: {sendPurpose:sample.source.kind==='manual'||sample.source.kind==='developmentIncoming'?'other':'confirmation',quantity: kind === 'return' ? 0 : sample.available, person: '', borrowerId: '', destination: '', carrier: '', trackingNo: '', feeAmount: '', feeCurrency: 'CNY', location: kind === 'return' || kind === 'send' || sample.location === '多个位置' ? '' : sample.location, note: '', loanId: '', expectedReturn: '', sourceLocation: '__choose__' },
       submitLabel: '保存流转',
       submit: values => run({ type: 'fulfillment.samples.move', payload: { id: sample.id, kind,...(kind==='send'?{sendPurpose:sampleSendPurpose(text(values,'sendPurpose'),sample)}:{}),quantity: kind === 'move' ? 0 : number(values, 'quantity'), ...(kind === 'lend' ? { borrowerId: text(values, 'borrowerId'), person: members.find(m => m.id === text(values, 'borrowerId'))?.name || '' } : { person: text(values, 'person') }), location: text(values, 'location'), note: text(values, 'note'),
         ...(kind === 'send' ? { destination: text(values, 'destination'), carrier: text(values, 'carrier'), trackingNo: text(values, 'trackingNo'), ...(Number(values.feeAmount) > 0 ? { fee: { amount: Number(values.feeAmount), currency: text(values, 'feeCurrency') || 'CNY' } } : {}) } : {}),
         ...(text(values, 'loanId') ? { loanId: text(values, 'loanId') } : {}), ...(text(values, 'expectedReturn') ? { expectedReturn: text(values, 'expectedReturn') } : {}), ...(text(values, 'sourceLocation') !== '__choose__' ? { sourceLocation: text(values, 'sourceLocation') } : {}) } }) });
   };
   const openSampleQc = (sample: FulfillmentSample) => {
-    const source = sample.source; if (source.kind === 'manual' || !state) return;
+    const source = sample.source; if (source.kind !== 'version' && source.kind !== 'orderLine' || !state) return;
     const existing = state.fulfillment.qcTasks.find(task => task.sampleId === sample.id);
     const qcTarget = sample.role === 'shipping' && sample.shipmentId ? { section: 'shipment:' + sample.shipmentId, productionId: source.kind === 'orderLine' ? source.productionId : undefined } : { section: 'sample', ...(source.kind === 'orderLine' ? { orderLineId: source.lineId, productionId: source.productionId } : { versionId: source.versionId }) };
     if (existing) { go('qc-workbench', existing.id, qcTarget); return; }
@@ -252,7 +252,7 @@ export function SamplesPage() {
     <Toolbar>
       <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索档案号、名称、来源或位置")} />
       <Dropdown label={uiText("形态")} value={form} onChange={setForm} options={[{ value: 'all', label: '全部形态' }, ...forms.map(value => ({ value, label: value }))]} />
-      <Dropdown label={uiText("来源")} value={origin} onChange={setOrigin} options={[{ value: 'all', label: '全部来源' }, { value: 'version', label: '开发版本' }, { value: 'orderLine', label: '订单条目' }, { value: 'manual', label: '手工登记' }]} />
+      <Dropdown label={uiText("来源")} value={origin} onChange={setOrigin} options={[{ value: 'all', label: '全部来源' }, { value: 'version', label: '开发版本' }, { value: 'orderLine', label: '订单条目' }, { value: 'manual', label: '手工登记' }, {value:'developmentIncoming',label:'开发来样'}]} />
     </Toolbar>
     <Pipeline value={statusFilter} onChange={value => setStatusFilter(value as StatusFilter)} items={[
       { value: 'all', label: '全部', count: statusCounts('all'), color: 'var(--mist-ink-2)' },
@@ -294,7 +294,7 @@ function SampleDetail({ row, state, day, can, locked, onMove, onEdit, onQc, onAt
     </div>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill>{primary.category}</Pill><Pill tone={status.tone}>{uiText(status.label)}</Pill>{primary.role && <Pill tone="accent">{fulfillmentSampleRoleLabel(primary.role)}</Pill>}</div>
     <Facts items={[
-      { label: '来源', value: <SourceLink source={primary.source} /> },
+      { label: '来源', value: <SourceLink source={primary.source} sampleId={primary.id} /> },
       { label: row.shelf === 'fabric' ? '样品数' : '规格', value: row.shelf === 'fabric' ? `${row.samples.length}` : [primary.size, primary.color].filter(Boolean).join(' · ') || '未记录' },
       ...(shipment ? [{ label: '出运批次', value: <Mono>{shipment.code}</Mono> }] : []),
       ...(row.samples.length===1?[{ label: '登记', value: shortWhen(primary.createdAt) }]:[]),
@@ -314,7 +314,7 @@ function SampleDetail({ row, state, day, can, locked, onMove, onEdit, onQc, onAt
           { label: '退还工厂', onClick: () => onMove(sample, 'returnFactory'), hidden: !!why(sample, 'returnFactory') },
           { label: '报废', onClick: () => onMove(sample, 'scrap'), hidden: !!why(sample, 'scrap') },
         ]} />}
-        {sample.source.kind !== 'manual' && (state.fulfillment.qcTasks.some(task=>task.sampleId===sample.id) || session.hasPermission(sample.source.kind==='version'?'products:write':'orders:write')) && <Button onClick={() => onQc(sample)}>{uiText("查看 / 发起本样品QC")}</Button>}
+        {(sample.source.kind === 'version'||sample.source.kind==='orderLine') && (state.fulfillment.qcTasks.some(task=>task.sampleId===sample.id) || session.hasPermission(sample.source.kind==='version'?'products:write':'orders:write')) && <Button onClick={() => onQc(sample)}>{uiText("查看 / 发起本样品QC")}</Button>}
         {row.samples.length>1&&can&&<Button icon={Pencil} disabled={locked} onClick={()=>onEdit(sample)}>{uiText('编辑资料')}</Button>}
         {row.samples.length>1&&sample.note&&<p className="mist-sub">{sample.note}</p>}
       </div>; })}

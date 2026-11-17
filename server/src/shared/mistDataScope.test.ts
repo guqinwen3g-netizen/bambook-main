@@ -2,6 +2,10 @@ import { expect, it } from 'vitest';
 import { applyDataScope, scopedWriteViolation } from './mistDataScope';
 import { assertOrderDepositCovered, orderDepositCoverage, orderFundingCoveredAmount } from './mistOrderFunding';
 import { projectState } from '../mist/access';
+it('does not spread upstream incoming originals to a team that only reads a development through its own order',()=>{
+ const state:any={customers:[{id:'c',ownerId:'another'}],crm:{opportunities:[],followUps:[]},devs:[{id:'dev',customerId:'c',ownerId:'another',values:{domain:'fabric'}}],versions:[{id:'v',devId:'dev'}],market:{quotations:[],suppliers:[]},orders:[{id:'o',customerId:'c',ownerId:'another',type:'fabric'}],orderLines:[{id:'l',orderId:'o',sourceDevId:'dev',sourceVersionId:'v'}],fulfillment:{samples:[{id:'incoming',source:{kind:'developmentIncoming',devId:'dev',receiptId:'r'},fileIds:[]},{id:'returned',source:{kind:'version',devId:'dev',versionId:'v'},fileIds:[]}]},platform:{},events:[],tasks:[],notifications:[],calendar:[],teamScopes:[{teamId:'team',conditions:[],picks:[{kind:'order',id:'o'}],exclusions:[]}]};
+ const visible=applyDataScope(state,{userIds:['me'],teamIds:['team']});expect(visible.devs.some(d=>d.id==='dev')).toBe(true);expect(visible.fulfillment.samples.some(s=>s.id==='returned')).toBe(true);expect(visible.fulfillment.samples.some(s=>s.id==='incoming')).toBe(false);
+});
 
 it('limits a server-authorized main decision to its exact contract and line changes',()=>{
  const before:any={customers:[],crm:{opportunities:[],followUps:[]},devs:[],market:{quotations:[],suppliers:[]},orders:[{id:'reviewed',ownerId:'other',type:'fabric'},{id:'unrelated',ownerId:'other',type:'fabric'}],orderLines:[{id:'reviewed-line',orderId:'reviewed',qty:1},{id:'unrelated-line',orderId:'unrelated',qty:1}],fulfillment:{},platform:{},events:[],tasks:[],notifications:[],calendar:[]},scope={userIds:['reviewer'],teamIds:[]};
