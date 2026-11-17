@@ -261,7 +261,7 @@ export function SamplesPage() {
       { value: 'overdue', label: '逾期未还', count: statusCounts('overdue'), color: 'var(--mist-bad)' },
       { value: 'empty', label: '已寄出 / 无可用', count: statusCounts('empty'), color: 'var(--mist-ink-3)' },
     ]} />
-    <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected?.name || '样品详情'} drawerSub={selected&&selected.samples.length>1?ui`${selected.samples.length}份样品`:selected?.primary.code}
+    <ListDetail freezeLayout={!!dialog} drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected?.name || '样品详情'} drawerSub={selected&&selected.samples.length>1?ui`${selected.samples.length}份样品`:selected?.primary.code}
       list={<Card><DataTable ariaLabel={uiText("样品台账")} loading={loading} rows={visible} rowKey={row => row.id} selectedKey={selected?.id} density="comfy" onRowClick={pick}
         columns={shelf === 'fabric' ? fabricColumns : pieceColumns}
         empty={shelfRows.length ? <EmptyState icon={SearchX} title={uiText("没有符合条件的样品")} description={uiText("换个关键词或清除筛选。")} action={<TextLink onClick={() => { setQuery(''); setForm('all'); setOrigin('all'); setStatusFilter('all'); }}>{uiText("清除筛选")}</TextLink>} />

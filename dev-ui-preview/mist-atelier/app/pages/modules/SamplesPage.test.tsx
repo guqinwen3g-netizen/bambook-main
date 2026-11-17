@@ -2,7 +2,7 @@
 import React,{act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {getAllByRole,getByRole,queryByRole} from '@testing-library/dom';
+import {fireEvent,getAllByRole,getByRole,queryByRole} from '@testing-library/dom';
 import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentSample} from '../../../../../server/src/shared/mistFulfillment';
@@ -20,6 +20,11 @@ const version={kind:'version' as const,devId:'dev',versionId:'ver'};
 function fabric(id:string,form:string,unit:string,quantity:number,available:number):FulfillmentSample{return {id,code:id.toUpperCase(),name:'亚麻平纹',category:'面料',form,unit,quantity,available,location:'A-01',size:'',color:'',source:version,fileIds:[],note:'',createdAt:'2026-10-10T08:00:00Z'};}
 beforeEach(()=>{store.workspace={id:'workspace',revision:1};presentedError=undefined;store.error='';write.allowed=true;store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'业务员'},'empty');store.run.mockReset();go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
+
+it('keeps an open sample movement above a responsive detail drawer and retains its location',async()=>{
+ const previous=window.matchMedia,listeners=new Set<()=>void>(),media={matches:false,addEventListener:(_type:string,fn:()=>void)=>listeners.add(fn),removeEventListener:(_type:string,fn:()=>void)=>listeners.delete(fn)};Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:()=>media});
+ try{store.state!.fulfillment.samples.push(fabric('smp-layer','A4','张',2,2));render();await act(async()=>getByRole(getByRole(host,'table',{name:'样品台账'}),'row',{name:/SMP-LAYER/}).click());await act(async()=>getByRole(host,'button',{name:'移位',exact:true}).click());const d=getByRole(document.body,'dialog',{name:'登记移位 · A4',exact:true}),location=getByRole(d,'textbox',{name:'新位置',exact:true})as HTMLInputElement;act(()=>fireEvent.change(location,{target:{value:'复核位置'}}));act(()=>{media.matches=true;listeners.forEach(fn=>fn());});expect(getAllByRole(document.body,'dialog')).toHaveLength(1);expect(location.value).toBe('复核位置');await act(async()=>getByRole(d,'button',{name:'取消',exact:true}).click());expect(getByRole(document.body,'dialog',{name:'亚麻平纹',exact:true})).toBeTruthy();expect(store.run).not.toHaveBeenCalled();}finally{Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:previous});}
+});
 
 it('opens a linked sample on compact screens and opens the next linked sample after closing',async()=>{
   const matchMedia=window.matchMedia;
