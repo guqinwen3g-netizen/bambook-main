@@ -1,4 +1,4 @@
-import {projectDevelopmentReferenceAccess,developmentReferenceTargetViolation} from './developmentReferenceAccess';
+import {projectDevelopmentReferenceAccess,developmentReferenceTargetViolation,developmentReferenceWithdrawalException} from './developmentReferenceAccess';
 import {developmentReferenceReadKeys,type DevelopmentReferenceCommand} from '../shared/mistDevelopmentSampleReferences';
 import {developmentTaskClosePlan,developmentTaskLifecycleReadKeys} from '../shared/mistDevelopmentTaskLifecycle';
 import { teamReportReadPermissions } from './teamReportAccess';
@@ -330,6 +330,7 @@ export class MistRepository {
   private accessView(row: MistWorkspaceRow, actor: TokenPayload, scope = scopeOf(row), state = row.state) {
     return projectState(state, actor, this.emptyState(actor), fileOwner(row), scope, this.filePrivacy(row, state), row.id);
   }
+  private visibleCommandSources(row:MistWorkspaceRow,actor:TokenPayload,visible:MistState,command:unknown){return knownCommandSourcesVisible(row.state,visible,developmentReferenceWithdrawalException(row.state,visible,actor,scopeOf(row),command))(command);}
   private async issuedCreditBytes(workspaceId: string, file: MistStoredFile, version: Parameters<typeof assertIssuedCreditArchive>[0]) {
     try { return assertIssuedCreditArchive(version, await this.files.read(workspaceId, file)); }
     catch (error) {
@@ -440,7 +441,7 @@ export class MistRepository {
   }
   private view(row: MistWorkspaceRow, actor: TokenPayload) {
     const projected = this.accessView(row, actor, scopeOf(row)), owner = isOwner(row, actor), company = companyRow(row);
-    const proposalSources=projected.state.agentProposals?.some(p=>!p.taskId)?knownCommandSourcesVisible(row.state,projected.state):undefined;
+    const proposalSources=projected.state.agentProposals?.some(p=>!p.taskId)?(command:unknown)=>this.visibleCommandSources(row,actor,projected.state,command):undefined;
     if(projected.state.agentProposals)projected.state.agentProposals=projected.state.agentProposals.map(p=>{
       const access=p.taskId?TASK_PROPOSAL_ACCESS.get(row)?.get(p.id):undefined;
       if(this.proposalReadable(row,actor,p.command)&&(p.taskId?access?.visible:proposalSources?.(p.command)))return {...p,risk:p.state==='pending'?effectiveAgentCommandRisk(p.command,row.state):p.risk??agentCommandRisk(p.command.type),...(access?.blocked?{taskBlocked:access.blocked}:{})};
@@ -970,7 +971,7 @@ export class MistRepository {
           await this.authorizeAiWrite(db,prior,risk);
           if(high&&(!reauthGrant||reauthGrant.proposalId!==confirmProposalId||reauthGrant.command!==canonical(input.command)||(!!locked&&reauthGrant.command!==canonical(locked))))fail('REAUTH_REQUIRED','确认高风险 AI 提议须输入本人当前登录密码',403);
         }
-        if(humanTaskProposal&&!humanTaskProposal.taskId){const visible=this.accessView(row, actor, scopeOf(row)).state;if(!this.proposalReadable(row,actor,humanTaskProposal.command)||!knownCommandSourcesVisible(row.state,visible)(humanTaskProposal.command))fail('FORBIDDEN','提议来源已不可见，请拒绝后重新核对',403);}
+        if(humanTaskProposal&&!humanTaskProposal.taskId){const visible=this.accessView(row, actor, scopeOf(row)).state;if(!this.proposalReadable(row,actor,humanTaskProposal.command)||!this.visibleCommandSources(row,actor,visible,humanTaskProposal.command))fail('FORBIDDEN','提议来源已不可见，请拒绝后重新核对',403);}
         if(humanTaskProposal?.taskId){this.assertTaskSources(row,actor,(await taskRecord(db,workspaceId,humanTaskProposal.taskId)).value);await assertHumanTaskProposal(db,actor,workspaceId,humanTaskProposal.taskId,humanTaskProposal.id,Date.now());}
         // 版本落后时只在能证明安全时把本命令重新应用到最新状态；否则照旧明确拒绝。
         const concurrent = row.revision === input.expectedRevision ? undefined : await this.concurrentChanges(db, workspaceId, row.revision, input.expectedRevision, upload ? 'files.add' : input.command?.type);
@@ -1040,7 +1041,7 @@ export class MistRepository {
           check(input.command.payload);
         }
         if (earlyScope && scopedTargetViolation(row.state, earlyScope, input.command, input.claimId, actor.userId)) fail('NOT_FOUND', '记录不存在或不在当前账号的业务范围内', 404);
-        if(input.command?.type.startsWith('development.reference.')&&developmentReferenceTargetViolation(row.state,this.accessView(row,actor,earlyScope).state,earlyScope,input.command as DevelopmentReferenceCommand))fail('NOT_FOUND','参考实物不存在或不在当前账号的业务范围内',404);
+        if((input.command?.type==='agent.proposal.create'?input.command.payload?.command:input.command)?.type?.startsWith('development.reference.')&&developmentReferenceTargetViolation(row.state,this.accessView(row,actor,earlyScope).state,earlyScope,(input.command.type==='agent.proposal.create'?input.command.payload.command:input.command) as DevelopmentReferenceCommand))fail('NOT_FOUND','参考实物不存在或不在当前账号的业务范围内',404);
         const scopeManagement = input.command?.type?.startsWith('teamScope.') || REVIEW_KIND_BY_COMMAND.has(input.command?.type);
         const crossIssue=input.command?.type==='fulfillment.materials.issue'?input.command.payload:undefined;
         const crossTarget=earlyScope&&crossIssue&&scopedMaterialIssueTargets(row.state,earlyScope)[crossIssue.id]?.some(option=>option.value===crossIssue.targetProductionId)?crossIssue.targetProductionId:undefined;

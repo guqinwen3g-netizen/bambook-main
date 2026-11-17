@@ -1,3 +1,4 @@
+import {developmentReferenceCommandSources,type ReferenceCommandSources} from './developmentReferenceReadRecords';
 import type {TokenPayload} from '../auth/service';
 import {hasScope} from '../auth/permissionService';
 import type {PermissionScope} from '../_shared/rolePermissionMatrix';
@@ -5,8 +6,8 @@ import type {MistState,MistWorkspaceEnvelope} from '../shared/mistWorkspace';
 import type {DevelopmentTaskClosePlan} from '../shared/mistDevelopmentTaskLifecycle';
 import {shippingSampleSourceSnapshot,shipmentHasDeparted,type ShippingSampleSourceSnapshot} from '../shared/mistShipmentSampleCustody';
 
-export type AgentGetContext=Pick<MistWorkspaceEnvelope,'developmentTaskClosePlans'>;
-export type AgentCommandSources={
+export type AgentGetContext=Pick<MistWorkspaceEnvelope,'developmentTaskClosePlans'|'developmentReferenceAccess'>;
+export type AgentCommandSources=ReferenceCommandSources&{
  taskClosePlan?:DevelopmentTaskClosePlan|null;
  taskReopenSource?:{devId:string;versionId:string;expectedTaskEndId:string}|null;
  shippingBasisSource?:{sourceSnapshot:ShippingSampleSourceSnapshot;reconcileDeparted:boolean}|null;
@@ -46,7 +47,8 @@ function completeShippingSnapshot(snapshot:ShippingSampleSourceSnapshot):boolean
 }
 
 export function agentCommandSources(state:MistState,actor:TokenPayload,type:string,row:any,context:AgentGetContext):AgentCommandSources{
- if(type==='development')return{taskClosePlan:currentPlan(state,actor,row,context)};
+ if(type==='development')return{taskClosePlan:currentPlan(state,actor,row,context),...developmentReferenceCommandSources(state,actor,type,row,context)};
+ if(type==='development_reference'||type==='sample_movement')return developmentReferenceCommandSources(state,actor,type,row,context);
  if(type==='dev_version'){
   const devs=state.devs.filter(dev=>dev.id===row.devId),dev=devs.length===1?devs[0]:undefined;
   const plan=currentPlan(state,actor,dev,context),end=row.taskEnd;

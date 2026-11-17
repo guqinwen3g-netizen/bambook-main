@@ -11,7 +11,7 @@ export type DevelopmentReferenceFacts={source?:FulfillmentSampleSource;code:stri
 export type DevelopmentReferenceSnapshot={id:string;facts:DevelopmentReferenceFacts;purpose:string;sourceHash:string;hash:string;at:string;by:string;byId:string};
 export type DevelopmentSampleReference={id:string;sampleId:string;purpose:string;linkedAt:string;linkedBy:string;linkedById:string;snapshots:DevelopmentReferenceSnapshot[];withdrawn?:{at:string;by:string;byId:string;reason:string};withdrawalHistory?:Array<{at:string;by:string;byId:string;reason:string}>};
 export type DevelopmentReferenceTransfer={devId:string;taskVersionId:string;referenceId:string;snapshotId:string;dispatchId:string;supplierId:string;supplierName:string;direction:'out'|'return';occurredAt:string;delivery:IncomingDelivery;returnBatchId?:string;postage?:IncomingPostage;expenseId?:string};
-export type DevelopmentReferenceAccess={readableDevIds:string[];writableDevIds:string[];writableSampleIds:string[];referencesByDev:Record<string,Array<{referenceId:string;readable:boolean;canRemove:boolean;canDispatch:boolean;canReturn:boolean;blocker?:string}>>};
+export type DevelopmentReferenceAccess={readableDevIds:string[];writableDevIds:string[];writableSampleIds:string[];referencesByDev:Record<string,Array<{referenceId:string;readable:boolean;withdrawn:boolean;canRemove:boolean;canDispatch:boolean;canReturn:boolean;blocker?:string}>>};
 export type DevelopmentReferenceCommand=
  |{type:'development.reference.add';payload:{devId:string;sampleId:string;purpose:string;fileIds?:string[]}}
  |{type:'development.reference.remove';payload:{devId:string;referenceId:string;reason:string}}

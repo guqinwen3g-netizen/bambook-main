@@ -1,3 +1,4 @@
+import {developmentReferenceReadRows,developmentReferenceCaseReadRecord} from './developmentReferenceReadRecords';
 /**
  * 工作助手业务读取（bambook_query / bambook_get / bambook_expand）。
  * 只在“按当前执行者权限裁剪后的公司状态”上运行：仓储先按账号权限 ∩ 委托上限投影，这里再按对象类型的读权限复核一次。
@@ -24,6 +25,7 @@ export const AGENT_OBJECT_TYPES: ObjectType[] = [
   { type: 'order', label: '订单', scope: 'orders:read', path: ['orders'], view: 'orders/detail' },
   { type: 'order_line', label: '订单行', scope: 'orders:read', path: ['orderLines'], view: 'orders/detail', linkId: r => r.orderId },
   { type: 'development', label: '开发单', scope: 'products:read', path: ['devs'], view: 'development/detail' },
+  {type:'development_reference',label:'开发参考实物',scope:'products:read',path:['devs','sampleReferences'],view:'development/detail',section:'references',linkId:r=>r.devId,flatten:developmentReferenceReadRows},
   { type: 'development_draft', label: '开发草稿', scope: 'products:read', path: ['drafts'], view: 'development/new' },
   { type: 'dev_version', label: '开发版本', scope: 'products:read', path: ['versions'], view: 'development/detail', linkId: r => r.devId },
   { type: 'product', label: '产品档案', scope: 'products:read', path: ['market', 'products'], view: 'products' },
@@ -105,6 +107,7 @@ function bankAccountReadRecord(row:any){
   return{...row,accountNo:no?'****'+no.slice(-4):''};
 }
 function mailReadRecord(type:string,row:any){
+  if(type==='development')return developmentReferenceCaseReadRecord(row);
   if(type==='bank_account')return bankAccountReadRecord(row);
   // 报价和订单记录里内嵌的生成文件也不带快照，和单独读取文件一致。
   if((type==='order'||type==='quotation')&&Array.isArray(row.documents))return{...row,documents:row.documents.map(({snapshot:_snapshot,...document}:any)=>document)};
@@ -174,7 +177,7 @@ function summary(row: any, type?:ObjectType) {
 }
 function link(type: ObjectType, row: any) {
   const id = type.linkId ? type.linkId(row) : row.id;
-  return typeof id === 'string' && id ? `bambook://open?${new URLSearchParams({view:type.view,id,...(type.section?{section:type.section}:{}),...(type.type==='dev_version'?{versionId:row.id}:{}),...(type.type==='order_line'?{orderLineId:row.id}:{})})}` : null;
+  return typeof id === 'string' && id ? `bambook://open?${new URLSearchParams({view:type.view,id,...(type.section?{section:type.section}:{}),...(type.type==='dev_version'?{versionId:row.id}:{}),...(type.type==='development_reference'?{section:'reference:'+row.id}:{}),...(type.type==='order_line'?{orderLineId:row.id}:{})})}` : null;
 }
 function ref(type: ObjectType, row: any) { return { type: type.type, id: row.id as string, label: labelOf(type.type==='development_draft'?{id:row.id,name:row.values?.name}:row), link: link(type, row) }; }
 
@@ -269,7 +272,7 @@ export function agentRelated(state: MistState, actor: TokenPayload, typeName: un
   const { type, row } = find(state, actor, typeName, id);
   const idsOf = (r: any): string[] => Object.entries(r).flatMap(([k, v]) => !/(Id|Ids)$/.test(k) ? [] : typeof v === 'string' && v ? [v] : Array.isArray(v) ? v.filter(x => typeof x === 'string') : []);
   // 明细行里的引用也算（如票据 lines[].purchaseId、付款申请 lines[].billId），只展开一层。
-  const scalarRefs = (r: any) => new Set([...idsOf(r), ...(r.source?.kind==='developmentIncoming'&&typeof r.source.devId==='string'?[r.source.devId]:[]), ...Object.values(r).flatMap(v => Array.isArray(v) ? v.filter(x => x && typeof x === 'object' && !Array.isArray(x)).flatMap(idsOf) : [])]);
+  const scalarRefs = (r: any) => new Set([...idsOf(r), ...(r.source?.kind==='developmentIncoming'&&typeof r.source.devId==='string'?[r.source.devId]:[]),...(r.referenceTransfer&&typeof r.referenceTransfer.referenceId==='string'?[r.referenceTransfer.referenceId]:[]), ...Object.values(r).flatMap(v => Array.isArray(v) ? v.filter(x => x && typeof x === 'object' && !Array.isArray(x)).flatMap(idsOf) : [])]);
   const own = scalarRefs(row);
   const results: Array<ReturnType<typeof ref> & { relation: 'references' | 'referenced_by' }> = [];
   let total = 0;

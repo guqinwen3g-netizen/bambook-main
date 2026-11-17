@@ -6,7 +6,7 @@ import { MIST_READ_SECTIONS } from './access';
 import { fail } from './errors';
 
 export type TaskSourceRef = { path: string; id: string; partial: boolean; coverage: string[]; observedRevision?:number; fieldRevisions?:Record<string,number>; fullReadHash?:string };
-const PATHS = [...new Set<string>([...SCOPED_COLLECTIONS,...MIST_READ_SECTIONS.flatMap(section=>section.paths.filter(path=>!path.some(key=>key.startsWith('partial'))).map(path=>path.join('.'))), 'customers','contacts','fabrics','files','market.products','market.suppliers','market.relations','email.accounts','email.messages','email.drafts','email.sends'])];
+const PATHS = [...new Set<string>([...SCOPED_COLLECTIONS,...MIST_READ_SECTIONS.flatMap(section=>section.paths.filter(path=>!path.some(key=>key.startsWith('partial'))).map(path=>path.join('.'))), 'devs.sampleReferences','customers','contacts','fabrics','files','market.products','market.suppliers','market.relations','email.accounts','email.messages','email.drafts','email.sends'])];
 const PARTIAL: Record<string,string> = { 'orderCosts.expenses':'partialExpenses','payables.bills':'partialPayableBills','receipts':'partialReceipts','customerStatements':'partialStatements','letterOfCredits':'partialLettersOfCredit' };
 const hash = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
 function ordered(v: any): any { return Array.isArray(v) ? v.map(ordered) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k=>[k,ordered(v[k])])) : v; }
@@ -16,6 +16,8 @@ export function taskScopeHash(scope?: MistDataScope, state?: MistState) {
   return hash(ordered({ scope: scope ? { users:[...scope.userIds].sort(),teams:[...scope.teamIds].sort(),lines:[...(scope.lines??[])].sort() } : null, configurations: scope ? (state?.teamScopes??[]).filter(s=>scope.teamIds.includes(s.teamId)).map(s=>({teamId:s.teamId,conditions:s.conditions,picks:s.picks,exclusions:s.exclusions})).sort((a,b)=>a.teamId.localeCompare(b.teamId)) : [] }));
 }
 function rows(state: MistState, path: string): Array<{row:any;partial:boolean}> {
+  // A virtual read path only. Its parent and source have already passed the current projection.
+  if(path==='devs.sampleReferences')return(state.devs||[]).flatMap(dev=>(dev.sampleReferences||[]).filter(ref=>ref&&typeof ref.id==='string').map(ref=>({row:{...ref,devId:dev.id},partial:!ref.snapshots?.length||!state.fulfillment?.samples?.some(sample=>sample.id===ref.sampleId)})));
   let value: any = state; for(const key of path.split('.'))value=value?.[key];
   const full = Array.isArray(value)?value.filter(r=>r&&typeof r.id==='string'):[];
   const partial = (state as any)[PARTIAL[path]];
@@ -34,17 +36,24 @@ function index(state: MistState) {
   return {byPath,byId};
 }
 /** Existing business references cannot gain visibility from a proposal or a same-ID record in another collection. */
-export function knownCommandSourcesVisible(raw:MistState,current:MistState){
+export function knownCommandSourcesVisible(raw:MistState,current:MistState,withdrawal?:{devId:string;referenceId:string}){
   const source=index(raw),visible=index(current);
   return (command:unknown)=>{
-    const visit=(value:any):boolean=>{
-      if(typeof value==='string')return(source.byId.get(value)??[]).every(path=>{
-        const before=source.byPath.get(path)?.get(value),shown=visible.byPath.get(path)?.get(value);
-        if(!shown||!before.partial&&shown.partial)return false;
-        if(!shown.partial)return true;const allowed=new Set(coverage(shown.row));return coverage(before.row).every(id=>allowed.has(id));
-      });
-      if(Array.isArray(value))return value.every(visit);
-      if(value&&typeof value==='object')return Object.entries(value).every(([key,child])=>visit(key)&&visit(child));
+    const c=command as any,p=c?.payload;
+    // The repository supplies this one exact exception after fresh case scope, permissions and loan checks.
+    // No other field/value can borrow an opaque relationship's withdrawal authority.
+    const opaque=c?.type==='development.reference.remove'&&!!withdrawal&&p&&typeof p==='object'&&!Array.isArray(p)&&Object.keys(c).sort().join('|')==='payload|type'&&Object.keys(p).sort().join('|')==='devId|reason|referenceId'&&p.devId===withdrawal.devId&&p.referenceId===withdrawal.referenceId&&typeof p.reason==='string'&&!!p.reason.trim()&&p.reason.trim().length<=1000;
+    const visit=(value:any,key=''):boolean=>{
+      if(typeof value==='string'){
+        if(opaque&&key==='referenceId'&&value===withdrawal!.referenceId)return true;
+        return(source.byId.get(value)??[]).every(path=>{
+          const before=source.byPath.get(path)?.get(value),shown=visible.byPath.get(path)?.get(value);
+          if(!shown||!before.partial&&shown.partial)return false;
+          if(!shown.partial)return true;const allowed=new Set(coverage(shown.row));return coverage(before.row).every(id=>allowed.has(id));
+        });
+      }
+      if(Array.isArray(value))return value.every(child=>visit(child));
+      if(value&&typeof value==='object')return Object.entries(value).every(([field,child])=>visit(field)&&visit(child,field));
       return true;
     };
     return visit(command);
@@ -57,10 +66,16 @@ export function taskSourcesVisible(refs: TaskSourceRef[], scopeHash: string, cur
 }
 /** Required typed object references are rechecked; incidental IDs inside a visible email are not authority. */
 export function collectTaskSources(data: unknown, current: MistState, previous: TaskSourceRef[]): TaskSourceRef[] {
-  const visible=index(current), found=new Map(previous.map(r=>[r.path+'\0'+r.id,r]));
+  const visible=index(current), found=new Map(previous.map(r=>{
+    if(r.path!=='devs.sampleReferences')return[r.path+'\0'+r.id,r] as const;
+    const item=visible.byPath.get(r.path)?.get(r.id);if(item&&!item.partial)return[r.path+'\0'+r.id,r] as const;
+    // A past successful read is history, not a current full-read baseline after source loss.
+    const {fullReadHash:_full,fieldRevisions:_fields,...opaque}=r;
+    return[r.path+'\0'+r.id,{...opaque,partial:true,coverage:item?coverage(item.row):[]}] as const;
+  }));
   const envelope=data as any,revision=Number.isSafeInteger(envelope?.revision)?envelope.revision:Number.isSafeInteger(envelope?.workspace?.revision)?envelope.workspace.revision:undefined;
   const full=envelope?.object?.data&&!envelope.object.truncated?envelope.object:null;
-  const add=(path:string,id:string,required=false,type?:string)=>{const item=visible.byPath.get(path)?.get(id);if(!item){if(required)fail('AGENT_TASK_SCOPE_CHANGED','任务来源已不可见，请重新安排任务',403);return;}const prior=found.get(path+'\0'+id),freshFull=required&&revision!==undefined&&full?.id===id&&full?.type===type,observed=required&&revision!==undefined&&(prior?.observedRevision===undefined||freshFull)?revision:prior?.observedRevision;const fullReadHash=freshFull&&full.truncated===false?taskReadHash(full.data):prior?.fullReadHash;const ref:TaskSourceRef={path,id,partial:item.partial,coverage:item.partial?coverage(item.row):[],...(observed!==undefined?{observedRevision:observed}:{}),...(fullReadHash?{fullReadHash}:{}),...(!freshFull&&prior?.fieldRevisions?{fieldRevisions:prior.fieldRevisions}:{})};found.set(path+'\0'+id,ref);};
+  const add=(path:string,id:string,required=false,type?:string)=>{const item=visible.byPath.get(path)?.get(id);if(!item){if(required)fail('AGENT_TASK_SCOPE_CHANGED','任务来源已不可见，请重新安排任务',403);return;}const prior=found.get(path+'\0'+id),freshFull=required&&revision!==undefined&&full?.id===id&&full?.type===type,observed=required&&revision!==undefined&&(prior?.observedRevision===undefined||freshFull)?revision:prior?.observedRevision;const opaqueReference=path==='devs.sampleReferences'&&item.partial,fullReadHash=opaqueReference?undefined:freshFull&&full.truncated===false?taskReadHash(full.data):prior?.fullReadHash;const ref:TaskSourceRef={path,id,partial:item.partial,coverage:item.partial?coverage(item.row):[],...(observed!==undefined?{observedRevision:observed}:{}),...(fullReadHash?{fullReadHash}:{}),...(!opaqueReference&&!freshFull&&prior?.fieldRevisions?{fieldRevisions:prior.fieldRevisions}:{})};found.set(path+'\0'+id,ref);};
   const walk=(v:any)=>{
     if(typeof v==='string'){const id=v.startsWith('i:')?v.slice(2):v;for(const path of visible.byId.get(id)??[])add(path,id);return;}
     if(Array.isArray(v)){v.forEach(walk);return;}
