@@ -208,3 +208,23 @@ it('keeps due corrections distinct from amount confirmation and requires a new c
 it('retains a stale due-review form after another accountant changed its source',async()=>{
  const shipment=pendingAcceptance();shipment.delivered={at:'2026-10-20T10:00:00Z',receiver:'Buyer',evidence:'POD',fileIds:[],recordedBy:'Ops'};render();await click('核对账期');fillForm('客户验收日','2026-10-21');fillForm('验收依据','My old AC1');const i=store.value.state.invoices.at(-1);i.due='2026-11-21';i.dueConfirmation={acceptanceDate:'2026-10-22',basis:'Other AC2',due:'2026-11-21',shipmentId:shipment.id,sourceDocumentId:'conditional-ci',deliveryAt:shipment.delivered.at,at:'2026-10-22T04:00:00Z',actor:'Other'};store.value.workspace.revision=2;render();const d=getByRole(document.body,'dialog',{name:'核对账期 · CI-CONDITIONAL'});await act(async()=>getByRole(d,'button',{name:'核对账期'}).click());expect(store.value.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('账期来源已更新，请重新打开后核对');expect((getByLabelText(d,'客户验收日') as HTMLInputElement).value).toBe('2026-10-21');
 });
+
+it('opens the exact visible customer sample request, with no shipping or CI action', async () => {
+  const state = store.value.state;
+  const row = state.invoices[0];
+  Object.assign(row, { orderId: '', order: 'SR-1', sampleRequestId: 'request', customerId: 'customer', financeStatus: 'pending' });
+  state.sampleRequests = [{ id: 'request', customerId: 'customer' }];
+  route.id = row.id;
+  render();
+  expect(host.textContent).toContain('样品费');
+  expect(host.textContent).not.toContain('来源 CI / 作废回程');
+  expect(host.textContent).not.toContain('驳回 CI');
+  await click('来源索样单');
+  expect(go).toHaveBeenCalledWith('samples', 'request', { section: 'requests' });
+  state.sampleRequests[0].customerId = 'unrelated';
+  render();
+  expect((getByRole(host, 'button', { name: '来源索样单' }) as HTMLButtonElement).disabled).toBe(true);
+  state.sampleRequests = [];
+  render();
+  expect((getByRole(host, 'button', { name: '来源索样单' }) as HTMLButtonElement).disabled).toBe(true);
+});

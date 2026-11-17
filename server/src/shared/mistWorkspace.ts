@@ -60,7 +60,7 @@ import {applyTeamScopeCommand,teamScopeCommandPermission,type MistTeamScope,type
 import {applyOrderCostCommand,orderCostCommandPermission,type OrderCostCommand} from './mistOrderCost';
 import {applyReportScheduleCommand,reportSchedulePermission,type ReportScheduleCommand,type MistReportSchedule} from './mistReportSchedules';
 import {applyOrderSplitCommand,orderDownstreamFacts,type OrderSplitCommand} from './mistOrderSplit';
-import {applySampleRequestCommand,sampleRequestPermission,type SampleRequestCommand,type MistSampleRequest} from './mistSampleRequests';
+import {applySampleRequestCommand,type SampleRequestCommand,type MistSampleRequest} from './mistSampleRequests';
 import {applyFxRateCommand,fxCommandPermission,type FxPeriodRate,type FxRateCommand,type FxRevaluation} from './mistFxRates';
 import {createExportRebateState,applyExportRebateCommand,exportRebateCommandPermission,rebateReceiptUsedMinor,type ExportRebateState,type ExportRebateCommand} from './mistExportRebate';
 import {createPayablesState,applyPayablesCommand,payablesCommandPermission,getPayableReviews,type PayablesState,type PayablesCommand} from './mistPayables';
@@ -930,7 +930,7 @@ export function mistCommandPermission(command: MistCommand): string | null {
   if(command.type.startsWith('team.'))return teamCommandPermission(command as TeamCommand);
   if(command.type.startsWith('teamScope.'))return teamScopeCommandPermission(command as TeamScopeCommand);
   if(command.type.startsWith('cost.'))return orderCostCommandPermission(command as OrderCostCommand);
-  if(command.type.startsWith('sample.request.'))return sampleRequestPermission(command as SampleRequestCommand);
+  if(command.type.startsWith('sample.request.'))return 'products:write';
   if(command.type.startsWith('report.schedule.'))return reportSchedulePermission(command as ReportScheduleCommand);
   if(command.type.startsWith('fulfillment.'))return fulfillmentCommandPermission(command as FulfillmentCommand);
   if(command.type.startsWith('market.'))return marketCommandPermission(command as MarketCommand);

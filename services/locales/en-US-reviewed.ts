@@ -1258,4 +1258,9 @@ export const reviewedEnglish: Record<string, string> = {
   "补记": "Record later",
   "否": "No",
   "内容过多，无法完整核对，请重新提出提议": "The content cannot be fully reviewed. Submit a new proposal.",
+  "需要样品办理权限": "Sample handling permission required",
+  "来源索样单": "Source sample request",
+  "未找到指定索样单": "Sample request not found",
+  "驳回样品费应收": "Reject sample fee receivable",
+  "来源索样单不可见": "Source sample request unavailable",
 };

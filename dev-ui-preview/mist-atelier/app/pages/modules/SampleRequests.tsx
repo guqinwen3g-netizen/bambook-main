@@ -24,11 +24,13 @@ const TONE = { open: 'warn', sent: 'ok', cancelled: 'neutral' } as const;
 export function SampleRequests() {
   const { state, loading, run, saving, pending } = useMistWorkspace(), session = useMistSession(), { route, go } = useNav(), editor = useEditor();
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
-  const [query, setQuery] = React.useState(''), [filter, setFilter] = React.useState<Filter>('open'), [drawer, setDrawer] = React.useState(false);
-  const can = session.hasPermission('products:write'), room = can && session.hasPermission('sample:room:write'), canInvoice = session.hasPermission('invoices:write'), locked = saving || !!pending;
+  const [query, setQuery] = React.useState(''), [filter, setFilter] = React.useState<Filter>('open'), [drawer, setDrawer] = React.useState(!!route.id);
+  const can = session.hasPermission('products:write'), room = can && session.hasPermission('sample:room:write'), locked = saving || !!pending;
   const rows = state ? readSampleRequests(state) : [];
   const shown = rows.filter(r => (filter === 'all' || r.state === filter) && (!query || [r.code, r.customer, r.description, r.recipient].join(' ').toLowerCase().includes(query.toLowerCase())));
-  const selected = rows.find(r => r.id === route.id) || shown[0];
+  const selected = route.id ? rows.find(r => r.id === route.id) : shown[0];
+  React.useEffect(() => { setDrawer(!!route.id); }, [route.id]);
+  const invoice = selected?.fee?.invoiceId && state?.invoices.find(i => i.id === selected.fee?.invoiceId && i.sampleRequestId === selected.id);
   const count = (f: Filter) => rows.filter(r => f === 'all' || r.state === f).length;
   const pick = (r: MistSampleRequest) => { setDrawer(true); go('samples', r.id, { section: 'requests' }, { keepScroll: true }); };
 
@@ -74,7 +76,8 @@ export function SampleRequests() {
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={TONE[selected.state]}>{uiText(SAMPLE_REQUEST_STATE_LABEL[selected.state])}</Pill>{selected.fee && <Pill tone={selected.fee.invoiceId ? 'ok' : 'accent'}>{selected.fee.invoiceId ? ui`样品费已开票 ${selected.fee.invoiceCode || ''}` : ui`收样品费 ${selected.fee.amount} ${selected.fee.currency}`}</Pill>}</div>
     <ActionBar busy={locked} actions={[
       { label: '据单寄出', icon: Send, primary: true, onClick: () => setDialog(fulfillSpec(selected, state)), reason: room ? false : '需要样品间权限', hidden: selected.state !== 'open' },
-      { label: '开具样品费', icon: Receipt, primary: true, onClick: () => setDialog(invoiceSpec(selected)), reason: canInvoice ? false : '需要开票权限', hidden: selected.state !== 'sent' || !selected.fee || !!selected.fee.invoiceId },
+      { label: '开具样品费', icon: Receipt, primary: true, onClick: () => setDialog(invoiceSpec(selected)), reason: can ? false : '需要样品办理权限', hidden: selected.state !== 'sent' || !selected.fee || !!selected.fee.invoiceId },
+      { label: '查看应收', icon: Receipt, onClick: () => invoice && go('invoices', invoice.id), hidden: !invoice || !session.hasPermission('invoices:read') },
       { label: '修改', icon: Pencil, onClick: () => editor.open(saveSpec(selected)), hidden: !can || selected.state !== 'open' || !!selected.shipments.length },
       { label: '取消申请', icon: Ban, onClick: () => setDialog(cancelSpec(selected)), hidden: !can || selected.state !== 'open' || !!selected.shipments.length },
     ]} />
@@ -87,7 +90,7 @@ export function SampleRequests() {
     {selected.note && <p className="mist-sub">{selected.note}</p>}
     {selected.cancelled && <span className="mist-note">{selected.cancelled.actor} · {shortWhen(selected.cancelled.at)} · {selected.cancelled.reason}</span>}
     {!!selected.shipments.length && <DetailBlock title={uiText('寄出记录')}><Timeline events={selected.shipments.slice().reverse().map(s => ({ who: s.actor, when: shortWhen(s.at), text: `${s.sampleCode} · ${s.quantity} ${s.unit}${s.carrier ? ' · ' + s.carrier : ''}${s.trackingNo ? ' · ' + s.trackingNo : ''}` }))} /></DetailBlock>}
-  </DetailBody> : <EmptyState title={uiText(loading ? '正在读取索样申请' : '选择一条索样申请')} compact />;
+  </DetailBody> : <EmptyState title={uiText(loading ? '正在读取索样申请' : route.id ? '未找到指定索样单' : '选择一条索样申请')} compact />;
 
   return <>
     <Toolbar right={can ? <Button variant="primary" icon={Plus} disabled={locked} onClick={() => editor.open(saveSpec())}>{uiText('新建索样申请')}</Button> : undefined}>
@@ -97,7 +100,7 @@ export function SampleRequests() {
       { value: 'open', label: '待寄出', count: count('open'), color: 'var(--mist-warn)' }, { value: 'sent', label: '已寄出', count: count('sent'), color: 'var(--mist-ok)' },
       { value: 'cancelled', label: '已取消', count: count('cancelled'), color: 'var(--mist-ink-3)' }, { value: 'all', label: '全部', count: count('all'), color: 'var(--mist-ink-2)' },
     ]} />
-    <ListDetail freezeLayout={!!dialog} drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected?.customer || '索样申请'} drawerSub={selected?.code}
+    <ListDetail freezeLayout={!!dialog} drawerOpen={drawer && (!!selected || !!route.id)} onDrawerClose={() => setDrawer(false)} drawerTitle={selected?.customer || '索样申请'} drawerSub={selected?.code}
       list={<Card><DataTable ariaLabel={uiText('索样申请')} loading={loading} rows={shown} rowKey={r => r.id} selectedKey={selected?.id} onRowClick={pick} columns={columns}
         empty={<EmptyState title={uiText(rows.length ? '没有符合条件的申请' : '还没有索样申请')} />} /></Card>}
       detail={detail} />

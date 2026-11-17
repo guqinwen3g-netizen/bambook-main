@@ -25,7 +25,8 @@ describe('ord19 客户索样申请 / ord18 样品费', () => {
   it('提单进样品间待办，据单从库存寄出并扣减，寄完自动完成并提醒开样品费', () => {
     const f = fixture();
     expect(mistCommandPermission({ type: 'sample.request.save', payload: {} } as any)).toBe('products:write');
-    expect(mistCommandPermission({ type: 'sample.request.invoice', payload: {} } as any)).toBe('invoices:write');
+    expect(mistCommandPermission({ type: 'sample.request.invoice', payload: {} } as any)).toBe('products:write');
+    expect(mistCommandPermission({ type: 'finance.receivable.confirm', payload: {} } as any)).toBe('invoices:write');
     expect(() => f.run(request({ quantity: 1.5 }))).toThrow('整数');
     const id = f.run(request()).id;
     const r = () => readSampleRequests(f.state).find(x => x.id === id)!;

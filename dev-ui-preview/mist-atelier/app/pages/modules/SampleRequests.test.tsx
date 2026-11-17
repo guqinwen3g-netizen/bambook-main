@@ -6,9 +6,9 @@ import {fireEvent,getByRole,queryByRole} from '@testing-library/dom';
 import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import {Nav} from '../../nav';
-const store=vi.hoisted(()=>({state:null as MistState|null,workspace:{id:'workspace',revision:1},loading:false,saving:false,pending:null,run:vi.fn()}));
+const store=vi.hoisted(()=>({permissions:['products:read','products:write','sample:room:write','invoices:read'],state:null as MistState|null,workspace:{id:'workspace',revision:1},loading:false,saving:false,pending:null,run:vi.fn()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
-vi.mock('../../runtime/auth',()=>{const useMistSession=()=>({user:{id:'sales',displayName:'业务员'},sessionKey:'s',hasPermission:()=>true});return{useMistSession,useOptionalMistSession:useMistSession};});
+vi.mock('../../runtime/auth',()=>{const useMistSession=()=>({user:{id:'sales',displayName:'业务员'},sessionKey:'s',hasPermission:(p:string)=>store.permissions.includes(p)});return{useMistSession,useOptionalMistSession:useMistSession};});
 import {SampleRequests} from './SampleRequests';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let host:HTMLElement,root:Root;const go=vi.fn();
@@ -51,4 +51,26 @@ it('defers a newly narrow request drawer until the open fulfillment dialog close
   expect(queryByRole(document.body,'dialog',{name:'客户',exact:true})).toBeNull();expect(getByRole(document.body,'dialog',{name:'据单寄出 SR-1',exact:true})).toBeTruthy();
   await act(async()=>getByRole(getByRole(document.body,'dialog',{name:'据单寄出 SR-1',exact:true}),'button',{name:'取消',exact:true}).click());expect(getByRole(document.body,'dialog',{name:'客户',exact:true})).toBeTruthy();
  }finally{window.matchMedia=previous;}
+});
+
+it('allows the business handler to issue the sent sample fee and reopen its exact receivable', async () => {
+  const request = store.state!.sampleRequests![0];
+  request.state = 'sent';
+  request.fee = { amount: 12, currency: 'USD' };
+  render();
+  expect((getByRole(host, 'button', { name: '开具样品费' }) as HTMLButtonElement).disabled).toBe(false);
+  request.fee.invoiceId = 'fee';
+  store.state!.invoices.push({ id: 'fee', sampleRequestId: request.id } as any);
+  render();
+  await act(async () => getByRole(host, 'button', { name: '查看应收' }).click());
+  expect(go).toHaveBeenCalledWith('invoices', 'fee');
+  store.state!.invoices[0].sampleRequestId = 'other';
+  render();
+  expect(queryByRole(host, 'button', { name: '查看应收' })).toBeNull();
+});
+it('keeps an unavailable request from selecting the first unrelated record', () => {
+  store.state!.sampleRequests![0].id = 'unrelated';
+  render();
+  expect(host.textContent).toContain('未找到指定索样单');
+  expect(host.querySelector('[data-sample-request]')).toBeNull();
 });

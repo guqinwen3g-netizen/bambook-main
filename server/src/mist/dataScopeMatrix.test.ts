@@ -63,6 +63,26 @@ describe('development invoices follow the exact development scope', () => {
     expect(db.receipts.size).toBe(count);
   });
 });
+it('keeps sample fee issuance in the business scope and posting in finance', async () => {
+  const state = db.workspaces.get(workspaceId)!.state;
+  const request = { id: 'paid-sample', code: 'SR-1', state: 'sent', requesterId: 'demo-sales', customerId: 'customer-0', customer: 'Customer', fee: { amount: 12, currency: 'USD' }, shipments: [] };
+  state.sampleRequests = [request, { ...structuredClone(request), id: 'outside', customerId: 'customer-1', requesterId: 'demo-buyer' }];
+  state.files.push({ id: 'sample-original', name: 'sample.txt', mimeType: 'text/plain', size: 5, storageKey: 'fixture', createdAt: '2026-10-13T00:00:00Z', uploadedBy: 'demo-sales' });
+  const run = (user: string, command: any) => repo.execute(actor(user), workspaceId, { requestId: randomUUID(), expectedRevision: db.workspaces.get(workspaceId)!.revision, command });
+  const issue = (id: string) => ({ type: 'sample.request.invoice', payload: { id, number: 'SF-1', due: '2026-11-04', fileIds: ['sample-original'] } });
+  const before = db.workspaces.get(workspaceId)!.revision;
+  await expect(run('demo-sales', issue('outside'))).rejects.toMatchObject({ status: 404 });
+  await expect(run('finance', issue(request.id))).rejects.toMatchObject({ status: 403 });
+  expect(db.workspaces.get(workspaceId)!.revision).toBe(before);
+  const issued = await run('demo-sales', issue(request.id));
+  const invoiceId = issued.receipt.result.invoiceId;
+  expect(issued.workspace.state.invoices.find(i => i.id === invoiceId)).toMatchObject({ sampleRequestId: request.id, amount: 12, issuedById: 'demo-sales', open: 0, financeStatus: 'pending' });
+  const confirm = { type: 'finance.receivable.confirm', payload: { invoiceId } };
+  await expect(run('demo-sales', confirm)).rejects.toMatchObject({ status: 403 });
+  expect(db.workspaces.get(workspaceId)!.revision).toBe(before + 1);
+  const posted = await run('finance', confirm);
+  expect(posted.workspace.state.invoices.find(i => i.id === invoiceId)).toMatchObject({ open: 12, financeStatus: 'confirmed' });
+});
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), 'mist-scope-matrix-'));
   db = new MemoryMistDatabase(); auth = testAuthority();
