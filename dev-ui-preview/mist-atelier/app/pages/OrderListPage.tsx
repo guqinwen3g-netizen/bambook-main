@@ -88,6 +88,7 @@ export function OrderListPage() {
     { key: 'state', header: '状态', width: '120px', render: order => <><Pill tone={approvalOf(order)==='approved'||isTerminatedOrder(order)?order.tone:'warn'}>{uiText(approvalOf(order)==='approved'?order.state:approvalLabel(order))}</Pill>{approvalOf(order)==='approved'&&<span className="mist-cell-sub">{uiText("主单已批准")}</span>}</> },
     { key: 'go', header: '', width: '16px', hideOnMobile: true, render: () => <span className="mist-go"><Icon icon={ChevronRight} size="sm" /></span> },
   ];
+  if(!state)return <MistPage><PageHeader eyebrow={uiText('订单履约 · 订单')} title={uiText('订单管理')} actions={<><Button icon={Download} disabled>{uiText('导出')}</Button>{canWrite&&<Button variant="primary" icon={Plus} disabled>{uiText('新建订单')}</Button>}</>}/><Card><EmptyState title={uiText(loading?'正在读取订单资料':'订单资料未读取')}/></Card></MistPage>;
   if(route.section==='internal-deliveries')return <InternalDeliveryInbox/>;
   return <MistPage>
     <PageHeader description={uiText(customerId ? state?.customers.find(customer => customer.id === customerId)?.name : undefined)} eyebrow={uiText("订单履约 · 订单")} title={uiText("订单管理")}

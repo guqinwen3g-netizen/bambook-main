@@ -19,6 +19,11 @@ afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;h
 async function mount(route:Route={view:'production-board'}){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<React.StrictMode><MistRoot><ToastProvider><Nav.Provider value={{route,go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><ProductionPage/></Nav.Provider></ToastProvider></MistRoot></React.StrictMode>));}
 async function range(label:string){const group=getByRole(host,'group',{name:'范围'});await act(async()=>within(group).getByRole('button',{name:label}).click());}
 async function click(label:string){await act(async()=>getByRole(document.body,'button',{name:label}).click());}
+it.each([true,false])('does not turn an unread production workspace into zero work (loading %s)',async loading=>{
+ bridge.state=null;bridge.loading=loading;bridge.error=loading?'':'读取失败';await mount();
+ expect(host.textContent).toContain(loading?'正在读取生产资料':'生产资料未读取');expect(host.textContent).not.toContain('在手分支');expect(host.textContent).not.toContain('暂无在手数量');expect(host.textContent).not.toContain('没有计划中的生产单');expect(queryByRole(host,'button',{name:'甘特图'})).toBeNull();expect(bridge.run).not.toHaveBeenCalled();
+});
+it('keeps known production facts visible when a later read fails',async()=>{bridge.error='重新读取失败';await mount();await range('全部');expect(host.textContent).toContain('PROD-A');expect(host.textContent).toContain('PROD-B');expect(host.textContent).not.toContain('生产资料未读取');});
 async function fill(label:string,value:string){const field=[...document.querySelectorAll('label')].find(item=>item.querySelector('.mist-field-label')?.textContent===label);const input=field?.querySelector('input') as HTMLInputElement;expect(input).toBeTruthy();await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});return input;}
 
 describe('Mist production complete range',()=>{

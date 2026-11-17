@@ -125,6 +125,7 @@ export function ProductionPage() {
       submit: async values => { await run({ type: 'production.move', payload: { id, col: col as MistProduction['col'], note: String(values.note || '').trim() } }); toast(`${item.code} 已移至${title}`); } });
   };
   const position = (date: string) => Math.max(0, Math.min(100, ((mistDate(date)?.getTime() ?? window.start.getTime()) - window.start.getTime()) / (window.end.getTime() - window.start.getTime()) * 100));
+  if(!state)return <MistPage width="wide"><PageHeader eyebrow={uiText('订单履约 · 生产')} title={uiText('生产进度')}/><Card><EmptyState title={uiText(loading?'正在读取生产资料':'生产资料未读取')}/></Card></MistPage>;
   if(intakeMode&&selected)return <ProductionIntakeEditor key={`${workspace?.id}|${session.user?.id}|${selected.id}|${intakeMode}`} productionId={selected.id} initial={intakeMode==='initial'} onClose={()=>setIntakeMode(null)}/>;
   if(operation)return operation.fields.length>3?<ModuleEditorPage spec={operation} onClose={()=>setOperation(null)}/>:<ModuleEditorDialog spec={operation} onClose={()=>setOperation(null)}/>;
   return <MistPage width="wide">

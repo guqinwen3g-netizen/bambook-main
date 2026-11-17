@@ -75,6 +75,11 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); localStorage.removeItem('bambook.device.locale'); vi.restoreAllMocks(); vi.useRealTimers(); });
 
+it.each([true,false])('does not present an unread order workspace as an empty business (loading %s)',loading=>{
+ store.state=null;store.loading=loading;store.error=loading?'':'读取失败';render(<OrderListPage/>);
+ expect(host.textContent).toContain(loading?'正在读取订单资料':'订单资料未读取');expect(host.textContent).not.toContain('暂无在途条目');expect(host.textContent).not.toContain('暂无逾期');expect(queryByRole(host,'table',{name:'订单'})).toBeNull();for(const b of getAllByRole(host,'button',{name:'新建订单',exact:true}))expect((b as HTMLButtonElement).disabled).toBe(true);expect(store.run).not.toHaveBeenCalled();
+});
+
 it('finishes internal order stages without a shipment reminder or counting completed goods as in transit',()=>{
   const f=internalDeliveryFixture(),id=f.send();
   f.run({type:'order.internal.receive',payload:{id,accepted:10,rejected:0,expectedRevision:0,evidence:'Counted internally'}},'warehouse');
