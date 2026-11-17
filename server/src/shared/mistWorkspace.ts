@@ -1610,7 +1610,9 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const amount=positive(p.amount,'核销金额'),minor=mistMoneyMinor(amount),reason=text(p.reason,p.kind==='badDebt'?'坏账依据（催收记录、破产或诉讼文件）':p.kind==='correction'?'更正原因（开错项目、单价或数量）':'尾差说明',true,1000);
       if(minor>mistMoneyMinor(i.open))throw new MistCommandError('VALIDATION',`核销 ${amount} 超出发票未收 ${i.open} ${i.currency}`);
       if(p.kind==='difference'&&mistInvoiceWriteoffMinor({writeoffs:(i.writeoffs||[]).filter(w=>w.kind==='difference')})+minor>mistMoneyMinor(MIST_WRITEOFF_DIFFERENCE_LIMIT))throw new MistCommandError('PRECONDITION',`单张发票尾差累计不超过 ${MIST_WRITEOFF_DIFFERENCE_LIMIT} ${i.currency}；更大的短收请按坏账或索赔处理`);
-      if(p.kind==='badDebt'&&!state.allocations.some(a=>a.invoiceId===i.id)&&!state.crm?.followUps.some(f=>f.link?.kind==='invoice'&&f.link.id===i.id&&f.collection))throw new MistCommandError('PRECONDITION','坏账核销前须有催收记录或已收部分款项');
+      const hasReceiptAllocation = state.allocations.some(a => a.invoiceId === i.id && a.amount > 0 && a.currency === i.currency);
+      if (p.kind === 'correction' && !hasReceiptAllocation) throw new MistCommandError('PRECONDITION', '红冲更正须有本票到账核销记录');
+      if(p.kind==='badDebt'&&!hasReceiptAllocation&&!state.crm?.followUps.some(f=>f.link?.kind==='invoice'&&f.link.id===i.id&&f.collection))throw new MistCommandError('PRECONDITION','坏账核销前须有催收记录或已收部分款项');
       const id=context.id();i.writeoffs=[...(i.writeoffs||[]),{id,kind:p.kind,amount,currency:i.currency,reason,at:context.now,actor:context.actorName,...(context.actorId?{actorId:context.actorId}:{})}];
       recalculate(state);
       event(state,context,'invoice',i.id,`${WRITEOFF_LABEL[p.kind as MistInvoiceWriteoff["kind"]]} ${amount} ${i.currency}：${reason}`,{view:'invoices',id:i.id},'general',notificationOwners(state,'invoice',i.id));

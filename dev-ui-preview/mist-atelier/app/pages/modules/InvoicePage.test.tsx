@@ -111,6 +111,44 @@ it('shows the finance confirmation and rejection facts on the receivable',()=>{
   expect((getByRole(host,'button',{name:'收款与核销'}) as HTMLButtonElement).disabled).toBe(true);
 });
 
+it('offers collection-backed bad debt independently of bank fees or cash allocations', () => {
+  const state = store.value.state;
+  route.id = 'a';
+  state.allocations = [];
+  state.invoices[0].open = 90; // The remaining reduction is a claim credit.
+  state.crm.followUps.push({ id: 'follow-up', at: '2026-10-14T00:00:00Z', method: 'phone', content: '核对未收金额', link: { kind: 'invoice', id: 'a' }, collection: { level: 1, openAtLog: 90, currency: 'USD' } });
+  render();
+  expect((getByRole(host, 'button', { name: '坏账核销' }) as HTMLButtonElement).disabled).toBe(false);
+  expect((getByRole(host, 'button', { name: '红冲更正' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(getAllByRole(host, 'button').some(b => b.textContent === '登记银行扣费')).toBe(false);
+});
+
+it('keeps the original non-cash adjustment available to reverse after it settles the invoice', async () => {
+  route.id = 'a';
+  Object.assign(store.value.state.invoices[0], { open: 0, writeoffs: [{ id: 'wo', kind: 'badDebt', amount: 70, currency: 'USD', actor: '财务', reason: '催收结论', at: '2026-10-14T00:00:00Z' }] });
+  render();
+  await click('冲回');
+  const dialog = getByRole(document.body, 'dialog', { name: '冲回核销' });
+  fillForm('冲回原因', '收回核销决定');
+  await act(async () => getByRole(dialog, 'button', { name: '冲回' }).click());
+  expect(store.value.run).toHaveBeenCalledWith({ type: 'finance.receivable.writeoff.reverse', payload: { invoiceId: 'a', writeoffId: 'wo', reason: '收回核销决定' } }, expect.objectContaining({ expectedRevision: 1 }));
+});
+
+it('requires a fresh adjustment review if a receipt allocation changes while the form is open', async () => {
+  route.id = 'a';
+  store.value.state.invoices[0].open = 40;
+  render();
+  await click('尾差核销');
+  const dialog = getByRole(document.body, 'dialog', { name: '尾差核销 · CI-A' });
+  fillForm('尾差说明', '对账差额');
+  store.value.state.allocations[0].receiptId = 'replacement';
+  store.value.workspace.revision = 2;
+  render();
+  await act(async () => getByRole(dialog, 'button', { name: '核销' }).click());
+  expect(dialog.textContent).toContain('应收资料已更新');
+  expect(store.value.run).not.toHaveBeenCalled();
+});
+
 it('generates a customer statement for a customer with open receivables and lists archived statements',async()=>{
   const s=store.value.state;s.customers=[{id:'customer',name:'客户',code:'C-1'}];s.settings.companyProfile={legalName:'公司'};
   s.files.push({id:'soa-file',name:'客户对账单-SOA-2026-0001-C-1.pdf',mimeType:'application/pdf',size:1,storageKey:'w/soa-file',createdAt:'2026-10-14T00:00:00Z'});

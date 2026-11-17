@@ -34,6 +34,16 @@ describe('receivable settlement', () => {
     f.run({ type: 'finance.receivable.writeoff.reverse', payload: { invoiceId: 'i2', writeoffId: w.id, reason: '客户补付' } });
     expect(f.state.invoices.find(i => i.id === 'i2')!.open).toBe(10);
   });
+  it('requires a current cash allocation on the same invoice for a red correction', () => {
+    const f = setup();
+    const receiptId = f.state.receipts[0].id;
+    f.run({ type: 'finance.reconcile', payload: { receiptId, lines: [{ invoiceId: 'i1', amount: 100 }, { invoiceId: 'i2', amount: 10 }] } });
+    const allocation = f.state.allocations.find(a => a.invoiceId === 'i1')!;
+    f.run({ type: 'finance.allocation.reverse', payload: { allocationId: allocation.id, reason: '原分配已取消' } });
+    expect(() => f.run({ type: 'finance.receivable.writeoff', payload: { invoiceId: 'i1', kind: 'correction', amount: 5, reason: '单价更正' } })).toThrow('到账核销');
+    expect(f.state.invoices.find(i => i.id === 'i1')).toMatchObject({ open: 300 });
+    expect(f.state.invoices.find(i => i.id === 'i1')!.writeoffs).toBeUndefined();
+  });
   it('red-corrects an over-billed invoice that already has receipts, with approval authority', () => {
     const f = setup(), r = f.state.receipts[0].id;
     f.run({ type: 'finance.reconcile', payload: { receiptId: r, lines: [{ invoiceId: 'i1', amount: 100 }] } });
