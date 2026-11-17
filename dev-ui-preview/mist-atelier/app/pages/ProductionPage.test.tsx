@@ -24,6 +24,9 @@ it.each([true,false])('does not turn an unread production workspace into zero wo
  expect(host.textContent).toContain(loading?'正在读取生产资料':'生产资料未读取');expect(host.textContent).not.toContain('在手分支');expect(host.textContent).not.toContain('暂无在手数量');expect(host.textContent).not.toContain('没有计划中的生产单');expect(queryByRole(host,'button',{name:'甘特图'})).toBeNull();expect(bridge.run).not.toHaveBeenCalled();
 });
 it('keeps known production facts visible when a later read fails',async()=>{bridge.error='重新读取失败';await mount();await range('全部');expect(host.textContent).toContain('PROD-A');expect(host.textContent).toContain('PROD-B');expect(host.textContent).not.toContain('生产资料未读取');});
+it('keeps the production action mounted and returns focus when a short operation is cancelled',async()=>{
+ await mount({view:'production-board',id:'production-a'});const drawer=getByRole(document.body,'dialog',{name:'PROD-A',exact:true}),opener=getByRole(drawer,'button',{name:'登记延期',exact:true});act(()=>opener.focus());await act(async()=>opener.click());const dialog=getByRole(document.body,'dialog',{name:'登记延期',exact:true});expect(document.body.contains(opener)).toBe(true);await act(async()=>{getByRole(dialog,'button',{name:'取消',exact:true}).click();await new Promise(resolve=>setTimeout(resolve,0));});expect(document.activeElement).toBe(opener);expect(bridge.run).not.toHaveBeenCalled();
+});
 async function fill(label:string,value:string){const field=[...document.querySelectorAll('label')].find(item=>item.querySelector('.mist-field-label')?.textContent===label);const input=field?.querySelector('input') as HTMLInputElement;expect(input).toBeTruthy();await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});return input;}
 
 describe('Mist production complete range',()=>{
@@ -120,17 +123,17 @@ describe('Mist production gates, delay and pause',()=>{
  it('records a delay with new date, reason and customer notice into the branch risk',async()=>{
   await mount({view:'production-board',productionId:'production-b'});await click('登记延期');
   const due=lastDue.slice(0,4)+'-08-01';const dueInput=getByLabelText(document.body,/^新交期/) as HTMLInputElement;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(dueInput,due);dueInput.dispatchEvent(new Event('input',{bubbles:true}));});
-  const reason=document.querySelector('textarea') as HTMLTextAreaElement;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(reason,'面料复染');reason.dispatchEvent(new Event('input',{bubbles:true}));});
+  const reason=getByRole(getByRole(document.body,'dialog',{name:'登记延期',exact:true}),'textbox',{name:'延期原因',exact:true}) as HTMLTextAreaElement;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(reason,'面料复染');reason.dispatchEvent(new Event('input',{bubbles:true}));});
   await click('保存延期');
   expect(bridge.run).toHaveBeenCalledWith({type:'production.update',payload:{id:'production-b',pct:0,due,risk:`延期 ${lastDue} → ${due}：面料复染（尚未告知客户）`}});
   expect(bridge.state!.productions.find(job=>job.id==='production-b')).toMatchObject({due,risk:`延期 ${lastDue} → ${due}：面料复染（尚未告知客户）`});
  });
  it('pauses a released branch with a category and reason, then resumes it with evidence',async()=>{
-  const fill=async(value:string)=>{const area=document.querySelector('[role="dialog"] textarea') as HTMLTextAreaElement;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(area,value);area.dispatchEvent(new Event('input',{bubbles:true}));});};
+  const fill=async(value:string)=>{const area=getByRole(document.body,'dialog',{name:value==='复染合格'?'恢复生产':'异常暂停生产',exact:true}).querySelector('textarea') as HTMLTextAreaElement;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(area,value);area.dispatchEvent(new Event('input',{bubbles:true}));});};
   await mount({view:'production-board',productionId:'production-b'});await click('异常暂停');await fill('面料色差待复染');await click('确认暂停');
   expect(bridge.run).toHaveBeenCalledWith({type:'fulfillment.production.hold',payload:{productionId:'production-b',category:'quality',reason:'面料色差待复染'}});
   act(()=>root!.unmount());host.remove();await mount({view:'production-board',productionId:'production-b'});expect(document.body.textContent).toContain('生产已异常暂停');expect(queryByRole(document.body,'button',{name:'异常暂停'})).toBeNull();
-  await click('恢复生产');await fill('复染合格');await act(async()=>getByRole(getByRole(document.body,'dialog'),'button',{name:'恢复生产'}).click());
+  await click('恢复生产');await fill('复染合格');await act(async()=>getByRole(getByRole(document.body,'dialog',{name:'恢复生产',exact:true}),'button',{name:'恢复生产'}).click());
   expect(bridge.run).toHaveBeenLastCalledWith({type:'fulfillment.production.resume',payload:{productionId:'production-b',note:'复染合格'}});
  });
 });
