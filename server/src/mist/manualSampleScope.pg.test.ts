@@ -20,7 +20,7 @@ describe.skipIf(!url)('manual sample source scope on real PostgreSQL',()=>{
  let db:PrismaClient,app:ReturnType<typeof createMistServer>,directory:string,wid:string,foreignWid:string,writePermission:string;
  const tokens:Record<string,string>={},workspaces:string[]=[];
  beforeAll(async()=>{
-  const target=new URL(url!);if(target.hostname!=='127.0.0.1'||target.port!=='15444'||target.pathname!=='/bambook_test_validation_20261111')throw Error('Dedicated local validation database required');
+  const target=new URL(url!);if(!['127.0.0.1','localhost'].includes(target.hostname)||!/^\/bambook_(account|acceptance|test)(?:_|$)/.test(target.pathname))throw Error('Dedicated local validation database required');
   directory=await mkdtemp(path.join(tmpdir(),'mist-manual-sample-'));vi.stubEnv('NODE_ENV','test');vi.stubEnv('MIST_LOCAL_WORKSPACE','0');vi.stubEnv('MIST_FILES_DIR',path.join(directory,'files'));vi.stubEnv('MIST_MAIL_CREDENTIAL_DIR',path.join(directory,'mail'));vi.stubEnv('BAMBOOK_AI_SUBSCRIPTION_DIR',path.join(directory,'ai'));vi.stubEnv('BAMBOOK_MARKET_DIR',path.join(directory,'market'));
   db=new PrismaClient({datasourceUrl:url});
   for(const id of[companyId,foreignCompanyId]){await db.company.create({data:{id,slug:id,name:'Sample scope '+id}});await db.$transaction(tx=>provisionCompanyRoles(tx,id));for(const scope of['products:read','products:write']){const permission=await db.permission.findFirstOrThrow({where:{scope}}),roleId=companyRoleId(SYSTEM_ROLE_IDS.SALES,id);if(!await db.rolePermission.findFirst({where:{roleId,permissionId:permission.id}}))await db.rolePermission.create({data:{id:randomUUID(),roleId,permissionId:permission.id}});}}
