@@ -129,4 +129,6 @@ export const sampleCustodyEnglish: Record<string,string> = {
   '未留存':'Not retained',
   '商业借样来源尚不可核对':'The commercial lending source cannot be verified yet.',
   '请从样品仓库选择本次商业来源':'Select the commercial source from the sample warehouse.',
+  '开发案资料未读取':'Development case not loaded',
+  '开发案读取失败':'Could not load development case',
 };
