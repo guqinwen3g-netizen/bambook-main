@@ -268,6 +268,26 @@ it('disables final completion during a hold and displays its Shanghai business d
  expect(bridge.run).not.toHaveBeenCalled();
 });
 
+it('keeps the held percentage and stage fixed while follow-up stays editable',async()=>{
+ const state=bridge.state!,branch=state.productions[1];
+ await mount({view:'production-board',productionId:branch.id});
+ await fill('生产进度（%）','35');
+ await click('异常暂停');
+ const dialog=getByRole(document.body,'dialog',{name:'异常暂停生产'});
+ const reason=getByRole(dialog,'textbox',{name:'暂停原因'}) as HTMLTextAreaElement;
+ await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(reason,'核对当前技术资料');reason.dispatchEvent(new Event('input',{bubbles:true}));});
+ await click('确认暂停');
+ const drawer=getByRole(document.body,'dialog',{name:'PROD-B'}),field=getByRole(drawer,'spinbutton',{name:'生产进度（%）'}) as HTMLInputElement;
+ expect(field.disabled).toBe(true);expect(field.value).toBe('0');
+ const card=getByRole(host,'button',{name:/未来分支乙/}) as HTMLButtonElement;
+ expect(card.draggable).toBe(false);expect((getByRole(host,'button',{name:/未来分支甲/}) as HTMLButtonElement).draggable).toBe(true);
+ const note=getByLabelText(drawer,'跟进记录') as HTMLTextAreaElement;
+ await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(note,'技术资料正在核对');note.dispatchEvent(new Event('input',{bubbles:true}));});
+ await click('保存计划与跟进');
+ expect(bridge.run.mock.calls.at(-1)?.[0]).toMatchObject({type:'production.update',payload:{id:branch.id,pct:0,note:'技术资料正在核对'}});
+ expect(bridge.state!.productions[1].risk).toContain('核对当前技术资料');
+});
+
 it('does not resubmit a stale percentage after recording final completion in the same drawer',async()=>{
  const state=bridge.state!,branch=state.productions[1],g=state.orders[0].governance!;branch.pct=90;
  for(const contract of [g.contract,g.approvedSnapshot!.contract]){contract.quantityBasis='total';contract.quantityBasisNote='按总量';}

@@ -217,7 +217,7 @@ export function SummaryBar({ items }: { items: Array<{ label: React.ReactNode; v
 /* ═════════ 看板 ═════════ */
 export type KanbanColumn<T> = { id: string; title: string; color: string; items: T[] };
 /** 看板：支持拖拽改列（onMove）。renderCard 只渲染卡片内部内容。 */
-export function Kanban<T>({ columns, itemKey, renderCard, onMove, onOpen }: { columns: KanbanColumn<T>[]; itemKey: (t: T) => string; renderCard: (t: T) => React.ReactNode; onMove?: (key: string, toColumn: string) => void; onOpen?: (t: T) => void }) {
+export function Kanban<T>({ columns, itemKey, renderCard, onMove, canMove, onOpen }: { columns: KanbanColumn<T>[]; itemKey: (t: T) => string; renderCard: (t: T) => React.ReactNode; onMove?: (key: string, toColumn: string) => void; canMove?: (t: T) => boolean; onOpen?: (t: T) => void }) {
   const [drag, setDrag] = React.useState<string | null>(null);
   const dragRef = React.useRef<string | null>(null);
   const [over, setOver] = React.useState<string | null>(null);
@@ -228,9 +228,9 @@ export function Kanban<T>({ columns, itemKey, renderCard, onMove, onOpen }: { co
           onDragOver={e => { if (onMove) { e.preventDefault(); setOver(c.id); } }} onDragLeave={() => setOver(null)}
           onDrop={() => { const key = dragRef.current; dragRef.current = null; setDrag(null); setOver(null); if (key && onMove) onMove(key, c.id); }}>
           <div className="mist-kb-h"><i style={{ background: c.color }} />{c.title}<span>{c.items.length}</span></div>
-          {c.items.map(t => { const k = itemKey(t); return (
-            <button key={k} type="button" className="mist-kb-card" draggable={!!onMove} data-dragging={drag === k || undefined}
-              onDragStart={() => { dragRef.current = k; setDrag(k); }} onDragEnd={() => { dragRef.current = null; setDrag(null); setOver(null); }} onClick={() => onOpen?.(t)}>{renderCard(t)}</button>
+          {c.items.map(t => { const k = itemKey(t), movable = !!onMove && (canMove?.(t) ?? true); return (
+            <button key={k} type="button" className="mist-kb-card" draggable={movable} data-dragging={drag === k || undefined}
+              onDragStart={e => { if (!movable) { e.preventDefault(); return; } dragRef.current = k; setDrag(k); }} onDragEnd={() => { dragRef.current = null; setDrag(null); setOver(null); }} onClick={() => onOpen?.(t)}>{renderCard(t)}</button>
           ); })}
         </section>
       ))}

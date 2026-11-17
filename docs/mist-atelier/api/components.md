@@ -156,7 +156,7 @@
 | `ObjectStage` | 商品展台（抠图 + 浅色舞台）。 | `({ src, alt, size, topLeft, topRight, caption }: { src: string; alt: string; size?: 'md' \| 'lg'; topLeft?: React.ReactNode; topRight?: React.ReactNode; caption?: React.ReactNode })` |
 | `SummaryBar` | 单据汇总条（订单/发票/核销页顶部的 3–4 个大数字）。 | `({ items }: { items: Array<{ label: React.ReactNode; value: React.ReactNode; unit?: React.ReactNode; hint?: React.ReactNode; hintTone?: Tone }> })` |
 | `KanbanColumn` | — | `type KanbanColumn<T> = { id: string; title: string; color: string; items: T[] };` |
-| `Kanban` | 看板：支持拖拽改列（onMove）。renderCard 只渲染卡片内部内容。 | `({ columns, itemKey, renderCard, onMove, onOpen }: { columns: KanbanColumn<T>[]; itemKey: (t: T) => string; renderCard: (t: T) => React.ReactNode; onMove?: (key: string, toColumn: string) => void; onOpen?: (t: T) => void })` |
+| `Kanban` | 看板：支持拖拽改列（onMove）。renderCard 只渲染卡片内部内容。 | `({ columns, itemKey, renderCard, onMove, canMove, onOpen }: { columns: KanbanColumn<T>[]; itemKey: (t: T) => string; renderCard: (t: T) => React.ReactNode; onMove?: (key: string, toColumn: string) => void; canMove?: (t: T) => boolean; onOpen?: (t: T) => void })` |
 | `SettingRow` | 设置行：左侧标题+说明，右侧控件。 | `({ title, description, control }: { title: React.ReactNode; description?: React.ReactNode; control: React.ReactNode })` |
 
 ## 浮层 · `components/mist/overlays.tsx`
