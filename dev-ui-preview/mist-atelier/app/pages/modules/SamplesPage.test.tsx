@@ -20,6 +20,9 @@ const version={kind:'version' as const,devId:'dev',versionId:'ver'};
 function fabric(id:string,form:string,unit:string,quantity:number,available:number):FulfillmentSample{return {id,code:id.toUpperCase(),name:'亚麻平纹',category:'面料',form,unit,quantity,available,location:'A-01',size:'',color:'',source:version,fileIds:[],note:'',createdAt:'2026-10-10T08:00:00Z'};}
 beforeEach(()=>{store.workspace={id:'workspace',revision:1};presentedError=undefined;store.error='';write.allowed=true;store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'业务员'},'empty');store.run.mockReset();go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
+it.each([true,false])('does not expose an empty sample ledger or enable operations before its workspace is read (loading %s)',loading=>{
+ store.state=null;store.loading=loading;store.error=loading?'':'服务读取失败';try{render();expect((getByRole(host,'button',{name:'新建样品',exact:true})as HTMLButtonElement).disabled).toBe(true);expect((getByRole(host,'button',{name:'同步已返样版本',exact:true})as HTMLButtonElement).disabled).toBe(true);expect(queryByRole(host,'table',{name:'样品台账'})).toBeNull();expect(queryByRole(host,'button',{name:/^全部\s*0$/})).toBeNull();expect(queryByRole(host,'tab',{name:/^面料\s*0$/})).toBeNull();expect(host.textContent).not.toContain('还没有样品档案');expect(store.run).not.toHaveBeenCalled();}finally{store.loading=false;}
+});
 
 it('keeps an open sample movement above a responsive detail drawer and retains its location',async()=>{
  const previous=window.matchMedia,listeners=new Set<()=>void>(),media={matches:false,addEventListener:(_type:string,fn:()=>void)=>listeners.add(fn),removeEventListener:(_type:string,fn:()=>void)=>listeners.delete(fn)};Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:()=>media});

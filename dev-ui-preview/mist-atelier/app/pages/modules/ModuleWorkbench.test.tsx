@@ -18,7 +18,7 @@ type Row={id:string;name:string;detail:string};
 const rows:Row[]=[{id:'row-a',name:'记录甲',detail:'仅属于甲的业务依据'},{id:'row-b',name:'记录乙',detail:'仅属于乙的业务依据'}];
 const columns:Column<Row>[]=[{key:'name',header:'业务记录',render:row=>row.name}];
 let host:HTMLDivElement,root:Root|undefined;
-beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;bridge.route={view:'test-ledger'};bridge.go.mockReset();bridge.workspace={loading:false,saving:false,pending:null,pendingCreate:null,error:'',refresh:vi.fn(),run:vi.fn()};});
+beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;bridge.route={view:'test-ledger'};bridge.go.mockReset();bridge.workspace={state:{files:[]},loading:false,saving:false,pending:null,pendingCreate:null,error:'',refresh:vi.fn(),run:vi.fn()};});
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();});
 
 function editor(submit:ModuleEditorSpec['submit']=vi.fn(async(_values:any)=>({id:'saved'})),name='初始业务'):ModuleEditorSpec{return{
@@ -36,6 +36,14 @@ function editor(submit:ModuleEditorSpec['submit']=vi.fn(async(_values:any)=>({id
 function tree(spec?:ModuleEditorSpec,edit?:(row:Row)=>ModuleEditorSpec|undefined,exportRows?:(filtered:Row[])=>void,preview=false){return <React.StrictMode><MistRoot theme="light"><ToastProvider><ModuleWorkbench title="业务台账" rows={rows} columns={columns} create={spec} edit={edit} exportRows={exportRows} preview={preview} detail={row=><p data-testid="exact-detail">{row.detail}</p>} rowActions={[{label:'执行当前记录',run:row=>bridge.workspace.run(row.id)}]}/></ToastProvider></MistRoot></React.StrictMode>; }
 async function mount(spec?:ModuleEditorSpec,edit?:(row:Row)=>ModuleEditorSpec|undefined,exportRows?:(filtered:Row[])=>void,preview=false){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(tree(spec,edit,exportRows,preview)));}
 function recordDetailPage(){return getByRole(document.body,'heading',{name:'业务台账详情'}).closest<HTMLElement>('.mist-page')!;}
+it.each([true,false])('keeps missing workspace data distinct from an empty ledger and blocks dependent actions (loading %s)',async loading=>{
+ bridge.workspace.state=null;bridge.workspace.loading=loading;bridge.workspace.error=loading?'':'服务读取失败';const submit=vi.fn(),exportRows=vi.fn();await mount(editor(submit),undefined,exportRows);
+ expect((getByRole(host,'button',{name:'新建',exact:true})as HTMLButtonElement).disabled).toBe(true);expect((getByRole(host,'button',{name:'导出',exact:true})as HTMLButtonElement).disabled).toBe(true);expect(queryByRole(host,'table',{name:'业务台账'})).toBeNull();expect(host.textContent).not.toContain('0 条记录');expect(host.textContent).not.toContain('还没有业务台账记录');
+ bridge.workspace.state={files:[]};bridge.workspace.loading=false;bridge.workspace.error='';await act(async()=>root!.render(tree(editor(submit),undefined,exportRows)));expect(getByRole(host,'table',{name:'业务台账'})).toBeTruthy();expect(host.textContent).toContain('记录甲');expect((getByRole(host,'button',{name:'新建',exact:true})as HTMLButtonElement).disabled).toBe(false);expect(submit).not.toHaveBeenCalled();expect(exportRows).not.toHaveBeenCalled();
+});
+it('does not identify a supplied old record as a current detail before its workspace is read',async()=>{
+ bridge.workspace.state=null;bridge.workspace.error='服务读取失败';bridge.route={view:'test-ledger',id:'row-a'};await mount();expect(host.textContent).not.toContain('记录甲');expect(host.textContent).not.toContain('未找到这条记录');expect(host.querySelector('[data-testid="exact-detail"]')).toBeNull();expect(queryByRole(host,'button',{name:'执行当前记录',exact:true})).toBeNull();
+});
 async function click(name:string){await act(async()=>getByRole(document.body,'button',{name}).click());}
 async function fill(name:string,value:string,role:'textbox'|'spinbutton'|'combobox'='textbox'){const input=getByRole(document.body,role,{name}) as HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement;await act(async()=>{const prototype=input.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:input.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(prototype,'value')!.set!.call(input,value);input.dispatchEvent(new Event(input.tagName==='SELECT'?'change':'input',{bubbles:true}));});return input;}
 async function confirmStep(){await click('新建');await click('下一步');await click('下一步');expect(getByRole(document.body,'button',{name:'确认创建'})).toBeTruthy();}

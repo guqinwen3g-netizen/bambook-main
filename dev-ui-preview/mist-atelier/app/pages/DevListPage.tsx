@@ -103,8 +103,8 @@ function DevListTabPage({tab}:{tab:DevelopmentListTab}){
     {key:'go',header:'',width:'16px',hideOnMobile:true,render:()=> <span className="mist-go"><Icon icon={ChevronRight} size="sm" /></span>},
   ];
   return <MistPage width={mode==='board'?'wide':undefined}>
-    <PageHeader eyebrow={uiText("订单履约 · 开发")} title={uiText("开发与寻样")} actions={canWrite?<Button variant="primary" icon={Plus} disabled={!state} onClick={create}>{tabConfig.create}</Button>:undefined} />
-    <Tabs value={tab} onChange={value=>switchTab(value)} options={DEVELOPMENT_LIST_TABS.map(item=>({value:item.value,label:item.label,count:tabCounts[item.value]}))} />
+    <PageHeader eyebrow={uiText("订单履约 · 开发")} title={uiText("开发与寻样")} actions={canWrite?<Button variant="primary" icon={Plus} disabled={!state||loading} onClick={create}>{tabConfig.create}</Button>:undefined} />
+    <Tabs value={tab} onChange={value=>switchTab(value)} options={DEVELOPMENT_LIST_TABS.map(item=>({value:item.value,label:item.label,count:state?tabCounts[item.value]:undefined}))} />
     <Toolbar right={domain&&!drafting?<Segmented ariaLabel={uiText("视图")} value={mode} onChange={value=>setMode(value as 'list'|'board')} options={[{value:'list',icon:List,ariaLabel:'列表视图'},{value:'board',icon:Columns3,ariaLabel:'看板视图'}]} />:undefined}>
       <SearchField value={q} onChange={setQ} placeholder={uiText(tab==='sourcing'?'面料需求、编号或答复':drafting?'草稿名称、客户款号或客户':'名称、客户款式或编号')} />
       {!drafting&&<Dropdown label={uiText("负责人")} value={owner} onChange={setOwner} options={[{value:'all',label:'全部'},...owners.map(([id,name])=>({value:id,label:owners.filter(([,other])=>other===name).length>1?`${name} · ${id}`:name}))]} />}
@@ -114,7 +114,7 @@ function DevListTabPage({tab}:{tab:DevelopmentListTab}){
     </Toolbar>
     {(failure||error)&&<FailureNotice title={"操作未完成"} detail={failure||error} />}
     {pending&&!saving&&<div className="mist-section"><Banner tone="warn" title={uiText("原操作结果尚待核对")} actions={recovery}>{uiText("已保留原请求，请先核对后再继续操作。")}</Banner></div>}
-    {!domain?<Card><DataTable ariaLabel={uiText("面料寻样")} loading={loading} rows={fabricRows} rowKey={fabric=>fabric.id} onRowClick={fabric=>showFabric(fabric)} columns={[
+    {!state?<EmptyState title={uiText(error?'读取失败':'正在读取记录')} compact/>:!domain?<Card><DataTable ariaLabel={uiText("面料寻样")} loading={loading} rows={fabricRows} rowKey={fabric=>fabric.id} onRowClick={fabric=>showFabric(fabric)} columns={[
       {key:'n',header:'面料',width:'minmax(200px,2fr)',render:fabric=><ObjectCell thumb={<Thumb icon={Layers} />} name={fabric.name} meta={<><Mono>{fabric.code}</Mono> · {uiText(fabric.sub)}</>} />},
       {key:'o',header:'发起人',width:'60px',hideOnMobile:true,render:fabric=><Avatar name={fabric.owner} size="sm" />},
       {key:'d',header:'目标日期',width:'80px',hideOnMobile:true,render:fabric=><b className="mist-cell-strong">{shortDate(fabric.due)}</b>},

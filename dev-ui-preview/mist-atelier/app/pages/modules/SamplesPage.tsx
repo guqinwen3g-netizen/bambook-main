@@ -84,7 +84,7 @@ export function SamplesPage() {
   const [query, setQuery] = React.useState(''), [form, setForm] = React.useState('all'), [origin, setOrigin] = React.useState('all'), [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all');
   const [page, setPage] = React.useState(1), [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
   React.useEffect(() => { setPicked(route.id || null); setDrawer(!!route.id); }, [route.id]);
-  const day = today(), can = session.hasPermission('products:write'), locked = saving || !!pending;
+  const day = today(), can = session.hasPermission('products:write'), locked = saving || !!pending || loading || !state;
 
   // Shipment context: only this shipment's shipping samples, bound to its exact production branch.
   const hasShipmentContext = route.section?.startsWith('shipment:') === true, shipmentId = hasShipmentContext ? route.section!.slice(9) : undefined;
@@ -247,8 +247,8 @@ export function SamplesPage() {
     {error && error !== presentedError && <FailureNotice title={state ? "样品操作未完成" : "读取失败"} detail={error} />}
     {overdueLoans.length > 0 && <div className="mist-section"><Banner tone="warn" title={ui`${overdueLoans.length} 笔借出已超过预计归还日`} actions={<Button onClick={() => { const first = overdueLoans[0]; changeShelf(shelfOf(first.sample)); setStatusFilter('overdue'); }}>{uiText("只看逾期")}</Button>}>
       {overdueLoans.slice(0, 3).map(({ loan, sample }) => `${sample.name} · ${loan.person} · 应还 ${loan.expectedReturn}`).join('；')}{uiText(overdueLoans.length > 3 ? ' …' : '')}</Banner></div>}
-    <Tabs<SampleTab> value={requestsTab ? 'requests' : shelf} onChange={value => { if (value === 'requests') { go('samples', undefined, { section: 'requests' }); return; } if (requestsTab) go('samples'); changeShelf(value); }} options={[{ value: 'fabric', label: '面料', count: counts.fabric }, { value: 'garment', label: '成衣', count: counts.garment }, { value: 'other', label: '其他类别', count: counts.other }, ...(hasShipmentContext || hasProductionContext ? [] : [{ value: 'requests' as const, label: '索样申请', count: openRequests }])]} />
-    {requestsTab ? <SampleRequests /> : <>
+    <Tabs<SampleTab> value={requestsTab ? 'requests' : shelf} onChange={value => { if (value === 'requests') { go('samples', undefined, { section: 'requests' }); return; } if (requestsTab) go('samples'); changeShelf(value); }} options={[{ value: 'fabric', label: '面料', count: state ? counts.fabric : undefined }, { value: 'garment', label: '成衣', count: state ? counts.garment : undefined }, { value: 'other', label: '其他类别', count: state ? counts.other : undefined }, ...(hasShipmentContext || hasProductionContext ? [] : [{ value: 'requests' as const, label: '索样申请', count: state ? openRequests : undefined }])]} />
+    {!state ? <EmptyState title={uiText(error?'读取失败':'正在读取记录')} compact/> : requestsTab ? <SampleRequests /> : <>
     <Toolbar>
       <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索档案号、名称、来源或位置")} />
       <Dropdown label={uiText("形态")} value={form} onChange={setForm} options={[{ value: 'all', label: '全部形态' }, ...forms.map(value => ({ value, label: value }))]} />

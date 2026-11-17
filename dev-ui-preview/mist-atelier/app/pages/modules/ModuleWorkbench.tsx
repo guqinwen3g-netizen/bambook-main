@@ -116,6 +116,7 @@ export type ModuleWorkbenchProps<T extends {id:string}>={title:string;eyebrow?:s
 export function ModuleWorkbench<T extends {id:string}>({title,eyebrow,description,rows,allRows,columns,searchText,rowKey,exportRows,create,edit,detail,detailSurface='card',rowActions=[],toolbar,filtersActive=false,onClearFilters,preview,summary,openLabel='打开完整详情',showWorkspaceError=true}:ModuleWorkbenchProps<T>){
   const workspace=useMistWorkspace(),toast=useToast(),{route,go}=useNav(),compact=useCompactLayout();
   const presentedError=React.useContext(MistPresentedErrorContext);
+  const hasSnapshot=!!workspace.state;
   const [query,setQuery]=React.useState(''),[page,setPage]=React.useState(1),[selected,setSelected]=React.useState<string|null>(route.id||null),[editor,setEditor]=React.useState<ModuleEditorSpec|null>(null),[failure,setFailure]=React.useState(''),[acting,setActing]=React.useState(false);
   const actionLock=React.useRef(false);
   React.useEffect(()=>{setSelected(route.id||null);setFailure('');},[route.id]);
@@ -129,12 +130,12 @@ export function ModuleWorkbench<T extends {id:string}>({title,eyebrow,descriptio
   const filtering=!!query||filtersActive;
   const clearFilters=()=>{setQuery('');setPage(1);onClearFilters?.();};
   const filtered=rows.filter(r=>!query||(searchText?searchText(r):Object.values(r).filter(v=>typeof v==='string'||typeof v==='number').join(' ')).toLocaleLowerCase().includes(query.toLocaleLowerCase()));
-  const pages=Math.max(1,Math.ceil(filtered.length/size)),visiblePage=Math.min(page,pages),current=rows.find(r=>getKey(r)===selectionKey)||allRows?.find(r=>getKey(r)===selectionKey)||null;
-  const locked=acting||workspace.saving||!!workspace.pending||!!workspace.pendingCreate;
+  const pages=Math.max(1,Math.ceil(filtered.length/size)),visiblePage=Math.min(page,pages),current=hasSnapshot?(rows.find(r=>getKey(r)===selectionKey)||allRows?.find(r=>getKey(r)===selectionKey)||null):null;
+  const locked=acting||workspace.saving||!!workspace.pending||!!workspace.pendingCreate||!hasSnapshot||workspace.loading;
   const act=async(action:ModuleRowAction<T>,row:T)=>{if(locked||actionLock.current)return;const origin=routeContext,rowId=getKey(row);actionLock.current=true;setActing(true);setFailure('');try{await action.run(row);}catch(problem){if(active.current&&currentContext.current===origin&&currentSelection.current===rowId)setFailure(problem instanceof Error?problem.message:'操作未完成');}finally{actionLock.current=false;if(active.current)setActing(false);}};
   const editSpec=current?edit?.(current):undefined;
   const controls=current&&(editSpec||rowActions.length)?<div className="mist-row mist-module-actions">{editSpec&&<Button icon={Edit3} disabled={locked} onClick={()=>setEditor(editSpec)}>{uiText("编辑")}</Button>}{rowActions.map((a,index)=>{const label=typeof a.label==='function'?a.label(current):a.label;return <Button key={index} disabled={locked||a.disabled?.(current)} onClick={()=>{if(a.confirmTitle){setEditor({title:a.confirmTitle(current),submitLabel:uiText(label),fields:[],initialValues:{},submit:async()=>{await a.run(current);}});return;}void act(a,current);}}>{uiText(label)}</Button>;})}</div>:null;
-  const recordDetail=current?detail?.(current):<EmptyState title={uiText(workspace.loading?'正在读取记录':selectionKey?'未找到这条记录':'选择一条记录')} compact />;
+  const recordDetail=!hasSnapshot?<EmptyState title={uiText(workspace.error?'读取失败':'正在读取记录')} compact/>:current?detail?.(current):<EmptyState title={uiText(workspace.loading?'正在读取记录':selectionKey?'未找到这条记录':'选择一条记录')} compact />;
   const body=<div className="mist-col" data-module-detail>{controls}{recordDetail}</div>;
   const previewSummary=preview&&current&&summary?summary(current):null;
   // Compact layouts hide the preview column, so a selected record opens as its full page instead.
@@ -152,13 +153,13 @@ export function ModuleWorkbench<T extends {id:string}>({title,eyebrow,descriptio
     {detailSurface==='sections'&&current?<div className="mist-col" data-module-detail data-detail-surface="sections">{recordDetail}</div>:<Card><div className="mist-card-body mist-col" data-module-detail>{recordDetail}</div></Card>}
     <ModuleEditorDialog spec={editor} onClose={()=>setEditor(null)}/>
   </MistPage>;
-  return <MistPage><PageHeader  eyebrow={uiText(eyebrow)} title={uiText(title)} actions={<>{exportRows&&<Button icon={Download} onClick={()=>exportRows(filtered)}>{uiText("导出")}</Button>}{create&&<Button variant="primary" icon={Plus} disabled={locked} onClick={()=>setEditor(create)}>{uiText("新建")}</Button>}</>} />
+  return <MistPage><PageHeader  eyebrow={uiText(eyebrow)} title={uiText(title)} actions={<>{exportRows&&<Button icon={Download} disabled={locked||!filtered.length} onClick={()=>exportRows(filtered)}>{uiText("导出")}</Button>}{create&&<Button variant="primary" icon={Plus} disabled={locked} onClick={()=>setEditor(create)}>{uiText("新建")}</Button>}</>} />
     {failure&&!workspace.error?.startsWith(failure)&&<FailureNotice title={"操作未完成"} detail={failure} />}
     {showWorkspaceError&&workspace.error&&workspace.error!==presentedError&&<FailureNotice title="读取失败" detail={workspace.error} retry={()=>void workspace.refresh()} retryLabel="重新读取" />}
-    <Toolbar right={toolbar}><SearchField value={query} onChange={v=>{setQuery(v);setPage(1);}} placeholder={uiText('搜索'+title)} /></Toolbar>
+    {hasSnapshot?<><Toolbar right={toolbar}><SearchField value={query} onChange={v=>{setQuery(v);setPage(1);}} placeholder={uiText('搜索'+title)} /></Toolbar>
     <section className={preview?'mist-split':'mist-grid'} data-preview-summary={preview?'':undefined}><Card className={preview?undefined:'mist-col-12'}><DataTable loading={workspace.loading} rows={filtered.slice((visiblePage-1)*size,visiblePage*size)} columns={columns} rowKey={getKey} selectedKey={selectionKey} onRowClick={r=>{setSelected(getKey(r));const {view,id,detail:detailMode,...target}=route;if(preview&&!compact)go(view,getKey(r),target,{keepScroll:true});else go(view,getKey(r),target);}} ariaLabel={uiText(title)} empty={<EmptyState title={uiText(filtering?'没有匹配的记录':'还没有'+title+(title.endsWith('记录')?'':'记录'))} action={filtering?<Button variant="quiet" onClick={clearFilters}>{uiText('清除筛选')}</Button>:create?<Button onClick={()=>setEditor(create)}>{uiText("新建")}</Button>:undefined} />} footer={<div className="mist-row"><span className="mist-note">{filtered.length}{uiText(" 条记录")}</span><span className="mist-spacer"/><Pagination page={visiblePage} pages={pages} onChange={setPage}/></div>} /></Card>
       {preview&&!compact&&<Card as="aside" className="mist-preview" aria-label={uiText("记录预览")}>{current&&previewSummary?<PreviewSummary data={previewSummary} actions={controls} openLabel={openLabel} onOpen={openFullDetail} data-module-detail=""/>
-      :<div className="mist-preview-b">{body}{current&&<Button variant="primary" block iconRight={ArrowRight} onClick={openFullDetail}>{openLabel}</Button>}</div>}</Card>}</section>
+      :<div className="mist-preview-b">{body}{current&&<Button variant="primary" block iconRight={ArrowRight} onClick={openFullDetail}>{openLabel}</Button>}</div>}</Card>}</section></>:<EmptyState title={uiText(workspace.error?'读取失败':'正在读取记录')} compact/>}
     <ModuleEditorDialog spec={editor} onClose={()=>setEditor(null)} />
   </MistPage>;
 }
