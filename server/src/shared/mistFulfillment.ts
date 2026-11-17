@@ -1,5 +1,7 @@
 import {cdDocumentIssueProblem} from './mistDocumentGeneration';
 import {confirmShippingSampleBasis,consumeShipmentSamples,shipmentSampleCustodyBlocker,shippingSampleMovementBlocker,shipmentHasDeparted,type ShippingSampleBasisInput} from './mistShipmentSampleCustody';
+import {openCommercialSampleLoan,returnCommercialSampleLoan,commercialSampleHasLoan,unresolvedCommercialLoanSource,type CommercialSampleSourceSelection} from './mistCommercialSampleLoan';
+import {isSampleLoanHold,sampleLoanHoldOpen,ordinarySampleLoanReserved,type StockSampleLoanHold} from './mistStockSampleLoan';
 import {notifyMist,notificationOwners,notificationTargetOwners} from './mistNotifications';
 import {receivableAcceptanceTerms,type ReceivableDueCondition} from './mistTradeTerms';
 import {stableJson} from './stableJson';
@@ -104,6 +106,9 @@ export type FulfillmentSample = {
     createdAt: string;
 };
 export type SampleMovement = {
+    commercialLoan?:import('./mistCommercialSampleLoan').CommercialSampleLoan;
+    /** Response-only return facts when inventory identities are not readable. */
+    commercialReturn?:{location:string;quantity:number;unit:string};
     shipmentLink?:{shipmentId:string;shipmentCode:string;quantityBasisId:string;departureAt:string;recordedAt:string;retrospective:boolean};
     id: string;
     sampleId: string;
@@ -321,10 +326,11 @@ export type FulfillmentStock = {
 };
 export type StockRoll = { roll: string; quantity: number; weightKg?: number };
 /** `issued` is the part already taken out by issues against this reservation; the rest stays held until issued or released. */
-export type StockReservation = { id: string; orderId: string; lineId: string; purpose: string; quantity: number; issued?: number; at: string; actor: string; releasedAt?: string; releasedBy?: string; releaseReason?: string };
+export type StockReservation = { id: string; orderId: string; lineId: string; purpose: string; quantity: number; issued?: number; at: string; actor: string; releasedAt?: string; releasedBy?: string; releaseReason?: string;sampleLoan?:StockSampleLoanHold;sampleLoanAllocations?:Array<{loanId:string;quantity:number;returned:number}> };
 export const OTHER_RECEIPT_REASONS = { customer: '客供料', sample: '样布 / 样品料', leftover: '余料退回', productionReturn: '生产退料', other: '其他' } as const;
 export type OtherReceiptReason = keyof typeof OTHER_RECEIPT_REASONS;
 export type FulfillmentStockMovement = {
+    sampleLoan?:{sampleId:string;loanId:string;returnId?:string};
     id: string;
     materialDelivery?: MaterialDeliveryLink;
     stockId: string;
@@ -542,6 +548,7 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
 } | {
     type: 'fulfillment.samples.move';
     payload: {
+        commercialSources?:CommercialSampleSourceSelection[];
         id: string;
         kind: 'lend' | 'return' | 'send' | 'move' | 'scrap' | 'returnFactory';
         sendPurpose?:SampleSendPurpose;
@@ -1007,12 +1014,12 @@ export function sampleLoanRemaining(root: MistState, id: string) {
     return loan ? sum([loan.quantity, -sum(root.fulfillment.sampleMovements.filter(movement => movement.kind === 'return' && movement.loanId === id).map(movement => movement.quantity))]) : 0;
 }
 /** Active reservations hold stock for one order line; issue for that line consumes them first (see stock.release). */
-export const reservationOpen = (r: StockReservation) => r.releasedAt ? 0 : sum([r.quantity, -(r.issued || 0)]);
-export const stockReservedQuantity = (stock: Pick<FulfillmentStock, 'reservations'>) => sum((stock.reservations || []).map(reservationOpen));
+export const reservationOpen = (r: StockReservation) => isSampleLoanHold(r)?sampleLoanHoldOpen(r):r.releasedAt ? 0 : sum([r.quantity, -(r.issued || 0),-ordinarySampleLoanReserved(r)]);
+export const stockReservedQuantity = (stock: Pick<FulfillmentStock, 'reservations'>) => sum((stock.reservations || []).filter(r=>!isSampleLoanHold(r)).map(reservationOpen));
 /** Issue for an order line draws on that line's own reservations first, so reserved goods can still go to their purpose. */
 export function consumeReservations(stock: FulfillmentStock, quantity: number, line?: { orderId: string; lineId: string }) {
     let left = quantity;
-    if (line) for (const r of stock.reservations || []) { if (left <= 0) break; if (r.orderId !== line.orderId || r.lineId !== line.lineId) continue; const take = Math.min(left, reservationOpen(r)); if (take > 0) { r.issued = sum([r.issued || 0, take]); left = sum([left, -take]); } }
+    if (line) for (const r of stock.reservations || []) { if (left <= 0) break; if (isSampleLoanHold(r)||r.orderId !== line.orderId || r.lineId !== line.lineId) continue; const take = Math.min(left, reservationOpen(r)); if (take > 0) { r.issued = sum([r.issued || 0, take]); left = sum([left, -take]); } }
     if (left > freeQuantity(stock)) fail(`可用量不足：已预留 ${stockReservedQuantity(stock)} ${stock.unit}`);
 }
 export const freeQuantity = (stock: FulfillmentStock) => sum([stock.available, -stockReservedQuantity(stock)]);
@@ -1469,6 +1476,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const s = get(f.samples, p.id, '样品');
             if(s.sizeQuantities&&p.size!==undefined&&p.size!==s.size)fail('船样实际尺码件数已登记，实物变更请重新登记本批船样');
             const changedPhysical = ['form', 'size', 'color'].some(key => p[key] !== undefined && p[key] !== (s as any)[key]);
+            if(changedPhysical&&commercialSampleHasLoan(root as MistState,s.id))fail('商业借样未归还，实物组合不能改写');
             if(changedPhysical&&s.shippingQuantityBasis?.consumption)fail('已随本批出运的实物规格已锁定');
             if (text(p.location, '位置', false) !== s.location) fail('请通过移位操作登记位置变化');
             if (p.name !== undefined) s.name = text(p.name, '样品名称');
@@ -1486,6 +1494,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         }
         case 'fulfillment.samples.move': {
             const s = get(f.samples, p.id, '样品');
+            if(['sampleLoan','commercialLoan','commercialReturn','commercialHolds','reservationIds'].some(key=>Object.prototype.hasOwnProperty.call(p,key)))fail('商业借样占用由系统按原实物建立');
+            if(p.kind!=='lend'&&p.commercialSources!==undefined)fail('归还或移位不得改选原商业借出来源');
             const custodyBlocker=shippingSampleMovementBlocker(root as MistState,s,p.kind);if(custodyBlocker)fail(custodyBlocker,'PRECONDITION');
             // Only the dedicated case command can establish exact factory custody and parcel cost.
             if(s.source.kind==='developmentIncoming'&&!['move','scrap'].includes(p.kind)&&!options?.developmentIncomingCustody)fail('开发来样请从开发案办理寄厂与原样退回','PRECONDITION');
@@ -1511,6 +1521,9 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 fail('预计归还日不能早于借出日');
             const sendPurpose=p.kind==='send'?sampleSendPurpose(p.sendPurpose,s):undefined;
             if(sendPurpose){const blocker=sampleSendBlocker(root,s,sendPurpose,note,p.sendPurpose!==undefined);if(blocker)fail(blocker,'PRECONDITION');}
+            const id=ctx.id();
+            const commercialLoan=p.kind==='lend'?openCommercialSampleLoan(root as MistState,s,id,quantity,p.commercialSources,sourcePosition(s,p.sourceLocation).location,ctx):undefined;
+            if(p.kind==='return'&&loan)returnCommercialSampleLoan(root as MistState,s,loan,quantity,location,id,ctx);
             let sourceLocation: string | undefined;
             if (p.kind === 'return') addAtPosition(s, quantity, location);
             else {
@@ -1519,7 +1532,6 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 sourceLocation = removeAtPosition(s, quantity, position.location);
                 if (p.kind === 'move') addAtPosition(s, quantity, location);
             }
-            const id = ctx.id();
             const shipping = p.kind === 'send' ? { ...(p.trackingNo?.trim() ? { trackingNo: text(p.trackingNo, '运单号', false) } : {}), ...(p.carrier?.trim() ? { carrier: text(p.carrier, '快递公司', false) } : {}), ...(p.destination?.trim() ? { destination: text(p.destination, '寄送去向', false) } : {}) } : {};
             let fee: SampleMovement['fee'];
             if (p.kind === 'send' && p.fee && p.fee.amount) {
@@ -1528,7 +1540,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 fee = { amount: Math.round(amount * 100) / 100, currency };
             }
             const borrowers = options?.externalBorrower?[]:borrower ? [borrower] : (ctx.members || (ctx.actorId ? [{ id: ctx.actorId, name: ctx.actorName, active: true }] : [])).filter(member => member.active && member.name === person);
-            f.sampleMovements.push({ id, sampleId: s.id, kind: p.kind, quantity, person, location, note, at: ctx.now, actor: ctx.actorName, ...shipping, ...(p.kind === 'lend' ? { borrowerId: borrowers.length === 1 ? borrowers[0].id : '' } : {}), ...(fee ? { fee } : {}), ...(sourceLocation === undefined ? {} : { sourceLocation }), ...(loan ? { loanId: loan.id } : {}), ...(expectedReturn ? { expectedReturn } : {}),...(sendPurpose?{sendPurpose}:{}) });
+            f.sampleMovements.push({ id, sampleId: s.id, kind: p.kind, quantity, person, location, note, at: ctx.now, actor: ctx.actorName, ...shipping, ...(p.kind === 'lend' ? { borrowerId: borrowers.length === 1 ? borrowers[0].id : '' } : {}), ...(fee ? { fee } : {}), ...(sourceLocation === undefined ? {} : { sourceLocation }), ...(loan ? { loanId: loan.id } : {}), ...(expectedReturn ? { expectedReturn } : {}),...(sendPurpose?{sendPurpose}:{}),...(commercialLoan?{commercialLoan}:{}) });
             // ord17：订单样品的寄样费记入该订单费用台账，客户样品等无订单来源的只记在流水上。
             if (fee && s.source.kind === 'orderLine') {
                 const order = get(root.orders, s.source.orderId, '订单'), costs = ((root as MistState & { orderCosts?: { expenses: unknown[] } }).orderCosts ||= { expenses: [] }) as { expenses: Array<Record<string, unknown>> };
@@ -2121,6 +2133,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (problem) fail(problem);
             if (quantity > receipt.quantity) fail('转拒收数量超过本次合格实收数量');
             const stock = f.stock.find(row => row.receiptId === receipt.id && row.purchaseId === purchase.id)!;
+            const unresolved=unresolvedCommercialLoanSource(root,stock);if(unresolved)fail(unresolved);
             if (quantity > stock.available) fail('本次收货的可用库存不足');
             const sourceLocation = removeAtPosition(stock, quantity, p.sourceLocation);
             if (stock.onHand !== undefined) stock.onHand = sum([stock.onHand, -quantity]);
@@ -2178,6 +2191,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         }
         case 'fulfillment.inventory.move': {
             const stock = get(f.stock, p.id, '库存批次');
+            const unresolved=unresolvedCommercialLoanSource(root,stock);if(unresolved&&p.kind!=='return')fail(unresolved);
             if(stock.sourceKind==='claimReturn')fail('退回隔离库存仅可按案件实际处置，不能通用出库、退回或移位');
             if (!['issue', 'return', 'move'].includes(p.kind))
                 fail('库存操作无效');

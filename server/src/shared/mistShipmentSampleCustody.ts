@@ -1,6 +1,7 @@
 import {MistCommandError,type MistContext,type MistState} from './mistWorkspace';
 import type {FulfillmentSample,FulfillmentShipment,SampleMovement} from './mistFulfillment';
 import {stableJson} from './stableJson';
+import {commercialSampleHasLoan} from './mistCommercialSampleLoan';
 
 export type ShippingSampleSourceSnapshot={
  sampleId:string;shipmentId:string;orderId:string;lineId:string;productionId:string;
@@ -71,8 +72,8 @@ export function shippingSampleMovementBlocker(state:MistState,sample:Fulfillment
  if(sample.role!=='shipping'||!sample.shipmentId)return false;
  if(!sample.shippingQuantityBasis)return kind==='return'?false:'请先确认样品数量口径';
  if(sample.shippingQuantityBasis.kind==='included'){
-  if(!shipmentHasDeparted(shipment)&&(kind==='move'||kind==='return'))return false;
-  return shipmentHasDeparted(shipment)?'本批已出运，请按原依据补记随货':'大货内随货样品仅可现场移位或归还，出运请办理本票';
+  if(kind==='return'||!shipmentHasDeparted(shipment)&&(kind==='move'||kind==='lend'))return false;
+  return shipmentHasDeparted(shipment)?'本批已出运，请按原依据补记随货':'大货内样品不能独立寄出或处置，请办理本票出运';
  }
  return false;
 }
@@ -88,6 +89,7 @@ export function confirmShippingSampleBasis(state:MistState,input:ShippingSampleB
  if(input.reconcileDeparted!==undefined&&typeof input.reconcileDeparted!=='boolean')fail('补记方式无效');
  if(input.kind==='included'&&input.independentSource)fail('随货口径不能同时声明独立实物来源');
  const sample=state.fulfillment.samples.find(s=>s.id===input.id);if(!sample)fail('船样不存在');
+ if(commercialSampleHasLoan(state,sample.id))fail('原商业借样未归还，不能更改数量口径');
  if(sample.shippingQuantityBasis?.consumption)fail('已结转的随货数量口径已锁定');
  if(!['included','independent'].includes(input.kind))fail('请选择样品数量口径');
  if(typeof input.evidence!=='string'||!input.evidence.trim()||input.evidence.length>4000)fail('请填写数量口径确认依据');
