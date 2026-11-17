@@ -159,6 +159,28 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
+  "type": "development.incoming.dispatch",
+  "payload": "{devId:string;taskVersionId:string;items:Array<{sampleId:string;quantity:number;sourceLocation:string}>;sentAt:string;returnExpected:boolean;expectedReturn?:string;delivery:IncomingDelivery;postage:IncomingPostage;note:string}",
+  "types": {
+   "IncomingDelivery": "{kind:'courier'|'handover';recipient:string;address:string;carrier:string;trackingNo:string;evidence:string}",
+   "IncomingPostage": "{amount:number;currency:string;zeroReason:string}"
+  },
+  "source": "server/src/shared/mistDevelopmentIncoming.ts"
+ },
+ {
+  "type": "development.incoming.receive",
+  "payload": "{devId:string;receivedAt:string;name:string;form:string;quantity:number;unit:string;size:string;color:string;location:string;contact:string;fileIds:string[];note:string}",
+  "source": "server/src/shared/mistDevelopmentIncoming.ts"
+ },
+ {
+  "type": "development.incoming.return",
+  "payload": "{devId:string;dispatchId:string;items:Array<{loanId:string;quantity:number;location:string}>;receivedAt:string;delivery:IncomingDelivery;note:string}",
+  "types": {
+   "IncomingDelivery": "{kind:'courier'|'handover';recipient:string;address:string;carrier:string;trackingNo:string;evidence:string}"
+  },
+  "source": "server/src/shared/mistDevelopmentIncoming.ts"
+ },
+ {
   "type": "development.move",
   "payload": "{ devId: string; stage: number }",
   "source": "server/src/shared/mistWorkspace.ts"
@@ -1027,8 +1049,9 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "fulfillment.samples.create",
   "payload": "SampleInput",
   "types": {
-   "SampleInput": "Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'source' | 'fileIds' | 'note' | 'role' | 'shipmentId' | 'sizeQuantities'>",
-   "FulfillmentSample": "{ id: string; code: string; name: string; category: string; form: string; unit: string; quantity: number; available: number; location: string; positions?: FulfillmentPosition[]; size: string; sizeQuantities?:FulfillmentSizeQuantity[]; color: string; source: FulfillmentSource; registeredById?: string; sourceSampleCode?: string; materialPlan?: string; role?: FulfillmentSampleRole; shipmentId?: string; qualityRevision?: number; fileIds: string[]; note: string; createdAt: string; }"
+   "SampleInput": "Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'fileIds' | 'note' | 'role' | 'shipmentId' | 'sizeQuantities'>&{source:FulfillmentSource}",
+   "FulfillmentSample": "{ id: string; code: string; name: string; category: string; form: string; unit: string; quantity: number; available: number; location: string; positions?: FulfillmentPosition[]; size: string; sizeQuantities?:FulfillmentSizeQuantity[]; color: string; source: FulfillmentSampleSource; incoming?:IncomingReceiptInfo; registeredById?: string; sourceSampleCode?: string; materialPlan?: string; role?: FulfillmentSampleRole; shipmentId?: string; qualityRevision?: number; fileIds: string[]; note: string; createdAt: string; }",
+   "FulfillmentSource": "{ kind: 'version'; devId: string; versionId: string; } | { kind: 'orderLine'; orderId: string; lineId: string; productionId?: string; } | { kind: 'manual'; description: string; }"
   },
   "source": "server/src/shared/mistFulfillment.ts"
  },

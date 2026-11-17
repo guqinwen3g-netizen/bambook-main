@@ -461,8 +461,9 @@ export class MistRepository {
     const fabricAccess=scope&&hasScope(actor,'orders:read')&&hasScope(actor,'orders:write')?scopedFabricAccess(row.state,scope,actor.userId,actor.displayName||actor.userId,hasScope(actor,'production:read')&&hasScope(actor,'products:read')&&hasScope(actor,'qc:read')):undefined;
     const fabricDestinations=scope&&hasScope(actor,'orders:read')?scopedFabricDestinations(row.state,scope):undefined;
     const shipmentReleaseGates=projectShipmentReleaseGates(row.state,projected.state,actor,row.companyId);
-    const incomingScope=scope?scopedVisibility(row.state,scope,false).get('devs')!:new Set(projected.state.devs.map(dev=>dev.id));
-    const incomingReadable=hasScope(actor,'products:read')?projected.state.devs.filter(dev=>incomingScope.has(dev.id)).map(dev=>dev.id):[];
+    const visibleDevs=projected.state.devs||[];
+    const incomingScope=scope?scopedVisibility(row.state,scope,false).get('devs')!:new Set(visibleDevs.map(dev=>dev.id));
+    const incomingReadable=hasScope(actor,'products:read')?visibleDevs.filter(dev=>incomingScope.has(dev.id)).map(dev=>dev.id):[];
     const developmentIncomingAccess={readableDevIds:incomingReadable,writableDevIds:hasScope(actor,'products:write')?[...incomingReadable]:[]};
     return { ...publicWorkspace({ ...row, state: projected.state }), access,developmentIncomingAccess,...(shipmentReleaseGates?{shipmentReleaseGates}:{}),...(projected.costMaterialBasis!==undefined?{costMaterialBasis:projected.costMaterialBasis}:{}),...(projected.costClaimBasis!==undefined?{costClaimBasis:projected.costClaimBasis}:{}),...(materialIssueTargets?{materialIssueTargets}:{}),...(directTargets?{materialDeliveryTargets:directTargets}:{}),...(financialDisposals?{financialDisposals}:{}),...(fabricAccess?{scopedFabricAccess:fabricAccess}:{}),...(fabricDestinations?{scopedFabricDestinations:fabricDestinations}:{}) };
   }
