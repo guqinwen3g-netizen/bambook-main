@@ -5,6 +5,7 @@ import {SAMPLE_SEND_PURPOSES,sampleSendPurpose} from '../../../../../server/src/
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 样品仓库：面料按档案汇总形态余额，成衣按每件实物；详情卡承接借出、寄出、归还、移位与送检。 */
 import { parseShippingSampleSizes } from '../../../../../server/src/shared/mistShippingSample';
+import {shippingSampleSourceSnapshot,shippingSampleMovementBlocker} from '../../../../../server/src/shared/mistShipmentSampleCustody';
 import React from 'react';
 import { ArrowLeftRight, Download, Layers, Package, Pencil, Plus, RefreshCw, SearchX, Send, Shirt, Undo2 } from 'lucide-react';
 import { Banner, Button, Card, DataTable, Dropdown, EmptyState, Facts, Icon, MistPage, Mono, ObjectCell, PageHeader, Pagination, Pill, Pipeline, SearchField, Tabs, TextLink, Thumb, Timeline, Toolbar, type Column } from '../../../../../components/mist';
@@ -89,6 +90,7 @@ export function SamplesPage() {
   const members = workspaceMembers(workspace, state, session.user);
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
   const [syncError, setSyncError] = useRouteDraft(''), [syncing, setSyncing] = React.useState(false);
+  const [basisError,setBasisError]=useRouteDraft('');
   const [query, setQuery] = React.useState(''), [form, setForm] = React.useState('all'), [origin, setOrigin] = React.useState('all'), [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all');
   const [page, setPage] = React.useState(1), [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
   React.useEffect(() => { setPicked(route.id || null); setDrawer(!!route.id); }, [route.id]);
@@ -106,7 +108,7 @@ export function SamplesPage() {
   const requestsTab = route.section === 'requests' && !hasShipmentContext && !hasProductionContext;
   const openRequests = state ? readSampleRequests(state).filter(r => r.state === 'open').length : 0;
   const invalidProduction = hasProductionContext && !!state && !contextProduction;
-  const canCreate = can && !invalidProduction && !(hasProductionContext && contextProduction?.closed);
+  const canCreate = can && !invalidProduction && !(hasProductionContext && contextProduction?.closed) && !(hasShipmentContext&&sourceShipment?.state==='departed');
   const contextLine = state?.orderLines.find(line => line.id === contextProduction?.lineId && line.orderId === contextProduction.orderId);
   const contextDomain = sourceShipment?.domain || state?.orders.find(order => order.id === contextProduction?.orderId)?.type;
   const contextShelf: Shelf | undefined = contextDomain === 'fabric' || contextDomain === 'garment' ? contextDomain : undefined;
@@ -147,7 +149,7 @@ export function SamplesPage() {
   const contextRole = hasShipmentContext ? 'shipping' : route.productionId ? (state?.orders.find(order => order.id === state.productions.find(branch => branch.id === route.productionId)?.orderId)?.type === 'fabric' ? 'pioneer' : 'pp') : '';
   const productionSources = sampleSources.filter(option => option.value.startsWith('production:')).map(option => option.value);
   const roleOptions = hasShipmentContext ? [{ value: 'shipping', label: '船样' }] : [emptyOption, ...(!contextShelf || contextShelf==='garment' ? [{ value: 'pp', label: '成衣产前样' }] : []), ...(!contextShelf || contextShelf==='fabric' ? [{ value: 'pioneer', label: '面料先锋样' }] : []), { value: 'shipping', label: '船样' }];
-  const shipmentOptions = hasShipmentContext ? (sourceShipment ? [{ value: sourceShipment.id, label: sourceShipment.code }] : [emptyOption]) : [emptyOption, ...(state?.fulfillment.shipments || []).filter(shipment => shipment.state !== 'cancelled').map(shipment => ({ value: shipment.id, label: shipment.code }))];
+  const shipmentOptions = hasShipmentContext ? (sourceShipment ? [{ value: sourceShipment.id, label: sourceShipment.code }] : [emptyOption]) : [emptyOption, ...(state?.fulfillment.shipments || []).filter(shipment => shipment.state !== 'cancelled'&&shipment.state!=='departed').map(shipment => ({ value: shipment.id, label: shipment.code }))];
   const defaultCategory = contextShelf ? (contextShelf === 'fabric' ? '面料' : '成衣') : shelf === 'garment' ? '成衣' : shelf === 'other' ? '其他' : '面料';
   const shippingGarment=hasShipmentContext&&sourceShipment?.domain==='garment';
   const createSpec: ModuleEditorSpec = {
@@ -184,6 +186,18 @@ export function SamplesPage() {
   const editSpec = (sample: FulfillmentSample): ModuleEditorSpec => ({ title: '编辑样品资料', fields: [field('name', '样品名称'), choiceField('form', '样品形态', SAMPLE_FORMS), field('size', '尺码', 'text', false), field('color', '颜色', 'text', false), field('note', '备注', 'textarea', false),field('files','附件','files',false)],
     initialValues: { name: sample.name, form: sample.form, size: sample.size, color: sample.color, note: sample.note, files:sample.fileIds.join(',') },
     submit: values => run({ type: 'fulfillment.samples.edit', payload: { id: sample.id, location: sample.location, name: text(values, 'name'), form: text(values, 'form'), size: text(values, 'size'), color: text(values, 'color'), note: text(values, 'note'), fileIds: moduleFileIds(values.files) } }) });
+  const confirmQuantityBasis=(sample:FulfillmentSample)=>{
+    if(!state)return;setBasisError('');
+    let snapshot:ReturnType<typeof shippingSampleSourceSnapshot>;
+    try{snapshot=shippingSampleSourceSnapshot(state,sample);}catch(error){setBasisError(error instanceof Error?error.message:String(error));return;}
+    const shipment=state.fulfillment.shipments.find(s=>s.id===sample.shipmentId)!;
+    setDialog({title:shipment.state==='departed'?'补记样品数量口径':'确认样品数量口径',fields:[
+      {...field('batch','出运批次','text',false),readonly:true},{...field('quantity','实物数量','text',false),readonly:true},
+      field('kind','数量口径','select',true,[{value:'included',label:'大货内随本批出运'},{value:'independent',label:'独立实物（不占本批大货）'}]),
+      {...field('independentSource','独立实物来源与保管依据','textarea'),when:{key:'kind',values:['independent']}},field('evidence','确认依据','textarea'),
+    ],initialValues:{batch:shipment.code,quantity:`${sample.quantity} ${sample.unit}`,kind:sample.shippingQuantityBasis?.kind||'',independentSource:sample.shippingQuantityBasis?.independentSource||'',evidence:''},submitLabel:shipment.state==='departed'?'确认并补记':'确认口径',
+    submit:values=>run({type:'fulfillment.samples.shippingBasis',payload:{id:sample.id,kind:text(values,'kind') as 'included'|'independent',sourceSnapshot:snapshot,evidence:text(values,'evidence'),independentSource:text(values,'independentSource'),fileIds:[...sample.fileIds],...(shipment.state==='departed'?{reconcileDeparted:true}:{})}})});
+  };
   const movement = (sample: FulfillmentSample, kind: MoveKind) => {
     if (!state) return;
     const loans = state.fulfillment.sampleMovements.filter(item => item.sampleId === sample.id && item.kind === 'lend' && sampleLoanRemaining(state, item.id) > 0);
@@ -237,7 +251,7 @@ export function SamplesPage() {
   const statusCounts = (key: StatusFilter) => shelfRows.filter(row => key === 'all' || statusOf(row).key === key || (key === 'lent' && statusOf(row).key === 'overdue')).length;
 
   const detail = selected && state ? <SampleDetail row={selected} state={state} day={day} can={can} locked={locked}
-    onMove={movement} onEdit={sample => editor.open(editSpec(sample))} onQc={openSampleQc}
+    onMove={movement} onBasis={confirmQuantityBasis} onEdit={sample => editor.open(editSpec(sample))} onQc={openSampleQc}
     onAttach={(sample,added) => attachFiles(root=>root.fulfillment.samples.find(row=>row.id===sample.id),(current,fileIds)=>({type:'fulfillment.samples.edit',payload:{id:current.id,location:current.location,note:current.note,fileIds}}),added)} />
     : <EmptyState icon={shelf === 'garment' ? Shirt : Layers} title={uiText("样品详情")} description={uiText(loading ? '正在读取样品' : '从列表选择一条样品记录')} compact />;
 
@@ -252,6 +266,7 @@ export function SamplesPage() {
         {canCreate && !invalidShipment && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => editor.open(createSpec)}>{uiText("新建样品")}</Button>}
       </>} />
     {syncError && <FailureNotice title={"来源实物同步失败"} detail={syncError} />}
+    {basisError && <FailureNotice title={"数量口径未确认"} detail={basisError} />}
     {error && error !== presentedError && <FailureNotice title={state ? "样品操作未完成" : "读取失败"} detail={error} />}
     {overdueLoans.length > 0 && <div className="mist-section"><Banner tone="warn" title={ui`${overdueLoans.length} 笔借出已超过预计归还日`} actions={<Button onClick={() => { const first = overdueLoans[0]; changeShelf(shelfOf(first.sample)); setStatusFilter('overdue'); }}>{uiText("只看逾期")}</Button>}>
       {overdueLoans.slice(0, 3).map(({ loan, sample }) => `${sample.name} · ${loan.person} · 应还 ${loan.expectedReturn}`).join('；')}{uiText(overdueLoans.length > 3 ? ' …' : '')}</Banner></div>}
@@ -281,9 +296,9 @@ export function SamplesPage() {
   </MistPage>;
 }
 
-function SampleDetail({ row, state, day, can, locked, onMove, onEdit, onQc, onAttach }: {
+function SampleDetail({ row, state, day, can, locked, onMove, onBasis, onEdit, onQc, onAttach }: {
   row: LedgerRow; state: MistState; day: string; can: boolean; locked: boolean;
-  onMove: (sample: FulfillmentSample, kind: MoveKind) => void; onEdit: (sample: FulfillmentSample) => void; onQc: (sample: FulfillmentSample) => void; onAttach: (sample: FulfillmentSample, ids: string[]) => Promise<unknown>;
+  onMove: (sample: FulfillmentSample, kind: MoveKind) => void; onBasis:(sample:FulfillmentSample)=>void; onEdit: (sample: FulfillmentSample) => void; onQc: (sample: FulfillmentSample) => void; onAttach: (sample: FulfillmentSample, ids: string[]) => Promise<unknown>;
 }) {
   const { go } = useNav(), session = useMistSession();
   const primary = row.primary, status = rowStatus(state, row, day);
@@ -292,6 +307,7 @@ function SampleDetail({ row, state, day, can, locked, onMove, onEdit, onQc, onAt
     .sort((a, b) => (incomingMovementDay(b.sample,b.movement)||b.movement.at).localeCompare(incomingMovementDay(a.sample,a.movement)||a.movement.at)||b.movement.at.localeCompare(a.movement.at));
   const why = (sample: FulfillmentSample, kind: MoveKind): string | false => {
     if (!can) return '没有样品写权限';
+    const custody=shippingSampleMovementBlocker(state,sample);if(custody)return custody;
     if(sample.source.kind==='developmentIncoming'&&kind!=='move'&&kind!=='scrap')return '请从开发案办理寄厂与原样退回';
     const facts = sampleFacts(state, sample, day);
     if (kind === 'return') return facts.openLoans.length ? false : '没有未归还的借出';
@@ -306,7 +322,7 @@ function SampleDetail({ row, state, day, can, locked, onMove, onEdit, onQc, onAt
       { label: '来源', value: <SourceLink source={primary.source} sampleId={primary.id} /> },
       ...(primary.source.kind==='developmentIncoming'&&primary.incoming?[{label:'实际收样日',value:primary.incoming.receivedAt}]:[]),
       { label: row.shelf === 'fabric' ? '样品数' : '规格', value: row.shelf === 'fabric' ? `${row.samples.length}` : [primary.size, primary.color].filter(Boolean).join(' · ') || '未记录' },
-      ...(shipment ? [{ label: '出运批次', value: <Mono>{shipment.code}</Mono> }] : []),
+      ...(shipment ? [{ label: '出运批次', value: <TextLink onClick={()=>go('shipments',shipment.id,{detail:'full'})}><Mono>{shipment.code}</Mono></TextLink> }] : []),
       ...(row.samples.length===1?[{ label: '登记', value: shortWhen(primary.createdAt) }]:[]),
     ]} />
     <DetailBlock title={uiText(row.shelf === 'fabric' ? '形态与余额' : '数量与位置')}>
@@ -316,6 +332,10 @@ function SampleDetail({ row, state, day, can, locked, onMove, onEdit, onQc, onAt
         <span className="mist-note">{uiText("可用 ")}{sample.available} {uiText(sample.unit)}{uiText(" · 借出未还 ")}{facts.lent} {uiText(sample.unit)} · {uiText(sample.available > 0 ? (fulfillmentPositions(sample).length > 1 ? '多个位置' : sample.location || '位置未记录') : '无在库位置')}</span>
         {facts.overdue.map(loan => <span key={loan.id} className="mist-note"><Icon icon={Undo2} size="xs" />{loan.person}{uiText(" 应于 ")}{loan.expectedReturn}{uiText(" 归还，已逾期")}</span>)}
         <PositionSummary row={sample} />
+        {sample.role==='shipping'&&<div className="mist-col" data-sample-quantity-basis={sample.id}>
+          <div className="mist-row"><span>{uiText('数量口径')}</span><Pill tone={sample.shippingQuantityBasis?'neutral':'warn'}>{uiText(sample.shippingQuantityBasis?.consumption?'已随货出运':sample.shippingQuantityBasis?.kind==='included'?'大货内随本批出运':sample.shippingQuantityBasis?.kind==='independent'?'独立实物（不占本批大货）':'未确认')}</Pill><span className="mist-spacer"/>{can&&!sample.shippingQuantityBasis?.consumption&&<Button variant="quiet" disabled={locked} onClick={()=>onBasis(sample)}>{uiText(sample.shippingQuantityBasis?'更正口径':'确认数量口径')}</Button>}</div>
+          {sample.shippingQuantityBasis&&<Timeline events={[...(sample.shippingQuantityBasisHistory||[]),sample.shippingQuantityBasis].map(b=>({who:b.actor,when:businessWhen(b.at),text:<>{uiText(b.kind==='included'?'大货内随本批出运':'独立实物（不占本批大货）')} · {b.independentSource?b.independentSource+' · ':''}{b.evidence}{b.consumption&&<> · {uiText(b.consumption.retrospective?'补记随货':'随货出运')} · {shipment?.code}</>}</>}))}/>}
+        </div>}
         {can && <ActionBar busy={locked} actions={[
           { label: '借出', icon: ArrowLeftRight, onClick: () => onMove(sample, 'lend'), hidden: !!why(sample, 'lend') },
           { label: '寄出', icon: Send, onClick: () => onMove(sample, 'send'), hidden: !!why(sample, 'send') },

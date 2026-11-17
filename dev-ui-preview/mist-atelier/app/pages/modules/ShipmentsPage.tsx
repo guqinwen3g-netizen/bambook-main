@@ -16,6 +16,7 @@ import type { FulfillmentShipment } from '../../../../../server/src/shared/mistF
 import {stableJson} from '../../../../../server/src/shared/stableJson';
 import { fulfillmentSourceLabel, shipmentCancelBlockers, shipmentHandoverBlocker, stockIssueRemaining } from '../../../../../server/src/shared/mistFulfillment';
 import { heldShipmentRelease } from '../../../../../server/src/shared/mistRelationHold';
+import {shipmentSampleCustodyBlocker} from '../../../../../server/src/shared/mistShipmentSampleCustody';
 import { OVER_SHIP_REQUIRED, SHORT_SHIP_HINT, pendingOverShip, shipmentToleranceCheck } from '../../../../../server/src/shared/mistOrderClosure';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
@@ -395,7 +396,7 @@ function ShipmentDetail({ shipment: s, releaseGate, state, day, me, business, lo
   const packReason = logisticsReason || (issuedCiPl&&!supplement ? '已有有效 CI 或装箱单，请先在单据中心作废原件' : customsFiled ? '已有实际申报或清关记录，请先完成外部更正' : false);
   const hold = heldShipmentRelease(state as any, s.customerId);
   const paymentBlocker = [...new Set(s.lines.map(line=>line.orderId))].map(orderId=>orderShipmentPaymentBlocker(state,orderId)).find(Boolean);
-  const departReason = logisticsReason || packingClientBlocker(state,s) || paymentBlocker || (!s.documentsSentAt ? '等待业务登记对客发送 CI / PL' : !cleared ? '出口清关尚未完成' : shipmentHandoverBlocker(state, s) || ((releaseGate?.held??!!hold.held) && !(releaseGate?.unusedAuthorized??!!hold.risk) ? '客户往来已冻结：须先经部门主管批准带风险放行' : false));
+  const departReason = logisticsReason || packingClientBlocker(state,s) || paymentBlocker || (!s.documentsSentAt ? '等待业务登记对客发送 CI / PL' : !cleared ? '出口清关尚未完成' : shipmentHandoverBlocker(state, s) || shipmentSampleCustodyBlocker(state,s) || ((releaseGate?.held??!!hold.held) && !(releaseGate?.unusedAuthorized??!!hold.risk) ? '客户往来已冻结：须先经部门主管批准带风险放行' : false));
   const track = [
     { label: '业务发起', done: true, note: `${s.requestedBy} · ${shortWhen(s.createdAt)}` },
     { label: '逐条目装箱核实', done: matched, note: packingRows.length ? `${cartons} ${s.domain === 'fabric' ? '件' : '箱'} · ${detailIssue ? '明细待核对' : matched ? '与计划一致' : '与计划不符'}` : '未装箱', noteTone: packingRows.length && !matched ? 'bad' as const : undefined },

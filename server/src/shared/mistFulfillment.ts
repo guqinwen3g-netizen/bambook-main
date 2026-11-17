@@ -1,4 +1,5 @@
 import {cdDocumentIssueProblem} from './mistDocumentGeneration';
+import {confirmShippingSampleBasis,consumeShipmentSamples,shipmentSampleCustodyBlocker,shippingSampleMovementBlocker,type ShippingSampleBasisInput} from './mistShipmentSampleCustody';
 import {notifyMist,notificationOwners,notificationTargetOwners} from './mistNotifications';
 import {receivableAcceptanceTerms,type ReceivableDueCondition} from './mistTradeTerms';
 import {stableJson} from './stableJson';
@@ -72,6 +73,8 @@ export type FulfillmentProductionFact = {
 export const PRODUCTION_HOLD_CATEGORIES = { quality: '质量问题', material: '缺料 / 物料问题', customer: '客户要求暂停', factory: '工厂产能 / 停工', other: '其他' } as const;
 export type FulfillmentProductionHold = { at: string; actor: string; category: keyof typeof PRODUCTION_HOLD_CATEGORIES; reason: string };
 export type FulfillmentSample = {
+    shippingQuantityBasis?:import('./mistShipmentSampleCustody').ShippingSampleQuantityBasis;
+    shippingQuantityBasisHistory?:import('./mistShipmentSampleCustody').ShippingSampleQuantityBasis[];
     id: string;
     code: string;
     name: string;
@@ -101,6 +104,7 @@ export type FulfillmentSample = {
     createdAt: string;
 };
 export type SampleMovement = {
+    shipmentLink?:{shipmentId:string;shipmentCode:string;quantityBasisId:string;departureAt:string;recordedAt:string;retrospective:boolean};
     id: string;
     sampleId: string;
     /** scrap：报废 / 销毁；returnFactory：退还工厂。两者都是永久出库，须写原因。 */
@@ -516,7 +520,7 @@ export type FulfillmentState = {
 type PurchaseInput = Pick<FulfillmentPurchase, 'orderId' | 'lineId' | 'kind' | 'materialKind' | 'stageTerms' | 'iqcRequired' | 'supplierId' | 'supplier' | 'description' | 'quantity' | 'unit' | 'price' | 'currency' | 'due' | 'terms' | 'destination' | 'note' | 'fileIds'>;
 type SampleInput = Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'fileIds' | 'note' | 'role' | 'shipmentId' | 'sizeQuantities'>&{source:FulfillmentSource};
 type ShipmentInput = {packingDetailVersion?:2;packingColorVersion?:1} & Pick<FulfillmentShipment, 'consignee' | 'mode' | 'portOfLoading' | 'portOfDischarge' | 'incoterm' | 'plannedDate' | 'booking' | 'lines' | 'note' | 'fileIds'>;
-export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportCommand | QcDispositionCommand | {
+export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportCommand | QcDispositionCommand | {type:'fulfillment.samples.shippingBasis';payload:ShippingSampleBasisInput} | {
     type: 'fulfillment.samples.create';
     payload: SampleInput;
 } | {
@@ -1419,6 +1423,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         case 'fulfillment.materials.confirm': return confirmMaterialDelivery(root, p, ctx);
         case 'fulfillment.samples.create': {
             if (Object.prototype.hasOwnProperty.call(p, 'registeredById')) fail('样品登记人由系统记录');
+            if(p.role==='shipping'&&f.shipments.some(s=>s.id===p.shipmentId&&s.state==='departed'))fail('本批已出运，不能追加船样重建可用余额','PRECONDITION');
             const s = source(root, p.source);
             if (s.kind === 'version') {
                 const d = get(root.devs, s.devId, '开发案'), v = get(root.versions, s.versionId, '版本');
@@ -1453,11 +1458,17 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             }
             return { applied };
         }
+        case 'fulfillment.samples.shippingBasis': {
+            const result=confirmShippingSampleBasis(root as MistState,{...p,fileIds:files(root,p.fileIds)},ctx);
+            audit(root,ctx,'sample',p.id,p.kind==='included'?'确认大货内随本批出运口径':'确认独立实物口径');
+            return result;
+        }
         case 'fulfillment.samples.edit': {
             if (Object.prototype.hasOwnProperty.call(p, 'registeredById')) fail('样品登记人由系统记录');
             const s = get(f.samples, p.id, '样品');
             if(s.sizeQuantities&&p.size!==undefined&&p.size!==s.size)fail('船样实际尺码件数已登记，实物变更请重新登记本批船样');
             const changedPhysical = ['form', 'size', 'color'].some(key => p[key] !== undefined && p[key] !== (s as any)[key]);
+            if(changedPhysical&&s.shippingQuantityBasis?.consumption)fail('已随本批出运的实物规格已锁定');
             if (text(p.location, '位置', false) !== s.location) fail('请通过移位操作登记位置变化');
             if (p.name !== undefined) s.name = text(p.name, '样品名称');
             if (p.form !== undefined) s.form = text(p.form, '样品形态');
@@ -1474,6 +1485,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         }
         case 'fulfillment.samples.move': {
             const s = get(f.samples, p.id, '样品');
+            const custodyBlocker=shippingSampleMovementBlocker(root as MistState,s);if(custodyBlocker)fail(custodyBlocker,'PRECONDITION');
             // Only the dedicated case command can establish exact factory custody and parcel cost.
             if(s.source.kind==='developmentIncoming'&&!['move','scrap'].includes(p.kind)&&!options?.developmentIncomingCustody)fail('开发来样请从开发案办理寄厂与原样退回','PRECONDITION');
             let quantity = p.kind === 'move' ? 0 : qty(p.quantity);
@@ -2515,6 +2527,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             {const error=packingBreakdownBlocker(root,s);if(error)fail(error);}
             assertCurrentShipmentTolerance(root, s);
             requiredShipmentDocuments(root, s);
+            const sampleCustodyBlocker=shipmentSampleCustodyBlocker(root as MistState,s);if(sampleCustodyBlocker)fail(sampleCustodyBlocker,'PRECONDITION');
             const at = instant(p.at, ctx, '实际离港/起飞时间');
             if (at < s.documentsSentAt!)
                 fail('实际出运不得早于单据发送');
@@ -2527,6 +2540,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             s.state = 'departed';
             // Finished goods held in our warehouse for these lines leave stock with the shipment.
             autoIssueForDeparture(root, s, ctx);
+            consumeShipmentSamples(root as MistState,s,ctx);
             audit(root,ctx,'shipment',s.id,'已登记实际出运',{ view: 'orders/detail', id: s.lines[0].orderId, orderLineId: s.lines[0].lineId },notificationOwners(root,'shipment',s.id));
             if (hold.risk?.release) { Object.assign(hold.risk.release, { shipmentId: s.id, shipmentCode: s.code, usedAt: ctx.now }); audit(root,ctx,'risk',hold.risk.id,`带风险放行已用于 ${s.code}（往来冻结中，下一票须重新申请）`,{ view: 'risks', id: hold.risk.id },notificationOwners(root,'risk',hold.risk.id)); }
             return { id: s.id };

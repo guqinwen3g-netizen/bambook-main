@@ -6,6 +6,7 @@ import {fireEvent,getAllByRole,getByRole,queryByRole} from '@testing-library/dom
 import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentSample} from '../../../../../server/src/shared/mistFulfillment';
+import {confirmShippingSampleBasis} from '../../../../../server/src/shared/mistShipmentSampleCustody';
 import {Nav} from '../../nav';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 const store=vi.hoisted(()=>({state:null as MistState|null,workspace:{id:'workspace',revision:1},loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
@@ -17,6 +18,23 @@ import {SamplesPage} from './SamplesPage';
 let host:HTMLElement,root:Root;let presentedError:string|undefined;const go=vi.fn();
 function render(id?:string,context:Record<string,string>={}){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'samples',id,...context},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><MistPresentedErrorContext.Provider value={presentedError}><SamplesPage/></MistPresentedErrorContext.Provider></Nav.Provider></ToastProvider></MistRoot>));}
 const version={kind:'version' as const,devId:'dev',versionId:'ver'};
+function shippingCustodyFixture(){
+ const state=store.state!;state.orders.push({id:'custody-order',type:'garment',ownerId:'sales'}as any);state.orderLines.push({id:'custody-line',orderId:'custody-order',unit:'件'}as any);state.productions.push({id:'custody-production',orderId:'custody-order',lineId:'custody-line'}as any);
+ state.fulfillment.shipments.push({id:'custody-ship',code:'SHP-CUSTODY',state:'departed',domain:'garment',departedAt:'2026-11-19T14:00:00Z',departureEvidence:'Original carrier confirmation',fileIds:[],lines:[{orderId:'custody-order',lineId:'custody-line',productionId:'custody-production',quantity:8}]}as any);
+ state.fulfillment.packing.push({id:'custody-box',shipmentId:'custody-ship',lineId:'custody-line',productionId:'custody-production',carton:'A01',quantity:8,assortment:[{color:'Blue',size:'M',quantity:8}]}as any);
+ const sample:FulfillmentSample={id:'custody-sample',code:'SMP-CUSTODY',name:'Shipping specimen',category:'成衣',form:'船样',unit:'件',quantity:4,available:4,location:'A01',positions:[{location:'A01',available:4}],color:'Blue',size:'M 4',sizeQuantities:[{size:'M',quantity:4}],role:'shipping',shipmentId:'custody-ship',source:{kind:'orderLine',orderId:'custody-order',lineId:'custody-line',productionId:'custody-production'},fileIds:[],note:'Not a machine-readable classification',createdAt:'2026-11-18T04:00:00Z'};state.fulfillment.samples.push(sample);return sample;
+}
+it('blocks borrowing an undeclared departed specimen and asks for an explicit quantity basis without a default',async()=>{
+ const sample=shippingCustodyFixture();render(sample.id);const form=host.querySelector('[data-sample-form="'+sample.id+'"]')as HTMLElement;expect(queryByRole(form,'button',{name:'借出',exact:true})).toBeNull();expect(queryByRole(form,'button',{name:'寄出',exact:true})).toBeNull();expect(form.textContent).toContain('未确认');await act(async()=>getByRole(form,'button',{name:'确认数量口径',exact:true}).click());
+ const dialog=getByRole(document.body,'dialog',{name:'补记样品数量口径'}),kind=getByRole(dialog,'combobox',{name:'数量口径'})as HTMLSelectElement;expect(kind.value).toBe('');expect(Array.from(kind.options).map(x=>x.label)).toContain('大货内随本批出运');expect(Array.from(kind.options).map(x=>x.label)).toContain('独立实物（不占本批大货）');
+ act(()=>fireEvent.change(kind,{target:{value:'independent'}}));act(()=>fireEvent.change(getByRole(dialog,'textbox',{name:'独立实物来源与保管依据'}),{target:{value:'Factory supplied an extra specimen; physically stored in A01'}}));act(()=>fireEvent.change(getByRole(dialog,'textbox',{name:'确认依据'}),{target:{value:'Actual specimen and original carrier record checked'}}));await act(async()=>getByRole(dialog,'button',{name:'确认并补记'}).click());
+ expect(store.run).toHaveBeenCalledWith({type:'fulfillment.samples.shippingBasis',payload:expect.objectContaining({id:sample.id,kind:'independent',independentSource:'Factory supplied an extra specimen; physically stored in A01',reconcileDeparted:true,sourceSnapshot:expect.objectContaining({sampleId:sample.id,shipmentId:'custody-ship',quantity:4,unit:'件'})})});
+});
+it('shows consumed quantity and history without restoring movement or correction actions',()=>{
+ const sample=shippingCustodyFixture();const state=store.state!;
+ const source={sampleId:sample.id,shipmentId:'custody-ship',orderId:'custody-order',lineId:'custody-line',productionId:'custody-production',quantity:4,unit:'件',color:'Blue',sizeQuantities:[{size:'M',quantity:4}],shipmentQuantity:8,commercialUnit:'件',packing:[{id:'custody-box',carton:'A01',quantity:8,color:'',assortment:[{color:'Blue',size:'M',quantity:8}]}]};
+ confirmShippingSampleBasis(state,{id:sample.id,kind:'included',sourceSnapshot:source,evidence:'Original carrier evidence',fileIds:[],reconcileDeparted:true},{id:()=>crypto.randomUUID(),now:'2026-11-19T14:00:00Z',actorName:'Sales'});render(sample.id);const form=host.querySelector('[data-sample-form="'+sample.id+'"]')as HTMLElement;expect(form.textContent).toContain('已随货出运');expect(form.textContent).toContain('补记随货');expect(form.textContent).toContain('0 / 4');expect(queryByRole(form,'button',{name:'借出',exact:true})).toBeNull();expect(queryByRole(form,'button',{name:'更正口径',exact:true})).toBeNull();
+});
 function fabric(id:string,form:string,unit:string,quantity:number,available:number):FulfillmentSample{return {id,code:id.toUpperCase(),name:'亚麻平纹',category:'面料',form,unit,quantity,available,location:'A-01',size:'',color:'',source:version,fileIds:[],note:'',createdAt:'2026-10-10T08:00:00Z'};}
 it('returns an incoming original to its exact development sample and does not offer factory-result QC',async()=>{
  store.state!.devs.push({id:'incoming-dev',code:'DEV-IN',values:{domain:'fabric'}}as any);const sample={...fabric('incoming-piece','米样','米',1,1),source:{kind:'developmentIncoming' as const,devId:'incoming-dev',receiptId:'receipt'}};store.state!.fulfillment.samples.push(sample);render(sample.id);
