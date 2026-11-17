@@ -794,10 +794,10 @@ function updateDev(state: MistState, dev: MistDev, context: MistContext) {
   else if(version?.qcDecision?.kind==='resample'){dev.stage=2;dev.state='QC 不通过 · 已重新打样';dev.tone='bad';}
   else if(version?.qc?.result==='reject'){dev.stage=2;dev.state='QC 不通过';dev.tone='bad';}
   else if(version?.qc){dev.stage=3;dev.state=version.qc.result==='conditional'?'有保留通过 · 待确认':'待需求方确认';dev.tone='accent';}
-  else if(version?.returnedAt&&version.qcHistory?.length){dev.stage=2;dev.state='整改中 · 待复检';dev.tone='warn';}
+  else if(version?.returnedAt&&version.qcHistory?.length){dev.stage=2;dev.state=version.taskEnd?'QC 待复评':'整改中 · 待复检';dev.tone='warn';}
   else if(version?.returnedAt){dev.stage=2;dev.state=(state.fulfillment?.qcTasks||[]).some(t=>t.source.kind==='version'&&t.source.versionId===version.id&&t.state==='pending'&&!t.assigneeId)?'待 QC 认领':'QC 待评审';dev.tone='warn';}
-  else if(version&&devStagePendingHandovers(version).length){dev.stage=1;dev.state='前道打样中';dev.tone='neutral';}
   else if(version?.taskEnd){dev.stage=1;dev.state='待后续安排';dev.tone='neutral';}
+  else if(version&&devStagePendingHandovers(version).length){dev.stage=1;dev.state='前道打样中';dev.tone='neutral';}
   else if(version){dev.stage=1;dev.state=developmentDomain(dev.values)==='fabric'?'待工厂试样':'工厂制作中';dev.tone='neutral';}
   else {dev.stage=0;dev.state='开发计划';dev.tone='neutral';}
 }

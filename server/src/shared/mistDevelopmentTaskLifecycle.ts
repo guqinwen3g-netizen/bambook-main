@@ -26,7 +26,7 @@ export function developmentTaskHasFollowups(plan:DevelopmentTaskClosePlan){retur
 /** Stop new factory work, while existing QC, original returns and lawful late expenses retain their own rules. */
 export function developmentFactoryWorkBlocker(_state:MistState,dev:MistDev,version:MistVersion):string|null{
  if(dev.closure)return `开发案${dev.closure.kind==='cancelled'?'已取消':dev.closure.kind==='archived'?'已归档':'已结案'}，请先恢复后继续工厂任务`;
- if(version.taskEnd)return version.taskEnd.kind==='completed'?'本工厂任务已完成，请通过新任务继续':'本工厂任务已终止，请通过新任务继续';
+ if(version.taskEnd)return version.taskEnd.kind==='completed'?'本工厂任务已完成，请先恢复工厂任务':'本工厂任务已终止，请先恢复工厂任务';
  return null;
 }
 function taskOf(state:MistState,dev:MistDev,id:string){const v=(state.versions||[]).find(v=>v.id===id&&v.devId===dev.id&&(dev.versionIds||[]).includes(id));if(!v)fail('工厂任务不存在','NOT_FOUND',404);if(v!.minor)fail('小版本沿用主版本任务，请打开准确主任务');return v!;}
