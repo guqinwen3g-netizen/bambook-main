@@ -85,6 +85,10 @@ function validateLines(root:MistState,order:GovernedOrder,lines:OrderGovernanceL
  if(!Array.isArray(lines)||!lines.length||lines.length>200)fail('至少需要一个订单条目');const seen=new Set<string>();
  return lines.map(input=>{const id=text(input.id,'条目ID',true,200);const {breakdown:_raw,...plain}=input,fromBreakdown=lineQuantityFromBreakdown(order.type,input,`条目「${typeof input.name==='string'?input.name:id}」`),line:OrderGovernanceLine=fromBreakdown.breakdown?{...plain,qty:fromBreakdown.qty!,breakdown:fromBreakdown.breakdown}:plain;if(seen.has(id))fail('条目ID重复');seen.add(id);const existing=root.orderLines.find(l=>l.id===id);if(existing&&existing.orderId!==order.id)fail('条目不属于当前订单');if(!Number.isFinite(line.qty)||line.qty<=0)fail('条目数量须为正数');if(!Number.isFinite(line.price)||line.price<0)fail('条目单价无效');lineAmount(line.qty,line.price);return{id,name:text(line.name,'品名',true),...(normalizeOrderLineNameEn(line.nameEn)?{nameEn:normalizeOrderLineNameEn(line.nameEn)}:{}),style:text(line.style,'款号',true),unit:text(line.unit,'单位',true,40),img:line.img,qty:line.qty,price:line.price,...(order.type==='garment'?normalizeGarmentFulfillment(line,false):{}),...(line.sourceProductId?{sourceProductId:line.sourceProductId}:{}),...(line.sourceDevId?{sourceDevId:line.sourceDevId}:{}),...(line.sourceVersionId?{sourceVersionId:line.sourceVersionId}:{}),...(line.breakdown?{breakdown:line.breakdown}:{})};});
 }
+/** A draft saved before closure is not permission to change the now-locked quantity when submitted or approved. */
+function assertClosureQuantities(root:MistState,orderId:string,lines:OrderGovernanceLine[]){
+ for(const line of root.orderLines.filter(l=>l.orderId===orderId) as ClosableLine[]){if(!line.closure||line.closure.status==='rejected')continue;const next=lines.find(l=>l.id===line.id);if(!next||next.qty!==line.qty||next.unit!==line.unit||stableJson(next.breakdown||null)!==stableJson((line as ClosableLine&{breakdown?:unknown}).breakdown||null))fail(`条目「${line.style} · ${line.name}」${line.closure.status==='closed'?'已结案':'结案审批中'}，不能再改数量`,'PRECONDITION');}
+}
 /** BB-ORD-2：保存草稿时校验新写入或改动过的来源；未改动的历史来源原样保留（历史订单只读兼容）。 */
 function checkLineSources(root:MistState,order:GovernedOrder,lines:OrderGovernanceLine[],internal:boolean){
  const key=(v:{sourceDevId?:string;sourceVersionId?:string;sourceProductId?:string})=>JSON.stringify(normalizeOrderLineSource(v));
@@ -101,6 +105,7 @@ function assertOrderPurposeChangeAllowed(root:MistState,order:GovernedOrder,cont
  if(root.invoices.some(invoice=>invoice.orderId===order.id&&isActiveMistInvoice(invoice))||(root.orderFunding?.assignments||[]).some(row=>row.orderId===order.id&&row.state==='active'))fail('已有销售发票或资金归属，不能更改订单用途');
 }
 function validateSubmission(root:MistState,s:OrderGovernanceSnapshot,context:MistContext){
+ assertClosureQuantities(root,s.orderId,s.lines);
  if(s.type==='garment')s.lines.forEach(line=>normalizeGarmentFulfillment(line));
  const order=getOrder(root,s.orderId);assertReplacementOrder(root,order,s);assertOrderPurposeChangeAllowed(root,order,s.contract);normalizeInternalSupply(s.contract,order,context,false);assertInternalFabricOrderChange(root,order,s.lines,s.contract);
  idsExist(root,s.contract);if(!s.lines.length)fail('至少需要一个条目');date(s.due);currency(s.currency);
@@ -178,7 +183,7 @@ export function applyOrderGovernanceCommand(root:MistState,command:OrderGovernan
    const reason=text(p.reason||'','变更原因',true);
    // BB-ORD-4：已有履约事实时允许改数量/单价/交期/新增条目，但守住下限、不删有事实的条目、有票/收款不改币种
    assertOrderChangeAllowed(root,order,lines,orderPatch.currency);
-   for(const line of root.orderLines.filter(l=>l.orderId===id) as ClosableLine[]){if(!line.closure||line.closure.status==='rejected')continue;const next=lines.find(l=>l.id===line.id);if(!next||next.qty!==line.qty||next.unit!==line.unit||stableJson(next.breakdown||null)!==stableJson((line as ClosableLine&{breakdown?:unknown}).breakdown||null))fail(`条目「${line.style} · ${line.name}」${line.closure.status==='closed'?'已结案':'结案审批中'}，不能再改数量`,'PRECONDITION');}
+   assertClosureQuantities(root,id,lines);
    g.changeDraft={contract,orderPatch,lines,reason,status:'draft'};event(root,context,order,'保存订单变更草稿，原批准内容继续生效');
   }else{g.contract=contract;g.status='draft';applySnapshot(root,order,{...snapshot(root,order),...orderPatch,contract,lines});order.state='订单草稿';order.tone='neutral';event(root,context,order,'保存订单合同草稿');}
   if((p.orderPatch as Record<string,unknown>|undefined)?.owner!==undefined)fail('负责人须按账号选择');
