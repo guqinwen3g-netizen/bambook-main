@@ -224,7 +224,7 @@ export function PlatformReportsPage() {
     { key: 'code', header: '订单', width: 'minmax(140px,1fr)', render: r => <Button variant="quiet" onClick={() => openSource('orders/detail', r.id)}>{r.code}</Button>, sortValue: r => r.code },
     { key: 'customer', header: '客户', width: 'minmax(140px,1.5fr)', render: r => r.customer },
     { key: 'due', header: '交期', width: '110px', render: r => r.due || '—', sortValue: r => r.due },
-    { key: 'progress', header: '进度', width: '80px', align: 'right', render: r => r.progress + '%', sortValue: r => r.progress },
+    { key: 'progress', header: '生产进度', width: '80px', align: 'right', render: r => r.progress + '%', sortValue: r => r.progress },
     { key: 'status', header: '交期状态', width: '120px', render: r => <Pill tone={PROGRESS_STATUS[r.status].tone}>{uiText(PROGRESS_STATUS[r.status].label)}{uiText(r.status === 'overdue' ? ` ${r.lateDays} 天` : '')}</Pill> },
     { key: 'state', header: '当前环节', render: r => r.state },
   ];
@@ -237,7 +237,7 @@ export function PlatformReportsPage() {
     else if (tab === 'margin') out('订单毛利.csv', ['订单', '客户', '币种', '销售收入', '采购成本', '毛利', '毛利率%', '已到票', '说明', '异币种采购', '未批准采购数'], margin.map(r => [r.code, r.customer, r.currency, r.revenue, r.purchases ? r.cost : '', r.margin ?? '', r.rate === null ? '' : Math.round(r.rate * 1000) / 10, r.billed, MARGIN_STATUS[r.status].label, r.foreign, r.pending]));
     else if (tab === 'cash') out('资金月报.csv', ['月份', '币种', '收款', '付款', '净流入', '退税到账', '汇兑损益', '费用'], cash.map(r => [r.month, r.currency, r.cashIn, r.cashOut, r.net, rebateShown ? r.rebate : rebateHidden, r.fx, r.expense]));
     else if (tab === 'aging') out(`应收账龄-${asOf}.csv`, ['客户', '币种', ...AGING_BUCKETS.map(b => b.label), '未收合计'], aging.map(r => [r.customer, r.currency, ...AGING_BUCKETS.map(b => r[b.key]), r.total]));
-    else out(`订单进度-${asOf}.csv`, ['订单', '客户', '交期', '进度%', '交期状态', '逾期天数', '当前环节'], shownProgress.map(r => [r.code, r.customer, r.due, r.progress, PROGRESS_STATUS[r.status].label, r.lateDays, r.state]));
+    else out(`订单进度-${asOf}.csv`, ['订单', '客户', '交期', '生产进度%', '交期状态', '逾期天数', '当前环节'], shownProgress.map(r => [r.code, r.customer, r.due, r.progress, PROGRESS_STATUS[r.status].label, r.lateDays, r.state]));
   };
 
   if(!state)return <MistPage><PageHeader title={uiText('报表中心')} actions={<Button icon={RefreshCw} disabled={workspace.loading} onClick={()=>void workspace.refresh()}>{uiText('刷新')}</Button>}/>{workspace.error&&<FailureNotice title={'读取失败'} detail={workspace.error}/>}<EmptyState title={uiText(workspace.loading?'正在读取报表':'报表未读取')} compact/></MistPage>;
