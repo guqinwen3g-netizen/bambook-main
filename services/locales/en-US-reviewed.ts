@@ -570,6 +570,8 @@ export const reviewedEnglish: Record<string, string> = {
   '请联系管理员':'Contact an administrator',
   '生成报价单需中文抬头。':'A Chinese company name is required for quotations.',
   '报关资料已保存':'Customs details saved',
+  '报关资料或来源已更新，请重新打开后核对':'Customs details or their source changed. Reopen and review again',
+  '报关资料未读取，请重新打开后核对':'Customs details are unavailable. Reopen and review again',
   '报关资料已更新，请重新生成CD草稿':'Customs details changed. Regenerate the CD draft',
   '报关资料或原件已更新，请重新打开后核对':'Customs details or the original changed. Reopen and review again',
   'CD原件记录异常，请重新生成CD草稿':'The CD archive is invalid. Regenerate the CD draft',
