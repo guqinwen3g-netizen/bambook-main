@@ -1,3 +1,4 @@
+import {FileRow} from '../../runtime/files';
 import { supplierPayableSummary, supplierPayments } from '../../../../../server/src/shared/mistPayables';
 import { readRfqs, RFQ_STATE_LABEL } from '../../../../../server/src/shared/mistSourcing';
 import { CURRENCIES } from '../../runtime/tradeOptions';
@@ -9,7 +10,7 @@ import { BaseDataImportButton } from './BaseDataImport';
 import React from 'react';
 import { Award, Ban, Building2, Download, FileBadge, Mail, Pause, Pencil, Play, Plus, Scale, SearchX, UserPlus } from 'lucide-react';
 import { Banner, Button, Card, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, ObjectCell, PageHeader, Pill, Pipeline, SearchField, TextLink, Timeline, Toolbar, type Column, type Tone } from '../../../../../components/mist';
-import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
+import type { MistState, MistFile } from '../../../../../server/src/shared/mistWorkspace';
 import { stableJson } from '../../../../../server/src/shared/stableJson';
 import type { FulfillmentPurchase } from '../../../../../server/src/shared/mistFulfillment';
 import { SUPPLIER_GRADES, SUPPLIER_TYPES, marketBusinessDate, supplierGrade, type MarketSupplier, type SupplierCertificate } from '../../../../../server/src/shared/mistMarket';
@@ -285,6 +286,18 @@ function SupplierMail({ s, state }: { s: MarketSupplier; state: MistState }) {
     {rows.length ? <div className="mist-col" style={{ gap: 4 }}>{rows.map(m => <TextLink key={m.id} onClick={() => go('emails', m.id)}>{m.subject || '（无主题）'} · {m.folder === 'sent' ? m.to.map(t => t.name || t.address).join('、') : m.from.name || m.from.address} · {m.at.slice(0, 10)}</TextLink>)}</div> : <span className="mist-muted">{uiText('还没有往来邮件。')}</span>}
   </DetailBlock>;
 }
+/** Certificate originals follow the same read scope as the current workspace files. */
+function SupplierCertificateFiles({ids,files}:{ids:string[];files:MistFile[]}){
+  const [failed,setFailed]=React.useState(false),known=files.filter(file=>ids.includes(file.id));
+  const scope=ids.join('|')+':'+known.map(file=>file.id).join('|');
+  React.useEffect(()=>setFailed(false),[scope]);
+  if(!ids.length)return null;
+  return <div className="mist-col" data-supplier-certificate-files onClickCapture={()=>setFailed(false)}>
+    {(failed||known.length!==ids.length)&&<span role="alert" className="mist-muted">{uiText('附件暂不可用')}</span>}
+    {known.map(file=><FileRow key={file.id} file={file} files={known} onError={()=>setFailed(true)}/>)}
+  </div>;
+}
+
 function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure, canBank, onBank, onBankDisable, onRfq, locked, perf, onEdit, onRate, onCert, onDeleteCert, onStatus, onContact, onContactDelete, onOpen, attachments, history }: {
   s: MarketSupplier; state: MistState; day: string; can: boolean; canAdmin: boolean; canContacts: boolean; canProcure: boolean; canBank: boolean; onBank: (currency?: string) => void; onBankDisable: (a: NonNullable<MarketSupplier['bankAccounts']>[number]) => void; onRfq: () => void; locked: boolean; perf: ReturnType<typeof supplierPerformance>;
   onEdit: () => void; onRate: () => void; onCert: (c?: SupplierCertificate) => void; onDeleteCert: (c: SupplierCertificate) => void; onStatus: (s: MarketSupplier['status']) => void;
@@ -338,6 +351,7 @@ function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure,
         <div className="mist-row" style={{ gap: 8 }}><strong>{c.name}</strong><span className="mist-spacer" /><Pill tone={st.tone}>{uiText(st.label)}</Pill></div>
         <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><small className="mist-muted">{[c.number && <Mono key="n">{c.number}</Mono>, c.issuer].filter(Boolean).reduce<React.ReactNode[]>((acc, x, i) => i ? [...acc, ' · ', x] : [x], [])}{!c.number && !c.issuer && '未填证书编号'}{uiText(" · 至 ")}{c.validUntil}</small><span className="mist-spacer" />
           {can && <><Button variant="quiet" disabled={locked} onClick={() => onCert(c)}>{uiText("更新")}</Button><Button variant="quiet" disabled={locked} onClick={() => onDeleteCert(c)}>{uiText("删除")}</Button></>}</div>
+        <SupplierCertificateFiles ids={c.fileIds||[]} files={state.files}/>
       </div>; })}</div> : <span className="mist-muted">{uiText("未登记认证")}</span>}
     </DetailBlock>
     {(!service||!!perf.open.length)&&<DetailBlock title={ui`在手业务 · ${perf.open.length}`}>

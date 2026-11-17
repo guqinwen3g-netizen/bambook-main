@@ -1,3 +1,4 @@
+import {Blob as NodeBlob} from 'node:buffer';
 // @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -8,17 +9,17 @@ import { fireEvent, getByRole, queryByRole } from '@testing-library/dom';
 import { Nav } from '../../nav';
 import { createMistState, type MistContext, type MistState } from '../../../../../server/src/shared/mistWorkspace';
 
-const bridge = vi.hoisted(() => ({ current: null as any }));
+const bridge = vi.hoisted(() => ({ current: null as any, denied:new Set<string>() }));
 vi.mock('../../runtime/workspace', () => ({ useMistWorkspace: () => bridge.current }));
-vi.mock('../../runtime/auth', () => { const useMistSession = () => ({ user: { id: 'demo-buyer', displayName: '沈禾' }, hasPermission: () => true, hasRole: () => false, canAccessView: () => true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
+vi.mock('../../runtime/auth', () => { const useMistSession = () => ({ user: { id: 'demo-buyer', displayName: '沈禾' }, hasPermission: (permission:string) => !bridge.denied.has(permission), hasRole: () => false, canAccessView: () => true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
 let host: HTMLDivElement, root: Root | undefined, state: MistState; const go = vi.fn();
 const named = (n: string) => state.market.suppliers.find(s => s.name === n)!;
 beforeEach(() => {
-  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; go.mockReset();
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; go.mockReset();bridge.denied.clear();
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-14T04:00:00Z'));
   let n = 0; const ctx: MistContext = { id: () => `s-test-${++n}`, actorName: '演示', now: '2026-10-14T02:00:00.000Z' };
   state = createMistState(ctx, 'demo');
-  bridge.current = { state, workspace:{id:'workspace',revision:7}, run: vi.fn(async () => ({ result: { id: 'saved' } })), error: '', refresh: vi.fn(), loading: false, saving: false, pending: null, upload: vi.fn() };
+  bridge.current = { state, workspace:{id:'workspace',revision:7}, run: vi.fn(async () => ({ result: { id: 'saved' } })), error: '', refresh: vi.fn(), loading: false, saving: false, pending: null, upload: vi.fn(),downloadFile:vi.fn(async()=>{}),readFile:vi.fn(async()=>new NodeBlob(['cert original'],{type:'text/plain'})) };
 });
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; host?.remove(); vi.useRealTimers(); });
 async function mount(id?: string, detail?: 'full') { host = document.createElement('div'); document.body.append(host); root = createRoot(host); const Page = MARKET_PAGES.suppliers; await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'suppliers', id, detail }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
@@ -216,4 +217,23 @@ it.each(['成衣加工','服务商'])('creates %s with only name and type and no
  await click('保存');
  expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.supplier.save',payload:expect.objectContaining({input:expect.objectContaining({name:'新供应商',type,capabilities:'',capacity:0,capacityUnit:'',leadDays:0})})}), {expectedRevision:7});
  expect(bridge.current.run.mock.calls[0][0].payload.input.code).toBeUndefined();
+});
+
+function certificateSource(visible=true){
+ bridge.denied.add('suppliers:write');bridge.denied.add('suppliers:admin');const supplier=state.market.suppliers[0],file={id:'readonly-cert-file',name:'customer-audit.txt',mimeType:'text/plain',storageKey:'w/readonly-cert-file',size:12,createdAt:'2026-10-13T08:00:00Z'};
+ supplier.certificates=[{id:'certificate',name:'客户内部审核',number:'AUD-1',issuer:'客户',validUntil:'2026-10-13',fileIds:[file.id],updatedAt:'2026-10-13T08:00:00Z'}];if(visible)state.files.push(file);return{supplier,file};
+}
+it('lets a supplier reader preview and download a certificate original without entering maintenance',async()=>{
+ const{supplier,file}=certificateSource();const original=structuredClone(state);await mount(supplier.id,'full');const row=getByRole(document.body,'list',{name:supplier.name+' 认证'}).querySelector('[role="listitem"]')!;
+ expect(queryByRole(row as HTMLElement,'button',{name:'更新',exact:true})).toBeNull();expect(queryByRole(row as HTMLElement,'button',{name:'删除',exact:true})).toBeNull();
+ await act(async()=>getByRole(row as HTMLElement,'button',{name:'下载',exact:true}).click());expect(bridge.current.downloadFile).toHaveBeenCalledWith(file);
+ await act(async()=>getByRole(row as HTMLElement,'button',{name:file.name,exact:true}).click());expect(getByRole(document.body,'dialog',{name:file.name,exact:true})).toBeTruthy();expect(bridge.current.readFile).toHaveBeenCalledWith(file);expect(bridge.current.run).not.toHaveBeenCalled();expect(state).toEqual(original);
+});
+it('withholds original actions when its file metadata is hidden or missing',async()=>{
+ const{supplier,file}=certificateSource(false);await mount(supplier.id,'full');const row=getByRole(document.body,'list',{name:supplier.name+' 认证'}).querySelector('[role="listitem"]')as HTMLElement;
+ expect(row.textContent).toContain('附件暂不可用');expect(queryByRole(row,'button',{name:file.name,exact:true})).toBeNull();expect(queryByRole(row,'button',{name:'下载',exact:true})).toBeNull();expect(bridge.current.downloadFile).not.toHaveBeenCalled();expect(bridge.current.run).not.toHaveBeenCalled();
+});
+it('shows a short unavailable notice after the server refuses the original and keeps retry on the same file',async()=>{
+ const{supplier,file}=certificateSource();bridge.current.downloadFile.mockRejectedValueOnce(new Error('FILE_NOT_FOUND'));await mount(supplier.id,'full');const row=getByRole(document.body,'list',{name:supplier.name+' 认证'}).querySelector('[role="listitem"]')as HTMLElement;
+ await act(async()=>getByRole(row,'button',{name:'下载',exact:true}).click());expect(row.textContent).toContain('附件暂不可用');expect(row.textContent).not.toContain('FILE_NOT_FOUND');await act(async()=>getByRole(row,'button',{name:'下载',exact:true}).click());expect(bridge.current.downloadFile).toHaveBeenNthCalledWith(2,file);expect(row.textContent).not.toContain('附件暂不可用');expect(bridge.current.run).not.toHaveBeenCalled();
 });
