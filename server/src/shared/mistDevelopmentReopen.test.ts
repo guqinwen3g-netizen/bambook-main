@@ -1,3 +1,4 @@
+import {retainFixtureFactoryTasks} from './__tests__/utils/devClose';
 import {expect,it} from 'vitest';
 import {applyMistCommand,createMistState,type DevelopmentValues,type MistCommand,type MistContext} from './mistWorkspace';
 import {withTestFactories} from './__tests__/utils/devFactories';
@@ -9,7 +10,7 @@ function fixture(){
  run({type:'development.recordSample',payload:{devId,versionId,sample:'GW-1',quantity:1,returnedAt:ctx.now}});
  const dev=()=>state.devs.find(d=>d.id===devId)!,version=()=>state.versions.find(v=>v.id===versionId)!;
  version().qc={result:'conditional',reviewer:'QC',reviewedAt:ctx.now,report:'QC-1',opinion:'已留原评审'};version().confirmations=[{id:'decision',result:'approved',confirmer:'客户',organization:'客户',confirmedAt:ctx.now,basis:'原客户确认件',originalText:'认可',recordedAt:ctx.now,recordedBy:'业务员'}];version().archivedAt=ctx.now;
- const close=(kind:'archived'|'cancelled'='archived',reason='开发暂告结束')=>run({type:'development.close',payload:{devId,kind,reason}});
+ const close=(kind:'archived'|'cancelled'='archived',reason='开发暂告结束')=>run({type:'development.close',payload:{devId,kind,reason,...retainFixtureFactoryTasks(state,devId)}});
  const reopen=(closureId=(dev().closure as any)?.id,reason='继续下一轮开发',expectedVersionId=dev().currentVersionId)=>run({type:'development.reopen',payload:{devId,closureId,expectedVersionId,reason}});
  return{ctx,devId,versionId,run,dev,version,close,reopen,get state(){return state;}};
 }
@@ -27,7 +28,7 @@ it('uses a new trusted identity for each close cycle even with the same fixed cl
  expect(()=>f.reopen(first)).toThrow(/关闭记录已变化/);expect(f.state).toEqual(before);
 });
 it('does not accept a caller-supplied closing identity',()=>{
- const f=fixture();f.run({type:'development.close',payload:{devId:f.devId,kind:'archived',reason:'结束',id:'forged',closureId:'forged'}});expect((f.dev().closure as any).id).toBeTruthy();expect((f.dev().closure as any).id).not.toBe('forged');expect((f.state.events[0]as any).developmentLifecycle.closure.id).toBe((f.dev().closure as any).id);
+ const f=fixture();f.run({type:'development.close',payload:{devId:f.devId,kind:'archived',reason:'结束',...retainFixtureFactoryTasks(f.state,f.devId),id:'forged',closureId:'forged'}});expect((f.dev().closure as any).id).toBeTruthy();expect((f.dev().closure as any).id).not.toBe('forged');expect((f.state.events[0]as any).developmentLifecycle.closure.id).toBe((f.dev().closure as any).id);
 });
 it('rejects empty reasons, absent close authority, a changed current version and a different close token atomically',()=>{
  const f=fixture();expect(()=>f.reopen('forged')).toThrow(/未结束|未关闭/);f.close();let before=structuredClone(f.state);expect(()=>f.reopen(undefined,' ')).toThrow(/原因/);expect(f.state).toEqual(before);expect(()=>f.reopen('forged')).toThrow(/关闭记录已变化/);expect(f.state).toEqual(before);expect(()=>f.reopen(undefined,'继续','another-version')).toThrow(/当前版本已变化/);expect(f.state).toEqual(before);

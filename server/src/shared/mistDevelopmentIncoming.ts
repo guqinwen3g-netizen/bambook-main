@@ -1,3 +1,4 @@
+import {developmentFactoryWorkBlocker} from './mistDevelopmentTaskLifecycle';
 import {MistCommandError,type MistState,type MistContext,type MistCommandResult} from './mistWorkspace';
 import {applyFulfillmentCommand,registerDevelopmentIncomingSample,type IncomingDelivery} from './mistFulfillment';
 import {developmentDomain,developmentInitiator,validFabricSample} from './mistDevelopmentDomain';
@@ -54,7 +55,7 @@ export function applyDevelopmentIncomingCommand(state:MistState,command:Developm
  }
  if(command.type==='development.incoming.dispatch'){
   const p=command.payload;if(['borrowerId','supplierId'].some(key=>Object.prototype.hasOwnProperty.call(p,key)))return fail('外部收件主体由准确工厂任务确定，不绑定公司借用账号');
-  const version=state.versions.find(v=>v.id===p.taskVersionId&&v.devId===dev.id&&dev.versionIds.includes(v.id));if(!version?.task||version.minor)return fail('请选择本案准确工厂任务');if(version.archivedAt||version.qcDecision&&version.qcDecision.kind!=='rework')return fail('该工厂任务已结束，请核对当前任务');
+  const version=state.versions.find(v=>v.id===p.taskVersionId&&v.devId===dev.id&&dev.versionIds.includes(v.id));if(!version?.task||version.minor)return fail('请选择本案准确工厂任务');const work=developmentFactoryWorkBlocker(state,dev,version);if(work)throw new MistCommandError('PRECONDITION',work);if(version.archivedAt||version.qcDecision&&version.qcDecision.kind!=='rework')return fail('该工厂任务已结束，请核对当前任务');
   const supplier=state.market.suppliers.find(supplier=>supplier.id===version.factoryId);if(!supplier)return fail('工厂资料不存在');const blocked=productionSupplierUnavailableReason(supplier,platformBusinessDate(ctx.now));if(blocked)throw new MistCommandError('PRECONDITION',blocked);
   const day=occurred(p.sentAt,'实际寄送日',ctx),ship=delivery(p.delivery),cost=postage(p.postage);if(typeof p.returnExpected!=='boolean')return fail('请明确是否需退原样');
   const expectedReturn=p.returnExpected&&p.expectedReturn?text(p.expectedReturn,'预计归还日',true,10):'';if(expectedReturn&&(!isCalendarDay(expectedReturn)||expectedReturn<day))return fail('预计归还日不得早于寄送日');

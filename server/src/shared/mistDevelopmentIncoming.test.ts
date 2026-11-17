@@ -1,3 +1,4 @@
+import {retainFixtureFactoryTasks} from './__tests__/utils/devClose';
 import {expect,it} from 'vitest';
 import {applyMistCommand,createMistState,type MistCommand,type MistContext,type DevelopmentValues} from './mistWorkspace';
 import {withTestFactories} from './__tests__/utils/devFactories';
@@ -27,7 +28,7 @@ it('charges one courier parcel once for two garment pieces rather than once per 
  const f=fixture('garment'),r=f.receive(),out=f.dispatch(r.sampleIds[0],{items:r.sampleIds.map((sampleId:string)=>({sampleId,quantity:1,sourceLocation:'来样架 A01'}))});expect(out.movementIds).toHaveLength(2);expect(f.dev().billing!.expenses).toHaveLength(1);expect(f.dev().billing!.expenses![0]).toMatchObject({amount:12,currency:'CNY',sourceDispatchId:out.dispatchId,sourceMovementIds:out.movementIds});
 });
 it('returns only against the exact outgoing loans, appends partial returns and still permits physical return after case closure',()=>{
- const f=fixture(),r=f.receive(),id=r.sampleIds[0],out=f.dispatch(id),loanId=out.movementIds[0],beforeVersions=structuredClone(f.state.versions);f.run({type:'development.close',payload:{devId:f.devId,kind:'archived',reason:'等待后续安排'}});const closed=structuredClone(f.dev().closure);
+ const f=fixture(),r=f.receive(),id=r.sampleIds[0],out=f.dispatch(id),loanId=out.movementIds[0],beforeVersions=structuredClone(f.state.versions);f.run({type:'development.close',payload:{devId:f.devId,kind:'archived',reason:'等待后续安排',...retainFixtureFactoryTasks(f.state,f.devId)}});const closed=structuredClone(f.dev().closure);
  const returned=()=>f.run({type:'development.incoming.return',payload:{devId:f.devId,dispatchId:out.dispatchId,items:[{loanId,quantity:.25,location:'来样架 B02'}],receivedAt:'2026-11-18',delivery:{kind:'courier',recipient:'业务员',address:'公司样品室',carrier:'顺丰',trackingNo:'SF-LOCAL-RETURN',evidence:''},note:'原件退回'}});returned();expect(f.state.fulfillment.samples.find(s=>s.id===id)!.available).toBe(2.5);returned();expect(f.state.fulfillment.samples.find(s=>s.id===id)!.available).toBe(2.75);expect(f.dev().closure).toEqual(closed);expect(f.state.versions).toEqual(beforeVersions);expect(f.dev().billing!.expenses).toHaveLength(1);
  const returns=f.state.fulfillment.sampleMovements.filter(m=>m.kind==='return');expect(returns).toHaveLength(2);expect(returns.every(m=>m.loanId===loanId&&(m as any).incomingTransfer.delivery.trackingNo==='SF-LOCAL-RETURN'&&(m as any).incomingTransfer.supplierId===f.versions()[0].factoryId)).toBe(true);const before=structuredClone(f.state);expect(returned).toThrow(/未还量/);expect(f.state).toEqual(before);
 });

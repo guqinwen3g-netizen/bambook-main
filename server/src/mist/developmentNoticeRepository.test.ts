@@ -1,3 +1,4 @@
+import {retainFixtureFactoryTasks} from '../shared/__tests__/utils/devClose';
 import {beforeEach,afterEach,expect,it,vi,describe} from 'vitest';
 import { withTestFactories } from '../shared/__tests__/utils/devFactories';
 import {mkdtemp,rm,readdir} from 'node:fs/promises';
@@ -102,7 +103,7 @@ describe('BB-DEV-4 试样通知单',()=>{
   delete (state().settings as any).companyProfile;before=structuredClone(state());
   await expect(notice('no-company','R2-A-2')).rejects.toThrow(/公司抬头/);expect(state()).toEqual(before);
   state().settings.companyProfile={...company};
-  await exec('close',{type:'development.close',payload:{devId,kind:'cancelled',reason:'客户撤单'}});before=structuredClone(state());
+  await exec('close',{type:'development.close',payload:{devId,kind:'cancelled',reason:'客户撤单',...retainFixtureFactoryTasks(state(),devId)}});before=structuredClone(state());
   await expect(notice('closed','R2-A-2')).rejects.toThrow(/已取消，不能再生成通知单/);expect(state()).toEqual(before);
   expect(renderPdf).not.toHaveBeenCalled();expect(await names()).toHaveLength(0);
  });

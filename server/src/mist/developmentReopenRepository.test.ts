@@ -1,3 +1,4 @@
+import {retainFixtureFactoryTasks} from '../shared/__tests__/utils/devClose';
 import {beforeEach,afterEach,expect,it} from 'vitest';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -13,7 +14,7 @@ const actor=(userId='demo-sales',companyId=company):any=>({userId,displayName:'�
 const row=()=>db.workspaces.get(workspaceId)!;
 const current=()=>row().state.devs.find((d:any)=>d.id===devId);
 const execute=(command:any,who=actor(),requestId=randomUUID(),expectedRevision=row().revision)=>repo.execute(who,workspaceId,{requestId,expectedRevision,command});
-const close=()=>execute({type:'development.close',payload:{devId,kind:'archived',reason:'暂告结束'}});
+const close=()=>execute({type:'development.close',payload:{devId,kind:'archived',reason:'暂告结束',...retainFixtureFactoryTasks(row().state,devId)}});
 const reopenCommand=()=>({type:'development.reopen',payload:{devId,closureId:current().closure.id,expectedVersionId:current().currentVersionId,reason:'继续核对版型'}});
 beforeEach(async()=>{
  directory=await mkdtemp(path.join(tmpdir(),'development-reopen-'));db=new MemoryMistDatabase();auth=testAuthority();workspaceId=randomUUID();

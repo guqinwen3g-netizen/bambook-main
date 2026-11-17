@@ -1,3 +1,4 @@
+import {developmentTaskClosePlan,developmentTaskLifecycleReadKeys} from '../shared/mistDevelopmentTaskLifecycle';
 import { teamReportReadPermissions } from './teamReportAccess';
 import {assertCustomerCommandFieldAuthority} from '../shared/mistCustomerFieldAuthority';
 import {mistBusinessInstant} from '../shared/mistBusinessClock';
@@ -298,6 +299,7 @@ export class MistRepository {
   }
   private async authorizeCompoundCommand(db: any, prior: TokenPayload, command?: MistCommand) {
     if(command?.type.startsWith('development.incoming.'))await this.authorize(db,prior,'products:read');
+    if(command?.type.startsWith('development.task.')||command?.type==='development.close')await this.authorize(db,prior,'products:read');
     if(command?.type==='agent.proposal.create'){
       const original=command.payload?.command;
       if(original&&typeof original.type==='string'&&!original.type.startsWith('agent.')&&original.payload&&typeof original.payload==='object'&&!Array.isArray(original.payload)){
@@ -465,7 +467,10 @@ export class MistRepository {
     const incomingScope=scope?scopedVisibility(row.state,scope,false).get('devs')!:new Set(visibleDevs.map(dev=>dev.id));
     const incomingReadable=hasScope(actor,'products:read')?visibleDevs.filter(dev=>incomingScope.has(dev.id)).map(dev=>dev.id):[];
     const developmentIncomingAccess={readableDevIds:incomingReadable,writableDevIds:hasScope(actor,'products:write')?[...incomingReadable]:[]};
-    return { ...publicWorkspace({ ...row, state: projected.state }), access,developmentIncomingAccess,...(shipmentReleaseGates?{shipmentReleaseGates}:{}),...(projected.costMaterialBasis!==undefined?{costMaterialBasis:projected.costMaterialBasis}:{}),...(projected.costClaimBasis!==undefined?{costClaimBasis:projected.costClaimBasis}:{}),...(materialIssueTargets?{materialIssueTargets}:{}),...(directTargets?{materialDeliveryTargets:directTargets}:{}),...(financialDisposals?{financialDisposals}:{}),...(fabricAccess?{scopedFabricAccess:fabricAccess}:{}),...(fabricDestinations?{scopedFabricDestinations:fabricDestinations}:{}) };
+    const visibleVersions=new Set((projected.state.versions??[]).map(v=>v.id));
+    const developmentTaskClosePlans=hasScope(actor,'products:read')&&hasScope(actor,'products:write')?Object.fromEntries((projected.state.devs??[]).filter(dev=>incomingScope.has(dev.id)).map(dev=>{const plan=developmentTaskClosePlan(row.state,dev),visible=plan.tasks.filter(task=>visibleVersions.has(task.versionId));return[dev.id,visible.length===plan.tasks.length?plan:{...plan,tasks:visible,unavailable:true}];})):{};
+
+    return { ...publicWorkspace({ ...row, state: projected.state }), access,developmentIncomingAccess,developmentTaskClosePlans,...(shipmentReleaseGates?{shipmentReleaseGates}:{}),...(projected.costMaterialBasis!==undefined?{costMaterialBasis:projected.costMaterialBasis}:{}),...(projected.costClaimBasis!==undefined?{costClaimBasis:projected.costClaimBasis}:{}),...(materialIssueTargets?{materialIssueTargets}:{}),...(directTargets?{materialDeliveryTargets:directTargets}:{}),...(financialDisposals?{financialDisposals}:{}),...(fabricAccess?{scopedFabricAccess:fabricAccess}:{}),...(fabricDestinations?{scopedFabricDestinations:fabricDestinations}:{}) };
   }
   async list(prior: TokenPayload) { return this.transact(async db => { if(isAgentActor(prior)&&prior.agentWorkspaceId){const {row,actor}=await this.own(db,prior,prior.agentWorkspaceId);return[await this.preparedView(db,row,actor)];}const actor = await this.authorize(db, prior); const rows: MistWorkspaceRow[] = await db.mistWorkspace.findMany({ where: this.accessibleWhere(actor), orderBy: { updatedAt: 'desc' } }); const out = []; for (const row of rows.filter(row=>this.accessible(row,actor))) { if (companyRow(row)) { await applyCompanyRoster(db, row, row.companyId!); const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); OWN_TEAMS.set(row, scope?.teamIds ?? await companyTeamIds(db, row.companyId!, actor.userId)); } this.contract.normalizeMistState?.(row.state,this.context(actor)); out.push(await this.preparedView(db,row,actor)); } return out; }); }
   /** 公司会话只看本公司唯一的库；本机空间看自己拥有或被授权的。 */
@@ -1206,7 +1211,7 @@ export class MistRepository {
         if(this.contract.getMistReviewTasks)(applied.state as any).reviewerIds=[...new Set(this.contract.getMistReviewTasks(applied.state).flatMap(t=>t.reviewerIds))];
         canonical(applied.state); canonical(applied.result);
         const changeKeys = mistChangeKeys(row.state, applied.state);
-        if(humanTaskProposal?.sourceRevision!==undefined&&humanTaskProposal.sourceRevision<row.revision){const changed=await this.concurrentChanges(db,workspaceId,row.revision,humanTaskProposal.sourceRevision,undefined,true),system=new Set(['k:agentProposals','k:events','k:tasks','k:notifications','k:calendar','k:reviewerIds']),readKeys=command.type.startsWith('development.incoming.')?developmentIncomingReadKeys(row.state,command as DevelopmentIncomingCommand):[];if(!changeKeys||[...changeKeys.filter(key=>!system.has(key[0])),...readKeys].some(key=>changed.some(other=>overlapping(key,other))))fail('REVISION_CONFLICT','提议来源已更新，请重新读取后再提出',409);}
+        if(humanTaskProposal?.sourceRevision!==undefined&&humanTaskProposal.sourceRevision<row.revision){const changed=await this.concurrentChanges(db,workspaceId,row.revision,humanTaskProposal.sourceRevision,undefined,true),system=new Set(['k:agentProposals','k:events','k:tasks','k:notifications','k:calendar','k:reviewerIds']),readKeys=[...(command.type.startsWith('development.incoming.')?developmentIncomingReadKeys(row.state,command as DevelopmentIncomingCommand):[]),...developmentTaskLifecycleReadKeys(row.state,command)];if(!changeKeys||[...changeKeys.filter(key=>!system.has(key[0])),...readKeys].some(key=>changed.some(other=>overlapping(key,other))))fail('REVISION_CONFLICT','提议来源已更新，请重新读取后再提出',409);}
         // 行级范围写侧：受限岗位不能改看不到的业务，也不能在看不到的业务下新建。
         const incomingSource=incoming&&row.state.fulfillment.purchases.find(p=>p.id===incoming.purchaseId);
         const internalIncoming=['order.internal.receive','order.internal.reverseCheck'].includes(input.command?.type)?row.state.internalDeliveries?.find(d=>d.id===input.command.payload.id&&d.receiverId===actor.userId):undefined;
@@ -1217,6 +1222,7 @@ export class MistRepository {
           if(shipmentReadKeys(row.state,command).some(key=>concurrent.some(other=>overlapping(key,other))))fail('REVISION_CONFLICT','出运来源已更新，请刷新后重新核对',409);
           if(qcReportReadKeys(row.state,command).some(key=>concurrent.some(other=>overlapping(key,other))))fail('REVISION_CONFLICT','QC实物或任务已更新，请刷新后重新核对',409);
           if(command?.type.startsWith('development.incoming.')&&developmentIncomingReadKeys(row.state,command as DevelopmentIncomingCommand).some(key=>concurrent.some(other=>overlapping(key,other))))fail('REVISION_CONFLICT','来样或工厂任务已更新，请刷新后重新核对',409);
+          if(developmentTaskLifecycleReadKeys(row.state,command).some(key=>concurrent.some(other=>overlapping(key,other))))fail('REVISION_CONFLICT','任务或未结事项已更新，请重新核对后结束',409);
           if (changeKeys!.some(key => concurrent.some(other => overlapping(key, other)))) fail('REVISION_CONFLICT', '其他人已修改同一记录，为避免覆盖对方的更新未自动合并，请刷新核对后重试', 409);
         }
         // 需要签字的批准：权限、范围、并发与业务门禁都已通过（结果仍在副本上）才要求签字；预演不落账，不要求签字。

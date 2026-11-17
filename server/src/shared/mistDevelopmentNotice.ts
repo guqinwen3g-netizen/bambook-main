@@ -1,3 +1,4 @@
+import {developmentFactoryWorkBlocker} from './mistDevelopmentTaskLifecycle';
 /**
  * BB-DEV-4 试样通知单：每轮每厂一份（面料“面料试样通知单”，服装“服装开发通知单”）。
  * 内容来自本厂在本轮的任务（共同要求 + 本厂差异、形态、数量和单位、要求日期、参考附件）。
@@ -43,6 +44,7 @@ const FABRIC_LABELS: Array<[keyof NonNullable<MistVersion['fabricRequirements']>
 export function developmentNoticeBlocker(state: MistState, dev: MistDev, version: MistVersion): string | null {
   const closure = developmentClosure(state, dev);
   if (closure && closure.kind !== 'closed') return `开发案${closure.label}，不能再生成通知单`;
+  const work=developmentFactoryWorkBlocker(state,dev,version);if(work)return work;
   if (version.minor) return `小版本 ${version.label} 不单独发试样通知单，沿用大版本的通知单`;
   if (!factoryTaskSync(state, version)) return '本版没有轮次记录（历史版本），不能生成通知单';
   if (!state.settings.companyProfile?.legalName) return '先在 设置 › 公司档案 填写公司抬头，才能生成通知单';

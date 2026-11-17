@@ -1,3 +1,4 @@
+import {retainFixtureFactoryTasks} from '../shared/__tests__/utils/devClose';
 import {expect,it} from 'vitest';
 import {randomUUID} from 'node:crypto';
 import {applyMistCommand,createMistState,type DevelopmentValues} from '../shared/mistWorkspace';
@@ -50,7 +51,7 @@ function legacyClosedDevelopment(){
  s.customers.push({id:'client',name:'客户',code:'C',country:'',city:'',industry:'',owner:'',grade:'',currency:'USD',terms:'',incoterm:'',categories:'',creditLimit:0,since:''});
  const values:DevelopmentValues={name:'外套',customer:'client',style:'ST-1',season:'AW',category:'外套',kind:'new',fabric:'羊毛',color:'灰',target:'',sizeBase:'M',goal:'版型',factories:['A厂'],due:'2026-11-21',collaborators:[],sampleQuantity:1};
  const submitted=applyMistCommand(s,{type:'development.submit',payload:{values,fileIds:[]}},context),created=submitted.result as any;s=submitted.state;
- s=applyMistCommand(s,{type:'development.close',payload:{devId:created.devId,kind:'cancelled',reason:'客户暂缓'}},context).state;
+ s=applyMistCommand(s,{type:'development.close',payload:{devId:created.devId,kind:'cancelled',reason:'客户暂缓',...retainFixtureFactoryTasks(s,created.devId)}},context).state;
  const dev=s.devs.find(d=>d.id===created.devId)!,event=s.events[0];delete dev.closure!.id;delete event.developmentLifecycle;
  return{s,dev,event,context,permitted:{...actor,permissions:['products:read']} as TokenPayload};
 }

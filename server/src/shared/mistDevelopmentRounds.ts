@@ -1,3 +1,4 @@
+import {developmentFactoryWorkBlocker} from './mistDevelopmentTaskLifecycle';
 /**
  * 开发轮次与固定工厂字母（BB-DEV-2）。
  * 轮次 = 一批共同开发要求，可派给任意数量的工厂；某轮某工厂的实体成果是大版本 R{轮次}-{字母}-{本厂实物序号}。
@@ -138,6 +139,7 @@ export function factoryTaskSync(state: MistState, version: MistVersion): { round
 }
 /** 同步共同要求的阻断原因；可以同步时返回 null。 */
 export function factoryTaskSyncBlocker(state: MistState, dev: MistDev, version: MistVersion): string | null {
+  const work=developmentFactoryWorkBlocker(state,dev,version);if(work)return work;
   const closure = developmentClosure(state, dev);
   if (closure) return `开发案${closure.label}，不能再改工厂任务`;
   if (version.minor) return `小版本 ${version.label} 没有单独的工厂任务`;

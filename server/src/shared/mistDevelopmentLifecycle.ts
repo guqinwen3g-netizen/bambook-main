@@ -2,7 +2,7 @@ import type {MistDev,MistState} from './mistWorkspace';
 
 export type DevelopmentClosure={id?:string;kind:'closed'|'archived'|'cancelled';at:string;by:string;byId?:string;reason:string};
 export type DevelopmentCloseSnapshot=DevelopmentClosure&{id:string};
-export type DevelopmentLifecycleEvent={action:'closed'|'reopened';closure:DevelopmentCloseSnapshot;actorId?:string;expectedVersionId:string|null;reason?:string};
+export type DevelopmentLifecycleEvent={action:'closed'|'reopened';closure:DevelopmentCloseSnapshot;actorId?:string;expectedVersionId:string|null;reason?:string;taskResolutions?:import('./mistDevelopmentTaskLifecycle').DevelopmentTaskResolutionSnapshot[];retainedFollowups?:import('./mistDevelopmentTaskLifecycle').DevelopmentFollowups};
 const CLOSE_TEXT={closed:'结束开发案：',archived:'归档开发案：',cancelled:'取消开发案：'}as const;
 
 /** A close cycle is identified by a trusted ID, never by a clock/name/reason tuple. */

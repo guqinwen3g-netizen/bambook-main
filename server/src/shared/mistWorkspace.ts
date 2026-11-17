@@ -1,3 +1,4 @@
+import {applyDevelopmentTaskEnd,applyDevelopmentTaskReopen,closeDevelopmentFactoryTasks,developmentFactoryWorkBlocker,type DevelopmentTaskEnd,type DevelopmentTaskEndCommand,type DevelopmentTaskLifecycleEvent,type DevelopmentTaskResolution} from './mistDevelopmentTaskLifecycle';
 import type {OrderMainApprovalSource} from './mistOrderApprovalSource';
 import type {MistOrderFlow} from './mistOrderFlow';
 import {applyDevelopmentIncomingCommand,type DevelopmentIncomingCommand} from './mistDevelopmentIncoming';
@@ -130,6 +131,8 @@ export type MistVersion = {
   qcDecision?: MistQcDecision;
   /** 本厂在本轮的任务（BB-DEV-3）：建轮时复制的共同要求、差异要求与样品要求。改共同要求后需逐厂同步才更新。 */
   task?: MistFactoryTask;
+  /** Explicit factory work end; distinct from QC, archive and the whole-case gate. */
+  taskEnd?:DevelopmentTaskEnd;
   /** 本厂本轮的试样通知单（BB-DEV-4），每次生成追加一份，旧版保留。 */
   notices?: DevNoticeRecord[];
   /** 服装小版本（BB-DEV-5）：在大版本上记录小调整生成 R4-A.1、.2…；沿用大版本实物与 QC 结论，需求方确认单独记录。 */
@@ -321,7 +324,7 @@ export type MistFinanceReversal = { id: string; kind: 'allocation' | 'payment'; 
   allocation?: MistAllocation; receiptId?: string; invoiceId?: string; voucherId?: string };
 export type MistCustomer = { id: string; name: string; code: string; country: string; city: string; industry: string; owner: string; /** 同 MistOrder.ownerId。 */ ownerId: string; grade: string; currency: string; terms: string; incoterm: string; categories: string; creditLimit: number; since: string };
 export type MistContact = { id: string; customerId: string; name: string; role: string; email: string; phone: string; tone: MistTone };
-export type MistEvent = { id: string; entityType: string; entityId: string; actor: string; at: string; text: string; fileIds: string[]; businessRef?: { kind: 'opportunity' | 'followUp'; id: string };developmentLifecycle?:DevelopmentLifecycleEvent;orderFlow?:MistOrderFlow };
+export type MistEvent = { id: string; entityType: string; entityId: string; actor: string; at: string; text: string; fileIds: string[]; businessRef?: { kind: 'opportunity' | 'followUp'; id: string };developmentLifecycle?:DevelopmentLifecycleEvent;orderFlow?:MistOrderFlow;developmentTaskLifecycle?:DevelopmentTaskLifecycleEvent };
 export type MistTarget = { view: string; id?: string; section?: string; versionId?: string; customerId?: string; orderLineId?: string; productionId?: string };
 /**
  * 工作事项必须写明由谁处理：assigneeIds 为指定账号；permission 为「持有该权限的任何人」（岗位事项，如财务开票、后勤接手）。
@@ -395,7 +398,7 @@ export type MistState = {
   seals?:MistSeal[]; sealUses?:MistSealUse[];
 };
 export type MistOrderInput = { type: 'garment' | 'fabric'; customerId: string; season: string; currency: string; due: string; ownerId: string; governance?:OrderGovernanceInput; lines: Array<Omit<MistOrderLine, 'id' | 'orderId' | 'made' | 'qc'> & OrderLineSource & {breakdown?:OrderLineBreakdown}> };
-export type MistCommand = DevelopmentIncomingCommand | SealCommand | PeriodCloseCommand | Extract<DocumentGenerationCommand, { type: 'order.document.generate' | 'market.lookbook.document' }> | AgentTaskCommand | AgentProposalCommand | InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | SampleRequestCommand | OrderSplitCommand | ReportScheduleCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
+export type MistCommand = DevelopmentTaskEndCommand | DevelopmentIncomingCommand | SealCommand | PeriodCloseCommand | Extract<DocumentGenerationCommand, { type: 'order.document.generate' | 'market.lookbook.document' }> | AgentTaskCommand | AgentProposalCommand | InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | SampleRequestCommand | OrderSplitCommand | ReportScheduleCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
   | { type: 'development.saveDraft'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.submit'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.update'; payload: { devId: string; patch: Partial<DevelopmentValues> } }
@@ -421,7 +424,7 @@ export type MistCommand = DevelopmentIncomingCommand | SealCommand | PeriodClose
   | { type: 'development.billing.withdraw'; payload: { devId: string; reason: string } }
   | { type: 'development.billing.issue'; payload: { devId: string; chargeIds: string[]; number: string; due: string; fileIds: string[] } }
   | { type: 'development.version.recordMinor'; payload: { devId: string; versionId: string; change: string } }
-  | { type: 'development.close'; payload: { devId: string; kind: 'archived' | 'cancelled'; reason: string } }
+  | { type: 'development.close'; payload: { devId: string; kind: 'archived' | 'cancelled'; reason: string;taskResolutions?:DevelopmentTaskResolution[];retainFollowups?:boolean } }
   | { type: 'development.reopen'; payload: { devId: string; closureId: string; expectedVersionId: string|null; reason: string } }
   | { type: 'development.qc.decide'; payload: { devId: string; versionId: string; decision: 'rework' | 'abandon'; note: string } }
   /** 分段委外：登记前道工厂已把坯样交给下一道。 */
@@ -506,7 +509,7 @@ export type MistWorkspaceMemberLog={id:string;action:'add'|'remove';userId:strin
 export type MistWorkspaceAccess={companyLibrary?:boolean;/** Resolved references in the user's own groups, already intersected with module and row permissions. No scope conditions or history. */teamViews?:Record<string,import('./mistTeamScope').TeamScopeRef[]>;role:'owner'|'member';canManageMembers:boolean;/** Present for restricted company sessions: customer records maintainable within current authority. */manageableCustomerIds?:string[];/** 可维护公司设置与业务组划分：公司库看公司用户管理权限，本机空间看是否为所有者。 */canManageCompany?:boolean;hidden:Array<{key:string;label:string;permissions:string[]}>};
 /** Response-only customer credit gate, not overall departure permission or business state. */
 export type MistShipmentReleaseGate={held:boolean;unusedAuthorized:boolean};
-export type MistWorkspaceEnvelope = { id: string; ownerId: string; name: string; revision: number; state: MistState; /** Minimal gate for visible complete shipment sources; never persisted. */ shipmentReleaseGates?:Record<string,MistShipmentReleaseGate>; /** Server capability, response-only; never infer allowance support from an old service. */ supportsSignedSettlementAllowance?: boolean; access?: MistWorkspaceAccess;/** Read-only financial proportions; never persisted in workspace business state. */costMaterialBasis?:import('./mistInternalFabric').InternalFabricCostBasis[] | null; /** Response-only, order-scoped aftersales financial totals. */costClaimBasis?:import('./mistClaimCost').OrderClaimCostBasis[]|null; /** Scoped, actionable material destinations only; never persisted in workspace state. */materialIssueTargets?:import('./mistDataScope').ScopedMaterialIssueTargets; /** Minimal direct-handoff choices, keyed by writable source purchase; response-only. */ materialDeliveryTargets?:import('./mistDataScope').ScopedMaterialDeliveryTargets; /** Minimal financial disposal handoff, response-only. */financialDisposals?:import('./mistPayables').FinancialDisposalView[]; /** Recipient-only material handoff, response-only. */ scopedFabricAccess?:import('./mistDataScope').ScopedFabricAccess; /** Source-only destination identifiers, response-only. */ scopedFabricDestinations?:import('./mistDataScope').ScopedFabricDestinations;
+export type MistWorkspaceEnvelope = { id: string; ownerId: string; name: string; revision: number; state: MistState; /** Minimal gate for visible complete shipment sources; never persisted. */ shipmentReleaseGates?:Record<string,MistShipmentReleaseGate>; /** Server capability, response-only; never infer allowance support from an old service. */ supportsSignedSettlementAllowance?: boolean;/** Current writable case task review only; response-only, no hidden QC/financial identities or amounts. */developmentTaskClosePlans?:Record<string,import('./mistDevelopmentTaskLifecycle').DevelopmentTaskClosePlan>; access?: MistWorkspaceAccess;/** Read-only financial proportions; never persisted in workspace business state. */costMaterialBasis?:import('./mistInternalFabric').InternalFabricCostBasis[] | null; /** Response-only, order-scoped aftersales financial totals. */costClaimBasis?:import('./mistClaimCost').OrderClaimCostBasis[]|null; /** Scoped, actionable material destinations only; never persisted in workspace state. */materialIssueTargets?:import('./mistDataScope').ScopedMaterialIssueTargets; /** Minimal direct-handoff choices, keyed by writable source purchase; response-only. */ materialDeliveryTargets?:import('./mistDataScope').ScopedMaterialDeliveryTargets; /** Minimal financial disposal handoff, response-only. */financialDisposals?:import('./mistPayables').FinancialDisposalView[]; /** Recipient-only material handoff, response-only. */ scopedFabricAccess?:import('./mistDataScope').ScopedFabricAccess; /** Source-only destination identifiers, response-only. */ scopedFabricDestinations?:import('./mistDataScope').ScopedFabricDestinations;
   /** Exact case scope for incoming originals; response-only. */
   developmentIncomingAccess?:import('./mistDevelopmentIncoming').DevelopmentIncomingAccess;
   /** Response-only exact associations for visible signatures; never persisted. */
@@ -794,6 +797,7 @@ function updateDev(state: MistState, dev: MistDev, context: MistContext) {
   else if(version?.returnedAt&&version.qcHistory?.length){dev.stage=2;dev.state='整改中 · 待复检';dev.tone='warn';}
   else if(version?.returnedAt){dev.stage=2;dev.state=(state.fulfillment?.qcTasks||[]).some(t=>t.source.kind==='version'&&t.source.versionId===version.id&&t.state==='pending'&&!t.assigneeId)?'待 QC 认领':'QC 待评审';dev.tone='warn';}
   else if(version&&devStagePendingHandovers(version).length){dev.stage=1;dev.state='前道打样中';dev.tone='neutral';}
+  else if(version?.taskEnd){dev.stage=1;dev.state='待后续安排';dev.tone='neutral';}
   else if(version){dev.stage=1;dev.state=developmentDomain(dev.values)==='fabric'?'待工厂试样':'工厂制作中';dev.tone='neutral';}
   else {dev.stage=0;dev.state='开发计划';dev.tone='neutral';}
 }
@@ -1081,7 +1085,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       event(state,context,'development',dev.id,'记录 '+version.label+' 需求方确认'+(confirmed?'（'+confirmed.map(s=>s.form+' '+s.code).join('、')+'）':''),{view:'development/detail',id:dev.id,versionId:version.id},'general',notificationOwners(state,'development',dev.id));result={devId:dev.id,versionId:version.id};break;
     }
     case 'development.recordSample': {
-      const [dev,v]=versionOf(state,p.devId,p.versionId);
+      const [dev,v]=versionOf(state,p.devId,p.versionId),workBlocked=developmentFactoryWorkBlocker(state,dev,v);if(workBlocked)throw new MistCommandError('PRECONDITION',workBlocked);
       if(dev.billing?.request)throw new MistCommandError('PRECONDITION',DEVELOPMENT_BILLING_LOCK);
       if(v.minor)throw new MistCommandError('PRECONDITION','小版本 '+v.label+' 沿用大版本实物，不登记新实物');
       if(v.archivedAt||v.qc||v.confirmations.length)throw new MistCommandError('PRECONDITION','已有QC、确认或留档记录的实物不可替换，请创建新版本');
@@ -1139,13 +1143,16 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
     case 'development.incoming.receive':case 'development.incoming.dispatch':case 'development.incoming.return':{
       result=applyDevelopmentIncomingCommand(state,command,context);break;
     }
+    case 'development.task.end': {result=applyDevelopmentTaskEnd(state,command,context);updateDev(state,find(state.devs,p.devId,'开发案'),context);break;}
+    case 'development.task.reopen': {result=applyDevelopmentTaskReopen(state,command,context);updateDev(state,find(state.devs,p.devId,'开发案'),context);break;}
     case 'development.close': {
       const dev=find(state.devs,p.devId,'开发案');
       if(p.kind!=='archived'&&p.kind!=='cancelled')throw new MistCommandError('VALIDATION','开发案结束方式无效');
       if(dev.closure)throw new MistCommandError('PRECONDITION','开发案已'+(dev.closure.kind==='cancelled'?'取消':dev.closure.kind==='archived'?'归档':'结案'));
-      dev.closure={id:context.id(),kind:p.kind,at:context.now,by:context.actorName,...(context.actorId?{byId:context.actorId}:{}),reason:text(p.reason,'原因')};updateDev(state,dev,context);
+      const note=text(p.reason,'原因'),closureId=context.id(),dispositions=closeDevelopmentFactoryTasks(state,dev,p.taskResolutions,p.retainFollowups,context,closureId);
+      dev.closure={id:closureId,kind:p.kind,at:context.now,by:context.actorName,...(context.actorId?{byId:context.actorId}:{}),reason:note};updateDev(state,dev,context);
       event(state,context,'development',dev.id,(p.kind==='cancelled'?'取消开发案：':'归档开发案：')+dev.closure.reason,{view:'development/detail',id:dev.id},'general',notificationOwners(state,'development',dev.id));
-      state.events[0].developmentLifecycle={action:'closed',closure:{...dev.closure,id:dev.closure.id!},...(context.actorId?{actorId:context.actorId}:{}),expectedVersionId:dev.currentVersionId??null};result={devId:dev.id};break;
+      state.events[0].developmentLifecycle={action:'closed',closure:{...dev.closure,id:dev.closure.id!},...(context.actorId?{actorId:context.actorId}:{}),expectedVersionId:dev.currentVersionId??null,...dispositions};result={devId:dev.id};break;
     }
     case 'development.reopen': {
       const dev=find(state.devs,p.devId,'开发案');if(!dev.closure)throw new MistCommandError('PRECONDITION','开发案尚未结束');
@@ -1166,6 +1173,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(p.decision==='abandon'&&!(typeof p.note==='string'&&p.note.trim()))throw new MistCommandError('VALIDATION','放弃本版须填写原因');
       const decision:MistQcDecision={kind:p.decision,note:text(p.note||'','处理说明',false),decidedAt:context.now,decidedBy:context.actorName};
       if(p.decision==='rework'){
+        const work=developmentFactoryWorkBlocker(state,dev,v);if(work)throw new MistCommandError('PRECONDITION',work);
         if(developmentDomain(dev.values)==='fabric')throw new MistCommandError('VALIDATION','面料开发没有整改复检，请重新打样或放弃本版');
         v.qcHistory=[...(v.qcHistory||[]),{...v.qc,decision}];v.qc=null;
       }else v.qcDecision=decision;
@@ -1175,7 +1183,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
     }
     case 'development.stage.handover': {
       const [dev,v]=versionOf(state,p.devId,p.versionId);
-      const blocked=developmentRoundBlocker(state,dev)||devStageHandoverBlocker(v,p.stageIndex);if(blocked)throw new MistCommandError('PRECONDITION',blocked);
+      const blocked=developmentFactoryWorkBlocker(state,dev,v)||developmentRoundBlocker(state,dev)||devStageHandoverBlocker(v,p.stageIndex);if(blocked)throw new MistCommandError('PRECONDITION',blocked);
       if((v.stageHandovers||[]).some(row=>row.stageIndex===p.stageIndex))throw new MistCommandError('CONFLICT','该道工序已登记交接',409);
       const handoverDate=date(p.date,'交接日期');if(handoverDate>mistBusinessDate(context.now))throw new MistCommandError('VALIDATION','交接日期不得在未来');
       if((v.stageHandovers||[]).some(row=>row.stageIndex<p.stageIndex&&row.date>handoverDate))throw new MistCommandError('VALIDATION','交接日期不能早于前道交接日期');

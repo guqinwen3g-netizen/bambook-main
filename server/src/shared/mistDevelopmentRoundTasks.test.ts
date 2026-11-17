@@ -1,3 +1,4 @@
+import {retainFixtureFactoryTasks} from './__tests__/utils/devClose';
 import {describe,it,expect} from 'vitest';
 import { withTestFactories } from './__tests__/utils/devFactories';
 import {applyMistCommand,createMistState,type DevelopmentValues,type MistContext,type MistCommand} from './mistWorkspace';
@@ -57,7 +58,7 @@ describe('BB-DEV-3 开新一轮：逐厂任务与共同要求同步',()=>{
     f.run({type:'development.recordSample',payload:{devId:f.devId,versionId:f.version('R2-B-2').id,sample:'S-B',quantity:1,returnedAt:f.ctx.now}});
     f.run({type:'development.round.updateRequirements',payload:{devId:f.devId,roundId,requirements:'收腰 3cm'}});
     expect(()=>f.run({type:'development.version.syncRequirements',payload:{devId:f.devId,versionId:f.version('R2-B-2').id}})).toThrow(/R2-B-2 已返样，改要求请开新一轮/);
-    f.run({type:'development.close',payload:{devId:f.devId,kind:'cancelled',reason:'客户撤单'}});
+    f.run({type:'development.close',payload:{devId:f.devId,kind:'cancelled',reason:'客户撤单',...retainFixtureFactoryTasks(f.state,f.devId)}});
     expect(()=>f.run({type:'development.version.syncRequirements',payload:{devId:f.devId,versionId:f.version('R2-A-2').id}})).toThrow(/已取消/);
     expect(()=>f.run({type:'development.round.updateRequirements',payload:{devId:f.devId,roundId,requirements:'收腰 4cm'}})).toThrow(/已取消，不能再改共同要求/);
   });
