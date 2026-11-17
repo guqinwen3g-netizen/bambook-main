@@ -18,7 +18,7 @@ import {developmentCharged,developmentDomain,developmentInitiator,developmentIni
 import { apiService } from '../../../../services/apiService';
 import { Archive, ArrowRight, Building2, CircleCheck, ClipboardList, Clock, Download, Ellipsis, FileCheck, FileText, History, Layers, Shirt, PackageCheck, Paperclip, Pencil, Plus, ShieldCheck, Trash2, Users, X } from 'lucide-react';
 import { Avatar, BackLink, Banner, Button, Card, CardFooter, CardHeader, Checkbox, ChoiceCards, Dialog, EmptyState, Field, FormGrid, IconButton, IdentityHeader, KeyValue, MeasurementTable, MistPage, Mono, ObjectStage, Pill, RelatedList, Select, Stepper, SummaryNumbers, TextArea, TextInput, TextLink, Thumb, Timeline, UploadZone, useToast, type StepState } from '../../../../components/mist';
-import type { MistConfirmation, MistDev, MistQc, MistRound, MistVersion } from '../../../../server/src/shared/mistWorkspace';
+import type { MistConfirmation, MistDev, MistQc, MistRound, MistState, MistVersion } from '../../../../server/src/shared/mistWorkspace';
 import { STAGES } from '../data';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useMyDisplayName } from '../runtime/me';
@@ -71,9 +71,23 @@ export function qcMeasurementFacts(form:QcForm):Pick<MistQc,'measurements'|'appe
   return{measurements,...(form.appearanceDefects.trim()?{appearanceDefects:Number(form.appearanceDefects)}:{})};
 }
 
+/** Mounted per identity/company/record; a dismissed shell notice is not a successful read. */
+function DevelopmentDetailReadState({state,loading,error,refresh}:{state:MistState|null;loading:boolean;error:string;refresh:()=>Promise<void>}){
+  const [observed,setObserved]=React.useState({snapshot:state,loading,failure:error});
+  let current=observed;
+  if(observed.snapshot!==state||observed.loading!==loading||!!error&&observed.failure!==error){
+    const readSucceeded=!!state&&(observed.snapshot!==state||observed.loading&&!loading);
+    current={snapshot:state,loading,failure:error||(readSucceeded?'':observed.failure)};
+    setObserved(current);
+  }
+  const failure=error||current.failure;
+  const retry=async()=>{try{await refresh();}catch(problem){setObserved(previous=>({...previous,failure:problem instanceof Error?problem.message:'开发案读取失败'}));}};
+  return <EmptyState icon={Shirt} title={uiText(loading?'正在读取开发案':failure?'开发案读取失败':state?'未找到开发案':'开发案资料未读取')} description={!loading&&failure?uiText(failure):undefined} action={!loading&&(!!failure||!state)?<Button onClick={()=>void retry()}>{uiText('重新读取')}</Button>:undefined}/>;
+}
+
 export function DevDetailPage(){
   const qcSession=useOptionalMistSession();
-  const {go,route}=useNav();const {state,workspace,loading,error,run,uploadFile,downloadFile,fileUrl,pending,recover,saving}=useMistWorkspace();const myName=useMyDisplayName(workspace,state);const toast=useToast();
+  const {go,route}=useNav();const {state,workspace,loading,error,refresh,run,uploadFile,downloadFile,fileUrl,pending,recover,saving}=useMistWorkspace();const myName=useMyDisplayName(workspace,state);const toast=useToast();
   const dev=state?.devs.find(item=>item.id===route.id),versions=state&&dev?devVersions(state,dev):[]; // 按开发案版本顺序，小版本紧跟所属大版本
   const fabricDomain=!!dev&&developmentDomain(dev.values)==='fabric';
   const [versionId,setVersionId]=React.useState(route.versionId||''),[form,setForm]=React.useState<Form>(()=>emptyForm()),[dialog,setDialog]=React.useState<'confirm'|'actions'|'revise'|'minor'|'archive'|'sample'|'qc'|'edit'|'round'|'qcDecide'|'close'|'reopen'|'taskEnd'|'taskReopen'|'product'|null>(null),[busy,setBusy]=React.useState(false),[failure,setFailure]=React.useState('');
@@ -212,7 +226,7 @@ export function DevDetailPage(){
   const editFactories=edit.factories.split(/[、,，\n]/).map(value=>value.trim()).filter(Boolean);
   const factoryOptions=developmentFactoryOptions(state,editFactories,dev?developmentDomain(dev.values):'garment');
   const recovery=pending?<Button loading={busy||saving} onClick={()=>void recoverWrite()}>{uiText("核对原操作结果")}</Button>:null;
-  if(!dev)return <MistPage><BackLink onClick={backToSource}>{uiText(route.customerId?'返回客户档案':'开发与寻样')}</BackLink><Card><EmptyState icon={fabricDomain?Layers:Shirt} title={uiText(loading?'正在读取开发案':'未找到开发案')} description={uiText(error||'请从开发列表选择一个已保存的开发案。')} /></Card></MistPage>;
+  if(!dev)return <MistPage><BackLink onClick={backToSource}>{uiText(route.customerId?'返回客户档案':'开发与寻样')}</BackLink><Card><DevelopmentDetailReadState key={JSON.stringify([qcSession?.sessionKey,qcSession?.user?.id,qcSession?.user?.companyId,workspace?.id,route.id])} state={state} loading={loading} error={error} refresh={refresh}/></Card></MistPage>;
   const files=(version?.fileIds||dev.fileIds).map(id=>state?.files.find(file=>file.id===id)).filter(file=>!!file),last=version?.confirmations.at(-1),steps=developmentStepStates(dev,version),history=(state?.events||[]).filter(event=>event.entityId===dev.id||event.entityId===version?.id).slice().sort((a,b)=>b.at.localeCompare(a.at));
   const openEdit=()=>{setEdit({goal:dev.goal,due:dev.due,factories:dev.values.factories.join('、')});setDialog('edit');};
   const currentFormError=confirmationFormError(form)||(needsForms&&!confirmSampleIds.length?'请选择本次确认针对的形态':null);
