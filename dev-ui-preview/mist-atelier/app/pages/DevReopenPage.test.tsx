@@ -32,6 +32,12 @@ it('retains the reason and prevents a stale dialog from reopening a newer same-c
 it('owns a definite server rejection in the recovery dialog and retains exact inputs',async()=>{
  store.current.run.mockRejectedValueOnce(new Error('当前版本已变化，请重新核对后恢复'));await open();fill('继续开发');await act(async()=>getByRole(document.body,'button',{name:'确认恢复',exact:true}).click());expect(reason().value).toBe('继续开发');expect(document.body.textContent?.match(/当前版本已变化，请重新核对后恢复/g)).toHaveLength(1);expect(getByRole(document.body,'dialog',{name:'恢复开发案',exact:true})).toBeTruthy();
 });
+it('shows a background read failure inside the open dialog while preserving its reason',async()=>{
+ await open();fill('继续开发');store.current.error='读取失败，请稍后重试';render();const dialog=getByRole(document.body,'dialog',{name:'恢复开发案',exact:true});expect(dialog.textContent).toContain('读取失败，请稍后重试');expect(reason().value).toBe('继续开发');expect((getByRole(dialog,'button',{name:'确认恢复',exact:true})as HTMLButtonElement).disabled).toBe(true);expect(document.body.textContent?.match(/读取失败，请稍后重试/g)).toHaveLength(1);
+});
+it('makes the original pending request recovery reachable without another restore submission or changing the historical route',async()=>{
+ await open();fill('继续开发');store.current.pending={kind:'command',requestId:'pending',command:{type:'development.reopen',payload:{devId:'dev'}}};store.current.recover=vi.fn(async()=>({result:{devId:'dev'},revision:8}));render();const dialog=getByRole(document.body,'dialog',{name:'恢复开发案',exact:true});await act(async()=>getByRole(dialog,'button',{name:'核对原操作结果',exact:true}).click());expect(store.current.recover).toHaveBeenCalledTimes(1);expect(store.current.run).not.toHaveBeenCalled();expect(go).not.toHaveBeenCalled();
+});
 it('does not grant restoration from a display status or to a read-only role',async()=>{
  store.write=false;render();await act(async()=>getByRole(host,'button',{name:'更多',exact:true}).click());expect(queryByRole(document.body,'button',{name:'恢复开发案',exact:true})).toBeNull();expect(store.current.run).not.toHaveBeenCalled();
 });
