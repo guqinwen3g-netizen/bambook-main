@@ -135,6 +135,7 @@ type DashboardTab='overview'|'team';
 /** 业务全景；业务主管（客户管理主管权限）与所有者多一个“团队”页签，看下属名下在手的事并督办。 */
 export function DashboardPage(){const w=usePlatform();const owner=w.workspace?.access?.canManageCompany??w.workspace?.access?.role!=='member',canTeam=owner||w.session.hasPermission('relations:admin');const weekly=w.route.section==='team-weekly',tab:DashboardTab=canTeam&&(w.route.section==='team'||weekly)?'team':'overview';
   const members=workspaceMembers(w.workspace,w.state,w.session.user),viewer={id:w.session.user?.id??'',owner};
+  if(!w.state)return <MistPage><PageHeader title={uiText('业务全景')} actions={<Button disabled={w.loading} onClick={()=>void w.refresh()}>{uiText('刷新')}</Button>}/><ErrorNotice/><EmptyState title={uiText(w.loading?'正在读取业务数据':'业务数据未读取')} compact/></MistPage>;
   return <MistPage><PageHeader  title={uiText("业务全景")}/><ErrorNotice/>
     {canTeam&&<div className="mist-section"><Tabs<DashboardTab> value={tab} onChange={next=>w.go('dashboard',undefined,{section:next})} options={[{value:'overview',label:'业务全景'},{value:'team',label:'团队'}]}/></div>}
     {tab==='team'?(w.state?<TeamBoard state={w.state} members={members} viewer={viewer} can={w.session.hasPermission('relations:admin')} busy={w.loading||w.saving||!!w.pending} run={c=>w.isCurrent()?w.run(c):Promise.resolve(undefined)} go={(view,id,extra)=>w.go(view as any,id,extra as any)} key={weekly?'weekly':'team'} initialMode={weekly?'week':'now'} initialWeek={weekly?addBusinessDays(weekStartOf(today()),-7):undefined}/>:<EmptyState title={uiText("正在读取团队数据")} compact/>):<DashboardOverview/>}
