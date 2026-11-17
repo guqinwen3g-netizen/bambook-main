@@ -3,7 +3,7 @@
  * 期初应收没有系统内订单，直接归属客户；与普通应收一样参与收款核销、催收、对账单、账龄、逾期风险与期末调汇。
  * 只登记未收余额（票面金额仅作参考）；未核销、未抵扣时可作废重登。
  */
-import { MistCommandError, mistMoneyMinor, type MistContext, type MistInvoice, type MistState } from './mistWorkspace';
+import { MistCommandError, mistInvoiceBankChargeMinor, mistInvoiceWriteoffMinor, mistMoneyMinor, type MistContext, type MistInvoice, type MistState } from './mistWorkspace';
 import { platformBusinessDate } from './mistPlatform';
 import { mistImportDate, mistImportEach, text, type MistImportRow } from './mistImport';
 import { createPayablesState, nextPayableCode, type SupplierBill } from './mistPayables';
@@ -42,6 +42,11 @@ export function mistPayerMatchesInvoice(root: Pick<MistState, 'orders' | 'devs' 
   return [invoice.customer, mistInvoiceCustomerName(root, invoice), ...relationNames].some(name => !!name && payerNameKey(name) === key);
 }
 export const isOpeningInvoice = (invoice: { opening?: unknown }) => !!invoice.opening;
+
+export function openingAdjustmentVoidBlock(invoice: Pick<MistInvoice, 'bankCharges' | 'writeoffs'>): string | undefined {
+  if (mistInvoiceBankChargeMinor(invoice) > 0) return '须先冲回银行扣费';
+  if (mistInvoiceWriteoffMinor(invoice) > 0) return '须先冲回核销调整';
+}
 
 function amountOf(value: string, label: string): number {
   const v = value.replace(/,/g, '');
@@ -92,6 +97,8 @@ export function applyOpeningCommand(state: MistState, command: OpeningCommand, c
     if (!reason || reason.length > 500) return fail('请填写作废原因');
     if (state.allocations.some(a => a.invoiceId === invoice.id)) return fail('已有收款核销，须先冲回核销再作废', 'PRECONDITION');
     if ((state.platform?.creditApplications || []).some(a => a.invoiceId === invoice.id)) return fail('已有贷项抵扣，不能作废', 'PRECONDITION');
+    const adjustmentBlock = openingAdjustmentVoidBlock(invoice);
+    if (adjustmentBlock) return fail(adjustmentBlock, 'PRECONDITION');
     Object.assign(invoice, { voidedAt: context.now, voidReason: reason, voidedBy: context.actorName, ...(context.actorId ? { voidedById: context.actorId } : {}), open: 0 });
     state.events.unshift({ id: context.id(), entityType: 'invoice', entityId: invoice.id, actor: context.actorName, at: context.now, text: `作废期初应收 ${invoice.code}：${reason}`, fileIds: [] });
     return { id: invoice.id };

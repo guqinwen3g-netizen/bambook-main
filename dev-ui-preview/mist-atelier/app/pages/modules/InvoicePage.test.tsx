@@ -149,6 +149,24 @@ it('requires a fresh adjustment review if a receipt allocation changes while the
   expect(store.value.run).not.toHaveBeenCalled();
 });
 
+it.each(['bankCharges', 'writeoffs'])('waits for active %s to be reversed before offering to void an opening balance', field => {
+  route.id = 'a';
+  const state = store.value.state;
+  state.allocations = [];
+  state.platform.creditApplications = [];
+  const invoice = state.invoices[0], adjustment = { id: 'adjust', kind: 'difference', amount: 1, currency: 'USD', reason: '原记录', actor: '财务', at: '2026-10-14T00:00:00Z' };
+  invoice.opening = { originalAmount: 100, registeredAt: '2026-10-14', registeredBy: '财务' };
+  invoice[field] = [adjustment];
+  invoice.open = 99;
+  render();
+  const voidButton = () => getByRole(host, 'button', { name: '作废期初登记' }) as HTMLButtonElement;
+  expect(voidButton().disabled).toBe(true);
+  invoice[field] = [{ ...adjustment, reversed: { at: '2026-10-14T01:00:00Z', actor: '财务', reason: '原额冲回' } }];
+  invoice.open = 100;
+  render();
+  expect(voidButton().disabled).toBe(false);
+});
+
 it('generates a customer statement for a customer with open receivables and lists archived statements',async()=>{
   const s=store.value.state;s.customers=[{id:'customer',name:'客户',code:'C-1'}];s.settings.companyProfile={legalName:'公司'};
   s.files.push({id:'soa-file',name:'客户对账单-SOA-2026-0001-C-1.pdf',mimeType:'application/pdf',size:1,storageKey:'w/soa-file',createdAt:'2026-10-14T00:00:00Z'});

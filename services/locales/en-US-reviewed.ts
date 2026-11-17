@@ -73,6 +73,8 @@ export const reviewedEnglish: Record<string, string> = {
   '该附件的原件受权限限制，请由有权限的岗位办理': 'The source file is restricted. An authorized role must handle this attachment.',
   '银行扣费': 'Bank charges',
   '核销调整': 'Write-off adjustments',
+  '须先冲回银行扣费': 'Reverse the bank charges first',
+  '须先冲回核销调整': 'Reverse the write-off adjustments first',
   '须有催收记录或部分收款': 'A collection record or partial payment is required',
   '红冲更正须有本票到账核销记录': 'A receipt must be applied to this invoice before a correction can be recorded',
   '应收资料已更新，请重新打开后核对': 'The receivable has changed. Reopen it and check the details.',
