@@ -168,6 +168,8 @@ CompanySeals preview (2026-11-14): `modules/CompanySeals.tsx#SealImage` waits fo
 
 报价成本口径（2026-11-13）：`mistMarket.ts#quotationProductCost/sourceLine` 仅在档案与报价的币种、计价单位均一致且成本为正时采用档案成本；不把每码、每米、每公斤或每件成本直接互用，也不隐式折汇。`MarketPages.tsx#QuotationEditor` 同步使用该规则，匹配的档案成本只读，改变币种或单位后清掉沿用成本。人工参考成本保持 `unverified` 并进入业务审批；需要结构化换算及依据时沿既有条目专业核算办理。新保存规则不回写旧报价、批准记录或正式单据。
 
+订单复合审批签字读取（2026-11-17，候选待完整验证及本地应用）：`mistSignatures.ts#decisionSignatureVisible/orderDecisionSourceVisible`从当前模块权限及RLS投影确认真实父订单和准确子记录，分别识别取消申请、条目结案及超量请求；不以订单ID前缀、姓名或客户端文件ID放行。`projectSeals`保留合法签字引用后，`visibleFiles`才沿同一业务来源返回私有SVG；当前岗位撤权或业务不可见仍拒绝，原签字人本人规则保持。`mistSignatureSource.test.ts`与真实PG的`orderSignatureScope.pg.test.ts`覆盖准确来源、伪造后缀/父子错配、同名他人、跨公司和旧令牌撤权。
+
 订单审批金额（2026-11-13）：`mistOrderGovernance.ts#getOrderGovernanceReviews/reviewAmount` 从本轮冻结快照逐条计算金额并按分相加，主单和变更均显示该轮合同总额，不读取当前主单缓存金额或后续草稿。内部未定价显示「未定价」，损坏历史金额显示「金额待核对」，补发单仍按无需客户收款呈现。新增字段只在读取审批时派生，不改审批、签字或经营历史。
 
 成衣成品采购（2026-11-13）：`mistInternalFabric.ts#garmentFinishedPurchaseProblem` 要求与订单条目同单位且合同数量为整数；`mistFulfillment.ts` 在保存和提交/批准/发出/确认/收货的合同重查，以及变更提出/批准时共用该规则。实际物理流转另由`garmentDeliveryQuantityProblem`约束成衣成品和成衣加工交付的实收、拒收、收货后转拒收及退换数量；`ProcurementPage.tsx`提交前共用校验，服务端在累计量、库存和退换记录修改前重查，失败不留部分写入。材料不套用此限制，面料仍支持实际小数数量，不自动换算或改写历史。对应`mistGarmentReceiptQuantities.test.ts`覆盖错误拒绝/状态不变及整件、面料小数正例；浏览器实走198件接收/2件拒收→1件转拒收→3件退换→3件补货，最终实收与库存均200件，拒收补货历史保留。
