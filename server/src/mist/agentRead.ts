@@ -8,6 +8,7 @@ import { hasScope } from '../auth/permissionService';
 import type { PermissionScope } from '../_shared/rolePermissionMatrix';
 import type { MistState } from '../shared/mistWorkspace';
 import { emailSendEffectiveStatus, emailSendRecipients } from '../shared/mistEmail';
+import { developmentReopenSource } from '../shared/mistDevelopmentLifecycle';
 import { MistApiError } from './errors';
 
 type ObjectType = { type: string; label: string; scope: PermissionScope; path: string[]; view: string; section?: string; linkId?: (row: any) => string | undefined; /** Rows that live inside parent records (generated documents) are flattened here instead of walked by `path`. */ flatten?: (state: MistState) => any[] };
@@ -136,8 +137,8 @@ function compact(value: unknown, depth: number): unknown {
   return Object.fromEntries(Object.entries(value).filter(([k]) => k !== 'img').map(([k, v]) => [k, compact(v, depth - 1)]));
 }
 /** A small record must not lose facts merely because its review history is deeply nested. */
-function completeDataWithinLimit(row:unknown):Record<string,unknown>|undefined{
-  let remaining=GET_LIMIT,nodes=0,complete=true;
+function completeDataWithinLimit(row:unknown,limit=GET_LIMIT):Record<string,unknown>|undefined{
+  let remaining=limit,nodes=0,complete=true;
   const read=(value:any,depth:number):any=>{
     if(!complete)return;
     if(++nodes>10_000||depth>32){complete=false;return;}
@@ -163,7 +164,7 @@ function completeDataWithinLimit(row:unknown):Record<string,unknown>|undefined{
     }
     return Object.fromEntries(entries);
   };
-  const data=read(row,0);return complete&&data&&JSON.stringify(data).length<=GET_LIMIT?data:undefined;
+  const data=read(row,0);return complete&&data&&JSON.stringify(data).length<=limit?data:undefined;
 }
 function summary(row: any, type?:ObjectType) {
   // Draft values stay nested in detail reads so task source fingerprints still match storage.
@@ -231,22 +232,31 @@ function attachmentsOf(state: MistState, row: unknown) {
   return found.length > ATTACHMENTS_MAX ? { attachments: found.slice(0, ATTACHMENTS_MAX), attachmentsTotal: found.length } : found.length ? { attachments: found } : {};
 }
 
-export function agentGet(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown):ReturnType<typeof ref>&{data:Record<string,unknown>;truncated:boolean;readHint?:string;attachments?:Array<{fileId:string;name:string;mimeType:string;size:number}>;attachmentsTotal?:number} {
+/** Opaque command source IDs only; events stay outside the machine-readable object catalog. */
+function developmentReadMetadata(state:MistState,row:any):{reopenSource:{closureId:string;expectedVersionId:string|null}|null}{
+  const source=developmentReopenSource(state,row),exact=(value:unknown):value is string=>typeof value==='string'&&!!value&&value===value.trim()&&value.length<=200&&!value.startsWith('data:');
+  return{reopenSource:source&&exact(source.closureId)&&(source.expectedVersionId===null||exact(source.expectedVersionId))?{closureId:source.closureId,expectedVersionId:source.expectedVersionId}:null};
+}
+export function agentGet(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown):ReturnType<typeof ref>&{data:Record<string,unknown>;truncated:boolean;readHint?:string;attachments?:Array<{fileId:string;name:string;mimeType:string;size:number}>;attachmentsTotal?:number;reopenSource?:{closureId:string;expectedVersionId:string|null}|null} {
   const { type, row } = find(state, actor, typeName, id);
   const files=attachmentsOf(state,row);
-  const complete=completeDataWithinLimit(row);
-  if(complete)return{...ref(type,row),data:complete,truncated:false,...files};
+  // Keep computed IDs outside data and preserve its existing source-fingerprint contract.
+  // Computed identity consumes the existing record budget instead of enlarging it.
+  const metadata=type.type==='development'?developmentReadMetadata(state,row):{};
+  const dataLimit=type.type==='development'?GET_LIMIT-(JSON.stringify({data:null,...metadata}).length-4):GET_LIMIT;
+  const complete=completeDataWithinLimit(row,dataLimit);
+  if(complete)return{...ref(type,row),...metadata,data:complete,truncated:false,...files};
   const mail=['email','email_draft','email_send'].includes(type.type);
   let data = compact(row, mail ? 5 : 3) as Record<string, unknown>;
   if(mail&&typeof row.body==='string')data.body=row.body.slice(0,10_000);
   let text = JSON.stringify(data);
-  if (text.length > GET_LIMIT) {
+  if (text.length > dataLimit) {
     data = compact(row, 1) as Record<string, unknown>;
     if(type.type==='email_send'){Object.assign(data,{recipientCounts:row.recipientCounts,attemptCount:row.attemptCount,latestAttempt:compact(row.latestAttempt,3)});data.recipients=compact(row.recipients,3);}
     text = JSON.stringify(data);
   }
-  if (text.length > GET_LIMIT) { data = summary(row);if(type.type==='email_send')Object.assign(data,{recipientCounts:row.recipientCounts,attemptCount:row.attemptCount,latestAttempt:compact(row.latestAttempt,3)}); }
-  return { ...ref(type, row), data, truncated:true,readHint:'超出单次读取范围；当前结果不完整，请读取关联明细或交本人核对。',...files };
+  if (text.length > dataLimit) { data = summary(row);if(type.type==='email_send')Object.assign(data,{recipientCounts:row.recipientCounts,attemptCount:row.attemptCount,latestAttempt:compact(row.latestAttempt,3)}); }
+  return { ...ref(type, row), ...metadata, data, truncated:true,readHint:'超出单次读取范围；当前结果不完整，请读取关联明细或交本人核对。',...files };
 }
 
 /** 关联对象：本对象字段直接引用的对象，以及字段引用了本对象的其它对象（均限当前可读类型）。 */
