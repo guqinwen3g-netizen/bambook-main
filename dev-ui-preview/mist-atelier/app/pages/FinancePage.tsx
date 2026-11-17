@@ -160,6 +160,7 @@ export function FinancePage() {
     else downloadMistCsv('核销明细.csv', ['流水', '发票', '核销金额', '币种', '时间', '操作人'], allocations.map(item => [receipts.find(receipt => receipt.id === item.receiptId)?.code ?? state?.partialReceipts?.find(receipt => receipt.id === item.receiptId)?.code ?? item.receiptId, invoices.find(invoice => invoice.id === item.invoiceId)?.code ?? item.invoiceId, item.amount, item.currency, item.createdAt, item.actor]));
     toast('已导出当前台账');
   };
+  if(!state)return <MistPage><PageHeader eyebrow={uiText('财务与成本 · 财务')} title={uiText('财务管理')} actions={<Button disabled={loading||working||saving} onClick={()=>void refresh()}>{uiText('刷新')}</Button>}/>{pending&&!saving&&<Banner variant="notice" tone="warn" title={uiText('上一次操作结果待核对')} actions={<Button disabled={working||saving||loading} onClick={()=>void resolvePending()}>{uiText('核对原操作结果')}</Button>}>{uiText('核对原请求后再继续操作。')}</Banner>}<EmptyState title={uiText(loading?'正在读取财务数据':'财务数据未读取')} compact/></MistPage>;
   if(area==='records'&&route.detail==='full'&&route.id)return <FinanceRecords onReceipt={openReceipt}/>;
   return <MistPage>
     <PageHeader eyebrow={uiText("财务与成本 · 财务")} title={uiText("财务管理")}
