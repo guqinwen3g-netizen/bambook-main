@@ -1090,4 +1090,12 @@ export const reviewedEnglish: Record<string, string> = {
   '单位未记录': 'Unit not recorded',
   '尚未存档': 'Not archived',
   '存档当前不可查看': 'This archived report is not currently accessible',
+  '最多引用12条业务记录': 'Select up to 12 business records',
+  '任务引用格式无效': 'Invalid task reference format',
+  '引用记录不存在或不在当前账号的业务范围内': 'The referenced record is unavailable or outside your current business access',
+  '当前Agent无权读取引用记录': 'This agent cannot read the referenced records',
+  '引用资料未能读取，请回原记录核对后重新安排。': 'The referenced records could not be read. Check the original records and arrange the task again.',
+  '请选择本次实际出库位置': 'Select the actual source location',
+  '所选位置的可用数量不足': 'Insufficient available stock at the selected location',
+  '生产进度%': 'Production progress (%)',
 };
