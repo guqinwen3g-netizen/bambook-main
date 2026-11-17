@@ -8,6 +8,7 @@ import type{MistRepository}from'./repository';
 import{MistApiError}from'./errors';
 import{responseLanguagePrompt,responseUserMessage}from'./responseLanguage';
 import{parsePlatformTaskPlan,platformTaskHistory,PLATFORM_TASK_RESULT_LIMIT,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskStep}from'./platformTaskPlan';
+import{nextTaskIntentRead}from'./agentTaskIntentRefs';
 
 export type PlatformTaskWorkerOptions={complete?:(input:LlmCompletionInput)=>Promise<string>;makeCredential:MakeTaskCredential;configured?:()=>boolean;tickMs?:number;pulseMs?:number;modelTimeoutMs?:number;concurrency?:number;onError?:(code:string)=>void};
 /** Keep the current Shanghai business clock explicit; never relabel UTC digits with +08:00. */
@@ -109,13 +110,18 @@ export class MistPlatformTaskWorker{
       while(!abort.signal.aborted&&this.enabled){
         phase='store';const context=await this.repository.platformTaskContext(actor);let step=context.steps.at(-1);
         if(!step||step.result!==undefined){
+          const intentRead=nextTaskIntentRead(context.task.intentRefs??[],context.steps);
+          if(intentRead.failed){await this.repository.agentTaskRuntime(actor,job.workspaceId,'finish',{requestId:'platform-intent-read-'+job.taskId,outcome:'failed',result:'引用资料未能读取，请回原记录核对后重新安排。'});return;}
           if(context.steps.length>=PLATFORM_TASK_TURN_LIMIT){await this.repository.agentTaskRuntime(actor,job.workspaceId,'finish',{requestId:'platform-limit-'+job.taskId,outcome:'failed',result:'本次执行已达轮次上限，请核对原业务和已办记录后接续。'});return;}
           if(!this.available)throw Error('MODEL_UNAVAILABLE');
-          if(!await this.repository.platformTaskDailyRoom(actor)){issue='daily_limit';return;}
-          phase='model';
-          const facts={task:context.task,clock:platformTaskClock(Date.now()),requiresRead:context.requiresRead,decisions:context.decisions,history:platformTaskHistory(context.steps)};
-          const response=await this.model({systemPrompt:SYSTEM+'\n'+responseLanguagePrompt(context.locale)+'\n工具：'+JSON.stringify(taskMcpTools()),messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts)),context.locale)}],temperature:0.1,jsonMode:true},abort.signal);
-          if(abort.signal.aborted)return;const plan=parsePlatformTaskPlan(response);phase='store';step=await this.repository.savePlatformTaskPlan(actor,plan);
+          if(intentRead.plan){step=await this.repository.savePlatformTaskPlan(actor,intentRead.plan);}
+          else{
+            if(!await this.repository.platformTaskDailyRoom(actor)){issue='daily_limit';return;}
+            phase='model';
+            const facts={task:context.task,clock:platformTaskClock(Date.now()),requiresRead:context.requiresRead,decisions:context.decisions,history:platformTaskHistory(context.steps)};
+            const response=await this.model({systemPrompt:SYSTEM+'\n'+responseLanguagePrompt(context.locale)+'\n工具：'+JSON.stringify(taskMcpTools()),messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts)),context.locale)}],temperature:0.1,jsonMode:true},abort.signal);
+            if(abort.signal.aborted)return;const plan=parsePlatformTaskPlan(response);phase='store';step=await this.repository.savePlatformTaskPlan(actor,plan);
+          }
         }
         if(abort.signal.aborted)return;phase='tool';const result:any=await invokePlatformTaskTool(this.repository,actor,step);
         // These effects already acknowledge the frozen step inside their own durable transaction.

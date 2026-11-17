@@ -90,3 +90,8 @@ it('works with Xiaozhu as a coworker: a request becomes a platform task whose pr
   expect(polls).toBeGreaterThan(0);expect(host.textContent).toContain('本周有 2 张订单交期临近');
   expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('');
 });
+it('sends exact selected identities on the platform path even when two source labels are identical',async()=>{
+ mock.fetch.mockResolvedValue(response({configured:true,models:['test-model']}));let posted:any;
+ mock.api.mockImplementation(async(url:string,init:any)=>{if(init?.method==='POST'){posted=JSON.parse(init.body);throw new Error('local task capture');}if(url.includes('/agent-identities'))return{items:[{id:'personal',kind:'personal',state:'active'}]};if(url.endsWith('/agent-task-capabilities'))return{platformAvailable:true};return{items:[],nextCursor:null};});
+ mock.workspace.state.invoices.push({id:'invoice',code:'SO-SELECTED',customer:'Fixture',amount:10,open:10,currency:'USD'});await mount();await click('引用业务记录');await click('加入问题');const type=document.querySelector<HTMLSelectElement>('select[aria-label="检索对象"]')!;await act(async()=>{type.value='invoices';type.dispatchEvent(new Event('change',{bubbles:true}));});await click('加入问题');await question('核对所选两条资料');await click('发送');expect(posted.intentRefs).toEqual([{kind:'orders',id:'order'},{kind:'invoices',id:'invoice'}]);expect(mock.fetch.mock.calls.some(([url])=>String(url).endsWith('/assistant'))).toBe(false);
+});

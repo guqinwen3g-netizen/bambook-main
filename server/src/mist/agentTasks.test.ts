@@ -25,6 +25,18 @@ async function claim(requestId = randomUUID(), workerId = 'worker') {
   const c = (await tx(d => taskRecord(d, workspaceId, taskId))).value;
   return { result, lease: { taskId, workspaceId, runId: c.lease!.id, grantHash: digest(result.token!), serviceLease: c.authority } as AgentTaskLease };
 }
+it('persists exact intent references separately from actual task reads and distinguishes same-label identity in idempotency',async()=>{
+ const requestId=randomUUID(),input={requestId,identityId,name:'同名资料',instructions:'核对同名资料'};
+ const created=await tx(d=>(createTask as any)(d,actor,workspaceId,input,now,undefined,undefined,[{kind:'orders',id:'order-A'}]));
+ const saved=(await tx(d=>taskRecord(d,workspaceId,created.id))).value;
+ expect(saved).toMatchObject({intentRefs:[{kind:'orders',id:'order-A'}],sources:[]});expect(taskView(saved,actor,now).intentRefs).toEqual([{kind:'orders',id:'order-A'}]);expect(taskView(saved,actor,now,false)).not.toHaveProperty('intentRefs');
+ await expect(tx(d=>(createTask as any)(d,actor,workspaceId,input,now,undefined,undefined,[{kind:'orders',id:'order-B'}]))).rejects.toMatchObject({status:409});
+});
+it('keeps the legacy creation hash and row shape unchanged when references are absent or empty',async()=>{
+ const requestId=randomUUID(),input={requestId,identityId,name:'旧任务',instructions:'核对订单'};
+ const first=await tx(d=>createTask(d,actor,workspaceId,input,now));const second=await tx(d=>(createTask as any)(d,actor,workspaceId,input,now,undefined,undefined,[]));expect(second.id).toBe(first.id);
+ const saved=(await tx(d=>taskRecord(d,workspaceId,first.id))).value;expect(saved).not.toHaveProperty('intentRefs');expect(saved.lastInputHash).toBe(digest(JSON.stringify([identityId,input.name,input.instructions])));
+});
 const conditionTarget={type:'order',id:'source-order'},preparedCondition=()=>({...conditionTarget,label:'SO-1',hash:'server-full-read-hash'});
 it('checks a condition on a bounded cadence without a lease or runtime charge, then requires the exact original full read',async()=>{
  const first=await claim();now+=5000;const requestId=randomUUID(),input={requestId,delaySeconds:120,condition:conditionTarget,summary:'等待原订单变化。'};

@@ -34,6 +34,7 @@ import { applyCompanyRoster, canMaintainCompany, companyDataScope, companyTeamId
 import { isAgentActor, type AgentActor } from './agentDelegation';
 import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, assertTaskLease, assertTaskAuthority, assertTaskViewAuthority, acknowledgePlatformStep, advanceTaskSources, answerTaskQuestion, askTaskQuestion, changeTask, checkpointTask, claimTask, deferPlatformJob, duePlatformTasks, createTask, finishTask, finishTaskSession, heartbeatTask, issueTaskControl, listTasks, readTaskRecord, reserveTaskStep, resolveTaskControl, resolveTaskCredential, releasePlatformTask, savePlatformPlan, saveTaskSources, settleTaskProposal, taskHistory, taskRecord, taskView, waitTaskForProposal, type MakeTaskCredential, type MakeTaskControl, type TaskRecord, type PlatformTaskJob } from './agentTasks';
 import { collectTaskSources, knownCommandSourcesVisible, taskScopeHash, taskSourcesVisible } from './agentTaskVisibility';
+import { taskIntentRefsVisible, validateTaskIntentRefs } from './agentTaskIntentRefs';
 import {taskNotice,taskNoticeCandidates} from './agentTaskAttention';
 import {markTaskNoticeRead,waitTaskUntil,platformTaskUsage,agentDailyUsage,assertDailyRoom} from './agentTasks';
 import {assertTaskBusinessRead,checkTaskCondition,type PlatformTaskScanCursor} from './agentTasks';
@@ -352,7 +353,7 @@ export class MistRepository {
     if (companyRow(row)) { await applyCompanyRoster(db, row, row.companyId!); const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); OWN_TEAMS.set(row, scope?.teamIds ?? await companyTeamIds(db, row.companyId!, actor.userId)); }
     this.contract.normalizeMistState?.(row.state,this.context(actor));
     await this.prepareFileAccess(row);
-    if(task){if(taskActor===actor)this.assertTaskSources(row,actor,task);else{const taskScope=await companyDataScope(db,row,taskActor),visible=this.accessView(row, taskActor, taskScope).state;if(!taskSourcesVisible(task.sources,task.scopeHash,visible,row.state,taskScope))fail('AGENT_TASK_SCOPE_CHANGED','任务可见范围已变化',403);}}
+    if(task){if(taskActor===actor)this.assertTaskSources(row,actor,task);else{const taskScope=await companyDataScope(db,row,taskActor),visible=this.accessView(row, taskActor, taskScope).state;if(!taskSourcesVisible(task.sources,task.scopeHash,visible,row.state,taskScope)||!taskIntentRefsVisible(task.intentRefs??[],taskActor,visible))fail('AGENT_TASK_SCOPE_CHANGED','任务可见范围已变化',403);}}
     await this.prepareTaskProposalAccess(db,row,actor);
     return { actor, row };
   }
@@ -381,7 +382,7 @@ export class MistRepository {
   private async taskValidationActor(db:any,prior:TokenPayload,actor:TokenPayload){
     if(isAgentActor(prior)&&prior.agentTaskLease&&(prior as any).mailStateWorker===true){const c=(await taskRecord(db,prior.agentTaskLease.workspaceId,prior.agentTaskLease.taskId)).value;return this.authorize(db,{...prior,permissionCeiling:[...c.ceiling]});}return actor;
   }
-  private taskSourcesAllowed(row:MistWorkspaceRow,actor:TokenPayload,c:TaskRecord,visible?:MistState){return c.ownerId===actor.userId&&c.ceiling.every(scope=>hasScope(actor,scope as any))&&taskSourcesVisible(c.sources,c.scopeHash,visible??this.accessView(row, actor, scopeOf(row)).state,row.state,scopeOf(row));}
+  private taskSourcesAllowed(row:MistWorkspaceRow,actor:TokenPayload,c:TaskRecord,visible?:MistState){return c.ownerId===actor.userId&&c.ceiling.every(scope=>hasScope(actor,scope as any))&&taskSourcesVisible(c.sources,c.scopeHash,visible??this.accessView(row, actor, scopeOf(row)).state,row.state,scopeOf(row))&&taskIntentRefsVisible(c.intentRefs??[],actor,visible??this.accessView(row, actor, scopeOf(row)).state);}
   private assertTaskSources(row:MistWorkspaceRow,actor:TokenPayload,c:TaskRecord){if(!this.taskSourcesAllowed(row,actor,c))fail('AGENT_TASK_SCOPE_CHANGED','任务可见范围已变化，请重新安排任务',403);}
   private async refreshTaskCondition(db:any,actor:TokenPayload,row:MistWorkspaceRow,c:TaskRecord,now:number){
     if(c.state!=='waiting_condition')return c;
@@ -544,9 +545,10 @@ export class MistRepository {
   async authorizePersonalAgentVoice(prior:TokenPayload,workspaceId:string){if(isAgentActor(prior))fail('FORBIDDEN','语音只供本人使用',403);await this.transact(async db=>{const actor=await this.taskAccess(db,prior,workspaceId,'ai:chat');await assertPersonalVoiceAvailable(db,actor,workspaceId);});}
   async assignPersonalAgentTask(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>,make:MakeServiceCredential,automationId?:string){
     if(isAgentActor(prior))fail('FORBIDDEN','任务须由本人安排',403);
-    if(Object.keys(input).some(k=>!['requestId','name','instructions','locale','conversationId'].includes(k)))fail('INVALID_INPUT','任务字段无效',400);
+    if(Object.keys(input).some(k=>!['requestId','name','instructions','locale','conversationId','intentRefs'].includes(k)))fail('INVALID_INPUT','任务字段无效',400);
+    if(input.intentRefs!==undefined)await this.transact(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,'ai:chat');validateTaskIntentRefs(input.intentRefs,actor,this.accessView(row,actor,scopeOf(row)).state);});
     const identity=await this.ensurePersonalAgent(prior,workspaceId,make);
-    return this.createAgentTask(prior,workspaceId,{requestId:input.requestId,identityId:identity.id,name:input.name,instructions:input.instructions,executor:'platform',...(input.locale!==undefined?{locale:input.locale}:{}),...(input.conversationId!==undefined?{conversationId:input.conversationId}:{})},automationId);
+    return this.createAgentTask(prior,workspaceId,{requestId:input.requestId,identityId:identity.id,name:input.name,instructions:input.instructions,executor:'platform',...(input.locale!==undefined?{locale:input.locale}:{}),...(input.conversationId!==undefined?{conversationId:input.conversationId}:{}),...(input.intentRefs!==undefined?{intentRefs:input.intentRefs}:{})},automationId);
   }
   /** 个人 Agent 用量：本人看自己的；公司管理员（users:write）看全公司。 */
   async personalAgentUsage(prior:TokenPayload,workspaceId:string,month:unknown){
@@ -615,7 +617,7 @@ export class MistRepository {
   }
   async getAgentTask(prior:TokenPayload,workspaceId:string,taskId:string,summaryOnly=false){
     if(isAgentActor(prior)&&prior.agentTaskLease&&prior.agentTaskLease.taskId!==taskId)fail('NOT_FOUND','任务不存在或无权访问',404);
-    if(summaryOnly)return this.transact(async db=>{const actor=await this.taskAccess(db,prior,workspaceId,isAgentActor(prior)?'ai:chat':undefined),c=(await taskRecord(db,workspaceId,taskId)).value;if(isAgentActor(prior)&&prior.agentIdentity?.id!==c.identityId)fail('NOT_FOUND','任务不存在或无权访问',404);let valid=true;try{await assertTaskViewAuthority(db,actor,c,Date.now());}catch(e){if(!(e instanceof MistApiError))throw e;valid=false;}return {...taskView(c,actor,Date.now(),valid),name:'Agent任务',instructions:'',checkpoint:'',result:'',questions:[],waitingFor:null,requiredRead:null,wakeReason:undefined};});
+    if(summaryOnly)return this.transact(async db=>{const actor=await this.taskAccess(db,prior,workspaceId,isAgentActor(prior)?'ai:chat':undefined),c=(await taskRecord(db,workspaceId,taskId)).value;if(isAgentActor(prior)&&prior.agentIdentity?.id!==c.identityId)fail('NOT_FOUND','任务不存在或无权访问',404);let valid=true;try{await assertTaskViewAuthority(db,actor,c,Date.now());}catch(e){if(!(e instanceof MistApiError))throw e;valid=false;}return {...taskView(c,actor,Date.now(),valid),name:'Agent任务',instructions:'',checkpoint:'',result:'',intentRefs:undefined,questions:[],waitingFor:null,requiredRead:null,wakeReason:undefined};});
     return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,isAgentActor(prior)?'ai:chat':undefined);let c=(await taskRecord(db,workspaceId,taskId)).value;if(isAgentActor(prior)&&prior.agentIdentity?.id!==c.identityId)fail('NOT_FOUND','任务不存在或无权访问',404);let valid=this.taskSourcesAllowed(row,actor,c);try{await assertTaskViewAuthority(db,actor,c,Date.now());if(valid)c=await this.refreshTaskCondition(db,actor,row,c,Date.now());}catch(e){if(!(e instanceof MistApiError))throw e;valid=false;}return taskView(c,actor,Date.now(),valid);});
   }
   async listConversations(prior:TokenPayload,workspaceId:string){if(isAgentActor(prior))fail('FORBIDDEN','对话设置须由本人管理',403);return this.transact(async db=>{const{actor}=await this.own(db,prior,workspaceId,'ai:chat');return{items:await listConversationMeta(db,workspaceId,actor.userId)};});}
@@ -646,7 +648,7 @@ export class MistRepository {
   private async haltAutomation(workspaceId:string,id:string,message:string,now:number){await this.connectionTransaction(async db=>{const{row,value}=await automationRecord(db,workspaceId,id);await writeAutomation(db,row,value,{...value,version:value.version+1,enabled:false,authority:undefined,updatedAt:new Date(now).toISOString(),halted:{code:'AUTOMATION_HALTED',message}});});}
   async createAgentTask(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>,automationId?:string){
     if(isAgentActor(prior))fail('FORBIDDEN','任务须由本人安排',403);
-    return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,'ai:chat');if(input.executor==='platform'&&!this.platformRuntimeAvailable())fail('PRECONDITION','平台执行器或模型暂不可用',503);const result=await createTask(db,actor,workspaceId,input,Date.now(),taskScopeHash(scopeOf(row),row.state),automationId);const c=(await taskRecord(db,workspaceId,result.id)).value;return taskView(c,actor,Date.now(),result.state!=='access_changed'&&this.taskSourcesAllowed(row,actor,c));});
+    return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,'ai:chat');if(input.executor==='platform'&&!this.platformRuntimeAvailable())fail('PRECONDITION','平台执行器或模型暂不可用',503);const{intentRefs:rawIntentRefs,...taskInput}=input,refs=validateTaskIntentRefs(rawIntentRefs,actor,this.accessView(row,actor,scopeOf(row)).state);const result=await createTask(db,actor,workspaceId,taskInput,Date.now(),taskScopeHash(scopeOf(row),row.state),automationId,refs);const c=(await taskRecord(db,workspaceId,result.id)).value;return taskView(c,actor,Date.now(),result.state!=='access_changed'&&this.taskSourcesAllowed(row,actor,c));});
   }
   async claimAgentTask(prior:TokenPayload,workspaceId:string,taskId:string,input:Record<string,unknown>,make:MakeTaskCredential){
     if(!isAgentActor(prior)||!prior.agentServiceLease||prior.agentTaskLease)fail('FORBIDDEN','请使用执行器管理连接领取任务',403);
