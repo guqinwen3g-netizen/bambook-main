@@ -185,7 +185,7 @@ export function CustomsPage() {
         {tab !== 'lc' && tab !== 'hs' && <Button icon={Download} disabled={!rows.length} onClick={exportRows}>{uiText("导出")}</Button>}
         {tab === 'declarations' && createButton}
       </>} />
-    {error && <FailureNotice title={"报关数据未读取"} detail={error} retry={() => void refresh()} />}
+    {error && <FailureNotice title={state ? "报关操作未完成" : "报关数据未读取"} detail={error} retry={() => void refresh()} />}
     {!hasContext && <div className="mist-section"><Tabs<Tab> value={tab} onChange={changeTab} options={[{ value: 'declarations', label: '报关', count: inDomain.length }, { value: 'lc', label: '信用证', count: lcAll.filter(o => o.type === domain).length }, { value: 'rebate', label: '退税', count: inDomain.filter(c => c.status !== 'draft').length }, { value: 'hs', label: '商品归类', count: hsAll.filter(c => c.family === domain).length }]} /></div>}
     {!hasContext && <div className="mist-section"><Segmented<Domain> ariaLabel={uiText("业务板块")} value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${tab === 'lc' ? lcAll.filter(o => o.type === 'garment').length : tab === 'hs' ? hsAll.filter(c => c.family === 'garment').length : records.filter(c => domainOf(c) === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${tab === 'lc' ? lcAll.filter(o => o.type === 'fabric').length : tab === 'hs' ? hsAll.filter(c => c.family === 'fabric').length : records.filter(c => domainOf(c) === 'fabric').length}` }]} /></div>}
     <Toolbar>
