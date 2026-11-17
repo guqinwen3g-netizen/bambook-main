@@ -214,6 +214,33 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
+  "type": "development.reference.add",
+  "payload": "{devId:string;sampleId:string;purpose:string;fileIds?:string[]}",
+  "source": "server/src/shared/mistDevelopmentSampleReferences.ts"
+ },
+ {
+  "type": "development.reference.dispatch",
+  "payload": "{devId:string;taskVersionId:string;items:Array<{referenceId:string;quantity:number;sourceLocation:string}>;sentAt:string;expectedReturn?:string;delivery:IncomingDelivery;postage:IncomingPostage;note:string}",
+  "types": {
+   "IncomingDelivery": "{kind:'courier'|'handover';recipient:string;address:string;carrier:string;trackingNo:string;evidence:string}",
+   "IncomingPostage": "{amount:number;currency:string;zeroReason:string}"
+  },
+  "source": "server/src/shared/mistDevelopmentSampleReferences.ts"
+ },
+ {
+  "type": "development.reference.remove",
+  "payload": "{devId:string;referenceId:string;reason:string}",
+  "source": "server/src/shared/mistDevelopmentSampleReferences.ts"
+ },
+ {
+  "type": "development.reference.return",
+  "payload": "{devId:string;dispatchId:string;items:Array<{loanId:string;quantity:number;location:string}>;receivedAt:string;delivery:IncomingDelivery;note:string}",
+  "types": {
+   "IncomingDelivery": "{kind:'courier'|'handover';recipient:string;address:string;carrier:string;trackingNo:string;evidence:string}"
+  },
+  "source": "server/src/shared/mistDevelopmentSampleReferences.ts"
+ },
+ {
   "type": "development.reopen",
   "payload": "{ devId: string; closureId: string; expectedVersionId: string|null; reason: string }",
   "source": "server/src/shared/mistWorkspace.ts"
@@ -1079,8 +1106,9 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "fulfillment.samples.move",
-  "payload": "{ id: string; kind: 'lend' | 'return' | 'send' | 'move' | 'scrap' | 'returnFactory'; sendPurpose?:SampleSendPurpose; trackingNo?: string; carrier?: string; destination?: string; fee?: { amount: number; currency: string }; quantity: number; person: string; /** Company borrower account; display name is resolved server-side. */ borrowerId?: string; location: string; note: string; loanId?: string; expectedReturn?: string; sourceLocation?: string; }",
+  "payload": "{ commercialSources?:CommercialSampleSourceSelection[]; id: string; kind: 'lend' | 'return' | 'send' | 'move' | 'scrap' | 'returnFactory'; sendPurpose?:SampleSendPurpose; trackingNo?: string; carrier?: string; destination?: string; fee?: { amount: number; currency: string }; quantity: number; person: string; /** Company borrower account; display name is resolved server-side. */ borrowerId?: string; location: string; note: string; loanId?: string; expectedReturn?: string; sourceLocation?: string; }",
   "types": {
+   "CommercialSampleSourceSelection": "{stockId:string;location:string;quantity:number}",
    "SampleSendPurpose": "'confirmation'|'testing'|'rework'|'other'"
   },
   "source": "server/src/shared/mistFulfillment.ts"
