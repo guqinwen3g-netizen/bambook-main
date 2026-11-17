@@ -13,6 +13,11 @@ function fixture(){
  const command={type:'fulfillment.samples.shippingBasis',payload:{id:'private-sample-id',kind:'included',sourceSnapshot:shippingSampleSourceSnapshot(state,state.fulfillment.samples[0]),evidence:'Checked original carrier and box members',fileIds:['private-file-id'],reconcileDeparted:true}};
  return {state,command};
 }
+it('keeps a valid complete confirmation basis within the domain limit readable',()=>{
+ const {state,command}=fixture();command.payload.evidence='已核对原承运资料。'.repeat(300);
+ const review=shippingSampleProposalDetails(command,state,true)!;
+ expect(review.reason).toBe('');expect(review.rows.find(row=>row.field==='确认依据')?.value).toBe(command.payload.evidence);
+});
 describe('shipping sample human proposal details',()=>{
  it('shows current business identifiers and quantities without flattening snapshots or UUIDs',()=>{
   const f=fixture(),original=structuredClone(f.state),review=shippingSampleProposalDetails(f.command,f.state,true)!;expect(review.reason).toBe('');expect(review.rows).toEqual(expect.arrayContaining([{field:'样品',path:'shippingSampleReview.0',value:'SMP-2026-00035'},{field:'实物数量',path:'shippingSampleReview.1',value:'4 件'},{field:'出运批次',path:'shippingSampleReview.2',value:'SHP-2026-00007'}]));const text=review.rows.map(r=>r.value).join(' ');expect(text).toContain('大货内随本批出运');expect(text).toContain('Carrier confirmation.txt');expect(text).not.toContain('private-');expect(text).not.toContain('sourceSnapshot');expect(review.fingerprint).not.toBe('');expect(f.state).toEqual(original);

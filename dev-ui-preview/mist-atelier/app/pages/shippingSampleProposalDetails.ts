@@ -21,14 +21,16 @@ export function shippingSampleProposalDetails(command:AgentProposalCommandBody,s
  try{
   snapshot=shippingSampleSourceSnapshot(state,sample);
   if(stableJson(p.sourceSnapshot)!==stableJson(snapshot))return blocked('样品或装箱来源已变化，请重新核对');
-  // Run the same physical validator on a private clone. No preview fact or ID is persisted.
-  confirmShippingSampleBasis(structuredClone(state),p as unknown as ShippingSampleBasisInput,{id:()=> 'proposal-preview',now:state.settings.businessClock?.at||sample.createdAt,actorName:'确认预览'});
+  // Only the target sample and movement list can change in this validator. Avoid
+  // copying the whole company on each review input while keeping its data immutable.
+  const preview={...state,fulfillment:{...state.fulfillment,samples:state.fulfillment.samples.map(row=>row.id===sample.id?structuredClone(row):row),sampleMovements:[...state.fulfillment.sampleMovements]}};
+  confirmShippingSampleBasis(preview,p as unknown as ShippingSampleBasisInput,{id:()=> 'proposal-preview',now:state.settings.businessClock?.at||sample.createdAt,actorName:'确认预览'});
  }catch(error){return blocked(error instanceof Error?error.message:'数量口径当前不可办理，请重新核对');}
  const rows:ShippingSampleProposalReview['rows']=[],add=(field:string,value:string)=>rows.push({field,path:'shippingSampleReview.'+rows.length,value});
  add('样品',sample.code);add('实物数量',sample.quantity+' '+sample.unit);add('出运批次',shipment.code);add('数量口径',p.kind==='included'?'大货内随本批出运':'独立实物（不占本批大货）');add('补记',shipmentHasDeparted(shipment)?'是':'否');
  if(p.kind==='independent')add('独立实物来源与保管依据',String(p.independentSource).trim());add('确认依据',String(p.evidence).trim());
  const fileIds=p.fileIds as string[];if(fileIds.length)add('附件',fileIds.map(id=>state.files.find(f=>f.id===id)!.name).join('；'));
- if(rows.some(row=>row.value.length>2000))return blocked('内容过多，无法完整核对，请拆分提议');
+ if(rows.some(row=>row.value.length>4000))return blocked('内容过多，无法完整核对，请重新提出提议');
  const loans=state.fulfillment.sampleMovements.filter(m=>m.sampleId===sample.id&&(m.kind==='lend'||m.kind==='return'));
  return {title,reason:'',rows,fingerprint:stableJson([command,snapshot,sample.available,sample.positions,sample.shippingQuantityBasis,loans,shipmentHasDeparted(shipment),shipment.state,shipment.departedAt,shipment.departureEvidence,fileIds.map(id=>{const f=state.files.find(f=>f.id===id)!;return {id:f.id,name:f.name,size:f.size};})])};
 }
