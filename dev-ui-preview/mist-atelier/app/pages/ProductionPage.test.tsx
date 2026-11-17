@@ -71,6 +71,7 @@ it('opens the exact original branch from an approval target id',async()=>{await 
 it('records offline intake through the real editor with unknown progress and returns to its original branch',async()=>{
  const branch=bridge.state!.productions[1];bridge.state!.fulfillment.productionFacts.find(f=>f.productionId===branch.id)!.release=undefined;bridge.state!.orders[0].fileIds=['contract'];
  await mount({view:'production-board',productionId:branch.id});await click('登记线下在制');
+ expect(host.textContent).toContain(branch.code);expect(host.textContent).toContain(branch.factory);expect(getByRole(document.body,'spinbutton',{name:'本工序已完成数量（件）',exact:true})).toBeTruthy();
  expect(getByRole(document.body,'spinbutton',{name:'工厂进度（%）'}).getAttribute('value')).toBe('');
  await click('下一步');
  expect(getByRole(document.body,'checkbox',{name:'contract.pdf',exact:true})).toBeTruthy();expect(document.querySelector('label label')).toBeNull();
@@ -88,6 +89,12 @@ it('shows fabric quantities in their source unit and never asks for garment size
 });
 it('records fabric final quantity without a garment size matrix',async()=>{
  bridge.state!.orders[0].type='fabric';bridge.state!.orderLines[1].unit='米';await mount({view:'production-board',productionId:'production-b'});await click('登记最终完工数量');expect(getByRole(document.body,'dialog',{name:'登记最终实际完工'})).toBeTruthy();expect(queryByRole(document.body,'textbox',{name:/各实际尺码数量/})).toBeNull();expect(getByRole(document.body,'spinbutton',{name:/最终实际完工数量/})).toBeTruthy();
+});
+it.each(['件','米','码','公斤'])('labels final completion with its actual source unit %s',async unit=>{
+ bridge.state!.orders[0].type=unit==='件'?'garment':'fabric';bridge.state!.orderLines[1].unit=unit;const g=bridge.state!.orders[0].governance!;for(const contract of [g.contract,g.approvedSnapshot!.contract]){contract.quantityBasis='total';contract.quantityBasisNote='按当前订单单位核对总量';}await mount({view:'production-board',productionId:'production-b'});await click('登记最终完工数量');expect(getByRole(document.body,'spinbutton',{name:'最终实际完工数量（'+unit+'）',exact:true})).toBeTruthy();expect(bridge.run).not.toHaveBeenCalled();
+});
+it('does not invent a unit when the intake source has no recorded unit',async()=>{
+ const branch=bridge.state!.productions[1];bridge.state!.fulfillment.productionFacts.find(f=>f.productionId===branch.id)!.release=undefined;bridge.state!.orderLines[1].unit='';await mount({view:'production-board',productionId:branch.id});await click('登记线下在制');expect(getByRole(document.body,'spinbutton',{name:'本工序已完成数量（单位未记录）',exact:true})).toBeTruthy();expect(bridge.run).not.toHaveBeenCalled();
 });
 
 describe('Mist production gates, delay and pause',()=>{
@@ -264,7 +271,7 @@ it('disables final completion during a hold and displays its Shanghai business d
 it('does not resubmit a stale percentage after recording final completion in the same drawer',async()=>{
  const state=bridge.state!,branch=state.productions[1],g=state.orders[0].governance!;branch.pct=90;
  for(const contract of [g.contract,g.approvedSnapshot!.contract]){contract.quantityBasis='total';contract.quantityBasisNote='按总量';}
- await mount({view:'production-board',productionId:branch.id});await click('登记最终完工数量');await act(async()=>{const input=getByRole(document.body,'spinbutton',{name:'最终实际完工数量'}) as HTMLInputElement;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'20');input.dispatchEvent(new Event('input',{bubbles:true}));});
+ await mount({view:'production-board',productionId:branch.id});await click('登记最终完工数量');await act(async()=>{const input=getByRole(document.body,'spinbutton',{name:'最终实际完工数量（件）'}) as HTMLInputElement;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'20');input.dispatchEvent(new Event('input',{bubbles:true}));});
  await act(async()=>{const input=getByRole(document.body,'textbox',{name:'最终点数及完工依据'}) as HTMLTextAreaElement;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(input,'工厂最终点数20件');input.dispatchEvent(new Event('input',{bubbles:true}));});
  await click('保存');expect(bridge.state!.productions[1].pct).toBe(100);
  expect(queryByRole(document.body,'spinbutton',{name:'生产进度（%）'})).toBeNull();

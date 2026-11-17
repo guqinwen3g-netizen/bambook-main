@@ -16,6 +16,7 @@ export function ProductionIntakeEditor({ productionId, initial, onClose }: { pro
   const previous = workspace.state && (productionObservation(workspace.state, productionId) || productionIntake(workspace.state, productionId)?.snapshot);
   const branch=workspace.state?.productions.find(p=>p.id===productionId),order=workspace.state?.orders.find(o=>o.id===branch?.orderId);
   const unit=workspace.state?.orderLines.find(line=>line.id===branch?.lineId&&line.orderId===branch?.orderId)?.unit||'';
+  const quantityLabel=uiText('本工序已完成数量')+'（'+uiText(unit||'单位未记录')+'）';
   const labels=observedProductionStages(order?.type);
   const existingFiles=(order?.fileIds||[]).flatMap(id=>{const file=workspace.state?.files.find(f=>f.id===id);return file?[file]:[];});
   const [values, setValues] = React.useState({ asOf: businessToday(), startedOn: previous?.startedOn || '', stage: '', percent: '', quantity: '', sourceName: '', evidence: '' });
@@ -52,7 +53,7 @@ export function ProductionIntakeEditor({ productionId, initial, onClose }: { pro
     finally{lock.current=false;if(current())setBusy(false);}
   };
   return <MistPage><BackLink onClick={() => { if (!busy) onClose(); }}>{uiText('返回生产单')}</BackLink>
-    <PageHeader title={uiText(initial ? '登记线下在制' : '登记实际进度')} />
+    <PageHeader eyebrow={branch?[branch.code,branch.factory].filter(Boolean).join(' · '):undefined} title={uiText(initial ? '登记线下在制' : '登记实际进度')} />
     {failure && presentedError!==failure && <FailureNotice title={'未能保存'} detail={failure} />}
     {(workspace.pending || workspace.pendingCreate) && <Banner tone="warn" title={uiText('请先核对上次操作')} actions={<Button disabled={busy || workspace.saving} onClick={()=>void recover()}>{uiText('核对原请求')}</Button>} />}
     <div ref={stepRef} className="mist-wizard" role="group" aria-label={uiText('第 ')+(step+1)+uiText(' 步')+' · '+uiText(['生产事实','来源依据','确认'][step])} tabIndex={-1}><VerticalSteps current={String(step)} onSelect={id => { if (!blocked && Number(id) < step) setStep(Number(id)); }} steps={[{ id: '0', label: '生产事实', done: step > 0 }, { id: '1', label: '来源依据', done: step > 1 }, { id: '2', label: '确认' }]} /><Card>
@@ -61,7 +62,7 @@ export function ProductionIntakeEditor({ productionId, initial, onClose }: { pro
         <Field label={uiText('实际开产日')}><TextInput aria-label={uiText('实际开产日')} type="date" value={values.startedOn} disabled={blocked} onChange={e => change('startedOn', e.target.value)} /></Field>
         <Field label={uiText('实际工序')}><Select aria-label={uiText('实际工序')} value={values.stage} disabled={blocked} options={[{ value: '', label: '待核' }, ...Object.entries(labels).map(([value, label]) => ({ value, label }))]} onChange={e => change('stage', e.target.value)} /></Field>
         <Field label={uiText('工厂进度（%）')}><TextInput aria-label={uiText('工厂进度（%）')} type="number" min={0} max={100} value={values.percent} placeholder={uiText('待核')} disabled={blocked} onChange={e => change('percent', e.target.value)} /></Field>
-        <Field label={uiText('本工序已完成数量')}><TextInput aria-label={uiText('本工序已完成数量')} type="number" min={0} step="0.0001" value={values.quantity} placeholder={uiText('待核')} disabled={blocked} onChange={e => change('quantity', e.target.value)} /></Field>
+        <Field label={quantityLabel}><TextInput aria-label={quantityLabel} type="number" min={0} step="0.0001" value={values.quantity} placeholder={uiText('待核')} disabled={blocked} onChange={e => change('quantity', e.target.value)} /></Field>
       </FormGrid> : <FormGrid>
         <Field label={uiText('资料来源')} required full><TextInput aria-label={uiText('资料来源')} value={values.sourceName} disabled={blocked} onChange={e => change('sourceName', e.target.value)} /></Field>
         <Field label={uiText('事实依据')} required full><TextArea aria-label={uiText('事实依据')} value={values.evidence} disabled={blocked} onChange={e => change('evidence', e.target.value)} /></Field>
