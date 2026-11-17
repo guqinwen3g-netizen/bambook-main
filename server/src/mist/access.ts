@@ -216,7 +216,8 @@ const canManageMemberHandover = (actor: TokenPayload, ownerId?: string) => hasSc
 /** Derive from the full company state before risk masking; expose no risk or credit details. */
 export function projectShipmentReleaseGates(full:MistState,visible:MistState,actor:TokenPayload,workspaceCompanyId?:string|null):Record<string,MistShipmentReleaseGate>|undefined {
   if(!workspaceCompanyId||actor.companyId!==workspaceCompanyId||!hasScope(actor,'shipments:read'))return undefined;
-  const sourceOrders=new Set((visible.orders||[]).map(row=>row.id)),sourceLines=new Map((visible.orderLines||[]).map(row=>[row.id,row]));
+  // Shipment reading already grants its source reference packet, not full order/financial reading.
+  const sourceOrders=new Set((full.orders||[]).map(row=>row.id)),sourceLines=new Map((full.orderLines||[]).map(row=>[row.id,row]));
   const result:Record<string,MistShipmentReleaseGate>={};
   for(const shipment of visible.fulfillment?.shipments||[]){
     const original=(full.fulfillment?.shipments||[]).find(row=>row.id===shipment.id);
