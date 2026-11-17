@@ -12,7 +12,7 @@ import { activeCustomers } from '../../runtime/activeCustomers';
 import { CURRENCIES } from '../../runtime/tradeOptions';
 import { SAMPLE_COUNT_UNITS, SAMPLE_MEASURED_UNITS } from '../../../../../server/src/shared/mistDevelopmentDomain';
 const SAMPLE_UNITS = [...new Set([...SAMPLE_MEASURED_UNITS, ...SAMPLE_COUNT_UNITS.fabric, ...SAMPLE_COUNT_UNITS.garment])].map(u => ({ value: u, label: u }));
-import { ModuleEditorDialog, moduleFileIds, type ModuleEditorSpec } from './ModuleWorkbench';
+import { ModuleEditorDialog, moduleFileIds, type ModuleEditorSpec, type ModuleValues } from './ModuleWorkbench';
 import { emptyOption, field, number, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen } from './pageKit';
@@ -45,11 +45,17 @@ export function SampleRequests() {
       const id = String(saved.result.id || ''); if (id) go('samples', id, { section: 'requests' }); } });
   const fulfillSpec = (r: MistSampleRequest, s: MistState): ModuleEditorSpec => {
     const left = Math.max(0, Math.round((r.quantity - sampleRequestSent(r)) * 10000) / 10000);
-    const options = s.fulfillment.samples.filter(x => x.unit === r.unit && x.available > 0).map(x => ({ value: x.id, label: `${x.code} · ${x.name}${x.color ? ' · ' + x.color : ''} · 可用 ${x.available} ${x.unit}${fulfillmentPositions(x).length > 1 ? ' · 多个位置' : ''}` }));
+    const samples = s.fulfillment.samples.filter(x => x.unit === r.unit && x.available > 0), positions = new Map(samples.map(sample => [sample.id, fulfillmentPositions(sample).filter(position => position.available > 0)]));
+    const positionKey = (sampleId: string) => 'position:' + sampleId;
+    const options = samples.map(x => ({ value: x.id, label: `${x.code} · ${x.name}${x.color ? ' · ' + x.color : ''} · 可用 ${x.available} ${x.unit}${fulfillmentPositions(x).length > 1 ? ' · 多个位置' : ''}` }));
+    // Position indices are form-local, so a real empty location remains selectable.
+    const selectedPosition = (v: ModuleValues) => { const id = text(v, 'sampleId'), value = String(v[positionKey(id)] ?? ''); return /^\d+$/.test(value) ? positions.get(id)?.[Number(value)] : undefined; };
     return { title: `据单寄出 ${r.code}`, submitLabel: '登记寄出',
-      fields: [field('sampleId', '寄出样品', 'select', true, [emptyOption, ...options]), { ...field('quantity', `本次数量（${r.unit}）`, 'number'), min: 0.0001 }, field('carrier', '快递公司', 'text', false), field('trackingNo', '运单号', 'text', false), field('complete', '本次寄完', 'checkbox', false)],
+      fields: [field('sampleId', '寄出样品', 'select', true, [emptyOption, ...options]), ...samples.map(sample => ({ ...field(positionKey(sample.id), '本次出库位置', 'select', true, [{ value: '', label: '请选择位置' }, ...positions.get(sample.id)!.map((position, index) => ({ value: String(index), label: `${position.location || '位置未记录'} · 可用 ${position.available} ${sample.unit}` }))]), when: { key: 'sampleId', values: [sample.id] } })), { ...field('quantity', `本次数量（${r.unit}）`, 'number'), min: 0.0001 }, field('carrier', '快递公司', 'text', false), field('trackingNo', '运单号', 'text', false), field('complete', '本次寄完', 'checkbox', false)],
       initialValues: { sampleId: '', quantity: left || r.quantity, carrier: '', trackingNo: '', complete: true },
-      submit: async v => { await run({ type: 'sample.request.fulfill', payload: { id: r.id, sampleId: text(v, 'sampleId'), quantity: number(v, 'quantity'), carrier: text(v, 'carrier'), trackingNo: text(v, 'trackingNo'), complete: v.complete === true } }); go('samples', r.id, { section: 'requests' }); } };
+      derive: (key, value) => key === 'sampleId' ? Object.fromEntries(samples.map(sample => [positionKey(sample.id), sample.id === value && positions.get(sample.id)!.length === 1 ? '0' : ''])) : {},
+      issue: v => !selectedPosition(v) ? '请选择本次实际出库位置' : Number(v.quantity) > selectedPosition(v)!.available ? '所选位置的可用数量不足' : '',
+      submit: async v => { await run({ type: 'sample.request.fulfill', payload: { id: r.id, sampleId: text(v, 'sampleId'), sourceLocation: selectedPosition(v)!.location, quantity: number(v, 'quantity'), carrier: text(v, 'carrier'), trackingNo: text(v, 'trackingNo'), complete: v.complete === true } }); go('samples', r.id, { section: 'requests' }); } };
   };
   const cancelSpec = (r: MistSampleRequest): ModuleEditorSpec => ({ title: `取消索样 ${r.code}`, submitLabel: '取消申请', submitVariant: 'danger', fields: [field('reason', '取消原因', 'textarea')], initialValues: { reason: '' },
     submit: v => run({ type: 'sample.request.cancel', payload: { id: r.id, reason: text(v, 'reason') } }) });

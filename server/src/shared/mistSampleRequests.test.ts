@@ -15,6 +15,13 @@ function fixture() {
 const request = (over: Record<string, unknown> = {}) => ({ type: 'sample.request.save', payload: { customerId: 'c1', description: '羊毛双面呢 Navy 剪样', quantity: 2, unit: '份', recipient: 'Anna Berg', address: 'Stockholm', neededBy: '2026-11-10', feeAmount: 30, feeCurrency: 'usd', ...over } });
 
 describe('ord19 客户索样申请 / ord18 样品费', () => {
+  it('requires an exact position for multi-location stock and deducts only the chosen position atomically',()=>{
+    const f=fixture(),sample=f.state.fulfillment.samples.find(s=>s.id===f.sampleId)!;sample.positions=[{location:'A1',available:3},{location:'B2',available:2}];sample.location='多个位置';
+    const id=f.run(request()).id,before=structuredClone(f.state);
+    expect(()=>f.run({type:'sample.request.fulfill',payload:{id,sampleId:f.sampleId,quantity:2,complete:true}})).toThrow('请选择本次实际出库位置');expect(f.state).toEqual(before);
+    f.run({type:'sample.request.fulfill',payload:{id,sampleId:f.sampleId,sourceLocation:'B2',quantity:2,complete:true}});
+    expect(f.state.fulfillment.samples.find(s=>s.id===f.sampleId)).toMatchObject({available:3,positions:[{location:'A1',available:3},{location:'B2',available:0}]});expect(f.state.fulfillment.sampleMovements.at(-1)).toMatchObject({kind:'send',quantity:2,sourceLocation:'B2'});
+  });
   it('提单进样品间待办，据单从库存寄出并扣减，寄完自动完成并提醒开样品费', () => {
     const f = fixture();
     expect(mistCommandPermission({ type: 'sample.request.save', payload: {} } as any)).toBe('products:write');
