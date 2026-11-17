@@ -43,12 +43,16 @@ function orderRisk(patch: Partial<RiskRecord>, owner?: string, ownerId?: string)
   state.platform!.risks.unshift(r); return r;
 }
 
+it('keeps the active risk editor above the detail surface when the viewport narrows',async()=>{
+ const original=window.matchMedia,listeners=new Set<()=>void>(),media={matches:false,addEventListener:(_type:string,fn:()=>void)=>listeners.add(fn),removeEventListener:(_type:string,fn:()=>void)=>listeners.delete(fn)};Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:()=>media});
+ try{const record=orderRisk({id:'risk-layer',state:'Open'});await mount(record.id,'ledger','list');await click([...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='手工登记'));const editor=document.querySelector('[role="dialog"]');expect(editor).toBeTruthy();expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);await act(async()=>{media.matches=true;listeners.forEach(fn=>fn());});expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);expect(document.querySelector('[role="dialog"]')).toBe(editor);expect(bridge.current.run).not.toHaveBeenCalled();}finally{Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:original});}
+});
+
 describe('风险管理与合规', () => {
   it('预警页：汇总、已登记的预警显示负责人；未登记预警可带来源登记', async () => {
     await mount();
     const summary = host.querySelector('[data-risk-summary]')!.textContent!;
     expect(summary).toContain('未登记预警'); expect(summary).toContain('待审批申请');
-    expect(host.textContent).toContain('外币应收与采购在此按原币显示');
     const cert = risk('Open'); expect(row(cert.title)!.textContent).toContain('沈禾');
     const free = riskSignals(state, '2026-10-14').find(s => !state.platform!.risks.some(r => r.signalKey === s.key))!;
     expect(free).toBeTruthy();

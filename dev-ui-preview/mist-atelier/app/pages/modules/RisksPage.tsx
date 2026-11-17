@@ -168,8 +168,7 @@ export function RisksPage() {
       <Segmented<TypeFilter> ariaLabel={uiText("风险类型")} value={typeFilter} onChange={setTypeFilter} options={[{ value: 'all', label: '全部类型' }, ...typeCounts(tab === 'signals' ? signals : risks.map(r => ({ type: riskType(r) })))]} />
       {tab === 'ledger' && <Segmented<LedgerFilter> ariaLabel={uiText("状态")} value={ledgerFilter} onChange={setLedgerFilter} options={[{ value: 'open', label: `未关闭 ${open.length}` }, { value: 'escalated', label: `待审批 ${escalated.length}` }, { value: 'closed', label: `已关闭 ${risks.length - open.length}` }, { value: 'all', label: '全部' }]} />}
     </div>
-    {tab === 'signals' && <p className="mist-note mist-section">{uiText("外币应收与采购在此按原币显示；按月末汇率的折算、期末调汇与外币敞口见财务管理 · 账户与余额（月末汇率、期末调汇）。")}</p>}
-    <ListDetail drawerOpen={drawer && !!detail} onDrawerClose={() => setDrawer(false)} drawerTitle={selSignal?.title || selRisk?.title || ''}
+    <ListDetail freezeLayout={!!dialog} drawerOpen={drawer && !!detail} onDrawerClose={() => setDrawer(false)} drawerTitle={selSignal?.title || selRisk?.title || ''}
       list={<Card>{tab === 'signals'
         ? <DataTable ariaLabel={uiText("风险预警")} loading={loading} rows={signalRows} rowKey={s => s.key} selectedKey={selSignal?.key} density="comfy" onRowClick={s => pick(s.key)} columns={signalCols} empty={<EmptyState icon={ShieldCheck} title={uiText("当前没有预警")} description={uiText("逾期应收、往来冻结、认证到期、供应商暂停、QC 不通过与生产逾期会自动出现在这里。")} />} />
         : <DataTable ariaLabel={uiText("风险台账")} loading={loading} rows={ledgerRows} rowKey={r => r.id} selectedKey={selRisk?.id} density="comfy" onRowClick={r => pick(r.id)} columns={ledgerCols} empty={<EmptyState icon={ShieldCheck} title={uiText(risks.length ? '没有符合筛选的风险' : '还没有登记风险')} description={uiText(risks.length ? '换一个状态或类型筛选。' : '从预警登记，或手工登记订单风险。')} />} />}</Card>}
