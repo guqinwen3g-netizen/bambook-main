@@ -1,3 +1,4 @@
+import {cdDocumentIssueProblem} from './mistDocumentGeneration';
 import {notifyMist,notificationOwners,notificationTargetOwners} from './mistNotifications';
 import {receivableAcceptanceTerms,type ReceivableDueCondition} from './mistTradeTerms';
 import {stableJson} from './stableJson';
@@ -2625,6 +2626,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (POST_DEPARTURE_TYPES.includes(d.type)) { if (s.state === 'cancelled') fail('出运已取消'); } else requireEditableShipment(s);
             if (!d.fileIds.length)
                 fail('请生成或上传核对后的正式单据文件');
+            const cdIssueProblem=cdDocumentIssueProblem(root,d);if(cdIssueProblem)fail(cdIssueProblem);
             if (f.documents.some(o => o.id !== d.id && o.shipmentId === d.shipmentId && o.orderId === d.orderId && o.type === d.type && o.status === 'issued'))
                 fail('相同来源已有有效签发版本');
             if(d.type==='PL'){const error=packingBreakdownBlocker(root,s);if(error)fail(error);}

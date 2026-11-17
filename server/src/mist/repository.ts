@@ -65,7 +65,7 @@ import { preparePurchaseDocumentSnapshot } from '../shared/mistPurchaseDocument'
 import { bindDevelopmentNotice, buildDevelopmentNotice, prepareDevelopmentNoticeSnapshot } from './developmentNoticePrint';
 import { bindCustomerStatement, buildCustomerStatement, prepareCustomerStatementSnapshot } from './customerStatementPrint';
 import { bindGeneratedDocument, buildGeneratedDocument, generatedDocumentImages } from './generatedDocumentPrint';
-import { GENERATING_COMMANDS, prepareGeneratedSnapshot } from '../shared/mistDocumentGeneration';
+import { GENERATING_COMMANDS, prepareGeneratedSnapshot, cdDocumentIssueProblem } from '../shared/mistDocumentGeneration';
 import { mistCommandRequiresSignature, normalizeSignatureSvg, signatureEntityId, type MistDecisionSignature } from '../shared/mistSignatures';
 import { prepareSeal, requestsSeal, sealFileIds, SEAL_COMMANDS, SEAL_IMAGE_MIME_TYPES, withoutSeal, type MistSealStamp } from '../shared/mistSeals';
 import type { PdfRenderResult } from '../templates/pdf';
@@ -1025,6 +1025,10 @@ export class MistRepository {
         if (earlyScope && !scopeManagement && scopedReferenceViolation(row.state, earlyScope, input.command?.payload, ['market.quotation.save','order.create','order.governance.saveDraft'].includes(input.command?.type),crossRefs)) fail('NOT_FOUND', '来源记录不存在或不在当前账号的业务范围内', 404);
         if(upload&&input.claimId!==undefined)activeUploadClaim(row.state,input.claimId);
         const context = this.context(actor, input.command?.type?.startsWith('email.') ? undefined : row.state);
+        if(input.command?.type==='fulfillment.documents.issue'){
+          const document=row.state.fulfillment.documents.find(item=>item.id===input.command.payload.id);
+          if(document?.status==='draft'){const problem=cdDocumentIssueProblem(row.state,document);if(problem)fail('PRECONDITION',problem,422);}
+        }
         if (input.command?.type === 'team.weekly.archive') context.teamReportInput = { state: this.accessView(row,actor,scopeOf(row)).state, workspaceId: row.id, companyId: actor.companyId ?? null, permissions: teamReportReadPermissions(actor) };
         // 经 Agent（委托令牌）的写入在业务事件经办人后标注，账号与权限判断不受影响。
         if (isAgentActor(prior)) Object.assign(context, { actorName: `${context.actorName}（经 Agent）`, viaAgent: true, agentSessionId: prior.agentSessionId,...(prior.agentIdentity?{agentIdentity:prior.agentIdentity}:{}),...(prior.agentTaskLease?{agentTaskId:prior.agentTaskLease.taskId,agentTaskSourceRevision:prior.agentTaskSourceRevision}:{}) });

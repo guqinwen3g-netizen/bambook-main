@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { MistPrivateFiles } from './files';
 import { MistRepository } from './repository';
@@ -28,6 +29,50 @@ describe.skipIf(!url)('真实 PostgreSQL：多人同时保存自动重试', () =
   const note = (requestId: string, text = requestId) => ({ requestId, expectedRevision: 0, command: { type: 'notes.add', payload: { text } } });
   const row = (id: string) => prisma.mistWorkspace.findUniqueOrThrow({ where: { id } }) as any;
   const requests = (id: string) => prisma.mistCommandReceipt.count({ where: { workspaceId: id, NOT: { requestId: { startsWith: 'mist-revision:' } } } });
+
+  it.each(['review', 'review-note', 'regenerated', 'unrelated'] as const)('binds CD issue to its reviewed source and original (%s)', async change => {
+    const auth = testAuthority(), permissions = [...new Set(MIST_READ_SECTIONS.flatMap(section => section.permissions)), 'customs:write', 'shipments:write', 'relations:write'];
+    auth.users.get('owner')!.permissions = permissions; auth.users.get('other')!.permissions = permissions;
+    // PDF layout is tested separately; use a deterministic archive to exercise real file writes and PG receipts.
+    const render = async () => { const pdf = Buffer.from('%PDF-1.4\nCD concurrency fixture\n%%EOF'); return { pdf, sha: createHash('sha256').update(pdf).digest('hex'), bytes: pdf.length, generatedAt: new Date().toISOString(), format: 'A4' }; };
+    const actual = new MistRepository(prisma, actualContract, files, auth.authorize, undefined, undefined, render);
+    const created = await actual.create(owner, { name: 'CD source', slug: 'pg-cd-source-' + Math.random().toString(36).slice(2), seed: 'empty' }); ids.push(created.id);
+    const f = shipmentFixture(), branch = f.released(); f.receiveAndComplete(branch.productionId, branch.purchaseId);
+    const shipmentId = f.shipment(branch.productionId), line = f.state.orderLines[0], source = f.state.fulfillment.shipments.find(s => s.id === shipmentId)!.lines[0];
+    f.state.settings.companyProfile = { legalName: '竹语服饰', englishName: 'Bamboo Apparel', address: '杭州', englishAddress: 'Hangzhou', phone: '0571-1', email: 'doc@example.invalid', taxId: 'TAX-1', customsCode: 'CUS-1', bankName: 'Bank', bankAccount: '123', swift: 'SWIFT', defaultCurrency: 'USD' };
+    f.run({ type: 'fulfillment.shipments.pack', payload: { id: shipmentId, lines: [{ lineId: line.id, productionId: source.productionId, carton: 'C1', quantity: 10, netWeight: 5, grossWeight: 6, volume: .5, note: '' }] } });
+    const customsId = f.run({ type: 'fulfillment.customs.save', payload: { shipmentId, status: 'draft', declarationNo: '', broker: '报关行', hsCode: '', origin: '中国', tradeMode: '一般贸易', declaredAt: '', clearedAt: '', evidence: '', fileIds: [], note: '' } }).id!;
+    f.run({ type: 'fulfillment.customs.classify.save', payload: { family: 'garment', hsCode: '6203310000', declaredName: '男式羊毛西服上衣', brandType: '0', preference: '0', elements: ['机织', '西服上衣', '男式', '100%羊毛', '无品牌'], styles: [line.style], legalUnit: '件', secondUnit: '千克' } });
+    f.run({ type: 'fulfillment.customs.items', payload: { id: customsId } });
+    const state = structuredClone(f.state); state.memberIds = ['other'];
+    await prisma.mistWorkspace.update({ where: { id: created.id }, data: { state: JSON.parse(JSON.stringify(state)) } });
+    const generate = { type: 'fulfillment.documents.generate' as const, payload: { shipmentId, type: 'CD' as const } };
+    const printed = await actual.execute(owner, created.id, { requestId: 'cd-original', expectedRevision: 0, command: generate });
+    const cd = printed.workspace.state.fulfillment.documents.find(d => d.type === 'CD')!, customs = printed.workspace.state.fulfillment.customs.find(c => c.id === customsId)!, item = customs.items![0];
+    const issue = { requestId: 'cd-issue-reviewed', expectedRevision: 1, command: { type: 'fulfillment.documents.issue' as const, payload: { id: cd.id } } };
+    const update = change === 'unrelated' ? { type: 'contact.save', payload: { customerId: state.customers[0].id, name: '新联系人', role: '收货', email: '', phone: '' } }
+      : change === 'review-note' ? { type: 'fulfillment.customs.save', payload: { id: customs.id, shipmentId, status: 'draft', declarationNo: customs.declarationNo, broker: customs.broker, hsCode: customs.hsCode, origin: customs.origin, tradeMode: customs.tradeMode, declaredAt: '', clearedAt: '', evidence: '', fileIds: customs.fileIds, note: '审单确认已更新' } }
+      : { type: 'fulfillment.customs.item.adjust', payload: { id: customsId, no: 1, declaredName: '男式机织羊毛西服上衣', elements: item.elements, legalQty: item.legalQty, secondQty: item.secondQty, reason: '据供方及审单原件补明品名' } };
+    await actual.execute(testActor('other'), created.id, { requestId: 'cd-source-change', expectedRevision: 1, command: update } as any);
+    if (change === 'regenerated') await actual.execute(testActor('other'), created.id, { requestId: 'cd-current-original', expectedRevision: 2, command: generate });
+    let before = await row(created.id), receipts = await requests(created.id), disk = await readdir(root, { recursive: true });
+    // Issue commands deliberately do not rebase, including after an unrelated update.
+    // The page may use the new checked revision only after proving its CD source is unchanged.
+    {
+      await expect(actual.execute(owner, created.id, issue)).rejects.toMatchObject({ code: 'REVISION_CONFLICT', status: 409 });
+      expect(await row(created.id)).toEqual(before); expect(await requests(created.id)).toBe(receipts); expect(await readdir(root, { recursive: true })).toEqual(disk);
+    }
+    if (change === 'review') {
+      await expect(actual.execute(owner, created.id, { ...issue, requestId: 'cd-still-stale', expectedRevision: before.revision })).rejects.toMatchObject({ status: 422 });
+      expect(await row(created.id)).toEqual(before); expect(await requests(created.id)).toBe(receipts); expect(await readdir(root, { recursive: true })).toEqual(disk);
+      return;
+    }
+    const checked = { ...issue, requestId: 'cd-issue-rechecked', expectedRevision: before.revision };
+    const issued = await actual.execute(owner, created.id, checked);
+    expect(issued.workspace.state.fulfillment.documents.find(d => d.id === cd.id)!.status).toBe('issued');
+    before = await row(created.id); const replay = await actual.execute(owner, created.id, checked);
+    expect(replay.replayed).toBe(true); expect(replay.receipt).toEqual(issued.receipt); expect(await row(created.id)).toEqual(before); expect(await requests(created.id)).toBe(receipts + 1);
+  });
 
   it('persists acceptance-based confirmation, rejects missing or premature facts without receipts, and replays once',async()=>{
     const auth=testAuthority(),all=[...new Set(MIST_READ_SECTIONS.flatMap(section=>section.permissions)),'invoices:write'];auth.users.get('owner')!.permissions=all;

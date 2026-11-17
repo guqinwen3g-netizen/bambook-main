@@ -2,7 +2,7 @@ import { businessInputInstant } from '../../runtime/businessClock';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import {fulfillmentDocumentFamily} from '../../../../../server/src/shared/mistFulfillment';
 import {BL_KIND_LABEL,DOCUMENT_TYPE_LABEL,DOCUMENT_TYPES,OWN_DOCUMENT_TYPES,PER_ORDER_TYPES,POST_DEPARTURE_TYPES,isOwnDocumentType,type BillOfLadingKind,type OwnDocumentType} from '../../../../../server/src/shared/mistDocumentTypes';
-import {documentGenerationBlocker} from '../../../../../server/src/shared/mistDocumentGeneration';
+import {documentGenerationBlocker,cdDocumentIssueProblem,cdDocumentIssueBasis} from '../../../../../server/src/shared/mistDocumentGeneration';
 import {suggestedReceivableDue,receivableAcceptanceTerms} from '../../../../../server/src/shared/mistTradeTerms';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import { View } from '../../../../../types';
@@ -48,6 +48,7 @@ export function issueBlocker(root: MistState, d: FulfillmentDocument) {
   if (!d.fileIds.length) return OWN(d.type) ? '请先生成或上传正式单据文件' : '请先上传外部机构签发的原件';
   if (root.fulfillment.documents.some(o => o.id !== d.id && family(o) === family(d) && o.status === 'issued')) return '相同来源已有有效版本，请先作废';
   if(d.type==='CI'&&root.orders.find(o=>o.id===d.orderId)?.replacementSource&&!root.fulfillment.customs.some(c=>c.shipmentId===s.id&&c.replacementReviews?.some(r=>r.orderId===d.orderId&&r.unitPrice>0)))return '补发申报货值尚未核定';
+  const cdIssueProblem=cdDocumentIssueProblem(root,d);if(cdIssueProblem)return cdIssueProblem;
   if (d.type === 'PL' && !packingMatched(root, s)) return '装箱分配与计划数量不一致';
   return '';
 }
@@ -62,7 +63,7 @@ function voidBlocker(root: MistState, d: FulfillmentDocument) {
 export function DocumentCenterPage() {
   const attachFiles=useRecordAttachment();
   const presentedError = React.useContext(MistPresentedErrorContext);
-  const { state, run, error, refresh, loading, saving, pending, downloadFile } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
+  const { state, run, error, refresh, loading, saving, pending, downloadFile, workspace } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
   const can = session.hasPermission('customs:write'), canInvoices = session.hasPermission('invoices:read');
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
   const [tab, setTab] = React.useState<Tab>('documents'), [domainChoice, setDomainChoice] = React.useState<Domain | null>(null);
@@ -70,6 +71,7 @@ export function DocumentCenterPage() {
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
   React.useEffect(() => { if (route.id) { setPicked(route.id); setDrawer(true); setDomainChoice(null); setTab('documents'); } }, [route.id]);
   const f = state?.fulfillment, locked = saving || !!pending;
+  const liveCdIssue=React.useRef({state,workspaceId:workspace?.id,revision:workspace?.revision,loading,error});liveCdIssue.current={state,workspaceId:workspace?.id,revision:workspace?.revision,loading,error};
   const shipmentOf = (d: FulfillmentDocument) => f?.shipments.find(s => s.id === d.shipmentId);
   const contextShipment = route.section ? f?.shipments.find(s => s.id === route.section) : undefined;
   const hasContext = !!route.section, invalidContext = hasContext && !!state && !contextShipment;
@@ -146,16 +148,27 @@ export function DocumentCenterPage() {
       submit: v => run({ type: 'fulfillment.documents.bl', payload: { id: d.id, blNo: text(v, 'blNo'), kind: text(v, 'kind') as BillOfLadingKind, originals: text(v, 'kind') === 'original' ? Number(v.originals) : 0, ...(text(v, 'siDocumentId') ? { siDocumentId: text(v, 'siDocumentId') } : {}), ...(text(v, 'confirmDraft').trim() ? { confirmDraft: text(v, 'confirmDraft') } : {}), ...(text(v, 'release').trim() ? { release: text(v, 'release') } : {}) } }) };
   };
   const issueSpec = (d: FulfillmentDocument): ModuleEditorSpec => {
+    const sourceWorkspaceId=workspace?.id,cdSource=d.type==='CD'&&state?cdDocumentIssueBasis(state,d):'';
     const order = state?.orders.find(o => o.id === d.orderId), s = f?.shipments.find(row => row.id === d.shipmentId);
     const amount = d.type === 'CI' && order && s && !order.replacementSource ? s.lines.filter(l => l.orderId === order.id).reduce((n, l) => n + Math.round(l.quantity * (state?.orderLines.find(x => x.id === l.lineId)?.price || 0) * 100), 0) / 100 : null;
     // 指定用印人签发系统生成的单据时可选章盖印；其他人签发不带章，不显示这两项。
     const seals = d.generated?.length ? usableSeals(state, session.user?.id) : [];
     const sealFields: ModuleField[] = seals.length ? [field('sealId', '加盖印章', 'select', false, [{ value: '', label: '不盖章' }, ...seals.map(seal => ({ value: seal.id, label: `${seal.name} · ${SEAL_KIND_LABEL[seal.kind]}` }))]), { ...field('sealReason', '用印事由', 'text', true), when: { key: 'sealId', values: seals.map(seal => seal.id) } }] : [];
     return { title: `签发 ${d.number} · V${d.version}`, submitLabel: '确认签发', ...(amount !== null ? { description: d.receivableDueCondition?`将生成应收 ${order!.currency} ${fmt(amount,2)}，${d.receivableDueCondition.terms}，待财务核对验收资料。`:`将生成应收 ${order!.currency} ${fmt(amount, 2)}，到期 ${d.dueDate}，待财务确认。` } : {}), fields: sealFields, initialValues: seals.length ? { sealId: '', sealReason: '' } : {},
-      submit: v => run({ type: 'fulfillment.documents.issue', payload: { id: d.id, ...(text(v, 'sealId') ? { sealId: text(v, 'sealId'), sealReason: text(v, 'sealReason').trim() } : {}) } } as never) };
+      submit: v => {
+        const command={type:'fulfillment.documents.issue' as const,payload:{id:d.id,...(text(v,'sealId')?{sealId:text(v,'sealId'),sealReason:text(v,'sealReason').trim()}:{})}};
+        if(d.type!=='CD')return run(command);
+        const checked=liveCdIssue.current;
+        if(!checked.state||!checked.workspaceId||checked.loading||checked.error||typeof checked.revision!=='number'||!Number.isSafeInteger(checked.revision)||checked.revision<0)throw new Error('单据资料未读取，请重新打开后核对');
+        const current=checked.state.fulfillment.documents.find(row=>row.id===d.id);
+        if(checked.workspaceId!==sourceWorkspaceId||!current||current.status!=='draft')throw new Error('单据已更新，请重新打开后核对');
+        const problem=cdDocumentIssueProblem(checked.state,current);if(problem)throw new Error(problem);
+        if(cdDocumentIssueBasis(checked.state,current)!==cdSource)throw new Error('报关资料或原件已更新，请重新打开后核对');
+        return run(command,{expectedRevision:checked.revision});
+      } };
   };
   const archiveSpec = (d: FulfillmentDocument): ModuleEditorSpec => ({ title: '归档外部机构原件', submitLabel: '归档原件', description: `${TYPE_LABEL[d.type]} ${d.number} · 以外部机构签发的原件为准。`, fields: [field('issuer', '外部签发机构', 'choice', true, DOCUMENT_ISSUERS), field('at', '实际签发时间', 'datetime-local'), field('evidence', '原件来源依据', 'textarea')], initialValues: { issuer: '', at: localNow(), evidence: '' }, submit: v => run({ type: 'fulfillment.documents.archiveExternal', payload: { id: d.id, issuer: text(v, 'issuer'), at: businessInputInstant(text(v, 'at')), evidence: text(v, 'evidence') } }) });
-  const voidSpec = (d: FulfillmentDocument): ModuleEditorSpec => ({ title: `作废 ${d.number} · V${d.version}`, submitLabel: '确认作废', description: d.invoiceId ? '作废 CI 会同时作废其财务应收，出运回到单证处理中；已对客发送的需重新发送。' : '作废后出运回到单证处理中；原版本保留为历史。', fields: [field('reason', '作废原因', 'textarea')], initialValues: { reason: '' }, submit: v => run({ type: 'fulfillment.documents.void', payload: { id: d.id, reason: text(v, 'reason') } }) });
+  const voidSpec = (d: FulfillmentDocument): ModuleEditorSpec => ({ title: `作废 ${d.number} · V${d.version}`, submitLabel: '确认作废', description: d.invoiceId ? '作废 CI 会同时作废其财务应收，出运回到单证处理中；已对客发送的需重新发送。' : ['CI','PL','BL','CO','OTHER'].includes(d.type)?'作废后出运回到单证处理中；原版本保留为历史。':undefined, fields: [field('reason', '作废原因', 'textarea')], initialValues: { reason: '' }, submit: v => run({ type: 'fulfillment.documents.void', payload: { id: d.id, reason: text(v, 'reason') } }) });
 
   const columns: Column<FulfillmentDocument>[] = [
     { key: 'number', header: '单据', width: 'minmax(170px,1.6fr)', render: d => <div className="mist-col" style={{ gap: 2 }}><Mono>{d.number}</Mono><small className="mist-muted">{d.title}</small></div> },

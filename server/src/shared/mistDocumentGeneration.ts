@@ -228,6 +228,31 @@ export function prepareShipmentDocumentSnapshot(root: MistState, payload: unknow
 /** Plain-text summary stored as the document content (search, review and history), derived from the same snapshot. */
 const contentText = (s: GeneratedDocSnapshot) => [...s.facts.map(f => `${f.label.zh}：${f.value}`), ...(s.table ? s.table.rows.map(r => Object.values(r).filter(v => String(v ?? '').trim()).join(' · ')) : []), ...s.paragraphs.map(p => (p.title ? p.title.zh + '：' : '') + p.text), s.amountInWords || ''].filter(Boolean).join('\n').slice(0, 8000);
 
+
+/** A generated CD must still describe the saved review and current source facts.
+ * Generation identity/date remain frozen; manually supplied originals keep their own review path. */
+export function cdDocumentIssueProblem(root:MistState,document:FulfillmentDocument):string {
+  if(document.type!=='CD')return '';
+  const active=((document as FulfillmentDocument&{generated?:GeneratedDocRecord[]}).generated||[]).filter(record=>document.fileIds.includes(record.fileId));
+  if(!active.length)return '';
+  const shipment=root.fulfillment.shipments.find(row=>row.id===document.shipmentId),blocked=documentGenerationBlocker(root,shipment,'CD');
+  if(blocked)return blocked;
+  const issuer=issuerOf(root.settings.companyProfile);if(!issuer)return '请先补全公司抬头';
+  try{
+    const parts=shipmentDocContent(root,shipment!,'CD',undefined,'');
+    for(const record of active){
+      if(record.kind!=='CD'||record.snapshot?.kind!=='CD')return 'CD原件记录异常，请重新生成CD草稿';
+      const current:GeneratedDocSnapshot={...record.snapshot,number:document.number,issuer,...parts,signatures:[{label:{zh:'授权签字及公司盖章',en:'Authorized signature'},name:issuer.englishName||issuer.legalName}]};
+      if(generatedDocFingerprint(generatedDocContent(current))!==generatedDocFingerprint(generatedDocContent(record.snapshot)))return '报关资料已更新，请重新生成CD草稿';
+    }
+    return '';
+  }catch{return 'CD来源不可用，请重新核对';}
+}
+/** The issue window binds the reviewed record and physical original, not the entire workspace. */
+export function cdDocumentIssueBasis(root:MistState,document:FulfillmentDocument):string {
+  return document.type==='CD'?generatedDocFingerprint({document,customs:root.fulfillment.customs.filter(row=>row.shipmentId===document.shipmentId)}):'';
+}
+
 export function prepareOrderDocumentSnapshot(root: MistState, payload: unknown, ctx: MistContext): GeneratedDocSnapshot {
   exact(payload, ['orderId', 'kind']);
   const p = payload as { orderId: string; kind: 'PI' | 'SC' };

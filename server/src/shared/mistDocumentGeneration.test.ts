@@ -269,6 +269,27 @@ describe('external goods descriptions and customs facts',()=>{
   expect(snapshot.table!.rows[0].qty).toBe('10 件\n\n10 件');expect(renderGeneratedDocumentHtml(snapshot)).toContain('10 件<br><br>10 件');
   expect(snapshot.table!.rows[0]).toMatchObject({price:'10.00',amount:'100.00 USD'});expect(f.state).toEqual(before);
  });
+
+ it('refuses to issue a generated CD whose saved review fields changed after the PDF was frozen',()=>{
+  const {f,shipmentId,id}=customsReady(),printed=generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CD'}});
+  f.run({type:'fulfillment.customs.item.adjust',payload:{id,no:1,declaredName:'男式机织羊毛西服上衣',elements:f.state.fulfillment.customs.find(c=>c.id===id)!.items![0].elements,legalQty:10,secondQty:5,reason:'据供方确认资料及报关行审单意见补明织造口径'}});
+  const before=structuredClone(f.state);
+  expect(()=>f.run({type:'fulfillment.documents.issue',payload:{id:printed.result.id!}})).toThrow('报关资料已更新');
+  expect(f.state).toEqual(before);
+ });
+ it('allows the regenerated current CD and keeps generation date and unprinted bank changes from invalidating it',()=>{
+  const {f,shipmentId,id}=customsReady();const first=generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CD'}});
+  f.run({type:'fulfillment.customs.item.adjust',payload:{id,no:1,declaredName:'男式机织羊毛西服上衣',elements:f.state.fulfillment.customs.find(c=>c.id===id)!.items![0].elements,legalQty:10,secondQty:5,reason:'据本批已核商品事实补充申报品名'}});
+  const current=generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CD'}});expect(current.result.id).toBe(first.result.id);
+  f.state.settings.companyProfile!.bankAccount='unprinted-bank-change';
+  const result=f.run({type:'fulfillment.documents.issue',payload:{id:current.result.id!}},{...f.context,now:'2026-12-02T10:00:00.000Z'});
+  expect(result.id).toBe(current.result.id);expect(f.state.fulfillment.documents.find(d=>d.id===result.id)!.status).toBe('issued');expect(f.state.invoices).toHaveLength(0);
+ });
+ it('preserves the existing issue path for a manually uploaded CD original',()=>{
+  const {f,shipmentId}=customsReady(),printed=generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CD'}}),document=f.state.fulfillment.documents.find(d=>d.id===printed.result.id)!;
+  const file={...f.state.files.find(file=>file.id===printed.fileId)!,id:'manual-cd',name:'broker-reviewed-CD.pdf',storageKey:'manual-cd'};f.state.files.push(file);document.fileIds=[file.id];
+  const result=f.run({type:'fulfillment.documents.issue',payload:{id:document.id}});expect(result.id).toBe(document.id);expect(f.state.fulfillment.documents.find(d=>d.id===result.id)!.status).toBe('issued');
+ });
  it.each(['quantity','price','netWeight','packages'] as const)('CD refuses stale saved declaration items after %s changes',change=>{
   const {f,shipmentId}=customsReady(),shipment=f.state.fulfillment.shipments.find(s=>s.id===shipmentId)!;
   if(change==='quantity')shipment.lines[0].quantity=9;
