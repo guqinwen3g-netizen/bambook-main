@@ -63,9 +63,11 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const [loading, setLoading] = React.useState(true), [error, setError] = React.useState(''), [busy, setBusy] = React.useState(false), [more, setMore] = React.useState<string | undefined>(undefined);
   const live = React.useRef(scope); live.current = scope;
   const version = React.useRef(0), pending = React.useRef<{ fingerprint: string; id: string } | undefined>(undefined);
+  const lastAvailability=React.useRef<{scope:string;available:boolean}|null>(null);
   const load = React.useCallback(async () => {
     const run = ++version.current, bound = scope;
     if (!base || !enabled) { setLoading(false); setAvailable(false); return; }
+    setLoading(true);setError('');
     try {
       const [mine, page, caps] = await Promise.all([
         mistApiRequest(base + '/agent-identities?scope=mine') as Promise<{ items: AgentIdentityView[] }>,
@@ -74,15 +76,15 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       ]);
       if (run !== version.current || live.current !== bound) return;
       const own = mine.items.find(i => i.kind === 'personal') ?? null;
-      setAvailable(caps.platformAvailable === true && own?.state !== 'disabled');
+      const nextAvailable=caps.platformAvailable === true && own?.state !== 'disabled';lastAvailability.current={scope:bound,available:nextAvailable};setAvailable(nextAvailable);
       setTasks(page.items.filter(t => t.executor === 'platform' && (!own || t.identityId === own.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-THREAD_LIMIT)); setMore(page.cursor);
       setError('');
     } catch (e) {
-      // 任务通道读不到时退回只读问答，不把原因当作对话内容。
-      if (run === version.current && live.current === bound) { setAvailable(false); setError(e instanceof Error ? e.message : '读取失败'); }
+      // A failed read cannot establish that the task channel is unavailable, or replace a known conversation mode.
+      if (run === version.current && live.current === bound) { setAvailable(lastAvailability.current?.scope===bound?lastAvailability.current.available:false); setError(e instanceof Error ? e.message : '读取失败'); }
     } finally { if (run === version.current && live.current === bound) setLoading(false); }
   }, [base, enabled, scope]);
-  React.useEffect(() => { setTasks([]); setAvailable(false); setLoading(true); pending.current = undefined; void load(); return () => { version.current++; }; }, [load]);
+  React.useEffect(() => { setTasks([]); setAvailable(false); setLoading(true);lastAvailability.current=null; pending.current = undefined; void load(); return () => { version.current++; }; }, [load]);
   const activeIds = tasks.filter(t => COWORK_ACTIVE.includes(t.state)).map(t => t.id).join(',');
   React.useEffect(() => {
     if (!activeIds || !base || !available) return;
@@ -98,7 +100,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   }, [activeIds, base, available]);
   const post = async (path: string, body: object) => mistApiRequest(base + path, { method: 'POST', body: JSON.stringify(body) }) as Promise<{ item?: AgentTaskView }>;
   const send = async (text: string, history: AgentTaskView[] = [], conversationId?: string): Promise<AgentTaskView | null> => {
-    const message = text.trim(); if (!message || busy || !base) return null;
+    const message = text.trim(); if (!message || busy || !base||loading||error||!available) return null;
     const bound = scope; setBusy(true); setError('');
     try {
       const input = { name: message.slice(0, 60), instructions: composeInstructions(history, message), locale: interfaceLocale(), ...(conversationId ? { conversationId } : {}) };
