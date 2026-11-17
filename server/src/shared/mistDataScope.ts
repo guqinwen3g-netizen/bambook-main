@@ -147,6 +147,16 @@ export function scopedVisibility(state: MistState, scope: MistDataScope, include
   // 客户跟进与对账单：本人跟进的客户，或可见业务所属的客户。
   const customers = new Set(ownedCustomers);
   for (const path of ['crm.opportunities', 'devs', 'market.quotations', 'orders'] as const) for (const row of get(state, path)) if (out.get(path)!.has(row.id) && row.customerId) customers.add(row.customerId);
+  // Customer / relation risks have no orderId. Follow their actual customer business,
+  // not the shared relation directory or a freely assigned risk owner. The writable
+  // projection above excludes upstream read-only business as usual.
+  const knownCustomers = new Set((state.customers ?? []).map(row => row.id));
+  for (const row of p.risks ?? []) {
+    if (row.orderId) continue; // Order-bound risks retain the existing exact order scope.
+    const source = row.source;
+    const customerId = source?.kind === 'customer' ? source.id : source?.kind === 'relation' ? state.market?.relations?.find(relation => relation.id === source.id)?.customerId : undefined;
+    if (customerId && knownCustomers.has(customerId) && customers.has(customerId)) add('platform.risks', row.id);
+  }
   const linkedPath: Record<string, ScopedCollection> = {development:'devs',quotation:'market.quotations',order:'orders',opportunity:'crm.opportunities',invoice:'invoices'};
   for (const row of state.crm?.followUps ?? []) {
     const path = row.link?.kind ? linkedPath[row.link.kind] : undefined;
