@@ -1,3 +1,4 @@
+import {applyMistCommand} from '../shared/mistWorkspace';
 /** Agent 全链路验收：真实 HTTP MCP 客户端 + 真实仓储 + 脚本化模型，覆盖全部工具、对象类型、命令。 */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
@@ -232,6 +233,15 @@ it('reads every one of the object types with records present', async () => {
   void db; const local = (f as any).local; const row = await local.database.mistWorkspace.findUnique({ where: { id } }), state: any = structuredClone(row.state);
   const set = (p: string[], value: unknown) => { let at = state; p.slice(0, -1).forEach(k => { at[k] ??= {}; at = at[k]; }); const last = p.at(-1)!; at[last] = [...(Array.isArray(at[last]) ? at[last] : []), value]; };
   const at = '2026-11-01T00:00:00Z';
+  // Flattened references need a genuine parent/source relation, not a placeholder collection row.
+  const referenceDev = state.devs.find((dev: any) => !dev.closure);
+  expect(referenceDev, 'the acceptance seed has an open development case').toBeDefined();
+  const referenceContext = { id: randomUUID, now: state.settings.businessClock?.at || new Date().toISOString(), actorId: row.ownerId, actorName: '本地负责人' };
+  const specimen = applyMistCommand(state, { type: 'fulfillment.samples.create', payload: { name: '棉样', category: '面料', form: '米样', quantity: 1, unit: '米', location: '样品架', size: '', color: '灰', note: '保留同一实物作手感对照', fileIds: [], source: { kind: 'manual', description: '本地目录留样' } } }, referenceContext);
+  Object.assign(state, specimen.state);
+  const reference = applyMistCommand(state, { type: 'development.reference.add', payload: { devId: referenceDev.id, sampleId: String(specimen.result.id), purpose: '手感与组织结构对照', fileIds: [] } }, referenceContext);
+  Object.assign(state, reference.state);
+  expect(reference.result.referenceId).toBeTruthy();
   for (const t of AGENT_OBJECT_TYPES) { const list = t.path.reduce((v: any, k) => v?.[k], state); if (!t.flatten && !(list?.length) && !['email_draft', 'email_send'].includes(t.type)) set(t.path, { id: 'x-' + t.type, code: 'X-' + t.type, name: t.label, ownerId: 'local-operator', ...(t.type === 'bank_account' ? { accountNo: '6222000012345678' } : {}), createdAt: at, date: '2026-11-01', state: 'open', lines: [], receipts: [], items: [], allocations: [], events: [], files: [], fileIds: [], amount: 100, currency: 'USD' }); }
   state.periodCloses = [{ month: '2026-09', closedAt: at, closedBy: 'x', note: 'ok' }];
   state.market.quotations[0].documents = [{ id: 'qd', quotationId: state.market.quotations[0].id, revision: 1, draft: false, fileId: 'f', fileName: 'q.pdf', sha256: 'h', bytes: 1, templateVersion: 1, snapshotFingerprint: 'fp', snapshot: { secret: 'quote-secret' }, createdAt: at }];
