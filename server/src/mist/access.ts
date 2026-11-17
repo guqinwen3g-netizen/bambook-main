@@ -1,3 +1,4 @@
+import {heldShipmentRelease} from '../shared/mistRelationHold';
 import { projectTeamReports } from './teamReportAccess';
 import {financialMaterialCostBasis,type InternalFabricCostBasis} from '../shared/mistInternalFabric';
 import {financialClaimCostBasis,type OrderClaimCostBasis} from '../shared/mistClaimCost';
@@ -7,7 +8,7 @@ import { hasScope } from '../auth/permissionService';
 import type { PermissionScope } from '../_shared/rolePermissionMatrix';
 import { emailVisibleScope } from '../shared/mistEmail';
 import { applyDataScope, scopedHiddenFiles, scopedMaterialDeliveryFileIds, type MistDataScope } from '../shared/mistDataScope';
-import type { MistCalendarEvent, MistState, MistTask, MistWorkspaceMember, MistWorkspaceMemberLog, MistWorkspaceAccess as SharedAccess } from '../shared/mistWorkspace';
+import type { MistCalendarEvent, MistState, MistShipmentReleaseGate, MistTask, MistWorkspaceMember, MistWorkspaceMemberLog, MistWorkspaceAccess as SharedAccess } from '../shared/mistWorkspace';
 import { MIST_BUSINESS_GROUPS, MIST_BUSINESS_GROUP_LABEL, type MistOwnedObject } from '../shared/mistAccounts';
 import { accountHandovers, type MistAccountHandover } from '../shared/mistHandover';
 import { COMPANY_MAINTAIN_SCOPE, LINE_SUPERVISOR_SCOPE } from './companyLibrary';
@@ -212,6 +213,22 @@ function projectMemberHandovers(next: MistState, actor: TokenPayload) {
   next.tasks = (next.tasks || []).filter(task => task.kind !== 'account-handover' || task.assigneeIds?.includes(actor.userId));
 }
 const canManageMemberHandover = (actor: TokenPayload, ownerId?: string) => hasScope(actor, COMPANY_MAINTAIN_SCOPE as PermissionScope) || !!ownerId && ownerId === actor.userId;
+/** Derive from the full company state before risk masking; expose no risk or credit details. */
+export function projectShipmentReleaseGates(full:MistState,visible:MistState,actor:TokenPayload,workspaceCompanyId?:string|null):Record<string,MistShipmentReleaseGate>|undefined {
+  if(!workspaceCompanyId||actor.companyId!==workspaceCompanyId||!hasScope(actor,'shipments:read'))return undefined;
+  const sourceOrders=new Set((visible.orders||[]).map(row=>row.id)),sourceLines=new Map((visible.orderLines||[]).map(row=>[row.id,row]));
+  const result:Record<string,MistShipmentReleaseGate>={};
+  for(const shipment of visible.fulfillment?.shipments||[]){
+    const original=(full.fulfillment?.shipments||[]).find(row=>row.id===shipment.id);
+    if(!original||original.customerId!==shipment.customerId||shipment.hiddenCount||!shipment.lines.length||original.lines.length!==shipment.lines.length)continue;
+    const complete=original.lines.every(line=>shipment.lines.some(row=>row.orderId===line.orderId&&row.lineId===line.lineId&&row.productionId===line.productionId&&row.quantity===line.quantity)&&sourceOrders.has(line.orderId)&&sourceLines.get(line.lineId)?.orderId===line.orderId);
+    if(!complete)continue;
+    const gate=heldShipmentRelease(full,original.customerId);
+    result[shipment.id]={held:!!gate.held,unusedAuthorized:!!gate.risk};
+  }
+  return Object.keys(result).length?result:undefined;
+}
+
 /** 按账号自身读权限裁剪状态；被隐藏的数据结构用空公司的同名结构替换，保证页面结构完整。 */
 export function projectState(state: MistState, actor: TokenPayload, empty: () => MistState, ownerId?: string, scope?: MistDataScope, privacy?: FilePrivacyContext, reportWorkspaceId?: string): { state: MistState; hidden: Section[];costMaterialBasis?:InternalFabricCostBasis[] | null;costClaimBasis?:OrderClaimCostBasis[]|null } {
   const calendarState = { ...state, calendar: currentCrmCalendar(state) };

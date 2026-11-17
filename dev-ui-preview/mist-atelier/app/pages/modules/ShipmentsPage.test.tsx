@@ -7,7 +7,7 @@ import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentShipment,FulfillmentDocument} from '../../../../../server/src/shared/mistFulfillment';
 import {Nav} from '../../nav';
-const store=vi.hoisted(()=>({state:null as MistState|null,workspace:{id:'w',revision:0},loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
+const store=vi.hoisted(()=>({state:null as MistState|null,workspace:{id:'w',revision:0,shipmentReleaseGates:undefined as Record<string,{held:boolean;unusedAuthorized:boolean}>|undefined},loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
 const session=vi.hoisted(()=>({id:'biz',denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:session.id,displayName:'经办人'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
@@ -28,7 +28,7 @@ const shipment=(id:string,patch:Partial<FulfillmentShipment>={}):FulfillmentShip
 const doc=(id:string,shipmentId:string,type:FulfillmentDocument['type'],status:FulfillmentDocument['status']='issued'):FulfillmentDocument=>({id,shipmentId,orderId:type==='CI'?'o':'',type,number:type+'-'+id,version:1,title:type,dueDate:'',content:'',fileIds:[],status,createdAt:'2026-10-10T08:00:00Z',actor:'后勤'});
 const pack=(shipmentId:string,quantity:number)=>({id:shipmentId+quantity,shipmentId,lineId:'l',productionId:'p',carton:'1',quantity,netWeight:9,grossWeight:10,volume:0.1,note:''});
 const customs=(shipmentId:string,status:'draft'|'submitted'|'cleared')=>({id:'cus-'+shipmentId,shipmentId,code:'CUS-'+shipmentId,status,declarationNo:'D1',broker:'报关行',hsCode:'6202',origin:'CN',tradeMode:'一般贸易',declaredAt:'2026-10-13',clearedAt:'',evidence:'',fileIds:[],note:''});
-beforeEach(()=>{store.workspace.revision=0;presentedError=undefined;store.error='';session.id='biz';session.denied=new Set();const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');
+beforeEach(()=>{store.workspace.revision=0;store.workspace.shipmentReleaseGates=undefined;presentedError=undefined;store.error='';session.id='biz';session.denied=new Set();const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');
   s.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',customer:'Cedar',currency:'USD',amount:100,governance:{contract:{preShipmentPercent:0}}} as any);s.orderLines.push({id:'l',orderId:'o',name:'大衣',style:'COAT-1',img:'coat',qty:10,unit:'件',price:10,made:10,qc:10});
   store.state=s;store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();store.loading=false;});
@@ -512,4 +512,19 @@ it('keeps an unread packing source from submitting while retaining entered weigh
  await packingEditorDraft();store.state=null;render('packing-source');await click(getByRole(host,'button',{name:'保存装箱分配'}));
  expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('装箱资料未读取，请重新打开后核对');
  expect((getByRole(host,'spinbutton',{name:'毛重'}) as HTMLInputElement).value).toBe('11');
+});
+
+it.each([true,false])('lets the logistics reader consume only current release metadata (authorized %s)',authorized=>{
+ session.denied.add('risk:read');session.denied.add('orders:write');session.id='warehouse';const f=store.state!.fulfillment;
+ f.shipments.push(shipment('s',{state:'ready',booking:'BK',documentsSentAt:'2026-10-12T08:00:00Z'}));f.customs.push(customs('s','cleared'));
+ store.state!.market.relations=[{id:'relation',customerId:'c',supplierId:'',name:'Cedar',hold:{at:'2026-10-12T08:00:00Z',actor:'财务',reason:'经营复核'}}]as any;store.state!.platform.risks=[];
+ store.workspace.shipmentReleaseGates={s:{held:true,unusedAuthorized:authorized}};render('s');
+ const detail=host.querySelector('[data-shipment-detail="s"]') as HTMLElement;expect((getByRole(detail,'button',{name:'登记实际离港'})as HTMLButtonElement).disabled).toBe(!authorized);expect(store.state!.platform.risks).toEqual([]);expect(store.run).not.toHaveBeenCalled();
+});
+it('keeps export clearance blocking even with an unused credit release',()=>{
+ const f=store.state!.fulfillment;f.shipments.push(shipment('s',{state:'ready',documentsSentAt:'2026-10-12T08:00:00Z'}));f.customs.push(customs('s','submitted'));store.workspace.shipmentReleaseGates={s:{held:true,unusedAuthorized:true}};render('s');const detail=host.querySelector('[data-shipment-detail="s"]')as HTMLElement;expect((getByRole(detail,'button',{name:'登记实际离港'})as HTMLButtonElement).disabled).toBe(true);expect(detail.textContent).toContain('出口清关尚未完成');
+});
+
+it('keeps customer document dispatch blocking even with an unused credit release',()=>{
+ const f=store.state!.fulfillment;f.shipments.push(shipment('s',{state:'ready'}));f.customs.push(customs('s','cleared'));store.workspace.shipmentReleaseGates={s:{held:true,unusedAuthorized:true}};render('s');const detail=host.querySelector('[data-shipment-detail="s"]')as HTMLElement;expect((getByRole(detail,'button',{name:'登记实际离港'})as HTMLButtonElement).disabled).toBe(true);expect(detail.textContent).toContain('等待业务登记对客发送 CI / PL');
 });

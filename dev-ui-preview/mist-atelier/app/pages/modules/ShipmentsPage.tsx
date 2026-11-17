@@ -11,7 +11,7 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import React from 'react';
 import { Anchor, Boxes, CheckCircle2, Download, FileText, Pencil, Plane, Plus, ScrollText, SearchX, Send, Ship, X } from 'lucide-react';
 import { useToast, FormFooter, BackLink, Banner, Button, Card, CardHeader, Checklist, DataTable, Dropdown, EmptyState, Facts, Field, FormGrid, FormSection, KeyValue, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Select, TextArea, TextInput, TextLink, Timeline, Toolbar, VerticalSteps, type Column, type Tone } from '../../../../../components/mist';
-import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
+import type { MistState, MistShipmentReleaseGate } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentShipment } from '../../../../../server/src/shared/mistFulfillment';
 import {stableJson} from '../../../../../server/src/shared/stableJson';
 import { fulfillmentSourceLabel, shipmentCancelBlockers, shipmentHandoverBlocker, stockIssueRemaining } from '../../../../../server/src/shared/mistFulfillment';
@@ -313,7 +313,7 @@ export function ShipmentsPage() {
     ? <EmptyState icon={SearchX} title={uiText("没有符合条件的出运")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setStageFilter('all'); setFlagFilter('all'); }}>{uiText("清除筛选")}</Button>} />
     : <EmptyState icon={Ship} title={uiText(invalidSource ? '来源不匹配' : sourceOrder ? '本订单还没有出运' : `还没有${domain === 'fabric' ? '面料' : '成衣'}出运`)} description={invalidSource ? uiText('请返回来源订单重新进入。') : undefined} action={canCreate && !invalidSource ? <Button icon={Plus} onClick={() => setEditing('new')}>{uiText("新建出运")}</Button> : undefined} />;
   const detail = selected && state
-    ? <ShipmentDetail shipment={selected} state={state} day={day} me={me} business={business} logistics={logistics} inventory={session.hasPermission('inventory:read')} locked={locked} canReviewOrders={session.hasPermission('orders:approve:cancel')}
+    ? <ShipmentDetail shipment={selected} releaseGate={workspace?.shipmentReleaseGates?.[selected.id]} state={state} day={day} me={me} business={business} logistics={logistics} inventory={session.hasPermission('inventory:read')} locked={locked} canReviewOrders={session.hasPermission('orders:approve:cancel')}
         onEdit={() => setEditing(selected)} onPack={() => setPacking(selected)} onTransport={() => setDialog(transportSpec(selected))}
         onReady={() => void act(() => run({ type: 'fulfillment.shipments.ready', payload: { id: selected.id } }), '单证准备已完成，已交回业务发送')}
         onArrive={() => setDialog(arriveSpec(selected))} onDeliver={() => setDialog(deliverSpec(selected))}
@@ -364,8 +364,8 @@ export function ShipmentsPage() {
   </MistPage>;
 }
 
-function ShipmentDetail({ shipment: s, state, day, me, business, logistics, inventory, locked, canReviewOrders = false, onEdit, onPack, onTransport, onReady, onSent, onDepart, onCancel, onCustoms, onDocuments, onSamples, onArrive, onDeliver }: {
-  shipment: FulfillmentShipment; state: MistState; day: string; me: string; business: boolean; logistics: boolean; inventory: boolean; locked: boolean; canReviewOrders?: boolean;
+function ShipmentDetail({ shipment: s, releaseGate, state, day, me, business, logistics, inventory, locked, canReviewOrders = false, onEdit, onPack, onTransport, onReady, onSent, onDepart, onCancel, onCustoms, onDocuments, onSamples, onArrive, onDeliver }: {
+  shipment: FulfillmentShipment; releaseGate?:MistShipmentReleaseGate; state: MistState; day: string; me: string; business: boolean; logistics: boolean; inventory: boolean; locked: boolean; canReviewOrders?: boolean;
   onEdit: () => void; onPack: () => void; onTransport: () => void; onReady: () => void; onSent: () => void; onDepart: () => void; onCancel: () => void; onCustoms: () => void; onDocuments: () => void; onSamples: () => void; onArrive: () => void; onDeliver: () => void;
 }) {
   if (s.hiddenCount) return <DetailBody data-shipment-detail={s.id} heading={<div><span className="mist-mono mist-muted">{s.code}</span><div className="mist-h2">{s.customer}</div></div>}>
@@ -395,7 +395,7 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, inve
   const packReason = logisticsReason || (issuedCiPl&&!supplement ? '已有有效 CI 或装箱单，请先在单据中心作废原件' : customsFiled ? '已有实际申报或清关记录，请先完成外部更正' : false);
   const hold = heldShipmentRelease(state as any, s.customerId);
   const paymentBlocker = [...new Set(s.lines.map(line=>line.orderId))].map(orderId=>orderShipmentPaymentBlocker(state,orderId)).find(Boolean);
-  const departReason = logisticsReason || packingClientBlocker(state,s) || paymentBlocker || (!s.documentsSentAt ? '等待业务登记对客发送 CI / PL' : !cleared ? '出口清关尚未完成' : shipmentHandoverBlocker(state, s) || (hold.held && !hold.risk ? '客户往来已冻结：须先经部门主管批准带风险放行' : false));
+  const departReason = logisticsReason || packingClientBlocker(state,s) || paymentBlocker || (!s.documentsSentAt ? '等待业务登记对客发送 CI / PL' : !cleared ? '出口清关尚未完成' : shipmentHandoverBlocker(state, s) || ((releaseGate?.held??!!hold.held) && !(releaseGate?.unusedAuthorized??!!hold.risk) ? '客户往来已冻结：须先经部门主管批准带风险放行' : false));
   const track = [
     { label: '业务发起', done: true, note: `${s.requestedBy} · ${shortWhen(s.createdAt)}` },
     { label: '逐条目装箱核实', done: matched, note: packingRows.length ? `${cartons} ${s.domain === 'fabric' ? '件' : '箱'} · ${detailIssue ? '明细待核对' : matched ? '与计划一致' : '与计划不符'}` : '未装箱', noteTone: packingRows.length && !matched ? 'bad' as const : undefined },
