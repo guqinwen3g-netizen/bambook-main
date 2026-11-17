@@ -1023,7 +1023,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "payload": "SampleInput",
   "types": {
    "SampleInput": "Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'source' | 'fileIds' | 'note' | 'role' | 'shipmentId' | 'sizeQuantities'>",
-   "FulfillmentSample": "{ id: string; code: string; name: string; category: string; form: string; unit: string; quantity: number; available: number; location: string; positions?: FulfillmentPosition[]; size: string; sizeQuantities?:FulfillmentSizeQuantity[]; color: string; source: FulfillmentSource; sourceSampleCode?: string; materialPlan?: string; role?: FulfillmentSampleRole; shipmentId?: string; qualityRevision?: number; fileIds: string[]; note: string; createdAt: string; }"
+   "FulfillmentSample": "{ id: string; code: string; name: string; category: string; form: string; unit: string; quantity: number; available: number; location: string; positions?: FulfillmentPosition[]; size: string; sizeQuantities?:FulfillmentSizeQuantity[]; color: string; source: FulfillmentSource; registeredById?: string; sourceSampleCode?: string; materialPlan?: string; role?: FulfillmentSampleRole; shipmentId?: string; qualityRevision?: number; fileIds: string[]; note: string; createdAt: string; }"
   },
   "source": "server/src/shared/mistFulfillment.ts"
  },
