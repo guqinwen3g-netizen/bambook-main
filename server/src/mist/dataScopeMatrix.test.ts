@@ -63,6 +63,32 @@ describe('development invoices follow the exact development scope', () => {
     expect(db.receipts.size).toBe(count);
   });
 });
+it('lets the customer owner collect their standalone opening balance without extending finance authority or ordinary invoice scope', async () => {
+  const stored = db.workspaces.get(workspaceId)!;
+  const run = (user: string, command: any) => repo.execute(actor(user), workspaceId, {
+    requestId: randomUUID(), expectedRevision: stored.revision, command,
+  });
+  const state = stored.state;
+  const rows = ['customer-0', 'customer-1', 'customer-2'].map((customerId, i) => ({
+    customer:state.customers.find((c:any)=>c.id===customerId).code,reference:'OPEN-'+i,issuedAt:'2026-08-01',due:'2026-09-01',currency:'USD',amount:'25',
+  }));
+  await run('finance', {type:'opening.receivable.import',payload:{rows}});
+  const imported = db.workspaces.get(workspaceId)!.state.invoices;
+  const mine = imported.find((i:any)=>i.code==='OPEN-0'), other=imported.find((i:any)=>i.code==='OPEN-1');
+  const visible = (await repo.get(actor('demo-sales'),workspaceId)).state.invoices;
+  expect(visible.find(i=>i.id===mine.id)).toMatchObject({customerId:'customer-0',orderId:'',open:25});
+  expect(visible.some(i=>i.id===other.id)).toBe(false);
+  expect((await repo.get(actor('loner'),workspaceId)).state.invoices.some(i=>i.id===mine.id)).toBe(false);
+  const sharedOnly=(await repo.get(actor('teammate'),workspaceId)).state;
+  expect(sharedOnly.orders.some(o=>o.customerId==='customer-2')).toBe(true);
+  expect(sharedOnly.invoices.some(i=>i.code==='OPEN-2')).toBe(false);
+  const before = db.workspaces.get(workspaceId)!.revision;
+  const ownInvoiceOwner=actor('demo-sales');
+  await expect(repo.execute(ownInvoiceOwner,workspaceId,{requestId:randomUUID(),expectedRevision:db.workspaces.get(workspaceId)!.revision,command:{type:'opening.receivable.void',payload:{invoiceId:mine.id,reason:'财务作废'}}})).rejects.toMatchObject({status:403});
+  expect(db.workspaces.get(workspaceId)!.revision).toBe(before);
+  const follow=await repo.execute(ownInvoiceOwner,workspaceId,{requestId:randomUUID(),expectedRevision:db.workspaces.get(workspaceId)!.revision,command:{type:'crm.followUp.save',payload:{customerId:'customer-0',method:'call',at:'2026-10-13T00:00:00Z',content:'核对期初未收',link:{kind:'invoice',id:mine.id},collection:{level:2}}}});
+  expect(follow.workspace.state.crm.followUps.find(f=>f.id===follow.receipt.result.id)?.link).toEqual({kind:'invoice',id:mine.id});
+});
 it('keeps sample fee issuance in the business scope and posting in finance', async () => {
   const state = db.workspaces.get(workspaceId)!.state;
   const request = { id: 'paid-sample', code: 'SR-1', state: 'sent', requesterId: 'demo-sales', customerId: 'customer-0', customer: 'Customer', fee: { amount: 12, currency: 'USD' }, shipments: [] };
