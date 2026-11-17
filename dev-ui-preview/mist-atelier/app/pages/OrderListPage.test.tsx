@@ -79,6 +79,9 @@ it.each([true,false])('does not present an unread order workspace as an empty bu
  store.state=null;store.loading=loading;store.error=loading?'':'读取失败';render(<OrderListPage/>);
  expect(host.textContent).toContain(loading?'正在读取订单资料':'订单资料未读取');expect(host.textContent).not.toContain('暂无在途条目');expect(host.textContent).not.toContain('暂无逾期');expect(queryByRole(host,'table',{name:'订单'})).toBeNull();for(const b of getAllByRole(host,'button',{name:'新建订单',exact:true}))expect((b as HTMLButtonElement).disabled).toBe(true);expect(store.run).not.toHaveBeenCalled();
 });
+it('does not offer order creation in a real empty list to a read-only role',()=>{
+ store.canWrite=false;store.state!.orders=[];render(<OrderListPage/>);expect(host.textContent).toContain('还没有成衣订单');expect(queryByRole(host,'button',{name:'新建订单',exact:true})).toBeNull();expect(store.run).not.toHaveBeenCalled();
+});
 
 it('finishes internal order stages without a shipment reminder or counting completed goods as in transit',()=>{
   const f=internalDeliveryFixture(),id=f.send();
