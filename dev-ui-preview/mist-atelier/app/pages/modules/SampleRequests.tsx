@@ -45,7 +45,7 @@ export function SampleRequests() {
       const id = String(saved.result.id || ''); if (id) go('samples', id, { section: 'requests' }); } });
   const fulfillSpec = (r: MistSampleRequest, s: MistState): ModuleEditorSpec => {
     const left = Math.max(0, Math.round((r.quantity - sampleRequestSent(r)) * 10000) / 10000);
-    const samples = s.fulfillment.samples.filter(x => x.unit === r.unit && x.available > 0), positions = new Map(samples.map(sample => [sample.id, fulfillmentPositions(sample).filter(position => position.available > 0)]));
+    const samples = s.fulfillment.samples.filter(x => x.source.kind!=='developmentIncoming'&&x.unit === r.unit && x.available > 0), positions = new Map(samples.map(sample => [sample.id, fulfillmentPositions(sample).filter(position => position.available > 0)]));
     const positionKey = (sampleId: string) => 'position:' + sampleId;
     const options = samples.map(x => ({ value: x.id, label: `${x.code} · ${x.name}${x.color ? ' · ' + x.color : ''} · 可用 ${x.available} ${x.unit}${fulfillmentPositions(x).length > 1 ? ' · 多个位置' : ''}` }));
     // Position indices are form-local, so a real empty location remains selectable.

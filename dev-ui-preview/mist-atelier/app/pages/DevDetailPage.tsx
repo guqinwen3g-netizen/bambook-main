@@ -1,4 +1,5 @@
 import { businessInputInstant, businessInputValue } from '../runtime/businessClock';
+import {DevIncomingSamplesCard} from './DevIncomingSamples';
 import {developmentReopenSource} from '../../../../server/src/shared/mistDevelopmentLifecycle';
 import {useOptionalMistSession} from '../runtime/auth';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
@@ -74,6 +75,7 @@ export function DevDetailPage(){
   const fabricDomain=!!dev&&developmentDomain(dev.values)==='fabric';
   const [versionId,setVersionId]=React.useState(route.versionId||''),[form,setForm]=React.useState<Form>(()=>emptyForm()),[dialog,setDialog]=React.useState<'confirm'|'actions'|'revise'|'minor'|'archive'|'sample'|'qc'|'edit'|'round'|'qcDecide'|'close'|'reopen'|'product'|null>(null),[busy,setBusy]=React.useState(false),[failure,setFailure]=React.useState('');
   const [reopenForm,setReopenForm]=React.useState<{devId:string;closureId:string;expectedVersionId:string|null;expectedRevision:number;reason:string}|null>(null);
+  const [incomingEditing,setIncomingEditing]=React.useState(false);
   const reopenSource=state&&dev?developmentReopenSource(state,dev):null,canReopen=qcSession?.hasPermission('products:write')===true;
   const reopenChanged=!!reopenForm&&(reopenForm.devId!==dev?.id||reopenForm.closureId!==reopenSource?.closureId||reopenForm.expectedVersionId!==reopenSource?.expectedVersionId);
   const openReopen=()=>{if(!dev||!reopenSource||!canReopen||!Number.isSafeInteger(workspace?.revision))return;setReopenForm({devId:dev.id,closureId:reopenSource.closureId,expectedVersionId:reopenSource.expectedVersionId,expectedRevision:workspace!.revision,reason:''});setFailure('');setDialog('reopen');};
@@ -239,8 +241,8 @@ export function DevDetailPage(){
     <BackLink onClick={backToSource}>{uiText(route.customerId?'返回客户档案':'开发与寻样')}</BackLink>
     <IdentityHeader thumb={<Thumb src={picture} icon={fabricDomain?Layers:Shirt} size="lg" />} meta={[developmentInitiator(dev.values)==='internal'?developmentInitiatorLabel(dev.values):dev.customer,<Mono key="code">{dev.code}</Mono>,<Mono key="style">{dev.style}</Mono>]} title={uiText(dev.name)} facts={[{label:'负责人',value:<><Avatar name={dev.owner} identityKey={dev.ownerId} size="xs" />{dev.owner}</>},{label:'目标日期',value:dev.due},{label:'发起方',value:developmentInitiatorLabel(dev.values)},{label:'费用',value:developmentCharged(dev.values)?'收费':'不收费'},{label:'状态',value:<Pill tone={dev.tone}>{dev.state}</Pill>}]} actions={<IconButton icon={Ellipsis} label={uiText("更多")} onClick={()=>setDialog('actions')} />} />
     <Stepper steps={STAGES.map((label,index)=>({label,state:steps[index]}))} onSelect={index=>document.getElementById(['mist-dev-goal','mist-dev-sample','mist-dev-qc','mist-dev-confirmation','mist-dev-archive'][index])?.scrollIntoView({behavior:'smooth',block:'start'})} />
-    {(failure||error)&&dialog!=='reopen'&&<FailureNotice title={"操作未完成"} detail={failure||error} />}
-    {pending&&!saving&&<div className="mist-section"><Banner tone="warn" title={uiText("原操作结果尚待核对")} actions={recovery}>{uiText("已保留原请求，核对前请勿重复提交。")}</Banner></div>}
+    {(failure||error)&&dialog!=='reopen'&&!incomingEditing&&<FailureNotice title={"操作未完成"} detail={failure||error} />}
+    {pending&&!saving&&!incomingEditing&&<div className="mist-section"><Banner tone="warn" title={uiText("原操作结果尚待核对")} actions={recovery}>{uiText("已保留原请求，核对前请勿重复提交。")}</Banner></div>}
     {state&&compareOpen&&compareIds.length>=2&&<div className="mist-section"><DevCompareCard state={state} dev={dev} versionIds={compareIds} currentId={version?.id} onOpen={id=>{chooseVersion(id);reveal('mist-dev-version',true);}} onClose={()=>setCompareOpen(false)}/></div>}
     <div className="mist-detail">
       <div>
@@ -254,6 +256,7 @@ export function DevDetailPage(){
           {version?.minor&&<div className="mist-section" data-minor={version.label}><Banner variant="status" tone="neutral" title={ui`小版本 · 沿用 ${parentVersion?.label||'大版本'} 实物与 QC 结论`}>{uiText("本次调整：")}{version.minor.change}{uiText("。需求方确认须对 ")}{uiText(version.label)}{uiText(" 单独记录，不继承 ")}{parentVersion?.label||'大版本'}{uiText(" 的确认。")}</Banner></div>}
           {!!childMinors.length&&<p className="mist-note" style={{padding:'0 22px 12px'}}>{uiText("本版小调整：")}{childMinors.map(item=>`${item.label}（${item.minor!.change}）`).join('；')}</p>}
         </Card>
+        {state&&<DevIncomingSamplesCard state={state} dev={dev} access={workspace?.developmentIncomingAccess} disabled={busy} onEditingChange={setIncomingEditing}/>}
         {state&&<DevRoundsCard state={state} dev={dev} versionId={version?.id} busy={busy} onSelect={id=>{chooseVersion(id);reveal('mist-dev-version');}} compareIds={compareIds} onToggleCompare={(id,checked)=>updateCompare(checked?[...compareIds.filter(item=>item!==id),id]:compareIds.filter(item=>item!==id))} onCompare={()=>{setCompareOpen(true);reveal('mist-dev-compare',true);}} onClearCompare={()=>updateCompare([])} onCreate={()=>{setFailure('');setRoundInitial(undefined);setDialog('round');}} onEditRequirements={round=>{setFailure('');setRoundEdit(round);}} onSync={target=>void syncRoundTask(target)}/>}
         {fabricDomain&&<Card><CardHeader title={uiText("面料开发目标规格")} sub={uiText("目标要求，不代表工厂分析或 QC 实测")}/><KeyValue items={[{label:'分类',value:dev.values.category||'待核实'},{label:'本版工厂要求',value:version?.note||'待记录'},{label:'目标成分',value:fabricRequirements?.composition||'待工厂分析'},{label:'克重原值',value:`${fabricRequirements?.weightValue||'待分析'} ${fabricRequirements?.weightUnit||''}`},{label:'幅宽原值',value:`${fabricRequirements?.widthValue||'待分析'} ${fabricRequirements?.widthUnit||''}`},{label:'纱支 / 组织',value:`${fabricRequirements?.yarn||'待分析'} / ${fabricRequirements?.weave||'待分析'}`},{label:'用途 / 手感',value:`${fabricRequirements?.usage||'—'} / ${fabricRequirements?.handle||'—'}`},{label:'后整理 / 性能',value:`${fabricRequirements?.finish||'—'} / ${fabricRequirements?.performance||'—'}`}]}/></Card>}
         <Card id="mist-dev-goal"><CardHeader title={uiText("开发目标")} /><p className="mist-sub" style={{padding:'10px 22px 20px',fontSize:13.5}}>{dev.goal||'尚未填写开发目标'}</p></Card>

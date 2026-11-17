@@ -7,6 +7,8 @@ import {platformBusinessDate} from './mistPlatform';
 import {notifyMist,notificationOwners} from './mistNotifications';
 
 export type IncomingPostage={amount:number;currency:string;zeroReason:string};
+/** Response-only; describes the current projection, never accepted as command authority. */
+export type DevelopmentIncomingAccess={readableDevIds:string[];writableDevIds:string[]};
 export type DevelopmentIncomingCommand=
  |{type:'development.incoming.receive';payload:{devId:string;receivedAt:string;name:string;form:string;quantity:number;unit:string;size:string;color:string;location:string;contact:string;fileIds:string[];note:string}}
  |{type:'development.incoming.dispatch';payload:{devId:string;taskVersionId:string;items:Array<{sampleId:string;quantity:number;sourceLocation:string}>;sentAt:string;returnExpected:boolean;expectedReturn?:string;delivery:IncomingDelivery;postage:IncomingPostage;note:string}}
@@ -25,7 +27,7 @@ function postage(value:IncomingPostage):IncomingPostage{
  const currency=text(value.currency,'币种',true,3).toUpperCase();if(!/^[A-Z]{3}$/.test(currency))return fail('币种须为三位字母');
  return{amount:value.amount,currency,zeroReason:value.amount===0?text(value.zeroReason,'零支出原因',true,500):text(value.zeroReason||'','费用说明',false,500)};
 }
-function items<T>(value:T[],key:(row:T)=>string):T[]{if(!Array.isArray(value)||!value.length||value.length>50)return fail('每次请选择1至50条准确实物');const keys=value.map(key);if(new Set(keys).size!==keys.length)return fail('同一实物位置不能重复选择');return value;}
+function items<T>(value:T[],key:(row:T)=>string):T[]{if(!Array.isArray(value)||!value.length||value.length>50)return fail('每次请选择1至50条准确实物');if(value.some(item=>!item||typeof item!=='object'||Array.isArray(item)))return fail('实物明细格式无效');const keys=value.map(key);if(new Set(keys).size!==keys.length)return fail('同一实物位置不能重复选择');return value;}
 function event(state:MistState,ctx:MistContext,devId:string,message:string,section='incoming'){
  state.events.unshift({id:ctx.id(),entityType:'development',entityId:devId,actor:ctx.actorName,at:ctx.auditNow??ctx.now,text:message,fileIds:[]});
  notifyMist(state,ctx,{title:message,detail:ctx.actorName,target:{view:'development/detail',id:devId,section},category:'general'},notificationOwners(state,'development',devId));
@@ -58,8 +60,8 @@ export function applyDevelopmentIncomingCommand(state:MistState,command:Developm
   const expectedReturn=p.returnExpected&&p.expectedReturn?text(p.expectedReturn,'预计归还日',true,10):'';if(expectedReturn&&(!isCalendarDay(expectedReturn)||expectedReturn<day))return fail('预计归还日不得早于寄送日');
   const dispatchId=ctx.id(),movementIds:string[]=[];
   for(const item of items(p.items,item=>JSON.stringify([item.sampleId,item.sourceLocation]))){
-   const sample=developmentIncomingSamples(state,dev.id).find(sample=>sample.id===item.sampleId);if(!sample)return fail('寄送必须选择本案准确来样');if(sample.incoming!.receivedAt>day)return fail('寄送日不得早于实际收样日');
-   const q=quantity(item.quantity);const result=applyFulfillmentCommand(state,{type:'fulfillment.samples.move',payload:{id:sample.id,kind:p.returnExpected?'lend':'send',quantity:q,person:ship.recipient,location:ship.address,sourceLocation:item.sourceLocation,note:`来样寄厂 · ${version.label}${p.note?' · '+text(p.note,'寄送说明',false):''}`,...(expectedReturn?{expectedReturn}:{}),...(!p.returnExpected?{sendPurpose:'other'}:{})}},ctx,{externalBorrower:true,loanStartedOn:day});
+   const sample=developmentIncomingSamples(state,dev.id).find(sample=>sample.id===item.sampleId);if(!sample)return fail('寄送必须选择本案准确来样');if(!sample.incoming)return fail('来样收样资料无法核对');if(sample.incoming.receivedAt>day)return fail('寄送日不得早于实际收样日');
+   const q=quantity(item.quantity);const result=applyFulfillmentCommand(state,{type:'fulfillment.samples.move',payload:{id:sample.id,kind:p.returnExpected?'lend':'send',quantity:q,person:ship.recipient,location:ship.address,sourceLocation:item.sourceLocation,note:`来样寄厂 · ${version.label}${p.note?' · '+text(p.note,'寄送说明',false):''}`,...(expectedReturn?{expectedReturn}:{}),...(!p.returnExpected?{sendPurpose:'other'}:{})}},ctx,{externalBorrower:true,loanStartedOn:day,developmentIncomingCustody:true});
    const movement=state.fulfillment.sampleMovements.find(move=>move.id===result.id)!;movement.carrier=ship.carrier;movement.trackingNo=ship.trackingNo;movement.destination=ship.address;
    movement.incomingTransfer={dispatchId,devId:dev.id,taskVersionId:version.id,supplierId:supplier.id,supplierName:supplier.name,returnExpected:p.returnExpected,direction:'out',occurredAt:day,delivery:ship};movementIds.push(movement.id);
   }
@@ -71,7 +73,7 @@ export function applyDevelopmentIncomingCommand(state:MistState,command:Developm
  for(const item of items(pReturn.items,item=>JSON.stringify([item.loanId,item.location]))){
   const loan=state.fulfillment.sampleMovements.find(move=>move.id===item.loanId&&move.kind==='lend'),out=loan?.incomingTransfer;if(!loan||!out||out.direction!=='out'||out.devId!==dev.id||out.dispatchId!==pReturn.dispatchId)return fail('退回须引用本案同票原借出流水');if(day<out.occurredAt)return fail('退回日不得早于寄送日');
   const sample=developmentIncomingSamples(state,dev.id).find(sample=>sample.id===loan.sampleId);if(!sample)return fail('原借出来样不存在');
-  const result=applyFulfillmentCommand(state,{type:'fulfillment.samples.move',payload:{id:sample.id,kind:'return',loanId:loan.id,quantity:quantity(item.quantity),person:ctx.actorName,location:text(item.location,'归还位置',false,200),note:text(pReturn.note||'','退回说明',false)}},ctx);
+  const result=applyFulfillmentCommand(state,{type:'fulfillment.samples.move',payload:{id:sample.id,kind:'return',loanId:loan.id,quantity:quantity(item.quantity),person:ctx.actorName,location:text(item.location,'归还位置',false,200),note:text(pReturn.note||'','退回说明',false)}},ctx,{developmentIncomingCustody:true});
   const move=state.fulfillment.sampleMovements.find(move=>move.id===result.id)!;move.carrier=ship.carrier;move.trackingNo=ship.trackingNo;move.destination=ship.address;move.incomingTransfer={dispatchId:out.dispatchId,devId:dev.id,taskVersionId:out.taskVersionId,supplierId:out.supplierId,supplierName:out.supplierName,returnExpected:true,direction:'return',occurredAt:day,delivery:ship,returnBatchId};movementIds.push(move.id);
  }
  dev.updatedAt=ctx.now;event(state,ctx,dev.id,'原样退回 '+ship.recipient,'incoming-dispatch:'+pReturn.dispatchId);return{devId:dev.id,id:returnBatchId,returnBatchId,movementIds};

@@ -44,3 +44,9 @@ it('cannot relabel an incoming original as a warehouse-manual create or a formal
 it('can send an original for an active factory rework without turning the rejected report into a pass',()=>{
  const f=fixture(),r=f.receive(),version=f.versions()[0];version.qc={result:'reject',reviewer:'QC',reviewedAt:f.ctx.now,report:'OLD-REJECT',opinion:'待整改'};version.qcDecision={kind:'rework',note:'按原件核对',decidedAt:f.ctx.now,decidedBy:'业务员'};const before=structuredClone(f.state.versions);f.dispatch(r.sampleIds[0]);expect(f.state.versions).toEqual(before);expect(f.state.fulfillment.qcTasks).toEqual([]);
 });
+it('does not bypass the exact factory, delivery and postage contract through generic warehouse custody commands',()=>{
+ const f=fixture(),r=f.receive(),id=r.sampleIds[0],before=structuredClone(f.state);
+ for(const kind of ['lend','send','returnFactory']){expect(()=>f.run({type:'fulfillment.samples.move',payload:{id,kind,quantity:.25,person:'收件人',location:'工厂样品室',sourceLocation:'来样架 A01',note:'其它寄送',sendPurpose:'other',developmentIncomingCustody:true,externalBorrower:true}})).toThrow(/开发案/);expect(f.state).toEqual(before);}
+ const out=f.dispatch(id),after=structuredClone(f.state);expect(()=>f.run({type:'fulfillment.samples.move',payload:{id,kind:'return',loanId:out.movementIds[0],quantity:.25,person:'业务员',location:'来样架 A01',note:'退回'}})).toThrow(/开发案/);expect(f.state).toEqual(after);
+ const request=f.run({type:'sample.request.save',payload:{customerId:'c',description:'客户索样',quantity:.25,unit:'米',recipient:'客户联系人',address:'客户样品室',neededBy:'2026-11-22'}}),beforeRequest=structuredClone(f.state);expect(()=>f.run({type:'sample.request.fulfill',payload:{id:request.id,sampleId:id,sourceLocation:'来样架 A01',quantity:.25,complete:true}})).toThrow(/开发案/);expect(f.state).toEqual(beforeRequest);
+});

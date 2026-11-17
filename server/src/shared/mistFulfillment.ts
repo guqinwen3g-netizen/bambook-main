@@ -1386,7 +1386,7 @@ export function recordDevelopmentQcOnTasks(root: MistState, devId: string, versi
         t.state = qc.result === 'reject' ? 'blocked' : 'reported';
     }
 }
-export function applyFulfillmentCommand(root: MistState, command: FulfillmentCommand, ctx: MistContext, options?:{externalBorrower?:boolean;loanStartedOn?:string}): MistCommandResult {
+export function applyFulfillmentCommand(root: MistState, command: FulfillmentCommand, ctx: MistContext, options?:{externalBorrower?:boolean;loanStartedOn?:string;developmentIncomingCustody?:boolean}): MistCommandResult {
     const f = root.fulfillment || (root.fulfillment = createFulfillmentState(ctx, root));
     f.shippingTerms ||= [];
     f.productionFacts ||= [];
@@ -1474,6 +1474,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         }
         case 'fulfillment.samples.move': {
             const s = get(f.samples, p.id, '样品');
+            // Only the dedicated case command can establish exact factory custody and parcel cost.
+            if(s.source.kind==='developmentIncoming'&&!['move','scrap'].includes(p.kind)&&!options?.developmentIncomingCustody)fail('开发来样请从开发案办理寄厂与原样退回','PRECONDITION');
             let quantity = p.kind === 'move' ? 0 : qty(p.quantity);
             if(s.sizeQuantities&&p.kind!=='move'&&quantity!==s.quantity)fail('按尺码登记的成组样品须整组流转');
             if (!sampleUnitAllowsDecimal(s.unit) && !Number.isInteger(quantity)) fail(`按${s.unit}计的样品须按整数流转`);

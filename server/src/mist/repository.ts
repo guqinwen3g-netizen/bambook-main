@@ -297,6 +297,7 @@ export class MistRepository {
     return MIST_UPLOAD_SCOPES.find(scope => hasScope(actor, scope as any)) ?? MIST_UPLOAD_SCOPES[0];
   }
   private async authorizeCompoundCommand(db: any, prior: TokenPayload, command?: MistCommand) {
+    if(command?.type.startsWith('development.incoming.'))await this.authorize(db,prior,'products:read');
     if(command?.type==='agent.proposal.create'){
       const original=command.payload?.command;
       if(original&&typeof original.type==='string'&&!original.type.startsWith('agent.')&&original.payload&&typeof original.payload==='object'&&!Array.isArray(original.payload)){
@@ -460,7 +461,10 @@ export class MistRepository {
     const fabricAccess=scope&&hasScope(actor,'orders:read')&&hasScope(actor,'orders:write')?scopedFabricAccess(row.state,scope,actor.userId,actor.displayName||actor.userId,hasScope(actor,'production:read')&&hasScope(actor,'products:read')&&hasScope(actor,'qc:read')):undefined;
     const fabricDestinations=scope&&hasScope(actor,'orders:read')?scopedFabricDestinations(row.state,scope):undefined;
     const shipmentReleaseGates=projectShipmentReleaseGates(row.state,projected.state,actor,row.companyId);
-    return { ...publicWorkspace({ ...row, state: projected.state }), access,...(shipmentReleaseGates?{shipmentReleaseGates}:{}),...(projected.costMaterialBasis!==undefined?{costMaterialBasis:projected.costMaterialBasis}:{}),...(projected.costClaimBasis!==undefined?{costClaimBasis:projected.costClaimBasis}:{}),...(materialIssueTargets?{materialIssueTargets}:{}),...(directTargets?{materialDeliveryTargets:directTargets}:{}),...(financialDisposals?{financialDisposals}:{}),...(fabricAccess?{scopedFabricAccess:fabricAccess}:{}),...(fabricDestinations?{scopedFabricDestinations:fabricDestinations}:{}) };
+    const incomingScope=scope?scopedVisibility(row.state,scope,false).get('devs')!:new Set(projected.state.devs.map(dev=>dev.id));
+    const incomingReadable=hasScope(actor,'products:read')?projected.state.devs.filter(dev=>incomingScope.has(dev.id)).map(dev=>dev.id):[];
+    const developmentIncomingAccess={readableDevIds:incomingReadable,writableDevIds:hasScope(actor,'products:write')?[...incomingReadable]:[]};
+    return { ...publicWorkspace({ ...row, state: projected.state }), access,developmentIncomingAccess,...(shipmentReleaseGates?{shipmentReleaseGates}:{}),...(projected.costMaterialBasis!==undefined?{costMaterialBasis:projected.costMaterialBasis}:{}),...(projected.costClaimBasis!==undefined?{costClaimBasis:projected.costClaimBasis}:{}),...(materialIssueTargets?{materialIssueTargets}:{}),...(directTargets?{materialDeliveryTargets:directTargets}:{}),...(financialDisposals?{financialDisposals}:{}),...(fabricAccess?{scopedFabricAccess:fabricAccess}:{}),...(fabricDestinations?{scopedFabricDestinations:fabricDestinations}:{}) };
   }
   async list(prior: TokenPayload) { return this.transact(async db => { if(isAgentActor(prior)&&prior.agentWorkspaceId){const {row,actor}=await this.own(db,prior,prior.agentWorkspaceId);return[await this.preparedView(db,row,actor)];}const actor = await this.authorize(db, prior); const rows: MistWorkspaceRow[] = await db.mistWorkspace.findMany({ where: this.accessibleWhere(actor), orderBy: { updatedAt: 'desc' } }); const out = []; for (const row of rows.filter(row=>this.accessible(row,actor))) { if (companyRow(row)) { await applyCompanyRoster(db, row, row.companyId!); const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); OWN_TEAMS.set(row, scope?.teamIds ?? await companyTeamIds(db, row.companyId!, actor.userId)); } this.contract.normalizeMistState?.(row.state,this.context(actor)); out.push(await this.preparedView(db,row,actor)); } return out; }); }
   /** 公司会话只看本公司唯一的库；本机空间看自己拥有或被授权的。 */

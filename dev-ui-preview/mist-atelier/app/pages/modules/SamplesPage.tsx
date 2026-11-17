@@ -284,6 +284,7 @@ function SampleDetail({ row, state, day, can, locked, onMove, onEdit, onQc, onAt
     .sort((a, b) => b.movement.at.localeCompare(a.movement.at));
   const why = (sample: FulfillmentSample, kind: MoveKind): string | false => {
     if (!can) return '没有样品写权限';
+    if(sample.source.kind==='developmentIncoming'&&kind!=='move'&&kind!=='scrap')return '请从开发案办理寄厂与原样退回';
     const facts = sampleFacts(state, sample, day);
     if (kind === 'return') return facts.openLoans.length ? false : '没有未归还的借出';
     return sample.available > 0 ? false : '当前没有可用数量';

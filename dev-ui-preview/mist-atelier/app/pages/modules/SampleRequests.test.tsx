@@ -30,6 +30,9 @@ it('requires an exact positive stock position, shows its unit and available bala
  expect([...location.options].map(o=>o.textContent)).toEqual(['请选择位置','B02 · 可用 2 米','C03 · 可用 0.75 米']);await submit();expect(store.run).not.toHaveBeenCalled();
  change('本次出库位置','1');amount('0.25');await submit();expect(store.run).toHaveBeenCalledWith({type:'sample.request.fulfill',payload:{id:'request',sampleId:'twill',sourceLocation:'C03',quantity:.25,carrier:'',trackingNo:'',complete:true}});expect(go).toHaveBeenCalledWith('samples','request',{section:'requests'});
 });
+it('excludes a development incoming original from ordinary customer sample dispatch choices',async()=>{
+ store.state!.fulfillment.samples.push({...store.state!.fulfillment.samples[0],id:'incoming-original',code:'SMP-INCOMING',source:{kind:'developmentIncoming',devId:'development',receiptId:'receipt'}});await open();const select=getByRole(document.body,'combobox',{name:'寄出样品',exact:true})as HTMLSelectElement;expect([...select.options].map(option=>option.value)).not.toContain('incoming-original');expect([...select.options].map(option=>option.value)).toContain('twill');expect(store.run).not.toHaveBeenCalled();
+});
 it('does not reuse an old sample position after changing the selected physical sample',async()=>{
  store.state!.fulfillment.samples.push({...store.state!.fulfillment.samples[0],id:'other',code:'SMP-OTHER',positions:[{location:'D01',available:1},{location:'D02',available:1}],available:2});
  await open();change('本次出库位置','1');change('寄出样品','other');expect((getByRole(document.body,'combobox',{name:'本次出库位置',exact:true})as HTMLSelectElement).value).toBe('');await submit();expect(store.run).not.toHaveBeenCalled();change('本次出库位置','0');amount('0.25');await submit();expect(store.run.mock.calls[0][0].payload).toMatchObject({sampleId:'other',sourceLocation:'D01'});
