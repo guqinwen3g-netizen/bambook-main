@@ -72,6 +72,7 @@ describe('persisted workspace development list',()=>{
   it('applies the fabric owner filter and hides inapplicable customer/view controls',async()=>{
     bridge.current.state.fabrics=[{id:'f1',code:'SR-1',name:'甲的面料',owner:'甲',ownerId:'user-a',due:'2026-10-30',state:'寻样中',tone:'neutral',sub:'',request:'需求1',answer:''},{id:'f2',code:'SR-2',name:'乙的面料',owner:'乙',ownerId:'user-b',due:'2026-10-30',state:'寻样中',tone:'neutral',sub:'',request:'需求2',answer:''}];
     await mount();await tab('面料寻样');expect(host.querySelector('[aria-label="看板视图"]')).toBeNull();expect([...host.querySelectorAll('button')].some(button=>button.textContent?.startsWith('客户'))).toBe(false);
+    expect(Array.from(host.querySelectorAll('[role="columnheader"], th'), h=>h.textContent)).toContain('负责人');
     await select('负责人','甲');expect(host.querySelectorAll('.mist-tr')).toHaveLength(1);expect(host.textContent).toContain('甲的面料');expect(host.textContent).not.toContain('乙的面料');
   });
   it('applies the draft customer filter and does not expose owner/view controls without draft data',async()=>{
