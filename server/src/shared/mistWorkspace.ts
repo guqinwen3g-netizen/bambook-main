@@ -1,3 +1,4 @@
+import {applyDevelopmentReferenceCommand,type DevelopmentReferenceCommand,type DevelopmentSampleReference} from './mistDevelopmentSampleReferences';
 import {applyDevelopmentTaskEnd,applyDevelopmentTaskReopen,closeDevelopmentFactoryTasks,developmentFactoryWorkBlocker,type DevelopmentTaskEnd,type DevelopmentTaskEndCommand,type DevelopmentTaskLifecycleEvent,type DevelopmentTaskResolution} from './mistDevelopmentTaskLifecycle';
 import type {OrderMainApprovalSource} from './mistOrderApprovalSource';
 import type {MistOrderFlow} from './mistOrderFlow';
@@ -170,6 +171,8 @@ export type MistDev = {
   factoryLetters?: Record<string, string>;
   /** 整案只由业务员显式结束/恢复；版本认可、转档或财务结果不自动结束整案。 */
   closure?: DevelopmentClosure;
+  /** Reference relations retain the original sample identity and never create stock. */
+  sampleReferences?:DevelopmentSampleReference[];
   /** BB-DEV-9：开发费用（制作费）、开票申请与销账结案；只有收费案使用。 */
   billing?: MistDevBilling;
 };
@@ -398,7 +401,8 @@ export type MistState = {
   seals?:MistSeal[]; sealUses?:MistSealUse[];
 };
 export type MistOrderInput = { type: 'garment' | 'fabric'; customerId: string; season: string; currency: string; due: string; ownerId: string; governance?:OrderGovernanceInput; lines: Array<Omit<MistOrderLine, 'id' | 'orderId' | 'made' | 'qc'> & OrderLineSource & {breakdown?:OrderLineBreakdown}> };
-export type MistCommand = DevelopmentTaskEndCommand | DevelopmentIncomingCommand | SealCommand | PeriodCloseCommand | Extract<DocumentGenerationCommand, { type: 'order.document.generate' | 'market.lookbook.document' }> | AgentTaskCommand | AgentProposalCommand | InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | SampleRequestCommand | OrderSplitCommand | ReportScheduleCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
+export type MistCommand = DevelopmentTaskEndCommand | DevelopmentReferenceCommand
+  | DevelopmentIncomingCommand | SealCommand | PeriodCloseCommand | Extract<DocumentGenerationCommand, { type: 'order.document.generate' | 'market.lookbook.document' }> | AgentTaskCommand | AgentProposalCommand | InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | SampleRequestCommand | OrderSplitCommand | ReportScheduleCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
   | { type: 'development.saveDraft'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.submit'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.update'; payload: { devId: string; patch: Partial<DevelopmentValues> } }
@@ -510,6 +514,8 @@ export type MistWorkspaceAccess={companyLibrary?:boolean;/** Resolved references
 /** Response-only customer credit gate, not overall departure permission or business state. */
 export type MistShipmentReleaseGate={held:boolean;unusedAuthorized:boolean};
 export type MistWorkspaceEnvelope = { id: string; ownerId: string; name: string; revision: number; state: MistState; /** Minimal gate for visible complete shipment sources; never persisted. */ shipmentReleaseGates?:Record<string,MistShipmentReleaseGate>; /** Server capability, response-only; never infer allowance support from an old service. */ supportsSignedSettlementAllowance?: boolean;/** Current writable case task review only; response-only, no hidden QC/financial identities or amounts. */developmentTaskClosePlans?:Record<string,import('./mistDevelopmentTaskLifecycle').DevelopmentTaskClosePlan>; access?: MistWorkspaceAccess;/** Read-only financial proportions; never persisted in workspace business state. */costMaterialBasis?:import('./mistInternalFabric').InternalFabricCostBasis[] | null; /** Response-only, order-scoped aftersales financial totals. */costClaimBasis?:import('./mistClaimCost').OrderClaimCostBasis[]|null; /** Scoped, actionable material destinations only; never persisted in workspace state. */materialIssueTargets?:import('./mistDataScope').ScopedMaterialIssueTargets; /** Minimal direct-handoff choices, keyed by writable source purchase; response-only. */ materialDeliveryTargets?:import('./mistDataScope').ScopedMaterialDeliveryTargets; /** Minimal financial disposal handoff, response-only. */financialDisposals?:import('./mistPayables').FinancialDisposalView[]; /** Recipient-only material handoff, response-only. */ scopedFabricAccess?:import('./mistDataScope').ScopedFabricAccess; /** Source-only destination identifiers, response-only. */ scopedFabricDestinations?:import('./mistDataScope').ScopedFabricDestinations;
+  /** Independent current sample/reference capabilities; response-only, no inferred source grants. */
+  developmentReferenceAccess?:import('./mistDevelopmentSampleReferences').DevelopmentReferenceAccess;
   /** Exact case scope for incoming originals; response-only. */
   developmentIncomingAccess?:import('./mistDevelopmentIncoming').DevelopmentIncomingAccess;
   /** Response-only exact associations for visible signatures; never persisted. */
@@ -1140,6 +1146,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       updateDev(state,dev,context);
       event(state,context,'development',dev.id,'创建改版 '+version.label,{view:'development/detail',id:dev.id,versionId:version.id},'general',notificationOwners(state,'development',dev.id));result={devId:dev.id,versionId:version.id,roundId:round.id};break;
     }
+    case 'development.reference.add':case 'development.reference.remove':case 'development.reference.dispatch':case 'development.reference.return':{result=applyDevelopmentReferenceCommand(state,command,context);break;}
     case 'development.incoming.receive':case 'development.incoming.dispatch':case 'development.incoming.return':{
       result=applyDevelopmentIncomingCommand(state,command,context);break;
     }

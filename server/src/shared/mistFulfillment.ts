@@ -130,6 +130,7 @@ export type SampleMovement = {
     fee?: { amount: number; currency: string; expenseId?: string };
     sendPurpose?:SampleSendPurpose;
     incomingTransfer?:IncomingTaskTransfer;
+    referenceTransfer?:import('./mistDevelopmentSampleReferences').DevelopmentReferenceTransfer;
 };
 export type QcBusinessConfirmation = { result:'approved'|'rejected';note:string;actor:string;actorId?:string;at:string;reportId?:string };
 export type QcBusinessContinuation = { reportId:string;actor:string;actorId?:string;at:string;note:string };

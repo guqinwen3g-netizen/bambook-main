@@ -18,12 +18,12 @@ const fail=(message:string):never=>{throw new MistCommandError('VALIDATION',mess
 const text=(value:unknown,label:string,required=true,max=2000)=>{if(typeof value!=='string')return fail('请填写'+label);const v=value.trim();if(required&&!v)return fail('请填写'+label);if(v.length>max)return fail(label+'过长');return v;};
 const occurred=(value:unknown,label:string,ctx:MistContext)=>{const day=text(value,label,true,10);if(!isCalendarDay(day))return fail(label+'无效');if(day>platformBusinessDate(ctx.now))return fail(label+'不得在未来');return day;};
 const quantity=(value:unknown)=>{if(typeof value!=='number'||!Number.isFinite(value)||value<=0)return fail('请填写正数数量');return value;};
-function delivery(value:IncomingDelivery):IncomingDelivery{
+export function normalizeDevelopmentDelivery(value:IncomingDelivery):IncomingDelivery{
  if(!value||!['courier','handover'].includes(value.kind))return fail('请选择交接方式');
  const base={kind:value.kind,recipient:text(value.recipient,'收件人',true,120),address:text(value.address,'收件地址',true,500)};
  return value.kind==='courier'?{...base,carrier:text(value.carrier,'快递公司',true,120),trackingNo:text(value.trackingNo,'运单号',true,120),evidence:''}:{...base,carrier:'',trackingNo:'',evidence:text(value.evidence,'交接依据',true,500)};
 }
-function postage(value:IncomingPostage):IncomingPostage{
+export function normalizeDevelopmentPostage(value:IncomingPostage):IncomingPostage{
  if(!value||typeof value.amount!=='number'||!Number.isFinite(value.amount)||value.amount<0||!/^\d{1,10}(\.\d{1,2})?$/.test(String(value.amount)))return fail('请填写最多两位小数的我方邮费');
  const currency=text(value.currency,'币种',true,3).toUpperCase();if(!/^[A-Z]{3}$/.test(currency))return fail('币种须为三位字母');
  return{amount:value.amount,currency,zeroReason:value.amount===0?text(value.zeroReason,'零支出原因',true,500):text(value.zeroReason||'','费用说明',false,500)};
@@ -57,7 +57,7 @@ export function applyDevelopmentIncomingCommand(state:MistState,command:Developm
   const p=command.payload;if(['borrowerId','supplierId'].some(key=>Object.prototype.hasOwnProperty.call(p,key)))return fail('外部收件主体由准确工厂任务确定，不绑定公司借用账号');
   const version=state.versions.find(v=>v.id===p.taskVersionId&&v.devId===dev.id&&dev.versionIds.includes(v.id));if(!version?.task||version.minor)return fail('请选择本案准确工厂任务');const work=developmentFactoryWorkBlocker(state,dev,version);if(work)throw new MistCommandError('PRECONDITION',work);if(version.archivedAt||version.qcDecision&&version.qcDecision.kind!=='rework')return fail('该工厂任务已结束，请核对当前任务');
   const supplier=state.market.suppliers.find(supplier=>supplier.id===version.factoryId);if(!supplier)return fail('工厂资料不存在');const blocked=productionSupplierUnavailableReason(supplier,platformBusinessDate(ctx.now));if(blocked)throw new MistCommandError('PRECONDITION',blocked);
-  const day=occurred(p.sentAt,'实际寄送日',ctx),ship=delivery(p.delivery),cost=postage(p.postage);if(typeof p.returnExpected!=='boolean')return fail('请明确是否需退原样');
+  const day=occurred(p.sentAt,'实际寄送日',ctx),ship=normalizeDevelopmentDelivery(p.delivery),cost=normalizeDevelopmentPostage(p.postage);if(typeof p.returnExpected!=='boolean')return fail('请明确是否需退原样');
   const expectedReturn=p.returnExpected&&p.expectedReturn?text(p.expectedReturn,'预计归还日',true,10):'';if(expectedReturn&&(!isCalendarDay(expectedReturn)||expectedReturn<day))return fail('预计归还日不得早于寄送日');
   const dispatchId=ctx.id(),movementIds:string[]=[];
   for(const item of items(p.items,item=>JSON.stringify([item.sampleId,item.sourceLocation]))){
@@ -70,7 +70,7 @@ export function applyDevelopmentIncomingCommand(state:MistState,command:Developm
   if(cost.amount>0){const id=ctx.id();(dev.billing||={makingFees:[]}).expenses||=[];dev.billing.expenses.push({id,versionId:version.id,amount:cost.amount,currency:cost.currency,description:`来样寄厂邮费 · ${supplier.name} · ${ship.trackingNo||ship.evidence}`,date:day,at:ctx.now,actor:ctx.actorName,sourceDispatchId:dispatchId,sourceMovementIds:[...movementIds]});first.incomingTransfer!.expenseId=id;}
   dev.updatedAt=ctx.now;event(state,ctx,dev.id,`来样寄厂 ${version.label} · ${supplier.name}`,'incoming-dispatch:'+dispatchId);return{devId:dev.id,id:dispatchId,dispatchId,movementIds};
  }
- const pReturn=command.payload,day=occurred(pReturn.receivedAt,'实际退回日',ctx),ship=delivery(pReturn.delivery),returnBatchId=ctx.id(),movementIds:string[]=[];
+ const pReturn=command.payload,day=occurred(pReturn.receivedAt,'实际退回日',ctx),ship=normalizeDevelopmentDelivery(pReturn.delivery),returnBatchId=ctx.id(),movementIds:string[]=[];
  for(const item of items(pReturn.items,item=>JSON.stringify([item.loanId,item.location]))){
   const loan=state.fulfillment.sampleMovements.find(move=>move.id===item.loanId&&move.kind==='lend'),out=loan?.incomingTransfer;if(!loan||!out||out.direction!=='out'||out.devId!==dev.id||out.dispatchId!==pReturn.dispatchId)return fail('退回须引用本案同票原借出流水');if(day<out.occurredAt)return fail('退回日不得早于寄送日');
   const sample=developmentIncomingSamples(state,dev.id).find(sample=>sample.id===loan.sampleId);if(!sample)return fail('原借出来样不存在');

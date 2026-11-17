@@ -1,3 +1,4 @@
+import {sanitizeDevelopmentReferenceState} from './developmentReferenceAccess';
 import {heldShipmentRelease} from '../shared/mistRelationHold';
 import {projectOrderFlowEvents} from '../shared/mistOrderFlow';
 import { projectTeamReports } from './teamReportAccess';
@@ -273,6 +274,7 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
     next.notifications = (next.notifications || []).filter(item => visibleTarget(item.target));
     next.calendar = (next.calendar || []).filter(item => visibleTarget(item.target));
   }
+  sanitizeDevelopmentReferenceState(next);
   // 在分区隐藏之后执行：交接清单只按本账号最终可见的对象过滤。
   if (scope && !canManageMemberHandover(actor, ownerId)) projectMemberHandovers(next, actor);
   // Warehouse-only readers still need the outcome required to dispose their own visible lot.
@@ -319,6 +321,7 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
   for (const id of restrictedSensitiveFiles(state, actor, ownerId, privacy)) restrictedFiles.add(id);
   const handoffFiles=scope&&hasScope(actor,'orders:read')&&hasScope(actor,'orders:write')?scopedMaterialDeliveryFileIds(state,scope,actor.userId):new Set<string>();
   next.files = visibleFiles(state, next, actor.userId, ownerId,handoffFiles).filter(file => !restrictedFiles.has(file.id));
+  sanitizeDevelopmentReferenceState(next);
   const costVisible=hasScope(actor,'reports:admin')&&!hidden.some(s=>['orders','procurement','receivables','payables'].includes(s.key));
   let costClaimBasis:OrderClaimCostBasis[]|null=null;
   if(costVisible)try{costClaimBasis=financialClaimCostBasis(state,new Set((next.orders??[]).map(order=>order.id)));}catch(error){if(!(error instanceof MistCommandError))throw error;}
