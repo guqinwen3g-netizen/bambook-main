@@ -5,7 +5,7 @@ import { uiText, ui } from '../../../../services/interfaceLanguage';
 import React from 'react';
 import { ArrowUpRight, Check, CornerUpLeft, Paperclip, RefreshCw } from 'lucide-react';
 import { Banner, Button, Card, DataTable, EmptyState, Facts, Field, KeyValue, MistPage, ObjectCell, PageHeader, Pill, SearchField, Segmented, SignaturePad, Tabs, TextArea, Toolbar, type Column, type SignatureValue, type Tone } from '../../../../components/mist';
-import { getMistReviewTasks } from '../../../../server/src/shared/mistWorkspace';
+import { getMistReviewTasks, type MistState } from '../../../../server/src/shared/mistWorkspace';
 import type { MistReviewTask } from '../../../../server/src/shared/mistReview';
 import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
 import type { View } from '../../../../types';
@@ -18,7 +18,7 @@ import { FailureNotice } from '../runtime/FailureNotice';
 
 export type ApprovalTab = 'mine' | 'sent' | 'done' | 'others';
 type Kind = MistReviewTask['kind'];
-type Row = MistReview & { local?: boolean };
+type Row = MistReview;
 export const APPROVAL_KIND_LABEL: Record<Kind, string> = { order: '订单审批', quotation: '报价偏差', procurement: '采购审批', procurementAmendment: '合同变更', payment: '付款申请', claim: '索赔方案', risk: '风险处置', productionIntake: '在制承接', qcConcession: '让步接收', stockCount: '盘点调整' };
 const STATUS: Record<MistReviewTask['status'], { tone: Tone; label: string }> = { pending: { tone: 'warn', label: '待审批' }, approved: { tone: 'ok', label: '已批准' }, rejected: { tone: 'bad', label: '已退回' } };
 /** 统一审批尚未覆盖、仍在原业务页按原流程办理的类型（没有服务端放行规则时不在这里假装可审批）。 */
@@ -39,6 +39,25 @@ export function approvalRows(rows: Row[], tab: ApprovalTab, me: string) {
 /** 付款申请：服务端在审批快照里给出需要哪一档、已签哪一级、还差哪一级。 */
 const tierNote = (r: Pick<Row, 'details'>) => ['审批档位', '审批进度'].map(label => r.details.find(d => d.label === label)?.value).filter(Boolean).join('。');
 
+const SIGNED_REVIEW_COMMAND: Partial<Record<Kind, string>> = {
+  order: 'order.governance.decide', procurement: 'fulfillment.procurement.decide',
+  procurementAmendment: 'fulfillment.procurement.amend.decide', payment: 'payable.request.decide',
+  stockCount: 'fulfillment.stock.count.decide',
+};
+/** Local submissions use only evidence already present in this company's readable projection. */
+export function projectedReviewEvidence(task: MistReviewTask, state: Pick<MistState, 'files' | 'decisionSignatures'>, tasks: readonly MistReviewTask[]): Pick<MistReview, 'files' | 'signatureFileId'> {
+  const readable = new Map(state.files.map(file => [file.id, file]));
+  const files = [...new Set(task.fileIds || [])].flatMap(id => { const file = readable.get(id); return file ? [{ id, name: file.name, size: file.size }] : []; });
+  const command = SIGNED_REVIEW_COMMAND[task.kind];
+  if (!command || task.status === 'pending' || !task.decision) return { files };
+  // Old main rounds can share an entity without a per-round signature reference.
+  // Never lend a later signature to an ambiguous historical decision; audit and business clocks differ.
+  const decisions = tasks.filter(row => SIGNED_REVIEW_COMMAND[row.kind] === command && row.entityId === task.entityId && row.status === task.status);
+  if (decisions.length !== 1) return { files };
+  const signature = (state.decisionSignatures || []).filter(row => row.commandType === command && row.entityId === task.entityId && row.decision === task.status).at(-1);
+  return { files, ...(signature && readable.has(signature.fileId) ? { signatureFileId: signature.fileId } : {}) };
+}
+
 export function ApprovalsPage() {
   const reviews = useMistReviews(), workspace = useMistWorkspace(), session = useMistSession(), { route, go } = useNav();
   const me = session.user?.id ?? '', state = workspace.state, current = workspace.workspace;
@@ -52,8 +71,9 @@ export function ApprovalsPage() {
     const server: Row[] = reviews.rows;
     if (!state || !current) return server;
     const seen = new Set(server.map(rowKey));
-    const mine = getMistReviewTasks(state).filter(t => t.requesterId === me && !seen.has(current.id + '|' + t.id))
-      .map(t => ({ ...t, workspaceId: current.id, workspaceName: current.name, revision: current.revision, canDecide: false, local: true }));
+    const tasks = getMistReviewTasks(state);
+    const mine = tasks.filter(t => t.requesterId === me && !seen.has(current.id + '|' + t.id))
+      .map(t => ({ ...t, ...projectedReviewEvidence(t, state, tasks), workspaceId: current.id, workspaceName: current.name, revision: current.revision, canDecide: false, local: true }));
     return [...server, ...mine].sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
   }, [reviews.rows, state, current?.id, current?.revision, current?.name, me, interfaceLocale()]);
   const counts = { mine: approvalRows(all, 'mine', me).length, sent: approvalRows(all, 'sent', me).length, done: approvalRows(all, 'done', me).length, others: approvalRows(all, 'others', me).length };
@@ -64,7 +84,7 @@ export function ApprovalsPage() {
   const selected = all.find(r => rowKey(r) === route.id) ?? null;
   React.useEffect(() => { setNote(''); setLocal(''); setSignature(null); setSignKey(k => k + 1); }, [route.id]);
   const [signatureUrl, setSignatureUrl] = React.useState<string | null>(null);
-  const signatureKey = selected ? selected.workspaceId + '|' + selected.id + '|' + (selected.signatureFileId || '') : '';
+  const signatureKey = selected ? selected.workspaceId + '|' + selected.id + '|' + (selected.local ? 'company' : 'review') + '|' + (selected.signatureFileId || '') : '';
   React.useEffect(() => {
     setSignatureUrl(null);
     if (!selected?.signatureFileId) return;

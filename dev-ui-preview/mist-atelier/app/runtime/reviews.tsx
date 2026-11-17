@@ -10,11 +10,15 @@ import { useMistSession } from './auth';
 import { useMistWorkspace } from './workspace';
 import { useNav } from '../nav';
 
-export type MistReview = MistReviewTask & { signatureRequired?: boolean; workspaceId: string; workspaceName: string; revision: number; canDecide: boolean; files?: Array<{ id: string; name: string; size: number }>; signatureFileId?: string };
+export type MistReview = MistReviewTask & { signatureRequired?: boolean; workspaceId: string; workspaceName: string; revision: number; canDecide: boolean; files?: Array<{ id: string; name: string; size: number }>; signatureFileId?: string; /** 本公司投影补齐的本人提交记录，始终只读。 */ local?: boolean };
+function reviewFilePath(row: MistReview, fileId: string): string {
+  const base = row.local ? '/api/mist/workspaces/' + encodeURIComponent(row.workspaceId) : '/api/mist/reviews/' + encodeURIComponent(row.workspaceId) + '/' + encodeURIComponent(row.id);
+  return base + '/files/' + encodeURIComponent(fileId);
+}
 /** 读取这次决定归档的签字（SVG，按图片显示，不作为 HTML 解析）。 */
 export async function reviewSignatureImage(row: MistReview, signal?: AbortSignal): Promise<string | null> {
   if (!row.signatureFileId) return null;
-  const response = await fetch('/api/mist/reviews/' + encodeURIComponent(row.workspaceId) + '/' + encodeURIComponent(row.id) + '/files/' + encodeURIComponent(row.signatureFileId), { headers: apiService.getAuthHeaders(), credentials: 'include', signal });
+  const response = await fetch(reviewFilePath(row, row.signatureFileId), { headers: apiService.getAuthHeaders(), credentials: 'include', signal });
   if (!response.ok) return null;
   const bytes = await response.arrayBuffer();
   return URL.createObjectURL(new Blob([bytes], { type: 'image/svg+xml' }));
@@ -88,6 +92,7 @@ export function MistReviewProvider({ children }: { children: React.ReactNode }) 
     } finally { if (identity === ref.current) { locked.current = false; setBusy(false); } }
   };
   const decide = (row: MistReview, decision: 'approved' | 'rejected', note: string, signature?: { svg: string }) => {
+    if (row.local) { setError('当前账号没有本次审批资格'); return Promise.resolve(false); }
     if (intent) { setError('上一次审批结果待核对，请先核对原请求'); return Promise.resolve(false); }
     return execute({ workspaceId: row.workspaceId, reviewId: row.id, requestId: crypto.randomUUID(), expectedRevision: row.revision, decision, note: note.trim(), ...(signature ? { signature } : {}) });
   };
@@ -102,7 +107,9 @@ export function MistReviewProvider({ children }: { children: React.ReactNode }) 
   };
   const download = async (row: MistReview, file: { id: string; name: string }) => {
     try {
-      const response = await fetch('/api/mist/reviews/' + encodeURIComponent(row.workspaceId) + '/' + encodeURIComponent(row.id) + '/files/' + encodeURIComponent(file.id), { headers: apiService.getAuthHeaders(), credentials: 'include' });
+      if (identity !== ref.current) return;
+      if (row.local && (currentWorkspace.current.workspace?.id !== row.workspaceId || !row.files?.some(item => item.id === file.id) || !currentWorkspace.current.state?.files.some(item => item.id === file.id))) throw new Error('审批附件读取失败');
+      const response = await fetch(reviewFilePath(row, file.id), { headers: apiService.getAuthHeaders(), credentials: 'include' });
       if (!response.ok) throw new Error('审批附件读取失败'); const bytes = await response.blob(); if (identity !== ref.current) return;
       const url = URL.createObjectURL(bytes), link = document.createElement('a'); link.href = url; link.download = file.name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) { if (identity === ref.current) setError(e instanceof Error ? e.message : '附件读取失败'); }
