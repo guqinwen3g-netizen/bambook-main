@@ -150,6 +150,7 @@ export function RisksPage() {
         ] }} />; })()
     : null;
   const roleBanner = !can ? <div className="mist-section"><Banner variant="status" tone="neutral" title={uiText("只读查看")}/></div> : null;
+  if(!state)return <MistPage><PageHeader eyebrow={uiText('财务与成本 · 风险')} title={uiText('风险管理与合规')} actions={<Button disabled={loading||saving} onClick={()=>void refresh()}>{uiText('刷新')}</Button>}/>{error&&<FailureNotice title={'数据未加载'} detail={error} retry={()=>void refresh()}/>}<EmptyState title={uiText(loading?'正在读取风险数据':'风险数据未读取')} compact/></MistPage>;
   if (full.active && detail) return <ListDetailPage backLabel={tab === 'signals' ? '风险预警' : '风险台账'} onBack={full.back} before={roleBanner} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage>
     <PageHeader eyebrow={uiText("财务与成本 · 风险")} title={uiText("风险管理与合规")}
