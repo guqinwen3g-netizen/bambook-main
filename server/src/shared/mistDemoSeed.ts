@@ -16,6 +16,7 @@ import { MIST_DEMO_ACCOUNTS } from './mistAccounts';
 import { mistBusinessDate } from './mistBusinessClock';
 import { platformBusinessDate } from './mistPlatform';
 import { MIST_COMPANY_PROFILE } from './mistCompanyIdentity';
+import { shippingSampleSourceSnapshot } from './mistShipmentSampleCustody';
 
 export const DEMO_SEED_VERSION = 24;
 export type DemoSeedFailure = { step: string; message: string };
@@ -344,7 +345,12 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
     run('handoff 017', { type: 'order.handoff', payload: { orderId: order017.id, note: '第一批 500 件交接后勤安排出运' } } as unknown as MistCommand, sales);
     const ship = id(run('shipment 017', { type: 'fulfillment.shipments.save', payload: { consignee: 'Northwind Atelier AB, Stockholm', mode: 'sea', portOfLoading: '上海洋山', portOfDischarge: '哥德堡', incoterm: 'FOB', plannedDate: day(-4), booking: 'MSKU 7741 2093', lines: [{ orderId: order017.id, lineId: job017.lineId, productionId: job017.id, quantity: job017.qty, factoryConfirmedAt: day(-7) }], note: '第一批', fileIds: [] } }, sales));
     if (ship) {
-      sampleQc('PO-L-0411', 'shipping', 'pass', ship);
+      const shippingTask=sampleQc('PO-L-0411', 'shipping', 'pass', ship);
+      const specimen=state.fulfillment.samples.find(sample=>sample.id===state.fulfillment.qcTasks.find(task=>task.id===shippingTask)?.sampleId);
+      if(specimen){
+        // This demonstration has a separately registered specimen kept in the sample room, not a member of the 500 commercial units.
+        run('shipping sample basis 017',{type:'fulfillment.samples.shippingBasis',payload:{id:specimen.id,kind:'independent',sourceSnapshot:shippingSampleSourceSnapshot(state,specimen),independentSource:'演示中单独登记并保管于样品间 A-3 的 1 件船样，不计入本票 500 件。',evidence:'演示独立样衣已单独送检并确认，继续留存样品间，不随本票商业货物出运。',fileIds:[]}},buyer);
+      }else failures.push({step:'shipping sample basis 017',message:'演示独立船样来源未生成'});
       run('pack 017', { type: 'fulfillment.shipments.pack', payload: { id: ship, lines: Array.from({ length: 5 }, (_, i) => ({ lineId: job017.lineId, productionId: job017.id, carton: `${i * 20 + 1}-${i * 20 + 20}`, quantity: 100, netWeight: 96, grossWeight: 108, volume: 1.15, note: '' })) } }, warehouse);
       run('customs 017', { type: 'fulfillment.customs.save', payload: { shipmentId: ship, declarationNo: '2200 2026 1004 9126 51', broker: '上海东航报关有限公司', hsCode: '6203.31', origin: '中国', tradeMode: '一般贸易', declaredAt: day(-5), clearedAt: day(-4), evidence: '海关放行通知', fileIds: [demoFile('customs-release', ship, '报关放行通知 SO-G-2026-017.pdf')], note: '', status: 'cleared' } }, warehouse);
       // 商品归类按款号建档一次，之后每票出运自动带出商品编号、申报品名与申报要素。
