@@ -592,6 +592,7 @@ export const reviewedEnglish: Record<string, string> = {
   '风险数据未读取':'Risk records unavailable',
   '正在读取核算数据':'Loading costing records',
   '核算数据未读取':'Costing records unavailable',
+  '样品登记人由系统记录':'The sample registrar is recorded by the system',
   '报关资料或来源已更新，请重新打开后核对':'Customs details or their source changed. Reopen and review again',
   '报关资料未读取，请重新打开后核对':'Customs details are unavailable. Reopen and review again',
   '报关资料已更新，请重新生成CD草稿':'Customs details changed. Regenerate the CD draft',
