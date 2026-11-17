@@ -81,6 +81,8 @@ export type FulfillmentSample = {
     sizeQuantities?:FulfillmentSizeQuantity[];
     color: string;
     source: FulfillmentSource;
+    /** Trusted registering account for a manual sample. Never inferred for legacy records or accepted from a client. */
+    registeredById?: string;
     sourceSampleCode?: string;
     /** Approved full-package material plan when this PP was physically recorded. */
     materialPlan?: string;
@@ -1123,7 +1125,7 @@ function addSample(root: MistState, input: SampleInput, ctx: MistContext) {
         } else if (input.shipmentId) fail('产前/先锋样不绑定出运批次');
     } else if (input.role || input.shipmentId) fail('订单样品角色仅用于准确订单生产分支');
     const id = ctx.id();
-    f.samples.push({ id, code: code('SMP', f.samples, ctx), name: text(input.name, '名称'), category, form: text(input.form, '形态'), unit, quantity, available: quantity, location: text(input.location, '位置', false), size: sizeQuantities?sizeQuantities.map(row=>`${row.size} ${row.quantity}`).join(' / '):text(input.size, '尺码', false),...(sizeQuantities?{sizeQuantities}:{}), color: text(input.color, '颜色', false), source: s, ...(s.kind === 'version' ? { sourceSampleCode: get(root.versions, s.versionId, '来源版本').sample } : {}), ...(input.role ? { role: input.role } : {}), ...(s.kind === 'orderLine' && input.role === 'pp' ? {materialPlan:garmentMaterialFingerprint(root,s.orderId,s.lineId)} : {}), ...(input.shipmentId ? { shipmentId: input.shipmentId } : {}), qualityRevision: 1, fileIds: files(root, input.fileIds), note: text(input.note, '备注', false), createdAt: ctx.now });
+    f.samples.push({ id, code: code('SMP', f.samples, ctx), name: text(input.name, '名称'), category, form: text(input.form, '形态'), unit, quantity, available: quantity, location: text(input.location, '位置', false), size: sizeQuantities?sizeQuantities.map(row=>`${row.size} ${row.quantity}`).join(' / '):text(input.size, '尺码', false),...(sizeQuantities?{sizeQuantities}:{}), color: text(input.color, '颜色', false), source: s, ...(s.kind === 'manual' && ctx.actorId ? {registeredById:ctx.actorId} : {}), ...(s.kind === 'version' ? { sourceSampleCode: get(root.versions, s.versionId, '来源版本').sample } : {}), ...(input.role ? { role: input.role } : {}), ...(s.kind === 'orderLine' && input.role === 'pp' ? {materialPlan:garmentMaterialFingerprint(root,s.orderId,s.lineId)} : {}), ...(input.shipmentId ? { shipmentId: input.shipmentId } : {}), qualityRevision: 1, fileIds: files(root, input.fileIds), note: text(input.note, '备注', false), createdAt: ctx.now });
     f.sampleMovements.push({ id: ctx.id(), sampleId: id, kind: 'receive', quantity, person: ctx.actorName, location: input.location, note: input.note, at: ctx.now, actor: ctx.actorName });
     return id;
 }
@@ -1403,6 +1405,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         }
         case 'fulfillment.materials.confirm': return confirmMaterialDelivery(root, p, ctx);
         case 'fulfillment.samples.create': {
+            if (Object.prototype.hasOwnProperty.call(p, 'registeredById')) fail('样品登记人由系统记录');
             const s = source(root, p.source);
             if (s.kind === 'version') {
                 const d = get(root.devs, s.devId, '开发案'), v = get(root.versions, s.versionId, '版本');
@@ -1438,6 +1441,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             return { applied };
         }
         case 'fulfillment.samples.edit': {
+            if (Object.prototype.hasOwnProperty.call(p, 'registeredById')) fail('样品登记人由系统记录');
             const s = get(f.samples, p.id, '样品');
             if(s.sizeQuantities&&p.size!==undefined&&p.size!==s.size)fail('船样实际尺码件数已登记，实物变更请重新登记本批船样');
             const changedPhysical = ['form', 'size', 'color'].some(key => p[key] !== undefined && p[key] !== (s as any)[key]);

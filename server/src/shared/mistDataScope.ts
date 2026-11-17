@@ -118,7 +118,11 @@ export function scopedVisibility(state: MistState, scope: MistDataScope, include
   for (const row of state.allocations ?? []) if (has('invoices', row.invoiceId)) add('allocations', row.id);
   for (const row of f.qcTasks ?? []) if (row.source?.kind === 'version' && devs.has(row.source.devId)) add('fulfillment.qcTasks', row.id);
   for (const row of f.qcReports ?? []) if (has('fulfillment.qcTasks', row.taskId)) add('fulfillment.qcReports', row.id);
-  for (const row of f.samples ?? []) { const s = row.source; if (s?.kind === 'version' && devs.has(s.devId) || s?.kind === 'orderLine' && collaboratingOrders.has(s.orderId)) add('fulfillment.samples', row.id); }
+  // A manual physical sample has no customer/order/development edge. Anchor only
+  // to trusted registering IDs and exact persisted borrower IDs, including returned
+  // loans for traceability. Display names and non-manual source chains add no reachability.
+  const handledManualSamples=new Set((f.sampleMovements??[]).filter((move:any)=>move.kind==='lend'&&typeof move.borrowerId==='string'&&users.has(move.borrowerId)).map((move:any)=>move.sampleId));
+  for (const row of f.samples ?? []) { const s = row.source; if (s?.kind === 'version' && devs.has(s.devId) || s?.kind === 'orderLine' && collaboratingOrders.has(s.orderId) || s?.kind === 'manual'&&(users.has(row.registeredById)||handledManualSamples.has(row.id))) add('fulfillment.samples', row.id); }
   for (const row of f.shipments ?? []) if (row.lines?.some((line: any) => collaboratingOrders.has(line.orderId))) add('fulfillment.shipments', row.id);
   for (const row of f.shippingTerms ?? []) if (collaboratingOrders.has(row.orderId)) add('fulfillment.shippingTerms', row.orderId);
   for (const row of f.productionFacts ?? []) if (has('productions', row.productionId)) add('fulfillment.productionFacts', row.productionId);

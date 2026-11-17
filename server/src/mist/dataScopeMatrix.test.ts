@@ -82,6 +82,43 @@ beforeEach(async () => {
 });
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
+describe('manual samples retain trusted registering/handling account scope',()=>{
+ const input=()=>({name:'棉斜纹米样',category:'面料',form:'米样',unit:'米',quantity:3,location:'A01',size:'150cm',color:'军绿',source:{kind:'manual' as const,description:'目录留样，不关联商业订单'},fileIds:[],note:''});
+ const executeManual=(who:string,command:any)=>repo.execute(actor(who),workspaceId,{requestId:randomUUID(),expectedRevision:db.workspaces.get(workspaceId)!.revision,command});
+ it('allows a restricted registrar, exact borrower and department supervisor without sharing a sibling or other business sources',async()=>{
+  db.userDepartments.set('demo-sales','sales-dept');
+  const original=structuredClone(db.workspaces.get(workspaceId).state),created=await executeManual('demo-sales',{type:'fulfillment.samples.create',payload:input()}),id=created.receipt.result.id!;
+  const sample=created.workspace.state.fulfillment.samples.find(s=>s.id===id)!;expect(sample).toMatchObject({registeredById:'demo-sales',source:{kind:'manual'},quantity:3,available:3});
+  await executeManual('demo-sales',{type:'fulfillment.samples.create',payload:{...input(),name:'另一份留样'}});
+  expect((await repo.get(actor('demo-buyer'),workspaceId)).state.fulfillment.samples.some(s=>s.id===id)).toBe(false);
+  const loan=await executeManual('demo-sales',{type:'fulfillment.samples.move',payload:{id,kind:'lend',quantity:2,borrowerId:'demo-buyer',person:'',location:'',note:'核对组织'}});
+  const beforeOrders=await orders('demo-buyer'),buyer=await repo.get(actor('demo-buyer'),workspaceId);
+  expect(buyer.state.fulfillment.samples.filter(s=>s.source.kind==='manual').map(s=>s.id)).toEqual([id]);
+  for(let i=0;i<2;i++)await executeManual('demo-buyer',{type:'fulfillment.samples.move',payload:{id,kind:'return',loanId:loan.receipt.result.id!,quantity:1,person:'demo-buyer',location:'B02',note:'分次归还'}});
+  const returned=await repo.get(actor('demo-buyer'),workspaceId);expect(returned.state.fulfillment.samples.find(s=>s.id===id)).toMatchObject({registeredById:'demo-sales',quantity:3,available:3});
+  expect(returned.state.fulfillment.sampleMovements.filter(m=>m.sampleId===id&&m.kind==='return')).toHaveLength(2);expect(await orders('demo-buyer')).toEqual(beforeOrders);
+  expect((await repo.get(actor('head'),workspaceId)).state.fulfillment.samples.some(s=>s.id===id)).toBe(true);
+  expect((await repo.get({...actor('loner'),displayName:'demo-sales'},workspaceId)).state.fulfillment.samples.some(s=>s.id===id)).toBe(false);
+  expect(db.workspaces.get(workspaceId).state.fulfillment.stock).toEqual(original.fulfillment.stock);
+  expect(db.workspaces.get(workspaceId).state.fulfillment.samples.filter((s:any)=>original.fulfillment.samples.some((x:any)=>x.id===s.id))).toEqual(original.fulfillment.samples);
+  for(const old of original.fulfillment.sampleMovements)expect(db.workspaces.get(workspaceId).state.fulfillment.sampleMovements.find((m:any)=>m.id===old.id)).toEqual(old);
+ });
+ it('rejects forged registrar IDs on create/edit without persisting a sample, changed owner or receipt',async()=>{
+  const before=structuredClone(db.workspaces.get(workspaceId)),receipts=db.receipts.size;
+  await expect(executeManual('demo-sales',{type:'fulfillment.samples.create',payload:{...input(),registeredById:'loner'}})).rejects.toMatchObject({status:422,message:expect.stringContaining('登记人')});
+  expect(db.workspaces.get(workspaceId)).toEqual(before);expect(db.receipts.size).toBe(receipts);
+  const created=await executeManual('demo-sales',{type:'fulfillment.samples.create',payload:input()}),id=created.receipt.result.id!,saved=structuredClone(db.workspaces.get(workspaceId)),count=db.receipts.size;
+  await expect(executeManual('demo-sales',{type:'fulfillment.samples.edit',payload:{id,location:'A01',fileIds:[],note:'',registeredById:'loner'}})).rejects.toMatchObject({status:422,message:expect.stringContaining('登记人')});
+  expect(db.workspaces.get(workspaceId)).toEqual(saved);expect(db.receipts.size).toBe(count);
+ });
+ it('does not bypass company binding or products write permission with a manual sample ID',async()=>{
+  const created=await executeManual('demo-sales',{type:'fulfillment.samples.create',payload:input()}),id=created.receipt.result.id!,before=structuredClone(db.workspaces.get(workspaceId)),receipts=db.receipts.size;
+  await expect(repo.get({...actor('demo-sales'),companyId:'22222222-2222-4222-8222-222222222222'},workspaceId)).rejects.toMatchObject({status:404});
+  await expect(executeManual('qc',{type:'fulfillment.samples.move',payload:{id,kind:'move',quantity:0,person:'',location:'B02',note:'不得越权'}})).rejects.toMatchObject({status:403});
+  expect(db.workspaces.get(workspaceId)).toEqual(before);expect(db.receipts.size).toBe(receipts);
+ });
+});
+
 describe('row-level data scope by role', () => {
   it.each(['email.link', 'email.bulk', 'email.draft.save'])('%s rejects a business reference outside the current group', async type => {
     const raw = db.workspaces.get(workspaceId)!.state, message = raw.email.messages[0], account = raw.email.accounts.find((a: any) => a.id === message.accountId);
