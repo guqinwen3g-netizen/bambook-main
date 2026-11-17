@@ -145,6 +145,7 @@ export function InvoicePage() {
   const source = current ? invoiceSource(w.state, current) : null, facts = current ? invoiceFinancialFacts(w.state, current) : null, document = source?.document;
   const order = w.state?.orders.find(o => o.id === current?.orderId), shipment = w.state?.fulfillment.shipments.find(s => s.id === document?.shipmentId);
   const events = (w.state?.events || []).filter(e => e.entityId === current?.id || !!document && e.entityId === document.id).sort((a, b) => b.at.localeCompare(a.at));
+  if(!w.state)return <MistPage><PageHeader eyebrow={uiText('财务与成本 · 票据')} title={uiText('发票管理')} actions={<Button icon={RefreshCw} disabled={w.loading} onClick={()=>void w.refresh()}>{uiText('刷新')}</Button>}/>{w.error&&<FailureNotice title={'票据读取未完成'} detail={w.error} retry={()=>void w.refresh()}/>}<EmptyState title={uiText(w.loading?'正在读取票据':'票据未读取')} compact/></MistPage>;
   return <MistPage>
     <PageHeader eyebrow={uiText("财务与成本 · 票据")} title={uiText(current ? current.code : '发票管理')} actions={current ? <Button icon={ArrowLeft} onClick={back}>{uiText("返回发票台账")}</Button> : <>{tab === 'ar' && canInvoice && <BaseDataImportButton kind="openingReceivable" label={uiText("导入期初应收")} disabled={w.loading} />}<Button icon={Download} disabled={tab !== 'ar' || w.loading} onClick={exportRows}>{uiText("导出当前台账 CSV")}</Button><Button icon={RefreshCw} disabled={w.loading || w.saving} onClick={() => void w.refresh()}>{uiText("刷新")}</Button></>} />
     {w.error && <FailureNotice title={"票据读取未完成"} detail={w.error} retry={() => void w.refresh()} />}

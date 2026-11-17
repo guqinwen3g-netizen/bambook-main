@@ -4,7 +4,7 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 /** 报表中心：客户销售额、订单毛利、应收账龄、订单进度与逾期。销售额与账龄按币种分别统计、不折算；订单毛利可按所选口径（实际结汇 / 月末暂估 / 报价预计）折算人民币，并列不含 / 含出口退税。 */
 import React from 'react';
-import { Clock, Download, Package, Receipt, TrendingUp } from 'lucide-react';
+import { Clock, Download, Package, Receipt, RefreshCw, TrendingUp } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, DataTable, EmptyState, Field, MistPage, PageHeader, Pill, Select, StatCard, StatGrid, Tabs, TextInput, Toolbar, type Column } from '../../../../../components/mist';
 import { platformBusinessDate } from '../../../../../server/src/shared/mistPlatform';
 import { isActiveMistInvoice, isRecognizedMistInvoice, mistMoneyMinor, type MistState } from '../../../../../server/src/shared/mistWorkspace';
@@ -240,6 +240,7 @@ export function PlatformReportsPage() {
     else out(`订单进度-${asOf}.csv`, ['订单', '客户', '交期', '进度%', '交期状态', '逾期天数', '当前环节'], shownProgress.map(r => [r.code, r.customer, r.due, r.progress, PROGRESS_STATUS[r.status].label, r.lateDays, r.state]));
   };
 
+  if(!state)return <MistPage><PageHeader title={uiText('报表中心')} actions={<Button icon={RefreshCw} disabled={workspace.loading} onClick={()=>void workspace.refresh()}>{uiText('刷新')}</Button>}/>{workspace.error&&<FailureNotice title={'读取失败'} detail={workspace.error}/>}<EmptyState title={uiText(workspace.loading?'正在读取报表':'报表未读取')} compact/></MistPage>;
   return <MistPage>
     <PageHeader title={uiText("报表中心")} actions={<>{tab !== 'actual' && <><Button icon={Download} disabled={cannotExport} onClick={() => exportCurrent('csv')}>{uiText("导出 CSV")}</Button><Button icon={Download} disabled={cannotExport} onClick={() => exportCurrent('xlsx')}>{uiText("导出 Excel")}</Button></>}</>} />
     {workspace.error && <FailureNotice title={"读取失败"} detail={workspace.error} />}
