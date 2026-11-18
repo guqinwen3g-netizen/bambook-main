@@ -148,7 +148,7 @@ describe('market action audit regressions',()=>{
   expect(()=>run(s,{type:'market.quotation.status',payload:{id,status:'Sent',evidence:'绕过'}},ctx)).toThrow(/审批/);
   input.lines[0].price='2.00';run(s,{type:'market.quotation.save',payload:{id,input}},ctx);expect(s.market.quotations[0].approvalHistory?.[0].id).toBe(old);expect(s.market.quotations[0].approvalHistory?.[0].details.some(d=>d.value.includes('1.00'))).toBe(true);
   expect(()=>run(s,{type:'market.quotation.status',payload:{id,status:'Sent',evidence:'仍未重审'}},ctx)).toThrow(/审批/);
-  run(s,{type:'market.quotation.submit',payload:{id}},ctx);run(s,{type:'market.quotation.decide',payload:{id,decision:'approved',note:'新版已核对'}},{...ctx,actorId:'leader'});run(s,{type:'market.quotation.status',payload:{id,status:'Sent',evidence:'新版交付'}},ctx);expect(getMarketReviews(s).map(r=>r.status)).toEqual(['rejected','approved']);
+  run(s,{type:'market.quotation.submit',payload:{id}},ctx);run(s,{type:'market.quotation.decide',payload:{id,decision:'approved',note:'新版已核对'}},{...ctx,actorId:'leader'});run(s,{type:'market.quotation.status',payload:{id,status:'Sent',evidence:'新版交付'}},ctx);expect(getMarketReviews(s).map(r=>r.status)).toEqual(['rejected','approved']);expect(getMarketReviews(s).map(r=>r.roundNumber)).toEqual([1,2]);
  });
  it('rejects quoting a customer-owned development (or its product) to another customer at save time',()=>{
   const {ctx,s}=setup(),demo=createMistState(ctx);s.devs=demo.devs;s.versions=demo.versions;const v=s.versions.find(v=>v.qc?.result==='pass')!,dev=s.devs.find(d=>d.id===v.devId)!;

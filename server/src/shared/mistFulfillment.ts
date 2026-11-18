@@ -1356,12 +1356,12 @@ export function purchaseAmendmentText(p: Pick<FulfillmentPurchase, 'unit' | 'cur
     return [a.from.quantity !== a.to.quantity ? `数量 ${a.from.quantity} → ${a.to.quantity} ${p.unit}` : '', a.from.price !== a.to.price ? `单价 ${a.from.price} → ${a.to.price} ${p.currency}` : '', a.from.due !== a.to.due ? `交期 ${a.from.due} → ${a.to.due}` : ''].filter(Boolean).join('；');
 }
 function purchaseAmendmentReviews(root: MistState): MistReviewTask[] {
-    return (root.fulfillment?.purchases || []).flatMap(p => (p.amendments || []).filter(a => a.state !== 'withdrawn').map((a): MistReviewTask => ({
-        id: `procurement-amendment:${a.id}`, kind: 'procurementAmendment', entityId: a.id, title: `${p.code} · ${p.supplier} 合同变更`, requesterId: a.requesterId, reviewerIds: [...a.reviewerIds],
+    return (root.fulfillment?.purchases || []).flatMap(p => (p.amendments || []).flatMap((a, index): MistReviewTask[] => a.state === 'withdrawn' ? [] : [{
+        id: `procurement-amendment:${a.id}`, roundNumber: index + 1, kind: 'procurementAmendment', entityId: a.id, title: `${p.code} · ${p.supplier} 合同变更`, requesterId: a.requesterId, reviewerIds: [...a.reviewerIds],
         status: a.state === 'pending' ? 'pending' : a.state === 'approved' ? 'approved' : 'rejected', submittedAt: a.submittedAt, decision: reviewDecision(a.decision?.actor, a.decision?.at, a.decision?.note), requiredPermission: 'procurement:approve', fileIds: [...a.fileIds], target: { view: 'procurement', id: p.id },
         details: [{ label: '来源', value: fulfillmentSourceLabel(root, { kind: 'orderLine', orderId: p.orderId, lineId: p.lineId }) }, { label: '供应商', value: p.supplier }, { label: '变更内容', value: purchaseAmendmentText(p, a) },
             { label: '合同金额', value: `${reviewMoney(lineAmount(a.from.quantity, a.from.price))} → ${reviewMoney(lineAmount(a.to.quantity, a.to.price))} ${p.currency}` }, { label: '已收', value: `${p.received} ${p.unit}` }, { label: '变更原因', value: a.reason }, { label: '供应商同意依据', value: a.evidence }],
-    })));
+    }]));
 }
 function purchaseReviews(root: MistState): MistReviewTask[] {
     return (root.fulfillment?.purchases || []).filter(p => p.submittedAt).map(p => {

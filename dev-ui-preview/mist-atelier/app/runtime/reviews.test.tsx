@@ -144,6 +144,27 @@ it('opens a payment approval in the payable section at its exact original reques
  await render();await openRow('PR-ONE');await click('打开原业务');
  expect(go).toHaveBeenLastCalledWith('payment-vouchers','payment-one',{section:'payables'});
 });
+it('distinguishes same-title approval rounds in the list and opens the original record', async () => {
+  rows = [
+    row({ id: 'amendment-one', title: 'PO-001 合同变更', kind: 'procurementAmendment', roundNumber: 1,
+      status: 'approved', canDecide: false, details: [{ label: '合同金额', value: '100.00 → 110.00 CNY' }] }),
+    row({ id: 'amendment-three', title: 'PO-001 合同变更', kind: 'procurementAmendment', roundNumber: 3,
+      status: 'approved', canDecide: false, details: [{ label: '合同金额', value: '110.00 → 120.00 CNY' }] }),
+  ];
+  route = { view: 'approvals', section: 'done' };
+  await render();
+  const result = tableRows();
+  expect(result).toHaveLength(2);
+  expect(result[0].textContent).toContain('第 1 轮');
+  expect(result[1].textContent).toContain('第 3 轮');
+  await act(async () => result[1].click());
+  const detail = document.querySelector('[data-approval="amendment-three"]')!;
+  expect(detail.textContent).toContain('110.00 → 120.00 CNY');
+  expect(detail.textContent).toContain('审批轮次');
+  expect(detail.textContent).toContain('第 3 轮');
+  expect(postCount).toBe(0);
+});
+
 it('opens the exact business record when the review belongs to the current workspace',async()=>{
  await render();await openRow();await click('打开原业务');
  expect(go).toHaveBeenLastCalledWith('orders/detail','order-one');

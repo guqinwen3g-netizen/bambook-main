@@ -148,6 +148,7 @@ describe('sup11 approved contract amendment', () => {
     expect(getFulfillmentReviews(f.root).some(r => r.entityId === a)).toBe(false);
     const b = amend(f, id, { quantity: 8 });
     f.run({ type: 'fulfillment.procurement.amend.decide', payload: { id: b, decision: 'rejected', note: '先确认客户追加' } }, reviewer(f));
+    expect(getFulfillmentReviews(f.root).find(r => r.entityId === b)?.roundNumber).toBe(2);
     expect(f.root.fulfillment.purchases.find(x => x.id === id)).toMatchObject({ quantity: 10, price: 2 });
   });
   it('does not change the quantity of a released production branch', () => {

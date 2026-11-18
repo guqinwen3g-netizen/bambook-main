@@ -144,10 +144,10 @@ function reviewAmount(snapshot:OrderGovernanceSnapshot):string{
 export function getOrderGovernanceReviews(root:MistState):MistReviewTask[]{
  const tasks=root.orders.flatMap(source=>{
   const order=source as GovernedOrder;
-  return(order.governance?.rounds||[]).map(round=>{
+  return(order.governance?.rounds||[]).map((round,index)=>{
    const snapshot=round.snapshot,contract=snapshot.contract,internal=contract.kind==='internal',replacement=!!order.replacementSource;
    const sourceCase=replacement?root.platform?.claims.find(claim=>claim.id===order.replacementSource!.claimId):undefined;
-   return{id:'order:'+round.id,kind:'order' as const,entityId:order.id,title:order.code+(round.kind==='change'?' 订单变更审批':' 订单主单审批'),requesterId:round.requesterId,reviewerIds:round.reviewerIds,status:round.status,submittedAt:round.submittedAt,decision:reviewDecision(round.decidedName,round.decidedAt,round.note),requiredPermission:'orders:write',target:{view:'orders/detail',id:order.id},fileIds:contract.confirmationFileIds,details:[
+   return{id:'order:'+round.id,roundNumber:index+1,kind:'order' as const,entityId:order.id,title:order.code+(round.kind==='change'?' 订单变更审批':' 订单主单审批'),requesterId:round.requesterId,reviewerIds:round.reviewerIds,status:round.status,submittedAt:round.submittedAt,decision:reviewDecision(round.decidedName,round.decidedAt,round.note),requiredPermission:'orders:write',target:{view:'orders/detail',id:order.id},fileIds:contract.confirmationFileIds,details:[
     {label:'订单用途',value:replacement?'换货补发':internal?'内部用途订单':'外部客户订单'},
     ...(sourceCase?[{label:'来源案件',value:sourceCase.code}]:[]),
     {label:internal?'接收负责人':'客户',value:internal?contract.receiver:snapshot.customer},

@@ -180,8 +180,8 @@ export function marketCommandPermission(command:MarketCommand):string|null {
 }
 export function getMarketReviews(rootState:MistState):MistReviewTask[] {
  const trials = new Map(rootState.platform?.pricing?.map(trial=>[trial.id,trial]));
- return (rootState.market?.quotations||[]).flatMap(q=>[...(q.approvalHistory||[]),...(q.approval?[q.approval]:[])].map(approval=>({
-  id:approval.id,kind:'quotation' as const,entityId:q.id,title:q.code+' 报价审批',requesterId:approval.requesterId,
+ return (rootState.market?.quotations||[]).flatMap(q=>[...(q.approvalHistory||[]),...(q.approval?[q.approval]:[])].map((approval,index)=>({
+  id:approval.id,roundNumber:index+1,kind:'quotation' as const,entityId:q.id,title:q.code+' 报价审批',requesterId:approval.requesterId,
   reviewerIds:[approval.reviewerId],status:approval.status,submittedAt:approval.submittedAt,
   decision:approval.status==='pending'?undefined:reviewDecision(rootState.members?.find(m=>m.userId===approval.reviewerId)?.name||approval.reviewerId,approval.decidedAt,approval.note),
   requiredPermission:'quotations:approve',target:{view:'quotations',id:q.id},fileIds:approval.fileIds,
