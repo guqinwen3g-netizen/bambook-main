@@ -75,9 +75,16 @@ it('returns an incoming original to its exact development sample and does not of
 beforeEach(()=>{store.workspace={id:'workspace',revision:1};presentedError=undefined;store.error='';write.allowed=true;store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'业务员'},'empty');store.run.mockReset();go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 
+it('keeps independent manual fabric records separate and groups only an explicit archive selection',()=>{
+ const state=store.state!,base={...fabric('first','色样','份',1,1),source:{kind:'manual' as const,description:'展会来样'}};
+ const other={...base,id:'second',code:'SECOND',location:'B'},child={...base,id:'third',code:'THIRD',manualLinks:{archiveId:base.id},form:'米样',unit:'米'};
+ state.fulfillment.samples.push(base,other,child);render(other.id);
+ expect([...host.querySelectorAll('[data-sample-form]')].map(el=>el.getAttribute('data-sample-form'))).toEqual([other.id]);
+ render(child.id);expect([...host.querySelectorAll('[data-sample-form]')].map(el=>el.getAttribute('data-sample-form'))).toEqual([base.id,child.id]);
+});
 it('keeps server registrar metadata out of the manual specimen editor request',async()=>{
  const sample={...fabric('smp-registered-edit','米样','米',3,3),source:{kind:'manual' as const,description:'供应商目录留样'},registeredById:'sales',note:'登记原说明'};store.state!.fulfillment.samples.push(sample);store.run.mockResolvedValue({result:{id:sample.id},revision:2});render(sample.id);
- await act(async()=>getByRole(host,'button',{name:'编辑资料',exact:true}).click());const registrarField=queryByRole(document.body,'textbox',{name:/登记人|registeredBy/i})as HTMLInputElement|null;expect(!registrarField||registrarField.readOnly||registrarField.disabled).toBe(true);act(()=>fireEvent.change(getByRole(document.body,'textbox',{name:'备注',exact:true}),{target:{value:'登记后补充说明'}}));await act(async()=>getByRole(document.body,'button',{name:'下一步',exact:true}).click());await act(async()=>getByRole(document.body,'button',{name:'确认保存',exact:true}).click());
+ await act(async()=>getByRole(host,'button',{name:'编辑资料',exact:true}).click());const registrarField=queryByRole(document.body,'textbox',{name:/登记人|registeredBy/i})as HTMLInputElement|null;expect(!registrarField||registrarField.readOnly||registrarField.disabled).toBe(true);act(()=>fireEvent.change(getByRole(document.body,'textbox',{name:'备注',exact:true}),{target:{value:'登记后补充说明'}}));while(queryByRole(document.body,'button',{name:'下一步',exact:true}))await act(async()=>getByRole(document.body,'button',{name:'下一步',exact:true}).click());await act(async()=>getByRole(document.body,'button',{name:'确认保存',exact:true}).click());
  const command=store.run.mock.calls[0][0];expect(command).toEqual({type:'fulfillment.samples.edit',payload:{id:sample.id,name:sample.name,form:sample.form,size:sample.size,color:sample.color,location:sample.location,note:'登记后补充说明',fileIds:[]}});expect(command.payload).not.toHaveProperty('registeredById');expect(sample.registeredById).toBe('sales');
 });
 

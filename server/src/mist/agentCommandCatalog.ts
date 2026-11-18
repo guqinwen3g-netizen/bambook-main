@@ -1093,15 +1093,19 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "fulfillment.samples.create",
   "payload": "SampleInput",
   "types": {
-   "SampleInput": "Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'fileIds' | 'note' | 'role' | 'shipmentId' | 'sizeQuantities'>&{source:FulfillmentSource}",
-   "FulfillmentSample": "{ shippingQuantityBasis?:import('./mistShipmentSampleCustody').ShippingSampleQuantityBasis; shippingQuantityBasisHistory?:import('./mistShipmentSampleCustody').ShippingSampleQuantityBasis[]; id: string; code: string; name: string; category: string; form: string; unit: string; quantity: number; available: number; location: string; positions?: FulfillmentPosition[]; size: string; sizeQuantities?:FulfillmentSizeQuantity[]; color: string; source: FulfillmentSampleSource; incoming?:IncomingReceiptInfo; registeredById?: string; sourceSampleCode?: string; materialPlan?: string; role?: FulfillmentSampleRole; shipmentId?: string; qualityRevision?: number; fileIds: string[]; note: string; createdAt: string; }",
-   "FulfillmentSource": "{ kind: 'version'; devId: string; versionId: string; } | { kind: 'orderLine'; orderId: string; lineId: string; productionId?: string; } | { kind: 'manual'; description: string; }"
+   "SampleInput": "Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'fileIds' | 'note' | 'role' | 'shipmentId' | 'sizeQuantities'>&{source:FulfillmentSource;manualLinks?:ManualSampleLinks}",
+   "FulfillmentSample": "{ manualLinks?:ManualSampleLinks; shippingQuantityBasis?:import('./mistShipmentSampleCustody').ShippingSampleQuantityBasis; shippingQuantityBasisHistory?:import('./mistShipmentSampleCustody').ShippingSampleQuantityBasis[]; id: string; code: string; name: string; category: string; form: string; unit: string; quantity: number; available: number; location: string; positions?: FulfillmentPosition[]; size: string; sizeQuantities?:FulfillmentSizeQuantity[]; color: string; source: FulfillmentSampleSource; incoming?:IncomingReceiptInfo; registeredById?: string; sourceSampleCode?: string; materialPlan?: string; role?: FulfillmentSampleRole; shipmentId?: string; qualityRevision?: number; fileIds: string[]; note: string; createdAt: string; }",
+   "FulfillmentSource": "{ kind: 'version'; devId: string; versionId: string; } | { kind: 'orderLine'; orderId: string; lineId: string; productionId?: string; } | { kind: 'manual'; description: string; }",
+   "ManualSampleLinks": "{archiveId?:string;productId?:string;customerId?:string;supplierId?:string}"
   },
   "source": "server/src/shared/mistFulfillment.ts"
  },
  {
   "type": "fulfillment.samples.edit",
-  "payload": "{ id: string; location: string; note: string; fileIds: string[]; name?: string; form?: string; size?: string; color?: string; }",
+  "payload": "{ manualLinks?:ManualSampleLinkEdit; id: string; location: string; note: string; fileIds: string[]; name?: string; form?: string; size?: string; color?: string; }",
+  "types": {
+   "ManualSampleLinkEdit": "{productId?:string|null;customerId?:string|null;supplierId?:string|null}"
+  },
   "source": "server/src/shared/mistFulfillment.ts"
  },
  {

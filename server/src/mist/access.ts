@@ -1,3 +1,4 @@
+import { projectManualSampleLinks } from '../shared/mistManualSample';
 import {sanitizeDevelopmentReferenceState} from './developmentReferenceAccess';
 import {heldShipmentRelease} from '../shared/mistRelationHold';
 import {projectOrderFlowEvents} from '../shared/mistOrderFlow';
@@ -340,7 +341,7 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
     const {commercialLoan,...publicMovement}=safe;
     return {...publicMovement,commercialReturn:{location:commercialLoan.sampleLocation,quantity:commercialLoan.quantity,unit:commercialLoan.unit}};
   });
-  return { state: next, hidden,...(costVisible?{costMaterialBasis:scope ? null : financialMaterialCostBasis(state),costClaimBasis}:{}) };
+  return { state: projectManualSampleLinks(next), hidden,...(costVisible?{costMaterialBasis:scope ? null : financialMaterialCostBasis(state),costClaimBasis}:{}) };
 }
 /** 精确匹配附件 ID，不用全文子串判断，避免相似文本开放隐藏附件。 */
 function referencedFiles(state: MistState): Set<string> {

@@ -44,6 +44,27 @@ describe.skipIf(!url)('manual sample source scope on real PostgreSQL',()=>{
  const create=async(user=creator,extra:Record<string,unknown>={})=>{const r=await command(user,'fulfillment.samples.create',{name:'Cotton sample',category:'面料',form:'米样',unit:'米',quantity:3,location:'A',size:'150cm',color:'Blue',note:'Supplier sample',fileIds:[],source:{kind:'manual',description:'Supplier sheet'},...extra});expect(r.status,JSON.stringify(r.body.error)).toBe(200);return r.body.receipt.result.id as string;};
  const lend=async(sampleId:string,to=borrower,user=creator)=>{const r=await command(user,'fulfillment.samples.move',{id:sampleId,kind:'lend',quantity:2,borrowerId:to,location:'',person:'',note:'Sample handover',expectedReturn:'2026-11-20'});expect(r.status,JSON.stringify(r.body.error)).toBe(200);return r.body.receipt.result.id as string;};
  const returning=(sampleId:string,loanId:string,quantity=1)=>command(borrower,'fulfillment.samples.move',{id:sampleId,kind:'return',quantity,loanId,person:borrower,location:'B',note:'Checked and returned'});
+ it('keeps customer references within the readable scope even when another account can handle the same sample',async()=>{
+  const record=await raw(),state=record.state as unknown as ReturnType<typeof createMistState>;
+  const ownCustomer=randomUUID(),peerCustomer=randomUUID();
+  for(const [id,ownerId] of [[ownCustomer,creator],[peerCustomer,stranger]]){
+   state.customers.push({id,ownerId,name:'Customer '+id,code:'C-'+id,country:'',city:'',industry:'',owner:'',grade:'',currency:'CNY',terms:'',incoterm:'',categories:'',creditLimit:0,since:''});
+  }
+  await db.mistWorkspace.update({where:{id:wid},data:{state:state as any}});
+  const sampleId=await create(creator,{manualLinks:{customerId:ownCustomer}});await lend(sampleId);
+  const own=(await get(creator)).body.workspace.state.fulfillment.samples.find((s:any)=>s.id===sampleId);
+  expect(own.manualLinks).toEqual({customerId:ownCustomer});
+  const hidden=(await get(borrower)).body.workspace.state.fulfillment.samples.find((s:any)=>s.id===sampleId);
+  expect(hidden).toBeDefined();expect(hidden.manualLinks).toBeUndefined();
+  const before=await raw(),n=await receipts(),input={id:sampleId,note:own.note,location:own.location,fileIds:[]};
+  expect((await command(borrower,'fulfillment.samples.edit',{...input,manualLinks:{customerId:null}})).status).toBe(404);
+  expect((await command(borrower,'fulfillment.samples.edit',{...input,manualLinks:{customerId:peerCustomer}})).status).toBe(404);
+  expect((await command(creator,'fulfillment.samples.edit',{...input,manualLinks:{customerId:randomUUID()}})).status).toBe(404);
+  const after=await raw();expect(after.state).toEqual(before.state);expect(after.revision).toBe(before.revision);expect(await receipts()).toBe(n);
+  const directory=(await get(creator)).body.workspace.state.customers;expect(directory.some((c:any)=>c.id===peerCustomer)).toBe(true);
+  expect((await command(creator,'fulfillment.samples.edit',{...input,manualLinks:{customerId:peerCustomer}})).status).toBe(200);
+  expect((await get(stranger)).body.workspace.state.fulfillment.samples.some((s:any)=>s.id===sampleId)).toBe(false);
+ });
  it('uses a trusted registration identity and never treats equal names as access',async()=>{
   const id=await create();expect(((await raw()).state as any).fulfillment.samples.find((s:any)=>s.id===id).registeredById).toBe(creator);
   expect((await get(creator)).body.workspace.state.fulfillment.samples.some((s:any)=>s.id===id)).toBe(true);expect((await get(head)).body.workspace.state.fulfillment.samples.some((s:any)=>s.id===id)).toBe(true);

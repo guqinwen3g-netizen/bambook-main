@@ -1057,6 +1057,21 @@ export class MistRepository {
         const assignedMainReview=input.command?.type==='order.governance.decide'?this.reviews(row.state).find(t=>t.kind==='order'&&t.id.startsWith('order:')&&t.status==='pending'&&t.entityId===input.command.payload.id&&t.reviewerIds.includes(actor.userId)&&hasScope(actor,t.requiredPermission as any)):undefined;
         const crossRefs=new Set([...(crossTarget?[crossTarget]:[]),...(crossDirectTarget?[crossDirectTarget]:[]),...(fabricCandidate?[fabricCandidate.fabricOrderId,fabricCandidate.fabricLineId]:[]),...(incoming?[incoming.id]:[])]);
         if (earlyScope && !scopeManagement && scopedReferenceViolation(row.state, earlyScope, input.command?.payload, ['market.quotation.save','order.create','order.governance.saveDraft'].includes(input.command?.type),crossRefs)) fail('NOT_FOUND', '来源记录不存在或不在当前账号的业务范围内', 404);
+        const sampleCommand=input.command;
+        if((sampleCommand?.type==='fulfillment.samples.create'||sampleCommand?.type==='fulfillment.samples.edit')&&sampleCommand.payload.manualLinks){
+          const visible=this.accessView(row,actor,earlyScope).state;
+          const previous=sampleCommand.type==='fulfillment.samples.edit'?row.state.fulfillment.samples.find(s=>s.id===sampleCommand.payload.id)?.manualLinks:undefined;
+          const links=sampleCommand.payload.manualLinks;
+          for(const [key,newId] of Object.entries(links)){
+            const allowed=key==='productId'?visible.market.products:key==='customerId'?visible.customers:key==='supplierId'?visible.market.suppliers:visible.fulfillment.samples;
+            const priorId=previous?.[key as keyof typeof previous];
+            if([newId,priorId].some(id=>typeof id==='string'&&id&&!allowed.some((entry:{id:string})=>entry.id===id)))fail('NOT_FOUND','关联资料不存在或不在当前账号的范围内',404);
+            if(key==='archiveId'){
+              const archive=row.state.fulfillment.samples.find(s=>s.id===newId)?.manualLinks?.archiveId;
+              if(archive&&!visible.fulfillment.samples.some(s=>s.id===archive))fail('NOT_FOUND','手工面料档案不在当前账号的范围内',404);
+            }
+          }
+        }
         if(upload&&input.claimId!==undefined)activeUploadClaim(row.state,input.claimId);
         const context = this.context(actor, input.command?.type?.startsWith('email.') ? undefined : row.state);
         if(input.command?.type==='fulfillment.documents.issue'){

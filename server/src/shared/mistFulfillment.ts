@@ -37,6 +37,7 @@ import { heldShipmentRelease, relationHoldReason } from './mistRelationHold';
 import { assertOrderLineOpen, assertShipmentWithinTolerance, orderInvoiceCapProblem } from './mistOrderClosure';
 import {applyCustomsDeclarationCommand,customsItemsStale,CUSTOMS_DECLARATION_COMMANDS,type CustomsClassification,type CustomsDeclarationCommand,type CustomsDeclarationItem} from './mistCustomsDeclaration';
 import {applyClaimInventoryCommand,claimInventoryPermission,type ClaimInventoryCommand,type ClaimInventoryWarehouse,type ClaimReturnReceipt,type ClaimReceivedRecord} from './mistClaimInventory';
+import { normalizeManualSampleLinks, type ManualSampleLinks, type ManualSampleLinkEdit } from './mistManualSample';
 export type FulfillmentSource = {
     kind: 'version';
     devId: string;
@@ -75,6 +76,7 @@ export type FulfillmentProductionFact = {
 export const PRODUCTION_HOLD_CATEGORIES = { quality: '质量问题', material: '缺料 / 物料问题', customer: '客户要求暂停', factory: '工厂产能 / 停工', other: '其他' } as const;
 export type FulfillmentProductionHold = { at: string; actor: string; category: keyof typeof PRODUCTION_HOLD_CATEGORIES; reason: string };
 export type FulfillmentSample = {
+    manualLinks?:ManualSampleLinks;
     shippingQuantityBasis?:import('./mistShipmentSampleCustody').ShippingSampleQuantityBasis;
     shippingQuantityBasisHistory?:import('./mistShipmentSampleCustody').ShippingSampleQuantityBasis[];
     id: string;
@@ -525,7 +527,7 @@ export type FulfillmentState = {
     documents: FulfillmentDocument[];
 };
 type PurchaseInput = Pick<FulfillmentPurchase, 'orderId' | 'lineId' | 'kind' | 'materialKind' | 'stageTerms' | 'iqcRequired' | 'supplierId' | 'supplier' | 'description' | 'quantity' | 'unit' | 'price' | 'currency' | 'due' | 'terms' | 'destination' | 'note' | 'fileIds'>;
-type SampleInput = Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'fileIds' | 'note' | 'role' | 'shipmentId' | 'sizeQuantities'>&{source:FulfillmentSource};
+type SampleInput = Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'fileIds' | 'note' | 'role' | 'shipmentId' | 'sizeQuantities'>&{source:FulfillmentSource;manualLinks?:ManualSampleLinks};
 type ShipmentInput = {packingDetailVersion?:2;packingColorVersion?:1} & Pick<FulfillmentShipment, 'consignee' | 'mode' | 'portOfLoading' | 'portOfDischarge' | 'incoterm' | 'plannedDate' | 'booking' | 'lines' | 'note' | 'fileIds'>;
 export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportCommand | QcDispositionCommand | {type:'fulfillment.samples.shippingBasis';payload:ShippingSampleBasisInput} | {
     type: 'fulfillment.samples.create';
@@ -536,6 +538,7 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
 } | {
     type: 'fulfillment.samples.edit';
     payload: {
+        manualLinks?:ManualSampleLinkEdit;
         id: string;
         location: string;
         note: string;
@@ -1145,7 +1148,8 @@ function addSample(root: MistState, input: Omit<SampleInput,'source'>&{source:Fu
         } else if (input.shipmentId) fail('产前/先锋样不绑定出运批次');
     } else if (input.role || input.shipmentId) fail('订单样品角色仅用于准确订单生产分支');
     const id = ctx.id();
-    f.samples.push({ id, code: code('SMP', f.samples, ctx), name: text(input.name, '名称'), category, form: text(input.form, '形态'), unit, quantity, available: quantity, location: text(input.location, '位置', false), size: sizeQuantities?sizeQuantities.map(row=>`${row.size} ${row.quantity}`).join(' / '):text(input.size, '尺码', false),...(sizeQuantities?{sizeQuantities}:{}), color: text(input.color, '颜色', false), source: s, ...(s.kind === 'manual' && ctx.actorId ? {registeredById:ctx.actorId} : {}), ...(s.kind === 'version' ? { sourceSampleCode: get(root.versions, s.versionId, '来源版本').sample } : {}), ...(input.role ? { role: input.role } : {}), ...(s.kind === 'orderLine' && input.role === 'pp' ? {materialPlan:garmentMaterialFingerprint(root,s.orderId,s.lineId)} : {}), ...(input.shipmentId ? { shipmentId: input.shipmentId } : {}), qualityRevision: 1, fileIds: files(root, input.fileIds), note: text(input.note, '备注', false), createdAt: ctx.now });
+    const manualLinks=input.manualLinks===undefined?undefined:normalizeManualSampleLinks(root,ctx,{source:s,category},input.manualLinks);
+    f.samples.push({ id, ...(manualLinks?{manualLinks}:{}), code: code('SMP', f.samples, ctx), name: text(input.name, '名称'), category, form: text(input.form, '形态'), unit, quantity, available: quantity, location: text(input.location, '位置', false), size: sizeQuantities?sizeQuantities.map(row=>`${row.size} ${row.quantity}`).join(' / '):text(input.size, '尺码', false),...(sizeQuantities?{sizeQuantities}:{}), color: text(input.color, '颜色', false), source: s, ...(s.kind === 'manual' && ctx.actorId ? {registeredById:ctx.actorId} : {}), ...(s.kind === 'version' ? { sourceSampleCode: get(root.versions, s.versionId, '来源版本').sample } : {}), ...(input.role ? { role: input.role } : {}), ...(s.kind === 'orderLine' && input.role === 'pp' ? {materialPlan:garmentMaterialFingerprint(root,s.orderId,s.lineId)} : {}), ...(input.shipmentId ? { shipmentId: input.shipmentId } : {}), qualityRevision: 1, fileIds: files(root, input.fileIds), note: text(input.note, '备注', false), createdAt: ctx.now });
     f.sampleMovements.push({ id: ctx.id(), sampleId: id, kind: 'receive', quantity, person: ctx.actorName, location: input.location, note: input.note, at: ctx.now, actor: ctx.actorName });
     return id;
 }
@@ -1475,6 +1479,10 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (Object.prototype.hasOwnProperty.call(p, 'registeredById')) fail('样品登记人由系统记录');
             const s = get(f.samples, p.id, '样品');
             if(s.sizeQuantities&&p.size!==undefined&&p.size!==s.size)fail('船样实际尺码件数已登记，实物变更请重新登记本批船样');
+            if(p.manualLinks!==undefined){
+                const links=normalizeManualSampleLinks(root,ctx,s,p.manualLinks);
+                if(links)s.manualLinks=links;else delete s.manualLinks;
+            }
             const changedPhysical = ['form', 'size', 'color'].some(key => p[key] !== undefined && p[key] !== (s as any)[key]);
             if(changedPhysical&&commercialSampleHasLoan(root as MistState,s.id))fail('商业借样未归还，实物组合不能改写');
             if(changedPhysical&&s.shippingQuantityBasis?.consumption)fail('已随本批出运的实物规格已锁定');

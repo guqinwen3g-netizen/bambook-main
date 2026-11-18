@@ -22,7 +22,7 @@ type Authority = { key: string; userId?: string; companyId?: string; status: str
 function recoveryStorageKey(kind: 'pending' | 'pending-create' | 'selected-workspace', bound: Authority) {
   return 'bambook.mist.' + kind + ':' + bound.userId + (bound.companyId ? ':' + bound.companyId : '');
 }
-export type MistCommandRecovery={workspaceId:string;requestId:string;actorId:string;revision:number};
+export type MistCommandRecovery={workspaceId:string;requestId:string;actorId:string;revision:number;resultId?:string};
 export interface MistWorkspaceContext {
   agentTaskNotices?:AgentTaskNotices;
   state: MistState | null; workspace: MistWorkspaceEnvelope | null; workspaces: Array<{ id: string; name: string; shared?: boolean }>;
@@ -698,7 +698,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
     const token = lock(); setError('');
     const recovered=(acknowledged:MistRunReceipt)=>{
       assertSource(authority,boundEpoch,boundWorkspaceId);
-      if(intent.kind==='command')setCommandRecovery({workspaceId:intent.workspaceId,requestId:intent.requestId,actorId:authority.userId!,revision:acknowledged.revision});
+      if(intent.kind==='command')setCommandRecovery({workspaceId:intent.workspaceId,requestId:intent.requestId,actorId:authority.userId!,revision:acknowledged.revision,...(typeof acknowledged.result.id==='string'?{resultId:acknowledged.result.id}:{})});
       return acknowledged;
     };
     try {
