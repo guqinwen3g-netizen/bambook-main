@@ -12,7 +12,7 @@ import { developmentClosure, factoryTaskSync } from './mistDevelopmentRounds';
 import { creditDocumentFingerprint } from './mistCreditDocuments';
 
 import { devStageChainText } from './mistDevelopmentStages';
-export const DEV_NOTICE_TEMPLATE_VERSION = 3 as const;
+export const DEV_NOTICE_TEMPLATE_VERSION = 4 as const;
 export type DevNoticeContent = {
   materials?:Array<{sku:string;name:string;position:string;specification:string;perPiece:string;unit:string;color:string;colorMode:string;colorReference:string;provider:string;nature:string;technical?:Array<{label:string;value:string}>}>;
   domain: DevelopmentDomain; title: string; factory: string;

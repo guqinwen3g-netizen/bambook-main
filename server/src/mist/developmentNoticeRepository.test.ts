@@ -117,5 +117,6 @@ describe('BB-DEV-4 试样通知单',()=>{
   expect(html).toContain('2026-10-16 16:00（北京时间）');
   expect(html).not.toContain('Template v');
   expect(html).not.toContain('version-note');
+  expect(html).toContain('@bottom-right{content:"DEV-F-1-R1-A-1-N01 · " counter(page)');
  });
 });
