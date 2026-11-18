@@ -53,7 +53,7 @@ function ProposalCard({ proposal, onOpen, onDecide }: { proposal: AgentProposal;
     <div className="mist-row">{quick ? <><Button size="sm" variant="ai" loading={busy} disabled={busy} onClick={() => void decide(true)}>{uiText('确认执行')}</Button><Button size="sm" variant="quiet" disabled={busy} onClick={() => void decide(false)}>{uiText('拒绝')}</Button><span className="mist-spacer" /><Button size="sm" variant="quiet" disabled={busy} onClick={() => onOpen(proposal.id)}>{uiText('查看并确认')}</Button></> : <Button size="sm" variant="ai" onClick={() => onOpen(proposal.id)}>{uiText('查看并确认')}</Button>}</div></div>;
 }
 
-export type ThreadActions = { onAnswer: (task: AgentTaskView, id: string, text: string) => void; onCancel: (task: AgentTaskView) => void; onRetry: (text: string) => void; onCopy: (text: string) => void; onDraft: (text: string) => void; onAutomate: (text: string) => void; onOpenRecord: OpenRecord; onProposal: (id: string) => void; onDecide?: (id: string, confirm: boolean) => Promise<void>; onOpenFile?: (fileId: string) => void };
+export type ThreadActions = { onAnswer: (task: AgentTaskView, id: string, text: string) => void; onCancel: (task: AgentTaskView) => void; onRetry?: (text: string) => void; onCopy: (text: string) => void; onDraft: (text: string) => void; onAutomate: (text: string) => void; onOpenRecord: OpenRecord; onProposal: (id: string) => void; onDecide?: (id: string, confirm: boolean) => Promise<void>; onOpenFile?: (fileId: string) => void };
 
 /** 本轮确认后生成的文件：放在回答下方，点开即下载。 */
 function ProducedFiles({ proposals, onOpen }: { proposals: AgentProposal[]; onOpen: (fileId: string) => void }) {
@@ -90,7 +90,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         <div className="mist-xz-acts">
           {/* 办理中的停止在输入框；等待中的任务在这里停。 */}{active && t.canControl && !['queued', 'running'].includes(t.state) && <Button size="sm" variant="quiet" icon={Square} onClick={() => actions.onCancel(t)}>{uiText('停止')}</Button>}
           {done && t.result && <><IconButton size="sm" icon={Copy} label={uiText('复制')} onClick={() => actions.onCopy(t.result)} /><IconButton size="sm" icon={FileText} label={uiText('保存草稿')} onClick={() => actions.onDraft(t.result)} /></>}
-          {done && <IconButton size="sm" icon={RotateCcw} label={uiText('重新提问')} onClick={() => actions.onRetry(request)} />}
+          {done && actions.onRetry && <IconButton size="sm" icon={RotateCcw} label={uiText('重新提问')} onClick={() => actions.onRetry?.(request)} />}
           {done && t.state === 'succeeded' && <IconButton size="sm" icon={Zap} label={uiText('设为自动规则')} onClick={() => actions.onAutomate(request)} />}
           {done && <time className="mist-xz-time" dateTime={t.updatedAt}>{clock(t.updatedAt || t.createdAt)}</time>}
         </div>

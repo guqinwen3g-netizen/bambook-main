@@ -18,7 +18,7 @@ import { materialDeliveryRequired, materialDeliveryTargets, internalFabricCandid
 import { productionSampleRequirements, type ProductionSampleRequirement } from './mistProductionSamples';
 
 /** 受限账号的数据范围：账号集合为本人 + 部门领导所辖成员；teamIds 为本人所在的在用小组。 */
-export type MistDataScope = { userIds: string[]; teamIds: string[]; lines?: Array<'fabric' | 'garment'> };
+export type MistDataScope = { actorId?: string; userIds: string[]; teamIds: string[]; lines?: Array<'fabric' | 'garment'> };
 
 /** 受行级范围裁剪的集合（路径 = 状态内位置）。写入校验也只对这些集合生效。 */
 export const SCOPED_COLLECTIONS = [
@@ -150,7 +150,10 @@ export function scopedVisibility(state: MistState, scope: MistDataScope, include
   for (const row of f.stockTransfers ?? []) if (has('fulfillment.stock', row.stockId)) add('fulfillment.stockTransfers', row.id);
   for (const row of (state as MistState & { orderCosts?: OrderCostState }).orderCosts?.expenses ?? []) if (row.shares?.length && row.shares.every(share => collaboratingOrders.has(share.orderId))) add('orderCosts.expenses', row.id);
 
-  for (const path of ['platform.boms', 'platform.invoiceDrafts', 'platform.assistantDrafts'] as const) for (const row of get(state, path)) if (collaboratingOrders.has(row.orderId)) add(path, row.id);
+  for (const path of ['platform.boms', 'platform.invoiceDrafts'] as const) for (const row of get(state, path)) if (collaboratingOrders.has(row.orderId)) add(path, row.id);
+  for (const draft of state.platform?.assistantDrafts ?? []) {
+    if (draft.orderId ? collaboratingOrders.has(draft.orderId) : !!scope.actorId && draft.ownerId === scope.actorId) add('platform.assistantDrafts', draft.id);
+  }
   // Pricing trials on a quotation line and reference costs on a development version follow that quotation / development.
   for (const row of get(state, 'platform.pricing')) if (row.quotationId && out.get('market.quotations')!.has(row.quotationId)) add('platform.pricing', row.id);
   for (const row of get(state, 'platform.boms')) if (!row.orderId && row.devId && devs.has(row.devId)) add('platform.boms', row.id);
@@ -255,7 +258,8 @@ export function canGenerateScopedStatement(state: MistState, scope: MistDataScop
 /** 按受限范围裁剪状态（不改原对象）。动态、待办、通知、日历按其指向的记录同步裁剪；本人被指派的待办始终保留。 */
 /** Partial projections carry hiddenCount 1/0 only: the exact number of out-of-scope rows is itself hidden data. */
 export function applyDataScope(state: MistState, scope: MistDataScope, actorId: string): MistState {
-  const visible = scopedVisibility(state, scope), writable = scopedVisibility(state, scope, false), next: any = { ...state };
+  const viewer = { ...scope, actorId };
+  const visible = scopedVisibility(state, viewer), writable = scopedVisibility(state, viewer, false), next: any = { ...state };
   const hiddenFiles = new Set<string>(), knownFiles = new Set((state.files ?? []).map(file => file.id));
   const hideFiles = (value: unknown): void => { if (typeof value === 'string') { if (knownFiles.has(value)) hiddenFiles.add(value); } else if (Array.isArray(value)) value.forEach(hideFiles); else if (value && typeof value === 'object') Object.values(value).forEach(hideFiles); };
   Object.defineProperty(next, HIDDEN_FILES, { value: hiddenFiles });

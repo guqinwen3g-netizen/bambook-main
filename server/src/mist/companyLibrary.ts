@@ -95,5 +95,5 @@ export async function companyDataScope(db: any, row: { companyId?: string | null
   }
   // 业务线主管（R7，P4）：持主管权限且设置了管理业务线者，本线全部业务可见。
   const lines = hasScope(actor, LINE_SUPERVISOR_SCOPE as any) ? memberGroups(row.state, actor.userId) : [];
-  return { userIds: [...userIds], teamIds, ...(lines.length ? { lines } : {}) };
+  return { actorId: actor.userId, userIds: [...userIds], teamIds, ...(lines.length ? { lines } : {}) };
 }

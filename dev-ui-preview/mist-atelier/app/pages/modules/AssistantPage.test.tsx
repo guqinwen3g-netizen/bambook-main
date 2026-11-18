@@ -20,6 +20,37 @@ it('is the single AI page with no sub-page tabs, and without the task channel of
   expect(host.textContent).not.toContain('我的 Agent');expect(host.textContent).not.toContain('工作助手');
   expect(button('任务')).toBeUndefined();
 });
+it('retains completed task conversations while the worker is offline and requires a new thread for text-only chat', async () => {
+  mock.api.mockImplementation(async (url: string) => {
+    if (url.includes('/agent-identities')) return { items: [{ id: 'personal', kind: 'personal', state: 'active' }] };
+    if (url.endsWith('/agent-task-capabilities')) return { platformAvailable: false };
+    if (url.endsWith('/agent-tasks')) return { items: [{ id: 'retained', identityId: 'personal', executor: 'platform',
+      name: '原业务任务', instructions: '核对历史业务任务', conversationId: 'old-conversation', state: 'succeeded',
+      result: '原任务真实读回', checkpoint: '', questions: [], waitingProposalIds: [], version: 4, canControl: false,
+      createdAt: '2026-11-07T00:00:00Z', updatedAt: '2026-11-07T01:00:00Z' }], nextCursor: null };
+    return { items: [] };
+  });
+  mock.fetch.mockImplementation(async (url: string) => response(url.endsWith('/status')
+    ? { configured: true, models: ['test-model'] }
+    : { text: '新的问答结果', mode: 'read_only', revision: 1, sources: [] }));
+  await mount();
+  expect(button('对话列表')).toBeTruthy();
+  await click('核对历史业务任务');
+  expect(host.textContent).toContain('原任务真实读回');
+  expect(host.textContent).toContain('任务服务暂不可用');
+  expect(button('重新提问')).toBeUndefined();
+  await question('留到任务服务恢复再问');
+  expect(button('发送')!.disabled).toBe(true);
+  await click('发送');
+  expect(mock.fetch.mock.calls.some(([url])=>String(url).endsWith('/assistant'))).toBe(false);
+  await click('新对话');
+  await question('新独立问答');
+  expect(button('发送')!.disabled).toBe(false);
+  await click('发送');
+  expect(host.textContent).toContain('新的问答结果');
+  expect(mock.workspace.run).not.toHaveBeenCalled();
+});
+
 it('shows a task-read failure and preserves the unsent question instead of silently switching to direct model requests',async()=>{
  mock.fetch.mockResolvedValue(response({configured:true,models:['test-model']}));mock.api.mockRejectedValue(new Error('任务列表暂时不可读取'));await mount();await question('保留未发送的问题');expect(host.textContent).toContain('任务列表暂时不可读取');expect(button('重新读取任务')).toBeTruthy();expect(button('发送')!.disabled).toBe(true);await click('发送');expect(mock.fetch.mock.calls.filter(([url])=>!String(url).endsWith('/status'))).toHaveLength(0);expect((host.querySelector('textarea')as HTMLTextAreaElement).value).toBe('保留未发送的问题');
 });
@@ -94,4 +125,22 @@ it('sends exact selected identities on the platform path even when two source la
  mock.fetch.mockResolvedValue(response({configured:true,models:['test-model']}));let posted:any;
  mock.api.mockImplementation(async(url:string,init:any)=>{if(init?.method==='POST'){posted=JSON.parse(init.body);throw new Error('local task capture');}if(url.includes('/agent-identities'))return{items:[{id:'personal',kind:'personal',state:'active'}]};if(url.endsWith('/agent-task-capabilities'))return{platformAvailable:true};return{items:[],nextCursor:null};});
  mock.workspace.state.invoices.push({id:'invoice',code:'SO-SELECTED',customer:'Fixture',amount:10,open:10,currency:'USD'});await mount();await click('引用业务记录');await click('加入问题');const type=document.querySelector<HTMLSelectElement>('select[aria-label="检索对象"]')!;await act(async()=>{type.value='invoices';type.dispatchEvent(new Event('change',{bubbles:true}));});await click('加入问题');await question('核对所选两条资料');await click('发送');expect(posted.intentRefs).toEqual([{kind:'orders',id:'order'},{kind:'invoices',id:'invoice'}]);expect(mock.fetch.mock.calls.some(([url])=>String(url).endsWith('/assistant'))).toBe(false);
+});
+
+it('retries a failed automation read and only shows an empty list after success', async () => {
+  let unavailable = true;
+  mock.api.mockImplementation(async (url: string) => {
+    if (url.endsWith('/agent-task-capabilities')) return { platformAvailable: true };
+    if (url.endsWith('/agent-automations') && unavailable) throw new Error('规则暂时无法读取');
+    return { items: [], nextCursor: null };
+  });
+  mock.fetch.mockResolvedValue(response({ configured: true, models: ['test-model'] }));
+  await mount();
+  await click('自动规则');
+  expect(document.body.textContent).toContain('规则暂时无法读取');
+  expect(document.body.textContent).not.toContain('还没有规则');
+  unavailable = false;
+  await click('重新读取');
+  expect(document.body.textContent).toContain('还没有规则');
+  expect(document.body.textContent).not.toContain('规则暂时无法读取');
 });

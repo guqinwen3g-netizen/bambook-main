@@ -5,6 +5,7 @@ import { Banner, Button, Drawer, EmptyState, Field, IconButton, Pill, Select, Sw
 import { uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { mistApiRequest } from '../../runtime/workspace';
 import { useNav } from '../../nav';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 type Trigger = 'new_mail' | 'new_receipt' | 'due_soon' | 'daily';
 type Rule = { id: string; name: string; trigger: Trigger; time: string; instructions: string; enabled: boolean; version: number; runs: Array<{ at: string; taskId: string; detail: string }>; halted?: { message: string } };
@@ -19,12 +20,27 @@ const label = (t: Trigger) => TRIGGERS.find(x => x.value === t)!.label;
 
 export function XiaozhuAutomations({ open, onClose, workspaceId, seed, newRule }: { open: boolean; onClose: () => void; workspaceId?: string; seed?: string; newRule?: number }) {
   const { go } = useNav(), toast = useToast(), base = workspaceId ? '/api/mist/workspaces/' + encodeURIComponent(workspaceId) + '/agent-automations' : '';
-  const [rules, setRules] = React.useState<Rule[]>([]), [loading, setLoading] = React.useState(false), [error, setError] = React.useState('');
-  const rulesRef = React.useRef(rules); rulesRef.current = rules;
+  const [rules, setRules] = React.useState<Rule[] | null>(null), [loading, setLoading] = React.useState(false);
+  const [readError, setReadError] = React.useState(''), [error, setError] = React.useState('');
+  const readGeneration = React.useRef(0);
   const [draft, setDraft] = React.useState<{ trigger: Trigger; name: string; instructions: string; time: string } | null>(null), [busy, setBusy] = React.useState(false);
   const load = React.useCallback(async () => {
-    if (!base) return; setLoading(l => l || !rulesRef.current.length);
-    try { setRules(((await mistApiRequest(base)) as { items: Rule[] }).items); setError(''); } catch (e) { setError(e instanceof Error ? e.message : '读取失败'); } finally { setLoading(false); }
+    if (!base) return;
+    const generation = ++readGeneration.current;
+    setLoading(true);
+    try {
+      const result = await mistApiRequest(base) as { items: Rule[] };
+      if (!Array.isArray(result.items)) throw new Error('规则响应无效');
+      if (generation !== readGeneration.current) return;
+      setRules(result.items);
+      setReadError('');
+    } catch (e) {
+      if (generation !== readGeneration.current) return;
+      if (e instanceof Error && 'status' in e && [401, 403, 404].includes(Number(e.status))) setRules(null);
+      setReadError(e instanceof Error ? e.message : '读取失败');
+    } finally {
+      if (generation === readGeneration.current) setLoading(false);
+    }
   }, [base]);
   React.useEffect(() => { if (open) void load(); else setDraft(null); }, [open, load]);
   React.useEffect(() => { if (open && seed) setDraft({ trigger: 'daily', name: seed.slice(0, 20), instructions: seed, time: '09:00' }); }, [open, seed]);
@@ -38,6 +54,7 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, seed, newRule }
   const remove = (r: Rule) => act(() => mistApiRequest(base + '/' + r.id, { method: 'DELETE' }));
   return <Drawer open={open} onClose={onClose} size="lg" title={uiText('自动')} tone="ai" footer={draft ? undefined : <Button icon={Plus} variant="primary" onClick={start}>{uiText('新建规则')}</Button>}>
     <div className="mist-col">
+      {readError && <FailureNotice title={uiText("规则读取失败")} detail={readError} retry={loading ? undefined : () => void load()} retryLabel="重新读取" />}
       {error && <Banner tone="bad" title={uiText(error)} />}
       {draft && <div className="mist-col">
         <Field label={uiText('什么时候')} required><Select aria-label={uiText('触发条件')} value={draft.trigger} options={TRIGGERS.map(t => ({ value: t.value, label: uiText(t.label) }))} onChange={e => pick(e.target.value as Trigger)} /></Field>
@@ -46,8 +63,8 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, seed, newRule }
         <Field label={uiText('要做什么')} required><TextArea aria-label={uiText('规则要做什么')} rows={3} maxLength={2000} value={draft.instructions} onChange={e => setDraft({ ...draft, instructions: e.target.value })} /></Field>
         <div className="mist-row"><span className="mist-spacer" /><Button disabled={busy} onClick={() => setDraft(null)}>{uiText('取消')}</Button><Button variant="primary" loading={busy} disabled={busy || !draft.name.trim() || !draft.instructions.trim()} onClick={() => void create()}>{uiText('开启')}</Button></div>
       </div>}
-      {!rules.length && !draft && !loading && <EmptyState title={uiText('还没有规则')} compact />}
-      {rules.map(r => <div className="mist-col mist-section" key={r.id}>
+      {rules?.length === 0 && !draft && !loading && !readError && <EmptyState title={uiText('还没有规则')} compact />}
+      {rules?.map(r => <div className="mist-col mist-section" key={r.id}>
         <div className="mist-row"><b>{r.name}</b><Pill tone="ai">{uiText(label(r.trigger))}{timed(r.trigger) ? ' ' + r.time : ''}</Pill><span className="mist-spacer" />
           <Switch ariaLabel={uiText(`开启 ${r.name}`)} checked={r.enabled} disabled={busy} onChange={v => void toggle(r, v)} />
           <IconButton icon={Trash2} label={uiText(`删除 ${r.name}`)} disabled={busy} onClick={() => void remove(r)} /></div>

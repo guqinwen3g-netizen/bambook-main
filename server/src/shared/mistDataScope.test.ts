@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import { applyDataScope, scopedWriteViolation } from './mistDataScope';
 import { assertOrderDepositCovered, orderDepositCoverage, orderFundingCoveredAmount } from './mistOrderFunding';
 import { projectState } from '../mist/access';
+import { applyMistCommand, createMistState } from './mistWorkspace';
 it('does not spread upstream incoming originals to a team that only reads a development through its own order',()=>{
  const state:any={customers:[{id:'c',ownerId:'another'}],crm:{opportunities:[],followUps:[]},devs:[{id:'dev',customerId:'c',ownerId:'another',values:{domain:'fabric'}}],versions:[{id:'v',devId:'dev'}],market:{quotations:[],suppliers:[]},orders:[{id:'o',customerId:'c',ownerId:'another',type:'fabric'}],orderLines:[{id:'l',orderId:'o',sourceDevId:'dev',sourceVersionId:'v'}],fulfillment:{samples:[{id:'incoming',source:{kind:'developmentIncoming',devId:'dev',receiptId:'r'},fileIds:[]},{id:'returned',source:{kind:'version',devId:'dev',versionId:'v'},fileIds:[]}]},platform:{},events:[],tasks:[],notifications:[],calendar:[],teamScopes:[{teamId:'team',conditions:[],picks:[{kind:'order',id:'o'}],exclusions:[]}]};
  const visible=applyDataScope(state,{userIds:['me'],teamIds:['team']});expect(visible.devs.some(d=>d.id==='dev')).toBe(true);expect(visible.fulfillment.samples.some(s=>s.id==='returned')).toBe(true);expect(visible.fulfillment.samples.some(s=>s.id==='incoming')).toBe(false);
@@ -259,4 +260,18 @@ it('shows a fabric supplier its allocated metres without exposing or granting wr
  expect(projected.orders.map(row=>row.id)).toEqual(['fabric']);expect(JSON.stringify(projected)).not.toContain('private customer');
  const after=structuredClone(state);after.internalFabricAllocations[0].metres='190';
  expect(scopedWriteViolation(state,after,scope)).toMatchObject({path:'internalFabricAllocations',id:'allocation'});
+});
+
+it('lets an ordinary actor create and read their unlinked assistant draft without admitting a coworker', () => {
+  const ctx = { actorId: 'author', actorName: '业务员', now: '2026-11-19T01:00:00.000Z', id: () => 'authored-draft' };
+  const before = createMistState(ctx, 'empty');
+  const after = applyMistCommand(before, { type: 'platform.assistant.saveDraft',
+    payload: { title: '业务备忘', content: '待复核', orderId: '' } }, ctx).state;
+  const ownScope = { actorId: 'author', userIds: ['author'], teamIds: [] };
+  const otherScope = { actorId: 'manager', userIds: ['manager', 'author'], teamIds: [] };
+  expect(after.platform.assistantDrafts[0]?.ownerId).toBe('author');
+  expect(scopedWriteViolation(before, after, ownScope)).toBeNull();
+  expect(scopedWriteViolation(before, after, otherScope)).toMatchObject({ path: 'platform.assistantDrafts', id: 'authored-draft' });
+  expect(applyDataScope(after, ownScope, 'author').platform.assistantDrafts).toHaveLength(1);
+  expect(applyDataScope(after, otherScope, 'manager').platform.assistantDrafts).toEqual([]);
 });

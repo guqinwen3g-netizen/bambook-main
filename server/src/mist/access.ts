@@ -257,6 +257,10 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
   // Group scope conditions and notes may reference company-wide business; match the management API's permission boundary.
   // Agent 提议含待执行命令，只给提议所属账号本人。
   if (next.agentProposals) next.agentProposals = next.agentProposals.filter(proposal => proposal.ownerId === actor.userId);
+  // An unlinked draft with a known author lives in that actor's personal workspace view.
+  if (next.platform?.assistantDrafts) next.platform = { ...next.platform,
+    assistantDrafts: next.platform.assistantDrafts.filter(draft => draft.orderId || !draft.ownerId || draft.ownerId === actor.userId) };
+
   // fin63：报表订阅只给订阅人本人（收件人与发送节奏属个人安排）。
   if (next.reportSchedules) next.reportSchedules = next.reportSchedules.filter(row => row.ownerId === actor.userId);
   if (!hasScope(actor, 'hr:write')) {

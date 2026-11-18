@@ -155,3 +155,20 @@ it('gives invoice readers only the linked payment-anchor date without granting t
  expect(view.fulfillment.shipments).toEqual([]);expect(view.fulfillment.documents).toEqual([]);expect(JSON.stringify(view)).not.toContain('POD-SECRET');expect(JSON.stringify(view)).not.toContain('secret-pod');expect(s).toEqual(before);
  expect(projectState(s,actor(['shipments:read']),empty).state.invoices).toEqual([]);
 });
+
+it('keeps new unlinked assistant drafts on the author account without rewriting legacy or order drafts', () => {
+  const state = empty(), base = { title: '业务备忘', content: '本地模拟', createdAt: context.now };
+  state.platform.assistantDrafts = [
+    { ...base, id: 'mine', orderId: '', ownerId: 'author' },
+    { ...base, id: 'other', orderId: '', ownerId: 'peer' },
+    { ...base, id: 'linked', orderId: 'order', ownerId: 'peer' },
+    { ...base, id: 'legacy', orderId: '' },
+  ];
+  const before = structuredClone(state);
+  const mine = projectState(state, actor(['ai:chat'], 'author'), empty).state.platform.assistantDrafts;
+  const unassigned = projectState(state, actor(['ai:chat', 'company:admin'], 'another'), empty).state.platform.assistantDrafts;
+  expect(mine.map(r => r.id)).toEqual(['mine', 'linked', 'legacy']);
+  expect(unassigned.map(r => r.id)).toEqual(['linked', 'legacy']);
+  expect(projectState(state, actor([], 'author'), empty).state.platform.assistantDrafts).toEqual([]);
+  expect(state).toEqual(before);
+});
