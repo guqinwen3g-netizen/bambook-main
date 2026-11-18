@@ -303,41 +303,83 @@ export function AdminRoles() {
 
 const AUDIT_ACTIONS: Record<string, string> = { login: '登录', register: '提交注册', create_user: '新建账号', reactivate_user: '重新启用账号', update_user: '修改账号', update_profile: '修改个人资料', reset_password: '重置密码', disable_account: '停用账号', approve_register: '通过注册', reject_register: '拒绝注册', update_roles: '调整岗位', update_role_permissions: '调整岗位权限', create_role: '新建岗位', update_role: '编辑岗位', delete_role: '删除岗位', reset_mfa: '重置两步验证', enable_mfa: '开启两步验证', disable_mfa: '关闭两步验证', login_mfa_recovery: '用恢复码登录', logout_all_sessions: '退出所有设备', erase_personal_data: '清除个人数据', create_department: '新建部门', edit_department: '修改部门', retire_department: '裁撤部门', create_team: '新建小组', update_team: '修改小组', delete_team: '解散小组', add_team_member: '加入小组', remove_team_member: '移出小组', upsert_employee: '保存员工档案', delete_employee: '删除员工档案' };
 const AUDIT_TARGETS: Record<string, string> = { UserAccount: '账号', Department: '部门', Team: '小组', TeamMember: '小组成员', EmployeeProfile: '员工档案', Role: '岗位' };
+type AuditLogRead =
+  | { key: string; logs: AuditLogRow[]; total: number; error?: never }
+  | { key: string; error: string; logs?: never; total?: never };
+
 export function AdminAuditLog() {
-  const session = useMistSession();
-  // 操作人与账号对象显示姓名；读不到账号表时退回原编号。
-  const [names, setNames] = React.useState<Record<string, string>>({});
-  React.useEffect(() => { let live = true; organizationApi.listAccounts().then(r => { if (live) setNames(Object.fromEntries((r.users ?? []).map(u => [u.id, u.displayName]))); }).catch(() => undefined); return () => { live = false; }; }, [session.sessionKey]);
-  const person = (id: string | null | undefined) => id ? (names[id] ? <span title={uiText(id)}>{names[id]}</span> : <Mono>{id}</Mono>) : '—';
-  const [rows, setRows] = React.useState<AuditLogRow[]>([]), [total, setTotal] = React.useState(0), [page, setPage] = React.useState(0), [targetType, setTargetType] = React.useState('');
-  const [loading, setLoading] = React.useState(true), [error, setError] = React.useState('');
+  const session = useMistSession(), sessionKey = session.sessionKey;
+  const liveSession = React.useRef(sessionKey);
+  liveSession.current = sessionKey;
+  // Keep actor names bound to the directory of the active session.
+  const [directory, setDirectory] = React.useState<{ sessionKey: string; names: Record<string, string> }>();
+  React.useEffect(() => {
+    let live = true;
+    organizationApi.listAccounts().then(result => {
+      if (live) setDirectory({ sessionKey, names: Object.fromEntries((result.users ?? []).map(user => [user.id, user.displayName])) });
+    }).catch(() => undefined);
+    return () => { live = false; };
+  }, [sessionKey]);
+  const person = (id: string | null | undefined) => {
+    if (!id) return '—';
+    const name = directory?.sessionKey === sessionKey ? directory.names[id] : undefined;
+    return name ? <span title={uiText(id)}>{name}</span> : <Mono>{id}</Mono>;
+  };
+
+  const [page, setPage] = React.useState(0), [targetType, setTargetType] = React.useState('');
+  const readKey = JSON.stringify([sessionKey, page, targetType]);
+  const [read, setRead] = React.useState<AuditLogRead | null>(null);
+  const listing = read?.key === readKey ? read : null;
   const size = 50, serial = React.useRef(0);
   const load = React.useCallback(async () => {
-    const run = ++serial.current; setLoading(true); setError('');
-    try { const result = await organizationApi.auditLogs({ limit: size, offset: page * size, targetType }); if (run === serial.current) { setRows(result.logs ?? []); setTotal(result.total ?? 0); } }
-    catch (e) { if (run === serial.current) setError(message(e, '审计日志读取失败')); }
-    finally { if (run === serial.current) setLoading(false); }
-  }, [page, targetType]);
-  React.useEffect(() => { void load(); return () => { serial.current++; }; }, [load, session.sessionKey]);
-  const [exporting, setExporting] = React.useState(false);
+    const run = ++serial.current;
+    setRead(null);
+    try {
+      const result = await organizationApi.auditLogs({ limit: size, offset: page * size, targetType });
+      if (!Array.isArray(result.logs) || !Number.isSafeInteger(result.total) || result.total < 0) throw new Error('审计日志读取失败');
+      if (run === serial.current) setRead({ key: readKey, logs: result.logs, total: result.total });
+    } catch (failure) {
+      if (run === serial.current) setRead({ key: readKey, error: message(failure, '审计日志读取失败') });
+    }
+  }, [page, readKey, targetType]);
+  React.useEffect(() => { void load(); return () => { serial.current++; }; }, [load]);
+  const loading = !listing, total = listing?.total;
+
+  const [exportingFor, setExportingFor] = React.useState<string>();
+  const [exportError, setExportError] = React.useState<{ key: string; error: string }>();
+  const exporting = exportingFor === sessionKey;
   const exportCsv = async () => {
-    setExporting(true); setError('');
-    try { const blob = await organizationApi.exportAuditLogs({ targetType }); const url = URL.createObjectURL(blob), link = document.createElement('a'); link.href = url; link.download = `审计日志-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 0); }
-    catch (e) { setError(message(e, '审计日志导出未完成')); }
-    finally { setExporting(false); }
+    if (exporting) return;
+    setExportingFor(sessionKey);
+    setExportError(undefined);
+    try {
+      const blob = await organizationApi.exportAuditLogs({ targetType });
+      if (liveSession.current !== sessionKey) return;
+      const url = URL.createObjectURL(blob), link = document.createElement('a');
+      link.href = url;
+      link.download = `审计日志-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (failure) {
+      if (liveSession.current === sessionKey) setExportError({ key: readKey, error: message(failure, '审计日志导出未完成') });
+    } finally {
+      setExportingFor(current => current === sessionKey ? undefined : current);
+    }
   };
+
   return <>
-    {error && <FailureNotice title={"审计日志读取失败"} detail={error} retry={() => void load()} />}
-    <Toolbar right={<span className="mist-note">{uiText("共 ")}{total}{uiText(" 条 · 第 ")}{uiText(page + 1)} / {Math.max(1, Math.ceil(total / size))}{uiText(" 页")}</span>}>
+    {listing?.error && <FailureNotice title="审计日志读取失败" detail={listing.error} retry={() => void load()} />}
+    {exportError?.key === readKey && <FailureNotice title="审计日志导出未完成" detail={exportError.error} retry={() => void exportCsv()} />}
+    <Toolbar right={total === undefined ? undefined : <span className="mist-note">{uiText("共 ")}{total}{uiText(" 条 · 第 ")}{uiText(page + 1)} / {Math.max(1, Math.ceil(total / size))}{uiText(" 页")}</span>}>
       <Field label={uiText("对象")}><Select aria-label={uiText("审计对象")} value={targetType} onChange={e => { setPage(0); setTargetType(e.target.value); }} options={[{ value: '', label: '全部对象' }, ...Object.entries(AUDIT_TARGETS).map(([value, label]) => ({ value, label }))]} /></Field>
       {session.hasPermission('users:admin') && session.hasPermission('audit:export') && <Button icon={Download} loading={exporting} disabled={loading || exporting} onClick={() => void exportCsv()}>{uiText("导出 CSV")}</Button>}
-      <Button disabled={loading || page === 0} onClick={() => setPage(page - 1)}>{uiText("上一页")}</Button><Button disabled={loading || (page + 1) * size >= total} onClick={() => setPage(page + 1)}>{uiText("下一页")}</Button>
+      <Button disabled={total === undefined || page === 0} onClick={() => setPage(page - 1)}>{uiText("上一页")}</Button><Button disabled={total === undefined || (page + 1) * size >= total} onClick={() => setPage(page + 1)}>{uiText("下一页")}</Button>
     </Toolbar>
-    <Card><DataTable ariaLabel={uiText("审计日志")} rows={rows} rowKey={r => r.id} loading={loading} columns={[
+    {!listing?.error && <Card><DataTable ariaLabel={uiText("审计日志")} rows={listing?.logs ?? []} rowKey={r => r.id} loading={loading} columns={[
       { key: 'at', header: '时间', width: '170px', render: r => when(r.createdAt) },
       { key: 'actor', header: '操作人', width: 'minmax(140px,1fr)', render: r => person(r.actorId) },
       { key: 'action', header: '动作', width: 'minmax(120px,1fr)', render: r => AUDIT_ACTIONS[r.action] ?? r.action },
       { key: 'target', header: '对象', width: 'minmax(180px,2fr)', render: r => <>{AUDIT_TARGETS[r.targetType] ?? r.targetType} {r.targetType === 'UserAccount' ? person(r.targetId) : <Mono>{r.targetId ?? ''}</Mono>}</> },
-    ]} empty={<EmptyState title={uiText("没有审计记录")} description={uiText("调整对象筛选后再看。")} />} /></Card>
+    ]} empty={<EmptyState title={uiText("没有审计记录")} description={uiText("调整对象筛选后再看。")} />} /></Card>}
   </>;
 }

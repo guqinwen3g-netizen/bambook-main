@@ -3,10 +3,10 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MistRoot, ToastProvider } from '../../../../../components/mist';
-import { AdminAccounts } from './AdminAccounts';
+import { AdminAccounts, AdminAuditLog } from './AdminAccounts';
 
 const api = vi.hoisted(() => ({
-  listAccounts: vi.fn(), listRoles: vi.fn(), createAccount: vi.fn(),
+  listAccounts: vi.fn(), listRoles: vi.fn(), createAccount: vi.fn(), auditLogs: vi.fn(), exportAuditLogs: vi.fn(),
 }));
 vi.mock('../../runtime/organization', async orig => ({ ...(await orig<typeof import('../../runtime/organization')>()), organizationApi: api }));
 vi.mock('../../runtime/workspace', () => ({ useMistWorkspace: () => ({ workspace: null, state: null }) }));
@@ -29,6 +29,8 @@ beforeEach(async () => {
   api.listAccounts.mockResolvedValue({ users: [], departments: [{ id: 'company', name: '公司', parentId: null }, { id: 'd1', name: '业务部', parentId: 'company' }] });
   api.listRoles.mockResolvedValue({ roles: [{ id: 'role-sales@c1', name: '业务员', permissions: [], isSystem: true }] });
   api.createAccount.mockReset();
+  api.auditLogs.mockReset();
+  api.exportAuditLogs.mockReset();
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   await act(async () => root.render(<MistRoot><ToastProvider><AdminAccounts /></ToastProvider></MistRoot>));
 });
@@ -72,4 +74,46 @@ it('sends a new company without departments to department setup instead of an em
   expect(document.body.textContent).toContain('还没有可任职的部门');
   await act(async () => button('去建立部门').click());
   expect(nav.go).toHaveBeenCalledWith('hr', undefined, { section: 'org' });
+});
+
+const auditRow = { id: 'audit-one', targetType: 'Department', targetId: 'department-one',
+  action: 'edit_department', actorId: 'owner', createdAt: '2026-11-15T04:00:00Z' };
+async function showAuditLog() {
+  await act(async () => root.render(<MistRoot><ToastProvider><AdminAuditLog /></ToastProvider></MistRoot>));
+}
+
+it('shows unread audits as unavailable and retries the same query before presenting a real empty result', async () => {
+  api.auditLogs.mockRejectedValueOnce(new Error('暂时无法读取')).mockResolvedValueOnce({ logs: [], total: 0 });
+  await showAuditLog();
+  expect(host.textContent).toContain('审计日志读取失败');
+  expect(host.textContent).not.toContain('没有审计记录');
+  expect(host.textContent).not.toMatch(/共\s*0\s*条/);
+  await act(async () => button('重试').click());
+  expect(api.auditLogs).toHaveBeenLastCalledWith({ limit: 50, offset: 0, targetType: '' });
+  expect(host.textContent).toContain('没有审计记录');
+  expect(host.textContent).toMatch(/共\s*0\s*条/);
+});
+
+it('withholds counts and old rows after a filter fails, then restores that filter on retry', async () => {
+  api.auditLogs.mockResolvedValueOnce({ logs: [auditRow], total: 8 })
+    .mockRejectedValueOnce(new Error('筛选请求失败')).mockResolvedValueOnce({ logs: [auditRow], total: 1 });
+  await showAuditLog();
+  expect(host.textContent).toContain('department-one');
+  await act(async () => choose('审计对象', 'Department'));
+  expect(host.textContent).not.toContain('department-one');
+  expect(host.textContent).not.toMatch(/共\s*8\s*条/);
+  await act(async () => button('重试').click());
+  expect(api.auditLogs).toHaveBeenLastCalledWith({ limit: 50, offset: 0, targetType: 'Department' });
+  expect(host.textContent).toContain('department-one');
+  expect(host.textContent).toMatch(/共\s*1\s*条/);
+});
+
+it('identifies an export failure without labelling valid audit rows as unread', async () => {
+  api.auditLogs.mockResolvedValue({ logs: [auditRow], total: 1 });
+  api.exportAuditLogs.mockRejectedValueOnce(new Error('无法生成文件'));
+  await showAuditLog();
+  await act(async () => button('导出 CSV').click());
+  expect(host.textContent).toContain('审计日志导出未完成');
+  expect(host.textContent).not.toContain('审计日志读取失败');
+  expect(host.textContent).toContain('department-one');
 });
