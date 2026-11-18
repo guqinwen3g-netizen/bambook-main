@@ -53,6 +53,23 @@ describe('Market explicit detail sections',()=>{
  });
 });
 describe('Mist market screens',()=>{
+ it('retains the requested marketing lead tab during read failure without showing empty campaigns',async()=>{
+  const original=bridge.current.state;
+  bridge.current.state=null;
+  bridge.current.error='市场工作区未能读取';
+  await mount('marketing',undefined,'leads');
+  expect(host.textContent).toContain('全部线索');
+  expect(host.textContent).not.toContain('尚无营销活动');
+  expect(host.querySelector('[aria-label="营销活动列表"]')).toBeNull();
+  expect(host.querySelector('[aria-label="全部线索"]')).toBeNull();
+  await click('重试');
+  expect(bridge.current.refresh).toHaveBeenCalledTimes(1);
+  bridge.current.state=original;
+  bridge.current.error='';
+  await reroute('marketing',undefined,'leads');
+  expect(host.querySelector('[aria-label="全部线索"]')).toBeTruthy();
+  expect(go).not.toHaveBeenCalled();
+ });
  it('hands a new quotation focus to its customer and preserves focus while editing terms',async()=>{
   await mount('quotations');await click('新建报价');expect(document.activeElement).toBe(getByRole(host,'combobox',{name:'客户'}));
   const place=host.querySelector('[aria-label="贸易术语指定地点"]') as HTMLInputElement;place.focus();await fill('贸易术语指定地点','上海');expect(document.activeElement).toBe(place);expect(bridge.current.run).not.toHaveBeenCalled();

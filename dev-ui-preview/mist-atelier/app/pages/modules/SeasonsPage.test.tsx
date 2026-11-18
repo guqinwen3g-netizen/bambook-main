@@ -34,6 +34,18 @@ describe('季节性与趋势', () => {
     const craft = state.market.trends.find(t => t.name === '轻量无衬里结构')!;
     expect(trendCustomers(state, craft)).toEqual([]);
   });
+  it('keeps the seasonal lists and exports unavailable until the workspace read succeeds', async () => {
+    bridge.current.state = null;
+    bridge.current.error = '市场工作区未能读取';
+    await mount();
+    expect(host.textContent).toContain('数据未加载');
+    expect(host.textContent).not.toContain('还没有季节');
+    expect(host.textContent).not.toContain('季节 · 0');
+    expect(button('导出')?.disabled).toBe(true);
+    expect(button('新建季节')?.disabled).toBe(true);
+    await click(button('重试'));
+    expect(bridge.current.refresh).toHaveBeenCalledTimes(1);
+  });
   it('季节页显示时间线、今天线与当前季节的里程碑和业务', async () => {
     await mount(season('AW27').id);
     const tl = host.querySelector('[data-season-timeline]')!;
