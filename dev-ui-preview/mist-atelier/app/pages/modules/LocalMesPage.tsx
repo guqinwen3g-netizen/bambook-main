@@ -57,18 +57,18 @@ export function LocalMesPage() {
         <Button icon={Download} disabled={!rows.length} onClick={() => downloadModuleCsv('加工履行记录.csv', ['合同', '订单', '加工方', '加工内容', '合同数量', '单位', '已交付', '交期', '状态'], rows.map(p => [p.code, orderCode(p.orderId), p.supplier, p.description, p.quantity, p.unit, p.received, p.due, STAGE[stageOf(p)].label]))}>{uiText("导出")}</Button>
         {session.canAccessView(View.ProductionBoard) && <Button icon={Factory} variant="primary" onClick={() => go('production-board')}>{uiText("前往生产进度")}</Button>}
       </>} />
-    <div className="mist-section"><Segmented<Domain> ariaLabel={uiText("业务板块")} value={domain} onChange={value => { setDomainChoice(value); setStage('all'); setSupplier('all'); setPicked(null); }} options={[{ value: 'garment', label: `成衣业务 · ${all.filter(p => (p.domain || 'garment') === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${all.filter(p => p.domain === 'fabric').length}` }]} /></div>
+    <div className="mist-section"><Segmented<Domain> ariaLabel={uiText("业务板块")} value={domain} onChange={value => { setDomainChoice(value); setStage('all'); setSupplier('all'); setPicked(null); }} options={[{ value: 'garment', label: state ? `成衣业务 · ${all.filter(p => (p.domain || 'garment') === 'garment').length}` : '成衣业务' }, { value: 'fabric', label: state ? `面料业务 · ${all.filter(p => p.domain === 'fabric').length}` : '面料业务' }]} /></div>
     <Toolbar>
       <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索加工合同、加工方、加工内容或来源订单")} />
       {suppliers.length > 1 && <Dropdown label={uiText("加工方")} value={supplier} onChange={setSupplier} options={[{ value: 'all', label: '全部加工方' }, ...suppliers.map(value => ({ value, label: value }))]} />}
       {years.length > 1 && <Dropdown label={uiText("交期年份")} value={year} onChange={setYear} options={[{ value: 'all', label: '全部年份' }, ...years.map(value => ({ value, label: `${value} 年` }))]} />}
     </Toolbar>
-    <Pipeline<StageFilter> value={stage} onChange={setStage} items={[
+    {state && <Pipeline<StageFilter> value={stage} onChange={setStage} items={[
       { value: 'all', label: '全部合同', count: count('all'), color: 'var(--mist-ink-2)' },
       { value: 'open', label: '履行中', count: count('open'), color: 'var(--mist-accent)' },
       { value: 'done', label: '已交付', count: count('done'), color: 'var(--mist-ok)' },
       { value: 'variance', label: '数量差异', count: count('variance'), color: 'var(--mist-warn)' },
-    ]} />
+    ]} />}
     {route.id && !selected && !loading && !error && <Banner tone="bad" title={uiText('加工合同不存在或无权查看')} actions={<Button onClick={()=>go('mes')}>{uiText('返回列表')}</Button>}/> }
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${selected.supplier}` : '加工记录详情'} drawerSub={selected?.description}
       list={<Card><DataTable ariaLabel={uiText("历史加工记录")} loading={loading} rows={rows} rowKey={p => p.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
