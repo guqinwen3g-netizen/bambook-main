@@ -69,8 +69,14 @@ type AttachmentKind=Extract<MarketCommand,{type:'market.attachment.set'}>['paylo
 function Attachments({kind,row,locked=false}:{kind:AttachmentKind;row:{id:string;fileIds:string[]};locked?:boolean}){
  const w=useMarket(),op=useOperation(),[staged,setStaged]=useRouteDraft<string[]>([]);
  const ids=[...new Set([...row.fileIds,...staged])];
+ const expectedRevision=w.workspace?.revision;
  React.useEffect(()=>setStaged([]),[row.id]);
- const save=async(next:string[])=>{await w.command({type:'market.attachment.set',payload:{kind,id:row.id,fileIds:next}});setStaged([]);};
+ const save=async(next:string[])=>{
+  // Uploading advances the workspace, but the replacement list still belongs to this render.
+  await w.command({type:'market.attachment.set',payload:{kind,id:row.id,fileIds:next}},
+   expectedRevision===undefined?undefined:{expectedRevision});
+  setStaged([]);
+ };
  return <Card><CardHeader title={uiText("附件与凭据")}/><CardBody>
   {op.error&&<Banner tone="bad" title={uiText("附件未保存")}>{op.error}{staged.length>0&&<Button disabled={op.busy} onClick={()=>void op.execute(()=>save(ids))}>{uiText("重试关联已上传附件")}</Button>}</Banner>}
   {ids.map(id=>{const f=w.state?.files.find(f=>f.id===id),role=kind==='product'?imageRole(w.state?.files,ids,id):undefined;return f?<div className="mist-row" key={id}><FileName file={f} files={ids.map(x=>w.state?.files.find(y=>y.id===x))} label={uiText(staged.includes(id)?`${f.name} · 待关联`:undefined)}/>{kind==='product'&&<ImageRoleTag files={w.state?.files} ids={ids} id={id}/>}<span className="mist-spacer"/>{!locked&&role==='supplement'&&<TextLink onClick={()=>void op.execute(()=>save(withPrimaryImage(ids,id)))}>{uiText("设为主图")}</TextLink>}<TextLink onClick={()=>void op.execute(()=>w.downloadFile(f))}>{uiText("下载")}</TextLink>{!locked&&<TextLink onClick={()=>void op.execute(()=>save(ids.filter(x=>x!==id)))}>{uiText("移除")}</TextLink>}</div>:<p key={id}>{uiText("附件暂不可用")}</p>;})}
