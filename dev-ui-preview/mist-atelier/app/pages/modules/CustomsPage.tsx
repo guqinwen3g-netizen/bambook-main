@@ -7,7 +7,7 @@ import { Button, Card, CardHeader, Checklist, DataTable, Dropdown, EmptyState, F
 import type { MistCommand, MistInvoice, MistState } from '../../../../../server/src/shared/mistWorkspace';
 import { isRecognizedMistInvoice } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentCustoms, FulfillmentShipment } from '../../../../../server/src/shared/mistFulfillment';
-import { useMistWorkspace } from '../../runtime/workspace';
+import { useMistWorkspace, type MistWorkspaceContext } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { fmt } from '../../data';
@@ -81,13 +81,14 @@ export function CustomsPage() {
   const liveCustoms=React.useRef({state,workspaceId:workspace?.id,revision:workspace?.revision,loading});liveCustoms.current={state,workspaceId:workspace?.id,revision:workspace?.revision,loading};
   const customsRunner=(source:FulfillmentCustoms)=>{
     const sourceWorkspaceId=workspace?.id,basis=state?customsActionBasis(state,source):'';
-    return(command:MistCommand)=>{
-      if(!command.type.startsWith('fulfillment.customs.'))return run(command);
+    return(...args:Parameters<MistWorkspaceContext['run']>)=>{
+      const [command,options]=args;
+      if(!command.type.startsWith('fulfillment.customs.'))return run(...args);
       const checked=liveCustoms.current;
       if(!checked.state||!checked.workspaceId||checked.loading||typeof checked.revision!=='number'||!Number.isSafeInteger(checked.revision)||checked.revision<0)throw new Error('报关资料未读取，请重新打开后核对');
       const current=checked.state.fulfillment.customs.find(c=>c.id===source.id);
       if(checked.workspaceId!==sourceWorkspaceId||!current||customsActionBasis(checked.state,current)!==basis)throw new Error('报关资料或来源已更新，请重新打开后核对');
-      return run(command,{expectedRevision:checked.revision});
+      return run(command,{...options,expectedRevision:checked.revision});
     };
   };
   const shipmentOf = (c: FulfillmentCustoms) => f?.shipments.find(s => s.id === c.shipmentId);
@@ -227,7 +228,7 @@ export function CustomsPage() {
 
 function CustomsDetail({ record: c, state, onAmend, can, canClear, canInvoices, canRebate, canRebateApprove = false, canReconcile, locked, open, run, onBill, onReceipt, onEdit, onDeclare, onRelease, onAttach, onClassify, onShipment, onDocuments, onInvoice }: {
   record: FulfillmentCustoms; state: MistState; can: boolean; canClear: boolean; canInvoices: boolean; canRebate: boolean; canRebateApprove?: boolean; canReconcile: boolean; locked: boolean;
-  open: (spec: ModuleEditorSpec) => void; run: (command: MistCommand) => Promise<unknown>; onBill: (id: string) => void; onReceipt: (id: string) => void;
+  open: (spec: ModuleEditorSpec) => void; run: MistWorkspaceContext['run']; onBill: (id: string) => void; onReceipt: (id: string) => void;
   onAmend: (kind: 'amend' | 'withdraw' | 'attach') => void; onEdit: () => void; onDeclare: () => void; onRelease: () => void; onAttach: (ids: string[]) => Promise<unknown>; onClassify: () => void; onShipment: () => void; onDocuments: () => void; onInvoice: (id: string) => void;
 }) {
   const f = state.fulfillment, s = f.shipments.find(row => row.id === c.shipmentId), flags = customsFlags(state, c);

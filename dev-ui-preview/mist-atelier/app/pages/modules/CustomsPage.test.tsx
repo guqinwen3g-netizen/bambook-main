@@ -379,6 +379,26 @@ it('hides the tax approval and receipt matching actions when the rebate amounts 
   expect((await actions(false,'filed')).approve).toBe(true);expect((await actions(false,'approved')).receive).toBe(true);
   expect(await actions(true,'filed')).toEqual({approve:false,receive:false});expect(await actions(true,'approved')).toEqual({approve:false,receive:false});
 });
+it('passes the handwritten tax approval signature from Customs to the workspace command',async()=>{
+ const st=store.state!;
+ st.fulfillment.shipments.push(shipment('signed-rebate',{state:'departed',departedAt:'2026-10-13T02:00:00Z'}));
+ st.fulfillment.customs.push(customs('signed-rebate','cleared',{hsCode:'6202.1300'}));
+ st.exportRebate={rates:[],claims:[{id:'signed-claim',code:'RB-01',customsId:'cus-signed-rebate',customsCode:'CUS-SIGNED-REBATE',declarationNo:'D-signed-rebate',shipmentId:'s-signed-rebate',shipmentCode:'S-SIGNED-REBATE',orderIds:['o'],hsCode:'6202130000',exportDate:'2026-10-13',rateId:'rt',rate:'13',lines:[],taxable:100,expected:13,filedAt:'2026-10-14',batchRef:'B-1',fileIds:[],note:'',state:'filed',receipts:[],createdAt:'2026-10-14T00:00:00Z',actor:'财务'}]};
+ render('cus-signed-rebate');await click(getByRole(host,'button',{name:'登记税务核准',exact:true}));
+ const dialog=getByRole(document.body,'dialog',{name:'登记税务核准',exact:true});
+ typeInto(getByRole(dialog,'textbox',{name:'审核通知 / 批复文号'}) as HTMLInputElement,'模拟核准 RB-01');
+ const pad=dialog.querySelector('.mist-signature-pad') as HTMLElement;expect(pad).toBeTruthy();
+ pad.getBoundingClientRect=()=>({left:0,top:0,width:480,height:168,right:480,bottom:168,x:0,y:0,toJSON:()=>({})});
+ const point=(type:string,x:number,y:number)=>Object.assign(new MouseEvent(type,{bubbles:true,clientX:x,clientY:y,button:0}),{pointerId:1});
+ for(const [type,x,y] of [['pointerdown',12,60],['pointermove',120,21],['pointermove',180,72],['pointermove',270,52],['pointerup',270,52]] as const){
+  await act(async()=>{pad.dispatchEvent(point(type,x,y));});
+ }
+ expect(getByRole(dialog,'img',{name:'登记签字：已签',exact:true})).toBeTruthy();
+ await click(getByRole(dialog,'button',{name:'登记核准',exact:true}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({
+  type:'rebate.claim.approve',payload:expect.objectContaining({id:'signed-claim',amount:13,ref:'模拟核准 RB-01'}),
+ }),{signature:{svg:expect.stringContaining('<svg')}});
+});
 it('keeps another declarant note and file when an earlier attachment upload finishes',async()=>{
  store.state!.fulfillment.shipments.push(shipment('file-source'));store.state!.fulfillment.customs.push(customs('file-source','draft',{note:'旧备注',fileIds:['old']}));let finish!:(value:unknown)=>void;store.uploadFile.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
  render('cus-file-source');const input=host.querySelector('[data-customs-detail="cus-file-source"] input[type="file"]')!;expect(input).toBeTruthy();Object.defineProperty(input,'files',{configurable:true,value:[new File(['new'],'new.txt',{type:'text/plain'})]});await act(async()=>{input.dispatchEvent(new Event('change',{bubbles:true}));});
