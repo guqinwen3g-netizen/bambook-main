@@ -61,12 +61,13 @@ describe('Mist market screens',()=>{
   const state=bridge.current.state,product=state.market.products[0];
   state.customers.push({...state.customers[0],id:'c2',name:'来源客户'});
   state.devs.push({id:'source-dev',customerId:'c2'} as any);product.sourceDevId='source-dev';product.season='AW27';
+  product.specs={...product.specs,style:'CC-JK4182'};
   await mount('quotations',undefined,'product:'+product.id);
   expect((host.querySelector('[aria-label="客户"]') as HTMLSelectElement).value).toBe('c2');
   expect((host.querySelector('[aria-label="季节"]') as HTMLInputElement).value).toBe('AW27');
   await fill('有效期','2026-12-01');await fill('贸易术语','FOB');await fill('贸易术语指定地点','上海');await fill('付款条件','T/T 30% 定金，70% 发货前付清');
   await click('下一步');await click('下一步');await click('保存报价草稿');
-  expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.quotation.save',payload:expect.objectContaining({input:expect.objectContaining({customerId:'c2',lines:[expect.objectContaining({productId:product.id})]})})}));
+  expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.quotation.save',payload:expect.objectContaining({input:expect.objectContaining({customerId:'c2',lines:[expect.objectContaining({productId:product.id,style:'CC-JK4182'})]})})}));
  });
  it.each([false,true])('uses only an unambiguous customer-code reference for a product without a development (%s)',async unique=>{
   const state=bridge.current.state,product=state.market.products[0];
