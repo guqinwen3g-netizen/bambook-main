@@ -24,6 +24,19 @@ import { FailureNotice } from '../runtime/FailureNotice';
 const STEPS = [{id:'basic',label:'基本信息'},{id:'style',label:'款式与面料'},{id:'plan',label:'工厂与计划'},{id:'files',label:'附件'},{id:'review',label:'确认提交'}];
 type DevelopmentFormValues = Omit<DevelopmentValues,'collaborators'|'sampleQuantity'> & {collaborators:string;sampleQuantity:string};
 const emptyForm = (customer='',domain:DevelopmentDomain='garment'):DevelopmentFormValues => ({...(domain==='fabric'?{domain,sampleForm:'米样',sampleUnit:'米',targetCurrency:'',targetUnit:'',fabricRequirements:emptyFabricRequirements()}:{}),initiator:'customer',name:'',customer,style:'',season:'AW27',category:domain==='fabric'?'':'大衣',fabric:'',color:'',target:'',factories:[],due:'',kind:'new',goal:'',sizeBase:domain==='fabric'?'':'M（常规）',collaborators:'',sampleQuantity:'2'});
+function formFromProduct(product:MistState['market']['products'][number], customerId:string):DevelopmentFormValues {
+  const domain=product.category==='fabric'?'fabric':'garment', form=emptyForm(customerId,domain), specs=product.specs||{};
+  const result={...form,sourceProductId:product.id,name:product.name,color:product.color,season:product.season,
+    style:product.customerCodes?.find(c=>c.customerId===customerId)?.code||'',
+    category:domain==='garment'?specs.garmentCategory||'':'',fabric:domain==='garment'?specs.mainFabric||'':''};
+  if(domain==='fabric'){
+    const requirements=emptyFabricRequirements();
+    if(product.composition&&!fabricRequirementError({...requirements,composition:product.composition}))requirements.composition=product.composition;
+    result.fabricRequirements={...requirements,yarn:specs.yarn||requirements.yarn,weave:specs.weave||requirements.weave,finish:specs.finish||'',
+      weightValue:specs.weight||'',weightUnit:specs.weight?'g/m²':'',widthValue:specs.width||'',widthUnit:specs.width?'cm':''};
+  }
+  return result;
+}
 const fromValues = (values:DevelopmentValues):DevelopmentFormValues => ({...values,factories:[...values.factories],collaborators:values.collaborators.join('、'),sampleQuantity:String(values.sampleQuantity)});
 const toValues = (values:DevelopmentFormValues):DevelopmentValues => ({...values,collaborators:values.collaborators.split(/[、,，\n]/).map(value=>value.trim()).filter(Boolean),sampleQuantity:Number(values.sampleQuantity)});
 
@@ -89,20 +102,34 @@ export function DevCreatePage(){
   const [step,setStep]=React.useState('basic'),[done,setDone]=React.useState<Record<string,boolean>>({});
   const stepRef=useEditorStepFocus(step);
   const [f,setF]=React.useState<DevelopmentFormValues>(()=>emptyForm());const [fileIds,setFileIds]=React.useState<string[]>([]);
-  const [draftId,setDraftId]=React.useState<string|undefined>(route.id),[touched,setTouched]=React.useState(false),[busy,setBusy]=React.useState(false),[message,setMessage]=React.useState(''),[dirty,setDirtyState]=React.useState(false),[leave,setLeave]=React.useState(false),[factoryDialog,setFactoryDialog]=React.useState(false);
+  const productRoute=route.id?.startsWith('product:')||false;
+  const routeProductId=productRoute?route.id!.slice('product:'.length):undefined;
+  const [draftId,setDraftId]=React.useState<string|undefined>(productRoute?undefined:route.id),[touched,setTouched]=React.useState(false),[busy,setBusy]=React.useState(false),[message,setMessage]=React.useState(''),[dirty,setDirtyState]=React.useState(false),[leave,setLeave]=React.useState(false),[factoryDialog,setFactoryDialog]=React.useState(false);
   const dirtyNow=React.useRef(false),pendingNavigation=React.useRef<(()=>void)|undefined>(undefined);
   const setDirty=(value:boolean)=>{dirtyNow.current=value;setDirtyState(value);};
   const requestLeave=(proceed:()=>void)=>{if(dirtyNow.current){pendingNavigation.current=proceed;setLeave(true);}else proceed();};
   usePageNavigationGuard(requestLeave,dirty);
   React.useEffect(()=>{const prevent=(event:BeforeUnloadEvent)=>{if(dirtyNow.current){event.preventDefault();event.returnValue='';}};window.addEventListener('beforeunload',prevent);return()=>window.removeEventListener('beforeunload',prevent);},[]);
   const loaded=React.useRef<string|undefined>(undefined);const busyRef=React.useRef(false);const active=React.useRef(true);React.useEffect(()=>{active.current=true;return()=>{active.current=false;};},[]);
-  React.useEffect(()=>{if(!state)return;const key=(route.id||'new')+':'+(route.customerId||'')+':'+(route.section||'');if(loaded.current===key)return;loaded.current=key;const draft=state.drafts.find(item=>item.id===route.id);
-    if(route.id&&!draft){setMessage('这份草稿已不存在，请从开发列表重新选择。');return;}
+  const sourceId=routeProductId||f.sourceProductId;
+  const sourceProduct=sourceId?state?.market?.products?.find(p=>p.id===sourceId):undefined;
+  const sourceBlocked=!!(productRoute||sourceId)&&(!sourceProduct||sourceProduct.status!=='active'||sourceProduct.category==='trimming');
+  React.useEffect(()=>{
+    if(!state)return;
+    const key=(route.id||'new')+':'+(route.customerId||'')+':'+(route.section||'');
+    if(loaded.current===key)return;
+    const draft=productRoute?undefined:state.drafts.find(item=>item.id===route.id);
+    if(route.id&&!productRoute&&!draft){setMessage('这份草稿已不存在，请从开发列表重新选择。');return;}
+    const product=productRoute?state.market?.products?.find(p=>p.id===routeProductId):undefined;
+    if(productRoute&&(!product||product.status!=='active'||product.category==='trimming')){setMessage('来源产品档案不可用');return;}
+    loaded.current=key;
     const draftCustomer=draft?(state.customers.find(c=>c.id===draft.values.customer)||state.customers.filter(c=>c.name===draft.values.customer).length===1&&state.customers.find(c=>c.name===draft.values.customer)):undefined;
-    const sourceCustomer=route.customerId?state.customers.find(c=>c.id===route.customerId):state.customers[0];
-    setF(draft?{...fromValues(draft.values),customer:draftCustomer?draftCustomer.id:''}:emptyForm(sourceCustomer?.id,route.section==='fabric'?'fabric':'garment'));
-    if(route.customerId&&!sourceCustomer)setMessage('指定客户不存在，请在本公司重新选择客户。');else if(draft&&!draftCustomer&&developmentInitiator(draft.values)==='customer')setMessage('草稿客户无法唯一匹配，请重新选择准确客户。');setFileIds(draft?.fileIds||[]);setDraftId(draft?.id);setStep('basic');setDone({});setDirty(false);
-  },[state,route.id,route.customerId,route.section]);
+    const sourceCustomer=route.customerId?state.customers.find(c=>c.id===route.customerId):product?undefined:state.customers[0];
+    const customerId=sourceCustomer?.id||'';
+    setF(draft?{...fromValues(draft.values),customer:draftCustomer?draftCustomer.id:''}:product?formFromProduct(product,customerId):emptyForm(customerId,route.section==='fabric'?'fabric':'garment'));
+    setMessage(route.customerId&&!sourceCustomer?'指定客户不存在，请在本公司重新选择客户。':draft&&!draftCustomer&&developmentInitiator(draft.values)==='customer'?'草稿客户无法唯一匹配，请重新选择准确客户。':'');
+    setFileIds(draft?.fileIds||[]);setDraftId(draft?.id);setStep('basic');setDone({});setDirty(false);
+  },[state,route.id,route.customerId,route.section,productRoute,routeProductId]);
   const set=<K extends keyof DevelopmentFormValues>(key:K,value:DevelopmentFormValues[K])=>{setF(previous=>({...previous,[key]:value}));setDirty(true);setMessage('');};
   const fabricDomain=developmentDomain(f)==='fabric',domain=developmentDomain(f);
   const requirements={...emptyFabricRequirements(),...f.fabricRequirements};
@@ -113,11 +140,11 @@ export function DevCreatePage(){
   const selectedFiles=fileIds.map(id=>state?.files.find(file=>file.id===id)).filter((file):file is MistFile=>!!file);
   const factories=developmentFactoryOptions(state,f.factories,domain);
   const customerName=state?.customers.find(c=>c.id===f.customer)?.name||f.customer;
-  const backToSource=()=>route.customerId?go('crm',route.customerId,{customerId:route.customerId}):go('development',undefined,{section:domain});
+  const backToSource=()=>sourceProduct?go('products',sourceProduct.id,{detail:'full'}):productRoute?go('products'):route.customerId?go('crm',route.customerId,{customerId:route.customerId}):go('development',undefined,{section:domain});
   const continueEditing=()=>{pendingNavigation.current=undefined;setLeave(false);};
   const leaveRequested=()=>{const proceed=pendingNavigation.current;pendingNavigation.current=undefined;setDirty(false);setLeave(false);if(proceed)proceed();else backToSource();};
   const save=async(submit:boolean)=>{
-    if(!state||busyRef.current)return;if(developmentInitiator(f)==='customer'&&!state.customers.some(c=>c.id===f.customer)){setStep('basic');setTouched(true);setMessage('请重新选择准确客户');return;}if(submit&&factories.some(factory=>factory.unavailable&&f.factories.includes(factory.name))){setStep('plan');setMessage('已停用工厂不能用于本次开发，请选择其他工厂');return;}if(!submit&&Object.keys(developmentFormErrors(f,'basic')).length){setStep('basic');setTouched(true);return;}if(submit){const invalid=firstInvalidDevelopmentStep(f);if(invalid){setStep(invalid);setTouched(true);return;}}
+    if(!state||busyRef.current)return;if(sourceBlocked){setMessage('来源产品档案不可用');return;}if(developmentInitiator(f)==='customer'&&!state.customers.some(c=>c.id===f.customer)){setStep('basic');setTouched(true);setMessage('请重新选择准确客户');return;}if(submit&&factories.some(factory=>factory.unavailable&&f.factories.includes(factory.name))){setStep('plan');setMessage('已停用工厂不能用于本次开发，请选择其他工厂');return;}if(!submit&&Object.keys(developmentFormErrors(f,'basic')).length){setStep('basic');setTouched(true);return;}if(submit){const invalid=firstInvalidDevelopmentStep(f);if(invalid){setStep(invalid);setTouched(true);return;}}
     busyRef.current=true;setBusy(true);setMessage('');try{const receipt=await run({type:submit?'development.submit':'development.saveDraft',payload:{draftId,values:toValues(f),fileIds}});if(!active.current)return;setDirty(false);toast(submit?(fabricDomain?'面料开发案与工厂计划版本已创建':'开发案已创建，工厂任务已保存'):'草稿已保存');if(submit&&receipt.result.devId)go('development/detail',receipt.result.devId,{versionId:receipt.result.versionId,...(route.customerId?{customerId:f.customer}:{})});else if(pendingNavigation.current){const proceed=pendingNavigation.current;pendingNavigation.current=undefined;setLeave(false);proceed();}else go('development',undefined,{section:domain,...(route.customerId?{customerId:f.customer}:{})});}
     catch(cause){if(active.current)setMessage(cause instanceof Error?cause.message:'保存失败，请重试');}finally{busyRef.current=false;if(active.current)setBusy(false);}
   };
@@ -128,9 +155,9 @@ export function DevCreatePage(){
   const recovery=pending?<Button loading={busy||saving} onClick={()=>void recoverWrite()}>{uiText("核对原操作结果")}</Button>:null;
   const back=()=>requestLeave(backToSource);
   return <MistPage>
-    <BackLink onClick={back} onTopbarBack={back}>{uiText(route.customerId?'返回客户档案':'开发与寻样')}</BackLink>
-    <PageHeader eyebrow={ui`订单履约 · ${fabricDomain?'面料开发':'成衣开发'}`} title={uiText(draftId?'继续开发草稿':fabricDomain?'新建面料开发案':'新建成衣开发案')} actions={<Button variant="quiet" loading={busy} disabled={!state} onClick={()=>void save(false)}>{uiText("存为草稿")}</Button>} />
-    {(message||error)&&<FailureNotice title={"暂时无法保存"} detail={message||error} />}
+    <BackLink onClick={back} onTopbarBack={back}>{sourceProduct?<>{uiText('来源产品档案')} · {sourceProduct.sku} · {sourceProduct.name}</>:uiText(productRoute?'数字档案':route.customerId?'返回客户档案':'开发与寻样')}</BackLink>
+    <PageHeader eyebrow={ui`订单履约 · ${fabricDomain?'面料开发':'成衣开发'}`} title={uiText(draftId?'继续开发草稿':fabricDomain?'新建面料开发案':'新建成衣开发案')} actions={<Button variant="quiet" loading={busy} disabled={!state||sourceBlocked} onClick={()=>void save(false)}>{uiText("存为草稿")}</Button>} />
+    {(message||error||(state&&sourceBlocked))&&<FailureNotice title={"暂时无法保存"} detail={message||error||'来源产品档案不可用'} />}
     {pending&&!saving&&<div className="mist-section"><Banner tone="warn" title={uiText("原操作结果尚待核对")} actions={recovery}>{uiText("请先核对已发出的请求，避免重复创建。")}</Banner></div>}
     <div ref={stepRef} className="mist-wizard" role="group" aria-label={uiText(steps[idx]?.label||STEPS[0].label)} tabIndex={-1}>
       <VerticalSteps steps={steps.map(item=>({...item,done:done[item.id]}))} current={step} onSelect={id=>{if(busy)return;setStep(id);setTouched(false);}} />

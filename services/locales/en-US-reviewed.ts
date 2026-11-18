@@ -853,6 +853,8 @@ export const reviewedEnglish: Record<string, string> = {
   '规格与约定': 'Specifications and terms', '审批版本': 'Approval history', '查看依据': 'View evidence',
   '票据与付款': 'Bills and payments', '数量待核对': 'Quantity needs review',
   '新建数字档案': 'New product record',
+  '来源产品档案': 'Source product record',
+  '来源产品档案不可用': 'Source product record unavailable',
   ' · 待复验与业务确认': ' · Awaiting re-inspection and sales clearance',
   '未选择批次': 'No batch selected', '未选择单据': 'No document selected',
   '订单来源不匹配': 'Order source does not match', '退货来源不匹配': 'Return source does not match',

@@ -98,7 +98,7 @@ export type DevelopmentValues = {
   name: string; customer: string; style: string; season: string; category: string;
   kind: 'new' | 'rev' | 'copy'; fabric: string; color: string; target: string;
   sizeBase: string; goal: string; factories: string[]; due: string;
-  collaborators: string[]; sampleQuantity: number; sourceDevId?: string; sourceVersionId?: string;
+  collaborators: string[]; sampleQuantity: number; sourceDevId?: string; sourceVersionId?: string; sourceProductId?: string;
   /** 发起方（BB-DEV-1）：客户要求须有客户与要求类型；内部需求无客户，须有内部需求方。 */
   initiator?: DevelopmentInitiator; requestType?: DevelopmentRequestType; requestNote?: string;
   requester?: string; requesterId?: string; charged?: boolean;
@@ -602,6 +602,18 @@ const iso = (value: string, context: MistContext) => /^\d\d\/\d\d$/.test(value) 
 function emptyValues(): DevelopmentValues {
   return {name:'',customer:'',style:'',season:'',category:'',kind:'new',fabric:'',color:'',target:'',sizeBase:'',goal:'',factories:[],due:'',collaborators:[],sampleQuantity:1};
 }
+function bindDevelopmentProduct(state:MistState, input:DevelopmentValues, draft:MistDraft|undefined, ctx:MistContext) {
+  const original=draft?.values.sourceProductId;
+  const id=input.sourceProductId===undefined?original:text(input.sourceProductId,'来源产品档案',true,180);
+  if(draft && id!==original)throw new MistCommandError('PRECONDITION','草稿的来源产品档案不可替换');
+  if(!id)return;
+  if(!ctx.can?.('products:read'))throw new MistCommandError('FORBIDDEN','没有查看来源产品档案的权限');
+  const product=state.market?.products.find(p=>p.id===id);
+  if(!product)throw new MistCommandError('NOT_FOUND','来源产品档案不可用');
+  if(product.status!=='active')throw new MistCommandError('PRECONDITION','来源产品已归档');
+  if(product.category!==developmentDomain(input))throw new MistCommandError('VALIDATION','来源产品与开发类别不符');
+  input.sourceProductId=id;
+}
 function values(input: DevelopmentValues, complete: boolean): DevelopmentValues {
   const v = {...emptyValues(), ...input};
   if (v.initiator !== undefined && !['customer','internal'].includes(v.initiator)) throw new MistCommandError('VALIDATION','发起方无效');
@@ -1042,13 +1054,15 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
     case 'development.saveDraft': {
       const v=values(p.values,false), fileIds=files(state,p.fileIds), id=p.draftId||context.id();
       const existing = p.draftId ? find(state.drafts,p.draftId,'草稿') : undefined;
+      bindDevelopmentProduct(state,v,existing,context);
       const ownerId = existing?.ownerId ?? (existing ? undefined : context.actorId);
       state.drafts=state.drafts.filter(d=>d.id!==id);
       state.drafts.push({id,values:v,fileIds,updatedAt:context.now,...(ownerId?{ownerId}:{})}); result={id,draftId:id}; break;
     }
     case 'development.submit': {
       const v=values(p.values,true), fileIds=files(state,p.fileIds);
-      if(p.draftId)find(state.drafts,p.draftId,'草稿');
+      const draft=p.draftId?find(state.drafts,p.draftId,'草稿'):undefined;
+      bindDevelopmentProduct(state,v,draft,context);
       if(v.kind!=='new'&&!v.sourceDevId)throw new MistCommandError('VALIDATION','请选择来源开发案');
       if(v.sourceVersionId){const source=find(state.versions,v.sourceVersionId,'来源版本');if(source.devId!==v.sourceDevId)throw new MistCommandError('VALIDATION','来源版本不属于准确来源开发案');}
       if(v.sourceDevId&&developmentDomain(find(state.devs,v.sourceDevId,'来源开发案').values)!==developmentDomain(v))throw new MistCommandError('VALIDATION','来源开发案业务域不同，请分别创建开发案');

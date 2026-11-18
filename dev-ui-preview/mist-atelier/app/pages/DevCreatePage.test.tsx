@@ -36,6 +36,25 @@ async function pickType(title='复刻'){const button=[...document.body.querySele
 async function click(text:string){const button=[...document.body.querySelectorAll('button')].find(item=>item.textContent?.trim()===text);expect(button,text).toBeTruthy();await act(async()=>button!.click());}
 
 describe('persisted five-step development creation',()=>{
+  it('opens the specific product without choosing an unrelated customer or copying its attachments',async()=>{
+    bridge.current.state.market.products=[{id:'prod',sku:'SRC-TEST',name:'短款夹克',category:'garment',status:'active',color:'军绿',season:'AW27',specs:{style:'内部编号',mainFabric:'棉斜纹',garmentCategory:'夹克'},customerCodes:[],fileIds:['another-file']}];
+    await mount('product:prod',undefined,'garment');
+    expect(host.textContent).toContain('SRC-TEST');expect(host.textContent).toContain('短款夹克');
+    expect((getByRole(host,'textbox',{name:/开发对象名称/}) as HTMLInputElement).value).toBe('短款夹克');
+    expect((getByRole(host,'textbox',{name:/客户款号/}) as HTMLInputElement).value).toBe('');
+    expect((getByRole(host,'combobox',{name:/客户/}) as HTMLSelectElement).value).toBe('');
+    await click('存为草稿');expect(bridge.current.run).not.toHaveBeenCalled();
+    await act(async()=>getByRole(host,'button',{name:/来源产品档案.*SRC-TEST/}).click());
+    expect(go).toHaveBeenLastCalledWith('products','prod',{detail:'full'});
+  });
+  it('does not start an ordinary development draft when the product origin is unavailable',async()=>{
+    bridge.current.state.market.products=[];
+    await mount('product:missing',undefined,'fabric');
+    expect(host.textContent).toContain('来源产品档案不可用');
+    expect((getByRole(host,'button',{name:'存为草稿'}) as HTMLButtonElement).disabled).toBe(true);
+    expect(bridge.current.run).not.toHaveBeenCalled();
+  });
+
   it('continues to the requested page after recovering the original draft save without issuing another write',async()=>{
     await mountGuarded();await fill('开发对象名称','城市羊毛大衣');await pickType();await fill('客户款号','STYLE-17');await click('查看库存测试入口');bridge.current.pending={kind:'command',command:{type:'development.saveDraft'}};bridge.current.recover=vi.fn(async()=>({requestId:'original-draft',revision:8,result:{draftId:'recovered-draft'}}));await act(async()=>root!.render(<GuardedDevelopment/>));await click('核对原操作结果');expect(bridge.current.run).not.toHaveBeenCalled();expect(bridge.current.recover).toHaveBeenCalledTimes(1);expect(go).toHaveBeenCalledTimes(1);expect(go).toHaveBeenCalledWith('inventory');
   });
