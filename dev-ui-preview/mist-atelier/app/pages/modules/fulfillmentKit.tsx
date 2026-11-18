@@ -129,10 +129,11 @@ export function useRecordFileUpload(ids:string[], onAttach?: (addedIds:string[])
   return { failure, setFailure, busy, staged, owned, add, verify, clearStaged };
 }
 
-export function RecordFiles({ ids, onAttach }: {
+export function RecordFiles({ ids, onAttach, onPrint }: {
     ids: string[];
     /** Newly uploaded/recovered IDs only; the owner merges against its current record. */
     onAttach?: (addedIds: string[]) => Promise<unknown>;
+    onPrint?: (file: MistFile) => void;
 }) {
   const { state, downloadFile, pending, saving } = useMistWorkspace();
   const { failure, setFailure, busy, staged, owned, add, verify } = useRecordFileUpload(ids, onAttach);
@@ -141,7 +142,7 @@ export function RecordFiles({ ids, onAttach }: {
     {owned && !saving && <Banner tone="warn" title={uiText("附件上传结果待核对")} actions={<Button disabled={busy} onClick={() => void verify()}>{uiText("核对并关联")}</Button>}>{uiText(failure || '核对后关联到本记录，不会重复上传。')}</Banner>}
     {failure && !owned && <FailureNotice title={"附件未完成保存"} detail={failure} />}
     {unavailable > 0 && <Pill tone="neutral">{ui`${unavailable}份附件不可读`}</Pill>}
-    {ids.map(id => { const f = state?.files.find(f => f.id === id); return f ? <div className="mist-row" key={id}><FileName file={f} files={ids.map(x => state?.files.find(y => y.id === x))} /><TextLink icon={Download} onClick={() => void downloadFile(f).catch(e => setFailure(String(e)))}>{uiText("下载")}</TextLink></div> : null; })}
+    {ids.map(id => { const f = state?.files.find(f => f.id === id); return f ? <div className="mist-row" key={id}><FileName file={f} files={ids.map(x => state?.files.find(y => y.id === x))} /><TextLink icon={Download} onClick={() => void downloadFile(f).catch(e => setFailure(String(e)))}>{uiText("下载")}</TextLink>{onPrint&&f.mimeType==='application/pdf'&&<TextLink aria-label={ui`打印 ${f.name}`} onClick={()=>onPrint(f)}>{uiText("打印")}</TextLink>}</div> : null; })}
     {onAttach && <UploadZone onFiles={files => { if (!busy && !saving && (!pending || owned)) void add(files); }}/>}
     {!!staged.length && <Button disabled={busy || saving || !!pending || !onAttach} onClick={() => void add([])}>{uiText("重试关联已上传附件")}</Button>}
   </div>;

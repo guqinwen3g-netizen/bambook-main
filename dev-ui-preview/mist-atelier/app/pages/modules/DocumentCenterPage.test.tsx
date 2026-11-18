@@ -16,6 +16,7 @@ import {fixture as fulfillmentFixture} from '../../../../../server/src/mist/__te
 import {prepareGeneratedSnapshot} from '../../../../../server/src/shared/mistDocumentGeneration';
 import {generatedDocFingerprint} from '../../../../../server/src/shared/mistGeneratedDocument';
 import {DocumentCenterPage,issueBlocker} from './DocumentCenterPage';
+import {GENERATED_EXPORT_EVENT,type GeneratedExportRequest} from '../../runtime/exportRequests';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let host:HTMLElement,root:Root;let presentedError:string|undefined;const go=vi.fn();
 function render(id?:string,section?:string){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'document-center',id,section},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><MistPresentedErrorContext.Provider value={presentedError}><DocumentCenterPage/></MistPresentedErrorContext.Provider></Nav.Provider></ToastProvider></MistRoot>));}
@@ -29,6 +30,45 @@ beforeEach(()=>{store.workspace={id:'workspace',revision:1};presentedError=undef
   s.fulfillment.shipments.push(shipment('s'));
   store.state=s;store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
+
+it.each([true,false])('keeps unread documents and letterhead distinct from empty data (loading %s)',async loading=>{
+ store.state=null;store.loading=loading;store.error=loading?'':'本次读取失败';
+ try{
+  render();
+  expect(host.textContent).toContain(loading?'正在读取单据':'单据资料未读取');
+  expect(host.textContent).not.toContain('还没有成衣出运单据');
+  expect(queryByRole(host,'table',{name:'单据列表'})).toBeNull();
+  expect(queryByRole(host,'button',{name:/当前单据/})).toBeNull();
+  expect((getByRole(host,'button',{name:'生成单据',exact:true}) as HTMLButtonElement).disabled).toBe(true);
+  await click(getByRole(host,'tab',{name:'公司抬头',exact:true}));
+  expect(host.textContent).not.toContain('尚未填写公司抬头');
+ }finally{store.loading=false;}
+});
+
+it('packages only distinct originals from effective documents in the current full shipment scope',async()=>{
+ const state=store.state!;
+ state.fulfillment.shipments.push(shipment('other'));
+ state.fulfillment.documents.push(
+  doc('a','CI',{status:'issued',fileIds:['a','shared']}),
+  doc('b','PL',{status:'issued',fileIds:['b','shared']}),
+  doc('old','CI',{status:'void',fileIds:['old']}),
+  doc('draft','CD',{fileIds:['draft']}),
+  doc('outside','CI',{shipmentId:'other',status:'issued',fileIds:['outside']}),
+ );
+ let request:GeneratedExportRequest|undefined;
+ const listen=(event:Event)=>{event.preventDefault();request=(event as CustomEvent<GeneratedExportRequest>).detail;};
+ document.addEventListener(GENERATED_EXPORT_EVENT,listen);
+ try{
+  render(undefined,'s');
+  await click(getByRole(host,'button',{name:'打包本票正式单据',exact:true}));
+  expect(request).toMatchObject({filename:'S-正式单据.zip',rowCount:3});
+  state.fulfillment.shipments[0].hiddenCount=1;render(undefined,'s');
+  expect(queryByRole(host,'button',{name:'打包本票正式单据',exact:true})).toBeNull();
+  render();
+  expect(queryByRole(host,'button',{name:'打包本票正式单据',exact:true})).toBeNull();
+  expect(store.run).not.toHaveBeenCalled();
+ }finally{document.removeEventListener(GENERATED_EXPORT_EVENT,listen);}
+});
 
 it('explains every issue precondition the backend enforces before a draft can be issued',()=>{
   const st=store.state!,f=st.fulfillment;

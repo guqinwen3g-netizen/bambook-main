@@ -10,7 +10,7 @@ import { View } from '../../../../../types';
 import React from 'react';
 import { Anchor, Archive, Building2, Download, FileText, FilePlus2, Pencil, Plus, Receipt, SearchX, Sparkles, Stamp, XCircle } from 'lucide-react';
 import { Button, Card, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Tabs, TextLink, Toolbar, type Column, type Tone } from '../../../../../components/mist';
-import { isPendingFinanceMistInvoice, isRecognizedMistInvoice, type MistState } from '../../../../../server/src/shared/mistWorkspace';
+import { isPendingFinanceMistInvoice, isRecognizedMistInvoice, type MistState, type MistFile } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentDocument, FulfillmentShipment } from '../../../../../server/src/shared/mistFulfillment';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
@@ -19,7 +19,9 @@ import { fmt } from '../../data';
 import { ModuleEditorDialog, type ModuleEditorSpec, type ModuleField } from './ModuleWorkbench';
 import { SEAL_KIND_LABEL, usableSeals } from './CompanySeals';
 import { useRecordAttachment, documentTypeLabel, choices, emptyOption, Events, exportRecords, field, localNow, RecordFiles, text } from './fulfillmentKit';
-import { useRouteDraft } from './useRouteDraft';
+import { useRouteDraft, useRouteScope } from './useRouteDraft';
+import { workspaceFileBundle } from '../../runtime/workspaceFileBundle';
+import { downloadGeneratedBlob, requestGeneratedExport } from '../../runtime/exportRequests';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen, type ReasonedAction } from './pageKit';
 import { MODE_LABEL, packingMatched } from './ShipmentsPage';
 import { DOCUMENT_ISSUERS } from '../../runtime/tradeOptions';
@@ -35,6 +37,9 @@ const OWN = isOwnDocumentType;
 /** Own documents bound to the shipment's open state; post-departure notices stay editable after sailing. */
 const shipmentBound = (type: DocType) => OWN(type) && !POST_DEPARTURE_TYPES.includes(type);
 const family = fulfillmentDocumentFamily;
+const issuedShipmentDocuments = (state: MistState, shipmentId: string) =>
+  state.fulfillment.documents.filter(d => d.shipmentId === shipmentId && d.status === 'issued');
+const bundleBasis = (docs: FulfillmentDocument[]) => JSON.stringify(docs.map(d => [d.id, d.fileIds]));
 export function documentStatus(d: FulfillmentDocument): { label: string; tone: Tone } {
   if (d.status === 'void') return { label: '已作废', tone: 'neutral' };
   if (d.status === 'issued') return d.externalIssue ? { label: '外部原件已归档', tone: 'ok' } : { label: '已签发', tone: 'ok' };
@@ -63,7 +68,9 @@ function voidBlocker(root: MistState, d: FulfillmentDocument) {
 export function DocumentCenterPage() {
   const attachFiles=useRecordAttachment();
   const presentedError = React.useContext(MistPresentedErrorContext);
-  const { state, run, error, refresh, loading, saving, pending, downloadFile, workspace } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
+  const { state, run, error, refresh, loading, saving, pending, downloadFile, readFile, workspace } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
+  const scope = useRouteScope();
+  const [fileFailure, setFileFailure] = useRouteDraft('');
   const can = session.hasPermission('customs:write'), canInvoices = session.hasPermission('invoices:read');
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
   const [tab, setTab] = React.useState<Tab>('documents'), [domainChoice, setDomainChoice] = React.useState<Domain | null>(null);
@@ -89,6 +96,56 @@ export function DocumentCenterPage() {
   const rows = searched.filter(d => statusFilter === 'active' ? d.status !== 'void' : d.status === statusFilter)
     .sort((a, b) => order[a.status] - order[b.status] || (shipmentOf(a)?.code || '').localeCompare(shipmentOf(b)?.code || '') || a.type.localeCompare(b.type) || b.version - a.version);
   const selected = rows.find(d => d.id === picked) || (picked ? docs.find(d => d.id === picked) : undefined);
+  const issuedForBundle = state && contextShipment && !contextShipment.hiddenCount ? issuedShipmentDocuments(state, contextShipment.id) : [];
+
+  function downloadBundle() {
+    if (!state || !contextShipment || !issuedForBundle.length) return;
+    const shipmentId = contextShipment.id, workspaceId = workspace?.id, basis = bundleBasis(issuedForBundle);
+    const isCurrent = () => {
+      const current = liveCdIssue.current;
+      return scope.isCurrent() && current.workspaceId === workspaceId && !!current.state &&
+        current.state.fulfillment.shipments.some(s => s.id === shipmentId && !s.hiddenCount) &&
+        bundleBasis(issuedShipmentDocuments(current.state, shipmentId)) === basis;
+    };
+    setFileFailure('');
+    try {
+      const incomplete = issuedForBundle.find(d => !d.fileIds.length);
+      if (incomplete) throw new Error(`${incomplete.number || incomplete.title} 缺少正式原件`);
+      const refs = [...new Set(issuedForBundle.flatMap(d => d.fileIds))]
+        .map(fileId => ({ fileId, name: state.files.find(f => f.id === fileId)?.name || '正式单据' }));
+      const name = contextShipment.code + '-正式单据';
+      requestGeneratedExport({ filename: name + '.zip', rowCount: refs.length, run: async () => {
+        try {
+          const result = await workspaceFileBundle(refs, state.files, readFile, {
+            name, date: issuedForBundle[0].issuedAt || issuedForBundle[0].createdAt, isCurrent,
+          });
+          downloadGeneratedBlob(new Blob([new Uint8Array(result.bytes).buffer], { type: 'application/zip' }), result.name);
+        } catch (cause) {
+          if (scope.isCurrent()) setFileFailure(cause instanceof Error ? cause.message : String(cause));
+        }
+      } });
+    } catch (cause) {
+      setFileFailure(cause instanceof Error ? cause.message : String(cause));
+    }
+  }
+
+  async function printOriginal(file: MistFile) {
+    const workspaceId = workspace?.id;
+    const isCurrent = () => scope.isCurrent() && liveCdIssue.current.workspaceId === workspaceId;
+    setFileFailure('');
+    const preview = window.open('', '_blank');
+    if (!preview) { setFileFailure('请允许打开打印预览窗口'); return; }
+    try {
+      const blob = await readFile(file);
+      if (!isCurrent()) { preview.close(); return; }
+      const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+      preview.location.href = url;
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (cause) {
+      preview.close();
+      if (isCurrent()) setFileFailure(cause instanceof Error ? cause.message : String(cause));
+    }
+  }
 
   const pick = (d: FulfillmentDocument) => { setPicked(d.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, d.id, target, { keepScroll: true }); };
   const changeDomain = (value: Domain) => { setDomainChoice(value); setStatusFilter('active'); setPicked(null); };
@@ -177,12 +234,12 @@ export function DocumentCenterPage() {
     { key: 'date', header: '签发 / 创建', width: '116px', hideOnMobile: true, render: d => <div className="mist-col" style={{ gap: 2 }}><span>{uiText(d.issuedAt ? shortWhen(d.issuedAt) : '未签发')}</span><small className="mist-muted">{d.actor} · {shortWhen(d.createdAt)}</small></div> },
     { key: 'status', header: '状态', width: '128px', render: d => { const st = documentStatus(d); return <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={st.tone}>{uiText(st.label)}</Pill>{d.status === 'draft' && !d.fileIds.length && <small className="mist-muted">{uiText("缺正式文件")}</small>}</div>; } },
   ];
-  const createButton = can ? <><Button icon={Plus} disabled={invalidContext || !shipments.length} onClick={() => setDialog(docSpec())}>{uiText("登记单据")}</Button><Button variant="primary" icon={Sparkles} disabled={invalidContext || !shipments.length} title={uiText(shipments.length ? undefined : '没有可出具单据的出运')} onClick={() => setDialog(generateSpec())}>{uiText("生成单据")}</Button></> : undefined;
+  const createButton = can ? <><Button icon={Plus} disabled={invalidContext || !shipments.length} onClick={() => setDialog(docSpec())}>{uiText("登记单据")}</Button><Button variant="primary" icon={Sparkles} disabled={invalidContext || !shipments.length} title={uiText(!state || shipments.length ? undefined : '没有可出具单据的出运')} onClick={() => setDialog(generateSpec())}>{uiText("生成单据")}</Button></> : undefined;
   const empty = inDomain.length
     ? <EmptyState icon={SearchX} title={uiText("没有符合条件的单据")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setTypeFilter('all'); setStatusFilter('active'); }}>{uiText("清除筛选")}</Button>} />
     : <EmptyState icon={FileText} title={uiText(invalidContext ? '来源出运不存在' : hasContext ? '本票还没有单据' : `还没有${domain === 'fabric' ? '面料' : '成衣'}出运单据`)} description={invalidContext ? uiText('来源出运不可用') : undefined} action={createButton && !invalidContext && shipments.length ? <Button icon={Sparkles} onClick={() => setDialog(generateSpec())}>{uiText("生成单据")}</Button> : undefined} />;
   const detail = selected && state
-    ? <DocumentDetail doc={selected} state={state} can={can} canInvoices={canInvoices} locked={locked} onPick={pick}
+    ? <DocumentDetail doc={selected} state={state} can={can} canInvoices={canInvoices} locked={locked} onPick={pick} onPrint={file=>void printOriginal(file)}
         onEdit={() => setDialog(docSpec(selected))} onVersion={() => setDialog(docSpec(undefined, selected))} onArchive={() => setDialog(archiveSpec(selected))} onVoid={() => setDialog(voidSpec(selected))}
         onIssue={() => setDialog(issueSpec(selected))} onBl={() => setDialog(blSpec(selected))} onRegenerate={() => setDialog(generateSpec(f?.shipments.find(row => row.id === selected.shipmentId), selected.type as OwnDocumentType, selected.orderId || undefined))}
         onAttach={added => attachFiles(root=>root.fulfillment.documents.find(row=>row.id===selected.id),(current,fileIds)=>{if(current.status!=='draft')throw new Error('单据已不在草稿状态，请重新打开后核对附件');return {type:'fulfillment.documents.save',payload:{id:current.id,shipmentId:current.shipmentId,orderId:current.orderId,type:current.type,number:current.number,title:current.title,dueDate:current.dueDate,content:current.content,fileIds}};},added)}
@@ -195,12 +252,15 @@ export function DocumentCenterPage() {
       actions={<>
         {contextShipment && <Button onClick={() => go('shipments', contextShipment.id)}>{uiText("返回出运")}</Button>}
         {hasContext && <Button onClick={() => go('document-center')}>{uiText("查看全部单据")}</Button>}
+        {!!issuedForBundle.length && <Button icon={Archive} onClick={downloadBundle}>{uiText("打包本票正式单据")}</Button>}
         {tab === 'documents' && <Button icon={Download} disabled={!rows.length} onClick={() => exportRecords('单据目录', ['编号', '标题', '类型', '版本', '出运', '订单', '状态', '签发时间'], rows.map(d => [d.number, d.title, d.type, d.version, shipmentOf(d)?.code || '', orderCode(d.orderId), documentStatus(d).label, d.issuedAt || '']))}>{uiText("导出")}</Button>}
         {tab === 'documents' && createButton}
       </>} />
     {error && error !== presentedError && <FailureNotice title={state ? "单据操作未完成" : "单据未读取"} detail={error} retry={() => void refresh()} />}
-    {!hasContext && <div className="mist-section"><Tabs<Tab> value={tab} onChange={value => { setTab(value); setDrawer(false); }} options={[{ value: 'documents', label: '出运单据', count: docs.filter(d => d.status !== 'void').length }, { value: 'letterhead', label: '公司抬头' }]} /></div>}
-    {tab === 'letterhead' && !hasContext ? <Card><div className="mist-col" style={{ padding: 20, gap: 16 }}>
+    {fileFailure && <FailureNotice title="原件操作未完成" detail={fileFailure} />}
+    {!hasContext && <div className="mist-section"><Tabs<Tab> value={tab} onChange={value => { setTab(value); setDrawer(false); }} options={[{ value: 'documents', label: '出运单据', count: state ? docs.filter(d => d.status !== 'void').length : undefined }, { value: 'letterhead', label: '公司抬头' }]} /></div>}
+    {!state ? <EmptyState icon={FileText} title={uiText(error && !loading ? '单据资料未读取' : '正在读取单据')} compact />
+    : tab === 'letterhead' && !hasContext ? <Card><div className="mist-col" style={{ padding: 20, gap: 16 }}>
         {profile?.legalName ? <Facts items={[
           { label: '中文抬头', value: profile.legalName }, { label: '英文抬头', value: profile.englishName || '未填写' },
           { label: '中文地址', value: profile.address || '未填写' }, { label: '英文地址', value: profile.englishAddress || '未填写' },
@@ -229,8 +289,8 @@ export function DocumentCenterPage() {
   </MistPage>;
 }
 
-function DocumentDetail({ doc: d, state, can, canInvoices, locked, onPick, onEdit, onVersion, onIssue, onArchive, onVoid, onAttach, onShipment, onInvoice, onBl, onRegenerate }: {
-  doc: FulfillmentDocument; state: MistState; can: boolean; canInvoices: boolean; locked: boolean; onPick: (d: FulfillmentDocument) => void;
+function DocumentDetail({ doc: d, state, can, canInvoices, locked, onPick, onEdit, onVersion, onIssue, onArchive, onVoid, onAttach, onShipment, onInvoice, onBl, onRegenerate, onPrint }: {
+  doc: FulfillmentDocument; state: MistState; can: boolean; canInvoices: boolean; locked: boolean; onPick: (d: FulfillmentDocument) => void; onPrint: (file: MistFile) => void;
   onBl: () => void; onRegenerate: () => void;
   onEdit: () => void; onVersion: () => void; onIssue: () => void; onArchive: () => void; onVoid: () => void; onAttach: (ids: string[]) => Promise<unknown>; onShipment: () => void; onInvoice: (id: string) => void;
 }) {
@@ -283,7 +343,7 @@ function DocumentDetail({ doc: d, state, can, canInvoices, locked, onPick, onEdi
         { key: 'at', header: '签发 / 创建', hideOnMobile: true, render: v => v.issuedAt ? shortWhen(v.issuedAt) : shortWhen(v.createdAt) },
       ]} />
     </DetailBlock>
-    <DetailBlock title={uiText("正式文件")}><RecordFiles key={d.id} ids={d.fileIds} onAttach={can && d.status === 'draft' && editableShipment ? onAttach : undefined} /></DetailBlock>
+    <DetailBlock title={uiText("正式文件")}><RecordFiles key={d.id} ids={d.fileIds} onPrint={d.status !== 'draft' ? onPrint : undefined} onAttach={can && d.status === 'draft' && editableShipment ? onAttach : undefined} /></DetailBlock>
     <DetailBlock title={uiText("处理记录")}><Events entity="document" id={d.id} /></DetailBlock>
   </DetailBody>;
 }
