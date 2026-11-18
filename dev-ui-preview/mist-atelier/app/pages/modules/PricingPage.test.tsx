@@ -27,6 +27,41 @@ it('saves only actual inputs and lets the server calculate four-decimal results'
 it('keeps failed inputs and prevents same-tick duplicate writes',async()=>{store.value.run.mockRejectedValueOnce(new Error('真实保存失败'));render();fill();const button=getByRole(host,'button',{name:'保存定价记录'});await act(async()=>{button.click();button.click();});expect(store.value.run).toHaveBeenCalledTimes(1);expect(host.textContent).toContain('真实保存失败');expect((getByLabelText(host,/^采购成本 CNY/) as HTMLInputElement).value).toBe('100');});
 it('copies an exact immutable snapshot for a new calculation without overwriting the original',async()=>{const old=snapshot();store.value.state.platform.pricing=[old];const before=JSON.stringify(old);route={view:'pricing',id:'original',section:'snapshots'};render();await click('用于新试算');expect((getByLabelText(host,/^采购成本 CNY/) as HTMLInputElement).value).toBe('100');field('采购成本 CNY','120');await click('保存定价记录');expect(store.value.state.platform.pricing).toHaveLength(2);expect(store.value.state.platform.pricing.find((r:any)=>r.id==='original')).toEqual(JSON.parse(before));expect(store.value.state.platform.pricing[0].id).not.toBe('original');});
 it('exports only records for the selected exact order',async()=>{store.value.state.orders.push({id:'other',code:'OTHER',customer:'其他客户'});store.value.state.platform.pricing=[snapshot(),{...snapshot(),id:'other-record',orderId:'other'}];route.section='snapshots';render();field('定价来源订单','order');await click('导出记录');expect(store.csv.mock.calls[0][2]).toHaveLength(1);expect(store.csv.mock.calls[0][2][0][0]).toBe('original');});
+it('uses each frozen trial currency in the snapshot and exported rows',async()=>{
+ store.value.state.platform.pricing=[{...snapshot(),currency:'EUR'}];
+ route={view:'pricing',id:'original',section:'snapshots'};render();
+ expect(host.textContent).toContain('15.1042 EUR');
+ expect(host.textContent).toContain('7.2 CNY / EUR');
+ expect(host.textContent).not.toContain('15.1042 USD');
+ await click('导出记录');
+ const [,headers,rows]=store.csv.mock.calls[0];
+ expect(rows[0][headers.indexOf('试算币种')]).toBe('EUR');
+ expect(headers).not.toContain('建议USD单价');
+});
+it('clears only the entered FX rate when a new currency is chosen',()=>{
+ store.value.state.orders[0].currency='EUR';render();
+ field('采购成本 CNY','100');field('汇率 CNY / USD','7.2');field('来源订单 / 报价','o:order');
+ expect((getByLabelText(host,/^汇率 CNY \/ EUR/) as HTMLInputElement).value).toBe('');
+ field('汇率 CNY / EUR','7.8');field('试算币种','GBP');
+ expect((getByLabelText(host,/^汇率 CNY \/ GBP/) as HTMLInputElement).value).toBe('');
+ expect((getByLabelText(host,/^采购成本 CNY/) as HTMLInputElement).value).toBe('100');
+});
+it('distinguishes duplicate styles and copies and returns to the exact saved quote line',async()=>{
+ const state=store.value.state;
+ state.market.quotations=[{id:'quote',code:'QUOTE-1',currency:'USD',customerId:'customer',status:'Draft',lines:[
+  {id:'line-a',style:'SAME',name:'衬衫',qty:'2',unit:'件'},{id:'line-b',style:'SAME',name:'衬衫',qty:'1',unit:'件'},
+ ]}];
+ state.platform.pricing=[{...snapshot(),orderId:'',quotationId:'quote',lineId:'line-b'}];
+ route={view:'pricing',id:'original',section:'snapshots'};render();
+ expect(host.textContent).toContain('QUOTE-1 · 第 2 行 · SAME · 1 件');
+ await click('返回来源报价');expect(go).toHaveBeenLastCalledWith('quotations','quote');
+ route={view:'pricing',id:'original',section:'snapshots'};render();await click('用于新试算');
+ const source=getByLabelText(host,/^来源订单/) as HTMLSelectElement;
+ expect(source.value).toBe('q:quote:line-b');
+ expect([...source.options].find(o=>o.value==='q:quote:line-a')?.label).toContain('第 1 行');
+ expect([...source.options].find(o=>o.value==='q:quote:line-b')?.label).toContain('第 2 行');
+ expect(store.value.run).not.toHaveBeenCalled();
+});
 it('keeps approved procurement amounts per currency, excluding drafts and other orders',()=>{const base={id:'purchase',orderId:'order',quantity:10,price:2,currency:'CNY',state:'approved'};store.value.state.fulfillment.purchases=[base,{...base,id:'usd',currency:'USD',price:3},{...base,id:'draft',state:'draft',price:999},{...base,id:'other',orderId:'other',price:999}] as any;expect(pricingOrderEvidence(store.value.state)[0].commitments).toEqual([{currency:'CNY',amount:20},{currency:'USD',amount:30}]);expect(store.value.state.payments).toEqual([]);});
 it('never calls commitment totals or unlinked payments actual profit',()=>{store.value.state.payments=[{id:'pay',code:'PAY',date:'2026-10-14',payee:'供应商',amount:10,currency:'USD',ref:'未关联订单'}];route.section='orders';render();expect(host.textContent).toContain('不是已核实的订单利润');expect(getByRole(host,'table',{name:'订单成本来源'}).textContent).toContain('见报表中心 · 订单核算');expect(getByRole(host,'button',{name:'查看订单核算'})).toBeTruthy();});
 it('prices an EUR order in EUR by default and warns when the trial currency differs',()=>{store.value.state.orders[0].currency='EUR';render();fill();expect((getByLabelText(host,/^试算币种/) as HTMLSelectElement).value).toBe('EUR');field('试算币种','USD');expect(host.textContent).toContain('来源订单为 EUR');expect(store.value.state.orders[0].currency).toBe('EUR');});
@@ -34,7 +69,18 @@ it('disables writes and reuse while keeping source records readable',()=>{store.
 it('does not claim success when a save response lacks the exact record id',async()=>{store.value.run.mockResolvedValue({result:{}});render();fill();await click('保存定价记录');expect(host.textContent).toContain('回执未包含准确记录编号');expect(host.textContent).not.toContain('计算与依据已保存；原有记录未改写');});
 it('recovers the original pending request without a new pricing command',async()=>{store.value.pending={requestId:'pending'};store.value.recover.mockResolvedValue({result:{id:'known'}});render();await click('核对原请求');expect(store.value.recover).toHaveBeenCalledTimes(1);expect(store.value.run).not.toHaveBeenCalled();});
 it('does not show an old save error after a workspace switch',async()=>{let reject!:(e:Error)=>void;store.value.run.mockReturnValue(new Promise((_,r)=>reject=r));render();fill();await click('保存定价记录');store.value={...store.value,workspace:{id:'space-b'}};render();await act(async()=>reject(new Error('旧空间失败')));expect(host.textContent).not.toContain('旧空间失败');expect((getByLabelText(host,/^采购成本 CNY/) as HTMLInputElement).value).toBe('');});
+it('opens the actual cost report for the order selected in cost sources',async()=>{
+ route.section='orders';render();field('成本来源订单','order');
+ await click('查看订单核算');expect(go).toHaveBeenLastCalledWith('reports','order',{section:'actual'});
+});
 it('does not silently open another snapshot for a missing id',()=>{store.value.state.platform.pricing=[snapshot()];route={view:'pricing',id:'missing',section:'snapshots'};render();expect(host.textContent).toContain('未找到指定定价记录');expect(host.textContent).not.toContain('只读参数快照');});
+it('does not claim a zero snapshot count or offer export before pricing data is read',()=>{
+ store.value.state=null;store.value.error='模拟定价读取失败';render();
+ expect(host.textContent).toContain('定价资料未读取');
+ expect(getByRole(host,'tab',{name:'参数快照',exact:true})).toBeTruthy();
+ expect((getByRole(host,'button',{name:'导出记录'}) as HTMLButtonElement).disabled).toBe(true);
+ expect(host.textContent).not.toContain('保存定价记录');
+});
 const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai'}).format(new Date());
 function standard(profitMargin=20,commissionRate=5){store.value.state.orders[0].type='garment';store.value.state.platform.pricingParams=[{id:'std-1',family:'garment',version:1,profitMargin,commissionRate,effectiveFrom:'2026-01-01',reason:'年度定价会议',createdAt:'2026-01-01T00:00:00Z',createdBy:'总经理',createdById:'boss'}];}
 it('prefills standard markup and commission when an order is chosen and shows the applicable version',async()=>{standard(18,3);render();field('来源订单 / 报价','o:order');expect((getByLabelText(host,/^成本加成率 %/) as HTMLInputElement).value).toBe('18');expect((getByLabelText(host,/^佣金率 %/) as HTMLInputElement).value).toBe('3');expect(host.querySelector('[data-pricing-standard]')?.textContent).toContain('成衣标准参数 V1：成本加成 18%、佣金 3%');});
