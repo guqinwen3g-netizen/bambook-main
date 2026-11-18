@@ -66,12 +66,13 @@ export function ApprovalsPage() {
       .map(t => ({ ...t, ...projectedReviewEvidence(t, state, tasks, current.signatureReviewBindings), workspaceId: current.id, workspaceName: current.name, revision: current.revision, canDecide: false, local: true }));
     return [...server, ...mine].sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
   }, [reviews.rows, state, current?.id, current?.revision, current?.name, current?.signatureReviewBindings, me, interfaceLocale()]);
+  const ready = reviews.loaded && !reviews.readError;
   const counts = { mine: approvalRows(all, 'mine', me).length, sent: approvalRows(all, 'sent', me).length, done: approvalRows(all, 'done', me).length, others: approvalRows(all, 'others', me).length };
   const inTab = approvalRows(all, tab, me);
   const kinds = [...new Set(inTab.map(r => r.kind))];
   const q = query.trim().toLowerCase();
   const shown = inTab.filter(r => (kind === 'all' || r.kind === kind) && (!q || [r.title, r.workspaceName, APPROVAL_KIND_LABEL[r.kind], ...r.details.map(d => d.value)].some(v => v.toLowerCase().includes(q))));
-  const selected = all.find(r => rowKey(r) === route.id) ?? null;
+  const selected = ready ? all.find(r => rowKey(r) === route.id) ?? null : null;
   React.useEffect(() => { setNote(''); setLocal(''); setSignature(null); setSignKey(k => k + 1); }, [route.id]);
   const [signatureUrl, setSignatureUrl] = React.useState<string | null>(null);
   const signatureKey = selected ? selected.workspaceId + '|' + selected.id + '|' + (selected.local ? 'company' : 'review') + '|' + (selected.signatureFileId || '') : '';
@@ -129,14 +130,18 @@ export function ApprovalsPage() {
     {reviews.error && <FailureNotice title="审批未完成" detail={reviews.error} retry={reviews.clearError} retryLabel="知道了" />}
     {reviews.intent&&!reviews.busy && <Banner tone="warn" title={uiText("有审批结果待核对")} actions={<Button size="sm" loading={reviews.busy} onClick={() => void reviews.recover()}>{uiText("核对原请求")}</Button>}>{uiText("审批结果未确认，请核对。")}</Banner>}
     <Tabs<ApprovalTab> value={tab} onChange={next => { setDrawer(false); go('approvals', undefined, { section: next }); }} options={[
-      { value: 'mine', label: '待我审批', count: counts.mine }, { value: 'sent', label: '我发起的', count: counts.sent }, { value: 'done', label: '已处理', count: counts.done },
-      ...(counts.others ? [{ value: 'others' as const, label: '公司内其他待审', count: counts.others }] : []),
+      { value: 'mine', label: '待我审批', count: ready ? counts.mine : undefined }, { value: 'sent', label: '我发起的', count: ready ? counts.sent : undefined }, { value: 'done', label: '已处理', count: ready ? counts.done : undefined },
+      ...((ready && counts.others) || tab === 'others' ? [{ value: 'others' as const, label: '公司内其他待审', count: ready ? counts.others : undefined }] : []),
     ]} />
-    <Toolbar right={kinds.length > 1 ? <Segmented<'all' | Kind> ariaLabel={uiText("审批类型")} value={kind} onChange={setKind} options={[{ value: 'all', label: '全部' }, ...kinds.map(k => ({ value: k, label: APPROVAL_KIND_LABEL[k] }))]} /> : undefined}>
-      <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索单号、供应商、客户或公司")} />
-    </Toolbar>
-    <ListDetail drawerOpen={drawer && !!selected} drawerTitle={selected ? localizedPageTitle(selected.title) : '审批详情'} onDrawerClose={() => setDrawer(false)} detail={detail}
-      list={<Card><DataTable ariaLabel={uiText("审批事项")} rows={shown} columns={columns} loading={!reviews.loaded && !reviews.error} rowKey={rowKey} selectedKey={selected ? rowKey(selected) : undefined} onRowClick={open}
-        empty={<EmptyState title={uiText(inTab.length ? '没有符合条件的审批' : tab === 'mine' ? '没有待你审批的事项' : tab === 'sent' ? '你还没有发起审批' : tab === 'done' ? '暂无已处理的审批' : '没有其他待审事项')} action={inTab.length ? <Button onClick={() => { setQuery(''); setKind('all'); }}>{uiText("清除筛选")}</Button> : undefined} />} /></Card>} />
+    {reviews.readError
+      ? <FailureNotice title="审批记录读取失败" detail={reviews.readError} retry={() => void reviews.refresh()} />
+      : <>
+        <Toolbar right={kinds.length > 1 ? <Segmented<'all' | Kind> ariaLabel={uiText("审批类型")} value={kind} onChange={setKind} options={[{ value: 'all', label: '全部' }, ...kinds.map(k => ({ value: k, label: APPROVAL_KIND_LABEL[k] }))]} /> : undefined}>
+          <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索单号、供应商、客户或公司")} />
+        </Toolbar>
+        <ListDetail drawerOpen={drawer && !!selected} drawerTitle={selected ? localizedPageTitle(selected.title) : '审批详情'} onDrawerClose={() => setDrawer(false)} detail={detail}
+          list={<Card><DataTable ariaLabel={uiText("审批事项")} rows={shown} columns={columns} loading={!ready} rowKey={rowKey} selectedKey={selected ? rowKey(selected) : undefined} onRowClick={open}
+            empty={<EmptyState title={uiText(inTab.length ? '没有符合条件的审批' : tab === 'mine' ? '没有待你审批的事项' : tab === 'sent' ? '你还没有发起审批' : tab === 'done' ? '暂无已处理的审批' : '没有其他待审事项')} action={inTab.length ? <Button onClick={() => { setQuery(''); setKind('all'); }}>{uiText("清除筛选")}</Button> : undefined} />} /></Card>} />
+      </>}
   </MistPage>;
 }

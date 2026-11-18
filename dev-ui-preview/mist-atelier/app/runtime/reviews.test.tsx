@@ -49,6 +49,41 @@ beforeEach(()=>{
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();});
 
+it('withholds empty-state and count during an initial queue read failure, then restores the same list on retry',async()=>{
+ intercept=url=>url==='/api/mist/reviews'?Promise.resolve(response({error:{message:'审批服务暂时不可用'}},503)):undefined;
+ await render();
+ expect(queryByText(document.body,'没有待你审批的事项')).toBeNull();
+ expect(getByRole(host,'tab',{name:'待我审批',exact:true})).toBeTruthy();
+ expect(getByRole(document.body,'button',{name:'重试',exact:true})).toBeTruthy();
+ intercept=undefined;
+ await click('重试');
+ expect(tableRows().map(r=>r.textContent).join(' ')).toContain('SO-ONE');
+ expect(queryByText(document.body,'审批服务暂时不可用')).toBeNull();
+ expect(postCount).toBe(0);
+});
+
+it('blocks stale approval details after a refresh failure and restores the selection and draft opinion on retry',async()=>{
+ await render();
+ await prepareDecision();
+ intercept=url=>url==='/api/mist/reviews'?Promise.resolve(response({error:{message:'审批服务暂时不可用'}},503)):undefined;
+ await click('刷新');
+ expect(queryByRole(document.body,'button',{name:'批准',exact:true})).toBeNull();
+ expect(queryByRole(document.body,'button',{name:'退回',exact:true})).toBeNull();
+ expect(queryByText(document.body,'没有待你审批的事项')).toBeNull();
+ intercept=undefined;
+ await click('重试');
+ expect(getByRole(document.body,'button',{name:'批准',exact:true})).toBeTruthy();
+ expect((getByLabelText(document.body,'审批意见') as HTMLTextAreaElement).value).toBe('核对合同通过');
+ expect(postCount).toBe(0);
+});
+
+it('shows a genuine empty approval queue only after a successful read',async()=>{
+ rows=[];
+ await render();
+ expect(getByRole(host,'tab',{name:/^待我审批\s*0$/})).toBeTruthy();
+ expect(queryByText(document.body,'没有待你审批的事项')).toBeTruthy();
+});
+
 it('refreshes the current workspace after approval so the existing business page is no longer pending',async()=>{
  await render();await prepareDecision();await click('批准');
  expect(bridge.refresh).toHaveBeenCalledTimes(1);expect(host.querySelector('[data-testid="business-state"]')?.textContent).toBe('workspace-a:approved');
