@@ -1,4 +1,4 @@
-import {applyGarmentMaterial,type GarmentMaterialUse,type GarmentMaterialCommand} from './mistGarmentMaterials';
+import {applyGarmentMaterial,garmentMaterialUses,type GarmentMaterialUse,type GarmentMaterialCommand} from './mistGarmentMaterials';
 import { applyGarmentTrimTask, type GarmentTrimTask, type GarmentTrimTaskCommand, type TrimNoticeArtifact } from './mistGarmentTrimTasks';
 import {applyDevelopmentReferenceCommand,type DevelopmentReferenceCommand,type DevelopmentSampleReference} from './mistDevelopmentSampleReferences';
 import {applyDevelopmentTaskEnd,applyDevelopmentTaskReopen,closeDevelopmentFactoryTasks,developmentFactoryWorkBlocker,type DevelopmentTaskEnd,type DevelopmentTaskEndCommand,type DevelopmentTaskLifecycleEvent,type DevelopmentTaskResolution} from './mistDevelopmentTaskLifecycle';
@@ -797,7 +797,8 @@ function createRound(state: MistState, dev: MistDev, input: RoundInput, context:
     const base = references.find(version => version.factoryId===factory) || references[0];
     const id = context.id(), requirementsCopy = fabric ? (base?.fabricRequirements || dev.values.fabricRequirements) : undefined;
     const task:MistFactoryTask={...tasks[factory],commonRequirements:requirements};
-    const version: MistVersion = {...(base?.materialUses?.length?{materialUses:structuredClone(base.materialUses)}:{}),...(requirementsCopy?{fabricRequirements:JSON.parse(JSON.stringify(requirementsCopy))}:{}),id,devId:dev.id,label:roundVersionLabel(number,letters[factory],nextPhysicalVersionNumber(state,dev,letters[factory])),factoryId:factory,factory:factoryName(state,factory),sample:'',sampleQuantity:task.sampleQuantity,size:fabric?'':(base?.size??dev.values.sizeBase),fabric:base?.fabric??dev.values.fabric,img:base?.img??dev.img,fileIds:[...new Set([...(base?.fileIds??dev.fileIds),...fileIds])],returnedAt:null,qc:null,confirmations:[],archivedAt:null,note:factoryTaskNote(requirements,task.extraRequirements),roundId:round.id,factoryLetter:letters[factory],task,...(plan?{stages:devStagesOf(state,plan)}:{})};
+    const materials=base?garmentMaterialUses(state,base):[];
+    const version: MistVersion = {...(materials.length?{materialUses:structuredClone(materials)}:{}),...(requirementsCopy?{fabricRequirements:JSON.parse(JSON.stringify(requirementsCopy))}:{}),id,devId:dev.id,label:roundVersionLabel(number,letters[factory],nextPhysicalVersionNumber(state,dev,letters[factory])),factoryId:factory,factory:factoryName(state,factory),sample:'',sampleQuantity:task.sampleQuantity,size:fabric?'':(base?.size??dev.values.sizeBase),fabric:base?.fabric??dev.values.fabric,img:base?.img??dev.img,fileIds:[...new Set([...(base?.fileIds??dev.fileIds),...fileIds])],returnedAt:null,qc:null,confirmations:[],archivedAt:null,note:factoryTaskNote(requirements,task.extraRequirements),roundId:round.id,factoryLetter:letters[factory],task,...(plan?{stages:devStagesOf(state,plan)}:{})};
     state.versions.push(version); dev.versionIds.push(id); created.push(version);
   }
   dev.values.factories = [...new Set([...dev.values.factories, ...factories])];
@@ -1400,10 +1401,12 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const [dev,parent]=versionOf(state,p.devId,p.versionId), blocked=minorVersionBlocker(state,dev,parent);
       if(blocked)throw new MistCommandError('PRECONDITION',blocked);
       const change=text(p.change,'调整内容'), siblings=minorVersions(state,parent), seq=siblings.length+1, id=context.id();
+      const uses=garmentMaterialUses(state,parent);
       const minor:MistVersion={id,devId:dev.id,label:minorVersionLabel(physicalVersionLabel(state,dev,parent),seq),factoryId:parent.factoryId,factory:parent.factory,sample:parent.sample,sampleQuantity:parent.sampleQuantity,
         ...(parent.sampleForm!==undefined?{sampleForm:parent.sampleForm}:{}),...(parent.sampleUnit!==undefined?{sampleUnit:parent.sampleUnit}:{}),
         size:parent.size,fabric:parent.fabric,img:parent.img,fileIds:[...parent.fileIds],returnedAt:parent.returnedAt,qc:structuredClone(parent.qc),confirmations:[],archivedAt:null,note:change,
         ...(parent.roundId?{roundId:parent.roundId}:{}),...(parent.factoryLetter?{factoryLetter:parent.factoryLetter}:{}),
+        ...(uses.length ? { materialUses: structuredClone(uses) } : {}),
         minor:{parentVersionId:parent.id,seq,change,recordedAt:context.now,recordedBy:context.actorName}};
       const after=dev.versionIds.indexOf((siblings.at(-1)||parent).id);
       state.versions.push(minor);dev.versionIds.splice(after+1,0,id);dev.currentVersionId=id;updateDev(state,dev,context);

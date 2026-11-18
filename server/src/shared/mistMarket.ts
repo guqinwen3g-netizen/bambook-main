@@ -1,5 +1,5 @@
 import {stableJson} from './stableJson';
-import type {GarmentMaterialUse} from './mistGarmentMaterials';
+import {garmentMaterialUses,type GarmentMaterialUse} from './mistGarmentMaterials';
 import {saveTrimProfile,trimQuoteTerms,sourcePriceLabel,type TrimCatalogProfile,type TrimProfileInput,type TrimQuoteTerms} from './mistTrimCatalog';
 import {assertCustomerFieldAuthority} from './mistCustomerFieldAuthority';
 import { scheduleCrmFollowUp } from './mistCrm';
@@ -421,7 +421,8 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    const isFabric=developmentDomain(d.values)==='fabric',fr=v.fabricRequirements||d.values.fabricRequirements,known=(x:string|undefined)=>x&&x!=='待工厂分析'?x:'';
    const specs:Record<string,string>=isFabric?{weight:fr&&(!fr.weightUnit||fr.weightUnit==='g/m²')&&/^\d{1,4}(\.\d{1,2})?$/.test(fr.weightValue)?fr.weightValue:'',width:fr&&(!fr.widthUnit||fr.widthUnit==='cm')&&/^\d{1,4}(\.\d{1,2})?$/.test(fr.widthValue)?fr.widthValue:'',weave:known(fr?.weave),yarn:known(fr?.yarn),finish:known(fr?.finish)}:{style:d.values.style||'',garmentCategory:d.values.category||'',sizeRange:v.size||'',mainFabric:v.fabric||''};
    const composition=isFabric&&known(fr?.composition)?fr!.composition.split('\n').map(x=>x.trim()).filter(Boolean).join(' / '):v.fabric;
-   const saved=execute(root,{type:'market.product.save',payload:{input:{sku:command.payload.sku,name:command.payload.name===undefined?d.name:str(command.payload.name,'产品名称',true,80),category:isFabric?'fabric':'garment',season:d.values.season,supplierId:command.payload.supplierId||'',supplierCode:command.payload.supplierCode||'',composition,specification:v.size,color:d.values.color,specs,refPrice:'',unit:d.values.targetUnit||(isFabric?'米':'件'),cost:'0',currency:d.values.targetCurrency||'USD',sourceDevId:devId,sourceVersionId:versionId,fileIds:v.fileIds,note:`来源 ${d.code} / ${v.label}；成本待核实`}}},ctx);if(!isFabric&&v.materialUses?.length){const archive=find(m.products,String(saved.id),'产品档案');archive.materialUses=structuredClone(v.materialUses);}
+   const saved=execute(root,{type:'market.product.save',payload:{input:{sku:command.payload.sku,name:command.payload.name===undefined?d.name:str(command.payload.name,'产品名称',true,80),category:isFabric?'fabric':'garment',season:d.values.season,supplierId:command.payload.supplierId||'',supplierCode:command.payload.supplierCode||'',composition,specification:v.size,color:d.values.color,specs,refPrice:'',unit:d.values.targetUnit||(isFabric?'米':'件'),cost:'0',currency:d.values.targetCurrency||'USD',sourceDevId:devId,sourceVersionId:versionId,fileIds:v.fileIds,note:`来源 ${d.code} / ${v.label}；成本待核实`}}},ctx);const materialUses=isFabric?[]:garmentMaterialUses(root,v);
+   if(materialUses.length){const archive=find(m.products,String(saved.id),'产品档案');archive.materialUses=structuredClone(materialUses);}
    result={...saved,devId,versionId};break;}
   case 'market.product.status':{const row=find(m.products,command.payload.id,'产品');row.status=one(command.payload.status,['active','archived'],'产品状态');row.updatedAt=ctx.now;history(root,ctx,'product',row.id,(row.status==='archived'?'归档产品档案 ':'恢复产品档案 ')+row.sku);result={id:row.id};break;}
   case 'market.supplier.save':{const {id,input:supplied}=command.payload,old=id?find(m.suppliers,id,'供应商'):undefined,input={...old,...supplied};

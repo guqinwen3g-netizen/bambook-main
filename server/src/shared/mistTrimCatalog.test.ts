@@ -85,6 +85,17 @@ describe('material use on an exact garment factory version',()=>{
     expect(hidden.catalog.specs).toEqual(old![0].catalog.specs);expect(get(first).materialUses).toEqual(old);
     f.run({type:'development.recordSample',payload:{devId,versionId:first,sample:'SRC-1',quantity:1,returnedAt:f.ctx.now}});
     f.run({type:'development.recordQc',payload:{devId,versionId:first,qc:{result:'pass',reviewer:'QC',reviewedAt:f.ctx.now,report:'QC-01',opinion:'通过'}}});
+    const minor=String(f.run({type:'development.version.recordMinor',payload:{devId,versionId:first,change:'明确洗标标注'}}).versionId);
+    expect(get(minor).materialUses).toEqual(old);
+    expect(get(minor).materialUses).not.toBe(get(first).materialUses);
+    delete get(minor).materialUses; // Existing records lack the copy, but have an immutable physical parent.
+    const legacy=structuredClone(f.state);
+    projectGarmentMaterials(legacy);
+    expect(legacy.versions.find(v=>v.id===minor)?.materialUses).toEqual(old);
+    expect(get(minor).materialUses).toBeUndefined();
+    const minorArchive=f.run({type:'market.product.fromVersion',payload:{devId,versionId:minor,sku:'JK-MINOR'}});
+    expect(f.state.market.products.find(p=>p.id===minorArchive.id)?.materialUses).toEqual(old);
+    expect(get(first).materialUses).toEqual(old);
     const archive=f.run({type:'market.product.fromVersion',payload:{devId,versionId:first,sku:'JK-ARCH'}});
     expect(f.state.market.products.find(p=>p.id===archive.id)?.materialUses).toEqual(old);
 

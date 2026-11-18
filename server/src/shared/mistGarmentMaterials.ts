@@ -39,6 +39,15 @@ export function materialChangeBlocker(state:MistState,dev:MistDev,v:MistVersion)
   if(dev.closure||dev.billing?.request||v.returnedAt||v.archivedAt||v.qc||v.qcDecision||v.confirmations.length||v.minor)return '本版用料已冻结';
   return null;
 }
+
+/** Older minor versions may lack a copy. Their exact physical parent has already frozen its material use. */
+export function garmentMaterialUses(state: Pick<MistState, 'versions'>, version: MistVersion): GarmentMaterialUse[] {
+  if (version.materialUses) return version.materialUses;
+  if (!version.minor) return [];
+  const parentId = version.minor.parentVersionId;
+  const parent = state.versions.find(row => row.id === parentId && row.devId === version.devId && !row.minor);
+  return parent?.materialUses ?? [];
+}
 function freezeCatalog(state:MistState,p:MarketProduct):FrozenTrimCatalog{
   const profile=p.trimProfile,manufacturer=profile?.manufacturerRelationId?state.market.relations.find(r=>r.id===profile.manufacturerRelationId):undefined;
   return {id:p.id,sku:p.sku,name:p.name,supplierCode:p.supplierCode,composition:p.composition,specification:p.specification,color:p.color,unit:p.unit,specs:{...p.specs},fileIds:[...p.fileIds],
@@ -101,7 +110,10 @@ export function projectGarmentMaterials(state:MistState):void{
     if(hideOffer)delete out.offer;
     return out;
   };
-  if(state.versions?.some(v=>v.materialUses?.length))state.versions=state.versions.map(v=>v.materialUses?{...v,materialUses:v.materialUses.map(project)}:v);
+  if (state.versions?.some(v => v.materialUses?.length)) state.versions = state.versions.map(v => {
+    const uses = garmentMaterialUses(state, v);
+    return uses.length ? { ...v, materialUses: uses.map(project) } : v;
+  });
   if(state.market?.products?.some(p=>p.materialUses?.length))state.market={...state.market,products:state.market.products.map(p=>p.materialUses?{...p,materialUses:p.materialUses.map(project)}:p)};
 }
 

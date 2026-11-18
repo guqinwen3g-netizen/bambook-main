@@ -25,7 +25,7 @@ export function MaterialFacts({use}:{use:GarmentMaterialUse}){
   const {state}=useMistWorkspace(),{go}=useNav();
   const q=use.offer,p=use.catalog,source=state?.market?.products?.find(s=>s.id===p.id);
   return <div className="mist-col"><Facts items={[
-    {label:'辅料档案',value:source?<TextLink onClick={()=>go('products',p.id,{detail:'full'})}>{p.sku} · {p.name}</TextLink>:p.sku+' · '+p.name},
+    {label:use.trimTaskId?'辅料任务':'辅料档案',value:source?<TextLink onClick={()=>go('products',p.id,{detail:'full'})}>{p.sku} · {p.name}</TextLink>:p.sku+' · '+p.name},
     {label:'使用部位',value:use.position},{label:'每件用量',value:use.perPiece+' '+use.unit},
     {label:'选定规格',value:use.specification||p.specification||'—'},{label:'选定颜色',value:use.color||'—'},
     {label:'配色要求',value:MATERIAL_COLORS[use.colorMode]},{label:'配色参照',value:use.colorReference||'—'},
