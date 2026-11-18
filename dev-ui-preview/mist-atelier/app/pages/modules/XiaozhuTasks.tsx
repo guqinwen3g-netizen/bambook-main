@@ -8,7 +8,7 @@ import { mistApiRequest, useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { uiText } from '../../../../../services/interfaceLanguage';
-import { businessNow } from '../../runtime/businessClock';
+import { businessDate } from '../../runtime/businessClock';
 import { FailureNotice } from '../../runtime/FailureNotice';
 import { AgentTasks } from '../AgentTasks';
 
@@ -20,7 +20,8 @@ export function XiaozhuTasks({ open, onClose, refreshSignal }: { open: boolean; 
   const workspaceId = w.workspace?.id, canChat = session.hasPermission('ai:chat');
   const base = workspaceId ? '/api/mist/workspaces/' + encodeURIComponent(workspaceId) : '';
   const [usage, setUsage] = React.useState<Usage | null>(null), [error, setError] = React.useState('');
-  const month = businessNow().toISOString().slice(0, 7);
+  // Model usage is metered in real Shanghai time, independently of a frozen business scenario.
+  const month = businessDate(new Date()).slice(0, 7);
   React.useEffect(() => {
     setUsage(null); setError('');
     if (!open || !base || !canChat) return;
