@@ -447,6 +447,13 @@ function ShipmentDetail({ shipment: s, releaseGate, state, day, me, business, lo
     ]} />
     {s.note && <p className="mist-sub">{uiText("后勤要求：")}{s.note}</p>}
     <DetailBlock title={uiText("阶段轨迹")}><Checklist items={track} /></DetailBlock>
+    {s.arrival?.evidence && <RecordDisclosure title="到港依据">
+      <p style={{ whiteSpace: 'pre-wrap' }}>{s.arrival.evidence}</p>
+    </RecordDisclosure>}
+    {s.delivered && (s.delivered.evidence || !!s.delivered.fileIds?.length) && <RecordDisclosure title="签收依据">
+      {s.delivered.evidence && <p style={{ whiteSpace: 'pre-wrap' }}>{s.delivered.evidence}</p>}
+      {!!s.delivered.fileIds?.length && <RecordFiles key={s.id} ids={s.delivered.fileIds} />}
+    </RecordDisclosure>}
     <DetailBlock title={uiText("来源范围")}>
       <DataTable ariaLabel={ui`${s.code} 来源范围`} rows={s.lines} rowKey={line => line.lineId + ':' + (line.productionId || '')} columns={[
         { key: 'source', header: '准确条目', render: line => <SourceLink source={{ kind: 'orderLine', orderId: line.orderId, lineId: line.lineId, productionId: line.productionId }} /> },

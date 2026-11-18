@@ -33,6 +33,31 @@ beforeEach(()=>{store.workspace.revision=0;store.workspace.shipmentReleaseGates=
   store.state=s;store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();store.loading=false;});
 
+it('opens the saved arrival and POD basis and only the current batch’s authorised original',async()=>{
+ const s=store.state!;
+ const arrivedAt='2026-10-14T09:00:00Z',signedAt='2026-10-14T12:00:00Z';
+ s.fulfillment.shipments.push(
+  shipment('first',{state:'departed',arrival:{at:arrivedAt,evidence:'首批实际到港通知',actor:'后勤'},delivered:{at:signedAt,receiver:'收货组',evidence:'首批签收回执 A1',actor:'后勤',fileIds:['first-pod']}}),
+  shipment('second',{state:'departed',delivered:{at:signedAt,receiver:'收货组',evidence:'尾批签收回执 B1',actor:'后勤',fileIds:['second-pod']}}),
+ );
+ s.files.push({id:'first-pod',name:'首批签收原件.pdf',size:10,mimeType:'application/pdf',createdAt:signedAt,storageKey:'w/first-pod'});
+ render('first');
+ await click(getByRole(host,'button',{name:'到港依据',exact:true}));
+ await click(getByRole(host,'button',{name:'签收依据',exact:true}));
+ expect(host.textContent).toContain('首批实际到港通知');
+ expect(host.textContent).toContain('首批签收回执 A1');
+ expect(getByRole(host,'button',{name:'首批签收原件.pdf',exact:true})).toBeTruthy();
+ expect(host.textContent).not.toContain('尾批签收回执 B1');
+ render('second');
+ expect(queryByRole(host,'button',{name:'到港依据',exact:true})).toBeNull();
+ const details=getByRole(host,'button',{name:'签收依据',exact:true});
+ if(details.getAttribute('aria-expanded')!=='true')await click(details);
+ expect(host.textContent).toContain('尾批签收回执 B1');
+ expect(host.textContent).toContain('1份附件不可读');
+ expect(queryByRole(host,'button',{name:'首批签收原件.pdf',exact:true})).toBeNull();
+ expect(store.run).not.toHaveBeenCalled();
+});
+
 it('removes only the held branch from new shipment sources and blocks an already selected draft',async()=>{
  const state=store.state!;
  for(const id of ['first','second'])state.productions.push({id,code:id,orderId:'o',lineId:'l',order:'SO-1',name:'大衣',factory:'工厂',qty:10,due:'2026-11-01',pct:0,img:'coat',col:'cut'});
