@@ -92,7 +92,7 @@ export function DevRoundsCard({ state, dev, versionId, busy, onSelect, onCreate,
         return <li key={version.id} data-task={version.label} className="mist-row" style={{ fontSize: 12.5, padding: '3px 0', flexWrap: 'wrap', gap: 6 }}>
           <Mono>{uiText(version.label)}</Mono><span className="mist-muted">{uiText(version.task ? taskSummary(version.task) : '历史任务')}</span>
           {version.task?.extraRequirements && <span>{uiText("差异：")}{version.task.extraRequirements}</span>}
-          {sync && !sync.inSync && <><Pill tone="warn">{uiText("与共同要求不一致，可同步")}</Pill>
+          {sync && !sync.inSync && <><Pill tone="warn">{uiText(blocker || !onSync ? "与共同要求不一致" : "与共同要求不一致，可同步")}</Pill>
             {onSync && <Button size="sm" icon={RefreshCw} disabled={busy || !!blocker} title={uiText(blocker || undefined)} onClick={() => onSync(version)}>{uiText("同步 ")}{uiText(version.label)}</Button>}
             {blocker && <span className="mist-note">{blocker}</span>}</>}
         </li>;

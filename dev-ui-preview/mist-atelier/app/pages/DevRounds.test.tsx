@@ -96,6 +96,7 @@ describe('BB-DEV-3 修改共同要求后逐厂同步',()=>{
     apply({type:'development.recordSample',payload:{devId,versionId:state.versions.find(v=>v.label==='R1-B-1')!.id,sample:'S',quantity:1,returnedAt:ctx.now}});
     await act(async()=>{bridge.current={...bridge.current,state};render();});
     expect(button('同步 R1-B-1')!.disabled).toBe(true);expect(taskText('R1-B-1')).toContain('R1-B-1 已返样，改要求请开新一轮');expect(button('同步 R1-A-1')!.disabled).toBe(false);
+    expect(taskText('R1-B-1')).not.toContain('可同步');
   });
 });
 

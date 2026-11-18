@@ -39,6 +39,17 @@ const selectedTab=()=>host.querySelector('[role="tab"][aria-selected="true"]')?.
 const tabCount=(label:string)=>[...host.querySelectorAll('[role="tab"]')].find(t=>t.textContent?.startsWith(label))?.querySelector('.mist-tab-count')?.textContent;
 const pipe=(label:string)=>[...host.querySelectorAll<HTMLButtonElement>('.mist-pipeline > button')].find(b=>b.querySelector('small')?.textContent===label);
 const button=(text:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent===text);
+it('keeps the answer and upload read-only after cancelling a sourcing request',async()=>{
+ bridge.current.state.market={suppliers:[],products:[]};
+ bridge.current.state.fabrics=[{id:'ended',code:'SR-ENDED',name:'已取消的藏青色寻样',owner:'甲',ownerId:'user-a',due:'2026-10-30',state:'已取消',tone:'neutral',sub:'',request:'需求',answer:'原答复',confirmed:false,fileIds:[],cancelled:{reason:'取消',at:'2026-10-30',actor:'甲'}}];
+ await mount({view:'development',section:'sourcing'});
+ await act(async()=>host.querySelector<HTMLElement>('.mist-tr')!.click());
+ const dialog=document.querySelector('[role="dialog"]')!;
+ expect(dialog).toBeTruthy();
+ expect([...dialog.querySelectorAll('textarea')].every(input=>input.readOnly)).toBe(true);
+ expect(dialog.querySelector('input[type=file]')).toBeNull();
+ expect(bridge.current.run).not.toHaveBeenCalled();
+});
 async function type(label:string,value:string){const input=host.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 async function tab(label:string){await act(async()=>[...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(button=>button.textContent?.startsWith(label))!.click());}
 async function select(label:string,value:string){await act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent?.startsWith(label)&&button.hasAttribute('aria-haspopup'))!.click());await act(async()=>[...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find(button=>button.textContent===value)!.click());}
