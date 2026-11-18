@@ -135,6 +135,20 @@ describe('Mist market screens',()=>{
   });
   expect(b.run).toHaveBeenCalledWith({type:'market.attachment.set',payload:{kind:'product',id:product.id,fileIds:[added.id]}},{expectedRevision:14});
  });
+ it('recovers an acknowledged upload into the original product without uploading again',async()=>{
+  const w=bridge.current,product=w.state.market.products[0],stored={id:'file-original',name:'包装说明.txt',mimeType:'text/plain',size:4,storageKey:'w/file-original',createdAt:'2026-10-13'};
+  w.workspace={revision:20};
+  w.uploadFile.mockImplementation(async()=>{w.pending={kind:'upload',requestId:'original-upload'};throw new Error('上传回复中断');});
+  w.recover=vi.fn(async()=>{w.pending=null;w.state.files.push(stored);w.workspace={revision:21};return {result:{fileId:stored.id}};});
+  await mount('products',product.id,undefined,'full');
+  await act(async()=>{
+   const input=host.querySelector<HTMLInputElement>('input[type="file"]')!;
+   Object.defineProperty(input,'files',{configurable:true,value:[new File(['说明'],stored.name,{type:stored.mimeType})]});input.dispatchEvent(new Event('change',{bubbles:true}));
+  });
+  await click('核对并关联');
+  expect(w.uploadFile).toHaveBeenCalledTimes(1);expect(w.recover).toHaveBeenCalledTimes(1);
+  expect(w.run).toHaveBeenCalledWith({type:'market.attachment.set',payload:{kind:'product',id:product.id,fileIds:[stored.id]}},expect.anything());
+ });
  it('retains uploaded attachment identity after association failure and retries the same file',async()=>{const p=bridge.current.state.market.products[0];const stored={id:'f-upload',name:'规格.pdf',mimeType:'application/pdf',size:4,storageKey:'w/f-upload',createdAt:'2026-10-13'};bridge.current.uploadFile.mockImplementation(async()=>{bridge.current.state.files.push(stored);return stored;});bridge.current.run.mockRejectedValueOnce(new Error('关联保存失败'));await mount('products',p.id,undefined,'full');const file=new File(['spec'],'规格.pdf',{type:'application/pdf'});await act(async()=>{const input=host.querySelector<HTMLInputElement>('input[type="file"]')!;Object.defineProperty(input,'files',{configurable:true,value:[file]});input.dispatchEvent(new Event('change',{bubbles:true}));});expect(host.textContent).toContain('规格.pdf · 待关联');expect(host.textContent).toContain('关联保存失败');await click('重试关联已上传附件');expect(bridge.current.uploadFile).toHaveBeenCalledTimes(1);expect(bridge.current.run).toHaveBeenLastCalledWith({type:'market.attachment.set',payload:{kind:'product',id:p.id,fileIds:['f-upload']}});});
  it('renders truthful empty marketing state without manufactured leads or success',async()=>{await mount('marketing');expect(host.textContent).toContain('尚无营销活动');expect(bridge.current.run).not.toHaveBeenCalled();expect(bridge.current.state.market.leads).toEqual([]);});
  it('displays real quotation totals and keeps acceptance separate from conversion',async()=>{const s=bridge.current.state;s.market.quotations.push({id:'q1',createdAt:'2026-10-13',updatedAt:'2026-10-13',fileIds:[],note:'',code:'QT-REAL',customerId:'c1',currency:'USD',season:'AW26',validUntil:'2026-12-01',deliveryTerms:'FOB',paymentTerms:'T/T',status:'Accepted',lines:[],total:'0.30',deliveryEvidence:'线下发送',responseEvidence:'实际签回',approval:null,convertedOrderId:null});await mount('quotations','q1');expect(host.textContent).toContain('0.30');expect(host.textContent).toContain('核对并转订单');expect(bridge.current.run).not.toHaveBeenCalled();});

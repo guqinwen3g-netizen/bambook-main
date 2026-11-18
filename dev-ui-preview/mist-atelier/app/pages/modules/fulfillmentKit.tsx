@@ -88,18 +88,14 @@ export function useRecordAttachment(execute?:RecordAttachmentRun){
   };
 }
 
-export function RecordFiles({ ids, onAttach }: {
-    ids: string[];
-    /** Newly uploaded/recovered IDs only; the owner merges against its current record. */
-    onAttach?: (addedIds: string[]) => Promise<unknown>;
-}) {
-  const { state, uploadFile, downloadFile, recover, pending, saving } = useMistWorkspace();
+/** Recover only uploads initiated on the current record. A confirmed association clears its draft. */
+export function useRecordFileUpload(ids:string[], onAttach?: (addedIds:string[])=>Promise<unknown>) {
+  const { uploadFile, recover, pending, saving } = useMistWorkspace();
   const scope=useRouteScope();
   const [failure, setFailure] = useRouteDraft(''), [busy, setBusy] = React.useState(false), [staged, setStaged] = useRouteDraft<MistFile[]>([]);
   // 本记录发起、回执丢失的上传；只在同一记录页内核对后关联，换页即不再自动关联。
   const [lost, setLost] = useRouteDraft('');
   const owned = !!lost && pending?.kind === 'upload' && pending.requestId === lost;
-  const unavailable = state ? [...new Set(ids)].filter(id => !state.files.some(file => file.id === id)).length : 0;
   useUploadRecoveryClaim(owned ? lost : null);
   // A shell-level receipt recovery can confirm association after this widget saw a lost reply.
   React.useEffect(()=>{
@@ -129,6 +125,18 @@ export function RecordFiles({ ids, onAttach }: {
       setFailure(e instanceof Error && 'status' in e && (e as { status: number }).status === 404 ? '服务器未收到原附件，请重新选择同一附件' : e instanceof Error ? e.message : '核对未完成');
     } finally { setBusy(false); }
   };
+  const clearStaged=()=>{setStaged([]);setFailure('');};
+  return { failure, setFailure, busy, staged, owned, add, verify, clearStaged };
+}
+
+export function RecordFiles({ ids, onAttach }: {
+    ids: string[];
+    /** Newly uploaded/recovered IDs only; the owner merges against its current record. */
+    onAttach?: (addedIds: string[]) => Promise<unknown>;
+}) {
+  const { state, downloadFile, pending, saving } = useMistWorkspace();
+  const { failure, setFailure, busy, staged, owned, add, verify } = useRecordFileUpload(ids, onAttach);
+  const unavailable = state ? [...new Set(ids)].filter(id => !state.files.some(file => file.id === id)).length : 0;
   return <div className="mist-section">
     {owned && !saving && <Banner tone="warn" title={uiText("附件上传结果待核对")} actions={<Button disabled={busy} onClick={() => void verify()}>{uiText("核对并关联")}</Button>}>{uiText(failure || '核对后关联到本记录，不会重复上传。')}</Banner>}
     {failure && !owned && <FailureNotice title={"附件未完成保存"} detail={failure} />}

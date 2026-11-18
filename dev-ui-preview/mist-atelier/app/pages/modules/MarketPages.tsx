@@ -17,6 +17,7 @@ import { useRouteDraft, useRouteScope } from './useRouteDraft';
 import { ArrowRight, CalendarDays, ClipboardList, Download, Factory, FileText, Package, Plus, Send, TrendingUp, Users } from 'lucide-react';
 import { FormFooter, BackLink, Banner, Button, Card, CardBody, CardFooter, CardHeader, Checkbox, DataTable, Dialog, Dropdown, EmptyState, Field, FormGrid, FormSection, IdentityHeader, Kanban, KeyValue, MistPage, Mono, ObjectCell, ObjectStage, PageHeader, Pill, SearchField, Segmented, Select, StatCard, StatGrid, SummaryBar, Tabs, TextArea, TextInput, TextLink, Timeline, Toolbar, UploadZone, VerticalSteps, type Column } from '../../../../../components/mist';
 import { useMistWorkspace } from '../../runtime/workspace';
+import { useRecordFileUpload } from './fulfillmentKit';
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
@@ -66,21 +67,26 @@ function History({id,domain}:{id:string;domain?:'market.relation'}){
 }
 function MarketDetailCard({children,preview=false}:{children:React.ReactNode;preview?:boolean}){const {route}=useNav();return preview&&route.detail!=='full'?<>{uiText(children)}</>:<Card><div className="mist-card-body mist-col">{uiText(children)}</div></Card>;}
 type AttachmentKind=Extract<MarketCommand,{type:'market.attachment.set'}>['payload']['kind'];
-function Attachments({kind,row,locked=false}:{kind:AttachmentKind;row:{id:string;fileIds:string[]};locked?:boolean}){
- const w=useMarket(),op=useOperation(),[staged,setStaged]=useRouteDraft<string[]>([]);
- const ids=[...new Set([...row.fileIds,...staged])];
+type MarketAttachmentsProps={kind:AttachmentKind;row:{id:string;fileIds:string[]};locked?:boolean};
+function Attachments(props:MarketAttachmentsProps){
+ return <MarketAttachmentEditor key={props.kind+':'+props.row.id} {...props}/>;
+}
+function MarketAttachmentEditor({kind,row,locked=false}:MarketAttachmentsProps){
+ const w=useMarket(),op=useOperation();
  const expectedRevision=w.workspace?.revision;
- React.useEffect(()=>setStaged([]),[row.id]);
- const save=async(next:string[])=>{
-  // Uploading advances the workspace, but the replacement list still belongs to this render.
-  await w.command({type:'market.attachment.set',payload:{kind,id:row.id,fileIds:next}},
-   expectedRevision===undefined?undefined:{expectedRevision});
-  setStaged([]);
- };
+ // Uploading advances the workspace, but a replacement list belongs to the render that supplied it.
+ const save=(fileIds:string[])=>w.command({type:'market.attachment.set',payload:{kind,id:row.id,fileIds}},
+  expectedRevision===undefined?undefined:{expectedRevision});
+ const upload=useRecordFileUpload(row.fileIds,locked?undefined:added=>save([...new Set([...row.fileIds,...added])]));
+ const staged=upload.staged.map(file=>file.id), ids=[...new Set([...row.fileIds,...staged])];
+ const busy=op.busy||upload.busy||w.saving, canChange=!locked&&!busy&&!w.pending;
+ const retry=staged.length>0&&!locked&&!w.pending;
+ const replace=async(fileIds:string[])=>{await save(fileIds);upload.clearStaged();};
  return <Card><CardHeader title={uiText("附件与凭据")}/><CardBody>
-  {op.error&&<Banner tone="bad" title={uiText("附件未保存")}>{op.error}{staged.length>0&&<Button disabled={op.busy} onClick={()=>void op.execute(()=>save(ids))}>{uiText("重试关联已上传附件")}</Button>}</Banner>}
-  {ids.map(id=>{const f=w.state?.files.find(f=>f.id===id),role=kind==='product'?imageRole(w.state?.files,ids,id):undefined;return f?<div className="mist-row" key={id}><FileName file={f} files={ids.map(x=>w.state?.files.find(y=>y.id===x))} label={uiText(staged.includes(id)?`${f.name} · 待关联`:undefined)}/>{kind==='product'&&<ImageRoleTag files={w.state?.files} ids={ids} id={id}/>}<span className="mist-spacer"/>{!locked&&role==='supplement'&&<TextLink onClick={()=>void op.execute(()=>save(withPrimaryImage(ids,id)))}>{uiText("设为主图")}</TextLink>}<TextLink onClick={()=>void op.execute(()=>w.downloadFile(f))}>{uiText("下载")}</TextLink>{!locked&&<TextLink onClick={()=>void op.execute(()=>save(ids.filter(x=>x!==id)))}>{uiText("移除")}</TextLink>}</div>:<p key={id}>{uiText("附件暂不可用")}</p>;})}
-  {!locked&&<UploadZone title={uiText(op.busy?'附件处理中':kind==='product'?imageUploadTitle(w.state?.files,ids):'选择实际文件上传')} onFiles={files=>void op.execute(async()=>{const next=[...ids];for(const file of files){const uploaded=await w.uploadFile(file);next.push(uploaded.id);setStaged(current=>[...new Set([...current,uploaded.id])]);}await save(next);})}/>}
+  {upload.owned&&!w.saving&&<Banner tone="warn" title={uiText('附件上传结果待核对')} actions={<Button disabled={busy||locked} onClick={()=>void op.execute(upload.verify)}>{uiText('核对并关联')}</Button>}/>}
+  {!upload.owned&&(upload.failure||op.error)&&<Banner tone="bad" title={uiText("附件未保存")}>{upload.failure||op.error}{retry&&<Button disabled={busy} onClick={()=>void op.execute(()=>upload.add([]))}>{uiText("重试关联已上传附件")}</Button>}</Banner>}
+  {ids.map(id=>{const f=w.state?.files.find(f=>f.id===id),role=kind==='product'?imageRole(w.state?.files,ids,id):undefined;return f?<div className="mist-row" key={id}><FileName file={f} files={ids.map(x=>w.state?.files.find(y=>y.id===x))} label={uiText(staged.includes(id)?`${f.name} · 待关联`:undefined)}/>{kind==='product'&&<ImageRoleTag files={w.state?.files} ids={ids} id={id}/>}<span className="mist-spacer"/>{canChange&&role==='supplement'&&<TextLink onClick={()=>void op.execute(()=>replace(withPrimaryImage(ids,id)))}>{uiText("设为主图")}</TextLink>}<TextLink onClick={()=>void op.execute(()=>w.downloadFile(f))}>{uiText("下载")}</TextLink>{canChange&&<TextLink onClick={()=>void op.execute(()=>replace(ids.filter(x=>x!==id)))}>{uiText("移除")}</TextLink>}</div>:<p key={id}>{uiText("附件暂不可用")}</p>;})}
+  {!locked&&<UploadZone title={uiText(busy?'附件处理中':kind==='product'?imageUploadTitle(w.state?.files,ids):'选择实际文件上传')} onFiles={files=>{if(canChange)void op.execute(()=>upload.add(files));}}/>}
  </CardBody></Card>;
 }
 /** Preview stage: the primary image only; the gallery and supplementary images live on the full record. */
