@@ -50,28 +50,48 @@ export function GarmentMaterialRows({rows,edit,remove}:{rows:GarmentMaterialUse[
 export function GarmentMaterials({dev,version}:{dev:MistDev;version:MistVersion}){
   const w=useMistWorkspace(),session=useMistSession(),[editor,setEditor]=React.useState<ModuleEditorSpec|null>(null);
   const products=(w.state?.market?.products||[]).filter(p=>p.status==='active'&&p.category==='trimming');
+  const confirmedTasks=(dev.trimTasks ?? []).filter(task=>task.confirmed);
   const allowed=session.hasPermission('products:write'),stop=w.state?materialChangeBlocker(w.state,dev,version):'正在读取';
   const write=(use?:GarmentMaterialUse)=>{
     const revision=w.workspace?.revision,base={devId:dev.id,versionId:version.id};
     const fields:ModuleField[]=use?[]:[
-      {key:'productId',label:'选用辅料',type:'select',required:true,options:[{value:'',label:'请选择'},...products.map(p=>({value:p.id,label:p.sku+' · '+p.name}))]},
-      {key:'nature',label:'材料来源',type:'select',required:true,options:options({existing:MATERIAL_NATURES.existing,substitute:MATERIAL_NATURES.substitute})},
+      {key:'nature',label:'材料来源',type:'select',required:true,options:options({
+        existing:MATERIAL_NATURES.existing,substitute:MATERIAL_NATURES.substitute,
+        ...(confirmedTasks.length ? { developed: MATERIAL_NATURES.developed } : {}),
+      })},
+      {key:'productId',label:'选用辅料',type:'select',required:true,when:{key:'nature',values:['existing','substitute']},
+        options:[{value:'',label:'请选择'},...products.map(p=>({value:p.id,label:p.sku+' · '+p.name}))]},
+      {key:'trimTaskId',label:'已确认辅料',type:'select',required:true,when:{key:'nature',values:['developed']},
+        options:confirmedTasks.map(task=>({value:task.id,label:task.code+' · '+task.confirmed!.name}))},
       ...products.flatMap(p=>{
         const sources=(p.sources||[]).filter(s=>s.quoteTerms&&w.state?.market.suppliers.some(supplier=>supplier.id===s.supplierId&&supplier.status==='active'));
-        return sources.length?[{key:'quote_'+p.id,label:'供应报价',type:'select' as const,when:{key:'productId',values:[p.id]},options:[{value:'',label:'未选报价'},...sources.map(s=>{
+        return sources.length?[{key:'quote_'+p.id,label:'供应报价',type:'select' as const,when:[{key:'productId',values:[p.id]},{key:'nature',values:['existing','substitute']}],options:[{value:'',label:'未选报价'},...sources.map(s=>{
           const name=w.state?.market.suppliers.find(r=>r.id===s.supplierId)?.name;
           return {value:s.supplierId,label:`${name} · ${s.price} ${s.currency}/${s.quoteTerms!.unit} · ${s.quoteTerms!.date}`};
         })]}]:[];
       }),
     ];
-    setEditor({title:use?'修改用法':'选用辅料',submitLabel:'保存用料',initialValues:{productId:'',nature:'existing',position:use?.position||'',perPiece:use?.perPiece||'',unit:use?.unit||'',
+    setEditor({title:use?'修改用法':'选用辅料',submitLabel:'保存用料',initialValues:{productId:'',trimTaskId:'',nature:'existing',position:use?.position||'',perPiece:use?.perPiece||'',unit:use?.unit||'',
       provider:use?.provider||'',colorMode:use?.colorMode||'unspecified',colorReference:use?.colorReference||'',color:use?.color||'',specification:use?.specification||''},
       fields:[...fields,...usageFields],
-      derive:(key,value)=>{if(key!=='productId')return {};const p=products.find(s=>s.id===value);return {unit:p?.unit||'',specification:p?.specification||'',color:p?.color||''};},
+      derive:(key,value)=>{
+        if (key==='trimTaskId') {
+          const task=confirmedTasks.find(row=>row.id===value);
+          return {unit:task?.unit??'',specification:task?.confirmed?.specification??'',color:task?.confirmed?.color??''};
+        }
+        if (key==='nature') return {productId:'',trimTaskId:'',unit:'',specification:'',color:''};
+        if (key!=='productId') return {};
+        const product=products.find(row=>row.id===value);
+        return {unit:product?.unit??'',specification:product?.specification??'',color:product?.color??''};
+      },
       submit:values=>{
         const usage=details(values),id=String(values.productId||''),supplier=String(values['quote_'+id]||'');
-        return w.run(use?{type:'development.material.edit',payload:{...base,useId:use.id,...usage}}:
-          {type:'development.material.add',payload:{...base,productId:id,nature:values.nature as 'existing'|'substitute',...(supplier?{offerSupplierId:supplier}:{}),...usage}},revision===undefined?undefined:{expectedRevision:revision});
+        const options=revision===undefined?undefined:{expectedRevision:revision};
+        if (use) return w.run({type:'development.material.edit',payload:{...base,useId:use.id,...usage}},options);
+        if (values.nature==='developed') return w.run({type:'development.material.addDeveloped',
+          payload:{...base,trimTaskId:String(values.trimTaskId||''),...usage}},options);
+        return w.run({type:'development.material.add',payload:{...base,productId:id,nature:values.nature as 'existing'|'substitute',
+          ...(supplier?{offerSupplierId:supplier}:{}),...usage}},options);
       }});
   };
   const remove=(use:GarmentMaterialUse)=>{const revision=w.workspace?.revision;setEditor({title:'移除用料',description:use.position+' · '+use.catalog.name,submitLabel:'移除',submitVariant:'danger',fields:[],initialValues:{},

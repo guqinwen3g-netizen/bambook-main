@@ -50,6 +50,27 @@ describe.skipIf(!url)('development incoming originals on real PostgreSQL',()=>{
  async function upload(){const r=await request(app).post('/api/mist/workspaces/'+wid+'/files').set('Authorization','Bearer '+tokens[owner]).field('requestId',randomUUID()).field('expectedRevision',String((await raw()).revision)).attach('file',bytes,{filename:'incoming-original.pdf',contentType:'application/pdf'});expect(r.status,JSON.stringify(r.body.error)).toBe(201);return r.body.receipt.result.fileId as string;}
  const download=(user:string,fileId:string)=>request(app).get('/api/mist/workspaces/'+wid+'/files/'+fileId).set('Authorization','Bearer '+tokens[user]);
  async function denied(user:string,type:string,payload:unknown,status:number[]){const before=await raw(),count=await receiptCount(),r=await command(user,type,payload);expect(status,JSON.stringify(r.body.error)).toContain(r.status);expect(await raw()).toEqual(before);expect(await receiptCount()).toBe(count);}
+ it('keeps a supplier task scoped to its garment case and rejects a stale request edit without receipts',async()=>{
+  const garment=await command(owner,'development.submit',{values:{name:'带帽夹克',customer:customerId,style:'DRAWSTRING',season:'AW',category:'夹克',kind:'new',fabric:'棉斜纹',color:'绿',target:'',sizeBase:'M',goal:'抽绳活动顺畅',factories:['A厂'],due:'2026-11-25',collaborators:[],sampleQuantity:1},fileIds:[]});
+  expect(garment.status,JSON.stringify(garment.body.error)).toBe(200);
+  const caseId=garment.body.receipt.result.devId;
+  const supplier=garment.body.workspace.state.market.suppliers.find((row:{name:string})=>row.name==='A厂');
+  const input={devId:caseId,supplierId:supplier.id,contact:'工厂收件人',requirements:'线绳直径4毫米',quantity:'2',unit:'米',dueDate:'2026-11-24',fileIds:[]};
+  await denied(stranger,'development.trimTask.save',input,[403,404]);
+  await denied(reader,'development.trimTask.save',input,[403,404]);
+  await denied(owner,'development.trimTask.save',{...input,devId},[422]);
+  const created=await command(owner,'development.trimTask.save',input);
+  expect(created.status,JSON.stringify(created.body.error)).toBe(200);
+  const taskId=created.body.receipt.result.id,oldRevision=(await raw()).revision;
+  const updated=await command(owner,'development.trimTask.save',{...input,taskId,quantity:'3'});
+  expect(updated.status,JSON.stringify(updated.body.error)).toBe(200);
+  const previous=await raw(),count=await receiptCount();
+  const stale=await command(owner,'development.trimTask.save',{...input,taskId,requirements:'旧窗口'},randomUUID(),oldRevision);
+  expect(stale.status,JSON.stringify(stale.body.error)).toBe(409);
+  expect(await raw()).toEqual(previous);expect(await receiptCount()).toBe(count);
+  await denied(owner,'development.trimTask.confirm',{devId:caseId,taskId,name:'抽绳',specification:'4毫米',color:'绿',fileIds:[]},[422]);
+  await denied(foreign,'development.trimTask.notice',{devId:caseId,taskId},[403,404]);
+ });
  it('requires a fresh supplier offer and exact case scope when freezing a garment material',async()=>{
   const garment=await command(owner,'development.submit',{values:{name:'夹克',customer:customerId,style:'TRIM-STYLE',season:'AW',category:'夹克',kind:'new',fabric:'棉斜纹',color:'绿',target:'',sizeBase:'M',goal:'对照扣位',factories:['A厂'],due:'2026-11-25',collaborators:[],sampleQuantity:1},fileIds:[]});
   expect(garment.status,JSON.stringify(garment.body.error)).toBe(200);

@@ -1,4 +1,6 @@
 import {materialReadKeys} from '../shared/mistGarmentMaterials';
+import { prepareTrimTaskNotice, trimTaskReadKeys } from '../shared/mistGarmentTrimTasks';
+import { buildTrimTaskNotice } from './trimTaskNoticePrint';
 import {projectDevelopmentReferenceAccess,developmentReferenceTargetViolation,developmentReferenceWithdrawalException} from './developmentReferenceAccess';
 import {developmentReferenceReadKeys,type DevelopmentReferenceCommand} from '../shared/mistDevelopmentSampleReferences';
 import {developmentTaskClosePlan,developmentTaskLifecycleReadKeys} from '../shared/mistDevelopmentTaskLifecycle';
@@ -249,7 +251,7 @@ const candidateIds=(row:MistWorkspaceRow)=>companyRow(row)?memberIds(row.state):
 const WRITE_QUEUES = new WeakMap<object, Map<string, Promise<void>>>();
 /** 预演结束时用来整笔回滚的信号（不是错误）。 */
 class MistPreviewOutcome extends Error { constructor(readonly preview: { revision: number; result: unknown; events: string[]; changes: unknown }) { super('preview'); } }
-const PREVIEW_UNSUPPORTED = new Set(['platform.credit.issue', 'fulfillment.procurement.document', 'market.quotation.document', 'development.notice.generate', 'finance.statement.generate', ...GENERATING_COMMANDS]);
+const PREVIEW_UNSUPPORTED = new Set(['platform.credit.issue', 'fulfillment.procurement.document', 'market.quotation.document', 'development.notice.generate', 'development.trimTask.notice', 'finance.statement.generate', ...GENERATING_COMMANDS]);
 
 export class MistRepository {
   private platformRuntimeAvailable:()=>boolean=()=>false;
@@ -1153,6 +1155,12 @@ export class MistRepository {
           stored = await this.files.write(workspaceId, prepared.file, context.now);
           (context as typeof context & { developmentNotice?: unknown }).developmentNotice = bindDevelopmentNotice(prepared, stored, { id: context.id, workspaceId, requestId: input.requestId });
         }
+        if (input.command?.type === 'development.trimTask.notice') {
+          const snapshot = prepareTrimTaskNotice(row.state, input.command.payload, context);
+          const file = await buildTrimTaskNotice(snapshot, this.quotationPdfRenderer);
+          stored = await this.files.write(workspaceId, file, context.now);
+          context.trimTaskNotice = { snapshot, file: stored };
+        }
         if (input.command?.type === 'finance.statement.generate') {
           const statementScope = scopeOf(row), customerId = String(input.command.payload?.customerId ?? '');
           if (statementScope && !canGenerateScopedStatement(row.state, statementScope, customerId)) fail('FORBIDDEN', '对账单包含当前范围外的业务，请由财务生成', 403);
@@ -1235,7 +1243,7 @@ export class MistRepository {
         if(this.contract.getMistReviewTasks)(applied.state as any).reviewerIds=[...new Set(this.contract.getMistReviewTasks(applied.state).flatMap(t=>t.reviewerIds))];
         canonical(applied.state); canonical(applied.result);
         const changeKeys = mistChangeKeys(row.state, applied.state);
-        if(humanTaskProposal?.sourceRevision!==undefined&&humanTaskProposal.sourceRevision<row.revision){const changed=await this.concurrentChanges(db,workspaceId,row.revision,humanTaskProposal.sourceRevision,undefined,true),system=new Set(['k:agentProposals','k:events','k:tasks','k:notifications','k:calendar','k:reviewerIds']),readKeys=[...(command.type.startsWith('development.incoming.')?developmentIncomingReadKeys(row.state,command as DevelopmentIncomingCommand):[]),...(command.type.startsWith('development.reference.')?developmentReferenceReadKeys(row.state,command as DevelopmentReferenceCommand):[]),...developmentTaskLifecycleReadKeys(row.state,command),...materialReadKeys(row.state,command)];if(!changeKeys||[...changeKeys.filter(key=>!system.has(key[0])),...readKeys].some(key=>changed.some(other=>overlapping(key,other))))fail('REVISION_CONFLICT','提议来源已更新，请重新读取后再提出',409);}
+        if(humanTaskProposal?.sourceRevision!==undefined&&humanTaskProposal.sourceRevision<row.revision){const changed=await this.concurrentChanges(db,workspaceId,row.revision,humanTaskProposal.sourceRevision,undefined,true),system=new Set(['k:agentProposals','k:events','k:tasks','k:notifications','k:calendar','k:reviewerIds']),readKeys=[...(command.type.startsWith('development.incoming.')?developmentIncomingReadKeys(row.state,command as DevelopmentIncomingCommand):[]),...(command.type.startsWith('development.reference.')?developmentReferenceReadKeys(row.state,command as DevelopmentReferenceCommand):[]),...developmentTaskLifecycleReadKeys(row.state,command),...materialReadKeys(row.state,command),...trimTaskReadKeys(row.state,command)];if(!changeKeys||[...changeKeys.filter(key=>!system.has(key[0])),...readKeys].some(key=>changed.some(other=>overlapping(key,other))))fail('REVISION_CONFLICT','提议来源已更新，请重新读取后再提出',409);}
         // 行级范围写侧：受限岗位不能改看不到的业务，也不能在看不到的业务下新建。
         const incomingSource=incoming&&row.state.fulfillment.purchases.find(p=>p.id===incoming.purchaseId);
         const internalIncoming=['order.internal.receive','order.internal.reverseCheck'].includes(input.command?.type)?row.state.internalDeliveries?.find(d=>d.id===input.command.payload.id&&d.receiverId===actor.userId):undefined;
@@ -1247,6 +1255,7 @@ export class MistRepository {
           if(qcReportReadKeys(row.state,command).some(key=>concurrent.some(other=>overlapping(key,other))))fail('REVISION_CONFLICT','QC实物或任务已更新，请刷新后重新核对',409);
           if(command?.type.startsWith('development.incoming.')&&developmentIncomingReadKeys(row.state,command as DevelopmentIncomingCommand).some(key=>concurrent.some(other=>overlapping(key,other))))fail('REVISION_CONFLICT','来样或工厂任务已更新，请刷新后重新核对',409);
           if(command&&materialReadKeys(row.state,command).some(key=>concurrent.some(other=>overlapping(key,other))))fail('REVISION_CONFLICT','辅料档案、报价或工厂版本已更新，请重新核对',409);
+          if(command&&trimTaskReadKeys(row.state,command).some(key=>concurrent.some(other=>overlapping(key,other))))fail('REVISION_CONFLICT','辅料任务或供应商已更新，请重新核对',409);
           if(command?.type.startsWith('development.reference.')&&developmentReferenceReadKeys(row.state,command as DevelopmentReferenceCommand).some(key=>concurrent.some(other=>overlapping(key,other))))fail('REVISION_CONFLICT','参考实物或工厂任务已更新，请刷新后重新核对',409);
           if(developmentTaskLifecycleReadKeys(row.state,command).some(key=>concurrent.some(other=>overlapping(key,other))))fail('REVISION_CONFLICT','任务或未结事项已更新，请重新核对后结束',409);
           if (changeKeys!.some(key => concurrent.some(other => overlapping(key, other)))) fail('REVISION_CONFLICT', '其他人已修改同一记录，为避免覆盖对方的更新未自动合并，请刷新核对后重试', 409);

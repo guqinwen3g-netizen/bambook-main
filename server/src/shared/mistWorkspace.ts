@@ -1,4 +1,5 @@
 import {applyGarmentMaterial,type GarmentMaterialUse,type GarmentMaterialCommand} from './mistGarmentMaterials';
+import { applyGarmentTrimTask, type GarmentTrimTask, type GarmentTrimTaskCommand, type TrimNoticeArtifact } from './mistGarmentTrimTasks';
 import {applyDevelopmentReferenceCommand,type DevelopmentReferenceCommand,type DevelopmentSampleReference} from './mistDevelopmentSampleReferences';
 import {applyDevelopmentTaskEnd,applyDevelopmentTaskReopen,closeDevelopmentFactoryTasks,developmentFactoryWorkBlocker,type DevelopmentTaskEnd,type DevelopmentTaskEndCommand,type DevelopmentTaskLifecycleEvent,type DevelopmentTaskResolution} from './mistDevelopmentTaskLifecycle';
 import type {OrderMainApprovalSource} from './mistOrderApprovalSource';
@@ -76,6 +77,7 @@ export const MIST_ORDER_CHECKLIST = ['拟发范围确认', '收货与贸易条�
 export type MistBusinessNumberPrefix = 'CLM' | 'RT' | 'PV';
 export type MistContext = {
   id: () => string; now: string; actorName: string; actorId?: string; auditNow?: string;
+  trimTaskNotice?: TrimNoticeArtifact;
   /** 服务端从实时读投影生成，不能由命令 payload 扩大；不重构共享通知的数据模型。 */
   visibleNotificationIds?: string[];
   /** Trusted server read projection for weekly output; never accepted from command payload. */
@@ -175,6 +177,7 @@ export type MistDev = {
   closure?: DevelopmentClosure;
   /** Reference relations retain the original sample identity and never create stock. */
   sampleReferences?:DevelopmentSampleReference[];
+  trimTasks?: GarmentTrimTask[];
   /** BB-DEV-9：开发费用（制作费）、开票申请与销账结案；只有收费案使用。 */
   billing?: MistDevBilling;
 };
@@ -403,7 +406,7 @@ export type MistState = {
   seals?:MistSeal[]; sealUses?:MistSealUse[];
 };
 export type MistOrderInput = { type: 'garment' | 'fabric'; customerId: string; season: string; currency: string; due: string; ownerId: string; governance?:OrderGovernanceInput; lines: Array<Omit<MistOrderLine, 'id' | 'orderId' | 'made' | 'qc'> & OrderLineSource & {breakdown?:OrderLineBreakdown}> };
-export type MistCommand = GarmentMaterialCommand | DevelopmentTaskEndCommand | DevelopmentReferenceCommand
+export type MistCommand = GarmentMaterialCommand | GarmentTrimTaskCommand | DevelopmentTaskEndCommand | DevelopmentReferenceCommand
   | DevelopmentIncomingCommand | SealCommand | PeriodCloseCommand | Extract<DocumentGenerationCommand, { type: 'order.document.generate' | 'market.lookbook.document' }> | AgentTaskCommand | AgentProposalCommand | InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | SampleRequestCommand | OrderSplitCommand | ReportScheduleCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
   | { type: 'development.saveDraft'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.submit'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
@@ -1164,7 +1167,14 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       updateDev(state,dev,context);
       event(state,context,'development',dev.id,'创建改版 '+version.label,{view:'development/detail',id:dev.id,versionId:version.id},'general',notificationOwners(state,'development',dev.id));result={devId:dev.id,versionId:version.id,roundId:round.id};break;
     }
-    case 'development.material.add':case 'development.material.edit':case 'development.material.remove':{result=applyGarmentMaterial(state,command,context);break;}
+    case 'development.material.add':case 'development.material.addDeveloped':case 'development.material.edit':case 'development.material.remove':{result=applyGarmentMaterial(state,command,context);break;}
+    case 'development.trimTask.save':
+    case 'development.trimTask.notice':
+    case 'development.trimTask.confirm':
+    case 'development.trimTask.catalog': {
+      result = applyGarmentTrimTask(state, command, context);
+      break;
+    }
     case 'development.reference.add':case 'development.reference.remove':case 'development.reference.dispatch':case 'development.reference.return':{result=applyDevelopmentReferenceCommand(state,command,context);break;}
     case 'development.incoming.receive':case 'development.incoming.dispatch':case 'development.incoming.return':{
       result=applyDevelopmentIncomingCommand(state,command,context);break;

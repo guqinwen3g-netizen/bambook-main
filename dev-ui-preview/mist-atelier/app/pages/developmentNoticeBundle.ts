@@ -8,7 +8,7 @@ const safeName=(name:string)=>{
  return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(value)?'_'+value:value;
 };
 /** Read only this notice's frozen references through the current workspace's authenticated reader. */
-export async function developmentNoticeBundle(notice:DevNoticeRecord,files:MistFile[],readFile:(file:MistFile)=>Promise<Blob>,isCurrent:()=>boolean=()=>true){
+export async function developmentNoticeBundle(notice:Pick<DevNoticeRecord,'fileId'|'noticeNo'|'generatedAt'>&{snapshot:Pick<DevNoticeRecord['snapshot'],'attachments'>},files:MistFile[],readFile:(file:MistFile)=>Promise<Blob>,isCurrent:()=>boolean=()=>true){
  const check=()=>{if(!isCurrent())throw new Error('页面已切换，请重新下载');};check();
  const seen=new Set<string>(),refs=notice.snapshot.attachments.filter(ref=>ref.fileId!==notice.fileId&&!seen.has(ref.fileId)&&!!seen.add(ref.fileId));
  if(!refs.length)throw new Error('本通知单没有附件');

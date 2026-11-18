@@ -1,4 +1,5 @@
 import {GarmentMaterials} from './GarmentMaterials';
+import { GarmentTrimTasks } from './GarmentTrimTasks';
 import {DevReferenceSamplesCard} from './DevReferenceSamples';
 import {DevTaskEndDialog,FactoryTaskEndFacts,physicalFactoryTask} from './DevTaskLifecycle';
 import {developmentFactoryWorkBlocker} from '../../../../server/src/shared/mistDevelopmentTaskLifecycle';
@@ -322,6 +323,7 @@ export function DevDetailPage(){
             ...(dev.customerId?[{icon:Users,title:dev.customer,sub:'客户档案',onClick:()=>go('crm',dev.customerId,{customerId:dev.customerId})}]:[])]} />
           {links.product?<div className="mist-row" style={{padding:'6px 22px 10px',gap:8}}><span className="mist-note">{uiText("本版产品档案")}</span><TextLink onClick={()=>go('products',links.product!.id)}><Mono>{links.product.sku}</Mono></TextLink></div>
             :<div className="mist-row" style={{padding:'6px 22px 10px',gap:8,flexWrap:'wrap'}}><Button size="sm" icon={Archive} disabled={!version||busy||!!productBlocker} title={uiText(productBlocker||undefined)} onClick={()=>{setFailure('');setDialog('product');}}>{uiText("转为产品档案")}</Button>{productBlocker&&<span className="mist-note">{productBlocker}</span>}</div>}<CardFooter><span className="mist-note">{uiText(version?.archivedAt?`本版已留档 · ${new Date(version.archivedAt).toLocaleDateString(interfaceLocale(),{timeZone:'Asia/Shanghai',})}`:'本版尚未留档')}</span><Button size="sm" disabled={!version||busy||!!version.archivedAt} onClick={()=>setDialog('archive')}>{uiText("成果留档")}</Button></CardFooter></Card>
+        {state&&!fabricDomain&&<GarmentTrimTasks key={dev.id} dev={dev}/>}
         {state&&version&&!fabricDomain&&<GarmentMaterials key={version.id} dev={dev} version={version}/>}
         {state&&version&&!version.minor&&<DevNoticeCard state={state} dev={dev} version={version} busy={busy} onGenerate={()=>void generateNotice()} onDownload={downloadNotice} onPrint={printNotice}/>}
       </div>

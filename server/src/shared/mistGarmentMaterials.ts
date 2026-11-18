@@ -13,9 +13,10 @@ export const MATERIAL_NATURES={existing:'现成料',substitute:'替代料',devel
 export type MaterialUseDetails={position:string;specification:string;color:string;perPiece:string;unit:string;provider:MaterialProvider;colorMode:MaterialColorMode;colorReference:string};
 export type FrozenTrimCatalog={id:string;sku:string;name:string;supplierCode:string;composition:string;specification:string;color:string;unit:string;specs:Record<string,string>;fileIds:string[];profile?:TrimCatalogProfile;manufacturerName?:string};
 export type FrozenTrimOffer={supplierId:string;supplierName:string;supplierCode:string;price:string;currency:string;moq:string;leadDays:number;terms:TrimQuoteTerms};
-export type GarmentMaterialUse=MaterialUseDetails & {id:string;nature:MaterialNature;catalog:FrozenTrimCatalog;offer?:FrozenTrimOffer;selectedAt:string;selectedBy:string};
+export type GarmentMaterialUse=MaterialUseDetails & {id:string;nature:MaterialNature;catalog:FrozenTrimCatalog;offer?:FrozenTrimOffer;trimTaskId?:string;selectedAt:string;selectedBy:string};
 export type GarmentMaterialCommand=
-  | {type:'development.material.add';payload:MaterialUseDetails & {devId:string;versionId:string;productId:string;offerSupplierId?:string;nature:'existing'|'substitute'}}
+  | {type:'development.material.add';payload:MaterialUseDetails & {devId:string;versionId:string;nature:'existing'|'substitute';productId:string;offerSupplierId?:string}}
+  | {type:'development.material.addDeveloped';payload:MaterialUseDetails & {devId:string;versionId:string;trimTaskId:string}}
   | {type:'development.material.edit';payload:MaterialUseDetails & {devId:string;versionId:string;useId:string}}
   | {type:'development.material.remove';payload:{devId:string;versionId:string;useId:string}};
 function fail(message:string,code='VALIDATION'):never{throw new MistCommandError(code,message);}
@@ -56,7 +57,22 @@ export function applyGarmentMaterial(state:MistState,command:GarmentMaterialComm
   if(!ctx.can?.('products:read'))throw new MistCommandError('FORBIDDEN','没有读取辅料档案的权限',403);
   const materials=version.materialUses||[];
   let use:GarmentMaterialUse,action:string;
-  if(command.type==='development.material.add'){
+  if (command.type === 'development.material.addDeveloped') {
+    const task = dev.trimTasks?.find(row => row.id === command.payload.trimTaskId);
+    if (!task?.confirmed) return fail('请选择本案已确认的开发料', 'PRECONDITION');
+    const final = task.confirmed;
+    const catalog: FrozenTrimCatalog = {
+      id: task.catalogProductId ?? task.id, sku: task.code, name: final.name, supplierCode: '',
+      composition: '', specification: final.specification, color: final.color, unit: task.unit,
+      specs: {}, fileIds: [...final.fileIds],
+    };
+    use = {
+      ...details(command.payload), id: ctx.id(), nature: 'developed', catalog, trimTaskId: task.id,
+      selectedAt: ctx.now, selectedBy: ctx.actorName,
+    };
+    version.materialUses = [...materials, use];
+    action = '选用开发料';
+  } else if(command.type==='development.material.add'){
     const input=command.payload;
     const product=state.market.products.find(row=>row.id===input.productId);
     if(!product||product.category!=='trimming'||product.status!=='active')return fail('请选择在用的独立辅料档案','PRECONDITION');
@@ -100,5 +116,6 @@ export function materialReadKeys(state:MistState,command:{type:string;payload:un
     const product=state.market?.products?.find(row=>row.id===c.payload.productId);
     if(product?.trimProfile?.manufacturerRelationId)keys.push(['k:market','k:relations','i:'+product.trimProfile.manufacturerRelationId]);
   }
+  if (c.type === 'development.material.addDeveloped') keys.push(['k:devs', 'i:' + p.devId, 'k:trimTasks']);
   return keys;
 }

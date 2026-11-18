@@ -195,6 +195,16 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistGarmentMaterials.ts"
  },
  {
+  "type": "development.material.addDeveloped",
+  "payload": "MaterialUseDetails",
+  "types": {
+   "MaterialUseDetails": "{position:string;specification:string;color:string;perPiece:string;unit:string;provider:MaterialProvider;colorMode:MaterialColorMode;colorReference:string}",
+   "MaterialProvider": "'company'|'factory'",
+   "MaterialColorMode": "'dtm'|'specified'|'contrast'|'unspecified'"
+  },
+  "source": "server/src/shared/mistGarmentMaterials.ts"
+ },
+ {
   "type": "development.material.edit",
   "payload": "MaterialUseDetails",
   "types": {
@@ -364,6 +374,24 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "development.task.reopen",
   "payload": "{devId:string;versionId:string;expectedTaskEndId:string;reason:string}",
   "source": "server/src/shared/mistDevelopmentTaskLifecycle.ts"
+ },
+ {
+  "type": "development.trimTask.catalog",
+  "payload": "{ devId: string; taskId: string; sku: string }",
+  "source": "server/src/shared/mistGarmentTrimTasks.ts"
+ },
+ {
+  "type": "development.trimTask.notice",
+  "payload": "{ devId: string; taskId: string }",
+  "source": "server/src/shared/mistGarmentTrimTasks.ts"
+ },
+ {
+  "type": "development.trimTask.save",
+  "payload": "TrimRequest",
+  "types": {
+   "TrimRequest": "{ requirements: string; supplierId: string; contact: string; quantity: string; unit: string; dueDate: string; fileIds: string[] }"
+  },
+  "source": "server/src/shared/mistGarmentTrimTasks.ts"
  },
  {
   "type": "development.update",
@@ -1480,7 +1508,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
    "Input": "Omit<T,keyof RecordBase|'status'> & {fileIds?:string[];note?:string}",
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }",
    "MarketProduct": "RecordBase & { materialUses?:GarmentMaterialUse[]; trimProfile?:TrimCatalogProfile; sku:string; name:string; category:'garment'|'fabric'|'trimming'; status:'active'|'archived'; season:string; supplierId:string; supplierCode:string; composition:string; specification:string; color:string; unit:string; cost:string; currency:string; sourceDevId:string; sourceVersionId:string; specs?:Record<string,string>; customerCodes?:Array<{customerId:string;code:string}>; refPrice?:string; sources?:ProductSource[]; priceHistory?:ProductPriceChange[] }",
-   "GarmentMaterialUse": "MaterialUseDetails & {id:string;nature:MaterialNature;catalog:FrozenTrimCatalog;offer?:FrozenTrimOffer;selectedAt:string;selectedBy:string}",
+   "GarmentMaterialUse": "MaterialUseDetails & {id:string;nature:MaterialNature;catalog:FrozenTrimCatalog;offer?:FrozenTrimOffer;trimTaskId?:string;selectedAt:string;selectedBy:string}",
    "TrimCatalogProfile": "{category:TrimmingCategory;manufacturerRelationId?:string;parameters:TrimmingCategoryParameters}",
    "ProductSource": "{quoteTerms?:TrimQuoteTerms;supplierId:string;supplierCode:string;price:string;currency:string;moq:string;leadDays:number;note:string;updatedAt:string;updatedBy:string}",
    "ProductPriceChange": "{previousTerms?:TrimQuoteTerms;newTerms?:TrimQuoteTerms;supplierId:string;from:string;to:string;currency:string;at:string;actor:string;note:string}"
@@ -1506,7 +1534,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "types": {
    "MarketProduct": "RecordBase & { materialUses?:GarmentMaterialUse[]; trimProfile?:TrimCatalogProfile; sku:string; name:string; category:'garment'|'fabric'|'trimming'; status:'active'|'archived'; season:string; supplierId:string; supplierCode:string; composition:string; specification:string; color:string; unit:string; cost:string; currency:string; sourceDevId:string; sourceVersionId:string; specs?:Record<string,string>; customerCodes?:Array<{customerId:string;code:string}>; refPrice?:string; sources?:ProductSource[]; priceHistory?:ProductPriceChange[] }",
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }",
-   "GarmentMaterialUse": "MaterialUseDetails & {id:string;nature:MaterialNature;catalog:FrozenTrimCatalog;offer?:FrozenTrimOffer;selectedAt:string;selectedBy:string}",
+   "GarmentMaterialUse": "MaterialUseDetails & {id:string;nature:MaterialNature;catalog:FrozenTrimCatalog;offer?:FrozenTrimOffer;trimTaskId?:string;selectedAt:string;selectedBy:string}",
    "TrimCatalogProfile": "{category:TrimmingCategory;manufacturerRelationId?:string;parameters:TrimmingCategoryParameters}",
    "ProductSource": "{quoteTerms?:TrimQuoteTerms;supplierId:string;supplierCode:string;price:string;currency:string;moq:string;leadDays:number;note:string;updatedAt:string;updatedBy:string}",
    "ProductPriceChange": "{previousTerms?:TrimQuoteTerms;newTerms?:TrimQuoteTerms;supplierId:string;from:string;to:string;currency:string;at:string;actor:string;note:string}"
