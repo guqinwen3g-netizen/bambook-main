@@ -344,6 +344,8 @@ export const reviewedEnglish: Record<string, string> = {
   '仓库仍有实际库存，不能变更保管单位':'The custodian cannot change while stock remains',
 
   '汇率依据':'Exchange rate source',
+  '所选发票已无法核销':'Selected invoices are no longer available for reconciliation',
+  '移除失效选择':'Remove unavailable selections',
   '{0} 月末 {1}':'{0} month-end {1}',
   '服务商':'Service provider',
   '服务内容':'Services',

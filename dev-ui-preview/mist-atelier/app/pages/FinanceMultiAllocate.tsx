@@ -18,16 +18,34 @@ export function FinanceMultiAllocate({ receipt, invoices, busy, onClose, onSubmi
   const [lines, setLines] = React.useState<Record<string, Line>>({}), [rateBasis, setRateBasis] = React.useState(''), [error, setError] = React.useState('');
   const set = (id: string, patch: Partial<Line>) => setLines(all => ({ ...all, [id]: { invoiceId: id, amount: all[id]?.amount ?? '', rate: all[id]?.rate ?? '', ...patch } }));
   const chosen = Object.values(lines).filter(l => l.amount.trim());
-  const receiptUse = chosen.reduce((n, l) => { const inv = open.find(i => i.id === l.invoiceId)!, c = cents(l.amount); return n + (inv.currency === receipt.currency ? c : Math.round(c / Number(l.rate || NaN))); }, 0);
-  const cross = chosen.some(l => open.find(i => i.id === l.invoiceId)?.currency !== receipt.currency);
+  const available = new Map(open.map(invoice => [invoice.id, invoice]));
+  const selected = chosen.flatMap(line => {
+    const invoice = available.get(line.invoiceId);
+    return invoice ? [{ line, invoice }] : [];
+  });
+  const hasUnavailable = selected.length !== chosen.length;
+  const receiptUse = selected.reduce((sum, { line, invoice }) => {
+    const amount = cents(line.amount);
+    return sum + (invoice.currency === receipt.currency ? amount : Math.round(amount / Number(line.rate || NaN)));
+  }, 0);
+  const cross = selected.some(({ invoice }) => invoice.currency !== receipt.currency);
   const left = Math.round(receipt.remaining * 100) - receiptUse;
   const submit = () => {
+    if (busy || hasUnavailable) return;
     setError('');
-    for (const l of chosen) { const inv = open.find(i => i.id === l.invoiceId)!; if (!(cents(l.amount) > 0) || cents(l.amount) > Math.round(inv.open * 100)) return setError(`${inv.code} 金额无效或超过未收`); if (inv.currency !== receipt.currency && !(Number(l.rate) > 0)) return setError(`${inv.code} 请填写汇率`); }
-    if (!chosen.length) return setError('请至少填写一张发票的核销金额');
+    for (const { line, invoice } of selected) {
+      const amount = cents(line.amount);
+      if (!(amount > 0) || amount > Math.round(invoice.open * 100)) return setError(`${invoice.code} 金额无效或超过未收`);
+      if (invoice.currency !== receipt.currency && !(Number(line.rate) > 0)) return setError(`${invoice.code} 请填写汇率`);
+    }
+    if (!selected.length) return setError('请至少填写一张发票的核销金额');
     if (!(left >= 0)) return setError('合计超过到账未分配余额');
     if (cross && !rateBasis.trim()) return setError('请填写汇率依据');
-    onSubmit({ type: 'finance.reconcile', payload: { receiptId: receipt.id, lines: chosen.map(l => ({ invoiceId: l.invoiceId, amount: cents(l.amount) / 100, ...(open.find(i => i.id === l.invoiceId)!.currency !== receipt.currency ? { rate: l.rate.trim() } : {}) })), ...(cross ? { rateBasis: rateBasis.trim() } : {}) } });
+    const amounts = selected.map(({ line, invoice }) => ({
+      invoiceId: invoice.id, amount: cents(line.amount) / 100,
+      ...(invoice.currency === receipt.currency ? {} : { rate: line.rate.trim() }),
+    }));
+    onSubmit({ type: 'finance.reconcile', payload: { receiptId: receipt.id, lines: amounts, ...(cross ? { rateBasis: rateBasis.trim() } : {}) } });
   };
   const columns: Column<MistInvoice>[] = [
     { key: 'code', header: '发票', render: i => <div className="mist-col" style={{ gap: 2 }}><b>{i.code}</b><small className="mist-muted">{i.customer} · {i.due}</small></div> },
@@ -36,7 +54,11 @@ export function FinanceMultiAllocate({ receipt, invoices, busy, onClose, onSubmi
     { key: 'rate', header: `汇率（1 ${receipt.currency} =）`, align: 'right', render: i => i.currency === receipt.currency ? <span className="mist-muted">—</span> : <TextInput aria-label={ui`${i.code} 核销汇率`} type="number" min="0" step="0.000001" value={lines[i.id]?.rate ?? ''} disabled={busy} onChange={e => set(i.id, { rate: e.target.value })} /> },
   ];
   return <Dialog open title={ui`核销到多张发票 · ${receipt.code}`} width={880} onClose={() => { if (!busy) onClose(); }}
-    footer={<><span className="mist-note">{ui`到账未分配 ${fmt(receipt.remaining, 2)} → ${fmt(Math.max(0, left) / 100, 2)} ${receipt.currency}`}</span><span className="mist-spacer" /><Button disabled={busy} onClick={onClose}>{uiText('取消')}</Button><Button variant="primary" loading={busy} disabled={busy || !chosen.length} onClick={submit}>{uiText(`核销 ${chosen.length} 张`)}</Button></>}>
+    footer={<><span className="mist-note">{hasUnavailable || !Number.isFinite(left) ? <>{uiText('到账未分配')} {fmt(receipt.remaining, 2)} {receipt.currency}</> : ui`到账未分配 ${fmt(receipt.remaining, 2)} → ${fmt(Math.max(0, left) / 100, 2)} ${receipt.currency}`}</span><span className="mist-spacer" /><Button disabled={busy} onClick={onClose}>{uiText('取消')}</Button><Button variant="primary" loading={busy} disabled={busy || hasUnavailable || !chosen.length} onClick={submit}>{uiText(`核销 ${chosen.length} 张`)}</Button></>}>
+    {hasUnavailable && <Banner tone="warn" title={uiText('所选发票已无法核销')} actions={<Button disabled={busy} onClick={() => {
+      setLines(current => Object.fromEntries(Object.entries(current).filter(([id]) => available.has(id))));
+      setError('');
+    }}>{uiText('移除失效选择')}</Button>} />}
     {error && <Banner tone="bad" title={uiText('未能核销')}>{uiText(error)}</Banner>}
     <DataTable ariaLabel={uiText('待核销发票')} rows={open} rowKey={i => i.id} columns={columns} density="comfy" />
     {cross && <Field label={uiText('汇率依据')} required full><TextInput aria-label={uiText('汇率依据')} value={rateBasis} disabled={busy} onChange={e => setRateBasis(e.target.value)} placeholder={uiText('银行水单或客户确认的折算')} /></Field>}

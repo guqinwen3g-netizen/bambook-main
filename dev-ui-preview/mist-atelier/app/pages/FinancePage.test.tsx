@@ -23,6 +23,19 @@ function input(label:string,value:string){const control=getByLabelText(document.
 beforeEach(()=>vi.stubGlobal('matchMedia',(query:string)=>({matches:false,media:query,onchange:null,addListener(){},removeListener(){},addEventListener(){},removeEventListener(){},dispatchEvent(){return true;}})));
 beforeEach(()=>{let serial=0;const context={id:()=>`test-${++serial}`,actorName:'财务',actorId:'finance',now:new Date().toISOString()};const state=createMistState(context,'empty');state.customers=[{id:'customer',name:'客户',currency:'EUR'}] as any;state.orders=[{id:'o',code:'ORDER',type:'fabric',customerId:'customer',customer:'客户',season:'',lines:1,qty:1,amount:100,currency:'EUR',due:today(),progress:0,state:'',tone:'neutral',owner:'',img:'clay',checklist:[],handoffAt:null,createdAt:'',updatedAt:''}];state.orderLines=[{id:'line',orderId:'o',name:'商品',style:'A',img:'clay',qty:1,unit:'件',price:100,made:0,qc:0}];state.invoices=[{id:'invoice',code:'INV-EUR',orderId:'o',order:'ORDER',customer:'客户',due:today(),amount:100,open:100,currency:'EUR'}];state.receipts=[{id:'receipt',code:'R-EUR',date:today(),payer:'客户',amount:50,remaining:50,currency:'EUR',ref:'测试',state:'unmatched'}];store.value={state,workspace:{id:'space-a'},loading:false,saving:false,pending:null,error:'',refresh:vi.fn(),recover:vi.fn(),run:vi.fn(async(command)=>{const applied=applyMistCommand(store.value.state,command,context);store.value.state=applied.state;render();return{requestId:'req',revision:1,result:applied.result};})};go.mockReset();route={view:'payment-vouchers'};host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
+it('retains the other allocation amount when a selected invoice is settled in another session',async()=>{
+  const state=store.value.state,first=state.invoices[0],second={...first,id:'retained',code:'I-RETAINED'};
+  state.invoices.push(second);render();await click('多张 / 跨币种核销');
+  input(first.code+' 核销金额','20');input(second.code+' 核销金额','10');
+  first.open=0;state.receipts[0].remaining=30;render();
+  const dialog=getByRole(document.body,'dialog',{name:/核销到多张发票/});
+  expect((getByRole(dialog,'button',{name:'核销 2 张'}) as HTMLButtonElement).disabled).toBe(true);
+  expect((getByLabelText(dialog,second.code+' 核销金额') as HTMLInputElement).value).toBe('10');
+  expect(store.value.run).not.toHaveBeenCalled();
+  await click('移除失效选择');await click('核销 1 张');
+  expect(store.value.run).toHaveBeenCalledTimes(1);
+  expect(store.value.run).toHaveBeenCalledWith({type:'finance.reconcile',payload:{receiptId:'receipt',lines:[{invoiceId:'retained',amount:10}]}});
+});
 it('keeps non-order invoices in the customer drilldown and opens the exact sample request',async()=>{
   const s=store.value.state,base={...s.invoices[0],orderId:'',customerId:'customer',currency:'EUR',open:12};
   s.devs=[{id:'dev',customerId:'customer'}];
