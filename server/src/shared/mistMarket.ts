@@ -19,6 +19,7 @@ import {buildQuotationDocumentSnapshot,quotationDocumentBlocker,quotationFormalD
 /** Market-side business records owned by the current Mist workspace. No fixture records are created. */
 import { MistCommandError, type MistState, type MistContext, type MistCommandResult, type MistCustomer, mistMoneyMinor, MIST_ORDER_CHECKLIST, mistPlaceholderImage, type MistImage } from './mistWorkspace';
 import { reviewDecision, type MistReviewTask } from './mistReview';
+import { pricingParamsText } from './mistPricingParams';
 import { supplierBusinessDay, supplierUnavailableReason, productionSupplierUnavailableReason, isServiceSupplier } from './mistSupplierStatus';
 import { relationHoldReason } from './mistRelationHold';
 import { relationBusiness } from './mistRelationBusiness';
@@ -89,8 +90,8 @@ export type MarketShow = RecordBase & { name:string; location:string; seasonId:s
 export type MarketCampaign = RecordBase & { code:string; name:string; type:string; seasonId:string; showId:string; startDate:string; endDate:string; target:string; budget:string; actualCost:string; currency:string; status:'Draft'|'Active'|'Paused'|'Completed'|'Cancelled'; owner:string; productIds:string[] };
 /** ownerId / owner：线索负责人（mar53），旧线索没有时按活动负责人显示。 */
 export type MarketLead = RecordBase & { ownerId?:string; owner?:string; name:string; company:string; email:string; phone:string; demand:string; source:'campaign'|'show'; parentId:string; customerId:string; status:'New'|'Contacted'|'Qualified'|'Following'|'Converted'|'Lost'; followUpDate:string; estimatedValue:string; actualValue:string; currency:string; convertedAt:string|null; opportunityId?:string; communication?:{actor:string;actorId?:string;at:string}; followUps?:Array<{at:string;actor:string;actorId?:string;status:string;note:string}> };
-export type MarketQuoteLine = { id:string; productId:string; sourceDevId:string; sourceVersionId:string; name:string; style:string; specification:string; qty:string; unit:string; price:string; cost:string; amount:string; costBasis?:'product'|'unverified'; /** BB-QUO-2 结构化规格与 MOQ；历史条目可能没有。 */ specs?:QuoteLineSpecs; /** BB-QUO-3 保存时冻结的最低毛利率版本；历史条目没有则不按底价线判断。 */ marginFloor?:FrozenMarginFloor; /** BB-QUO-3 服务端保存时按当时来源判定的板块（null=当时不属面料/成衣）；历史条目没有，编辑时按已保存单位兼容推断。不随产品档案之后改类别变化。 */ family?:QuoteFamily|null; /** BB-QUO-5 条目转单去向；仅转单命令写入。 */ conversion?:QuoteLineConversion; /** BB-QUO-5 标记不再转及原因。 */ skipped?:QuoteLineSkip };
-export type MarketQuoteApproval = { id:string; requesterId:string; reviewerId:string; status:'pending'|'approved'|'rejected'; submittedAt:string; decidedAt?:string; note?:string; details:Array<{label:string;value:string}>; fileIds:string[]; /** Immutable audit links, separate from human-readable approval text. */ costingRefs?:Array<{lineId:string;snapshotId:string;modelVersion:string}> };
+export type MarketQuoteLine = { id:string; productId:string; sourceDevId:string; sourceVersionId:string; name:string; style:string; specification:string; qty:string; unit:string; price:string; cost:string; amount:string; costBasis?:'product'|'unverified'; /** Last trial applied to this exact saved line. */ pricingTrialId?:string; /** BB-QUO-2 结构化规格与 MOQ；历史条目可能没有。 */ specs?:QuoteLineSpecs; /** BB-QUO-3 保存时冻结的最低毛利率版本；历史条目没有则不按底价线判断。 */ marginFloor?:FrozenMarginFloor; /** BB-QUO-3 服务端保存时按当时来源判定的板块（null=当时不属面料/成衣）；历史条目没有，编辑时按已保存单位兼容推断。不随产品档案之后改类别变化。 */ family?:QuoteFamily|null; /** BB-QUO-5 条目转单去向；仅转单命令写入。 */ conversion?:QuoteLineConversion; /** BB-QUO-5 标记不再转及原因。 */ skipped?:QuoteLineSkip };
+export type MarketQuoteApproval = { id:string; requesterId:string; reviewerId:string; status:'pending'|'approved'|'rejected'; submittedAt:string; decidedAt?:string; note?:string; details:Array<{label:string;value:string}>; fileIds:string[]; /** Immutable audit links, separate from human-readable approval text. */ costingRefs?:Array<{lineId:string;snapshotId:string;modelVersion:string}>; pricingTrialRefs?:Array<{lineId:string;trialId:string;position:number;unit:string}> };
 export type MarketQuotation = RecordBase & { code:string; customerId:string; currency:string; season:string; validUntil:string; deliveryTerms:string; paymentTerms:string; status:'Draft'|'Sent'|'Accepted'|'Rejected'|'Expired'; lines:MarketQuoteLine[]; total:string; deliveryEvidence:string; responseEvidence:string; approval:MarketQuoteApproval|null; approvalHistory?:MarketQuoteApproval[]; requiresApproval?:boolean; convertedOrderId:string|null; /** 报价汇率：1 单位报价币种折人民币（报价时预计的结汇汇率，非人民币报价才有）；随报价版本冻结，已发送版本不可改，报表“报价预计”口径取此值。 */ fxRate?:string; /** 版本链：V1 无 previousId；新版本不覆盖旧版本。 */ revision?:number; rootId?:string; previousId?:string;costingSnapshots?:QuoteCostSnapshot[];feedback?:QuoteFeedbackRecord[]; /** BB-QUO-6 生成的报价单文件记录；只追加，仅由生成命令写入。 */ documents?:QuoteDocumentRecord[] };
 export type MarketLookbook = RecordBase & { name:string; customerId:string; productIds:string[]; status:'Draft'|'Prepared'|'Archived'; preparedAt:string|null; snapshots:LookbookSnapshot[]; /** Immutable generated originals, retained when a draft is revised. */ documents?:GeneratedDocRecord[]; /** Set only by PDF generation; a new draft/preparation has no current PDF. */ currentDocumentId?:string };
 /** 画册准备时冻结的产品资料：客户款号按目标客户取；成分、颜色单列，规格不重复成分。 */
@@ -136,7 +137,7 @@ export type MarketCommand =
  | {type:'market.lead.save';payload:{id?:string;input:Omit<Input<MarketLead>,'convertedAt'|'communication'|'followUps'>}}
  | {type:'market.lead.transition';payload:{id:string;status:MarketLead['status'];customerId?:string;actualValue?:string;note:string;followUpDate?:string}}
  | {type:'market.lead.convertToCrm';payload:{id:string;customerId?:string;opportunity?:{title:string;domain:'garment'|'fabric';amount:string;currency:string;expectedDate:string}|null}}
- | {type:'market.quotation.save';payload:{id?:string;input:Omit<Input<MarketQuotation>,'documents'|'code'|'total'|'deliveryEvidence'|'responseEvidence'|'approval'|'convertedOrderId'|'lines'|'revision'|'rootId'|'previousId'|'costingSnapshots'|'feedback'>&{lines:Array<Omit<MarketQuoteLine,'id'|'amount'>>;/** 仅新建时：基于此报价建立新版本（续期或改价）。 */previousId?:string}}}
+ | {type:'market.quotation.save';payload:{id?:string;input:Omit<Input<MarketQuotation>,'documents'|'code'|'total'|'deliveryEvidence'|'responseEvidence'|'approval'|'convertedOrderId'|'lines'|'revision'|'rootId'|'previousId'|'costingSnapshots'|'feedback'>&{lines:Array<Omit<MarketQuoteLine,'id'|'amount'|'pricingTrialId'>>;/** 仅新建时：基于此报价建立新版本（续期或改价）。 */previousId?:string}}}
  | {type:'market.quotation.submit';payload:{id:string}}
  | {type:'market.quotation.decide';payload:{id:string;decision:'approved'|'rejected';note:string}}
  | {type:'market.quotation.feedback.add';payload:{quotationId:string;expectedTarget:string;input:QuoteFeedbackInput}}
@@ -178,7 +179,26 @@ export function marketCommandPermission(command:MarketCommand):string|null {
  throw new MistCommandError('VALIDATION','未知市场操作');
 }
 export function getMarketReviews(rootState:MistState):MistReviewTask[] {
- return ((rootState as MistState&{market?:MarketState}).market?.quotations||[]).flatMap(q=>[...(q.approvalHistory||[]),...(q.approval?[q.approval]:[])].map(approval=>({id:approval.id,kind:'quotation' as const,entityId:q.id,title:q.code+' 报价审批',requesterId:approval.requesterId,reviewerIds:[approval.reviewerId],status:approval.status,submittedAt:approval.submittedAt,decision:approval.status==='pending'?undefined:reviewDecision(rootState.members?.find(m=>m.userId===approval.reviewerId)?.name||approval.reviewerId,approval.decidedAt,approval.note),requiredPermission:'quotations:approve',target:{view:'quotations',id:q.id},details:quoteApprovalDisplayDetails(approval.details),fileIds:approval.fileIds})));
+ const trials = new Map(rootState.platform?.pricing?.map(trial=>[trial.id,trial]));
+ return (rootState.market?.quotations||[]).flatMap(q=>[...(q.approvalHistory||[]),...(q.approval?[q.approval]:[])].map(approval=>({
+  id:approval.id,kind:'quotation' as const,entityId:q.id,title:q.code+' 报价审批',requesterId:approval.requesterId,
+  reviewerIds:[approval.reviewerId],status:approval.status,submittedAt:approval.submittedAt,
+  decision:approval.status==='pending'?undefined:reviewDecision(rootState.members?.find(m=>m.userId===approval.reviewerId)?.name||approval.reviewerId,approval.decidedAt,approval.note),
+  requiredPermission:'quotations:approve',target:{view:'quotations',id:q.id},fileIds:approval.fileIds,
+  details:[...quoteApprovalDisplayDetails(approval.details),...(approval.pricingTrialRefs||[]).map(ref=>{
+   const trial = trials.get(ref.trialId), label = '定价试算 · 第 '+ref.position+' 行';
+   if (!trial || trial.quotationId!==q.id || trial.lineId!==ref.lineId || !Number.isFinite(trial.netUsdCost) || !Number.isFinite(trial.finalUnitPrice)) return {label,value:'原试算记录不可用'};
+   const currency = trial.currency||'USD';
+   const value = [
+    '净成本 '+trial.netUsdCost.toFixed(4)+' '+currency+'/'+ref.unit,
+    '成本加成 '+trial.profitMargin+'%', '佣金 '+trial.commissionRate+'%',
+    '建议单价 '+trial.finalUnitPrice.toFixed(4)+' '+currency+'/'+ref.unit,
+    ...(trial.params?[pricingParamsText(trial.params)]:[]),
+    '依据：'+trial.basis, ...(trial.deviationReason?['偏离理由：'+trial.deviationReason]:[]),
+   ].join('；');
+   return {label,value};
+  })],
+ })));
 }
 /** Present old frozen evidence without changing its stored facts or audit identifiers. */
 function quoteApprovalDisplayDetails(details:MarketQuoteApproval['details']):MarketQuoteApproval['details']{
@@ -234,7 +254,7 @@ export function quotationProductCost(product:Pick<MarketProduct,'cost'|'currency
 }
 /** 客户专属开发案（开发案有客户）只能报给该客户；与转订单校验（mistOrderSource）同一口径，避免报价走完审批、发送、接受后才在转单时被拒。 */
 export function quoteSourceCustomerProblem(root:Pick<MistState,'devs'>,customerId:string,sourceDevId:string,label:string):string|null{const d=sourceDevId?root.devs.find(x=>x.id===sourceDevId):undefined;return d?.customerId&&d.customerId!==customerId?`条目「${label}」的来源开发案 ${d.code} 属于 ${d.customer||'其他客户'}，不能报给本报价客户`:null;}
-function sourceLine(root:MistState,m:MarketState,input:Omit<MarketQuoteLine,'id'|'amount'>,ctx:MistContext,quoteCurrency:string,customerId:string):MarketQuoteLine{
+function sourceLine(root:MistState,m:MarketState,input:Omit<MarketQuoteLine,'id'|'amount'|'pricingTrialId'>,ctx:MistContext,quoteCurrency:string,customerId:string):MarketQuoteLine{
  const productId=str(input.productId||'','产品',false);let sourceDevId=str(input.sourceDevId||'','来源开发案',false),sourceVersionId=str(input.sourceVersionId||'','来源版本',false);
  if(!productId&&!sourceVersionId)fail('报价条目须选择产品档案或准确开发版本');
  if(productId){const p=find(m.products,productId,'产品');if(p.status!=='active')fail('归档产品不可新增报价');if(sourceVersionId&&sourceVersionId!==p.sourceVersionId||sourceDevId&&sourceDevId!==p.sourceDevId)fail('产品与来源版本不一致');sourceDevId=p.sourceDevId;sourceVersionId=p.sourceVersionId;}
@@ -534,7 +554,7 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    if(input.allocationQuantity!==undefined&&quoteCostDecimal(input.allocationQuantity,'分摊数量')!==quoteCostDecimal(line!.qty,'准确报价行数量'))fail('费用分摊数量须等于当前准确报价行数量；不跨行分摊或沿用旧数量','CONFLICT');
    let historyEvidence:ReturnType<typeof freezeQuotationHistoryEvidence>;try{historyEvidence=freezeQuotationHistoryEvidence(root,q,line!,v.historyReference);}catch(e){fail(e instanceof Error?e.message:'历史依据无效','CONFLICT');}
    {const target=quoteCostTarget(input);if(target.currency!==q.currency||target.unit!==line!.unit)fail(input.conversion?'折算后的币种与单位须为本报价行的币种和计价单位':'成本来源与本报价行币种或计价单位不同，请填写折算汇率与单位换算');}const supplier=input.mode==='supplier'?find(m.suppliers,input.supplierId,'来源供应商'):null;if(supplier&&isServiceSupplier(supplier))fail('服务商不能作为生产供应商','PRECONDITION');const fileIds=attachmentIds(root,input.fileIds);const snapshot:QuoteCostSnapshot={...(historyEvidence?{historyEvidence}:{}),id:ctx.id(),quotationId:q.id,lineId:line!.id,modelVersion:quoteCostModelVersion(input),createdAt:ctx.now,actorId:ctx.actorId||'',actor:ctx.actorName,input:{...input,fileIds},result:costResult,appliedPrice:v.applyPrice,target:{customerId:q.customerId,quoteCode:q.code,currency:q.currency,deliveryTerms:q.deliveryTerms,paymentTerms:q.paymentTerms,validUntil:q.validUntil,line:{...line!}},supplier:supplier?{id:supplier.id,name:supplier.name,code:supplier.code}:null,files:fileIds.map(id=>{const f=find(root.files,id,'凭据附件');return{id:f.id,name:f.name,createdAt:f.createdAt,size:f.size};})};
-   if(v.applyPrice&&decimal(costResult.proposedPrice,'人工拟报价').minor<=BigInt(0))fail('写入报价的人工拟报价必须大于0');archiveApproval(q);q.approval=null;q.requiresApproval=true;line!.cost=costResult.approvalCost;line!.costBasis='unverified';if(v.applyPrice){line!.price=costResult.proposedPrice;line!.amount=marketLineAmount(line!.qty,line!.price);q.total=marketSum(q.lines.map(l=>l.amount));}q.costingSnapshots=[...(q.costingSnapshots||[]),snapshot];q.updatedAt=ctx.now;history(root,ctx,'quotation',q.id,'保存条目专业核算 '+line!.style+' / '+snapshot.id+'（人工依据，成本待审批核实）');result={id:q.id,lineId:line!.id,snapshotId:snapshot.id};break;
+   if(v.applyPrice&&decimal(costResult.proposedPrice,'人工拟报价').minor<=BigInt(0))fail('写入报价的人工拟报价必须大于0');archiveApproval(q);q.approval=null;q.requiresApproval=true;line!.cost=costResult.approvalCost;line!.costBasis='unverified';if(v.applyPrice){delete line!.pricingTrialId;line!.price=costResult.proposedPrice;line!.amount=marketLineAmount(line!.qty,line!.price);q.total=marketSum(q.lines.map(l=>l.amount));}q.costingSnapshots=[...(q.costingSnapshots||[]),snapshot];q.updatedAt=ctx.now;history(root,ctx,'quotation',q.id,'保存条目专业核算 '+line!.style+' / '+snapshot.id+'（人工依据，成本待审批核实）');result={id:q.id,lineId:line!.id,snapshotId:snapshot.id};break;
   }
   case 'market.quotation.submit': {
    const q = find(m.quotations, command.payload.id, '报价');
@@ -543,9 +563,12 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    if (!requesterId || !reviewerId || reviewerId === requesterId) fail('未能解析独立的业务审批负责人', 'PRECONDITION');
    archiveApproval(q);q.requiresApproval=true;
    const costing=activeQuoteCostSnapshots(q);
+   // Bind the applied trial by identity. The approval endpoint reads the frozen inputs without exposing them on the ordinary quotation payload.
+   const pricingTrialRefs=q.lines.flatMap((line,index)=>line.pricingTrialId?[{lineId:line.id,trialId:line.pricingTrialId,position:index+1,unit:line.unit}]:[]);
    const approval: MarketQuoteApproval = {
     id: ctx.id(), requesterId, reviewerId, status: 'pending', submittedAt: ctx.now, fileIds: [...new Set([...q.fileIds,...activeQuoteCostSnapshots(q).flatMap(x=>x.input.fileIds)])],
     costingRefs:costing.map(x=>({lineId:x.lineId,snapshotId:x.id,modelVersion:x.modelVersion})),
+    ...(pricingTrialRefs.length?{pricingTrialRefs}:{}),
     details: [
      {label:'报价',value:q.code}, {label:'客户',value:find(root.customers,q.customerId,'客户').name},
      {label:'金额',value:q.currency+' '+q.total}, {label:'贸易与付款',value:q.deliveryTerms+' / '+q.paymentTerms},

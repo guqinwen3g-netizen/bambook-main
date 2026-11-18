@@ -194,7 +194,7 @@ case'platform.pricing.apply':{
  if((row.currency||'USD')!==q.currency)fail('试算币种与报价不一致','CONFLICT');
  // Quote prices carry two decimals; the trial's four-decimal price is rounded half up.
  const price=(Math.round(row.finalUnitPrice*100)/100).toFixed(2);
- line.price=price;line.amount=marketLineAmount(line.qty,line.price);q.total=marketSum(q.lines.map(l=>l.amount));
+ line.price=price;line.amount=marketLineAmount(line.qty,line.price);line.pricingTrialId=row.id;q.total=marketSum(q.lines.map(l=>l.amount));
  if(q.approval){q.approvalHistory=[...(q.approvalHistory||[]),q.approval];q.approval=null;}q.requiresApproval=true;q.updatedAt=c.now;
  row.appliedAt=c.now;row.appliedBy=c.actorName;
  emit(root,c,'quotation',q.id,`按定价试算写入 ${line.style||line.name} 单价 ${price} ${q.currency}：${text(command.payload.note,'写入说明',true,500)}`);
