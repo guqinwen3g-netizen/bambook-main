@@ -121,6 +121,27 @@ describe('Mist market screens',()=>{
  it('records the quotation exchange rate on the version for foreign-currency quotes and rejects malformed rates',async()=>{await mount('quotations');await click('新建报价');await fill('有效期','2026-12-01');await fill('贸易术语','FOB');await fill('贸易术语指定地点','上海');await fill('付款条件','T/T 30% 定金，70% 发货前付清');await fill('报价汇率','7.1234567');await click('下一步');expect(host.textContent).toContain('报价汇率须为正数');await fill('报价汇率','7.10');await click('下一步');await fill('条目1来源','p:'+bridge.current.state.market.products[0].id);await fill('条目1数量','3');await click('下一步');expect(host.textContent).toContain('= 7.10 CNY');await click('保存报价草稿');expect(bridge.current.run).toHaveBeenCalledWith({type:'market.quotation.save',payload:{id:undefined,input:expect.objectContaining({fxRate:'7.10'})}});});
  it('preserves the complete quotation on save failure and does not navigate or create an order',async()=>{bridge.current.run.mockRejectedValueOnce(new Error('数据库保存失败'));await mount('quotations');await completeQuote();await click('保存报价草稿');expect(host.textContent).toContain('数据库保存失败');expect(host.textContent).toContain('0.30');expect(go).not.toHaveBeenCalled();await click('上一步');expect((host.querySelector('[aria-label="条目1数量"]') as HTMLInputElement).value).toBe('3');expect(bridge.current.run.mock.calls.every(([c]:any[])=>c.type==='market.quotation.save')).toBe(true);});
  it('opens an archived product exact source version instead of current development version',async()=>{const p=bridge.current.state.market.products[0];p.sourceDevId='dev-original';p.sourceVersionId='version-original';await mount('products',p.id,undefined,'full');await click('打开准确开发版本');expect(go).toHaveBeenCalledWith('development/detail','dev-original',{versionId:'version-original'});});
+ it('submits the selected category fields and its default unit in the first save',async()=>{
+  await mount('products');await click('新建');
+  await fill('公司产品编码','T-0048');await fill('名称','树脂扣');await fill('类别','trimming');
+  expect(host.querySelector('[aria-label="款号"]')).toBeNull();
+  await fill('辅料类型','扣类');await fill('规格尺寸','18 mm');await fill('起订量','500');
+  for(let i=0;i<8&&!host.querySelector('[aria-label="计量单位"]');i++)await click('下一步');
+  expect((host.querySelector('[aria-label="计量单位"]') as HTMLSelectElement).value).toBe('个');
+  for(let i=0;i<8&&!Array.from(host.querySelectorAll('button')).some(b=>b.textContent==='确认保存');i++)await click('下一步');
+  await click('确认保存');
+  expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.product.save',payload:expect.objectContaining({input:expect.objectContaining({category:'trimming',unit:'个',specs:{trimType:'扣类',size:'18 mm',moq:'500'}})})}));
+ });
+ it('preserves an explicitly selected product unit when changing category',async()=>{
+  await mount('products');await click('新建');
+  await fill('公司产品编码','C-0048');await fill('名称','包装组件');
+  for(let i=0;i<8&&!host.querySelector('[aria-label="计量单位"]');i++)await click('下一步');
+  await fill('计量单位','套');
+  for(let i=0;i<8&&!host.querySelector('[aria-label="类别"]');i++)await click('上一步');
+  await fill('类别','trimming');
+  for(let i=0;i<8&&!host.querySelector('[aria-label="计量单位"]');i++)await click('下一步');
+  expect((host.querySelector('[aria-label="计量单位"]') as HTMLSelectElement).value).toBe('套');
+ });
  it('binds attachment replacement to the file list the user saw before the upload',async()=>{
   const b=bridge.current,product=b.state.market.products[0],added={id:'file-new',name:'量尺记录.txt',mimeType:'text/plain',size:4,storageKey:'w/file-new',createdAt:'2026-10-13'};
   b.workspace={revision:14};

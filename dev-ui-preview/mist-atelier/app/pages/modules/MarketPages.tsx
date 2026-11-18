@@ -127,7 +127,46 @@ function productSupplierOptions(suppliers:MarketSupplier[],currentId?:string){
   return {value:s.id,label:reason?`${s.name} · 原供应商（${reason}）`:s.name};
  });
 }
-function ProductPage(){const w=useMarket(),[filter,setFilter]=React.useState<'all'|MarketProduct['category']>('all'),[supplierFilter,setSupplierFilter]=React.useState('all'),[seasonFilter,setSeasonFilter]=React.useState('all'),[statusFilter,setStatusFilter]=React.useState<'active'|'archived'|'all'>('active'),[editor,setEditor]=useRouteDraft<ModuleEditorSpec|null>(null);const can=w.session.hasPermission('products:write');const input=(row?:MarketProduct):ModuleEditorSpec=>{const cat:MarketProduct['category']=row?.category||(filter==='all'?'garment':filter);const specKeys=PRODUCT_SPEC_FIELDS[cat];return {title:row?'编辑数字档案':'新建'+PRODUCT_CATEGORY_LABEL[cat]+'档案',initialValues:{...(row?formValues(row):{sku:'',name:'',category:cat,season:'',supplierId:'',supplierCode:'',composition:'',specification:'',color:'',unit:cat==='fabric'?'米':cat==='trimming'?'个':'件',cost:'0',currency:preferredMarketCurrency(w.state),note:''}),refPrice:row?.refPrice||'',...Object.fromEntries(specKeys.map(f=>['spec_'+f.key,row?.specs?.[f.key]||'']))},fields:[field('sku','公司产品编码',{required:true}),field('name','名称',{required:true}),field('category','类别',{type:'select',options:opts(['garment','fabric','trimming']),hint:'更改类别后保存以更新规格'}),...specKeys.map(f=>field('spec_'+f.key,f.label+(f.unit?`（${f.unit}）`:''))),field('season','季节编码',{type:'choice',options:seasonOptions(businessNow().getFullYear(),w.market.seasons)}),field('supplierId','供应商',{type:'select',options:[{value:'',label:'未指定'},...productSupplierOptions(w.market.suppliers,row?.supplierId)]}),field('supplierCode','供应商产品编码'),field('composition','材质与成分'),field('specification','规格',{type:'textarea'}),field('color','颜色'),field('unit','计量单位',{required:true,type:'choice',options:UNITS}),field('cost','成本单价',{required:true}),field('currency','币种',{required:true,type:'choice',options:CURRENCIES,strict:true}),field('refPrice','参考价'),field('note','备注',{type:'textarea'})],submit:async v=>w.command({type:'market.product.save',payload:{id:row?.id,input:{...(row?productInput(row):{sourceDevId:'',sourceVersionId:'',fileIds:[]}),sku:text(v,'sku'),name:text(v,'name'),category:text(v,'category') as MarketProduct['category'],season:text(v,'season'),supplierId:text(v,'supplierId'),supplierCode:text(v,'supplierCode'),composition:text(v,'composition'),specification:text(v,'specification'),color:text(v,'color'),unit:text(v,'unit'),cost:text(v,'cost'),currency:text(v,'currency'),note:text(v,'note'),specs:Object.fromEntries(specKeys.map(f=>[f.key,text(v,'spec_'+f.key)])),refPrice:text(v,'refPrice')}}})};};
+function ProductPage(){const w=useMarket(),[filter,setFilter]=React.useState<'all'|MarketProduct['category']>('all'),[supplierFilter,setSupplierFilter]=React.useState('all'),[seasonFilter,setSeasonFilter]=React.useState('all'),[statusFilter,setStatusFilter]=React.useState<'active'|'archived'|'all'>('active'),[editor,setEditor]=useRouteDraft<ModuleEditorSpec|null>(null);const can=w.session.hasPermission('products:write');
+ const input=(row?:MarketProduct):ModuleEditorSpec=>{
+  const categories=['garment','fabric','trimming'] as const;
+  const units={garment:'件',fabric:'米',trimming:'个'};
+  const initialCategory=row?.category||(filter==='all'?'garment':filter);
+  return {
+   title:row?'编辑数字档案':'新建数字档案',
+   initialValues:{
+    ...(row?formValues(row):{sku:'',name:'',category:initialCategory,season:'',supplierId:'',supplierCode:'',composition:'',specification:'',color:'',unit:units[initialCategory],cost:'0',currency:preferredMarketCurrency(w.state),note:''}),
+    refPrice:row?.refPrice||'',unitManuallySelected:!!row&&row.unit!==units[initialCategory],
+    ...Object.fromEntries(PRODUCT_SPEC_FIELDS[initialCategory].map(f=>['spec_'+f.key,row?.specs?.[f.key]||''])),
+   },
+   fields:[
+    field('sku','公司产品编码',{required:true}),field('name','名称',{required:true}),
+    field('category','类别',{required:true,type:'select',options:opts([...categories])}),
+    ...categories.flatMap(category=>PRODUCT_SPEC_FIELDS[category].map(f=>field('spec_'+f.key,f.label+(f.unit?`（${f.unit}）`:''),{when:{key:'category',values:[category]}}))),
+    field('season','季节编码',{type:'choice',options:seasonOptions(businessNow().getFullYear(),w.market.seasons)}),
+    field('supplierId','供应商',{type:'select',options:[{value:'',label:'未指定'},...productSupplierOptions(w.market.suppliers,row?.supplierId)]}),
+    field('supplierCode','供应商产品编码'),field('composition','材质与成分'),field('specification','规格',{type:'textarea'}),
+    field('color','颜色'),field('unit','计量单位',{required:true,type:'choice',options:UNITS}),
+    field('cost','成本单价',{required:true}),field('currency','币种',{required:true,type:'choice',options:CURRENCIES,strict:true}),
+    field('refPrice','参考价'),field('note','备注',{type:'textarea'}),
+   ],
+   derive:(key,value,values)=>{
+    if(key==='unit')return {unitManuallySelected:true};
+    if(key==='category'&&!values.unitManuallySelected&&typeof value==='string'&&Object.hasOwn(units,value))return {unit:units[value as MarketProduct['category']]};
+    return {};
+   },
+   submit:async values=>{
+    const category=text(values,'category') as MarketProduct['category'];
+    const specs=Object.fromEntries(PRODUCT_SPEC_FIELDS[category].map(f=>[f.key,text(values,'spec_'+f.key)]));
+    return w.command({type:'market.product.save',payload:{id:row?.id,input:{
+     ...(row?productInput(row):{sourceDevId:'',sourceVersionId:'',fileIds:[]}),
+     sku:text(values,'sku'),name:text(values,'name'),category,season:text(values,'season'),supplierId:text(values,'supplierId'),
+     supplierCode:text(values,'supplierCode'),composition:text(values,'composition'),specification:text(values,'specification'),
+     color:text(values,'color'),unit:text(values,'unit'),cost:text(values,'cost'),currency:text(values,'currency'),note:text(values,'note'),specs,refPrice:text(values,'refPrice'),
+    }}});
+   },
+  };
+ };
  const versions=w.state?.versions.filter(v=>!!v.qc&&v.qc.result!=='reject'&&!v.qcDecision)||[];const fromVersion:ModuleEditorSpec={title:'从开发版本建档',initialValues:{versionId:versions[0]?.id||'',sku:'',name:''},fields:[field('versionId','准确开发版本',{type:'select',required:true,options:versions.map(v=>({value:v.id,label:`${w.state?.devs.find(d=>d.id===v.devId)?.code} / ${v.label} / ${v.factory}`}))}),field('sku','公司产品编码',{required:true}),field('name','产品名称',{required:true})],submit:async v=>{const version=versions.find(x=>x.id===v.versionId);if(!version)throw new Error('请选择一个 QC 通过或有保留通过的版本');const r=await w.command({type:'market.product.fromVersion',payload:{devId:version.devId,versionId:version.id,sku:text(v,'sku'),name:text(v,'name')}});w.go('products',String(r.result.id));}};
  // mar57：按供应商、季节、状态筛选，归档档案默认不混入。
  const rows=w.market.products.filter(p=>(filter==='all'||p.category===filter)&&(supplierFilter==='all'||p.supplierId===supplierFilter)&&(seasonFilter==='all'||p.season===seasonFilter)&&(statusFilter==='all'||p.status===statusFilter));if(editor)return <ActionEditor spec={editor} onClose={()=>setEditor(null)}/>;
