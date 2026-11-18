@@ -336,6 +336,30 @@ describe('人事管理', () => {
     expect(bridge.calls.some(c => c.method === 'POST' && c.url === '/api/hr/teams/t1/dissolve')).toBe(true);
     expect(document.body.textContent).not.toContain('解散「面料一组」');
   });
+  it('does not present the unread company directory as an empty personnel list and retries on the same page', async () => {
+    const personnel = bridge.routes['GET /api/hr/personnel'];
+    bridge.routes['GET /api/hr/personnel'] = () => { throw new Error('名册暂不可用'); };
+    await render(HrOrganizationPage, 'hr', 'people');
+    expect(document.body.textContent).toContain('组织架构读取失败');
+    expect(document.body.textContent).not.toContain('还没有公司人员');
+    bridge.routes['GET /api/hr/personnel'] = personnel;
+    await click('重试');
+    expect(document.querySelector('[aria-label="全部人员"]')?.textContent).toContain('李四');
+  });
+
+  it('retries an unavailable employment history without showing a false zero or reloading the profile', async () => {
+    const history = 'GET /api/hr/employment-events?userId=u3&limit=50';
+    bridge.routes['GET /api/hr/employees/u3'] = () => ({ profile: { userId: 'u3', employeeNo: 'E3', employmentStatus: 'Resigned' } });
+    bridge.routes[history] = () => { throw new Error('在职变动暂不可用'); };
+    await render(HrOrganizationPage, 'hr', 'people', 'u3');
+    expect(document.body.textContent).toContain('变动记录读取失败');
+    expect(document.body.textContent).not.toContain('在职变动记录0 条');
+    bridge.routes[history] = () => ({ events: [{ id: 'event-one', type: 'Resign', effectiveDate: '2026-11-15', reason: '手续完成' }] });
+    await click('重试');
+    expect(document.querySelector('[aria-label="在职变动记录"]')?.textContent).toContain('手续完成');
+    expect(bridge.calls.filter(c => c.method === 'GET' && c.url === '/api/hr/employees/u3')).toHaveLength(1);
+  });
+
   it('lists people with their team and offers to create a missing employee profile', async () => {
     await render(HrOrganizationPage, 'hr', 'people');
     expect(document.body.textContent).toContain('李四');

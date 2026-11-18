@@ -27,12 +27,19 @@ export function EmployeeFile({ person, departments, jobs, positionNames, nameOf,
   const [profile, setProfile] = React.useState<{ userId: string; value: EmployeeProfile | null; error?: string } | null>(null);
   const [events, setEvents] = React.useState<{ userId: string; rows: EmploymentEvent[] | null; error?: string } | null>(null), [tick, setTick] = React.useState(0);
   const [form, setForm] = React.useState<ProfileForm | EventForm | null>(null), [formError, setFormError] = React.useState(''), [busy, setBusy] = React.useState(false);
+  const [historyRetry, setHistoryRetry] = React.useState(0);
   React.useEffect(() => {
-    let live = true; setProfile({ userId: person.id, value: null }); setEvents({ userId: person.id, rows: null });
+    let live = true;
+    setProfile({ userId: person.id, value: null });
     organizationApi.profile(person.id).then(value => { if (live) setProfile({ userId: person.id, value }); }, e => { if (live) setProfile({ userId: person.id, value: null, error: message(e, '档案读取失败') }); });
-    organizationApi.employmentEvents(person.id).then(r => { if (live) setEvents({ userId: person.id, rows: r.events ?? [] }); }, e => { if (live) setEvents({ userId: person.id, rows: [], error: message(e, '变动记录读取失败') }); });
     return () => { live = false; };
   }, [person.id, tick]);
+  React.useEffect(() => {
+    let live = true;
+    setEvents({ userId: person.id, rows: null });
+    organizationApi.employmentEvents(person.id).then(r => { if (live) setEvents({ userId: person.id, rows: r.events ?? [] }); }, e => { if (live) setEvents({ userId: person.id, rows: [], error: message(e, '变动记录读取失败') }); });
+    return () => { live = false; };
+  }, [person.id, tick, historyRetry]);
   React.useEffect(() => { setForm(null); setFormError(''); }, [person.id]);
 
   const current = profile?.userId === person.id ? profile : null;
@@ -85,8 +92,8 @@ export function EmployeeFile({ person, departments, jobs, positionNames, nameOf,
       { label: '工作地点', value: value.workLocation ?? '—' }, { label: '备注', value: value.notes ?? '—' },
     ]} /> : <EmptyState compact title={uiText("尚未建立员工档案")} />}
     {value && <>
-      <CardHeader title={uiText("在职变动记录")} sub={uiText(events?.userId === person.id && events.rows ? `${events.rows.length} 条` : undefined)} />
-      {events?.userId !== person.id || !events.rows ? <p className="mist-note">{uiText("读取中…")}</p> : events.error ? <FailureNotice title={"变动记录读取失败"} detail={events.error} /> : events.rows.length ? <DataTable ariaLabel={uiText("在职变动记录")} rows={events.rows} rowKey={e => e.id} columns={[
+      <CardHeader title={uiText("在职变动记录")} sub={uiText(events?.userId === person.id && events.rows && !events.error ? `${events.rows.length} 条` : undefined)} />
+      {events?.userId !== person.id || !events.rows ? <p className="mist-note">{uiText("读取中…")}</p> : events.error ? <FailureNotice title="变动记录读取失败" detail={events.error} retry={() => setHistoryRetry(value => value + 1)} /> : events.rows.length ? <DataTable ariaLabel={uiText("在职变动记录")} rows={events.rows} rowKey={e => e.id} columns={[
         { key: 'date', header: '生效日期', width: '110px', render: e => e.effectiveDate },
         { key: 'type', header: '变动', width: '110px', render: e => <b>{eventLabel(e.type, e.fromStatus)}</b> },
         { key: 'detail', header: '说明', render: e => <>{(e.type === 'Transfer' || e.type === 'Promote') && <div>{positionTitle(e.fromPositionId)} → {positionTitle(e.toPositionId)}</div>}{e.toDeptId && e.toDeptId !== e.fromDeptId && <div>{uiText("部门：")}{deptName(e.fromDeptId)} → {deptName(e.toDeptId)}</div>}{e.reason && <div className="mist-note">{e.reason}</div>}</> },

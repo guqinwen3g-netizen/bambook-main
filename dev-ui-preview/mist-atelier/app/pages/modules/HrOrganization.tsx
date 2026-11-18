@@ -52,7 +52,9 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
     try {
       const [personnel, teams, employees] = await Promise.all([organizationApi.personnel(), organizationApi.teams(), organizationApi.employees()]);
       if (run === serial.current) setData({ people: personnel.personnel ?? [], departments: personnel.departments ?? [], jobs: personnel.jobs ?? [], positionNames: personnel.positionNames ?? {}, teams: (teams.teams ?? []).filter(t => t.status !== 'dissolved'), employees: employees.employees ?? [] });
-    } catch (e) { if (run === serial.current) setError(message(e, '组织架构读取失败')); }
+    } catch (e) {
+      if (run === serial.current) { setData(null); setError(message(e, '组织架构读取失败')); }
+    }
     finally { if (run === serial.current) setLoading(false); }
   }, []);
   React.useEffect(() => { setData(null); setOpen(null); setForm(null); if (!session.localMode && canRead) void load(); else setLoading(false); return () => { serial.current++; }; }, [session.sessionKey, session.localMode, canRead, load]);
@@ -156,6 +158,7 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
 
   if (session.localMode) return <Banner variant="status" tone="neutral" title={uiText("本机演示模式没有组织架构")}>{uiText("连接公司服务器后维护。")}</Banner>;
   if (!canRead) return <Banner variant="status" tone="neutral" title={uiText("当前账号没有人事查看权限")} />;
+  if (error) return <FailureNotice title="组织架构读取失败" detail={error} retry={() => void load()} />;
   const refresh = <Button icon={RefreshCw} loading={loading} onClick={() => void load()}>{uiText("重新读取")}</Button>;
 
   const deptColumns: Column<OrgDepartment>[] = [
@@ -179,7 +182,6 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
   const expiring = (data?.employees ?? []).filter(e => e.contractEnd && e.contractEnd <= soon && !['Resigned', 'Terminated'].includes(e.employmentStatus)).sort((a, b) => (a.contractEnd || '').localeCompare(b.contractEnd || ''));
   return <>
     {part === 'people' && expiring.length > 0 && <Banner tone="warn" title={uiText(`劳动合同 30 天内到期 · ${expiring.length} 人`)}>{expiring.slice(0, 6).map(e => <span key={e.userId} className="mist-row" style={{ gap: 6 }}><TextLink onClick={() => setOpen({ kind: 'person', id: e.userId })}>{e.displayName || e.employeeNo}</TextLink><span className={e.contractEnd! < today ? 'mist-tone-bad' : 'mist-note'}>{e.contractEnd}</span></span>)}</Banner>}
-    {error && <FailureNotice title={"组织架构读取失败"} detail={error} retry={() => void load()} />}
     <section className="mist-section">{part === 'org' ? <>
       <Toolbar right={<>{refresh}{canWrite && <Button variant="primary" icon={Plus} disabled={!data} onClick={() => { setFormError(''); setForm({ kind: 'dept', name: '', attributes: [],headId:'',originalHeadId:null }); }}>{uiText("新建部门")}</Button>}</>}>
         <span />
