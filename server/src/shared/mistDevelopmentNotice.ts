@@ -1,3 +1,4 @@
+import {trimmingParameterFields} from '../_shared/trimmingFields';
 import {MATERIAL_PROVIDERS,MATERIAL_COLORS,MATERIAL_NATURES} from './mistGarmentMaterials';
 import {developmentFactoryWorkBlocker} from './mistDevelopmentTaskLifecycle';
 /**
@@ -13,7 +14,7 @@ import { creditDocumentFingerprint } from './mistCreditDocuments';
 import { devStageChainText } from './mistDevelopmentStages';
 export const DEV_NOTICE_TEMPLATE_VERSION = 3 as const;
 export type DevNoticeContent = {
-  materials?:Array<{sku:string;name:string;position:string;specification:string;perPiece:string;unit:string;color:string;colorMode:string;colorReference:string;provider:string;nature:string}>;
+  materials?:Array<{sku:string;name:string;position:string;specification:string;perPiece:string;unit:string;color:string;colorMode:string;colorReference:string;provider:string;nature:string;technical?:Array<{label:string;value:string}>}>;
   domain: DevelopmentDomain; title: string; factory: string;
   devId: string; devCode: string; devName: string; versionId: string; versionLabel: string; roundNumber: number; roundTargetDate: string;
   style: string; category: string; season: string; color: string; fabric: string; sizeBase: string;
@@ -74,7 +75,10 @@ export function developmentNoticeContent(state: MistState, dev: MistDev, version
     ...(domain==='garment'&&version.materialUses?.length?{materials:version.materialUses.map(use=>({
       sku:use.catalog.sku,name:use.catalog.name,position:use.position,specification:use.specification||use.catalog.specification,
       perPiece:use.perPiece,unit:use.unit,color:use.color,colorMode:MATERIAL_COLORS[use.colorMode],colorReference:use.colorReference,
-      provider:MATERIAL_PROVIDERS[use.provider],nature:MATERIAL_NATURES[use.nature]
+      provider:MATERIAL_PROVIDERS[use.provider],nature:MATERIAL_NATURES[use.nature],
+      ...(use.catalog.profile?{technical:trimmingParameterFields(use.catalog.profile.category)
+        .filter(f=>f.key!=='supplierInformation'&&use.catalog.profile!.parameters[f.key])
+        .map(f=>({label:f.label,value:use.catalog.profile!.parameters[f.key]}))}:{})
     }))}:{}),
     commonRequirements: task.commonRequirements, extraRequirements: task.extraRequirements, sampleForm: task.sampleForm, sampleQuantity: task.sampleQuantity, sampleUnit: task.sampleUnit, dueDate: task.dueDate,
     attachments: fileIds.map(id => ({ fileId: id, name: state.files.find(file => file.id === id)?.name || '已不可用的附件' })),

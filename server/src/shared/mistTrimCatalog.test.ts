@@ -76,6 +76,7 @@ describe('material use on an exact garment factory version',()=>{
     const {renderDevelopmentNoticeHtml}=await import('../templates/developmentNotice');
     const html=renderDevelopmentNoticeHtml({...content,noticeNo:'D-N01',seq:1,templateVersion:3,generatedAt:f.ctx.now,generatedBy:'业务',generatedById:'seller'});
     expect(html).toContain('本版辅料');expect(html).toContain('门襟');expect(html).toContain('袖口');expect(html).not.toContain('3.60');
+    expect(html).toContain('树脂');expect(html).not.toContain('新树脂');
     const {projectGarmentMaterials}=await import('./mistGarmentMaterials');
     const projected={...f.state,market:{...f.state.market,relations:[],suppliers:[]}};
     projectGarmentMaterials(projected);
