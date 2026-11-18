@@ -1,3 +1,5 @@
+import {projectGarmentMaterials} from '../shared/mistGarmentMaterials';
+import {projectTrimCatalog} from '../shared/mistTrimCatalog';
 import { projectManualSampleLinks } from '../shared/mistManualSample';
 import {sanitizeDevelopmentReferenceState} from './developmentReferenceAccess';
 import {heldShipmentRelease} from '../shared/mistRelationHold';
@@ -317,6 +319,8 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
   const restrictedFiles = new Set(scopedHiddenFiles(next));
   // 印章图片只给公司管理员（本机空间为所有者）与该章用印人，Agent 一律不给；用印与签字记录按所涉业务记录裁剪（见 mistSeals）。
   const maintainer = fileMaintainer(actor, ownerId);
+  projectTrimCatalog(next);
+  projectGarmentMaterials(next);
   for (const id of projectSeals(state, next, actor.userId, maintainer, (actor as { actorKind?: unknown }).actorKind === 'agent')) restrictedFiles.add(id);
   // Re-uploading identical bytes does not remove an existing source restriction.
   for (const id of restrictedSensitiveFiles(state, actor, ownerId, privacy)) restrictedFiles.add(id);

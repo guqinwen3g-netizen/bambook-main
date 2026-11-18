@@ -1,3 +1,4 @@
+import {GarmentMaterialRows} from '../GarmentMaterials';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import React from 'react';
 import { FlaskConical, Plus, ShoppingCart, Trash2, FileText } from 'lucide-react';
@@ -8,8 +9,11 @@ import { usePrivateImageResource } from '../../runtime/usePrivateImage';
 import { useNav } from '../../nav';
 import { businessDate } from '../../runtime/businessClock';
 import { PRODUCT_SPEC_FIELDS, type MarketProduct, type MarketQuotation, type MarketState } from '../../../../../server/src/shared/mistMarket';
-import { ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
+import { ModuleEditorDialog, moduleFileIds, type ModuleEditorSpec } from './ModuleWorkbench';
 import { platformBusinessDate } from '../../../../../server/src/shared/mistPlatform';
+
+import {TrimCatalogDetails} from './TrimCatalogDetails';
+import {FileName} from '../../runtime/files';
 
 export const PRODUCT_CATEGORY_LABEL: Record<MarketProduct['category'], string> = { fabric: '面料', garment: '成衣', trimming: '辅料' };
 
@@ -82,6 +86,8 @@ export function ProductProfile({ product }: { product: MarketProduct }) {
       <KeyValue items={[...specFields.map(f => ({ label: f.label, value: product.specs?.[f.key] ? `${product.specs[f.key]}${f.unit ? ' ' + f.unit : ''}` : '未登记' })), { label: '计价单位 / 参考价', value: productPriceText(product) }]} />
       {product.category === 'fabric' && product.unit === '件' && <Banner tone="warn" title={uiText("面料计价单位为“件”")}>{uiText("请核对是否应按米、码或公斤计价。")}</Banner>}
     </section>
+    {product.category==='garment'&&!!product.materialUses?.length&&<section className="mist-product-section"><CardHeader title={uiText('归档用料')}/><GarmentMaterialRows rows={product.materialUses}/></section>}
+    {product.category==='trimming'&&<TrimCatalogDetails key={product.id} product={product}/>}
     <section className="mist-product-section" aria-label={uiText("客户编码表")}>
       <CardHeader title={uiText("客户编码表")} tools={canWrite ? <Button size="sm" onClick={() => setEditing(true)}>{uiText("编辑")}</Button> : undefined} />
       {product.customerCodes?.length ? <KeyValue items={product.customerCodes.map(c => ({ label: w.state?.customers.find(x => x.id === c.customerId)?.name || '客户已不存在', value: c.code, mono: true }))} /> : <EmptyState compact title={uiText("未登记客户编码")} />}
@@ -147,24 +153,37 @@ function ProductSources({ product, canWrite }: { product: MarketProduct; canWrit
   const market = (w.state as (typeof w.state & { market?: MarketState }) | null)?.market;
   const [editing, setEditing] = React.useState<ModuleEditorSpec | null>(null);
   const name = (id: string) => market?.suppliers.find(s => s.id === id)?.name || '供应商已不存在';
+  const [viewingTerms,setViewingTerms]=React.useState<string|null>(null);
+  const currentOffer=product.sources?.find(s=>s.supplierId===viewingTerms),terms=currentOffer?.quoteTerms;
   const sources = product.sources || [];
+  const isTrim=product.category==='trimming',session=useMistSession();
+  const canQuote=canWrite&&(!isTrim||session.hasPermission('suppliers:read'));
   const purchases = (w.state?.fulfillment.purchases || []).filter(p => p.state === 'approved' && (sources.some(s => s.supplierId === p.supplierId) || p.supplierId === product.supplierId) && product.sku && p.description.toLowerCase().includes(product.sku.toLowerCase()));
   const spec = (src?: NonNullable<MarketProduct['sources']>[number]): ModuleEditorSpec => ({ title: src ? `更新 ${name(src.supplierId)} 报价` : '添加供应来源', submitLabel: '保存',
-    initialValues: { supplierId: src?.supplierId || '', supplierCode: src?.supplierCode || '', price: src?.price || '', currency: src?.currency || product.currency, moq: src?.moq || '', leadDays: src?.leadDays || '', note: '' },
+    initialValues: { supplierId: src?.supplierId || '', supplierCode: src?.supplierCode || '', price: src?.price || '', currency: src?.currency || product.currency, moq: src?.moq || '', leadDays: src?.leadDays || '', note: '',quoteDate:src?.quoteTerms?.date||'',priceUnit:src?.quoteTerms?.unit||product.unit,moqUnit:src?.quoteTerms?.moqUnit||product.unit,conditions:src?.quoteTerms?.conditions||'',quoteFiles:(src?.quoteTerms?.fileIds||[]).join(',') },
     fields: [{ key: 'supplierId', label: '供应商', type: 'select', required: true, readonly: !!src, options: [{ value: '', label: '请选择' }, ...(market?.suppliers || []).filter(s => s.status === 'active' || s.id === src?.supplierId).filter(s => !!src || !sources.some(x => x.supplierId === s.id)).map(s => ({ value: s.id, label: s.name }))] },
-      { key: 'supplierCode', label: '供应商编码' }, { key: 'price', label: `报价（每${product.unit}）`, type: 'number', required: true, min: 0 }, { key: 'currency', label: '币种', required: true },
-      { key: 'moq', label: `MOQ（${product.unit}）`, type: 'number', min: 0 }, { key: 'leadDays', label: '交期（天）', type: 'number', min: 0, step: 1 }, { key: 'note', label: '说明', type: 'textarea' }],
-    submit: v => w.run({ type: 'market.product.source.save', payload: { productId: product.id, supplierId: String(v.supplierId ?? ''), supplierCode: String(v.supplierCode ?? ''), price: String(v.price ?? ''), currency: String(v.currency ?? ''), moq: String(v.moq ?? ''), leadDays: Number(v.leadDays) || 0, note: String(v.note ?? '') } }) });
+      { key: 'supplierCode', label: '供应商编码' }, { key: 'price', label: isTrim?'供应报价':`报价（每${product.unit}）`, type: 'number', required: true, min: 0 }, { key: 'currency', label: '币种', required: true },
+      { key: 'moq', label: isTrim?'起订量':`MOQ（${product.unit}）`, type: 'number', min: 0 }, { key: 'leadDays', label: '交期（天）', type: 'number', min: 0, step: 1 }, ...(isTrim?[
+        {key:'quoteDate',label:'报价日期',type:'date' as const,required:true},{key:'priceUnit',label:'计价单位',required:true},
+        {key:'moqUnit',label:'起订量单位',requiredIf:(v:Record<string,unknown>)=>!!String(v.moq||'')},
+        {key:'conditions',label:'适用条件',type:'textarea' as const},{key:'quoteFiles',label:'报价依据附件',type:'files' as const}
+      ]:[]),{ key: 'note', label: '说明', type: 'textarea' }],
+    submit: v => w.run({ type: 'market.product.source.save', payload: { ...(isTrim?{quoteTerms:{date:String(v.quoteDate||''),unit:String(v.priceUnit||''),moqUnit:String(v.moqUnit||''),conditions:String(v.conditions||''),fileIds:moduleFileIds(v.quoteFiles)}}:{}), productId: product.id, supplierId: String(v.supplierId ?? ''), supplierCode: String(v.supplierCode ?? ''), price: String(v.price ?? ''), currency: String(v.currency ?? ''), moq: String(v.moq ?? ''), leadDays: Number(v.leadDays) || 0, note: String(v.note ?? '') } },...(isTrim&&w.workspace?.revision!==undefined?[{expectedRevision:w.workspace.revision}]:[])) });
   const removeSpec = (src: NonNullable<MarketProduct['sources']>[number]): ModuleEditorSpec => ({ title: `移除 ${name(src.supplierId)}`, submitLabel: '移除', submitVariant: 'danger', initialValues: { reason: '' }, fields: [{ key: 'reason', label: '移除原因', type: 'textarea', required: true }],
-    submit: v => w.run({ type: 'market.product.source.remove', payload: { productId: product.id, supplierId: src.supplierId, reason: String(v.reason ?? '') } }) });
+    submit: v => w.run({ type: 'market.product.source.remove', payload: { productId: product.id, supplierId: src.supplierId, reason: String(v.reason ?? '') } },...(isTrim&&w.workspace?.revision!==undefined?[{expectedRevision:w.workspace.revision}]:[])) });
   return <section className="mist-product-section" aria-label={uiText('供应来源')}>
-    <CardHeader title={uiText('供应来源')} tools={canWrite ? <Button size="sm" icon={Plus} onClick={() => setEditing(spec())}>{uiText('添加')}</Button> : undefined} />
+    <CardHeader title={uiText('供应来源')} tools={canQuote ? <Button size="sm" icon={Plus} onClick={() => setEditing(spec())}>{uiText('添加')}</Button> : undefined} />
     {sources.length ? <DataTable ariaLabel={uiText('供应来源')} rows={sources} rowKey={r => r.supplierId} density="compact" columns={[
       { key: 'supplier', header: '供应商', width: 'minmax(140px,1fr)', render: r => <span>{name(r.supplierId)}{r.supplierCode ? <small className="mist-cell-sub">{r.supplierCode}</small> : null}</span> },
-      { key: 'price', header: '报价', width: '120px', align: 'right', render: r => <span className="mist-num">{r.currency} {r.price}</span> },
-      { key: 'terms', header: 'MOQ / 交期', width: '120px', render: r => [r.moq && `${r.moq} ${uiText(product.unit)}`, r.leadDays ? `${r.leadDays} 天` : ''].filter(Boolean).join(' · ') || '—' },
-      { key: 'act', header: '', width: '140px', render: r => canWrite ? <span className="mist-row"><Button size="sm" variant="quiet" onClick={() => setEditing(spec(r))}>{uiText('更新报价')}</Button><Button size="sm" variant="quiet" onClick={() => setEditing(removeSpec(r))}>{uiText('移除')}</Button></span> : null },
+      { key: 'price', header: '报价', width: '150px', align: 'right', render: r => r.quoteTerms?<Button size="sm" variant="quiet" onClick={()=>setViewingTerms(r.supplierId)}>{r.currency} {r.price} / {r.quoteTerms.unit}</Button>:<span className="mist-num">{r.currency} {r.price}</span> },
+      { key: 'terms', header: 'MOQ / 交期', width: '120px', render: r => [r.moq && `${r.moq} ${uiText(r.quoteTerms?.moqUnit||product.unit)}`, r.leadDays ? `${r.leadDays} 天` : ''].filter(Boolean).join(' · ') || '—' },
+      { key: 'act', header: '', width: '140px', render: r => canQuote ? <span className="mist-row"><Button size="sm" variant="quiet" onClick={() => setEditing(spec(r))}>{uiText('更新报价')}</Button><Button size="sm" variant="quiet" onClick={() => setEditing(removeSpec(r))}>{uiText('移除')}</Button></span> : null },
     ]} /> : <EmptyState compact title={uiText('未登记其他供应来源')} />}
+    {currentOffer&&terms&&<Dialog open title={name(currentOffer.supplierId)+' · '+uiText('供应报价')} onClose={()=>setViewingTerms(null)}>
+      <KeyValue items={[{label:'报价日期',value:terms.date},{label:'供应报价',value:currentOffer.currency+' '+currentOffer.price+' / '+terms.unit},
+        ...(currentOffer.moq?[{label:'起订量',value:currentOffer.moq+' '+(terms.moqUnit||'')}]:[]),...(terms.conditions?[{label:'适用条件',value:terms.conditions}]:[])]}/>
+      {terms.fileIds.map(id=>{const file=w.state?.files.find(f=>f.id===id);return file?<FileName key={id} file={file}/>:null;})}
+    </Dialog>}
     {!!product.priceHistory?.length && <KeyValue items={product.priceHistory.slice().reverse().slice(0, 8).map(h => ({ label: `${businessDate(h.at)} · ${name(h.supplierId)}`, value: h.from ? `${h.from} → ${h.to}` : h.to }))} />}
     {!!purchases.length && <div className="mist-row" style={{ flexWrap: 'wrap', gap: 6 }}>{purchases.slice(0, 6).map(p => <Button key={p.id} size="sm" variant="quiet" onClick={() => go('procurement', p.id)}>{p.code} · {p.supplier} · {p.price} {p.currency}</Button>)}</div>}
     <ModuleEditorDialog spec={editing} onClose={() => setEditing(null)} />

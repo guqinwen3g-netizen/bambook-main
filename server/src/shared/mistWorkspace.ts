@@ -1,3 +1,4 @@
+import {applyGarmentMaterial,type GarmentMaterialUse,type GarmentMaterialCommand} from './mistGarmentMaterials';
 import {applyDevelopmentReferenceCommand,type DevelopmentReferenceCommand,type DevelopmentSampleReference} from './mistDevelopmentSampleReferences';
 import {applyDevelopmentTaskEnd,applyDevelopmentTaskReopen,closeDevelopmentFactoryTasks,developmentFactoryWorkBlocker,type DevelopmentTaskEnd,type DevelopmentTaskEndCommand,type DevelopmentTaskLifecycleEvent,type DevelopmentTaskResolution} from './mistDevelopmentTaskLifecycle';
 import type {OrderMainApprovalSource} from './mistOrderApprovalSource';
@@ -117,6 +118,7 @@ export type MistQc = {
   appearanceDefects?: number;
 };
 export type MistVersion = {
+  materialUses?:GarmentMaterialUse[];
   /** factoryId：工厂的供应商 ID（稳定引用）；factory 为供应商当前显示名，供应商改名时同步。 */
   factoryId: string;
   id: string; devId: string; label: string; factory: string; sample: string; sampleQuantity: number;
@@ -401,7 +403,7 @@ export type MistState = {
   seals?:MistSeal[]; sealUses?:MistSealUse[];
 };
 export type MistOrderInput = { type: 'garment' | 'fabric'; customerId: string; season: string; currency: string; due: string; ownerId: string; governance?:OrderGovernanceInput; lines: Array<Omit<MistOrderLine, 'id' | 'orderId' | 'made' | 'qc'> & OrderLineSource & {breakdown?:OrderLineBreakdown}> };
-export type MistCommand = DevelopmentTaskEndCommand | DevelopmentReferenceCommand
+export type MistCommand = GarmentMaterialCommand | DevelopmentTaskEndCommand | DevelopmentReferenceCommand
   | DevelopmentIncomingCommand | SealCommand | PeriodCloseCommand | Extract<DocumentGenerationCommand, { type: 'order.document.generate' | 'market.lookbook.document' }> | AgentTaskCommand | AgentProposalCommand | InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | SampleRequestCommand | OrderSplitCommand | ReportScheduleCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
   | { type: 'development.saveDraft'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.submit'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
@@ -792,7 +794,7 @@ function createRound(state: MistState, dev: MistDev, input: RoundInput, context:
     const base = references.find(version => version.factoryId===factory) || references[0];
     const id = context.id(), requirementsCopy = fabric ? (base?.fabricRequirements || dev.values.fabricRequirements) : undefined;
     const task:MistFactoryTask={...tasks[factory],commonRequirements:requirements};
-    const version: MistVersion = {...(requirementsCopy?{fabricRequirements:JSON.parse(JSON.stringify(requirementsCopy))}:{}),id,devId:dev.id,label:roundVersionLabel(number,letters[factory],nextPhysicalVersionNumber(state,dev,letters[factory])),factoryId:factory,factory:factoryName(state,factory),sample:'',sampleQuantity:task.sampleQuantity,size:fabric?'':(base?.size??dev.values.sizeBase),fabric:base?.fabric??dev.values.fabric,img:base?.img??dev.img,fileIds:[...new Set([...(base?.fileIds??dev.fileIds),...fileIds])],returnedAt:null,qc:null,confirmations:[],archivedAt:null,note:factoryTaskNote(requirements,task.extraRequirements),roundId:round.id,factoryLetter:letters[factory],task,...(plan?{stages:devStagesOf(state,plan)}:{})};
+    const version: MistVersion = {...(base?.materialUses?.length?{materialUses:structuredClone(base.materialUses)}:{}),...(requirementsCopy?{fabricRequirements:JSON.parse(JSON.stringify(requirementsCopy))}:{}),id,devId:dev.id,label:roundVersionLabel(number,letters[factory],nextPhysicalVersionNumber(state,dev,letters[factory])),factoryId:factory,factory:factoryName(state,factory),sample:'',sampleQuantity:task.sampleQuantity,size:fabric?'':(base?.size??dev.values.sizeBase),fabric:base?.fabric??dev.values.fabric,img:base?.img??dev.img,fileIds:[...new Set([...(base?.fileIds??dev.fileIds),...fileIds])],returnedAt:null,qc:null,confirmations:[],archivedAt:null,note:factoryTaskNote(requirements,task.extraRequirements),roundId:round.id,factoryLetter:letters[factory],task,...(plan?{stages:devStagesOf(state,plan)}:{})};
     state.versions.push(version); dev.versionIds.push(id); created.push(version);
   }
   dev.values.factories = [...new Set([...dev.values.factories, ...factories])];
@@ -1162,6 +1164,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       updateDev(state,dev,context);
       event(state,context,'development',dev.id,'创建改版 '+version.label,{view:'development/detail',id:dev.id,versionId:version.id},'general',notificationOwners(state,'development',dev.id));result={devId:dev.id,versionId:version.id,roundId:round.id};break;
     }
+    case 'development.material.add':case 'development.material.edit':case 'development.material.remove':{result=applyGarmentMaterial(state,command,context);break;}
     case 'development.reference.add':case 'development.reference.remove':case 'development.reference.dispatch':case 'development.reference.return':{result=applyDevelopmentReferenceCommand(state,command,context);break;}
     case 'development.incoming.receive':case 'development.incoming.dispatch':case 'development.incoming.return':{
       result=applyDevelopmentIncomingCommand(state,command,context);break;

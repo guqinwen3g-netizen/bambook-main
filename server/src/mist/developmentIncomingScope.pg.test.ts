@@ -50,6 +50,27 @@ describe.skipIf(!url)('development incoming originals on real PostgreSQL',()=>{
  async function upload(){const r=await request(app).post('/api/mist/workspaces/'+wid+'/files').set('Authorization','Bearer '+tokens[owner]).field('requestId',randomUUID()).field('expectedRevision',String((await raw()).revision)).attach('file',bytes,{filename:'incoming-original.pdf',contentType:'application/pdf'});expect(r.status,JSON.stringify(r.body.error)).toBe(201);return r.body.receipt.result.fileId as string;}
  const download=(user:string,fileId:string)=>request(app).get('/api/mist/workspaces/'+wid+'/files/'+fileId).set('Authorization','Bearer '+tokens[user]);
  async function denied(user:string,type:string,payload:unknown,status:number[]){const before=await raw(),count=await receiptCount(),r=await command(user,type,payload);expect(status,JSON.stringify(r.body.error)).toContain(r.status);expect(await raw()).toEqual(before);expect(await receiptCount()).toBe(count);}
+ it('requires a fresh supplier offer and exact case scope when freezing a garment material',async()=>{
+  const garment=await command(owner,'development.submit',{values:{name:'夹克',customer:customerId,style:'TRIM-STYLE',season:'AW',category:'夹克',kind:'new',fabric:'棉斜纹',color:'绿',target:'',sizeBase:'M',goal:'对照扣位',factories:['A厂'],due:'2026-11-25',collaborators:[],sampleQuantity:1},fileIds:[]});
+  expect(garment.status,JSON.stringify(garment.body.error)).toBe(200);
+  const {devId:caseId,versionId:ver}=garment.body.receipt.result;
+  const product=await command(owner,'market.product.save',{input:{sku:'TR-TEST',name:'扣子',category:'trimming',season:'',supplierId:'',supplierCode:'',composition:'树脂',specification:'18 mm',color:'绿',unit:'个',cost:'0',currency:'CNY',sourceDevId:'',sourceVersionId:''}});
+  expect(product.status,JSON.stringify(product.body.error)).toBe(200);
+  const productId=product.body.receipt.result.id,source=(garment.body.workspace.state.market.suppliers as {id:string;name:string}[]).find(r=>r.name==='A厂')!;
+  const basis={productId,supplierId:source.id,price:'3.60',currency:'CNY',quoteTerms:{date:'2026-11-10',unit:'打',fileIds:[]}};
+  const first=await command(owner,'market.product.source.save',basis);expect(first.status,JSON.stringify(first.body.error)).toBe(200);
+  const revision=(await raw()).revision;
+  expect((await command(owner,'market.product.source.save',{...basis,price:'4.20'})).status).toBe(200);
+  const payload={devId:caseId,versionId:ver,productId,offerSupplierId:source.id,position:'门襟',color:'绿',specification:'18 mm',perPiece:'5',unit:'个',provider:'company',colorMode:'specified',colorReference:'',nature:'existing'};
+  const before=await raw(),n=await receiptCount(),requestId=randomUUID();
+  const stale=await command(owner,'development.material.add',payload,requestId,revision);
+  expect(stale.status,JSON.stringify(stale.body.error)).toBe(409);
+  const outsider=await command(stranger,'development.material.add',payload);
+  expect([403,404]).toContain(outsider.status);expect(await receiptCount()).toBe(n);expect((await raw()).state).toEqual(before.state);
+  const ok=await command(owner,'development.material.add',payload);expect(ok.status,JSON.stringify(ok.body.error)).toBe(200);
+  const row=ok.body.workspace.state.versions.find((v:{id:string})=>v.id===ver).materialUses[0];
+  expect(row.offer.price).toBe('4.20');expect(row.perPiece).toBe('5');
+ });
  it('performs HTTP intake, exact factory custody, partial return and original request replay without duplicating inventory or postage',async()=>{
   const id=await receive(),expectedRevision=(await raw()).revision,requestId=randomUUID(),first=await command(owner,'development.incoming.dispatch',outgoing(id),requestId,expectedRevision);expect(first.status,JSON.stringify(first.body.error)).toBe(200);const result=first.body.receipt.result;const r=await command(owner,'development.incoming.return',returning(result.dispatchId,result.movementIds[0]));expect(r.status,JSON.stringify(r.body.error)).toBe(200);
   const before=await raw(),count=await receiptCount(),replay=await command(owner,'development.incoming.dispatch',outgoing(id),requestId,expectedRevision);expect(replay.status).toBe(200);expect(replay.body.replayed).toBe(true);expect(replay.body.receipt).toEqual(first.body.receipt);expect(await raw()).toEqual(before);expect(await receiptCount()).toBe(count);const s=before.state as any,sample=s.fulfillment.samples.find((x:any)=>x.id===id),loan=s.fulfillment.sampleMovements.find((x:any)=>x.id===result.movementIds[0]);expect(sample).toMatchObject({quantity:3,available:2.5,source:{kind:'developmentIncoming',devId},incoming:{receivedAt:'2026-11-14',recordedById:owner}});expect(loan).toMatchObject({borrowerId:'',incomingTransfer:{occurredAt:'2026-11-15',taskVersionId:versionId,supplierId:s.versions.find((v:any)=>v.id===versionId).factoryId}});expect(s.fulfillment.sampleMovements.find((x:any)=>x.loanId===loan.id)).toMatchObject({quantity:.5,incomingTransfer:{occurredAt:'2026-11-17'}});expect(s.devs.find((d:any)=>d.id===devId).billing.expenses).toHaveLength(1);expect(s.devs.find((d:any)=>d.id===devId).billing.expenses[0]).toMatchObject({amount:12,sourceDispatchId:result.dispatchId,sourceMovementIds:[loan.id]});expect(s.fulfillment.qcTasks).toEqual([]);expect(s.invoices).toEqual([]);expect(s.payments).toEqual([]);
