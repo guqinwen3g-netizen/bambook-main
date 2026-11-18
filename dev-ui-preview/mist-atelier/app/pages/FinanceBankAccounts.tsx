@@ -246,7 +246,7 @@ export function FxPeriodRatesCard() {
 const cny = (v: number) => (v < 0 ? '−' : '') + '¥' + Math.abs(v).toLocaleString(interfaceLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const gain = (v: number) => <span className="mist-num" style={{ color: v > 0 ? 'var(--mist-ok)' : v < 0 ? 'var(--mist-bad)' : undefined }}>{uiText(v > 0 ? '收益 ' : v < 0 ? '损失 ' : '')}{cny(Math.abs(v))}</span>;
 function RevalLinesTable({ lines, label }: { lines: FxRevalLine[]; label: string }) {
-  return <DataTable ariaLabel={uiText(label)} rows={lines} rowKey={l => l.kind + l.refId} columns={[
+  return <div data-report-results><DataTable ariaLabel={uiText(label)} rows={lines} rowKey={l => l.kind + l.refId} columns={[
     { key: 'kind', header: '项目', width: '110px', render: l => FX_REVAL_KIND_LABEL[l.kind] },
     { key: 'ref', header: '对象', width: 'minmax(160px,2fr)', render: l => l.ref },
     { key: 'amount', header: '外币余额', width: '130px', align: 'right', render: l => <span className="mist-num">{l.currency} {l.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span> },
@@ -254,7 +254,7 @@ function RevalLinesTable({ lines, label }: { lines: FxRevalLine[]; label: string
     { key: 'book', header: '账面人民币', width: '130px', align: 'right', render: l => <span className="mist-num">{cny(l.bookCny)}</span> },
     { key: 'closing', header: '重估 / 实收', width: '130px', align: 'right', render: l => <span className="mist-num">{cny(l.closingCny)}</span> },
     { key: 'diff', header: '汇兑损益', width: '140px', align: 'right', render: l => gain(l.diff) },
-  ]} empty={<EmptyState title={uiText("没有外币项目")} compact />} />;
+  ]} empty={<EmptyState title={uiText("没有外币项目")} compact />} /></div>;
 }
 /** 期末调汇：月初汇率记账、月末汇率重估外币银行存款 / 应收 / 待核销到账，当月结汇差额计已实现损益。 */
 export function FxRevaluationCard() {
