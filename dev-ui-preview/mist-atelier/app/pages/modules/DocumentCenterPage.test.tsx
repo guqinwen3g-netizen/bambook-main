@@ -232,6 +232,16 @@ it('keeps a CI on acceptance terms without inventing a fixed due date before acc
  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.documents.generate',payload:{shipmentId:'s',type:'CI',orderId:'o'}});
 });
 
+it('states amount confirmation rather than delivery acceptance on an LC invoice issue',async()=>{
+ store.state!.fulfillment.documents.push(doc('lc-ci','CI',{dueDate:'',receivableDueCondition:{kind:'letterOfCredit',terms:'按信用证条款付款，具体日期待银行确认'}}));
+ render('lc-ci','s');
+ await click(getByRole(host.querySelector('[data-document-detail="lc-ci"]') as HTMLElement,'button',{name:'签发'}));
+ const issue=getByRole(document.body,'dialog',{name:/签发/});
+ expect(issue.textContent).toContain('具体日期待银行确认');
+ expect(issue.textContent).toContain('待财务确认金额');
+ expect(issue.textContent).not.toContain('验收资料');
+});
+
  it('shows frozen acceptance terms on the CI detail and unresolved receivable date without a false missing-input warning',()=>{
   const terms={kind:'deliveryAcceptance' as const,days:30,terms:'交付验收后30天付款'};
   store.state!.fulfillment.documents.push(doc('ci-terms','CI',{dueDate:'',receivableDueCondition:terms,status:'issued',invoiceId:'invoice-terms'}));

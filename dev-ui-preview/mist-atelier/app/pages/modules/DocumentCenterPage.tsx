@@ -211,7 +211,10 @@ export function DocumentCenterPage() {
     // 指定用印人签发系统生成的单据时可选章盖印；其他人签发不带章，不显示这两项。
     const seals = d.generated?.length ? usableSeals(state, session.user?.id) : [];
     const sealFields: ModuleField[] = seals.length ? [field('sealId', '加盖印章', 'select', false, [{ value: '', label: '不盖章' }, ...seals.map(seal => ({ value: seal.id, label: `${seal.name} · ${SEAL_KIND_LABEL[seal.kind]}` }))]), { ...field('sealReason', '用印事由', 'text', true), when: { key: 'sealId', values: seals.map(seal => seal.id) } }] : [];
-    return { title: `签发 ${d.number} · V${d.version}`, submitLabel: '确认签发', ...(amount !== null ? { description: d.receivableDueCondition?`将生成应收 ${order!.currency} ${fmt(amount,2)}，${d.receivableDueCondition.terms}，待财务核对验收资料。`:`将生成应收 ${order!.currency} ${fmt(amount, 2)}，到期 ${d.dueDate}，待财务确认。` } : {}), fields: sealFields, initialValues: seals.length ? { sealId: '', sealReason: '' } : {},
+    const condition = d.receivableDueCondition;
+    const dueText = condition?.terms || `到期 ${d.dueDate}`;
+    const review = condition?.kind === 'deliveryAcceptance' ? '待财务核对验收资料' : '待财务确认金额';
+    return { title: `签发 ${d.number} · V${d.version}`, submitLabel: '确认签发', ...(amount !== null ? { description: `将生成应收 ${order!.currency} ${fmt(amount, 2)}，${dueText}，${review}。` } : {}), fields: sealFields, initialValues: seals.length ? { sealId: '', sealReason: '' } : {},
       submit: v => {
         const command={type:'fulfillment.documents.issue' as const,payload:{id:d.id,...(text(v,'sealId')?{sealId:text(v,'sealId'),sealReason:text(v,'sealReason').trim()}:{})}};
         if(d.type!=='CD')return run(command);
