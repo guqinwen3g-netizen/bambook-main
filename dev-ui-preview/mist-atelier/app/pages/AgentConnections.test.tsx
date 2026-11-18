@@ -48,3 +48,13 @@ it('gives each client its own config, all sending the credential as a Bearer tok
  expect(JSON.parse(agentClientConfig('cursor',url,'tok'))).toEqual({mcpServers:{bambook:{url,headers:{Authorization:'Bearer tok'}}}});
  expect(JSON.parse(agentClientConfig('json',url,'tok'))).toEqual({mcpServers:{bambook:{type:'http',url,headers:{Authorization:'Bearer tok'}}}});
 });
+
+it('shows 连接读取失败 without claiming an empty list and preserves retry',async()=>{
+  seam.api.mockRejectedValueOnce(new Error('本机读回暂不可用')).mockResolvedValueOnce({...page(),items:[]});
+  act(paint);await flush();
+  expect(host.textContent).toContain('连接读取失败');
+  expect(host.textContent).not.toContain('暂无 Agent 连接');
+  await act(async()=>getByRole(host,'button',{name:'重试',exact:true}).click());await flush();
+  expect(host.textContent).toContain('暂无 Agent 连接');
+  expect(seam.api.mock.calls.every(([,init])=>!init?.method||init.method==='GET')).toBe(true);
+});

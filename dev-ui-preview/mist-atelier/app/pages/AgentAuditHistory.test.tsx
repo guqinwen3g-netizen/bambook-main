@@ -87,3 +87,13 @@ it('does not translate user-entered notes that happen to match internal status w
   act(paint);await flush();await act(async()=>getByText(host,'保存日程').click());await flush();
   const region=getByRole(document.body,'region',{name:'实际变更'});expect(region.textContent).toContain('pending');expect(region.textContent).toContain('active');expect(region.textContent).not.toContain('待处理');expect(region.textContent).not.toContain('在用');
 });
+
+it('shows 操作记录读取失败 without claiming an empty list and preserves retry',async()=>{
+  seam.api.mockRejectedValueOnce(new Error('本机读回暂不可用')).mockResolvedValueOnce({items:[],nextCursor:null,canReadCompany:false});
+  act(paint);await flush();
+  expect(host.textContent).toContain('操作记录读取失败');
+  expect(host.textContent).not.toContain('暂无 Agent 操作记录');
+  await act(async()=>getByRole(host,'button',{name:'重试',exact:true}).click());await flush();
+  expect(host.textContent).toContain('暂无 Agent 操作记录');
+  expect(seam.api.mock.calls.every(([,init])=>!init?.method||init.method==='GET')).toBe(true);
+});
