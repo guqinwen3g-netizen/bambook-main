@@ -250,9 +250,9 @@ function RevalLinesTable({ lines, label }: { lines: FxRevalLine[]; label: string
     { key: 'kind', header: '项目', width: '110px', render: l => FX_REVAL_KIND_LABEL[l.kind] },
     { key: 'ref', header: '对象', width: 'minmax(160px,2fr)', render: l => l.ref },
     { key: 'amount', header: '外币余额', width: '130px', align: 'right', render: l => <span className="mist-num">{l.currency} {l.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span> },
-    { key: 'rate', header: '记账 → 月末', width: '150px', align: 'right', hideOnMobile: true, render: l => <span className="mist-num" title={uiText(l.kind === 'settlement' ? '结汇按记账汇率转出，与实际成交汇率之差为已实现损益' : '月初汇率入账，按月末汇率重估')}>{l.bookRate} → {l.closingRate}{uiText(l.kind === 'settlement' ? '（成交）' : '')}</span> },
-    { key: 'book', header: '账面人民币', width: '130px', align: 'right', hideOnMobile: true, render: l => <span className="mist-num">{cny(l.bookCny)}</span> },
-    { key: 'closing', header: '重估 / 实收', width: '130px', align: 'right', hideOnMobile: true, render: l => <span className="mist-num">{cny(l.closingCny)}</span> },
+    { key: 'rate', header: '记账 → 月末', width: '150px', align: 'right', render: l => <span className="mist-num" title={uiText(l.kind === 'settlement' ? '结汇按记账汇率转出，与实际成交汇率之差为已实现损益' : '月初汇率入账，按月末汇率重估')}>{l.bookRate} → {l.closingRate}{uiText(l.kind === 'settlement' ? '（成交）' : '')}</span> },
+    { key: 'book', header: '账面人民币', width: '130px', align: 'right', render: l => <span className="mist-num">{cny(l.bookCny)}</span> },
+    { key: 'closing', header: '重估 / 实收', width: '130px', align: 'right', render: l => <span className="mist-num">{cny(l.closingCny)}</span> },
     { key: 'diff', header: '汇兑损益', width: '140px', align: 'right', render: l => gain(l.diff) },
   ]} empty={<EmptyState title={uiText("没有外币项目")} compact />} />;
 }
@@ -288,7 +288,7 @@ export function FxRevaluationCard() {
       { key: 'total', header: '合计', width: '140px', align: 'right', render: r => gain(r.total) },
       { key: 'act', header: '', width: '90px', align: 'right', render: r => r.voided ? <Pill tone="neutral">{uiText("已作废")}</Pill> : canWrite ? <Button size="sm" disabled={busy} onClick={e => { e.stopPropagation(); setSpec(voidSpec(r)); }}>{uiText("作废")}</Button> : null },
     ]} empty={<EmptyState title={uiText("还没有登记期末调汇")} compact />} />
-    {detail && <Dialog open onClose={() => setDetail(null)} width={900} title={ui`${detail.code} · ${detail.month} 期末调汇明细`} description={ui`截至 ${detail.monthEnd}；登记时冻结，之后的流水变动不影响本记录。合计 ${cny(detail.total)}。`}>
+    {detail && <Dialog open onClose={() => setDetail(null)} width={1180} title={ui`${detail.code} · ${detail.month} 期末调汇明细`} description={ui`截至 ${detail.monthEnd}；登记时冻结，之后的流水变动不影响本记录。合计 ${cny(detail.total)}。`}>
       <RevalLinesTable lines={detail.lines} label={uiText("期末调汇明细")} />
     </Dialog>}
     <ModuleEditorDialog spec={spec} onClose={() => setSpec(null)} />
