@@ -303,6 +303,51 @@ describe('external goods descriptions and customs facts',()=>{
 });
 
 const acceptanceTerms={kind:'deliveryAcceptance' as const,days:30,terms:'交付验收后30天付款'};
+function withSightCredit(){
+ const {f,shipmentId}=ready(),order=f.state.orders.find(o=>o.id===f.orderId)!;
+ Object.assign(order.governance!.contract,{paymentMethod:'LC',paymentNote:'100% 即期信用证（L/C at sight），提单日后 21 天内交单',depositPercent:0,preShipmentPercent:0});
+ if(order.governance!.approvedSnapshot)order.governance!.approvedSnapshot.contract=structuredClone(order.governance!.contract);
+ f.run({type:'lc.save',payload:{input:{lcNo:'LC-SIGHT-01',orderIds:[order.id],issuingBank:'Test Issuing Bank',availableBy:'sight',
+  currency:order.currency,amount:'1000',issueDate:'2026-10-01',latestShipmentDate:'2026-10-30',expiryDate:'2026-11-20',presentationDays:15}}});
+ return {f,shipmentId};
+}
+it('issues the exact sight-credit CI and keeps trade terms separate from an unknown payment date',()=>{
+ const {f,shipmentId}=withSightCredit();
+ const {result,snapshot}=generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CI',orderId:f.orderId}});
+ const document=f.state.fulfillment.documents.find(d=>d.id===result.id)!;
+ expect(document).toMatchObject({dueDate:'',receivableDueCondition:{kind:'letterOfCredit'}});
+ expect(snapshot.facts.some(row=>row.label.en==='L/C no.'&&String(row.value).includes('LC-SIGHT-01'))).toBe(true);
+ expect(snapshot.facts.find(row=>row.label.en==='Payment')?.value).toContain('L/C at sight');
+ expect(snapshot.paragraphs.some(row=>row.title?.en==='Payment due')).toBe(false);
+ expect(renderGeneratedDocumentHtml(snapshot)).not.toContain('21 天内交单');
+ f.run({type:'fulfillment.documents.issue',payload:{id:document.id}});
+ const invoice=f.state.invoices.find(i=>i.sourceDocumentId===document.id)!;
+ expect(invoice).toMatchObject({financeStatus:'pending',due:'',open:0,receivableDueCondition:{kind:'letterOfCredit'}});
+ f.run({type:'finance.receivable.confirm',payload:{invoiceId:invoice.id}});
+ expect(f.state.invoices.find(i=>i.id===invoice.id)).toMatchObject({financeStatus:'confirmed',due:''});
+ expect(()=>f.run({type:'finance.receivable.due',payload:{invoiceId:invoice.id,acceptanceDate:'2026-10-13',acceptanceBasis:'simulated POD'}})).toThrow('验收账期');
+});
+it('rejects fixed dates on new sight-credit CIs from generated and manual paths',()=>{
+ const {f,shipmentId}=withSightCredit();
+ const common={shipmentId,type:'CI' as const,orderId:f.orderId,dueDate:'2026-11-21'};
+ const before=structuredClone(f.state);
+ expect(()=>generate(f,{type:'fulfillment.documents.generate',payload:common})).toThrow('信用证');
+ expect(()=>f.run({type:'fulfillment.documents.save',payload:{...common,number:'LC-MANUAL',title:'CI',content:'L/C at sight',fileIds:['contract']}})).toThrow('信用证');
+ expect(f.state).toEqual(before);
+});
+it('does not borrow another order’s credit for the CI of a consolidated T/T shipment',()=>{
+ const {f,shipmentId}=withSightCredit();
+ const first=f.state.orders.find(o=>o.id===f.orderId)!,shipment=f.state.fulfillment.shipments.find(s=>s.id===shipmentId)!;
+ const other={...structuredClone(first),id:'order-tt',code:'SO-TT'};
+ Object.assign(other.governance!.contract,{paymentMethod:'TT',paymentNote:'T/T 见提单副本'});
+ const line={...structuredClone(f.state.orderLines[0]),id:'line-tt',orderId:other.id};
+ f.state.orders.push(other);f.state.orderLines.push(line);
+ shipment.lines.push({...shipment.lines[0],orderId:other.id,lineId:line.id,productionId:'production-tt'});
+ const invoice=prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CI',orderId:other.id,dueDate:'2026-11-21'}},f.context);
+ expect(invoice.facts.some(row=>row.label.en==='L/C no.')).toBe(false);
+ expect(invoice.facts.find(row=>row.label.en==='Payment')?.value).toContain('T/T');
+ expect(invoice.paragraphs).toContainEqual(expect.objectContaining({text:'2026-11-21'}));
+});
 function withAcceptanceContract(){const r=ready(),order=r.f.state.orders.find(o=>o.id===r.f.orderId)!;Object.assign(order.governance!.contract,{paymentMethod:'OA',paymentNote:acceptanceTerms.terms,depositPercent:0,preShipmentPercent:0});if(order.governance!.approvedSnapshot)order.governance!.approvedSnapshot.contract=structuredClone(order.governance!.contract);return r;}
 function pendingAcceptanceInvoice(){
  const {f,shipmentId}=withAcceptanceContract();

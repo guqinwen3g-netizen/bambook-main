@@ -222,6 +222,16 @@ function pendingAcceptance(){
 it('keeps amount confirmation available while holding only the unresolved due-date action',()=>{
  pendingAcceptance();render();expect((getByRole(host,'button',{name:'确认应收'}) as HTMLButtonElement).disabled).toBe(false);expect((getByRole(host,'button',{name:'核对账期'}) as HTMLButtonElement).disabled).toBe(true);expect(host.textContent).toContain('验收后30天');expect(store.value.run).not.toHaveBeenCalled();
 });
+it('keeps an LC receivable confirmable with the bank date pending and no delivery-acceptance action',()=>{
+ pendingAcceptance();
+ const state=store.value.state,condition={kind:'letterOfCredit',terms:'按信用证条款付款，具体日期待银行确认'};
+ state.invoices.at(-1).receivableDueCondition=condition;
+ state.fulfillment.documents.at(-1).receivableDueCondition=condition;
+ render();
+ expect(getByRole(host,'button',{name:'确认应收'})).toHaveProperty('disabled',false);
+ expect(host.textContent).toContain('待银行确认');
+ expect(host.textContent).not.toContain('核对账期');
+});
 it('asks finance for an actual acceptance date and basis instead of copying the POD date',async()=>{
  const shipment=pendingAcceptance();shipment.delivered={at:'2026-10-20T10:00:00Z',receiver:'Customer',evidence:'POD-1',fileIds:[],recordedBy:'后勤'};render();await click('核对账期');
  const d=getByRole(document.body,'dialog',{name:'核对账期 · CI-CONDITIONAL'}),day=getByLabelText(d,'客户验收日') as HTMLInputElement,basis=getByRole(d,'textbox',{name:'验收依据'}) as HTMLTextAreaElement;

@@ -6,14 +6,22 @@ import { orderIncoterm } from './orderTradeTerms';
 import type { OrderGovernanceInput } from './mistOrderGovernance';
 import {isCalendarDay,shiftCalendarDay} from './mistBusinessClock';
 
-export type ReceivableDueCondition={kind:'deliveryAcceptance';days:number;terms:string};
+type DeliveryAcceptanceTerms={kind:'deliveryAcceptance';days:number;terms:string};
+export type ReceivableDueCondition=DeliveryAcceptanceTerms|{kind:'letterOfCredit';terms:string};
 /** Explicit customer delivery acceptance is a separate fact from scheduled dispatch or POD. */
-export function receivableAcceptanceTerms(value:string|undefined):ReceivableDueCondition|null{
+export function receivableAcceptanceTerms(value:string|undefined):DeliveryAcceptanceTerms|null{
   const terms=(value||'').trim();
   const normalized=terms.normalize('NFKC');
   const match=normalized.match(/(?:交付|客户)\s*验收(?:合格|完成)?后\s*(\d+)\s*天/)||normalized.match(/(\d+)\s*days?\s*(?:after|from)\s*(?:delivery|goods)\s+acceptance/i);
   if(!match)return null;
   const days=Number(match[1]);return Number.isSafeInteger(days)&&days>=0?{kind:'deliveryAcceptance',days,terms}:null;
+}
+export function shipmentReceivableDueCondition(contract:Pick<OrderGovernanceInput,'paymentMethod'|'paymentNote'>|undefined):ReceivableDueCondition|null{
+  if(contract?.paymentMethod==='LC')return {kind:'letterOfCredit',terms:'按信用证条款付款，具体日期待银行确认'};
+  return receivableAcceptanceTerms(contract?.paymentNote);
+}
+export function fixedShipmentReceivableDueProblem(condition:ReceivableDueCondition):string{
+  return condition.kind==='letterOfCredit'?'信用证付款日期以银行依据为准，不能在CI预设固定日期':'本合同按客户验收确定到期日，不能预设固定日期';
 }
 export function dueAfterAcceptance(day:string,days:number):string{
   if(!isCalendarDay(day)||!Number.isSafeInteger(days)||days<0)return '';

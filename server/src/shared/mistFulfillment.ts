@@ -3,7 +3,7 @@ import {confirmShippingSampleBasis,consumeShipmentSamples,shipmentSampleCustodyB
 import {openCommercialSampleLoan,returnCommercialSampleLoan,commercialSampleHasLoan,unresolvedCommercialLoanSource,type CommercialSampleSourceSelection} from './mistCommercialSampleLoan';
 import {isSampleLoanHold,sampleLoanHoldOpen,ordinarySampleLoanReserved,type StockSampleLoanHold} from './mistStockSampleLoan';
 import {notifyMist,notificationOwners,notificationTargetOwners} from './mistNotifications';
-import {receivableAcceptanceTerms,type ReceivableDueCondition} from './mistTradeTerms';
+import {fixedShipmentReceivableDueProblem,shipmentReceivableDueCondition,type ReceivableDueCondition} from './mistTradeTerms';
 import {stableJson} from './stableJson';
 import { isCalendarDay, nextBusinessCode } from './mistBusinessClock';
 import {packingBreakdownBlocker,packingFabricSpecification,packingFabricColorError,packingPhysicalKey,packingSkuError,canonicalPackingSkus,canSupplementPacking,type PackingSku} from './mistPackingBreakdown';
@@ -2658,8 +2658,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const base = p.baseDocumentId ? get(f.documents, p.baseDocumentId, '版本来源') : undefined;
             if (base && (base.shipmentId !== s.id || base.type !== p.type || base.orderId !== (p.orderId || ''))) fail('版本来源必须属于同一出运、类型和订单');
             const ciOrder=p.type==='CI'?get(root.orders,p.orderId,'订单'):undefined;
-            const dueCondition=ciOrder&&!ciOrder.replacementSource?receivableAcceptanceTerms(ciOrder.governance?.contract.paymentNote):null;
-            if(dueCondition&&p.dueDate)fail('本合同按客户验收确定到期日，不能预设固定日期');
+            const dueCondition=ciOrder&&!ciOrder.replacementSource?shipmentReceivableDueCondition(ciOrder.governance?.contract):null;
+            if(dueCondition&&p.dueDate)fail(fixedShipmentReceivableDueProblem(dueCondition));
             const id = old?.id || ctx.id();
             const familyId = p.type === 'OTHER' ? old?.familyId || old?.id || base?.familyId || base?.id || id : undefined;
             const family = fulfillmentDocumentFamily({ id, shipmentId: s.id, orderId: p.orderId || '', type: p.type, ...(familyId ? { familyId } : {}) });
@@ -2692,8 +2692,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 fail('装箱分配未匹配计划');
             if (d.type === 'CI') {
                 const order = get(root.orders, d.orderId, '订单');
-                const dueCondition=!order.replacementSource?receivableAcceptanceTerms(order.governance?.contract.paymentNote):null;
-                if((dueCondition&&(!d.receivableDueCondition||stableJson(d.receivableDueCondition)!==stableJson(dueCondition)||d.dueDate))||(!dueCondition&&d.receivableDueCondition))fail('CI验收账期来源已变，请重新核对草稿');
+                const dueCondition=!order.replacementSource?shipmentReceivableDueCondition(order.governance?.contract):null;
+                if((dueCondition&&(!d.receivableDueCondition||stableJson(d.receivableDueCondition)!==stableJson(dueCondition)||d.dueDate))||(!dueCondition&&d.receivableDueCondition))fail('CI合同账期来源已变，请重新核对草稿');
                 if(order.replacementSource){
                     assertMistOrderApproved(root,order.id);
                     const amount=sum(s.lines.filter(l=>l.orderId===order.id).map(l=>lineAmount(l.quantity,replacementDeclaredUnitPrice(root,s.id,order.id,l.lineId)!)));

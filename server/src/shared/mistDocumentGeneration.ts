@@ -1,5 +1,5 @@
 import {isCalendarDay} from './mistBusinessClock';
-import {receivableAcceptanceTerms} from './mistTradeTerms';
+import {fixedShipmentReceivableDueProblem,shipmentReceivableDueCondition} from './mistTradeTerms';
 /**
  * P1-3 document generation. Builds frozen snapshots from current business records and applies the generate commands.
  *
@@ -97,12 +97,18 @@ const externalGoodsName = (line: Pick<MistOrderLine, 'name' | 'nameEn'>) => line
 function ciSnapshot(root: MistState, s: FulfillmentShipment, order: MistOrder) {
   const lines = goodsLines(root, s, order.id);
   const rows = lines.map(g => { const price = unitPriceOf(root, s, order, g.line.id); return { style: g.line.style, desc: externalGoodsName(g.line) + (g.detail ? '\n' + g.detail : ''), qty: `${qtyText(g.quantity)} ${g.line.unit}`, price: money2(price), amount: money2(lineAmount(g.quantity, price)), _amount: lineAmount(g.quantity, price) }; });
-  const total = r2(rows.reduce((n, r) => n + r._amount, 0)), pack = packingTotals(root, s, order.id), lc = lcFor(root, s);
+  const total = r2(rows.reduce((n, r) => n + r._amount, 0)), pack = packingTotals(root, s, order.id);
+  const contract = order.governance?.contract, creditOrder = contract?.paymentMethod === 'LC' && !order.replacementSource;
+  const credits = creditOrder ? readLetterOfCredits(root).filter(credit => !credit.cancelled && credit.orderIds.includes(order.id)) : [];
+  const lc = credits.length === 1 ? credits[0] : undefined;
+  const payment = creditOrder
+    ? lc ? lc.availableBy === 'sight' ? '即期信用证 / L/C at sight' : `远期信用证 / L/C usance · ${lc.usanceDays} days` : '按信用证条款付款 / Payment by letter of credit'
+    : contract?.paymentMethod ? [contract.paymentMethod, contract.paymentNote].filter(Boolean).join(' · ') : '';
   return {
     parties: [buyerParty(root, s), consigneeParty(s)], total,
     facts: [{ label: { zh: '订单 / 合同号', en: 'Order / Contract' }, value: [order.code, order.governance?.contract.poNumber].filter(Boolean).join(' · ') }, ...transportFacts(s), { label: { zh: '币种', en: 'Currency' }, value: order.currency },
       ...(order.replacementSource ? [{ label: { zh: '货值用途', en: 'Value purpose' }, value: '免费补发，无需付款。仅供报关估值。 / Free replacement, no charge. Value for customs purposes only.' }] : []),
-      ...(order.governance?.contract.paymentMethod ? [{ label: { zh: '付款方式', en: 'Payment' }, value: [order.governance.contract.paymentMethod, order.governance.contract.paymentNote].filter(Boolean).join(' · ') }] : []),
+      ...(payment ? [{ label: { zh: '付款方式', en: 'Payment' }, value: payment }] : []),
       ...(lc ? [{ label: { zh: '信用证号', en: 'L/C no.' }, value: `${lc.lcNo} · ${lc.issuingBank}` }] : []),
       ...(pack.packages ? [{ label: { zh: '件数 / 毛净重', en: 'Packages / Weights' }, value: `${pack.packages} · N.W. ${money2(pack.net)} kg · G.W. ${money2(pack.gross)} kg` }] : [])],
     table: { columns: [{ key: 'style', label: { zh: '款号', en: 'Style' } }, { key: 'desc', label: { zh: '品名 / 规格', en: 'Description' } }, { key: 'qty', label: { zh: '数量', en: 'Quantity' }, num: true }, { key: 'price', label: { zh: `单价 ${order.currency}`, en: 'Unit price' }, num: true }, { key: 'amount', label: { zh: `金额 ${order.currency}`, en: 'Amount' }, num: true }],
@@ -217,8 +223,8 @@ export function prepareShipmentDocumentSnapshot(root: MistState, payload: unknow
   const blocked = documentGenerationBlocker(root, s, p.type, p.orderId); if (blocked) fail(blocked, blocked === '出运不存在' ? 'NOT_FOUND' : 'PRECONDITION');
   if (!ctx.actorId) fail('缺少真实生成人');
   const order = PER_ORDER_TYPES.includes(p.type) ? root.orders.find(o => o.id === p.orderId) : undefined;
-  const condition=p.type==='CI'&&!order?.replacementSource?receivableAcceptanceTerms(order?.governance?.contract.paymentNote):null;
-  if(condition&&p.dueDate)fail('本合同按客户验收确定到期日，不能预设固定日期','VALIDATION');
+  const condition=p.type==='CI'&&!order?.replacementSource?shipmentReceivableDueCondition(order?.governance?.contract):null;
+  if(condition&&p.dueDate)fail(fixedShipmentReceivableDueProblem(condition),'VALIDATION');
   const due = p.type === 'CI' && !order?.replacementSource && !condition ? (isCalendarDay(p.dueDate) ? p.dueDate : fail('请填写应收到期日', 'VALIDATION')) : '';
   const { number } = nextNumber(root, s!, p.type, order), content = shipmentDocContent(root, s!, p.type, order, due);
   const { total, ...rest } = content;
@@ -318,8 +324,8 @@ export function applyDocumentGeneration(root: MistState, command: DocumentGenera
     // A regenerated draft replaces its own earlier generated file; files uploaded by people stay attached.
     const generatedIds = new Set(((draft as FulfillmentDocument & { generated?: GeneratedDocRecord[] })?.generated || []).map(g => g.fileId));
     const row:FulfillmentDocument = draft || { id: ctx.id(), shipmentId: s.id, orderId: order?.id || '', type: p.type, number: snapshot.number, version, title: '', dueDate: '', content: '', fileIds: [], status: 'draft' as const, createdAt: ctx.now, actor: ctx.actorName };
-    Object.assign(row, { title: `${ZH_TITLE[p.type]} ${s.code}${order ? ' · ' + order.code : ''}`, dueDate: p.type === 'CI' && !order?.replacementSource ? (receivableAcceptanceTerms(order?.governance?.contract.paymentNote)?'':p.dueDate||'') : row.dueDate, content: contentText(snapshot), fileIds: [...row.fileIds.filter(id => !generatedIds.has(id)), artifact.file.id] });
-    const dueCondition=p.type==='CI'&&!order?.replacementSource?receivableAcceptanceTerms(order?.governance?.contract.paymentNote):null;
+    Object.assign(row, { title: `${ZH_TITLE[p.type]} ${s.code}${order ? ' · ' + order.code : ''}`, dueDate: p.type === 'CI' && !order?.replacementSource ? (shipmentReceivableDueCondition(order?.governance?.contract)?'':p.dueDate||'') : row.dueDate, content: contentText(snapshot), fileIds: [...row.fileIds.filter(id => !generatedIds.has(id)), artifact.file.id] });
+    const dueCondition=p.type==='CI'&&!order?.replacementSource?shipmentReceivableDueCondition(order?.governance?.contract):null;
     if(dueCondition)row.receivableDueCondition=dueCondition;else delete row.receivableDueCondition;
     (row as FulfillmentDocument & { generated?: GeneratedDocRecord[] }).generated = [...((row as FulfillmentDocument & { generated?: GeneratedDocRecord[] }).generated || []), structuredClone(artifact.record)];
     if (!draft) root.fulfillment.documents.push(row as FulfillmentDocument);

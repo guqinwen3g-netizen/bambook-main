@@ -333,7 +333,7 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
   if ('teamReports' in state) (next as MistState & {teamReports?:import('../shared/mistTeam').TeamWeeklyArchiveView[]}).teamReports = projectTeamReports(state,next,actor,scope,reportWorkspaceId);
   // Invoice readers need the payment anchor date, not unrestricted transport or POD evidence.
   next.invoices=(next.invoices||[]).map(invoice=>{
-    const {receivableDueSource:_untrusted,...safe}=invoice;if(!invoice.receivableDueCondition)return safe;
+    const {receivableDueSource:_untrusted,...safe}=invoice;if(invoice.receivableDueCondition?.kind!=='deliveryAcceptance')return safe;
     const document=state.fulfillment.documents.find(d=>d.id===invoice.sourceDocumentId&&d.invoiceId===invoice.id&&d.orderId===invoice.orderId&&d.type==='CI'),shipment=state.fulfillment.shipments.find(s=>s.id===document?.shipmentId),condition=document?.receivableDueCondition;
     const sourceCurrent=!invoice.voidedAt&&document?.status==='issued'&&!!shipment&&condition?.kind===invoice.receivableDueCondition.kind&&condition.days===invoice.receivableDueCondition.days&&condition.terms===invoice.receivableDueCondition.terms;
     return {...safe,receivableDueSource:{sourceCurrent,...(sourceCurrent?{shipmentId:shipment!.id,...(shipment!.delivered?{deliveryAt:shipment!.delivered.at}:{})}:{})}};

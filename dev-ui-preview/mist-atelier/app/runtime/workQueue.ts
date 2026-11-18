@@ -364,7 +364,7 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
       push({ id: 'invoice:' + invoice.id, source: 'finance', title: ui`${invoice.code} · 发票待财务确认`, meta: [invoice.customer, invoice.order].filter(Boolean).join(' · '), when: '待确认', urgent: false, at: invoice.due || '',
         due: invoice.due || undefined, target: { view: 'invoices', section: 'pending', id: invoice.id } as MistTarget });
     if(canRead('invoices')&&can('invoices:write'))for(const invoice of state.invoices||[]){
-      if(!isActiveMistInvoice(invoice)||!invoice.receivableDueCondition||invoice.dueConfirmation)continue;
+      if(!isActiveMistInvoice(invoice)||invoice.receivableDueCondition?.kind!=='deliveryAcceptance'||invoice.dueConfirmation)continue;
       const document=state.fulfillment.documents.find(d=>d.id===invoice.sourceDocumentId&&d.invoiceId===invoice.id&&d.status==='issued'),shipment=state.fulfillment.shipments.find(s=>s.id===document?.shipmentId);
       const deliveryAt=invoice.receivableDueSource?(invoice.receivableDueSource.sourceCurrent?invoice.receivableDueSource.deliveryAt:undefined):shipment?.delivered?.at;if(!deliveryAt)continue;
       push({id:'invoice-due:'+invoice.id,source:'finance',title:ui`${invoice.code} · 待核对验收账期`,meta:[invoice.customer,invoice.order].filter(Boolean).join(' · '),when:'待核对',urgent:false,at:deliveryAt,target:{view:'invoices',id:invoice.id}});

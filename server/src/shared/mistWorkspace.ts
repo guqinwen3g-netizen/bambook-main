@@ -1493,7 +1493,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
     case 'finance.receivable.due': {
       if(Object.keys(p).some(key=>!['invoiceId','acceptanceDate','acceptanceBasis','reason'].includes(key)))throw new MistCommandError('VALIDATION','账期核对字段无效');
       const i=find(state.invoices,text(p.invoiceId,'应收'),'应收');
-      if(!isActiveMistInvoice(i)||!i.receivableDueCondition)throw new MistCommandError('PRECONDITION','当前应收无待核对的客户验收账期');
+      if(!isActiveMistInvoice(i)||i.receivableDueCondition?.kind!=='deliveryAcceptance')throw new MistCommandError('PRECONDITION','当前应收无待核对的客户验收账期');
       const document=state.fulfillment.documents.find(d=>d.id===i.sourceDocumentId&&d.invoiceId===i.id&&d.orderId===i.orderId&&d.type==='CI'&&d.status==='issued');
       const shipment=document&&state.fulfillment.shipments.find(s=>s.id===document.shipmentId);
       if(!shipment||!document?.receivableDueCondition||stableJson(document.receivableDueCondition)!==stableJson(i.receivableDueCondition))throw new MistCommandError('PRECONDITION','CI与应收账期来源不一致，请核对');
