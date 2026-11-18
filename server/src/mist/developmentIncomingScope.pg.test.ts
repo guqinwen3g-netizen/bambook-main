@@ -71,6 +71,18 @@ describe.skipIf(!url)('development incoming originals on real PostgreSQL',()=>{
   await denied(owner,'development.trimTask.confirm',{devId:caseId,taskId,name:'抽绳',specification:'4毫米',color:'绿',fileIds:[]},[422]);
   await denied(foreign,'development.trimTask.notice',{devId:caseId,taskId},[403,404]);
  });
+ it('updates sourcing requirements with the live company member directory',async()=>{
+  const created=await command(owner,'fabric.create',{name:'深灰棉斜纹补样',request:'寄送深灰色卡',ownerId:owner,due:'2026-11-23'});
+  expect(created.status,JSON.stringify(created.body.error)).toBe(200);
+  const id=created.body.receipt.result.id;
+  const update={id,name:'深灰棉斜纹补样',request:'先核幅宽和面料缩率',ownerId:head,due:'2026-11-26'};
+  const changed=await command(owner,'fabric.update',update);
+  expect(changed.status,JSON.stringify(changed.body.error)).toBe(200);
+  expect(changed.body.workspace.state.fabrics.find((row:{id:string})=>row.id===id)).toMatchObject({
+   id,request:update.request,ownerId:head,due:update.due,
+  });
+  await denied(owner,'fabric.update',{...update,ownerId:foreign},[403,404,422]);
+ });
  it('requires a fresh supplier offer and exact case scope when freezing a garment material',async()=>{
   const garment=await command(owner,'development.submit',{values:{name:'夹克',customer:customerId,style:'TRIM-STYLE',season:'AW',category:'夹克',kind:'new',fabric:'棉斜纹',color:'绿',target:'',sizeBase:'M',goal:'对照扣位',factories:['A厂'],due:'2026-11-25',collaborators:[],sampleQuantity:1},fileIds:[]});
   expect(garment.status,JSON.stringify(garment.body.error)).toBe(200);
