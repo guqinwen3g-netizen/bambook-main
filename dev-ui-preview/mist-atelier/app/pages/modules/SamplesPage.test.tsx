@@ -10,9 +10,9 @@ import {confirmShippingSampleBasis,shippingSampleSourceSnapshot} from '../../../
 import {Nav} from '../../nav';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 const store=vi.hoisted(()=>({state:null as MistState|null,workspace:{id:'workspace',revision:1},loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
-const write=vi.hoisted(()=>({allowed:true}));
+const write=vi.hoisted(()=>({allowed:true,denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
-vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:'sales',displayName:'业务员'},sessionKey:'s',hasPermission:()=>write.allowed,canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
+vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:'sales',displayName:'业务员'},sessionKey:'s',hasPermission:(scope:string)=>write.allowed&&!write.denied.has(scope),canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 import {SamplesPage} from './SamplesPage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let host:HTMLElement,root:Root;let presentedError:string|undefined;const go=vi.fn();
@@ -72,9 +72,17 @@ it('returns an incoming original to its exact development sample and does not of
  store.state!.devs.push({id:'incoming-dev',code:'DEV-IN',values:{domain:'fabric'}}as any);const sample={...fabric('incoming-piece','米样','米',1,1),source:{kind:'developmentIncoming' as const,devId:'incoming-dev',receiptId:'receipt'}};store.state!.fulfillment.samples.push(sample);render(sample.id);
  await act(async()=>getByRole(host,'button',{name:'开发来样 · DEV-IN',exact:true}).click());expect(go).toHaveBeenCalledWith('development/detail','incoming-dev',{section:'incoming:'+sample.id});expect(queryByRole(host,'button',{name:/发起本样品QC/})).toBeNull();for(const name of ['借出','寄出','归还','退还工厂'])expect(queryByRole(host,'button',{name,exact:true})).toBeNull();expect(getByRole(host,'button',{name:'移位',exact:true})).toBeTruthy();expect(store.run).not.toHaveBeenCalled();
 });
-beforeEach(()=>{store.workspace={id:'workspace',revision:1};presentedError=undefined;store.error='';write.allowed=true;store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'业务员'},'empty');store.run.mockReset();go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
+beforeEach(()=>{store.workspace={id:'workspace',revision:1};presentedError=undefined;store.error='';write.allowed=true;write.denied.clear();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'业务员'},'empty');store.run.mockReset();go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 
+it('opens the exact directory record for a sample handler without CRM access',async()=>{
+ const state=store.state!,row={...fabric('sample-dir','色样','份',1,1),source:{kind:'manual' as const,description:'客户来样'},manualLinks:{customerId:'client'}};
+ state.fulfillment.samples.push(row);state.customers.push({id:'client',name:'Spring Textile'} as typeof state.customers[number]);
+ state.market.relations.push({id:'directory-row',customerId:'client',name:'Spring Textile'} as typeof state.market.relations[number]);
+ write.denied.add('crm:read');render(row.id);
+ await act(async()=>getByRole(host,'button',{name:'关联客户 · Spring Textile'}).click());
+ expect(go).toHaveBeenCalledWith('relations','directory-row',{detail:'full'});
+});
 it('keeps independent manual fabric records separate and groups only an explicit archive selection',()=>{
  const state=store.state!,base={...fabric('first','色样','份',1,1),source:{kind:'manual' as const,description:'展会来样'}};
  const other={...base,id:'second',code:'SECOND',location:'B'},child={...base,id:'third',code:'THIRD',manualLinks:{archiveId:base.id},form:'米样',unit:'米'};

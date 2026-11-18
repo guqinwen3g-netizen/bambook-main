@@ -69,7 +69,7 @@ export function ManualSampleLinksView({state,sample}:{state:MistState;sample:Ful
   const {go}=useNav(),session=useMistSession();if(!sample.manualLinks)return null;
   const {product,customer,supplier}=linkedRecords(state,sample);
   const relation=customer&&state.market?.relations?.find(r=>r.customerId===customer.id);
-  const openCustomer=customer&&(session.canAccessView('crm')?()=>go('crm',customer.id,{customerId:customer.id}):relation&&session.canAccessView('relations')?()=>go('relations',relation.id,{detail:'full'}):undefined);
+  const openCustomer=customer&&(session.hasPermission('crm:read')?()=>go('crm',customer.id,{customerId:customer.id}):relation&&session.hasPermission('relations:read')?()=>go('relations',relation.id,{detail:'full'}):undefined);
   return <div className="mist-row mist-module-actions">
     {product&&<TextLink onClick={()=>go('products',product.id,{detail:'full'})}>{uiText('关联产品档案')} · {product.sku} · {product.name}</TextLink>}
     {customer&&(openCustomer?<TextLink onClick={openCustomer}>{uiText('关联客户')} · {customer.name}</TextLink>:<span>{uiText('关联客户')} · {customer.name}</span>)}
