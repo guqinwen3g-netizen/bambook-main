@@ -1349,7 +1349,7 @@ const reviewMoney = (n: number) => n.toLocaleString('en-US', { minimumFractionDi
 function purchaseSaleReference(root: MistState, p: { orderId: string; lineId: string }) {
   const order = root.orders.find(o => o.id === p.orderId), line = root.orderLines.find(l => l.id === p.lineId && l.orderId === p.orderId);
   if (!order || !line || !(line.price > 0)) return [];
-  return [{ label: '订单售价参考', value: `${line.qty} ${line.unit} × ${line.price} = ${reviewMoney(lineAmount(line.qty, line.price))} ${order.currency}` }];
+  return [{ label: '当前订单售价参考', value: `${line.qty} ${line.unit} × ${line.price} = ${reviewMoney(lineAmount(line.qty, line.price))} ${order.currency}` }];
 }
 export function getFulfillmentReviews(root: MistState): MistReviewTask[] { return [...purchaseReviews(root), ...purchaseAmendmentReviews(root)]; }
 export function purchaseAmendmentText(p: Pick<FulfillmentPurchase, 'unit' | 'currency'>, a: Pick<FulfillmentPurchaseAmendment, 'from' | 'to'>): string {
@@ -1363,7 +1363,43 @@ function purchaseAmendmentReviews(root: MistState): MistReviewTask[] {
             { label: '合同金额', value: `${reviewMoney(lineAmount(a.from.quantity, a.from.price))} → ${reviewMoney(lineAmount(a.to.quantity, a.to.price))} ${p.currency}` }, { label: '已收', value: `${p.received} ${p.unit}` }, { label: '变更原因', value: a.reason }, { label: '供应商同意依据', value: a.evidence }],
     })));
 }
-function purchaseReviews(root: MistState): MistReviewTask[] { return (root.fulfillment?.purchases || []).filter(p => p.submittedAt).map(p => ({ id: `procurement:${p.id}`, kind: 'procurement', entityId: p.id, title: `${p.code} · ${p.supplier}`, requesterId: p.requesterId, reviewerIds: p.reviewerIds, status: p.state === 'pending' ? 'pending' : p.state === 'approved' || p.state === 'cancelled' ? 'approved' : 'rejected', submittedAt: p.submittedAt!, decision: reviewDecision(p.decision?.actor, p.decision?.at, p.decision?.note), requiredPermission: 'procurement:approve', fileIds: [...p.fileIds], target: { view: 'procurement', id: p.id }, details: [{ label: '来源', value: fulfillmentSourceLabel(root, { kind: 'orderLine', orderId: p.orderId, lineId: p.lineId }) }, { label: '采购内容', value: p.description }, { label: '供应商', value: p.supplier }, { label: '数量', value: `${p.quantity} ${p.unit}` }, { label: '金额', value: `${p.quantity} × ${p.price} = ${reviewMoney(lineAmount(p.quantity, p.price))} ${p.currency}` }, ...purchaseSaleReference(root, p), { label: '付款条件', value: p.terms }, { label: '交付地点', value: p.destination }, { label: '交期', value: p.due }, ...(fabricStageTermsText(p.revisionHistory?.at(-1)?.snapshot ?? p) ? [{ label: '工序约定', value: fabricStageTermsText(p.revisionHistory?.at(-1)?.snapshot ?? p) }] : []), ...((p.revisionHistory?.at(-1)?.snapshot ?? p).iqcRequired ? [{ label: '来料检验', value: '入库前检验，合格后放行' }] : []), ...((p.revisionHistory?.at(-1)?.snapshot.note ?? p.note).trim() ? [{ label: '规格与交付要求', value: p.revisionHistory?.at(-1)?.snapshot.note ?? p.note }] : [])] })); }
+function purchaseReviews(root: MistState): MistReviewTask[] {
+    return (root.fulfillment?.purchases || []).filter(p => p.submittedAt).map(p => {
+        const approvedAmendments = (p.amendments || []).filter(a => a.state === 'approved').length;
+        // Each approved amendment appends one revision after the latest main submission.
+        const original = p.revisionHistory?.at(-1 - approvedAmendments);
+        const revision = original && original.submittedAt === p.submittedAt && original.requesterId === p.requesterId &&
+            original.decision?.actorId === p.decision?.actorId && original.decision?.at === p.decision?.at &&
+            original.decision?.decision === p.decision?.decision && original.decision?.note === p.decision?.note
+            ? original : undefined;
+        // Legacy contracts without any amendments or revision history can still supply their original terms.
+        const snapshot = revision?.snapshot ?? (!p.revisionHistory?.length && !approvedAmendments
+            ? { ...p, due: p.dueChanges?.[0]?.from ?? p.due } : undefined);
+        const stageTerms = snapshot ? fabricStageTermsText(snapshot) : '';
+        return {
+            id: `procurement:${p.id}`, kind: 'procurement', entityId: p.id,
+            title: `${p.code} · ${snapshot?.supplier ?? p.supplier}`, requesterId: p.requesterId, reviewerIds: p.reviewerIds,
+            status: p.state === 'pending' ? 'pending' : p.state === 'approved' || p.state === 'cancelled' ? 'approved' : 'rejected',
+            submittedAt: p.submittedAt!, decision: reviewDecision(p.decision?.actor, p.decision?.at, p.decision?.note),
+            requiredPermission: 'procurement:approve', fileIds: snapshot?.fileIds ?? [], target: { view: 'procurement', id: p.id },
+            details: snapshot ? [
+                ...(revision ? [{ label: '送审版本', value: `V${revision.revision}` }] : []),
+                { label: '来源', value: fulfillmentSourceLabel(root, { kind: 'orderLine', orderId: snapshot.orderId, lineId: snapshot.lineId }) },
+                { label: '采购内容', value: snapshot.description },
+                { label: '供应商', value: snapshot.supplier },
+                { label: '数量', value: `${snapshot.quantity} ${snapshot.unit}` },
+                { label: '金额', value: `${snapshot.quantity} × ${snapshot.price} = ${reviewMoney(lineAmount(snapshot.quantity, snapshot.price))} ${snapshot.currency}` },
+                ...purchaseSaleReference(root, snapshot),
+                { label: '付款条件', value: snapshot.terms },
+                { label: '交付地点', value: snapshot.destination },
+                { label: '交期', value: snapshot.due },
+                ...(stageTerms ? [{ label: '工序约定', value: stageTerms }] : []),
+                ...(snapshot.iqcRequired ? [{ label: '来料检验', value: '入库前检验，合格后放行' }] : []),
+                ...(snapshot.note.trim() ? [{ label: '规格与交付要求', value: snapshot.note }] : []),
+            ] : [{ label: '送审快照', value: '原审批快照不可用' }],
+        };
+    });
+}
 /** Called only on the aggregate's transaction clone; throws before its snapshot is committed. */
 /** A disposed development version keeps its original report; further inspection belongs to the successor. */
 export function fulfillmentQcSourceBlocker(root: MistState, source: FulfillmentSource): string | null {

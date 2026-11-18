@@ -95,6 +95,41 @@ describe('sup11 approved contract amendment', () => {
     expect(po.revisionHistory!.at(-1)).toMatchObject({ revision: 2, snapshot: { quantity: 12, price: 2.5 }, decision: { decision: 'approved' } });
     expect(po.dueChanges!.at(-1)).toMatchObject({ from: '2026-11-01', to: '2026-11-05' });
   });
+  it('keeps the signed purchase approval on the exact submitted terms after same-time amendments', () => {
+    const f = setup(), id = purchase(f);
+    const draft = f.root.fulfillment.purchases.find(p => p.id === id)!;
+    f.root.files.push({ id: 'submitted-spec', name: '送审原件.pdf', mimeType: 'application/pdf', size: 10, storageKey: 'submitted-spec', createdAt: f.ctx.now });
+    draft.fileIds = ['submitted-spec'];
+    approve(f, id);
+    const first = amend(f, id, { quantity: 12, price: 2.5, due: '2026-11-05' });
+    f.run({ type: 'fulfillment.procurement.amend.decide', payload: { id: first, decision: 'approved', note: '同意第一次变更' } }, reviewer(f));
+    const second = amend(f, id, { price: 3, due: '2026-11-07' });
+    f.run({ type: 'fulfillment.procurement.amend.decide', payload: { id: second, decision: 'approved', note: '同意第二次变更' } }, reviewer(f));
+    const p = f.root.fulfillment.purchases.find(p => p.id === id)!;
+    p.fileIds = [];
+    const before = structuredClone(f.root);
+    const reviews = getFulfillmentReviews(f.root);
+    const main = reviews.find(r => r.id === 'procurement:' + id)!;
+    expect(main).toMatchObject({ status:'approved', decision:{note:'已核对'}, fileIds:['submitted-spec'] });
+    expect(main.details).toEqual(expect.arrayContaining([
+      { label:'金额', value:'10 × 2 = 20.00 USD' },
+      { label:'交期', value:'2026-11-01' },
+    ]));
+    expect(reviews.find(r => r.entityId === second)?.details).toContainEqual({ label:'合同金额', value:'30.00 → 36.00 USD' });
+    expect(p).toMatchObject({ quantity:12, price:3, due:'2026-11-07' });
+    expect(f.root).toEqual(before);
+  });
+  it('does not substitute amended terms when the original purchase snapshot is missing', () => {
+    const f = setup(), id = purchase(f);
+    approve(f,id);
+    const change = amend(f,id,{price:3});
+    f.run({type:'fulfillment.procurement.amend.decide',payload:{id:change,decision:'approved',note:'同意'}},reviewer(f));
+    const p = f.root.fulfillment.purchases.find(p => p.id === id)!;
+    p.revisionHistory!.shift();
+    const task = getFulfillmentReviews(f.root).find(r => r.id === 'procurement:' + id)!;
+    expect(task.details).toEqual([{label:'送审快照',value:'原审批快照不可用'}]);
+    expect(task.fileIds).toEqual([]);
+  });
   it('tells the requester to add another reviewer when they are the only commitment approver', () => {
     const f = setup(), id = purchase(f); approve(f, id);
     const key = Object.keys(f.ctx.authority!.supplier!).find(k => k.includes('purchase.garment'))!;
