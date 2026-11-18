@@ -7,7 +7,7 @@ import { uiText, ui } from '../../../../services/interfaceLanguage';
 import React from 'react';
 import { Bell, Bot, Briefcase, History, Landmark, Laptop, ScrollText, ShieldCheck, Stamp, Users, UsersRound } from 'lucide-react';
 import { Banner, Card, DataTable, EmptyState, Field, FormGrid, FormSection, MistPage, PageHeader, Select, SettingRow, Skeleton, Switch, TextInput, VerticalSteps, useToast } from '../../../../components/mist';
-import type { MistCompanyProfile, MistSettings } from '../../../../server/src/shared/mistWorkspace';
+import type { MistCommand, MistSettings } from '../../../../server/src/shared/mistWorkspace';
 import { View } from '../../../../types';
 import { useMistSession } from '../runtime/auth';
 import { useMistWorkspace } from '../runtime/workspace';
@@ -25,7 +25,7 @@ import { FailureNotice } from '../runtime/FailureNotice';
 
 type TextKey = 'workspaceName';
 type TextValues = Pick<MistSettings, TextKey>;
-type SettingsPatch = Partial<Omit<MistSettings, 'companyProfile'>> & { companyProfile?: Partial<MistCompanyProfile> };
+type SettingsPatch = Extract<MistCommand, { type: 'settings.update' }>['payload'];
 export type CompanySection = 'accounts' | 'jobs' | 'approvals' | 'profile' | 'seals' | 'access' | 'teams' | 'notify' | 'activity' | 'audit' | 'local'|'agents';
 const SECTIONS: CompanySection[] = ['accounts', 'jobs', 'approvals', 'profile', 'seals', 'access', 'teams', 'notify', 'activity', 'audit', 'local','agents'];
 /** 旧页面与分区地址 → 公司管理分区。 */
@@ -93,7 +93,7 @@ export function SettingsPage() {
     if (Object.keys(patch).length) void save(patch, '公司设置已保存'); else toast('当前设置已同步');
   };
   const saveCurrency=(defaultCurrency:string)=>{if(!settings)return;void save({companyProfile:{defaultCurrency}});};
-  const notify = (key: keyof MistSettings['notifications'], value: boolean) => settings && void save({ notifications: { ...settings.notifications, [key]: value } });
+  const notify = (key: keyof MistSettings['notifications'], value: boolean) => settings && void save({ notifications: { [key]: value } });
 
   const local = !!session.localMode, scoped = !!session.user?.companyId, platformCompany = !!session.user?.platformCompany;
   const manager = !local && (session.hasRole('owner', 'admin') || session.hasPermission('users:admin'));

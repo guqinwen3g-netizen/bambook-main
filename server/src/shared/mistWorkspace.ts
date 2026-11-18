@@ -479,7 +479,7 @@ export type MistCommand = GarmentMaterialCommand | GarmentTrimTaskCommand | Deve
   | { type: 'member.groups.set'; payload: { userId: string; groups: Array<'fabric' | 'garment'> } }
   | { type: 'contact.save'; payload: { id?: string; customerId: string; name: string; role: string; email: string; phone: string } }
   | { type: 'contact.delete'; payload: { id: string } }
-  | { type: 'settings.update'; payload: Partial<Omit<MistSettings,'companyProfile'|'businessClock'>> & { companyProfile?: Partial<MistCompanyProfile> } }
+  | { type: 'settings.update'; payload: Partial<Omit<MistSettings,'companyProfile'|'businessClock'|'notifications'>> & { companyProfile?: Partial<MistCompanyProfile>; notifications?: Partial<MistSettings['notifications']> } }
   | { type: 'notification.read'; payload: { id: string } }
   | { type: 'notification.readAll'; payload: Record<string, never> }
   | { type: 'task.complete'; payload: { id: string; done: boolean } }

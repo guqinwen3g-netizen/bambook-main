@@ -6,9 +6,9 @@ import { loadUserWithRoles } from '../auth/tokenHelpers';
 import { isTokenRevoked } from '../auth/sessionRevocation';
 import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
 import { companyAdministratorIds } from '../auth/companyAdministration';
-import { applyMistCommand, createMistState, MistCommandError, type MistSettings, type MistState } from '../shared/mistWorkspace';
+import { applyMistCommand, createMistState, MistCommandError, type MistCommand, type MistSettings, type MistState } from '../shared/mistWorkspace';
 
-export type CompanySettingsPatch = Pick<Partial<MistSettings>, 'workspaceName' | 'notifications'> & { companyProfile?: Partial<NonNullable<MistSettings['companyProfile']>> };
+export type CompanySettingsPatch = Pick<Extract<MistCommand, { type: 'settings.update' }>['payload'], 'workspaceName' | 'notifications' | 'companyProfile'>;
 export type CompanySettingsSnapshot = { companyId: string; workspaceId: string | null; ownerId: string | null; revision: number; settings: Pick<MistSettings, 'workspaceName' | 'companyProfile' | 'notifications'>; events: MistState['events'] };
 const fail = (code: string, message: string, status = 400): never => { throw new CompanyAccessError(code, message, status); };
 const stable = (value: any): string => value && typeof value === 'object'
