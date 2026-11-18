@@ -14,6 +14,16 @@ const save=(patch:Record<string,unknown>={})=>({type:'lc.save',payload:{input:in
 const present=(id:string,shipmentId:string,patch:Record<string,unknown>={})=>({type:'lc.present',payload:{id,shipmentId,shipmentDate:'2026-10-14',presentedAt:'2026-10-17',amount:'30000',documents:'发票、提单、装箱单',...patch}}) as MistCommand;
 
 describe('信用证台账',()=>{
+  it.each(['preparing','ready'] as const)('拒绝用尚未实际出运的 %s 批次登记交单',state=>{
+    const f=fixture(),{id}=f.run(save());
+    const shipment=f.state.fulfillment.shipments.find(row=>row.id===f.shipmentId)!;
+    shipment.state=state;
+    delete shipment.departedAt;
+    const before=structuredClone(f.state);
+    expect(()=>f.run(present(id,shipment.id))).toThrow('尚未实际出运');
+    expect(f.state).toEqual(before);
+    expect(lcAvailableMinor(f.lc)).toBe(lcAvailableMinor(readLetterOfCredits(before)[0]));
+  });
   it.each(['2026-10-18','2026-12-01'])('keeps unresolved bank discrepancies visible at zero available balance on %s',today=>{
     const f=fixture(),{id}=f.run(save({amount:'30000',tolerancePct:'0'}));const {presentationId}=f.run(present(id,f.shipmentId));
     f.run({type:'lc.presentation.result',payload:{id,presentationId,result:'discrepant',date:'2026-10-18',discrepancies:'缺少第三份提单正本'}} as MistCommand);

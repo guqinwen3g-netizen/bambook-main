@@ -94,6 +94,17 @@ export function lcAutoDiscrepancies(lc: MistLetterOfCredit, shipmentDate: string
 
 export function lcCommandPermission(command: LcCommand) { return command.type === 'lc.receipt.link' ? 'invoices:reconcile' : 'customs:write'; }
 
+export function lcPresentationSourceProblem(
+  credit: Pick<MistLetterOfCredit, 'orderIds' | 'presentations'>,
+  shipment: Pick<MistState['fulfillment']['shipments'][number], 'id' | 'state' | 'lines'>,
+) {
+  if (shipment.state === 'cancelled') return { message: '已取消的出运不能交单', code: 'PRECONDITION' } as const;
+  if (shipment.state !== 'departed') return { message: '该批次尚未实际出运，不能登记交单', code: 'PRECONDITION' } as const;
+  if (!shipment.lines.some(line => credit.orderIds.includes(line.orderId))) return { message: '该出运不含本信用证对应订单的货物', code: 'VALIDATION' } as const;
+  if (credit.presentations.some(row => row.shipmentId === shipment.id && row.result !== 'refused')) return { message: '该出运已在本信用证下交单', code: 'CONFLICT' } as const;
+  return null;
+}
+
 function orderSet(root: Root, raw: unknown, currency: string) {
   if (!Array.isArray(raw) || !raw.length) fail('请选择信用证对应的订单');
   const ids = [...new Set((raw as unknown[]).map(String))], orders = ids.map(id => root.orders.find(o => o.id === id) || fail('订单不存在', 'NOT_FOUND'));
@@ -155,9 +166,8 @@ export function applyLcCommand(root: Root, command: LcCommand, c: MistContext): 
     case 'lc.present': {
       const lc = find(root, p.id); if (lc.cancelled) fail('已注销的信用证不能交单', 'PRECONDITION');
       const s = (root.fulfillment?.shipments || []).find(x => x.id === p.shipmentId) || fail('出运不存在', 'NOT_FOUND');
-      if (s.state === 'cancelled') fail('已取消的出运不能交单', 'PRECONDITION');
-      if (!s.lines.some(l => lc.orderIds.includes(l.orderId))) fail('该出运不含本信用证对应订单的货物');
-      if (lc.presentations.some(x => x.shipmentId === s.id && x.result !== 'refused')) fail('该出运已在本信用证下交单', 'CONFLICT');
+      const sourceProblem = lcPresentationSourceProblem(lc, s);
+      if (sourceProblem) fail(sourceProblem.message, sourceProblem.code);
       const shipmentDate = day(p.shipmentDate, '装运日（运输单据日）'), presentedAt = day(p.presentedAt, '交单日');
       if (shipmentDate > today || presentedAt > today) fail('装运日与交单日须为已发生日期');
       if (presentedAt < shipmentDate) fail('交单日不能早于装运日');

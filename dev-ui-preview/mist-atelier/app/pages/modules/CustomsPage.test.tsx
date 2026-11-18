@@ -181,7 +181,7 @@ it('keeps a letter of credit ledger with terms, presentations and bank results, 
   const gov=(note:string)=>({status:'approved',rounds:[],effectiveVersion:1,contract:{kind:'external',poNumber:'PO',confirmationFileIds:[],internalPurpose:'',receiver:'',paymentMethod:'LC',depositPercent:null,paymentNote:note,incoterm:'FOB',deliveryPlace:'上海'}});
   (st.orders[0] as any).governance=gov('L/C at sight');
   st.orders.push({id:'o2',code:'SO-2',type:'garment',customerId:'c',customer:'Cedar',currency:'USD',due:'2026-12-01',governance:gov('L/C 60 days')} as any);
-  f.shipments.push(shipment('s',{state:'departed'}),shipment('t'));
+  f.shipments.push(shipment('s',{state:'departed'}),shipment('t'),shipment('u',{state:'departed'}));
   (st as any).letterOfCredits=[{id:'lc1',code:'LC-2026-0001',lcNo:'LCA2026001',customerId:'c',customer:'Cedar',orderIds:['o'],issuingBank:'Barclays London',advisingBank:'中国银行上海分行',confirmed:false,availableBy:'sight',usanceDays:0,currency:'USD',amount:100,tolerancePct:5,issueDate:'2026-09-01',latestShipmentDate:'2099-01-31',expiryDate:'2099-02-21',expiryPlace:'中国',presentationDays:21,partialShipment:true,transhipment:false,documentsRequired:'商业发票一式三份',note:'',fileIds:[],
     amendments:[{no:1,date:'2026-09-20',changes:[{field:'expiryDate',label:'有效期',from:'2099-01-21',to:'2099-02-21'}],note:'展期',at:'2026-09-20T01:00:00Z',actor:'单证'}],
     presentations:[{id:'p1',no:1,shipmentId:'s',shipmentCode:'S',shipmentDate:'2026-10-10',presentedAt:'2026-10-12',deadline:'2026-10-31',amount:60,documents:'发票',autoDiscrepancies:[],discrepancies:'',result:'pending',history:[],createdAt:'2026-10-12T01:00:00Z',actor:'单证'}],createdAt:'2026-09-02T01:00:00Z',actor:'单证'}];
@@ -203,7 +203,10 @@ it('keeps a letter of credit ledger with terms, presentations and bank results, 
   await click(getByRole(dialog,'button',{name:'取消'}));
   await click(getByRole(detail,'button',{name:'登记交单'}));
   dialog=getByRole(document.body,'dialog');
-  expect(getByRole(dialog,'combobox',{name:'出运'}).textContent).toContain('T');expect(getByRole(dialog,'combobox',{name:'出运'}).textContent).not.toContain('S ·');
+  const presentationSources=getByRole(dialog,'combobox',{name:'出运'}).textContent;
+  expect(presentationSources).toContain('U ·');
+  expect(presentationSources).not.toContain('T ·');
+  expect(presentationSources).not.toContain('S ·');
   await click(getByRole(dialog,'button',{name:'取消'}));
   await click(getByRole(host,'button',{name:'登记信用证'}));
   expect(queryByRole(document.body,'dialog')).toBeNull();expect(getByRole(host,'heading',{name:'登记信用证'})).toBeTruthy();

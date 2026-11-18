@@ -5,7 +5,7 @@ import React from 'react';
 import { Ban, FilePen, Landmark, Plus, SearchX, Send, Stamp } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, DataTable, EmptyState, Facts, Mono, Pill, TextLink, type Column, type Tone } from '../../../../../components/mist';
 import type { MistCommand, MistOrder, MistState } from '../../../../../server/src/shared/mistWorkspace';
-import { LC_RESULT_LABEL, LC_STATUS_LABEL, lcAlerts, lcAvailableMinor, lcStatus, readLetterOfCredits, type LcAmendField, type LcPresentationResult, type LcStatus, type MistLcPresentation, type MistLetterOfCredit } from '../../../../../server/src/shared/mistLetterOfCredit';
+import { LC_RESULT_LABEL, LC_STATUS_LABEL, lcAlerts, lcAvailableMinor, lcPresentationSourceProblem, lcStatus, readLetterOfCredits, type LcAmendField, type LcPresentationResult, type LcStatus, type MistLcPresentation, type MistLetterOfCredit } from '../../../../../server/src/shared/mistLetterOfCredit';
 import { fmt } from '../../data';
 import type { ModuleEditorSpec, ModuleValues } from './ModuleWorkbench';
 import { choiceField, emptyOption, Events, field, RecordFiles, useRecordAttachment, type RecordAttachmentRun, text, today } from './fulfillmentKit';
@@ -74,7 +74,7 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
       if (text(v, 'documentsRequired').trim() !== lc.documentsRequired) changes.documentsRequired = text(v, 'documentsRequired');
       return run({ type: 'lc.amend', payload: { id: lc.id, date: text(v, 'date'), changes, note: text(v, 'note') } });
     } });
-  const presentable = (lc: MistLetterOfCredit) => (state?.fulfillment.shipments || []).filter(s => s.state !== 'cancelled' && s.lines.some(l => lc.orderIds.includes(l.orderId)) && !lc.presentations.some(p => p.shipmentId === s.id && p.result !== 'refused'));
+  const presentable = (lc: MistLetterOfCredit) => (state?.fulfillment.shipments || []).filter(shipment => !lcPresentationSourceProblem(lc, shipment));
   const presentSpec = (lc: MistLetterOfCredit): ModuleEditorSpec => ({
     title: '登记交单', submitLabel: '登记交单', description: `${lc.lcNo} · 可用余额 ${money(lcAvailableMinor(lc) / 100, lc.currency)}`,
     fields: [field('shipmentId', '出运', 'select', true, [emptyOption, ...presentable(lc).map(s => ({ value: s.id, label: `${s.code} · ${s.portOfLoading} → ${s.portOfDischarge}` }))]), field('shipmentDate', '装运日（运输单据日）', 'date'), field('presentedAt', '交单日', 'date'), field('amount', `交单金额（${lc.currency}）`, 'number'), field('documents', '提交单据', 'textarea'), field('discrepancies', '已知不符点', 'textarea', false)],
@@ -144,7 +144,7 @@ function LcDetail({ lc, state, day, can, locked, run, presentable, onShipment, o
     {alerts.length > 0 && <Banner variant="notice" tone="warn" title={uiText("需要关注")}>{alerts.map(uiText).join('；')}</Banner>}
     {lc.cancelled && <Banner variant="status" tone="neutral" title={ui`已于 ${lc.cancelled.date} 注销`}>{lc.cancelled.reason}</Banner>}
     {can && <ActionBar busy={locked} actions={[
-      { label: '登记交单', icon: Send, onClick: onPresent, primary: true, reason: cancelled ? '信用证已注销' : available <= 0 ? '可用余额为零' : !presentable ? '没有可交单的出运（须含本信用证订单且尚未交单）' : false },
+      { label: '登记交单', icon: Send, onClick: onPresent, primary: true, reason: cancelled ? '信用证已注销' : available <= 0 ? '可用余额为零' : !presentable ? '须实际出运且含本证下可交单货物' : false },
       { label: '登记修改书', icon: FilePen, onClick: onAmend, reason: cancelled ? '信用证已注销' : false },
       { label: '注销信用证', icon: Ban, onClick: onCancel, reason: cancelled ? '信用证已注销' : openPresentations ? '还有未承付或未拒付的交单' : false, hidden: cancelled },
     ] as ReasonedAction[]} />}
