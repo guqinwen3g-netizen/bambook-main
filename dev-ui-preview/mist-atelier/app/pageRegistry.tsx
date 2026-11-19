@@ -83,10 +83,4 @@ export function buildPages(referencePreview: boolean): Record<string, React.FC> 
   };
 }
 
-/** 页面代码下载失败（断网或发布后旧标签页）时给出重新加载，不让整个外壳白屏。 */
-export class PageLoadBoundary extends React.Component<{ resetKey: string; fallback: (retry: () => void) => React.ReactNode; children: React.ReactNode }, { failed: boolean }> {
-  state = { failed: false };
-  static getDerivedStateFromError() { return { failed: true }; }
-  componentDidUpdate(previous: { resetKey: string }) { if (previous.resetKey !== this.props.resetKey && this.state.failed) this.setState({ failed: false }); }
-  render() { return this.state.failed ? this.props.fallback(() => location.reload()) : this.props.children; }
-}
+export { PageLoadBoundary } from './PageLoading';

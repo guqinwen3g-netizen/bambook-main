@@ -1,0 +1,430 @@
+import { publicEntryForHost } from '../../../server/src/shared/bambookPublicOrigins';
+import { interfaceLocale } from '../../../services/interfaceLanguage';
+import { uiText, ui, localizedPageTitle, type InterfaceLocale } from '../../../services/interfaceLanguage';
+import {businessNow} from './runtime/businessClock';
+import { ManualLink } from './pages/ManualLink';
+import { exitCompanyManagement } from './runtime/platformAdmin';
+import React from 'react';
+import {PageBackRegistrationContext,usePageBackAction} from '../../../components/mist/pageBack';
+import {PageNavigationGuardContext,usePageNavigationController} from '../../../components/mist/pageNavigation';
+import { buildPages, MODULE_VIEW_SET, PageLoadBoundary, AccountPage, PlatformSettingsPage, PlatformCompanySettingsPage } from './pageRegistry';
+import { PageLoading } from './PageLoading';
+import { ExportConfirmHost } from './runtime/ExportConfirmHost';
+import { preloadPagesWhenIdle } from './pagePreload';
+import { primaryImageId } from '../../../server/src/shared/mistPrimaryImage';
+import { useAssistantConversation } from './runtime/assistantConversation';
+import { Bell, ClipboardList, Component, KeyRound, Layers, ListTodo, Moon, Search, Settings2, ShieldCheck, Sparkles, SquareDashed, Users } from 'lucide-react';
+
+import {
+  AvatarDirectory, AssistantDrawer, Banner, TaskList, Button, IconButton, CommandPalette, Drawer, EmptyState, MistAppShell, MistPage, MistSidebarPresentation, MistTopbar, MistDensityContext, useHotkey, useToast,
+  type ChatMessage, type CommandItem, type Crumb, type NavSection, type ThemeMode,
+} from '../../../components/mist';
+import { getModuleByView, getPrimaryNavigationModules, groupPrimaryNavigationModules } from '../../../components/moduleRegistry';
+import { View } from '../../../types';
+import { MODULE_MAP } from './moduleMap';
+import { Nav, useNav, readMistRoute, writeMistRoute, isListState, nextScrollKey, scrollKeyOf, type GoOptions, type Route, type RouteTarget } from './nav';
+import { PAGE_LABELS as LABELS, pageDocumentTitle } from './pageTitle';
+import { useMistSession } from './runtime/auth';
+import { useDevice } from './runtime/devicePreferences';
+import { MistWorkspaceProvider, useMistWorkspace } from './runtime/workspace';
+import {MistPresentedErrorContext,useClaimedUploadRecovery,usePendingRecoveryClaimed,usePageFailures,usePageFailureHost} from './runtime/errorPresentation';
+import { clearPrivateImages, schedulePrivateImagePrefetch } from './runtime/usePrivateImage';
+import { useOrganizationContext } from './runtime/organizationContext';
+import { TeamViewScope, useTeamView } from './runtime/teamView';
+import { organizationEntry } from './OrganizationEntry';
+import { canOpenCompanyAdmin, canOpenMistView, COMPANY_ADMIN_VIEWS, personalSettingsSection, settingsGap } from './routeAccess';
+import { MistReviewButton, MistReviewProvider, useOptionalMistReviews } from './runtime/reviews';
+import { mistMyWork, mistNavCounts, mistWorkModule, type MistWorkOptions } from './runtime/workQueue';
+import { workspaceSearchRecords } from './runtime/search';
+import { apiService } from '../../../services/apiService';
+import { platformBusinessDate } from '../../../server/src/shared/mistPlatform';
+import { visibleMistNotifications, mistDailyDigest } from './runtime/notificationPreferences';
+import { NotificationCenter, NotificationToast } from './runtime/NotificationCenter';
+import { canPlayNotificationSound, playNotificationSound } from '../../../services/uiSoundService';
+import {readAllMistNotices,readMistNotice} from './runtime/agentTaskNotices';
+import { DEVELOPMENT_LIST_TABS, developmentCreateTarget, developmentListTab, developmentListTarget, type DevelopmentListTab } from './developmentEntry';
+import { PublicEntry, publicEntryMode } from './PublicEntry';
+const SEARCH_ICONS: Record<string, typeof Layers> = { 开发案: Layers, 订单: ClipboardList };
+// Only the separate reference preview enables developer showcase pages.
+// Running the business app through Vite does not make them client features.
+const REFERENCE_PREVIEW = import.meta.env.VITE_MIST_REFERENCE === 'true';
+
+const PAGES = buildPages(REFERENCE_PREVIEW);
+const LIVE_VIEWS = new Set(['account','platform-admin','emails','cockpit','development','development/detail','development/new','orders','orders/detail','orders/new','payment-vouchers','crm','production-board','calendar','system-settings','settings','company-settings','workspace-settings','approvals','notifications','search']);
+const GROUPS: Record<string, string> = { overview: '我的事务', customer: '客户与市场', fulfillment: '订单履约', finance: '财务与成本', platform: '管理与工具' };
+
+/** 平台管理范围：账号、组织人事及公司设置；业务执行仍走公司端。 */
+const COMPANY_MANAGEMENT_VIEWS = ['admin-panel', 'hr', 'system-settings', 'settings', 'company-settings', 'workspace-settings'];
+function useSections(): NavSection[] {
+  const session = useMistSession();
+  return React.useMemo(() => {
+    const platformOnly = session.user?.platformRole === 'platform_admin' && !session.user.roleIds?.length;
+    const supporting = !!session.user?.platformCompany;
+    const modules = platformOnly ? [] : getPrimaryNavigationModules({ isAdmin: session.hasRole('owner', 'admin') || session.hasPermission('users:admin'), canAccessView: session.canAccessView })
+      .filter(m => !supporting || COMPANY_MANAGEMENT_VIEWS.includes(String(m.view)));
+    const real = groupPrimaryNavigationModules(modules).map(g => ({
+      id: g.group, label: g.label === '平台' ? '数据与工具' : g.label, defaultClosed: !['overview', 'fulfillment'].includes(g.group),
+      items: g.modules.filter(m => !COMPANY_ADMIN_VIEWS.has(String(m.view)) && m.view !== View.HR).map(m => ({ id: String(m.view), label: productName(m), icon: m.icon })),
+    })).filter(g => g.items.length);
+    const hr = !platformOnly && !session.localMode && session.canAccessView(View.HR) ? [{ id: 'hr', label: '人事管理', icon: Users }] : [];
+    const items = supporting ? [...hr, { id: 'company-settings', label: '公司管理', icon: Settings2 }] : [
+      ...hr,
+      ...(platformOnly ? [{ id: 'system-settings', label: '平台设置', icon: Settings2 }] : canOpenCompanyAdmin(session.canAccessView) ? [{ id: 'company-settings', label: '公司管理', icon: Settings2 }] : []),
+      ...(session.user?.platformRole === 'platform_admin' ? [{ id: 'platform-admin', label: '平台管理', icon: ShieldCheck }] : []),
+    ];
+    const reference = REFERENCE_PREVIEW ? [{ id: 'design-system', label: '设计系统', icon: Component }, { id: 'states', label: '空 / 加载 / 错误', icon: SquareDashed }, ...(!session.localMode ? [{ id: 'login', label: '登录页', icon: KeyRound }] : [])] : [];
+    return [...real, ...(items.length ? [{ id: 'handoff', label: '管理', items }] : []), ...(reference.length ? [{ id: 'reference', label: '开发预览', items: reference }] : [])];
+  }, [session.sessionKey, session.status, session.hasRole, session.canAccessView, interfaceLocale()]);
+}
+/** 侧栏数字、模块页「待我处理」、首页合计共用同一口径（见 runtime/workQueue）。 */
+function useMyWorkOptions(): MistWorkOptions {
+  const session = useMistSession(), { workspace } = useMistWorkspace(), reviews = useOptionalMistReviews();
+  return { canRead: view => session.canAccessView(view as View), can: permission => session.hasPermission(permission), me: session.user?.id ?? '', reviews: reviews?.rows, today: platformBusinessDate(businessNow()), now: businessNow().toISOString(), workspaceId: workspace?.id, financialDisposals: workspace?.financialDisposals };
+}
+function CountedSidebar({ sections, ...rest }: React.ComponentProps<typeof MistSidebarPresentation>) {
+  const { state } = useMistWorkspace(), counts = mistNavCounts(state, useMyWorkOptions());
+  const counted = sections.map(section => ({ ...section, items: section.items.map(item => ({ ...item, count: counts[item.id] || undefined })) }));
+  return <MistSidebarPresentation sections={counted} {...rest} />;
+}
+/** 顶栏「待我处理」：本模块等我处理的事项（条数与侧栏数字一致），打开抽屉后可直接进入原业务。放在顶栏而不是页面内，页面标题位置不随待办有无而变化。 */
+function ModuleWorkButton({ view }: { view: string }) {
+  const { state } = useMistWorkspace(), { go } = useNav(), [open, setOpen] = React.useState(false), today = platformBusinessDate(businessNow());
+  const module = mistWorkModule(view), items = mistMyWork(state, useMyWorkOptions()).filter(item => item.module === module);
+  React.useEffect(() => setOpen(false), [module]);
+  if (!items.length || module === 'cockpit') return null;
+  return <><span data-mist-module-work={module}><IconButton icon={ListTodo} label={ui`本模块待我处理 ${items.length} 项`} count={items.length} onClick={() => setOpen(true)} /></span>
+    <Drawer open={open} onClose={() => setOpen(false)} title={ui`待我处理 · ${items.length} 项`}>
+      <TaskList items={items.map(item => ({ id: item.id, when: item.when, urgent: item.urgent || (!!item.at && item.at.slice(0, 10) < today && item.source === 'task'), title: item.title, meta: item.meta }))}
+        onOpen={row => { const item = items.find(entry => entry.id === row.id); if (item) { setOpen(false); go(item.target.view, item.target.id, item.target); } }} />
+    </Drawer></>;
+}
+const developmentCreateLabel = (section?: string) => DEVELOPMENT_LIST_TABS.find(tab => tab.value === (section === 'fabric' ? 'fabric' : 'garment'))!.create;
+/** 模块的正式产品名：注册表里的「（开发中）」内部标记不进入界面。 */
+const productName = (m: { productLabel: string }) => m.productLabel.replace('（开发中）', '');
+
+function crumbsFor(route: Route, go: (view: string, id?: string) => void, objectLabel?: string, versionLabel?: string): Crumb[] {
+  if (COMPANY_ADMIN_VIEWS.has(route.view)) return [{ label: '公司管理' }];
+  if (route.view === 'hr') return [{ label: '人事管理' }];
+  if (route.view === 'platform-admin') return [{ label: '平台运营', hideOnMobile: true }, { label: '平台管理' }];
+  const base = route.view.split('/')[0], mod = getModuleByView(base as View);
+  const label = (mod && productName(mod)) ?? LABELS[base] ?? base;
+  if (!mod && !PAGES[route.view] && (!(base in LABELS) || base === 'design-system' || base === 'states')) return [{ label: '页面不存在' }];
+  const crumbs: Crumb[] = [{ label: mod ? GROUPS[mod.nav.group] : base === 'account' || base === 'company-settings' || base === 'workspace-settings' || base === 'approvals' || base === 'notifications' || base === 'search' ? '我的事务' : '设计系统', hideOnMobile: true }];
+  if (route.view.includes('/')) {
+    crumbs.push({ label, onClick: () => go(base) });
+    crumbs.push(route.view.endsWith('/new') ? { label: base === 'orders' ? '新建订单' : route.id ? '继续开发草稿' : developmentCreateLabel(route.section) } : { label: objectLabel || route.id || '未指定对象', mono: true });
+    if (route.versionId) crumbs.push({ label: versionLabel || route.versionId, mono: true });
+  } else crumbs.push({ label });
+  return crumbs;
+}
+type WorkspaceProps = { theme: ThemeMode; locale: InterfaceLocale; toggleTheme: () => void };
+
+function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
+  const session = useMistSession(), toast = useToast(), workspace = useMistWorkspace(), claimedUpload = useClaimedUploadRecovery(), pendingClaimed = usePendingRecoveryClaimed(), pageFailures = usePageFailures();
+  usePageFailureHost();
+  const [hiddenNoticeKey, setHiddenNoticeKey] = React.useState('');
+  const {state} = workspace;
+  const platformOnly = session.user?.platformRole === 'platform_admin' && !session.user.roleIds?.length;
+  const platformCompany = session.user?.platformCompany;
+  const canAI = session.hasPermission('ai:chat') && !platformOnly && !platformCompany;
+  const canCreateDevelopment = session.hasPermission('products:write');
+  const [exitingSupport, setExitingSupport] = React.useState(false);
+  const organization = useOrganizationContext(), teamView = useTeamView(session.user?.id ? `${session.user.companyId ?? 'local'}:${session.user.id}` : undefined, organization.teams);
+  const [organizationOpen, setOrganizationOpen] = React.useState(false);
+  const visibleNotifications=visibleMistNotifications(state,view=>session.canAccessView(view as View),workspace.agentTaskNotices?.items);
+  const dailyDigest=mistDailyDigest(state,platformBusinessDate(businessNow()),view=>session.canAccessView(view as View));
+  const canDevelopment=session.canAccessView('development' as View), canOrders=session.canAccessView('orders' as View), canCustomers=session.canAccessView('crm' as View), canProduction=session.canAccessView('production-board' as View);
+  const [route, setRoute] = React.useState<Route>(readMistRoute);
+  // 已被服务端明确拒绝的操作提示属于原页面；换页后撤下，不让它带着“重新读取”跟到别的页面。
+  const dismissRejection = workspace.dismissRejection;
+  React.useEffect(() => { dismissRejection?.(); }, [route.view, route.id, dismissRejection]);
+  const personalSection = personalSettingsSection(route);
+  const documentTitle = pageDocumentTitle(personalSection ? 'account' : session.status === 'anonymous' && publicEntryForHost(location.host) === 'platform' ? 'platform-login' : route.view, { anonymous: session.status === 'anonymous', loading: session.status === 'loading', platformOnly, mustChangePassword: !session.localMode && session.user?.mustChangePassword, invitation: new URLSearchParams(location.search).get('kind') === 'invite' });
+  React.useEffect(() => { document.title = localizedPageTitle(documentTitle); }, [documentTitle, locale]);
+  const scrollPosition = React.useRef<{ key: string; route: Route; list: boolean }>(null as never);
+  if (!scrollPosition.current) { const list = typeof history.state?.mistListState === 'boolean' ? history.state.mistListState : isListState(route); scrollPosition.current = { key: scrollKeyOf(route, list), route, list }; }
+  const [collapsed, setCollapsed] = React.useState(false);
+  const [palette, setPalette] = React.useState(false), [query, setQuery] = React.useState('');
+  const [ai, setAI] = React.useState(false);
+  React.useEffect(()=>{if(!canAI)setAI(false);},[canAI]);
+  const [notifications, setNotifications] = React.useState(false);
+  // New unread notices pop a small card. The first snapshot after login or a company switch only sets the baseline.
+  const [toastIds, setToastIds] = React.useState<string[]>([]);
+  const seenNotices = React.useRef<{ scope: string; ids: Set<string> } | null>(null);
+  const noticeScope = session.sessionKey + ':' + (workspace.workspace?.id || '');
+  const unreadIds = visibleNotifications.filter(n => !n.readAt).map(n => n.id).join('|');
+  React.useEffect(() => {
+    const unread = visibleNotifications.filter(n => !n.readAt), seen = seenNotices.current;
+    if (!state || !seen || seen.scope !== noticeScope) { seenNotices.current = { scope: noticeScope, ids: new Set(unread.map(n => n.id)) }; setToastIds([]); return; }
+    const fresh = unread.filter(n => !seen.ids.has(n.id)).map(n => n.id);
+    unread.forEach(n => seen.ids.add(n.id));
+    if (!fresh.length || notifications) return;
+    setToastIds(ids => [...new Set([...ids, ...fresh])]);
+    if (canPlayNotificationSound()) playNotificationSound(fresh[0]);
+  }, [unreadIds, noticeScope, !!state]); // eslint-disable-line react-hooks/exhaustive-deps
+  React.useEffect(() => { if (!toastIds.length) return; const timer = window.setTimeout(() => setToastIds([]), 6000); return () => window.clearTimeout(timer); }, [toastIds]);
+  React.useEffect(() => { if (notifications) setToastIds([]); }, [notifications]);
+  const toastItems = toastIds.map(id => visibleNotifications.find(n => n.id === id)).filter((n): n is NonNullable<typeof n> => !!n && !n.readAt && !(route.view === 'assistant' && n.id.startsWith('agent-task:')));
+  const [msgs, setMsgs] = React.useState<ChatMessage[]>([]);
+  const [aiBusy,setAiBusy]=React.useState(false),[aiUseRouteSource,setAiUseRouteSource]=React.useState(false);
+  const aiScope=session.sessionKey+':'+(workspace.workspace?.id??'');
+  React.useEffect(() => {
+    const workspaceId = workspace.workspace?.id;
+    if (!workspaceId || !state?.market?.products?.length || workspace.loading) return;
+    const scope = `${session.sessionKey}:${session.user?.id || ''}:${workspaceId}`;
+    const files = new Map(state.files.map(file => [file.id, file]));
+    // 只预取主图的抠图派生；补充图在用户切换到它时才按普通预览读取。
+    const productPaths = state.market.products.flatMap(product => {
+      const id = primaryImageId(files, product.fileIds), file = id ? files.get(id) : undefined; if (!file) return [];
+      const base = workspace.fileUrl(file); return [`${base}?preview=cutout-thumb`, `${base}?preview=cutout-display`];
+    });
+    const developmentIds=[...state.devs,...state.versions].flatMap(owner=>{const id=primaryImageId(files,owner.fileIds);return id?[id]:[];});
+    const developmentPaths=[...new Set(developmentIds)].flatMap(id=>{const file=files.get(id);return file?[`${workspace.fileUrl(file)}?preview=cutout-display`]:[];});
+    const paths=[...productPaths,...developmentPaths];
+    return schedulePrivateImagePrefetch(scope, paths);
+  }, [session.sessionKey, session.user?.id, workspace.workspace?.id, workspace.loading, workspace.workspace?.revision]);
+  React.useEffect(() => () => clearPrivateImages(), [session.sessionKey, workspace.workspace?.id]);
+  const aiCurrent=React.useRef(aiScope);aiCurrent.current=aiScope;
+  const aiMounted=React.useRef(true),aiController=React.useRef<AbortController|null>(null),aiRun=React.useRef<symbol|null>(null);
+  const aiHistory=React.useRef<Array<{role:'user'|'assistant';content:string}>>([]);
+  React.useEffect(()=>{aiMounted.current=true;return()=>{aiMounted.current=false;aiController.current?.abort();aiRun.current=null;};},[]);
+  React.useEffect(()=>{aiController.current?.abort();aiController.current=null;aiRun.current=null;aiHistory.current=[];setAiBusy(false);setAiUseRouteSource(false);},[aiScope]);
+  React.useEffect(()=>setAiUseRouteSource(false),[route.view,route.id]);
+  const sections = useSections();
+  React.useEffect(() => {
+    if (session.status !== 'authenticated' || session.user?.mustChangePassword || (!platformOnly && workspace.loading)) return;
+    const views = sections.flatMap(section => section.items.map(item => item.id));
+    // Details and creation pages are prepared only when their parent module is visible.
+    if (views.includes('orders')) views.push('orders/detail', 'orders/new');
+    if (views.includes('development')) views.push('development/detail', 'development/new');
+    for (const view of ['approvals', 'notifications', 'search']) {
+      if (canOpenMistView({ view }, { canAccessView: session.canAccessView, hasPermission: session.hasPermission, platformOperator: session.user?.platformRole === 'platform_admin' }, REFERENCE_PREVIEW)) views.push(view);
+    }
+    const pages = [AccountPage, ...views.map(view => PAGES[view]).filter((page): page is React.FC => !!page)];
+    if (platformOnly) pages.push(PlatformSettingsPage);
+    if (platformCompany) pages.push(PlatformCompanySettingsPage);
+    return preloadPagesWhenIdle(pages);
+  }, [sections, session.status, session.sessionKey, session.user?.mustChangePassword, session.canAccessView, session.hasPermission, session.user?.platformRole, platformOnly, !!platformCompany, workspace.loading]);
+  // 侧栏「开发与寻样」回到本次会话最近查看的页签；未查看过时为「成衣开发」。
+  const lastDevelopmentTab = React.useRef<DevelopmentListTab | null>(null);
+  if (route.view === 'development') lastDevelopmentTab.current = developmentListTab(route.section);
+  // ord7：未查看过时按本人所在业务线落页签：只属面料组的员工默认「面料开发」。
+  const myGroups = workspace.state?.memberGroups?.find(g => g.userId === session.user?.id)?.groups ?? [];
+  const defaultDevelopmentTab: DevelopmentListTab = myGroups.includes('fabric') && !myGroups.includes('garment') ? 'fabric' : 'garment';
+  const {register:registerNavigationGuard,attempt:attemptNavigation,hasGuard:hasNavigationGuard}=usePageNavigationController();
+  const historyPosition=React.useRef({url:location.href,state:history.state,depth:Number(history.state?.mistDepth)||0});
+  const go = React.useCallback((view: string, id?: string, target: RouteTarget = {}, options: GoOptions = {}) => {
+    attemptNavigation(()=>{
+    const next = { view, id, ...target }, list = isListState(next, options);
+    scrollPosition.current = { key: nextScrollKey(scrollPosition.current, next, list), route: next, list };
+    setRoute(next); writeMistRoute(next, options); historyPosition.current={url:location.href,state:history.state,depth:Number(history.state?.mistDepth)||0}; setPalette(false); setAI(false); setNotifications(false);
+    if (view === 'cockpit') window.dispatchEvent(new CustomEvent('bambook:mist-workbench-refresh'));
+    });
+  }, [toast,attemptNavigation]);
+  // 平台会话退出后回到平台管理登录，不落到公司登录页。
+  const platformSession = React.useRef(false);
+  React.useEffect(() => {
+    if (platformOnly || platformCompany) platformSession.current = true;
+    else if (session.status === 'anonymous' && platformSession.current) { platformSession.current = false; go('platform-login'); }
+  }, [platformOnly, platformCompany, session.status, go]);
+  React.useEffect(() => {
+    if (publicEntryForHost(location.host) === 'platform' && platformOnly && !personalSection
+      && !['platform-admin','system-settings','settings','platform-login','account-recovery','platform-recovery','account-access'].includes(route.view)) go('platform-admin');
+  }, [platformOnly, personalSection, route.view, go]);
+  // 公司管理会话保持在当前公司的管理页面。
+  React.useEffect(() => { if (platformCompany && !personalSection && !COMPANY_MANAGEMENT_VIEWS.includes(route.view.split('/')[0])) go('company-settings'); }, [platformCompany, personalSection, route.view, go]);
+  const exitManagement = async () => {
+    setExitingSupport(true);
+    try { await exitCompanyManagement(); go('platform-admin', platformCompany?.companyId); } catch (failure) { report(failure); } finally { setExitingSupport(false); }
+  };
+  React.useEffect(() => { if (personalSection && session.status === 'authenticated') go('account', undefined, { section: personalSection }); }, [personalSection, session.status, go]);
+  React.useEffect(()=>{
+    type Position={url:string;state:any;depth:number;route:Route};
+    let restoring:{origin:typeof historyPosition.current;target:Position;delta:number}|undefined;
+    let allowed:Position|undefined;
+    const capture=():Position=>({url:location.href,state:history.state,depth:Number(history.state?.mistDepth)||0,route:readMistRoute()});
+    const apply=(target:Position)=>{
+      const next=target.route,list=typeof target.state?.mistListState==='boolean'?target.state.mistListState:isListState(next);
+      historyPosition.current={url:target.url,state:target.state,depth:target.depth};
+      scrollPosition.current={key:nextScrollKey(scrollPosition.current,next,list),route:next,list};
+      setRoute(next);setPalette(false);setAI(false);
+      if(next.view==='cockpit')window.dispatchEvent(new CustomEvent('bambook:mist-workbench-refresh'));
+    };
+    const back=()=>{
+      const target=capture();
+      if(allowed&&target.url===allowed.url&&target.depth===allowed.depth){allowed=undefined;apply(target);return;}
+      allowed=undefined;
+      if(restoring){
+        if(target.depth!==restoring.origin.depth){history.go(restoring.origin.depth-target.depth);return;}
+        const blocked=restoring;restoring=undefined;historyPosition.current={url:target.url,state:target.state,depth:target.depth};
+        attemptNavigation(()=>{allowed=blocked.target;history.go(-blocked.delta);});return;
+      }
+      if(!hasNavigationGuard()){apply(target);return;}
+      const origin=historyPosition.current,delta=origin.depth-target.depth;
+      if(delta){restoring={origin,target,delta};history.go(delta);return;}
+      // Unknown/legacy history positions still retain the current editor until the page decides.
+      history.replaceState(origin.state,'',origin.url);
+      attemptNavigation(()=>{history.replaceState(target.state,'',target.url);apply(target);});
+    };
+    window.addEventListener('popstate',back);return()=>window.removeEventListener('popstate',back);
+  },[attemptNavigation,hasNavigationGuard]);
+  React.useEffect(() => { setPalette(false); setAI(false); setNotifications(false); setOrganizationOpen(false); setMsgs([]); }, [session.sessionKey, workspace.workspace?.id]);
+  const previousLocalActor = React.useRef<string|undefined>(undefined);
+  React.useEffect(() => {
+    if (!session.localMode || session.status !== 'authenticated') return;
+    if (route.view === 'login' || previousLocalActor.current && previousLocalActor.current !== session.user?.id) go('cockpit');
+    previousLocalActor.current = session.user?.id;
+  }, [session.localMode, session.status, session.user?.id, route.view, go]);
+  const previousSpace = React.useRef<{session:string;id?:string}>({session:session.sessionKey});
+  React.useEffect(()=>{
+    const id=workspace.workspace?.id, previous=previousSpace.current;
+    if(previous.session!==session.sessionKey){previousSpace.current={session:session.sessionKey,id};return;}
+    if(id){if(previous.id&&previous.id!==id)go('cockpit');previousSpace.current={session:session.sessionKey,id};}
+  },[session.sessionKey,workspace.workspace?.id,go]);
+  const density = useDevice('density');
+  const report = (failure: unknown) => toast(failure instanceof Error ? failure.message : '操作未完成', 'bad');
+  const routeBase=route.view.split('/')[0];
+  const currentAiSource=route.id&&routeBase==='orders'&&canOrders&&session.hasPermission('orders:read')
+    ?state?.orders.find(row=>row.id===route.id)
+      ?{id:'orders:'+route.id,label:state.orders.find(row=>row.id===route.id)!.code,view:'orders/detail',entityId:route.id}:null
+    :route.id&&routeBase==='invoices'&&session.hasPermission('invoices:read')
+      ?state?.invoices.find(row=>row.id===route.id)
+        ?{id:'invoices:'+route.id,label:state.invoices.find(row=>row.id===route.id)!.code,view:'invoices',entityId:route.id}:null
+      :route.id&&routeBase==='risks'&&session.hasPermission('risk:read')
+        ?state?.platform?.risks.find(row=>row.id===route.id)
+          ?{id:'risks:'+route.id,label:state.platform.risks.find(row=>row.id===route.id)!.title,view:'risks',entityId:route.id}:null
+        :null;
+  const overview = (): ChatMessage => {
+    if (!state) return {role:'assistant',content:'公司数据尚未读取，请稍后再试。'};
+    const visibleDevs=canDevelopment?state.devs:[],visibleOrders=canOrders?state.orders:[],visibleTasks=state.tasks.filter(t=>session.canAccessView(t.target.view.split('/')[0] as View));
+    const devs=visibleDevs.filter(d=>d.stage<4).slice(0,4),late=(canProduction?state.productions:[]).filter(p=>!p.closed&&p.col!=='done'&&p.due<platformBusinessDate(businessNow()));
+    return {role:'assistant',content:<div><p>{uiText("当前公司有 ")}{visibleDevs.length}{uiText(" 个可见开发案、")}{visibleOrders.length}{uiText(" 张订单；")}{visibleTasks.filter(t=>!t.done).length}{uiText(" 项待办未完成，")}{late.length}{uiText(" 项生产已过交期。")}</p>{devs.map(d=><p key={d.id}><Button variant="quiet" onClick={()=>go('development/detail',d.id,{versionId:d.currentVersionId||undefined})}>{d.code} · {d.name} · {d.state}</Button></p>)}</div>,sources:[state.settings.workspaceName || '当前公司'],actions:<>{currentAiSource?<Button aria-pressed={aiUseRouteSource} disabled={aiBusy} onClick={()=>setAiUseRouteSource(value=>!value)}>{uiText(aiUseRouteSource?'取消引用：':'引用当前来源：')}{uiText(currentAiSource.label)}</Button>:null}</>};
+  };
+  const send = async (question:string,retrySources?:string[]) => {
+    const content=question.trim();if(!content)return;
+    const sourceIds=retrySources??(aiUseRouteSource&&currentAiSource?[currentAiSource.id]:[]);
+    const available=()=>aiMounted.current&&aiCurrent.current===aiScope;
+    if(!available())return;
+    const errorMessage=(message:string):ChatMessage=>({role:'assistant',content:<p>{message}</p>,actions:<Button onClick={()=>void send(content,sourceIds)}>{uiText("重试此问题")}</Button>});
+    if(aiRun.current){setMsgs(items=>[...items,{role:'user',text:content},errorMessage('上一个问题仍在处理。内容已保留，请等待完成后重试。')]);return;}
+    if(!workspace.workspace?.id||workspace.loading){setMsgs(items=>[...items,{role:'user',text:content},errorMessage('公司数据尚未读取，请完成读取后重试。')]);return;}
+    if(!canAI)return;
+    if(content.length>4000){setMsgs(items=>[...items,{role:'user',text:content},{role:'assistant',content:'问题超过4000个字符，请缩短后重试。'}]);return;}
+    const token=Symbol('assistant-run'),controller=new AbortController();aiRun.current=token;aiController.current=controller;setAiBusy(true);setMsgs(items=>[...items,{role:'user',text:content}]);
+    try{
+      const response=await fetch('/api/mist/workspaces/'+encodeURIComponent(workspace.workspace.id)+'/assistant',{method:'POST',headers:{...apiService.getAuthHeaders(),'Content-Type':'application/json','X-Bambook-Locale':interfaceLocale()},credentials:'include',signal:controller.signal,body:JSON.stringify({message:content,history:aiHistory.current.slice(-8).map(m=>({...m,content:m.content.slice(0,2000)})),sourceIds})});
+      const result=await response.json().catch(()=>null);
+      if(!response.ok)throw new Error(result?.error?.message??'模型请求未完成，请重试');
+      if(result?.mode!=='read_only'||typeof result.text!=='string'||!result.text.trim()||!Number.isSafeInteger(result.revision)||!Array.isArray(result.sources)||result.sources.some((source:any)=>!source||!sourceIds.includes(source.id)||typeof source.label!=='string'||typeof source.entityId!=='string'||!['orders/detail','invoices','risks'].includes(source.view)||source.id!==(source.view==='orders/detail'?'orders':source.view)+':'+source.entityId))throw new Error('助手响应格式无效，请重试');
+      if(!available()||aiRun.current!==token)return;
+      aiHistory.current=[...aiHistory.current,{role:'user',content},{role:'assistant',content:result.text}];
+      setMsgs(items=>[...items,{role:'assistant',content:<><p style={{whiteSpace:'pre-wrap'}}>{result.text}</p>{result.truncated&&<p className="mist-note">{uiText("回复过长，已截断；可缩小问题范围继续询问。")}</p>}</>,actions:<>{result.sources.map((source:any)=><Button key={source.id} variant="quiet" onClick={()=>go(source.view,source.entityId)}>{uiText(source.label)}</Button>)}</>}]);
+    }catch(error){if(available()&&aiRun.current===token&&!(error instanceof Error&&error.name==='AbortError'))setMsgs(items=>[...items,errorMessage(error instanceof Error?error.message:'模型服务暂不可用，请重试')]);}
+    finally{if(available()&&aiRun.current===token){aiRun.current=null;aiController.current=null;setAiBusy(false);}}
+  };
+  const conversation=useAssistantConversation(aiScope);
+  // 抽屉是小竹的快捷形态；进入完整版时把这段对话接到小竹页。
+  const expandAI=()=>{const history=aiHistory.current;if(history.length)conversation.setMessages(old=>[...old,...history]);aiHistory.current=[];setMsgs([]);setAI(false);go('assistant');};
+  const openAI = (prompt?: string) => {if(!canAI)return;setAI(true);setPalette(false);if(prompt)void send(prompt);};
+  useHotkey('k', () => { if (session.status === 'authenticated') setPalette(value => !value); }, { meta: true });
+  useHotkey('j', () => { if (session.status === 'authenticated') openAI(); }, { meta: true });
+  const commands: CommandItem[] = [
+    ...(state ? workspaceSearchRecords(state, view => session.canAccessView(view as View)).map(r => ({ id: r.view + '-' + r.id, group: r.group, label: r.label, hint: r.hint, keywords: r.keywords, icon: SEARCH_ICONS[r.group], run: () => go(r.view, r.id, r.target) })) : []),
+    ...sections.flatMap(section => section.items.map(item => ({ id: 'go-' + item.id, group: '跳转', label: item.label, hint: section.label, icon: item.icon, run: () => navigateModule(item.id) }))),
+    ...(canDevelopment ? DEVELOPMENT_LIST_TABS.flatMap(tab => {
+      const list = developmentListTarget(tab.value), create = developmentCreateTarget(tab.value);
+      return [
+        { id: 'go-development-' + tab.value, group: '跳转', label: tab.label, hint: '开发与寻样', keywords: '开发与寻样 ' + tab.label, run: () => go(list.view, list.id, list.target) },
+        ...(canCreateDevelopment ? [{ id: 'new-development-' + tab.value, group: '操作', label: tab.create, keywords: '新建 ' + tab.label, run: () => go(create.view, create.id, create.target) }] : []),
+      ];
+    }) : []),
+    { id: 'approvals', group: '操作', label: '审批与放行', keywords: '审批 待我审批 放行 付款申请', icon: ClipboardList, run: () => go('approvals') },
+    { id: 'notifications', group: '操作', label: '通知中心', keywords: '通知 提醒 未读 消息', icon: Bell, run: () => go('notifications') },
+    { id: 'theme', group: '操作', label: '切换深浅色', icon: Moon, run: toggleTheme },
+    ...(canAI ? [{ id: 'ai', group: '操作', label: '问小竹', hint: '⌘ J', icon: Sparkles, run: ()=>openAI() }] : []),
+    ...(query.trim() ? [{ id: 'search-all', group: '搜索', label: '打开搜索结果页查看全部', keywords: query.trim(), icon: Search, run: () => go('search', undefined, { section: query.trim() }) }] : []),
+  ];
+  function navigateModule(id: string) {
+    if (id !== 'development') { go(id); return; }
+    const target = developmentListTarget(lastDevelopmentTab.current ?? defaultDevelopmentTab);
+    go(target.view, target.id, target.target);
+  }
+  const nav = { route, go, theme, toggleTheme, openPalette: () => setPalette(true), openAI };
+  const {register:registerPageBack,back:goBack}=usePageBackAction(()=>{
+    if((Number(history.state?.mistDepth)||0)>0)history.back();
+    else if(route.view.includes('/'))go(route.view.split('/')[0]);
+  });
+  const publicMode = publicEntryMode(route.view, session);
+  if (publicMode) return <PublicEntry mode={publicMode} nav={nav} />;
+  const base = route.view.split('/')[0], module = getModuleByView(base as View);
+  // 空间设置只处理本公司；不能为此授予系统设置/后台管理权限。
+  // Search owns query synchronization; remounting on every submit would discard its input focus.
+  const stablePageRoute = MODULE_VIEW_SET.has(route.view)||route.view==='emails'||route.view==='search';
+  const permitted = !!personalSection || canOpenMistView(route, { canAccessView: session.canAccessView, hasPermission: session.hasPermission, platformOperator: session.user?.platformRole === 'platform_admin' }, REFERENCE_PREVIEW) || platformOnly && ['system-settings','settings'].includes(route.view), live = LIVE_VIEWS.has(route.view) || MODULE_VIEW_SET.has(route.view) || COMPANY_ADMIN_VIEWS.has(route.view);
+  const Page = personalSection ? AccountPage : platformCompany && COMPANY_ADMIN_VIEWS.has(route.view) ? PlatformCompanySettingsPage : platformOnly && ['system-settings','settings'].includes(route.view) ? PlatformSettingsPage
+    : PAGES[route.view] ?? null;
+  // 二级页（详情 / 新建）：应用内有上一页时按历史返回，直接打开链接时回到所属模块。
+  const backTarget = route.view.includes('/') ? { view: base, label: (module && productName(module)) ?? LABELS[base] ?? '' } : null;
+  const user = session.user!;
+  const workspaceProfileName = state?.settings.profileName?.trim() || '';
+  const name = (workspace.workspace?.ownerId === user.id ? workspaceProfileName : '') || user.displayName || user.email;
+  const roles = platformOnly ? '平台管理员' : platformCompany ? '平台管理' : user.roleLabels?.filter(role => !role.name.endsWith('标准岗位补充')).map(role => role.name).join(' · ') || user.roles.map(role => ({ owner: '负责人', admin: '管理员', manager: '管理者', merchandiser: '业务员', finance: '财务', sales: '业务员', viewer: '查看人员', agent_operator: '助手操作员' })[role]).join(' · ');
+  // Shell status floats under the topbar (MistAppShell notices) instead of pushing the page title down.
+  const canAdminister = session.hasRole('owner', 'admin') || session.hasPermission('users:admin'), errorGap = workspace.error ? settingsGap(workspace.error) : null;
+  const shellNoticeList = [
+    platformCompany && <Banner variant="inline" key="platform" tone="neutral" title={ui`公司管理 · ${platformCompany.companyName}`} actions={<Button loading={exitingSupport} onClick={()=>void exitManagement()}>{uiText("返回平台")}</Button>}/>,
+    workspace.pendingCreate && !workspace.saving && <Banner variant="inline" key="create" tone="warn" title={uiText("历史数据创建结果需要核对")} actions={<Button onClick={()=>void workspace.createWorkspace(workspace.pendingCreate!.name,workspace.pendingCreate!.seed).catch(report)}>{uiText("核对创建结果")}</Button>}>{workspace.pendingCreate.name}{uiText("：将查询并继续同一次创建。")}</Banner>,
+    workspace.pending && !workspace.saving && !pendingClaimed && !(workspace.pending.kind==='mail-send'&&route.view==='emails') && !(workspace.pending.kind==='command'&&route.view==='calendar') && !(workspace.pending.kind==='upload'&&claimedUpload===workspace.pending.requestId) && <Banner variant="inline" key="pending" tone="warn" title={uiText("上次操作的结果需要核对")} actions={<Button loading={workspace.saving} onClick={()=>void workspace.recover().catch(report)}>{uiText("核对原请求")}</Button>}>{uiText("核对前会保留原请求，避免重复保存。")}{uiText(workspace.pending.kind==='upload'?'如尚未上传成功，请在原页面重新选择同一附件。':workspace.pending.kind==='mail-send'?'上次邮件发送未收到服务器回执；核对时使用原发送请求，已登记的不会重复投递。':'')}</Banner>,
+    // 审批人、公司抬头等设置缺口，重新读取解决不了：管理员直接去对应设置，其他人知道该找谁。
+    workspace.error && !workspace.pending && (errorGap
+      ? <Banner variant="inline" key="error" tone="bad" title={uiText(workspace.error)} actions={canAdminister ? <Button onClick={()=>go('settings',undefined,{section:errorGap.section})}>{uiText(errorGap.label)}</Button> : undefined}>{canAdminister ? undefined : uiText(errorGap.ask)}</Banner>
+      : <Banner variant="inline" key="error" tone="bad" title={uiText(workspace.error)} actions={<Button onClick={()=>void workspace.refresh()}>{uiText("重新读取")}</Button>} />),
+    // A page's own failure that the shell already shows (same text) is not repeated.
+    ...pageFailures.filter(item => item.detail !== workspace.error).map(item => <Banner variant="inline" key={'page:'+item.id} tone="bad" title={uiText(item.title)} actions={item.retry ? <Button onClick={item.retry}>{uiText("重试")}</Button> : undefined}>{item.detail}</Banner>)
+  ].filter(Boolean);
+  // Collapsing remembers which notices were seen; a new or changed notice shows again. The topbar status reopens them.
+  const shellNoticeKey = shellNoticeList.map(item => (item as React.ReactElement).key).join('|') + '|' + (workspace.error || '') + '|' + pageFailures.map(item => item.detail).join('|');
+  const noticesHidden = !!shellNoticeList.length && hiddenNoticeKey === shellNoticeKey;
+  const toastNotice = toastItems.length ? <NotificationToast key="toast" items={toastItems} onDismiss={() => setToastIds([])}
+    onOpen={n => { setToastIds([]); void readMistNotice(workspace, n).then(() => { if (n.target) go(n.target.view, n.target.id, n.target); }).catch(report); }}
+    onOpenAll={() => { setToastIds([]); setNotifications(true); }} /> : null;
+  const shellNotices = (shellNoticeList.length && !noticesHidden) || toastNotice ? [...(noticesHidden ? [] : shellNoticeList), ...(toastNotice ? [toastNotice] : [])] : undefined;
+  return (
+    <AvatarDirectory people={[...(state?.members ?? []).map(member=>({id:member.userId,name:member.name})),...organization.teams.flatMap(team=>(team.members ?? []).map(person=>({id:person.id,name:person.name,src:person.avatarUrl}))),{id:user.id,name:user.displayName || user.email,src:user.avatarUrl}]}><Nav.Provider value={nav}><MistReviewProvider><MistDensityContext.Provider value={density||'default'}>
+      <PageNavigationGuardContext.Provider value={registerNavigationGuard}><PageBackRegistrationContext.Provider value={registerPageBack}><MistAppShell collapsed={collapsed} scrollKey={scrollPosition.current.key} notices={shellNotices} onCloseNotices={() => setHiddenNoticeKey(shellNoticeKey)}
+        sidebar={<CountedSidebar sections={sections} activeId={base === 'development' ? 'development' : COMPANY_ADMIN_VIEWS.has(base) && !(platformOnly && ['system-settings','settings'].includes(base)) ? 'company-settings' : base}
+          onNavigate={navigateModule} collapsed={collapsed} onToggleCollapsed={() => setCollapsed(value => !value)}
+          workspace={platformOnly ? { symbol: 'S', name: 'Sylway Cloud', caption: '平台运营', onClick:()=>go('platform-admin') } : platformCompany ? { symbol: platformCompany.companyName.slice(0,1), name: platformCompany.companyName, caption: '平台管理', onClick:()=>go('company-settings') } : { ...organizationEntry({ organization:{...organization,teams:organization.teams.map(team=>({...team,members:team.members?.map(person=>person.id===user.id?{...person,avatarUrl:user.avatarUrl ?? undefined}:person)}))}, department: user.department, teamId: teamView.teamId, onSelect: id => { teamView.select(id); setOrganizationOpen(false); },
+              onCompanyProfile: session.canAccessView(View.SystemSettings) ? () => { setOrganizationOpen(false); go('company-settings', undefined, { section: 'profile' }); } : undefined,
+              onManageTeams: session.hasPermission('hr:write') && session.canAccessView(View.SystemSettings) ? () => { setOrganizationOpen(false); go('company-settings', undefined, { section: 'teams' }); } : undefined }),
+            expanded: organizationOpen, onClick:()=>{setOrganizationOpen(value=>!value);if(!organizationOpen)organization.retry();} }}
+          account={{ name, identityKey:user.id, caption: roles, avatarUrl: user.avatarUrl ?? undefined, onClick: () => go('account') }}
+          onSearch={() => setPalette(true)}
+          assistant={!canAI || base === 'assistant' ? undefined : { title: '小竹', text: '查询当前公司的进展', onClick: ()=>openAI() }} />}
+        topbar={scrolled => <MistTopbar scrolled={scrolled} onBack={backTarget ? goBack : undefined} backLabel={backTarget ? '返回' + backTarget.label : undefined} crumbs={platformOnly && ['system-settings','settings'].includes(route.view) ? [{label:'平台运营'},{label:'平台设置'}] : crumbsFor(route, go, state?.devs.find(d=>d.id===route.id)?.code || state?.orders.find(o=>o.id===route.id)?.code, state?.versions.find(v=>v.id===route.versionId)?.label)}
+          sync={base === 'account' || !Page ? undefined : platformOnly ? { state: 'ok', text: '平台运营' } : platformCompany ? { state: 'ok', text: '平台管理' } : !live||workspace.error||workspace.pending||workspace.pendingCreate||workspace.loading||workspace.saving||shellNoticeList.length ? { state: workspace.error||workspace.pending&&!workspace.saving ? 'offline' : workspace.loading||workspace.saving ? 'syncing' : 'ok', text: workspace.saving ? '正在保存' : workspace.loading ? '读取公司数据' : workspace.pending ? '需要核对同步状态' : workspace.error ? (workspace.pendingCreate ? '需要核对同步状态' : '操作未完成') : live ? '查看提示' : '设计组件展示', ...(shellNoticeList.length ? { onClick: () => setHiddenNoticeKey(noticesHidden ? '' : shellNoticeKey), expanded: !noticesHidden } : {}) } : undefined}
+          theme={theme} onToggleTheme={toggleTheme} onSearch={() => setPalette(true)}
+          extra={<>{!(platformOnly || platformCompany) && !route.id && !route.view.includes('/') && <ModuleWorkButton view={route.view} />}{!(platformOnly || platformCompany) && <MistReviewButton/>}<ManualLink /></>} notifications={platformOnly || platformCompany ? undefined : { unread: visibleNotifications.some(n=>!n.readAt), onClick:()=>setNotifications(true) }} onAsk={!canAI || base === 'assistant' ? undefined : ()=>openAI()} />}
+      >
+        {!Page ? <EmptyState title={uiText("没有找到此页面")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />
+          : !permitted ? <EmptyState icon={ShieldCheck} title={uiText("没有查看权限")} description={uiText("当前账号无法访问此业务。")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />
+          : Page ? <TeamViewScope teamId={COMPANY_ADMIN_VIEWS.has(base) || base === 'account' ? 'all' : teamView.teamId} actorId={user.id} teams={organization.teams}><MistPresentedErrorContext.Provider value={workspace.error||undefined}><PageLoadBoundary resetKey={route.view} fallback={retry=><MistPage><Banner tone="bad" title={uiText('页面未能加载')} actions={<Button onClick={retry}>{uiText('重新加载')}</Button>}/></MistPage>}><React.Suspense fallback={<PageLoading />}><Page key={session.sessionKey + ':' + workspace.workspace?.id + ':' + (stablePageRoute?route.view:JSON.stringify(route))} /></React.Suspense></PageLoadBoundary></MistPresentedErrorContext.Provider></TeamViewScope>
+          : <EmptyState title={uiText("没有找到此页面")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />}
+      </MistAppShell></PageBackRegistrationContext.Provider></PageNavigationGuardContext.Provider>
+      <ExportConfirmHost scope={JSON.stringify([session.sessionKey, user.id, user.companyId, user.roles, user.roleIds, user.permissions, user.permissionCeiling, user.businessAttributes, user.globalBusinessScope, workspace.workspace?.id, workspace.workspace?.access, teamView.teamId, route])} />
+      <CommandPalette open={palette} onClose={() => setPalette(false)} query={query} onQueryChange={setQuery} items={commands} />
+      <AssistantDrawer key={aiScope} open={ai} onClose={() => setAI(false)} onExpand={aiBusy?undefined:expandAI} messages={[overview(),...msgs,...(aiBusy?[{role:'typing'} as ChatMessage]:[])]} onSend={question=>void send(question)} sub={uiText(aiBusy?'正在生成':undefined)} suggestions={aiBusy?[]:['根据当前事实建议下一步','哪些信息还需要核实']} />
+      <NotificationCenter open={notifications} onClose={()=>setNotifications(false)} items={visibleNotifications} digest={dailyDigest} digestEnabled={!!state?.settings.notifications.digest}
+        busy={workspace.saving||workspace.agentTaskNotices?.reading}
+        error={workspace.agentTaskNotices?.error&&<Banner tone="bad" title={uiText(workspace.agentTaskNotices.error)} actions={<Button onClick={()=>void workspace.agentTaskNotices?.refresh()}>{uiText('重新加载')}</Button>}/>}
+        onOpenItem={n=>{void readMistNotice(workspace,n).then(()=>{setNotifications(false);if(n.target)go(n.target.view,n.target.id,n.target);}).catch(report);}}
+        onOpenDigest={target=>{setNotifications(false);go(target.view,target.id,target);}}
+        onReadAll={()=>void readAllMistNotices(workspace,visibleNotifications).catch(report)}
+        onViewAll={()=>{setNotifications(false);go('notifications');}} />
+    </MistDensityContext.Provider></MistReviewProvider></Nav.Provider></AvatarDirectory>
+  );
+}
+
+export default function WorkspaceApp(props: WorkspaceProps) {
+  return <MistWorkspaceProvider><AppInner {...props} /></MistWorkspaceProvider>;
+}

@@ -22,3 +22,31 @@ export type NavCtx = {
 };
 export const Nav = React.createContext<NavCtx>(null as unknown as NavCtx);
 export const useNav = () => React.useContext(Nav);
+
+const ROUTE_KEYS = ['view','id','versionId','batchId','section','customerId','orderLineId','productionId','detail'] as const;
+export function readMistRoute(): Route {
+  const qs = new URLSearchParams(location.search);
+  const view = qs.get('view') || 'cockpit', id = qs.get('id') || undefined;
+  const saved = history.state?.mistRoute;
+  const scopeMatches = saved?.view === view && saved?.id === id && ROUTE_KEYS.slice(2).every(key => saved[key] === (qs.get(key) || undefined));
+  return {
+    ...(scopeMatches ? saved : {}),
+    view, id, ...Object.fromEntries(ROUTE_KEYS.slice(2).map(key => [key, qs.get(key) || undefined])),
+  };
+}
+export function writeMistRoute(route: Route, options: GoOptions = {}) {
+  const url = new URL(location.href);
+  for (const key of ROUTE_KEYS) {
+    if (route[key]) url.searchParams.set(key, route[key]!); else url.searchParams.delete(key);
+  }
+  history.pushState({ ...history.state, mistRoute: route, mistListState: isListState(route, options), mistDepth: (Number(history.state?.mistDepth) || 0) + 1 }, '', url);
+}
+/** A list position: the list itself or a row picked for its in-page preview (not a full page). */
+export function isListState(route: Route, options: GoOptions = {}) { return !route.detail && (!route.id || !!options.keepScroll); }
+/** Scroll resets on page changes, but not while switching the previewed row inside the same list (or going back/forward between such rows). */
+export function nextScrollKey(previous: { key: string; route: Route; list: boolean }, route: Route, list: boolean) {
+  const keep = list && previous.list && previous.route.view === route.view && (previous.route.section ?? '') === (route.section ?? '');
+  return keep ? previous.key : scrollKeyOf(route, list);
+}
+export function scrollKeyOf(route: Route, list: boolean) { return route.view + (route.id ?? '') + (list ? '#list' : '');
+}

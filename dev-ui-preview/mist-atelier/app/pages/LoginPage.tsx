@@ -11,7 +11,7 @@ import { useMistSession } from '../runtime/auth';
 import { mapAuthErrorMessage } from '../../../../services/authService';
 
 /** entry=platform：Sylway 平台管理入口，只接受平台账号；默认是公司登录入口。 */
-export function LoginPage({ entry = 'company' }: { entry?: 'company' | 'platform' }) {
+export function LoginPage({ entry = 'company', onWorkspaceIntent }: { entry?: 'company' | 'platform'; onWorkspaceIntent?: () => void }) {
   const platform = entry === 'platform';
   const { go, route } = useNav();
   const session = useMistSession();
@@ -61,6 +61,7 @@ export function LoginPage({ entry = 'company' }: { entry?: 'company' | 'platform
     if (submitting.current || busy || cooldown > 0 || session.status === 'loading') return;
     if (!email.trim()) { setErr('请输入工作邮箱'); return; }
     if (!pw) { setErr('请输入密码'); return; }
+    onWorkspaceIntent?.();
     await doLogin();
   };
   const shownError = err || session.error;
@@ -93,7 +94,11 @@ export function LoginPage({ entry = 'company' }: { entry?: 'company' | 'platform
           </>) : (<>
           <div><h2 className="mist-h1" style={{ fontSize: 28 }}>{uiText(platform ? "平台管理" : "登录")}</h2></div>
           <Field label={uiText("工作邮箱")}><TextInput icon={Mail} type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} disabled={busy} required /></Field>
-          <Field label={uiText("密码")} error={errorNode}><PasswordInput icon={KeyRound} autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} placeholder={uiText("输入密码")} disabled={busy} aria-invalid={!!errorNode} aria-describedby={errorNode ? "mist-login-error" : undefined} /></Field>
+          <Field label={uiText("密码")} error={errorNode}><PasswordInput icon={KeyRound} autoComplete="current-password" value={pw} onChange={event => {
+            const value = event.target.value;
+            if (!pw && value) onWorkspaceIntent?.();
+            setPw(value);
+          }} placeholder={uiText("输入密码")} disabled={busy} aria-invalid={!!errorNode} aria-describedby={errorNode ? "mist-login-error" : undefined} /></Field>
           <div className="mist-row"><Checkbox checked={remember} onChange={setRemember} disabled={busy} label={uiText("保持登录")} /><span className="mist-spacer" /><TextLink disabled={busy} title={uiText("找回密码")} onClick={()=>go('account-recovery')}>{uiText("找回密码")}</TextLink></div>
           <Button type="submit" variant="primary" size="lg" block loading={busy} disabled={busy || cooldown > 0 || session.status === 'loading'} iconRight={busy ? undefined : ArrowRight}>{uiText(cooldown > 0 ? `请稍候 ${cooldown}s` : '登录')}</Button>
           {!platform && <p className="mist-auth-switch"><TextLink disabled={busy} onClick={() => go('register')}>{uiText("账户开通")}</TextLink></p>}
