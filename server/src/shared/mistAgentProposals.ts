@@ -1,3 +1,4 @@
+import {customerCommandChangesCredit} from './mistCustomerFieldAuthority';
 /**
  * Agent 提议（2026-10-30、2026-11-02 用户定案）：除低风险命令外（见 agentCommandRisk），Agent 只能提交提议，
  * 由账号本人在「接着完成」里确认后，按本人身份走完整的命令门禁执行；Agent 不能确认或拒绝。
@@ -13,6 +14,8 @@ export type AgentProposal = {
   state: 'pending' | 'confirmed' | 'rejected'; decidedAt?: string; note?: string; taskId?: string;
   /** Response-only access state; never accepted as a client authority claim. */
   unavailable?: boolean; taskBlocked?: string;
+  /** Server-owned risk snapshot; pending views recompute current risk and decisions retain their executed tier. */
+  risk?: AgentCommandRisk;
   sourceRevision?: number;
   /** 确认执行后生成的文件（单据、对账单、通知等），供对话里直接打开与续办时引用。 */
   produced?: { fileId: string; fileName: string };
@@ -84,6 +87,15 @@ export const agentCommandRisk = (type: string | undefined): AgentCommandRisk => 
   return HIGH_RISK_COMMANDS.has(type) || HIGH_RISK_PREFIXES.some(prefix => type.startsWith(prefix)) || HIGH_RISK_VERB.test(type) ? 'high' : 'medium';
 };
 
+/** Generic archive edits remain medium; an actual credit grant/denomination change uses the existing high-risk flow. */
+export const effectiveAgentCommandRisk = (command:AgentProposalCommandBody,state?:MistState|null):AgentCommandRisk => customerCommandChangesCredit(command,state)?'high':agentCommandRisk(command.type);
+export function agentProposalRisk(proposal:Pick<AgentProposal,'command'|'risk'>&Partial<Pick<AgentProposal,'state'>>,state?:MistState|null):AgentCommandRisk {
+ if(proposal.state&&proposal.state!=='pending')return proposal.risk??agentCommandRisk(proposal.command.type);
+ const current=state?effectiveAgentCommandRisk(proposal.command,state):undefined;
+ if(proposal.risk==='high'||current==='high')return 'high';
+ return proposal.risk??current??effectiveAgentCommandRisk(proposal.command);
+}
+
 /** 拒绝本人旧提议只是撤销待办，不依赖继续使用 AI 的权限；确认的原业务权限仍在仓储重新校验。 */
 export const agentProposalCommandPermission = (type?: string): string|null => type==='agent.proposal.reject'?null:'ai:chat';
 
@@ -101,7 +113,7 @@ export function applyAgentProposalCommand(state: MistState, command: AgentPropos
     if (!Array.isArray(summary) || !summary.length || summary.length > 10 || summary.some(line => typeof line !== 'string' || !line.trim() || line.length > 500)) fail('提议须附 1–10 行业务说明');
     if (list.filter(p => p.ownerId === context.actorId && p.state === 'pending').length >= AGENT_PROPOSAL_MAX_PENDING) fail('待确认的 Agent 提议过多，请先处理已有提议', 'PRECONDITION');
     const id = context.id();
-    list.push({ id, ownerId: context.actorId!, owner: plainOwner(context.actorName), ...(context.agentSessionId ? { agentSessionId: context.agentSessionId } : {}),...(context.agentIdentity?{agentIdentity:context.agentIdentity}:{}), ...(context.agentTaskId ? {taskId:context.agentTaskId,sourceRevision:context.agentTaskSourceRevision} : {}), command: { type: body.type, payload: JSON.parse(JSON.stringify(body.payload)) }, summary: summary.map(line => line.trim()), createdAt: context.now, state: 'pending' });
+    list.push({ id, ownerId: context.actorId!, owner: plainOwner(context.actorName), ...(context.agentSessionId ? { agentSessionId: context.agentSessionId } : {}),...(context.agentIdentity?{agentIdentity:context.agentIdentity}:{}), ...(context.agentTaskId ? {taskId:context.agentTaskId,sourceRevision:context.agentTaskSourceRevision} : {}), command: { type: body.type, payload: JSON.parse(JSON.stringify(body.payload)) }, risk: effectiveAgentCommandRisk(body,state), summary: summary.map(line => line.trim()), createdAt: context.now, state: 'pending' });
     return { id };
   }
   if (command.type === 'agent.proposal.reject') {

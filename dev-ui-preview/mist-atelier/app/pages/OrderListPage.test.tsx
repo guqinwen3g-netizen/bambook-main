@@ -11,7 +11,7 @@ import { MistRoot, ToastProvider } from '../../../../components/mist';
 import type { MistState } from '../../../../server/src/shared/mistWorkspace';
 import { Nav } from '../nav';
 import { usePageFailures } from '../runtime/errorPresentation';
-const store = vi.hoisted(() => ({ state: null as MistState | null, canWrite:true, loading: false, error: '', workspace: { id: 'w', ownerId: 'test-user' }, run: vi.fn(), refresh: vi.fn(), downloadFile: vi.fn(), uploadFile: vi.fn() }));
+const store = vi.hoisted(() => ({ state: null as MistState | null, canWrite:true, loading: false, error: '', workspace: { id: 'w', ownerId: 'test-user', revision: 0, state: null as MistState|null }, run: vi.fn(), refresh: vi.fn(), downloadFile: vi.fn(), uploadFile: vi.fn() }));
 vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => store }));
 vi.mock('../runtime/auth', () => { const useMistSession = () => ({ status:'authenticated', sessionKey:'order-test', user:{id:'test-user',displayName:'负责人'}, hasPermission:(scope:string)=>scope.endsWith(':read')||store.canWrite,canAccessView:()=>true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
 import { OrderListPage } from './OrderListPage';
@@ -69,11 +69,22 @@ function select(label: string, value: string) {
 function deferred<T>() { let resolve!: (value: T) => void, reject!: (reason: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 beforeEach(() => {
   store.canWrite=true;
-  store.state = fixture(); store.loading = false; store.error = ''; store.run.mockReset(); store.refresh.mockReset(); store.downloadFile.mockReset(); go.mockReset();
+  store.state = fixture(); store.workspace={id:'w',ownerId:'test-user',revision:0,state:store.state}; store.loading = false; store.error = ''; store.run.mockReset(); store.refresh.mockReset(); store.downloadFile.mockReset(); go.mockReset();
   store.run.mockResolvedValue({ requestId: 'r1', revision: 2, result: {} });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); localStorage.removeItem('bambook.device.locale'); vi.restoreAllMocks(); vi.useRealTimers(); });
+
+it.each([true,false])('does not present an unread order workspace as an empty business (loading %s)',loading=>{
+ store.state=null;store.loading=loading;store.error=loading?'':'读取失败';render(<OrderListPage/>);
+ expect(host.textContent).toContain(loading?'正在读取订单资料':'订单资料未读取');expect(host.textContent).not.toContain('暂无在途条目');expect(host.textContent).not.toContain('暂无逾期');expect(queryByRole(host,'table',{name:'订单'})).toBeNull();for(const b of getAllByRole(host,'button',{name:'新建订单',exact:true}))expect((b as HTMLButtonElement).disabled).toBe(true);expect(store.run).not.toHaveBeenCalled();
+});
+it('does not offer order creation in a real empty list to a read-only role',()=>{
+ store.canWrite=false;store.state!.orders=[];render(<OrderListPage/>);expect(host.textContent).toContain('还没有成衣订单');expect(queryByRole(host,'button',{name:'新建订单',exact:true})).toBeNull();expect(store.run).not.toHaveBeenCalled();
+});
+it.each([true,false])('treats an empty approval filter as no match and clears all list filters (write %s)',async canWrite=>{
+ store.canWrite=canWrite;render(<OrderListPage/>);await click(getByRole(host,'button',{name:/^主单审批/}));await click(getByRole(document.body,'menuitemradio',{name:'待审批',exact:true}));expect(host.textContent).toContain('没有匹配的订单');expect(host.textContent).not.toContain('还没有成衣订单');const search=getByRole(host,'textbox',{name:'订单号、客户或季节',exact:true})as HTMLInputElement;act(()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(search,'NO-MATCH');search.dispatchEvent(new Event('input',{bubbles:true}));});const first=store.state!.orders.find(o=>o.type==='garment')!;await click(getByRole(host,'button',{name:/^状态/}));await click(getByRole(document.body,'menuitemradio',{name:first.state,exact:true}));expect(host.textContent).toContain('没有匹配的订单');expect(host.textContent).not.toContain('还没有成衣订单');await click(getByRole(host,'button',{name:'清除筛选',exact:true}));expect(search.value).toBe('');expect(getByRole(host,'button',{name:/^主单审批\s*全部/})).toBeTruthy();expect(getByRole(host,'button',{name:/^状态\s*全部$/})).toBeTruthy();expect(host.textContent).toContain(first.code);if(!canWrite)expect(queryByRole(host,'button',{name:'新建订单',exact:true})).toBeNull();expect(store.run).not.toHaveBeenCalled();
+});
 
 it('finishes internal order stages without a shipment reminder or counting completed goods as in transit',()=>{
   const f=internalDeliveryFixture(),id=f.send();
@@ -112,6 +123,9 @@ it('order detail renders only its own lines and does not invent a fallback order
   render(<OrderDetailPage />, { view: 'orders/detail', id: 'order-a' });
   expect(host.textContent).toContain('本单产品'); expect(host.textContent).not.toContain('其他单产品');
   render(<OrderDetailPage />, { view: 'orders/detail', id: 'missing' }); expect(host.textContent).toContain('没有找到此订单'); expect(host.textContent).not.toContain('SO-A');
+});
+it('does not classify an unread order detail as a missing order',()=>{
+ store.state=null;store.error='读取失败';render(<OrderDetailPage/>,{view:'orders/detail',id:'order-a'});expect(host.textContent).toContain('订单资料未读取');expect(host.textContent).not.toContain('没有找到此订单');expect(host.textContent).not.toContain('订单可能已移除');expect(store.run).not.toHaveBeenCalled();
 });
 it('waits for the checklist acknowledgement and leaves data unchanged on rejection', async () => {
   const pending = deferred<unknown>(); store.run.mockReturnValue(pending.promise);

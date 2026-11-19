@@ -16,7 +16,7 @@ export const ACCOUNT_STATUS: Record<string, { label: string; tone: 'ok' | 'warn'
 export const EMPLOYMENT_STATUS: Record<string, string> = { Probation: '试用期', Regular: '正式', Suspended: '停职', Resigned: '已离职', Terminated: '已解除' };
 export const CONTRACT_TYPES = [{ value: 'FixedTerm', label: '固定期限' }, { value: 'OpenEnded', label: '无固定期限' }, { value: 'PartTime', label: '非全日制' }, { value: 'Intern', label: '实习' }];
 
-export interface OrgDepartment { id: string; name: string; parentId: string | null; status?: string; businessAttributes?: BusinessAttribute[] }
+export interface OrgDepartment { id: string; name: string; parentId: string | null; headId?:string|null; updatedAt?:string; status?: string; businessAttributes?: BusinessAttribute[] }
 /** 邀请邮件发送结果；只有 sent 表示已提交给邮件服务，不代表对方已收到。 */
 export type AccountInvitation = { status: 'sent' | 'unconfirmed' | 'unavailable' | 'cooldown'; message: string };
 export interface AdminAccount { id: string; displayName: string; email: string; status: string; roles: string[]; roleIds: string[]; departmentId: string | null; department: string | null; lastLoginAt: string | null; createdAt: string; metadata?: Record<string, unknown> | null; identityEditable?: boolean }
@@ -104,8 +104,8 @@ export const organizationApi = {
   // 人事（hr:read / hr:write）
   personnel: () => call<{ personnel: OrgPerson[]; departments: OrgDepartment[]; jobs: OrgJob[]; positionNames: Record<string, string> }>('/hr/personnel'),
   teams: () => call<{ teams: OrgTeam[] }>('/hr/teams'),
-  createDepartment: (body: { name: string; parentId: string; businessAttributes: BusinessAttribute[] }) => call<{ department: OrgDepartment }>('/hr/departments', { method: 'POST', body }),
-  updateDepartment: (departmentId: string, body: { name: string; businessAttributes: BusinessAttribute[] }) => call<unknown>('/hr/departments/' + id(departmentId), { method: 'PATCH', body }),
+  createDepartment: (body: { name: string; parentId: string; businessAttributes: BusinessAttribute[];headId?:string|null }) => call<{ department: OrgDepartment }>('/hr/departments', { method: 'POST', body }),
+  updateDepartment: (departmentId: string, body: { name: string; businessAttributes: BusinessAttribute[];expectedUpdatedAt:string;headId?:string|null;expectedHeadId?:string|null }) => call<unknown>('/hr/departments/' + id(departmentId), { method: 'PATCH', body }),
   retireDepartment: (departmentId: string, targetDepartmentId?: string) => call<unknown>('/hr/departments/' + id(departmentId) + '/retire', { method: 'POST', body: targetDepartmentId ? { targetDepartmentId } : {} }),
   createTeam: (body: { name: string; departmentId: string; description?: string }) => call<{ team: OrgTeam }>('/hr/teams', { method: 'POST', body }),
   updateTeam: (teamId: string, body: { name?: string; departmentId?: string; description?: string }) => call<unknown>('/hr/teams/' + id(teamId), { method: 'PATCH', body }),

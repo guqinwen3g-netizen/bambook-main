@@ -2,15 +2,15 @@ import { businessInputInstant } from '../../runtime/businessClock';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import {fulfillmentDocumentFamily} from '../../../../../server/src/shared/mistFulfillment';
 import {BL_KIND_LABEL,DOCUMENT_TYPE_LABEL,DOCUMENT_TYPES,OWN_DOCUMENT_TYPES,PER_ORDER_TYPES,POST_DEPARTURE_TYPES,isOwnDocumentType,type BillOfLadingKind,type OwnDocumentType} from '../../../../../server/src/shared/mistDocumentTypes';
-import {documentGenerationBlocker} from '../../../../../server/src/shared/mistDocumentGeneration';
-import {suggestedReceivableDue} from '../../../../../server/src/shared/mistTradeTerms';
+import {documentGenerationBlocker,cdDocumentIssueProblem,cdDocumentIssueBasis} from '../../../../../server/src/shared/mistDocumentGeneration';
+import {suggestedReceivableDue,shipmentReceivableDueCondition} from '../../../../../server/src/shared/mistTradeTerms';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import { View } from '../../../../../types';
 /** 单据中心：按准确出运与合同保留单据版本（新版本不覆盖旧版本）、正式文件与签发 / 归档记录；我方签发 CI / PL，外部机构单据只归档原件；CI 签发回到财务应收。 */
 import React from 'react';
 import { Anchor, Archive, Building2, Download, FileText, FilePlus2, Pencil, Plus, Receipt, SearchX, Sparkles, Stamp, XCircle } from 'lucide-react';
 import { Button, Card, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Tabs, TextLink, Toolbar, type Column, type Tone } from '../../../../../components/mist';
-import { isPendingFinanceMistInvoice, isRecognizedMistInvoice, type MistState } from '../../../../../server/src/shared/mistWorkspace';
+import { isPendingFinanceMistInvoice, isRecognizedMistInvoice, type MistState, type MistFile } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentDocument, FulfillmentShipment } from '../../../../../server/src/shared/mistFulfillment';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
@@ -18,8 +18,10 @@ import { useNav } from '../../nav';
 import { fmt } from '../../data';
 import { ModuleEditorDialog, type ModuleEditorSpec, type ModuleField } from './ModuleWorkbench';
 import { SEAL_KIND_LABEL, usableSeals } from './CompanySeals';
-import { documentTypeLabel, choices, emptyOption, Events, exportRecords, field, localNow, RecordFiles, text } from './fulfillmentKit';
-import { useRouteDraft } from './useRouteDraft';
+import { useRecordAttachment, documentTypeLabel, choices, emptyOption, Events, exportRecords, field, localNow, RecordFiles, text } from './fulfillmentKit';
+import { useRouteDraft, useRouteScope } from './useRouteDraft';
+import { workspaceFileBundle } from '../../runtime/workspaceFileBundle';
+import { downloadGeneratedBlob, requestGeneratedExport } from '../../runtime/exportRequests';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen, type ReasonedAction } from './pageKit';
 import { MODE_LABEL, packingMatched } from './ShipmentsPage';
 import { DOCUMENT_ISSUERS } from '../../runtime/tradeOptions';
@@ -35,6 +37,9 @@ const OWN = isOwnDocumentType;
 /** Own documents bound to the shipment's open state; post-departure notices stay editable after sailing. */
 const shipmentBound = (type: DocType) => OWN(type) && !POST_DEPARTURE_TYPES.includes(type);
 const family = fulfillmentDocumentFamily;
+const issuedShipmentDocuments = (state: MistState, shipmentId: string) =>
+  state.fulfillment.documents.filter(d => d.shipmentId === shipmentId && d.status === 'issued');
+const bundleBasis = (docs: FulfillmentDocument[]) => JSON.stringify(docs.map(d => [d.id, d.fileIds]));
 export function documentStatus(d: FulfillmentDocument): { label: string; tone: Tone } {
   if (d.status === 'void') return { label: '已作废', tone: 'neutral' };
   if (d.status === 'issued') return d.externalIssue ? { label: '外部原件已归档', tone: 'ok' } : { label: '已签发', tone: 'ok' };
@@ -48,6 +53,7 @@ export function issueBlocker(root: MistState, d: FulfillmentDocument) {
   if (!d.fileIds.length) return OWN(d.type) ? '请先生成或上传正式单据文件' : '请先上传外部机构签发的原件';
   if (root.fulfillment.documents.some(o => o.id !== d.id && family(o) === family(d) && o.status === 'issued')) return '相同来源已有有效版本，请先作废';
   if(d.type==='CI'&&root.orders.find(o=>o.id===d.orderId)?.replacementSource&&!root.fulfillment.customs.some(c=>c.shipmentId===s.id&&c.replacementReviews?.some(r=>r.orderId===d.orderId&&r.unitPrice>0)))return '补发申报货值尚未核定';
+  const cdIssueProblem=cdDocumentIssueProblem(root,d);if(cdIssueProblem)return cdIssueProblem;
   if (d.type === 'PL' && !packingMatched(root, s)) return '装箱分配与计划数量不一致';
   return '';
 }
@@ -60,8 +66,11 @@ function voidBlocker(root: MistState, d: FulfillmentDocument) {
 }
 
 export function DocumentCenterPage() {
+  const attachFiles=useRecordAttachment();
   const presentedError = React.useContext(MistPresentedErrorContext);
-  const { state, run, error, refresh, loading, saving, pending, downloadFile } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
+  const { state, run, error, refresh, loading, saving, pending, downloadFile, readFile, workspace } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
+  const scope = useRouteScope();
+  const [fileFailure, setFileFailure] = useRouteDraft('');
   const can = session.hasPermission('customs:write'), canInvoices = session.hasPermission('invoices:read');
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
   const [tab, setTab] = React.useState<Tab>('documents'), [domainChoice, setDomainChoice] = React.useState<Domain | null>(null);
@@ -69,6 +78,7 @@ export function DocumentCenterPage() {
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
   React.useEffect(() => { if (route.id) { setPicked(route.id); setDrawer(true); setDomainChoice(null); setTab('documents'); } }, [route.id]);
   const f = state?.fulfillment, locked = saving || !!pending;
+  const liveCdIssue=React.useRef({state,workspaceId:workspace?.id,revision:workspace?.revision,loading,error});liveCdIssue.current={state,workspaceId:workspace?.id,revision:workspace?.revision,loading,error};
   const shipmentOf = (d: FulfillmentDocument) => f?.shipments.find(s => s.id === d.shipmentId);
   const contextShipment = route.section ? f?.shipments.find(s => s.id === route.section) : undefined;
   const hasContext = !!route.section, invalidContext = hasContext && !!state && !contextShipment;
@@ -86,10 +96,65 @@ export function DocumentCenterPage() {
   const rows = searched.filter(d => statusFilter === 'active' ? d.status !== 'void' : d.status === statusFilter)
     .sort((a, b) => order[a.status] - order[b.status] || (shipmentOf(a)?.code || '').localeCompare(shipmentOf(b)?.code || '') || a.type.localeCompare(b.type) || b.version - a.version);
   const selected = rows.find(d => d.id === picked) || (picked ? docs.find(d => d.id === picked) : undefined);
+  const issuedForBundle = state && contextShipment && !contextShipment.hiddenCount ? issuedShipmentDocuments(state, contextShipment.id) : [];
+
+  function downloadBundle() {
+    if (!state || !contextShipment || !issuedForBundle.length) return;
+    const shipmentId = contextShipment.id, workspaceId = workspace?.id, basis = bundleBasis(issuedForBundle);
+    const isCurrent = () => {
+      const current = liveCdIssue.current;
+      return scope.isCurrent() && current.workspaceId === workspaceId && !!current.state &&
+        current.state.fulfillment.shipments.some(s => s.id === shipmentId && !s.hiddenCount) &&
+        bundleBasis(issuedShipmentDocuments(current.state, shipmentId)) === basis;
+    };
+    setFileFailure('');
+    try {
+      const incomplete = issuedForBundle.find(d => !d.fileIds.length);
+      if (incomplete) throw new Error(`${incomplete.number || incomplete.title} 缺少正式原件`);
+      const refs = [...new Set(issuedForBundle.flatMap(d => d.fileIds))]
+        .map(fileId => ({ fileId, name: state.files.find(f => f.id === fileId)?.name || '正式单据' }));
+      const name = contextShipment.code + '-正式单据';
+      requestGeneratedExport({ filename: name + '.zip', rowCount: refs.length, run: async () => {
+        try {
+          const result = await workspaceFileBundle(refs, state.files, readFile, {
+            name, date: issuedForBundle[0].issuedAt || issuedForBundle[0].createdAt, isCurrent,
+          });
+          downloadGeneratedBlob(new Blob([new Uint8Array(result.bytes).buffer], { type: 'application/zip' }), result.name);
+        } catch (cause) {
+          if (scope.isCurrent()) setFileFailure(cause instanceof Error ? cause.message : String(cause));
+        }
+      } });
+    } catch (cause) {
+      setFileFailure(cause instanceof Error ? cause.message : String(cause));
+    }
+  }
+
+  async function printOriginal(file: MistFile) {
+    const workspaceId = workspace?.id;
+    const isCurrent = () => scope.isCurrent() && liveCdIssue.current.workspaceId === workspaceId;
+    setFileFailure('');
+    const preview = window.open('', '_blank');
+    if (!preview) { setFileFailure('请允许打开打印预览窗口'); return; }
+    try {
+      const blob = await readFile(file);
+      if (!isCurrent()) { preview.close(); return; }
+      const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+      preview.location.href = url;
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (cause) {
+      preview.close();
+      if (isCurrent()) setFileFailure(cause instanceof Error ? cause.message : String(cause));
+    }
+  }
 
   const pick = (d: FulfillmentDocument) => { setPicked(d.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, d.id, target, { keepScroll: true }); };
   const changeDomain = (value: Domain) => { setDomainChoice(value); setStatusFilter('active'); setPicked(null); };
   const shipments = (f?.shipments || []).filter(s => s.state !== 'cancelled' && (!hasContext || s.id === route.section));
+  const conditionalDueOrderIds=(state?.orders||[]).filter(order=>!order.replacementSource&&shipmentReceivableDueCondition(order.governance?.contract)).map(order=>order.id);
+  const fixedDueOrderIds=(state?.orders||[]).filter(order=>!order.replacementSource&&!conditionalDueOrderIds.includes(order.id)).map(order=>order.id);
+  const contractDueTerms=(orderId:string)=>shipmentReceivableDueCondition(state?.orders.find(order=>order.id===orderId)?.governance?.contract)?.terms||'';
+  const ciDueFields:ModuleField[]=[{...field('dueDate','应收到期日','date'),when:[{key:'type',values:['CI']},{key:'orderId',values:fixedDueOrderIds}]},{...field('conditionalDueTerms','合同账期','text',false),readonly:true,when:[{key:'type',values:['CI']},{key:'orderId',values:conditionalDueOrderIds}]}];
+  const dueOrderChange=(key:string,value:unknown,values:Record<string,unknown>)=>{const orderId=key==='orderId'?String(value):String(values.orderId||'');return {conditionalDueTerms:contractDueTerms(orderId),...(conditionalDueOrderIds.includes(orderId)?{dueDate:''}:{})};};
   const docSpec = (d?: FulfillmentDocument, base?: FulfillmentDocument): ModuleEditorSpec => {
     const src = d || base, fixed = !!src;
     const s = src ? f?.shipments.find(row => row.id === src.shipmentId) : contextShipment;
@@ -99,29 +164,31 @@ export function DocumentCenterPage() {
         ...(fixed ? [] : [field('shipmentId', '准确出运', 'select', true, [emptyOption, ...shipments.map(row => ({ value: row.id, label: `${row.code} · ${row.customer}` }))]), field('type', '单据类型', 'select', true, (DOCUMENT_TYPES as readonly DocType[]).map(value => ({ value, label: TYPE_LABEL[value] })))]),
         ...(fixed ? [] : [{ ...field('orderId', '对应订单', 'select', true, [emptyOption, ...(orderOptions.length ? orderOptions : (state?.orders || []).map(o => ({ value: o.id, label: o.code })))]), when: {key:'type',values:[...PER_ORDER_TYPES]} }]),
         field('number', '实际单据编号'), field('title', '标题'),
-        ...(!fixed || src?.type === 'CI' ? [{...field('dueDate', '应收到期日', 'date'),when:[{key:'type',values:['CI']},{key:'orderId',values:(state?.orders||[]).filter(order=>!order.replacementSource).map(order=>order.id)}]}] : []),
+        ...(!fixed || src?.type === 'CI' ? ciDueFields : []),
         field('content', '单据正文', 'textarea'),
       ],
-      initialValues: { shipmentId: src?.shipmentId || (hasContext ? route.section || '' : ''), type: src?.type || 'PL', orderId: src?.orderId || '', number: d?.number || '', title: src?.title || '', dueDate: src?.dueDate || '', content: src?.content || '' },
-      submit: v => run({ type: 'fulfillment.documents.save', payload: { ...(d ? { id: d.id } : {}), ...(base ? { baseDocumentId: base.id } : {}), shipmentId: src?.shipmentId || text(v, 'shipmentId'), orderId: src ? src.orderId : text(v, 'orderId'), type: (src?.type || text(v, 'type')) as DocType, number: text(v, 'number'), title: text(v, 'title'), dueDate: text(v, 'dueDate'), content: text(v, 'content'), fileIds: d?.fileIds || [] } }) };
+      initialValues: { shipmentId: src?.shipmentId || (hasContext ? route.section || '' : ''), type: src?.type || 'PL', orderId: src?.orderId || '', number: d?.number || '', title: src?.title || '', dueDate: conditionalDueOrderIds.includes(src?.orderId||'')?'':src?.dueDate||'',conditionalDueTerms:contractDueTerms(src?.orderId||''), content: src?.content || '' },
+      derive:dueOrderChange,
+      submit: v => run({ type: 'fulfillment.documents.save', payload: { ...(d ? { id: d.id } : {}), ...(base ? { baseDocumentId: base.id } : {}), shipmentId: src?.shipmentId || text(v, 'shipmentId'), orderId: src ? src.orderId : text(v, 'orderId'), type: (src?.type || text(v, 'type')) as DocType, number: text(v, 'number'), title: text(v, 'title'), dueDate: conditionalDueOrderIds.includes(src?src.orderId:text(v,'orderId'))?'':text(v, 'dueDate'), content: text(v, 'content'), fileIds: d?.fileIds || [] } }) };
   };
   const generateSpec = (s?: FulfillmentShipment, presetType?: OwnDocumentType, presetOrder?: string): ModuleEditorSpec => {
     const target = s || contextShipment, orderOptions = (target ? [...new Set(target.lines.map(line => line.orderId))] : []).map(id => ({ value: id, label: orderCode(id) || '订单不可用' }));
-    const plainOrders = (state?.orders || []).filter(o => !o.replacementSource).map(o => o.id), firstCi = (f?.documents || []).find(d => d.shipmentId === target?.id && d.type === 'CI');
+    const firstCi = (f?.documents || []).find(d => d.shipmentId === target?.id && d.type === 'CI');
     return { title: '生成单据', submitLabel: '生成',
       fields: [
         ...(target ? [] : [field('shipmentId', '准确出运', 'select', true, [emptyOption, ...shipments.map(row => ({ value: row.id, label: `${row.code} · ${row.customer}` }))])]),
         field('type', '单据类型', 'select', true, (OWN_DOCUMENT_TYPES as readonly OwnDocumentType[]).map(value => ({ value, label: TYPE_LABEL[value] }))),
         { ...field('orderId', '对应订单', 'select', true, [emptyOption, ...(orderOptions.length ? orderOptions : (state?.orders || []).map(o => ({ value: o.id, label: o.code })))]), when: { key: 'type', values: [...PER_ORDER_TYPES] } },
-        { ...field('dueDate', '应收到期日', 'date'), when: [{ key: 'type', values: ['CI'] }, { key: 'orderId', values: plainOrders }] },
+        ...ciDueFields,
       ],
       initialValues: (() => { const orderId = presetOrder || (orderOptions.length === 1 ? orderOptions[0].value : ''), contract = state?.orders.find(o => o.id === orderId)?.governance?.contract;
-        return { shipmentId: target?.id || '', type: presetType || 'CI', orderId, dueDate: firstCi?.dueDate || suggestedReceivableDue(contract?.paymentNote, target?.transport?.etd || target?.plannedDate) }; })(),
+        return { shipmentId: target?.id || '', type: presetType || 'CI', orderId, dueDate: conditionalDueOrderIds.includes(orderId)?'':firstCi?.dueDate || suggestedReceivableDue(contract?.paymentNote, target?.transport?.etd || target?.plannedDate),conditionalDueTerms:contractDueTerms(orderId) }; })(),
+      derive:dueOrderChange,
       submit: async v => {
         const shipmentId = target?.id || text(v, 'shipmentId'), type = text(v, 'type') as OwnDocumentType, orderId = PER_ORDER_TYPES.includes(type) ? text(v, 'orderId') : undefined;
         const blocked = state ? documentGenerationBlocker(state, f?.shipments.find(row => row.id === shipmentId), type, orderId) : null;
         if (blocked) throw new Error(blocked);
-        const receipt = await run({ type: 'fulfillment.documents.generate', payload: { shipmentId, type, ...(orderId ? { orderId } : {}), ...(type === 'CI' && text(v, 'dueDate') ? { dueDate: text(v, 'dueDate') } : {}) } });
+        const receipt = await run({ type: 'fulfillment.documents.generate', payload: { shipmentId, type, ...(orderId ? { orderId } : {}), ...(type === 'CI' && !conditionalDueOrderIds.includes(orderId||'') && text(v, 'dueDate') ? { dueDate: text(v, 'dueDate') } : {}) } });
         const id = String(receipt?.result?.id || ''), fileId = receipt?.result?.fileId;
         if (id) { setPicked(id); setDrawer(true); }
         if (typeof fileId === 'string') void downloadFile({ id: fileId, name: `${TYPE_LABEL[type]}-${target?.code || ''}.pdf`, mimeType: 'application/pdf', size: 0, storageKey: '', createdAt: '' }).catch(() => undefined);
@@ -138,16 +205,30 @@ export function DocumentCenterPage() {
       submit: v => run({ type: 'fulfillment.documents.bl', payload: { id: d.id, blNo: text(v, 'blNo'), kind: text(v, 'kind') as BillOfLadingKind, originals: text(v, 'kind') === 'original' ? Number(v.originals) : 0, ...(text(v, 'siDocumentId') ? { siDocumentId: text(v, 'siDocumentId') } : {}), ...(text(v, 'confirmDraft').trim() ? { confirmDraft: text(v, 'confirmDraft') } : {}), ...(text(v, 'release').trim() ? { release: text(v, 'release') } : {}) } }) };
   };
   const issueSpec = (d: FulfillmentDocument): ModuleEditorSpec => {
+    const sourceWorkspaceId=workspace?.id,cdSource=d.type==='CD'&&state?cdDocumentIssueBasis(state,d):'';
     const order = state?.orders.find(o => o.id === d.orderId), s = f?.shipments.find(row => row.id === d.shipmentId);
     const amount = d.type === 'CI' && order && s && !order.replacementSource ? s.lines.filter(l => l.orderId === order.id).reduce((n, l) => n + Math.round(l.quantity * (state?.orderLines.find(x => x.id === l.lineId)?.price || 0) * 100), 0) / 100 : null;
     // 指定用印人签发系统生成的单据时可选章盖印；其他人签发不带章，不显示这两项。
     const seals = d.generated?.length ? usableSeals(state, session.user?.id) : [];
     const sealFields: ModuleField[] = seals.length ? [field('sealId', '加盖印章', 'select', false, [{ value: '', label: '不盖章' }, ...seals.map(seal => ({ value: seal.id, label: `${seal.name} · ${SEAL_KIND_LABEL[seal.kind]}` }))]), { ...field('sealReason', '用印事由', 'text', true), when: { key: 'sealId', values: seals.map(seal => seal.id) } }] : [];
-    return { title: `签发 ${d.number} · V${d.version}`, submitLabel: '确认签发', ...(amount !== null ? { description: `将生成应收 ${order!.currency} ${fmt(amount, 2)}，到期 ${d.dueDate}，待财务确认。` } : {}), fields: sealFields, initialValues: seals.length ? { sealId: '', sealReason: '' } : {},
-      submit: v => run({ type: 'fulfillment.documents.issue', payload: { id: d.id, ...(text(v, 'sealId') ? { sealId: text(v, 'sealId'), sealReason: text(v, 'sealReason').trim() } : {}) } } as never) };
+    const condition = d.receivableDueCondition;
+    const dueText = condition?.terms || `到期 ${d.dueDate}`;
+    const review = condition?.kind === 'deliveryAcceptance' ? '待财务核对验收资料' : '待财务确认金额';
+    return { title: `签发 ${d.number} · V${d.version}`, submitLabel: '确认签发', ...(amount !== null ? { description: `将生成应收 ${order!.currency} ${fmt(amount, 2)}，${dueText}，${review}。` } : {}), fields: sealFields, initialValues: seals.length ? { sealId: '', sealReason: '' } : {},
+      submit: v => {
+        const command={type:'fulfillment.documents.issue' as const,payload:{id:d.id,...(text(v,'sealId')?{sealId:text(v,'sealId'),sealReason:text(v,'sealReason').trim()}:{})}};
+        if(d.type!=='CD')return run(command);
+        const checked=liveCdIssue.current;
+        if(!checked.state||!checked.workspaceId||checked.loading||checked.error||typeof checked.revision!=='number'||!Number.isSafeInteger(checked.revision)||checked.revision<0)throw new Error('单据资料未读取，请重新打开后核对');
+        const current=checked.state.fulfillment.documents.find(row=>row.id===d.id);
+        if(checked.workspaceId!==sourceWorkspaceId||!current||current.status!=='draft')throw new Error('单据已更新，请重新打开后核对');
+        const problem=cdDocumentIssueProblem(checked.state,current);if(problem)throw new Error(problem);
+        if(cdDocumentIssueBasis(checked.state,current)!==cdSource)throw new Error('报关资料或原件已更新，请重新打开后核对');
+        return run(command,{expectedRevision:checked.revision});
+      } };
   };
   const archiveSpec = (d: FulfillmentDocument): ModuleEditorSpec => ({ title: '归档外部机构原件', submitLabel: '归档原件', description: `${TYPE_LABEL[d.type]} ${d.number} · 以外部机构签发的原件为准。`, fields: [field('issuer', '外部签发机构', 'choice', true, DOCUMENT_ISSUERS), field('at', '实际签发时间', 'datetime-local'), field('evidence', '原件来源依据', 'textarea')], initialValues: { issuer: '', at: localNow(), evidence: '' }, submit: v => run({ type: 'fulfillment.documents.archiveExternal', payload: { id: d.id, issuer: text(v, 'issuer'), at: businessInputInstant(text(v, 'at')), evidence: text(v, 'evidence') } }) });
-  const voidSpec = (d: FulfillmentDocument): ModuleEditorSpec => ({ title: `作废 ${d.number} · V${d.version}`, submitLabel: '确认作废', description: d.invoiceId ? '作废 CI 会同时作废其财务应收，出运回到单证处理中；已对客发送的需重新发送。' : '作废后出运回到单证处理中；原版本保留为历史。', fields: [field('reason', '作废原因', 'textarea')], initialValues: { reason: '' }, submit: v => run({ type: 'fulfillment.documents.void', payload: { id: d.id, reason: text(v, 'reason') } }) });
+  const voidSpec = (d: FulfillmentDocument): ModuleEditorSpec => ({ title: `作废 ${d.number} · V${d.version}`, submitLabel: '确认作废', description: d.invoiceId ? '作废 CI 会同时作废其财务应收，出运回到单证处理中；已对客发送的需重新发送。' : ['CI','PL','BL','CO','OTHER'].includes(d.type)?'作废后出运回到单证处理中；原版本保留为历史。':undefined, fields: [field('reason', '作废原因', 'textarea')], initialValues: { reason: '' }, submit: v => run({ type: 'fulfillment.documents.void', payload: { id: d.id, reason: text(v, 'reason') } }) });
 
   const columns: Column<FulfillmentDocument>[] = [
     { key: 'number', header: '单据', width: 'minmax(170px,1.6fr)', render: d => <div className="mist-col" style={{ gap: 2 }}><Mono>{d.number}</Mono><small className="mist-muted">{d.title}</small></div> },
@@ -156,15 +237,15 @@ export function DocumentCenterPage() {
     { key: 'date', header: '签发 / 创建', width: '116px', hideOnMobile: true, render: d => <div className="mist-col" style={{ gap: 2 }}><span>{uiText(d.issuedAt ? shortWhen(d.issuedAt) : '未签发')}</span><small className="mist-muted">{d.actor} · {shortWhen(d.createdAt)}</small></div> },
     { key: 'status', header: '状态', width: '128px', render: d => { const st = documentStatus(d); return <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={st.tone}>{uiText(st.label)}</Pill>{d.status === 'draft' && !d.fileIds.length && <small className="mist-muted">{uiText("缺正式文件")}</small>}</div>; } },
   ];
-  const createButton = can ? <><Button icon={Plus} disabled={invalidContext || !shipments.length} onClick={() => setDialog(docSpec())}>{uiText("登记单据")}</Button><Button variant="primary" icon={Sparkles} disabled={invalidContext || !shipments.length} title={uiText(shipments.length ? undefined : '没有可出具单据的出运')} onClick={() => setDialog(generateSpec())}>{uiText("生成单据")}</Button></> : undefined;
+  const createButton = can ? <><Button icon={Plus} disabled={invalidContext || !shipments.length} onClick={() => setDialog(docSpec())}>{uiText("登记单据")}</Button><Button variant="primary" icon={Sparkles} disabled={invalidContext || !shipments.length} title={uiText(!state || shipments.length ? undefined : '没有可出具单据的出运')} onClick={() => setDialog(generateSpec())}>{uiText("生成单据")}</Button></> : undefined;
   const empty = inDomain.length
     ? <EmptyState icon={SearchX} title={uiText("没有符合条件的单据")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setTypeFilter('all'); setStatusFilter('active'); }}>{uiText("清除筛选")}</Button>} />
     : <EmptyState icon={FileText} title={uiText(invalidContext ? '来源出运不存在' : hasContext ? '本票还没有单据' : `还没有${domain === 'fabric' ? '面料' : '成衣'}出运单据`)} description={invalidContext ? uiText('来源出运不可用') : undefined} action={createButton && !invalidContext && shipments.length ? <Button icon={Sparkles} onClick={() => setDialog(generateSpec())}>{uiText("生成单据")}</Button> : undefined} />;
   const detail = selected && state
-    ? <DocumentDetail doc={selected} state={state} can={can} canInvoices={canInvoices} locked={locked} onPick={pick}
+    ? <DocumentDetail doc={selected} state={state} can={can} canInvoices={canInvoices} locked={locked} onPick={pick} onPrint={file=>void printOriginal(file)}
         onEdit={() => setDialog(docSpec(selected))} onVersion={() => setDialog(docSpec(undefined, selected))} onArchive={() => setDialog(archiveSpec(selected))} onVoid={() => setDialog(voidSpec(selected))}
         onIssue={() => setDialog(issueSpec(selected))} onBl={() => setDialog(blSpec(selected))} onRegenerate={() => setDialog(generateSpec(f?.shipments.find(row => row.id === selected.shipmentId), selected.type as OwnDocumentType, selected.orderId || undefined))}
-        onAttach={ids => run({ type: 'fulfillment.documents.save', payload: { id: selected.id, shipmentId: selected.shipmentId, orderId: selected.orderId, type: selected.type, number: selected.number, title: selected.title, dueDate: selected.dueDate, content: selected.content, fileIds: ids } })}
+        onAttach={added => attachFiles(root=>root.fulfillment.documents.find(row=>row.id===selected.id),(current,fileIds)=>{if(current.status!=='draft')throw new Error('单据已不在草稿状态，请重新打开后核对附件');return {type:'fulfillment.documents.save',payload:{id:current.id,shipmentId:current.shipmentId,orderId:current.orderId,type:current.type,number:current.number,title:current.title,dueDate:current.dueDate,content:current.content,fileIds}};},added)}
         onShipment={() => go('shipments', selected.shipmentId)} onInvoice={id => go('invoices', id)} />
     : <EmptyState icon={FileText} title={uiText("单据详情")} description={uiText(loading ? '正在读取单据' : '从列表选择一份单据，查看版本、正式文件与签发记录')} compact />;
   const profile = state?.settings.companyProfile;
@@ -174,12 +255,15 @@ export function DocumentCenterPage() {
       actions={<>
         {contextShipment && <Button onClick={() => go('shipments', contextShipment.id)}>{uiText("返回出运")}</Button>}
         {hasContext && <Button onClick={() => go('document-center')}>{uiText("查看全部单据")}</Button>}
+        {!!issuedForBundle.length && <Button icon={Archive} onClick={downloadBundle}>{uiText("打包本票正式单据")}</Button>}
         {tab === 'documents' && <Button icon={Download} disabled={!rows.length} onClick={() => exportRecords('单据目录', ['编号', '标题', '类型', '版本', '出运', '订单', '状态', '签发时间'], rows.map(d => [d.number, d.title, d.type, d.version, shipmentOf(d)?.code || '', orderCode(d.orderId), documentStatus(d).label, d.issuedAt || '']))}>{uiText("导出")}</Button>}
         {tab === 'documents' && createButton}
       </>} />
     {error && error !== presentedError && <FailureNotice title={state ? "单据操作未完成" : "单据未读取"} detail={error} retry={() => void refresh()} />}
-    {!hasContext && <div className="mist-section"><Tabs<Tab> value={tab} onChange={value => { setTab(value); setDrawer(false); }} options={[{ value: 'documents', label: '出运单据', count: docs.filter(d => d.status !== 'void').length }, { value: 'letterhead', label: '公司抬头' }]} /></div>}
-    {tab === 'letterhead' && !hasContext ? <Card><div className="mist-col" style={{ padding: 20, gap: 16 }}>
+    {fileFailure && <FailureNotice title="原件操作未完成" detail={fileFailure} />}
+    {!hasContext && <div className="mist-section"><Tabs<Tab> value={tab} onChange={value => { setTab(value); setDrawer(false); }} options={[{ value: 'documents', label: '出运单据', count: state ? docs.filter(d => d.status !== 'void').length : undefined }, { value: 'letterhead', label: '公司抬头' }]} /></div>}
+    {!state ? <EmptyState icon={FileText} title={uiText(error && !loading ? '单据资料未读取' : '正在读取单据')} compact />
+    : tab === 'letterhead' && !hasContext ? <Card><div className="mist-col" style={{ padding: 20, gap: 16 }}>
         {profile?.legalName ? <Facts items={[
           { label: '中文抬头', value: profile.legalName }, { label: '英文抬头', value: profile.englishName || '未填写' },
           { label: '中文地址', value: profile.address || '未填写' }, { label: '英文地址', value: profile.englishAddress || '未填写' },
@@ -200,7 +284,7 @@ export function DocumentCenterPage() {
         { value: 'issued', label: '有效签发 / 归档', count: count('issued'), color: 'var(--mist-ok)' },
         { value: 'void', label: '已作废', count: count('void'), color: 'var(--mist-ink-3)' },
       ]} />
-      <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.number} · V${selected.version}` : '单据详情'} drawerSub={selected ? `${TYPE_LABEL[selected.type]} · ${shipmentOf(selected)?.code || ''}` : undefined}
+      <ListDetail freezeLayout={!!dialog} drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.number} · V${selected.version}` : '单据详情'} drawerSub={selected ? `${TYPE_LABEL[selected.type]} · ${shipmentOf(selected)?.code || ''}` : undefined}
         list={<Card><DataTable ariaLabel={uiText("单据列表")} loading={loading} rows={rows} rowKey={d => d.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
         detail={detail} />
     </>}
@@ -208,8 +292,8 @@ export function DocumentCenterPage() {
   </MistPage>;
 }
 
-function DocumentDetail({ doc: d, state, can, canInvoices, locked, onPick, onEdit, onVersion, onIssue, onArchive, onVoid, onAttach, onShipment, onInvoice, onBl, onRegenerate }: {
-  doc: FulfillmentDocument; state: MistState; can: boolean; canInvoices: boolean; locked: boolean; onPick: (d: FulfillmentDocument) => void;
+function DocumentDetail({ doc: d, state, can, canInvoices, locked, onPick, onEdit, onVersion, onIssue, onArchive, onVoid, onAttach, onShipment, onInvoice, onBl, onRegenerate, onPrint }: {
+  doc: FulfillmentDocument; state: MistState; can: boolean; canInvoices: boolean; locked: boolean; onPick: (d: FulfillmentDocument) => void; onPrint: (file: MistFile) => void;
   onBl: () => void; onRegenerate: () => void;
   onEdit: () => void; onVersion: () => void; onIssue: () => void; onArchive: () => void; onVoid: () => void; onAttach: (ids: string[]) => Promise<unknown>; onShipment: () => void; onInvoice: (id: string) => void;
 }) {
@@ -241,7 +325,7 @@ function DocumentDetail({ doc: d, state, can, canInvoices, locked, onPick, onEdi
       { label: '客户', value: s?.customer || '—' },
       { label: '运输', value: s ? `${MODE_LABEL[s.mode]} · ${s.portOfLoading} → ${s.portOfDischarge}` : '—' },
       { label: '对应订单', value: order?.code || (d.orderId ? '订单不可用' : '整票出运') },
-      ...(d.type === 'CI'&&!order?.replacementSource ? [{ label: 'CI 合同应收日', value: d.dueDate || '未填写' }] : []),
+      ...(d.type === 'CI'&&!order?.replacementSource ? [{ label: d.receivableDueCondition?'合同账期':'CI 合同应收日', value: d.receivableDueCondition?.terms || d.dueDate || '未填写' }] : []),
       { label: '标题', value: d.title },
       { label: '创建', value: `${d.actor} · ${shortWhen(d.createdAt)}` },
       { label: '签发 / 归档', value: d.issuedAt ? shortWhen(d.issuedAt) : '尚未签发' },
@@ -251,7 +335,7 @@ function DocumentDetail({ doc: d, state, can, canInvoices, locked, onPick, onEdi
     <DetailBlock title={uiText("单据正文")}><p className="mist-sub" style={{ whiteSpace: 'pre-wrap' }}>{d.content}</p></DetailBlock>
     {d.type==='CI'&&order?.replacementSource&&<DetailBlock title={uiText('补发CI')}><Facts items={[{label:'客户收款',value:uiText('无需收款')},{label:'申报货值',value:d.replacementDeclaredAmount!==undefined?order.currency+' '+fmt(d.replacementDeclaredAmount,2):uiText('待签发')}]}/></DetailBlock>}
     {d.type === 'CI'&&!order?.replacementSource && <DetailBlock title={uiText("财务应收")} aside={invoice && canInvoices ? <TextLink icon={Receipt} onClick={() => onInvoice(invoice.id)}>{uiText("查看应收 ")}{invoice.code}</TextLink> : undefined}>
-      {invoice ? <Facts items={[{ label: '应收金额', value: `${invoice.currency} ${fmt(invoice.amount, 2)}` }, { label: '未收', value: invoice.voidedAt ? '已随 CI 作废' : isPendingFinanceMistInvoice(invoice) ? '待财务确认' : `${invoice.currency} ${fmt(invoice.open, 2)}` }, { label: '到期日', value: invoice.due }]} />
+      {invoice ? <Facts items={[{ label: '应收金额', value: `${invoice.currency} ${fmt(invoice.amount, 2)}` }, { label: '未收', value: invoice.voidedAt ? '已随 CI 作废' : isPendingFinanceMistInvoice(invoice) ? '待财务确认' : `${invoice.currency} ${fmt(invoice.open, 2)}` }, { label: '到期日', value: invoice.due || (invoice.receivableDueCondition?'待核对账期':'—') }]} />
         : <span className="mist-note">{uiText(d.status === 'draft' ? '待签发' : '未找到对应应收')}</span>}
     </DetailBlock>}
     <DetailBlock title={ui`版本（${versions.length}）`}>
@@ -262,7 +346,7 @@ function DocumentDetail({ doc: d, state, can, canInvoices, locked, onPick, onEdi
         { key: 'at', header: '签发 / 创建', hideOnMobile: true, render: v => v.issuedAt ? shortWhen(v.issuedAt) : shortWhen(v.createdAt) },
       ]} />
     </DetailBlock>
-    <DetailBlock title={uiText("正式文件")}><RecordFiles key={d.id} ids={d.fileIds} onAttach={can && d.status === 'draft' && editableShipment ? onAttach : undefined} /></DetailBlock>
+    <DetailBlock title={uiText("正式文件")}><RecordFiles key={d.id} ids={d.fileIds} onPrint={d.status !== 'draft' ? onPrint : undefined} onAttach={can && d.status === 'draft' && editableShipment ? onAttach : undefined} /></DetailBlock>
     <DetailBlock title={uiText("处理记录")}><Events entity="document" id={d.id} /></DetailBlock>
   </DetailBody>;
 }

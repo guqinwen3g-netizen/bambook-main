@@ -4,7 +4,7 @@ import { MIST_DEMO_ACCOUNTS } from './mistAccounts';
 import { mistImportHeaderKey } from './mistImport';
 
 function fixture() {
-  let i = 0; const ctx = { id: () => `im-${++i}`, now: '2026-10-18T02:00:00Z', actorName: '周敏', actorId: 'demo-reviewer', members: MIST_DEMO_ACCOUNTS } as unknown as MistContext;
+  let i = 0; const ctx = { id: () => `im-${++i}`, now: '2026-10-18T02:00:00Z', actorName: '周敏', actorId: 'demo-reviewer', can: () => true, members: MIST_DEMO_ACCOUNTS } as unknown as MistContext;
   let state = createMistState(ctx, 'empty');
   const run = (kind: string, rows: Array<Record<string, string>>) => { const r = applyMistCommand(state, { type: 'market.import', payload: { kind, rows } } as MistCommand, ctx); state = r.state; return r.result as { imported: number }; };
   return { run, get state() { return state as MistState & { market: any }; } };

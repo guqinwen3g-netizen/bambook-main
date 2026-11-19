@@ -1,3 +1,4 @@
+import {useEditorStepFocus} from '../../runtime/editorFocus';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** Quote-entry professional costing; internal, manual and auditable, not AI prediction. */
 import React from "react";
@@ -321,6 +322,7 @@ export function QuotationCostingPage() {
     [applyPrice, setApplyPrice] = useRouteDraft(false),
     [failure, setFailure] = useRouteDraft(""),
     [busy, setBusy] = useRouteDraft(false);
+  const stepRef=useEditorStepFocus(step);
   const [historyReference, setHistoryReference] = useRouteDraft<
     QuoteHistoryReference | undefined
   >(undefined);
@@ -484,7 +486,7 @@ export function QuotationCostingPage() {
   if (!q || !line)
     return (
       <MistPage>
-        <PageHeader title={uiText("报价条目核算")} />
+        <PageHeader title={uiText(route.section === "cost-history" ? "报价核算历史" : "报价条目核算")} />
         {w.error && (
           <FailureNotice title={"读取失败"} detail={w.error} retry={() =>
                   void w.refresh().catch((e) => {
@@ -495,8 +497,7 @@ export function QuotationCostingPage() {
           <FailureNotice title={"重试未完成"} detail={failure} />
         )}
         <EmptyState
-          title={uiText(w.loading ? "正在读取准确条目" : "未找到指定报价条目")}
-          description={uiText(w.error || "不猜配其他产品或报价行。")}
+          title={uiText(w.loading ? route.section === "cost-history" ? "正在读取报价资料" : "正在读取准确条目" : !w.state ? "报价资料未读取" : "未找到指定报价条目")}
           action={<Button onClick={back}>{uiText("返回报价")}</Button>}
         />
       </MistPage>
@@ -551,7 +552,7 @@ export function QuotationCostingPage() {
         <Banner variant="status" title={uiText(can ? "本版本只读" : "没有报价写权限")}>{uiText("审批中、已发送或已转单的报价不能改核算；需要改价时从报价主线建立适用新版本。")}</Banner>
       )}
       {editing && can && !frozen ? (
-        <div className="mist-wizard">
+        <div ref={stepRef} className="mist-wizard" role="group" aria-label={uiText('第 ')+(step+1)+uiText(' 步')+' · '+uiText(['成本来源与拆解','本次报价策略','核对并冻结'][step])} tabIndex={-1}>
           <VerticalSteps
             current={String(step)}
             onSelect={(v) => {

@@ -21,12 +21,16 @@ export function CustomerStatementCard({ customerId }: { customerId?: string }) {
   const w = useMistWorkspace(), session = useMistSession(), toast = useToast(), state = w.state;
   const today = platformBusinessDate(businessNow()), customers = statementCustomers(state, today);
   const [picked, setPicked] = React.useState(customerId || ''), [busy, setBusy] = React.useState(false);
+  const [visibleCount, setVisibleCount] = React.useState(8);
   React.useEffect(() => { if (customerId) setPicked(customerId); }, [customerId]);
+  React.useEffect(() => { setVisibleCount(8); }, [customerId, w.workspace?.id, session.user?.id]);
   const target = customerId || (picked && customers.some(c => c.id === picked) ? picked : customers[0]?.id || '');
   const canWrite = session.hasPermission('invoices:write' as never);
   const blocker = !state ? '公司未加载' : !canWrite ? '生成对账单需要应收写权限（财务）' : !target ? '没有未结应收或待核销到账的客户' : customerStatementBlocker(state, target, today);
-  const records = readCustomerStatements(state || {}).filter(r => !customerId || r.customerId === customerId).sort((a, b) => b.generatedAt.localeCompare(a.generatedAt)).slice(0, 8);
-  const partials = (state?.partialStatements ?? []).filter(r => !customerId || r.customerId === customerId).slice(0, 8);
+  const history = readCustomerStatements(state || {}).filter(r => !customerId || r.customerId === customerId).sort((a, b) => b.generatedAt.localeCompare(a.generatedAt) || b.seq - a.seq);
+  const partialHistory = (state?.partialStatements ?? []).filter(r => !customerId || r.customerId === customerId).sort((a, b) => b.asOf.localeCompare(a.asOf) || b.statementNo.localeCompare(a.statementNo, undefined, { numeric: true }));
+  const records = history.slice(0, visibleCount), partials = partialHistory.slice(0, visibleCount);
+  const hasMore = history.length > visibleCount || partialHistory.length > visibleCount;
   const nameOf = (id: string) => state?.customers.find(c => c.id === id)?.name || id;
   const fileOf = (id: string) => state?.files.find(f => f.id === id);
   const generate = async () => {
@@ -60,5 +64,6 @@ export function CustomerStatementCard({ customerId }: { customerId?: string }) {
       {partials.map(r => <div key={r.id} role="listitem" className="mist-col" data-statement={r.statementNo} style={{ gap: 8, padding: '8px 0' }}><div className="mist-row"><Mono>{r.statementNo}</Mono><span>{nameOf(r.customerId)} · {uiText("部分可见")}</span><span className="mist-spacer"/><span>{uiText('另含其他范围业务')}</span></div>{r.sections.flatMap(section => section.lines.map(line => <div className="mist-row" key={section.currency + ':' + line.invoiceId}><Mono>{line.code}</Mono><span className="mist-spacer"/><span>{line.open} {section.currency}</span></div>))}</div>)}
       {!records.length && !partials.length && <span className="mist-note">{uiText("尚未生成")}</span>}
     </div>
+    {(history.length > 8 || partialHistory.length > 8) && <div style={{ padding: '0 22px 14px' }}><Button size="sm" variant="quiet" disabled={busy} onClick={() => setVisibleCount(count => hasMore ? count + 8 : 8)}>{uiText(hasMore ? "更多记录" : "收起记录")}</Button></div>}
   </Card>;
 }

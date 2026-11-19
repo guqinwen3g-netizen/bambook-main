@@ -1,4 +1,5 @@
 import { authenticatedEventStream } from './authenticatedEventStream';
+import { publicEntryApiBase } from './publicEntryApi';
 import { businessNowDate } from '../lib/businessClock';
 import { parseShipmentCiSources, parseSourceDocumentSet, type SourceDocumentSetData, type ShipmentCiSources, type ShipmentDocumentSourceBinding } from './documentSourceContracts';
 import type { SavedOrderRow } from '../types';
@@ -360,6 +361,8 @@ const normalizeEndpoint = (endpoint?: string): string => {
   // 「登录走本地、业务数据却写往生产」的割裂路由。
   const envBase = String(import.meta.env.VITE_API_BASE_URL || '').trim();
   if (envBase.startsWith('/')) return envBase.replace(/\/$/, '');
+  const publicBase = publicEntryApiBase();
+  if (publicBase) return publicBase;
   if (!endpoint?.trim()) return getDynamicApiBaseUrl().replace(/\/$/, '');
   let formatted = normalizeDataCenterEndpoint(endpoint);
   if (!formatted.startsWith('http')) formatted = `http://${formatted}`;

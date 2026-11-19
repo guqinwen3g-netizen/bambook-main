@@ -8,12 +8,13 @@ vi.mock('../tokenHelpers', async (orig) => ({
   buildLoadedAuthTokenPayload: async (_p: unknown, u: any) => ({ userId: u.id, displayName: 'U', roles: ['viewer'], roleIds: [], permissions: [], departmentIds: [], authorizationLoaded: true }),
 }));
 import { createAuthRouter } from '../route';
+import {sessionRevocationStore} from './sessionRevocationStore';
 import { createAuthService } from '../service';
 
 const auth = createAuthService();
 let user: any; let updates: any[];
 function app() {
-  const prisma = { userAccount: {
+  const prisma = {authSessionRevocation:sessionRevocationStore(), userAccount: {
     findUnique: async ({ where }: any) => (where.id === user.id ? structuredClone(user) : null),
     update: async ({ where, data }: any) => { if (where.id !== user.id) throw new Error('unexpected user'); updates.push(structuredClone(data)); Object.assign(user, data); return structuredClone(user); },
   }, auditLog: { create: async ({ data }: any) => data } };

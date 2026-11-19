@@ -5,6 +5,8 @@ import {seedIssuedClaimSource,testClaimNumberConsumer} from './mistClaimTestFixt
 import {assertClaimReplacementShipped,assertReplacementOrder,replacementDeclaredUnitPrice} from './mistClaimReplacement';
 import {claimLedger} from './mistClaimCoordination';
 import {draftCustomsDeclaration} from './mistCustomsDeclaration';
+import {prepareGeneratedSnapshot} from './mistDocumentGeneration';
+import {renderGeneratedDocumentHtml} from '../templates/generatedDocument';
 function fixture(){
  let id=0;const c:MistContext={id:()=>`replacement-${++id}`,now:'2026-10-13T08:00:00Z',actorId:'business',actorName:'业务员',can:()=>true,members:[{id:'business',name:'业务员',active:true,groups:['garment']}],consumeBusinessNumber:testClaimNumberConsumer('2026-10-13T08:00:00Z'),authority:{supplier:{},claimReviewerId:'leader',orderReviewerIds:{garment:['leader'],fabric:['leader']}}};let state=createMistState(c,'empty');
  const run=(command:MistCommand,context=c)=>{const result=applyMistCommand(state,command,context);state=result.state;return result.result;};
@@ -24,6 +26,17 @@ function fixture(){
 }
 const reviewPayload=(id:string,orderId:string)=>({id,orderId,unitPrice:90,originalDeclarationNo:'OLD-EXPORT',returnReference:'RETURN-1',taxHandling:'原出口税务资料核对',basis:'同款原出口价',fileIds:['proof']});
 describe('claim replacement sources and commercial separation',()=>{
+ it('prints reviewed replacement value as customs-only with no payment due',()=>{
+  const f=fixture(),id=f.create();f.approve(id);const scope=f.declaration(id);
+  f.state.settings.companyProfile={legalName:'测试贸易公司',englishName:'Example Trading Co.',address:'上海',englishAddress:'Shanghai',phone:'',email:'',taxId:'',customsCode:'',bankName:'',bankAccount:'',swift:'',defaultCurrency:'USD'};
+  f.run({type:'fulfillment.customs.reviewReplacement',payload:reviewPayload(scope.id,id)});
+  const before=structuredClone(f.state),snapshot=prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId:scope.shipmentId,orderId:id,type:'CI'}},f.c),html=renderGeneratedDocumentHtml(snapshot);
+  expect(snapshot.table!.totals!.amount).toBe('USD 90.00');
+  expect(html).toContain('免费补发');
+  expect(html).toMatch(/no charge/i);
+  expect(html).toMatch(/value for customs purposes only/i);
+  expect(f.state).toEqual(before);
+ });
  it('creates one zero receivable draft from exact approved quantity, preserving original records',()=>{const f=fixture(),before=structuredClone({orders:f.state.orders,lines:f.state.orderLines,invoices:f.state.invoices,payments:f.state.payments}),id=f.create(),order=f.state.orders.find(o=>o.id===id)!;expect(order).toMatchObject({amount:0,qty:1,state:'订单草稿',replacementSource:{claimId:f.claimId,dispositionId:f.dispositionId,sourceOrderId:f.original,createdById:'business'}});expect(order.governance).toMatchObject({status:'draft',effectiveVersion:0,rounds:[],contract:{kind:'external',paymentMethod:'OTHER',preShipmentPercent:0}});expect(f.state.orders.filter(o=>o.id!==id)).toEqual(before.orders);expect(f.state.orderLines.filter(l=>l.orderId!==id)).toEqual(before.lines);expect(f.state.invoices).toEqual(before.invoices);expect(f.state.payments).toEqual(before.payments);expect(()=>f.create()).toThrow('已生成');});
  it.each(['orders:write','aftersales:write'])('requires both scopes, denying missing %s without mutation',scope=>{const f=fixture(),before=structuredClone(f.state);expect(()=>f.run(f.createCommand,{...f.c,can:value=>value!==scope})).toThrow('权限');expect(f.state).toEqual(before);});
  it('fails closed without authority or an executed approved disposition',()=>{const f=fixture();expect(()=>f.run(f.createCommand,{...f.c,can:undefined})).toThrow('权限');f.state.platform.claims[0].dispositions[0].state='approved';expect(()=>f.create()).toThrow('已执行');});

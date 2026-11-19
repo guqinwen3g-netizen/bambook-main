@@ -29,6 +29,9 @@ let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
 const dev=(index:number):MistDev=>({id:`real-${index}`,code:`DEV-${index}`,name:`实际开发 ${index}`,style:`STYLE-${index}`,owner:index%2?'甲':'乙',ownerId:index%2?'user-a':'user-b',customer:index%2?'客户 A':'客户 B',customerId:index%2?'a':'b',due:'2026-10-30',dueRel:'待交付',stage:1,state:'工厂制作中',tone:'neutral',ver:'R1-A-1',fac:1,img:'coat',factory:'实际工厂',sample:'未返样',fabric:'羊毛',goal:'实际需求',currentVersionId:`version-${index}`,versionIds:[`version-${index}`],values:{} as any,fileIds:[],createdAt:'2026-10-13T00:00:00Z',updatedAt:'2026-10-13T00:00:00Z'});
 beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;go.mockReset();bridge.canWrite=true;bridge.current={state:{devs:[dev(1),dev(2)],drafts:[],fabrics:[],customers:[{name:'客户 A'},{name:'客户 B'}],settings:{workspaceName:'测试公司'},files:[]},loading:false,error:'',run:vi.fn(async()=>({requestId:'c-1',revision:1,result:{}})),uploadFile:vi.fn(),downloadFile:vi.fn()};});
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();});
+it.each([true,false])('keeps development counts and empty-state claims hidden until the first read completes (loading %s)',async loading=>{
+ bridge.current.state=null;bridge.current.loading=loading;bridge.current.error=loading?'':'服务读取失败';await mount();expect(host.querySelector('[role="table"]')).toBeNull();expect([...host.querySelectorAll('[role="tab"]')].every(el=>!/[0-9]/.test(el.textContent||''))).toBe(true);expect(host.textContent).not.toContain('暂无成衣开发案');expect(host.textContent).not.toContain('需求与计划0');expect((host.querySelector('button[data-variant="primary"]')as HTMLButtonElement).disabled).toBe(true);expect(bridge.current.run).not.toHaveBeenCalled();
+});
 /** 与 ReferenceApp 一致：go 写入路由，列表页按路由 section 选择页签。 */
 function Harness({initial}:{initial:Route}){const [route,setRoute]=React.useState<Route>(initial);const navigate=(view:string,id?:string,target:RouteTarget={})=>{go(view,id,target);if(view==='development')setRoute({view,id,...target});};return <Nav.Provider value={{route,go:navigate,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><DevListPage/></Nav.Provider>;}
 async function mount(initial:Route={view:'development'}){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<Harness initial={initial}/>));}
@@ -36,6 +39,17 @@ const selectedTab=()=>host.querySelector('[role="tab"][aria-selected="true"]')?.
 const tabCount=(label:string)=>[...host.querySelectorAll('[role="tab"]')].find(t=>t.textContent?.startsWith(label))?.querySelector('.mist-tab-count')?.textContent;
 const pipe=(label:string)=>[...host.querySelectorAll<HTMLButtonElement>('.mist-pipeline > button')].find(b=>b.querySelector('small')?.textContent===label);
 const button=(text:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent===text);
+it('keeps the answer and upload read-only after cancelling a sourcing request',async()=>{
+ bridge.current.state.market={suppliers:[],products:[]};
+ bridge.current.state.fabrics=[{id:'ended',code:'SR-ENDED',name:'已取消的藏青色寻样',owner:'甲',ownerId:'user-a',due:'2026-10-30',state:'已取消',tone:'neutral',sub:'',request:'需求',answer:'原答复',confirmed:false,fileIds:[],cancelled:{reason:'取消',at:'2026-10-30',actor:'甲'}}];
+ await mount({view:'development',section:'sourcing'});
+ await act(async()=>host.querySelector<HTMLElement>('.mist-tr')!.click());
+ const dialog=document.querySelector('[role="dialog"]')!;
+ expect(dialog).toBeTruthy();
+ expect([...dialog.querySelectorAll('textarea')].every(input=>input.readOnly)).toBe(true);
+ expect(dialog.querySelector('input[type=file]')).toBeNull();
+ expect(bridge.current.run).not.toHaveBeenCalled();
+});
 async function type(label:string,value:string){const input=host.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 async function tab(label:string){await act(async()=>[...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(button=>button.textContent?.startsWith(label))!.click());}
 async function select(label:string,value:string){await act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent?.startsWith(label)&&button.hasAttribute('aria-haspopup'))!.click());await act(async()=>[...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find(button=>button.textContent===value)!.click());}
@@ -69,6 +83,7 @@ describe('persisted workspace development list',()=>{
   it('applies the fabric owner filter and hides inapplicable customer/view controls',async()=>{
     bridge.current.state.fabrics=[{id:'f1',code:'SR-1',name:'甲的面料',owner:'甲',ownerId:'user-a',due:'2026-10-30',state:'寻样中',tone:'neutral',sub:'',request:'需求1',answer:''},{id:'f2',code:'SR-2',name:'乙的面料',owner:'乙',ownerId:'user-b',due:'2026-10-30',state:'寻样中',tone:'neutral',sub:'',request:'需求2',answer:''}];
     await mount();await tab('面料寻样');expect(host.querySelector('[aria-label="看板视图"]')).toBeNull();expect([...host.querySelectorAll('button')].some(button=>button.textContent?.startsWith('客户'))).toBe(false);
+    expect(Array.from(host.querySelectorAll('[role="columnheader"], th'), h=>h.textContent)).toContain('负责人');
     await select('负责人','甲');expect(host.querySelectorAll('.mist-tr')).toHaveLength(1);expect(host.textContent).toContain('甲的面料');expect(host.textContent).not.toContain('乙的面料');
   });
   it('applies the draft customer filter and does not expose owner/view controls without draft data',async()=>{

@@ -5,8 +5,9 @@ import { uiText, ui } from '../../../../services/interfaceLanguage';
 import React from 'react';
 import { ArrowUpRight, Check, CornerUpLeft, Paperclip, RefreshCw } from 'lucide-react';
 import { Banner, Button, Card, DataTable, EmptyState, Facts, Field, KeyValue, MistPage, ObjectCell, PageHeader, Pill, SearchField, Segmented, SignaturePad, Tabs, TextArea, Toolbar, type Column, type SignatureValue, type Tone } from '../../../../components/mist';
-import { getMistReviewTasks } from '../../../../server/src/shared/mistWorkspace';
+import { getMistReviewTasks, type MistState } from '../../../../server/src/shared/mistWorkspace';
 import type { MistReviewTask } from '../../../../server/src/shared/mistReview';
+import { resolveReviewDecisionSignature, type MistSignatureReviewBinding } from '../../../../server/src/shared/mistSignatures';
 import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
 import type { View } from '../../../../types';
 import { useNav } from '../nav';
@@ -18,12 +19,13 @@ import { FailureNotice } from '../runtime/FailureNotice';
 
 export type ApprovalTab = 'mine' | 'sent' | 'done' | 'others';
 type Kind = MistReviewTask['kind'];
-type Row = MistReview & { local?: boolean };
+type Row = MistReview;
 export const APPROVAL_KIND_LABEL: Record<Kind, string> = { order: '订单审批', quotation: '报价偏差', procurement: '采购审批', procurementAmendment: '合同变更', payment: '付款申请', claim: '索赔方案', risk: '风险处置', productionIntake: '在制承接', qcConcession: '让步接收', stockCount: '盘点调整' };
 const STATUS: Record<MistReviewTask['status'], { tone: Tone; label: string }> = { pending: { tone: 'warn', label: '待审批' }, approved: { tone: 'ok', label: '已批准' }, rejected: { tone: 'bad', label: '已退回' } };
 /** 统一审批尚未覆盖、仍在原业务页按原流程办理的类型（没有服务端放行规则时不在这里假装可审批）。 */
 /** 尚未接入统一审批的事项（说明见页面横幅）。 */
 export const APPROVAL_NOT_CONNECTED = ['受控例外'];
+const reviewRoundLabel = (round: number) => ui`第 ${round} 轮`;
 const rowKey = (r: Pick<Row, 'workspaceId' | 'id'>) => r.workspaceId + '|' + r.id;
 const day = (at: string) => { try { return platformBusinessDate(at); } catch { return at.slice(0, 10); } };
 const when = (at: string) => { const d = new Date(at); return Number.isNaN(d.getTime()) ? at : d.toLocaleString(interfaceLocale(), {timeZone:'Asia/Shanghai',  year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }); };
@@ -39,6 +41,14 @@ export function approvalRows(rows: Row[], tab: ApprovalTab, me: string) {
 /** 付款申请：服务端在审批快照里给出需要哪一档、已签哪一级、还差哪一级。 */
 const tierNote = (r: Pick<Row, 'details'>) => ['审批档位', '审批进度'].map(label => r.details.find(d => d.label === label)?.value).filter(Boolean).join('。');
 
+/** Local submissions use only evidence already present in this company's readable projection. */
+export function projectedReviewEvidence(task: MistReviewTask, state: Pick<MistState, 'files' | 'decisionSignatures'>, tasks: readonly MistReviewTask[], bindings?: readonly MistSignatureReviewBinding[]): Pick<MistReview, 'files' | 'signatureFileId'> {
+  const readable = new Map(state.files.map(file => [file.id, file]));
+  const files = [...new Set(task.fileIds || [])].flatMap(id => { const file = readable.get(id); return file ? [{ id, name: file.name, size: file.size }] : []; });
+  const signature = task.decision ? resolveReviewDecisionSignature(state, task, tasks, { bindings }) : undefined;
+  return { files, ...(signature && readable.has(signature.fileId) ? { signatureFileId: signature.fileId } : {}) };
+}
+
 export function ApprovalsPage() {
   const reviews = useMistReviews(), workspace = useMistWorkspace(), session = useMistSession(), { route, go } = useNav();
   const me = session.user?.id ?? '', state = workspace.state, current = workspace.workspace;
@@ -52,19 +62,21 @@ export function ApprovalsPage() {
     const server: Row[] = reviews.rows;
     if (!state || !current) return server;
     const seen = new Set(server.map(rowKey));
-    const mine = getMistReviewTasks(state).filter(t => t.requesterId === me && !seen.has(current.id + '|' + t.id))
-      .map(t => ({ ...t, workspaceId: current.id, workspaceName: current.name, revision: current.revision, canDecide: false, local: true }));
+    const tasks = getMistReviewTasks(state);
+    const mine = tasks.filter(t => t.requesterId === me && !seen.has(current.id + '|' + t.id))
+      .map(t => ({ ...t, ...projectedReviewEvidence(t, state, tasks, current.signatureReviewBindings), workspaceId: current.id, workspaceName: current.name, revision: current.revision, canDecide: false, local: true }));
     return [...server, ...mine].sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
-  }, [reviews.rows, state, current?.id, current?.revision, current?.name, me, interfaceLocale()]);
+  }, [reviews.rows, state, current?.id, current?.revision, current?.name, current?.signatureReviewBindings, me, interfaceLocale()]);
+  const ready = reviews.loaded && !reviews.readError;
   const counts = { mine: approvalRows(all, 'mine', me).length, sent: approvalRows(all, 'sent', me).length, done: approvalRows(all, 'done', me).length, others: approvalRows(all, 'others', me).length };
   const inTab = approvalRows(all, tab, me);
   const kinds = [...new Set(inTab.map(r => r.kind))];
   const q = query.trim().toLowerCase();
   const shown = inTab.filter(r => (kind === 'all' || r.kind === kind) && (!q || [r.title, r.workspaceName, APPROVAL_KIND_LABEL[r.kind], ...r.details.map(d => d.value)].some(v => v.toLowerCase().includes(q))));
-  const selected = all.find(r => rowKey(r) === route.id) ?? null;
+  const selected = ready ? all.find(r => rowKey(r) === route.id) ?? null : null;
   React.useEffect(() => { setNote(''); setLocal(''); setSignature(null); setSignKey(k => k + 1); }, [route.id]);
   const [signatureUrl, setSignatureUrl] = React.useState<string | null>(null);
-  const signatureKey = selected ? selected.workspaceId + '|' + selected.id + '|' + (selected.signatureFileId || '') : '';
+  const signatureKey = selected ? selected.workspaceId + '|' + selected.id + '|' + (selected.local ? 'company' : 'review') + '|' + (selected.signatureFileId || '') : '';
   React.useEffect(() => {
     setSignatureUrl(null);
     if (!selected?.signatureFileId) return;
@@ -86,7 +98,8 @@ export function ApprovalsPage() {
     if (await reviews.decide(selected, decision, note, needsSignature && signature ? { svg: signature.svg } : undefined)) { setNote(''); setSignature(null); setSignKey(k => k + 1); }
   };
   const columns: Column<Row>[] = [
-    { key: 'title', header: '事项', width: 'minmax(220px,2fr)', render: r => <ObjectCell name={localizedPageTitle(r.title)} meta={uiText(APPROVAL_KIND_LABEL[r.kind])} /> },
+    { key: 'title', header: '事项', width: 'minmax(220px,2fr)', render: r => <ObjectCell name={localizedPageTitle(r.title)} meta={r.roundNumber === undefined ? uiText(APPROVAL_KIND_LABEL[r.kind])
+      : <>{uiText(APPROVAL_KIND_LABEL[r.kind])} · {reviewRoundLabel(r.roundNumber)}</>} /> },
     { key: 'requester', header: '发起人', width: '110px', hideOnMobile: true, render: r => requester(r) },
     { key: 'at', header: '提交', width: '110px', hideOnMobile: true, render: r => <span className="mist-num">{day(r.submittedAt)}</span> },
     { key: 'status', header: '状态', width: '96px', render: r => <Pill tone={STATUS[r.status].tone}>{uiText(STATUS[r.status].label)}</Pill> },
@@ -94,15 +107,16 @@ export function ApprovalsPage() {
   const targetBase = selected?.target.view.split('/')[0] ?? '';
   const sameSpace = !!selected && selected.workspaceId === current?.id;
   const openReason = !selected ? '' : !sameSpace ? `该审批属于公司“${selected.workspaceName}”，请先切换到该公司再打开原业务` : !session.canAccessView(targetBase as View) ? '当前账号没有原业务的查看权限' : undefined;
-  const decideReason = !selected ? '' : selected.status !== 'pending' ? '这项审批已处理' : selected.local ? '你是发起人，不能审批本人提交的事项' : !selected.canDecide ? '你不在本次审批人名单中，或缺少该类审批权限' : reviews.intent&&!reviews.busy ? '上一次审批结果待核对，请先核对原请求' : undefined;
+  const decideReason = !selected ? '' : selected.status !== 'pending' ? '这项审批已处理' : selected.local ? '当前账号没有本次审批资格' : !selected.canDecide ? '你不在本次审批人名单中，或缺少该类审批权限' : reviews.intent&&!reviews.busy ? '上一次审批结果待核对，请先核对原请求' : undefined;
+  const unavailableEvidence = selected ? [...new Set(selected.fileIds || [])].filter(id => !selected.files?.some(file => file.id === id)).length : 0;
   const detail = selected ? <DetailBody data-approval={selected.id} heading={<h2 className="mist-h2">{localizedPageTitle(selected.title)}</h2>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATUS[selected.status].tone}>{uiText(STATUS[selected.status].label)}</Pill><Pill tone="neutral">{APPROVAL_KIND_LABEL[selected.kind]}</Pill></div>
-    <Facts items={[{ label: '发起人', value: requester(selected) }, { label: '提交时间', value: day(selected.submittedAt) }, { label: '审批人', value: selected.reviewerIds.includes(me) ? (selected.reviewerIds.length > 1 ? `我及另外 ${selected.reviewerIds.length - 1} 人` : '我') : `${selected.reviewerIds.length} 人` }]} />
+    <Facts items={[{ label: '发起人', value: requester(selected) }, { label: '提交时间', value: day(selected.submittedAt) }, ...(selected.roundNumber === undefined ? [] : [{ label: '审批轮次', value: reviewRoundLabel(selected.roundNumber) }]), { label: selected.kind==='order'&&selected.id.startsWith('order:')?'提交时审批人':'审批人', value: selected.reviewerIds.includes(me) ? (selected.reviewerIds.length > 1 ? `我及另外 ${selected.reviewerIds.length - 1} 人` : '我') : `${selected.reviewerIds.length} 人` }]} />
     {selected.kind === 'payment' && tierNote(selected) && <Banner variant="status" tone={selected.status === 'pending' ? 'warn' : 'neutral'} title={uiText('付款审批档位')}><span data-payment-tier>{tierNote(selected)}</span></Banner>}
     <DetailBlock title={uiText("审批内容")}>{selected.details.length ? <KeyValue items={selected.details.map(item=>['处置方式','退回去向','审批内容','订单用途','客户收款','溢短装','数量口径'].includes(item.label)?{...item,value:uiText(item.value)}:item)} /> : <span className="mist-note">{uiText("缺少审批内容")}</span>}
       </DetailBlock>
     {selected.status !== 'pending' && selected.decision && <DetailBlock title={uiText(selected.status === 'approved' ? '批准' : '退回')}><KeyValue items={[{ label: '经办人', value: selected.decision.actor }, { label: '时间', value: when(selected.decision.at) }, ...(selected.decision.note ? [{ label: '意见', value: selected.decision.note }] : []), ...(signatureUrl ? [{ label: '签字', value: <img className="mist-signature-archive" src={signatureUrl} alt={uiText('批准签字')} data-approval-signature /> }] : [])]} /></DetailBlock>}
-    {!!selected.files?.length && <DetailBlock title={uiText("随附依据")}>{selected.files.map(f => <div className="mist-row" key={f.id}><Button size="sm" icon={Paperclip} onClick={() => void reviews.download(selected, f)}>{f.name}</Button></div>)}</DetailBlock>}
+    {(!!selected.files?.length || unavailableEvidence > 0) && <DetailBlock title={uiText("随附依据")}>{unavailableEvidence > 0 && <Pill tone="neutral">{ui`${unavailableEvidence}份附件不可读`}</Pill>}{selected.files?.map(f => <div className="mist-row" key={f.id}><Button size="sm" icon={Paperclip} onClick={() => void reviews.download(selected, f)}>{f.name}</Button></div>)}</DetailBlock>}
     {selected.status === 'pending' && !decideReason && <Field label={uiText("审批意见")} required><TextArea aria-label={uiText("审批意见")} rows={3} maxLength={4000} value={note} disabled={reviews.busy} onChange={e => setNote(e.target.value)} /></Field>}
     {selected.status === 'pending' && !decideReason && selected.signatureRequired && <Field label={uiText("批准签字")} required><SignaturePad key={signKey} ariaLabel="批准签字" disabled={reviews.busy} onChange={setSignature} /></Field>}
     {local && <Banner variant="notice" tone="bad" title={uiText("还不能保存决定")}>{local}</Banner>}
@@ -118,14 +132,18 @@ export function ApprovalsPage() {
     {reviews.error && <FailureNotice title="审批未完成" detail={reviews.error} retry={reviews.clearError} retryLabel="知道了" />}
     {reviews.intent&&!reviews.busy && <Banner tone="warn" title={uiText("有审批结果待核对")} actions={<Button size="sm" loading={reviews.busy} onClick={() => void reviews.recover()}>{uiText("核对原请求")}</Button>}>{uiText("审批结果未确认，请核对。")}</Banner>}
     <Tabs<ApprovalTab> value={tab} onChange={next => { setDrawer(false); go('approvals', undefined, { section: next }); }} options={[
-      { value: 'mine', label: '待我审批', count: counts.mine }, { value: 'sent', label: '我发起的', count: counts.sent }, { value: 'done', label: '已处理', count: counts.done },
-      ...(counts.others ? [{ value: 'others' as const, label: '公司内其他待审', count: counts.others }] : []),
+      { value: 'mine', label: '待我审批', count: ready ? counts.mine : undefined }, { value: 'sent', label: '我发起的', count: ready ? counts.sent : undefined }, { value: 'done', label: '已处理', count: ready ? counts.done : undefined },
+      ...((ready && counts.others) || tab === 'others' ? [{ value: 'others' as const, label: '公司内其他待审', count: ready ? counts.others : undefined }] : []),
     ]} />
-    <Toolbar right={kinds.length > 1 ? <Segmented<'all' | Kind> ariaLabel={uiText("审批类型")} value={kind} onChange={setKind} options={[{ value: 'all', label: '全部' }, ...kinds.map(k => ({ value: k, label: APPROVAL_KIND_LABEL[k] }))]} /> : undefined}>
-      <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索单号、供应商、客户或公司")} />
-    </Toolbar>
-    <ListDetail drawerOpen={drawer && !!selected} drawerTitle={selected ? localizedPageTitle(selected.title) : '审批详情'} onDrawerClose={() => setDrawer(false)} detail={detail}
-      list={<Card><DataTable ariaLabel={uiText("审批事项")} rows={shown} columns={columns} loading={!reviews.loaded && !reviews.error} rowKey={rowKey} selectedKey={selected ? rowKey(selected) : undefined} onRowClick={open}
-        empty={<EmptyState title={uiText(inTab.length ? '没有符合条件的审批' : tab === 'mine' ? '没有待你审批的事项' : tab === 'sent' ? '你还没有发起审批' : tab === 'done' ? '暂无已处理的审批' : '没有其他待审事项')} action={inTab.length ? <Button onClick={() => { setQuery(''); setKind('all'); }}>{uiText("清除筛选")}</Button> : undefined} />} /></Card>} />
+    {reviews.readError
+      ? <FailureNotice title="审批记录读取失败" detail={reviews.readError} retry={() => void reviews.refresh()} />
+      : <>
+        <Toolbar right={kinds.length > 1 ? <Segmented<'all' | Kind> ariaLabel={uiText("审批类型")} value={kind} onChange={setKind} options={[{ value: 'all', label: '全部' }, ...kinds.map(k => ({ value: k, label: APPROVAL_KIND_LABEL[k] }))]} /> : undefined}>
+          <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索单号、供应商、客户或公司")} />
+        </Toolbar>
+        <ListDetail drawerOpen={drawer && !!selected} drawerTitle={selected ? localizedPageTitle(selected.title) : '审批详情'} onDrawerClose={() => setDrawer(false)} detail={detail}
+          list={<Card><DataTable ariaLabel={uiText("审批事项")} rows={shown} columns={columns} loading={!ready} rowKey={rowKey} selectedKey={selected ? rowKey(selected) : undefined} onRowClick={open}
+            empty={<EmptyState title={uiText(inTab.length ? '没有符合条件的审批' : tab === 'mine' ? '没有待你审批的事项' : tab === 'sent' ? '你还没有发起审批' : tab === 'done' ? '暂无已处理的审批' : '没有其他待审事项')} action={inTab.length ? <Button onClick={() => { setQuery(''); setKind('all'); }}>{uiText("清除筛选")}</Button> : undefined} />} /></Card>} />
+      </>}
   </MistPage>;
 }

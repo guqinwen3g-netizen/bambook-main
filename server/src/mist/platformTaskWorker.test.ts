@@ -26,6 +26,40 @@ async function fixture(complete:(input:LlmCompletionInput)=>Promise<string>,opti
  return{local,app,human,workspace,base,id,key,worker,repository,create,current,command,drain};
 }
 const tool=(name:string,args:Record<string,unknown>)=>JSON.stringify({name,arguments:args});
+it('pre-reads authorized intent references before first planning while supplying the current company business date and real lease time',async()=>{
+ const seen:any[]=[];const complete=vi.fn(async(input:LlmCompletionInput)=>{const text=String(input.messages[0].content),facts=JSON.parse(text.slice(text.indexOf('User request:\n')+'User request:\n'.length));seen.push(facts);return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对所选资料。'});});
+ const f=await fixture(complete),order=f.workspace.state.orders[0],invoice=f.workspace.state.invoices[0],intentRefs=[{kind:'orders',id:order.id},{kind:'invoices',id:invoice.id}];
+ const businessAt='2026-10-08T00:18:00.000Z';
+ await f.local.database.$transaction(async db=>{
+  const state=f.workspace.state;
+  await db.mistWorkspace.update({where:{id:f.workspace.id},data:{state:{...state,settings:{...state.settings,businessClock:{mode:'fixed',at:businessAt,timezone:'Asia/Shanghai'}}}}});
+ });
+ const started=Date.now();
+ f.worker.start(3_600_000);const created=(await f.human.post(f.base+'/personal-agent/tasks').send({requestId:randomUUID(),name:'核对两条资料',instructions:'核对所选资料，不修改。',intentRefs}).expect(201)).body.item;
+ const before=(await taskRecord((f.repository as any).prisma,f.workspace.id,created.id)).value;expect(before.sources).toEqual([]);expect(before.intentRefs).toEqual(intentRefs);
+ await f.drain();expect(complete).toHaveBeenCalledTimes(1);expect(seen[0].task.intentRefs).toEqual(intentRefs);
+ expect(seen[0].businessClock).toEqual(platformTaskClock(Date.parse(businessAt)));
+ expect(Date.parse(seen[0].clock.utc)).toBeGreaterThanOrEqual(started);
+ expect(Date.parse(created.expiresAt)).toBeGreaterThan(started+23*60*60_000);
+ const reads=seen[0].history.recent.filter((step:any)=>step.name==='bambook_get');expect(reads.map((step:any)=>[step.arguments.type,step.arguments.id])).toEqual([['order',order.id],['invoice',invoice.id]]);expect(reads.every((step:any)=>step.result.object?.id===step.arguments.id)).toBe(true);
+ const after=(await taskRecord((f.repository as any).prisma,f.workspace.id,created.id)).value;expect(after.sources.some(s=>s.path==='orders'&&s.id===order.id)).toBe(true);expect(after.sources.some(s=>s.path==='invoices'&&s.id===invoice.id)).toBe(true);expect((await f.current(created.id)).state).toBe('succeeded');
+});
+it('does not ask a model to guess when the deterministic intent read failed, and does not manufacture a read proof',async()=>{
+ const complete=vi.fn(async()=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'不应调用'})),f=await fixture(complete),order=f.workspace.state.orders[0];
+ f.worker.start(3_600_000);const created=(await f.human.post(f.base+'/personal-agent/tasks').send({requestId:randomUUID(),name:'核对原件',instructions:'核对准确资料。',intentRefs:[{kind:'orders',id:order.id}]}).expect(201)).body.item;
+ vi.spyOn(f.repository,'getForAgent').mockRejectedValueOnce(Object.assign(new Error('资料暂不可读'),{status:404}));await f.drain();expect(complete).not.toHaveBeenCalled();expect((await f.current(created.id))).toMatchObject({state:'failed',result:expect.stringContaining('引用')});expect((await taskRecord((f.repository as any).prisma,f.workspace.id,created.id)).value.sources).toEqual([]);
+});
+it('does not read or call a model after referenced record permission is revoked before execution',async()=>{
+ const ceiling:{value:string[]|null}={value:null},complete=vi.fn(async()=>''),f=await fixture(complete,{ceiling}),order=f.workspace.state.orders[0];f.worker.start(3_600_000);
+ const created=(await f.human.post(f.base+'/personal-agent/tasks').send({requestId:randomUUID(),name:'核对原件',instructions:'核对所选资料。',intentRefs:[{kind:'orders',id:order.id}]}).expect(201)).body.item;
+ const get=vi.spyOn(f.repository,'getForAgent');ceiling.value=['ai:chat'];await f.drain();expect(get).not.toHaveBeenCalled();expect(complete).not.toHaveBeenCalled();expect(await f.current(created.id)).toMatchObject({state:'access_changed',instructions:''});expect((await taskRecord((f.repository as any).prisma,f.workspace.id,created.id)).value.sources).toEqual([]);
+ const hidden=await f.current(created.id);await f.human.post(f.base+'/agent-tasks/'+created.id+'/cancel').send({requestId:randomUUID(),version:hidden.version}).expect(200);
+});
+it('retains owner rejection of an existing proposal after an intent record becomes unreadable',async()=>{
+ const ceiling:{value:string[]|null}={value:null};let customer='';const complete=vi.fn(async()=>tool('bambook_execute',{command:{type:'customer.update',payload:{id:customer,patch:{terms:'T/T 30% 预付'}}}})),f=await fixture(complete,{ceiling});customer=f.workspace.state.customers[0].id;f.worker.start(3_600_000);
+ const created=(await f.human.post(f.base+'/personal-agent/tasks').send({requestId:randomUUID(),name:'客户条款草案',instructions:'修改客户条款，先交本人确认。',intentRefs:[{kind:'customers',id:customer}]}).expect(201)).body.item;await f.drain();const waiting=await f.current(created.id);expect(waiting.state).toBe('waiting_human');const proposal=waiting.waitingProposalIds[0];expect(proposal).toBeTruthy();
+ ceiling.value=['ai:chat'];expect(await f.current(created.id)).toMatchObject({state:'access_changed',instructions:''});await f.command('agent.proposal.reject',{id:proposal});expect((await taskRecord((f.repository as any).prisma,f.workspace.id,created.id)).value.waitingProposalIds).toEqual([]);expect(complete).toHaveBeenCalledTimes(1);
+});
 
 it.each(['rejected','confirmed'] as const)('distinguishes an owner refusal from a genuine failed finish (%s)',async decision=>{
  let calls=0,customer='';const complete=vi.fn(async()=>[tool('bambook_get',{type:'customer',id:customer}),tool('bambook_execute',{command:{type:'customer.update',payload:{id:customer,patch:{terms:'T/T 30% 预付'}}}}),tool('bambook_get',{type:'customer',id:customer}),tool('bambook_task',{action:'finish',outcome:'stopped',result:'本人拒绝后已停止，原业务未修改。'}),tool('bambook_task',{action:'finish',outcome:'failed',result:'没有本人拒绝依据，不能报告为按本人决定停止。'})][calls++]);
@@ -39,6 +73,16 @@ it('requires a fresh business read before reporting an owner-declined stop',asyn
 });
 it('provides a real offset-qualified business clock across a UTC month boundary without changing the instant',()=>{
  const now=Date.parse('2026-10-31T16:00:00Z'),clock=platformTaskClock(now);expect(clock).toEqual({now:'2026-11-01T00:00:00.000+08:00',utc:'2026-10-31T16:00:00.000Z',timeZone:'Asia/Shanghai'});expect(Date.parse(clock.now)).toBe(now);expect(Date.parse(clock.utc)).toBe(now);
+});
+it.each([true,false])('supplies the company business date separately from real task time (fixed=%s)',async fixed=>{
+ let customer='',calls=0;const complete=vi.fn(async(_input:LlmCompletionInput)=>calls++===0?tool('bambook_get',{type:'customer',id:customer}):tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对客户资料。'})),f=await fixture(complete);customer=f.workspace.state.customers[0].id;
+ const businessAt='2026-10-08T00:18:00.000Z';
+ if(fixed)await f.local.database.$transaction(async db=>{await db.mistWorkspace.update({where:{id:f.workspace.id},data:{state:{...f.workspace.state,settings:{...f.workspace.state.settings,businessClock:{mode:'fixed',at:businessAt,timezone:'Asia/Shanghai'}}}}});});
+ const started=Date.now();f.worker.start(3_600_000);const task=await f.create('platform');await f.drain();
+ const message=String(complete.mock.calls[0][0].messages[0].content),facts=JSON.parse(message.slice(message.indexOf('{"task":')));
+ expect(Date.parse(facts.clock.utc)).toBeGreaterThanOrEqual(started);expect(Date.parse(task.expiresAt)).toBeGreaterThan(started+23*60*60_000);
+ if(fixed){expect(facts.businessClock.now).toBe('2026-10-08T08:18:00.000+08:00');expect(facts.businessClock.utc).toBe(businessAt);}else expect(Math.abs(Date.parse(facts.businessClock.utc)-Date.parse(facts.clock.utc))).toBeLessThan(1000);
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded'});
 });
 async function usedBudget(f:Awaited<ReturnType<typeof fixture>>,id:string,milliseconds:number){
  await f.local.database.$transaction(async db=>{const{row,value:c}=await taskRecord(db,f.workspace.id,id);await db.mistCommandReceipt.updateMany({where:{id:row.id},data:{result:{revision:0,__agentTask:{...c,version:c.version+1,runtimeUsedMs:milliseconds}}}});});

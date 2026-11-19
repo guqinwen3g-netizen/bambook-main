@@ -8,8 +8,9 @@ import {getAllByRole,getByRole,queryByRole} from '@testing-library/dom';
 import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentPurchase} from '../../../../../server/src/shared/mistFulfillment';
+import {purchasePrepaymentReadback} from '../../../../../server/src/shared/mistPayables';
 import {Nav} from '../../nav';
-const store=vi.hoisted(()=>({state:null as MistState|null,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
+const store=vi.hoisted(()=>({state:null as MistState|null,workspace:null as any,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn(),recover:vi.fn()}));
 const session=vi.hoisted(()=>({id:'buyer',denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:session.id,displayName:'经办人'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
@@ -29,6 +30,44 @@ async function advanceRfqNeed(){
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 function purchase(id:string,patch:Partial<FulfillmentPurchase>={}):FulfillmentPurchase{return {id,code:id.toUpperCase(),orderId:'o',lineId:'l',kind:'material',domain:'garment',supplierId:'s',supplier:'青禾辅料',description:'主唛与洗标',quantity:100,unit:'个',price:0.3,currency:'CNY',due:'2026-10-30',terms:'月结30天',destination:'江南成衣',note:'',fileIds:[],state:'draft',requesterId:'buyer',createdBy:'经办人',createdAt:'2026-10-01T08:00:00Z',reviewerIds:['boss'],configVersions:{},received:0,...patch};}
 const approved=(patch:Partial<FulfillmentPurchase>={})=>({state:'approved' as const,submittedAt:'2026-10-02T08:00:00Z',decision:{actorId:'boss',actor:'审批人',at:'2026-10-03T08:00:00Z',decision:'approved' as const,note:'同意'},...patch});
+it.each([false,true])('keeps procurement creation disabled without a read workspace (loading %s)',loading=>{
+  store.state=null;store.loading=loading;render();
+  for(const button of getAllByRole(host,'button',{name:'新建采购订单',exact:true}))expect((button as HTMLButtonElement).disabled).toBe(true);
+  expect(host.textContent).toContain(loading?'正在读取采购资料':'采购资料未读取');
+  expect(host.textContent).not.toContain('还没有成衣采购订单');
+  expect(host.textContent).not.toContain('成衣业务 · 0');
+  expect(host.querySelector('.mist-pipeline')).toBeNull();
+  store.loading=false;
+});
+it.each([false,true])('does not present unread RFQ sources as an empty ledger (loading %s)',loading=>{
+  store.state=null;store.loading=loading;render(undefined,'list',{section:'rfq'});
+  expect(host.textContent).toContain(loading?'正在读取采购资料':'采购资料未读取');
+  expect(host.textContent).not.toContain('还没有成衣询价');
+  expect(queryByRole(host,'button',{name:/新建询价/})).toBeNull();
+  expect(queryByRole(host,'table',{name:'询价单列表'})).toBeNull();
+  store.loading=false;
+});
+it('keeps a genuinely read empty procurement ledger actionable',()=>{
+  render();expect(host.textContent).toContain('还没有成衣采购订单');
+  for(const button of getAllByRole(host,'button',{name:'新建采购订单',exact:true}))expect((button as HTMLButtonElement).disabled).toBe(false);
+  expect(host.querySelector('.mist-pipeline')).not.toBeNull();
+});
+it('opens the original requested purchase after the initial read recovers',()=>{
+  const state=store.state!;state.fulfillment.purchases.push(purchase('recovered'));
+  store.state=null;render('recovered');expect(host.textContent).toContain('采购资料未读取');
+  store.state=state;render('recovered');expect(host.textContent).toContain('RECOVERED');
+  expect(host.textContent).not.toContain('采购资料未读取');expect(store.run).not.toHaveBeenCalled();
+});
+it('enables RFQ export when the visible RFQ exists without purchase orders',()=>{
+  store.state!.rfqs=[{id:'rfq',code:'RFQ-1',orderId:'o',lineId:'l',kind:'material',domain:'garment',description:'Coat trims',quantity:100,unit:'个',currency:'CNY',due:'2099-01-31',destination:'Factory',deadline:'2099-01-10',supplierIds:[],quotes:[],note:'',state:'open',createdAt:'',actor:'Buyer'}];
+  render(undefined,'list',{section:'rfq'});
+  expect((getByRole(host,'button',{name:'导出',exact:true}) as HTMLButtonElement).disabled).toBe(false);
+});
+it('disables RFQ export for an empty RFQ ledger even when purchase orders exist',()=>{
+  store.state!.fulfillment.purchases.push(purchase('purchase-only'));
+  render(undefined,'list',{section:'rfq'});
+  expect((getByRole(host,'button',{name:'导出',exact:true}) as HTMLButtonElement).disabled).toBe(true);
+});
 it('generates supplier PDFs through the server and keeps archived files available',async()=>{
   store.state!.fulfillment.purchases.push(purchase('pdf',approved({documents:[{id:'doc',fileId:'pdf-file',fileName:'PO-V1-01.pdf'} as any]})));
   store.state!.files.push({id:'pdf-file',name:'PO-V1-01.pdf',mimeType:'application/pdf',size:100,storageKey:'private',createdAt:''});
@@ -36,6 +75,14 @@ it('generates supplier PDFs through the server and keeps archived files availabl
   expect(store.run).toHaveBeenCalledWith({type:'fulfillment.procurement.document',payload:{id:'pdf'}});
   expect(host.textContent).toContain('合同文件');expect(host.textContent).toContain('PO-V1-01.pdf');
   expect(queryByRole(host,'button',{name:'下载批准单据'})).toBeNull();
+});
+function scopedHandoffFixture(){const f=materialDeliveryFixture(20,false);store.state=f.state;store.state.orders=store.state.orders.filter(o=>o.id===f.source.orderId);store.state.orderLines=store.state.orderLines.filter(l=>l.orderId===f.source.orderId);store.state.productions=store.state.productions.filter(p=>p.id!==f.productionId);store.state.fulfillment.purchases=store.state.fulfillment.purchases.filter(p=>p.id===f.purchaseId);return f;}
+it('uses the scoped direct handoff options without needing the destination order or contract in state',async()=>{
+ const f=scopedHandoffFixture();
+ store.workspace={id:'workspace',materialDeliveryTargets:{[f.purchaseId]:[{value:f.productionId,label:'PO-CMT · 接收工厂 · 可发20米',remaining:'20'}]}};render(f.purchaseId);await click(getByRole(host,'button',{name:'登记本次交付',exact:true}));const d=getByRole(document.body,'dialog',{name:'登记收料'}),path=getByRole(d,'combobox',{name:'交付路径'}) as HTMLSelectElement;act(()=>{path.value='supplier';path.dispatchEvent(new Event('change',{bubbles:true}));});const target=getByRole(d,'combobox',{name:'直送加工单'}) as HTMLSelectElement;expect([...target.options].map(o=>o.value)).toContain(f.productionId);act(()=>{target.value=f.productionId;target.dispatchEvent(new Event('change',{bubbles:true}));});typeInto(getByRole(d,'spinbutton',{name:'接收数量（米）'}) as HTMLInputElement,'5');typeInto(getByRole(d,'textbox',{name:'点数与交接依据'}) as HTMLTextAreaElement,'DO-A');await click(getByRole(d,'button',{name:'登记本次交付',exact:true}));expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.materials.deliver',payload:expect.objectContaining({id:f.purchaseId,quantity:5,targetProductionId:f.productionId})}));
+});
+it('blocks a scoped direct handoff while preserving the source quality gate',async()=>{
+ const f=scopedHandoffFixture();store.workspace={id:'workspace',materialDeliveryTargets:{[f.purchaseId]:[{value:f.productionId,label:'PO-CMT · 接收工厂',remaining:'20',blocker:'来源面料生产QC未通过'}]}};render(f.purchaseId);await click(getByRole(host,'button',{name:'登记本次交付',exact:true}));const d=getByRole(document.body,'dialog',{name:'登记收料'}),target=getByRole(d,'combobox',{name:'直送加工单'}) as HTMLSelectElement,option=[...target.options].find(o=>o.value===f.productionId)!;expect(option.textContent).toContain('来源面料生产QC未通过');const path=getByRole(d,'combobox',{name:'交付路径'}) as HTMLSelectElement;act(()=>{path.value='supplier';path.dispatchEvent(new Event('change',{bubbles:true}));target.value=f.productionId;target.dispatchEvent(new Event('change',{bubbles:true}));});typeInto(getByRole(d,'textbox',{name:'点数与交接依据'}) as HTMLTextAreaElement,'DO-BLOCKED');await click(getByRole(d,'button',{name:'登记本次交付',exact:true}));expect(d.textContent).toContain('来源面料生产QC未通过');expect(store.run).not.toHaveBeenCalled();
 });
 it('keeps generation hidden for read-only procurement access',()=>{
   session.denied.add('procurement:write');store.state!.fulfillment.purchases.push(purchase('readonly',approved({kind:'processing'})));
@@ -51,15 +98,16 @@ it('recognizes counted direct deliveries while keeping rejected goods awaiting r
   store.state=f.state;render(f.processingId);expect(host.textContent).toContain('1 笔已收 · 0 笔待收');
   expect(host.textContent).not.toContain('1 笔拒收待退');
 });
-beforeEach(()=>{session.id='buyer';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');store.state.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',currency:'USD'} as any);store.state.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',img:'coat',qty:100,unit:'件',price:10,made:0,qc:0,fulfillmentMode:'trims_cmt',cmtIncludedItems:[]});store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
+beforeEach(()=>{store.loading=false;store.error='';store.pending=null;store.saving=false;store.uploadFile.mockReset();store.recover.mockReset();store.workspace=null;session.id='buyer';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');store.state.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',currency:'USD'} as any);store.state.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',img:'coat',qty:100,unit:'件',price:10,made:0,qc:0,fulfillmentMode:'trims_cmt',cmtIncludedItems:[]});store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();vi.useRealTimers();});
 
 it('shows isolated stock disposal on its source purchase only to an inventory reader',()=>{
   store.state!.fulfillment.purchases.push(purchase('p1',approved()));
   store.state!.fulfillment.stock.push({id:'lot',purchaseId:'p1',orderId:'o',lineId:'l'} as any);
   store.state!.fulfillment.stockMovements.push({id:'ret',stockId:'lot',kind:'return',quarantinedQuantity:2,quarantineDisposition:{decision:'supplierReturn',actor:'仓库',at:'2026-10-13',evidence:'供应商已签收'}} as any);
-  render('p1');expect(host.textContent).toContain('退供应商 2 个');expect(host.textContent).toContain('供应商已签收');expect(host.textContent).toContain('采购结算待核对');
+  render('p1');expect(host.textContent).toContain('退供应商 2 个');expect(host.textContent).toContain('供应商已签收');expect(host.textContent).toContain('采购结算待核对');expect(getByRole(host,'button',{name:'查看来源库存',exact:true})).toBeTruthy();
   session.denied.add('inventory:read');render('p1');expect(host.textContent).not.toContain('供应商已签收');
+  expect(queryByRole(host,'button',{name:'查看来源库存',exact:true})).toBeNull();
 });
 
 it('offers garment supplies and processing without a fabric purchase shortcut',async()=>{
@@ -286,6 +334,15 @@ it('transfers an approved contract without receipts to another active supplier a
   expect(go).toHaveBeenCalledWith('procurement','moved');
 });
 
+it.each(['rfq',undefined])('opens the exact fabric RFQ from a return link with section %s',section=>{
+ const f=materialDeliveryFixture(20);store.state=f.state;session.id='owner';
+ store.state.rfqs=[{id:'rfq-return',code:'RFQ-RETURN',orderId:f.source.orderId,lineId:f.source.lineId,kind:'finished',domain:'fabric',description:'Twill supply',quantity:20,unit:'米',currency:'CNY',due:'2099-01-31',destination:'Factory',deadline:'2099-01-10',supplierIds:['mill','factory'],quotes:[],note:'',state:'open',createdAt:'2026-11-14',actor:'Fabric'}];
+ render('rfq-return','list',section?{section}:{});
+ expect((getByRole(host,'tab',{name:/^询价比价/}) as HTMLElement).getAttribute('aria-selected')).toBe('true');
+ expect((getByRole(host,'button',{name:/^面料业务/}) as HTMLElement).getAttribute('aria-pressed')).toBe('true');
+ expect(document.querySelector('[data-rfq-detail="rfq-return"]')?.textContent).toContain('Twill supply');
+ expect(store.run).not.toHaveBeenCalled();
+});
 it('compares RFQ quotes in CNY, requires a reason to award a non-lowest quote, and preselects the supplier the user came from',async()=>{
   const st=store.state!,base={type:'成衣加工',country:'CN',address:'',capabilities:'',capacity:100,capacityUnit:'件',leadDays:7,blockReason:'',contacts:[],fileIds:[],note:'',createdAt:'',updatedAt:'',status:'active' as const};
   st.market.suppliers=[{...base,id:'a',code:'A',name:'江南成衣',ratings:[{id:'r',grade:'A',period:'2026 Q3',note:'',at:'',actor:''}]},{...base,id:'b',code:'B',name:'远山服装'},{...base,id:'c',code:'C',name:'恒彩印花',status:'paused',statusFrom:'2026-10-01'}] as any;
@@ -321,6 +378,45 @@ function postReceiptFixture(){
   store.state!.fulfillment.receipts.push({id:'r-post',purchaseId:'post',quantity:110,rejected:0,destination:'warehouse',location:'上海仓',date:'2026-10-12',evidence:'原收货单',fileIds:[],actor:'仓库',createdAt:'2026-10-12T02:00:00Z'});
   store.state!.fulfillment.stock.push({id:'stock-post',receiptId:'r-post',purchaseId:'post',quantity:110,available:110,location:'上海仓'} as any);
 }
+it.each(['finished','processing','material'] as const)('limits a production hold to matching delivery kinds: %s',async kind=>{
+ const state=store.state!,p={...wholeGarmentPurchase(),kind};
+ state.fulfillment.purchases.push(p,{...p,id:'other',code:'OTHER'});
+ state.productions.push({id:'paused',sourcePurchaseId:p.id,code:'PAUSED',orderId:'o',lineId:'l',order:'SO-1',name:'风衣',factory:'工厂',qty:100,due:p.due,pct:0,img:'coat',col:'cut'});
+ state.fulfillment.productionFacts.push({productionId:'paused',sizes:[],revision:1,hold:{actor:'业务员',at:'2026-10-13T10:00:00Z',category:'other',reason:'核对工艺'}});
+ const label=kind==='processing'?'登记加工回交':'登记本次交付';
+ render(p.id);const action=getByRole(host,'button',{name:label}) as HTMLButtonElement;
+ expect(action.disabled).toBe(kind!=='material');
+ if(kind!=='material'){expect(action.title).toContain('暂停');await click(action);expect(document.querySelector('[role="dialog"]')).toBeNull();}
+ render('other');expect((getByRole(host,'button',{name:label}) as HTMLButtonElement).disabled).toBe(false);
+ expect(store.run).not.toHaveBeenCalled();
+});
+
+it('stops a prepared garment delivery when its own production is put on hold',async()=>{
+ const state=store.state!,p=wholeGarmentPurchase();
+ state.fulfillment.purchases.push(p);state.productions.push({id:'branch',sourcePurchaseId:p.id,orderId:'o',lineId:'l',order:'SO-1',name:'风衣',factory:'工厂',code:'PR',qty:100,due:p.due,pct:0,img:'coat',col:'cut'});
+ render(p.id);await click(getByRole(host,'button',{name:'登记本次交付'}));
+ const dialog=getByRole(document.body,'dialog',{name:'登记成品交接'});
+ typeInto(getByRole(dialog,'textbox',{name:'点数与交接依据'}) as HTMLTextAreaElement,'待复核交接单');
+ state.fulfillment.productionFacts.push({productionId:'branch',sizes:[],revision:1,hold:{actor:'业务员',at:'2026-10-13T10:00:00Z',category:'other',reason:'待复核'}});
+ render(p.id);await click(getByRole(dialog,'button',{name:'登记本次交付'}));
+ expect(dialog.textContent).toContain('生产分支已暂停');expect(store.run).not.toHaveBeenCalled();
+});
+
+function wholeGarmentPurchase(){
+ store.state!.orderLines[0].fulfillmentMode='full_package';
+ return purchase('whole',approved({kind:'finished',unit:'件',offlineSend:{at:'2026-10-10T08:00:00Z',actor:'经办人',evidence:'线下发出',fileIds:[]},supplierConfirmation:{at:'2026-10-11T08:00:00Z',actor:'经办人',confirmedDue:'2026-10-30',evidence:'供方确认',fileIds:[]}}));
+}
+it('blocks fractional finished garment receipt and rejection before sending a command',async()=>{
+ store.state!.fulfillment.purchases.push(wholeGarmentPurchase());render('whole');await click(getByRole(host,'button',{name:'登记本次交付'}));const dialog=getByRole(document.body,'dialog',{name:'登记成品交接'});
+ typeInto(getByRole(dialog,'spinbutton',{name:'接收数量（件）'}) as HTMLInputElement,'0.5');typeInto(getByRole(dialog,'textbox',{name:'点数与交接依据'}) as HTMLTextAreaElement,'点数交接');await click(getByRole(dialog,'button',{name:'登记本次交付'}));expect(store.run).not.toHaveBeenCalled();expect(dialog.textContent).toContain('成衣接收数量须为整数');
+ typeInto(getByRole(dialog,'spinbutton',{name:'接收数量（件）'}) as HTMLInputElement,'1');typeInto(getByRole(dialog,'spinbutton',{name:'拒收数量（件）'}) as HTMLInputElement,'0.5');await click(getByRole(dialog,'button',{name:'登记本次交付'}));expect(store.run).not.toHaveBeenCalled();expect(dialog.textContent).toContain('成衣拒收数量须为整数');
+});
+it('blocks fractional finished garment post-receipt rejection before changing inventory',async()=>{
+ postReceiptFixture();Object.assign(store.state!.fulfillment.purchases[0],{kind:'finished',unit:'件'});store.state!.orderLines[0].fulfillmentMode='full_package';render('post');await click(getByRole(host,'button',{name:'转为拒收'}));const dialog=getByRole(document.body,'dialog');typeInto(getByRole(dialog,'spinbutton',{name:'转拒收数量（件）'}) as HTMLInputElement,'0.5');typeInto(getByRole(dialog,'textbox',{name:'拒收货物位置'}) as HTMLInputElement,'拒收区');typeInto(getByRole(dialog,'textbox',{name:'拒收依据'}) as HTMLTextAreaElement,'复核');await click(getByRole(dialog,'button',{name:'确认拒收'}));expect(store.run).not.toHaveBeenCalled();expect(dialog.textContent).toContain('成衣转拒收数量须为整数');
+});
+it('blocks fractional finished garment return before consuming rejected quantities',async()=>{
+ const p=wholeGarmentPurchase();p.received=98;store.state!.fulfillment.purchases.push(p);store.state!.fulfillment.receipts.push({id:'r-whole',purchaseId:p.id,quantity:98,rejected:2,destination:'warehouse',location:'仓库',date:'2026-10-12',evidence:'点数',fileIds:[],actor:'仓库',createdAt:'2026-10-12T02:00:00Z'});render(p.id);await click(getByRole(host,'button',{name:'登记退货 / 换货'}));const dialog=getByRole(document.body,'dialog');typeInto(getByRole(dialog,'spinbutton',{name:'退回数量（件）'}) as HTMLInputElement,'0.5');typeInto(getByRole(dialog,'textbox',{name:'供应商确认依据'}) as HTMLTextAreaElement,'供方同意');await click(getByRole(dialog,'button',{name:'登记退换'}));expect(store.run).not.toHaveBeenCalled();expect(dialog.textContent).toContain('成衣退换数量须为整数');
+});
 it('submits a post-receipt rejection for the exact receipt and defaults to its over-delivery',async()=>{
   postReceiptFixture();render('post');await click(getByRole(host,'button',{name:'转为拒收'}));
   const dialog=getByRole(document.body,'dialog');
@@ -540,4 +636,119 @@ it('offers settlement submission once goods are delivered and opens it in payabl
   render('done');await click(getByRole(host,'button',{name:'提交结算'}));
   expect(go).toHaveBeenCalledWith('payment-vouchers','done',{section:'payables'});
   session.denied.add('procurement:write');render('done');expect(queryByRole(host,'button',{name:'提交结算'})).toBeNull();
+});
+
+function draftConcurrencyFixture(){
+ store.workspace={id:'workspace',revision:7};
+ store.state!.market.suppliers=[{id:'s',name:'青禾辅料',country:'CN',status:'active'} as any];
+ store.state!.fulfillment.purchases=[purchase('draft-race',{supplierId:'s',supplier:'青禾辅料',materialKind:'trims',price:0.3,terms:'到货验收合格后付款'})];
+}
+async function advanceDraftToReview(){for(let i=0;i<3;i++)await click(getByRole(host,'button',{name:'下一步',exact:true}));}
+it('retains the local purchase draft but refuses to overwrite a new supplier price received in the background',async()=>{
+ draftConcurrencyFixture();render('draft-race');await click(getByRole(host,'button',{name:'编辑草稿',exact:true}));
+ store.state=structuredClone(store.state);store.state!.fulfillment.purchases[0].price=0.4;store.workspace={id:'workspace',revision:8};render('draft-race');
+ await advanceDraftToReview();await click(getByRole(host,'button',{name:'保存草稿',exact:true}));
+ expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('采购草稿已更新，请重新打开后核对');
+ await click(getByRole(host,'button',{name:'上一步',exact:true}));await click(getByRole(host,'button',{name:'上一步',exact:true}));
+ expect((getByRole(host,'spinbutton',{name:'含税 / 约定单价',exact:true}) as HTMLInputElement).value).toBe('0.3');
+});
+it('allows unrelated workspace updates while binding the purchase save to its checked revision',async()=>{
+ draftConcurrencyFixture();render('draft-race');await click(getByRole(host,'button',{name:'编辑草稿',exact:true}));
+ store.state=structuredClone(store.state);store.workspace={id:'workspace',revision:8};render('draft-race');
+ await advanceDraftToReview();await click(getByRole(host,'button',{name:'保存草稿',exact:true}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.procurement.save',payload:expect.objectContaining({id:'draft-race',price:0.3})}),{expectedRevision:8});
+});
+it('refuses a stale purchase editor after another actor submits that draft for approval',async()=>{
+ draftConcurrencyFixture();render('draft-race');await click(getByRole(host,'button',{name:'编辑草稿',exact:true}));
+ store.state=structuredClone(store.state);store.state!.fulfillment.purchases[0].state='pending';store.workspace={id:'workspace',revision:8};render('draft-race');
+ await advanceDraftToReview();await click(getByRole(host,'button',{name:'保存草稿',exact:true}));
+ expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('采购草稿已更新，请重新打开后核对');
+});
+
+function approvedAmendmentFixture(){
+ store.workspace={id:'workspace',revision:7};
+ store.state!.market.suppliers=[{id:'s',name:'青禾辅料',country:'CN',status:'active'} as any];
+ store.state!.fulfillment.purchases=[purchase('amend-race',{...approved(),materialKind:'trims',price:0.3})];
+}
+async function closureDialog(action:'cancel'|'transfer'){
+ approvedAmendmentFixture();store.state!.market.suppliers.push({id:'next',name:'新供方',country:'CN',type:'辅料',status:'active'} as any);
+ render('amend-race');await click(getByRole(host,'button',{name:action==='cancel'?'取消合同':'转给其他供应商',exact:true}));
+ const d=getByRole(document.body,'dialog',{name:action==='cancel'?'取消合同':'转给其他供应商',exact:true});
+ const reason=getByRole(d,'textbox',{name:action==='cancel'?'取消原因与工厂确认依据':'转移原因与原供应商确认依据'}) as HTMLTextAreaElement;typeInto(reason,'原供方同意未执行合同终止，数量与规格须以当前合同核对。');
+ if(action==='transfer'){const supplier=getByRole(d,'combobox',{name:'新供应商'}) as HTMLSelectElement;act(()=>{supplier.value='next';supplier.dispatchEvent(new Event('change',{bubbles:true}));});}
+ return{d,reason,submit:()=>click(getByRole(d,'button',{name:action==='cancel'?'确认取消':'确认转移',exact:true}))};
+}
+it.each(['cancel','transfer'] as const)('refuses a %s form after the source contract changes without losing its reason',async action=>{
+ const{d,reason,submit}=await closureDialog(action);store.state=structuredClone(store.state);store.state!.fulfillment.purchases[0].price=0.4;store.workspace={id:'workspace',revision:8};render('amend-race');await submit();expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('采购合同已更新，请重新打开后核对');expect(reason.value).toContain('原供方同意');
+});
+it.each(['cancel','transfer'] as const)('refuses a %s form after a colleague posts new prepayment on its source',async action=>{
+ const{d,submit}=await closureDialog(action);store.state=structuredClone(store.state);store.state!.payables.payments.push({id:'new-prepay',paymentId:'cash',purpose:'prepayment',purchaseId:'amend-race',supplierId:'s',currency:'CNY',amount:10} as any);expect(purchasePrepaymentReadback(store.state!,'amend-race').available).toBe(10);store.workspace={id:'workspace',revision:8};render('amend-race');await submit();expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('采购合同已更新，请重新打开后核对');
+});
+it.each(['cancel','transfer'] as const)('permits unrelated changes for %s and binds the checked workspace revision',async action=>{
+ const{submit}=await closureDialog(action);store.state=structuredClone(store.state);store.workspace={id:'workspace',revision:8};render('amend-race');await submit();expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:action==='cancel'?'payable.purchase.cancel':'sourcing.purchase.transfer'}),{expectedRevision:8});
+});
+async function fillAmendmentDialog(){
+ const d=getByRole(document.body,'dialog',{name:'变更合同 AMEND-RACE',exact:true});
+ typeInto(d.querySelector('input[aria-label="交期"]') as HTMLInputElement,'2026-11-24');
+ typeInto(getByRole(d,'textbox',{name:'变更原因',exact:true}) as HTMLTextAreaElement,'仅调整交期，数量和单价保持现行合同。');
+ typeInto(getByRole(d,'textbox',{name:'供应商同意依据',exact:true}) as HTMLTextAreaElement,'供方同意11月24日交货，其他条款保持。');
+ return d;
+}
+it('preserves a local contract-change draft but refuses an old price after another approved amendment syncs',async()=>{
+ approvedAmendmentFixture();render('amend-race');await click(getByRole(host,'button',{name:'变更合同',exact:true}));const d=await fillAmendmentDialog();
+ store.state=structuredClone(store.state);store.state!.fulfillment.purchases[0].price=0.4;store.workspace={id:'workspace',revision:8};render('amend-race');
+ await click(getByRole(d,'button',{name:'提交审批',exact:true}));expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('采购合同已更新，请重新打开后核对');
+ expect((getByRole(d,'spinbutton',{name:'单价（CNY）',exact:true}) as HTMLInputElement).value).toBe('0.3');
+ expect((d.querySelector('input[aria-label="交期"]') as HTMLInputElement).value).toBe('2026-11-24');
+});
+it('allows unrelated changes while binding a contract-change proposal to the checked workspace revision',async()=>{
+ approvedAmendmentFixture();render('amend-race');await click(getByRole(host,'button',{name:'变更合同',exact:true}));const d=await fillAmendmentDialog();
+ store.state=structuredClone(store.state);store.workspace={id:'workspace',revision:8};render('amend-race');
+ await click(getByRole(d,'button',{name:'提交审批',exact:true}));expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.procurement.amend',payload:expect.objectContaining({id:'amend-race',price:0.3,due:'2026-11-24'})}),{expectedRevision:8});
+});
+
+it('refuses an old contract-change dialog when a new pending proposal arrives without changing effective terms',async()=>{
+ approvedAmendmentFixture();render('amend-race');await click(getByRole(host,'button',{name:'变更合同',exact:true}));const d=await fillAmendmentDialog();
+ store.state=structuredClone(store.state);store.state!.fulfillment.purchases[0].amendments=[{id:'other-proposal',state:'pending',from:{quantity:100,price:0.3,due:'2026-10-30'},to:{quantity:100,price:0.4,due:'2026-10-30'}} as any];store.workspace={id:'workspace',revision:8};render('amend-race');
+ await click(getByRole(d,'button',{name:'提交审批',exact:true}));expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('采购合同已更新，请重新打开后核对');
+});
+
+async function startRecordUpload(file:File){
+ const input=host.querySelector('input[type="file"]') as HTMLInputElement;expect(input).toBeTruthy();
+ Object.defineProperty(input,'files',{configurable:true,value:[file]});
+ await act(async()=>{input.dispatchEvent(new Event('change',{bubbles:true}));});
+}
+it('associates a recovered upload against current purchase values and files, without restoring a removed old reference',async()=>{
+ draftConcurrencyFixture();const p=store.state!.fulfillment.purchases[0];p.fileIds=['removed-old'];
+ const meta=(id:string)=>({id,name:id+'.txt',mimeType:'text/plain',size:1,storageKey:'workspace/'+id,createdAt:''});
+ store.state!.files=[meta('removed-old')];
+ store.uploadFile.mockImplementation(async()=>{store.pending={kind:'upload',workspaceId:'workspace',requestId:'lost-upload'} as any;throw new Error('上传回执丢失');});
+ let finish!:(value:unknown)=>void;store.recover.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
+ render('draft-race');await startRecordUpload(new File(['new'],'new.txt',{type:'text/plain'}));
+ await click(getByRole(host,'button',{name:'核对并关联',exact:true}));
+ store.state=structuredClone(store.state);store.state!.fulfillment.purchases[0].price=0.4;store.state!.fulfillment.purchases[0].fileIds=['peer-added'];store.state!.files.push(meta('peer-added'),meta('new-upload'));store.workspace={id:'workspace',revision:8};store.pending=null;render('draft-race');
+ await act(async()=>{finish({requestId:'lost-upload',revision:8,result:{fileId:'new-upload'}});});
+ expect(store.run).toHaveBeenCalledTimes(1);expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.procurement.save',payload:expect.objectContaining({id:'draft-race',price:0.4,fileIds:['peer-added','new-upload']})}),{expectedRevision:8});
+ expect(store.uploadFile).toHaveBeenCalledTimes(1);expect(store.recover).toHaveBeenCalledTimes(1);
+});
+it('does not associate a late upload to its former record after the page target changes',async()=>{
+ draftConcurrencyFixture();store.state!.fulfillment.purchases.push(purchase('other-record',{materialKind:'trims'}));let finish!:(value:unknown)=>void;store.uploadFile.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
+ render('draft-race');await startRecordUpload(new File(['new'],'new.txt',{type:'text/plain'}));render('other-record');
+ await act(async()=>{finish({id:'new-upload',name:'new.txt',mimeType:'text/plain',size:3,storageKey:'workspace/new-upload',createdAt:''});});
+ expect(store.run).not.toHaveBeenCalled();
+});
+it('retains uploaded files for recovery when the purchase becomes locked before association',async()=>{
+ draftConcurrencyFixture();let finish!:(value:unknown)=>void;store.uploadFile.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
+ render('draft-race');await startRecordUpload(new File(['new'],'new.txt',{type:'text/plain'}));store.state=structuredClone(store.state);store.state!.fulfillment.purchases[0].state='pending';store.workspace={id:'workspace',revision:8};render('draft-race');
+ await act(async()=>{finish({id:'new-upload',name:'new.txt',mimeType:'text/plain',size:3,storageKey:'workspace/new-upload',createdAt:''});});
+ expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('采购已不在草稿状态');expect((getByRole(host,'button',{name:'重试关联已上传附件',exact:true}) as HTMLButtonElement).disabled).toBe(true);
+});
+it('keeps attachment additions available on a rejected purchase that can be revised',async()=>{
+ draftConcurrencyFixture();store.state!.fulfillment.purchases[0].state='rejected';store.uploadFile.mockResolvedValue({id:'new-upload',name:'new.txt',mimeType:'text/plain',size:3,storageKey:'workspace/new-upload',createdAt:''});
+ render('draft-race');await startRecordUpload(new File(['new'],'new.txt',{type:'text/plain'}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.procurement.save',payload:expect.objectContaining({id:'draft-race',fileIds:['new-upload']})}),{expectedRevision:7});
+});
+it('does not rewrite a purchase when a recovered file is already associated',async()=>{
+ draftConcurrencyFixture();store.state!.fulfillment.purchases[0].fileIds=['same-upload'];store.uploadFile.mockResolvedValue({id:'same-upload',name:'same.txt',mimeType:'text/plain',size:3,storageKey:'workspace/same-upload',createdAt:''});
+ render('draft-race');await startRecordUpload(new File(['new'],'same.txt',{type:'text/plain'}));expect(store.run).not.toHaveBeenCalled();expect(queryByRole(host,'button',{name:'重试关联已上传附件',exact:true})).toBeNull();
 });

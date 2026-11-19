@@ -1,3 +1,4 @@
+import type {OrderClaimCostBasis} from '../../../../../server/src/shared/mistClaimCost';
 import type {InternalFabricCostBasis} from '../../../../../server/src/shared/mistInternalFabric';
 import { interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
@@ -18,7 +19,7 @@ const SHIPMENT_BASES: AllocationBasis[] = ['volume', 'weight', 'value', 'quantit
 const ORDER_BASES: AllocationBasis[] = ['value', 'quantity', 'equal', 'manual'];
 
 const STATUS_ORDER = { ok: 0, norate: 1, nocost: 2 } as const;
-export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,materialCostBasis,initialOrderId,rebate: rebateChoice }: { materialCostBasis?:ReadonlyArray<InternalFabricCostBasis>|null;initialOrderId?:string;state: MistState; asOf: string; canWrite: boolean; busy: boolean; run: (c: MistCommand) => Promise<unknown>; rebate?: RebateAccess }) {
+export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,onErrorPresented,materialCostBasis,claimCostBasis,initialOrderId,rebate: rebateChoice }: { claimCostBasis?:ReadonlyArray<OrderClaimCostBasis>|null;materialCostBasis?:ReadonlyArray<InternalFabricCostBasis>|null;initialOrderId?:string;state: MistState; asOf: string; canWrite: boolean; busy: boolean; run: (c: MistCommand) => Promise<unknown>; onErrorPresented?:(message:string)=>void; rebate?: RebateAccess }) {
   const toast = useToast();
   // 退税金额不可读时不显示退税，也不显示可反推退税的含退税毛利；毛利改按不含退税口径。
   const access = rebateChoice ?? rebateAccess(state), shown = access === 'full', hiddenText = access === 'full' ? '' : REBATE_ACCESS_TEXT[access];
@@ -27,8 +28,9 @@ export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,material
   const basis: FxBasis = basisChoice ?? ((state.fxRecords || []).some(r => r.kind === 'settlement' && !r.reversed) ? 'actual' : 'period');
   const [open, setOpen] = React.useState<string | null>(initialOrderId ?? null), [register, setRegister] = React.useState(false), [voiding, setVoiding] = React.useState<OrderExpense | null>(null), [reason, setReason] = React.useState(''), [showVoided, setShowVoided] = React.useState(false), [paying, setPaying] = React.useState<OrderExpense | null>(null), [payForm, setPayForm] = React.useState({ supplierId: '', invoiceNo: '', due: '', taxAmount: '' });
   if(materialCostBasis===null)return <div className="mist-col"><Banner tone="warn" title={uiText(state.partialExpenses !== undefined ? '当前范围无法核对完整成本' : '内部供料成本依据未读取')}/>{(state.partialExpenses?.length ?? 0)>0 && <Card><CardHeader title={uiText('部分可见费用')} /><div className="mist-card-body mist-col" role="list" aria-label={uiText('部分可见费用')}>{state.partialExpenses!.map(expense=><div className="mist-col" role="listitem" key={expense.id}><div className="mist-row"><span>{expense.code} · {EXPENSE_CATEGORIES[expense.category]}</span><span className="mist-spacer"/><span>{uiText('另含其他范围业务')}</span></div>{expense.shares.map(share=><div className="mist-row" key={share.orderId}><span>{share.orderCode}</span><span className="mist-spacer"/><span>{money(share.amount)} {expense.currency}</span></div>)}</div>)}</div></Card>}</div>;
+  if(claimCostBasis===null)return <Banner tone="warn" title={uiText('售后核算依据未读取')}/>;
   const orders = state.orders.filter(o => !o.governance || o.governance.status === 'approved');
-  const rows = orders.map(o => orderActualCost(state, o.id, basis, month, asOf,materialCostBasis)).sort((a, b) => (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) || (rateOf(a) ?? 0) - (rateOf(b) ?? 0) || a.code.localeCompare(b.code));
+  const rows = orders.map(o => orderActualCost(state, o.id, basis, month, asOf,materialCostBasis,claimCostBasis)).sort((a, b) => (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) || (rateOf(a) ?? 0) - (rateOf(b) ?? 0) || a.code.localeCompare(b.code));
   const ok = rows.filter(r => r.status === 'ok' && !r.internal), internalRows = rows.filter(r => r.status === 'ok' && r.internal), total = (pick: (r: OrderActualCost) => number | null, list = ok) => Math.round(list.reduce((n, r) => n + (pick(r) ?? 0) * 100, 0)) / 100;
   const t = { revenue: total(r => r.revenueCny), purchase: total(r => r.purchaseCny), expense: total(r => r.expenseCny), margin: total(marginOf), internalCost: total(r => r.costCny, internalRows) };
   const expenses = showVoided ? orderExpenses(state) : activeExpenses(state);
@@ -77,6 +79,7 @@ export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,material
     <Drawer open={!!detail} onClose={() => setOpen(null)} size="lg" title={uiText(detail ? `${detail.code} 实际核算` : '实际核算')} sub={detail?[detail.customer,uiText(FX_BASIS_LABEL[basis]),...(detail.estimated?[uiText('含暂估')]:[])].join(' · '):undefined}>
       {detail && <div className="mist-content-flow" data-order-cost-detail={detail.orderId}>
         {(detail.internal ? (['purchases', 'expenses'] as const) : (['revenue', 'purchases', 'expenses'] as const)).map(k => <CostBlock key={k} title={uiText({ revenue: '收入', purchases: '采购成本', expenses: '分摊费用' }[k])} rows={detail[k]} />)}
+        {!!detail.includedCredits?.length&&<CostBlock title={uiText('已含贷项')} rows={detail.includedCredits}/>}
         {detail.internal ? <Card><CardBody><Facts items={[{label:uiText('实际成本'),value:cnyCell(detail.costCny)},...(detail.internalSale?[{label:ui`内部收入（加成 ${detail.internalSale.markupPercent}%）`,value:cnyCell(detail.internalSale.revenueCny)},{label:uiText('内部利润'),value:cnyCell(detail.internalSale.profitCny)}]:[])]}/></CardBody></Card> : <>
         <Card><CardHeader title={uiText("出口退税")} sub={shown ? ui`应退 ${money(detail.rebate.expected)} · 核准 ${money(detail.rebate.approved)} · 已到账 ${money(detail.rebate.received)}` : uiText(hiddenText)} /></Card>
         <Card><CardBody><Facts items={[
@@ -86,7 +89,7 @@ export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,material
         ]}/></CardBody></Card></>}
       </div>}
     </Drawer>
-    {register && <RegisterExpense state={state} asOf={asOf} busy={busy} run={run} onClose={() => setRegister(false)} onDone={() => { setRegister(false); toast('费用已登记并分摊'); }} />}
+    {register && <RegisterExpense state={state} asOf={asOf} busy={busy} run={run} onErrorPresented={onErrorPresented} onClose={() => setRegister(false)} onDone={() => { setRegister(false); toast('费用已登记并分摊'); }} />}
     <Dialog open={!!voiding} onClose={() => setVoiding(null)} tone="bad" title={ui`作废 ${voiding?.code ?? ''}`} description={uiText("作废后不再计入订单成本，原记录保留。")} footer={<><Button onClick={() => setVoiding(null)}>{uiText("取消")}</Button><Button variant="danger" disabled={busy || !reason.trim()} onClick={() => void doVoid().catch(() => undefined)}>{uiText("作废")}</Button></>}>
       <Field label={uiText("作废原因")}><TextInput aria-label={uiText("作废原因")} value={reason} onChange={e => setReason(e.target.value)} /></Field>
     </Dialog>
@@ -111,7 +114,8 @@ function CostBlock({ title, rows }: { title: string; rows: OrderCostLine[] }) {
   return <section className="mist-section"><Card><CardHeader title={uiText(title)} />{sources.length>0&&<CardBody><Facts items={sources.map(r=>({label:uiText("汇率依据"),value:r.currency+" · "+uiText(r.fx!.label.replace(/（暂估）$/,''))}))}/></CardBody>}<DataTable ariaLabel={uiText(title)} rows={rows} rowKey={r => r.key} columns={cols} empty={<EmptyState title={uiText("无")} compact />} /></Card></section>;
 }
 
-function RegisterExpense({ state, asOf, busy, run, onClose, onDone }: { state: MistState; asOf: string; busy: boolean; run: (c: MistCommand) => Promise<unknown>; onClose: () => void; onDone: () => void }) {
+function RegisterExpense({ state, asOf, busy, run, onErrorPresented, onClose, onDone }: { state: MistState; asOf: string; busy: boolean; run: (c: MistCommand) => Promise<unknown>; onErrorPresented?:(message:string)=>void; onClose: () => void; onDone: () => void }) {
+  const live=React.useRef(true);React.useEffect(()=>{live.current=true;return()=>{live.current=false;};},[]);
   const shipments = state.fulfillment.shipments.filter(s => s.state !== 'cancelled');
   const orders = state.orders.filter(o => !o.governance || o.governance.status === 'approved');
   const [v, setV] = React.useState({ category: 'freight' as ExpenseCategory, vendor: '', ref: '', date: asOf, currency: 'USD', amount: '', note: '', scope: (shipments.length ? 'shipment' : 'orders') as 'shipment' | 'orders', shipmentId: '', basis: 'volume' as AllocationBasis });
@@ -125,7 +129,7 @@ function RegisterExpense({ state, asOf, busy, run, onClose, onDone }: { state: M
     try {
       await run({ type: 'cost.expense.register', payload: { ...v, amount: v.amount, ...(v.scope === 'shipment' ? { shipmentId: v.shipmentId } : { orderIds: picked }), ...(v.basis === 'manual' ? { manual: scopeOrders.map(orderId => ({ orderId, amount: manual[orderId] ?? '' })) } : {}) } } as MistCommand);
       onDone();
-    } catch (e) { setError(e instanceof Error ? e.message : '登记失败'); }
+    } catch (e) { if(live.current){const message=e instanceof Error?e.message:'登记失败';setError(message);onErrorPresented?.(message);} }
   };
   return <Dialog open onClose={() => !busy && onClose()} title={uiText("登记费用")} width={640}
     footer={<><Button onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" disabled={busy || !v.amount || !scopeOrders.length} onClick={() => void submit()}>{uiText("登记并分摊")}</Button></>}>

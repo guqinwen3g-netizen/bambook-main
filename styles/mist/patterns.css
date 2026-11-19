@@ -114,6 +114,10 @@
 .mist-shell-notices { position: absolute; bottom: calc(var(--mist-form-footer-height, 0px) + 20px); right: 24px; z-index: var(--mist-z-sticky); display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 8px; width: min(400px, calc(100% - 48px)); pointer-events: none; }
 /* 抽屉或对话框打开时操作失败的提示仍要看得见、点得到：移到抽屉左侧并压过遮罩；窄屏放到顶部。 */
 .mist-root:has(> .mist-dialog) .mist-shell-notices { z-index: calc(var(--mist-z-overlay) + 2); }
+/* Business popups must not cover dialog actions or take a click intended for the dialog.
+   Keep recovery/error cards available; the unread notice remains in the notification centre. */
+.mist-root:has(> .mist-dialog) .mist-notice-toast,
+.mist-root:has(> .mist-dialog) .mist-shell-notices > .mist-shell-notice:has(> .mist-notice-toast) { display: none; }
 /* Agent 提议在弹窗内展示执行失败；隐藏全局提示，避免挡住确认/拒绝，不清除错误状态。 */
 .mist-root:has(> .mist-dialog [data-agent-proposal-dialog]) .mist-shell-notices { visibility: hidden; }
 .mist-root:has(> .mist-drawer) .mist-shell-notices { z-index: calc(var(--mist-z-overlay) + 2); right: 434px; }
@@ -886,6 +890,10 @@ button.mist-sync:hover { background: var(--mist-fill); color: var(--mist-ink); }
 [data-report-results] .mist-tr > [data-label]::before { content: attr(data-label); display: var(--mist-report-label-display, none); margin-bottom: 4px; font-size: var(--mist-text-xs); color: var(--mist-ink-3); }
 /* 堆叠时表头隐藏：含输入控件的单元格补回列名，避免一排无标签的输入框。 */
 .mist-table[data-fit="stack"] > .mist-tr > [data-label]:has(input, select, textarea)::before { content: attr(data-label); display: block; margin-bottom: 4px; font-size: var(--mist-text-xs); color: var(--mist-ink-3); }
+/* Mobile hides the packing header even when the two-column grid fits. Keep each editable value identifiable. */
+@media (max-width: 760px) {
+  [data-packing-editor] .mist-tr > [data-label]:has(input, select, textarea)::before { content: attr(data-label); display: block; margin-bottom: 4px; font-size: var(--mist-text-xs); color: var(--mist-ink-3); }
+}
 .mist-thead > span, .mist-thead > button { min-width: 0; white-space: normal; line-height: 1.25; }
 .mist-thead { height: auto; min-height: 44px; }
 .mist-tr > [role="cell"] { overflow-wrap: anywhere; }

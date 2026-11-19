@@ -6,6 +6,131 @@ import { MistRoot } from '../../../../components/mist';
 import { createMistState } from '../../../../server/src/shared/mistWorkspace';
 import { AgentProposalDialog } from './AgentProposalDialog';
 
+function reopenProposalFixture(){
+ const state=createMistState({id:()=>crypto.randomUUID(),now:'2026-11-18T04:00:00Z',actorName:'业务员'},'empty');
+ state.devs=[{id:'dev-private',code:'DEV-27',name:'羊毛外套',currentVersionId:'version-private',versionIds:['version-private'],closure:{id:'close-private',kind:'archived',at:'2026-11-18T04:00:00Z',by:'业务员',reason:'样衣阶段已告结束'}}as any];state.versions=[{id:'version-private',devId:'dev-private',label:'R2-A-2'}as any];
+ const proposal:any={id:'restore-proposal',ownerId:'owner',owner:'业务员',state:'pending',createdAt:'2026-11-18T04:00:00Z',summary:['development.reopen dev-private closureId close-private expectedVersionId version-private'],command:{type:'development.reopen',payload:{devId:'dev-private',closureId:'close-private',expectedVersionId:'version-private',reason:'继续下一轮版型核对'}}};
+ return{state,proposal};
+}
+it('presents a restore proposal as the exact business case/version and both reasons without exposing or trusting technical tokens',()=>{
+ const{state,proposal}=reopenProposalFixture();(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
+ try{act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));const text=document.body.textContent!;
+  for(const value of['恢复开发案','开发案 · DEV-27 · 羊毛外套','当前版本 · R2-A-2','关闭状态 · 已归档','原关闭原因 · 样衣阶段已告结束','本次恢复原因 · 继续下一轮版型核对','中风险'])expect(text).toContain(value);
+  for(const value of['dev-private','close-private','version-private','devId','closureId','expectedVersionId','development.reopen'])expect(text).not.toContain(value);expect(getConfirm(host).disabled).toBe(false);
+ }finally{act(()=>root.unmount());host.remove();}
+});
+it.each(['unread','case','version','foreign-version','closure','cycle','current-version','forged-token','empty-reason','extra-field'])('blocks restore confirmation after %s changes while keeping owner rejection available',async kind=>{
+ const{state,proposal}=reopenProposalFixture();let visible:any=state;const run=vi.fn(async()=>({}));(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
+ try{const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={visible} run={run} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));render();expect(getConfirm(host).disabled).toBe(false);
+  if(kind==='unread')visible=null;else if(kind==='case')state.devs=[];else if(kind==='version')state.versions=[];else if(kind==='foreign-version')state.versions[0].devId='another-case';else if(kind==='closure')delete state.devs[0].closure;else if(kind==='cycle')state.devs[0].closure!.id='new-close-same-clock';else if(kind==='current-version')state.devs[0].currentVersionId='new-version';else if(kind==='forged-token')proposal.command.payload.closureId='forged';else if(kind==='empty-reason')proposal.command.payload.reason=' ';else proposal.command.payload.hiddenChange='unreviewed';render();expect(getConfirm(host).disabled).toBe(true);
+  const reject=[...host.querySelectorAll('button')].find(b=>b.textContent?.trim()==='拒绝')!;expect(reject.disabled).toBe(false);for(const value of['dev-private','close-private','version-private','closureId','expectedVersionId'])expect(document.body.textContent).not.toContain(value);
+  if(kind==='unread'){await act(async()=>reject.click());expect(run).toHaveBeenCalledWith({type:'agent.proposal.reject',payload:{id:'restore-proposal'}},undefined);}
+ }finally{act(()=>root.unmount());host.remove();}
+});
+
+function orderProposalFixture(){
+ const state=createMistState({id:()=> 'id',now:'2026-11-15T00:00:00Z',actorName:'Test'},'empty');
+ state.customers=[{id:'customer-private',name:'Harborline Brands',code:'HLB'} as any];
+ state.members=[{userId:'owner-private',name:'沈禾'} as any];state.files=[{id:'file-private',name:'HLB-01.pdf'} as any];
+ state.market.products=[{id:'product-private',name:'再生涤纶塔丝隆',sku:'HLB-T01'} as any];
+ const command={type:'order.create',payload:{type:'fabric',customerId:'customer-private',season:'SS28',currency:'GBP',due:'2026-12-28',ownerId:'owner-private',governance:{kind:'external',poNumber:'HLB-01',confirmationFileIds:['file-private'],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:100,preShipmentPercent:100,paymentNote:'T/T 100% 预付',incoterm:'FOB',deliveryPlace:'上海',overPercent:0,shortPercent:0},lines:[{name:'再生涤纶塔丝隆',nameEn:'Recycled polyester taslon',style:'HLB-T01',img:'clay',qty:10,unit:'米',price:1.95,sourceProductId:'product-private',breakdown:{kind:'fabric',composition:'再生涤纶100%',width:150,weight:110,rows:[{color:'Navy / HB-N01',quantity:10}]}}]}};
+ const proposal={id:'p',ownerId:'u',owner:'陆衡',summary:['创建订单'],state:'pending',createdAt:'2026-11-15',command};return{state,proposal};
+}
+function contractProposalFixture(){
+ const{state,proposal:original}=orderProposalFixture(),contract={...original.command.payload.governance,confirmationFileIds:[] as string[]};
+ state.orders=[{id:'order-private',code:'SO-G-22',governance:{status:'draft',contract}} as any];
+ const proposal:any={id:'contract-proposal',ownerId:'u',owner:'顾言',summary:['保存订单合同草稿'],state:'pending',createdAt:'2026-11-18',command:{type:'order.governance.saveDraft',payload:{orderId:'order-private',input:{...contract,confirmationFileIds:['file-private']}}}};
+ return{state,proposal};
+}
+it('identifies a contract proposal by its order and original filename without presenting unchanged inputs as changes',()=>{
+ const{state,proposal}=contractProposalFixture();(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
+ try{act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));const text=host.textContent!;
+  expect(text).toContain('订单 · SO-G-22');expect(text).toContain('客户依据 · 第1项 · HLB-01.pdf');
+  for(const value of ['order-private','file-private','input ·','付款方式 · TT','定金比例（%） · 100'])expect(text).not.toContain(value);
+  expect(getConfirm(host).disabled).toBe(false);
+ }finally{act(()=>root.unmount());host.remove();}
+});
+it.each(['order','file'])('blocks a saved contract proposal after its %s source becomes invisible',kind=>{
+ const{state,proposal}=contractProposalFixture();(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
+ try{const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));render();expect(getConfirm(host).disabled).toBe(false);
+  if(kind==='order')state.orders=[];else state.files=[];render();expect(getConfirm(host).disabled).toBe(true);expect(host.textContent).toContain('订单或来源资料已不可见，请重新核对');
+ }finally{act(()=>root.unmount());host.remove();}
+});
+it('identifies the assigned owner and priced line, permits new proposed lines, and blocks another order line',()=>{
+ const{state,proposal}=contractProposalFixture();state.orders[0].currency='GBP';state.orderLines=[{id:'line-private',orderId:'order-private',style:'HLB-T01',name:'塔丝隆',qty:10,unit:'米',price:1.95} as any];
+ proposal.command.payload.orderPatch={ownerId:'owner-private'};proposal.command.payload.lines=[{...state.orderLines[0],price:2.25,img:'clay'}];
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
+ try{const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));render();
+  expect(host.textContent).toContain('负责人 · 沈禾');expect(host.textContent).toContain('单价 · 2.25 GBP');expect(host.textContent).not.toContain('line-private');expect(host.textContent).not.toContain('owner-private');expect(host.textContent).not.toContain('img ·');
+  state.orderLines=[];render();expect(getConfirm(host).disabled).toBe(false);expect(host.textContent).toContain('HLB-T01');expect(host.textContent).not.toContain('line-private');
+  state.orderLines=[{id:'line-private',orderId:'another-order',style:'OTHER'} as any];render();expect(getConfirm(host).disabled).toBe(true);
+ }finally{act(()=>root.unmount());host.remove();}
+});
+it('presents an order draft as named business objects, full terms and an exact currency total',()=>{
+ const{state,proposal}=orderProposalFixture();(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
+ try{act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal as any} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));const text=host.textContent!;
+  for(const value of ['客户 · Harborline Brands','负责人 · 沈禾','客户依据 · 第1项 · HLB-01.pdf','订单总金额 · 19.50 GBP','来源产品 · 再生涤纶塔丝隆','面料','外部客户订单','门幅（cm） · 150','克重（g/m²） · 110','出运前累计收款（%） · 100'])expect(text).toContain(value);
+  for(const value of ['customer-private','owner-private','file-private','product-private','governance','breakdown','img ·','clay','fabric','external'])expect(text).not.toContain(value);
+  expect(getConfirm(host).disabled).toBe(false);
+ }finally{act(()=>root.unmount());host.remove();}
+});
+it.each(['customer','member','file','product'])('blocks an order draft when its named %s reference is no longer visible',kind=>{
+ const{state,proposal}=orderProposalFixture();(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
+ try{const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal as any} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));render();expect(getConfirm(host).disabled).toBe(false);
+  if(kind==='customer')state.customers=[];if(kind==='member')state.members=[];if(kind==='file')state.files=[];if(kind==='product')state.market.products=[];render();expect(getConfirm(host).disabled).toBe(true);expect(host.textContent).toContain('订单或来源资料已不可见，请重新核对');
+ }finally{act(()=>root.unmount());host.remove();}
+});
+it('shows all fields of a larger medium risk order and blocks confirmation when the display limit is exceeded',()=>{
+ const{state,proposal}=orderProposalFixture();proposal.command.payload.lines=Array.from({length:4},(_,i)=>({...proposal.command.payload.lines[0],style:'款号'+i}));(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
+ try{const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal as any} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));render();expect(host.textContent).toContain('订单总金额 · 78.00 GBP');expect(host.textContent).toContain('款号3');expect(host.textContent).not.toContain('项未显示');expect(getConfirm(host).disabled).toBe(false);
+  proposal.command.payload.lines=Array.from({length:40},()=>proposal.command.payload.lines[0]);render();expect(host.textContent).toContain('项未显示');expect(getConfirm(host).disabled).toBe(true);
+ }finally{act(()=>root.unmount());host.remove();}
+});
+
+it.each([false,true])('keeps a rejected confirmation local while preserving an uncertain original request (%s)',async(uncertain)=>{
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const proposal:any={id:'failure-proposal',ownerId:'u',owner:'User',summary:['Update customer'],state:'pending',createdAt:'2026-11-15T00:00:00Z',command:{type:'customer.update',payload:{id:'customer',patch:{city:'York'}}}};
+ const failure=Object.assign(new Error('Confirmation failed'),uncertain?{mistPendingCommand:true}:{}),onRejection=vi.fn(),run=vi.fn().mockRejectedValue(failure);
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ try{
+  act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} run={run} onRejection={onRejection} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
+  await act(async()=>{[...document.querySelectorAll('button')].find(b=>b.textContent==='确认执行')!.click();});
+  expect(document.body.textContent).toContain(uncertain?'结果待核对':'没有执行');
+  expect(document.body.textContent).toContain('Confirmation failed');
+  expect(onRejection.mock.calls).toEqual(uncertain?[]:[['Confirmation failed']]);
+  if(uncertain)for(const label of ['确认执行','拒绝'])expect([...document.querySelectorAll('button')].find(b=>b.textContent===label)!.disabled).toBe(true);
+ }finally{act(()=>root.unmount());host.remove();}
+});
+
+it.each(['proposal','company'])('does not report a late rejection in a different %s or consume its global failure',async(change)=>{
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const make=(id:string):any=>({id,ownerId:'u',owner:'User',summary:[id],state:'pending',createdAt:'2026-11-15T00:00:00Z',command:{type:'customer.update',payload:{id:'customer',patch:{city:'York'}}}});
+ let reject!:(error:Error)=>void;const run=vi.fn(()=>new Promise((_ok,no)=>{reject=no;})),onRejection=vi.fn();
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ const show=(id:string,scope='a')=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={make(id)} scopeKey={scope} run={run} onRejection={onRejection} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));
+ try{show('old');await act(async()=>{[...document.querySelectorAll('button')].find(b=>b.textContent==='确认执行')!.click();});show(change==='proposal'?'new':'old',change==='company'?'b':'a');await act(async()=>reject(new Error('Old failure')));expect(document.body.textContent).not.toContain('Old failure');expect(onRejection).not.toHaveBeenCalled();expect([...document.querySelectorAll('button')].find(b=>b.textContent==='确认执行')!.disabled).toBe(false);}
+ finally{act(()=>root.unmount());host.remove();}
+});
+
+it('identifies supplier quote sources and filenames before allowing confirmation',()=>{
+ const state=createMistState({id:()=> 'id',now:'2026-11-14T00:00:00Z',actorName:'Test'},'empty');
+ state.market.suppliers=[{id:'supplier-private',name:'江南成衣'} as any];state.files=[{id:'file-private',name:'CMT-V2.pdf'} as any];state.rfqs=[{id:'rfq-private',code:'RFQ-2026-0003',state:'open',unit:'件',supplierIds:['supplier-private'],quotes:[]} as any];
+ const proposal={id:'p',ownerId:'u',owner:'顾言',summary:['更新供应报价'],state:'pending',createdAt:'2026-11-14',command:{type:'rfq.quote',payload:{id:'rfq-private',supplierId:'supplier-private',price:'131.25',currency:'CNY',moq:'50',promisedDue:'2026-12-20',validUntil:'2026-11-30',terms:'20%预付',fileIds:['file-private']}}};
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
+ try{const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal as any} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));const confirmButton=()=>getConfirm(host);render();const text=host.textContent!;
+  for(const value of ['询价单 · RFQ-2026-0003','供应商 · 江南成衣','CMT-V2.pdf','承诺交期 · 2026-12-20','报价有效期 · 2026-11-30','单价 · 131.25'])expect(text).toContain(value);
+  for(const value of ['rfq-private','supplier-private','file-private','fileIds','promisedDue','validUntil','moq ·'])expect(text).not.toContain(value);expect(confirmButton().disabled).toBe(false);
+  const files=state.files;state.files=[];render();expect(confirmButton().disabled).toBe(true);state.files=files;state.rfqs=[];render();expect(confirmButton().disabled).toBe(true);
+ }finally{act(()=>root.unmount());host.remove();}
+});
+it('identifies the exact awarded quote and blocks a superseded quote source',()=>{
+ const state=createMistState({id:()=> 'id',now:'2026-11-14T00:00:00Z',actorName:'Test'},'empty'),quote={id:'quote-private',supplierId:'supplier-private',supplier:'江南成衣',price:131.25,currency:'CNY',fileIds:[],declined:false};state.rfqs=[{id:'rfq-private',code:'RFQ-2026-0003',state:'open',unit:'件',supplierIds:['supplier-private'],quotes:[quote]} as any];
+ const proposal={id:'p',ownerId:'u',owner:'顾言',summary:['定标'],state:'pending',createdAt:'2026-11-14',command:{type:'rfq.award',payload:{id:'rfq-private',quoteId:'quote-private',reason:'按有效报价'}}};(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
+ try{const render=()=>act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal as any} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));render();expect(host.textContent).toContain('江南成衣 · 131.25 CNY/件');expect(host.textContent).not.toContain('quote-private');(quote as any).supersededAt='2026-11-14T01:00:00Z';render();expect(getConfirm(host).disabled).toBe(true);
+ }finally{act(()=>root.unmount());host.remove();}
+});
+function getConfirm(host:HTMLElement){return [...host.querySelectorAll('button')].find(b=>b.textContent==='确认执行')!;}
+
 it('shows precise proposed mail values and evidence, and disables confirmation when the analyzed source is stale', async () => {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   const state = createMistState({ id: () => 'id', now: '2026-11-01T00:00:00Z', actorName: 'Test' }, 'demo'), mail = state.email.messages[0];
@@ -148,4 +273,17 @@ it('shows quotation business references and exact version, and blocks missing so
   for(const [owner,key]of [[state.market,'quotations'],[state,'customers'],[state,'devs'],[state,'versions'],[state,'files']] as const){const rows=owner[key as keyof typeof owner];(owner as any)[key]=[];render();expect(host.textContent).toContain('报价或来源资料已不可见，请重新核对');expect(confirmButton().disabled).toBe(true);(owner as any)[key]=rows;}
  }
  finally{act(()=>root.unmount());host.remove();}
+});
+
+it('shows a customer credit grant with the exact old/new currency values and requires the existing high-risk password',()=>{
+ const state=createMistState({id:()=> 'id',now:'2026-11-18T04:00:00Z',actorName:'Test'},'empty');state.customers=[{id:'customer-private',code:'BCS',name:'Birchline',grade:'B',creditLimit:1000,currency:'GBP'} as any];
+ const proposal:any={id:'credit-proposal',ownerId:'u',owner:'Manager',summary:['调整信用额度'],state:'pending',createdAt:'2026-11-18',risk:'high',command:{type:'market.customer.update',payload:{id:'customer-private',patch:{creditLimit:2000}}}};
+ const host=document.createElement('div'),root=createRoot(host);document.body.append(host);try{act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));const body=document.body.textContent!;for(const text of ['Birchline · BCS','原信用额度','1000.00 GBP','拟设信用额度','2000.00 GBP','高风险','本人登录密码'])expect(body).toContain(text);expect(body).not.toContain('customer-private');expect(body).not.toContain('creditLimit');expect(getConfirm(host).disabled).toBe(true);}finally{act(()=>root.unmount());host.remove();}
+});
+
+it('labels customer acceptance facts in an existing finance confirmation proposal',()=>{
+ const {state}=orderProposalFixture();state.invoices=[{id:'ar-private',code:'CI-ACCEPTANCE',orderId:'',order:'',customer:'Buyer',currency:'USD',amount:100,open:0,due:'',financeStatus:'pending'}];
+ const proposal:any={id:'accept-proposal',ownerId:'u',owner:'财务',summary:['确认应收'],state:'pending',createdAt:'2026-11-18',command:{type:'finance.receivable.due',payload:{invoiceId:'ar-private',acceptanceDate:'2026-11-18',acceptanceBasis:'Customer AC-1 and POD-1'}}};
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;const host=document.createElement('div'),root=createRoot(host);document.body.append(host);
+ try{act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={()=>{}} onDone={()=>{}}/></MistRoot>));expect(host.textContent).toContain('客户验收日');expect(host.textContent).toContain('验收依据');expect(host.textContent).toContain('Customer AC-1 and POD-1');expect(host.textContent).not.toContain('acceptanceDate');expect(host.textContent).not.toContain('acceptanceBasis');}finally{act(()=>root.unmount());host.remove();}
 });

@@ -35,8 +35,6 @@ const customerArchived = (root: MistState, customerId: string) => (root.market?.
 
 export const readSampleRequests = (root: Pick<Root, 'sampleRequests'>) => root.sampleRequests || [];
 export const SAMPLE_REQUEST_STATE_LABEL: Record<MistSampleRequest['state'], string> = { open: '待寄出', sent: '已寄出', cancelled: '已取消' };
-/** 提单、取消、据单寄出按样品写权限（products:write）；开票按开票权限。样品间权限（sample:room:write）由界面限定寄出入口。 */
-export function sampleRequestPermission(command: SampleRequestCommand): string { return command.type === 'sample.request.invoice' ? 'invoices:write' : 'products:write'; }
 export const sampleRequestSent = (r: Pick<MistSampleRequest, 'shipments'>) => r.shipments.reduce((n, s) => n + s.quantity, 0);
 
 export function applySampleRequestCommand(root: Root, command: SampleRequestCommand, c: MistContext): { id: string; invoiceId?: string } {

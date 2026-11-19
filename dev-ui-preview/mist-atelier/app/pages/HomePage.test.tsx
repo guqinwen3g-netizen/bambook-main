@@ -4,6 +4,7 @@ import {materialDeliveryFixture} from '../../../../server/src/mist/__tests__/mat
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getByRole } from '@testing-library/dom';
 import { createMistState, applyMistCommand, type MistCommand } from '../../../../server/src/shared/mistWorkspace';
 import { MistRoot, ToastProvider } from '../../../../components/mist';
 import { Nav } from '../nav';
@@ -31,7 +32,7 @@ beforeEach(() => {
   state.invoices.push({ ...state.invoices[0], id: 'euro-open', code: 'EUR-OPEN', currency: 'EUR', amount: 77, open: 77 });
   state.calendar = [{ id: 'event-real', title: '实际约定', date: key, time: '14:00', note: '实际参与安排' }];
   state.notifications = state.notifications.map(n => ({ ...n, recipientIds: ['owner'] }));
-  seam.value = { state, workspace: { id: 'workspace-one', name: '真实公司' }, loading: false, saving: false, pending: null, error: '', refresh: vi.fn(), recover: vi.fn(),
+  seam.value = { state, workspace: { id: 'workspace-one', name: '真实公司', revision: 0 }, loading: false, saving: false, pending: null, error: '', refresh: vi.fn(), recover: vi.fn(),
     // Same as the server read projection: each member sees notices addressed to them, with their own read state.
     run: vi.fn(async (command: MistCommand) => { const next = applyMistCommand(seam.value.state, command, ctx()).state; next.notifications = next.notifications.map((n: any) => ({ ...n, readAt: n.readBy?.owner ?? n.readAt })); seam.value.state = next; paint(); return { requestId: 'request', revision: 1, result: {} }; }) };
 });
@@ -59,7 +60,8 @@ describe('original Mist Home workspace functionality', () => {
     await click(button('QC 报告')); const dialog = host.querySelector('[role="dialog"]'); expect(dialog?.textContent).toContain('真实评审人'); expect(dialog?.textContent).toContain('有保留通过'); expect(dialog?.textContent).toContain('保留问题需跟进');
   });
   it('persists task completion and removes the item only after the command succeeds', async () => {
-    render(); await click(button('管理任务')); const dialog = host.querySelector('[role="dialog"]')!;
+    seam.value.state.tasks[0].note='完成前核对资料';render(); await click(button('管理任务')); const dialog = host.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain('完成前核对资料');expect(dialog.textContent).toContain(seam.value.state.tasks[0].due);
     await click(dialog.querySelector<HTMLInputElement>('input[type="checkbox"]')!); await click(button('保存状态', dialog));
     expect(seam.value.run).toHaveBeenCalledWith({ type: 'task.complete', payload: { id: 'task-exact', done: true } }); expect(seam.value.state.tasks[0].done).toBe(true); expect(host.querySelector('.mist-task')).toBeNull();
   });
@@ -218,4 +220,44 @@ it('opens the existing adjustment form with the selected CRM task and its due da
   let finish!:()=>void;seam.value.run.mockImplementationOnce(async()=>{seam.value.saving=true;paint();await new Promise<void>(r=>{finish=r;});seam.value.saving=false;paint();return {result:{id:task.id}};});
   await click(button('保存',dialog));await act(async()=>finish());
   expect(seam.value.run).toHaveBeenCalledTimes(1);expect(host.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it('lets the assignee reopen their completed personal task while excluding another person and controlled business tasks',async()=>{
+  const state=seam.value.state;
+  const task=(id:string,assignee:string,kind='personal')=>({id,title:id,done:true,due:businessToday(),kind,target:{view:'cockpit'},assigneeIds:[assignee]});
+  state.tasks=[task('my-personal','owner'),task('other-personal','other'),task('controlled','owner','internal-delivery')];render();
+  expect([...host.querySelectorAll('.mist-task')].some(row=>row.textContent?.includes('my-personal'))).toBe(false);
+  expect(button('管理任务').disabled).toBe(false);await click(button('管理任务'));const dialog=host.querySelector('[role="dialog"]')!,select=dialog.querySelector('select')!;
+  expect([...select.options].map(option=>option.value)).toEqual(['my-personal']);await click(dialog.querySelector<HTMLInputElement>('input[type="checkbox"]')!);await click(button('保存状态',dialog));
+  expect(seam.value.run).toHaveBeenCalledWith({type:'task.complete',payload:{id:'my-personal',done:false}});expect(seam.value.state.tasks.find((task:any)=>task.id==='my-personal').done).toBe(false);
+});
+it('preserves an adjustment draft without submitting after the current task source changes',async()=>{
+  seam.value.workspace.ownerId='owner';const task=seam.value.state.tasks[0];task.kind='personal';task.note='原始备注';render();await click(button('管理任务'));await click(button('调整待办',host.querySelector('[role="dialog"]')!));
+  const dialog=host.querySelector('[role="dialog"]')!,note=dialog.querySelector('textarea')!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(note,'我的未保存输入');note.dispatchEvent(new Event('input',{bubbles:true}));});
+  seam.value={...seam.value,state:{...seam.value.state,tasks:[{...task,due:'2026-11-20',note:'同事保存的资料'}]},workspace:{...seam.value.workspace,revision:1}};await act(async()=>paint());await click(button('保存',dialog));expect(seam.value.run).not.toHaveBeenCalled();expect(dialog.textContent).toContain('待办资料已更新，请重新打开后核对');expect(note.value).toBe('我的未保存输入');expect(seam.value.state.tasks[0].note).toBe('同事保存的资料');
+});
+it('submits an unchanged task source with the checked current revision despite key order and unrelated updates',async()=>{
+  seam.value.workspace.ownerId='owner';const task=seam.value.state.tasks[0];task.kind='personal';task.note='原始备注';render();await click(button('管理任务'));await click(button('调整待办',host.querySelector('[role="dialog"]')!));const dialog=host.querySelector('[role="dialog"]')!;
+  seam.value={...seam.value,state:{...seam.value.state,tasks:[Object.fromEntries(Object.entries(task).reverse())]},workspace:{...seam.value.workspace,revision:7}};await act(async()=>paint());await click(button('保存',dialog));expect(seam.value.run).toHaveBeenCalledWith({type:'task.save',payload:{id:task.id,title:task.title,due:task.due,assigneeId:'owner',note:'原始备注'}},{expectedRevision:7});
+});
+it('clears a status failure only after its exact request, person and company acknowledgement is recovered',async()=>{
+  const pending={workspaceId:'workspace-one',requestId:'task-status',actorId:'owner'};seam.value.run.mockRejectedValueOnce(Object.assign(new Error('回执未收到'),{mistPendingCommand:pending}));render();await click(button('管理任务'));let dialog=host.querySelector('[role="dialog"]')!;await click(dialog.querySelector<HTMLInputElement>('input[type="checkbox"]')!);await click(button('保存状态',dialog));expect(host.textContent).toContain('操作未完成');await click(button('关闭',dialog));
+  for(const other of [{requestId:'another'},{actorId:'someone-else'},{workspaceId:'another-company'}]){seam.value={...seam.value,commandRecovery:{...pending,...other,revision:1}};await act(async()=>paint());expect(host.textContent).toContain('操作未完成');}
+  seam.value={...seam.value,commandRecovery:{...pending,revision:1}};await act(async()=>paint());expect(host.textContent).not.toContain('操作未完成');expect(seam.value.run).toHaveBeenCalledTimes(1);
+});
+it('does not erase an unrelated definite failure when another command is recovered',async()=>{
+  seam.value.run.mockRejectedValueOnce(new Error('无权办理'));render();await click(button('管理任务'));const dialog=host.querySelector('[role="dialog"]')!;await click(dialog.querySelector<HTMLInputElement>('input[type="checkbox"]')!);await click(button('保存状态',dialog));await click(button('关闭',dialog));seam.value={...seam.value,commandRecovery:{workspaceId:'workspace-one',requestId:'other',actorId:'owner',revision:1}};await act(async()=>paint());expect(host.textContent).toContain('操作未完成');expect(host.textContent).toContain('无权办理');
+});
+it.each(['due','title'] as const)('sorts the whole visible list including derived business and personal work by %s',async sort=>{
+  const state=createMistState(ctx(),'empty'),today=businessToday(),yesterday=new Date(Date.parse(today+'T00:00:00Z')-86400000).toISOString().slice(0,10);
+  state.tasks=[{id:'later',title:'Alpha',done:false,due:today,kind:'personal',target:{view:'cockpit'},assigneeIds:['finance']},{id:'earlier',title:'Zeta',done:false,due:yesterday,kind:'personal',target:{view:'cockpit'},assigneeIds:['finance']}];
+  state.payables!.requests=[{id:'approved-payment',code:'PR-BETA',state:'approved',purpose:'settlement',supplier:'供货工厂',currency:'CNY',amount:434,submittedAt:'2099-01-01T00:00:00Z',paymentHistory:[]} as any];seam.value={...seam.value,state};seam.session={...seam.session,user:{id:'finance',displayName:'财务'},hasPermission:(permission:string)=>permission==='vouchers:write'};render();
+  if(sort==='title'){await click(getByRole(host,'button',{name:/^排序/}));await click(getByRole(document.body,'menuitemradio',{name:'按名称'}));}
+  expect([...host.querySelectorAll('.mist-task-t')].map(row=>row.textContent)).toEqual(sort==='title'?['Alpha','PR-BETA · 待付款','Zeta']:['Zeta','Alpha','PR-BETA · 待付款']);
+});
+it('shows account handover scope and checks as fields instead of a long selection title',async()=>{
+  const title='接手 林舟 的业务（客户 1、商机 1）：核对在手订单、报价、未收款与供应商';seam.value.state.tasks=[{id:'account',title,kind:'account-handover',done:false,due:businessToday(),target:{view:'relations'},assigneeIds:['owner']}];render();await click(button('管理任务'));const dialog=host.querySelector('[role="dialog"]')!;expect([...dialog.querySelector('select')!.options].map(option=>option.textContent)).toEqual(['接手业务 · 林舟']);expect(dialog.textContent).toContain('交接范围');expect(dialog.textContent).toContain('客户 1、商机 1');expect(dialog.textContent).toContain('核对内容');expect(dialog.textContent).toContain('在手订单、报价、未收款与供应商');expect(seam.value.state.tasks[0].title).toBe(title);expect(seam.value.run).not.toHaveBeenCalled();
+});
+it('shows only recorded completion person and time when reviewing a completed personal task',async()=>{
+  const task=seam.value.state.tasks[0];Object.assign(task,{kind:'personal',done:true,doneBy:'原经办人',doneAt:'2026-11-18T04:00:00.000Z'});render();await click(button('管理任务'));const dialog=host.querySelector('[role="dialog"]')!;expect(dialog.textContent).toContain('完成人');expect(dialog.textContent).toContain('原经办人');expect(dialog.textContent).toContain('完成时间');expect(dialog.textContent).toContain('12:00');expect(seam.value.run).not.toHaveBeenCalled();
 });

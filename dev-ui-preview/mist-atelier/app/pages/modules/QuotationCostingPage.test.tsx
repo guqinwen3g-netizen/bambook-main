@@ -149,8 +149,13 @@ it("enters exact line from quote detail and returns to exact quote", async () =>
     section: "costing:" + line.id,
   });
   expect(host.textContent).toContain("报价条目核算");
+  expect(host.querySelector('.mist-wizard')!.contains(document.activeElement)).toBe(true);
   await click("返回报价");
   expect(go).toHaveBeenLastCalledWith("quotations", q().id, { detail: "full" });
+});
+it('focuses a new costing opened after a fresh readonly snapshot load without changing that snapshot',async()=>{
+  render();await fill();await click('下一步');await click('保存核算');const original=structuredClone(q().costingSnapshots),writes=bridge.w.run.mock.calls.length;
+  act(()=>root.unmount());root=createRoot(host);render();expect(host.querySelector('.mist-wizard')).toBeNull();await click('新建核算');expect(host.querySelector('.mist-wizard')!.contains(document.activeElement)).toBe(true);expect(q().costingSnapshots).toEqual(original);expect(bridge.w.run).toHaveBeenCalledTimes(writes);
 });
 it("freezes sources without silently applying selling price, then exports only exact line snapshots", async () => {
   const original = structuredClone(q()),
@@ -294,6 +299,9 @@ it("does not manufacture snapshots or another line for a missing exact target", 
   expect(host.textContent).toContain("未找到指定报价条目");
   expect(host.textContent).not.toContain("供应商成品单价");
   expect(bridge.w.run).not.toHaveBeenCalled();
+});
+it.each(['line','history'])('distinguishes an unread costing %s source from an absent record',kind=>{
+ if(kind==='history')route.section='cost-history';bridge.w.state=null;bridge.w.error='读取失败';render();expect(host.textContent).toContain('报价资料未读取');expect(host.textContent).not.toContain('未找到指定报价条目');expect(host.textContent).not.toContain('本报价尚无核算历史');if(kind==='history')expect(host.textContent).toContain('报价核算历史');expect(bridge.w.run).not.toHaveBeenCalled();
 });
 it("keeps sent quote or unauthorized role read-only", () => {
   q().status = "Sent";

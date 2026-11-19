@@ -5,6 +5,7 @@ import { createIdentity, identityRecord, identityView, issueServiceKey, revokeSe
 import { answerTaskQuestion, askTaskQuestion, assertTaskLease, changeTask, checkTaskCondition, checkpointTask, claimTask, createTask, finishTask, heartbeatTask, issueTaskControl, reserveTaskStep, saveTaskSources, settleTaskProposal, taskRecord, taskView, waitTaskForProposal, waitTaskUntil, type AgentTaskLease } from './agentTasks';
 import type { AgentActor } from './agentDelegation';
 import type { TokenPayload } from '../auth/service';
+import {platformTaskUsage} from './agentTasks';
 
 let db: MemoryMistDatabase, actor: TokenPayload, service: AgentActor, workspaceId: string, identityId: string, taskId: string;
 let now: number;
@@ -25,7 +26,28 @@ async function claim(requestId = randomUUID(), workerId = 'worker') {
   const c = (await tx(d => taskRecord(d, workspaceId, taskId))).value;
   return { result, lease: { taskId, workspaceId, runId: c.lease!.id, grantHash: digest(result.token!), serviceLease: c.authority } as AgentTaskLease };
 }
+it('persists exact intent references separately from actual task reads and distinguishes same-label identity in idempotency',async()=>{
+ const requestId=randomUUID(),input={requestId,identityId,name:'同名资料',instructions:'核对同名资料'};
+ const created=await tx(d=>(createTask as any)(d,actor,workspaceId,input,now,undefined,undefined,[{kind:'orders',id:'order-A'}]));
+ const saved=(await tx(d=>taskRecord(d,workspaceId,created.id))).value;
+ expect(saved).toMatchObject({intentRefs:[{kind:'orders',id:'order-A'}],sources:[]});expect(taskView(saved,actor,now).intentRefs).toEqual([{kind:'orders',id:'order-A'}]);expect(taskView(saved,actor,now,false)).not.toHaveProperty('intentRefs');
+ await expect(tx(d=>(createTask as any)(d,actor,workspaceId,input,now,undefined,undefined,[{kind:'orders',id:'order-B'}]))).rejects.toMatchObject({status:409});
+});
+it('keeps the legacy creation hash and row shape unchanged when references are absent or empty',async()=>{
+ const requestId=randomUUID(),input={requestId,identityId,name:'旧任务',instructions:'核对订单'};
+ const first=await tx(d=>createTask(d,actor,workspaceId,input,now));const second=await tx(d=>(createTask as any)(d,actor,workspaceId,input,now,undefined,undefined,[]));expect(second.id).toBe(first.id);
+ const saved=(await tx(d=>taskRecord(d,workspaceId,first.id))).value;expect(saved).not.toHaveProperty('intentRefs');expect(saved.lastInputHash).toBe(digest(JSON.stringify([identityId,input.name,input.instructions])));
+});
 const conditionTarget={type:'order',id:'source-order'},preparedCondition=()=>({...conditionTarget,label:'SO-1',hash:'server-full-read-hash'});
+it('aggregates platform usage by actual Shanghai month at both UTC boundaries',async()=>{
+ const start=Date.parse('2026-10-01T00:00:00Z'),identity=await tx(d=>createIdentity(d,actor,workspaceId,{id:randomUUID(),name:'月度核对',ownerId:actor.userId,mode:'read'},{id:actor.userId,name:actor.displayName!},start));
+ await tx(d=>issueServiceKey(d,actor,workspaceId,identity.id,{requestId:randomUUID(),version:identity.version},(_w,_i,g)=>'month-key-'+g,start));
+ for(const at of ['2026-10-31T15:59:59.999Z','2026-10-31T16:00:00.000Z','2026-11-30T15:59:59.999Z','2026-11-30T16:00:00.000Z'])await tx(d=>createTask(d,actor,workspaceId,{requestId:randomUUID(),identityId:identity.id,name:'月度核对',instructions:'只读核对本人业务。',executor:'platform'},Date.parse(at)));
+ expect(await tx(d=>platformTaskUsage(d,workspaceId,'2026-10',actor.userId))).toMatchObject([{tasks:1}]);
+ expect(await tx(d=>platformTaskUsage(d,workspaceId,'2026-11',actor.userId))).toMatchObject([{tasks:2}]);
+ expect(await tx(d=>platformTaskUsage(d,workspaceId,'2026-12',actor.userId))).toMatchObject([{tasks:1}]);
+ expect(await tx(d=>platformTaskUsage(d,workspaceId,'2026-11','another-owner'))).toEqual([]);
+});
 it('checks a condition on a bounded cadence without a lease or runtime charge, then requires the exact original full read',async()=>{
  const first=await claim();now+=5000;const requestId=randomUUID(),input={requestId,delaySeconds:120,condition:conditionTarget,summary:'等待原订单变化。'};
  const waiting=await tx(d=>waitTaskUntil(d,service,first.lease,input,now,preparedCondition));expect(waiting).toMatchObject({state:'waiting_condition',runtimeUsedMs:5000,waitingFor:{...conditionTarget,label:'SO-1'}});

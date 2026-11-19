@@ -23,6 +23,141 @@ afterEach(async () => { if (root) await act(async () => root!.unmount()); root =
 async function mount(id?: string, mode: 'full' | 'list' = id ? 'full' : 'list') { const detail = mode === 'full' ? mode : undefined; host = document.createElement('div'); document.body.append(host); root = createRoot(host); const Page = MARKET_PAGES.relations; await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'relations', id, detail }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
 const button = (label: string) => [...document.body.querySelectorAll('button')].find(b => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
 async function click(label: string) { const b = button(label); expect(b, label).toBeTruthy(); await act(async () => b!.click()); }
+async function repaint(id?: string) { const Page = MARKET_PAGES.relations; await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'relations', id, detail: id ? 'full' : undefined }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
+async function fillProfile(label: string, value: string) {
+  const dialog = document.body.querySelector('[role="dialog"]')!;
+  const input = dialog.querySelector(`[aria-label="${label}"]`) as HTMLInputElement | HTMLTextAreaElement;
+  await act(async () => { Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
+}
+
+it.each([true, false])('does not present an unread workspace as an empty editable organization list (loading %s)', async loading => {
+  bridge.current = { ...bridge.current, state: null, loading, error: loading ? '' : '读取失败', workspace: { id: 'workspace', revision: 7 } }; await mount();
+  expect(button('建立关系档案')!.disabled).toBe(true); expect(button('导出')!.disabled).toBe(true); expect(host.textContent).not.toContain('还没有关系档案'); expect(host.querySelector('.mist-pipeline')).toBeNull();
+  if (!loading) { expect(host.textContent).toContain('关系资料未读取'); await click('重试'); expect(bridge.current.refresh).toHaveBeenCalledOnce(); }
+  bridge.current = { ...bridge.current, state, loading: false, error: '' }; await repaint(); expect(button('建立关系档案')!.disabled).toBe(false); expect(button('导出')!.disabled).toBe(false);
+});
+
+it('keeps a new organization draft without posting when only workspace metadata remains available', async () => {
+  bridge.current.workspace = { id: 'workspace', revision: 7 }; await mount(); await click('建立关系档案'); await fillProfile('组织名称', '沅海物流');
+  bridge.current = { ...bridge.current, state: null, workspace: { id: 'workspace', revision: 8 }, error: '读取失败' }; await repaint(); await click('保存');
+  expect(bridge.current.run).not.toHaveBeenCalled(); expect(document.body.textContent).toContain('关系档案不可用，请重新读取后核对'); expect((document.querySelector('[aria-label="组织名称"]') as HTMLInputElement).value).toBe('沅海物流');
+});
+
+it('shows a real empty state and enables creation after an empty workspace was actually read', async () => {
+  state.market.relations = []; bridge.current.workspace = { id: 'workspace', revision: 7 }; await mount(); expect(host.textContent).toContain('还没有关系档案'); expect(button('建立关系档案')!.disabled).toBe(false); expect(host.textContent).not.toContain('关系资料未读取');
+});
+
+it.each(['customer-code', 'supplier-code', 'customer-name', 'customer-email', 'customer-phone', 'supplier-name', 'supplier-email', 'supplier-phone'])('finds a dual-identity organization by its readable identifiers: %s', async kind => {
+  const relation = named('博远'), customer = state.customers.find(r => r.id === relation.customerId)!, supplier = state.market.suppliers.find(r => r.id === relation.supplierId)!, c = { id: 'search-customer-contact', customerId: relation.customerId, name: '', role: '', email: '', phone: '', tone: 'accent' as const }, s = supplier.contacts[0];
+  state.contacts.push(c);
+  customer.code = 'CID-901'; supplier.code = 'SID-902'; Object.assign(c, { name: '客户独立联络', email: 'customer.unique@example.invalid', phone: '0000-010101' }); Object.assign(s, { name: '供方独立联络', email: 'supplier.unique@example.invalid', phone: '0000-020202' });
+  const queries: Record<string, string> = { 'customer-code': customer.code, 'supplier-code': supplier.code, 'customer-name': c.name, 'customer-email': c.email, 'customer-phone': c.phone, 'supplier-name': s.name, 'supplier-email': s.email, 'supplier-phone': s.phone };
+  await mount(); const input = host.querySelector<HTMLInputElement>('.mist-search input')!;
+  expect(input).toBeTruthy();
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, queries[kind]); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  const rows = [...host.querySelectorAll('[role="row"][tabindex]')]; expect(rows).toHaveLength(1); expect(rows[0].textContent).toContain(relation.name);
+});
+
+it.each(['customer', 'supplier'] as const)('keeps linked location read-only while allowing relationship notes: %s', async kind => {
+  const relation = state.market.relations.find(r => kind === 'customer' ? r.customerId && !r.supplierId : r.supplierId && !r.customerId)!; await mount(relation.id); await click('编辑档案');
+  expect((document.querySelector('[aria-label="国家地区"]') as HTMLSelectElement).disabled).toBe(true); expect((document.querySelector('[aria-label="地址"]') as HTMLInputElement).disabled).toBe(true); expect((document.querySelector('[aria-label="偏好与备注"]') as HTMLTextAreaElement).disabled).toBe(false);
+});
+
+it.each(['customer', 'supplier'] as const)('includes readable canonical contact history and excludes unrelated financial history: %s', async kind => {
+  const relation = named('博远'), id = kind === 'customer' ? relation.customerId : relation.supplierId, marker = kind === 'customer' ? '客户历史标识' : '供方历史标识';
+  state.events.unshift({ id: 'contact-history', entityType: kind === 'customer' ? 'customer' : 'relation', entityId: id, actor: '经办人', at: '2026-10-14T02:00:00Z', text: '保存联系人 ' + marker, fileIds: [] }, { id: 'unrelated-history', entityType: 'supplier', entityId: id, actor: '其他岗位', at: '2026-10-14T02:00:00Z', text: '不应纳入的供方资金记录', fileIds: [] }, { id: 'other-customer-history', entityType: 'customer', entityId: 'another-customer', actor: '其他岗位', at: '2026-10-14T02:00:00Z', text: '其他客户私有记录', fileIds: [] });
+  await mount(relation.id); expect(host.textContent).toContain(marker); expect(host.textContent).not.toContain('不应纳入的供方资金记录'); expect(host.textContent).not.toContain('其他客户私有记录'); expect(bridge.current.run).not.toHaveBeenCalled();
+});
+
+describe('relation profile concurrency', () => {
+  it.each(['address', 'note', 'aliases', 'status', 'supplierId', 'removed'])('keeps the draft and refuses a changed source: %s', async field => {
+    const relation = named('Cedar'); bridge.current.workspace = { id: 'workspace', revision: 7 };
+    await mount(relation.id); await click('编辑档案'); await fillProfile('别名', '新别名');
+    const changed = { ...relation, ...(field === 'aliases' ? { aliases: ['同事别名'] } : { [field]: field === 'status' ? 'archived' : '同事更新' }) };
+    state = { ...state, market: { ...state.market, relations: field === 'removed' ? state.market.relations.filter(r => r.id !== relation.id) : state.market.relations.map(r => r.id === relation.id ? changed : r) } } as MistState;
+    bridge.current = { ...bridge.current, state, workspace: { id: 'workspace', revision: 8 } }; await repaint(relation.id); await click('保存');
+    expect(bridge.current.run).not.toHaveBeenCalled(); expect(document.body.textContent).toContain('关系档案已更新，请重新打开后核对');
+    expect([...document.body.querySelectorAll<HTMLInputElement>('input')].some(input => input.value === '新别名')).toBe(true);
+  });
+  it('uses the checked revision and preserves newer attachments and contacts outside the profile fields', async () => {
+    const relation = named('Cedar'); bridge.current.workspace = { id: 'workspace', revision: 7 };
+    await mount(relation.id); await click('编辑档案'); await fillProfile('别名', '新别名');
+    const current = { ...relation, updatedAt: '2026-10-14T03:00:00Z', fileIds: ['peer-file'], contacts: [...relation.contacts, { id: 'peer', name: '同事', role: '', email: '', phone: '', primary: false }] };
+    state = { ...state, market: { ...state.market, relations: state.market.relations.map(r => r.id === relation.id ? current : r) } };
+    bridge.current = { ...bridge.current, state, workspace: { id: 'workspace', revision: 9 } }; await repaint(relation.id); await click('保存');
+    expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({ type: 'market.relation.save', payload: expect.objectContaining({ input: expect.objectContaining({ aliases: ['新别名'], fileIds: ['peer-file'] }) }) }), { expectedRevision: 9 });
+  });
+  it('keeps the form when a later server revision rejects the checked request', async () => {
+    const relation = named('Cedar'); bridge.current.workspace = { id: 'workspace', revision: 7 };
+    bridge.current.run.mockRejectedValue(new Error('资料版本已变化'));
+    await mount(relation.id); await click('编辑档案'); await fillProfile('别名', '保留输入'); await click('保存');
+    expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({ type: 'market.relation.save' }), { expectedRevision: 7 });
+    expect(document.body.textContent).toContain('资料版本已变化'); expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+  it.each(['workspace', 'missingRevision', 'invalidRevision'])('does not submit without the bound workspace and a usable revision: %s', async change => {
+    const relation = named('Cedar'); bridge.current.workspace = { id: 'workspace', revision: 7 };
+    await mount(relation.id); await click('编辑档案'); await fillProfile('别名', '保留输入');
+    bridge.current = { ...bridge.current, workspace: { id: change === 'workspace' ? 'elsewhere' : 'workspace', revision: change === 'missingRevision' ? undefined : change === 'invalidRevision' ? -1 : 8 } }; await repaint(relation.id); await click('保存');
+    expect(bridge.current.run).not.toHaveBeenCalled(); expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+});
+
+describe('relation contact concurrency', () => {
+  const contact = { id: 'contact-a', name: '周诚', role: '经理', email: 'zhou@example.invalid', phone: '0000', primary: false };
+  function agent() {
+    const relation = { ...named('Cedar'), id: 'agent-contact-fixture', name: '远帆物流', category: 'Agent' as const, customerId: '', supplierId: '', contacts: [{ ...contact }] };
+    state.market.relations.push(relation); bridge.current.workspace = { id: 'workspace', revision: 7 }; return relation;
+  }
+  async function editContact(name = contact.name) { const row = [...document.querySelectorAll('.mist-quote-line')].find(row => row.textContent?.includes(name))!; await act(async () => (row.querySelector('button') as HTMLButtonElement).click()); await fillProfile('岗位', '单证经理'); }
+  it.each(['name', 'role', 'email', 'phone', 'primary', 'removed'])('refuses an updated or removed contact without dropping the draft: %s', async field => {
+    const relation = agent(); await mount(relation.id); await editContact();
+    const changed = { ...relation, contacts: field === 'removed' ? [] : [{ ...contact, [field]: field === 'primary' ? true : '同事更新' }] };
+    state = { ...state, market: { ...state.market, relations: state.market.relations.map(r => r.id === relation.id ? changed : r) } } as MistState;
+    bridge.current = { ...bridge.current, state, workspace: { id: 'workspace', revision: 8 } }; await repaint(relation.id); await click('保存');
+    expect(bridge.current.run).not.toHaveBeenCalled(); expect(document.body.textContent).toContain('联系人资料已更新，请重新打开后核对'); expect((document.querySelector('[aria-label="岗位"]') as HTMLInputElement).value).toBe('单证经理');
+  });
+  it('does not delete a contact updated by a colleague after this deletion form opened', async () => {
+    const relation = agent(); await mount(relation.id); await editContact(); await act(async () => (document.querySelectorAll('input[type="checkbox"]')[1] as HTMLInputElement).click());
+    state = { ...state, market: { ...state.market, relations: state.market.relations.map(r => r.id === relation.id ? { ...r, contacts: [{ ...contact, phone: '0001' }] } : r) } }; bridge.current = { ...bridge.current, state, workspace: { id: 'workspace', revision: 8 } }; await repaint(relation.id); await click('保存'); expect(bridge.current.run).not.toHaveBeenCalled();
+  });
+  it('reads linked customer contact fields from the canonical customer collection', async () => {
+    const relation = named('Cedar'), c = state.contacts.find(c => c.customerId === relation.customerId)!; bridge.current.workspace = { id: 'workspace', revision: 7 }; await mount(relation.id); await editContact(c.name);
+    state = { ...state, contacts: state.contacts.map(row => row.id === c.id ? { ...row, phone: '0001' } : row) }; bridge.current = { ...bridge.current, state, workspace: { id: 'workspace', revision: 8 } }; await repaint(relation.id); await click('保存'); expect(bridge.current.run).not.toHaveBeenCalled(); expect(document.body.textContent).toContain('联系人资料已更新，请重新打开后核对');
+  });
+  it('checks the independent supplier contact source in a dual-identity organization', async () => {
+    const relation = named('博远'), supplier = state.market.suppliers.find(s => s.id === relation.supplierId)!, c = supplier.contacts[0]; bridge.current.workspace = { id: 'workspace', revision: 7 }; await mount(relation.id); await editContact(c.name);
+    state = { ...state, market: { ...state.market, suppliers: state.market.suppliers.map(row => row.id === supplier.id ? { ...row, contacts: row.contacts.map(x => x.id === c.id ? { ...x, phone: '0001' } : x) } : row) } }; bridge.current = { ...bridge.current, state, workspace: { id: 'workspace', revision: 8 } }; await repaint(relation.id); await click('保存'); expect(bridge.current.run).not.toHaveBeenCalled();
+  });
+  it('preserves unrelated profile and contact changes and submits the checked current revision', async () => {
+    const relation = agent(); await mount(relation.id); await editContact();
+    state = { ...state, market: { ...state.market, relations: state.market.relations.map(r => r.id === relation.id ? { ...r, note: '同事备注', fileIds: ['peer-file'], contacts: [...r.contacts, { ...contact, id: 'contact-b', name: '李晴' }] } : r) } }; bridge.current = { ...bridge.current, state, workspace: { id: 'workspace', revision: 9 } }; await repaint(relation.id); await click('保存');
+    expect(bridge.current.run).toHaveBeenCalledWith({ type: 'market.contact.save', payload: { kind: 'relation', parentId: relation.id, ...contact, role: '单证经理' } }, { expectedRevision: 9 });
+  });
+  it('requires a fresh view before replacing a primary contact assigned by a colleague', async () => {
+    const relation = agent(); relation.contacts.push({ ...contact, id: 'contact-b', name: '李晴' }); await mount(relation.id); await editContact(); await act(async () => (document.querySelector('input[type="checkbox"]') as HTMLInputElement).click());
+    state = { ...state, market: { ...state.market, relations: state.market.relations.map(r => r.id === relation.id ? { ...r, contacts: r.contacts.map(c => c.id === 'contact-b' ? { ...c, primary: true } : c) } : r) } }; bridge.current = { ...bridge.current, state, workspace: { id: 'workspace', revision: 8 } }; await repaint(relation.id); await click('保存'); expect(bridge.current.run).not.toHaveBeenCalled(); expect(document.body.textContent).toContain('主联系人已更新，请重新打开后核对');
+  });
+});
+
+it.each([false, true])('shows only a designated primary contact in the organization preview (%s)', async designated => {
+  const relation = { ...named('Cedar'), id: 'primary-preview', name: '远帆物流', category: 'Agent' as const, customerId: '', supplierId: '', contacts: [{ id: 'first', name: '周诚', role: '业务经理', email: '', phone: '', primary: false }, { id: 'second', name: '李晴', role: '单证专员', email: '', phone: '', primary: designated }] };
+  state.market.relations.push(relation); await mount(relation.id, 'list');
+  const label = [...host.querySelectorAll('.mist-facts small')].find(row => row.textContent === '主联系人')!;
+  expect(label.nextElementSibling?.textContent).toBe(designated ? '李晴 · 单证专员' : '未指定');
+});
+
+it('returns to the surviving customer organization after linking from its supplier identity', async () => {
+  const supplier = state.market.relations.find(r => r.supplierId && !r.customerId && !r.hold)!, target = named('Cedar'); bridge.current.workspace = { id: 'workspace', revision: 7 }; bridge.current.run.mockResolvedValue({ result: { id: target.id } });
+  await mount(supplier.id); await click('关联客户身份'); const select = document.querySelector('select[aria-label="客户"]') as HTMLSelectElement;
+  await act(async () => { select.value = target.customerId; select.dispatchEvent(new Event('change', { bubbles: true })); }); await click('关联');
+  expect(go).toHaveBeenCalledWith('relations', target.id, { detail: 'full' });
+});
+
+it('does not navigate away from another route when a former identity-link operation finishes late', async () => {
+  const supplier = state.market.relations.find(r => r.supplierId && !r.customerId && !r.hold)!, target = named('Cedar'); bridge.current.workspace = { id: 'workspace', revision: 7 }; let resolve!: (value: any) => void; bridge.current.run.mockImplementation(() => new Promise(done => { resolve = done; }));
+  await mount(supplier.id); await click('关联客户身份'); const select = document.querySelector('select[aria-label="客户"]') as HTMLSelectElement;
+  await act(async () => { select.value = target.customerId; select.dispatchEvent(new Event('change', { bubbles: true })); }); await click('关联'); await repaint(target.id); await act(async () => resolve({ result: { id: target.id } })); expect(go).not.toHaveBeenCalled();
+});
 
 
 describe('关系智库', () => {
@@ -56,6 +191,7 @@ describe('关系智库', () => {
     expect(detail.textContent).toContain('往来已冻结');
     expect(detail.textContent).toContain(lune.hold!.reason);
     expect(button('解冻')).toBeTruthy(); expect(button('冻结往来')).toBeUndefined();
+    expect(button('关联供应商身份')!.disabled).toBe(true);
     expect(button('归档')!.disabled).toBe(true);
     expect(detail.textContent).toMatch(/还有在手业务 \d+ 项/);
   });

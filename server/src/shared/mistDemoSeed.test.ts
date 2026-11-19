@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createMistState, type MistContext } from './mistWorkspace';
+import { applyMistCommand, createMistState, type MistContext } from './mistWorkspace';
 import { DEMO_SEED_VERSION } from './mistDemoSeed';
 import { isDemoFile, renderDemoFile } from './mistDemoFiles';
 
@@ -7,6 +7,13 @@ const context = (): MistContext => { let n = 0; return { id: () => `demo-${++n}`
 const demo = () => { let failures: unknown[] = []; const state = createMistState(context(), 'demo', f => { failures = f; }); return { state, failures }; };
 
 describe('演示公司数据', () => {
+  it('finishes the intended departed shipment while keeping its separately registered demonstration specimen in sample custody', () => {
+    const {state,failures}=demo(),order=state.orders.find(o=>o.code==='SO-G-2026-017')!,job=state.productions.find(p=>p.code==='PO-L-0411')!,shipment=state.fulfillment.shipments.find(s=>s.lines.some(l=>l.productionId===job.id))!,sample=state.fulfillment.samples.find(s=>s.role==='shipping'&&s.shipmentId===shipment.id)!;
+    expect(sample).toMatchObject({quantity:1,available:1,unit:'件',location:'样品间 A-3',shippingQuantityBasis:{kind:'independent'}});
+    expect(sample.shippingQuantityBasis?.independentSource).toContain('演示');
+    expect(shipment).toMatchObject({state:'departed',lines:[expect.objectContaining({orderId:order.id,productionId:job.id,quantity:500})]});
+    expect(shipment.departedAt).toBeTruthy();expect(state.fulfillment.sampleMovements.filter(m=>m.sampleId===sample.id&&m.shipmentLink)).toEqual([]);expect(failures).toEqual([]);
+  });
   it('所有示例数据都经由真实业务命令生成，没有失败步骤并记录种子版本', () => {
     const { state, failures } = demo();
     expect(failures).toEqual([]);
@@ -83,3 +90,5 @@ describe('演示公司数据', () => {
     expect(state.orders).toEqual([]); expect(state.market.products).toEqual([]); expect(state.fulfillment.samples).toEqual([]); expect(state.files).toEqual([]);
   });
 });
+
+it('initializes the fixed dual-identity rating/credit without granting the caller those write permissions',()=>{const ctx=context(),state=createMistState(ctx,'demo'),customer=state.customers.find(c=>c.name==='博远纺织贸易')!;expect(customer).toMatchObject({grade:'B',creditLimit:200000,ownerId:'demo-sales'});expect(ctx.can).toBeUndefined();expect(()=>applyMistCommand(state,{type:'market.customer.update',payload:{id:customer.id,patch:{creditLimit:200001}}},ctx)).toThrow(/信用管理权限/);});

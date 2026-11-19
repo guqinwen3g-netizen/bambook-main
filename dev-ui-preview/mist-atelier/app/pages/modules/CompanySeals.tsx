@@ -8,6 +8,7 @@ import { Banner, Button, Checkbox, DataTable, Dialog, EmptyState, Field, FormGri
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useOptionalMistSession } from '../../runtime/auth';
 import { workspaceMembers } from '../../runtime/members';
+import { FileName } from '../../runtime/files';
 import { businessWhen } from './pageKit';
 
 export type SealKind = 'company' | 'contract' | 'finance' | 'customs' | 'other';
@@ -26,13 +27,16 @@ const ACCEPT = 'image/png';
 type Draft = { id?: string; name: string; kind: SealKind; fileId: string; userIds: string[] };
 
 function SealImage({ fileId, state }: { fileId?: string; state: MistState }) {
-  const { readFile } = useMistWorkspace(), file = fileId ? state.files.find(f => f.id === fileId) : undefined;
-  const [url, setUrl] = React.useState('');
+  const { readFile, loading } = useMistWorkspace(), file = fileId ? state.files.find(f => f.id === fileId) : undefined;
+  const [preview, setPreview] = React.useState<{ fileId: string; reader: typeof readFile; url: string } | null>(null);
+  const url = !loading && file && preview?.fileId === file.id && preview.reader === readFile ? preview.url : '';
   React.useEffect(() => {
-    if (!file) return; let live = true, made = '';
-    void readFile(file as MistFile).then(blob => { if (!live) return; made = URL.createObjectURL(blob); setUrl(made); }).catch(() => undefined);
+    // Reader identity follows the company/user binding: retry when ready and never display a blob from the previous scope.
+    setPreview(null);
+    if (!file || loading) return; let live = true, made = '';
+    void readFile(file as MistFile).then(blob => { if (!live) return; made = URL.createObjectURL(blob); setPreview({ fileId: file.id, reader: readFile, url: made }); }).catch(() => undefined);
     return () => { live = false; if (made) URL.revokeObjectURL(made); };
-  }, [file?.id]);
+  }, [file?.id, readFile, loading]);
   return <span className="mist-seal-image" data-empty={!url || undefined}>{url ? <img src={url} alt={uiText('印章图片')} /> : <Stamp size={22} aria-hidden="true" />}</span>;
 }
 
@@ -80,7 +84,11 @@ export function CompanySealsSection({ canManage }: { canManage: boolean }) {
   const useColumns: Column<MistSealUseView>[] = [
     { key: 'at', header: '时间', width: '150px', render: u => <span className="mist-num">{businessWhen(u.at)}</span> },
     { key: 'seal', header: '印章', width: 'minmax(120px,1fr)', render: u => u.sealName },
-    { key: 'doc', header: '单据', width: 'minmax(140px,1.2fr)', render: u => <Mono>{u.documentNumber}</Mono> },
+    { key: 'doc', header: '单据', width: 'minmax(140px,1.2fr)', render: u => {
+      // Review only the explicitly projected stamped PDF, never infer a newer file.
+      const file=!workspace.loading&&u.fileId?state.files.find(file=>file.id===u.fileId&&file.mimeType==='application/pdf'):undefined;
+      return file?<FileName file={file} label={<Mono>{u.documentNumber}</Mono>} />:<Mono>{u.documentNumber}</Mono>;
+    } },
     { key: 'actor', header: '用印人', width: '96px', render: u => u.actor },
     { key: 'reason', header: '事由', width: 'minmax(160px,2fr)', render: u => u.reason },
   ];
@@ -100,10 +108,10 @@ export function CompanySealsSection({ canManage }: { canManage: boolean }) {
         <FormGrid>
           <Field label={uiText('印章名称')} required><TextInput aria-label={uiText('印章名称')} value={draft.name} maxLength={60} disabled={busy} onChange={e => setDraft({ ...draft, name: e.target.value })} /></Field>
           <Field label={uiText('类型')} required><Select aria-label={uiText('印章类型')} value={draft.kind} disabled={busy} options={(Object.keys(SEAL_KIND_LABEL) as SealKind[]).map(k => ({ value: k, label: uiText(SEAL_KIND_LABEL[k]) }))} onChange={e => setDraft({ ...draft, kind: e.target.value as SealKind })} /></Field>
-          <Field label={uiText('印章图片')} required full hint={uiText('透明底 PNG')}>{draft.fileId
+          <Field group label={uiText('印章图片')} required full hint={uiText('透明底 PNG')}>{draft.fileId
             ? <div className="mist-row" style={{ gap: 12 }}><SealImage fileId={draft.fileId} state={state} /><Button size="sm" variant="quiet" disabled={busy} onClick={() => setDraft({ ...draft, fileId: '' })}>{uiText('更换')}</Button></div>
             : <UploadZone title={uiText(uploading ? '上传中…' : '上传印章图片')} accept={ACCEPT} multiple={false} onFiles={files => void upload(files)} />}</Field>
-          <Field label={uiText('用印人')} required full>
+          <Field group label={uiText('用印人')} required full>
             <div className="mist-col" style={{ gap: 6 }}>{members.map(m => <Checkbox key={m.id} label={m.name} checked={draft.userIds.includes(m.id)} disabled={busy}
               onChange={on => setDraft({ ...draft, userIds: on ? [...draft.userIds, m.id] : draft.userIds.filter(id => id !== m.id) })} />)}</div>
           </Field>

@@ -21,6 +21,7 @@ export const AGENT_EXCLUDED_COMMANDS = {
   'platform.invoice.issue': '同 platform.invoice.save：财务不直接签发商业发票，页面无入口',
   'seal.save': '电子公章由公司管理员本人维护（上传印章图片、指定用印人），不交给 Agent，也不能经 Agent 提议',
   'seal.disable': '同 seal.save：停用印章只由公司管理员本人操作',
+  'development.trimTask.confirm': '辅料最终规格和实物由业务员本人线下核对后确认',
 };
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');

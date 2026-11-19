@@ -2,6 +2,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { getByRole } from '@testing-library/dom';
 import { Nav } from '../nav';
 import { SearchPage } from './SearchPage';
 
@@ -24,13 +25,20 @@ it('groups results, previews eight per group and opens a record at its route', a
   expect(host.querySelectorAll('[aria-label="订单"] [role="listitem"]')).toHaveLength(8);
   await act(async () => [...host.querySelectorAll('button')].find(b => b.textContent === '显示全部 10 条')!.click());
   expect(host.querySelectorAll('[aria-label="订单"] [role="listitem"]')).toHaveLength(10);
-  await act(async () => (host.querySelector('[aria-label="客户"] [role="listitem"]') as HTMLButtonElement).click());
+  await act(async () => getByRole(getByRole(host, 'list', { name: '客户' }), 'button', { name: 'Panda Trading C1' }).click());
   expect(go).toHaveBeenCalledWith('crm', 'c1', { customerId: 'c1' });
 });
 it('hides records from pages the account cannot enter and says so when nothing matches', async () => {
   bridge.can = v => v !== 'orders' && v !== 'crm';
   await render('panda');
   expect(host.textContent).toContain('没有找到「panda」');
+});
+it('exposes search results as named actions inside their result list', async () => {
+  await render('SO-3');
+  const orders = getByRole(host, 'list', { name: '订单' });
+  const open = getByRole(orders, 'button', { name: 'SO-3 Panda Trading' });
+  await act(async () => open.click());
+  expect(go).toHaveBeenCalledWith('orders/detail', 'o3', undefined);
 });
 it('submits a new query through the route', async () => {
   await render();

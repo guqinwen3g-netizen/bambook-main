@@ -8,6 +8,7 @@ import { extractActorFromRequest } from './middleware';
 import { buildLoadedAuthTokenPayload, loadUserWithRoles } from './tokenHelpers';
 import { logger } from '../lib/logger';
 import { httpStatusOfCode } from '../shared/errorCodes';
+import {withVerifiedSession} from './sessionLifetime';
 
 /**
  * Revalidate configured authorization on every authenticated API request.
@@ -34,10 +35,11 @@ export function createAuthorizationSnapshotGuard(options: {
         if (jwt) res.clearCookie('bambook_token', { path: '/' });
         return res.status(401).json({ error: 'ACCOUNT_DISABLED', message: '账号已失效，请重新登录。' });
       }
-      if(jwt && isTokenRevoked(user.metadata,(jwt as any).iat,jwt.credentialVersion))return res.status(401).json({error:'SESSION_REVOKED',message:'密码已更新，请重新登录。'});
+      if(jwt && isTokenRevoked(user.metadata,jwt.credentialIssuedAt??(jwt as any).iat,jwt.credentialVersion))return res.status(401).json({error:'SESSION_REVOKED',message:'密码已更新，请重新登录。'});
       const platformRequest = /^\/platform(?:\/|$)/.test(req.path) && (user as any).platformRole === 'platform_admin';
       const platformCompany = jwt && !platformRequest ? jwt.platformCompany : undefined;
-      const current = await buildLoadedAuthTokenPayload(options.prisma, user, platformRequest ? null : prior.companyId ?? null, platformCompany);
+      const loaded = await buildLoadedAuthTokenPayload(options.prisma, user, platformRequest ? null : prior.companyId ?? null, platformCompany);
+      const current=jwt?withVerifiedSession(loaded,jwt):loaded;
       // Refresh account grants without expanding the verified credential's
       // upper bound. The prior actor came from a signed JWT or configured key
       // binding; request body fields never participate in this decision.

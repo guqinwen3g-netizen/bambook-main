@@ -9,6 +9,11 @@ let n = 0;
 const ctx = () => ({ id: () => `id-${++n}`, now: '2026-10-15T08:00:00.000Z', actorName: '当前员工' });
 const all = () => true;
 const base = () => { const state = createMistState(ctx(), 'empty'); state.fulfillment.qcTasks = []; state.fulfillment.shipments = []; return state; };
+it('keeps a generated account handover identity short without rewriting its original facts or free personal text',()=>{
+  const state=base(),title='接手 林舟 的业务（客户 1、商机 1）：核对在手订单、报价、未收款与供应商';
+  state.tasks=[{id:'account',title,kind:'account-handover',due:'2026-10-15',done:false,target:{view:'relations'},assigneeIds:['owner']},{id:'personal',title,kind:'personal',due:'2026-10-15',done:false,target:{view:'cockpit'},assigneeIds:['owner']}];
+  const rows=mistMyTasks(state,{me:'owner',canRead:all,can:all});expect(rows.find(row=>row.id==='account')?.title).toBe('接手业务 · 林舟');expect(rows.find(row=>row.id==='personal')?.title).toBe(title);expect(state.tasks[0].title).toBe(title);expect(rows.find(row=>row.id==='account')?.target).toEqual({view:'relations'});
+});
 describe('risk owner work', () => {
   const options: MistWorkOptions = { canRead: all, me: 'risk-owner', today: '2026-10-15' };
   const fixture = () => {
@@ -591,4 +596,16 @@ describe('rejected development samples and outstanding sample loans', () => {
     state.members!.push({ userId: 'other', name: '借用人' } as any);
     expect(mistWorkQueue(state, options)).toEqual([]);
   });
+});
+
+it('returns a delivered invoice with unresolved acceptance terms to finance without inventing an overdue deadline',()=>{
+ const state=base(),options={canRead:all,can:(p:string)=>p==='invoices:write',me:'fin',today:'2026-11-18'};
+ state.invoices.push({id:'ar-due',code:'CI-DUE',orderId:'o',order:'SO-DUE',customer:'Buyer',due:'',amount:100,open:100,currency:'USD',financeStatus:'confirmed',sourceDocumentId:'ci-due',receivableDueCondition:{kind:'deliveryAcceptance',days:30,terms:'交付验收后30天付款'}});
+ state.fulfillment.documents.push({id:'ci-due',invoiceId:'ar-due',shipmentId:'ship-due',type:'CI',status:'issued'} as any);state.fulfillment.shipments.push({id:'ship-due',state:'departed',lines:[]} as any);
+ expect(mistWorkQueue(state,options).some(t=>t.id==='invoice-due:ar-due')).toBe(false);
+ state.fulfillment.shipments[0].delivered={at:'2026-11-17T04:00:00Z',receiver:'Buyer',evidence:'POD',fileIds:[],recordedBy:'Ops'};
+ const before=structuredClone(state),item=mistWorkQueue(state,options).find(t=>t.id==='invoice-due:ar-due');expect(item).toMatchObject({source:'finance',when:'待核对',urgent:false,target:{view:'invoices',id:'ar-due'}});expect(item?.due).toBeUndefined();expect(state).toEqual(before);
+ expect(mistWorkQueue(state,{...options,can:()=>false}).some(t=>t.id==='invoice-due:ar-due')).toBe(false);
+ state.invoices[0].dueConfirmation={acceptanceDate:'2026-11-17',basis:'AC1',due:'2026-12-17',shipmentId:'ship-due',sourceDocumentId:'ci-due',deliveryAt:'2026-11-17T04:00:00Z',at:'2026-11-18T04:00:00Z',actor:'Fin'};
+ expect(mistWorkQueue(state,options).some(t=>t.id==='invoice-due:ar-due')).toBe(false);
 });

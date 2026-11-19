@@ -83,7 +83,7 @@ const REASON: Record<ReasonKind, { title: string; label: string; action: string;
 };
 
 export function FinancePayables() {
-  const { state, loading, run, saving, pending, workspace, recover } = useMistWorkspace(), session = useMistSession(), { route, go } = useNav(), toast = useToast();
+  const { state, loading, run, saving, pending, workspace, recover, dismissError } = useMistWorkspace(), session = useMistSession(), { route, go } = useNav(), toast = useToast();
   const canBill = session.hasPermission(MIST_FINANCE_SCOPES.invoice), canPay = session.hasPermission(MIST_FINANCE_SCOPES.voucher), canAllocate = session.hasPermission(MIST_FINANCE_SCOPES.reconcile), canRequest = session.hasPermission(PAYMENT_REQUEST_SCOPES.create as any), canSettle = session.hasPermission(SETTLEMENT_SCOPES.submit as any), canConfirm = canAllocate, day = today();
   const routedView = payableTargetView(state, route.id);
   const [view, setView] = React.useState<View>(() => routedView ?? 'bills');
@@ -100,6 +100,7 @@ export function FinancePayables() {
   const busy = working || loading || saving || !!pending;
   const actionKey=`${session.sessionKey??session.user?.id??''}:${workspace?.id??''}:${route.id??''}`,actionScope=React.useRef(actionKey),mounted=React.useRef(true);actionScope.current=actionKey;
   const unresolved=React.useRef<{scope:string;requestId:string;workspaceId:string;actorId:string;done:(result:Record<string,unknown>)=>void}|null>(null);
+  const billFailureRef=React.useRef<HTMLDivElement>(null);
   React.useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
   React.useEffect(()=>{setWorking(false);setRecovering(false);setFailure('');setBillDraft(null);setPayDraft(null);setReasonDraft(null);setPlanDraft(null);setPreDraft(null);setSettleOpen(false);setConfirmId('');setLinkId('');setDeductId('');setMoveDraft(null);setAdvanceId('');setBackfillId('');setPlanLinkId('');setInvoiceTypeId('');setDisposalDraft(null);},[actionKey]);
   const settlementPurchaseId = state?.fulfillment?.purchases?.find(purchase => purchase.id === route.id)?.id;
@@ -130,13 +131,19 @@ export function FinancePayables() {
     try { const receipt = await (signature ? run(command as any, { signature }) : run(command as any)); if(available())done(receipt.result as Record<string, unknown>); } catch (problem) { if(available()){
       const intent=(problem as {mistPendingCommand?:{requestId:string;workspaceId:string;actorId:string}})?.mistPendingCommand;
       if(intent)unresolved.current={...intent,scope,done};
-      setFailure(intent?'':problem instanceof Error ? problem.message : '操作失败，请重试');
+      const message=intent?'':problem instanceof Error ? problem.message : '操作失败，请重试';
+      setFailure(message);
+      // This page presents confirmed failures locally or through usePageFailure.
+      // An uncertain command must keep its original workspace recovery notice.
+      if(!intent)dismissError?.(message);
     } } finally { if(available())setWorking(false); }
   };
   const pendingPayable=pending?.kind==='command'&&!!pending.command?.type.startsWith('payable.');
   const failure=pendingPayable?'':operationFailure;
+  const actionDialogOpen=!!(disposalDraft||billDraft||payDraft||reasonDraft||planDraft||preDraft||settleOpen||confirmId||linkId||deductId||moveDraft||advanceId||backfillId||planLinkId||invoiceTypeId||unlinkPlanId);
+  React.useEffect(()=>{if(billDraft&&failure)billFailureRef.current?.scrollIntoView?.({block:'nearest'});},[!!billDraft,failure]);
   // Failures inside an open dialog stay there; otherwise they go to the shell card.
-  usePageFailure('操作没有完成', failure && !disposalDraft && !billDraft && !payDraft && !reasonDraft && !planDraft && !preDraft && !settleOpen && !confirmId && !linkId && !deductId && !moveDraft && !advanceId && !backfillId && !planLinkId ? failure : '');
+  usePageFailure('操作没有完成', failure && !actionDialogOpen ? failure : '');
   const recoverPayable=async()=>{
     if(!pendingPayable||saving||working)return;
     const scope=actionScope.current,intent=pending,original=unresolved.current;
@@ -197,7 +204,7 @@ export function FinancePayables() {
     if (overAccepted) { const src = sources.find(s => s.purchase.id === overAccepted)!; return setFailure(`${src.purchase.code} 本票金额超过已验收未开票货值 ${apMoney(src.acceptedUninvoiced!, src.purchase.currency)}；请核对票面，或选择“待关联结算”。`); }
     if (picked.some(id => needsLink(id) && !billDraft.links[id])) return setFailure('已有已确认结算或已付预付的合同，票据须关联已确认结算；结算还没确认时，可选“待关联结算”先登记。');
     const tax = shownTax.trim() ? cents(shownTax) : 0; if (Number.isNaN(tax)) return setFailure('税额格式无效。');
-    void execute({ type: 'payable.bill.register', payload: { invoiceType:billDraft.invoiceType,supplierId: billDraft.supplierId, invoiceNo: billDraft.invoiceNo, invoiceDate: billDraft.invoiceDate, currency: billCurrency, amount: billTotal / 100, taxAmount: tax / 100, taxRate: billDraft.taxRate, lines: picked.map(id => ({ purchaseId: id, amount: cents(billDraft.lines[id]) / 100, ...(billDraft.links[id] === HELD ? { awaitingSettlement: true } : billDraft.links[id] ? { settlementId: billDraft.links[id] } : {}) })), due: billDraft.due, dueBasis: billDraft.dueBasis, note: billDraft.note, fileIds: billDraft.fileIds || [] } }, r => { const held = picked.some(id => billDraft.links[id] === HELD); setBillDraft(null); setView('bills'); open(String(r.id)); toast(held ? '票据已登记为待关联结算，结算确认后再关联' : '供应商票据已登记，应付已形成'); });
+    void execute({ type: 'payable.bill.register', payload: { invoiceType:billDraft.invoiceType,supplierId: billDraft.supplierId, invoiceNo: billDraft.invoiceNo, invoiceDate: billDraft.invoiceDate, currency: billCurrency, amount: billTotal / 100, taxAmount: tax / 100, taxRate: billDraft.taxRate, lines: picked.map(id => ({ purchaseId: id, amount: cents(billDraft.lines[id]) / 100, ...(billDraft.links[id] === HELD ? { awaitingSettlement: true } : billDraft.links[id] ? { settlementId: billDraft.links[id] } : {}) })), due: billDraft.due, dueBasis: billDraft.dueBasis, note: billDraft.note, fileIds: billDraft.fileIds || [] } }, r => { const held = picked.some(id => billDraft.links[id] === HELD); setBillDraft(null); setView('bills'); open(String(r.id)); toast(held ? '票据已登记，待关联结算' : '供应商票据已登记'); });
   };
 
   // —— 申请 / 付款 / 分配表单
@@ -400,14 +407,14 @@ export function FinancePayables() {
       <span className="mist-spacer" />
       {view === 'bills' && <Button onClick={() => downloadMistCsv('供应商应付.csv', ['应付号', '供应商', '发票号', '发票日期', '币种', '价税合计', '税额', '已结清', '未付', '到期日', '状态', '来源合同'], shownBills.map(b => [b.code, b.supplier, b.invoiceNo, b.invoiceDate, b.currency, b.amount, b.taxMasked ? '已隐藏' : b.taxAmount, billClearedMinor(b)/100, b.open, b.due, STATUS[b.status].label, b.lines.map(l => l.purchaseCode + ':' + l.amount).join(' / ')]))}>{uiText("导出当前票据")}</Button>}
     </div>
-    <ListDetail drawerOpen={drawer && !!(bill || payment || request || plan || settlement)} drawerTitle={bill?.code || payment?.code || request?.code || plan?.code || settlement?.code || '应付详情'} onDrawerClose={() => setDrawer(false)} list={<Card>{list}</Card>} detail={detail} />
+    <ListDetail freezeLayout={actionDialogOpen} drawerOpen={drawer && !!(bill || payment || request || plan || settlement)} drawerTitle={bill?.code || payment?.code || request?.code || plan?.code || settlement?.code || '应付详情'} onDrawerClose={() => setDrawer(false)} list={<Card>{list}</Card>} detail={detail} />
     {view === 'bills' && (state?.partialPayableBills?.length ?? 0)>0 && <Card><CardHeader title={uiText('部分可见应付票据')}/><div className="mist-card-body mist-col" role="list" aria-label={uiText('部分可见应付票据')}>{state!.partialPayableBills!.map(item=><div className="mist-col" role="listitem" key={item.id}><div className="mist-row"><Mono>{item.code}</Mono><span>{item.supplier}</span><span className="mist-spacer"/><span>{uiText('另含其他范围业务')}</span></div>{item.lines.map(line=><div className="mist-row" key={line.purchaseId}><Mono>{line.purchaseCode}</Mono><span className="mist-spacer"/><span>{apMoney(line.amount,item.currency)}</span></div>)}</div>)}</div></Card>}
 
     {invoiceTypeId&&bills.find(row=>row.id===invoiceTypeId)&&<SupplierInvoiceTypeDialog key={invoiceTypeId} bill={bills.find(row=>row.id===invoiceTypeId)!} onClose={()=>setInvoiceTypeId('')}/>}
     <Dialog open={!!billDraft} onClose={() => { if (!busy) setBillDraft(null); }} width={760} title={uiText("登记供应商票据")}
       footer={<><Button disabled={busy} onClick={() => setBillDraft(null)}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canBill} onClick={submitBill}>{uiText("登记应付")}</Button></>}>
       {billDraft && <div className="mist-col">
-        {failure && <Banner tone="bad" title={uiText("还不能登记")}>{failure}</Banner>}
+        {failure && <div ref={billFailureRef}><Banner tone="bad" title={uiText("还不能登记")}>{failure}</Banner></div>}
         <FormGrid>
           <Field label={uiText("供应商")} required><Select aria-label={uiText("供应商")} value={billDraft.supplierId} options={[{ value: '', label: '请选择供应商' }, ...suppliers]} onChange={e => setBillDraft({ ...billDraft, supplierId: e.target.value, lines: {} })} /></Field>
           <Field label={uiText('发票类型')}><Select aria-label={uiText('发票类型')} value={billDraft.invoiceType||''} options={[{value:'',label:'待核对'},...Object.entries(SUPPLIER_INVOICE_TYPES).map(([value,label])=>({value,label}))]} onChange={event=>setBillDraft({...billDraft,invoiceType:event.target.value as SupplierInvoiceType||undefined})}/></Field>

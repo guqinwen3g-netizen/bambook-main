@@ -214,9 +214,10 @@ export function applySealedCommand<R extends Record<string, unknown>>(root: Mist
  * 用印记录：能看到所盖单据的人看完整记录；用印人、管理员与盖章人本人看到不含文件的记录；其他人不下发。
  * 决定签字：签字人本人与能看到所签业务记录的人。返回本次读者不能读取的印章图片文件。
  */
+export const sealImageAllowed = (seal: MistSeal, actorId: string, maintainer: boolean, agent: boolean) => !agent && (maintainer || seal.userIds.includes(actorId));
 export function projectSeals(full: MistState, next: MistState, actorId: string, maintainer: boolean, agent: boolean): Set<string> {
   const hidden = new Set<string>();
-  const imageAllowed = (seal: MistSeal) => !agent && (maintainer || seal.userIds.includes(actorId));
+  const imageAllowed = (seal: MistSeal) => sealImageAllowed(seal, actorId, maintainer, agent);
   if (full.seals) next.seals = full.seals.map(seal => {
     if (imageAllowed(seal)) return { ...seal, userIds: [...seal.userIds] };
     if (seal.fileId) hidden.add(seal.fileId);

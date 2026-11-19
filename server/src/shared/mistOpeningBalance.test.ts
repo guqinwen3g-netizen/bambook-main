@@ -4,6 +4,7 @@ import { MIST_DEMO_ACCOUNTS } from './mistAccounts';
 import { customerStatementContent } from './mistCustomerStatement';
 import { teamRow } from './mistTeam';
 import { mistInvoiceCustomerId, mistInvoiceCustomerName, mistPayerMatchesInvoice } from './mistOpeningBalance';
+import { monthlyVouchers } from './mistVoucherExport';
 import { billOpenMinor } from './mistPayables';
 
 function fixture() {
@@ -96,6 +97,32 @@ describe('期初未结应收', () => {
     expect(() => f.run({ type: 'opening.receivable.import', payload: { rows: [row()] } })).toThrow('重登请加后缀');
     expect(f.run({ type: 'opening.receivable.import', payload: { rows: [row({ reference: 'CI-2026-0815-R' })] } }).imported).toBe(1);
   });
+  it.each(['核销调整', '银行扣费'])('期初票须先冲回有效%s，凭证与作废状态一致', kind => {
+    const f = fixture();
+    const { ids: [invoiceId] } = f.run({ type: 'opening.receivable.import', payload: { rows: [row({ originalAmount: '12', amount: '12' })] } });
+    let reverse;
+    if (kind === '银行扣费') {
+      f.run({ type: 'finance.importReceipts', payload: { receipts: [{ date: '2026-10-18', payer: 'Nordic Wear AB', amount: 5, currency: 'USD', ref: 'BANK-1' }] } });
+      const receiptId = f.state.receipts[0].id;
+      f.run({ type: 'finance.reconcile', payload: { receiptId, lines: [{ invoiceId, amount: 5 }] } });
+      const { id: chargeId } = f.run({ type: 'finance.receivable.bankCharge', payload: { invoiceId, receiptId, amount: 1, reason: '银行费用' } });
+      f.run({ type: 'finance.allocation.reverse', payload: { allocationId: f.state.allocations[0].id, reason: '更正原分配' } });
+      reverse = { type: 'finance.receivable.bankCharge.reverse', payload: { invoiceId, chargeId, reason: '冲回原扣费' } };
+    } else {
+      const { id: writeoffId } = f.run({ type: 'finance.receivable.writeoff', payload: { invoiceId, kind: 'difference', amount: 1, reason: '尾差' } });
+      reverse = { type: 'finance.receivable.writeoff.reverse', payload: { invoiceId, writeoffId, reason: '冲回原尾差' } };
+    }
+    const voidCommand = { type: 'opening.receivable.void', payload: { invoiceId, reason: '移除重复期初登记' } };
+    const voucherLines = () => monthlyVouchers(f.state, '2026-10').filter(v => v.source === 'CI-2026-0815');
+    expect(voucherLines()).toHaveLength(2);
+    expect(() => f.run(voidCommand)).toThrow('须先冲回' + kind);
+    expect(f.state.invoices[0].open).toBe(11);
+    f.run(reverse);
+    expect(voucherLines()).toHaveLength(0);
+    f.run(voidCommand);
+    expect(f.state.invoices[0]).toMatchObject({ voidReason: '移除重复期初登记', open: 0 });
+  });
+
   it('期初应付：按供应商编码登记未付余额，可按票据付款与作废', () => {
     const f = fixture();
     f.run({ type: 'market.import', payload: { kind: 'supplier', rows: [{ code: 'SUP-001', name: '江南成衣厂', type: '成衣', capabilities: '外套', capacity: '1000', capacityUnit: '件/月', leadDays: '30' }] } });

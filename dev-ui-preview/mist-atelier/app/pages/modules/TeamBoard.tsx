@@ -6,7 +6,7 @@ import { AlertTriangle, Archive, BellRing, ChevronLeft, ChevronRight, ClipboardL
 import { Banner, Button, Card, CardHeader, DataTable, Drawer, EmptyState, Pill, Segmented, StatCard, StatGrid, TextLink, useToast, type Column, type Tone } from '../../../../../components/mist';
 import type { MistCommand, MistState, MistTarget } from '../../../../../server/src/shared/mistWorkspace';
 import { MIST_BUSINESS_GROUP_LABEL, type MistBusinessGroup } from '../../../../../server/src/shared/mistAccounts';
-import { TEAM_DORMANT_DAYS, addBusinessDays, myTeamReport, teamOverview, teamWeeklyReport, teamWeeklyText, weekStartOf, type TeamAttention, type TeamMoney, type TeamRow, type TeamWeekRow } from '../../../../../server/src/shared/mistTeam';
+import { addBusinessDays, myTeamReport, teamOverview, teamWeeklyReport, teamWeeklyText, formatTeamShipmentQuantities, weekStartOf, type TeamAttention, type TeamMoney, type TeamRow, type TeamWeekRow } from '../../../../../server/src/shared/mistTeam';
 import { platformBusinessDate } from '../../../../../server/src/shared/mistPlatform';
 import type { MistMemberOption } from '../../runtime/members';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec, type ModuleValues } from './ModuleWorkbench';
@@ -65,8 +65,8 @@ export function TeamBoard({ state, members, viewer, can, busy, run, go, initialM
     { key: 'nudges', header: '督办中', width: '72px', align: 'right', render: r => r.nudges.length || '—' },
   ];
   return <>
-    <div className="mist-section mist-row" style={{ justifyContent: 'space-between' }}>
-      <span className="mist-note">{uiText("范围：")}{scopeNote}{uiText("。统计只含你有权查看的数据；交期 ")}{7}{uiText(" 天内为临近，客户超过 ")}{TEAM_DORMANT_DAYS}{uiText(" 天无跟进且无在手订单为久未跟进。")}</span>
+    <div className="mist-section mist-row" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+      <span className="mist-note">{uiText("范围：")}{scopeNote}</span>
       <span className="mist-row"><Segmented<'now' | 'week'> ariaLabel={uiText("团队视图")} value={mode} onChange={setMode} options={[{ value: 'now', label: '在手' }, { value: 'week', label: '周报' }]} />
 </span>
     </div>
@@ -139,6 +139,7 @@ export function TeamWeekly({ state, members, viewer, group, today, initialWeek, 
   const [week, setWeek] = React.useState(initialWeek && weekStartOf(initialWeek) === initialWeek && initialWeek <= current ? initialWeek : current);
   /** 已结束的周：本人存档过就显示存档版本（数据冻结在生成那一刻），否则显示实时计算并可存档。 */
   const archived = myTeamReport(state, viewer.id, week);
+  if (archived?.unavailable) return <div data-team-weekly={week}><div className="mist-row" style={{flexWrap:'wrap'}}><Button size="sm" icon={ChevronLeft} aria-label={uiText('上一周')} onClick={()=>setWeek(addBusinessDays(week,-7))}/><b>{archived.weekStart}{uiText(' 至 ')}{archived.weekEnd}</b><Button size="sm" icon={ChevronRight} aria-label={uiText('下一周')} disabled={week>=current} onClick={()=>setWeek(addBusinessDays(week,7))}/></div><Banner tone="warn" title={uiText('存档当前不可查看')}/></div>;
   const live = teamWeeklyReport(state, members, viewer, week, today, group);
   const report = archived ? archived.report : live, t = report.totals;
   const text = archived ? archived.text : teamWeeklyText(report);
@@ -146,11 +147,11 @@ export function TeamWeekly({ state, members, viewer, group, today, initialWeek, 
   const copy = async () => { try { await navigator.clipboard.writeText(text); toast('周报文字已复制'); } catch { toast('复制失败，请改用导出', 'bad'); } };
   const archive = async () => { if (!run) return; const r = await run({ type: 'team.weekly.archive', payload: { weekStart: week } } as MistCommand); if (r !== undefined) toast('周报已生成并存档'); };
   const exportCsv = () => downloadModuleCsv(`团队周报-${report.weekStart}.csv`, ['成员', '新接订单', '新单金额', '出运票数', '出运数量', '回款', '新开发案', '客户跟进', '赢单', '流失', '完成待办', '收到督办', '完成督办', '逾期督办', '当前过交期订单', '当前逾期应收'],
-    report.rows.map(r => [r.name + (r.former ? '（已不在本公司）' : ''), r.newOrders, sums(r.newOrderAmount), r.shipments, r.shippedQty, sums(r.collected), r.newDevs, r.followUps, r.won, r.lost, r.tasksDone, r.nudgesIn, r.nudgesDone, r.nudgesOpenLate, r.lateOrders, sums(r.overdueReceivable)]));
+    report.rows.map(r => [r.name + (r.former ? '（已不在本公司）' : ''), r.newOrders, sums(r.newOrderAmount), r.shipments, formatTeamShipmentQuantities(r.shippedQuantities), sums(r.collected), r.newDevs, r.followUps, r.won, r.lost, r.tasksDone, r.nudgesIn, r.nudgesDone, r.nudgesOpenLate, r.lateOrders, sums(r.overdueReceivable)]));
   const columns: Column<TeamWeekRow>[] = [
     { key: 'name', header: '成员', width: 'minmax(110px,1fr)', render: r => <b>{r.name}{uiText(r.former ? '（已不在本公司）' : '')}</b> },
     { key: 'orders', header: '新接订单', width: 'minmax(120px,1fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><span>{r.newOrders}{uiText(" 单")}</span>{r.newOrderAmount.length > 0 && <small className="mist-muted">{sums(r.newOrderAmount)}</small>}</div> },
-    { key: 'ship', header: '出运', width: '96px', align: 'right', render: r => r.shipments ? `${r.shipments} 票 · ${r.shippedQty}` : '—' },
+    { key: 'ship', header: '出运', width: '96px', align: 'right', render: r => r.shipments ? `${r.shipments} 票 · ${formatTeamShipmentQuantities(r.shippedQuantities, uiText)}` : '—' },
     { key: 'collected', header: '回款', width: 'minmax(110px,1fr)', align: 'right', render: r => moneyCell(r.collected) },
     { key: 'follow', header: '跟进 / 新开发', width: '104px', align: 'right', render: r => `${r.followUps} / ${r.newDevs}` },
     { key: 'opp', header: '赢单 / 流失', width: '96px', align: 'right', render: r => `${r.won} / ${r.lost}` },
@@ -160,15 +161,15 @@ export function TeamWeekly({ state, members, viewer, group, today, initialWeek, 
     { key: 'ar', header: '当前逾期应收', width: 'minmax(110px,1fr)', align: 'right', render: r => moneyCell(r.overdueReceivable) },
   ];
   return <div data-team-weekly={report.weekStart}>
-    <div className="mist-section mist-row" style={{ justifyContent: 'space-between' }}>
-      <span className="mist-row"><Button size="sm" icon={ChevronLeft} aria-label={uiText("上一周")} onClick={() => setWeek(addBusinessDays(week, -7))} /><b>{report.weekStart}{uiText(" 至 ")}{report.weekEnd}</b>{week === current && <Pill tone="accent">{uiText("本周 · 统计到 ")}{today}</Pill>}<Button size="sm" icon={ChevronRight} aria-label={uiText("下一周")} disabled={week >= current} onClick={() => setWeek(addBusinessDays(week, 7))} /></span>
-      <span className="mist-row">{ended && !archived && canArchive && run && <Button size="sm" variant="primary" icon={Archive} disabled={busy} onClick={() => void archive()}>{uiText("生成并存档")}</Button>}<Button size="sm" icon={Copy} onClick={() => void copy()}>{uiText("复制周报文字")}</Button><Button size="sm" icon={Download} disabled={!report.rows.length} onClick={exportCsv}>{uiText("导出 CSV")}</Button></span>
+    <div className="mist-section mist-row" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+      <span className="mist-row" style={{ flexWrap: 'wrap' }}><Button size="sm" icon={ChevronLeft} aria-label={uiText("上一周")} onClick={() => setWeek(addBusinessDays(week, -7))} /><b style={{ whiteSpace: 'nowrap' }}>{report.weekStart}{uiText(" 至 ")}{report.weekEnd}</b>{week === current && <Pill tone="accent">{uiText("本周 · 统计到 ")}{today}</Pill>}<Button size="sm" icon={ChevronRight} aria-label={uiText("下一周")} disabled={week >= current} onClick={() => setWeek(addBusinessDays(week, 7))} /></span>
+      <span className="mist-row" style={{ flexWrap: 'wrap' }}>{ended && !archived && canArchive && run && <Button size="sm" variant="primary" icon={Archive} disabled={busy} onClick={() => void archive()}>{uiText("生成并存档")}</Button>}<Button size="sm" icon={Copy} onClick={() => void copy()}>{uiText("复制周报文字")}</Button><Button size="sm" icon={Download} disabled={!report.rows.length} onClick={exportCsv}>{uiText("导出 CSV")}</Button></span>
     </div>
-    {archived ? <Banner variant="status" tone="ok" title={ui`已存档 · ${archived.scope}`}>{uiText("由 ")}{archived.generatedBy}{uiText(" 于 ")}{businessWhen(archived.generatedAt)}{uiText(" 生成；以下是生成那一刻的数据，之后的补录不会改变它。")}</Banner>
-      : ended && canArchive && run ? <Banner tone="warn" title={uiText("这一周已结束，尚未存档")}>{uiText("点“生成并存档”把此刻的数据冻结成正式周报，之后可随时回看、复制或导出。")}</Banner> : null}
+    {archived ? <Banner variant="status" tone="ok" title={ui`已存档 · ${archived.scope}`}>{uiText("由 ")}{archived.generatedBy}{uiText(" 于 ")}{businessWhen(archived.generatedAt)}</Banner>
+      : ended && canArchive && run ? <Banner tone="warn" title={uiText("尚未存档")} /> : null}
     <StatGrid>
       <StatCard icon={Package} label={uiText("新接订单")} value={t.newOrders} unit={uiText("单")} foot={sums(t.newOrderAmount) || '本周没有新单'} />
-      <StatCard icon={Ship} label={uiText("出运")} value={t.shipments} unit={uiText("票")} foot={`合计 ${t.shippedQty} 件/米`} />
+      <StatCard icon={Ship} label={uiText("出运")} value={t.shipments} unit={uiText("票")} foot={formatTeamShipmentQuantities(t.shippedQuantities, uiText)} />
       <StatCard icon={Wallet} label={uiText("回款")} value={t.collected[0] ? money(t.collected[0].amount) : '0.00'} unit={uiText(t.collected[0]?.currency || '')} foot={t.collected.length > 1 ? sums(t.collected) : '按到账日、已核销到发票'} />
       <StatCard icon={BellRing} label={uiText("督办 完成 / 发出")} value={`${t.nudgesDone} / ${t.nudgesIn}`} unit={uiText("条")} foot={`逾期未完成 ${t.nudgesOpenLate} 条`} />
     </StatGrid>
@@ -176,6 +177,5 @@ export function TeamWeekly({ state, members, viewer, group, today, initialWeek, 
       <CardHeader title={uiText("成员本周")} sub={ui`新单按建单日、出运按离港日、回款按到账日（已核销到该成员订单的发票）；${archived ? '“当前”两列是存档时的状态。' : '“当前”两列是此刻的状态，不是当周历史值。'}`} />
       <DataTable ariaLabel={uiText("团队周报")} rows={report.rows} rowKey={r => r.id} columns={columns} empty={<EmptyState icon={Users} title={uiText("范围内没有成员")} compact />} />
     </Card></section>
-    <span className="mist-note">{uiText("本系统只生成周报内容；复制或导出后由你自行发送。")}</span>
   </div>;
 }

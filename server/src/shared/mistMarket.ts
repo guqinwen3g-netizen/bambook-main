@@ -1,3 +1,7 @@
+import {stableJson} from './stableJson';
+import {garmentMaterialUses,type GarmentMaterialUse} from './mistGarmentMaterials';
+import {saveTrimProfile,trimQuoteTerms,sourcePriceLabel,type TrimCatalogProfile,type TrimProfileInput,type TrimQuoteTerms} from './mistTrimCatalog';
+import {assertCustomerFieldAuthority} from './mistCustomerFieldAuthority';
 import { scheduleCrmFollowUp } from './mistCrm';
 import { isCalendarDay, nextBusinessCode } from './mistBusinessClock';
 import { primaryImageId } from './mistPrimaryImage';
@@ -15,6 +19,7 @@ import {buildQuotationDocumentSnapshot,quotationDocumentBlocker,quotationFormalD
 /** Market-side business records owned by the current Mist workspace. No fixture records are created. */
 import { MistCommandError, type MistState, type MistContext, type MistCommandResult, type MistCustomer, mistMoneyMinor, MIST_ORDER_CHECKLIST, mistPlaceholderImage, type MistImage } from './mistWorkspace';
 import { reviewDecision, type MistReviewTask } from './mistReview';
+import { pricingParamsText } from './mistPricingParams';
 import { supplierBusinessDay, supplierUnavailableReason, productionSupplierUnavailableReason, isServiceSupplier } from './mistSupplierStatus';
 import { relationHoldReason } from './mistRelationHold';
 import { relationBusiness } from './mistRelationBusiness';
@@ -27,9 +32,9 @@ function quoteLineImage(root: MistState, m: { products: Array<{ id: string; sour
  const devId = line.sourceDevId || m.products.find(p => p.id === line.productId)?.sourceDevId;
  return (devId && root.devs.find(d => d.id === devId)?.img) || mistPlaceholderImage(type);
 }
-export type MarketProduct = RecordBase & { sku:string; name:string; category:'garment'|'fabric'|'trimming'; status:'active'|'archived'; season:string; supplierId:string; supplierCode:string; composition:string; specification:string; color:string; unit:string; cost:string; currency:string; sourceDevId:string; sourceVersionId:string; specs?:Record<string,string>; customerCodes?:Array<{customerId:string;code:string}>; refPrice?:string; /** mar56：同一档案的其他可供工厂与各自报价；价格变动留历史。 */ sources?:ProductSource[]; priceHistory?:ProductPriceChange[] };
-export type ProductSource={supplierId:string;supplierCode:string;price:string;currency:string;moq:string;leadDays:number;note:string;updatedAt:string;updatedBy:string};
-export type ProductPriceChange={supplierId:string;from:string;to:string;currency:string;at:string;actor:string;note:string};
+export type MarketProduct = RecordBase & { materialUses?:GarmentMaterialUse[]; trimProfile?:TrimCatalogProfile; sku:string; name:string; category:'garment'|'fabric'|'trimming'; status:'active'|'archived'; season:string; supplierId:string; supplierCode:string; composition:string; specification:string; color:string; unit:string; cost:string; currency:string; sourceDevId:string; sourceVersionId:string; specs?:Record<string,string>; customerCodes?:Array<{customerId:string;code:string}>; refPrice?:string; /** mar56：同一档案的其他可供工厂与各自报价；价格变动留历史。 */ sources?:ProductSource[]; priceHistory?:ProductPriceChange[] };
+export type ProductSource={quoteTerms?:TrimQuoteTerms;supplierId:string;supplierCode:string;price:string;currency:string;moq:string;leadDays:number;note:string;updatedAt:string;updatedBy:string};
+export type ProductPriceChange={previousTerms?:TrimQuoteTerms;newTerms?:TrimQuoteTerms;supplierId:string;from:string;to:string;currency:string;at:string;actor:string;note:string};
 /** 数字档案按板块的结构化规格；面料不预设“件”，单位以实际计价单位为准。 */
 export const PRODUCT_SPEC_FIELDS:Record<MarketProduct['category'],Array<{key:string;label:string;unit?:string}>>={
  fabric:[{key:'weight',label:'克重',unit:'g/m²'},{key:'width',label:'门幅',unit:'cm'},{key:'weave',label:'组织'},{key:'yarn',label:'纱支 / 原料'},{key:'finish',label:'后整理'}],
@@ -73,15 +78,20 @@ export type SupplierRating={id:string;grade:typeof SUPPLIER_GRADES[number];perio
 export type SupplierStatusChange={status:MarketSupplier['status'];reason:string;effectiveDate:string;at:string;actor:string};
 /** fin40：合规筛查记录（制裁名单、出口管制等）；结论与依据由人工登记，到复查日进风险预警。 */
 export type RelationScreening = { id:string; kind:'sanctions'|'export_control'|'annual'|'other'; result:'clear'|'hit'|'review'; basis:string; screenedOn:string; nextReview:string; fileIds:string[]; at:string; actor:string };
-export type MarketRelation = RecordBase & { screenings?:RelationScreening[]; name:string; category:'Customer'|'Supplier'|'Agent'|'Partner'|'Government'|'Internal'|'Other'; customerId:string; supplierId:string; country:string; address:string; aliases:string[]; status:'active'|'archived'; hold?:{reason:string;at:string;actor:string}|null; holdHistory?:RelationHoldChange[]; /** 合并来源的关系 ID；历史事件保留原归属，由服务端维护。 */ mergedRelationIds?:string[]; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> };
+export type SupplierRelationSource = {
+ supplierId:string;supplierName:string;
+ relation:Pick<RecordBase,'id'|'createdAt'|'fileIds'|'note'>&{aliases:string[];status:'active'|'archived';screenings?:RelationScreening[];holdHistory?:RelationHoldChange[];holdHistoryKeys?:string[];mergedRelationIds?:string[]};
+ customerAliases:string[];customerFileIds:string[];customerScreeningIds:string[];combinedHoldHistoryKeys:string[];
+};
+export type MarketRelation = RecordBase & { screenings?:RelationScreening[]; name:string; category:'Customer'|'Supplier'|'Agent'|'Partner'|'Government'|'Internal'|'Other'; customerId:string; supplierId:string; country:string; address:string; aliases:string[]; status:'active'|'archived'; hold?:{reason:string;at:string;actor:string}|null; holdHistory?:RelationHoldChange[]; /** Parallel provenance keys preserve identical independent facts and avoid duplicate shared facts after relinking. */ holdHistoryKeys?:string[]; /** Only the server records pre-link ownership; callers cannot supply or replace it. */ supplierRelationSource?:SupplierRelationSource; /** 合并来源的关系 ID；历史事件保留原归属，由服务端维护。 */ mergedRelationIds?:string[]; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> };
 export type MarketSeason = RecordBase & { code:string; name:string; startDate:string; endDate:string; status:'Planning'|'Active'|'Closed'; milestones:Array<{label:string;date:string}>; review?:{at:string;orderCount:number;developmentCount:number;productCount:number;amounts:Array<{currency:string;amount:string}>} };
 export type MarketTrend = RecordBase & { name:string; type:'fabric'|'color'|'craft'|'composition'; seasonId:string; source:string; productIds:string[] };
 export type MarketShow = RecordBase & { name:string; location:string; seasonId:string; startDate:string; endDate:string; booth:string; attendees:string; cost:string; currency:string; status:'Planned'|'Ongoing'|'Completed'|'Cancelled' };
 export type MarketCampaign = RecordBase & { code:string; name:string; type:string; seasonId:string; showId:string; startDate:string; endDate:string; target:string; budget:string; actualCost:string; currency:string; status:'Draft'|'Active'|'Paused'|'Completed'|'Cancelled'; owner:string; productIds:string[] };
 /** ownerId / owner：线索负责人（mar53），旧线索没有时按活动负责人显示。 */
 export type MarketLead = RecordBase & { ownerId?:string; owner?:string; name:string; company:string; email:string; phone:string; demand:string; source:'campaign'|'show'; parentId:string; customerId:string; status:'New'|'Contacted'|'Qualified'|'Following'|'Converted'|'Lost'; followUpDate:string; estimatedValue:string; actualValue:string; currency:string; convertedAt:string|null; opportunityId?:string; communication?:{actor:string;actorId?:string;at:string}; followUps?:Array<{at:string;actor:string;actorId?:string;status:string;note:string}> };
-export type MarketQuoteLine = { id:string; productId:string; sourceDevId:string; sourceVersionId:string; name:string; style:string; specification:string; qty:string; unit:string; price:string; cost:string; amount:string; costBasis?:'product'|'unverified'; /** BB-QUO-2 结构化规格与 MOQ；历史条目可能没有。 */ specs?:QuoteLineSpecs; /** BB-QUO-3 保存时冻结的最低毛利率版本；历史条目没有则不按底价线判断。 */ marginFloor?:FrozenMarginFloor; /** BB-QUO-3 服务端保存时按当时来源判定的板块（null=当时不属面料/成衣）；历史条目没有，编辑时按已保存单位兼容推断。不随产品档案之后改类别变化。 */ family?:QuoteFamily|null; /** BB-QUO-5 条目转单去向；仅转单命令写入。 */ conversion?:QuoteLineConversion; /** BB-QUO-5 标记不再转及原因。 */ skipped?:QuoteLineSkip };
-export type MarketQuoteApproval = { id:string; requesterId:string; reviewerId:string; status:'pending'|'approved'|'rejected'; submittedAt:string; decidedAt?:string; note?:string; details:Array<{label:string;value:string}>; fileIds:string[]; /** Immutable audit links, separate from human-readable approval text. */ costingRefs?:Array<{lineId:string;snapshotId:string;modelVersion:string}> };
+export type MarketQuoteLine = { id:string; productId:string; sourceDevId:string; sourceVersionId:string; name:string; style:string; specification:string; qty:string; unit:string; price:string; cost:string; amount:string; costBasis?:'product'|'unverified'; /** Last trial applied to this exact saved line. */ pricingTrialId?:string; /** BB-QUO-2 结构化规格与 MOQ；历史条目可能没有。 */ specs?:QuoteLineSpecs; /** BB-QUO-3 保存时冻结的最低毛利率版本；历史条目没有则不按底价线判断。 */ marginFloor?:FrozenMarginFloor; /** BB-QUO-3 服务端保存时按当时来源判定的板块（null=当时不属面料/成衣）；历史条目没有，编辑时按已保存单位兼容推断。不随产品档案之后改类别变化。 */ family?:QuoteFamily|null; /** BB-QUO-5 条目转单去向；仅转单命令写入。 */ conversion?:QuoteLineConversion; /** BB-QUO-5 标记不再转及原因。 */ skipped?:QuoteLineSkip };
+export type MarketQuoteApproval = { id:string; requesterId:string; reviewerId:string; status:'pending'|'approved'|'rejected'; submittedAt:string; decidedAt?:string; note?:string; details:Array<{label:string;value:string}>; fileIds:string[]; /** Immutable audit links, separate from human-readable approval text. */ costingRefs?:Array<{lineId:string;snapshotId:string;modelVersion:string}>; pricingTrialRefs?:Array<{lineId:string;trialId:string;position:number;unit:string}> };
 export type MarketQuotation = RecordBase & { code:string; customerId:string; currency:string; season:string; validUntil:string; deliveryTerms:string; paymentTerms:string; status:'Draft'|'Sent'|'Accepted'|'Rejected'|'Expired'; lines:MarketQuoteLine[]; total:string; deliveryEvidence:string; responseEvidence:string; approval:MarketQuoteApproval|null; approvalHistory?:MarketQuoteApproval[]; requiresApproval?:boolean; convertedOrderId:string|null; /** 报价汇率：1 单位报价币种折人民币（报价时预计的结汇汇率，非人民币报价才有）；随报价版本冻结，已发送版本不可改，报表“报价预计”口径取此值。 */ fxRate?:string; /** 版本链：V1 无 previousId；新版本不覆盖旧版本。 */ revision?:number; rootId?:string; previousId?:string;costingSnapshots?:QuoteCostSnapshot[];feedback?:QuoteFeedbackRecord[]; /** BB-QUO-6 生成的报价单文件记录；只追加，仅由生成命令写入。 */ documents?:QuoteDocumentRecord[] };
 export type MarketLookbook = RecordBase & { name:string; customerId:string; productIds:string[]; status:'Draft'|'Prepared'|'Archived'; preparedAt:string|null; snapshots:LookbookSnapshot[]; /** Immutable generated originals, retained when a draft is revised. */ documents?:GeneratedDocRecord[]; /** Set only by PDF generation; a new draft/preparation has no current PDF. */ currentDocumentId?:string };
 /** 画册准备时冻结的产品资料：客户款号按目标客户取；成分、颜色单列，规格不重复成分。 */
@@ -97,7 +107,8 @@ export type MarketCommand =
  | {type:'market.showLead.save';payload:Extract<MarketCommand,{type:'market.lead.save'}>['payload']}
  | {type:'market.showLead.transition';payload:Extract<MarketCommand,{type:'market.lead.transition'}>['payload']}
  | {type:'market.product.save';payload:{id?:string;input:Input<MarketProduct>}}
- | {type:'market.product.source.save';payload:{productId:string;supplierId:string;supplierCode?:string;price:string;currency:string;moq?:string;leadDays?:number;note?:string}}
+ | {type:'market.product.trimProfile.save';payload:TrimProfileInput}
+ | {type:'market.product.source.save';payload:{quoteTerms?:TrimQuoteTerms|null;productId:string;supplierId:string;supplierCode?:string;price:string;currency:string;moq?:string;leadDays?:number;note?:string}}
  | {type:'market.product.source.remove';payload:{productId:string;supplierId:string;reason:string}}
  | {type:'market.product.fromVersion';payload:{devId:string;versionId:string;sku:string;name?:string;supplierId?:string;supplierCode?:string}}
  | {type:'market.product.status';payload:{id:string;status:MarketProduct['status']}}
@@ -108,7 +119,7 @@ export type MarketCommand =
  | {type:'market.supplier.certificate.save';payload:{supplierId:string;id?:string;name:string;number:string;issuer:string;validUntil:string;fileIds:string[]}}
  | {type:'market.supplier.certificate.delete';payload:{supplierId:string;id:string}}
  | {type:'market.supplier.rate';payload:{supplierId:string;grade:SupplierRating['grade'];period:string;note:string}}
- | {type:'market.relation.save';payload:{id?:string;input:Omit<Input<MarketRelation>,'contacts'|'hold'|'holdHistory'|'mergedRelationIds'>}}
+ | {type:'market.relation.save';payload:{id?:string;input:Omit<Input<MarketRelation>,'contacts'|'hold'|'holdHistory'|'holdHistoryKeys'|'supplierRelationSource'|'screenings'|'mergedRelationIds'>}}
  | {type:'market.relation.status';payload:{id:string;status:MarketRelation['status']}}
  | {type:'market.relation.hold';payload:{id:string;frozen:boolean;reason:string}}
  | {type:'market.relation.linkSupplier';payload:{id:string;supplierId:string}}
@@ -126,7 +137,7 @@ export type MarketCommand =
  | {type:'market.lead.save';payload:{id?:string;input:Omit<Input<MarketLead>,'convertedAt'|'communication'|'followUps'>}}
  | {type:'market.lead.transition';payload:{id:string;status:MarketLead['status'];customerId?:string;actualValue?:string;note:string;followUpDate?:string}}
  | {type:'market.lead.convertToCrm';payload:{id:string;customerId?:string;opportunity?:{title:string;domain:'garment'|'fabric';amount:string;currency:string;expectedDate:string}|null}}
- | {type:'market.quotation.save';payload:{id?:string;input:Omit<Input<MarketQuotation>,'documents'|'code'|'total'|'deliveryEvidence'|'responseEvidence'|'approval'|'convertedOrderId'|'lines'|'revision'|'rootId'|'previousId'|'costingSnapshots'|'feedback'>&{lines:Array<Omit<MarketQuoteLine,'id'|'amount'>>;/** 仅新建时：基于此报价建立新版本（续期或改价）。 */previousId?:string}}}
+ | {type:'market.quotation.save';payload:{id?:string;input:Omit<Input<MarketQuotation>,'documents'|'code'|'total'|'deliveryEvidence'|'responseEvidence'|'approval'|'convertedOrderId'|'lines'|'revision'|'rootId'|'previousId'|'costingSnapshots'|'feedback'>&{lines:Array<Omit<MarketQuoteLine,'id'|'amount'|'pricingTrialId'>>;/** 仅新建时：基于此报价建立新版本（续期或改价）。 */previousId?:string}}}
  | {type:'market.quotation.submit';payload:{id:string}}
  | {type:'market.quotation.decide';payload:{id:string;decision:'approved'|'rejected';note:string}}
  | {type:'market.quotation.feedback.add';payload:{quotationId:string;expectedTarget:string;input:QuoteFeedbackInput}}
@@ -168,7 +179,26 @@ export function marketCommandPermission(command:MarketCommand):string|null {
  throw new MistCommandError('VALIDATION','未知市场操作');
 }
 export function getMarketReviews(rootState:MistState):MistReviewTask[] {
- return ((rootState as MistState&{market?:MarketState}).market?.quotations||[]).flatMap(q=>[...(q.approvalHistory||[]),...(q.approval?[q.approval]:[])].map(approval=>({id:approval.id,kind:'quotation' as const,entityId:q.id,title:q.code+' 报价审批',requesterId:approval.requesterId,reviewerIds:[approval.reviewerId],status:approval.status,submittedAt:approval.submittedAt,decision:approval.status==='pending'?undefined:reviewDecision(rootState.members?.find(m=>m.userId===approval.reviewerId)?.name||approval.reviewerId,approval.decidedAt,approval.note),requiredPermission:'quotations:approve',target:{view:'quotations',id:q.id},details:quoteApprovalDisplayDetails(approval.details),fileIds:approval.fileIds})));
+ const trials = new Map(rootState.platform?.pricing?.map(trial=>[trial.id,trial]));
+ return (rootState.market?.quotations||[]).flatMap(q=>[...(q.approvalHistory||[]),...(q.approval?[q.approval]:[])].map((approval,index)=>({
+  id:approval.id,roundNumber:index+1,kind:'quotation' as const,entityId:q.id,title:q.code+' 报价审批',requesterId:approval.requesterId,
+  reviewerIds:[approval.reviewerId],status:approval.status,submittedAt:approval.submittedAt,
+  decision:approval.status==='pending'?undefined:reviewDecision(rootState.members?.find(m=>m.userId===approval.reviewerId)?.name||approval.reviewerId,approval.decidedAt,approval.note),
+  requiredPermission:'quotations:approve',target:{view:'quotations',id:q.id},fileIds:approval.fileIds,
+  details:[...quoteApprovalDisplayDetails(approval.details),...(approval.pricingTrialRefs||[]).map(ref=>{
+   const trial = trials.get(ref.trialId), label = '定价试算 · 第 '+ref.position+' 行';
+   if (!trial || trial.quotationId!==q.id || trial.lineId!==ref.lineId || !Number.isFinite(trial.netUsdCost) || !Number.isFinite(trial.finalUnitPrice)) return {label,value:'原试算记录不可用'};
+   const currency = trial.currency||'USD';
+   const value = [
+    '净成本 '+trial.netUsdCost.toFixed(4)+' '+currency+'/'+ref.unit,
+    '成本加成 '+trial.profitMargin+'%', '佣金 '+trial.commissionRate+'%',
+    '建议单价 '+trial.finalUnitPrice.toFixed(4)+' '+currency+'/'+ref.unit,
+    ...(trial.params?[pricingParamsText(trial.params)]:[]),
+    '依据：'+trial.basis, ...(trial.deviationReason?['偏离理由：'+trial.deviationReason]:[]),
+   ].join('；');
+   return {label,value};
+  })],
+ })));
 }
 /** Present old frozen evidence without changing its stored facts or audit identifiers. */
 function quoteApprovalDisplayDetails(details:MarketQuoteApproval['details']):MarketQuoteApproval['details']{
@@ -196,6 +226,9 @@ export function marketSum(amounts:string[]):string {return display(amounts.reduc
 const count=(value:unknown,label:string)=>typeof value==='number'&&Number.isFinite(value)&&value>=0&&value<=1e9?value:fail(label+'须为非负数');
 function attachmentIds(root:MistState,value:unknown){const ids=arr(value||[],'附件');ids.forEach(id=>find(root.files,id,'附件'));return ids;}
 function base(root:MistState,context:MistContext,input:{fileIds?:string[];note?:string},old?:RecordBase):RecordBase{return {id:old?.id||context.id(),createdAt:old?.createdAt||context.now,updatedAt:context.now,fileIds:attachmentIds(root,input.fileIds),note:str(input.note||'','备注',false)};}
+type RelationHistoryRow={key:string;change:RelationHoldChange};
+function relationHistoryRows(r:Pick<MarketRelation,'id'|'holdHistory'|'holdHistoryKeys'>):RelationHistoryRow[]{return(r.holdHistory||[]).map((change,index)=>({key:r.holdHistoryKeys?.[index]||`relation:${r.id}:${index}`,change}));}
+function setRelationHistory(r:MarketRelation,rows:RelationHistoryRow[]){const seen=new Set<string>(),unique=rows.filter(row=>{if(seen.has(row.key))return false;seen.add(row.key);return true;});r.holdHistory=unique.map(row=>({...row.change}));r.holdHistoryKeys=unique.map(row=>row.key);}
 function put<T extends RecordBase>(rows:T[],row:T,old?:T){if(old)rows[rows.indexOf(old)]=row;else rows.unshift(row);}
 function history(root:MistState,ctx:MistContext,kind:string,id:string,text:string,fileIds:string[]=[]){root.events.unshift({id:ctx.id(),entityType:kind,entityId:id,actor:ctx.actorName,at:ctx.now,text,fileIds});}
 function supplierRef(m:MarketState,id:string,now:string|false){if(!id)return '';const s=find(m.suppliers,id,'供应商');const unavailable=now?productionSupplierUnavailableReason(s,supplierBusinessDay(now)):'';if(unavailable)fail(unavailable,'PRECONDITION');return s.id;}
@@ -214,19 +247,24 @@ export function quoteLineFamily(state:{devs:Array<{id:string;values:{domain?:'fa
 export function quoteUnitOptions(family:QuoteFamily|undefined):readonly string[]|undefined{return family?QUOTE_UNITS[family]:undefined;}
 /** 单位对该板块合法时原样返回，否则返回空（留空由人工选择）。 */
 export function legalQuoteUnit(family:QuoteFamily|undefined,unit:string|undefined):string{const options=quoteUnitOptions(family),u=(unit||'').trim();return !options||options.includes(u)?u:'';}
+/** Archive unit cost is usable only on the same currency and pricing unit; no implicit FX or unit conversion. */
+export function quotationProductCost(product:Pick<MarketProduct,'cost'|'currency'|'unit'>|undefined,quoteCurrency:string,quoteUnit:string):string|null{
+ if(!product||product.currency!==quoteCurrency.trim().toUpperCase()||!quoteUnit.trim()||product.unit.trim()!==quoteUnit.trim())return null;
+ try{return decimal(product.cost,'产品成本',4).minor>BigInt(0)?product.cost:null;}catch{return null;}
+}
 /** 客户专属开发案（开发案有客户）只能报给该客户；与转订单校验（mistOrderSource）同一口径，避免报价走完审批、发送、接受后才在转单时被拒。 */
 export function quoteSourceCustomerProblem(root:Pick<MistState,'devs'>,customerId:string,sourceDevId:string,label:string):string|null{const d=sourceDevId?root.devs.find(x=>x.id===sourceDevId):undefined;return d?.customerId&&d.customerId!==customerId?`条目「${label}」的来源开发案 ${d.code} 属于 ${d.customer||'其他客户'}，不能报给本报价客户`:null;}
-function sourceLine(root:MistState,m:MarketState,input:Omit<MarketQuoteLine,'id'|'amount'>,ctx:MistContext,quoteCurrency:string,customerId:string):MarketQuoteLine{
+function sourceLine(root:MistState,m:MarketState,input:Omit<MarketQuoteLine,'id'|'amount'|'pricingTrialId'>,ctx:MistContext,quoteCurrency:string,customerId:string):MarketQuoteLine{
  const productId=str(input.productId||'','产品',false);let sourceDevId=str(input.sourceDevId||'','来源开发案',false),sourceVersionId=str(input.sourceVersionId||'','来源版本',false);
  if(!productId&&!sourceVersionId)fail('报价条目须选择产品档案或准确开发版本');
  if(productId){const p=find(m.products,productId,'产品');if(p.status!=='active')fail('归档产品不可新增报价');if(sourceVersionId&&sourceVersionId!==p.sourceVersionId||sourceDevId&&sourceDevId!==p.sourceDevId)fail('产品与来源版本不一致');sourceDevId=p.sourceDevId;sourceVersionId=p.sourceVersionId;}
  validateSource(root,sourceDevId,sourceVersionId);
  {const p=quoteSourceCustomerProblem(root,customerId,sourceDevId,String(input.name||input.style||''));if(p)fail(p,'PRECONDITION');}
  const price=decimal(input.price,'单价').text,qty=decimal(input.qty,'数量',4,true).text,product=productId?find(m.products,productId,'产品'):undefined;
- const costBasis=product&&product.currency===quoteCurrency&&decimal(product.cost,'产品成本').minor>BigInt(0)?'product':'unverified';
- const cost=costBasis==='product'?product!.cost:input.cost?decimal(input.cost,'参考成本价',4).text:'';
  const unit=str(input.unit,'单位'),family=quoteLineFamily(root,m,{productId,sourceDevId}),units=quoteUnitOptions(family);
  if(units&&!units.includes(unit))fail(`${QUOTE_FAMILY_LABEL[family!]}条目「${str(input.name,'品名')}」计价单位只能是 ${units.join(' / ')}，不能用“${unit}”；不自动换算`);
+ const productCost=quotationProductCost(product,quoteCurrency,unit),costBasis=productCost!==null?'product':'unverified';
+ const cost=productCost??(input.cost?decimal(input.cost,'参考成本价',4).text:'');
  const name=str(input.name,'品名'),specs=family?normalizeQuoteSpecs(family,(input as {specs?:unknown}).specs,QUOTE_UNITS[family],name,fail):{};
  return {id:ctx.id(),productId,sourceDevId,sourceVersionId,name,style:str(input.style,'款号'),specification:str(input.specification,'规格',false),qty,unit,price,cost,costBasis,amount:marketLineAmount(qty,price),...(Object.keys(specs).length?{specs}:{}),family:family||null};
 }
@@ -324,6 +362,7 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    if(patch.currency!==undefined)next.currency=currency(patch.currency);
    if(patch.since!==undefined)next.since=day(patch.since,'合作起始日',true);
    if(patch.creditLimit!==undefined){if(typeof patch.creditLimit!=='number')fail('信用额度格式无效');mistMoneyMinor(patch.creditLimit);next.creditLimit=patch.creditLimit;}
+   assertCustomerFieldAuthority(ctx,customer,next);
    Object.assign(customer,next);customerRelation(root,m,id,ctx).updatedAt=ctx.now;
    root.devs.filter(d=>d.customerId===id).forEach(d=>{d.customer=next.name;d.values.customer=next.name;});root.orders.filter(o=>o.customerId===id).forEach(o=>o.customer=next.name);
    history(root,ctx,'customer',id,'更新客户档案 '+customer.name+ownerText);return{id,customerId:id};
@@ -349,6 +388,7 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    mistMoneyMinor(input.creditLimit);
    const customer:MistCustomer={id:ctx.id(),code,name:str(input.name,'客户名称'),country:str(input.country,'国家',false),city:str(input.city,'城市',false),industry:str(input.industry,'行业',false),...(()=>{if((input as Record<string,unknown>).owner!==undefined)fail('负责人须按账号选择');const owner=resolveMember(ctx,input.ownerId,'客户负责人');return{owner:owner.name,ownerId:owner.id};})(),grade:str(input.grade,'等级',false),currency:currency(input.currency),terms:str(input.terms,'付款条款',false),incoterm:str(input.incoterm,'贸易术语',false),categories:str(input.categories,'主要品类',false),creditLimit:input.creditLimit,since:day(input.since,'合作起始日',true)};
    const relation:MarketRelation={...base(root,ctx,{}),name:customer.name,category:'Customer',customerId:customer.id,supplierId:'',country:customer.country,address:customer.city,aliases:[],status:'active',contacts:[]};
+   assertCustomerFieldAuthority(ctx,undefined,customer);
    root.customers.push(customer);m.relations.push(relation);
    history(root,ctx,'customer',customer.id,'创建客户档案 '+customer.name);
    return {id:customer.id,customerId:customer.id,relationId:relation.id};
@@ -360,29 +400,50 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    if(old&&(old.sourceDevId!==sourceDevId||old.sourceVersionId!==sourceVersionId))fail('产品来源版本不可替换，请另建产品档案');
    if(sourceVersionId&&m.products.some(x=>x.id!==id&&x.sourceVersionId===sourceVersionId))fail('该准确版本已有产品档案');
    const row:MarketProduct={...base(root,ctx,input,old),sku,name:str(input.name,'名称'),category:one(input.category,['garment','fabric','trimming'],'类别'),status:old?.status||'active',season:str(input.season,'季节',false),supplierId:supplierRef(m,input.supplierId||'',ctx.now),supplierCode:str(input.supplierCode,'供应商编码',false),composition:str(input.composition,'成分',false),specification:str(input.specification,'规格',false),color:str(input.color,'颜色',false),unit:str(input.unit,'单位'),cost:decimal(input.cost,'成本').text,currency:currency(input.currency),sourceDevId,sourceVersionId};
+   if(old?.materialUses?.length&&row.category!=='garment')fail('已有归档用料的成衣档案不能改类','PRECONDITION');
    const specs=productSpecs(row.category,input.specs===undefined?(old?.category===row.category?old?.specs:undefined):input.specs);if(Object.keys(specs).length)row.specs=specs;
    if(input.customerCodes!==undefined){if(!Array.isArray(input.customerCodes)||input.customerCodes.length>50)fail('客户编码表格式无效');const seen=new Set<string>();const codes:Array<{customerId:string;code:string}>=[];for(const c of input.customerCodes as unknown[]){const r=c as {customerId?:unknown;code?:unknown};if(!r||typeof r.customerId!=='string'||!root.customers.some(x=>x.id===r.customerId))fail('客户编码引用的客户不存在');if(seen.has(r.customerId as string))fail('同一客户只能登记一个客户编码');seen.add(r.customerId as string);codes.push({customerId:r.customerId as string,code:str(r.code,'客户编码',true,80)});}if(codes.length)row.customerCodes=codes;}else if(old?.customerCodes)row.customerCodes=old.customerCodes.map(c=>({...c}));
    // 客户货号在该客户的全部产品（含归档档案）内唯一，保留历史对应关系。
    for(const c of row.customerCodes||[])if(m.products.some(p=>p.id!==id&&p.customerCodes?.some(other=>other.customerId===c.customerId&&other.code.toLowerCase()===c.code.toLowerCase())))fail('客户编码已存在');
    const refPrice=input.refPrice===undefined?(old?.refPrice||''):String(input.refPrice).trim();if(refPrice)row.refPrice=decimal(refPrice,'参考价').text;
+   if(old?.materialUses&&row.category==='garment')row.materialUses=structuredClone(old.materialUses);
+   if(old?.trimProfile&&row.category==='trimming')row.trimProfile=structuredClone(old.trimProfile);
    if(old?.sources)row.sources=old.sources.map(x=>({...x}));if(old?.priceHistory)row.priceHistory=old.priceHistory.map(x=>({...x}));
    put(m.products,row,old);result={id:row.id};break;}
+  case 'market.product.trimProfile.save':{
+   const product=find(m.products,command.payload.productId,'辅料档案');
+   saveTrimProfile(root,ctx,product,command.payload);
+   history(root,ctx,'product',product.id,'更新辅料资料');result={id:product.id};break;
+  }
   case 'market.product.source.save':{const i=command.payload,p=find(m.products,i.productId,'数字档案');if(p.status==='archived')fail('归档产品须先恢复再编辑');
    const supplierId=supplierRef(m,str(i.supplierId,'供应商'),ctx.now);const price=decimal(i.price,'报价').text;if(!(Number(price)>0))fail('报价须大于零');const cur=currency(i.currency);
    const moq=i.moq===undefined||i.moq===''?'':decimal(i.moq,'MOQ').text;const lead=i.leadDays===undefined?0:Number(i.leadDays);if(!Number.isInteger(lead)||lead<0||lead>365)fail('交期天数无效');
    const list=p.sources||[],old=list.find(x=>x.supplierId===supplierId);
+   if((old?.quoteTerms||i.quoteTerms!==undefined)&&!ctx.can?.('suppliers:read'))throw new MistCommandError('FORBIDDEN','没有供应商资料读取权限',403);
    const row:ProductSource={supplierId,supplierCode:str(i.supplierCode||'','供应商编码',false,80),price,currency:cur,moq,leadDays:lead,note:str(i.note||'','备注',false,500),updatedAt:ctx.now,updatedBy:ctx.actorName};
-   if(old&&(old.price!==price||old.currency!==cur))p.priceHistory=[...(p.priceHistory||[]),{supplierId,from:`${old.price} ${old.currency}`,to:`${price} ${cur}`,currency:cur,at:ctx.now,actor:ctx.actorName,note:row.note}];
-   if(!old)p.priceHistory=[...(p.priceHistory||[]),{supplierId,from:'',to:`${price} ${cur}`,currency:cur,at:ctx.now,actor:ctx.actorName,note:row.note}];
+   if(i.quoteTerms!=null){
+    if(p.category!=='trimming')fail('只有辅料供应报价可以登记此报价依据');
+    row.quoteTerms=trimQuoteTerms(root,i.quoteTerms,!!moq);
+   }else if(i.quoteTerms===undefined&&old?.quoteTerms&&old.price===price&&old.currency===cur&&old.moq===moq){
+    row.quoteTerms=structuredClone(old.quoteTerms);
+   }
+   const termsChanged=stableJson(old?.quoteTerms??null)!==stableJson(row.quoteTerms??null);
+   if(!old||old.price!==price||old.currency!==cur||termsChanged){
+    p.priceHistory=[...(p.priceHistory||[]),{supplierId,from:old?sourcePriceLabel(old):'',to:sourcePriceLabel(row),currency:cur,at:ctx.now,actor:ctx.actorName,note:row.note,
+     ...(old?.quoteTerms?{previousTerms:structuredClone(old.quoteTerms)}:{}),...(row.quoteTerms?{newTerms:structuredClone(row.quoteTerms)}:{})}];
+   }
    p.sources=old?list.map(x=>x===old?row:x):[...list,row];p.updatedAt=ctx.now;
-   const sup=find(m.suppliers,supplierId,'供应商');history(root,ctx,'product',p.id,`${old?'更新':'登记'}供应来源 ${sup.name}：${price} ${cur}/${p.unit}${moq?` · MOQ ${moq}`:''}${lead?` · ${lead} 天`:''}`);result={id:p.id};break;}
+   const sup=find(m.suppliers,supplierId,'供应商');history(root,ctx,'product',p.id,`${old?'更新':'登记'}供应来源 ${sup.name}：${price} ${cur}/${row.quoteTerms?.unit||p.unit}${moq?` · MOQ ${moq}`:''}${lead?` · ${lead} 天`:''}`);result={id:p.id};break;}
   case 'market.product.source.remove':{const i=command.payload,p=find(m.products,i.productId,'数字档案');const old=(p.sources||[]).find(x=>x.supplierId===i.supplierId)||fail('该供应来源不存在');const reason=str(i.reason,'移除原因');
+   if(old.quoteTerms){if(!ctx.can?.('suppliers:read'))throw new MistCommandError('FORBIDDEN','没有供应商资料读取权限',403);p.priceHistory=[...(p.priceHistory||[]),{supplierId:i.supplierId,from:sourcePriceLabel(old),to:'',currency:old.currency,at:ctx.now,actor:ctx.actorName,note:reason,previousTerms:structuredClone(old.quoteTerms)}];}
    p.sources=(p.sources||[]).filter(x=>x!==old);p.updatedAt=ctx.now;history(root,ctx,'product',p.id,`移除供应来源 ${find(m.suppliers,old!.supplierId,'供应商').name}：${reason}`);result={id:p.id};break;}
   case 'market.product.fromVersion':{const {devId,versionId}=command.payload;validateSource(root,devId,versionId,true);const previous=m.products.find(x=>x.sourceVersionId===versionId);if(previous)return {id:previous.id,devId,versionId};const d=find(root.devs,devId,'开发案'),v=find(root.versions,versionId,'版本');
    const isFabric=developmentDomain(d.values)==='fabric',fr=v.fabricRequirements||d.values.fabricRequirements,known=(x:string|undefined)=>x&&x!=='待工厂分析'?x:'';
    const specs:Record<string,string>=isFabric?{weight:fr&&(!fr.weightUnit||fr.weightUnit==='g/m²')&&/^\d{1,4}(\.\d{1,2})?$/.test(fr.weightValue)?fr.weightValue:'',width:fr&&(!fr.widthUnit||fr.widthUnit==='cm')&&/^\d{1,4}(\.\d{1,2})?$/.test(fr.widthValue)?fr.widthValue:'',weave:known(fr?.weave),yarn:known(fr?.yarn),finish:known(fr?.finish)}:{style:d.values.style||'',garmentCategory:d.values.category||'',sizeRange:v.size||'',mainFabric:v.fabric||''};
    const composition=isFabric&&known(fr?.composition)?fr!.composition.split('\n').map(x=>x.trim()).filter(Boolean).join(' / '):v.fabric;
-   const saved=execute(root,{type:'market.product.save',payload:{input:{sku:command.payload.sku,name:command.payload.name===undefined?d.name:str(command.payload.name,'产品名称',true,80),category:isFabric?'fabric':'garment',season:d.values.season,supplierId:command.payload.supplierId||'',supplierCode:command.payload.supplierCode||'',composition,specification:v.size,color:d.values.color,specs,refPrice:'',unit:d.values.targetUnit||(isFabric?'米':'件'),cost:'0',currency:d.values.targetCurrency||'USD',sourceDevId:devId,sourceVersionId:versionId,fileIds:v.fileIds,note:`来源 ${d.code} / ${v.label}；成本待核实`}}},ctx);result={...saved,devId,versionId};break;}
+   const saved=execute(root,{type:'market.product.save',payload:{input:{sku:command.payload.sku,name:command.payload.name===undefined?d.name:str(command.payload.name,'产品名称',true,80),category:isFabric?'fabric':'garment',season:d.values.season,supplierId:command.payload.supplierId||'',supplierCode:command.payload.supplierCode||'',composition,specification:v.size,color:d.values.color,specs,refPrice:'',unit:d.values.targetUnit||(isFabric?'米':'件'),cost:'0',currency:d.values.targetCurrency||'USD',sourceDevId:devId,sourceVersionId:versionId,fileIds:v.fileIds,note:`来源 ${d.code} / ${v.label}；成本待核实`}}},ctx);const materialUses=isFabric?[]:garmentMaterialUses(root,v);
+   if(materialUses.length){const archive=find(m.products,String(saved.id),'产品档案');archive.materialUses=structuredClone(materialUses);}
+   result={...saved,devId,versionId};break;}
   case 'market.product.status':{const row=find(m.products,command.payload.id,'产品');row.status=one(command.payload.status,['active','archived'],'产品状态');row.updatedAt=ctx.now;history(root,ctx,'product',row.id,(row.status==='archived'?'归档产品档案 ':'恢复产品档案 ')+row.sku);result={id:row.id};break;}
   case 'market.supplier.save':{const {id,input:supplied}=command.payload,old=id?find(m.suppliers,id,'供应商'):undefined,input={...old,...supplied};
    // Allocate inside the workspace command transaction; replay returns the existing receipt.
@@ -422,27 +483,36 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
   case 'market.supplier.rate':{const i=command.payload,row=find(m.suppliers,i.supplierId,'供应商');const rating:SupplierRating={id:ctx.id(),grade:one(i.grade,[...SUPPLIER_GRADES],'评级'),period:str(i.period,'评级周期'),note:str(i.note,'评级依据'),at:ctx.now,actor:ctx.actorName};row.ratings=[...(row.ratings||[]),rating];row.updatedAt=ctx.now;history(root,ctx,'supplier',row.id,'评级 '+rating.grade+'（'+rating.period+'）：'+rating.note);result={id:row.id};break;}
   case 'market.relation.save':{const {id,input}=command.payload,old=id?find(m.relations,id,'关系档案'):undefined,category=one(input.category,['Customer','Supplier','Agent','Partner','Government','Internal','Other'],'关系类别');const customerId=category==='Customer'?find(root.customers,input.customerId,'现有客户').id:'',supplierId=category==='Supplier'?supplierRef(m,input.supplierId,false):category==='Customer'&&old?.customerId&&old.supplierId?old.supplierId:'';if(category==='Supplier'&&!supplierId)fail('供应商关系须引用现有供应商');if(m.relations.some(r=>r.id!==id&&((customerId&&r.customerId===customerId)||(supplierId&&r.supplierId===supplierId))))fail('该组织已有关联关系档案');
    if(old&&(old.customerId||old.supplierId)&&(old.customerId!==customerId||old.supplierId!==supplierId||old.category!==category))fail('已关联组织身份不可改绑，请创建独立关系档案');
-   const supplier=supplierId&&!customerId?find(m.suppliers,supplierId,'供应商'):undefined;const row:MarketRelation={...base(root,ctx,input,old),hold:old?.hold,holdHistory:old?.holdHistory,mergedRelationIds:old?.mergedRelationIds,category,customerId,supplierId,name:customerId?find(root.customers,customerId,'客户').name:supplier?.name||str(input.name,'组织名称'),country:supplier?.country||str(input.country,'国家地区',false),address:supplier?.address||str(input.address,'地址',false),aliases:arr(input.aliases||[],'组织别名'),status:old?.status||'active',contacts:old?.contacts||supplier?.contacts||[]};put(m.relations,row,old);result={id:row.id};break;}
+   const customer=customerId?find(root.customers,customerId,'客户'):undefined,supplier=supplierId&&!customerId?find(m.suppliers,supplierId,'供应商'):undefined;const row:MarketRelation={...base(root,ctx,input,old),hold:old?.hold,holdHistory:old?.holdHistory,holdHistoryKeys:old?.holdHistoryKeys,supplierRelationSource:old?.supplierRelationSource,screenings:old?.screenings,mergedRelationIds:old?.mergedRelationIds,category,customerId,supplierId,name:customer?customer.name:supplier?supplier.name:str(input.name,'组织名称'),country:customer?customer.country||'':supplier?supplier.country||'':str(input.country,'国家地区',false),address:customer?customer.city||'':supplier?supplier.address||'':str(input.address,'地址',false),aliases:arr(input.aliases||[],'组织别名'),status:old?.status||'active',contacts:old?.contacts||supplier?.contacts||[]};put(m.relations,row,old);result={id:row.id};break;}
   case 'market.relation.status':{const r=find(m.relations,command.payload.id,'关系档案'),next=one(command.payload.status,['active','archived'],'关系状态') as MarketRelation['status'];
     if(next===r.status)fail(next==='archived'?'该关系档案已归档':'该关系档案已在使用中','CONFLICT');
     // 还有在手业务（订单、报价、商机、未到齐采购）时不能归档，与关系智库页面同一口径；智能体或接口同样受限。
     if(next==='archived'){const b=relationBusiness(root,r);if(b.total)fail(`还有在手业务 ${b.total} 项（订单 ${b.orders.length}、报价 ${b.quotations.length}、商机 ${b.opportunities.length}、采购 ${b.purchases.length}），完成或交接后再归档`,'PRECONDITION');}
     r.status=next;r.updatedAt=ctx.now;history(root,ctx,'relation',r.id,(next==='archived'?'归档关系档案 ':'恢复关系档案 ')+r.name);result={id:r.id};break;}
   case 'market.relation.hold':{const r=find(m.relations,command.payload.id,'关系档案'),frozen=command.payload.frozen===true,reason=str(command.payload.reason,frozen?'冻结原因':'解冻说明');if(frozen===!!r.hold)fail(frozen?'该往来已冻结':'该往来未冻结');
-   r.hold=frozen?{reason,at:ctx.now,actor:ctx.actorName}:null;r.holdHistory=[...(r.holdHistory||[]),{action:frozen?'freeze':'release',reason,at:ctx.now,actor:ctx.actorName}];r.updatedAt=ctx.now;history(root,ctx,'relation',r.id,(frozen?'冻结往来：':'解冻往来：')+reason);result={id:r.id};break;}
-  case 'market.relation.linkSupplier':{const r=find(m.relations,command.payload.id,'关系档案');if(!r.customerId)fail('只有客户关系档案可以关联供应商身份');if(r.supplierId)fail('该组织已关联供应商身份');const supplier=find(m.suppliers,command.payload.supplierId,'供应商');
+   r.hold=frozen?{reason,at:ctx.now,actor:ctx.actorName}:null;setRelationHistory(r,[...relationHistoryRows(r),{key:`hold:${ctx.id()}`,change:{action:frozen?'freeze':'release',reason,at:ctx.now,actor:ctx.actorName}}]);r.updatedAt=ctx.now;history(root,ctx,'relation',r.id,(frozen?'冻结往来：':'解冻往来：')+reason);result={id:r.id};break;}
+  case 'market.relation.linkSupplier':{const r=find(m.relations,command.payload.id,'关系档案');if(!r.customerId)fail('只有客户关系档案可以关联供应商身份');if(r.supplierId)fail('该组织已关联供应商身份');if(r.hold)fail('客户关系档案已冻结，请先解冻','PRECONDITION');const supplier=find(m.suppliers,command.payload.supplierId,'供应商');
    const unavailable=supplierUnavailableReason(supplier,marketBusinessDate(ctx.now));if(unavailable)fail(unavailable,'PRECONDITION');
    const other=m.relations.find(x=>x.supplierId===supplier.id);if(other?.customerId)fail('该供应商已关联到其它客户');if(other&&other.hold)fail('该供应商的关系档案已冻结，请先解冻');
+   const source=other?structuredClone({id:other.id,createdAt:other.createdAt,fileIds:other.fileIds,note:other.note,aliases:other.aliases,status:other.status,screenings:other.screenings,holdHistory:other.holdHistory,holdHistoryKeys:relationHistoryRows(other).map(row=>row.key),mergedRelationIds:other.mergedRelationIds}):{id:'',createdAt:ctx.now,fileIds:[],note:'',aliases:[],status:'active' as const};
+   const origin:SupplierRelationSource={supplierId:supplier.id,supplierName:supplier.name,relation:source,customerAliases:[...r.aliases],customerFileIds:[...r.fileIds],customerScreeningIds:(r.screenings||[]).map(row=>row.id),combinedHoldHistoryKeys:[]};
+   setRelationHistory(r,[...relationHistoryRows(r),...(other?relationHistoryRows(other):[])].sort((a,b)=>Date.parse(a.change.at)-Date.parse(b.change.at)));origin.combinedHoldHistoryKeys=[...(r.holdHistoryKeys||[])];r.supplierRelationSource=origin;
    r.supplierId=supplier.id;r.aliases=[...new Set([...r.aliases,...(other?.aliases||[]),...(supplier.name!==r.name?[supplier.name]:[])])];r.fileIds=[...new Set([...r.fileIds,...(other?.fileIds||[])])];r.updatedAt=ctx.now;
-   if(other){r.holdHistory=[...(r.holdHistory||[]),...(other.holdHistory||[])].sort((a,b)=>Date.parse(a.at)-Date.parse(b.at));r.mergedRelationIds=[...new Set([...(r.mergedRelationIds||[]),other.id,...(other.mergedRelationIds||[])])].filter(id=>id!==r.id);m.relations.splice(m.relations.indexOf(other),1);}history(root,ctx,'relation',r.id,'关联供应商身份 '+supplier.code+' '+supplier.name);result={id:r.id};break;}
+   if(other?.screenings?.length){const ids=new Set((r.screenings||[]).map(row=>row.id));r.screenings=[...(r.screenings||[]),...structuredClone(other.screenings.filter(row=>!ids.has(row.id)))];}
+   if(other){r.mergedRelationIds=[...new Set([...(r.mergedRelationIds||[]),other.id,...(other.mergedRelationIds||[])])].filter(id=>id!==r.id);m.relations.splice(m.relations.indexOf(other),1);}history(root,ctx,'relation',r.id,'关联供应商身份 '+supplier.code+' '+supplier.name);result={id:r.id};break;}
   // mar32：从供应商一侧关联客户身份——并入该客户的关系档案（同一合并规则）；撤销关联把供应商拆回独立关系档案。
   case 'market.relation.linkCustomer':{const r=find(m.relations,command.payload.id,'关系档案');if(r.customerId)fail('该组织已关联客户身份');if(!r.supplierId)fail('只有供应商关系档案可以关联客户身份');
    const target=customerRelation(root,m,command.payload.customerId,ctx);if(target.supplierId)fail('该客户已关联其它供应商');
    result=execute(root,{type:'market.relation.linkSupplier',payload:{id:target.id,supplierId:r.supplierId}},ctx);break;}
   case 'market.relation.unlinkSupplier':{const r=find(m.relations,command.payload.id,'关系档案');if(!r.customerId||!r.supplierId)fail('该组织没有同时关联客户与供应商身份');if(r.hold)fail('关系档案已冻结，请先解冻');
-   const reason=str(command.payload.reason,'撤销原因');const supplier=find(m.suppliers,r.supplierId,'供应商');
-   r.supplierId='';r.aliases=r.aliases.filter(a=>a!==supplier.name);r.updatedAt=ctx.now;
-   const split:MarketRelation={...base(root,ctx,{}),name:supplier.name,category:'Supplier',customerId:'',supplierId:supplier.id,country:supplier.country,address:supplier.address,aliases:[],status:'active',contacts:supplier.contacts.map(c=>({...c}))};m.relations.push(split);
+   const reason=str(command.payload.reason,'撤销原因');const supplier=find(m.suppliers,r.supplierId,'供应商'),origin=r.supplierRelationSource;
+   if((origin&&origin.supplierId!==supplier.id)||(!origin&&r.mergedRelationIds?.length))fail('关联前资料不完整，请先核对原供应商资料','PRECONDITION');
+   const source=origin?.relation,supplierFiles=(source?.fileIds||[]).filter(id=>r.fileIds.includes(id)),supplierAliases=(source?.aliases||[]).filter(alias=>r.aliases.includes(alias)),supplierScreenings=(r.screenings||[]).filter(row=>source?.screenings?.some(s=>s.id===row.id));
+   const split:MarketRelation={...base(root,ctx,{fileIds:supplierFiles,note:source?.note||''}),createdAt:source?.createdAt||ctx.now,name:supplier.name,category:'Supplier',customerId:'',supplierId:supplier.id,country:supplier.country,address:supplier.address,aliases:supplierAliases,status:source?.status||'active',contacts:supplier.contacts.map(c=>({...c})),...(supplierScreenings.length?{screenings:structuredClone(supplierScreenings)}:{})};
+   if(source){const priorKeys=new Set(origin!.combinedHoldHistoryKeys);setRelationHistory(split,[...relationHistoryRows(source),...relationHistoryRows(r).filter(row=>!priorKeys.has(row.key))]);split.mergedRelationIds=[...new Set([source.id,...(source.mergedRelationIds||[])])].filter(id=>id&&id!==split.id);}
+   r.supplierId='';r.aliases=r.aliases.filter(a=>origin?origin.customerAliases.includes(a)||!source!.aliases.includes(a)&&a!==origin.supplierName:a!==supplier.name);r.fileIds=r.fileIds.filter(id=>!supplierFiles.includes(id)||origin!.customerFileIds.includes(id));
+   if(source?.screenings?.length){const ids=new Set(source.screenings.map(row=>row.id));r.screenings=(r.screenings||[]).filter(row=>!ids.has(row.id)||origin!.customerScreeningIds.includes(row.id));}
+   delete r.supplierRelationSource;r.updatedAt=ctx.now;m.relations.push(split);
    history(root,ctx,'relation',r.id,`撤销关联供应商身份 ${supplier.code} ${supplier.name}：${reason}`);history(root,ctx,'relation',split.id,`由 ${r.name} 拆出为独立供应商关系档案：${reason}`);result={id:split.id};break;}
   case 'market.contact.save':{const i=command.payload;if(!['customer','supplier','relation'].includes(i.kind))fail('联系人所属类型无效');const parent=i.kind==='customer'?customerRelation(root,m,i.parentId,ctx):i.kind==='supplier'?find(m.suppliers,i.parentId,'供应商'):find(m.relations,i.parentId,'关系档案');if(i.kind==='relation'&&(parent as MarketRelation).customerId)customerRelation(root,m,(parent as MarketRelation).customerId,ctx);const email=str(i.email,'邮箱',false);if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))fail('邮箱格式无效');const old=i.id?find(parent.contacts,i.id,'联系人'):undefined;
    const row={id:old?.id||ctx.id(),name:str(i.name,'联系人姓名'),role:str(i.role,'岗位',false),email,phone:str(i.phone,'电话',false),primary:!!i.primary};if(row.primary)parent.contacts.forEach(c=>c.primary=false);if(old)parent.contacts[parent.contacts.indexOf(old)]=row;else parent.contacts.push(row);parent.updatedAt=ctx.now;
@@ -484,7 +554,7 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    if(input.allocationQuantity!==undefined&&quoteCostDecimal(input.allocationQuantity,'分摊数量')!==quoteCostDecimal(line!.qty,'准确报价行数量'))fail('费用分摊数量须等于当前准确报价行数量；不跨行分摊或沿用旧数量','CONFLICT');
    let historyEvidence:ReturnType<typeof freezeQuotationHistoryEvidence>;try{historyEvidence=freezeQuotationHistoryEvidence(root,q,line!,v.historyReference);}catch(e){fail(e instanceof Error?e.message:'历史依据无效','CONFLICT');}
    {const target=quoteCostTarget(input);if(target.currency!==q.currency||target.unit!==line!.unit)fail(input.conversion?'折算后的币种与单位须为本报价行的币种和计价单位':'成本来源与本报价行币种或计价单位不同，请填写折算汇率与单位换算');}const supplier=input.mode==='supplier'?find(m.suppliers,input.supplierId,'来源供应商'):null;if(supplier&&isServiceSupplier(supplier))fail('服务商不能作为生产供应商','PRECONDITION');const fileIds=attachmentIds(root,input.fileIds);const snapshot:QuoteCostSnapshot={...(historyEvidence?{historyEvidence}:{}),id:ctx.id(),quotationId:q.id,lineId:line!.id,modelVersion:quoteCostModelVersion(input),createdAt:ctx.now,actorId:ctx.actorId||'',actor:ctx.actorName,input:{...input,fileIds},result:costResult,appliedPrice:v.applyPrice,target:{customerId:q.customerId,quoteCode:q.code,currency:q.currency,deliveryTerms:q.deliveryTerms,paymentTerms:q.paymentTerms,validUntil:q.validUntil,line:{...line!}},supplier:supplier?{id:supplier.id,name:supplier.name,code:supplier.code}:null,files:fileIds.map(id=>{const f=find(root.files,id,'凭据附件');return{id:f.id,name:f.name,createdAt:f.createdAt,size:f.size};})};
-   if(v.applyPrice&&decimal(costResult.proposedPrice,'人工拟报价').minor<=BigInt(0))fail('写入报价的人工拟报价必须大于0');archiveApproval(q);q.approval=null;q.requiresApproval=true;line!.cost=costResult.approvalCost;line!.costBasis='unverified';if(v.applyPrice){line!.price=costResult.proposedPrice;line!.amount=marketLineAmount(line!.qty,line!.price);q.total=marketSum(q.lines.map(l=>l.amount));}q.costingSnapshots=[...(q.costingSnapshots||[]),snapshot];q.updatedAt=ctx.now;history(root,ctx,'quotation',q.id,'保存条目专业核算 '+line!.style+' / '+snapshot.id+'（人工依据，成本待审批核实）');result={id:q.id,lineId:line!.id,snapshotId:snapshot.id};break;
+   if(v.applyPrice&&decimal(costResult.proposedPrice,'人工拟报价').minor<=BigInt(0))fail('写入报价的人工拟报价必须大于0');archiveApproval(q);q.approval=null;q.requiresApproval=true;line!.cost=costResult.approvalCost;line!.costBasis='unverified';if(v.applyPrice){delete line!.pricingTrialId;line!.price=costResult.proposedPrice;line!.amount=marketLineAmount(line!.qty,line!.price);q.total=marketSum(q.lines.map(l=>l.amount));}q.costingSnapshots=[...(q.costingSnapshots||[]),snapshot];q.updatedAt=ctx.now;history(root,ctx,'quotation',q.id,'保存条目专业核算 '+line!.style+' / '+snapshot.id+'（人工依据，成本待审批核实）');result={id:q.id,lineId:line!.id,snapshotId:snapshot.id};break;
   }
   case 'market.quotation.submit': {
    const q = find(m.quotations, command.payload.id, '报价');
@@ -493,9 +563,12 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    if (!requesterId || !reviewerId || reviewerId === requesterId) fail('未能解析独立的业务审批负责人', 'PRECONDITION');
    archiveApproval(q);q.requiresApproval=true;
    const costing=activeQuoteCostSnapshots(q);
+   // Bind the applied trial by identity. The approval endpoint reads the frozen inputs without exposing them on the ordinary quotation payload.
+   const pricingTrialRefs=q.lines.flatMap((line,index)=>line.pricingTrialId?[{lineId:line.id,trialId:line.pricingTrialId,position:index+1,unit:line.unit}]:[]);
    const approval: MarketQuoteApproval = {
     id: ctx.id(), requesterId, reviewerId, status: 'pending', submittedAt: ctx.now, fileIds: [...new Set([...q.fileIds,...activeQuoteCostSnapshots(q).flatMap(x=>x.input.fileIds)])],
     costingRefs:costing.map(x=>({lineId:x.lineId,snapshotId:x.id,modelVersion:x.modelVersion})),
+    ...(pricingTrialRefs.length?{pricingTrialRefs}:{}),
     details: [
      {label:'报价',value:q.code}, {label:'客户',value:find(root.customers,q.customerId,'客户').name},
      {label:'金额',value:q.currency+' '+q.total}, {label:'贸易与付款',value:q.deliveryTerms+' / '+q.paymentTerms},
@@ -521,7 +594,7 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    approval.note = str(command.payload.note, '审批意见'); approval.decidedAt = ctx.now; q.updatedAt = ctx.now;
    result = {id:q.id}; break;
   }
-  case 'market.quotation.status':{const q=find(m.quotations,command.payload.id,'报价'),next=one(command.payload.status,['Draft','Sent','Accepted','Rejected','Expired'],'报价状态');if(next==='Sent'){const held=relationHoldReason(root,{customerId:q.customerId});if(held)fail(held,'PRECONDITION');}const allowed:Record<MarketQuotation['status'],string[]>={Draft:['Sent'],Sent:['Accepted','Rejected','Expired'],Accepted:[],Rejected:[],Expired:[]};if(!allowed[q.status].includes(next))fail('不允许此报价状态转换','PRECONDITION');const evidence=str(command.payload.evidence,'实际操作凭据');if(next==='Sent'){if(q.approval?.status==='pending'||q.approval?.status==='rejected'||quotationNeedsApproval(q)&&q.approval?.status!=='approved')fail('此报价须先取得业务负责人审批','PRECONDITION');if(q.validUntil<marketBusinessDate(ctx.now))fail('报价已超过有效期');q.deliveryEvidence=evidence;}else{if(next==='Expired'&&q.validUntil>=marketBusinessDate(ctx.now))fail('报价尚未到期');q.responseEvidence=evidence;}if(next==='Accepted'&&command.payload.acceptLineIds!==undefined){const keep=new Set(pickQuoteLines(root,q,command.payload.acceptLineIds).map(l=>l.id)),rest=q.lines.filter(l=>!keep.has(l.id));for(const l of rest)l.skipped={reason:`客户未接受（${evidence}）`,at:ctx.now,by:ctx.actorName,byId:ctx.actorId||''};if(rest.length)history(root,ctx,'quotation',q.id,`客户部分接受：${q.lines.filter(l=>keep.has(l.id)).map(l=>l.name).join('、')}；未接受 ${rest.map(l=>l.name).join('、')}`);}q.status=next;q.updatedAt=ctx.now;result={id:q.id};break;}
+  case 'market.quotation.status':{const q=find(m.quotations,command.payload.id,'报价'),next=one(command.payload.status,['Draft','Sent','Accepted','Rejected','Expired'],'报价状态');if(next==='Sent'){const held=relationHoldReason(root,{customerId:q.customerId});if(held)fail(held,'PRECONDITION');}const allowed:Record<MarketQuotation['status'],string[]>={Draft:['Sent'],Sent:['Accepted','Rejected','Expired'],Accepted:[],Rejected:[],Expired:[]};if(!allowed[q.status].includes(next))fail('不允许此报价状态转换','PRECONDITION');if(next==='Accepted'&&q.validUntil<marketBusinessDate(ctx.now))fail('报价已过有效期，请新建版本后重新确认','PRECONDITION');const evidence=str(command.payload.evidence,'实际操作凭据');if(next==='Sent'){if(q.approval?.status==='pending'||q.approval?.status==='rejected'||quotationNeedsApproval(q)&&q.approval?.status!=='approved')fail('此报价须先取得业务负责人审批','PRECONDITION');if(q.validUntil<marketBusinessDate(ctx.now))fail('报价已超过有效期');q.deliveryEvidence=evidence;}else{if(next==='Expired'&&q.validUntil>=marketBusinessDate(ctx.now))fail('报价尚未到期');q.responseEvidence=evidence;}if(next==='Accepted'&&command.payload.acceptLineIds!==undefined){const keep=new Set(pickQuoteLines(root,q,command.payload.acceptLineIds).map(l=>l.id)),rest=q.lines.filter(l=>!keep.has(l.id));for(const l of rest)l.skipped={reason:`客户未接受（${evidence}）`,at:ctx.now,by:ctx.actorName,byId:ctx.actorId||''};if(rest.length)history(root,ctx,'quotation',q.id,`客户部分接受：${q.lines.filter(l=>keep.has(l.id)).map(l=>l.name).join('、')}；未接受 ${rest.map(l=>l.name).join('、')}`);}q.status=next;q.updatedAt=ctx.now;result={id:q.id};break;}
   case 'market.marginFloor.set':{const p=command.payload,family=one(p.family,['fabric','garment'],'板块') as 'fabric'|'garment',min=normalizeMarginPercent(p.minMarginPercent);if(min===null)fail('最低毛利率须为 0–99.99 之间的数字，最多两位小数');const effectiveFrom=day(p.effectiveFrom,'生效日');if(effectiveFrom<marketBusinessDate(ctx.now))fail('生效日不能早于今天；参数不追溯已保存报价');const reason=str(p.reason,'调整原因');m.marginFloors||=[];const version=m.marginFloors.filter(f=>f.family===family).length+1;const row:QuoteMarginFloor={id:ctx.id(),family,version,minMarginPercent:min,effectiveFrom,reason,createdAt:ctx.now,createdBy:ctx.actorName,createdById:ctx.actorId||''};m.marginFloors.push(row);history(root,ctx,'pricing',row.id,`设置${MARGIN_FLOOR_FAMILY_LABEL[family]}最低毛利率 V${version}：${min}%，${effectiveFrom} 起生效；原因：${reason}`);result={id:row.id};break;}
   case 'market.quotation.convert':{const q=find(m.quotations,command.payload.id,'报价');if(q.status!=='Accepted')fail('仅客户已接受的报价可转订单');const asked=command.payload.lineIds,pending=quotationPendingLines(q);
    // 旧调用（不带 lineIds）在整单已转同一订单时保持幂等返回。

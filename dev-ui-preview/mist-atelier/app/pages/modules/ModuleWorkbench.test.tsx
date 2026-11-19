@@ -3,11 +3,11 @@ import React,{act} from 'react';
 import {readFileSync} from 'node:fs';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
-import {getByRole,queryByRole,getByText,queryByText} from '@testing-library/dom';
-import {Card,MistRoot,ToastProvider,type Column} from '../../../../../components/mist';
+import {getAllByRole,getByRole,queryByRole,getByText,getAllByText,queryByText} from '@testing-library/dom';
+import {Button,Card,MistRoot,ToastProvider,type Column} from '../../../../../components/mist';
 import {readDevice,writeDevice} from '../../runtime/devicePreferences';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
-import {ModuleWorkbench,ModuleEditorDialog,ModuleEditorPage,moduleEditorSections,moduleVisibleFields,type ModuleEditorSpec} from './ModuleWorkbench';
+import {ModuleWorkbench,buildModuleXlsxFile,ModuleEditorDialog,ModuleEditorPage,moduleEditorSections,moduleVisibleFields,type ModuleEditorSpec} from './ModuleWorkbench';
 
 const bridge=vi.hoisted(()=>({workspace:null as any,route:{view:'test-ledger'} as any,go:vi.fn()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>bridge.workspace}));
@@ -18,7 +18,7 @@ type Row={id:string;name:string;detail:string};
 const rows:Row[]=[{id:'row-a',name:'记录甲',detail:'仅属于甲的业务依据'},{id:'row-b',name:'记录乙',detail:'仅属于乙的业务依据'}];
 const columns:Column<Row>[]=[{key:'name',header:'业务记录',render:row=>row.name}];
 let host:HTMLDivElement,root:Root|undefined;
-beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;bridge.route={view:'test-ledger'};bridge.go.mockReset();bridge.workspace={loading:false,saving:false,pending:null,pendingCreate:null,error:'',refresh:vi.fn(),run:vi.fn()};});
+beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;bridge.route={view:'test-ledger'};bridge.go.mockReset();bridge.workspace={state:{files:[]},loading:false,saving:false,pending:null,pendingCreate:null,error:'',refresh:vi.fn(),run:vi.fn()};});
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();});
 
 function editor(submit:ModuleEditorSpec['submit']=vi.fn(async(_values:any)=>({id:'saved'})),name='初始业务'):ModuleEditorSpec{return{
@@ -36,9 +36,41 @@ function editor(submit:ModuleEditorSpec['submit']=vi.fn(async(_values:any)=>({id
 function tree(spec?:ModuleEditorSpec,edit?:(row:Row)=>ModuleEditorSpec|undefined,exportRows?:(filtered:Row[])=>void,preview=false){return <React.StrictMode><MistRoot theme="light"><ToastProvider><ModuleWorkbench title="业务台账" rows={rows} columns={columns} create={spec} edit={edit} exportRows={exportRows} preview={preview} detail={row=><p data-testid="exact-detail">{row.detail}</p>} rowActions={[{label:'执行当前记录',run:row=>bridge.workspace.run(row.id)}]}/></ToastProvider></MistRoot></React.StrictMode>; }
 async function mount(spec?:ModuleEditorSpec,edit?:(row:Row)=>ModuleEditorSpec|undefined,exportRows?:(filtered:Row[])=>void,preview=false){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(tree(spec,edit,exportRows,preview)));}
 function recordDetailPage(){return getByRole(document.body,'heading',{name:'业务台账详情'}).closest<HTMLElement>('.mist-page')!;}
+it.each([true,false])('keeps missing workspace data distinct from an empty ledger and blocks dependent actions (loading %s)',async loading=>{
+ bridge.workspace.state=null;bridge.workspace.loading=loading;bridge.workspace.error=loading?'':'服务读取失败';const submit=vi.fn(),exportRows=vi.fn();await mount(editor(submit),undefined,exportRows);
+ expect((getByRole(host,'button',{name:'新建',exact:true})as HTMLButtonElement).disabled).toBe(true);expect((getByRole(host,'button',{name:'导出',exact:true})as HTMLButtonElement).disabled).toBe(true);expect(queryByRole(host,'table',{name:'业务台账'})).toBeNull();expect(host.textContent).not.toContain('0 条记录');expect(host.textContent).not.toContain('还没有业务台账记录');
+ bridge.workspace.state={files:[]};bridge.workspace.loading=false;bridge.workspace.error='';await act(async()=>root!.render(tree(editor(submit),undefined,exportRows)));expect(getByRole(host,'table',{name:'业务台账'})).toBeTruthy();expect(host.textContent).toContain('记录甲');expect((getByRole(host,'button',{name:'新建',exact:true})as HTMLButtonElement).disabled).toBe(false);expect(submit).not.toHaveBeenCalled();expect(exportRows).not.toHaveBeenCalled();
+});
+it('does not identify a supplied old record as a current detail before its workspace is read',async()=>{
+ bridge.workspace.state=null;bridge.workspace.error='服务读取失败';bridge.route={view:'test-ledger',id:'row-a'};await mount();expect(host.textContent).not.toContain('记录甲');expect(host.textContent).not.toContain('未找到这条记录');expect(host.querySelector('[data-testid="exact-detail"]')).toBeNull();expect(queryByRole(host,'button',{name:'执行当前记录',exact:true})).toBeNull();
+});
+it('locks both create entries on a known empty ledger while another operation is saving, and during refresh',async()=>{
+ const spec=editor(),empty=()=><MistRoot><ToastProvider><ModuleWorkbench title="业务台账" rows={[]} columns={columns} create={spec}/></ToastProvider></MistRoot>;bridge.workspace.saving=true;await mount();await act(async()=>root!.render(empty()));expect(getAllByRole(host,'button',{name:'新建',exact:true})).toHaveLength(2);expect(getAllByRole(host,'button',{name:'新建',exact:true}).every(button=>(button as HTMLButtonElement).disabled)).toBe(true);bridge.workspace.saving=false;bridge.workspace.loading=true;await act(async()=>root!.render(empty()));expect(getAllByRole(host,'button',{name:'新建',exact:true}).every(button=>(button as HTMLButtonElement).disabled)).toBe(true);bridge.workspace.loading=false;await act(async()=>root!.render(empty()));expect(getAllByRole(host,'button',{name:'新建',exact:true}).every(button=>!(button as HTMLButtonElement).disabled)).toBe(true);
+});
 async function click(name:string){await act(async()=>getByRole(document.body,'button',{name}).click());}
 async function fill(name:string,value:string,role:'textbox'|'spinbutton'|'combobox'='textbox'){const input=getByRole(document.body,role,{name}) as HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement;await act(async()=>{const prototype=input.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:input.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(prototype,'value')!.set!.call(input,value);input.dispatchEvent(new Event(input.tagName==='SELECT'?'change':'input',{bubbles:true}));});return input;}
 async function confirmStep(){await click('新建');await click('下一步');await click('下一步');expect(getByRole(document.body,'button',{name:'确认创建'})).toBeTruthy();}
+
+it('clears a no-result search without losing the exact selected business record or executing a command',async()=>{
+ bridge.route={view:'test-ledger',id:'row-a'};await mount(undefined,undefined,undefined,true);
+ await fill('搜索业务台账','ZXQ-NOMATCH');expect(getByText(document.body,'没有匹配的记录')).toBeTruthy();
+ expect(document.querySelector('[data-testid="exact-detail"]')?.textContent).toBe(rows[0].detail);
+ await click('清除筛选');expect((getByRole(document.body,'textbox',{name:'搜索业务台账'})as HTMLInputElement).value).toBe('');
+ expect(getByText(document.body,'记录乙')).toBeTruthy();expect(document.querySelector('[data-testid="exact-detail"]')?.textContent).toBe(rows[0].detail);
+ expect(bridge.workspace.run).not.toHaveBeenCalled();expect(bridge.go).not.toHaveBeenCalled();
+});
+
+it('restores parent filters and the first page together while retaining an out-of-filter selected original',async()=>{
+ const all=[rows[0],...Array.from({length:25},(_,i)=>({id:'extra-'+i,name:'记录'+i,detail:'原始依据'+i}))],cleared=vi.fn();
+ function List(){const[hidden,setHidden]=React.useState(false);return <ModuleWorkbench title="业务台账" rows={hidden?[]:all} allRows={all} columns={columns} preview
+  detail={row=><p data-testid="exact-detail">{row.detail}</p>} filtersActive={hidden} onClearFilters={()=>{cleared();setHidden(false);}}
+  toolbar={<Button onClick={()=>setHidden(true)}>外部筛选</Button>}/>;}
+ bridge.route={view:'test-ledger',id:'row-a'};host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<MistRoot><ToastProvider><List/></ToastProvider></MistRoot>));await click('下一页');expect(getByText(document.body,'2 / 3')).toBeTruthy();
+ await click('外部筛选');expect(document.querySelector('[data-testid="exact-detail"]')?.textContent).toBe(rows[0].detail);
+ await click('清除筛选');expect(cleared).toHaveBeenCalledTimes(1);expect(getByText(document.body,'1 / 3')).toBeTruthy();
+ expect(document.querySelector('[data-testid="exact-detail"]')?.textContent).toBe(rows[0].detail);expect(bridge.workspace.run).not.toHaveBeenCalled();expect(bridge.go).not.toHaveBeenCalled();
+});
 
 describe('ModuleWorkbench real Mist T9 workflow',()=>{
   it('closes a successfully saved long form under React StrictMode',async()=>{const submit=vi.fn(async(_values:any)=>({id:'saved'}));await mount(editor(submit));await confirmStep();await click('确认创建');expect(submit).toHaveBeenCalledTimes(1);expect(submit).toHaveBeenCalledWith({name:'初始业务',quantity:2.5,category:'blue',due:'2026-10-13',note:'原始说明',active:true,source:'原始凭据'});expect(queryByRole(document.body,'heading',{name:'创建业务记录'})).toBeNull();expect(getByRole(document.body,'heading',{name:'业务台账'})).toBeTruthy();expect(getByText(document.body,'已保存',{exact:true})).toBeTruthy();});
@@ -54,6 +86,32 @@ function conditionalEditor(submit=vi.fn(async(_values:any)=>({id:'saved'}))):Mod
  {key:'amount',label:'补偿金额',type:'number',required:true,min:0.01,when:{key:'kind',values:['Allowance']}},
  {key:'replacementSpec',label:'补发规格',required:true,when:{key:'kind',values:['Replace']}},
 ],initialValues:{id:'source-id',kind:'Repair',name:'来源已核实',amount:'not-a-number',replacementSpec:''}};}
+describe('ModuleEditorDialog rejected save feedback',()=>{
+ const refundSpec=(submit:ModuleEditorSpec['submit'],amount='91'):ModuleEditorSpec=>({title:'登记退款',submitLabel:'保存',submit,fields:[{key:'amount',label:'退款金额',type:'number',required:true},{key:'reference',label:'付款凭据',required:true}],initialValues:{amount,reference:'SIM-REFUND-90'}});
+ const dialog=(spec:ModuleEditorSpec)=><React.StrictMode><MistRoot><ToastProvider><ModuleEditorDialog spec={spec} onClose={vi.fn()}/></ToastProvider></MistRoot></React.StrictMode>;
+ it('shows one rejection inside the dialog, preserves input and removes it on cancel',async()=>{
+  const message='退款超过贷项余额';let showGlobal!:(value:string)=>void,clearGlobal!:(value:string)=>void;
+  bridge.workspace.dismissError=vi.fn((value:string)=>clearGlobal(value));
+  const spec=refundSpec(vi.fn(async()=>{showGlobal(message);throw new Error(message);}));
+  function Harness(){const[globalError,setGlobalError]=React.useState(''),[open,setOpen]=React.useState(true);showGlobal=setGlobalError;clearGlobal=value=>setGlobalError(current=>current===value?'':current);return <>{globalError&&<div data-global-error>{globalError}</div>}<ModuleEditorDialog spec={open?spec:null} onClose={()=>setOpen(false)}/></>;}
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<React.StrictMode><MistRoot><ToastProvider><Harness/></ToastProvider></MistRoot></React.StrictMode>));
+  await click('保存');const panel=getByRole(document.body,'dialog',{name:'登记退款'});
+  expect(getAllByText(document.body,message,{exact:true})).toHaveLength(1);expect(getByText(panel,message)).toBeTruthy();expect(host.querySelector('[data-global-error]')).toBeNull();
+  expect((getByRole(panel,'spinbutton',{name:'退款金额'}) as HTMLInputElement).value).toBe('91');expect((getByRole(panel,'textbox',{name:'付款凭据'}) as HTMLInputElement).value).toBe('SIM-REFUND-90');
+  await click('取消');expect(queryByRole(document.body,'dialog')).toBeNull();expect(queryByText(document.body,message)).toBeNull();
+ });
+ it('does not claim an error after the dialog has unmounted',async()=>{
+  let reject!:(error:Error)=>void;const spec=refundSpec(()=>new Promise((_resolve,no)=>reject=no));bridge.workspace.dismissError=vi.fn();
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(dialog(spec)));await click('保存');await act(async()=>root!.render(<p>新页面读取失败</p>));await act(async()=>reject(new Error('旧退款失败')));
+  expect(bridge.workspace.dismissError).not.toHaveBeenCalled();expect(getByText(host,'新页面读取失败')).toBeTruthy();
+ });
+ it('does not clear or decorate a replacement dialog with an earlier rejection',async()=>{
+  let reject!:(error:Error)=>void;const old=refundSpec(()=>new Promise((_resolve,no)=>reject=no)),next=refundSpec(vi.fn(),'77');bridge.workspace.dismissError=vi.fn();
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(dialog(old)));await click('保存');await act(async()=>root!.render(dialog(next)));await act(async()=>reject(new Error('旧退款失败')));
+  expect(bridge.workspace.dismissError).not.toHaveBeenCalled();expect(queryByText(document.body,'旧退款失败')).toBeNull();expect((getByRole(document.body,'spinbutton',{name:'退款金额'}) as HTMLInputElement).value).toBe('77');
+ });
+});
+
 describe('ModuleWorkbench applicable business fields',()=>{
  it('keeps an inapplicable field out of both explicit sections and fallbacks',()=>{const spec=conditionalEditor();spec.sections=[{id:'money',label:'款项',fields:['amount']}];expect(moduleVisibleFields(spec).map(f=>f.key)).toEqual(['kind','name']);expect(moduleEditorSections(spec).flatMap(g=>g.fields.map(f=>f.key))).toEqual(['kind','name']);expect(moduleVisibleFields(spec,{...spec.initialValues,kind:'Replace'}).map(f=>f.key)).toEqual(['kind','name','replacementSpec']);});
  it('does not validate or submit hidden required amounts in a short dialog, retaining source metadata',async()=>{
@@ -300,6 +358,52 @@ it.each(['dialog','page'])('renders a checkbox label once in a %s and retains it
  expect(submit).toHaveBeenCalledWith({move:false});
 });
 
+it.each(['dialog','page'])('uploads file fields and submits references from a %s',async surface=>{
+ const file={id:'technical-file-id',name:'报价原件.pdf',mimeType:'application/pdf',size:5,storageKey:'test/file',createdAt:'2026-11-14T01:00:00Z'};
+ bridge.workspace.state={files:[file]};bridge.workspace.uploadFile=vi.fn(async()=>file);
+ const submit=vi.fn(async()=>({})),spec:ModuleEditorSpec={title:'登记报价',submitLabel:'确认保存',initialValues:{files:''},fields:[{key:'files',label:'报价原件',type:'files',required:true}],submit};
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<MistRoot><ToastProvider>{surface==='page'?<ModuleEditorPage spec={spec} onClose={vi.fn()}/>:<ModuleEditorDialog spec={spec} onClose={vi.fn()}/>}</ToastProvider></MistRoot>));
+ expect(getByRole(document.body,'button',{name:'报价原件'})).toBeTruthy();expect(queryByRole(document.body,'textbox',{name:'报价原件'})).toBeNull();
+ const input=document.body.querySelector('input[type=file]') as HTMLInputElement;Object.defineProperty(input,'files',{value:[new File(['%PDF'],file.name,{type:'application/pdf'})]});await act(async()=>input.dispatchEvent(new Event('change',{bubbles:true})));
+ expect(bridge.workspace.uploadFile).toHaveBeenCalledTimes(1);expect(document.body.textContent).toContain(file.name);
+ if(surface==='page'){await act(async()=>getByRole(host,'button',{name:'下一步'}).click());expect(host.textContent).toContain(file.name);expect(host.textContent).not.toContain(file.id);}
+ await act(async()=>getByRole(document.body,'button',{name:'确认保存'}).click());expect(submit).toHaveBeenCalledWith({files:file.id});
+});
+
+it('hands full-page editor focus to the current step without stealing input on a source refresh',async()=>{
+ const submit=vi.fn(async()=>({id:'saved'})),spec:ModuleEditorSpec={title:'新建客户',initialValues:{name:'Pine Studio',note:'原始要求',quantity:'2'},fields:[{key:'name',label:'客户名称',required:true},{key:'note',label:'业务说明',type:'textarea'},{key:'quantity',label:'数量',type:'number',required:true}],sections:[{id:'identity',label:'客户资料',fields:['name','note']},{id:'terms',label:'业务条件',fields:['quantity']}],submit};
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ const page=(input:ModuleEditorSpec)=><MistRoot><ToastProvider><ModuleEditorPage spec={input} onClose={vi.fn()}/></ToastProvider></MistRoot>;
+ await act(async()=>root!.render(page(spec)));expect(document.activeElement).toBe(getByRole(host,'textbox',{name:'客户名称'}));
+ const note=getByRole(host,'textbox',{name:'业务说明'});note.focus();await fill('业务说明','正在输入的业务要求');
+ await act(async()=>root!.render(page({...spec,description:'更新的可用来源'})));expect(document.activeElement).toBe(note);expect((note as HTMLTextAreaElement).value).toBe('正在输入的业务要求');
+ await click('下一步');expect(document.activeElement).toBe(getByRole(host,'spinbutton',{name:'数量'}));
+ await click('下一步');expect(document.activeElement).toBe(getByRole(host,'group',{name:'确认提交'}));expect(getByRole(host,'group',{name:'确认提交'}).textContent).toContain('正在输入的业务要求');
+ await click('上一步');expect(document.activeElement).toBe(getByRole(host,'spinbutton',{name:'数量'}));expect(submit).not.toHaveBeenCalled();
+});
+
 it('translates dialog interface descriptions without translating business input values',async()=>{
  const original=readDevice('locale');try{writeDevice('locale','en-US');const spec:ModuleEditorSpec={title:'解冻往来',description:'Maison Lune · 当前负责人 林澈',initialValues:{reason:'原业务依据保持中文'},fields:[{key:'reason',label:'解冻说明',type:'textarea'}],submit:vi.fn()};host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<MistRoot><ToastProvider><ModuleEditorDialog spec={spec} onClose={vi.fn()}/></ToastProvider></MistRoot>));expect(getByRole(document.body,'dialog',{name:'Restore trading'})).toBeTruthy();expect(document.body.textContent).toContain('Maison Lune · Current owner: 林澈');expect((document.body.querySelector('textarea') as HTMLTextAreaElement).value).toBe('原业务依据保持中文');expect(spec.submit).not.toHaveBeenCalled();}finally{writeDevice('locale',original);}
+});
+
+async function readWorkbookFile(file:File){
+ const bytes=await new Promise<ArrayBuffer>((resolve,reject)=>{const reader=new FileReader();reader.onerror=()=>reject(reader.error);reader.onload=()=>resolve(reader.result as ArrayBuffer);reader.readAsArrayBuffer(file)});
+ const XLSX=await import('xlsx');return XLSX.read(bytes,{type:'array',cellStyles:true});
+}
+it('exports readable customs identifiers, Chinese headers and source metadata as real XLSX column widths',async()=>{
+ const book=await readWorkbookFile(await buildModuleXlsxFile('customs.xlsx',[
+  {name:'申报商品项',headers:['项号','商品编号','商品名称','申报要素','成交数量'],rows:[[1,'6205.20.00.99','棉制男式衬衫','0|0|机织|衬衫|男式|100%棉|无品牌|货号CC-SH-2702',8]]},
+  {name:'表头',headers:['项目','内容'],rows:[['出运','SHP-2026-00007'],['收货人','Cedar & Crown UK distribution'],['净重 kg',4]]},
+ ]));
+ const item=book.Sheets['申报商品项'],header=book.Sheets['表头'];
+ expect(item['!cols']?.[1]?.wch).toBeGreaterThanOrEqual(14);
+ expect(item['!cols']?.[2]?.wch).toBeGreaterThanOrEqual(14);
+ expect(item['!cols']?.[3]?.wch).toBeGreaterThanOrEqual(48);
+ expect(header['!cols']?.[1]?.wch).toBeGreaterThanOrEqual(29);
+ expect(item.B2).toMatchObject({t:'s',v:'6205.20.00.99'});expect(item.E2).toMatchObject({t:'n',v:8});expect(header.B4).toMatchObject({t:'n',v:4});
+});
+it('preserves zero, blanks, numeric amounts and literal formula-like text when formatting XLSX exports',async()=>{
+ const book=await readWorkbookFile(await buildModuleXlsxFile('source.xlsx',[{name:'来源/资料',headers:['文本','数量','金额','可选'],rows:[['=HYPERLINK("https://example.invalid")',0,-12.5,null],['正常资料',4,42,'']]}]));
+ expect(book.SheetNames).toEqual(['来源_资料']);const sheet=book.Sheets[book.SheetNames[0]];
+ expect(sheet.A2).toMatchObject({t:'s',v:"'=HYPERLINK(\"https://example.invalid\")"});expect(sheet.A2.f).toBeUndefined();expect(sheet.B2).toMatchObject({t:'n',v:0});expect(sheet.C2).toMatchObject({t:'n',v:-12.5});expect(sheet.D2?.v||'').toBe('');expect(sheet.C3).toMatchObject({t:'n',v:42});
 });

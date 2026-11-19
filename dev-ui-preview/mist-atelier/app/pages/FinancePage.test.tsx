@@ -23,6 +23,58 @@ function input(label:string,value:string){const control=getByLabelText(document.
 beforeEach(()=>vi.stubGlobal('matchMedia',(query:string)=>({matches:false,media:query,onchange:null,addListener(){},removeListener(){},addEventListener(){},removeEventListener(){},dispatchEvent(){return true;}})));
 beforeEach(()=>{let serial=0;const context={id:()=>`test-${++serial}`,actorName:'财务',actorId:'finance',now:new Date().toISOString()};const state=createMistState(context,'empty');state.customers=[{id:'customer',name:'客户',currency:'EUR'}] as any;state.orders=[{id:'o',code:'ORDER',type:'fabric',customerId:'customer',customer:'客户',season:'',lines:1,qty:1,amount:100,currency:'EUR',due:today(),progress:0,state:'',tone:'neutral',owner:'',img:'clay',checklist:[],handoffAt:null,createdAt:'',updatedAt:''}];state.orderLines=[{id:'line',orderId:'o',name:'商品',style:'A',img:'clay',qty:1,unit:'件',price:100,made:0,qc:0}];state.invoices=[{id:'invoice',code:'INV-EUR',orderId:'o',order:'ORDER',customer:'客户',due:today(),amount:100,open:100,currency:'EUR'}];state.receipts=[{id:'receipt',code:'R-EUR',date:today(),payer:'客户',amount:50,remaining:50,currency:'EUR',ref:'测试',state:'unmatched'}];store.value={state,workspace:{id:'space-a'},loading:false,saving:false,pending:null,error:'',refresh:vi.fn(),recover:vi.fn(),run:vi.fn(async(command)=>{const applied=applyMistCommand(store.value.state,command,context);store.value.state=applied.state;render();return{requestId:'req',revision:1,result:applied.result};})};go.mockReset();route={view:'payment-vouchers'};host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
+it('retains the other allocation amount when a selected invoice is settled in another session',async()=>{
+  const state=store.value.state,first=state.invoices[0],second={...first,id:'retained',code:'I-RETAINED'};
+  state.invoices.push(second);render();await click('多张 / 跨币种核销');
+  input(first.code+' 核销金额','20');input(second.code+' 核销金额','10');
+  first.open=0;state.receipts[0].remaining=30;render();
+  const dialog=getByRole(document.body,'dialog',{name:/核销到多张发票/});
+  expect((getByRole(dialog,'button',{name:'核销 2 张'}) as HTMLButtonElement).disabled).toBe(true);
+  expect((getByLabelText(dialog,second.code+' 核销金额') as HTMLInputElement).value).toBe('10');
+  expect(store.value.run).not.toHaveBeenCalled();
+  await click('移除失效选择');await click('核销 1 张');
+  expect(store.value.run).toHaveBeenCalledTimes(1);
+  expect(store.value.run).toHaveBeenCalledWith({type:'finance.reconcile',payload:{receiptId:'receipt',lines:[{invoiceId:'retained',amount:10}]}});
+});
+it('keeps non-order invoices in the customer drilldown and opens the exact sample request',async()=>{
+  const s=store.value.state,base={...s.invoices[0],orderId:'',customerId:'customer',currency:'EUR',open:12};
+  s.devs=[{id:'dev',customerId:'customer'}];
+  s.sampleRequests=[{id:'request',customerId:'customer',code:'SR-93'}];
+  s.invoices.push({...base,id:'fee',code:'SF-93',sampleRequestId:'request'},{...base,id:'opening',code:'AR-OPEN',opening:{}},{...base,id:'dev-fee',code:'DI-8',customerId:undefined,devId:'dev'},{...base,id:'foreign',code:'AR-OTHER',customerId:'other'});
+  route={view:'payment-vouchers',section:'open',customerId:'customer',id:'fee'};render();
+  const list=getByRole(host,'table',{name:'发票'});for(const code of ['SF-93','AR-OPEN','DI-8'])expect(list.textContent).toContain(code);
+  expect(list.textContent).not.toContain('AR-OTHER');
+  const dialog=getByRole(document.body,'dialog',{name:'SF-93'});
+  expect(queryByRole(dialog,'button',{name:'打开关联订单'})).toBeNull();
+  await act(async()=>getByRole(dialog,'button',{name:'来源索样单'}).click());
+  expect(go).toHaveBeenLastCalledWith('samples','request',{section:'requests'});
+});
+it('limits the customer ledger and matching suggestions to confirmed open invoices of that customer',()=>{
+  const state=store.value.state,original=state.invoices[0];
+  state.invoices.push({...original,id:'foreign',code:'OTHER-AR',customerId:'another'}, {...original,id:'rejected',code:'REJECTED-AR',financeStatus:'rejected'});
+  Object.assign(state.receipts[0],{state:'suggested',suggest:'foreign',confidence:99,payer:original.customer});
+  route={view:'payment-vouchers',section:'open',customerId:'customer'};render();
+  const list=getByRole(host,'table',{name:'发票'});
+  expect(list.textContent).toContain(original.code);
+  expect(list.textContent).not.toContain('REJECTED-AR');expect(list.textContent).not.toContain('OTHER-AR');
+  expect(queryByRole(host,'button',{name:'核对并采纳'})).toBeNull();
+});
+it.each(['not-visible','wrong-customer','no-product-read'])('disables a sample invoice source for %s',condition=>{
+  const s=store.value.state;Object.assign(s.invoices[0],{orderId:'',customerId:'customer',sampleRequestId:'request'});
+  s.sampleRequests=condition==='not-visible'?[]:[{id:'request',customerId:condition==='wrong-customer'?'other':'customer'}];
+  if(condition==='no-product-read')store.value.denied=new Set(['products:read']);
+  route.id=s.invoices[0].id;render();
+  const d=getByRole(document.body,'dialog',{name:s.invoices[0].code});
+  expect((getByRole(d,'button',{name:'来源索样单'}) as HTMLButtonElement).disabled).toBe(true);
+});
+it.each([undefined,'payables','records','accounts'])('does not present unread %s financial data as zero bank activity or enable importing',section=>{
+ const original=store.value.state;route.section=section;store.value={...store.value,state:null,loading:false,error:'无法读取公司数据'};render();expect(host.textContent).toContain('财务数据未读取');expect(host.textContent).not.toContain('还没有银行流水');expect(host.textContent).not.toContain('0 笔流水');expect(getAllByRole(host,'button').some(b=>b.textContent==='导入流水'||b.textContent==='登记付款'||b.textContent==='导出')).toBe(false);
+ store.value={...store.value,state:original,loading:false,error:''};render();expect(host.textContent).not.toContain('财务数据未读取');expect(host.textContent).toContain('财务管理');expect(store.value.run).not.toHaveBeenCalled();
+});
+it('keeps loading and pending-request recovery available before the financial workspace has been read',async()=>{
+ store.value={...store.value,state:null,loading:true,error:''};render();expect(host.textContent).toContain('正在读取财务数据');expect((getByRole(host,'button',{name:'刷新',exact:true})as HTMLButtonElement).disabled).toBe(true);
+ store.value={...store.value,loading:false,pending:{kind:'command',requestId:'lost-finance-request',command:{type:'finance.payment.save'}},recover:vi.fn().mockResolvedValue({result:{}})};render();await click('核对原操作结果');expect(store.value.recover).toHaveBeenCalledOnce();expect(host.textContent).not.toContain('还没有银行流水');expect(store.value.run).not.toHaveBeenCalled();
+});
 it.each(['2026-02-30,Client,1.00,USD,ref','2026-10-13,Client,1e3,USD,ref','2026-10-13,Client,1.001,USD,ref','2026-10-13,Client,"1,2",USD,ref'])('rejects malformed bank facts before import: %s',row=>{expect(()=>parseMistReceiptCsv('日期,付款方,金额,币种,附言\n'+row)).toThrow('第 2 行');});
 it('does not mix last year into current-month totals or force EUR into a USD label',()=>{const now=new Date(),previous=new Date(now);previous.setFullYear(now.getFullYear()-1);store.value.state.allocations=[{id:'current',receiptId:'receipt',invoiceId:'invoice',amount:5,currency:'EUR',createdAt:now.toISOString(),actor:'财务'},{id:'old',receiptId:'receipt',invoiceId:'invoice',amount:90,currency:'EUR',createdAt:previous.toISOString(),actor:'财务'}];render();const stat=getByText(host,'本月已核销').parentElement!;expect(stat.textContent).toContain('5.00EUR');expect(stat.textContent).not.toContain('95.00');expect(getByText(host,'待核销到账').parentElement?.textContent).toContain('50.00EUR');});
 it('counts the overdue card in the scope it was opened from',()=>{const yesterday=new Date(Date.now()-86400000);store.value.state.invoices[0].due=yesterday.toISOString().slice(0,10);
@@ -207,3 +259,29 @@ it('keeps company bank accounts with finance staff and transaction facts readabl
 });
 
 it('labels partially visible receipts without showing an invented original total or balance',()=>{store.value.state.receipts=[];store.value.state.partialReceipts=[{id:'r-part',code:'R-PART',date:today(),payer:'客户',currency:'EUR',visibleAllocatedAmount:40,hiddenCount:1}];render();const partial=getByRole(host,'list',{name:'部分可见到账'});expect(partial.textContent).toContain('R-PART');expect(partial.textContent).toContain('本范围已核销');expect(partial.textContent).toContain('40.00');expect(partial.textContent).toContain('另含其他范围业务');expect(partial.textContent).not.toContain('100.00');expect(getByText(host,'到账待核销').parentElement?.textContent).toContain('部分到账余额不可见');expect(getByText(host,'待核销到账').parentElement?.textContent).toContain('部分到账余额不可见');});
+
+it('allows closing an uncertain bank dialog to recover the original request without issuing another command',async()=>{
+  route={view:'payment-vouchers',section:'accounts'};render();await click('新增账户');
+  store.value.pending={kind:'command',command:{type:'finance.account.save',payload:{name:'备用户'}}};render();
+  const dialog=getByRole(document.body,'dialog',{name:'新增银行账户'});
+  expect((getByRole(dialog,'button',{name:'保存账户'}) as HTMLButtonElement).disabled).toBe(true);
+  const close=getAllByRole(dialog,'button',{name:'关闭',exact:true})[0] as HTMLButtonElement;
+  expect(getAllByRole(dialog,'button',{name:'关闭',exact:true}).some(button=>button.textContent==='关闭')).toBe(true);
+  expect(close.disabled).toBe(false);await act(async()=>close.click());
+  expect(queryByRole(document.body,'dialog',{name:'新增银行账户'})).toBeNull();
+  store.value.recover.mockImplementation(async()=>{store.value.pending=null;render();return{result:{id:'account'}};});
+  await click('核对原操作结果');expect(store.value.recover).toHaveBeenCalledTimes(1);expect(store.value.run).not.toHaveBeenCalled();
+});
+it('keeps a bank dialog locked while its original save is actually in flight',async()=>{
+  route={view:'payment-vouchers',section:'accounts'};render();await click('新增账户');
+  input('账户名称','备用户');input('开户行','中国银行');input('银行账号','SIM-ZERO');input('币种','CNY');input('期初余额','0');
+  let resolve!:(value:unknown)=>void;store.value.run.mockReturnValue(new Promise(done=>resolve=done));await click('保存账户');
+  const dialog=getByRole(document.body,'dialog',{name:'新增银行账户'});
+  expect((getByRole(dialog,'button',{name:'取消',exact:true})as HTMLButtonElement).disabled).toBe(true);
+  await act(async()=>resolve({result:{id:'account'}}));
+});
+
+it('does not turn a confirmed receivable with an unresolved due date into overdue debt',()=>{
+ store.value.state.invoices[0].due='';route={view:'payment-vouchers',section:'overdue:fabric'};render();
+ const card=[...host.querySelectorAll<HTMLElement>('.mist-sumbar > div')].find(el=>el.textContent?.includes('逾期应收'));expect(card?.textContent).toContain('0.00');expect(host.querySelector('[aria-label="发票"]')?.textContent||'').not.toContain('INV-EUR');
+});

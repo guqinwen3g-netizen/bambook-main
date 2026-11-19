@@ -2,12 +2,12 @@
 import React,{act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {getByRole,getAllByRole,queryByRole,within} from '@testing-library/dom';
+import {getByRole,getAllByRole,getByLabelText,queryByRole,within} from '@testing-library/dom';
 import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentQcTask} from '../../../../../server/src/shared/mistFulfillment';
 import {Nav} from '../../nav';
-const store=vi.hoisted(()=>({state:null as MistState|null,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
+const store=vi.hoisted(()=>({state:null as MistState|null,workspace:{id:'space',revision:0},loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
 const session=vi.hoisted(()=>({id:'qc-a',denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:session.id,displayName:'QC甲'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
@@ -19,7 +19,58 @@ async function click(node:HTMLElement){await act(async()=>node.click());}
 function choose(select:HTMLSelectElement,value:string){act(()=>{select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));});}
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 function task(id:string,patch:Partial<FulfillmentQcTask>={}):FulfillmentQcTask{return {id,code:id.toUpperCase(),source:{kind:'orderLine',orderId:'o',lineId:'l'},domain:'garment',kind:'sample',factory:'华美制衣',location:'一号车间',contact:'',due:'2026-10-20',requestedBy:'业务员',assignee:'',state:'pending',reportIds:[],createdAt:'2026-10-10T08:00:00Z',...patch};}
-beforeEach(()=>{session.id='qc-a';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'QC甲'},'empty');store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
+it('does not offer a development incoming original as a returned factory QC source',async()=>{
+ store.state!.devs.push({id:'incoming-dev',code:'DEV-IN',values:{domain:'fabric'}}as any);store.state!.versions.push({id:'factory-version',devId:'incoming-dev',label:'R1-A-1',factory:'试样厂',returnedAt:'2026-10-13T08:00:00Z'}as any);
+ const common={name:'棉斜纹',category:'面料',form:'米样',unit:'米',quantity:1,available:1,size:'',color:'',location:'A01',fileIds:[],note:'',createdAt:'2026-10-13T08:00:00Z'};
+ store.state!.fulfillment.samples.push({...common,id:'incoming-original',code:'SMP-INCOMING',source:{kind:'developmentIncoming',devId:'incoming-dev',receiptId:'receipt'}}as any,{...common,id:'returned-factory',code:'SMP-RETURNED',source:{kind:'version',devId:'incoming-dev',versionId:'factory-version'}}as any);
+ render();await click(getAllByRole(host,'button',{name:'从来源发起QC'})[0]);const select=getByRole(host,'combobox',{name:'送检来源'})as HTMLSelectElement;const values=[...select.options].map(option=>option.value);expect(values).toContain('sample:returned-factory');expect(values).not.toContain('sample:incoming-original');expect(store.run).not.toHaveBeenCalled();
+});
+beforeEach(()=>{store.loading=false;store.error='';store.saving=false;store.pending=null;store.workspace={id:'space',revision:0};session.id='qc-a';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'QC甲'},'empty');store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
+
+function fabricDevelopmentTask(){
+ store.state!.devs.push({id:'fabric-dev',code:'DEV-FABRIC',values:{domain:'fabric'},versionIds:['fabric-version']} as any);store.state!.versions.push({id:'fabric-version',devId:'fabric-dev',label:'R1-A-1',returnedAt:'2026-10-13T08:00:00Z',confirmations:[],fileIds:[],qc:null} as any);
+ store.state!.fulfillment.qcTasks.push(task('fabric-dev-qc',{domain:'fabric',source:{kind:'version',devId:'fabric-dev',versionId:'fabric-version'},state:'working',assignee:'QC甲',assigneeId:'qc-a'}));
+}
+async function physicalReportDraft(){
+ fabricDevelopmentTask();const t=store.state!.fulfillment.qcTasks[0];t.sampleId='draft-physical';
+ store.state!.fulfillment.samples.push({id:'draft-physical',code:'SMP-DRAFT',source:t.source,name:'面料样',category:'面料',form:'米样',size:'幅宽150cm',color:'灰',quantity:1,available:1,unit:'米',fileIds:[],qualityRevision:1,location:'样品室',note:''} as any);
+ render(t.id);await click(getByRole(host,'button',{name:'提交 / 追加复验报告'}));
+ choose(getByRole(host,'combobox',{name:'本次结论'}) as HTMLSelectElement,'pass');typeInto(getByRole(host,'textbox',{name:'报告编号'}) as HTMLInputElement,'PHYSICAL-DRAFT');typeInto(getByRole(host,'textbox',{name:'专业意见与影响范围'}) as HTMLTextAreaElement,'按当前灰色实物核对');
+ await click(getByRole(host,'button',{name:'添加面料实测'}));typeInto(getByRole(host,'textbox',{name:'实测项目 1'}) as HTMLInputElement,'幅宽');typeInto(getByRole(host,'textbox',{name:'实测值 1'}) as HTMLInputElement,'150');typeInto(getByRole(host,'textbox',{name:'原单位 1'}) as HTMLInputElement,'cm');
+ await click(getByRole(host,'button',{name:'提交报告'}));return t.id;
+}
+it('retains a report draft and blocks final confirmation after the physical sample changed',async()=>{
+ const id=await physicalReportDraft();store.state=structuredClone(store.state!);store.state.fulfillment.samples[0].color='红';store.state.fulfillment.samples[0].qualityRevision=2;store.workspace.revision=1;render(id);
+ await click(getByRole(getByRole(document.body,'dialog',{name:'确认提交QC报告'}),'button',{name:'确认提交'}));
+ expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('实物或QC任务已更新，请重新打开后核对');
+ expect((getByRole(host,'textbox',{name:'实测值 1'}) as HTMLInputElement).value).toBe('150');
+});
+it('binds a checked report to the current revision after unrelated synchronization',async()=>{
+ const id=await physicalReportDraft();store.state=structuredClone(store.state!);store.state.settings.profileName='新简称';store.workspace.revision=7;render(id);
+ await click(getByRole(getByRole(document.body,'dialog',{name:'确认提交QC报告'}),'button',{name:'确认提交'}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.report',payload:expect.objectContaining({report:'PHYSICAL-DRAFT'})}),{expectedRevision:7});
+});
+it('submits fabric development values with original units instead of garment standards and tolerances',async()=>{
+ fabricDevelopmentTask();render('fabric-dev-qc');await click(getByRole(host,'button',{name:'提交 / 追加复验报告'}));expect(queryByRole(host,'button',{name:'增加测量点'})).toBeNull();await click(getByRole(host,'button',{name:'添加面料实测'}));
+ typeInto(getByRole(host,'textbox',{name:'实测项目 1'}) as HTMLInputElement,'克重');typeInto(getByRole(host,'textbox',{name:'实测值 1'}) as HTMLInputElement,'98');typeInto(getByRole(host,'textbox',{name:'原单位 1'}) as HTMLInputElement,'g/m²');
+ await click(getByRole(host,'button',{name:'添加面料实测'}));typeInto(getByRole(host,'textbox',{name:'实测项目 2'}) as HTMLInputElement,'有效幅宽');typeInto(getByRole(host,'textbox',{name:'实测值 2'}) as HTMLInputElement,'144');typeInto(getByRole(host,'textbox',{name:'原单位 2'}) as HTMLInputElement,'cm');
+ choose(getByRole(host,'combobox',{name:'本次结论'}) as HTMLSelectElement,'reject');typeInto(getByRole(host,'textbox',{name:'报告编号'}) as HTMLInputElement,'FABRIC-01');typeInto(getByRole(host,'textbox',{name:'专业意见与影响范围'}) as HTMLTextAreaElement,'克重与有效幅宽不符合本次要求');await click(getByRole(host,'button',{name:'提交报告'}));await click(getByRole(getByRole(document.body,'dialog',{name:'确认提交QC报告'}),'button',{name:'确认提交'}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.report',payload:expect.objectContaining({id:'fabric-dev-qc',domain:'fabric',measurements:[],fabricMeasurements:[{property:'克重',actual:98,unit:'g/m²'},{property:'有效幅宽',actual:144,unit:'cm'}]})}),{expectedRevision:0});
+});
+it.each(['sample','production'] as const)('records original units for fabric %s QC outside development',async kind=>{
+ store.state!.fulfillment.qcTasks.push(task('fabric-physical',{domain:'fabric',kind,state:'working',assignee:'QC甲',assigneeId:'qc-a',source:{kind:'orderLine',orderId:'o',lineId:'l',productionId:'p'}}));
+ render('fabric-physical');await click(getByRole(host,'button',{name:'提交 / 追加复验报告'}));expect(queryByRole(host,'button',{name:'增加测量点'})).toBeNull();await click(getByRole(host,'button',{name:'添加面料实测'}));
+ typeInto(getByRole(host,'textbox',{name:'实测项目 1'}) as HTMLInputElement,'克重');typeInto(getByRole(host,'textbox',{name:'实测值 1'}) as HTMLInputElement,'418.5');typeInto(getByRole(host,'textbox',{name:'原单位 1'}) as HTMLInputElement,'g/m²');
+ choose(getByRole(host,'combobox',{name:'本次结论'}) as HTMLSelectElement,'pass');typeInto(getByRole(host,'textbox',{name:'报告编号'}) as HTMLInputElement,'PHYSICAL-FABRIC');typeInto(getByRole(host,'textbox',{name:'专业意见与影响范围'}) as HTMLTextAreaElement,'仅本次实际检查范围');await click(getByRole(host,'button',{name:'提交报告'}));await click(getByRole(getByRole(document.body,'dialog',{name:'确认提交QC报告'}),'button',{name:'确认提交'}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.report',payload:expect.objectContaining({id:'fabric-physical',domain:'fabric',measurements:[],fabricMeasurements:[{property:'克重',actual:418.5,unit:'g/m²'}]})}),{expectedRevision:0});
+});
+it('shows saved fabric development facts and units in the workbench report',()=>{
+ fabricDevelopmentTask();const t=store.state!.fulfillment.qcTasks[0];t.state='reported';t.reportIds=['fabric-report'];store.state!.fulfillment.qcReports.push({id:'fabric-report',taskId:t.id,result:'reject',report:'FABRIC-01',opinion:'按本次要求退回',measurements:[],fabricMeasurements:[{property:'克重',actual:98,unit:'g/m²'}],fileIds:[],reviewer:'QC甲',reviewedAt:'2026-10-13T10:00:00Z'} as any);render(t.id);const table=getByRole(host,'table',{name:'FABRIC-01 · 面料实测'});expect(table.textContent).toContain('克重');expect(table.textContent).toContain('98');expect(table.textContent).toContain('g/m²');
+});
+it('keeps an incomplete fabric fact out of submission and allows correction without losing the other fields',async()=>{
+ fabricDevelopmentTask();render('fabric-dev-qc');await click(getByRole(host,'button',{name:'提交 / 追加复验报告'}));choose(getByRole(host,'combobox',{name:'本次结论'}) as HTMLSelectElement,'reject');typeInto(getByRole(host,'textbox',{name:'报告编号'}) as HTMLInputElement,'FABRIC-DRAFT');typeInto(getByRole(host,'textbox',{name:'专业意见与影响范围'}) as HTMLTextAreaElement,'幅宽不符合要求');await click(getByRole(host,'button',{name:'添加面料实测'}));typeInto(getByRole(host,'textbox',{name:'实测项目 1'}) as HTMLInputElement,'有效幅宽');typeInto(getByRole(host,'textbox',{name:'实测值 1'}) as HTMLInputElement,'144');await click(getByRole(host,'button',{name:'提交报告'}));expect(host.textContent).toContain('请完整填写面料实测 1');expect(queryByRole(document.body,'dialog',{name:'确认提交QC报告'})).toBeNull();expect(store.run).not.toHaveBeenCalled();
+ typeInto(getByRole(host,'textbox',{name:'原单位 1'}) as HTMLInputElement,'cm');await click(getByRole(host,'button',{name:'提交报告'}));expect(getByRole(document.body,'dialog',{name:'确认提交QC报告'})).toBeTruthy();expect((getByRole(host,'textbox',{name:'报告编号'}) as HTMLInputElement).value).toBe('FABRIC-DRAFT');expect(store.run).not.toHaveBeenCalled();
+});
 
 it.each([{domain:'fabric',category:'羊毛混纺斜纹'},{domain:'garment',category:'面料拼接夹克'}] as const)('submits the explicit $domain domain from a returned development, independent of category wording',async({domain,category})=>{
   store.state!.devs.push({id:'dev-domain',code:'DEV-DOMAIN',values:{domain,category}} as any);
@@ -184,7 +235,7 @@ it('lets the current QC transfer to a named member and reschedule with reasons',
   dialog=getByRole(document.body,'dialog');
   typeInto(getByRole(dialog,'textbox',{name:/改期原因/}) as HTMLTextAreaElement,'工厂延期');
   await click(getByRole(dialog,'button',{name:'改期'}));
-  expect(store.run).toHaveBeenLastCalledWith(expect.objectContaining({type:'fulfillment.qc.reschedule',payload:expect.objectContaining({id:'mine',reason:'工厂延期'})}));
+  expect(store.run).toHaveBeenLastCalledWith(expect.objectContaining({type:'fulfillment.qc.reschedule',payload:expect.objectContaining({id:'mine',reason:'工厂延期'})}),{expectedRevision:0});
 });
 
 it('tells QC the production size plan is missing and blocks the report instead of failing on submit',async()=>{
@@ -221,7 +272,7 @@ it('validates garment size checks and confirms the consequence before appending 
   expect(dialog.textContent).toContain('不通过将阻断生产，需复验。');expect(dialog.textContent).toContain('提交后报告不可改写');
   expect(store.run).not.toHaveBeenCalled();
   await click(getByRole(dialog,'button',{name:'确认提交'}));
-  expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.report',payload:expect.objectContaining({id:'prod',result:'reject',report:'R-9',location:'上海仓 A-01',sizeChecks:[{size:'M',inspected:3,result:'reject',evidence:'袖长实测'}]})}));
+  expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.report',payload:expect.objectContaining({id:'prod',result:'reject',report:'R-9',location:'上海仓 A-01',sizeChecks:[{size:'M',inspected:3,result:'reject',evidence:'袖长实测'}]})}),{expectedRevision:0});
 });
 
 it('keeps business resume available to business users and absent for QC-only accounts',async()=>{
@@ -232,13 +283,13 @@ it('keeps business resume available to business users and absent for QC-only acc
   expect(host.querySelector('[data-list-detail-page]')).not.toBeNull();
   typeInto(getByRole(dialog,'textbox',{name:'业务处理与恢复依据'}) as HTMLTextAreaElement,'整改已复核');
   await click(getByRole(dialog,'button',{name:'确认继续生产'}));
-  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.continue',payload:{id:'resume',note:'整改已复核'}});
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.continue',payload:{id:'resume',note:'整改已复核'}},{expectedRevision:0});
   session.denied=new Set(['orders:write','products:write']);
   render('resume');
   expect(queryByRole(host,'button',{name:'确认继续生产'})).toBeNull();
   expect(host.textContent).not.toContain('由业务员确认恢复');
   render('resume','list');
-  expect(queryByRole(host,'button',{name:'从来源发起QC'})).toBeNull();expect(host.textContent).toContain('送检由业务员在准确来源发起');
+  expect(queryByRole(host,'button',{name:'从来源发起QC'})).toBeNull();expect(host.textContent).not.toContain('送检由业务员在准确来源发起');
   expect(queryByRole(document.body,'dialog')).toBeNull();
 });
 
@@ -297,6 +348,17 @@ it('lets the order owner choose a rework and requires the customer file for a co
   expect(store.run).not.toHaveBeenCalled();expect(again.textContent).toContain('附文件');
 });
 
+it.each(['pending','approved'] as const)('keeps financial deductions separate from a %s concession in the current report',async status=>{
+ session.id='sales';store.state!.orders.push({id:'o',code:'SO-G',type:'garment',ownerId:'sales'} as any);store.state!.orderLines.push({id:'l',orderId:'o',name:'大衣',style:'CC-014',unit:'件',qty:80} as any);
+ store.state!.productions.push({id:'prod',orderId:'o',lineId:'l',sourcePurchaseId:'po',factory:'江南成衣',qty:80} as any);store.state!.fulfillment.purchases.push({id:'po',code:'PO-9',currency:'CNY'} as any);
+ store.state!.fulfillment.qcReports.push({id:'r1',taskId:'nok',result:'reject',report:'QC-B02',measurements:[],fileIds:[],reviewer:'QC甲',reviewedAt:'2026-11-14T01:00:00Z'} as any);
+ store.state!.fulfillment.qcTasks.push(task('nok',{kind:'production',source:{kind:'orderLine',orderId:'o',lineId:'l',productionId:'prod'},state:status==='approved'?'reported':'blocked',reportIds:['r1'],dispositions:[{id:'concession',kind:'concession',reportId:'r1',status,scope:'L码6件',customerEvidence:'客户文件',note:'范围接受',fileIds:[],requesterId:'sales',requester:'业务员',at:'2026-11-14'},{id:'deduction',kind:'chargeback',reportId:'r1',status:'open',amount:120,currency:'CNY',purchaseId:'po',purchaseCode:'PO-9',note:'费用折让',fileIds:[],requesterId:'sales',requester:'业务员',at:'2026-11-14'}]}));
+ render('nok');expect(queryByRole(host,'button',{name:'选择处置方式'})).toBeNull();await click(getByRole(host,'button',{name:'登记工厂扣款'}));
+ const dialog=getByRole(document.body,'dialog',{name:'不合格处置'});expect(within(dialog).queryByRole('radio',{name:/让步接收/})).toBeNull();expect(within(dialog).queryByRole('radio',{name:/返工/})).toBeNull();
+ typeInto(within(dialog).getByRole('spinbutton',{name:'扣款金额'}) as HTMLInputElement,'12.5');typeInto(within(dialog).getByRole('textbox',{name:'处置说明'}) as HTMLTextAreaElement,'另一笔独立质量费用');await click(within(dialog).getByRole('button',{name:'保存'}));
+ expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.dispose',payload:expect.objectContaining({id:'nok',kind:'chargeback',amount:12.5})});
+});
+
 it('computes the AQL decision in the production report and lets the warehouse release an inspected incoming lot',async()=>{
   store.state!.orders.push({id:'o',code:'SO-G',type:'garment',ownerId:'sales'} as any);store.state!.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',unit:'件',qty:1200} as any);
   store.state!.productions.push({id:'prod',code:'FUL-1',orderId:'o',lineId:'l',order:'SO-G',name:'风衣',factory:'华美制衣',qty:1200,due:'2026-10-30',pct:50,img:'coat',col:'sew'} as any);
@@ -315,6 +377,26 @@ it('computes the AQL decision in the production report and lets the warehouse re
   expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.incoming.close',payload:{id:'iqc',evidence:'IQC-1 合格'}});
 });
 
+it.each([['套',83],['个',16]] as const)('keeps the incoming %s unit in sampling inputs, submission and saved reports',async(unit,quantity)=>{
+ store.state!.orders.push({id:'o',code:'SO-G',type:'garment',ownerId:'sales'} as any);store.state!.orderLines.push({id:'l',orderId:'o',name:'大衣',style:'CC-014',unit:'件',qty:80} as any);
+ const incoming=task('iqc-unit',{kind:'incoming',incoming:{receiptId:'rc',stockId:'st',quantity,unit,name:'配套物料'},state:'working',assignee:'QC甲',assigneeId:'qc-a'});store.state!.fulfillment.qcTasks.push(incoming);
+ render(incoming.id);await click(getByRole(host,'button',{name:'提交 / 追加复验报告'}));
+ expect((getByRole(host,'spinbutton',{name:`批量（${unit}）`}) as HTMLInputElement).value).toBe(String(quantity));
+ expect(queryByRole(host,'spinbutton',{name:'实际抽检件数'})).toBeNull();typeInto(getByRole(host,'spinbutton',{name:`实际抽检数量（${unit}）`}) as HTMLInputElement,String(quantity));
+ choose(getByRole(host,'combobox',{name:'本次结论'}) as HTMLSelectElement,'pass');typeInto(getByRole(host,'textbox',{name:'报告编号'}) as HTMLInputElement,'IQC-UNIT');typeInto(getByRole(host,'textbox',{name:'专业意见与影响范围'}) as HTMLTextAreaElement,'按本批原单位逐项核对');
+ await click(getByRole(host,'button',{name:'提交报告'}));await click(getByRole(getByRole(document.body,'dialog',{name:'确认提交QC报告'}),'button',{name:'确认提交'}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.report',payload:expect.objectContaining({aql:expect.objectContaining({lotSize:quantity,inspected:quantity})})}),{expectedRevision:0});
+ act(()=>root.unmount());root=createRoot(host);incoming.state='reported';incoming.reportIds=['unit-report'];
+ store.state!.fulfillment.qcReports.push({id:'unit-report',taskId:incoming.id,result:'pass',report:'IQC-UNIT',opinion:'按本批原单位逐项核对',measurements:[],fileIds:[],reviewer:'QC甲',reviewedAt:'2026-11-14T01:00:00Z',aql:{lotSize:quantity,inspected:quantity,critical:0,major:0,minor:0,outcome:{sampleSize:13,major:{accept:0,reject:1},minor:{accept:1,reject:2},result:'pass'}}} as any);
+ render(incoming.id);const report=host.querySelector('[data-qc-report="unit-report"]')!;
+ expect(report.textContent).toContain(`批量 ${quantity} ${unit} · 抽检 ${quantity} ${unit}（应抽 13 ${unit}）`);expect(report.textContent).not.toContain(`抽检 ${quantity} 件`);
+});
+
+it.each([0,16])('does not offer another IQC report after the lot was disposed with %s rejected',rejectedQuantity=>{
+ store.state!.fulfillment.qcTasks.push(task('closed-iqc',{kind:'incoming',incoming:{receiptId:'rc',stockId:'st',quantity:16,unit:'个',name:'外箱',releasedAt:'2026-11-14T01:00:00Z',rejectedQuantity},state:rejectedQuantity?'blocked':'reported',assignee:'QC甲',assigneeId:'qc-a'}));
+ render('closed-iqc');expect((getByRole(host,'button',{name:'提交 / 追加复验报告'}) as HTMLButtonElement).disabled).toBe(true);expect(host.textContent).toContain('本批已处置');
+});
+
 it('defaults a production inspection to the supplier site and opens the new task',async()=>{
   const st=store.state! as any;st.market.suppliers.push({id:'sup-site',name:'嘉禾制衣',address:'嘉兴秀洲工业园 18 号'});
   st.fulfillment.purchases.push({id:'po-site',supplierId:'sup-site'});
@@ -323,4 +405,50 @@ it('defaults a production inspection to the supplier site and opens the new task
   render(undefined,'list',{productionId:'prod-site'});await click(getAllByRole(host,'button',{name:'从来源发起QC'})[0]);
   await click(getByRole(host,'button',{name:'下一步'}));
   expect((getByRole(host,'textbox',{name:'实际检查地点'}) as HTMLInputElement).value).toBe('嘉兴秀洲工业园 18 号');
+});
+
+function decisionFixture(continued=false){
+ store.state!.orders.push({id:'o',code:'SO-DECISION',type:'garment',customerId:'c',customer:'Cedar',governance:{contract:{kind:'external'}}} as any);
+ const t=task('decision',{state:'reported',reportIds:['r1'],...(continued?{businessConfirmation:{result:'approved' as const,note:'客户认可R1',actor:'业务',at:'2026-10-13T10:00:00Z'}}:{})});
+ store.state!.fulfillment.qcTasks.push(t);store.state!.fulfillment.qcReports.push({id:'r1',taskId:t.id,report:'R1',result:'pass',measurements:[],fileIds:[],reviewer:'QC甲',reviewedAt:'2026-10-13T10:00:00Z'} as any);return t;
+}
+it.each(['confirm','continue'] as const)('keeps the old %s draft but refuses it when a new QC report arrives',async action=>{
+ const t=decisionFixture(action==='continue');render(t.id);await click(getByRole(host,'button',{name:action==='confirm'?'记录客户确认':'业务确认继续'}));const d=getByRole(document.body,'dialog');
+ if(action==='confirm')choose(getByRole(d,'combobox',{name:'客户决定'}) as HTMLSelectElement,'approved');
+ const label=action==='confirm'?'客户确认依据':'业务处理与恢复依据';typeInto(getByRole(d,'textbox',{name:label}) as HTMLTextAreaElement,'仅针对R1的原始依据');
+ store.state=structuredClone(store.state!);const current=store.state!.fulfillment.qcTasks.find(x=>x.id===t.id)!;current.reportIds.push('r2');delete current.businessConfirmation;store.state!.fulfillment.qcReports.push({id:'r2',taskId:t.id,report:'R2',result:'pass',measurements:[],fileIds:[],reviewer:'QC甲',reviewedAt:'2026-10-13T11:00:00Z'} as any);store.workspace.revision=1;render(t.id);
+ await click(getByRole(d,'button',{name:action==='confirm'?'记录确认':'确认继续'}));expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('QC资料已更新');expect((getByRole(d,'textbox',{name:label}) as HTMLTextAreaElement).value).toBe('仅针对R1的原始依据');
+});
+it.each(['confirm','continue'] as const)('allows %s after an unrelated synchronization and binds the current checked revision',async action=>{
+ const t=decisionFixture(action==='continue');render(t.id);await click(getByRole(host,'button',{name:action==='confirm'?'记录客户确认':'业务确认继续'}));const d=getByRole(document.body,'dialog');
+ if(action==='confirm')choose(getByRole(d,'combobox',{name:'客户决定'}) as HTMLSelectElement,'approved');
+ typeInto(getByRole(d,'textbox',{name:action==='confirm'?'客户确认依据':'业务处理与恢复依据'}) as HTMLTextAreaElement,'核对R1后的有效依据');store.state=structuredClone(store.state!);store.state!.files.push({id:'unrelated',name:'other.txt'} as any);store.workspace.revision=7;render(t.id);
+ await click(getByRole(d,'button',{name:action==='confirm'?'记录确认':'确认继续'}));expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.'+action,payload:expect.objectContaining({id:t.id,note:'核对R1后的有效依据'})}),{expectedRevision:7});
+});
+it.each([false,true])('keeps unread QC data separate from an empty workload while loading %s',loading=>{
+ store.state=null;store.loading=loading;render();expect(host.textContent).toContain(loading?'正在读取QC资料':'QC资料未读取');
+ for(const name of['新建巡检','从来源发起QC'])expect((getByRole(host,'button',{name,exact:true})as HTMLButtonElement).disabled).toBe(true);
+ expect(queryByRole(host,'tablist',{name:'QC 专业板块'})).toBeNull();expect(host.querySelector('.mist-pipeline')).toBeNull();expect(store.run).not.toHaveBeenCalled();
+});
+it('restores the requested QC task after the initial read recovers',()=>{
+ const ready=store.state!;ready.fulfillment.qcTasks.push(task('recover-qc',{code:'QC-RECOVER',state:'reported'}));store.state=null;render('recover-qc');expect(host.textContent).toContain('QC资料未读取');store.state=ready;render('recover-qc');expect(host.textContent).toContain('QC-RECOVER');expect(host.textContent).not.toContain('QC资料未读取');expect(store.run).not.toHaveBeenCalled();
+});
+it('keeps a genuine empty QC workspace actionable after reading succeeds',()=>{
+ render();expect((getByRole(host,'button',{name:'新建巡检',exact:true})as HTMLButtonElement).disabled).toBe(false);for(const button of getAllByRole(host,'button',{name:'从来源发起QC',exact:true}))expect((button as HTMLButtonElement).disabled).toBe(false);expect(getByRole(host,'tablist',{name:'QC 专业板块'})).toBeTruthy();
+});
+it('keeps the patrol editor above the QC detail when the viewport narrows',async()=>{
+ const previous=window.matchMedia,listeners=new Set<()=>void>(),media={matches:false,addEventListener:(_type:string,fn:()=>void)=>listeners.add(fn),removeEventListener:(_type:string,fn:()=>void)=>listeners.delete(fn)};Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:()=>media});
+ try{store.state!.fulfillment.qcTasks.push(task('layer',{code:'QC-LAYER'}));render('layer','list');await click(getByRole(host,'button',{name:'新建巡检',exact:true}));act(()=>{media.matches=true;listeners.forEach(fn=>fn());});expect(getAllByRole(document.body,'dialog')).toHaveLength(1);expect(getByRole(document.body,'dialog',{name:'新建巡检'})).toBeTruthy();expect(store.run).not.toHaveBeenCalled();}finally{Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:previous});}
+});
+async function oldScheduleDraft(){
+ store.workspace={id:'space',revision:7};store.state!.fulfillment.qcTasks.push(task('schedule-race',{state:'working',assignee:'QC甲',assigneeId:'qc-a',due:'2026-12-20'}));render('schedule-race');await click(getByRole(host,'button',{name:'改期',exact:true}));const d=getByRole(document.body,'dialog',{name:'改期 SCHEDULE-RACE',exact:true});typeInto(getByLabelText(d,'新检查日',{exact:true})as HTMLInputElement,'2026-12-18');typeInto(getByRole(d,'textbox',{name:'改期原因',exact:true})as HTMLTextAreaElement,'按现场安排提前检查，原记录保留。');return d;
+}
+it('refuses an older QC reschedule after its planned day changed without losing the draft',async()=>{
+ const d=await oldScheduleDraft();store.state=structuredClone(store.state);store.state!.fulfillment.qcTasks.find(t=>t.id==='schedule-race')!.due='2026-12-19';store.workspace={id:'space',revision:8};render('schedule-race');await click(getByRole(d,'button',{name:'改期',exact:true}));expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('QC任务已更新，请重新打开后核对');expect((getByRole(d,'textbox',{name:'改期原因',exact:true})as HTMLTextAreaElement).value).toContain('原记录保留');
+});
+it('allows a QC reschedule after unrelated synchronization using the checked version',async()=>{
+ const d=await oldScheduleDraft();store.state=structuredClone(store.state);store.workspace={id:'space',revision:8};render('schedule-race');await click(getByRole(d,'button',{name:'改期',exact:true}));expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.reschedule',payload:expect.objectContaining({due:'2026-12-18'})}),{expectedRevision:8});
+});
+it('shows superseded business evidence under its original report without using it as the current approval',async()=>{
+ const at='2026-11-18T04:00:00Z';store.state!.fulfillment.qcTasks.push(task('archived-business',{state:'reported',reportIds:['old-report','new-report'],businessHistory:[{id:'archive',reportId:'old-report',qualityRevision:1,reason:'new_report',archivedBy:'Inspector',archivedById:'qc-a',archivedAt:at,confirmation:{result:'approved',reportId:'old-report',actor:'Original business',actorId:'biz',at,note:'Original customer basis'},continued:{reportId:'old-report',actor:'Original business',actorId:'biz',at,note:'Original continuation basis'}}]}));for(const[id,report]of[['old-report','QC-OLD'],['new-report','QC-NEW']])store.state!.fulfillment.qcReports.push({id,taskId:'archived-business',report,result:'pass',reviewer:'Inspector',reviewedAt:at,opinion:'Checked',measurements:[],fileIds:[],scopeRevision:1});render('archived-business');expect(queryByRole(host,'button',{name:'业务确认继续',exact:true})).toBeNull();await click(getByRole(host,'button',{name:'业务接续历史',exact:true}));const history=host.querySelector('[data-qc-business-history="archive"]')!;expect(history.textContent).toContain('QC-OLD');expect(history.textContent).toContain('Original customer basis');expect(history.textContent).toContain('Original continuation basis');expect(history.textContent).toContain('Original business');expect(history.textContent).toContain('新增报告');expect(store.run).not.toHaveBeenCalled();
 });

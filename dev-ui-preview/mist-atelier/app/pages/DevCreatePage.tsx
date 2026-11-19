@@ -8,6 +8,8 @@ import { FormFooter, BackLink, Banner, Button, Card, Checkbox, ChoiceCards, Dial
 import { isServiceSupplier } from '../../../../server/src/shared/mistSupplierStatus';
 import type { DevelopmentValues, MistFile, MistState } from '../../../../server/src/shared/mistWorkspace';
 import { useMistWorkspace } from '../runtime/workspace';
+import {useEditorStepFocus} from '../runtime/editorFocus';
+import {usePageNavigationGuard} from '../../../../components/mist/pageNavigation';
 import { ImageRoleTag, imageRole } from './modules/PrimaryImage';
 import { withPrimaryImage } from '../../../../server/src/shared/mistPrimaryImage';
 import { useNav } from '../nav';
@@ -22,6 +24,19 @@ import { FailureNotice } from '../runtime/FailureNotice';
 const STEPS = [{id:'basic',label:'基本信息'},{id:'style',label:'款式与面料'},{id:'plan',label:'工厂与计划'},{id:'files',label:'附件'},{id:'review',label:'确认提交'}];
 type DevelopmentFormValues = Omit<DevelopmentValues,'collaborators'|'sampleQuantity'> & {collaborators:string;sampleQuantity:string};
 const emptyForm = (customer='',domain:DevelopmentDomain='garment'):DevelopmentFormValues => ({...(domain==='fabric'?{domain,sampleForm:'米样',sampleUnit:'米',targetCurrency:'',targetUnit:'',fabricRequirements:emptyFabricRequirements()}:{}),initiator:'customer',name:'',customer,style:'',season:'AW27',category:domain==='fabric'?'':'大衣',fabric:'',color:'',target:'',factories:[],due:'',kind:'new',goal:'',sizeBase:domain==='fabric'?'':'M（常规）',collaborators:'',sampleQuantity:'2'});
+function formFromProduct(product:MistState['market']['products'][number], customerId:string):DevelopmentFormValues {
+  const domain=product.category==='fabric'?'fabric':'garment', form=emptyForm(customerId,domain), specs=product.specs||{};
+  const result={...form,sourceProductId:product.id,name:product.name,color:product.color,season:product.season,
+    style:product.customerCodes?.find(c=>c.customerId===customerId)?.code||'',
+    category:domain==='garment'?specs.garmentCategory||'':'',fabric:domain==='garment'?specs.mainFabric||'':''};
+  if(domain==='fabric'){
+    const requirements=emptyFabricRequirements();
+    if(product.composition&&!fabricRequirementError({...requirements,composition:product.composition}))requirements.composition=product.composition;
+    result.fabricRequirements={...requirements,yarn:specs.yarn||requirements.yarn,weave:specs.weave||requirements.weave,finish:specs.finish||'',
+      weightValue:specs.weight||'',weightUnit:specs.weight?'g/m²':'',widthValue:specs.width||'',widthUnit:specs.width?'cm':''};
+  }
+  return result;
+}
 const fromValues = (values:DevelopmentValues):DevelopmentFormValues => ({...values,factories:[...values.factories],collaborators:values.collaborators.join('、'),sampleQuantity:String(values.sampleQuantity)});
 const toValues = (values:DevelopmentFormValues):DevelopmentValues => ({...values,collaborators:values.collaborators.split(/[、,，\n]/).map(value=>value.trim()).filter(Boolean),sampleQuantity:Number(values.sampleQuantity)});
 
@@ -85,16 +100,36 @@ export function InlineDevelopmentFactoryDialog({open,onClose,onCreated,domain='g
 export function DevCreatePage(){
   const {go,route}=useNav();const {state,loading,error,run,uploadFile,downloadFile,pending,recover,saving}=useMistWorkspace();const toast=useToast();
   const [step,setStep]=React.useState('basic'),[done,setDone]=React.useState<Record<string,boolean>>({});
+  const stepRef=useEditorStepFocus(step);
   const [f,setF]=React.useState<DevelopmentFormValues>(()=>emptyForm());const [fileIds,setFileIds]=React.useState<string[]>([]);
-  const [draftId,setDraftId]=React.useState<string|undefined>(route.id),[touched,setTouched]=React.useState(false),[busy,setBusy]=React.useState(false),[message,setMessage]=React.useState(''),[dirty,setDirty]=React.useState(false),[leave,setLeave]=React.useState(false),[factoryDialog,setFactoryDialog]=React.useState(false);
+  const productRoute=route.id?.startsWith('product:')||false;
+  const routeProductId=productRoute?route.id!.slice('product:'.length):undefined;
+  const [draftId,setDraftId]=React.useState<string|undefined>(productRoute?undefined:route.id),[touched,setTouched]=React.useState(false),[busy,setBusy]=React.useState(false),[message,setMessage]=React.useState(''),[dirty,setDirtyState]=React.useState(false),[leave,setLeave]=React.useState(false),[factoryDialog,setFactoryDialog]=React.useState(false);
+  const dirtyNow=React.useRef(false),pendingNavigation=React.useRef<(()=>void)|undefined>(undefined);
+  const setDirty=(value:boolean)=>{dirtyNow.current=value;setDirtyState(value);};
+  const requestLeave=(proceed:()=>void)=>{if(dirtyNow.current){pendingNavigation.current=proceed;setLeave(true);}else proceed();};
+  usePageNavigationGuard(requestLeave,dirty);
+  React.useEffect(()=>{const prevent=(event:BeforeUnloadEvent)=>{if(dirtyNow.current){event.preventDefault();event.returnValue='';}};window.addEventListener('beforeunload',prevent);return()=>window.removeEventListener('beforeunload',prevent);},[]);
   const loaded=React.useRef<string|undefined>(undefined);const busyRef=React.useRef(false);const active=React.useRef(true);React.useEffect(()=>{active.current=true;return()=>{active.current=false;};},[]);
-  React.useEffect(()=>{if(!state)return;const key=(route.id||'new')+':'+(route.customerId||'')+':'+(route.section||'');if(loaded.current===key)return;loaded.current=key;const draft=state.drafts.find(item=>item.id===route.id);
-    if(route.id&&!draft){setMessage('这份草稿已不存在，请从开发列表重新选择。');return;}
+  const sourceId=routeProductId||f.sourceProductId;
+  const sourceProduct=sourceId?state?.market?.products?.find(p=>p.id===sourceId):undefined;
+  const sourceBlocked=!!(productRoute||sourceId)&&(!sourceProduct||sourceProduct.status!=='active'||sourceProduct.category==='trimming');
+  React.useEffect(()=>{
+    if(!state)return;
+    const key=(route.id||'new')+':'+(route.customerId||'')+':'+(route.section||'');
+    if(loaded.current===key)return;
+    const draft=productRoute?undefined:state.drafts.find(item=>item.id===route.id);
+    if(route.id&&!productRoute&&!draft){setMessage('这份草稿已不存在，请从开发列表重新选择。');return;}
+    const product=productRoute?state.market?.products?.find(p=>p.id===routeProductId):undefined;
+    if(productRoute&&(!product||product.status!=='active'||product.category==='trimming')){setMessage('来源产品档案不可用');return;}
+    loaded.current=key;
     const draftCustomer=draft?(state.customers.find(c=>c.id===draft.values.customer)||state.customers.filter(c=>c.name===draft.values.customer).length===1&&state.customers.find(c=>c.name===draft.values.customer)):undefined;
-    const sourceCustomer=route.customerId?state.customers.find(c=>c.id===route.customerId):state.customers[0];
-    setF(draft?{...fromValues(draft.values),customer:draftCustomer?draftCustomer.id:''}:emptyForm(sourceCustomer?.id,route.section==='fabric'?'fabric':'garment'));
-    if(route.customerId&&!sourceCustomer)setMessage('指定客户不存在，请在本公司重新选择客户。');else if(draft&&!draftCustomer&&developmentInitiator(draft.values)==='customer')setMessage('草稿客户无法唯一匹配，请重新选择准确客户。');setFileIds(draft?.fileIds||[]);setDraftId(draft?.id);setStep('basic');setDone({});setDirty(false);
-  },[state,route.id,route.customerId,route.section]);
+    const sourceCustomer=route.customerId?state.customers.find(c=>c.id===route.customerId):product?undefined:state.customers[0];
+    const customerId=sourceCustomer?.id||'';
+    setF(draft?{...fromValues(draft.values),customer:draftCustomer?draftCustomer.id:''}:product?formFromProduct(product,customerId):emptyForm(customerId,route.section==='fabric'?'fabric':'garment'));
+    setMessage(route.customerId&&!sourceCustomer?'指定客户不存在，请在本公司重新选择客户。':draft&&!draftCustomer&&developmentInitiator(draft.values)==='customer'?'草稿客户无法唯一匹配，请重新选择准确客户。':'');
+    setFileIds(draft?.fileIds||[]);setDraftId(draft?.id);setStep('basic');setDone({});setDirty(false);
+  },[state,route.id,route.customerId,route.section,productRoute,routeProductId]);
   const set=<K extends keyof DevelopmentFormValues>(key:K,value:DevelopmentFormValues[K])=>{setF(previous=>({...previous,[key]:value}));setDirty(true);setMessage('');};
   const fabricDomain=developmentDomain(f)==='fabric',domain=developmentDomain(f);
   const requirements={...emptyFabricRequirements(),...f.fabricRequirements};
@@ -105,33 +140,35 @@ export function DevCreatePage(){
   const selectedFiles=fileIds.map(id=>state?.files.find(file=>file.id===id)).filter((file):file is MistFile=>!!file);
   const factories=developmentFactoryOptions(state,f.factories,domain);
   const customerName=state?.customers.find(c=>c.id===f.customer)?.name||f.customer;
-  const backToSource=()=>route.customerId?go('crm',route.customerId,{customerId:route.customerId}):go('development',undefined,{section:domain});
+  const backToSource=()=>sourceProduct?go('products',sourceProduct.id,{detail:'full'}):productRoute?go('products'):route.customerId?go('crm',route.customerId,{customerId:route.customerId}):go('development',undefined,{section:domain});
+  const continueEditing=()=>{pendingNavigation.current=undefined;setLeave(false);};
+  const leaveRequested=()=>{const proceed=pendingNavigation.current;pendingNavigation.current=undefined;setDirty(false);setLeave(false);if(proceed)proceed();else backToSource();};
   const save=async(submit:boolean)=>{
-    if(!state||busyRef.current)return;if(developmentInitiator(f)==='customer'&&!state.customers.some(c=>c.id===f.customer)){setStep('basic');setTouched(true);setMessage('请重新选择准确客户');return;}if(submit&&factories.some(factory=>factory.unavailable&&f.factories.includes(factory.name))){setStep('plan');setMessage('已停用工厂不能用于本次开发，请选择其他工厂');return;}if(!submit&&Object.keys(developmentFormErrors(f,'basic')).length){setStep('basic');setTouched(true);return;}if(submit){const invalid=firstInvalidDevelopmentStep(f);if(invalid){setStep(invalid);setTouched(true);return;}}
-    busyRef.current=true;setBusy(true);setMessage('');try{const receipt=await run({type:submit?'development.submit':'development.saveDraft',payload:{draftId,values:toValues(f),fileIds}});if(!active.current)return;setDirty(false);toast(submit?(fabricDomain?'面料开发案与工厂计划版本已创建':'开发案已创建，工厂任务已保存'):'草稿已保存');if(submit&&receipt.result.devId)go('development/detail',receipt.result.devId,{versionId:receipt.result.versionId,...(route.customerId?{customerId:f.customer}:{})});else go('development',undefined,{section:domain,...(route.customerId?{customerId:f.customer}:{})});}
+    if(!state||busyRef.current)return;if(sourceBlocked){setMessage('来源产品档案不可用');return;}if(developmentInitiator(f)==='customer'&&!state.customers.some(c=>c.id===f.customer)){setStep('basic');setTouched(true);setMessage('请重新选择准确客户');return;}if(submit&&factories.some(factory=>factory.unavailable&&f.factories.includes(factory.name))){setStep('plan');setMessage('已停用工厂不能用于本次开发，请选择其他工厂');return;}if(!submit&&Object.keys(developmentFormErrors(f,'basic')).length){setStep('basic');setTouched(true);return;}if(submit){const invalid=firstInvalidDevelopmentStep(f);if(invalid){setStep(invalid);setTouched(true);return;}}
+    busyRef.current=true;setBusy(true);setMessage('');try{const receipt=await run({type:submit?'development.submit':'development.saveDraft',payload:{draftId,values:toValues(f),fileIds}});if(!active.current)return;setDirty(false);toast(submit?(fabricDomain?'面料开发案与工厂计划版本已创建':'开发案已创建，工厂任务已保存'):'草稿已保存');if(submit&&receipt.result.devId)go('development/detail',receipt.result.devId,{versionId:receipt.result.versionId,...(route.customerId?{customerId:f.customer}:{})});else if(pendingNavigation.current){const proceed=pendingNavigation.current;pendingNavigation.current=undefined;setLeave(false);proceed();}else go('development',undefined,{section:domain,...(route.customerId?{customerId:f.customer}:{})});}
     catch(cause){if(active.current)setMessage(cause instanceof Error?cause.message:'保存失败，请重试');}finally{busyRef.current=false;if(active.current)setBusy(false);}
   };
   const upload=async(files:File[])=>{if(busyRef.current)return;busyRef.current=true;setBusy(true);setMessage('');try{for(const file of files){if(file.size>50*1024*1024)throw Error(`${file.name} 超过 50MB`);const stored=await uploadFile(file);if(!active.current)return;setFileIds(previous=>[...new Set([...previous,stored.id])]);setDirty(true);}}catch(cause){if(active.current)setMessage(cause instanceof Error?cause.message:'附件上传失败');}finally{busyRef.current=false;if(active.current)setBusy(false);}};
   const removeFile=async(id:string)=>{if(busyRef.current||pending)return;const next=fileIds.filter(value=>value!==id);if(!draftId){setFileIds(next);setDirty(true);return;}busyRef.current=true;setBusy(true);setMessage('');try{await run({type:'development.saveDraft',payload:{draftId,values:toValues(f),fileIds:next}});if(active.current){setFileIds(next);setDirty(false);toast('已从草稿移除附件');}}catch(cause){if(active.current)setMessage(cause instanceof Error?cause.message:'附件未能移除');}finally{busyRef.current=false;if(active.current)setBusy(false);}};
   const autofill=()=>{const source=state?.devs.find(dev=>dev.id===f.sourceDevId);if(!source)return;setF(previous=>({...previous,style:source.style,category:source.values.category,fabric:source.fabric,color:source.values.color,target:source.values.target,sizeBase:source.values.sizeBase,...(fabricDomain?{fabricRequirements:source.values.fabricRequirements,targetCurrency:source.values.targetCurrency,targetUnit:source.values.targetUnit}:{}),goal:source.goal,sourceVersionId:source.currentVersionId||undefined}));setDirty(true);toast('已从所选开发案带入本次要求');};
-  const recoverWrite=async()=>{const original=pending;if(!original||busyRef.current)return;busyRef.current=true;setBusy(true);try{const receipt=await recover();if(!receipt||!active.current)return;if(original.kind==='upload'){const id=receipt.result.fileId||receipt.result.id;if(id)setFileIds(previous=>[...new Set([...previous,id])]);setDirty(true);setMessage('');}else if(original.command?.type==='development.submit'&&receipt.result.devId){setDirty(false);go('development/detail',receipt.result.devId,{versionId:receipt.result.versionId,...(route.customerId?{customerId:f.customer}:{})});}else if(original.command?.type==='development.saveDraft'){setDirty(false);if(route.customerId)go('development',undefined,{section:domain,customerId:f.customer});else go('development',undefined,{section:domain});}}catch(cause){if(active.current)setMessage(String(cause));}finally{busyRef.current=false;if(active.current)setBusy(false);}};
+  const recoverWrite=async()=>{const original=pending;if(!original||busyRef.current)return;busyRef.current=true;setBusy(true);try{const receipt=await recover();if(!receipt||!active.current)return;if(original.kind==='upload'){const id=receipt.result.fileId||receipt.result.id;if(id)setFileIds(previous=>[...new Set([...previous,id])]);setDirty(true);setMessage('');}else if(original.command?.type==='development.submit'&&receipt.result.devId){setDirty(false);go('development/detail',receipt.result.devId,{versionId:receipt.result.versionId,...(route.customerId?{customerId:f.customer}:{})});}else if(original.command?.type==='development.saveDraft'){setDirty(false);if(pendingNavigation.current){const proceed=pendingNavigation.current;pendingNavigation.current=undefined;setLeave(false);proceed();}else if(route.customerId)go('development',undefined,{section:domain,customerId:f.customer});else go('development',undefined,{section:domain});}}catch(cause){if(active.current)setMessage(String(cause));}finally{busyRef.current=false;if(active.current)setBusy(false);}};
   const recovery=pending?<Button loading={busy||saving} onClick={()=>void recoverWrite()}>{uiText("核对原操作结果")}</Button>:null;
-  const back=()=>dirty?setLeave(true):backToSource();
+  const back=()=>requestLeave(backToSource);
   return <MistPage>
-    <BackLink onClick={back}>{uiText(route.customerId?'返回客户档案':'开发与寻样')}</BackLink>
-    <PageHeader eyebrow={ui`订单履约 · ${fabricDomain?'面料开发':'成衣开发'}`} title={uiText(draftId?'继续开发草稿':fabricDomain?'新建面料开发案':'新建成衣开发案')} actions={<Button variant="quiet" loading={busy} disabled={!state} onClick={()=>void save(false)}>{uiText("存为草稿")}</Button>} />
-    {(message||error)&&<FailureNotice title={"暂时无法保存"} detail={message||error} />}
+    <BackLink onClick={back} onTopbarBack={back}>{sourceProduct?<>{uiText('来源产品档案')} · {sourceProduct.sku} · {sourceProduct.name}</>:uiText(productRoute?'数字档案':route.customerId?'返回客户档案':'开发与寻样')}</BackLink>
+    <PageHeader eyebrow={ui`订单履约 · ${fabricDomain?'面料开发':'成衣开发'}`} title={uiText(draftId?'继续开发草稿':fabricDomain?'新建面料开发案':'新建成衣开发案')} actions={<Button variant="quiet" loading={busy} disabled={!state||sourceBlocked} onClick={()=>void save(false)}>{uiText("存为草稿")}</Button>} />
+    {(message||error||(state&&sourceBlocked))&&<FailureNotice title={"暂时无法保存"} detail={message||error||'来源产品档案不可用'} />}
     {pending&&!saving&&<div className="mist-section"><Banner tone="warn" title={uiText("原操作结果尚待核对")} actions={recovery}>{uiText("请先核对已发出的请求，避免重复创建。")}</Banner></div>}
-    <div className="mist-wizard">
+    <div ref={stepRef} className="mist-wizard" role="group" aria-label={uiText(steps[idx]?.label||STEPS[0].label)} tabIndex={-1}>
       <VerticalSteps steps={steps.map(item=>({...item,done:done[item.id]}))} current={step} onSelect={id=>{if(busy)return;setStep(id);setTouched(false);}} />
       <Card><fieldset disabled={busy||loading||!state||!!pending} style={{border:0,padding:0,margin:0,minWidth:0}}>
         {step==='basic'&&<>
           <FormSection title={uiText("基本信息")}><FormGrid>
             <Field label={uiText("开发对象名称")} required error={err('name')} full><TextInput icon={Tag} value={f.name} onChange={event=>set('name',event.target.value)} placeholder={uiText(fabricDomain?'例如：羊毛混纺斜纹面料':'例如：双面羊毛城市大衣')} /></Field>
-            <Field label={uiText("发起方")} required full><ChoiceCards ariaLabel={uiText("发起方")} cols={2} value={developmentInitiator(f)} onChange={value=>{setF(previous=>({...previous,initiator:value,charged:value==='customer',...(value==='internal'?{customer:'',requestType:undefined,requestNote:undefined}:{requester:undefined,requesterId:undefined})}));setDirty(true);setMessage('');}} options={[{value:'customer',title:'客户要求',},{value:'internal',title:'内部需求',}]} /></Field>
+            <Field group label={uiText("发起方")} required full><ChoiceCards ariaLabel={uiText("发起方")} cols={2} value={developmentInitiator(f)} onChange={value=>{setF(previous=>({...previous,initiator:value,charged:value==='customer',...(value==='internal'?{customer:'',requestType:undefined,requestNote:undefined}:{requester:undefined,requesterId:undefined})}));setDirty(true);setMessage('');}} options={[{value:'customer',title:'客户要求',},{value:'internal',title:'内部需求',}]} /></Field>
             {developmentInitiator(f)==='customer'?<>
               <Field label={uiText("客户")} required error={err('customer')}><Select icon={Building2} value={f.customer} onChange={event=>set('customer',event.target.value)} options={[{value:'',label:'请选择客户'},...activeCustomers(state,f.customer).map(customer=>({value:customer.id,label:customer.name}))]} /></Field>
-              <Field label={uiText("客户要求类型")} required error={err('requestType')} full><ChoiceCards ariaLabel={uiText("客户要求类型")} value={f.requestType||('' as never)} onChange={value=>set('requestType',value)} options={(Object.keys(DEVELOPMENT_REQUEST_TYPES) as Array<keyof typeof DEVELOPMENT_REQUEST_TYPES>).map(value=>({value,title:DEVELOPMENT_REQUEST_TYPES[value].label}))} /></Field>
+              <Field group label={uiText("客户要求类型")} required error={err('requestType')} full><ChoiceCards ariaLabel={uiText("客户要求类型")} value={f.requestType||('' as never)} onChange={value=>set('requestType',value)} options={(Object.keys(DEVELOPMENT_REQUEST_TYPES) as Array<keyof typeof DEVELOPMENT_REQUEST_TYPES>).map(value=>({value,title:DEVELOPMENT_REQUEST_TYPES[value].label}))} /></Field>
               {f.requestType==='other'&&<Field label={uiText("要求说明")} required error={err('requestNote')} full><TextArea value={f.requestNote||''} onChange={event=>set('requestNote',event.target.value)} placeholder={uiText("写明客户的具体要求")} /></Field>}
             </>:<Field label={uiText("内部需求方")} required error={err('requester')}><TextInput icon={Users} list="mist-dev-requesters" value={f.requester||''} onChange={event=>{const name=event.target.value,employee=(state?.platform?.employees||[]).find(item=>item.active&&item.name===name);setF(previous=>({...previous,requester:name,requesterId:employee?.id}));setDirty(true);setMessage('');}} placeholder={uiText("员工姓名")} /><datalist id="mist-dev-requesters">{(state?.platform?.employees||[]).filter(item=>item.active).map(item=><option key={item.id} value={item.name}>{item.department}</option>)}</datalist></Field>}
             <Field label={uiText("是否收费")}><Checkbox checked={developmentCharged(f)} label={uiText(developmentCharged(f)?'收费开发':'不收费')} onChange={checked=>set('charged',checked)} /></Field>
@@ -140,7 +177,7 @@ export function DevCreatePage(){
             <Field label={uiText(fabricDomain?'面料分类':'品类')}><OptionInput ariaLabel={fabricDomain?'面料分类':'品类'} options={fabricDomain?FABRIC_CATEGORIES:GARMENT_CATEGORIES} value={f.category} onChange={value=>set('category',value)} /></Field>
             <Field label={uiText("参考开发案")} error={err('sourceDevId')} full><Select value={f.sourceDevId||''} onChange={event=>set('sourceDevId',event.target.value||undefined)} options={[{value:'',label:'不引用已有开发案'},...(state?.devs.filter(dev=>developmentDomain(dev.values)===domain).map(dev=>({value:dev.id,label:`${dev.code} · ${dev.name}`}))||[])]} />{f.sourceDevId&&<Button size="sm" onClick={autofill}>{uiText("带入要求")}</Button>}</Field>
           </FormGrid></FormSection>
-          <FormSection title={uiText("开发类型")}><ChoiceCards value={f.kind} onChange={value=>set('kind',value)} options={[{value:'new',title:'全新开发'},{value:'rev',title:'基于已有改版'},{value:'copy',title:'复制其他客户款'}]} /></FormSection>
+          <FormSection title={uiText("开发类型")}><ChoiceCards ariaLabel={uiText("开发类型")} value={f.kind} onChange={value=>set('kind',value)} options={[{value:'new',title:'全新开发'},{value:'rev',title:'基于已有改版'},{value:'copy',title:'复制其他客户款'}]} /></FormSection>
         </>}
         {step==='style'&&!fabricDomain&&<FormSection title={uiText("款式与面料")}><FormGrid>
           <Field label={uiText("面料")} required error={err('fabric')}><TextInput icon={Palette} value={f.fabric} onChange={event=>set('fabric',event.target.value)} placeholder={uiText("成分 / 克重 / 名称")} /></Field>
@@ -193,6 +230,6 @@ export function DevCreatePage(){
       </fieldset></Card>
     </div>
     <InlineDevelopmentFactoryDialog open={factoryDialog} domain={domain} onClose={()=>setFactoryDialog(false)} onCreated={(_name,id)=>{set('factories',[...new Set([...f.factories,id])]);}}/>
-    <Dialog open={leave} onClose={()=>setLeave(false)} title={uiText("离开未保存的开发案？")} footer={<>{recovery}<Button variant="quiet" onClick={()=>setLeave(false)}>{uiText("继续编辑")}</Button><Button variant="quiet" onClick={backToSource}>{uiText("放弃并返回")}</Button><Button variant="primary" loading={busy} onClick={()=>void save(false)}>{uiText("保存草稿")}</Button></>} />
+    <Dialog open={leave} onClose={continueEditing} title={uiText("离开未保存的开发案？")} footer={<>{recovery}<Button variant="quiet" onClick={continueEditing}>{uiText("继续编辑")}</Button><Button variant="quiet" onClick={leaveRequested}>{uiText("放弃并返回")}</Button><Button variant="primary" loading={busy} onClick={()=>void save(false)}>{uiText("保存草稿")}</Button></>} />
   </MistPage>;
 }

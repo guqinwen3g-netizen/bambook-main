@@ -3,7 +3,51 @@ import {applyMistCommand,createMistState,type MistContext,type MistState} from '
 import {createOrderGovernance,applyOrderGovernanceCommand,assertOrderApproved,getOrderGovernanceReviews,type OrderGovernanceFields,type OrderGovernanceInput,type OrderGovernanceCommand} from './mistOrderGovernance';
 import {assertOrderFundingIntegrity,orderFundingCoveredAmount} from './mistOrderFunding';
 function fixture(){let n=0;const c:MistContext={id:()=>`gov-${++n}`,now:'2026-10-13T08:00:00Z',actorName:'业务员',actorId:'sales',authority:{supplier:{},orderReviewerIds:{garment:['leader','sales'],fabric:['fabric-leader']}}};const state=createMistState(c,'empty');state.customers.push({id:'customer',name:'客户',code:'C',country:'CN',city:'',industry:'',owner:'业务员',grade:'',currency:'USD',terms:'',incoterm:'',categories:'',creditLimit:0,since:''});state.files.push({id:'contract-file',name:'confirmed.pdf',mimeType:'application/pdf',size:10,storageKey:'workspace/contract-file',createdAt:c.now});const contract:OrderGovernanceInput={kind:'external',poNumber:'PO-001',confirmationFileIds:['contract-file'],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,preShipmentPercent:30,paymentNote:'30%定金，余款按合同',incoterm:'FOB',deliveryPlace:'上海'};const order={id:'order',code:'SO-1',type:'garment' as const,customerId:'customer',customer:'客户',season:'AW26',lines:1,qty:10,amount:100,currency:'USD',due:'2026-12-01',progress:0,state:'订单草稿',tone:'neutral' as const,owner:'业务员',img:'coat' as const,checklist:[],handoffAt:null,createdAt:c.now,updatedAt:c.now,governance:createOrderGovernance(c,contract)};state.orders.push(order);state.orderLines.push({id:'line',orderId:order.id,fulfillmentMode:'cmt' as const,cmtIncludedItems:[],name:'外套',style:'A',img:'coat',qty:10,unit:'件',price:10,made:0,qc:0});const run=(command:OrderGovernanceCommand,actor=c)=>applyOrderGovernanceCommand(state,command,actor);return{state,c,contract,order,run};}
+describe('submitted main review organization source',()=>{
+ const source=()=>({schemaVersion:1,mode:'organization',companyId:'company-a',businessLine:'garment',requesterId:'sales',departmentSnapshotId:'original-department'});
+ it('freezes only the trusted server source and does not keep a mutable authority reference',()=>{
+  const f=fixture(),origin=source();(f.c.authority as any).orderMainApprovalSources={garment:origin};
+  f.run({type:'order.governance.submit',payload:{orderId:'order',approvalSource:{...origin,departmentSnapshotId:'forged-client-department'}}} as any);
+  expect((f.order.governance.rounds[0] as any).approvalSource).toEqual(source());origin.departmentSnapshotId='later-department';expect((f.order.governance.rounds[0] as any).approvalSource.departmentSnapshotId).toBe('original-department');
+ });
+ it('does not accept a client source when no server source was supplied',()=>{
+  const f=fixture();f.run({type:'order.governance.submit',payload:{orderId:'order',approvalSource:source()}} as any);expect((f.order.governance.rounds[0] as any).approvalSource).toBeUndefined();
+ });
+ it.each([{schemaVersion:0},{companyId:''},{businessLine:'fabric'},{requesterId:'someone-else'},{departmentSnapshotId:''},{mode:{toString:null}},{reviewerIds:['forged-reviewer']}])('rejects a mismatched or incomplete trusted source %j without a partial round',patch=>{
+  const f=fixture(),before=structuredClone(f.state);(f.c.authority as any).orderMainApprovalSources={garment:{...source(),...patch}};expect(()=>f.run({type:'order.governance.submit',payload:{orderId:'order'}})).toThrow('审批归属');expect(f.state).toEqual(before);
+ });
+ it('keeps the old returned source when a new submission uses a different department',()=>{
+  const f=fixture();(f.c.authority as any).orderMainApprovalSources={garment:source()};f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.run({type:'order.governance.decide',payload:{id:'order',decision:'rejected',note:'补充书面确认'}},{...f.c,actorId:'leader'});const old=structuredClone(f.order.governance.rounds[0]);(f.c.authority as any).orderMainApprovalSources={garment:{...source(),departmentSnapshotId:'new-department'}};f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:f.contract}});f.run({type:'order.governance.submit',payload:{orderId:'order'}});expect(f.order.governance.rounds[0]).toEqual(old);expect((f.order.governance.rounds[1] as any).approvalSource.departmentSnapshotId).toBe('new-department');
+ });
+});
 describe('formal order governance',()=>{
+ it.each([undefined,null,0,{},[],'',' '])('rejects an invalid approval identifier %s before interpreting review variants',id=>{
+  const f=fixture(),before=structuredClone(f.state);let error:unknown;
+  try{f.run({type:'order.governance.decide',payload:{id,decision:'rejected',note:'Invalid identifier'}} as any);}catch(caught){error=caught;}
+  expect(error).toMatchObject({code:'VALIDATION',status:422,message:'订单审批标识无效'});expect(f.state).toEqual(before);
+ });
+ it('shows the frozen total for the original contract and a proposed change without taking the live order amount',()=>{
+  const f=fixture();f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'Approved'}},{...f.c,actorId:'leader'});
+  f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:f.contract,lines:[{...f.state.orderLines[0],qty:200,price:86.8}],reason:'客户确认新增数量与单价'}});f.run({type:'order.governance.submit',payload:{orderId:'order'}});
+  f.order.amount=1;
+  const rows=getOrderGovernanceReviews(f.state);
+  expect(rows[0].details).toContainEqual({label:'合同金额',value:'USD 100.00'});
+  expect(rows[1].details).toContainEqual({label:'合同金额',value:'USD 17,360.00'});
+  expect(f.order.governance.approvedSnapshot!.lines[0].price).toBe(10);
+ });
+ it('totals the individually rounded fabric lines instead of multiplying or rounding their combined quantities',()=>{
+  const f=fixture();f.order.type='fabric' as never;Object.assign(f.state.orderLines[0],{qty:.1,price:.05,unit:'米'});f.state.orderLines.push({...f.state.orderLines[0],id:'line-2'});
+  f.run({type:'order.governance.submit',payload:{orderId:'order'}});
+  expect(getOrderGovernanceReviews(f.state)[0].details).toContainEqual({label:'合同金额',value:'USD 0.02'});
+ });
+ it('does not call an unpriced internal order a zero budget',()=>{
+  const f=fixture();f.order.governance=createOrderGovernance(f.c,{...f.contract,kind:'internal',internalPurpose:'展厅试穿',receiver:'样品团队'});f.state.orderLines[0].price=0;f.run({type:'order.governance.submit',payload:{orderId:'order'}});
+  expect(getOrderGovernanceReviews(f.state)[0].details).toContainEqual({label:'内部预算',value:'未定价'});
+ });
+ it('keeps a damaged historical amount explicit without making the whole review queue unreadable',()=>{
+  const f=fixture();f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.order.governance.rounds[0].snapshot.lines[0].price=NaN;
+  expect(getOrderGovernanceReviews(f.state)[0].details).toContainEqual({label:'合同金额',value:'金额待核对'});
+ });
  it.each(['invoice','funding'] as const)('does not turn an external order with %s into an internal budget',fact=>{
   const f=fixture();f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'Approved'}},{...f.c,actorId:'leader'});
   if(fact==='invoice')f.state.invoices.push({id:'issued',orderId:'order',amount:100,currency:'USD'} as never);
@@ -39,7 +83,7 @@ describe('formal order governance',()=>{
  it('blocks downstream fulfillment until the order main approval is complete',()=>{const f=fixture();expect(()=>assertOrderApproved(f.state,'order')).toThrow(/尚未批准/);f.run({type:'order.governance.submit',payload:{orderId:'order'}});expect(()=>assertOrderApproved(f.state,'order')).toThrow(/尚未批准/);f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'核对PO通过'}},{...f.c,actorId:'leader'});expect(assertOrderApproved(f.state,'order').id).toBe('order');});
  it('requires external written evidence and the current domain approval list',()=>{const f=fixture();f.order.governance.contract.confirmationFileIds=[];expect(()=>f.run({type:'order.governance.submit',payload:{orderId:'order'}})).toThrow(/书面/);f.order.governance.contract=f.contract;expect(()=>f.run({type:'order.governance.submit',payload:{orderId:'order'}},{...f.c,authority:{supplier:{}}})).toThrow(/审批负责人/);});
  it('allows an explicitly authorized requester to review their own order and resolves only once',()=>{const f=fixture();f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'本人授权范围内核对'}});expect(f.order.governance.approvedBy).toBe('sales');expect(()=>f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'重复'}},{...f.c,actorId:'leader'})).toThrow(/没有待决定/);});
- it('locks pending content and preserves a rejected round when edited and resubmitted',()=>{const f=fixture();f.run({type:'order.governance.submit',payload:{orderId:'order'}});expect(()=>f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:f.contract}})).toThrow(/锁定/);f.run({type:'order.governance.decide',payload:{id:'order',decision:'rejected',note:'修改交期'}},{...f.c,actorId:'leader'});f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:f.contract,orderPatch:{due:'2026-12-03'}}});f.run({type:'order.governance.submit',payload:{orderId:'order'}});const reviews=getOrderGovernanceReviews(f.state);expect(reviews.map(r=>r.status)).toEqual(['rejected','pending']);expect(f.order.governance.rounds[0].snapshot.due).toBe('2026-12-01');});
+ it('locks pending content and preserves a rejected round when edited and resubmitted',()=>{const f=fixture();f.run({type:'order.governance.submit',payload:{orderId:'order'}});expect(()=>f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:f.contract}})).toThrow(/锁定/);f.run({type:'order.governance.decide',payload:{id:'order',decision:'rejected',note:'修改交期'}},{...f.c,actorId:'leader'});f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:f.contract,orderPatch:{due:'2026-12-03'}}});f.run({type:'order.governance.submit',payload:{orderId:'order'}});const reviews=getOrderGovernanceReviews(f.state);expect(reviews.map(r=>r.status)).toEqual(['rejected','pending']);expect(reviews.map(r=>r.roundNumber)).toEqual([1,2]);expect(f.order.governance.rounds[0].snapshot.due).toBe('2026-12-01');});
  it('keeps approved content active while a change is drafted, and applies it only after approval',()=>{const f=fixture();f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'通过'}},{...f.c,actorId:'leader'});f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:f.contract,orderPatch:{due:'2026-12-10'},reason:'客户书面调整交期'}});expect(f.order.due).toBe('2026-12-01');f.run({type:'order.governance.submit',payload:{orderId:'order'}});expect(assertOrderApproved(f.state,'order').due).toBe('2026-12-01');f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'变更批准'}},{...f.c,actorId:'leader'});expect(f.order.due).toBe('2026-12-10');expect(f.order.governance.effectiveVersion).toBe(2);});
  it('does not accept a forged reviewer or material mutation after submission',()=>{const f=fixture();f.run({type:'order.governance.submit',payload:{orderId:'order'}});expect(()=>f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'越权'}},{...f.c,actorId:'stranger'})).toThrow(/名单/);f.state.orderLines[0].price=11;expect(()=>f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'已核对'}},{...f.c,actorId:'leader'})).toThrow(/快照不一致/);});
 });

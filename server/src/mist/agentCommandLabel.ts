@@ -16,7 +16,7 @@ export function proposalFallbackSummary(command: { type: string; payload?: Recor
 
 
 /** 会生成正式文件的命令（与仓储的不支持预演清单一致；印章另由执行门禁拒绝 Agent）。 */
-export const FILE_PRODUCING_COMMANDS: ReadonlySet<string> = new Set(['order.document.generate', 'fulfillment.documents.generate', 'market.quotation.document', 'fulfillment.procurement.document', 'finance.statement.generate', 'development.notice.generate', 'market.lookbook.document', 'platform.credit.issue']);
+export const FILE_PRODUCING_COMMANDS: ReadonlySet<string> = new Set(['order.document.generate', 'fulfillment.documents.generate', 'market.quotation.document', 'fulfillment.procurement.document', 'finance.statement.generate', 'development.notice.generate', 'development.trimTask.notice', 'market.lookbook.document', 'platform.credit.issue']);
 const SHIPPING_DOC: Record<string, string> = { CI: '商业发票', PL: '装箱单', SO: '订舱委托', SI: '出运指示', DN: '送货单', SA: '装运通知', BC: '受益人证明', DFT: '汇票', CD: '报关单', CDA: '报关委托书' };
 function documentName(command: { type: string; payload?: Record<string, unknown> }): string | undefined {
   const p = command.payload ?? {};
@@ -27,6 +27,7 @@ function documentName(command: { type: string; payload?: Record<string, unknown>
     case 'fulfillment.procurement.document': return '采购合同';
     case 'finance.statement.generate': return '客户对账单';
     case 'development.notice.generate': return '开发通知';
+    case 'development.trimTask.notice': return '辅料开发通知';
     case 'market.lookbook.document': return '画册';
     case 'platform.credit.issue': return '贷项通知';
   }

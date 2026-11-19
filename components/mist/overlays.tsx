@@ -63,6 +63,12 @@ export function useModalFocus(open: boolean, onClose: () => void, ref: React.Ref
       document.removeEventListener('focusin', onFocus);
       const i = modalStack.indexOf(node); if (i >= 0) modalStack.splice(i, 1);
       if (prev?.isConnected) prev.focus();
+      // React's close commit may subsequently restore its old BODY selection.
+      // Retry only while focus is unclaimed; never override a new page or modal.
+      queueMicrotask(() => {
+        const top = modalStack.at(-1);
+        if (document.activeElement === document.body && prev?.isConnected && (!top || top.contains(prev))) prev.focus();
+      });
     };
   }, [open, ref, target]);
 }

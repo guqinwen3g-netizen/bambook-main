@@ -11,6 +11,7 @@ import { agentGet, agentQuery, agentRelated } from './agentRead';
 import { handleMcpMessage } from './agentMcp';
 import { runMistAssistant } from './assistant';
 import { MemoryMistDatabase, testAuthority } from './__tests__/support';
+import { teamWeeklyReport } from '../shared/mistTeam';
 
 // 规格 §2 / P3：岗位 × 越权读写矩阵。示例数据：customer-0、customer-2 跟进人 demo-sales，customer-1 跟进人 demo-buyer。
 const COMPANY = '11111111-1111-4111-8111-111111111111';
@@ -25,6 +26,97 @@ const PEOPLE: Record<string, { role: SystemRoleId | 'owner' }> = {
 let root: string, db: MemoryMistDatabase, repo: MistRepository, workspaceId: string, auth: ReturnType<typeof testAuthority>;
 const actor = (userId: string): any => { const role = PEOPLE[userId].role; return role === 'owner' ? { userId, displayName: userId, roles: ['owner'], departmentIds: [], companyId: COMPANY } : { userId, displayName: userId, roles: [], roleIds: [`${role}@${COMPANY}`], departmentIds: [], companyId: COMPANY, authorizationLoaded: true }; };
 const orders = async (userId: string) => (await repo.get(actor(userId), workspaceId)).state.orders.map(o => o.id).sort();
+
+describe('development invoices follow the exact development scope', () => {
+  const seedBilling = () => {
+    const state = db.workspaces.get(workspaceId)!.state;
+    const original = structuredClone(state.devs[0]);
+    const version = structuredClone(state.versions.find((v: any) => v.devId === original.id));
+    const dev = { ...original, id: 'billing-dev', ownerId: 'loner', owner: 'loner', customerId: 'customer-1', customer: state.customers.find((c: any) => c.id === 'customer-1').name,
+      values: { ...original.values, initiator: 'customer', charged: true }, versionIds: ['billing-version'], currentVersionId: 'billing-version', billing: { makingFees: [] }, closure: { kind: 'archived', reason: '业务已结束', at: '2026-10-13T00:00:00Z', by: 'loner' } };
+    state.devs.push(dev);
+    state.versions.push({ ...version, id: 'billing-version', devId: dev.id });
+    state.files.push({ id: 'billing-original', name: 'invoice.pdf', mimeType: 'application/pdf', size: 5, storageKey: 'fixture', createdAt: '2026-10-13T00:00:00Z', uploadedBy: 'loner' });
+    return dev;
+  };
+  it('lets the scoped business owner issue, read and correct an archived development invoice', async () => {
+    const dev = seedBilling();
+    const run = async (user: string, command: any) => repo.execute(actor(user), workspaceId, { requestId: randomUUID(), expectedRevision: db.workspaces.get(workspaceId)!.revision, command });
+    const charge = await run('loner', { type: 'development.charge.add', payload: { devId: dev.id, versionIds: ['billing-version'], description: '开发服务', amount: 180, currency: 'USD', evidence: '客户书面约定' } });
+    const issued = await run('loner', { type: 'development.billing.issue', payload: { devId: dev.id, chargeIds: [charge.receipt.result.id], number: 'DI-SCOPE-1', due: '2026-10-20', fileIds: ['billing-original'] } });
+    const id = issued.receipt.result.id;
+    expect(issued.workspace.state.invoices.find(i => i.id === id)).toMatchObject({ devId: dev.id, financeStatus: 'pending', amount: 180, open: 0 });
+    expect((await repo.get(actor('loner'), workspaceId)).state.invoices.some(i => i.id === id)).toBe(true);
+    await run('finance', { type: 'finance.receivable.reject', payload: { invoiceId: id, reason: '更正原件' } });
+    const corrected = await run('loner', { type: 'development.billing.issue', payload: { devId: dev.id, chargeIds: [charge.receipt.result.id], number: 'DI-SCOPE-2', due: '2026-10-20', fileIds: ['billing-original'] } });
+    expect(corrected.workspace.state.invoices.find(i => i.id === id)).toMatchObject({ financeStatus: 'rejected', open: 0 });
+    expect(corrected.workspace.state.invoices.find(i => i.id === corrected.receipt.result.id)).toMatchObject({ financeStatus: 'pending', amount: 180 });
+  });
+  it('keeps another development invoice hidden even for the same customer and denies issuance on it atomically', async () => {
+    const dev = seedBilling(), state = db.workspaces.get(workspaceId)!.state;
+    state.devs.push({ ...structuredClone(dev), id: 'hidden-billing-dev', ownerId: 'demo-buyer', versionIds: [], currentVersionId: null });
+    state.invoices.push({ id: 'hidden-dev-invoice', code: 'DI-PRIVATE', devId: 'hidden-billing-dev', customerId: dev.customerId, customer: dev.customer, orderId: '', order: '', amount: 91, open: 91, currency: 'USD', due: '2026-10-20', financeStatus: 'confirmed' });
+    expect((await repo.get(actor('loner'), workspaceId)).state.invoices.some(i => i.id === 'hidden-dev-invoice')).toBe(false);
+    const before = structuredClone(db.workspaces.get(workspaceId)!.state), count = db.receipts.size;
+    await expect(repo.execute(actor('loner'), workspaceId, { requestId: randomUUID(), expectedRevision: 0, command: { type: 'development.billing.issue', payload: { devId: 'hidden-billing-dev', chargeIds: [], number: 'NO', due: '2026-10-20', fileIds: [] } } })).rejects.toMatchObject({ status: 404 });
+    expect(db.workspaces.get(workspaceId)!.state).toEqual(before);
+    expect(db.receipts.size).toBe(count);
+  });
+});
+it('lets the customer owner collect their standalone opening balance without extending finance authority or ordinary invoice scope', async () => {
+  const stored = db.workspaces.get(workspaceId)!;
+  const run = (user: string, command: any) => repo.execute(actor(user), workspaceId, {
+    requestId: randomUUID(), expectedRevision: stored.revision, command,
+  });
+  const state = stored.state;
+  const rows = ['customer-0', 'customer-1', 'customer-2'].map((customerId, i) => ({
+    customer:state.customers.find((c:any)=>c.id===customerId).code,reference:'OPEN-'+i,issuedAt:'2026-08-01',due:'2026-09-01',currency:'USD',amount:'25',
+  }));
+  await run('finance', {type:'opening.receivable.import',payload:{rows}});
+  const imported = db.workspaces.get(workspaceId)!.state.invoices;
+  const mine = imported.find((i:any)=>i.code==='OPEN-0'), other=imported.find((i:any)=>i.code==='OPEN-1');
+  const visible = (await repo.get(actor('demo-sales'),workspaceId)).state.invoices;
+  expect(visible.find(i=>i.id===mine.id)).toMatchObject({customerId:'customer-0',orderId:'',open:25});
+  expect(visible.some(i=>i.id===other.id)).toBe(false);
+  expect((await repo.get(actor('loner'),workspaceId)).state.invoices.some(i=>i.id===mine.id)).toBe(false);
+  const sharedOnly=(await repo.get(actor('teammate'),workspaceId)).state;
+  expect(sharedOnly.orders.some(o=>o.customerId==='customer-2')).toBe(true);
+  expect(sharedOnly.invoices.some(i=>i.code==='OPEN-2')).toBe(false);
+  const before = db.workspaces.get(workspaceId)!.revision;
+  const ownInvoiceOwner=actor('demo-sales');
+  await expect(repo.execute(ownInvoiceOwner,workspaceId,{requestId:randomUUID(),expectedRevision:db.workspaces.get(workspaceId)!.revision,command:{type:'opening.receivable.void',payload:{invoiceId:mine.id,reason:'财务作废'}}})).rejects.toMatchObject({status:403});
+  expect(db.workspaces.get(workspaceId)!.revision).toBe(before);
+  const follow=await repo.execute(ownInvoiceOwner,workspaceId,{requestId:randomUUID(),expectedRevision:db.workspaces.get(workspaceId)!.revision,command:{type:'crm.followUp.save',payload:{customerId:'customer-0',method:'call',at:'2026-10-13T00:00:00Z',content:'核对期初未收',link:{kind:'invoice',id:mine.id},collection:{level:2}}}});
+  expect(follow.workspace.state.crm.followUps.find(f=>f.id===follow.receipt.result.id)?.link).toEqual({kind:'invoice',id:mine.id});
+});
+it('keeps sample fee issuance in the business scope and posting in finance', async () => {
+  const state = db.workspaces.get(workspaceId)!.state;
+  const request = { id: 'paid-sample', code: 'SR-1', state: 'sent', requesterId: 'demo-sales', customerId: 'customer-0', customer: 'Customer', fee: { amount: 12, currency: 'USD' }, shipments: [] };
+  state.sampleRequests = [request, { ...structuredClone(request), id: 'outside', customerId: 'customer-1', requesterId: 'demo-buyer' }];
+  state.files.push({ id: 'sample-original', name: 'sample.txt', mimeType: 'text/plain', size: 5, storageKey: 'fixture', createdAt: '2026-10-13T00:00:00Z', uploadedBy: 'demo-sales' });
+  const run = (user: string, command: any) => repo.execute(actor(user), workspaceId, { requestId: randomUUID(), expectedRevision: db.workspaces.get(workspaceId)!.revision, command });
+  const issue = (id: string) => ({ type: 'sample.request.invoice', payload: { id, number: 'SF-1', due: '2026-11-04', fileIds: ['sample-original'] } });
+  const before = db.workspaces.get(workspaceId)!.revision;
+  await expect(run('demo-sales', issue('outside'))).rejects.toMatchObject({ status: 404 });
+  await expect(run('finance', issue(request.id))).rejects.toMatchObject({ status: 403 });
+  expect(db.workspaces.get(workspaceId)!.revision).toBe(before);
+  const issued = await run('demo-sales', issue(request.id));
+  const invoiceId = issued.receipt.result.invoiceId;
+  expect(issued.workspace.state.invoices.find(i => i.id === invoiceId)).toMatchObject({ sampleRequestId: request.id, amount: 12, issuedById: 'demo-sales', open: 0, financeStatus: 'pending' });
+  const confirm = { type: 'finance.receivable.confirm', payload: { invoiceId } };
+  await expect(run('demo-sales', confirm)).rejects.toMatchObject({ status: 403 });
+  expect(db.workspaces.get(workspaceId)!.revision).toBe(before + 1);
+  const posted = await run('finance', confirm);
+  expect(posted.workspace.state.invoices.find(i => i.id === invoiceId)).toMatchObject({ open: 12, financeStatus: 'confirmed' });
+  const collection = {
+    type: 'crm.followUp.save',
+    payload: {customerId:'customer-0',method:'call',at:'2026-10-13T00:00:00Z',content:'核对样品费',link:{kind:'invoice',id:invoiceId},collection:{level:1}},
+  };
+  const logged = await run('demo-sales', collection);
+  const followId = logged.receipt.result.id;
+  expect(logged.workspace.state.crm.followUps.find(f=>f.id===followId)?.link).toEqual(collection.payload.link);
+  expect((await repo.get(actor('demo-buyer'),workspaceId)).state.crm.followUps.some(f=>f.id===followId)).toBe(false);
+});
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), 'mist-scope-matrix-'));
   db = new MemoryMistDatabase(); auth = testAuthority();
@@ -43,6 +135,43 @@ beforeEach(async () => {
   repo = new MistRepository(db, contract, new MistPrivateFiles(root), auth.authorize, () => new Date('2026-10-13T04:00:00Z'));
 });
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
+
+describe('manual samples retain trusted registering/handling account scope',()=>{
+ const input=()=>({name:'棉斜纹米样',category:'面料',form:'米样',unit:'米',quantity:3,location:'A01',size:'150cm',color:'军绿',source:{kind:'manual' as const,description:'目录留样，不关联商业订单'},fileIds:[],note:''});
+ const executeManual=(who:string,command:any)=>repo.execute(actor(who),workspaceId,{requestId:randomUUID(),expectedRevision:db.workspaces.get(workspaceId)!.revision,command});
+ it('allows a restricted registrar, exact borrower and department supervisor without sharing a sibling or other business sources',async()=>{
+  db.userDepartments.set('demo-sales','sales-dept');
+  const original=structuredClone(db.workspaces.get(workspaceId).state),created=await executeManual('demo-sales',{type:'fulfillment.samples.create',payload:input()}),id=created.receipt.result.id!;
+  const sample=created.workspace.state.fulfillment.samples.find(s=>s.id===id)!;expect(sample).toMatchObject({registeredById:'demo-sales',source:{kind:'manual'},quantity:3,available:3});
+  await executeManual('demo-sales',{type:'fulfillment.samples.create',payload:{...input(),name:'另一份留样'}});
+  expect((await repo.get(actor('demo-buyer'),workspaceId)).state.fulfillment.samples.some(s=>s.id===id)).toBe(false);
+  const loan=await executeManual('demo-sales',{type:'fulfillment.samples.move',payload:{id,kind:'lend',quantity:2,borrowerId:'demo-buyer',person:'',location:'',note:'核对组织'}});
+  const beforeOrders=await orders('demo-buyer'),buyer=await repo.get(actor('demo-buyer'),workspaceId);
+  expect(buyer.state.fulfillment.samples.filter(s=>s.source.kind==='manual').map(s=>s.id)).toEqual([id]);
+  for(let i=0;i<2;i++)await executeManual('demo-buyer',{type:'fulfillment.samples.move',payload:{id,kind:'return',loanId:loan.receipt.result.id!,quantity:1,person:'demo-buyer',location:'B02',note:'分次归还'}});
+  const returned=await repo.get(actor('demo-buyer'),workspaceId);expect(returned.state.fulfillment.samples.find(s=>s.id===id)).toMatchObject({registeredById:'demo-sales',quantity:3,available:3});
+  expect(returned.state.fulfillment.sampleMovements.filter(m=>m.sampleId===id&&m.kind==='return')).toHaveLength(2);expect(await orders('demo-buyer')).toEqual(beforeOrders);
+  expect((await repo.get(actor('head'),workspaceId)).state.fulfillment.samples.some(s=>s.id===id)).toBe(true);
+  expect((await repo.get({...actor('loner'),displayName:'demo-sales'},workspaceId)).state.fulfillment.samples.some(s=>s.id===id)).toBe(false);
+  expect(db.workspaces.get(workspaceId).state.fulfillment.stock).toEqual(original.fulfillment.stock);
+  expect(db.workspaces.get(workspaceId).state.fulfillment.samples.filter((s:any)=>original.fulfillment.samples.some((x:any)=>x.id===s.id))).toEqual(original.fulfillment.samples);
+  for(const old of original.fulfillment.sampleMovements)expect(db.workspaces.get(workspaceId).state.fulfillment.sampleMovements.find((m:any)=>m.id===old.id)).toEqual(old);
+ });
+ it('rejects forged registrar IDs on create/edit without persisting a sample, changed owner or receipt',async()=>{
+  const before=structuredClone(db.workspaces.get(workspaceId)),receipts=db.receipts.size;
+  await expect(executeManual('demo-sales',{type:'fulfillment.samples.create',payload:{...input(),registeredById:'loner'}})).rejects.toMatchObject({status:422,message:expect.stringContaining('登记人')});
+  expect(db.workspaces.get(workspaceId)).toEqual(before);expect(db.receipts.size).toBe(receipts);
+  const created=await executeManual('demo-sales',{type:'fulfillment.samples.create',payload:input()}),id=created.receipt.result.id!,saved=structuredClone(db.workspaces.get(workspaceId)),count=db.receipts.size;
+  await expect(executeManual('demo-sales',{type:'fulfillment.samples.edit',payload:{id,location:'A01',fileIds:[],note:'',registeredById:'loner'}})).rejects.toMatchObject({status:422,message:expect.stringContaining('登记人')});
+  expect(db.workspaces.get(workspaceId)).toEqual(saved);expect(db.receipts.size).toBe(count);
+ });
+ it('does not bypass company binding or products write permission with a manual sample ID',async()=>{
+  const created=await executeManual('demo-sales',{type:'fulfillment.samples.create',payload:input()}),id=created.receipt.result.id!,before=structuredClone(db.workspaces.get(workspaceId)),receipts=db.receipts.size;
+  await expect(repo.get({...actor('demo-sales'),companyId:'22222222-2222-4222-8222-222222222222'},workspaceId)).rejects.toMatchObject({status:404});
+  await expect(executeManual('qc',{type:'fulfillment.samples.move',payload:{id,kind:'move',quantity:0,person:'',location:'B02',note:'不得越权'}})).rejects.toMatchObject({status:403});
+  expect(db.workspaces.get(workspaceId)).toEqual(before);expect(db.receipts.size).toBe(receipts);
+ });
+});
 
 describe('row-level data scope by role', () => {
   it.each(['email.link', 'email.bulk', 'email.draft.save'])('%s rejects a business reference outside the current group', async type => {
@@ -304,7 +433,7 @@ describe('row-level data scope by role', () => {
   it.each(['market.customer.update','customer.update'])('does not let a salesperson acquire another customer’s scope through %s',async(type)=>{
     const state=db.workspaces.get(workspaceId)!.state, customer=state.customers.find((row:any)=>row.ownerId==='demo-buyer');
     expect(customer).toBeTruthy();const before=structuredClone(db.workspaces.get(workspaceId));
-    await expect(repo.execute(actor('demo-sales'),workspaceId,{requestId:'take-customer',expectedRevision:0,command:{type,payload:{id:customer.id,patch:{ownerId:'demo-sales'}}}} as any)).rejects.toMatchObject({status:403});
+    await expect(repo.execute(actor('demo-sales'),workspaceId,{requestId:'take-customer',expectedRevision:0,command:{type,payload:{id:customer.id,patch:{ownerId:'demo-sales'}}}} as any)).rejects.toMatchObject({status:404});
     expect(db.workspaces.get(workspaceId)).toEqual(before);
   });
   it('keeps customer archives readable company-wide but limits maintenance to the responsible scope',async()=>{
@@ -427,4 +556,75 @@ describe('read-only exits use the current repository projection', () => {
       expect(read).not.toHaveBeenCalled();
     } finally { read.mockRestore(); }
   });
+});
+
+
+describe('weekly archives keep the caller business projection', () => {
+  const weekStart = '2026-10-05';
+  beforeEach(() => { const raw=db.workspaces.get(workspaceId)!.state; raw.orders.find((order:any)=>order.ownerId==='demo-buyer')!.createdAt='2026-10-07T01:00:00Z'; });
+  it('generates from the same allowed state as the live report, ignoring client report data', async () => {
+    const visible = await repo.get(actor('head'), workspaceId);
+    const expected = teamWeeklyReport(visible.state, visible.state.members as any, { id: 'head', owner: false }, weekStart, '2026-10-13');
+    await repo.execute(actor('head'), workspaceId, { requestId: randomUUID(), expectedRevision: 0,
+      command: { type: 'team.weekly.archive', payload: { weekStart, report: { totals: { newOrders: 999999 } } } } as any });
+    const raw = db.workspaces.get(workspaceId)!.state as any;
+    expect(raw.teamReports[0].report.totals).toEqual(expected.totals);
+    expect(raw.orders.map((o: any) => o.id).sort()).toEqual([...ALL_ORDERS].sort());
+    expect(raw.teamReports[0].readProof).toMatchObject({ version: 1, workspaceId, companyId: COMPANY, generatedById: 'head', weekStart });
+  });
+  it('does not expose another supervisor full-company aggregate outside the current allowed records', async () => {
+    await repo.execute(actor('boss'), workspaceId, { requestId: randomUUID(), expectedRevision: 0, command: { type: 'team.weekly.archive', payload: { weekStart } } });
+    const limited = await repo.get(actor('head'), workspaceId);
+    expect((limited.state as any).teamReports?.some((r: any) => r.generatedById === 'boss' && r.report)).toBe(false);
+  });
+  it('keeps a frozen own report readable as data grows, hides its body on scope loss, and restores it when access returns', async () => {
+    await repo.execute(actor('head'), workspaceId, { requestId: randomUUID(), expectedRevision: 0, command: { type: 'team.weekly.archive', payload: { weekStart } } });
+    const raw = db.workspaces.get(workspaceId)!.state as any, original = structuredClone(raw.teamReports[0]);
+    const before = await repo.get(actor('head'), workspaceId); expect((before.state as any).teamReports[0].report).toEqual(original.report);
+    const extra = structuredClone(raw.orders.find((o: any) => o.ownerId === 'demo-buyer')); extra.id = 'new-visible-order'; raw.orders.push(extra);
+    const grown = await repo.get(actor('head'), workspaceId); expect((grown.state as any).teamReports[0].report).toEqual(original.report);
+    db.departments.find(d => d.id === 'sales-dept')!.headId = null;
+    const lost = await repo.get(actor('head'), workspaceId), record = (lost.state as any).teamReports.find((r: any) => r.id === original.id);
+    expect(record).toMatchObject({ id: original.id, weekStart, unavailable: true }); expect(record.report).toBeUndefined(); expect(record.text).toBeUndefined();
+    db.departments.find(d => d.id === 'sales-dept')!.headId = 'head';
+    const restored = await repo.get(actor('head'), workspaceId); expect((restored.state as any).teamReports[0].report).toEqual(original.report);
+    expect(raw.teamReports[0]).toEqual(original);
+  });
+  it('withholds immutable values after a source-read permission is revoked, without losing archive identity', async () => {
+    await repo.execute(actor('head'), workspaceId, {requestId:randomUUID(),expectedRevision:0,command:{type:'team.weekly.archive',payload:{weekStart}}});
+    const raw=db.workspaces.get(workspaceId)!.state as any,original=structuredClone(raw.teamReports[0]),grants=[...auth.users.get('head')!.permissions];
+    expect(original.readProof.permissions).toContain('orders:read');auth.users.get('head')!.permissions=grants.filter(p=>p!=='orders:read');
+    const denied=await repo.get(actor('head'),workspaceId),record=(denied.state as any).teamReports[0];
+    expect(record).toMatchObject({id:original.id,unavailable:true});expect(Object.keys(record).sort()).toEqual(['generatedAt','generatedBy','generatedById','id','scope','unavailable','weekEnd','weekStart'].sort());
+    auth.users.get('head')!.permissions=grants;const restored=await repo.get(actor('head'),workspaceId);
+    expect((restored.state as any).teamReports[0].report).toEqual(original.report);expect((restored.state as any).teamReports[0].readProof).toBeUndefined();expect(raw.teamReports[0]).toEqual(original);
+  });
+  it('does not infer historical sources for an old unbound scoped archive or allow duplicate regeneration', async () => {
+    await repo.execute(actor('head'),workspaceId,{requestId:randomUUID(),expectedRevision:0,command:{type:'team.weekly.archive',payload:{weekStart}}});
+    const raw=db.workspaces.get(workspaceId)!.state as any;delete raw.teamReports[0].readProof;const original=structuredClone(raw.teamReports[0]);
+    const view=await repo.get(actor('head'),workspaceId);expect((view.state as any).teamReports[0]).toMatchObject({id:original.id,unavailable:true});
+    await expect(repo.execute(actor('head'),workspaceId,{requestId:randomUUID(),expectedRevision:1,command:{type:'team.weekly.archive',payload:{weekStart}}})).rejects.toMatchObject({code:'CONFLICT'});
+    expect(raw.teamReports).toEqual([original]);
+  });
+  it('binds new read proof to the real workspace, company, author and version rather than treating malformed proof as legacy', async () => {
+    await repo.execute(actor('head'),workspaceId,{requestId:randomUUID(),expectedRevision:0,command:{type:'team.weekly.archive',payload:{weekStart}}});
+    const raw=db.workspaces.get(workspaceId)!.state as any,proof=structuredClone(raw.teamReports[0].readProof);
+    for(const change of [{workspaceId:randomUUID()},{companyId:randomUUID()},{generatedById:'boss'},{version:'1'},{permissions:['*']}]){
+      raw.teamReports[0].readProof={...proof,...change};const view=await repo.get(actor('head'),workspaceId);
+      expect((view.state as any).teamReports[0]).toMatchObject({unavailable:true});expect((view.state as any).teamReports[0].report).toBeUndefined();
+    }
+    raw.teamReports[0].readProof=proof;
+  });
+
+  it('uses the same trusted source when a human confirms an Agent weekly proposal', async () => {
+    const grants=auth.users.get('head')!.permissions;for(const scope of ['ai:chat','ai:write:medium'])if(!grants.includes(scope))grants.push(scope);
+    const visible=await repo.get(actor('head'),workspaceId),expected=teamWeeklyReport(visible.state,visible.state.members as any,{id:'head',owner:false},weekStart,'2026-10-13');
+    const raw=db.workspaces.get(workspaceId)!.state as any;
+    raw.agentProposals=[{id:'weekly-agent-proposal',ownerId:'head',owner:'head',state:'pending',risk:'medium',createdAt:'2026-10-13T01:00:00Z',summary:['生成可见范围周报'],command:{type:'team.weekly.archive',payload:{weekStart}}}];
+    await repo.execute(actor('head'),workspaceId,{requestId:randomUUID(),expectedRevision:0,command:{type:'agent.proposal.confirm',payload:{id:'weekly-agent-proposal'}}});
+    const after=db.workspaces.get(workspaceId)!.state as any;
+    expect(after.teamReports[0].report.totals).toEqual(expected.totals);expect(after.teamReports[0].readProof).toMatchObject({workspaceId,companyId:COMPANY,generatedById:'head'});
+    expect(after.agentProposals[0].state).toBe('confirmed');
+  });
+
 });

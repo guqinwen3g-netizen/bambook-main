@@ -1,16 +1,22 @@
+import {cdDocumentIssueProblem} from './mistDocumentGeneration';
+import {confirmShippingSampleBasis,consumeShipmentSamples,shipmentSampleCustodyBlocker,shippingSampleMovementBlocker,shipmentHasDeparted,type ShippingSampleBasisInput} from './mistShipmentSampleCustody';
+import {openCommercialSampleLoan,returnCommercialSampleLoan,commercialSampleHasLoan,unresolvedCommercialLoanSource,type CommercialSampleSourceSelection} from './mistCommercialSampleLoan';
+import {isSampleLoanHold,sampleLoanHoldOpen,ordinarySampleLoanReserved,type StockSampleLoanHold} from './mistStockSampleLoan';
 import {notifyMist,notificationOwners,notificationTargetOwners} from './mistNotifications';
+import {fixedShipmentReceivableDueProblem,shipmentReceivableDueCondition,type ReceivableDueCondition} from './mistTradeTerms';
+import {stableJson} from './stableJson';
 import { isCalendarDay, nextBusinessCode } from './mistBusinessClock';
 import {packingBreakdownBlocker,packingFabricSpecification,packingFabricColorError,packingPhysicalKey,packingSkuError,canonicalPackingSkus,canSupplementPacking,type PackingSku} from './mistPackingBreakdown';
 import {recordReplacementExportReview,replacementDeclaredUnitPrice,type ReplacementExportCommand,type ReplacementExportReview} from './mistClaimReplacement';
 import { normalizeFabricStageTerms, fabricStageSubmitProblem, fabricStageTermsText, type FabricStageTerms } from './mistFabricStage';
-import { aqlOutcome, assertConclusionMatches, fabricOutcome, normalizeAql, normalizeFabricInspection, type AqlInspection, type AqlOutcome, type FabricInspection, type FabricOutcome } from './mistQcInspection';
+import { aqlOutcome, assertConclusionMatches, fabricOutcome, normalizeAql, normalizeFabricInspection, normalizeFabricQcMeasurements, type AqlInspection, type AqlOutcome, type FabricInspection, type FabricOutcome } from './mistQcInspection';
 import { DOCUMENT_TYPES, isOwnDocumentType, POST_DEPARTURE_TYPES, type BillOfLadingDetails, type ShipmentDocumentType } from './mistDocumentTypes';
 import type { GeneratedDocRecord } from './mistGeneratedDocument';
 import { applyDocumentGeneration, type DocumentGenerationCommand } from './mistDocumentGeneration';
 import { applyStockOperation, autoIssueForDeparture, stockOperationPermission, STOCK_OPERATION_COMMANDS, type StockCount, type StockOperationCommand, type StockTransfer } from './mistStockOperations';
 import { applyQcDispositionCommand, qcConcessionReleases, type QcDisposition, type QcDispositionCommand } from './mistQcDisposition';
 import { applyProductionIntake, productionIntake, type ProductionIntakeCommand, type ProductionIntakeRound, type ProductionObservation } from './mistProductionIntake';
-import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,materialDeliveryRequired,isFabricStageMaterial,isFabricIntermediateProcessing,isFabricStageSource,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,assertMaterialReturnReversal,materialIssueReturnTotals,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
+import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,garmentFinishedPurchaseProblem,garmentDeliveryQuantityProblem,normalizeInternalSupply,materialDeliveryRequired,isFabricStageMaterial,isFabricIntermediateProcessing,isFabricStageSource,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,assertMaterialReturnReversal,materialIssueReturnTotals,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
 import {sampleSendPurpose,sampleSendBlocker,SAMPLE_SEND_PURPOSES,type SampleSendPurpose} from './mistSampleSending';
 import {assertOrderFundingAfterInvoiceRemoval,assertOrderShipmentPaymentCovered} from './mistOrderFunding';
 import { preparePurchaseDocumentSnapshot, purchaseDocumentFingerprint, type PurchaseDocumentArtifact, type PurchaseDocumentRecord } from './mistPurchaseDocument';
@@ -31,6 +37,7 @@ import { heldShipmentRelease, relationHoldReason } from './mistRelationHold';
 import { assertOrderLineOpen, assertShipmentWithinTolerance, orderInvoiceCapProblem } from './mistOrderClosure';
 import {applyCustomsDeclarationCommand,customsItemsStale,CUSTOMS_DECLARATION_COMMANDS,type CustomsClassification,type CustomsDeclarationCommand,type CustomsDeclarationItem} from './mistCustomsDeclaration';
 import {applyClaimInventoryCommand,claimInventoryPermission,type ClaimInventoryCommand,type ClaimInventoryWarehouse,type ClaimReturnReceipt,type ClaimReceivedRecord} from './mistClaimInventory';
+import { normalizeManualSampleLinks, type ManualSampleLinks, type ManualSampleLinkEdit } from './mistManualSample';
 export type FulfillmentSource = {
     kind: 'version';
     devId: string;
@@ -45,6 +52,12 @@ export type FulfillmentSource = {
     description: string;
 };
 export type FulfillmentPosition = { location: string; available: number };
+/** Incoming originals are case-owned physical samples, never factory results or QC sources. */
+export type DevelopmentIncomingSource={kind:'developmentIncoming';devId:string;receiptId:string};
+export type FulfillmentSampleSource=FulfillmentSource|DevelopmentIncomingSource;
+export type IncomingReceiptInfo={receivedAt:string;providerKind:'customer'|'internal';providerId:string;providerName:string;contact:string;recordedAt:string;recordedBy:string;recordedById:string};
+export type IncomingDelivery={kind:'courier'|'handover';recipient:string;address:string;carrier:string;trackingNo:string;evidence:string};
+export type IncomingTaskTransfer={dispatchId:string;devId:string;taskVersionId:string;supplierId:string;supplierName:string;returnExpected:boolean;direction:'out'|'return';occurredAt:string;delivery:IncomingDelivery;returnBatchId?:string;expenseId?:string;postage?:{amount:number;currency:string;zeroReason:string}};
 export type FulfillmentSampleRole = 'pp' | 'pioneer' | 'shipping';
 export type FulfillmentSizeQuantity = { size: string; quantity: number };
 export type FulfillmentProductionFact = {
@@ -63,6 +76,9 @@ export type FulfillmentProductionFact = {
 export const PRODUCTION_HOLD_CATEGORIES = { quality: '质量问题', material: '缺料 / 物料问题', customer: '客户要求暂停', factory: '工厂产能 / 停工', other: '其他' } as const;
 export type FulfillmentProductionHold = { at: string; actor: string; category: keyof typeof PRODUCTION_HOLD_CATEGORIES; reason: string };
 export type FulfillmentSample = {
+    manualLinks?:ManualSampleLinks;
+    shippingQuantityBasis?:import('./mistShipmentSampleCustody').ShippingSampleQuantityBasis;
+    shippingQuantityBasisHistory?:import('./mistShipmentSampleCustody').ShippingSampleQuantityBasis[];
     id: string;
     code: string;
     name: string;
@@ -77,7 +93,10 @@ export type FulfillmentSample = {
     /** One shipping submission's actual physical size/count members; never inferred from the production plan. */
     sizeQuantities?:FulfillmentSizeQuantity[];
     color: string;
-    source: FulfillmentSource;
+    source: FulfillmentSampleSource;
+    incoming?:IncomingReceiptInfo;
+    /** Trusted registering account for a manual sample. Never inferred for legacy records or accepted from a client. */
+    registeredById?: string;
     sourceSampleCode?: string;
     /** Approved full-package material plan when this PP was physically recorded. */
     materialPlan?: string;
@@ -89,6 +108,10 @@ export type FulfillmentSample = {
     createdAt: string;
 };
 export type SampleMovement = {
+    commercialLoan?:import('./mistCommercialSampleLoan').CommercialSampleLoan;
+    /** Response-only return facts when inventory identities are not readable. */
+    commercialReturn?:{location:string;quantity:number;unit:string};
+    shipmentLink?:{shipmentId:string;shipmentCode:string;quantityBasisId:string;departureAt:string;recordedAt:string;retrospective:boolean};
     id: string;
     sampleId: string;
     /** scrap：报废 / 销毁；returnFactory：退还工厂。两者都是永久出库，须写原因。 */
@@ -113,6 +136,16 @@ export type SampleMovement = {
     /** ord17：寄出登记的寄样费，同时记入订单费用台账（expenseId）。 */
     fee?: { amount: number; currency: string; expenseId?: string };
     sendPurpose?:SampleSendPurpose;
+    incomingTransfer?:IncomingTaskTransfer;
+    referenceTransfer?:import('./mistDevelopmentSampleReferences').DevelopmentReferenceTransfer;
+};
+export type QcBusinessConfirmation = { result:'approved'|'rejected';note:string;actor:string;actorId?:string;at:string;reportId?:string };
+export type QcBusinessContinuation = { reportId:string;actor:string;actorId?:string;at:string;note:string };
+export type QcBusinessEvidenceArchive = {
+    id:string;reportId?:string;qualityRevision?:number;
+    reason:'sample_changed'|'new_report'|'confirmation_changed'|'continuation_changed';
+    confirmation?:QcBusinessConfirmation;continued?:QcBusinessContinuation;
+    archivedAt:string;archivedBy:string;archivedById?:string;
 };
 export type FulfillmentQcTask = {
     id: string;
@@ -138,13 +171,10 @@ export type FulfillmentQcTask = {
     state: 'pending' | 'working' | 'reported' | 'blocked' | 'awaiting_business';
     reportIds: string[];
     createdAt: string;
-    businessConfirmation?: {
-        result: 'approved' | 'rejected';
-        note: string;
-        actor: string;
-        at: string;
-    };
-    businessContinued?: { reportId: string; actor: string; at: string; note: string };
+    businessConfirmation?: QcBusinessConfirmation;
+    businessContinued?: QcBusinessContinuation;
+    /** Superseded business evidence; never used as the current approval. */
+    businessHistory?: QcBusinessEvidenceArchive[];
     /** Production NOK handling (rework / concession / chargeback), append-only. */
     dispositions?: QcDisposition[];
 };
@@ -156,6 +186,7 @@ export type FulfillmentQcReport = {
     report: string;
     opinion: string;
     measurements: NonNullable<MistQc['measurements']>;
+    fabricMeasurements?: NonNullable<MistQc['fabricMeasurements']>;
     fileIds: string[];
     reviewer: string;
     reviewedAt: string;
@@ -297,10 +328,11 @@ export type FulfillmentStock = {
 };
 export type StockRoll = { roll: string; quantity: number; weightKg?: number };
 /** `issued` is the part already taken out by issues against this reservation; the rest stays held until issued or released. */
-export type StockReservation = { id: string; orderId: string; lineId: string; purpose: string; quantity: number; issued?: number; at: string; actor: string; releasedAt?: string; releasedBy?: string; releaseReason?: string };
+export type StockReservation = { id: string; orderId: string; lineId: string; purpose: string; quantity: number; issued?: number; at: string; actor: string; releasedAt?: string; releasedBy?: string; releaseReason?: string;sampleLoan?:StockSampleLoanHold;sampleLoanAllocations?:Array<{loanId:string;quantity:number;returned:number}> };
 export const OTHER_RECEIPT_REASONS = { customer: '客供料', sample: '样布 / 样品料', leftover: '余料退回', productionReturn: '生产退料', other: '其他' } as const;
 export type OtherReceiptReason = keyof typeof OTHER_RECEIPT_REASONS;
 export type FulfillmentStockMovement = {
+    sampleLoan?:{sampleId:string;loanId:string;returnId?:string};
     id: string;
     materialDelivery?: MaterialDeliveryLink;
     stockId: string;
@@ -418,7 +450,7 @@ export type FulfillmentCustoms = {
     evidence: string;
     fileIds: string[];
     note: string;
-    /** sup52：报关方式；express（快件 / 邮寄）不需要正式报关单，登记快件运单即可离港。旧记录为 general。 */
+    /** sup52：业务登记路径。express 记录快件运单、申报与放行事实，不表示免于海关申报或随附单证；旧记录为 general。 */
     channel?: 'general' | 'express';
     /** sup50：放行后的改单 / 退关记录与补充附件，原记录不改写。 */
     amendments?: Array<{ kind: 'amend' | 'withdraw' | 'attach'; reason: string; fileIds: string[]; at: string; actor: string }>;
@@ -431,6 +463,7 @@ export type FulfillmentCustoms = {
     grossWeight?: number;
 };
 export type FulfillmentDocument = {
+    receivableDueCondition?:ReceivableDueCondition;
     replacementDeclaredAmount?:number;
     id: string;
     /** OTHER originals are independent unless a new version explicitly names its source. */
@@ -494,9 +527,9 @@ export type FulfillmentState = {
     documents: FulfillmentDocument[];
 };
 type PurchaseInput = Pick<FulfillmentPurchase, 'orderId' | 'lineId' | 'kind' | 'materialKind' | 'stageTerms' | 'iqcRequired' | 'supplierId' | 'supplier' | 'description' | 'quantity' | 'unit' | 'price' | 'currency' | 'due' | 'terms' | 'destination' | 'note' | 'fileIds'>;
-type SampleInput = Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'source' | 'fileIds' | 'note' | 'role' | 'shipmentId' | 'sizeQuantities'>;
+type SampleInput = Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'fileIds' | 'note' | 'role' | 'shipmentId' | 'sizeQuantities'>&{source:FulfillmentSource;manualLinks?:ManualSampleLinks};
 type ShipmentInput = {packingDetailVersion?:2;packingColorVersion?:1} & Pick<FulfillmentShipment, 'consignee' | 'mode' | 'portOfLoading' | 'portOfDischarge' | 'incoterm' | 'plannedDate' | 'booking' | 'lines' | 'note' | 'fileIds'>;
-export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportCommand | QcDispositionCommand | {
+export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportCommand | QcDispositionCommand | {type:'fulfillment.samples.shippingBasis';payload:ShippingSampleBasisInput} | {
     type: 'fulfillment.samples.create';
     payload: SampleInput;
 } | {
@@ -505,6 +538,7 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
 } | {
     type: 'fulfillment.samples.edit';
     payload: {
+        manualLinks?:ManualSampleLinkEdit;
         id: string;
         location: string;
         note: string;
@@ -517,6 +551,7 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
 } | {
     type: 'fulfillment.samples.move';
     payload: {
+        commercialSources?:CommercialSampleSourceSelection[];
         id: string;
         kind: 'lend' | 'return' | 'send' | 'move' | 'scrap' | 'returnFactory';
         sendPurpose?:SampleSendPurpose;
@@ -580,6 +615,8 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
         report: string;
         opinion: string;
         measurements: NonNullable<MistQc['measurements']>;
+        /** Development fabric facts, in their original measurement units. */
+        fabricMeasurements?: NonNullable<MistQc['fabricMeasurements']>;
         fileIds: string[];
         reviewedAt: string;
         sizeChecks?: NonNullable<FulfillmentQcReport['sizeChecks']>;
@@ -891,7 +928,7 @@ function liveBranch(root: MistState, id: string | undefined) {
     if (branch.closed) fail(`生产分支 ${branch.code} 已随合同取消关闭：${branch.closed.reason}`, 'PRECONDITION');
     return branch;
 }
-function source(root: MistState, s: FulfillmentSource, manual = true): FulfillmentSource {
+function source(root: MistState, s: FulfillmentSampleSource, manual = true): FulfillmentSource {
     if (!s || typeof s !== 'object')
         fail('请选择准确来源');
     if (s.kind === 'manual' && manual)
@@ -917,11 +954,11 @@ function source(root: MistState, s: FulfillmentSource, manual = true): Fulfillme
     }
     return fail('来源类型无效');
 }
-export function fulfillmentSourceLabel(root: MistState, s: FulfillmentSource): string { if (s.kind === 'manual')
+export function fulfillmentSourceLabel(root: MistState, s: FulfillmentSampleSource): string { if(s.kind==='developmentIncoming')return `开发来样 · ${root.devs.find(dev=>dev.id===s.devId)?.code||'开发案不可见'}`;if (s.kind === 'manual')
     return s.description; if (s.kind === 'version')
     return `${root.devs.find(d => d.id === s.devId)?.code || s.devId} · ${root.versions.find(v => v.id === s.versionId)?.label || s.versionId}`; return `${root.orders.find(o => o.id === s.orderId)?.code || s.orderId} · ${root.orderLines.find(l => l.id === s.lineId)?.style || s.lineId}`; }
-const sourceKey = (s: FulfillmentSource) => s.kind === 'version' ? `v:${s.versionId}` : s.kind === 'orderLine' ? `l:${s.lineId}:${s.productionId || ''}` : `m:${s.description}`;
-const target = (s: FulfillmentSource): MistTarget => s.kind === 'version' ? { view: 'development/detail', id: s.devId, versionId: s.versionId } : s.kind === 'orderLine' ? { view: 'orders/detail', id: s.orderId, orderLineId: s.lineId, productionId: s.productionId } : { view: 'samples' };
+const sourceKey = (s: FulfillmentSampleSource) => s.kind === 'version' ? `v:${s.versionId}` : s.kind === 'orderLine' ? `l:${s.lineId}:${s.productionId || ''}` : s.kind==='developmentIncoming'?`incoming:${s.receiptId}`:`m:${s.description}`;
+const target = (s: FulfillmentSampleSource): MistTarget => s.kind==='developmentIncoming'?{view:'development/detail',id:s.devId,section:'incoming-receipt:'+s.receiptId}:s.kind === 'version' ? { view: 'development/detail', id: s.devId, versionId: s.versionId } : s.kind === 'orderLine' ? { view: 'orders/detail', id: s.orderId, orderLineId: s.lineId, productionId: s.productionId } : { view: 'samples' };
 function audit(root: MistState, ctx: MistContext, entity: string, id: string, message: string, to?: MistTarget, recipientIds: string[] = []) { root.events.unshift({ id: ctx.id(), entityType: entity, entityId: id, actor: ctx.actorName, at: ctx.now, text: message, fileIds: [] }); if (to)
     notifyMist(root, ctx, { title: message, detail: ctx.actorName, target: to, category:entity==='qc'?'qc':['shipment','customs','document'].includes(entity)?'shipping':'general' }, recipientIds); }
 const code = (prefix: string, rows: {
@@ -980,12 +1017,12 @@ export function sampleLoanRemaining(root: MistState, id: string) {
     return loan ? sum([loan.quantity, -sum(root.fulfillment.sampleMovements.filter(movement => movement.kind === 'return' && movement.loanId === id).map(movement => movement.quantity))]) : 0;
 }
 /** Active reservations hold stock for one order line; issue for that line consumes them first (see stock.release). */
-export const reservationOpen = (r: StockReservation) => r.releasedAt ? 0 : sum([r.quantity, -(r.issued || 0)]);
-export const stockReservedQuantity = (stock: Pick<FulfillmentStock, 'reservations'>) => sum((stock.reservations || []).map(reservationOpen));
+export const reservationOpen = (r: StockReservation) => isSampleLoanHold(r)?sampleLoanHoldOpen(r):r.releasedAt ? 0 : sum([r.quantity, -(r.issued || 0),-ordinarySampleLoanReserved(r)]);
+export const stockReservedQuantity = (stock: Pick<FulfillmentStock, 'reservations'>) => sum((stock.reservations || []).filter(r=>!isSampleLoanHold(r)).map(reservationOpen));
 /** Issue for an order line draws on that line's own reservations first, so reserved goods can still go to their purpose. */
 export function consumeReservations(stock: FulfillmentStock, quantity: number, line?: { orderId: string; lineId: string }) {
     let left = quantity;
-    if (line) for (const r of stock.reservations || []) { if (left <= 0) break; if (r.orderId !== line.orderId || r.lineId !== line.lineId) continue; const take = Math.min(left, reservationOpen(r)); if (take > 0) { r.issued = sum([r.issued || 0, take]); left = sum([left, -take]); } }
+    if (line) for (const r of stock.reservations || []) { if (left <= 0) break; if (isSampleLoanHold(r)||r.orderId !== line.orderId || r.lineId !== line.lineId) continue; const take = Math.min(left, reservationOpen(r)); if (take > 0) { r.issued = sum([r.issued || 0, take]); left = sum([left, -take]); } }
     if (left > freeQuantity(stock)) fail(`可用量不足：已预留 ${stockReservedQuantity(stock)} ${stock.unit}`);
 }
 export const freeQuantity = (stock: FulfillmentStock) => sum([stock.available, -stockReservedQuantity(stock)]);
@@ -1037,6 +1074,8 @@ const purchaseCommitmentKey = (p: FulfillmentPurchase) => `supplierCommitment.ap
 /** sup11：变更前置条件，申请和批准时都按当时事实重新核对；返回首个阻断原因。 */
 function purchaseAmendmentProblem(root: MistState, p: FulfillmentPurchase, to: FulfillmentPurchaseTerms): string {
     if (p.state !== 'approved') return '仅已批准的合同可以变更';
+    const finishedProblem = garmentFinishedPurchaseProblem(get(root.orders,p.orderId,'来源订单'),get(root.orderLines,p.lineId,'来源订单条目'),p.kind,p.unit,to.quantity);
+    if (finishedProblem) return finishedProblem;
     const payables = root.payables, settlements = (payables?.settlements || []).filter(s => s.purchaseId === p.id);
     const settled = sum(settlements.filter(s => s.state === 'confirmed').map(s => s.quantity)), settling = settlements.some(s => s.state === 'pending');
     const billed = (payables?.bills || []).filter(b => b.state === 'open').flatMap(b => b.lines).filter(l => l.purchaseId === p.id).reduce((n, l) => n + mistMoneyMinor(l.amount), 0);
@@ -1077,8 +1116,8 @@ function normalizeTransport(root: MistState, t: ShipmentTransport): ShipmentTran
     if (out.etd && out.eta && out.eta < out.etd) fail('ETA 不得早于 ETD');
     return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined && !(Array.isArray(v) && !v.length))) as ShipmentTransport;
 }
-function addSample(root: MistState, input: SampleInput, ctx: MistContext) {
-    const f = root.fulfillment, s = source(root, input.source), category = text(input.category, '类别'), quantity = qty(input.quantity), unit = text(input.unit, '单位');
+function addSample(root: MistState, input: Omit<SampleInput,'source'>&{source:FulfillmentSampleSource}, ctx: MistContext, trustedIncoming?:DevelopmentIncomingSource) {
+    const f = root.fulfillment, s = trustedIncoming||source(root, input.source), category = text(input.category, '类别'), quantity = qty(input.quantity), unit = text(input.unit, '单位');
     if (s.kind === 'version' && get(root.devs, s.devId, '来源开发案').billing?.request) fail(DEVELOPMENT_BILLING_LOCK, 'PRECONDITION');
     const groupedShipping=input.sizeQuantities!==undefined;
     if(groupedShipping&&category!=='成衣')fail('尺码件数组合仅用于成衣样品');
@@ -1109,9 +1148,15 @@ function addSample(root: MistState, input: SampleInput, ctx: MistContext) {
         } else if (input.shipmentId) fail('产前/先锋样不绑定出运批次');
     } else if (input.role || input.shipmentId) fail('订单样品角色仅用于准确订单生产分支');
     const id = ctx.id();
-    f.samples.push({ id, code: code('SMP', f.samples, ctx), name: text(input.name, '名称'), category, form: text(input.form, '形态'), unit, quantity, available: quantity, location: text(input.location, '位置', false), size: sizeQuantities?sizeQuantities.map(row=>`${row.size} ${row.quantity}`).join(' / '):text(input.size, '尺码', false),...(sizeQuantities?{sizeQuantities}:{}), color: text(input.color, '颜色', false), source: s, ...(s.kind === 'version' ? { sourceSampleCode: get(root.versions, s.versionId, '来源版本').sample } : {}), ...(input.role ? { role: input.role } : {}), ...(s.kind === 'orderLine' && input.role === 'pp' ? {materialPlan:garmentMaterialFingerprint(root,s.orderId,s.lineId)} : {}), ...(input.shipmentId ? { shipmentId: input.shipmentId } : {}), qualityRevision: 1, fileIds: files(root, input.fileIds), note: text(input.note, '备注', false), createdAt: ctx.now });
+    const manualLinks=input.manualLinks===undefined?undefined:normalizeManualSampleLinks(root,ctx,{source:s,category},input.manualLinks);
+    f.samples.push({ id, ...(manualLinks?{manualLinks}:{}), code: code('SMP', f.samples, ctx), name: text(input.name, '名称'), category, form: text(input.form, '形态'), unit, quantity, available: quantity, location: text(input.location, '位置', false), size: sizeQuantities?sizeQuantities.map(row=>`${row.size} ${row.quantity}`).join(' / '):text(input.size, '尺码', false),...(sizeQuantities?{sizeQuantities}:{}), color: text(input.color, '颜色', false), source: s, ...(s.kind === 'manual' && ctx.actorId ? {registeredById:ctx.actorId} : {}), ...(s.kind === 'version' ? { sourceSampleCode: get(root.versions, s.versionId, '来源版本').sample } : {}), ...(input.role ? { role: input.role } : {}), ...(s.kind === 'orderLine' && input.role === 'pp' ? {materialPlan:garmentMaterialFingerprint(root,s.orderId,s.lineId)} : {}), ...(input.shipmentId ? { shipmentId: input.shipmentId } : {}), qualityRevision: 1, fileIds: files(root, input.fileIds), note: text(input.note, '备注', false), createdAt: ctx.now });
     f.sampleMovements.push({ id: ctx.id(), sampleId: id, kind: 'receive', quantity, person: ctx.actorName, location: input.location, note: input.note, at: ctx.now, actor: ctx.actorName });
     return id;
+}
+/** Called only by the development intake command after its case and receipt are verified. */
+export function registerDevelopmentIncomingSample(root:MistState,input:Omit<SampleInput,'source'>&{devId:string;receiptId:string},ctx:MistContext){
+    const dev=get(root.devs,input.devId,'来样开发案'),incoming:DevelopmentIncomingSource={kind:'developmentIncoming',devId:dev.id,receiptId:input.receiptId};
+    return addSample(root,{...input,source:incoming},ctx,incoming);
 }
 function sourceDomain(root: MistState, s: FulfillmentSource): 'garment' | 'fabric' { if (s.kind === 'orderLine')
     return get(root.orders, s.orderId, '订单').type; return s.kind === 'version' && developmentDomain(get(root.devs, s.devId, '开发案').values)==='fabric' ? 'fabric' : 'garment'; }
@@ -1142,6 +1187,16 @@ function normalizeSizes(value: unknown, total: number, required: boolean): Fulfi
     if (rows.length && sum(rows.map(row => row.quantity)) !== total) fail('尺码数量合计必须等于对应总数量');
     return rows;
 }
+/** Archive existing evidence before invalidating it; report IDs keep each decision with its original inspection. */
+function archiveQcBusiness(root:MistState,task:FulfillmentQcTask,ctx:MistContext,reason:QcBusinessEvidenceArchive['reason']) {
+    if(!task.businessConfirmation&&!task.businessContinued)return;
+    const reportId=task.businessConfirmation?.reportId||task.businessContinued?.reportId||task.reportIds.at(-1);
+    const report=root.fulfillment.qcReports.find(row=>row.id===reportId&&row.taskId===task.id);
+    (task.businessHistory??=[]).push({id:ctx.id(),...(reportId?{reportId}:{}),...(report?.scopeRevision!==undefined?{qualityRevision:report.scopeRevision}:{}),reason,
+        ...(task.businessConfirmation?{confirmation:structuredClone(task.businessConfirmation)}:{}),...(task.businessContinued?{continued:structuredClone(task.businessContinued)}:{}),
+        archivedAt:ctx.now,archivedBy:ctx.actorName,...(ctx.actorId?{archivedById:ctx.actorId}:{})});
+}
+
 function scopeRevision(root: MistState, task: FulfillmentQcTask): number {
     if (task.sampleId) return get(root.fulfillment.samples, task.sampleId, '准确实物样品').qualityRevision || 1;
     return task.source.kind === 'orderLine' && task.source.productionId ? fulfillmentProductionFact(root, task.source.productionId)?.revision || 1 : 1;
@@ -1294,21 +1349,57 @@ const reviewMoney = (n: number) => n.toLocaleString('en-US', { minimumFractionDi
 function purchaseSaleReference(root: MistState, p: { orderId: string; lineId: string }) {
   const order = root.orders.find(o => o.id === p.orderId), line = root.orderLines.find(l => l.id === p.lineId && l.orderId === p.orderId);
   if (!order || !line || !(line.price > 0)) return [];
-  return [{ label: '订单售价参考', value: `${line.qty} ${line.unit} × ${line.price} = ${reviewMoney(lineAmount(line.qty, line.price))} ${order.currency}` }];
+  return [{ label: '当前订单售价参考', value: `${line.qty} ${line.unit} × ${line.price} = ${reviewMoney(lineAmount(line.qty, line.price))} ${order.currency}` }];
 }
 export function getFulfillmentReviews(root: MistState): MistReviewTask[] { return [...purchaseReviews(root), ...purchaseAmendmentReviews(root)]; }
 export function purchaseAmendmentText(p: Pick<FulfillmentPurchase, 'unit' | 'currency'>, a: Pick<FulfillmentPurchaseAmendment, 'from' | 'to'>): string {
     return [a.from.quantity !== a.to.quantity ? `数量 ${a.from.quantity} → ${a.to.quantity} ${p.unit}` : '', a.from.price !== a.to.price ? `单价 ${a.from.price} → ${a.to.price} ${p.currency}` : '', a.from.due !== a.to.due ? `交期 ${a.from.due} → ${a.to.due}` : ''].filter(Boolean).join('；');
 }
 function purchaseAmendmentReviews(root: MistState): MistReviewTask[] {
-    return (root.fulfillment?.purchases || []).flatMap(p => (p.amendments || []).filter(a => a.state !== 'withdrawn').map((a): MistReviewTask => ({
-        id: `procurement-amendment:${a.id}`, kind: 'procurementAmendment', entityId: a.id, title: `${p.code} · ${p.supplier} 合同变更`, requesterId: a.requesterId, reviewerIds: [...a.reviewerIds],
+    return (root.fulfillment?.purchases || []).flatMap(p => (p.amendments || []).flatMap((a, index): MistReviewTask[] => a.state === 'withdrawn' ? [] : [{
+        id: `procurement-amendment:${a.id}`, roundNumber: index + 1, kind: 'procurementAmendment', entityId: a.id, title: `${p.code} · ${p.supplier} 合同变更`, requesterId: a.requesterId, reviewerIds: [...a.reviewerIds],
         status: a.state === 'pending' ? 'pending' : a.state === 'approved' ? 'approved' : 'rejected', submittedAt: a.submittedAt, decision: reviewDecision(a.decision?.actor, a.decision?.at, a.decision?.note), requiredPermission: 'procurement:approve', fileIds: [...a.fileIds], target: { view: 'procurement', id: p.id },
         details: [{ label: '来源', value: fulfillmentSourceLabel(root, { kind: 'orderLine', orderId: p.orderId, lineId: p.lineId }) }, { label: '供应商', value: p.supplier }, { label: '变更内容', value: purchaseAmendmentText(p, a) },
             { label: '合同金额', value: `${reviewMoney(lineAmount(a.from.quantity, a.from.price))} → ${reviewMoney(lineAmount(a.to.quantity, a.to.price))} ${p.currency}` }, { label: '已收', value: `${p.received} ${p.unit}` }, { label: '变更原因', value: a.reason }, { label: '供应商同意依据', value: a.evidence }],
-    })));
+    }]));
 }
-function purchaseReviews(root: MistState): MistReviewTask[] { return (root.fulfillment?.purchases || []).filter(p => p.submittedAt).map(p => ({ id: `procurement:${p.id}`, kind: 'procurement', entityId: p.id, title: `${p.code} · ${p.supplier}`, requesterId: p.requesterId, reviewerIds: p.reviewerIds, status: p.state === 'pending' ? 'pending' : p.state === 'approved' || p.state === 'cancelled' ? 'approved' : 'rejected', submittedAt: p.submittedAt!, decision: reviewDecision(p.decision?.actor, p.decision?.at, p.decision?.note), requiredPermission: 'procurement:approve', fileIds: [...p.fileIds], target: { view: 'procurement', id: p.id }, details: [{ label: '来源', value: fulfillmentSourceLabel(root, { kind: 'orderLine', orderId: p.orderId, lineId: p.lineId }) }, { label: '采购内容', value: p.description }, { label: '供应商', value: p.supplier }, { label: '数量', value: `${p.quantity} ${p.unit}` }, { label: '金额', value: `${p.quantity} × ${p.price} = ${reviewMoney(lineAmount(p.quantity, p.price))} ${p.currency}` }, ...purchaseSaleReference(root, p), { label: '付款条件', value: p.terms }, { label: '交付地点', value: p.destination }, { label: '交期', value: p.due }, ...(fabricStageTermsText(p.revisionHistory?.at(-1)?.snapshot ?? p) ? [{ label: '工序约定', value: fabricStageTermsText(p.revisionHistory?.at(-1)?.snapshot ?? p) }] : []), ...((p.revisionHistory?.at(-1)?.snapshot ?? p).iqcRequired ? [{ label: '来料检验', value: '入库前检验，合格后放行' }] : []), ...((p.revisionHistory?.at(-1)?.snapshot.note ?? p.note).trim() ? [{ label: '规格与交付要求', value: p.revisionHistory?.at(-1)?.snapshot.note ?? p.note }] : [])] })); }
+function purchaseReviews(root: MistState): MistReviewTask[] {
+    return (root.fulfillment?.purchases || []).filter(p => p.submittedAt).map(p => {
+        const approvedAmendments = (p.amendments || []).filter(a => a.state === 'approved').length;
+        // Each approved amendment appends one revision after the latest main submission.
+        const original = p.revisionHistory?.at(-1 - approvedAmendments);
+        const revision = original && original.submittedAt === p.submittedAt && original.requesterId === p.requesterId &&
+            original.decision?.actorId === p.decision?.actorId && original.decision?.at === p.decision?.at &&
+            original.decision?.decision === p.decision?.decision && original.decision?.note === p.decision?.note
+            ? original : undefined;
+        // Legacy contracts without any amendments or revision history can still supply their original terms.
+        const snapshot = revision?.snapshot ?? (!p.revisionHistory?.length && !approvedAmendments
+            ? { ...p, due: p.dueChanges?.[0]?.from ?? p.due } : undefined);
+        const stageTerms = snapshot ? fabricStageTermsText(snapshot) : '';
+        return {
+            id: `procurement:${p.id}`, kind: 'procurement', entityId: p.id,
+            title: `${p.code} · ${snapshot?.supplier ?? p.supplier}`, requesterId: p.requesterId, reviewerIds: p.reviewerIds,
+            status: p.state === 'pending' ? 'pending' : p.state === 'approved' || p.state === 'cancelled' ? 'approved' : 'rejected',
+            submittedAt: p.submittedAt!, decision: reviewDecision(p.decision?.actor, p.decision?.at, p.decision?.note),
+            requiredPermission: 'procurement:approve', fileIds: snapshot?.fileIds ?? [], target: { view: 'procurement', id: p.id },
+            details: snapshot ? [
+                ...(revision ? [{ label: '送审版本', value: `V${revision.revision}` }] : []),
+                { label: '来源', value: fulfillmentSourceLabel(root, { kind: 'orderLine', orderId: snapshot.orderId, lineId: snapshot.lineId }) },
+                { label: '采购内容', value: snapshot.description },
+                { label: '供应商', value: snapshot.supplier },
+                { label: '数量', value: `${snapshot.quantity} ${snapshot.unit}` },
+                { label: '金额', value: `${snapshot.quantity} × ${snapshot.price} = ${reviewMoney(lineAmount(snapshot.quantity, snapshot.price))} ${snapshot.currency}` },
+                ...purchaseSaleReference(root, snapshot),
+                { label: '付款条件', value: snapshot.terms },
+                { label: '交付地点', value: snapshot.destination },
+                { label: '交期', value: snapshot.due },
+                ...(stageTerms ? [{ label: '工序约定', value: stageTerms }] : []),
+                ...(snapshot.iqcRequired ? [{ label: '来料检验', value: '入库前检验，合格后放行' }] : []),
+                ...(snapshot.note.trim() ? [{ label: '规格与交付要求', value: snapshot.note }] : []),
+            ] : [{ label: '送审快照', value: '原审批快照不可用' }],
+        };
+    });
+}
 /** Called only on the aggregate's transaction clone; throws before its snapshot is committed. */
 /** A disposed development version keeps its original report; further inspection belongs to the successor. */
 export function fulfillmentQcSourceBlocker(root: MistState, source: FulfillmentSource): string | null {
@@ -1341,13 +1432,13 @@ export function recordDevelopmentQcOnTasks(root: MistState, devId: string, versi
     for (const t of open) {
         if (t.assigneeId && t.assigneeId !== ctx.actorId) fail(`${t.code} 已由 ${t.assignee} 认领，请在 QC 工作台由认领人提交`, 'CONFLICT');
         const id = ctx.id(), previous = t.reportIds.at(-1);
-        f.qcReports.push({ id, taskId: t.id, location: t.location, result: qc.result, report: qc.report, opinion: qc.opinion, measurements: qc.measurements || [], fileIds: [], reviewer: qc.reviewer, reviewedAt: qc.reviewedAt, scopeRevision: scopeRevision(root, t), sizeChecks: [], ...(previous ? { previousReportId: previous } : {}) });
+        f.qcReports.push({ id, taskId: t.id, location: t.location, result: qc.result, report: qc.report, opinion: qc.opinion, measurements: qc.measurements || [], ...(qc.fabricMeasurements?.length ? { fabricMeasurements: structuredClone(qc.fabricMeasurements) } : {}), fileIds: [], reviewer: qc.reviewer, reviewedAt: qc.reviewedAt, scopeRevision: scopeRevision(root, t), sizeChecks: [], ...(previous ? { previousReportId: previous } : {}) });
         t.reportIds.push(id);
         if (!t.assigneeId && ctx.actorId) { t.assignee = ctx.actorName; t.assigneeId = ctx.actorId; }
         t.state = qc.result === 'reject' ? 'blocked' : 'reported';
     }
 }
-export function applyFulfillmentCommand(root: MistState, command: FulfillmentCommand, ctx: MistContext): MistCommandResult {
+export function applyFulfillmentCommand(root: MistState, command: FulfillmentCommand, ctx: MistContext, options?:{externalBorrower?:boolean;loanStartedOn?:string;developmentIncomingCustody?:boolean}): MistCommandResult {
     const f = root.fulfillment || (root.fulfillment = createFulfillmentState(ctx, root));
     f.shippingTerms ||= [];
     f.productionFacts ||= [];
@@ -1362,6 +1453,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
     if (['fulfillment.procurement.submit','fulfillment.procurement.send','fulfillment.procurement.confirm','fulfillment.procurement.receive'].includes(command.type) || command.type === 'fulfillment.procurement.decide' && p.decision === 'approved') {
         const purchase = get(f.purchases, p.id, '采购'), order = get(root.orders, purchase.orderId, '订单'), line = get(root.orderLines, purchase.lineId, '订单条目');
         assertGarmentProcurement(order, line, purchase.kind, purchase.materialKind, root, purchase.id);
+        const finishedProblem = garmentFinishedPurchaseProblem(order,line,purchase.kind,purchase.unit,purchase.quantity);
+        if (finishedProblem) fail(finishedProblem);
         if (order.governance?.contract.internalSupply && ['fulfillment.procurement.submit','fulfillment.procurement.send','fulfillment.procurement.confirm'].includes(command.type)) normalizeInternalSupply(order.governance.contract, order, ctx);
     }
     switch (command.type) {
@@ -1377,6 +1470,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         }
         case 'fulfillment.materials.confirm': return confirmMaterialDelivery(root, p, ctx);
         case 'fulfillment.samples.create': {
+            if (Object.prototype.hasOwnProperty.call(p, 'registeredById')) fail('样品登记人由系统记录');
+            if(p.role==='shipping'&&f.shipments.some(s=>s.id===p.shipmentId&&shipmentHasDeparted(s)))fail('本批已出运，不能追加船样重建可用余额','PRECONDITION');
             const s = source(root, p.source);
             if (s.kind === 'version') {
                 const d = get(root.devs, s.devId, '开发案'), v = get(root.versions, s.versionId, '版本');
@@ -1411,10 +1506,22 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             }
             return { applied };
         }
+        case 'fulfillment.samples.shippingBasis': {
+            const result=confirmShippingSampleBasis(root as MistState,{...p,fileIds:files(root,p.fileIds)},ctx);
+            audit(root,ctx,'sample',p.id,p.kind==='included'?'确认大货内随本批出运口径':'确认独立实物口径');
+            return result;
+        }
         case 'fulfillment.samples.edit': {
+            if (Object.prototype.hasOwnProperty.call(p, 'registeredById')) fail('样品登记人由系统记录');
             const s = get(f.samples, p.id, '样品');
             if(s.sizeQuantities&&p.size!==undefined&&p.size!==s.size)fail('船样实际尺码件数已登记，实物变更请重新登记本批船样');
+            if(p.manualLinks!==undefined){
+                const links=normalizeManualSampleLinks(root,ctx,s,p.manualLinks);
+                if(links)s.manualLinks=links;else delete s.manualLinks;
+            }
             const changedPhysical = ['form', 'size', 'color'].some(key => p[key] !== undefined && p[key] !== (s as any)[key]);
+            if(changedPhysical&&commercialSampleHasLoan(root as MistState,s.id))fail('商业借样未归还，实物组合不能改写');
+            if(changedPhysical&&s.shippingQuantityBasis?.consumption)fail('已随本批出运的实物规格已锁定');
             if (text(p.location, '位置', false) !== s.location) fail('请通过移位操作登记位置变化');
             if (p.name !== undefined) s.name = text(p.name, '样品名称');
             if (p.form !== undefined) s.form = text(p.form, '样品形态');
@@ -1424,13 +1531,18 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             s.fileIds = files(root, p.fileIds);
             if (changedPhysical) {
                 s.qualityRevision = (s.qualityRevision || 1) + 1;
-                for (const task of f.qcTasks.filter(task => task.sampleId === s.id)) { task.state = 'working'; delete task.businessConfirmation; delete task.businessContinued; }
+                for (const task of f.qcTasks.filter(task => task.sampleId === s.id)) { archiveQcBusiness(root,task,ctx,'sample_changed'); task.state = 'working'; delete task.businessConfirmation; delete task.businessContinued; }
             }
             audit(root, ctx, 'sample', s.id, '更新样品资料');
             return { id: s.id };
         }
         case 'fulfillment.samples.move': {
             const s = get(f.samples, p.id, '样品');
+            if(['sampleLoan','commercialLoan','commercialReturn','commercialHolds','reservationIds'].some(key=>Object.prototype.hasOwnProperty.call(p,key)))fail('商业借样占用由系统按原实物建立');
+            if(p.kind!=='lend'&&p.commercialSources!==undefined)fail('归还或移位不得改选原商业借出来源');
+            const custodyBlocker=shippingSampleMovementBlocker(root as MistState,s,p.kind);if(custodyBlocker)fail(custodyBlocker,'PRECONDITION');
+            // Only the dedicated case command can establish exact factory custody and parcel cost.
+            if(s.source.kind==='developmentIncoming'&&!['move','scrap'].includes(p.kind)&&!options?.developmentIncomingCustody)fail('开发来样请从开发案办理寄厂与原样退回','PRECONDITION');
             let quantity = p.kind === 'move' ? 0 : qty(p.quantity);
             if(s.sizeQuantities&&p.kind!=='move'&&quantity!==s.quantity)fail('按尺码登记的成组样品须整组流转');
             if (!sampleUnitAllowsDecimal(s.unit) && !Number.isInteger(quantity)) fail(`按${s.unit}计的样品须按整数流转`);
@@ -1446,12 +1558,16 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                     fail('归还量超过未还量');
             }
             else if (quantity > s.available) fail('可用样品不足');
+            if(options?.externalBorrower&&p.borrowerId)fail('外部收件不绑定公司借用账号');
             const borrower = p.kind === 'lend' && p.borrowerId ? resolveMember(ctx, p.borrowerId, '借用人') : undefined;
             const person = borrower?.name || text(p.person, p.kind === 'returnFactory' ? '退回工厂' : '借用人/收件人', p.kind === 'lend' || p.kind === 'send' || p.kind === 'returnFactory'), location = text(p.location, '位置', false), note = text(p.note, p.kind === 'scrap' || p.kind === 'returnFactory' ? '原因' : '备注', p.kind === 'scrap' || p.kind === 'returnFactory'), expectedReturn = p.expectedReturn ? day(p.expectedReturn, '预计归还日') : undefined;
-            if (expectedReturn && expectedReturn < platformBusinessDate(ctx.now))
+            if (expectedReturn && expectedReturn < (options?.loanStartedOn||platformBusinessDate(ctx.now)))
                 fail('预计归还日不能早于借出日');
             const sendPurpose=p.kind==='send'?sampleSendPurpose(p.sendPurpose,s):undefined;
             if(sendPurpose){const blocker=sampleSendBlocker(root,s,sendPurpose,note,p.sendPurpose!==undefined);if(blocker)fail(blocker,'PRECONDITION');}
+            const id=ctx.id();
+            const commercialLoan=p.kind==='lend'?openCommercialSampleLoan(root as MistState,s,id,quantity,p.commercialSources,sourcePosition(s,p.sourceLocation).location,ctx):undefined;
+            if(p.kind==='return'&&loan)returnCommercialSampleLoan(root as MistState,s,loan,quantity,location,id,ctx);
             let sourceLocation: string | undefined;
             if (p.kind === 'return') addAtPosition(s, quantity, location);
             else {
@@ -1460,7 +1576,6 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 sourceLocation = removeAtPosition(s, quantity, position.location);
                 if (p.kind === 'move') addAtPosition(s, quantity, location);
             }
-            const id = ctx.id();
             const shipping = p.kind === 'send' ? { ...(p.trackingNo?.trim() ? { trackingNo: text(p.trackingNo, '运单号', false) } : {}), ...(p.carrier?.trim() ? { carrier: text(p.carrier, '快递公司', false) } : {}), ...(p.destination?.trim() ? { destination: text(p.destination, '寄送去向', false) } : {}) } : {};
             let fee: SampleMovement['fee'];
             if (p.kind === 'send' && p.fee && p.fee.amount) {
@@ -1468,8 +1583,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 if (!/^[A-Z]{3}$/.test(currency)) fail('寄样费币种须为三位英文字母');
                 fee = { amount: Math.round(amount * 100) / 100, currency };
             }
-            const borrowers = borrower ? [borrower] : (ctx.members || (ctx.actorId ? [{ id: ctx.actorId, name: ctx.actorName, active: true }] : [])).filter(member => member.active && member.name === person);
-            f.sampleMovements.push({ id, sampleId: s.id, kind: p.kind, quantity, person, location, note, at: ctx.now, actor: ctx.actorName, ...shipping, ...(p.kind === 'lend' ? { borrowerId: borrowers.length === 1 ? borrowers[0].id : '' } : {}), ...(fee ? { fee } : {}), ...(sourceLocation === undefined ? {} : { sourceLocation }), ...(loan ? { loanId: loan.id } : {}), ...(expectedReturn ? { expectedReturn } : {}),...(sendPurpose?{sendPurpose}:{}) });
+            const borrowers = options?.externalBorrower?[]:borrower ? [borrower] : (ctx.members || (ctx.actorId ? [{ id: ctx.actorId, name: ctx.actorName, active: true }] : [])).filter(member => member.active && member.name === person);
+            f.sampleMovements.push({ id, sampleId: s.id, kind: p.kind, quantity, person, location, note, at: ctx.now, actor: ctx.actorName, ...shipping, ...(p.kind === 'lend' ? { borrowerId: borrowers.length === 1 ? borrowers[0].id : '' } : {}), ...(fee ? { fee } : {}), ...(sourceLocation === undefined ? {} : { sourceLocation }), ...(loan ? { loanId: loan.id } : {}), ...(expectedReturn ? { expectedReturn } : {}),...(sendPurpose?{sendPurpose}:{}),...(commercialLoan?{commercialLoan}:{}) });
             // ord17：订单样品的寄样费记入该订单费用台账，客户样品等无订单来源的只记在流水上。
             if (fee && s.source.kind === 'orderLine') {
                 const order = get(root.orders, s.source.orderId, '订单'), costs = ((root as MistState & { orderCosts?: { expenses: unknown[] } }).orderCosts ||= { expenses: [] }) as { expenses: Array<Record<string, unknown>> };
@@ -1570,6 +1685,9 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 const to = resolveMember(ctx, p.assigneeId, '接收QC');
                 if (to.id === t.assigneeId)
                     fail('接收人与当前QC相同');
+                const receivers=ctx.authority?.qcAssigneeIds?.[t.domain];
+                if(!receivers)fail('无法核对接收QC权限，请刷新后重试','PRECONDITION');
+                if(!receivers?.includes(to.id))throw new MistCommandError('FORBIDDEN',`接收人不具备${t.domain==='garment'?'成衣':'面料'}QC权限`,403);
                 const from = t.assignee || '待认领';
                 t.assignee = to.name;
                 t.assigneeId = to.id;
@@ -1613,12 +1731,16 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (!Array.isArray(p.measurements) || p.measurements.length > 200)
                 fail('测量点最多200项');
             const measurements = p.measurements.map((m: any) => ({ point: text(m.point, '测量点'), standard: qty(m.standard, '标准值', true), actual: qty(m.actual, '实测值', true), tolerance: qty(m.tolerance, '容差', true) }));
+            const fabricDevelopment = t.source.kind === 'version' && t.domain === 'fabric';
+            const fabricMeasurements = normalizeFabricQcMeasurements(p.fabricMeasurements);
+            if (fabricDevelopment && measurements.length) fail('面料开发不套成衣尺寸公差，请填写面料实测');
+            if (t.domain !== 'fabric' && fabricMeasurements.length) fail('本类QC不接收面料实测');
             const fileIds = files(root, p.fileIds);
             if (t.source.kind === 'version') {
                 const v = get(root.versions, t.source.versionId, '版本');
                 if (v.archivedAt || v.confirmations.length)
                     fail('已有需求方决定或留档的版本不可改写QC，请创建新版本');
-                v.qc = { result: p.result, reviewer: ctx.actorName, reviewedAt, report, opinion, measurements };
+                v.qc = { result: p.result, reviewer: ctx.actorName, reviewedAt, report, opinion, measurements, ...(fabricMeasurements.length ? { fabricMeasurements: structuredClone(fabricMeasurements) } : {}) };
                 const d = get(root.devs, t.source.devId, '开发案');
                 if (d.currentVersionId === v.id) {
                     d.stage = p.result === 'reject' ? 2 : 3;
@@ -1628,6 +1750,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 }
             }
             const needsResume = t.state === 'blocked' || t.state === 'awaiting_business', previous = t.reportIds.at(-1), id = ctx.id();
+            archiveQcBusiness(root,t,ctx,'new_report');
             delete t.businessConfirmation;
             delete t.businessContinued;
             let sizeChecks: NonNullable<FulfillmentQcReport['sizeChecks']> = [];
@@ -1654,7 +1777,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (p.fabricInspection !== undefined && t.domain !== 'fabric') fail('成衣检验请用 AQL 抽样');
             const aql = p.aql === undefined ? undefined : (() => { const row = normalizeAql(p.aql); const outcome = aqlOutcome(row); assertConclusionMatches(p.result, outcome); return { ...row, outcome }; })();
             const fabricInspection = p.fabricInspection === undefined ? undefined : (() => { const row = normalizeFabricInspection(p.fabricInspection); const outcome = fabricOutcome(row); assertConclusionMatches(p.result, outcome); return { ...row, outcome }; })();
-            f.qcReports.push({ ...(aql ? { aql } : {}), ...(fabricInspection ? { fabricInspection } : {}), id, taskId: t.id, location, result: p.result, report, opinion, measurements, fileIds, reviewer: ctx.actorName, reviewedAt, scopeRevision: scopeRevision(root, t), sizeChecks, ...(previous ? { previousReportId: previous } : {}) });
+            f.qcReports.push({ ...(aql ? { aql } : {}), ...(fabricInspection ? { fabricInspection } : {}), id, taskId: t.id, location, result: p.result, report, opinion, measurements, ...(fabricMeasurements.length ? { fabricMeasurements } : {}), fileIds, reviewer: ctx.actorName, reviewedAt, scopeRevision: scopeRevision(root, t), sizeChecks, ...(previous ? { previousReportId: previous } : {}) });
             t.reportIds.push(id);
             t.state = p.result === 'reject' ? 'blocked' : (t.kind === 'production' || t.kind === 'patrol') && (needsResume || p.result === 'conditional') ? 'awaiting_business' : 'reported';
             if (t.source.kind === 'orderLine' && t.source.productionId) {
@@ -1674,8 +1797,10 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const latest = get(f.qcReports, t.reportIds.at(-1) || '', 'QC报告');
             if (latest.result === 'reject' || latest.scopeRevision !== scopeRevision(root, t))
                 fail('不通过的QC报告不能确认采用');
+            const note=text(p.note,'需求方确认依据');
+            archiveQcBusiness(root,t,ctx,'confirmation_changed');
             delete t.businessContinued;
-            t.businessConfirmation = { result: p.result, note: text(p.note, '需求方确认依据'), actor: ctx.actorName, at: ctx.now };
+            t.businessConfirmation = { result: p.result, note, reportId:latest.id,actor: ctx.actorName,...(ctx.actorId?{actorId:ctx.actorId}:{}), at: ctx.now };
             audit(root,ctx,'qc',t.id,'业务记录需求方样品确认',target(t.source),notificationOwners(root,'qc',t.id));
             return { id: t.id };
         }
@@ -1686,8 +1811,9 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const latest = get(f.qcReports, t.reportIds.at(-1) || '', '当前报告');
             if (latest.result === 'reject' || latest.scopeRevision !== scopeRevision(root, t)) fail('当前实物需要有效复验报告');
             const note = text(p.note, '恢复依据');
+            if(t.businessContinued)archiveQcBusiness(root,t,ctx,'continuation_changed');
             t.state = 'reported';
-            t.businessContinued = { reportId: latest.id, actor: ctx.actorName, at: ctx.now, note };
+            t.businessContinued = { reportId: latest.id, actor: ctx.actorName,...(ctx.actorId?{actorId:ctx.actorId}:{}), at: ctx.now, note };
             if (t.source.kind === 'orderLine' && t.source.productionId) {
                 const job = liveBranch(root, t.source.productionId);
                 if (job.risk?.startsWith('QC 不通过：'))
@@ -1885,6 +2011,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (!['material', 'finished', 'processing'].includes(p.kind))
                 fail('采购类型无效');
             const quantity = qty(p.quantity), price = qty(p.price, '单价', true);
+            const finishedProblem = garmentFinishedPurchaseProblem(order,get(root.orderLines,p.lineId,'订单条目'),p.kind,text(p.unit,'单位'),quantity);
+            if (finishedProblem) fail(finishedProblem);
             lineAmount(quantity, price);
             const supplierId = text(p.supplierId, '供应商ID'), supplierRecord = get(root.market.suppliers, supplierId, '供应商');
             const supplierBlocked = productionSupplierUnavailableReason(supplierRecord, supplierBusinessDay(ctx.now));
@@ -1991,6 +2119,11 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const intermediate = isFabricIntermediateProcessing(purchase);
             if (production && (purchase.kind === 'processing' || purchase.domain === 'garment' && purchase.kind === 'finished')) requireProductionRelease(root, production, ctx);
             const quantity = qty(p.quantity, '实收数量', true), rejected = qty(p.rejected, '拒收数量', true), location = text(p.location, '实际收货地点'), date = day(p.date, '收货日期'), evidence = text(p.evidence, '交接依据'), fileIds = files(root, p.fileIds);
+            const order = get(root.orders, purchase.orderId, '订单');
+            for (const [value,label] of [[quantity,'实收数量'],[rejected,'拒收数量']] as const) {
+                const problem = garmentDeliveryQuantityProblem(order,purchase.kind,value,label);
+                if (problem) fail(problem);
+            }
             if (completion && sum([purchase.received, quantity]) > completion.quantity) fail('累计实收不能超过已登记的最终完工数量');
             if (sum([quantity, rejected]) <= 0) fail('实收与拒收数量至少有一项大于零');
             if (date > platformBusinessDate(ctx.now))
@@ -2040,8 +2173,11 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (blocker) fail(blocker, 'PRECONDITION');
             const purchase = get(f.purchases, receipt.purchaseId, '采购');
             const quantity = qty(p.quantity, '转拒收数量'), location = text(p.location, '拒收货物位置'), evidence = text(p.evidence, '拒收依据');
+            const problem = garmentDeliveryQuantityProblem(get(root.orders,purchase.orderId,'订单'),purchase.kind,quantity,'转拒收数量');
+            if (problem) fail(problem);
             if (quantity > receipt.quantity) fail('转拒收数量超过本次合格实收数量');
             const stock = f.stock.find(row => row.receiptId === receipt.id && row.purchaseId === purchase.id)!;
+            const unresolved=unresolvedCommercialLoanSource(root,stock);if(unresolved)fail(unresolved);
             if (quantity > stock.available) fail('本次收货的可用库存不足');
             const sourceLocation = removeAtPosition(stock, quantity, p.sourceLocation);
             if (stock.onHand !== undefined) stock.onHand = sum([stock.onHand, -quantity]);
@@ -2067,6 +2203,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const purchase = get(f.purchases, receipt.purchaseId, '采购');
             if (purchase.state !== 'approved') fail('仅已批准采购可登记退换', 'PRECONDITION');
             const quantity = qty(p.quantity, '退换数量'), date = day(p.date, '退换日期'), evidence = text(p.evidence, '退换依据');
+            const problem = garmentDeliveryQuantityProblem(get(root.orders,purchase.orderId,'订单'),purchase.kind,quantity,'退换数量');
+            if (problem) fail(problem);
             if (!['replace', 'noReplace'].includes(p.disposition)) fail('请选择供应商补发或不再补发');
             if (date > platformBusinessDate(ctx.now)) fail('退换日期不得在未来');
             if (date < receipt.date) fail('退换日期不能早于收货日期');
@@ -2097,6 +2235,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         }
         case 'fulfillment.inventory.move': {
             const stock = get(f.stock, p.id, '库存批次');
+            const unresolved=unresolvedCommercialLoanSource(root,stock);if(unresolved&&p.kind!=='return')fail(unresolved);
             if(stock.sourceKind==='claimReturn')fail('退回隔离库存仅可按案件实际处置，不能通用出库、退回或移位');
             if (!['issue', 'return', 'move'].includes(p.kind))
                 fail('库存操作无效');
@@ -2391,6 +2530,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (s.arrival) fail('已登记到港');
             const at = instant(p.at, ctx, '实际到港时间');
             if (s.departedAt && at < s.departedAt) fail('到港不得早于离港');
+            if (s.delivered && at > s.delivered.at) fail('到港不得晚于客户签收');
             s.arrival = { at, evidence: text(p.evidence, '到港依据'), actor: ctx.actorName };
             audit(root,ctx,'shipment',s.id,'已登记到港',{ view: 'shipments', id: s.id },notificationOwners(root,'shipment',s.id));
             return { id: s.id };
@@ -2436,6 +2576,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         }
         case 'fulfillment.shipments.depart': {
             const s = get(f.shipments, p.id, '出运');
+            if(shipmentHasDeparted(s))fail('本批已登记实际出运','PRECONDITION');
             if (s.state !== 'ready' || !s.documentsSentAt)
                 fail('需完成单据准备并由业务登记对客发送');
             if (!f.customs.some(c => c.shipmentId === s.id && c.status === 'cleared'))
@@ -2446,6 +2587,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             {const error=packingBreakdownBlocker(root,s);if(error)fail(error);}
             assertCurrentShipmentTolerance(root, s);
             requiredShipmentDocuments(root, s);
+            const sampleCustodyBlocker=shipmentSampleCustodyBlocker(root as MistState,s);if(sampleCustodyBlocker)fail(sampleCustodyBlocker,'PRECONDITION');
             const at = instant(p.at, ctx, '实际离港/起飞时间');
             if (at < s.documentsSentAt!)
                 fail('实际出运不得早于单据发送');
@@ -2458,6 +2600,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             s.state = 'departed';
             // Finished goods held in our warehouse for these lines leave stock with the shipment.
             autoIssueForDeparture(root, s, ctx);
+            consumeShipmentSamples(root as MistState,s,ctx);
             audit(root,ctx,'shipment',s.id,'已登记实际出运',{ view: 'orders/detail', id: s.lines[0].orderId, orderLineId: s.lines[0].lineId },notificationOwners(root,'shipment',s.id));
             if (hold.risk?.release) { Object.assign(hold.risk.release, { shipmentId: s.id, shipmentCode: s.code, usedAt: ctx.now }); audit(root,ctx,'risk',hold.risk.id,`带风险放行已用于 ${s.code}（往来冻结中，下一票须重新申请）`,{ view: 'risks', id: hold.risk.id },notificationOwners(root,'risk',hold.risk.id)); }
             return { id: s.id };
@@ -2550,11 +2693,16 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (old && p.baseDocumentId) fail('已有单据不可更换版本来源');
             const base = p.baseDocumentId ? get(f.documents, p.baseDocumentId, '版本来源') : undefined;
             if (base && (base.shipmentId !== s.id || base.type !== p.type || base.orderId !== (p.orderId || ''))) fail('版本来源必须属于同一出运、类型和订单');
+            const ciOrder=p.type==='CI'?get(root.orders,p.orderId,'订单'):undefined;
+            const dueCondition=ciOrder&&!ciOrder.replacementSource?shipmentReceivableDueCondition(ciOrder.governance?.contract):null;
+            if(dueCondition&&p.dueDate)fail(fixedShipmentReceivableDueProblem(dueCondition));
             const id = old?.id || ctx.id();
             const familyId = p.type === 'OTHER' ? old?.familyId || old?.id || base?.familyId || base?.id || id : undefined;
             const family = fulfillmentDocumentFamily({ id, shipmentId: s.id, orderId: p.orderId || '', type: p.type, ...(familyId ? { familyId } : {}) });
             const version = old?.version || Math.max(0, ...f.documents.filter(d => fulfillmentDocumentFamily(d) === family).map(d => d.version)) + 1;
-            const row: FulfillmentDocument = { id, ...(familyId ? { familyId } : {}), shipmentId: s.id, orderId: p.orderId || '', type: p.type, number: text(p.number, '单据编号'), version, title: text(p.title, '标题'), dueDate: day(p.dueDate, 'CI合同应收日', p.type === 'CI'&&!root.orders.find(o=>o.id===p.orderId)?.replacementSource), content: text(p.content, '单据正文'), fileIds: files(root, p.fileIds), status: 'draft', createdAt: old?.createdAt || ctx.now, actor: ctx.actorName };
+            const row: FulfillmentDocument = { id, ...(familyId ? { familyId } : {}), shipmentId: s.id, orderId: p.orderId || '', type: p.type, number: text(p.number, '单据编号'), version, title: text(p.title, '标题'), dueDate: dueCondition?'':day(p.dueDate, 'CI合同应收日', p.type === 'CI'&&!root.orders.find(o=>o.id===p.orderId)?.replacementSource), content: text(p.content, '单据正文'), fileIds: files(root, p.fileIds), status: 'draft', createdAt: old?.createdAt || ctx.now, actor: ctx.actorName };
+            if(dueCondition)row.receivableDueCondition=dueCondition;
+            if(old&&!dueCondition)delete old.receivableDueCondition;
             if (old)
                 Object.assign(old, row);
             else
@@ -2572,6 +2720,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (POST_DEPARTURE_TYPES.includes(d.type)) { if (s.state === 'cancelled') fail('出运已取消'); } else requireEditableShipment(s);
             if (!d.fileIds.length)
                 fail('请生成或上传核对后的正式单据文件');
+            const cdIssueProblem=cdDocumentIssueProblem(root,d);if(cdIssueProblem)fail(cdIssueProblem);
             if (f.documents.some(o => o.id !== d.id && o.shipmentId === d.shipmentId && o.orderId === d.orderId && o.type === d.type && o.status === 'issued'))
                 fail('相同来源已有有效签发版本');
             if(d.type==='PL'){const error=packingBreakdownBlocker(root,s);if(error)fail(error);}
@@ -2579,6 +2728,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 fail('装箱分配未匹配计划');
             if (d.type === 'CI') {
                 const order = get(root.orders, d.orderId, '订单');
+                const dueCondition=!order.replacementSource?shipmentReceivableDueCondition(order.governance?.contract):null;
+                if((dueCondition&&(!d.receivableDueCondition||stableJson(d.receivableDueCondition)!==stableJson(dueCondition)||d.dueDate))||(!dueCondition&&d.receivableDueCondition))fail('CI合同账期来源已变，请重新核对草稿');
                 if(order.replacementSource){
                     assertMistOrderApproved(root,order.id);
                     const amount=sum(s.lines.filter(l=>l.orderId===order.id).map(l=>lineAmount(l.quantity,replacementDeclaredUnitPrice(root,s.id,order.id,l.lineId)!)));
@@ -2595,7 +2746,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 if (capProblem) fail(capProblem === 'total' ? 'CI金额超过来源订单尚未开票额度' : capProblem);
                 const id = ctx.id();
                 // CI 只形成待财务确认的应收：确认前不计入余额、账龄、报表、催收，也不能核销。
-                root.invoices.push({ id, code: d.number, orderId: order.id, order: order.code, customer: order.customer, due: d.dueDate, amount, open: 0, currency: order.currency, financeStatus: 'pending', sourceDocumentId: d.id, issuedLinePrices, issuedById: ctx.actorId, issuedAt: platformBusinessDate(ctx.now) });
+                root.invoices.push({ id, code: d.number, orderId: order.id, order: order.code, customer: order.customer, due: d.dueDate, amount, open: 0, currency: order.currency, financeStatus: 'pending', sourceDocumentId: d.id, ...(d.receivableDueCondition?{receivableDueCondition:structuredClone(d.receivableDueCondition)}:{}), issuedLinePrices, issuedById: ctx.actorId, issuedAt: platformBusinessDate(ctx.now) });
                 d.invoiceId = id;
                 }
             }

@@ -111,6 +111,46 @@ const ADMIN_ROLES: Role[] = [
   { id: 'role-super-admin', name: '超级管理员' },
 ];
 
+describe('order main organization authority (D10)',()=>{
+ const company='main-company';
+ const member=(id:string,dept:string|null='business',status='active'):User=>({...u(id,dept,status),companyMembers:[{companyId:company,status:'active'}]});
+ const system=(id:string,code:string):Role=>({id,code,name:'Display name is not authority',companyId:company,isSystem:true});
+ const bossRole=system('boss-role','role-super-admin'),managerRole=system('manager-role','role-sales-manager');
+ function fixture(headId:string|null='head'){
+  const data={users:[member('sales'),member('head'),member('manager-2'),member('boss','office')],departments:[{...d('business',headId,'root'),companyId:company},{...d('office',null,'root'),companyId:company},{...d('root'),companyId:company}],roles:[bossRole,managerRole],userRoles:[ur('head',managerRole.id,'business'),ur('manager-2',managerRole.id,'business'),ur('boss',bossRole.id,'office')]};
+  const service=createApprovalRoutingService({prisma:makePrisma(data),companyId:company,eligibleReviewerIds:data.users.map(x=>x.id)});return{data,service};
+ }
+ it('returns the appointed department head and company leadership, without granting an ordinary requester',async()=>{
+  const{service}=fixture();expect(await service.resolveOrderMainReviewers('sales')).toEqual({reviewerIds:['head','boss'],departmentSnapshotId:'business'});
+ });
+ it('keeps a qualified department requester in the main set while the ordinary independent-review route still goes upward',async()=>{
+  const{service}=fixture();expect((await service.resolveOrderMainReviewers('head')).reviewerIds).toEqual(['head','boss']);expect((await service.resolveReviewerByDepartment('head')).reviewerId).toBe('boss');
+ });
+ it('lets the qualified company leader submit a main order without inventing a higher reviewer',async()=>{
+  const{service}=fixture();expect((await service.resolveOrderMainReviewers('boss')).reviewerIds).toEqual(['boss']);
+ });
+ it('includes every qualified department manager when no appointed head exists, with leadership as backup',async()=>{
+  const{service}=fixture(null);expect((await service.resolveOrderMainReviewers('head')).reviewerIds).toEqual(['head','manager-2','boss']);
+ });
+ it('filters a revoked head out through the server-owned candidate ceiling and uses the existing manager fallback',async()=>{
+  const{data}=fixture();const service=createApprovalRoutingService({prisma:makePrisma(data),companyId:company,eligibleReviewerIds:['sales','manager-2','boss']});expect((await service.resolveOrderMainReviewers('sales')).reviewerIds).toEqual(['manager-2','boss']);
+ });
+ it.each(['disabled','departed','foreign','custom-name'])('does not turn a %s leader into main authority',async(condition)=>{
+  const{data}=fixture(null);data.users=data.users.filter(x=>['sales','boss'].includes(x.id));data.userRoles=data.userRoles.filter(x=>x.userId==='boss');
+  if(condition==='disabled')data.users.find(x=>x.id==='boss')!.status='disabled';
+  if(condition==='departed')data.users.find(x=>x.id==='boss')!.companyMembers![0].status='suspended';
+  if(condition==='foreign')data.users.find(x=>x.id==='boss')!.companyMembers![0].companyId='other-company';
+  if(condition==='custom-name')data.roles=[{...bossRole,name:'老板',code:'custom-job',isSystem:false}];
+  await expect(createApprovalRoutingService({prisma:makePrisma(data),companyId:company,eligibleReviewerIds:['sales','boss']}).resolveOrderMainReviewers('sales')).rejects.toMatchObject({code:NO_REVIEWER_RESOLVED});
+ });
+ it('does not cross a foreign ancestor and deduplicates a leader appointed at multiple levels',async()=>{
+  const{data}=fixture();data.departments.find(x=>x.id==='root')!.headId='head';data.departments.find(x=>x.id==='root')!.parentId='foreign';data.departments.push({...d('foreign','outsider'),companyId:'other-company'});data.users.push({...member('outsider'),companyMembers:[{companyId:'other-company',status:'active'}]});const service=createApprovalRoutingService({prisma:makePrisma(data),companyId:company,eligibleReviewerIds:data.users.map(x=>x.id)});expect((await service.resolveOrderMainReviewers('sales')).reviewerIds).toEqual(['head','boss']);
+ });
+ it('requires an explicit company context for the new main organization path',async()=>{
+  const{data}=fixture();await expect(createApprovalRoutingService({prisma:makePrisma(data),companyId:null}).resolveOrderMainReviewers('sales')).rejects.toMatchObject({code:NO_REVIEWER_RESOLVED});
+ });
+});
+
 describe('approvalRoutingService: 索赔任意金额总领导路线', () => {
   it('普通部门 head/销售主管不能替代唯一真实 ADMIN 总领导', async () => {
     const prisma = makePrisma({ users: [u('u_sun', 'dept_a'), u('manager', 'dept_a'), u('leader')],
@@ -423,4 +463,25 @@ it('binds an implicit request company at operation time without sharing it betwe
  const results=await Promise.all(['a','b'].map(companyId=>runWithCompanyContext(companyId,()=>service.resolveClaimLeader(`requester-${companyId}`))));
  expect(results.map(row=>row.reviewerId)).toEqual(['leader-a','leader-b']);
  expect((await runWithCompanyContext('b',()=>createApprovalRoutingService({prisma,companyId:'a'}).resolveClaimLeader('requester-a'))).reviewerId).toBe('leader-a');
+});
+
+it.each(['active','inactive'])('prefers the current company job department over a stale %s global primary department',async status=>{
+ const active=(id:string,dept:string|null=null):User=>({...u(id,dept),companyMembers:[{companyId:'company-a',status:'active'}]});
+ const sales:Role={id:'sales-a',companyId:'company-a',code:'role-sales',isSystem:true,name:'业务员'},manager:Role={id:'manager-a',companyId:'company-a',code:'role-sales-manager',isSystem:true,name:'主管'},admin:Role={id:'admin-a',companyId:'company-a',code:'role-super-admin',isSystem:true,name:'总经理'};
+ const prisma=makePrisma({users:[active('requester','old'),active('old-head','old'),active('head','current'),active('boss')],roles:[sales,manager,admin],departments:[{...d('old','old-head'),companyId:'company-a',status},{...d('current','head'),companyId:'company-a'}],userRoles:[ur('requester',sales.id,'current'),ur('head',manager.id,'current'),ur('old-head',manager.id,'old'),ur('boss',admin.id)]});
+ const routing=createApprovalRoutingService({prisma,companyId:'company-a'});
+ expect(await routing.resolveOrderMainReviewers('requester')).toEqual({reviewerIds:['head','boss'],departmentSnapshotId:'current'});
+ expect((await routing.resolveReviewerByDepartment('requester')).reviewerId).toBe('head');
+ expect(await routing.resolveRequesterDepartmentSnapshot('requester')).toEqual({departmentSnapshotId:'current'});
+});
+it('resolves a validated submitted department without reopening an ended requester, within the current company and candidate ceiling',async()=>{
+ const member=(id:string):User=>({...u(id),companyMembers:[{companyId:'company-a',status:'active'}]}),admin:Role={id:'admin-a',companyId:'company-a',code:'role-super-admin',isSystem:true,name:'总经理'};
+ const prisma=makePrisma({users:[member('head'),member('boss')],roles:[admin],departments:[{...d('original','head'),companyId:'company-a'},{...d('foreign','head'),companyId:'company-b'}],userRoles:[ur('boss',admin.id)]});
+ const service=createApprovalRoutingService({prisma,companyId:'company-a',eligibleReviewerIds:['head','boss']});expect(await service.resolveSubmittedOrderMainReviewers('original')).toEqual({reviewerIds:['head','boss'],departmentSnapshotId:'original'});await expect(service.resolveSubmittedOrderMainReviewers('foreign')).rejects.toThrow('提交部门不可核验');
+ await expect(createApprovalRoutingService({prisma,companyId:'company-a',eligibleReviewerIds:[]}).resolveSubmittedOrderMainReviewers('original')).rejects.toMatchObject({code:NO_REVIEWER_RESOLVED});
+});
+it('rejects multiple current company job departments even when the global primary department names one of them',async()=>{
+ const member=(id:string,dept:string|null):User=>({...u(id,dept),companyMembers:[{companyId:'company-a',status:'active'}]}),sales:Role={id:'sales-a',companyId:'company-a',code:'role-sales',isSystem:true,name:'业务员'},second:Role={...sales,id:'second-job',isSystem:false};
+ const prisma=makePrisma({users:[member('requester','one'),member('head-one','one'),member('head-two','two')],roles:[sales,second],departments:[{...d('one','head-one'),companyId:'company-a'},{...d('two','head-two'),companyId:'company-a'}],userRoles:[ur('requester',sales.id,'one'),ur('requester',second.id,'two')]});
+ await expect(createApprovalRoutingService({prisma,companyId:'company-a'}).resolveOrderMainReviewers('requester')).rejects.toThrow('部门归属不唯一');
 });

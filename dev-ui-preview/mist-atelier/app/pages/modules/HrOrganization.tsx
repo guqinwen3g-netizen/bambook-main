@@ -15,7 +15,7 @@ import { FailureNotice } from '../../runtime/FailureNotice';
 const message = (e: unknown, fallback: string) => e instanceof Error ? e.message : fallback;
 type Directory = { people: OrgPerson[]; departments: OrgDepartment[]; jobs: OrgJob[]; positionNames: Record<string, string>; teams: OrgTeam[]; employees: EmployeeProfile[] };
 type Open = { kind: 'dept' | 'team' | 'person'; id: string } | null;
-type DeptForm = { kind: 'dept'; id?: string; name: string; attributes: BusinessAttribute[] };
+type DeptForm = { kind: 'dept'; id?: string; name: string; attributes: BusinessAttribute[];headId:string;originalHeadId:string|null;originalUpdatedAt?:string };
 type TeamForm = { kind: 'team'; id?: string; departmentId: string; name: string; description: string };
 type Form = DeptForm | TeamForm;
 type Confirm = { kind: 'retire'; department: OrgDepartment; target: string } | { kind: 'dissolve'; team: OrgTeam } | { kind: 'remove'; team: OrgTeam; person: OrgPerson | { id: string; displayName: string } } | null;
@@ -38,6 +38,7 @@ export function HrOrganizationPage() {
 export function HrOrganization({ part }: { part: 'org' | 'people' }) {
   const session = useMistSession(), workspace = useMistWorkspace(), { route, go } = useNav(), toast = useToast();
   const canRead = session.hasPermission('hr:read') || session.hasPermission('hr:write'), canWrite = session.hasPermission('hr:write');
+  const canAssignHead=session.hasPermission('users:admin');
   const [data, setData] = React.useState<Directory | null>(null), [loading, setLoading] = React.useState(true), [error, setError] = React.useState('');
   const [open, setOpen] = React.useState<Open>(null), [form, setForm] = React.useState<Form | null>(null), [formError, setFormError] = React.useState('');
   const [confirm, setConfirm] = React.useState<Confirm>(null), [busy, setBusy] = React.useState(false);
@@ -51,7 +52,9 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
     try {
       const [personnel, teams, employees] = await Promise.all([organizationApi.personnel(), organizationApi.teams(), organizationApi.employees()]);
       if (run === serial.current) setData({ people: personnel.personnel ?? [], departments: personnel.departments ?? [], jobs: personnel.jobs ?? [], positionNames: personnel.positionNames ?? {}, teams: (teams.teams ?? []).filter(t => t.status !== 'dissolved'), employees: employees.employees ?? [] });
-    } catch (e) { if (run === serial.current) setError(message(e, '组织架构读取失败')); }
+    } catch (e) {
+      if (run === serial.current) { setData(null); setError(message(e, '组织架构读取失败')); }
+    }
     finally { if (run === serial.current) setLoading(false); }
   }, []);
   React.useEffect(() => { setData(null); setOpen(null); setForm(null); if (!session.localMode && canRead) void load(); else setLoading(false); return () => { serial.current++; }; }, [session.sessionKey, session.localMode, canRead, load]);
@@ -74,6 +77,19 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
   const root = data?.departments.find(d => !d.parentId) ?? null;
   const departments = (data?.departments ?? []).filter(d => d.parentId);
   const person = (userId: string) => data?.people.find(p => p.id === userId);
+  const headCandidates=(data?.people??[]).filter(p=>{
+    const profiles=data?.employees.filter(e=>e.userId===p.id)??[];
+    return p.status==='active'&&(!profiles.length||profiles.some(e=>e.employmentStatus==='Probation'||e.employmentStatus==='Regular'));
+  });
+  const selectedHead=form?.kind==='dept'&&form.headId?person(form.headId):undefined;
+  const hasOldMainReviews=form?.kind==='dept'&&!!form.id&&canAssignHead&&session.hasPermission('orders:read')&&(form.headId||null)!==form.originalHeadId&&(workspace.state?.orders??[]).some(order=>order.governance?.rounds?.some(round=>{
+    if(round.status!=='pending')return false;
+    const source=round.approvalSource;
+    return source?.schemaVersion===1&&source.companyId===session.user?.companyId&&source.departmentSnapshotId===form.id||!!form.originalHeadId&&round.reviewerIds.includes(form.originalHeadId);
+  }));
+  const headHint=[selectedHead?.department&&form?.kind==='dept'&&selectedHead.departmentId!==form.id?ui`负责人来自${selectedHead.department}`:'',hasOldMainReviews?uiText('原主单待审保留原指派'):''].filter(Boolean).join(' · ');
+  const headOptions=headCandidates.map(p=>({value:p.id,label:p.displayName+(p.department?' · '+p.department:'')}));
+  if(form?.kind==='dept'&&form.headId&&!headOptions.some(o=>o.value===form.headId))headOptions.unshift({value:form.headId,label:ui`${selectedHead?.displayName||uiText('原负责人')}（已不可用）`});
   const activeMembers = (team: OrgTeam) => team.members.filter(m => !m.leftAt);
   const teamOf = (userId: string) => data?.teams.find(t => activeMembers(t).some(m => m.userId === userId)) ?? null;
   const openDept = open?.kind === 'dept' ? departments.find(d => d.id === open.id) ?? null : null;
@@ -108,19 +124,28 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
     setFormError('');
     if (form.kind === 'dept' && !form.name.trim()) return setFormError('请填写部门名称');
     if (form.kind === 'dept' && !form.id && !root) return setFormError('没有找到公司根部门，无法新建');
+    if(form.kind==='dept'&&(form.headId||null)!==form.originalHeadId&&!canAssignHead)return setFormError('当前账号不能设置部门负责人');
+    if(form.kind==='dept'&&form.id&&!form.originalUpdatedAt)return setFormError('部门资料不可用，请重新打开后核对。');
     if (form.kind === 'team' && (!form.name.trim() || !form.departmentId)) return setFormError('请填写小组名称并选择所属部门');
     setBusy(true);
     try {
       if (form.kind === 'dept') {
-        if (form.id) await organizationApi.updateDepartment(form.id, { name: form.name.trim(), businessAttributes: form.attributes });
-        else await organizationApi.createDepartment({ name: form.name.trim(), parentId: root!.id, businessAttributes: form.attributes });
+        // An unrelated HR edit must preserve any newer appointment made after this form opened.
+        const head=canAssignHead&&(form.headId||null)!==form.originalHeadId?{headId:form.headId||null,...(form.id?{expectedHeadId:form.originalHeadId}:{})}:{};
+        if (form.id) await organizationApi.updateDepartment(form.id, { name: form.name.trim(), businessAttributes: form.attributes,expectedUpdatedAt:form.originalUpdatedAt!,...head });
+        else await organizationApi.createDepartment({ name: form.name.trim(), parentId: root!.id, businessAttributes: form.attributes,...head });
       } else if (form.kind === 'team') {
         if (form.id) await organizationApi.updateTeam(form.id, { name: form.name.trim(), description: form.description.trim() });
         else await organizationApi.createTeam({ name: form.name.trim(), departmentId: form.departmentId, description: form.description.trim() || undefined });
       }
       toast(form.id ? '已保存' : form.kind === 'dept' ? '部门已新建' : '小组已新建');
       setForm(null); await load();
-    } catch (e) { setFormError(message(e, '保存未完成')); }
+    } catch (e) {
+      setFormError(message(e, '保存未完成'));
+      // Keep this editor's input/version, but let a reopened editor use the actual current source.
+      // A slow refresh must not trap the user in the rejected form.
+      if(form.kind==='dept'&&form.id){setBusy(false);await load();}
+    }
     finally { setBusy(false); }
   };
   const decide = async () => {
@@ -133,6 +158,7 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
 
   if (session.localMode) return <Banner variant="status" tone="neutral" title={uiText("本机演示模式没有组织架构")}>{uiText("连接公司服务器后维护。")}</Banner>;
   if (!canRead) return <Banner variant="status" tone="neutral" title={uiText("当前账号没有人事查看权限")} />;
+  if (error) return <FailureNotice title="组织架构读取失败" detail={error} retry={() => void load()} />;
   const refresh = <Button icon={RefreshCw} loading={loading} onClick={() => void load()}>{uiText("重新读取")}</Button>;
 
   const deptColumns: Column<OrgDepartment>[] = [
@@ -156,9 +182,8 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
   const expiring = (data?.employees ?? []).filter(e => e.contractEnd && e.contractEnd <= soon && !['Resigned', 'Terminated'].includes(e.employmentStatus)).sort((a, b) => (a.contractEnd || '').localeCompare(b.contractEnd || ''));
   return <>
     {part === 'people' && expiring.length > 0 && <Banner tone="warn" title={uiText(`劳动合同 30 天内到期 · ${expiring.length} 人`)}>{expiring.slice(0, 6).map(e => <span key={e.userId} className="mist-row" style={{ gap: 6 }}><TextLink onClick={() => setOpen({ kind: 'person', id: e.userId })}>{e.displayName || e.employeeNo}</TextLink><span className={e.contractEnd! < today ? 'mist-tone-bad' : 'mist-note'}>{e.contractEnd}</span></span>)}</Banner>}
-    {error && <FailureNotice title={"组织架构读取失败"} detail={error} retry={() => void load()} />}
     <section className="mist-section">{part === 'org' ? <>
-      <Toolbar right={<>{refresh}{canWrite && <Button variant="primary" icon={Plus} disabled={!data} onClick={() => { setFormError(''); setForm({ kind: 'dept', name: '', attributes: [] }); }}>{uiText("新建部门")}</Button>}</>}>
+      <Toolbar right={<>{refresh}{canWrite && <Button variant="primary" icon={Plus} disabled={!data} onClick={() => { setFormError(''); setForm({ kind: 'dept', name: '', attributes: [],headId:'',originalHeadId:null }); }}>{uiText("新建部门")}</Button>}</>}>
         <span />
       </Toolbar>
       <Card><DataTable ariaLabel={uiText("部门")} rows={departments} rowKey={d => d.id} loading={loading && !data} selectedKey={openDept?.id ?? null} onRowClick={d => setOpen({ kind: 'dept', id: d.id })} columns={deptColumns}
@@ -173,15 +198,15 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
         empty={<EmptyState title={uiText(data?.people.length ? '没有符合条件的人员' : '还没有公司人员')} description={uiText(data?.people.length ? '调整搜索或部门后再看。' : undefined)} />} /></Card>
     </>}</section>
 
-    <Drawer open={!!openDept && !form} onClose={() => setOpen(null)} title={uiText(openDept?.name ?? '')} sub={uiText("部门")}
+    <Drawer open={!!openDept} onClose={() => setOpen(null)} title={uiText(openDept?.name ?? '')} sub={uiText("部门")}
       footer={openDept && canWrite && <div className="mist-row">
         <Button variant="primary" icon={Plus} onClick={() => { setFormError(''); setForm({ kind: 'team', departmentId: openDept.id, name: '', description: '' }); }}>{uiText("新建小组")}</Button>
-        <Button onClick={() => { setFormError(''); setForm({ kind: 'dept', id: openDept.id, name: openDept.name, attributes: [...(openDept.businessAttributes ?? [])] }); }}>{uiText("修改部门")}</Button>
+        <Button disabled={loading} onClick={() => { setFormError(''); setForm({ kind: 'dept', id: openDept.id, name: openDept.name, attributes: [...(openDept.businessAttributes ?? [])],headId:openDept.headId??'',originalHeadId:openDept.headId??null,originalUpdatedAt:openDept.updatedAt }); }}>{uiText("修改部门")}</Button>
         <Button onClick={() => setConfirm({ kind: 'retire', department: openDept, target: '' })}>{uiText("裁撤部门")}</Button>
       </div>}>
       {openDept && <>
         {operationError && <Banner tone="bad" title={uiText("操作未完成")}>{uiText(operationError)}</Banner>}
-        <KeyValue items={[{ label: '业务属性', value: <AttributePills values={openDept.businessAttributes} /> }, { label: '启用人员', value: data?.people.filter(p => p.departmentId === openDept.id && p.status === 'active').length ?? 0 }]} />
+        <KeyValue items={[{ label: '业务属性', value: <AttributePills values={openDept.businessAttributes} /> },{label:'部门负责人',value:openDept.headId?person(openDept.headId)?.displayName||'负责人已不可用':'未指定'}, { label: '启用人员', value: data?.people.filter(p => p.departmentId === openDept.id && p.status === 'active').length ?? 0 }]} />
         <CardHeader title={uiText("小组")} sub={ui`${teamsIn(openDept.id).length} 个`} />
         {teamsIn(openDept.id).length ? <DataTable ariaLabel={uiText("部门小组")} rows={teamsIn(openDept.id)} rowKey={t => t.id} onRowClick={t => setOpen({ kind: 'team', id: t.id })} columns={[
           { key: 'name', header: '小组', render: t => <><b>{t.name}</b>{t.description && <div className="mist-note">{t.description}</div>}</> },
@@ -192,7 +217,7 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
       </>}
     </Drawer>
 
-    <Drawer open={!!openTeam && !form} onClose={() => setOpen(null)} title={uiText(openTeam?.name ?? '')} sub={uiText(openTeam ? `小组 · ${openTeam.department ?? ''}` : undefined)}
+    <Drawer open={!!openTeam} onClose={() => setOpen(null)} title={uiText(openTeam?.name ?? '')} sub={uiText(openTeam ? `小组 · ${openTeam.department ?? ''}` : undefined)}
       footer={openTeam && canWrite && <div className="mist-row">
         <Button onClick={() => { setFormError(''); setForm({ kind: 'team', id: openTeam.id, departmentId: openTeam.departmentId, name: openTeam.name, description: openTeam.description ?? '' }); }}>{uiText("修改小组")}</Button>
         <Button onClick={() => setConfirm({ kind: 'dissolve', team: openTeam })}>{uiText("解散小组")}</Button>
@@ -228,15 +253,16 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
     </Drawer>
 
     <Drawer open={!!form} onClose={() => !busy && setForm(null)} title={uiText(form?.kind === 'dept' ? (form.id ? '修改部门' : '新建部门') : form?.id ? '修改小组' : '新建小组')}
-      footer={<div className="mist-row"><Button variant="primary" loading={busy} onClick={() => void submit()}>{uiText('保存')}</Button><Button disabled={busy} onClick={() => setForm(null)}>{uiText("取消")}</Button></div>}>
+      footer={<div className="mist-row"><Button variant="primary" loading={busy} disabled={loading} onClick={() => void submit()}>{uiText('保存')}</Button><Button disabled={busy} onClick={() => setForm(null)}>{uiText("取消")}</Button></div>}>
       {form && <>
         {formError && <Banner tone="bad" title={uiText("未保存")}>{formError}</Banner>}
         {form.kind === 'dept' ? <FormGrid>
           <Field label={uiText("部门名称")} required full><TextInput value={form.name} disabled={busy} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
-          <Field label={uiText("业务属性")} full hint={uiText("影响本部门全部成员")}><div className="mist-col">{BUSINESS_ATTRIBUTES.map(a => <Checkbox key={a.value} label={uiText(a.label)} checked={form.attributes.includes(a.value)} disabled={busy} onChange={on => setForm({ ...form, attributes: on ? [...form.attributes, a.value] : form.attributes.filter(v => v !== a.value) })} />)}</div></Field>
+          {canAssignHead&&<Field label={uiText('部门负责人')} full hint={headHint||undefined}><Select aria-label={uiText('部门负责人')} value={form.headId} disabled={busy} placeholder={uiText('未指定')} options={headOptions} onChange={e=>setForm({...form,headId:e.target.value})}/></Field>}
+          <Field group label={uiText("业务属性")} full hint={uiText("影响本部门全部成员")}><div className="mist-col">{BUSINESS_ATTRIBUTES.map(a => <Checkbox key={a.value} label={uiText(a.label)} checked={form.attributes.includes(a.value)} disabled={busy} onChange={on => setForm({ ...form, attributes: on ? [...form.attributes, a.value] : form.attributes.filter(v => v !== a.value) })} />)}</div></Field>
         </FormGrid> : <FormGrid>
           <Field label={uiText("小组名称")} required><TextInput value={form.name} disabled={busy} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
-          <Field label={uiText("所属部门")} required hint={uiText(form.id ? '小组成员须与部门一致，建立后不在此改部门。' : undefined)}><Select aria-label={uiText("所属部门")} value={form.departmentId} disabled={busy || !!form.id} placeholder={uiText("选择部门")} onChange={e => setForm({ ...form, departmentId: e.target.value })} options={departmentOptions(data?.departments ?? [])} /></Field>
+          <Field label={uiText("所属部门")} required hint={uiText(form.id ? '所属部门不可在此修改。' : undefined)}><Select aria-label={uiText("所属部门")} value={form.departmentId} disabled={busy || !!form.id} placeholder={uiText("选择部门")} onChange={e => setForm({ ...form, departmentId: e.target.value })} options={departmentOptions(data?.departments ?? [])} /></Field>
           <Field label={uiText("说明")} full><TextArea value={form.description} disabled={busy} onChange={e => setForm({ ...form, description: e.target.value })} /></Field>
         </FormGrid>}
       </>}

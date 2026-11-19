@@ -15,7 +15,7 @@ export type MistBillingRequest = {
   id: string; requestedAt: string; requestedBy: string; billTo: string; lines: MistBillingLine[]; totals: MistBillingTotal[];
   state: 'pending' | 'invoiced'; invoiceIds: string[]; invoicedAt?: string; invoicedBy?: string; taskId?: string;
 };
-export type MistDevelopmentExpense = { id: string; versionId?: string; amount: number; currency: string; description: string; date: string; at: string; actor: string };
+export type MistDevelopmentExpense = { id: string; versionId?: string; amount: number; currency: string; description: string; date: string; at: string; actor: string;sourceDispatchId?:string;sourceMovementIds?:string[] };
 export type MistDevelopmentCharge = { id: string; versionIds: string[]; description: string; amount: number; currency: string; evidence: string; at: string; actor: string; voided?: { at: string; actor: string; reason: string } };
 export type MistDevelopmentInvoiceRecord = { invoiceId: string; chargeIds: string[]; lines: MistDevelopmentCharge[]; fileIds: string[]; at: string; actor: string };
 export type MistDevBilling = {

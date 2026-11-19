@@ -1,6 +1,7 @@
 import {applyMistCommand,getMistReviewTasks,type MistCommand,type MistContext,type MistState} from './mistWorkspace';
 import {demoFileRecord,type DemoFileTemplate} from './mistDemoFiles';
 import {seedInternalFabricPlan} from './mistDemoInternalFabric';
+import {shippingSampleSourceSnapshot} from './mistShipmentSampleCustody';
 
 /** Completed seasonal business, with chronology and evidence generated from each exact source. */
 export function seedCompanyHistory(initial:MistState,contexts:{sales:MistContext;fabric:MistContext;finance:MistContext;qc:MistContext;logistics:MistContext;reviewer:MistContext;manager:MistContext},input:{month:number;family:'fabric'|'garment';customerId:string;productId:string}):MistState{
@@ -43,6 +44,7 @@ export function seedCompanyHistory(initial:MistState,contexts:{sales:MistContext
   run({type:'fulfillment.qc.report',payload:{id:taskId,domain:family,result:'pass',report:`QC-${year}${month}-${role}-${family}`,opinion:'规格、外观与封样一致，达到客户要求。',measurements:[],fileIds:[],reviewedAt:date(day)+'T08:00:00Z'}},'qc',day);
   run({type:'fulfillment.qc.confirm',payload:{id:taskId,result:'approved',note:'客户采购确认本批样品'}},'sales',day);
   run({type:'fulfillment.qc.continue',payload:{id:taskId,note:'业务复核通过，继续主线'}},'sales',day);
+  return sampleId;
  };
  sample(family==='fabric'?'pioneer':'pp',7);
  run({type:'fulfillment.production.release',payload:{productionId:production.id,note:'定金、封样与工厂回签齐全'}},'sales',8);
@@ -55,7 +57,9 @@ export function seedCompanyHistory(initial:MistState,contexts:{sales:MistContext
  run({type:'fulfillment.shipments.sourceTerms',payload:{orderId,consignee:customer.name,partialAllowed:false,mode:'sea',confirmedAt:date(3),evidence:'本批合同整票出运'}},'sales',20);
  run({type:'order.handoff',payload:{orderId,note:'交后勤办理订舱及出口单证'}},'sales',20);
  const shipmentId=run({type:'fulfillment.shipments.save',payload:{consignee:customer.name,mode:'sea',portOfLoading:'上海洋山',portOfDischarge:'汉堡',incoterm:'FOB',plannedDate:date(23),booking:`CPBK${year}${month}${family==='fabric'?'F':'G'}`,lines:[{orderId,lineId:line.id,productionId:production.id,quantity:qty,factoryConfirmedAt:date(18)}],note:'季度补单交付',fileIds:[]}},'sales',20).id!;
- sample('shipping',21,shipmentId);
+ const shippingSampleId=sample('shipping',21,shipmentId),shippingSample=state.fulfillment.samples.find(s=>s.id===shippingSampleId)!;
+ // This fixture's separately held confirmation specimen is additional to the commercial quantity.
+ run({type:'fulfillment.samples.shippingBasis',payload:{id:shippingSampleId,kind:'independent',sourceSnapshot:shippingSampleSourceSnapshot(state,shippingSample),independentSource:'工厂另行提供并留存在样品室 B-2 的独立确认样，不计入本票商业货物数量。',evidence:'本批确认样单独登记、送检并保管，商业货物按合同数量另行出运。',fileIds:[]}},'sales',21);
  run({type:'fulfillment.shipments.pack',payload:{id:shipmentId,lines:[{lineId:line.id,productionId:production.id,carton:'1-40',quantity:qty,netWeight:qty*0.5,grossWeight:qty*0.55,volume:4.8,note:'按合同唛头装箱'}]}},'logistics',21);
  let invoiceId='';
  for(const type of ['CI','PL'] as const){const fileId=proof(type==='CI'?'commercial-invoice':'packing-list',shipmentId,`${type}-${year}${month}-${family}.pdf`,22);const docId=run({type:'fulfillment.documents.save',payload:{shipmentId,orderId:type==='CI'?orderId:'',type,number:`${type}-${year}${month}-${family}`,title:product.name+' '+type,dueDate:type==='CI'?date(28):'',content:`${qty} ${unit} · FOB Shanghai`,fileIds:[fileId]}},'logistics',22).id!;const issued=run({type:'fulfillment.documents.issue',payload:{id:docId}},'logistics',22);if(type==='CI')invoiceId=String(issued.invoiceId);}

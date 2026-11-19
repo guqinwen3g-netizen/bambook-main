@@ -35,7 +35,16 @@ beforeEach(() => {
   store.run.mockImplementation(async command => { const result = applyMistCommand(store.state!, command, context); store.state = result.state; render(); return { requestId: 'request', revision: 1, result: result.result }; });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
-afterEach(() => { act(() => root.unmount()); host.remove(); delete (store.workspace as any).scopedFabricAccess; });
+afterEach(() => { act(() => root.unmount()); host.remove(); delete (store.workspace as any).scopedFabricAccess; delete (store.workspace as any).scopedFabricDestinations; });
+
+it('identifies a scoped destination without offering its hidden garment record',()=>{
+ const target=store.state!.orders.find(o=>o.id===orderId)!,targetLine=store.state!.orderLines.find(l=>l.id===lineId)!;
+ store.state!.internalFabricAllocations=[{id:'destination',orderId,lineId,fabricOrderId,fabricLineId,metres:'5',status:'active',revision:1,history:[],updatedAt:context.now,updatedBy:'garment-owner',updatedByName:'成衣负责人'}];
+ (store.workspace as any).scopedFabricDestinations={[fabricLineId]:[{allocationId:'destination',orderCode:target.code,lineStyle:targetLine.style,lineName:targetLine.name}]};
+ store.state!.orders=store.state!.orders.filter(o=>o.id!==orderId);store.state!.orderLines=store.state!.orderLines.filter(l=>l.id!==lineId);
+ render(true);expect(host.textContent).toContain(target.code+' · '+targetLine.style);
+ expect(queryByRole(host,'button',{name:'查看成衣条目'})).toBeNull();expect(store.run).not.toHaveBeenCalled();
+});
 
 it('offers a recipient-only source hint without exposing the underlying order',async()=>{
  const source=store.state!.orders.find(o=>o.id===fabricOrderId)!;const sourceLine=store.state!.orderLines.find(l=>l.id===fabricLineId)!;

@@ -1,6 +1,7 @@
 import {replacementDeclaredUnitPrice} from './mistClaimReplacement';
 import { nextSerialCode } from './mistBusinessClock';
 import {packingBreakdownBlocker,packingFabricSpecification} from './mistPackingBreakdown';
+import {convertLength} from '../lib/unitConversion';
 /**
  * 报关申报资料（2026-10-18 按《中华人民共和国海关进出口货物报关单填制规范》与《规范申报目录》的通行做法确定首版）。
  * - 商品归类库：单证员按款号建立归类档案——10 位商品编号（HS）、申报品名、申报要素（品牌类型、出口享惠情况及按章节的必报要素）、法定第一 / 第二计量单位。
@@ -56,6 +57,15 @@ export function defaultLegalUnits(hs: string): { legalUnit: string; secondUnit: 
 }
 const UNIT_ALIASES: Record<string, string> = { pcs: '件', pc: '件', piece: '件', pieces: '件', 件: '件', set: '套', sets: '套', 套: '套', m: '米', meter: '米', meters: '米', 米: '米', yd: '码', yds: '码', yard: '码', yards: '码', 码: '码', kg: '千克', kgs: '千克', 公斤: '千克', 千克: '千克', 条: '条', 双: '双' };
 export const normalizeUnit = (u: string) => UNIT_ALIASES[(u || '').trim().toLowerCase()] || (u || '').trim();
+const COUNT_UNITS = new Set(['件', '套', '条', '双', '个']);
+export const customsQuantityStep = (unit: string) => COUNT_UNITS.has(normalizeUnit(unit)) ? 1 : 0.0001;
+/** Validate the actual legal unit, including a count unit in the second position. */
+export function customsQuantityProblem(quantity: number, unit: string, label = '数量'): string {
+  if (!Number.isFinite(quantity) || quantity <= 0) return `${label}须大于 0`;
+  if (customsQuantityStep(unit) === 1) return Number.isSafeInteger(quantity) ? '' : `${label}按${normalizeUnit(unit)}计，须为整数`;
+  const stored = round(quantity, 4);
+  return Number.isFinite(stored) && stored > 0 ? '' : `${label}须大于 0`;
+}
 const styleKey = (s: string) => (s || '').trim().toUpperCase();
 const colorKey = (s:string) => (s || '').normalize('NFC').trim().toLowerCase();
 /** Allocate the original line's rounded cents without negative items or rounding drift. */
@@ -119,10 +129,14 @@ export function draftCustomsDeclaration(root: MistState, shipment: FulfillmentSh
   for (const g of groups.values()) {
     const quantity = round(g.lines.reduce((s, l) => s + l.quantity, 0)), net = round(g.lines.reduce((s, l) => s + l.net, 0), 2), amountMinor = g.lines.reduce((s, l) => s + l.amountMinor, 0);
     const styles = [...new Set(g.lines.map(l => l.style).filter(Boolean))];
-    const convert = (target: string): number | null => { const t = normalizeUnit(target); if (!t) return null; if (t === g.unit) return quantity; if (g.unit === '码' && t === '米') return round(quantity * 0.9144, 2); if (t === '千克') return net > 0 ? net : null; return null; };
+    const convert = (target: string): number | null => { const t = normalizeUnit(target); if (!t) return null; if (t === g.unit) return quantity; if (t === '千克') return net > 0 ? net : null; return convertLength(quantity,g.unit,t); };
     const legalQty = convert(g.cls.legalUnit), secondQty = g.cls.secondUnit ? convert(g.cls.secondUnit) : null;
     if (legalQty === null && packing.length) blockers.push(`${g.cls.declaredName}（${styles.join('/')}）：成交单位“${g.unit}”无法换算为法定单位“${g.cls.legalUnit}”，请核对归类档案的法定单位`);
     if (g.cls.secondUnit && secondQty === null && packing.length) blockers.push(`${g.cls.declaredName}（${styles.join('/')}）：第二单位“${g.cls.secondUnit}”取不到装箱净重`);
+    for (const [value, unit, label] of [[legalQty, g.cls.legalUnit, '法定数量'], [secondQty, g.cls.secondUnit, '第二数量']] as const) {
+      const problem = value === null ? '' : customsQuantityProblem(value, unit, label);
+      if (problem) blockers.push(`${g.cls.declaredName}（${styles.join('/')}）：${problem}`);
+    }
     items.push({ no: items.length + 1, classificationId: g.cls.id, lineKeys: g.lines.map(l => l.key), styles, hsCode: g.cls.hsCode, declaredName: g.cls.declaredName, elements: customsElementsText(g.cls, styles), quantity, unit: g.unit, legalQty: legalQty ?? 0, legalUnit: g.cls.legalUnit, secondQty, secondUnit: g.cls.secondUnit, unitPrice: quantity > 0 ? round(amountMinor / 100 / quantity) : 0, amount: amountMinor / 100, currency: g.currency, origin: '中国', destination: customer?.country || '' });
   }
   if (items.length > CUSTOMS_MAX_ITEMS) blockers.push(`商品项 ${items.length} 项，超过一份报关单 ${CUSTOMS_MAX_ITEMS} 项上限，请拆分出运`);
@@ -225,9 +239,9 @@ export function applyCustomsDeclarationCommand(root: MistState, command: Customs
     const item = (c.items || []).find(i => i.no === p.no) || fail('申报商品项不存在，请先生成', 'NOT_FOUND');
     const declaredName = str(p.declaredName, '申报品名', true, 50);
     const elements = str(p.elements, '申报要素', true, 255);
-    const qty = (v: unknown, label: string) => { const n = typeof v === 'number' ? v : Number(v); if (!Number.isFinite(n) || n <= 0) fail(`${label}须大于 0`); return round(n, 4); };
-    const legalQty = qty(p.legalQty, '法定数量');
-    const secondQty = item.secondUnit ? qty(p.secondQty, '第二数量') : null;
+    const qty = (v: unknown, label: string, unit: string) => { const n = typeof v === 'number' ? v : Number(v), problem = customsQuantityProblem(n, unit, label); if (problem) fail(problem); return customsQuantityStep(unit) === 1 ? n : round(n, 4); };
+    const legalQty = qty(p.legalQty, '法定数量', item.legalUnit);
+    const secondQty = item.secondUnit ? qty(p.secondQty, '第二数量', item.secondUnit) : null;
     const reason = str(p.reason, '调整原因', true, 200);
     const base = generatedItem(item), next = { declaredName, elements, legalQty, secondQty };
     const fields = CUSTOMS_ADJUSTABLE_FIELDS.filter(k => next[k] !== base[k]);

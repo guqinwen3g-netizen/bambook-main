@@ -108,6 +108,7 @@ describe('应收 → 多票核销 → 部分冲正', () => {
     f.ctx.now = '2026-10-05T02:00:00Z';
     f.invoice('i1', 108);
     f.run({ type: 'fxrate.period.save', payload: { month: '2026-10', currency: 'EUR', rate: '7.8', source: '月末牌价' } });
+    f.run({ type: 'fxrate.period.save', payload: { month: '2026-09', currency: 'USD', rate: '7.1', source: '上月牌价' } });
     f.run({ type: 'finance.reconcile', payload: { receiptId, invoiceId: 'i1', rate: '1.08', rateBasis: '客户确认' } });
     const lines = monthlyVouchers(f.state, '2026-10').filter(l => l.source.endsWith('/I1'));
     expect(lines.map(l => [l.currency, mistMoneyMinor(l.amount), l.rate])).toEqual([['EUR', 10000, 7.8], ['USD', 10800, null]]);

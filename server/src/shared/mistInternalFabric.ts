@@ -35,7 +35,7 @@ export type MaterialDeliveryLink = {
   receivingChecks?: MaterialReceivingCheck[];
 };
 export type MaterialReceivingCheck = { id: string; acceptedQuantity: string; rejectedQuantity: string; previousQuantity: string; previousRejected: string; at: string; actorId: string; actor: string; evidence: string };
-export type MaterialDeliveryRow = { id: string; kind: 'issue' | 'direct'; purchaseId: string; sourcePurchaseCode?:string; quantity: string; outstanding: string; accepted: string; rejected: string; pending: string; returned: string; unit: string; at: string; location: string; evidence: string; delivery: MaterialDeliveryLink };
+export type MaterialDeliveryRow = { id: string; kind: 'issue' | 'direct'; purchaseId: string; sourcePurchaseCode?:string; fileIds?:string[]; quantity: string; outstanding: string; accepted: string; rejected: string; pending: string; returned: string; unit: string; at: string; location: string; evidence: string; delivery: MaterialDeliveryLink };
 export const GARMENT_FULFILLMENT_LABELS: Record<GarmentFulfillmentMode, string> = { cmt: '纯 CMT', trims_cmt: '辅料 + CMT', full_package: '全包' };
 export const CMT_INCLUDED_ITEM_LABELS: Record<CmtIncludedItem, string> = { trims: '辅料', packaging: '包装' };
 export const MATERIAL_KIND_LABELS: Record<MistMaterialKind, string> = { fabric: '面料', greige: '坯布 / 纱线', trims: '辅料', packaging: '包装', other: '其他原料' };
@@ -144,6 +144,17 @@ export function garmentMaterialBlocker(root: MistState, orderId: string, lineId:
   try { assertGarmentMaterial(root, orderId, lineId, context); return ''; } catch (error) { if (error instanceof MistCommandError) return error.message; throw error; }
 }
 /** Material classification is a stored business field, never inferred from a description. */
+/** A finished garment purchase supplies the same physical pieces as its order line; materials keep their own units. */
+export function garmentFinishedPurchaseProblem(order:Pick<MistOrder,'type'>,line:Pick<MistOrderLine,'unit'>,kind:string,unit:string,quantity:number):string{
+  if(order.type!=='garment'||kind!=='finished')return '';
+  if(unit.trim()!==line.unit.trim())return `成衣成品计量单位须与订单条目一致（${line.unit}）；系统不自动换算`;
+  if(!Number.isInteger(quantity))return '成衣成品数量须为整数';
+  return '';
+}
+/** Finished garments and garment processing handovers count physical pieces/sets; materials retain their own quantity precision. */
+export function garmentDeliveryQuantityProblem(order:Pick<MistOrder,'type'>,kind:string,quantity:number,label:string):string{
+  return order.type==='garment'&&(kind==='finished'||kind==='processing')&&!Number.isSafeInteger(quantity)?`成衣${label}须为整数`:'';
+}
 export function assertGarmentProcurement(order: Pick<MistOrder, 'type'> & {id?:string}, line: GarmentFulfillmentFields & {id?:string}, kind: string, materialKind: unknown, root?:MistState, purchaseId?:string): MistMaterialKind | undefined {
   if (order.type === 'garment' && kind === 'finished' && normalizeGarmentFulfillment(line).fulfillmentMode !== 'full_package') fail('仅全包条目可采购成衣成品');
   if(order.type==='garment'&&root&&order.id&&line.id){
@@ -290,7 +301,7 @@ export function materialDeliveryRows(root: MistState): MaterialDeliveryRow[] {
     const allReturned = (r.returns || []).filter(row => !row.reversed).reduce((sum, row) => sum + quantityMinor(row.quantity), BigInt(0));
     const receiverReturned = allReturned > senderRejected ? allReturned - senderRejected : BigInt(0);
     const returned = receiverReturned < rejected ? receiverReturned : rejected;
-    result.push({ id: r.id, kind: 'direct', purchaseId: p.id, quantity: metresText(quantity), outstanding: metresText(quantity - returned), accepted: metresText(accepted), rejected: metresText(rejected), pending: metresText(quantity - accepted - rejected), returned: metresText(returned), unit: p.unit, at: r.date, location: r.location, evidence: r.evidence, delivery });
+    result.push({ id: r.id, kind: 'direct', purchaseId: p.id, ...(r.fileIds?.length?{fileIds:[...r.fileIds]}:{}), quantity: metresText(quantity), outstanding: metresText(quantity - returned), accepted: metresText(accepted), rejected: metresText(rejected), pending: metresText(quantity - accepted - rejected), returned: metresText(returned), unit: p.unit, at: r.date, location: r.location, evidence: r.evidence, delivery });
   }
   return result;
 }

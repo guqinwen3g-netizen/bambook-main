@@ -6,6 +6,8 @@ import { AccountAccessPage } from './pages/AccountAccessPage';
 import { ManualLink } from './pages/ManualLink';
 import { exitCompanyManagement } from './runtime/platformAdmin';
 import React from 'react';
+import {PageBackRegistrationContext,usePageBackAction} from '../../../components/mist/pageBack';
+import {PageNavigationGuardContext,usePageNavigationController} from '../../../components/mist/pageNavigation';
 import { buildPages, MODULE_VIEW_SET, PageLoadBoundary, AccountPage, PlatformSettingsPage, PlatformCompanySettingsPage } from './pageRegistry';
 import { PageLoading } from './PageLoading';
 import { ExportConfirmHost } from './runtime/ExportConfirmHost';
@@ -249,12 +251,16 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   // ord7：未查看过时按本人所在业务线落页签：只属面料组的员工默认「面料开发」。
   const myGroups = workspace.state?.memberGroups?.find(g => g.userId === session.user?.id)?.groups ?? [];
   const defaultDevelopmentTab: DevelopmentListTab = myGroups.includes('fabric') && !myGroups.includes('garment') ? 'fabric' : 'garment';
+  const {register:registerNavigationGuard,attempt:attemptNavigation,hasGuard:hasNavigationGuard}=usePageNavigationController();
+  const historyPosition=React.useRef({url:location.href,state:history.state,depth:Number(history.state?.mistDepth)||0});
   const go = React.useCallback((view: string, id?: string, target: RouteTarget = {}, options: GoOptions = {}) => {
+    attemptNavigation(()=>{
     const next = { view, id, ...target }, list = isListState(next, options);
     scrollPosition.current = { key: nextScrollKey(scrollPosition.current, next, list), route: next, list };
-    setRoute(next); writeMistRoute(next, options); setPalette(false); setAI(false); setNotifications(false);
+    setRoute(next); writeMistRoute(next, options); historyPosition.current={url:location.href,state:history.state,depth:Number(history.state?.mistDepth)||0}; setPalette(false); setAI(false); setNotifications(false);
     if (view === 'cockpit') window.dispatchEvent(new CustomEvent('bambook:mist-workbench-refresh'));
-  }, [toast]);
+    });
+  }, [toast,attemptNavigation]);
   // 平台会话退出后回到平台管理登录，不落到公司登录页。
   const platformSession = React.useRef(false);
   React.useEffect(() => {
@@ -272,10 +278,36 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
     try { await exitCompanyManagement(); go('platform-admin', platformCompany?.companyId); } catch (failure) { report(failure); } finally { setExitingSupport(false); }
   };
   React.useEffect(() => { if (personalSection && session.status === 'authenticated') go('account', undefined, { section: personalSection }); }, [personalSection, session.status, go]);
-  React.useEffect(() => {
-    const back = () => { const next = readMistRoute(), list = typeof history.state?.mistListState === 'boolean' ? history.state.mistListState : isListState(next); scrollPosition.current = { key: nextScrollKey(scrollPosition.current, next, list), route: next, list }; setRoute(next); setPalette(false); setAI(false); if (next.view === 'cockpit') window.dispatchEvent(new CustomEvent('bambook:mist-workbench-refresh')); };
-    window.addEventListener('popstate', back); return () => window.removeEventListener('popstate', back);
-  }, []);
+  React.useEffect(()=>{
+    type Position={url:string;state:any;depth:number;route:Route};
+    let restoring:{origin:typeof historyPosition.current;target:Position;delta:number}|undefined;
+    let allowed:Position|undefined;
+    const capture=():Position=>({url:location.href,state:history.state,depth:Number(history.state?.mistDepth)||0,route:readMistRoute()});
+    const apply=(target:Position)=>{
+      const next=target.route,list=typeof target.state?.mistListState==='boolean'?target.state.mistListState:isListState(next);
+      historyPosition.current={url:target.url,state:target.state,depth:target.depth};
+      scrollPosition.current={key:nextScrollKey(scrollPosition.current,next,list),route:next,list};
+      setRoute(next);setPalette(false);setAI(false);
+      if(next.view==='cockpit')window.dispatchEvent(new CustomEvent('bambook:mist-workbench-refresh'));
+    };
+    const back=()=>{
+      const target=capture();
+      if(allowed&&target.url===allowed.url&&target.depth===allowed.depth){allowed=undefined;apply(target);return;}
+      allowed=undefined;
+      if(restoring){
+        if(target.depth!==restoring.origin.depth){history.go(restoring.origin.depth-target.depth);return;}
+        const blocked=restoring;restoring=undefined;historyPosition.current={url:target.url,state:target.state,depth:target.depth};
+        attemptNavigation(()=>{allowed=blocked.target;history.go(-blocked.delta);});return;
+      }
+      if(!hasNavigationGuard()){apply(target);return;}
+      const origin=historyPosition.current,delta=origin.depth-target.depth;
+      if(delta){restoring={origin,target,delta};history.go(delta);return;}
+      // Unknown/legacy history positions still retain the current editor until the page decides.
+      history.replaceState(origin.state,'',origin.url);
+      attemptNavigation(()=>{history.replaceState(target.state,'',target.url);apply(target);});
+    };
+    window.addEventListener('popstate',back);return()=>window.removeEventListener('popstate',back);
+  },[attemptNavigation,hasNavigationGuard]);
   React.useEffect(() => { setPalette(false); setAI(false); setNotifications(false); setOrganizationOpen(false); setMsgs([]); }, [session.sessionKey, workspace.workspace?.id]);
   const previousLocalActor = React.useRef<string|undefined>(undefined);
   React.useEffect(() => {
@@ -377,6 +409,10 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
     go(target.view, target.id, target.target);
   }
   const nav = { route, go, theme, toggleTheme, openPalette: () => setPalette(true), openAI };
+  const {register:registerPageBack,back:goBack}=usePageBackAction(()=>{
+    if((Number(history.state?.mistDepth)||0)>0)history.back();
+    else if(route.view.includes('/'))go(route.view.split('/')[0]);
+  });
   // 找回密码：公司员工与平台人员同一页面；platform-recovery 仅为兼容旧链接。
   if (['account-access','account-recovery','platform-recovery'].includes(route.view)) return <Nav.Provider value={nav}><AccountAccessPage key={route.view}/></Nav.Provider>;
   if (route.view === 'register' && publicEntryForHost(location.host) !== 'platform') return <Nav.Provider value={nav}><RegisterPage/></Nav.Provider>;
@@ -393,12 +429,13 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   if (!session.localMode && session.user?.mustChangePassword) return <ForcedPasswordChangePage />;
   const base = route.view.split('/')[0], module = getModuleByView(base as View);
   // 空间设置只处理本公司；不能为此授予系统设置/后台管理权限。
+  // Search owns query synchronization; remounting on every submit would discard its input focus.
+  const stablePageRoute = MODULE_VIEW_SET.has(route.view)||route.view==='emails'||route.view==='search';
   const permitted = !!personalSection || canOpenMistView(route, { canAccessView: session.canAccessView, hasPermission: session.hasPermission, platformOperator: session.user?.platformRole === 'platform_admin' }, REFERENCE_PREVIEW) || platformOnly && ['system-settings','settings'].includes(route.view), live = LIVE_VIEWS.has(route.view) || MODULE_VIEW_SET.has(route.view) || COMPANY_ADMIN_VIEWS.has(route.view);
   const Page = personalSection ? AccountPage : platformCompany && COMPANY_ADMIN_VIEWS.has(route.view) ? PlatformCompanySettingsPage : platformOnly && ['system-settings','settings'].includes(route.view) ? PlatformSettingsPage
     : PAGES[route.view] ?? null;
   // 二级页（详情 / 新建）：应用内有上一页时按历史返回，直接打开链接时回到所属模块。
   const backTarget = route.view.includes('/') ? { view: base, label: (module && productName(module)) ?? LABELS[base] ?? '' } : null;
-  const goBack = () => { if ((Number(history.state?.mistDepth) || 0) > 0) history.back(); else if (backTarget) go(backTarget.view); };
   const user = session.user!;
   const workspaceProfileName = state?.settings.profileName?.trim() || '';
   const name = (workspace.workspace?.ownerId === user.id ? workspaceProfileName : '') || user.displayName || user.email;
@@ -425,7 +462,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const shellNotices = (shellNoticeList.length && !noticesHidden) || toastNotice ? [...(noticesHidden ? [] : shellNoticeList), ...(toastNotice ? [toastNotice] : [])] : undefined;
   return (
     <AvatarDirectory people={[...(state?.members ?? []).map(member=>({id:member.userId,name:member.name})),...organization.teams.flatMap(team=>(team.members ?? []).map(person=>({id:person.id,name:person.name,src:person.avatarUrl}))),{id:user.id,name:user.displayName || user.email,src:user.avatarUrl}]}><Nav.Provider value={nav}><MistReviewProvider><MistDensityContext.Provider value={density||'default'}>
-      <MistAppShell collapsed={collapsed} scrollKey={scrollPosition.current.key} notices={shellNotices} onCloseNotices={() => setHiddenNoticeKey(shellNoticeKey)}
+      <PageNavigationGuardContext.Provider value={registerNavigationGuard}><PageBackRegistrationContext.Provider value={registerPageBack}><MistAppShell collapsed={collapsed} scrollKey={scrollPosition.current.key} notices={shellNotices} onCloseNotices={() => setHiddenNoticeKey(shellNoticeKey)}
         sidebar={<CountedSidebar sections={sections} activeId={base === 'development' ? 'development' : COMPANY_ADMIN_VIEWS.has(base) && !(platformOnly && ['system-settings','settings'].includes(base)) ? 'company-settings' : base}
           onNavigate={navigateModule} collapsed={collapsed} onToggleCollapsed={() => setCollapsed(value => !value)}
           workspace={platformOnly ? { symbol: 'S', name: 'Sylway Cloud', caption: '平台运营', onClick:()=>go('platform-admin') } : platformCompany ? { symbol: platformCompany.companyName.slice(0,1), name: platformCompany.companyName, caption: '平台管理', onClick:()=>go('company-settings') } : { ...organizationEntry({ organization:{...organization,teams:organization.teams.map(team=>({...team,members:team.members?.map(person=>person.id===user.id?{...person,avatarUrl:user.avatarUrl ?? undefined}:person)}))}, department: user.department, teamId: teamView.teamId, onSelect: id => { teamView.select(id); setOrganizationOpen(false); },
@@ -436,15 +473,15 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
           onSearch={() => setPalette(true)}
           assistant={!canAI || base === 'assistant' ? undefined : { title: '小竹', text: '查询当前公司的进展', onClick: ()=>openAI() }} />}
         topbar={scrolled => <MistTopbar scrolled={scrolled} onBack={backTarget ? goBack : undefined} backLabel={backTarget ? '返回' + backTarget.label : undefined} crumbs={platformOnly && ['system-settings','settings'].includes(route.view) ? [{label:'平台运营'},{label:'平台设置'}] : crumbsFor(route, go, state?.devs.find(d=>d.id===route.id)?.code || state?.orders.find(o=>o.id===route.id)?.code, state?.versions.find(v=>v.id===route.versionId)?.label)}
-          sync={base === 'account' || !Page ? undefined : platformOnly ? { state: 'ok', text: '平台运营' } : platformCompany ? { state: 'ok', text: '平台管理' } : { state: workspace.error||workspace.pending&&!workspace.saving ? 'offline' : workspace.loading||workspace.saving ? 'syncing' : 'ok', text: workspace.saving ? '正在保存' : workspace.loading ? '读取公司数据' : workspace.pending ? '需要核对同步状态' : workspace.error ? (workspace.pendingCreate ? '需要核对同步状态' : '操作未完成') : live ? '已保存 · 公司' : '设计组件展示', ...(shellNoticeList.length ? { onClick: () => setHiddenNoticeKey(noticesHidden ? '' : shellNoticeKey), expanded: !noticesHidden } : {}) }}
+          sync={base === 'account' || !Page ? undefined : platformOnly ? { state: 'ok', text: '平台运营' } : platformCompany ? { state: 'ok', text: '平台管理' } : !live||workspace.error||workspace.pending||workspace.pendingCreate||workspace.loading||workspace.saving||shellNoticeList.length ? { state: workspace.error||workspace.pending&&!workspace.saving ? 'offline' : workspace.loading||workspace.saving ? 'syncing' : 'ok', text: workspace.saving ? '正在保存' : workspace.loading ? '读取公司数据' : workspace.pending ? '需要核对同步状态' : workspace.error ? (workspace.pendingCreate ? '需要核对同步状态' : '操作未完成') : live ? '查看提示' : '设计组件展示', ...(shellNoticeList.length ? { onClick: () => setHiddenNoticeKey(noticesHidden ? '' : shellNoticeKey), expanded: !noticesHidden } : {}) } : undefined}
           theme={theme} onToggleTheme={toggleTheme} onSearch={() => setPalette(true)}
           extra={<>{!(platformOnly || platformCompany) && !route.id && !route.view.includes('/') && <ModuleWorkButton view={route.view} />}{!(platformOnly || platformCompany) && <MistReviewButton/>}<ManualLink /></>} notifications={platformOnly || platformCompany ? undefined : { unread: visibleNotifications.some(n=>!n.readAt), onClick:()=>setNotifications(true) }} onAsk={!canAI || base === 'assistant' ? undefined : ()=>openAI()} />}
       >
         {!Page ? <EmptyState title={uiText("没有找到此页面")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />
           : !permitted ? <EmptyState icon={ShieldCheck} title={uiText("没有查看权限")} description={uiText("当前账号无法访问此业务。")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />
-          : Page ? <TeamViewScope teamId={COMPANY_ADMIN_VIEWS.has(base) || base === 'account' ? 'all' : teamView.teamId} actorId={user.id} teams={organization.teams}><MistPresentedErrorContext.Provider value={workspace.error||undefined}><PageLoadBoundary resetKey={route.view} fallback={retry=><MistPage><Banner tone="bad" title={uiText('页面未能加载')} actions={<Button onClick={retry}>{uiText('重新加载')}</Button>}/></MistPage>}><React.Suspense fallback={<PageLoading />}><Page key={session.sessionKey + ':' + workspace.workspace?.id + ':' + (MODULE_VIEW_SET.has(route.view)||route.view==='emails'?route.view:JSON.stringify(route))} /></React.Suspense></PageLoadBoundary></MistPresentedErrorContext.Provider></TeamViewScope>
+          : Page ? <TeamViewScope teamId={COMPANY_ADMIN_VIEWS.has(base) || base === 'account' ? 'all' : teamView.teamId} actorId={user.id} teams={organization.teams}><MistPresentedErrorContext.Provider value={workspace.error||undefined}><PageLoadBoundary resetKey={route.view} fallback={retry=><MistPage><Banner tone="bad" title={uiText('页面未能加载')} actions={<Button onClick={retry}>{uiText('重新加载')}</Button>}/></MistPage>}><React.Suspense fallback={<PageLoading />}><Page key={session.sessionKey + ':' + workspace.workspace?.id + ':' + (stablePageRoute?route.view:JSON.stringify(route))} /></React.Suspense></PageLoadBoundary></MistPresentedErrorContext.Provider></TeamViewScope>
           : <EmptyState title={uiText("没有找到此页面")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />}
-      </MistAppShell>
+      </MistAppShell></PageBackRegistrationContext.Provider></PageNavigationGuardContext.Provider>
       <ExportConfirmHost scope={JSON.stringify([session.sessionKey, user.id, user.companyId, user.roles, user.roleIds, user.permissions, user.permissionCeiling, user.businessAttributes, user.globalBusinessScope, workspace.workspace?.id, workspace.workspace?.access, teamView.teamId, route])} />
       <CommandPalette open={palette} onClose={() => setPalette(false)} query={query} onQueryChange={setQuery} items={commands} />
       <AssistantDrawer key={aiScope} open={ai} onClose={() => setAI(false)} onExpand={aiBusy?undefined:expandAI} messages={[overview(),...msgs,...(aiBusy?[{role:'typing'} as ChatMessage]:[])]} onSend={question=>void send(question)} sub={uiText(aiBusy?'正在生成':undefined)} suggestions={aiBusy?[]:['根据当前事实建议下一步','哪些信息还需要核实']} />

@@ -9,6 +9,7 @@ import {createMistState,type MistState} from '../../../../../server/src/shared/m
 import {applyDataScope,scopedMaterialIssueTargets} from '../../../../../server/src/shared/mistDataScope';
 import type {FulfillmentStock,FulfillmentStockMovement} from '../../../../../server/src/shared/mistFulfillment';
 import {Nav} from '../../nav';
+import * as clock from '../../runtime/businessClock';
 const store=vi.hoisted(()=>({state:null as MistState|null,workspace:null as any,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
 const session=vi.hoisted(()=>({denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
@@ -23,12 +24,38 @@ function choose(select:HTMLSelectElement,value:string){act(()=>{select.value=val
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 const stock=(id:string,patch:Partial<FulfillmentStock>={}):FulfillmentStock=>({id,sourceKind:'purchase',purchaseId:'po',receiptId:'rc',orderId:'og',lineId:'lg',name:'主唛',unit:'个',quantity:100,available:100,location:'A-1',owner:'公司货权',warehouseId:'wh',createdAt:'2026-10-10T08:00:00Z',...patch});
 const movement=(id:string,stockId:string,kind:FulfillmentStockMovement['kind'],quantity:number,patch:Partial<FulfillmentStockMovement>={}):FulfillmentStockMovement=>({id,stockId,kind,quantity,location:'嘉兴厂',person:'江南成衣',note:'供料',at:'2026-10-11T08:00:00Z',actor:'经办人',...patch});
-beforeEach(()=>{session.denied=new Set();store.workspace=null;const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');
+beforeEach(()=>{store.loading=false;store.error='';session.denied=new Set();store.workspace=null;const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');
   s.orders.push({id:'og',code:'SO-G',type:'garment',customerId:'c',currency:'USD'} as any,{id:'of',code:'SO-F',type:'fabric',customerId:'c',currency:'USD'} as any);
   s.orderLines.push({id:'lg',orderId:'og',name:'风衣',style:'TR-1',img:'coat',qty:100,unit:'件',price:10,made:0,qc:0},{id:'lf',orderId:'of',name:'府绸',style:'F-1',img:'fabric',qty:500,unit:'米',price:3,made:0,qc:0});
   s.fulfillment.warehouses.push({id:'wh',code:'WH-1',name:'松江仓',address:'上海',active:true});
   store.state=s;store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
+it('shows warehouse and owned on-loan quantities separately and prevents ordinary release of physical sample debt',()=>{
+ const s=stock('loan-source',{owner:'公司',available:60,reservations:[{id:'sample-hold',orderId:'og',lineId:'lg',purpose:'商业内样借出',quantity:40,at:'2026-10-13T10:00:00Z',actor:'业务员',sampleLoan:{sampleId:'sample',loanId:'loan',unit:'个',sourceLocation:'A-1',returned:0,owned:true}}]});
+ store.state!.fulfillment.stock.push(s);store.state!.fulfillment.purchases.push({id:'po',code:'PO-1',price:2,currency:'CNY',unit:'个'}as any);render(s.id);
+ expect(host.textContent).toContain('借样在外');expect(host.textContent).toContain('40 个');expect(host.textContent).toContain('200 CNY');expect(host.textContent).toContain('按原借出归还');expect(queryByRole(host,'button',{name:'释放',exact:true})).toBeNull();expect(store.run).not.toHaveBeenCalled();
+});
+
+it.each([false,true])('blocks inventory entry before the workspace is read (loading %s)',loading=>{
+ store.state=null;store.loading=loading;render();
+ expect(host.textContent).toContain(loading?'正在读取库存资料':'库存资料未读取');
+ for(const name of['导出','仓库目录','新增仓库','其他入库'])expect((getByRole(host,'button',{name,exact:true}) as HTMLButtonElement).disabled).toBe(true);
+ expect(host.textContent).not.toContain('还没有库存');expect(host.querySelector('.mist-pipeline')).toBeNull();
+ expect(queryByRole(host,'tablist',{name:'库存业务板块'})).toBeNull();
+});
+it('keeps genuinely read empty inventory actionable',()=>{
+ render();expect(host.textContent).toContain('还没有库存');expect(host.textContent).not.toContain('库存资料未读取');
+ for(const name of['仓库目录','新增仓库','其他入库'])expect((getByRole(host,'button',{name,exact:true}) as HTMLButtonElement).disabled).toBe(false);
+});
+it('does not present an unread warehouse catalog as an empty editable collection',async()=>{
+ const state=store.state!;render();await click(getByRole(host,'button',{name:'仓库目录',exact:true}));
+ store.state=null;render();expect(host.textContent).toContain('库存资料未读取');expect(queryByRole(host,'button',{name:'新建',exact:true})).toBeNull();
+ store.state=state;render();expect(host.textContent).toContain('仓库目录');expect(host.textContent).toContain('松江仓');expect(store.run).not.toHaveBeenCalled();
+});
+it('retains the requested batch when the inventory read recovers',()=>{
+ const state=store.state!;state.fulfillment.stock.push(stock('recover',{name:'面料批次'}));store.state=null;render('recover');expect(host.textContent).toContain('库存资料未读取');
+ store.state=state;render('recover');expect(host.textContent).toContain('面料批次');expect(host.textContent).not.toContain('库存资料未读取');expect(store.run).not.toHaveBeenCalled();
+});
 
 it('summarises each business group per unit without ever adding different units together',async()=>{
   store.state!.fulfillment.stock.push(stock('a',{available:400}),stock('b',{name:'里布',unit:'米',available:860,quantity:860}),stock('c',{name:'主唛补单',available:20}),stock('f',{orderId:'of',lineId:'lf',name:'府绸坯布',unit:'米',available:300,quantity:300}));
@@ -251,4 +278,72 @@ it('records other receipts with source, evidence and packing list',async()=>{
   choose(getByRole(form,'combobox',{name:'来源类型'}) as HTMLSelectElement,'customer');choose(getByRole(form,'combobox',{name:'订单条目'}) as HTMLSelectElement,'lf');
   typeInto(getByRole(form,'textbox',{name:'来源单位 / 单号'}) as HTMLInputElement,'客户来料 DN-88');typeInto(getByRole(form,'textbox',{name:'入库依据'}) as HTMLTextAreaElement,'送货单');
   expect(form.textContent).toContain('其他入库');
+});
+it('identifies a leftover receipt by its recorded source in the detail heading',()=>{
+  store.state!.fulfillment.stock.push(stock('leftover',{sourceKind:'other',purchaseId:undefined,receiptId:undefined,orderId:'of',lineId:'lf',name:'府绸余料',otherReceipt:{reason:'leftover',source:'工厂退料 DN-89',evidence:'原供料 DN-88'}}));
+  render('leftover');const detail=host.querySelector('[data-stock-detail="leftover"]') as HTMLElement;
+  expect(detail.querySelector('.mist-mono')?.textContent).toBe('工厂退料 DN-89');expect(detail.textContent).not.toContain('来源采购不可用');
+});
+
+async function editWarehouseSource(){
+ store.state!.fulfillment.warehouses[0].custodian='company';
+ store.workspace={id:'workspace',revision:7};render();await click(getByRole(host,'button',{name:'仓库目录',exact:true}));
+ const row=getAllByRole(host,'row').find(row=>row.textContent?.includes('松江仓'))!;expect(row).toBeTruthy();await click(row);await click(getByRole(host,'button',{name:'编辑',exact:true}));
+ const address=getByRole(host,'textbox',{name:'仓库地址'}) as HTMLInputElement;typeInto(address,'上海松江备料区');
+ return{address,save:async()=>{let next:HTMLElement|null;for(let i=0;i<8&&(next=queryByRole(host,'button',{name:'下一步',exact:true}));i++)await click(next);await click(getByRole(host,'button',{name:'确认保存',exact:true}));}};
+}
+it('preserves a warehouse address draft and refuses an updated warehouse source',async()=>{
+ const{address,save}=await editWarehouseSource();store.state=structuredClone(store.state);store.state!.fulfillment.warehouses[0].name='松江周转仓';store.workspace={id:'workspace',revision:8};render();await save();
+ expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('仓库资料已更新，请重新打开后核对');expect(host.textContent).toContain('上海松江备料区');
+});
+it('rechecks the warehouse custodian before saving an older form',async()=>{
+ const{save}=await editWarehouseSource();store.state=structuredClone(store.state);Object.assign(store.state!.fulfillment.warehouses[0],{custodian:'supplier',supplierId:'supplier'});store.workspace={id:'workspace',revision:8};render();await save();
+ expect(store.run).not.toHaveBeenCalled();expect(host.textContent).toContain('仓库资料已更新，请重新打开后核对');
+});
+it('allows unrelated workspace updates while binding a warehouse save to the checked revision',async()=>{
+ const{save}=await editWarehouseSource();store.state=structuredClone(store.state);store.workspace={id:'workspace',revision:8};render();await save();
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.claimInventory.warehouse.save',payload:expect.objectContaining({id:'wh',name:'松江仓',address:'上海松江备料区'})}),{expectedRevision:8});
+});
+
+async function openCountSource(){
+ store.workspace={id:'workspace',revision:7};store.state!.fulfillment.stock.push(stock('count-race',{quantity:12,available:12}));render('count-race');await click(getByRole(host,'button',{name:'盘点',exact:true}));
+ const d=getByRole(document.body,'dialog',{name:'库存盘点',exact:true});const note=getByRole(d,'textbox',{name:'盘点说明'}) as HTMLTextAreaElement;typeInto(note,'本次按当前库位与实物点数，原记录保留。');
+ return{d,note,submit:()=>click(getByRole(d,'button',{name:'提交盘点',exact:true}))};
+}
+it('refuses a stock count when the recorded balance changes after opening it',async()=>{
+ const{d,submit}=await openCountSource();store.state=structuredClone(store.state);store.state!.fulfillment.stock[0].available=10;store.workspace={id:'workspace',revision:8};render('count-race');await submit();
+ expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('库存已更新，请重新打开后复点');expect((getByRole(d,'textbox',{name:'盘点说明'})as HTMLTextAreaElement).value).toContain('原记录保留');
+});
+it('rechecks counted positions even when the total stock balance is unchanged',async()=>{
+ const{d,submit}=await openCountSource();store.state=structuredClone(store.state);store.state!.fulfillment.stock[0].positions=[{location:'A-01',available:11},{location:'B-01',available:1}];store.workspace={id:'workspace',revision:8};render('count-race');await submit();
+ expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('库存已更新，请重新打开后复点');
+});
+it('binds an unchanged stock count to the checked revision after an unrelated update',async()=>{
+ const{submit}=await openCountSource();store.state=structuredClone(store.state);store.workspace={id:'workspace',revision:8};render('count-race');await submit();
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.stock.count'}),{expectedRevision:8});
+});
+it('ages an actual purchase receipt from its physical receipt date rather than its later registration time',()=>{
+ const now=vi.spyOn(clock,'businessNow').mockReturnValue(new Date('2026-11-18T04:00:00Z'));
+ try{store.state!.fulfillment.receipts.push({id:'rc-age',purchaseId:'po',date:'2026-11-10'} as any);store.state!.fulfillment.stock.push(stock('age',{receiptId:'rc-age',createdAt:'2026-11-13T12:00:00Z'}));render('age');expect(host.textContent).toContain('2026-11-10 · 8 天');}finally{now.mockRestore();}
+});
+it('refuses an older count form when another count is awaiting approval for that stock',async()=>{
+ const{d,submit}=await openCountSource();store.state=structuredClone(store.state);(store.state!.fulfillment.stockCounts??=[]).push({id:'other-count',state:'pending',lines:[{stockId:'count-race',location:'A-1',book:12,counted:11,difference:-1}]} as any);store.workspace={id:'workspace',revision:8};render('count-race');await submit();
+ expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('库存已更新，请重新打开后复点');
+});
+it('uses the Shanghai registration day consistently for receipts without a separate receipt date',()=>{
+ const now=vi.spyOn(clock,'businessNow').mockReturnValue(new Date('2026-11-18T04:00:00Z'));
+ try{store.state!.fulfillment.stock.push(stock('late',{sourceKind:'other',purchaseId:undefined,receiptId:undefined,createdAt:'2026-11-13T22:56:00Z',otherReceipt:{reason:'other',source:'DN-13',evidence:'点收'}}));render('late');expect(host.textContent).toContain('2026-11-14 · 4 天');}finally{now.mockRestore();}
+});
+it('shows the physical return receipt day and age independently of its audit timestamp',()=>{
+ const now=vi.spyOn(clock,'businessNow').mockReturnValue(new Date('2026-11-18T04:00:00Z'));
+ try{store.state!.fulfillment.stock.push(stock('returned-age',{sourceKind:'claimReturn',purchaseId:undefined,receiptId:undefined,available:0,onHand:2,locked:2,createdAt:'2026-11-18T04:00:00Z',goodsId:'g',claimId:'cl',returnReceiptId:'rt'}));store.state!.fulfillment.receivedRecords.push({id:'rr-age',stockId:'returned-age',receivedAt:'2026-11-17',fileIds:[],quantity:2,unit:'个',source:{shipmentId:'sh'}} as any);render('returned-age');expect(host.textContent).toContain('2026-11-17 · 1 天');}finally{now.mockRestore();}
+});
+it('keeps the stock action above the responsive detail drawer until it closes',async()=>{
+ const previous=window.matchMedia,listeners=new Set<()=>void>(),media={matches:false,addEventListener:(_type:string,fn:()=>void)=>listeners.add(fn),removeEventListener:(_type:string,fn:()=>void)=>listeners.delete(fn)};
+ Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:()=>media});
+ try{const{d,note}=await openCountSource();store.state=structuredClone(store.state);store.state!.fulfillment.stock[0].available=10;store.workspace={id:'workspace',revision:8};render('count-race');await click(getByRole(d,'button',{name:'提交盘点',exact:true}));expect(d.textContent).toContain('库存已更新');act(()=>{media.matches=true;listeners.forEach(fn=>fn());});expect(queryByRole(document.body,'dialog',{name:'库存盘点',exact:true})).toBe(d);expect(queryByRole(document.body,'dialog',{name:'主唛',exact:true})).toBeNull();expect(note.value).toContain('原记录保留');await click(getByRole(d,'button',{name:'取消',exact:true}));expect(queryByRole(document.body,'dialog',{name:'主唛',exact:true})).not.toBeNull();expect(store.run).not.toHaveBeenCalled();}finally{Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:previous});}
+});
+it('returns focus to the equivalent stock action after a mobile editor closes on desktop',async()=>{
+ const previous=window.matchMedia,listeners=new Set<()=>void>(),media={matches:true,addEventListener:(_type:string,fn:()=>void)=>listeners.add(fn),removeEventListener:(_type:string,fn:()=>void)=>listeners.delete(fn)};Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:()=>media});
+ try{store.state!.fulfillment.stock.push(stock('focus-count'));render('focus-count');const opener=getByRole(document.body,'button',{name:'盘点',exact:true});act(()=>opener.focus());await click(opener);const d=getByRole(document.body,'dialog',{name:'库存盘点',exact:true});act(()=>{media.matches=false;listeners.forEach(fn=>fn());});await click(getByRole(d,'button',{name:'取消',exact:true}));await act(async()=>{await new Promise(resolve=>setTimeout(resolve,0));});expect(document.activeElement).toBe(getByRole(host,'button',{name:'盘点',exact:true}));expect(store.run).not.toHaveBeenCalled();}finally{Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:previous});}
 });

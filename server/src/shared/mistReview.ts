@@ -3,6 +3,8 @@ export type MistReviewTask = {
   id:string; kind:'procurement'|'procurementAmendment'|'quotation'|'claim'|'order'|'payment'|'risk'|'productionIntake'|'qcConcession'|'stockCount'; entityId:string; title:string;
   requesterId:string; reviewerIds:string[]; status:'pending'|'approved'|'rejected'; submittedAt:string;
   requiredPermission:string; fileIds?:string[];
+  /** Position in the source object's submission history, before hiding withdrawn rounds. */
+  roundNumber?:number;
   /** 批准时是否须当场手写签字（listReviews 按审批类型给出，见 mistSignatures）。 */
   signatureRequired?:boolean; target:{view:string;id:string}; details:Array<{label:string;value:string}>;
   /** 已处理事项的决定：经办人、时间与意见（取自原业务记录，不另存）。 */

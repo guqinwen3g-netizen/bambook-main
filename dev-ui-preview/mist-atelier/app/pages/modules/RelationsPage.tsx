@@ -6,11 +6,12 @@ import { Archive, ArchiveRestore, Building2, Download, Link2, Lock, Pencil, Plus
 import { Banner, Button, Card, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, ObjectCell, PageHeader, Pill, Pipeline, SearchField, Timeline, Toolbar, type Column, type Tone } from '../../../../../components/mist';
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { MarketRelation } from '../../../../../server/src/shared/mistMarket';
+import { stableJson } from '../../../../../server/src/shared/stableJson';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec , moduleFileIds } from './ModuleWorkbench';
-import { useRouteDraft } from './useRouteDraft';
+import { useRouteDraft, useRouteScope } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
 import { memberSelectOptions, workspaceMembers } from '../../runtime/members';
 import { customerHandoverScope, customerHandovers } from '../../../../../server/src/shared/mistHandover';
@@ -40,10 +41,22 @@ export function relationContacts(state: MistState | null, r: MarketRelation): Ma
 }
 /** 别名按顿号或换行分隔；英文名中的逗号（如 Co., Ltd.）属于名称本身。 */
 export const splitRelationAliases = (value: string) => value.split(/[、\n]/).map(x => x.trim()).filter(Boolean);
+// Compare the fields this editor can replace, not contacts or attachments maintained elsewhere.
+const profileSource = (r: MarketRelation) => stableJson({ id: r.id, name: r.name, category: r.category, customerId: r.customerId || '', supplierId: r.supplierId || '', country: r.country, address: r.address, aliases: r.aliases, note: r.note, status: r.status });
+const contactSource = (c: MarketRelation['contacts'][number]) => stableJson({ id: c.id, name: c.name, role: c.role || '', email: c.email || '', phone: c.phone || '', primary: !!c.primary });
+function contactContext(state: MistState | null, kind: 'relation' | 'supplier', id: string) {
+  const parent = kind === 'supplier' ? state?.market.suppliers.find(row => row.id === id) : state?.market.relations.find(row => row.id === id);
+  if (!parent) return null;
+  const relation = kind === 'relation' ? parent as MarketRelation : undefined;
+  return { identity: stableJson({ id: parent.id, name: parent.name, status: parent.status, category: relation?.category, customerId: relation?.customerId || '', supplierId: relation?.supplierId || '' }), contacts: relation ? relationContacts(state, relation) : parent.contacts };
+}
+const primarySource = (contacts: MarketRelation['contacts']) => stableJson(contacts.filter(c => c.primary).map(c => c.id).sort());
 export type RelationWorkbenchProps = { attachments: (r: MarketRelation, locked: boolean) => React.ReactNode; history: (id: string) => React.ReactNode };
 
 export function RelationWorkbench({ attachments, history }: RelationWorkbenchProps) {
-  const { state, run, error, refresh, loading, saving, pending, workspace } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
+  const work = useMistWorkspace(), { state, run, error, refresh, loading, saving, pending, workspace } = work, session = useMistSession(), { go, route } = useNav();
+  const routeScope = useRouteScope(), live = React.useRef({ work, session });
+  React.useLayoutEffect(() => { live.current = { work, session }; }, [work, session]);
   const members = workspaceMembers(workspace, state, session.user);
   const [identity, setIdentity] = React.useState<Identity>('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [statusFilter, setStatusFilter] = React.useState<StatusFilter>('active'), [query, setQuery] = React.useState('');
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
@@ -56,29 +69,42 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
   const business = React.useMemo(() => new Map(all.map(r => [r.id, relationBusiness(state, r)])), [state, all, interfaceLocale()]);
   const needle = query.trim().toLowerCase();
   const flagged = (r: MarketRelation, f: FlagFilter) => f === 'all' || (f === 'hold' ? !!r.hold : f === 'dual' ? !!(r.customerId && r.supplierId) : !relationContacts(state, r).length && !(supplier(r)?.contacts.length));
-  const searched = all.filter(r => (statusFilter === 'any' || r.status === statusFilter) && flagged(r, flagFilter)
-    && (!needle || `${r.name} ${r.aliases.join(' ')} ${r.country} ${r.address} ${customer(r)?.code || ''} ${supplier(r)?.code || ''} ${relationContacts(state, r).map(c => c.name + ' ' + c.email).join(' ')}`.toLowerCase().includes(needle)));
+  const searched = all.filter(r => {
+    if ((statusFilter !== 'any' && r.status !== statusFilter) || !flagged(r, flagFilter)) return false;
+    if (!needle) return true;
+    const linkedSupplier = supplier(r), contacts = [...relationContacts(state, r), ...(linkedSupplier?.contacts || [])];
+    return [r.name, ...r.aliases, r.country, r.address, customer(r)?.code, linkedSupplier?.code, ...contacts.flatMap(c => [c.name, c.email, c.phone])].filter(Boolean).join(' ').toLowerCase().includes(needle);
+  });
   const count = (v: Identity) => searched.filter(r => v === 'all' || relationIdentities(r).includes(v)).length;
   const rows = searched.filter(r => identity === 'all' || relationIdentities(r).includes(identity)).sort((a, b) => Number(!!b.hold) - Number(!!a.hold) || a.name.localeCompare(b.name, 'zh'));
   const selected = rows.find(r => r.id === picked) || (picked ? all.find(r => r.id === picked) : undefined);
   const can = session.hasPermission('relations:write'), canAdmin = session.hasPermission('relations:admin');
   const allowedDialog=dialog?.adminOnly&&!canAdmin?null:dialog;
   React.useEffect(()=>{if(!canAdmin)setDialog(current=>current?.adminOnly?null:current);},[canAdmin]);
-  const locked = saving || !!pending;
+  const unavailable = loading || !state, locked = unavailable || saving || !!pending;
   const pick = (r: MarketRelation) => { setPicked(r.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, r.id, target, { keepScroll: true }); };
   const linked = (r?: MarketRelation) => !!r && (!!r.customerId || !!r.supplierId);
-  const profileSpec = (r?: MarketRelation): ModuleEditorSpec => ({
+  const profileSpec = (r?: MarketRelation): ModuleEditorSpec => {
+    const source = r ? profileSource(r) : '', workspaceId = workspace?.id, actorId = session.user?.id;
+    return {
     title: r ? `编辑 ${r.name}` : '建立关系档案', submitLabel: '保存',
-    description: r && linked(r) ? '客户与供应商的名称、地区读取各自档案；这里维护别名与备注。' : '客户与供应商请在各自页面新建，会自动生成关系档案；这里登记货代、报关行、合作伙伴等其它组织。',
     initialValues: r ? { category: r.category, name: r.name, country: r.country, address: r.address, aliases: r.aliases.join('、'), note: r.note } : { category: 'Agent', name: '', country: '', address: '', aliases: '', note: '' },
     fields: [
       { key: 'category', label: '关系类别', type: 'select', required: true, readonly: linked(r), options: (linked(r) ? Object.keys(CATEGORY_LABEL) : ['Agent', 'Partner', 'Government', 'Internal', 'Other']).map(k => ({ value: k, label: CATEGORY_LABEL[k as MarketRelation['category']] })) },
       { key: 'name', label: '组织名称', required: !linked(r), readonly: linked(r) },
-      { key: 'country', label: '国家地区', type: 'choice', options: COUNTRIES, readonly: linked(r) && !!r?.supplierId && !r?.customerId }, { key: 'address', label: '地址', readonly: linked(r) && !!r?.supplierId && !r?.customerId },
+      { key: 'country', label: '国家地区', type: 'choice', options: COUNTRIES, readonly: linked(r) }, { key: 'address', label: '地址', readonly: linked(r) },
       { key: 'aliases', label: '别名', hint: '用顿号分隔' }, { key: 'note', label: '偏好与备注', type: 'textarea' },
     ],
-    submit: async v => { const res = await run({ type: 'market.relation.save', payload: { id: r?.id, input: { name: String(v.name ?? ''), category: String(v.category) as MarketRelation['category'], customerId: r?.customerId || '', supplierId: r?.supplierId || '', country: String(v.country ?? ''), address: String(v.address ?? ''), aliases: splitRelationAliases(String(v.aliases ?? '')), note: String(v.note ?? ''), fileIds: r?.fileIds || [] } } }); const id = String((res.result as { id?: string }).id || ''); if (!r && id) { setPicked(id); go('relations', id); } },
-  });
+    submit: async v => {
+      const checked = live.current.work, current = r ? checked.state?.market.relations.find(row => row.id === r.id) : undefined, revision = checked.workspace?.revision;
+      if (!routeScope.isCurrent() || checked.workspace?.id !== workspaceId || live.current.session.user?.id !== actorId) throw new Error('当前账号或公司已变化，请重新打开档案');
+      if (!checked.state || checked.loading) throw new Error('关系档案不可用，请重新读取后核对');
+      if (r && (!current || profileSource(current) !== source)) throw new Error('关系档案已更新，请重新打开后核对');
+      if (!Number.isSafeInteger(revision) || typeof revision !== 'number' || revision < 0) throw new Error('关系档案不可用，请重新读取后核对');
+      const res = await checked.run({ type: 'market.relation.save', payload: { id: r?.id, input: { name: String(v.name ?? ''), category: String(v.category) as MarketRelation['category'], customerId: r?.customerId || '', supplierId: r?.supplierId || '', country: String(v.country ?? ''), address: String(v.address ?? ''), aliases: splitRelationAliases(String(v.aliases ?? '')), note: String(v.note ?? ''), fileIds: current?.fileIds || [] } } }, { expectedRevision: revision });
+      const id = String((res.result as { id?: string }).id || ''); if (!r && id && routeScope.isCurrent() && live.current.work.workspace?.id === workspaceId && live.current.session.user?.id === actorId) { setPicked(id); go('relations', id); }
+    },
+  }; };
   const holdSpec = (r: MarketRelation, frozen: boolean): RelationEditorSpec => {
     const effects = [r.customerId && '暂停新报价和订单，出运须逐票批准。', r.supplierId && '暂停新采购。'].filter(Boolean).join('');
     return frozen
@@ -92,22 +118,40 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
     submit: v => run({ type: 'market.relation.linkSupplier', payload: { id: r.id, supplierId: String(v.supplierId ?? '') } }),
   });
   const linkableCustomers = (state?.customers || []).filter(c => !all.some(r => r.customerId === c.id && r.supplierId));
-  const linkCustomerSpec = (r: MarketRelation): ModuleEditorSpec => ({
+  const linkCustomerSpec = (r: MarketRelation): ModuleEditorSpec => {
+    const workspaceId = workspace?.id, actorId = session.user?.id;
+    return {
     title: `为 ${r.name} 关联客户身份`, submitLabel: '关联', description: '该供应商的关系档案并入所选客户的关系档案，别名与附件保留。',
     initialValues: { customerId: '' }, fields: [{ key: 'customerId', label: '客户', type: 'select', required: true, options: linkableCustomers.map(c => ({ value: c.id, label: `${c.code} · ${c.name}` })) }],
-    submit: v => run({ type: 'market.relation.linkCustomer', payload: { id: r.id, customerId: String(v.customerId ?? '') } }),
-  });
+    submit: async v => {
+      const res = await run({ type: 'market.relation.linkCustomer', payload: { id: r.id, customerId: String(v.customerId ?? '') } });
+      const id = String((res.result as { id?: string }).id || '');
+      // The supplier-only relation has been merged away; continue at the surviving organization.
+      if (id && routeScope.isCurrent() && live.current.work.workspace?.id === workspaceId && live.current.session.user?.id === actorId) { setPicked(id); go('relations', id, full.active ? { detail: 'full' } : undefined); }
+    },
+  }; };
   const unlinkSpec = (r: MarketRelation): ModuleEditorSpec => ({
     title: `撤销 ${r.name} 的供应商关联`, submitLabel: '撤销关联', submitVariant: 'danger', description: '供应商拆回独立的关系档案；客户与供应商的业务记录不变。',
     initialValues: { reason: '' }, fields: [{ key: 'reason', label: '撤销原因', type: 'textarea', required: true }],
     submit: v => run({ type: 'market.relation.unlinkSupplier', payload: { id: r.id, reason: String(v.reason ?? '') } }),
   });
-  const contactSpec = (kind: 'relation' | 'supplier', parentId: string, owner: string, c?: MarketRelation['contacts'][number]): ModuleEditorSpec => ({
+  const contactSpec = (kind: 'relation' | 'supplier', parentId: string, owner: string, c?: MarketRelation['contacts'][number]): ModuleEditorSpec => {
+    const original = contactContext(state, kind, parentId), source = c ? contactSource(c) : '', originalPrimary = primarySource(original?.contacts || []), workspaceId = workspace?.id, actorId = session.user?.id;
+    return {
     title: c ? `编辑联系人 ${c.name}` : `添加 ${owner} 联系人`, submitLabel: '保存', initialValues: c ? { ...c } : { name: '', role: '', email: '', phone: '', primary: false },
     // mar31：编辑时可勾选删除该联系人（后端 market.contact.delete）。
     fields: [{ key: 'name', label: '联系人姓名', required: true }, { key: 'role', label: '岗位' }, { key: 'email', label: '邮箱' }, { key: 'phone', label: '电话' }, { key: 'primary', label: '主联系人', type: 'checkbox' }, ...(c ? [{ key: 'remove', label: '删除该联系人', type: 'checkbox' as const }] : [])],
-    submit: v => c && v.remove === true ? run({ type: 'market.contact.delete', payload: { kind, parentId, id: c.id } }) : run({ type: 'market.contact.save', payload: { kind, parentId, id: c?.id, name: String(v.name ?? ''), role: String(v.role ?? ''), email: String(v.email ?? ''), phone: String(v.phone ?? ''), primary: !!v.primary } }),
-  });
+    submit: async v => {
+      const checked = live.current.work, context = contactContext(checked.state, kind, parentId), current = c ? context?.contacts.find(row => row.id === c.id) : undefined, revision = checked.workspace?.revision;
+      if (!routeScope.isCurrent() || checked.workspace?.id !== workspaceId || live.current.session.user?.id !== actorId) throw new Error('当前账号或公司已变化，请重新打开联系人');
+      if (!context || !original || context.identity !== original.identity || c && (!current || contactSource(current) !== source)) throw new Error('联系人资料已更新，请重新打开后核对');
+      if (v.remove !== true && v.primary && primarySource(context.contacts) !== originalPrimary) throw new Error('主联系人已更新，请重新打开后核对');
+      if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 0) throw new Error('联系人资料不可用，请重新读取后核对');
+      return c && v.remove === true
+        ? checked.run({ type: 'market.contact.delete', payload: { kind, parentId, id: c.id } }, { expectedRevision: revision })
+        : checked.run({ type: 'market.contact.save', payload: { kind, parentId, id: c?.id, name: String(v.name ?? ''), role: String(v.role ?? ''), email: String(v.email ?? ''), phone: String(v.phone ?? ''), primary: !!v.primary } }, { expectedRevision: revision });
+    },
+  }; };
   const handoverSpec = (r: MarketRelation): RelationEditorSpec | null => {
     const c = state?.customers.find(x => x.id === r.customerId); if (!state || !c) return null;
     const scope = customerHandoverScope(state, c.id), lockedOrders = scope.orders.filter(o => scope.locked(o)), movable = scope.orders.filter(o => !scope.locked(o));
@@ -131,35 +175,35 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
     { key: 'business', header: '在手', width: '64px', align: 'right', render: r => <span className="mist-num">{business.get(r.id)?.total || 0}</span> },
     { key: 'status', header: '状态', width: '88px', render: r => r.hold ? <Pill tone="bad">{uiText("已冻结")}</Pill> : r.status === 'archived' ? <Pill>{uiText("已归档")}</Pill> : <Pill tone="ok">{uiText("正常")}</Pill> },
   ];
-  const empty = all.length
-    ? <EmptyState icon={SearchX} title={uiText("没有符合条件的组织")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setIdentity('all'); setFlagFilter('all'); setStatusFilter('active'); }}>{uiText("清除筛选")}</Button>} />
-    : <EmptyState icon={Users} title={uiText("还没有关系档案")} description={uiText("新建客户或供应商时会自动生成；货代、报关行等其它组织可在这里登记。")} action={can ? <Button icon={Plus} onClick={() => setDialog(profileSpec())}>{uiText("建立关系档案")}</Button> : undefined} />;
+  const empty = !state ? <EmptyState icon={Users} title={uiText("关系资料未读取")} /> : all.length
+    ? <EmptyState icon={SearchX} title={uiText("没有符合条件的组织")} action={<Button onClick={() => { setQuery(''); setIdentity('all'); setFlagFilter('all'); setStatusFilter('active'); }}>{uiText("清除筛选")}</Button>} />
+    : <EmptyState icon={Users} title={uiText("还没有关系档案")} action={can ? <Button icon={Plus} onClick={() => setDialog(profileSpec())}>{uiText("建立关系档案")}</Button> : undefined} />;
   const detail = selected && state
     ? <RelationDetail r={selected} state={state} can={can} canAdmin={canAdmin} onHandover={() => { const spec = handoverSpec(selected); if (spec) setDialog(spec); }} locked={locked} business={business.get(selected.id)!} identityPills={identityPills(selected)} linkableCount={linkable.length}
         onEdit={() => setDialog(profileSpec(selected))} onHold={f => setDialog(holdSpec(selected, f))} onLink={() => setDialog(linkSpec(selected))} onLinkCustomer={() => setDialog(linkCustomerSpec(selected))} onUnlink={() => setDialog(unlinkSpec(selected))} linkableCustomerCount={linkableCustomers.length}
         onContact={(kind, parentId, owner, c) => setDialog(contactSpec(kind, parentId, owner, c))} onScreen={() => setDialog({ title: `登记合规筛查 · ${selected.name}`, submitLabel: '登记', fields: [{ key: 'kind', label: '筛查类型', type: 'select', required: true, options: [{ value: 'sanctions', label: '制裁名单' }, { value: 'export_control', label: '出口管制' }, { value: 'annual', label: '年度合规检查' }, { value: 'other', label: '其他' }] }, { key: 'result', label: '结论', type: 'select', required: true, options: [{ value: 'clear', label: '未命中' }, { value: 'review', label: '待人工复核' }, { value: 'hit', label: '命中' }] }, { key: 'screenedOn', label: '筛查日期', type: 'date', required: true }, { key: 'nextReview', label: '下次复查日', type: 'date', required: true }, { key: 'basis', label: '依据（名单来源与查询结果）', type: 'textarea', required: true }, { key: 'files', label: '查询截图 / 报告', type: 'files' }], initialValues: { kind: 'sanctions', result: 'clear', screenedOn: '', nextReview: '', basis: '', files: '' }, submit: v => run({ type: 'market.relation.screening', payload: { id: selected.id, kind: String(v.kind) as 'sanctions', result: String(v.result) as 'clear', screenedOn: String(v.screenedOn || ''), nextReview: String(v.nextReview || ''), basis: String(v.basis || ''), fileIds: moduleFileIds(v.files) } }) })} onArchive={() => setDialog({ title: `${selected.status === 'active' ? '归档' : '恢复'} ${selected.name}`, submitLabel: selected.status === 'active' ? '归档' : '恢复', submitVariant: selected.status === 'active' ? 'danger' : 'primary', fields: [], initialValues: {}, submit: () => run({ type: 'market.relation.status', payload: { id: selected.id, status: selected.status === 'active' ? 'archived' : 'active' } }) })}
         onOpen={(view, id, extra) => go(view, id, extra)} attachments={attachments(selected, !can)} history={history(selected.id)} />
-    : <EmptyState icon={Building2} title={uiText("组织档案")} description={uiText("从左侧列表选择一个组织，查看身份、联系人、信用与在手业务。")} compact />;
+    : <EmptyState icon={Building2} title={uiText("组织档案")} compact />;
   const summary = selected ? (() => {
-    const b = business.get(selected.id), contacts = relationContacts(state, selected), main = contacts.find(c => c.primary) || contacts[0];
+    const b = business.get(selected.id), contacts = relationContacts(state, selected), main = contacts.find(c => c.primary);
     return <PreviewSummary openLabel="打开组织档案" onOpen={() => full.open(selected.id)} data={{
       code: [customer(selected)?.code, supplier(selected)?.code].filter(Boolean).join(' · ') || undefined,
       status: selected.hold ? <Pill tone="bad">{uiText("已冻结")}</Pill> : selected.status === 'archived' ? <Pill>{uiText("已归档")}</Pill> : <Pill tone="ok">{uiText("正常")}</Pill>,
       title: selected.name, description: [selected.aliases.length ? '别名 ' + selected.aliases.join('、') : '', selected.country].filter(Boolean).join(' · ') || undefined,
       facts: [
         { label: '身份', value: <span className="mist-row" style={{ gap: 4, flexWrap: 'wrap' }}>{identityPills(selected)}</span> },
-        { label: '主联系人', value: main ? main.name + (main.role ? ' · ' + main.role : '') : '未登记' },
+        { label: '主联系人', value: main ? main.name + (main.role ? ' · ' + main.role : '') : contacts.length ? '未指定' : '未登记' },
         { label: '在手业务', value: b?.total ? `${b.total} 项` : '无' },
         ...(b?.receivable.length ? [{ label: '未收款', value: b.receivable.map(([c, v]) => `${c} ${v.toLocaleString()}`).join('；') }] : []),
       ],
       extra: selected.hold ? <Banner tone="bad" title={uiText("往来已冻结")}>{selected.hold.reason || '报价、订单、采购处不能新增业务。'}</Banner> : undefined,
     }} />;
   })() : null;
-  if (full.active && selected && state) return <ListDetailPage backLabel="关系智库" onBack={full.back} after={<ModuleEditorDialog spec={allowedDialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
-  return <MistPage>
+  if (full.active && selected && state) return <><ListDetailPage backLabel="关系智库" onBack={full.back}>{detail}</ListDetailPage><ModuleEditorDialog spec={allowedDialog} onClose={() => setDialog(null)} /></>;
+  return <><MistPage>
     <PageHeader eyebrow={uiText("客户与市场 · 组织关系")} title={uiText("关系智库")}
       actions={<>
-        <Button icon={Download} onClick={() => downloadModuleCsv('关系智库.csv', ['组织', '身份', '别名', '地区', '地址', '联系人', '在手业务', '状态', '冻结原因'], rows.map(r => [r.name, relationIdentities(r).map(i => ({ customer: '客户', supplier: '供应商', agent: '代理', partner: '合作伙伴', other: '其他' })[i]).join(' + '), r.aliases.join('、'), r.country, r.address, relationContacts(state, r).map(c => c.name).join('、'), business.get(r.id)?.total || 0, r.hold ? '已冻结' : r.status === 'archived' ? '已归档' : '正常', r.hold?.reason || '']))}>{uiText("导出")}</Button>
+        <Button icon={Download} disabled={unavailable} onClick={() => downloadModuleCsv('关系智库.csv', ['组织', '身份', '别名', '地区', '地址', '联系人', '在手业务', '状态', '冻结原因'], rows.map(r => [r.name, relationIdentities(r).map(i => ({ customer: '客户', supplier: '供应商', agent: '代理', partner: '合作伙伴', other: '其他' })[i]).join(' + '), r.aliases.join('、'), r.country, r.address, relationContacts(state, r).map(c => c.name).join('、'), business.get(r.id)?.total || 0, r.hold ? '已冻结' : r.status === 'archived' ? '已归档' : '正常', r.hold?.reason || '']))}>{uiText("导出")}</Button>
         {can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => setDialog(profileSpec())}>{uiText("建立关系档案")}</Button>}
       </>} />
     {!can && <div className="mist-section"><Banner variant="status" tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有关系档案写权限，可以查看组织、联系人与在手业务。")}</Banner></div>}
@@ -169,19 +213,18 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
       <Dropdown<FlagFilter> label={uiText("提醒")} value={flagFilter} onChange={setFlagFilter} options={[{ value: 'all', label: '全部' }, { value: 'hold', label: '已冻结' }, { value: 'dual', label: '既是客户也是供应商' }, { value: 'noContact', label: '没有联系人' }]} />
       <Dropdown<StatusFilter> label={uiText("档案")} value={statusFilter} onChange={setStatusFilter} options={[{ value: 'active', label: '使用中' }, { value: 'archived', label: '已归档' }, { value: 'any', label: '全部' }]} />
     </Toolbar>
-    <Pipeline<Identity> value={identity} onChange={setIdentity} items={[
+    {state && <Pipeline<Identity> value={identity} onChange={setIdentity} items={[
       { value: 'all', label: '全部', count: count('all'), color: 'var(--mist-ink-2)' },
       { value: 'customer', label: '客户', count: count('customer'), color: 'var(--mist-accent)' },
       { value: 'supplier', label: '供应商', count: count('supplier'), color: 'var(--mist-ok)' },
       { value: 'agent', label: '代理 / 货代', count: count('agent'), color: 'var(--mist-warn)' },
       { value: 'partner', label: '合作伙伴', count: count('partner'), color: 'var(--mist-ink-3)' },
       { value: 'other', label: '其他', count: count('other'), color: 'var(--mist-ink-3)' },
-    ]} />
+    ]} />}
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected?.name || '组织档案'} drawerSub={selected ? relationIdentities(selected).length > 1 ? '客户 + 供应商' : CATEGORY_LABEL[selected.category] : undefined}
       list={<Card><DataTable ariaLabel={uiText("关系档案列表")} loading={loading} rows={rows} rowKey={r => r.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
       detail={detail} summary={summary} />
-    <ModuleEditorDialog spec={allowedDialog} onClose={() => setDialog(null)} />
-  </MistPage>;
+  </MistPage><ModuleEditorDialog spec={allowedDialog} onClose={() => setDialog(null)} /></>;
 }
 
 function ContactRows({ contacts, edit }: { contacts: MarketRelation['contacts']; edit?: (c: MarketRelation['contacts'][number]) => void }) {
@@ -206,7 +249,7 @@ function RelationDetail({ r, state, can, canAdmin, onHandover, locked, business,
       { label: '编辑档案', icon: Pencil, onClick: onEdit, hidden: !can },
       { label: '冻结往来', icon: Lock, onClick: () => onHold(true), hidden: !!r.hold||!canAdmin },
       { label: '解冻', icon: Unlock, onClick: () => onHold(false), primary: true, hidden: !r.hold||!canAdmin },
-      { label: '关联供应商身份', icon: Link2, onClick: onLink, reason: writeReason || (!linkableCount ? '没有可关联的供应商' : false), hidden: !can || !customer || !!supplier },
+      { label: '关联供应商身份', icon: Link2, onClick: onLink, reason: writeReason || (r.hold ? '关系档案已冻结，请先解冻' : !linkableCount ? '没有可关联的供应商' : false), hidden: !can || !customer || !!supplier },
       { label: '关联客户身份', icon: Link2, onClick: onLinkCustomer, reason: writeReason || (!linkableCustomerCount ? '没有可关联的客户' : r.hold ? '关系档案已冻结，请先解冻' : false), hidden: !can || !!customer || !supplier },
       { label: '撤销供应商关联', onClick: onUnlink, reason: writeReason || (r.hold ? '关系档案已冻结，请先解冻' : false), hidden: !can || !customer || !supplier },
       { label: '打开客户业务', icon: Users, onClick: () => onOpen('crm', r.customerId, { customerId: r.customerId }), hidden: !customer },

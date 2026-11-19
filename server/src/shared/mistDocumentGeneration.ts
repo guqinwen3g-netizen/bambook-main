@@ -1,3 +1,5 @@
+import {isCalendarDay} from './mistBusinessClock';
+import {fixedShipmentReceivableDueProblem,shipmentReceivableDueCondition} from './mistTradeTerms';
 /**
  * P1-3 document generation. Builds frozen snapshots from current business records and applies the generate commands.
  *
@@ -13,8 +15,9 @@
 import { MistCommandError, lineAmount, type MistContext, type MistState, type MistOrder, type MistOrderLine } from './mistWorkspace';
 import type { FulfillmentDocument, FulfillmentShipment } from './mistFulfillment';
 import { platformBusinessDate } from './mistPlatform';
-import { draftCustomsDeclaration } from './mistCustomsDeclaration';
-import { breakdownSummary, type OrderLineBreakdown } from './mistOrderBreakdown';
+import { customsItemsStale, draftCustomsDeclaration } from './mistCustomsDeclaration';
+import { breakdownSummary, fabricSpecText, type OrderLineBreakdown } from './mistOrderBreakdown';
+import {canonicalPackingSkus,packingSkuError,packingFabricColorError} from './mistPackingBreakdown';
 import { readLetterOfCredits } from './mistLetterOfCredit';
 import { replacementDeclaredUnitPrice } from './mistClaimReplacement';
 import { amountInWords, generatedDocContent, generatedDocFingerprint, GENERATED_DOCUMENT_TEMPLATE_VERSION, issuerOf, money2, qtyText, type GeneratedDocArtifact, type GeneratedDocRecord, type GeneratedDocSnapshot } from './mistGeneratedDocument';
@@ -45,8 +48,9 @@ const lineOf = (root: MistState, id: string) => root.orderLines.find(l => l.id =
 const shipmentOrders = (root: MistState, s: FulfillmentShipment) => [...new Set(s.lines.map(l => l.orderId))].map(id => root.orders.find(o => o.id === id)).filter(Boolean) as MistOrder[];
 const lcFor = (root: MistState, s: FulfillmentShipment) => readLetterOfCredits(root).find(lc => !lc.cancelled && s.lines.some(l => lc.orderIds.includes(l.orderId)));
 const packingOf = (root: MistState, s: FulfillmentShipment) => root.fulfillment.packing.filter(p => p.shipmentId === s.id);
-function packingTotals(root: MistState, s: FulfillmentShipment) {
-  const rows = packingOf(root, s);
+function packingTotals(root: MistState, s: FulfillmentShipment, orderId?: string) {
+  const lineIds=orderId?new Set(s.lines.filter(line=>line.orderId===orderId).map(line=>line.lineId)):null;
+  const rows = packingOf(root, s).filter(row=>!lineIds||lineIds.has(row.lineId));
   return { packages: new Set(rows.map(r => r.carton)).size, net: r2(rows.reduce((n, r) => n + r.netWeight, 0)), gross: r2(rows.reduce((n, r) => n + r.grossWeight, 0)), volume: r4(rows.reduce((n, r) => n + r.volume, 0)) };
 }
 /** Unit price for the CI of an order on this shipment: the order line price, or the reviewed declared value for a replacement. */
@@ -61,11 +65,31 @@ const transportFacts = (s: FulfillmentShipment) => [
   ...(s.booking ? [{ label: { zh: '订舱号', en: 'Booking no.' }, value: s.booking }] : []),
   ...(s.plannedDate ? [{ label: { zh: '计划出运日', en: 'Planned date' }, value: s.plannedDate }] : []),
 ];
+/** CI specifications describe this physical batch, never the full contract ratio.
+ * Before complete detailed packing, keep only non-quantity fabric specifications. */
+function shipmentLineDetail(root:MistState,s:FulfillmentShipment,source:FulfillmentShipment['lines'][number],line:MistOrderLine&{breakdown?:OrderLineBreakdown}){
+  const spec=line.breakdown;if(!spec)return '';
+  const rows=packingOf(root,s).filter(row=>row.lineId===source.lineId&&(row.productionId||'')===(source.productionId||''));
+  const complete=rows.length>0&&r4(rows.reduce((sum,row)=>sum+row.quantity,0))===r4(source.quantity);
+  if(spec.kind==='fabric'){
+    if(!complete||rows.some(row=>packingFabricColorError(root,line.id,row.fabricColor)))return fabricSpecText(spec);
+    const normalize=(value:string)=>value.normalize('NFC').trim().toLowerCase();
+    const actual=spec.rows.map(color=>({color:color.color,quantity:r4(rows.filter(row=>normalize(row.fabricColor||'')===normalize(color.color)).reduce((sum,row)=>sum+row.quantity,0))})).filter(row=>row.quantity>0);
+    return breakdownSummary({...spec,rows:actual},line.unit);
+  }
+  if(!complete||rows.some(row=>packingSkuError(root,line.id,row.quantity,row.assortment)))return '';
+  const cells=canonicalPackingSkus(root,line.id,rows.flatMap(row=>row.assortment||[]));
+  const colors=spec.rows.map(color=>{
+    const sizes=spec.sizes.map(size=>({size,quantity:cells.filter(cell=>cell.color===color.color&&cell.size===size).reduce((sum,cell)=>sum+cell.quantity,0)})).filter(cell=>cell.quantity>0);
+    return sizes.length?`${color.color}：${sizes.map(cell=>`${cell.size} ${qtyText(cell.quantity)}`).join(' / ')}`:'';
+  }).filter(Boolean);
+  return colors.join('；')+`（合计 ${qtyText(source.quantity)} ${line.unit}）`;
+}
 function goodsLines(root: MistState, s: FulfillmentShipment, orderId?: string) {
   return s.lines.filter(l => !orderId || l.orderId === orderId).map(l => {
     const line = lineOf(root, l.lineId), order = root.orders.find(o => o.id === l.orderId);
     if (!line || !order) return fail('出运明细的订单条目不可用');
-    return { order, line, quantity: l.quantity, detail: line.breakdown ? breakdownSummary(line.breakdown, line.unit) : '' };
+    return { order, line, quantity: l.quantity, detail: shipmentLineDetail(root,s,l,line) };
   });
 }
 /** External goods names keep the identifier separate from specifications. */
@@ -73,11 +97,18 @@ const externalGoodsName = (line: Pick<MistOrderLine, 'name' | 'nameEn'>) => line
 function ciSnapshot(root: MistState, s: FulfillmentShipment, order: MistOrder) {
   const lines = goodsLines(root, s, order.id);
   const rows = lines.map(g => { const price = unitPriceOf(root, s, order, g.line.id); return { style: g.line.style, desc: externalGoodsName(g.line) + (g.detail ? '\n' + g.detail : ''), qty: `${qtyText(g.quantity)} ${g.line.unit}`, price: money2(price), amount: money2(lineAmount(g.quantity, price)), _amount: lineAmount(g.quantity, price) }; });
-  const total = r2(rows.reduce((n, r) => n + r._amount, 0)), pack = packingTotals(root, s), lc = lcFor(root, s);
+  const total = r2(rows.reduce((n, r) => n + r._amount, 0)), pack = packingTotals(root, s, order.id);
+  const contract = order.governance?.contract, creditOrder = contract?.paymentMethod === 'LC' && !order.replacementSource;
+  const credits = creditOrder ? readLetterOfCredits(root).filter(credit => !credit.cancelled && credit.orderIds.includes(order.id)) : [];
+  const lc = credits.length === 1 ? credits[0] : undefined;
+  const payment = creditOrder
+    ? lc ? lc.availableBy === 'sight' ? '即期信用证 / L/C at sight' : `远期信用证 / L/C usance · ${lc.usanceDays} days` : '按信用证条款付款 / Payment by letter of credit'
+    : contract?.paymentMethod ? [contract.paymentMethod, contract.paymentNote].filter(Boolean).join(' · ') : '';
   return {
     parties: [buyerParty(root, s), consigneeParty(s)], total,
     facts: [{ label: { zh: '订单 / 合同号', en: 'Order / Contract' }, value: [order.code, order.governance?.contract.poNumber].filter(Boolean).join(' · ') }, ...transportFacts(s), { label: { zh: '币种', en: 'Currency' }, value: order.currency },
-      ...(order.governance?.contract.paymentMethod ? [{ label: { zh: '付款方式', en: 'Payment' }, value: [order.governance.contract.paymentMethod, order.governance.contract.paymentNote].filter(Boolean).join(' · ') }] : []),
+      ...(order.replacementSource ? [{ label: { zh: '货值用途', en: 'Value purpose' }, value: '免费补发，无需付款。仅供报关估值。 / Free replacement, no charge. Value for customs purposes only.' }] : []),
+      ...(payment ? [{ label: { zh: '付款方式', en: 'Payment' }, value: payment }] : []),
       ...(lc ? [{ label: { zh: '信用证号', en: 'L/C no.' }, value: `${lc.lcNo} · ${lc.issuingBank}` }] : []),
       ...(pack.packages ? [{ label: { zh: '件数 / 毛净重', en: 'Packages / Weights' }, value: `${pack.packages} · N.W. ${money2(pack.net)} kg · G.W. ${money2(pack.gross)} kg` }] : [])],
     table: { columns: [{ key: 'style', label: { zh: '款号', en: 'Style' } }, { key: 'desc', label: { zh: '品名 / 规格', en: 'Description' } }, { key: 'qty', label: { zh: '数量', en: 'Quantity' }, num: true }, { key: 'price', label: { zh: `单价 ${order.currency}`, en: 'Unit price' }, num: true }, { key: 'amount', label: { zh: `金额 ${order.currency}`, en: 'Amount' }, num: true }],
@@ -136,6 +167,8 @@ function shipmentDocContent(root: MistState, s: FulfillmentShipment, type: OwnDo
     case 'CD': {
       const draft = draftCustomsDeclaration(root, s), pack = packingTotals(root, s);
       const customs = root.fulfillment.customs.find(x => x.shipmentId === s.id);
+      // Saved declaration items include the broker's reviewed adjustments; the classification draft is only a fallback before items exist.
+      const items = customs?.items?.length ? customs.items : draft.items;
       // No port/country mapping or structured consignee address exists; use the customer country, never infer from free text.
       const destinationCountry = root.customers.find(x => x.id === s.customerId)?.country || '';
       return { parties: [{ label: { zh: '境内发货人', en: 'Exporter' }, name: c.legalName, detail: [c.customsCode && '海关编码 ' + c.customsCode, c.taxId && '税号 ' + c.taxId].filter(Boolean).join(' · ') }, { label: { zh: '境外收货人', en: 'Overseas consignee' }, name: s.consignee, detail: '' }],
@@ -146,7 +179,9 @@ function shipmentDocContent(root: MistState, s: FulfillmentShipment, type: OwnDo
           { label: { zh: '运抵国 / 最终目的国', en: 'Country of destination' }, value: destinationCountry },
         ] : []), { label: { zh: '件数 / 毛重 / 净重', en: 'Packages / G.W. / N.W.' }, value: `${pack.packages} · ${money2(pack.gross)} kg · ${money2(pack.net)} kg` }],
         table: { columns: [{ key: 'no', label: { zh: '项号', en: 'No.' } }, { key: 'hs', label: { zh: '商品编号', en: 'HS code' } }, { key: 'name', label: { zh: '商品名称及规格型号', en: 'Description / elements' } }, { key: 'qty', label: { zh: '数量及单位', en: 'Quantity' }, num: true }, { key: 'price', label: { zh: '单价', en: 'Unit price' }, num: true }, { key: 'amount', label: { zh: '总价 / 币制', en: 'Amount' }, num: true }],
-          rows: draft.items.map(i => ({ no: String(i.no), hs: i.hsCode, name: `${i.declaredName}\n${i.elements}`, qty: [`${qtyText(i.quantity)} ${i.unit}`, `${qtyText(i.legalQty)} ${i.legalUnit}`, i.secondUnit && i.secondQty !== null ? `${qtyText(i.secondQty)} ${i.secondUnit}` : ''].filter(Boolean).join('\n'), price: money2(i.unitPrice), amount: `${money2(i.amount)} ${i.currency}` })),
+          // Declaration rows: legal primary, legal secondary, trade.
+          // Keep the empty secondary row when it has no legal unit.
+          rows: items.map(i => ({ no: String(i.no), hs: i.hsCode, name: `${i.declaredName}\n${i.elements}`, qty: [`${qtyText(i.legalQty)} ${i.legalUnit}`, i.secondUnit && i.secondQty !== null ? `${qtyText(i.secondQty)} ${i.secondUnit}` : '', `${qtyText(i.quantity)} ${i.unit}`].join('\n'), price: money2(i.unitPrice), amount: `${money2(i.amount)} ${i.currency}` })),
           totals: { amount: draft.totals.map(t => `${money2(t.amount)} ${t.currency}`).join(' / ') } },
         paragraphs: draft.blockers.length ? [{ title: { zh: '待补资料', en: 'Open items' }, text: draft.blockers.join('\n') }] : [] };
     }
@@ -166,6 +201,8 @@ export function documentGenerationBlocker(root: MistState, s: FulfillmentShipmen
   if (PER_ORDER_TYPES.includes(type) && (!orderId || !s.lines.some(l => l.orderId === orderId))) return '请选择本票的准确订单';
   if (type === 'CI' && root.orders.find(o => o.id === orderId)?.governance?.contract.kind === 'internal') return '内部订单不生成销售发票';
   if (type === 'PL' && !packingOf(root, s).length) return '请先登记装箱分配';
+  const customs = type === 'CD' ? root.fulfillment.customs.find(c => c.shipmentId === s.id) : undefined;
+  if (customs && customsItemsStale(root, customs)) return '报关商品项已过期，请先重新生成商品项';
   if (type === 'BC' && !lcFor(root, s)) return '本票没有对应的有效信用证';
   if (type === 'DFT' && !root.fulfillment.documents.some(d => d.shipmentId === s.id && d.orderId === orderId && d.type === 'CI' && d.status === 'issued')) return '请先签发本订单 CI';
   const family = root.fulfillment.documents.filter(d => d.shipmentId === s.id && d.type === type && d.orderId === (PER_ORDER_TYPES.includes(type) ? orderId : ''));
@@ -186,7 +223,9 @@ export function prepareShipmentDocumentSnapshot(root: MistState, payload: unknow
   const blocked = documentGenerationBlocker(root, s, p.type, p.orderId); if (blocked) fail(blocked, blocked === '出运不存在' ? 'NOT_FOUND' : 'PRECONDITION');
   if (!ctx.actorId) fail('缺少真实生成人');
   const order = PER_ORDER_TYPES.includes(p.type) ? root.orders.find(o => o.id === p.orderId) : undefined;
-  const due = p.type === 'CI' && !order?.replacementSource ? (typeof p.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.dueDate) ? p.dueDate : fail('请填写应收到期日', 'VALIDATION')) : '';
+  const condition=p.type==='CI'&&!order?.replacementSource?shipmentReceivableDueCondition(order?.governance?.contract):null;
+  if(condition&&p.dueDate)fail(fixedShipmentReceivableDueProblem(condition),'VALIDATION');
+  const due = p.type === 'CI' && !order?.replacementSource && !condition ? (isCalendarDay(p.dueDate) ? p.dueDate : fail('请填写应收到期日', 'VALIDATION')) : '';
   const { number } = nextNumber(root, s!, p.type, order), content = shipmentDocContent(root, s!, p.type, order, due);
   const { total, ...rest } = content;
   const snapshot: GeneratedDocSnapshot = { templateVersion: GENERATED_DOCUMENT_TEMPLATE_VERSION, kind: p.type, number, date: platformBusinessDate(ctx.now), title: { zh: ZH_TITLE[p.type], en: EN_TITLE[p.type] }, issuer: issuerOf(root.settings.companyProfile)!, signatures: [{ label: { zh: '授权签字及公司盖章', en: 'Authorized signature' }, name: root.settings.companyProfile!.englishName || root.settings.companyProfile!.legalName }], ...rest, paragraphs: rest.paragraphs || [], generatedAt: ctx.now, generatedBy: ctx.actorName, generatedById: ctx.actorId! };
@@ -194,6 +233,31 @@ export function prepareShipmentDocumentSnapshot(root: MistState, payload: unknow
 }
 /** Plain-text summary stored as the document content (search, review and history), derived from the same snapshot. */
 const contentText = (s: GeneratedDocSnapshot) => [...s.facts.map(f => `${f.label.zh}：${f.value}`), ...(s.table ? s.table.rows.map(r => Object.values(r).filter(v => String(v ?? '').trim()).join(' · ')) : []), ...s.paragraphs.map(p => (p.title ? p.title.zh + '：' : '') + p.text), s.amountInWords || ''].filter(Boolean).join('\n').slice(0, 8000);
+
+
+/** A generated CD must still describe the saved review and current source facts.
+ * Generation identity/date remain frozen; manually supplied originals keep their own review path. */
+export function cdDocumentIssueProblem(root:MistState,document:FulfillmentDocument):string {
+  if(document.type!=='CD')return '';
+  const active=((document as FulfillmentDocument&{generated?:GeneratedDocRecord[]}).generated||[]).filter(record=>document.fileIds.includes(record.fileId));
+  if(!active.length)return '';
+  const shipment=root.fulfillment.shipments.find(row=>row.id===document.shipmentId),blocked=documentGenerationBlocker(root,shipment,'CD');
+  if(blocked)return blocked;
+  const issuer=issuerOf(root.settings.companyProfile);if(!issuer)return '请先补全公司抬头';
+  try{
+    const parts=shipmentDocContent(root,shipment!,'CD',undefined,'');
+    for(const record of active){
+      if(record.kind!=='CD'||record.snapshot?.kind!=='CD')return 'CD原件记录异常，请重新生成CD草稿';
+      const current:GeneratedDocSnapshot={...record.snapshot,number:document.number,issuer,...parts,signatures:[{label:{zh:'授权签字及公司盖章',en:'Authorized signature'},name:issuer.englishName||issuer.legalName}]};
+      if(generatedDocFingerprint(generatedDocContent(current))!==generatedDocFingerprint(generatedDocContent(record.snapshot)))return '报关资料已更新，请重新生成CD草稿';
+    }
+    return '';
+  }catch{return 'CD来源不可用，请重新核对';}
+}
+/** The issue window binds the reviewed record and physical original, not the entire workspace. */
+export function cdDocumentIssueBasis(root:MistState,document:FulfillmentDocument):string {
+  return document.type==='CD'?generatedDocFingerprint({document,customs:root.fulfillment.customs.filter(row=>row.shipmentId===document.shipmentId)}):'';
+}
 
 export function prepareOrderDocumentSnapshot(root: MistState, payload: unknown, ctx: MistContext): GeneratedDocSnapshot {
   exact(payload, ['orderId', 'kind']);
@@ -259,8 +323,10 @@ export function applyDocumentGeneration(root: MistState, command: DocumentGenera
     const { version, draft } = nextNumber(root, s, p.type, order);
     // A regenerated draft replaces its own earlier generated file; files uploaded by people stay attached.
     const generatedIds = new Set(((draft as FulfillmentDocument & { generated?: GeneratedDocRecord[] })?.generated || []).map(g => g.fileId));
-    const row = draft || { id: ctx.id(), shipmentId: s.id, orderId: order?.id || '', type: p.type, number: snapshot.number, version, title: '', dueDate: '', content: '', fileIds: [], status: 'draft' as const, createdAt: ctx.now, actor: ctx.actorName };
-    Object.assign(row, { title: `${ZH_TITLE[p.type]} ${s.code}${order ? ' · ' + order.code : ''}`, dueDate: p.type === 'CI' && !order?.replacementSource ? p.dueDate : row.dueDate, content: contentText(snapshot), fileIds: [...row.fileIds.filter(id => !generatedIds.has(id)), artifact.file.id] });
+    const row:FulfillmentDocument = draft || { id: ctx.id(), shipmentId: s.id, orderId: order?.id || '', type: p.type, number: snapshot.number, version, title: '', dueDate: '', content: '', fileIds: [], status: 'draft' as const, createdAt: ctx.now, actor: ctx.actorName };
+    Object.assign(row, { title: `${ZH_TITLE[p.type]} ${s.code}${order ? ' · ' + order.code : ''}`, dueDate: p.type === 'CI' && !order?.replacementSource ? (shipmentReceivableDueCondition(order?.governance?.contract)?'':p.dueDate||'') : row.dueDate, content: contentText(snapshot), fileIds: [...row.fileIds.filter(id => !generatedIds.has(id)), artifact.file.id] });
+    const dueCondition=p.type==='CI'&&!order?.replacementSource?shipmentReceivableDueCondition(order?.governance?.contract):null;
+    if(dueCondition)row.receivableDueCondition=dueCondition;else delete row.receivableDueCondition;
     (row as FulfillmentDocument & { generated?: GeneratedDocRecord[] }).generated = [...((row as FulfillmentDocument & { generated?: GeneratedDocRecord[] }).generated || []), structuredClone(artifact.record)];
     if (!draft) root.fulfillment.documents.push(row as FulfillmentDocument);
     event(root, ctx, 'document', row.id, `生成${DOCUMENT_TYPE_LABEL[p.type]} ${snapshot.number}`, [artifact.file.id]);

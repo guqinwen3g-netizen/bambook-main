@@ -99,3 +99,19 @@ it('opens the exact attachment source version from a formatted task report',asyn
  seam.routeId='task';seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:finished}:url.includes('/history')?{items:[],nextCursor:null}:url.includes('agent-identities')?{items:[identity()]}:{items:[finished],nextCursor:null}));
  act(paint);await flush();expect(document.querySelector('p table')).toBeNull();await click(getByRole(document.body,'button',{name:'来源版本'}));expect(seam.go).toHaveBeenCalledWith('development/detail','dev',{versionId:'old'});
 });
+
+it('reports an unread task list and shows an empty state only after a successful refresh', async () => {
+  let inaccessible = true;
+  seam.api.mockImplementation(async (url: string) => {
+    if (url.endsWith('/agent-tasks') && inaccessible) throw new Error('暂时无法读取');
+    return { items: [], nextCursor: null };
+  });
+  act(paint);
+  await flush();
+  expect(getByText(host, '任务读取失败')).toBeTruthy();
+  expect(host.textContent).not.toContain('暂无可用的Agent连接');
+  inaccessible = false;
+  await click(getByRole(host, 'button', { name: '刷新' }));
+  expect(getByText(host, '暂无可用的Agent连接')).toBeTruthy();
+  expect(host.textContent).not.toContain('任务读取失败');
+});

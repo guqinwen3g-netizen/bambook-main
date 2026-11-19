@@ -24,7 +24,16 @@ async function mount(id?: string) { host = document.createElement('div'); docume
 const button = (label: string) => [...document.body.querySelectorAll('button')].find(b => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
 async function click(label: string) { const b = button(label); expect(b, label).toBeTruthy(); await act(async () => b!.click()); }
 
+it.each([true,false])('does not expose zero quotation stages or creation before data is read (loading %s)',async loading=>{
+ bridge.current={...bridge.current,state:null,loading,error:loading?'':'读取失败'};await mount();expect(host.textContent).toContain(loading?'正在读取报价资料':'报价资料未读取');expect(host.textContent).not.toContain('成衣业务 · 0');expect(host.textContent).not.toContain('还没有成衣报价');expect(button('导出')?.disabled).toBe(true);for(const b of [...document.body.querySelectorAll('button')].filter(b=>b.textContent?.trim()==='新建报价'))expect(b.disabled).toBe(true);expect(bridge.current.run).not.toHaveBeenCalled();
+});
+
 describe('报价管理', () => {
+  it('blocks accepting an overdue sent offer while keeping customer feedback available',async()=>{
+    const q=code('QT-2026-0005');q.validUntil='2026-10-13';await mount(q.id);
+    expect(button('客户接受')?.disabled).toBe(true);expect(host.textContent).toContain('报价已过有效期，请新建版本后重新确认');
+    expect(button('客户未接受')?.disabled).toBe(false);expect(button('查看客户反馈')?.disabled).toBe(false);
+  });
   it('does not present an unverified zero cost as a 100 percent margin',async()=>{
     const quote=code('QT-2026-0003-V2');quote.lines=quote.lines.slice(0,1);quote.lines[0].cost='0';quote.lines[0].costBasis='unverified';
     await mount(quote.id);const detail=host.querySelector('[data-quotation-detail]')!;

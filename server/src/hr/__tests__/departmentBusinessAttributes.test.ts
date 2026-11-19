@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { teamBusinessFamilies } from '../departmentBusinessAttributes';
 import { retireOrganizationDepartment, updateOrganizationDepartment } from '../organizationService';
-const dept = { id: 'd', parentId: 'company', status: 'active', name: '12345', metadata: { retained: true, businessAttributes: ['fabric_business', 'garment_business'] } };
+const dept = { id: 'd', parentId: 'company', status: 'active', name: '12345',updatedAt:new Date('2026-11-15T00:00:00.000Z'), metadata: { retained: true, businessAttributes: ['fabric_business', 'garment_business'] } };
 describe('department business attributes', () => {
   it('inherits both domains regardless of group names or obsolete metadata', () => {
     expect(teamBusinessFamilies({ status: 'active', name: '财务', metadata: { businessFamily: 'garment' }, department: dept })).toEqual(['fabric', 'garment']);
@@ -17,16 +17,17 @@ describe('department business attributes', () => {
     expect(teamBusinessFamilies({ status: 'active', deletedAt: 1n, department: dept })).toEqual([]);
   });
   function db(count = 0) {
-    const tx: any = { department: { findUnique: vi.fn(async ({ where }) => where.id === 'target' ? { ...dept, id: 'target' } : dept), findFirst: vi.fn(async () => null), update: vi.fn(async ({ data }) => ({ ...dept, ...data })) } };
+    const current={...dept};
+    const tx: any = { department: { findUnique: vi.fn(async ({ where }) => where.id === 'target' ? { ...current, id: 'target' } : current),findUniqueOrThrow:vi.fn(async()=>current), findFirst: vi.fn(async () => null), update: vi.fn(async ({ data }) => ({ ...current, ...data })),updateMany:vi.fn(async({data})=>{Object.assign(current,data);return{count:1};}) } };
     for (const key of ['team', 'userAccount', 'jobPosition']) tx[key] = { count: vi.fn(async () => count), updateMany: vi.fn(async () => ({ count })) };
     return { tx, prisma: { $transaction: vi.fn(async (fn: any) => fn(tx)) } as any };
   }
   it('editing removes attributes and keeps unrelated metadata', async () => {
     const { prisma } = db();
-    expect((await updateOrganizationDepartment(prisma, 'd', { name: 'Renamed', businessAttributes: ['fabric_qc'] })).metadata).toEqual({ retained: true, businessAttributes: ['fabric_qc'] });
+    expect((await updateOrganizationDepartment(prisma, 'd', { name: 'Renamed', businessAttributes: ['fabric_qc'],expectedUpdatedAt:dept.updatedAt.toISOString() })).metadata).toEqual({ retained: true, businessAttributes: ['fabric_qc'] });
   });
   it('rejects unknown business attributes', async () => {
-    const { prisma, tx } = db(); await expect(updateOrganizationDepartment(prisma, 'd', { businessAttributes: ['admin'] })).rejects.toThrow('有效'); expect(tx.department.update).not.toHaveBeenCalled();
+    const { prisma, tx } = db(); await expect(updateOrganizationDepartment(prisma, 'd', { businessAttributes: ['admin'],expectedUpdatedAt:dept.updatedAt.toISOString() })).rejects.toThrow('有效'); expect(tx.department.update).not.toHaveBeenCalled();expect(tx.department.updateMany).not.toHaveBeenCalled();
   });
   it('retiring populated department requires valid recipient', async () => {
     const { prisma, tx } = db(2); await expect(retireOrganizationDepartment(prisma, 'd', {})).rejects.toThrow('承接部门'); expect(tx.department.update).not.toHaveBeenCalled();

@@ -150,10 +150,10 @@ export function applyRfqCommand(root: Root, command: RfqCommand, c: MistContext)
       if (!declined) {
         if (q.validUntil < today) fail('报价有效期不能早于今天');
         if (q.promisedDue < today) fail('承诺交期不能早于今天');
-        const ids = [...new Set((Array.isArray(p.fileIds) ? p.fileIds as unknown[] : []).map(String))];
-        for (const id of ids) if (!root.files.some(f => f.id === id)) fail('附件不存在', 'NOT_FOUND');
-        q.fileIds = ids;
       }
+      const ids = [...new Set((Array.isArray(p.fileIds) ? p.fileIds as unknown[] : []).map(String))];
+      for (const id of ids) if (!root.files.some(f => f.id === id)) fail('附件不存在', 'NOT_FOUND');
+      q.fileIds = ids;
       const prev = rfqCurrentQuotes(r).find(x => x.supplierId === supplierId); if (prev) prev.supersededAt = c.now;
       r.quotes.push(q);
       event(root, c, r, declined ? `${s.name} 谢绝报价：${q.declineReason}` : `${prev ? '更新' : '登记'} ${s.name} 报价：${q.price} ${q.currency}/${r.unit}，MOQ ${q.moq || '无'}，承诺交期 ${q.promisedDue}，有效至 ${q.validUntil}`);
@@ -233,7 +233,7 @@ export function applyRfqCommand(root: Root, command: RfqCommand, c: MistContext)
       const prepaid = purchasePrepaymentAvailableMinor(root, po.id);
       applyPayablesCommand(root, { type: 'payable.purchase.cancel', payload: { purchaseId: po.id, reason: `转给 ${target.name}：${reason}`, ...(prepaid > 0 ? { prepayment: 'refund' as const } : {}) } }, c);
       const saved = applyFulfillmentCommand(root, { type: 'fulfillment.procurement.save', payload: { orderId: po.orderId, lineId: po.lineId, kind: po.kind, ...(po.materialKind?{materialKind:po.materialKind}:{}), ...(po.stageTerms?{stageTerms:{...po.stageTerms}}:{}), ...(po.iqcRequired?{iqcRequired:true}:{}), supplierId: target.id, supplier: target.name, description: po.description, quantity: po.quantity, unit: po.unit, price: positive(p.price, '新单价'), currency: currencyOf(p.currency), due, terms: text(p.terms, '付款条件', false, 200) || po.terms, destination: transferDestination(po, target.name),
-        note: `由 ${po.code}（${po.supplier}）转入：${reason}`, fileIds: [] } }, c) as { id: string };
+        note: po.note, fileIds: [] } }, c) as { id: string };
       const next = root.fulfillment.purchases.find(x => x.id === saved.id)!;
       next.transferredFrom = { purchaseId: po.id, purchaseCode: po.code, supplierId: po.supplierId, supplier: po.supplier, reason };
       po.transferredTo = { purchaseId: next.id, purchaseCode: next.code, supplierId: target.id, supplier: target.name, reason, at: c.now, actor: c.actorName };

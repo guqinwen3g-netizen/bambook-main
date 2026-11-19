@@ -11,6 +11,16 @@ const line=(source:{productId?:string;sourceDevId?:string;sourceVersionId?:strin
 const save=(s:MistState&{market:MarketState},ctx:MistContext,lines:ReturnType<typeof line>[])=>run(s,{type:'market.quotation.save',payload:{input:{...header,lines,fileIds:[],note:''}}},ctx);
 
 describe('BB-QUO-1 quotation pricing units',()=>{
+ it('does not treat archive cost per metre as verified cost per yard or kilogram',()=>{
+  const {ctx,s}=setup(),id=product(s,ctx,'fabric','米');
+  for(const unit of ['码','公斤']){
+   const qid=save(s,ctx,[line({productId:id},unit)]).id;
+   const q=s.market.quotations.find(q=>q.id===qid)!;
+   expect(q.lines[0]).toMatchObject({unit,cost:'',costBasis:'unverified'});
+  }
+  const qid=save(s,ctx,[{...line({productId:id},'码'),cost:'0.9144'}]).id;
+  expect(s.market.quotations.find(q=>q.id===qid)!.lines[0]).toMatchObject({unit:'码',cost:'0.9144',costBasis:'unverified'});
+ });
  it('only accepts 米 / 码 / 公斤 for fabric and 件 / 套 for garment product lines',()=>{
   const {ctx,s}=setup(),fabric=product(s,ctx,'fabric','米'),garment=product(s,ctx,'garment','件');
   expect(()=>save(s,ctx,[line({productId:fabric},'件')])).toThrow(/面料条目「条目」计价单位只能是 米 \/ 码 \/ 公斤/);
@@ -43,7 +53,10 @@ describe('BB-QUO-1 quotation pricing units',()=>{
   const legacy:MarketQuotation={...s.market.quotations[0],id:'legacy',code:'QT-2025-0001',customerId:'c',currency:'USD',season:'',validUntil:'2025-12-01',deliveryTerms:'FOB',paymentTerms:'T/T',status:'Sent',lines:[{id:'ll',productId:fabric,sourceDevId:'',sourceVersionId:'',name:'旧面料',style:'OLD',specification:'',qty:'100',unit:'件',price:'2.00',cost:'1.00',amount:'200.00'}],total:'200.00',deliveryEvidence:'已发送',responseEvidence:'',approval:null,approvalHistory:[],requiresApproval:false,convertedOrderId:null,createdAt:'2025-11-01T00:00:00.000Z',updatedAt:'2025-11-01T00:00:00.000Z',fileIds:[],note:''} as MarketQuotation;
   s.market.quotations.push(legacy);const before=JSON.stringify(legacy);
   save(s,ctx,[line({productId:fabric},'米')]);
-  run(s,{type:'market.quotation.status',payload:{id:'legacy',status:'Accepted',evidence:'客户邮件接受'}},ctx);
+  expect(()=>run(s,{type:'market.quotation.status',payload:{id:'legacy',status:'Accepted',evidence:'超过有效期才收到的接受'}},ctx)).toThrow('报价已过有效期');
+  expect(JSON.stringify(s.market.quotations.find(q=>q.id==='legacy'))).toBe(before);
+  // This historical acceptance happened before its deadline; old units must remain untouched.
+  run(s,{type:'market.quotation.status',payload:{id:'legacy',status:'Accepted',evidence:'客户邮件接受'}},{...ctx,now:'2025-11-02T08:00:00.000Z'});
   const after=s.market.quotations.find(q=>q.id==='legacy')!;
   expect(after.lines).toEqual(JSON.parse(before).lines);expect(after.status).toBe('Accepted');
  });

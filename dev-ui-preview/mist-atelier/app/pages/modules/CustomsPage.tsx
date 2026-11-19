@@ -7,16 +7,17 @@ import { Button, Card, CardHeader, Checklist, DataTable, Dropdown, EmptyState, F
 import type { MistCommand, MistInvoice, MistState } from '../../../../../server/src/shared/mistWorkspace';
 import { isRecognizedMistInvoice } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentCustoms, FulfillmentShipment } from '../../../../../server/src/shared/mistFulfillment';
-import { useMistWorkspace } from '../../runtime/workspace';
+import { useMistWorkspace, type MistWorkspaceContext } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { fmt } from '../../data';
 import { ModuleEditorDialog, ModuleEditorPage, moduleFileIds, type ModuleEditorSpec } from './ModuleWorkbench';
-import { documentTypeLabel, emptyOption, Events, exportRecords, field, RecordFiles, SourceLink, text, today } from './fulfillmentKit';
+import { useRecordAttachment, documentTypeLabel, emptyOption, Events, exportRecords, field, RecordFiles, SourceLink, text, today } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen, type ReasonedAction } from './pageKit';
 import { CustomsClassificationLedger, CustomsItemsBlock } from './CustomsDeclarationPanel';
-import { readCustomsClassifications } from '../../../../../server/src/shared/mistCustomsDeclaration';
+import { readCustomsClassifications, draftCustomsDeclaration } from '../../../../../server/src/shared/mistCustomsDeclaration';
+import { generatedDocFingerprint } from '../../../../../server/src/shared/mistGeneratedDocument';
 import { REBATE_TONE, RebateClaimBlock, RebateDeadlinesCard, RebateRatesCard, rebateSummary } from './RebatePanel';
 import { REBATE_STATE_LABEL } from '../../../../../server/src/shared/mistExportRebate';
 import { LetterOfCreditLedger, lcOrderDomain } from './LetterOfCredits';
@@ -63,9 +64,12 @@ export function rebateEvidence(root: MistState, c: FulfillmentCustoms) {
   return { replacement,released, cis, invoices, open: [...open].map(([currency, amount]) => ({ currency, amount })), collected, vat, ready: Number(released) + Number(collected) + Number(vat.vatReady) };
 }
 const openText = (open: Array<{ currency: string; amount: number }>) => open.map(row => `${row.currency} ${fmt(row.amount, 2)}`).join(' / ');
+/** Bind the reviewed record/originals and the declaration facts read by the form, without unrelated workspace changes. */
+const customsActionBasis=(root:MistState,c:FulfillmentCustoms)=>{const shipment=root.fulfillment.shipments.find(s=>s.id===c.shipmentId);return generatedDocFingerprint({customs:c,shipment,declaration:shipment?draftCustomsDeclaration(root,shipment):null});};
 
 export function CustomsPage() {
-  const { state, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
+  const attachFiles=useRecordAttachment();
+  const { state, run, error, refresh, loading, saving, pending, workspace } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
   const can = session.hasPermission('customs:write'), canClear = session.hasPermission('customs:clear'), canInvoices = session.hasPermission('invoices:read');
   const canRebate = session.hasPermission('tax:write'), canRebateApprove = session.hasPermission('tax:approve'), canTaxRead = session.hasPermission('tax:read'), canReconcile = session.hasPermission('invoices:reconcile');
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
@@ -74,6 +78,19 @@ export function CustomsPage() {
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id), [allPending, setAllPending] = React.useState(false);
   React.useEffect(() => { if (route.id) { setPicked(route.id); setDrawer(true); setDomainChoice(null); } }, [route.id]);
   const f = state?.fulfillment, day = today(), locked = saving || !!pending;
+  const liveCustoms=React.useRef({state,workspaceId:workspace?.id,revision:workspace?.revision,loading});liveCustoms.current={state,workspaceId:workspace?.id,revision:workspace?.revision,loading};
+  const customsRunner=(source:FulfillmentCustoms)=>{
+    const sourceWorkspaceId=workspace?.id,basis=state?customsActionBasis(state,source):'';
+    return(...args:Parameters<MistWorkspaceContext['run']>)=>{
+      const [command,options]=args;
+      if(!command.type.startsWith('fulfillment.customs.'))return run(...args);
+      const checked=liveCustoms.current;
+      if(!checked.state||!checked.workspaceId||checked.loading||typeof checked.revision!=='number'||!Number.isSafeInteger(checked.revision)||checked.revision<0)throw new Error('报关资料未读取，请重新打开后核对');
+      const current=checked.state.fulfillment.customs.find(c=>c.id===source.id);
+      if(checked.workspaceId!==sourceWorkspaceId||!current||customsActionBasis(checked.state,current)!==basis)throw new Error('报关资料或来源已更新，请重新打开后核对');
+      return run(command,{...options,expectedRevision:checked.revision});
+    };
+  };
   const shipmentOf = (c: FulfillmentCustoms) => f?.shipments.find(s => s.id === c.shipmentId);
   const contextShipment = route.section ? f?.shipments.find(s => s.id === route.section) : undefined;
   const hasContext = !!route.section, invalidContext = hasContext && !!state && !contextShipment;
@@ -106,24 +123,24 @@ export function CustomsPage() {
   const payload = (c: FulfillmentCustoms | undefined, patch: Partial<FulfillmentCustoms>) => ({ ...(c ? { id: c.id } : {}), shipmentId: c?.shipmentId || '', status: c?.status || 'draft', declarationNo: c?.declarationNo || '', broker: c?.broker || '', hsCode: c?.hsCode || '', origin: c?.origin || '', tradeMode: c?.tradeMode || '', declaredAt: c?.declaredAt || '', clearedAt: c?.clearedAt || '', evidence: c?.evidence || '', fileIds: c?.fileIds || [], note: c?.note || '', ...(c?.channel ? { channel: c.channel } : {}), ...patch });
   const prepFields = [field('broker', '报关行', 'text', false), field('hsCode', 'HS 编码', 'text', false), field('origin', '原产地', 'choice', false, COUNTRIES), field('tradeMode', '贸易方式 / 成交方式', 'choice', false, CUSTOMS_TRADE_MODES), field('note', '备注', 'textarea', false)];
   const createSpec = (shipmentId = ''): ModuleEditorSpec => ({ title: '建立报关记录', submitLabel: '建立记录',
-    fields: [field('shipmentId', '准确出运', 'select', true, [emptyOption, ...eligibleShipments().map(s => ({ value: s.id, label: `${s.code} · ${s.customer}` }))]), field('channel', '报关方式', 'select', true, [{ value: 'general', label: '一般贸易报关' }, { value: 'express', label: '快件 / 邮寄（无需正式报关单）' }]), ...prepFields],
+    fields: [field('shipmentId', '准确出运', 'select', true, [emptyOption, ...eligibleShipments().map(s => ({ value: s.id, label: `${s.code} · ${s.customer}` }))]), field('channel', '报关方式', 'select', true, [{ value: 'general', label: '一般贸易报关' }, { value: 'express', label: '快件 / 邮寄' }]), ...prepFields],
     initialValues: { shipmentId: shipmentId || (hasContext ? route.section || '' : ''), channel: 'general', broker: '', hsCode: '', origin: '中国', tradeMode: '一般贸易', note: '' },
     submit: v => run({ type: 'fulfillment.customs.save', payload: payload(undefined, { shipmentId: text(v, 'shipmentId'), channel: text(v, 'channel') as 'general' | 'express', broker: text(v, 'broker'), hsCode: text(v, 'hsCode'), origin: text(v, 'origin'), tradeMode: text(v, 'tradeMode'), note: text(v, 'note') }) }) });
   const hsField = (c: FulfillmentCustoms) => c.items?.length ? { ...field('hsCode', 'HS 编码（按商品项汇总）', 'text', false), readonly: true } : field('hsCode', 'HS 编码', 'text', false);
   const editSpec = (c: FulfillmentCustoms): ModuleEditorSpec => ({ title: '编辑报关资料', fields: prepFields.map(f => f.key === 'hsCode' ? hsField(c) : f), initialValues: { broker: c.broker, hsCode: c.hsCode, origin: c.origin, tradeMode: c.tradeMode, note: c.note },
-    submit: v => run({ type: 'fulfillment.customs.save', payload: payload(c, { broker: text(v, 'broker'), hsCode: text(v, 'hsCode'), origin: text(v, 'origin'), tradeMode: text(v, 'tradeMode'), note: text(v, 'note') }) }) });
+    submit: v => customsRunner(c)({ type: 'fulfillment.customs.save', payload: payload(c, { broker: text(v, 'broker'), hsCode: text(v, 'hsCode'), origin: text(v, 'origin'), tradeMode: text(v, 'tradeMode'), note: text(v, 'note') }) }) });
   const declareSpec = (c: FulfillmentCustoms, correcting: boolean): ModuleEditorSpec => ({ title: correcting ? '更正申报信息' : '登记已向海关申报', submitLabel: correcting ? '保存更正' : '登记已申报',
     fields: c.channel === 'express' ? [field('declarationNo', '快件运单号'), field('broker', '快递 / 承运商'), field('declaredAt', '交寄日', 'date'), field('note', '备注', 'textarea', false)] : [field('declarationNo', '报关单号'), field('broker', '报关行'), c.items?.length ? hsField(c) : field('hsCode', 'HS 编码'), field('origin', '原产地'), field('tradeMode', '贸易方式 / 成交方式'), field('declaredAt', '实际申报日', 'date'), field('note', '备注', 'textarea', false)],
     initialValues: { declarationNo: c.declarationNo, broker: c.broker, hsCode: c.hsCode, origin: c.origin, tradeMode: c.tradeMode, declaredAt: c.declaredAt || day, note: c.note },
-    submit: v => run({ type: 'fulfillment.customs.save', payload: payload(c, { status: 'submitted', declarationNo: text(v, 'declarationNo'), broker: text(v, 'broker'), hsCode: text(v, 'hsCode'), origin: text(v, 'origin'), tradeMode: text(v, 'tradeMode'), declaredAt: text(v, 'declaredAt'), note: text(v, 'note') }) }) });
+    submit: v => customsRunner(c)({ type: 'fulfillment.customs.save', payload: payload(c, { status: 'submitted', declarationNo: text(v, 'declarationNo'), broker: text(v, 'broker'), hsCode: text(v, 'hsCode'), origin: text(v, 'origin'), tradeMode: text(v, 'tradeMode'), declaredAt: text(v, 'declaredAt'), note: text(v, 'note') }) }) });
   // sup50：已放行记录不覆盖，改单、退关、补附件各留一条记录。
   const amendSpec = (c: FulfillmentCustoms, kind: 'amend' | 'withdraw' | 'attach'): ModuleEditorSpec => ({ title: ({ amend: '登记改单', withdraw: '登记退关', attach: '补充附件' })[kind], submitLabel: '保存', submitVariant: kind === 'withdraw' ? 'danger' : 'primary',
     fields: [field('reason', ({ amend: '改单内容与海关回执', withdraw: '退关原因', attach: '附件说明' })[kind], 'textarea'), field('files', '附件', 'files', kind === 'attach')], initialValues: { reason: '', files: '' },
-    submit: v => run({ type: 'fulfillment.customs.amend', payload: { id: c.id, kind, reason: text(v, 'reason'), fileIds: moduleFileIds(v.files) } }) });
+    submit: v => customsRunner(c)({ type: 'fulfillment.customs.amend', payload: { id: c.id, kind, reason: text(v, 'reason'), fileIds: moduleFileIds(v.files) } }) });
   const releaseSpec = (c: FulfillmentCustoms): ModuleEditorSpec => ({ title: '登记海关放行', submitLabel: '登记放行',
     fields: [field('clearedAt', '实际放行日', 'date'), field('evidence', '放行依据', 'textarea')],
     initialValues: { clearedAt: day, evidence: c.evidence },
-    submit: v => run({ type: 'fulfillment.customs.save', payload: payload(c, { status: 'cleared', clearedAt: text(v, 'clearedAt'), evidence: text(v, 'evidence') }) }) });
+    submit: v => customsRunner(c)({ type: 'fulfillment.customs.save', payload: payload(c, { status: 'cleared', clearedAt: text(v, 'clearedAt'), evidence: text(v, 'evidence') }) }) });
 
   const statusCount = (value: StatusFilter) => value === 'all' ? searched.length : searched.filter(c => c.status === value).length;
   const declarationColumns: Column<FulfillmentCustoms>[] = [
@@ -151,10 +168,10 @@ export function CustomsPage() {
       ? <EmptyState icon={Receipt} title={uiText("还没有可核对的退税资料")} description={uiText("报关单登记为已申报或已放行后，会在这里核对放行、本票 CI 收汇与增值税专票，并由财务登记退税申报。")} />
       : <EmptyState icon={Stamp} title={uiText(invalidContext ? '来源出运不存在' : hasContext ? '本票还没有报关记录' : `还没有${domain === 'fabric' ? '面料' : '成衣'}报关记录`)} description={invalidContext ? uiText('来源出运不可用') : undefined} action={createButton && !invalidContext && eligible.length ? <Button icon={Plus} onClick={() => setDialog(createSpec())}>{uiText("建立报关记录")}</Button> : undefined} />;
   const detail = selected && state
-    ? <CustomsDetail record={selected} state={state} onAmend={kind => setDialog(amendSpec(selected, kind))} can={can} canClear={canClear} canInvoices={canInvoices&&canTaxRead} canRebate={canRebate} canRebateApprove={canRebateApprove} canReconcile={canReconcile} locked={locked} open={setDialog} run={run}
+    ? <CustomsDetail record={selected} state={state} onAmend={kind => setDialog(amendSpec(selected, kind))} can={can} canClear={canClear} canInvoices={canInvoices&&canTaxRead} canRebate={canRebate} canRebateApprove={canRebateApprove} canReconcile={canReconcile} locked={locked} open={setDialog} run={customsRunner(selected)}
         onBill={id => go('payment-vouchers', id, { section: 'payables' })} onReceipt={id => go('payment-vouchers', id)}
         onEdit={() => setDialog(editSpec(selected))} onDeclare={() => setDialog(declareSpec(selected, selected.status === 'submitted'))} onRelease={() => { if (canClear) setDialog(releaseSpec(selected)); }}
-        onAttach={ids => run({ type: 'fulfillment.customs.save', payload: payload(selected, { fileIds: ids }) })}
+        onAttach={added => attachFiles(root=>root.fulfillment.customs.find(row=>row.id===selected.id),(current,fileIds)=>{if(current.status==='cleared')throw new Error('报关记录已放行，请重新打开后核对附件');return {type:'fulfillment.customs.save',payload:payload(current,{fileIds})};},added)}
         onClassify={() => {if(hasContext){setTab('hs');setDrawer(false);}else changeTab('hs');}} onShipment={() => go('shipments', selected.shipmentId)} onDocuments={() => go('document-center', undefined, { section: selected.shipmentId })} onInvoice={id => go('invoices', id)} />
     : <EmptyState icon={Stamp} title={uiText("报关详情")} description={uiText(loading ? '正在读取报关记录' : tab === 'rebate' ? '从列表选择一张报关单，查看放行、收汇与退税资料' : '从列表选择一条报关记录，查看申报、放行与装箱核对')} compact />;
   const pendingShown = allPending ? pendingShipments : pendingShipments.slice(0, 3);
@@ -169,7 +186,7 @@ export function CustomsPage() {
         {tab !== 'lc' && tab !== 'hs' && <Button icon={Download} disabled={!rows.length} onClick={exportRows}>{uiText("导出")}</Button>}
         {tab === 'declarations' && createButton}
       </>} />
-    {error && <FailureNotice title={"报关数据未读取"} detail={error} retry={() => void refresh()} />}
+    {error && <FailureNotice title={state ? "报关操作未完成" : "报关数据未读取"} detail={error} retry={() => void refresh()} />}
     {!hasContext && <div className="mist-section"><Tabs<Tab> value={tab} onChange={changeTab} options={[{ value: 'declarations', label: '报关', count: inDomain.length }, { value: 'lc', label: '信用证', count: lcAll.filter(o => o.type === domain).length }, { value: 'rebate', label: '退税', count: inDomain.filter(c => c.status !== 'draft').length }, { value: 'hs', label: '商品归类', count: hsAll.filter(c => c.family === domain).length }]} /></div>}
     {!hasContext && <div className="mist-section"><Segmented<Domain> ariaLabel={uiText("业务板块")} value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${tab === 'lc' ? lcAll.filter(o => o.type === 'garment').length : tab === 'hs' ? hsAll.filter(c => c.family === 'garment').length : records.filter(c => domainOf(c) === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${tab === 'lc' ? lcAll.filter(o => o.type === 'fabric').length : tab === 'hs' ? hsAll.filter(c => c.family === 'fabric').length : records.filter(c => domainOf(c) === 'fabric').length}` }]} /></div>}
     <Toolbar>
@@ -202,7 +219,7 @@ export function CustomsPage() {
         <LetterOfCreditLedger state={state || undefined} domain={domain} needle={needle} can={can} locked={locked} loading={loading} open={setDialog} run={run} onOrder={o => go('orders/detail', o.id, { customerId: o.customerId, section: o.type })} onShipment={id => go('shipments', id)} />
       </>
       : tab === 'hs' ? (state ? <CustomsClassificationLedger state={state} domain={domain} needle={needle} can={can} locked={locked} open={setDialog} run={run} /> : null)
-      : <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.declarationNo || selected.code} · ${shipmentOf(selected)?.customer || ''}` : '报关详情'} drawerSub={selected ? `${shipmentOf(selected)?.code || ''} · ${CUSTOMS_LABEL[selected.status]}` : undefined}
+      : <ListDetail freezeLayout={!!dialog} drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.declarationNo || selected.code} · ${shipmentOf(selected)?.customer || ''}` : '报关详情'} drawerSub={selected ? `${shipmentOf(selected)?.code || ''} · ${CUSTOMS_LABEL[selected.status]}` : undefined}
           list={<Card><DataTable ariaLabel={uiText(tab === 'rebate' ? '退税资料核对' : '报关列表')} loading={loading} rows={rows} rowKey={c => c.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={tab === 'rebate' ? rebateColumns : declarationColumns} empty={empty} /></Card>}
           detail={detail} />}
     <ModuleEditorDialog spec={tab==='lc'&&!can?null:dialog} onClose={() => setDialog(null)} />
@@ -211,7 +228,7 @@ export function CustomsPage() {
 
 function CustomsDetail({ record: c, state, onAmend, can, canClear, canInvoices, canRebate, canRebateApprove = false, canReconcile, locked, open, run, onBill, onReceipt, onEdit, onDeclare, onRelease, onAttach, onClassify, onShipment, onDocuments, onInvoice }: {
   record: FulfillmentCustoms; state: MistState; can: boolean; canClear: boolean; canInvoices: boolean; canRebate: boolean; canRebateApprove?: boolean; canReconcile: boolean; locked: boolean;
-  open: (spec: ModuleEditorSpec) => void; run: (command: MistCommand) => Promise<unknown>; onBill: (id: string) => void; onReceipt: (id: string) => void;
+  open: (spec: ModuleEditorSpec) => void; run: MistWorkspaceContext['run']; onBill: (id: string) => void; onReceipt: (id: string) => void;
   onAmend: (kind: 'amend' | 'withdraw' | 'attach') => void; onEdit: () => void; onDeclare: () => void; onRelease: () => void; onAttach: (ids: string[]) => Promise<unknown>; onClassify: () => void; onShipment: () => void; onDocuments: () => void; onInvoice: (id: string) => void;
 }) {
   const f = state.fulfillment, s = f.shipments.find(row => row.id === c.shipmentId), flags = customsFlags(state, c);

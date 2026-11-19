@@ -70,6 +70,21 @@ describe('closed month locks CI receivable confirmation, rejection and void (by 
   });
 });
 describe('monthly voucher export', () => {
+  it('keeps original amounts when the voucher month has no active rate', async () => {
+    const { monthlyVouchers } = await import('./mistVoucherExport');
+    const f = setup();
+    f.run({ type: 'fxrate.period.save', payload: { month: '2026-09', currency: 'USD', rate: '7.20', source: '九月月末汇率' } });
+    const october = () => monthlyVouchers(f.state, '2026-10');
+    const unpriced = () => expect(october().map(l => [l.currency, l.amount, l.rate, l.debit, l.credit])).toEqual([
+      ['USD', 200, null, null, null], ['USD', 200, null, null, null],
+    ]);
+    unpriced();
+    const current = f.run({ type: 'fxrate.period.save', payload: { month: '2026-10', currency: 'USD', rate: '7.10', source: '十月月末汇率' } });
+    expect(october()[0]).toMatchObject({ rate: 7.1, debit: 1420 });
+    f.run({ type: 'fxrate.period.void', payload: { id: String(current.id), reason: '当月来源有误' } });
+    unpriced();
+  });
+
   it('produces balanced suggested entries with account codes and period-rate CNY', async () => {
     const { monthlyVouchers } = await import('./mistVoucherExport');
     const f = setup();

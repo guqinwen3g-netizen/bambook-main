@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import React,{act}from'react';import{createRoot,type Root}from'react-dom/client';import{beforeEach,afterEach,it,expect,vi}from'vitest';
+import {usePageFailureHost} from '../runtime/errorPresentation';
 const m=vi.hoisted(()=>({nav:{route:{view:'account-recovery'},go:vi.fn()},api:{requestRecovery:vi.fn(),complete:vi.fn()}}));vi.mock('../nav',()=>({useNav:()=>m.nav}));vi.mock('../runtime/accountAccess',()=>({accountAccessApi:m.api}));import{AccountAccessPage}from'./AccountAccessPage';
 let root:Root,host:HTMLDivElement;
 const fill=(name:string,value:string)=>{const field=host.querySelector(`[aria-label="${name}"]`)as HTMLInputElement;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(field,value);field.dispatchEvent(new Event('input',{bubbles:true}));};
@@ -10,6 +11,15 @@ it('submits the employee recovery address without claiming that an account exist
 it('rejects mismatched passwords and never renders the link secret',async()=>{m.nav.route.view='account-access';history.replaceState({},'','/?view=account-access&kind=invite&email=ops@example.invalid#private-link-secret');await render();await act(async()=>{fill('新密码','CorrectPassword42!');fill('确认新密码','different');});await submit();expect(m.api.complete).not.toHaveBeenCalled();expect(host.textContent).toContain('两次输入');expect(host.textContent).not.toContain('private-link-secret');});
 it('sends the token only on explicit submission and clears it after success',async()=>{m.nav.route.view='account-access';history.replaceState({},'','/?view=account-access&kind=invite&email=ops@example.invalid#private-link-secret');m.api.complete.mockResolvedValue({platform:true});await render();expect(m.api.complete).not.toHaveBeenCalled();await act(async()=>{fill('新密码','CorrectPassword42!');fill('确认新密码','CorrectPassword42!');});await submit();expect(m.api.complete).toHaveBeenCalledWith(expect.objectContaining({kind:'invite',token:'private-link-secret'}));expect(location.hash).toBe('');expect(host.textContent).toContain('密码已设置');await act(async()=>host.querySelector('button')!.click());expect(m.nav.go).toHaveBeenCalledWith('login');});
 it('keeps the reset form usable after a server error',async()=>{m.nav.route.view='account-access';history.replaceState({},'','/?view=account-access&kind=recovery&email=ops@example.invalid#private-link-secret');m.api.complete.mockRejectedValue(new Error('请求未完成，请重试'));await render();await act(async()=>{fill('新密码','CorrectPassword42!');fill('确认新密码','CorrectPassword42!');});await submit();expect(host.textContent).toContain('请求未完成');expect((host.querySelector('[aria-label="新密码"]')as HTMLInputElement).value).toBe('CorrectPassword42!');});
+it.each(['account-recovery','account-access'])('keeps %s failures visible with the pre-workbench error host',async view=>{
+ m.nav.route.view=view;history.replaceState({},'','/?view='+view+'&kind=recovery&email=staff@example.invalid#private-link-secret');
+ m.api.requestRecovery.mockRejectedValue(new Error('网络暂不可用，请重试'));m.api.complete.mockRejectedValue(new Error('网络暂不可用，请重试'));
+ function BeforeWorkbench(){usePageFailureHost();return <AccountAccessPage/>;}
+ await act(async()=>root.render(<BeforeWorkbench/>));
+ if(view==='account-recovery')await act(async()=>fill('工作邮箱','staff@example.invalid'));
+ else await act(async()=>{fill('新密码','CorrectPassword42!');fill('确认新密码','CorrectPassword42!');});
+ await submit();expect(host.textContent).toContain('网络暂不可用，请重试');expect(host.querySelector('button[type=submit]')?.hasAttribute('disabled')).toBe(false);
+});
 
 it('explains employee recovery without a platform-only restriction',async()=>{await render();expect(host.querySelector('form p')).toBeNull();expect(host.textContent).toContain('发送重置链接');expect(host.textContent).not.toContain('平台工作账号');expect(host.textContent).not.toContain('公司账号请联系');});
 it('completes an employee recovery and returns to the shared login',async()=>{m.nav.route.view='account-access';history.replaceState({},'','/?view=account-access&kind=recovery&email=staff@example.test#private-link-secret');m.api.complete.mockResolvedValue({platform:false});await render();expect(host.querySelector('h2')?.textContent).toBe('设置新密码');await act(async()=>{fill('新密码','CorrectPassword42!');fill('确认新密码','CorrectPassword42!');});await submit();expect(m.api.complete).toHaveBeenCalledWith(expect.objectContaining({kind:'recovery',email:'staff@example.test'}));expect(location.hash).toBe('');await act(async()=>host.querySelector('button')!.click());expect(m.nav.go).toHaveBeenCalledWith('login');});

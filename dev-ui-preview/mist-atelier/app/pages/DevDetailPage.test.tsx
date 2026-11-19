@@ -9,8 +9,9 @@ import { getByRole } from '@testing-library/dom';
 
 const bridge=vi.hoisted(()=>({current:null as any}));
 const billingAccess=vi.hoisted(()=>({write:true,qcWrite:true}));
+const readIdentity=vi.hoisted(()=>({sessionKey:'session-a',userId:'test-sales',companyId:'company-a'}));
 vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>bridge.current}));
-vi.mock('../runtime/auth',()=>({useMistSession:()=>({hasPermission:(permission:string)=>permission.startsWith('qc:')?billingAccess.qcWrite:permission!=='products:write'||billingAccess.write}),useOptionalMistSession:()=>({user:{id:'test-sales',displayName:'业务员'},hasPermission:(permission:string)=>permission.startsWith('qc:')?billingAccess.qcWrite:permission!=='products:write'||billingAccess.write})}));
+vi.mock('../runtime/auth',()=>({useMistSession:()=>({hasPermission:(permission:string)=>permission.startsWith('qc:')?billingAccess.qcWrite:permission!=='products:write'||billingAccess.write}),useOptionalMistSession:()=>({sessionKey:readIdentity.sessionKey,user:{id:readIdentity.userId,companyId:readIdentity.companyId,displayName:'业务员'},hasPermission:(permission:string)=>permission.startsWith('qc:')?billingAccess.qcWrite:permission!=='products:write'||billingAccess.write})}));
 
 describe('version confirmation form',()=>{
   const values={confirmer:'Emma Clarke',organization:'Cedar & Crown',confirmedAt:'2026-10-13T15:10',basis:'电话确认记录',originalText:'Approved'};
@@ -33,6 +34,36 @@ afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;h
 async function mount(versionId='va',customerId?:string){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<Nav.Provider value={{route:{view:'development/detail',id:'dev-a',versionId,customerId},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><DevDetailPage/></Nav.Provider>));}
 async function click(text:string){const button=[...document.querySelectorAll('button')].find(item=>item.textContent?.trim()===text);expect(button,text).toBeTruthy();await act(async()=>button!.click());}
 async function fill(label:string,value:string){const field=[...document.querySelectorAll('label')].find(item=>item.querySelector('.mist-field-label')?.textContent?.replace('*','')===label);const select=field?.querySelector('select');if(select){await act(async()=>{select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));});expect(select.value,label).toBe(value);return;}const input=field?.querySelector('input,textarea') as HTMLInputElement|HTMLTextAreaElement;expect(input,label).toBeTruthy();await act(async()=>{const prototype=input.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(prototype,'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));});}
+
+describe('development detail workspace read states',()=>{
+  beforeEach(()=>{Object.assign(readIdentity,{sessionKey:'session-a',userId:'test-sales',companyId:'company-a'});bridge.current.workspace={id:'workspace-a',revision:1};bridge.current.refresh=vi.fn(async()=>{});});
+  const redraw=async()=>{await act(async()=>root!.render(<Nav.Provider value={{route:{view:'development/detail',id:'dev-a',versionId:'va'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><DevDetailPage/></Nav.Provider>));};
+  it('distinguishes unread and loading from a confirmed missing record',async()=>{
+    bridge.current.state=null;await mount();expect(host.textContent).toContain('开发案资料未读取');expect(host.textContent).not.toContain('未找到开发案');
+    await act(async()=>{bridge.current.loading=true;});await redraw();expect(host.textContent).toContain('正在读取开发案');expect(host.textContent).not.toContain('未找到开发案');
+  });
+  it('keeps an initial 503 failure after the shell dismisses its error and recovers only after a successful read',async()=>{
+    const saved=bridge.current.state;bridge.current.state=null;bridge.current.error='参考资料读取暂时失败';await mount();expect(host.textContent).toContain('开发案读取失败');expect(host.textContent).not.toContain('未找到开发案');
+    bridge.current.error='';await redraw();expect(host.textContent).toContain('开发案读取失败');
+    await click('重新读取');expect(bridge.current.refresh).toHaveBeenCalledTimes(1);
+    bridge.current.loading=true;await redraw();expect(host.textContent).toContain('正在读取开发案');
+    bridge.current.state=saved;bridge.current.loading=false;await redraw();expect(host.textContent).toContain('实际开发');expect(host.textContent).not.toContain('开发案读取失败');expect(bridge.current.run).not.toHaveBeenCalled();
+  });
+  it('reports a missing object only after a successful snapshot and clears a failed refresh when the same snapshot is reread',async()=>{
+    bridge.current.state={...bridge.current.state,devs:[]};await mount();expect(host.textContent).toContain('未找到开发案');
+    bridge.current.error='读取暂时失败';await redraw();expect(host.textContent).toContain('开发案读取失败');
+    bridge.current.error='';await redraw();expect(host.textContent).toContain('开发案读取失败');
+    bridge.current.loading=true;await redraw();bridge.current.loading=false;await redraw();expect(host.textContent).toContain('未找到开发案');expect(host.textContent).not.toContain('读取暂时失败');
+  });
+  it('retains a known current snapshot while a background refresh fails',async()=>{
+    await mount();bridge.current.loading=true;await redraw();expect(host.textContent).toContain('实际开发');bridge.current.loading=false;bridge.current.error='同步暂时失败';await redraw();expect(host.textContent).toContain('实际开发');expect(host.textContent).not.toContain('未找到开发案');
+  });
+  it.each(['session','company','workspace'] as const)('does not carry a prior failure or record across a %s switch',async(kind)=>{
+    await mount();expect(host.textContent).toContain('实际开发');bridge.current.state=null;bridge.current.error='甲司私有读取信息';await redraw();
+    if(kind==='session')readIdentity.sessionKey='session-b';else if(kind==='company')readIdentity.companyId='company-b';else bridge.current.workspace={id:'workspace-b',revision:1};
+    bridge.current.error='';await redraw();expect(host.textContent).toContain('开发案资料未读取');expect(host.textContent).not.toContain('甲司私有读取信息');expect(host.textContent).not.toContain('实际开发');
+  });
+});
 
 describe('exact persisted version detail',()=>{
   it('shows a staged version chain, blocks the sample until the greige is handed over and records the handover',async()=>{

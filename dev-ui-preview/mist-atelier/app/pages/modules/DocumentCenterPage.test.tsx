@@ -8,11 +8,15 @@ import {createMistState,type MistState} from '../../../../../server/src/shared/m
 import type {FulfillmentShipment,FulfillmentDocument} from '../../../../../server/src/shared/mistFulfillment';
 import {Nav} from '../../nav';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
-const store=vi.hoisted(()=>({state:null as MistState|null,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
+const store=vi.hoisted(()=>({state:null as MistState|null,workspace:{id:'workspace',revision:1},loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
 const session=vi.hoisted(()=>({denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:'ops',displayName:'后勤'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:(view:string)=>view!=='system-settings'||!session.denied.has('settings:system:read')}); return { useMistSession, useOptionalMistSession: useMistSession }; });
+import {fixture as fulfillmentFixture} from '../../../../../server/src/mist/__tests__/professionalFulfillment';
+import {prepareGeneratedSnapshot} from '../../../../../server/src/shared/mistDocumentGeneration';
+import {generatedDocFingerprint} from '../../../../../server/src/shared/mistGeneratedDocument';
 import {DocumentCenterPage,issueBlocker} from './DocumentCenterPage';
+import {GENERATED_EXPORT_EVENT,type GeneratedExportRequest} from '../../runtime/exportRequests';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let host:HTMLElement,root:Root;let presentedError:string|undefined;const go=vi.fn();
 function render(id?:string,section?:string){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'document-center',id,section},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><MistPresentedErrorContext.Provider value={presentedError}><DocumentCenterPage/></MistPresentedErrorContext.Provider></Nav.Provider></ToastProvider></MistRoot>));}
@@ -21,11 +25,50 @@ function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act((
 const shipment=(id:string,patch:Partial<FulfillmentShipment>={}):FulfillmentShipment=>({id,code:id.toUpperCase(),customerId:'c',customer:'Cedar',domain:'garment',consignee:'Cedar DC',mode:'sea',portOfLoading:'上海',portOfDischarge:'Felixstowe',incoterm:'FOB',plannedDate:'2099-01-01',booking:'',lines:[{orderId:'o',lineId:'l',productionId:'p',quantity:10,factoryConfirmedAt:'2026-10-09'}],note:'',fileIds:[],state:'preparing',requestedBy:'业务',requesterId:'biz',createdAt:'2026-10-08T08:00:00Z',...patch});
 const doc=(id:string,type:FulfillmentDocument['type'],patch:Partial<FulfillmentDocument>={}):FulfillmentDocument=>({id,shipmentId:'s',orderId:type==='CI'?'o':'',type,number:type+'-'+id,version:1,title:type+' 标题',dueDate:type==='CI'?'2026-11-01':'',content:'正文',fileIds:['file'],status:'draft',createdAt:'2026-10-10T08:00:00Z',actor:'后勤',...patch});
 const pack=(quantity:number)=>({id:'pk'+quantity,shipmentId:'s',lineId:'l',productionId:'p',carton:'1',quantity,netWeight:9,grossWeight:10,volume:0.1,note:''});
-beforeEach(()=>{presentedError=undefined;store.error='';session.denied=new Set();const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'后勤'},'empty');
+beforeEach(()=>{store.workspace={id:'workspace',revision:1};presentedError=undefined;store.error='';session.denied=new Set();const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'后勤'},'empty');
   s.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',customer:'Cedar',currency:'USD'} as any);s.orderLines.push({id:'l',orderId:'o',name:'大衣',style:'COAT-1',img:'coat',qty:10,unit:'件',price:10,made:10,qc:10} as any);
   s.fulfillment.shipments.push(shipment('s'));
   store.state=s;store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
+
+it.each([true,false])('keeps unread documents and letterhead distinct from empty data (loading %s)',async loading=>{
+ store.state=null;store.loading=loading;store.error=loading?'':'本次读取失败';
+ try{
+  render();
+  expect(host.textContent).toContain(loading?'正在读取单据':'单据资料未读取');
+  expect(host.textContent).not.toContain('还没有成衣出运单据');
+  expect(queryByRole(host,'table',{name:'单据列表'})).toBeNull();
+  expect(queryByRole(host,'button',{name:/当前单据/})).toBeNull();
+  expect((getByRole(host,'button',{name:'生成单据',exact:true}) as HTMLButtonElement).disabled).toBe(true);
+  await click(getByRole(host,'tab',{name:'公司抬头',exact:true}));
+  expect(host.textContent).not.toContain('尚未填写公司抬头');
+ }finally{store.loading=false;}
+});
+
+it('packages only distinct originals from effective documents in the current full shipment scope',async()=>{
+ const state=store.state!;
+ state.fulfillment.shipments.push(shipment('other'));
+ state.fulfillment.documents.push(
+  doc('a','CI',{status:'issued',fileIds:['a','shared']}),
+  doc('b','PL',{status:'issued',fileIds:['b','shared']}),
+  doc('old','CI',{status:'void',fileIds:['old']}),
+  doc('draft','CD',{fileIds:['draft']}),
+  doc('outside','CI',{shipmentId:'other',status:'issued',fileIds:['outside']}),
+ );
+ let request:GeneratedExportRequest|undefined;
+ const listen=(event:Event)=>{event.preventDefault();request=(event as CustomEvent<GeneratedExportRequest>).detail;};
+ document.addEventListener(GENERATED_EXPORT_EVENT,listen);
+ try{
+  render(undefined,'s');
+  await click(getByRole(host,'button',{name:'打包本票正式单据',exact:true}));
+  expect(request).toMatchObject({filename:'S-正式单据.zip',rowCount:3});
+  state.fulfillment.shipments[0].hiddenCount=1;render(undefined,'s');
+  expect(queryByRole(host,'button',{name:'打包本票正式单据',exact:true})).toBeNull();
+  render();
+  expect(queryByRole(host,'button',{name:'打包本票正式单据',exact:true})).toBeNull();
+  expect(store.run).not.toHaveBeenCalled();
+ }finally{document.removeEventListener(GENERATED_EXPORT_EVENT,listen);}
+});
 
 it('explains every issue precondition the backend enforces before a draft can be issued',()=>{
   const st=store.state!,f=st.fulfillment;
@@ -151,4 +194,93 @@ it('generates a CI from the shipment with its due date and shows the receivable 
   store.state!.fulfillment.documents.push(doc('ci','CI',{dueDate:'2026-12-01'}));render('ci','s');
   await click(getByRole(host.querySelector('[data-document-detail="ci"]') as HTMLElement,'button',{name:'签发'}));
   expect(getByRole(document.body,'dialog',{name:/签发/}).textContent).toContain('将生成应收 USD 100.00，到期 2026-12-01');
+});
+it('prefills an English OA credit term from the shipment ETD without changing the contract',async()=>{
+ const s=store.state!;s.orders[0].governance={contract:{kind:'external',paymentNote:'O/A30 days from actual air dispatch; final quantity95yards'}} as any;
+ s.fulfillment.shipments[0].plannedDate='2026-11-14';s.fulfillment.shipments[0].transport={etd:'2026-11-15'} as any;
+ render(undefined,'s');await click(getAllByRole(host,'button',{name:'生成单据'})[0]);
+ expect((getByLabelText(getByRole(document.body,'dialog',{name:'生成单据'}),'应收到期日') as HTMLInputElement).value).toBe('2026-12-15');
+ expect(store.run).not.toHaveBeenCalled();expect(s.orders[0].governance?.contract.paymentNote).toContain('O/A30 days');
+});
+it('preserves a revised draft document body and its current originals while associating a late upload',async()=>{
+ store.state!.fulfillment.documents.push(doc('file-doc','PL',{content:'旧正文',fileIds:['old']}));let finish!:(value:unknown)=>void;store.uploadFile.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));render('file-doc');const input=host.querySelector('input[type="file"]')!;expect(input).toBeTruthy();Object.defineProperty(input,'files',{configurable:true,value:[new File(['new'],'new.txt',{type:'text/plain'})]});await act(async()=>{input.dispatchEvent(new Event('change',{bubbles:true}));});
+ store.state=structuredClone(store.state);Object.assign(store.state!.fulfillment.documents[0],{content:'另一岗位已复核的正文',fileIds:['old','peer']});store.workspace={id:'workspace',revision:2};render('file-doc');await act(async()=>{finish({id:'upload',name:'new.txt',mimeType:'text/plain',size:3,storageKey:'workspace/upload',createdAt:''});});
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.documents.save',payload:expect.objectContaining({id:'file-doc',content:'另一岗位已复核的正文',fileIds:['old','peer','upload']})}),{expectedRevision:2});
+});
+
+it('uses the LC payment condition without turning the presentation period into an invoice due date',async()=>{
+ const s=store.state!;s.settings.companyProfile={legalName:'竹语'} as any;
+ s.orders[0].governance={contract:{kind:'external',paymentMethod:'LC',paymentNote:'即期信用证（L/C at sight），提单日后21天内交单'}} as any;
+ s.fulfillment.shipments[0].plannedDate='2026-11-30';
+ store.run.mockResolvedValue({result:{id:'gen'}});render(undefined,'s');await click(getAllByRole(host,'button',{name:'生成单据'})[0]);
+ const dialog=getByRole(document.body,'dialog',{name:'生成单据'});
+ expect(queryByLabelText(dialog,'应收到期日')).toBeNull();
+ expect(getByRole(dialog,'textbox',{name:'合同账期'})).toHaveProperty('value','按信用证条款付款，具体日期待银行确认');
+ await click(getByRole(dialog,'button',{name:'生成'}));
+ expect(store.run).toHaveBeenCalledWith({type:'fulfillment.documents.generate',payload:{shipmentId:'s',type:'CI',orderId:'o'}});
+});
+
+it('keeps a CI on acceptance terms without inventing a fixed due date before acceptance',async()=>{
+ const s=store.state!;s.settings.companyProfile={legalName:'竹语'} as any;
+ s.orders[0].governance={contract:{kind:'external',paymentMethod:'OA',paymentNote:'交付验收后30天付款'}} as any;
+ s.fulfillment.shipments[0].plannedDate='2026-11-19';s.fulfillment.shipments[0].transport={etd:'2026-11-19'};
+ store.run.mockResolvedValue({result:{id:'gen'}});render(undefined,'s');await click(getAllByRole(host,'button',{name:'生成单据'})[0]);
+ const d=getByRole(document.body,'dialog',{name:'生成单据'});
+ expect(queryByLabelText(d,'应收到期日')).toBeNull();
+ expect((getByRole(d,'textbox',{name:'合同账期'}) as HTMLInputElement).value).toBe('交付验收后30天付款');
+ await click(getByRole(d,'button',{name:'生成'}));
+ expect(store.run).toHaveBeenCalledWith({type:'fulfillment.documents.generate',payload:{shipmentId:'s',type:'CI',orderId:'o'}});
+});
+
+it('states amount confirmation rather than delivery acceptance on an LC invoice issue',async()=>{
+ store.state!.fulfillment.documents.push(doc('lc-ci','CI',{dueDate:'',receivableDueCondition:{kind:'letterOfCredit',terms:'按信用证条款付款，具体日期待银行确认'}}));
+ render('lc-ci','s');
+ await click(getByRole(host.querySelector('[data-document-detail="lc-ci"]') as HTMLElement,'button',{name:'签发'}));
+ const issue=getByRole(document.body,'dialog',{name:/签发/});
+ expect(issue.textContent).toContain('具体日期待银行确认');
+ expect(issue.textContent).toContain('待财务确认金额');
+ expect(issue.textContent).not.toContain('验收资料');
+});
+
+ it('shows frozen acceptance terms on the CI detail and unresolved receivable date without a false missing-input warning',()=>{
+  const terms={kind:'deliveryAcceptance' as const,days:30,terms:'交付验收后30天付款'};
+  store.state!.fulfillment.documents.push(doc('ci-terms','CI',{dueDate:'',receivableDueCondition:terms,status:'issued',invoiceId:'invoice-terms'}));
+  store.state!.invoices.push({id:'invoice-terms',code:'AR-TERMS',orderId:'o',order:'SO-1',customer:'Cedar',due:'',amount:100,open:100,currency:'USD',financeStatus:'confirmed',receivableDueCondition:terms});
+  render('ci-terms');const detail=host.querySelector('[data-document-detail="ci-terms"]') as HTMLElement;
+  expect(detail.textContent).toContain('合同账期交付验收后30天付款');expect(detail.textContent).toContain('待核对账期');expect(detail.textContent).not.toContain('CI 合同应收日未填写');
+ });
+
+function generatedCdFixture(){
+ const f=fulfillmentFixture(),{productionId,purchaseId}=f.released();f.receiveAndComplete(productionId,purchaseId);const shipmentId=f.shipment(productionId),line=f.state.orderLines[0],source=f.state.fulfillment.shipments.find(s=>s.id===shipmentId)!.lines[0];
+ f.state.settings.companyProfile={legalName:'竹语服饰',englishName:'Bamboo Apparel',address:'杭州',englishAddress:'Hangzhou',phone:'0571-1',email:'doc@example.invalid',taxId:'TAX-1',customsCode:'CUS-1',bankName:'Bank',bankAccount:'123',swift:'SWIFT',defaultCurrency:'USD'};
+ f.run({type:'fulfillment.shipments.pack',payload:{id:shipmentId,lines:[{lineId:line.id,productionId:source.productionId,carton:'C1',quantity:10,netWeight:5,grossWeight:6,volume:.5,note:''}]}});
+ const customsId=f.run({type:'fulfillment.customs.save',payload:{shipmentId,status:'draft',declarationNo:'',broker:'报关行',hsCode:'',origin:'中国',tradeMode:'一般贸易',declaredAt:'',clearedAt:'',evidence:'',fileIds:[],note:''}}).id!;
+ f.run({type:'fulfillment.customs.classify.save',payload:{family:'garment',hsCode:'6203310000',declaredName:'男式羊毛西服上衣',brandType:'0',preference:'0',elements:['机织','西服上衣','男式','100%羊毛','无品牌'],styles:[line.style],legalUnit:'件',secondUnit:'千克'}});
+ f.run({type:'fulfillment.customs.items',payload:{id:customsId}});
+ const snapshot=prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CD'}},f.context),file={id:'cd-pdf',name:'CD.pdf',mimeType:'application/pdf',size:10,storageKey:'cd-pdf',createdAt:f.context.now};
+ const cd={id:'generated-cd',shipmentId,orderId:'',type:'CD' as const,number:snapshot.number,version:1,title:'报关单草稿',dueDate:'',content:'原已核稿',fileIds:[file.id],status:'draft' as const,createdAt:f.context.now,actor:'后勤',generated:[{id:'cd-generation',kind:'CD',number:snapshot.number,fileId:file.id,fileName:file.name,sha256:'x',bytes:10,templateVersion:1,snapshotFingerprint:generatedDocFingerprint(snapshot),snapshot,generatedAt:f.context.now,generatedBy:'后勤'}]};
+ f.state.files.push(file);f.state.fulfillment.documents.push(cd as any);store.state=f.state;return{f,shipmentId,customsId,cd};
+}
+it('stops the old CD issue window before a request after current review data changes and retains the seal reason',async()=>{
+ const{f,shipmentId,customsId,cd}=generatedCdFixture();store.state!.seals=[{id:'cd-seal',name:'本票章',kind:'other',status:'active',userIds:['ops'],fileId:'stamp',createdAt:'',createdBy:'',updatedAt:''}];
+ render(cd.id,shipmentId);let detail=host.querySelector('[data-document-detail="'+cd.id+'"]')as HTMLElement;await click(getByRole(detail,'button',{name:'签发',exact:true}));const dialog=getByRole(document.body,'dialog');act(()=>fireEvent.change(getByRole(dialog,'combobox',{name:'加盖印章',exact:true}),{target:{value:'cd-seal'}}));typeInto(getByRole(dialog,'textbox',{name:'用印事由',exact:true})as HTMLInputElement,'已核本票委托资料，输入应保留');
+ const item=f.state.fulfillment.customs.find(c=>c.id===customsId)!.items![0];f.run({type:'fulfillment.customs.item.adjust',payload:{id:customsId,no:1,declaredName:'男式机织羊毛西服上衣',elements:item.elements,legalQty:item.legalQty,secondQty:item.secondQty,reason:'据供方及审单资料补充品名'}});
+ store.state=f.state;store.workspace={...store.workspace,revision:2};render(cd.id,shipmentId);await click(getByRole(dialog,'button',{name:'确认签发',exact:true}));expect(store.run).not.toHaveBeenCalled();expect(dialog.textContent).toContain('报关资料已更新');expect((getByRole(dialog,'textbox',{name:'用印事由',exact:true})as HTMLInputElement).value).toBe('已核本票委托资料，输入应保留');
+});
+it('issues a current generated CD using the checked revision after an unrelated workspace update',async()=>{
+ const{shipmentId,cd}=generatedCdFixture();render(cd.id,shipmentId);const detail=host.querySelector('[data-document-detail="'+cd.id+'"]')as HTMLElement;await click(getByRole(detail,'button',{name:'签发',exact:true}));const dialog=getByRole(document.body,'dialog');store.state={...store.state!,tasks:[...store.state!.tasks,{id:'unrelated-task',title:'个人资料核对',kind:'personal',assigneeId:'ops',assignedBy:'ops',done:false,due:'',target:{view:'cockpit'}} as any]};store.workspace={...store.workspace,revision:2};render(cd.id,shipmentId);await click(getByRole(dialog,'button',{name:'确认签发',exact:true}));expect(store.run).toHaveBeenCalledWith({type:'fulfillment.documents.issue',payload:{id:cd.id}},{expectedRevision:2});
+});
+it('requires a new CD review after the customs review note changes even when its printed fields do not',async()=>{
+ const{shipmentId,customsId,cd}=generatedCdFixture();render(cd.id,shipmentId);const detail=host.querySelector('[data-document-detail="'+cd.id+'"]')as HTMLElement;await click(getByRole(detail,'button',{name:'签发',exact:true}));const dialog=getByRole(document.body,'dialog');
+ store.state=structuredClone(store.state);store.state!.fulfillment.customs.find(c=>c.id===customsId)!.note='审单依据已补充';store.workspace={...store.workspace,revision:2};render(cd.id,shipmentId);await click(getByRole(dialog,'button',{name:'确认签发',exact:true}));expect(store.run).not.toHaveBeenCalled();expect(dialog.textContent).toContain('报关资料或原件已更新');
+});
+it('refuses a CD issue when reading the current workspace fails',async()=>{
+ const{shipmentId,cd}=generatedCdFixture();render(cd.id,shipmentId);const detail=host.querySelector('[data-document-detail="'+cd.id+'"]')as HTMLElement;await click(getByRole(detail,'button',{name:'签发',exact:true}));const dialog=getByRole(document.body,'dialog');store.error='读取失败';render(cd.id,shipmentId);await click(getByRole(dialog,'button',{name:'确认签发',exact:true}));expect(store.run).not.toHaveBeenCalled();expect(dialog.textContent).toContain('单据资料未读取');
+});
+it('does not claim that voiding CD resets the shipment preparation',async()=>{
+ const{shipmentId,cd}=generatedCdFixture();store.state!.fulfillment.documents.find(d=>d.id===cd.id)!.status='issued';render(cd.id,shipmentId);const detail=host.querySelector('[data-document-detail="'+cd.id+'"]')as HTMLElement;await click(getByRole(detail,'button',{name:'作废当前版本',exact:true}));expect(getByRole(document.body,'dialog').textContent).not.toContain('出运回到单证处理中');
+});
+it('keeps the CD issue window above the detail drawer when the viewport narrows',async()=>{
+ const previous=window.matchMedia,listeners=new Set<()=>void>(),media={matches:false,addEventListener:(_type:string,fn:()=>void)=>listeners.add(fn),removeEventListener:(_type:string,fn:()=>void)=>listeners.delete(fn)};Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:()=>media});
+ try{const{shipmentId,cd}=generatedCdFixture();render(cd.id,shipmentId);const detail=host.querySelector('[data-document-detail="'+cd.id+'"]')as HTMLElement;await click(getByRole(detail,'button',{name:'签发',exact:true}));const d=getByRole(document.body,'dialog',{name:'签发 '+cd.number+' · V1',exact:true});act(()=>{media.matches=true;listeners.forEach(fn=>fn());});expect(getAllByRole(document.body,'dialog')).toHaveLength(1);expect(getByRole(document.body,'dialog',{name:'签发 '+cd.number+' · V1',exact:true})).toBe(d);expect(store.run).not.toHaveBeenCalled();}finally{Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:previous});}
 });

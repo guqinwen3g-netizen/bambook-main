@@ -1,3 +1,4 @@
+import {useEditorStepFocus} from '../../runtime/editorFocus';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 import React from "react";
@@ -221,6 +222,7 @@ export function QuotationFeedbackPage() {
     [target] = useRouteDraft(() => (q ? quotationFeedbackTarget(q) : "")),
     [failure, setFailure] = useRouteDraft(""),
     [busy, setBusy] = useRouteDraft(false);
+  const stepRef=useEditorStepFocus(step);
   const lock = React.useRef(false),
     key = session.user?.id + ":" + w.workspace?.id,
     activeKey = React.useRef(key);
@@ -310,7 +312,7 @@ export function QuotationFeedbackPage() {
           <FailureNotice title={"读取失败"} detail={w.error} retry={() => void retry()} retryLabel="重试读取" />
         )}
         <EmptyState
-          title={uiText(w.loading ? "正在读取准确报价" : "未找到指定报价或被更正反馈")}
+          title={uiText(w.loading ? "正在读取准确报价" : !w.state ? "报价资料未读取" : "未找到指定报价或被更正反馈")}
           action={<Button onClick={back}>{uiText("返回报价")}</Button>}
         />
       </MistPage>
@@ -422,7 +424,7 @@ export function QuotationFeedbackPage() {
         </Banner>
       )}
       {editing && can && !frozen ? (
-        <div className="mist-wizard">
+        <div ref={stepRef} className="mist-wizard" role="group" aria-label={uiText('第 ')+(step+1)+uiText(' 步')+' · '+uiText(['反馈事实与来源','原因、还价与跟进','核对并追加'][step])} tabIndex={-1}>
           <VerticalSteps
             current={String(step)}
             onSelect={(v) => {

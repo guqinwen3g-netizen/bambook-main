@@ -5,6 +5,7 @@ import { memberSelectOptions, workspaceMembers } from '../runtime/members';
 import { calendarWithDerived } from '../runtime/derivedCalendar';
 import { isRecognizedMistInvoice } from '../../../../server/src/shared/mistWorkspace';
 import {isInternalDeliveryTask} from '../../../../server/src/shared/mistInternalDelivery';
+import {stableJson} from '../../../../server/src/shared/stableJson';
 import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow,businessToday} from '../runtime/businessClock';
@@ -16,14 +17,14 @@ import { MIST_LOGISTICS_DUTY, type MistTarget, type MistTask } from '../../../..
 import { IMG, STAGES } from '../data';
 import { useNav } from '../nav';
 import { useMistSession } from '../runtime/auth';
-import { useMistWorkspace } from '../runtime/workspace';
+import { useMistWorkspace, type MistCommandRecovery } from '../runtime/workspace';
 import { useMyDisplayName } from '../runtime/me';
 import {mistActivityTitle} from '../runtime/activityLabels';
 import { visibleMistNotifications } from '../runtime/notificationPreferences';
 import {readMistNotice} from '../runtime/agentTaskNotices';
 import { useOptionalMistReviews } from '../runtime/reviews';
 import { AgentProposalDialog } from './AgentProposalDialog';
-import { mistWorkQueue, mistMyTasks, isMyMistTask, mistEmailFollowUpTaskIds, type MistWorkOptions } from '../runtime/workQueue';
+import { mistWorkQueue, mistMyTasks, isMyMistTask, mistEmailFollowUpTaskIds, accountHandoverPresentation, type MistWorkOptions } from '../runtime/workQueue';
 import type { View } from '../../../../types';
 import { firstWorkspaceImage, useWorkspaceImage } from '../runtime/useWorkspaceImage';
 import { FailureNotice } from '../runtime/FailureNotice';
@@ -48,15 +49,22 @@ export function HomePage() {
   // mar64：新建 / 改期 / 转派待办。
   const me = session.user?.id || '', [todoSpec, setTodoSpec] = React.useState<ModuleEditorSpec | null>(null), members = workspaceMembers(workspace.workspace, workspace.state, session.user);
   const [reportVersion, setReportVersion] = React.useState<string | null>(null), [error, setError] = React.useState('');
+  const [failedCommand,setFailedCommand]=React.useState<Omit<MistCommandRecovery,'revision'>|null>(null);
+  const recovered=workspace.commandRecovery;
+  React.useEffect(()=>{
+    if(failedCommand&&recovered&&failedCommand.requestId===recovered.requestId&&failedCommand.workspaceId===recovered.workspaceId&&failedCommand.actorId===recovered.actorId&&recovered.workspaceId===workspace.workspace?.id&&recovered.actorId===me){setError('');setFailedCommand(null);}
+  },[failedCommand,recovered,workspace.workspace?.id,me]);
   const [statView,setStatView]=React.useState<'development'|'qc'|'shipping'|'invoices'|null>(null);
   const hidden = new Set(workspace.workspace?.access?.hidden?.map(section => section.key) ?? []);
   const hiddenStats = { development: hidden.has('products')||!session.hasPermission('products:read'), qc: hidden.has('products')||hidden.has('qc')||!session.hasPermission('products:read')||!session.hasPermission('qc:read'), shipping: hidden.has('shipments')||!session.hasPermission('shipments:read'), invoices: hidden.has('receivables')||!session.hasPermission('invoices:read') };
   React.useEffect(() => { if (statView && hiddenStats[statView]) setStatView(null); }, [statView, hiddenStats.development, hiddenStats.qc, hiddenStats.shipping, hiddenStats.invoices]);
   const scope = `${session.sessionKey}:${workspace.workspace?.id ?? ''}`, activeScope = React.useRef(scope); activeScope.current = scope;
+  const liveWorkspace=React.useRef(workspace);
+  React.useLayoutEffect(()=>{liveWorkspace.current=workspace;},[workspace]);
   React.useEffect(()=>{const current=businessToday();setToday(current);setDay(current);},[scope,state?.settings.businessClock?.at]);
   const alive=React.useRef(true);React.useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const busy = loading || saving || !!pending, operation = React.useRef(false);
-  React.useEffect(() => { setTodoSpec(null); setTaskDialog(false); setSelectedTask(''); setReportVersion(null); setStatView(null); setError(''); operation.current = false; }, [scope]);
+  React.useEffect(() => { setTodoSpec(null); setTaskDialog(false); setSelectedTask(''); setReportVersion(null); setStatView(null); setError('');setFailedCommand(null); operation.current = false; }, [scope]);
   React.useEffect(() => { const update = () => setToday(businessToday()); const timer = window.setInterval(update, 60000); window.addEventListener('focus', update); return () => { window.clearInterval(timer); window.removeEventListener('focus', update); }; }, []);
   const days = weekDays(today), weekStart = days[0].key, weekEnd = days[6].key;
   const reviews = useOptionalMistReviews(), waitingReviews = reviews?.rows.filter(row => row.canDecide).length ?? 0;
@@ -64,7 +72,7 @@ export function HomePage() {
   const workOptions: MistWorkOptions = { canRead: view => session.canAccessView(view as View), can: permission => session.hasPermission(permission), me: session.user?.id ?? '', reviews: reviews?.rows, today, now: businessNow().toISOString(), workspaceId: workspace.workspace?.id, financialDisposals: workspace.workspace?.financialDisposals };
   const allTasks = mistMyTasks(state, workOptions);
   const followUpIds = new Set(state?.crm?.followUps.filter(f => !f.voided).map(f => f.nextTaskId));
-  const manageable = [...allTasks, ...(state?.tasks ?? []).filter(t => t.done && t.kind === 'crm-follow-up' && followUpIds.has(t.id) && isMyMistTask(t, workOptions, true))];
+  const manageable = [...allTasks, ...(state?.tasks ?? []).filter(t => t.done && (t.kind === 'personal' || t.kind === 'crm-follow-up' && followUpIds.has(t.id)) && isMyMistTask(t, workOptions, true))];
   const inRange = (date: string) => !date || (range === 'today' ? date <= today : date <= weekEnd);
   const tasks = allTasks.filter(task => (task.kind === 'shipping' && task.permission === MIST_LOGISTICS_DUTY) || inRange(task.due)).slice().sort((a, b) => sort === 'title' ? a.title.localeCompare(b.title, 'zh-CN') : (a.due || '9999').localeCompare(b.due || '9999') || a.title.localeCompare(b.title, 'zh-CN'));
   const queue = mistWorkQueue(state, workOptions);
@@ -78,16 +86,29 @@ export function HomePage() {
   const openTarget = (target: MistTarget) => { if (busy) return; if (target.section === 'agent-proposal' && target.id) { setProposalId(target.id); return; } go(target.view, target.id, target); };
   const run = async (work: () => Promise<unknown>, success?: string) => {
     if (busy || operation.current) return;
-    operation.current = true; const current = scope; setError('');
+    operation.current = true; const current = scope; setError('');setFailedCommand(null);
     try { await work(); if (alive.current && activeScope.current === current && success) toast(success); }
-    catch (failure) { if (alive.current && activeScope.current === current) { const message = failure instanceof Error ? failure.message : '操作未完成，请重试'; setError(message); toast(message, 'bad'); } }
+    catch (failure) { if (alive.current && activeScope.current === current) {
+      const message=failure instanceof Error?failure.message:'操作未完成，请重试',pending=failure&&typeof failure==='object'?(failure as {mistPendingCommand?:Partial<MistCommandRecovery>}).mistPendingCommand:undefined;
+      setFailedCommand(pending&&typeof pending.requestId==='string'&&pending.requestId&&typeof pending.workspaceId==='string'&&pending.workspaceId&&typeof pending.actorId==='string'&&pending.actorId?{requestId:pending.requestId,workspaceId:pending.workspaceId,actorId:pending.actorId}:null);
+      setError(message);toast(message,'bad');
+    } }
     finally { if (alive.current && activeScope.current === current) operation.current = false; }
   };
   const emailTasks = mistEmailFollowUpTaskIds(state);
+  const handoverDetails=new Map<string,NonNullable<ReturnType<typeof accountHandoverPresentation>>>();
+  for(const task of state?.tasks||[]){const details=accountHandoverPresentation(task);if(details)handoverDetails.set(task.id,details);}
   const queueRows: TaskItem[] = queue.map(item => ({ id: item.id, when: item.when, urgent: item.urgent, title: item.title, meta: item.meta, status: { tone: item.urgent ? 'warn' : 'accent', label: item.sourceLabel } }));
+  const taskDeadlines=new Map<string,string>();
+  queue.forEach(item=>taskDeadlines.set(item.id,item.due||''));
+  tasks.forEach(item=>taskDeadlines.set(item.id,item.due||''));
   const taskRows: TaskItem[] = [...queueRows, ...tasks.map(task => ({ id: task.id, when: !task.due ? '未定期限' : task.due < today ? '已逾期' : task.due === today ? '今天' : task.due.slice(5), urgent: !!task.due && task.due <= today,
-    title: task.title, meta: [emailTasks.has(task.id) ? '邮件跟进' : task.kind === 'development' ? '开发事项' : task.kind === 'supervision' ? `主管督办${(task as { nudge?: { by: string } }).nudge?.by ? ' · ' + (task as { nudge?: { by: string } }).nudge!.by : ''}` : '工作事项', state?.devs.find(dev=>dev.id===task.target.id)?.code||state?.orders.find(order=>order.id===task.target.id)?.code, task.target.versionId ? state?.versions.find(v => v.id === task.target.versionId)?.label : undefined].filter(Boolean).join(' · '),
-    status: { tone: task.due && task.due < today ? 'warn' : 'accent', label: task.due && task.due < today ? '已逾期' : '待处理' } as TaskItem['status'] }))];
+    title: task.title, meta: [handoverDetails.get(task.id)?.scope,emailTasks.has(task.id) ? '邮件跟进' : task.kind === 'development' ? '开发事项' : task.kind === 'supervision' ? `主管督办${(task as { nudge?: { by: string } }).nudge?.by ? ' · ' + (task as { nudge?: { by: string } }).nudge!.by : ''}` : '工作事项', state?.devs.find(dev=>dev.id===task.target.id)?.code||state?.orders.find(order=>order.id===task.target.id)?.code, task.target.versionId ? state?.versions.find(v => v.id === task.target.versionId)?.label : undefined].filter(Boolean).join(' · '),
+    status: { tone: task.due && task.due < today ? 'warn' : 'accent', label: task.due && task.due < today ? '已逾期' : '待处理' } as TaskItem['status'] }))].sort((a,b)=>{
+      const name=String(a.title).localeCompare(String(b.title),'zh-CN');if(sort==='title')return name;
+      const first=taskDeadlines.get(a.id),second=taskDeadlines.get(b.id);
+      return first&&second?first.localeCompare(second)||name:first?-1:second?1:name;
+    });
   const outstanding = new Map<string, number>();
   state?.invoices.forEach(invoice => { if (isRecognizedMistInvoice(invoice) && invoice.open > 0) outstanding.set(invoice.currency, (outstanding.get(invoice.currency) ?? 0) + invoice.open); });
   const currencies = [...outstanding.entries()].sort(([a], [b]) => a.localeCompare(b));
@@ -107,6 +128,8 @@ export function HomePage() {
   if (!brief.length) brief.push({ strong: '暂无工作动态', text: '', onClick: session.hasPermission('products:write') ? () => go('development/new') : undefined });
   const openTodo = (task?: MistTask) => {
     setTaskDialog(false);
+    const original=task?liveWorkspace.current.state?.tasks.find(item=>item.id===task.id):undefined;
+    const source=original?stableJson(original):'',bound=scope;
     // Keep the same form while the workspace publishes its saving state and acknowledgement.
     setTodoSpec({title:task?'调整待办':'新建待办',submitLabel:'保存',fields:[
       {key:'title',label:'事项',required:true,readonly:!!task && task.kind!=='personal'},
@@ -114,19 +137,27 @@ export function HomePage() {
       {key:'assigneeId',label:'负责人',type:'select',required:true,options:memberSelectOptions(members)},
       {key:'note',label:'备注',type:'textarea'},
     ],initialValues:{title:task?.title||'',due:task?.due||today,assigneeId:task?.assigneeIds?.[0]||me,note:task?.note||''},
-    submit:async v=>{await workspace.run({type:'task.save',payload:{...(task?{id:task.id}:{}),title:String(v.title||''),due:String(v.due||''),assigneeId:String(v.assigneeId||''),note:String(v.note||'')}});toast(uiText(task?'待办已调整':'待办已创建'));}});
+    submit:async v=>{
+      if(!alive.current||activeScope.current!==bound)throw new Error('当前公司已变化，请重新打开待办');
+      const checked=liveWorkspace.current,current=task?checked.state?.tasks.find(item=>item.id===task.id):undefined,revision=checked.workspace?.revision;
+      // A newer workspace must not lend its revision to an older task draft.
+      if(task&&(!current||source!==stableJson(current)))throw new Error('待办资料已更新，请重新打开后核对');
+      if(typeof revision!=='number'||!Number.isSafeInteger(revision)||revision<0)throw new Error('待办资料不可用，请重新读取后核对');
+      await checked.run({type:'task.save',payload:{...(task?{id:task.id}:{}),title:String(v.title||''),due:String(v.due||''),assigneeId:String(v.assigneeId||''),note:String(v.note||'')}},{expectedRevision:revision});
+    }});
   };
   const beginTask = () => { const task = tasks[0] ?? manageable[0]; setSelectedTask(task?.id ?? ''); setTaskDone(task?.done ?? false); setTaskDialog(true); };
   const chosenTask = manageable.find(task => task.id === selectedTask);
+  const chosenHandover=chosenTask?handoverDetails.get(chosenTask.id):undefined;
   const taskControlled=isInternalDeliveryTask(chosenTask);
   const dateLabel = new Date(`${today}T12:00:00`).toLocaleDateString(interfaceLocale(), { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
   return (
     <MistPage>
-      <PageHeader description={!state ? uiText(loading ? '正在读取公司业务…' : '公司业务尚未读取成功，请重试。') : undefined} variant="greeting" eyebrow={uiText(`${dateLabel} · ${workspace.workspace?.name ?? '公司工作台'}`)} title={<>{uiText(greeting)}{interfaceLocale() === 'en-US' ? ', ' : '，'}<em>{myName || uiText('同事')}</em></>}
+      <PageHeader description={!state ? uiText(loading ? '正在读取公司业务…' : '公司业务尚未读取成功，请重试。') : undefined} variant="greeting" eyebrow={dateLabel} title={<>{uiText(greeting)}{interfaceLocale() === 'en-US' ? ', ' : '，'}<em>{myName || uiText('同事')}</em></>}
         actions={<><Segmented<'today' | 'week'> ariaLabel={uiText("时间范围")} value={range} onChange={setRange} options={[{ value: 'today', label: '今天' }, { value: 'week', label: '本周' }]} />
           <Button icon={Plus} disabled={busy || !state} onClick={() => openTodo()}>{uiText("新建待办")}</Button><Button variant="primary" icon={Plus} disabled={busy || !state || !session.hasPermission('products:write')} onClick={() => go('development/new')}>{uiText("新建开发案")}</Button></>} />
       {state && <SetupChecklist state={state} workspace={workspace.workspace} canAdmin={session.hasPermission('users:admin')} go={go} />}
-      {(error || workspace.error) && <FailureNotice title="操作未完成" detail={error || workspace.error} retry={() => { setError(''); void workspace.refresh(); }} retryLabel="重新读取" />}
+      {(error || workspace.error) && <FailureNotice title="操作未完成" detail={error || workspace.error} retry={() => { setError('');setFailedCommand(null); void workspace.refresh(); }} retryLabel="重新读取" />}
       {Object.values(hiddenStats).some(value=>!value)&&<StatGrid cols={Object.values(hiddenStats).filter(value=>!value).length}>
         {!hiddenStats.development&&<StatCard icon={Layers} label={uiText("在途开发案")} value={state ? activeDevs.length : '—'} unit={uiText('个')} onClick={() => setStatView('development')} />}
         {!hiddenStats.qc&&<StatCard icon={BadgeCheck} label={uiText("待 QC 评审")} value={state ? qcTasks.length+qcVersions.length : '—'} unit={uiText('项')} onClick={() => setStatView('qc')} />}
@@ -152,9 +183,9 @@ export function HomePage() {
         </Card>
       </section>
       <ModuleEditorDialog spec={todoSpec} onClose={()=>setTodoSpec(null)} />
-      <AgentProposalDialog state={workspace.state} proposal={workspace.state?.agentProposals?.find(p => p.id === proposalId && p.state === 'pending')} onClose={() => setProposalId('')} run={(command, options) => workspace.run(command, options)} onDone={message => toast(uiText(message))} />
+      <AgentProposalDialog incomingAccess={workspace.workspace?.developmentIncomingAccess} referenceAccess={workspace.workspace?.developmentReferenceAccess} taskClosePlans={workspace.workspace?.developmentTaskClosePlans} commercialSampleLoanSources={workspace.workspace?.commercialSampleLoanSources} canConfirmShippingBasis={session.hasPermission('products:write')} state={workspace.state} scopeKey={workspace.workspace?.id+':'+session.user?.id} onRejection={workspace.dismissError} proposal={workspace.state?.agentProposals?.find(p => p.id === proposalId && p.state === 'pending')} onClose={() => setProposalId('')} run={(command, options) => workspace.run(command, options)} onDone={message => toast(uiText(message))} />
       <Dialog open={taskDialog} onClose={() => setTaskDialog(false)} title={uiText("任务状态")} footer={<><Button variant="quiet" onClick={() => setTaskDialog(false)}>{uiText("关闭")}</Button>{chosenTask&&!chosenTask.done&&(chosenTask.kind==='crm-follow-up'||chosenTask.kind==='personal')&&<Button disabled={busy} onClick={()=>openTodo(chosenTask)}>{uiText("调整待办")}</Button>}{taskControlled?<Button variant="primary" disabled={busy||!chosenTask?.target} onClick={()=>{setTaskDialog(false);if(chosenTask?.target)openTarget(chosenTask.target);}}>{uiText("打开事项")}</Button>:<Button variant="primary" disabled={busy || !chosenTask || chosenTask.done === taskDone} onClick={() => void run(async () => { await workspace.run({ type: 'task.complete', payload: { id: selectedTask, done: taskDone } }); if (alive.current && activeScope.current === scope) setTaskDialog(false); }, taskDone ? '已完成事项' : '已重新打开事项')}>{uiText("保存状态")}</Button>}</>}>
-        <FormGrid cols={1}><Field label={uiText("事项")}><Select aria-label={uiText("选择事项")} value={selectedTask} onChange={event => { const task = state?.tasks.find(item => item.id === event.target.value); setSelectedTask(event.target.value); setTaskDone(task?.done ?? false); }} options={manageable.map(task => ({ value: task.id, label: task.done ? `${uiText('已完成')} · ${task.title}` : task.title }))} /></Field><Switch label={uiText("已完成")} checked={taskDone} disabled={busy||taskControlled} onChange={setTaskDone} /></FormGrid>
+        <FormGrid cols={1}><Field label={uiText("事项")}><Select aria-label={uiText("选择事项")} value={selectedTask} onChange={event => { const task = state?.tasks.find(item => item.id === event.target.value); setSelectedTask(event.target.value); setTaskDone(task?.done ?? false); }} options={manageable.map(task => ({ value: task.id, label: task.done ? `${uiText('已完成')} · ${task.title}` : task.title }))} /></Field>{chosenTask&&<KeyValue items={[{label:'期限',value:chosenTask.due||'未定期限'},...(chosenTask.note?[{label:'备注',value:chosenTask.note}]:[]),...(chosenTask.done&&chosenTask.doneBy?[{label:'完成人',value:chosenTask.doneBy}]:[]),...(chosenTask.done&&chosenTask.doneAt?[{label:'完成时间',value:businessWhen(chosenTask.doneAt)}]:[]),...(chosenHandover?[{label:'交接范围',value:chosenHandover.scope},{label:'核对内容',value:chosenHandover.checks}]:[])]}/>}<Switch label={uiText("已完成")} checked={taskDone} disabled={busy||taskControlled} onChange={setTaskDone} /></FormGrid>
       </Dialog>
       <Dialog open={!!reportVersion} onClose={() => setReportVersion(null)} title={uiText(report?.qc?.report || 'QC 评审')}>
         {report?.qc ? <KeyValue items={[{ label: '版本', value: report.label }, { label: '评审人', value: report.qc.reviewer }, { label: '结论', value: ({ pass: '通过', conditional: '有保留通过', reject: '不通过' })[report.qc.result] }, { label: '评审时间', value: businessWhen(report.qc.reviewedAt) }, { label: '意见', value: report.qc.opinion }]} /> : <EmptyState compact title={uiText("此版本没有可读取的评审记录")} />}

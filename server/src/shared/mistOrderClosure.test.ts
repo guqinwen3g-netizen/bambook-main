@@ -59,6 +59,52 @@ describe('BB-ORD-5 over/short tolerance and closing a line at actual quantity',(
   expect(()=>close(f)).toThrow('该条目还有未离港的有效出运（OPEN），须先离港或取消后再结案');
   f.state.fulfillment.shipments.find(s=>s.id==='open')!.state='departed';expect(close(f)).toMatchObject({closure:'closed'});
  });
+ it('retains a rejected request and its frozen original source when a corrected closure is submitted',()=>{
+  const f=thousand();const breakdown={kind:'garment',sizes:['M'],rows:[{color:'黑',quantities:[1000]}]};Object.assign(f.state.orderLines[0],{breakdown});ship(f,900);const first=close(f,'首份客户短装意见');
+  const firstTask=getOrderGovernanceReviews(f.state).find(r=>r.id===first.reviewId)!;
+  f.run({type:'order.governance.decide',payload:{id:firstTask.entityId,decision:'rejected',note:'补充原件后重提'}},leader(f));
+  const rejected=structuredClone(closure(f));
+  f.order.governance.contract.shortPercent=5;f.state.orderLines[0].name='更名后的外套';f.state.orderLines[0].style='NEW-A';breakdown.rows[0].color='白';
+  const second=close(f,'补充后的独立意见');const reviews=getOrderGovernanceReviews(f.state);
+  expect(second.reviewId).not.toBe(first.reviewId);expect(reviews.filter(r=>r.id.startsWith('order-close:'))).toHaveLength(2);
+  const old=reviews.find(r=>r.id===first.reviewId)!;expect(old.status).toBe('rejected');expect(old.requesterId).toBe('sales');expect(old.reviewerIds).toEqual(['leader']);
+  expect(old.details).toEqual(expect.arrayContaining([{label:'条目',value:'A · 外套'},{label:'溢短装',value:'溢装 +3% / 短装 −3%'},{label:'允许范围',value:'970–1030 件'},{label:'结案原因',value:'首份客户短装意见'}]));
+  expect(old.decision).toMatchObject({actor:'业务员',note:'补充原件后重提'});
+  expect(old.details!.find(x=>x.label==='规格 / 分色分码')!.value).toContain('黑');
+  expect((f.state.orderLines[0] as unknown as {closureHistory:unknown[]}).closureHistory).toEqual([rejected]);
+  expect(reviews.find(r=>r.id===second.reviewId)!.details).toContainEqual({label:'溢短装',value:'溢装 +3% / 短装 −5%'});
+ });
+ it('does not change the unit of a closed or pending line through a contract change',()=>{
+  for(const quantity of [950,1000]){const f=thousand();ship(f,quantity);close(f);const before=structuredClone(f.state);
+   expect(()=>f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:f.contract,lines:[{...f.state.orderLines[0],unit:'码'}],reason:'改单位'}})).toThrow('不能再改数量');expect(f.state).toEqual(before);
+  }
+ });
+ it('keeps a legacy rejected request without inventing a source snapshot or mutating it during reads',()=>{
+  const f=thousand();ship(f,900);const first=close(f);f.run({type:'order.governance.decide',payload:{id:'order#close:line',decision:'rejected',note:'补依据'}},leader(f));delete closure(f)!.source;
+  close(f);const before=structuredClone(f.state),old=getOrderGovernanceReviews(f.state).find(r=>r.id===first.reviewId)!;
+  expect(old.status).toBe('rejected');expect(old.details).toContainEqual({label:'原申请资料',value:'未留存'});expect(old.details).toContainEqual({label:'订单数量',value:'1000'});expect(old.fileIds).toBeUndefined();expect(f.state).toEqual(before);
+ });
+ it('does not append history or replace the rejected source when a retry has no qualified reviewer',()=>{
+  const f=thousand();ship(f,900);close(f);f.run({type:'order.governance.decide',payload:{id:'order#close:line',decision:'rejected',note:'补依据'}},leader(f));const before=structuredClone(f.state);
+  expect(()=>close(f,'重提',{...f.c,authority:{supplier:{},orderReviewerIds:{garment:['sales'],fabric:[]}}})).toThrow('尚未配置除申请人外');expect(f.state).toEqual(before);
+ });
+ it.each(['quantity','unit','breakdown'] as const)('rechecks %s from a saved change draft when closure subsequently locks the line',field=>{
+  for(const departed of [950,1000]){const f=thousand(),line=f.state.orderLines[0];const change=field==='quantity'?{qty:1100}:field==='unit'?{unit:'码'}:{breakdown:{kind:'garment' as const,sizes:['M'],rows:[{color:'黑',quantities:[1000]}]}};
+   f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:f.order.governance.contract,lines:[{...line,...change}],reason:'结案前已保存的合法变更'}});ship(f,departed);close(f);const before=structuredClone(f.state);
+   expect(()=>f.run({type:'order.governance.submit',payload:{orderId:'order'}})).toThrow('不能再改数量');expect(f.state).toEqual(before);
+  }
+ });
+ it.each(['quantity','unit','breakdown'] as const)('rechecks current closure before an earlier submitted %s snapshot becomes effective',field=>{
+  for(const departed of [950,1000]){const f=thousand(),line=f.state.orderLines[0];const change=field==='quantity'?{qty:1100}:field==='unit'?{unit:'码'}:{breakdown:{kind:'garment' as const,sizes:['M'],rows:[{color:'黑',quantities:[1000]}]}};
+   f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:f.order.governance.contract,lines:[{...line,...change}],reason:'旧待审数量变更'}});ship(f,departed);close(f);const current=line as unknown as {closure?:unknown},closed=current.closure;
+   // Model an already-queued legacy snapshot, without letting the new submit guard manufacture one.
+   delete current.closure;f.run({type:'order.governance.submit',payload:{orderId:'order'}});current.closure=closed;const before=structuredClone(f.state);
+   expect(()=>f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'旧批准请求'}},leader(f))).toThrow('不能再改数量');expect(f.state).toEqual(before);
+  }
+ });
+ it('still submits and approves a prior price amendment with the exact closed quantity and unit',()=>{
+  for(const departed of [950,1000]){const f=thousand();f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:f.order.governance.contract,lines:[{...f.state.orderLines[0],price:11}],reason:'独立更正销售单价'}});ship(f,departed);close(f);const closed=structuredClone(closure(f));f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'核对单价更正'}},leader(f));expect(f.state.orderLines[0]).toMatchObject({qty:1000,unit:'件',price:11});expect(closure(f)).toEqual(closed);}
+ });
  it('blocks further shipments and quantity changes once the line is closed',()=>{
   const f=thousand();ship(f,1000);close(f);
   expect(()=>assertOrderLineOpen(f.state.orderLines[0])).toThrow('已结案，不能再建出运');

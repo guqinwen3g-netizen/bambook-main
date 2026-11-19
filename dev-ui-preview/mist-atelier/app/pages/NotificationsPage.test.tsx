@@ -68,4 +68,23 @@ describe('notification center', () => {
     await click([...host.querySelectorAll<HTMLButtonElement>('button')].filter(b => b.textContent?.trim() === '打开')[0]);
     expect(go).not.toHaveBeenCalled(); expect(seam.value.state.notifications[0].readAt).toBeNull(); expect(host.textContent).toContain('未保存');
   });
+  it('clears the failed notice only when its exact account, company and request are recovered', async () => {
+    const pending = { workspaceId: 'w1', requestId: 'notice-read', actorId: 'owner' };
+    seam.value.run = vi.fn(async () => { throw Object.assign(new Error('回执未收到'), { mistPendingCommand: pending }); }); render();
+    await click([...host.querySelectorAll<HTMLButtonElement>('button')].filter(b => b.textContent?.trim() === '打开')[0]);
+    expect(host.textContent).toContain('通知操作未完成');
+    for (const other of [{ requestId: 'other' }, { workspaceId: 'other-company' }, { actorId: 'other-person' }]) {
+      seam.value.commandRecovery = { ...pending, ...other, revision: 1 }; act(paint);
+      expect(host.textContent).toContain('通知操作未完成');
+    }
+    seam.value.commandRecovery = { ...pending, revision: 1 }; act(paint);
+    expect(host.textContent).not.toContain('通知操作未完成');
+    expect(go).not.toHaveBeenCalled(); expect(seam.value.run).toHaveBeenCalledTimes(1);
+  });
+  it('preserves a definite failure when an unrelated workspace request is recovered', async () => {
+    seam.value.run = vi.fn(async () => { throw new Error('没有权限'); }); render();
+    await click(button('全部标为已读'));
+    seam.value.commandRecovery = { workspaceId: 'w1', requestId: 'other', actorId: 'owner', revision: 1 }; act(paint);
+    expect(host.textContent).toContain('通知操作未完成'); expect(host.textContent).toContain('没有权限');
+  });
 });

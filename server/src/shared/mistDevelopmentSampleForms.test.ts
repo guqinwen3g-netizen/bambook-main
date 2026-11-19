@@ -1,3 +1,4 @@
+import {retainFixtureFactoryTasks} from './__tests__/utils/devClose';
 import {describe,it,expect} from 'vitest';
 import { withTestFactories } from './__tests__/utils/devFactories';
 import {applyMistCommand,createMistState,mistCommandPermission,type DevelopmentValues,type MistContext,type MistCommand} from './mistWorkspace';
@@ -48,7 +49,7 @@ describe('BB-DEV-6 fabric version physical forms',()=>{
  ])('rejects invalid appended forms without writing: %j',(input,pattern)=>{const f=fixture();f.record(3,'色样','份');f.unchanged(()=>f.run({type:'development.version.addSampleForm',payload:{...f.at,...input}}),pattern);});
  it('blocks appending before return and on cancelled developments',()=>{
   const f=fixture();f.unchanged(()=>f.run({type:'development.version.addSampleForm',payload:{...f.at,form:'米样',quantity:1,unit:'米'}}),/先登记本版返样/);
-  f.record(3,'色样','份');f.run({type:'development.close',payload:{devId:f.at.devId,kind:'cancelled',reason:'客户取消'}});
+  f.record(3,'色样','份');f.run({type:'development.close',payload:{devId:f.at.devId,kind:'cancelled',reason:'客户取消',...retainFixtureFactoryTasks(f.state,f.at.devId)}});
   f.unchanged(()=>f.run({type:'development.version.addSampleForm',payload:{...f.at,form:'米样',quantity:1,unit:'米'}}),/已取消/);
  });
  it.each(['archived','resample','abandon'] as const)('does not append new physical forms to a %s version',disposition=>{

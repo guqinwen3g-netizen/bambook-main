@@ -89,7 +89,7 @@ export function RisksPage() {
     // fin39：手工登记可挂订单、客户或供应商。
     fields: [...(s ? [] : [{ key: 'sourceKind', label: '来源类型', type: 'select' as const, required: true, options: [{ value: 'order', label: '订单' }, { value: 'customer', label: '客户' }, { value: 'supplier', label: '供应商' }] },
       { key: 'orderId', label: '来源订单', type: 'select' as const, required: true, when: { key: 'sourceKind', values: ['order'] }, hint: canAll ? undefined : '只能选择你负责的订单', options: ownOrders.map(o => ({ value: o.id, label: `${o.code} · ${o.customer}` })) },
-      { key: 'customerId', label: '来源客户', type: 'select' as const, required: true, when: { key: 'sourceKind', values: ['customer'] }, options: (state?.customers || []).filter(c => canAll || c.ownerId === me).map(c => ({ value: c.id, label: c.name })) },
+      { key: 'customerId', label: '来源客户', type: 'select' as const, required: true, when: { key: 'sourceKind', values: ['customer'] }, options: (state?.customers || []).filter(c => canAll || !!meId && c.ownerId === meId).map(c => ({ value: c.id, label: c.name })) },
       { key: 'supplierId', label: '来源供应商', type: 'select' as const, required: true, when: { key: 'sourceKind', values: ['supplier'] }, options: (state?.market.suppliers || []).map(x => ({ value: x.id, label: x.name })) }, { key: 'type', label: '风险类型', type: 'select' as const, options: (Object.keys(RISK_TYPE_LABEL) as RiskType[]).map(t => ({ value: t, label: RISK_TYPE_LABEL[t] })) }]),
       { key: 'title', label: '风险标题', required: true }, { key: 'level', label: '风险等级', type: 'select', hint: s ? '不能低于预警等级；严重为高风险，关闭须经部门主管审批' : '严重为高风险，关闭须经部门主管审批', options: (['critical', 'warning', 'info'] as const).filter(l => !s || levelRank[l] <= levelRank[s.level]).map(l => ({ value: l, label: LEVEL[l].label })) },
       { key: 'owner', label: '负责人', required: true, readonly: !canAll, hint: canAll ? '单一主负责人，统筹各岗位处理' : '登记本人客户或订单的风险，负责人为本人；需转交请联系主管' }, { key: 'basis', label: '事实与依据', type: 'textarea', required: true }],
@@ -150,6 +150,7 @@ export function RisksPage() {
         ] }} />; })()
     : null;
   const roleBanner = !can ? <div className="mist-section"><Banner variant="status" tone="neutral" title={uiText("只读查看")}/></div> : null;
+  if(!state)return <MistPage><PageHeader eyebrow={uiText('财务与成本 · 风险')} title={uiText('风险管理与合规')} actions={<Button disabled={loading||saving} onClick={()=>void refresh()}>{uiText('刷新')}</Button>}/>{error&&<FailureNotice title={'数据未加载'} detail={error} retry={()=>void refresh()}/>}<EmptyState title={uiText(loading?'正在读取风险数据':'风险数据未读取')} compact/></MistPage>;
   if (full.active && detail) return <ListDetailPage backLabel={tab === 'signals' ? '风险预警' : '风险台账'} onBack={full.back} before={roleBanner} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage>
     <PageHeader eyebrow={uiText("财务与成本 · 风险")} title={uiText("风险管理与合规")}
@@ -167,8 +168,7 @@ export function RisksPage() {
       <Segmented<TypeFilter> ariaLabel={uiText("风险类型")} value={typeFilter} onChange={setTypeFilter} options={[{ value: 'all', label: '全部类型' }, ...typeCounts(tab === 'signals' ? signals : risks.map(r => ({ type: riskType(r) })))]} />
       {tab === 'ledger' && <Segmented<LedgerFilter> ariaLabel={uiText("状态")} value={ledgerFilter} onChange={setLedgerFilter} options={[{ value: 'open', label: `未关闭 ${open.length}` }, { value: 'escalated', label: `待审批 ${escalated.length}` }, { value: 'closed', label: `已关闭 ${risks.length - open.length}` }, { value: 'all', label: '全部' }]} />}
     </div>
-    {tab === 'signals' && <p className="mist-note mist-section">{uiText("外币应收与采购在此按原币显示；按月末汇率的折算、期末调汇与外币敞口见财务管理 · 账户与余额（月末汇率、期末调汇）。")}</p>}
-    <ListDetail drawerOpen={drawer && !!detail} onDrawerClose={() => setDrawer(false)} drawerTitle={selSignal?.title || selRisk?.title || ''}
+    <ListDetail freezeLayout={!!dialog} drawerOpen={drawer && !!detail} onDrawerClose={() => setDrawer(false)} drawerTitle={selSignal?.title || selRisk?.title || ''}
       list={<Card>{tab === 'signals'
         ? <DataTable ariaLabel={uiText("风险预警")} loading={loading} rows={signalRows} rowKey={s => s.key} selectedKey={selSignal?.key} density="comfy" onRowClick={s => pick(s.key)} columns={signalCols} empty={<EmptyState icon={ShieldCheck} title={uiText("当前没有预警")} description={uiText("逾期应收、往来冻结、认证到期、供应商暂停、QC 不通过与生产逾期会自动出现在这里。")} />} />
         : <DataTable ariaLabel={uiText("风险台账")} loading={loading} rows={ledgerRows} rowKey={r => r.id} selectedKey={selRisk?.id} density="comfy" onRowClick={r => pick(r.id)} columns={ledgerCols} empty={<EmptyState icon={ShieldCheck} title={uiText(risks.length ? '没有符合筛选的风险' : '还没有登记风险')} description={uiText(risks.length ? '换一个状态或类型筛选。' : '从预警登记，或手工登记订单风险。')} />} />}</Card>}

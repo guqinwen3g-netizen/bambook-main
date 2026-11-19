@@ -367,6 +367,9 @@ it("reports missing exact target without a fallback or unauthorized disclosure",
   expect(host.textContent).toContain("没有报价读取权限");
   expect(host.textContent).not.toContain("TEST-HISTORY");
 });
+it('does not classify an unread history source as a missing quotation line',()=>{
+ bridge.w.state=null;bridge.w.error='读取失败';render();expect(host.textContent).toContain('报价资料未读取');expect(host.textContent).not.toContain('未找到指定报价条目');expect(bridge.w.run).not.toHaveBeenCalled();
+});
 it("loading/error/retry preserve read-only behavior and do not claim refreshed success", async () => {
   bridge.w.loading = true;
   render();

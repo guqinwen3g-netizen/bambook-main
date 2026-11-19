@@ -35,8 +35,8 @@ describe('报表中心', () => {
     expect(['2026-10-15', '2026-10-14', '2026-09-15', '2026-08-16', '2026-07-17', '2026-07-16'].map(d => agingBucket(d, '2026-10-15'))).toEqual(['current', 'd30', 'd30', 'd60', 'd90', 'over']);
     const rows = buildReceivableAging(state([], [invoice('a', 'x', { due: '2026-10-20' }), invoice('b', 'x', { due: '2026-06-01', open: 25.5 }), invoice('c', 'x', { open: 0 }), invoice('d', 'x', { voidedAt: '2026-10-01T00:00:00Z' }), invoice('e', 'x', { currency: 'EUR', open: 7 })]), '2026-10-15');
     expect(rows).toEqual([
-      { id: 'A|EUR', customer: 'A', currency: 'EUR', invoices: 1, total: 7, current: 0, d30: 7, d60: 0, d90: 0, over: 0 },
-      { id: 'A|USD', customer: 'A', currency: 'USD', invoices: 2, total: 125.5, current: 100, d30: 0, d60: 0, d90: 0, over: 25.5 },
+      { id: 'A|EUR', customer: 'A', currency: 'EUR', invoices: 1, total: 7, current: 0, d30: 7, d60: 0, d90: 0, over: 0, unknown:0 },
+      { id: 'A|USD', customer: 'A', currency: 'USD', invoices: 2, total: 125.5, current: 100, d30: 0, d60: 0, d90: 0, over: 25.5, unknown:0 },
     ]);
   });
   it('lists unfinished orders with overdue first, then due within seven days', () => {
@@ -95,4 +95,9 @@ describe('退税金额可读程度', () => {
     s.exportRebate = { rates: [], claims: [{ taxMasked: true } as any] };
     expect(rebateAccess(s)).toBe('masked');
   });
+});
+
+it('keeps unresolved due dates in a separate aging amount without calling them overdue or dropping receivables',()=>{
+ const s={...state([order('u')],[invoice('unknown','u',{due:'',open:100}),invoice('late','u',{due:'2026-10-01',open:25}),invoice('pending','u',{due:'',open:50,financeStatus:'pending'})]),customers:[]};
+ const rows=buildReceivableAging(s,'2026-10-20');expect(rows).toHaveLength(1);expect(rows[0]).toMatchObject({total:125,unknown:100,d30:25,current:0,over:0,invoices:2});expect(rows[0].total).toBe(rows[0].unknown+rows[0].current+rows[0].d30+rows[0].d60+rows[0].d90+rows[0].over);expect(agingBucket('','2026-10-20')).toBe('unknown');expect(agingBucket('2026-02-30','2026-10-20')).toBe('unknown');
 });

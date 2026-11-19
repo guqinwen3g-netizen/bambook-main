@@ -11,11 +11,13 @@ import { RecordDisclosure } from './modules/pageKit';
 import { OptionInput } from './OptionInput';
 import { CURRENCIES } from '../runtime/tradeOptions';
 import { usePageFailure } from '../runtime/errorPresentation';
+import {useMistWorkspace} from '../runtime/workspace';
 
 type Props = { state: MistState; dev: MistDev; disabled?: boolean; run: (command: MistCommand) => Promise<unknown> };
 type Action = 'making' | 'expense' | 'charge' | 'invoice' | 'withdraw' | 'void';
 const money = (amount: number, currency: string) => `${amount.toFixed(2)} ${currency}`;
 export function DevBillingCard({ state, dev, disabled, run }: Props) {
+  const incomingAccess=useMistWorkspace().workspace?.developmentIncomingAccess;
   const { go } = useNav(), session = useOptionalMistSession();
   const [action, setAction] = React.useState<Action | null>(null), [selected, setSelected] = React.useState<string[]>([]);
   const [form, setForm] = React.useState({ sampleId: '', version: '*', amount: '', currency: 'USD', description: '', evidence: '', date: today(), number: '' });
@@ -74,7 +76,7 @@ export function DevBillingCard({ state, dev, disabled, run }: Props) {
       <RecordDisclosure title="本案支出">
         {summary.totals.map(row => <p key={row.currency}>{money(row.amount, row.currency)}</p>)}
         {samples.map(sample => { const fee = dev.billing?.makingFees.find(row => row.sampleId === sample.id); return <div className="mist-row" key={sample.id}><span>{sample.form} <Mono>{sample.code}</Mono></span><span className="mist-spacer" />{fee ? money(fee.amount, fee.currency) : canWrite && <Button size="sm" disabled={blocked} onClick={() => open('making', sample.id)}>{uiText('登记制作费')}</Button>}</div>; })}
-        {summary.lines.filter(row => row.kind !== 'making').map(row => <p key={row.refId}>{row.versionLabel} · {row.label} · {money(row.amount, row.currency)}</p>)}
+        {summary.lines.filter(row => row.kind !== 'making').map(row => {const expense=dev.billing?.expenses?.find(expense=>expense.id===row.refId),source=expense?.sourceDispatchId;const visible=source&&incomingAccess?.readableDevIds.includes(dev.id)&&state.fulfillment.sampleMovements.some(move=>move.incomingTransfer?.dispatchId===source&&move.incomingTransfer.devId===dev.id);return <p key={row.refId}>{row.versionLabel} · {row.label} · {money(row.amount, row.currency)}{visible&&<TextLink onClick={()=>document.getElementById('mist-incoming-dispatch-'+source)?.scrollIntoView({block:'center',behavior:'smooth'})}>{uiText('查看来样寄单')}</TextLink>}</p>;})}
         {canWrite && <Button disabled={blocked} onClick={() => open('expense')}>{uiText('添加额外费用')}</Button>}
       </RecordDisclosure>
     </div>

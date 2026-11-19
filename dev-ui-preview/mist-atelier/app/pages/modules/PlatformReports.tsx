@@ -1,9 +1,10 @@
+import {isCalendarDay} from '../../../../../server/src/shared/mistBusinessClock';
 import { interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 /** 报表中心：客户销售额、订单毛利、应收账龄、订单进度与逾期。销售额与账龄按币种分别统计、不折算；订单毛利可按所选口径（实际结汇 / 月末暂估 / 报价预计）折算人民币，并列不含 / 含出口退税。 */
 import React from 'react';
-import { Clock, Download, Package, Receipt, TrendingUp } from 'lucide-react';
+import { Clock, Download, Package, Receipt, RefreshCw, TrendingUp } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, DataTable, EmptyState, Field, MistPage, PageHeader, Pill, Select, StatCard, StatGrid, Tabs, TextInput, Toolbar, type Column } from '../../../../../components/mist';
 import { platformBusinessDate } from '../../../../../server/src/shared/mistPlatform';
 import { isActiveMistInvoice, isRecognizedMistInvoice, mistMoneyMinor, type MistState } from '../../../../../server/src/shared/mistWorkspace';
@@ -105,19 +106,19 @@ type MarginView = 'none' | FxBasis;
 const MARGIN_STATUS = { ok: { label: '已计算', tone: 'ok' }, foreign: { label: '含异币种采购', tone: 'warn' }, nocost: { label: '无已批准采购', tone: 'neutral' } } as const;
 const percent = (r: number | null) => r === null ? '—' : (r * 100).toFixed(1) + '%';
 
-export const AGING_BUCKETS = [{ key: 'current', label: '未到期' }, { key: 'd30', label: '逾期 1–30 天' }, { key: 'd60', label: '31–60 天' }, { key: 'd90', label: '61–90 天' }, { key: 'over', label: '90 天以上' }] as const;
+export const AGING_BUCKETS = [{ key: 'current', label: '未到期' }, { key: 'd30', label: '逾期 1–30 天' }, { key: 'd60', label: '31–60 天' }, { key: 'd90', label: '61–90 天' }, { key: 'over', label: '90 天以上' },{key:'unknown',label:'待核对账期'}] as const;
 type Bucket = typeof AGING_BUCKETS[number]['key'];
-export const agingBucket = (due: string, asOf: string): Bucket => { const late = days(due, asOf); return late <= 0 ? 'current' : late <= 30 ? 'd30' : late <= 60 ? 'd60' : late <= 90 ? 'd90' : 'over'; };
+export const agingBucket = (due: string, asOf: string): Bucket => { if(!isCalendarDay(due)||!isCalendarDay(asOf))return 'unknown';const late = days(due, asOf); return late <= 0 ? 'current' : late <= 30 ? 'd30' : late <= 60 ? 'd60' : late <= 90 ? 'd90' : 'over'; };
 export type AgingRow = { id: string; customer: string; currency: string; invoices: number; total: number } & Record<Bucket, number>;
 /** 只统计有效且仍有未收余额的发票；按到期日计算逾期天数。 */
 export function buildReceivableAging(state: MistState, asOf: string): AgingRow[] {
   const map = new Map<string, { customer: string; currency: string; invoices: number } & Record<Bucket | 'total', number>>();
   for (const i of state.invoices) {
-    if (!isActiveMistInvoice(i) || !(i.open > 0)) continue;
-    const name = mistInvoiceCustomerName(state, i), key = (mistInvoiceCustomerId(state, i) || name) + '|' + i.currency, row = map.get(key) ?? { customer: name, currency: i.currency, invoices: 0, total: 0, current: 0, d30: 0, d60: 0, d90: 0, over: 0 };
+    if (!isRecognizedMistInvoice(i) || !(i.open > 0)) continue;
+    const name = mistInvoiceCustomerName(state, i), key = (mistInvoiceCustomerId(state, i) || name) + '|' + i.currency, row = map.get(key) ?? { customer: name, currency: i.currency, invoices: 0, total: 0, current: 0, d30: 0, d60: 0, d90: 0, over: 0,unknown:0 };
     const value = minor(i.open); row.invoices++; row.total += value; row[agingBucket(i.due, asOf)] += value; map.set(key, row);
   }
-  return [...map.entries()].map(([id, r]) => ({ id, customer: r.customer, currency: r.currency, invoices: r.invoices, total: r.total / 100, current: r.current / 100, d30: r.d30 / 100, d60: r.d60 / 100, d90: r.d90 / 100, over: r.over / 100 }))
+  return [...map.entries()].map(([id, r]) => ({ id, customer: r.customer, currency: r.currency, invoices: r.invoices, total: r.total / 100, current: r.current / 100, d30: r.d30 / 100, d60: r.d60 / 100, d90: r.d90 / 100, over: r.over / 100,unknown:r.unknown/100 }))
     .sort((a, b) => a.currency.localeCompare(b.currency) || b.total - a.total);
 }
 
@@ -223,7 +224,7 @@ export function PlatformReportsPage() {
     { key: 'code', header: '订单', width: 'minmax(140px,1fr)', render: r => <Button variant="quiet" onClick={() => openSource('orders/detail', r.id)}>{r.code}</Button>, sortValue: r => r.code },
     { key: 'customer', header: '客户', width: 'minmax(140px,1.5fr)', render: r => r.customer },
     { key: 'due', header: '交期', width: '110px', render: r => r.due || '—', sortValue: r => r.due },
-    { key: 'progress', header: '进度', width: '80px', align: 'right', render: r => r.progress + '%', sortValue: r => r.progress },
+    { key: 'progress', header: '生产进度', width: '80px', align: 'right', render: r => r.progress + '%', sortValue: r => r.progress },
     { key: 'status', header: '交期状态', width: '120px', render: r => <Pill tone={PROGRESS_STATUS[r.status].tone}>{uiText(PROGRESS_STATUS[r.status].label)}{uiText(r.status === 'overdue' ? ` ${r.lateDays} 天` : '')}</Pill> },
     { key: 'state', header: '当前环节', render: r => r.state },
   ];
@@ -236,9 +237,10 @@ export function PlatformReportsPage() {
     else if (tab === 'margin') out('订单毛利.csv', ['订单', '客户', '币种', '销售收入', '采购成本', '毛利', '毛利率%', '已到票', '说明', '异币种采购', '未批准采购数'], margin.map(r => [r.code, r.customer, r.currency, r.revenue, r.purchases ? r.cost : '', r.margin ?? '', r.rate === null ? '' : Math.round(r.rate * 1000) / 10, r.billed, MARGIN_STATUS[r.status].label, r.foreign, r.pending]));
     else if (tab === 'cash') out('资金月报.csv', ['月份', '币种', '收款', '付款', '净流入', '退税到账', '汇兑损益', '费用'], cash.map(r => [r.month, r.currency, r.cashIn, r.cashOut, r.net, rebateShown ? r.rebate : rebateHidden, r.fx, r.expense]));
     else if (tab === 'aging') out(`应收账龄-${asOf}.csv`, ['客户', '币种', ...AGING_BUCKETS.map(b => b.label), '未收合计'], aging.map(r => [r.customer, r.currency, ...AGING_BUCKETS.map(b => r[b.key]), r.total]));
-    else out(`订单进度-${asOf}.csv`, ['订单', '客户', '交期', '进度%', '交期状态', '逾期天数', '当前环节'], shownProgress.map(r => [r.code, r.customer, r.due, r.progress, PROGRESS_STATUS[r.status].label, r.lateDays, r.state]));
+    else out(`订单进度-${asOf}.csv`, ['订单', '客户', '交期', '生产进度%', '交期状态', '逾期天数', '当前环节'], shownProgress.map(r => [r.code, r.customer, r.due, r.progress, PROGRESS_STATUS[r.status].label, r.lateDays, r.state]));
   };
 
+  if(!state)return <MistPage><PageHeader title={uiText('报表中心')} actions={<Button icon={RefreshCw} disabled={workspace.loading} onClick={()=>void workspace.refresh()}>{uiText('刷新')}</Button>}/>{workspace.error&&<FailureNotice title={'读取失败'} detail={workspace.error}/>}<EmptyState title={uiText(workspace.loading?'正在读取报表':'报表未读取')} compact/></MistPage>;
   return <MistPage>
     <PageHeader title={uiText("报表中心")} actions={<>{tab !== 'actual' && <><Button icon={Download} disabled={cannotExport} onClick={() => exportCurrent('csv')}>{uiText("导出 CSV")}</Button><Button icon={Download} disabled={cannotExport} onClick={() => exportCurrent('xlsx')}>{uiText("导出 Excel")}</Button></>}</>} />
     {workspace.error && <FailureNotice title={"读取失败"} detail={workspace.error} />}
@@ -286,7 +288,7 @@ export function PlatformReportsPage() {
         { key: 'ex', header: '费用', align: 'right', render: r => r.expense ? money(r.expense) : <span className="mist-note">—</span> },
       ]} empty={<EmptyState title={uiText("当前范围没有资金记录")} />} /></Card></section>
       {!rebateShown && rebateClaimsReceived > 0 && <p className="mist-note">{uiText("收款不含出口退税到账")}</p>}
-    </> : tab === 'actual' ? (state ? <OrderActualCostPanel key={route.id || ''} initialOrderId={route.id} state={state} rebate={rebateView} materialCostBasis={workspace.workspace?.costMaterialBasis === null ? null : workspace.workspace?.costMaterialBasis??(workspace.workspace?.access?.hidden.some(section=>section.key==='inventory')?null:undefined)} asOf={asOf} canWrite={!!session.localMode || session.hasPermission('invoices:write')} busy={workspace.loading || workspace.saving || !!workspace.pending} run={c => workspace.run(c)} /> : <EmptyState title={uiText("正在读取数据")} compact />) : tab === 'aging' ? <>
+    </> : tab === 'actual' ? (state ? <OrderActualCostPanel key={route.id || ''} initialOrderId={route.id} state={state} rebate={rebateView} materialCostBasis={workspace.workspace?.costMaterialBasis === null ? null : workspace.workspace?.costMaterialBasis??(workspace.workspace?.access?.hidden.some(section=>section.key==='inventory')?null:undefined)} claimCostBasis={workspace.workspace?.costClaimBasis===null?null:workspace.workspace?.access?.hidden.some(section=>section.key==='claims')?workspace.workspace.costClaimBasis??null:undefined} asOf={asOf} canWrite={!!session.localMode || session.hasPermission('invoices:write')} busy={workspace.loading || workspace.saving || !!workspace.pending} run={c => workspace.run(c)} onErrorPresented={workspace.dismissError} /> : <EmptyState title={uiText("正在读取数据")} compact />) : tab === 'aging' ? <>
       <Toolbar right={<span className="mist-note">{uiText("截至 ")}{asOf}</span>}>{currencyFilter}</Toolbar>
       <StatGrid>{AGING_BUCKETS.map(b => <StatCard key={b.key} icon={Clock} label={uiText(b.label)} value={totals(aging, r => r[b.key])} />)}</StatGrid>
       <section className="mist-section"><Card><DataTable ariaLabel={uiText("应收账龄")} rows={aging} rowKey={r => r.id} loading={workspace.loading} columns={agingColumns} empty={<EmptyState title={uiText("没有未收应收")} description={uiText("有效发票均已收清。")} />} /></Card></section>

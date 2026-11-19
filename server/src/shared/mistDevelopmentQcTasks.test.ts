@@ -21,6 +21,28 @@ function fixture(domain:'fabric'|'garment'='fabric'){
 }
 
 describe('development sample QC tasks',()=>{
+ it('keeps fabric workbench measurements and their original units on the report and exact development version',()=>{
+  const f=fixture();f.returned();const task=f.tasks()[0],qc=f.as('qc','许言');f.run({type:'fulfillment.qc.claim',payload:{id:task.id,domain:'fabric'}},qc);
+  const facts=[{property:'克重',actual:98,unit:'g/m²'},{property:'有效幅宽',actual:144,unit:'cm'}],targets=structuredClone(f.state.versions[0].fabricRequirements);
+  f.run({type:'fulfillment.qc.report',payload:{id:task.id,domain:'fabric',result:'reject',report:'F-01',opinion:'克重和有效幅宽不符合本次要求',measurements:[],fabricMeasurements:facts,fileIds:[],reviewedAt:f.ctx.now}} as any,qc);
+  expect(f.state.fulfillment.qcReports[0].fabricMeasurements).toEqual(facts);expect(f.state.versions[0].qc?.fabricMeasurements).toEqual(facts);expect(f.state.versions[0].fabricRequirements).toEqual(targets);expect(f.tasks()[0].state).toBe('blocked');
+ });
+ it('keeps fabric development-page measurements on the same workbench report',()=>{
+  const f=fixture();f.returned();const facts=[{property:'克重',actual:124.5,unit:'g/m²'}];f.run({type:'development.recordQc',payload:{devId:f.devId,versionId:f.versionId,domain:'fabric',qc:{result:'pass',reviewer:'许言',reviewedAt:f.ctx.now,report:'F-02',opinion:'专业评审通过',fabricMeasurements:facts}}},f.as('qc','许言'));
+  expect(f.state.fulfillment.qcReports[0].fabricMeasurements).toEqual(facts);expect(f.state.versions[0].qc?.fabricMeasurements).toEqual(facts);
+ });
+ it('rejects garment-style tolerance measurements on a fabric development task without writing a report',()=>{
+  const f=fixture();f.returned();const id=f.tasks()[0].id,qc=f.as('qc','许言');f.run({type:'fulfillment.qc.claim',payload:{id,domain:'fabric'}},qc);const before=JSON.stringify(f.state);
+  expect(()=>f.run({type:'fulfillment.qc.report',payload:{id,domain:'fabric',result:'pass',report:'WRONG',opinion:'Wrong model',measurements:[{point:'克重',standard:125,actual:124.5,tolerance:1}],fileIds:[],reviewedAt:f.ctx.now}},qc)).toThrow('面料开发不套成衣尺寸公差');expect(JSON.stringify(f.state)).toBe(before);
+ });
+ it('rejects fabric-development measurements on another QC domain',()=>{
+  const f=fixture('garment');f.returned();const id=f.tasks()[0].id,qc=f.as('qc','许言');f.run({type:'fulfillment.qc.claim',payload:{id,domain:'garment'}},qc);const before=JSON.stringify(f.state);
+  expect(()=>f.run({type:'fulfillment.qc.report',payload:{id,domain:'garment',result:'pass',report:'WRONG',opinion:'Wrong domain',measurements:[],fabricMeasurements:[{property:'克重',actual:125,unit:'g/m²'}],fileIds:[],reviewedAt:f.ctx.now}} as any,qc)).toThrow();expect(JSON.stringify(f.state)).toBe(before);
+ });
+ it.each([[{property:'克重',actual:-1,unit:'g/m²'}],[{property:'克重',actual:Infinity,unit:'g/m²'}],[{property:'',actual:125,unit:'g/m²'}],[{property:'克重',actual:125,unit:''}],Array.from({length:201},()=>({property:'克重',actual:125,unit:'g/m²'}))])('rejects invalid or unbounded fabric facts atomically: %j',(...rows)=>{
+  const f=fixture();f.returned();const id=f.tasks()[0].id,qc=f.as('qc','许言');f.run({type:'fulfillment.qc.claim',payload:{id,domain:'fabric'}},qc);const before=JSON.stringify(f.state);
+  expect(()=>f.run({type:'fulfillment.qc.report',payload:{id,domain:'fabric',result:'pass',report:'INVALID',opinion:'Invalid facts',measurements:[],fabricMeasurements:rows,fileIds:[],reviewedAt:f.ctx.now}} as any,qc)).toThrow();expect(JSON.stringify(f.state)).toBe(before);
+ });
  it('creates one pending workbench task when the sample is returned and shows it on the case',()=>{
   const f=fixture();expect(f.tasks()).toHaveLength(0);
   f.returned();

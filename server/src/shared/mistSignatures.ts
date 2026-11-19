@@ -9,13 +9,117 @@
  *   Agent 永远不能签字。读投影（server/src/mist/access.ts）只把签字记录给签字人本人和能看到所签业务记录的人。
  */
 import { MistCommandError, type MistState } from './mistWorkspace';
+import type { ClosableLine } from './mistOrderClosure';
+import type { MistReviewTask } from './mistReview';
+import { stableJson } from './stableJson';
 
 export type MistDecisionSignature = {
   id: string; commandType: string; entityId: string; decision?: string;
   /** 归档的签字 SVG（私有文件，image/svg+xml）。 */
   fileId: string;
   actorId: string; actor: string; at: string; requestId: string;
+  /** Locked, server-derived approval identity; never copied from a client payload. */
+  reviewId?: string;
 };
+
+/** Response-only associations. They are never added to old business/signature records. */
+export type MistSignatureReviewBinding = { signatureId: string; reviewId: string };
+export type MistSignatureReceiptFact = { signatureId: string; requestId: string; actorId: string; revision?: number; reviewId?: string; unresolved?: true };
+export const REVIEW_SIGNATURE_COMMANDS: Partial<Record<MistReviewTask['kind'], string>> = {
+  order: 'order.governance.decide', procurement: 'fulfillment.procurement.decide',
+  procurementAmendment: 'fulfillment.procurement.amend.decide', payment: 'payable.request.decide', stockCount: 'fulfillment.stock.count.decide',
+};
+const exactId = (value: unknown): value is string => typeof value === 'string' && !!value && value === value.trim();
+const frozenRoster = (value: unknown): value is string[] => Array.isArray(value) && !!value.length && value.every(exactId) && new Set(value).size === value.length;
+type SignatureState = Pick<MistState, 'decisionSignatures'> & Partial<Pick<MistState, 'orders' | 'orderLines' | 'fulfillment' | 'payables'>>;
+
+/** Receipt fields must identify this same actor/request/signature before supplying any association. */
+export function signatureReceiptFact(signature: MistDecisionSignature, receipt: any): MistSignatureReceiptFact {
+  const base = { signatureId: signature.id, requestId: signature.requestId, actorId: signature.actorId };
+  if (!exactId(signature.id) || !exactId(signature.requestId) || !exactId(signature.actorId)) return { ...base, unresolved: true };
+  const result = receipt?.result, value = result?.result;
+  if (!receipt || receipt.requestId !== signature.requestId || receipt.actorId !== signature.actorId || value?.signatureId !== signature.id || !Number.isSafeInteger(result?.revision) || result.revision <= 0 || !Number.isSafeInteger(receipt.expectedRevision) || receipt.expectedRevision < 0 || receipt.expectedRevision >= result.revision) return { ...base, unresolved: true };
+  if (Object.prototype.hasOwnProperty.call(value, 'reviewId') && !exactId(value.reviewId)) return { ...base, unresolved: true };
+  return { ...base, revision: result.revision, ...(value.reviewId === undefined ? {} : { reviewId: value.reviewId }) };
+}
+
+/** Run on locked pre-command state, after domain validation and before writing a signature file. */
+export function pendingSignatureReviewId(tasks: readonly MistReviewTask[], command: { type: string; payload?: any }, actorId: string, expectedReviewId?: string): string | undefined {
+  if (!Object.values(REVIEW_SIGNATURE_COMMANDS).includes(command.type)) return undefined;
+  const matches = tasks.filter(task => REVIEW_SIGNATURE_COMMANDS[task.kind] === command.type && task.entityId === signatureEntityId(command) && task.status === 'pending');
+  if (command.payload?.decision !== 'approved' || matches.length !== 1 || !exactId(matches[0].id) || !frozenRoster(matches[0].reviewerIds) || !matches[0].reviewerIds.includes(actorId) || expectedReviewId !== undefined && matches[0].id !== expectedReviewId) throw new MistCommandError('PRECONDITION', '无法唯一核对本次审批，请重新读取后核对', 422);
+  return matches[0].id;
+}
+
+function decidedActorId(state: SignatureState, task: MistReviewTask): string | undefined {
+  if (task.kind === 'order') {
+    for (const order of state.orders || []) {
+      if (task.entityId === order.id && task.id.startsWith('order:')) return order.governance?.rounds.find(round => 'order:' + round.id === task.id)?.decidedBy;
+      const cancellation = order.governance?.cancellation;
+      if (cancellation && task.id === 'order-cancel:' + cancellation.id && task.entityId === order.id + '#cancel:' + cancellation.id) return cancellation.decidedBy;
+    }
+    for (const line of (state.orderLines || []) as ClosableLine[]) {
+      if (line.closure && task.id === 'order-close:' + line.closure.id && task.entityId === line.orderId + '#close:' + line.id) return line.closure.decidedBy;
+      const request = line.overShips?.find(item => task.id === 'order-overship:' + item.id && task.entityId === line.orderId + '#overship:' + item.id);
+      if (request) return request.decidedBy;
+    }
+  }
+  if (task.kind === 'procurement') return state.fulfillment?.purchases.find(item => item.id === task.entityId)?.decision?.actorId;
+  if (task.kind === 'procurementAmendment') return state.fulfillment?.purchases.flatMap(item => item.amendments || []).find(item => item.id === task.entityId)?.decision?.actorId;
+  if (task.kind === 'payment') return state.payables?.requests?.find(item => item.id === task.entityId)?.decision?.actorId;
+  if (task.kind === 'stockCount') return state.fulfillment?.stockCounts?.find(item => item.id === task.entityId)?.decision?.actorId;
+  return undefined;
+}
+
+/** Shared by server review reads and local submitted rows; no name or clock matching. */
+export function resolveReviewDecisionSignature(state: SignatureState, task: MistReviewTask, tasks: readonly MistReviewTask[], options: { receipts?: readonly MistSignatureReceiptFact[]; bindings?: readonly MistSignatureReviewBinding[] } = {}): MistDecisionSignature | undefined {
+  const command = REVIEW_SIGNATURE_COMMANDS[task.kind], all = state.decisionSignatures || [];
+  if (!command || task.status !== 'approved' || !frozenRoster(task.reviewerIds)) return undefined;
+  const actorId = decidedActorId(state, task);
+  const counts = new Map<string, number>();
+  for (const row of all) for (const [kind, value] of [['id', row.id], ['file', row.fileId], ['request', row.requestId]]) { const key = kind + ':' + value; counts.set(key, (counts.get(key) || 0) + 1); }
+  const compatible = all.filter(row => row.commandType === command && row.entityId === task.entityId && row.decision === task.status && exactId(row.id) && exactId(row.fileId) && exactId(row.actorId) && exactId(row.requestId) && task.reviewerIds.includes(row.actorId) && (!actorId || actorId === row.actorId) && counts.get('id:' + row.id) === 1 && counts.get('file:' + row.fileId) === 1 && counts.get('request:' + row.requestId) === 1);
+  // A new service's response-only map is authoritative even when empty/unresolvable.
+  if (options.bindings !== undefined) {
+    if (!Array.isArray(options.bindings)) return undefined;
+    const bound = compatible.filter(row => { const refs = options.bindings!.filter(ref => ref.signatureId === row.id); return refs.length === 1 && refs[0].reviewId === task.id && (row.reviewId === undefined || row.reviewId === task.id); });
+    return bound.length === 1 ? bound[0] : undefined;
+  }
+  const link = (row: MistDecisionSignature) => {
+    const facts = options.receipts?.filter(item => item.signatureId === row.id);
+    if (facts && (facts.length !== 1 || facts[0].unresolved || facts[0].requestId !== row.requestId || facts[0].actorId !== row.actorId)) return { invalid: true };
+    const fact = facts?.[0];
+    if (row.reviewId !== undefined && !exactId(row.reviewId) || row.reviewId !== undefined && fact?.reviewId !== undefined && row.reviewId !== fact.reviewId) return { invalid: true };
+    return { reviewId: row.reviewId ?? fact?.reviewId, revision: fact?.revision, invalid: false };
+  };
+  const bound = compatible.filter(row => { const ref = link(row); return !ref.invalid && ref.reviewId === task.id; });
+  if (bound.length === 1) return bound[0];
+  if (bound.length > 1) return undefined;
+  const sameTasks = tasks.filter(item => REVIEW_SIGNATURE_COMMANDS[item.kind] === command && item.entityId === task.entityId && item.status === 'approved');
+  if (task.kind !== 'order' || !task.id.startsWith('order:')) {
+    const legacy = compatible.filter(row => { const ref = link(row); return !ref.invalid && ref.reviewId === undefined && actorId === row.actorId; });
+    return sameTasks.length === 1 && exactId(actorId) && legacy.length === 1 ? legacy[0] : undefined;
+  }
+  const order = state.orders?.find(item => item.id === task.entityId), governance = order?.governance;
+  if (!order || !governance || !Array.isArray(governance.rounds)) return undefined;
+  const rounds = governance.rounds.filter(round => round.status === 'approved');
+  const signatures = all.filter(row => row.commandType === command && row.entityId === order.id);
+  if (!rounds.length || rounds.length !== signatures.length || sameTasks.length !== rounds.length || governance.effectiveVersion !== rounds.length || new Set(governance.rounds.map(round => round.id)).size !== governance.rounds.length || new Set(sameTasks.map(item => item.id)).size !== sameTasks.length || stableJson(governance.approvedSnapshot) !== stableJson(rounds.at(-1)!.snapshot) || governance.approvedBy !== rounds.at(-1)!.decidedBy) return undefined;
+  if (new Set(signatures.map(row => row.id)).size !== signatures.length || new Set(signatures.map(row => row.fileId)).size !== signatures.length || new Set(signatures.map(row => row.requestId)).size !== signatures.length) return undefined;
+  let previousRevision = -1;
+  for (let index = 0; index < rounds.length; index++) {
+    const round = rounds[index], signature = signatures[index], ref = link(signature), reviewId = 'order:' + round.id;
+    if (signature.decision !== 'approved' || !exactId(round.decidedBy) || signature.actorId !== round.decidedBy || !frozenRoster(round.reviewerIds) || !round.reviewerIds.includes(signature.actorId) || !sameTasks.some(item => item.id === reviewId) || round.snapshot.orderId !== order.id || round.snapshot.code !== order.code || !exactId(signature.id) || !exactId(signature.fileId) || !exactId(signature.requestId) || ref.invalid || ref.reviewId !== undefined && ref.reviewId !== reviewId) return undefined;
+    // A single exact legacy source can be identified by actor/roster alone; multiple
+    // rounds additionally require their durable commit sequence, never timestamps.
+    if (rounds.length > 1 || options.receipts !== undefined) {
+      if (!Number.isSafeInteger(ref.revision) || ref.revision! <= previousRevision) return undefined;
+      previousRevision = ref.revision!;
+    }
+  }
+  const index = rounds.findIndex(round => 'order:' + round.id === task.id);
+  return index < 0 || !compatible.includes(signatures[index]) ? undefined : signatures[index];
+}
 
 const DECIDE_COMMANDS: ReadonlySet<string> = new Set(['order.governance.decide', 'fulfillment.procurement.decide', 'fulfillment.procurement.amend.decide', 'payable.request.decide', 'fulfillment.stock.count.decide']);
 /** 需要签字的全部命令类型（批准类只在 approved 时需要，核销只在坏账 / 红冲时需要）。 */
@@ -86,7 +190,7 @@ export function decisionSignatureVisible(projected: MistState, row: MistDecision
   if (row.actorId === actorId) return true;
   const has = (list: Array<{ id: string }> | undefined) => !!list?.some(item => item.id === row.entityId);
   switch (row.commandType) {
-    case 'order.governance.decide': return has(projected.orders);
+    case 'order.governance.decide': return orderDecisionSourceVisible(projected, row.entityId);
     case 'fulfillment.procurement.decide': return has(projected.fulfillment?.purchases);
     case 'fulfillment.procurement.amend.decide': return !!projected.fulfillment?.purchases?.some(p => has(p.amendments));
     case 'fulfillment.stock.count.decide': return has(projected.fulfillment?.stockCounts);
@@ -96,4 +200,20 @@ export function decisionSignatureVisible(projected: MistState, row: MistDecision
     case 'rebate.claim.approve': return has(projected.exportRebate?.claims);
     default: return false;
   }
+}
+
+/** Composite approval IDs require an exact visible parent and actual child, never a prefix grant. */
+function orderDecisionSourceVisible(projected: MistState, entityId: string): boolean {
+  const orders = projected.orders || [], orderIds = new Set(orders.map(order => order.id));
+  if (orderIds.has(entityId)) return true;
+  for (const order of orders) {
+    const cancellation = order.governance?.cancellation;
+    if (cancellation?.id && entityId === order.id + '#cancel:' + cancellation.id) return true;
+  }
+  for (const line of (projected.orderLines || []) as ClosableLine[]) {
+    if (!orderIds.has(line.orderId)) continue;
+    if (line.closure && entityId === line.orderId + '#close:' + line.id) return true;
+    if (line.overShips?.some(request => entityId === line.orderId + '#overship:' + request.id)) return true;
+  }
+  return false;
 }

@@ -137,7 +137,7 @@ export type SupplierSettlement = {
   disputes: SettlementDispute[]; note: string; fileIds: string[];
   state: 'pending' | 'confirmed' | 'returned' | 'cancelled' | 'reversed';
   submitterId: string; submittedBy: string; submittedAt: string;
-  confirmation?: { actorId: string; actor: string; at: string; suggestedPrepayment: number; prepaymentApplied: number; adjustReason: string; note: string };
+  confirmation?: { actorId: string; actor: string; at: string; suggestedPrepayment: number; prepaymentApplied: number; adjustReason: string; note: string; deductionAmount?: number; deductionFileIds?: string[] };
   returned?: { at: string; actor: string; reason: string }; cancelled?: { at: string; actor: string; reason: string }; reversed?: { at: string; actor: string; reason: string };
 };
 /** 工厂索赔扣款：按售后追偿中工厂同意“从货款中扣”的金额，从指定票据的未付中扣减。冲回保留原记录。 */
@@ -206,7 +206,7 @@ export type PayablesCommand =
   | { type: 'payable.allocation.reverse'; payload: { allocationId: string; reason: string } }
   | { type: 'payable.settlement.submit'; payload: { purchaseId: string; receiptIds: string[]; final?: boolean; disputes?: SettlementDispute[]; note?: string; fileIds?: string[] } }
   | { type: 'payable.settlement.cancel'; payload: { id: string; reason: string } }
-  | { type: 'payable.settlement.confirm'; payload: { id: string; prepaymentApplied: number; adjustReason?: string; note?: string } }
+  | { type: 'payable.settlement.confirm'; payload: { id: string; prepaymentApplied: number; adjustReason?: string; note?: string; deductionAmount?: number; deductionFileIds?: string[] } }
   | { type: 'payable.settlement.return'; payload: { id: string; reason: string } }
   | { type: 'payable.settlement.reverse'; payload: { id: string; reason: string } };
 export const PAYABLE_COMMANDS = ['payable.disposal.review','payable.disposal.reverse','payable.bill.classify','payable.bill.register', 'payable.bill.void', 'payable.plan.register', 'payable.plan.cancel', 'payable.request.submit', 'payable.request.decide', 'payable.request.cancel', 'payable.payment.register', 'payable.payment.allocate', 'payable.payment.reverse', 'payable.allocation.reverse', 'payable.settlement.submit', 'payable.settlement.cancel', 'payable.settlement.confirm', 'payable.settlement.return', 'payable.settlement.reverse', 'payable.bill.link', 'payable.deduction.register', 'payable.deduction.reverse', 'payable.prepayment.refund', 'payable.prepayment.transfer', 'payable.prepayment.reverse', 'payable.payment.backfill', 'payable.payment.plan', 'payable.purchase.cancel'] as const;
@@ -276,6 +276,11 @@ const activeAllocations = (root: Root) => read(root).allocations.filter(a => !al
 
 /** 合同金额按 数量 × 单价 原币计算（分），只作为“最多能开多少票”的上限，不是应付余额。 */
 export function purchaseContractMinor(p: { quantity: number; price: number }) { return Math.round(p.quantity * p.price * 100); }
+/** A signed price allowance reduces the invoice basis; a dispute or separate compensation does not. */
+export function settlementDeductionMinor(st: Pick<SupplierSettlement, 'amount' | 'confirmation'>) { return mistMoneyMinor(st.confirmation?.deductionAmount || 0); }
+export function settlementNetMinor(st: Pick<SupplierSettlement, 'amount' | 'confirmation'>) { return Math.max(0, mistMoneyMinor(st.amount) - settlementDeductionMinor(st)); }
+/** The original contract stays intact; confirmed allowances reduce its invoicing ceiling. */
+function purchaseBillingLimitMinor(root: Root, p: { id: string; quantity: number; price: number }) { return Math.max(0, purchaseContractMinor(p) - confirmedSettlements(root, p.id).reduce((n, st) => n + settlementDeductionMinor(st), 0)); }
 /**
  * 材料合同的已验收货值（分）= 实收合格数量（不含拒收、不含待接收人点收）× 合同单价，用于票据三单匹配：
  * 不关联结算的票据累计不能超过它；超出部分先登记“待关联结算”，由业务员按实收提交结算、财务确认后再付。
@@ -324,7 +329,7 @@ export function settlementCreditsMinor(root: Root, settlementId: string, asOf = 
   const s = read(root), st = s.settlements.find(x => x.id === settlementId), out = new Map<string, number>();
   if (!st || st.state !== 'confirmed') return out;
   if (asOf && platformBusinessDate(st.confirmation?.at || st.submittedAt) > asOf) return out;
-  const applied = mistMoneyMinor(st.confirmation?.prepaymentApplied || 0), total = mistMoneyMinor(st.amount);
+  const applied = mistMoneyMinor(st.confirmation?.prepaymentApplied || 0), total = settlementNetMinor(st);
   if (!applied || !total) return out;
   const lines = s.bills.filter(b => b.state === 'open').sort((a, b) => a.registeredAt.localeCompare(b.registeredAt) || a.code.localeCompare(b.code)).flatMap(b => b.lines.filter(l => l.settlementId === settlementId).map(l => ({ billId: b.id, amount: mistMoneyMinor(l.amount) })));
   let cumulative = 0, credited = 0;
@@ -360,7 +365,7 @@ export function settlementAdvanceOpenMinor(root: Root, settlementId: string) { r
 export function settlementAdvanceRoomMinor(root: Root, settlementId: string, exceptRequestId = '') {
   const s = read(root), st = s.settlements.find(x => x.id === settlementId);
   if (!st || st.state !== 'confirmed') return 0;
-  const uninvoiced = mistMoneyMinor(st.amount) - settlementInvoicedMinor(root, st.id), prepayLeft = mistMoneyMinor(st.confirmation?.prepaymentApplied || 0) - sumMap(settlementCreditsMinor(root, st.id));
+  const uninvoiced = settlementNetMinor(st) - settlementInvoicedMinor(root, st.id), prepayLeft = mistMoneyMinor(st.confirmation?.prepaymentApplied || 0) - sumMap(settlementCreditsMinor(root, st.id));
   const live = s.requests.filter(r => r.purpose === 'settlement' && r.settlementId === st.id && r.id !== exceptRequestId && LIVE_REQUEST.includes(r.state)).reduce((n, r) => n + mistMoneyMinor(r.amount), 0);
   return Math.max(0, uninvoiced - Math.max(0, prepayLeft) - (live - sumMap(settlementAdvanceCreditsMinor(root, st.id))));
 }
@@ -395,13 +400,13 @@ const addDays = (d: string, n: number) => shiftCalendarDay(d, n);
 const receiptSettled = (root: Root, receiptId: string, exceptSettlementId = '') => read(root).settlements.some(x => x.id !== exceptSettlementId && (x.state === 'pending' || x.state === 'confirmed') && x.receiptIds.includes(receiptId));
 const settledQuantity = (root: Root, purchaseId: string, exceptSettlementId = '') => confirmedSettlements(root, purchaseId).filter(x => x.id !== exceptSettlementId).reduce((n, x) => n + x.quantity, 0);
 /** 预付抵扣建议：最后一次结算（勾选最终结算或累计数量达到合同数量）抵扣剩余全部预付，否则按数量比例；不超过结算金额。 */
-export function settlementSuggestedPrepaymentMinor(root: Root, settlement: Pick<SupplierSettlement, 'id' | 'purchaseId' | 'quantity' | 'amount' | 'final'>) {
+export function settlementSuggestedPrepaymentMinor(root: Root, settlement: Pick<SupplierSettlement, 'id' | 'purchaseId' | 'quantity' | 'amount' | 'final' | 'confirmation'>, deduction = settlementDeductionMinor(settlement)) {
   const po = (root.fulfillment?.purchases || []).find(x => x.id === settlement.purchaseId);
   const available = purchasePrepaidMinor(root, settlement.purchaseId) - purchasePrepaymentAppliedMinor(root, settlement.purchaseId, settlement.id) - purchasePrepaymentMovedOutMinor(root, settlement.purchaseId);
   if (!po || available <= 0) return 0;
   const last = settlement.final || settledQuantity(root, po.id, settlement.id) + settlement.quantity >= po.quantity;
   const proportional = po.quantity > 0 ? Math.round(purchasePrepaidMinor(root, po.id) * settlement.quantity / po.quantity) : 0;
-  return Math.max(0, Math.min(last ? available : proportional, available, mistMoneyMinor(settlement.amount)));
+  return Math.max(0, Math.min(last ? available : proportional, available, mistMoneyMinor(settlement.amount) - deduction));
 }
 export function settlementReceipts(root: Root, purchaseId: string, exceptSettlementId = '') {
   const pending = new Set(materialDeliveryRows(root).filter(row => row.kind === 'direct' && row.pending !== '0').map(row => row.id));
@@ -510,9 +515,9 @@ export function supplierPayableSummary(root: Root, today: string) {
 /** 已批准合同里还没登记票据的部分 = 财务待登记来源（不是应付）。 */
 export function payableSources(root: Root) {
   return (root.fulfillment?.purchases || []).filter(p => p.state === 'approved').map(p => {
-    const contract = purchaseContractMinor(p), invoiced = purchaseInvoicedMinor(root, p.id), accepted = purchaseAcceptedMinor(root, p);
-    return { purchase: p, contract: major(contract), invoiced: major(invoiced), uninvoiced: major(Math.max(0, contract - invoiced)),
-      ...(accepted === null ? {} : { accepted: major(accepted), acceptedUninvoiced: major(Math.max(0, Math.min(contract, accepted) - invoiced)) }) };
+    const contract = purchaseContractMinor(p), ceiling = purchaseBillingLimitMinor(root, p), invoiced = purchaseInvoicedMinor(root, p.id), accepted = purchaseAcceptedMinor(root, p);
+    return { purchase: p, contract: major(contract), invoiced: major(invoiced), uninvoiced: major(Math.max(0, ceiling - invoiced)),
+      ...(accepted === null ? {} : { accepted: major(accepted), acceptedUninvoiced: major(Math.max(0, Math.min(ceiling, accepted) - invoiced)) }) };
   });
 }
 /** 采购 / 加工页回读：这张合同登记了哪些票据、各自付了多少。 */
@@ -574,14 +579,14 @@ export function supplierSettlements(root: Root, purchaseId?: string): Settlement
   const order: Record<SupplierSettlement['state'], number> = { pending: 0, confirmed: 1, returned: 2, cancelled: 3, reversed: 4 };
   return read(root).settlements.filter(x => !purchaseId || x.purchaseId === purchaseId).map(x => {
     const invoiced = x.state === 'confirmed' ? settlementInvoicedMinor(root, x.id) : 0, applied = mistMoneyMinor(x.confirmation?.prepaymentApplied || 0);
-    return { ...x, invoiced: major(invoiced), uninvoiced: x.state === 'confirmed' ? major(Math.max(0, mistMoneyMinor(x.amount) - invoiced)) : 0, net: major(mistMoneyMinor(x.amount) - applied),
+    return { ...x, invoiced: major(invoiced), uninvoiced: x.state === 'confirmed' ? major(Math.max(0, settlementNetMinor(x) - invoiced)) : 0, net: major(settlementNetMinor(x) - applied),
       suggested: x.state === 'pending' ? major(settlementSuggestedPrepaymentMinor(root, x)) : major(mistMoneyMinor(x.confirmation?.suggestedPrepayment || 0)),
       available: x.state === 'pending' ? major(purchasePrepaymentAvailableMinor(root, x.purchaseId)) : 0 };
   }).sort((a, b) => order[a.state] - order[b.state] || b.submittedAt.localeCompare(a.submittedAt));
 }
 /** 可登记票据时关联的结算：已确认且还有未开票金额。 */
 export function invoiceableSettlements(root: Root, purchaseId: string, exceptBillId = '') {
-  return confirmedSettlements(root, purchaseId).map(x => ({ settlement: x, left: major(Math.max(0, mistMoneyMinor(x.amount) - settlementInvoicedMinor(root, x.id, exceptBillId))) })).filter(x => x.left > 0);
+  return confirmedSettlements(root, purchaseId).map(x => ({ settlement: x, left: major(Math.max(0, settlementNetMinor(x) - settlementInvoicedMinor(root, x.id, exceptBillId))) })).filter(x => x.left > 0);
 }
 /** 该合同票据是否必须关联结算：已有确认结算或已付预付时，必须关联，避免预付和结算重复形成应付。 */
 export function purchaseRequiresSettlementLink(root: Root, purchaseId: string) { return confirmedSettlements(root, purchaseId).length > 0 || purchasePrepaidMinor(root, purchaseId) > 0; }
@@ -757,12 +762,13 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
         if (po.currency !== currency) fail(`${po.code} 币种为 ${po.currency}，与票据币种 ${currency} 不同`);
         const m = minor(row.amount, po.code + ' 对应金额');
         if (m + purchaseInvoicedMinor(root, po.id) > purchaseContractMinor(po)) fail(`${po.code} 累计登记票据金额会超过合同金额，请核对或先走合同变更`);
+        if (m + purchaseInvoicedMinor(root, po.id) > purchaseBillingLimitMinor(root, po)) fail(`${po.code} 累计票据金额超过确认扣款后的结算净额`);
         let link: Pick<SupplierBillLine, 'settlementId' | 'settlementCode' | 'awaitingSettlement'> = {};
         if (row.settlementId) {
           const st = s.settlements.find(x => x.id === text(row.settlementId, '关联结算')) || fail('关联结算不存在', 'NOT_FOUND');
           if (st.purchaseId !== po.id) fail(`${st.code} 不属于 ${po.code}`);
           if (st.state !== 'confirmed') fail(`${st.code} 尚未经财务确认，不能关联票据`, 'PRECONDITION');
-          const left = mistMoneyMinor(st.amount) - settlementInvoicedMinor(root, st.id);
+          const left = settlementNetMinor(st) - settlementInvoicedMinor(root, st.id);
           if (m > left) fail(`${st.code} 未开票金额 ${fx(major(Math.max(0, left)))} ${st.currency}，本票对应金额超出；同一笔结算不能重复开票`);
           link = { settlementId: st.id, settlementCode: st.code };
         } else if (row.awaitingSettlement === true) {
@@ -850,7 +856,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       const amount = minor(p.amount, PLAN_STAGE_LABEL[stage] + '金额'), trigger = text(p.trigger, '付款触发条件', true, 500), basis = text(p.basis, '合同条款依据', true, 500);
       const due = p.due ? day(p.due, '计划付款日') : '';
       const planned = s.plans.filter(x => x.purchaseId === po.id && x.state === 'active').reduce((n, x) => n + mistMoneyMinor(x.amount), 0);
-      if (planned + amount > purchaseContractMinor(po)) fail(`${po.code} 付款计划合计会超过合同金额`);
+      if (planned + amount > purchaseBillingLimitMinor(root, po)) fail(`${po.code} 付款计划合计会超过合同金额或确认扣款后的净额`);
       const id = c.id(), code = nextCode('PP', s.plans, c.now);
       s.plans.push({ stage, id, code, purchaseId: po.id, purchaseCode: po.code, supplierId: po.supplierId, supplier: po.supplier, currency: po.currency, amount: major(amount), trigger, basis, due, note: text(p.note, '备注', false), state: 'active', registeredAt: c.now, registeredBy: c.actorName });
       event(root, c, id, `登记 ${po.code} ${PLAN_STAGE_LABEL[stage]}计划 ${code}（${fx(major(amount))} ${po.currency}）`);
@@ -898,7 +904,8 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
         const snapshot = [
           { label: '申请类型', value: '按结算付款（发票未到）' }, { label: '供应商', value: st.supplier },
           { label: '结算', value: `${st.code} · ${st.purchaseCode} · 实收 ${st.quantity} ${st.unit} · ${money(mistMoneyMinor(st.amount), st.currency)}${st.final ? ' · 最终结算' : ''}` },
-          { label: '预付抵扣 / 结算净额', value: `${money(applied, st.currency)} / ${money(mistMoneyMinor(st.amount) - applied, st.currency)}` },
+          { label: '确认扣款 / 扣后结算', value: `${money(settlementDeductionMinor(st), st.currency)} / ${money(settlementNetMinor(st), st.currency)}` },
+          { label: '预付抵扣 / 结算净额', value: `${money(applied, st.currency)} / ${money(settlementNetMinor(st) - applied, st.currency)}` },
           { label: '已收票', value: money(invoiced, st.currency) }, { label: '本结算此前不等票已申请', value: money(s.requests.filter(r => r.purpose === 'settlement' && r.settlementId === st.id && LIVE_REQUEST.includes(r.state)).reduce((n, r) => n + mistMoneyMinor(r.amount), 0), st.currency) },
           { label: '本次申请金额', value: money(amount, st.currency) }, { label: '未收票原因', value: reason }, { label: '申请人', value: c.actorName },
         ];
@@ -1069,13 +1076,18 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       if (st.final) assertFinalSettlementReceipts(root, po.id, st.receiptIds, st.id);
       const live = confirmedSettlements(root, po.id).reduce((n, x) => n + mistMoneyMinor(x.amount), 0);
       if (live + mistMoneyMinor(st.amount) > purchaseContractMinor(po)) fail(`${po.code} 累计结算金额会超过合同金额；超收部分须先走合同变更`);
-      const suggested = settlementSuggestedPrepaymentMinor(root, st), applied = minor(p.prepaymentApplied, '本次预付抵扣', true);
+      const deduction = minor(p.deductionAmount ?? 0, '确认扣款', true), disputed = st.disputes.reduce((n, row) => n + mistMoneyMinor(row.amount), 0), gross = mistMoneyMinor(st.amount);
+      if (deduction > disputed || deduction > gross) fail('确认扣款不得超过登记争议金额或原结算金额');
+      const note = text(p.note, '复核意见', deduction > 0, 1000), deductionFiles = files(root, p.deductionFileIds);
+      if (deduction > 0 && !deductionFiles.length) fail('确认扣款须附供应商同意的依据文件');
+      if (deduction > 0 && purchaseInvoicedMinor(root, po.id) > purchaseBillingLimitMinor(root, po) - deduction) fail('现有票据金额超过价款折让后的净额，请先核对并更正票据');
+      const suggested = settlementSuggestedPrepaymentMinor(root, st, deduction), applied = minor(p.prepaymentApplied, '本次预付抵扣', true);
       const available = purchasePrepaymentAvailableMinor(root, st.purchaseId);
       if (applied > available) fail(`本次预付抵扣超过合同剩余可抵扣预付 ${fx(major(available))} ${st.currency}`);
-      if (applied > mistMoneyMinor(st.amount)) fail('本次预付抵扣不能超过结算金额');
+      if (applied > gross - deduction) fail('本次预付抵扣不能超过扣后结算净额');
       const adjustReason = text(p.adjustReason, '调整原因', applied !== suggested, 500);
-      st.state = 'confirmed'; st.confirmation = { actorId: c.actorId, actor: c.actorName, at: c.now, suggestedPrepayment: major(suggested), prepaymentApplied: major(applied), adjustReason: applied !== suggested ? adjustReason : '', note: text(p.note, '复核意见', false, 1000) };
-      event(root,c,st.id,`确认结算 ${st.code}（${fx(st.amount)} ${st.currency}${applied ? `，预付抵扣 ${fx(major(applied))}` : ''}${applied !== suggested ? `，调整原因：${adjustReason}` : ''}）`,[st.submitterId,...notificationOwners(root,'procurement',st.purchaseId)]);
+      st.state = 'confirmed'; st.confirmation = { actorId: c.actorId, actor: c.actorName, at: c.now, suggestedPrepayment: major(suggested), prepaymentApplied: major(applied), adjustReason: applied !== suggested ? adjustReason : '', note, ...(deduction ? { deductionAmount: major(deduction), deductionFileIds: deductionFiles } : {}) };
+      event(root,c,st.id,`确认结算 ${st.code}（${fx(st.amount)} ${st.currency}${deduction ? `，确认扣款 ${fx(major(deduction))}，扣后 ${fx(major(gross - deduction))}` : ''}${applied ? `，预付抵扣 ${fx(major(applied))}` : ''}${applied !== suggested ? `，调整原因：${adjustReason}` : ''}）`,[st.submitterId,...notificationOwners(root,'procurement',st.purchaseId)]);
       return { id: st.id };
     }
     case 'payable.settlement.reverse': {
@@ -1101,7 +1113,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
         const st = s.settlements.find(x => x.id === text(row.settlementId, '关联结算')) || fail('关联结算不存在', 'NOT_FOUND');
         if (st.purchaseId !== purchaseId) fail(`${st.code} 不属于 ${line.purchaseCode}`);
         if (st.state !== 'confirmed') fail(`${st.code} 尚未经财务确认，不能关联票据`, 'PRECONDITION');
-        const left = mistMoneyMinor(st.amount) - settlementInvoicedMinor(root, st.id);
+        const left = settlementNetMinor(st) - settlementInvoicedMinor(root, st.id);
         if (mistMoneyMinor(line.amount) > left) fail(`${st.code} 未开票金额 ${fx(major(Math.max(0, left)))} ${st.currency}，不足以关联 ${line.purchaseCode} 的 ${fx(line.amount)}；如票额跨多笔结算，请取消登记后按结算分行重新登记`);
         line.settlementId = st.id; line.settlementCode = st.code; line.linkedAt = c.now; line.linkedBy = c.actorName; linked.push(st.code);
       }

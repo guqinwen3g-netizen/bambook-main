@@ -6,10 +6,13 @@ import { DevDetailPage } from './DevDetailPage';
 import { newRoundError, previewRoundLabels, roundTasks } from './DevRounds';
 import { applyMistCommand, createMistState, type MistCommand, type MistContext, type MistState } from '../../../../server/src/shared/mistWorkspace';
 import { Nav } from '../nav';
+import {developmentTaskClosePlan} from '../../../../server/src/shared/mistDevelopmentTaskLifecycle';
+import {getByRole,fireEvent} from '@testing-library/dom';
 import { developmentNoticeContent, developmentNoticeFingerprint } from '../../../../server/src/shared/mistDevelopmentNotice';
 
 const bridge=vi.hoisted(()=>({current:null as any}));
 vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>bridge.current}));
+vi.mock('../runtime/auth',()=>({useOptionalMistSession:()=>({sessionKey:'test',user:{id:'sales',displayName:'业务员'},hasPermission:()=>true}),useMistSession:()=>({sessionKey:'test',user:{id:'sales',displayName:'业务员'},hasPermission:()=>true})}));
 
 let root:Root|undefined,host:HTMLDivElement,state:MistState,devId='';const go=vi.fn();
 let n=0;const ctx:MistContext={id:()=>`ui-${++n}`,now:'2026-10-16T09:00:00Z',actorName:'业务员',actorId:'sales'};
@@ -21,8 +24,8 @@ beforeEach(async()=>{
   state.customers.push({id:'c',name:'测试客户',code:'C',country:'',city:'',industry:'',owner:'',grade:'',currency:'EUR',terms:'',incoterm:'',categories:'',creditLimit:0,since:''} as any);
   state.market.suppliers.push(...['A厂','B厂','C厂','D厂'].map(supplier));
   devId=apply({type:'development.submit',payload:{values:{name:'轮次大衣',customer:'c',style:'ST',season:'AW',category:'大衣',kind:'new',fabric:'羊毛',color:'灰',target:'',sizeBase:'M',goal:'首轮',factories:['A厂','B厂','C厂'],due:'2026-10-30',collaborators:[],sampleQuantity:1},fileIds:[]}}).result.devId!;
-  const run=vi.fn(async(command:MistCommand)=>{const r=apply(command);bridge.current={...bridge.current,state};await act(async()=>render(r.result.versionId));return{requestId:'r',revision:2,result:r.result};});
-  bridge.current={state,loading:false,error:'',run,uploadFile:vi.fn(async(file:File)=>{const id='file-'+file.name;state={...state,files:[...state.files,{id,name:file.name,mimeType:'text/plain',size:1,storageKey:id,createdAt:ctx.now}]};bridge.current={...bridge.current,state};return state.files.at(-1);}),downloadFile:vi.fn(),fileUrl:()=>''};
+  const run=vi.fn(async(command:MistCommand)=>{const r=apply(command);bridge.current={...bridge.current,state,workspace:{id:'test',revision:(bridge.current.workspace?.revision||1)+1,developmentTaskClosePlans:{[devId]:developmentTaskClosePlan(state,state.devs.find(d=>d.id===devId)!)}}};await act(async()=>render(r.result.versionId));return{requestId:'r',revision:bridge.current.workspace.revision,result:r.result};});
+  bridge.current={state,workspace:{id:'test',revision:1,developmentTaskClosePlans:{[devId]:developmentTaskClosePlan(state,state.devs.find(d=>d.id===devId)!) }},loading:false,error:'',run,uploadFile:vi.fn(async(file:File)=>{const id='file-'+file.name;state={...state,files:[...state.files,{id,name:file.name,mimeType:'text/plain',size:1,storageKey:id,createdAt:ctx.now}]};bridge.current={...bridge.current,state};return state.files.at(-1);}),downloadFile:vi.fn(),fileUrl:()=>''};
   host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>render());
 });
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();});
@@ -93,6 +96,7 @@ describe('BB-DEV-3 修改共同要求后逐厂同步',()=>{
     apply({type:'development.recordSample',payload:{devId,versionId:state.versions.find(v=>v.label==='R1-B-1')!.id,sample:'S',quantity:1,returnedAt:ctx.now}});
     await act(async()=>{bridge.current={...bridge.current,state};render();});
     expect(button('同步 R1-B-1')!.disabled).toBe(true);expect(taskText('R1-B-1')).toContain('R1-B-1 已返样，改要求请开新一轮');expect(button('同步 R1-A-1')!.disabled).toBe(false);
+    expect(taskText('R1-B-1')).not.toContain('可同步');
   });
 });
 
@@ -133,7 +137,7 @@ describe('acceptance review #59 on the page',()=>{
   it('disables 开新一轮 with the reason once the case is cancelled through the page',async()=>{
     expect(button('开新一轮')!.disabled).toBe(false);
     await act(async()=>[...document.querySelectorAll<HTMLButtonElement>('button')].find(item=>item.getAttribute('aria-label')==='更多')!.click());
-    await click('取消开发案');expect(button('确认取消')!.disabled).toBe(true);await fill('原因','客户撤单');await click('确认取消');
+    await click('取消开发案');expect(button('确认取消')!.disabled).toBe(true);await fill('原因','客户撤单');for(const version of state.versions)await act(async()=>fireEvent.change(getByRole(document.body,'combobox',{name:'任务处理 '+version.label,exact:true}),{target:{value:'retained'}}));await click('确认取消');
     expect(state.devs[0].closure).toMatchObject({kind:'cancelled',reason:'客户撤单'});
     await act(async()=>{bridge.current={...bridge.current,state};render();});
     const create=[...document.querySelectorAll<HTMLButtonElement>('#mist-dev-rounds button')].find(item=>item.textContent?.trim()==='开新一轮')!;

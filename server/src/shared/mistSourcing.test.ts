@@ -14,6 +14,16 @@ const input=(f:ReturnType<typeof fixture>,patch:Record<string,unknown>={})=>({or
 const quote=(id:string,supplierId:string,patch:Record<string,unknown>={})=>({type:'rfq.quote',payload:{id,supplierId,price:'88',currency:'CNY',moq:'500',promisedDue:'2026-11-15',terms:'月结 30 天',validUntil:'2026-10-31',...patch}}) as MistCommand;
 
 describe('供应商询价比价',()=>{
+  it('retains refusal originals and rejects missing files without replacing the previous response',()=>{
+    const f=fixture(),{id}=f.run({type:'rfq.save',payload:{input:input(f)}} as MistCommand);
+    f.state.files.push({id:'refusal-file',name:'refusal.txt',mimeType:'text/plain',size:10,storageKey:'refusal',createdAt:'2026-10-18T02:00:00Z'});
+    const declined=(fileIds:string[])=>({type:'rfq.quote',payload:{id,supplierId:f.sup('远山服装'),declined:true,declineReason:'No capacity',fileIds}} as MistCommand);
+    f.run(declined(['refusal-file','refusal-file']));
+    expect(f.rfq.quotes.at(-1)?.fileIds).toEqual(['refusal-file']);
+    const before=JSON.stringify(f.state);
+    expect(()=>f.run(declined(['missing-file']))).toThrow('附件不存在');
+    expect(JSON.stringify(f.state)).toBe(before);
+  });
   it('发起询价：至少两家可合作供应商，截止日在今天与需求交期之间',()=>{
     const f=fixture();
     expect(()=>f.run({type:'rfq.save',payload:{input:input(f,{supplierIds:[f.sup('江南成衣')]})}} as MistCommand)).toThrow('至少邀请两家');
@@ -69,6 +79,19 @@ describe('供应商询价比价',()=>{
     expect(()=>g.run({type:'rfq.cancel',payload:{id:r2,reason:''}} as MistCommand)).toThrow('取消原因');
     g.run({type:'rfq.cancel',payload:{id:r2,reason:'客户取消该款'}} as MistCommand);
     expect(g.rfq.state).toBe('cancelled');
+  });
+  it.each(['同色批生产，缝线顺直；藏青S2/M4/L4/XL2，按确认分码交付。',''])('转供方保留原规格字段，转移原因独立留档：%s',requirements=>{
+    const f=fixture(),source=f.state.fulfillment.purchases.find(p=>p.code==='PO-2026-00003')!;
+    source.note=requirements;
+    f.run({type:'fulfillment.procurement.submit',payload:{id:source.id}} as MistCommand);
+    f.as('leader',()=>f.run({type:'fulfillment.procurement.decide',payload:{id:source.id,decision:'approved',note:'批准原规格'}} as MistCommand));
+    const reason='原供方排期调整，书面确认同意转交';
+    const {id}=f.run({type:'sourcing.purchase.transfer',payload:{purchaseId:source.id,supplierId:f.sup('江南成衣'),price:88,currency:'CNY',due:'2026-11-18',reason}} as MistCommand);
+    const next=f.state.fulfillment.purchases.find(p=>p.id===id)!;
+    expect(next.note).toBe(requirements);
+    expect(f.state.fulfillment.purchases.find(p=>p.id===source.id)!.note).toBe(requirements);
+    expect(next.transferredFrom?.reason).toBe(reason);
+    expect(f.state.events.some(e=>e.entityId===next.id&&e.text.includes(reason))).toBe(true);
   });
   it('在手合同转给其他供应商：已批准未收货整单转移，原合同取消、生产分支关闭，新供应商草稿重新审批',()=>{
     const f=fixture();const po=()=>f.state.fulfillment.purchases.find(p=>p.code==='PO-2026-00003')!;

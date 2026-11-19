@@ -1,16 +1,26 @@
+import {projectGarmentMaterials} from '../shared/mistGarmentMaterials';
+import {projectTrimCatalog} from '../shared/mistTrimCatalog';
+import { projectManualSampleLinks } from '../shared/mistManualSample';
+import {sanitizeDevelopmentReferenceState} from './developmentReferenceAccess';
+import {heldShipmentRelease} from '../shared/mistRelationHold';
+import {projectOrderFlowEvents} from '../shared/mistOrderFlow';
+import { projectTeamReports } from './teamReportAccess';
 import {financialMaterialCostBasis,type InternalFabricCostBasis} from '../shared/mistInternalFabric';
+import {financialClaimCostBasis,type OrderClaimCostBasis} from '../shared/mistClaimCost';
+import {MistCommandError} from '../shared/mistWorkspace';
 import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
 import type { PermissionScope } from '../_shared/rolePermissionMatrix';
 import { emailVisibleScope } from '../shared/mistEmail';
-import { applyDataScope, scopedHiddenFiles, type MistDataScope } from '../shared/mistDataScope';
-import type { MistCalendarEvent, MistState, MistTask, MistWorkspaceMember, MistWorkspaceMemberLog, MistWorkspaceAccess as SharedAccess } from '../shared/mistWorkspace';
+import { applyDataScope, scopedHiddenFiles, scopedMaterialDeliveryFileIds, type MistDataScope } from '../shared/mistDataScope';
+import type { MistCalendarEvent, MistState, MistShipmentReleaseGate, MistTask, MistWorkspaceMember, MistWorkspaceMemberLog, MistWorkspaceAccess as SharedAccess } from '../shared/mistWorkspace';
 import { MIST_BUSINESS_GROUPS, MIST_BUSINESS_GROUP_LABEL, type MistOwnedObject } from '../shared/mistAccounts';
 import { accountHandovers, type MistAccountHandover } from '../shared/mistHandover';
 import { COMPANY_MAINTAIN_SCOPE, LINE_SUPERVISOR_SCOPE } from './companyLibrary';
 import { PERMISSION_SCOPES } from '../_shared/rolePermissionMatrix';
 import { projectSeals } from '../shared/mistSeals';
 import { currentCrmCalendar } from '../shared/mistCrmCalendar';
+import { fileMaintainer, restrictedSensitiveFiles, type FilePrivacyContext } from './filePrivacy';
 /**
  * 公司访问与读投影。
  * - 成员资格只决定"能不能进这家公司"，看到哪些业务数据仍由账号自身现有岗位的读权限决定；
@@ -88,13 +98,21 @@ export function rebateReceiptIds(state: MistState): Set<string> {
  * - 被退税勾稽占用的银行到账流水整笔不下发（其金额就是退税到账额）。
  */
 export function maskTaxBase(next: MistState) {
-  if (next.payables?.bills?.length) next.payables = { ...next.payables, bills: next.payables.bills.map(b => ({ ...b, taxAmount: 0, taxRate: '', taxMasked: true })) };
+  if (next.payables?.bills?.length) next.payables = { ...next.payables, bills: next.payables.bills.map(b => {
+    const taxDocument = b.invoiceType === 'vat-special' || b.taxAmount > 0;
+    return { ...b, taxAmount: 0, taxRate: '', taxMasked: true,
+      // 财务票据自由备注及税务核对原因不能直接恢复被隐藏的税额；业务条款仍在来源合同/结算中。
+      ...(taxDocument ? { note: '', ...(b.voided ? { voided: { ...b.voided, reason: '' } } : {}),
+        ...(b.invoiceTypeHistory ? { invoiceTypeHistory: b.invoiceTypeHistory.map(entry => ({ ...entry, reason: '' })) } : {}) } : {}) };
+  }) };
   const rebate = next.exportRebate;
   const refundReceipts = rebateReceiptIds(next);
-  if (rebate?.claims?.length) next.exportRebate = { ...rebate, claims: rebate.claims.map(c => ({ ...c, taxable: 0, expected: 0, taxMasked: true,
-    ...(c.approved ? { approved: { ...c.approved, amount: 0 } } : {}),
+  if (rebate?.claims?.length) next.exportRebate = { ...rebate, claims: rebate.claims.map(c => ({ ...c, taxable: 0, expected: 0, taxMasked: true, note: '',
+    ...(c.approved ? { approved: { ...c.approved, amount: 0, reason: '' } } : {}),
+    ...(c.withdrawn ? { withdrawn: { ...c.withdrawn, reason: '' } } : {}),
+    ...(c.settled ? { settled: { ...c.settled, reason: '' } } : {}),
     // 去掉到账流水 id：否则可凭 id 经资金归属等命令的提示拿到到账金额；勾稽编号与日期保留。
-    receipts: (c.receipts || []).map(({ receiptId: _receipt, ...r }) => ({ ...r, receiptId: '', amount: 0 })),
+    receipts: (c.receipts || []).map(({ receiptId: _receipt, ...r }) => ({ ...r, receiptId: '', amount: 0, ...(r.reversed ? { reversed: { ...r.reversed, reason: '' } } : {}) })),
     lines: (c.lines || []).map(({ parts: _parts, inputTaxCap: _cap, excluded: _excluded, taxLimited: _limited, ...l }) => ({ ...l, taxable: 0, rebate: 0 })) })) };
   if (next.events?.some(e => e.entityType === 'rebate')) next.events = next.events.map(e => e.entityType === 'rebate' ? { ...e, text: maskTaxBaseText(e.text) } : e);
   // Agent 提议说明来自预演事件或调用方填写，历史提议已入库：退税命令的说明按同一规则脱敏。
@@ -200,8 +218,25 @@ function projectMemberHandovers(next: MistState, actor: TokenPayload) {
   next.tasks = (next.tasks || []).filter(task => task.kind !== 'account-handover' || task.assigneeIds?.includes(actor.userId));
 }
 const canManageMemberHandover = (actor: TokenPayload, ownerId?: string) => hasScope(actor, COMPANY_MAINTAIN_SCOPE as PermissionScope) || !!ownerId && ownerId === actor.userId;
+/** Derive from the full company state before risk masking; expose no risk or credit details. */
+export function projectShipmentReleaseGates(full:MistState,visible:MistState,actor:TokenPayload,workspaceCompanyId?:string|null):Record<string,MistShipmentReleaseGate>|undefined {
+  if(!workspaceCompanyId||actor.companyId!==workspaceCompanyId||!hasScope(actor,'shipments:read'))return undefined;
+  // Shipment reading already grants its source reference packet, not full order/financial reading.
+  const sourceOrders=new Set((full.orders||[]).map(row=>row.id)),sourceLines=new Map((full.orderLines||[]).map(row=>[row.id,row]));
+  const result:Record<string,MistShipmentReleaseGate>={};
+  for(const shipment of visible.fulfillment?.shipments||[]){
+    const original=(full.fulfillment?.shipments||[]).find(row=>row.id===shipment.id);
+    if(!original||original.customerId!==shipment.customerId||shipment.hiddenCount||!shipment.lines.length||original.lines.length!==shipment.lines.length)continue;
+    const complete=original.lines.every(line=>shipment.lines.some(row=>row.orderId===line.orderId&&row.lineId===line.lineId&&row.productionId===line.productionId&&row.quantity===line.quantity)&&sourceOrders.has(line.orderId)&&sourceLines.get(line.lineId)?.orderId===line.orderId);
+    if(!complete)continue;
+    const gate=heldShipmentRelease(full,original.customerId);
+    result[shipment.id]={held:!!gate.held,unusedAuthorized:!!gate.risk};
+  }
+  return Object.keys(result).length?result:undefined;
+}
+
 /** 按账号自身读权限裁剪状态；被隐藏的数据结构用空公司的同名结构替换，保证页面结构完整。 */
-export function projectState(state: MistState, actor: TokenPayload, empty: () => MistState, ownerId?: string, scope?: MistDataScope): { state: MistState; hidden: Section[];costMaterialBasis?:InternalFabricCostBasis[] | null } {
+export function projectState(state: MistState, actor: TokenPayload, empty: () => MistState, ownerId?: string, scope?: MistDataScope, privacy?: FilePrivacyContext, reportWorkspaceId?: string): { state: MistState; hidden: Section[];costMaterialBasis?:InternalFabricCostBasis[] | null;costClaimBasis?:OrderClaimCostBasis[]|null } {
   const calendarState = { ...state, calendar: currentCrmCalendar(state) };
   const hidden = hiddenSections(actor), next: MistState = scope ? applyDataScope(calendarState, scope, actor.userId) : calendarState;
   // Legacy company activity had no recipients. Keep it in events, never broadcast it to accounts.
@@ -218,9 +253,14 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
   if (taxBaseHidden && !hidden.some(section => section.key === 'bankAccounts') && (state.receipts || []).some(r => rebateReceiptIds(state).has(r.id))) hidden.push(MIST_READ_SECTIONS.find(section => section.key === 'bankAccounts')!);
   // Financial read metadata belongs to the response envelope, never to restorable business state.
   delete (next as MistState&{costMaterialBasis?:unknown}).costMaterialBasis;
+  delete (next as MistState&{costClaimBasis?:unknown}).costClaimBasis;
   // Group scope conditions and notes may reference company-wide business; match the management API's permission boundary.
   // Agent 提议含待执行命令，只给提议所属账号本人。
   if (next.agentProposals) next.agentProposals = next.agentProposals.filter(proposal => proposal.ownerId === actor.userId);
+  // An unlinked draft with a known author lives in that actor's personal workspace view.
+  if (next.platform?.assistantDrafts) next.platform = { ...next.platform,
+    assistantDrafts: next.platform.assistantDrafts.filter(draft => draft.orderId || !draft.ownerId || draft.ownerId === actor.userId) };
+
   // fin63：报表订阅只给订阅人本人（收件人与发送节奏属个人安排）。
   if (next.reportSchedules) next.reportSchedules = next.reportSchedules.filter(row => row.ownerId === actor.userId);
   if (!hasScope(actor, 'hr:write')) {
@@ -241,6 +281,7 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
     next.notifications = (next.notifications || []).filter(item => visibleTarget(item.target));
     next.calendar = (next.calendar || []).filter(item => visibleTarget(item.target));
   }
+  sanitizeDevelopmentReferenceState(next);
   // 在分区隐藏之后执行：交接清单只按本账号最终可见的对象过滤。
   if (scope && !canManageMemberHandover(actor, ownerId)) projectMemberHandovers(next, actor);
   // Warehouse-only readers still need the outcome required to dispose their own visible lot.
@@ -278,19 +319,37 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
       next.calendar = (next.calendar || []).filter(item => allowed(item.target));
     }
   }
+  next.events = projectOrderFlowEvents(next.events || [], next.orders || []);
   const restrictedFiles = new Set(scopedHiddenFiles(next));
   // 印章图片只给公司管理员（本机空间为所有者）与该章用印人，Agent 一律不给；用印与签字记录按所涉业务记录裁剪（见 mistSeals）。
-  const maintainer = hasScope(actor, COMPANY_MAINTAIN_SCOPE as PermissionScope) || !!ownerId && ownerId === actor.userId;
+  const maintainer = fileMaintainer(actor, ownerId);
+  projectTrimCatalog(next);
+  projectGarmentMaterials(next);
   for (const id of projectSeals(state, next, actor.userId, maintainer, (actor as { actorKind?: unknown }).actorKind === 'agent')) restrictedFiles.add(id);
-  if (taxBaseHidden) {
-    // A PDF/image cannot use the structured tax mask. Use the full source state so
-    // another shared reference (or uploader ownership) cannot reopen its original.
-    for (const bill of state.payables?.bills || []) if (bill.invoiceType === 'vat-special' || bill.taxAmount > 0) for (const id of bill.fileIds || []) restrictedFiles.add(id);
-    for (const claim of state.exportRebate?.claims || []) for (const id of claim.fileIds || []) restrictedFiles.add(id);
-  }
-  next.files = visibleFiles(state, next, actor.userId, ownerId).filter(file => !restrictedFiles.has(file.id));
+  // Re-uploading identical bytes does not remove an existing source restriction.
+  for (const id of restrictedSensitiveFiles(state, actor, ownerId, privacy)) restrictedFiles.add(id);
+  const handoffFiles=scope&&hasScope(actor,'orders:read')&&hasScope(actor,'orders:write')?scopedMaterialDeliveryFileIds(state,scope,actor.userId):new Set<string>();
+  next.files = visibleFiles(state, next, actor.userId, ownerId,handoffFiles).filter(file => !restrictedFiles.has(file.id));
+  sanitizeDevelopmentReferenceState(next);
   const costVisible=hasScope(actor,'reports:admin')&&!hidden.some(s=>['orders','procurement','receivables','payables'].includes(s.key));
-  return { state: next, hidden,...(costVisible?{costMaterialBasis:scope ? null : financialMaterialCostBasis(state)}:{}) };
+  let costClaimBasis:OrderClaimCostBasis[]|null=null;
+  if(costVisible)try{costClaimBasis=financialClaimCostBasis(state,new Set((next.orders??[]).map(order=>order.id)));}catch(error){if(!(error instanceof MistCommandError))throw error;}
+  if ('teamReports' in state) (next as MistState & {teamReports?:import('../shared/mistTeam').TeamWeeklyArchiveView[]}).teamReports = projectTeamReports(state,next,actor,scope,reportWorkspaceId);
+  // Invoice readers need the payment anchor date, not unrestricted transport or POD evidence.
+  next.invoices=(next.invoices||[]).map(invoice=>{
+    const {receivableDueSource:_untrusted,...safe}=invoice;if(invoice.receivableDueCondition?.kind!=='deliveryAcceptance')return safe;
+    const document=state.fulfillment.documents.find(d=>d.id===invoice.sourceDocumentId&&d.invoiceId===invoice.id&&d.orderId===invoice.orderId&&d.type==='CI'),shipment=state.fulfillment.shipments.find(s=>s.id===document?.shipmentId),condition=document?.receivableDueCondition;
+    const sourceCurrent=!invoice.voidedAt&&document?.status==='issued'&&!!shipment&&condition?.kind===invoice.receivableDueCondition.kind&&condition.days===invoice.receivableDueCondition.days&&condition.terms===invoice.receivableDueCondition.terms;
+    return {...safe,receivableDueSource:{sourceCurrent,...(sourceCurrent?{shipmentId:shipment!.id,...(shipment!.delivered?{deliveryAt:shipment!.delivered.at}:{})}:{})}};
+  });
+  // Product-only readers can return the same physical sample without receiving inventory/receipt identities.
+  if(Array.isArray(next.fulfillment?.sampleMovements))next.fulfillment.sampleMovements=next.fulfillment.sampleMovements.map(movement=>{
+    const {commercialReturn:_untrusted,...safe}=movement;
+    if(!safe.commercialLoan||hasScope(actor,'inventory:read'))return safe;
+    const {commercialLoan,...publicMovement}=safe;
+    return {...publicMovement,commercialReturn:{location:commercialLoan.sampleLocation,quantity:commercialLoan.quantity,unit:commercialLoan.unit}};
+  });
+  return { state: projectManualSampleLinks(next), hidden,...(costVisible?{costMaterialBasis:scope ? null : financialMaterialCostBasis(state),costClaimBasis}:{}) };
 }
 /** 精确匹配附件 ID，不用全文子串判断，避免相似文本开放隐藏附件。 */
 function referencedFiles(state: MistState): Set<string> {
@@ -304,10 +363,10 @@ function referencedFiles(state: MistState): Set<string> {
   return found;
 }
 /** 已引用附件须有可见来源；尚未引用的附件只给上传人/公司所有者。 */
-function visibleFiles(full: MistState, projected: MistState, actorId: string, ownerId?: string) {
+function visibleFiles(full: MistState, projected: MistState, actorId: string, ownerId?: string,extra:ReadonlySet<string>=new Set()) {
   const visible = referencedFiles(projected), referenced = referencedFiles(full);
-  return (full.files || []).filter(file => visible.has(file.id) || !referenced.has(file.id) && (actorId === ownerId || file.uploadedBy === actorId));
+  return (full.files || []).filter(file => visible.has(file.id) || extra.has(file.id) || !referenced.has(file.id) && (actorId === ownerId || file.uploadedBy === actorId));
 }
-export function canReadFile(state: MistState, actor: TokenPayload, fileId: string, empty: () => MistState, ownerId?: string, scope?: MistDataScope) {
-  return projectState(state, actor, empty, ownerId, scope).state.files.some(file => file.id === fileId);
+export function canReadFile(state: MistState, actor: TokenPayload, fileId: string, empty: () => MistState, ownerId?: string, scope?: MistDataScope, privacy?: FilePrivacyContext) {
+  return projectState(state, actor, empty, ownerId, scope, privacy).state.files.some(file => file.id === fileId);
 }

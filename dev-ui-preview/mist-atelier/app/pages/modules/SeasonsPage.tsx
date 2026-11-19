@@ -4,7 +4,7 @@ import {businessNow} from '../../runtime/businessClock';
 /** 季节性与趋势：季节时间线（SS / AW + 年份，里程碑与今日），本季实时业务；趋势标签关联面料档案与（由报价推出的）客户；展会线索一键转 CRM 客户或商机。 */
 import React from 'react';
 import { CalendarRange, Download, Flag, Pencil, Plus, RefreshCw, Sparkles, Tent, UserCheck, UserPlus, UserX } from 'lucide-react';
-import { Banner, Button, Card, Checklist, DataTable, EmptyState, Facts, MistPage, Mono, ObjectCell, PageHeader, Pill, Segmented, Timeline, type Column, type Tone } from '../../../../../components/mist';
+import { Banner, Button, Card, Checklist, DataTable, EmptyState, Facts, MistPage, Mono, ObjectCell, PageHeader, Pill, Segmented, Skeleton, Timeline, type Column, type Tone } from '../../../../../components/mist';
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
 import { marketBusinessDate, type MarketLead, type MarketSeason, type MarketShow, type MarketTrend } from '../../../../../server/src/shared/mistMarket';
 import { useMistWorkspace } from '../../runtime/workspace';
@@ -183,16 +183,17 @@ export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) 
   const createLabel = tab === 'seasons' ? '新建季节' : tab === 'trends' ? '记录趋势' : '新建展会';
   return <MistPage>
     <PageHeader eyebrow={uiText("客户与市场 · 季节与趋势")} title={uiText("季节性与趋势")}
-      actions={<><Button icon={Download} onClick={exportRows}>{uiText("导出")}</Button>{can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => setDialog(tab === 'seasons' ? seasonSpec() : tab === 'trends' ? trendSpec() : showSpec())}>{createLabel}</Button>}</>} />
+      actions={<><Button icon={Download} disabled={!state} onClick={exportRows}>{uiText("导出")}</Button>{can && <Button variant="primary" icon={Plus} disabled={!state || locked} onClick={() => setDialog(tab === 'seasons' ? seasonSpec() : tab === 'trends' ? trendSpec() : showSpec())}>{createLabel}</Button>}</>} />
     {!can && <div className="mist-section"><Banner variant="status" tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有季节与趋势写权限。")}</Banner></div>}
     {error && <FailureNotice title={"数据未加载"} detail={error} retry={() => void refresh()} />}
-    <div className="mist-section"><Segmented<Tab> ariaLabel={uiText("内容")} value={tab} onChange={switchTab} options={[{ value: 'seasons', label: `季节 · ${seasons.length}` }, { value: 'trends', label: `趋势 · ${trends.length}` }, { value: 'shows', label: `展会与线索 · ${shows.length}` }]} /></div>
-    {tab === 'seasons' && <div className="mist-section"><SeasonTimeline seasons={seasons} day={day} selected={selSeason?.id} onPick={s => pick(s.id)} /></div>}
-    <ListDetail drawerOpen={drawer && !!detail} onDrawerClose={() => setDrawer(false)} drawerTitle={selSeason ? `${selSeason.code} · ${selSeason.name}` : selTrend?.name || selShow?.name || ''}
+    <div className="mist-section"><Segmented<Tab> ariaLabel={uiText("内容")} value={tab} onChange={switchTab} options={[{ value: 'seasons', label: state ? `季节 · ${seasons.length}` : '季节' }, { value: 'trends', label: state ? `趋势 · ${trends.length}` : '趋势' }, { value: 'shows', label: state ? `展会与线索 · ${shows.length}` : '展会与线索' }]} /></div>
+    {state && tab === 'seasons' && <div className="mist-section"><SeasonTimeline seasons={seasons} day={day} selected={selSeason?.id} onPick={s => pick(s.id)} /></div>}
+    {!state && loading && <Card><Skeleton height={120} /></Card>}
+    {state && <ListDetail drawerOpen={drawer && !!detail} onDrawerClose={() => setDrawer(false)} drawerTitle={selSeason ? `${selSeason.code} · ${selSeason.name}` : selTrend?.name || selShow?.name || ''}
       list={<Card>{tab === 'seasons' ? <DataTable ariaLabel={uiText("季节列表")} loading={loading} rows={seasonRows} rowKey={s => s.id} selectedKey={selSeason?.id} density="comfy" onRowClick={s => pick(s.id)} columns={seasonCols} empty={<EmptyState icon={CalendarRange} title={uiText("还没有季节")} />} />
         : tab === 'trends' ? <DataTable ariaLabel={uiText("趋势列表")} loading={loading} rows={trendRows} rowKey={t => t.id} selectedKey={selTrend?.id} density="comfy" onRowClick={t => pick(t.id)} columns={trendCols} empty={<EmptyState icon={Sparkles} title={uiText("还没有趋势记录")} />} />
         : <DataTable ariaLabel={uiText("展会列表")} loading={loading} rows={showRows} rowKey={x => x.id} selectedKey={selShow?.id} density="comfy" onRowClick={x => pick(x.id)} columns={showCols} empty={<EmptyState icon={Tent} title={uiText("还没有展会")} />} />}</Card>}
-      detail={detail || placeholder} summary={summary} />
+      detail={detail || placeholder} summary={summary} />}
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
   </MistPage>;
 }

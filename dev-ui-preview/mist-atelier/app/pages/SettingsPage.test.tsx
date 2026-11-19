@@ -40,9 +40,11 @@ describe('original Mist settings with server workspace commands', () => {
     expect(host.querySelector('[aria-label="界面语言"]')).toBeNull();
     expect(host.textContent).not.toContain('查看账号安全');
   });
-  it('persists notification switches with the shared field names', async () => {
+  it('submits only the changed notification switch and keeps the other preferences', async () => {
+    seam.value.state.settings.notifications.qc = false;
     render(); await click(button('通知')); const controls = host.querySelectorAll<HTMLInputElement>('input[role="switch"]');
-    await click(controls[1]); expect(seam.value.run).toHaveBeenCalledWith({ type: 'settings.update', payload: { notifications: { qc: true, shipping: false, suggestions: true, digest: false } } });
+    await click(controls[1]); expect(seam.value.run).toHaveBeenCalledWith({ type: 'settings.update', payload: { notifications: { shipping: false } } });
+    expect(seam.value.state.settings.notifications).toEqual({ qc: false, shipping: false, suggestions: true, digest: false });
     expect(host.textContent).not.toContain('不发送邮件');
   });
   it.each(['account','appearance','security'])('redirects the old %s link to personal settings without writing company data', section => {

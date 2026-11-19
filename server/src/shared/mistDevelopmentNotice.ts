@@ -1,3 +1,6 @@
+import {trimmingParameterFields} from '../_shared/trimmingFields';
+import {MATERIAL_PROVIDERS,MATERIAL_COLORS,MATERIAL_NATURES} from './mistGarmentMaterials';
+import {developmentFactoryWorkBlocker} from './mistDevelopmentTaskLifecycle';
 /**
  * BB-DEV-4 试样通知单：每轮每厂一份（面料“面料试样通知单”，服装“服装开发通知单”）。
  * 内容来自本厂在本轮的任务（共同要求 + 本厂差异、形态、数量和单位、要求日期、参考附件）。
@@ -9,8 +12,9 @@ import { developmentClosure, factoryTaskSync } from './mistDevelopmentRounds';
 import { creditDocumentFingerprint } from './mistCreditDocuments';
 
 import { devStageChainText } from './mistDevelopmentStages';
-export const DEV_NOTICE_TEMPLATE_VERSION = 3 as const;
+export const DEV_NOTICE_TEMPLATE_VERSION = 4 as const;
 export type DevNoticeContent = {
+  materials?:Array<{sku:string;name:string;position:string;specification:string;perPiece:string;unit:string;color:string;colorMode:string;colorReference:string;provider:string;nature:string;technical?:Array<{label:string;value:string}>}>;
   domain: DevelopmentDomain; title: string; factory: string;
   devId: string; devCode: string; devName: string; versionId: string; versionLabel: string; roundNumber: number; roundTargetDate: string;
   style: string; category: string; season: string; color: string; fabric: string; sizeBase: string;
@@ -43,6 +47,7 @@ const FABRIC_LABELS: Array<[keyof NonNullable<MistVersion['fabricRequirements']>
 export function developmentNoticeBlocker(state: MistState, dev: MistDev, version: MistVersion): string | null {
   const closure = developmentClosure(state, dev);
   if (closure && closure.kind !== 'closed') return `开发案${closure.label}，不能再生成通知单`;
+  const work=developmentFactoryWorkBlocker(state,dev,version);if(work)return work;
   if (version.minor) return `小版本 ${version.label} 不单独发试样通知单，沿用大版本的通知单`;
   if (!factoryTaskSync(state, version)) return '本版没有轮次记录（历史版本），不能生成通知单';
   if (!state.settings.companyProfile?.legalName) return '先在 设置 › 公司档案 填写公司抬头，才能生成通知单';
@@ -67,6 +72,14 @@ export function developmentNoticeContent(state: MistState, dev: MistDev, version
     style: v.style || '', category: v.category || '', season: v.season || '', color: v.color || '', fabric: domain === 'fabric' ? '' : (version.fabric || v.fabric || ''), sizeBase: domain === 'fabric' ? '' : (version.size || v.sizeBase || ''),
     fabricRequirements,
     ...(version.stages?.length ? { stageChain: devStageChainText(version.stages) } : {}),
+    ...(domain==='garment'&&version.materialUses?.length?{materials:version.materialUses.map(use=>({
+      sku:use.catalog.sku,name:use.catalog.name,position:use.position,specification:use.specification||use.catalog.specification,
+      perPiece:use.perPiece,unit:use.unit,color:use.color,colorMode:MATERIAL_COLORS[use.colorMode],colorReference:use.colorReference,
+      provider:MATERIAL_PROVIDERS[use.provider],nature:MATERIAL_NATURES[use.nature],
+      ...(use.catalog.profile?{technical:trimmingParameterFields(use.catalog.profile.category)
+        .filter(f=>f.key!=='supplierInformation'&&use.catalog.profile!.parameters[f.key])
+        .map(f=>({label:f.label,value:use.catalog.profile!.parameters[f.key]}))}:{})
+    }))}:{}),
     commonRequirements: task.commonRequirements, extraRequirements: task.extraRequirements, sampleForm: task.sampleForm, sampleQuantity: task.sampleQuantity, sampleUnit: task.sampleUnit, dueDate: task.dueDate,
     attachments: fileIds.map(id => ({ fileId: id, name: state.files.find(file => file.id === id)?.name || '已不可用的附件' })),
     issuer: { legalName: issuer.legalName, englishName: issuer.englishName || '', address: issuer.address || '', phone: issuer.phone || '', email: issuer.email || '' },

@@ -9,6 +9,17 @@
 import { MistCommandError } from './mistWorkspace';
 
 const fail = (message: string): never => { throw new MistCommandError('VALIDATION', message, 422); };
+/** Development fabric facts retain measured values and original units, without a garment tolerance model. */
+export function normalizeFabricQcMeasurements(input: unknown): Array<{property:string;actual:number;unit:string}> {
+  if (input === undefined) return [];
+  if (!Array.isArray(input) || input.length > 200) return fail('面料实测最多支持200行');
+  return input.map(row => {
+    if (!row || typeof row.actual !== 'number' || !Number.isFinite(row.actual) || row.actual < 0) return fail('面料实测须为有限非负数');
+    if (typeof row.property !== 'string' || !row.property.trim() || row.property.length > 120) return fail('实测项目未填写或格式无效');
+    if (typeof row.unit !== 'string' || !row.unit.trim() || row.unit.length > 120) return fail('实测单位未填写或格式无效');
+    return { property: row.property.trim(), actual: row.actual, unit: row.unit.trim() };
+  });
+}
 // Lot size → sample size code letter, general inspection level II.
 const LOT_LETTERS: Array<[number, string]> = [[8, 'A'], [15, 'B'], [25, 'C'], [50, 'D'], [90, 'E'], [150, 'F'], [280, 'G'], [500, 'H'], [1200, 'J'], [3200, 'K'], [10000, 'L'], [35000, 'M'], [150000, 'N'], [500000, 'P'], [Infinity, 'Q']];
 const SAMPLE_SIZE: Record<string, number> = { A: 2, B: 3, C: 5, D: 8, E: 13, F: 20, G: 32, H: 50, J: 80, K: 125, L: 200, M: 315, N: 500, P: 800, Q: 1250, R: 2000 };

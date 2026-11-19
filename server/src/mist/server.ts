@@ -1,6 +1,7 @@
 import { MistMailStateWorker } from './mail/stateWorker';
 import { samePublicOrigin, publicOriginAllowed } from '../shared/bambookPublicOrigins';
 import { createAuthRouter } from '../auth/route';
+import {createCurrentSessionGuard} from '../auth/currentSessionRevocation';
 import { createDbVerificationStore } from '../auth/verificationDb';
 import { createEmailService } from '../auth/email';
 import express from 'express';
@@ -69,6 +70,7 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
     app.use('/api/mist',createMistRouter({repository,marketStore,voice,voiceSettings,...mailRuntime(repository),authenticate:local.authenticate,delegation:local.agentDelegation,delegationGuard:local.requestGuard}));
   }else{
     if(!prisma)throw new Error('Mist server requires an explicit database outside local mode');
+    app.use('/api',createCurrentSessionGuard(prisma));
     const requireEmailVerification = process.env.AUTH_REQUIRE_EMAIL_VERIFY ? !/^(0|false|no)$/i.test(process.env.AUTH_REQUIRE_EMAIL_VERIFY.trim()) : true;
     app.use('/api/auth', createAuthRouter({ prisma, email: createEmailService(), verification: createDbVerificationStore({ prisma }), requireEmailVerification }));
     // The local-identity session exists only in local mode. Clients that send X-Mist-Session-Probe: 2 get an explicit

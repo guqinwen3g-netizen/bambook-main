@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../../../components/mist';
 import { ChangePasswordRow, ForcedPasswordChangePage, LogoutAllRow } from './ChangePassword';
+import { usePageFailureHost } from '../runtime/errorPresentation';
 
 const change = vi.hoisted(() => vi.fn());
 const logoutAll = vi.hoisted(() => vi.fn());
@@ -65,6 +66,27 @@ it('explains a first-login password change differently from an administrator res
   expect(document.body.textContent).toContain('临时密码');
   session.user = { email: 'a@x.test', mustChangePassword: false };
 });
+it.each(['initial', 'reset'])('keeps %s password failures visible before the workbench shell is rendered', async reason => {
+  session.user = { email: 'a@x.test', mustChangePassword: true, passwordChangeReason: reason };
+  // AppInner registers the error host before its forced-password early return;
+  // the workbench status card has not been rendered in this state.
+  function BeforeWorkbench() { usePageFailureHost(); return <ForcedPasswordChangePage />; }
+  await act(async () => root.render(<ToastProvider><BeforeWorkbench /></ToastProvider>));
+  await fill(['temp-pass-1', 'new-pass-22', 'different-pass-33']);
+  await act(async () => button('修改并继续').click());
+  expect(document.body.textContent).toContain('两次输入的新密码不一致');
+  expect(change).not.toHaveBeenCalled();
+  change.mockRejectedValueOnce(new Error('Current password is incorrect.'));
+  await fill(['wrong-pass-1', 'new-pass-22', 'new-pass-22']);
+  await act(async () => button('修改并继续').click());
+  expect(document.body.textContent).toContain('当前密码不正确');
+  change.mockResolvedValueOnce(undefined);
+  await fill(['temp-pass-1', 'new-pass-22', 'new-pass-22']);
+  await act(async () => button('修改并继续').click());
+  expect(session.refresh).toHaveBeenCalledTimes(1);
+  expect(document.body.textContent).not.toContain('当前密码不正确');
+  session.user = { email: 'a@x.test', mustChangePassword: false };
+});
 it('logs out every device only after confirmation, then ends the local session', async () => {
   logoutAll.mockReset();
   await act(async () => root.render(<ToastProvider><LogoutAllRow /></ToastProvider>));
@@ -75,5 +97,5 @@ it('logs out every device only after confirmation, then ends the local session',
   expect(document.body.textContent).toContain('未能退出所有设备'); expect(session.logout).not.toHaveBeenCalled();
   logoutAll.mockResolvedValueOnce(undefined);
   await act(async () => button('确认退出').click());
-  expect(logoutAll).toHaveBeenCalledTimes(2); expect(session.logout).toHaveBeenCalledTimes(1);
+  expect(logoutAll).toHaveBeenCalledTimes(2); expect(session.logout).not.toHaveBeenCalled();
 });

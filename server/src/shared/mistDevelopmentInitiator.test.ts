@@ -60,3 +60,37 @@ describe('BB-DEV-1 development initiator, request type and charging',()=>{
     const values=f.state.devs.find(d=>d.id===ids.devId)!.values;expect(values.initiator).toBeUndefined();expect(developmentCharged(values)).toBe(true);expect(developmentInitiatorLabel(values)).toBe('客户要求');
   });
 });
+
+describe('redevelopment from an exact catalog product',()=>{
+  function productFixture(){
+    const f=fixture();
+    const p=f.run({type:'market.product.save',payload:{input:{
+      sku:'JK-19',name:'短夹克',category:'garment',season:'AW27',supplierId:'',supplierCode:'',
+      composition:'棉',specification:'五扣',color:'军绿',unit:'件',cost:'72.50',currency:'CNY',sourceDevId:'',sourceVersionId:'',
+    }}});
+    const state=f.state;
+    const ctx:MistContext={actorId:'test-sales',actorName:'测试业务员',now:'2026-10-16T10:00:00Z',id:(()=>{let n=0;return ()=>'source-'+ ++n;})(),can:scope=>scope==='products:read'};
+    return {state,ctx,productId:String(p.id),garment:f.garment,fabric:f.fabric};
+  }
+  it('preserves the original product through a draft submitted by a client that omitted the optional field',()=>{
+    const {state,ctx,productId,garment}=productFixture();
+    const draft=applyMistCommand(state,{type:'development.saveDraft',payload:{values:{...garment,sourceProductId:productId},fileIds:[]}},ctx);
+    const started=applyMistCommand(draft.state,{type:'development.submit',payload:{draftId:String(draft.result.draftId),values:garment,fileIds:[]}},ctx);
+    expect(started.state.devs.find(d=>d.id===started.result.devId)?.values.sourceProductId).toBe(productId);
+    expect(started.state.market.products).toEqual(state.market.products);
+    expect(started.state.fulfillment.stocks).toEqual(state.fulfillment.stocks);
+  });
+  it('refuses to substitute a different catalog source or start from an archived, missing, unreadable or wrong-domain product',()=>{
+    const {state,ctx,productId,garment,fabric}=productFixture();
+    const input={type:'development.saveDraft',payload:{values:{...garment,sourceProductId:productId},fileIds:[]}} as const;
+    const save=(values:DevelopmentValues,context=ctx,draftId?:string)=>applyMistCommand(state,{type:'development.saveDraft',payload:{values,fileIds:[],draftId}},context);
+    expect(()=>save({...fabric,sourceProductId:productId})).toThrow('来源产品与开发类别不符');
+    expect(()=>save({...garment,sourceProductId:'missing'})).toThrow('来源产品档案不可用');
+    expect(()=>save({...garment,sourceProductId:productId},{...ctx,can:()=>false})).toThrow('没有查看来源产品档案的权限');
+    const frozen=save(input.payload.values),draftId=String(frozen.result.draftId);
+    expect(()=>applyMistCommand(frozen.state,{type:'development.saveDraft',payload:{draftId,values:{...garment,sourceProductId:'other'},fileIds:[]}},ctx)).toThrow('草稿的来源产品档案不可替换');
+    state.market.products.find(p=>p.id===productId)!.status='archived';
+    expect(()=>save(input.payload.values)).toThrow('来源产品已归档');
+    expect(()=>applyMistCommand(state,{type:'development.submit',payload:{values:input.payload.values,fileIds:[]}},ctx)).toThrow('来源产品已归档');
+  });
+});

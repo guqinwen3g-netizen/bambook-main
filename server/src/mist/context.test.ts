@@ -1,12 +1,65 @@
 import {beforeEach,afterEach,describe,it,expect,vi} from 'vitest';
-const mocks=vi.hoisted(()=>({resolve:vi.fn(),dept:vi.fn(),claim:vi.fn(),users:new Map<string,any>(),build:vi.fn()}));
-vi.mock('../approvals/approvalRoutingService',()=>({createApprovalRoutingService:()=>({resolveReviewerByDepartment:mocks.dept,resolveClaimLeader:mocks.claim})}));
+const mocks=vi.hoisted(()=>({resolve:vi.fn(),dept:vi.fn(),main:vi.fn(),source:vi.fn(),submitted:vi.fn(),claim:vi.fn(),users:new Map<string,any>(),routes:new Map<string,any>(),build:vi.fn()}));
+vi.mock('../approvals/approvalRoutingService',()=>({createApprovalRoutingService:(options:any)=>({resolveReviewerByDepartment:mocks.dept,resolveOrderMainReviewers:mocks.main,resolveRequesterDepartmentSnapshot:mocks.source,resolveSubmittedOrderMainReviewers:mocks.submitted,resolveClaimLeader:mocks.claim,...mocks.routes.get(JSON.stringify(options?.eligibleReviewerIds))})}));
 vi.mock('../orders/orderMainApprovalService',()=>({createOrderMainApprovalService:()=>({resolveEligibleReviewerIds:mocks.resolve})}));
 vi.mock('../auth/tokenHelpers',()=>({loadUserWithRoles:async(_db:any,id:string)=>mocks.users.get(id)||null,buildLoadedAuthTokenPayload:mocks.build}));
-import {mistApprovalAuthority} from './context';
+import {mistApprovalAuthority,mistQcTransferAuthority} from './context';
+import {CompanyAccessError} from '../auth/companyAccess';
 const actor={userId:'owner',roles:[],permissions:['orders:write'],departmentIds:[]} as any;
-beforeEach(()=>{mocks.resolve.mockReset();mocks.dept.mockReset();mocks.claim.mockReset();mocks.claim.mockRejectedValue(Object.assign(new Error('none'),{code:'NO_REVIEWER_RESOLVED'}));mocks.users.clear();mocks.build.mockReset();mocks.build.mockImplementation(async(_db:any,user:any,companyId?:string)=>({userId:user.id,companyId,roles:[],departmentIds:[],permissions:user.permissions,authorizationLoaded:true}));vi.stubEnv('MIST_LOCAL_WORKSPACE','0');vi.stubEnv('NODE_ENV','test');});
+beforeEach(()=>{mocks.resolve.mockReset();mocks.dept.mockReset();mocks.main.mockReset();mocks.main.mockRejectedValue(Object.assign(new Error('none'),{code:'NO_REVIEWER_RESOLVED'}));mocks.source.mockReset();mocks.source.mockResolvedValue({departmentSnapshotId:'current-department'});mocks.submitted.mockReset();mocks.submitted.mockRejectedValue(Object.assign(new Error('none'),{code:'NO_REVIEWER_RESOLVED'}));mocks.claim.mockReset();mocks.claim.mockRejectedValue(Object.assign(new Error('none'),{code:'NO_REVIEWER_RESOLVED'}));mocks.users.clear();mocks.routes.clear();mocks.build.mockReset();mocks.build.mockImplementation(async(_db:any,user:any,companyId?:string)=>({userId:user.id,companyId,roles:[],departmentIds:[],permissions:user.permissions,globalBusinessScope:user.globalBusinessScope,businessAttributes:user.businessAttributes,authorizationLoaded:true}));vi.stubEnv('MIST_LOCAL_WORKSPACE','0');vi.stubEnv('NODE_ENV','test');});
 afterEach(()=>vi.unstubAllEnvs());
+describe('trusted submitted main authority',()=>{
+ const source=(mode='organization')=>({schemaVersion:1,mode,companyId:'company-a',businessLine:'fabric',requesterId:'original-requester',departmentSnapshotId:'original-department'});
+ const missing=()=>mocks.resolve.mockRejectedValue(Object.assign(new Error('missing'),{code:'ORDER_APPROVAL_AUTHORITY_MISSING'}));
+ const people=()=>{for(const[id,props]of Object.entries({'old-head':{businessAttributes:['fabric_business']},boss:{globalBusinessScope:true},'new-head':{businessAttributes:['fabric_business']}}))mocks.users.set(id,{id,status:'active',permissions:['orders:write'],...props});};
+ it('records the resolved organization department and actual submitting identity for each domain',async()=>{
+  missing();people();mocks.main.mockResolvedValue({reviewerIds:['old-head','boss'],departmentSnapshotId:'original-department'});const value=await mistApprovalAuthority({}, {...actor,companyId:'company-a'},'order.governance.submit',['old-head','boss']);expect((value as any).orderMainApprovalSources.fabric).toEqual({...source(),requesterId:actor.userId});
+ });
+ it('records explicit configuration separately from organizational qualification',async()=>{
+  people();mocks.resolve.mockResolvedValue(['boss']);mocks.dept.mockResolvedValue(null);const value=await mistApprovalAuthority({}, {...actor,companyId:'company-a'},'order.governance.submit',['boss']);expect((value as any).orderMainApprovalSources.fabric).toEqual({...source('explicit'),requesterId:actor.userId,departmentSnapshotId:'current-department'});
+ });
+ it('keeps the original assigned reviewers after a head change without requiring an active original requester',async()=>{
+  missing();people();mocks.main.mockResolvedValue({reviewerIds:['new-head','boss'],departmentSnapshotId:'new-department'});const value=await mistApprovalAuthority({}, {...actor,userId:'old-head',companyId:'company-a'},'order.governance.decide',['old-head','new-head','boss'],{orderMain:true,submittedOrderMain:{source:source(),reviewerIds:['old-head','boss']}} as any);expect(value.orderReviewerIds).toEqual({garment:[],fabric:['old-head','boss']});expect(mocks.main).not.toHaveBeenCalled();
+ });
+ it.each(['module','domain','membership'])('still removes a submitted reviewer when current %s access is gone',async loss=>{
+  missing();people();const old=mocks.users.get('old-head');if(loss==='module')old.permissions=[];if(loss==='domain')old.businessAttributes=['garment_business'];const ids=loss==='membership'?['boss','new-head']:['old-head','boss','new-head'];const value=await mistApprovalAuthority({}, {...actor,companyId:'company-a'},'order.governance.decide',ids,{orderMain:true,submittedOrderMain:{source:source(),reviewerIds:['old-head','boss']}} as any);expect(value.orderReviewerIds?.fabric).toEqual(['boss']);
+ });
+ it('keeps current explicit configuration above an older organizational grant',async()=>{
+  people();mocks.resolve.mockResolvedValue(['boss']);mocks.dept.mockResolvedValue(null);const value=await mistApprovalAuthority({}, {...actor,companyId:'company-a'},'order.governance.decide',['old-head','boss'],{orderMain:true,submittedOrderMain:{source:source(),reviewerIds:['old-head','boss']}} as any);expect(value.orderReviewerIds?.fabric).toEqual(['boss']);
+ });
+ it('uses the submitted department when an explicit-source task falls back to current organizational routing',async()=>{
+  missing();people();mocks.submitted.mockResolvedValue({reviewerIds:['old-head','boss'],departmentSnapshotId:'original-department'});const value=await mistApprovalAuthority({}, {...actor,userId:'boss',companyId:'company-a'},'order.governance.decide',['old-head','boss'],{orderMain:true,submittedOrderMain:{source:source('explicit'),reviewerIds:['old-head','boss']}} as any);expect(value.orderReviewerIds?.fabric).toEqual(['old-head','boss']);expect(mocks.submitted).toHaveBeenCalledWith('original-department');expect(mocks.main).not.toHaveBeenCalled();
+ });
+ it('rejects a foreign submitted company instead of using it as a grant',async()=>{
+  missing();people();await expect(mistApprovalAuthority({}, {...actor,companyId:'company-a'},'order.governance.decide',['old-head','boss'],{orderMain:true,submittedOrderMain:{source:{...source(),companyId:'company-b'},reviewerIds:['old-head']}} as any)).rejects.toThrow('审批归属');
+ });
+ it('excludes an ended company membership even if an old roster still contains that reviewer',async()=>{
+  missing();people();const build=mocks.build.getMockImplementation()!;mocks.build.mockImplementation(async(...args:any[])=>{if(args[1].id==='old-head')throw new CompanyAccessError('COMPANY_ACCESS_DENIED','成员已离开');return(build as any)(...args);});const value=await mistApprovalAuthority({}, {...actor,companyId:'company-a'},'order.governance.decide',['old-head','boss'],{orderMain:true,submittedOrderMain:{source:source(),reviewerIds:['old-head','boss']}} as any);expect(value.orderReviewerIds?.fabric).toEqual(['boss']);
+ });
+ it('does not mask a real qualification database error as an ended membership',async()=>{
+  missing();people();mocks.build.mockRejectedValue(new Error('qualification database unavailable'));await expect(mistApprovalAuthority({}, {...actor,companyId:'company-a'},'order.governance.decide',['old-head'],{orderMain:true,submittedOrderMain:{source:source(),reviewerIds:['old-head']}} as any)).rejects.toThrow('qualification database unavailable');
+ });
+ it.each(['organization','explicit'])('reports an unverifiable requester department without inventing %s provenance',async mode=>{
+  people();const error=Object.assign(new Error('ambiguous department'),{code:'NO_REVIEWER_RESOLVED',sourceFailure:'REQUESTER_DEPARTMENT_AMBIGUOUS'});if(mode==='organization'){missing();mocks.main.mockRejectedValue(error);}else{mocks.resolve.mockResolvedValue(['boss']);mocks.source.mockRejectedValue(error);}await expect(mistApprovalAuthority({}, {...actor,companyId:'company-a'},'order.governance.submit',['boss'])).rejects.toMatchObject({status:409,message:'申请人的部门归属不可核验，请联系管理员'});
+ });
+});
+describe('D10 main-only organization qualification',()=>{
+ function missing(){mocks.resolve.mockRejectedValue(Object.assign(new Error('missing'),{code:'ORDER_APPROVAL_AUTHORITY_MISSING'}));}
+ it.each(['order.governance.submit','order.governance.decide'])('retains a currently qualified company requester for %s',async kind=>{
+  missing();mocks.users.set('owner',{id:'owner',status:'active',permissions:['orders:write'],globalBusinessScope:true});mocks.main.mockResolvedValue({reviewerIds:['owner'],departmentSnapshotId:'office'});
+  const value=await mistApprovalAuthority({}, {...actor,companyId:'company-a'},kind,['owner'],{orderMain:true});expect(value.orderReviewerIds).toEqual({garment:['owner'],fabric:['owner']});expect(mocks.main).toHaveBeenCalledWith('owner');
+ });
+ it('keeps current domain/module/member ceilings when the organization returns a larger set',async()=>{
+  missing();for(const[id,props]of Object.entries({head:{permissions:['orders:write'],businessAttributes:['fabric_business']},boss:{permissions:['orders:write'],globalBusinessScope:true},revoked:{permissions:[],globalBusinessScope:true},disabled:{permissions:['orders:write'],globalBusinessScope:true,status:'disabled'},outside:{permissions:['orders:write'],globalBusinessScope:true}}))mocks.users.set(id,{id,status:'active',...props});
+  mocks.main.mockResolvedValue({reviewerIds:['head','boss','revoked','disabled','outside']});const value=await mistApprovalAuthority({}, {...actor,companyId:'company-a'},'order.governance.submit',['head','boss','revoked','disabled']);expect(value.orderReviewerIds).toEqual({garment:['boss'],fabric:['head','boss']});
+ });
+ it.each(['order.governance.decide','order.governance.requestCancel','order.governance.decideCancel','fulfillment.stock.count'])('does not apply main self/backup rules to the %s exception route',async kind=>{
+  missing();mocks.users.set('owner',{id:'owner',status:'active',permissions:['orders:write'],globalBusinessScope:true});mocks.main.mockResolvedValue({reviewerIds:['owner']});const value=await mistApprovalAuthority({}, {...actor,companyId:'company-a'},kind,['owner'],{orderMain:false});expect(value.orderReviewerIds).toEqual({garment:[],fabric:[]});expect(mocks.main).not.toHaveBeenCalled();
+ });
+ it('retains a valid explicit domain list without replacing it by organization qualification',async()=>{
+  mocks.resolve.mockResolvedValue(['assigned']);mocks.users.set('assigned',{id:'assigned',status:'active',permissions:['orders:write']});mocks.dept.mockRejectedValue(Object.assign(new Error('none'),{code:'NO_REVIEWER_RESOLVED'}));const value=await mistApprovalAuthority({}, {...actor,companyId:'company-a'},'order.governance.submit',['assigned']);expect(value.orderReviewerIds).toEqual({garment:['assigned'],fabric:['assigned']});expect(mocks.main).not.toHaveBeenCalled();
+ });
+});
 describe('Mist order reviewer authority',()=>{
  it('uses both built-in local identities for both domains without querying the old account database',async()=>{vi.stubEnv('MIST_LOCAL_WORKSPACE','1');const value=await mistApprovalAuthority({}, {...actor,mistLocal:true},'order.governance.submit');expect(value.orderReviewerIds).toEqual({garment:['local-operator','local-reviewer','local-manager'],fabric:['local-operator','local-reviewer','local-manager']});expect(mocks.resolve).not.toHaveBeenCalled();});
  it.each(['order.governance.decide','fulfillment.production.intake','fulfillment.production.intake.decide'])('reuses business-domain eligibility and filters revoked or inactive ordinary accounts for %s',async kind=>{mocks.resolve.mockImplementation(async(_db,domain)=>domain==='garment'?['garment-reviewer','revoked','inactive']:['fabric-reviewer']);for(const id of ['garment-reviewer','fabric-reviewer'])mocks.users.set(id,{id,status:'active',permissions:['orders:write']});mocks.users.set('revoked',{id:'revoked',status:'active',permissions:[]});mocks.users.set('inactive',{id:'inactive',status:'disabled',permissions:['orders:write']});const value=await mistApprovalAuthority({},actor,kind);expect(value.orderReviewerIds).toEqual({garment:['garment-reviewer'],fabric:['fabric-reviewer']});expect(mocks.resolve.mock.calls.map(call=>call[1])).toEqual(['garment','fabric']);});
@@ -54,6 +107,17 @@ describe('Mist payment request reviewer authority',()=>{
  it('local identities give a second, different reviewer for the larger and first-payment tiers',async()=>{
   vi.stubEnv('MIST_LOCAL_WORKSPACE','1');
   expect((await mistApprovalAuthority({},{...actor,mistLocal:true},'payable.request.submit') as any).paymentTierAlternateIds).toEqual({pay_lt5:[],pay_gt5:['local-operator'],pay_new_supplier:['local-operator']});
+ });
+ it.each(['payable.request.submit','payable.request.decide'])('routes %s to a tier-qualified company manager when the claim-only ADMIN route excludes the general manager',async kind=>{
+  mocks.dept.mockResolvedValue({reviewerId:'head'});mocks.users.set('head',{id:'head',status:'active',permissions:['finance:payment_request:approve','vouchers:approve:pay_lt5']});mocks.users.set('boss',{id:'boss',status:'active',permissions:ALL});
+  const upper=vi.fn().mockResolvedValue({reviewerId:'boss'});mocks.routes.set('["boss"]',{resolveReviewerByDepartment:upper,resolveClaimLeader:mocks.claim});
+  const authority=await mistApprovalAuthority({}, {...actor,companyId:'company-a'},kind,['head','boss']);
+  expect(authority.paymentTierReviewerIds).toEqual({pay_lt5:['head'],pay_gt5:['boss'],pay_new_supplier:['boss']});expect(upper).toHaveBeenCalledWith('owner');
+ });
+ it.each(['disabled','revoked','outside-members','self','unresolved'])('keeps the tier escalation closed for %s',async condition=>{
+  mocks.dept.mockResolvedValue({reviewerId:'head'});mocks.users.set('head',{id:'head',status:'active',permissions:['finance:payment_request:approve','vouchers:approve:pay_lt5']});mocks.users.set('boss',{id:'boss',status:condition==='disabled'?'disabled':'active',permissions:condition==='revoked'?[]:ALL});mocks.users.set('owner',{id:'owner',status:'active',permissions:ALL});
+  const upper=condition==='unresolved'?vi.fn().mockRejectedValue(Object.assign(new Error('none'),{code:'NO_REVIEWER_RESOLVED'})):vi.fn().mockResolvedValue({reviewerId:condition==='self'?'owner':'boss'});mocks.routes.set('["boss"]',{resolveReviewerByDepartment:upper,resolveClaimLeader:mocks.claim});
+  const authority=await mistApprovalAuthority({}, {...actor,companyId:'company-a'},'payable.request.submit',condition==='outside-members'?['head']:['head','boss']);expect(authority.paymentTierReviewerIds).toEqual({pay_lt5:['head'],pay_gt5:[],pay_new_supplier:[]});
  });
  it('when both levels route to the same leader, nominates other current members holding that tier; none when there is no conflict',async()=>{
   mocks.dept.mockResolvedValue({reviewerId:'head'});mocks.users.set('head',{id:'head',status:'active',permissions:['finance:payment_request:approve','vouchers:approve:pay_lt5']});
@@ -109,6 +173,38 @@ describe('company context across approval transaction callbacks',()=>{
 });
 
 describe('Mist claim leader authority',()=>{
+ it.each(['platform.claim.create','platform.claim.updateDraft','platform.claim.attachFiles','platform.claim.notify','platform.claim.verify','platform.claim.execute','platform.claim.recovery.open'])('does not load unrelated reviewer accounts for %s',async kind=>{
+  mocks.claim.mockRejectedValue(new Error('review routing is unavailable'));
+  expect((await mistApprovalAuthority({}, {...actor,companyId:'company-a'},kind,['boss'])).claimReviewerId).toBeUndefined();
+  expect(mocks.claim).not.toHaveBeenCalled();expect(mocks.build).not.toHaveBeenCalled();
+ });
+ it.each(['platform.claim.submit','platform.claim.decide'])('routes %s to the current company general manager when the legacy ADMIN-only route has no reviewer',async kind=>{
+  mocks.users.set('head',{id:'head',status:'active',permissions:['aftersales:approve'],globalBusinessScope:false});
+  mocks.users.set('boss',{id:'boss',status:'active',permissions:['aftersales:approve'],globalBusinessScope:true});
+  mocks.build.mockImplementation(async(_db:any,user:any,companyId?:string)=>({userId:user.id,companyId,roles:[],departmentIds:[],permissions:user.permissions,globalBusinessScope:user.globalBusinessScope===true,authorizationLoaded:true}));
+  const upper=vi.fn().mockResolvedValue({reviewerId:'boss'});
+  mocks.routes.set('["boss"]',{resolveReviewerByDepartment:upper,resolveClaimLeader:mocks.claim});
+  const authority=await mistApprovalAuthority({}, {...actor,companyId:'company-a'},kind,['head','boss']);
+  expect(authority.claimReviewerId).toBe('boss');expect(upper).toHaveBeenCalledWith(actor.userId);
+  for(const call of mocks.build.mock.calls)expect(call[2]).toBe('company-a');
+ });
+ it.each(['disabled','revoked','not-companywide','outside-members','self','unresolved','foreign-result','missing-company'])('does not invent a company claim leader for %s',async condition=>{
+  const id=condition==='self'?actor.userId:'boss';
+  mocks.users.set(id,{id,status:condition==='disabled'?'disabled':'active',permissions:condition==='revoked'?[]:['aftersales:approve'],globalBusinessScope:condition!=='not-companywide'});
+  mocks.build.mockImplementation(async(_db:any,user:any,companyId?:string)=>({userId:user.id,companyId,roles:[],departmentIds:[],permissions:user.permissions,globalBusinessScope:user.globalBusinessScope===true,authorizationLoaded:true}));
+  const upper=condition==='unresolved'?vi.fn().mockRejectedValue(Object.assign(new Error('none'),{code:'NO_REVIEWER_RESOLVED'})):vi.fn().mockResolvedValue({reviewerId:condition==='foreign-result'?'outsider':id});
+  mocks.routes.set('["boss"]',{resolveReviewerByDepartment:upper,resolveClaimLeader:mocks.claim});
+  const authority=await mistApprovalAuthority({}, {...actor,...(condition==='missing-company'?{}:{companyId:'company-a'})},'platform.claim.submit',condition==='outside-members'?[]:[id]);
+  expect(authority.claimReviewerId).toBeUndefined();
+ });
+ it('keeps multiple company-wide claim leaders ambiguous instead of choosing the first account',async()=>{
+  for(const id of ['boss','second'])mocks.users.set(id,{id,status:'active',permissions:['aftersales:approve'],globalBusinessScope:true});
+  mocks.build.mockImplementation(async(_db:any,user:any,companyId?:string)=>({userId:user.id,companyId,roles:[],departmentIds:[],permissions:user.permissions,globalBusinessScope:user.globalBusinessScope,authorizationLoaded:true}));
+  const upper=vi.fn().mockResolvedValue({reviewerId:'boss'});
+  mocks.routes.set('["boss","second"]',{resolveReviewerByDepartment:upper,resolveClaimLeader:mocks.claim});
+  expect((await mistApprovalAuthority({}, {...actor,companyId:'company-a'},'platform.claim.submit',['boss','second'])).claimReviewerId).toBeUndefined();
+  expect(upper).not.toHaveBeenCalled();
+ });
  it('keeps the current company and checks the leader current approval grant before nomination',async()=>{
   mocks.claim.mockResolvedValue({reviewerId:'leader'});mocks.users.set('leader',{id:'leader',status:'active',permissions:['aftersales:approve']});
   expect((await mistApprovalAuthority({},{...actor,companyId:'company-a'},'platform.claim.submit')).claimReviewerId).toBe('leader');
@@ -126,18 +222,18 @@ describe('company order approval without duplicate legacy configuration',()=>{
  it('routes a supervisor request to existing company leadership in the matching business domain',async()=>{
   mocks.resolve.mockRejectedValue(Object.assign(new Error('missing'),{code:'ORDER_APPROVAL_AUTHORITY_MISSING'}));
   mocks.users.set('gm',{id:'gm',status:'active',permissions:['orders:write'],globalBusinessScope:true});
-  mocks.dept.mockResolvedValue({reviewerId:'gm'});
+  mocks.main.mockResolvedValue({reviewerIds:['gm']});
   mocks.build.mockImplementation(async(_db,user,companyId)=>({...user,userId:user.id,companyId,roles:[],departmentIds:[],authorizationLoaded:true}));
   const result=await mistApprovalAuthority({}, {...actor,userId:'supervisor',companyId:'company-a'},'order.governance.submit',['supervisor','gm']);
   expect(result.orderReviewerIds).toEqual({garment:['gm'],fabric:['gm']});
-  expect(mocks.dept).toHaveBeenCalledWith('supervisor');
+  expect(mocks.main).toHaveBeenCalledWith('supervisor');
  });
- it.each(['inactive','revoked','different-domain','not-a-member','self'])('does not use %s as a company order reviewer',async condition=>{
+ it.each(['inactive','revoked','different-domain','not-a-member','unappointed-requester'])('does not use %s as a company order reviewer',async condition=>{
   mocks.resolve.mockResolvedValue([]);
   mocks.users.set('candidate',{id:'candidate',status:condition==='inactive'?'disabled':'active',permissions:condition==='revoked'?[]:['orders:write'],businessAttributes:condition==='different-domain'?['finance']:['garment_business']});
   mocks.users.set('supervisor',{id:'supervisor',status:'active',permissions:['orders:write'],businessAttributes:['garment_business']});
   mocks.build.mockImplementation(async(_db,user,companyId)=>({...user,userId:user.id,companyId,roles:[],departmentIds:[],authorizationLoaded:true}));
-  mocks.dept.mockResolvedValue({reviewerId:condition==='self'?'supervisor':'candidate'});
+  mocks.main.mockResolvedValue({reviewerIds:condition==='unappointed-requester'?[]:['candidate']});
   const result=await mistApprovalAuthority({}, {...actor,userId:'supervisor',companyId:'company-a'},'order.governance.submit',condition==='not-a-member'?['supervisor']:['supervisor','candidate']);
   expect(result.orderReviewerIds).toEqual({garment:[],fabric:[]});
  });
@@ -176,4 +272,40 @@ it('keeps procurement fallback within current members, matching business domain 
  expect(mocks.build.mock.calls.some(call=>call[1].id==='foreign')).toBe(false);
  mocks.users.get('leader').permissions=[];
  expect((await mistApprovalAuthority(...args)).supplier['supplierCommitment.approvers.purchase.garment']?.userIds).toEqual([]);
+});
+
+describe('current professional QC transfer recipient authority',()=>{
+ const run=(id='receiver',members:readonly string[]=['receiver'])=>mistQcTransferAuthority({}, {...actor,companyId:'company-a'},members,id);
+ it.each([
+  [['qc:read','qc:garment_chain:write'],{garment:['receiver'],fabric:[]}],
+  [['qc:read','qc:fabric_chain:write'],{garment:[],fabric:['receiver']}],
+  [['qc:read','qc:garment_chain:write','qc:fabric_chain:write'],{garment:['receiver'],fabric:['receiver']}],
+  [['qc:read','qc:write'],{garment:[],fabric:[]}],
+  [['qc:garment_chain:write'],{garment:[],fabric:[]}],
+ ] as const)('uses the receiver current professional scopes %j',async(permissions,expected)=>{
+  mocks.users.set('receiver',{id:'receiver',status:'active',permissions:[...permissions]});expect((await run()).qcAssigneeIds).toEqual(expected);expect(mocks.build).toHaveBeenCalledWith(expect.anything(),expect.objectContaining({id:'receiver'}),'company-a');expect(mocks.main).not.toHaveBeenCalled();
+ });
+ it.each([{status:'disabled'},{status:'active',deletedAt:new Date()}])('rejects unavailable receivers %j',async flags=>{
+  mocks.users.set('receiver',{id:'receiver',permissions:['qc:read','qc:garment_chain:write'],...flags});expect((await run()).qcAssigneeIds).toEqual({garment:[],fabric:[]});expect(mocks.build).not.toHaveBeenCalled();
+ });
+ it('does not load a guessed nonmember or missing receiver',async()=>{
+  expect((await run('foreign',['receiver'])).qcAssigneeIds).toEqual({garment:[],fabric:[]});expect((await mistQcTransferAuthority({},actor,['receiver'])).qcAssigneeIds).toEqual({garment:[],fabric:[]});expect(mocks.build).not.toHaveBeenCalled();
+ });
+ it('rechecks revoked professional scope on the next transfer instead of using sender permissions',async()=>{
+  mocks.users.set('receiver',{id:'receiver',status:'active',permissions:['qc:read','qc:garment_chain:write']});expect((await run()).qcAssigneeIds?.garment).toEqual(['receiver']);mocks.users.get('receiver').permissions=['qc:write'];expect((await run()).qcAssigneeIds?.garment).toEqual([]);
+ });
+ it('rejects a receiver who lost the selected company context',async()=>{
+  mocks.users.set('receiver',{id:'receiver',status:'active',permissions:['qc:read','qc:garment_chain:write']});mocks.build.mockRejectedValue(new CompanyAccessError('COMPANY_ACCESS_DENIED','not this company'));expect((await run()).qcAssigneeIds).toEqual({garment:[],fabric:[]});
+ });
+ it('propagates an authority storage failure without granting eligibility',async()=>{
+  mocks.users.set('receiver',{id:'receiver',status:'active',permissions:['qc:read','qc:garment_chain:write']});mocks.build.mockRejectedValue(new Error('authority unavailable'));await expect(run()).rejects.toThrow('authority unavailable');
+ });
+ it.each([
+  ['demo-qc',{garment:['demo-qc'],fabric:['demo-qc']}],['demo-reviewer',{garment:['demo-reviewer'],fabric:['demo-reviewer']}],['demo-sales',{garment:[],fabric:[]}],['local-operator',{garment:['local-operator'],fabric:['local-operator']}],
+ ] as const)('uses only an explicitly enabled local professional profile %s',async(id,expected)=>{
+  vi.stubEnv('MIST_LOCAL_WORKSPACE','1');expect((await mistQcTransferAuthority({}, {...actor,mistLocal:true} as any,[id],id)).qcAssigneeIds).toEqual(expected);expect(mocks.build).not.toHaveBeenCalled();
+ });
+ it('cannot turn a normal production account into a local QC by setting the local flag',async()=>{
+  vi.stubEnv('MIST_LOCAL_WORKSPACE','1');vi.stubEnv('NODE_ENV','production');mocks.users.set('demo-qc',{id:'demo-qc',status:'active',permissions:[]});const result=await mistQcTransferAuthority({}, {...actor,mistLocal:true,companyId:'company-a'} as any,['demo-qc'],'demo-qc');expect(result.qcAssigneeIds).toEqual({garment:[],fabric:[]});expect(mocks.build).toHaveBeenCalled();
+ });
 });

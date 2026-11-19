@@ -1,3 +1,4 @@
+import {developmentFactoryWorkBlocker} from './mistDevelopmentTaskLifecycle';
 import {sampleConfirmationBlocker,type SampleSendPurpose} from './mistSampleSending';
 /**
  * 面料版本多形态实物与寄样（BB-DEV-6 / BB-DEV-8）。
@@ -31,6 +32,7 @@ export function developmentVersionSamples(state: MistState, version: MistVersion
 export const sampleRef = (sample: VersionSample): MistSampleRef => ({ sampleId: sample.id, code: sample.code, form: sample.form, unit: sample.unit });
 /** 追加实物形态的阻断原因；可以追加时返回 null。 */
 export function sampleFormBlocker(state: MistState, dev: MistDev, version: MistVersion): string | null {
+  const work=developmentFactoryWorkBlocker(state,dev,version);if(work)return work;
   if (developmentDomain(dev.values) !== 'fabric') return '只有面料版本可以追加实物形态';
   if (version.minor) return '小版本沿用大版本实物，不登记新实物';
   if (dev.billing?.request) return DEVELOPMENT_BILLING_LOCK;

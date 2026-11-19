@@ -7,6 +7,7 @@ import {createMistCompanyBaseline,mistCompanyBaselineMetrics,mistCompanyVisibleT
 import {renderDemoFile} from './mistDemoFiles';
 import { completeCompanyProduct } from './mistCompanyCatalog';
 import { PRODUCT_SPEC_FIELDS } from './mistMarket';
+import {shippingSampleSourceSnapshot} from './mistShipmentSampleCustody';
 
 // 服务端重建审批人：账号权限 = 岗位默认权限 + 种子写入的个人授权；部门路由同种子脚本（业务员 → 所在事业部经理，总领导 → 总经理）。
 const auth=vi.hoisted(()=>({permissions:new Map<string,string[]>(),head:new Map<string,string>(),leader:''}));
@@ -24,6 +25,10 @@ const roster:MistCompanyRoster={
 function company(){let seq=0,failures:unknown[]=[];const state=createMistCompanyBaseline({id:()=>`company-${++seq}`,now:'2026-10-19T04:00:00.000Z',actorId:roster.owner.id,actorName:roster.owner.name},roster,rows=>{failures=rows;});return{state,failures};}
 
 describe('持续经营公司基线',()=>{
+ it('finishes all six historical shipments with explicit independent specimen custody and current physical source snapshots',()=>{
+  const {state,failures}=company();expect(failures).toEqual([]);const historical=state.orders.filter(o=>o.governance?.contract.poNumber.startsWith('CP-2026')),ids=new Set(historical.map(o=>o.id)),shipments=state.fulfillment.shipments.filter(s=>s.lines.some(l=>ids.has(l.orderId)));expect(historical).toHaveLength(6);expect(shipments).toHaveLength(6);expect(shipments.every(s=>s.state==='departed'&&!!s.departedAt)).toBe(true);
+  const specimens=state.fulfillment.samples.filter(s=>s.role==='shipping'&&shipments.some(ship=>ship.id===s.shipmentId));expect(specimens).toHaveLength(6);for(const sample of specimens){expect(sample).toMatchObject({quantity:1,available:1,location:'样品室 B-2',shippingQuantityBasis:{kind:'independent',fileIds:[]}});expect(sample.shippingQuantityBasis!.consumption).toBeUndefined();const current=shippingSampleSourceSnapshot(state,sample);expect(sample.shippingQuantityBasis!.sourceSnapshot).toMatchObject({sampleId:current.sampleId,shipmentId:current.shipmentId,orderId:current.orderId,lineId:current.lineId,productionId:current.productionId,quantity:current.quantity,unit:current.unit,color:current.color,sizeQuantities:current.sizeQuantities});expect(state.fulfillment.sampleMovements.some(m=>m.sampleId===sample.id&&!!m.shipmentLink)).toBe(false);}
+ });
  it('fills catalog omissions without overwriting edited specifications or business identity',()=>{
   const {state}=company();
   for(const product of state.market.products){

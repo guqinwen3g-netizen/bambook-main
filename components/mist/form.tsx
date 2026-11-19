@@ -12,16 +12,18 @@ export function FormGrid({ cols = 2, children, style }: { cols?: 1 | 2 | 3; chil
   return <div className="mist-form" data-cols={cols === 2 ? undefined : cols} style={style}>{uiText(children)}</div>;
 }
 
-export type FieldProps = { label: React.ReactNode; required?: boolean; hint?: React.ReactNode; error?: React.ReactNode; full?: boolean; children: React.ReactNode; htmlFor?: string };
-/** 字段外框：标签 + 控件 + 提示/错误。error 存在时整个输入底变红色 tint。 */
-export function Field({ label, required, hint, error, full, children, htmlFor }: FieldProps) {
-  return (
-    <label className="mist-field" data-full={full || undefined} data-error={error ? true : undefined} htmlFor={htmlFor}>
-      <span className="mist-field-label">{uiText(label)}{required && <em>*</em>}</span>
+export type FieldProps = { label: React.ReactNode; required?: boolean; hint?: React.ReactNode; error?: React.ReactNode; full?: boolean; children: React.ReactNode; htmlFor?: string;group?:boolean };
+/** 字段外框：标签 + 控件 + 提示/错误。多控件时用 group，让组名与各控件标签独立；默认单控件标签不变。error 存在时整个输入底变红色 tint。 */
+export function Field({ label, required, hint, error, full, children, htmlFor,group=false }: FieldProps) {
+  const labelId=React.useId();
+  const content=<>
+      <span className="mist-field-label" id={group?labelId:undefined}>{uiText(label)}{required && <em>*</em>}</span>
       {uiText(children)}
       {(error || hint) && <span className="mist-field-hint">{uiText(error || hint)}</span>}
-    </label>
-  );
+    </>;
+  // Multiple individually labelled controls must not sit inside an implicit single-control label.
+  return group?<div className="mist-field" data-full={full||undefined} data-error={error?true:undefined} role="group" aria-labelledby={labelId}>{content}</div>
+    :<label className="mist-field" data-full={full||undefined} data-error={error?true:undefined} htmlFor={htmlFor}>{content}</label>;
 }
 
 type InputBase = { icon?: LucideIcon; suffix?: React.ReactNode; disabled?: boolean };
@@ -77,10 +79,19 @@ export function Switch({ checked, onChange, label, disabled, ariaLabel }: { chec
 export type Choice<V extends string> = { value: V; title: React.ReactNode; description?: React.ReactNode; icon?: LucideIcon };
 /** 选择卡（大单选）：用于「认可 / 需修改 / 不采用」这类关键决策。 */
 export function ChoiceCards<V extends string>({ options, value, onChange, cols = 3, ariaLabel, disabled }: { options: Choice<V>[]; value: V; onChange: (v: V) => void; cols?: number; ariaLabel?: string; disabled?: boolean }) {
+  const groupRef=React.useRef<HTMLDivElement>(null),tabStop=Math.max(0,options.findIndex(option=>option.value===value));
+  const move=(event:React.KeyboardEvent<HTMLButtonElement>,index:number)=>{
+    if(disabled||!['ArrowRight','ArrowDown','ArrowLeft','ArrowUp','Home','End'].includes(event.key))return;
+    event.preventDefault();
+    const next=event.key==='Home'?0:event.key==='End'?options.length-1:(index+(['ArrowLeft','ArrowUp'].includes(event.key)?-1:1)+options.length)%options.length;
+    const option=options[next];if(!option)return;
+    groupRef.current?.querySelectorAll<HTMLButtonElement>('button[role="radio"]')[next]?.focus();
+    if(option.value!==value)onChange(option.value);
+  };
   return (
-    <div className="mist-choices" role="radiogroup" aria-label={uiText(ariaLabel)} style={{ ['--mist-choice-cols' as string]: cols }}>
-      {options.map(o => (
-        <button key={o.value} type="button" disabled={disabled} role="radio" aria-checked={o.value === value} className="mist-choice" onClick={() => onChange(o.value)}>
+    <div ref={groupRef} className="mist-choices" role="radiogroup" aria-label={uiText(ariaLabel)} style={{ ['--mist-choice-cols' as string]: cols }}>
+      {options.map((o,index) => (
+        <button key={o.value} type="button" disabled={disabled} role="radio" aria-checked={o.value === value} tabIndex={!disabled&&index===tabStop?0:-1} className="mist-choice" onKeyDown={event=>move(event,index)} onClick={() => onChange(o.value)}>
           <b>{o.icon && <Icon icon={o.icon} size="sm" />}{uiText(o.title)}<span className="mist-choice-check" aria-hidden="true"><Icon icon={Check} size="sm" /></span></b>
           {o.description && <small>{uiText(o.description)}</small>}
         </button>

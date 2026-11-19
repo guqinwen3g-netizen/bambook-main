@@ -1,12 +1,36 @@
 import type { TokenPayload } from '../auth/service';
-import type { MistContext } from '../shared/mistWorkspace';
+import { MistCommandError,type MistContext } from '../shared/mistWorkspace';
+import {parseOrderMainApprovalSource,type SubmittedOrderMain} from '../shared/mistOrderApprovalSource';
+import {CompanyAccessError} from '../auth/companyAccess';
 import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../auth/tokenHelpers';
 import { hasScope } from '../auth/permissionService';
 import { createApprovalRoutingService } from '../approvals/approvalRoutingService';
 import type { PaymentTierAuthority } from '../shared/mistPayables';
-/** Approval authority is rebuilt in the same DB transaction as the business command. */
-export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:string,eligibleReviewerIds?:readonly string[]):Promise<NonNullable<MistContext['authority']>>{
+/** Reload a proposed receiver's current company permissions; the caller also checks source visibility. */
+export async function mistQcTransferAuthority(db:any,actor:TokenPayload,eligibleIds:readonly string[],id?:string){
+  const allowed={garment:[] as string[],fabric:[] as string[]};
+  const result:{qcAssigneeIds:typeof allowed;actor?:TokenPayload}={qcAssigneeIds:allowed};
+  if(!id||!eligibleIds.includes(id))return result;
+  let fresh:TokenPayload;
+  if((actor as TokenPayload&{mistLocal?:boolean}).mistLocal===true&&process.env.MIST_LOCAL_WORKSPACE==='1'&&process.env.NODE_ENV!=='production'){
+    // Resolve this local test identity only when its runtime is explicitly enabled.
+    const{MIST_LOCAL_PROFILES,mistLocalPublicUser}=await import('./local');
+    if(!MIST_LOCAL_PROFILES.some(profile=>profile.id===id))return result;
+    const user=mistLocalPublicUser(id);
+    fresh={...user,userId:id,roles:user.roles.includes('owner')?['owner']:[],authorizationLoaded:true};
+  }else{
+    const user=await loadUserWithRoles(db,id);if(!user||user.status!=='active'||user.deletedAt)return result;
+    try{fresh=await buildLoadedAuthTokenPayload(db,user,actor.companyId??null);}catch(error){if(error instanceof CompanyAccessError)return result;throw error;}
+  }
+  for(const domain of ['garment','fabric'] as const)if(hasScope(fresh,'qc:read')&&hasScope(fresh,`qc:${domain}_chain:write`))allowed[domain].push(id);
+  result.actor=fresh;
+  return result;
+}
+
+/** Execution authority is rebuilt in the same DB transaction as the business command. */
+export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:string,eligibleReviewerIds?:readonly string[],options?:{orderMain?:boolean;submittedOrderMain?:SubmittedOrderMain}):Promise<NonNullable<MistContext['authority']>>{
   const authority:NonNullable<MistContext['authority']>={supplier:{}};
+  if(kind==='fulfillment.qc.transfer')return authority;
   // 风险处理权：按当前账号此刻的岗位权限重建（risk:write 不限来源；否则只认本人客户/订单 + 现有订单写/客户档案写权限）。
   if(kind.startsWith('platform.risk.'))authority.risk={all:hasScope(actor,'risk:write' as any),orders:hasScope(actor,'orders:write' as any),customers:hasScope(actor,'relations:write' as any)};
   if((actor as any).mistLocal===true && process.env.MIST_LOCAL_WORKSPACE==='1' && process.env.NODE_ENV!=='production'){
@@ -28,16 +52,27 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
     return authority;
   }
   const routing=createApprovalRoutingService({prisma:db,companyId:actor.companyId??null,eligibleReviewerIds});
+  // The decision command also carries cancellation/quantity exceptions; only the server's real main task opts in.
+  const orderMain=kind==='order.governance.submit'||kind==='order.governance.decide'&&options?.orderMain===true;
+  const submitted=options?.submittedOrderMain,submittedSource=submitted&&parseOrderMainApprovalSource(submitted.source,{companyId:actor.companyId??''});
+  if(submitted!==undefined&&(!orderMain||kind!=='order.governance.decide'||!actor.companyId||!submittedSource||!Array.isArray(submitted.reviewerIds)||!submitted.reviewerIds.length||submitted.reviewerIds.some(id=>typeof id!=='string'||!id||id!==id.trim())))throw new MistCommandError('PRECONDITION','订单审批归属不可核验',409);
   if(kind.startsWith('order.governance.') || kind.startsWith('fulfillment.production.intake') || kind==='fulfillment.qc.dispose' || kind==='fulfillment.qc.concession.decide' || kind==='fulfillment.stock.count' || kind==='fulfillment.stock.count.decide'){
     const {createOrderMainApprovalService}=await import('../orders/orderMainApprovalService');
     const service=createOrderMainApprovalService(db);authority.orderReviewerIds={garment:[],fabric:[]};
+    let requesterSnapshot:Promise<{departmentSnapshotId:string}>|undefined;
+    const rememberSource=async(domain:'garment'|'fabric',mode:'organization'|'explicit',snapshot?:string)=>{
+      if(kind!=='order.governance.submit'||!actor.companyId)return;
+      if(!snapshot){try{requesterSnapshot??=routing.resolveRequesterDepartmentSnapshot(actor.userId);snapshot=(await requesterSnapshot).departmentSnapshotId;}catch(error:any){if(error?.code==='NO_REVIEWER_RESOLVED')throw new MistCommandError('PRECONDITION','申请人的部门归属不可核验，请联系管理员',409);throw error;}}
+      (authority.orderMainApprovalSources??={})[domain]={schemaVersion:1,mode,companyId:actor.companyId,businessLine:domain,requesterId:actor.userId,departmentSnapshotId:snapshot};
+    };
     for(const domain of ['garment','fabric'] as const){
+      if(submittedSource&&submittedSource.businessLine!==domain)continue;
       // 公司会话只取本公司显式配置的审批资格；未配置时下方按部门主管路由。
       let configured:string[]=[];try{configured=await service.resolveEligibleReviewerIds(db,domain,actor.companyId??null);}catch(error:any){if(error?.code!=='ORDER_APPROVAL_AUTHORITY_MISSING')throw error;}
       const current=async(id:string,checkDomain=false)=>{
         if(eligibleReviewerIds&&!eligibleReviewerIds.includes(id))return false;
         const user=await loadUserWithRoles(db,id);if(!user||user.status!=='active'||user.deletedAt)return false;
-        const fresh=await buildLoadedAuthTokenPayload(db,user,actor.companyId??null);
+        let fresh:TokenPayload;try{fresh=await buildLoadedAuthTokenPayload(db,user,actor.companyId??null);}catch(error){if(error instanceof CompanyAccessError)return false;throw error;}
         return hasScope({...fresh,roles:[]},'orders:write') && (!checkDomain || fresh.globalBusinessScope === true || fresh.businessAttributes?.includes(domain+'_business'));
       };
       for(const id of configured){
@@ -49,18 +84,32 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
           if(leader&&leader!==id&&await current(leader))authority.orderReviewerIds[domain].push(leader);
         }catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}
       }
+      if(authority.orderReviewerIds[domain].length)await rememberSource(domain,'explicit');
       // Company roles and department hierarchy are the authority when no usable legacy
       // domain assignment exists. Resolve from the original requester on both submit
       // and decide (the repository supplies reviewSubject for decisions).
       if(actor.companyId && !authority.orderReviewerIds[domain].length && eligibleReviewerIds){
         const candidates:string[]=[];
-        for(const id of eligibleReviewerIds)if(id!==actor.userId&&await current(id,true))candidates.push(id);
+        const ids=submittedSource?.mode==='organization'?submitted!.reviewerIds:eligibleReviewerIds;
+        for(const id of new Set(ids))if((orderMain||id!==actor.userId)&&await current(id,true))candidates.push(id);
         if(candidates.length){
+          if(submittedSource?.mode==='organization'){
+            // The assignment belongs to this submitted round. Head/department edits only affect new rounds;
+            // membership, module permission, domain qualification and explicit overrides remain current.
+            authority.orderReviewerIds[domain].push(...candidates);
+            continue;
+          }
           const companyRouting=createApprovalRoutingService({prisma:db,companyId:actor.companyId,eligibleReviewerIds:candidates});
           try{
-            const id=(await companyRouting.resolveReviewerByDepartment(actor.userId))?.reviewerId;
-            if(id&&id!==actor.userId&&candidates.includes(id))authority.orderReviewerIds[domain].push(id);
-          }catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}
+            if(orderMain){
+              const resolved=submittedSource?await companyRouting.resolveSubmittedOrderMainReviewers(submittedSource.departmentSnapshotId):await companyRouting.resolveOrderMainReviewers(actor.userId);
+              authority.orderReviewerIds[domain].push(...resolved.reviewerIds.filter(id=>candidates.includes(id)));
+              if(authority.orderReviewerIds[domain].length)await rememberSource(domain,'organization',resolved.departmentSnapshotId);
+            }else{
+              const id=(await companyRouting.resolveReviewerByDepartment(actor.userId))?.reviewerId;
+              if(id&&id!==actor.userId&&candidates.includes(id))authority.orderReviewerIds[domain].push(id);
+            }
+          }catch(error:any){if(error?.sourceFailure)throw new MistCommandError('PRECONDITION','申请人的部门归属不可核验，请联系管理员',409);if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}
         }
       }
       authority.orderReviewerIds[domain]=[...new Set(authority.orderReviewerIds[domain])];
@@ -100,7 +149,26 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
       authority.supplier[key]={version:valid?row.version:0,userIds};
     }
   }
-  if(kind.startsWith('platform.claim.')){try{const reviewerId=(await routing.resolveClaimLeader(actor.userId)).reviewerId;const user=reviewerId&&reviewerId!==actor.userId?await loadUserWithRoles(db,reviewerId):null;if(user&&user.status==='active'&&!user.deletedAt&&hasScope(await buildLoadedAuthTokenPayload(db,user,actor.companyId??null),'aftersales:approve'))authority.claimReviewerId=reviewerId;}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}}
+  if(kind==='platform.claim.submit'||kind==='platform.claim.decide'){
+    try{const reviewerId=(await routing.resolveClaimLeader(actor.userId)).reviewerId;const user=reviewerId&&reviewerId!==actor.userId?await loadUserWithRoles(db,reviewerId):null;if(user&&user.status==='active'&&!user.deletedAt&&hasScope(await buildLoadedAuthTokenPayload(db,user,actor.companyId??null),'aftersales:approve'))authority.claimReviewerId=reviewerId;}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}
+    if(!authority.claimReviewerId&&actor.companyId&&eligibleReviewerIds){
+      // Tenant general managers need not have the legacy ADMIN role. Require a
+      // unique, currently granted company-wide approver; department supervisors
+      // and ambiguous leadership must not become the claim leader by fallback.
+      const candidates:string[]=[];
+      for(const id of new Set(eligibleReviewerIds)){
+        if(id===actor.userId)continue;
+        const user=await loadUserWithRoles(db,id);if(!user||user.status!=='active'||user.deletedAt)continue;
+        const fresh=await buildLoadedAuthTokenPayload(db,user,actor.companyId);
+        if(fresh.companyId===actor.companyId&&fresh.globalBusinessScope===true&&hasScope({...fresh,roles:[]},'aftersales:approve'))candidates.push(id);
+      }
+      if(candidates.length===1){
+        const companyRouting=createApprovalRoutingService({prisma:db,companyId:actor.companyId,eligibleReviewerIds:candidates});
+        try{const id=(await companyRouting.resolveReviewerByDepartment(actor.userId))?.reviewerId;if(id&&candidates.includes(id))authority.claimReviewerId=id;}
+        catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}
+      }
+    }
+  }
   // 付款申请分档：每一档先找申请人所在部门主管，主管没有该档权限时上抬到总领导；
   // 审批人必须当前在职、同时持有付款申请审批权与该档权限，且不能是申请人本人。
   if(kind.startsWith('payable.request.')){
@@ -114,7 +182,18 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
       const qualified=async(id?:string)=>{const p=id?await fresh(id):null;return !!p&&hasScope(p,'finance:payment_request:approve' as any)&&hasScope(p,scope as any);};
       if(await qualified(head)){authority.paymentTierReviewerIds[level]=[head!];continue;}
       if(leader===null)leader=await resolve(()=>routing.resolveClaimLeader(actor.userId));
-      authority.paymentTierReviewerIds[level]=await qualified(leader??undefined)?[leader!]:[];
+      let reviewer=await qualified(leader??undefined)?leader:undefined;
+      if(!reviewer&&actor.companyId&&eligibleReviewerIds){
+        // The legacy claim role route accepts ADMIN only; payment tiers also reach a qualified company general manager.
+        // Keep the existing department/upper-manager rules, filtering by this tier before routing.
+        const candidates:string[]=[];for(const id of eligibleReviewerIds)if(await qualified(id))candidates.push(id);
+        if(candidates.length){
+          const tierRouting=createApprovalRoutingService({prisma:db,companyId:actor.companyId,eligibleReviewerIds:candidates});
+          const next=await resolve(()=>tierRouting.resolveReviewerByDepartment(actor.userId));
+          if(await qualified(next))reviewer=next;
+        }
+      }
+      authority.paymentTierReviewerIds[level]=reviewer?[reviewer]:[];
     }
     // H1：首笔付款的金额档与首笔加签须由不同的人签。原路由让两级落到同一人时（主管没有该档、上抬到同一位总领导，
     // 或申请人本人就是主管），另给出本空间成员中当前合格持有该档权限的其他人（申请人已由 fresh 排除）；

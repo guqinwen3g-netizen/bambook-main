@@ -12,6 +12,9 @@
 | 页面注册 | `view` 即页面身份；模块页按三张映射懒加载 | `app/pageRegistry.tsx`（`MODULE_VIEWS`、`buildPages`）；`moduleMap.ts` 只是迁移期模块清单，其中 `entry` 列不代表当前文件 |
 | 导航与访问 | 路由、页面可见性、公司管理分区 | `app/nav.tsx`、`app/routeAccess.ts`、`app/runtime/accountAccess.ts` |
 | 组件与样式 | Mist 组件库与令牌 | `components/mist/`、`styles/mist/`；规范见 `docs/mist-atelier/`、`.qoder/skills/bambook-ui/SKILL.md` |
+| 分步编辑焦点（2026-11-16） | 台账、订单、开发、出运及核算/反馈/生产专项编辑器共用轻量 Hook，在编辑区域出现或换步时交给当前控件，无输入/被禁用时交给具名步骤；稳定 callback ref 同时覆盖只读页重开，来源刷新不重抢输入。专项步骤名包含序号，避免与业务字段重名 | `app/runtime/editorFocus.ts#useEditorStepFocus`；`ModuleWorkbench.tsx`、`OrderCreatePage.tsx`、`DevCreatePage.tsx`、`ShipmentsPage.tsx`、`ProductionIntakeEditor.tsx`、`QuotationCostingPage.tsx`、`QuotationFeedbackPage.tsx`、`MarketPages.tsx` |
+| 顶部返回保护（2026-11-16） | `BackLink.onTopbarBack` 显式声明页面接管，顶部复用当前页的保护及业务回程；未声明者保留原历史/所属模块回退。动作保持最新且卸载清理，不以全局历史绕过开发页的未保存确认 | `components/mist/pageBack.ts#usePageBackAction`、`shell.tsx#BackLink`；`ReferenceApp.tsx`；`DevCreatePage.tsx` |
+| 未保存导航（2026-11-16） | 页面显式登记保护；普通导航先决策，浏览器遍历先恢复原历史位置，确认后只重放已请求目标。继续编辑/身份卸载取消旧意图；开发页用同步 dirty ref，保存或恢复原请求成功后继续原目标，失败留页，不重复写入；关闭/刷新使用原生 beforeunload | `components/mist/pageNavigation.ts`；`ReferenceApp.tsx#go` 与 popstate；`DevCreatePage.tsx` |
 | API | `/api/mist/*`：工作区、类型化命令、审批、文件、助手、MCP | `server/src/mist/route.ts`；端点清单见 [`server/src/mist/README.md`](../server/src/mist/README.md) |
 | 本地开发 | `npm run dev:mist`：本地 API 8082 + 前端 3001，数据在 `server/private/mist-local/`（不入库） | `server/src/mist/local.ts`、`standalone.ts` |
 | 员工手册 | `/manual/`（应用顶栏与账号页「使用手册」） | `scripts/manual-site.ts`，见第 7 节 |
@@ -21,11 +24,63 @@
 1. 页面调用 `runtime/workspace.tsx` 发送 `POST /api/mist/workspaces/:id/commands`，请求体 `{requestId, expectedRevision, command:{type,payload}}`。只有类型化命令，没有整份状态覆盖。
 2. `server/src/mist/repository.ts#execute` → `executeInternal`：重新加载账号与成员资格 → 校验命令权限 `mistCommandPermission`（`server/src/shared/mistWorkspace.ts`）→ 行级范围 `scopedTargetViolation`（写前）→ 应用 `applyMistCommand`（同文件，分派到各 `server/src/shared/mist*.ts` 领域模块）→ `scopedWriteViolation`（写后差异）→ 状态与回执同事务提交。
 3. **幂等重试**：相同 `requestId` + 相同输入只回放原回执；同编号换输入报冲突。网络重试必须沿用原编号。
-4. **并发**：`expectedRevision` 过期时，仅当中间修订都留有 `mist-revision:<n>` 标记且写入位置不重叠才在最新状态上重跑；同记录写入、`decide/confirm/issue/release/document` 类命令一律 `REVISION_CONFLICT`。细节见 `server/src/mist/README.md`。
+4. **并发**：`expectedRevision` 过期时，仅当中间修订都留有 `mist-revision:<n>` 标记且实际写入位置及适用的业务来源不重叠才在最新状态上重跑；带 id 的记录以整条记录比较，同记录写入拒绝合并。当前 `concurrentChanges` 对后缀 `.issue` / `.document` 及 `development.notice.generate` / `finance.statement.generate` 直接要求最新版本；其他命令仍先按最新状态执行领域门禁，再比较写集。因此已有待审批采购变更可先返回422 `CONFLICT`，已生效合同的旧来源写入会返回409 `REVISION_CONFLICT`。细节见 `server/src/mist/README.md`。
 5. **预演**：`repository.preview` 走同一事务和同一套校验后整笔回滚，返回业务事件说明；生成文件的命令不支持预演。
 6. **结果回主线**：命令写入的审计、待办与通知由领域模块产生；前端首页「接着完成」由 `runtime/workQueue.ts#mistWorkQueue` / `mistMyWork` 从状态派生，审批由 `runtime/reviews.tsx` 与 `pages/ApprovalsPage.tsx` 展示。待办不是手工勾选：例如内部交付任务由实际点收派生完成，`task.complete` 拒绝手工改完成。
 
+关系档案与联系人来源保护（2026-11-16）：`RelationsPage.tsx#profileSource/contactSource/contactContext` 按本表单会覆盖的字段冻结来源。档案编辑不比较联系人或附件，但提交从同一核对快照带上最新附件列表（`mistMarket.ts#base` 对省略附件不作保留）；联系人从客户根记录/关系主标记或独立供应商联系人核对，删除同样校验来源，指定主联系人另比对原主联系人集合。同步变化保留输入且零请求拒绝，未同步仍由服务端409保护；明确传所核对快照版本，不借用后续版本。账号、公司或路由变化后旧表单不可操作；组织合并导致原对象消失时弹窗仍保留输入。预览只展示明确指定的主联系人，不把首位联系人推断为主联系人。本条仅覆盖这些编辑器，关联、拆分、冻结、归档与附件独立操作仍须各自核验。
+
+组织双身份拆分归属（2026-11-16，当前支线候选）：`mistMarket.ts#SupplierRelationSource` 由关联命令保存原供应商关系资料及原客户共享项；普通档案保存只能保留服务端来源，不能注入或替换。拆分把仍在使用的原供应商附件、别名、筛查及备注恢复到独立关系，客户专属与后加资料留在客户，共享附件两边保留，明确移除的旧项不复活。供应商名称、地址和联系人取当前供应商真源；历史原件和事件保留。冻结历史另带服务端追溯键：内容相同但来自不同主体的事实仍独立，共享期间的事实拆回后重联不重复。历史合并有来源ID却没有归属快照时拒绝猜分；没有历史合并来源的初始双身份仍可按供应商主档拆出。行为回归见 `server/src/shared/mistRelationIdentity.test.ts`；本条不代表候选已部署或全局验收。
+
+关系档案主数据与时间线（2026-11-16，当前支线候选）：`mistMarket.ts#market.relation.save` 对客户名称/国家/城市、供应商名称/国家/地址只读主档，主档空值也不回填表单伪造值；关系页仅维护独立别名、备注等字段，避免联系人同步把已显示保存的地区覆盖。`MarketPages.tsx#History` 在关系自身及合并来源事件之外，接入当前账号原已可读、且匹配本客户ID的customer事件、本供方ID的relation联系人事件，不扩大读取权限或把supplier资金流/其他主体并入；其他模块历史口径不改。`RelationsPage.tsx` 检索同一可读状态中的两套编码及双方姓名/邮箱/电话，未读时不以空库或0统计冒充结果，创建/导出不可用。
+
+运输编辑的来源保护（2026-11-14）：`ShipmentsPage.tsx#transportSpec` 打开时冻结订舱号、计划日、说明及运输字段的指纹，保存时与当前同步来源比较。运输本身被其他岗位改动时保留草稿并阻止覆盖，其他资料更新不误拦；提交通过 `runtime/workspace.tsx#run` 的可选 `expectedRevision` 绑定实际核对来源的同一版本，避免 React 渲染与后台同步之间偷换版本。未同步时仍由服务端版本冲突保护；新选项随原请求保存及重放，不更改默认调用。已用仓储/管理员两个正常登录的浏览器复现同步后旧表单覆盖，并实测修复后不发第二笔写入、输入保留及重开读取最新资料；该结论仅覆盖本运输编辑，不能外推为所有编辑器均已防覆盖。
+
+Agent合同提议核对（2026-11-16，适用`order.governance.saveDraft`）：`AgentProposalDialog.tsx#proposalFieldChanges`用当前可见订单/原件解析编号和文件名，合同输入与当前工作草稿（如有）或合同按`stableJson`比较，只列实际变化；负责人、条目及单价分别显示姓名、款号和币种，包装字段与装饰令牌不显示。`orderSourceMissing`阻止确认不可见订单、原件、接收人或已知错单条目引用；合同治理允许拟新增条目ID，不把尚未进入生效条目表的拟新增数据当成丢失引用；服务器的当前权限、来源版本及业务校验仍执行。已用正常账号的同一待确认提议完成浅深三宽实渲、关联已上传原件，再正常提交和独立签批；临时可办理连接随后撤销，旧凭据拒绝。本项不替代其它命令的逐项验收。
+
+报价编辑的来源保护（2026-11-15）：`MarketPages.tsx#QuotationEditor` 为原报价/新版本来源冻结完整指纹。后台同步保留本地输入，但原报价变化时保存被拦；其他工作区记录更新仍允许保存。`saveQuotation` 对同一渲染快照核验来源并传 `expectedRevision`，`useMarket#command` 只将该可选参数交给既有 `run`，不改变其他默认调用或服务端命令。未同步则由真实409触发来源刷新，原输入保留，重新打开最新版后才正常保存。两个正常账号浏览器已验同步后零写入、同步断网后的409、保留输入与重开保存；新版本来源变化和无关刷新另有前端回归。此项与运输编辑分别收口，其他编辑器仍须逐一走查。
+
+采购草稿的来源保护（2026-11-15）：`ProcurementPage.tsx#purchaseSpec` 打开原草稿时冻结采购记录指纹，`liveSource` 必须在长表单提前返回前随当前工作区更新。提交先核对记录仍与打开时一致，再用同一快照中的订单/供应商与版本校验并发送；不能用表单闭包里的旧状态配同步后的新版本号。已同步的单价、数量或审批状态变更会保留输入并阻止覆盖；未同步则由真实409保护，重开最新记录后可保存。无关更新仍可提交，新建采购的默认调用不变。编辑标题显示准确采购编号。已用两个正常岗位浏览器核对单价与数量、保留输入、重开保存，另有状态变化与无关刷新回归；此项不外推到合同变更、转供应商等其他表单。
+
+采购合同变更的来源保护（2026-11-15）：`ProcurementPage.tsx#amendSpec` 打开时冻结原采购完整指纹，提交时通过同一 `liveSource` 核对来源并绑定所核对版本。其他变更已生效或有新申请时，旧弹窗保留输入、零请求拦截；未同步且来源已生效时由服务端同记录409保护，刷新后的旧弹窗再次提交也被拦。重开最新版可只改交期而保留当前单价。已有待审批申请的422与版本409分别验收，不把领域拒绝混作版本冲突。独立模拟采购的原件、供应商补充确认、四次签批、退回/撤回与当前版本分别留档；当前合同金额不等于已收货或实付。附件关联、转供应商等入口仍需独立核对。
+
+客户与联系人编辑来源（2026-11-15）：`CustomerPage.tsx#customerProfileSource/contactSource/currentContact`分别冻结客户可保存字段及联系人的根记录/关系档案主标记。保存/删除先从同一当前工作区快照核源，再绑定该快照版本；已同步变化保留输入并零请求拦截，未同步由真实409保护，重开才接新源。不因额度校验错误添加新服务端规则，`mistWorkspace.ts#mistMoneyMinor`既有限定非负/两位精度；具体字段维护权仍按有效岗位规则另核。客户/工作区/路由变后，迟到回调不能关新表单或清新错误。
+
+客户失败反馈（2026-11-15）：`CustomerPage.tsx#execute/showFailure`只让当前抽屉或最上层删除确认展示确认失败，关闭清本地错误。以异常的`mistPendingCommand`识别未知结果，`workspace.tsx#dismissError`再用同步的原请求引用兜底；不能用React已渲染`pending`拦掉确定拒绝的错误清理，它可能落后一个渲染。布局提交时把错误滚入本浮层，重复同文失败也重新揭示；不隐藏未知结果的原请求核对，不把状态卡修复外推为通知浮层全局通过。
+
+公司恢复记录隔离（2026-11-15）：`runtime/workspace.tsx#recoveryStorageKey/MistWorkspaceProvider`将公司会话的待核对、创建及旧选择记录按账号与公司分开，身份世代包含当前公司。登录先读取后台当前公司的共享默认；旧单用户恢复记录只在准确来源ID与已核实默认一致后接回，未匹配的保留原样且不查询外公司来源。迁移存储失败仍保留原请求，成功核对只清当前准确编号。非公司本地模式的原有多库行为继续独立。已提交的未知结果优先GET准确回执和当前状态；只有服务端确认原回执不存在才按原编号与原输入重发，不新编号重复办理。
+
+初始化恢复迁移（2026-11-15）：`runtime/workspace.tsx#MistWorkspaceProvider`仅在旧请求确实存在、当前工作区ID已核实且准确匹配时迁移。被后续初始化替代或失败的读取没有工作区，不能将两个空值相等视作可迁移，更不能写入字符串null；有效旧请求加载失败时保持原字节，未知损坏记录仍交原恢复提示，不静默清除。
+
+银行弹窗待核对回程（2026-11-15）：`FinanceBankAccounts.tsx#useBankAccountCommand`区分`inFlight`与`pending`；实际请求在途锁关闭和保存，结果未知时保存继续锁定、允许关闭到财务页核对原请求。关闭不撤销已提交业务，不把未知结果当未保存；账户、流水归属、锁/结汇、对应到账和冲回复用同一门禁。
+
+订单合同编辑的来源与连续提交（2026-11-15）：`OrderDetailPage.tsx#OrderContractDialog` 打开时冻结合同治理及商业条目来源；`orderContractSource` 以稳定键序比较当前合同、订单表头与商业条目，不把后台同步的新版本借给旧输入。保存按所核对快照的 `expectedRevision` 发送；同步后的来源变化零请求拦截，未同步由真实409保护，原输入保留。保存后提交审批使用保存回执的版本号，离开订单后不继续自动提交；另一人夹在保存与提交之间修改合同会得到409、不会建立审批记录。确认失败由当前弹窗展示并仅清除同文外壳副本，不影响原请求待核对入口或新页面错误。已用正常业务/主管账号核对两条并发路径、保存后提交竞态、重开及原条款恢复，另有商业条目变化、无关版本刷新、换订单后的后续提交/错误隔离回归。此项不外推到订单基本资料、条目及其他编辑器。
+
+订单基本资料与条目编辑（2026-11-15）：`OrderDetailPage.tsx#saveHeader` 在打开时冻结订单表头、治理与商业条目来源，提交先核对来源再传同快照版本；已批准订单仅维护负责人时仍用 `order.update`，其余既有合同变更仍留待审批，不借本修复改变岗位或审批规则。`OrderLineDialog` 同样冻结整个被保存来源，避免只改英文品名时夹带旧价，或同一草稿里的另一条目变化时把旧来源混入新版本；本地输入保留，缺失版本不发请求，无关记录更新可按当前核对版本保存。两正常岗位已分别复现基本资料旧交期/条目旧单价覆盖，再核同步后零请求、未同步实际409、刷新后重试拦截、重开保存与原字段恢复；已有批准态/退回态、负责人单独维护、分色分码、采购门禁等相关回归保留。基本资料弹窗仅接管同文已确认错误，不隐藏待核对请求或清除其他页面错误。原库存、单据与资金不因草稿保存改变，其他模块仍按独立覆盖账验收。
+
+共享附件关联（2026-11-15）：`fulfillmentKit.tsx#RecordFiles` 的 `onAttach` 只交付本次上传/核对得到的新文件ID，不再夹带打开页面时的旧引用列表。采购、样品、报关、单据、信用证与订单通过 `useRecordAttachment` 从同一已提交视图读取当前记录、合并新增ID并绑定其版本；不能在上传/核对的旧回调里展开整票旧对象。另一岗位新增引用保留、移除的旧引用不被重新挂回，已关联ID不重复写；采购退回态仍可补资料，已提交/锁定等状态由当前来源与原领域门禁拒绝，已上传文件留在待关联状态。组件离开路由或被换成其他记录后不自动关联。全局核对确认本记录已关联后清除旧失败/重试状态。浏览器重开只可全局核对原上传，不据未保存的记录目标自动关联。现有服务端权限、幂等与文件可读边界不变；不可读附件仍只显示数量。
+
+弹窗与新通知（2026-11-15）：`styles/mist/patterns.css` 在对话框打开时隐藏 `.mist-notice-toast` 及其独立外层卡片，避免业务通知截获弹窗底部操作的点击或留下悬空收起按钮；其余操作失败/原请求核对卡片保留。只改变显示层，不关闭、已读或删除通知；弹窗关闭后仍在六秒展示期内的通知可恢复，未读记录始终留在通知中心。原生业务截图有重叠观察，私有真实组件浏览器命中测试复现旧区域点击落到通知，修复后六态落到提交、键盘不进入隐藏通知且核对入口仍可见；正常登录的业务弹窗另验六态和Escape焦点回归，组件命中测试不充作额外业务验收。
+
+合票单证的范围（2026-11-14）：`mistDocumentGeneration.ts#ciSnapshot` 的货物、金额与包装汇总均限定当前订单，`packingTotals(root,s,order.id)` 从本票该订单的条目筛选装箱行；本订单无装箱行时不借用其他订单的件数重量。PL及其他整票单证继续按整票汇总，混合单位分别展示。正常仓储界面已实测同一票两张CI：A四卷净95.46/毛98.46kg、B一卷净43.51/毛44.51kg，PL五卷净138.97/毛142.97kg；重生成草稿后旧PDF及摘要仍可核对，不覆盖历史原件。
+
+申报法定长度（2026-11-14）：`mistCustomsDeclaration.ts#draftCustomsDeclaration` 的长度换算统一调用 `unitConversion.ts#convertLength`，保留模型支持的四位小数，不把法定数量按金额的两位精度处理。110码应为100.584米；成交量110码、每码单价、总价及按装箱净重取得的第二数量分别保留。实测旧100.58米草稿会被来源过期门禁阻止申报；正常重新生成后，页面、商品项Excel及CD草稿PDF均100.584米，原订单、发票、装箱和QC不变。整数计件单位与重量口径沿用既有校验。
+
+费用弹窗错误归属（2026-11-14）：`OrderActualCostPanel.tsx#RegisterExpense` 已在仍挂载的弹窗内显示服务器校验失败时，通过 `onErrorPresented` 让 `PlatformReports` 调用 `runtime/workspace.tsx#dismissError`，仅清除当前身份/公司内同文案的外壳通知，避免“一分钱不平”同时出现两次。待核对请求/创建不清除；跨公司旧回调及离开弹窗后的延迟失败不接管。业务错误、输入、请求身份及服务端校验保持，非其他弹窗全量完成的结论。
+
+- **出运条款与请求的来源（2026-11-17，分支待发布）**：`ShipmentsPage.tsx#shippingContractBasis/shipmentRequestBasis`保留打开表单时的合同、准确条目/生产分支、生产事实及数量占用；保存时比较当前来源并绑定同快照版本，冲突保留输入、重开核对。`repository.ts#shipmentReadKeys`在自动合并过期版本前独立核对读依赖，含来源条目、生产分支、相关出运记录以及整组生产事实/收货条款；同步未到客户端时也返回409，不留成功回执。独立本地正常双设备已验证条款、新请求的数量占用和请求自身的同步拒绝、断同步409、恢复拒绝及重开保存；无关个人待办更新可合并。实际8+4两票只处于准备中，实收12件仍在库，不能据此宣称订舱、放行、出库或起飞已验。
+
+- **装箱编辑来源及手机字段（2026-11-17，分支待发布）**：`ShipmentsPage.tsx#packingSourceBasis`保留打开时的出运、订单/条目、完工分码、同条目各批占用、现有装箱、单证和申报依据；保存绑定同次核对的工作区版本，来源变更时保留输入并要求重开。实际同步后旧重量覆盖已复现再修复，断同步409仍由现有后台同记录冲突保护处理；正常双设备已验证同步0POST、断同步409/恢复后拒绝、无关个人待办合并及另一批新装箱触发旧稿保护。手机表头隐藏时，仅在`data-packing-editor`范围补回输入字段名，沿用Mist字阶和颜色；六浅深/三宽实页核对通过。装箱不等于订舱、出库或实际起飞，商业库存数量及质量门禁仍独立核验。
+
+- **成组船样的实际成员（2026-11-17，分支待发布）**：`SamplesPage.tsx#createSpec`的`sizeQuantities`初始为空，要求操作者明确填写本次实物的尺码和件数；生产分支计划不能自动生成“每码1件”。本地尾批只有M/L时仍预填四码的缺口已在实际新表单及回归中复现，修复后空白继续0POST、明确M1/L1只登记两件。船样绑定准确`shipmentId`和生产来源；QC通过门禁按该组`sizeQuantities`核验，报告版次取本份`qualityRevision`，客户决定/业务继续引用当前报告。两票分别4件16点、2件8点独立实走，原件字节、回执及商业数据保持有证据。箱内抽核记录不增加商业库存；内部回箱用正常移位记录，登记人由实际权限决定、经手人另记。商业发运与样品台账的后续随货退出仍须引用该票实际事实，不能将登记或客户采用当作已出运。
+
 ## 3. 权限、岗位与行级范围
+
+订单决定标识（2026-11-14）：通用命令`order.governance.decide`使用`payload.id`指定订单或复合审批事项，待处理轮由领域服务查找；审批接口路径里的`order:roundId`通过服务端映射到该标识，不能把`orderId/roundId`字段直接当作通用命令参数。`mistOrderGovernance.ts#applyOrderGovernanceCommand`在解释短交、超装或取消等标识分支前验证非空字符串，缺失/错误类型以422拒绝；合法请求仍校验本次冻结名单与当前有效审批资格。格式拒绝不产生业务版本、签字或回执，不代表通过权限校验。
+
+默认组织主单（2026-11-15，候选待完整与原生复验）：`approvalRoutingService.ts#resolveOrderMainReviewers` 独立于资金等单人复核路线，读取当前公司的负责人任命、部门缺省系统主管及上级/公司领导集合；保留本就在合格集合里的申请人，不把普通模块写权限或显示岗位名当审批授权。`mist/context.ts` 只在真正主单提交/决定启用，按当前成员/业务域/模块再筛；精确审批、通用命令、当前可决定读模型由服务端主单任务ID传入区分，同命令的取消/超短等不套用。通用命令的多轮决定先取pending对应申请人，不以旧已批轮路由本次变更。显式名单仍沿原明示资格优先，已提交名单和合同快照保留；动态组织移交的来源快照/恢复另见GO-LIVE待验，不以本候选代替。
+
+主单当前资格（2026-11-15，本地验收通过，未发布）：`repository.ts#listReviews` 的待审主单 `canDecide` 同时要求本次冻结名单/模块权限与当前原申请人路由的准确业务域资格；按公司库、原申请人缓存一次当前权威，但面料/成衣分别判断。撤销资格不抹去冻结名单、审批资料或已处理历史；缺订单/申请人不可核验不提供决定，数据库异常正常上报。决定入口原有当前权威复核、资金等特定自审限制不改；合格主单申请人没有通用自审禁令。公司设置的审批资格与模块权限分开，不能因岗位显示名而自动授予；主单事实栏标“提交时审批人”，与当前可决定状态分开。已正常登录实走显式资格后的本人签批、撤销另一候选资格、未授权及跨公司拒绝、多人同实例完成与配置恢复；这不覆盖空名单的默认组织路由，通用DR007自排除/单人回落与D10的主单业务规则仍须单独收口；旧数量变更403只证未授权经办人不可审，不是主单通用自审禁令。资金类特定自审规则须另核其基础/金额/首笔资格，不能拿无资格账号403替代。当前发布与余项见GO-LIVE，回归见 `mist/reviews.test.ts`。
 
 - **权限点**：`server/src/_shared/rolePermissionMatrix.ts#PERMISSION_SCOPES`。命令到权限点的映射在 `mistWorkspace.ts#mistCommandPermission`；财务细分见 `mistFinancePermissions.ts`。
 - **岗位配置界面**：`app/runtime/jobPermissions.ts`（`JOB_AREAS`：按模块配 读/写/审批）+ `pages/modules/JobPermissionEditor.tsx`；成员与小组在 `pages/WorkspaceMembers.tsx`、`pages/TeamScopesSection.tsx`（`teamScope.save`）。
@@ -33,16 +88,42 @@
 - **账号引用（2026-11-09）**：解析负责人、经手人或借用人账号的命令，须登记于 `server/src/shared/mistAccounts.ts#MIST_MEMBER_DIRECTORY_COMMANDS`，由 `repository.ts#executeInternal` 在当前事务构建成员目录；预演复用同一路径。样品借出 `fulfillment.samples.move` 也在此列，提交账号 ID 后以服务端姓名落快照，拒绝公司外或停用账号。仓储回归见 `mist/memberCommandAccess.test.ts`，不能仅用带手工目录的领域单测代替真实调用链。
 - **行级范围**：`server/src/shared/mistDataScope.ts`。读投影按小组/指定人裁剪；写入用写前目标检查 + 写后差异检查。跨组交接（如内部面料、内部交付）只开放该记录的最小投影（`scopedFabricAccess` 等），不公开隐藏来源订单的商业信息。
 - **审批**：不能审批本人提交的单据；审批权限与额度见 `pages/modules/AdminApprovalAuthorities.tsx` 及各领域 `decide` 命令。
+- **默认审批策略（2026-11-13核实）**：`mist/context.ts#mistApprovalAuthority` 对主单、采购及加工，在无有效显式名单时按公司组织关系查找当前有资格的部门主管或上级。设置页空名单显示「按组织审批」，不据此宣称提交阻塞，也不保证每位发起人都有可用审批人；提交和决定时仍重载资格、业务域与公司边界。配置并发版本留在请求与存储中，不作为员工界面字段展示。
 - **已确认规则**：教学与验证不在共享环境变更账号权限；岗位示例只在本地演示公司演示。
 
+浏览器会话凭据（2026-11-15）：`auth/sessionLifetime.ts#writeSession` 保留登录/续期JSON响应中的完整JWT；HttpOnly Cookie改为仅认证的已签凭据，不携带角色/岗位/权限/部门/业务范围快照，并以空权限和显式标记禁止未加载时回退旧角色默认权限。Core的`createAuthorizationSnapshotGuard`及Mist的`freshMistAuthority`仍须在受保护业务判定前加载当前数据库授权。公司、平台进入公司上下文、权限上限（缺省与空数组不同）、凭据版本、会话ID、原密码登录时间与保持登录方式均保留；响应与Cookie共用同一签发/到期边界，当前设备退出按同一会话族撤销。生产Secure/HttpOnly/SameSite、30天/会话Cookie及90天重新登录规则不变，无用户角色或数据迁移。Cookie中的空权限不代表当前账号无权，不能把原始Cookie载荷当作当前授权。
+
+客户字段权限（2026-11-15，本地候选）：`mistCustomerFieldAuthority.ts` 按有效差异独立要求客户等级的 `relations:admin`、信用额度及正额度币种的 `risk:admin`；普通资料带回未变受保护值可保存，普通业务员可建未评级/零额度客户，零额度币种仍可修改。创建、旧别名、批量、预演与提议共用校验，事务提交前再核被冻结的必要权限；先核对象可维护范围，避免用字段猜值取得他人客户信息。`risk:admin` 已从悬空豁免移入已消费阳性对照，回归为 `mist/customerFieldAuthority.test.ts`、`shared/mistCustomerFieldAuthority.test.ts` 和 `auth/__tests__/danglingScopeConsumption.test.ts`。
+
+部门任命与编辑来源（2026-11-15，本地候选）：`HrOrganization.tsx`→`runtime/organization.ts`→`hr/route.ts`→`organizationService.ts`写既有`Department.headId`，不写账号岗位或单据审批名单。任命同时要求人事写入与账号/岗位管理权限；目标必须为本公司有效启用账号，有员工档案时至少有一份当前在职档案。跨部门任命保留业务入口并显示实际来源部门，模块能力及业务域仍独立校验。人员目录返回`headId/updatedAt`；所有部门编辑携带打开时的`expectedUpdatedAt`，任命另带`expectedHeadId`，服务端同事务条件更新且版本严格递增，旧名称表单不能带回旧业务属性或旧任命。普通人事编辑省略负责人字段；创建、修改、裁撤的审计与任命/属性/人员转移在同一事务，审计失败全部回滚；提交后再刷新既有小组范围缓存。冲突时保留本表单输入和原版本，刷新底层资料供关闭重开使用；读取等待期间不锁住关闭，不给旧输入借用新版本。父抽屉在子编辑期间保留，使用Mist现有栈恢复触发器焦点。负责人变更不会改写既有审批提交名单；待审申请人的调岗/离职恢复另行验收。
+
+主单提交来源（2026-11-15，本地候选）：`approvalRoutingService.ts#requesterSource`优先本公司有效唯一岗位部门，同公司旧全局primary不能覆盖调岗/裁撤后的岗位归属，多归属失败关闭。`mist/context.ts`仅由服务端在提交时产生`orderMainApprovalSources`，`mistOrderGovernance.ts`将其克隆到轮次`approvalSource`；字段为schemaVersion、模式、公司、业务域、申请人和部门快照，客户端载荷不授予来源。`mistOrderApprovalSource.ts`严格解析并由`repository.ts#submittedMainReview`绑定实际轮次/申请人/公司/业务域及冻结审批人。组织来源的旧指派不因改派/申请人变动重新路由，当前成员、模块、业务域上限及显式配置仍优先；显式来源回退时使用原提交部门，不借用决定人的部门。索引授权缓存按来源和冻结名单区分；专用决定、通用命令与读取共用同一归属。旧无来源不反向补造；成员失效保持只读/409，数据库故障不伪装无权。当前审批人可以处理原有效公司合同，不给离职申请人新权限、不自动改业务负责人，人员交接是独立操作。通用主单决定只对实际指派目标合同及条目豁免普通行写范围，普通编辑/其他订单/条目改挂仍受限，资金/数量例外不使用该豁免。部门修改仅在有可见待审且改派时短提示旧主单指派保留。实际原生人员生命周期尚待，已核范围见GO-LIVE。
+
 ## 4. 业务真源索引（按业务链）
+
+登录退出（2026-11-13，本地候选）：`auth/currentSessionRevocation.ts`按真实账号和稳定会话标识校验持久撤销记录，主API、独立Mist服务、认证私有入口及Mist事务授权均接续；权限重载保留签发时刻、安全代次与真实会话标识，不以新授权快照掩盖凭据来源；记录覆盖90天绝对会话上限，原始JWT及会话标识不入撤销表。续期、改密和公司切换沿用同一会话，旧格式换发保留可撤销来源；普通鉴权仍拒绝过期凭据，过期原凭据仅可用于撤销其会话。全部退出另换凭据代次，避免同秒旧令牌漏过；私有公司列表同样复核当前账号和退出状态。
+
+公开入口的客户端路由（2026-11-14，本地候选）：`services/publicEntryApi.ts`把已识别的公司/平台/旧开发兼容域名绑定到当前域名的`/api`，认证、业务基座及显式请求端点共同复用，忽略其他域名的环境绝对地址或保存设置。显式相对代理与非公开 Web/Electron 的端点配置保持原语义；服务器域名/Origin、身份和公司权限守卫继续独立生效。公开入口不依靠跨域重试完成登录。
+
+`services/logoutCapabilities.ts`只暂存服务端签发、不能登录或访问业务的退出用途凭据，待确认记录按API地址隔离并跨刷新保留；`authService.ts`清除登录令牌后仍可重试，不把匿名成功响应当成已撤销证明，失败不靠旧Cookie恢复身份。新密码登录可建立新会话；未完成的旧退出记录继续按原用途收口，不借用新账号身份。界面仅在失败时提供“重试退出”，确认所有设备退出后由服务统一清本机状态，不再追加第二次退出请求。
+
+公司人事访问变动（2026-11-14，本地候选）：`hr/companyEmploymentService.ts#recordEmploymentEvent`的停职、复职、离职、解除及返聘，与公司账号管理共用`revokeAllSessions`。会员状态、凭据代次、员工状态、事件及审计在同一事务提交，成功后才清账号状态缓存；失败全部回滚。恢复访问后旧凭据继续失效，须重新密码登录；这是既有账号级撤销，其他公司会话同样须重登，但其会员、岗位与人事记录不变。普通建档/改档和转正不作访问恢复，不重置凭据。
+
+公司小组解散（同上候选）：`hr/companyClient.ts`仅为既有解散事务补入`teamDataGrant.updateMany`，按小组所属部门的公司过滤，撤销本组生效中的旧共享授权；其他公司、既有撤销历史保持。旧授权独立接口及创建、读取、删除仍关闭，不为修复解散放开通用旧数据接口；POST解散和DELETE入口复用同一服务，重复解散409。公司内业务范围仍走当前Mist公司业务入口。
+
+账号入口的错误反馈（2026-11-14，本地候选）：`ChangePassword.tsx#ForcedPasswordChangePage` 与 `AccountAccessPage.tsx` 在工作台外壳出现前直接使用现有 `Banner` 展示错误；此时 `AppInner` 已登记全局错误宿主，但状态卡尚未渲染，不能把错误送入该卡而令用户看不到。工作台内与浮层的既有 `FailureNotice` 行为保持。`OrderDetailPage.tsx#OrderLineDialog` 仅在仍挂载且提交代际相同时接管精确同文的全局失败，并将自己的错误滚入弹窗当前可视区；取消清本地错误，迟到回调不消费新页面错误。宿主条件反例见两页同名测试；没有改动认证、邀请或邮件服务。
+
+财务操作失败与响应式详情（2026-11-14，本地候选）：`FinancePayables.tsx#execute` 仅在当前作用域仍有效、且没有待核对请求时精确接管全局同文错误；本页负责弹窗内反馈或 `usePageFailure`，未知结果仍沿原请求核对。票据错误滚入本弹窗视口。`modules/pageKit.tsx#ListDetail` 的可选 `freezeLayout` 在财务操作期间保持原预览/抽屉布局，防止缩窄时新的底层Drawer盖住现有编辑，也防止放大时撤掉编辑的父抽屉；操作关闭后才应用当前视口，默认调用保持实时响应式。未改变全局浮层样式或优先级，回归见 `FinancePayables.test.tsx`。
+
+本包新增`AuthSessionRevocation`迁移，仅在隔离本地库应用；正式发布须把该受控迁移列入最终授权。回滚包须保留会话撤销层及表结构，不能因回退业务版本而忽略已登记的撤销；统一发布前仍须制作并验证相应回滚包。发布及全局验收状态以GO-LIVE为准。
 
 页面路径相对 `dev-ui-preview/mist-atelier/app/pages/`，规则路径相对 `server/src/shared/`。测试与源码同名 `*.test.ts`。
 
 | 业务阶段 | 页面 | 规则真源 |
 |---|---|---|
 | 首页待办、审批、通知 | `HomePage.tsx`、`ApprovalsPage.tsx`、`NotificationsPage.tsx` | `mistReview.ts`、`mistTeam.ts`；派生在 `app/runtime/workQueue.ts` |
-| 业务日历与跟进 | `CalendarPage.tsx`、`HomePage.tsx` | `mistCrm.ts#scheduleCrmFollowUp` 记录待办 ID；`mistCrmCalendar.ts#currentCrmCalendar` 随待办改期、改派、完成、重开与作废读取，之后再按公司、个人与来源权限裁剪。旧独立记录只有原始字段双方唯一匹配才联动，歧义不合并。 |
+| 团队周报数量与存档（2026-11-16） | `modules/TeamBoard.tsx#TeamWeekly` | `mistTeam.ts#teamWeekRow` 从已离港条目 `lineId + orderId` 核对订单条目的原单位，按四位数量精度分别累计为 `shippedQuantities`（十进制字符串），不换算或混加件/米/码；团队总票数按可见范围的物理出运 ID 去重，成员行仍计各自参与的票。页面、生成文字、CSV、新存档使用同一分单位结果，`formatTeamShipmentQuantities` 只格式化、不补算。来源单位缺失明确标未记录；旧冻结周报缺少分单位字段时显示未分单位，原报告及存档文字不回填或重算。存档权限、期间、归属和币种口径不变；字段变化的发布/回滚核验保留在 GO-LIVE 最终边界。；归档生成由 `repository.ts#executeInternal` 注入当前账号可信读投影，`mistTeam.ts#archiveWeekly` 留存实际输入来源及字段读权限并绑定公司/工作区/作者/周次。`teamReportAccess.ts#projectTeamReports` 在读取端复核当前权限，正文保持原始冻结；无法证明时本人仅返回不可读存档身份，他人存档省略。恢复访问返回同一原文，旧无证明存档不迁移，只允许当前完整公司输入视图；禁止把新数据增长当作重算旧报告的理由。 |
+| 业务日历与跟进 | `CalendarPage.tsx`、`HomePage.tsx` | `mistCrm.ts#scheduleCrmFollowUp` 记录待办 ID；`mistCrmCalendar.ts#currentCrmCalendar` 随待办改期、改派、完成、重开与作废读取，之后再按公司、个人与来源权限裁剪。`mistDataScope.ts#applyDataScope` 的 CRM 来源既识别准确可见商机/跟进 ID，也识别范围内负责客户的主页 ID；共享客户目录或任意 `customerId` 提示不构成其它客户活动的读取授权。2026-11-15 补商机个别负责人日程：客户主页目标本身不足时，`applyDataScope` 仅从唯一的可见跟进和 `crmCalendarTaskLinks` 确认系统待办，再核对客户、标题及跟进原文，保留该准确日程；不据共享客户或借用的指针、歧义来源扩权。私人归属、当前业务可见性、CRM模块权限及完成/作废过滤继续生效，原日程/跟进/待办存储不改写。客户交接后按当前待办负责人展示同一日程，原跟进经办人与底层日历不改写。回归见 `mist/crmCalendarProjection.test.ts`。旧独立记录只有原始字段双方唯一匹配才联动，歧义不合并。 |
 | 客户销售额与资金月报 | `modules/PlatformReports.tsx` | `buildCustomerSales` 按生效外部合同及所选业务日筛订单，`mistFinanceReports.ts#monthlyFinanceSummary` 按实际收付款日期分币种；导出使用当前筛选行。 |
 | 客户、联系人、CRM | `CustomerPage.tsx`、`CustomerRelations.tsx` | `mistMarket.ts`、`mistCrm.ts`、`mistRelationHold.ts` |
 | 供应商与收款账户 | `modules/SuppliersPage.tsx` | `mistMarket.ts`、`mistSupplierStatus.ts` |
@@ -53,6 +134,8 @@
 | 采购合同、收货、退货 | `modules/ProcurementPage.tsx` | `mistFulfillment.ts`（`fulfillment.procurement.*`）、`mistProcurementCurrency.ts`、`mistPurchaseDocument.ts` |
 | 结算、票据、付款 | `FinancePayables.tsx`、`FinanceSettlements.tsx`、`FinancePayments.tsx`、`PayableDialog.tsx` | `mistPayables.ts`、`mistAccounts.ts` |
 | 产前样、放行、生产 | `ProductionPage.tsx`、`productionGate.ts`、`ProductionSampleNotes.tsx` | `mistProductionSamples.ts`、`mistProductionIntake.ts`、`mistProductionQuantity.ts`、`mistFulfillment.ts`（`fulfillment.production.*`） |
+
+订单生产进度由 `mistWorkspace.ts#recalculate` 调用 `mistProductionQuantity.ts#aggregateProductionProgress`：有效来源分支取采购单位，缺省取对应订单行单位；米/码通过 `unitConversion.ts` 换成可比长度后按数量加权，同单位保留数量加权。不可互换的单位按订单行平均，各行内部的拆分来源仍按可比数量加权，不能直接相加米数、公斤或件数。无有效分支保留原进度，关闭分支不参与；仅计算进度权重，不改合同数量、单位、价格，也不替代订单数量分组显示。2026-11-14 本地多行面料单中间快照已只读复验130.5米完成/110码未完成为56%，原54%为直接相加不同单位的缺陷。
 | QC | `modules/QcWorkbenchPage.tsx` | `mistFulfillment.ts`（`fulfillment.qc.*`） |
 | 内部面料、发料、回交、内部交付 | `InternalFabricPanel.tsx`、`MaterialDeliveryPanel.tsx`、`InternalDeliveryPanel.tsx`、`modules/InventoryPage.tsx` | `mistInternalFabric.ts`、`mistInternalDelivery.ts` |
 | 库存、隔离、退供、报废 | `modules/InventoryPage.tsx` | `mistFulfillment.ts`（`fulfillment.inventory.*`）、`mistPayables.ts`（处置财务核对） |
@@ -65,14 +148,68 @@
 | 邮箱 | `modules/EmailsPage.tsx` | `mistEmail.ts`；服务端收发 `server/src/mist/mail/` |
 | 公司、成员、交接 | `SettingsPage.tsx`、`WorkspaceMembers.tsx`、`MemberHandover.tsx` | `mistCompanyIdentity.ts`、`mistTeamScope.ts`、`mistHandover.ts` |
 
+到账、核销与结汇（2026-11-14）：`mistWorkspace.ts#finance.fx.settle`将原币账户卖出额和本币账户实际入账额写入`fxRecords`，`mistBankAccountBalances`计算两端划转；不改期初余额，不新增客户到账。`FinanceBankAccounts.tsx#ReceiptLinksField`及服务端`settlementLinks`以到账原额减已对应结汇额计算可分配额，与发票核销后的`remaining`分开。`mistFxRates.ts#fxOrderActual`通过准确到账/核销归属计算订单已收已结汇收入，未对应的结汇不猜配到订单；`mistOrderCost.ts#orderActualCost`分别保留实际结汇、月末暂估和报价预计口径。原币应收结清不代表已结汇；缺报价汇率不生成预计收入或毛利。结汇原单号重复、账户币种一致、原币余额不足或到账被超额对应均拒绝且不改账。
+
+供应商短交在手汇总（2026-11-15）：`SuppliersPage.tsx#supplierPerformance`只以当前`payables.settlements`中同采购的`confirmed && final`结束后续供货，待确认/退回/取消/冲回不结束；原合同数量和收货记录不改。短交合同从在手移至独立短交结案记录，保留实到/合同数量及采购回程，不混进按足量到货计算的已完成/准交KPI。评级仍由`suppliers:admin`办理、按事实填周期与依据、追加保留历史，不据补救动作自动升档。
+
+管理核算中的贷项与汇率（2026-11-15）：`mistOrderCost.ts#orderActualCost`在贷项使净销售额低于历史已结汇到账时，将已实现收入限制到净销售额并保留准确到账的加权结汇比例；`includedCredits`显示原收入折减来源，不把已含收入的贷项或其退款再次计为费用。工厂补偿按实际到账归集为收入，不同时冲减采购。银行费等外币成本没有独立本币结算来源时，`fxRateFor`仍用所选月份及以前的月末汇率并保留暂估；不能借用某笔客户结汇汇率冒充该成本的实际折算。三种口径是订单管理核算，不替代法定银行会计。
+
+报关PDF取数（2026-11-14）：`mistDocumentGeneration.ts#shipmentDocContent`生成CD时优先采用本票`fulfillment.customs.items`已保存的品名、申报要素、法定第一/第二数量；未建立商品项时仍提供当前归类的待核对预览。`documentGenerationBlocker`沿用`mistCustomsDeclaration.ts#customsItemsStale`：商品项已有而数量、单价、净毛重或件数与当前来源不符时，先重新生成并核对商品项，禁止混用旧项目和新合计。人工调整的原自动值仍用于过期比较，不会被误报为过期。快照、PDF及单据正文共用同一已核对数据，重新生成保留旧文件及摘要，不迁移或覆盖历史原件。
+
+快件路径边界（2026-11-15）：`CustomsPage.tsx#createSpec` 的 `channel:express` 选项只称“快件 / 邮寄”；`mistFulfillment.ts#FulfillmentCustoms.channel` 区分系统登记路径，不代表免于海关申报或随附单证。[海关快件办事指南](https://online.customs.gov.cn/static/pages/guides/000629017002/000629017002.html)列有按快件类别提交的报关单及其他材料，不能把运单替代本系统普通报关单编号的录入口径写成普遍免申报结论。本次只纠正文案和类型注释，申报、放行、权限及离港门禁不变。
+
+免费补发CI（2026-11-15）：`mistDocumentGeneration.ts#ciSnapshot`对`order.replacementSource`增加中英文货值用途，明确免费补发、无需付款及仅供报关估值；申报单价仍来自`mistClaimReplacement.ts#replacementDeclaredUnitPrice`的独立核对，绝不取合同零价充作申报价，也不把该值当客户应收。普通销售CI不带此说明。事实写入同一生成快照，后续生成保留旧快照/文件；新模板不改已生成或已签发原件。采用[DHL无收款货物单证指引](https://www.dhl.com/fr-en/home/freight/help-center-for-european-road-and-rail/faqs-for-european-road-freight.html)所区分的货值用途，不据此认定税费豁免。
+
+CompanySeals preview (2026-11-14): `modules/CompanySeals.tsx#SealImage` waits for workspace loading to finish before calling the company-bound `readFile`; the preview is keyed by the exact reader and file ID. Loading, file visibility or reader changes hide the old blob immediately and dispose its URL; the ready reader retries the same file. Server authorization and the workspace source guard remain authoritative.
+
+余料入库码单（2026-11-14）：`mistStockOperations.ts#applyStockOperation`的`fulfillment.stock.receiveOther`沿采购收货的既有可选重量规则，保存每卷`weightKg`并在改库存前校验有限正数/四位小数，省略仍兼容。其他入库保留来源类型、原供料订单条目、来源单号和依据，只记实物库存/流水，不形成采购或资金。`InventoryPage.tsx`的其他入库详情标题取`otherReceipt.source`，不套用缺失采购的错误提示；码单表沿既有公斤列回读。原库存出库交回仍走准确`issueId`退回，保留原量和接收历史。
+
 命令全集以生成目录 `server/src/mist/agentCommandCatalog.ts` 为准（由 `scripts/gen-mist-command-catalog.mjs` 从上述 `server/src/shared/*.ts` 生成，当前 313 条；`agentCommandCatalogGuard.test.ts` 守住声明、处理分支与权限映射不漂移）。
 
+报价成本口径（2026-11-13）：`mistMarket.ts#quotationProductCost/sourceLine` 仅在档案与报价的币种、计价单位均一致且成本为正时采用档案成本；不把每码、每米、每公斤或每件成本直接互用，也不隐式折汇。`MarketPages.tsx#QuotationEditor` 同步使用该规则，匹配的档案成本只读，改变币种或单位后清掉沿用成本。人工参考成本保持 `unverified` 并进入业务审批；需要结构化换算及依据时沿既有条目专业核算办理。新保存规则不回写旧报价、批准记录或正式单据。
+
+订单复合审批签字读取（2026-11-17，候选待完整验证及本地应用）：`mistSignatures.ts#decisionSignatureVisible/orderDecisionSourceVisible`从当前模块权限及RLS投影确认真实父订单和准确子记录，分别识别取消申请、条目结案及超量请求；不以订单ID前缀、姓名或客户端文件ID放行。`projectSeals`保留合法签字引用后，`visibleFiles`才沿同一业务来源返回私有SVG；当前岗位撤权或业务不可见仍拒绝，原签字人本人规则保持。`mistSignatureSource.test.ts`与真实PG的`orderSignatureScope.pg.test.ts`覆盖准确来源、伪造后缀/父子错配、同名他人、跨公司和旧令牌撤权。
+
+订单审批金额（2026-11-13）：`mistOrderGovernance.ts#getOrderGovernanceReviews/reviewAmount` 从本轮冻结快照逐条计算金额并按分相加，主单和变更均显示该轮合同总额，不读取当前主单缓存金额或后续草稿。内部未定价显示「未定价」，损坏历史金额显示「金额待核对」，补发单仍按无需客户收款呈现。新增字段只在读取审批时派生，不改审批、签字或经营历史。
+
+成衣成品采购（2026-11-13）：`mistInternalFabric.ts#garmentFinishedPurchaseProblem` 要求与订单条目同单位且合同数量为整数；`mistFulfillment.ts` 在保存和提交/批准/发出/确认/收货的合同重查，以及变更提出/批准时共用该规则。实际物理流转另由`garmentDeliveryQuantityProblem`约束成衣成品和成衣加工交付的实收、拒收、收货后转拒收及退换数量；`ProcurementPage.tsx`提交前共用校验，服务端在累计量、库存和退换记录修改前重查，失败不留部分写入。材料不套用此限制，面料仍支持实际小数数量，不自动换算或改写历史。对应`mistGarmentReceiptQuantities.test.ts`覆盖错误拒绝/状态不变及整件、面料小数正例；浏览器实走198件接收/2件拒收→1件转拒收→3件退换→3件补货，最终实收与库存均200件，拒收补货历史保留。
+
 ## 5. 跨模块交接（主线）
+
+面料分配去向标识（2026-11-14）：`mistDataScope.ts#scopedFabricDestinations`仅对当前行级协作范围内的内部面料供给行，按有效、来源/目标父行匹配的分配派生`allocationId/orderCode/lineStyle/lineName`。`repository.ts#view`在当前`orders:read`及委托上限内放入`MistWorkspaceEnvelope.scopedFabricDestinations`，不写公司业务状态，不下发成衣金额、客户、条款或附件，不让成衣整单变为可读/可写。`InternalFabricPanel.tsx`用该标识显示准确去向；成衣记录本来不可见时不提供打开动作。`teamView.tsx#teamViewFabricDestinations`随所选小组保留源行及有效分配过滤，切换为空视角不残留其他标识。角色撤权、只读来源不继承旁支、取消/不匹配分配、私有附件与跨改成衣拒绝由共享函数/仓储/页面回归覆盖；本次工作区读回修复不代替后续Agent业务读取验收。
+
+内部预算与分色输入（2026-11-14）：`OrderDetailPage.tsx#OrderLineDialog`按当前拟议合同或有效合同用途显示“预算单价”或“销售单价”，可访问名称与显示一致；字段及计算不变。`OrderBreakdownEditor.tsx`的面料根节点复用现有`mist-breakdown`输入收缩规则，使颜色、数量、单位及移除按钮在窄屏仍处于同一容器内，不改变分色数据或成衣分码表的横向滚动规则。390浅/深、1180深及单/双颜色行已真实复验，取消编辑不产生业务命令；不把本局部验证当作全站窄屏通过。
+
+开发发票范围（2026-11-14）：`mistDataScope.ts#scopedVisibility`按`invoice.devId`追溯准确开发案；该类发票没有销售订单，不能仅靠`orderId`。范围用于读投影与写后校验，归档不切断开发费用/收费/财务交接；同客户其他开发案不因此共享，上游只读关联仍不能新建或修改票据。模块操作权限、财务应收确认和附件引用权限继续独立校验。`dataScopeMatrix.test.ts`覆盖业务开票/财务退回后重开与同客越界拒绝，`mistDataScope.test.ts`覆盖只读上游。
+
+无订单应收的客户余额（2026-11-14）：`mistOrderFunding.ts#receiptFundingUse/customerFundingTotals`将开发、样品、期初及跨币种核销按可确认的发票客户归集，以到账原币占用该客户的一般余额；指定订单预留仍独立占用，其他客户余额不重叠，客户身份未知只可使用真正空闲资金。`orderFundingReconciliationLimit`与`customerReceiptUnappliedMinor`共用此口径，避免核销后继续把同一预收列作未核销余额；冲回后按原归属恢复，不修改银行到账或归属历史。跨币种使用`mistAllocationReceiptMinor`，不把发票币种金额当作到账金额。单位及快照回归见`mistOrderFunding.test.ts`、`mistCustomerStatementFunding.test.ts`；实际浏览器链与完整验证另记GO-LIVE。
+
+面料实测（2026-11-14，分支待发布）：`fulfillment.qc.report`与`development.recordQc`共用`mistQcInspection.ts#normalizeFabricQcMeasurements`，按项目/有限非负数/原单位保留最多200行，不自动以偏差裁决。工作台的`fabricMeasurements`适用于面料域的开发、先锋样、生产/来料/巡检及库存复检；只有开发版本来源才同步该准确版本的QC，其余实物报告不改开发、主单目标或采购规格。当前专业认领人、任务域、已处置来料及生产放行门禁继续独立校验；成衣域拒绝面料实测，AQL/四分制路径不改。前端`QcWorkbenchPage.tsx`对面料统一使用已有原单位编辑/回读表，`fabricQcFacts.ts`与开发页共用输入校验；历史测量记录不迁移或重写。相关契约回归见`mistDevelopmentQcTasks.test.ts`、`mistFabricBranch.test.ts`及页面测试，真实返样/QC/业务接续证据另记GO-LIVE。
+
+来料计量与已处置入口（2026-11-14，分支待发布）：`QcWorkbenchPage.tsx#qcSamplingUnit`优先取准确来料任务的`incoming.unit`，再取对应订单条目单位；`QcSampling.tsx#AqlCard`与报告卡片共用该单位，不用成衣主单的“件”覆盖辅料“套”或外箱“个”。仅改变显示，不换算数量、不修改AQL数据或重写历史报告。来料已经`releasedAt`时，工作台禁用追加报告，提前对齐`mistFulfillment.ts#fulfillment.qc.report`既有的已处置约束；仓库解除待检仍由`fulfillment.qc.incoming.close`办理。来料报告通过不会自动解锁、发料或点收，发料沿`materialDelivery`关联准确加工分支与接收人。相关界面回归覆盖原单位录入/提交/回读、成衣件数默认及已放行/拒收批次锁定，实际走查范围见GO-LIVE。
+
+QC质量决定与工厂费用（2026-11-14，分支待发布）：`mistQcDisposition.ts#currentQcDisposition`在准确当前报告内优先取最近的返工/让步决定，仅有费用记录时才回落到扣款；财务追加记录不能替代质量决定或遮住其审批。`fulfillment.qc.dispose`允许两类记录按任意先后顺序追加，已批准让步的原NOK报告仍可登记工厂费用，原报告/审批/业务继续不变。质量方案仍互斥、扣款单独不能放行、新报告不继承旧让步、负责人/有效审批资格和禁止自批、最终结算后改走索赔的约束保留。`QcDispositionPanel`在待批/已批准让步下保留追加费用入口；`openQcChargebacks`仍仅把未携带费用传入结算的争议栏，不改结算原金额或自动实付。组合回归覆盖两种顺序、返工与让步、审批前后、过期报告、准确门禁及结算携带一次；浏览器和完整验证状态见GO-LIVE。
+
+结算价款折让与净额（2026-11-14，候选656e4ab4完整验证通过）：`SupplierSettlement.amount`保留原数量/单价结算额，只有财务在`payable.settlement.confirm`明确填写`deductionAmount`、复核意见、`deductionFileIds`并当场签字，才形成价款折让。金额不得超过原额及登记争议合计，缺文件/意见不通过；未填时为0，旧确认不回写。此字段用于价款折让后的开票净额，单独费用补偿或追偿抵款保持原票沿原流程。`settlementNetMinor`统一关联票额上限、分票预付抵扣尾差、未到票先付上限及净应付，`payableSources`及付款计划预算扣除已确认折让；`mistOrderCost.ts#orderActualCost`按该净额估算未到票，不残留折让额暂估，也不重复产生索赔扣款。原票已高于新净额时先核对更正，不静默改票；冲回确认保留原签认、原件和金额历史，先处理票据/资金事实的守卫不变。文件引用继续走同公司/当前可读及敏感原件限制，命令目录已同步新可选字段，Agent仍受本人确认和手写签字约束。 `publicWorkspace`只在响应声明`supportsSignedSettlementAllowance`；财务确认界面仅在服务明确支持时允许填写、提交正数折让，已填金额遇服务降级时停止确认并保留输入。前后端须配套更新；已落库的折让存在后，兼容回滚必须保留净额开票、预付、付款上限和成本计算，不能回退为忽略该金额的旧服务，也不能恢复整库覆盖新增业务。
+
+资金档级升级（2026-11-14，当前候选待全量）：`mist/context.ts#mistApprovalAuthority`先保留合格部门主管及原领导路由；客诉专用ADMIN路由未返回合格人时，仅从服务端给出的本公司业务候选中按当前资金审批权和档级权限筛选，再走既有部门/上级/管理人路由，使持有该档权限的公司总经理不因SUPER身份漏选。候选、在职资格、当前授权、禁止自批和决定时按原申请人重建均保留；不改岗位、不按显示名称授予资格、不放宽客诉ADMIN规则。
+
+出运条款回程（2026-11-13）：`ShipmentsPage.tsx#ShipmentEditor/ShipmentEditorDraft`在就地核对合同条款前保存完整本机草稿，返回时恢复来源行、数量、工厂确认日及运输字段；保存/取消均不丢输入，恢复不重复按合同覆盖运输草稿，之后主动更换来源仍重新预填合同。`useRouteDraft`绑定账号与工作区，草稿不写成正式出运；真实出运仍由用户确认请求。
+
+生成单据分页（2026-11-13）：`server/src/templates/generatedDocument.ts#renderGeneratedDocumentHtml`保留跨页重复表头，整票合计仅随最后一行打印，不使用浏览器默认的重复表尾。仅修打印样式；快照、数量金额、归档与签发规则不变。已生成原件不会自动替换；草稿从单据中心重新生成，旧PDF及摘要仍在生成历史中保留。
+
+报关数量（2026-11-13）：`mistCustomsDeclaration.ts#customsQuantityProblem/customsQuantityStep`按每个实际法定单位校验，件、套、条、双、个须为安全整数；第一、第二单位同样约束。米、千克等连续数量保留四位小数，不能舍入成0后保存。生成商品项和手工调整均校验；`CustomsDeclarationPanel.tsx#adjustItemSpec`使用同一规则在界面保存前阻止错误输入，保留原有调整依据与历史，不改成交数量、价格或库存。
+
+应收台账分项（2026-11-13）：`InvoicePage.tsx#invoiceFinancialFacts/exportRows`分别列到账核销、贷项抵扣、银行扣费、核销调整、未收和待核对差额；按票据原币勾稽，不跨币种合计。核销采用`mistInvoiceWriteoffMinor`的有效记录，扣费与核销冲回后不再计入，真实未解释差额保留，不倒填余额或虚构现金。页面与CSV共用该读模型。客户对账单使用独立的`mistCustomerStatement.ts`快照及`templates/customerStatement.ts`：v2新增有效银行扣费/核销调整，打印为对应票据下的金额行，未收继续取正式台账；v1历史字段可缺省、归档原件不重写。不得把这些账务调整当作实际现金。对账单待核销额复用`mistOrderFunding.ts#customerReceiptUnappliedMinor`的资金预留与核销重叠规则：明确客户/订单归属优先，仅真实未预留部分允许付款方同名回落，已核销金额不重复计入；币种分别统计，不自动核销或更改现金。`canGenerateScopedStatement`同时检查异名归属到账来源，局部投影的可见性探测可保守回落，正式快照仍需完整来源。收款信息只取未销户的对应币种银行账户，抬头SWIFT仅在银行/账号均匹配时复用，未知币种/银行信息不猜测；收款块整块分页。回归`mistCustomerStatementFunding.test.ts`覆盖归属优先、部分核销、客户余额/订单预留、多币种、跨币种、范围和账户信息；单据原件与历史快照不回写。仍须继续多单及跨币种真实浏览器核销验收，不能据单据修复宣告全部财务场景通过。 历史卡片`CustomerStatements.tsx`按时间/序号排序，更多/收起逐批展示已授权记录，公司/客户/账号切换重置展开；完整单据与部分摘要分别保留原权限，不因展开生成或重写原件。固定业务时钟下用序号保持新单在前；历史控制保留DOM以维持键盘焦点。
+
+离港表单恢复（2026-11-13）：`ShipmentDepartureDialog.tsx`依据当前工作区的授权快照核实来源；已出运、取消、不可见、仅部分可见或切换公司时撤下旧表单，不能继续用打开时的旧对象提交。未知网络结果显示“待核对”，原请求仍走既有核对入口；不把其他对象的回执当成本票成功。库存扣减由同一离港事务及幂等回执保护，关闭表单不新增写入。相关回归已覆盖，完整丢回执场景须在新版本的下一票真实模拟出运重演。
 
 报价批准 → 正式报价单发出 → 客户接受 → 需求方认可开发样 → 转订单 → 补齐条款、选择条目履约模式（成衣全包 / 自供料加工 / 内部业务）→ 主管批准 → 交接后勤 → 采购合同审批、发出、供应商确认 →（定金到账归属）→ 收货 / 内部发料点收 → 产前样确认 → 放行开产 → 生产 QC → 完工 → 装箱、单据、报关 → 离港 → 应收确认 → 收汇核销 → 结汇 → 退税；采购侧：收货 → 结算 → 财务复核 → 票据 → 余款付款 → 短交 / 最终结算。
 
 - 交接靠状态派生的待办推动，不靠消息：例如订单批准后首页出现「待交接后勤」（`workQueue.ts` 的 `order-handoff` 提醒，已有出运的订单不再提醒）。
 - 各环节的岗位、开始条件、完成标准和退回路径写在员工 SOP（课程 `sop` 字段与 `wiki/pages/`），覆盖情况见第 7 节矩阵。
+
+实物样品分组（2026-11-14，分支待发布）：`SamplesPage.tsx#SampleDetail`保留面料按档案汇总，逐份显示样品编号/登记时间、备注和动作。编辑、附件上传及QC始终传该份实物的`id`，不能让分组`primary`承接所有实物操作；附件区按编号分开，编辑使用现有文件控件更正引用，不自动修改其他实物或旧QC报告。后台仍以`fulfillment.samples.edit`校验当前来源与权限；形态/尺码/颜色变更按原规则使该实物需要复验。回归见`SamplesPage.test.tsx`同款双米样、准确上传/编辑与只读反例；操作见[样品送检SOP](../wiki/pages/52-产前样送检与确认.md)。
 
 ## 6. AI 与 Agent 能力边界（2026-10-31）
 
@@ -95,9 +232,15 @@
 
 ### 6.0.1 普通提议的当前可见性
 
+订单起草确认（2026-11-15，本地候选）：`AgentProposalDialog.tsx#proposalFieldChanges/orderSourceMissing`对`order.create`按当前可见客户、公司成员、附件、产品及开发/报价来源解析业务名称，合同和分色规格使用业务字段，图像装饰token不展示。金额使用同一`orderAmounts`逐行取分后汇总，标明币种；中风险多条目同样完整展示至200项，超限不能确认，引用消失时短提示并禁确认。此为人工复核显示门禁，服务端仍独立校验权限、成员、版本与业务来源；不替代主单审批或签字。对应弹窗测试包含准确金额/规格、四类来源消失及中风险长内容。
+
+- **询价原件与回程（2026-11-14，分支待发布）**：`SourcingRequests.tsx`将报价/谢绝的原件交给现有文件上传与`rfq.quote.fileIds`，当前与历史答复分别显示只读附件；`mistSourcing.ts`对两类答复共用文件存在校验，缺失引用不能覆盖旧答复。`ModuleEditorPage`沿用对话框的`ModuleFilesInput`，复核页显示授权文件名。`AgentProposalDialog`将询价、供应商、准确报价及附件引用解析为当前可读对象，报价/定标来源缺失时禁止确认；服务端权限与业务门禁继续独立复核。`agentRead.ts`为RFQ链接添加`section=rfq`，`ProcurementPage/RfqLedger`按当前授权数据恢复准确板块和详情，也识别旧版通用采购链接；不因路由ID授予读取权。
+
 - `repository.ts#view` 不只按ownerId返回普通提议，还复用`agentAuditRead.ts#readableCommand`的模块读取边界，并通过`agentTaskVisibility.ts#knownCommandSourcesVisible`核对当前已存在的业务引用。索引来源是权威业务集合，提议载荷、快照及另一集合的同名ID不授予来源可见性。公司银行账户、邮件草稿/发送记录及整单/部分财务记录同样受控；只有部分明细时不返回旧完整提议的整单内容。
 - 无法再查看来源时，返回最小编号/经办人/时间/状态与unavailable标记；原命令、摘要及可能含商业资料的备注不回传。本人仍可拒绝。`member.groups.set`复用现行公司维护权限（公司库users:write，非公司库所有者），不虚构users:read或以公司库创建人替代当前管理员。确认的初查与实际提交事务都重新校验，避免页面看过后权限收回仍能提交。任务提议继续使用6.3的冻结来源与部分覆盖，不用普通提议的保守整单判断取代精确任务来源。
 - 当前边界核验为普通提议的模块、已存在引用和当前行级范围；不把未知自由文字当作新的业务来源证明，也不宣称旧普通提议拥有任务连接的完整读取溯源。测试入口`mist/agentProposalVisibility.test.ts`覆盖跨组、跨集合重名ID、读取权收回、提交事务中的权限变化、安全拒绝、合法新建及公司银行信息。员工步骤见[Agent连接与提议确认SOP](../wiki/sop/agent-connections.md)。
+
+信用提议与错误归属（2026-11-15，本地候选）：`mistAgentProposals.ts#effectiveAgentCommandRisk` 对实际授信变动使用既有高风险本人密码复验；普通资料含未变额度仍为中风险，决定时把实际风险留档，后续额度修改不改写已确认/拒绝的风险历史。非低风险 Agent 命令不能绕过提议直接进入仓储执行。`AgentProposalDialog` 的确定拒绝仅由当前公司/本人/提议的弹窗接管；首页与小竹传入 `dismissError`，服务方仍以同步原请求状态及精确同文做最终校验。未知结果保留原请求核对，弹窗禁止再次确认/拒绝；迟到回调不改另一提议或公司。回归见该弹窗同名测试；本地第二条真实MCP链已实走：授信提议本人错密码拒绝/正确密码单次执行、含未变额度的普通资料中风险拒绝、两请求原回执重放、四段关联审计及界面撤销后SDK401；全部通过物理本机运输，未调用平台模型。实际原始业务保存与当前发布状态仍以 GO-LIVE 为准。
 
 ### 6.1 当前 Mist 邮箱边界
 
@@ -161,6 +304,7 @@
 
 ### 6.2.1 业务附件读取与原件回程（2026-11-11）
 
+- 敏感原件及同内容副本（2026-11-13）：`mist/filePrivacy.ts` 将专票/退税依据与原始印章的既有权限传播至相同内容附件，文件名、MIME、上传人或另一可见引用不能解除限制；普通业务的行级可见性不按内容扩大。仓储 `prepareFileAccess/accessView` 覆盖工作区、命令回执、历史来源、下载与正文；审批列表/附件复用原敏感限制并保留原审批资格。权限每次重载，不缓存授权结果；Agent上限及原始印章禁读继续生效。旧文件只读流式摘要核验、并发受限，不回写历史；无法核验的敏感来源按同大小保守拒绝，真实可验证的同大小异内容可用。新上传摘要只由服务端从实际字节生成，下载核验完整性；受限副本上传在写文件/递增版本前拒绝。CN专用下载和更正同样核验当前可读附件；新底层完整性错误在普通下载仍为非披露404，在CN归档流程保留既有专用422，不能因此重建或替换原件。界面只显示不可读附件数量。回归：`filePrivacy.test.ts`、`filePrivacyRepository.test.ts`、`FilePrivacyViews.test.tsx`、`creditDocuments.test.ts`。
 - 开发草稿可经 `development_draft` 查询与读取（`products:read`），按草稿名、客户、款号或 ID 查找，链接回 `development/new?id=草稿ID`。摘要从 values 取业务字段，详情保持原始结构，避免改变任务来源指纹；附件仍按当前账号可见范围返回。
 - 工作区默认入口、列表、直接读取和命令回执统一经 `repository.preparedView` 准备任务提议可见性。任务源或权限失效仍隐去 payload，不能用未准备的缓存代替授权。开发草稿提议列明业务字段和附件名称；源草稿/附件不可见时禁用确认，服务端继续独立校验。
 - 公司维护附件上传（2026-11-11）：`repository.uploadPermission` 对当前真人公司管理员复用 `canMaintainCompany` / `users:admin` 门槛，供印章等公司资料上传；不要求或补授订单、开发等业务写权限。普通业务上传仍按既有模块授权，Agent不继承这条管理上传通道；关联业务、案件附件及用印各自继续校验原权限，未引用文件只给上传人。真实数据库回归见 `companyConfigurationFiles.pg.test.ts`，覆盖非库所有者管理员上传/登记、业务写入仍拒绝、只读/跨公司及撤权后的图片读取拒绝。
@@ -174,6 +318,8 @@
 - 本轮本地模拟资料已通过实际模型“客诉 → Excel/PPT → 带来源回答”和“不完整/损坏附件 → 明确缺失”两条任务，以及官方 MCP 客户端的正文读取、准确版本、只读写入拒绝。没有把资料文字转为用户授权，没有发送邮箱或修改共享业务。
 
 ### 6.3 持久 Agent 任务与标准任务连接（2026-11-01）
+
+- **小竹历史与个人草稿。** 任务服务暂不可用时，本人既有对话仍从持久任务读取，续发保持服务门禁。任务和规则读取失败可重试，空状态以成功响应为准。新建草稿若无订单来源，保存命令记录当前账号且只投影给本人。关联订单的草稿继续沿订单范围。旧无归属草稿保留原投影，无数据回填。
 
 - **缺资料问答**：标准`bambook_task`增加`question`动作，传稳定requestId及最多2000字问题；在原任务登记`questions`、计入已用执行时长、清空执行租约并进入waiting_human。每任务最多10个问题，答案最多4000字；问答不清零业务调用或执行额度。有效本人通过`agent-tasks/:taskId/answer`提交问题ID、控制版本、稳定请求号及答复，重新核对AI使用权、公司资格、本人归属、原授权和来源范围，Agent不可答。回答后重新领取租约；暂停中的任务仍暂停，停止后不可答，未答的问题在继续或换连接后仍等待。答复保留问题/时间/来源人，不代替审批、发信或资金确认。任务内容失权时问题和答案一并隐藏，summary读取也不回正文；内部回执不得经普通读取公开。问答事件留存元信息，未增Schema。原任务自己的待同步邮件须先核对，不能借提问提前结束执行等待。
 - **问答验收边界**：独立本地真实Mist创建任务、官方MCP提问→本人暂停并答复→客户端核对仍暂停且执行被拒→本人继续→同任务读取答案及原邮件→准确报告；临时密钥撤销401、配置清理，正式领域摘要和远端写计数未变。覆盖换连接等待、角色失权隐藏/拒答、他人及Agent拒答、停止拒答、稳定重放/不同载荷冲突与提问长度/次数。桌面和390深色抽屉可读；该路径由受控外部SDK驱动，不是平台自主模型循环；平台执行器和本人提醒分别见6.4与6.5。教学HTML未改，员工步骤见下列文字SOP。
@@ -216,6 +362,10 @@
 
 当前源码支持本人明确选择「平台执行」，不自动接管既有外部任务。发布状态以GO-LIVE和对应提交的deployment状态为准。员工步骤见[长期Agent任务SOP](../wiki/sop/agent-tasks.md)；本节记录维护契约。
 
+**经营日期与运行时间（2026-11-12）**：`repository.platformTaskContext`从当前有权公司状态经`mistBusinessInstant`计算`businessAt`；执行器把它作为`businessClock`送给模型，用于报价有效期、账龄、交期和报表判断。原`clock`继续表示实际运行时间，任务期限、等待、执行预算、租约及凭据不随模拟经营日期冻结。正常公司两者一致，雾织固定场景按原经营时钟，客户端不能借此修改内部场景配置。`platformTaskWorker.test.ts`在真实仓储→任务执行器→模型输入这一链上验证固定/正常公司日期与真实到期时间，避免用服务器当前日期误报模拟场景报价过期。发布状态仍以GO-LIVE为准。
+
+**任务月度用量**同样按实际北京时间计量：`XiaozhuTasks.tsx`用实际日期的上海月份查询，`agentTasks.platformTaskUsage`按任务真实创建时间换算上海月份聚合；冻结经营月及UTC月份均不能替代用量月份。固定场景前端、UTC月末前端和服务端月初/月末边界已有回归；当前真实任务的11月用量在本地新版页面经已部署API读回为2项/21次，未生成额外任务。
+
 ```mermaid
 flowchart LR
   U[本人安排任务] --> R[受保护任务登记]
@@ -240,6 +390,8 @@ flowchart LR
 - **原邮箱状态**：`stateQueue.ts`把观察关联与执行授权分开。本人确认邮件动作后，以本人权限继续同步，同时`sourceTasks`关联原任务；重试或替换未发出的同字段意图保留观察者，任务不得在有关原邮箱操作未完成时成功结束。停止Agent不撤销本人已明确确认的操作。旧登记仍支持原任务租约及单一来源字段；不根据相近时间自动猜测或回填关联。自动收件开关不是单封移动结果，不能把`off`当移动失败，也不能把本地文件夹改变当原邮箱已完成。
 - **故障与资源**：模型故障退避重试，连续三次暂停，原任务、额度、未确认写入决定和已办结果保留；恢复后清除当前故障提示，历史重试事件继续保留。每任务仍24小时、40次业务调用、30分钟累计有效执行，另限制60个已保存模型工具步骤。已完成历史按大小压缩并明确标记，保留所有操作编号；未确认写入的参数不压缩或改写。单次过大读取明确要求缩小范围，不把未向模型提供的内容登记成完整已读证据。
 - **实际核验与未覆盖**：独立本地Mist中，普通业务员经实际平台模型查询/读信/提问，暂停补答、服务重启及明确继续后重新读取并报告；另由模型预演并提交移动提议，本人在真实界面确认，原邮箱只移动一次，再读取审计、邮件与同步状态。整体业务数据除明确的邮件状态、提议和审计外保留，未发信、未改订单、金额、正文或其他邮件。管理员与业务员实页切换后，另用只读服务精确查询本人确认的原回执；中文指令在English界面输出英文报告，业务整体摘要和远端写计数不变，凭据已撤销。受控故障测试覆盖提交后回执中断、新运行实例接续、并发领取、迟到输出、失权、只读、模型故障恢复、压缩边界及定位原编号；不以测试替身冒充实际模型。英文只读与精确原回执验证、当前固定版本检查和发布状态继续按GO-LIVE登记。
+- **2026-11-16 本地真实模型核验**：在隔离PostgreSQL副本按用户指定的`codex/gpt-6.1-terra`完成两条普通账号任务。第一条经5轮真实模型/标准任务工具读取客户确认附件，完整正文、范围与原件SHA一致；第二条先提SC、本人拒绝，重新读取并审计来源后改提PI，本人确认才生成。文件已提交后注入本地连接拒绝，恢复原网关后同一任务回源收尾，13轮仅生成1份PI，真实浏览器下载SHA一致；原财务/用章及其他经营记录保留，另一公司对任务/文件/问答及外公司来源4项404。凭据仅私有运行配置；未证明真实收发、语音/实机、Windows或云端连接已就绪，发布以GO-LIVE为准。
+- **只读问答的订单数量**：`mist/assistant.ts`仅从当前可见订单行构建`summarizeOrderQuantity`摘要，混合单位按组保留；没有记录单位的旧头数量不推断为件数，坏数量标记未决。来源链接仍由服务返回，模型正文使用业务单号/标题，不展示内部UUID。此问答来源与任务MCP权限分别受原入口约束。
 - **当前剩余边界（2026-11-11对齐）**：明确时间/资料条件等待见6.3.1–6.3.2，附件分页/准确回程见6.2.1，三类非邮箱自动规则实际核验见6.4.1，不再列为待开发。跨日持续观察、多公司压力/公平性和更多客户端/岗位分支仍须分别验证；首发剩余项和发布状态以GO-LIVE最新收尾清单为准。小竹业务问答仍按6.2的独立来源契约。
 
 - **耗尽任务不阻塞候选队列**：`duePlatformTasks`不能在数据库`take`之后直接丢弃累计运行时长耗尽的登记，否则最早的旧任务可永久占住候选窗口。仅向执行器返回`exhausted`元信息，按原版本锁定后把其`nextRunAt`推进到该任务原到期日；不重置预算、不改原状态/问题/报告/已读，也不构造执行主体或调用模型。每轮最多50次有界候选读取，实际启动数仍受本轮空闲槽和原并发上限限制；同一候选反复出现时停止本轮，下一周期重新核对。原候选版本已变化则不覆盖并发操作。直接累计耗尽、最后一段过期租约及并发标记竞争已有受控回归；真实时钟长时观察单列，不把这些用例当作跨日值守验收。多租户调度公平性仍待后续验证。
@@ -307,11 +459,22 @@ flowchart LR
 
 #### 内部面料分配与交接
 
+- **完整内供与分批票据核算（2026-11-14，适用于当前成本口径）**：`mistPayables.ts#purchasePrepaymentAppliedMinor/purchasePrepaymentAvailableMinor/payableBills`分别跟踪结算已确认抵扣、剩余可抵预付及关联票据抵扣，不把抵票再记一次现金。最后一批数量加已确认结算数量达到合同量时，`FinanceSettlements`自动带最终标志，财务每笔确认重新签字。`mistOrderCost.ts#orderActualCost`按到票和未到票分列成本，内部采购通过`internalFabricCostShare/financialMaterialCostBasis`归最终订单；无加成且已全部转给成衣、没有来源余料时，来源内部单的未分摊成本为0，成衣只计一次该采购成本，内部不生成外部应收。当前核算沿价税合计口径、退税单独列示，不擅自从已到票成本再扣一次票面税额；未到票加工及未开票销售仍保留暂估标志。角色裁剪和税基限制不因已结算解除。
+- **供应商一票多合同（2026-11-14，现行接口）**：`payable.bill.register`的`lines`按同供应商、同币种的各合同保存本票金额，并分别关联本合同已确认的`settlementId`；票面`taxAmount`在整票保存一次。`mistOrderCost.ts#orderActualCost`按各合同对应金额归集，不把整张`bill.amount`重复计到每个合同；内部供料成本仍按准确分配归最终订单。票据形成应付不产生现金，预付按对应合同抵扣，不借用其他供应商的预款；税基与专票原件权限覆盖全部关联合同。旧票/结算/现金不重写，当前业务实测及发布状态见GO-LIVE。
+
+- **待点清的结算数量（2026-11-14，单页增量待发布）**：`FinanceSettlements.tsx#SettlementSubmitDialog`在直送未点清时从`materialDeliveryRows`展示原交付总量、已点收与待点收；不把扣除已拒收后的临时收货数标成确认实收。点清后才按收货记录的合格数量展示“实收”并允许勾选。`settlementReceipts/assertSettlementReceiptsCounted`的服务端整笔点清规则保持不变，显示修复不改业务数量或核销。`FinancePayables.test.tsx`覆盖部分点收兼有拒收、补点清后的选择/数量切换。
+
+- **直送接收与原件（2026-11-14，分支待发布）**：`scopedFabricAccess`同时返回仓库发料与供应商直送的最小交接记录；`MaterialDeliveryPanel`按交接展示只读送货依据。当前有订单读写权的准确接收人通过`scopedMaterialDeliveryFileIds`获得该笔直送附件的元信息、下载和有界正文权限，仍经过印章/敏感原件/同字节限制；来源报价、合同和其他交接文件不因此开放。办理点收时，仓储只承认该接收记录引用；`scopedWriteViolation`按四位小数精确验证追加点收及对应拒收差量，来源采购仅允许匹配的`received`差量、来源订单仅允许派生状态/色调；价格、附件、其他条目和旧点收不得改写。新回归覆盖部分接收/拒收、旧式整笔确认、来源字段篡改、其他成员与权限收回。该授权不写入业务状态，既有业务门禁继续由`confirmMaterialDelivery`复核。
+
+- **直送的跨组目标（2026-11-14，分支待发布）**：`scopedMaterialDeliveryTargets`按当前可写、已批准/发出/供方确认的来源采购，复用`materialDeliveryTargets`派生响应专用候选；`materialDeliveryTargets[purchaseId]`只含目标编号值、加工合同/工厂标签、剩余量和来源质量阻断，不开放目标订单/采购/生产正文或金额。仓储仅为`fulfillment.materials.deliver`及供应商路径的`fulfillment.procurement.receive`放行本次合法目标引用，业务层继续重验分配、数量、质量和接收资格；取消分配或改用其他目标仍拒绝。响应按当前采购读取/办理权限和可见来源过滤，小组视角再按保留采购过滤；不存业务状态。采购交付弹窗消费该最小候选，质量阻断不能提交直送。回归见`materialCrossGroupRepository.test.ts`、`ProcurementPage.test.tsx`、`teamView.test.ts`。
+
 - 当前页面入口为 `dev-ui-preview/mist-atelier/app/main.tsx` → `ReferenceApp.tsx`；分配与点收界面分别在 `pages/InternalFabricPanel.tsx`、`pages/MaterialDeliveryPanel.tsx`，库存入口在 `pages/modules/InventoryPage.tsx`，开产核对在 `pages/productionGate.ts`。
 - 业务真源在 `server/src/shared/mistInternalFabric.ts`。成衣订单条目使用有效分配指向面料订单；仓库发料记录与接收点收保留独立历史，旧分配版本的交接不得用于新版本的发料限额或短结判断。
 - 行级范围按 `server/src/shared/mistDataScope.ts` 与 `server/src/mist/repository.ts` 执行。指定接收人通过响应中的 `scopedFabricAccess` 获取目标条目的最小候选、门禁和交接摘要；隐藏来源订单的商业信息不因此公开。接收动作在服务端重新核对身份、来源、状态和写入范围。生产页展示该条目的服务端门禁摘要，放行仍以服务端校验为准。
 - 针对性回归入口：`server/src/mist/materialCandidateRepository.test.ts`、`server/src/shared/mistMaterialCrossGroup.test.ts`、`server/src/shared/mistMaterialShortClose.test.ts`、`dev-ui-preview/mist-atelier/app/pages/productionGate.test.ts`。
 - **产前样跨组门禁（2026-10-30）**：`productionSampleRequirements` 比对产前样与当前物料计划；接收人看不到面料来源时，不能在裁剪状态里重新计算指纹并据此声称“未登记”。`scopedFabricAccess` 在接收人具有订单读写、生产/产品/QC 读取权限时，按该接收人的订单条目和生产分支返回最小样品门禁状态；来源商业资料和报告正文不包含在摘要中，任务与样品 ID 只在相应行可见时返回。开产仍以服务端完整状态核验，物料计划修改后旧样品不能用于放行。青屿模拟通过报告、需求方采用及业务接续后，原生产页回读产前样已确认；此为 M 码样品的模拟评审，不代表生产已放行或全部实物已检验。
+
+- **QC报告草稿来源（2026-11-17，分支待发布）**：`QcWorkbenchPage.tsx#qcReportSource/checkedSource`在报告编辑打开时保留任务及准确实物的质量依据，复核与最终保存均比较当前来源并绑定同快照版本；同步改变后保留输入并要求重开。`repository.ts#qcReportReadKeys`在过期版本自动合并前核对任务、实物或对应生产事实/条目变更，冲突409且不留成功回执，无关待办更新仍允许合并。回归含`QcWorkbenchPage.test.tsx`、`workspaceConflictRetry.test.ts`及同名PG用例；独立本地原生双角色已验证同步拒绝、断同步409、恢复后旧稿拒绝、重开当前质量版次报告及无关更新合并，未改原商业数量或既有终检。
 
 #### 隔离处置与无补偿财务核对
 

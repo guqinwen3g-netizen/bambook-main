@@ -19,6 +19,10 @@ beforeEach(() => {
   bridge.current = { state, run: vi.fn(async () => ({ result: { id: 'saved' } })), error: '', refresh: vi.fn(), loading: false, saving: false, pending: null, upload: vi.fn() };
 });
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; host?.remove(); vi.useRealTimers(); });
+it.each([true,false])('keeps unread risk data distinct from a real absence of warnings (loading %s)',async loading=>{
+ const original=bridge.current.state;bridge.current={...bridge.current,state:null,loading,error:loading?'':'读取失败'};await mount(undefined,'signals','list');expect(host.textContent).toContain(loading?'正在读取风险数据':'风险数据未读取');expect(host.querySelector('[data-risk-summary]')).toBeNull();expect(host.querySelector('[role="table"]')).toBeNull();expect([...host.querySelectorAll('button')].some(b=>b.textContent==='导出'||b.textContent==='手工登记')).toBe(false);
+ bridge.current={...bridge.current,state:original,loading:false,error:''};const Page=PLATFORM_PAGES.risks;await act(async()=>root!.render(<Nav.Provider value={{route:{view:'risks',section:'signals'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><Page/></Nav.Provider>));expect(host.querySelector('[data-risk-summary]')).not.toBeNull();expect(host.textContent).not.toContain('风险数据未读取');expect(bridge.current.run).not.toHaveBeenCalled();
+});
 async function mount(id?: string, section?: string, mode: 'full' | 'list' = id ? 'full' : 'list') { const detail = mode === 'full' ? mode : undefined; host = document.createElement('div'); document.body.append(host); root = createRoot(host); const Page = PLATFORM_PAGES.risks; await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'risks', id, section, detail }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
 /** 读列表页（预览模式）上的内容后回到完整详情页。 */
 async function inList<T>(id: string | undefined, section: string | undefined, read: () => T) { await act(async () => root!.unmount()); host.remove(); await mount(id, section, 'list'); const value = read(); await act(async () => root!.unmount()); host.remove(); await mount(id, section); return value; }
@@ -39,12 +43,21 @@ function orderRisk(patch: Partial<RiskRecord>, owner?: string, ownerId?: string)
   state.platform!.risks.unshift(r); return r;
 }
 
+it('keeps the active risk editor above the detail surface when the viewport narrows',async()=>{
+ const original=window.matchMedia,listeners=new Set<()=>void>(),media={matches:false,addEventListener:(_type:string,fn:()=>void)=>listeners.add(fn),removeEventListener:(_type:string,fn:()=>void)=>listeners.delete(fn)};Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:()=>media});
+ try{const record=orderRisk({id:'risk-layer',state:'Open'});await mount(record.id,'ledger','list');await click([...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='手工登记'));const editor=document.querySelector('[role="dialog"]');expect(editor).toBeTruthy();expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);await act(async()=>{media.matches=true;listeners.forEach(fn=>fn());});expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);expect(document.querySelector('[role="dialog"]')).toBe(editor);expect(bridge.current.run).not.toHaveBeenCalled();}finally{Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:original});}
+});
+it.each([false,true])('uses bound customer account IDs in the manual source picker while preserving unrestricted risk handlers (risk write %s)',async unrestricted=>{
+ bridge.perms=unrestricted?['risk:read','risk:write']:['risk:read','orders:write','relations:write'];state.orders[0].ownerId=bridge.user.id;state.orders[0].owner=bridge.user.displayName;
+ state.customers=[{id:'my-customer',name:'本人客户',ownerId:bridge.user.id,owner:bridge.user.displayName},{id:'same-name-other-owner',name:'同名另一账号客户',ownerId:'different-account',owner:bridge.user.displayName},{id:'display-as-id',name:'姓名碰撞的另一账号客户',ownerId:bridge.user.displayName,owner:'其他人'},{id:'unbound-owner',name:'未绑定客户',owner:bridge.user.displayName}]as any;
+ await mount(undefined,'signals','list');await click([...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='手工登记'));const kind=document.body.querySelector('select[aria-label="来源类型"]')as HTMLSelectElement;expect(kind).toBeTruthy();await act(async()=>{kind.value='customer';kind.dispatchEvent(new Event('change',{bubbles:true}));});const customers=document.body.querySelector('select[aria-label="来源客户"]')as HTMLSelectElement;expect(customers).toBeTruthy();const ids=[...customers.options].map(o=>o.value).filter(Boolean).sort();expect(ids).toEqual(unrestricted?['display-as-id','my-customer','same-name-other-owner','unbound-owner']:['my-customer']);expect(bridge.current.run).not.toHaveBeenCalled();
+});
+
 describe('风险管理与合规', () => {
   it('预警页：汇总、已登记的预警显示负责人；未登记预警可带来源登记', async () => {
     await mount();
     const summary = host.querySelector('[data-risk-summary]')!.textContent!;
     expect(summary).toContain('未登记预警'); expect(summary).toContain('待审批申请');
-    expect(host.textContent).toContain('外币应收与采购在此按原币显示');
     const cert = risk('Open'); expect(row(cert.title)!.textContent).toContain('沈禾');
     const free = riskSignals(state, '2026-10-14').find(s => !state.platform!.risks.some(r => r.signalKey === s.key))!;
     expect(free).toBeTruthy();

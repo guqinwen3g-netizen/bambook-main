@@ -10,14 +10,27 @@ import request from 'supertest';
 import bcrypt from 'bcryptjs';
 import { describe, expect, it, vi } from 'vitest';
 import { createAuthRouter } from '../route';
+import {sessionRevocationStore} from './sessionRevocationStore';
 import { createAuthService, type TokenPayload } from '../service';
 import { createPermissionService, hasScope } from '../permissionService';
 import { buildAuthTokenPayload, buildLoadedAuthTokenPayload, serializeAuthUser } from '../tokenHelpers';
 import { createAuthorizationSnapshotGuard } from '../authorizationSnapshotGuard';
 import { createModuleAuthGuard } from '../moduleGuard';
 import { requirePermission } from '../permissionGuard';
+import { newSession, writeSession } from '../sessionLifetime';
 
 const password = 'SyntheticAuthAuthorizationPassword!';
+
+it.each([[[]],[['orders:read']],[undefined]] as Array<[string[]|undefined]>)('rehydrates a compact cookie and retains ceiling %j after withdrawal',async ceiling=>{
+ const fixture=database(),auth=createAuthService();let cookie='';
+ const prior:TokenPayload={userId:fixture.user.id,roles:['owner'],roleIds:['role-super-admin'],permissions:['*'],departmentIds:[],authorizationLoaded:true,...(ceiling===undefined?{}:{permissionCeiling:ceiling})};
+ writeSession({cookie:(name:string,value:string)=>{cookie=`${name}=${value}`;}} as any,auth,prior,newSession(true));
+ const app=express();app.use(cookieParser());app.use(createAuthorizationSnapshotGuard({prisma:fixture.prisma}));
+ app.get('/read',requirePermission('orders:read'),(req,res)=>{const actor=(req as any).actor as TokenPayload;res.json({permissions:actor.permissions,ceiling:actor.permissionCeiling,writeAllowed:hasScope(actor,'orders:write')});});
+ const first=await request(app).get('/read').set('Cookie',cookie);expect(first.status).toBe(ceiling?.length===0?403:200);if(first.status===200)expect(first.body).toEqual({permissions:['orders:read'],...(ceiling===undefined?{}:{ceiling}),writeAllowed:false});
+ fixture.user.roles[0].role.permissions=[];
+ expect((await request(app).get('/read').set('Cookie',cookie)).status).toBe(403);
+});
 type Grant = { scope: string; isActive: boolean; deletedAt: Date | null; expiresAt: Date | null };
 
 function database(roleId = 'role-sales', scopes: string[] = ['orders:read'], grants: Grant[] = []) {
@@ -29,6 +42,7 @@ function database(roleId = 'role-sales', scopes: string[] = ['orders:read'], gra
       isSystem: roleId === 'role-sales', permissions: scopes.map(scope => ({ permission: { scope } })) } }],
   };
   const prisma: any = {
+    authSessionRevocation:sessionRevocationStore(),
     userAccount: {
       findFirst: vi.fn(async () => user),
       findUnique: vi.fn(async (query: any) => {
@@ -64,12 +78,15 @@ function priorToken() {
     departmentIds: ['stale-department'] });
 }
 
-function renewedPayload(response: { headers: Record<string, unknown> }): TokenPayload {
+function cookieHeader(response: { headers: Record<string, unknown> }): string {
   const headers = response.headers['set-cookie'];
   const cookies = Array.isArray(headers) ? headers.map(String) : [String(headers ?? '')];
   const cookie = cookies.map(value => value.split(';')[0]).find(value => value.startsWith('bambook_token='));
   expect(cookie, 'successful refresh must issue the actual session cookie').toBeDefined();
-  return createAuthService().verifyToken(decodeURIComponent(cookie!.slice('bambook_token='.length)));
+  return cookie!;
+}
+function renewedPayload(response: { headers: Record<string, unknown> }): TokenPayload {
+  return createAuthService().verifyToken(decodeURIComponent(cookieHeader(response).slice('bambook_token='.length)));
 }
 
 describe.each(['snapshot'] as const)('%s current-authorization error boundary (actual JWT/loader, substituted storage)', kind => {
@@ -278,12 +295,15 @@ describe('current effective authorization: actual login/me/refresh HTTP with sto
     ]);
     const response = await request(host(fixture.prisma)).post('/auth/refresh').set('Cookie', `bambook_token=${priorToken()}`);
     expect(response.status).toBe(200);
-    const payload = renewedPayload(response);
+    const payload = createAuthService().verifyToken(response.body.token);
     expect(payload).toMatchObject({ roles: ['sales'], roleIds: ['role-sales'], permissions: [],
       departmentIds: ['company'], authorizationLoaded: true });
     expect(response.body.user.permissions).toEqual([]);
     expect(hasScope(payload, 'orders:read'), 'last permission revocation must not be restored from the sales default matrix').toBe(false);
     expect(hasScope(payload, 'orders:write')).toBe(false);
+    expect(renewedPayload(response)).toMatchObject({roles:[],permissions:[],authorizationLoaded:true});
+    const cookieMe=await request(host(fixture.prisma)).get('/auth/me').set('Cookie',cookieHeader(response));
+    expect(cookieMe.status).toBe(200);expect(cookieMe.body.user.permissions).toEqual([]);
   });
 
   it('refresh admits new effective personal grants and honors the same explicit Bearer principal as other auth routes', async () => {
@@ -294,8 +314,11 @@ describe('current effective authorization: actual login/me/refresh HTTP with sto
     const response = await request(host(fixture.prisma)).post('/auth/refresh')
       .set('Authorization', `Bearer ${priorToken()}`).set('Cookie', 'bambook_token=invalid-passive-cookie');
     expect(response.status).toBe(200);
-    expect(renewedPayload(response)).toMatchObject({ roles: ['sales'],
+    expect(createAuthService().verifyToken(response.body.token)).toMatchObject({ roles: ['sales'],
       permissions: ['hr:salary:read', 'orders:read', 'sensitive:salary'], authorizationLoaded: true });
+    expect(renewedPayload(response)).toMatchObject({roles:[],permissions:[],authorizationLoaded:true});
+    const cookieMe=await request(host(fixture.prisma)).get('/auth/me').set('Cookie',cookieHeader(response));
+    expect(cookieMe.status).toBe(200);expect(cookieMe.body.user.permissions).toEqual(['hr:salary:read','orders:read','sensitive:salary']);
   });
 
   it.each(['pending', 'disabled', 'deleted'] as const)('refresh cannot renew a %s account into a new authorized session', async state => {
@@ -318,14 +341,18 @@ describe('current effective authorization: actual login/me/refresh HTTP with sto
         permissions: ['orders:read'], departmentIds: ['company'], authorizationLoaded: true, ...(ceiling === undefined ? {} : { permissionCeiling: ceiling }) });
       const refreshed = await request(host(fixture.prisma)).post('/auth/refresh').set('Authorization', `Bearer ${prior}`);
       expect(refreshed.status).toBe(200);
-      const renewed = renewedPayload(refreshed);
+      const renewed = createAuthService().verifyToken(refreshed.body.token),credential=renewedPayload(refreshed);
       expect(renewed.permissionCeiling).toEqual(ceiling); expect(refreshed.body.user.permissionCeiling).toEqual(ceiling);
+      expect(credential.permissionCeiling).toEqual(ceiling);expect(credential.permissions).toEqual([]);expect(credential.authorizationLoaded).toBe(true);
       expect(hasScope(renewed, 'orders:read')).toBe(ceiling === undefined || ceiling.includes('orders:read'));
       const profile = await request(host(fixture.prisma)).patch('/auth/me').set('Authorization', `Bearer ${prior}`)
         .send({ displayName: 'Renamed', permissionCeiling: ['*'], permissions: ['*'] });
       expect(profile.status).toBe(200);
       expect(Object.hasOwn(profile.body.user, 'permissionCeiling')).toBe(ceiling !== undefined);
       expect(profile.body.user.permissionCeiling).toEqual(ceiling);
+      expect(profile.headers['set-cookie']).toBeUndefined();
+      const cookieMe=await request(host(fixture.prisma)).get('/auth/me').set('Cookie',cookieHeader(refreshed));
+      expect(cookieMe.status).toBe(200);expect(cookieMe.body.user.permissionCeiling).toEqual(ceiling);
     });
 
   it('serializer copies a provided ceiling and keeps an absent ceiling distinct from an empty one', () => {

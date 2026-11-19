@@ -1,3 +1,4 @@
+import {shippingSampleSourceSnapshot} from './mistShipmentSampleCustody';
 import { describe, expect, it } from 'vitest';
 import { type MistCommand } from './mistWorkspace';
 import { customsItemsStale } from './mistCustomsDeclaration';
@@ -59,6 +60,7 @@ function scenario(actualQuantity = 10) {
   function sample(l: ShipmentLine, role: 'pp' | 'shipping', shipmentId?: string) {
     const source = { kind: 'orderLine' as const, orderId: l.orderId, lineId: l.lineId, productionId: l.productionId };
     const sampleId = run({ type: 'fulfillment.samples.create', payload: { name: '上衣样', category: '成衣', form: '实物', quantity: 1, unit: '件', size: 'M', color: '蓝', location: '样品室', source, role, shipmentId, note: '', fileIds: [] } }).id!;
+    if(role==='shipping')run({type:'fulfillment.samples.shippingBasis',payload:{id:sampleId,kind:'independent',sourceSnapshot:shippingSampleSourceSnapshot(f.state,f.state.fulfillment.samples.find(s=>s.id===sampleId)!),independentSource:'Factory supplied an additional QA specimen outside commercial quantities',evidence:'Independent sample custody checked',fileIds:[]}});
     const id = run({ type: 'fulfillment.qc.request', payload: { source, sampleId, domain: 'garment', kind: 'sample', factory: '本地验收工厂', location: '样品室', contact: '', due: '2026-10-13' } }).id!;
     run({ type: 'fulfillment.qc.claim', payload: { id, domain: 'garment' } }, 'qc');
     run({ type: 'fulfillment.qc.report', payload: { id, domain: 'garment', result: 'pass', report: 'SAMPLE', opinion: '按实物检验', measurements: [], fileIds: [], reviewedAt: f.context.now } }, 'qc');

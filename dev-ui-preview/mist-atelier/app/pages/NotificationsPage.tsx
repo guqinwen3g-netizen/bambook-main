@@ -9,7 +9,7 @@ import type { MistNotification } from '../../../../server/src/shared/mistWorkspa
 import type { View } from '../../../../types';
 import { useNav } from '../nav';
 import { useMistSession } from '../runtime/auth';
-import { useMistWorkspace } from '../runtime/workspace';
+import { useMistWorkspace, type MistCommandRecovery } from '../runtime/workspace';
 import { notificationPermissionView,visibleMistNotifications } from '../runtime/notificationPreferences';
 import {readAllMistNotices,readMistNotice} from '../runtime/agentTaskNotices';
 import { FailureNotice } from '../runtime/FailureNotice';
@@ -31,20 +31,38 @@ export function NotificationsPage() {
   const workspace = useMistWorkspace(), session = useMistSession(), { route, go } = useNav(), toast = useToast(), state = workspace.state;
   const tab: NotificationTab = route.section === 'all' ? 'all' : 'unread';
   const [kind, setKind] = React.useState<'all' | Category>('all'), [query, setQuery] = React.useState(''), [error, setError] = React.useState('');
+  const [failedCommand, setFailedCommand] = React.useState<Omit<MistCommandRecovery, 'revision'> | null>(null);
+  const recovered = workspace.commandRecovery;
+  // An acknowledgement settles only the failed read which produced this notice.
+  React.useEffect(() => {
+    if (failedCommand && recovered && failedCommand.requestId === recovered.requestId
+      && failedCommand.workspaceId === recovered.workspaceId && failedCommand.actorId === recovered.actorId
+      && recovered.workspaceId === workspace.workspace?.id && recovered.actorId === session.user?.id) {
+      setError(''); setFailedCommand(null);
+    }
+  }, [failedCommand, recovered, workspace.workspace?.id, session.user?.id]);
   const visible = visibleMistNotifications(state, view => session.canAccessView(view as View),workspace.agentTaskNotices?.items);
   const unread = visible.filter(n => !n.readAt).length;
   const shown = notificationRows(visible, tab, kind, query);
   const kinds = (Object.keys(NOTIFICATION_CATEGORY_LABEL) as Category[]).filter(c => visible.some(n => category(n) === c));
   const prefs = state?.settings.notifications, off = prefs ? [!prefs.qc && 'QC 报告回传', !prefs.shipping && '出运准备提醒', !prefs.suggestions && '小竹主动建议'].filter(Boolean) as string[] : [];
   const busy = workspace.saving || !!workspace.pending || !!workspace.agentTaskNotices?.reading;
-  const report = (failure: unknown) => { const message = failure instanceof Error ? failure.message : '操作未完成，请重试'; setError(message); toast(message, 'bad'); };
+  const clearFailure = () => { setError(''); setFailedCommand(null); };
+  const report = (failure: unknown) => {
+    const message = failure instanceof Error ? failure.message : '操作未完成，请重试';
+    const pending = failure && typeof failure === 'object' ? (failure as { mistPendingCommand?: Partial<MistCommandRecovery> }).mistPendingCommand : undefined;
+    setFailedCommand(pending && typeof pending.requestId === 'string' && pending.requestId && typeof pending.workspaceId === 'string' && pending.workspaceId && typeof pending.actorId === 'string' && pending.actorId
+      ? { requestId: pending.requestId, workspaceId: pending.workspaceId, actorId: pending.actorId } : null);
+    setError(message); toast(message, 'bad');
+  };
   const canOpen = (n: MistNotification) => !!n.target?.view && session.canAccessView(notificationPermissionView(n.target.view) as View);
   const open = (n: MistNotification) => {
     if (busy) return;
+    clearFailure();
     void readMistNotice(workspace,n)
       .then(() => { if (canOpen(n)) go(n.target.view, n.target.id, n.target); }).catch(report);
   };
-  const readAll = () => { setError(''); void readAllMistNotices(workspace,visible).then(() => toast('已全部标为已读')).catch(report); };
+  const readAll = () => { clearFailure(); void readAllMistNotices(workspace,visible).then(() => toast('已全部标为已读')).catch(report); };
   const columns: Column<MistNotification>[] = [
     { key: 'title', header: '通知', width: 'minmax(240px,3fr)', render: n => <ObjectCell name={n.readAt ? n.title : <strong>{n.title}</strong>} meta={n.detail} /> },
     { key: 'kind', header: '类型', width: '104px', hideOnMobile: true, render: n => <Pill tone={TONE[category(n)]}>{NOTIFICATION_CATEGORY_LABEL[category(n)]}</Pill> },
@@ -56,7 +74,7 @@ export function NotificationsPage() {
     <PageHeader eyebrow={uiText("我的事务 · 通知")} title={uiText("通知中心")}
       actions={<><Button icon={Settings2} onClick={() => go('settings', undefined, { section: 'notify' })}>{uiText("通知订阅")}</Button>
         <Button variant="primary" icon={CheckCheck} disabled={busy || !unread} loading={workspace.saving} onClick={readAll}>{uiText("全部标为已读")}</Button></>} />
-    {error && <FailureNotice title="通知操作未完成" detail={error} retry={() => setError('')} retryLabel="知道了" />}
+    {error && <FailureNotice title="通知操作未完成" detail={error} retry={clearFailure} retryLabel="知道了" />}
     {!error&&workspace.agentTaskNotices?.error&&<FailureNotice title="Agent 通知读取失败" detail={workspace.agentTaskNotices.error} retry={()=>void workspace.agentTaskNotices?.refresh()} retryLabel="重新加载" />}
     {!!off.length && <Banner variant="status" tone="neutral" title={ui`已关闭：${off.join('、')}`} actions={<Button size="sm" onClick={() => go('settings', undefined, { section: 'notify' })}>{uiText("去设置")}</Button>}>{uiText("这些类别的通知不在这里显示，重新开启后会恢复显示。")}</Banner>}
     <Tabs<NotificationTab> value={tab} onChange={next => go('notifications', undefined, { section: next })} options={[{ value: 'unread', label: '未读', count: unread }, { value: 'all', label: '全部', count: visible.length }]} />

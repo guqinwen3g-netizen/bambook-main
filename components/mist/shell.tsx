@@ -1,5 +1,6 @@
 import { uiText, ui } from '../../services/interfaceLanguage';
 import React from 'react';
+import {PageBackRegistrationContext} from './pageBack';
 import { createPortal } from 'react-dom';
 import type { LucideIcon } from 'lucide-react';
 import { ArrowLeft, Bell, ChevronDown, ChevronRight, Menu, Moon, PanelLeft, Search, Sun, X } from 'lucide-react';
@@ -248,7 +249,11 @@ export function PageHeader({ eyebrow, title, description, actions, variant }: { 
     </section>
   );
 }
-export function BackLink({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+export function BackLink({ children, onClick, onTopbarBack }: { children: React.ReactNode; onClick: () => void; onTopbarBack?:()=>void }) {
+  const register=React.useContext(PageBackRegistrationContext),action=React.useRef(onTopbarBack),ownsTopbar=!!onTopbarBack;
+  React.useLayoutEffect(()=>{action.current=onTopbarBack;},[onTopbarBack]);
+  const invoke=React.useCallback(()=>action.current?.(),[]);
+  React.useLayoutEffect(()=>ownsTopbar?register?.(invoke):undefined,[register,invoke,ownsTopbar]);
   return <button type="button" className="mist-back" onClick={onClick}><Icon icon={ArrowLeft} size="sm" />{uiText(children)}</button>;
 }
 export function Toolbar({ children, right }: { children?: React.ReactNode; right?: React.ReactNode }) {

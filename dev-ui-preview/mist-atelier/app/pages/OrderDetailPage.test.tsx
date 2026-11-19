@@ -7,7 +7,7 @@ import { MistRoot, ToastProvider } from '../../../../components/mist';
 import { applyMistCommand, createMistState, type MistState } from '../../../../server/src/shared/mistWorkspace';
 import type {OrderFundingAssignment} from '../../../../server/src/shared/mistOrderFunding';
 import { Nav } from '../nav';
-const store = vi.hoisted(() => ({ state: null as MistState | null, loading: false, error: '', run: vi.fn(), refresh: vi.fn(), uploadFile: vi.fn(), downloadFile: vi.fn() }));
+const store = vi.hoisted(() => ({ state: null as MistState | null, workspace:{id:'workspace',revision:1}, loading: false, error: '', run: vi.fn(), dismissError: vi.fn(), refresh: vi.fn(), uploadFile: vi.fn(), downloadFile: vi.fn() }));
 vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => store }));
 const permissions=vi.hoisted(()=>({ordersWrite:true,shippingRead:true}));
 vi.mock('../runtime/auth',()=>{const session=()=>({user:{id:'sales',displayName:'业务员甲'},sessionKey:'detail-session',hasPermission:(p:string)=>p==='orders:write'?permissions.ordersWrite:p==='shipments:read'?permissions.shippingRead:true,canAccessView:(view:string)=>view==='shipments'?permissions.shippingRead:true});return{useOptionalMistSession:session,useMistSession:session};});
@@ -22,7 +22,8 @@ function render() {
   act(() => root.render(<MistRoot><ToastProvider><Nav.Provider value={{ route: { view: 'orders/detail', id: orderId }, go, openAI: vi.fn(), theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn() }}><MistPresentedErrorContext.Provider value={presentedError}><OrderDetailPage /></MistPresentedErrorContext.Provider></Nav.Provider></ToastProvider></MistRoot>));
 }
 beforeEach(() => {
-  sequence = 0;presentedError=undefined;store.error='';permissions.ordersWrite=true;permissions.shippingRead=true;go.mockClear();store.run.mockReset();store.uploadFile.mockReset();store.downloadFile.mockReset();
+  store.workspace={id:'workspace',revision:1};
+  sequence = 0;presentedError=undefined;store.error='';permissions.ordersWrite=true;permissions.shippingRead=true;go.mockClear();store.run.mockReset();store.dismissError.mockReset();store.uploadFile.mockReset();store.downloadFile.mockReset();
   const empty = createMistState(context, 'empty');
   empty.customers.push({ id: 'customer-a', code: 'C-A', name: '客户甲', country: '', city: '', industry: '', owner: '业务员甲', grade: 'A', currency: 'USD', terms: '', incoterm: '', categories: '', creditLimit: 0, since: '2026-01-01' });
   const result = applyMistCommand(empty, { type: 'order.create', payload: { type: 'garment', customerId: 'customer-a', season: 'AW28', currency: 'USD', due: '2026-10-30', ownerId:'sales', lines: [{ name: '精确金额条目', style: 'ROUND-01', img: 'coat', fulfillmentMode:'cmt', cmtIncludedItems:[], qty: 1.005, unit: '件', price: 1 }] } }, context);
@@ -30,6 +31,52 @@ beforeEach(() => {
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
+
+it('does not turn an empty merged void source into an amount-reconciliation todo or guess its former value',()=>{
+ const order=store.state!.orders[0];order.governance!.status='void';order.governance!.termination={kind:'void',reason:'并入 SO-DEST：统一交付',at:context.now,byId:'sales',byName:'业务员甲'};order.amount=7.6;store.state!.orderLines=[];
+ render();expect(host.textContent).not.toContain('待核对订单金额');expect(queryByRole(host,'button',{name:'查看收款核销'})).toBeNull();const summary=getByText(host,'订单金额').parentElement!.querySelector('.mist-sumbar-big')!;expect(summary.textContent).toContain('—');expect(summary.textContent).not.toContain('7.60');expect(summary.textContent).not.toContain('0.00');expect(store.run).not.toHaveBeenCalled();
+});
+
+it.each(['draft','approved','cancelled'] as const)('keeps the missing-current-amount guard for an empty %s order',status=>{
+ const order=store.state!.orders[0];order.governance!.status=status;store.state!.orderLines=[];render();expect(host.textContent).toContain('待核对订单金额');expect(getByText(host,'订单金额').parentElement!.querySelector('.mist-sumbar-big')!.textContent).toContain('—');
+});
+
+it('keeps an actual amount problem visible on a void order that still has current lines',()=>{
+ const order=store.state!.orders[0];order.governance!.status='void';order.governance!.termination={kind:'void',reason:'客户撤回',at:context.now,byId:'sales',byName:'业务员甲'};store.state!.orderLines[0].price=NaN;render();expect(host.textContent).toContain('待核对订单金额');
+});
+
+it('preserves the old approved snapshot when the current merged void source has no lines',async()=>{
+ const order=store.state!.orders[0];order.type='fabric';order.governance!.status='void';order.governance!.termination={kind:'void',reason:'合并后作废：统一交付',at:context.now,byId:'sales',byName:'业务员甲'};order.governance!.rounds=[{id:'old-approved',kind:'initial',status:'approved',submittedAt:context.now,requesterId:'sales',reviewerIds:['reviewer'],snapshot:{contract:{...order.governance!.contract,poNumber:'OLD-PO'},currency:'USD',lines:[{id:'old-line',style:'OLD',name:'旧面料',qty:4,unit:'码',price:1.9}]}}] as any;store.state!.orderLines=[];const frozen=structuredClone(order.governance!.rounds);
+ render();expect(host.textContent).not.toContain('待核对订单金额');await act(async()=>getByRole(host,'button',{name:'查看提交快照'}).click());const dialog=getByRole(document.body,'dialog',{name:'主单审批提交快照'});expect(dialog.textContent).toContain('OLD-PO');expect(dialog.textContent).toContain('4 码 × 1.9 USD');expect(order.governance!.rounds).toEqual(frozen);expect(store.run).not.toHaveBeenCalled();
+});
+
+it('makes the exact order operation history readable without inferring links from old prose',async()=>{
+ const state=store.state!,peer={...state.orders[0],id:'split-peer',code:'SO-PEER'};state.orders.push(peer);
+ state.events.push({id:'old-split',entityType:'order',entityId:orderId,actor:'原业务员',at:'2026-11-18T04:00:00Z',text:'拆分订单：A 4 件移至 SO-PEER；按批次交付',fileIds:[]});
+ state.events.push({id:'unrelated',entityType:'order',entityId:peer.id,actor:'另一业务员',at:'2026-11-18T04:00:00Z',text:'另一订单的内部记录',fileIds:[]});
+ render();await act(async()=>getByRole(host,'button',{name:'订单记录',exact:true}).click());
+ expect(host.textContent).toContain('原业务员');expect(host.textContent).toContain('A 4 件移至 SO-PEER；按批次交付');expect(host.textContent).not.toContain('另一订单的内部记录');
+ expect(queryByRole(host,'button',{name:'去向 SO-PEER',exact:true})).toBeNull();expect(store.run).not.toHaveBeenCalled();
+});
+
+it('links a split destination by its trusted id and the current readable order instead of a code in the reason',async()=>{
+ const state=store.state!,peer={...state.orders[0],id:'split-peer',code:'SO-EXACT',type:'fabric' as const};state.orders.push(peer);
+ state.events.push({id:'new-split',entityType:'order',entityId:orderId,actor:'原业务员',at:'2026-11-18T04:00:00Z',text:'拆分订单：A 4 件；原因提及 SO-DECOY',fileIds:[],orderFlow:{action:'split',sourceOrderId:orderId,targetOrderId:peer.id,lines:[{sourceLineId:'source-line',targetLineId:'copy-line',quantity:4,unit:'件'}]}} as any);
+ permissions.ordersWrite=false;render();await act(async()=>getByRole(host,'button',{name:'订单记录',exact:true}).click());await act(async()=>getByRole(host,'button',{name:'去向 SO-EXACT',exact:true}).click());
+ expect(go).toHaveBeenCalledWith('orders/detail','split-peer',{section:'fabric'});expect(queryByRole(host,'button',{name:'SO-DECOY',exact:true})).toBeNull();expect(store.run).not.toHaveBeenCalled();
+});
+
+it('keeps a generic record but does not expose an invisible or unrelated split counterpart',async()=>{
+ const state=store.state!;state.events.push({id:'hidden-flow',entityType:'order',entityId:orderId,actor:'业务员',at:'2026-11-18T04:00:00Z',text:'拆分订单：A 4 件；按批次交付',fileIds:[],orderFlow:{action:'split',sourceOrderId:orderId,targetOrderId:'hidden-order',lines:[{sourceLineId:'source-line',targetLineId:'hidden-line',quantity:4,unit:'件'}]}} as any);
+ const peer={...state.orders[0],id:'visible-peer',code:'SO-VISIBLE'};state.orders.push(peer);state.events.push({id:'wrong-owner-flow',entityType:'order',entityId:orderId,actor:'业务员',at:'2026-11-18T04:00:00Z',text:'普通记录',fileIds:[],orderFlow:{action:'merge',sourceOrderId:'not-this-order',targetOrderId:peer.id,lines:[{sourceLineId:'a',targetLineId:'a',quantity:4,unit:'件'}]}} as any);
+ render();await act(async()=>getByRole(host,'button',{name:'订单记录',exact:true}).click());expect(host.textContent).toContain('A 4 件；按批次交付');expect(host.textContent).not.toContain('hidden-order');expect(queryByRole(host,'button',{name:/^(来源|去向) /})).toBeNull();expect(go).not.toHaveBeenCalled();
+});
+
+it('opens the exact merge source from the destination history without creating a command',async()=>{
+ const state=store.state!,peer={...state.orders[0],id:'merged-source',code:'SO-SOURCE'};state.orders.push(peer);
+ state.events.push({id:'merge-record',entityType:'order',entityId:orderId,actor:'原业务员',at:'2026-11-18T04:00:00Z',text:'合并条目：A 4 件；统一交付',fileIds:[],orderFlow:{action:'merge',sourceOrderId:peer.id,targetOrderId:orderId,lines:[{sourceLineId:state.orderLines[0].id,targetLineId:state.orderLines[0].id,quantity:4,unit:'件'}]}});
+ render();await act(async()=>getByRole(host,'button',{name:'订单记录',exact:true}).click());await act(async()=>getByRole(host,'button',{name:'来源 SO-SOURCE',exact:true}).click());expect(go).toHaveBeenCalledWith('orders/detail',peer.id,{section:'garment'});expect(store.run).not.toHaveBeenCalled();
+});
 
 it('shows an internal budget without external collection or shipping actions',()=>{
   const order=store.state!.orders[0];order.governance!.contract={...order.governance!.contract,kind:'internal',internalPurpose:'Production supply',receiver:'Garment team'};
@@ -84,7 +131,7 @@ it('links uploaded originals to the exact order without changing contract confir
  const input=card.querySelector('input[type="file"]')!;
  Object.defineProperty(input,'files',{value:[new File(['technical'],'factory-original.xlsx',{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})]});
  await act(async()=>{input.dispatchEvent(new Event('change',{bubbles:true}));});render();
- expect(store.run).toHaveBeenCalledWith({type:'order.files.add',payload:{orderId,fileIds:['order-original']}});
+ expect(store.run).toHaveBeenCalledWith({type:'order.files.add',payload:{orderId,fileIds:['order-original']}},{expectedRevision:1});
  expect(store.state!.orders[0].fileIds).toEqual(['order-original']);expect(store.state!.orders[0].governance).toEqual(before);
  expect(getByRole(host,'button',{name:'factory-original.xlsx'})).toBeTruthy();
 });
@@ -156,6 +203,54 @@ it('lets the business attach contract evidence and submit the entire draft for a
 });
 function queryByRoleSafe(name:string){return [...host.querySelectorAll('button')].find(button=>button.textContent===name)||null;}
 
+it('contract editor refuses a synchronized contract change and keeps its input',async()=>{
+ render();act(()=>getByRole(host,'button',{name:'合同与审批资料',exact:true}).click());
+ const input=getByRole(document.body,'spinbutton',{name:'短装下限 %',exact:true}) as HTMLInputElement;
+ act(()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'1.5');input.dispatchEvent(new Event('input',{bubbles:true}));});
+ store.state=structuredClone(store.state!);store.state.orders[0].governance!.contract.overPercent=2.5;store.workspace.revision=2;render();
+ await act(async()=>getByRole(document.body,'button',{name:'保存合同资料',exact:true}).click());
+ expect(store.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('订单合同资料已更新，请重新打开后核对');expect(input.value).toBe('1.5');
+});
+
+it('contract editor refuses changed commercial lines without resetting the open contract',async()=>{
+ render();act(()=>getByRole(host,'button',{name:'合同与审批资料',exact:true}).click());
+ store.state=structuredClone(store.state!);store.state.orderLines[0].price=2;store.workspace.revision=2;render();
+ await act(async()=>getByRole(document.body,'button',{name:'保存合同资料',exact:true}).click());
+ expect(store.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('订单合同资料已更新，请重新打开后核对');
+});
+
+it('contract editor binds unchanged reviewed data to the current checked revision',async()=>{
+ store.run.mockResolvedValue({revision:8,result:{orderId}});render();act(()=>getByRole(host,'button',{name:'合同与审批资料',exact:true}).click());
+ store.workspace.revision=7;render();await act(async()=>getByRole(document.body,'button',{name:'保存合同资料',exact:true}).click());
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'order.governance.saveDraft'}),{expectedRevision:7});
+});
+
+function readyContract(){store.state!.orders[0].governance!.contract={...store.state!.orders[0].governance!.contract,poNumber:'CUSTOMER-PO',paymentNote:'O/A 30 days',paymentMethod:'OA',depositPercent:0,incoterm:'FOB',deliveryPlace:'上海',confirmationFileIds:['po-evidence']};}
+it('contract editor submits approval against its saved receipt revision',async()=>{
+ readyContract();store.workspace.revision=7;store.run.mockResolvedValueOnce({revision:8,result:{orderId}}).mockResolvedValueOnce({revision:9,result:{orderId}});render();
+ act(()=>getByRole(host,'button',{name:'提交主单审批',exact:true}).click());await act(async()=>getByRole(document.body,'button',{name:'保存并提交主单审批',exact:true}).click());
+ expect(store.run).toHaveBeenNthCalledWith(1,expect.objectContaining({type:'order.governance.saveDraft'}),{expectedRevision:7});
+ expect(store.run).toHaveBeenNthCalledWith(2,{type:'order.governance.submit',payload:{orderId}},{expectedRevision:8});
+});
+
+it('contract editor stops after saving when its order route has changed',async()=>{
+ readyContract();let finish!:(value:unknown)=>void;store.run.mockReturnValue(new Promise(resolve=>finish=resolve));render();act(()=>getByRole(host,'button',{name:'提交主单审批',exact:true}).click());
+ await act(async()=>getByRole(document.body,'button',{name:'保存并提交主单审批',exact:true}).click());expect(store.run).toHaveBeenCalledTimes(1);
+ store.state!.orders.push({...store.state!.orders[0],id:'other-contract',code:'OTHER-CONTRACT'});orderId='other-contract';render();
+ await act(async()=>finish({revision:2,result:{orderId:'old'}}));expect(store.run).toHaveBeenCalledTimes(1);
+});
+
+it('contract editor keeps a confirmed server failure inside the modal and dismisses only its duplicate',async()=>{
+ store.run.mockRejectedValue(new Error('合同版本冲突'));store.error='合同版本冲突';presentedError='合同版本冲突';render();act(()=>getByRole(host,'button',{name:'合同与审批资料',exact:true}).click());
+ await act(async()=>getByRole(document.body,'button',{name:'保存合同资料',exact:true}).click());
+ expect(getByRole(document.body,'dialog',{name:'合同与审批资料'}).textContent).toContain('合同版本冲突');expect(store.dismissError).toHaveBeenCalledWith('合同版本冲突');
+});
+
+it('contract editor does not dismiss a later workspace failure after leaving its order',async()=>{
+ let reject!:(error:Error)=>void;store.run.mockReturnValue(new Promise((_,fail)=>reject=fail));render();act(()=>getByRole(host,'button',{name:'合同与审批资料',exact:true}).click());await act(async()=>getByRole(document.body,'button',{name:'保存合同资料',exact:true}).click());
+ store.state!.orders.push({...store.state!.orders[0],id:'later-contract',code:'LATER-CONTRACT'});orderId='later-contract';render();store.error='新订单的错误';await act(async()=>reject(new Error('旧合同错误')));expect(store.dismissError).not.toHaveBeenCalled();expect(store.error).toBe('新订单的错误');
+});
+
 it.each(['draft','approved'] as const)('opens an exact line procurement draft from a %s order without executing fulfillment',async status=>{
   store.state!.orders[0].governance!.status=status;
   store.state!.orderLines.push({...store.state!.orderLines[0],id:'unselected-line',name:'另一条目',style:'OTHER'});
@@ -175,6 +270,24 @@ it('opens the exact existing procurement promise and excludes purchases from oth
   await act(async()=>getByRole(drawer,'button',{name:'查看采购承诺 PO-SELECTED'}).click());
   expect(go).toHaveBeenLastCalledWith('procurement','purchase-selected',{orderLineId:store.state!.orderLines[0].id,section:'order:'+orderId,customerId:'customer-a'});
   expect(store.run).not.toHaveBeenCalled();
+});
+
+it.each([
+  { percent: null, complete: false, label: '进度待核' },
+  { percent: 35, complete: false, label: '35%' },
+  { percent: null, complete: true, label: '已完工' },
+])('uses current factory facts in the production link ($label)', async ({percent,complete,label}) => {
+  const state=store.state!, line=state.orderLines[0], jobId='apron-cut';
+  state.productions.push({id:jobId,code:'AP-01',orderId,lineId:line.id,order:state.orders[0].code,name:'灰围裙',factory:'锦川',qty:24,due:'2026-12-02',pct:0,img:'coat',col:'cut'});
+  state.fulfillment.productionFacts.push({
+    productionId:jobId,sizes:[],revision:1,
+    observations:[{id:'cut-batch',asOf:'2026-11-18',sourceName:'裁床交接单',evidence:'累计8件份',fileIds:[],stage:'cut',percent,quantity:8,recordedAt:context.now,recordedBy:'业务员',recordedById:'sales'}],
+    ...(complete?{completion:{id:'done',quantity:24,sizeQuantities:[],date:'2026-12-02',at:context.now,actor:'跟单',evidence:'完工单',fileIds:[]}}:{}),
+  });
+  render();await act(async()=>getByRole(host,'row',{name:/精确金额条目/}).click());
+  const link=getByRole(document.body,'button',{name:'AP-01 · 锦川 · '+label,exact:true});
+  await act(async()=>link.click());
+  expect(go).toHaveBeenLastCalledWith('production-board',undefined,{productionId:jobId,orderLineId:line.id});
 });
 
 it('returns the receipt action to this exact order funding context without automatic reconciliation',async()=>{
@@ -239,6 +352,64 @@ async function lineInput(label:string,value:string){
   await act(async()=>{Object.getOwnPropertyDescriptor(control.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value')!.set!.call(control,value);control.dispatchEvent(new Event('input',{bubbles:true}));});
 }
 
+it.each(['closed','pending'] as const)('locks the quantity of a %s closure while preserving lawful price changes',async status=>{
+ lineEditorFixture('approved',20);Object.assign(store.state!.orderLines[0],{closure:{id:'closure',status,quantity:0,ordered:20,min:19.4,max:20.6,reason:'客户撤回',requesterId:'sales',requesterName:'业务员甲',requestedAt:context.now,reviewerIds:['leader']}});
+ render();await openLineEditor();expect((getByLabelText(document.body,'订单数量') as HTMLInputElement).disabled).toBe(true);expect((getByLabelText(document.body,'销售单价') as HTMLInputElement).disabled).toBe(false);expect(store.run).not.toHaveBeenCalled();
+});
+
+it('preserves a lawful price amendment on a closed line and keeps its quantity unchanged',async()=>{
+ lineEditorFixture('approved',20);Object.assign(store.state!.orderLines[0],{closure:{id:'closure',status:'closed',quantity:0,ordered:20,min:19.4,max:20.6,reason:'客户撤回',requesterId:'sales',requesterName:'业务员甲',requestedAt:context.now,reviewerIds:['leader']}});render();await openLineEditor();await lineInput('销售单价','12');await lineInput('变更原因','按独立客户价格更正依据');await act(async()=>getByRole(document.body,'button',{name:'保存条目'}).click());expect(store.run).toHaveBeenCalledTimes(1);expect(store.state!.orders[0].governance!.changeDraft!.lines[0]).toMatchObject({qty:20,price:12});expect(store.state!.orderLines[0]).toMatchObject({qty:20,price:11});
+});
+
+it('retains an open draft but refuses submission after a new closure locks its source',async()=>{
+ lineEditorFixture('approved',20);render();await openLineEditor();await lineInput('订单数量','21');store.state=structuredClone(store.state!);Object.assign(store.state.orderLines[0],{closure:{id:'new-closure',status:'pending',quantity:0,ordered:20,min:19.4,max:20.6,reason:'客户撤回',requesterId:'sales',requesterName:'业务员甲',requestedAt:context.now,reviewerIds:['leader']}});store.workspace.revision=2;render();await lineInput('变更原因','原草稿');await act(async()=>getByRole(document.body,'button',{name:'保存条目'}).click());expect(store.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('订单条目资料已更新，请重新打开后核对');expect((getByLabelText(document.body,'订单数量') as HTMLInputElement).value).toBe('21');
+});
+
+it('shows each retained closure source and decision without borrowing current line or hidden file details',async()=>{
+ lineEditorFixture('approved',20);const line=store.state!.orderLines[0];Object.assign(line,{closureHistory:[{id:'first-close',status:'rejected',quantity:0,ordered:20,min:19.4,max:20.6,reason:'原申请原因',requesterId:'sales',requesterName:'原申请人',requestedAt:context.now,reviewerIds:['leader'],decidedBy:'leader',decidedName:'原审批人',decidedAt:context.now,note:'补充原件',source:{orderId,lineId:line.id,orderCode:'ORIGINAL-CODE',poNumber:'ORIGINAL-PO',style:'ORIGINAL-STYLE',name:'原面料',unit:'码',tolerance:{overPercent:3,shortPercent:3},fileIds:['hidden-closure-file']}}],closure:{id:'second-close',status:'pending',quantity:0,ordered:20,min:19.4,max:20.6,reason:'新申请',requesterId:'sales',requesterName:'业务员甲',requestedAt:context.now,reviewerIds:['leader']}});
+ render();await act(async()=>getByRole(host,'row',{name:/精确金额条目/}).click());await act(async()=>getByRole(document.body,'button',{name:'结案记录',exact:true}).click());const history=getByRole(document.body,'list',{name:'条目结案申请记录'});expect(within(history).getAllByRole('listitem')).toHaveLength(2);expect(history.textContent).toContain('ORIGINAL-STYLE · 原面料');expect(history.textContent).toContain('原申请原因');expect(history.textContent).toContain('原申请人');expect(history.textContent).toContain('原审批人');expect(history.textContent).toContain('补充原件');expect(history.textContent).toContain('19.4–20.6 码');expect(history.textContent).not.toContain('hidden-closure-file');expect(history.textContent).toContain('原申请资料未留存');expect(store.downloadFile).not.toHaveBeenCalled();expect(store.run).not.toHaveBeenCalled();
+});
+
+it('header editor refuses a synchronized due-date change and retains its season',async()=>{
+ render();act(()=>getByRole(host,'button',{name:'编辑',exact:true}).click());
+ const select=getByRole(document.body,'combobox',{name:'季节',exact:true}) as HTMLSelectElement;
+ act(()=>{select.value='__custom__';select.dispatchEvent(new Event('change',{bubbles:true}));});
+ await lineInput('季节（手动填写）','SS29');
+ store.state=structuredClone(store.state!);store.state.orders[0].due='2026-11-02';store.workspace.revision=2;render();
+ await act(async()=>getByRole(document.body,'button',{name:'保存',exact:true}).click());
+ expect(store.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('订单资料已更新，请重新打开后核对');expect((getByLabelText(document.body,'季节（手动填写）') as HTMLInputElement).value).toBe('SS29');
+});
+
+it('header editor binds the whole header save to its checked revision',async()=>{
+ store.run.mockResolvedValue({revision:8,result:{orderId}});render();act(()=>getByRole(host,'button',{name:'编辑',exact:true}).click());store.workspace.revision=7;render();
+ await act(async()=>getByRole(document.body,'button',{name:'保存',exact:true}).click());
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'order.governance.saveDraft'}),{expectedRevision:7});
+});
+
+it('header editor binds approved owner-only maintenance without creating a contract proposal',async()=>{
+ lineEditorFixture('approved');store.run.mockResolvedValue({revision:8,result:{orderId}});render();act(()=>getByRole(host,'button',{name:'编辑',exact:true}).click());store.workspace.revision=7;render();
+ await act(async()=>getByRole(document.body,'button',{name:'保存',exact:true}).click());
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'order.update'}),{expectedRevision:7});
+});
+
+it('line editor refuses a synchronized price change without overwriting its local name',async()=>{
+ lineEditorFixture('draft');store.run.mockReset();render();await openLineEditor();await lineInput('英文品名','LOCAL ENGLISH NAME');store.state=structuredClone(store.state!);store.state.orderLines[0].price=13;store.workspace.revision=2;render();
+ await act(async()=>getByRole(document.body,'button',{name:'保存条目',exact:true}).click());
+ expect(store.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('订单条目资料已更新，请重新打开后核对');expect((getByLabelText(document.body,'英文品名') as HTMLInputElement).value).toBe('LOCAL ENGLISH NAME');
+});
+
+it('line editor refuses another changed commercial line in the same reviewed order',async()=>{
+ lineEditorFixture('draft');const second={...store.state!.orderLines[0],id:'other-source-line',name:'其他条目',style:'SECOND',price:7};store.state!.orderLines.push(second);store.run.mockReset();render();await openLineEditor();store.state=structuredClone(store.state!);store.state.orderLines[1].price=9;store.workspace.revision=2;render();
+ await act(async()=>getByRole(document.body,'button',{name:'保存条目',exact:true}).click());
+ expect(store.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('订单条目资料已更新，请重新打开后核对');
+});
+
+it('line editor binds unchanged commercial data to the checked current revision',async()=>{
+ lineEditorFixture('draft');store.run.mockResolvedValue({revision:8,result:{orderId}});render();await openLineEditor();store.workspace.revision=7;render();await lineInput('英文品名','LOCAL ENGLISH NAME');
+ await act(async()=>getByRole(document.body,'button',{name:'保存条目',exact:true}).click());
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'order.governance.saveDraft'}),{expectedRevision:7});
+});
+
 it('saves and clears an English line name through the line editor',async()=>{
   lineEditorFixture('rejected');render();await openLineEditor();
   await lineInput('英文品名','  COTTON STRETCH TWILL NAVY ');await act(async()=>getByRole(document.body,'button',{name:'保存条目'}).click());
@@ -289,6 +460,28 @@ it('retains edited input when an existing fulfillment fact prevents an approved 
   expect(document.body.textContent).toContain('低于下限 6 件');expect(store.state!.orderLines[0].price).toBe(11);expect(store.state!.orders[0].governance?.changeDraft).toBeUndefined();
 });
 
+it('presents a rejected line change once in the active dialog and retains its draft',async()=>{
+  lineEditorFixture('approved');const message='新数量低于已完工下限';
+  const renderHosted=()=>act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'orders/detail',id:orderId},go,openAI:vi.fn(),theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn()}}><MistPresentedErrorContext.Provider value={store.error||undefined}>{store.error&&<div role="alert">{store.error}</div>}<OrderDetailPage/></MistPresentedErrorContext.Provider></Nav.Provider></ToastProvider></MistRoot>));
+  store.run.mockImplementation(async()=>{store.error=message;renderHosted();throw new Error(message);});
+  store.dismissError.mockImplementation(expected=>{if(store.error===expected){store.error='';renderHosted();}});
+  renderHosted();await openLineEditor();await lineInput('订单数量','3');await lineInput('变更原因','客户数量确认');
+  await act(async()=>getByRole(document.body,'button',{name:'保存条目'}).click());
+  expect(document.body.textContent!.split(message)).toHaveLength(2);
+  expect(store.dismissError).toHaveBeenCalledWith(message);
+  expect((getByLabelText(document.body,'订单数量') as HTMLInputElement).value).toBe('3');
+});
+
+it('does not consume a new page error when an abandoned line save rejects late',async()=>{
+  lineEditorFixture('approved');let reject!:(error:Error)=>void;
+  store.run.mockImplementation(()=>new Promise((_resolve,fail)=>{reject=fail;}));
+  render();await openLineEditor();await lineInput('订单数量','3');await lineInput('变更原因','客户数量确认');
+  await act(async()=>getByRole(document.body,'button',{name:'保存条目'}).click());
+  await act(async()=>root.render(<div>其它页面</div>));store.error='新页面操作失败';
+  await act(async()=>reject(new Error('旧条目保存失败')));
+  expect(store.dismissError).not.toHaveBeenCalled();expect(store.error).toBe('新页面操作失败');
+});
+
 it.each(['contract-first','header-first'] as const)('merges price, amended contract and header due into one pending proposal in %s order',async sequence=>{
   const actor=lineEditorFixture('approved',4,12);
   (store as any).uploadFile=vi.fn(async(file:File)=>{const saved={id:'amended-po',name:file.name,mimeType:file.type,size:file.size,storageKey:'fixture/amended-po',createdAt:context.now};store.state!.files.push(saved);return saved;});
@@ -333,7 +526,7 @@ it('saves a proposed due date restored to the live date without losing the amend
 
 it('keeps the owner-only shortcut for an approved order with no proposed change',async()=>{
   const actor=lineEditorFixture('approved',4,12);const members=[{id:'sales',name:'业务员甲',active:true,groups:[]},{id:'sales-b',name:'业务员乙',active:true,groups:[]}];
-  store.state!.members=[{userId:'sales-b',name:'业务员乙',addedBy:'sales',addedByName:'业务员甲',addedAt:context.now}];(store as any).workspace={id:'w',ownerId:'sales'};
+  store.state!.members=[{userId:'sales-b',name:'业务员乙',addedBy:'sales',addedByName:'业务员甲',addedAt:context.now}];(store as any).workspace={id:'w',ownerId:'sales',revision:1};
   store.run.mockImplementation(async(command:Parameters<typeof applyMistCommand>[1])=>{const result=applyMistCommand(store.state!,command,{...actor,members});store.state=result.state;render();return{requestId:'owner',revision:1,result:result.result};});
   render();await act(async()=>getByRole(host,'button',{name:/^编辑$/}).click());
   const owner=getByLabelText(document.body,'负责人') as HTMLSelectElement;expect([...owner.options].map(o=>o.textContent)).toEqual(['业务员甲','业务员乙']);
@@ -532,6 +725,22 @@ it.each(['void','cancelled','pending-cancel'] as const)('presents %s as halted w
 });
 it('keeps an approved order line readable without exposing closure to a reader',()=>{
  permissions.ordersWrite=false;store.state!.orders[0].governance!.status='approved';render();act(()=>getByText(host,'精确金额条目').click());expect(queryByRole(document.body,'button',{name:'按实际完工结案'})).toBeNull();expect(document.body.textContent).toContain('精确金额条目');expect(store.run).not.toHaveBeenCalled();
+});
+
+it('stops active stage guidance for an unfulfilled closed line without inventing delivery',async()=>{
+ lineEditorFixture('approved',4);const order=store.state!.orders[0],line=store.state!.orderLines[0];order.type='fabric';line.unit='码';Object.assign(line,{closure:{id:'closed',status:'closed',quantity:0,ordered:4,min:3.88,max:4.12,reason:'客户撤回',requesterId:'sales',requesterName:'业务员甲',requestedAt:context.now,reviewerIds:['leader']}});
+ render();await act(async()=>getByRole(host,'row',{name:/精确金额条目/}).click());const scope=document.body.querySelector('[data-line-fulfillment]') as HTMLElement,track=getByRole(scope,'navigation',{name:'条目阶段'});
+ expect(track.querySelector('[aria-current]')).toBeNull();expect(track.querySelector('[data-state="now"], [data-state="partial"], [data-state="blocked"]')).toBeNull();expect(track.querySelector('[data-state="done"]')).toBeNull();expect(scope.textContent).not.toContain('当前：');expect(scope.textContent).not.toContain('已完成出运');expect(scope.textContent).toContain('未建采购');expect(scope.querySelector('[data-stage-open]')).toBeNull();
+ expect(getByText(scope,'未排数量').parentElement!.textContent).toContain('4 码');expect(getByText(scope,'已离港').parentElement!.textContent).toContain('0 码');await act(async()=>getByRole(track,'button',{name:/坯布 \/ 染整/}).click());expect(scope.querySelector('[data-stage-open]')).not.toBeNull();expect(scope.textContent).not.toContain('前序阶段完成后解锁');expect(store.run).not.toHaveBeenCalled();expect(getByRole(host,'button',{name:'查看收款核销'})).toBeTruthy();
+});
+
+it.each(['open','pending'] as const)('keeps the real current stage for a %s line',async status=>{
+ lineEditorFixture('approved',4);const order=store.state!.orders[0],line=store.state!.orderLines[0];order.type='fabric';line.unit='码';if(status==='pending')Object.assign(line,{closure:{id:'pending',status:'pending',quantity:0,ordered:4,min:3.88,max:4.12,reason:'客户申请',requesterId:'sales',requesterName:'业务员甲',requestedAt:context.now,reviewerIds:['leader']}});render();await act(async()=>getByRole(host,'row',{name:/精确金额条目/}).click());const scope=document.body.querySelector('[data-line-fulfillment]') as HTMLElement,track=getByRole(scope,'navigation',{name:'条目阶段'});expect(track.querySelectorAll('[aria-current="step"]')).toHaveLength(1);expect(scope.textContent).toContain('当前：坯布 / 染整');expect(scope.querySelector('[data-stage-open]')).not.toBeNull();expect(store.run).not.toHaveBeenCalled();
+});
+
+it('keeps real completed source facts and their return available on a closed line',async()=>{
+ lineEditorFixture('approved',4);const order=store.state!.orders[0],line=store.state!.orderLines[0];order.type='fabric';line.unit='码';Object.assign(line,{closure:{id:'closed',status:'closed',quantity:0,ordered:4,min:3.88,max:4.12,reason:'客户撤回',requesterId:'sales',requesterName:'业务员甲',requestedAt:context.now,reviewerIds:['leader']}});store.state!.fulfillment.purchases=[{id:'existing-po',code:'PO-EXACT',orderId,lineId:line.id,kind:'material',state:'approved',quantity:4,received:4}] as any;
+ render();await act(async()=>getByRole(host,'row',{name:/精确金额条目/}).click());const scope=document.body.querySelector('[data-line-fulfillment]') as HTMLElement,track=getByRole(scope,'navigation',{name:'条目阶段'});expect(track.querySelector('[aria-current]')).toBeNull();expect(track.querySelector('[data-state="done"]')!.textContent).toContain('坯布 / 染整');await act(async()=>getByRole(track,'button',{name:/坯布 \/ 染整/}).click());await act(async()=>getByRole(document.body,'button',{name:/查看采购承诺\s*PO-EXACT/}).click());expect(go).toHaveBeenCalledWith('procurement','existing-po',{orderLineId:line.id,section:'order:'+orderId,customerId:order.customerId});expect(store.run).not.toHaveBeenCalled();
 });
 
 it('shows the current business state instead of presenting an old 100-percent field as overall completion',()=>{

@@ -9,6 +9,7 @@ import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** T9 订单创建：保留 Mist 分步表单与吸附操作栏。 */
 import React from 'react';
+import {useEditorStepFocus} from '../runtime/editorFocus';
 import { ArrowLeft, ArrowRight, Plus, Trash2 } from 'lucide-react';
 import { FormFooter, BackLink, Banner, Button, Card, Field, FormGrid, FormSection, IconButton, KeyValue, MistPage, PageHeader, Select, TextArea, TextInput, UploadZone, VerticalSteps, useToast } from '../../../../components/mist';
 import type { MistOrderInput } from '../../../../server/src/shared/mistWorkspace';
@@ -52,6 +53,7 @@ export function OrderCreatePage() {
   },[!!state,route.versionId,route.id,initialType, interfaceLocale()]);
   const sourceMissing=!!state&&(!!route.versionId||!!route.id?.startsWith('product:'))&&!source;
   const [step, setStep] = React.useState('basic'), [done, setDone] = React.useState<Record<string, boolean>>({});
+  const stepRef=useEditorStepFocus(step);
   const [form, setForm] = React.useState({ type: initialType as 'garment' | 'fabric', customerId: route.customerId ?? '', season: '', currency: 'USD', due: '', ownerId: '' });
   const [contract,setContract]=React.useState<OrderGovernanceInput>(()=>createOrderGovernance({id:()=>'',now:'',actorName:''}).contract);
   const [lines, setLines] = React.useState<LineDraft[]>([newLine(initialType)]);
@@ -99,7 +101,7 @@ export function OrderCreatePage() {
     {sourceMissing&&<Banner variant="notice" tone="warn" title={uiText("来源记录不可用")}>{uiText("指定的开发版本或数字档案不在本公司，已按手工新建处理。")}</Banner>}
     {customerFrozen&&<Banner variant="notice" tone="bad" title={uiText("客户往来已冻结")}/>}
     {pending&&!saving&&<Banner variant="notice" tone="warn" title={uiText("上一次操作结果待核对")} actions={<Button disabled={working||saving} onClick={()=>void resolve()}>{uiText("核对原操作结果")}</Button>}>{uiText("保留当前填写内容，先核对原请求。")}</Banner>}
-    <div className="mist-wizard"><VerticalSteps current={step} onSelect={id => { if (done[id] || id === step) { setStep(id); setFailure(''); } }} steps={STEPS.map(item => ({ ...item, done: done[item.id] }))} />
+    <div ref={stepRef} className="mist-wizard" role="group" aria-label={uiText(STEPS.find(item=>item.id===step)?.label||STEPS[0].label)} tabIndex={-1}><VerticalSteps current={step} onSelect={id => { if (done[id] || id === step) { setStep(id); setFailure(''); } }} steps={STEPS.map(item => ({ ...item, done: done[item.id] }))} />
       <Card>
         <fieldset disabled={busy} style={{border:0,padding:0,margin:0,minWidth:0}}>
         {step === 'basic' && <FormSection title={uiText("基本信息")}><FormGrid><Field label={uiText("订单用途")}><Select value={contract.kind} onChange={event=>setContract(value=>{const {internalSupply:_old,...rest}=value;const kind=event.target.value as OrderGovernanceInput['kind'];return {...rest,kind,...(kind==='internal'?{paymentMethod:'OTHER' as const,depositPercent:0,preShipmentPercent:0,paymentNote:'',incoterm:'内部交接',deliveryPlace:''}:value.kind==='internal'?{paymentMethod:'TT' as const,depositPercent:null,preShipmentPercent:null,paymentNote:'',incoterm:'',deliveryPlace:''}:{})};})} options={[{value:'external',label:'外部客户订单'},{value:'internal',label:'内部用途订单'}]}/></Field>

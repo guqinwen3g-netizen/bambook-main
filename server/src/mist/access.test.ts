@@ -8,6 +8,22 @@ const empty = () => createMistState(context, 'empty');
 const actor = (permissions: string[], userId = 'member'): TokenPayload => ({ userId, roles: [], permissions, authorizationLoaded: true, departmentIds: [] } as TokenPayload);
 const file = (id: string, uploadedBy?: string): MistFile => ({ id, name: id + '.pdf', mimeType: 'application/pdf', size: 10, storageKey: 'space/' + id, createdAt: context.now, uploadedBy });
 
+function orderFlowFixture(){
+ const state=empty();state.orders=[{id:'own',code:'SO-OWN',ownerId:'member',owner:'业务员',type:'fabric'},{id:'peer',code:'SO-PEER',ownerId:'member',owner:'业务员',type:'fabric'}] as any;
+ state.orderLines=[{id:'line',orderId:'own',qty:6,unit:'米',price:9},{id:'copy',orderId:'peer',qty:4,unit:'米',price:9}] as any;
+ state.events=[{id:'flow',entityType:'order',entityId:'own',actor:'业务员',at:context.now,text:'拆分订单：A 4 米；分批',fileIds:[],orderFlow:{action:'split',sourceOrderId:'own',targetOrderId:'peer',lines:[{sourceLineId:'line',targetLineId:'copy',quantity:4,unit:'米'}]}} as any];return state;
+}
+it('removes the whole counterpart packet after row scope hides the other owner without rewriting raw history',()=>{
+ const state=orderFlowFixture();state.orders[1].ownerId='other-owner';const raw=structuredClone(state);
+ const view=projectState(state,actor(['orders:read']),empty,undefined,{userIds:['member'],teamIds:[]}).state;
+ expect(view.orders.map(o=>o.id)).toEqual(['own']);expect(view.orders[0].ownerId).toBe('member');expect(view.events).toHaveLength(1);expect((view.events[0] as any).orderFlow).toBeUndefined();expect(view.events[0].text).toBe(raw.events[0].text);expect(JSON.stringify(view.events)).not.toContain('peer');expect(state).toEqual(raw);
+});
+it('whitelists visible movement facts and does not smuggle price/cost/amount fields through history metadata',()=>{
+ const state=orderFlowFixture(),flow=(state.events[0] as any).orderFlow;flow.cost=717;flow.amount=81;flow.lines[0].price=9;flow.lines[0].supplierCost=7;const raw=structuredClone(state);
+ const view=projectState(state,actor(['orders:read']),empty).state;
+ expect((view.events[0] as any).orderFlow).toEqual({action:'split',sourceOrderId:'own',targetOrderId:'peer',lines:[{sourceLineId:'line',targetLineId:'copy',quantity:4,unit:'米'}]});expect(view.orders.map(o=>o.ownerId)).toEqual(['member','member']);expect(view.fulfillment.purchases).toEqual([]);expect(state).toEqual(raw);
+});
+
 describe('按已有业务查看权限投影，不因成员资格扩大权限', () => {
   it('keeps QC reading independent from writing and withholds QC records when read permission is absent', () => {
     const state = empty();
@@ -127,4 +143,32 @@ describe('lead follow-up history projection', () => {
     expect(projectState(state, actor(['seasons:read']), empty).state.market.leads).toEqual([]);
     expect(state).toEqual(before);
   });
+});
+
+it('gives invoice readers only the linked payment-anchor date without granting transport or POD contents',()=>{
+ const s=empty(),condition={kind:'deliveryAcceptance' as const,days:30,terms:'交付验收后30天付款'};
+ s.invoices.push({id:'ar-condition',code:'CI-C',orderId:'o',order:'SO-C',customer:'Buyer',currency:'USD',due:'',amount:100,open:100,financeStatus:'confirmed',sourceDocumentId:'ci-condition',receivableDueCondition:condition});
+ s.fulfillment.documents.push({id:'ci-condition',type:'CI',status:'issued',orderId:'o',invoiceId:'ar-condition',shipmentId:'ship-condition',receivableDueCondition:condition} as any);
+ s.fulfillment.shipments.push({id:'ship-condition',lines:[],delivered:{at:'2026-10-20T10:00:00Z',receiver:'POD-SECRET-RECEIVER',evidence:'POD-SECRET-CONTENT',fileIds:['secret-pod'],recordedBy:'Ops'}} as any);
+ const before=structuredClone(s),view=projectState(s,actor(['invoices:read']),empty).state;
+ expect(view.invoices[0].receivableDueSource).toEqual({sourceCurrent:true,shipmentId:'ship-condition',deliveryAt:'2026-10-20T10:00:00Z'});
+ expect(view.fulfillment.shipments).toEqual([]);expect(view.fulfillment.documents).toEqual([]);expect(JSON.stringify(view)).not.toContain('POD-SECRET');expect(JSON.stringify(view)).not.toContain('secret-pod');expect(s).toEqual(before);
+ expect(projectState(s,actor(['shipments:read']),empty).state.invoices).toEqual([]);
+});
+
+it('keeps new unlinked assistant drafts on the author account without rewriting legacy or order drafts', () => {
+  const state = empty(), base = { title: '业务备忘', content: '本地模拟', createdAt: context.now };
+  state.platform.assistantDrafts = [
+    { ...base, id: 'mine', orderId: '', ownerId: 'author' },
+    { ...base, id: 'other', orderId: '', ownerId: 'peer' },
+    { ...base, id: 'linked', orderId: 'order', ownerId: 'peer' },
+    { ...base, id: 'legacy', orderId: '' },
+  ];
+  const before = structuredClone(state);
+  const mine = projectState(state, actor(['ai:chat'], 'author'), empty).state.platform.assistantDrafts;
+  const unassigned = projectState(state, actor(['ai:chat', 'company:admin'], 'another'), empty).state.platform.assistantDrafts;
+  expect(mine.map(r => r.id)).toEqual(['mine', 'linked', 'legacy']);
+  expect(unassigned.map(r => r.id)).toEqual(['linked', 'legacy']);
+  expect(projectState(state, actor([], 'author'), empty).state.platform.assistantDrafts).toEqual([]);
+  expect(state).toEqual(before);
 });

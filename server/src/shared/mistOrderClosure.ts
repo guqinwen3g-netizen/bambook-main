@@ -3,12 +3,17 @@
  * 结案数量 = 已离港数量；须无未离港的有效出运；在允许范围内业务员直接结案，超出范围生成审批（审批人=订单审批人配置，申请人不能自批）。
  * 财务应收不在此自动变更。 */
 import {MistCommandError,isActiveMistInvoice,lineAmount,mistMoneyMinor,type MistOrder,type MistOrderLine,type MistState} from './mistWorkspace';
+import type {OrderLineBreakdown} from './mistOrderBreakdown';
 
 export type OrderTolerance={overPercent?:number|null;shortPercent?:number|null};
-export type OrderLineClosure={id:string;status:'pending'|'closed'|'rejected';quantity:number;ordered:number;min:number;max:number;reason:string;requesterId:string;requesterName:string;requestedAt:string;reviewerIds:string[];decidedBy?:string;decidedName?:string;decidedAt?:string;note?:string};
+export type OrderLineClosureSource={orderId:string;lineId:string;orderCode:string;poNumber:string;style:string;name:string;unit:string;breakdown?:OrderLineBreakdown;tolerance:OrderTolerance};
+export type OrderLineClosure={id:string;status:'pending'|'closed'|'rejected';quantity:number;ordered:number;min:number;max:number;reason:string;requesterId:string;requesterName:string;requestedAt:string;reviewerIds:string[];decidedBy?:string;decidedName?:string;decidedAt?:string;note?:string;source?:OrderLineClosureSource};
 /** BB-ORD-6：超量出运申请。quantity 为批准后该条目累计可出（含已排出运）的上限。 */
 export type OverShipRequest={id:string;status:'pending'|'approved'|'rejected';quantity:number;ordered:number;max:number;excess:number;reason:string;requesterId:string;requesterName:string;requestedAt:string;reviewerIds:string[];decidedBy?:string;decidedName?:string;decidedAt?:string;note?:string};
-export type ClosableLine=MistOrderLine&{closure?:OrderLineClosure;overShips?:OverShipRequest[]};
+export type ClosableLine=MistOrderLine&{closure?:OrderLineClosure;closureHistory?:OrderLineClosure[];overShips?:OverShipRequest[]};
+/** A previous request remains a submitted record; neither current contract edits nor display names rebuild it. */
+export function orderLineClosures(line:ClosableLine){return [...(line.closureHistory||[]).filter(c=>c.status==='rejected'&&c.id!==line.closure?.id),...(line.closure?[line.closure]:[])];}
+export function closureSource(line:ClosableLine,c:OrderLineClosure){const s=c.source;return s?.orderId===line.orderId&&s.lineId===line.id?s:undefined;}
 export const TOLERANCE_NONE='未约定，按足量';
 export const CLOSE_SETTLEMENT_HINT='请到发票/收款核对结算金额';
 

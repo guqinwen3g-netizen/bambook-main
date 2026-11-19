@@ -11,7 +11,7 @@ import { fixture } from './__tests__/professionalFulfillment';
 import { TEST_SIGNATURE, TEST_SIGNATURE_SVG } from './__tests__/signature';
 import { normalizeSignatureSvg } from '../shared/mistSignatures';
 
-vi.mock('./context', () => ({ mistApprovalAuthority: async () => ({ supplier: {} }) }));
+vi.mock('./context', () => ({ mistApprovalAuthority: async () => ({ supplier: {}, orderReviewerIds: {garment:['owner'],fabric:['owner']} }) }));
 vi.mock('../auth/tokenHelpers', () => ({ loadUserWithRoles: async (_db: any, id: string) => ({ id, status: 'active', deletedAt: null }), buildLoadedAuthTokenPayload: async (_db: any, u: any) => ({ userId: u.id, permissions: [], roles: [], departmentIds: [] }) }));
 const now = '2026-10-13T12:00:00.000Z', digest = (b: Buffer) => createHash('sha256').update(b).digest('hex'), htmls: string[] = [];
 const renderPdf = vi.fn(async (html: string) => { htmls.push(html); const pdf = Buffer.from('%PDF-1.4\n' + digest(Buffer.from(html)) + '\n%%EOF'); return { pdf, sha: digest(pdf), bytes: pdf.length, generatedAt: now, format: 'A4' }; });
@@ -29,7 +29,7 @@ describe('审批手写签字', () => {
     getMistReviewTasks: (state: any) => state.reviewTasks || [],
     mistCommandPermission: (command: any) => ['order.governance.decide', 'finance.receivable.writeoff'].includes(command.type) ? 'products:write' : testContract.mistCommandPermission(command),
     applyMistCommand: (state: any, command: any, context: any) => {
-      if (command.type === 'order.governance.decide') { const row = state.reviewTasks.find((t: any) => t.entityId === command.payload.id); row.status = command.payload.decision; return { state, result: { id: row.entityId } }; }
+      if (command.type === 'order.governance.decide') { const row = state.reviewTasks.find((t: any) => t.entityId === command.payload.id && t.status === 'pending'); row.status = command.payload.decision; return { state, result: { id: row.entityId } }; }
       if (command.type === 'finance.receivable.writeoff') { state.writeoffs = [...(state.writeoffs || []), command.payload.kind]; return { state, result: { id: command.payload.invoiceId } }; }
       return testContract.applyMistCommand(state, command, context);
     },
@@ -41,7 +41,7 @@ describe('审批手写签字', () => {
   const approve = { type: 'order.governance.decide', payload: { id: 'order-1', decision: 'approved', note: '同意' } };
   beforeEach(async () => {
     auth = testAuthority(); repo = new MistRepository(db, decisions, files, auth.authorize, () => new Date(now));
-    wid = (await repo.create(testActor(), { name: '签字' })).id; state().reviewTasks = [structuredClone(task)]; state().orders = [{ id: 'order-1' }]; state().invoices = [{ id: 'inv-1' }];
+    wid = (await repo.create(testActor(), { name: '签字' })).id; state().reviewTasks = [structuredClone(task)]; state().orders = [{ id: 'order-1',type:'garment' }]; state().invoices = [{ id: 'inv-1' }];
   });
 
   it('批准须附签字；驳回与尾差核销不得附签字', async () => {
@@ -111,6 +111,60 @@ describe('审批手写签字', () => {
     expect(state().agentProposals[0].state).toBe('confirmed');
     expect(state().decisionSignatures[0]).toMatchObject({ commandType: 'order.governance.decide', actorId: 'owner', requestId: 'c2', fileId: expect.any(String) });
     expect(done.receipt.result.signatureId).toBe(state().decisionSignatures[0].id);
+  });
+
+  it('binds command signatures to the actual pending review and ignores a client-provided review identifier',async()=>{
+    const done=await exec('bound-command',{...approve,payload:{...approve.payload,reviewId:'forged-review'}},{signature:TEST_SIGNATURE});
+    expect(state().decisionSignatures[0]).toMatchObject({reviewId:'order:1',requestId:'bound-command'});
+    expect(done.receipt.result.reviewId).toBe('order:1');
+  });
+
+  it('keeps each old round signature on its exact durable review receipt without rewriting old records',async()=>{
+    await repo.decideReview(testActor(),wid,'order:1',{requestId:'old-review-one',expectedRevision:0,decision:'approved',note:'第一轮',signature:TEST_SIGNATURE});
+    const first=structuredClone(state().decisionSignatures[0]);
+    state().reviewTasks.push({...structuredClone(task),id:'order:2',status:'pending'});
+    await repo.decideReview(testActor(),wid,'order:2',{requestId:'old-review-two',expectedRevision:1,decision:'approved',note:'第二轮',signature:TEST_SIGNATURE});
+    const second=structuredClone(state().decisionSignatures[1]);
+    // Pre-binding production records lack reviewId; their original receipt remains authoritative.
+    for(const item of state().decisionSignatures)delete item.reviewId;
+    const original=structuredClone(state()),receiptCount=db.receipts.size;
+    const reviews=await repo.listReviews(testActor());
+    expect(reviews.find((r:any)=>r.id==='order:1')?.signatureFileId).toBe(first.fileId);
+    expect(reviews.find((r:any)=>r.id==='order:2')?.signatureFileId).toBe(second.fileId);
+    await expect(repo.reviewFile(testActor(),wid,'order:1',second.fileId)).rejects.toMatchObject({code:'FILE_NOT_FOUND'});
+    expect((await repo.reviewFile(testActor(),wid,'order:1',first.fileId)).file.id).toBe(first.fileId);
+    const view=await repo.get(testActor(),wid);
+    expect(view.signatureReviewBindings).toEqual(expect.arrayContaining([{signatureId:first.id,reviewId:'order:1'},{signatureId:second.id,reviewId:'order:2'}]));
+    expect(state()).toEqual(original);expect(db.receipts.size).toBe(receiptCount);
+    await repo.upload(testActor(),wid,{requestId:'unrelated-upload',expectedRevision:2},{name:'独立附件.txt',mimeType:'text/plain',bytes:Buffer.from('independent')});
+    expect(state().decisionSignatures).toEqual(original.decisionSignatures);
+    expect(state().decisionSignatures.every((r:any)=>r.reviewId===undefined)).toBe(true);
+  });
+
+  it('refuses an ambiguous pending command before writing any signature or changing the business state',async()=>{
+    state().reviewTasks.push({...structuredClone(task),id:'order:other-pending'});
+    const before=structuredClone(state()),receipts=db.receipts.size;
+    await expect(exec('ambiguous-command',approve,{signature:TEST_SIGNATURE})).rejects.toMatchObject({code:'PRECONDITION'});
+    await expect(repo.decideReview(testActor(),wid,'order:other-pending',{requestId:'ambiguous-review',expectedRevision:0,decision:'approved',note:'核对',signature:TEST_SIGNATURE})).rejects.toMatchObject({code:'PRECONDITION'});
+    expect(state()).toEqual(before);expect(db.receipts.size).toBe(receipts);expect(await blobs(wid)).toEqual([]);
+  });
+
+  it('does not turn a conflicting receipt into an old-round fallback',async()=>{
+    await repo.decideReview(testActor(),wid,'order:1',{requestId:'receipt-conflict',expectedRevision:0,decision:'approved',note:'核对',signature:TEST_SIGNATURE});
+    delete state().decisionSignatures[0].reviewId;
+    const receipt=db.receipts.get(wid+':receipt-conflict');receipt.result.result.signatureId='another-signature';
+    const row=(await repo.listReviews(testActor())).find((r:any)=>r.id==='order:1');
+    expect(row.signatureFileId).toBeUndefined();
+    expect((await repo.get(testActor(),wid)).signatureReviewBindings).toEqual([]);
+  });
+
+  it('returns response bindings only for the signature and file IDs in the existing readable projection',async()=>{
+    await repo.decideReview(testActor(),wid,'order:1',{requestId:'visible-first',expectedRevision:0,decision:'approved',note:'第一轮',signature:TEST_SIGNATURE});
+    state().reviewTasks.push({...structuredClone(task),id:'order:2',status:'pending'});
+    await repo.decideReview(testActor(),wid,'order:2',{requestId:'hidden-second',expectedRevision:1,decision:'approved',note:'第二轮',signature:TEST_SIGNATURE});
+    const first=state().decisionSignatures[0],view=(repo as any).view.bind(repo);
+    const projection=vi.spyOn(repo as any,'view').mockImplementation((...args:any[])=>{const result=view(...args);return{...result,state:{...result.state,decisionSignatures:result.state.decisionSignatures.filter((s:any)=>s.id===first.id),files:result.state.files.filter((f:any)=>f.id===first.fileId)}};});
+    try{expect((await repo.get(testActor(),wid)).signatureReviewBindings).toEqual([{signatureId:first.id,reviewId:'order:1'}]);}finally{projection.mockRestore();}
   });
 });
 

@@ -8,6 +8,7 @@
 import { MistCommandError, MIST_ORDER_CHECKLIST, type MistContext, type MistOrder, type MistOrderLine, type MistState } from './mistWorkspace';
 import { isCalendarDay, nextBusinessCode } from './mistBusinessClock';
 import type { OrderGovernanceFields } from './mistOrderGovernance';
+import type { MistOrderFlow } from './mistOrderFlow';
 
 export type OrderSplitCommand =
   | { type: 'order.split'; payload: { orderId: string; lines: Array<{ lineId: string; qty?: number }>; due?: string; reason: string } }
@@ -56,7 +57,7 @@ function eligible(root: Root, order: Governed, label: string) {
 }
 /** 已批准订单回到草稿，待重新提交主单审批。 */
 function backToDraft(g: OrderGovernanceFields) { if (g.status === 'approved') { g.status = 'draft'; delete g.approvedSnapshot; } delete g.changeDraft; }
-const event = (root: Root, c: MistContext, id: string, message: string) => root.events.unshift({ id: c.id(), entityType: 'order', entityId: id, actor: c.actorName, at: c.now, text: message, fileIds: [] });
+const event = (root: Root, c: MistContext, id: string, message: string, orderFlow: MistOrderFlow) => root.events.unshift({ id: c.id(), entityType: 'order', entityId: id, actor: c.actorName, at: c.now, text: message, fileIds: [], orderFlow: structuredClone(orderFlow) });
 
 export function applyOrderSplitCommand(root: Root, command: OrderSplitCommand, c: MistContext): { id: string; orderId: string } {
   if (command.type === 'order.split') {
@@ -77,17 +78,20 @@ export function applyOrderSplitCommand(root: Root, command: OrderSplitCommand, c
     const next: Governed = { ...structuredClone(order), id, code, due, governance: { contract: structuredClone(g.contract), status: 'draft', rounds: [], effectiveVersion: 0 }, progress: 0, state: '订单草稿', tone: 'neutral',
       checklist: MIST_ORDER_CHECKLIST.map((label, index) => ({ id: id + '-check-' + index, label, done: false, note: '' })), handoffAt: null, createdAt: c.now, updatedAt: c.now };
     root.orders.unshift(next);
+    const movements: MistOrderFlow['lines'] = [];
     for (const { line, qty } of picks) {
-      if (qty === line.qty) { line.orderId = id; continue; }
+      if (qty === line.qty) { movements.push({sourceLineId:line.id,targetLineId:line.id,quantity:qty,unit:line.unit}); line.orderId = id; continue; }
       const copy = { ...structuredClone(line), id: c.id(), orderId: id, qty, made: 0, qc: 0 } as MistOrderLine & Record<string, unknown>;
       line.qty = q4(line.qty - qty);
       for (const row of [copy, line as MistOrderLine & Record<string, unknown>]) { delete row.quantityExact; delete row.amountExact; }
       root.orderLines.push(copy);
+      movements.push({sourceLineId:line.id,targetLineId:copy.id,quantity:qty,unit:line.unit});
     }
     backToDraft(g); order.updatedAt = c.now;
     const moved = picks.map(x => `${x.line.style} ${x.qty} ${x.line.unit}`).join('、');
-    event(root, c, order.id, `拆分订单：${moved} 移至 ${code}${due !== order.due ? `（交期 ${due}）` : ''}；${reason}${g.rounds.length ? '。原订单需重新提交主单审批' : ''}`);
-    event(root, c, id, `由 ${order.code} 拆出：${moved}；${reason}`);
+    const flow:MistOrderFlow={action:'split',sourceOrderId:order.id,targetOrderId:id,lines:movements};
+    event(root, c, order.id, `拆分订单：${moved}${due !== order.due ? `（交期 ${due}）` : ''}；${reason}${g.rounds.length ? '。原订单需重新提交主单审批' : ''}`,flow);
+    event(root, c, id, `拆入条目：${moved}；${reason}`,flow);
     return { id, orderId: id };
   }
   const p = command.payload;
@@ -105,12 +109,14 @@ export function applyOrderSplitCommand(root: Root, command: OrderSplitCommand, c
     if (q.convertedOrderId === source.id) q.convertedOrderId = target.id;
     for (const l of q.lines || []) if (l.conversion?.orderId === source.id) l.conversion = { ...l.conversion, orderId: target.id, orderCode: target.code };
   }
-  sg.status = 'void'; sg.termination = { kind: 'void', reason: `并入 ${target.code}：${reason}`, at: c.now, byId: c.actorId || '', byName: c.actorName }; delete sg.changeDraft;
+  sg.status = 'void'; sg.termination = { kind: 'void', reason: `合并后作废：${reason}`, at: c.now, byId: c.actorId || '', byName: c.actorName }; delete sg.changeDraft;
   source.state = '已作废'; source.tone = 'neutral'; source.updatedAt = c.now;
   for (const t of root.tasks) if (t.target?.id === source.id && !t.done && t.kind === 'order-approval') t.done = true;
   backToDraft(tg); target.updatedAt = c.now;
   const terms = ['incoterm', 'deliveryPlace', 'paymentMethod', 'paymentNote', 'depositPercent'].filter(k => JSON.stringify((sg.contract as any)[k] ?? null) !== JSON.stringify((tg.contract as any)[k] ?? null));
-  event(root, c, target.id, `并入 ${source.code} 的 ${lines.length} 个条目；${reason}${terms.length ? '。来源订单的贸易或付款条款与本单不同，已按本单合同执行' : ''}${tg.rounds.length ? '。需重新提交主单审批' : ''}`);
-  event(root, c, source.id, `并入 ${target.code} 后作废：${reason}`);
+  const flow:MistOrderFlow={action:'merge',sourceOrderId:source.id,targetOrderId:target.id,lines:lines.map(line=>({sourceLineId:line.id,targetLineId:line.id,quantity:line.qty,unit:line.unit}))};
+  const moved=lines.map(line=>`${line.style} ${line.qty} ${line.unit}`).join('、');
+  event(root, c, target.id, `合并条目：${moved}；${reason}${terms.length ? '。来源订单的贸易或付款条款与本单不同，已按本单合同执行' : ''}${tg.rounds.length ? '。需重新提交主单审批' : ''}`,flow);
+  event(root, c, source.id, `合并后作废：${moved}；${reason}`,flow);
   return { id: target.id, orderId: target.id };
 }

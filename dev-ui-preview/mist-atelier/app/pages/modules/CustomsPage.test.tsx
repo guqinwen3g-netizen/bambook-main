@@ -7,7 +7,7 @@ import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentShipment,FulfillmentDocument,FulfillmentCustoms} from '../../../../../server/src/shared/mistFulfillment';
 import {Nav} from '../../nav';
-const store=vi.hoisted(()=>({state:null as MistState|null,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
+const store=vi.hoisted(()=>({state:null as MistState|null,workspace:{id:'workspace',revision:1},loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
 const session=vi.hoisted(()=>({denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:'ops',displayName:'后勤'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
@@ -28,12 +28,50 @@ function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act((
 function choose(select:HTMLSelectElement,value:string){act(()=>{select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));});expect(select.value).toBe(value);}
 const shipment=(id:string,patch:Partial<FulfillmentShipment>={}):FulfillmentShipment=>({id,code:id.toUpperCase(),customerId:'c',customer:'Cedar',domain:'garment',consignee:'Cedar DC',mode:'sea',portOfLoading:'上海',portOfDischarge:'Felixstowe',incoterm:'FOB',plannedDate:'2099-01-01',booking:'',lines:[{orderId:'o',lineId:'l',productionId:'p',quantity:10,factoryConfirmedAt:'2026-10-09'}],note:'',fileIds:[],state:'preparing',requestedBy:'业务',requesterId:'biz',createdAt:'2026-10-08T08:00:00Z',...patch});
 const pack=(shipmentId:string,quantity:number)=>({id:shipmentId+quantity,shipmentId,lineId:'l',productionId:'p',carton:'1',quantity,netWeight:9,grossWeight:10,volume:0.1,note:''});
+
+it.each([false,true])('申报调整按真实第一/第二法定单位拦截半件，连续单位仍可保存小数（第二单位按件：%s）',async countOnSecond=>{
+  const st=store.state!,f=st.fulfillment;f.shipments.push(shipment('unit-check'));
+  const item={no:1,classificationId:'class-unit',lineKeys:['l:p'],styles:[],hsCode:'6203310000',declaredName:'羊毛西服上衣',elements:'3|0|机织|西服上衣|男式|100%羊毛|Northwind|货号S',quantity:10,unit:'件',legalQty:countOnSecond?9:10,legalUnit:countOnSecond?'千克':'件',secondQty:countOnSecond?10:9,secondUnit:countOnSecond?'件':'千克',unitPrice:10,amount:100,currency:'USD',origin:'中国',destination:'英国'};
+  f.customs.push(customs('unit-check','draft',{items:[item]} as any));render('cus-unit-check');
+  await click(getByRole(host,'button',{name:'调整商品项 1'}));const dialog=getByRole(host,'dialog');
+  const countField=getByRole(dialog,'spinbutton',{name:countOnSecond?'第二数量（件）':'法定数量（件）'}) as HTMLInputElement;
+  const continuousField=getByRole(dialog,'spinbutton',{name:countOnSecond?'法定数量（千克）':'第二数量（千克）'}) as HTMLInputElement;
+  typeInto(getByRole(dialog,'textbox',{name:'调整原因'}) as HTMLTextAreaElement,'核对法定数量与磅单');typeInto(countField,'0.5');
+  await click(getByRole(dialog,'button',{name:'保存调整'}));expect(store.run).not.toHaveBeenCalled();expect(dialog.textContent).toContain('整数');
+  typeInto(countField,'10');typeInto(continuousField,'0.00001');await click(getByRole(dialog,'button',{name:'保存调整'}));expect(store.run).not.toHaveBeenCalled();expect(dialog.textContent).toContain('须大于 0');
+  typeInto(continuousField,'9.125');await click(getByRole(dialog,'button',{name:'保存调整'}));
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.customs.item.adjust',payload:expect.objectContaining({id:'cus-unit-check',no:1,legalQty:countOnSecond?9.125:10,secondQty:countOnSecond?10:9.125})},{expectedRevision:1});
+});
 const customs=(shipmentId:string,status:FulfillmentCustoms['status'],patch:Partial<FulfillmentCustoms>={}):FulfillmentCustoms=>({id:'cus-'+shipmentId,shipmentId,code:'CUS-'+shipmentId.toUpperCase(),status,declarationNo:status==='draft'?'':'D-'+shipmentId,broker:'上港报关',hsCode:'6202.13',origin:'CN',tradeMode:'一般贸易',declaredAt:status==='draft'?'':'2026-10-12',clearedAt:status==='cleared'?'2026-10-13':'',evidence:'',fileIds:[],note:'',...patch});
 const ci=(shipmentId:string,invoiceId?:string):FulfillmentDocument=>({id:'ci-'+shipmentId,shipmentId,orderId:'o',type:'CI',number:'CI-'+shipmentId,version:1,title:'CI',dueDate:'2026-11-01',content:'',fileIds:[],status:'issued',createdAt:'2026-10-10T08:00:00Z',actor:'后勤',...(invoiceId?{invoiceId}:{})} as FulfillmentDocument);
-beforeEach(()=>{session.denied=new Set();const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'后勤'},'empty');
+beforeEach(()=>{store.workspace={id:'workspace',revision:1};session.denied=new Set();const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'后勤'},'empty');
   s.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',customer:'Cedar',currency:'USD',due:'2026-11-08'} as any);s.orderLines.push({id:'l',orderId:'o',name:'大衣',style:'COAT-1',img:'coat',qty:10,unit:'件',price:10,made:10,qc:10} as any);
   store.state=s;store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
+
+it.each([
+ ['draft','编辑报关资料','保存'],['draft','登记已申报','登记已申报'],['submitted','登记海关放行','登记放行'],['cleared','登记改单','保存'],
+]as const)('keeps the old %s / %s form from dropping a newly associated original',async(status,action,submit)=>{
+ const f=store.state!.fulfillment;f.shipments.push(shipment('source-original'));f.packing.push(pack('source-original',10));f.customs.push(customs('source-original',status));render('cus-source-original');
+ const detail=host.querySelector('[data-customs-detail="cus-source-original"]')as HTMLElement;await click(getByRole(detail,'button',{name:action,exact:true}));const d=getByRole(document.body,'dialog');
+ if(action==='登记已申报')typeInto(getByRole(d,'textbox',{name:'报关单号',exact:true})as HTMLInputElement,'D-REVIEWED');
+ if(action==='登记海关放行')typeInto(getByRole(d,'textbox',{name:'放行依据',exact:true})as HTMLTextAreaElement,'已核对本票回执，输入保留');
+ if(action==='登记改单')typeInto(getByRole(d,'textbox',{name:'改单内容与海关回执',exact:true})as HTMLTextAreaElement,'原回执补充说明，输入保留');
+ store.state=structuredClone(store.state);store.state!.fulfillment.customs[0].fileIds=['new-reviewed-original'];store.workspace={id:'workspace',revision:2};render('cus-source-original');await click(getByRole(d,'button',{name:submit,exact:true}));
+ expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('报关资料或来源已更新');if(action==='登记已申报')expect((getByRole(d,'textbox',{name:'报关单号',exact:true})as HTMLInputElement).value).toBe('D-REVIEWED');
+});
+it('uses the checked revision after an unrelated update while keeping the current customs original',async()=>{
+ const f=store.state!.fulfillment;f.shipments.push(shipment('current-original'));f.packing.push(pack('current-original',10));f.customs.push(customs('current-original','draft',{fileIds:['reviewed-original']}));render('cus-current-original');await click(getByRole(host.querySelector('[data-customs-detail="cus-current-original"]')as HTMLElement,'button',{name:'登记已申报',exact:true}));const d=getByRole(document.body,'dialog');typeInto(getByRole(d,'textbox',{name:'报关单号',exact:true})as HTMLInputElement,'D-CURRENT');
+ store.state={...store.state!,tasks:[...store.state!.tasks,{id:'unrelated-review-task'}as any]};store.workspace={id:'workspace',revision:2};render('cus-current-original');await click(getByRole(d,'button',{name:'登记已申报',exact:true}));expect(store.run).toHaveBeenCalledWith({type:'fulfillment.customs.save',payload:expect.objectContaining({id:'cus-current-original',fileIds:['reviewed-original'],declarationNo:'D-CURRENT',status:'submitted'})},{expectedRevision:2});
+});
+it('requires a new customs review when the packing facts change while the record itself stays the same',async()=>{
+ const f=store.state!.fulfillment;f.shipments.push(shipment('packing-source'));f.packing.push(pack('packing-source',10));f.customs.push(customs('packing-source','submitted'));render('cus-packing-source');await click(getByRole(host.querySelector('[data-customs-detail="cus-packing-source"]')as HTMLElement,'button',{name:'登记海关放行',exact:true}));const d=getByRole(document.body,'dialog');typeInto(getByRole(d,'textbox',{name:'放行依据',exact:true})as HTMLTextAreaElement,'已核净重与回执');
+ store.state=structuredClone(store.state);store.state!.fulfillment.packing[0].netWeight+=1;store.workspace={id:'workspace',revision:2};render('cus-packing-source');await click(getByRole(d,'button',{name:'登记放行',exact:true}));expect(store.run).not.toHaveBeenCalled();expect(d.textContent).toContain('报关资料或来源已更新');expect((getByRole(d,'textbox',{name:'放行依据',exact:true})as HTMLTextAreaElement).value).toBe('已核净重与回执');
+});
+it('keeps a customs declaration window above the detail drawer when its viewport narrows',async()=>{
+ const previous=window.matchMedia,listeners=new Set<()=>void>(),media={matches:false,addEventListener:(_type:string,fn:()=>void)=>listeners.add(fn),removeEventListener:(_type:string,fn:()=>void)=>listeners.delete(fn)};Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:()=>media});
+ try{const f=store.state!.fulfillment;f.shipments.push(shipment('resize'));f.packing.push(pack('resize',10));f.customs.push(customs('resize','draft'));render('cus-resize');await click(getByRole(host.querySelector('[data-customs-detail="cus-resize"]')as HTMLElement,'button',{name:'登记已申报',exact:true}));const d=getByRole(document.body,'dialog',{name:'登记已向海关申报',exact:true});typeInto(getByRole(d,'textbox',{name:'报关单号',exact:true})as HTMLInputElement,'D-KEPT');act(()=>{media.matches=true;listeners.forEach(fn=>fn());});expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);expect(getByRole(document.body,'dialog',{name:'登记已向海关申报',exact:true})).toBe(d);expect((getByRole(d,'textbox',{name:'报关单号',exact:true})as HTMLInputElement).value).toBe('D-KEPT');expect(store.run).not.toHaveBeenCalled();}finally{Object.defineProperty(window,'matchMedia',{configurable:true,writable:true,value:previous});}
+});
 
 it('shows fabric packing as packages without asserting they are cartons',()=>{
  const f=store.state!.fulfillment;f.shipments.push(shipment('fabric',{domain:'fabric'}));f.packing.push(pack('fabric',10));f.customs.push(customs('fabric','draft'));
@@ -109,7 +147,7 @@ it('registers the declaration and then the release in dialogs, and stops edits o
   let dialog=getByRole(document.body,'dialog');
   typeInto(getByRole(dialog,'textbox',{name:'报关单号'}) as HTMLInputElement,'223320260001');
   await click(getByRole(dialog,'button',{name:'登记已申报'}));
-  expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.customs.save',payload:expect.objectContaining({id:'cus-s',shipmentId:'s',status:'submitted',declarationNo:'223320260001',broker:'上港报关',hsCode:'6202.13'})});
+  expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.customs.save',payload:expect.objectContaining({id:'cus-s',shipmentId:'s',status:'submitted',declarationNo:'223320260001',broker:'上港报关',hsCode:'6202.13'})},{expectedRevision:1});
   Object.assign(f.customs[0],{status:'submitted',declarationNo:'223320260001',declaredAt:'2026-10-12'});store.state={...store.state!};render('cus-s');
   detail=host.querySelector('[data-customs-detail="cus-s"]') as HTMLElement;
   expect(queryByRole(detail,'button',{name:'编辑报关资料'})).toBeNull();
@@ -117,7 +155,7 @@ it('registers the declaration and then the release in dialogs, and stops edits o
   dialog=getByRole(document.body,'dialog');
   typeInto(getByRole(dialog,'textbox',{name:'放行依据'}) as HTMLTextAreaElement,'海关放行通知');
   await click(getByRole(dialog,'button',{name:'登记放行'}));
-  expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.customs.save',payload:expect.objectContaining({id:'cus-s',status:'cleared',declarationNo:'223320260001',declaredAt:'2026-10-12',evidence:'海关放行通知'})});
+  expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.customs.save',payload:expect.objectContaining({id:'cus-s',status:'cleared',declarationNo:'223320260001',declaredAt:'2026-10-12',evidence:'海关放行通知'})},{expectedRevision:1});
   Object.assign(f.customs[0],{status:'cleared',clearedAt:'2026-10-13',evidence:'海关放行通知'});store.state={...store.state!};render('cus-s');
   detail=host.querySelector('[data-customs-detail="cus-s"]') as HTMLElement;
   expect(queryByRole(detail,'button',{name:'登记海关放行'})).toBeNull();
@@ -143,7 +181,7 @@ it('keeps a letter of credit ledger with terms, presentations and bank results, 
   const gov=(note:string)=>({status:'approved',rounds:[],effectiveVersion:1,contract:{kind:'external',poNumber:'PO',confirmationFileIds:[],internalPurpose:'',receiver:'',paymentMethod:'LC',depositPercent:null,paymentNote:note,incoterm:'FOB',deliveryPlace:'上海'}});
   (st.orders[0] as any).governance=gov('L/C at sight');
   st.orders.push({id:'o2',code:'SO-2',type:'garment',customerId:'c',customer:'Cedar',currency:'USD',due:'2026-12-01',governance:gov('L/C 60 days')} as any);
-  f.shipments.push(shipment('s',{state:'departed'}),shipment('t'));
+  f.shipments.push(shipment('s',{state:'departed'}),shipment('t'),shipment('u',{state:'departed'}));
   (st as any).letterOfCredits=[{id:'lc1',code:'LC-2026-0001',lcNo:'LCA2026001',customerId:'c',customer:'Cedar',orderIds:['o'],issuingBank:'Barclays London',advisingBank:'中国银行上海分行',confirmed:false,availableBy:'sight',usanceDays:0,currency:'USD',amount:100,tolerancePct:5,issueDate:'2026-09-01',latestShipmentDate:'2099-01-31',expiryDate:'2099-02-21',expiryPlace:'中国',presentationDays:21,partialShipment:true,transhipment:false,documentsRequired:'商业发票一式三份',note:'',fileIds:[],
     amendments:[{no:1,date:'2026-09-20',changes:[{field:'expiryDate',label:'有效期',from:'2099-01-21',to:'2099-02-21'}],note:'展期',at:'2026-09-20T01:00:00Z',actor:'单证'}],
     presentations:[{id:'p1',no:1,shipmentId:'s',shipmentCode:'S',shipmentDate:'2026-10-10',presentedAt:'2026-10-12',deadline:'2026-10-31',amount:60,documents:'发票',autoDiscrepancies:[],discrepancies:'',result:'pending',history:[],createdAt:'2026-10-12T01:00:00Z',actor:'单证'}],createdAt:'2026-09-02T01:00:00Z',actor:'单证'}];
@@ -165,7 +203,10 @@ it('keeps a letter of credit ledger with terms, presentations and bank results, 
   await click(getByRole(dialog,'button',{name:'取消'}));
   await click(getByRole(detail,'button',{name:'登记交单'}));
   dialog=getByRole(document.body,'dialog');
-  expect(getByRole(dialog,'combobox',{name:'出运'}).textContent).toContain('T');expect(getByRole(dialog,'combobox',{name:'出运'}).textContent).not.toContain('S ·');
+  const presentationSources=getByRole(dialog,'combobox',{name:'出运'}).textContent;
+  expect(presentationSources).toContain('U ·');
+  expect(presentationSources).not.toContain('T ·');
+  expect(presentationSources).not.toContain('S ·');
   await click(getByRole(dialog,'button',{name:'取消'}));
   await click(getByRole(host,'button',{name:'登记信用证'}));
   expect(queryByRole(document.body,'dialog')).toBeNull();expect(getByRole(host,'heading',{name:'登记信用证'})).toBeTruthy();
@@ -282,7 +323,7 @@ it('generates declaration items on the server once every shipped style is classi
   const detail=host.querySelector('[data-customs-detail="cus-s"]') as HTMLElement;
   expect(detail.textContent).not.toContain('尚未建立商品归类');
   await click(getByRole(detail,'button',{name:'生成申报商品项'}));
-  expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.customs.items',payload:{id:'cus-s'}});
+  expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.customs.items',payload:{id:'cus-s'}},{expectedRevision:1});
 });
 
 it('adjusts a generated declaration item by hand with a reason and shows the adjustment trail',async()=>{
@@ -298,7 +339,7 @@ it('adjusts a generated declaration item by hand with a reason and shows the adj
   typeInto(getByRole(dialog,'textbox',{name:'申报品名'}) as HTMLInputElement,'女式涤纶制大衣');
   typeInto(getByRole(dialog,'textbox',{name:'调整原因'}) as HTMLInputElement,'按规范申报目录');
   await click(getByRole(dialog,'button',{name:'保存调整'}));
-  expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.customs.item.adjust',payload:{id:'cus-s',no:1,declaredName:'女式涤纶制大衣',elements:item.elements,legalQty:10,secondQty:10,reason:'按规范申报目录'}});
+  expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.customs.item.adjust',payload:{id:'cus-s',no:1,declaredName:'女式涤纶制大衣',elements:item.elements,legalQty:10,secondQty:10,reason:'按规范申报目录'}},{expectedRevision:1});
 });
 
 
@@ -340,4 +381,36 @@ it('hides the tax approval and receipt matching actions when the rebate amounts 
   const actions=async(masked:boolean,state:string)=>{(st as any).exportRebate={rates:[],claims:[claim(masked,state)]};store.state={...st};act(()=>root.unmount());root=createRoot(host);render('cus-m');const detail=host.querySelector('[data-customs-detail="cus-m"]') as HTMLElement;return {approve:!!queryByRole(detail,'button',{name:'登记税务核准'}),receive:!!queryByRole(detail,'button',{name:'勾稽到账'})};};
   expect((await actions(false,'filed')).approve).toBe(true);expect((await actions(false,'approved')).receive).toBe(true);
   expect(await actions(true,'filed')).toEqual({approve:false,receive:false});expect(await actions(true,'approved')).toEqual({approve:false,receive:false});
+});
+it('passes the handwritten tax approval signature from Customs to the workspace command',async()=>{
+ const st=store.state!;
+ st.fulfillment.shipments.push(shipment('signed-rebate',{state:'departed',departedAt:'2026-10-13T02:00:00Z'}));
+ st.fulfillment.customs.push(customs('signed-rebate','cleared',{hsCode:'6202.1300'}));
+ st.exportRebate={rates:[],claims:[{id:'signed-claim',code:'RB-01',customsId:'cus-signed-rebate',customsCode:'CUS-SIGNED-REBATE',declarationNo:'D-signed-rebate',shipmentId:'s-signed-rebate',shipmentCode:'S-SIGNED-REBATE',orderIds:['o'],hsCode:'6202130000',exportDate:'2026-10-13',rateId:'rt',rate:'13',lines:[],taxable:100,expected:13,filedAt:'2026-10-14',batchRef:'B-1',fileIds:[],note:'',state:'filed',receipts:[],createdAt:'2026-10-14T00:00:00Z',actor:'财务'}]};
+ render('cus-signed-rebate');await click(getByRole(host,'button',{name:'登记税务核准',exact:true}));
+ const dialog=getByRole(document.body,'dialog',{name:'登记税务核准',exact:true});
+ typeInto(getByRole(dialog,'textbox',{name:'审核通知 / 批复文号'}) as HTMLInputElement,'模拟核准 RB-01');
+ const pad=dialog.querySelector('.mist-signature-pad') as HTMLElement;expect(pad).toBeTruthy();
+ pad.getBoundingClientRect=()=>({left:0,top:0,width:480,height:168,right:480,bottom:168,x:0,y:0,toJSON:()=>({})});
+ const point=(type:string,x:number,y:number)=>Object.assign(new MouseEvent(type,{bubbles:true,clientX:x,clientY:y,button:0}),{pointerId:1});
+ for(const [type,x,y] of [['pointerdown',12,60],['pointermove',120,21],['pointermove',180,72],['pointermove',270,52],['pointerup',270,52]] as const){
+  await act(async()=>{pad.dispatchEvent(point(type,x,y));});
+ }
+ expect(getByRole(dialog,'img',{name:'登记签字：已签',exact:true})).toBeTruthy();
+ await click(getByRole(dialog,'button',{name:'登记核准',exact:true}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({
+  type:'rebate.claim.approve',payload:expect.objectContaining({id:'signed-claim',amount:13,ref:'模拟核准 RB-01'}),
+ }),{signature:{svg:expect.stringContaining('<svg')}});
+});
+it('keeps another declarant note and file when an earlier attachment upload finishes',async()=>{
+ store.state!.fulfillment.shipments.push(shipment('file-source'));store.state!.fulfillment.customs.push(customs('file-source','draft',{note:'旧备注',fileIds:['old']}));let finish!:(value:unknown)=>void;store.uploadFile.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
+ render('cus-file-source');const input=host.querySelector('[data-customs-detail="cus-file-source"] input[type="file"]')!;expect(input).toBeTruthy();Object.defineProperty(input,'files',{configurable:true,value:[new File(['new'],'new.txt',{type:'text/plain'})]});await act(async()=>{input.dispatchEvent(new Event('change',{bubbles:true}));});
+ store.state=structuredClone(store.state);Object.assign(store.state!.fulfillment.customs[0],{note:'另一单证员已复核',fileIds:['old','peer']});store.workspace={id:'workspace',revision:2};render('cus-file-source');await act(async()=>{finish({id:'upload',name:'new.txt',mimeType:'text/plain',size:3,storageKey:'workspace/upload',createdAt:''});});
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.customs.save',payload:expect.objectContaining({id:'cus-file-source',note:'另一单证员已复核',fileIds:['old','peer','upload']})}),{expectedRevision:2});
+});
+it('includes all current credit originals when adding an uploaded amendment letter',async()=>{
+ store.state!.orders[0].governance={status:'approved',contract:{paymentMethod:'LC'}} as any;store.state!.letterOfCredits=[{id:'lc-files',code:'LC-FILES',lcNo:'LC-FILES',customerId:'c',customer:'Cedar',orderIds:['o'],issuingBank:'Bank',advisingBank:'Bank',currency:'USD',amount:1000,latestShipmentDate:'2099-01-01',expiryDate:'2099-01-31',expiryPlace:'中国',availableBy:'sight',usanceDays:0,tolerancePercent:0,allowPartial:true,allowTransshipment:true,presentationDays:21,requiredDocuments:[],presentations:[],amendments:[],fileIds:['old'],note:''} as any];let finish!:(value:unknown)=>void;store.uploadFile.mockImplementation(()=>new Promise(resolve=>{finish=resolve}));
+ render();await click(getByRole(host,'tab',{name:/信用证/}));await click(getByRole(getByRole(host,'table',{name:'信用证台账'}),'row',{name:/LC-FILES/}));const input=host.querySelector('[data-lc-detail="lc-files"] input[type="file"]')!;expect(input).toBeTruthy();Object.defineProperty(input,'files',{configurable:true,value:[new File(['new'],'new.txt',{type:'text/plain'})]});await act(async()=>{input.dispatchEvent(new Event('change',{bubbles:true}));});
+ store.state=structuredClone(store.state);store.state!.letterOfCredits![0].fileIds=['old','peer'];store.workspace={id:'workspace',revision:2};render();await act(async()=>{finish({id:'upload',name:'new.txt',mimeType:'text/plain',size:3,storageKey:'workspace/upload',createdAt:''});});
+ expect(store.run).toHaveBeenCalledWith({type:'lc.files',payload:{id:'lc-files',fileIds:['old','peer','upload']}},{expectedRevision:2});
 });

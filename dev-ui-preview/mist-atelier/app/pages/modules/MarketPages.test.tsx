@@ -2,6 +2,7 @@
 import React,{act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
+import {getByRole} from '@testing-library/dom';
 import {MARKET_PAGES} from './MarketPages';
 import {Nav} from '../../nav';
 import {ExportConfirmHost} from '../../runtime/ExportConfirmHost';
@@ -52,16 +53,38 @@ describe('Market explicit detail sections',()=>{
  });
 });
 describe('Mist market screens',()=>{
+ it('retains the requested marketing lead tab during read failure without showing empty campaigns',async()=>{
+  const original=bridge.current.state;
+  bridge.current.state=null;
+  bridge.current.error='市场工作区未能读取';
+  await mount('marketing',undefined,'leads');
+  expect(host.textContent).toContain('全部线索');
+  expect(host.textContent).not.toContain('尚无营销活动');
+  expect(host.querySelector('[aria-label="营销活动列表"]')).toBeNull();
+  expect(host.querySelector('[aria-label="全部线索"]')).toBeNull();
+  await click('重试');
+  expect(bridge.current.refresh).toHaveBeenCalledTimes(1);
+  bridge.current.state=original;
+  bridge.current.error='';
+  await reroute('marketing',undefined,'leads');
+  expect(host.querySelector('[aria-label="全部线索"]')).toBeTruthy();
+  expect(go).not.toHaveBeenCalled();
+ });
+ it('hands a new quotation focus to its customer and preserves focus while editing terms',async()=>{
+  await mount('quotations');await click('新建报价');expect(document.activeElement).toBe(getByRole(host,'combobox',{name:'客户'}));
+  const place=host.querySelector('[aria-label="贸易术语指定地点"]') as HTMLInputElement;place.focus();await fill('贸易术语指定地点','上海');expect(document.activeElement).toBe(place);expect(bridge.current.run).not.toHaveBeenCalled();
+ });
  it('carries the exact development customer into a product quotation and saves that customer',async()=>{
   const state=bridge.current.state,product=state.market.products[0];
   state.customers.push({...state.customers[0],id:'c2',name:'来源客户'});
   state.devs.push({id:'source-dev',customerId:'c2'} as any);product.sourceDevId='source-dev';product.season='AW27';
+  product.specs={...product.specs,style:'CC-JK4182'};
   await mount('quotations',undefined,'product:'+product.id);
   expect((host.querySelector('[aria-label="客户"]') as HTMLSelectElement).value).toBe('c2');
   expect((host.querySelector('[aria-label="季节"]') as HTMLInputElement).value).toBe('AW27');
   await fill('有效期','2026-12-01');await fill('贸易术语','FOB');await fill('贸易术语指定地点','上海');await fill('付款条件','T/T 30% 定金，70% 发货前付清');
   await click('下一步');await click('下一步');await click('保存报价草稿');
-  expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.quotation.save',payload:expect.objectContaining({input:expect.objectContaining({customerId:'c2',lines:[expect.objectContaining({productId:product.id})]})})}));
+  expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.quotation.save',payload:expect.objectContaining({input:expect.objectContaining({customerId:'c2',lines:[expect.objectContaining({productId:product.id,style:'CC-JK4182'})]})})}));
  });
  it.each([false,true])('uses only an unambiguous customer-code reference for a product without a development (%s)',async unique=>{
   const state=bridge.current.state,product=state.market.products[0];
@@ -116,6 +139,55 @@ describe('Mist market screens',()=>{
  it('records the quotation exchange rate on the version for foreign-currency quotes and rejects malformed rates',async()=>{await mount('quotations');await click('新建报价');await fill('有效期','2026-12-01');await fill('贸易术语','FOB');await fill('贸易术语指定地点','上海');await fill('付款条件','T/T 30% 定金，70% 发货前付清');await fill('报价汇率','7.1234567');await click('下一步');expect(host.textContent).toContain('报价汇率须为正数');await fill('报价汇率','7.10');await click('下一步');await fill('条目1来源','p:'+bridge.current.state.market.products[0].id);await fill('条目1数量','3');await click('下一步');expect(host.textContent).toContain('= 7.10 CNY');await click('保存报价草稿');expect(bridge.current.run).toHaveBeenCalledWith({type:'market.quotation.save',payload:{id:undefined,input:expect.objectContaining({fxRate:'7.10'})}});});
  it('preserves the complete quotation on save failure and does not navigate or create an order',async()=>{bridge.current.run.mockRejectedValueOnce(new Error('数据库保存失败'));await mount('quotations');await completeQuote();await click('保存报价草稿');expect(host.textContent).toContain('数据库保存失败');expect(host.textContent).toContain('0.30');expect(go).not.toHaveBeenCalled();await click('上一步');expect((host.querySelector('[aria-label="条目1数量"]') as HTMLInputElement).value).toBe('3');expect(bridge.current.run.mock.calls.every(([c]:any[])=>c.type==='market.quotation.save')).toBe(true);});
  it('opens an archived product exact source version instead of current development version',async()=>{const p=bridge.current.state.market.products[0];p.sourceDevId='dev-original';p.sourceVersionId='version-original';await mount('products',p.id,undefined,'full');await click('打开准确开发版本');expect(go).toHaveBeenCalledWith('development/detail','dev-original',{versionId:'version-original'});});
+ it('submits the selected category fields and its default unit in the first save',async()=>{
+  await mount('products');await click('新建');
+  await fill('公司产品编码','T-0048');await fill('名称','树脂扣');await fill('类别','trimming');
+  expect(host.querySelector('[aria-label="款号"]')).toBeNull();
+  await fill('辅料类型','扣类');await fill('规格尺寸','18 mm');await fill('起订量','500');
+  for(let i=0;i<8&&!host.querySelector('[aria-label="计量单位"]');i++)await click('下一步');
+  expect((host.querySelector('[aria-label="计量单位"]') as HTMLSelectElement).value).toBe('个');
+  for(let i=0;i<8&&!Array.from(host.querySelectorAll('button')).some(b=>b.textContent==='确认保存');i++)await click('下一步');
+  await click('确认保存');
+  expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.product.save',payload:expect.objectContaining({input:expect.objectContaining({category:'trimming',unit:'个',specs:{trimType:'扣类',size:'18 mm',moq:'500'}})})}));
+ });
+ it('preserves an explicitly selected product unit when changing category',async()=>{
+  await mount('products');await click('新建');
+  await fill('公司产品编码','C-0048');await fill('名称','包装组件');
+  for(let i=0;i<8&&!host.querySelector('[aria-label="计量单位"]');i++)await click('下一步');
+  await fill('计量单位','套');
+  for(let i=0;i<8&&!host.querySelector('[aria-label="类别"]');i++)await click('上一步');
+  await fill('类别','trimming');
+  for(let i=0;i<8&&!host.querySelector('[aria-label="计量单位"]');i++)await click('下一步');
+  expect((host.querySelector('[aria-label="计量单位"]') as HTMLSelectElement).value).toBe('套');
+ });
+ it('binds attachment replacement to the file list the user saw before the upload',async()=>{
+  const b=bridge.current,product=b.state.market.products[0],added={id:'file-new',name:'量尺记录.txt',mimeType:'text/plain',size:4,storageKey:'w/file-new',createdAt:'2026-10-13'};
+  b.workspace={revision:14};
+  b.uploadFile.mockImplementation(async()=>{
+   b.state.files.push(added);b.workspace={revision:16};
+   return added;
+  });
+  await mount('products',product.id,undefined,'full');
+  await act(async()=>{
+   const input=host.querySelector<HTMLInputElement>('input[type="file"]')!;
+   Object.defineProperty(input,'files',{configurable:true,value:[new File(['记录'],added.name,{type:added.mimeType})]});input.dispatchEvent(new Event('change',{bubbles:true}));
+  });
+  expect(b.run).toHaveBeenCalledWith({type:'market.attachment.set',payload:{kind:'product',id:product.id,fileIds:[added.id]}},{expectedRevision:14});
+ });
+ it('recovers an acknowledged upload into the original product without uploading again',async()=>{
+  const w=bridge.current,product=w.state.market.products[0],stored={id:'file-original',name:'包装说明.txt',mimeType:'text/plain',size:4,storageKey:'w/file-original',createdAt:'2026-10-13'};
+  w.workspace={revision:20};
+  w.uploadFile.mockImplementation(async()=>{w.pending={kind:'upload',requestId:'original-upload'};throw new Error('上传回复中断');});
+  w.recover=vi.fn(async()=>{w.pending=null;w.state.files.push(stored);w.workspace={revision:21};return {result:{fileId:stored.id}};});
+  await mount('products',product.id,undefined,'full');
+  await act(async()=>{
+   const input=host.querySelector<HTMLInputElement>('input[type="file"]')!;
+   Object.defineProperty(input,'files',{configurable:true,value:[new File(['说明'],stored.name,{type:stored.mimeType})]});input.dispatchEvent(new Event('change',{bubbles:true}));
+  });
+  await click('核对并关联');
+  expect(w.uploadFile).toHaveBeenCalledTimes(1);expect(w.recover).toHaveBeenCalledTimes(1);
+  expect(w.run).toHaveBeenCalledWith({type:'market.attachment.set',payload:{kind:'product',id:product.id,fileIds:[stored.id]}},expect.anything());
+ });
  it('retains uploaded attachment identity after association failure and retries the same file',async()=>{const p=bridge.current.state.market.products[0];const stored={id:'f-upload',name:'规格.pdf',mimeType:'application/pdf',size:4,storageKey:'w/f-upload',createdAt:'2026-10-13'};bridge.current.uploadFile.mockImplementation(async()=>{bridge.current.state.files.push(stored);return stored;});bridge.current.run.mockRejectedValueOnce(new Error('关联保存失败'));await mount('products',p.id,undefined,'full');const file=new File(['spec'],'规格.pdf',{type:'application/pdf'});await act(async()=>{const input=host.querySelector<HTMLInputElement>('input[type="file"]')!;Object.defineProperty(input,'files',{configurable:true,value:[file]});input.dispatchEvent(new Event('change',{bubbles:true}));});expect(host.textContent).toContain('规格.pdf · 待关联');expect(host.textContent).toContain('关联保存失败');await click('重试关联已上传附件');expect(bridge.current.uploadFile).toHaveBeenCalledTimes(1);expect(bridge.current.run).toHaveBeenLastCalledWith({type:'market.attachment.set',payload:{kind:'product',id:p.id,fileIds:['f-upload']}});});
  it('renders truthful empty marketing state without manufactured leads or success',async()=>{await mount('marketing');expect(host.textContent).toContain('尚无营销活动');expect(bridge.current.run).not.toHaveBeenCalled();expect(bridge.current.state.market.leads).toEqual([]);});
  it('displays real quotation totals and keeps acceptance separate from conversion',async()=>{const s=bridge.current.state;s.market.quotations.push({id:'q1',createdAt:'2026-10-13',updatedAt:'2026-10-13',fileIds:[],note:'',code:'QT-REAL',customerId:'c1',currency:'USD',season:'AW26',validUntil:'2026-12-01',deliveryTerms:'FOB',paymentTerms:'T/T',status:'Accepted',lines:[],total:'0.30',deliveryEvidence:'线下发送',responseEvidence:'实际签回',approval:null,convertedOrderId:null});await mount('quotations','q1');expect(host.textContent).toContain('0.30');expect(host.textContent).toContain('核对并转订单');expect(bridge.current.run).not.toHaveBeenCalled();});
@@ -182,4 +254,33 @@ it('keeps product pages usable while an image belongs to a loading or retired wo
  bridge.current.loading=false;const Page=MARKET_PAGES.products;
  await act(async()=>root!.render(<Nav.Provider value={{route:{view:'products',id:p.id,detail:'full'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><Page/></Nav.Provider>));
  expect(bridge.current.fileUrl).toHaveBeenCalled();expect(host.textContent).toContain(p.name);
+});
+
+describe('quotation editor source concurrency',()=>{
+ it('refuses a new version when the source quotation changes while its draft stays open',async()=>{
+  bridge.current.workspace={id:'workspace',revision:7};bridge.current.state.market.quotations=[{...routeQuote('source'),status:'Sent'}];
+  await mount('quotations','source');await click('新建版本');await fill('有效期','2026-12-01');await fill('报价备注','新版本未保存');
+  bridge.current.state=structuredClone(bridge.current.state);bridge.current.state.market.quotations[0].status='Accepted';bridge.current.workspace={id:'workspace',revision:8};await reroute('quotations','source');
+  await click('下一步');await click('下一步');await click('保存报价草稿');
+  expect(bridge.current.run).not.toHaveBeenCalled();expect(host.textContent).toContain('报价已更新，请重新打开后核对');
+ });
+ it('keeps a stale local draft but refuses to overwrite a quotation changed by a real workspace refresh',async()=>{
+  bridge.current.workspace={id:'workspace',revision:7};
+  bridge.current.state.market.quotations=[routeQuote('concurrent')];
+  await mount('quotations','concurrent');await click('编辑草稿');await fill('报价备注','我的未保存备注');
+  bridge.current.state=structuredClone(bridge.current.state);
+  bridge.current.state.market.quotations[0].note='主管已保存的备注';bridge.current.workspace={id:'workspace',revision:8};
+  await reroute('quotations','concurrent');
+  expect((host.querySelector('[aria-label="报价备注"]') as HTMLTextAreaElement).value).toBe('我的未保存备注');
+  await click('下一步');await click('下一步');await click('保存报价草稿');
+  expect(bridge.current.run).not.toHaveBeenCalled();expect(host.textContent).toContain('报价已更新，请重新打开后核对');
+  await click('上一步');await click('上一步');expect((host.querySelector('[aria-label="报价备注"]') as HTMLTextAreaElement).value).toBe('我的未保存备注');
+ });
+ it('allows an unrelated workspace refresh and binds saving to that same checked revision',async()=>{
+  bridge.current.workspace={id:'workspace',revision:7};bridge.current.state.market.quotations=[routeQuote('concurrent')];
+  await mount('quotations','concurrent');await click('编辑草稿');await fill('报价备注','本次修改');
+  bridge.current.state=structuredClone(bridge.current.state);bridge.current.workspace={id:'workspace',revision:8};await reroute('quotations','concurrent');
+  await click('下一步');await click('下一步');await click('保存报价草稿');
+  expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.quotation.save',payload:expect.objectContaining({id:'concurrent',input:expect.objectContaining({note:'本次修改'})})}),{expectedRevision:8});
+ });
 });

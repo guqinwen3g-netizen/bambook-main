@@ -6,7 +6,8 @@ import React from 'react';
 import { ArrowDownLeft, ArrowUpRight, Landmark, ReceiptText } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, DataTable, Dialog, EmptyState, Facts, Mono, ObjectCell, Pill, SearchField, Segmented, StatCard, StatGrid, Tabs, Toolbar, type Column } from '../../../../components/mist';
 import type { MistState, MistReceipt, MistPayment } from '../../../../server/src/shared/mistWorkspace';
-import { isActiveMistInvoice, mistBankAccountBalances, mistFxLockUsage, type MistFxRecord } from '../../../../server/src/shared/mistWorkspace';
+import { isRecognizedMistInvoice, mistBankAccountBalances, mistFxLockUsage, type MistFxRecord } from '../../../../server/src/shared/mistWorkspace';
+import { mistInvoiceCustomerId, mistInvoiceCustomerName } from '../../../../server/src/shared/mistOpeningBalance';
 import { AccountAssignDialog, BankAccountDialog, FxAllocateDialog, FxDialog, fxUnallocatedMinor, FxPeriodRatesCard, FxReverseDialog, FxRevaluationCard, PeriodCloseCard, AccountStatusCell, accountLabel, editAccountDraft, newAccountDraft, newFxDraft, useBankAccountCommand } from './FinanceBankAccounts';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
@@ -29,7 +30,7 @@ const money = (amount: number, currency: string) => `${amount.toLocaleString('en
 const totalsText = (totals: ReturnType<typeof financeCurrencyTotals>) => totals.map(t => money(t.amount, t.currency)).join(' · ') || '暂无已登记金额';
 
 export function FinanceEntrances({ state, area, onChange, accounts = true }: { state: MistState | null; area: FinanceArea; onChange: (area: FinanceArea) => void; accounts?: boolean }) {
-  const open = financeCurrencyTotals((state?.invoices || []).filter(i => isActiveMistInvoice(i) && i.open > 0).map(i => ({ currency: i.currency, amount: i.open })));
+  const open = financeCurrencyTotals((state?.invoices || []).filter(i => isRecognizedMistInvoice(i) && i.open > 0).map(i => ({ currency: i.currency, amount: i.open })));
   const unallocated = financeCurrencyTotals((state?.receipts || []).filter(r => r.remaining > 0).map(r => ({ currency: r.currency, amount: r.remaining })));
   const payable = financeCurrencyTotals(state ? supplierPayableSummary(state, platformBusinessDate(businessNow())).filter(r => r.open > 0).map(r => ({ currency: r.currency, amount: r.open })) : []);
   const bank = state ? mistBankAccountBalances(state) : null, balances = financeCurrencyTotals((bank?.accounts || []).map(a => ({ currency: a.account.currency, amount: a.balance })));
@@ -104,7 +105,7 @@ export function FinanceRecords({ onReceipt }: { onReceipt: (id: string) => void 
     title: money(current.amount, current.currency), description: current.party,
     facts: [
       { label: '交易日期', value: current.date }, { label: '银行参考 / 附言', value: current.ref || '未填写' },
-      { label: '归属账户', value: account ? `${account.code} · ${account.name}` : <Pill tone="warn">{uiText("未归属")}</Pill> },
+      ...(accountsVisible ? [{ label: '归属账户', value: account ? `${account.code} · ${account.name}` : <Pill tone="warn">{uiText("未归属")}</Pill> }] : []),
       ...(current.receipt ? [{ label: '未分配', value: money(current.receipt.remaining, current.currency) }] : [{label:'业务来源',value:paymentPurpose}]),
     ] }} /> : null;
   return <div className="mist-col">
@@ -119,9 +120,11 @@ export function FinanceRecords({ onReceipt }: { onReceipt: (id: string) => void 
 
 export function financeCustomerReceivables(state: MistState | null) {
   const groups = new Map<string, { customerId: string; name: string; currency: string; amount: number; invoices: number }>();
-  for (const i of state?.invoices || []) if (isActiveMistInvoice(i) && i.open > 0) {
-    const order = state?.orders.find(o => o.id === i.orderId), customerId = order?.customerId || '', key = JSON.stringify([customerId || i.customer, i.currency]);
-    const old = groups.get(key) || { customerId, name: i.customer, currency: i.currency, amount: 0, invoices: 0 };
+  if (!state) return [];
+  for (const i of state.invoices) if (isRecognizedMistInvoice(i) && i.open > 0) {
+    const customerId = mistInvoiceCustomerId(state, i) || '';
+    const key = JSON.stringify([customerId, i.currency, customerId ? null : i.id]);
+    const old = groups.get(key) || { customerId, name: mistInvoiceCustomerName(state, i), currency: i.currency, amount: 0, invoices: 0 };
     old.amount += Math.round(i.open * 100); old.invoices++; groups.set(key, old);
   }
   return [...groups.entries()].map(([id, g]) => ({ id, ...g, amount: g.amount / 100 }));

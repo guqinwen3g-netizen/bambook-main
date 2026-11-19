@@ -6,6 +6,8 @@
 import { MistCommandError, type MistContext, type MistState, type MistCommandResult } from './mistWorkspace';
 import { reviewDecision, type MistReviewTask } from './mistReview';
 import { addAtPosition, consumeReservations, freeQuantity, removeAtPosition, reservationOpen, stockIssueRemaining, OTHER_RECEIPT_REASONS, type FulfillmentShipment, type FulfillmentStock, type OtherReceiptReason, type StockRoll } from './mistFulfillment';
+import {isSampleLoanHold,stockSampleLoanQuantity} from './mistStockSampleLoan';
+import {unresolvedCommercialLoanSource,commercialSampleDepartureBlocker} from './mistCommercialSampleLoan';
 import { mistBusinessDate, nextBusinessCode } from './mistBusinessClock';
 
 export type StockCountLine = { stockId: string; location: string; counted: number };
@@ -52,7 +54,7 @@ export function applyStockOperation(root: MistState, command: StockOperationComm
       const warehouseId = p.warehouseId === undefined ? undefined : warehouseOf(root, p.warehouseId).id;
       let unitCost: number | undefined, currency: string | undefined;
       if (p.unitCost !== undefined) { unitCost = qty(p.unitCost, '单位成本', true); currency = text(p.currency, '成本币种', 3).toUpperCase(); if (!/^[A-Z]{3}$/.test(currency)) fail('成本币种须为三位字母'); }
-      const rolls = p.rolls === undefined ? undefined : (Array.isArray(p.rolls) && p.rolls.length && p.rolls.length <= 1000 ? (p.rolls as any[]).map((r, i) => ({ roll: text(r?.roll, `第 ${i + 1} 卷卷号`, 60), quantity: qty(r?.quantity, `第 ${i + 1} 卷数量`) })) : fail('码单格式无效'));
+      const rolls = p.rolls === undefined ? undefined : (Array.isArray(p.rolls) && p.rolls.length && p.rolls.length <= 1000 ? (p.rolls as any[]).map((r, i) => ({ roll: text(r?.roll, `第 ${i + 1} 卷卷号`, 60), quantity: qty(r?.quantity, `第 ${i + 1} 卷数量`), ...(r?.weightKg !== undefined && r.weightKg !== null && r.weightKg !== '' ? { weightKg: qty(r.weightKg, `第 ${i + 1} 卷重量`) } : {}) })) : fail('码单格式无效'));
       if (rolls && new Set(rolls.map(r => r.roll)).size !== rolls.length) fail('码单卷号不能重复');
       if (rolls && sum(rolls.map(r => r.quantity)) !== quantity) fail('码单合计与入库数量不一致');
       const id = ctx.id();
@@ -64,7 +66,8 @@ export function applyStockOperation(root: MistState, command: StockOperationComm
       return { id };
     }
     case 'fulfillment.stock.reserve': {
-      const stock = stockOf(root, p.stockId); ordinary(stock);
+      if(['sampleLoan','sampleLoanAllocations'].some(key=>Object.prototype.hasOwnProperty.call(p,key)))fail('商业借样占用须从原样品借出办理');
+      const stock = stockOf(root, p.stockId); ordinary(stock); const unresolved=unresolvedCommercialLoanSource(root,stock);if(unresolved)fail(unresolved);
       const line = root.orderLines.find(l => l.id === p.lineId && l.orderId === p.orderId); if (!line) return fail('请选择准确的订单条目');
       const quantity = qty(p.quantity, '预留数量');
       if (quantity > freeQuantity(stock)) fail(`可预留数量不足（可用 ${freeQuantity(stock)} ${stock.unit}）`);
@@ -77,13 +80,14 @@ export function applyStockOperation(root: MistState, command: StockOperationComm
     case 'fulfillment.stock.release': {
       const stock = stockOf(root, p.stockId), r = stock.reservations?.find(x => x.id === p.reservationId && reservationOpen(x) > 0);
       if (!r) return fail('没有有效预留', 'NOT_FOUND');
+      if(isSampleLoanHold(r))fail('商业借样占用只能按原借出归还释放');
       r.releasedAt = ctx.now; r.releasedBy = ctx.actorName; r.releaseReason = text(p.reason, '释放原因', 500);
       f.stockMovements.push({ id: ctx.id(), stockId: stock.id, kind: 'release', quantity: reservationOpen({ ...r, releasedAt: undefined }), location: stock.location, person: ctx.actorName, note: text(p.reason, '释放原因', 500), at: ctx.now, actor: ctx.actorName });
       event(root, ctx, stock.id, `释放预留：${r.releaseReason}`);
       return { id: r.id };
     }
     case 'fulfillment.stock.transfer': {
-      const stock = stockOf(root, p.stockId); ordinary(stock);
+      const stock = stockOf(root, p.stockId); ordinary(stock);const unresolved=unresolvedCommercialLoanSource(root,stock);if(unresolved)fail(unresolved);
       const quantity = qty(p.quantity, '调拨数量'), to = warehouseOf(root, p.toWarehouseId);
       if (to.id === stock.warehouseId) fail('调入仓库与原仓库相同，请用移位');
       if (quantity > freeQuantity(stock)) fail(`可调拨数量不足（可用 ${freeQuantity(stock)} ${stock.unit}）`);
@@ -104,7 +108,7 @@ export function applyStockOperation(root: MistState, command: StockOperationComm
       const prefix = `${f.warehouses.find(w => w.id === t.toWarehouseId)?.name || t.toWarehouseId} · `;
       addAtPosition(stock, t.quantity, prefix + t.toLocation);
       const positions = (stock.positions || []).filter(pos => pos.available > 0), stillAway = ops.stockTransfers.some(x => x.stockId === stock.id && x.state === 'inTransit' && x.id !== t.id);
-      if (!stillAway && !(stock.locked || 0) && positions.every(pos => pos.location.startsWith(prefix))) {
+      if (!stillAway && !(stock.locked || 0) && !stockSampleLoanQuantity(stock) && positions.every(pos => pos.location.startsWith(prefix))) {
         stock.warehouseId = t.toWarehouseId;
         stock.positions = positions.map(pos => ({ location: pos.location.startsWith(prefix) ? pos.location.slice(prefix.length) : pos.location, available: pos.available }));
         stock.location = stock.positions.length === 1 ? stock.positions[0].location : '多个位置';
@@ -118,7 +122,7 @@ export function applyStockOperation(root: MistState, command: StockOperationComm
       if (!Array.isArray(p.lines) || !p.lines.length || p.lines.length > 500) fail('请逐批登记盘点数量，最多 500 行');
       const seen = new Set<string>();
       const lines = (p.lines as any[]).map(row => {
-        const stock = stockOf(root, row?.stockId); ordinary(stock);
+        const stock = stockOf(root, row?.stockId); ordinary(stock);const unresolved=unresolvedCommercialLoanSource(root,stock);if(unresolved)fail(unresolved);
         const location = text(row?.location, '盘点库位', 200), key = stock.id + '\u0000' + location;
         if (seen.has(key)) fail('同一批次同一库位只能登记一次'); seen.add(key);
         const book = (stock.positions ?? [{ location: stock.location, available: stock.available }]).find(pos => pos.location === location)?.available ?? 0;
@@ -139,7 +143,7 @@ export function applyStockOperation(root: MistState, command: StockOperationComm
       if (ctx.actorId === count.requesterId || !count.reviewerIds.includes(ctx.actorId!) || !countReviewers(root, { authority: ctx.authority, actorId: count.requesterId }, count.lines.map(l => l.stockId)).includes(ctx.actorId!)) fail('当前账号不在本次及当前有效审批名单', 'FORBIDDEN');
       if (!['approved', 'rejected'].includes(p.decision)) fail('请选择审批结论');
       if (p.decision === 'approved') for (const line of count.lines.filter(l => l.difference !== 0)) {
-        const stock = stockOf(root, line.stockId);
+        const stock = stockOf(root, line.stockId);const unresolved=unresolvedCommercialLoanSource(root,stock);if(unresolved)fail(unresolved);
         const now = (stock.positions ?? [{ location: stock.location, available: stock.available }]).find(pos => pos.location === line.location)?.available ?? 0;
         if (now !== line.book) fail(`${stock.name} 在 ${line.location} 的账面已变化，请重新盘点`, 'CONFLICT');
         if (line.difference > 0) addAtPosition(stock, line.difference, line.location); else removeAtPosition(stock, -line.difference, line.location);
@@ -160,6 +164,7 @@ export function applyStockOperation(root: MistState, command: StockOperationComm
  * Quantities already issued and linked to this shipment by hand are not issued again; reservations for other lines are respected.
  */
 export function autoIssueForDeparture(root: MistState, shipment: FulfillmentShipment, ctx: MistContext): void {
+  const borrowed=commercialSampleDepartureBlocker(root,shipment.id);if(borrowed)fail(borrowed,'PRECONDITION');
   const f = root.fulfillment;
   for (const line of shipment.lines) {
     const branch = root.productions.find(job => job.id === line.productionId);
@@ -169,9 +174,12 @@ export function autoIssueForDeparture(root: MistState, shipment: FulfillmentShip
     const unit = root.orderLines.find(row => row.id === line.lineId)?.unit;
     const linked = sum(f.stockMovements.filter(m => m.kind === 'issue' && m.shipmentLink?.shipmentId === shipment.id && m.shipmentLink.productionId === branch.id).map(m => stockIssueRemaining(root, m.id)));
     let need = sum([line.quantity, -linked]);
-    const lots = f.stock.filter(s => s.purchaseId === purchase.id && s.orderId === line.orderId && s.lineId === line.lineId && s.unit === unit && s.sourceKind !== 'claimReturn' && s.available > 0).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const sourceStock=f.stock.filter(s=>s.purchaseId===purchase.id&&s.orderId===line.orderId&&s.lineId===line.lineId);
+    // Service/direct supplier handovers without a warehouse source never invent an inventory receipt.
+    if(!sourceStock.length&&!f.receipts.some(r=>r.purchaseId===purchase.id&&r.destination==='warehouse'&&r.quantity>0))continue;
+    const lots = sourceStock.filter(s => s.unit === unit && s.sourceKind !== 'claimReturn' && s.available > 0).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     for (const lot of lots) {
-      let allowance = sum([freeQuantity(lot), ...(lot.reservations || []).filter(r => r.orderId === line.orderId && r.lineId === line.lineId).map(reservationOpen)]);
+      let allowance = sum([freeQuantity(lot), ...(lot.reservations || []).filter(r => !isSampleLoanHold(r)&&r.orderId === line.orderId && r.lineId === line.lineId).map(reservationOpen)]);
       for (const position of (lot.positions ?? [{ location: lot.location, available: lot.available }]).filter(pos => pos.available > 0).map(pos => ({ ...pos }))) {
         if (need <= 0 || allowance <= 0) break;
         const take = Math.min(need, position.available, allowance);
@@ -181,6 +189,7 @@ export function autoIssueForDeparture(root: MistState, shipment: FulfillmentShip
         need = sum([need, -take]); allowance = sum([allowance, -take]);
       }
     }
+    if(need>0)fail(`${shipment.code} 来源库存可出库数量不足（尚缺 ${need} ${unit||''}）`,'PRECONDITION');
   }
 }
 /** Days since receipt, for stock age; uses the Beijing business day. */

@@ -6,7 +6,7 @@
  * registered period rate when there is one, otherwise the CNY columns are left for the bookkeeper.
  */
 import { WRITEOFF_LABEL, mistMoneyMinor, type MistState } from './mistWorkspace';
-import { fxCnyMinor, fxPeriodRateFor } from './mistFxRates';
+import { fxCnyMinor, readFxPeriodRates } from './mistFxRates';
 import { mistBusinessDate } from './mistBusinessClock';
 import { allocationFacts, allocationDate } from './mistAllocationFacts';
 
@@ -15,13 +15,17 @@ export const ACCOUNTS = {
   revenue: ['6001', '主营业务收入'], fee: ['6603', '财务费用'], fx: ['6603.02', '财务费用-汇兑损益'], badDebt: ['1231', '坏账准备'], other: ['1221', '其他应收款'],
 } as const;
 export type VoucherLine = { date: string; no: string; summary: string; account: string; accountName: string; currency: string; amount: number; rate: number | null; debit: number | null; credit: number | null; source: string };
+
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 export function monthlyVouchers(root: MistState, month: string): VoucherLine[] {
   const out: VoucherLine[] = []; let seq = 0;
-  const rate = (currency: string) => currency === 'CNY' ? 1 : Number(fxPeriodRateFor(root as never, currency, month)?.rate) || null;
+  const periodRates = new Map(readFxPeriodRates(root)
+    .filter(row => row.month === month && !row.voided)
+    .map(row => [row.currency, row.rate]));
+  const rateText = (currency: string) => currency === 'CNY' ? '1' : periodRates.get(currency);
   const pair = (date: string, summary: string, currency: string, amount: number, dr: readonly [string, string], cr: readonly [string, string], source: string) => {
-    const no = `记-${String(++seq).padStart(4, '0')}`, fx = rate(currency), cny = fx ? r2(amount * fx) : null;
+    const no = `记-${String(++seq).padStart(4, '0')}`, fx = Number(rateText(currency)) || null, cny = fx ? r2(amount * fx) : null;
     out.push({ date, no, summary, account: dr[0], accountName: dr[1], currency, amount, rate: fx, debit: cny, credit: null, source });
     out.push({ date, no, summary, account: cr[0], accountName: cr[1], currency, amount, rate: fx, debit: null, credit: cny, source });
   };
@@ -32,7 +36,7 @@ export function monthlyVouchers(root: MistState, month: string): VoucherLine[] {
     cr: { account: readonly [string, string]; currency: string; amount: number }) => {
     const no = `记-${String(++seq).padStart(4, '0')}`;
     const convert = (side: typeof dr) => {
-      const text = side.currency === 'CNY' ? '1' : fxPeriodRateFor(root, side.currency, month)?.rate;
+      const text = rateText(side.currency);
       return { rate: text ? Number(text) : null, minor: text ? fxCnyMinor(mistMoneyMinor(side.amount), text) : null };
     };
     const debit = convert(dr), credit = convert(cr);

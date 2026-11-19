@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { isCalendarDay } from '../shared/mistBusinessClock';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { HrError, type EmploymentEventType } from './hrService';
+import { revokeAllSessions } from '../auth/sessionRevocation';
+import { invalidateAccountStatusCache } from '../auth/accountStatusGuard';
 
 type Tx = Prisma.TransactionClient;
 type ProfileInput = {
@@ -178,7 +180,8 @@ export function createCompanyEmploymentService(prisma: PrismaClient, companyId: 
       date(input.effectiveDate, '生效日期');
       if (input.effectiveDate > today()) throw new HrError('VALIDATION_FAILED', '生效日期不能晚于今天。');
       if (!ALLOWED[input.type]) throw new HrError('VALIDATION_FAILED', '变动类型无效。');
-      return prisma.$transaction(async tx => {
+      const changesAccess = ['Suspend', 'Resume', 'Resign', 'Terminate', 'Onboard'].includes(input.type);
+      const result = await prisma.$transaction(async tx => {
         const company = await lock(tx), person = await assertCanManage(tx, input.userId);
         const profile = await tx.employeeProfile.findUnique({ where: profileWhere(input.userId) });
         if (!profile || profile.deletedAt !== null) throw new HrError('PROFILE_NOT_FOUND', '请先建立员工档案。', 404);
@@ -213,6 +216,9 @@ export function createCompanyEmploymentService(prisma: PrismaClient, companyId: 
           await availableSeat(tx, company, input.userId);
           await tx.companyMember.update({ where: membership(input.userId), data: { status: 'active' } });
         } else if (ending || suspending) await tx.companyMember.update({ where: membership(input.userId), data: { status: 'suspended' } });
+        // Match account management: restoring access never revives old credentials.
+        // Identity revocation requires a fresh login in every company; other memberships stay unchanged.
+        if (changesAccess) await tx.userAccount.update({ where: { id: input.userId }, data: { metadata: revokeAllSessions(person.user.metadata) as any } });
         if (ending || nextDepartment !== currentDepartment) {
           leftTeams = (await tx.teamMember.updateMany({ where: { userId: input.userId, leftAt: null, team: { department: { companyId }, ...(ending ? {} : { departmentId: { not: nextDepartment! } }) } }, data: { leftAt: new Date() } })).count;
           await tx.team.updateMany({ where: { leaderId: input.userId, department: { companyId }, ...(ending ? {} : { departmentId: { not: nextDepartment! } }) }, data: { leaderId: null } });
@@ -231,6 +237,8 @@ export function createCompanyEmploymentService(prisma: PrismaClient, companyId: 
         await audit(tx, 'employment_' + input.type.toLowerCase(), input.userId, { eventId: savedEvent.id, fromStatus: profile.employmentStatus, toStatus: patch.employmentStatus, ...(jobChanged ? { fromRoleId: currentJob, toRoleId: nextPosition } : {}) });
         return { event: savedEvent, accountDisabled: ending || suspending, accountReenabled: restoring, leftTeams, jobChanged };
       });
+      if (changesAccess) invalidateAccountStatusCache(input.userId);
+      return result;
     },
   };
 }

@@ -136,7 +136,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "development.close",
-  "payload": "{ devId: string; kind: 'archived' | 'cancelled'; reason: string }",
+  "payload": "{ devId: string; kind: 'archived' | 'cancelled'; reason: string;taskResolutions?:DevelopmentTaskResolution[];retainFollowups?:boolean }",
+  "types": {
+   "DevelopmentTaskResolution": "{versionId:string;kind:DevelopmentTaskEndKind|'retained';reason:string}",
+   "DevelopmentTaskEndKind": "'completed'|'terminated'"
+  },
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
@@ -157,6 +161,63 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "development.fee.recordMaking",
   "payload": "{ devId: string; sampleId: string; amount: number; currency: string }",
   "source": "server/src/shared/mistWorkspace.ts"
+ },
+ {
+  "type": "development.incoming.dispatch",
+  "payload": "{devId:string;taskVersionId:string;items:Array<{sampleId:string;quantity:number;sourceLocation:string}>;sentAt:string;returnExpected:boolean;expectedReturn?:string;delivery:IncomingDelivery;postage:IncomingPostage;note:string}",
+  "types": {
+   "IncomingDelivery": "{kind:'courier'|'handover';recipient:string;address:string;carrier:string;trackingNo:string;evidence:string}",
+   "IncomingPostage": "{amount:number;currency:string;zeroReason:string}"
+  },
+  "source": "server/src/shared/mistDevelopmentIncoming.ts"
+ },
+ {
+  "type": "development.incoming.receive",
+  "payload": "{devId:string;receivedAt:string;name:string;form:string;quantity:number;unit:string;size:string;color:string;location:string;contact:string;fileIds:string[];note:string}",
+  "source": "server/src/shared/mistDevelopmentIncoming.ts"
+ },
+ {
+  "type": "development.incoming.return",
+  "payload": "{devId:string;dispatchId:string;items:Array<{loanId:string;quantity:number;location:string}>;receivedAt:string;delivery:IncomingDelivery;note:string}",
+  "types": {
+   "IncomingDelivery": "{kind:'courier'|'handover';recipient:string;address:string;carrier:string;trackingNo:string;evidence:string}"
+  },
+  "source": "server/src/shared/mistDevelopmentIncoming.ts"
+ },
+ {
+  "type": "development.material.add",
+  "payload": "MaterialUseDetails",
+  "types": {
+   "MaterialUseDetails": "{position:string;specification:string;color:string;perPiece:string;unit:string;provider:MaterialProvider;colorMode:MaterialColorMode;colorReference:string}",
+   "MaterialProvider": "'company'|'factory'",
+   "MaterialColorMode": "'dtm'|'specified'|'contrast'|'unspecified'"
+  },
+  "source": "server/src/shared/mistGarmentMaterials.ts"
+ },
+ {
+  "type": "development.material.addDeveloped",
+  "payload": "MaterialUseDetails",
+  "types": {
+   "MaterialUseDetails": "{position:string;specification:string;color:string;perPiece:string;unit:string;provider:MaterialProvider;colorMode:MaterialColorMode;colorReference:string}",
+   "MaterialProvider": "'company'|'factory'",
+   "MaterialColorMode": "'dtm'|'specified'|'contrast'|'unspecified'"
+  },
+  "source": "server/src/shared/mistGarmentMaterials.ts"
+ },
+ {
+  "type": "development.material.edit",
+  "payload": "MaterialUseDetails",
+  "types": {
+   "MaterialUseDetails": "{position:string;specification:string;color:string;perPiece:string;unit:string;provider:MaterialProvider;colorMode:MaterialColorMode;colorReference:string}",
+   "MaterialProvider": "'company'|'factory'",
+   "MaterialColorMode": "'dtm'|'specified'|'contrast'|'unspecified'"
+  },
+  "source": "server/src/shared/mistGarmentMaterials.ts"
+ },
+ {
+  "type": "development.material.remove",
+  "payload": "{devId:string;versionId:string;useId:string}",
+  "source": "server/src/shared/mistGarmentMaterials.ts"
  },
  {
   "type": "development.move",
@@ -185,6 +246,38 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  {
   "type": "development.recordSample",
   "payload": "{ devId: string; versionId: string; sample: string; quantity: number; returnedAt: string; form?:string; unit?:string; location?:string; color?:string }",
+  "source": "server/src/shared/mistWorkspace.ts"
+ },
+ {
+  "type": "development.reference.add",
+  "payload": "{devId:string;sampleId:string;purpose:string;fileIds?:string[]}",
+  "source": "server/src/shared/mistDevelopmentSampleReferences.ts"
+ },
+ {
+  "type": "development.reference.dispatch",
+  "payload": "{devId:string;taskVersionId:string;items:Array<{referenceId:string;quantity:number;sourceLocation:string}>;sentAt:string;expectedReturn?:string;delivery:IncomingDelivery;postage:IncomingPostage;note:string}",
+  "types": {
+   "IncomingDelivery": "{kind:'courier'|'handover';recipient:string;address:string;carrier:string;trackingNo:string;evidence:string}",
+   "IncomingPostage": "{amount:number;currency:string;zeroReason:string}"
+  },
+  "source": "server/src/shared/mistDevelopmentSampleReferences.ts"
+ },
+ {
+  "type": "development.reference.remove",
+  "payload": "{devId:string;referenceId:string;reason:string}",
+  "source": "server/src/shared/mistDevelopmentSampleReferences.ts"
+ },
+ {
+  "type": "development.reference.return",
+  "payload": "{devId:string;dispatchId:string;items:Array<{loanId:string;quantity:number;location:string}>;receivedAt:string;delivery:IncomingDelivery;note:string}",
+  "types": {
+   "IncomingDelivery": "{kind:'courier'|'handover';recipient:string;address:string;carrier:string;trackingNo:string;evidence:string}"
+  },
+  "source": "server/src/shared/mistDevelopmentSampleReferences.ts"
+ },
+ {
+  "type": "development.reopen",
+  "payload": "{ devId: string; closureId: string; expectedVersionId: string|null; reason: string }",
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
@@ -242,7 +335,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "development.saveDraft",
   "payload": "{ draftId?: string; values: DevelopmentValues; fileIds: string[] }",
   "types": {
-   "DevelopmentValues": "{ domain?:DevelopmentDomain; sampleForm?:string; sampleUnit?:string; targetCurrency?:string; targetUnit?:string; fabricRequirements?:FabricDevelopmentRequirements; name: string; customer: string; style: string; season: string; category: string; kind: 'new' | 'rev' | 'copy'; fabric: string; color: string; target: string; sizeBase: string; goal: string; factories: string[]; due: string; collaborators: string[]; sampleQuantity: number; sourceDevId?: string; sourceVersionId?: string; initiator?: DevelopmentInitiator; requestType?: DevelopmentRequestType; requestNote?: string; requester?: string; requesterId?: string; charged?: boolean; stages?: DevStagePlan[]; }",
+   "DevelopmentValues": "{ domain?:DevelopmentDomain; sampleForm?:string; sampleUnit?:string; targetCurrency?:string; targetUnit?:string; fabricRequirements?:FabricDevelopmentRequirements; name: string; customer: string; style: string; season: string; category: string; kind: 'new' | 'rev' | 'copy'; fabric: string; color: string; target: string; sizeBase: string; goal: string; factories: string[]; due: string; collaborators: string[]; sampleQuantity: number; sourceDevId?: string; sourceVersionId?: string; sourceProductId?: string; initiator?: DevelopmentInitiator; requestType?: DevelopmentRequestType; requestNote?: string; requester?: string; requesterId?: string; charged?: boolean; stages?: DevStagePlan[]; }",
    "DevelopmentDomain": "'garment' | 'fabric'",
    "FabricDevelopmentRequirements": "{composition:string;weightValue:string;weightUnit:string;widthValue:string;widthUnit:string;yarn:string;weave:string;usage:string;handle:string;finish:string;performance:string}",
    "DevelopmentInitiator": "'customer' | 'internal'",
@@ -260,7 +353,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "development.submit",
   "payload": "{ draftId?: string; values: DevelopmentValues; fileIds: string[] }",
   "types": {
-   "DevelopmentValues": "{ domain?:DevelopmentDomain; sampleForm?:string; sampleUnit?:string; targetCurrency?:string; targetUnit?:string; fabricRequirements?:FabricDevelopmentRequirements; name: string; customer: string; style: string; season: string; category: string; kind: 'new' | 'rev' | 'copy'; fabric: string; color: string; target: string; sizeBase: string; goal: string; factories: string[]; due: string; collaborators: string[]; sampleQuantity: number; sourceDevId?: string; sourceVersionId?: string; initiator?: DevelopmentInitiator; requestType?: DevelopmentRequestType; requestNote?: string; requester?: string; requesterId?: string; charged?: boolean; stages?: DevStagePlan[]; }",
+   "DevelopmentValues": "{ domain?:DevelopmentDomain; sampleForm?:string; sampleUnit?:string; targetCurrency?:string; targetUnit?:string; fabricRequirements?:FabricDevelopmentRequirements; name: string; customer: string; style: string; season: string; category: string; kind: 'new' | 'rev' | 'copy'; fabric: string; color: string; target: string; sizeBase: string; goal: string; factories: string[]; due: string; collaborators: string[]; sampleQuantity: number; sourceDevId?: string; sourceVersionId?: string; sourceProductId?: string; initiator?: DevelopmentInitiator; requestType?: DevelopmentRequestType; requestNote?: string; requester?: string; requesterId?: string; charged?: boolean; stages?: DevStagePlan[]; }",
    "DevelopmentDomain": "'garment' | 'fabric'",
    "FabricDevelopmentRequirements": "{composition:string;weightValue:string;weightUnit:string;widthValue:string;widthUnit:string;yarn:string;weave:string;usage:string;handle:string;finish:string;performance:string}",
    "DevelopmentInitiator": "'customer' | 'internal'",
@@ -270,10 +363,41 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
+  "type": "development.task.end",
+  "payload": "{devId:string;versionId:string;kind:DevelopmentTaskEndKind;reason:string}",
+  "types": {
+   "DevelopmentTaskEndKind": "'completed'|'terminated'"
+  },
+  "source": "server/src/shared/mistDevelopmentTaskLifecycle.ts"
+ },
+ {
+  "type": "development.task.reopen",
+  "payload": "{devId:string;versionId:string;expectedTaskEndId:string;reason:string}",
+  "source": "server/src/shared/mistDevelopmentTaskLifecycle.ts"
+ },
+ {
+  "type": "development.trimTask.catalog",
+  "payload": "{ devId: string; taskId: string; sku: string }",
+  "source": "server/src/shared/mistGarmentTrimTasks.ts"
+ },
+ {
+  "type": "development.trimTask.notice",
+  "payload": "{ devId: string; taskId: string }",
+  "source": "server/src/shared/mistGarmentTrimTasks.ts"
+ },
+ {
+  "type": "development.trimTask.save",
+  "payload": "TrimRequest",
+  "types": {
+   "TrimRequest": "{ requirements: string; supplierId: string; contact: string; quantity: string; unit: string; dueDate: string; fileIds: string[] }"
+  },
+  "source": "server/src/shared/mistGarmentTrimTasks.ts"
+ },
+ {
   "type": "development.update",
   "payload": "{ devId: string; patch: Partial<DevelopmentValues> }",
   "types": {
-   "DevelopmentValues": "{ domain?:DevelopmentDomain; sampleForm?:string; sampleUnit?:string; targetCurrency?:string; targetUnit?:string; fabricRequirements?:FabricDevelopmentRequirements; name: string; customer: string; style: string; season: string; category: string; kind: 'new' | 'rev' | 'copy'; fabric: string; color: string; target: string; sizeBase: string; goal: string; factories: string[]; due: string; collaborators: string[]; sampleQuantity: number; sourceDevId?: string; sourceVersionId?: string; initiator?: DevelopmentInitiator; requestType?: DevelopmentRequestType; requestNote?: string; requester?: string; requesterId?: string; charged?: boolean; stages?: DevStagePlan[]; }",
+   "DevelopmentValues": "{ domain?:DevelopmentDomain; sampleForm?:string; sampleUnit?:string; targetCurrency?:string; targetUnit?:string; fabricRequirements?:FabricDevelopmentRequirements; name: string; customer: string; style: string; season: string; category: string; kind: 'new' | 'rev' | 'copy'; fabric: string; color: string; target: string; sizeBase: string; goal: string; factories: string[]; due: string; collaborators: string[]; sampleQuantity: number; sourceDevId?: string; sourceVersionId?: string; sourceProductId?: string; initiator?: DevelopmentInitiator; requestType?: DevelopmentRequestType; requestNote?: string; requester?: string; requesterId?: string; charged?: boolean; stages?: DevStagePlan[]; }",
    "DevelopmentDomain": "'garment' | 'fabric'",
    "FabricDevelopmentRequirements": "{composition:string;weightValue:string;weightUnit:string;widthValue:string;widthUnit:string;yarn:string;weave:string;usage:string;handle:string;finish:string;performance:string}",
    "DevelopmentInitiator": "'customer' | 'internal'",
@@ -497,7 +621,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "files.add",
   "payload": "{ file: MistFile }",
   "types": {
-   "MistFile": "{ id: string; name: string; mimeType: string; size: number; storageKey: string; createdAt: string; uploadedBy?: string; url?: string }"
+   "MistFile": "{ id: string; name: string; mimeType: string; size: number; storageKey: string; createdAt: string; uploadedBy?: string; url?: string; sha256?: string }"
   },
   "source": "server/src/shared/mistWorkspace.ts"
  },
@@ -594,6 +718,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  {
   "type": "finance.receivable.confirm",
   "payload": "{ invoiceId: string }",
+  "source": "server/src/shared/mistWorkspace.ts"
+ },
+ {
+  "type": "finance.receivable.due",
+  "payload": "{ invoiceId:string; acceptanceDate:string; acceptanceBasis:string; reason?:string }",
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
@@ -734,7 +863,8 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "fulfillment.documents.save",
   "payload": "{ id?: string; baseDocumentId?: string; shipmentId: string; orderId: string; type: FulfillmentDocument['type']; number: string; title: string; dueDate: string; content: string; fileIds: string[]; }",
   "types": {
-   "FulfillmentDocument": "{ replacementDeclaredAmount?:number; id: string; familyId?: string; shipmentId: string; orderId: string; type: ShipmentDocumentType; number: string; version: number; generated?: GeneratedDocRecord[]; bl?: BillOfLadingDetails; title: string; dueDate: string; content: string; fileIds: string[]; status: 'draft' | 'issued' | 'void'; createdAt: string; issuedAt?: string; actor: string; invoiceId?: string; externalIssue?: { issuer: string; at: string; evidence: string; recordedBy: string }; financeRejection?: { reason: string; at: string; actor: string; invoiceId: string }; }",
+   "FulfillmentDocument": "{ receivableDueCondition?:ReceivableDueCondition; replacementDeclaredAmount?:number; id: string; familyId?: string; shipmentId: string; orderId: string; type: ShipmentDocumentType; number: string; version: number; generated?: GeneratedDocRecord[]; bl?: BillOfLadingDetails; title: string; dueDate: string; content: string; fileIds: string[]; status: 'draft' | 'issued' | 'void'; createdAt: string; issuedAt?: string; actor: string; invoiceId?: string; externalIssue?: { issuer: string; at: string; evidence: string; recordedBy: string }; financeRejection?: { reason: string; at: string; actor: string; invoiceId: string }; }",
+   "ReceivableDueCondition": "DeliveryAcceptanceTerms|{kind:'letterOfCredit';terms:string}",
    "ShipmentDocumentType": "typeof DOCUMENT_TYPES[number]",
    "GeneratedDocRecord": "{ id: string; kind: string; number: string; fileId: string; fileName: string; sha256: string; bytes: number; templateVersion: number; snapshotFingerprint: string; snapshot: GeneratedDocSnapshot; generatedAt: string; generatedBy: string; sealUseId?: string }",
    "BillOfLadingDetails": "{ blNo: string; kind: BillOfLadingKind; originals: number; siDocumentId?: string; draftConfirmed?: { at: string; actor: string; evidence: string }; released?: { at: string; actor: string; evidence: string }; updatedAt: string; updatedBy: string; }"
@@ -983,10 +1113,10 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "fulfillment.qc.report",
-  "payload": "{ id: string; location?: string; domain: 'garment' | 'fabric'; result: MistQc['result']; report: string; opinion: string; measurements: NonNullable<MistQc['measurements']>; fileIds: string[]; reviewedAt: string; sizeChecks?: NonNullable<FulfillmentQcReport['sizeChecks']>; aql?: AqlInspection; fabricInspection?: FabricInspection; }",
+  "payload": "{ id: string; location?: string; domain: 'garment' | 'fabric'; result: MistQc['result']; report: string; opinion: string; measurements: NonNullable<MistQc['measurements']>; /** Development fabric facts, in their original measurement units. */ fabricMeasurements?: NonNullable<MistQc['fabricMeasurements']>; fileIds: string[]; reviewedAt: string; sizeChecks?: NonNullable<FulfillmentQcReport['sizeChecks']>; aql?: AqlInspection; fabricInspection?: FabricInspection; }",
   "types": {
    "MistQc": "{ result: 'pass' | 'conditional' | 'reject'; reviewer: string; reviewedAt: string; report: string; opinion: string; fabricMeasurements?:Array<{property:string;actual:number;unit:string}>; measurements?: Array<{ point: string; standard: number; actual: number; tolerance: number }>; appearanceDefects?: number; }",
-   "FulfillmentQcReport": "{ id: string; location?: string; taskId: string; result: MistQc['result']; report: string; opinion: string; measurements: NonNullable<MistQc['measurements']>; fileIds: string[]; reviewer: string; reviewedAt: string; previousReportId?: string; scopeRevision?: number; sizeChecks?: Array<{ size: string; inspected: number; result: 'pass' | 'reject'; evidence: string }>; aql?: AqlInspection & { outcome: AqlOutcome }; fabricInspection?: FabricInspection & { outcome: FabricOutcome }; }",
+   "FulfillmentQcReport": "{ id: string; location?: string; taskId: string; result: MistQc['result']; report: string; opinion: string; measurements: NonNullable<MistQc['measurements']>; fabricMeasurements?: NonNullable<MistQc['fabricMeasurements']>; fileIds: string[]; reviewer: string; reviewedAt: string; previousReportId?: string; scopeRevision?: number; sizeChecks?: Array<{ size: string; inspected: number; result: 'pass' | 'reject'; evidence: string }>; aql?: AqlInspection & { outcome: AqlOutcome }; fabricInspection?: FabricInspection & { outcome: FabricOutcome }; }",
    "AqlInspection": "{ lotSize: number; majorAql: AqlLevel; minorAql: AqlLevel; inspected: number; critical: number; major: number; minor: number; defects: string }",
    "AqlOutcome": "{ major: AqlPlan; minor: AqlPlan; sampleSize: number; result: 'pass' | 'reject'; reasons: string[] }",
    "FabricInspection": "{ widthInches: number; limit: number; rolls: FabricRoll[]; lab: FabricLab }",
@@ -1016,21 +1146,36 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "fulfillment.samples.create",
   "payload": "SampleInput",
   "types": {
-   "SampleInput": "Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'source' | 'fileIds' | 'note' | 'role' | 'shipmentId' | 'sizeQuantities'>",
-   "FulfillmentSample": "{ id: string; code: string; name: string; category: string; form: string; unit: string; quantity: number; available: number; location: string; positions?: FulfillmentPosition[]; size: string; sizeQuantities?:FulfillmentSizeQuantity[]; color: string; source: FulfillmentSource; sourceSampleCode?: string; materialPlan?: string; role?: FulfillmentSampleRole; shipmentId?: string; qualityRevision?: number; fileIds: string[]; note: string; createdAt: string; }"
+   "SampleInput": "Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'fileIds' | 'note' | 'role' | 'shipmentId' | 'sizeQuantities'>&{source:FulfillmentSource;manualLinks?:ManualSampleLinks}",
+   "FulfillmentSample": "{ manualLinks?:ManualSampleLinks; shippingQuantityBasis?:import('./mistShipmentSampleCustody').ShippingSampleQuantityBasis; shippingQuantityBasisHistory?:import('./mistShipmentSampleCustody').ShippingSampleQuantityBasis[]; id: string; code: string; name: string; category: string; form: string; unit: string; quantity: number; available: number; location: string; positions?: FulfillmentPosition[]; size: string; sizeQuantities?:FulfillmentSizeQuantity[]; color: string; source: FulfillmentSampleSource; incoming?:IncomingReceiptInfo; registeredById?: string; sourceSampleCode?: string; materialPlan?: string; role?: FulfillmentSampleRole; shipmentId?: string; qualityRevision?: number; fileIds: string[]; note: string; createdAt: string; }",
+   "FulfillmentSource": "{ kind: 'version'; devId: string; versionId: string; } | { kind: 'orderLine'; orderId: string; lineId: string; productionId?: string; } | { kind: 'manual'; description: string; }",
+   "ManualSampleLinks": "{archiveId?:string;productId?:string;customerId?:string;supplierId?:string}"
   },
   "source": "server/src/shared/mistFulfillment.ts"
  },
  {
   "type": "fulfillment.samples.edit",
-  "payload": "{ id: string; location: string; note: string; fileIds: string[]; name?: string; form?: string; size?: string; color?: string; }",
+  "payload": "{ manualLinks?:ManualSampleLinkEdit; id: string; location: string; note: string; fileIds: string[]; name?: string; form?: string; size?: string; color?: string; }",
+  "types": {
+   "ManualSampleLinkEdit": "{productId?:string|null;customerId?:string|null;supplierId?:string|null}"
+  },
   "source": "server/src/shared/mistFulfillment.ts"
  },
  {
   "type": "fulfillment.samples.move",
-  "payload": "{ id: string; kind: 'lend' | 'return' | 'send' | 'move' | 'scrap' | 'returnFactory'; sendPurpose?:SampleSendPurpose; trackingNo?: string; carrier?: string; destination?: string; fee?: { amount: number; currency: string }; quantity: number; person: string; /** Company borrower account; display name is resolved server-side. */ borrowerId?: string; location: string; note: string; loanId?: string; expectedReturn?: string; sourceLocation?: string; }",
+  "payload": "{ commercialSources?:CommercialSampleSourceSelection[]; id: string; kind: 'lend' | 'return' | 'send' | 'move' | 'scrap' | 'returnFactory'; sendPurpose?:SampleSendPurpose; trackingNo?: string; carrier?: string; destination?: string; fee?: { amount: number; currency: string }; quantity: number; person: string; /** Company borrower account; display name is resolved server-side. */ borrowerId?: string; location: string; note: string; loanId?: string; expectedReturn?: string; sourceLocation?: string; }",
   "types": {
+   "CommercialSampleSourceSelection": "{stockId:string;location:string;quantity:number}",
    "SampleSendPurpose": "'confirmation'|'testing'|'rework'|'other'"
+  },
+  "source": "server/src/shared/mistFulfillment.ts"
+ },
+ {
+  "type": "fulfillment.samples.shippingBasis",
+  "payload": "ShippingSampleBasisInput",
+  "types": {
+   "ShippingSampleBasisInput": "{id:string;kind:'included'|'independent';sourceSnapshot:ShippingSampleSourceSnapshot;evidence:string;independentSource?:string;fileIds:string[];reconcileDeparted?:boolean}",
+   "ShippingSampleSourceSnapshot": "{ sampleId:string;shipmentId:string;orderId:string;lineId:string;productionId:string; quantity:number;unit:string;color:string;sizeQuantities:Array<{size:string;quantity:number}>; shipmentQuantity:number;commercialUnit:string; packing:Array<{id:string;carton:string;quantity:number;color:string;assortment:Array<{color:string;size:string;quantity:number}>}>; }"
   },
   "source": "server/src/shared/mistFulfillment.ts"
  },
@@ -1362,9 +1507,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "types": {
    "Input": "Omit<T,keyof RecordBase|'status'> & {fileIds?:string[];note?:string}",
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }",
-   "MarketProduct": "RecordBase & { sku:string; name:string; category:'garment'|'fabric'|'trimming'; status:'active'|'archived'; season:string; supplierId:string; supplierCode:string; composition:string; specification:string; color:string; unit:string; cost:string; currency:string; sourceDevId:string; sourceVersionId:string; specs?:Record<string,string>; customerCodes?:Array<{customerId:string;code:string}>; refPrice?:string; sources?:ProductSource[]; priceHistory?:ProductPriceChange[] }",
-   "ProductSource": "{supplierId:string;supplierCode:string;price:string;currency:string;moq:string;leadDays:number;note:string;updatedAt:string;updatedBy:string}",
-   "ProductPriceChange": "{supplierId:string;from:string;to:string;currency:string;at:string;actor:string;note:string}"
+   "MarketProduct": "RecordBase & { materialUses?:GarmentMaterialUse[]; trimProfile?:TrimCatalogProfile; sku:string; name:string; category:'garment'|'fabric'|'trimming'; status:'active'|'archived'; season:string; supplierId:string; supplierCode:string; composition:string; specification:string; color:string; unit:string; cost:string; currency:string; sourceDevId:string; sourceVersionId:string; specs?:Record<string,string>; customerCodes?:Array<{customerId:string;code:string}>; refPrice?:string; sources?:ProductSource[]; priceHistory?:ProductPriceChange[] }",
+   "GarmentMaterialUse": "MaterialUseDetails & {id:string;nature:MaterialNature;catalog:FrozenTrimCatalog;offer?:FrozenTrimOffer;trimTaskId?:string;selectedAt:string;selectedBy:string}",
+   "TrimCatalogProfile": "{category:TrimmingCategory;manufacturerRelationId?:string;parameters:TrimmingCategoryParameters}",
+   "ProductSource": "{quoteTerms?:TrimQuoteTerms;supplierId:string;supplierCode:string;price:string;currency:string;moq:string;leadDays:number;note:string;updatedAt:string;updatedBy:string}",
+   "ProductPriceChange": "{previousTerms?:TrimQuoteTerms;newTerms?:TrimQuoteTerms;supplierId:string;from:string;to:string;currency:string;at:string;actor:string;note:string}"
   },
   "source": "server/src/shared/mistMarket.ts"
  },
@@ -1375,17 +1522,30 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "market.product.source.save",
-  "payload": "{productId:string;supplierId:string;supplierCode?:string;price:string;currency:string;moq?:string;leadDays?:number;note?:string}",
+  "payload": "{quoteTerms?:TrimQuoteTerms|null;productId:string;supplierId:string;supplierCode?:string;price:string;currency:string;moq?:string;leadDays?:number;note?:string}",
+  "types": {
+   "TrimQuoteTerms": "{date:string;unit:string;moqUnit?:string;conditions?:string;fileIds:string[]}"
+  },
   "source": "server/src/shared/mistMarket.ts"
  },
  {
   "type": "market.product.status",
   "payload": "{id:string;status:MarketProduct['status']}",
   "types": {
-   "MarketProduct": "RecordBase & { sku:string; name:string; category:'garment'|'fabric'|'trimming'; status:'active'|'archived'; season:string; supplierId:string; supplierCode:string; composition:string; specification:string; color:string; unit:string; cost:string; currency:string; sourceDevId:string; sourceVersionId:string; specs?:Record<string,string>; customerCodes?:Array<{customerId:string;code:string}>; refPrice?:string; sources?:ProductSource[]; priceHistory?:ProductPriceChange[] }",
+   "MarketProduct": "RecordBase & { materialUses?:GarmentMaterialUse[]; trimProfile?:TrimCatalogProfile; sku:string; name:string; category:'garment'|'fabric'|'trimming'; status:'active'|'archived'; season:string; supplierId:string; supplierCode:string; composition:string; specification:string; color:string; unit:string; cost:string; currency:string; sourceDevId:string; sourceVersionId:string; specs?:Record<string,string>; customerCodes?:Array<{customerId:string;code:string}>; refPrice?:string; sources?:ProductSource[]; priceHistory?:ProductPriceChange[] }",
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }",
-   "ProductSource": "{supplierId:string;supplierCode:string;price:string;currency:string;moq:string;leadDays:number;note:string;updatedAt:string;updatedBy:string}",
-   "ProductPriceChange": "{supplierId:string;from:string;to:string;currency:string;at:string;actor:string;note:string}"
+   "GarmentMaterialUse": "MaterialUseDetails & {id:string;nature:MaterialNature;catalog:FrozenTrimCatalog;offer?:FrozenTrimOffer;trimTaskId?:string;selectedAt:string;selectedBy:string}",
+   "TrimCatalogProfile": "{category:TrimmingCategory;manufacturerRelationId?:string;parameters:TrimmingCategoryParameters}",
+   "ProductSource": "{quoteTerms?:TrimQuoteTerms;supplierId:string;supplierCode:string;price:string;currency:string;moq:string;leadDays:number;note:string;updatedAt:string;updatedBy:string}",
+   "ProductPriceChange": "{previousTerms?:TrimQuoteTerms;newTerms?:TrimQuoteTerms;supplierId:string;from:string;to:string;currency:string;at:string;actor:string;note:string}"
+  },
+  "source": "server/src/shared/mistMarket.ts"
+ },
+ {
+  "type": "market.product.trimProfile.save",
+  "payload": "TrimProfileInput",
+  "types": {
+   "TrimProfileInput": "{productId:string;category:TrimmingCategory;manufacturerRelationId?:string|null;parameters:TrimmingCategoryParameters}"
   },
   "source": "server/src/shared/mistMarket.ts"
  },
@@ -1426,13 +1586,13 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "market.quotation.save",
-  "payload": "{id?:string;input:Omit<Input<MarketQuotation>,'documents'|'code'|'total'|'deliveryEvidence'|'responseEvidence'|'approval'|'convertedOrderId'|'lines'|'revision'|'rootId'|'previousId'|'costingSnapshots'|'feedback'>&{lines:Array<Omit<MarketQuoteLine,'id'|'amount'>>;/** 仅新建时：基于此报价建立新版本（续期或改价）。 */previousId?:string}}",
+  "payload": "{id?:string;input:Omit<Input<MarketQuotation>,'documents'|'code'|'total'|'deliveryEvidence'|'responseEvidence'|'approval'|'convertedOrderId'|'lines'|'revision'|'rootId'|'previousId'|'costingSnapshots'|'feedback'>&{lines:Array<Omit<MarketQuoteLine,'id'|'amount'|'pricingTrialId'>>;/** 仅新建时：基于此报价建立新版本（续期或改价）。 */previousId?:string}}",
   "types": {
    "Input": "Omit<T,keyof RecordBase|'status'> & {fileIds?:string[];note?:string}",
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }",
    "MarketQuotation": "RecordBase & { code:string; customerId:string; currency:string; season:string; validUntil:string; deliveryTerms:string; paymentTerms:string; status:'Draft'|'Sent'|'Accepted'|'Rejected'|'Expired'; lines:MarketQuoteLine[]; total:string; deliveryEvidence:string; responseEvidence:string; approval:MarketQuoteApproval|null; approvalHistory?:MarketQuoteApproval[]; requiresApproval?:boolean; convertedOrderId:string|null; fxRate?:string; revision?:number; rootId?:string; previousId?:string;costingSnapshots?:QuoteCostSnapshot[];feedback?:QuoteFeedbackRecord[]; documents?:QuoteDocumentRecord[] }",
-   "MarketQuoteLine": "{ id:string; productId:string; sourceDevId:string; sourceVersionId:string; name:string; style:string; specification:string; qty:string; unit:string; price:string; cost:string; amount:string; costBasis?:'product'|'unverified'; specs?:QuoteLineSpecs; marginFloor?:FrozenMarginFloor; family?:QuoteFamily|null; conversion?:QuoteLineConversion; skipped?:QuoteLineSkip }",
-   "MarketQuoteApproval": "{ id:string; requesterId:string; reviewerId:string; status:'pending'|'approved'|'rejected'; submittedAt:string; decidedAt?:string; note?:string; details:Array<{label:string;value:string}>; fileIds:string[]; costingRefs?:Array<{lineId:string;snapshotId:string;modelVersion:string}> }",
+   "MarketQuoteLine": "{ id:string; productId:string; sourceDevId:string; sourceVersionId:string; name:string; style:string; specification:string; qty:string; unit:string; price:string; cost:string; amount:string; costBasis?:'product'|'unverified'; pricingTrialId?:string; specs?:QuoteLineSpecs; marginFloor?:FrozenMarginFloor; family?:QuoteFamily|null; conversion?:QuoteLineConversion; skipped?:QuoteLineSkip }",
+   "MarketQuoteApproval": "{ id:string; requesterId:string; reviewerId:string; status:'pending'|'approved'|'rejected'; submittedAt:string; decidedAt?:string; note?:string; details:Array<{label:string;value:string}>; fileIds:string[]; costingRefs?:Array<{lineId:string;snapshotId:string;modelVersion:string}>; pricingTrialRefs?:Array<{lineId:string;trialId:string;position:number;unit:string}> }",
    "QuoteCostSnapshot": "{ historyEvidence?: import(\"./mistQuotationHistoryEvidence\").QuoteHistoryEvidence; id: string; quotationId: string; lineId: string; modelVersion: string; createdAt: string; actorId: string; actor: string; input: QuoteCostInput; result: QuoteCostResult; appliedPrice: boolean; target: { customerId: string; quoteCode: string; currency: string; deliveryTerms: string; paymentTerms: string; validUntil: string; line: MarketQuoteLine; }; supplier: { id: string; name: string; code: string } | null; files: Array<{ id: string; name: string; createdAt: string; size: number }>; }",
    "QuoteFeedbackRecord": "{ id: string; quotationId: string; createdAt: string; actorId: string; actor: string; input: QuoteFeedbackInput; target: { code: string; revision: number; customerId: string; customerName: string; status: MarketQuotation[\"status\"]; convertedOrderId: string | null; currency: string; total: string; validUntil: string; deliveryTerms: string; paymentTerms: string; lines: MarketQuoteLine[]; costingSnapshotIds: string[]; }; files: Array<{ id: string; name: string; size: number; createdAt: string }>; }",
    "QuoteDocumentRecord": "{ id: string; quotationId: string; revision: number; draft: boolean; fileId: string; fileName: string; sha256: string; bytes: number; templateVersion: number; snapshotFingerprint: string; snapshot: QuoteDocumentSnapshot; generatedAt: string; generatedBy: string; generatedById: string }"
@@ -1450,8 +1610,8 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "types": {
    "MarketQuotation": "RecordBase & { code:string; customerId:string; currency:string; season:string; validUntil:string; deliveryTerms:string; paymentTerms:string; status:'Draft'|'Sent'|'Accepted'|'Rejected'|'Expired'; lines:MarketQuoteLine[]; total:string; deliveryEvidence:string; responseEvidence:string; approval:MarketQuoteApproval|null; approvalHistory?:MarketQuoteApproval[]; requiresApproval?:boolean; convertedOrderId:string|null; fxRate?:string; revision?:number; rootId?:string; previousId?:string;costingSnapshots?:QuoteCostSnapshot[];feedback?:QuoteFeedbackRecord[]; documents?:QuoteDocumentRecord[] }",
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }",
-   "MarketQuoteLine": "{ id:string; productId:string; sourceDevId:string; sourceVersionId:string; name:string; style:string; specification:string; qty:string; unit:string; price:string; cost:string; amount:string; costBasis?:'product'|'unverified'; specs?:QuoteLineSpecs; marginFloor?:FrozenMarginFloor; family?:QuoteFamily|null; conversion?:QuoteLineConversion; skipped?:QuoteLineSkip }",
-   "MarketQuoteApproval": "{ id:string; requesterId:string; reviewerId:string; status:'pending'|'approved'|'rejected'; submittedAt:string; decidedAt?:string; note?:string; details:Array<{label:string;value:string}>; fileIds:string[]; costingRefs?:Array<{lineId:string;snapshotId:string;modelVersion:string}> }",
+   "MarketQuoteLine": "{ id:string; productId:string; sourceDevId:string; sourceVersionId:string; name:string; style:string; specification:string; qty:string; unit:string; price:string; cost:string; amount:string; costBasis?:'product'|'unverified'; pricingTrialId?:string; specs?:QuoteLineSpecs; marginFloor?:FrozenMarginFloor; family?:QuoteFamily|null; conversion?:QuoteLineConversion; skipped?:QuoteLineSkip }",
+   "MarketQuoteApproval": "{ id:string; requesterId:string; reviewerId:string; status:'pending'|'approved'|'rejected'; submittedAt:string; decidedAt?:string; note?:string; details:Array<{label:string;value:string}>; fileIds:string[]; costingRefs?:Array<{lineId:string;snapshotId:string;modelVersion:string}>; pricingTrialRefs?:Array<{lineId:string;trialId:string;position:number;unit:string}> }",
    "QuoteCostSnapshot": "{ historyEvidence?: import(\"./mistQuotationHistoryEvidence\").QuoteHistoryEvidence; id: string; quotationId: string; lineId: string; modelVersion: string; createdAt: string; actorId: string; actor: string; input: QuoteCostInput; result: QuoteCostResult; appliedPrice: boolean; target: { customerId: string; quoteCode: string; currency: string; deliveryTerms: string; paymentTerms: string; validUntil: string; line: MarketQuoteLine; }; supplier: { id: string; name: string; code: string } | null; files: Array<{ id: string; name: string; createdAt: string; size: number }>; }",
    "QuoteFeedbackRecord": "{ id: string; quotationId: string; createdAt: string; actorId: string; actor: string; input: QuoteFeedbackInput; target: { code: string; revision: number; customerId: string; customerName: string; status: MarketQuotation[\"status\"]; convertedOrderId: string | null; currency: string; total: string; validUntil: string; deliveryTerms: string; paymentTerms: string; lines: MarketQuoteLine[]; costingSnapshotIds: string[]; }; files: Array<{ id: string; name: string; size: number; createdAt: string }>; }",
    "QuoteDocumentRecord": "{ id: string; quotationId: string; revision: number; draft: boolean; fileId: string; fileName: string; sha256: string; bytes: number; templateVersion: number; snapshotFingerprint: string; snapshot: QuoteDocumentSnapshot; generatedAt: string; generatedBy: string; generatedById: string }"
@@ -1480,13 +1640,14 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "market.relation.save",
-  "payload": "{id?:string;input:Omit<Input<MarketRelation>,'contacts'|'hold'|'holdHistory'|'mergedRelationIds'>}",
+  "payload": "{id?:string;input:Omit<Input<MarketRelation>,'contacts'|'hold'|'holdHistory'|'holdHistoryKeys'|'supplierRelationSource'|'screenings'|'mergedRelationIds'>}",
   "types": {
    "Input": "Omit<T,keyof RecordBase|'status'> & {fileIds?:string[];note?:string}",
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }",
-   "MarketRelation": "RecordBase & { screenings?:RelationScreening[]; name:string; category:'Customer'|'Supplier'|'Agent'|'Partner'|'Government'|'Internal'|'Other'; customerId:string; supplierId:string; country:string; address:string; aliases:string[]; status:'active'|'archived'; hold?:{reason:string;at:string;actor:string}|null; holdHistory?:RelationHoldChange[]; mergedRelationIds?:string[]; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> }",
+   "MarketRelation": "RecordBase & { screenings?:RelationScreening[]; name:string; category:'Customer'|'Supplier'|'Agent'|'Partner'|'Government'|'Internal'|'Other'; customerId:string; supplierId:string; country:string; address:string; aliases:string[]; status:'active'|'archived'; hold?:{reason:string;at:string;actor:string}|null; holdHistory?:RelationHoldChange[]; holdHistoryKeys?:string[]; supplierRelationSource?:SupplierRelationSource; mergedRelationIds?:string[]; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> }",
    "RelationScreening": "{ id:string; kind:'sanctions'|'export_control'|'annual'|'other'; result:'clear'|'hit'|'review'; basis:string; screenedOn:string; nextReview:string; fileIds:string[]; at:string; actor:string }",
-   "RelationHoldChange": "{action:'freeze'|'release';reason:string;at:string;actor:string}"
+   "RelationHoldChange": "{action:'freeze'|'release';reason:string;at:string;actor:string}",
+   "SupplierRelationSource": "{ supplierId:string;supplierName:string; relation:Pick<RecordBase,'id'|'createdAt'|'fileIds'|'note'>&{aliases:string[];status:'active'|'archived';screenings?:RelationScreening[];holdHistory?:RelationHoldChange[];holdHistoryKeys?:string[];mergedRelationIds?:string[]}; customerAliases:string[];customerFileIds:string[];customerScreeningIds:string[];combinedHoldHistoryKeys:string[]; }"
   },
   "source": "server/src/shared/mistMarket.ts"
  },
@@ -1502,10 +1663,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "market.relation.status",
   "payload": "{id:string;status:MarketRelation['status']}",
   "types": {
-   "MarketRelation": "RecordBase & { screenings?:RelationScreening[]; name:string; category:'Customer'|'Supplier'|'Agent'|'Partner'|'Government'|'Internal'|'Other'; customerId:string; supplierId:string; country:string; address:string; aliases:string[]; status:'active'|'archived'; hold?:{reason:string;at:string;actor:string}|null; holdHistory?:RelationHoldChange[]; mergedRelationIds?:string[]; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> }",
+   "MarketRelation": "RecordBase & { screenings?:RelationScreening[]; name:string; category:'Customer'|'Supplier'|'Agent'|'Partner'|'Government'|'Internal'|'Other'; customerId:string; supplierId:string; country:string; address:string; aliases:string[]; status:'active'|'archived'; hold?:{reason:string;at:string;actor:string}|null; holdHistory?:RelationHoldChange[]; holdHistoryKeys?:string[]; supplierRelationSource?:SupplierRelationSource; mergedRelationIds?:string[]; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> }",
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }",
    "RelationScreening": "{ id:string; kind:'sanctions'|'export_control'|'annual'|'other'; result:'clear'|'hit'|'review'; basis:string; screenedOn:string; nextReview:string; fileIds:string[]; at:string; actor:string }",
-   "RelationHoldChange": "{action:'freeze'|'release';reason:string;at:string;actor:string}"
+   "RelationHoldChange": "{action:'freeze'|'release';reason:string;at:string;actor:string}",
+   "SupplierRelationSource": "{ supplierId:string;supplierName:string; relation:Pick<RecordBase,'id'|'createdAt'|'fileIds'|'note'>&{aliases:string[];status:'active'|'archived';screenings?:RelationScreening[];holdHistory?:RelationHoldChange[];holdHistoryKeys?:string[];mergedRelationIds?:string[]}; customerAliases:string[];customerFileIds:string[];customerScreeningIds:string[];combinedHoldHistoryKeys:string[]; }"
   },
   "source": "server/src/shared/mistMarket.ts"
  },
@@ -1548,13 +1710,14 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "market.showLead.save",
   "payload": "Extract<MarketCommand",
   "types": {
-   "MarketCommand": "| {type:'market.customer.update';payload:{id:string;patch:Partial<Omit<MistCustomer,'id'|'code'|'owner'>>}} | {type:'market.contact.delete';payload:{kind:'customer'|'supplier'|'relation';parentId:string;id:string}} | {type:'market.import';payload:{kind:MistImportKind;rows:MistImportRow[]}} | {type:'market.customer.create';payload:{input:Omit<MistCustomer,'id'|'code'|'owner'>&{code?:string}}} | {type:'market.attachment.set';payload:{kind:'product'|'supplier'|'relation'|'season'|'trend'|'show'|'campaign'|'lead'|'showLead'|'quotation'|'lookbook';id:string;fileIds:string[]}} | {type:'market.showLead.save';payload:Extract<MarketCommand,{type:'market.lead.save'}>['payload']} | {type:'market.showLead.transition';payload:Extract<MarketCommand,{type:'market.lead.transition'}>['payload']} | {type:'market.product.save';payload:{id?:string;input:Input<MarketProduct>}} | {type:'market.product.source.save';payload:{productId:string;supplierId:string;supplierCode?:string;price:string;currency:string;moq?:string;leadDays?:number;note?:string}} | {type:'market.product.source.remove';payload:{productId:string;supplierId:string;reason:string}} | {type:'market.product.fromVersion';payload:{devId:string;versionId:string;sku:string;name?:string;supplierId?:string;supplierCode?:string}} | {type:'market.product.status';payload:{id:string;status:MarketProduct['status']}} | {type:'market.supplier.save';payload:{id?:string;input:Pick<MarketSupplier,'name'|'type'>&Partial<Omit<Input<MarketSupplier>,'nam",
+   "MarketCommand": "| {type:'market.customer.update';payload:{id:string;patch:Partial<Omit<MistCustomer,'id'|'code'|'owner'>>}} | {type:'market.contact.delete';payload:{kind:'customer'|'supplier'|'relation';parentId:string;id:string}} | {type:'market.import';payload:{kind:MistImportKind;rows:MistImportRow[]}} | {type:'market.customer.create';payload:{input:Omit<MistCustomer,'id'|'code'|'owner'>&{code?:string}}} | {type:'market.attachment.set';payload:{kind:'product'|'supplier'|'relation'|'season'|'trend'|'show'|'campaign'|'lead'|'showLead'|'quotation'|'lookbook';id:string;fileIds:string[]}} | {type:'market.showLead.save';payload:Extract<MarketCommand,{type:'market.lead.save'}>['payload']} | {type:'market.showLead.transition';payload:Extract<MarketCommand,{type:'market.lead.transition'}>['payload']} | {type:'market.product.save';payload:{id?:string;input:Input<MarketProduct>}} | {type:'market.product.trimProfile.save';payload:TrimProfileInput} | {type:'market.product.source.save';payload:{quoteTerms?:TrimQuoteTerms|null;productId:string;supplierId:string;supplierCode?:string;price:string;currency:string;moq?:string;leadDays?:number;note?:string}} | {type:'market.product.source.remove';payload:{productId:string;supplierId:string;reason:string}} | {type:'market.product.fromVersion';payload:{devId:string;versionId:string;sku:string;name?:string;supplierId?:string;supplierCode?:string}} | {type:'market.product.status';payload:{id:string;status:MarketProduct['status']}} | {type:'market.supplier.save';",
    "MistCustomer": "{ id: string; name: string; code: string; country: string; city: string; industry: string; owner: string; ownerId: string; grade: string; currency: string; terms: string; incoterm: string; categories: string; creditLimit: number; since: string }",
    "MistImportKind": "'customer' | 'supplier' | 'product' | 'openingReceivable' | 'openingPayable'",
    "MistImportRow": "Record<string, string>",
    "Input": "Omit<T,keyof RecordBase|'status'> & {fileIds?:string[];note?:string}",
-   "MarketProduct": "RecordBase & { sku:string; name:string; category:'garment'|'fabric'|'trimming'; status:'active'|'archived'; season:string; supplierId:string; supplierCode:string; composition:string; specification:string; color:string; unit:string; cost:string; currency:string; sourceDevId:string; sourceVersionId:string; specs?:Record<string,string>; customerCodes?:Array<{customerId:string;code:string}>; refPrice?:string; sources?:ProductSource[]; priceHistory?:ProductPriceChange[] }",
-   "MarketSupplier": "RecordBase & { code:string; name:string; type:string; country:string; address:string; capabilities:string; capacity:number; capacityUnit:string; leadDays:number; status:'active'|'paused'|'blocked'; blockReason:string; statusFrom?:string; statusHistory?:SupplierStatusChange[]; certificates?:SupplierCertificate[]; ratings?:SupplierRating[]; handlers?:Partial<Record<MistBusinessGroup,MistAccountRef>>; bankAccounts?:SupplierBankAccount[]; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> }"
+   "MarketProduct": "RecordBase & { materialUses?:GarmentMaterialUse[]; trimProfile?:TrimCatalogProfile; sku:string; name:string; category:'garment'|'fabric'|'trimming'; status:'active'|'archived'; season:string; supplierId:string; supplierCode:string; composition:string; specification:string; color:string; unit:string; cost:string; currency:string; sourceDevId:string; sourceVersionId:string; specs?:Record<string,string>; customerCodes?:Array<{customerId:string;code:string}>; refPrice?:string; sources?:ProductSource[]; priceHistory?:ProductPriceChange[] }",
+   "TrimProfileInput": "{productId:string;category:TrimmingCategory;manufacturerRelationId?:string|null;parameters:TrimmingCategoryParameters}",
+   "TrimQuoteTerms": "{date:string;unit:string;moqUnit?:string;conditions?:string;fileIds:string[]}"
   },
   "source": "server/src/shared/mistMarket.ts"
  },
@@ -1562,13 +1725,14 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "market.showLead.transition",
   "payload": "Extract<MarketCommand",
   "types": {
-   "MarketCommand": "| {type:'market.customer.update';payload:{id:string;patch:Partial<Omit<MistCustomer,'id'|'code'|'owner'>>}} | {type:'market.contact.delete';payload:{kind:'customer'|'supplier'|'relation';parentId:string;id:string}} | {type:'market.import';payload:{kind:MistImportKind;rows:MistImportRow[]}} | {type:'market.customer.create';payload:{input:Omit<MistCustomer,'id'|'code'|'owner'>&{code?:string}}} | {type:'market.attachment.set';payload:{kind:'product'|'supplier'|'relation'|'season'|'trend'|'show'|'campaign'|'lead'|'showLead'|'quotation'|'lookbook';id:string;fileIds:string[]}} | {type:'market.showLead.save';payload:Extract<MarketCommand,{type:'market.lead.save'}>['payload']} | {type:'market.showLead.transition';payload:Extract<MarketCommand,{type:'market.lead.transition'}>['payload']} | {type:'market.product.save';payload:{id?:string;input:Input<MarketProduct>}} | {type:'market.product.source.save';payload:{productId:string;supplierId:string;supplierCode?:string;price:string;currency:string;moq?:string;leadDays?:number;note?:string}} | {type:'market.product.source.remove';payload:{productId:string;supplierId:string;reason:string}} | {type:'market.product.fromVersion';payload:{devId:string;versionId:string;sku:string;name?:string;supplierId?:string;supplierCode?:string}} | {type:'market.product.status';payload:{id:string;status:MarketProduct['status']}} | {type:'market.supplier.save';payload:{id?:string;input:Pick<MarketSupplier,'name'|'type'>&Partial<Omit<Input<MarketSupplier>,'nam",
+   "MarketCommand": "| {type:'market.customer.update';payload:{id:string;patch:Partial<Omit<MistCustomer,'id'|'code'|'owner'>>}} | {type:'market.contact.delete';payload:{kind:'customer'|'supplier'|'relation';parentId:string;id:string}} | {type:'market.import';payload:{kind:MistImportKind;rows:MistImportRow[]}} | {type:'market.customer.create';payload:{input:Omit<MistCustomer,'id'|'code'|'owner'>&{code?:string}}} | {type:'market.attachment.set';payload:{kind:'product'|'supplier'|'relation'|'season'|'trend'|'show'|'campaign'|'lead'|'showLead'|'quotation'|'lookbook';id:string;fileIds:string[]}} | {type:'market.showLead.save';payload:Extract<MarketCommand,{type:'market.lead.save'}>['payload']} | {type:'market.showLead.transition';payload:Extract<MarketCommand,{type:'market.lead.transition'}>['payload']} | {type:'market.product.save';payload:{id?:string;input:Input<MarketProduct>}} | {type:'market.product.trimProfile.save';payload:TrimProfileInput} | {type:'market.product.source.save';payload:{quoteTerms?:TrimQuoteTerms|null;productId:string;supplierId:string;supplierCode?:string;price:string;currency:string;moq?:string;leadDays?:number;note?:string}} | {type:'market.product.source.remove';payload:{productId:string;supplierId:string;reason:string}} | {type:'market.product.fromVersion';payload:{devId:string;versionId:string;sku:string;name?:string;supplierId?:string;supplierCode?:string}} | {type:'market.product.status';payload:{id:string;status:MarketProduct['status']}} | {type:'market.supplier.save';",
    "MistCustomer": "{ id: string; name: string; code: string; country: string; city: string; industry: string; owner: string; ownerId: string; grade: string; currency: string; terms: string; incoterm: string; categories: string; creditLimit: number; since: string }",
    "MistImportKind": "'customer' | 'supplier' | 'product' | 'openingReceivable' | 'openingPayable'",
    "MistImportRow": "Record<string, string>",
    "Input": "Omit<T,keyof RecordBase|'status'> & {fileIds?:string[];note?:string}",
-   "MarketProduct": "RecordBase & { sku:string; name:string; category:'garment'|'fabric'|'trimming'; status:'active'|'archived'; season:string; supplierId:string; supplierCode:string; composition:string; specification:string; color:string; unit:string; cost:string; currency:string; sourceDevId:string; sourceVersionId:string; specs?:Record<string,string>; customerCodes?:Array<{customerId:string;code:string}>; refPrice?:string; sources?:ProductSource[]; priceHistory?:ProductPriceChange[] }",
-   "MarketSupplier": "RecordBase & { code:string; name:string; type:string; country:string; address:string; capabilities:string; capacity:number; capacityUnit:string; leadDays:number; status:'active'|'paused'|'blocked'; blockReason:string; statusFrom?:string; statusHistory?:SupplierStatusChange[]; certificates?:SupplierCertificate[]; ratings?:SupplierRating[]; handlers?:Partial<Record<MistBusinessGroup,MistAccountRef>>; bankAccounts?:SupplierBankAccount[]; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> }"
+   "MarketProduct": "RecordBase & { materialUses?:GarmentMaterialUse[]; trimProfile?:TrimCatalogProfile; sku:string; name:string; category:'garment'|'fabric'|'trimming'; status:'active'|'archived'; season:string; supplierId:string; supplierCode:string; composition:string; specification:string; color:string; unit:string; cost:string; currency:string; sourceDevId:string; sourceVersionId:string; specs?:Record<string,string>; customerCodes?:Array<{customerId:string;code:string}>; refPrice?:string; sources?:ProductSource[]; priceHistory?:ProductPriceChange[] }",
+   "TrimProfileInput": "{productId:string;category:TrimmingCategory;manufacturerRelationId?:string|null;parameters:TrimmingCategoryParameters}",
+   "TrimQuoteTerms": "{date:string;unit:string;moqUnit?:string;conditions?:string;fileIds:string[]}"
   },
   "source": "server/src/shared/mistMarket.ts"
  },
@@ -1954,7 +2118,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "payable.settlement.confirm",
-  "payload": "{ id: string; prepaymentApplied: number; adjustReason?: string; note?: string }",
+  "payload": "{ id: string; prepaymentApplied: number; adjustReason?: string; note?: string; deductionAmount?: number; deductionFileIds?: string[] }",
   "source": "server/src/shared/mistPayables.ts"
  },
  {

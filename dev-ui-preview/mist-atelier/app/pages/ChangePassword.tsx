@@ -6,7 +6,6 @@ import { Banner, Button, Card, CardHeader, Dialog, Field, FormGrid, MistPage, Se
 import { changePassword, logoutAllSessions } from '../../../../services/authService';
 import { useMistSession } from '../runtime/auth';
 import { passwordOk } from '../runtime/passwordRule';
-import { FailureNotice } from '../runtime/FailureNotice';
 
 const MIN = 8;
 function explain(error: unknown) {
@@ -47,7 +46,8 @@ export function ForcedPasswordChangePage() {
   const form = usePasswordForm(async () => { toast('登录密码已修改'); await session.refresh(); }, firstLogin ? '初始密码' : '临时密码');
   return <MistPage width="narrow"><Card><CardHeader title={uiText(firstLogin ? '首次登录，请先设置登录密码' : '密码已重置，请先修改登录密码')} sub={uiText(session.user?.email)} />
     <div className="mist-card-body">
-      {form.error && <FailureNotice title={"未修改"} detail={form.error} />}
+      {/* The forced-password route precedes the workbench status-card host. */}
+      {form.error && <Banner variant="notice" tone="bad" title={uiText("未修改")}>{form.error}</Banner>}
       {form.fields}
       <div className="mist-row"><Button variant="primary" loading={form.busy} onClick={() => void form.submit()}>{uiText("修改并继续")}</Button><Button icon={LogOut} disabled={form.busy} onClick={() => void session.logout()}>{uiText("退出登录")}</Button></div>
     </div>
@@ -70,12 +70,11 @@ export function ChangePasswordRow() {
 
 /** 设置 · 安全：退出所有设备（含当前设备），用于设备丢失或怀疑密码外泄。 */
 export function LogoutAllRow() {
-  const session = useMistSession();
   const [open, setOpen] = React.useState(false), [busy, setBusy] = React.useState(false), [error, setError] = React.useState('');
   const submit = async () => {
     if (busy) return;
     setBusy(true); setError('');
-    try { await logoutAllSessions(); setOpen(false); await session.logout(); }
+    try { await logoutAllSessions(); setOpen(false); }
     catch (e) { setError(explain(e) === '密码未修改，请重试' ? '未能退出所有设备，请重试' : explain(e)); }
     finally { setBusy(false); }
   };

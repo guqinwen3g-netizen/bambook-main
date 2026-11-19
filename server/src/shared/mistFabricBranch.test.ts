@@ -49,6 +49,15 @@ describe('fabric pioneer colour coverage',()=>{
   const release=()=>f.run({type:'fulfillment.production.release',payload:{productionId,note:'测试放行'}});
   return{f,productionId,add,release};
  }
+ it.each(['sample','production'] as const)('keeps original-unit physical fabric facts on a %s report without rewriting targets',kind=>{
+  const t=prepare();if(kind==='production'){t.add('Navy','pass');t.add('Stone','pass');t.release();}
+  const sampleId=kind==='sample'?t.add('Navy'):undefined,source={kind:'orderLine' as const,orderId:t.f.orderId,lineId:t.f.state.orderLines[0].id,productionId:t.productionId};
+  const id=t.f.run({type:'fulfillment.qc.request',payload:{source,...(sampleId?{sampleId}:{}),domain:'fabric',kind,factory:'factory-a',location:'现场',contact:'',due:'2026-10-13'}}).id!,qc={...t.f.context,actorId:'qc',actorName:'测试QC'};
+  t.f.run({type:'fulfillment.qc.claim',payload:{id,domain:'fabric'}},qc);const target=structuredClone(t.f.state.orderLines[0].breakdown),versions=structuredClone(t.f.state.versions),facts=[{property:'克重',actual:306,unit:'g/m²'},{property:'有效幅宽',actual:147.5,unit:'cm'}];
+  const command={type:'fulfillment.qc.report',payload:{id,domain:'fabric',result:'pass',report:'PHYSICAL',opinion:'按本次实际范围独立判断',measurements:[],fabricMeasurements:facts,fileIds:[],reviewedAt:t.f.context.now}} as MistCommand;
+  const before=JSON.stringify(t.f.state);expect(()=>t.f.run({...command,payload:{...command.payload,fabricMeasurements:[{property:'克重',actual:306,unit:''}]}} as MistCommand,qc)).toThrow();expect(JSON.stringify(t.f.state)).toBe(before);
+  t.f.run(command,qc);const report=t.f.state.fulfillment.qcReports.find(x=>x.taskId===id)!;expect(report.fabricMeasurements).toEqual(facts);expect(report.result).toBe('pass');expect(t.f.state.orderLines[0].breakdown).toEqual(target);expect(t.f.state.versions).toEqual(versions);
+ });
  it('does not release all colours using only one approved pioneer sample',()=>{
   const t=prepare();t.add('Navy','pass');const before=JSON.stringify(t.f.state);
   expect(t.release).toThrow(/Stone/);expect(JSON.stringify(t.f.state)).toBe(before);

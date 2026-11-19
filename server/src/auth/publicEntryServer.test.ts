@@ -2,9 +2,10 @@ import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import { createMistServer } from '../mist/server';
 import { createAuthService } from './service';
+import {sessionRevocationStore} from './__tests__/sessionRevocationStore';
 
 describe('public domains on the running Mist server', () => {
-  const db:any = { $queryRawUnsafe: vi.fn(async()=>[]), userAccount: { findUnique: vi.fn(async()=>null) } };
+  const db:any = {authSessionRevocation:sessionRevocationStore(), $queryRawUnsafe: vi.fn(async()=>[]), userAccount: { findUnique: vi.fn(async()=>null) } };
   it('answers remote-session discovery on both entry hosts without an error status', async()=>{
     for(const host of ['bambook.sylway.cloud','bambook-admin.sylway.cloud']) {
       const res=await request(createMistServer(db)).get('/api/mist/session').set('Host',host).set('X-Mist-Session-Probe','2');

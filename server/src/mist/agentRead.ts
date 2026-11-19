@@ -1,3 +1,4 @@
+import {developmentReferenceReadRows,developmentReferenceCaseReadRecord} from './developmentReferenceReadRecords';
 /**
  * 工作助手业务读取（bambook_query / bambook_get / bambook_expand）。
  * 只在“按当前执行者权限裁剪后的公司状态”上运行：仓储先按账号权限 ∩ 委托上限投影，这里再按对象类型的读权限复核一次。
@@ -8,6 +9,8 @@ import { hasScope } from '../auth/permissionService';
 import type { PermissionScope } from '../_shared/rolePermissionMatrix';
 import type { MistState } from '../shared/mistWorkspace';
 import { emailSendEffectiveStatus, emailSendRecipients } from '../shared/mistEmail';
+import { developmentReopenSource } from '../shared/mistDevelopmentLifecycle';
+import {agentCommandSources,unavailableCommandSources,type AgentGetContext,type AgentCommandSources} from './agentReadCommandSources';
 import { MistApiError } from './errors';
 
 type ObjectType = { type: string; label: string; scope: PermissionScope; path: string[]; view: string; section?: string; linkId?: (row: any) => string | undefined; /** Rows that live inside parent records (generated documents) are flattened here instead of walked by `path`. */ flatten?: (state: MistState) => any[] };
@@ -22,10 +25,12 @@ export const AGENT_OBJECT_TYPES: ObjectType[] = [
   { type: 'order', label: '订单', scope: 'orders:read', path: ['orders'], view: 'orders/detail' },
   { type: 'order_line', label: '订单行', scope: 'orders:read', path: ['orderLines'], view: 'orders/detail', linkId: r => r.orderId },
   { type: 'development', label: '开发单', scope: 'products:read', path: ['devs'], view: 'development/detail' },
+  {type:'development_reference',label:'开发参考实物',scope:'products:read',path:['devs','sampleReferences'],view:'development/detail',section:'references',linkId:r=>r.devId,flatten:developmentReferenceReadRows},
   { type: 'development_draft', label: '开发草稿', scope: 'products:read', path: ['drafts'], view: 'development/new' },
   { type: 'dev_version', label: '开发版本', scope: 'products:read', path: ['versions'], view: 'development/detail', linkId: r => r.devId },
   { type: 'product', label: '产品档案', scope: 'products:read', path: ['market', 'products'], view: 'products' },
   { type: 'sample', label: '样品', scope: 'products:read', path: ['fulfillment', 'samples'], view: 'samples' },
+  { type: 'sample_movement', label: '样品流转', scope: 'products:read', path: ['fulfillment', 'sampleMovements'], view: 'samples', linkId:r=>r.sampleId },
   { type: 'quotation', label: '报价', scope: 'quotations:read', path: ['market', 'quotations'], view: 'quotations' },
   { type: 'supplier', label: '供应商', scope: 'suppliers:read', path: ['market', 'suppliers'], view: 'suppliers' },
   { type: 'purchase', label: '采购合同', scope: 'procurement:read', path: ['fulfillment', 'purchases'], view: 'procurement' },
@@ -55,7 +60,7 @@ export const AGENT_OBJECT_TYPES: ObjectType[] = [
   { type: 'bank_account', label: '公司银行账户', scope: 'vouchers:write', path: ['bankAccounts'], view: 'receipts' },
   { type: 'fx_record', label: '锁汇结汇', scope: 'vouchers:read', path: ['fxRecords'], view: 'receipts' },
   { type: 'letter_of_credit', label: '信用证', scope: 'customs:read', path: ['letterOfCredits'], view: 'shipments' },
-  { type: 'rfq', label: '供应商询价', scope: 'procurement:read', path: ['rfqs'], view: 'procurement' },
+  { type: 'rfq', label: '供应商询价', scope: 'procurement:read', path: ['rfqs'], view: 'procurement', section: 'rfq' },
   { type: 'sample_request', label: '客户索样', scope: 'products:read', path: ['sampleRequests'], view: 'samples' },
   { type: 'report_schedule', label: '报表订阅', scope: 'reports:read', path: ['reportSchedules'], view: 'reports' },
   // 出口退税：嵌在 exportRebate 内，读权限 tax:read；计税基数由仓储投影按 sensitive:tax_base 脱敏（金额置 0，标 taxMasked），这里不另行处理。
@@ -102,6 +107,7 @@ function bankAccountReadRecord(row:any){
   return{...row,accountNo:no?'****'+no.slice(-4):''};
 }
 function mailReadRecord(type:string,row:any){
+  if(type==='development')return developmentReferenceCaseReadRecord(row);
   if(type==='bank_account')return bankAccountReadRecord(row);
   // 报价和订单记录里内嵌的生成文件也不带快照，和单独读取文件一致。
   if((type==='order'||type==='quotation')&&Array.isArray(row.documents))return{...row,documents:row.documents.map(({snapshot:_snapshot,...document}:any)=>document)};
@@ -135,8 +141,8 @@ function compact(value: unknown, depth: number): unknown {
   return Object.fromEntries(Object.entries(value).filter(([k]) => k !== 'img').map(([k, v]) => [k, compact(v, depth - 1)]));
 }
 /** A small record must not lose facts merely because its review history is deeply nested. */
-function completeDataWithinLimit(row:unknown):Record<string,unknown>|undefined{
-  let remaining=GET_LIMIT,nodes=0,complete=true;
+function completeDataWithinLimit(row:unknown,limit=GET_LIMIT):Record<string,unknown>|undefined{
+  let remaining=limit,nodes=0,complete=true;
   const read=(value:any,depth:number):any=>{
     if(!complete)return;
     if(++nodes>10_000||depth>32){complete=false;return;}
@@ -162,7 +168,7 @@ function completeDataWithinLimit(row:unknown):Record<string,unknown>|undefined{
     }
     return Object.fromEntries(entries);
   };
-  const data=read(row,0);return complete&&data&&JSON.stringify(data).length<=GET_LIMIT?data:undefined;
+  const data=read(row,0);return complete&&data&&JSON.stringify(data).length<=limit?data:undefined;
 }
 function summary(row: any, type?:ObjectType) {
   // Draft values stay nested in detail reads so task source fingerprints still match storage.
@@ -171,7 +177,7 @@ function summary(row: any, type?:ObjectType) {
 }
 function link(type: ObjectType, row: any) {
   const id = type.linkId ? type.linkId(row) : row.id;
-  return typeof id === 'string' && id ? `bambook://open?${new URLSearchParams({view:type.view,id,...(type.section?{section:type.section}:{}),...(type.type==='dev_version'?{versionId:row.id}:{}),...(type.type==='order_line'?{orderLineId:row.id}:{})})}` : null;
+  return typeof id === 'string' && id ? `bambook://open?${new URLSearchParams({view:type.view,id,...(type.section?{section:type.section}:{}),...(type.type==='dev_version'?{versionId:row.id}:{}),...(type.type==='development_reference'?{section:'reference:'+row.id}:{}),...(type.type==='order_line'?{orderLineId:row.id}:{})})}` : null;
 }
 function ref(type: ObjectType, row: any) { return { type: type.type, id: row.id as string, label: labelOf(type.type==='development_draft'?{id:row.id,name:row.values?.name}:row), link: link(type, row) }; }
 
@@ -230,22 +236,35 @@ function attachmentsOf(state: MistState, row: unknown) {
   return found.length > ATTACHMENTS_MAX ? { attachments: found.slice(0, ATTACHMENTS_MAX), attachmentsTotal: found.length } : found.length ? { attachments: found } : {};
 }
 
-export function agentGet(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown):ReturnType<typeof ref>&{data:Record<string,unknown>;truncated:boolean;readHint?:string;attachments?:Array<{fileId:string;name:string;mimeType:string;size:number}>;attachmentsTotal?:number} {
+/** Opaque command source IDs only; events stay outside the machine-readable object catalog. */
+function developmentReadMetadata(state:MistState,row:any):{reopenSource:{closureId:string;expectedVersionId:string|null}|null}{
+  const source=developmentReopenSource(state,row),exact=(value:unknown):value is string=>typeof value==='string'&&!!value&&value===value.trim()&&value.length<=200&&!value.startsWith('data:');
+  return{reopenSource:source&&exact(source.closureId)&&(source.expectedVersionId===null||exact(source.expectedVersionId))?{closureId:source.closureId,expectedVersionId:source.expectedVersionId}:null};
+}
+export function agentGet(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown,context:AgentGetContext={}):ReturnType<typeof ref>&AgentCommandSources&{data:Record<string,unknown>;truncated:boolean;readHint?:string;attachments?:Array<{fileId:string;name:string;mimeType:string;size:number}>;attachmentsTotal?:number;reopenSource?:{closureId:string;expectedVersionId:string|null}|null} {
   const { type, row } = find(state, actor, typeName, id);
   const files=attachmentsOf(state,row);
-  const complete=completeDataWithinLimit(row);
-  if(complete)return{...ref(type,row),data:complete,truncated:false,...files};
+  // Keep computed IDs outside data and preserve its existing source-fingerprint contract.
+  // Computed identity consumes the existing record budget instead of enlarging it.
+  const existing=type.type==='development'?developmentReadMetadata(state,row):{};
+  const commandSources=agentCommandSources(state,actor,type.type,row,context);
+  let metadata={...existing,...commandSources},metadataIncomplete=false;
+  if(JSON.stringify({data:{id:row.id},...metadata}).length>GET_LIMIT){metadata={...existing,...unavailableCommandSources(commandSources)};metadataIncomplete=true;}
+  const dataLimit=Object.keys(metadata).length?GET_LIMIT-(JSON.stringify({data:null,...metadata}).length-4):GET_LIMIT;
+  const complete=completeDataWithinLimit(row,dataLimit);
+  if(complete)return{...ref(type,row),...metadata,data:complete,truncated:metadataIncomplete,...(metadataIncomplete?{readHint:'命令来源资料超出单次读取范围；当前结果不完整，请交本人核对。'}:{}),...files};
   const mail=['email','email_draft','email_send'].includes(type.type);
   let data = compact(row, mail ? 5 : 3) as Record<string, unknown>;
   if(mail&&typeof row.body==='string')data.body=row.body.slice(0,10_000);
   let text = JSON.stringify(data);
-  if (text.length > GET_LIMIT) {
+  if (text.length > dataLimit) {
     data = compact(row, 1) as Record<string, unknown>;
     if(type.type==='email_send'){Object.assign(data,{recipientCounts:row.recipientCounts,attemptCount:row.attemptCount,latestAttempt:compact(row.latestAttempt,3)});data.recipients=compact(row.recipients,3);}
     text = JSON.stringify(data);
   }
-  if (text.length > GET_LIMIT) { data = summary(row);if(type.type==='email_send')Object.assign(data,{recipientCounts:row.recipientCounts,attemptCount:row.attemptCount,latestAttempt:compact(row.latestAttempt,3)}); }
-  return { ...ref(type, row), data, truncated:true,readHint:'超出单次读取范围；当前结果不完整，请读取关联明细或交本人核对。',...files };
+  if (text.length > dataLimit) { data = summary(row);if(type.type==='email_send')Object.assign(data,{recipientCounts:row.recipientCounts,attemptCount:row.attemptCount,latestAttempt:compact(row.latestAttempt,3)}); }
+  if(JSON.stringify(data).length>dataLimit)data=JSON.stringify({id:row.id}).length<=dataLimit?{id:row.id}:{};
+  return { ...ref(type, row), ...metadata, data, truncated:true,readHint:'超出单次读取范围；当前结果不完整，请读取关联明细或交本人核对。',...files };
 }
 
 /** 关联对象：本对象字段直接引用的对象，以及字段引用了本对象的其它对象（均限当前可读类型）。 */
@@ -253,7 +272,7 @@ export function agentRelated(state: MistState, actor: TokenPayload, typeName: un
   const { type, row } = find(state, actor, typeName, id);
   const idsOf = (r: any): string[] => Object.entries(r).flatMap(([k, v]) => !/(Id|Ids)$/.test(k) ? [] : typeof v === 'string' && v ? [v] : Array.isArray(v) ? v.filter(x => typeof x === 'string') : []);
   // 明细行里的引用也算（如票据 lines[].purchaseId、付款申请 lines[].billId），只展开一层。
-  const scalarRefs = (r: any) => new Set([...idsOf(r), ...Object.values(r).flatMap(v => Array.isArray(v) ? v.filter(x => x && typeof x === 'object' && !Array.isArray(x)).flatMap(idsOf) : [])]);
+  const scalarRefs = (r: any) => new Set([...idsOf(r), ...(r.source?.kind==='developmentIncoming'&&typeof r.source.devId==='string'?[r.source.devId]:[]),...(r.referenceTransfer&&typeof r.referenceTransfer.referenceId==='string'?[r.referenceTransfer.referenceId]:[]), ...Object.values(r).flatMap(v => Array.isArray(v) ? v.filter(x => x && typeof x === 'object' && !Array.isArray(x)).flatMap(idsOf) : [])]);
   const own = scalarRefs(row);
   const results: Array<ReturnType<typeof ref> & { relation: 'references' | 'referenced_by' }> = [];
   let total = 0;

@@ -32,11 +32,11 @@ export const platformAdminApi={
  update:(id:string,draft:{status:string;plan:string;seatLimit:number|null})=>call('/companies/'+encodeURIComponent(id),'PATCH',draft),
  members:(id:string,signal?:AbortSignal)=>call<{members:PlatformMember[]}>('/companies/'+encodeURIComponent(id)+'/members','GET',undefined,signal),
  addMember:(id:string,email:string)=>call('/companies/'+encodeURIComponent(id)+'/members','POST',{email}),
- enterCompany:(id:string)=>call<{token:string;user:AuthUser}>('/companies/'+encodeURIComponent(id)+'/management-session','POST',{}),
- exitCompany:()=>call<{token:string;user:AuthUser}>('/management-session/exit','POST',{}),
+ enterCompany:(id:string)=>call<{token:string;user:AuthUser;logoutTicket?:string}>('/companies/'+encodeURIComponent(id)+'/management-session','POST',{}),
+ exitCompany:()=>call<{token:string;user:AuthUser;logoutTicket?:string}>('/management-session/exit','POST',{}),
  removeMember:(id:string,userId:string)=>call('/companies/'+encodeURIComponent(id)+'/members/'+encodeURIComponent(userId),'DELETE'),
 };
 
 /** 平台切换公司范围后使用服务端签发的会话，保持真实平台身份。 */
-export async function enterCompanyManagement(companyId:string){const result=await platformAdminApi.enterCompany(companyId);return adoptIssuedSession(result.token,result.user);}
-export async function exitCompanyManagement(){const result=await platformAdminApi.exitCompany();return adoptIssuedSession(result.token,result.user);}
+export async function enterCompanyManagement(companyId:string){const result=await platformAdminApi.enterCompany(companyId);return adoptIssuedSession(result.token,result.user,result.logoutTicket);}
+export async function exitCompanyManagement(){const result=await platformAdminApi.exitCompany();return adoptIssuedSession(result.token,result.user,result.logoutTicket);}

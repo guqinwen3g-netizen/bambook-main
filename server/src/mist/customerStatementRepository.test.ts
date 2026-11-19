@@ -4,7 +4,8 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import * as contract from '../shared/mistWorkspace';
-import {customerStatementContent,customerStatementsOf,statementAge} from '../shared/mistCustomerStatement';
+import {customerStatementContent,customerStatementsOf,statementAge,CUSTOMER_STATEMENT_TEMPLATE_VERSION} from '../shared/mistCustomerStatement';
+import {renderCustomerStatementHtml} from '../templates/customerStatement';
 import {MistRepository,type MistCommandRequest} from './repository';
 import {MistPrivateFiles} from './files';
 import {MemoryMistDatabase,testActor,testAuthority} from './__tests__/support';
@@ -27,6 +28,7 @@ beforeEach(async()=>{
  repo=new MistRepository(db,contract,files,auth.authorize,()=>new Date(now),undefined,renderPdf);workspaceId=(await repo.create(testActor(),{name:'对账单测试空间',seed:'demo'})).id;
  baseline=(await readdir(path.join(directory,workspaceId)).catch(()=>[] as string[])).length;
  const s=state();s.settings.companyProfile={...company};
+ s.bankAccounts=[{id:'usd-account',code:'USD',name:'USD account',currency:'USD',bankName:company.bankName,accountNo:company.bankAccount,openingDate:'2026-01-01',openingBalance:0,createdAt:now,actor:'Finance'}];
  // 客户 1 有一笔同名付款方的待核销到账
  const c1=s.customers.find(c=>c.id==='customer-1')!;s.receipts.push({id:'r-adv',code:'BR-ADV-1',date:'2026-10-12',payer:c1.name.toUpperCase(),amount:3000,remaining:3000,currency:'USD',ref:'TT ADV',state:'unmatched'});
  s.receipts.push({id:'r-future',code:'BR-FUT-1',date:'2026-10-20',payer:c1.name,amount:500,remaining:500,currency:'USD',ref:'',state:'unmatched'});
@@ -34,19 +36,37 @@ beforeEach(async()=>{
 afterEach(async()=>{vi.restoreAllMocks();await rm(directory,{recursive:true,force:true});});
 
 describe('客户对账单',()=>{
- it('按币种列未结应收、同名待核销到账、账龄与净欠款，冻结快照并归档 PDF',async()=>{
+ it('separates active bank fees and write-offs from received cash, excludes reversals, and leaves posted balances unchanged',async()=>{
+  const s=state(),invoice=s.invoices.find(i=>i.code==='INV-G-2026-0412')!;invoice.amount=1000;invoice.open=885;
+  invoice.bankCharges=[{id:'fee',receiptId:'r',amount:3,currency:'USD',reason:'Bank notice',at:now,actor:'Finance'},{id:'old-fee',receiptId:'r',amount:7,currency:'USD',reason:'Old notice',at:now,actor:'Finance',reversed:{at:now,actor:'Finance',reason:'Correction'}}];
+  invoice.writeoffs=[{id:'writeoff',kind:'difference',amount:2,currency:'USD',reason:'Approved difference',at:now,actor:'Finance'},{id:'old-writeoff',kind:'difference',amount:11,currency:'USD',reason:'Old difference',at:now,actor:'Finance',reversed:{at:now,actor:'Finance',reason:'Correction'}}];
+  s.allocations=s.allocations.filter(a=>a.invoiceId!==invoice.id);s.allocations.push({id:'cash',invoiceId:invoice.id,receiptId:'r',amount:100,currency:'USD',createdAt:now,actor:'Finance'});
+  s.platform.creditApplications=s.platform.creditApplications.filter(a=>a.invoiceId!==invoice.id);s.platform.creditApplications.push({id:'credit',creditId:'cn',invoiceId:invoice.id,amount:10,at:now,actor:'Finance'});
+  const ledger=structuredClone({invoices:s.invoices,allocations:s.allocations,receipts:s.receipts,bankAccounts:s.bankAccounts});
+  await generate('adjustments',{customerId:'customer-0'});const rec=customerStatementsOf(state(),'customer-0')[0],line=rec.snapshot.sections.find(s=>s.currency==='USD')!.lines.find(l=>l.invoiceId===invoice.id)!;
+  expect(line).toMatchObject({amount:'1000.00',received:'100.00',credited:'10.00',bankCharges:'3.00',writtenOff:'2.00',open:'885.00'});expect(CUSTOMER_STATEMENT_TEMPLATE_VERSION).toBe(2);expect(rec.templateVersion).toBe(2);
+  expect(Number(line.amount)-Number(line.received)-Number(line.credited)-Number(line.bankCharges)-Number(line.writtenOff)).toBe(Number(line.open));
+  const html=htmls[0],adjustments=html.match(/<tr data-invoice-adjustments="INV-G-2026-0412">[\s\S]*?<\/tr>/)?.[0];expect(adjustments).toContain('Bank charges');expect(adjustments).toContain('3.00');expect(adjustments).toContain('Write-off adjustments');expect(adjustments).toContain('2.00');expect(adjustments).not.toContain('7.00');expect(adjustments).not.toContain('11.00');
+  expect({invoices:state().invoices,allocations:state().allocations,receipts:state().receipts,bankAccounts:state().bankAccounts}).toEqual(ledger);
+ });
+ it('keeps archived v1 snapshots renderable without new fields and does not invent an adjustment for them',async()=>{
+  await generate('legacy',{customerId:'customer-1'});const snapshot=structuredClone(customerStatementsOf(state(),'customer-1')[0].snapshot);snapshot.templateVersion=1;
+  for(const section of snapshot.sections)for(const line of section.lines){delete line.bankCharges;delete line.writtenOff;}
+  const before=structuredClone(snapshot),html=renderCustomerStatementHtml(snapshot);expect(html).toContain('Template v1');expect(html).not.toContain('<tr data-invoice-adjustments');expect(html).not.toContain('NaN');expect(snapshot).toEqual(before);
+ });
+ it('按币种列未结应收、明确归属及同名待核销到账、账龄与净欠款，冻结快照并归档 PDF',async()=>{
   await generate('soa-1',{customerId:'customer-1'});
   const [rec]=customerStatementsOf(state(),'customer-1');
   expect(rec).toMatchObject({statementNo:'SOA-2026-0001',seq:1,asOf:'2026-10-16',customerId:'customer-1'});
   const sec=rec.snapshot.sections;expect(sec.map(s=>s.currency)).toEqual(['USD']);
   expect(sec[0].lines.map(l=>l.code)).toEqual(['INV-G-2026-0398','INV-G-2026-0405','CI-2026-0417']); // 按到期日排序
   expect(sec[0].lines[0]).toMatchObject({daysOverdue:11,bucket:'1-30'});
-  expect(sec[0].unapplied.map(u=>u.code)).toEqual(['BR-ADV-1']); // 对账日之后的到账不列入
-  expect(sec[0]).toMatchObject({totalOpen:'62325.00',totalUnapplied:'3000.00',net:'59325.00'});
-  expect(rec.totals).toEqual([{currency:'USD',net:'59325.00'}]);
+  expect(sec[0].unapplied.map(u=>u.code)).toEqual(['BR-20261016-006','BR-ADV-1']); // 含异名付款的有效归属12555；不含未来到账。
+  expect(sec[0]).toMatchObject({totalOpen:'62325.00',totalUnapplied:'15555.00',net:'46770.00'});
+  expect(rec.totals).toEqual([{currency:'USD',net:'46770.00'}]);
   expect(sec[0].aging.reduce((n,a)=>n+Number(a.amount),0)).toBeCloseTo(62325);
   expect(sec[0].remit[0]).toMatchObject({accountNo:expect.any(String)});
-  const html=htmls[0];expect(html).toContain('STATEMENT OF ACCOUNT');expect(html).toContain('SOA-2026-0001');expect(html).toContain('INV-G-2026-0398');expect(html).toContain('BR-ADV-1');expect(html).not.toContain('BR-FUT-1');expect(html).toContain('59,325.00');
+  const html=htmls[0];expect(html).toContain('STATEMENT OF ACCOUNT');expect(html).toContain('SOA-2026-0001');expect(html).toContain('INV-G-2026-0398');expect(html).toContain('BR-ADV-1');expect(html).toContain('BR-20261016-006');expect(html).not.toContain('BR-FUT-1');expect(html).toContain('46,770.00');
   const f=state().files.find(x=>x.id===rec.fileId)!;expect(f).toMatchObject({mimeType:'application/pdf'});expect(f.name).toContain('SOA-2026-0001');
   expect((await files.read(workspaceId,f)).subarray(0,8).toString()).toBe('%PDF-1.4');expect(await names()).toHaveLength(1);
   expect(state().events.some(e=>e.entityType==='invoice'&&e.entityId==='customer-1'&&e.text.includes('SOA-2026-0001'))).toBe(true);
@@ -79,7 +99,7 @@ describe('客户对账单',()=>{
   expect(statementAge('2026-09-15','2026-10-16')).toEqual({days:31,bucket:'31-60'});
   expect(statementAge('','2026-10-16')).toEqual({days:null,bucket:'unknown'});
   const s=structuredClone(state());s.platform.creditApplications.push({id:'ca',creditId:'cn',invoiceId:'INV-G-2026-0412',amount:240,at:now,actor:'财务'});
-  const line=customerStatementContent(s,'customer-0','2026-10-16').sections[0].lines[0];
+  const line=customerStatementContent(s,'customer-0','2026-10-16').sections.find(s=>s.currency==='USD')!.lines[0];
   expect(line).toMatchObject({code:'INV-G-2026-0412',credited:'240.00',open:'42240.00'});
  });
 });

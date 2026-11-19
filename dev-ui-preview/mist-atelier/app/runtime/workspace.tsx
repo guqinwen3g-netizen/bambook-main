@@ -18,17 +18,23 @@ type Pending = { workspaceId: string; requestId: string; expectedRevision: numbe
 export type MistUploadOptions={claimId:string};
 export type ArchivedMistWorkspace={id:string;name:string;revision:number;archivedAt:string};
 export type MistPendingCreate = { actorId: string; slug: string; name: string; seed: 'demo' | 'empty' };
-type Authority = { key: string; userId?: string; status: string };
-export type MistCommandRecovery={workspaceId:string;requestId:string;actorId:string;revision:number};
+type Authority = { key: string; userId?: string; companyId?: string; status: string };
+function recoveryStorageKey(kind: 'pending' | 'pending-create' | 'selected-workspace', bound: Authority) {
+  return 'bambook.mist.' + kind + ':' + bound.userId + (bound.companyId ? ':' + bound.companyId : '');
+}
+export type MistCommandRecovery={workspaceId:string;requestId:string;actorId:string;revision:number;resultId?:string};
 export interface MistWorkspaceContext {
   agentTaskNotices?:AgentTaskNotices;
   state: MistState | null; workspace: MistWorkspaceEnvelope | null; workspaces: Array<{ id: string; name: string; shared?: boolean }>;
   loading: boolean; saving: boolean; error: string; pending: Pending | null;
+  /** A live dialog has shown this exact confirmed failure; pending results keep their shell notice. */
+  dismissError?: (message: string) => void;
   pendingCreate?: MistPendingCreate | null;
   commandRecovery?:MistCommandRecovery|null;
   /** reauth：只在确认高风险 Agent 提议时随本次请求发送，不写入本机待核对记录。
-   *  signature：合同与资金类批准的当场手写签字；属于请求内容，随待核对记录保存以便按原请求重发。 */
-  run: (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string } }) => Promise<MistRunReceipt>;
+   *  signature：合同与资金类批准的当场手写签字；属于请求内容，随待核对记录保存以便按原请求重发。
+   *  expectedRevision：编辑器实际核对的来源版本；与该来源快照一起绑定，不随后台同步偷换。 */
+  run: (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string }; expectedRevision?: number }) => Promise<MistRunReceipt>;
   uploadFile: (file: File, options?:MistUploadOptions) => Promise<MistFile>;
   downloadFile: (file: MistFile) => Promise<void>;
   /** 读取附件原件（带登录凭据），供在线预览使用；不会触发下载。 */
@@ -246,17 +252,17 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
   const [pending, setPending] = React.useState<Pending | null>(null);
   const [pendingCreate, setPendingCreate] = React.useState<MistPendingCreate | null>(null);
   const [commandRecovery,setCommandRecovery]=React.useState<MistCommandRecovery|null>(null);
-  const live = React.useRef<Authority>({ key: session.sessionKey, userId: session.user?.id, status: session.status });
-  live.current = { key: session.sessionKey, userId: session.user?.id, status: session.status };
+  const authority: Authority = { key: JSON.stringify([session.sessionKey, session.user?.companyId ?? null]), userId: session.user?.id, companyId: session.user?.companyId || undefined, status: session.status };
+  const live = React.useRef<Authority>(authority);
+  live.current = authority;
   const activeScope = React.useRef<Authority>(live.current);
   const mounted = React.useRef(false), snapshot = React.useRef<MistWorkspaceEnvelope | null>(null), pendingRef = React.useRef<Pending | null>(null);
   const pendingCreateRef = React.useRef<MistPendingCreate | null>(null);
   const mutation = React.useRef<symbol | null>(null), navigating = React.useRef(false), scopeEpoch = React.useRef(0), readEpoch = React.useRef(0);
   const readController = React.useRef<AbortController | null>(null), wanted = React.useRef<string | undefined>(undefined);
   const latest = React.useRef(new Map<string, MistWorkspaceEnvelope>());
-  const authority = { key: session.sessionKey, userId: session.user?.id, status: session.status };
   const scopeIsCurrent = activeScope.current.key === authority.key && activeScope.current.userId === authority.userId && activeScope.current.status === authority.status;
-  const visible = scopeIsCurrent && session.status === 'authenticated' && current?.key === session.sessionKey && workspaceAccessibleBy(current.value, session.user?.id) ? current.value : null;
+  const visible = scopeIsCurrent && session.status === 'authenticated' && current?.key === authority.key && workspaceAccessibleBy(current.value, session.user?.id) ? current.value : null;
   const boundEpoch = scopeEpoch.current, boundWorkspaceId = visible?.id;
   const assertIdentity = React.useCallback((bound: Authority) => {
     if (!mounted.current || bound.status !== 'authenticated' || !bound.userId || live.current.status !== 'authenticated'
@@ -270,25 +276,36 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
   const publishPending = React.useCallback((value: Pending | null) => { pendingRef.current = value; setPending(value); }, []);
   const publishCreate = React.useCallback((value: MistPendingCreate | null) => { pendingCreateRef.current = value; setPendingCreate(value); }, []);
   const persistCreate = React.useCallback((value: MistPendingCreate, bound: Authority) => {
-    const userId = assertIdentity(bound);
-    try { localStorage.setItem('bambook.mist.pending-create:' + userId, JSON.stringify(value)); }
+    assertIdentity(bound);
+    try { localStorage.setItem(recoveryStorageKey('pending-create', bound), JSON.stringify(value)); }
     catch { throw new RequestError('无法保存本机创建恢复记录，本次尚未提交。请允许本机存储后重试'); }
     publishCreate(value);
   }, [assertIdentity, publishCreate]);
   const clearCreate = React.useCallback((bound: Authority) => {
     assertIdentity(bound); publishCreate(null);
-    try { localStorage.removeItem('bambook.mist.pending-create:' + bound.userId); }
+    try { localStorage.removeItem(recoveryStorageKey('pending-create', bound)); }
     catch { setError('公司已创建，但本机恢复记录暂未清理；原创建请求可安全重试。'); }
   }, [assertIdentity, publishCreate]);
   const persist = React.useCallback((value: Pending, bound: Authority) => {
-    const userId = assertIdentity(bound);
-    try { localStorage.setItem('bambook.mist.pending:' + userId, JSON.stringify(value)); }
+    assertIdentity(bound);
+    try { localStorage.setItem(recoveryStorageKey('pending', bound), JSON.stringify(value)); }
     catch { throw new RequestError('无法保存本机恢复记录，本次尚未提交。请允许本机存储后重试'); }
     publishPending(value);
   }, [assertIdentity, publishPending]);
   const clearPending = React.useCallback((bound: Authority) => {
-    assertIdentity(bound); publishPending(null);
-    try { localStorage.removeItem('bambook.mist.pending:' + bound.userId); }
+    assertIdentity(bound); const original = pendingRef.current; publishPending(null);
+    try {
+      localStorage.removeItem(recoveryStorageKey('pending', bound));
+      // A failed legacy-key migration must not strand the exact acknowledged request. Never clear another company's record.
+      if (bound.companyId && original) {
+        const legacyKey = 'bambook.mist.pending:' + bound.userId, raw = localStorage.getItem(legacyKey);
+        if (raw) {
+          let legacy: Pending | null = null;
+          try { legacy = readPending(raw, bound.userId!); } catch { /* Preserve an unreadable legacy recovery record. */ }
+          if (legacy?.workspaceId === original.workspaceId && legacy.requestId === original.requestId) localStorage.removeItem(legacyKey);
+        }
+      }
+    }
     catch { setError('操作已保存，但本机恢复记录暂未清理；重新打开后可核对同一回执。'); }
   }, [assertIdentity, publishPending]);
   /** 发送意图转为待人工核对：保留原意图（同一 requestKey）并写明原因；之后的核对不再重放。 */
@@ -304,13 +321,13 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
     latest.current.set(next.id, next); snapshot.current = next; setCurrent({ key: bound.key, value: next });
   }, [assertIdentity]);
   const rememberSelection = React.useCallback((id: string, bound: Authority) => {
-    const userId = assertIdentity(bound);
-    try { localStorage.setItem('bambook.mist.selected-workspace:' + userId, id); }
+    assertIdentity(bound);
+    try { localStorage.setItem(recoveryStorageKey('selected-workspace', bound), id); }
     catch { setError('本公司已打开，但选择未能保存在本机；刷新后可能需要重新选择。'); }
   }, [assertIdentity]);
   const forgetSelection = React.useCallback((bound: Authority) => {
-    const userId = assertIdentity(bound);
-    try { localStorage.removeItem('bambook.mist.selected-workspace:' + userId); }
+    assertIdentity(bound);
+    try { localStorage.removeItem(recoveryStorageKey('selected-workspace', bound)); }
     catch { setError('原公司已不存在，但本机选择记录暂未清理。'); }
   }, [assertIdentity]);
   const load = React.useCallback(async (bound: Authority, id?: string, navigation = false, fallbackMissingSelection = false) => {
@@ -351,23 +368,47 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       let restored: Pending | null = null;
       let selected: string | undefined;
       let recoveryError = '';
-      try { const raw = localStorage.getItem('bambook.mist.pending:' + authority.userId); if (raw) restored = readPending(raw, authority.userId); }
+      try { const raw = localStorage.getItem(recoveryStorageKey('pending', authority)); if (raw) restored = readPending(raw, authority.userId); }
       catch (failure) { recoveryError = failure instanceof Error ? failure.message : '本机恢复记录不可读'; }
-      try { const raw = localStorage.getItem('bambook.mist.pending-create:' + authority.userId); if (raw) publishCreate(readPendingCreate(raw, authority.userId)); }
+      try { const raw = localStorage.getItem(recoveryStorageKey('pending-create', authority)); if (raw) publishCreate(readPendingCreate(raw, authority.userId)); }
       catch (failure) { recoveryError = failure instanceof Error ? failure.message : '本机创建恢复记录不可读'; }
       try {
-        const raw = localStorage.getItem('bambook.mist.selected-workspace:' + authority.userId);
+        const raw = localStorage.getItem(recoveryStorageKey('selected-workspace', authority));
         if (raw && nonempty(raw) && raw === raw.trim() && raw.length <= 120) selected = raw;
         else if (raw) forgetSelection(authority);
       } catch { recoveryError = '本机公司选择不可读，请重新选择公司'; }
-      // An unresolved command must reopen its exact workspace before recovery.
-      const lifecycle=restored&&(restored.kind==='archive'||restored.kind==='restore');
-      // Company sessions resolve their current shared default on sign-in, not a legacy personal cache.
-      // Pending writes still reopen their exact source so they can be reconciled safely.
-      const initialId = lifecycle ? selected : restored?.workspaceId ?? (session.user?.companyId ? undefined : selected);
-      publishPending(restored); void load(authority, initialId, true, !!lifecycle||!restored && !!selected).finally(() => {
-        if (recoveryError && mounted.current && live.current.key === authority.key && live.current.userId === authority.userId && live.current.status === 'authenticated') setError(previous => previous || recoveryError);
-      });
+      if (authority.companyId) {
+        // One shared workspace per company: resolve the authenticated company before inspecting legacy recovery.
+        // A user can belong to multiple companies; another company's unresolved request must remain inert here.
+        let legacy: Pending | null = null;
+        try { const raw = localStorage.getItem('bambook.mist.pending:' + authority.userId); if (raw) legacy = readPending(raw, authority.userId); }
+        catch { /* Keep unknown legacy data; do not bind it to the currently selected company. */ }
+        void load(authority, undefined, true).then(() => {
+          if (!mounted.current || live.current.key !== authority.key || live.current.userId !== authority.userId || live.current.status !== 'authenticated') return;
+          const workspaceId = snapshot.current?.id;
+          let candidate = restored?.workspaceId === workspaceId ? restored : null;
+          // A failed/superseded read can leave no workspace. Missing legacy data must never
+          // compare equal to that missing ID and become a literal "null" recovery record.
+          if (!restored && legacy && workspaceId && legacy.workspaceId === workspaceId) {
+            candidate = legacy;
+            try {
+              localStorage.setItem(recoveryStorageKey('pending', authority), JSON.stringify(legacy));
+              localStorage.removeItem('bambook.mist.pending:' + authority.userId);
+            } catch { recoveryError = '原请求已保留，本机恢复记录暂未迁移，请先核对。'; }
+          }
+          publishPending(candidate);
+          if (recoveryError) setError(previous => previous || recoveryError);
+        });
+      } else {
+        // An unresolved command must reopen its exact workspace before recovery.
+        const lifecycle=restored&&(restored.kind==='archive'||restored.kind==='restore');
+        // Company sessions resolve their current shared default on sign-in, not a legacy personal cache.
+        // Pending writes still reopen their exact source so they can be reconciled safely.
+        const initialId = lifecycle ? selected : restored?.workspaceId ?? (session.user?.companyId ? undefined : selected);
+        publishPending(restored); void load(authority, initialId, true, !!lifecycle||!restored && !!selected).finally(() => {
+          if (recoveryError && mounted.current && live.current.key === authority.key && live.current.userId === authority.userId && live.current.status === 'authenticated') setError(previous => previous || recoveryError);
+        });
+      }
     } else setLoading(authority.status === 'loading');
     return () => { mounted.current = false; scopeEpoch.current++; readEpoch.current++; readController.current?.abort(); mutation.current = null; };
   }, [authority.key, authority.userId, authority.status, session.user?.mustChangePassword, load, publishPending, publishCreate, forgetSelection]);
@@ -524,13 +565,21 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       throw failure;
     }finally{if(token)unlock(token,authority);}
   },[authority.key,authority.userId,authority.status,boundEpoch,boundWorkspaceId,assertSource,lock,load,put,unlock,persist,clearPending,holdForReview]);
-  const run = React.useCallback(async (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string } }) => {
+  const dismissError = React.useCallback((message:string)=>{
+    if(live.current.key!==authority.key||live.current.userId!==authority.userId||live.current.status!=='authenticated'||scopeEpoch.current!==boundEpoch||snapshot.current?.id!==boundWorkspaceId||pendingRef.current||pendingCreateRef.current)return;
+    setError(current=>current===message?'':current);
+  },[authority.key,authority.userId,boundEpoch,boundWorkspaceId]);
+  const run = React.useCallback(async (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string }; expectedRevision?: number }) => {
     assertSource(authority, boundEpoch, boundWorkspaceId);
+    // Editors can bind a command to the same source snapshot they validated,
+    // rather than silently adopting a revision received between render and submit.
+    const expectedRevision=options?.expectedRevision??snapshot.current!.revision;
+    if(!Number.isSafeInteger(expectedRevision)||expectedRevision<0||expectedRevision>snapshot.current!.revision)throw new RequestError('编辑版本无效，请重新打开后核对');
     if (pendingCreateRef.current) throw new RequestError(createNotice(pendingCreateRef.current));
     if (pendingRef.current) throw new RequestError('存在待核对的操作，请先核对原请求结果');
     const token = lock();
     try {
-      const intent: Pending = { workspaceId: boundWorkspaceId!, requestId: crypto.randomUUID(), expectedRevision: snapshot.current!.revision, actorId: authority.userId, kind: 'command', command: JSON.parse(JSON.stringify(command)), ...(options?.signature ? { signature: { svg: options.signature.svg } } : {}) };
+      const intent: Pending = { workspaceId: boundWorkspaceId!, requestId: crypto.randomUUID(), expectedRevision, actorId: authority.userId, kind: 'command', command: JSON.parse(JSON.stringify(command)), ...(options?.signature ? { signature: { svg: options.signature.svg } } : {}) };
       const audible = !['settings.update','notification.read','notification.readAll','email.flag','email.move'].includes(command.type);
       try{const result=await perform(intent, JSON.stringify({ requestId: intent.requestId, expectedRevision: intent.expectedRevision, command: intent.command, ...(intent.signature ? { signature: intent.signature } : {}), ...(options?.reauth && command.type === 'agent.proposal.confirm' ? { reauth: { password: options.reauth.password } } : {}) }), authority); if(audible)playFeedbackSound('success');return result;}
       catch(failure){
@@ -649,7 +698,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
     const token = lock(); setError('');
     const recovered=(acknowledged:MistRunReceipt)=>{
       assertSource(authority,boundEpoch,boundWorkspaceId);
-      if(intent.kind==='command')setCommandRecovery({workspaceId:intent.workspaceId,requestId:intent.requestId,actorId:authority.userId!,revision:acknowledged.revision});
+      if(intent.kind==='command')setCommandRecovery({workspaceId:intent.workspaceId,requestId:intent.requestId,actorId:authority.userId!,revision:acknowledged.revision,...(typeof acknowledged.result.id==='string'?{resultId:acknowledged.result.id}:{})});
       return acknowledged;
     };
     try {
@@ -722,7 +771,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
   const noticeScope=agentTaskNoticeScope(session.sessionKey,visible?.id,session.user);
   const agentTaskNotices=useAgentTaskNotices(noticeScope,visible?.id,mistApiRequest,JSON.stringify([session.user?.id,visible?.id]));
   const dismissRejection = React.useCallback(() => { const message = rejection.current; if (!message) return; rejection.current = ''; setError(previous => previous === message ? '' : previous); }, []);
-  return <Context.Provider value={{ dismissRejection,agentTaskNotices,state: visible?.state ?? null, workspace: visible, workspaces: scopeIsCurrent ? workspaces : [], archivedWorkspaces:scopeIsCurrent?archivedWorkspaces:[],refreshArchived,archiveWorkspace:()=>changeArchive('archive'),restoreWorkspace:id=>changeArchive('restore',id),changeMember,mail,closeMailReview,loading: scopeIsCurrent ? loading : session.status !== 'anonymous', error: scopeIsCurrent && !pending ? error : '', saving: scopeIsCurrent ? saving : false, pending: scopeIsCurrent ? pending : null, pendingCreate: scopeIsCurrent ? pendingCreate : null, commandRecovery:scopeIsCurrent&&commandRecovery?.workspaceId===visible?.id&&commandRecovery?.actorId===session.user?.id?commandRecovery:null, run, uploadFile, downloadFile, readFile, prepareCreditDocument, issueCreditDocument, downloadCreditDocument, fileUrl, refresh, recover, switchWorkspace, createWorkspace }}><AssistantConversationProvider scope={session.sessionKey+':'+(visible?.id??'')}>{uiText(children)}</AssistantConversationProvider></Context.Provider>;
+  return <Context.Provider value={{ dismissRejection,agentTaskNotices,state: visible?.state ?? null, workspace: visible, workspaces: scopeIsCurrent ? workspaces : [], archivedWorkspaces:scopeIsCurrent?archivedWorkspaces:[],refreshArchived,archiveWorkspace:()=>changeArchive('archive'),restoreWorkspace:id=>changeArchive('restore',id),changeMember,mail,closeMailReview,loading: scopeIsCurrent ? loading : session.status !== 'anonymous', error: scopeIsCurrent && !pending ? error : '', saving: scopeIsCurrent ? saving : false, pending: scopeIsCurrent ? pending : null, pendingCreate: scopeIsCurrent ? pendingCreate : null, commandRecovery:scopeIsCurrent&&commandRecovery?.workspaceId===visible?.id&&commandRecovery?.actorId===session.user?.id?commandRecovery:null, run, dismissError, uploadFile, downloadFile, readFile, prepareCreditDocument, issueCreditDocument, downloadCreditDocument, fileUrl, refresh, recover, switchWorkspace, createWorkspace }}><AssistantConversationProvider scope={session.sessionKey+':'+(visible?.id??'')}>{uiText(children)}</AssistantConversationProvider></Context.Provider>;
 }
 export function useMistWorkspace(): MistWorkspaceContext {
   const context = React.useContext(Context); if (!context) throw new Error('useMistWorkspace must be used inside MistWorkspaceProvider'); return context;

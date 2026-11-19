@@ -10,11 +10,15 @@ import { useMistSession } from './auth';
 import { useMistWorkspace } from './workspace';
 import { useNav } from '../nav';
 
-export type MistReview = MistReviewTask & { signatureRequired?: boolean; workspaceId: string; workspaceName: string; revision: number; canDecide: boolean; files?: Array<{ id: string; name: string; size: number }>; signatureFileId?: string };
+export type MistReview = MistReviewTask & { signatureRequired?: boolean; workspaceId: string; workspaceName: string; revision: number; canDecide: boolean; files?: Array<{ id: string; name: string; size: number }>; signatureFileId?: string; /** 本公司投影补齐的本人提交记录，始终只读。 */ local?: boolean };
+function reviewFilePath(row: MistReview, fileId: string): string {
+  const base = row.local ? '/api/mist/workspaces/' + encodeURIComponent(row.workspaceId) : '/api/mist/reviews/' + encodeURIComponent(row.workspaceId) + '/' + encodeURIComponent(row.id);
+  return base + '/files/' + encodeURIComponent(fileId);
+}
 /** 读取这次决定归档的签字（SVG，按图片显示，不作为 HTML 解析）。 */
 export async function reviewSignatureImage(row: MistReview, signal?: AbortSignal): Promise<string | null> {
   if (!row.signatureFileId) return null;
-  const response = await fetch('/api/mist/reviews/' + encodeURIComponent(row.workspaceId) + '/' + encodeURIComponent(row.id) + '/files/' + encodeURIComponent(row.signatureFileId), { headers: apiService.getAuthHeaders(), credentials: 'include', signal });
+  const response = await fetch(reviewFilePath(row, row.signatureFileId), { headers: apiService.getAuthHeaders(), credentials: 'include', signal });
   if (!response.ok) return null;
   const bytes = await response.arrayBuffer();
   return URL.createObjectURL(new Blob([bytes], { type: 'image/svg+xml' }));
@@ -22,7 +26,7 @@ export async function reviewSignatureImage(row: MistReview, signal?: AbortSignal
 /** signature 随恢复记录保存：网络中断后按同一请求重发时，服务端幂等摘要须与原请求一致。 */
 export type MistReviewIntent = { workspaceId: string; reviewId: string; requestId: string; expectedRevision: number; decision: 'approved' | 'rejected'; note: string; signature?: { svg: string } };
 export type MistReviewQueue = {
-  rows: MistReview[]; loaded: boolean; error: string; busy: boolean; intent: MistReviewIntent | null;
+  rows: MistReview[]; loaded: boolean; readError: string; error: string; busy: boolean; intent: MistReviewIntent | null;
   refresh: () => Promise<void>; clearError: () => void;
   /** 保存一次审批决定；成功返回 true。失败时保留恢复记录（网络/服务端异常）或给出明确原因（4xx）。 */
   decide: (row: MistReview, decision: 'approved' | 'rejected', note: string, signature?: { svg: string }) => Promise<boolean>;
@@ -49,14 +53,27 @@ export function MistReviewProvider({ children }: { children: React.ReactNode }) 
   const ref = React.useRef(identity); ref.current = identity;
   const currentWorkspace = React.useRef(workspace); currentWorkspace.current = workspace;
   const [rows, setRows] = React.useState<MistReview[]>([]), [loaded, setLoaded] = React.useState(false), [error, setError] = React.useState(''), [busy, setBusy] = React.useState(false), [intent, setIntent] = React.useState<MistReviewIntent | null>(null);
+  const [readError, setReadError] = React.useState('');
   const locked = React.useRef(false), requestCounter = React.useRef(0), key = 'bambook.mist.review-pending:' + session.user?.id;
   const refresh = React.useCallback(async () => {
     if (session.status !== 'authenticated') return; const sequence = ++requestCounter.current;
-    try { const data = await call(''); if (identity === ref.current && sequence === requestCounter.current) { setRows(Array.isArray(data.reviews) ? data.reviews : []); setLoaded(true); setError(''); } }
-    catch (e) { if (identity === ref.current && sequence === requestCounter.current) setError(e instanceof Error ? e.message : '无法读取审批'); }
+    try {
+      const data = await call('');
+      if (!Array.isArray(data?.reviews)) throw new Error('审批记录读取失败');
+      if (identity === ref.current && sequence === requestCounter.current) {
+        setRows(data.reviews);
+        setLoaded(true);
+        setReadError('');
+        setError('');
+      }
+    } catch (e) {
+      if (identity === ref.current && sequence === requestCounter.current) {
+        setReadError(e instanceof Error ? e.message : '无法读取审批');
+      }
+    }
   }, [identity, session.status]);
   React.useEffect(() => {
-    ref.current = identity; setRows([]); setLoaded(false); setIntent(null); setError(''); locked.current = false; setBusy(false); requestCounter.current++;
+    ref.current = identity; setRows([]); setLoaded(false); setReadError(''); setIntent(null); setError(''); locked.current = false; setBusy(false); requestCounter.current++;
     if (session.status !== 'authenticated') return;
     try { const value = localStorage.getItem(key); if (value) { const saved = JSON.parse(value); if (saved?.workspaceId && saved?.requestId && saved?.reviewId && ['approved', 'rejected'].includes(saved.decision)) setIntent(saved); } } catch { setError('本机审批恢复记录无法读取'); }
     void refresh(); const timer = window.setInterval(() => void refresh(), 30000);
@@ -88,6 +105,8 @@ export function MistReviewProvider({ children }: { children: React.ReactNode }) 
     } finally { if (identity === ref.current) { locked.current = false; setBusy(false); } }
   };
   const decide = (row: MistReview, decision: 'approved' | 'rejected', note: string, signature?: { svg: string }) => {
+    if (row.local) { setError('当前账号没有本次审批资格'); return Promise.resolve(false); }
+    if (!loaded || readError) return Promise.resolve(false);
     if (intent) { setError('上一次审批结果待核对，请先核对原请求'); return Promise.resolve(false); }
     return execute({ workspaceId: row.workspaceId, reviewId: row.id, requestId: crypto.randomUUID(), expectedRevision: row.revision, decision, note: note.trim(), ...(signature ? { signature } : {}) });
   };
@@ -102,18 +121,20 @@ export function MistReviewProvider({ children }: { children: React.ReactNode }) 
   };
   const download = async (row: MistReview, file: { id: string; name: string }) => {
     try {
-      const response = await fetch('/api/mist/reviews/' + encodeURIComponent(row.workspaceId) + '/' + encodeURIComponent(row.id) + '/files/' + encodeURIComponent(file.id), { headers: apiService.getAuthHeaders(), credentials: 'include' });
+      if (identity !== ref.current) return;
+      if (row.local && (currentWorkspace.current.workspace?.id !== row.workspaceId || !row.files?.some(item => item.id === file.id) || !currentWorkspace.current.state?.files.some(item => item.id === file.id))) throw new Error('审批附件读取失败');
+      const response = await fetch(reviewFilePath(row, file.id), { headers: apiService.getAuthHeaders(), credentials: 'include' });
       if (!response.ok) throw new Error('审批附件读取失败'); const bytes = await response.blob(); if (identity !== ref.current) return;
       const url = URL.createObjectURL(bytes), link = document.createElement('a'); link.href = url; link.download = file.name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) { if (identity === ref.current) setError(e instanceof Error ? e.message : '附件读取失败'); }
   };
-  const value: MistReviewQueue = { rows, loaded, error, busy, intent, refresh, clearError: () => setError(''), decide, recover, download };
+  const value: MistReviewQueue = { rows, loaded, readError, error, busy, intent, refresh, clearError: () => setError(''), decide, recover, download };
   return <ReviewContext.Provider value={value}>{uiText(children)}</ReviewContext.Provider>;
 }
 
 /** 顶栏入口：有待我决定的审批或待核对的审批结果时显示红点，点击进入“审批与放行”。 */
 export function MistReviewButton() {
   const reviews = useMistReviews(), nav = useNav();
-  const waiting = reviews.rows.filter(r => r.canDecide).length;
+  const waiting = reviews.readError ? 0 : reviews.rows.filter(r => r.canDecide).length;
   return <IconButton icon={ClipboardCheck} label={uiText(waiting ? `审批与放行（${waiting} 项待我审批）` : '审批与放行')} dot={!!reviews.intent || waiting > 0} onClick={() => nav.go('approvals')} />;
 }

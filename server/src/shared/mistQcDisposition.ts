@@ -36,10 +36,11 @@ const reviewersFor = (root: MistState, task: FulfillmentQcTask, context: MistCon
   return [...new Set(domain ? context.authority?.orderReviewerIds?.[domain] || [] : [])].filter(id => typeof id === 'string' && id && id !== context.actorId);
 };
 export const qcDispositions = (task: Pick<FulfillmentQcTask, 'dispositions'>) => task.dispositions || [];
-/** The disposition for the task's current failed report, if any. */
+/** Quality decisions keep their identity when a separate financial chargeback is appended. */
 export function currentQcDisposition(task: FulfillmentQcTask): QcDisposition | undefined {
   const report = task.reportIds.at(-1);
-  return qcDispositions(task).filter(d => d.reportId === report).at(-1);
+  const rows = qcDispositions(task).filter(d => d.reportId === report);
+  return rows.filter(d => d.kind !== 'chargeback').at(-1) || rows.at(-1);
 }
 /** Approved concessions release the production gate for the exact failed report they were granted on. */
 export const qcConcessionReleases = (task: FulfillmentQcTask): boolean => {
@@ -75,11 +76,12 @@ export function applyQcDispositionCommand(root: MistState, command: QcDispositio
   const source = task.source;
   assertMistOrderOpen(root, source.orderId);
   const report = f.qcReports.find(r => r.id === task.reportIds.at(-1));
-  if (task.state !== 'blocked' || report?.result !== 'reject') fail('当前QC任务没有待处置的不通过报告', 'PRECONDITION');
+  const existing = currentQcDisposition(task), chargeback = p.kind === 'chargeback';
+  // Approved concessions close the quality decision; their supplier costs may be recorded afterwards.
+  if (report?.result !== 'reject' || task.state !== 'blocked' && !(chargeback && task.state === 'reported' && qcConcessionReleases(task))) fail('当前QC任务没有待处置的不通过报告', 'PRECONDITION');
   const order = root.orders.find(o => o.id === source.orderId);
   if (order?.ownerId && order.ownerId !== context.actorId) fail('由订单负责人选择不合格处置', 'FORBIDDEN');
-  const existing = currentQcDisposition(task);
-  if (existing && (existing.kind !== 'chargeback' || p.kind !== 'chargeback') && existing.status !== 'rejected') fail(`本次不通过已选择${QC_DISPOSITION_LABEL[existing.kind]}`, 'CONFLICT');
+  if (!chargeback && existing && existing.kind !== 'chargeback' && existing.status !== 'rejected') fail(`本次不通过已选择${QC_DISPOSITION_LABEL[existing.kind]}`, 'CONFLICT');
   if (!['rework', 'concession', 'chargeback'].includes(p.kind)) fail('处置方式无效');
   const fileIds = Array.isArray(p.fileIds) ? [...new Set(p.fileIds)] : [];
   if (fileIds.length > 50 || fileIds.some(id => typeof id !== 'string' || !root.files.some(file => file.id === id))) fail('附件不存在或不属于当前公司');

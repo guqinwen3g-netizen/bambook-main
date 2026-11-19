@@ -36,6 +36,9 @@ function makeApp(userRow: any | Error) {
 }
 
 describe('REQ2-13 · accountStatusGuard（停用即时失效）', () => {
+  it('still permits current-device logout for a disabled account without authorizing business access',async()=>{
+    const{app,findUnique}=makeApp({status:'disabled',deletedAt:null});app.post('/api/auth/logout',(_req,res)=>res.json({ok:true}));expect((await request(app).post('/api/auth/logout').set(auth(tokenOf('disabled-logout')))).status).toBe(200);expect(findUnique).not.toHaveBeenCalled();expect((await request(app).get('/probe').set(auth(tokenOf('disabled-logout')))).status).toBe(401);
+  });
   // 模块级状态缓存跨用例共享：每例前失效，保证从 DB 真值起测
   beforeEach(() => { invalidateAccountStatusCache('u1'); });
 

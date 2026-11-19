@@ -2,6 +2,20 @@ import { expect, it } from 'vitest';
 import { applyDataScope, scopedWriteViolation } from './mistDataScope';
 import { assertOrderDepositCovered, orderDepositCoverage, orderFundingCoveredAmount } from './mistOrderFunding';
 import { projectState } from '../mist/access';
+import { applyMistCommand, createMistState } from './mistWorkspace';
+it('does not spread upstream incoming originals to a team that only reads a development through its own order',()=>{
+ const state:any={customers:[{id:'c',ownerId:'another'}],crm:{opportunities:[],followUps:[]},devs:[{id:'dev',customerId:'c',ownerId:'another',values:{domain:'fabric'}}],versions:[{id:'v',devId:'dev'}],market:{quotations:[],suppliers:[]},orders:[{id:'o',customerId:'c',ownerId:'another',type:'fabric'}],orderLines:[{id:'l',orderId:'o',sourceDevId:'dev',sourceVersionId:'v'}],fulfillment:{samples:[{id:'incoming',source:{kind:'developmentIncoming',devId:'dev',receiptId:'r'},fileIds:[]},{id:'returned',source:{kind:'version',devId:'dev',versionId:'v'},fileIds:[]}]},platform:{},events:[],tasks:[],notifications:[],calendar:[],teamScopes:[{teamId:'team',conditions:[],picks:[{kind:'order',id:'o'}],exclusions:[]}]};
+ const visible=applyDataScope(state,{userIds:['me'],teamIds:['team']});expect(visible.devs.some(d=>d.id==='dev')).toBe(true);expect(visible.fulfillment.samples.some(s=>s.id==='returned')).toBe(true);expect(visible.fulfillment.samples.some(s=>s.id==='incoming')).toBe(false);
+});
+
+it('limits a server-authorized main decision to its exact contract and line changes',()=>{
+ const before:any={customers:[],crm:{opportunities:[],followUps:[]},devs:[],market:{quotations:[],suppliers:[]},orders:[{id:'reviewed',ownerId:'other',type:'fabric'},{id:'unrelated',ownerId:'other',type:'fabric'}],orderLines:[{id:'reviewed-line',orderId:'reviewed',qty:1},{id:'unrelated-line',orderId:'unrelated',qty:1}],fulfillment:{},platform:{},events:[],tasks:[],notifications:[],calendar:[]},scope={userIds:['reviewer'],teamIds:[]};
+ const after=structuredClone(before);after.orders[0].governance={status:'approved'};after.orderLines[0].qty=2;expect(scopedWriteViolation(before,after,scope)).toMatchObject({path:'orders',id:'reviewed'});expect(scopedWriteViolation(before,after,scope,undefined,undefined,{orderId:'reviewed'})).toBeNull();
+ const replaced=structuredClone(after);replaced.orderLines=replaced.orderLines.filter((l:any)=>l.id!=='reviewed-line');replaced.orderLines.push({id:'new-reviewed-line',orderId:'reviewed',qty:3});expect(scopedWriteViolation(before,replaced,scope,undefined,undefined,{orderId:'reviewed'})).toBeNull();
+ const otherOrder=structuredClone(after);otherOrder.orders[1].due='2026-12-28';expect(scopedWriteViolation(before,otherOrder,scope,undefined,undefined,{orderId:'reviewed'})).toMatchObject({path:'orders',id:'unrelated'});
+ const otherLine=structuredClone(after);otherLine.orderLines[1].qty=2;expect(scopedWriteViolation(before,otherLine,scope,undefined,undefined,{orderId:'reviewed'})).toMatchObject({path:'orderLines',id:'unrelated-line'});
+ const reparented=structuredClone(after);reparented.orderLines[1].orderId='reviewed';expect(scopedWriteViolation(before,reparented,scope,undefined,undefined,{orderId:'reviewed'})).toMatchObject({path:'orderLines',id:'unrelated-line'});
+});
 
 it('keeps an upstream development read-only when a team only collaborates on its order', () => {
   const state: any = {
@@ -11,13 +25,19 @@ it('keeps an upstream development read-only when a team only collaborates on its
     market: { quotations: [], suppliers: [] },
     orders: [{ id: 'order', customerId: 'customer', ownerId: 'another', type: 'garment' }],
     orderLines: [{ id: 'line', orderId: 'order', sourceDevId: 'upstream' }],
+    invoices: [{ id: 'dev-invoice', devId: 'upstream', orderId: '' }],
     teamScopes: [{ teamId: 'team', conditions: [], picks: [{ kind: 'order', id: 'order' }], exclusions: [] }],
     fulfillment: {}, platform: {}, events: [], tasks: [], notifications: [], calendar: [],
   };
   const scope = { userIds: ['member'], teamIds: ['team'] };
   expect(applyDataScope(state, scope, 'member').devs).toHaveLength(1);
+  expect(applyDataScope(state, scope, 'member').invoices.map((row: any) => row.id)).toEqual(['dev-invoice']);
   const after = structuredClone(state); after.devs[0].name = 'changed';
   expect(scopedWriteViolation(state, after, scope)).toMatchObject({ path: 'devs', id: 'upstream' });
+  const invoiceChanged = structuredClone(state); invoiceChanged.invoices[0].amount = 999;
+  expect(scopedWriteViolation(state, invoiceChanged, scope)).toMatchObject({ path: 'invoices', id: 'dev-invoice' });
+  const invoiceAdded = structuredClone(state); invoiceAdded.invoices.push({ id: 'new-invoice', devId: 'upstream', orderId: '' });
+  expect(scopedWriteViolation(state, invoiceAdded, scope)).toMatchObject({ path: 'invoices', id: 'new-invoice' });
 });
 
 it('does not expose totals for receipts allocated to out-of-scope invoices', () => {
@@ -240,4 +260,18 @@ it('shows a fabric supplier its allocated metres without exposing or granting wr
  expect(projected.orders.map(row=>row.id)).toEqual(['fabric']);expect(JSON.stringify(projected)).not.toContain('private customer');
  const after=structuredClone(state);after.internalFabricAllocations[0].metres='190';
  expect(scopedWriteViolation(state,after,scope)).toMatchObject({path:'internalFabricAllocations',id:'allocation'});
+});
+
+it('lets an ordinary actor create and read their unlinked assistant draft without admitting a coworker', () => {
+  const ctx = { actorId: 'author', actorName: '业务员', now: '2026-11-19T01:00:00.000Z', id: () => 'authored-draft' };
+  const before = createMistState(ctx, 'empty');
+  const after = applyMistCommand(before, { type: 'platform.assistant.saveDraft',
+    payload: { title: '业务备忘', content: '待复核', orderId: '' } }, ctx).state;
+  const ownScope = { actorId: 'author', userIds: ['author'], teamIds: [] };
+  const otherScope = { actorId: 'manager', userIds: ['manager', 'author'], teamIds: [] };
+  expect(after.platform.assistantDrafts[0]?.ownerId).toBe('author');
+  expect(scopedWriteViolation(before, after, ownScope)).toBeNull();
+  expect(scopedWriteViolation(before, after, otherScope)).toMatchObject({ path: 'platform.assistantDrafts', id: 'authored-draft' });
+  expect(applyDataScope(after, ownScope, 'author').platform.assistantDrafts).toHaveLength(1);
+  expect(applyDataScope(after, otherScope, 'manager').platform.assistantDrafts).toEqual([]);
 });

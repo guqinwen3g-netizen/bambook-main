@@ -1,0 +1,51 @@
+import {afterAll,beforeAll,describe,expect,it,vi} from 'vitest';
+import {randomUUID} from 'node:crypto';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import request from 'supertest';
+import {PrismaClient} from '@prisma/client';
+import {createMistServer} from './server';
+import {createAuthService} from '../auth/service';
+import {buildLoadedAuthTokenPayload,loadUserWithRoles} from '../auth/tokenHelpers';
+import {provisionCompanyRoles,companyRoleId} from '../platform/companyProvisioning';
+import {SYSTEM_ROLE_IDS} from '../_shared/rolePermissionMatrix';
+import {createMistState} from '../shared/mistWorkspace';
+import {shippingSampleSourceSnapshot} from '../shared/mistShipmentSampleCustody';
+
+const url=process.env.MIST_PG_CONFLICT_TEST_URL;
+describe.skipIf(!url)('shipping sample quantity custody on real PostgreSQL',()=>{
+ const company=randomUUID(),foreignCompany=randomUUID(),dept=randomUUID(),foreignDept=randomUUID(),rootDept=randomUUID(),foreignRootDept=randomUUID(),wid=randomUUID(),key=randomUUID();
+ const sales='custody-sales-'+key,stranger='custody-stranger-'+key,warehouse='custody-warehouse-'+key,foreign='custody-foreign-'+key,users=[sales,stranger,warehouse,foreign];
+ let db:PrismaClient,app:ReturnType<typeof createMistServer>,directory:string;const tokens:Record<string,string>={};
+ beforeAll(async()=>{
+  const target=new URL(url!);if(!['127.0.0.1','localhost'].includes(target.hostname)||!/^\/bambook_(account|acceptance|test)(?:_|$)/.test(target.pathname))throw Error('Dedicated local validation database required');
+  directory=await mkdtemp(path.join(tmpdir(),'mist-shipping-custody-'));vi.stubEnv('NODE_ENV','test');vi.stubEnv('MIST_LOCAL_WORKSPACE','0');vi.stubEnv('MIST_FILES_DIR',path.join(directory,'files'));vi.stubEnv('MIST_MAIL_CREDENTIAL_DIR',path.join(directory,'mail'));vi.stubEnv('BAMBOOK_AI_SUBSCRIPTION_DIR',path.join(directory,'ai'));vi.stubEnv('BAMBOOK_MARKET_DIR',path.join(directory,'market'));
+  db=new PrismaClient({datasourceUrl:url});
+  for(const id of[company,foreignCompany]){await db.company.create({data:{id,slug:id,name:'Shipping custody '+id}});await db.$transaction(tx=>provisionCompanyRoles(tx,id));
+   // This fixture explicitly gives its scoped sample handlers sample authority; production roles are untouched.
+   for(const scope of['products:read','products:write']){const permission=await db.permission.findFirstOrThrow({where:{scope}}),roleId=companyRoleId(SYSTEM_ROLE_IDS.SALES,id);if(!await db.rolePermission.findFirst({where:{roleId,permissionId:permission.id}}))await db.rolePermission.create({data:{id:randomUUID(),roleId,permissionId:permission.id}});}
+  }
+  await db.department.create({data:{id:rootDept,companyId:company,name:'Company'}});await db.department.create({data:{id:foreignRootDept,companyId:foreignCompany,name:'Company'}});
+  await db.department.create({data:{id:dept,parentId:rootDept,companyId:company,name:'Business',metadata:{businessAttributes:['fabric_business','garment_business']}}});await db.department.create({data:{id:foreignDept,parentId:foreignRootDept,companyId:foreignCompany,name:'Business',metadata:{businessAttributes:['fabric_business','garment_business']}}});
+  for(const id of users){const companyId=id===foreign?foreignCompany:company,departmentId=id===foreign?foreignDept:dept;await db.userAccount.create({data:{id,displayName:id,email:id+'@example.invalid',status:'active',primaryDeptId:departmentId}});await db.companyMember.create({data:{companyId,userId:id}});await db.userRole.create({data:{id:randomUUID(),userId:id,departmentId,roleId:companyRoleId(id===warehouse?SYSTEM_ROLE_IDS.LOGISTICS:SYSTEM_ROLE_IDS.SALES,companyId)}});}
+  const auth=createAuthService();for(const id of users){const actor=await buildLoadedAuthTokenPayload(db,(await loadUserWithRoles(db,id))!,id===foreign?foreignCompany:company);expect(actor.permissions.includes('products:write'),JSON.stringify({id,roles:actor.roleIds})).toBe(id!==warehouse);tokens[id]=auth.signToken(actor);}
+  const state=createMistState({id:randomUUID,now:'2026-11-19T14:00:00.000Z',actorName:sales},'empty');state.settings.businessClock={mode:'fixed',at:'2026-11-19T14:00:00.000Z',timezone:'Asia/Shanghai'};state.memberIds=users.filter(id=>id!==foreign);
+  state.customers=[{id:'customer',name:'Customer',owner:sales,ownerId:sales}]as any;state.orders=[{id:'order',code:'SO-CUSTODY',type:'garment',customerId:'customer',customer:'Customer',owner:sales,ownerId:sales,state:'部分出运',currency:'USD'}]as any;state.orderLines=[{id:'line',orderId:'order',name:'Shirt',style:'SH',img:'coat',qty:8,unit:'件',price:42,made:8,qc:8}]as any;state.productions=[{id:'production',orderId:'order',lineId:'line',qty:8,pct:100}]as any;
+  state.fulfillment.shipments=[{id:'shipment',code:'SHP-CUSTODY',customerId:'customer',customer:'Customer',domain:'garment',state:'departed',mode:'air',consignee:'Customer',portOfLoading:'Shanghai',portOfDischarge:'London',incoterm:'FCA',plannedDate:'2026-11-19',booking:'B1',note:'',fileIds:[],departedAt:'2026-11-19T14:00:00.000Z',departureEvidence:'Original carrier accepted shipment8 including specimen4',lines:[{orderId:'order',lineId:'line',productionId:'production',quantity:8}]}]as any;
+  state.fulfillment.packing=[{id:'packing',shipmentId:'shipment',lineId:'line',productionId:'production',carton:'A01',quantity:8,assortment:[{color:'Blue',size:'M',quantity:8}],netWeight:1,grossWeight:1,volume:0.1,note:''}];
+  state.fulfillment.samples=[{id:'sample',code:'SMP-CUSTODY',name:'Specimen',category:'成衣',form:'船样',unit:'件',quantity:4,available:4,location:'A01',positions:[{location:'A01',available:4}],size:'M4',sizeQuantities:[{size:'M',quantity:4}],color:'Blue',role:'shipping',shipmentId:'shipment',source:{kind:'orderLine',orderId:'order',lineId:'line',productionId:'production'},fileIds:[],note:'No machine-readable basis yet',createdAt:'2026-11-18T04:00:00Z'}];
+  state.fulfillment.stock=[{id:'stock',orderId:'order',lineId:'line',name:'Shirt',unit:'件',owner:'公司',quantity:12,available:4,location:'Warehouse',positions:[{location:'Warehouse',available:4}],createdAt:'2026-11-18T04:00:00Z'}];
+  await db.mistWorkspace.create({data:{id:wid,companyId:company,ownerId:sales,slug:'custody-'+key,name:'Shipping custody',state:state as any}});app=createMistServer(db,{host:'127.0.0.1'});
+ });
+ afterAll(async()=>{if(db){await db.mistCommandReceipt.deleteMany({where:{workspaceId:wid}});await db.mistWorkspace.deleteMany({where:{id:wid}});await db.auditLog.deleteMany({where:{OR:[{companyId:{in:[company,foreignCompany]}},{actorId:{in:users}}]}});await db.userRole.deleteMany({where:{userId:{in:users}}});await db.rolePermission.deleteMany({where:{role:{companyId:{in:[company,foreignCompany]}}}});await db.role.deleteMany({where:{companyId:{in:[company,foreignCompany]}}});await db.companyMember.deleteMany({where:{companyId:{in:[company,foreignCompany]}}});await db.userAccount.deleteMany({where:{id:{in:users}}});await db.department.deleteMany({where:{companyId:{in:[company,foreignCompany]}}});await db.company.deleteMany({where:{id:{in:[company,foreignCompany]}}});await db.$disconnect();}vi.unstubAllEnvs();if(directory)await rm(directory,{recursive:true,force:true});});
+ it('uses real projected source, rejects wrong actors without a receipt, and replays one original reconciliation only once',async()=>{
+  const raw=()=>db.mistWorkspace.findUniqueOrThrow({where:{id:wid}}),receipts=()=>db.mistCommandReceipt.count({where:{workspaceId:wid}}),get=(user:string)=>request(app).get('/api/mist/workspaces/'+wid).set('Authorization','Bearer '+tokens[user]);
+  const view=await get(sales);expect(view.status).toBe(200);const projected=view.body.workspace.state,sample=projected.fulfillment.samples.find((s:any)=>s.id==='sample'),snapshot=shippingSampleSourceSnapshot(projected,sample),original=await raw();expect(snapshot).toEqual(shippingSampleSourceSnapshot(original.state as any,(original.state as any).fulfillment.samples[0]));
+  const input={requestId:'original-'+key,expectedRevision:0,command:{type:'fulfillment.samples.shippingBasis',payload:{id:'sample',kind:'included',sourceSnapshot:snapshot,evidence:'Original carrier and physical specimen checked',fileIds:[],reconcileDeparted:true}}};
+  for(const[user,status]of[[warehouse,403],[stranger,404],[foreign,404]]as const){const denied=await request(app).post('/api/mist/workspaces/'+wid+'/commands').set('Authorization','Bearer '+tokens[user]).send({...input,requestId:user+'-denied'});expect(denied.status,JSON.stringify(denied.body.error)).toBe(status);expect(await raw()).toEqual(original);expect(await receipts()).toBe(0);}
+  const first=await request(app).post('/api/mist/workspaces/'+wid+'/commands').set('Authorization','Bearer '+tokens[sales]).send(input);expect(first.status,JSON.stringify(first.body.error)).toBe(200);expect(first.body.replayed).toBe(false);const committed=await raw(),count=await receipts();expect(committed.revision).toBe(1);expect((committed.state as any).fulfillment.samples[0]).toMatchObject({quantity:4,available:0,shippingQuantityBasis:{consumption:{retrospective:true}}});expect((committed.state as any).fulfillment.sampleMovements).toHaveLength(1);expect((committed.state as any).fulfillment.stock).toEqual((original.state as any).fulfillment.stock);expect((committed.state as any).fulfillment.stockMovements).toEqual((original.state as any).fulfillment.stockMovements);
+  const replay=await request(app).post('/api/mist/workspaces/'+wid+'/commands').set('Authorization','Bearer '+tokens[sales]).send(input);expect(replay.status).toBe(200);expect(replay.body.replayed).toBe(true);expect(replay.body.receipt).toEqual(first.body.receipt);expect(await raw()).toEqual(committed);expect(await receipts()).toBe(count);
+  const borrow=await request(app).post('/api/mist/workspaces/'+wid+'/commands').set('Authorization','Bearer '+tokens[sales]).send({requestId:'borrow-'+key,expectedRevision:1,command:{type:'fulfillment.samples.move',payload:{id:'sample',kind:'lend',quantity:4,person:'Customer',location:'A01',note:'Must reject departed specimen'}}});expect(borrow.status).toBe(422);expect(borrow.body.error.code).toBe('PRECONDITION');expect(await raw()).toEqual(committed);expect(await receipts()).toBe(count);
+ });
+});

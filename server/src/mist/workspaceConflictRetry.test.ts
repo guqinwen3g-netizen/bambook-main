@@ -9,11 +9,14 @@ import { MistLocalDatabase } from './local';
 import { MIST_MAX_REBASE_GAP, MIST_MAX_SAVE_ATTEMPTS, MistRepository, mistChangeKeys, type MistContract } from './repository';
 import { MemoryMistDatabase, requestReceiptCount, testActor, testAuthority, testContract } from './__tests__/support';
 import { AGENT_AUDIT_FIELD } from './agentAudit';
+import {fixture as shipmentFixture} from './__tests__/professionalFulfillment';
 
 /** 业务门禁与需重新确认的命令：只用于本回归，验证自动合并在最新状态上重新执行规则。 */
 const gatedContract: MistContract = {
   ...testContract,
   applyMistCommand: (state: any, command: any, context: any) => {
+    // A real low-risk command name reaches the audit/retry path; this fixture only models notes.
+    if (command.type === 'calendar.save') command = { ...command, type: 'notes.add' };
     if (command.type === 'settings.lock') { state.settings.locked = true; return { state, result: {} }; }
     if (command.type === 'notes.confirm') { Object.assign(state.notes.find((note: any) => note.id === command.payload.id), { confirmed: true, confirmedBy: context.actorId }); return { state, result: {} }; }
     if (command.type === 'notes.add' && state.settings.locked) throw Object.assign(new Error('空间已锁定，不能新增'), { code: 'LOCKED', status: 409 });
@@ -42,6 +45,7 @@ let root: string, db: MemoryMistDatabase, auth: ReturnType<typeof testAuthority>
 const owner = testActor('owner'), other = testActor('other');
 const repoFor = (database: any, rules: MistContract = gatedContract) => new MistRepository(database, rules, files, auth.authorize);
 const note = (requestId: string, expectedRevision: number, text = requestId) => ({ requestId, expectedRevision, command: { type: 'notes.add', payload: { text } } });
+const agentNote = (...args: Parameters<typeof note>) => { const input = note(...args); return { ...input, command: { ...input.command, type: 'calendar.save' } }; };
 const money = (requestId: string, expectedRevision: number, cents: number) => ({ requestId, expectedRevision, command: { type: 'money.add', payload: { cents } } });
 async function sharedWorkspace(repo: MistRepository, database: MemoryMistDatabase = db) {
   const workspace = await repo.create(owner, { name: '并发保存', seed: 'empty' });
@@ -53,10 +57,47 @@ beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), 'mist-conflict
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
 describe('多人保存冲突自动重试：只在最新状态上重新执行可证明互不覆盖的命令', () => {
+  it.each([true,false])('checks a QC report physical source without refusing unrelated merging (related %s)',async related=>{
+    const all=[...new Set(MIST_READ_SECTIONS.flatMap(section=>section.permissions)),'orders:write','products:write','relations:write','qc:garment_chain:write'];auth.users.get('owner')!.permissions=all;auth.users.get('other')!.permissions=all;
+    const repo=repoFor(db,contract),created=await repo.create(owner,{name:'QC source',seed:'empty'}),f=shipmentFixture(),branch=f.released();
+    const source={kind:'orderLine' as const,orderId:f.orderId,lineId:f.state.orderLines[0].id,productionId:branch.productionId};
+    const sampleId=f.run({type:'fulfillment.samples.create',payload:{name:'复核产前样',category:'成衣',form:'产前样',quantity:1,unit:'件',size:'M',color:'蓝',location:'样品室',source,role:'pp',fileIds:[],note:'独立物理样品'}}).id!;
+    const taskId=f.run({type:'fulfillment.qc.request',payload:{source,sampleId,domain:'garment',kind:'sample',factory:'工厂',location:'样品室',contact:'',due:'2026-10-13'}}).id!;
+    f.run({type:'fulfillment.qc.claim',payload:{id:taskId,domain:'garment'}},{...f.context,actorId:'owner',actorName:'QC'});
+    const state=structuredClone(f.state);state.memberIds=['other'];state.settings.businessClock={mode:'fixed',at:f.context.now,timezone:'Asia/Shanghai'};db.workspaces.get(created.id).state=state;
+    const change=related?{type:'fulfillment.samples.edit',payload:{...state.fulfillment.samples.find(sample=>sample.id===sampleId),id:sampleId,color:'红'}}:{type:'contact.save',payload:{customerId:state.customers[0].id,name:'新联系人',role:'收货',email:'',phone:''}};
+    await repo.execute(other,created.id,{requestId:'concurrent-qc-source',expectedRevision:0,command:change}as any);
+    if(related)expect(db.workspaces.get(created.id).state.fulfillment.samples.find((sample:any)=>sample.id===sampleId).qualityRevision).toBe(2);
+    const command={type:'fulfillment.qc.report',payload:{id:taskId,domain:'garment',result:'pass',report:'QC-OLD-PHYSICAL',opinion:'原蓝色样品测量',measurements:[{point:'胸围',standard:100,actual:100.2,tolerance:1}],fileIds:[],reviewedAt:f.context.now}}as any;
+    const before=structuredClone(db.workspaces.get(created.id)),receipts=requestReceiptCount(db);
+    if(!related){const merged=await repo.execute(owner,created.id,{requestId:'old-qc-report',expectedRevision:0,command});expect(merged.receipt.revision).toBe(2);return;}
+    await expect(repo.execute(owner,created.id,{requestId:'old-qc-report',expectedRevision:0,command})).rejects.toMatchObject({code:'REVISION_CONFLICT',status:409});
+    expect(db.workspaces.get(created.id)).toEqual(before);expect(requestReceiptCount(db)).toBe(receipts);
+    const fresh=await repo.execute(owner,created.id,{requestId:'checked-qc-report',expectedRevision:1,command:{...command,payload:{...command.payload,report:'QC-CURRENT-PHYSICAL',opinion:'重新核对当前红色实物'}}});
+    expect(fresh.workspace.state.fulfillment.qcReports.find((report:any)=>report.report==='QC-CURRENT-PHYSICAL').scopeRevision).toBe(2);
+  });
+  it.each([['save',true],['save',false],['sourceTerms',true],['sourceTerms',false]] as const)('checks shipment %s read sources while preserving unrelated merging (related %s)',async(kind,related)=>{
+    const all=[...new Set(MIST_READ_SECTIONS.flatMap(section=>section.permissions)),'orders:write','shipments:write','relations:write','products:write'];auth.users.get('owner')!.permissions=all;auth.users.get('other')!.permissions=all;
+    const repo=repoFor(db,contract),created=await repo.create(owner,{name:'Shipment source',seed:'empty'}),f=shipmentFixture();let command:any;
+    if(kind==='save'){
+      const branch=f.released();f.receiveAndComplete(branch.productionId,branch.purchaseId);const id=f.shipment(branch.productionId),s=f.state.fulfillment.shipments.find(row=>row.id===id)!;
+      command={type:'fulfillment.shipments.save',payload:{...s,note:'已核对本次出运要求'}};
+    }else{
+      f.approveOrder();command={type:'fulfillment.shipments.sourceTerms',payload:{orderId:f.orderId,consignee:'客户收货仓',partialAllowed:true,mode:'sea',confirmedAt:'2026-10-13',evidence:'已签合同'}};
+    }
+    const state=structuredClone(f.state);state.memberIds=['other'];db.workspaces.get(created.id).state=state;
+    const change=related?(kind==='save'?{type:'production.update',payload:{id:state.productions[0].id,pct:state.productions[0].pct,risk:'待复核出运安排'}}:{type:'order.checklist',payload:{orderId:f.orderId,itemId:state.orders[0].checklist[0].id,done:true}}):{type:'contact.save',payload:{customerId:state.customers[0].id,name:'新联系人',role:'收货',email:'',phone:''}};
+    await repo.execute(other,created.id,{requestId:'concurrent-change',expectedRevision:0,command:change}as any);
+    const before=structuredClone(db.workspaces.get(created.id)),receipts=requestReceiptCount(db);
+    if(!related){const merged=await repo.execute(owner,created.id,{requestId:'old-shipment',expectedRevision:0,command});expect(merged.receipt.revision).toBe(2);return;}
+    await expect(repo.execute(owner,created.id,{requestId:'old-shipment',expectedRevision:0,command})).rejects.toMatchObject({code:'REVISION_CONFLICT',status:409});
+    expect(db.workspaces.get(created.id)).toEqual(before);expect(requestReceiptCount(db)).toBe(receipts);
+    const fresh=await repo.execute(owner,created.id,{requestId:'checked-shipment',expectedRevision:1,command});expect(fresh.receipt.revision).toBe(2);
+  });
   it('Agent事务重试仅保留最后一次实际提交的审计，公开回执不携带内部差异', async () => {
     const database = new FlakyDatabase(), repo = repoFor(database), id = await sharedWorkspace(repo, database);
     database.failures = 2;
-    const result = await repo.execute({ ...owner, actorKind: 'agent', agentMode: 'operate', agentSessionId: 'retry-session' } as any, id, note('agent-retry', 0));
+    const result = await repo.execute({ ...owner, actorKind: 'agent', agentMode: 'operate', agentSessionId: 'retry-session' } as any, id, agentNote('agent-retry', 0));
     const saved = [...database.receipts.values()].filter(row => row.result[AGENT_AUDIT_FIELD]);
     expect(saved).toHaveLength(1);
     expect(database.workspaces.get(id).state.notes).toHaveLength(1);
@@ -71,8 +112,8 @@ describe('多人保存冲突自动重试：只在最新状态上重新执行可�
     database.failures = 1;
     // Separate client/connection pool: a competitor must not wait on this request's in-process write queue.
     const competitor = repoFor(new Proxy(database, {}));
-    database.beforeFailure = async () => { await competitor.execute({ ...actor, agentSessionId: 'committed-session' }, id, note('same-operation', 0)); };
-    const result = await repo.execute(actor, id, note('same-operation', 0));
+    database.beforeFailure = async () => { await competitor.execute({ ...actor, agentSessionId: 'committed-session' }, id, agentNote('same-operation', 0)); };
+    const result = await repo.execute(actor, id, agentNote('same-operation', 0));
     expect(result.replayed).toBe(true);
     const saved = [...database.receipts.values()].filter(row => row.result[AGENT_AUDIT_FIELD]);
     expect(saved).toHaveLength(1);

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { createAuthService, TokenPayload } from './service';
 import { AgentRole } from '../agent/types';
+import {withVerifiedSession} from './sessionLifetime';
 
 type AuthMiddlewareOptions = {
   jwtSecret?: string;
@@ -72,10 +73,10 @@ export function extractActorFromRequest(req: Request): TokenPayload | null {
   const hydrated = (req as Request & { actor?: TokenPayload }).actor;
   if (hydrated?.authorizationLoaded === true && hydrated.userId === payload.userId
     && (hydrated as TokenPayload & { kind?: string }).kind !== 'customer') {
-    return hydrated;
+    return withVerifiedSession(hydrated,payload,token);
   }
 
-  return payload;
+  return withVerifiedSession(payload,payload,token);
 }
 
 /**

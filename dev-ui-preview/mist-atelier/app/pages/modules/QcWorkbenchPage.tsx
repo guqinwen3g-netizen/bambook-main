@@ -1,11 +1,14 @@
 import { businessInputInstant } from '../../runtime/businessClock';
+import { MistPresentedErrorContext } from '../../runtime/errorPresentation';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** QC 工作台：先选面料 / 成衣专业板块，再分样品评审 / 生产检验；任务按工厂与检查地点分组，详情承接报告、门禁与业务恢复。 */
 import React from 'react';
 import { CalendarClock, ChevronDown, ChevronRight, ClipboardCheck, Columns3, Layers, List, Plus, RefreshCw, Repeat2, SearchX, Shirt, UserRoundCheck } from 'lucide-react';
-import { FormFooter, BackLink, Banner, Button, Card, CardBody, CardButton, CardHeader, DataTable, Dialog, Dropdown, EmptyState, Facts, Field, FormGrid, Icon, Kanban, MeasurementTable, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Select, Tabs, TextArea, TextInput, Tile, Toolbar, UploadZone, useToast, type Tone } from '../../../../../components/mist';
+import { FormFooter, BackLink, Banner, Button, Card, CardBody, CardButton, useTabNavigation, CardHeader, DataTable, Dialog, Dropdown, EmptyState, Facts, Field, FormGrid, Icon, Kanban, MeasurementTable, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Select, Tabs, TextArea, TextInput, Tile, Toolbar, UploadZone, useToast, type Tone } from '../../../../../components/mist';
 import { developmentDomain } from '../../../../../server/src/shared/mistDevelopmentDomain';
-import type { MistQc, MistState } from '../../../../../server/src/shared/mistWorkspace';
+import {fabricQcFacts,type FabricFactDraft} from '../fabricQcFacts';
+import type { MistCommand, MistQc, MistState } from '../../../../../server/src/shared/mistWorkspace';
+import {stableJson} from '../../../../../server/src/shared/stableJson';
 import type { FulfillmentCommand, FulfillmentQcReport, FulfillmentQcTask } from '../../../../../server/src/shared/mistFulfillment';
 import { fulfillmentQcSourceBlocker, fulfillmentSampleRoleLabel, fulfillmentSourceLabel } from '../../../../../server/src/shared/mistFulfillment';
 import { useMistWorkspace } from '../../runtime/workspace';
@@ -38,6 +41,11 @@ const isNok = (task: FulfillmentQcTask) => task.state === 'blocked' || task.stat
 const isOpen = (task: FulfillmentQcTask, state?: MistState) => task.state !== 'reported' && (!state || !fulfillmentQcSourceBlocker(state, task.source));
 const isOverdue = (task: FulfillmentQcTask, day: string) => (task.state === 'pending' || task.state === 'working') && !!task.due && task.due < day;
 const branchKey = (task: FulfillmentQcTask) => task.source.kind === 'orderLine' && task.source.productionId ? task.source.productionId : task.id;
+// Incoming material is inspected in its received unit, independently of the garment order's unit.
+const qcSamplingUnit = (task: FulfillmentQcTask, state?: MistState | null) => {
+  const source = task.source;
+  return task.incoming?.unit || (source.kind === 'orderLine' ? state?.orderLines.find(line => line.id === source.lineId && line.orderId === source.orderId)?.unit : '') || '件';
+};
 
 /** Entry-card numbers per professional domain; never a mixed fabric + garment total. */
 export function qcDomainMetrics(tasks: FulfillmentQcTask[], domain: Domain, state?: MistState) {
@@ -73,6 +81,8 @@ function qcGate(task: FulfillmentQcTask, state?: MistState | null): { tone: Tone
 }
 
 type TaskGroup = { key: string; factory: string; location: string; tasks: FulfillmentQcTask[]; open: number; earliest: string; contacts: string[] };
+/** Reports are append-only; decisions must stay on the report and business outcome actually reviewed. */
+const decisionFingerprint=(task:FulfillmentQcTask)=>stableJson({source:task.source,domain:task.domain,kind:task.kind,sampleId:task.sampleId,state:task.state,reportIds:task.reportIds,confirmation:task.businessConfirmation||null,continued:task.businessContinued||null,dispositions:task.dispositions||[]});
 /** Factory × inspection site groups: open work first, earliest planned inspection first. */
 function groupTasks(tasks: FulfillmentQcTask[], state?: MistState): TaskGroup[] {
   const groups = new Map<string, TaskGroup>();
@@ -99,8 +109,12 @@ function taskSubject(state: MistState, task: FulfillmentQcTask) {
 }
 
 export function QcWorkbenchPage() {
+  const presentedError=React.useContext(MistPresentedErrorContext);
   const { state, run, error, refresh, loading, saving, pending, workspace } = useMistWorkspace(), session = useMistSession(), { route, go } = useNav(), editor = useEditor(), toast = useToast();
+  const liveSource=React.useRef({state,workspaceId:workspace?.id,revision:workspace?.revision??0});
+  liveSource.current={state,workspaceId:workspace?.id,revision:workspace?.revision??0};
   const [domain, setDomain] = React.useState<Domain>(() => session.hasPermission('qc:fabric_chain:write') && !session.hasPermission('qc:garment_chain:write') ? 'fabric' : 'garment'), [kind, setKind] = React.useState<Kind>('sample');
+  const domainTabs = useTabNavigation(['fabric', 'garment'] as const, domain);
   const [query, setQuery] = React.useState(''), [stateFilter, setStateFilter] = React.useState<StateFilter>('all'), [owner, setOwner] = React.useState<Owner>('all'), [mode, setMode] = React.useState<'groups' | 'board'>('groups');
   const [selected, setSelected] = useRouteDraft(route.id || ''), [reportTaskId, setReportTaskId] = useRouteDraft(''), [failure, setFailure] = useRouteDraft('');
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null), [drawer, setDrawer] = React.useState(!!route.id), [collapsed, setCollapsed] = React.useState<string[]>([]), [busy, setBusy] = React.useState(false);
@@ -124,7 +138,7 @@ export function QcWorkbenchPage() {
   const canQc = (d: Domain) => session.hasPermission(`qc:${d}_chain:write`);
   const canRequest = session.hasPermission('orders:write') || session.hasPermission('products:write');
   const canPatrol = session.hasPermission('qc:inspect') && canQc(domain);
-  const locked = busy || saving || !!pending;
+  const locked = !state || busy || saving || !!pending;
   const reportTask = all.find(t => t.id === reportTaskId);
   if (reportTask) return <QcReportEditor task={reportTask} onClose={() => setReportTaskId('')} />;
   if (editor.spec) return editor.view;
@@ -133,7 +147,7 @@ export function QcWorkbenchPage() {
   const changeDomain = (value: Domain) => { setDomain(value); setSelected(''); setStateFilter('all'); go('qc-workbench', undefined, { section: kind }); };
   const changeKind = (value: Kind) => { setKind(value); setSelected(''); setStateFilter('all'); go('qc-workbench', undefined, { section: value }); };
   const act = async (command: FulfillmentCommand, done?: string) => { setFailure(''); setBusy(true); try { await run(command); if (done) toast(done); } catch (e) { setFailure(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); } };
-  const qcSources = [emptyOption, ...(state?.fulfillment.samples || []).filter(sample => sample.source.kind !== 'manual').map(sample => ({ value: 'sample:' + sample.id, label: `${sample.code} · ${sample.name} · ${sample.role ? fulfillmentSampleRoleLabel(sample.role) : '开发样'} · ${sample.size}` })), ...sourceOptions(state).filter(option => option.value.startsWith('version:') || option.value.startsWith('production:'))];
+  const qcSources = [emptyOption, ...(state?.fulfillment.samples || []).filter(sample => (sample.source.kind === 'version'||sample.source.kind === 'orderLine')).map(sample => ({ value: 'sample:' + sample.id, label: `${sample.code} · ${sample.name} · ${sample.role ? fulfillmentSampleRoleLabel(sample.role) : '开发样'} · ${sample.size}` })), ...sourceOptions(state).filter(option => option.value.startsWith('version:') || option.value.startsWith('production:'))];
   // 生产检验默认在供应商的实际生产地址；样品评审沿用样品所在位置。
   const productionSite = (productionId: string) => { const job = state?.productions.find(p => p.id === productionId), purchase = job?.sourcePurchaseId ? state?.fulfillment?.purchases.find(p => p.id === job.sourcePurchaseId) : undefined; return state?.market?.suppliers.find(s => s.id === purchase?.supplierId)?.address || state?.market?.suppliers.find(s => s.name === job?.factory)?.address || ''; };
   const request = () => editor.open({
@@ -156,21 +170,35 @@ export function QcWorkbenchPage() {
       if (!state) return;
       const sample = text(values, 'source').startsWith('sample:') ? state.fulfillment.samples.find(item => item.id === text(values, 'source').slice(7)) : undefined;
       const source = sample ? sample.source : parseSource(state, text(values, 'source'));
-      if (source.kind === 'manual') throw new Error('请选择准确系统实物');
+      if (source.kind !== 'version'&&source.kind!=='orderLine') throw new Error('请选择准确系统实物');
       const taskDomain = source.kind === 'version' ? developmentDomain(state.devs.find(d => d.id === source.devId)!.values) : state.orders.find(o => o.id === source.orderId)!.type;
       const taskKind = text(values, 'kind') as 'sample' | 'production';
       const saved = await run({ type: 'fulfillment.qc.request', payload: { source, ...(sample ? { sampleId: sample.id } : {}), domain: taskDomain, kind: taskKind, factory: text(values, 'factory'), location: text(values, 'location'), contact: text(values, 'contact'), due: text(values, 'due') } });
       setDomain(taskDomain); setKind(taskKind); setSelected(String(saved.result.id || '')); setDrawer(true); go('qc-workbench', String(saved.result.id || ''));
     },
   });
-  const confirmSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: externalCustomer(task, state) ? '记录客户样品确认' : '记录需求方样品确认', submitLabel: '记录确认', fields: [field('result', externalCustomer(task, state) ? '客户决定' : '需求方决定', 'select', true, [emptyOption, { value: 'approved', label: '确认采用' }, { value: 'rejected', label: '不采用' }]), field('note', externalCustomer(task, state) ? '客户确认依据' : '需求方确认依据', 'textarea')], initialValues: { result: '', note: '' }, submit: values => run({ type: 'fulfillment.qc.confirm', payload: { id: task.id, result: text(values, 'result') as 'approved' | 'rejected', note: text(values, 'note') } }) });
+  const runDecision=(id:string,baseline:string,workspaceId:string|undefined,command:MistCommand)=>{
+    const current=liveSource.current.state?.fulfillment.qcTasks.find(task=>task.id===id);
+    if(liveSource.current.workspaceId!==workspaceId||!current||decisionFingerprint(current)!==baseline)throw new Error('QC资料已更新，请重新打开后核对');
+    return run(command,{expectedRevision:liveSource.current.revision});
+  };
+  const confirmSpec = (task: FulfillmentQcTask): ModuleEditorSpec => {const baseline=decisionFingerprint(task),workspaceId=workspace?.id;return { title: externalCustomer(task, state) ? '记录客户样品确认' : '记录需求方样品确认', submitLabel: '记录确认', fields: [field('result', externalCustomer(task, state) ? '客户决定' : '需求方决定', 'select', true, [emptyOption, { value: 'approved', label: '确认采用' }, { value: 'rejected', label: '不采用' }]), field('note', externalCustomer(task, state) ? '客户确认依据' : '需求方确认依据', 'textarea')], initialValues: { result: '', note: '' }, submit: values => runDecision(task.id,baseline,workspaceId,{ type: 'fulfillment.qc.confirm', payload: { id: task.id, result: text(values, 'result') as 'approved' | 'rejected', note: text(values, 'note') } }) };};
   const transferSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: `转交 ${task.code}`, submitLabel: '转交', fields: [field('assigneeId', '接收QC', 'select', true, [emptyOption, ...memberSelectOptions(workspaceMembers(workspace, state, session.user)).filter(option => option.value !== task.assigneeId)]), field('reason', '转交原因', 'textarea')], initialValues: { assigneeId: '', reason: '' }, submit: values => run({ type: 'fulfillment.qc.transfer', payload: { id: task.id, domain: task.domain, assigneeId: text(values, 'assigneeId'), reason: text(values, 'reason') } }) });
-  const rescheduleSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: `改期 ${task.code}`, submitLabel: '改期', description: task.due ? `原检查日 ${task.due}` : undefined, fields: [field('due', '新检查日', 'date'), field('reason', '改期原因', 'textarea')], initialValues: { due: task.due && task.due >= today() ? task.due : today(), reason: '' }, submit: values => run({ type: 'fulfillment.qc.reschedule', payload: { id: task.id, domain: task.domain, due: text(values, 'due'), reason: text(values, 'reason') } }) });
+  const rescheduleSpec = (task: FulfillmentQcTask): ModuleEditorSpec => {
+    const baseline=stableJson(task),sourceWorkspaceId=workspace?.id;
+    return { title: `改期 ${task.code}`, submitLabel: '改期', description: task.due ? `原检查日 ${task.due}` : undefined, fields: [field('due', '新检查日', 'date'), field('reason', '改期原因', 'textarea')], initialValues: { due: task.due && task.due >= today() ? task.due : today(), reason: '' }, submit: values => {
+      const checked=liveSource.current,current=checked.state?.fulfillment.qcTasks.find(value=>value.id===task.id);
+      if(!current||checked.workspaceId!==sourceWorkspaceId||stableJson(current)!==baseline)throw new Error('QC任务已更新，请重新打开后核对');
+      if(!checked.workspaceId||!Number.isSafeInteger(checked.revision)||checked.revision<0)throw new Error('QC资料未读取，请重新打开后核对');
+      const command:MistCommand={type:'fulfillment.qc.reschedule',payload:{id:task.id,domain:task.domain,due:text(values,'due'),reason:text(values,'reason')}};
+      return run(command,{expectedRevision:checked.revision});
+    } };
+  };
   const releaseSpec = (task: FulfillmentQcTask): ModuleEditorSpec => { const rejected = state?.fulfillment.qcReports.find(r => r.id === task.reportIds.at(-1))?.result === 'reject'; return { title: rejected ? '登记来料拒收' : '放行入库', submitLabel: rejected ? '登记拒收' : '放行', fields: [field('evidence', rejected ? '拒收依据' : '放行依据', 'textarea')], initialValues: { evidence: '' }, submit: values => run({ type: 'fulfillment.qc.incoming.close', payload: { id: task.id, evidence: text(values, 'evidence') } }) }; };
   // QC opens its own patrol / final inspection on a released branch of this business line.
   const patrolSpec = (): ModuleEditorSpec => ({ title: '新建巡检', submitLabel: '新建巡检', fields: [field('productionId', '生产分支', 'select', true, [emptyOption, ...(state?.productions || []).filter(job => !job.closed && state?.orders.find(o => o.id === job.orderId)?.type === domain && state.fulfillment.productionFacts?.some(fact => fact.productionId === job.id && fact.release)).map(job => ({ value: job.id, label: `${job.code} · ${job.factory}` }))]), field('purpose', '巡检目的', 'select', true, [emptyOption, ...['中期巡检', '尾期检验', '复查整改', '首件确认'].map(value => ({ value, label: value }))]), field('location', '检查地点'), field('contact', '现场联系人', 'text', false), field('due', '预计检查日', 'date')], initialValues: { productionId: '', purpose: '', location: '', contact: '', due: today() },
     submit: async values => { const saved = await run({ type: 'fulfillment.qc.patrol', payload: { productionId: text(values, 'productionId'), purpose: text(values, 'purpose'), location: text(values, 'location'), contact: text(values, 'contact'), due: text(values, 'due') } }); setKind('patrol'); setSelected(String(saved.result.id || '')); } });
-  const continueSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: task.kind === 'production' ? '确认继续生产' : '业务确认继续', submitLabel: task.kind === 'production' ? '确认继续生产' : '确认继续', fields: [field('note', '业务处理与恢复依据', 'textarea')], initialValues: { note: '' }, submit: values => run({ type: 'fulfillment.qc.continue', payload: { id: task.id, note: text(values, 'note') } }) });
+  const continueSpec = (task: FulfillmentQcTask): ModuleEditorSpec => {const baseline=decisionFingerprint(task),workspaceId=workspace?.id;return { title: task.kind === 'production' ? '确认继续生产' : '业务确认继续', submitLabel: task.kind === 'production' ? '确认继续生产' : '确认继续', fields: [field('note', '业务处理与恢复依据', 'textarea')], initialValues: { note: '' }, submit: values => runDecision(task.id,baseline,workspaceId,{ type: 'fulfillment.qc.continue', payload: { id: task.id, note: text(values, 'note') } }) };};
 
   const metrics = { fabric: qcDomainMetrics(all, 'fabric', state || undefined), garment: qcDomainMetrics(all, 'garment', state || undefined) };
   const stateCount = (value: StateFilter) => value === 'all' ? searched.length : searched.filter(t => t.state === value).length;
@@ -240,12 +268,12 @@ export function QcWorkbenchPage() {
     <PageHeader eyebrow={uiText("订单履约 · 专业检验")} title={uiText("QC 工作台")}
       actions={<>
         <Button icon={RefreshCw} disabled={loading} onClick={() => void refresh()}>{uiText("刷新")}</Button>
-        {canPatrol && <Button icon={Plus} onClick={() => setDialog(patrolSpec())}>{uiText('新建巡检')}</Button>}
-        {canRequest ? <Button variant="primary" icon={Plus} onClick={request}>{uiText("从来源发起QC")}</Button> : <span className="mist-note">{uiText('送检由业务员在准确来源发起')}</span>}
+        {canPatrol && <Button icon={Plus} disabled={locked} onClick={() => setDialog(patrolSpec())}>{uiText('新建巡检')}</Button>}
+        {canRequest && <Button variant="primary" icon={Plus} disabled={locked} onClick={request}>{uiText("从来源发起QC")}</Button>}
       </>} />
-    {(error || failure) && <FailureNotice title="QC操作未完成" detail={failure || error} retry={error ? () => void refresh() : undefined} />}
-    <div className="mist-domains" role="tablist" aria-label={uiText("QC 专业板块")}>
-      {(['fabric', 'garment'] as const).map(value => { const m = metrics[value]; return <CardButton key={value} role="tab" aria-selected={domain === value} className="mist-domain" onClick={() => changeDomain(value)}>
+    {(failure || error&&error!==presentedError) && <FailureNotice title="QC操作未完成" detail={failure || error} retry={error ? () => void refresh() : undefined} />}
+    {!state ? <Card><EmptyState icon={ClipboardCheck} title={uiText(loading?'正在读取QC资料':'QC资料未读取')} /></Card> : <><div className="mist-domains" role="tablist" aria-label={uiText("QC 专业板块")} {...domainTabs.listProps}>
+      {(['fabric', 'garment'] as const).map(value => { const m = metrics[value]; return <CardButton key={value} role="tab" aria-selected={domain === value} className="mist-domain" {...domainTabs.tabProps(value)} onClick={() => changeDomain(value)}>
         <span className="mist-domain-h"><Tile icon={value === 'fabric' ? Layers : Shirt} tone={domain === value ? 'accent' : undefined} /><b>{DOMAIN_LABEL[value]}</b><span className="mist-spacer" /><span className="mist-note">{uiText(canQc(value) ? '可处理' : '只读')}{uiText(" · 共 ")}{m.total}{uiText(" 条")}</span></span>
         <span className="mist-domain-nums">
           <span><small>{uiText("待处理样品")}</small><b>{m.samples}</b></span>
@@ -267,8 +295,9 @@ export function QcWorkbenchPage() {
       { value: 'awaiting_business', label: '待业务恢复', count: stateCount('awaiting_business'), color: 'var(--mist-warn)' },
       { value: 'reported', label: '报告已回传', count: stateCount('reported'), color: 'var(--mist-ok)' },
     ]} />
-    <ListDetail list={list} detail={detail} summary={summary} drawerOpen={drawer && !!current} onDrawerClose={() => setDrawer(false)} drawerTitle={current ? `${current.code} · ${KIND_LABEL[current.kind]}` : 'QC任务'} drawerSub={current ? `${current.factory} · ${current.location}` : undefined} />
+    <ListDetail freezeLayout={!!dialog} list={list} detail={detail} summary={summary} drawerOpen={drawer && !!current} onDrawerClose={() => setDrawer(false)} drawerTitle={current ? `${current.code} · ${KIND_LABEL[current.kind]}` : 'QC任务'} drawerSub={current ? `${current.factory} · ${current.location}` : undefined} />
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
+    </>}
   </MistPage>;
 }
 
@@ -285,7 +314,7 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, canRelease, locked,
   const sizes = fact?.completion?.sizeQuantities.length ? fact.completion.sizeQuantities : fact?.sizes || [];
   const sample = state.fulfillment.samples.find(item => item.id === task.sampleId);
   const claimReason = !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : sourceBlocker || (task.assigneeId && !mine ? `已由 ${task.assignee} 认领` : false);
-  const reportReason = !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : task.quarantine?.disposedAt ? '本批已处置' : sourceBlocker || (!task.assigneeId ? '请先认领任务' : !mine ? `仅当前QC（${task.assignee}）可提交` : false);
+  const reportReason = !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : task.quarantine?.disposedAt || task.incoming?.releasedAt ? '本批已处置' : sourceBlocker || (!task.assigneeId ? '请先认领任务' : !mine ? `仅当前QC（${task.assignee}）可提交` : false);
   const handoverReason = (verb: string) => !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : sourceBlocker || (task.state === 'reported' ? `已出结论，不能${verb}；需复验请追加报告` : task.assigneeId && !mine ? `仅当前QC（${task.assignee}）可${verb}` : false);
   const confirmable = task.kind === 'sample' && task.source.kind === 'orderLine' && task.state === 'reported';
   const ownerId = task.source.kind === 'orderLine' ? state.orders.find(order => order.id === (task.source as { orderId: string }).orderId)?.ownerId : undefined;
@@ -307,6 +336,7 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, canRelease, locked,
       ]} />
       {task.businessConfirmation && <RecordDisclosure key={task.id+':confirmation'} title={externalCustomer(task, state) ? "客户确认" : "需求方确认"}><Facts items={[{label:'经办人',value:task.businessConfirmation.actor},{label:'时间',value:shortWhen(task.businessConfirmation.at)}]} /><p>{task.businessConfirmation.note}</p></RecordDisclosure>}
       {task.businessContinued && <RecordDisclosure key={task.id+':continued'} title={task.kind === 'production' ? '业务恢复记录' : '业务继续记录'}><Facts items={[{label:'经办人',value:task.businessContinued.actor},{label:'时间',value:shortWhen(task.businessContinued.at)}]} /><p>{task.businessContinued.note}</p></RecordDisclosure>}
+      <QcBusinessHistory task={task} state={state} />
       {onBack && <Button block onClick={onBack}>{backLabel}</Button>}
     </DetailBlock>
     <DetailBlock title={uiText("现场信息")}>
@@ -338,20 +368,33 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, canRelease, locked,
     </DetailBlock>}
     <QcDispositionPanel task={task} state={state} canDispose={canBusiness && (!ownerId || ownerId === me)} locked={locked} />
     <DetailBlock title={uiText(task.kind === 'production' ? `持续检查记录（${reports.length}）` : `评审报告（${reports.length}）`)}>
-      {reports.length ? reports.map((report, index) => <QcReportCard key={report.id} report={report} domain={task.domain} production={task.kind === 'production'} latest={index === 0} />) : <span className="mist-note">{uiText("暂无报告")}</span>}
+      {reports.length ? reports.map((report, index) => <QcReportCard key={report.id} report={report} domain={task.domain} unit={qcSamplingUnit(task,state)} production={task.kind === 'production'} latest={index === 0} />) : <span className="mist-note">{uiText("暂无报告")}</span>}
     </DetailBlock>
     <DetailBlock title={uiText("处理记录")}><Events entity="qc" id={task.id} /></DetailBlock>
   </DetailBody>;
 }
 
-function QcReportCard({ report, domain, production, latest }: { report: FulfillmentQcReport; domain: Domain; production: boolean; latest: boolean }) {
+const BUSINESS_HISTORY_REASON:Record<NonNullable<FulfillmentQcTask['businessHistory']>[number]['reason'],string>={sample_changed:'实物资料变更',new_report:'新增报告',confirmation_changed:'确认变更',continuation_changed:'继续依据变更'};
+function QcBusinessHistory({task,state}:{task:FulfillmentQcTask;state:MistState}){
+  if(!task.businessHistory?.length)return null;
+  return <RecordDisclosure key={task.id+':business-history'} title="业务接续历史">
+    {task.businessHistory.slice().reverse().map(entry=>{const report=state.fulfillment.qcReports.find(row=>row.id===entry.reportId&&row.taskId===task.id);return <div className="mist-section" key={entry.id} data-qc-business-history={entry.id}>
+      <Facts items={[{label:'所据报告',value:<Mono>{report?.report||'未记录'}</Mono>},...(entry.qualityRevision!==undefined?[{label:'实物版次',value:`V${entry.qualityRevision}`}]:[]),{label:'归档原因',value:uiText(BUSINESS_HISTORY_REASON[entry.reason])},{label:'归档人',value:entry.archivedBy},{label:'归档时间',value:businessWhen(entry.archivedAt)}]} />
+      {entry.confirmation&&<><Facts items={[{label:'确认结果',value:uiText(entry.confirmation.result==='approved'?'确认采用':'不采用')},{label:'确认人',value:entry.confirmation.actor},{label:'确认时间',value:businessWhen(entry.confirmation.at)}]} /><p>{entry.confirmation.note}</p></>}
+      {entry.continued&&<><Facts items={[{label:'继续经办人',value:entry.continued.actor},{label:'继续时间',value:businessWhen(entry.continued.at)}]} /><p>{entry.continued.note}</p></>}
+    </div>;})}
+  </RecordDisclosure>;
+}
+
+function QcReportCard({ report, domain, unit, production, latest }: { report: FulfillmentQcReport; domain: Domain; unit: string; production: boolean; latest: boolean }) {
   return <div className="mist-col" data-qc-report={report.id}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><b>{report.report}</b><Pill tone={RESULT_TONE[report.result]}>{RESULT_LABEL[report.result]}</Pill>{report.previousReportId && <span className="mist-note">{uiText("复验")}</span>}{latest && <span className="mist-note">{uiText("当前")}</span>}<span className="mist-spacer" /><span className="mist-note">{report.reviewer} · {businessWhen(report.reviewedAt)}</span></div>
     {report.location && <div className="mist-row"><span>{uiText("检查地点")}</span><span>{report.location}</span></div>}
     {report.opinion && <p className="mist-sub">{report.opinion}</p>}
-    {(production||!!report.sizeChecks?.length) && domain === 'garment' && <DataTable ariaLabel={ui`${report.report} · 生产尺码检查`} rows={report.sizeChecks || []} rowKey={check => check.size} columns={[{ key: 'size', header: '实际尺码', render: check => check.size }, { key: 'inspected', header: '实际检查件数', align: 'right', render: check => check.inspected }, { key: 'result', header: '各码结论', render: check => check.result === 'pass' ? '通过' : '不通过' }, { key: 'basis', header: '检查依据', render: check => check.evidence }]} empty={<EmptyState title={uiText("未记录本次实际尺码检查")} compact />} />}
-    {report.aql && <Facts cols={2} items={[{ label: 'AQL 抽样', value: `批量 ${report.aql.lotSize} · 抽检 ${report.aql.inspected} 件（应抽 ${report.aql.outcome.sampleSize}）` }, { label: '缺陷', value: `致命 ${report.aql.critical} · 严重 ${report.aql.major}（Ac ${report.aql.outcome.major.accept}）· 轻微 ${report.aql.minor}（Ac ${report.aql.outcome.minor.accept}）` }, { label: '抽样判定', value: report.aql.outcome.result === 'pass' ? '允收' : '拒收' }, ...(report.aql.defects ? [{ label: '缺陷内容', value: report.aql.defects }] : [])]} />}
+    {(production||!!report.sizeChecks?.length) && domain === 'garment' && <DataTable ariaLabel={ui`${report.report} · 生产尺码检查`} rows={report.sizeChecks || []} rowKey={check => check.size} columns={[{ key: 'size', width: '96px', header: '实际尺码', render: check => <span style={{ whiteSpace: 'nowrap' }}>{check.size}</span> }, { key: 'inspected', width: '112px', header: '实际检查件数', align: 'right', render: check => check.inspected }, { key: 'result', width: '96px', header: '各码结论', render: check => check.result === 'pass' ? '通过' : '不通过' }, { key: 'basis', width: 'minmax(180px,1fr)', header: '检查依据', render: check => check.evidence }]} empty={<EmptyState title={uiText("未记录本次实际尺码检查")} compact />} />}
+    {report.aql && <Facts cols={2} items={[{ label: 'AQL 抽样', value: `批量 ${report.aql.lotSize} ${unit} · 抽检 ${report.aql.inspected} ${unit}（应抽 ${report.aql.outcome.sampleSize} ${unit}）` }, { label: '缺陷', value: `致命 ${report.aql.critical} · 严重 ${report.aql.major}（Ac ${report.aql.outcome.major.accept}）· 轻微 ${report.aql.minor}（Ac ${report.aql.outcome.minor.accept}）` }, { label: '抽样判定', value: report.aql.outcome.result === 'pass' ? '允收' : '拒收' }, ...(report.aql.defects ? [{ label: '缺陷内容', value: report.aql.defects }] : [])]} />}
     {report.fabricInspection && <Facts cols={2} items={[{ label: '四分制', value: `${report.fabricInspection.rolls.length} 卷 · ${report.fabricInspection.outcome.totalYards} 码 · ${report.fabricInspection.outcome.pointsPer100} 分/100 平方码（允收 ${report.fabricInspection.limit}）` }, { label: '验布判定', value: report.fabricInspection.outcome.result === 'pass' ? '允收' : `拒收${report.fabricInspection.outcome.rejectedRolls.length ? ' · 超分卷 ' + report.fabricInspection.outcome.rejectedRolls.join('、') : ''}` }, ...Object.entries({ 色差: report.fabricInspection.lab.shade, 经向缩率: report.fabricInspection.lab.shrinkageWarp !== undefined ? report.fabricInspection.lab.shrinkageWarp + '%' : undefined, 纬向缩率: report.fabricInspection.lab.shrinkageWeft !== undefined ? report.fabricInspection.lab.shrinkageWeft + '%' : undefined, 色牢度: report.fabricInspection.lab.colourfastness }).filter(([, v]) => v !== undefined).map(([label, v]) => ({ label, value: String(v) }))]} />}
+    {!!report.fabricMeasurements?.length && <DataTable ariaLabel={ui`${report.report} · 面料实测`} rows={report.fabricMeasurements.map((fact,index)=>({...fact,key:String(index)}))} rowKey={row=>row.key} columns={[{key:'property',header:'实测项目',render:row=>row.property},{key:'actual',header:'实测值',align:'right',render:row=>row.actual},{key:'unit',header:'原单位',render:row=>row.unit}]} />}
     {report.measurements.length > 0 && <MeasurementTable rows={report.measurements} unit={domain === 'fabric' ? '' : 'cm'} />}
     <RecordFiles key={report.id} ids={report.fileIds} />
   </div>;
@@ -359,15 +402,37 @@ function QcReportCard({ report, domain, production, latest }: { report: Fulfillm
 
 type SizeCheck = { size: string; inspected: number; result: string; evidence: string };
 type Measurement = { point: string; standard: number; actual: number; tolerance: number };
+function qcReportSource(state:MistState|null,taskId:string){
+  const task=state?.fulfillment.qcTasks.find(row=>row.id===taskId);if(!state||!task)return null;
+  const subject=task.source;
+  const sample=task.sampleId?state.fulfillment.samples.find(row=>row.id===task.sampleId):undefined;
+  if(task.sampleId&&!sample)return null;
+  const physical=sample?{id:sample.id,source:sample.source,revision:sample.qualityRevision||1,form:sample.form,size:sample.size,color:sample.color,quantity:sample.quantity,unit:sample.unit,role:sample.role,shipmentId:sample.shipmentId,sizeQuantities:sample.sizeQuantities,materialPlan:sample.materialPlan}
+    :subject.kind==='version'?state.versions.find(row=>row.id===subject.versionId)
+    :subject.kind==='orderLine'&&subject.productionId?{production:state.productions.find(row=>row.id===subject.productionId),fact:state.fulfillment.productionFacts.find(row=>row.productionId===subject.productionId)}
+    :subject.kind==='orderLine'?state.orderLines.find(row=>row.id===subject.lineId):subject;
+  return stableJson({task:{source:task.source,sampleId:task.sampleId,domain:task.domain,kind:task.kind,state:task.state,assigneeId:task.assigneeId,reportIds:task.reportIds,incoming:task.incoming,quarantine:task.quarantine},physical});
+}
+
 /** Full-page report form with a side guide; submission is confirmed because the conclusion is appended permanently to the source. */
 export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onClose: () => void }) {
-  const { state, run, uploadFile, pending, saving } = useMistWorkspace();
+  const { state, workspace, run, uploadFile, pending, saving } = useMistWorkspace();
+  const [source]=React.useState(()=>({workspaceId:workspace?.id,basis:qcReportSource(state,task.id)}));
+  const liveSource=React.useRef({state,workspaceId:workspace?.id,revision:workspace?.revision});liveSource.current={state,workspaceId:workspace?.id,revision:workspace?.revision};
+  const checkedSource=()=>{
+    const checked=liveSource.current;
+    if(!checked.state||!checked.workspaceId||typeof checked.revision!=='number'||!Number.isSafeInteger(checked.revision)||checked.revision<0)throw new Error('QC资料未读取，请重新打开后核对');
+    if(!source.basis||source.workspaceId!==checked.workspaceId||source.basis!==qcReportSource(checked.state,task.id))throw new Error('实物或QC任务已更新，请重新打开后核对');
+    return checked;
+  };
   const [location, setLocation] = React.useState(task.location);
   const [result, setResult] = React.useState<MistQc['result'] | ''>(''), [report, setReport] = React.useState(''), [opinion, setOpinion] = React.useState(''), [at, setAt] = React.useState(localNow());
   const sampling = task.kind === 'production' || task.kind === 'patrol' || task.kind === 'incoming';
   const productionQty = task.source.kind === 'orderLine' ? state?.productions.find(job => job.id === (task.source as { productionId?: string }).productionId)?.qty : undefined;
   const [aql, setAql] = React.useState<AqlDraft>(() => emptyAql(task.incoming?.quantity || productionQty || 0)), [fabricCheck, setFabricCheck] = React.useState<FabricDraft>(emptyFabric);
   const useAql = sampling && task.domain === 'garment', useFabric = sampling && task.domain === 'fabric';
+  const fabricQc = task.domain === 'fabric';
+  const [fabricMeasurements,setFabricMeasurements] = React.useState<FabricFactDraft[]>([]);
   const [measurements, setMeasurements] = React.useState<Measurement[]>([]), [ids, setIds] = React.useState<string[]>([]), [failure, setFailure] = useRouteDraft(''), [busy, setBusy] = React.useState(false), [confirming, setConfirming] = React.useState(false);
   const fact = state?.fulfillment.productionFacts?.find(item => task.source.kind === 'orderLine' && item.productionId === task.source.productionId);
   const sampleConcerns = task.kind === 'production' ? fact?.release?.sampleChecks?.filter(sample => sample.result === 'conditional') || [] : [];
@@ -392,16 +457,18 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
     if (garmentProduction && !checked.length) return '请至少记录一个本次实际检查尺码';
     for (const check of checked) if (!(check.inspected > 0) || !check.evidence.trim()) return `尺码 ${check.size} 需填写实际检查件数和检查依据`;
     if (checked.some(check => check.result === 'reject') && result !== 'reject') return '存在尺码不通过时，总结论必须选择不通过';
+    if (fabricQc) { try { fabricQcFacts(fabricMeasurements); } catch (error) { return error instanceof Error ? error.message : '面料实测尚未完整'; } }
     if (measurements.some(item => !item.point.trim())) return '请填写每个测量点的名称，或移除空白测量点';
     return '';
   };
-  const review = () => { const problem = validate(); setFailure(problem); if (!problem) setConfirming(true); };
+  const review = () => { try{checkedSource();const problem = validate(); setFailure(problem); if (!problem) setConfirming(true);}catch(error){setFailure(error instanceof Error?error.message:'QC来源不可用');} };
   const save = async () => {
     if (!result) return;
     setBusy(true); setFailure('');
     try {
+      const checked=checkedSource(),problem=validate();if(problem)throw new Error(problem);
       const aqlInput = useAql ? aqlFromDraft(aql) : null, fabricInput = useFabric ? fabricFromDraft(fabricCheck) : null;
-      await run({ type: 'fulfillment.qc.report', payload: { id: task.id, domain: task.domain, result, report, opinion, location, reviewedAt: businessInputInstant(at), measurements, fileIds: ids, sizeChecks: sizeChecks.filter(check => check.result).map(check => ({ ...check, result: check.result as 'pass' | 'reject' })), ...(aqlInput ? { aql: aqlInput } : {}), ...(fabricInput ? { fabricInspection: fabricInput } : {}) } });
+      await run({ type: 'fulfillment.qc.report', payload: { id: task.id, domain: task.domain, result, report, opinion, location, reviewedAt: businessInputInstant(at), measurements: fabricQc ? [] : measurements, ...(fabricQc ? {fabricMeasurements:fabricQcFacts(fabricMeasurements)} : {}), fileIds: ids, sizeChecks: sizeChecks.filter(check => check.result).map(check => ({ ...check, result: check.result as 'pass' | 'reject' })), ...(aqlInput ? { aql: aqlInput } : {}), ...(fabricInput ? { fabricInspection: fabricInput } : {}) } },{expectedRevision:checked.revision});
       onClose();
     } catch (e) { setFailure(e instanceof Error ? e.message : '报告未保存'); setConfirming(false); }
     finally { setBusy(false); }
@@ -426,7 +493,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
             <Field label={uiText("专业意见与影响范围")} full required><TextArea aria-label={uiText("专业意见与影响范围")} value={opinion} onChange={e => setOpinion(e.target.value)} /></Field>
           </FormGrid></CardBody>
         </Card>
-        {useAql && <AqlCard value={aql} onChange={setAql} />}
+        {useAql && <AqlCard value={aql} onChange={setAql} unit={qcSamplingUnit(task,state)} />}
         {useFabric && <FabricInspectionCard value={fabricCheck} onChange={setFabricCheck} />}
         {garmentProduction && sizeChecks.length > 0 && <Card>
           <CardHeader title={uiText("本次实际尺码检查")} />
@@ -436,13 +503,22 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
             <Field label={uiText("尺码检查依据")} full><TextInput aria-label={ui`尺码 ${check.size} · 检查依据`} value={check.evidence} disabled={!check.result} onChange={event => updateSize(index, { evidence: event.target.value })} /></Field>
           </FormGrid>)}</div></CardBody>
         </Card>}
-        <Card>
+        {!fabricQc && <Card>
           <CardHeader title={uiText("测量记录")} tools={<Button size="sm" icon={Plus} onClick={() => setMeasurements(rows => [...rows, { point: '', standard: 0, actual: 0, tolerance: 0 }])}>{uiText("增加测量点")}</Button>} />
           <CardBody>{measurements.length ? <div className="mist-col">{measurements.map((item, i) => <FormGrid key={i}>
             {(['point', 'standard', 'actual', 'tolerance'] as const).map((key, j) => <Field key={key} label={uiText(['测量点', '标准', '实测', '容差'][j])}><TextInput aria-label={uiText(`${['测量点', '标准', '实测', '容差'][j]} ${i + 1}`)} type={key === 'point' ? 'text' : 'number'} step="0.0001" value={item[key]} onChange={e => setMeasurements(rows => rows.map((row, n) => n === i ? { ...row, [key]: key === 'point' ? e.target.value : Number(e.target.value) } : row))} /></Field>)}
             <Button size="sm" variant="quiet" onClick={() => setMeasurements(rows => rows.filter((_, n) => n !== i))}>{uiText("移除本点")}</Button>
           </FormGrid>)}</div> : <span className="mist-note">{uiText("还没有测量点")}</span>}</CardBody>
-        </Card>
+        </Card>}
+        {fabricQc && <Card>
+          <CardHeader title={uiText("面料实测")} tools={<Button size="sm" icon={Plus} disabled={blocked||fabricMeasurements.length>=200} onClick={()=>setFabricMeasurements(rows=>[...rows,{key:crypto.randomUUID(),property:'',actual:'',unit:''}])}>{uiText("添加面料实测")}</Button>} />
+          <CardBody>{fabricMeasurements.map((row,index)=><FormGrid key={row.key}>
+            <Field label={ui`实测项目 ${index+1}`} required><TextInput aria-label={ui`实测项目 ${index+1}`} value={row.property} disabled={blocked} maxLength={120} onChange={e=>setFabricMeasurements(rows=>rows.map(item=>item.key===row.key?{...item,property:e.target.value}:item))}/></Field>
+            <Field label={ui`实测值 ${index+1}`} required><TextInput aria-label={ui`实测值 ${index+1}`} inputMode="decimal" value={row.actual} disabled={blocked} onChange={e=>setFabricMeasurements(rows=>rows.map(item=>item.key===row.key?{...item,actual:e.target.value}:item))}/></Field>
+            <Field label={ui`原单位 ${index+1}`} required><TextInput aria-label={ui`原单位 ${index+1}`} value={row.unit} disabled={blocked} maxLength={120} onChange={e=>setFabricMeasurements(rows=>rows.map(item=>item.key===row.key?{...item,unit:e.target.value}:item))}/></Field>
+            <Button size="sm" variant="quiet" aria-label={ui`移除面料实测 ${index+1}`} disabled={blocked} onClick={()=>setFabricMeasurements(rows=>rows.filter(item=>item.key!==row.key))}>{uiText("移除此项")}</Button>
+          </FormGrid>)}</CardBody>
+        </Card>}
         <Card>
           <CardHeader title={uiText("现场照片与完整报告")} />
           <CardBody>

@@ -5,10 +5,10 @@ import React from 'react';
 import { Ban, FilePen, Landmark, Plus, SearchX, Send, Stamp } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, DataTable, EmptyState, Facts, Mono, Pill, TextLink, type Column, type Tone } from '../../../../../components/mist';
 import type { MistCommand, MistOrder, MistState } from '../../../../../server/src/shared/mistWorkspace';
-import { LC_RESULT_LABEL, LC_STATUS_LABEL, lcAlerts, lcAvailableMinor, lcStatus, readLetterOfCredits, type LcAmendField, type LcPresentationResult, type LcStatus, type MistLcPresentation, type MistLetterOfCredit } from '../../../../../server/src/shared/mistLetterOfCredit';
+import { LC_RESULT_LABEL, LC_STATUS_LABEL, lcAlerts, lcAvailableMinor, lcPresentationSourceProblem, lcStatus, readLetterOfCredits, type LcAmendField, type LcPresentationResult, type LcStatus, type MistLcPresentation, type MistLetterOfCredit } from '../../../../../server/src/shared/mistLetterOfCredit';
 import { fmt } from '../../data';
 import type { ModuleEditorSpec, ModuleValues } from './ModuleWorkbench';
-import { choiceField, emptyOption, Events, field, RecordFiles, text, today } from './fulfillmentKit';
+import { choiceField, emptyOption, Events, field, RecordFiles, useRecordAttachment, type RecordAttachmentRun, text, today } from './fulfillmentKit';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, type ReasonedAction } from './pageKit';
 import { BANKS, CURRENCIES, LC_EXPIRY_PLACES } from '../../runtime/tradeOptions';
 
@@ -25,7 +25,7 @@ export function lcOrderDomain(state: MistState, lc: MistLetterOfCredit): MistOrd
 
 export function LetterOfCreditLedger({ state, domain, needle, can, locked, loading, open, run, onOrder, onShipment }: {
   state: MistState | undefined; domain: MistOrder['type']; needle: string; can: boolean; locked: boolean; loading: boolean;
-  open: (spec: ModuleEditorSpec) => void; run: (command: MistCommand) => Promise<unknown>; onOrder: (order: MistOrder) => void; onShipment: (id: string) => void;
+  open: (spec: ModuleEditorSpec) => void; run: RecordAttachmentRun; onOrder: (order: MistOrder) => void; onShipment: (id: string) => void;
 }) {
   const [picked, setPicked] = React.useState<string | null>(null), [drawer, setDrawer] = React.useState(false), day = today();
   const all = state ? readLetterOfCredits(state).filter(lc => lcOrderDomain(state, lc) === domain) : [];
@@ -74,7 +74,7 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
       if (text(v, 'documentsRequired').trim() !== lc.documentsRequired) changes.documentsRequired = text(v, 'documentsRequired');
       return run({ type: 'lc.amend', payload: { id: lc.id, date: text(v, 'date'), changes, note: text(v, 'note') } });
     } });
-  const presentable = (lc: MistLetterOfCredit) => (state?.fulfillment.shipments || []).filter(s => s.state !== 'cancelled' && s.lines.some(l => lc.orderIds.includes(l.orderId)) && !lc.presentations.some(p => p.shipmentId === s.id && p.result !== 'refused'));
+  const presentable = (lc: MistLetterOfCredit) => (state?.fulfillment.shipments || []).filter(shipment => !lcPresentationSourceProblem(lc, shipment));
   const presentSpec = (lc: MistLetterOfCredit): ModuleEditorSpec => ({
     title: '登记交单', submitLabel: '登记交单', description: `${lc.lcNo} · 可用余额 ${money(lcAvailableMinor(lc) / 100, lc.currency)}`,
     fields: [field('shipmentId', '出运', 'select', true, [emptyOption, ...presentable(lc).map(s => ({ value: s.id, label: `${s.code} · ${s.portOfLoading} → ${s.portOfDischarge}` }))]), field('shipmentDate', '装运日（运输单据日）', 'date'), field('presentedAt', '交单日', 'date'), field('amount', `交单金额（${lc.currency}）`, 'number'), field('documents', '提交单据', 'textarea'), field('discrepancies', '已知不符点', 'textarea', false)],
@@ -133,9 +133,10 @@ function ExportedOrders({ orders, covered, onOrder }: { orders: MistOrder[]; cov
 }
 
 function LcDetail({ lc, state, day, can, locked, run, presentable, onShipment, onAmend, onPresent, onResult, onCancel, onAction, onLink }: {
-  lc: MistLetterOfCredit; state: MistState; day: string; can: boolean; locked: boolean; run: (command: MistCommand) => Promise<unknown>; presentable: number;
+  lc: MistLetterOfCredit; state: MistState; day: string; can: boolean; locked: boolean; run: RecordAttachmentRun; presentable: number;
   onShipment: (id: string) => void; onAmend: () => void; onPresent: () => void; onResult: (p: MistLcPresentation) => void; onCancel: () => void; onAction: (p: MistLcPresentation) => void; onLink: (p: MistLcPresentation) => void;
 }) {
+  const attachFiles=useRecordAttachment(run);
   const status = lcStatus(lc, day), alerts = lcAlerts(lc, day), available = lcAvailableMinor(lc) / 100, cancelled = !!lc.cancelled;
   const openPresentations = lc.presentations.some(p => !final(p));
   return <DetailBody data-lc-detail={lc.id} heading={<div><span className="mist-mono mist-muted">{lc.code}</span><div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{lc.lcNo}</div></div>}>
@@ -143,7 +144,7 @@ function LcDetail({ lc, state, day, can, locked, run, presentable, onShipment, o
     {alerts.length > 0 && <Banner variant="notice" tone="warn" title={uiText("需要关注")}>{alerts.map(uiText).join('；')}</Banner>}
     {lc.cancelled && <Banner variant="status" tone="neutral" title={ui`已于 ${lc.cancelled.date} 注销`}>{lc.cancelled.reason}</Banner>}
     {can && <ActionBar busy={locked} actions={[
-      { label: '登记交单', icon: Send, onClick: onPresent, primary: true, reason: cancelled ? '信用证已注销' : available <= 0 ? '可用余额为零' : !presentable ? '没有可交单的出运（须含本信用证订单且尚未交单）' : false },
+      { label: '登记交单', icon: Send, onClick: onPresent, primary: true, reason: cancelled ? '信用证已注销' : available <= 0 ? '可用余额为零' : !presentable ? '须实际出运且含本证下可交单货物' : false },
       { label: '登记修改书', icon: FilePen, onClick: onAmend, reason: cancelled ? '信用证已注销' : false },
       { label: '注销信用证', icon: Ban, onClick: onCancel, reason: cancelled ? '信用证已注销' : openPresentations ? '还有未承付或未拒付的交单' : false, hidden: cancelled },
     ] as ReasonedAction[]} />}
@@ -179,7 +180,7 @@ function LcDetail({ lc, state, day, can, locked, run, presentable, onShipment, o
     <DetailBlock title={ui`修改记录 · ${lc.amendments.length}`}>
       {lc.amendments.length ? <div className="mist-col">{[...lc.amendments].reverse().map(a => <div key={a.no} className="mist-col" style={{ gap: 2 }}><span>{uiText("第 ")}{a.no}{uiText(" 次修改 · ")}{a.date}</span>{a.changes.map(ch => <small key={ch.field} className="mist-muted">{uiText(ch.label)}：{ch.from} → {ch.to}</small>)}{a.note && <small className="mist-muted">{a.note}</small>}</div>)}</div> : <span className="mist-note">{uiText("暂无修改")}</span>}
     </DetailBlock>
-    <DetailBlock title={uiText("附件")}><RecordFiles key={lc.id} ids={lc.fileIds} onAttach={can ? ids => run({ type: 'lc.files', payload: { id: lc.id, fileIds: ids } }) : undefined} /></DetailBlock>
+    <DetailBlock title={uiText("附件")}><RecordFiles key={lc.id} ids={lc.fileIds} onAttach={can ? added=>attachFiles(root=>readLetterOfCredits(root).find(row=>row.id===lc.id),(current,fileIds)=>({type:'lc.files',payload:{id:current.id,fileIds}}),added) : undefined} /></DetailBlock>
     <DetailBlock title={uiText("记录")}><Events entity="customs" id={lc.id} /></DetailBlock>
   </DetailBody>;
 }

@@ -108,7 +108,6 @@ const EXEMPT: ReadonlyArray<{ scope: string; reason: Reason; note: string }> = [
   { scope: 'hr:salary:read', reason: 'superseded-by-mist', note: '薪资读取由 sensitive:salary 强制保护，员工档案视图要求 hr:read（mist/access.ts:51）' },
   { scope: 'invoices:suggest_match', reason: 'superseded-by-mist', note: '接受对账建议要求 invoices:reconcile（mistWorkspace.ts:910）' },
   { scope: 'reports:write', reason: 'superseded-by-mist', note: '报表计划：管理类要求 reports:admin，其余 reports:read（mistReportSchedules.ts:31）' },
-  { scope: 'risk:admin', reason: 'superseded-by-mist', note: '风险决策要求 risk:write，其余风险命令 risk:read（mistRisk.ts:198）' },
   { scope: 'sensitive:commission', reason: 'superseded-by-mist', note: '佣金率属报价参数：修改要求 pricing:admin（mistPlatform.ts:96）；报价人对自己报价核算可见，沿用既有定案' },
   { scope: 'sensitive:cost', reason: 'superseded-by-mist', note: '采购价与成本按分区权限强制：定价 pricing:read、采购 procurement:read（mist/access.ts:49,53），成本核算依据要求 reports:admin（mist/access.ts:290）' },
   { scope: 'production:pp_release:admin', reason: 'module-absent', note: '产前样放行的暂停 / 撤销 / 恢复动作随旧生产模块删除，Mist 无对应命令' },
@@ -136,6 +135,7 @@ const EXEMPT: ReadonlyArray<{ scope: string; reason: Reason; note: string }> = [
 
 /** 已知被强制的码 —— 用于**阳性对照**，防止扫描逻辑退化成恒真/恒假 */
 const KNOWN_ENFORCED = [
+  'risk:admin', // Customer credit changes enforce this scope in mistCustomerFieldAuthority.ts.
   'orders:read',
   'orders:write',
   'finance:read',

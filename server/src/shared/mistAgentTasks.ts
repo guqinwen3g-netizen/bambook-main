@@ -1,4 +1,18 @@
 /** Public task views contain no service credential or execution lease secret. */
+export const AGENT_TASK_INTENT_KINDS = ['orders','invoices','customers','purchases','shipments','developments','risks'] as const;
+export type AgentTaskIntentKind = typeof AGENT_TASK_INTENT_KINDS[number];
+/** User-selected intent, never a claim that the task has read the referenced data. */
+export type AgentTaskIntentRef = { kind: AgentTaskIntentKind; id: string };
+export function normalizeAgentTaskIntentRefs(value: unknown): AgentTaskIntentRef[] {
+  if(value===undefined)return [];
+  if(!Array.isArray(value)||value.length>12)throw new Error('最多引用12条业务记录');
+  const seen=new Set<string>(),out:AgentTaskIntentRef[]=[];
+  for(const item of value){
+    if(!item||typeof item!=='object'||Array.isArray(item)||Object.keys(item).some(k=>!['kind','id'].includes(k))||!AGENT_TASK_INTENT_KINDS.includes(item.kind)||typeof item.id!=='string'||!item.id.length||item.id.length>200||item.id.trim()!==item.id)throw new Error('任务引用格式无效');
+    const ref={kind:item.kind as AgentTaskIntentKind,id:item.id},key=JSON.stringify([ref.kind,ref.id]);if(!seen.has(key)){seen.add(key);out.push(ref);}
+  }
+  return out;
+}
 export type AgentTaskState = 'queued' | 'running' | 'waiting_time' | 'waiting_condition' | 'waiting_human' | 'paused' | 'succeeded' | 'failed' | 'cancelled' | 'expired' | 'budget_exhausted' | 'access_changed';
 export type AgentTaskQuestion = {id:string;question:string;askedAt:string;answer?:string;answeredAt?:string};
 export type AgentTaskTrailItem = { at: string; kind: 'read' | 'write' | 'ask' | 'wait' | 'note'; label: string; failed?: boolean; ref?: { type: string; id: string; label: string; /** 读取结果给出的页面与锚点；id 为页面要打开的编号（可能是上级单据）。 */ view?: string; section?: string } };
@@ -14,6 +28,7 @@ export type AgentTaskView = {
   executor?:'external'|'platform';
   automationId?:string;
   conversationId?:string;
+  intentRefs?:AgentTaskIntentRef[];
   /** 平台任务的办理过程（做了什么、读了哪条记录）；不含读取到的内容。 */
   trail?:AgentTaskTrailItem[];
   executionIssue?:{code:'model_unavailable'|'model_response_invalid';retryAt?:string};

@@ -13,8 +13,8 @@ vi.mock('./auth',()=>({useMistSession:()=>bridge.session}));
 vi.mock('./workspace',async()=>{const React=await import('react');const {createMistState}=await import('../../../../server/src/shared/mistWorkspace');const base=createMistState({actorName:'测试',actorId:'actor-a',now:'2026-10-13T00:00:00.000Z',id:()=>crypto.randomUUID()},'empty');return{useMistWorkspace:()=>{React.useSyncExternalStore(listener=>{bridge.listeners.add(listener);return()=>{bridge.listeners.delete(listener);};},()=>bridge.version);return{workspace:{id:bridge.workspaceId,name:'本公司',revision:(bridge as any).revision??1,ownerId:'owner-x'},state:{...base,...(bridge.extra||{}),orderStatus:bridge.status},refresh:bridge.refresh};}};});
 vi.mock('../../../../services/apiService',()=>({apiService:{getAuthHeaders:()=>({'Content-Type':'application/json','X-Test-Actor':bridge.session.user.id})}}));
 import {useMistWorkspace} from './workspace';
-import {MistReviewButton,MistReviewProvider} from './reviews';
-import {ApprovalsPage,approvalRows} from '../pages/ApprovalsPage';
+import {MistReviewButton,MistReviewProvider,useMistReviews} from './reviews';
+import {ApprovalsPage,approvalRows,projectedReviewEvidence} from '../pages/ApprovalsPage';
 
 let host:HTMLDivElement,root:Root,serverStatus:'pending'|'approved'|'rejected',postCount:number,rows:any[]|undefined;
 let intercept:((url:string,init:RequestInit)=>Promise<any>|undefined)|undefined;
@@ -23,7 +23,8 @@ const intent={workspaceId:'workspace-a',reviewId:'order:round-one',requestId:'or
 const response=(data:any,status=200)=>({ok:status<400,status,json:async()=>data});
 function row(patch:any={}){return{id:'order:round-one',kind:'order',entityId:'order-one',title:'SO-ONE 主单审批',requesterId:'actor-b',reviewerIds:['actor-a'],status:serverStatus,submittedAt:'2026-10-13',requiredPermission:'orders:write',target:{view:'orders/detail',id:'order-one'},details:[{label:'金额',value:'48 USD'}],workspaceId:'workspace-a',workspaceName:'本公司',revision:1,canDecide:serverStatus==='pending',...patch};}
 function publish(){bridge.version++;bridge.listeners.forEach(listener=>listener());}
-function Probe(){const workspace=useMistWorkspace();return <p data-testid="business-state">{workspace.workspace?.id}:{(workspace.state as any).orderStatus}</p>;}
+let activeReviews:ReturnType<typeof useMistReviews>;
+function Probe(){const workspace=useMistWorkspace();activeReviews=useMistReviews();return <p data-testid="business-state">{workspace.workspace?.id}:{(workspace.state as any).orderStatus}</p>;}
 let route:Route={view:'approvals'};const go=vi.fn();
 function Harness(){const [current,setCurrent]=React.useState<Route>(route);route=current;go.mockImplementation((view:string,id?:string,target={})=>setCurrent({view,id,...target}));
  return <Nav.Provider value={{route:current,go,theme:'light',toggleTheme:vi.fn(),openAI:vi.fn(),openPalette:vi.fn()} as any}><MistReviewProvider><Probe/><MistReviewButton/>{current.view==='approvals'&&<ApprovalsPage key={JSON.stringify(current)}/>}</MistReviewProvider></Nav.Provider>;}
@@ -47,6 +48,41 @@ beforeEach(()=>{
  host=document.createElement('div');document.body.append(host);root=createRoot(host);
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();});
+
+it('withholds empty-state and count during an initial queue read failure, then restores the same list on retry',async()=>{
+ intercept=url=>url==='/api/mist/reviews'?Promise.resolve(response({error:{message:'审批服务暂时不可用'}},503)):undefined;
+ await render();
+ expect(queryByText(document.body,'没有待你审批的事项')).toBeNull();
+ expect(getByRole(host,'tab',{name:'待我审批',exact:true})).toBeTruthy();
+ expect(getByRole(document.body,'button',{name:'重试',exact:true})).toBeTruthy();
+ intercept=undefined;
+ await click('重试');
+ expect(tableRows().map(r=>r.textContent).join(' ')).toContain('SO-ONE');
+ expect(queryByText(document.body,'审批服务暂时不可用')).toBeNull();
+ expect(postCount).toBe(0);
+});
+
+it('blocks stale approval details after a refresh failure and restores the selection and draft opinion on retry',async()=>{
+ await render();
+ await prepareDecision();
+ intercept=url=>url==='/api/mist/reviews'?Promise.resolve(response({error:{message:'审批服务暂时不可用'}},503)):undefined;
+ await click('刷新');
+ expect(queryByRole(document.body,'button',{name:'批准',exact:true})).toBeNull();
+ expect(queryByRole(document.body,'button',{name:'退回',exact:true})).toBeNull();
+ expect(queryByText(document.body,'没有待你审批的事项')).toBeNull();
+ intercept=undefined;
+ await click('重试');
+ expect(getByRole(document.body,'button',{name:'批准',exact:true})).toBeTruthy();
+ expect((getByLabelText(document.body,'审批意见') as HTMLTextAreaElement).value).toBe('核对合同通过');
+ expect(postCount).toBe(0);
+});
+
+it('shows a genuine empty approval queue only after a successful read',async()=>{
+ rows=[];
+ await render();
+ expect(getByRole(host,'tab',{name:/^待我审批\s*0$/})).toBeTruthy();
+ expect(queryByText(document.body,'没有待你审批的事项')).toBeTruthy();
+});
 
 it('refreshes the current workspace after approval so the existing business page is no longer pending',async()=>{
  await render();await prepareDecision();await click('批准');
@@ -108,6 +144,27 @@ it('opens a payment approval in the payable section at its exact original reques
  await render();await openRow('PR-ONE');await click('打开原业务');
  expect(go).toHaveBeenLastCalledWith('payment-vouchers','payment-one',{section:'payables'});
 });
+it('distinguishes same-title approval rounds in the list and opens the original record', async () => {
+  rows = [
+    row({ id: 'amendment-one', title: 'PO-001 合同变更', kind: 'procurementAmendment', roundNumber: 1,
+      status: 'approved', canDecide: false, details: [{ label: '合同金额', value: '100.00 → 110.00 CNY' }] }),
+    row({ id: 'amendment-three', title: 'PO-001 合同变更', kind: 'procurementAmendment', roundNumber: 3,
+      status: 'approved', canDecide: false, details: [{ label: '合同金额', value: '110.00 → 120.00 CNY' }] }),
+  ];
+  route = { view: 'approvals', section: 'done' };
+  await render();
+  const result = tableRows();
+  expect(result).toHaveLength(2);
+  expect(result[0].textContent).toContain('第 1 轮');
+  expect(result[1].textContent).toContain('第 3 轮');
+  await act(async () => result[1].click());
+  const detail = document.querySelector('[data-approval="amendment-three"]')!;
+  expect(detail.textContent).toContain('110.00 → 120.00 CNY');
+  expect(detail.textContent).toContain('审批轮次');
+  expect(detail.textContent).toContain('第 3 轮');
+  expect(postCount).toBe(0);
+});
+
 it('opens the exact business record when the review belongs to the current workspace',async()=>{
  await render();await openRow();await click('打开原业务');
  expect(go).toHaveBeenLastCalledWith('orders/detail','order-one');
@@ -176,6 +233,7 @@ it('shows who decided a handled approval, when, and the note',async()=>{
   expect(text).toContain('经办人');expect(text).toContain('周敏');expect(text).toContain('单价与交期已核对');
   // 带签字的已批准事项：按图片加载归档签字。
   expect(document.querySelector('[data-approval-signature]')?.getAttribute('src')).toMatch(/^blob:/);
+  expect(fetch).toHaveBeenCalledWith('/api/mist/reviews/workspace-a/order%3Around-one/files/sig-1',expect.objectContaining({credentials:'include'}));
  }finally{rows=undefined;intercept=undefined;route={view:'approvals'};}
 });
 
@@ -183,4 +241,79 @@ it('reloads the approval queue as soon as the company data revision changes',asy
  rows=[];await render();expect(tableRows()).toHaveLength(0);
  rows=[row({requesterId:'actor-a'})];(bridge as any).revision=2;await act(async()=>{publish();});await act(async()=>{await Promise.resolve();});
  expect(tableRows().some(r=>r.textContent?.includes('SO-ONE'))).toBe(true);
+});
+
+function submittedCancellation(signatures:any[],files:any[]){
+ bridge.extra={orders:[{id:'own-order',code:'SO-CANCEL',type:'garment',customer:'本票客户',ownerId:'actor-a',governance:{rounds:[],status:'cancelled',cancellation:{id:'own-cancel',status:'approved',reason:'客户书面取消',requesterId:'actor-a',requesterName:'我',reviewerIds:['boss'],requestedAt:'2026-11-18T04:00:00.000Z',decidedBy:'boss',decidedName:'周敏',decidedAt:'2026-11-18T04:00:00.000Z',note:'保留原单历史'}}}],decisionSignatures:signatures,files};
+ rows=[];route={view:'approvals',section:'sent'};
+}
+const cancelSignature=(patch:any={})=>({id:'decision-signature',commandType:'order.governance.decide',entityId:'own-order#cancel:own-cancel',decision:'approved',fileId:'sig-cancel',actorId:'boss',actor:'周敏',at:'2026-11-17T09:32:08.000Z',requestId:'original-cancel-decision',...patch});
+function stubSignatureFile(){
+ const BaseURL=URL;vi.stubGlobal('URL',class extends BaseURL{static createObjectURL(){return 'blob:local-signature';}static revokeObjectURL(){}});
+ intercept=url=>url.endsWith('/files/sig-cancel')?Promise.resolve({ok:true,status:200,arrayBuffer:async()=>new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>').buffer}):undefined;
+}
+it('shows the exact projected cancellation signature for my submitted read-only row using the company file route',async()=>{
+ submittedCancellation([cancelSignature({id:'main-record',requestId:'original-main-decision',entityId:'own-order',fileId:'main-signature'}),cancelSignature()],[{id:'main-signature',name:'主单签字.svg',size:20},{id:'sig-cancel',name:'取消签字.svg',size:30}]);stubSignatureFile();
+ await render();await openRow('SO-CANCEL');await act(async()=>{await Promise.resolve();await Promise.resolve();});
+ expect(document.querySelector('[data-approval-signature]')?.getAttribute('src')).toBe('blob:local-signature');
+ expect(fetch).toHaveBeenCalledWith('/api/mist/workspaces/workspace-a/files/sig-cancel',expect.objectContaining({credentials:'include'}));
+ expect(queryByRole(document.body,'button',{name:'批准'})).toBeNull();expect(queryByRole(document.body,'button',{name:'退回'})).toBeNull();expect(postCount).toBe(0);
+});
+it.each([
+ ['another command',{commandType:'fulfillment.procurement.decide'}],
+ ['the main order',{entityId:'own-order'}],
+ ['another cancellation',{entityId:'own-order#cancel:another'}],
+ ['another decision',{decision:'rejected'}],
+ ['an absent decision',{decision:undefined}],
+])('does not substitute %s as the original cancellation signature',async(_label,patch)=>{
+ submittedCancellation([cancelSignature(patch)],[{id:'sig-cancel',name:'不能套用.svg',size:30}]);stubSignatureFile();
+ await render();await openRow('SO-CANCEL');
+ expect(document.querySelector('[data-approval-signature]')).toBeNull();expect(vi.mocked(fetch).mock.calls.some(([url])=>String(url).includes('/files/'))).toBe(false);
+});
+it('does not request a projected signature whose original file is absent from current readable metadata',async()=>{
+ submittedCancellation([cancelSignature()],[]);stubSignatureFile();await render();await openRow('SO-CANCEL');
+ expect(document.querySelector('[data-approval-signature]')).toBeNull();expect(vi.mocked(fetch).mock.calls.some(([url])=>String(url).includes('/files/'))).toBe(false);
+});
+it('fills only current readable attachment metadata for a submitted row and downloads through the company route',async()=>{
+ bridge.extra={files:[{id:'evidence-one',name:'本次依据.txt',size:12},{id:'other-evidence',name:'其他业务.txt',size:18}],payables:{bills:[],payments:[],allocations:[],plans:[],requests:[{id:'req-files',code:'PR-FILES',purpose:'bill',supplierId:'s',supplier:'本次供方',currency:'CNY',amount:120,lines:[],requesterId:'actor-a',requester:'我',submittedAt:'2026-10-14T02:00:00.000Z',reviewerIds:['boss'],snapshot:[],fileIds:['evidence-one','hidden-evidence','evidence-one'],state:'pending',note:''}]}};rows=[];route={view:'approvals',section:'sent'};
+ const BaseURL=URL;vi.stubGlobal('URL',class extends BaseURL{static createObjectURL(){return 'blob:local-file';}static revokeObjectURL(){}});const anchor=vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{});
+ intercept=url=>url.endsWith('/files/evidence-one')?Promise.resolve({ok:true,status:200,blob:async()=>new Blob(['本次依据'])}):undefined;
+ try{await render();await openRow('PR-FILES');expect(document.body.textContent).toContain('1份附件不可读');expect(queryByRole(document.body,'button',{name:'其他业务.txt'})).toBeNull();expect(document.querySelectorAll('button[data-full-text="本次依据.txt"]')).toHaveLength(1);await click('本次依据.txt');expect(fetch).toHaveBeenCalledWith('/api/mist/workspaces/workspace-a/files/evidence-one',expect.objectContaining({credentials:'include'}));expect(anchor).toHaveBeenCalledTimes(1);expect(postCount).toBe(0);}finally{anchor.mockRestore();}
+});
+it('never posts a decision for a local read-only submission even when called outside the page controls',async()=>{
+ await render();await act(async()=>{expect(await activeReviews.decide({...row(),local:true,canDecide:false},'approved','不能代审批')).toBe(false);});
+ expect(postCount).toBe(0);expect(localStorage.getItem(key)).toBeNull();
+});
+it('does not fetch an old local file after switching the current company projection',async()=>{
+ const file={id:'old-file',name:'原公司依据.txt',size:10};await render();bridge.workspaceId='workspace-b';await act(async()=>publish());
+ const before=vi.mocked(fetch).mock.calls.length;await act(async()=>activeReviews.download({...row(),workspaceId:'workspace-a',local:true,files:[file]},file));
+ expect(vi.mocked(fetch).mock.calls).toHaveLength(before);expect(document.body.textContent).toContain('审批附件读取失败');
+});
+it('does not borrow a later signature for ambiguous historical rounds sharing one source entity',()=>{
+ const first=row({id:'order:first',status:'approved',canDecide:false,decision:{actor:'周敏',at:'2026-11-18T04:00:00.000Z'}}),second={...first,id:'order:second'};
+ const evidence=projectedReviewEvidence(first,{files:[{id:'new-signature',name:'新一轮.svg',size:20}] as any,decisionSignatures:[cancelSignature({entityId:first.entityId,fileId:'new-signature'})]},[first,second]);
+ expect(evidence.signatureFileId).toBeUndefined();
+});
+it('does not fall back to an earlier readable signature when the matching final original is hidden',()=>{
+ const task=row({status:'approved',decision:{actor:'周敏',at:'2026-11-18T04:00:00.000Z'}});
+ const evidence=projectedReviewEvidence(task,{files:[{id:'earlier',name:'旧档.svg',size:20}] as any,decisionSignatures:[cancelSignature({entityId:task.entityId,fileId:'earlier'}),cancelSignature({entityId:task.entityId,fileId:'hidden-final'})]},[task]);
+ expect(evidence.signatureFileId).toBeUndefined();
+});
+it('does not choose the latest of two readable signatures for one unbound approval',()=>{
+ const task=row({status:'approved',decision:{actor:'周敏',at:'2026-11-18T04:00:00.000Z'}});
+ const evidence=projectedReviewEvidence(task,{files:[{id:'first',name:'第一份.svg',size:20},{id:'second',name:'第二份.svg',size:20}] as any,decisionSignatures:[cancelSignature({id:'first-signature',requestId:'first-request',entityId:task.entityId,fileId:'first'}),cancelSignature({id:'second-signature',requestId:'second-request',entityId:task.entityId,fileId:'second'})]},[task]);
+ expect(evidence.signatureFileId).toBeUndefined();
+});
+it('uses only the exact response-only binding for old rounds and treats an empty binding map as unresolved',()=>{
+ const first=row({id:'order:first',status:'approved',decision:{actor:'周敏',at:'2026-11-18T04:00:00.000Z'}}),second={...first,id:'order:second'};
+ const state={files:[{id:'first-file',name:'第一轮.svg',size:20},{id:'second-file',name:'第二轮.svg',size:20}] as any,decisionSignatures:[cancelSignature({id:'first-signature',actorId:'actor-a',requestId:'first-request',entityId:first.entityId,fileId:'first-file'}),cancelSignature({id:'second-signature',actorId:'actor-a',requestId:'second-request',entityId:first.entityId,fileId:'second-file'})]};
+ const bindings=[{signatureId:'first-signature',reviewId:first.id},{signatureId:'second-signature',reviewId:second.id}];
+ expect(projectedReviewEvidence(first,state,[first,second],bindings).signatureFileId).toBe('first-file');
+ expect(projectedReviewEvidence(second,state,[first,second],bindings).signatureFileId).toBe('second-file');
+ expect(projectedReviewEvidence(first,state,[first,second],[]).signatureFileId).toBeUndefined();
+});
+it('keeps a server review attachment on its exact review snapshot route outside the selected projection',async()=>{
+ bridge.workspaceId='workspace-b';const BaseURL=URL;vi.stubGlobal('URL',class extends BaseURL{static createObjectURL(){return 'blob:review-file';}static revokeObjectURL(){}});const anchor=vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{});
+ intercept=url=>url.endsWith('/files/review-file')?Promise.resolve({ok:true,status:200,blob:async()=>new Blob(['审批快照依据'])}):undefined;
+ try{await render();await act(async()=>activeReviews.download(row(),{id:'review-file',name:'提交时依据.txt'}));expect(fetch).toHaveBeenCalledWith('/api/mist/reviews/workspace-a/order%3Around-one/files/review-file',expect.objectContaining({credentials:'include'}));expect(vi.mocked(fetch).mock.calls.some(([url])=>String(url).startsWith('/api/mist/workspaces/'))).toBe(false);expect(postCount).toBe(0);}finally{anchor.mockRestore();}
 });

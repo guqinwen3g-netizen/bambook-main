@@ -19,6 +19,7 @@ import jwt from 'jsonwebtoken';
 import { extractActorFromRequest, pickRequestToken } from './middleware';
 import { sessionRevokedBeforeSec } from './sessionRevocation';
 import { logger } from '../lib/logger';
+import {isPublicSessionPath} from './publicSessionPaths';
 
 const CACHE_TTL_MS = 30_000;
 const CACHE_MAX_ENTRIES = 5_000;
@@ -81,7 +82,9 @@ async function accountGate(prisma: PrismaClient, userId: string): Promise<Accoun
 export function createAccountStatusGuard(prisma: PrismaClient) {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
-      if (/^\/(?:bambook\/)?api\/auth\/account-access\/(?:request|complete)\/?$/.test(req.originalUrl.split('?')[0])) return next();
+      const path = normalizedPath(req.originalUrl || req.url || '');
+      // A stale passive cookie must not prevent fresh password authentication or revocation/recovery.
+      if(isPublicSessionPath(path))return next();
       const actor = extractActorFromRequest(req);
       if (!actor?.userId) return next();
       const gate = await accountGate(prisma, actor.userId);
@@ -97,7 +100,6 @@ export function createAccountStatusGuard(prisma: PrismaClient) {
           return res.status(401).json({ error: 'SESSION_REVOKED', message: '登录已在所有设备退出，请重新登录。' });
         }
       }
-      const path = normalizedPath(req.originalUrl || req.url || '');
       if (gate.mustChangePassword && API_PATH.test(path) && !PASSWORD_CHANGE_ALLOWED.test(path)) {
         return res.status(403).json({ error: 'PASSWORD_CHANGE_REQUIRED', message: passwordChangeRequiredMessage(gate.passwordChangeReason) });
       }

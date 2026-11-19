@@ -8,8 +8,8 @@ import { createMistState } from '../../../../../server/src/shared/mistWorkspace'
 import { usableSeals } from './CompanySeals';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-const store = vi.hoisted(() => ({ state: null as any, run: vi.fn(), uploadFile: vi.fn(), readFile: vi.fn() }));
-vi.mock('../../runtime/workspace', () => ({ useMistWorkspace: () => ({ state: store.state, workspace: { id: 'ws', ownerId: 'owner', access: { companyLibrary: true } }, run: store.run, uploadFile: store.uploadFile, readFile: store.readFile, saving: false, pending: null }) }));
+const store = vi.hoisted(() => ({ state: null as any, loading: false, run: vi.fn(), uploadFile: vi.fn(), readFile: vi.fn() }));
+vi.mock('../../runtime/workspace', () => ({ useMistWorkspace: () => ({ state: store.state, loading: store.loading, workspace: { id: 'ws', ownerId: 'owner', access: { companyLibrary: true } }, run: store.run, uploadFile: store.uploadFile, readFile: store.readFile, saving: false, pending: null }) }));
 vi.mock('../../runtime/auth', () => ({ useOptionalMistSession: () => ({ user: { id: 'owner', displayName: '陆衡' } }) }));
 import { CompanySealsSection } from './CompanySeals';
 
@@ -21,12 +21,53 @@ beforeEach(() => {
   state.files.push({ id: 'seal-file', name: '公章.png', mimeType: 'image/png', size: 10, storageKey: 'k', createdAt: '' });
   state.seals = [seal, { ...seal, id: 'seal-2', name: '旧合同章', kind: 'contract', status: 'disabled', userIds: ['u-gu'] }];
   state.sealUses = [{ id: 'use-1', sealId: 'seal-1', sealName: '雾织贸易公章', documentKind: 'CI', documentId: 'd', documentNumber: 'CI-2026-1110', fileId: 'f', actorId: 'u-li', actor: '陈晓', at: '2026-11-05T06:00:00Z', reason: 'CI 对外签发' }];
-  store.state = state; store.run.mockReset().mockResolvedValue({ result: {} }); store.readFile.mockReset().mockResolvedValue(new Blob(['x'], { type: 'image/png' }));
+  store.state = state; store.loading = false; store.run.mockReset().mockResolvedValue({ result: {} }); store.readFile.mockReset().mockResolvedValue(new Blob(['x'], { type: 'image/png' }));
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => { if (root) await act(async () => root!.unmount()); host.remove(); document.body.innerHTML = ''; });
 const render = async (canManage: boolean) => act(async () => root!.render(<MistRoot><ToastProvider><CompanySealsSection canManage={canManage} /></ToastProvider></MistRoot>));
 const click = async (el: Element) => act(async () => { (el as HTMLElement).click(); });
+function mockImageUrls() {
+  const create = URL.createObjectURL, revoke = URL.revokeObjectURL;
+  URL.createObjectURL = vi.fn(() => 'blob:seal-preview'); URL.revokeObjectURL = vi.fn();
+  return () => { URL.createObjectURL = create; URL.revokeObjectURL = revoke; };
+}
+
+it('keeps each authorized seal user independently named inside its group',async()=>{
+  const restore=mockImageUrls();try{await render(true);await click(getByRole(host,'button',{name:'编辑',exact:true}));const dialog=getByRole(document.body,'dialog',{name:'编辑印章'});expect(getByRole(dialog,'checkbox',{name:'陈晓',exact:true})).toBeTruthy();expect(getByRole(dialog,'checkbox',{name:'顾言',exact:true})).toBeTruthy();expect(store.run).not.toHaveBeenCalled();}finally{restore();}
+});
+it('names the existing seal image replacement action by its visible operation',async()=>{
+  const restore=mockImageUrls();try{await render(true);await click(getByRole(host,'button',{name:'编辑',exact:true}));const dialog=getByRole(document.body,'dialog',{name:'编辑印章'});expect(getByRole(dialog,'button',{name:'更换',exact:true})).toBeTruthy();expect(store.run).not.toHaveBeenCalled();}finally{restore();}
+});
+
+it('waits for company loading to finish even when its file and reader identities stay the same', async () => {
+  const restore = mockImageUrls(); store.state.seals = [seal]; store.loading = true;
+  store.readFile.mockImplementation(async () => { if (store.loading) throw new Error('公司已切换，请在本公司重新操作'); return new Blob(['seal'], { type: 'image/png' }); });
+  try {
+    await render(true); expect(store.readFile).not.toHaveBeenCalled();
+    store.loading = false; await render(true);
+    expect(getByRole(host, 'img', { name: '印章图片' }).getAttribute('src')).toBe('blob:seal-preview'); expect(store.readFile).toHaveBeenCalledTimes(1);
+  } finally { if (root) { await act(async () => root!.unmount()); root = undefined; } restore(); }
+});
+
+it('retries the same seal file after the company-bound reader becomes ready', async () => {
+  const restore = mockImageUrls(), reader = store.readFile; store.state.seals = [seal];
+  try {
+    reader.mockRejectedValue(new Error('公司已切换，请在本公司重新操作')); await render(true);
+    expect(queryByRole(host, 'img', { name: '印章图片' })).toBeNull();
+    store.readFile = vi.fn().mockResolvedValue(new Blob(['seal'], { type: 'image/png' })); await render(true);
+    expect(getByRole(host, 'img', { name: '印章图片' }).getAttribute('src')).toBe('blob:seal-preview'); expect(store.readFile).toHaveBeenCalledTimes(1);
+  } finally { if (root) { await act(async () => root!.unmount()); root = undefined; } store.readFile = reader; restore(); }
+});
+
+it('removes a loaded seal preview when the image is no longer in the authorized file list', async () => {
+  const restore = mockImageUrls(); store.state.seals = [seal];
+  try {
+    await render(true); expect(getByRole(host, 'img', { name: '印章图片' })).toBeTruthy();
+    store.state = { ...store.state, files: [] }; await render(true);
+    expect(queryByRole(host, 'img', { name: '印章图片' })).toBeNull(); expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:seal-preview');
+  } finally { if (root) { await act(async () => root!.unmount()); root = undefined; } restore(); }
+});
 
 it('only active seals that list the user are usable', () => {
   expect(usableSeals(store.state, 'u-li').map(s => s.id)).toEqual(['seal-1']);
@@ -69,4 +110,31 @@ it('disabling a seal requires a reason', async () => {
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(area, '印章遗失'); area.dispatchEvent(new Event('input', { bubbles: true })); });
   await click(getByRole(dialog, 'button', { name: '停用' }));
   expect(store.run).toHaveBeenCalledWith({ type: 'seal.disable', payload: { id: 'seal-1', reason: '印章遗失' } });
+});
+
+function archivedSealPdf(){
+ const file={id:'f',name:'CI-2026-1110-sealed.pdf',mimeType:'application/pdf',size:20,storageKey:'old-stamped',createdAt:''};
+ store.state.seals=[{...seal,fileId:undefined,status:'disabled'}];
+ store.state.files=[file,{...file,id:'newer-file',name:'newer-generation.pdf'}];
+ store.state.fulfillment.documents=[{id:'d',type:'CI',fileIds:['newer-file']}];
+ store.readFile.mockResolvedValue(new Blob(['%PDF-1.4\n%%EOF'],{type:'application/pdf'}));
+ return file;
+}
+it('opens the archived stamped file recorded by the use, and closes back to its ledger entry without a command',async()=>{
+ const restore=mockImageUrls(),file=archivedSealPdf();
+ try{await render(false);const entry=getByRole(host,'button',{name:'CI-2026-1110',exact:true});entry.focus();await click(entry);
+  expect(store.readFile).toHaveBeenCalledWith(file);expect(document.querySelector('[data-file-preview="f"]')).toBeTruthy();expect(store.readFile).not.toHaveBeenCalledWith(expect.objectContaining({id:'newer-file'}));
+  await click(getByRole(document.body,'button',{name:'关闭',exact:true}));expect(document.querySelector('[data-file-preview]')).toBeNull();expect(document.activeElement).toBe(entry);expect(store.run).not.toHaveBeenCalled();
+ }finally{restore();}
+});
+it.each(['hidden-reference','missing-file','image-not-pdf']as const)('keeps seal use metadata noninteractive for %s',async kind=>{
+ archivedSealPdf();if(kind==='hidden-reference')delete store.state.sealUses[0].fileId;if(kind==='missing-file')store.state.files=[];if(kind==='image-not-pdf')store.state.files[0].mimeType='image/png';
+ await render(false);expect(host.textContent).toContain('CI-2026-1110');expect(queryByRole(host,'button',{name:'CI-2026-1110',exact:true})).toBeNull();expect(store.readFile).not.toHaveBeenCalled();expect(store.run).not.toHaveBeenCalled();
+});
+it('closes the archived-file preview and removes its entry while company data is loading',async()=>{
+ const restore=mockImageUrls();archivedSealPdf();
+ try{await render(false);await click(getByRole(host,'button',{name:'CI-2026-1110',exact:true}));expect(document.querySelector('[data-file-preview="f"]')).toBeTruthy();
+  store.loading=true;await render(false);expect(queryByRole(host,'button',{name:'CI-2026-1110',exact:true})).toBeNull();expect(document.querySelector('[data-file-preview]')).toBeNull();
+  store.loading=false;await render(false);expect(getByRole(host,'button',{name:'CI-2026-1110',exact:true})).toBeTruthy();expect(document.querySelector('[data-file-preview]')).toBeNull();expect(store.run).not.toHaveBeenCalled();
+ }finally{restore();}
 });

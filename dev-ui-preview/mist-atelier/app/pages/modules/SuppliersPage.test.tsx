@@ -1,3 +1,4 @@
+import {Blob as NodeBlob} from 'node:buffer';
 // @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -8,24 +9,124 @@ import { fireEvent, getByRole, queryByRole } from '@testing-library/dom';
 import { Nav } from '../../nav';
 import { createMistState, type MistContext, type MistState } from '../../../../../server/src/shared/mistWorkspace';
 
-const bridge = vi.hoisted(() => ({ current: null as any }));
+const bridge = vi.hoisted(() => ({ current: null as any, denied:new Set<string>() }));
 vi.mock('../../runtime/workspace', () => ({ useMistWorkspace: () => bridge.current }));
-vi.mock('../../runtime/auth', () => { const useMistSession = () => ({ user: { id: 'demo-buyer', displayName: '沈禾' }, hasPermission: () => true, hasRole: () => false, canAccessView: () => true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
+vi.mock('../../runtime/auth', () => { const useMistSession = () => ({ user: { id: 'demo-buyer', displayName: '沈禾' }, hasPermission: (permission:string) => !bridge.denied.has(permission), hasRole: () => false, canAccessView: () => true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
 let host: HTMLDivElement, root: Root | undefined, state: MistState; const go = vi.fn();
 const named = (n: string) => state.market.suppliers.find(s => s.name === n)!;
 beforeEach(() => {
-  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; go.mockReset();
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; go.mockReset();bridge.denied.clear();
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-14T04:00:00Z'));
   let n = 0; const ctx: MistContext = { id: () => `s-test-${++n}`, actorName: '演示', now: '2026-10-14T02:00:00.000Z' };
   state = createMistState(ctx, 'demo');
-  bridge.current = { state, run: vi.fn(async () => ({ result: { id: 'saved' } })), error: '', refresh: vi.fn(), loading: false, saving: false, pending: null, upload: vi.fn() };
+  bridge.current = { state, workspace:{id:'workspace',revision:7}, run: vi.fn(async () => ({ result: { id: 'saved' } })), error: '', refresh: vi.fn(), loading: false, saving: false, pending: null, upload: vi.fn(),downloadFile:vi.fn(async()=>{}),readFile:vi.fn(async()=>new NodeBlob(['cert original'],{type:'text/plain'})) };
 });
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; host?.remove(); vi.useRealTimers(); });
 async function mount(id?: string, detail?: 'full') { host = document.createElement('div'); document.body.append(host); root = createRoot(host); const Page = MARKET_PAGES.suppliers; await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'suppliers', id, detail }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
 const button = (label: string) => [...document.body.querySelectorAll('button')].find(b => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
 async function click(label: string) { const b = button(label); expect(b, label).toBeTruthy(); await act(async () => b!.click()); }
+async function repaint(id:string){const Page=MARKET_PAGES.suppliers;await act(async()=>root!.render(<Nav.Provider value={{route:{view:'suppliers',id,detail:'full'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><Page/></Nav.Provider>));}
+async function fillProfile(label:string,value:string){const input=document.querySelector(`[role="dialog"] [aria-label="${label}"]`)as HTMLInputElement|HTMLTextAreaElement;expect(input).toBeTruthy();await act(async()=>{Object.getOwnPropertyDescriptor(input.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
+
+it.each(['name','type','country','address','capabilities','capacity','capacityUnit','leadDays','note','handlers','removed'])('refuses stale supplier profile fields and keeps input: %s',async field=>{
+ const supplier=state.market.suppliers[0];await mount(supplier.id,'full');await click('编辑档案');await fillProfile('备注','我的补充');const patch=field==='handlers'?{handlers:{fabric:{id:'peer',name:'同事'}}}:field==='capacity'||field==='leadDays'?{[field]:999}:field==='type'?{type:'服务商'}:{[field]:'同事更新'};
+ state={...state,market:{...state.market,suppliers:field==='removed'?state.market.suppliers.filter(s=>s.id!==supplier.id):state.market.suppliers.map(s=>s.id===supplier.id?{...s,...patch}:s)}}as MistState;bridge.current={...bridge.current,state,workspace:{id:'workspace',revision:8}};await repaint(supplier.id);await click('保存');expect(bridge.current.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('供应商档案已更新，请重新打开后核对');expect((document.querySelector('[aria-label="备注"]')as HTMLTextAreaElement).value).toBe('我的补充');
+});
+it('keeps newer attachments and non-profile records while binding the checked revision',async()=>{
+ const supplier=state.market.suppliers[0];await mount(supplier.id,'full');await click('编辑档案');await fillProfile('备注','我的补充');const current={...supplier,fileIds:['peer-file'],contacts:[...supplier.contacts,{id:'peer-contact',name:'同事',role:'',email:'',phone:'',primary:false}],ratings:[...(supplier.ratings||[]),{id:'peer-rating',grade:'B' as const,period:'本季',note:'履约记录',at:'2026-10-14T03:00:00Z',actor:'主管'}]};state={...state,market:{...state.market,suppliers:state.market.suppliers.map(s=>s.id===supplier.id?current:s)}};bridge.current={...bridge.current,state,workspace:{id:'workspace',revision:9}};await repaint(supplier.id);await click('保存');expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.supplier.save',payload:expect.objectContaining({input:expect.objectContaining({note:'我的补充',fileIds:['peer-file']})})}),{expectedRevision:9});
+});
+it.each(['workspace','unread','revision'])('does not submit a supplier draft after source availability changes: %s',async kind=>{
+ const supplier=state.market.suppliers[0];await mount(supplier.id,'full');await click('编辑档案');await fillProfile('备注','保留输入');bridge.current={...bridge.current,state:kind==='unread'?null:state,workspace:{id:kind==='workspace'?'another':'workspace',revision:kind==='revision'?undefined:8}};await repaint(supplier.id);await click('保存');expect(bridge.current.run).not.toHaveBeenCalled();expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+});
+
+async function editContact(supplier:typeof state.market.suppliers[number]){await mount(supplier.id,'full');const row=[...document.querySelectorAll('.mist-quote-line')].find(e=>e.textContent?.includes(supplier.contacts[0].name)&&[...e.querySelectorAll('button')].some(b=>b.textContent==='编辑'))!;await act(async()=>[...row.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='编辑')!.click());await fillProfile('岗位','我的岗位补充');}
+it.each(['name','role','email','phone','primary','removed'])('refuses stale supplier contact data without losing input: %s',async field=>{
+ const supplier=state.market.suppliers.find(s=>s.contacts.length)!,contact=supplier.contacts[0];await editContact(supplier);const contacts=field==='removed'?supplier.contacts.filter(c=>c.id!==contact.id):supplier.contacts.map(c=>c.id===contact.id?{...c,[field]:field==='primary'?!contact.primary:'同事更新'}:c);state={...state,market:{...state.market,suppliers:state.market.suppliers.map(s=>s.id===supplier.id?{...s,contacts}:s)}}as MistState;bridge.current={...bridge.current,state,workspace:{id:'workspace',revision:8}};await repaint(supplier.id);await click('保存');expect(bridge.current.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('联系人资料已更新，请重新打开后核对');expect((document.querySelector('[aria-label="岗位"]')as HTMLInputElement).value).toBe('我的岗位补充');
+});
+it('does not delete a supplier contact updated after confirmation opened',async()=>{
+ const supplier=state.market.suppliers.find(s=>s.contacts.length)!,contact=supplier.contacts[0];await mount(supplier.id,'full');const row=[...document.querySelectorAll('.mist-quote-line')].find(e=>e.textContent?.includes(contact.name)&&[...e.querySelectorAll('button')].some(b=>b.textContent==='删除'))!;await act(async()=>[...row.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='删除')!.click());state={...state,market:{...state.market,suppliers:state.market.suppliers.map(s=>s.id===supplier.id?{...s,contacts:s.contacts.map(c=>c.id===contact.id?{...c,phone:'0001'}:c)}:s)}};bridge.current={...bridge.current,state,workspace:{id:'workspace',revision:8}};await repaint(supplier.id);await act(async()=>getByRole(getByRole(document.body,'dialog'),'button',{name:'删除',exact:true}).click());expect(bridge.current.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('联系人资料已更新，请重新打开后核对');
+});
+it('allows unrelated supplier profile changes while using the checked revision for contact edits',async()=>{
+ const supplier=state.market.suppliers.find(s=>s.contacts.length)!;await editContact(supplier);state={...state,market:{...state.market,suppliers:state.market.suppliers.map(s=>s.id===supplier.id?{...s,address:'同事新地址'}:s)}};bridge.current={...bridge.current,state,workspace:{id:'workspace',revision:9}};await repaint(supplier.id);await click('保存');expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.contact.save',payload:expect.objectContaining({kind:'supplier',parentId:supplier.id,role:'我的岗位补充'})}),{expectedRevision:9});
+});
+it('does not replace a primary contact newly assigned by a colleague from an older form',async()=>{
+ const supplier=state.market.suppliers.find(s=>s.contacts.length)!,first={...supplier.contacts[0],primary:false},second={...first,id:'second-contact',name:'其他联系人'};supplier.contacts=[first,second];await editContact(supplier);await act(async()=>getByRole(document.body,'checkbox',{name:'主联系人'}).click());state={...state,market:{...state.market,suppliers:state.market.suppliers.map(s=>s.id===supplier.id?{...s,contacts:s.contacts.map(c=>c.id===second.id?{...c,primary:true}:c)}:s)}};bridge.current={...bridge.current,state,workspace:{id:'workspace',revision:8}};await repaint(supplier.id);await click('保存');expect(bridge.current.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('主联系人已更新，请重新打开后核对');
+});
+
+async function openCertificate(supplier:typeof state.market.suppliers[number],label='更新'){await mount(supplier.id,'full');const cert=supplier.certificates![0],row=[...document.querySelectorAll('[data-supplier-certs] [role="listitem"]')].find(e=>e.textContent?.includes(cert.name))!;await act(async()=>[...row.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent===label)!.click());return cert;}
+it.each(['name','number','issuer','validUntil','fileIds','removed'])('refuses changed supplier certification source: %s',async field=>{
+ const supplier=state.market.suppliers.find(s=>s.certificates?.length)!,cert=await openCertificate(supplier);await fillProfile('证书编号','我的补充编号');state={...state,market:{...state.market,suppliers:state.market.suppliers.map(s=>s.id===supplier.id?{...s,certificates:field==='removed'?s.certificates!.filter(c=>c.id!==cert.id):s.certificates!.map(c=>c.id===cert.id?{...c,[field]:field==='fileIds'?['peer-file']:field==='validUntil'?'2028-12-31':'同事更新'}:c)}:s)}}as MistState;bridge.current={...bridge.current,state,workspace:{id:'workspace',revision:8}};await repaint(supplier.id);await click('保存');expect(bridge.current.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('认证资料已更新，请重新打开后核对');expect((document.querySelector('[aria-label="证书编号"]')as HTMLInputElement).value).toBe('我的补充编号');
+});
+it('refuses deleting a certification updated after its confirmation opened',async()=>{
+ const supplier=state.market.suppliers.find(s=>s.certificates?.length)!,cert=await openCertificate(supplier,'删除');state={...state,market:{...state.market,suppliers:state.market.suppliers.map(s=>s.id===supplier.id?{...s,certificates:s.certificates!.map(c=>c.id===cert.id?{...c,issuer:'同事机构'}:c)}:s)}};bridge.current={...bridge.current,state,workspace:{id:'workspace',revision:8}};await repaint(supplier.id);await act(async()=>getByRole(getByRole(document.body,'dialog'),'button',{name:'删除',exact:true}).click());expect(bridge.current.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('认证资料已更新，请重新打开后核对');
+});
+it('allows profile/contact refresh and a newly uploaded file while binding certification to the checked revision',async()=>{
+ const supplier=state.market.suppliers.find(s=>s.certificates?.length)!;await openCertificate(supplier);await fillProfile('证书编号','我的补充编号');state={...state,files:[...state.files,{id:'new-upload',name:'证据.pdf',size:1,mimeType:'application/pdf',storageKey:'new-upload',createdAt:'2026-10-14T03:00:00Z'}],market:{...state.market,suppliers:state.market.suppliers.map(s=>s.id===supplier.id?{...s,address:'同事新地址'}:s)}};bridge.current={...bridge.current,state,workspace:{id:'workspace',revision:9}};await repaint(supplier.id);await click('保存');expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.supplier.certificate.save',payload:expect.objectContaining({supplierId:supplier.id,number:'我的补充编号'})}),{expectedRevision:9});
+});
+it.each(['full','preview'])('does not infer a primary supplier contact from its first row: %s',async mode=>{
+ const supplier=state.market.suppliers.find(s=>s.contacts.length)!;supplier.contacts=supplier.contacts.map(c=>({...c,primary:false}));await mount(supplier.id,mode==='full'?'full':undefined);const label=[...host.querySelectorAll('.mist-facts small')].find(e=>e.textContent==='主联系人')!;expect(label.nextElementSibling?.textContent).toBe('未指定');
+});
+it.each(['full','preview'])('shows the explicitly designated supplier primary contact: %s',async mode=>{
+ const supplier=state.market.suppliers.find(s=>s.contacts.length)!,contact={...supplier.contacts[0],id:'chosen-contact',name:'指定联系人',role:''};supplier.contacts=[{...supplier.contacts[0],primary:false},{...contact,primary:true}];await mount(supplier.id,mode==='full'?'full':undefined);const label=[...host.querySelectorAll('.mist-facts small')].find(e=>e.textContent==='主联系人')!;expect(label.nextElementSibling?.textContent).toBe('指定联系人');
+});
+it.each([true,false])('does not present unread supplier data as an empty actionable list (loading %s)',async loading=>{
+ bridge.current={...bridge.current,state:null,loading,error:loading?'':'读取失败'};await mount();expect(button('新增供应商')!.disabled).toBe(true);expect(button('导出')!.disabled).toBe(true);expect(button('批量导入')!.disabled).toBe(true);expect(host.textContent).not.toContain('还没有供应商');expect(host.querySelector('.mist-pipeline')).toBeNull();if(!loading)expect(host.textContent).toContain('供应商资料未读取');expect(bridge.current.run).not.toHaveBeenCalled();
+});
+it('allows creation and import for a genuinely read empty supplier list',async()=>{
+ state.market.suppliers=[];await mount();expect(host.textContent).toContain('还没有供应商');expect(button('新增供应商')!.disabled).toBe(false);expect(button('批量导入')!.disabled).toBe(false);expect(host.textContent).not.toContain('供应商资料未读取');
+});
+it.each(['name','code','email','phone'])('finds the supplier through readable contact identifiers: %s',async kind=>{
+ const supplier=state.market.suppliers.find(s=>s.contacts.length)!;supplier.name='独立供应服务商';supplier.code='S-Q-999';Object.assign(supplier.contacts[0],{name:'联络标识',email:'unique.contact@example.invalid',phone:'0000-998877'});const query={name:supplier.contacts[0].name,code:supplier.code,email:supplier.contacts[0].email,phone:supplier.contacts[0].phone}[kind as 'name'|'code'|'email'|'phone'];await mount();const input=host.querySelector<HTMLInputElement>('.mist-search input')!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,query);input.dispatchEvent(new Event('input',{bubbles:true}));});const rows=[...host.querySelectorAll('[role="row"][tabindex]')];expect(rows).toHaveLength(1);expect(rows[0].textContent).toContain(supplier.name);
+});
+it('clears grade and country together with the remaining supplier filters',async()=>{
+ await mount();await act(async()=>getByRole(document.body,'button',{name:/^评级/}).click());await act(async()=>getByRole(document.body,'menuitemradio',{name:'A',exact:true}).click());await act(async()=>getByRole(document.body,'button',{name:/^国家地区/}).click());await act(async()=>getByRole(document.body,'menuitemradio',{name:'中国',exact:true}).click());const input=host.querySelector<HTMLInputElement>('.mist-search input')!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'ZXQ-NOMATCH');input.dispatchEvent(new Event('input',{bubbles:true}));});await click('清除筛选');expect(input.value).toBe('');expect(getByRole(document.body,'button',{name:/^评级/}).textContent).toContain('全部');expect(getByRole(document.body,'button',{name:/^国家地区/}).textContent).toContain('全部');expect([...host.querySelectorAll('[role="row"][tabindex]')]).toHaveLength(state.market.suppliers.length);
+});
+async function openBankEdit(supplier:typeof state.market.suppliers[number]){await mount(supplier.id,'full');const bank=document.querySelector('[data-supplier-bank]')!;await act(async()=>getByRole(bank as HTMLElement,'button',{name:'变更',exact:true}).click());await fillProfile('开户行','新的开户行');await fillProfile('账号','000000000000009999');await fillProfile('核实记录','依据原始联络资料核对账户');}
+it.each(['id','accountName','bankName','accountNo','swift','verification','state'])('does not replace a bank account from a changed active-account source: %s',async field=>{
+ const supplier=state.market.suppliers.find(s=>s.bankAccounts?.some(a=>a.state==='active'&&a.currency==='CNY'))!,bank=supplier.bankAccounts!.find(a=>a.state==='active'&&a.currency==='CNY')!;await openBankEdit(supplier);state={...state,market:{...state.market,suppliers:state.market.suppliers.map(s=>s.id===supplier.id?{...s,bankAccounts:s.bankAccounts!.map(a=>a.id===bank.id?{...a,[field]:field==='state'?'replaced':field==='accountNo'?'000000000000000003':'同事更新'}:a)}:s)}}as MistState;bridge.current={...bridge.current,state,workspace:{id:'workspace',revision:8}};await repaint(supplier.id);await click('保存');expect(bridge.current.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('收款账户已更新，请重新打开后核对');expect((document.querySelector('[aria-label="账号"]')as HTMLInputElement).value).toBe('000000000000009999');
+});
+it('does not block a bank draft because another currency changed',async()=>{
+ const supplier=state.market.suppliers.find(s=>s.bankAccounts?.some(a=>a.state==='active'&&a.currency==='CNY'))!,bank=supplier.bankAccounts!.find(a=>a.state==='active'&&a.currency==='CNY')!;await openBankEdit(supplier);state={...state,market:{...state.market,suppliers:state.market.suppliers.map(s=>s.id===supplier.id?{...s,bankAccounts:[...s.bankAccounts!,{...bank,id:'peer-usd',currency:'USD',accountNo:'000000000000000004'}]}:s)}};bridge.current={...bridge.current,state,workspace:{id:'workspace',revision:9}};await repaint(supplier.id);await click('保存');expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.supplier.bank.save',payload:expect.objectContaining({currency:'CNY',accountNo:'000000000000009999'})}),{expectedRevision:9});
+});
+it('checks the currency actually selected in a bank draft',async()=>{
+ const supplier=state.market.suppliers.find(s=>s.bankAccounts?.some(a=>a.state==='active'&&a.currency==='CNY'))!,bank=supplier.bankAccounts!.find(a=>a.state==='active'&&a.currency==='CNY')!;await openBankEdit(supplier);await act(async()=>fireEvent.change(getByRole(getByRole(document.body,'dialog'),'combobox',{name:'币种'}),{target:{value:'USD'}}));state={...state,market:{...state.market,suppliers:state.market.suppliers.map(s=>s.id===supplier.id?{...s,bankAccounts:[...s.bankAccounts!,{...bank,id:'peer-usd',currency:'USD',accountNo:'000000000000000004'}]}:s)}};bridge.current={...bridge.current,state,workspace:{id:'workspace',revision:9}};await repaint(supplier.id);await click('保存');expect(bridge.current.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('收款账户已更新，请重新打开后核对');
+});
+it('does not disable a bank account replaced since its confirmation opened',async()=>{
+ const supplier=state.market.suppliers.find(s=>s.bankAccounts?.some(a=>a.state==='active'&&a.currency==='CNY'))!,bank=supplier.bankAccounts!.find(a=>a.state==='active'&&a.currency==='CNY')!;await mount(supplier.id,'full');await act(async()=>getByRole(document.querySelector('[data-supplier-bank]')as HTMLElement,'button',{name:'停用',exact:true}).click());await fillProfile('停用原因','已核对新的收款资料');state={...state,market:{...state.market,suppliers:state.market.suppliers.map(s=>s.id===supplier.id?{...s,bankAccounts:s.bankAccounts!.map(a=>a.id===bank.id?{...a,state:'replaced' as const}:a)}:s)}};bridge.current={...bridge.current,state,workspace:{id:'workspace',revision:8}};await repaint(supplier.id);await act(async()=>getByRole(getByRole(document.body,'dialog'),'button',{name:'停用',exact:true}).click());expect(bridge.current.run).not.toHaveBeenCalled();expect(document.body.textContent).toContain('收款账户已更新，请重新打开后核对');
+});
 
 describe('供应商管理', () => {
+  it('excludes a confirmed final short closure from open work while preserving original quantity and delivery KPIs', async () => {
+    const supplier = named('华盛毛纺'), po = supplierPerformance(state, supplier.id).open[0];
+    po.state = 'approved';
+    const before = supplierPerformance(state, supplier.id), originalQuantity = po.quantity;
+    state.payables.settlements.push({ id: 'final-short', purchaseId: po.id, final: true, state: 'confirmed' } as any);
+    const after = supplierPerformance(state, supplier.id);
+    expect(after.open.some(p => p.id === po.id)).toBe(false);
+    expect(after.completed).toEqual(before.completed);
+    expect(after.onTime).toBe(before.onTime);
+    expect(po.quantity).toBe(originalQuantity);
+    await mount(supplier.id, 'full');
+    expect(queryByRole(document.body, 'list', { name: '在手采购单' })).toBeNull();
+    const closed = getByRole(document.body, 'list', { name: '短交结案采购单' });
+    expect(closed.textContent).toContain(po.code);
+    expect(closed.textContent).toContain('短交结案');
+    expect(closed.textContent).toContain(String(originalQuantity));
+    await act(async () => fireEvent.click(getByRole(closed, 'button', { name: '打开', exact: true })));
+    expect(go).toHaveBeenCalledWith('procurement', po.id);
+  });
+  it.each(['pending', 'returned', 'cancelled', 'reversed'] as const)('does not close supplier work for a %s final settlement', status => {
+    const supplier = named('华盛毛纺'), po = supplierPerformance(state, supplier.id).open[0];
+    state.payables.settlements.push({ id: 'not-final-confirmed', purchaseId: po.id, final: true, state: status } as any);
+    expect(supplierPerformance(state, supplier.id).open.some(p => p.id === po.id)).toBe(true);
+  });
+  it('keeps partial confirmed settlements and other suppliers from closing an open purchase', () => {
+    const supplier = named('华盛毛纺'), po = supplierPerformance(state, supplier.id).open[0];
+    state.payables.settlements.push({ id: 'partial-confirmed', purchaseId: po.id, final: false, state: 'confirmed' } as any,
+      { id: 'different-purchase', purchaseId: 'other-po', final: true, state: 'confirmed' } as any);
+    expect(supplierPerformance(state, supplier.id).open.some(p => p.id === po.id)).toBe(true);
+  });
+
   it('switches a service provider form to service details and submits no factory capacity',async()=>{
     await mount();await click('新增供应商');
     const type=getByRole(document.body,'combobox',{name:'供应商类型'});
@@ -37,7 +138,7 @@ describe('供应商管理', () => {
       await act(async()=>fireEvent.change(getByRole(document.body,'textbox',{name,exact:true}),{target:{value}}));
     }
     await click('保存');
-    expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.supplier.save',payload:expect.objectContaining({input:expect.objectContaining({type:'服务商',address:'上海',capabilities:'出口货运及报关',capacity:0,capacityUnit:'',leadDays:0})})}));
+    expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.supplier.save',payload:expect.objectContaining({input:expect.objectContaining({type:'服务商',address:'上海',capabilities:'出口货运及报关',capacity:0,capacityUnit:'',leadDays:0})})}), {expectedRevision:7});
   });
   it('shows service details and contacts without manufacturing KPIs or a production RFQ action',async()=>{
     const row={...named('华盛毛纺'),id:'service',code:'LOG-001',name:'浦江物流',type:'服务商',capabilities:'出口货运及报关',capacity:0,capacityUnit:'',leadDays:0,certificates:[],ratings:[]};state.market.suppliers.push(row);
@@ -114,6 +215,25 @@ it.each(['成衣加工','服务商'])('creates %s with only name and type and no
  await act(async()=>fireEvent.change(getByRole(document.body,'textbox',{name:'名称',exact:true}),{target:{value:'新供应商'}}));
  await act(async()=>fireEvent.change(getByRole(document.body,'combobox',{name:'供应商类型'}),{target:{value:type}}));
  await click('保存');
- expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.supplier.save',payload:expect.objectContaining({input:expect.objectContaining({name:'新供应商',type,capabilities:'',capacity:0,capacityUnit:'',leadDays:0})})}));
+ expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.supplier.save',payload:expect.objectContaining({input:expect.objectContaining({name:'新供应商',type,capabilities:'',capacity:0,capacityUnit:'',leadDays:0})})}), {expectedRevision:7});
  expect(bridge.current.run.mock.calls[0][0].payload.input.code).toBeUndefined();
+});
+
+function certificateSource(visible=true){
+ bridge.denied.add('suppliers:write');bridge.denied.add('suppliers:admin');const supplier=state.market.suppliers[0],file={id:'readonly-cert-file',name:'customer-audit.txt',mimeType:'text/plain',storageKey:'w/readonly-cert-file',size:12,createdAt:'2026-10-13T08:00:00Z'};
+ supplier.certificates=[{id:'certificate',name:'客户内部审核',number:'AUD-1',issuer:'客户',validUntil:'2026-10-13',fileIds:[file.id],updatedAt:'2026-10-13T08:00:00Z'}];if(visible)state.files.push(file);return{supplier,file};
+}
+it('lets a supplier reader preview and download a certificate original without entering maintenance',async()=>{
+ const{supplier,file}=certificateSource();const original=structuredClone(state);await mount(supplier.id,'full');const row=getByRole(document.body,'list',{name:supplier.name+' 认证'}).querySelector('[role="listitem"]')!;
+ expect(queryByRole(row as HTMLElement,'button',{name:'更新',exact:true})).toBeNull();expect(queryByRole(row as HTMLElement,'button',{name:'删除',exact:true})).toBeNull();
+ await act(async()=>getByRole(row as HTMLElement,'button',{name:'下载',exact:true}).click());expect(bridge.current.downloadFile).toHaveBeenCalledWith(file);
+ await act(async()=>getByRole(row as HTMLElement,'button',{name:file.name,exact:true}).click());expect(getByRole(document.body,'dialog',{name:file.name,exact:true})).toBeTruthy();expect(bridge.current.readFile).toHaveBeenCalledWith(file);expect(bridge.current.run).not.toHaveBeenCalled();expect(state).toEqual(original);
+});
+it('withholds original actions when its file metadata is hidden or missing',async()=>{
+ const{supplier,file}=certificateSource(false);await mount(supplier.id,'full');const row=getByRole(document.body,'list',{name:supplier.name+' 认证'}).querySelector('[role="listitem"]')as HTMLElement;
+ expect(row.textContent).toContain('附件暂不可用');expect(queryByRole(row,'button',{name:file.name,exact:true})).toBeNull();expect(queryByRole(row,'button',{name:'下载',exact:true})).toBeNull();expect(bridge.current.downloadFile).not.toHaveBeenCalled();expect(bridge.current.run).not.toHaveBeenCalled();
+});
+it('shows a short unavailable notice after the server refuses the original and keeps retry on the same file',async()=>{
+ const{supplier,file}=certificateSource();bridge.current.downloadFile.mockRejectedValueOnce(new Error('FILE_NOT_FOUND'));await mount(supplier.id,'full');const row=getByRole(document.body,'list',{name:supplier.name+' 认证'}).querySelector('[role="listitem"]')as HTMLElement;
+ await act(async()=>getByRole(row,'button',{name:'下载',exact:true}).click());expect(row.textContent).toContain('附件暂不可用');expect(row.textContent).not.toContain('FILE_NOT_FOUND');await act(async()=>getByRole(row,'button',{name:'下载',exact:true}).click());expect(bridge.current.downloadFile).toHaveBeenNthCalledWith(2,file);expect(row.textContent).not.toContain('附件暂不可用');expect(bridge.current.run).not.toHaveBeenCalled();
 });

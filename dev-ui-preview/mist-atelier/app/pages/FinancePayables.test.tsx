@@ -17,7 +17,7 @@ import { signPads } from '../runtime/signTestUtils';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLElement, root: Root, route: { view: string; id?: string; section?: string };
 const go = vi.fn(), day = platformBusinessDate(new Date());
-function render() { act(() => root.render(<MistRoot><ToastProvider><Nav.Provider value={{ route, go, theme: 'light', toggleTheme: vi.fn(), openAI: vi.fn(), openPalette: vi.fn() } as any}><FinancePayables /></Nav.Provider></ToastProvider></MistRoot>)); }
+function render() { act(() => root.render(<MistRoot><ToastProvider><Nav.Provider value={{ route, go, theme: 'light', toggleTheme: vi.fn(), openAI: vi.fn(), openPalette: vi.fn() } as any}>{store.value.shellError&&store.value.error&&<div role="alert">{store.value.error}</div>}<FinancePayables /></Nav.Provider></ToastProvider></MistRoot>)); }
 const click = async (name: string | RegExp, scope: HTMLElement = document.body) => { await act(async () => (getAllByRole(scope, 'button', { name })[0] as HTMLButtonElement).click()); };
 function input(label: string, value: string) { const c = getByLabelText(document.body, label) as HTMLInputElement; act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(c, value); c.dispatchEvent(new Event('input', { bubbles: true })); }); }
 function select(label: string, value: string) { const c = getByLabelText(document.body, label) as HTMLSelectElement; act(() => { c.value = value; c.dispatchEvent(new Event('change', { bubbles: true })); }); }
@@ -25,11 +25,37 @@ let po: any, ctx: any;
 beforeEach(() => {
   let serial = 0; const context = ctx = { id: () => `ui-${++serial}`, actorName: '财务', actorId: 'finance', now: new Date().toISOString(), authority: { supplier: {}, paymentTierReviewerIds: { pay_lt5: ['manager'], pay_gt5: ['manager'], pay_new_supplier: ['director'] } } };
   const state = createMistState(context, 'demo'); state.payables!.bills = []; /* 演示自带出口退税专票；本组从没有票据开始 */ po = state.fulfillment.purchases.find(p => p.code === 'PO-2026-00001');
-  store.value = { state, workspace: { id: 'space' }, loading: false, saving: false, pending: null, run: vi.fn(async (command: any) => { const r = applyMistCommand(store.value.state, command, context); store.value.state = r.state; render(); return { requestId: 'req', revision: 1, result: r.result }; }) };
+  store.value = { state, workspace: { id: 'space', supportsSignedSettlementAllowance: true }, loading: false, saving: false, pending: null, run: vi.fn(async (command: any) => { const r = applyMistCommand(store.value.state, command, context); store.value.state = r.state; render(); return { requestId: 'req', revision: 1, result: r.result }; }) };
   go.mockReset(); route = { view: 'payment-vouchers', section: 'payables' };
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
+
+function disputedSettlement(withFile = true) {
+ const s = store.value.state, id = 'deduction-st';
+ s.files.push({id:'allowance-file',name:'factory-allowance.txt',mimeType:'text/plain',size:4,storageKey:'unit/allowance',createdAt:ctx.now});
+ s.fulfillment.receipts = [{id:'allowance-rc',purchaseId:po.id,quantity:2400,rejected:0,destination:'warehouse',location:'嘉兴仓',date:day,evidence:'准确收货',fileIds:[],actor:'仓库',createdAt:ctx.now}];po.received=2400;
+ s.fulfillment.qcTasks.push({id:'allowance-qc',code:'QC-ALLOWANCE',kind:'production',domain:'fabric',source:{kind:'orderLine',orderId:po.orderId,lineId:po.lineId},state:'reported',reportIds:['qc-report'],dispositions:[{id:'allowance-decision',kind:'chargeback',reportId:'qc-report',status:'open',amount:500,purchaseId:po.id,fileIds:withFile?['allowance-file']:[],note:'供方书面折让'}]});
+ s.payables.settlements=[{id,code:'ST-ALLOWANCE',purchaseId:po.id,purchaseCode:po.code,supplierId:po.supplierId,supplier:po.supplier,currency:po.currency,unit:po.unit,price:po.price,receiptIds:['allowance-rc'],quantity:2400,rejected:0,amount:111600,final:true,disputes:[{description:'供方书面质量折让',amount:500,qcDispositionId:'allowance-decision'}],note:'按实际收货结算',fileIds:[],state:'pending',submitterId:'sales',submittedBy:'业务员',submittedAt:ctx.now}];
+ route={view:'payment-vouchers',section:'payables',id};render();return id;
+}
+function reviewNote(value:string) { const node=getByLabelText(document.body,'复核意见') as HTMLTextAreaElement;act(()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new Event('input',{bubbles:true}));}); }
+it('确认扣款须核金额、原件和新签字，开票默认使用扣后净额',async()=>{
+ const id=disputedSettlement();await click('确认结算');let cd=dialog('确认结算');
+ input('价款折让金额','500.01');await click('确认结算',cd);expect(cd.textContent).toMatch(/扣款.*超过/);expect((getByLabelText(cd,'价款折让金额') as HTMLInputElement).value).toBe('500.01');
+ input('价款折让金额','500');expect(cd.textContent).toContain('factory-allowance.txt');reviewNote('已核对供方书面折让500元，按扣后111100元结算');expect(cd.textContent).toContain('111,100.00 CNY');await click('确认结算',cd);expect(cd.textContent).toContain('请先手写签字');
+ await signPads(cd);await click('确认结算',cd);expect(store.value.state.payables.settlements.find((x:any)=>x.id===id)).toMatchObject({state:'confirmed',amount:111600,confirmation:{deductionAmount:500,deductionFileIds:['allowance-file'],prepaymentApplied:0}});
+ await click('按结算登记票据');cd=dialog('登记供应商票据');expect((getByLabelText(cd,po.code+' 本票金额') as HTMLInputElement).value).toBe('111100');
+});
+it('扣款缺原件时保留财务输入并拒绝确认',async()=>{
+ disputedSettlement(false);await click('确认结算');const cd=dialog('确认结算');input('价款折让金额','500');reviewNote('金额正确但还未取得书面原件');await click('确认结算',cd);expect(cd.textContent).toMatch(/扣款.*(原件|文件|依据)/);expect(store.value.state.payables.settlements[0].state).toBe('pending');expect((getByLabelText(cd,'价款折让金额') as HTMLInputElement).value).toBe('500');
+});
+it('服务未声明价款折让能力时不提交已填写的折让，不让旧服务忽略金额',async()=>{
+ disputedSettlement();await click('确认结算');const cd=dialog('确认结算');input('价款折让金额','500');reviewNote('供方已同意价款折让');
+ delete store.value.workspace.supportsSignedSettlementAllowance;render();expect((getByLabelText(cd,'价款折让金额') as HTMLInputElement).disabled).toBe(true);await click('确认结算',cd);
+ expect(cd.textContent).toContain('请更新服务后再确认价款折让');expect(store.value.run).not.toHaveBeenCalled();expect(store.value.state.payables.settlements[0].state).toBe('pending');
+ store.value.workspace.supportsSignedSettlementAllowance=true;render();expect((getByLabelText(cd,'价款折让金额') as HTMLInputElement).disabled).toBe(false);expect((getByLabelText(cd,'价款折让金额') as HTMLInputElement).value).toBe('500');
+});
 
 it('requires an explicit no-compensation basis before closing a disposal review',async()=>{
  store.value.workspace.financialDisposals=[{returnId:'ret',purchaseId:'p',purchaseCode:'PO-1',supplier:'供应商',quantity:2,unit:'米',currency:'CNY',referenceAmount:32,decision:'scrap',disposalEvidence:'实际报废',report:'QC-1',settlementConfirmed:true,noRecovery:{actor:'主管',evidence:'确认不追偿'}}];
@@ -66,11 +92,14 @@ it('does not open a settlement write form from a contract URL without submit per
 it('keeps a supplier-direct receipt unavailable for settlement while the recipient still has uncounted goods',()=>{
   prepaidWithReceipt(); const receipt=store.value.state.fulfillment.receipts.find((row:any)=>row.id==='rcpt-2') || store.value.state.fulfillment.receipts.at(-1);
   receipt.destination='supplier'; receipt.materialDelivery={productionId:'target-production',orderId:'target-order',lineId:'target-line',supplierId:'factory',supplier:'Factory',receiverId:'receiver',receiver:'Receiver'};
+  receipt.quantity=980;receipt.rejected=70;receipt.materialDelivery.sentQuantity='1000';receipt.materialDelivery.receivingChecks=[{id:'count-1',acceptedQuantity:'400',rejectedQuantity:'20',previousQuantity:'1000',previousRejected:'50',at:ctx.now,actorId:'receiver',actor:'Receiver',evidence:'First count'}];
   store.value.userId='sales';store.value.permissions=[SETTLEMENT_SCOPES.submit];route.id=po.id;render();
   const form=getByRole(document.body,'dialog',{name:'提交结算'});
   const row=form.querySelector(`[data-settle-receipt="${receipt.id}"]`)!;
   expect((getByRole(row as HTMLElement,'checkbox') as HTMLInputElement).disabled).toBe(true);
   expect(row.textContent).toContain('待接收人点收');
+  expect(row.textContent).toContain('交付 1000');expect(row.textContent).toContain('已点收 400');expect(row.textContent).toContain('待点收 580');expect(row.textContent).not.toContain('实收 '+receipt.quantity);
+  receipt.materialDelivery.receivingChecks.push({id:'count-2',acceptedQuantity:'580',rejectedQuantity:'0',previousQuantity:'980',previousRejected:'70',at:ctx.now,actorId:'receiver',actor:'Receiver',evidence:'Counted remaining'});render();const counted=getByRole(document.body,'dialog',{name:'提交结算'}).querySelector(`[data-settle-receipt="${receipt.id}"]`)!;expect((getByRole(counted as HTMLElement,'checkbox') as HTMLInputElement).disabled).toBe(false);expect(counted.textContent).toContain('实收 '+receipt.quantity);expect(counted.textContent).not.toContain('待接收人点收');
   expect(store.value.run).not.toHaveBeenCalled();
 });
 
@@ -98,6 +127,56 @@ it('从待登记来源登记供应商票据：形成应付，合同还没收到�
   expect(store.value.state.payables.bills[0]).toMatchObject({ invoiceNo: 'VAT-HS-01', amount: 33480 });
   expect(getByRole(host, 'table', { name: '供应商应付汇总' }).textContent).toContain('33,480.00 CNY');
   expect(go).toHaveBeenLastCalledWith('payment-vouchers', store.value.state.payables.bills[0].id, { section: 'payables' }, { keepScroll: true });
+});
+
+async function openRejectedBillEditor(){
+  render();await click(/待登记来源/);await click('登记票据',getByRole(host,'table',{name:'待登记来源合同'}));
+  input(po.code+' 本票金额','33480');input('供应商发票号','VAT-FAILED-01');input('税额','3851.68');input('到期日',day);
+  return getByRole(document.body,'dialog',{name:'登记供应商票据'});
+}
+it.each([false,true])('preserves a bill editor across responsive detail changes from compact=%s',async initialCompact=>{
+  let compact=initialCompact;const listeners=new Set<()=>void>();
+  const media={get matches(){return compact;},addEventListener:(_type:string,listener:()=>void)=>listeners.add(listener),removeEventListener:(_type:string,listener:()=>void)=>listeners.delete(listener)};
+  vi.stubGlobal('matchMedia',vi.fn((query:string)=>query==='(max-width: 1180px)'?media:{matches:false,addEventListener:vi.fn(),removeEventListener:vi.fn()}));
+  try{
+    const id=disputedSettlement(),settlement=store.value.state.payables.settlements.find((row:any)=>row.id===id);
+    settlement.state='confirmed';settlement.confirmation={actorId:'finance',actor:'财务',at:ctx.now,prepaymentApplied:0,suggestedPrepayment:0,adjustReason:'',note:'已确认'};render();
+    await click('按结算登记票据');const editor=getByRole(document.body,'dialog',{name:'登记供应商票据'});
+    input('供应商发票号','VAT-RESPONSIVE-01');
+    await act(async()=>{compact=!initialCompact;listeners.forEach(listener=>listener());});
+    expect(queryAllByRole(document.body,'dialog')).toHaveLength(initialCompact?2:1);
+    expect(editor.contains(document.activeElement)).toBe(true);
+    expect((getByLabelText(editor,'供应商发票号') as HTMLInputElement).value).toBe('VAT-RESPONSIVE-01');
+    await click('取消',editor);
+    expect(queryByRole(document.body,'dialog',{name:'登记供应商票据'})).toBeNull();
+    expect(queryAllByRole(document.body,'dialog')).toHaveLength(initialCompact?0:1);
+    if(!initialCompact)expect(getByRole(document.body,'dialog',{name:'ST-ALLOWANCE'})).toBeTruthy();
+    expect(store.value.run).not.toHaveBeenCalled();
+  }finally{vi.unstubAllGlobals();}
+});
+it('keeps a confirmed supplier-bill failure in its dialog once without losing the entered amount',async()=>{
+  const message='本票对应金额超过结算未开票金额';store.value.shellError=true;store.value.error='';
+  store.value.dismissError=vi.fn((expected:string)=>{if(store.value.error===expected){store.value.error='';render();}});
+  store.value.run=vi.fn(async()=>{store.value.error=message;render();throw new Error(message);});
+  const editor=await openRejectedBillEditor();await click('登记应付',editor);
+  expect(document.body.textContent!.split(message)).toHaveLength(2);expect(store.value.dismissError).toHaveBeenCalledWith(message);
+  expect((getByLabelText(editor,po.code+' 本票金额') as HTMLInputElement).value).toBe('33480');
+});
+it('does not dismiss an uncertain supplier-bill command or hide its original recovery action',async()=>{
+  store.value.dismissError=vi.fn();store.value.run=vi.fn(async(command:any)=>{
+    store.value.pending={kind:'command',workspaceId:'space',requestId:'bill-uncertain',actorId:'finance',command};render();
+    throw Object.assign(new Error('结果待核对'),{mistPendingCommand:{workspaceId:'space',requestId:'bill-uncertain',actorId:'finance'}});
+  });
+  const editor=await openRejectedBillEditor();await click('登记应付',editor);
+  expect(store.value.dismissError).not.toHaveBeenCalled();expect(store.value.pending.requestId).toBe('bill-uncertain');
+  expect(getByRole(editor,'button',{name:'核对原操作结果'})).toBeTruthy();
+});
+it.each(['route','unmount'])('does not consume a new error when an old bill fails after %s',async change=>{
+  let reject!:(error:Error)=>void;store.value.dismissError=vi.fn();store.value.run=vi.fn(()=>new Promise((_yes,no)=>{reject=no;}));
+  const editor=await openRejectedBillEditor();await click('登记应付',editor);
+  if(change==='route'){route={...route,id:po.id};render();}else await act(async()=>root.render(<div>其它页面</div>));
+  store.value.error='新页面失败';await act(async()=>reject(new Error('旧票据失败')));
+  expect(store.value.dismissError).not.toHaveBeenCalled();expect(store.value.error).toBe('新页面失败');
 });
 
 it('有付款的票据不能作废，按钮写明原因；没有付款的作废要写原因', async () => {

@@ -20,8 +20,64 @@ function ready() {
   (f.state as MistState).settings.companyProfile = { ...company };
   return { f, shipmentId };
 }
+function customsReady() {
+  const { f, shipmentId } = ready(), line = f.state.orderLines[0], productionId = f.state.fulfillment.shipments.find(s => s.id === shipmentId)!.lines[0].productionId;
+  f.run({ type: 'fulfillment.shipments.pack', payload: { id: shipmentId, lines: [{ lineId: line.id, productionId, carton: 'C1', quantity: 10, netWeight: 5, grossWeight: 6, volume: 0.5, note: '' }] } });
+  const id = f.run({ type: 'fulfillment.customs.save', payload: { shipmentId, status: 'draft', declarationNo: '', broker: '报关行', hsCode: '', origin: '中国', tradeMode: '一般贸易', declaredAt: '', clearedAt: '', evidence: '', fileIds: [], note: '' } }).id!;
+  f.run({ type: 'fulfillment.customs.classify.save', payload: { family: 'garment', hsCode: '6203310000', declaredName: '男式羊毛西服上衣', brandType: '3', preference: '0', elements: ['机织', '西服上衣', '男式', '100%羊毛', '无品牌'], styles: [line.style], legalUnit: '件', secondUnit: '千克' } });
+  f.run({ type: 'fulfillment.customs.items', payload: { id } });
+  return { f, shipmentId, id };
+}
 
 describe('shipment document generation', () => {
+  it('keeps ordinary sales CI payable rather than labelling its value as a free replacement',()=>{
+    const {f,shipmentId}=ready();
+    const snapshot=prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId,orderId:f.orderId,type:'CI',dueDate:'2026-12-01'}},f.context);
+    expect(renderGeneratedDocumentHtml(snapshot)).not.toMatch(/no charge|value for customs purposes only/i);
+  });
+  it('keeps each consolidated CI package and weight totals within its own order',()=>{
+    const {f,shipmentId}=ready(),s=f.state.fulfillment.shipments.find(x=>x.id===shipmentId)!,order=f.state.orders.find(x=>x.id===f.orderId)!,line=f.state.orderLines.find(x=>x.orderId===order.id)!;
+    Object.assign(order,{type:'fabric',currency:'EUR'});Object.assign(line,{qty:130.5,unit:'米',price:7.8});
+    const secondOrder={...structuredClone(order),id:'order-b',code:'SO-F-B'},yards={...structuredClone(line),id:'line-yards',qty:110,unit:'码',price:1.75},secondLine={...structuredClone(line),id:'line-b',orderId:secondOrder.id,qty:70};
+    f.state.orders.push(secondOrder);f.state.orderLines.push(yards,secondLine);s.domain='fabric';
+    s.lines=[{...s.lines[0],quantity:130.5},{...s.lines[0],lineId:yards.id,productionId:'job-yards',quantity:110},{...s.lines[0],orderId:secondOrder.id,lineId:secondLine.id,productionId:'job-b',quantity:70}];
+    const rows=[{lineId:line.id,productionId:s.lines[0].productionId,carton:'A1',quantity:65.25,netWeight:40.56,grossWeight:41.56,volume:0.12},{lineId:line.id,productionId:s.lines[0].productionId,carton:'A2',quantity:65.25,netWeight:40.56,grossWeight:41.56,volume:0.12},{lineId:yards.id,productionId:'job-yards',carton:'T1',quantity:60,netWeight:7.82,grossWeight:8.32,volume:0.035},{lineId:yards.id,productionId:'job-yards',carton:'T2',quantity:50,netWeight:6.52,grossWeight:7.02,volume:0.03},{lineId:secondLine.id,productionId:'job-b',carton:'B1',quantity:70,netWeight:43.51,grossWeight:44.51,volume:0.13}];
+    f.state.fulfillment.packing=rows.map((r,i)=>({...r,id:'packed-'+i,shipmentId,note:''}));
+    const snapshot=(type:string,orderId?:string)=>prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId,type,...(orderId?{orderId,dueDate:'2026-12-01'}:{})}},f.context);
+    const a=snapshot('CI',order.id),b=snapshot('CI',secondOrder.id),pl=snapshot('PL');
+    const weights=(doc:typeof a)=>doc.facts?.find(x=>x.label.en==='Packages / Weights')?.value;
+    expect(weights(a)).toBe('4 · N.W. 95.46 kg · G.W. 98.46 kg');expect(weights(b)).toBe('1 · N.W. 43.51 kg · G.W. 44.51 kg');
+    expect(a.table!.totals!.amount).toBe('EUR 1,210.40');expect(b.table!.totals!.amount).toBe('EUR 546.00');
+    expect(pl.facts?.find(x=>x.label.en==='Packages')?.value).toBe('5');expect(pl.table!.totals).toMatchObject({qty:'200.5 米 / 110 码',nw:'138.97',gw:'142.97',cbm:'0.435'});
+    f.state.fulfillment.packing=f.state.fulfillment.packing.filter(x=>x.lineId!==secondLine.id);
+    expect(weights(snapshot('CI',secondOrder.id))).toBeUndefined();
+  });
+  it('prints each partial garment CI assortment from its exact shipment and production packing',()=>{
+    const {f,shipmentId}=ready(),line=f.state.orderLines[0],s=f.state.fulfillment.shipments.find(row=>row.id===shipmentId)!;
+    line.qty=12;line.price=42;line.breakdown={kind:'garment',sizes:['S','M','L','XL'],rows:[{color:'Blue',quantities:[2,4,4,2]}]};
+    const source=s.lines[0];source.quantity=8;
+    const second={...structuredClone(s),id:'shipment-second',code:'SHP-B',lines:[{...source,quantity:4}]};f.state.fulfillment.shipments.push(second);
+    const pack=(id:string,shipmentId:string,productionId:string|undefined,counts:number[])=>({id,shipmentId,lineId:line.id,productionId,carton:id,quantity:counts.reduce((a,b)=>a+b,0),netWeight:1,grossWeight:2,volume:0.1,note:'',assortment:counts.map((quantity,i)=>({color:'Blue',size:['S','M','L','XL'][i],quantity}))});
+    f.state.fulfillment.packing=[pack('A1',s.id,source.productionId,[1,1,1,1]),pack('A2',s.id,source.productionId,[1,1,1,1]),pack('B1',second.id,source.productionId,[0,2,2,0]),pack('other-branch',s.id,'other-production',[0,20,0,0])];
+    const ci=(id:string)=>prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId:id,type:'CI',orderId:f.orderId,dueDate:'2026-12-01'}},f.context);
+    const before=structuredClone(f.state),a=ci(s.id),b=ci(second.id);
+    expect(a.table!.rows[0]).toMatchObject({qty:'8 件',price:'42.00',amount:'336.00'});expect(a.table!.rows[0].desc).toContain('Blue：S 2 / M 2 / L 2 / XL 2（合计 8 件）');
+    expect(b.table!.rows[0]).toMatchObject({qty:'4 件',amount:'168.00'});expect(b.table!.rows[0].desc).toContain('Blue：M 2 / L 2（合计 4 件）');
+    expect(a.table!.rows[0].desc).not.toContain('12 件');expect(b.table!.rows[0].desc).not.toContain('XL');expect(f.state).toEqual(before);
+  });
+  it('never invents partial garment assortment before actual detailed packing is available',()=>{
+    const {f,shipmentId}=ready(),line=f.state.orderLines[0],s=f.state.fulfillment.shipments.find(row=>row.id===shipmentId)!;
+    line.breakdown={kind:'garment',sizes:['S','M'],rows:[{color:'Blue',quantities:[4,6]}]};s.lines[0].quantity=4;
+    const snapshot=prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CI',orderId:f.orderId,dueDate:'2026-12-01'}},f.context);
+    expect(snapshot.table!.rows[0].desc).toBe(line.name);expect(snapshot.table!.rows[0].qty).toBe('4 件');
+  });
+  it('keeps fabric physical specifications but prints only the actual batch colour quantity and source unit',()=>{
+    const {f,shipmentId}=ready(),line=f.state.orderLines[0],s=f.state.fulfillment.shipments.find(row=>row.id===shipmentId)!;
+    f.state.orders[0].type='fabric';s.domain='fabric';line.unit='码';line.qty=100;line.breakdown={kind:'fabric',width:150,weight:180,composition:'Cotton',rows:[{color:'Blue',quantity:60},{color:'White',quantity:40}]};s.lines[0].quantity=32.5;
+    f.state.fulfillment.packing=[{id:'P1',shipmentId,lineId:line.id,productionId:s.lines[0].productionId,carton:'R1',quantity:32.5,netWeight:2,grossWeight:3,volume:0.1,note:'',fabricColor:'Blue'}];
+    const snapshot=prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CI',orderId:f.orderId,dueDate:'2026-12-01'}},f.context),desc=snapshot.table!.rows[0].desc;
+    expect(desc).toContain('门幅 150 cm');expect(desc).toContain('克重 180 g/m²');expect(desc).toContain('Cotton');expect(desc).toContain('Blue 32.5（合计 32.5 码）');expect(desc).not.toContain('White');expect(desc).not.toContain('100 码');
+  });
   it('generates a CI draft from shipment and order prices, then issues it through the receivable rule', () => {
     const { f, shipmentId } = ready();
     const { result, snapshot, fileId } = generate(f, { type: 'fulfillment.documents.generate', payload: { shipmentId, type: 'CI', orderId: f.orderId, dueDate: '2026-12-01' } });
@@ -197,4 +253,175 @@ describe('external goods descriptions and customs facts',()=>{
   expect(snapshot.facts.some(fact=>fact.label.zh==='监管方式')).toBe(false);
   expect(snapshot.paragraphs[0].text).toContain('尚未建立商品归类');
  });
+ it('CD honors the saved manual declaration fields in its snapshot and rendered document',()=>{
+  const {f,shipmentId,id}=customsReady();
+  f.run({type:'fulfillment.customs.item.adjust',payload:{id,no:1,declaredName:'本批毛制上衣',elements:'本批70%羊毛30%涤纶',legalQty:10,secondQty:5.25,reason:'按本批实物及重新称重的申报依据核对'}});
+  const before=structuredClone(f.state),snapshot=prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CD'}},f.context);
+  expect(snapshot.table!.rows[0]).toMatchObject({name:'本批毛制上衣\n本批70%羊毛30%涤纶',qty:'10 件\n5.25 千克\n10 件',price:'10.00',amount:'100.00 USD'});
+  expect(renderGeneratedDocumentHtml(snapshot)).toContain('本批70%羊毛30%涤纶');expect(renderGeneratedDocumentHtml(snapshot)).not.toContain('100%羊毛');expect(f.state).toEqual(before);
+ });
+
+ it('CD reserves the second legal quantity row when no legal second unit is recorded',()=>{
+  const {f,shipmentId,id}=customsReady(),cls=f.state.fulfillment.customsClassifications![0];
+  f.run({type:'fulfillment.customs.classify.save',payload:{id:cls.id,family:cls.family,hsCode:cls.hsCode,declaredName:cls.declaredName,brandType:cls.brandType,preference:cls.preference,elements:cls.elements,styles:cls.styles,legalUnit:cls.legalUnit,secondUnit:'',note:cls.note}});
+  f.run({type:'fulfillment.customs.items',payload:{id}});
+  const before=structuredClone(f.state),snapshot=prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CD'}},f.context);
+  expect(snapshot.table!.rows[0].qty).toBe('10 件\n\n10 件');expect(renderGeneratedDocumentHtml(snapshot)).toContain('10 件<br><br>10 件');
+  expect(snapshot.table!.rows[0]).toMatchObject({price:'10.00',amount:'100.00 USD'});expect(f.state).toEqual(before);
+ });
+
+ it('refuses to issue a generated CD whose saved review fields changed after the PDF was frozen',()=>{
+  const {f,shipmentId,id}=customsReady(),printed=generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CD'}});
+  f.run({type:'fulfillment.customs.item.adjust',payload:{id,no:1,declaredName:'男式机织羊毛西服上衣',elements:f.state.fulfillment.customs.find(c=>c.id===id)!.items![0].elements,legalQty:10,secondQty:5,reason:'据供方确认资料及报关行审单意见补明织造口径'}});
+  const before=structuredClone(f.state);
+  expect(()=>f.run({type:'fulfillment.documents.issue',payload:{id:printed.result.id!}})).toThrow('报关资料已更新');
+  expect(f.state).toEqual(before);
+ });
+ it('allows the regenerated current CD and keeps generation date and unprinted bank changes from invalidating it',()=>{
+  const {f,shipmentId,id}=customsReady();const first=generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CD'}});
+  f.run({type:'fulfillment.customs.item.adjust',payload:{id,no:1,declaredName:'男式机织羊毛西服上衣',elements:f.state.fulfillment.customs.find(c=>c.id===id)!.items![0].elements,legalQty:10,secondQty:5,reason:'据本批已核商品事实补充申报品名'}});
+  const current=generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CD'}});expect(current.result.id).toBe(first.result.id);
+  f.state.settings.companyProfile!.bankAccount='unprinted-bank-change';
+  const result=f.run({type:'fulfillment.documents.issue',payload:{id:current.result.id!}},{...f.context,now:'2026-12-02T10:00:00.000Z'});
+  expect(result.id).toBe(current.result.id);expect(f.state.fulfillment.documents.find(d=>d.id===result.id)!.status).toBe('issued');expect(f.state.invoices).toHaveLength(0);
+ });
+ it('preserves the existing issue path for a manually uploaded CD original',()=>{
+  const {f,shipmentId}=customsReady(),printed=generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CD'}}),document=f.state.fulfillment.documents.find(d=>d.id===printed.result.id)!;
+  const file={...f.state.files.find(file=>file.id===printed.fileId)!,id:'manual-cd',name:'broker-reviewed-CD.pdf',storageKey:'manual-cd'};f.state.files.push(file);document.fileIds=[file.id];
+  const result=f.run({type:'fulfillment.documents.issue',payload:{id:document.id}});expect(result.id).toBe(document.id);expect(f.state.fulfillment.documents.find(d=>d.id===result.id)!.status).toBe('issued');
+ });
+ it.each(['quantity','price','netWeight','packages'] as const)('CD refuses stale saved declaration items after %s changes',change=>{
+  const {f,shipmentId}=customsReady(),shipment=f.state.fulfillment.shipments.find(s=>s.id===shipmentId)!;
+  if(change==='quantity')shipment.lines[0].quantity=9;
+  if(change==='price')f.state.orderLines[0].price=11;
+  const packing=f.state.fulfillment.packing.find(r=>r.shipmentId===shipmentId)!;
+  if(change==='netWeight')packing.netWeight=6;
+  if(change==='packages'){packing.quantity=5;packing.netWeight=2.5;packing.grossWeight=3;f.state.fulfillment.packing.push({...packing,id:'second-carton',carton:'C2'});}
+  const before=structuredClone(f.state);expect(documentGenerationBlocker(f.state,shipment,'CD')).toContain('重新生成商品项');
+  expect(()=>prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CD'}},f.context)).toThrow('重新生成商品项');expect(f.state).toEqual(before);
+ });
+});
+
+const acceptanceTerms={kind:'deliveryAcceptance' as const,days:30,terms:'交付验收后30天付款'};
+function withSightCredit(){
+ const {f,shipmentId}=ready(),order=f.state.orders.find(o=>o.id===f.orderId)!;
+ Object.assign(order.governance!.contract,{paymentMethod:'LC',paymentNote:'100% 即期信用证（L/C at sight），提单日后 21 天内交单',depositPercent:0,preShipmentPercent:0});
+ if(order.governance!.approvedSnapshot)order.governance!.approvedSnapshot.contract=structuredClone(order.governance!.contract);
+ f.run({type:'lc.save',payload:{input:{lcNo:'LC-SIGHT-01',orderIds:[order.id],issuingBank:'Test Issuing Bank',availableBy:'sight',
+  currency:order.currency,amount:'1000',issueDate:'2026-10-01',latestShipmentDate:'2026-10-30',expiryDate:'2026-11-20',presentationDays:15}}});
+ return {f,shipmentId};
+}
+it('issues the exact sight-credit CI and keeps trade terms separate from an unknown payment date',()=>{
+ const {f,shipmentId}=withSightCredit();
+ const {result,snapshot}=generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CI',orderId:f.orderId}});
+ const document=f.state.fulfillment.documents.find(d=>d.id===result.id)!;
+ expect(document).toMatchObject({dueDate:'',receivableDueCondition:{kind:'letterOfCredit'}});
+ expect(snapshot.facts.some(row=>row.label.en==='L/C no.'&&String(row.value).includes('LC-SIGHT-01'))).toBe(true);
+ expect(snapshot.facts.find(row=>row.label.en==='Payment')?.value).toContain('L/C at sight');
+ expect(snapshot.paragraphs.some(row=>row.title?.en==='Payment due')).toBe(false);
+ expect(renderGeneratedDocumentHtml(snapshot)).not.toContain('21 天内交单');
+ f.run({type:'fulfillment.documents.issue',payload:{id:document.id}});
+ const invoice=f.state.invoices.find(i=>i.sourceDocumentId===document.id)!;
+ expect(invoice).toMatchObject({financeStatus:'pending',due:'',open:0,receivableDueCondition:{kind:'letterOfCredit'}});
+ f.run({type:'finance.receivable.confirm',payload:{invoiceId:invoice.id}});
+ expect(f.state.invoices.find(i=>i.id===invoice.id)).toMatchObject({financeStatus:'confirmed',due:''});
+ expect(()=>f.run({type:'finance.receivable.due',payload:{invoiceId:invoice.id,acceptanceDate:'2026-10-13',acceptanceBasis:'simulated POD'}})).toThrow('验收账期');
+});
+it('rejects fixed dates on new sight-credit CIs from generated and manual paths',()=>{
+ const {f,shipmentId}=withSightCredit();
+ const common={shipmentId,type:'CI' as const,orderId:f.orderId,dueDate:'2026-11-21'};
+ const before=structuredClone(f.state);
+ expect(()=>generate(f,{type:'fulfillment.documents.generate',payload:common})).toThrow('信用证');
+ expect(()=>f.run({type:'fulfillment.documents.save',payload:{...common,number:'LC-MANUAL',title:'CI',content:'L/C at sight',fileIds:['contract']}})).toThrow('信用证');
+ expect(f.state).toEqual(before);
+});
+it('does not borrow another order’s credit for the CI of a consolidated T/T shipment',()=>{
+ const {f,shipmentId}=withSightCredit();
+ const first=f.state.orders.find(o=>o.id===f.orderId)!,shipment=f.state.fulfillment.shipments.find(s=>s.id===shipmentId)!;
+ const other={...structuredClone(first),id:'order-tt',code:'SO-TT'};
+ Object.assign(other.governance!.contract,{paymentMethod:'TT',paymentNote:'T/T 见提单副本'});
+ const line={...structuredClone(f.state.orderLines[0]),id:'line-tt',orderId:other.id};
+ f.state.orders.push(other);f.state.orderLines.push(line);
+ shipment.lines.push({...shipment.lines[0],orderId:other.id,lineId:line.id,productionId:'production-tt'});
+ const invoice=prepareGeneratedSnapshot(f.state,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CI',orderId:other.id,dueDate:'2026-11-21'}},f.context);
+ expect(invoice.facts.some(row=>row.label.en==='L/C no.')).toBe(false);
+ expect(invoice.facts.find(row=>row.label.en==='Payment')?.value).toContain('T/T');
+ expect(invoice.paragraphs).toContainEqual(expect.objectContaining({text:'2026-11-21'}));
+});
+function withAcceptanceContract(){const r=ready(),order=r.f.state.orders.find(o=>o.id===r.f.orderId)!;Object.assign(order.governance!.contract,{paymentMethod:'OA',paymentNote:acceptanceTerms.terms,depositPercent:0,preShipmentPercent:0});if(order.governance!.approvedSnapshot)order.governance!.approvedSnapshot.contract=structuredClone(order.governance!.contract);return r;}
+function pendingAcceptanceInvoice(){
+ const {f,shipmentId}=withAcceptanceContract();
+ f.state.fulfillment.documents.push({id:'acceptance-ci',shipmentId,orderId:f.orderId,type:'CI',number:'CI-ACCEPTANCE',version:1,title:'CI',dueDate:'',content:'O/A 30 days after delivery acceptance',fileIds:['contract'],status:'issued',createdAt:f.context.now,actor:'业务',invoiceId:'acceptance-ar',receivableDueCondition:acceptanceTerms} as any);
+ f.state.invoices.push({id:'acceptance-ar',code:'CI-ACCEPTANCE',orderId:f.orderId,order:'SO-LOCAL',customer:'客户',currency:'USD',amount:100,open:0,due:'',financeStatus:'pending',sourceDocumentId:'acceptance-ci',receivableDueCondition:acceptanceTerms} as any);
+ const shipment=f.state.fulfillment.shipments.find(s=>s.id===shipmentId)!;shipment.state='departed';shipment.departedAt='2026-10-19T04:00:00.000Z';
+ return {f,shipmentId,shipment,invoiceId:'acceptance-ar'};
+}
+it('generates and issues an acceptance-based CI with contract terms and an unresolved date',()=>{
+ const {f,shipmentId}=withAcceptanceContract();
+ const {result,snapshot}=generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CI',orderId:f.orderId}});
+ const d=f.state.fulfillment.documents.find(d=>d.id===result.id)!;
+ expect(d).toMatchObject({dueDate:'',receivableDueCondition:acceptanceTerms});
+ expect(snapshot.facts.some(f=>String(f.value).includes(acceptanceTerms.terms))).toBe(true);
+ expect(snapshot.paragraphs.some(p=>p.text.includes('2026-'))).toBe(false);
+ f.run({type:'fulfillment.documents.issue',payload:{id:d.id}});
+ expect(f.state.invoices.at(-1)).toMatchObject({financeStatus:'pending',open:0,due:'',receivableDueCondition:acceptanceTerms});
+});
+it('refuses a fixed date that would override an acceptance-based generated CI',()=>{
+ const {f,shipmentId}=withAcceptanceContract();
+ expect(()=>generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CI',orderId:f.orderId,dueDate:'2026-12-19'}})).toThrow('验收');
+});
+it('keeps manually registered acceptance-based CI terms unresolved as well',()=>{
+ const {f,shipmentId}=withAcceptanceContract();
+ const made=f.run({type:'fulfillment.documents.save',payload:{shipmentId,orderId:f.orderId,type:'CI',number:'MANUAL-ACCEPTANCE',title:'CI',dueDate:'',content:'O/A 30 days after delivery acceptance',fileIds:['contract']}});
+ expect(f.state.fulfillment.documents.find(d=>d.id===made.id)).toMatchObject({dueDate:'',receivableDueCondition:acceptanceTerms});
+});
+it('allows finance to confirm the amount while the due date awaits actual acceptance',()=>{
+ const {f,invoiceId}=pendingAcceptanceInvoice(),ctx={...f.context,now:'2026-10-22T04:00:00Z',actorId:'fin',actorName:'财务'};
+ f.run({type:'finance.receivable.confirm',payload:{invoiceId}},ctx);
+ expect(f.state.invoices.find(i=>i.id===invoiceId)).toMatchObject({financeStatus:'confirmed',open:100,due:''});
+ const before=structuredClone(f.state);expect(()=>f.run({type:'finance.receivable.due',payload:{invoiceId,acceptanceDate:'2026-10-21',acceptanceBasis:'AC1'}},ctx)).toThrow('签收');expect(f.state).toEqual(before);
+});
+it('computes and corrects only the due date from actual acceptance, preserving amount and issued CI',()=>{
+ const {f,shipmentId,invoiceId}=pendingAcceptanceInvoice(),ctx={...f.context,now:'2026-10-22T04:00:00Z',actorId:'fin',actorName:'财务'};
+ f.run({type:'finance.receivable.confirm',payload:{invoiceId}},ctx);
+ f.state.fulfillment.shipments.find(s=>s.id===shipmentId)!.delivered={at:'2026-10-20T10:00:00Z',receiver:'Customer',evidence:'POD-1',fileIds:['contract'],recordedBy:'ops'};
+ for(const acceptanceDate of ['2026-10-19','2026-10-23']){const before=structuredClone(f.state);expect(()=>f.run({type:'finance.receivable.due',payload:{invoiceId,acceptanceDate,acceptanceBasis:'AC1'}},ctx)).toThrow();expect(f.state).toEqual(before);}
+ expect(()=>f.run({type:'finance.receivable.due',payload:{invoiceId,acceptanceDate:'2026-10-21',acceptanceBasis:''}},ctx)).toThrow('依据');
+ f.run({type:'finance.receivable.due',payload:{invoiceId,acceptanceDate:'2026-10-21',acceptanceBasis:'Customer AC1 and POD1'}},ctx);
+ expect(f.state.invoices.find(i=>i.id===invoiceId)).toMatchObject({financeStatus:'confirmed',amount:100,open:100,due:'2026-11-20',dueConfirmation:{acceptanceDate:'2026-10-21',basis:'Customer AC1 and POD1',actorId:'fin',shipmentId}});
+ const beforeCorrection=structuredClone(f.state);expect(()=>f.run({type:'finance.receivable.due',payload:{invoiceId,acceptanceDate:'2026-10-22',acceptanceBasis:'Corrected AC2'}},ctx)).toThrow('更正原因');expect(f.state).toEqual(beforeCorrection);
+ f.run({type:'finance.receivable.due',payload:{invoiceId,acceptanceDate:'2026-10-22',acceptanceBasis:'Corrected AC2',reason:'Original date was recorded one day early'}},ctx);
+ const invoice=f.state.invoices.find(i=>i.id===invoiceId)!;expect(invoice).toMatchObject({financeStatus:'confirmed',amount:100,open:100,due:'2026-11-21',dueConfirmation:{acceptanceDate:'2026-10-22'},dueHistory:[{acceptanceDate:'2026-10-21',due:'2026-11-20',replacementReason:'Original date was recorded one day early'}]});
+ expect(f.state.fulfillment.documents.find(d=>d.id==='acceptance-ci')!.dueDate).toBe('');
+});
+it('issues a valid conditional CI after JSON storage reordered its metadata keys',()=>{
+ const {f,shipmentId}=withAcceptanceContract(),made=generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CI',orderId:f.orderId}}),d=f.state.fulfillment.documents.find(d=>d.id===made.result.id)!;
+ d.receivableDueCondition={days:30,terms:acceptanceTerms.terms,kind:'deliveryAcceptance'};
+ expect(()=>f.run({type:'fulfillment.documents.issue',payload:{id:d.id}})).not.toThrow();
+});
+it('does not let the historical independent-invoice API bypass acceptance-based CI evidence',()=>{
+ const {f}=withAcceptanceContract(),draft=f.run({type:'platform.invoice.save',payload:{orderId:f.orderId,due:'2026-12-19',amount:100,note:'旧接口草稿'}}),before=structuredClone(f.state);
+ expect(()=>f.run({type:'platform.invoice.issue',payload:{id:draft.id as string}})).toThrow('验收账期');
+ expect(f.state).toEqual(before);
+});
+
+it('rejects an acceptance condition that no longer matches the exact issued CI',()=>{
+ const {f,shipment,invoiceId}=pendingAcceptanceInvoice();shipment.delivered={at:'2026-10-20T10:00:00Z',receiver:'Customer',evidence:'POD',fileIds:[],recordedBy:'ops'};
+ f.state.invoices.find(i=>i.id===invoiceId)!.receivableDueCondition={...acceptanceTerms,days:29};const before=structuredClone(f.state);
+ expect(()=>f.run({type:'finance.receivable.due',payload:{invoiceId,acceptanceDate:'2026-10-21',acceptanceBasis:'AC1'}},{...f.context,now:'2026-10-22T04:00:00Z'})).toThrow('来源不一致');expect(f.state).toEqual(before);
+});
+
+it('rejects an impossible fixed due date instead of freezing it into a CI PDF',()=>{
+ const {f,shipmentId}=ready();expect(()=>generate(f,{type:'fulfillment.documents.generate',payload:{shipmentId,type:'CI',orderId:f.orderId,dueDate:'2026-02-30'}})).toThrow('到期日');expect(f.state.fulfillment.documents.some(d=>d.type==='CI')).toBe(false);
+});
+
+it('does not accept caller-supplied money or credit days in a due-date review',()=>{
+ const {f,shipment,invoiceId}=pendingAcceptanceInvoice();shipment.delivered={at:'2026-10-20T10:00:00Z',receiver:'Buyer',evidence:'POD',fileIds:[],recordedBy:'Ops'};const before=structuredClone(f.state);
+ expect(()=>f.run({type:'finance.receivable.due',payload:{invoiceId,acceptanceDate:'2026-10-21',acceptanceBasis:'AC1',days:90,amount:1}} as any,{...f.context,now:'2026-10-22T04:00:00Z'})).toThrow('字段无效');expect(f.state).toEqual(before);
+});
+
+it('can verify an actual due date without also confirming the pending invoice amount',()=>{
+ const {f,shipment,invoiceId}=pendingAcceptanceInvoice();shipment.delivered={at:'2026-10-20T10:00:00Z',receiver:'Buyer',evidence:'POD',fileIds:[],recordedBy:'Ops'};
+ f.run({type:'finance.receivable.due',payload:{invoiceId,acceptanceDate:'2026-10-21',acceptanceBasis:'Customer AC1'}},{...f.context,now:'2026-10-22T04:00:00Z'});
+ expect(f.state.invoices.find(i=>i.id===invoiceId)).toMatchObject({financeStatus:'pending',open:0,amount:100,due:'2026-11-20'});expect(f.state.invoices.find(i=>i.id===invoiceId)!.financeConfirmedAt).toBeUndefined();
 });

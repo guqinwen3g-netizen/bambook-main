@@ -1,3 +1,4 @@
+import {retainFixtureFactoryTasks} from './__tests__/utils/devClose';
 import {describe,it,expect} from 'vitest';
 import { withTestFactories } from './__tests__/utils/devFactories';
 import {applyMistCommand,createMistState,type DevelopmentValues,type MistContext,type MistCommand} from './mistWorkspace';
@@ -71,7 +72,7 @@ describe('acceptance review #59: round creation boundaries',()=>{
   };
   const round=(devId:string,extra:Record<string,unknown>={})=>({type:'development.round.create' as const,payload:{devId,factories:['A厂'],requirements:'第二轮',targetDate:'2026-11-01',...extra}});
   for(const kind of ['cancelled','archived'] as const)it(`rejects a new round, revise and resample on a ${kind} case without writing`,()=>{
-    const t=setup();t.run({type:'development.close',payload:{devId:t.devId,kind,reason:'客户撤单'}});
+    const t=setup();t.run({type:'development.close',payload:{devId:t.devId,kind,reason:'客户撤单',...retainFixtureFactoryTasks(t.state,t.devId)}});
     const before=JSON.stringify(t.state);
     expect(()=>t.run(round(t.devId))).toThrow(kind==='cancelled'?/已取消，不能再开新一轮/:/已归档，不能再开新一轮/);
     expect(()=>t.run({type:'development.revise',payload:{devId:t.devId,versionId:t.versionId,note:'改'}})).toThrow(/不能再开新一轮/);

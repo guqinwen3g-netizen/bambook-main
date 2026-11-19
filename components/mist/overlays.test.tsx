@@ -54,6 +54,23 @@ it('keeps drawer focus inside and returns to the real trigger after Escape', () 
   key(document.activeElement!, 'Escape'); expect(host.querySelector('[role="dialog"]')).toBeNull(); expect(document.activeElement).toBe(trigger);
 });
 
+it('restores the opener after a close commit resets focus to the page body', async () => {
+  const oldTabIndex=document.body.getAttribute('tabindex');document.body.tabIndex=-1;
+  try {
+    const opener=document.createElement('button');document.body.append(opener);opener.focus();
+    function Example(){const[open,setOpen]=React.useState(true);React.useLayoutEffect(()=>{if(!open)document.body.focus();},[open]);return <MistRoot><Dialog open={open} onClose={()=>setOpen(false)} title="退款"><input aria-label="退款金额"/></Dialog></MistRoot>;}
+    const host=render(<Example/>);await act(async()=>{document.activeElement!.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));});
+    expect(host.querySelector('[role="dialog"]')).toBeNull();expect(document.activeElement).toBe(opener);
+  } finally { if(oldTabIndex===null)document.body.removeAttribute('tabindex');else document.body.setAttribute('tabindex',oldTabIndex); }
+});
+
+it('does not replace an explicit focus destination chosen while closing', async () => {
+  const opener=document.createElement('button'),next=document.createElement('button');document.body.append(opener,next);opener.focus();
+  function Example(){const[open,setOpen]=React.useState(true);React.useLayoutEffect(()=>{if(!open)next.focus();},[open]);return <MistRoot><Dialog open={open} onClose={()=>setOpen(false)} title="退款"><input aria-label="退款金额"/></Dialog></MistRoot>;}
+  render(<Example/>);await act(async()=>{document.activeElement!.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));});
+  expect(document.activeElement).toBe(next);
+});
+
 it('portals a dropdown out of a clipping ancestor into the nearest MistRoot and selects by keyboard', () => {
   const change = vi.fn();
   const host = render(<MistRoot theme="light"><MistRoot theme="dark"><div style={{ overflow: 'hidden' }}>

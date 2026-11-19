@@ -43,3 +43,13 @@ it('lets the owner revoke an issued key after AI access is lost without exposing
  await act(async()=>getByRole(host,'button',{name:'撤销',exact:true}).click());await flush();await act(async()=>getByRole(document.body,'button',{name:'确认撤销'}).click());await flush();
  const writes=seam.api.mock.calls.filter(([,init])=>init?.method==='POST');expect(writes).toHaveLength(1);expect(writes[0][0]).toMatch(/\/agent-identities\/identity\/revoke$/);expect(JSON.parse(writes[0][1].body)).toEqual({requestId:expect.any(String)});
 });
+
+it('shows Agent身份读取失败 without claiming an empty list and preserves retry',async()=>{
+  seam.api.mockRejectedValueOnce(new Error('本机读回暂不可用')).mockResolvedValueOnce({...page(),items:[]});
+  act(()=>paint());await flush();
+  expect(host.textContent).toContain('Agent身份读取失败');
+  expect(host.textContent).not.toContain('暂无分配给你的Agent身份');
+  await act(async()=>getByRole(host,'button',{name:'重试',exact:true}).click());await flush();
+  expect(host.textContent).toContain('暂无分配给你的Agent身份');
+  expect(seam.api.mock.calls.every(([,init])=>!init?.method||init.method==='GET')).toBe(true);
+});

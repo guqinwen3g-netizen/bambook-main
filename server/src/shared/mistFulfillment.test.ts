@@ -1,3 +1,4 @@
+import {shippingSampleSourceSnapshot} from './mistShipmentSampleCustody';
 import { fixture as professionalFixture } from '../mist/__tests__/professionalFulfillment';
 import { describe, expect, it } from 'vitest';
 import { applyMistCommand, createMistState, type MistContext, type MistState } from './mistWorkspace';
@@ -9,7 +10,7 @@ function setup(){let serial=0;const ctx:MistContext={id:()=>`id-${++serial}`,now
 function purchase(f:ReturnType<typeof setup>,kind:FulfillmentPurchase['kind']='material'){const o=f.root.orders[0],line=f.root.orderLines[0];const id=f.run({type:'fulfillment.procurement.save',payload:{orderId:o.id,lineId:line.id,kind,...(kind==='material'?{materialKind:'trims' as const}:{}),supplierId:'supplier',supplier:'伪造名称应被覆盖',description:'真实采购',quantity:10,unit:'件',price:2,currency:'USD',due:'2026-11-01',terms:'月结',destination:'上海仓',note:'',fileIds:[]}}).id!;return id;}
 function approve(f:ReturnType<typeof setup>,id:string){f.run({type:'fulfillment.procurement.submit',payload:{id}});f.run({type:'fulfillment.procurement.decide',payload:{id,decision:'approved',note:'已核对'}},{...f.ctx,actorId:'reviewer',actorName:'批准人'});f.run({type:'fulfillment.procurement.send',payload:{id,at:f.ctx.now,evidence:'批准合同已线下发出',fileIds:[]}});f.run({type:'fulfillment.procurement.confirm',payload:{id,at:f.ctx.now,confirmedDue:f.root.fulfillment.purchases.find(p=>p.id===id)!.due,evidence:'供应商已书面确认',fileIds:[]}});const branch=f.root.productions.find(p=>p.sourcePurchaseId===id);if(branch)prepareBranch(f,branch.id);}
 function terms(f:ReturnType<typeof setup>,partialAllowed=true){f.run({type:'fulfillment.shipments.sourceTerms',payload:{orderId:f.root.orders[0].id,consignee:'合同收货人',partialAllowed,mode:'sea',confirmedAt:'2026-10-12',evidence:'客户签订合同'}});}
-function approveSample(f:ReturnType<typeof setup>,productionId:string,role:'pp'|'shipping',shipmentId?:string){const branch=f.root.productions.find(p=>p.id===productionId)!;const source={kind:'orderLine' as const,orderId:branch.orderId,lineId:branch.lineId,productionId};const sampleId=f.run({type:'fulfillment.samples.create',payload:{name:'实际样品',category:'成衣',form:'实物',quantity:1,unit:'件',size:'M',color:'蓝',location:'样品室',source,role,shipmentId,note:'',fileIds:[]}}).id!;const task=f.run({type:'fulfillment.qc.request',payload:{source,sampleId,kind:'sample',domain:'garment',factory:'工厂',location:'现场',contact:'',due:'2026-10-13'}}).id!;f.run({type:'fulfillment.qc.claim',payload:{id:task,domain:'garment'}});f.run({type:'fulfillment.qc.report',payload:{id:task,domain:'garment',result:'pass',report:'SAMPLE',opinion:'实物已核对',measurements:[],sizeChecks:[{size:'M',inspected:1,result:'pass',evidence:'实际抽检'}],fileIds:[],reviewedAt:f.ctx.now}});f.run({type:'fulfillment.qc.confirm',payload:{id:task,result:'approved',note:'需求方确认'}});f.run({type:'fulfillment.qc.continue',payload:{id:task,note:'业务核对后继续'}});return task;}
+function approveSample(f:ReturnType<typeof setup>,productionId:string,role:'pp'|'shipping',shipmentId?:string){const branch=f.root.productions.find(p=>p.id===productionId)!;const source={kind:'orderLine' as const,orderId:branch.orderId,lineId:branch.lineId,productionId};const sampleId=f.run({type:'fulfillment.samples.create',payload:{name:'实际样品',category:'成衣',form:'实物',quantity:1,unit:'件',size:'M',color:'蓝',location:'样品室',source,role,shipmentId,note:'',fileIds:[]}}).id!;if(role==='shipping')f.run({type:'fulfillment.samples.shippingBasis',payload:{id:sampleId,kind:'independent',sourceSnapshot:shippingSampleSourceSnapshot(f.root,f.root.fulfillment.samples.find(s=>s.id===sampleId)!),independentSource:'Factory supplied a separate QA specimen, held outside commercial goods',evidence:'Separate physical fixture specimen checked',fileIds:[]}});const task=f.run({type:'fulfillment.qc.request',payload:{source,sampleId,kind:'sample',domain:'garment',factory:'工厂',location:'现场',contact:'',due:'2026-10-13'}}).id!;f.run({type:'fulfillment.qc.claim',payload:{id:task,domain:'garment'}});f.run({type:'fulfillment.qc.report',payload:{id:task,domain:'garment',result:'pass',report:'SAMPLE',opinion:'实物已核对',measurements:[],sizeChecks:[{size:'M',inspected:1,result:'pass',evidence:'实际抽检'}],fileIds:[],reviewedAt:f.ctx.now}});f.run({type:'fulfillment.qc.confirm',payload:{id:task,result:'approved',note:'需求方确认'}});f.run({type:'fulfillment.qc.continue',payload:{id:task,note:'业务核对后继续'}});return task;}
 function prepareBranch(f:ReturnType<typeof setup>,productionId:string){if(f.root.fulfillment.productionFacts.find(x=>x.productionId===productionId)?.release)return;const branch=f.root.productions.find(p=>p.id===productionId)!,wasDone=branch.col==='done';f.run({type:'fulfillment.production.plan',payload:{productionId,sizes:[{size:'M',quantity:branch.qty}]}});approveSample(f,productionId,'pp');f.run({type:'fulfillment.production.release',payload:{productionId,note:'已核对全部开产条件'}});if(wasDone)f.run({type:'fulfillment.production.complete',payload:{productionId,quantity:branch.qty,sizeQuantities:[{size:'M',quantity:branch.qty}],date:'2026-10-13',evidence:'明确最终点数',fileIds:[]}});}
 function shipment(f:ReturnType<typeof setup>,quantity=10){if(!f.root.productions.length){const order=f.root.orders[0],line=f.root.orderLines[0];f.root.productions.push({id:'ready-fixture',code:'PROD-READY',orderId:order.id,lineId:line.id,order:order.code,name:line.name,factory:'已确认工厂',qty:10,due:'2026-11-01',pct:100,img:'coat',col:'done'});}let branch=f.root.productions[0];prepareBranch(f,branch.id);branch=f.root.productions[0];if(!f.root.fulfillment.productionFacts.find(x=>x.productionId===branch.id)?.completion&&(branch.col==='done'||branch.sourcePurchaseId&&f.root.fulfillment.purchases.find(p=>p.id===branch.sourcePurchaseId)!.received>=10)){f.run({type:'fulfillment.production.complete',payload:{productionId:branch.id,quantity:10,sizeQuantities:[{size:'M',quantity:10}],date:'2026-10-13',evidence:'最终点数',fileIds:[]}});}const id=f.run({type:'fulfillment.shipments.save',payload:{consignee:'合同收货人',mode:'sea',portOfLoading:'上海',portOfDischarge:'伦敦',incoterm:'FOB',plannedDate:'2026-11-01',booking:'',lines:[{orderId:f.root.orders[0].id,lineId:f.root.orderLines[0].id,quantity,factoryConfirmedAt:'2026-10-12'}],note:'',fileIds:[]}}).id!;approveSample(f,branch.id,'shipping',id);return id;}
 
@@ -53,8 +54,11 @@ describe('Mist actual fulfillment chain',()=>{
   f.run({type:'fulfillment.production.resume',payload:{productionId:'hold',note:'面料已到仓'}});
   expect(fact().hold).toBeUndefined();expect(fact().holdLog).toEqual([expect.objectContaining({category:'material',reason:'面料未到',resumeNote:'面料已到仓'})]);expect(branch().risk).toBe('');
   expect(()=>assertProductionTransition(f.root,branch(),'sew',50)).not.toThrow();});
- it('QC transfer and reschedule are reasoned, limited to the current QC and audited',()=>{const f=setup();terms(f);shipment(f);const id=f.root.fulfillment.qcTasks[0].id,task=()=>f.root.fulfillment.qcTasks.find(t=>t.id===id)!;const members=[{id:'business',name:'业务员',active:true,groups:['garment' as const]},{id:'qc',name:'专业QC',active:true,groups:['garment' as const]},{id:'qc2',name:'接手QC',active:true,groups:['garment' as const]},{id:'gone',name:'离职QC',active:false,groups:['garment' as const]}];const qc={...f.ctx,actorName:'专业QC',actorId:'qc',members},other={...f.ctx,actorName:'接手QC',actorId:'qc2',members};
+ it('QC transfer and reschedule are reasoned, limited to the current QC and audited',()=>{const f=setup();terms(f);shipment(f);const id=f.root.fulfillment.qcTasks[0].id,task=()=>f.root.fulfillment.qcTasks.find(t=>t.id===id)!;const members=[{id:'business',name:'业务员',active:true,groups:['garment' as const]},{id:'qc',name:'专业QC',active:true,groups:['garment' as const]},{id:'qc2',name:'接手QC',active:true,groups:['garment' as const]},{id:'gone',name:'离职QC',active:false,groups:['garment' as const]}];const qc={...f.ctx,actorName:'专业QC',actorId:'qc',members,authority:{...f.ctx.authority!,qcAssigneeIds:{garment:['qc','qc2'],fabric:[]}}},other={...f.ctx,actorName:'接手QC',actorId:'qc2',members};
   Object.assign(task(),{assignee:'专业QC',assigneeId:'qc',state:'working'});
+  const before=structuredClone(f.root);expect(()=>f.run({type:'fulfillment.qc.transfer',payload:{id,domain:'garment',assigneeId:'business',reason:'交接'}},qc)).toThrow('接收人不具备成衣QC权限');expect(f.root).toEqual(before);
+  expect(()=>f.run({type:'fulfillment.qc.transfer',payload:{id,domain:'garment',assigneeId:'qc2',reason:'交接'}},{...qc,authority:{supplier:{}}})).toThrow('无法核对接收QC权限');expect(f.root).toEqual(before);
+  expect(()=>f.run({type:'fulfillment.qc.transfer',payload:{id,domain:'garment',assigneeId:'qc2',reason:'交接'}},{...qc,authority:{supplier:{},qcAssigneeIds:{garment:[],fabric:['qc2']}}})).toThrow('接收人不具备成衣QC权限');expect(f.root).toEqual(before);
   expect(()=>f.run({type:'fulfillment.qc.transfer',payload:{id,domain:'garment',assigneeId:'qc2',reason:''}},qc)).toThrow('转交原因');
   expect(()=>f.run({type:'fulfillment.qc.transfer',payload:{id,domain:'garment',assigneeId:'gone',reason:'出差'}},qc)).toThrow('停用');
   expect(()=>f.run({type:'fulfillment.qc.transfer',payload:{id,domain:'garment',assigneeId:'qc2',reason:'出差'}},other)).toThrow('只有当前QC');
@@ -91,6 +95,41 @@ describe('sup11 approved contract amendment', () => {
     expect(po.revisionHistory!.at(-1)).toMatchObject({ revision: 2, snapshot: { quantity: 12, price: 2.5 }, decision: { decision: 'approved' } });
     expect(po.dueChanges!.at(-1)).toMatchObject({ from: '2026-11-01', to: '2026-11-05' });
   });
+  it('keeps the signed purchase approval on the exact submitted terms after same-time amendments', () => {
+    const f = setup(), id = purchase(f);
+    const draft = f.root.fulfillment.purchases.find(p => p.id === id)!;
+    f.root.files.push({ id: 'submitted-spec', name: '送审原件.pdf', mimeType: 'application/pdf', size: 10, storageKey: 'submitted-spec', createdAt: f.ctx.now });
+    draft.fileIds = ['submitted-spec'];
+    approve(f, id);
+    const first = amend(f, id, { quantity: 12, price: 2.5, due: '2026-11-05' });
+    f.run({ type: 'fulfillment.procurement.amend.decide', payload: { id: first, decision: 'approved', note: '同意第一次变更' } }, reviewer(f));
+    const second = amend(f, id, { price: 3, due: '2026-11-07' });
+    f.run({ type: 'fulfillment.procurement.amend.decide', payload: { id: second, decision: 'approved', note: '同意第二次变更' } }, reviewer(f));
+    const p = f.root.fulfillment.purchases.find(p => p.id === id)!;
+    p.fileIds = [];
+    const before = structuredClone(f.root);
+    const reviews = getFulfillmentReviews(f.root);
+    const main = reviews.find(r => r.id === 'procurement:' + id)!;
+    expect(main).toMatchObject({ status:'approved', decision:{note:'已核对'}, fileIds:['submitted-spec'] });
+    expect(main.details).toEqual(expect.arrayContaining([
+      { label:'金额', value:'10 × 2 = 20.00 USD' },
+      { label:'交期', value:'2026-11-01' },
+    ]));
+    expect(reviews.find(r => r.entityId === second)?.details).toContainEqual({ label:'合同金额', value:'30.00 → 36.00 USD' });
+    expect(p).toMatchObject({ quantity:12, price:3, due:'2026-11-07' });
+    expect(f.root).toEqual(before);
+  });
+  it('does not substitute amended terms when the original purchase snapshot is missing', () => {
+    const f = setup(), id = purchase(f);
+    approve(f,id);
+    const change = amend(f,id,{price:3});
+    f.run({type:'fulfillment.procurement.amend.decide',payload:{id:change,decision:'approved',note:'同意'}},reviewer(f));
+    const p = f.root.fulfillment.purchases.find(p => p.id === id)!;
+    p.revisionHistory!.shift();
+    const task = getFulfillmentReviews(f.root).find(r => r.id === 'procurement:' + id)!;
+    expect(task.details).toEqual([{label:'送审快照',value:'原审批快照不可用'}]);
+    expect(task.fileIds).toEqual([]);
+  });
   it('tells the requester to add another reviewer when they are the only commitment approver', () => {
     const f = setup(), id = purchase(f); approve(f, id);
     const key = Object.keys(f.ctx.authority!.supplier!).find(k => k.includes('purchase.garment'))!;
@@ -109,6 +148,7 @@ describe('sup11 approved contract amendment', () => {
     expect(getFulfillmentReviews(f.root).some(r => r.entityId === a)).toBe(false);
     const b = amend(f, id, { quantity: 8 });
     f.run({ type: 'fulfillment.procurement.amend.decide', payload: { id: b, decision: 'rejected', note: '先确认客户追加' } }, reviewer(f));
+    expect(getFulfillmentReviews(f.root).find(r => r.entityId === b)?.roundNumber).toBe(2);
     expect(f.root.fulfillment.purchases.find(x => x.id === id)).toMatchObject({ quantity: 10, price: 2 });
   });
   it('does not change the quantity of a released production branch', () => {
@@ -301,6 +341,16 @@ describe('P2-3 shipment transport, booking history, arrival and customs amendmen
   expect(()=>f.run({type:'fulfillment.shipments.deliver',payload:{id,at:'2026-10-11T08:00:00Z',receiver:'仓库',evidence:'POD',fileIds:[]}})).toThrow('不得早于');
   f.run({type:'fulfillment.shipments.deliver',payload:{id,at:'2026-10-13T08:00:00Z',receiver:'客户仓库',evidence:'POD 签字',fileIds:[]}});
   expect(s().delivered).toMatchObject({receiver:'客户仓库'});
+ });
+ it('refuses a later arrival when POD was recorded first, but permits a truthful earlier backfill',()=>{
+  const f=setup();terms(f);const id=shipment(f),s=()=>f.root.fulfillment.shipments.find(x=>x.id===id)!;
+  s().state='departed';s().departedAt='2026-10-10T08:00:00.000Z';
+  f.run({type:'fulfillment.shipments.deliver',payload:{id,at:'2026-10-12T08:00:00Z',receiver:'客户仓库',evidence:'客户签收原件',fileIds:[]}});
+  const before=structuredClone(f.root),pod=structuredClone(s().delivered);
+  expect(()=>f.run({type:'fulfillment.shipments.arrive',payload:{id,at:'2026-10-13T08:00:00Z',evidence:'时间矛盾的到港通知'}})).toThrow('到港不得晚于客户签收');
+  expect(f.root).toEqual(before);
+  f.run({type:'fulfillment.shipments.arrive',payload:{id,at:'2026-10-11T08:00:00Z',evidence:'后补承运到港原件'}});
+  expect(s().arrival?.at).toBe('2026-10-11T08:00:00.000Z');expect(s().delivered).toEqual(pod);
  });
  it('adds amendments to a cleared declaration and lets a not-yet-departed shipment withdraw it',()=>{
   const f=setup();terms(f);const id=shipment(f);

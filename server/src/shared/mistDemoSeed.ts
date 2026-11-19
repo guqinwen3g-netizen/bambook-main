@@ -1,3 +1,4 @@
+import {CUSTOMER_GRADE_SCOPE,CUSTOMER_CREDIT_SCOPE} from './mistCustomerFieldAuthority';
 import {sampleConfirmationBlocker} from './mistSampleSending';
 import {seedInternalFabricPlan} from './mistDemoInternalFabric';
 /**
@@ -15,8 +16,9 @@ import { MIST_DEMO_ACCOUNTS } from './mistAccounts';
 import { mistBusinessDate } from './mistBusinessClock';
 import { platformBusinessDate } from './mistPlatform';
 import { MIST_COMPANY_PROFILE } from './mistCompanyIdentity';
+import { shippingSampleSourceSnapshot } from './mistShipmentSampleCustody';
 
-export const DEMO_SEED_VERSION = 23;
+export const DEMO_SEED_VERSION = 24;
 export type DemoSeedFailure = { step: string; message: string };
 
 const DAY = 86400000;
@@ -120,7 +122,7 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
   const coatProduct = coatDev && coatVersion ? id(run('product coat', { type: 'market.product.fromVersion', payload: { devId: coatDev.id, versionId: coatVersion.id, sku: 'GA-2711', supplierId: jiangnan, supplierCode: 'JX-C88' } })) : '';
   const fabricProduct = fabricDevId ? id(run('product fabric', { type: 'market.product.fromVersion', payload: { devId: fabricDevId, versionId: fabricVersionId, sku: 'FB-2701', supplierId: huasheng, supplierCode: 'HS-W3302' } })) : '';
   const product = (step: string, input: Parameters<typeof productInput>[0]) => id(run(step, { type: 'market.product.save', payload: { input: productInput(input) } }));
-  const nylon = product('product nylon', { sku: 'FB-2702', name: '再生涤纶塔丝隆', category: 'fabric', supplierId: huasheng, supplierCode: 'HS-N210', composition: '再生涤纶 100', color: '黑色', unit: '码', cost: '1.35', currency: 'USD', refPrice: '1.90', specs: { weight: '95', width: '150', weave: '平纹', finish: '防泼水' } });
+  const nylon = product('product nylon', { sku: 'FB-2702', name: '再生涤纶塔丝隆', category: 'fabric', supplierId: huasheng, supplierCode: 'HS-N210', composition: '再生涤纶 100%', color: '黑色', unit: '码', cost: '1.35', currency: 'USD', refPrice: '1.90', specs: { weight: '95', width: '150', weave: '平纹', finish: '防泼水' } });
   const vest = product('product vest', { sku: 'GA-2712', name: '轻量填充马甲', category: 'garment', supplierId: yuanshan, supplierCode: 'YS-V12', composition: '面 再生涤纶 / 填充 仿羽绒棉', color: '黑色', unit: '件', cost: '21.00', currency: 'USD', refPrice: '29.50', specs: { garmentCategory: '马甲', sizeRange: 'S–XXL', mainFabric: 'FB-2702' } });
   const button = product('product button', { sku: 'TR-0301', name: '牛角纹树脂扣 24L', category: 'trimming', supplierId: baotai, supplierCode: 'BT-24L', composition: '树脂', color: '深棕', unit: '粒', cost: '0.08', currency: 'CNY', refPrice: '0.12', specs: { trimType: '纽扣', size: '24L / 15mm', moq: '5000 粒' } });
   const withDetails = (pid: string, patch: { refPrice?: string; customerCodes?: Array<{ customerId: string; code: string }>; cost?: string }) => {
@@ -343,7 +345,12 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
     run('handoff 017', { type: 'order.handoff', payload: { orderId: order017.id, note: '第一批 500 件交接后勤安排出运' } } as unknown as MistCommand, sales);
     const ship = id(run('shipment 017', { type: 'fulfillment.shipments.save', payload: { consignee: 'Northwind Atelier AB, Stockholm', mode: 'sea', portOfLoading: '上海洋山', portOfDischarge: '哥德堡', incoterm: 'FOB', plannedDate: day(-4), booking: 'MSKU 7741 2093', lines: [{ orderId: order017.id, lineId: job017.lineId, productionId: job017.id, quantity: job017.qty, factoryConfirmedAt: day(-7) }], note: '第一批', fileIds: [] } }, sales));
     if (ship) {
-      sampleQc('PO-L-0411', 'shipping', 'pass', ship);
+      const shippingTask=sampleQc('PO-L-0411', 'shipping', 'pass', ship);
+      const specimen=state.fulfillment.samples.find(sample=>sample.id===state.fulfillment.qcTasks.find(task=>task.id===shippingTask)?.sampleId);
+      if(specimen){
+        // This demonstration has a separately registered specimen kept in the sample room, not a member of the 500 commercial units.
+        run('shipping sample basis 017',{type:'fulfillment.samples.shippingBasis',payload:{id:specimen.id,kind:'independent',sourceSnapshot:shippingSampleSourceSnapshot(state,specimen),independentSource:'演示中单独登记并保管于样品间 A-3 的 1 件船样，不计入本票 500 件。',evidence:'演示独立样衣已单独送检并确认，继续留存样品间，不随本票商业货物出运。',fileIds:[]}},buyer);
+      }else failures.push({step:'shipping sample basis 017',message:'演示独立船样来源未生成'});
       run('pack 017', { type: 'fulfillment.shipments.pack', payload: { id: ship, lines: Array.from({ length: 5 }, (_, i) => ({ lineId: job017.lineId, productionId: job017.id, carton: `${i * 20 + 1}-${i * 20 + 20}`, quantity: 100, netWeight: 96, grossWeight: 108, volume: 1.15, note: '' })) } }, warehouse);
       run('customs 017', { type: 'fulfillment.customs.save', payload: { shipmentId: ship, declarationNo: '2200 2026 1004 9126 51', broker: '上海东航报关有限公司', hsCode: '6203.31', origin: '中国', tradeMode: '一般贸易', declaredAt: day(-5), clearedAt: day(-4), evidence: '海关放行通知', fileIds: [demoFile('customs-release', ship, '报关放行通知 SO-G-2026-017.pdf')], note: '', status: 'cleared' } }, warehouse);
       // 商品归类按款号建档一次，之后每票出运自动带出商品编号、申报品名与申报要素。
@@ -376,7 +383,8 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
 
   /* ───────── 关系智库：一家同时是客户和供应商的组织；一个因逾期冻结的往来 ───────── */
   const boyuanSupplier = supplier('SUP-0006', '博远纺织贸易', '面料贸易', '现货里布 · 衬布 · 小批量面料调货', 50000, '米/月', 7, '浙江绍兴柯桥区中国轻纺城东区 2 号楼', ['何静', '采购与销售', 'hejing@boyuan-textile.cn', '0575-8566 1027']);
-  const boyuan = run('customer boyuan', { type: 'market.customer.create', payload: { input: { name: '博远纺织贸易', country: '中国', city: '绍兴', industry: '面料贸易', ownerId: 'demo-sales', grade: 'B', currency: 'CNY', terms: '月结 30 天', incoterm: 'EXW', categories: '面料', creditLimit: 200000, since: day(-200) } } });
+  // Fixed demo initialization assigns its existing rating/credit through a narrowly authorized setup context; it never escapes to ordinary operations.
+  const boyuan = run('customer boyuan', { type: 'market.customer.create', payload: { input: { name: '博远纺织贸易', country: '中国', city: '绍兴', industry: '面料贸易', ownerId: 'demo-sales', grade: 'B', currency: 'CNY', terms: '月结 30 天', incoterm: 'EXW', categories: '面料', creditLimit: 200000, since: day(-200) } } }, { ...reviewer, can: scope => scope===CUSTOMER_GRADE_SCOPE||scope===CUSTOMER_CREDIT_SCOPE||reviewer.can?.(scope)===true });
   const boyuanRelation = boyuan ? String((boyuan as { relationId?: string }).relationId || '') : '';
   if (boyuanRelation && boyuanSupplier) run('relation link boyuan', { type: 'market.relation.linkSupplier', payload: { id: boyuanRelation, supplierId: boyuanSupplier } });
   const luneRelation = state.market.relations.find(r => r.customerId === c2.id);
