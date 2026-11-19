@@ -260,6 +260,54 @@ it('connects a mailbox: saves settings without the password, then binds the cred
   expect(store.mail).toHaveBeenCalledWith({kind:'bind',accountId:'acc-new',password:'s3cret-value'});
 });
 
+it('国内邮箱预设保留企业地址，切换实际收发端点会清除旧授权码',async()=>{
+  store.state=createMistState(ctx,'empty');
+  store.run.mockResolvedValue({result:{id:'acc-new'}});
+  store.mail.mockResolvedValue({});
+  render();
+  await click(button('打开邮箱账号')!);
+  await click(button('接入邮箱')!);
+  type('邮箱地址','sales@company.example');
+  type('显示名称','业务邮箱');
+  type('登录用户名','sales@company.example');
+  const preset=document.querySelector<HTMLSelectElement>('[aria-label="邮箱服务商"]')!;
+  expect(preset).toBeTruthy();
+  function select(value:string){
+    act(()=>{preset.value=value;preset.dispatchEvent(new Event('change',{bubbles:true}));});
+  }
+  const value=(label:string)=>document.querySelector<HTMLInputElement | HTMLSelectElement>('[aria-label="'+label+'"]')!.value;
+  select('aliyun-enterprise');
+  expect(value('IMAP 服务器')).toBe('imap.qiye.aliyun.com');
+  expect(value('SMTP 服务器')).toBe('smtp.qiye.aliyun.com');
+  expect(value('IMAP 端口')).toBe('993');
+  expect(value('SMTP 端口')).toBe('465');
+  expect(value('SMTP 加密')).toBe('ssl');
+  type('密码或授权码','aliyun-fixture-authorization');
+  select('netease-enterprise');
+  expect(value('密码或授权码')).toBe('');
+  expect(value('邮箱地址')).toBe('sales@company.example');
+  expect(value('登录用户名')).toBe('sales@company.example');
+  expect(value('显示名称')).toBe('业务邮箱');
+  type('密码或授权码','before-manual-fixture-authorization');
+  type('SMTP 服务器','smtp.company.example');
+  expect(value('密码或授权码')).toBe('');
+  expect(preset.value).toBe('');
+  select('netease-enterprise');
+  type('密码或授权码','before-switch-fixture-authorization');
+  select('');
+  expect(value('密码或授权码')).toBe('');
+  expect(value('SMTP 服务器')).toBe('smtp.qiye.163.com');
+  select('netease-enterprise');
+  type('密码或授权码','netease-fixture-authorization');
+  await click(button('保存并验证登录')!);
+  expect(store.run.mock.calls.at(-1)![0]).toMatchObject({type:'email.account.save',payload:{input:{
+    address:'sales@company.example',transport:{imapHost:'imap.qiye.163.com',imapPort:993,imapSecure:true,
+      smtpHost:'smtp.qiye.163.com',smtpPort:465,smtpSecure:true,username:'sales@company.example'}
+  }}});
+  expect(store.mail).toHaveBeenCalledWith({kind:'bind',accountId:'acc-new',password:'netease-fixture-authorization'});
+  expect(JSON.stringify(store.run.mock.calls)).not.toContain('fixture-authorization');
+});
+
 it('only the connecting user can change a mailbox; examples cannot send',()=>{
   store.state=realState('other-user');render();
   act(()=>button('邮箱账号')!.click());
