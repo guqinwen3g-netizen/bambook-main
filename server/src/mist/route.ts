@@ -17,6 +17,7 @@ import {runQuoteCostAdvisor} from './quoteCostAdvisor';
 import { hasScope } from '../auth/permissionService';
 import { codexSubscriptions, CodexSubscriptionError, PLATFORM_SUBJECT, personalSubject, type CodexSubscriptionService } from '../ai/codexSubscription';
 import { platformProfileList } from '../ai/platformModel';
+import { Semaphore } from '../ai/runtime';
 import { platformProviders, type PlatformProviderStore } from '../ai/platformProviders';
 import type { MarketStore } from '../ai/marketQuotes';
 import { resolveEnvProviderChain, testLlmProvider } from '../ai/llmProviders';
@@ -65,6 +66,7 @@ export function bearerAsAgentCredential(req: Request) {
 export function createMistRouter(options: { prisma?: any; voice?: MistVoiceService; voiceSettings?: PlatformVoiceStore; marketStore?: MarketStore; platformProviders?: PlatformProviderStore; filesRoot?: string; repository?: MistRepository; contract?: MistContract; authenticate?: RequestHandler; subscriptions?: CodexSubscriptionService; mail?: MistMailService; mailReceiver?: MistMailReceiver; mailTransport?: MailTransport; mailCredentialsRoot?: string; delegation?: AgentDelegation; delegationGuard?: (req: Request) => void }) {
   const repository = options.repository ?? new MistRepository(options.prisma, options.contract ?? require('../shared/mistWorkspace') as MistContract, new MistPrivateFiles(options.filesRoot ?? path.resolve(__dirname, '../../private/mist-files')));
   const router = Router();
+  const workspaceReads = new Map<string, { lane: Semaphore; pending: number }>();
   const authenticate = options.authenticate ?? requireAuth;
   const delegation = options.delegation ?? defaultAgentDelegation();
   // 带委托头的请求一律按工作助手身份处理（比本人会话更窄），且只放行工作助手读取接口。
@@ -329,17 +331,52 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   router.get('/reviews/:workspaceId/receipts/:requestId', run(async (req,res)=>{res.json({receipt:await repository.reviewReceipt(actor(req),req.params.workspaceId,req.params.requestId)});}));
   router.get('/reviews/:workspaceId/:reviewId/files/:fileId',run(async(req,res)=>{const {file,bytes}=await repository.reviewFile(actor(req),req.params.workspaceId,req.params.reviewId,req.params.fileId);res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);res.type('application/octet-stream').send(Buffer.from(bytes));}));
   router.post('/reviews/:workspaceId/:reviewId', run(async (req,res)=>{const body=exactBody(req.body,['requestId','expectedRevision','decision','note','signature']);if(body.signature!==undefined&&typeof exactBody(body.signature,['svg']).svg!=='string')fail('INVALID_INPUT','签字格式无效',400);res.json(await repository.decideReview(actor(req),req.params.workspaceId,req.params.reviewId,body as any));}));
-  router.get('/workspaces/default', run(async (req, res) => { res.json({ workspace: await repository.create(actor(req), { name: '公司业务', seed: actor(req)?.companyId ? 'empty' : 'demo' }, true) }); }));
+  const replyWithWorkspaceRead = async (prior: TokenPayload, res: Response, read: () => Promise<object>) => {
+    if (!prior?.userId) fail('UNAUTHENTICATED', '请先登录', 401);
+    const key = prior.companyId ? 'company:' + prior.companyId : 'account:' + prior.userId;
+    let reads = workspaceReads.get(key);
+    if (!reads) {
+      // Full snapshots share the database and JS thread. Limit each company before
+      // opening a transaction so a burst leaves room for others' reads.
+      reads = { lane: new Semaphore('mist-workspace-read', 3), pending: 0 };
+      workspaceReads.set(key, reads);
+    }
+    reads.pending++;
+    try {
+      await reads.lane.run(async () => {
+        if (res.destroyed) return;
+        const payload = await read();
+        if (!res.destroyed) res.json(payload);
+      });
+    } finally {
+      if (--reads.pending === 0) workspaceReads.delete(key);
+    }
+  };
+  router.get('/workspaces/default', run(async (req, res) => {
+    const prior = actor(req);
+    await replyWithWorkspaceRead(prior, res, async () => ({
+      workspace: await repository.create(prior, { name: '公司业务', seed: prior.companyId ? 'empty' : 'demo' }, true),
+    }));
+  }));
   router.get('/workspaces', run(async (req, res) => {
-    const workspaces = req.query.summary === '1' ? await repository.listSummaries(actor(req)) : await repository.list(actor(req));
-    res.json({ workspaces: isAgentActor(actor(req)) ? workspaces.map((w: { id: string; name: string; revision: number }) => ({ id: w.id, name: w.name, revision: w.revision })) : workspaces });
+    const prior = actor(req);
+    const summary = req.query.summary === '1';
+    const read = async () => {
+      const workspaces = summary ? await repository.listSummaries(prior) : await repository.list(prior);
+      return { workspaces: isAgentActor(prior) ? workspaces.map(({ id, name, revision }) => ({ id, name, revision })) : workspaces };
+    };
+    if (summary) res.json(await read());
+    else await replyWithWorkspaceRead(prior, res, read);
   }));
   router.get('/workspaces/archived',run(async(req,res)=>{res.json({workspaces:await repository.listArchived(actor(req))});}));
   router.post('/workspaces', run(async (req, res) => {
     const body = exactBody(req.body, ['name', 'slug', 'seed']);
     res.status(201).json({ workspace: await repository.create(actor(req), body as any) });
   }));
-  router.get('/workspaces/:id', run(async (req, res) => { res.json({ workspace: await repository.get(actor(req), req.params.id) }); }));
+  router.get('/workspaces/:id', run(async (req, res) => {
+    const prior = actor(req);
+    await replyWithWorkspaceRead(prior, res, async () => ({ workspace: await repository.get(prior, req.params.id) }));
+  }));
   router.get('/workspaces/:id/revision', run(async (req, res) => { res.json(await repository.revisionOf(actor(req), req.params.id)); }));
   router.post('/workspaces/:id/archive',run(async(req,res)=>{const body=exactBody(req.body,['requestId','expectedRevision']);res.json(await repository.changeArchive(actor(req),req.params.id,body as any,'archive'));}));
   router.post('/workspaces/:id/restore',run(async(req,res)=>{const body=exactBody(req.body,['requestId','expectedRevision']);res.json(await repository.changeArchive(actor(req),req.params.id,body as any,'restore'));}));

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -56,6 +56,18 @@ describe('one company = one library', () => {
     await expect(repo.get(member('clerk', OTHER_COMPANY), library.id)).rejects.toMatchObject({ status: 404 });
     expect(await repo.list(member('clerk', OTHER_COMPANY))).toEqual([]);
     expect(await repo.revisionOf(member('clerk'), library.id)).toEqual({ id: library.id, revision: 0 });
+  });
+  it('polls only the current company revision without reading its state', async () => {
+    const library = await repo.create(member('owner'), { name: '公司' }, true);
+    const findFirst = vi.fn(async ({ where }: { where: { id: string; companyId?: string } }) =>
+      where.companyId === COMPANY && where.id === library.id ? { id: library.id, revision: 17 } : null);
+    const reader = new MistRepository({
+      $transaction: (read: (client: object) => Promise<unknown>) => read({ mistWorkspace: { findFirst } }),
+    }, contract, new MistPrivateFiles(root), auth.authorize);
+    expect(await reader.revisionOf(member('clerk'), library.id)).toEqual({ id: library.id, revision: 17 });
+    expect(findFirst).toHaveBeenCalledWith({ where: { id: library.id, companyId: COMPANY }, select: { id: true, revision: true } });
+    await expect(reader.revisionOf(member('clerk', OTHER_COMPANY), library.id)).rejects.toMatchObject({ status: 404 });
+    expect(findFirst).toHaveBeenLastCalledWith({ where: { id: library.id, companyId: OTHER_COMPANY }, select: { id: true, revision: true } });
   });
   it('does not expose an archived legacy library detached from company access', async () => {
     const main = await repo.create(member('owner'), { name: '公司' }, true);
