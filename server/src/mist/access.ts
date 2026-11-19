@@ -351,21 +351,39 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
   });
   return { state: projectManualSampleLinks(next), hidden,...(costVisible?{costMaterialBasis:scope ? null : financialMaterialCostBasis(state),costClaimBasis}:{}) };
 }
-/** 精确匹配附件 ID，不用全文子串判断，避免相似文本开放隐藏附件。 */
-function referencedFiles(state: MistState): Set<string> {
-  const ids = new Set((state.files || []).map(file => file.id)), found = new Set<string>();
-  const walk = (value: unknown) => {
-    if (typeof value === 'string') { if (ids.has(value)) found.add(value); return; }
-    if (Array.isArray(value)) { value.forEach(walk); return; }
-    if (value && typeof value === 'object') Object.values(value).forEach(walk);
+/** 精确匹配附件 ID，匹配完所需 ID 就停止遍历。 */
+function referencedFiles(state: MistState, remaining: Set<string>): Set<string> {
+  const found = new Set<string>();
+  if (!remaining.size) return found;
+  const walk = (value: unknown): boolean => {
+    if (typeof value === 'string') {
+      if (!remaining.delete(value)) return false;
+      found.add(value);
+      return remaining.size === 0;
+    }
+    if (value && typeof value === 'object') {
+      const children = Array.isArray(value) ? value : Object.values(value);
+      for (const child of children) if (walk(child)) return true;
+    }
+    return false;
   };
-  walk({ ...state, files: [] });
+  for (const [key, value] of Object.entries(state)) {
+    if (key !== 'files' && walk(value)) break;
+  }
   return found;
 }
 /** 已引用附件须有可见来源；尚未引用的附件只给上传人/公司所有者。 */
-function visibleFiles(full: MistState, projected: MistState, actorId: string, ownerId?: string,extra:ReadonlySet<string>=new Set()) {
-  const visible = referencedFiles(projected), referenced = referencedFiles(full);
-  return (full.files || []).filter(file => visible.has(file.id) || extra.has(file.id) || !referenced.has(file.id) && (actorId === ownerId || file.uploadedBy === actorId));
+function visibleFiles(full: MistState, projected: MistState, actorId: string, ownerId?: string, extra: ReadonlySet<string> = new Set()) {
+  const files = full.files || [];
+  const visible = referencedFiles(projected, new Set((projected.files || []).map(file => file.id)));
+  const owned = (file: MistState['files'][number]) => actorId === ownerId || file.uploadedBy === actorId;
+  // Hidden references only need checking for files that could be visible as unattached.
+  const candidates = new Set<string>();
+  for (const file of files) {
+    if (!visible.has(file.id) && !extra.has(file.id) && owned(file)) candidates.add(file.id);
+  }
+  const referenced = referencedFiles(full, candidates);
+  return files.filter(file => visible.has(file.id) || extra.has(file.id) || (owned(file) && !referenced.has(file.id)));
 }
 export function canReadFile(state: MistState, actor: TokenPayload, fileId: string, empty: () => MistState, ownerId?: string, scope?: MistDataScope, privacy?: FilePrivacyContext) {
   return projectState(state, actor, empty, ownerId, scope, privacy).state.files.some(file => file.id === fileId);

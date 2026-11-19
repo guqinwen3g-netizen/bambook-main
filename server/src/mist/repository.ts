@@ -546,9 +546,19 @@ export class MistRepository {
   async revisionOf(prior: TokenPayload, id: string) {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) fail('INVALID_INPUT', '公司编号无效', 400);
     return this.transact(async db => {
-      const actor = await this.authorize(db, prior), row: MistWorkspaceRow | null = await db.mistWorkspace.findFirst({ where: { id } });
-      if (row && row.companyId !== (actor.companyId ?? null) && (row.companyId || actor.companyId)) fail('NOT_FOUND', '公司不存在或当前账号无权访问', 404);
-      if (!row || !(companyRow(row) || isOwner(row, actor) || isMember(row, actor)) || archived(row)) fail('NOT_FOUND', '公司不存在或当前账号无权访问', 404);
+      const actor = await this.authorize(db, prior);
+      if (actor.companyId) {
+        // Company membership is checked by authorize. Company libraries have no
+        // personal grants or recycle bin, so polling only needs the identity and revision.
+        const head: Pick<MistWorkspaceRow, 'id' | 'revision'> | null = await db.mistWorkspace.findFirst({
+          where: { id, companyId: actor.companyId },
+          select: { id: true, revision: true },
+        });
+        if (!head) fail('NOT_FOUND', '公司不存在或当前账号无权访问', 404);
+        return { id: head!.id, revision: head!.revision };
+      }
+      const row: MistWorkspaceRow | null = await db.mistWorkspace.findFirst({ where: { id } });
+      if (!row || companyRow(row) || !(isOwner(row, actor) || isMember(row, actor)) || archived(row)) fail('NOT_FOUND', '公司不存在或当前账号无权访问', 404);
       return { id: row!.id, revision: row!.revision };
     });
   }

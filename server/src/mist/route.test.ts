@@ -23,6 +23,49 @@ beforeEach(async () => {
 });
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 describe('Mist workspace HTTP contracts', () => {
+  it('keeps other companies readable while one company queues full snapshots', async () => {
+    const repo = new MistRepository(new MemoryMistDatabase(), testContract, new MistPrivateFiles(root), auth.authorize);
+    const authenticated: string[] = [];
+    const started: string[] = [];
+    let release!: () => void;
+    const busy = new Promise<void>(resolve => { release = resolve; });
+    const snapshot: MistRepository['get'] = async (actor, id) => {
+      started.push(actor.userId);
+      if (actor.companyId === 'busy-company') await busy;
+      return { id, ownerId: actor.userId } as Awaited<ReturnType<MistRepository['get']>>;
+    };
+    vi.spyOn(repo, 'get').mockImplementation(snapshot);
+    vi.spyOn(repo, 'create').mockImplementation(actor => snapshot(actor, 'busy'));
+    vi.spyOn(repo, 'list').mockImplementation(async actor => [await snapshot(actor, 'busy')]);
+    vi.spyOn(repo, 'listSummaries').mockResolvedValue([]);
+    const isolated = express().use('/api/mist', createMistRouter({ repository: repo, authenticate: (req, _res, next) => {
+      const id = String(req.headers['x-test-user']);
+      authenticated.push(id);
+      (req as any).actor = { ...testActor(id), companyId: id === 'quiet' ? 'quiet-company' : 'busy-company' };
+      next();
+    } }));
+    const read = (user: string, id: string) => request(isolated).get('/api/mist/workspaces/' + id).set('x-test-user', user).then(response => response);
+    const pending = [read('busy-first', 'busy'), read('busy-second', 'busy'), read('busy-third', 'busy')];
+    try {
+      await vi.waitFor(() => expect(started).toHaveLength(3));
+      pending.push(read('busy-fourth', 'default'));
+      pending.push(request(isolated).get('/api/mist/workspaces').set('x-test-user', 'busy-fifth').then(response => response));
+      await vi.waitFor(() => expect(authenticated).toEqual(expect.arrayContaining(['busy-fourth', 'busy-fifth'])));
+      const quiet = await read('quiet', 'quiet');
+      const summaries = await request(isolated).get('/api/mist/workspaces?summary=1').set('x-test-user', 'busy-summary');
+      expect(summaries.body.workspaces).toEqual([]);
+      expect(quiet.status).toBe(200);
+      expect(quiet.body.workspace).toEqual({ id: 'quiet', ownerId: 'quiet' });
+      expect(started).not.toContain('busy-fourth');
+      expect(started).not.toContain('busy-fifth');
+    } finally {
+      release();
+      await Promise.all(pending);
+    }
+    const completed = await Promise.all(pending);
+    expect(completed.slice(0, 4).map(response => response.body.workspace.ownerId)).toEqual(['busy-first', 'busy-second', 'busy-third', 'busy-fourth']);
+    expect(completed[4].body.workspaces).toEqual([{ id: 'busy', ownerId: 'busy-fifth' }]);
+  });
   it('protects the dedicated quote advisor with real workspace authorization and rejects forged identity',async()=>{
     await request(app).post('/api/mist/workspaces/foreign/quotation-cost-advisor').send({}).expect(401);
     const workspace=(await request(app).get('/api/mist/workspaces/default').set('x-test-user','owner').expect(200)).body.workspace;
