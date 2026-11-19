@@ -34,6 +34,43 @@ it('does not use background data when the browser requests data saving', () => {
   stop();
 });
 
+it('pauses background downloads on a slow connection and resumes when it improves', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('requestIdleCallback', undefined);
+  const connection = Object.assign(new EventTarget(), { effectiveType: '3g', saveData: false });
+  vi.stubGlobal('navigator', { connection });
+  const load = vi.fn().mockResolvedValue(undefined);
+  const pages: React.FC[] = [() => null, () => null, () => null];
+  const change = (effectiveType: string) => {
+    connection.effectiveType = effectiveType;
+    connection.dispatchEvent(new Event('change'));
+  };
+  const stop = preloadPagesWhenIdle(pages, load);
+  try {
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(load).not.toHaveBeenCalled();
+
+    change('4g');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(load).toHaveBeenCalledTimes(1);
+
+    change('3g');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(load).toHaveBeenCalledTimes(1);
+
+    change('4g');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(load).toHaveBeenCalledTimes(2);
+
+    stop();
+    change('4g');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(load.mock.calls.map(call => call[0])).toEqual(pages.slice(0, 2));
+  } finally {
+    stop();
+  }
+});
+
 it('does not spend extra idle slots on pages from the same code bundle', async () => {
   vi.useFakeTimers();
   vi.stubGlobal('requestIdleCallback', undefined);
