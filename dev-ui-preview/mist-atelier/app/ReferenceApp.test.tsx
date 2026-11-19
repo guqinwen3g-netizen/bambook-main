@@ -8,13 +8,13 @@ import * as auth from '../../../services/authService';
 import type { MistState } from '../../../server/src/shared/mistWorkspace';
 import type { MistWorkspaceContext } from './runtime/workspace';
 
-const probes = vi.hoisted(() => ({ home: vi.fn(), development: vi.fn(), detail: vi.fn(), order: vi.fn(), customer: vi.fn(), settings: vi.fn() }));
+const probes = vi.hoisted(() => ({ workspace: vi.fn(), home: vi.fn(), development: vi.fn(), detail: vi.fn(), order: vi.fn(), customer: vi.fn(), settings: vi.fn() }));
 const pageBackProbe=vi.hoisted(()=>({enabled:false,guardTopbar:false,requested:undefined as (()=>void)|undefined}));
 const workspaces = vi.hoisted(() => ({ version: 0, listeners: new Set<() => void>(), actors: new Map<string, any>(), empty: null as any }));
 vi.mock('./runtime/workspace', async () => {
   const React = await import('react'), { useMistSession } = await import('./runtime/auth');
   return {
-    MistWorkspaceProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    MistWorkspaceProvider: ({ children }: { children: React.ReactNode }) => { probes.workspace(); return <>{children}</>; },
     useMistWorkspace: () => {
       React.useSyncExternalStore(listener => { workspaces.listeners.add(listener); return () => { workspaces.listeners.delete(listener); }; }, () => workspaces.version, () => 0);
       const session = useMistSession();
@@ -254,10 +254,11 @@ describe('one Mist entry with real authentication and workspace state', () => {
   it('keeps StrictMode boot behind real /me verification without loading a business page anonymously', async () => {
     const response = deferred<Response>(); override = url => url.pathname.endsWith('/auth/me') ? response.promise : null;
     await mount(); expect(probes.home).not.toHaveBeenCalled(); expect(probes.development).not.toHaveBeenCalled();
+    expect(probes.workspace).not.toHaveBeenCalled();
     expect(host!.querySelector('form')).toBeNull(); expect(requests.every(request => request.path.endsWith('/auth/me') || request.path==='/api/mist/session')).toBe(true);
     await act(async () => response.resolve(json({ message: '未登录' }, 401)));
     await waitFor(() => expect(queryByRole(host!, 'form', { name: '登录' })).not.toBeNull());
-    expect(probes.home).not.toHaveBeenCalled(); expect(requests.every(request => request.method === 'GET')).toBe(true);
+    expect(probes.home).not.toHaveBeenCalled(); expect(probes.workspace).not.toHaveBeenCalled(); expect(requests.every(request => request.method === 'GET')).toBe(true);
   });
 
   it('preserves every authorized deep-link identifier through a real login response', async () => {

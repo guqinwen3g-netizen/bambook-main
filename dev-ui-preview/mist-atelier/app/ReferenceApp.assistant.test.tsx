@@ -22,7 +22,11 @@ const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
 function workspace(id='workspace-a',code='SO-ONE'){let i=0;const state=createMistState({id:()=>`drawer-${++i}`,now:'2026-10-13T00:00:00Z',actorName:'Test'},'empty');state.orders.push({id:'order-a',code,customer:'Fixture customer',state:'Open',currency:'USD',amount:10} as any);return{state,workspace:{id,name:'Test workspace',revision:2},workspaces:[],error:'',loading:false,saving:false,pending:null,run:vi.fn(),refresh:vi.fn()};}
 beforeEach(()=>{localStorage.removeItem('bambook.device.locale');(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;bridge.workspace=workspace();bridge.sessionKey='session-a';bridge.canAsk=true;bridge.fetch.mockReset();vi.stubGlobal('fetch',(url:unknown,init?:RequestInit)=>url==='/api/hr/teams/mine'?Promise.resolve({ok:true,json:async()=>({ok:true,teams:[]})}):bridge.fetch(url,init));vi.stubGlobal('matchMedia',()=>({matches:false,addEventListener(){},removeEventListener(){}}));HTMLElement.prototype.scrollTo=vi.fn();history.replaceState(null,'','/?intro=0&theme=light&view=orders/detail&id=order-a');});
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();localStorage.removeItem('bambook.device.locale');HTMLElement.prototype.scrollTo=originalScroll;vi.unstubAllGlobals();vi.restoreAllMocks();});
-async function mount(){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<ReferenceApp/>));}
+async function mount(){
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<ReferenceApp/>));
+  await act(async()=>{await import('./WorkspaceApp');});
+}
 async function open(){await act(async()=>window.dispatchEvent(new KeyboardEvent('keydown',{key:'j',metaKey:true,bubbles:true,cancelable:true})));return getByRole(document.body,'dialog',{name:uiText('小竹')});}
 async function click(button:HTMLElement){await act(async()=>button.click());}
 async function send(question:string){const drawer=getByRole(document.body,'dialog',{name:uiText('小竹')}),field=getByRole(drawer,'textbox',{name:uiText('输入问题')}) as HTMLTextAreaElement;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,question);field.dispatchEvent(new Event('input',{bubbles:true}));});await click(getByRole(drawer,'button',{name:uiText('发送')}));}
