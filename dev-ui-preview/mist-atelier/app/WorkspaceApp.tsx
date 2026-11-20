@@ -117,6 +117,27 @@ function crumbsFor(route: Route, go: (view: string, id?: string) => void, object
   } else crumbs.push({ label });
   return crumbs;
 }
+function PageIdlePreloads({ sections, platformOnly, platformCompany }: { sections: NavSection[]; platformOnly: boolean; platformCompany: boolean }) {
+  const session = useMistSession();
+  const { loading } = useMistWorkspace();
+  // Suspense removes layout effects while a new foreground page is still loading.
+  React.useLayoutEffect(() => {
+    if (session.status !== 'authenticated' || session.user?.mustChangePassword || (!platformOnly && loading)) return;
+    const views = sections.flatMap(section => section.items.map(item => item.id));
+    // Details and creation pages are prepared only when their parent module is visible.
+    if (views.includes('orders')) views.push('orders/detail', 'orders/new');
+    if (views.includes('development')) views.push('development/detail', 'development/new');
+    for (const view of ['approvals', 'notifications', 'search']) {
+      if (canOpenMistView({ view }, { canAccessView: session.canAccessView, hasPermission: session.hasPermission, platformOperator: session.user?.platformRole === 'platform_admin' }, REFERENCE_PREVIEW)) views.push(view);
+    }
+    const pages = [AccountPage, ...views.map(view => PAGES[view]).filter((page): page is React.FC => !!page)];
+    if (platformOnly) pages.push(PlatformSettingsPage);
+    if (platformCompany) pages.push(PlatformCompanySettingsPage);
+    return preloadPagesWhenIdle(pages);
+  }, [sections, session.status, session.sessionKey, session.user?.mustChangePassword, session.canAccessView, session.hasPermission, session.user?.platformRole, platformOnly, platformCompany, loading]);
+  return null;
+}
+
 type WorkspaceProps = { theme: ThemeMode; locale: InterfaceLocale; toggleTheme: () => void };
 
 function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
@@ -191,20 +212,6 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
   React.useEffect(()=>{aiController.current?.abort();aiController.current=null;aiRun.current=null;aiHistory.current=[];setAiBusy(false);setAiUseRouteSource(false);},[aiScope]);
   React.useEffect(()=>setAiUseRouteSource(false),[route.view,route.id]);
   const sections = useSections();
-  React.useEffect(() => {
-    if (session.status !== 'authenticated' || session.user?.mustChangePassword || (!platformOnly && workspace.loading)) return;
-    const views = sections.flatMap(section => section.items.map(item => item.id));
-    // Details and creation pages are prepared only when their parent module is visible.
-    if (views.includes('orders')) views.push('orders/detail', 'orders/new');
-    if (views.includes('development')) views.push('development/detail', 'development/new');
-    for (const view of ['approvals', 'notifications', 'search']) {
-      if (canOpenMistView({ view }, { canAccessView: session.canAccessView, hasPermission: session.hasPermission, platformOperator: session.user?.platformRole === 'platform_admin' }, REFERENCE_PREVIEW)) views.push(view);
-    }
-    const pages = [AccountPage, ...views.map(view => PAGES[view]).filter((page): page is React.FC => !!page)];
-    if (platformOnly) pages.push(PlatformSettingsPage);
-    if (platformCompany) pages.push(PlatformCompanySettingsPage);
-    return preloadPagesWhenIdle(pages);
-  }, [sections, session.status, session.sessionKey, session.user?.mustChangePassword, session.canAccessView, session.hasPermission, session.user?.platformRole, platformOnly, !!platformCompany, workspace.loading]);
   // 侧栏「开发与寻样」回到本次会话最近查看的页签；未查看过时为「成衣开发」。
   const lastDevelopmentTab = React.useRef<DevelopmentListTab | null>(null);
   if (route.view === 'development') lastDevelopmentTab.current = developmentListTab(route.section);
@@ -408,7 +415,18 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
       >
         {!Page ? <EmptyState title={uiText("没有找到此页面")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />
           : !permitted ? <EmptyState icon={ShieldCheck} title={uiText("没有查看权限")} description={uiText("当前账号无法访问此业务。")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />
-          : Page ? <TeamViewScope teamId={COMPANY_ADMIN_VIEWS.has(base) || base === 'account' ? 'all' : teamView.teamId} actorId={user.id} teams={organization.teams}><MistPresentedErrorContext.Provider value={workspace.error||undefined}><PageLoadBoundary resetKey={route.view} fallback={retry=><MistPage><Banner tone="bad" title={uiText('页面未能加载')} actions={<Button onClick={retry}>{uiText('重新加载')}</Button>}/></MistPage>}><React.Suspense fallback={<PageLoading />}><Page key={session.sessionKey + ':' + workspace.workspace?.id + ':' + (stablePageRoute?route.view:JSON.stringify(route))} /></React.Suspense></PageLoadBoundary></MistPresentedErrorContext.Provider></TeamViewScope>
+          : Page ? (
+            <TeamViewScope teamId={COMPANY_ADMIN_VIEWS.has(base) || base === 'account' ? 'all' : teamView.teamId} actorId={user.id} teams={organization.teams}>
+              <MistPresentedErrorContext.Provider value={workspace.error || undefined}>
+                <PageLoadBoundary resetKey={route.view} fallback={retry => <MistPage><Banner tone="bad" title={uiText('页面未能加载')} actions={<Button onClick={retry}>{uiText('重新加载')}</Button>} /></MistPage>}>
+                  <React.Suspense fallback={<PageLoading />}>
+                    <Page key={session.sessionKey + ':' + workspace.workspace?.id + ':' + (stablePageRoute ? route.view : JSON.stringify(route))} />
+                    <PageIdlePreloads sections={sections} platformOnly={platformOnly} platformCompany={!!platformCompany} />
+                  </React.Suspense>
+                </PageLoadBoundary>
+              </MistPresentedErrorContext.Provider>
+            </TeamViewScope>
+          )
           : <EmptyState title={uiText("没有找到此页面")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />}
       </MistAppShell></PageBackRegistrationContext.Provider></PageNavigationGuardContext.Provider>
       <ExportConfirmHost scope={JSON.stringify([session.sessionKey, user.id, user.companyId, user.roles, user.roleIds, user.permissions, user.permissionCeiling, user.businessAttributes, user.globalBusinessScope, workspace.workspace?.id, workspace.workspace?.access, teamView.teamId, route])} />
