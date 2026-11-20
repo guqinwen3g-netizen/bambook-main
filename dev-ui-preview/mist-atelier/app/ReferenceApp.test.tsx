@@ -5,10 +5,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getByRole, queryByRole, queryAllByRole } from '@testing-library/dom';
 import * as auth from '../../../services/authService';
+import * as idlePages from './pagePreload';
 import type { MistState } from '../../../server/src/shared/mistWorkspace';
 import type { MistWorkspaceContext } from './runtime/workspace';
 
 const probes = vi.hoisted(() => ({ workspace: vi.fn(), home: vi.fn(), development: vi.fn(), detail: vi.fn(), order: vi.fn(), customer: vi.fn(), settings: vi.fn() }));
+const homeLoad = vi.hoisted(() => ({ pending: undefined as Promise<void> | undefined, attempted: false }));
 const pageBackProbe=vi.hoisted(()=>({enabled:false,guardTopbar:false,requested:undefined as (()=>void)|undefined}));
 const workspaces = vi.hoisted(() => ({ version: 0, listeners: new Set<() => void>(), actors: new Map<string, any>(), empty: null as any }));
 vi.mock('./runtime/workspace', async () => {
@@ -25,7 +27,9 @@ vi.mock('./runtime/workspace', async () => {
 vi.mock('./pages/HomePage', async () => {
   const React = await import('react'), { useNav } = await import('./nav');
   return { HomePage: function Home() {
-    const nav = useNav(); probes.home();
+    const nav = useNav();
+    if (homeLoad.pending) { homeLoad.attempted = true; throw homeLoad.pending; }
+    probes.home();
     return <section aria-label="首页测试接缝"><button onClick={() => nav.go('development/detail', 'dev-a', { versionId: 'version-a', batchId: 'batch-a', section: 'overview', customerId: 'customer-a', orderLineId: 'line-a', productionId: 'production-a' })}>打开准确版本</button></section>;
   } };
 });
@@ -121,6 +125,7 @@ async function openSearch() {
 }
 function searchInput() { return getByRole(getByRole(host!, 'dialog', { name: '搜索' }), 'textbox') as HTMLInputElement; }
 beforeEach(async () => {
+  homeLoad.pending = undefined; homeLoad.attempted = false;
   pageBackProbe.enabled=false;pageBackProbe.guardTopbar=false;pageBackProbe.requested=undefined;
   Object.values(probes).forEach(probe => probe.mockClear()); workspaces.actors.clear(); workspaces.listeners.clear(); workspaces.version++;
   workspaces.empty = { ...context('anonymous'), state: null, workspace: null, workspaces: [], loading: false };
@@ -145,6 +150,23 @@ beforeEach(async () => {
 afterEach(() => {
   if (root) act(() => root!.unmount()); host?.remove(); root = undefined; host = undefined;
   vi.restoreAllMocks(); vi.unstubAllGlobals(); HTMLElement.prototype.scrollTo = originalScrollTo;
+});
+
+it('waits until the current page renders before starting idle preloads', async () => {
+  const gate = deferred<void>();
+  homeLoad.pending = gate.promise;
+  const startIdle = vi.spyOn(idlePages, 'preloadPagesWhenIdle');
+  try {
+    await signIn();
+    await mount();
+    await waitFor(() => expect(homeLoad.attempted).toBe(true));
+    expect(startIdle).not.toHaveBeenCalled();
+  } finally {
+    homeLoad.pending = undefined;
+    await act(async () => gate.resolve(undefined));
+  }
+  await waitFor(() => expect(probes.home).toHaveBeenCalled());
+  expect(startIdle).toHaveBeenCalled();
 });
 
 it('keeps design showcase navigation out of the business client in development builds', async () => {
