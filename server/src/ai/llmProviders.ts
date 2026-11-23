@@ -153,8 +153,9 @@ export function testLlmProvider(provider: LlmProviderConfig, signal: AbortSignal
 
 async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompletionInput): Promise<string> {
   const model = input.model || provider.model;
-  // Ark requires temperature=1.0 for this model on its Chat Completions data plane.
-  const arkKimi = model === 'kimi-k3-1-pro-261024' && provider.baseUrl === 'https://ark.cn-beijing.volces.com/api/v3';
+  // Ark requires temperature=1.0 for Kimi K3.1 Pro on its standard API and Agent Plan.
+  const arkKimi = (model === 'kimi-k3-1-pro-261024' && provider.baseUrl === 'https://ark.cn-beijing.volces.com/api/v3')
+    || (model === 'kimi-k3.1-pro' && provider.baseUrl === 'https://ark.cn-beijing.volces.com/api/plan/v3');
   const temperature = arkKimi ? 1 : input.temperature ?? 0.2;
   const messages = [
     { role: 'system' as const, content: input.systemPrompt },

@@ -187,10 +187,12 @@ it('sends task images as multimodal Chat Completions content', async () => {
 
 
 describe('Ark Kimi K3.1 Chat Completions', () => {
-  const baseUrl = 'https://ark.cn-beijing.volces.com/api/v3';
-  const model = 'kimi-k3-1-pro-261024';
+  const variants = [
+    { name: 'standard API', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'kimi-k3-1-pro-261024' },
+    { name: 'Agent Plan', baseUrl: 'https://ark.cn-beijing.volces.com/api/plan/v3', model: 'kimi-k3.1-pro' },
+  ];
 
-  it('uses the provider-required temperature in the connection test', async () => {
+  it.each(variants)('uses the provider-required temperature in the $name connection test', async ({ baseUrl, model }) => {
     const fetchMock = vi.fn().mockResolvedValueOnce(okCompletion('OK'));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -198,7 +200,7 @@ describe('Ark Kimi K3.1 Chat Completions', () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ model, temperature: 1, stream: false });
   });
 
-  it('preserves the required temperature through the streaming fallback', async () => {
+  it.each(variants)('preserves the required temperature through $name streaming fallback', async ({ baseUrl, model }) => {
     process.env.ARK_API_KEY = 'test-key';
     process.env.BAMBOOK_MODEL_BASE_URL = baseUrl;
     process.env.BAMBOOK_MODEL_NAME = model;
@@ -214,7 +216,7 @@ describe('Ark Kimi K3.1 Chat Completions', () => {
 
   it('retains the caller temperature for a different Ark model', async () => {
     process.env.ARK_API_KEY = 'test-key';
-    process.env.BAMBOOK_MODEL_BASE_URL = baseUrl;
+    process.env.BAMBOOK_MODEL_BASE_URL = variants[0].baseUrl;
     process.env.BAMBOOK_MODEL_NAME = 'test-other-model';
     const fetchMock = vi.fn().mockResolvedValueOnce(okCompletion('OK'));
     vi.stubGlobal('fetch', fetchMock);
