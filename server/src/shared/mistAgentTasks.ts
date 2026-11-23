@@ -1,3 +1,4 @@
+import type { TaskAttachment } from './mistTaskAttachments';
 /** Public task views contain no service credential or execution lease secret. */
 export const AGENT_TASK_INTENT_KINDS = ['orders','invoices','customers','purchases','shipments','developments','risks'] as const;
 export type AgentTaskIntentKind = typeof AGENT_TASK_INTENT_KINDS[number];
@@ -29,6 +30,7 @@ export type AgentTaskView = {
   automationId?:string;
   conversationId?:string;
   intentRefs?:AgentTaskIntentRef[];
+  attachments?: TaskAttachment[];
   /** 平台任务的办理过程（做了什么、读了哪条记录）；不含读取到的内容。 */
   trail?:AgentTaskTrailItem[];
   executionIssue?:{code:'model_unavailable'|'model_response_invalid';retryAt?:string};
