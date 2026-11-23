@@ -104,7 +104,11 @@ it('works with Xiaozhu as a coworker: a request becomes a platform task whose pr
     if(url.includes('/agent-identities'))return {items:[idn]};
     if(url.includes('/agent-task-capabilities'))return {platformAvailable:true};
     if(url.endsWith('/agent-tasks'))return {items:created?[created]:[],nextCursor:null};
-    if(url.includes('/agent-tasks/t1')){polls++;return {item:{...created,state:'succeeded',result:'本周有 2 张订单交期临近',version:2,updatedAt:'2026-11-07T00:00:05Z'}};}
+    if(url.includes('/agent-tasks/t1')){
+      polls++;
+      if(polls===1)return {item:{...created,state:'running',executionStage:'model',updatedAt:'2026-11-07T00:00:01Z'}};
+      return {item:{...created,state:'succeeded',result:'本周有 2 张订单交期临近',version:2,updatedAt:'2026-11-07T00:00:05Z'}};
+    }
     throw new Error('unexpected '+url);
   });
   await mount();
@@ -116,6 +120,7 @@ it('works with Xiaozhu as a coworker: a request becomes a platform task whose pr
   expect(mock.fetch.mock.calls.some(([u])=>String(u).endsWith('/assistant'))).toBe(false);
   expect(host.textContent).toContain('哪些订单交期临近？');
   expect(host.querySelector('[aria-label="停止生成"]')).not.toBeNull();
+  expect(host.textContent).toContain('正在等待模型');
   await act(async()=>{await new Promise(r=>setTimeout(r,3300));});
   expect(host.querySelector('[aria-label="停止生成"]')).toBeNull();
   expect(polls).toBeGreaterThan(0);expect(host.textContent).toContain('本周有 2 张订单交期临近');

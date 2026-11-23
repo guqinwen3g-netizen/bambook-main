@@ -6652,5 +6652,11 @@
   "图片无法读取或尺寸过大": "The image cannot be read or exceeds the size limit",
   "此文件类型暂不支持": "This file type is not supported",
   "正在等待模型": "Waiting for the model",
-  "模型重试中": "Retrying the model"
+  "模型重试中": "Retrying the model",
+  "办理过程": "Work log",
+  "{0} 秒": "{0}s",
+  "本次读取部分正文，还有后续内容": "Part of the document read, more content available",
+  "已提取可读取正文": "Extracted the readable text",
+  "本次读取第 {0} 至 {1} 页": "Read pages {0}–{1} in this step",
+  "整理回复": "Preparing the reply"
 }

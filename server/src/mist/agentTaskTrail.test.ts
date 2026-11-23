@@ -10,14 +10,17 @@ it('names a record read by its number, and never shows an internal id while the 
     step('bambook_get', { type: 'order', id: 'SO-G-2026-018' }),
   ]);
   expect(done.label).toBe('读取订单 SO-G-2026-017');
+  expect(done.completed).toBe(true);
+  expect(done.ref?.label).toBe('SO-G-2026-017');
   expect(pending.label).toBe('读取订单');
-  expect(pending.ref?.label).toBe('订单');
+  expect(pending.completed).toBe(false);
+  expect(pending.ref).toBeUndefined();
   expect(coded.label).toBe('读取订单 SO-G-2026-018');
 });
 
 it('links a read to the page the record lives on, including parent pages and sections, and names attachment reads by file', () => {
   const [receipt, bill, failed, file] = platformTrail([
-    step('bambook_get', { type: 'receipt', id: 'rc1' }, { label: 'rc1', link: 'bambook://open?view=procurement&id=po1' }),
+    step('bambook_get', { type: 'receipt', id: 'rc1' }, { object: { label: 'rc1', link: 'bambook://open?view=procurement&id=po1' } }),
     step('bambook_get', { type: 'payable_bill', id: 'b1' }, { label: 'AP-1', link: 'bambook://open?view=payment-vouchers&id=b1&section=payables' }),
     step('bambook_get', { type: 'order', id: 'x' }, { error: true, link: 'bambook://open?view=orders%2Fdetail&id=x' }),
     step('bambook_file_text', { fileId: 'f1' }, { file: { id: 'f1', name: '采购合同 PO-12.docx' }, text: '…' }),

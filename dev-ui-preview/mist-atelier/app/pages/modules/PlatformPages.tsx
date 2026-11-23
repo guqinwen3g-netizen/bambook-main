@@ -185,7 +185,7 @@ export function AssistantPage(){
     }
     setError('');setFiles(next);
   };
-  const cowork=useXiaozhuCowork(w.workspace?.id,scope,canChat);
+  const cowork=useXiaozhuCowork(w.workspace?.id,scope,canChat,conversationId);
   const showTaskHistory=canChat&&(cowork.available||cowork.tasks.length>0);
   const index=React.useMemo(()=>recordIndex(w.state),[w.state]),automationRules=useAutomationRules(w.workspace?.id,showTaskHistory,automations),meta=useConversationMeta(w.workspace?.id,showTaskHistory),conversations=React.useMemo(()=>conversationsOf(cowork.tasks,meta.items),[cowork.tasks,meta.items]),current=conversations.find(c=>c.id===conversationId),visibleTasks=showTaskHistory?(current?.tasks??[]):[],proposals=(w.state?.agentProposals??[]).filter(p=>p.state==='pending'),newConversation=()=>{openConversation(newConversationId());setQuestion('');setSelected([]);setFiles([]);requestAnimationFrame(()=>field.current?.focus());},voice=usePersonalAgentVoice(scope+':'+canChat,w.workspace?.id,cowork.track),inCall=voiceInCall(voice);
   const request=async(path:string,init:RequestInit={})=>{const result=await fetch(path,{...init,headers:{...apiService.getAuthHeaders(),...(init.headers as Record<string,string>??{})},credentials:'include'});const body=await result.json().catch(()=>null);if(!result.ok)throw new Error(body?.error?.message??body?.message??'助手请求未完成');if(!body)throw new Error('助手没有返回可核对的结果');return body;};
@@ -222,8 +222,8 @@ export function AssistantPage(){
   const rename=(id:string,title:string)=>{void meta.save(id,{title}).catch(e=>toast(e instanceof Error?e.message:'未能改名','bad'));};
   const remove=async(id:string)=>{setRemoving(undefined);try{await meta.save(id,{hidden:true});if(id===conversationId)newConversation();toast(uiText('已从列表移除'));}catch(e){toast(e instanceof Error?e.message:'未能移除','bad');}};
   const toBottom=(smooth=true)=>{const el=scrollRef.current;if(el?.scrollTo)el.scrollTo({top:el.scrollHeight,behavior:smooth?'smooth':'auto'});};
-  // 跟随新内容时最多滚到最新一轮的开头：长回答从提问和第一行读起，不直接跳到末尾。
-  const follow=()=>{const el=scrollRef.current;if(!el)return;const turns=el.querySelectorAll('.mist-xz-turn'),last=turns[turns.length-1] as HTMLElement|undefined;const bottom=el.scrollHeight-el.clientHeight;const start=last?last.getBoundingClientRect().top-el.getBoundingClientRect().top+el.scrollTop-16:bottom;el.scrollTop=Math.max(0,Math.min(bottom,start));};
+  // 执行中跟随新步骤；长回答完成后，从提问和第一行读起。
+  const follow=()=>{const el=scrollRef.current;if(!el)return;const turns=el.querySelectorAll('.mist-xz-turn'),last=turns[turns.length-1] as HTMLElement|undefined;const bottom=el.scrollHeight-el.clientHeight;if(last&&['queued','running'].includes(last.dataset.taskState??'')){el.scrollTop=Math.max(0,bottom);return;}const start=last?last.getBoundingClientRect().top-el.getBoundingClientRect().top+el.scrollTop-16:bottom;el.scrollTop=Math.max(0,Math.min(bottom,start));};
   const threadKey=visibleTasks.map(t=>t.id+t.updatedAt).join()+messages.length+busy;
   React.useEffect(()=>{if(atBottomRef.current)requestAnimationFrame(follow);},[threadKey]);
   // 回答排版、卡片展开等会在渲染后改变高度；停在底部时跟着到底。

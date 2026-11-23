@@ -258,12 +258,16 @@ it('researches a PDF, workbook and image together with a selected order, keeping
    expect(readTask).toBeDefined();
    const current=await readTask!();
    expect(current).toMatchObject({state:'running',executionStage:'model'});
+   expect(Number.isFinite(Date.parse(current.executionStageSince))).toBe(true);
+   expect(current.trail.filter((step:any)=>step.kind==='read'&&step.completed)).toHaveLength(3);
+   await new Promise(resolve=>setTimeout(resolve,55));
+   expect((await readTask!()).executionStageSince).toBe(current.executionStageSince);
    const input=model.messages[0].content;
    expect(input).toContain('PDF-DELIVERY-925');
    expect(input).toContain('XLSX-QUANTITY-318');
    expect(input).toContain('bambook_get');
    expect(model.images).toEqual([{name:'sample.png',url:expect.stringMatching(/^data:image\/jpeg;base64,/)}]);
-   return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已综合核对所选记录和三份附件。'});
+   return JSON.stringify({name:'bambook_task',arguments:{action:'finish',outcome:'succeeded',result:'已综合核对所选记录和三份附件。'},progress:'已读订单和两份文档，图片编号也已识别，正在整理对照结果。'});
  });
  const f=await fixture(complete);
  const book=XLSX.utils.book_new();
@@ -289,6 +293,12 @@ it('researches a PDF, workbook and image together with a selected order, keeping
  for(const file of task.attachments)await f.human.get(f.base+'/files/'+file.id).expect(404);
  await f.drain();
  expect(complete).toHaveBeenCalledTimes(1);
- expect(await f.current(task.id)).toMatchObject({state:'succeeded',attachments:task.attachments});
+ const completed=await f.current(task.id);
+ expect(completed).toMatchObject({state:'succeeded',attachments:task.attachments});
+ expect(completed.trail).toEqual(expect.arrayContaining([
+   expect.objectContaining({kind:'read',ref:expect.objectContaining({type:'order'})}),
+   expect.objectContaining({label:'读取附件 quantities.xlsx',detail:'已提取可读取正文'}),
+   expect.objectContaining({label:'整理回复',progress:'已读订单和两份文档，图片编号也已识别，正在整理对照结果。'}),
+ ]));
  await f.human.post(f.base+'/personal-agent/tasks').field('task',JSON.stringify(payload)).attach('attachments',Buffer.from('changed'),'change.txt').expect(409);
 });

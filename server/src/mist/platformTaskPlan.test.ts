@@ -29,3 +29,12 @@ it('bounds completed history without altering an unacknowledged write or losing 
 it('uses a dedicated platform task reasoning profile while retaining the existing override mechanism',()=>{
  expect(platformReasoning('agent-task',{})).toBe('high');expect(platformReasoning('agent-task',{BAMBOOK_PLATFORM_REASONING_AGENT_TASK:'medium'})).toBe('medium');
 });
+
+
+it('accepts a bounded public progress update without forwarding it to the tool',()=>{
+  const plan=parsePlatformTaskPlan(JSON.stringify({name:'bambook_get',arguments:{type:'order',id:'so-demo'},progress:'先核对订单中的交期，再与附件对照。'}));
+  expect(plan.progress).toBe('先核对订单中的交期，再与附件对照。');
+  expect(plan.arguments).toEqual({type:'order',id:'so-demo'});
+  expect(parsePlatformTaskPlan(JSON.stringify({...plan,progress:'Bearer abcdef1234567890'}))).not.toHaveProperty('progress');
+  expect(parsePlatformTaskPlan(JSON.stringify({...plan,progress:'字'.repeat(300)})).progress).toHaveLength(240);
+});

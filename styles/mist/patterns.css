@@ -1259,6 +1259,9 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .mist-root::-webkit-scrollbar,
 @media (hover: hover) { .mist-xz-turn .mist-xz-acts :is(.mist-icon-btn, .mist-xz-time) { opacity: 0; transition: opacity var(--mist-dur-fast) var(--mist-ease); } .mist-xz-turn:hover .mist-xz-acts :is(.mist-icon-btn, .mist-xz-time), .mist-xz-acts:focus-within :is(.mist-icon-btn, .mist-xz-time), .mist-xz-turn:last-child .mist-xz-acts :is(.mist-icon-btn, .mist-xz-time) { opacity: 1; } }
 
 .mist-xz-trail { font-size: var(--mist-text-xs); }
+.mist-xz-progress { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 5px; margin-bottom: 3px; color: var(--mist-ink-3); }
+.mist-xz-progress > [role="status"] { min-width: 0; overflow-wrap: anywhere; }
+.mist-xz-elapsed { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .mist-xz-trail-h { display: inline-flex; align-items: center; gap: 2px; padding: 0; border: 0; background: none; color: var(--mist-ink-3); font: inherit; cursor: pointer; }
 .mist-xz-trail-h:hover { color: var(--mist-ink-2); }
 .mist-xz-trail-h svg { transition: transform var(--mist-dur-fast) var(--mist-ease); }
@@ -1266,6 +1269,9 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .mist-root::-webkit-scrollbar,
 .mist-xz-steps { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 2px; padding: 10px 12px; border-radius: var(--mist-r-md); background: var(--mist-fill); color: var(--mist-ink-2); list-style: none; }
 .mist-xz-steps li { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .mist-xz-steps li > svg { flex: none; color: var(--mist-ink-3); }
+.mist-xz-steps:has(.mist-xz-step-body p) li { align-items: flex-start; }
+.mist-xz-step-body { min-width: 0; overflow-wrap: anywhere; }
+.mist-xz-step-body p { margin: 2px 0 0; color: var(--mist-ink-3); }
 .mist-xz-steps li[data-failed], .mist-xz-steps li[data-failed] > svg { color: var(--mist-bad); }
 .mist-xz-shimmer { display: inline-block; background: linear-gradient(90deg, var(--mist-ink-3) 0%, var(--mist-ai) 45%, var(--mist-ink-3) 90%); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: mist-xz-shimmer 1.8s linear infinite; }
 @keyframes mist-xz-shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
