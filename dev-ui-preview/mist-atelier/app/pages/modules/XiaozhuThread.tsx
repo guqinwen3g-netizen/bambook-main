@@ -23,11 +23,11 @@ const clock = (iso: string) => new Date(iso).toLocaleTimeString(interfaceLocale(
 const VIEW: Record<string, string> = { order: 'orders/detail', customer: 'crm', development: 'development/detail', purchase: 'procurement', shipment: 'shipments', invoice: 'invoices', quotation: 'quotations', supplier: 'suppliers', email: 'emails', production: 'production-board', risk: 'risks', claim: 'claims' };
 
 type OpenRecord = (view: string, id: string, target?: import('../../nav').RouteTarget) => void;
-function Trail({ items, active, onOpen }: { items: AgentTaskTrailItem[]; active: boolean; onOpen: OpenRecord }) {
+function Trail({ items, active, activeLabel, onOpen }: { items: AgentTaskTrailItem[]; active: boolean; activeLabel?: string; onOpen: OpenRecord }) {
   const [open, setOpen] = React.useState(false);
   const reads = items.filter(i => i.kind === 'read').length, writes = items.filter(i => i.kind === 'write').length, last = items.at(-1);
   const summary = [reads ? `查阅 ${reads} 项` : '', writes ? `${writes} 步写入` : ''].filter(Boolean).join(' · ') || `${items.length} 步`;
-  if (active) return <div className="mist-xz-trail"><span className="mist-xz-shimmer">{uiText(last?.label ?? '正在办理')}</span></div>;
+  if (active) return <div className="mist-xz-trail" role="status"><span className="mist-xz-shimmer">{uiText(activeLabel ?? last?.label ?? '正在办理')}</span></div>;
   return <div className="mist-xz-trail" data-open={open || undefined}>
     <button type="button" className="mist-xz-trail-h" aria-expanded={open} onClick={() => setOpen(v => !v)}>{uiText(summary)}<ChevronRight size={13} /></button>
     {open && <ol className="mist-xz-steps">{items.map((i, n) => <li key={n} data-failed={i.failed || undefined}><Icon icon={KIND_ICON[i.kind]} size="xs" />{i.ref && (i.ref.view || VIEW[i.ref.type]) ? <button type="button" className="mist-xz-ref" onClick={() => onOpen(i.ref!.view ?? VIEW[i.ref!.type], i.ref!.id, i.ref!.section ? {section:i.ref!.section} : undefined)}>{i.label}</button> : <span>{i.label}</span>}</li>)}</ol>}
@@ -75,6 +75,9 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
     const pending = t.waitingProposalIds.map(id => proposals.find(p => p.id === id && p.state === 'pending')).filter((p): p is AgentProposal => !!p);
     const produced = proposals.filter(p => p.taskId === t.id && p.state === 'confirmed' && p.produced && !p.unavailable);
     const request = splitRequest(t.instructions), done = !active && t.state !== 'waiting_human', working = active && !asking && !pending.length;
+    const activeLabel = t.state === 'queued' ? (t.executionIssue?.retryAt ? '模型重试中' : '待执行')
+      : t.state === 'waiting_time' || t.state === 'waiting_condition' ? STATE[t.state][0]
+      : t.executionStage === 'model' ? '正在等待模型' : undefined;
     const status = !active && t.state !== 'succeeded' ? <Pill tone={STATE[t.state][1]}>{uiText(STATE[t.state][0])}</Pill> : undefined;
     return <div className="mist-xz-turn" key={t.id} data-task-state={t.state}>
       {divider && <div className="mist-xz-day"><span>{dayLabel(t.createdAt)}</span></div>}
@@ -84,7 +87,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         </div>}
       </div>
       <XiaozhuTurnShell status={status}>
-        {(!!t.trail?.length || working) && <Trail items={t.trail ?? []} active={working} onOpen={actions.onOpenRecord} />}
+        {(!!t.trail?.length || working) && <Trail items={t.trail ?? []} active={working} activeLabel={activeLabel} onOpen={actions.onOpenRecord} />}
         {t.result && <XiaozhuMarkdown text={t.result} index={index} onOpen={actions.onOpenRecord} />}
         {active && t.checkpoint && !t.result && !working && <p className="mist-xz-note">{t.checkpoint}</p>}
         {!active && t.state !== 'succeeded' && !t.result && t.checkpoint && <p className="mist-xz-note">{t.checkpoint}</p>}

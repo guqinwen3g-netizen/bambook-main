@@ -225,3 +225,98 @@ describe('Ark Kimi K3.1 Chat Completions', () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).temperature).toBe(0.1);
   });
 });
+
+describe('Agent model provider deadline', () => {
+  function configure() {
+    process.env.ARK_API_KEY = 'test-primary';
+    process.env.BAMBOOK_LLM_BACKUP_URL = 'https://backup.example/v1';
+    process.env.BAMBOOK_LLM_BACKUP_KEY = 'test-backup';
+    const waitForAbort = (_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      const signal = init.signal!;
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    });
+    const fetchMock = vi.fn().mockImplementationOnce(waitForAbort).mockResolvedValueOnce(okCompletion('fallback reply'));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  it('tries the backup in the same turn when the primary exceeds 45 seconds', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = configure();
+      const answer = createLlmCompleter({ platformProfile: 'agent-task' })(BASE_INPUT);
+      await vi.advanceTimersByTimeAsync(44_999);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(answer).resolves.toBe('fallback reply');
+      expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
+      expect(String(fetchMock.mock.calls[1][0])).toBe('https://backup.example/v1/chat/completions');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not start a fallback after the parent task is cancelled', async () => {
+    const fetchMock = configure(), stop = new AbortController();
+    const answer = createLlmCompleter({ platformProfile: 'agent-task' })({ ...BASE_INPUT, signal: stop.signal });
+    stop.abort();
+    await expect(answer).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+it('tries the backup immediately when the primary cannot produce a valid Agent plan', async () => {
+  process.env.ARK_API_KEY = 'test-primary';
+  process.env.BAMBOOK_LLM_BACKUP_URL = 'https://backup.example/v1';
+  process.env.BAMBOOK_LLM_BACKUP_KEY = 'test-backup';
+  const validReply = '{"name":"bambook_task","arguments":{"action":"finish","outcome":"succeeded"}}';
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(okCompletion('not a plan'))
+    .mockResolvedValueOnce(okCompletion(validReply));
+  vi.stubGlobal('fetch', fetchMock);
+  const validateResponse = (reply: string) => { JSON.parse(reply); };
+
+  await expect(createLlmCompleter({ platformProfile: 'agent-task', validateResponse })(BASE_INPUT)).resolves.toBe(validReply);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(String(fetchMock.mock.calls[1][0])).toBe('https://backup.example/v1/chat/completions');
+});
+
+it('preserves an invalid-plan error when every provider fails', async () => {
+  process.env.ARK_API_KEY = 'test-primary';
+  const fetchMock = vi.fn().mockResolvedValueOnce(okCompletion('not a plan'));
+  vi.stubGlobal('fetch', fetchMock);
+
+  const validateResponse = () => { throw new Error('MODEL_PLAN_INVALID'); };
+  await expect(createLlmCompleter({ platformProfile: 'agent-task', validateResponse })(BASE_INPUT)).rejects.toThrow('MODEL_PLAN_INVALID');
+  expect(fetchMock).toHaveBeenCalledOnce();
+});
+
+it('tries DeepSeek after a 25-second Kimi image wait and requests JSON on both Ark calls', async () => {
+  vi.useFakeTimers();
+  try {
+    const fetchMock = vi.fn().mockImplementationOnce((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+    })).mockResolvedValueOnce(okCompletion('{"result":"read"}'));
+    vi.stubGlobal('fetch', fetchMock);
+    const chain = () => ['kimi-k3.1-pro', 'deepseek-v4.1-flash'].map(model => ({
+      kind: 'api' as const,
+      provider: { id: model, name: model, baseUrl: 'https://ark.cn-beijing.volces.com/api/plan/v3', model,
+        apiKey: 'test-plan-key', enabled: true, createdAt: '', updatedAt: '' },
+    }));
+    const answer = createLlmCompleter({ platformProfile: 'agent-task', platformProviders: { chain } })({
+      ...BASE_INPUT, jsonMode: true, images: [{ name: 'swatch.jpg', url: 'data:image/jpeg;base64,AA==' }],
+    });
+    await vi.advanceTimersByTimeAsync(24_999);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(answer).resolves.toBe('{"result":"read"}');
+    const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body));
+    expect(bodies).toMatchObject([
+      { model: 'kimi-k3.1-pro', temperature: 1, response_format: { type: 'json_object' } },
+      { model: 'deepseek-v4.1-flash', response_format: { type: 'json_object' } },
+    ]);
+    expect(bodies[1].messages).toEqual(bodies[0].messages);
+  } finally {
+    vi.useRealTimers();
+  }
+});

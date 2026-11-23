@@ -111,7 +111,15 @@ export type LlmCompleterOptions = {
   platformProfile?: PlatformAiProfile;
   subscriptions?: Pick<CodexSubscriptionService, 'isConnected' | 'complete'>;
   platformProviders?: Pick<PlatformProviderStore, 'chain'>;
+  validateResponse?: (response: string) => void;
 };
+
+// Reserve time for a second provider inside the Agent's overall model deadline.
+const AGENT_PROVIDER_ATTEMPT_MS = 45_000;
+const KIMI_VISION_ATTEMPT_MS = 25_000;
+const ARK_AGENT_PLAN_URL = 'https://ark.cn-beijing.volces.com/api/plan/v3';
+const ARK_KIMI = 'kimi-k3.1-pro';
+const ARK_DEEPSEEK_FLASH = 'deepseek-v4.1-flash';
 
 export function createLlmCompleter(options: LlmCompleterOptions = {}) {
   return async function complete(input: LlmCompletionInput): Promise<string> {
@@ -120,27 +128,44 @@ export function createLlmCompleter(options: LlmCompleterOptions = {}) {
       ...(options.platformProviders ?? platformProviders()).chain().map(step => step.kind === 'subscription' ? step : { kind: 'api' as const, provider: platformConfig(step.provider) }),
       ...resolveEnvProviderChain().map(provider => ({ kind: 'api' as const, provider })),
     ];
+    const profile = options.platformProfile;
+    const available = (step: typeof steps[number]) => step.kind === 'api' || (!!profile && subscriptions.isConnected(PLATFORM_SUBJECT));
     const failures: Array<{ providerId: string; error: string }> = [];
-    for (const step of steps) {
-      if (step.kind === 'subscription') {
-        // 平台 ChatGPT 套餐只用于平台 AI 功能档位，且须已连接
-        if (!options.platformProfile || !subscriptions.isConnected(PLATFORM_SUBJECT)) continue;
-        try {
-          return await subscriptions.complete(PLATFORM_SUBJECT, input, { reasoning: platformReasoning(options.platformProfile) });
-        } catch (err: any) {
-          if (err?.name === 'AbortError') throw err;
-          // 平台订阅失败（限额/授权失效）时转下一项；只记录脱敏后的错误文字
-          failures.push({ providerId: 'chatgpt-subscription', error: `${typeof err?.code === 'string' ? err.code + ': ' : ''}${String(err?.message || err)}` });
-        }
-        continue;
-      }
+    let invalidResponse: Error | undefined;
+    for (const [index, step] of steps.entries()) {
+      if (!available(step)) continue;
+      input.signal.throwIfAborted();
+      const remaining = steps.slice(index + 1).filter(available);
+      const deadline = profile === 'agent-task' && !input.onDelta && remaining.length ? new AbortController() : undefined;
+      const hasDeepseekBackup = remaining.some(next => next.kind === 'api'
+        && next.provider.baseUrl === ARK_AGENT_PLAN_URL && next.provider.model === ARK_DEEPSEEK_FLASH);
+      const kimiVision = !input.model && input.images?.length && step.kind === 'api'
+        && step.provider.baseUrl === ARK_AGENT_PLAN_URL && step.provider.model === ARK_KIMI && hasDeepseekBackup;
+      const timer = deadline ? setTimeout(() => deadline.abort(), kimiVision ? KIMI_VISION_ATTEMPT_MS : AGENT_PROVIDER_ATTEMPT_MS) : undefined;
+      timer?.unref?.();
+      const attempt = deadline ? { ...input, signal: AbortSignal.any([input.signal, deadline.signal]) } : input;
+      const providerId = step.kind === 'subscription' ? 'chatgpt-subscription' : step.provider.id;
       try {
-        return await completeWithProvider(step.provider, input);
+        const reply = step.kind === 'api'
+          ? await completeWithProvider(step.provider, attempt)
+          : await subscriptions.complete(PLATFORM_SUBJECT, attempt, { reasoning: profile && platformReasoning(profile) });
+        input.signal.throwIfAborted();
+        try {
+          options.validateResponse?.(reply);
+        } catch (err) {
+          invalidResponse ??= err instanceof Error ? err : new Error(String(err));
+          continue;
+        }
+        return reply;
       } catch (err: any) {
-        if (err?.name === 'AbortError') throw err;
-        failures.push({ providerId: step.provider.id, error: String(err?.message || err) });
+        if (input.signal.aborted || (!deadline?.signal.aborted && err?.name === 'AbortError')) throw err;
+        const code = step.kind === 'subscription' && typeof err?.code === 'string' ? err.code + ': ' : '';
+        failures.push({ providerId, error: deadline?.signal.aborted ? 'PROVIDER_ATTEMPT_TIMEOUT' : code + String(err?.message || err) });
+      } finally {
+        clearTimeout(timer);
       }
     }
+    if (invalidResponse) throw invalidResponse;
     if (failures.length === 0) throw new Error('Model API key is not configured on Mac mini');
     throw new Error(`LLM_ALL_PROVIDERS_FAILED: ${JSON.stringify(failures)}`);
   };
@@ -155,7 +180,7 @@ async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompl
   const model = input.model || provider.model;
   // Ark requires temperature=1.0 for Kimi K3.1 Pro on its standard API and Agent Plan.
   const arkKimi = (model === 'kimi-k3-1-pro-261024' && provider.baseUrl === 'https://ark.cn-beijing.volces.com/api/v3')
-    || (model === 'kimi-k3.1-pro' && provider.baseUrl === 'https://ark.cn-beijing.volces.com/api/plan/v3');
+    || (model === ARK_KIMI && provider.baseUrl === ARK_AGENT_PLAN_URL);
   const temperature = arkKimi ? 1 : input.temperature ?? 0.2;
   const messages = [
     { role: 'system' as const, content: input.systemPrompt },
@@ -188,10 +213,9 @@ async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompl
       ]),
     }] : messages,
   };
-  if (input.jsonMode) {
-    // 注意：不是所有模型/API 都支持 response_format JSON mode。
-    // system prompt 里已经明确要求 JSON 输出格式，所以这里不再设置 response_format。
-    // 保留这个分支作为未来切换支持 JSON mode 的模型时的入口。
+  // Limit native JSON output to the verified Agent Plan adapters.
+  if (input.jsonMode && provider.baseUrl === ARK_AGENT_PLAN_URL && [ARK_KIMI, ARK_DEEPSEEK_FLASH].includes(model)) {
+    body.response_format = { type: 'json_object' };
   }
   const res = await aiFetch(`${provider.baseUrl}/chat/completions`, {
     method: 'POST',
