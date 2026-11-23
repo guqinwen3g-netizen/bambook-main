@@ -61,7 +61,7 @@ export function useConversationMeta(workspaceId: string | undefined, enabled: bo
   return { items, save };
 }
 
-export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean) {
+export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string) {
   const base = workspaceId ? '/api/mist/workspaces/' + encodeURIComponent(workspaceId) : '';
   const [available, setAvailable] = React.useState(false), [tasks, setTasks] = React.useState<AgentTaskView[]>([]);
   const [loading, setLoading] = React.useState(true), [error, setError] = React.useState(''), [busy, setBusy] = React.useState(false), [more, setMore] = React.useState<string | undefined>(undefined);
@@ -89,19 +89,54 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     } finally { if (run === version.current && live.current === bound) setLoading(false); }
   }, [base, enabled, scope]);
   React.useEffect(() => { setTasks([]); setAvailable(false); setLoading(true);lastAvailability.current=null; pending.current = undefined; void load(); return () => { version.current++; }; }, [load]);
-  const activeIds = tasks.filter(t => COWORK_ACTIVE.includes(t.state)).map(t => t.id).join(',');
+  const activeTasks = tasks.filter(t => COWORK_ACTIVE.includes(t.state));
+  const foregroundId = activeTasks.filter(t => visibleConversationId && t.conversationId === visibleConversationId
+    && (t.state === 'running' || t.state === 'queued')).at(-1)?.id;
+  const backgroundIds = activeTasks.filter(t => t.id !== foregroundId).map(t => t.id).join(',');
   React.useEffect(() => {
-    if (!activeIds || !base || !available) return;
-    let stopped = false, running = false;
-    const timer = setInterval(() => {
-      if (running || document.visibilityState === 'hidden') return; running = true;
-      void Promise.all(activeIds.split(',').map(id => mistApiRequest(base + '/agent-tasks/' + encodeURIComponent(id)) as Promise<{ item: AgentTaskView }>))
-        .then(rows => { if (stopped) return; const fresh = new Map(rows.map(r => [r.item.id, r.item])); setTasks(old => old.map(t => { const n = fresh.get(t.id); return n && n.updatedAt >= t.updatedAt ? (t.conversationId && !n.conversationId ? { ...n, conversationId: t.conversationId } : n) : t; })); })
-        .catch(() => { if (!stopped) setError('进度暂未更新'); })
-        .finally(() => { running = false; });
-    }, 3000);
-    return () => { stopped = true; clearInterval(timer); };
-  }, [activeIds, base, available]);
+    if ((!foregroundId && !backgroundIds) || !base || !available) return;
+    const controller = new AbortController();
+    const background = backgroundIds ? backgroundIds.split(',') : [];
+    const inFlight = new Set<string>();
+    let lastBackground = 0;
+    const poll = () => {
+      if (controller.signal.aborted || live.current !== scope || document.visibilityState === 'hidden') return;
+      const ids = foregroundId ? [foregroundId] : [];
+      const now = Date.now();
+      if (background.length && now - lastBackground >= 3000) {
+        ids.push(...background);
+        lastBackground = now;
+      }
+      for (const id of ids) {
+        if (inFlight.has(id)) continue;
+        inFlight.add(id);
+        void (mistApiRequest(base + '/agent-tasks/' + encodeURIComponent(id), { signal: controller.signal }) as Promise<{ item: AgentTaskView }>)
+          .then(({ item: next }) => {
+            if (controller.signal.aborted || live.current !== scope || next?.id !== id) return;
+            setTasks(old => old.map(task => {
+              if (task.id !== id || next.updatedAt < task.updatedAt) return task;
+              return task.conversationId && !next.conversationId ? { ...next, conversationId: task.conversationId } : next;
+            }));
+            if (!foregroundId || foregroundId === id) setError(old => old === '进度暂未更新' ? '' : old);
+          })
+          .catch(() => {
+            if (!controller.signal.aborted && live.current === scope && (!foregroundId || foregroundId === id)) {
+              setError(old => old || '进度暂未更新');
+            }
+          })
+          .finally(() => inFlight.delete(id));
+      }
+    };
+    const refreshVisible = () => { lastBackground = 0; void poll(); };
+    const timer = window.setInterval(() => void poll(), foregroundId ? 1000 : 3000);
+    document.addEventListener('visibilitychange', refreshVisible);
+    void poll();
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refreshVisible);
+    };
+  }, [foregroundId, backgroundIds, base, available, scope]);
   const post = async (path: string, body: object) => mistApiRequest(base + path, { method: 'POST', body: JSON.stringify(body) }) as Promise<{ item?: AgentTaskView }>;
   const send = async (text: string, history: AgentTaskView[] = [], conversationId?: string, intentRefs:AgentTaskIntentRef[]=[], files:File[]=[]): Promise<AgentTaskView | null> => {
     const message = text.trim(); if (!message || busy || !base||loading||error||!available) return null;

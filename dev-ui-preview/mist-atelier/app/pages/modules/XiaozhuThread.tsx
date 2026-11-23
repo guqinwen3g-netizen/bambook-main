@@ -36,34 +36,36 @@ function Elapsed({ since }: { since: string }) {
   return <span className="mist-xz-elapsed" role="timer" aria-live="off">· {ui`${seconds} 秒`}</span>;
 }
 
-function completedWork(items: AgentTaskTrailItem[]) {
-  const completed = items.filter(step => step.completed && !step.failed
-    && (step.kind === 'note' || step.kind === 'read' || step.kind === 'write'));
-  const reads = completed.filter(step => step.kind === 'read').length;
-  const operations = completed.filter(step => step.kind === 'write').length;
-  const latest = completed.at(-1);
-  if (latest?.kind === 'note' && (reads || operations)) return uiText(latest.label);
-  return [reads ? ui`已查阅 ${reads} 项` : '', operations ? ui`已处理 ${operations} 步` : ''].filter(Boolean).join(' · ');
-}
-
 function Trail({ items, active, activeLabel, since, onOpen }: {
   items: AgentTaskTrailItem[]; active: boolean; activeLabel?: string; since?: string; onOpen: OpenRecord;
 }) {
-  const [open, setOpen] = React.useState(false);
-  const summary = active ? completedWork(items) : '';
-  const label = uiText(activeLabel ?? items.at(-1)?.label ?? '正在办理');
+  const [expanded, setExpanded] = React.useState<boolean>();
+  const open = expanded ?? active;
+  const label = uiText(activeLabel ?? '正在办理');
   return <div className="mist-xz-trail" data-open={open || undefined}>
     {active && <div className="mist-xz-progress">
-      <span role="status">
-        {summary && <span>{summary} · </span>}
-        <span className="mist-xz-shimmer">{label}</span>
-      </span>
+      <span role="status" className="mist-xz-shimmer">{label}</span>
       {since && <Elapsed since={since} />}
     </div>}
-    {!!items.length && <button type="button" className="mist-xz-trail-h" aria-expanded={open} onClick={() => setOpen(v => !v)}>
+    {!!items.length && <button type="button" className="mist-xz-trail-h" aria-expanded={open} onClick={() => setExpanded(!open)}>
       {uiText('办理过程')}<ChevronRight size={13} />
     </button>}
-    {open && !!items.length && <ol className="mist-xz-steps">{items.map((i, n) => <li key={n} data-failed={i.failed || undefined}><Icon icon={KIND_ICON[i.kind]} size="xs" />{i.ref && (i.ref.view || VIEW[i.ref.type]) ? <button type="button" className="mist-xz-ref" onClick={() => onOpen(i.ref!.view ?? VIEW[i.ref!.type], i.ref!.id, i.ref!.section ? {section:i.ref!.section} : undefined)}>{i.label}</button> : <span>{i.label}</span>}</li>)}</ol>}
+    {open && !!items.length && <ol className="mist-xz-steps" aria-live={active ? 'polite' : 'off'} aria-relevant="additions text">
+      {items.map((step, n) => {
+        const ref = step.ref;
+        const view = ref && (ref.view ?? VIEW[ref.type]);
+        return <li key={n} data-failed={step.failed || undefined}>
+          <Icon icon={KIND_ICON[step.kind]} size="xs" />
+          <div className="mist-xz-step-body">
+            {ref && view
+              ? <button type="button" className="mist-xz-ref" onClick={() => onOpen(view, ref.id, ref.section ? { section: ref.section } : undefined)}>{step.label}</button>
+              : <span>{uiText(step.label)}</span>}
+            {step.progress && <p>{step.progress}</p>}
+            {step.detail && <p>{uiText(step.detail)}</p>}
+          </div>
+        </li>;
+      })}
+    </ol>}
   </div>;
 }
 

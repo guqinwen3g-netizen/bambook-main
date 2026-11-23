@@ -28,7 +28,7 @@ it('groups requests by day',()=>{const now=new Date('2026-11-09T10:00:00+08:00')
 it('shows the active model and retry phases instead of the last completed read', async () => {
   const trail = [{ at: '', kind: 'read', label: '读取订单 SO-1001' }];
   await paint([task({ trail, executionStage: 'tool' })]);
-  expect(host.querySelector('.mist-xz-shimmer')?.textContent).toBe('读取订单 SO-1001');
+  expect(host.querySelector('.mist-xz-steps')?.textContent).toContain('读取订单 SO-1001');
   await paint([task({ trail, executionStage: 'model' })]);
   expect(host.querySelector('.mist-xz-shimmer')?.textContent).toBe('正在等待模型');
   await paint([task({ trail, state: 'queued', executionIssue: { code: 'model_unavailable', retryAt: new Date().toISOString() } })]);
@@ -36,25 +36,26 @@ it('shows the active model and retry phases instead of the last completed read',
 });
 
 
-it('keeps the factual summary stable while the current model wait counts up', async () => {
+it('shows actual step details as they arrive while the model wait counts up', async () => {
   vi.useFakeTimers();
   try {
     vi.setSystemTime(new Date('2026-11-23T06:00:00Z'));
     const executionStageSince = new Date(Date.now() - 2000).toISOString();
-    const trail = [
-      { at: '', kind: 'read', label: '读取订单 SO-1001', completed: true },
-      { at: '', kind: 'read', label: '读取附件交期.pdf', completed: true, failed: true },
-      { at: '', kind: 'note', label: '交期相差三天', completed: false },
-    ];
+    const trail = [{ at: '', kind: 'read', label: '读取订单 SO-1001', completed: true }];
     await paint([task({ executionStage:'model', executionStageSince, trail })]);
-    const status = getByRole(host,'status');
-    expect(status.textContent).toBe('已查阅 1 项 · 正在等待模型');
+    expect(getByRole(host,'status').textContent).toBe('正在等待模型');
     expect(getByRole(host,'timer').textContent).toBe('· 2 秒');
+    expect(host.querySelector('.mist-xz-steps')?.textContent).toContain('读取订单 SO-1001');
+    expect(host.querySelector('.mist-xz-steps')?.textContent).not.toContain('交期相差三天');
     await act(async () => { await vi.advanceTimersByTimeAsync(7000); });
-    expect(status.textContent).toBe('已查阅 1 项 · 正在等待模型');
     expect(getByRole(host,'timer').textContent).toBe('· 9 秒');
-    await paint([task({ executionStage:'model', executionStageSince, trail: [...trail.slice(0,-1), {...trail[2],completed:true}] })]);
-    expect(getByRole(host,'status').textContent).toBe('交期相差三天 · 正在等待模型');
+    await paint([task({ executionStage:'model', executionStageSince, trail: [...trail, {
+      at:'',kind:'read',label:'读取附件 交期.pdf',completed:true,
+      detail:'已提取可读取正文',progress:'订单与附件的交期相差三天，下一步核对最新版本。',
+    }] })]);
+    expect(host.querySelector('.mist-xz-steps')?.textContent).toContain('已提取可读取正文');
+    expect(host.querySelector('.mist-xz-steps')?.textContent).toContain('交期相差三天');
+    expect(getByRole(host,'timer').textContent).toBe('· 9 秒');
   } finally { vi.useRealTimers(); }
 });
 
@@ -64,7 +65,8 @@ it('opens source records from the work log while the model is running', async ()
     at:'', kind:'read', label:'读取订单 SO-1001', completed:true, ref:{type:'order',id:'o1',label:'SO-1001'},
   }]})],actions);
   const toggle=getByRole(host,'button',{name:'办理过程'});
-  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  await act(async()=>toggle.click());
   expect(queryByRole(host,'button',{name:'读取订单 SO-1001'})).toBeNull();
   await act(async()=>toggle.click());
   await act(async()=>getByRole(host,'button',{name:'读取订单 SO-1001'}).click());

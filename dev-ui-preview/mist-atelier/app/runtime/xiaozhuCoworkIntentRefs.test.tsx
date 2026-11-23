@@ -6,7 +6,7 @@ import {useXiaozhuCowork} from './xiaozhuCowork';
 const api=vi.hoisted(()=>vi.fn());vi.mock('./workspace',()=>({mistApiRequest:(...args:any[])=>api(...args)}));
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let host:HTMLDivElement,root:Root,cowork:any;const posts:any[]=[];
-function Probe(){cowork=useXiaozhuCowork('workspace','actor:workspace',true);return null;}
+function Probe({conversationId}:{conversationId?:string}){cowork=useXiaozhuCowork('workspace','actor:workspace',true,conversationId);return null;}
 beforeEach(async()=>{posts.length=0;api.mockReset();api.mockImplementation(async(url:string,init:any)=>{if(init?.method==='POST'){posts.push(JSON.parse(init.body));throw new Error('create response unavailable');}if(url.includes('/agent-identities'))return{items:[{id:'personal',kind:'personal',state:'active'}]};if(url.endsWith('/agent-task-capabilities'))return{platformAvailable:true};return{items:[],nextCursor:null};});host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root.render(<Probe/>));});
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();});
 it('carries exact typed references separately from the same human-readable question',async()=>{
@@ -19,4 +19,30 @@ it('does not reuse an uncertain creation request when the selected identity chan
 });
 it('keeps legacy no-reference request bodies unchanged',async()=>{
  await act(async()=>{await cowork.send('旧客户端请求',[],'conversation_1');});expect(posts).toHaveLength(1);expect(posts[0]).not.toHaveProperty('intentRefs');
+});
+
+
+it('refreshes the foreground task every second without waiting for a slower background read',async()=>{
+ vi.useFakeTimers();
+ let releaseBackground:(value:unknown)=>void=()=>{};
+ try{
+  const current={id:'active-task',identityId:'personal',executor:'platform',conversationId:'current',state:'running',createdAt:'2026-11-23T00:00:00Z',updatedAt:'2026-11-23T00:00:00Z'};
+  const other={...current,id:'background-task',conversationId:'other'};
+  const calls:string[]=[];
+  api.mockImplementation(async(url:string)=>{
+   if(url.includes('/agent-identities'))return{items:[{id:'personal',kind:'personal',state:'active'}]};
+   if(url.endsWith('/agent-task-capabilities'))return{platformAvailable:true};
+   if(url.endsWith('/agent-tasks'))return{items:[current,other],nextCursor:null};
+   if(url.endsWith('/agent-tasks/active-task')){calls.push('foreground');return{item:current};}
+   if(url.endsWith('/agent-tasks/background-task')){calls.push('background');return new Promise(r=>{releaseBackground=r;});}
+   throw Error('unexpected request');
+  });
+  await act(async()=>{root.render(<Probe conversationId="current"/>);await cowork.reload();});
+  expect(calls).toEqual(['foreground','background']);
+  await act(async()=>{await vi.advanceTimersByTimeAsync(2000);});
+  expect(calls).toEqual(['foreground','background','foreground','foreground']);
+  await act(async()=>{releaseBackground({item:other});});
+  await act(async()=>{await vi.advanceTimersByTimeAsync(1000);});
+  expect(calls.slice(-2)).toEqual(['foreground','background']);
+ }finally{releaseBackground({});vi.useRealTimers();}
 });
