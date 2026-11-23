@@ -602,13 +602,24 @@ function ComposePane({ state, initial, locked, onClose, onSave, onSend }: { stat
 }
 
 const PORT_ROW: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(64px, 96px) minmax(0, 1fr)', gap: 8, minWidth: 0 };
+const MAIL_SERVER_PRESETS = [
+  { value: 'aliyun-enterprise', label: '阿里云企业邮箱', imapHost: 'imap.qiye.aliyun.com', smtpHost: 'smtp.qiye.aliyun.com' },
+  { value: 'tencent-enterprise', label: '腾讯企业邮箱', imapHost: 'imap.exmail.qq.com', smtpHost: 'smtp.exmail.qq.com' },
+  { value: 'qq', label: 'QQ 邮箱', imapHost: 'imap.qq.com', smtpHost: 'smtp.qq.com' },
+  { value: 'netease-enterprise', label: '网易企业邮箱', imapHost: 'imap.qiye.163.com', smtpHost: 'smtp.qiye.163.com' },
+  { value: 'netease-163', label: '网易 163 邮箱', imapHost: 'imap.163.com', smtpHost: 'smtp.163.com' },
+  { value: 'netease-126', label: '网易 126 邮箱', imapHost: 'imap.126.com', smtpHost: 'smtp.126.com' },
+] as const;
+type MailServerPreset = typeof MAIL_SERVER_PRESETS[number]['value'];
+const MAIL_SERVER_OPTIONS = [{ value: '', label: '手动配置' }, ...MAIL_SERVER_PRESETS.map(({ value, label }) => ({ value, label }))];
+
 type AccountForm = EmailAccountInput & { password: string; aliasText: string };
 const blankAccount = (): AccountForm => ({ address: '', displayName: '', kind: 'personal', memberIds: [], aliases: [], aliasText: '', signature: '', password: '', transport: { imapHost: '', imapPort: 993, imapSecure: true, smtpHost: '', smtpPort: 587, smtpSecure: false, username: '' } });
 const accountForm = (a: EmailAccount): AccountForm => ({ address: a.address, displayName: a.displayName, kind: a.kind, memberIds: a.memberIds || [], aliases: a.aliases, aliasText: a.aliases.join(', '), signature: a.signature, password: '', transport: a.transport || blankAccount().transport });
 
 /** 邮箱账号：本人接入个人邮箱、有权限者接入共享邮箱并选择成员；密码只提交给服务端校验并加密保存，不回显、不进入公司数据。 */
 function AccountsDrawer({ state, me, can, canAdmin, locked, run, mail, onClose }: { state: MistState; me: string; can: boolean; canAdmin: boolean; locked: boolean; run: (command: MistCommand) => Promise<{ result: { id?: string } }>; mail: Mail; onClose: () => void }) {
-  const toast = useToast(), [editing, setEditing] = React.useState<{ id?: string; form: AccountForm } | null>(null), [problem, setProblem] = React.useState(''), [binding, setBinding] = React.useState<{ id: string; password: string } | null>(null);
+  const toast = useToast(), [editing, setEditing] = React.useState<{ id?: string; preset?: MailServerPreset; form: AccountForm } | null>(null), [problem, setProblem] = React.useState(''), [binding, setBinding] = React.useState<{ id: string; password: string } | null>(null);
   const [confirming, setConfirming] = React.useState<{ kind: 'disconnect' | 'remove'; id: string; name: string } | null>(null), [removeReason, setRemoveReason] = React.useState('');
   const receiving=useMailReceiving(state.email.accounts);
   const members = ((state as MistState & { members?: Array<{ userId: string; name: string }> }).members || []).filter(row => row.userId !== me);
@@ -621,7 +632,37 @@ function AccountsDrawer({ state, me, can, canAdmin, locked, run, mail, onClose }
     if (saved) setEditing(null); else if (id && !editing.id) setEditing(prev => prev ? { ...prev, id } : prev);
   };
   const set = <K extends keyof AccountForm>(key: K, value: AccountForm[K]) => setEditing(prev => prev ? { ...prev, form: { ...prev.form, [key]: value } } : prev);
-  const setT = <K extends keyof AccountForm['transport']>(key: K, value: AccountForm['transport'][K]) => setEditing(prev => prev ? { ...prev, form: { ...prev.form, transport: { ...prev.form.transport, [key]: value } } } : prev);
+  const setT = <K extends keyof AccountForm['transport']>(key: K, value: AccountForm['transport'][K]) => setEditing(prev => {
+    if (!prev || prev.form.transport[key] === value) return prev;
+    const leavesPreset = prev.preset && key !== 'username';
+    return {
+      ...prev,
+      preset: leavesPreset ? undefined : prev.preset,
+      form: {
+        ...prev.form,
+        password: leavesPreset ? '' : prev.form.password,
+        transport: { ...prev.form.transport, [key]: value },
+      },
+    };
+  });
+  const selectPreset = (value: string) => setEditing(previous => {
+    if (!previous || previous.id) return previous;
+    const preset = MAIL_SERVER_PRESETS.find(option => option.value === value);
+    if (!preset) return previous.preset ? { ...previous, preset: undefined, form: { ...previous.form, password: '' } } : previous;
+    const old = previous.form.transport;
+    const changed = old.imapHost !== preset.imapHost || old.imapPort !== 993 || !old.imapSecure ||
+      old.smtpHost !== preset.smtpHost || old.smtpPort !== 465 || !old.smtpSecure;
+    return {
+      ...previous,
+      preset: preset.value,
+      form: {
+        ...previous.form,
+        password: changed ? '' : previous.form.password,
+        transport: { ...old, imapHost: preset.imapHost, imapPort: 993, imapSecure: true,
+          smtpHost: preset.smtpHost, smtpPort: 465, smtpSecure: true },
+      },
+    };
+  });
   const f = editing?.form;
   return <Drawer open onClose={onClose} title={uiText(editing ? (editing.id ? '修改邮箱设置' : '接入邮箱') : '邮箱账号')} sub={uiText(editing ? undefined : '个人邮箱仅本人可见；共享邮箱对接入人与所选成员可见')} size="lg"
     footer={editing ? <div className="mist-row" style={{ width: '100%' }}><span className="mist-spacer" /><Button onClick={() => setEditing(null)}>{uiText("返回")}</Button><Button variant="primary" disabled={locked || !f!.address.trim() || !f!.displayName.trim() || !f!.transport.imapHost.trim() || !f!.transport.smtpHost.trim() || (!editing.id && !f!.password)} onClick={() => void save()}>{uiText(f!.password ? '保存并验证登录' : '保存设置')}</Button></div>
@@ -629,6 +670,8 @@ function AccountsDrawer({ state, me, can, canAdmin, locked, run, mail, onClose }
     <MailReceivingNotice control={receiving}/>
     {problem && <Banner tone="bad" title={uiText("未完成")}>{problem}</Banner>}
     {editing && f ? <FormGrid>
+      {!editing.id && <Field label={uiText("邮箱服务商")}><Select aria-label={uiText("邮箱服务商")} value={editing.preset ?? ''}
+        onChange={event => selectPreset(event.target.value)} options={MAIL_SERVER_OPTIONS} /></Field>}
       <Field label={uiText("邮箱地址")} required><TextInput aria-label={uiText("邮箱地址")} type="email" value={f.address} onChange={event => set('address', event.target.value)} placeholder="name@company.com" /></Field>
       <Field label={uiText("显示名称")} required><TextInput aria-label={uiText("显示名称")} value={f.displayName} onChange={event => set('displayName', event.target.value)} /></Field>
       <Field label={uiText("类型")} required hint={uiText(canAdmin ? '共享邮箱对所选成员可见' : '接入共享邮箱需要邮件账户管理权限')}><Select aria-label={uiText("邮箱类型")} value={f.kind} onChange={event => set('kind', event.target.value as AccountForm['kind'])} options={[{ value: 'personal', label: '个人邮箱' }, ...(canAdmin || f.kind === 'shared' ? [{ value: 'shared', label: '共享邮箱' }] : [])]} /></Field>
