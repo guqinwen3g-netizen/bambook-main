@@ -4,7 +4,7 @@ import { ChevronRight, Copy, Download, FileText, RotateCcw, Zap, ShieldCheck, Se
 import { AIBadge, AssistantEyes, Button, Icon, IconButton, Pill, type Tone } from '../../../../../components/mist';
 import type { AgentTaskTrailItem, AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
 import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../../server/src/shared/mistAgentProposals';
-import { uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
+import { ui, uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { COWORK_ACTIVE, splitRequest } from '../../runtime/xiaozhuCowork';
 import type { RecordRef } from '../../runtime/xiaozhuRecords';
 import { commandRequiresSignature } from '../../runtime/signatureRules';
@@ -23,14 +23,47 @@ const clock = (iso: string) => new Date(iso).toLocaleTimeString(interfaceLocale(
 const VIEW: Record<string, string> = { order: 'orders/detail', customer: 'crm', development: 'development/detail', purchase: 'procurement', shipment: 'shipments', invoice: 'invoices', quotation: 'quotations', supplier: 'suppliers', email: 'emails', production: 'production-board', risk: 'risks', claim: 'claims' };
 
 type OpenRecord = (view: string, id: string, target?: import('../../nav').RouteTarget) => void;
-function Trail({ items, active, activeLabel, onOpen }: { items: AgentTaskTrailItem[]; active: boolean; activeLabel?: string; onOpen: OpenRecord }) {
+function Elapsed({ since }: { since: string }) {
+  const [now, setNow] = React.useState(Date.now);
+  React.useEffect(() => {
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [since]);
+  const start = Date.parse(since);
+  if (!Number.isFinite(start)) return null;
+  const seconds = Math.max(0, Math.floor((now - start) / 1000));
+  return <span className="mist-xz-elapsed" role="timer" aria-live="off">· {ui`${seconds} 秒`}</span>;
+}
+
+function completedWork(items: AgentTaskTrailItem[]) {
+  const completed = items.filter(step => step.completed && !step.failed
+    && (step.kind === 'note' || step.kind === 'read' || step.kind === 'write'));
+  const reads = completed.filter(step => step.kind === 'read').length;
+  const operations = completed.filter(step => step.kind === 'write').length;
+  const latest = completed.at(-1);
+  if (latest?.kind === 'note' && (reads || operations)) return uiText(latest.label);
+  return [reads ? ui`已查阅 ${reads} 项` : '', operations ? ui`已处理 ${operations} 步` : ''].filter(Boolean).join(' · ');
+}
+
+function Trail({ items, active, activeLabel, since, onOpen }: {
+  items: AgentTaskTrailItem[]; active: boolean; activeLabel?: string; since?: string; onOpen: OpenRecord;
+}) {
   const [open, setOpen] = React.useState(false);
-  const reads = items.filter(i => i.kind === 'read').length, writes = items.filter(i => i.kind === 'write').length, last = items.at(-1);
-  const summary = [reads ? `查阅 ${reads} 项` : '', writes ? `${writes} 步写入` : ''].filter(Boolean).join(' · ') || `${items.length} 步`;
-  if (active) return <div className="mist-xz-trail" role="status"><span className="mist-xz-shimmer">{uiText(activeLabel ?? last?.label ?? '正在办理')}</span></div>;
+  const summary = active ? completedWork(items) : '';
+  const label = uiText(activeLabel ?? items.at(-1)?.label ?? '正在办理');
   return <div className="mist-xz-trail" data-open={open || undefined}>
-    <button type="button" className="mist-xz-trail-h" aria-expanded={open} onClick={() => setOpen(v => !v)}>{uiText(summary)}<ChevronRight size={13} /></button>
-    {open && <ol className="mist-xz-steps">{items.map((i, n) => <li key={n} data-failed={i.failed || undefined}><Icon icon={KIND_ICON[i.kind]} size="xs" />{i.ref && (i.ref.view || VIEW[i.ref.type]) ? <button type="button" className="mist-xz-ref" onClick={() => onOpen(i.ref!.view ?? VIEW[i.ref!.type], i.ref!.id, i.ref!.section ? {section:i.ref!.section} : undefined)}>{i.label}</button> : <span>{i.label}</span>}</li>)}</ol>}
+    {active && <div className="mist-xz-progress">
+      <span role="status">
+        {summary && <span>{summary} · </span>}
+        <span className="mist-xz-shimmer">{label}</span>
+      </span>
+      {since && <Elapsed since={since} />}
+    </div>}
+    {!!items.length && <button type="button" className="mist-xz-trail-h" aria-expanded={open} onClick={() => setOpen(v => !v)}>
+      {uiText('办理过程')}<ChevronRight size={13} />
+    </button>}
+    {open && !!items.length && <ol className="mist-xz-steps">{items.map((i, n) => <li key={n} data-failed={i.failed || undefined}><Icon icon={KIND_ICON[i.kind]} size="xs" />{i.ref && (i.ref.view || VIEW[i.ref.type]) ? <button type="button" className="mist-xz-ref" onClick={() => onOpen(i.ref!.view ?? VIEW[i.ref!.type], i.ref!.id, i.ref!.section ? {section:i.ref!.section} : undefined)}>{i.label}</button> : <span>{i.label}</span>}</li>)}</ol>}
   </div>;
 }
 
@@ -87,7 +120,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         </div>}
       </div>
       <XiaozhuTurnShell status={status}>
-        {(!!t.trail?.length || working) && <Trail items={t.trail ?? []} active={working} activeLabel={activeLabel} onOpen={actions.onOpenRecord} />}
+        {(!!t.trail?.length || working) && <Trail items={t.trail ?? []} active={working} activeLabel={activeLabel} since={t.executionStageSince} onOpen={actions.onOpenRecord} />}
         {t.result && <XiaozhuMarkdown text={t.result} index={index} onOpen={actions.onOpenRecord} />}
         {active && t.checkpoint && !t.result && !working && <p className="mist-xz-note">{t.checkpoint}</p>}
         {!active && t.state !== 'succeeded' && !t.result && t.checkpoint && <p className="mist-xz-note">{t.checkpoint}</p>}

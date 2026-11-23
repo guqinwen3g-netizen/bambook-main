@@ -1259,6 +1259,9 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .mist-root::-webkit-scrollbar,
 @media (hover: hover) { .mist-xz-turn .mist-xz-acts :is(.mist-icon-btn, .mist-xz-time) { opacity: 0; transition: opacity var(--mist-dur-fast) var(--mist-ease); } .mist-xz-turn:hover .mist-xz-acts :is(.mist-icon-btn, .mist-xz-time), .mist-xz-acts:focus-within :is(.mist-icon-btn, .mist-xz-time), .mist-xz-turn:last-child .mist-xz-acts :is(.mist-icon-btn, .mist-xz-time) { opacity: 1; } }
 
 .mist-xz-trail { font-size: var(--mist-text-xs); }
+.mist-xz-progress { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 5px; margin-bottom: 3px; color: var(--mist-ink-3); }
+.mist-xz-progress > [role="status"] { min-width: 0; overflow-wrap: anywhere; }
+.mist-xz-elapsed { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .mist-xz-trail-h { display: inline-flex; align-items: center; gap: 2px; padding: 0; border: 0; background: none; color: var(--mist-ink-3); font: inherit; cursor: pointer; }
 .mist-xz-trail-h:hover { color: var(--mist-ink-2); }
 .mist-xz-trail-h svg { transition: transform var(--mist-dur-fast) var(--mist-ease); }

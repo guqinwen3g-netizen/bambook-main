@@ -258,6 +258,10 @@ it('researches a PDF, workbook and image together with a selected order, keeping
    expect(readTask).toBeDefined();
    const current=await readTask!();
    expect(current).toMatchObject({state:'running',executionStage:'model'});
+   expect(Number.isFinite(Date.parse(current.executionStageSince))).toBe(true);
+   expect(current.trail.filter((step:any)=>step.kind==='read'&&step.completed)).toHaveLength(3);
+   await new Promise(resolve=>setTimeout(resolve,55));
+   expect((await readTask!()).executionStageSince).toBe(current.executionStageSince);
    const input=model.messages[0].content;
    expect(input).toContain('PDF-DELIVERY-925');
    expect(input).toContain('XLSX-QUANTITY-318');

@@ -3,7 +3,7 @@ import type {AgentTaskView} from '../shared/mistAgentTasks';
 import type{ResponseLocale}from'./responseLanguage';
 
 export type PlatformTaskPlan={name:string;arguments:Record<string,unknown>};
-export type PlatformTaskStep={id:string;plan:PlatformTaskPlan;result?:unknown;at:string;compacted?:boolean};
+export type PlatformTaskStep={id:string;plan:PlatformTaskPlan;result?:unknown;at:string;completedAt?:string;compacted?:boolean};
 export type PlatformTaskProgress={steps:PlatformTaskStep[];nextRunAt:number;requiresRead?:boolean;checkpointBeforeIssue?:string;retryAt?:number;failures?:number;issue?:'model_unavailable'|'model_response_invalid'};
 export const PLATFORM_TASK_TURN_LIMIT=60;
 export const PLATFORM_TASK_RESULT_LIMIT=160_000;
