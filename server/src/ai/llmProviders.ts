@@ -111,7 +111,11 @@ export type LlmCompleterOptions = {
   platformProfile?: PlatformAiProfile;
   subscriptions?: Pick<CodexSubscriptionService, 'isConnected' | 'complete'>;
   platformProviders?: Pick<PlatformProviderStore, 'chain'>;
+  validateResponse?: (response: string) => void;
 };
+
+// Reserve time for a second provider inside the Agent's overall model deadline.
+const AGENT_PROVIDER_ATTEMPT_MS = 45_000;
 
 export function createLlmCompleter(options: LlmCompleterOptions = {}) {
   return async function complete(input: LlmCompletionInput): Promise<string> {
@@ -120,27 +124,39 @@ export function createLlmCompleter(options: LlmCompleterOptions = {}) {
       ...(options.platformProviders ?? platformProviders()).chain().map(step => step.kind === 'subscription' ? step : { kind: 'api' as const, provider: platformConfig(step.provider) }),
       ...resolveEnvProviderChain().map(provider => ({ kind: 'api' as const, provider })),
     ];
+    const profile = options.platformProfile;
+    const available = (step: typeof steps[number]) => step.kind === 'api' || (!!profile && subscriptions.isConnected(PLATFORM_SUBJECT));
     const failures: Array<{ providerId: string; error: string }> = [];
-    for (const step of steps) {
-      if (step.kind === 'subscription') {
-        // 平台 ChatGPT 套餐只用于平台 AI 功能档位，且须已连接
-        if (!options.platformProfile || !subscriptions.isConnected(PLATFORM_SUBJECT)) continue;
-        try {
-          return await subscriptions.complete(PLATFORM_SUBJECT, input, { reasoning: platformReasoning(options.platformProfile) });
-        } catch (err: any) {
-          if (err?.name === 'AbortError') throw err;
-          // 平台订阅失败（限额/授权失效）时转下一项；只记录脱敏后的错误文字
-          failures.push({ providerId: 'chatgpt-subscription', error: `${typeof err?.code === 'string' ? err.code + ': ' : ''}${String(err?.message || err)}` });
-        }
-        continue;
-      }
+    let invalidResponse: Error | undefined;
+    for (const [index, step] of steps.entries()) {
+      if (!available(step)) continue;
+      input.signal.throwIfAborted();
+      const deadline = profile === 'agent-task' && !input.onDelta && steps.slice(index + 1).some(available) ? new AbortController() : undefined;
+      const timer = deadline ? setTimeout(() => deadline.abort(), AGENT_PROVIDER_ATTEMPT_MS) : undefined;
+      timer?.unref?.();
+      const attempt = deadline ? { ...input, signal: AbortSignal.any([input.signal, deadline.signal]) } : input;
+      const providerId = step.kind === 'subscription' ? 'chatgpt-subscription' : step.provider.id;
       try {
-        return await completeWithProvider(step.provider, input);
+        const reply = step.kind === 'api'
+          ? await completeWithProvider(step.provider, attempt)
+          : await subscriptions.complete(PLATFORM_SUBJECT, attempt, { reasoning: profile && platformReasoning(profile) });
+        input.signal.throwIfAborted();
+        try {
+          options.validateResponse?.(reply);
+        } catch (err) {
+          invalidResponse ??= err instanceof Error ? err : new Error(String(err));
+          continue;
+        }
+        return reply;
       } catch (err: any) {
-        if (err?.name === 'AbortError') throw err;
-        failures.push({ providerId: step.provider.id, error: String(err?.message || err) });
+        if (input.signal.aborted || (!deadline?.signal.aborted && err?.name === 'AbortError')) throw err;
+        const code = step.kind === 'subscription' && typeof err?.code === 'string' ? err.code + ': ' : '';
+        failures.push({ providerId, error: deadline?.signal.aborted ? 'PROVIDER_ATTEMPT_TIMEOUT' : code + String(err?.message || err) });
+      } finally {
+        clearTimeout(timer);
       }
     }
+    if (invalidResponse) throw invalidResponse;
     if (failures.length === 0) throw new Error('Model API key is not configured on Mac mini');
     throw new Error(`LLM_ALL_PROVIDERS_FAILED: ${JSON.stringify(failures)}`);
   };

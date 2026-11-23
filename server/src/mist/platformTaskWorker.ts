@@ -51,7 +51,7 @@ export class MistPlatformTaskWorker{
   private enabled=false;private timer?:ReturnType<typeof setInterval>;private initial?:ReturnType<typeof setTimeout>;private scanning=false;private scanDone:Promise<void>=Promise.resolve();
   private runs=new Map<string,{abort:AbortController;done:Promise<void>}>();private readonly owners=new Map<string,string>();private readonly complete:(input:LlmCompletionInput)=>Promise<string>;private readonly id='platform-'+randomUUID();
   private conditionCursor?:{createdAt:string;id:string};
-  constructor(private readonly repository:MistRepository,private readonly options:PlatformTaskWorkerOptions){this.complete=options.complete??createLlmCompleter({platformProfile:'agent-task'});}
+  constructor(private readonly repository:MistRepository,private readonly options:PlatformTaskWorkerOptions){this.complete=options.complete??createLlmCompleter({platformProfile:'agent-task',validateResponse:parsePlatformTaskPlan});}
   get running(){return this.enabled;}
   get available(){return this.enabled&&(this.options.configured?.()??(this.options.complete?true:getMistAssistantStatus().configured));}
   start(delayMs=1000){if(this.enabled)return;this.enabled=true;this.timer=setInterval(()=>void this.tick(),this.options.tickMs??3000);this.initial=setTimeout(()=>void this.tick(),delayMs);this.timer.unref?.();this.initial.unref?.();}

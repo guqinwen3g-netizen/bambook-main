@@ -23,3 +23,14 @@ it('asks the open question inline and sends the answer for that question',async(
 it('shows what will change and opens the confirmation without leaving the conversation',async()=>{const f=fns();await paint([task({state:'waiting_human',waitingProposalIds:['p1']})],f,[proposal()]);expect(host.textContent).toContain('需要你确认');expect(host.textContent).toContain('归档邮件 PO 确认');expect(host.textContent).toContain('中风险');await act(async()=>getByRole(host,'button',{name:'查看并确认'}).click());expect(f.onProposal).toHaveBeenCalledWith('p1');});
 it('labels a stopped request instead of leaving it blank',async()=>{await paint([task({state:'budget_exhausted',checkpoint:'已读 20 条'})]);expect(host.textContent).toContain('达到限额');});
 it('groups requests by day',()=>{const now=new Date('2026-11-09T10:00:00+08:00');expect(dayLabel('2026-11-09T01:00:00+08:00',now)).toBe('今天');expect(dayLabel('2026-11-08T17:30:00Z',now)).toBe('今天');expect(dayLabel('2026-11-08T23:00:00+08:00',now)).toBe('昨天');});
+
+
+it('shows the active model and retry phases instead of the last completed read', async () => {
+  const trail = [{ at: '', kind: 'read', label: '读取订单 SO-1001' }];
+  await paint([task({ trail, executionStage: 'tool' })]);
+  expect(host.querySelector('.mist-xz-shimmer')?.textContent).toBe('读取订单 SO-1001');
+  await paint([task({ trail, executionStage: 'model' })]);
+  expect(host.querySelector('.mist-xz-shimmer')?.textContent).toBe('正在等待模型');
+  await paint([task({ trail, state: 'queued', executionIssue: { code: 'model_unavailable', retryAt: new Date().toISOString() } })]);
+  expect(host.querySelector('.mist-xz-shimmer')?.textContent).toBe('模型重试中');
+});

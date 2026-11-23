@@ -253,7 +253,11 @@ function pdf(text:string){
 }
 
 it('researches a PDF, workbook and image together with a selected order, keeping all uploaded files task-private',async()=>{
+ let readTask: (()=>Promise<any>) | undefined;
  const complete=vi.fn(async(model:LlmCompletionInput)=>{
+   expect(readTask).toBeDefined();
+   const current=await readTask!();
+   expect(current).toMatchObject({state:'running',executionStage:'model'});
    const input=model.messages[0].content;
    expect(input).toContain('PDF-DELIVERY-925');
    expect(input).toContain('XLSX-QUANTITY-318');
@@ -274,6 +278,7 @@ it('researches a PDF, workbook and image together with a selected order, keeping
    .attach('attachments',image,'sample.png');
  f.worker.start(3_600_000);
  const task=(await submit().expect(201)).body.item;
+ readTask=()=>f.current(task.id);
  const replay=(await submit().expect(201)).body.item;
  expect(replay.id).toBe(task.id);
  expect(replay.attachments).toEqual(task.attachments);
