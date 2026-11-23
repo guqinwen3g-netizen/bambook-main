@@ -61,10 +61,11 @@ const CREATE = /^(?:[+＋]\s*)?(?:新建|新增|手工登记|登记|创建|添�
 const DETAIL_SETUP = {
   'production-board': { actions: [{ click: '.mist-kb-card' }], expected: { selector: '[role="dialog"]' } },
   inventory: { expected: { selector: '[data-stock-detail]' } },
-  'qc-workbench': { actions: [{ click: '.mist-task[data-workbench-item]' }], expected: { selector: '[data-qc-detail]' } },
-  'payment-vouchers': { expected: { text: '此流水核销记录' } },
+  'qc-workbench': { actions: [{ click: '.mist-task[data-workbench-item]' }, { button: '打开QC任务' }], expected: { selector: '[data-list-detail-page] [data-qc-detail]' } },
+  'payment-vouchers': { expected: { text: '到账用途' } },
   pricing: { actions: [{ tab: '参数快照' }, { row: true }], expected: { text: '只读参数快照' } },
-  hr: { actions: [{ tab: '全部人员' }, { row: true }], expected: { selector: '[role="dialog"]' } },
+  claims: { expected: { scope: '[data-module-detail]', text: '客诉问题' } },
+  hr: { actions: [{ tab: '人员' }, { row: true }], expected: { scope: '[role="dialog"]', text: '员工档案' } },
   approvals: { actions: [{ tab: '已处理' }, { row: true }], expected: { selector: '[data-approval]' } },
 };
 const CREATE_BUTTON = { crm: '新建客户', relations: '建立关系档案', invoices: '导入期初应收' };
@@ -155,7 +156,8 @@ const settle = async (page, state) => {
 
 async function expectedVisible(page, expected) {
   if (!expected) return false;
-  const locator = expected.text ? page.getByText(expected.text, { exact: true }) : page.locator(expected.selector);
+  const surface = expected.scope ? page.locator(expected.scope) : page;
+  const locator = expected.text ? surface.getByText(expected.text, { exact: true }) : surface.locator(expected.selector);
   for (let i = 0; i < await locator.count(); i++) if (await locator.nth(i).isVisible()) return true;
   return false;
 }
@@ -212,6 +214,9 @@ async function scanState(context, state, theme) {
       await page.setViewportSize({ width: w, height: w < 760 ? 844 : 900 });
       await page.waitForTimeout(260);
       await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+      if (state.expected && !(await expectedVisible(page, state.expected))) {
+        throw new Error(`${w}px 未显示预期的详情或表单`);
+      }
       const result = await page.evaluate(detectOverflow, {});
       result.issues.push(...(await page.evaluate(detectStacking, {})).issues);
       for (const issue of result.issues) found.push({ state: state.id, label: state.label, url: state.url, actions: state.actions, theme, width: w, ...issue });

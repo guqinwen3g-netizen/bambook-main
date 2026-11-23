@@ -197,7 +197,7 @@
 .mist-kv { padding: 6px 16px 14px; }
 .mist-kv > div { display: flex; justify-content: space-between; gap: 12px; padding: 10px 2px; font-size: var(--mist-text-sm); }
 .mist-kv > div:not(:last-child) { border-bottom: 1px solid var(--mist-line); }
-.mist-kv dt, .mist-kv > div > span:first-child { color: var(--mist-ink-3); min-width: 0; overflow-wrap: anywhere; }
+.mist-kv dt, .mist-kv > div > span:first-child { color: var(--mist-ink-3); flex-shrink: 0; max-width: 45%; min-width: 0; overflow-wrap: anywhere; }
 .mist-kv dd, .mist-kv > div > b { font-weight: var(--mist-fw-medium); text-align: right; min-width: 0; overflow-wrap: anywhere; }
 .mist-facts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px 16px; }
 .mist-facts > div { min-width: 0; overflow-wrap: anywhere; }

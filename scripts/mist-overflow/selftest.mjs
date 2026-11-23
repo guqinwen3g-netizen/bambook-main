@@ -63,14 +63,21 @@ async function actionAreaFailures(page) {
   await page.setViewportSize({ width: 320, height: 760 });
   const attributes = `<article style="width:288px;margin:auto"><dl class="mist-kv">
     <div><dt>样布异常后重新协调继续交付的整批采购需求全部备注</dt><dd>1750 米 · 未定价</dd></div>
+    <div><dt>依据</dt><dd>${'退货处置依据与业务复核记录'.repeat(12)}</dd></div>
   </dl></article>`;
-  await page.setContent(`<!doctype html><style>body{margin:0}</style><style>${css}</style><main class="mist-root">${measure}${attributes}</main>`);
+  const receipt = `<article style="width:288px;margin:auto"><div class="mist-table" data-fit="full">
+    <div class="mist-tr" role="row"><div role="cell">到账</div><div role="cell">${'模拟付款人及附言'.repeat(8)}</div>
+    <div role="cell" class="mist-cell-r"><b class="mist-num">125,000.00</b><span class="mist-cell-sub">USD · 余 0.00</span></div><div role="cell">已核销</div></div>
+  </div></article>`;
+  await page.setContent(`<!doctype html><style>body{margin:0}</style><style>${css}</style><main class="mist-root">${measure}${attributes}${receipt}</main>`);
   const overflows = await page.evaluate(() => ({
+    amount: [...document.querySelectorAll('.mist-cell-r')].some(cell => cell.scrollWidth > cell.clientWidth + 1 || cell.querySelector('.mist-num').getBoundingClientRect().width > cell.clientWidth + 1),
     measure: [...document.querySelectorAll('.mist-measure-row')].some(row => row.scrollWidth > row.clientWidth + 1),
     attributes: [...document.querySelectorAll('.mist-kv > div, .mist-kv dt, .mist-kv dd')].some(node => node.scrollWidth > node.clientWidth + 1),
   }));
+  if (overflows.amount) failures.push('到账流水 / 320px：长付款方挤出了金额');
   if (overflows.measure) failures.push('QC 测量区 / 320px：测量表列超出容器');
-  if (overflows.attributes) failures.push('键值行 / 320px：长字段名挤出了数值');
+  if (overflows.attributes) failures.push('键值行 / 320px：长字段名或长值挤出文字');
   return failures;
 }
 
