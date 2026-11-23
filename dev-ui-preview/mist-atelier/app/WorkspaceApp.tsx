@@ -382,7 +382,6 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
   // Shell status floats under the topbar (MistAppShell notices) instead of pushing the page title down.
   const canAdminister = session.hasRole('owner', 'admin') || session.hasPermission('users:admin'), errorGap = workspace.error ? settingsGap(workspace.error) : null;
   const shellNoticeList = [
-    platformCompany && <Banner variant="inline" key="platform" tone="neutral" title={ui`公司管理 · ${platformCompany.companyName}`} actions={<Button loading={exitingSupport} onClick={()=>void exitManagement()}>{uiText("返回平台")}</Button>}/>,
     workspace.pendingCreate && !workspace.saving && <Banner variant="inline" key="create" tone="warn" title={uiText("历史数据创建结果需要核对")} actions={<Button onClick={()=>void workspace.createWorkspace(workspace.pendingCreate!.name,workspace.pendingCreate!.seed).catch(report)}>{uiText("核对创建结果")}</Button>}>{workspace.pendingCreate.name}{uiText("：将查询并继续同一次创建。")}</Banner>,
     workspace.pending && !workspace.saving && !pendingClaimed && !(workspace.pending.kind==='mail-send'&&route.view==='emails') && !(workspace.pending.kind==='command'&&route.view==='calendar') && !(workspace.pending.kind==='upload'&&claimedUpload===workspace.pending.requestId) && <Banner variant="inline" key="pending" tone="warn" title={uiText("上次操作的结果需要核对")} actions={<Button loading={workspace.saving} onClick={()=>void workspace.recover().catch(report)}>{uiText("核对原请求")}</Button>}>{uiText("核对前会保留原请求，避免重复保存。")}{uiText(workspace.pending.kind==='upload'?'如尚未上传成功，请在原页面重新选择同一附件。':workspace.pending.kind==='mail-send'?'上次邮件发送未收到服务器回执；核对时使用原发送请求，已登记的不会重复投递。':'')}</Banner>,
     // 审批人、公司抬头等设置缺口，重新读取解决不了：管理员直接去对应设置，其他人知道该找谁。
@@ -416,6 +415,7 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
           theme={theme} onToggleTheme={toggleTheme} onSearch={() => setPalette(true)}
           extra={<>{!(platformOnly || platformCompany) && !route.id && !route.view.includes('/') && <ModuleWorkButton view={route.view} />}{!(platformOnly || platformCompany) && <MistReviewButton/>}<ManualLink /></>} notifications={platformOnly || platformCompany ? undefined : { unread: visibleNotifications.some(n=>!n.readAt), onClick:()=>setNotifications(true) }} onAsk={!canAI || base === 'assistant' ? undefined : ()=>openAI()} />}
       >
+        {platformCompany && <div className="mist-management-context"><Banner variant="inline" tone="neutral" title={ui`公司管理 · ${platformCompany.companyName}`} actions={<Button loading={exitingSupport} onClick={()=>void exitManagement()}>{uiText("返回平台")}</Button>}/></div>}
         {!Page ? <EmptyState title={uiText("没有找到此页面")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />
           : !permitted ? <EmptyState icon={ShieldCheck} title={uiText("没有查看权限")} description={uiText("当前账号无法访问此业务。")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />
           : Page ? (

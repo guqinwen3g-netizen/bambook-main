@@ -188,6 +188,7 @@ button.mist-sync:hover { background: var(--mist-fill); color: var(--mist-ink); }
 .mist-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 8px 32px 48px; }
 .mist-scroll::-webkit-scrollbar { width: 10px; }
 .mist-scroll::-webkit-scrollbar-thumb { background: var(--mist-ink-4); border-radius: 10px; border: 3px solid var(--mist-canvas); }
+.mist-management-context { max-width: var(--mist-page-max); margin: 0 auto 12px; }
 .mist-page { max-width: var(--mist-page-max); margin: 0 auto; }
 .mist-page > :is(.mist-grid, .mist-card) + :is(.mist-grid, .mist-card) { margin-block-start: var(--mist-gap); }
 .mist-page[data-width="narrow"] { max-width: 880px; }
@@ -631,7 +632,7 @@ button.mist-sync:hover { background: var(--mist-fill); color: var(--mist-ink); }
   .mist-task { grid-template-columns: minmax(0,1fr) auto; gap: 8px; } .mist-task > :is(.mist-task-when, .mist-stack, .mist-go) { display: none; }
   .mist-task[data-workbench-item] { grid-template-columns: minmax(0, 1fr) auto; }
   [data-report-results] { --mist-report-label-display: block; }
-  .mist-thead { display: none; } .mist-tr { grid-template-columns: minmax(0, 1fr) auto !important; padding: 10px 14px; } .mist-tr > [data-hide-sm] { display: none; }
+  .mist-thead { display: none; } .mist-tr { grid-template-columns: minmax(0, 1fr) fit-content(50%) !important; padding: 10px 14px; } .mist-tr > [data-hide-sm] { display: none; }
   .mist-pipeline { grid-template-columns: repeat(3, minmax(0, 1fr)); } .mist-pipeline > button { min-width: 0; padding: 10px 12px; gap: 6px; } .mist-pipeline small { white-space: normal; align-items: flex-start; line-height: 1.3; } .mist-pipeline small i { margin-top: 4px; } .mist-pipeline b { font-size: 22px; } .mist-search { min-width: 0; flex: 1 1 100%; } .mist-toolbar-right { margin-left: 0; }
   .mist-idrow { flex-wrap: wrap; } .mist-idrow-people { margin-left: 0; width: 100%; flex-wrap: wrap; gap: 18px; }
   .mist-stepper { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(150px, 1fr); overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; } .mist-stepper > * { scroll-snap-align: start; } .mist-detail, .mist-detail > .mist-detail-rail { grid-template-columns: 1fr !important; }
