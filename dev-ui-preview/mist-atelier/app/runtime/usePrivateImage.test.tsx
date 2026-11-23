@@ -106,6 +106,44 @@ it('pauses background images when hidden and resumes the remaining queue', async
  } finally { stop(); vi.useRealTimers(); }
 });
 
+it('pauses speculative images on 3G and resumes the remaining work on 4G', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('requestIdleCallback', undefined);
+  vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+  const connection = Object.assign(new EventTarget(), { effectiveType: '3g', saveData: false });
+  vi.stubGlobal('navigator', { connection });
+  let finish!: (response: Response) => void;
+  const response = { ok: true, blob: async () => new Blob(['image']) } as Response;
+  const fetcher = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockResolvedValue(response);
+  vi.stubGlobal('fetch', fetcher);
+  URL.createObjectURL = vi.fn(() => 'blob:scope'); URL.revokeObjectURL = vi.fn();
+  const paths = ['/private/first', '/private/second'];
+  const change = (effectiveType: string) => {
+    connection.effectiveType = effectiveType;
+    connection.dispatchEvent(new Event('change'));
+  };
+  const stop = schedulePrivateImagePrefetch('network:one:workspace-a', paths);
+  try {
+    await vi.advanceTimersByTimeAsync(900);
+    expect(fetcher).not.toHaveBeenCalled();
+
+    change('4g');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    change('3g');
+    finish(response);
+    await vi.advanceTimersByTimeAsync(900);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    change('4g');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(fetcher.mock.calls.map(([path]) => path)).toEqual(paths);
+  } finally {
+    stop();
+    vi.useRealTimers();
+  }
+});
+
 it('does not prefetch private images when data saving is requested', () => {
  vi.stubGlobal('navigator', { connection: { saveData: true } });
  const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);

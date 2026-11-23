@@ -1,6 +1,7 @@
 import React from 'react';
 import { apiService } from '../../../../services/apiService';
 import { useMistSession } from './auth';
+import { getPrefetchConnection, prefetchConnectionIsLimited } from './prefetchConnection';
 
 type Entry = { promise: Promise<string>; controller: AbortController; url?: string; users: number; bytes: number; usedAt: number; pending?: boolean };
 const images = new Map<string, Entry>();
@@ -60,18 +61,19 @@ export async function prefetchPrivateImages(scope: string, paths: string[], conc
 
 /** Keep speculative image traffic behind interactive page/data requests. */
 export function schedulePrivateImagePrefetch(scope: string, paths: string[]) {
-  const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
-  if (!paths.length || connection?.saveData || /(^|-)2g$/.test(connection?.effectiveType || '')) return () => {};
+  if (!paths.length) return () => {};
+  const connection = getPrefetchConnection();
   let stopped = false, running = false, timer: number | undefined, idle: number | undefined;
   let controller = new AbortController();
+  const cannotStart = () => stopped || document.hidden || prefetchConnectionIsLimited(connection);
   const schedule = () => {
-    if (stopped || running || document.hidden || timer !== undefined || idle !== undefined) return;
+    if (cannotStart() || running || timer !== undefined || idle !== undefined) return;
     timer = window.setTimeout(() => {
       timer = undefined;
-      if (stopped || document.hidden) return;
+      if (cannotStart()) return;
       const run = () => {
         idle = undefined;
-        if (stopped || document.hidden) return;
+        if (cannotStart()) return;
         if (controller.signal.aborted) controller = new AbortController();
         running = true;
         const current = controller;
@@ -81,12 +83,18 @@ export function schedulePrivateImagePrefetch(scope: string, paths: string[]) {
       else run();
     }, 300);
   };
-  const onVisibility = () => { if (document.hidden) controller.abort(); else schedule(); };
-  document.addEventListener('visibilitychange', onVisibility);
+  const onAvailabilityChange = () => {
+    // Pause the queue without cancelling a request a visible image may share.
+    if (cannotStart()) controller.abort();
+    else schedule();
+  };
+  document.addEventListener('visibilitychange', onAvailabilityChange);
+  connection?.addEventListener?.('change', onAvailabilityChange);
   schedule();
   return () => {
     stopped = true; controller.abort();
-    document.removeEventListener('visibilitychange', onVisibility);
+    document.removeEventListener('visibilitychange', onAvailabilityChange);
+    connection?.removeEventListener?.('change', onAvailabilityChange);
     if (timer !== undefined) window.clearTimeout(timer);
     if (idle !== undefined) window.cancelIdleCallback(idle);
   };
