@@ -7,7 +7,7 @@
  *   C. 同 provider 内流式失败降级非流式
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { resolveLlmProviderChain, createLlmCompleter } from '../llmProviders';
+import { resolveLlmProviderChain, createLlmCompleter, testLlmProvider } from '../llmProviders';
 
 const ENV_KEYS = [
   'ARK_API_KEY', 'VOLCENGINE_API_KEY', 'TENCENT_API_KEY', 'ZHIPU_API_KEY',
@@ -183,4 +183,43 @@ it('sends task images as multimodal Chat Completions content', async () => {
   expect(body.messages.at(-1)).toEqual({role:'user',content:[
     {type:'text',text:'swatch.jpg'}, {type:'image_url',image_url:{url:imageUrl}},
   ]});
+});
+
+
+describe('Ark Kimi K3.1 Chat Completions', () => {
+  const baseUrl = 'https://ark.cn-beijing.volces.com/api/v3';
+  const model = 'kimi-k3-1-pro-261024';
+
+  it('uses the provider-required temperature in the connection test', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(okCompletion('OK'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(testLlmProvider({ id: 'probe', baseUrl, model, apiKey: 'test-key' }, BASE_INPUT.signal)).resolves.toBe('OK');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ model, temperature: 1, stream: false });
+  });
+
+  it('preserves the required temperature through the streaming fallback', async () => {
+    process.env.ARK_API_KEY = 'test-key';
+    process.env.BAMBOOK_MODEL_BASE_URL = baseUrl;
+    process.env.BAMBOOK_MODEL_NAME = model;
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response('', { status: 503 })).mockResolvedValueOnce(okCompletion('OK'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(createLlmCompleter()({ ...BASE_INPUT, temperature: 0.1, onDelta: vi.fn() })).resolves.toBe('OK');
+    expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body))).toMatchObject([
+      { model, temperature: 1, stream: true },
+      { model, temperature: 1, stream: false },
+    ]);
+  });
+
+  it('retains the caller temperature for a different Ark model', async () => {
+    process.env.ARK_API_KEY = 'test-key';
+    process.env.BAMBOOK_MODEL_BASE_URL = baseUrl;
+    process.env.BAMBOOK_MODEL_NAME = 'test-other-model';
+    const fetchMock = vi.fn().mockResolvedValueOnce(okCompletion('OK'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(createLlmCompleter()({ ...BASE_INPUT, temperature: 0.1 })).resolves.toBe('OK');
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).temperature).toBe(0.1);
+  });
 });

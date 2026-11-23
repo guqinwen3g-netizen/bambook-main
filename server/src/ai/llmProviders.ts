@@ -153,6 +153,9 @@ export function testLlmProvider(provider: LlmProviderConfig, signal: AbortSignal
 
 async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompletionInput): Promise<string> {
   const model = input.model || provider.model;
+  // Ark requires temperature=1.0 for this model on its Chat Completions data plane.
+  const arkKimi = model === 'kimi-k3-1-pro-261024' && provider.baseUrl === 'https://ark.cn-beijing.volces.com/api/v3';
+  const temperature = arkKimi ? 1 : input.temperature ?? 0.2;
   const messages = [
     { role: 'system' as const, content: input.systemPrompt },
     ...input.messages,
@@ -163,7 +166,7 @@ async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompl
     try {
       return await streamChatCompletion({
         baseUrl: provider.baseUrl, apiKey: provider.apiKey, model, messages,
-        temperature: input.temperature ?? 0.2,
+        temperature,
         signal: input.signal, onDelta: input.onDelta,
       });
     } catch (streamErr: any) {
@@ -174,7 +177,7 @@ async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompl
 
   const body: Record<string, unknown> = {
     model,
-    temperature: input.temperature ?? 0.2,
+    temperature,
     stream: false,
     messages: input.images?.length ? [...messages, {
       role:'user',
