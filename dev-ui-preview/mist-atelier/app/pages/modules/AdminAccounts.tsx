@@ -137,12 +137,12 @@ export function AdminAccounts() {
     <Card><DataTable ariaLabel={uiText("公司账号")} rows={users} rowKey={u => u.id} loading={loading && !data} selectedKey={selected} onRowClick={u => setSelected(u.id)} columns={columns}
       empty={<EmptyState title={uiText(data?.users.length ? '没有符合条件的账号' : '还没有公司账号')} action={(query||status)&&<Button variant="quiet" onClick={()=>{setQuery('');setStatus('');}}>{uiText('清除筛选')}</Button>} />} /></Card>
     <Drawer open={!!current && !form} onClose={() => setSelected(null)} title={uiText(current?.displayName ?? '')} sub={uiText(current?.email)}
-      footer={current && <div className="mist-row">
+      footer={current && <>
         {current.status === 'pending' && <><Button variant="primary" onClick={() => { setFormError(''); setForm({ ...blank(), mode: 'approve', account: current, displayName: current.displayName, email: current.email, departmentId: current.departmentId ?? '', roles: current.roleIds }); }}>{uiText("审批通过")}</Button><Button onClick={() => setConfirm({ kind: 'reject', account: current })}>{uiText("拒绝")}</Button></>}
         {current.status === 'active' && <><Button onClick={() => { setFormError(''); setForm({ ...blank(), mode: 'edit', account: current, displayName: current.displayName, email: current.email, departmentId: current.departmentId ?? '', roles: current.roleIds }); }}>{uiText("修改资料与岗位")}</Button><Button icon={KeyRound} onClick={() => setConfirm({ kind: 'reset', account: current })}>{uiText("重置密码")}</Button><Button disabled={self} onClick={() => setConfirm({ kind: 'disable', account: current })}>{uiText(self ? '不能停用自己' : '停用账号')}</Button></>}
         {current.status === 'disabled' && <Button onClick={() => setConfirm({ kind: 'enable', account: current })}>{uiText("重新启用")}</Button>}
         {hrRead && current.status !== 'pending' && <Button onClick={() => go('hr', current.id, { section: 'people' })}>{uiText("员工档案")}</Button>}
-      </div>}>
+      </>}>
       {current && <>
         <KeyValue items={[{ label: '状态', value: ACCOUNT_STATUS[current.status]?.label ?? current.status }, { label: '任职部门', value: current.department ?? '未分配' }, { label: '岗位', value: current.roleIds.map(roleName).join('、') || '未设岗位' }, { label: '创建时间', value: when(current.createdAt) }, { label: '最近登录', value: when(current.lastLoginAt) }]} />
         {!companyMode && envelope && current.status === 'active' && <div className="mist-section">{envelope.ownerId === current.id ? <Banner tone="neutral" title={ui`「${envelope.name}」的所有者`} /> : memberIds.has(current.id)
