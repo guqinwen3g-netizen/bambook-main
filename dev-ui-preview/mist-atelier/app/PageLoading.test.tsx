@@ -2,7 +2,7 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it } from 'vitest';
-import { PageLoading } from './PageLoading';
+import { LoadingRows, PageLoading } from './PageLoading';
 import { CompanyManagementLoading } from './pages/CompanyManagementLoading';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -35,6 +35,20 @@ it('keeps the company management header and two-column layout during its initial
     expect(status?.querySelectorAll('.mist-vsteps .mist-skel')).toHaveLength(4);
     expect(status?.querySelectorAll('.mist-col .mist-card')).toHaveLength(2);
     expect(status?.querySelector('button, a, input')).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
+it('announces an inline data read without drawing interactive or empty content', async () => {
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<LoadingRows label="正在读取订阅连接…" rows={2} />));
+    const status = host.querySelector('[role="status"][aria-busy="true"]');
+    expect(status?.getAttribute('aria-label')).toBe('正在读取订阅连接…');
+    expect(status?.querySelectorAll('.mist-skel')).toHaveLength(2);
+    expect(status?.textContent).toBe('');
   } finally {
     await act(async () => root.unmount());
   }

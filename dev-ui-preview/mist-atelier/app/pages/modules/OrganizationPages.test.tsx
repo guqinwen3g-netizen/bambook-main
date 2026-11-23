@@ -360,6 +360,17 @@ describe('人事管理', () => {
     expect(bridge.calls.filter(c => c.method === 'GET' && c.url === '/api/hr/employees/u3')).toHaveLength(1);
   });
 
+  it('keeps the employee profile in a loading state until the read confirms it is absent', async () => {
+    let finish!: (response: unknown) => void;
+    bridge.routes['GET /api/hr/employees/u3'] = () => new Promise(resolve => { finish = resolve; });
+    await render(HrOrganizationPage, 'hr', 'people', 'u3');
+    expect(document.querySelector('[role="status"][aria-label="正在读取员工档案"][aria-busy="true"]')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('尚未建立员工档案');
+    expect(document.body.textContent).not.toContain('建立员工档案');
+    await act(async () => finish({ profile: null }));
+    expect(document.body.textContent).toContain('尚未建立员工档案');
+  });
+
   it('lists people with their team and offers to create a missing employee profile', async () => {
     await render(HrOrganizationPage, 'hr', 'people');
     expect(document.body.textContent).toContain('李四');

@@ -1,3 +1,4 @@
+import { LoadingRows } from '../../PageLoading';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /**
  * 平台 AI 调用链（平台设置 › 平台 AI 模型）：对所有公司生效，仅平台管理员可改。
@@ -88,7 +89,7 @@ export function PlatformAiProvidersPanel({ sessionKey }: { sessionKey: string })
 
   if (!view) return <div className="mist-card-body">{error
     ? <Banner tone="warn" title={uiText("平台 AI 配置暂不可读")} actions={<Button size="sm" onClick={() => void read()}>{uiText("重新读取")}</Button>}>{uiText(error)}</Banner>
-    : <p className="mist-note">{uiText("正在读取平台 AI 配置…")}</p>}</div>;
+    : <LoadingRows label="正在读取平台 AI 配置…" />}</div>;
 
   const providers = new Map(view.api.providers.map(p => [p.id, p]));
   const order = view.api.order;

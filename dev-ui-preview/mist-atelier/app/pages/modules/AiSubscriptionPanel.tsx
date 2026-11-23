@@ -1,3 +1,4 @@
+import { LoadingRows } from '../../PageLoading';
 import { interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /**
@@ -63,7 +64,7 @@ export function AiSubscriptionPanel({ sessionKey, mode, onChange, bare }: { sess
     // 读取中与服务器未启用都要有交代，不能留一整页空白。
     const body = <div className="mist-card-body">{status
       ? <Banner variant="status" title={uiText("未启用 ChatGPT 订阅连接")} />
-      : <p className="mist-note">{uiText("正在读取订阅连接…")}</p>}</div>;
+      : <LoadingRows label="正在读取订阅连接…" />}</div>;
     return bare ? body : <Card>{body}</Card>;
   }
   const start = async () => {

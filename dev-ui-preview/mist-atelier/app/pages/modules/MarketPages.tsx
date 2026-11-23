@@ -1,3 +1,4 @@
+import { LoadingRows } from '../../PageLoading';
 import { LeadPool } from './LeadPool';
 import { activeCustomers } from '../../runtime/activeCustomers';
 import type { QuoteFeedbackRecord } from '../../../../../server/src/shared/mistQuotationFeedback';
@@ -101,7 +102,7 @@ function ProductImage({row}:{row:MarketProduct}) {
  const {file,src,images,failed,retry}=useProductImage(row,'cutout-display',selected);
  if(!images.length)return null;
  return <section aria-label={uiText("产品图片")} className="mist-col">
-  {src&&file?<ObjectStage src={src} alt={uiText(row.name)} caption={uiText(file.name)}/>:failed?<Banner tone="bad" title={uiText("图片未能加载")}><Button onClick={retry}>{uiText("重试")}</Button></Banner>:<p className="mist-note" role="status">{uiText("正在读取图片…")}</p>}
+  {src&&file?<ObjectStage src={src} alt={uiText(row.name)} caption={uiText(file.name)}/>:failed?<Banner tone="bad" title={uiText("图片未能加载")}><Button onClick={retry}>{uiText("重试")}</Button></Banner>:<LoadingRows label="正在读取图片…" rows={1} />}
   {images.length>1&&<div className="mist-product-gallery" role="group" aria-label={uiText("选择产品图片")}>{images.map((image,index)=><Button key={image.id} size="sm" aria-pressed={image.id===file?.id} onClick={()=>setSelected(image.id)}>{uiText(index===0?'主图':`补充图 ${index}`)} · {image.name}</Button>)}</div>}
  </section>;
 }

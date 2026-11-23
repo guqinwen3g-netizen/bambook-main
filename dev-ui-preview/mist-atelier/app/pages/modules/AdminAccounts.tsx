@@ -1,3 +1,4 @@
+import { LoadingRows } from '../../PageLoading';
 import { useNav } from '../../nav';
 import { permissionLabel } from '../../runtime/permissionLabels';
 import { interfaceLocale } from '../../../../../services/interfaceLanguage';
@@ -268,7 +269,7 @@ export function AdminRoles() {
       footer={<div className="mist-row">{owner && editing && !isSuperAdmin(editing.role) && <Button variant="primary" disabled={!catalog || (!added.length && !removed.length)} onClick={() => setConfirming(true)}>{uiText("保存（新增 ")}{added.length}{uiText(" · 移除 ")}{removed.length}）</Button>}<Button disabled={busy} onClick={() => setEditing(null)}>{uiText("取消")}</Button></div>}>
       {editing && <>
         {saveError && <Banner tone="bad" title={uiText("未保存")}>{saveError}</Banner>}
-        {isSuperAdmin(editing.role) ? <Pill plain>{uiText("全部权限")}</Pill> : catalogError ? <Banner tone="bad" title={uiText("权限目录读取失败")}>{catalogError}</Banner> : !catalog ? <p className="mist-note">{uiText("读取权限目录…")}</p> :
+        {isSuperAdmin(editing.role) ? <Pill plain>{uiText("全部权限")}</Pill> : catalogError ? <Banner tone="bad" title={uiText("权限目录读取失败")}>{catalogError}</Banner> : !catalog ? <LoadingRows label="读取权限目录…" /> :
           <JobPermissionEditor catalog={scopes} value={editing.next} readOnly={busy || !owner} onChange={next => setEditing({ ...editing, next })} />}
       </>}
     </Drawer>
@@ -288,7 +289,7 @@ export function AdminRoles() {
           <Field label={uiText("说明")}><TextArea aria-label={uiText("岗位说明")} value={draft.description} maxLength={200} onChange={e => setDraft({ ...draft, description: e.target.value })} /></Field>
           {draft.mode === 'create' && <Field label={uiText("参照")}><Select aria-label={uiText("参照岗位")} value={draft.template} onChange={e => setDraft({ ...draft, template: e.target.value, permissions: e.target.value ? applyTemplate(e.target.value) : [] })} options={[{ value: '', label: '从空白开始' }, ...templates.map(r => ({ value: r.id, label: r.name })), ...JOB_TEMPLATES.filter(t => !templates.some(r => r.name === t.name)).map(t => ({ value: TEMPLATE_PREFIX + t.id, label: `常见岗位 · ${t.name}` }))]} /></Field>}
         </FormGrid>
-        {draft.mode === 'create' && (catalogError ? <Banner tone="bad" title={uiText("权限目录读取失败")}>{catalogError}</Banner> : !catalog ? <p className="mist-note">{uiText("读取权限目录…")}</p> :
+        {draft.mode === 'create' && (catalogError ? <Banner tone="bad" title={uiText("权限目录读取失败")}>{catalogError}</Banner> : !catalog ? <LoadingRows label="读取权限目录…" /> :
           <JobPermissionEditor catalog={scopes} value={draft.permissions} readOnly={busy} onChange={permissions => setDraft({ ...draft, permissions })} />)}
       </>}
     </Drawer>

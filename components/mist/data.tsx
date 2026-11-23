@@ -93,7 +93,7 @@ export function DataTable<T>({ columns, rows, rowKey, selectedKey, onRowClick, o
   }, [rows, sort, columns]);
   const style = { ['--mist-cols' as string]: cols } as React.CSSProperties;
   const body = (
-    <div ref={tableRef} className="mist-table" role="table" aria-label={uiText(ariaLabel)} style={style}>
+    <div ref={tableRef} className="mist-table" role="table" aria-label={uiText(ariaLabel)} aria-busy={loading || undefined} style={style}>
       <div className="mist-thead" role="row">
         {columns.map((c, ci) => c.sortValue
           ? <button key={c.key} type="button" role="columnheader" className={c.align === 'right' ? 'mist-cell-r' : undefined} data-hide-sm={c.hideOnMobile || undefined} data-col={ci}
