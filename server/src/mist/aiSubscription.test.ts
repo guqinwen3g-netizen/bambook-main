@@ -108,7 +108,8 @@ describe('ChatGPT subscription completions', () => {
       { type: 'response.completed', response: { output: [] } },
     ]) : undefined);
     const deltas: string[] = [];
-    const text = await s.complete('owner', { systemPrompt: '系统', messages: [{ role: 'user', content: '问' }, { role: 'assistant', content: '答' }], temperature: 0.2, signal: new AbortController().signal, jsonMode: true, onDelta: d => deltas.push(d) });
+    const imageUrl='data:image/jpeg;base64,AA==';
+    const text = await s.complete('owner', { images:[{name:'sample.jpg',url:imageUrl}], systemPrompt: '系统', messages: [{ role: 'user', content: '问' }, { role: 'assistant', content: '答' }], temperature: 0.2, signal: new AbortController().signal, jsonMode: true, onDelta: d => deltas.push(d) });
     expect(text).toBe('{"ok":true}');
     expect(deltas.join('')).toContain('"ok"');
     const req = calls.find(c => c.url.includes('/codex/responses'))!;
@@ -121,6 +122,9 @@ describe('ChatGPT subscription completions', () => {
     expect(body).not.toHaveProperty('temperature');
     expect(body.reasoning).toEqual({ effort: 'max', summary: 'auto' });
     expect(body.input[1].content[0].type).toBe('output_text');
+    expect(body.input[2]).toEqual({type:'message',role:'user',content:[
+      {type:'input_text',text:'sample.jpg'}, {type:'input_image',image_url:imageUrl},
+    ]});
     expect(stripJsonFence('plain')).toBe('plain');
   });
 
