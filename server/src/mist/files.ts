@@ -65,9 +65,9 @@ export class MistPrivateFiles {
     if (!file.startsWith(root + path.sep)) fail('INVALID_FILE_PATH', '附件路径无效', 400);
     return { root, file, directory: path.dirname(file) };
   }
-  async write(workspaceId: string, input: MistFileInput, now: string): Promise<MistStoredFile> { return this.writeWithId(workspaceId, randomUUID(), input, now); }
+  async write(workspaceId: string, input: MistFileInput, now: string, options?: { previews?: boolean }): Promise<MistStoredFile> { return this.writeWithId(workspaceId, randomUUID(), input, now, options); }
   /** 以既定附件 ID 写入（演示公司创建时使用）；ID 必须是 UUID 且尚不存在。 */
-  async writeWithId(workspaceId: string, id: string, input: MistFileInput, now: string): Promise<MistStoredFile> {
+  async writeWithId(workspaceId: string, id: string, input: MistFileInput, now: string, options?: { previews?: boolean }): Promise<MistStoredFile> {
     const meta = validateFileInput(input), target = this.checked(workspaceId, id);
     await fs.mkdir(target.directory, { recursive: true, mode: 0o700 });
     const realRoot = await fs.realpath(target.root), realDirectory = await fs.realpath(target.directory);
@@ -77,7 +77,7 @@ export class MistPrivateFiles {
     await handle.close();
     this.rememberDigest(`${workspaceId}/${id}`, meta.sha256);
     const stored={ id, name: input.multipartFilename ? multipartDisplayName(meta.name) : meta.name, mimeType: meta.mimeType, size: meta.size, storageKey: `${workspaceId}/${id}`, createdAt: now, sha256: meta.sha256 };
-    if (meta.mimeType.startsWith('image/')) {await Promise.allSettled((['thumb', 'display'] as const).map(mode => this.writePreview(target.file, input.bytes, meta.mimeType, mode)));}
+    if (options?.previews !== false && meta.mimeType.startsWith('image/')) {await Promise.allSettled((['thumb', 'display'] as const).map(mode => this.writePreview(target.file, input.bytes, meta.mimeType, mode)));}
     // 上传时不抠图：只有被用作主图的图片在首次请求抠图预览时才进入队列（见 shared/mistPrimaryImage）。
     return stored;
   }

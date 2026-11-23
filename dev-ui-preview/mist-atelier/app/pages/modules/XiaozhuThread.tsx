@@ -78,7 +78,11 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
     const status = !active && t.state !== 'succeeded' ? <Pill tone={STATE[t.state][1]}>{uiText(STATE[t.state][0])}</Pill> : undefined;
     return <div className="mist-xz-turn" key={t.id} data-task-state={t.state}>
       {divider && <div className="mist-xz-day"><span>{dayLabel(t.createdAt)}</span></div>}
-      <div className="mist-xz-user">{request}</div>
+      <div className="mist-xz-user">{request}
+        {!!t.attachments?.length && <div className="mist-xz-sources" aria-label={uiText('附件')}>
+          {t.attachments.map(file => <span className="mist-xz-source" key={file.id} data-attachment><span title={file.name}>{file.name}</span></span>)}
+        </div>}
+      </div>
       <XiaozhuTurnShell status={status}>
         {(!!t.trail?.length || working) && <Trail items={t.trail ?? []} active={working} onOpen={actions.onOpenRecord} />}
         {t.result && <XiaozhuMarkdown text={t.result} index={index} onOpen={actions.onOpenRecord} />}
@@ -90,7 +94,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         <div className="mist-xz-acts">
           {/* 办理中的停止在输入框；等待中的任务在这里停。 */}{active && t.canControl && !['queued', 'running'].includes(t.state) && <Button size="sm" variant="quiet" icon={Square} onClick={() => actions.onCancel(t)}>{uiText('停止')}</Button>}
           {done && t.result && <><IconButton size="sm" icon={Copy} label={uiText('复制')} onClick={() => actions.onCopy(t.result)} /><IconButton size="sm" icon={FileText} label={uiText('保存草稿')} onClick={() => actions.onDraft(t.result)} /></>}
-          {done && actions.onRetry && <IconButton size="sm" icon={RotateCcw} label={uiText('重新提问')} onClick={() => actions.onRetry?.(request)} />}
+          {done && !t.attachments?.length && actions.onRetry && <IconButton size="sm" icon={RotateCcw} label={uiText('重新提问')} onClick={() => actions.onRetry?.(request)} />}
           {done && t.state === 'succeeded' && <IconButton size="sm" icon={Zap} label={uiText('设为自动规则')} onClick={() => actions.onAutomate(request)} />}
           {done && <time className="mist-xz-time" dateTime={t.updatedAt}>{clock(t.updatedAt || t.createdAt)}</time>}
         </div>

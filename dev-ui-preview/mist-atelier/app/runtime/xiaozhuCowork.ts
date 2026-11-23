@@ -103,15 +103,27 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     return () => { stopped = true; clearInterval(timer); };
   }, [activeIds, base, available]);
   const post = async (path: string, body: object) => mistApiRequest(base + path, { method: 'POST', body: JSON.stringify(body) }) as Promise<{ item?: AgentTaskView }>;
-  const send = async (text: string, history: AgentTaskView[] = [], conversationId?: string, intentRefs:AgentTaskIntentRef[]=[]): Promise<AgentTaskView | null> => {
+  const send = async (text: string, history: AgentTaskView[] = [], conversationId?: string, intentRefs:AgentTaskIntentRef[]=[], files:File[]=[]): Promise<AgentTaskView | null> => {
     const message = text.trim(); if (!message || busy || !base||loading||error||!available) return null;
     const bound = scope; setBusy(true); setError('');
     try {
       const refs=normalizeAgentTaskIntentRefs(intentRefs);
       const input = { name: message.slice(0, 60), instructions: composeInstructions(history, message), locale: interfaceLocale(), ...(conversationId ? { conversationId } : {}),...(refs.length?{intentRefs:refs}:{}) };
-      const fingerprint = JSON.stringify([base, input]);
+      const fileIdentity=await Promise.all(files.map(async file=>{
+        const digest=await crypto.subtle.digest('SHA-256',await file.arrayBuffer());
+        return [file.name,file.type,file.size,Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('')];
+      }));
+      if(live.current!==bound)return null;
+      const fingerprint = JSON.stringify([base, input, fileIdentity]);
       if (pending.current?.fingerprint !== fingerprint) pending.current = { fingerprint, id: crypto.randomUUID() };
-      const r = await post('/personal-agent/tasks', { requestId: pending.current.id, ...input }) as { item: AgentTaskView };
+      const body={requestId:pending.current.id,...input};
+      let r:{item:AgentTaskView};
+      if(files.length){
+        const form=new FormData();
+        form.append('task',JSON.stringify(body));
+        for(const file of files)form.append('attachments',file);
+        r=await mistApiRequest(base+'/personal-agent/tasks',{method:'POST',body:form});
+      }else r=await post('/personal-agent/tasks',body) as {item:AgentTaskView};
       if (live.current !== bound) return null;
       pending.current = undefined; const item = conversationId && !r.item.conversationId ? { ...r.item, conversationId } : r.item; setTasks(old => [...old.filter(t => t.id !== item.id), item]); return item;
     } catch (e) { if (live.current === bound) setError(e instanceof Error ? e.message : '未能交给小竹'); return null; }

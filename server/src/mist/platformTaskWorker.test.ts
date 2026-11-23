@@ -1,3 +1,5 @@
+import sharp from 'sharp';
+import * as XLSX from 'xlsx';
 import{afterEach,beforeEach,expect,it,vi}from'vitest';
 import request from'supertest';
 import{mkdtemp,rm}from'node:fs/promises';
@@ -240,4 +242,48 @@ it.each([false,true])('keeps a valid development draft proposal visible across r
   const after=(await f.human.get(f.base).expect(200)).body.workspace;expect(after.state.drafts.find((d:any)=>d.id===draft).values.style).toBe('HUMAN-EDIT');expect(after.revision).toBe(before.revision);return;
  }
  await f.command('agent.proposal.confirm',{id:proposal.id});await f.drain();const after=(await f.human.get(f.base).expect(200)).body.workspace;expect(after.state.drafts.find((d:any)=>d.id===draft).values.style).toBe('NW-31');expect(after.state.drafts).toHaveLength(direct.state.drafts.length);expect(after.state.devs).toHaveLength(direct.state.devs.length);
+});
+
+function pdf(text:string){
+ const objects=['<</Type/Catalog/Pages 2 0 R>>','<</Type/Pages/Kids[3 0 R]/Count 1>>','<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 100]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>',null,'<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>'];
+ const stream=`BT /F1 12 Tf 10 50 Td (${text}) Tj ET`;objects[3]=`<</Length ${stream.length}>>\nstream\n${stream}\nendstream`;
+ let out='%PDF-1.4\n';const offsets:number[]=[];objects.forEach((o,i)=>{offsets.push(out.length);out+=`${i+1} 0 obj\n${o}\nendobj\n`;});
+ const xref=out.length;out+=`xref\n0 ${objects.length+1}\n0000000000 65535 f \n${offsets.map(o=>String(o).padStart(10,'0')+' 00000 n \n').join('')}trailer\n<</Size ${objects.length+1}/Root 1 0 R>>\nstartxref\n${xref}\n%%EOF`;
+ return Buffer.from(out);
+}
+
+it('researches a PDF, workbook and image together with a selected order, keeping all uploaded files task-private',async()=>{
+ const complete=vi.fn(async(model:LlmCompletionInput)=>{
+   const input=model.messages[0].content;
+   expect(input).toContain('PDF-DELIVERY-925');
+   expect(input).toContain('XLSX-QUANTITY-318');
+   expect(input).toContain('bambook_get');
+   expect(model.images).toEqual([{name:'sample.png',url:expect.stringMatching(/^data:image\/jpeg;base64,/)}]);
+   return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已综合核对所选记录和三份附件。'});
+ });
+ const f=await fixture(complete);
+ const book=XLSX.utils.book_new();
+ XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([['Quantity'],['XLSX-QUANTITY-318']]),'Data');
+ const workbook=XLSX.write(book,{type:'buffer',bookType:'xlsx'});
+ const image=await sharp({create:{width:16,height:12,channels:3,background:'#5cb388'}}).png().toBuffer();
+ const payload={requestId:randomUUID(),name:'对照订单',instructions:'对照所选订单与附件。',intentRefs:[{kind:'orders',id:f.workspace.state.orders[0].id}]};
+ const submit=()=>f.human.post(f.base+'/personal-agent/tasks')
+   .field('task',JSON.stringify(payload))
+   .attach('attachments',pdf('PDF-DELIVERY-925'),'delivery.pdf')
+   .attach('attachments',workbook,'quantities.xlsx')
+   .attach('attachments',image,'sample.png');
+ f.worker.start(3_600_000);
+ const task=(await submit().expect(201)).body.item;
+ const replay=(await submit().expect(201)).body.item;
+ expect(replay.id).toBe(task.id);
+ expect(replay.attachments).toEqual(task.attachments);
+ expect(task.attachments.map((file:any)=>file.name)).toEqual(['delivery.pdf','quantities.xlsx','sample.png']);
+ expect(task.attachments[0]).not.toHaveProperty('storageKey');
+ const state=(await f.human.get(f.base).expect(200)).body.workspace.state;
+ expect(state.files).toEqual(f.workspace.state.files);
+ for(const file of task.attachments)await f.human.get(f.base+'/files/'+file.id).expect(404);
+ await f.drain();
+ expect(complete).toHaveBeenCalledTimes(1);
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded',attachments:task.attachments});
+ await f.human.post(f.base+'/personal-agent/tasks').field('task',JSON.stringify(payload)).attach('attachments',Buffer.from('changed'),'change.txt').expect(409);
 });

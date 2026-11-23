@@ -28,6 +28,7 @@ export type LlmProviderConfig = {
 export type LlmCompletionInput = {
   systemPrompt: string;
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  images?: Array<{ name: string; url: string }>;
   model?: string;
   temperature?: number;
   signal: AbortSignal;
@@ -158,7 +159,7 @@ async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompl
   ];
 
   // 流式路径：有 onDelta 时走 stream:true，失败降级非流式（同一 provider 内）
-  if (input.onDelta) {
+  if (input.onDelta && !input.images?.length) {
     try {
       return await streamChatCompletion({
         baseUrl: provider.baseUrl, apiKey: provider.apiKey, model, messages,
@@ -175,7 +176,13 @@ async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompl
     model,
     temperature: input.temperature ?? 0.2,
     stream: false,
-    messages,
+    messages: input.images?.length ? [...messages, {
+      role:'user',
+      content:input.images.flatMap(image=>[
+        {type:'text',text:image.name},
+        {type:'image_url',image_url:{url:image.url}},
+      ]),
+    }] : messages,
   };
   if (input.jsonMode) {
     // 注意：不是所有模型/API 都支持 response_format JSON mode。

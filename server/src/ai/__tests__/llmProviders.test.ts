@@ -172,3 +172,15 @@ describe('C. 流式降级', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+it('sends task images as multimodal Chat Completions content', async () => {
+  process.env.ARK_API_KEY = 'test-key';
+  const fetchMock = vi.fn().mockResolvedValueOnce(okCompletion('result'));
+  vi.stubGlobal('fetch', fetchMock);
+  const imageUrl = 'data:image/jpeg;base64,AA==';
+  await expect(createLlmCompleter()({...BASE_INPUT,images:[{name:'swatch.jpg',url:imageUrl}]})).resolves.toBe('result');
+  const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+  expect(body.messages.at(-1)).toEqual({role:'user',content:[
+    {type:'text',text:'swatch.jpg'}, {type:'image_url',image_url:{url:imageUrl}},
+  ]});
+});

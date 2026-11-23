@@ -1,3 +1,4 @@
+import { TASK_ATTACHMENT_BYTES, TASK_ATTACHMENT_COUNT } from '../shared/mistTaskAttachments';
 import { createPublicEntryHostGuard } from '../auth/publicEntryHostGuard';
 import { withResponseLocale } from './responseLanguage';
 import { Router, type Request, type Response, type NextFunction, type RequestHandler } from 'express';
@@ -166,7 +167,29 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   router.get('/workspaces/:id/agent-tasks/:taskId',run(async(req,res)=>{exactBody(req.query,['summary']);if(req.query.summary!==undefined&&req.query.summary!=='1')fail('INVALID_INPUT','任务查询字段无效',400);res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.getAgentTask(actor(req),req.params.id,req.params.taskId,req.query.summary==='1')});}));
   router.get('/workspaces/:id/agent-tasks/:taskId/history',run(async(req,res)=>{exactBody(req.query,['cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.agentTaskHistory(actor(req),req.params.id,req.params.taskId,req.query.cursor));}));
   router.post('/workspaces/:id/personal-agent',run(async(req,res)=>{exactBody(req.body??{},[]);res.setHeader('Cache-Control','private, no-store');res.json({identity:await repository.ensurePersonalAgent(actor(req),req.params.id,delegation.makeServiceCredential,delegation.timestamp())});}));
-  router.post('/workspaces/:id/personal-agent/tasks',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.status(201).json({item:await repository.assignPersonalAgentTask(actor(req),req.params.id,exactBody(req.body,['requestId','name','instructions','locale','conversationId','intentRefs']),delegation.makeServiceCredential)});}));
+  const taskUpload=multer({storage:multer.memoryStorage(),limits:{files:TASK_ATTACHMENT_COUNT,fileSize:TASK_ATTACHMENT_BYTES+1,fields:1,fieldSize:24_000,parts:TASK_ATTACHMENT_COUNT+2}}).array('attachments',TASK_ATTACHMENT_COUNT);
+  router.post('/workspaces/:id/personal-agent/tasks',(req:Request,res:Response,next:NextFunction)=>{
+    if(!req.is('multipart/form-data'))return next();
+    void repository.authorizePersonalTaskUpload(actor(req),req.params.id).then(()=>taskUpload(req,res,error=>{
+      if(error){publicError(res,new MistApiError('INVALID_UPLOAD','最多 6 个附件，单个不超过 8 MiB',400));return;}
+      next();
+    })).catch(error=>publicError(res,error));
+  },run(async(req,res)=>{
+    res.setHeader('Cache-Control','private, no-store');
+    const files=Array.isArray(req.files)?req.files:[];
+    let body=req.body;
+    if(req.is('multipart/form-data')){
+      const form=exactBody(req.body,['task']);
+      if(typeof form.task!=='string'||!files.length)fail('INVALID_UPLOAD','请求缺少任务内容或附件',400);
+      try{body=JSON.parse(form.task as string);}catch{fail('INVALID_INPUT','任务内容无效',400);}
+    }
+    const task=exactBody(body,['requestId','name','instructions','locale','conversationId','intentRefs']);
+    const attachments=files.map(file=>({bytes:file.buffer,name:file.originalname,mimeType:file.mimetype,multipartFilename:true}));
+    const item=attachments.length
+      ? await repository.assignPersonalAgentTask(actor(req),req.params.id,task,delegation.makeServiceCredential,undefined,attachments)
+      : await repository.assignPersonalAgentTask(actor(req),req.params.id,task,delegation.makeServiceCredential);
+    res.status(201).json({item});
+  }));
   router.get('/workspaces/:id/agent-conversations',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.listConversations(actor(req),req.params.id));}));
   router.put('/workspaces/:id/agent-conversations/:conversationId',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.saveConversation(actor(req),req.params.id,req.params.conversationId,exactBody(req.body,['title','hidden']))});}));
   router.get('/workspaces/:id/agent-automations',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.listAutomations(actor(req),req.params.id));}));

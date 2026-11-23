@@ -6645,5 +6645,10 @@
   "开发案已不可见": "Development no longer accessible",
   "版本已不可见": "Version no longer accessible",
   "报价或来源资料已不可见，请重新核对": "The quotation or source is no longer accessible. Check it again.",
-  "Agent已按本人决定停止": "Agent stopped as requested"
+  "Agent已按本人决定停止": "Agent stopped as requested",
+  "移除附件": "Remove attachment",
+  "请选择图片、PDF、Excel 或其他受支持的文档": "Choose an image, PDF, Excel workbook, or another supported document",
+  "最多 6 个附件，单个不超过 8 MiB，总计不超过 24 MiB": "Up to 6 attachments, 8 MiB each and 24 MiB total",
+  "图片无法读取或尺寸过大": "The image cannot be read or exceeds the size limit",
+  "此文件类型暂不支持": "This file type is not supported"
 }

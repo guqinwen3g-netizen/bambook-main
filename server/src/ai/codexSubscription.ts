@@ -388,11 +388,14 @@ export class CodexSubscriptionService {
     return {
       model: this.model,
       instructions: [input.systemPrompt, ...extraSystem].filter(Boolean).join('\n\n'),
-      input: conversation.map(m => ({
+      input: [...conversation.map(m => ({
         type: 'message',
         role: m.role,
         content: [{ type: m.role === 'assistant' ? 'output_text' : 'input_text', text: m.content }],
-      })),
+      })),...(input.images?.length?[{
+        type:'message',role:'user',
+        content:input.images.flatMap(image=>[{type:'input_text',text:image.name},{type:'input_image',image_url:image.url}]),
+      }]:[])],
       stream: true,
       store: false,
       reasoning: { effort: reasoning, summary: 'auto' },
