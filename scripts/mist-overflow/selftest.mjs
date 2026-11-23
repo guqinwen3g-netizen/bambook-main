@@ -61,9 +61,16 @@ async function actionAreaFailures(page) {
     <div class="mist-measure-row"><span>前衣长</span><span>60.0</span><span>60.4</span><span>1.0</span><span class="mist-measure-dv mist-num">+0.4</span></div>
   </div></article>`;
   await page.setViewportSize({ width: 320, height: 760 });
-  await page.setContent(`<!doctype html><style>body{margin:0}</style><style>${css}</style><main class="mist-root">${measure}</main>`);
-  const overflows = await page.evaluate(() => [...document.querySelectorAll('.mist-measure-row')].some(row => row.scrollWidth > row.clientWidth + 1));
-  if (overflows) failures.push('QC 测量区 / 320px：测量表列超出容器');
+  const attributes = `<article style="width:288px;margin:auto"><dl class="mist-kv">
+    <div><dt>样布异常后重新协调继续交付的整批采购需求全部备注</dt><dd>1750 米 · 未定价</dd></div>
+  </dl></article>`;
+  await page.setContent(`<!doctype html><style>body{margin:0}</style><style>${css}</style><main class="mist-root">${measure}${attributes}</main>`);
+  const overflows = await page.evaluate(() => ({
+    measure: [...document.querySelectorAll('.mist-measure-row')].some(row => row.scrollWidth > row.clientWidth + 1),
+    attributes: [...document.querySelectorAll('.mist-kv > div, .mist-kv dt, .mist-kv dd')].some(node => node.scrollWidth > node.clientWidth + 1),
+  }));
+  if (overflows.measure) failures.push('QC 测量区 / 320px：测量表列超出容器');
+  if (overflows.attributes) failures.push('键值行 / 320px：长字段名挤出了数值');
   return failures;
 }
 

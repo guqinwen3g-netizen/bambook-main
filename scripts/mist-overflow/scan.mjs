@@ -94,7 +94,7 @@ async function ensureServer() {
 }
 
 async function waitForPageReady(page) {
-  await page.locator('.mist-scroll .mist-page').first().waitFor({ timeout: 15000 });
+  await page.locator('.mist-scroll :is(.mist-page, .mist-mail-page)').first().waitFor({ timeout: 15000 });
   await page.waitForFunction(() => {
     const surface = document.querySelector('.mist-scroll');
     return !document.querySelector('.mist-sync[data-state="syncing"]') &&
@@ -165,7 +165,11 @@ async function replay(page, state) {
   await page.goto(BASE + '/' + state.url); await settle(page, state);
   for (const a of state.actions || []) {
     const before = page.url();
-    if (a.tab) await page.getByRole('tab', { name: new RegExp(a.tab) }).click();
+    if (a.tab) {
+      const tab = page.getByRole('tab', { name: new RegExp(a.tab) });
+      if (!(await tab.isVisible())) return false;
+      await tab.click();
+    }
     if (a.button) await page.locator('.mist-scroll').getByRole('button', { name: a.button, exact: true }).first().click();
     if (a.press) await page.keyboard.press(a.press);
     if (a.click) { const el = page.locator(a.click).first(); if (!(await el.count()) || !(await el.isVisible())) return false; await el.click(); }
