@@ -35,7 +35,8 @@ const ACCOUNT_FILE = process.env.MIST_OVERFLOW_ACCOUNT_FILE;
 const account = ACCOUNT_FILE ? JSON.parse(fs.readFileSync(ACCOUNT_FILE, 'utf8')) : null;
 
 const BASE = (process.env.MIST_OVERFLOW_BASE || 'http://127.0.0.1:3001').replace(/\/$/, '');
-if (account && (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(BASE).hostname) || typeof account.email !== 'string' || typeof account.password !== 'string')) throw new Error('公司账号扫描只接受本机隔离服务及有效的私有账号文件');
+if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(BASE).hostname)) throw new Error('溢出扫描只接受本机隔离服务');
+if (account && (typeof account.email !== 'string' || typeof account.password !== 'string')) throw new Error('公司账号扫描须指定有效的私有账号文件');
 /**
  * 宽度：窄屏加密；每个断点（640 / 720 / 760 / 1180 / 1320，max-width）取「仍保持宽布局的最窄宽度」+1px，
  * 那是切换布局前最挤的状态；宽屏保留 1440 / 1920 各一个。
@@ -92,6 +93,15 @@ async function ensureServer() {
   return running;
 }
 
+async function waitForPageReady(page) {
+  await page.locator('.mist-scroll :is(.mist-page, .mist-mail-page)').first().waitFor({ timeout: 15000 });
+  await page.waitForFunction(() => {
+    const surface = document.querySelector('.mist-scroll');
+    return !document.querySelector('.mist-sync[data-state="syncing"]') &&
+      ![...(surface?.querySelectorAll('[aria-busy="true"]') || [])].some(node => node.getClientRects().length > 0);
+  }, undefined, { timeout: 15000 });
+}
+
 async function signIn(context) {
   const page = await context.newPage();
   await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
@@ -100,11 +110,11 @@ async function signIn(context) {
     await page.getByLabel('密码', { exact: true }).fill(account.password);
     await page.getByRole('button', { name: '登录', exact: true }).click();
     await page.locator('.mist-scroll').waitFor({ timeout: 15000 });
-    await page.locator('.mist-sync').filter({ hasText: '已保存' }).waitFor({ timeout: 15000 });
+    await waitForPageReady(page);
     if (account.workspaceId) {
       await page.evaluate(id => { const user = JSON.parse(localStorage.getItem('bambook_auth_user') || 'null'); if (!user?.id) throw new Error('公司账号登录后缺少身份'); localStorage.setItem('bambook.mist.selected-workspace:' + user.id, id); }, account.workspaceId);
       await page.reload();
-      await page.locator('.mist-sync').filter({ hasText: '已保存' }).waitFor({ timeout: 15000 });
+      await waitForPageReady(page);
     }
     return page;
   }
@@ -137,7 +147,7 @@ const settle = async (page, state) => {
   await page.locator('.mist-scroll').waitFor({ timeout: 10000 });
   // Component/state reference pages do not consume a workspace or render a save status.
   if (!['design-system', 'states'].includes(state.id.split(/[+#]/)[0])) {
-    await page.locator('.mist-sync').filter({ hasText: '已保存' }).waitFor({ timeout: 15000 });
+    await waitForPageReady(page);
     if (account?.workspaceName && await page.locator('.mist-ws b').innerText() !== account.workspaceName) throw new Error('页面未处于指定的隔离验收工作区');
   }
   await page.evaluate(() => document.fonts.ready);
@@ -155,7 +165,11 @@ async function replay(page, state) {
   await page.goto(BASE + '/' + state.url); await settle(page, state);
   for (const a of state.actions || []) {
     const before = page.url();
-    if (a.tab) await page.getByRole('tab', { name: new RegExp(a.tab) }).click();
+    if (a.tab) {
+      const tab = page.getByRole('tab', { name: new RegExp(a.tab) });
+      if (!(await tab.isVisible())) return false;
+      await tab.click();
+    }
     if (a.button) await page.locator('.mist-scroll').getByRole('button', { name: a.button, exact: true }).first().click();
     if (a.press) await page.keyboard.press(a.press);
     if (a.click) { const el = page.locator(a.click).first(); if (!(await el.count()) || !(await el.isVisible())) return false; await el.click(); }

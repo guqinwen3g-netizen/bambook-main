@@ -7,8 +7,9 @@ import { exitCompanyManagement } from './runtime/platformAdmin';
 import React from 'react';
 import {PageBackRegistrationContext,usePageBackAction} from '../../../components/mist/pageBack';
 import {PageNavigationGuardContext,usePageNavigationController} from '../../../components/mist/pageNavigation';
-import { buildPages, MODULE_VIEW_SET, PageLoadBoundary, AccountPage, PlatformSettingsPage, PlatformCompanySettingsPage } from './pageRegistry';
+import { buildPages, MODULE_VIEW_SET, PageLoadBoundary, AccountPage, SettingsPage, PlatformSettingsPage, PlatformCompanySettingsPage } from './pageRegistry';
 import { PageLoading } from './PageLoading';
+import { CompanyManagementLoading } from './pages/CompanyManagementLoading';
 import { ExportConfirmHost } from './runtime/ExportConfirmHost';
 import { preloadPagesWhenIdle } from './pagePreload';
 import { primaryImageId } from '../../../server/src/shared/mistPrimaryImage';
@@ -370,6 +371,8 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
   const permitted = !!personalSection || canOpenMistView(route, { canAccessView: session.canAccessView, hasPermission: session.hasPermission, platformOperator: session.user?.platformRole === 'platform_admin' }, REFERENCE_PREVIEW) || platformOnly && ['system-settings','settings'].includes(route.view), live = LIVE_VIEWS.has(route.view) || MODULE_VIEW_SET.has(route.view) || COMPANY_ADMIN_VIEWS.has(route.view);
   const Page = personalSection ? AccountPage : platformCompany && COMPANY_ADMIN_VIEWS.has(route.view) ? PlatformCompanySettingsPage : platformOnly && ['system-settings','settings'].includes(route.view) ? PlatformSettingsPage
     : PAGES[route.view] ?? null;
+  const pageLoading = Page === SettingsPage || Page === PlatformCompanySettingsPage
+    ? <CompanyManagementLoading /> : <PageLoading />;
   // 二级页（详情 / 新建）：应用内有上一页时按历史返回，直接打开链接时回到所属模块。
   const backTarget = route.view.includes('/') ? { view: base, label: (module && productName(module)) ?? LABELS[base] ?? '' } : null;
   const user = session.user!;
@@ -419,7 +422,7 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
             <TeamViewScope teamId={COMPANY_ADMIN_VIEWS.has(base) || base === 'account' ? 'all' : teamView.teamId} actorId={user.id} teams={organization.teams}>
               <MistPresentedErrorContext.Provider value={workspace.error || undefined}>
                 <PageLoadBoundary resetKey={route.view} fallback={retry => <MistPage><Banner tone="bad" title={uiText('页面未能加载')} actions={<Button onClick={retry}>{uiText('重新加载')}</Button>} /></MistPage>}>
-                  <React.Suspense fallback={<PageLoading />}>
+                  <React.Suspense fallback={pageLoading}>
                     <Page key={session.sessionKey + ':' + workspace.workspace?.id + ':' + (stablePageRoute ? route.view : JSON.stringify(route))} />
                     <PageIdlePreloads sections={sections} platformOnly={platformOnly} platformCompany={!!platformCompany} />
                   </React.Suspense>

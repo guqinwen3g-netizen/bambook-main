@@ -42,6 +42,23 @@ async function openCreate() {
   choose('任职部门', 'd1'); choose('岗位', 'role-sales@c1');
 }
 
+it('lets the drawer footer lay out all four available account actions independently', async () => {
+  act(() => root.unmount());
+  api.listAccounts.mockResolvedValueOnce({
+    users: [{ id: 'staff-one', displayName: '模拟同事', email: 'team@example.test', status: 'active', roleIds: ['role-sales@c1'] }],
+    departments: [],
+  });
+  root = createRoot(host);
+  await act(async () => root.render(<MistRoot><ToastProvider><AdminAccounts /></ToastProvider></MistRoot>));
+  const row = [...host.querySelectorAll<HTMLElement>('[role="row"]')].find(element => element.textContent?.includes('模拟同事'));
+  expect(row).toBeDefined();
+  await act(async () => row!.click());
+  const footer = document.querySelector('.mist-drawer-foot');
+  expect([...footer!.children].map(action => [action.tagName, action.textContent?.trim()])).toEqual([
+    ['BUTTON', '修改资料与岗位'], ['BUTTON', '重置密码'], ['BUTTON', '停用账号'], ['BUTTON', '员工档案'],
+  ]);
+});
+
 it('creates an account by invitation without an initial password and reports the real delivery result', async () => {
   api.createAccount.mockResolvedValueOnce({ userId: 'u1', reactivated: false, invitation: { status: 'unavailable', message: '账号已保留，邮件服务未配置，请联系平台管理员后重发。' } });
   await openCreate();

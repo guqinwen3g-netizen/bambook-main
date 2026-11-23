@@ -13,6 +13,17 @@ const clickInDrawer=async(s:string)=>{const b=[...document.querySelectorAll('[ro
 beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;m.session={sessionKey:'one',user:{id:'operator',platformRole:'platform_admin'}};for(const mock of Object.values(m.api))mock.mockReset();m.api.settings.mockResolvedValue({defaults:{plan:'standard',seatLimit:null,version:1}});m.api.staff.mockResolvedValue({staff:[]});m.api.audit.mockResolvedValue({logs:[],total:0,page:1});m.fetch.mockReset();vi.stubGlobal('fetch',m.fetch);host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();document.body.innerHTML='';vi.useRealTimers();vi.unstubAllGlobals();});
 it('denies company identities without fetching platform data',async()=>{m.session.user={id:'company',platformRole:null};await render();expect(host.textContent).toContain('需要平台管理员身份');expect(m.api.settings).not.toHaveBeenCalled();});
+it('does not show an empty defaults form before its first successful read', async () => {
+  let finish!: (response: unknown) => void;
+  m.api.settings.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  await render();
+  expect(host.querySelector('[role="status"][aria-busy="true"] .mist-skel')).toBeTruthy();
+  expect(host.querySelector('[aria-label="默认服务方案"]')).toBeNull();
+  expect(button('保存开户设置')).toBeUndefined();
+  await act(async () => finish({ defaults: { plan: 'standard', seatLimit: null, version: 1 } }));
+  expect(host.querySelector('[role="status"][aria-busy="true"]')).toBeNull();
+  expect((host.querySelector('[aria-label="默认服务方案"]') as HTMLInputElement).value).toBe('standard');
+});
 it('validates and saves the current configuration version',async()=>{await render();await act(async()=>fill('默认席位上限','0'));await act(async()=>button('保存开户设置').click());expect(m.api.saveSettings).not.toHaveBeenCalled();m.api.saveSettings.mockResolvedValue({defaults:{plan:'team',seatLimit:12,version:2}});await act(async()=>{fill('默认服务方案','team');fill('默认席位上限','12');});await act(async()=>button('保存开户设置').click());expect(m.api.saveSettings).toHaveBeenCalledWith({plan:'team',seatLimit:12,version:1});expect(host.textContent).toContain('仅用于之后新开通的公司');});
 it('retains the draft when a conflict is returned',async()=>{m.api.saveSettings.mockRejectedValue(new Error('设置已被其他管理员修改'));await render();await act(async()=>fill('默认服务方案','team'));await act(async()=>button('保存开户设置').click());expect(host.textContent).toContain('设置已被其他管理员修改');expect((host.querySelector('[aria-label="默认服务方案"]') as HTMLInputElement).value).toBe('team');});
 it('requires confirmation before disabling another staff account',async()=>{m.api.staff.mockResolvedValue({staff:[{id:'other',displayName:'运营人员',email:'ops@example.invalid',status:'active',lastLoginAt:null}]});await render();await act(async()=>button('平台人员').click());await act(async()=>button('停用').click());expect(m.api.updateStaff).not.toHaveBeenCalled();await act(async()=>button('取消').click());expect(m.api.updateStaff).not.toHaveBeenCalled();});

@@ -877,6 +877,33 @@ button.mist-sync:hover { background: var(--mist-fill); color: var(--mist-ink); }
  */
 .mist-row[data-wrap] { flex-wrap: wrap; }
 .mist-btn:has(> .mist-row[data-wrap]) { height: auto; min-height: var(--mist-control-h); padding-block: 6px; }
+/* Action slots can receive nested rows from their caller. Keep every control and its label inside the available width. */
+:where(.mist-sticky-foot, .mist-card-foot, .mist-tfoot) { flex-wrap: wrap; }
+:where(.mist-page-head-acts, .mist-card-tools, .mist-toolbar-right) { min-inline-size: 0; max-inline-size: 100%; }
+:where(.mist-drawer-foot, .mist-dialog-foot, .mist-form-footer-content, .mist-sticky-foot, .mist-card-foot, .mist-tfoot, .mist-page-head-acts, .mist-card-tools, .mist-toolbar-right) > * {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+:where(.mist-drawer-foot, .mist-dialog-foot, .mist-form-footer-content, .mist-sticky-foot, .mist-card-foot, .mist-tfoot, .mist-page-head-acts, .mist-card-tools, .mist-toolbar-right) :is(.mist-row, .mist-tfoot-pg) {
+  flex-wrap: wrap;
+  max-inline-size: 100%;
+}
+:where(.mist-drawer-foot, .mist-dialog-foot, .mist-form-footer-content, .mist-sticky-foot, .mist-card-foot, .mist-tfoot, .mist-page-head-acts, .mist-card-tools, .mist-toolbar-right) .mist-btn {
+  height: auto;
+  min-height: var(--mist-control-h);
+  padding-block: 6px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+:where(.mist-drawer-foot, .mist-dialog-foot, .mist-form-footer-content, .mist-sticky-foot, .mist-card-foot, .mist-tfoot, .mist-page-head-acts, .mist-card-tools, .mist-toolbar-right) .mist-btn[data-size="sm"] {
+  height: auto;
+  min-height: var(--mist-control-h-sm);
+}
+:where(.mist-drawer-foot, .mist-dialog-foot, .mist-form-footer-content, .mist-sticky-foot, .mist-card-foot, .mist-tfoot, .mist-page-head-acts, .mist-card-tools, .mist-toolbar-right) .mist-btn[data-size="lg"] {
+  height: auto;
+  min-height: var(--mist-control-h-lg);
+}
+
 .mist-table[data-fit="compact"] > :is(.mist-thead, .mist-tr) { grid-template-columns: var(--mist-cols-fit, var(--mist-cols)); }
 .mist-table[data-fit="compact"] > :is(.mist-thead, .mist-tr) > [data-fit-hidden] { display: none; }
 .mist-table[data-fit="stack"] > :is(.mist-thead, .mist-tr) > [data-hide-sm] { display: none; }
@@ -931,6 +958,12 @@ button.mist-sync:hover { background: var(--mist-fill); color: var(--mist-ink); }
 .mist-measure { container-type: inline-size; }
 .mist-measure-row { grid-template-columns: minmax(48px, 80px) minmax(40px, 60px) minmax(40px, 60px) minmax(56px, 1fr) minmax(40px, 56px); column-gap: clamp(6px, 3cqi, 14px); }
 .mist-measure-row > * { min-width: 0; overflow-wrap: break-word; }
+@container (max-width: 260px) {
+  .mist-measure-row {
+    grid-template-columns: minmax(36px, 80px) minmax(34px, 60px) minmax(34px, 60px) minmax(42px, 1fr) minmax(34px, 56px);
+    column-gap: 6px;
+  }
+}
 .mist-choice { min-width: 0; }
 .mist-choice b { flex-wrap: wrap; row-gap: 4px; min-width: 0; overflow-wrap: break-word; }
 @media (max-width: 760px) {

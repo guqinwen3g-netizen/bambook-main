@@ -1,3 +1,4 @@
+import { LoadingRows } from '../../PageLoading';
 import React from 'react';
 import { Button, CardHeader, Dialog, Field, FormGrid, Pill, Switch, TextInput, useToast } from '../../../../../components/mist';
 import { apiService } from '../../../../../services/apiService';
@@ -37,7 +38,7 @@ export function PlatformVoicePanel({ sessionKey }: { sessionKey: string }) {
     <CardHeader title={uiText('实时语音')} tools={view ? <Pill tone={view.configured ? 'ok' : 'neutral'}>{uiText(view.configured ? '已配置' : '未配置')}</Pill> : undefined} />
     <div className="mist-card-body">
       {error && <FailureNotice title="语音配置未完成" detail={error} retry={() => void read()} />}
-      {!view && !error && <p className="mist-note">{uiText('正在读取语音配置…')}</p>}
+      {!view && !error && <LoadingRows label="正在读取语音配置…" />}
       {view && <>
         <div className="mist-row"><Switch ariaLabel={uiText('启用实时语音')} checked={view.enabled} disabled={busy} onChange={enabled => setView({ ...view, enabled })} /><span>{uiText('豆包实时语音')}</span></div>
         <FormGrid cols={2}>

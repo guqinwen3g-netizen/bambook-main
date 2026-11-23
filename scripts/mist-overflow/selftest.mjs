@@ -2,6 +2,7 @@
  * 溢出 / 贴边叠放判定自检：用固定的 HTML 夹具验证 detectOverflow、detectStacking 能抓到每类问题、不误报正常布局。
  * 快速回归与全量扫描开始前都会先跑一遍，判定逻辑被改坏时直接失败，避免「0 溢出」是假阴性。
  */
+import { readFileSync } from 'node:fs';
 import { detectOverflow, detectStacking } from './detect.mjs';
 
 const W = 'style="width:200px;font:14px/1.4 sans-serif"';
@@ -22,6 +23,57 @@ export const FIXTURES = [
   { name: '整页横向滚动', expect: ['page-scroll-x'], width: 360, html: `<div style="width:520px;height:20px"></div>` },
 ];
 
+const ACTION_AREAS = ['mist-drawer-foot', 'mist-dialog-foot', 'mist-form-footer-content', 'mist-sticky-foot', 'mist-card-foot', 'mist-tfoot', 'mist-page-head-acts', 'mist-card-tools', 'mist-toolbar-right'];
+const ACTION_WIDTHS = [320, 360, 390, 761, 1440];
+
+async function actionAreaFailures(page) {
+  const css = ['tokens', 'components', 'patterns'].map(name => readFileSync(new URL(`../../styles/mist/${name}.css`, import.meta.url), 'utf8')).join('\n');
+  const buttons = [
+    '<button class="mist-btn"><span class="mist-btn-t">修改资料与岗位</span></button>',
+    '<button class="mist-btn" data-size="sm"><span class="mist-btn-t">重置密码</span></button>',
+    '<button class="mist-btn" data-size="lg"><span class="mist-btn-t">停用账号</span></button>',
+    '<button class="mist-btn"><span class="mist-btn-t">员工档案</span></button>',
+    '<button class="mist-btn"><span class="mist-btn-t">Review employee role and company access permissions before applying the requested organizational changes</span></button>',
+  ];
+  const cases = ACTION_AREAS.flatMap(footer => [
+    `<section class="action-fixture" data-case="${footer} direct"><div class="${footer}">${buttons.join('')}</div></section>`,
+    `<section class="action-fixture" data-case="${footer} grouped"><div class="${footer}"><div class="mist-row"><div class="mist-row">${buttons.slice(0, 3).join('')}</div>${buttons.slice(3).join('')}</div></div></section>`,
+  ]).join('');
+  const failures = [];
+  for (const width of ACTION_WIDTHS) for (const theme of ['light', 'dark']) {
+    await page.setViewportSize({ width, height: 760 });
+    await page.setContent(`<!doctype html><style>body{margin:0}.action-fixture{width:min(400px,100%);margin:0 auto}</style><style>${css}</style><main class="mist-root" data-theme="${theme}">${cases}</main>`);
+    const found = await page.evaluate(() => [...document.querySelectorAll('[data-case]')].flatMap(fixture => {
+      const footer = fixture.firstElementChild, bounds = footer.getBoundingClientRect();
+      const buttons = [...fixture.querySelectorAll('button')];
+      const exceeds = button => {
+        const rect = button.getBoundingClientRect(), label = button.querySelector('.mist-btn-t');
+        return rect.left < bounds.left - 1 || rect.right > bounds.right + 1 ||
+          label.scrollWidth > label.clientWidth + 1 || label.scrollHeight > label.clientHeight + 1;
+      };
+      return buttons.length !== 5 || footer.scrollWidth > footer.clientWidth + 1 || buttons.some(exceeds)
+        ? [fixture.dataset.case] : [];
+    }));
+    failures.push(...found.map(name => `操作栏 ${name} / ${width}px / ${theme}：有按钮或文案超出容器`));
+  }
+  const measure = `<article style="width:288px;margin:auto"><div class="mist-measure">
+    <div class="mist-measure-row" data-head><span>部位</span><span>标准</span><span>实测</span><span>公差</span><span>偏差</span></div>
+    <div class="mist-measure-row"><span>前衣长</span><span>60.0</span><span>60.4</span><span>1.0</span><span class="mist-measure-dv mist-num">+0.4</span></div>
+  </div></article>`;
+  await page.setViewportSize({ width: 320, height: 760 });
+  const attributes = `<article style="width:288px;margin:auto"><dl class="mist-kv">
+    <div><dt>样布异常后重新协调继续交付的整批采购需求全部备注</dt><dd>1750 米 · 未定价</dd></div>
+  </dl></article>`;
+  await page.setContent(`<!doctype html><style>body{margin:0}</style><style>${css}</style><main class="mist-root">${measure}${attributes}</main>`);
+  const overflows = await page.evaluate(() => ({
+    measure: [...document.querySelectorAll('.mist-measure-row')].some(row => row.scrollWidth > row.clientWidth + 1),
+    attributes: [...document.querySelectorAll('.mist-kv > div, .mist-kv dt, .mist-kv dd')].some(node => node.scrollWidth > node.clientWidth + 1),
+  }));
+  if (overflows.measure) failures.push('QC 测量区 / 320px：测量表列超出容器');
+  if (overflows.attributes) failures.push('键值行 / 320px：长字段名挤出了数值');
+  return failures;
+}
+
 export async function selfTest(page) {
   const failures = [];
   for (const f of FIXTURES) {
@@ -33,5 +85,6 @@ export async function selfTest(page) {
     const ok = JSON.stringify(kinds) === JSON.stringify(want) && (f.designed == null || result.designed.length === f.designed);
     if (!ok) failures.push(`${f.name}：期望 [${want.join(', ')}]${f.designed != null ? ` + ${f.designed} 个按设计滚动` : ''}，实际 [${kinds.join(', ')}]，按设计滚动 ${result.designed.length}`);
   }
+  failures.push(...await actionAreaFailures(page));
   return failures;
 }

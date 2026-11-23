@@ -1,3 +1,4 @@
+import { LoadingRows } from '../../PageLoading';
 import { MailReviewPanel } from './MailReviewPanel';
 import { MailStateStatus } from './MailStateStatus';
 import {useMailReceiving,MailReceivingControl,MailReceivingNotice} from './MailReceiving';
@@ -291,7 +292,7 @@ export function EmailsPage() {
     requestAnimationFrame(() => listRef.current?.querySelector<HTMLElement>(`[data-mail-row="${CSS.escape(next.id)}"]`)?.focus());
   };
   const list = <div ref={listRef} className="mist-mail-list" role="listbox" aria-label={ui`${scopeLabel}邮件`} onKeyDown={moveSelection}>
-    {loading && !rows.length ? <div className="mist-mail-list-empty"><span className="mist-note">{uiText("正在读取邮箱…")}</span></div>
+    {loading && !rows.length ? <div className="mist-mail-list-empty"><LoadingRows label="正在读取邮箱…" rows={4} /></div>
       : rows.length ? rows.map(row => { const item = itemOf(row), active = selected?.id === row.id;
         if (selecting && row.kind === 'message') return <div key={row.id} className="mist-mail-item" data-mail-row={row.id} data-active={chosen.includes(row.id) || undefined}><Checkbox checked={chosen.includes(row.id)} onChange={on => setChosen(list => on ? [...list, row.id] : list.filter(x => x !== row.id))} label={<span className="mist-mail-item-main"><span className="mist-mail-item-top"><span className="mist-mail-who">{item.who}</span><time className="mist-mail-time">{when(stamp(row))}</time></span><span className="mist-mail-item-subject"><span className="mist-mail-ellipsis">{item.subject}</span></span></span>} /></div>;
         return <button key={row.id} type="button" role="option" aria-selected={active} tabIndex={active || (!selected && row === rows[0]) ? 0 : -1} className="mist-mail-item" data-mail-row={row.id} data-unread={item.unread || undefined} data-active={active || undefined} onClick={() => pick(row)}>
