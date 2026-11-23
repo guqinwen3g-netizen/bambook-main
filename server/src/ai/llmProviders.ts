@@ -116,6 +116,10 @@ export type LlmCompleterOptions = {
 
 // Reserve time for a second provider inside the Agent's overall model deadline.
 const AGENT_PROVIDER_ATTEMPT_MS = 45_000;
+const KIMI_VISION_ATTEMPT_MS = 25_000;
+const ARK_AGENT_PLAN_URL = 'https://ark.cn-beijing.volces.com/api/plan/v3';
+const ARK_KIMI = 'kimi-k3.1-pro';
+const ARK_DEEPSEEK_FLASH = 'deepseek-v4.1-flash';
 
 export function createLlmCompleter(options: LlmCompleterOptions = {}) {
   return async function complete(input: LlmCompletionInput): Promise<string> {
@@ -131,8 +135,13 @@ export function createLlmCompleter(options: LlmCompleterOptions = {}) {
     for (const [index, step] of steps.entries()) {
       if (!available(step)) continue;
       input.signal.throwIfAborted();
-      const deadline = profile === 'agent-task' && !input.onDelta && steps.slice(index + 1).some(available) ? new AbortController() : undefined;
-      const timer = deadline ? setTimeout(() => deadline.abort(), AGENT_PROVIDER_ATTEMPT_MS) : undefined;
+      const remaining = steps.slice(index + 1).filter(available);
+      const deadline = profile === 'agent-task' && !input.onDelta && remaining.length ? new AbortController() : undefined;
+      const hasDeepseekBackup = remaining.some(next => next.kind === 'api'
+        && next.provider.baseUrl === ARK_AGENT_PLAN_URL && next.provider.model === ARK_DEEPSEEK_FLASH);
+      const kimiVision = !input.model && input.images?.length && step.kind === 'api'
+        && step.provider.baseUrl === ARK_AGENT_PLAN_URL && step.provider.model === ARK_KIMI && hasDeepseekBackup;
+      const timer = deadline ? setTimeout(() => deadline.abort(), kimiVision ? KIMI_VISION_ATTEMPT_MS : AGENT_PROVIDER_ATTEMPT_MS) : undefined;
       timer?.unref?.();
       const attempt = deadline ? { ...input, signal: AbortSignal.any([input.signal, deadline.signal]) } : input;
       const providerId = step.kind === 'subscription' ? 'chatgpt-subscription' : step.provider.id;
@@ -171,7 +180,7 @@ async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompl
   const model = input.model || provider.model;
   // Ark requires temperature=1.0 for Kimi K3.1 Pro on its standard API and Agent Plan.
   const arkKimi = (model === 'kimi-k3-1-pro-261024' && provider.baseUrl === 'https://ark.cn-beijing.volces.com/api/v3')
-    || (model === 'kimi-k3.1-pro' && provider.baseUrl === 'https://ark.cn-beijing.volces.com/api/plan/v3');
+    || (model === ARK_KIMI && provider.baseUrl === ARK_AGENT_PLAN_URL);
   const temperature = arkKimi ? 1 : input.temperature ?? 0.2;
   const messages = [
     { role: 'system' as const, content: input.systemPrompt },
@@ -204,10 +213,9 @@ async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompl
       ]),
     }] : messages,
   };
-  if (input.jsonMode) {
-    // 注意：不是所有模型/API 都支持 response_format JSON mode。
-    // system prompt 里已经明确要求 JSON 输出格式，所以这里不再设置 response_format。
-    // 保留这个分支作为未来切换支持 JSON mode 的模型时的入口。
+  // Limit native JSON output to the verified Agent Plan adapters.
+  if (input.jsonMode && provider.baseUrl === ARK_AGENT_PLAN_URL && [ARK_KIMI, ARK_DEEPSEEK_FLASH].includes(model)) {
+    body.response_format = { type: 'json_object' };
   }
   const res = await aiFetch(`${provider.baseUrl}/chat/completions`, {
     method: 'POST',

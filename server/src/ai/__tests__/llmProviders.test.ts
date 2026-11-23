@@ -290,3 +290,33 @@ it('preserves an invalid-plan error when every provider fails', async () => {
   await expect(createLlmCompleter({ platformProfile: 'agent-task', validateResponse })(BASE_INPUT)).rejects.toThrow('MODEL_PLAN_INVALID');
   expect(fetchMock).toHaveBeenCalledOnce();
 });
+
+it('tries DeepSeek after a 25-second Kimi image wait and requests JSON on both Ark calls', async () => {
+  vi.useFakeTimers();
+  try {
+    const fetchMock = vi.fn().mockImplementationOnce((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+    })).mockResolvedValueOnce(okCompletion('{"result":"read"}'));
+    vi.stubGlobal('fetch', fetchMock);
+    const chain = () => ['kimi-k3.1-pro', 'deepseek-v4.1-flash'].map(model => ({
+      kind: 'api' as const,
+      provider: { id: model, name: model, baseUrl: 'https://ark.cn-beijing.volces.com/api/plan/v3', model,
+        apiKey: 'test-plan-key', enabled: true, createdAt: '', updatedAt: '' },
+    }));
+    const answer = createLlmCompleter({ platformProfile: 'agent-task', platformProviders: { chain } })({
+      ...BASE_INPUT, jsonMode: true, images: [{ name: 'swatch.jpg', url: 'data:image/jpeg;base64,AA==' }],
+    });
+    await vi.advanceTimersByTimeAsync(24_999);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(answer).resolves.toBe('{"result":"read"}');
+    const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body));
+    expect(bodies).toMatchObject([
+      { model: 'kimi-k3.1-pro', temperature: 1, response_format: { type: 'json_object' } },
+      { model: 'deepseek-v4.1-flash', response_format: { type: 'json_object' } },
+    ]);
+    expect(bodies[1].messages).toEqual(bodies[0].messages);
+  } finally {
+    vi.useRealTimers();
+  }
+});
