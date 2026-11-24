@@ -242,8 +242,8 @@ export function proposalAccountRows(command: AgentProposal['command'], state?: M
  * 本人确认 Agent 提议：确认后由服务端按本人身份执行提议里的原命令（完整权限与业务校验），失败时提议保持待确认。
  * 中、高风险都列出将要执行的具体内容；高风险另须本人密码。拒绝只记录结论，不改业务。
  */
-export function AgentProposalDialog({ proposal, state, incomingAccess, referenceAccess, taskClosePlans, commercialSampleLoanSources, canConfirmShippingBasis = false, scopeKey = '', onClose, run, onDone, onRejection }: {
-  proposal: AgentProposal | undefined; state?: MistState | null; incomingAccess?:DevelopmentIncomingAccess; referenceAccess?:DevelopmentReferenceAccess; taskClosePlans?:Record<string,DevelopmentTaskClosePlan>; commercialSampleLoanSources?:MistWorkspaceEnvelope['commercialSampleLoanSources']; canConfirmShippingBasis?:boolean; scopeKey?: string; onClose: () => void; run: (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string } }) => Promise<unknown>; onDone: (message: string) => void; onRejection?: (message: string) => void;
+export function AgentProposalDialog({ proposal, state, incomingAccess, referenceAccess, taskClosePlans, commercialSampleLoanSources, canConfirmShippingBasis = false, scopeKey = '', onClose, run, onDone, onRejection, pendingRequestId, onRecoverOriginal }: {
+  proposal: AgentProposal | undefined; state?: MistState | null; incomingAccess?:DevelopmentIncomingAccess; referenceAccess?:DevelopmentReferenceAccess; taskClosePlans?:Record<string,DevelopmentTaskClosePlan>; commercialSampleLoanSources?:MistWorkspaceEnvelope['commercialSampleLoanSources']; canConfirmShippingBasis?:boolean; scopeKey?: string; onClose: () => void; run: (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string } }) => Promise<unknown>; onDone: (message: string) => void; onRejection?: (message: string) => void; pendingRequestId?:string; onRecoverOriginal?:(requestId:string)=>Promise<boolean>;
 }) {
   const [note, setNote] = React.useState(''), [busy, setBusy] = React.useState(false), [failure, setFailure] = React.useState(''), [password, setPassword] = React.useState(''), [signature, setSignature] = React.useState<SignatureValue | null>(null);
   const [pendingFailure,setPendingFailure]=React.useState(false),failureRef=React.useRef<HTMLDivElement>(null),alive=React.useRef(true);
@@ -281,8 +281,24 @@ export function AgentProposalDialog({ proposal, state, incomingAccess, reference
   const incomplete = (risk === 'high'||orderCreate) && fields.omitted > 0;
   // Agent 起草的合同与资金类批准，由确认人本人当场签字；Agent 不能代签。
   const signing = commandRequiresSignature(proposal.command);
+  const awaitingReceipt=pendingFailure||!!pendingRequestId;
+  const recoverOriginal=async()=>{
+    if(!pendingRequestId||!onRecoverOriginal||busy)return;
+    const operation=active.current;
+    const current=()=>alive.current&&active.current.scope===operation.scope&&(active.current===operation||active.current.id===undefined);
+    setBusy(true);
+    setFailure('');
+    try {
+      const confirmed=await onRecoverOriginal(pendingRequestId);
+      if(!current())return;
+      if(confirmed){setPendingFailure(false);setPassword('');setSignature(null);onDone('已核对原请求');onClose();}
+      else setFailure('暂未查到原回执');
+    } catch (problem) {
+      if(current())setFailure(problem instanceof Error?problem.message:'原请求仍待核对');
+    } finally { if(current())setBusy(false); }
+  };
   const decide = async (command: MistCommand, message: string, reauth?: { password: string }, signed?: { svg: string }) => {
-    if (busy||pendingFailure) return; const operation=active.current;setBusy(true); setFailure('');
+    if (busy||awaitingReceipt) return; const operation=active.current;setBusy(true); setFailure('');
     const sameScope=()=>alive.current&&active.current.scope===operation.scope&&(active.current===operation||active.current.id===undefined);
     try { await run(command, reauth || signed ? { ...(reauth ? { reauth } : {}), ...(signed ? { signature: signed } : {}) } : undefined);if(!sameScope())return;setPassword(''); setSignature(null); onDone(message); onClose(); }
     catch (error) {if(!alive.current||active.current!==operation)return;const text=error instanceof Error?error.message:String(error),uncertain=!!(error as {mistPendingCommand?:unknown})?.mistPendingCommand;
@@ -293,10 +309,11 @@ export function AgentProposalDialog({ proposal, state, incomingAccess, reference
   };
   return <Dialog open onClose={() => { if (!busy) onClose(); }} width={560} title={uiText('确认 Agent 提议')}
     footer={<><Button disabled={busy} onClick={onClose}>{uiText('稍后')}</Button>
-      <Button disabled={busy||pendingFailure} onClick={() => void decide({ type: 'agent.proposal.reject', payload: { id: proposal.id, ...(note.trim() ? { note: note.trim() } : {}) } }, '已拒绝提议')}>{uiText('拒绝')}</Button>
-      <Button variant="primary" loading={busy} disabled={busy || pendingFailure || !!mail?.reason || !!reopening?.reason || !!incoming?.reason || incomingChanged || !!sourceReview?.reason || sourceChanged || !!proposal.taskBlocked || proposal.unavailable || !!draftSourceMissing || quoteSourceMissing || rfqSourceUnavailable || orderSourceUnavailable || incomplete || (risk === 'high' && !password) || (signing && !signature)} onClick={() => void decide({ type: 'agent.proposal.confirm', payload: { id: proposal.id } }, '已确认并执行', risk === 'high' ? { password } : undefined, signing && signature ? { svg: signature.svg } : undefined)}>{uiText('确认执行')}</Button></>}>
+      {pendingRequestId&&onRecoverOriginal&&<Button loading={busy} disabled={busy} onClick={()=>void recoverOriginal()}>{uiText('核对原请求')}</Button>}
+      <Button disabled={busy||awaitingReceipt} onClick={() => void decide({ type: 'agent.proposal.reject', payload: { id: proposal.id, ...(note.trim() ? { note: note.trim() } : {}) } }, '已拒绝提议')}>{uiText('拒绝')}</Button>
+      <Button variant="primary" loading={busy} disabled={busy || awaitingReceipt || !!mail?.reason || !!reopening?.reason || !!incoming?.reason || incomingChanged || !!sourceReview?.reason || sourceChanged || !!proposal.taskBlocked || proposal.unavailable || !!draftSourceMissing || quoteSourceMissing || rfqSourceUnavailable || orderSourceUnavailable || incomplete || (risk === 'high' && !password) || (signing && !signature)} onClick={() => void decide({ type: 'agent.proposal.confirm', payload: { id: proposal.id } }, '已确认并执行', risk === 'high' ? { password } : undefined, signing && signature ? { svg: signature.svg } : undefined)}>{uiText('确认执行')}</Button></>}>
     <div className="mist-col" data-agent-proposal-dialog>
-      {failure && <div ref={failureRef}><Banner tone={pendingFailure?'warn':'bad'} title={uiText(pendingFailure?'结果待核对':'没有执行')}>{failure}</Banner></div>}
+      {(failure||awaitingReceipt) && <div ref={failureRef}><Banner tone={awaitingReceipt?'warn':'bad'} title={uiText(awaitingReceipt?'结果待核对':'没有执行')}>{uiText(failure)}</Banner></div>}
       {draftSourceMissing&&<Banner tone="warn" title={uiText('草稿或附件已不可见，请重新核对')} />}
       {quoteSourceMissing&&<Banner tone="warn" title={uiText('报价或来源资料已不可见，请重新核对')} />}
       {rfqSourceUnavailable&&<Banner tone="warn" title={uiText('询价或报价依据已不可用，请重新核对')} />}

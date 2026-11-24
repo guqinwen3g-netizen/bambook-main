@@ -649,6 +649,18 @@ it('clears a new definitively rejected request but keeps an uncertain replay aft
   await act(async () => { expect(await capture(api.recover())).toBeInstanceOf(Error); }); expect(api.pending).toEqual(pending);
 });
 
+it('does not replay an unresolved proposal when the exact receipt-only lookup returns 404',async()=>{
+  await mount();
+  intercept=request=>request.url.endsWith('/commands')?Promise.reject(new TypeError('断开')):undefined;
+  await act(async()=>{await capture(api.run({type:'agent.proposal.confirm',payload:{id:'proposal-a'}}));});
+  const original=clone(api.pending)!;
+  expect(original.command?.type).toBe('agent.proposal.confirm');
+  intercept=request=>request.url.includes('/receipts/')?failure(404,'NOT_FOUND'):undefined;
+  await act(async()=>{expect(await api.recover({requestId:original.requestId,receiptOnly:true})).toBeUndefined();});
+  expect(api.pending?.requestId).toBe(original.requestId);
+  expect(posts()).toHaveLength(1);
+});
+
 it.each(['workspace','task'])('does not finish a %s download after its account is replaced', async kind => {
   const file: MistFile = { id: 'private-file', name: 'private.pdf', size: 4, mimeType: 'application/pdf', storageKey: A + '/private-file', createdAt: '2026-10-13' };
   stores.get(A)!.state.files.push(file); await mount(); const bytes = deferred<Blob>();

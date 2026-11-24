@@ -102,6 +102,26 @@ it.each([false,true])('keeps a rejected confirmation local while preserving an u
  }finally{act(()=>root.unmount());host.remove();}
 });
 
+it('keeps a missing receipt open for read-only retry and closes only after confirmation',async()=>{
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const proposal:any={id:'p',ownerId:'u',owner:'User',summary:['Update customer'],state:'pending',createdAt:'2026-11-15T00:00:00Z',command:{type:'customer.update',payload:{id:'c',patch:{city:'York'}}}};
+ const run=vi.fn(),onClose=vi.fn(),onDone=vi.fn(),onRecoverOriginal=vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ try{
+  act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} pendingRequestId="original-receipt" onRecoverOriginal={onRecoverOriginal} run={run} onClose={onClose} onDone={onDone}/></MistRoot>));
+  const check=()=>[...document.querySelectorAll('button')].find(b=>b.textContent==='核对原请求')!;
+  expect([...document.querySelectorAll('button')].find(b=>b.textContent==='确认执行')!.disabled).toBe(true);
+  await act(async()=>check().click());
+  expect(document.body.textContent).toContain('暂未查到原回执');
+  expect(onClose).not.toHaveBeenCalled();
+  await act(async()=>check().click());
+  expect(onRecoverOriginal.mock.calls).toEqual([['original-receipt'],['original-receipt']]);
+  expect(run).not.toHaveBeenCalled();
+  expect(onDone).toHaveBeenCalledExactlyOnceWith('已核对原请求');
+  expect(onClose).toHaveBeenCalledTimes(1);
+ }finally{act(()=>root.unmount());host.remove();}
+});
+
 it.each(['proposal','company'])('does not report a late rejection in a different %s or consume its global failure',async(change)=>{
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
  const make=(id:string):any=>({id,ownerId:'u',owner:'User',summary:[id],state:'pending',createdAt:'2026-11-15T00:00:00Z',command:{type:'customer.update',payload:{id:'customer',patch:{city:'York'}}}});
