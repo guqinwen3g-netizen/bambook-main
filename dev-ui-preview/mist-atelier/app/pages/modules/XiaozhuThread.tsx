@@ -1,6 +1,6 @@
 /** 小竹对话：请求、办理过程、结果、追问和待确认事项都在同一条对话里，不用离开页面。 */
 import React from 'react';
-import { ChevronRight, Copy, Download, FileText, RotateCcw, Zap, ShieldCheck, Search, PenLine, HelpCircle, Clock, Check, Square, Link2 } from 'lucide-react';
+import { ChevronRight, Copy, Download, Eye, FileText, RotateCcw, Zap, ShieldCheck, Search, PenLine, HelpCircle, Clock, Check, Square, Link2 } from 'lucide-react';
 import { AIBadge, AssistantEyes, Button, Icon, IconButton, Pill, type Tone } from '../../../../../components/mist';
 import type { AgentTaskTrailItem, AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
 import type { TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
@@ -110,8 +110,13 @@ export type ThreadActions = {
   onDecide?: (id: string, confirm: boolean) => Promise<void>;
   onOpenFile?: (fileId: string) => void;
   onDownloadAttachment?: (task: AgentTaskView, file: TaskAttachment) => Promise<void>;
+  onPreviewAttachment?: (task: AgentTaskView, file: TaskAttachment) => void;
   onReuseAttachment?: (task: AgentTaskView, file: TaskAttachment) => void;
 };
+
+export function PreviewOriginal({name,onPreview}: {name:string;onPreview:()=>void}) {
+  return <IconButton size="sm" icon={Eye} label={uiText('预览原附件')+' '+name} onClick={onPreview}/>;
+}
 
 export function DownloadOriginal({name, onDownload}: {name:string;onDownload:()=>Promise<void>}) {
   const [busy,setBusy]=React.useState(false);
@@ -156,6 +161,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
       <div className="mist-xz-user">{request}
         {!!t.attachments?.length && <div className="mist-xz-sources" aria-label={uiText('附件')}>
           {t.attachments.map(file => <span className="mist-xz-source" key={file.id} data-attachment><span title={file.name}>{file.name}</span>
+            {actions.onPreviewAttachment&&<PreviewOriginal name={file.name} onPreview={()=>actions.onPreviewAttachment?.(t,file)}/>}
             {actions.onDownloadAttachment&&<DownloadOriginal name={file.name} onDownload={()=>actions.onDownloadAttachment!(t,file)}/>}
             {actions.onReuseAttachment && t.conversationId && <IconButton size="sm" icon={Link2} label={uiText('引用附件')+' '+file.name} onClick={() => actions.onReuseAttachment?.(t,file)} />}
           </span>)}

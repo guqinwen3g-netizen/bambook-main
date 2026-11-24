@@ -23,7 +23,7 @@ import { useRouteDraft, useRouteScope } from './useRouteDraft';
 import { useAssistantConversation } from '../../runtime/assistantConversation';
 import { submissionDraftKey } from '../../runtime/xiaozhuSubmissions';
 import { ArrowRight, ArrowUp, Calculator, Download, FileText, ArrowDown, PanelLeftClose, PanelLeftOpen, SquarePen, ChevronDown, PenLine, Trash2, RefreshCw, Sparkles, Square, X, Package, Receipt, ShieldCheck, Users, Database, Building2 } from 'lucide-react';
-import { ActionMenu, AIBadge, AssistantEyes, Banner, Button, Card, CardHeader, DataTable, Dialog, Drawer, EmptyState, Icon, IconButton, Field, FormGrid, KeyValue, Meter, MistPage, Mono, PageHeader, Pill, Select, StatCard, StatGrid, SummaryBar, Tabs, TextArea, TextInput, Toolbar, UploadZone, useToast, type Column } from '../../../../../components/mist';
+import { ActionMenu, AIBadge, AssistantEyes, Banner, Button, Card, CardHeader, DataTable, Dialog, Drawer, EmptyState, FilePreview, Icon, IconButton, Field, FormGrid, KeyValue, Meter, MistPage, Mono, PageHeader, Pill, Select, StatCard, StatGrid, SummaryBar, Tabs, TextArea, TextInput, Toolbar, UploadZone, useToast, type Column } from '../../../../../components/mist';
 import { apiService, type CompanyExporterProfileValue } from '../../../../../services/apiService';
 import { calculatePlatformBom, calculatePlatformPricing, platformBusinessDate, platformCreditRemaining, platformCreditEffectiveAmount, getPlatformClaimSourceOptions, canEditPlatformClaimDraft, type PlatformState, type PlatformBom, type PlatformBomLine, type PlatformClaim, type PlatformCommand, type PlatformRisk, type PlatformClaimDisposition } from '../../../../../server/src/shared/mistPlatform';
 import { mistMoneyMinor, isActiveMistInvoice, isRecognizedMistInvoice } from '../../../../../server/src/shared/mistWorkspace';
@@ -42,7 +42,7 @@ import { PlatformReportsPage, buildOrderProgress, buildReceivableAging, AGING_BU
 export { PlatformReportsPage as ReportsPage, buildCustomerSales, buildReceivableAging, buildOrderProgress } from './PlatformReports';
 import { XiaozhuTasks } from './XiaozhuTasks';
 import { XiaozhuAutomations } from './XiaozhuAutomations';
-import { DownloadOriginal, XiaozhuThread, xiaozhuTaskStatusLabel } from './XiaozhuThread';
+import { DownloadOriginal, PreviewOriginal, XiaozhuThread, xiaozhuTaskStatusLabel } from './XiaozhuThread';
 import { XiaozhuMoreHistory, TitleEditor, XiaozhuNav, XiaozhuProposalList, useAutomationRules } from './XiaozhuNav';
 import { AgentProposalDialog } from '../AgentProposalDialog';
 import { recordIndex } from '../../runtime/xiaozhuRecords';
@@ -193,6 +193,8 @@ export function AssistantPage(){
     setStatusChoices(undefined);
   };
   const attachmentScope=scope+':'+conversationId;
+  const [taskPreview,setTaskPreview]=React.useState<{scope:string;taskId:string;fileId:string}>();
+  React.useEffect(()=>{setTaskPreview(undefined);},[attachmentScope]);
   const liveConversation=React.useRef(conversationId);liveConversation.current=conversationId;
   const legacyTargets=React.useRef(new Map<string,string>());
   React.useEffect(()=>{legacyTargets.current.clear();},[scope]);
@@ -248,6 +250,13 @@ export function AssistantPage(){
       }
     }
   }
+  const previewTask=taskPreview?.scope===attachmentScope?visibleTasks.find(task=>task.id===taskPreview.taskId):undefined;
+  const previewFiles=previewTask?.attachments??[];
+  const previewIndex=previewFiles.findIndex(file=>file.id===taskPreview?.fileId);
+  const previewFile=previewFiles[previewIndex];
+  const previewAttachment=(task:AgentTaskView,file:TaskAttachment)=>{
+    setTaskPreview({scope:attachmentScope,taskId:task.id,fileId:file.id});
+  };
   const downloadAttachment=async(task:AgentTaskView,file:TaskAttachment)=>{
     try { await w.downloadTaskAttachment(task.id,file); }
     catch (problem) { if(live.current===scope)toast(problem instanceof Error?problem.message:uiText('附件读取失败'),'bad'); }
@@ -397,7 +406,7 @@ export function AssistantPage(){
         {canChat&&cowork.loading&&!hasThread?<div className="mist-xz-scroll"><div className="mist-xz-col mist-xz-loading" role="status" aria-label={uiText('正在读取对话')}><i/><i/><i/><i/></div></div>:hasThread?<>
           <div className="mist-xz-scroll" ref={scrollRef} onScroll={e=>{const el=e.currentTarget,near=el.scrollHeight-el.scrollTop-el.clientHeight<96;atBottomRef.current=near;setAtBottom(near);}}>
             <div className="mist-xz-col">
-              {useTaskThread?<XiaozhuThread tasks={visibleTasks} onDownloadAttachment={downloadAttachment} controls={cowork.controls} composerStopTaskId={composerStopTask?.id} onReuseAttachment={cowork.available&&!busy&&!inCall?reuseAttachment:undefined} index={index} proposals={w.state?.agentProposals??[]} onOpenFile={fileId=>{const file=w.state?.files.find(f=>f.id===fileId);if(!file){toast(uiText('文件已不可见'),'bad');return;}void w.downloadFile(file).catch((e:Error)=>toast(e.message,'bad'));}} onAnswer={(t,id,text)=>void cowork.answer(t,id,text)} onCancel={t=>void cowork.cancel(t)} onRetry={cowork.available?retryTask:undefined} retryBlocked={retryBlocked} onCopy={text=>{void navigator.clipboard?.writeText(text).then(()=>toast(uiText('已复制')),()=>toast(uiText('复制失败，请手动选择文字'),'bad'));}} onDraft={text=>draft(text)} onAutomate={text=>{setAutomationSeed(text);setAutomations(true);}} onOpenRecord={(view,id,target)=>{if(view)w.go(view,id,target);}} onProposal={setProposalId} onDecide={decide}/>
+              {useTaskThread?<XiaozhuThread tasks={visibleTasks} onPreviewAttachment={previewAttachment} onDownloadAttachment={downloadAttachment} controls={cowork.controls} composerStopTaskId={composerStopTask?.id} onReuseAttachment={cowork.available&&!busy&&!inCall?reuseAttachment:undefined} index={index} proposals={w.state?.agentProposals??[]} onOpenFile={fileId=>{const file=w.state?.files.find(f=>f.id===fileId);if(!file){toast(uiText('文件已不可见'),'bad');return;}void w.downloadFile(file).catch((e:Error)=>toast(e.message,'bad'));}} onAnswer={(t,id,text)=>void cowork.answer(t,id,text)} onCancel={t=>void cowork.cancel(t)} onRetry={cowork.available?retryTask:undefined} retryBlocked={retryBlocked} onCopy={text=>{void navigator.clipboard?.writeText(text).then(()=>toast(uiText('已复制')),()=>toast(uiText('复制失败，请手动选择文字'),'bad'));}} onDraft={text=>draft(text)} onAutomate={text=>{setAutomationSeed(text);setAutomations(true);}} onOpenRecord={(view,id,target)=>{if(view)w.go(view,id,target);}} onProposal={setProposalId} onDecide={decide}/>
               :<div className="mist-xz-thread">{messages.map((m,i)=>m.role==='user'?<div key={i} className="mist-xz-turn"><div className="mist-xz-user">{m.content}</div></div>:<div key={i} className="mist-xz-turn"><XiaozhuTurnShell><XiaozhuMarkdown text={m.content} index={index} onOpen={(view,id,target)=>w.go(view,id,target)}/>{m.truncated&&<p className="mist-xz-note">{uiText("回复较长，已截断。可缩小问题范围继续询问。")}</p>}
                 <div className="mist-xz-acts">{m.sources?.map(source=><Button key={source.id} size="sm" variant="quiet" iconRight={ArrowRight} onClick={()=>w.go(source.view,source.entityId)}>{uiText(source.label)}</Button>)}{canChat&&<Button size="sm" variant="quiet" icon={FileText} onClick={()=>draft(m.content)}>{uiText("保存草稿")}</Button>}</div></XiaozhuTurnShell></div>)}
                 {busy&&<div className="mist-xz-turn"><XiaozhuTurnShell><span className="mist-xz-shimmer" aria-label={uiText("小竹正在回复")}>{uiText('正在思考')}</span></XiaozhuTurnShell></div>}</div>}
@@ -430,6 +439,7 @@ export function AssistantPage(){
         const on=attachmentRefs.some(ref=>ref.fileId===file.id);
         return <div key={file.id} className="mist-chat-pick" data-on={on||undefined}>
           <div className="mist-chat-pick-t"><b>{file.name}</b><span>{task.name}</span></div>
+          <PreviewOriginal name={file.name} onPreview={()=>previewAttachment(task,file)}/>
           <DownloadOriginal name={file.name} onDownload={()=>downloadAttachment(task,file)}/>
           <Button size="sm" variant={on?'secondary':'ai'} aria-pressed={on} aria-label={ui`${on?'移除附件':'引用附件'} ${file.name}`} disabled={busy||!on&&!cowork.available}
             onClick={()=>{if(on){setAttachmentRefs(refs=>refs.filter(ref=>ref.fileId!==file.id));setError('');}else reuseAttachment(task,file);}}>{uiText(on?'移除附件':'加入问题')}</Button>
@@ -442,6 +452,11 @@ export function AssistantPage(){
     <Drawer open={drafts} onClose={()=>setDrafts(false)} title={uiText("已保存草稿")} sub={uiText("审阅后保存的回复，尚未执行任何业务操作。")} footer={canChat?<Button icon={FileText} onClick={()=>{setDrafts(false);draft('');}}>{uiText("新建草稿")}</Button>:undefined}>
       {saved.length?<div className="mist-chat-picks">{saved.map(d=><div key={d.id} className="mist-chat-draft"><b>{d.title}</b><p className="mist-chat-text">{d.content}</p><div className="mist-row">{d.orderId&&<SourceOrder id={d.orderId}/>}<span className="mist-note">{d.createdAt.slice(0,10)}{uiText(" · 尚未执行")}</span></div></div>)}</div>:<EmptyState title={uiText("尚无草稿")} description={uiText("在小竹的回复下点“保存草稿”即可留存。")} compact/>}
     </Drawer>
+    {previewTask&&previewFile&&<FilePreview key={previewTask.id} files={previewFiles} index={previewIndex}
+      onIndex={index=>setTaskPreview({scope:attachmentScope,taskId:previewTask.id,fileId:previewFiles[index].id})}
+      onClose={()=>setTaskPreview(undefined)}
+      load={()=>w.readTaskAttachment(previewTask.id,previewFile)}
+      onDownload={()=>w.downloadTaskAttachment(previewTask.id,previewFile)} />}
     <ModuleEditorDialog spec={editor} onClose={()=>setEditor(null)}/>
   </MistPage>;
 }

@@ -190,6 +190,7 @@ it.each([true,false])('finds and downloads an attached original with model avail
   });
   try {
     mock.workspace.downloadTaskAttachment=vi.fn(async()=>{});
+    mock.workspace.readTaskAttachment=vi.fn(()=>new Promise<Blob>(()=>{}));
     await mount();
     await click('核对最初的附件');
     if(available){
@@ -214,6 +215,16 @@ it.each([true,false])('finds and downloads an attached original with model avail
     expect(document.body.textContent).toContain('没有匹配的附件');
     await enterSearch('QUANTITY');
     const picker=search.closest('[role="dialog"]');
+    const preview=picker?.querySelector<HTMLButtonElement>('button[aria-label="预览原附件 quantity.xlsx"]');
+    expect(preview).toBeTruthy();
+    await act(async()=>preview!.click());
+    const viewer=document.querySelector('[data-file-preview="'+original.attachments[0].id+'"]');
+    expect(viewer).toBeTruthy();
+    expect(mock.workspace.readTaskAttachment).toHaveBeenCalledExactlyOnceWith(original.id,original.attachments[0]);
+    expect(mock.workspace.downloadTaskAttachment).not.toHaveBeenCalled();
+    await act(async()=>viewer!.querySelector<HTMLButtonElement>('button[aria-label="关闭"]')!.click());
+    expect(document.querySelector('[data-file-preview]')).toBeNull();
+    expect(search.value).toBe('QUANTITY');
     const download=picker?.querySelector<HTMLButtonElement>('button[aria-label="下载原附件 quantity.xlsx"]');
     expect(download).toBeTruthy();
     await act(async()=>download!.click());

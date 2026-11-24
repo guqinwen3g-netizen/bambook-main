@@ -612,6 +612,7 @@ export const reviewedEnglish: Record<string, string> = {
   '回答未确认，可重试':'Answer not confirmed. Try again.',
   '引用附件':'Reuse attachment',
   '下载原附件':'Download original attachment',
+  '预览原附件':'Preview original attachment',
   '正在下载附件':'Downloading attachment',
   '引用资料':'Reference sources',
   '对话附件':'Conversation attachments',
