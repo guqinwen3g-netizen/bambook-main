@@ -14,7 +14,11 @@ let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
 const view=(active=true, taskId?:string)=> <Nav.Provider value={{route:{view:'assistant',...(taskId?{section:'tasks',id:taskId}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
 const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
 
-it('recovers a submitted task after reload using only a receipt read and clears its matching unsent draft', async () => {
+it.each([
+  {case:'clears the matching draft for a recovered task',question:'核对原 PDF',found:true,after:''},
+  {case:'preserves a different draft when recovering a task',question:'正在写另一条问题',found:true,after:'正在写另一条问题'},
+  {case:'blocks a fileless resend while the attachment receipt is unknown',question:'核对原 PDF',found:false,after:'核对原 PDF'},
+])('$case', async ({question,found,after}) => {
   const conversationId='c_reload_task';
   const task = {
     id:'recovered-task', identityId:'personal', executor:'platform', conversationId, instructions:'核对原 PDF',
@@ -23,7 +27,7 @@ it('recovers a submitted task after reload using only a receipt read and clears 
   };
   const requestId='00000000-0000-4000-8000-000000000051';
   sessionStorage.setItem('mist.xiaozhu.conversation:session-a:workspace',conversationId);
-  sessionStorage.setItem('mist.assistant.conversation:session-a:workspace',JSON.stringify({question:task.instructions,selected:[],messages:[]}));
+  sessionStorage.setItem('mist.assistant.conversation:session-a:workspace',JSON.stringify({question,selected:[],messages:[]}));
   sessionStorage.setItem('mist.xiaozhu.submissions:session-a:workspace',JSON.stringify([['fingerprint',{
     requestId,instructions:task.instructions,locale:'zh-CN',draftKey:JSON.stringify([task.instructions,[]]),
     conversationId,sourceConversationId:conversationId,hasAttachments:true,
@@ -32,15 +36,25 @@ it('recovers a submitted task after reload using only a receipt read and clears 
   mock.api.mockImplementation(async (url: string) => {
     if (url.includes('/agent-identities')) return {items:[{id:'personal',kind:'personal',state:'active'}]};
     if (url.endsWith('/agent-task-capabilities')) return {platformAvailable:true};
-    if (url.endsWith('/personal-agent/tasks/receipt/'+requestId)) return {item:task};
+    if (url.endsWith('/personal-agent/tasks/receipt/'+requestId)) {
+      if (!found) throw Object.assign(new Error('没有原回执'),{status:404});
+      return {item:task};
+    }
     return {items:[],nextCursor:null};
   });
   await mount();
-  expect(host.textContent).toContain('已找回提交的任务');
-  expect(host.textContent).toContain('原 PDF 已核对');
-  expect(host.querySelector('textarea')?.value).toBe('');
+  if(found){
+    expect(host.textContent).toContain('已找回提交的任务');
+    expect(host.textContent).toContain('原 PDF 已核对');
+    expect(sessionStorage.getItem('mist.xiaozhu.submissions:session-a:workspace')).toBeNull();
+  }else{
+    expect(host.textContent).toContain('提交结果待核对');
+    await click('发送');
+    expect(host.textContent).toContain('请恢复原附件后重试');
+    expect(sessionStorage.getItem('mist.xiaozhu.submissions:session-a:workspace')).toContain(requestId);
+  }
+  expect(host.querySelector('textarea')?.value).toBe(after);
   expect(mock.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
-  expect(sessionStorage.getItem('mist.xiaozhu.submissions:session-a:workspace')).toBeNull();
 });
 
 it('restores the request, order and original attachment of a failed task for review before resending', async () => {

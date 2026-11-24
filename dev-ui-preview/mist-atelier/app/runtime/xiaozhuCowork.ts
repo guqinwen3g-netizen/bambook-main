@@ -274,6 +274,8 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     const isCurrent = () => live.current === bound && sendRequest.current === controller;
     setBusy(true);
     setSendFailure(undefined);
+    setRecoveredSubmissions(old=>old.filter(entry=>(entry.sourceConversationId??entry.conversationId)!==(visibleConversationId??conversationId)));
+    let firstAttempt: string | undefined;
     try {
       const refs = normalizeAgentTaskIntentRefs(intentRefs);
       const fileIdentity = await Promise.all(files.map(async file => {
@@ -294,6 +296,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
           conversationId, sourceConversationId:visibleConversationId??conversationId, draftKey, hasAttachments:!!(files.length||attachmentRefs.length) };
         pending.current.set(fingerprint, saved);
         savePendingSubmissions(bound,pending.current);
+        firstAttempt = fingerprint;
       }
       const {requestId,instructions,locale} = saved;
       const target = saved.conversationId;
@@ -322,7 +325,13 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       return item;
     } catch (e) {
       if (isCurrent()) {
-        const message = (e as {status?:number})?.status === 0 ? '提交结果未确认，请重试发送'
+        const status = (e as {status?:number})?.status;
+        // An explicit first-request rejection is different from a lost receipt or an uncertain retry.
+        if (firstAttempt && status && status >= 400 && status < 500 && ![408,409].includes(status)) {
+          pending.current.delete(firstAttempt);
+          savePendingSubmissions(bound,pending.current);
+        }
+        const message = status === 0 ? '提交结果未确认，请重试发送'
           : e instanceof Error ? e.message : '未能交给小竹';
         setSendFailure({conversationId:visibleConversationId??conversationId,message});
       }
