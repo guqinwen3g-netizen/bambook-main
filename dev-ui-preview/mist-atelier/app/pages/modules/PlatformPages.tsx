@@ -206,7 +206,7 @@ export function AssistantPage(){
   const index=React.useMemo(()=>recordIndex(w.state),[w.state]),automationRules=useAutomationRules(w.workspace?.id,showTaskHistory,automations),meta=useConversationMeta(w.workspace?.id,showTaskHistory),conversations=React.useMemo(()=>conversationsOf(cowork.tasks,meta.items),[cowork.tasks,meta.items]),current=conversations.find(c=>c.id===conversationId),visibleTasks=showTaskHistory?(current?.tasks??[]):[],proposals=(w.state?.agentProposals??[]).filter(p=>p.state==='pending'),voice=usePersonalAgentVoice(scope+':'+canChat,w.workspace?.id,cowork.track),inCall=voiceInCall(voice);
   const newConversation=()=>{
     const unsubmitted = cowork.available
-      ? [...inactiveDrafts.keys()].findLast(id=>!conversations.some(conversation=>conversation.id===id))
+      ? [...inactiveDrafts.keys()].reverse().find(id=>!conversations.some(conversation=>conversation.id===id))
       : undefined;
     openConversation(unsubmitted??newConversationId());
     requestAnimationFrame(()=>field.current?.focus());
