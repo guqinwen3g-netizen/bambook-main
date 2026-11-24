@@ -27,13 +27,29 @@ it('restores a lost creation receipt and replays the identical request after rem
   });
   await paint();
   await act(async()=>button('新建规则').click());
+  const trigger=getByLabelText(document.body,'触发条件') as HTMLSelectElement;
+  await act(async()=>{
+    trigger.value='daily';
+    trigger.dispatchEvent(new Event('change',{bubbles:true}));
+  });
+  await act(async()=>button('选择时间').click());
+  const timePicker=getByRole(document.body,'dialog',{name:'选择时间'});
+  const timeEntry=getByLabelText(timePicker,'时间') as HTMLInputElement;
+  await act(async()=>{
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(timeEntry,'1735');
+    timeEntry.dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  await act(async()=>getByRole(timePicker,'button',{name:'确定'}).click());
+  expect((getByLabelText(document.body,'每天几点') as HTMLInputElement).value).toBe('17:35');
   await act(async()=>button('开启').click());
+  expect(posts[0].time).toBe('17:35');
   expect(document.body.textContent).toContain('规则开启结果待核对');
   expect((getByLabelText(document.body,'规则名称') as HTMLInputElement).disabled).toBe(true);
   act(()=>root.unmount());root=createRoot(host);
   await paint();
   expect(posts).toHaveLength(1);
   expect((getByLabelText(document.body,'规则名称') as HTMLInputElement).value).toBe(posts[0].name);
+  expect((getByLabelText(document.body,'每天几点') as HTMLInputElement).value).toBe('17:35');
   await act(async()=>button('用原请求重试').click());
   expect(posts[1]).toEqual(posts[0]);
   expect(rules).toHaveLength(1);
