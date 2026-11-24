@@ -1,5 +1,5 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import request from 'supertest';import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import path from 'node:path';import {randomUUID} from 'node:crypto';
+import request from 'supertest';import {mkdtemp,rm,writeFile} from 'node:fs/promises';import {tmpdir} from 'node:os';import path from 'node:path';import {randomUUID} from 'node:crypto';
 import {createMistLocalRuntime} from './local';import {createMistServer} from './server';
 import type {MistPlatformTaskWorker} from './platformTaskWorker';
 import type {LlmCompletionInput} from '../ai/llmProviders';
@@ -42,6 +42,44 @@ it('recovers the same personal task by request ID without writing receipts or ex
  const identity = (await identityRecord(local.database, owner.workspace.id, accepted.identityId)).value;
  const token = local.agentDelegation.makeServiceCredential(owner.workspace.id, identity.id, identity.key!.generation);
  await request(app).get(read(input.requestId)).set('x-bambook-agent-key', token).expect(403);
+ expect(await local.database.mistCommandReceipt.findMany({ where: { workspaceId: owner.workspace.id } })).toEqual(before);
+});
+
+it('downloads the exact task original only for its owner, and checks integrity without writing receipts', async () => {
+ const { app, local, worker } = server(async () => tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '已读' }));
+ worker.start(3_600_000);
+ const owner = await human(app, 'demo-sales');
+ const another = await human(app, 'demo-buyer');
+ const bytes = Buffer.from('synthetic original\nsecond line');
+ const name = '原始清单.txt';
+ const taskInput = { requestId: randomUUID(), name: '清单', instructions: '核对附件', conversationId: 'conv_12345678' };
+ const original = (await owner.client.post(owner.base + '/personal-agent/tasks')
+   .field('task', JSON.stringify(taskInput)).attach('attachments', bytes, name).expect(201)).body.item;
+ const fileId = original.attachments[0].id;
+ const ref = { taskId: original.id, fileId };
+ const reused = (await owner.client.post(owner.base + '/personal-agent/tasks')
+   .send({ ...taskInput, requestId: randomUUID(), attachmentRefs: [ref] }).expect(201)).body.item;
+ const pathFor = (taskId: string, originalId = fileId) => '/agent-tasks/' + taskId + '/attachments/' + originalId;
+ const before = await local.database.mistCommandReceipt.findMany({ where: { workspaceId: owner.workspace.id } });
+
+ for (const taskId of [original.id, reused.id]) {
+   const downloaded = await owner.client.get(owner.base + pathFor(taskId)).expect(200)
+     .expect('Cache-Control', 'private, no-store').expect('X-Content-Type-Options', 'nosniff')
+     .expect('Content-Type', 'application/octet-stream')
+     .expect('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent(name));
+   expect(downloaded.body).toEqual(bytes);
+ }
+ await another.client.get(another.base + pathFor(original.id)).expect(404);
+ await owner.client.get('/api/mist/workspaces/' + randomUUID() + pathFor(original.id)).expect(404);
+ await owner.client.get(owner.base + pathFor(randomUUID())).expect(404);
+ await owner.client.get(owner.base + pathFor(original.id, randomUUID())).expect(404);
+ await owner.client.get(owner.base + pathFor(original.id) + '?extra=1').expect(400);
+ const identity = (await identityRecord(local.database, owner.workspace.id, original.identityId)).value;
+ const token = local.agentDelegation.makeServiceCredential(owner.workspace.id, identity.id, identity.key!.generation);
+ await request(app).get(owner.base + pathFor(original.id)).set('x-bambook-agent-key', token).expect(403);
+ await writeFile(path.join(directory, 'files', owner.workspace.id, fileId), Buffer.alloc(bytes.length, 1));
+ await owner.client.get(owner.base + pathFor(original.id)).expect(404);
+ await owner.client.get(owner.base + pathFor(reused.id)).expect(404);
  expect(await local.database.mistCommandReceipt.findMany({ where: { workspaceId: owner.workspace.id } })).toEqual(before);
 });
 

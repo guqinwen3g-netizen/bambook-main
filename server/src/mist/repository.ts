@@ -798,13 +798,16 @@ export class MistRepository {
     }
     return { file, origin: source.attachmentOrigins?.find(origin => origin.fileId === ref.fileId) ?? ref };
   }
+  private sameTaskAttachment(saved: MistStoredFile, file: MistStoredFile) {
+    return saved.id === file.id && saved.sha256 === file.sha256
+      && saved.storageKey === file.storageKey && saved.name === file.name && saved.size === file.size
+      && saved.mimeType === file.mimeType;
+  }
   private async assertTaskAttachmentOrigins(db: any, row: MistWorkspaceRow, actor: TokenPayload, task: TaskRecord, visible?: MistState) {
     const privacy=this.filePrivacy(row);
     for (const ref of task.attachmentOrigins ?? []) {
       const {file}=await this.resolveTaskAttachment(db,row,actor,task.conversationId,ref,visible);
-      if (!task.attachments?.some(saved => saved.id === file.id && saved.sha256 === file.sha256
-        && saved.storageKey === file.storageKey && saved.name === file.name && saved.size === file.size
-        && saved.mimeType === file.mimeType)) fail('FILE_NOT_FOUND','原附件无法核验',404);
+      if (!task.attachments?.some(saved => this.sameTaskAttachment(saved, file))) fail('FILE_NOT_FOUND','原附件无法核验',404);
       if (restrictedUploadContent(row.state,actor,fileOwner(row),privacy,file.sha256!,file.size)) fail('FORBIDDEN','附件的原件权限已变化',403);
     }
   }
@@ -1853,6 +1856,30 @@ export class MistRepository {
       return { file, bytes,previewReady,cutout };
     });
     return result;
+  }
+  async downloadTaskAttachment(prior: TokenPayload, workspaceId: string, taskId: string, fileId: string) {
+    if (isAgentActor(prior)) fail('FORBIDDEN', '任务附件只供本人下载', 403);
+    const authorizeOriginal = () => this.transact(async db => {
+      const { row, actor } = await this.own(db, prior, workspaceId);
+      const { value: task } = await taskRecord(db, row.id, taskId);
+      if (task.ownerId !== actor.userId || task.executor !== 'platform' || task.automationId
+        || task.credentialVersion !== actor.credentialVersion || !await this.taskViewSourcesAllowed(db, row, actor, task)) {
+        fail('FILE_NOT_FOUND', '附件不存在或无权访问', 404);
+      }
+      await assertTaskViewAuthority(db, actor, task, Date.now());
+      const file = task.attachments?.find(item => item.id === fileId);
+      if (!file?.sha256 || !/^[a-f0-9]{64}$/.test(file.sha256) || file.storageKey !== `${row.id}/${file.id}`
+        || restrictedUploadContent(row.state, actor, fileOwner(row), this.filePrivacy(row), file.sha256, file.size)) {
+        fail('FILE_NOT_FOUND', '附件不存在或无权访问', 404);
+      }
+      return file;
+    });
+    const file = await authorizeOriginal();
+    const bytes = await this.files.read(workspaceId, file);
+    // A fresh transaction also catches source permissions changed while the bytes were being read.
+    const current = await authorizeOriginal();
+    if (!this.sameTaskAttachment(file, current)) fail('FILE_NOT_FOUND', '附件原文件无法核验', 404);
+    return { file: current, bytes };
   }
   private async privateTaskFiles(prior:TokenPayload,workspaceId:string):Promise<MistStoredFile[]>{
     if(!isAgentActor(prior)||prior.agentExecutor!=='platform'||prior.agentTaskLease?.workspaceId!==workspaceId)return [];

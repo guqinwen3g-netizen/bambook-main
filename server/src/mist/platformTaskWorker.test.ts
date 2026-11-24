@@ -433,16 +433,35 @@ it('rechecks a borrowed attachment for the worker and redacts completed follow-u
   const completed = (await f.human.post(f.base + '/personal-agent/tasks').send(completedInput).expect(201)).body.item;
   await f.drain();
   expect(await f.current(completed.id)).toMatchObject({ result: marker, checkpoint: marker });
+  const downloadPath = (taskId: string) => f.base + '/agent-tasks/' + taskId + '/attachments/' + ref.fileId;
+  expect((await f.human.get(downloadPath(completed.id)).expect(200)).body).toEqual(Buffer.from(marker));
   const callsBeforeRevocation = complete.mock.calls.length;
   const followUp = (await f.human.post(f.base + '/personal-agent/tasks').send({
     ...payload, requestId: randomUUID(), attachmentRefs: [ref],
   }).expect(201)).body.item;
-  await f.local.database.$transaction(async db => {
-    const workspace = await db.mistWorkspace.findUnique({ where: { id: f.workspace.id } });
-    await db.mistWorkspace.update({ where: { id: f.workspace.id }, data: { state: {
-      ...workspace.state, orders: workspace.state.orders.filter((order: { id: string }) => order.id !== orderId),
-    } } });
+  const originalRead = MistPrivateFiles.prototype.read;
+  let revokedWhileReading = false;
+  const duringRead = vi.spyOn(MistPrivateFiles.prototype, 'read').mockImplementation(async function (this: MistPrivateFiles, workspaceId, file) {
+    const bytes = await originalRead.call(this, workspaceId, file);
+    if (file.id === ref.fileId && !revokedWhileReading) {
+      await f.local.database.$transaction(async db => {
+        const workspace = await db.mistWorkspace.findUnique({ where: { id: f.workspace.id } });
+        await db.mistWorkspace.update({ where: { id: f.workspace.id }, data: { state: {
+          ...workspace.state, orders: workspace.state.orders.filter((order: { id: string }) => order.id !== orderId),
+        } } });
+      });
+      revokedWhileReading = true;
+    }
+    return bytes;
   });
+  try {
+    await f.human.get(downloadPath(completed.id)).expect(404);
+    expect(revokedWhileReading).toBe(true);
+  } finally {
+    duringRead.mockRestore();
+  }
+  await f.human.get(downloadPath(item.id)).expect(404);
+  await f.human.get(downloadPath(completed.id)).expect(404);
   expect((await f.current(item.id)).attachments).toBeUndefined();
   const listed = (await f.human.get(f.base + '/agent-tasks').expect(200)).body.items.find((task: { id: string }) => task.id === completed.id);
   const summary = (await f.human.get(f.base + '/agent-tasks/' + completed.id + '?summary=1').expect(200)).body.item;

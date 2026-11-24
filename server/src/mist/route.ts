@@ -165,6 +165,15 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   const mailRecordReadOptions=(req:Request)=>{if(req.query.includeMailRecords!==undefined&&req.query.includeMailRecords!=='1')fail('INVALID_INPUT','邮件读取能力参数无效',400);return{excludeTypes:req.query.includeMailRecords==='1'?[]:['email_draft','email_send']};};
   router.get('/workspaces/:id/agent-tasks',run(async(req,res)=>{exactBody(req.query,['cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.listAgentTasks(actor(req),req.params.id,req.query.cursor));}));
   router.get('/workspaces/:id/agent-tasks/:taskId',run(async(req,res)=>{exactBody(req.query,['summary']);if(req.query.summary!==undefined&&req.query.summary!=='1')fail('INVALID_INPUT','任务查询字段无效',400);res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.getAgentTask(actor(req),req.params.id,req.params.taskId,req.query.summary==='1')});}));
+  router.get('/workspaces/:id/agent-tasks/:taskId/attachments/:fileId', run(async (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    exactBody(req.query, []);
+    const { file, bytes } = await repository.downloadTaskAttachment(actor(req), req.params.id, req.params.taskId, req.params.fileId);
+    const filename = encodeURIComponent(file.name).replace(/['()*]/g, char => '%' + char.charCodeAt(0).toString(16).toUpperCase());
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
+    res.type('application/octet-stream').send(Buffer.from(bytes));
+  }));
   router.get('/workspaces/:id/agent-tasks/:taskId/history',run(async(req,res)=>{exactBody(req.query,['cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.agentTaskHistory(actor(req),req.params.id,req.params.taskId,req.query.cursor));}));
   router.post('/workspaces/:id/personal-agent',run(async(req,res)=>{exactBody(req.body??{},[]);res.setHeader('Cache-Control','private, no-store');res.json({identity:await repository.ensurePersonalAgent(actor(req),req.params.id,delegation.makeServiceCredential,delegation.timestamp())});}));
   router.get('/workspaces/:id/personal-agent/tasks/receipt/:requestId',run(async(req,res)=>{
