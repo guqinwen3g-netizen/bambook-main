@@ -109,8 +109,19 @@ export type ThreadActions = {
   onProposal: (id: string) => void;
   onDecide?: (id: string, confirm: boolean) => Promise<void>;
   onOpenFile?: (fileId: string) => void;
+  onDownloadAttachment?: (task: AgentTaskView, file: TaskAttachment) => Promise<void>;
   onReuseAttachment?: (task: AgentTaskView, file: TaskAttachment) => void;
 };
+
+function DownloadOriginal({name, onDownload}: {name:string;onDownload:()=>Promise<void>}) {
+  const [busy,setBusy]=React.useState(false);
+  const download=async()=>{
+    if(busy)return;
+    setBusy(true);
+    try { await onDownload(); } finally { setBusy(false); }
+  };
+  return <IconButton size="sm" icon={Download} label={uiText(busy?'正在下载附件':'下载原附件')+' '+name} disabled={busy} onClick={()=>void download()}/>;
+}
 
 /** 本轮确认后生成的文件：放在回答下方，点开即下载。 */
 function ProducedFiles({ proposals, onOpen }: { proposals: AgentProposal[]; onOpen: (fileId: string) => void }) {
@@ -145,6 +156,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
       <div className="mist-xz-user">{request}
         {!!t.attachments?.length && <div className="mist-xz-sources" aria-label={uiText('附件')}>
           {t.attachments.map(file => <span className="mist-xz-source" key={file.id} data-attachment><span title={file.name}>{file.name}</span>
+            {actions.onDownloadAttachment&&<DownloadOriginal name={file.name} onDownload={()=>actions.onDownloadAttachment!(t,file)}/>}
             {actions.onReuseAttachment && t.conversationId && <IconButton size="sm" icon={Link2} label={uiText('引用附件')+' '+file.name} onClick={() => actions.onReuseAttachment?.(t,file)} />}
           </span>)}
         </div>}

@@ -649,12 +649,13 @@ it('clears a new definitively rejected request but keeps an uncertain replay aft
   await act(async () => { expect(await capture(api.recover())).toBeInstanceOf(Error); }); expect(api.pending).toEqual(pending);
 });
 
-it('does not finish a download after its account is replaced', async () => {
+it.each(['workspace','task'])('does not finish a %s download after its account is replaced', async kind => {
   const file: MistFile = { id: 'private-file', name: 'private.pdf', size: 4, mimeType: 'application/pdf', storageKey: A + '/private-file', createdAt: '2026-10-13' };
   stores.get(A)!.state.files.push(file); await mount(); const bytes = deferred<Blob>();
-  intercept = request => request.url.endsWith('/files/private-file') ? { ok: true, status: 200, json: async () => ({}), blob: () => bytes.promise } as ResponseData : undefined;
+  const path=kind==='task'?'/agent-tasks/task-a/attachments/private-file':'/files/private-file';
+  intercept = request => request.url.endsWith(path) ? { ok: true, status: 200, json: async () => ({}), blob: () => bytes.promise } as ResponseData : undefined;
   const create = vi.fn(); vi.stubGlobal('URL', class extends URL { static createObjectURL = create; });
-  let downloading!: Promise<void | Error>; await act(async () => { downloading = capture(api.downloadFile(file)); });
+  let downloading!: Promise<void | Error>; await act(async () => { downloading = capture(kind==='task'?api.downloadTaskAttachment('task-a',file):api.downloadFile(file)); });
   auth.session = { sessionKey: 'session-b', user: { id: 'actor-b' }, status: 'authenticated' }; await render(); await waitFor(() => api.workspace?.id === D);
   await resolve(bytes, new Blob(['data'])); expect(await downloading).toBeInstanceOf(Error); expect(create).not.toHaveBeenCalled();
 });

@@ -9,6 +9,7 @@ import { markNoticeSounds, newAudibleNotices } from './notificationSound';
 import {agentTaskNoticeScope,useAgentTaskNotices,type AgentTaskNotices} from './agentTaskNotices';
 import { useMistSession } from './auth';
 import type { MistCommand, MistFile, MistRunReceipt, MistState, MistWorkspaceEnvelope } from '../../../../server/src/shared/mistWorkspace';
+import type { TaskAttachment } from '../../../../server/src/shared/mistTaskAttachments';
 
 type Pending = { workspaceId: string; requestId: string; expectedRevision: number; kind: 'command' | 'upload' | 'archive' | 'restore' | 'member' | 'mail-send'; command?: MistCommand; signature?: { svg: string }; file?: { name: string; size: number; sha256?: string }; actorId?: string; claimId?: string; action?: 'add' | 'remove'; account?: string;
   /** 邮件发送意图：发出前存本机，丢失回执后用同一 requestKey 核对；凭据类动作绝不写入。 */
@@ -37,6 +38,7 @@ export interface MistWorkspaceContext {
   run: (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string }; expectedRevision?: number }) => Promise<MistRunReceipt>;
   uploadFile: (file: File, options?:MistUploadOptions) => Promise<MistFile>;
   downloadFile: (file: MistFile) => Promise<void>;
+  downloadTaskAttachment: (taskId: string, file: TaskAttachment) => Promise<void>;
   /** 读取附件原件（带登录凭据），供在线预览使用；不会触发下载。 */
   readFile: (file: MistFile) => Promise<Blob>;
   prepareCreditDocument: (creditId: string, versionId: string) => Promise<void>;
@@ -96,6 +98,14 @@ function uploadTarget(options:unknown):string|undefined{
 /** 所有者，或服务端确认的被授权成员，才能使用该公司快照。 */
 export function workspaceAccessibleBy(value: MistWorkspaceEnvelope, userId?: string | null) { return !!userId && (value.ownerId === userId || value.access?.role === 'member' && Array.isArray(value.state?.memberIds) && value.state.memberIds.includes(userId)); }
 class RequestError extends Error { constructor(message: string, public status = 0, public code?: string) { super(message); } }
+function downloadBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = name;
+  anchor.click();
+  window.setTimeout(()=>URL.revokeObjectURL(url),30_000);
+}
 function envelope(value: unknown, actorId: string, workspaceId?: string): MistWorkspaceEnvelope {
   const candidate = value as MistWorkspaceEnvelope;
   const arrays: Array<keyof MistState> = ['devs', 'versions', 'drafts', 'fabrics', 'orders', 'orderLines', 'productions', 'receipts', 'invoices', 'allocations', 'payments', 'customers', 'contacts', 'files', 'events', 'tasks', 'notifications', 'calendar'];
@@ -623,8 +633,19 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
   }, [authority.key, authority.userId, authority.status, boundEpoch, boundWorkspaceId, fileUrl, assertSource]);
   const downloadFile = React.useCallback(async (file: MistFile) => {
     const blob = await readFile(file);
-    const url = URL.createObjectURL(blob), anchor = document.createElement('a'); anchor.href = url; anchor.download = file.name; anchor.click(); window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+    downloadBlob(blob,file.name);
   }, [readFile]);
+  const downloadTaskAttachment = React.useCallback(async (taskId: string, file: TaskAttachment) => {
+    assertSource(authority,boundEpoch,boundWorkspaceId);
+    const path = BASE + '/' + encodeURIComponent(boundWorkspaceId!) + '/agent-tasks/' + encodeURIComponent(taskId)
+      + '/attachments/' + encodeURIComponent(file.id);
+    const response = await fetch(path,{headers:apiService.getAuthHeaders(),credentials:'include',cache:'no-store'});
+    if (!response.ok) throw new RequestError('附件读取失败',response.status);
+    const blob = await response.blob();
+    assertSource(authority,boundEpoch,boundWorkspaceId);
+    if (blob.size!==file.size) throw new RequestError('附件读取失败');
+    downloadBlob(blob,file.name);
+  },[authority.key,authority.userId,authority.status,boundEpoch,boundWorkspaceId,assertSource]);
   const readCreditDocument = React.useCallback(async (creditId: string, versionId: string, draft: boolean) => {
     assertSource(authority, boundEpoch, boundWorkspaceId);
     if (!claimIdentifier(creditId) || !claimIdentifier(versionId)) throw new RequestError('CN 或版本编号无效');
@@ -771,7 +792,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
   const noticeScope=agentTaskNoticeScope(session.sessionKey,visible?.id,session.user);
   const agentTaskNotices=useAgentTaskNotices(noticeScope,visible?.id,mistApiRequest,JSON.stringify([session.user?.id,visible?.id]));
   const dismissRejection = React.useCallback(() => { const message = rejection.current; if (!message) return; rejection.current = ''; setError(previous => previous === message ? '' : previous); }, []);
-  return <Context.Provider value={{ dismissRejection,agentTaskNotices,state: visible?.state ?? null, workspace: visible, workspaces: scopeIsCurrent ? workspaces : [], archivedWorkspaces:scopeIsCurrent?archivedWorkspaces:[],refreshArchived,archiveWorkspace:()=>changeArchive('archive'),restoreWorkspace:id=>changeArchive('restore',id),changeMember,mail,closeMailReview,loading: scopeIsCurrent ? loading : session.status !== 'anonymous', error: scopeIsCurrent && !pending ? error : '', saving: scopeIsCurrent ? saving : false, pending: scopeIsCurrent ? pending : null, pendingCreate: scopeIsCurrent ? pendingCreate : null, commandRecovery:scopeIsCurrent&&commandRecovery?.workspaceId===visible?.id&&commandRecovery?.actorId===session.user?.id?commandRecovery:null, run, dismissError, uploadFile, downloadFile, readFile, prepareCreditDocument, issueCreditDocument, downloadCreditDocument, fileUrl, refresh, recover, switchWorkspace, createWorkspace }}><AssistantConversationProvider scope={session.sessionKey+':'+(visible?.id??'')}>{uiText(children)}</AssistantConversationProvider></Context.Provider>;
+  return <Context.Provider value={{ dismissRejection,agentTaskNotices,state: visible?.state ?? null, workspace: visible, workspaces: scopeIsCurrent ? workspaces : [], archivedWorkspaces:scopeIsCurrent?archivedWorkspaces:[],refreshArchived,archiveWorkspace:()=>changeArchive('archive'),restoreWorkspace:id=>changeArchive('restore',id),changeMember,mail,closeMailReview,loading: scopeIsCurrent ? loading : session.status !== 'anonymous', error: scopeIsCurrent && !pending ? error : '', saving: scopeIsCurrent ? saving : false, pending: scopeIsCurrent ? pending : null, pendingCreate: scopeIsCurrent ? pendingCreate : null, commandRecovery:scopeIsCurrent&&commandRecovery?.workspaceId===visible?.id&&commandRecovery?.actorId===session.user?.id?commandRecovery:null, run, dismissError, uploadFile, downloadFile, downloadTaskAttachment, readFile, prepareCreditDocument, issueCreditDocument, downloadCreditDocument, fileUrl, refresh, recover, switchWorkspace, createWorkspace }}><AssistantConversationProvider scope={session.sessionKey+':'+(visible?.id??'')}>{uiText(children)}</AssistantConversationProvider></Context.Provider>;
 }
 export function useMistWorkspace(): MistWorkspaceContext {
   const context = React.useContext(Context); if (!context) throw new Error('useMistWorkspace must be used inside MistWorkspaceProvider'); return context;

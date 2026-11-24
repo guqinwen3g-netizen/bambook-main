@@ -8,9 +8,22 @@ const task=(over:any={})=>({id:'t1',instructions:'核对订单',state:'running',
 const index=[{text:'SO-1001',view:'orders/detail',id:'o1'}];
 const proposal=(over:any={})=>({id:'p1',state:'pending',command:{type:'email.move',payload:{}},summary:['归档邮件 PO 确认'],...over}) as any;
 const fns=()=>({onAnswer:vi.fn(),onCancel:vi.fn(),onRetry:vi.fn(),onCopy:vi.fn(),onDraft:vi.fn(),onAutomate:vi.fn(),onOpenRecord:vi.fn(),onProposal:vi.fn()});
-const paint=(tasks:any[],f:ReturnType<typeof fns>&{composerStopTaskId?:string}=fns(),proposals:any[]=[])=>act(async()=>root.render(<MistRoot><XiaozhuThread tasks={tasks} index={index} proposals={proposals} {...f}/></MistRoot>));
+const paint=(tasks:any[],f:ReturnType<typeof fns>&{composerStopTaskId?:string;onDownloadAttachment?: (task:any,file:any)=>Promise<void>}=fns(),proposals:any[]=[])=>act(async()=>root.render(<MistRoot><XiaozhuThread tasks={tasks} index={index} proposals={proposals} {...f}/></MistRoot>));
 beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
+it('downloads the original from its own task and disables repeat requests while pending',async()=>{
+ const file={id:'attachment',name:'delivery.pdf',size:43,mimeType:'application/pdf'};
+ let finish!:()=>void;
+ const onDownloadAttachment=vi.fn(()=>new Promise<void>(resolve=>{finish=resolve;}));
+ const original=task({state:'succeeded',attachments:[file]});
+ await paint([original],{...fns(),onDownloadAttachment});
+ await act(async()=>getByRole(host,'button',{name:'下载原附件 delivery.pdf'}).click());
+ const waiting=getByRole(host,'button',{name:'正在下载附件 delivery.pdf'}) as HTMLButtonElement;
+ expect(waiting.disabled).toBe(true);
+ expect(onDownloadAttachment).toHaveBeenCalledExactlyOnceWith(original,file);
+ await act(async()=>finish());
+ expect(getByRole(host,'button',{name:'下载原附件 delivery.pdf'})).toBeTruthy();
+});
 it('shows the latest step while it works, leaving stop to the composer; a waiting request can be stopped in place',async()=>{const f=fns();await paint([task({trail:[{at:'',kind:'read',label:'查询订单 · 8 条'}]})],{...f,composerStopTaskId:'t1'});expect(host.textContent).toContain('核对订单');expect(host.textContent).toContain('查询订单 · 8 条');expect(queryByRole(host,'button',{name:/^停止/})).toBeNull();
   await paint([task({state:'waiting_time'})],f);await act(async()=>getByRole(host,'button',{name:/^停止/}).click());expect(f.onCancel).toHaveBeenCalledOnce();});
 it('renders a finished answer as formatted content with openable record numbers',async()=>{const f=fns();await paint([task({state:'succeeded',result:'## 结论\n\n- 先跟进 SO-1001\n\n| 订单 | 交期 |\n| --- | --- |\n| SO-1001 | 11-08 |'})],f);expect(host.querySelector('h2')?.textContent).toBe('结论');expect(host.querySelector('table')).toBeTruthy();const chips=[...host.querySelectorAll('button.mist-xz-ref')];expect(chips.length).toBe(2);await act(async()=>(chips[0] as HTMLButtonElement).click());expect(f.onOpenRecord).toHaveBeenCalledWith('orders/detail','o1');});
