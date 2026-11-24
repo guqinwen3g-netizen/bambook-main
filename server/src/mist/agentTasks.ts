@@ -288,7 +288,8 @@ export async function acknowledgePlatformStep(db:any,actor:AgentActor,lease:Agen
   await save(db,row,c,n);
 }
 /** Release only this completed local runner; human stop/pause or a revoked grant always wins. */
-export async function releasePlatformTask(db:any,actor:AgentActor,lease:AgentTaskLease,issue:'model_unavailable'|'model_response_invalid'|'daily_limit'|undefined,now:number){
+export type PlatformTaskReleaseIssue = 'model_unavailable' | 'model_timeout' | 'model_response_invalid' | 'daily_limit';
+export async function releasePlatformTask(db:any,actor:AgentActor,lease:AgentTaskLease,issue:PlatformTaskReleaseIssue|undefined,now:number){
   await lockTaskRecord(db,lease.workspaceId,lease.taskId);const{row,value:c}=await assertTaskLease(db,actor,lease,now);
   if(c.executor!=='platform'||actor.agentExecutor!=='platform'||!c.platform)fail('FORBIDDEN','请使用平台任务执行器',403);
   if(issue==='daily_limit'){
@@ -296,8 +297,13 @@ export async function releasePlatformTask(db:any,actor:AgentActor,lease:AgentTas
     const requestId=randomUUID(),n={...next(c,now,'model_paused',requestId,['daily_limit']),state:'paused' as const,controlVersion:c.controlVersion+1,runtimeUsedMs:usedRuntime(c,now),lease:undefined,checkpoint:'今日小竹用量已达上限，任务已暂停；额度恢复后可在任务到期前继续。',platform:{...c.platform,nextRunAt:now+1000,retryAt:undefined,checkpointBeforeIssue:c.platform.checkpointBeforeIssue??c.checkpoint}};
     await save(db,row,c,n);await event(db,n,actor,'model_paused',requestId,now);return;
   }
-  const failures=issue?(c.platform.failures??0)+1:c.platform.failures??0,retryAt=now+(issue?Math.min(300_000,10_000*2**Math.min(failures,5)):1000),paused=!!issue&&failures>=3;
-  const requestId=randomUUID(),action=issue?(paused?'model_paused':'model_retry'):'recovering',n={...next(c,now,action,requestId,[issue??'interrupted']),state:paused?'paused' as const:'queued' as const,controlVersion:c.controlVersion+(paused?1:0),runtimeUsedMs:usedRuntime(c,now),lease:undefined,platform:{...c.platform,nextRunAt:retryAt,retryAt:issue&&!paused?retryAt:undefined,issue,failures}};
+  const failures = issue ? (c.platform.failures ?? 0) + 1 : c.platform.failures ?? 0;
+  // The first full deadline already spaced out requests. Fast errors and repeated failures retain the existing backoff.
+  const retryDelay = issue === 'model_timeout' && failures === 1 ? 5000
+    : issue ? Math.min(300_000, 10_000 * 2 ** Math.min(failures, 5)) : 1000;
+  const retryAt = now + retryDelay, paused = !!issue && failures >= 3;
+  const visibleIssue = issue === 'model_timeout' ? 'model_unavailable' : issue;
+  const requestId=randomUUID(),action=issue?(paused?'model_paused':'model_retry'):'recovering',n={...next(c,now,action,requestId,[issue??'interrupted']),state:paused?'paused' as const:'queued' as const,controlVersion:c.controlVersion+(paused?1:0),runtimeUsedMs:usedRuntime(c,now),lease:undefined,platform:{...c.platform,nextRunAt:retryAt,retryAt:issue&&!paused?retryAt:undefined,issue:visibleIssue,failures}};
   if(issue)n.checkpoint=(issue==='model_response_invalid'?'模型响应无效':'模型暂不可用')+(paused?'，任务已暂停；恢复后可从原步骤继续。':'，稍后核对原步骤重试。');
   if(issue)n.platform.checkpointBeforeIssue=c.platform.checkpointBeforeIssue??c.checkpoint;
   await save(db,row,c,n);await event(db,n,actor,action,requestId,now);

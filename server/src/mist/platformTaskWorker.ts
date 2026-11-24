@@ -4,7 +4,7 @@ import{createLlmCompleter,type LlmCompletionInput}from'../ai/llmProviders';
 import{getMistAssistantStatus}from'./assistant';
 import{handleMcpMessage,MCP_SOURCE_RULES,taskMcpTools,type McpRepository}from'./agentMcp';
 import type{AgentActor}from'./agentDelegation';
-import type{MakeTaskCredential,PlatformTaskJob}from'./agentTasks';
+import type{MakeTaskCredential,PlatformTaskJob,PlatformTaskReleaseIssue}from'./agentTasks';
 import type{MistRepository,PlatformTaskImageCache}from'./repository';
 import{MistApiError}from'./errors';
 import{responseLanguagePrompt,responseUserMessage}from'./responseLanguage';
@@ -126,12 +126,12 @@ export class MistPlatformTaskWorker{
   }
   private async model(input:Omit<LlmCompletionInput,'signal'>,signal:AbortSignal){
     const child=new AbortController(),stop=()=>child.abort();signal.addEventListener('abort',stop,{once:true});if(signal.aborted)stop();
-    const timer=setTimeout(()=>child.abort(),this.options.modelTimeoutMs??120_000);timer.unref?.();
-    let rejectAbort!:(e:Error)=>void;const cancelled=new Promise<never>((_,reject)=>{rejectAbort=reject;});const onAbort=()=>rejectAbort(Error('MODEL_ABORTED'));child.signal.addEventListener('abort',onAbort,{once:true});if(child.signal.aborted)onAbort();
+    const timer=setTimeout(()=>child.abort(Error('MODEL_TIMEOUT')),this.options.modelTimeoutMs??120_000);timer.unref?.();
+    let rejectAbort!:(e:Error)=>void;const cancelled=new Promise<never>((_,reject)=>{rejectAbort=reject;});const onAbort=()=>rejectAbort(child.signal.reason);child.signal.addEventListener('abort',onAbort,{once:true});if(child.signal.aborted)onAbort();
     try{return await Promise.race([this.complete({...input,signal:child.signal}),cancelled]);}finally{clearTimeout(timer);signal.removeEventListener('abort',stop);child.signal.removeEventListener('abort',onAbort);}
   }
   private async perform(job:PlatformTaskJob,abort:AbortController){
-    let actor:AgentActor|null=null,phase:'model'|'tool'|'store'='store',issue:'model_unavailable'|'model_response_invalid'|'daily_limit'|undefined,pulse:ReturnType<typeof setInterval>|undefined,pulsing=false;
+    let actor:AgentActor|null=null,phase:'model'|'tool'|'store'='store',issue:PlatformTaskReleaseIssue|undefined,pulse:ReturnType<typeof setInterval>|undefined,pulsing=false;
     try{
       actor=await this.repository.claimPlatformTask(job,this.id,this.options.makeCredential);if(!actor)return;
       const renderedImages: PlatformTaskImageCache = new Map();
@@ -175,7 +175,7 @@ export class MistPlatformTaskWorker{
       }
     }catch(error:any){
       if(!actor){await this.repository.deferPlatformTaskJob(job).catch(()=>this.options.onError?.('PLATFORM_TASK_DEFER_FAILED'));return;}
-      if(!abort.signal.aborted){issue=/^MODEL_PLAN_/.test(String(error?.message))?'model_response_invalid':phase==='model'||error?.message==='MODEL_UNAVAILABLE'?'model_unavailable':undefined;this.options.onError?.(issue?'PLATFORM_TASK_MODEL_RETRY':'PLATFORM_TASK_RECOVERY_REQUIRED');}
+      if(!abort.signal.aborted){issue=/^MODEL_PLAN_/.test(String(error?.message))?'model_response_invalid':phase==='model'&&error?.message==='MODEL_TIMEOUT'?'model_timeout':phase==='model'||error?.message==='MODEL_UNAVAILABLE'?'model_unavailable':undefined;this.options.onError?.(issue?'PLATFORM_TASK_MODEL_RETRY':'PLATFORM_TASK_RECOVERY_REQUIRED');}
     }finally{
       clearInterval(pulse);if(actor)await this.repository.releasePlatformTask(actor,issue).catch(()=>{});
     }

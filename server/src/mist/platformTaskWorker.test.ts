@@ -15,9 +15,9 @@ import{MistPrivateFiles}from'./files';
 let directory:string;const workers:MistPlatformTaskWorker[]=[];
 beforeEach(async()=>{directory=await mkdtemp(path.join(tmpdir(),'platform-agent-'));vi.stubEnv('MIST_LOCAL_WORKSPACE','1');vi.stubEnv('NODE_ENV','test');});
 afterEach(async()=>{await Promise.all(workers.splice(0).map(w=>w.stop()));vi.restoreAllMocks();vi.unstubAllEnvs();await rm(directory,{recursive:true,force:true});});
-async function fixture(complete:(input:LlmCompletionInput)=>Promise<string>,options:{ceiling?:{value:string[]|null};mode?:'read'|'operate';concurrency?:number}={}){
+async function fixture(complete:(input:LlmCompletionInput)=>Promise<string>,options:{ceiling?:{value:string[]|null};mode?:'read'|'operate';concurrency?:number;modelTimeoutMs?:number}={}){
  const local=createMistLocalRuntime({directory});if(options.ceiling){const authorize=local.authorize;local.authorize=(db,prior,permission)=>authorize(db,options.ceiling!.value===null?prior:{...prior,permissionCeiling:options.ceiling!.value},permission);}
- const app=createMistServer(undefined,{local,agentTasks:{complete,tickMs:3_600_000,pulseMs:20,concurrency:options.concurrency}}),human=request.agent(app);await human.get('/api/mist/session').expect(200);
+ const app=createMistServer(undefined,{local,agentTasks:{complete,tickMs:3_600_000,pulseMs:20,concurrency:options.concurrency,modelTimeoutMs:options.modelTimeoutMs}}),human=request.agent(app);await human.get('/api/mist/session').expect(200);
  const workspace=(await human.get('/api/mist/workspaces/default').expect(200)).body.workspace,base='/api/mist/workspaces/'+workspace.id,id=randomUUID();
  await human.post(base+'/agent-identities').send({id,name:'业务助理',ownerId:'local-operator',mode:options.mode??'operate'}).expect(201);
  const key=(await human.post(base+'/agent-identities/'+id+'/issue').send({requestId:randomUUID(),version:1}).expect(200)).body.token;
@@ -350,6 +350,27 @@ it('retries a model outage without clearing the task, then uses the saved reques
  const f=await fixture(complete);mail=f.workspace.state.email.messages[0].id;f.worker.start(3_600_000);const task=await f.create('platform','en-US');await f.drain();let state=await f.current(task.id);expect(state.state).toBe('queued');expect(state.executionIssue.code).toBe('model_unavailable');await f.drain();expect(complete).toHaveBeenCalledTimes(1);
  vi.spyOn(Date,'now').mockReturnValue(Date.now()+30_000);await f.drain();state=await f.current(task.id);expect(state.state).toBe('succeeded');expect(state.executionIssue).toBeUndefined();expect(state.checkpoint).not.toContain('模型暂不可用');expect(complete.mock.calls[1][0].systemPrompt).toContain('Default response language: English');
  for(const [input] of complete.mock.calls){expect(input.messages[0].content).toMatch(/^Interface language: English \(en-US\)/);expect(input.messages[0].content).toContain('核对当前来信');}
+});
+it('retries the first full model timeout promptly and resumes the same task from its acknowledged read', async () => {
+ const complete = vi.fn<(input:LlmCompletionInput)=>Promise<string>>();
+ const f=await fixture(complete,{modelTimeoutMs:45});
+ const mail=f.workspace.state.email.messages[0].id;
+ complete.mockResolvedValueOnce(tool('bambook_get',{type:'email',id:mail}))
+  .mockImplementationOnce(()=>new Promise<string>(()=>{}))
+  .mockResolvedValueOnce(tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对原来信。'}));
+ f.worker.start(3_600_000);
+ const task=await f.create('platform');
+ let clock=Date.now();vi.spyOn(Date,'now').mockImplementation(()=>clock);
+ await f.drain();
+ const queued=await f.current(task.id);
+ expect(queued).toMatchObject({state:'queued',executionIssue:{code:'model_unavailable'}});
+ expect(Date.parse(queued.executionIssue.retryAt)-clock).toBe(5000);
+ expect(queued.trail.filter((step:any)=>step.kind==='read'&&step.completed)).toHaveLength(1);
+ clock+=4999;await f.drain();expect(complete).toHaveBeenCalledTimes(2);
+ clock+=1;await f.drain();
+ expect(await f.current(task.id)).toMatchObject({id:task.id,state:'succeeded',result:'已核对原来信。'});
+ expect(complete).toHaveBeenCalledTimes(3);
+ expect(complete.mock.calls[2][0].messages[0].content).toContain('bambook_get');
 });
 it('pauses repeated invalid model output and allows explicit owner recovery on the same task',async()=>{
  let valid=false,mail='',read=false;const complete=vi.fn(async()=>!valid?'not a tool decision':!read?(read=true,tool('bambook_get',{type:'email',id:mail})):tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对原邮件。'}));
