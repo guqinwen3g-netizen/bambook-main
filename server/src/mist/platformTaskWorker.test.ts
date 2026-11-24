@@ -428,10 +428,23 @@ it('turns a business command the model executes into an owner proposal, waits fo
  ][index++]);
  const f=await fixture(complete);customer=f.workspace.state.customers[0].id;const original=f.workspace.state.customers[0].terms;f.worker.start(3_600_000);const task=await f.create('platform');
  await f.drain();let state=await f.current(task.id);expect(state.state).toBe('waiting_human');expect(state.waitingProposalIds).toHaveLength(1);expect(complete).toHaveBeenCalledTimes(2);
- let ws=(await f.human.get(f.base).expect(200)).body.workspace.state;expect(ws.customers.find((c:any)=>c.id===customer).terms).toBe(original);
+ const ws=(await f.human.get(f.base).expect(200)).body.workspace.state;expect(ws.customers.find((c:any)=>c.id===customer).terms).toBe(original);
  expect(ws.agentProposals.find((p:any)=>p.id===state.waitingProposalIds[0])).toMatchObject({state:'pending',taskId:task.id,command:{type:'customer.update'}});
- await f.command('agent.proposal.confirm',{id:state.waitingProposalIds[0]});await f.drain();state=await f.current(task.id);expect(state.state).toBe('succeeded');expect(complete).toHaveBeenCalledTimes(4);
- ws=(await f.human.get(f.base).expect(200)).body.workspace.state;expect(ws.customers.find((c:any)=>c.id===customer).terms).toBe('T/T 30% 预付');
+ const proposalId=state.waitingProposalIds[0];
+ const current=(await f.human.get(f.base).expect(200)).body.workspace;
+ const confirmation={requestId:randomUUID(),expectedRevision:current.revision,command:{type:'agent.proposal.confirm',payload:{id:proposalId}}};
+ const send=(body:typeof confirmation)=>f.human.post(f.base+'/commands').send(body);
+ const confirmed=await send(confirmation).expect(200);
+ await f.drain();state=await f.current(task.id);expect(state.state).toBe('succeeded');expect(complete).toHaveBeenCalledTimes(4);
+ const written=(await f.human.get(f.base).expect(200)).body.workspace;
+ expect(written.state.customers.find((c:any)=>c.id===customer).terms).toBe('T/T 30% 预付');
+ const replay=await send(confirmation).expect(200);
+ expect(replay.body).toMatchObject({replayed:true,receipt:confirmed.body.receipt,workspace:{revision:written.revision}});
+ await send({...confirmation,expectedRevision:written.revision}).expect(409);
+ await send({...confirmation,requestId:randomUUID(),expectedRevision:written.revision}).expect(404);
+ const final=(await f.human.get(f.base).expect(200)).body.workspace;
+ expect(final.revision).toBe(written.revision);
+ expect(final.state.customers).toEqual(written.state.customers);
 });
 it.each([false,true])('keeps a valid development draft proposal visible across reads and rejects stale source (changed: %s)',async changed=>{
  let calls=0,draft='';const values={name:'大衣',customer:'Cedar & Crown',style:'',season:'',category:'',kind:'new',fabric:'',color:'',target:'',sizeBase:'',goal:'',factories:[],due:'',collaborators:[],sampleQuantity:1};
