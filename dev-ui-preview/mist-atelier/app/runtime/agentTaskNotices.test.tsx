@@ -6,9 +6,23 @@ import type {AgentTaskNotice} from '../../../../server/src/shared/mistAgentTasks
 const sounds=vi.hoisted(()=>({play:vi.fn(),mark:vi.fn((_scope:string,_ids:string[])=>true)}));
 vi.mock('../../../../services/uiSoundService',()=>({canPlayNotificationSound:()=>true,playNotificationSound:sounds.play}));
 vi.mock('./notificationSound',()=>({markNoticeSounds:sounds.mark}));
-import {agentTaskNoticeScope,mistNoticeTarget,readAllMistNotices,readMistNotice,useAgentTaskNotices,type AgentTaskNotices} from './agentTaskNotices';
+import {agentTaskNoticeScope,mistNoticeTarget,openMistNotice,readAllMistNotices,readMistNotice,useAgentTaskNotices,type AgentTaskNotices} from './agentTaskNotices';
+import type { MistWorkspaceContext } from './workspace';
 let host:HTMLDivElement,root:Root,current:AgentTaskNotices;
 const notice=(id='one'):AgentTaskNotice=>({id:'agent-task:'+id+':key',taskId:id,key:'a'.repeat(64),title:'Agent待补充资料',detail:'核对交期',at:'2026-11-01T00:00:00Z',readAt:null,category:'general',target:{view:'assistant',id,section:'tasks'}});
+it('opens the original task before waiting for the optional read mark',async()=>{
+ const item=notice();
+ let fail!:(reason:Error)=>void;
+ const read=vi.fn(()=>new Promise<void>((_,reject)=>{fail=reject;}));
+ const workspace={agentTaskNotices:{items:[item],read}} as unknown as MistWorkspaceContext;
+ const open=vi.fn();
+ const action=openMistNotice(workspace,item,open);
+ expect(open).toHaveBeenCalledExactlyOnceWith({view:'assistant',id:'one',section:'task-origin'});
+ expect(read).toHaveBeenCalledExactlyOnceWith([item]);
+ fail(new Error('网络中断'));
+ await expect(action).rejects.toThrow('提醒未标为已读');
+ expect(open).toHaveBeenCalledTimes(1);
+});
 it('routes only personal task reminders through the original task lookup',()=>{
  const item=notice();
  expect(mistNoticeTarget(item)).toEqual({view:'assistant',id:'one',section:'task-origin'});

@@ -613,6 +613,7 @@ export const reviewedEnglish: Record<string, string> = {
   '已核对原请求':'Original request verified',
   '重试原操作':'Retry original action',
   '正在查找原对话':'Finding the original conversation',
+  '提醒未标为已读':'The reminder was not marked read',
   '打开任务详情':'Open task details',
   '停止结果未确认，可重试':'Stop not confirmed. Try again.',
   '回答未确认，可重试':'Answer not confirmed. Try again.',

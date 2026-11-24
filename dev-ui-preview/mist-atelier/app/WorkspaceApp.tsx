@@ -42,7 +42,7 @@ import { platformBusinessDate } from '../../../server/src/shared/mistPlatform';
 import { visibleMistNotifications, mistDailyDigest } from './runtime/notificationPreferences';
 import { NotificationCenter, NotificationToast } from './runtime/NotificationCenter';
 import { canPlayNotificationSound, playNotificationSound } from '../../../services/uiSoundService';
-import {mistNoticeTarget,readAllMistNotices,readMistNotice} from './runtime/agentTaskNotices';
+import {openMistNotice,readAllMistNotices} from './runtime/agentTaskNotices';
 import { DEVELOPMENT_LIST_TABS, developmentCreateTarget, developmentListTab, developmentListTarget, type DevelopmentListTab } from './developmentEntry';
 import { PublicEntry, publicEntryMode } from './PublicEntry';
 const SEARCH_ICONS: Record<string, typeof Layers> = { 开发案: Layers, 订单: ClipboardList };
@@ -396,7 +396,7 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
   const shellNoticeKey = shellNoticeList.map(item => (item as React.ReactElement).key).join('|') + '|' + (workspace.error || '') + '|' + pageFailures.map(item => item.detail).join('|');
   const noticesHidden = !!shellNoticeList.length && hiddenNoticeKey === shellNoticeKey;
   const toastNotice = toastItems.length ? <NotificationToast key="toast" items={toastItems} onDismiss={() => setToastIds([])}
-    onOpen={n => { setToastIds([]); void readMistNotice(workspace, n).then(() => { const target=mistNoticeTarget(n);if(target)go(target.view,target.id,target); }).catch(report); }}
+    onOpen={n => { setToastIds([]); void openMistNotice(workspace,n,target=>go(target.view,target.id,target)).catch(report); }}
     onOpenAll={() => { setToastIds([]); setNotifications(true); }} /> : null;
   const shellNotices = (shellNoticeList.length && !noticesHidden) || toastNotice ? [...(noticesHidden ? [] : shellNoticeList), ...(toastNotice ? [toastNotice] : [])] : undefined;
   return (
@@ -438,7 +438,7 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
       <NotificationCenter open={notifications} onClose={()=>setNotifications(false)} items={visibleNotifications} digest={dailyDigest} digestEnabled={!!state?.settings.notifications.digest}
         busy={workspace.saving||workspace.agentTaskNotices?.reading}
         error={workspace.agentTaskNotices?.error&&<Banner tone="bad" title={uiText(workspace.agentTaskNotices.error)} actions={<Button onClick={()=>void workspace.agentTaskNotices?.refresh()}>{uiText('重新加载')}</Button>}/>}
-        onOpenItem={n=>{void readMistNotice(workspace,n).then(()=>{setNotifications(false);const target=mistNoticeTarget(n);if(target)go(target.view,target.id,target);}).catch(report);}}
+        onOpenItem={n=>{void openMistNotice(workspace,n,target=>{setNotifications(false);go(target.view,target.id,target);}).catch(report);}}
         onOpenDigest={target=>{setNotifications(false);go(target.view,target.id,target);}}
         onReadAll={()=>void readAllMistNotices(workspace,visibleNotifications).catch(report)}
         onViewAll={()=>{setNotifications(false);go('notifications');}} />

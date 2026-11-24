@@ -21,7 +21,7 @@ import { useMistWorkspace, type MistCommandRecovery } from '../runtime/workspace
 import { useMyDisplayName } from '../runtime/me';
 import {mistActivityTitle} from '../runtime/activityLabels';
 import { visibleMistNotifications } from '../runtime/notificationPreferences';
-import {mistNoticeTarget,readMistNotice} from '../runtime/agentTaskNotices';
+import {openMistNotice,opensOriginalAgentTask} from '../runtime/agentTaskNotices';
 import { useOptionalMistReviews } from '../runtime/reviews';
 import { AgentProposalDialog } from './AgentProposalDialog';
 import { mistWorkQueue, mistMyTasks, isMyMistTask, mistEmailFollowUpTaskIds, accountHandoverPresentation, type MistWorkOptions } from '../runtime/workQueue';
@@ -123,7 +123,12 @@ export function HomePage() {
   const hour = (businessNow().getUTCHours() + 8) % 24, greeting = hour < 6 ? '夜深了' : hour < 12 ? '上午好' : hour < 14 ? '中午好' : hour < 18 ? '下午好' : '晚上好';
   const unread = visibleMistNotifications(state,view=>session.canAccessView(view as View),workspace.agentTaskNotices?.items).filter(notification=>!notification.readAt&&(!canAI||state?.settings.notifications.suggestions!==false||notification.id.startsWith('agent-task:')));
   const brief: Array<{ strong: React.ReactNode; text: React.ReactNode; onClick?: () => void }> = unread.slice(0, 3).map(notification => ({ strong: uiText(notification.title), text: notification.detail,
-    onClick: () => void run(async () => { const bound=scope;await readMistNotice(workspace,notification); if(alive.current&&activeScope.current===bound){const target=mistNoticeTarget(notification);go(target.view,target.id,target);} }) }));
+    onClick: () => {
+      const bound=scope;
+      const open=()=>openMistNotice(workspace,notification,target=>{if(alive.current&&activeScope.current===bound)go(target.view,target.id,target);});
+      if(opensOriginalAgentTask(notification))void open().catch(failure=>{if(alive.current&&activeScope.current===bound)toast(uiText(failure.message),'bad');});
+      else void run(open);
+    } }));
   if (!brief.length) (state?.events.slice().sort((a, b) => b.at.localeCompare(a.at)).slice(0, 3) ?? []).forEach(event => brief.push({ strong: event.actor, text: mistActivityTitle(state,event.text,{view:({order:'orders/detail',production:'production-board',procurement:'procurement',qc:'qc-workbench'} as Record<string,string>)[event.entityType]||'cockpit',id:event.entityId}), onClick: canAI ? () => openAI(`说明这条工作记录：${event.text}`) : undefined }));
   if (!brief.length) brief.push({ strong: '暂无工作动态', text: '', onClick: session.hasPermission('products:write') ? () => go('development/new') : undefined });
   const openTodo = (task?: MistTask) => {
