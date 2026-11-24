@@ -14,6 +14,44 @@ let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
 const view=(active=true, taskId?:string)=> <Nav.Provider value={{route:{view:'assistant',...(taskId?{section:'tasks',id:taskId}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
 const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
 
+it('uses the original attachment reference on a follow-up without uploading the file again', async () => {
+  const original = {
+    id: '00000000-0000-4000-8000-000000000041',
+    identityId: 'personal', executor: 'platform', conversationId: 'c_attachment',
+    instructions: '核对最初的附件', state: 'succeeded', result: '资料已读取',
+    questions: [], waitingProposalIds: [], canControl: false,
+    createdAt: '2026-11-24T00:00:00Z', updatedAt: '2026-11-24T00:01:00Z',
+    attachments: [{ id: '00000000-0000-4000-8000-000000000042', name: 'quantity.xlsx', size: 42 }],
+  };
+  mock.fetch.mockResolvedValue(response({ configured: true }));
+  mock.api.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.includes('/agent-identities')) return { items: [{ id: 'personal', kind: 'personal', state: 'active' }] };
+    if (url.endsWith('/agent-task-capabilities')) return { platformAvailable: true };
+    if (init?.method === 'POST') return { item: { ...original, id: 'follow-up', instructions: '核对第一行表头' } };
+    return { items: url.endsWith('/agent-tasks') ? [original] : [], nextCursor: null };
+  });
+  try {
+    await mount();
+    await click('核对最初的附件');
+    await click('引用附件 quantity.xlsx');
+    await click('引用附件 quantity.xlsx');
+    expect(Array.from(host.querySelectorAll('button')).filter(button =>
+      button.getAttribute('aria-label') === '移除附件 quantity.xlsx')).toHaveLength(1);
+    await question('核对第一行表头');
+    await click('发送');
+    const [path, init] = mock.api.mock.calls.find(([, opts]) => opts?.method === 'POST')!;
+    expect(path).toMatch(/\/personal-agent\/tasks$/);
+    expect(typeof init.body).toBe('string');
+    expect(JSON.parse(init.body)).toMatchObject({
+      conversationId: original.conversationId,
+      attachmentRefs: [{ taskId: original.id, fileId: original.attachments[0].id }],
+    });
+    expect(button('移除附件 quantity.xlsx')).toBeUndefined();
+  } finally {
+    localStorage.removeItem('mist.xiaozhu.conversation:session-a:workspace');
+  }
+});
+
 it('keeps an unsent question, references and files with their own conversation', async () => {
   const first = {
     id: 'first', identityId: 'personal', executor: 'platform', conversationId: 'c_first',

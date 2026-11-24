@@ -1,8 +1,9 @@
 /** 小竹对话：请求、办理过程、结果、追问和待确认事项都在同一条对话里，不用离开页面。 */
 import React from 'react';
-import { ChevronRight, Copy, Download, FileText, RotateCcw, Zap, ShieldCheck, Search, PenLine, HelpCircle, Clock, Check, Square } from 'lucide-react';
+import { ChevronRight, Copy, Download, FileText, RotateCcw, Zap, ShieldCheck, Search, PenLine, HelpCircle, Clock, Check, Square, Link2 } from 'lucide-react';
 import { AIBadge, AssistantEyes, Button, Icon, IconButton, Pill, type Tone } from '../../../../../components/mist';
 import type { AgentTaskTrailItem, AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
+import type { TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
 import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../../server/src/shared/mistAgentProposals';
 import { ui, uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { COWORK_ACTIVE, splitRequest } from '../../runtime/xiaozhuCowork';
@@ -94,7 +95,7 @@ function ProposalCard({ proposal, onOpen, onDecide }: { proposal: AgentProposal;
     <div className="mist-row">{quick ? <><Button size="sm" variant="ai" loading={busy} disabled={busy} onClick={() => void decide(true)}>{uiText('确认执行')}</Button><Button size="sm" variant="quiet" disabled={busy} onClick={() => void decide(false)}>{uiText('拒绝')}</Button><span className="mist-spacer" /><Button size="sm" variant="quiet" disabled={busy} onClick={() => onOpen(proposal.id)}>{uiText('查看并确认')}</Button></> : <Button size="sm" variant="ai" onClick={() => onOpen(proposal.id)}>{uiText('查看并确认')}</Button>}</div></div>;
 }
 
-export type ThreadActions = { onAnswer: (task: AgentTaskView, id: string, text: string) => void; onCancel: (task: AgentTaskView) => void; onRetry?: (text: string) => void; onCopy: (text: string) => void; onDraft: (text: string) => void; onAutomate: (text: string) => void; onOpenRecord: OpenRecord; onProposal: (id: string) => void; onDecide?: (id: string, confirm: boolean) => Promise<void>; onOpenFile?: (fileId: string) => void };
+export type ThreadActions = { onAnswer: (task: AgentTaskView, id: string, text: string) => void; onCancel: (task: AgentTaskView) => void; onRetry?: (text: string) => void; onCopy: (text: string) => void; onDraft: (text: string) => void; onAutomate: (text: string) => void; onOpenRecord: OpenRecord; onProposal: (id: string) => void; onDecide?: (id: string, confirm: boolean) => Promise<void>; onOpenFile?: (fileId: string) => void; onReuseAttachment?: (task: AgentTaskView, file: TaskAttachment) => void };
 
 /** 本轮确认后生成的文件：放在回答下方，点开即下载。 */
 function ProducedFiles({ proposals, onOpen }: { proposals: AgentProposal[]; onOpen: (fileId: string) => void }) {
@@ -124,7 +125,9 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
       {divider && <div className="mist-xz-day"><span>{dayLabel(t.createdAt)}</span></div>}
       <div className="mist-xz-user">{request}
         {!!t.attachments?.length && <div className="mist-xz-sources" aria-label={uiText('附件')}>
-          {t.attachments.map(file => <span className="mist-xz-source" key={file.id} data-attachment><span title={file.name}>{file.name}</span></span>)}
+          {t.attachments.map(file => <span className="mist-xz-source" key={file.id} data-attachment><span title={file.name}>{file.name}</span>
+            {actions.onReuseAttachment && t.conversationId && <IconButton size="sm" icon={Link2} label={uiText('引用附件')+' '+file.name} onClick={() => actions.onReuseAttachment?.(t,file)} />}
+          </span>)}
         </div>}
       </div>
       <XiaozhuTurnShell status={status}>

@@ -5,16 +5,18 @@ export type AssistantReply = {
   sources?: Array<{ id: string; label: string; view: string; entityId: string }>;
   revision?: number; truncated?: boolean;
 };
+export type AssistantAttachmentRef = { taskId: string; fileId: string; name: string; size: number };
 type ComposerDraft = {
   question: string;
   selected: Array<{ id: string; label: string }>;
   files: File[];
+  attachmentRefs: AssistantAttachmentRef[];
 };
 type Conversation = ComposerDraft & {
   messages: AssistantReply[];
   inactiveDrafts: Map<string, ComposerDraft>;
 };
-const emptyDraft = (): ComposerDraft => ({ question: '', selected: [], files: [] });
+const emptyDraft = (): ComposerDraft => ({ question: '', selected: [], files: [], attachmentRefs: [] });
 const empty = (): Conversation => ({ ...emptyDraft(), messages: [], inactiveDrafts: new Map() });
 /** fin50：对话按账号与公司（scope）存本标签页 sessionStorage，切页与刷新后保留；换账号或关标签即清空。 */
 const KEY = (scope: string) => 'mist.assistant.conversation:' + scope;
@@ -46,15 +48,16 @@ function useConversationState(scope: string) {
   const setSelected = React.useCallback<React.Dispatch<React.SetStateAction<Conversation['selected']>>>(value => update('selected', value), [update]);
   const setMessages = React.useCallback<React.Dispatch<React.SetStateAction<AssistantReply[]>>>(value => update('messages', value), [update]);
   const setFiles = React.useCallback<React.Dispatch<React.SetStateAction<File[]>>>(value => update('files', value), [update]);
+  const setAttachmentRefs = React.useCallback<React.Dispatch<React.SetStateAction<AssistantAttachmentRef[]>>>(value => update('attachmentRefs', value), [update]);
   const switchDraft = React.useCallback((from: string, to: string) => {
     if (from === to || live.current !== scope) return;
     setEntry(previous => {
       if (previous.scope !== scope || live.current !== scope) return previous;
-      const { question, selected, files, inactiveDrafts } = previous.value;
+      const { question, selected, files, attachmentRefs, inactiveDrafts } = previous.value;
       const drafts = new Map(inactiveDrafts);
       const incoming = drafts.get(to) ?? emptyDraft();
       drafts.delete(to);
-      if (question || selected.length || files.length) drafts.set(from, { question, selected, files });
+      if (question || selected.length || files.length || attachmentRefs.length) drafts.set(from, { question, selected, files, attachmentRefs });
       return { scope, value: { ...previous.value, ...incoming, inactiveDrafts: drafts } };
     });
   }, [scope]);
@@ -69,7 +72,7 @@ function useConversationState(scope: string) {
       return { scope, value: { ...previous.value, inactiveDrafts } };
     });
   }, [scope]);
-  return { scope, ...(entry.scope === scope ? entry.value : fresh), setQuestion, setSelected, setMessages, setFiles, switchDraft, clearDraft };
+  return { scope, ...(entry.scope === scope ? entry.value : fresh), setQuestion, setSelected, setMessages, setFiles, setAttachmentRefs, switchDraft, clearDraft };
 }
 
 const Context = React.createContext<ReturnType<typeof useConversationState> | null>(null);

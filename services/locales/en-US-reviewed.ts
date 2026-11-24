@@ -599,6 +599,7 @@ export const reviewedEnglish: Record<string, string> = {
   '小竹操作未完成':'Xiaozhu action incomplete',
   '进度暂未更新，正在重试':'Progress update delayed. Retrying…',
   '重新读取任务':'Reload tasks',
+  '引用附件':'Reuse attachment',
   '对话读取超时':'Loading conversations timed out',
   '正在读取对话':'Loading conversations',
   '任务服务暂不可用':'Task service unavailable',

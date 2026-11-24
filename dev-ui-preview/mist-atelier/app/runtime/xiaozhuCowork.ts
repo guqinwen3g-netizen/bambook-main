@@ -221,12 +221,13 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     };
   }, [foregroundId, backgroundIds, progressId, base, available, scope]);
   const post = async (path: string, body: object) => mistApiRequest(base + path, { method: 'POST', body: JSON.stringify(body) }) as Promise<{ item?: AgentTaskView }>;
-  const send = async (text: string, history: AgentTaskView[] = [], conversationId?: string, intentRefs:AgentTaskIntentRef[]=[], files:File[]=[]): Promise<AgentTaskView | null> => {
+  const send = async (text: string, history: AgentTaskView[] = [], conversationId?: string, intentRefs:AgentTaskIntentRef[]=[], files:File[]=[], attachmentRefs:ReadonlyArray<{taskId:string;fileId:string}>=[]): Promise<AgentTaskView | null> => {
     const message = text.trim(); if (!message || busy || !base||loading||error||!available) return null;
     const bound = scope; setBusy(true); setError('');
     try {
       const refs=normalizeAgentTaskIntentRefs(intentRefs);
-      const input = { name: message.slice(0, 60), instructions: composeInstructions(history, message), locale: interfaceLocale(), ...(conversationId ? { conversationId } : {}),...(refs.length?{intentRefs:refs}:{}) };
+      const input = { name: message.slice(0, 60), instructions: composeInstructions(history, message), locale: interfaceLocale(), ...(conversationId ? { conversationId } : {}),
+        ...(refs.length?{intentRefs:refs}:{}), ...(attachmentRefs.length?{attachmentRefs}:{}) };
       const fileIdentity=await Promise.all(files.map(async file=>{
         const digest=await crypto.subtle.digest('SHA-256',await file.arrayBuffer());
         return [file.name,file.type,file.size,Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('')];
