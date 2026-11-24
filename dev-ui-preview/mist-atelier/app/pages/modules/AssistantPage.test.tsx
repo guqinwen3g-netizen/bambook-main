@@ -423,7 +423,7 @@ it('shows a task-read failure and preserves the unsent question instead of silen
  mock.fetch.mockResolvedValue(response({configured:true,models:['test-model']}));mock.api.mockRejectedValue(new Error('任务列表暂时不可读取'));await mount();await question('保留未发送的问题');expect(host.textContent).toContain('任务列表暂时不可读取');expect(button('重新读取任务')).toBeTruthy();expect(button('发送')!.disabled).toBe(true);await click('发送');expect(mock.fetch.mock.calls.filter(([url])=>!String(url).endsWith('/status'))).toHaveLength(0);expect((host.querySelector('textarea')as HTMLTextAreaElement).value).toBe('保留未发送的问题');
 });
 
-it('shows a retry after a stalled opening request and restores the task conversation', async () => {
+it('opens task history while capabilities are pending and retries sending availability independently', async () => {
   vi.useFakeTimers();
   try {
     let capabilityReads = 0;
@@ -443,14 +443,19 @@ it('shows a retry after a stalled opening request and restores the task conversa
       return { items: [] };
     });
     await mount();
-    expect(host.querySelector('[aria-label="正在读取对话"]')).toBeTruthy();
-    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
     expect(host.querySelector('[aria-label="正在读取对话"]')).toBeNull();
-    expect(host.textContent).toContain('对话读取超时');
-    await click('重新读取任务');
     await click('核对原订单记录');
     expect(host.textContent).toContain('原订单结果已恢复');
-    expect(host.textContent).not.toContain('对话读取超时');
+    await question('不能提前发送');
+    expect(button('发送')!.disabled).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(host.textContent).toContain('任务服务检查超时');
+    expect(host.textContent).toContain('原订单结果已恢复');
+    expect(button('发送')!.disabled).toBe(true);
+    await click('重新读取任务');
+    expect(button('发送')!.disabled).toBe(false);
+    expect(host.textContent).not.toContain('任务服务检查超时');
+    expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('不能提前发送');
     expect(mock.api.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   } finally {
     localStorage.removeItem('mist.xiaozhu.conversation:session-a:workspace');
