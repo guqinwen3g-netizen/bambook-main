@@ -126,9 +126,9 @@ it('works with Xiaozhu as a coworker: a request becomes a platform task whose pr
   expect(polls).toBeGreaterThan(0);expect(host.textContent).toContain('本周有 2 张订单交期临近');
   expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('');
 });
-function mockTaskStatus(read: (task: Record<string, unknown>) => Promise<unknown>, available=true, terminal=false) {
+function mockTaskStatus(read: (task: Record<string, unknown>) => Promise<unknown>, available=true, terminal=false, activeState = 'paused') {
   const task={id:'existing-task',identityId:'personal',executor:'platform',name:'修改付款条件',instructions:'修改付款条件',
-    conversationId:'current-task-conversation',state:terminal?'budget_exhausted':'paused',result:'',checkpoint:'',questions:[],waitingProposalIds:[],
+    conversationId:'current-task-conversation',state:terminal?'budget_exhausted':activeState,result:'',checkpoint:'',questions:[],waitingProposalIds:[],
     version:1,canControl:true,createdAt:'2026-11-24T00:00:00Z',updatedAt:'2026-11-24T00:00:00Z'};
   mock.fetch.mockResolvedValue(response({configured:false,models:[]}));
   mock.api.mockImplementation(async(url:string,opts:any)=>{
@@ -169,6 +169,58 @@ it('keeps the status question as a draft when the task cannot be read',async()=>
   expect(mock.api.mock.calls.filter(([,opts])=>opts?.method==='POST')).toHaveLength(0);
   expect(host.textContent).toContain('任务暂时无法核对');
   expect(field.value).toBe('完成了没有？');
+});
+
+it('leaves a timed out status question ready to retry without creating a task', async () => {
+  vi.useFakeTimers();
+  let available = false;
+  try {
+    mockTaskStatus(async task => available ? { item: task } : new Promise(() => {}), false, true);
+    await mount();
+    await click('修改付款条件');
+    const field = await question('完成了没有？');
+    await click('发送');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(host.textContent).toContain('任务暂时无法核对');
+    expect(field.value).toBe('完成了没有？');
+    expect(button('发送')?.disabled).toBe(false);
+
+    available = true;
+    await click('发送');
+    expect(field.value).toBe('');
+    expect(host.textContent).toContain('当前任务 · 达到限额');
+    expect(mock.api.mock.calls.filter(([, opts]) => opts?.method === 'POST')).toHaveLength(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('announces a delayed progress read without blocking the composer and shows the recovered result', async () => {
+  vi.useFakeTimers();
+  let recovered = false;
+  try {
+    mockTaskStatus(async task => recovered
+      ? { item: { ...task, state: 'succeeded', result: '订单核对完成', updatedAt: '2026-11-24T00:00:06Z' } }
+      : new Promise(() => {}), true, false, 'running');
+    await mount();
+    await click('修改付款条件');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect([...host.querySelectorAll('[role="status"]')].some(status => status.textContent === '进度暂未更新，正在重试')).toBe(true);
+    expect(host.textContent).not.toContain('小竹操作未完成');
+    const field = await question('另一件独立的业务');
+    expect(button('发送')?.disabled).toBe(false);
+
+    recovered = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(host.textContent).toContain('订单核对完成');
+    expect(host.textContent).not.toContain('进度暂未更新，正在重试');
+    expect(field.value).toBe('另一件独立的业务');
+    expect(mock.api.mock.calls.filter(([, opts]) => opts?.method === 'POST')).toHaveLength(0);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it('sends a business status question with a source as a new task',async()=>{

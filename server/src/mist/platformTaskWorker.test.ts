@@ -44,7 +44,19 @@ it('pre-reads authorized intent references before first planning while supplying
  expect(Date.parse(seen[0].clock.utc)).toBeGreaterThanOrEqual(started);
  expect(Date.parse(created.expiresAt)).toBeGreaterThan(started+23*60*60_000);
  const reads=seen[0].history.recent.filter((step:any)=>step.name==='bambook_get');expect(reads.map((step:any)=>[step.arguments.type,step.arguments.id])).toEqual([['order',order.id],['invoice',invoice.id]]);expect(reads.every((step:any)=>step.result.object?.id===step.arguments.id)).toBe(true);
- const after=(await taskRecord((f.repository as any).prisma,f.workspace.id,created.id)).value;expect(after.sources.some(s=>s.path==='orders'&&s.id===order.id)).toBe(true);expect(after.sources.some(s=>s.path==='invoices'&&s.id===invoice.id)).toBe(true);expect((await f.current(created.id)).state).toBe('succeeded');
+ const after=(await taskRecord((f.repository as any).prisma,f.workspace.id,created.id)).value;expect(after.sources.some(s=>s.path==='orders'&&s.id===order.id)).toBe(true);expect(after.sources.some(s=>s.path==='invoices'&&s.id===invoice.id)).toBe(true);
+ await f.worker.stop();
+ const project=vi.spyOn(f.repository as any,'accessView');
+ expect(await f.current(created.id)).toMatchObject({state:'succeeded',result:'已核对所选资料。',intentRefs});
+ expect(project).toHaveBeenCalledTimes(1);
+ await f.local.database.$transaction(async db=>{
+  const row=await db.mistWorkspace.findUnique({where:{id:f.workspace.id}});
+  if(!row)throw new Error('隔离验收工作区不存在');
+  await db.mistWorkspace.update({where:{id:row.id},data:{state:{...row.state,orders:row.state.orders.filter((item:any)=>item.id!==order.id)}}});
+ });
+ const withdrawn=await f.current(created.id);
+ expect(withdrawn).toMatchObject({state:'succeeded',instructions:'',result:''});
+ expect(withdrawn.trail).toBeUndefined();expect(withdrawn.intentRefs).toBeUndefined();
 });
 it('does not ask a model to guess when the deterministic intent read failed, and does not manufacture a read proof',async()=>{
  const complete=vi.fn(async()=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'不应调用'})),f=await fixture(complete),order=f.workspace.state.orders[0];

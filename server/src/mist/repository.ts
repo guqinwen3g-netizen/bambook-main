@@ -396,7 +396,12 @@ export class MistRepository {
   private async taskValidationActor(db:any,prior:TokenPayload,actor:TokenPayload){
     if(isAgentActor(prior)&&prior.agentTaskLease&&(prior as any).mailStateWorker===true){const c=(await taskRecord(db,prior.agentTaskLease.workspaceId,prior.agentTaskLease.taskId)).value;return this.authorize(db,{...prior,permissionCeiling:[...c.ceiling]});}return actor;
   }
-  private taskSourcesAllowed(row:MistWorkspaceRow,actor:TokenPayload,c:TaskRecord,visible?:MistState){return c.ownerId===actor.userId&&c.ceiling.every(scope=>hasScope(actor,scope as any))&&taskSourcesVisible(c.sources,c.scopeHash,visible??this.accessView(row, actor, scopeOf(row)).state,row.state,scopeOf(row))&&taskIntentRefsVisible(c.intentRefs??[],actor,visible??this.accessView(row, actor, scopeOf(row)).state);}
+  private taskSourcesAllowed(row:MistWorkspaceRow,actor:TokenPayload,c:TaskRecord,visible?:MistState){
+    if(c.ownerId!==actor.userId||!c.ceiling.every(scope=>hasScope(actor,scope as any)))return false;
+    const scope=scopeOf(row),projected=visible??this.accessView(row,actor,scope).state;
+    return taskSourcesVisible(c.sources,c.scopeHash,projected,row.state,scope)
+      &&taskIntentRefsVisible(c.intentRefs??[],actor,projected);
+  }
   private assertTaskSources(row:MistWorkspaceRow,actor:TokenPayload,c:TaskRecord){if(!this.taskSourcesAllowed(row,actor,c))fail('AGENT_TASK_SCOPE_CHANGED','任务可见范围已变化，请重新安排任务',403);}
   private async refreshTaskCondition(db:any,actor:TokenPayload,row:MistWorkspaceRow,c:TaskRecord,now:number){
     if(c.state!=='waiting_condition')return c;

@@ -46,3 +46,50 @@ it('refreshes the foreground task every second without waiting for a slower back
   expect(calls.slice(-2)).toEqual(['foreground','background']);
  }finally{releaseBackground({});vi.useRealTimers();}
 });
+
+it('recovers the same running task after a hung status read and ignores its late response', async () => {
+  vi.useFakeTimers();
+  try {
+    const running = {
+      id: 'task', identityId: 'personal', executor: 'platform', conversationId: 'current', state: 'running',
+      createdAt: '2026-11-23T00:00:00Z', updatedAt: '2026-11-23T00:00:00Z',
+    };
+    const completed = { ...running, state: 'succeeded', result: '完成', updatedAt: '2026-11-23T00:00:10Z' };
+    let lateResponse: (value: unknown) => void = () => {};
+    const statusSignals: AbortSignal[] = [];
+    api.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes('/agent-identities')) return { items: [{ id: 'personal', kind: 'personal', state: 'active' }] };
+      if (url.endsWith('/agent-task-capabilities')) return { platformAvailable: true };
+      if (url.endsWith('/agent-tasks')) return { items: [running], nextCursor: null };
+      if (url.endsWith('/agent-tasks/task')) {
+        statusSignals.push(init!.signal!);
+        if (statusSignals.length === 1) return new Promise(resolve => { lateResponse = resolve; });
+        return { item: completed };
+      }
+      throw new Error('unexpected request');
+    });
+
+    await act(async () => { root.render(<Probe conversationId="current"/>); await cowork.reload(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(statusSignals).toHaveLength(1);
+    expect(statusSignals[0].aborted).toBe(true);
+    expect(cowork.tasks[0].state).toBe('running');
+    expect(cowork.progressStale).toBe(true);
+    expect(cowork.error).toBe('');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(statusSignals).toHaveLength(2);
+    expect(cowork.tasks).toEqual([completed]);
+    expect(cowork.progressStale).toBe(false);
+
+    await act(async () => {
+      lateResponse({ item: { ...running, updatedAt: '2026-11-23T00:00:11Z' } });
+      await vi.advanceTimersByTimeAsync(20000);
+    });
+    expect(cowork.tasks).toEqual([completed]);
+    expect(statusSignals).toHaveLength(2);
+    expect(api.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  } finally {
+    vi.useRealTimers();
+  }
+});
