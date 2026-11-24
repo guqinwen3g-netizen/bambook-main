@@ -102,6 +102,36 @@ it('records exactly one run when two schedulers evaluate the same rule version',
   expect(current.runs).toEqual([expect.objectContaining({ taskId: competing?.taskId })]);
 });
 
+it.each(['postponed', 'updated', 'access revoked'] as const)('uses current order facts at enqueue when the first read becomes %s', async change => {
+  const ws = db.workspaces.get(workspaceId)!;
+  const demo = createMistState({ id:randomUUID, now:new Date(now).toISOString(), actorId:'clerk', actorName:'Clerk' });
+  const order = { ...demo.orders[0], code:'SYN-ORDER-DUE', due:'2026-11-07', state:'生产中', ownerId:'clerk' };
+  ws.state = { ...ws.state, orders:[order] };
+  const saved = await repo.saveAutomation(clerk(), workspaceId, undefined, {
+    name:'近期交期', trigger:'due_soon', time:'00:00', instructions:'提醒当前交期',
+  });
+  const [job] = (await repo.dueAutomations(10)).jobs;
+  const actor = await worker.actor(job.authority);
+  afterScheduleRead(async () => {
+    if (change === 'access revoked') auth.users.get('clerk')!.permissions = ['ai:chat'];
+    else {
+      const current = db.workspaces.get(workspaceId)!;
+      current.state.orders[0].due = change === 'updated' ? '2026-11-09' : '2026-12-01';
+      current.revision++;
+    }
+  });
+
+  const result = await repo.runAutomation(actor, workspaceId, saved.id, () => 'bma1_test', now);
+  expect(result.fired).toBe(change === 'updated');
+  if (change === 'updated') {
+    expect(storedTasks()[0].instructions).toContain('SYN-ORDER-DUE 交期 2026-11-09');
+    expect(storedTasks()[0].instructions).not.toContain('2026-11-07');
+  } else {
+    expect(storedTasks()).toEqual([]);
+    expect((await repo.listAutomations(clerk(), workspaceId)).items[0].runs).toEqual([]);
+  }
+});
+
 it('rolls back task creation when the run history cannot commit', async () => {
   const {saved, actor} = await scheduledRule();
   const transact = db.$transaction.bind(db);

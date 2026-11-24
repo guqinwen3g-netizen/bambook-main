@@ -163,9 +163,17 @@ const SHANGHAI_CLOCK = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shangh
 const clock = (now: number) => SHANGHAI_CLOCK.format(new Date(now));
 const addDays = (day: string, days: number) => shiftCalendarDay(day, days);
 export type AutomationDecision = { next: Pick<AutomationRecord, 'seen' | 'primed' | 'lastDay' | 'since'>; fire?: { detail: string; facts: string } };
+const automationPosition = ({seen, primed, lastDay, since}: AutomationRecord): AutomationDecision['next'] =>
+  ({seen, primed, lastDay, since});
+
+export function shouldCommitAutomation(rule: AutomationRecord, decision: AutomationDecision, now: number) {
+  if (decision.fire) return !automationOverLimit(rule, now);
+  return Boolean(rule.failures) || JSON.stringify(decision.next) !== JSON.stringify(automationPosition(rule));
+}
+
 /** 只判断要不要触发。state 是规则所有者的权限投影，看不到的邮件和到账不会触发。 */
 export function evaluateAutomation(c: AutomationRecord, state: MistState, now: number): AutomationDecision {
-  const base = { seen: c.seen, primed: c.primed, lastDay: c.lastDay, since: c.since }, day = mistBusinessDate(new Date(now));
+  const base = automationPosition(c), day = mistBusinessDate(new Date(now));
   if (c.trigger === 'new_mail' || c.trigger === 'new_receipt') {
     const time = (v: unknown) => { const t = typeof v === 'string' ? Date.parse(v) : NaN; return Number.isFinite(t) ? t : 0; };
     const rows: Array<{ id: string; line: string; at: number }> = c.trigger === 'new_mail'

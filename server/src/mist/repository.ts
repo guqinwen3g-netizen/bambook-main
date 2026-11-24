@@ -58,7 +58,7 @@ import { AGENT_AUDIT_FIELD, AGENT_AUDIT_HASH, AGENT_AUDIT_PREFIX, agentAuditRece
 import { auditFromReceipt, auditMatchesParent, auditEntry, projectAgentAudit, readableCommand } from './agentAuditRead';
 import { markAgentProposalConfirmed, agentCommandRisk, effectiveAgentCommandRisk, AI_WRITE_SCOPES, AGENT_RISK_LABEL } from '../shared/mistAgentProposals';
 import { listConversationMeta, saveConversationMeta } from './agentConversations';
-import { AUTOMATION_FAILURE_LIMIT, AUTOMATION_FAILURE_SPAN_MS, automationInstructions, automationOverLimit, automationRecord, automationView, dueAutomations, evaluateAutomation, listAutomations, recordAutomationRun, removeAutomation, saveAutomation, setAutomationEnabled, writeAutomation } from './agentAutomations';
+import { AUTOMATION_FAILURE_LIMIT, AUTOMATION_FAILURE_SPAN_MS, automationInstructions, automationRecord, automationView, dueAutomations, evaluateAutomation, listAutomations, recordAutomationRun, removeAutomation, saveAutomation, setAutomationEnabled, shouldCommitAutomation, writeAutomation } from './agentAutomations';
 import { canGenerateScopedStatement, scopedMaterialIssueTargets, scopedMaterialDeliveryTargets, scopedFabricAccess, scopedFabricDestinations, scopedReferenceViolation, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
 import { buildTeamScopeGraph, resolveTeamScope, normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
 import { accountOwnedObjects, buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
@@ -793,29 +793,31 @@ export class MistRepository {
           if (task && task.value.expiresAt > now && ['queued','running','waiting_time','waiting_condition','waiting_human'].includes(task.value.state)) return;
         }
         const decision = evaluateAutomation(rule, (await this.preparedView(db, row, actor)).state, now);
-        if (decision.fire && automationOverLimit(rule, now)) return;
+        if (!shouldCommitAutomation(rule, decision, now)) return;
         return {rule, decision};
       });
       if (!read) return {fired: false};
-      const {rule, decision} = read;
-      const changed = decision.fire || rule.failures || JSON.stringify(decision.next) !== JSON.stringify({seen:rule.seen, primed:rule.primed, lastDay:rule.lastDay, since:rule.since});
-      if (!changed) return {fired: false};
       return await this.connectionTransaction(async db => {
         const {row, value} = await automationRecord(db, workspaceId, id);
-        if (!value.enabled || value.removed || value.version !== rule.version) return {fired: false};
+        if (!value.enabled || value.removed || value.version !== read.rule.version) return {fired: false};
         const {row: workspace, actor} = await this.own(db, prior, workspaceId, 'ai:chat');
+        // The first read is only a probe. Persist facts and watermarks from the
+        // same authorized workspace snapshot as the task creation transaction.
+        const decision = value.trigger === 'daily' ? read.decision
+          : evaluateAutomation(value, (await this.preparedView(db, workspace, actor)).state, now);
+        if (!shouldCommitAutomation(value, decision, now)) return {fired: false};
         let taskId: string | undefined;
         if (decision.fire) {
           if (!this.platformRuntimeAvailable()) fail('PRECONDITION','平台执行器或模型暂不可用',503);
           const createdAt = Date.now();
           const identity = await ensurePersonalIdentity(db, actor, workspaceId, make, createdAt, workspace.companyId ?? undefined);
           const task = await createTask(db, actor, workspaceId, {
-            requestId: 'auto-' + rule.id + '-' + rule.version,
+            requestId: 'auto-' + value.id + '-' + value.version,
             identityId: identity.id,
-            name: (rule.name + ' · ' + decision.fire.detail).slice(0,60),
-            instructions: automationInstructions(rule, decision.fire.facts),
+            name: (value.name + ' · ' + decision.fire.detail).slice(0,60),
+            instructions: automationInstructions(value, decision.fire.facts),
             executor: 'platform', locale: 'zh-CN',
-          }, createdAt, taskScopeHash(scopeOf(workspace), workspace.state), rule.id);
+          }, createdAt, taskScopeHash(scopeOf(workspace), workspace.state), value.id);
           taskId = task.id;
         }
         // The task and its receipts roll back if a different rule version was committed first.
