@@ -41,7 +41,7 @@ import { exportRebateExtraPermissions } from '../shared/mistExportRebate';
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyCompanyRoster, canMaintainCompany, companyDataScope, companyTeamIds, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
 import { isAgentActor, type AgentActor } from './agentDelegation';
-import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, assertTaskLease, assertTaskAuthority, assertTaskViewAuthority, acknowledgePlatformStep, advanceTaskSources, answerTaskQuestion, askTaskQuestion, changeTask, checkpointTask, claimTask, deferPlatformJob, duePlatformTasks, createTask, finishTask, finishTaskSession, heartbeatTask, issueTaskControl, listTasks, readTaskRecord, reserveTaskStep, resolveTaskControl, resolveTaskCredential, releasePlatformTask, savePlatformPlan, saveTaskSources, settleTaskProposal, taskHistory, taskRecord, taskView, waitTaskForProposal, type MakeTaskCredential, type MakeTaskControl, type TaskRecord, type PlatformTaskJob } from './agentTasks';
+import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, assertTaskLease, assertTaskAuthority, assertTaskViewAuthority, acknowledgePlatformStep, advanceTaskSources, answerTaskQuestion, askTaskQuestion, changeTask, checkpointTask, claimTask, deferPlatformJob, duePlatformTasks, createTask, finishTask, finishTaskSession, heartbeatTask, issueTaskControl, listTasks, readTaskRecord, reserveTaskStep, resolveTaskControl, resolveTaskCredential, releasePlatformTask, savePlatformPlan, saveTaskSources, settleTaskProposal, taskFromCreationReceipt, taskHistory, taskRecord, taskView, waitTaskForProposal, type MakeTaskCredential, type MakeTaskControl, type TaskRecord, type PlatformTaskJob } from './agentTasks';
 import { collectTaskSources, knownCommandSourcesVisible, taskScopeHash, taskSourcesVisible } from './agentTaskVisibility';
 import { taskIntentRefsVisible, validateTaskIntentRefs } from './agentTaskIntentRefs';
 import {taskNotice,taskNoticeCandidates} from './agentTaskAttention';
@@ -728,6 +728,18 @@ export class MistRepository {
       for(const i of input.items as Array<{taskId:string;key:string}>){const c=(await taskRecord(db,workspaceId,i.taskId)).value;let valid=await this.taskViewSourcesAllowed(db,row,actor,c,visible);try{await assertTaskViewAuthority(db,actor,c,now);}catch(e){if(!(e instanceof MistApiError))throw e;valid=false;}const notice=taskNotice(c,taskView(c,actor,now,valid));if(!notice||notice.key!==i.key)fail('AGENT_TASK_CHANGED','任务已更新，请刷新核对',409);pending.set(c.id,{key:i.key,version:c.version});}
       for(const[id,value]of pending)await markTaskNoticeRead(db,actor,workspaceId,id,value.key,value.version,now);
       return{read:true};
+    });
+  }
+  async getPersonalTaskReceipt(prior: TokenPayload, workspaceId: string, requestId: unknown) {
+    if (isAgentActor(prior)) fail('FORBIDDEN', '提交回执只供本人查看', 403);
+    return this.transact(async db => {
+      const { actor, row } = await this.own(db, prior, workspaceId);
+      const task = await taskFromCreationReceipt(db, actor, row.id, requestId);
+      const now = Date.now();
+      let readable = await this.taskViewSourcesAllowed(db, row, actor, task);
+      try { await assertTaskViewAuthority(db, actor, task, now); }
+      catch (error) { if (!(error instanceof MistApiError)) throw error; readable = false; }
+      return taskView(task, actor, now, readable);
     });
   }
   async getAgentTask(prior:TokenPayload,workspaceId:string,taskId:string,summaryOnly=false){

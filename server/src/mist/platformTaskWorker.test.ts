@@ -447,7 +447,8 @@ it('rechecks a borrowed attachment for the worker and redacts completed follow-u
   const listed = (await f.human.get(f.base + '/agent-tasks').expect(200)).body.items.find((task: { id: string }) => task.id === completed.id);
   const summary = (await f.human.get(f.base + '/agent-tasks/' + completed.id + '?summary=1').expect(200)).body.item;
   const replayed = (await f.human.post(f.base + '/personal-agent/tasks').send(completedInput).expect(201)).body.item;
-  for (const hidden of [await f.current(completed.id), listed, summary, replayed]) {
+  const recovered = (await f.human.get(f.base + '/personal-agent/tasks/receipt/' + completedInput.requestId).expect(200)).body.item;
+  for (const hidden of [await f.current(completed.id), listed, summary, replayed, recovered]) {
     expect(hidden).toMatchObject({ id: completed.id, state: 'succeeded', result: '', checkpoint: '' });
     expect(hidden.attachments).toBeUndefined();
     expect(hidden.trail).toBeUndefined();

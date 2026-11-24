@@ -35,6 +35,8 @@ const plain = (v: unknown, max: number, label: string, optional = false) => {
 };
 const rid = (v: unknown) => plain(v, 116, '操作编号');
 const id = (v: unknown) => { if (!uuid(v)) fail('INVALID_INPUT', '任务编号无效', 400); return v as string; };
+const taskCreationReceiptKey = (ownerId: string, requestId: string) =>
+  TASK_PREFIX + 'create:' + hash(ownerId + ':' + requestId).slice(0, 32);
 /** Date.parse normalizes impossible civil dates (e.g. November 31); never schedule from that guess. */
 function absoluteWaitTime(value: unknown): number {
   const parts = typeof value === 'string' && /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(?:Z|([+-])(\d{2}):(\d{2}))$/.exec(value);
@@ -90,6 +92,19 @@ export async function taskRecord(db: any, workspaceId: string, taskId: unknown) 
   const row = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: TASK_PREFIX + id(taskId) } } });
   return { row, value: record(row, workspaceId) };
 }
+
+export async function taskFromCreationReceipt(db: any, actor: TokenPayload, workspaceId: string, requestId: unknown) {
+  const key = taskCreationReceiptKey(actor.userId, rid(requestId));
+  const receipt = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: key } } });
+  if (receipt?.workspaceId !== workspaceId || receipt.actorId !== actor.userId || !uuid(receipt.result?.id))
+    fail('NOT_FOUND', '任务不存在或无权访问', 404);
+  const { value: task } = await taskRecord(db, workspaceId, receipt.result.id);
+  owner(actor, task);
+  if (task.executor !== 'platform' || task.automationId) fail('NOT_FOUND', '任务不存在或无权访问', 404);
+  const { value: identity } = await identityRecord(db, workspaceId, task.identityId);
+  if (identity.kind !== 'personal' || identity.ownerId !== actor.userId) fail('NOT_FOUND', '任务不存在或无权访问', 404);
+  return task;
+}
 export async function lockTaskRecord(db: any, workspaceId: string, taskId: unknown) {
   await db.$queryRawUnsafe('SELECT "id" FROM "MistCommandReceipt" WHERE "workspaceId" = $1::uuid AND "requestId" = $2 FOR UPDATE', workspaceId, TASK_PREFIX + id(taskId));
 }
@@ -141,7 +156,7 @@ export async function createTask(db: any, actor: TokenPayload, workspaceId: stri
   if (identity.ownerId !== actor.userId || !identity.enabled || !identity.key || identity.key.revokedAt || identity.key.expiresAt <= now || identity.key.credentialVersion !== actor.credentialVersion) fail('PRECONDITION', '请先启用本人负责的Agent连接', 422);
   const key = identity.key!, ceiling = key.ceiling.filter(scope => hasScope(actor, scope as any));
   const intentRefs=normalizeAgentTaskIntentRefs(trustedIntentRefs);if(!taskIntentCeilingAllows(intentRefs,ceiling))fail('FORBIDDEN','当前Agent无权读取引用记录',403);
-  const request = TASK_PREFIX + 'create:' + hash(actor.userId + ':' + requestId).slice(0, 32);
+  const request = taskCreationReceiptKey(actor.userId, requestId);
   const previous = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: request } } });
   const locale=input.executor==='platform'?responseLocale(input.locale):undefined,inputHash = hash(JSON.stringify([identity.id, name, instructions,...(input.executor==='platform'?['platform',locale]:[]),...(input.conversationId?[input.conversationId]:[]),...(intentRefs.length?[['intentRefs',intentRefs]]:[]),...(attachments?[['attachments',attachments.fingerprint]]:[])]));
   if (previous) { if (previous.inputHash !== inputHash) fail('CONFLICT', '操作编号已用于其他任务', 409);const c=(await taskRecord(db, workspaceId, previous.result.id)).value;let valid=c.scopeHash===scopeHash;try{await assertTaskAuthority(db,actor,c,now);}catch(e){if(!(e instanceof MistApiError))throw e;valid=false;}return taskView(c, actor, now,valid); }

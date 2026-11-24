@@ -15,6 +15,36 @@ async function human(app:any,profileId:string){const client=request.agent(app);a
 function server(complete:(input:LlmCompletionInput)=>Promise<string>){const local=createMistLocalRuntime({directory}),app=createMistServer(undefined,{local,agentTasks:{complete,tickMs:3_600_000,pulseMs:20}});const worker=app.locals.platformTaskWorker as MistPlatformTaskWorker;workers.push(worker);return{local,app,worker};}
 const tool=(name:string,args:Record<string,unknown>)=>JSON.stringify({name,arguments:args});
 
+it('recovers the same personal task by request ID without writing receipts or exposing another account', async () => {
+ const { app, local, worker } = server(async () => tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '核对完成' }));
+ worker.start(3_600_000);
+ const owner = await human(app, 'demo-sales');
+ const another = await human(app, 'demo-buyer');
+ const input = { requestId: randomUUID(), name: '核对附件', instructions: '核对原文件', conversationId: 'conv_12345678' };
+ const read = (id: string) => owner.base + '/personal-agent/tasks/receipt/' + id;
+ await owner.client.get(read(input.requestId)).expect(404);
+ const accepted = (await owner.client.post(owner.base + '/personal-agent/tasks')
+   .field('task', JSON.stringify(input)).attach('attachments', Buffer.from('synthetic receipt'), 'source.txt').expect(201)).body.item;
+ await worker.tick();
+ await worker.settled();
+ const before = await local.database.mistCommandReceipt.findMany({ where: { workspaceId: owner.workspace.id } });
+
+ const recovered = await owner.client.get(read(input.requestId)).expect('Cache-Control','private, no-store').expect(200);
+ expect(recovered.body.item).toMatchObject({
+   id: accepted.id, conversationId: input.conversationId, state: 'succeeded', result: '核对完成',
+   attachments: accepted.attachments,
+ });
+ expect(recovered.body.item.attachments[0]).not.toHaveProperty('storageKey');
+ await another.client.get(another.base + '/personal-agent/tasks/receipt/' + input.requestId).expect(404);
+ await owner.client.get('/api/mist/workspaces/' + randomUUID() + '/personal-agent/tasks/receipt/' + input.requestId).expect(404);
+ await owner.client.get(read(accepted.id)).expect(404);
+ await owner.client.get(read(input.requestId) + '?extra=1').expect(400);
+ const identity = (await identityRecord(local.database, owner.workspace.id, accepted.identityId)).value;
+ const token = local.agentDelegation.makeServiceCredential(owner.workspace.id, identity.id, identity.key!.generation);
+ await request(app).get(read(input.requestId)).set('x-bambook-agent-key', token).expect(403);
+ expect(await local.database.mistCommandReceipt.findMany({ where: { workspaceId: owner.workspace.id } })).toEqual(before);
+});
+
 it('limits attachment references to the same owner and conversation and counts uploads together', async () => {
  const { app, worker } = server(async () => tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '已读' }));
  worker.start(3_600_000);

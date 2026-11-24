@@ -167,6 +167,11 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   router.get('/workspaces/:id/agent-tasks/:taskId',run(async(req,res)=>{exactBody(req.query,['summary']);if(req.query.summary!==undefined&&req.query.summary!=='1')fail('INVALID_INPUT','任务查询字段无效',400);res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.getAgentTask(actor(req),req.params.id,req.params.taskId,req.query.summary==='1')});}));
   router.get('/workspaces/:id/agent-tasks/:taskId/history',run(async(req,res)=>{exactBody(req.query,['cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.agentTaskHistory(actor(req),req.params.id,req.params.taskId,req.query.cursor));}));
   router.post('/workspaces/:id/personal-agent',run(async(req,res)=>{exactBody(req.body??{},[]);res.setHeader('Cache-Control','private, no-store');res.json({identity:await repository.ensurePersonalAgent(actor(req),req.params.id,delegation.makeServiceCredential,delegation.timestamp())});}));
+  router.get('/workspaces/:id/personal-agent/tasks/receipt/:requestId',run(async(req,res)=>{
+    exactBody(req.query,[]);
+    res.setHeader('Cache-Control','private, no-store');
+    res.json({item:await repository.getPersonalTaskReceipt(actor(req),req.params.id,req.params.requestId)});
+  }));
   const taskUpload=multer({storage:multer.memoryStorage(),limits:{files:TASK_ATTACHMENT_COUNT,fileSize:TASK_ATTACHMENT_BYTES+1,fields:1,fieldSize:24_000,parts:TASK_ATTACHMENT_COUNT+2}}).array('attachments',TASK_ATTACHMENT_COUNT);
   router.post('/workspaces/:id/personal-agent/tasks',(req:Request,res:Response,next:NextFunction)=>{
     if(!req.is('multipart/form-data'))return next();
