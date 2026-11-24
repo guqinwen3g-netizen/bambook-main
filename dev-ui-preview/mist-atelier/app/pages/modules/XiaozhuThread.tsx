@@ -99,6 +99,7 @@ export type ThreadActions = {
   onAnswer: (task: AgentTaskView, id: string, text: string) => void;
   onCancel: (task: AgentTaskView) => void;
   controls?: Record<string,TaskControlState>;
+  composerStopTaskId?: string;
   onRetry?: (task: AgentTaskView) => void;
   retryBlocked?: boolean;
   onCopy: (text: string) => void;
@@ -158,7 +159,9 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         {control?.error&&(active||t.state==='paused')&&<p className="mist-xz-note" role="status">{uiText(control.error)}</p>}
         {pending.map(p => <ProposalCard key={p.id} proposal={p} onOpen={actions.onProposal} onDecide={actions.onDecide} />)}
         <div className="mist-xz-acts">
-          {/* 办理中的停止在输入框；等待中的任务在这里停。 */}{active && t.canControl && !['queued', 'running'].includes(t.state) && <Button size="sm" variant="quiet" icon={Square} disabled={control?.busy} loading={control?.busy} onClick={() => actions.onCancel(t)}>{uiText('停止')}</Button>}
+          {active && t.canControl && actions.composerStopTaskId!==t.id && <Button size="sm" variant="quiet" icon={Square}
+            aria-label={t.name ? uiText('停止任务')+' '+t.name : undefined}
+            disabled={control?.busy} loading={control?.busy} onClick={() => actions.onCancel(t)}>{uiText('停止')}</Button>}
           {done && t.result && <><IconButton size="sm" icon={Copy} label={uiText('复制')} onClick={() => actions.onCopy(t.result)} /><IconButton size="sm" icon={FileText} label={uiText('保存草稿')} onClick={() => actions.onDraft(t.result)} /></>}
           {retryable && actions.onRetry && <IconButton size="sm" icon={RotateCcw} label={uiText('重新提问')} disabled={actions.retryBlocked} onClick={() => actions.onRetry?.(t)} />}
           {done && t.state === 'succeeded' && <IconButton size="sm" icon={Zap} label={uiText('设为自动规则')} onClick={() => actions.onAutomate(request)} />}

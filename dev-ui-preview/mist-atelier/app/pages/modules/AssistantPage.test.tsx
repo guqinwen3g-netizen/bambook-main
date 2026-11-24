@@ -14,6 +14,45 @@ let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
 const view=(active=true, taskId?:string)=> <Nav.Provider value={{route:{view:'assistant',...(taskId?{section:'tasks',id:taskId}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
 const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
 
+it('lets a user stop one of two running tasks without losing the unsent question', async () => {
+  const conversationId='c_parallel_stop';
+  const first={
+    id:'task-a',identityId:'personal',executor:'platform',conversationId,name:'任务 A',instructions:'任务 A',
+    state:'running',version:1,canControl:true,questions:[],waitingProposalIds:[],
+    createdAt:'2026-11-24T01:00:00Z',updatedAt:'2026-11-24T01:00:00Z',
+  };
+  const second={...first,id:'task-b',name:'任务 B',instructions:'任务 B',createdAt:'2026-11-24T01:01:00Z'};
+  let taskA=first;
+  sessionStorage.setItem('mist.xiaozhu.conversation:session-a:workspace',conversationId);
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async (url:string,init?:RequestInit)=>{
+    if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    if(url.endsWith('/task-a/cancel')&&init?.method==='POST'){
+      taskA={...taskA,state:'cancelled',version:2};
+      return {item:taskA};
+    }
+    if(url.endsWith('/task-a'))return {item:taskA};
+    if(url.endsWith('/task-b'))return {item:second};
+    return {items:url.endsWith('/agent-tasks')?[taskA,second]:[],nextCursor:null};
+  });
+  await mount();
+  expect(button('停止生成')).toBeUndefined();
+  expect(button('停止任务 任务 A')).toBeTruthy();
+  expect(button('停止任务 任务 B')).toBeTruthy();
+  await question('保留这份未提交的草稿');
+  await click('停止任务 任务 A');
+  expect(host.querySelector('[data-task-state="cancelled"]')?.textContent).toContain('任务 A');
+  expect(host.querySelector('[data-task-state="running"]')?.textContent).toContain('任务 B');
+  expect(host.querySelector('textarea')?.value).toBe('保留这份未提交的草稿');
+  expect(mock.api.mock.calls.filter(([,init])=>init?.method==='POST').map(([url])=>url)).toEqual([
+    '/api/mist/workspaces/workspace/agent-tasks/task-a/cancel',
+  ]);
+  await question('');
+  expect(button('停止生成')).toBeTruthy();
+  expect(button('停止任务 任务 B')).toBeUndefined();
+});
+
 it.each([
   {case:'clears the matching draft for a recovered task',question:'核对原 PDF',found:true,after:''},
   {case:'preserves a different draft when recovering a task',question:'正在写另一条问题',found:true,after:'正在写另一条问题'},
