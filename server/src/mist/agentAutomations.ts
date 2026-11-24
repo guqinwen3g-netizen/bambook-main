@@ -3,7 +3,7 @@
  * 触发一次做一次，不是目标驱动的长会话。规则只属于本人，权限不超过本人；需要确认的写入留提议后本次运行结束。
  * 记录与收件授权同样放在回执表，不进业务状态，也不经 MCP 或业务命令改动。
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { TokenPayload } from '../auth/service';
 import type { MistState } from '../shared/mistWorkspace';
 import {mistBusinessDate,shiftCalendarDay} from '../shared/mistBusinessClock';
@@ -75,9 +75,29 @@ export async function saveAutomation(db: any, actor: TokenPayload, workspaceId: 
     const next: AutomationRecord = { ...c, ...fields, version: c.version + 1, updatedAt: at, authority: fields.enabled ? authority : undefined, halted: undefined, failures: undefined, ...(reset ? { seen: [], primed: false, lastDay: undefined, since: undefined } : {}) };
     await writeAutomation(db, row, c, next); return next;
   }
+  // The scoped receipt stores the original intent separately from the live, editable rule.
+  const request = input.requestId === undefined ? undefined : AUTOMATION_PREFIX + 'create:'
+    + createHash('sha256').update(JSON.stringify([actor.userId, text(input.requestId, '操作编号', 116)])).digest('hex');
+  const inputHash = createHash('sha256').update(JSON.stringify(fields)).digest('hex');
+  if (request) {
+    const receipt = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: request } } });
+    if (receipt) {
+      if (receipt.workspaceId !== workspaceId || receipt.actorId !== actor.userId || typeof receipt.result?.id !== 'string')
+        fail('NOT_FOUND', '规则不存在', 404);
+      if (receipt.inputHash !== inputHash) fail('CONFLICT', '操作编号已用于其他规则', 409);
+      const { value: rule } = await automationRecord(db, workspaceId, receipt.result.id);
+      if (rule.ownerId !== actor.userId) fail('NOT_FOUND', '规则不存在', 404);
+      if (rule.removed) fail('AGENT_AUTOMATION_CREATED_RULE_GONE', '原规则已删除', 404);
+      return rule;
+    }
+  }
   if ((await listAutomations(db, workspaceId, actor.userId)).length >= AUTOMATION_RULE_LIMIT) fail('PRECONDITION', `每人最多 ${AUTOMATION_RULE_LIMIT} 条规则`, 422);
   const c: AutomationRecord = { schemaVersion: 1, id: randomUUID(), workspaceId, ownerId: actor.userId, ownerName: actor.displayName || actor.userId, version: 1, ...fields, createdAt: at, updatedAt: at, ...(fields.enabled ? { authority } : {}), seen: [], primed: false, runs: [] };
   await db.mistCommandReceipt.create({ data: { id: randomUUID(), workspaceId, requestId: key(c.id), actorId: actor.userId, inputHash: AUTOMATION_HASH, expectedRevision: 0, result: { revision: 0, [AUTOMATION_FIELD]: c }, createdAt: new Date(now) } });
+  if (request) {
+    await db.mistCommandReceipt.create({ data: { id: randomUUID(), workspaceId, requestId: request, actorId: actor.userId,
+      inputHash, expectedRevision: 0, result: { revision: 0, id: c.id }, createdAt: new Date(now) } });
+  }
   return c;
 }
 export async function removeAutomation(db: any, actor: TokenPayload, workspaceId: string, id: string) {
