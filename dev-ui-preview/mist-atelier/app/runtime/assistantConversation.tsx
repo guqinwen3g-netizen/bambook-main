@@ -83,6 +83,7 @@ export function AssistantConversationProvider({ scope, children }: { scope: stri
 export function useAssistantConversation(scope: string) {
   const shared = React.useContext(Context);
   // Standalone reference pages have no workspace provider and retain page-local behavior.
-  const local = useConversationState(scope);
-  return shared?.scope === scope ? shared : local;
+  const scoped = shared?.scope === scope ? shared : undefined;
+  const local = useConversationState(scoped ? '' : scope);
+  return scoped ?? local;
 }

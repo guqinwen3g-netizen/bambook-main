@@ -55,6 +55,19 @@ it('keeps an unsent question, references and files with their own conversation',
     await click('核对第二单');
     expect(host.querySelector('textarea')!.value).toBe('第二单的未发送文字');
     expect(mock.api.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+
+    const read = mock.api.getMockImplementation()!;
+    let finish!: (value: { item: typeof second }) => void;
+    const acknowledgement = new Promise<{ item: typeof second }>(resolve => { finish = resolve; });
+    mock.api.mockImplementation((url: string, init?: RequestInit) =>
+      url.endsWith('/personal-agent/tasks') && init?.method === 'POST' ? acknowledgement : read(url, init));
+    await click('发送');
+    await click('核对第一单');
+    await act(async () => finish({ item: { ...second, id: 'submitted', instructions: '第二单的未发送文字' } }));
+    expect(host.querySelector('textarea')!.value).toBe('第一单的未发送文字');
+    expect(button('移除附件 first.pdf')).toBeTruthy();
+    await click('核对第二单');
+    expect(host.querySelector('textarea')!.value).toBe('');
   } finally {
     localStorage.removeItem('mist.xiaozhu.conversation:session-a:workspace');
   }

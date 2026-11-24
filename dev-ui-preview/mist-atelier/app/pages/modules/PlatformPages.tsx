@@ -191,6 +191,8 @@ export function AssistantPage(){
   };
   const attachmentScope=scope+':'+conversationId;
   const liveConversation=React.useRef(conversationId);liveConversation.current=conversationId;
+  const legacyTargets=React.useRef(new Map<string,string>());
+  React.useEffect(()=>{legacyTargets.current.clear();},[scope]);
   const addFiles=(incoming:File[])=>{
     const next=[...files,...incoming];
     if(incoming.some(file=>!isTaskAttachment(file.name))){setError('请选择图片、PDF、Excel 或其他受支持的文档');return;}
@@ -218,7 +220,12 @@ export function AssistantPage(){
   const data=(kind==='customers'?(w.state?.customers??[]).map(c=>({id:'customers:'+c.id,entityId:c.id,label:c.name,detail:[c.country,c.grade].filter(Boolean).join(' · '),view:'crm'})):kind==='purchases'?(w.state?.fulfillment.purchases??[]).filter(p=>p.state!=='cancelled').map(p=>({id:'purchases:'+p.id,entityId:p.id,label:p.code+' · '+p.supplier,detail:p.description,view:'procurement'})):kind==='shipments'?(w.state?.fulfillment.shipments??[]).filter(x=>x.state!=='cancelled').map(x=>({id:'shipments:'+x.id,entityId:x.id,label:x.code+' · '+x.customer,detail:x.state,view:'shipments'})):kind==='developments'?(w.state?.devs??[]).map(d=>({id:'developments:'+d.id,entityId:d.id,label:d.code+' · '+d.name,detail:d.state,view:'development/detail'})):kind==='orders'?(w.state?.orders??[]).map(o=>({id:'orders:'+o.id,entityId:o.id,label:o.code+' · '+o.customer,detail:o.state+' · '+money(o.amount)+' '+o.currency,view:'orders/detail'})):kind==='invoices'?(w.state?.invoices??[]).map(i=>({id:'invoices:'+i.id,entityId:i.id,label:i.code+' · '+i.customer,detail:'未收 '+money(i.open)+' '+i.currency,view:'invoices'})):(w.platform?.risks??[]).map(r=>({id:'risks:'+r.id,entityId:r.id,label:r.title,detail:label[r.state],view:'risks'}))).filter(r=>canReadSource&&(!query||(r.label+' '+r.detail).toLowerCase().includes(query.toLowerCase())));
   const toggle=(r:{id:string;label:string})=>setSelected(list=>list.some(s=>s.id===r.id)?list.filter(s=>s.id!==r.id):list.length>=12?list:[...list,{id:r.id,label:r.label}]);
   // 早期无编号的对话继续提问时换一个新编号，避免新提问因时间间隔被归到别处而从眼前消失。
-  const sendTarget=()=>current?.legacy?newConversationId():conversationId;
+  const sendTarget=()=>{
+    if(!current?.legacy)return conversationId;
+    const target=legacyTargets.current.get(conversationId)??newConversationId();
+    legacyTargets.current.set(conversationId,target);
+    return target;
+  };
   // A stored task can still be reviewed with the worker offline. A text-only model cannot continue its task thread.
   const useTaskThread=cowork.available||visibleTasks.length>0;
   const taskThreadOffline=!cowork.available&&visibleTasks.length>0;
