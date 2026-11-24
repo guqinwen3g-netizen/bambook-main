@@ -208,8 +208,21 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   router.put('/workspaces/:id/agent-conversations/:conversationId',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.saveConversation(actor(req),req.params.id,req.params.conversationId,exactBody(req.body,['title','hidden']))});}));
   router.get('/workspaces/:id/agent-automations',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.listAutomations(actor(req),req.params.id));}));
   router.post('/workspaces/:id/agent-automations',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.status(201).json({item:await repository.saveAutomation(actor(req),req.params.id,undefined,exactBody(req.body,['requestId','name','trigger','time','instructions','enabled']))});}));
-  router.put('/workspaces/:id/agent-automations/:automationId',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.saveAutomation(actor(req),req.params.id,req.params.automationId,exactBody(req.body,['name','trigger','time','instructions','enabled']))});}));
-  router.delete('/workspaces/:id/agent-automations/:automationId',run(async(req,res)=>{await repository.removeAutomation(actor(req),req.params.id,req.params.automationId);res.status(204).end();}));
+  router.put('/workspaces/:id/agent-automations/:automationId',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.saveAutomation(actor(req),req.params.id,req.params.automationId,exactBody(req.body,['name','trigger','time','instructions','enabled','expectedVersion']))});}));
+  router.patch('/workspaces/:id/agent-automations/:automationId',run(async(req,res)=>{
+    const input=exactBody(req.body,['enabled','expectedVersion']);
+    res.setHeader('Cache-Control','private, no-store');
+    res.json({item:await repository.setAutomationEnabled(actor(req),req.params.id,req.params.automationId,input)});
+  }));
+  router.delete('/workspaces/:id/agent-automations/:automationId',run(async(req,res)=>{
+    const {expectedVersion:raw}=exactBody(req.query,['expectedVersion']);
+    if(raw!==undefined&&(typeof raw!=='string'||!/^[1-9]\d*$/.test(raw)||!Number.isSafeInteger(Number(raw))))
+      fail('INVALID_INPUT','规则版本无效',400);
+    await repository.removeAutomation(actor(req),req.params.id,req.params.automationId,raw===undefined?undefined:Number(raw));
+    if(raw===undefined){res.status(204).end();return;}
+    res.setHeader('Cache-Control','private, no-store');
+    res.json({removed:true});
+  }));
   router.get('/workspaces/:id/personal-agent/usage',run(async(req,res)=>{exactBody(req.query,['month']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.personalAgentUsage(actor(req),req.params.id,req.query.month));}));
   router.get('/workspaces/:id/agent-task-capabilities',run(async(req,res)=>{exactBody(req.query,[]);res.setHeader('Cache-Control','private, no-store');res.json(await repository.platformTaskCapabilities(actor(req),req.params.id));}));
   router.get('/workspaces/:id/agent-task-notices',run(async(req,res)=>{exactBody(req.query,[]);res.setHeader('Cache-Control','private, no-store');res.json(await repository.listAgentTaskNotices(actor(req),req.params.id));}));

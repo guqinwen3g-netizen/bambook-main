@@ -216,6 +216,37 @@ it('replays the same automation creation without duplicating the rule or resetti
   expect(await rules(c)).toEqual([]);
 });
 
+it('rejects stale automation changes and pauses only the live rule at the confirmed version', async () => {
+  const c = await cowork(() => finish('已核对本日待办'));
+  const fields = { name: '每日汇总', trigger: 'daily', time: '00:00', instructions: '汇总待办' };
+  const initial = await automation(c, fields);
+  const endpoint = c.base + '/agent-automations/' + initial.id;
+
+  await fire(c);
+  const [beforeEdit] = await rules(c);
+  expect(beforeEdit.runs).toHaveLength(1);
+  const newerFields = { ...fields, name: '修改后的汇总', time: '12:30', instructions: '只列出未处理待办' };
+  const updated = (await c.human.put(endpoint)
+    .send({ ...newerFields, expectedVersion: beforeEdit.version }).expect(200)).body.item;
+  expect(updated).toMatchObject({ ...newerFields, enabled: true, runs: beforeEdit.runs });
+
+  const stalePause = await c.human.patch(endpoint).send({ enabled: false, expectedVersion: beforeEdit.version }).expect(409);
+  const staleDelete = await c.human.delete(endpoint).query({ expectedVersion: beforeEdit.version }).expect(409);
+  const stalePut = await c.human.put(endpoint).send({ ...fields, expectedVersion: beforeEdit.version }).expect(409);
+  for (const response of [stalePause, staleDelete, stalePut]) expect(response.body.error.code).toBe('REVISION_CONFLICT');
+  expect(await rules(c)).toEqual([updated]);
+
+  await c.human.patch(endpoint).send({ enabled: false }).expect(400);
+  await c.human.patch(endpoint).send({ enabled: false, expectedVersion: updated.version, name: '不能顺带改名' }).expect(400);
+  await c.human.delete(endpoint).query({ expectedVersion: '1.0' }).expect(400);
+  const paused = (await c.human.patch(endpoint)
+    .send({ enabled: false, expectedVersion: updated.version }).expect(200)).body.item;
+  expect(paused).toMatchObject({ ...newerFields, enabled: false, runs: beforeEdit.runs, version: updated.version + 1 });
+  expect(await rules(c)).toEqual([paused]);
+  await c.human.delete(endpoint).query({ expectedVersion: paused.version }).expect(200, { removed: true });
+  expect(await rules(c)).toEqual([]);
+});
+
 it('isolates an automation creation key by owner and workspace', async () => {
   const c = await cowork(() => finish('已核对本日待办'));
   const intent = { requestId: randomUUID(), name: '本人的每日汇总', trigger: 'daily', instructions: '汇总待办', enabled: false };

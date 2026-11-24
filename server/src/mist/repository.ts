@@ -58,7 +58,7 @@ import { AGENT_AUDIT_FIELD, AGENT_AUDIT_HASH, AGENT_AUDIT_PREFIX, agentAuditRece
 import { auditFromReceipt, auditMatchesParent, auditEntry, projectAgentAudit, readableCommand } from './agentAuditRead';
 import { markAgentProposalConfirmed, agentCommandRisk, effectiveAgentCommandRisk, AI_WRITE_SCOPES, AGENT_RISK_LABEL } from '../shared/mistAgentProposals';
 import { listConversationMeta, saveConversationMeta } from './agentConversations';
-import { AUTOMATION_FAILURE_LIMIT, AUTOMATION_FAILURE_SPAN_MS, automationInstructions, automationOverLimit, automationRecord, automationView, dueAutomations, evaluateAutomation, listAutomations, recordAutomationRun, removeAutomation, saveAutomation, writeAutomation, type AutomationDecision, type AutomationRecord } from './agentAutomations';
+import { AUTOMATION_FAILURE_LIMIT, AUTOMATION_FAILURE_SPAN_MS, automationInstructions, automationOverLimit, automationRecord, automationView, dueAutomations, evaluateAutomation, listAutomations, recordAutomationRun, removeAutomation, saveAutomation, setAutomationEnabled, writeAutomation, type AutomationDecision, type AutomationRecord } from './agentAutomations';
 import { canGenerateScopedStatement, scopedMaterialIssueTargets, scopedMaterialDeliveryTargets, scopedFabricAccess, scopedFabricDestinations, scopedReferenceViolation, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
 import { buildTeamScopeGraph, resolveTeamScope, normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
 import { accountOwnedObjects, buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
@@ -762,7 +762,20 @@ export class MistRepository {
   async saveConversation(prior:TokenPayload,workspaceId:string,id:string,input:Record<string,unknown>){if(isAgentActor(prior))fail('FORBIDDEN','对话设置须由本人管理',403);return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,workspaceId,'ai:chat');return saveConversationMeta(db,actor,workspaceId,id,input,Date.now());});}
   async listAutomations(prior:TokenPayload,workspaceId:string){if(isAgentActor(prior))fail('FORBIDDEN','自动规则须由本人管理',403);return this.transact(async db=>{const{actor}=await this.own(db,prior,workspaceId,'ai:chat');return{items:(await listAutomations(db,workspaceId,actor.userId)).map(automationView)};});}
   async saveAutomation(prior:TokenPayload,workspaceId:string,id:string|undefined,input:Record<string,unknown>){if(isAgentActor(prior))fail('FORBIDDEN','自动规则须由本人管理',403);return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,workspaceId,'ai:chat');return automationView(await saveAutomation(db,actor,workspaceId,id,input,Date.now()));});}
-  async removeAutomation(prior:TokenPayload,workspaceId:string,id:string){if(isAgentActor(prior))fail('FORBIDDEN','自动规则须由本人管理',403);return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,workspaceId,'ai:chat');await removeAutomation(db,actor,workspaceId,id);});}
+  async setAutomationEnabled(prior:TokenPayload,workspaceId:string,id:string,input:Record<string,unknown>){
+    if(isAgentActor(prior))fail('FORBIDDEN','自动规则须由本人管理',403);
+    return this.connectionTransaction(async db=>{
+      const {actor}=await this.own(db,prior,workspaceId,'ai:chat');
+      return automationView(await setAutomationEnabled(db,actor,workspaceId,id,input,Date.now()));
+    });
+  }
+  async removeAutomation(prior:TokenPayload,workspaceId:string,id:string,expectedVersion?:number){
+    if(isAgentActor(prior))fail('FORBIDDEN','自动规则须由本人管理',403);
+    return this.connectionTransaction(async db=>{
+      const {actor}=await this.own(db,prior,workspaceId,'ai:chat');
+      await removeAutomation(db,actor,workspaceId,id,expectedVersion);
+    });
+  }
   async dueAutomations(take:number){return this.connectionTransaction(db=>dueAutomations(db,take));}
   /** 触发一次：按所有者当前权限读投影后判断；授权失效时停用规则并写明原因，不静默。 */
   async runAutomation(prior:TokenPayload,workspaceId:string,id:string,make:MakeServiceCredential,now=Date.now()){

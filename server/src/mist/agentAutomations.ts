@@ -49,9 +49,9 @@ export async function ownAutomation(db: any, actor: TokenPayload, workspaceId: s
   if (found.value.ownerId !== actor.userId || found.value.removed) fail('NOT_FOUND', '规则不存在', 404);
   return found;
 }
-export async function writeAutomation(db: any, row: any, previous: AutomationRecord, next: AutomationRecord) {
+export async function writeAutomation(db: any, row: any, previous: AutomationRecord, next: AutomationRecord, conflictCode = 'CONFLICT') {
   const update = await db.mistCommandReceipt.updateMany({ where: { id: row.id, workspaceId: next.workspaceId, inputHash: AUTOMATION_HASH, result: { path: [AUTOMATION_FIELD, 'version'], equals: previous.version } }, data: { result: { revision: 0, [AUTOMATION_FIELD]: next } } });
-  if (update.count !== 1) fail('CONFLICT', '规则已变化，请刷新后重试', 409);
+  if (update.count !== 1) fail(conflictCode, '规则已变化，请刷新后重试', 409);
 }
 export async function listAutomations(db: any, workspaceId: string, ownerId: string): Promise<AutomationRecord[]> {
   const rows = await db.mistCommandReceipt.findMany({ where: { workspaceId, actorId: ownerId, inputHash: AUTOMATION_HASH, requestId: { startsWith: AUTOMATION_PREFIX } } });
@@ -65,16 +65,48 @@ export function parseAutomationInput(input: Record<string, unknown>) {
   if (input.enabled !== undefined && typeof input.enabled !== 'boolean') fail('INVALID_INPUT', '启用状态无效', 400);
   return { name: text(input.name, '规则名称', 40), trigger, time: time as string, instructions: text(input.instructions, '要做什么', 2000), enabled: input.enabled !== false };
 }
+function guardAutomationVersion(rule: AutomationRecord, expectedVersion: unknown, required = false) {
+  if (expectedVersion === undefined && !required) return 'CONFLICT';
+  if (typeof expectedVersion !== 'number' || !Number.isSafeInteger(expectedVersion) || expectedVersion < 1)
+    fail('INVALID_INPUT', '规则版本无效', 400);
+  if (rule.version !== expectedVersion) fail('REVISION_CONFLICT', '规则已变化，请刷新后重试', 409);
+  return 'REVISION_CONFLICT';
+}
+
+function automationAuthority(actor: TokenPayload, now: number): AutomationAuthority {
+  return { ownerId: actor.userId, ...(actor.companyId ? { companyId: actor.companyId } : {}), issuedAt: now, ...(actor.credentialVersion ? { credentialVersion: actor.credentialVersion } : {}) };
+}
+
+function updatedAutomation(rule: AutomationRecord, settings: Partial<ReturnType<typeof parseAutomationInput>>, actor: TokenPayload, now: number): AutomationRecord {
+  const enabled = settings.enabled ?? rule.enabled;
+  const reset = settings.trigger !== undefined && rule.trigger !== settings.trigger;
+  return {
+    ...rule, ...settings, version: rule.version + 1, updatedAt: new Date(now).toISOString(),
+    authority: enabled ? automationAuthority(actor, now) : undefined, halted: undefined, failures: undefined,
+    // 改了触发条件就重新记起点，已有邮件和到账不算新事件。
+    ...(reset ? { seen: [], primed: false, lastDay: undefined, since: undefined } : {}),
+  };
+}
+
+export async function setAutomationEnabled(db: any, actor: TokenPayload, workspaceId: string, id: string, input: Record<string, unknown>, now: number) {
+  const { row, value: rule } = await ownAutomation(db, actor, workspaceId, id);
+  const conflict = guardAutomationVersion(rule, input.expectedVersion, true);
+  if (typeof input.enabled !== 'boolean') fail('INVALID_INPUT', '启用状态无效', 400);
+  const next = updatedAutomation(rule, { enabled: input.enabled as boolean }, actor, now);
+  await writeAutomation(db, row, rule, next, conflict);
+  return next;
+}
+
 export async function saveAutomation(db: any, actor: TokenPayload, workspaceId: string, id: string | undefined, input: Record<string, unknown>, now: number) {
   const fields = parseAutomationInput(input), at = new Date(now).toISOString();
-  const authority: AutomationAuthority = { ownerId: actor.userId, ...(actor.companyId ? { companyId: actor.companyId } : {}), issuedAt: now, ...(actor.credentialVersion ? { credentialVersion: actor.credentialVersion } : {}) };
   if (id) {
-    const { row, value: c } = await ownAutomation(db, actor, workspaceId, id);
-    // 改了触发条件就重新记起点，已有邮件和到账不算新事件。
-    const reset = c.trigger !== fields.trigger;
-    const next: AutomationRecord = { ...c, ...fields, version: c.version + 1, updatedAt: at, authority: fields.enabled ? authority : undefined, halted: undefined, failures: undefined, ...(reset ? { seen: [], primed: false, lastDay: undefined, since: undefined } : {}) };
-    await writeAutomation(db, row, c, next); return next;
+    const { row, value: rule } = await ownAutomation(db, actor, workspaceId, id);
+    const conflict = guardAutomationVersion(rule, input.expectedVersion);
+    const next = updatedAutomation(rule, fields, actor, now);
+    await writeAutomation(db, row, rule, next, conflict);
+    return next;
   }
+  const authority = automationAuthority(actor, now);
   // The scoped receipt stores the original intent separately from the live, editable rule.
   const request = input.requestId === undefined ? undefined : AUTOMATION_PREFIX + 'create:'
     + createHash('sha256').update(JSON.stringify([actor.userId, text(input.requestId, '操作编号', 116)])).digest('hex');
@@ -100,10 +132,11 @@ export async function saveAutomation(db: any, actor: TokenPayload, workspaceId: 
   }
   return c;
 }
-export async function removeAutomation(db: any, actor: TokenPayload, workspaceId: string, id: string) {
+export async function removeAutomation(db: any, actor: TokenPayload, workspaceId: string, id: string, expectedVersion?: number) {
   // 回执记录不物理删除：标记移除后不再列出，也不再触发。
   const { row, value: c } = await ownAutomation(db, actor, workspaceId, id);
-  await writeAutomation(db, row, c, { ...c, version: c.version + 1, enabled: false, authority: undefined, removed: true });
+  const conflict = guardAutomationVersion(c, expectedVersion);
+  await writeAutomation(db, row, c, { ...c, version: c.version + 1, enabled: false, authority: undefined, removed: true }, conflict);
 }
 export async function dueAutomations(db: any, take: number): Promise<AutomationJob[]> {
   const rows = await db.mistCommandReceipt.findMany({ where: { inputHash: AUTOMATION_HASH, requestId: { startsWith: AUTOMATION_PREFIX }, result: { path: [AUTOMATION_FIELD, 'enabled'], equals: true } }, take });
