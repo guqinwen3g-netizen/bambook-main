@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {developmentReferenceReadRows,developmentReferenceCaseReadRecord} from './developmentReferenceReadRecords';
 /**
  * 工作助手业务读取（bambook_query / bambook_get / bambook_expand）。
@@ -270,38 +271,46 @@ export function agentGet(state: MistState, actor: TokenPayload, typeName: unknow
 }
 
 /** Report-only read. The quote and target order must both be visible in the current projection. */
-export function agentGetQuotationForOrder(state: MistState, actor: TokenPayload, id: unknown, orderId: unknown, inputOffset: unknown) {
+export function agentGetQuotationForOrder(
+  state: MistState, actor: TokenPayload, id: unknown, orderId: unknown, inputOffset: unknown,
+  continuation: { workspaceId?: string; sourceHash?: unknown } = {},
+) {
   const { type: quoteType, row } = find(state, actor, 'quotation', id);
   const { type: orderType, row: order } = find(state, actor, 'order', orderId);
   const quote = row as MarketQuotation;
   const offset = inputOffset === undefined ? 0 : inputOffset;
   if (typeof offset !== 'number' || !Number.isSafeInteger(offset) || offset < 0) deny('INVALID_INPUT', '条目偏移须为非负整数');
+  const source = continuation.sourceHash;
+  if ((offset > 0 || source !== undefined) && (typeof source !== 'string' || !/^[a-f0-9]{64}$/.test(source))) {
+    deny('INVALID_INPUT', '报价续读缺少有效的来源校验值，请重读首段');
+  }
 
   const legacy = quote.convertedOrderId === order.id && quotationLegacyConverted(quote);
-  const matched = quote.lines.flatMap((line, index) => legacy || line.conversion?.orderId === order.id
-    ? [{ line, lineNumber: index + 1 }] : []);
+  const matched = quote.lines.flatMap((line, index) => legacy || line.conversion?.orderId === order.id ? [{
+    lineNumber: index + 1, quotationLineId: line.id, name: line.name, style: line.style,
+    quantity: line.qty, unit: line.unit, unitPrice: line.price, quotationLineAmount: line.amount,
+  }] : []);
+  const data = { id: quote.id, code: quote.code, currency: quote.currency, total: quote.total, paymentTerms: quote.paymentTerms };
+  const quoteRef = ref(quoteType, quote), orderRef = ref(orderType, order);
+  const relation = legacy ? 'legacy_whole_quotation' : 'recorded_line_conversion';
+  // Hash exactly the authorized evidence shared by the pages. Workspace-wide edits do not invalidate it.
+  const sourceHash = createHash('sha256').update(JSON.stringify([
+    'quotation-order-lines-v1', continuation.workspaceId, quoteRef, orderRef, data, relation, matched,
+  ])).digest('hex');
+  if (source !== undefined && source !== sourceHash) {
+    deny('QUOTATION_LINES_SOURCE_CHANGED', '报价或订单的转单依据已变化，请重读首段', 409);
+  }
   if (!matched.length) deny('NOT_FOUND', '未找到该报价与订单的转单条目', 404);
   if (offset >= matched.length) deny('INVALID_INPUT', '条目偏移超出该订单的转单范围');
-
-  const data = { id: quote.id, code: quote.code, currency: quote.currency, total: quote.total, paymentTerms: quote.paymentTerms };
-  const scope = {
-    order: ref(orderType, order),
-    relation: legacy ? 'legacy_whole_quotation' : 'recorded_line_conversion',
-    matchingLineCount: matched.length,
-    offset,
-  };
+  const scope = { order: orderRef, relation, matchingLineCount: matched.length, offset, sourceHash };
   const lines = [];
   const response = {
-    ...ref(quoteType, quote), data, truncated: true,
+    ...quoteRef, data, truncated: true,
     readHint: '仅返回该订单的转单条目；total 是整份报价总额，本次读取不算完整报价回源。',
   };
   // Leave room for the result envelope, continuation offset, and explanation.
   let remaining = GET_LIMIT - 300 - JSON.stringify({ ...response, orderConversion: scope }).length;
-  for (const { line, lineNumber } of matched.slice(offset)) {
-    const item = {
-      lineNumber, quotationLineId: line.id, name: line.name, style: line.style,
-      quantity: line.qty, unit: line.unit, unitPrice: line.price, quotationLineAmount: line.amount,
-    };
+  for (const item of matched.slice(offset)) {
     const size = JSON.stringify(item).length + 1;
     if (size > remaining) break;
     lines.push(item);

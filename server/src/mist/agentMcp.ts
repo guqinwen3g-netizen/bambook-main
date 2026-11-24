@@ -60,7 +60,7 @@ const commandSchema = { type: 'object', description: 'Mist 类型化命令，typ
 const TOOLS = [
   { name: 'bambook_workspaces', description: '列出当前账号可访问的公司工作区（id、名称、版本）。', inputSchema: { type: 'object', properties: {} }, annotations: { readOnlyHint: true } },
   { name: 'bambook_query', description: '按对象类型和关键词查找业务对象（客户、订单、采购合同、出运等），结果已按当前账号权限和数据范围裁剪。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), type: { type: 'string', enum: AGENT_OBJECT_TYPES.map(t => t.type) }, q: str('关键词，可选'), limit: { type: 'integer', minimum: 1, maximum: 20 } }, required: ['workspaceId'] }, annotations: { readOnlyHint: true } },
-  { name: 'bambook_get', description: '读取当前授权对象的有界详情。追溯报价的转单条目时，type=quotation 可附 orderId，只读取该订单的对应报价条目；若 orderConversion 有 nextOffset，沿用相同报价与订单并以 lineOffset 继续。此窄读不算完整报价回源。taskClosePlan、taskReopenSource、shippingBasisSource、referenceRecords、referenceSource、referenceReturnSource是当前授权命令来源，缺失或null时不得从备注或旧记录补猜计划、令牌或快照。开发参考关系用development_reference按准确ID读取；整案关系列表超限时按devId与sampleId查询单关系，归还依据读取准确sample_movement。参考快照是历史事实，不等于原件正文已读取。attachments列出该对象引用且本人可见的附件（fileId、名称、类型），可再用bambook_file_text读取正文。truncated为true时不能据此覆盖完整字段；发送记录须结合effectiveStatus和收件人结果核对，不把服务器接受当作最终送达。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), type: { type: 'string', enum: AGENT_OBJECT_TYPES.map(t => t.type) }, id: str('对象 id'), orderId: str('仅报价定向读取使用：已授权的目标订单编号'), lineOffset: { type: 'integer', minimum: 0, description: '仅报价定向读取使用：orderConversion 的 nextOffset' } }, required: ['workspaceId', 'type', 'id'] }, annotations: { readOnlyHint: true } },
+  { name: 'bambook_get', description: '读取当前授权对象的有界详情。追溯报价的转单条目时，type=quotation 可附 orderId，只读取该订单的对应报价条目；若 orderConversion 有 nextOffset，沿用相同报价与订单，将 nextOffset 和 sourceHash 分别传为 lineOffset 和 lineSourceHash；来源变化时从首段重读。此窄读不算完整报价回源。taskClosePlan、taskReopenSource、shippingBasisSource、referenceRecords、referenceSource、referenceReturnSource是当前授权命令来源，缺失或null时不得从备注或旧记录补猜计划、令牌或快照。开发参考关系用development_reference按准确ID读取；整案关系列表超限时按devId与sampleId查询单关系，归还依据读取准确sample_movement。参考快照是历史事实，不等于原件正文已读取。attachments列出该对象引用且本人可见的附件（fileId、名称、类型），可再用bambook_file_text读取正文。truncated为true时不能据此覆盖完整字段；发送记录须结合effectiveStatus和收件人结果核对，不把服务器接受当作最终送达。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), type: { type: 'string', enum: AGENT_OBJECT_TYPES.map(t => t.type) }, id: str('对象 id'), orderId: str('仅报价定向读取使用：已授权的目标订单编号'), lineOffset: { type: 'integer', minimum: 0, description: '仅报价定向读取使用：orderConversion 的 nextOffset' }, lineSourceHash: str('非零 lineOffset 必填，原样传入 orderConversion 的 sourceHash') }, required: ['workspaceId', 'type', 'id'] }, annotations: { readOnlyHint: true } },
   {
     name: 'bambook_related',
     description: '展开一个业务对象的关联对象。已知要找的类型时填写 relatedType（如从订单追溯原报价填写 quotation），结果数和截断状态只针对该类型。',
@@ -122,9 +122,9 @@ async function callTool(repository: McpRepository, actor: TokenPayload, name: st
     case 'bambook_query': { const { workspace, actor: current } = await repository.getForAgent(actor, need(args, 'workspaceId')); return { revision: workspace.revision, ...agentQuery(workspace.state, current, { type: args.type, q: args.q, limit: args.limit }) }; }
     case 'bambook_get': {
       const { workspace, actor: current } = await repository.getForAgent(actor, need(args, 'workspaceId'));
-      if (args.orderId !== undefined || args.lineOffset !== undefined) {
+      if (args.orderId !== undefined || args.lineOffset !== undefined || args.lineSourceHash !== undefined) {
         if (args.type !== 'quotation' || args.orderId === undefined) throw new ToolInputError('转单条目定向读取需指定报价和订单');
-        return { revision: workspace.revision, object: agentGetQuotationForOrder(workspace.state, current, args.id, args.orderId, args.lineOffset) };
+        return { revision: workspace.revision, object: agentGetQuotationForOrder(workspace.state, current, args.id, args.orderId, args.lineOffset, { workspaceId: workspace.id, sourceHash: args.lineSourceHash }) };
       }
       return { revision: workspace.revision, object: agentGet(workspace.state, current, args.type, args.id, workspace) };
     }
