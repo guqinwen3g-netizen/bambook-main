@@ -6,6 +6,7 @@
 import React from 'react';
 import type { AgentIdentityView } from '../../../../server/src/shared/mistAgentIdentities';
 import type { AgentTaskPage, AgentTaskView } from '../../../../server/src/shared/mistAgentTasks';
+import type { TaskAttachmentRef } from '../../../../server/src/shared/mistTaskAttachments';
 import { normalizeAgentTaskIntentRefs, type AgentTaskIntentRef } from '../../../../server/src/shared/mistAgentTasks';
 import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { mistApiRequest } from './workspace';
@@ -221,7 +222,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     };
   }, [foregroundId, backgroundIds, progressId, base, available, scope]);
   const post = async (path: string, body: object) => mistApiRequest(base + path, { method: 'POST', body: JSON.stringify(body) }) as Promise<{ item?: AgentTaskView }>;
-  const send = async (text: string, history: AgentTaskView[] = [], conversationId?: string, intentRefs:AgentTaskIntentRef[]=[], files:File[]=[], attachmentRefs:ReadonlyArray<{taskId:string;fileId:string}>=[]): Promise<AgentTaskView | null> => {
+  const send = async (text: string, history: AgentTaskView[] = [], conversationId?: string, intentRefs:AgentTaskIntentRef[]=[], files:File[]=[], attachmentRefs:ReadonlyArray<TaskAttachmentRef>=[]): Promise<AgentTaskView | null> => {
     const message = text.trim(); if (!message || busy || !base||loading||error||!available) return null;
     const bound = scope; setBusy(true); setError('');
     try {

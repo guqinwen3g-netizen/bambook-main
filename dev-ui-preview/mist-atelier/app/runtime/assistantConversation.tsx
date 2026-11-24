@@ -1,11 +1,12 @@
 import React from 'react';
+import type { TaskAttachment, TaskAttachmentRef } from '../../../../server/src/shared/mistTaskAttachments';
 
 export type AssistantReply = {
   role: 'user' | 'assistant'; content: string;
   sources?: Array<{ id: string; label: string; view: string; entityId: string }>;
   revision?: number; truncated?: boolean;
 };
-export type AssistantAttachmentRef = { taskId: string; fileId: string; name: string; size: number };
+export type AssistantAttachmentRef = TaskAttachmentRef & Pick<TaskAttachment, 'name' | 'size'>;
 type ComposerDraft = {
   question: string;
   selected: Array<{ id: string; label: string }>;
