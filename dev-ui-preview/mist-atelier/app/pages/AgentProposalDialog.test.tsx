@@ -122,6 +122,30 @@ it('keeps a missing receipt open for read-only retry and closes only after confi
  }finally{act(()=>root.unmount());host.remove();}
 });
 
+it.each(['ordinary','protected','blocked'])('offers explicit replay only when the original confirmation is eligible (%s)',async(mode)=>{
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const proposal:any={id:'p',ownerId:'u',owner:'User',summary:['Update'],state:'pending',createdAt:'2026-11-15T00:00:00Z',
+  command:mode==='protected'?{type:'payable.payment.register',payload:{requestId:'r',amount:10}}:{type:'customer.update',payload:{id:'c',patch:{city:'York'}}},
+  ...(mode==='blocked'?{taskBlocked:'原任务已停止'}:{})};
+ const run=vi.fn(),onClose=vi.fn(),onRecoverOriginal=vi.fn().mockResolvedValue(false);
+ const onReplayOriginal=vi.fn().mockResolvedValue(true);
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ const find=(name:string)=>[...document.querySelectorAll('button')].find(b=>b.textContent===name);
+ try{
+  act(()=>root.render(<MistRoot><AgentProposalDialog proposal={proposal} pendingRequestId="original-receipt" pendingDecision="confirm"
+    onRecoverOriginal={onRecoverOriginal} onReplayOriginal={onReplayOriginal} run={run} onClose={onClose} onDone={()=>{}}/></MistRoot>));
+  expect(find('重试原操作')).toBeUndefined();
+  await act(async()=>find('核对原请求')!.click());
+  expect(onReplayOriginal).not.toHaveBeenCalled();
+  if(mode==='ordinary'){
+    await act(async()=>find('重试原操作')!.click());
+    expect(onReplayOriginal).toHaveBeenCalledExactlyOnceWith('original-receipt');
+    expect(onClose).toHaveBeenCalledOnce();
+  }else expect(find('重试原操作')).toBeUndefined();
+  expect(run).not.toHaveBeenCalled();
+ }finally{act(()=>root.unmount());host.remove();}
+});
+
 it.each(['proposal','company'])('does not report a late rejection in a different %s or consume its global failure',async(change)=>{
  (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
  const make=(id:string):any=>({id,ownerId:'u',owner:'User',summary:[id],state:'pending',createdAt:'2026-11-15T00:00:00Z',command:{type:'customer.update',payload:{id:'customer',patch:{city:'York'}}}});
