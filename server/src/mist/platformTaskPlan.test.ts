@@ -1,5 +1,5 @@
 import{expect,it}from'vitest';
-import{compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory}from'./platformTaskPlan';
+import{compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation}from'./platformTaskPlan';
 import{platformReasoning}from'../ai/platformModel';
 
 it('accepts only a bound business tool decision, without thoughts, owner impersonation or model request IDs',()=>{
@@ -52,4 +52,21 @@ it('sends identical read bodies once while keeping each operation and changed re
   expect(history.recent[1].result).toEqual(result);
   expect(history.recent[2].result).toEqual({...result,revision:64});
   expect(first.result).toEqual(result);
+});
+
+
+it('uses the last verified continuation for the same file and only exposes a short cursor to the model',()=>{
+ const read=(fileId:string)=>({name:'bambook_file_text',arguments:{fileId}});
+ const next=(fileId:string)=>({name:'bambook_file_text',arguments:{fileId,cursor:'next',maxChars:7000}});
+ const first={...newPlatformTaskStep(read('first'),1),result:{hasMore:true,nextCursor:'aft1.original-first',sourceHash:'source-one'}};
+ const other={...newPlatformTaskStep(read('other'),2),result:{hasMore:true,nextCursor:'aft1.original-other'}};
+ const failed={...newPlatformTaskStep(next('first'),3),result:{error:true}};
+ const history=platformTaskHistory([first,other,failed]);
+ expect(history.recent[0].result).toMatchObject({nextCursor:'next',sourceHash:'source-one'});
+ expect(JSON.stringify(history)).not.toContain('aft1.original');
+ expect(first.result.nextCursor).toBe('aft1.original-first');
+ expect(resolvePlatformFileContinuation(next('first'),[first,other,failed]).arguments).toEqual({fileId:'first',cursor:'aft1.original-first',maxChars:7000});
+ expect(resolvePlatformFileContinuation(next('missing'),[first,other])).toEqual(next('missing'));
+ const done={...newPlatformTaskStep(next('first'),4),result:{hasMore:false}};
+ expect(resolvePlatformFileContinuation(next('first'),[first,other,done])).toEqual(next('first'));
 });

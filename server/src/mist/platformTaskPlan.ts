@@ -27,6 +27,16 @@ export function parsePlatformTaskPlan(text:string):PlatformTaskPlan{
 export function newPlatformTaskStep(plan:PlatformTaskPlan,now:number):PlatformTaskStep{
   const id='platform_'+randomUUID();return{id,plan:{...plan,arguments:{...plan.arguments,...(plan.name==='bambook_execute'||plan.name==='bambook_task'&&plan.arguments.action!=='status'?{requestId:id}:{})}},at:new Date(now).toISOString()};
 }
+/** Only the platform runner expands this shorthand. It uses the latest successful window of the same file. */
+export function resolvePlatformFileContinuation(plan: PlatformTaskPlan, steps: PlatformTaskStep[]): PlatformTaskPlan {
+  const {fileId,cursor}=plan.arguments;
+  if(plan.name!=='bambook_file_text'||cursor!=='next'||typeof fileId!=='string')return plan;
+  const last=[...steps].reverse().find(step=>step.plan.name==='bambook_file_text'&&step.plan.arguments.fileId===fileId
+    &&step.result!==undefined&&!(step.result as {error?:boolean})?.error);
+  const result=last?.result as {hasMore?:boolean;nextCursor?:unknown}|undefined;
+  if(last?.compacted||result?.hasMore!==true||typeof result.nextCursor!=='string'||!result.nextCursor.startsWith('aft1.'))return plan;
+  return {...plan,arguments:{...plan.arguments,cursor:result.nextCursor}};
+}
 /** Model context is explicit about omitted history; it cannot silently become full-read evidence. */
 export function platformTaskHistory(steps:PlatformTaskStep[]){
   let remaining=240_000;const recent:Array<{operationId:string;name:string;arguments:unknown;result:unknown;compacted?:boolean}>=[];
@@ -38,8 +48,12 @@ export function platformTaskHistory(steps:PlatformTaskStep[]){
       ? createHash('sha256').update(JSON.stringify([step.plan.name,step.plan.arguments,step.result])).digest('hex')
       : undefined;
     const duplicateOf=key&&readResults.get(key);
-    const result=duplicateOf?{duplicateOf,readHint:'此读取的参数和完整结果与所引用步骤相同，请查看该步骤回执。'}:step.result;
-    const item={operationId:step.id,name:step.plan.name,arguments:step.plan.arguments,result,compacted:step.compacted},size=JSON.stringify(item).length;
+    const fileRead=step.plan.name==='bambook_file_text';
+    const window=fileRead?step.result as {nextCursor?:unknown}|undefined:undefined;
+    const displayedResult=typeof window?.nextCursor==='string'?{...window,nextCursor:'next'}:step.result;
+    const args=fileRead&&typeof step.plan.arguments.cursor==='string'?{...step.plan.arguments,cursor:'next'}:step.plan.arguments;
+    const result=duplicateOf?{duplicateOf,readHint:'此读取的参数和完整结果与所引用步骤相同，请查看该步骤回执。'}:displayedResult;
+    const item={operationId:step.id,name:step.plan.name,arguments:args,result,compacted:step.compacted},size=JSON.stringify(item).length;
     if(size>remaining)break;
     recent.unshift(item);remaining-=size;
     if(key&&!duplicateOf)readResults.set(key,step.id);
