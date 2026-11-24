@@ -67,10 +67,38 @@ export function useConversationMeta(workspaceId: string | undefined, enabled: bo
   return { items, save };
 }
 
+const TASK_READ_TIMEOUT_MS = 5000;
+const TASK_RETRY_INTERVAL_MS = 1000;
+const TASK_RETRY_MAX_MS = 8000;
+
+async function readCoworkTask(base: string, id: string, signal: AbortSignal): Promise<AgentTaskView> {
+  if (signal.aborted) throw signal.reason;
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal.reason);
+  signal.addEventListener('abort', abort, { once: true });
+  const timer = window.setTimeout(() => controller.abort(new Error('任务暂时无法核对')), TASK_READ_TIMEOUT_MS);
+  // Release the poll slot at the deadline even if response processing does not settle promptly.
+  const interrupted = new Promise<never>((_, reject) => {
+    controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true });
+  });
+  try {
+    const { item } = await Promise.race([
+      mistApiRequest(base + '/agent-tasks/' + encodeURIComponent(id), { cache: 'no-store', signal: controller.signal }) as Promise<{ item: AgentTaskView }>,
+      interrupted,
+    ]);
+    if (item?.id !== id) throw new Error('任务暂时无法核对');
+    return item;
+  } finally {
+    window.clearTimeout(timer);
+    signal.removeEventListener('abort', abort);
+  }
+}
+
 export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string) {
   const base = workspaceId ? '/api/mist/workspaces/' + encodeURIComponent(workspaceId) : '';
   const [available, setAvailable] = React.useState(false), [tasks, setTasks] = React.useState<AgentTaskView[]>([]);
   const [loading, setLoading] = React.useState(true), [error, setError] = React.useState(''), [busy, setBusy] = React.useState(false), [more, setMore] = React.useState<string | undefined>(undefined);
+  const [staleTask, setStaleTask] = React.useState<{ scope: string; id: string }>();
   const live = React.useRef(scope); live.current = scope;
   const version = React.useRef(0), pending = React.useRef<{ fingerprint: string; id: string } | undefined>(undefined);
   const lastAvailability=React.useRef<{scope:string;available:boolean}|null>(null);
@@ -98,12 +126,15 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const activeTasks = tasks.filter(t => COWORK_ACTIVE.includes(t.state));
   const foregroundId = activeTasks.filter(t => visibleConversationId && t.conversationId === visibleConversationId
     && (t.state === 'running' || t.state === 'queued')).at(-1)?.id;
+  const progressId = foregroundId ?? activeTasks.filter(t => visibleConversationId && t.conversationId === visibleConversationId).at(-1)?.id;
+  const progressStale = !!progressId && staleTask?.scope === scope && staleTask.id === progressId;
   const backgroundIds = activeTasks.filter(t => t.id !== foregroundId).map(t => t.id).join(',');
   React.useEffect(() => {
     if ((!foregroundId && !backgroundIds) || !base || !available) return;
     const controller = new AbortController();
     const background = backgroundIds ? backgroundIds.split(',') : [];
     const inFlight = new Set<string>();
+    const retry = new Map<string, { delay: number; at: number }>();
     let lastBackground = 0;
     const poll = () => {
       if (controller.signal.aborted || live.current !== scope || document.visibilityState === 'hidden') return;
@@ -114,21 +145,24 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         lastBackground = now;
       }
       for (const id of ids) {
-        if (inFlight.has(id)) continue;
+        if (inFlight.has(id) || now < (retry.get(id)?.at ?? 0)) continue;
         inFlight.add(id);
-        void (mistApiRequest(base + '/agent-tasks/' + encodeURIComponent(id), { signal: controller.signal }) as Promise<{ item: AgentTaskView }>)
-          .then(({ item: next }) => {
-            if (controller.signal.aborted || live.current !== scope || next?.id !== id) return;
+        void readCoworkTask(base, id, controller.signal)
+          .then(next => {
+            if (controller.signal.aborted || live.current !== scope) return;
+            retry.delete(id);
             setTasks(old => old.map(task => {
               if (task.id !== id || next.updatedAt < task.updatedAt) return task;
               return task.conversationId && !next.conversationId ? { ...next, conversationId: task.conversationId } : next;
             }));
-            if (!foregroundId || foregroundId === id) setError(old => old === '进度暂未更新' ? '' : old);
+            if (progressId === id) setStaleTask(old => old?.scope === scope && old.id === id ? undefined : old);
           })
           .catch(() => {
-            if (!controller.signal.aborted && live.current === scope && (!foregroundId || foregroundId === id)) {
-              setError(old => old || '进度暂未更新');
-            }
+            if (controller.signal.aborted || live.current !== scope) return;
+            const previous = retry.get(id);
+            const delay = previous ? Math.min(TASK_RETRY_MAX_MS, previous.delay * 2) : TASK_RETRY_INTERVAL_MS;
+            retry.set(id, { delay, at: Date.now() + delay });
+            if (progressId === id) setStaleTask(old => old?.scope === scope && old.id === id ? old : { scope, id });
           })
           .finally(() => inFlight.delete(id));
       }
@@ -142,7 +176,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', refreshVisible);
     };
-  }, [foregroundId, backgroundIds, base, available, scope]);
+  }, [foregroundId, backgroundIds, progressId, base, available, scope]);
   const post = async (path: string, body: object) => mistApiRequest(base + path, { method: 'POST', body: JSON.stringify(body) }) as Promise<{ item?: AgentTaskView }>;
   const send = async (text: string, history: AgentTaskView[] = [], conversationId?: string, intentRefs:AgentTaskIntentRef[]=[], files:File[]=[]): Promise<AgentTaskView | null> => {
     const message = text.trim(); if (!message || busy || !base||loading||error||!available) return null;
@@ -172,9 +206,9 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   };
   const refreshTask = async (taskId: string, signal: AbortSignal) => {
     const bound = scope;
-    const { item } = await mistApiRequest(base + '/agent-tasks/' + encodeURIComponent(taskId), { signal }) as { item: AgentTaskView };
+    const item = await readCoworkTask(base, taskId, signal);
     if (signal.aborted || live.current !== bound) return;
-    if (item?.id !== taskId) throw new Error('任务暂时无法核对');
+    setStaleTask(old => old?.scope === bound && old.id === taskId ? undefined : old);
     setTasks(old => old.map(task => task.id === taskId && item.updatedAt >= task.updatedAt
       ? { ...item, conversationId: item.conversationId ?? task.conversationId } : task));
     return item;
@@ -195,5 +229,5 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const cancel = async (task: AgentTaskView) => {
     try { await post('/agent-tasks/' + encodeURIComponent(task.id) + '/cancel', { requestId: crypto.randomUUID(), version: task.version }); } catch (e) { setError(e instanceof Error ? e.message : '未能停止'); } finally { await load(); }
   };
-  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, error, busy, send, refreshTask, answer, cancel, reload: load, loadMore, hasMore: !!more, track: (task: AgentTaskView) => setTasks(old => [...old.filter(t => t.id !== task.id), task]) };
+  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, error, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, hasMore: !!more, track: (task: AgentTaskView) => setTasks(old => [...old.filter(t => t.id !== task.id), task]) };
 }

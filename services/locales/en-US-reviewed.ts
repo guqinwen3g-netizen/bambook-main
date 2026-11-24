@@ -597,6 +597,7 @@ export const reviewedEnglish: Record<string, string> = {
   '正在读取业务数据':'Loading business records',
   '业务数据未读取':'Business records unavailable',
   '小竹操作未完成':'Xiaozhu action incomplete',
+  '进度暂未更新，正在重试':'Progress update delayed. Retrying…',
   '重新读取任务':'Reload tasks',
   '任务服务暂不可用':'Task service unavailable',
   '规则读取失败':'Could not load rules',
