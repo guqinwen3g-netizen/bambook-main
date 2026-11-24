@@ -607,6 +607,7 @@ export const reviewedEnglish: Record<string, string> = {
   '请恢复原附件后重试，或先核对提交结果':'Restore the original attachments to retry, or check the submission first',
   '已找回提交的任务':'Submitted task recovered',
   '正在核对停止结果':'Checking whether the task stopped',
+  '选择要核对的任务':'Choose a task to check',
   '停止结果未确认，可重试':'Stop not confirmed. Try again.',
   '回答未确认，可重试':'Answer not confirmed. Try again.',
   '引用附件':'Reuse attachment',

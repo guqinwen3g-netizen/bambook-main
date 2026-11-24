@@ -190,6 +190,7 @@ export function AssistantPage(){
     try{sessionStorage.setItem(convKey,id);localStorage.setItem(convKey,id);}catch{/* 本页状态仍可切换 */}
     setConversationIdState(id);
     setNavDrawer(false);
+    setStatusChoices(undefined);
   };
   const attachmentScope=scope+':'+conversationId;
   const liveConversation=React.useRef(conversationId);liveConversation.current=conversationId;
@@ -265,22 +266,27 @@ export function AssistantPage(){
   // A stored task can still be reviewed with the worker offline. A text-only model cannot continue its task thread.
   const useTaskThread=cowork.available||visibleTasks.length>0;
   const taskThreadOffline=!cowork.available&&visibleTasks.length>0;
-  const [statusCheck,setStatusCheck]=React.useState<{scope:string;taskId:string}>();
+  const [statusCheck,setStatusCheck]=React.useState<{scope:string;taskId:string;named?:boolean}>();
+  const [statusChoices,setStatusChoices]=React.useState<{scope:string;ids:string[]}>();
   const unfinishedTasks=visibleTasks.filter(task=>COWORK_ACTIVE.includes(task.state)||task.state==='paused');
   const statusTarget=unfinishedTasks.length===1 ? unfinishedTasks[0]
     : unfinishedTasks.length===0 ? visibleTasks.filter(task=>!isCurrentTaskStatusQuestion(splitRequest(task.instructions))).at(-1)
     : undefined;
-  const statusTask=!files.length&&!attachmentRefs.length&&!selected.length&&isCurrentTaskStatusQuestion(question) ? statusTarget : undefined;
+  const statusQuestion=!files.length&&!attachmentRefs.length&&!selected.length&&isCurrentTaskStatusQuestion(question);
+  const statusTask=statusQuestion ? statusTarget : undefined;
+  const ambiguousStatus=statusQuestion&&unfinishedTasks.length>1;
+  const activeStatusChoices=statusChoices?.scope===attachmentScope?statusChoices:undefined;
   const checkedTask=statusCheck?.scope===attachmentScope ? visibleTasks.find(task=>task.id===statusCheck.taskId) : undefined;
   const canAsk=(!(files.length||attachmentRefs.length)||cowork.available)&&!taskThreadOffline&&!cowork.error&&(cowork.available||!!configuration?.configured);
-  const ready=!busy&&!cowork.loading&&canChat&&!!question.trim()&&(!!statusTask||canAsk);
-  const checkCurrentTask=async(taskId:string)=>{
+  const ready=!busy&&!cowork.loading&&canChat&&!!question.trim()&&(!!statusTask||ambiguousStatus||canAsk);
+  const checkCurrentTask=async(taskId:string,named=false)=>{
     const controller=new AbortController();
     active.current=controller;sendLock.current=true;setBusy(true);setError('');
     try {
       const checked=await cowork.refreshTask(taskId,controller.signal);
       if(checked&&live.current===scope&&liveConversation.current===conversationId){
-        setStatusCheck({scope:attachmentScope,taskId});setQuestion('');
+        setStatusCheck({scope:attachmentScope,taskId,named});setQuestion('');
+        setStatusChoices(undefined);
       }
     } catch {
       if(!controller.signal.aborted&&live.current===scope&&liveConversation.current===conversationId)setError('任务暂时无法核对');
@@ -292,6 +298,11 @@ export function AssistantPage(){
     if(!ready||sendLock.current)return;
     if(statusTask){await checkCurrentTask(statusTask.id);return;}
     setStatusCheck(undefined);
+    if(ambiguousStatus){
+      setError('');
+      setStatusChoices({scope:attachmentScope,ids:unfinishedTasks.map(task=>task.id)});
+      return;
+    }
     if(cowork.available&&canChat){
       if(sendLock.current||busy||!question.trim())return;
       sendLock.current=true;
@@ -390,10 +401,21 @@ export function AssistantPage(){
             </div>
           </div>
           {!atBottom&&<IconButton className="mist-xz-tobottom" icon={ArrowDown} label={uiText('回到最新')} onClick={()=>toBottom()}/>}
-          <div className="mist-xz-dock"><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}{checkedTask&&<p className="mist-xz-hint" role="status">{ui`当前任务 · ${uiText(xiaozhuTaskStatusLabel(checkedTask))}`}</p>}{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</div></div>
+          <div className="mist-xz-dock"><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}{checkedTask&&<p className="mist-xz-hint" role="status">{(statusCheck?.named?checkedTask.name:uiText('当前任务'))+' · '+uiText(xiaozhuTaskStatusLabel(checkedTask))}</p>}{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</div></div>
         </>:<div className="mist-xz-scroll"><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}<XiaozhuEmpty name={w.session.user?.displayName} suggestions={xiaozhuSuggestions(w.state)} onPick={p=>{setQuestion(uiText(p));field.current?.focus();}}>{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</XiaozhuEmpty></div></div>}
       </div>
     </div>
+    <Drawer open={!!activeStatusChoices} onClose={()=>setStatusChoices(undefined)} title={uiText('选择要核对的任务')}>
+      {error&&<Banner tone="warn" title={uiText(error)}/>}
+      <div className="mist-chat-picks">{visibleTasks.filter(task=>activeStatusChoices?.ids.includes(task.id)).map(task=>(
+        <div key={task.id} className="mist-chat-pick">
+          <div className="mist-chat-pick-t"><b>{task.name}</b><span>{businessWhen(task.createdAt)}</span></div>
+          <Pill>{uiText(xiaozhuTaskStatusLabel(task))}</Pill>
+          <Button size="sm" variant="quiet" aria-label={uiText('核对状态')+' '+task.name} disabled={busy}
+            onClick={()=>void checkCurrentTask(task.id,true)}>{uiText('核对状态')}</Button>
+        </div>
+      ))}</div>
+    </Drawer>
     <Drawer open={picker} onClose={()=>setPicker(false)} title={uiText("引用资料")}>
       <Toolbar>
         <Select aria-label={uiText("检索对象")} value={kind} options={[{value:'attachments',label:'对话附件'},{value:'orders',label:'订单'},{value:'customers',label:'客户'},{value:'purchases',label:'采购'},{value:'shipments',label:'出运'},{value:'developments',label:'开发案'},{value:'invoices',label:'发票'},{value:'risks',label:'风险'}]} onChange={e=>{setKind(e.target.value);setQuery('');}}/>

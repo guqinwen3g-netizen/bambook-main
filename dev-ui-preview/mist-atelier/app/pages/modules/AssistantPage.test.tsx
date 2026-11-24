@@ -14,6 +14,41 @@ let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
 const view=(active=true, taskId?:string)=> <Nav.Provider value={{route:{view:'assistant',...(taskId?{section:'tasks',id:taskId}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
 const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
 
+it('asks which running task to check before issuing a read-only status request', async () => {
+  const conversationId='c_status_choices';
+  const a={
+    id:'check-a',identityId:'personal',executor:'platform',conversationId,name:'核对订单 A',instructions:'核对订单 A',
+    state:'running',version:1,canControl:true,questions:[],waitingProposalIds:[],
+    createdAt:'2026-11-24T01:00:00Z',updatedAt:'2026-11-24T01:00:00Z',
+  };
+  const b={...a,id:'check-b',name:'核对订单 B',instructions:'核对订单 B',createdAt:'2026-11-24T01:01:00Z'};
+  let picked=false;
+  sessionStorage.setItem('mist.xiaozhu.conversation:session-a:workspace',conversationId);
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async (url:string)=>{
+    if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    if(url.endsWith('/check-a'))return {item:a};
+    if(url.endsWith('/check-b'))return {item:picked?{...b,state:'succeeded',version:2,result:'已核对 B'}:b};
+    return {items:url.endsWith('/agent-tasks')?[a,b]:[],nextCursor:null};
+  });
+  await mount();
+  await question('完成了吗？');
+  await click('发送');
+  expect(document.body.textContent).toContain('选择要核对的任务');
+  expect(host.querySelector('textarea')?.value).toBe('完成了吗？');
+  await click('关闭');
+  expect(host.querySelector('textarea')?.value).toBe('完成了吗？');
+  await click('发送');
+  const before=mock.api.mock.calls.length;
+  picked=true;
+  await click('核对状态 核对订单 B');
+  expect(mock.api.mock.calls.slice(before).some(([url])=>url.endsWith('/check-b'))).toBe(true);
+  expect(mock.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+  expect(host.textContent).toContain('核对订单 B · 已完成');
+  expect(host.querySelector('textarea')?.value).toBe('');
+});
+
 it('lets a user stop one of two running tasks without losing the unsent question', async () => {
   const conversationId='c_parallel_stop';
   const first={
