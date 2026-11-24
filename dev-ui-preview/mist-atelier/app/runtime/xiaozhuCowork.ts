@@ -68,30 +68,54 @@ export function useConversationMeta(workspaceId: string | undefined, enabled: bo
 }
 
 const TASK_READ_TIMEOUT_MS = 5000;
+const HISTORY_READ_TIMEOUT_MS = 10_000;
 const TASK_RETRY_INTERVAL_MS = 1000;
 const TASK_RETRY_MAX_MS = 8000;
 
+async function withReadDeadline<T>(controller: AbortController, timeout: number, message: string, read: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const { signal } = controller;
+  signal.throwIfAborted();
+  const timer = window.setTimeout(() => controller.abort(new Error(message)), timeout);
+  let onAbort: () => void = () => {};
+  // Release the read slot even if the request or response processing does not settle after abort.
+  const interrupted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([read(signal), interrupted]);
+  } finally {
+    window.clearTimeout(timer);
+    signal.removeEventListener('abort', onAbort);
+  }
+}
+
 async function readCoworkTask(base: string, id: string, signal: AbortSignal): Promise<AgentTaskView> {
-  if (signal.aborted) throw signal.reason;
+  signal.throwIfAborted();
   const controller = new AbortController();
   const abort = () => controller.abort(signal.reason);
   signal.addEventListener('abort', abort, { once: true });
-  const timer = window.setTimeout(() => controller.abort(new Error('任务暂时无法核对')), TASK_READ_TIMEOUT_MS);
-  // Release the poll slot at the deadline even if response processing does not settle promptly.
-  const interrupted = new Promise<never>((_, reject) => {
-    controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true });
-  });
   try {
-    const { item } = await Promise.race([
-      mistApiRequest(base + '/agent-tasks/' + encodeURIComponent(id), { cache: 'no-store', signal: controller.signal }) as Promise<{ item: AgentTaskView }>,
-      interrupted,
-    ]);
+    const { item } = await withReadDeadline(controller, TASK_READ_TIMEOUT_MS, '任务暂时无法核对', signal =>
+      mistApiRequest(base + '/agent-tasks/' + encodeURIComponent(id), { cache: 'no-store', signal }) as Promise<{ item: AgentTaskView }>);
     if (item?.id !== id) throw new Error('任务暂时无法核对');
     return item;
   } finally {
-    window.clearTimeout(timer);
     signal.removeEventListener('abort', abort);
   }
+}
+
+async function readCoworkHistory(base: string, signal: AbortSignal) {
+  const items: AgentTaskView[] = [];
+  let cursor: string | undefined;
+  for (let i = 0; i < LIST_PAGES; i++) {
+    signal.throwIfAborted();
+    const page = await mistApiRequest(base + '/agent-tasks' + (cursor ? '?cursor=' + encodeURIComponent(cursor) : ''), { signal }) as AgentTaskPage;
+    items.push(...page.items);
+    cursor = page.nextCursor ?? undefined;
+    if (!cursor) break;
+  }
+  return { items, cursor };
 }
 
 export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string) {
@@ -101,17 +125,21 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const [staleTask, setStaleTask] = React.useState<{ scope: string; id: string }>();
   const live = React.useRef(scope); live.current = scope;
   const version = React.useRef(0), pending = React.useRef<{ fingerprint: string; id: string } | undefined>(undefined);
+  const historyRead = React.useRef<AbortController | undefined>(undefined);
   const lastAvailability=React.useRef<{scope:string;available:boolean}|null>(null);
   const load = React.useCallback(async () => {
     const run = ++version.current, bound = scope;
+    historyRead.current?.abort();
     if (!base || !enabled) { setLoading(false); setAvailable(false); return; }
+    const controller = new AbortController();
+    historyRead.current = controller;
     setLoading(true);setError('');
     try {
-      const [mine, page, caps] = await Promise.all([
-        mistApiRequest(base + '/agent-identities?scope=mine') as Promise<{ items: AgentIdentityView[] }>,
-        (async () => { const items: AgentTaskView[] = []; let cursor: string | undefined; for (let i = 0; i < LIST_PAGES; i++) { const page = await mistApiRequest(base + '/agent-tasks' + (cursor ? '?cursor=' + encodeURIComponent(cursor) : '')) as AgentTaskPage; items.push(...page.items); cursor = page.nextCursor ?? undefined; if (!cursor) break; } return { items, cursor }; })(),
-        mistApiRequest(base + '/agent-task-capabilities') as Promise<{ platformAvailable: boolean }>,
-      ]);
+      const [mine, page, caps] = await withReadDeadline(controller, HISTORY_READ_TIMEOUT_MS, '对话读取超时', signal => Promise.all([
+        mistApiRequest(base + '/agent-identities?scope=mine', { signal }) as Promise<{ items: AgentIdentityView[] }>,
+        readCoworkHistory(base, signal),
+        mistApiRequest(base + '/agent-task-capabilities', { signal }) as Promise<{ platformAvailable: boolean }>,
+      ]));
       if (run !== version.current || live.current !== bound) return;
       const own = mine.items.find(i => i.kind === 'personal') ?? null;
       const nextAvailable=caps.platformAvailable === true && own?.state !== 'disabled';lastAvailability.current={scope:bound,available:nextAvailable};setAvailable(nextAvailable);
@@ -120,9 +148,13 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     } catch (e) {
       // A failed read cannot establish that the task channel is unavailable, or replace a known conversation mode.
       if (run === version.current && live.current === bound) { setAvailable(lastAvailability.current?.scope===bound?lastAvailability.current.available:false); setError(e instanceof Error ? e.message : '读取失败'); }
-    } finally { if (run === version.current && live.current === bound) setLoading(false); }
+    } finally {
+      controller.abort();
+      if (historyRead.current === controller) historyRead.current = undefined;
+      if (run === version.current && live.current === bound) setLoading(false);
+    }
   }, [base, enabled, scope]);
-  React.useEffect(() => { setTasks([]); setAvailable(false); setLoading(true);lastAvailability.current=null; pending.current = undefined; void load(); return () => { version.current++; }; }, [load]);
+  React.useEffect(() => { setTasks([]); setAvailable(false); setLoading(true);lastAvailability.current=null; pending.current = undefined; void load(); return () => { version.current++; historyRead.current?.abort(); }; }, [load]);
   const activeTasks = tasks.filter(t => COWORK_ACTIVE.includes(t.state));
   const foregroundId = activeTasks.filter(t => visibleConversationId && t.conversationId === visibleConversationId
     && (t.state === 'running' || t.state === 'queued')).at(-1)?.id;

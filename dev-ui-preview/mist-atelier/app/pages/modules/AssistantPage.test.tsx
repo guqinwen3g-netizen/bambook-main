@@ -55,6 +55,41 @@ it('shows a task-read failure and preserves the unsent question instead of silen
  mock.fetch.mockResolvedValue(response({configured:true,models:['test-model']}));mock.api.mockRejectedValue(new Error('任务列表暂时不可读取'));await mount();await question('保留未发送的问题');expect(host.textContent).toContain('任务列表暂时不可读取');expect(button('重新读取任务')).toBeTruthy();expect(button('发送')!.disabled).toBe(true);await click('发送');expect(mock.fetch.mock.calls.filter(([url])=>!String(url).endsWith('/status'))).toHaveLength(0);expect((host.querySelector('textarea')as HTMLTextAreaElement).value).toBe('保留未发送的问题');
 });
 
+it('shows a retry after a stalled opening request and restores the task conversation', async () => {
+  vi.useFakeTimers();
+  try {
+    let capabilityReads = 0;
+    mock.fetch.mockResolvedValue(response({ configured: true, models: ['test-model'] }));
+    mock.api.mockImplementation(async (url: string) => {
+      if (url.includes('/agent-identities')) return { items: [{ id: 'personal', kind: 'personal', state: 'active' }] };
+      if (url.endsWith('/agent-task-capabilities')) {
+        if (++capabilityReads === 1) return new Promise(() => {});
+        return { platformAvailable: true };
+      }
+      if (url.endsWith('/agent-tasks')) return { items: [{
+        id: 'original', identityId: 'personal', executor: 'platform', conversationId: 'history-recovery',
+        instructions: '核对原订单记录', state: 'succeeded', result: '原订单结果已恢复',
+        questions: [], waitingProposalIds: [], canControl: false,
+        createdAt: '2026-11-07T00:00:00Z', updatedAt: '2026-11-07T01:00:00Z',
+      }] };
+      return { items: [] };
+    });
+    await mount();
+    expect(host.querySelector('[aria-label="正在读取对话"]')).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(host.querySelector('[aria-label="正在读取对话"]')).toBeNull();
+    expect(host.textContent).toContain('对话读取超时');
+    await click('重新读取任务');
+    await click('核对原订单记录');
+    expect(host.textContent).toContain('原订单结果已恢复');
+    expect(host.textContent).not.toContain('对话读取超时');
+    expect(mock.api.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  } finally {
+    localStorage.removeItem('mist.xiaozhu.conversation:session-a:workspace');
+    vi.useRealTimers();
+  }
+});
+
 it('retains the answer, references and an unfinished question when returning from a source page',async()=>{
   mock.fetch.mockImplementation(async(url:string)=>response(url.endsWith('/status')?{configured:true,models:['test-model']}:{text:'Answer to retain',mode:'read_only',revision:1,sources:[{id:'orders:order',label:'SO-SELECTED',view:'orders/detail',entityId:'order'}]}));
   await mount(); await click('引用业务记录'); await click('加入问题'); await question('First question'); await click('发送');
