@@ -19,6 +19,41 @@ it('opens the exact notification task even when it is absent from the first list
  seam.routeId='older-task';seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/older-task')?{item:{...row(),id:'older-task',name:'核对旧交接',state:'waiting_human',questions:[{id:'q',question:'请提供书面交期。',askedAt:'2026-11-01T00:00:00Z'}]}}:url.includes('/history')?{items:[],nextCursor:null}:url.includes('agent-identities')?{items:[identity()]}:{items:[],nextCursor:null}));
  act(paint);await flush();const dialog=getByRole(document.body,'dialog',{name:'核对旧交接'});expect(dialog.textContent).toContain('请提供书面交期。');expect(getByRole(dialog,'button',{name:'补充资料'})).toBeTruthy();expect(seam.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
 });
+it('does not show list-cached instructions while checking fresh detail access',async()=>{
+ let receive!: (value:unknown)=>void;
+ const fresh=new Promise(resolve=>{receive=resolve;});
+ seam.api.mockImplementation((url:string)=>url.endsWith('/task')?fresh:Promise.resolve(url.includes('agent-identities')?{items:[identity()]}:url.includes('/history')?{items:[]}:{items:[row()],nextCursor:null}));
+ act(paint);await flush();await click(getByText(host,'核对邮件'));
+ expect(getByRole(document.body,'dialog').textContent).not.toContain(row().instructions);
+ await act(async()=>receive({item:{...row(),name:'Agent任务',state:'access_changed',instructions:''}}));await flush();
+ expect(getByRole(document.body,'dialog',{name:'Agent任务'}).textContent).toContain('权限已变化');
+});
+it('opens the exact notified task while its history has yet to respond',async()=>{
+ seam.routeId='task';
+ seam.api.mockImplementation((url:string)=>url.includes('/history')?new Promise(()=>{}):Promise.resolve(url.endsWith('/task')?{item:row()}:url.includes('agent-identities')?{items:[identity()]}:{items:[],nextCursor:null}));
+ act(paint);await flush();
+ expect(getByRole(document.body,'dialog',{name:'核对邮件'}).textContent).toContain(row().instructions);
+});
+it('retries the exact task after a detail timeout without showing list-cached content',async()=>{
+ vi.useFakeTimers();
+ try {
+  seam.routeId='task';
+  let attempts=0,firstSignal:AbortSignal|undefined;
+  seam.api.mockImplementation((url:string,init:any)=>{
+   if(url.endsWith('/task')&&++attempts===1){firstSignal=init.signal;return new Promise(()=>{});}
+   return Promise.resolve(url.endsWith('/task')?{item:row()}:url.includes('agent-identities')?{items:[identity()]}:url.includes('/history')?{items:[]}:{items:[row()],nextCursor:null});
+  });
+  act(paint);await flush();
+  await act(async()=>vi.advanceTimersByTimeAsync(8_000));
+  const timeout=getByRole(document.body,'dialog',{name:'任务'});
+  expect(timeout.textContent).toContain('任务详情读取超时');
+  expect(firstSignal?.aborted).toBe(true);
+  expect(timeout.textContent).not.toContain(row().instructions);
+  await click(getByRole(timeout,'button',{name:'重试'}));
+  expect(attempts).toBe(2);
+  expect(getByRole(document.body,'dialog',{name:'核对邮件'}).textContent).toContain(row().instructions);
+ } finally {vi.useRealTimers();}
+});
 it('shows a scheduled continuation with pause and stop controls without presenting a waiting task as running',async()=>{
  const waiting={...row(),state:'waiting_time',resumeAt:'2026-11-01T08:00:00Z'};seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:waiting}:url.includes('/history')?{items:[],nextCursor:null}:url.includes('agent-identities')?{items:[identity()]}:{items:[waiting],nextCursor:null}));act(paint);await flush();await click(getByText(host,'核对邮件'));const dialog=getByRole(document.body,'dialog',{name:'核对邮件'});expect(dialog.textContent).toContain('计划继续');expect(dialog.textContent).toContain('等待继续');expect(dialog.textContent).not.toContain('执行中');expect(getByRole(dialog,'button',{name:'暂停任务'})).toBeTruthy();expect(getByRole(dialog,'button',{name:'停止任务'})).toBeTruthy();expect(queryByRole(dialog,'button',{name:'继续任务'})).toBeNull();
 });
