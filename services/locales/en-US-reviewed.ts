@@ -618,6 +618,8 @@ export const reviewedEnglish: Record<string, string> = {
   '标记已读超时':'Marking reminders as read timed out',
   '规则读取超时':'Loading rules timed out',
   '规则开启结果待核对':'Rule creation confirmation pending',
+  '规则操作结果待核对':'Rule action confirmation pending',
+  '规则已更新，请核对后重试':'Rule updated. Check it before trying again.',
   '已找回原规则':'Original rule recovered',
   '用原请求重试':'Retry the original request',
   '打开任务详情':'Open task details',

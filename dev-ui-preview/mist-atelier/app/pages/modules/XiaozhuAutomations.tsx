@@ -43,7 +43,7 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
   const [draft, setDraft] = React.useState<RuleDraft | null>(null), [busy, setBusy] = React.useState(false);
   const [pending,setPending]=React.useState<{scope:string;intent:RuleIntent}>();
   const activeIntent=React.useRef<RuleIntent|undefined>(undefined);
-  const creation=React.useRef<AbortController|undefined>(undefined);
+  const mutation=React.useRef<AbortController|undefined>(undefined);
   const pendingHere=pending?.scope===scope?pending.intent:undefined;
   const remember=(intent?:RuleIntent)=>{
     activeIntent.current=intent;
@@ -59,7 +59,7 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
     setPending(restored?{scope,intent:restored}:undefined);
     setDraft(restored?.draft??null);
     setRules(null);setError('');setReadError('');setBusy(false);
-    return()=>{creation.current?.abort();creation.current=undefined;listing.current?.abort();readGeneration.current++;};
+    return()=>{mutation.current?.abort();mutation.current=undefined;listing.current?.abort();readGeneration.current++;};
   },[scope]);
   const load = React.useCallback(async () => {
     if (!base) return;
@@ -89,19 +89,34 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
   React.useEffect(() => { if (!open) return; const timer = setInterval(() => { if (document.visibilityState !== 'hidden') void load(); }, 10_000); return () => clearInterval(timer); }, [open, load]);
   const start = () => { const t = TRIGGERS[0]; setDraft({ trigger: t.value, name: t.name, instructions: t.instructions, time: '09:00' }); };
   const pick = (value: Trigger) => { const t = TRIGGERS.find(x => x.value === value)!; setDraft(d => d && { ...d, trigger: value, name: t.name, instructions: t.instructions }); };
-  const act = async (run: () => Promise<unknown>) => {
+  const act = async <T,>(run:(signal:AbortSignal)=>Promise<T>,apply:(result:T)=>void) => {
+    if(busy||activeIntent.current||mutation.current)return;
+    const controller=new AbortController();
+    mutation.current=controller;
+    const current=()=>liveScope.current===scope&&mutation.current===controller;
     setBusy(true);setError('');
-    try{await run();if(liveScope.current!==scope)return;await load();}
-    catch(e){if(liveScope.current===scope)setError(e instanceof Error?e.message:'操作未完成');}
-    finally{if(liveScope.current===scope)setBusy(false);}
+    try {
+      const result=await withRequestDeadline(controller,10_000,'规则操作结果待核对',run);
+      if(current())apply(result);
+    } catch (problem) {
+      if(current()){
+        const status=(problem as {status?:number})?.status;
+        setError(status===409?'规则已更新，请核对后重试':problem instanceof Error?problem.message:'操作未完成');
+      }
+    } finally {
+      if(current()){
+        mutation.current=undefined;setBusy(false);
+        void load();
+      }
+    }
   };
   const create = async () => {
-    if(!base||!draft||busy||creation.current)return;
+    if(!base||!draft||busy||mutation.current)return;
     const original=activeIntent.current;
     const intent=original??{requestId:crypto.randomUUID(),draft};
     const controller=new AbortController();
-    creation.current=controller;
-    const isCurrent=()=>liveScope.current===scope&&creation.current===controller;
+    mutation.current=controller;
+    const isCurrent=()=>liveScope.current===scope&&mutation.current===controller;
     remember(intent);setBusy(true);setError('');
     try {
       const result=await withRequestDeadline(controller,10_000,'规则开启结果待核对',signal=>
@@ -118,11 +133,23 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
       if(code==='AGENT_AUTOMATION_CREATED_RULE_GONE'||!original&&status>=400&&status<500&&![408,409,429].includes(status))remember();
       setError(problem instanceof Error?problem.message:'规则开启结果待核对');
     } finally {
-      if(isCurrent()){creation.current=undefined;setBusy(false);}
+      if(isCurrent()){mutation.current=undefined;setBusy(false);}
     }
   };
-  const toggle = (r: Rule, enabled: boolean) => act(() => mistApiRequest(base + '/' + r.id, { method: 'PUT', body: JSON.stringify({ name: r.name, trigger: r.trigger, time: r.time, instructions: r.instructions, enabled }) }));
-  const remove = (r: Rule) => act(() => mistApiRequest(base + '/' + r.id, { method: 'DELETE' }));
+  const toggle = (rule:Rule,enabled:boolean) => act(signal=>
+    mistApiRequest(base+'/'+encodeURIComponent(rule.id),{
+      method:'PATCH',signal,body:JSON.stringify({enabled,expectedVersion:rule.version}),
+    }) as Promise<{item:Rule}>,result=>{
+      if(result.item?.id!==rule.id)throw Error('规则操作结果待核对');
+      setRules(old=>old?.map(item=>item.id===rule.id&&item.version<=result.item.version?result.item:item)??old);
+    });
+  const remove = (rule:Rule) => act(signal=>
+    mistApiRequest(base+'/'+encodeURIComponent(rule.id)+'?expectedVersion='+encodeURIComponent(rule.version),{
+      method:'DELETE',signal,
+    }) as Promise<{removed?:boolean}>,result=>{
+      if(result?.removed!==true)throw Error('规则操作结果待核对');
+      setRules(old=>old?.filter(item=>item.id!==rule.id)??old);
+    });
   return <Drawer open={open} onClose={onClose} size="lg" title={uiText('自动')} tone="ai" footer={draft ? undefined : <Button icon={Plus} variant="primary" onClick={start}>{uiText('新建规则')}</Button>}>
     <div className="mist-col">
       {readError && <FailureNotice title={uiText("规则读取失败")} detail={readError} retry={loading ? undefined : () => void load()} retryLabel="重新读取" />}
