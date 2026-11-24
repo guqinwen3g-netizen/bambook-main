@@ -13,6 +13,8 @@ import { XiaozhuMarkdown } from './XiaozhuMarkdown';
 
 const STATE: Record<AgentTaskView['state'], [string, Tone]> = { queued: ['待执行', 'accent'], running: ['办理中', 'accent'], waiting_time: ['等待继续', 'neutral'], waiting_condition: ['等待资料变化', 'neutral'], waiting_human: ['待我确认', 'warn'], paused: ['已暂停', 'neutral'], succeeded: ['已完成', 'ok'], failed: ['未完成', 'bad'], cancelled: ['已停止', 'neutral'], expired: ['已到期', 'neutral'], budget_exhausted: ['达到限额', 'warn'], access_changed: ['权限已变化', 'warn'] };
 export function xiaozhuTaskStatusLabel(task: AgentTaskView): string {
+  if (task.runnerStatus === 'heartbeat_stale') return '执行进度暂未更新';
+  if (task.runnerStatus === 'awaiting_reclaim') return '待重新领取';
   if (task.state === 'queued' && task.executionIssue?.retryAt) return '模型重试中';
   if (task.state === 'running' && task.executionStage === 'model') return '正在等待模型';
   if (task.state === 'waiting_human' && task.questions?.some(question => !question.answeredAt)) return '等待补充资料';
@@ -43,15 +45,15 @@ function Elapsed({ since }: { since: string }) {
   return <span className="mist-xz-elapsed" role="timer" aria-live="off">· {ui`${seconds} 秒`}</span>;
 }
 
-function Trail({ items, active, activeLabel, since, onOpen }: {
-  items: AgentTaskTrailItem[]; active: boolean; activeLabel?: string; since?: string; onOpen: OpenRecord;
+function Trail({ items, active, activeLabel, since, recovering, onOpen }: {
+  items: AgentTaskTrailItem[]; active: boolean; activeLabel?: string; since?: string; recovering?: boolean; onOpen: OpenRecord;
 }) {
   const [expanded, setExpanded] = React.useState<boolean>();
   const open = expanded ?? active;
   const label = uiText(activeLabel ?? '正在办理');
   return <div className="mist-xz-trail" data-open={open || undefined}>
     {active && <div className="mist-xz-progress">
-      <span role="status" className="mist-xz-shimmer">{label}</span>
+      <span role="status" className={recovering?undefined:'mist-xz-shimmer'}>{label}</span>
       {since && <Elapsed since={since} />}
     </div>}
     {!!items.length && <button type="button" className="mist-xz-trail-h" aria-expanded={open} onClick={() => setExpanded(!open)}>
@@ -175,7 +177,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
     const request = splitRequest(t.instructions), done = !active && t.state !== 'waiting_human', working = active && !asking && !pending.length;
     const retryable = done && !!request.trim() && t.state !== 'access_changed'
       && (!t.attachments?.length || (!!t.conversationId && ['succeeded','failed','cancelled'].includes(t.state)));
-    const activeLabel = t.state === 'queued' ? (t.executionIssue?.retryAt ? '模型重试中' : '待执行')
+    const activeLabel = t.runnerStatus ? xiaozhuTaskStatusLabel(t) : t.state === 'queued' ? (t.executionIssue?.retryAt ? '模型重试中' : '待执行')
       : t.state === 'waiting_time' || t.state === 'waiting_condition' ? STATE[t.state][0]
       : t.executionStage === 'model' ? '正在等待模型' : undefined;
     const status = !active && t.state !== 'succeeded' ? <Pill tone={STATE[t.state][1]}>{uiText(STATE[t.state][0])}</Pill> : undefined;
@@ -191,7 +193,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         </div>}
       </div>
       <XiaozhuTurnShell status={status}>
-        {(!!t.trail?.length || working) && <Trail items={t.trail ?? []} active={working} activeLabel={activeLabel} since={t.executionStageSince} onOpen={actions.onOpenRecord} />}
+        {(!!t.trail?.length || working) && <Trail items={t.trail ?? []} active={working} activeLabel={activeLabel} recovering={!!t.runnerStatus} since={t.runnerStatus==='heartbeat_stale'?t.lastHeartbeatAt??undefined:t.executionStageSince} onOpen={actions.onOpenRecord} />}
         {t.result && <XiaozhuMarkdown text={t.result} index={index} onOpen={actions.onOpenRecord} />}
         {active && t.checkpoint && !t.result && !working && <p className="mist-xz-note">{t.checkpoint}</p>}
         {!active && t.state !== 'succeeded' && !t.result && t.checkpoint && <p className="mist-xz-note">{t.checkpoint}</p>}

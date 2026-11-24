@@ -104,3 +104,13 @@ it('opens source records from the work log while the model is running', async ()
   expect(actions.onOpenRecord).toHaveBeenCalledWith('orders/detail','o1',undefined);
   expect(getByRole(host,'status').textContent).toContain('正在等待模型');
 });
+
+
+it('shows recovery independently of the model stage and returns to live model waiting',async()=>{
+ await paint([task({runnerStatus:'heartbeat_stale',executionStage:'model',lastHeartbeatAt:new Date(Date.now()-20_000).toISOString()})]);
+ expect(getByRole(host,'status').textContent).toBe('执行进度暂未更新');
+ await paint([task({state:'queued',runnerStatus:'awaiting_reclaim'})]);
+ expect(getByRole(host,'status').textContent).toBe('待重新领取');
+ await paint([task({executionStage:'model'})]);
+ expect(getByRole(host,'status').textContent).toBe('正在等待模型');
+});
