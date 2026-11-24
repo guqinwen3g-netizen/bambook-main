@@ -11,8 +11,55 @@ vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>mock.workspace,mist
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({sessionKey:mock.sessionKey,user:{id:'actor'},hasPermission:(scope:string)=>scope!=='orders:read'||mock.readOrders}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 vi.mock('../../../../../services/apiService',()=>({apiService:{getAuthHeaders:()=>({'X-Test-Auth':'authenticated'})}}));
 let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
-const view=(active=true)=> <Nav.Provider value={{route:{view:'assistant'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
+const view=(active=true, taskId?:string)=> <Nav.Provider value={{route:{view:'assistant',...(taskId?{section:'tasks',id:taskId}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
 const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
+
+it('keeps the same conversation in sync when a paused task is resumed from its drawer', async () => {
+  vi.useFakeTimers();
+  let acknowledged = false;
+  let statusReads = 0;
+  const paused = {
+    id: 'paused-task', name: '核对模拟订单', instructions: '核对模拟订单', conversationId: 'c_resume',
+    identityId: 'personal', identityName: '小竹', executor: 'platform', state: 'paused',
+    canControl: true, version: 4, questions: [], waitingProposalIds: [], runtimeUsedMs: 0,
+    createdAt: '2026-11-24T00:00:00Z', updatedAt: '2026-11-24T00:01:00Z',
+  };
+  const resumed = { ...paused, state: 'queued', version: 5 };
+  const finished = { ...resumed, state: 'succeeded', version: 6, result: '同一订单已核对' };
+  try {
+    mock.fetch.mockResolvedValue(response({ configured: true }));
+    mock.api.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes('/agent-identities')) return { items: [{ id: 'personal', kind: 'personal', state: 'active' }] };
+      if (url.endsWith('/agent-task-capabilities')) return { platformAvailable: true };
+      if (url.endsWith('/paused-task/resume')) {
+        expect(init?.method).toBe('POST');
+        acknowledged = true;
+        return { item: resumed };
+      }
+      if (url.endsWith('/paused-task')) {
+        if (init?.cache === 'no-store') return { item: ++statusReads > 1 ? finished : paused };
+        return { item: acknowledged ? resumed : paused };
+      }
+      return { items: url.endsWith('/agent-tasks') ? [acknowledged ? resumed : paused] : [], nextCursor: null };
+    });
+    await mount();
+    await click('核对模拟订单');
+    expect(host.textContent).toContain('已暂停');
+    await act(async () => root!.render(view(true, paused.id)));
+    await click('继续任务');
+    await click('确认');
+    expect(acknowledged).toBe(true);
+    await act(async () => root!.render(view()));
+    expect(host.textContent).not.toContain('已暂停');
+    expect(statusReads).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(host.textContent).toContain('同一订单已核对');
+    expect(mock.api.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+  } finally {
+    localStorage.removeItem('mist.xiaozhu.conversation:session-a:workspace');
+    vi.useRealTimers();
+  }
+});
 
 it('is the single AI page with no sub-page tabs, and without the task channel offers no task entry',async()=>{
   mock.fetch.mockResolvedValue(response({configured:true,models:['test-model']}));

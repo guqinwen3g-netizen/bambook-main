@@ -118,6 +118,12 @@ async function readCoworkHistory(base: string, signal: AbortSignal) {
   return { items, cursor };
 }
 
+function mergeTaskUpdate(previous: AgentTaskView, next: AgentTaskView): AgentTaskView {
+  if (previous.id !== next.id || previous.identityId !== next.identityId || previous.executor !== next.executor
+    || next.version < previous.version || next.updatedAt < previous.updatedAt) return previous;
+  return previous.conversationId && !next.conversationId ? { ...next, conversationId: previous.conversationId } : next;
+}
+
 export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string) {
   const base = workspaceId ? '/api/mist/workspaces/' + encodeURIComponent(workspaceId) : '';
   const [available, setAvailable] = React.useState(false), [tasks, setTasks] = React.useState<AgentTaskView[]>([]);
@@ -143,7 +149,15 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if (run !== version.current || live.current !== bound) return;
       const own = mine.items.find(i => i.kind === 'personal') ?? null;
       const nextAvailable=caps.platformAvailable === true && own?.state !== 'disabled';lastAvailability.current={scope:bound,available:nextAvailable};setAvailable(nextAvailable);
-      setTasks(page.items.filter(t => t.executor === 'platform' && (!own || t.identityId === own.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-THREAD_LIMIT)); setMore(page.cursor);
+      const visible = page.items.filter(t => t.executor === 'platform' && (!own || t.identityId === own.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-THREAD_LIMIT);
+      setTasks(old => {
+        const previous = new Map(old.map(task => [task.id, task]));
+        return visible.map(task => {
+          const prior = previous.get(task.id);
+          return prior ? mergeTaskUpdate(prior, task) : task;
+        });
+      });
+      setMore(page.cursor);
       setError('');
     } catch (e) {
       // A failed read cannot establish that the task channel is unavailable, or replace a known conversation mode.
@@ -183,10 +197,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
           .then(next => {
             if (controller.signal.aborted || live.current !== scope) return;
             retry.delete(id);
-            setTasks(old => old.map(task => {
-              if (task.id !== id || next.updatedAt < task.updatedAt) return task;
-              return task.conversationId && !next.conversationId ? { ...next, conversationId: task.conversationId } : next;
-            }));
+            setTasks(old => old.map(task => mergeTaskUpdate(task, next)));
             if (progressId === id) setStaleTask(old => old?.scope === scope && old.id === id ? undefined : old);
           })
           .catch(() => {
@@ -236,13 +247,16 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     } catch (e) { if (live.current === bound) setError(e instanceof Error ? e.message : '未能交给小竹'); return null; }
     finally { if (live.current === bound) setBusy(false); }
   };
+  const applyTaskUpdate = (item?: AgentTaskView) => {
+    if (!item || live.current !== scope) return;
+    setTasks(old => old.map(task => mergeTaskUpdate(task, item)));
+  };
   const refreshTask = async (taskId: string, signal: AbortSignal) => {
     const bound = scope;
     const item = await readCoworkTask(base, taskId, signal);
     if (signal.aborted || live.current !== bound) return;
     setStaleTask(old => old?.scope === bound && old.id === taskId ? undefined : old);
-    setTasks(old => old.map(task => task.id === taskId && item.updatedAt >= task.updatedAt
-      ? { ...item, conversationId: item.conversationId ?? task.conversationId } : task));
+    applyTaskUpdate(item);
     return item;
   };
   const loadMore = async () => {
@@ -254,12 +268,11 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       setMore(page.nextCursor ?? undefined);
     } catch (e) { setMore(cursor); setError(e instanceof Error ? e.message : '读取失败'); }
   };
-  const replace = (item?: AgentTaskView) => { if (item) setTasks(old => old.map(t => t.id === item.id ? item : t)); };
   const answer = async (task: AgentTaskView, questionId: string, text: string) => {
-    try { replace((await post('/agent-tasks/' + encodeURIComponent(task.id) + '/answer', { requestId: crypto.randomUUID(), version: task.version, questionId, answer: text.trim() })).item); } catch (e) { setError(e instanceof Error ? e.message : '回答未送达'); await load(); }
+    try { applyTaskUpdate((await post('/agent-tasks/' + encodeURIComponent(task.id) + '/answer', { requestId: crypto.randomUUID(), version: task.version, questionId, answer: text.trim() })).item); } catch (e) { setError(e instanceof Error ? e.message : '回答未送达'); await load(); }
   };
   const cancel = async (task: AgentTaskView) => {
     try { await post('/agent-tasks/' + encodeURIComponent(task.id) + '/cancel', { requestId: crypto.randomUUID(), version: task.version }); } catch (e) { setError(e instanceof Error ? e.message : '未能停止'); } finally { await load(); }
   };
-  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, error, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, hasMore: !!more, track: (task: AgentTaskView) => setTasks(old => [...old.filter(t => t.id !== task.id), task]) };
+  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, error, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, hasMore: !!more, applyTaskUpdate, track: (task: AgentTaskView) => setTasks(old => [...old.filter(t => t.id !== task.id), task]) };
 }

@@ -19,12 +19,17 @@ const tone=(state:AgentTaskView['state']):Tone=>state==='running'?'accent':state
 const time=(v:string|null)=>v?new Date(v).toLocaleString(interfaceLocale(),{timeZone:'Asia/Shanghai', year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}):'—';
 const duration=(ms:number)=>`${Math.floor(ms/60000)}:${String(Math.floor(ms/1000)%60).padStart(2,'0')}`;
 type Plan={kind:'create';requestId:string;identityId:string;name:string;instructions:string;executor:'external'|'platform'}|{kind:'answer';requestId:string;row:AgentTaskView;questionId:string;answer:string}|{kind:'pause'|'resume'|'cancel'|'issue';requestId:string;row:AgentTaskView};
-type TaskPanelProps={onConnections:()=>void;rowAction?:(row:AgentTaskView)=>React.ReactNode;refreshSignal?:number};
+type TaskPanelProps = {
+  onConnections: () => void;
+  rowAction?: (row: AgentTaskView) => React.ReactNode;
+  refreshSignal?: number;
+  onTaskUpdate?: (item: AgentTaskView) => void;
+};
 export function AgentTasks(props:TaskPanelProps){
  const w=useMistWorkspace(),s=useMistSession();
  return w.workspace?<TaskPanel key={JSON.stringify([s.sessionKey,s.user?.id,w.workspace.id])} workspaceId={w.workspace.id} {...props}/>:<EmptyState title={uiText('尚未进入公司')}/>;
 }
-function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal}:TaskPanelProps&{workspaceId:string}){
+function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpdate}:TaskPanelProps&{workspaceId:string}){
  const w=useMistWorkspace(),nav=useNav(),toast=useToast(),base='/api/mist/workspaces/'+encodeURIComponent(workspaceId)+'/agent-tasks',endpoint=agentConnectionEndpoint(location.origin);
  const [platformAvailable,setPlatformAvailable]=React.useState(false);
  const [page,setPage]=React.useState<AgentTaskPage>({items:[],nextCursor:null}),[identities,setIdentities]=React.useState<AgentIdentityView[]>([]),[loading,setLoading]=React.useState(true),[error,setError]=React.useState('');
@@ -58,7 +63,12 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal}:TaskPanel
   const body=plan.kind==='create'?{requestId:plan.requestId,identityId:plan.identityId,name:plan.name,instructions:plan.instructions,...(plan.executor==='platform'?{executor:'platform',locale:interfaceLocale()}:{})}:plan.kind==='answer'?{requestId:plan.requestId,version:plan.row.version,questionId:plan.questionId,answer:plan.answer}:{requestId:plan.requestId,version:plan.row.version};
   try{const result=await mistApiRequest(url,{method:'POST',body:JSON.stringify(body),signal:abort.signal});if(!alive.current||epoch!==writeGeneration.current)return;
    if(plan.kind==='issue'){if(typeof result.token!=='string'||!result.item?.id)throw new Error('任务连接响应无效');setCredential(result);}else toast(uiText(plan.kind==='answer'?'资料已补充':plan.kind==='create'&&result.item.state==='queued'?'任务已安排':LABEL[result.item.state as AgentTaskView['state']]??'已核对当前任务状态'),'ok');
-   setPlan(null);setUncertain(false);if(detail?.id===result.item?.id)setDetail(result.item);void currentLoad.current();window.dispatchEvent(new Event('bambook:agent-task-update'));if(plan.kind==='cancel')void w.refresh();
+   setPlan(null);setUncertain(false);
+   if(detail?.id===result.item?.id)setDetail(result.item);
+   if(result.item&&plan.kind!=='issue')onTaskUpdate?.(result.item);
+   void currentLoad.current();
+   window.dispatchEvent(new Event('bambook:agent-task-update'));
+   if(plan.kind==='cancel')void w.refresh();
   }catch(e){if(alive.current&&!abort.signal.aborted&&epoch===writeGeneration.current){setFailure(e instanceof Error?e.message:'操作未完成，请重试');setUncertain(!(e as any)?.status||(e as any).status>=500);}}
   finally{if(alive.current&&epoch===writeGeneration.current)setBusy(false);}
  };
