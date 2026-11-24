@@ -11,6 +11,8 @@ import{responseLanguagePrompt,responseUserMessage}from'./responseLanguage';
 import{parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,PLATFORM_TASK_RESULT_LIMIT,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskStep}from'./platformTaskPlan';
 import{nextTaskIntentRead}from'./agentTaskIntentRefs';
 
+class PlatformModelTimeout extends Error {}
+
 export type PlatformTaskWorkerOptions={complete?:(input:LlmCompletionInput)=>Promise<string>;makeCredential:MakeTaskCredential;configured?:()=>boolean;tickMs?:number;pulseMs?:number;modelTimeoutMs?:number;concurrency?:number;onError?:(code:string)=>void};
 /** Keep the current Shanghai business clock explicit; never relabel UTC digits with +08:00. */
 export function platformTaskClock(now:number){return{now:new Date(now+8*60*60_000).toISOString().replace(/Z$/,'+08:00'),utc:new Date(now).toISOString(),timeZone:'Asia/Shanghai'};}
@@ -126,7 +128,7 @@ export class MistPlatformTaskWorker{
   }
   private async model(input:Omit<LlmCompletionInput,'signal'>,signal:AbortSignal){
     const child=new AbortController(),stop=()=>child.abort();signal.addEventListener('abort',stop,{once:true});if(signal.aborted)stop();
-    const timer=setTimeout(()=>child.abort(Error('MODEL_TIMEOUT')),this.options.modelTimeoutMs??120_000);timer.unref?.();
+    const timer=setTimeout(()=>child.abort(new PlatformModelTimeout('Model deadline elapsed')),this.options.modelTimeoutMs??120_000);timer.unref?.();
     let rejectAbort!:(e:Error)=>void;const cancelled=new Promise<never>((_,reject)=>{rejectAbort=reject;});const onAbort=()=>rejectAbort(child.signal.reason);child.signal.addEventListener('abort',onAbort,{once:true});if(child.signal.aborted)onAbort();
     try{return await Promise.race([this.complete({...input,signal:child.signal}),cancelled]);}finally{clearTimeout(timer);signal.removeEventListener('abort',stop);child.signal.removeEventListener('abort',onAbort);}
   }
@@ -175,7 +177,7 @@ export class MistPlatformTaskWorker{
       }
     }catch(error:any){
       if(!actor){await this.repository.deferPlatformTaskJob(job).catch(()=>this.options.onError?.('PLATFORM_TASK_DEFER_FAILED'));return;}
-      if(!abort.signal.aborted){issue=/^MODEL_PLAN_/.test(String(error?.message))?'model_response_invalid':phase==='model'&&error?.message==='MODEL_TIMEOUT'?'model_timeout':phase==='model'||error?.message==='MODEL_UNAVAILABLE'?'model_unavailable':undefined;this.options.onError?.(issue?'PLATFORM_TASK_MODEL_RETRY':'PLATFORM_TASK_RECOVERY_REQUIRED');}
+      if(!abort.signal.aborted){issue=/^MODEL_PLAN_/.test(String(error?.message))?'model_response_invalid':phase==='model'&&error instanceof PlatformModelTimeout?'model_timeout':phase==='model'||error?.message==='MODEL_UNAVAILABLE'?'model_unavailable':undefined;this.options.onError?.(issue?'PLATFORM_TASK_MODEL_RETRY':'PLATFORM_TASK_RECOVERY_REQUIRED');}
     }finally{
       clearInterval(pulse);if(actor)await this.repository.releasePlatformTask(actor,issue).catch(()=>{});
     }
