@@ -40,14 +40,14 @@ import { PlatformReportsPage, buildOrderProgress, buildReceivableAging, AGING_BU
 export { PlatformReportsPage as ReportsPage, buildCustomerSales, buildReceivableAging, buildOrderProgress } from './PlatformReports';
 import { XiaozhuTasks } from './XiaozhuTasks';
 import { XiaozhuAutomations } from './XiaozhuAutomations';
-import { XiaozhuThread } from './XiaozhuThread';
+import { XiaozhuThread, xiaozhuTaskStatusLabel } from './XiaozhuThread';
 import { TitleEditor, XiaozhuNav, XiaozhuProposalList, useAutomationRules } from './XiaozhuNav';
 import { AgentProposalDialog } from '../AgentProposalDialog';
 import { recordIndex } from '../../runtime/xiaozhuRecords';
 import { XiaozhuComposer, XiaozhuEmpty, voiceInCall } from './XiaozhuShell';
 import { XiaozhuTurnShell } from './XiaozhuThread';
 import { XiaozhuMarkdown } from './XiaozhuMarkdown';
-import { conversationsOf, newConversationId, selectedTaskIntentRefs, useConversationMeta, useXiaozhuCowork } from '../../runtime/xiaozhuCowork';
+import { COWORK_ACTIVE, conversationsOf, isCurrentTaskStatusQuestion, newConversationId, selectedTaskIntentRefs, useConversationMeta, useXiaozhuCowork } from '../../runtime/xiaozhuCowork';
 import { usePersonalAgentVoice } from '../../runtime/personalAgentVoice';
 import { FileName } from '../../runtime/files';
 import { FailureNotice } from '../../runtime/FailureNotice';
@@ -201,8 +201,28 @@ export function AssistantPage(){
   // A stored task can still be reviewed with the worker offline. A text-only model cannot continue its task thread.
   const useTaskThread=cowork.available||visibleTasks.length>0;
   const taskThreadOffline=!cowork.available&&visibleTasks.length>0;
-  const ready=(!files.length||cowork.available)&&!taskThreadOffline&&!cowork.loading&&!cowork.error&&!busy&&!!question.trim()&&canChat&&(cowork.available||!!configuration?.configured);
-  const send=async()=>{if(files.length&&!cowork.available||taskThreadOffline||cowork.loading||cowork.error)return;if(cowork.available&&canChat){if(sendLock.current||busy||!question.trim())return;sendLock.current=true;setBusy(true);const text=question.trim()+(selected.length?'\n（引用业务记录：'+selected.map(s=>s.label).join('、')+'）':'');try{const target=sendTarget();atBottomRef.current=true;const sent=await cowork.send(text,visibleTasks,target,selectedTaskIntentRefs(selected),files);if(sent&&live.current===scope){voice.followTask(sent.id);if([conversationId,target].includes(liveConversation.current)){setQuestion('');setSelected([]);}setAttachmentDraft(draft=>draft.key===attachmentScope?{key:attachmentScope,files:[]}:draft);}}catch(problem){if(live.current===scope)setError(problem instanceof Error?problem.message:'任务引用格式无效');}finally{sendLock.current=false;if(live.current===scope)setBusy(false);}return;}
+  const [statusCheck,setStatusCheck]=React.useState<{scope:string;taskId:string}>();
+  const unfinishedTasks=visibleTasks.filter(task=>COWORK_ACTIVE.includes(task.state)||task.state==='paused');
+  const statusTask=!files.length&&!selected.length&&unfinishedTasks.length===1&&isCurrentTaskStatusQuestion(question)
+    ? unfinishedTasks[0] : undefined;
+  const checkedTask=statusCheck?.scope===attachmentScope ? visibleTasks.find(task=>task.id===statusCheck.taskId) : undefined;
+  const canAsk=(!files.length||cowork.available)&&!taskThreadOffline&&!cowork.error&&(cowork.available||!!configuration?.configured);
+  const ready=!busy&&!cowork.loading&&canChat&&!!question.trim()&&(!!statusTask||canAsk);
+  const checkCurrentTask=async(taskId:string)=>{
+    const controller=new AbortController();
+    active.current=controller;sendLock.current=true;setBusy(true);setError('');
+    try {
+      const checked=await cowork.refreshTask(taskId,controller.signal);
+      if(checked&&live.current===scope&&liveConversation.current===conversationId){
+        setStatusCheck({scope:attachmentScope,taskId});setQuestion('');
+      }
+    } catch {
+      if(!controller.signal.aborted&&live.current===scope&&liveConversation.current===conversationId)setError('任务暂时无法核对');
+    } finally {
+      if(active.current===controller){active.current=null;sendLock.current=false;if(live.current===scope)setBusy(false);}
+    }
+  };
+  const send=async()=>{if(!ready||sendLock.current)return;if(statusTask){await checkCurrentTask(statusTask.id);return;}setStatusCheck(undefined);if(cowork.available&&canChat){if(sendLock.current||busy||!question.trim())return;sendLock.current=true;setBusy(true);const text=question.trim()+(selected.length?'\n（引用业务记录：'+selected.map(s=>s.label).join('、')+'）':'');try{const target=sendTarget();atBottomRef.current=true;const sent=await cowork.send(text,visibleTasks,target,selectedTaskIntentRefs(selected),files);if(sent&&live.current===scope){voice.followTask(sent.id);if([conversationId,target].includes(liveConversation.current)){setQuestion('');setSelected([]);}setAttachmentDraft(draft=>draft.key===attachmentScope?{key:attachmentScope,files:[]}:draft);}}catch(problem){if(live.current===scope)setError(problem instanceof Error?problem.message:'任务引用格式无效');}finally{sendLock.current=false;if(live.current===scope)setBusy(false);}return;}
   if(sendLock.current||busy||!question.trim()||!w.workspace?.id||!configuration?.configured||!canChat)return;const bound=scope,controller=new AbortController();active.current=controller;const content=question.trim(),sent=ids;sendLock.current=true;setBusy(true);setError('');try{const result=await request('/api/mist/workspaces/'+encodeURIComponent(w.workspace.id)+'/assistant',{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json','X-Bambook-Locale':interfaceLocale()},body:JSON.stringify({message:content,history:messages.slice(-8).map(m=>({role:m.role,content:m.content.slice(0,2000)})),sourceIds:sent})});if(result.mode!=='read_only'||typeof result.text!=='string'||!result.text.trim()||!Number.isSafeInteger(result.revision)||!Array.isArray(result.sources)||result.sources.some((source:any)=>!source||!sent.includes(source.id)||typeof source.label!=='string'||typeof source.entityId!=='string'||!['orders/detail','invoices','risks'].includes(source.view)||source.id!==(source.view==='orders/detail'?'orders':source.view)+':'+source.entityId))throw new Error('助手响应格式无效');if(live.current===bound){setMessages(previous=>[...previous,{role:'user',content},{role:'assistant',content:result.text,sources:result.sources,revision:result.revision,truncated:!!result.truncated}]);setQuestion('');}}catch(e){if(live.current===bound&&!(e instanceof Error&&e.name==='AbortError'))setError(e instanceof Error?e.message:'模型调用失败');}finally{if(active.current===controller){active.current=null;sendLock.current=false;if(live.current===bound)setBusy(false);}}};
   const sendText=async(text:string)=>{if(!cowork.available||cowork.loading||cowork.error||!canChat||sendLock.current||busy)return;sendLock.current=true;setBusy(true);try{const sent=await cowork.send(text,visibleTasks,sendTarget());if(sent)voice.followTask(sent.id);}finally{sendLock.current=false;if(live.current===scope)setBusy(false);}};
   const draft=(content:string)=>setEditor({title:'保存可审阅草稿',fields:[f('title','标题'),f('orderId','关联订单','select',{required:false,options:[{value:'',label:'不关联订单'},...orderOptions(w.state)]}),f('content','草稿内容','textarea')],initialValues:{title:'',orderId:'',content},submit:v=>w.command({type:'platform.assistant.saveDraft',payload:{title:str(v,'title'),content:str(v,'content'),orderId:str(v,'orderId')}})});
@@ -229,7 +249,7 @@ export function AssistantPage(){
   // 回答排版、卡片展开等会在渲染后改变高度；停在底部时跟着到底。
   React.useEffect(()=>{const el=scrollRef.current,content=el?.firstElementChild;if(!el||!content||typeof ResizeObserver==='undefined')return;const watch=new ResizeObserver(()=>{if(atBottomRef.current)follow();});watch.observe(content);return()=>watch.disconnect();},[hasThread]);
   const runningTask=visibleTasks.find(t=>['queued','running'].includes(t.state)&&t.canControl);
-  const composer=<XiaozhuComposer value={question} onChange={setQuestion} onSend={()=>void send()} ready={ready} busy={busy} working={!!runningTask} onStop={!cowork.available?()=>active.current?.abort():runningTask?()=>void cowork.cancel(runningTask):undefined} sources={selected} onRemoveSource={toggle} onAttach={()=>setPicker(true)} files={files} onAddFiles={cowork.available?addFiles:undefined} onRemoveFile={index=>setFiles(files.filter((_,i)=>i!==index))} voice={voice} voiceAvailable={cowork.available&&(!cowork.loading&&!cowork.error||inCall)} field={field} placeholder={uiText(canChat?'问小竹，或交代一件事':'当前账号无模型助手权限')} disabled={!canChat}/>;
+  const composer=<XiaozhuComposer value={question} onChange={setQuestion} onSend={()=>void send()} ready={ready} busy={busy} working={!!runningTask} onStop={active.current||!cowork.available?()=>active.current?.abort():runningTask?()=>void cowork.cancel(runningTask):undefined} sources={selected} onRemoveSource={toggle} onAttach={()=>setPicker(true)} files={files} onAddFiles={cowork.available?addFiles:undefined} onRemoveFile={index=>setFiles(files.filter((_,i)=>i!==index))} voice={voice} voiceAvailable={cowork.available&&(!cowork.loading&&!cowork.error||inCall)} field={field} placeholder={uiText(canChat?'问小竹，或交代一件事':'当前账号无模型助手权限')} disabled={!canChat}/>;
   const leftNav=<XiaozhuNav conversations={conversations} activeId={conversationId} onSelect={openConversation} onNew={newConversation} confirmCount={proposals.length} runningCount={running} ruleCount={automationRules.rules.filter(r=>r.enabled).length} draftCount={saved.length} onOpenConfirm={()=>{setNavDrawer(false);setConfirmOpen(true);}} onOpenTasks={()=>{setNavDrawer(false);nav.go('assistant',undefined,{section:'tasks'});}} onOpenRules={()=>{setNavDrawer(false);setAutomations(true);}} onOpenDrafts={()=>{setNavDrawer(false);setDrafts(true);}} unread={unread} renaming={renaming?.startsWith('nav:')?renaming.slice(4):undefined} setRenaming={id=>setRenaming(id?'nav:'+id:undefined)} onRename={rename} onRemove={id=>setRemoving(id)} hasMore={cowork.hasMore} onLoadMore={()=>void cowork.loadMore()}/>;
   return <MistPage><ErrorNotice/><XiaozhuAutomations open={automations} onClose={()=>{setAutomations(false);setAutomationSeed('');}} workspaceId={w.workspace?.id} seed={automationSeed} newRule={newRule}/><XiaozhuTasks refreshSignal={cowork.tasks.length} open={tasksOpen} onClose={()=>nav.go('assistant')}/><AgentProposalDialog incomingAccess={w.workspace?.developmentIncomingAccess} referenceAccess={w.workspace?.developmentReferenceAccess} taskClosePlans={w.workspace?.developmentTaskClosePlans} commercialSampleLoanSources={w.workspace?.commercialSampleLoanSources} canConfirmShippingBasis={w.session.hasPermission('products:write')} state={w.state} scopeKey={w.workspace?.id+':'+w.session.user?.id} onRejection={w.dismissError} proposal={proposals.find(p=>p.id===proposalId)} onClose={()=>setProposalId('')} run={(command,options)=>w.run(command,options)} onDone={message=>{toast(uiText(message));void cowork.reload();}}/>
     <Drawer open={navDrawer} onClose={()=>setNavDrawer(false)} title={uiText('对话列表')} tone="ai">{leftNav}</Drawer>
@@ -256,7 +276,7 @@ export function AssistantPage(){
             </div>
           </div>
           {!atBottom&&<IconButton className="mist-xz-tobottom" icon={ArrowDown} label={uiText('回到最新')} onClick={()=>toBottom()}/>}
-          <div className="mist-xz-dock"><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</div></div>
+          <div className="mist-xz-dock"><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}{checkedTask&&<p className="mist-xz-hint" role="status">{ui`当前任务 · ${uiText(xiaozhuTaskStatusLabel(checkedTask))}`}</p>}{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</div></div>
         </>:<div className="mist-xz-scroll"><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}<XiaozhuEmpty name={w.session.user?.displayName} suggestions={xiaozhuSuggestions(w.state)} onPick={p=>{setQuestion(uiText(p));field.current?.focus();}}>{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</XiaozhuEmpty></div></div>}
       </div>
     </div>

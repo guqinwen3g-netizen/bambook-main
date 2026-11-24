@@ -11,6 +11,12 @@ import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { mistApiRequest } from './workspace';
 
 export const COWORK_ACTIVE: ReadonlyArray<AgentTaskView['state']> = ['queued', 'running', 'waiting_time', 'waiting_condition', 'waiting_human'];
+/** A bare status question in a conversation refers to the current task. */
+export function isCurrentTaskStatusQuestion(text: string): boolean {
+  const normalized = text.normalize('NFKC').trim().replace(/[?。!]+$/u, '').trim();
+  return /^(?:(?:这个任务|当前任务|任务)?(?:完成了没有|完成了吗|完成了没|做完了没有|做完了吗|做完了没|进度怎么样|做到哪一步了)|is (?:it|the task) done|what is the task status)$/i.test(normalized);
+}
+
 const REQUEST_MARK = '\n【本次请求】\n';
 const CONTEXT_TURNS = 3, CONTEXT_REPLY = 300, THREAD_LIMIT = 90, LIST_PAGES = 3, INSTRUCTION_LIMIT = 4000, LEGACY_GAP_MS = 30 * 60_000;
 
@@ -164,6 +170,15 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     } catch (e) { if (live.current === bound) setError(e instanceof Error ? e.message : '未能交给小竹'); return null; }
     finally { if (live.current === bound) setBusy(false); }
   };
+  const refreshTask = async (taskId: string, signal: AbortSignal) => {
+    const bound = scope;
+    const { item } = await mistApiRequest(base + '/agent-tasks/' + encodeURIComponent(taskId), { signal }) as { item: AgentTaskView };
+    if (signal.aborted || live.current !== bound) return;
+    if (item?.id !== taskId) throw new Error('任务暂时无法核对');
+    setTasks(old => old.map(task => task.id === taskId && item.updatedAt >= task.updatedAt
+      ? { ...item, conversationId: item.conversationId ?? task.conversationId } : task));
+    return item;
+  };
   const loadMore = async () => {
     if (!more || !base) return; const cursor = more; setMore(undefined);
     try {
@@ -180,5 +195,5 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const cancel = async (task: AgentTaskView) => {
     try { await post('/agent-tasks/' + encodeURIComponent(task.id) + '/cancel', { requestId: crypto.randomUUID(), version: task.version }); } catch (e) { setError(e instanceof Error ? e.message : '未能停止'); } finally { await load(); }
   };
-  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, error, busy, send, answer, cancel, reload: load, loadMore, hasMore: !!more, track: (task: AgentTaskView) => setTasks(old => [...old.filter(t => t.id !== task.id), task]) };
+  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, error, busy, send, refreshTask, answer, cancel, reload: load, loadMore, hasMore: !!more, track: (task: AgentTaskView) => setTasks(old => [...old.filter(t => t.id !== task.id), task]) };
 }

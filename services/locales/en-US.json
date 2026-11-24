@@ -6658,5 +6658,8 @@
   "本次读取部分正文，还有后续内容": "Part of the document read, more content available",
   "已提取可读取正文": "Extracted the readable text",
   "本次读取第 {0} 至 {1} 页": "Read pages {0}–{1} in this step",
-  "整理回复": "Preparing the reply"
+  "整理回复": "Preparing the reply",
+  "当前任务 · {0}": "Current task · {0}",
+  "任务暂时无法核对": "Couldn't check the task right now",
+  "等待补充资料": "Waiting for more information"
 }

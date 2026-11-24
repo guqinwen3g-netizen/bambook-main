@@ -11,6 +11,12 @@ import { commandRequiresSignature } from '../../runtime/signatureRules';
 import { XiaozhuMarkdown } from './XiaozhuMarkdown';
 
 const STATE: Record<AgentTaskView['state'], [string, Tone]> = { queued: ['待执行', 'accent'], running: ['办理中', 'accent'], waiting_time: ['等待继续', 'neutral'], waiting_condition: ['等待资料变化', 'neutral'], waiting_human: ['待我确认', 'warn'], paused: ['已暂停', 'neutral'], succeeded: ['已完成', 'ok'], failed: ['未完成', 'bad'], cancelled: ['已停止', 'neutral'], expired: ['已到期', 'neutral'], budget_exhausted: ['达到限额', 'warn'], access_changed: ['权限已变化', 'warn'] };
+export function xiaozhuTaskStatusLabel(task: AgentTaskView): string {
+  if (task.state === 'queued' && task.executionIssue?.retryAt) return '模型重试中';
+  if (task.state === 'running' && task.executionStage === 'model') return '正在等待模型';
+  if (task.state === 'waiting_human' && task.questions?.some(question => !question.answeredAt)) return '等待补充资料';
+  return STATE[task.state][0];
+}
 const RISK_TONE: Record<string, Tone> = { low: 'neutral', medium: 'warn', high: 'bad' };
 const KIND_ICON = { read: Search, write: PenLine, ask: HelpCircle, wait: Clock, note: Check };
 export const dayKey = (iso: string) => new Date(iso).toLocaleDateString('sv-SE',{timeZone:'Asia/Shanghai',});
