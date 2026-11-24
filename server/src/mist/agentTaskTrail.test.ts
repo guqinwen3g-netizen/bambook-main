@@ -30,3 +30,17 @@ it('links a read to the page the record lives on, including parent pages and sec
   expect(failed.ref).toBeUndefined();
   expect(file.label).toBe('读取附件 采购合同 PO-12.docx');
 });
+
+it('uses the known attachment name and safe failure details for a rejected continuation',()=>{
+  const actual=platformTrail([
+    step('bambook_file_text',{fileId:'from-record'},{file:{id:'from-record',name:'contract.pdf'},text:'private fixture contents'}),
+    step('bambook_file_text',{fileId:'from-record',cursor:'aft1.fixture'},{error:true,message:'附件已变化，请从首段重新读取'}),
+    step('bambook_file_text',{fileId:'private'},{error:true,message:'请求错误 private fixture secret'}),
+    step('bambook_file_text',{fileId:'unseen'},{error:true,message:'原附件不存在或无权访问'}),
+  ],[{id:'private',name:'private.pdf'}]);
+  expect(actual[1]).toMatchObject({label:'附件读取失败 contract.pdf',detail:'原件已变化，无法继续读取',failed:true});
+  expect(actual[2]).toMatchObject({label:'附件读取失败 private.pdf',failed:true});
+  expect(actual[3]).toMatchObject({label:'附件读取失败',detail:'原件不存在或无权访问',failed:true});
+  expect(JSON.stringify(actual)).not.toContain('private fixture');
+  expect(JSON.stringify(actual)).not.toContain('aft1.');
+});
