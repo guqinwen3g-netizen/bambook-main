@@ -8,6 +8,7 @@ import type { TokenPayload } from '../auth/service';
 import type { MistState } from '../shared/mistWorkspace';
 import {mistBusinessDate,shiftCalendarDay} from '../shared/mistBusinessClock';
 import { fail } from './errors';
+import type { TaskSourceRef } from './agentTaskVisibility';
 
 export const AUTOMATION_PREFIX = 'mist-revision:agent-automation:';
 export const AUTOMATION_HASH = 'mist-agent-automation:v1';
@@ -162,7 +163,9 @@ export async function dueAutomations(db: any, take: number, after?: string): Pro
 const SHANGHAI_CLOCK = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 const clock = (now: number) => SHANGHAI_CLOCK.format(new Date(now));
 const addDays = (day: string, days: number) => shiftCalendarDay(day, days);
-export type AutomationDecision = { next: Pick<AutomationRecord, 'seen' | 'primed' | 'lastDay' | 'since'>; fire?: { detail: string; facts: string } };
+export type AutomationDecision = { next: Pick<AutomationRecord, 'seen' | 'primed' | 'lastDay' | 'since'>; fire?: { detail: string; facts: string; sources: TaskSourceRef[] } };
+const fullFactSources = (path: string, items: Array<{ id: string }>): TaskSourceRef[] =>
+  items.map(({id}) => ({path, id, partial:false, coverage:[]}));
 const automationPosition = ({seen, primed, lastDay, since}: AutomationRecord): AutomationDecision['next'] =>
   ({seen, primed, lastDay, since});
 
@@ -191,14 +194,18 @@ export function evaluateAutomation(c: AutomationRecord, state: MistState, now: n
     const seen = [...c.seen.filter(id => keep.has(id)), ...fresh.map(r => r.id)].slice(-SEEN_LIMIT);
     if (!fresh.length) return { next: seen.length === c.seen.length ? base : { ...base, seen } };
     const label = c.trigger === 'new_mail' ? '封新邮件' : '笔新到账';
-    return { next: { ...base, seen, since }, fire: { detail: `${fresh.length} ${label}`, facts: fresh.slice(0, FACT_LIMIT).map(r => r.line).join('\n') } };
+    const facts = fresh.slice(0, FACT_LIMIT);
+    return { next: { ...base, seen, since }, fire: { detail: `${fresh.length} ${label}`, facts: facts.map(r => r.line).join('\n'),
+      sources: fullFactSources(c.trigger === 'new_mail' ? 'email.messages' : 'receipts', facts) } };
   }
   if (c.lastDay === day || clock(now) < c.time) return { next: base };
   const next = { ...base, primed: true, lastDay: day };
-  if (c.trigger === 'daily') return { next, fire: { detail: '每日定时', facts: `业务日期：${day}` } };
+  if (c.trigger === 'daily') return { next, fire: { detail: '每日定时', facts: `业务日期：${day}`, sources:[] } };
   const limit = addDays(day, DUE_SOON_DAYS), orders = ((state as any).orders ?? []).filter((o: any) => typeof o.due === 'string' && o.due && o.due.slice(0, 10) <= limit && !ENDED_ORDER_STATES.includes(o.state));
   if (!orders.length) return { next };
-  return { next, fire: { detail: `${orders.length} 张订单交期临近`, facts: orders.slice(0, FACT_LIMIT).map((o: any) => `order ${o.id}：${o.code ?? ''} 交期 ${o.due}`).join('\n') } };
+  const facts = orders.slice(0, FACT_LIMIT);
+  return { next, fire: { detail: `${orders.length} 张订单交期临近`, facts: facts.map((o: any) => `order ${o.id}：${o.code ?? ''} 交期 ${o.due}`).join('\n'),
+    sources: fullFactSources('orders', facts) } };
 }
 export const automationInstructions = (c: AutomationRecord, facts: string) => `【自动规则：${c.name}】\n${c.instructions}\n\n【本次触发】\n${facts}`.slice(0, 4000);
 export function recordAutomationRun(c: AutomationRecord, decision: AutomationDecision, taskId: string | undefined, detail: string, now: number): AutomationRecord {

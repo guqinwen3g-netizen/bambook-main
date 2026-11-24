@@ -817,7 +817,7 @@ export class MistRepository {
             name: (value.name + ' · ' + decision.fire.detail).slice(0,60),
             instructions: automationInstructions(value, decision.fire.facts),
             executor: 'platform', locale: 'zh-CN',
-          }, createdAt, taskScopeHash(scopeOf(workspace), workspace.state), value.id);
+          }, createdAt, taskScopeHash(scopeOf(workspace), workspace.state), value.id, [], undefined, decision.fire.sources);
           taskId = task.id;
         }
         // The task and its receipts roll back if a different rule version was committed first.

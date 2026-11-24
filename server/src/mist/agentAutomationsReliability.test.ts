@@ -27,6 +27,7 @@ it('never re-fires old mail in a mailbox larger than the remembered window, but 
   const withNew = { email: { messages: [...big.email.messages, { id: 'new', folder: 'inbox', subject: '新询价', at: new Date(newest + 60_000).toISOString() }, { id: 'late', folder: 'inbox', subject: '迟到', at: new Date(newest - 2 * DAY).toISOString() }, { id: 'ancient', folder: 'inbox', subject: '旧邮件', at: new Date(newest - 20 * DAY).toISOString() }] } } as any;
   d = evaluateAutomation(c, withNew, t0 + 120_000);
   expect(d.fire?.detail).toBe('2 封新邮件'); expect(d.fire?.facts).toContain('新询价'); expect(d.fire?.facts).toContain('迟到'); expect(d.fire?.facts).not.toContain('旧邮件');
+  expect(d.fire?.sources).toEqual(['new','late'].map(id => ({path:'email.messages', id, partial:false, coverage:[]})));
   c = { ...c, ...d.next };
   expect(evaluateAutomation(c, withNew, t0 + 150_000).fire).toBeUndefined();
 });
@@ -35,6 +36,14 @@ it('re-primes an older rule that has no time watermark instead of firing on its 
   const c = rule({ primed: true, seen: ['m1'] });
   const d = evaluateAutomation(c, inbox(800, t0 - 10 * DAY), t0);
   expect(d.fire).toBeUndefined(); expect(d.next.primed).toBe(true); expect(typeof d.next.since).toBe('number');
+});
+
+it('binds only the shown new receipt sources', () => {
+  const c = rule({ trigger:'new_receipt', primed:true, since:t0, seen:['old'] });
+  const receipts = [{id:'old', date:new Date(t0).toISOString()}, {id:'new', date:new Date(t0+1).toISOString()}];
+  const decision = evaluateAutomation(c, {receipts} as any, t0 + 10);
+  expect(decision.fire?.facts).toContain('receipt_record new');
+  expect(decision.fire?.sources).toEqual([{path:'receipts', id:'new', partial:false, coverage:[]}]);
 });
 
 const company = '11111111-1111-4111-8111-111111111111', now = Date.parse('2026-11-07T03:00:00Z');
