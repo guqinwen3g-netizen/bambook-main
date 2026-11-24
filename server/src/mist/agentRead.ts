@@ -10,6 +10,8 @@ import type { PermissionScope } from '../_shared/rolePermissionMatrix';
 import type { MistState } from '../shared/mistWorkspace';
 import { emailSendEffectiveStatus, emailSendRecipients } from '../shared/mistEmail';
 import { developmentReopenSource } from '../shared/mistDevelopmentLifecycle';
+import type { MarketQuotation } from '../shared/mistMarket';
+import { quotationLegacyConverted } from '../shared/mistQuotationLineConversion';
 import {agentCommandSources,unavailableCommandSources,type AgentGetContext,type AgentCommandSources} from './agentReadCommandSources';
 import { MistApiError } from './errors';
 
@@ -265,6 +267,53 @@ export function agentGet(state: MistState, actor: TokenPayload, typeName: unknow
   if (text.length > dataLimit) { data = summary(row);if(type.type==='email_send')Object.assign(data,{recipientCounts:row.recipientCounts,attemptCount:row.attemptCount,latestAttempt:compact(row.latestAttempt,3)}); }
   if(JSON.stringify(data).length>dataLimit)data=JSON.stringify({id:row.id}).length<=dataLimit?{id:row.id}:{};
   return { ...ref(type, row), ...metadata, data, truncated:true,readHint:'超出单次读取范围；当前结果不完整，请读取关联明细或交本人核对。',...files };
+}
+
+/** Report-only read. The quote and target order must both be visible in the current projection. */
+export function agentGetQuotationForOrder(state: MistState, actor: TokenPayload, id: unknown, orderId: unknown, inputOffset: unknown) {
+  const { type: quoteType, row } = find(state, actor, 'quotation', id);
+  const { type: orderType, row: order } = find(state, actor, 'order', orderId);
+  const quote = row as MarketQuotation;
+  const offset = inputOffset === undefined ? 0 : inputOffset;
+  if (typeof offset !== 'number' || !Number.isSafeInteger(offset) || offset < 0) deny('INVALID_INPUT', '条目偏移须为非负整数');
+
+  const legacy = quote.convertedOrderId === order.id && quotationLegacyConverted(quote);
+  const matched = quote.lines.flatMap((line, index) => legacy || line.conversion?.orderId === order.id
+    ? [{ line, lineNumber: index + 1 }] : []);
+  if (!matched.length) deny('NOT_FOUND', '未找到该报价与订单的转单条目', 404);
+  if (offset >= matched.length) deny('INVALID_INPUT', '条目偏移超出该订单的转单范围');
+
+  const data = { id: quote.id, code: quote.code, currency: quote.currency, total: quote.total, paymentTerms: quote.paymentTerms };
+  const scope = {
+    order: ref(orderType, order),
+    relation: legacy ? 'legacy_whole_quotation' : 'recorded_line_conversion',
+    matchingLineCount: matched.length,
+    offset,
+  };
+  const lines = [];
+  const response = {
+    ...ref(quoteType, quote), data, truncated: true,
+    readHint: '仅返回该订单的转单条目；total 是整份报价总额，本次读取不算完整报价回源。',
+  };
+  // Leave room for the result envelope, continuation offset, and explanation.
+  let remaining = GET_LIMIT - 300 - JSON.stringify({ ...response, orderConversion: scope }).length;
+  for (const { line, lineNumber } of matched.slice(offset)) {
+    const item = {
+      lineNumber, quotationLineId: line.id, name: line.name, style: line.style,
+      quantity: line.qty, unit: line.unit, unitPrice: line.price, quotationLineAmount: line.amount,
+    };
+    const size = JSON.stringify(item).length + 1;
+    if (size > remaining) break;
+    lines.push(item);
+    remaining -= size;
+  }
+  if (!lines.length) deny('INVALID_INPUT', '转单条目超过单次读取范围，请打开原报价核对', 422);
+  const next = offset + lines.length;
+  const truncated = next < matched.length;
+  return {
+    ...response,
+    orderConversion: { ...scope, lines, truncated, ...(truncated ? { nextOffset: next } : {}) },
+  };
 }
 
 /** 关联对象：本对象字段直接引用的对象，以及字段引用了本对象的其它对象（均限当前可读类型）。 */

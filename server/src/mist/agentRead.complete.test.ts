@@ -4,8 +4,8 @@ import {randomUUID} from 'node:crypto';
 import {applyMistCommand,createMistState,type DevelopmentValues} from '../shared/mistWorkspace';
 import {withTestFactories} from '../shared/__tests__/utils/devFactories';
 import type {TokenPayload} from '../auth/service';
-import {agentGet,agentQuery,agentRelated} from './agentRead';
-import {collectTaskSources,taskReadHash} from './agentTaskVisibility';
+import {agentGet,agentGetQuotationForOrder,agentQuery,agentRelated} from './agentRead';
+import {collectTaskSources,taskReadHash,taskScopeHash,taskSourcesVisible} from './agentTaskVisibility';
 
 const actor={userId:'owner',permissions:['emails:read','orders:read'],roles:[],departmentIds:[],authorizationLoaded:true} as TokenPayload;
 const state=()=>createMistState({id:randomUUID,actorName:'Test',now:'2026-11-01T00:00:00Z'},'empty');
@@ -123,4 +123,51 @@ it('filters related types before applying the limit and reports only authorized 
  expect(()=>agentRelated(s,actor,'order','target',{relatedType:'quotation'})).toThrow(/无权读取报价/);
  expect(()=>agentRelated(s,{...reader,permissionCeiling:['orders:read']},'order','target',{relatedType:'quotation'})).toThrow(/无权读取报价/);
  expect(()=>agentRelated(s,reader,'order','target',{relatedType:'unknown'})).toThrow(/不支持的对象类型/);
+});
+
+it('requires both the quotation and order, and registers both as report sources without a full-read baseline', () => {
+ const s=state(), reader={...actor,permissions:['orders:read','quotations:read']} as TokenPayload;
+ s.orders.push({id:'target',code:'SO-TARGET'} as any,{id:'other',code:'SO-OTHER'} as any);
+ s.market.quotations.push({
+   id:'quote',code:'QT-ORIGINAL',currency:'EUR',total:'15.00',lines:[{id:'line',amount:'15.00',conversion:{orderId:'target'}}],convertedOrderId:'target',
+ } as any);
+ const result=agentGetQuotationForOrder(s,reader,'quote','SO-TARGET',undefined);
+ const refs=collectTaskSources({revision:1,object:result},s,[]);
+ expect(refs.map(x=>[x.path,x.id]).sort()).toEqual([['market.quotations','quote'],['orders','target']]);
+ expect(refs.every(x=>!x.fullReadHash)).toBe(true);
+ expect(taskSourcesVisible(refs,taskScopeHash(undefined,s),s,s)).toBe(true);
+
+ const withoutOrder={...s,orders:s.orders.filter(row=>row.id!=='target')};
+ const withoutQuotation={...s,market:{...s.market,quotations:[]}};
+ expect(taskSourcesVisible(refs,taskScopeHash(undefined,s),withoutOrder,s)).toBe(false);
+ expect(taskSourcesVisible(refs,taskScopeHash(undefined,s),withoutQuotation,s)).toBe(false);
+ expect(()=>agentGetQuotationForOrder(withoutOrder,reader,'quote','target',undefined)).toThrow(/订单不存在或当前账号不可见/);
+ expect(()=>agentGetQuotationForOrder(withoutQuotation,reader,'quote','target',undefined)).toThrow(/报价不存在或当前账号不可见/);
+ expect(()=>agentGetQuotationForOrder(s,reader,'quote','other',undefined)).toThrow(/未找到该报价与订单的转单条目/);
+ expect(()=>agentGetQuotationForOrder(s,{...reader,permissionCeiling:['quotations:read']},'quote','target',undefined)).toThrow(/无权读取订单/);
+ expect(()=>agentGetQuotationForOrder(s,{...reader,permissionCeiling:['orders:read']},'quote','target',undefined)).toThrow(/无权读取报价/);
+});
+
+it('paginates only the authorized converted lines and retains the historical whole-quotation relation', () => {
+ const s=state(), reader={...actor,permissions:['orders:read','quotations:read']} as TokenPayload;
+ s.orders.push({id:'legacy-order',code:'SO-LEGACY'} as any);
+ const lines=Array.from({length:80},(_,i)=>({
+   id:'line-'+i,name:'long name '.repeat(55),qty:'1',unit:'米',price:'20.00',amount:'20.00',
+ }));
+ s.market.quotations.push({
+   id:'legacy-quote',code:'QT-LEGACY',currency:'EUR',total:'1600.00',convertedOrderId:'legacy-order',lines,
+ } as any);
+ const read=(offset:number)=>agentGetQuotationForOrder(s,reader,'legacy-quote','legacy-order',offset);
+ const first=read(0);
+ expect(first).toMatchObject({truncated:true,orderConversion:{relation:'legacy_whole_quotation',matchingLineCount:80,truncated:true}});
+ const collected=first.orderConversion.lines.map(x=>x.quotationLineId);
+ let offset=first.orderConversion.nextOffset;
+ while(offset!==undefined){
+   const page=read(offset);
+   expect(JSON.stringify(page).length).toBeLessThan(16_000);
+   collected.push(...page.orderConversion.lines.map(x=>x.quotationLineId));
+   offset=page.orderConversion.nextOffset;
+ }
+ expect(collected).toEqual(lines.map(x=>x.id));
+ expect(()=>read(80)).toThrow(/条目偏移超出/);
 });

@@ -50,9 +50,9 @@ it('names image-only PDF pages even when other pages in the window were readable
     step('bambook_file_text',{fileId:'mixed'},{file:{id:'mixed',name:'mixed.pdf'},kind:'pdf',text:'readable content',hasMore:false,range:{pageFrom:21,pageTo:23},pagesWithoutText:[22,22,99,'fixture-secret']}),
     step('bambook_file_text',{fileId:'mixed'},{file:{id:'mixed',name:'mixed.pdf'},kind:'pdf',text:'readable content',hasMore:true,range:{pageFrom:1,pageTo:20},pagesWithoutText:[3]}),
   ]);
-  expect(final).toMatchObject({label:'读取附件 mixed.pdf',detail:'本次读取第 21 至 23 页；第 22 页无可提取文字'});
+  expect(final).toMatchObject({label:'读取附件 mixed.pdf',detail:'提取范围第 21 至 23 页；第 22 页无可提取文字'});
   expect(final.failed).toBeUndefined();
-  expect(more.detail).toBe('本次读取第 1 至 20 页；第 3 页无可提取文字；还有后续内容');
+  expect(more.detail).toBe('提取范围第 1 至 20 页；第 3 页无可提取文字；还有后续内容');
 });
 
 it('links a completed relationship lookup to its source and indicates partial counts', () => {
@@ -70,4 +70,15 @@ it('links a completed relationship lookup to its source and indicates partial co
   expect(failed).toMatchObject({ label: '展开订单的关联记录', failed: true });
   expect(failed.ref).toBeUndefined();
   expect(JSON.stringify(platformTrail([step('bambook_related', args, { object })]))).not.toContain('private fixture');
+});
+
+
+it('shows the physical page range when a PDF window has no readable text', () => {
+  const window = { kind: 'pdf', text: '', range: { pageFrom: 21, pageTo: 23 }, pagesWithoutText: [21, 22, 23], reason: '未提取到文字，可能是扫描件或图片' };
+  const [last, more] = platformTrail([
+    step('bambook_file_text', { fileId: 'scan' }, window),
+    step('bambook_file_text', { fileId: 'scan' }, { ...window, range: { pageFrom: 21, pageTo: 21 }, pagesWithoutText: [21], hasMore: true }),
+  ], [{ id: 'scan', name: 'scan.pdf' }]);
+  expect(last).toMatchObject({ label: '读取附件 scan.pdf', detail: '第 21 至 23 页无可提取文字', failed: true });
+  expect(more).toMatchObject({ detail: '第 21 页无可提取文字；还有后续内容', failed: true });
 });
