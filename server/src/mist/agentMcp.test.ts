@@ -74,7 +74,8 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     const { rpc, workspace, tool } = await as(app, 'local-operator', 'read');
     const schema = (await rpc('tools/list')).result.tools.find((entry: any) => entry.name === 'bambook_get').inputSchema;
     expect(schema.properties.orderId).toMatchObject({ type: 'string' });
-    expect(taskMcpTools().find(entry => entry.name === 'bambook_get')!.inputSchema.properties).toMatchObject({ orderId: schema.properties.orderId });
+    expect(schema.properties.lineSourceHash).toMatchObject({ type: 'string' });
+    expect(taskMcpTools().find(entry => entry.name === 'bambook_get')!.inputSchema.properties).toMatchObject({ orderId: schema.properties.orderId, lineSourceHash: schema.properties.lineSourceHash });
 
     const state = structuredClone(workspace.state);
     const quote = state.market.quotations.find((row: any) => row.code === 'QT-2026-0002');
@@ -117,6 +118,45 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
       expect(result.isError).toBe(true);
       expect(result.structuredContent).toBeUndefined();
     }
+  });
+
+  it('continues a quotation snapshot across unrelated workspace revisions and rejects changed source lines', async () => {
+    const local = createMistLocalRuntime({ directory });
+    const app = createMistServer(undefined, { local });
+    const { workspace, tool } = await as(app, 'local-operator', 'read');
+    const state = structuredClone(workspace.state);
+    const quote = state.market.quotations.find((row: any) => row.code === 'QT-2026-0002');
+    const template = quote.lines[0];
+    quote.lines = Array.from({ length: 80 }, (_, index) => ({
+      ...template, id: randomUUID(), name: `row ${index + 1} ` + 'synthetic specification '.repeat(40),
+    }));
+    const save = () => local.database.$transaction(db => db.mistWorkspace.update({
+      where: { id: workspace.id }, data: { state, revision: { increment: 1 } },
+    }));
+    await save();
+    const args = { workspaceId: workspace.id, type: 'quotation', id: quote.id, orderId: quote.convertedOrderId };
+    const first = (await tool('bambook_get', args)).structuredContent;
+    const { nextOffset, sourceHash } = first.object.orderConversion;
+    expect(nextOffset).toBeGreaterThan(0);
+    const pageArgs = { ...args, lineOffset: nextOffset, lineSourceHash: sourceHash };
+
+    const invalid = await tool('bambook_get', { ...args, lineOffset: nextOffset });
+    expect(invalid.isError).toBe(true);
+    expect(invalid.content[0].text).toContain('重读首段');
+
+    await save(); // A workspace revision can advance without changing this quote or order.
+    const next = (await tool('bambook_get', pageArgs)).structuredContent;
+    expect(next.revision).toBeGreaterThan(first.revision);
+    expect(next.object.orderConversion).toMatchObject({ offset: nextOffset, sourceHash });
+    expect(next.object.orderConversion.lines[0].lineNumber).toBe(nextOffset + 1);
+    expect(JSON.stringify(next.object).length).toBeLessThan(16_000);
+
+    quote.lines.at(-1).amount = '7.00';
+    await save();
+    const stale = await tool('bambook_get', pageArgs);
+    expect(stale.isError).toBe(true);
+    expect(stale.content[0].text).toContain('已变化');
+    expect(stale.structuredContent).toBeUndefined();
   });
 
   it('rejects missing or invalid operation IDs before writing and rejects reusing an ID for different input', async () => {

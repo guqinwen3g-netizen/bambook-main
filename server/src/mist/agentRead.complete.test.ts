@@ -157,17 +157,51 @@ it('paginates only the authorized converted lines and retains the historical who
  s.market.quotations.push({
    id:'legacy-quote',code:'QT-LEGACY',currency:'EUR',total:'1600.00',convertedOrderId:'legacy-order',lines,
  } as any);
- const read=(offset:number)=>agentGetQuotationForOrder(s,reader,'legacy-quote','legacy-order',offset);
+ const read=(offset:number, sourceHash?:string)=>agentGetQuotationForOrder(s,reader,'legacy-quote','legacy-order',offset,{workspaceId:'workspace-a',sourceHash});
  const first=read(0);
+ const sourceHash=first.orderConversion.sourceHash;
+ expect(sourceHash).toMatch(/^[a-f0-9]{64}$/);
  expect(first).toMatchObject({truncated:true,orderConversion:{relation:'legacy_whole_quotation',matchingLineCount:80,truncated:true}});
  const collected=first.orderConversion.lines.map(x=>x.quotationLineId);
  let offset=first.orderConversion.nextOffset;
  while(offset!==undefined){
-   const page=read(offset);
+   const page=read(offset,sourceHash);
+   expect(page.orderConversion.sourceHash).toBe(sourceHash);
    expect(JSON.stringify(page).length).toBeLessThan(16_000);
    collected.push(...page.orderConversion.lines.map(x=>x.quotationLineId));
    offset=page.orderConversion.nextOffset;
  }
  expect(collected).toEqual(lines.map(x=>x.id));
- expect(()=>read(80)).toThrow(/条目偏移超出/);
+ expect(()=>read(80,sourceHash)).toThrow(/条目偏移超出/);
+});
+
+
+it('keeps continuations on the same visible quotation and order snapshot', () => {
+ const s=state(), reader={...actor,permissions:['orders:read','quotations:read']} as TokenPayload;
+ const target={id:'target',code:'SO-TARGET'};const other={...target,id:'other'};
+ s.orders.push(target as any,other as any);
+ const lines=Array.from({length:60},(_,i)=>({
+   id:'line-'+i,name:'long name '.repeat(55),qty:'1',unit:'米',price:'20.00',amount:'20.00',
+ }));
+ const quote={id:'quote',code:'QT-ORIGINAL',currency:'EUR',total:'1200.00',paymentTerms:'T/T',convertedOrderId:target.id,lines} as any;
+ const anotherQuote={...quote,id:'other-quote'};
+ s.market.quotations.push(quote,anotherQuote);
+ const read=(offset:unknown,sourceHash?:string,quoteId=quote.id,orderId=target.id,workspaceId='workspace-a')=>
+   agentGetQuotationForOrder(s,reader,quoteId,orderId,offset,{workspaceId,sourceHash});
+ const first=read(undefined).orderConversion;
+ expect(first.nextOffset).toBeDefined();
+ expect(()=>read(first.nextOffset)).toThrow(/重读首段/);
+ expect(()=>read(first.nextOffset,first.sourceHash,anotherQuote.id)).toThrow(/已变化/);
+ expect(()=>read(first.nextOffset,first.sourceHash,quote.id,target.id,'workspace-b')).toThrow(/已变化/);
+ quote.convertedOrderId=other.id;
+ expect(()=>read(first.nextOffset,first.sourceHash,quote.id,other.id)).toThrow(/已变化/);
+ quote.convertedOrderId=target.id;
+
+ s.orders.push({id:'unrelated',code:'SO-UNRELATED'} as any);
+ const next=read(first.nextOffset,first.sourceHash).orderConversion;
+ expect(next.lines[0].lineNumber).toBe(first.lines.length+1);
+ expect(next.sourceHash).toBe(first.sourceHash);
+ lines.at(-1)!.qty='2';
+ expect(()=>read(first.nextOffset,first.sourceHash)).toThrow(/已变化/);
+ expect(read(undefined).orderConversion.sourceHash).not.toBe(first.sourceHash);
 });
