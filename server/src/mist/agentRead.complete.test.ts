@@ -104,3 +104,23 @@ it('relates every order produced by split quotation lines in both directions', (
  expect(orderRefs.map(row=>row.id)).toEqual(['first','second']);
  expect(agentRelated(s,actor,'order','second').related.some(row=>row.type==='quotation')).toBe(false);
 });
+
+it('filters related types before applying the limit and reports only authorized matches', () => {
+ const s=state(), reader={...actor,permissions:['orders:read','quotations:read']} as TokenPayload;
+ s.orders.push({id:'target',code:'SO-TARGET'} as any);
+ s.orderLines.push(...Array.from({length:31},(_,i)=>({id:`line-${i}`,orderId:'target'}) as any));
+ s.market.quotations.push(
+  {id:'original',code:'QT-ORIGINAL',convertedOrderId:'first',lines:[{conversion:{orderId:'target',orderCode:'SO-TARGET'}}]} as any,
+  {id:'unrelated',code:'QT-UNRELATED',convertedOrderId:null,lines:[]} as any,
+ );
+ const unfiltered=agentRelated(s,reader,'order','target');
+ expect(unfiltered).toMatchObject({total:32,truncated:true});
+ expect(unfiltered.related).toHaveLength(30);
+ expect(unfiltered.related.every(row=>row.type==='order_line')).toBe(true);
+ expect(agentRelated(s,reader,'order','target',{relatedType:'quotation'})).toMatchObject({total:1,truncated:false,related:[{type:'quotation',id:'original',relation:'referenced_by'}]});
+ expect(agentRelated(s,reader,'order','target',{relatedType:'order_line'})).toMatchObject({total:31,truncated:true});
+ expect(agentRelated(s,reader,'order','target',{relatedType:'quotation',excludeTypes:['quotation']})).toMatchObject({total:0,truncated:false,related:[]});
+ expect(()=>agentRelated(s,actor,'order','target',{relatedType:'quotation'})).toThrow(/无权读取报价/);
+ expect(()=>agentRelated(s,{...reader,permissionCeiling:['orders:read']},'order','target',{relatedType:'quotation'})).toThrow(/无权读取报价/);
+ expect(()=>agentRelated(s,reader,'order','target',{relatedType:'unknown'})).toThrow(/不支持的对象类型/);
+});

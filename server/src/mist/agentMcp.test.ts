@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createMistLocalRuntime } from './local';
 import { createMistServer } from './server';
 import { AGENT_DELEGATION_HEADER as HEADER } from './agentDelegation';
-import { agentCommandSensitivity, handleMcpMessage, type McpRepository } from './agentMcp';
+import { agentCommandSensitivity, handleMcpMessage, taskMcpTools, type McpRepository } from './agentMcp';
 import { agentCommandRisk } from '../shared/mistAgentProposals';
 import { MistApiError } from './errors';
 import { MIST_COMMAND_CATALOG } from './agentCommandCatalog';
@@ -45,6 +45,27 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     expect((await rpc('resources/list')).error.code).toBe(-32601);
     await request(app).post('/api/mist/mcp').send({ jsonrpc: '2.0', id: 1, method: 'ping' }).expect(401);
     await request(app).get('/api/mist/mcp').set(HEADER, token).expect(405);
+  });
+
+  it('exposes and applies the optional related type in the MCP endpoint', async () => {
+    const app = createMistServer(undefined, { local: createMistLocalRuntime({ directory }) });
+    const { rpc, workspace, tool } = await as(app, 'local-operator', 'read');
+    const toolSchema = (await rpc('tools/list')).result.tools.find((entry: any) => entry.name === 'bambook_related').inputSchema;
+    const taskSchema = taskMcpTools().find(entry => entry.name === 'bambook_related')!.inputSchema;
+    expect(toolSchema.properties.relatedType.enum).toContain('quotation');
+    expect(taskSchema.properties.relatedType).toEqual(toolSchema.properties.relatedType);
+    expect(toolSchema.required).toEqual(['workspaceId', 'type', 'id']);
+    expect(taskSchema.required).toEqual(['type', 'id']);
+
+    const quote = workspace.state.market.quotations.find((row: any) => row.code === 'QT-2026-0002');
+    const args = { workspaceId: workspace.id, type: 'order', id: quote.convertedOrderId };
+    const unfiltered = (await tool('bambook_related', args)).structuredContent.object;
+    const filtered = (await tool('bambook_related', { ...args, relatedType: 'quotation' })).structuredContent.object;
+    expect(unfiltered.total).toBeGreaterThan(1);
+    expect(filtered).toMatchObject({ total: 1, truncated: false, related: [{ type: 'quotation', id: quote.id }] });
+    const invalid = await tool('bambook_related', { ...args, relatedType: ['quotation'] });
+    expect(invalid.isError).toBe(true);
+    expect(invalid.structuredContent).toBeUndefined();
   });
 
   it('rejects missing or invalid operation IDs before writing and rejects reusing an ID for different input', async () => {

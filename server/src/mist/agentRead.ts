@@ -10,7 +10,6 @@ import type { PermissionScope } from '../_shared/rolePermissionMatrix';
 import type { MistState } from '../shared/mistWorkspace';
 import { emailSendEffectiveStatus, emailSendRecipients } from '../shared/mistEmail';
 import { developmentReopenSource } from '../shared/mistDevelopmentLifecycle';
-import { quotationConvertedOrders } from '../shared/mistQuotationLineConversion';
 import {agentCommandSources,unavailableCommandSources,type AgentGetContext,type AgentCommandSources} from './agentReadCommandSources';
 import { MistApiError } from './errors';
 
@@ -269,8 +268,10 @@ export function agentGet(state: MistState, actor: TokenPayload, typeName: unknow
 }
 
 /** 关联对象：本对象字段直接引用的对象，以及字段引用了本对象的其它对象（均限当前可读类型）。 */
-export function agentRelated(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown,options:{excludeTypes?:readonly string[]}={}) {
+export function agentRelated(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown, options: { excludeTypes?: readonly string[]; relatedType?: unknown } = {}) {
   const { type, row } = find(state, actor, typeName, id);
+  const relatedType = options.relatedType === undefined ? undefined : typeOf(options.relatedType, actor);
+  const candidates = readable(actor, options.excludeTypes).filter(candidate => relatedType === undefined || candidate === relatedType);
   const idsOf = (r: any): string[] => Object.entries(r).flatMap(([k, v]) => !/(Id|Ids)$/.test(k) ? [] : typeof v === 'string' && v ? [v] : Array.isArray(v) ? v.filter(x => typeof x === 'string') : []);
   // 明细行里的引用也算（如票据 lines[].purchaseId、付款申请 lines[].billId），只展开一层。
   const scalarRefs = (descriptor: ObjectType, r: any) => new Set([
@@ -280,13 +281,18 @@ export function agentRelated(state: MistState, actor: TokenPayload, typeName: un
     ...Object.values(r).flatMap(value => Array.isArray(value)
       ? value.filter(item => item && typeof item === 'object' && !Array.isArray(item)).flatMap(idsOf)
       : []),
-    // Split conversion records later orders on quotation lines, beyond the first order on the header.
-    ...(descriptor.type === 'quotation' && Array.isArray(r.lines) ? quotationConvertedOrders(r).map(order => order.id) : []),
+    // The header is already covered by idsOf. Collect later orders directly from converted lines.
+    ...(descriptor.type === 'quotation' && Array.isArray(r.lines)
+      ? r.lines.flatMap((line: { conversion?: { orderId?: unknown } } | null) => {
+        const orderId = line?.conversion?.orderId;
+        return typeof orderId === 'string' && orderId ? [orderId] : [];
+      })
+      : []),
   ]);
   const own = scalarRefs(type, row);
   const results: Array<ReturnType<typeof ref> & { relation: 'references' | 'referenced_by' }> = [];
   let total = 0;
-  for (const other of readable(actor,options.excludeTypes)) for (const candidate of rows(state, other)) {
+  for (const other of candidates) for (const candidate of rows(state, other)) {
     if (other === type && candidate.id === row.id) continue;
     const relation = own.has(candidate.id) ? 'references' : scalarRefs(other, candidate).has(row.id) ? 'referenced_by' : null;
     if (!relation) continue;
