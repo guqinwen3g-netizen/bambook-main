@@ -179,30 +179,27 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     try {
       const replies = await withRequestDeadline(controller, HISTORY_READ_TIMEOUT_MS, '提交结果暂时无法核对', signal =>
         Promise.allSettled(missing.map(async ([fingerprint,entry]) => {
-          const result = await mistApiRequest(base + '/personal-agent/tasks/receipt/' + encodeURIComponent(entry.requestId), {signal,cache:'no-store'}) as {item:AgentTaskView};
-          if (!result.item?.id || result.item.executor !== 'platform' || result.item.conversationId !== entry.conversationId)
+          const {item:task} = await mistApiRequest(base + '/personal-agent/tasks/receipt/' + encodeURIComponent(entry.requestId), {signal,cache:'no-store'}) as {item:AgentTaskView};
+          if (!task?.id || task.executor !== 'platform' || task.conversationId !== entry.conversationId)
             throw new Error('提交结果暂时无法核对');
-          return {fingerprint,entry,task:result.item};
+          if (signal.aborted || !current() || pending.current.get(fingerprint)!==entry) return;
+          pending.current.delete(fingerprint);
+          savePendingSubmissions(scope,pending.current);
+          setTasks(old=>{
+            const existing=old.find(item=>item.id===task.id);
+            return existing ? old.map(item=>mergeTaskUpdate(item,task))
+              : [...old,task].sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
+          });
+          setSendFailure(old=>old&&(entry.sourceConversationId??entry.conversationId)===old.conversationId?undefined:old);
+          setRecoveredSubmissions(old=>[...old,{...entry,fingerprint}]);
         })));
-      if (!current()) return;
-      const recovered=replies.flatMap(reply=>reply.status==='fulfilled'&&pending.current.get(reply.value.fingerprint)===reply.value.entry?[reply.value]:[]);
-      if (!recovered.length) {
-        if (!automatic) setSendFailure({conversationId:conversation,message:replies.every(reply=>reply.status==='rejected'&&reply.reason?.status===404)
-          ?'暂未查到原提交回执':'提交结果暂时无法核对'});
-        return;
-      }
-      for (const {fingerprint} of recovered) pending.current.delete(fingerprint);
-      savePendingSubmissions(scope,pending.current);
-      setTasks(old=>{
-        const byId=new Map(old.map(task=>[task.id,task]));
-        for (const {task} of recovered) {
-          const existing=byId.get(task.id);
-          byId.set(task.id,existing?mergeTaskUpdate(existing,task):task);
-        }
-        return [...byId.values()].sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
+      if (!current() || automatic) return;
+      const unresolved=replies.filter((_,index)=>{
+        const [fingerprint,entry]=missing[index];
+        return pending.current.get(fingerprint)===entry;
       });
-      setSendFailure(old=>old&&recovered.some(({entry})=>(entry.sourceConversationId??entry.conversationId)===old.conversationId)?undefined:old);
-      setRecoveredSubmissions(old=>[...old,...recovered.map(({entry,fingerprint})=>({...entry,fingerprint}))]);
+      if(unresolved.length)setSendFailure({conversationId:conversation,message:unresolved.every(reply=>reply.status==='rejected'&&reply.reason?.status===404)
+        ?'暂未查到原提交回执':'提交结果暂时无法核对'});
     } catch {
       if (current()&&!automatic)setSendFailure({conversationId:conversation,message:'提交结果暂时无法核对'});
     } finally {

@@ -235,23 +235,29 @@ export function AssistantPage(){
   const recoveredSubmission=cowork.recoveredSubmissions.filter(entry=>(entry.sourceConversationId??entry.conversationId)===conversationId).at(-1);
   const taskText=formatTaskQuestion(question,selected);
   React.useEffect(()=>{
-    if(!recoveredSubmission||handledRecoveries.current.has(recoveredSubmission.requestId))return;
+    const unhandled=cowork.recoveredSubmissions.filter(entry=>(entry.sourceConversationId??entry.conversationId)===conversationId
+      &&!handledRecoveries.current.has(entry.requestId));
+    if(!unhandled.length)return;
     let cancelled=false;
     void (async()=>{
       try {
         const intentRefs=selectedTaskIntentRefs(selected);
-        const sameDraft=recoveredSubmission.recoveredFromStorage&&!files.length&&!attachmentRefs.length
-          ? recoveredSubmission.draftKey===submissionDraftKey(taskText,intentRefs)
-          : recoveredSubmission.fingerprint===await submissionFingerprint(conversationId,taskText,intentRefs,attachmentRefs.map(({taskId,fileId})=>({taskId,fileId})),files);
+        const draftKey=submissionDraftKey(taskText,intentRefs);
+        const candidates=unhandled.filter(entry=>entry.draftKey===draftKey);
+        const hasFiles=files.length||attachmentRefs.length;
+        const fingerprint=candidates.some(entry=>!entry.recoveredFromStorage||hasFiles)
+          ? await submissionFingerprint(conversationId,taskText,intentRefs,attachmentRefs.map(({taskId,fileId})=>({taskId,fileId})),files)
+          : undefined;
         if(cancelled)return;
-        handledRecoveries.current.add(recoveredSubmission.requestId);
-        if(!sameDraft)return;
+        for(const entry of unhandled)handledRecoveries.current.add(entry.requestId);
+        const matched=candidates.find(entry=>(entry.recoveredFromStorage&&!hasFiles)||entry.fingerprint===fingerprint);
+        if(!matched)return;
         clearDraft(conversationId,conversationId);
-        if(recoveredSubmission.conversationId&&recoveredSubmission.conversationId!==conversationId)openConversation(recoveredSubmission.conversationId);
+        if(matched.conversationId&&matched.conversationId!==conversationId)openConversation(matched.conversationId);
       } catch { /* A changed or unverifiable draft stays in the composer. */ }
     })();
     return()=>{cancelled=true;};
-  },[recoveredSubmission,conversationId,taskText,selected,files,attachmentRefs,clearDraft]);
+  },[cowork.recoveredSubmissions,conversationId,taskText,selected,files,attachmentRefs,clearDraft]);
   const showTaskHistory=canChat&&(cowork.available||cowork.tasks.length>0);
   const index=React.useMemo(()=>recordIndex(w.state),[w.state]),automationRules=useAutomationRules(w.workspace?.id,showTaskHistory,automations),meta=useConversationMeta(w.workspace?.id,showTaskHistory),conversations=React.useMemo(()=>conversationsOf(cowork.tasks,meta.items),[cowork.tasks,meta.items]),current=conversations.find(c=>c.id===conversationId)??(openedOrigin?.scope===scope&&openedOrigin.conversationId===conversationId?conversationsOf(cowork.tasks.filter(task=>task.conversationId===conversationId))[0]:undefined),visibleTasks=showTaskHistory?(current?.tasks??[]):[],proposals=(w.state?.agentProposals??[]).filter(p=>p.state==='pending'),voice=usePersonalAgentVoice(scope+':'+canChat,w.workspace?.id,cowork.track),inCall=voiceInCall(voice);
   const originActions=React.useRef({refreshTask:cowork.refreshTask,track:cowork.track,openConversation,go:nav.go});
@@ -503,7 +509,7 @@ export function AssistantPage(){
         </div>}
         {cowork.error&&<div className="mist-xz-col mist-xz-banner"><Banner tone="warn" title={uiText("小竹操作未完成")} actions={<Button disabled={cowork.loading} onClick={()=>void cowork.reload()}>{uiText("重新读取任务")}</Button>}>{uiText(cowork.error)}</Banner></div>}
         {(cowork.sendError||cowork.hasPendingSubmission&&!cowork.loading)&&<div className="mist-xz-col mist-xz-banner"><Banner variant="status" tone="warn" title={uiText(cowork.sendError||'提交结果待核对')} actions={cowork.hasPendingSubmission?<Button disabled={busy||cowork.checkingReceipt} loading={cowork.checkingReceipt} onClick={()=>void cowork.checkSubmission()}>{uiText('核对提交结果')}</Button>:undefined}/></div>}
-        {recoveredSubmission&&!cowork.sendError&&<div className="mist-xz-col mist-xz-banner"><Banner variant="status" tone="ok" title={uiText('已找回提交的任务')}/></div>}
+        {recoveredSubmission&&<div className="mist-xz-col mist-xz-banner"><Banner variant="status" tone="ok" title={uiText('已找回提交的任务')}/></div>}
         {canChat&&cowork.loading&&!hasThread?<div className="mist-xz-scroll"><div className="mist-xz-col mist-xz-loading" role="status" aria-label={uiText('正在读取对话')}><i/><i/><i/><i/></div></div>:hasThread?<>
           <div className="mist-xz-scroll" ref={scrollRef} onScroll={e=>{const el=e.currentTarget,near=el.scrollHeight-el.scrollTop-el.clientHeight<96;atBottomRef.current=near;setAtBottom(near);}}>
             <div className="mist-xz-col">

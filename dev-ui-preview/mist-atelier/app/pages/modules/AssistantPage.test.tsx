@@ -154,6 +154,37 @@ it.each([
   expect(mock.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
 });
 
+it('recovers an available receipt while another receipt in the same conversation stalls', async()=>{
+ vi.useFakeTimers();
+ try {
+  const conversationId='c_multiple_receipts';
+  const first='00000000-0000-4000-8000-000000000061', second='00000000-0000-4000-8000-000000000062';
+  const pending=(requestId:string,instructions:string)=>({requestId,instructions,locale:'zh-CN',draftKey:JSON.stringify([instructions,[]]),conversationId,sourceConversationId:conversationId,hasAttachments:false});
+  sessionStorage.setItem('mist.xiaozhu.conversation:session-a:workspace',conversationId);
+  sessionStorage.setItem('mist.assistant.conversation:session-a:workspace',JSON.stringify({question:'另外编辑的草稿',selected:[],messages:[]}));
+  const key='mist.xiaozhu.submissions:session-a:workspace';
+  sessionStorage.setItem(key,JSON.stringify([['first',pending(first,'第一笔问题')],['second',pending(second,'第二笔问题')]]));
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async(url:string)=>{
+   if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+   if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+   if(url.endsWith('/receipt/'+first))return {item:{id:'first-recovered',identityId:'personal',executor:'platform',conversationId,name:'第一笔问题',instructions:'第一笔问题',state:'succeeded',result:'第一笔已经找回',questions:[],waitingProposalIds:[],createdAt:'2026-11-24T00:00:00Z',updatedAt:'2026-11-24T00:01:00Z'}};
+   if(url.endsWith('/receipt/'+second))return new Promise(()=>{});
+   return {items:[],nextCursor:null};
+  });
+  await mount();
+  expect(host.textContent).toContain('第一笔已经找回');
+  expect(sessionStorage.getItem(key)).not.toContain(first);
+  expect(sessionStorage.getItem(key)).toContain(second);
+  await act(async()=>vi.advanceTimersByTimeAsync(10_000));
+  expect(host.textContent).toContain('第一笔已经找回');
+  expect(host.textContent).toContain('提交结果待核对');
+  expect(button('核对提交结果')!.disabled).toBe(false);
+  expect(host.querySelector('textarea')?.value).toBe('另外编辑的草稿');
+  expect(mock.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+ } finally{vi.useRealTimers();}
+});
+
 it.each([false,true])('looks up a lost receipt in place and preserves an edited draft (%s)', async changed=>{
  let posted:any;
  mock.fetch.mockResolvedValue(response({configured:true}));
