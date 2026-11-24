@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type {AgentTaskView} from '../shared/mistAgentTasks';
 import type{ResponseLocale}from'./responseLanguage';
 
@@ -30,10 +30,19 @@ export function newPlatformTaskStep(plan:PlatformTaskPlan,now:number):PlatformTa
 /** Model context is explicit about omitted history; it cannot silently become full-read evidence. */
 export function platformTaskHistory(steps:PlatformTaskStep[]){
   let remaining=240_000;const recent:Array<{operationId:string;name:string;arguments:unknown;result:unknown;compacted?:boolean}>=[];
+  const readResults = new Map<string,string>();
   for(const step of [...steps].reverse()){
     if(step.result===undefined)continue;
-    const item={operationId:step.id,name:step.plan.name,arguments:step.plan.arguments,result:step.result,compacted:step.compacted},size=JSON.stringify(item).length;
-    if(size>remaining)break;recent.unshift(item);remaining-=size;
+    const read = ['bambook_get','bambook_query','bambook_related','bambook_file_text','bambook_commands'].includes(step.plan.name);
+    const key=read&&!step.compacted
+      ? createHash('sha256').update(JSON.stringify([step.plan.name,step.plan.arguments,step.result])).digest('hex')
+      : undefined;
+    const duplicateOf=key&&readResults.get(key);
+    const result=duplicateOf?{duplicateOf,readHint:'此读取的参数和完整结果与所引用步骤相同，请查看该步骤回执。'}:step.result;
+    const item={operationId:step.id,name:step.plan.name,arguments:step.plan.arguments,result,compacted:step.compacted},size=JSON.stringify(item).length;
+    if(size>remaining)break;
+    recent.unshift(item);remaining-=size;
+    if(key&&!duplicateOf)readResults.set(key,step.id);
   }
   return{recent,omitted:steps.filter(s=>s.result!==undefined).length-recent.length,operations:steps.map(s=>({operationId:s.id,name:s.plan.name,completed:s.result!==undefined}))};
 }

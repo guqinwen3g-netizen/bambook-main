@@ -38,3 +38,18 @@ it('accepts a bounded public progress update without forwarding it to the tool',
   expect(parsePlatformTaskPlan(JSON.stringify({...plan,progress:'Bearer abcdef1234567890'}))).not.toHaveProperty('progress');
   expect(parsePlatformTaskPlan(JSON.stringify({...plan,progress:'字'.repeat(300)})).progress).toHaveLength(240);
 });
+
+
+it('sends identical read bodies once while keeping each operation and changed revisions distinct',()=>{
+  const plan={name:'bambook_get',arguments:{type:'order',id:'so'}};
+  const result={revision:63,object:{data:{id:'so',text:'条款'.repeat(2000)}}};
+  const first={...newPlatformTaskStep(plan,1000),result};
+  const repeated={...newPlatformTaskStep(plan,2000),result:structuredClone(result)};
+  const changed={...newPlatformTaskStep(plan,3000),result:{...result,revision:64}};
+  const history=platformTaskHistory([first,repeated,changed]);
+  expect(history.recent.map(step=>step.operationId)).toEqual([first.id,repeated.id,changed.id]);
+  expect(history.recent[0].result).toMatchObject({duplicateOf:repeated.id});
+  expect(history.recent[1].result).toEqual(result);
+  expect(history.recent[2].result).toEqual({...result,revision:64});
+  expect(first.result).toEqual(result);
+});

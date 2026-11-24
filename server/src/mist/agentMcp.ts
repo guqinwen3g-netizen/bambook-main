@@ -1,3 +1,4 @@
+import { MistApiError } from './errors';
 /**
  * Mist 的标准 MCP 接口（JSON-RPC 2.0，POST /api/mist/mcp）：让桌面工作助手和外部 Agent 不经前端操作同一套业务。
  *
@@ -50,7 +51,7 @@ export type McpRepository = {
   agentAudit(actor:TokenPayload,id:string,requestId:string,input?:Record<string,unknown>):Promise<unknown>;
   getAgentTask?(actor:TokenPayload,id:string,taskId:string):Promise<unknown>;
   agentTaskRuntime?(actor:TokenPayload,id:string,action:'heartbeat'|'checkpoint'|'question'|'wait'|'finish',input:Record<string,unknown>):Promise<unknown>;
-  agentTaskExpectedRevision?(actor:TokenPayload,id:string,command:{type:string;payload:Record<string,unknown>}):Promise<number|undefined>;
+  agentTaskExpectedRevision?(actor:TokenPayload,id:string,command:{type:string;payload:Record<string,unknown>}):Promise<{ revision: number; staleOrderLineIds: string[] }|undefined>;
   finishAgentTaskSession?(actor:TokenPayload,id:string,input:Record<string,unknown>):Promise<unknown>;
 };
 
@@ -125,10 +126,21 @@ async function callTool(repository: McpRepository, actor: TokenPayload, name: st
       if(args.expectedRevision!==undefined&&(!Number.isSafeInteger(args.expectedRevision)||Number(args.expectedRevision)<0||Number(args.expectedRevision)>workspace.revision))throw new ToolInputError('expectedRevision须为已读取的有效版本');
       const observed=await repository.agentTaskExpectedRevision?.(actor,workspaceId,command);
       const explicit=typeof args.expectedRevision==='number'?args.expectedRevision:workspace.revision;
-      const expected=observed===undefined?explicit:Math.min(observed,explicit);
+      const expected=observed===undefined?explicit:Math.min(observed.revision,explicit);
       if(isAgentActor(actor)&&actor.agentTaskLease)actor.agentTaskSourceRevision=expected;
+      const previewCommand = async () => {
+        try {
+          return await repository.preview(actor, workspaceId, { requestId: `mcp-preview-${randomUUID()}`, expectedRevision: expected, command });
+        } catch (error) {
+          if (error instanceof MistApiError && error.code === 'REVISION_CONFLICT' && observed?.staleOrderLineIds.length) {
+            const lines = observed.staleOrderLineIds.map(id => ({ type: 'order_line', id }));
+            throw new ToolInputError(`预演未通过。${error.message}。草稿同时含有旧版订单行，请分别用 bambook_get 读取这些订单行和订单，再按读回的当前字段重建草稿。只重读订单不会刷新订单行版本。订单行：${JSON.stringify(lines)}`);
+          }
+          throw error;
+        }
+      };
       if (name === 'bambook_preview' && FILE_PRODUCING_COMMANDS.has(command.type)) return { via, previewUnsupported: true, summary: fileCommandSummary(workspace.state, command), message: '生成正式文件的操作不能预演；核对资料后直接用 bambook_execute 提交，本人确认后才生成。' };
-      if (name === 'bambook_preview') return { via, ...(await repository.preview(actor, workspaceId, { requestId: `mcp-preview-${randomUUID()}`, expectedRevision: expected, command }) as object) };
+      if (name === 'bambook_preview') return { via, ...(await previewCommand() as object) };
       const operationId = args.requestId;
       if (typeof operationId !== 'string' || !operationId.trim() || operationId !== operationId.trim() || operationId.length > 116) throw new ToolInputError('执行需要 1–116 字的 requestId；同一操作重试请沿用原编号');
       const requestId = `mcp-${operationId}`;
@@ -138,7 +150,7 @@ async function callTool(repository: McpRepository, actor: TokenPayload, name: st
         // 高敏感命令：先按 Agent 身份完整预演（不合规的不提交），再记为提议，等本人在「接着完成」里确认执行。
         // 生成正式文件的命令不能预演（生成本身就是副作用）：直接记为提议，本人确认时按本人身份重走全部门禁。
         const producesFile = FILE_PRODUCING_COMMANDS.has(command.type);
-        const preview = prior || producesFile ? null : await repository.preview(actor, workspaceId, { requestId: `mcp-preview-${randomUUID()}`, expectedRevision: expected, command }) as { events?: string[] };
+        const preview = prior || producesFile ? null : await previewCommand() as { events?: string[] };
         // 重试必须沿用原提议说明；换成通用文字会改变请求哈希，让同一编号误报冲突。
         // 仅在当前本人可见的提议中查找，不因重试重新提交或再次执行已确认的业务。
         const original = prior ? workspace.state.agentProposals?.find(item => item.id === prior.result?.id && item.ownerId === actor.userId) : undefined;
