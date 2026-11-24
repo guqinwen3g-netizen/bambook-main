@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type {AgentTaskView} from '../shared/mistAgentTasks';
+import type { MarketQuotation } from '../shared/mistMarket';
 import type{ResponseLocale}from'./responseLanguage';
 
 export type PlatformTaskPlan={name:string;arguments:Record<string,unknown>;progress?:string};
@@ -37,9 +38,28 @@ export function resolvePlatformFileContinuation(plan: PlatformTaskPlan, steps: P
   if(last?.compacted||result?.hasMore!==true||typeof result.nextCursor!=='string'||!result.nextCursor.startsWith('aft1.'))return plan;
   return {...plan,arguments:{...plan.arguments,cursor:result.nextCursor}};
 }
+/** Label the amount scopes from one complete quotation read without calculating or refetching business values. */
+function quotationAmountScope(result: unknown) {
+  const read = result as { error?: boolean; object?: { type: string; truncated: boolean; data?: Partial<MarketQuotation> } } | undefined;
+  const quote = read?.object?.data;
+  if (read?.error || read?.object?.type !== 'quotation' || read.object.truncated !== false
+    || typeof quote?.total !== 'string' || typeof quote.currency !== 'string' || !Array.isArray(quote.lines) || quote.lines.length < 2) return;
+  const convertedLines = quote.lines.flatMap((line, index) => {
+    const orderCode = line?.conversion?.orderCode;
+    return orderCode && typeof line.amount === 'string'
+      ? [{ lineNumber: index + 1, orderCode, quotationLineAmount: line.amount }]
+      : [];
+  });
+  if (!convertedLines.length) return;
+  return {
+    currency: quote.currency, fullQuotationTotal: quote.total, convertedLines: convertedLines.slice(0, 12),
+    ...(convertedLines.length > 12 ? { convertedLinesOmitted: convertedLines.length - 12 } : {}),
+  };
+}
+
 /** Model context is explicit about omitted history; it cannot silently become full-read evidence. */
 export function platformTaskHistory(steps:PlatformTaskStep[]){
-  let remaining=240_000;const recent:Array<{operationId:string;name:string;arguments:unknown;result:unknown;compacted?:boolean}>=[];
+  let remaining=240_000;const recent:Array<{operationId:string;name:string;arguments:unknown;result:unknown;compacted?:boolean;quotationAmountScope?:ReturnType<typeof quotationAmountScope>}>=[];
   const readResults = new Map<string,string>();
   for(const step of [...steps].reverse()){
     if(step.result===undefined)continue;
@@ -53,7 +73,9 @@ export function platformTaskHistory(steps:PlatformTaskStep[]){
     const displayedResult=typeof window?.nextCursor==='string'?{...window,nextCursor:'next'}:step.result;
     const args=fileRead&&typeof step.plan.arguments.cursor==='string'?{...step.plan.arguments,cursor:'next'}:step.plan.arguments;
     const result=duplicateOf?{duplicateOf,readHint:'此读取的参数和完整结果与所引用步骤相同，请查看该步骤回执。'}:displayedResult;
-    const item={operationId:step.id,name:step.plan.name,arguments:args,result,compacted:step.compacted},size=JSON.stringify(item).length;
+    const amounts = !duplicateOf && !step.compacted && step.plan.name === 'bambook_get' && step.plan.arguments.type === 'quotation'
+      ? quotationAmountScope(step.result) : undefined;
+    const item={operationId:step.id,name:step.plan.name,arguments:args,result,compacted:step.compacted,...(amounts ? { quotationAmountScope: amounts } : {})},size=JSON.stringify(item).length;
     if(size>remaining)break;
     recent.unshift(item);remaining-=size;
     if(key&&!duplicateOf)readResults.set(key,step.id);
