@@ -68,9 +68,37 @@ it('includes active owner connections beyond the first page',async()=>{
 });
 it('keeps the owner stop action reachable for a masked task without offering new execution',async()=>{
  const masked={...row(),name:'Agent任务',state:'access_changed',instructions:'',canControl:true};
- seam.api.mockImplementation((url:string,init:any)=>Promise.resolve(init?.method==='POST'?{item:{...masked,state:'cancelled',canControl:false}}:url.includes('agent-identities')?{items:[{...identity(),state:'invalid',canIssue:false,canRevoke:true}],nextCursor:null}:url.includes('/history')?{items:[],nextCursor:null}:url.endsWith('/task')?{item:masked}:{items:[masked],nextCursor:null}));
+ let current=masked;
+ seam.api.mockImplementation((url:string,init:any)=>{
+  if(init?.method==='POST')current={...masked,state:'cancelled',canControl:false};
+  return Promise.resolve(init?.method==='POST'||url.endsWith('/task')?{item:current}:url.includes('agent-identities')?{items:[{...identity(),state:'invalid',canIssue:false,canRevoke:true}],nextCursor:null}:url.includes('/history')?{items:[],nextCursor:null}:{items:[current],nextCursor:null});
+ });
  act(paint);await flush();expect((getByRole(host,'button',{name:'新建任务'}) as HTMLButtonElement).disabled).toBe(true);expect(getByRole(host,'button',{name:'新建任务'}).title).toBe('当前无AI使用权限');await click(getByText(host,'Agent任务'));expect(queryByRole(document.body,'button',{name:'连接Agent',exact:true})).toBeNull();expect(queryByRole(document.body,'button',{name:'继续任务'})).toBeNull();
+ const dialog=getByRole(document.body,'dialog',{name:'Agent任务'});
+ expect(dialog.textContent).toContain('权限已变化');
+ expect(dialog.textContent).not.toContain('可办理');
+ expect(queryByRole(dialog,'button',{name:'暂停任务'})).toBeNull();
  await click(getByRole(document.body,'button',{name:'停止任务',exact:true}));await click(getByRole(document.body,'button',{name:'确认',exact:true}));const writes=seam.api.mock.calls.filter(([,init])=>init?.method==='POST');expect(writes).toHaveLength(1);expect(writes[0][0]).toMatch(/\/task\/cancel$/);expect(JSON.parse(writes[0][1].body).version).toBe(masked.version);
+ expect(dialog.textContent).toContain('已停止');
+ expect(dialog.textContent).not.toContain('可办理');
+});
+it('applies the detail permission change even when refreshing connections fails',async()=>{
+ let current={...row(),executor:'platform'},connectionsUnavailable=false;
+ seam.api.mockImplementation((url:string)=>{
+  if(url.includes('agent-identities'))return connectionsUnavailable?Promise.reject(new Error('连接暂不可用')):Promise.resolve({items:[identity()]});
+  return Promise.resolve(url.includes('/history')?{items:[],nextCursor:null}:url.endsWith('/task')?{item:current}:{items:[current],nextCursor:null});
+ });
+ act(paint);await flush();await click(getByText(host,'核对邮件'));
+ expect(getByRole(document.body,'dialog',{name:'核对邮件'}).textContent).toContain('可办理');
+ current={...current,state:'access_changed',name:'Agent任务',instructions:''};
+ connectionsUnavailable=true;
+ await click(getByRole(host,'button',{name:'刷新'}));
+ const dialog=getByRole(document.body,'dialog',{name:'Agent任务'});
+ expect(dialog.textContent).toContain('权限已变化');
+ expect(dialog.textContent).not.toContain('可办理');
+ expect(dialog.textContent).not.toContain(row().instructions);
+ expect(host.textContent).not.toContain(row().name);
+ expect(getByRole(dialog,'button',{name:'停止任务'})).toBeTruthy();
 });
 it('shows missing facts distinctly and submits an owner answer without confirming business',async()=>{
  const question={id:'question',question:'请提供准确工厂交期及书面依据。',askedAt:'2026-11-01T00:10:00Z'},waiting={...row(),state:'waiting_human',questions:[question]};
