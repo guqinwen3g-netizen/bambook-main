@@ -53,13 +53,18 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
         const observedName=text(result?.file?.name,60);
         if(observedName&&typeof args.fileId==='string'&&result?.file?.id===args.fileId)names.set(args.fileId,observedName);
         const file=observedName||names.get(args.fileId);
-        const pages = result?.range;
+        const pages=result?.range;
+        const pageDetail=Number.isSafeInteger(pages?.pageFrom)&&Number.isSafeInteger(pages?.pageTo)
+          &&pages.pageFrom>=1&&pages.pageTo>=pages.pageFrom?`本次读取第 ${pages.pageFrom} 至 ${pages.pageTo} 页`:'';
+        const missingPages=pageDetail&&result?.kind==='pdf'&&Array.isArray(result.pagesWithoutText)
+          ? [...new Set<number>(result.pagesWithoutText.filter((page:unknown)=>typeof page==='number'&&Number.isSafeInteger(page)&&page>=pages.pageFrom&&page<=pages.pageTo))].sort((a,b)=>a-b).slice(0,20)
+          : [];
         const detail = result?.error === true ? FILE_FAILURE_DETAILS.get(result.message)
           : failed ? text(result?.reason, 120)
+          : missingPages.length ? `${pageDetail}；第 ${missingPages.join('、')} 页无可提取文字${result.hasMore?'；还有后续内容':''}`
           : result?.hasMore ? '本次读取部分正文，还有后续内容'
           : result?.complete ? '已提取可读取正文'
-          : Number.isSafeInteger(pages?.pageFrom) && Number.isSafeInteger(pages?.pageTo)
-            ? `本次读取第 ${pages.pageFrom} 至 ${pages.pageTo} 页` : '';
+          : pageDetail;
         out.push({ ...base, kind: 'read', label: result?.error===true?`附件读取失败${file?' '+file:''}`:file?`读取附件 ${file}`:'读取附件正文', ...(detail ? { detail } : {}) });
         break;
       }
