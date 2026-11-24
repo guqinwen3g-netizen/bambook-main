@@ -126,16 +126,17 @@ it('works with Xiaozhu as a coworker: a request becomes a platform task whose pr
   expect(polls).toBeGreaterThan(0);expect(host.textContent).toContain('本周有 2 张订单交期临近');
   expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('');
 });
-function mockTaskStatus(read: (task: Record<string, unknown>) => Promise<unknown>, available=true) {
+function mockTaskStatus(read: (task: Record<string, unknown>) => Promise<unknown>, available=true, terminal=false) {
   const task={id:'existing-task',identityId:'personal',executor:'platform',name:'修改付款条件',instructions:'修改付款条件',
-    conversationId:'current-task-conversation',state:'paused',result:'',checkpoint:'',questions:[],waitingProposalIds:[],
+    conversationId:'current-task-conversation',state:terminal?'budget_exhausted':'paused',result:'',checkpoint:'',questions:[],waitingProposalIds:[],
     version:1,canControl:true,createdAt:'2026-11-24T00:00:00Z',updatedAt:'2026-11-24T00:00:00Z'};
   mock.fetch.mockResolvedValue(response({configured:false,models:[]}));
   mock.api.mockImplementation(async(url:string,opts:any)=>{
     if(opts?.method==='POST')throw new Error('task submission captured');
     if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
     if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:available};
-    if(url.endsWith('/agent-tasks'))return {items:[task],nextCursor:null};
+    if(url.endsWith('/agent-tasks'))return {items:terminal?[task,{...task,id:'old-status-echo',name:'完成了没有？',
+      instructions:'完成了没有？',state:'succeeded',createdAt:'2026-11-24T00:01:00Z',updatedAt:'2026-11-24T00:01:00Z'}]:[task],nextCursor:null};
     if(url.endsWith('/agent-tasks/existing-task'))return read(task);
     return {items:[]};
   });
@@ -149,6 +150,16 @@ it('answers a direct status inquiry from the existing task without submitting a 
   expect(mock.api.mock.calls.some(([url])=>url.endsWith('/agent-tasks/existing-task'))).toBe(true);
   expect(host.textContent).toContain('当前任务 · 待我确认');
   expect(field.value).toBe('');
+});
+
+it('reads the original task after it reaches the limit, skipping a prior status-only turn',async()=>{
+  mockTaskStatus(async task=>({item:task}),true,true);
+  await mount();await click('修改付款条件');
+  await question('完成了没有？');await click('发送');
+  expect(mock.api.mock.calls.filter(([,opts])=>opts?.method==='POST')).toHaveLength(0);
+  expect(mock.api.mock.calls.some(([url])=>url.endsWith('/agent-tasks/existing-task'))).toBe(true);
+  expect(mock.api.mock.calls.some(([url])=>url.endsWith('/agent-tasks/old-status-echo'))).toBe(false);
+  expect(host.textContent).toContain('当前任务 · 达到限额');
 });
 
 it('keeps the status question as a draft when the task cannot be read',async()=>{

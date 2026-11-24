@@ -47,7 +47,7 @@ import { recordIndex } from '../../runtime/xiaozhuRecords';
 import { XiaozhuComposer, XiaozhuEmpty, voiceInCall } from './XiaozhuShell';
 import { XiaozhuTurnShell } from './XiaozhuThread';
 import { XiaozhuMarkdown } from './XiaozhuMarkdown';
-import { COWORK_ACTIVE, conversationsOf, isCurrentTaskStatusQuestion, newConversationId, selectedTaskIntentRefs, useConversationMeta, useXiaozhuCowork } from '../../runtime/xiaozhuCowork';
+import { COWORK_ACTIVE, conversationsOf, isCurrentTaskStatusQuestion, newConversationId, selectedTaskIntentRefs, splitRequest, useConversationMeta, useXiaozhuCowork } from '../../runtime/xiaozhuCowork';
 import { usePersonalAgentVoice } from '../../runtime/personalAgentVoice';
 import { FileName } from '../../runtime/files';
 import { FailureNotice } from '../../runtime/FailureNotice';
@@ -203,8 +203,10 @@ export function AssistantPage(){
   const taskThreadOffline=!cowork.available&&visibleTasks.length>0;
   const [statusCheck,setStatusCheck]=React.useState<{scope:string;taskId:string}>();
   const unfinishedTasks=visibleTasks.filter(task=>COWORK_ACTIVE.includes(task.state)||task.state==='paused');
-  const statusTask=!files.length&&!selected.length&&unfinishedTasks.length===1&&isCurrentTaskStatusQuestion(question)
-    ? unfinishedTasks[0] : undefined;
+  const statusTarget=unfinishedTasks.length===1 ? unfinishedTasks[0]
+    : unfinishedTasks.length===0 ? visibleTasks.filter(task=>!isCurrentTaskStatusQuestion(splitRequest(task.instructions))).at(-1)
+    : undefined;
+  const statusTask=!files.length&&!selected.length&&isCurrentTaskStatusQuestion(question) ? statusTarget : undefined;
   const checkedTask=statusCheck?.scope===attachmentScope ? visibleTasks.find(task=>task.id===statusCheck.taskId) : undefined;
   const canAsk=(!files.length||cowork.available)&&!taskThreadOffline&&!cowork.error&&(cowork.available||!!configuration?.configured);
   const ready=!busy&&!cowork.loading&&canChat&&!!question.trim()&&(!!statusTask||canAsk);
