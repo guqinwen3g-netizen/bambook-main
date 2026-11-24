@@ -21,6 +21,39 @@ it('keeps legacy no-reference request bodies unchanged',async()=>{
  await act(async()=>{await cowork.send('旧客户端请求',[],'conversation_1');});expect(posts).toHaveLength(1);expect(posts[0]).not.toHaveProperty('intentRefs');
 });
 
+it('releases a hung submission and replays the original request after history has changed', async () => {
+  vi.useFakeTimers();
+  try {
+    let firstSignal: AbortSignal | null | undefined;
+    const saved = { id: 'saved', conversationId: 'conversation_1', state: 'succeeded', result: '已核对', instructions: '核对订单' };
+    const initial = api.getMockImplementation()!;
+    api.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method !== 'POST') return initial(url, init);
+      posts.push(JSON.parse(String(init.body)));
+      if (posts.length > 1) return { item: saved };
+      firstSignal = init.signal;
+      return new Promise(() => {});
+    });
+    const refs = [{kind:'orders',id:'order-A'}];
+    const attachments = [{taskId:'previous',fileId:'original'}];
+    await act(async () => {
+      void cowork.send('核对订单', [], 'conversation_1', refs, [], attachments);
+      void cowork.send('核对订单', [], 'conversation_1', refs, [], attachments);
+      await vi.advanceTimersByTimeAsync(45_000);
+    });
+    expect(firstSignal?.aborted).toBe(true);
+    expect(cowork.busy).toBe(false);
+    expect(cowork.sendError).toBeTruthy();
+    expect(cowork.error).toBe('');
+    await act(async () => { await cowork.send('核对订单', [saved], 'conversation_1', refs, [], attachments); });
+    expect(posts).toHaveLength(2);
+    expect(posts[1]).toEqual(posts[0]);
+    expect(cowork.tasks).toEqual([saved]);
+    expect(cowork.sendError).toBe('');
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 it('refreshes the foreground task every second without waiting for a slower background read',async()=>{
  vi.useFakeTimers();
