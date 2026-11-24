@@ -8,7 +8,7 @@ import React from 'react';
 import type { AgentIdentityView } from '../../../../server/src/shared/mistAgentIdentities';
 import type { AgentTaskPage, AgentTaskView } from '../../../../server/src/shared/mistAgentTasks';
 import type { TaskAttachmentRef } from '../../../../server/src/shared/mistTaskAttachments';
-import { readPendingSubmissions, savePendingSubmissions, submissionDraftKey, type PendingSubmission } from './xiaozhuSubmissions';
+import { readPendingSubmissions, savePendingSubmissions, submissionDraftKey, submissionFingerprint, type PendingSubmission } from './xiaozhuSubmissions';
 import { normalizeAgentTaskIntentRefs, type AgentTaskIntentRef } from '../../../../server/src/shared/mistAgentTasks';
 import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { mistApiRequest } from './workspace';
@@ -153,7 +153,9 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const live = React.useRef(scope); live.current = scope;
   const version = React.useRef(0);
   const pending = React.useRef(new Map<string, PendingSubmission>());
-  const [recoveredSubmissions, setRecoveredSubmissions] = React.useState<PendingSubmission[]>([]);
+  const [recoveredSubmissions, setRecoveredSubmissions] = React.useState<Array<PendingSubmission&{fingerprint:string}>>([]);
+  const receiptRead = React.useRef<AbortController|undefined>(undefined);
+  const [checkingReceipt,setCheckingReceipt] = React.useState(false);
   const sendRequest = React.useRef<AbortController | undefined>(undefined);
   const controlRequests = React.useRef(new Map<string,AbortController>());
   const controlKeys = React.useRef(new Map<string,{ key:string; requestId:string }>());
@@ -166,6 +168,47 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const [loadingMore, setLoadingMore] = React.useState(false), [moreError, setMoreError] = React.useState('');
   const personalIdentity = React.useRef<string | undefined>(undefined);
   const lastAvailability=React.useRef<{scope:string;available:boolean}|null>(null);
+  const checkReceipts = React.useCallback(async (automatic: boolean, conversation?: string) => {
+    if (!base || !enabled || receiptRead.current || sendRequest.current) return;
+    const missing = [...pending.current].filter(([,entry]) => automatic ? entry.recoveredFromStorage
+      : (entry.sourceConversationId??entry.conversationId) === conversation);
+    if (!missing.length) return;
+    const controller = new AbortController();
+    receiptRead.current=controller;setCheckingReceipt(true);
+    const current=()=>live.current===scope&&receiptRead.current===controller;
+    try {
+      const replies = await withRequestDeadline(controller, HISTORY_READ_TIMEOUT_MS, '提交结果暂时无法核对', signal =>
+        Promise.allSettled(missing.map(async ([fingerprint,entry]) => {
+          const result = await mistApiRequest(base + '/personal-agent/tasks/receipt/' + encodeURIComponent(entry.requestId), {signal,cache:'no-store'}) as {item:AgentTaskView};
+          if (!result.item?.id || result.item.executor !== 'platform' || result.item.conversationId !== entry.conversationId)
+            throw new Error('提交结果暂时无法核对');
+          return {fingerprint,entry,task:result.item};
+        })));
+      if (!current()) return;
+      const recovered=replies.flatMap(reply=>reply.status==='fulfilled'&&pending.current.get(reply.value.fingerprint)===reply.value.entry?[reply.value]:[]);
+      if (!recovered.length) {
+        if (!automatic) setSendFailure({conversationId:conversation,message:replies.every(reply=>reply.status==='rejected'&&reply.reason?.status===404)
+          ?'暂未查到原提交回执':'提交结果暂时无法核对'});
+        return;
+      }
+      for (const {fingerprint} of recovered) pending.current.delete(fingerprint);
+      savePendingSubmissions(scope,pending.current);
+      setTasks(old=>{
+        const byId=new Map(old.map(task=>[task.id,task]));
+        for (const {task} of recovered) {
+          const existing=byId.get(task.id);
+          byId.set(task.id,existing?mergeTaskUpdate(existing,task):task);
+        }
+        return [...byId.values()].sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
+      });
+      setSendFailure(old=>old&&recovered.some(({entry})=>(entry.sourceConversationId??entry.conversationId)===old.conversationId)?undefined:old);
+      setRecoveredSubmissions(old=>[...old,...recovered.map(({entry,fingerprint})=>({...entry,fingerprint}))]);
+    } catch {
+      if (current()&&!automatic)setSendFailure({conversationId:conversation,message:'提交结果暂时无法核对'});
+    } finally {
+      if(current()){receiptRead.current=undefined;setCheckingReceipt(false);}
+    }
+  },[base,enabled,scope]);
   const load = React.useCallback(async () => {
     const run = ++version.current, bound = scope;
     historyRead.current?.abort();
@@ -203,33 +246,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       setLoading(false);
       setError('');
 
-      const missing = [...pending.current].filter(([,entry])=>entry.recoveredFromStorage);
-      if (missing.length && !sendRequest.current) {
-        try {
-          const replies = await withRequestDeadline(controller, HISTORY_READ_TIMEOUT_MS, '提交结果暂时无法核对', signal =>
-            Promise.allSettled(missing.map(async ([fingerprint,entry]) => {
-              const result = await mistApiRequest(base + '/personal-agent/tasks/receipt/' + encodeURIComponent(entry.requestId), {signal,cache:'no-store'}) as {item:AgentTaskView};
-              if (!result.item?.id || result.item.executor !== 'platform' || result.item.conversationId !== entry.conversationId)
-                throw new Error('提交结果暂时无法核对');
-              return {fingerprint,entry,task:result.item};
-            })));
-          if (run !== version.current || live.current !== bound) return;
-          const recovered = replies.flatMap(reply=>reply.status==='fulfilled'?[reply.value]:[]);
-          if (recovered.length) {
-            for (const {fingerprint} of recovered) pending.current.delete(fingerprint);
-            savePendingSubmissions(bound,pending.current);
-            setTasks(old=>{
-              const byId = new Map(old.map(task=>[task.id,task]));
-              for (const {task} of recovered) {
-                const existing = byId.get(task.id);
-                byId.set(task.id,existing?mergeTaskUpdate(existing,task):task);
-              }
-              return [...byId.values()].sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
-            });
-            setRecoveredSubmissions(old=>[...old,...recovered.map(({entry})=>entry)]);
-          }
-        } catch { /* Keep the original request available for a later confirmation or retry. */ }
-      }
+      await checkReceipts(true);
       const result = await capability;
       if (!current()) return;
       if ('error' in result) throw result.error;
@@ -252,8 +269,8 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if (capabilityRead.current === capabilityController) capabilityRead.current = undefined;
       if (current()) { setLoading(false); setCheckingAvailability(false); }
     }
-  }, [base, enabled, scope]);
-  React.useEffect(() => { setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); setRecoveredSubmissions([]); setControls({}); controlKeys.current.clear(); setBusy(false); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); moreRead.current?.abort(); sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [load,scope]);
+  }, [base, enabled, scope, checkReceipts]);
+  React.useEffect(() => { setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); setRecoveredSubmissions([]); setCheckingReceipt(false); setControls({}); controlKeys.current.clear(); setBusy(false); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); moreRead.current?.abort(); receiptRead.current?.abort(); receiptRead.current=undefined; sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [load,scope]);
   const activeTasks = tasks.filter(t => COWORK_ACTIVE.includes(t.state));
   const foregroundId = activeTasks.filter(t => visibleConversationId && t.conversationId === visibleConversationId
     && (t.state === 'running' || t.state === 'queued')).at(-1)?.id;
@@ -307,24 +324,21 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   }, [foregroundId, backgroundIds, progressId, base, available, scope]);
   const send = async (text: string, history: AgentTaskView[] = [], conversationId?: string, intentRefs:AgentTaskIntentRef[]=[], files:File[]=[], attachmentRefs:ReadonlyArray<TaskAttachmentRef>=[]): Promise<AgentTaskView | null> => {
     const message = text.trim();
-    if (!message || sendRequest.current || !base || loading || checkingAvailability || error || !available) return null;
+    if (!message || sendRequest.current || receiptRead.current || !base || loading || checkingAvailability || error || !available) return null;
     const bound = scope, controller = new AbortController();
     sendRequest.current = controller;
     const isCurrent = () => live.current === bound && sendRequest.current === controller;
     setBusy(true);
     setSendFailure(undefined);
     setRecoveredSubmissions(old=>old.filter(entry=>(entry.sourceConversationId??entry.conversationId)!==(visibleConversationId??conversationId)));
-    let firstAttempt: string | undefined;
+    let firstAttempt: string | undefined, attemptedFingerprint: string | undefined;
     try {
       const refs = normalizeAgentTaskIntentRefs(intentRefs);
-      const fileIdentity = await Promise.all(files.map(async file => {
-        const digest = await crypto.subtle.digest('SHA-256',await file.arrayBuffer());
-        return [file.name,file.type,file.size,Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('')];
-      }));
+      const fingerprint = await submissionFingerprint(visibleConversationId??conversationId,message,refs,attachmentRefs,files);
       if (!isCurrent()) return null;
+      attemptedFingerprint=fingerprint;
 
       // A receipt can be lost after commit. A refreshed thread must not change the original POST.
-      const fingerprint = JSON.stringify([visibleConversationId??conversationId, message, refs, attachmentRefs, fileIdentity]);
       let saved = pending.current.get(fingerprint);
       if (!saved) {
         const draftKey = submissionDraftKey(message,refs);
@@ -349,11 +363,11 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         submission = { method: 'POST', body: form };
       }
       const uploadSeconds = Math.ceil(files.reduce((bytes,file) => bytes + file.size, 0) / UPLOAD_BYTES_PER_SECOND);
-      const result = await withRequestDeadline(controller, TASK_SEND_TIMEOUT_MS + uploadSeconds * 1000, '提交结果未确认，请重试发送', signal =>
+      const result = await withRequestDeadline(controller, TASK_SEND_TIMEOUT_MS + uploadSeconds * 1000, '提交结果待核对', signal =>
         mistApiRequest(base + '/personal-agent/tasks', { ...submission, signal }) as Promise<{item: AgentTaskView}>);
       if (!isCurrent()) return null;
       if (!result.item?.id || result.item.conversationId && result.item.conversationId !== target)
-        throw new Error('提交结果未确认，请重试发送');
+        throw new Error('提交结果待核对');
 
       pending.current.delete(fingerprint);
       savePendingSubmissions(bound,pending.current);
@@ -370,8 +384,8 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
           pending.current.delete(firstAttempt);
           savePendingSubmissions(bound,pending.current);
         }
-        const message = status === 0 ? '提交结果未确认，请重试发送'
-          : e instanceof Error ? e.message : '未能交给小竹';
+        const uncertain=!!attemptedFingerprint&&pending.current.has(attemptedFingerprint)&&(!status||status===408||status>=500);
+        const message=uncertain?'提交结果待核对':e instanceof Error?e.message:'未能交给小竹';
         setSendFailure({conversationId:visibleConversationId??conversationId,message});
       }
       return null;
@@ -478,8 +492,8 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   };
   const cancel = (task:AgentTaskView) => controlTask(task,'cancel',{},item=>
     !COWORK_ACTIVE.includes(item.state)&&item.state!=='paused');
-  const hasPendingSubmission = [...pending.current.values()].some(entry=>entry.recoveredFromStorage && (entry.sourceConversationId??entry.conversationId)===visibleConversationId);
-  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, controls, hasPendingSubmission, recoveredSubmissions, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track: (task: AgentTaskView) => setTasks(old => old.some(item=>item.id===task.id)
+  const hasPendingSubmission = [...pending.current.values()].some(entry=>(entry.sourceConversationId??entry.conversationId)===visibleConversationId);
+  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls, hasPendingSubmission, recoveredSubmissions, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track: (task: AgentTaskView) => setTasks(old => old.some(item=>item.id===task.id)
     ? old.map(item=>mergeTaskUpdate(item,task))
     : [...old,task]) };
 }
