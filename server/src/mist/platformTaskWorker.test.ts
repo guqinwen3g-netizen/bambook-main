@@ -2,7 +2,7 @@ import sharp from 'sharp';
 import * as XLSX from 'xlsx';
 import{afterEach,beforeEach,expect,it,vi}from'vitest';
 import request from'supertest';
-import{mkdtemp,rm}from'node:fs/promises';
+import{mkdtemp,rm,writeFile}from'node:fs/promises';
 import{tmpdir}from'node:os';import path from'node:path';import{randomUUID}from'node:crypto';
 import{createMistLocalRuntime}from'./local';import{createMistServer}from'./server';
 import{SERVICE_KEY_HEADER}from'./agentIdentities';
@@ -11,6 +11,7 @@ import {platformTaskClock}from'./platformTaskWorker';
 import type{MistRepository}from'./repository';
 import type{LlmCompletionInput}from'../ai/llmProviders';
 import{taskRecord}from'./agentTasks';
+import{MistPrivateFiles}from'./files';
 let directory:string;const workers:MistPlatformTaskWorker[]=[];
 beforeEach(async()=>{directory=await mkdtemp(path.join(tmpdir(),'platform-agent-'));vi.stubEnv('MIST_LOCAL_WORKSPACE','1');vi.stubEnv('NODE_ENV','test');});
 afterEach(async()=>{await Promise.all(workers.splice(0).map(w=>w.stop()));vi.restoreAllMocks();vi.unstubAllEnvs();await rm(directory,{recursive:true,force:true});});
@@ -348,3 +349,49 @@ it('researches a PDF, workbook and image together with a selected order, keeping
  ]));
  await f.human.post(f.base+'/personal-agent/tasks').field('task',JSON.stringify(payload)).attach('attachments',Buffer.from('changed'),'change.txt').expect(409);
 });
+
+it.each(['unchanged', 'removed', 'replaced'] as const)(
+  'only reuses rendered task images after the original is verified again (%s)',
+  async (change) => {
+    const image = await sharp({ create: { width: 16, height: 12, channels: 3, background: '#5cb388' } }).png().toBuffer();
+    const inputs: LlmCompletionInput['images'][] = [];
+    let original: string;
+    let orderId: string;
+    const complete = vi.fn(async (input: LlmCompletionInput) => {
+      inputs.push(input.images);
+      if (inputs.length > 1) return tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '已核对图片。' });
+      if (change === 'removed') {
+        await rm(original);
+      } else if (change === 'replaced') {
+        const changed = Buffer.from(image);
+        changed[0] ^= 0xff;
+        await writeFile(original, changed);
+      }
+      return tool('bambook_get', { type: 'order', id: orderId });
+    });
+    const f = await fixture(complete);
+    orderId = f.workspace.state.orders[0].id;
+    f.worker.start(3_600_000);
+    const { item } = (await f.human.post(f.base + '/personal-agent/tasks')
+      .field('task', JSON.stringify({ requestId: randomUUID(), name: '核对图片', instructions: '核对图片与订单。' }))
+      .attach('attachments', image, 'sample.png').expect(201)).body;
+    const imageId = item.attachments[0].id;
+    original = path.join(directory, 'files', f.workspace.id, imageId);
+    const reads = vi.spyOn(MistPrivateFiles.prototype, 'read');
+    const renders = vi.spyOn(sharp.prototype, 'toBuffer');
+
+    await f.drain();
+
+    expect(reads.mock.calls.filter(([, file]) => file.id === imageId)).toHaveLength(2);
+    expect(renders).toHaveBeenCalledTimes(1);
+    expect(inputs[0]).toEqual([{ name: 'sample.png', url: expect.stringMatching(/^data:image\/jpeg;base64,/) }]);
+    if (change === 'unchanged') {
+      expect(complete).toHaveBeenCalledTimes(2);
+      expect(inputs[1]).toEqual(inputs[0]);
+      expect(await f.current(item.id)).toMatchObject({ state: 'succeeded' });
+    } else {
+      expect(complete).toHaveBeenCalledTimes(1);
+      expect(await f.current(item.id)).toMatchObject({ state: 'queued', executionIssue: { code: 'model_unavailable' } });
+    }
+  },
+);

@@ -256,6 +256,9 @@ const WRITE_QUEUES = new WeakMap<object, Map<string, Promise<void>>>();
 class MistPreviewOutcome extends Error { constructor(readonly preview: { revision: number; result: unknown; events: string[]; changes: unknown }) { super('preview'); } }
 const PREVIEW_UNSUPPORTED = new Set(['platform.credit.issue', 'fulfillment.procurement.document', 'market.quotation.document', 'development.notice.generate', 'development.trimTask.notice', 'finance.statement.generate', ...GENERATING_COMMANDS]);
 
+export type PlatformTaskImageCache = Map<string, { sha256: string; url: string }>;
+const MAX_CACHED_TASK_IMAGE_URL_LENGTH = 1024 * 1024;
+
 export class MistRepository {
   private platformRuntimeAvailable:()=>boolean=()=>false;
   private platformActor:(actor:AgentActor)=>Promise<AgentActor>=async actor=>actor;
@@ -1730,12 +1733,23 @@ export class MistRepository {
       return files;
     });
   }
-  async platformTaskImages(prior:AgentActor,workspaceId:string){
+  async platformTaskImages(prior: AgentActor, workspaceId: string, rendered: PlatformTaskImageCache) {
     const files=(await this.privateTaskFiles(prior,workspaceId)).filter(file=>isTaskImage(file.name));
-    return Promise.all(files.map(async file=>{
-      const bytes=await this.files.read(workspaceId,file);
-      const image=await sharp(bytes,{limitInputPixels:40_000_000}).rotate().resize({width:1600,height:1600,fit:'inside',withoutEnlargement:true}).jpeg({quality:82}).toBuffer();
-      return {name:file.name,url:'data:image/jpeg;base64,'+image.toString('base64')};
+    return Promise.all(files.map(async file => {
+      // Check the live original even when a previous model turn rendered the same image.
+      const bytes = await this.files.read(workspaceId, file);
+      const cached = rendered.get(file.id);
+      if (cached && cached.sha256 === file.sha256) return { name: file.name, url: cached.url };
+      rendered.delete(file.id);
+
+      const image = await sharp(bytes, { limitInputPixels: 40_000_000 })
+        .rotate().resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 82 }).toBuffer();
+      const url = 'data:image/jpeg;base64,' + image.toString('base64');
+      if (file.sha256 && rendered.size < TASK_ATTACHMENT_COUNT && url.length <= MAX_CACHED_TASK_IMAGE_URL_LENGTH) {
+        rendered.set(file.id, { sha256: file.sha256, url });
+      }
+      return { name: file.name, url };
     }));
   }
   /** 复用附件下载的同一授权（canReadFile）后提取有界正文摘录；不返回字节。 */
