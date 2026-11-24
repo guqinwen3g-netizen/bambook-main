@@ -21,7 +21,7 @@ export class MistAutomationWorker {
       do {
         const page = await this.repository.dueAutomations(50, after);
         for (const job of page.jobs) {
-          try { await this.repository.runAutomation(await this.actor(job.authority), job.workspaceId, job.id, this.options.make, this.now()); }
+          try { await this.repository.runAutomation(await this.actor(job.authority), job.workspaceId, job.id, this.options.make, this.now(), job.version); }
           catch (error) { this.options.onError?.('AUTOMATION_RUN_FAILED ' + (error as Error)?.message); }
         }
         after = page.next;

@@ -32,7 +32,7 @@ export type AutomationRecord = {
   halted?: { code: string; message: string }; removed?: boolean;
 };
 export type AutomationView = Pick<AutomationRecord, 'id' | 'name' | 'trigger' | 'time' | 'instructions' | 'enabled' | 'version' | 'createdAt' | 'updatedAt' | 'runs' | 'halted'>;
-export type AutomationJob = { workspaceId: string; id: string; authority: AutomationAuthority };
+export type AutomationJob = { workspaceId: string; id: string; version: number; authority: AutomationAuthority };
 export const automationView = (c: AutomationRecord): AutomationView => ({ id: c.id, name: c.name, trigger: c.trigger, time: c.time, instructions: c.instructions, enabled: c.enabled, version: c.version, createdAt: c.createdAt, updatedAt: c.updatedAt, runs: c.runs, ...(c.halted ? { halted: c.halted } : {}) });
 
 const key = (id: string) => { if (!/^[A-Za-z0-9-]{1,80}$/.test(id)) fail('INVALID_INPUT', '规则编号无效', 400); return AUTOMATION_PREFIX + id; };
@@ -153,7 +153,7 @@ export async function dueAutomations(db: any, take: number, after?: string): Pro
     const rule = row.result?.[AUTOMATION_FIELD] as AutomationRecord;
     return rule?.schemaVersion === 1 && rule.enabled && rule.authority && !rule.halted
       && row.workspaceId === rule.workspaceId && row.actorId === rule.ownerId
-      ? [{ workspaceId: rule.workspaceId, id: rule.id, authority: rule.authority }] : [];
+      ? [{ workspaceId: rule.workspaceId, id: rule.id, version: rule.version, authority: rule.authority }] : [];
   });
   // Advance past the last scanned row even when some rows have no valid grant.
   return { jobs, next: rows.length === take ? rows.at(-1)?.id : undefined };

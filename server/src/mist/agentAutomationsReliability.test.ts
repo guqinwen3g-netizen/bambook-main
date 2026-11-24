@@ -10,7 +10,7 @@ import { MemoryMistDatabase, testAuthority } from './__tests__/support';
 import { MistRepository } from './repository';
 import { MistPrivateFiles } from './files';
 import { MistAutomationWorker } from './agentAutomationWorker';
-import { evaluateAutomation, type AutomationRecord } from './agentAutomations';
+import { AUTOMATION_HASH, evaluateAutomation, type AutomationRecord } from './agentAutomations';
 import { TASK_FIELD } from './agentTasks';
 
 const DAY = 86400_000, t0 = Date.parse('2026-11-07T03:00:00Z');
@@ -52,6 +52,78 @@ beforeEach(async () => {
 afterEach(async () => { vi.restoreAllMocks(); await rm(directory, { recursive: true, force: true }); });
 
 const taskRow = (taskId: string) => [...db.receipts.values()].find((r: any) => r.result?.[TASK_FIELD]?.id === taskId);
+const storedTasks = () => [...db.receipts.values()].flatMap(row => row.result?.[TASK_FIELD] ? [row.result[TASK_FIELD]] : []);
+
+async function scheduledRule() {
+  const saved = await repo.saveAutomation(clerk(), workspaceId, undefined, {
+    name: '每日汇总', trigger: 'daily', time: '00:00', instructions: '汇总待办',
+  });
+  const [job] = (await repo.dueAutomations(10)).jobs;
+  return { saved, actor: await worker.actor(job.authority) };
+}
+
+function afterScheduleRead(action: () => Promise<void>) {
+  const boundary = repo as unknown as {transact: (run: (...args: any[]) => Promise<unknown>) => Promise<unknown>};
+  const transact = boundary.transact.bind(repo);
+  return vi.spyOn(boundary, 'transact').mockImplementationOnce(async run => {
+    const read = await transact(run);
+    await action();
+    return read;
+  });
+}
+
+it.each(['pause', 'reschedule', 'delete'] as const)('does not queue a stale run when the owner wins the race to %s', async action => {
+  const { saved, actor } = await scheduledRule();
+  afterScheduleRead(async () => {
+    if (action === 'pause') await repo.setAutomationEnabled(clerk(), workspaceId, saved.id, { enabled: false, expectedVersion: saved.version });
+    if (action === 'reschedule') await repo.saveAutomation(clerk(), workspaceId, saved.id, {
+      name: saved.name, trigger: saved.trigger, time: '23:59', instructions: '按新时间汇总', enabled: true, expectedVersion: saved.version,
+    });
+    if (action === 'delete') await repo.removeAutomation(clerk(), workspaceId, saved.id, saved.version);
+  });
+
+  expect(await repo.runAutomation(actor, workspaceId, saved.id, () => 'bma1_test', now)).toEqual({ fired: false });
+  expect(storedTasks()).toEqual([]);
+  const {items} = await repo.listAutomations(clerk(), workspaceId);
+  if (action === 'delete') expect(items).toEqual([]);
+  else expect(items).toEqual([expect.objectContaining({ version: saved.version + 1, runs: [],
+    enabled: action === 'reschedule', time: action === 'reschedule' ? '23:59' : saved.time,
+  })]);
+});
+
+it('records exactly one run when two schedulers evaluate the same rule version', async () => {
+  const {saved, actor} = await scheduledRule();
+  let competing: Awaited<ReturnType<MistRepository['runAutomation']>> | undefined;
+  afterScheduleRead(async () => { competing = await repo.runAutomation(actor, workspaceId, saved.id, () => 'bma1_test', now); });
+  const result = await repo.runAutomation(actor, workspaceId, saved.id, () => 'bma1_test', now);
+  expect([competing?.fired, result.fired]).toEqual([true, false]);
+  expect(storedTasks()).toHaveLength(1);
+  const [current] = (await repo.listAutomations(clerk(), workspaceId)).items;
+  expect(current.runs).toEqual([expect.objectContaining({ taskId: competing?.taskId })]);
+});
+
+it('rolls back task creation when the run history cannot commit', async () => {
+  const {saved, actor} = await scheduledRule();
+  const transact = db.$transaction.bind(db);
+  let attempted = false;
+  vi.spyOn(db, '$transaction').mockImplementation(run => transact(tx => {
+    const update = tx.mistCommandReceipt.updateMany;
+    tx.mistCommandReceipt.updateMany = (args: any) => {
+      if (!attempted && args.where.inputHash === AUTOMATION_HASH) {
+        attempted = true;
+        throw new Error('automation history write failed');
+      }
+      return update(args);
+    };
+    return run(tx);
+  }));
+  await expect(repo.runAutomation(actor, workspaceId, saved.id, () => 'bma1_test', now)).rejects.toThrow('automation history write failed');
+  expect(storedTasks()).toEqual([]);
+  expect((await repo.listAutomations(clerk(), workspaceId)).items[0].runs).toEqual([]);
+  expect((await repo.runAutomation(actor, workspaceId, saved.id, () => 'bma1_test', now)).fired).toBe(true);
+  expect(storedTasks()).toHaveLength(1);
+});
+
 async function firstRun() {
   const saved = await repo.saveAutomation(clerk(), workspaceId, undefined, { name: '每日汇总', trigger: 'daily', time: '00:00', instructions: '汇总待办' });
   const [job] = (await repo.dueAutomations(10)).jobs, actor = await worker.actor(job.authority);
@@ -72,11 +144,10 @@ it('does not start another run while the last one waits for the owner, but an ex
 it('keeps retrying through a short outage, then stops with a reason once failures persist', async () => {
   const saved = await repo.saveAutomation(clerk(), workspaceId, undefined, { name: '每日汇总', trigger: 'daily', time: '00:00', instructions: '汇总待办' });
   const [job] = (await repo.dueAutomations(10)).jobs, actor = await worker.actor(job.authority);
-  const spy = vi.spyOn(repo, 'assignPersonalAgentTask').mockRejectedValue(new Error('connection reset'));
-  for (let i = 0; i < 6; i++) await expect(repo.runAutomation(actor, workspaceId, saved.id, () => 'bma1_test', now + i * 30_000)).rejects.toThrow();
+  const offline = () => { throw new Error('connection reset'); };
+  for (let i = 0; i < 6; i++) await expect(repo.runAutomation(actor, workspaceId, saved.id, offline, now + i * 30_000)).rejects.toThrow();
   let [rule] = (await repo.listAutomations(clerk(), workspaceId)).items; expect(rule.enabled).toBe(true);
-  await expect(repo.runAutomation(actor, workspaceId, saved.id, () => 'bma1_test', now + 31 * 60_000)).rejects.toThrow();
+  await expect(repo.runAutomation(actor, workspaceId, saved.id, offline, now + 31 * 60_000)).rejects.toThrow();
   [rule] = (await repo.listAutomations(clerk(), workspaceId)).items;
   expect(rule.enabled).toBe(false); expect(rule.halted?.message).toMatch(/持续无法运行.*系统暂时无法创建任务/);
-  spy.mockRestore();
 });
