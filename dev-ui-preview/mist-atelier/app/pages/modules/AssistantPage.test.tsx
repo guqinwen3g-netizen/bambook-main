@@ -14,6 +14,35 @@ let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
 const view=(active=true, taskId?:string)=> <Nav.Provider value={{route:{view:'assistant',...(taskId?{section:'tasks',id:taskId}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
 const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
 
+it('recovers a submitted task after reload using only a receipt read and clears its matching unsent draft', async () => {
+  const conversationId='c_reload_task';
+  const task = {
+    id:'recovered-task', identityId:'personal', executor:'platform', conversationId, instructions:'核对原 PDF',
+    state:'succeeded', result:'原 PDF 已核对', questions:[], waitingProposalIds:[], canControl:false,
+    createdAt:'2026-11-24T00:00:00Z', updatedAt:'2026-11-24T00:01:00Z',
+  };
+  const requestId='00000000-0000-4000-8000-000000000051';
+  sessionStorage.setItem('mist.xiaozhu.conversation:session-a:workspace',conversationId);
+  sessionStorage.setItem('mist.assistant.conversation:session-a:workspace',JSON.stringify({question:task.instructions,selected:[],messages:[]}));
+  sessionStorage.setItem('mist.xiaozhu.submissions:session-a:workspace',JSON.stringify([['fingerprint',{
+    requestId,instructions:task.instructions,locale:'zh-CN',draftKey:JSON.stringify([task.instructions,[]]),
+    conversationId,sourceConversationId:conversationId,hasAttachments:true,
+  }]]));
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async (url: string) => {
+    if (url.includes('/agent-identities')) return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    if (url.endsWith('/agent-task-capabilities')) return {platformAvailable:true};
+    if (url.endsWith('/personal-agent/tasks/receipt/'+requestId)) return {item:task};
+    return {items:[],nextCursor:null};
+  });
+  await mount();
+  expect(host.textContent).toContain('已找回提交的任务');
+  expect(host.textContent).toContain('原 PDF 已核对');
+  expect(host.querySelector('textarea')?.value).toBe('');
+  expect(mock.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+  expect(sessionStorage.getItem('mist.xiaozhu.submissions:session-a:workspace')).toBeNull();
+});
+
 it('restores the request, order and original attachment of a failed task for review before resending', async () => {
   const failure = {
     id: '00000000-0000-4000-8000-000000000047',

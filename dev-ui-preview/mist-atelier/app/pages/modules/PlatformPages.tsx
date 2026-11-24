@@ -21,6 +21,7 @@ import { InvoicePage } from './InvoicePage';
 export { InvoicePage } from './InvoicePage';
 import { useRouteDraft, useRouteScope } from './useRouteDraft';
 import { useAssistantConversation } from '../../runtime/assistantConversation';
+import { submissionDraftKey } from '../../runtime/xiaozhuSubmissions';
 import { ArrowRight, ArrowUp, Calculator, Download, FileText, ArrowDown, PanelLeftClose, PanelLeftOpen, SquarePen, ChevronDown, PenLine, Trash2, RefreshCw, Sparkles, Square, X, Package, Receipt, ShieldCheck, Users, Database, Building2 } from 'lucide-react';
 import { ActionMenu, AIBadge, AssistantEyes, Banner, Button, Card, CardHeader, DataTable, Dialog, Drawer, EmptyState, Icon, IconButton, Field, FormGrid, KeyValue, Meter, MistPage, Mono, PageHeader, Pill, Select, StatCard, StatGrid, SummaryBar, Tabs, TextArea, TextInput, Toolbar, UploadZone, useToast, type Column } from '../../../../../components/mist';
 import { apiService, type CompanyExporterProfileValue } from '../../../../../services/apiService';
@@ -214,6 +215,18 @@ export function AssistantPage(){
     setError('');setAttachmentRefs(next);if(!picker)field.current?.focus();
   };
   const cowork=useXiaozhuCowork(w.workspace?.id,scope,canChat,conversationId);
+  const handledRecoveries=React.useRef(new Set<string>());
+  const recoveredSubmission=cowork.recoveredSubmissions.filter(entry=>(entry.sourceConversationId??entry.conversationId)===conversationId).at(-1);
+  const taskText=question.trim()+(selected.length?'\n（引用业务记录：'+selected.map(s=>s.label).join('、')+'）':'');
+  React.useEffect(()=>{
+    if(!recoveredSubmission||handledRecoveries.current.has(recoveredSubmission.requestId))return;
+    handledRecoveries.current.add(recoveredSubmission.requestId);
+    try {
+      if(files.length||attachmentRefs.length||recoveredSubmission.draftKey!==submissionDraftKey(taskText,selectedTaskIntentRefs(selected)))return;
+      clearDraft(conversationId,conversationId);
+      if(recoveredSubmission.conversationId&&recoveredSubmission.conversationId!==conversationId)openConversation(recoveredSubmission.conversationId);
+    } catch { /* A changed draft remains in the composer. */ }
+  },[recoveredSubmission,conversationId,taskText,selected,files.length,attachmentRefs.length,clearDraft]);
   const showTaskHistory=canChat&&(cowork.available||cowork.tasks.length>0);
   const index=React.useMemo(()=>recordIndex(w.state),[w.state]),automationRules=useAutomationRules(w.workspace?.id,showTaskHistory,automations),meta=useConversationMeta(w.workspace?.id,showTaskHistory),conversations=React.useMemo(()=>conversationsOf(cowork.tasks,meta.items),[cowork.tasks,meta.items]),current=conversations.find(c=>c.id===conversationId),visibleTasks=showTaskHistory?(current?.tasks??[]):[],proposals=(w.state?.agentProposals??[]).filter(p=>p.state==='pending'),voice=usePersonalAgentVoice(scope+':'+canChat,w.workspace?.id,cowork.track),inCall=voiceInCall(voice);
   const newConversation=()=>{
@@ -283,7 +296,7 @@ export function AssistantPage(){
       if(sendLock.current||busy||!question.trim())return;
       sendLock.current=true;
       setBusy(true);
-      const text=question.trim()+(selected.length?'\n（引用业务记录：'+selected.map(s=>s.label).join('、')+'）':'');
+      const text=taskText;
       try {
         const target=sendTarget();
         const refs=attachmentRefs.map(({taskId,fileId})=>({taskId,fileId}));
@@ -292,7 +305,7 @@ export function AssistantPage(){
         if(sent&&live.current===scope){
           voice.followTask(sent.id);
           clearDraft(conversationId,liveConversation.current);
-          if(target!==conversationId&&liveConversation.current===conversationId)openConversation(target);
+          if(sent.conversationId&&sent.conversationId!==conversationId&&liveConversation.current===conversationId)openConversation(sent.conversationId);
         }
       } catch(problem) {
         if(live.current===scope)setError(problem instanceof Error?problem.message:'任务引用格式无效');
@@ -362,7 +375,8 @@ export function AssistantPage(){
         {!cowork.available&&configuration&&!configuration.configured&&<div className="mist-xz-col mist-xz-banner"><Banner tone="warn" title={uiText("生成模型尚未连接到此公司")}>{uiText(configuration.subscription?'请平台管理员连接平台模型。':'服务器未配置可用模型。')}{uiText("仍可引用业务记录并保存文字草稿。")}</Banner></div>}
         {cowork.progressStale&&<div className="mist-xz-col mist-xz-banner"><Banner variant="status" tone="warn" title={uiText("进度暂未更新，正在重试")}/></div>}
         {cowork.error&&<div className="mist-xz-col mist-xz-banner"><Banner tone="warn" title={uiText("小竹操作未完成")} actions={<Button disabled={cowork.loading} onClick={()=>void cowork.reload()}>{uiText("重新读取任务")}</Button>}>{uiText(cowork.error)}</Banner></div>}
-        {cowork.sendError&&<div className="mist-xz-col mist-xz-banner"><Banner variant="status" tone="warn" title={uiText(cowork.sendError)}/></div>}
+        {(cowork.sendError||cowork.hasPendingSubmission&&!cowork.loading)&&<div className="mist-xz-col mist-xz-banner"><Banner variant="status" tone="warn" title={uiText(cowork.sendError||'提交结果待核对')} actions={cowork.hasPendingSubmission?<Button disabled={cowork.loading||busy} onClick={()=>void cowork.reload()}>{uiText('核对提交结果')}</Button>:undefined}/></div>}
+        {recoveredSubmission&&!cowork.sendError&&<div className="mist-xz-col mist-xz-banner"><Banner variant="status" tone="ok" title={uiText('已找回提交的任务')}/></div>}
         {canChat&&cowork.loading&&!hasThread?<div className="mist-xz-scroll"><div className="mist-xz-col mist-xz-loading" role="status" aria-label={uiText('正在读取对话')}><i/><i/><i/><i/></div></div>:hasThread?<>
           <div className="mist-xz-scroll" ref={scrollRef} onScroll={e=>{const el=e.currentTarget,near=el.scrollHeight-el.scrollTop-el.clientHeight<96;atBottomRef.current=near;setAtBottom(near);}}>
             <div className="mist-xz-col">
