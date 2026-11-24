@@ -12,6 +12,14 @@ export type PendingSubmission = {
 };
 
 export const submissionDraftKey = (text: string, refs: readonly AgentTaskIntentRef[]) => JSON.stringify([text.trim(), refs]);
+export async function submissionFingerprint(conversationId: string|undefined, text: string, refs: readonly AgentTaskIntentRef[],
+  attachmentRefs: readonly {taskId:string;fileId:string}[], files: readonly File[]) {
+  const fileIdentity = await Promise.all(files.map(async file => {
+    const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+    return [file.name,file.type,file.size,Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('')];
+  }));
+  return JSON.stringify([conversationId,text.trim(),refs,attachmentRefs,fileIdentity]);
+}
 const storageKey = (scope: string) => 'mist.xiaozhu.submissions:' + scope;
 
 export function readPendingSubmissions(scope: string): Map<string, PendingSubmission> {
