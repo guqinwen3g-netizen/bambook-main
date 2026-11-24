@@ -17,10 +17,15 @@ export class MistAutomationWorker {
   async tick() {
     if (this.scanning) return; this.scanning = true;
     try {
-      for (const job of await this.repository.dueAutomations(50)) {
-        try { await this.repository.runAutomation(await this.actor(job.authority), job.workspaceId, job.id, this.options.make, this.now()); }
-        catch (error) { this.options.onError?.('AUTOMATION_RUN_FAILED ' + (error as Error)?.message); }
-      }
+      let after: string | undefined;
+      do {
+        const page = await this.repository.dueAutomations(50, after);
+        for (const job of page.jobs) {
+          try { await this.repository.runAutomation(await this.actor(job.authority), job.workspaceId, job.id, this.options.make, this.now()); }
+          catch (error) { this.options.onError?.('AUTOMATION_RUN_FAILED ' + (error as Error)?.message); }
+        }
+        after = page.next;
+      } while (after);
     } catch (error) { this.options.onError?.('AUTOMATION_SCAN_FAILED ' + (error as Error)?.message); } finally { this.scanning = false; }
   }
 }

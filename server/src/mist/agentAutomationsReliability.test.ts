@@ -54,7 +54,7 @@ afterEach(async () => { vi.restoreAllMocks(); await rm(directory, { recursive: t
 const taskRow = (taskId: string) => [...db.receipts.values()].find((r: any) => r.result?.[TASK_FIELD]?.id === taskId);
 async function firstRun() {
   const saved = await repo.saveAutomation(clerk(), workspaceId, undefined, { name: '每日汇总', trigger: 'daily', time: '00:00', instructions: '汇总待办' });
-  const [job] = await repo.dueAutomations(10), actor = await worker.actor(job.authority);
+  const [job] = (await repo.dueAutomations(10)).jobs, actor = await worker.actor(job.authority);
   const first = await repo.runAutomation(actor, workspaceId, saved.id, () => 'bma1_test', now);
   expect(first.fired).toBe(true);
   return { id: saved.id, actor, taskId: first.taskId! };
@@ -71,7 +71,7 @@ it('does not start another run while the last one waits for the owner, but an ex
 
 it('keeps retrying through a short outage, then stops with a reason once failures persist', async () => {
   const saved = await repo.saveAutomation(clerk(), workspaceId, undefined, { name: '每日汇总', trigger: 'daily', time: '00:00', instructions: '汇总待办' });
-  const [job] = await repo.dueAutomations(10), actor = await worker.actor(job.authority);
+  const [job] = (await repo.dueAutomations(10)).jobs, actor = await worker.actor(job.authority);
   const spy = vi.spyOn(repo, 'assignPersonalAgentTask').mockRejectedValue(new Error('connection reset'));
   for (let i = 0; i < 6; i++) await expect(repo.runAutomation(actor, workspaceId, saved.id, () => 'bma1_test', now + i * 30_000)).rejects.toThrow();
   let [rule] = (await repo.listAutomations(clerk(), workspaceId)).items; expect(rule.enabled).toBe(true);

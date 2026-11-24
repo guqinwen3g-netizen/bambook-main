@@ -776,7 +776,7 @@ export class MistRepository {
       await removeAutomation(db,actor,workspaceId,id,expectedVersion);
     });
   }
-  async dueAutomations(take:number){return this.connectionTransaction(db=>dueAutomations(db,take));}
+  async dueAutomations(take:number,after?:string){return this.connectionTransaction(db=>dueAutomations(db,take,after));}
   /** 触发一次：按所有者当前权限读投影后判断；授权失效时停用规则并写明原因，不静默。 */
   async runAutomation(prior:TokenPayload,workspaceId:string,id:string,make:MakeServiceCredential,now=Date.now()){
     let decision:AutomationDecision,rule:AutomationRecord;

@@ -138,9 +138,25 @@ export async function removeAutomation(db: any, actor: TokenPayload, workspaceId
   const conflict = guardAutomationVersion(c, expectedVersion);
   await writeAutomation(db, row, c, { ...c, version: c.version + 1, enabled: false, authority: undefined, removed: true }, conflict);
 }
-export async function dueAutomations(db: any, take: number): Promise<AutomationJob[]> {
-  const rows = await db.mistCommandReceipt.findMany({ where: { inputHash: AUTOMATION_HASH, requestId: { startsWith: AUTOMATION_PREFIX }, result: { path: [AUTOMATION_FIELD, 'enabled'], equals: true } }, take });
-  return rows.flatMap((row: any) => { const c = row.result?.[AUTOMATION_FIELD] as AutomationRecord; return c?.schemaVersion === 1 && c.enabled && c.authority && !c.halted && row.workspaceId === c.workspaceId && row.actorId === c.ownerId ? [{ workspaceId: c.workspaceId, id: c.id, authority: c.authority }] : []; });
+export async function dueAutomations(db: any, take: number, after?: string): Promise<{ jobs: AutomationJob[]; next?: string }> {
+  const rows = await db.mistCommandReceipt.findMany({
+    where: {
+      inputHash: AUTOMATION_HASH,
+      requestId: { startsWith: AUTOMATION_PREFIX },
+      result: { path: [AUTOMATION_FIELD, 'enabled'], equals: true },
+      ...(after ? { id: { gt: after } } : {}),
+    },
+    orderBy: { id: 'asc' },
+    take,
+  });
+  const jobs = rows.flatMap((row: any) => {
+    const rule = row.result?.[AUTOMATION_FIELD] as AutomationRecord;
+    return rule?.schemaVersion === 1 && rule.enabled && rule.authority && !rule.halted
+      && row.workspaceId === rule.workspaceId && row.actorId === rule.ownerId
+      ? [{ workspaceId: rule.workspaceId, id: rule.id, authority: rule.authority }] : [];
+  });
+  // Advance past the last scanned row even when some rows have no valid grant.
+  return { jobs, next: rows.length === take ? rows.at(-1)?.id : undefined };
 }
 
 const SHANGHAI_CLOCK = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
