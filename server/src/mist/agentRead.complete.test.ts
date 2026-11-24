@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {applyMistCommand,createMistState,type DevelopmentValues} from '../shared/mistWorkspace';
 import {withTestFactories} from '../shared/__tests__/utils/devFactories';
 import type {TokenPayload} from '../auth/service';
-import {agentGet,agentQuery} from './agentRead';
+import {agentGet,agentQuery,agentRelated} from './agentRead';
 import {collectTaskSources,taskReadHash} from './agentTaskVisibility';
 
 const actor={userId:'owner',permissions:['emails:read','orders:read'],roles:[],departmentIds:[],authorizationLoaded:true} as TokenPayload;
@@ -87,4 +87,20 @@ it('does not reuse a past token for an open development or truncate an oversized
  const {s,dev,permitted}=legacyClosedDevelopment();const closure=dev.closure;delete dev.closure;
  expect(agentGet(s,permitted,'development',dev.id).reopenSource).toBeNull();dev.closure={...closure!,id:'x'.repeat(201)};
  expect(agentGet(s,permitted,'development',dev.id).reopenSource).toBeNull();
+});
+
+
+it('relates every order produced by split quotation lines in both directions', () => {
+ const s=state(), reader={...actor,permissions:['orders:read','quotations:read']} as TokenPayload;
+ s.orders.push(...['first','second','unrelated'].map(id=>({id,code:`SO-${id}`} as any)));
+ const conversion=(orderId:string)=>({conversion:{orderId,orderCode:`SO-${orderId}`}});
+ s.market.quotations.push(
+  {id:'split',code:'QT-SPLIT',customerId:'customer',total:'250.00',convertedOrderId:'first',lines:[conversion('first'),conversion('second')]} as any,
+  {id:'same-value',code:'QT-SAME',customerId:'customer',total:'250.00',convertedOrderId:null,lines:[]} as any,
+ );
+ const quoteRefs=agentRelated(s,reader,'order','second').related.filter(row=>row.type==='quotation');
+ expect(quoteRefs.map(({id,relation})=>({id,relation}))).toEqual([{id:'split',relation:'referenced_by'}]);
+ const orderRefs=agentRelated(s,reader,'quotation','split').related.filter(row=>row.type==='order');
+ expect(orderRefs.map(row=>row.id)).toEqual(['first','second']);
+ expect(agentRelated(s,actor,'order','second').related.some(row=>row.type==='quotation')).toBe(false);
 });

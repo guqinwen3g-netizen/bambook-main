@@ -54,3 +54,20 @@ it('names image-only PDF pages even when other pages in the window were readable
   expect(final.failed).toBeUndefined();
   expect(more.detail).toBe('本次读取第 1 至 20 页；第 3 页无可提取文字；还有后续内容');
 });
+
+it('links a completed relationship lookup to its source and indicates partial counts', () => {
+  const args = { type: 'order', id: '7639f2bd-15de-4dc0-ba7c-0a1b2c3d4e5f' };
+  const object = { ...args, label: 'SO-F-2026-0001', link: 'bambook://open?view=orders%2Fdetail&id=o1', total: 40, truncated: true, related: [{ label: 'private fixture' }] };
+  const [done, empty, pending, failed] = platformTrail([
+    step('bambook_related', args, { object }),
+    step('bambook_related', args, { object: { ...object, total: 0, truncated: false, related: [] } }),
+    step('bambook_related', args),
+    step('bambook_related', args, { error: true, object }),
+  ]);
+  expect(done).toMatchObject({ label: '展开订单 SO-F-2026-0001 的关联记录', detail: '部分结果 · 共 40 条', ref: { type: 'order', id: 'o1', view: 'orders/detail' } });
+  expect(empty).toMatchObject({ label: '展开订单 SO-F-2026-0001 的关联记录', detail: '0 条关联记录' });
+  expect(pending).toMatchObject({ label: '展开订单的关联记录', completed: false });
+  expect(failed).toMatchObject({ label: '展开订单的关联记录', failed: true });
+  expect(failed.ref).toBeUndefined();
+  expect(JSON.stringify(platformTrail([step('bambook_related', args, { object })]))).not.toContain('private fixture');
+});
