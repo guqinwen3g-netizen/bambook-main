@@ -87,12 +87,32 @@ function Question({ task, onAnswer, busy }: { task: AgentTaskView; onAnswer: (ta
       <Button size="sm" variant="ai" loading={busy} disabled={busy||!text.trim()} onClick={send}>{uiText('回答')}</Button></div></div>;
 }
 
-function ProposalCard({ proposal, onOpen, onDecide }: { proposal: AgentProposal; onOpen: (id: string) => void; onDecide?: (id: string, confirm: boolean) => Promise<void> }) {
-  const risk = agentProposalRisk(proposal), quick = !!onDecide && risk !== 'high' && !commandRequiresSignature(proposal.command), [busy, setBusy] = React.useState(false);
-  const decide = async (confirm: boolean) => { if (!onDecide) return; setBusy(true); try { await onDecide(proposal.id, confirm); } finally { setBusy(false); } };
+function ProposalCard({ proposal, onOpen, onDecide, onRecover, blocked }: {
+  proposal: AgentProposal; onOpen: (id: string) => void; onDecide?: (id: string, confirm: boolean) => Promise<void>;
+  onRecover?: (id:string)=>Promise<void>; blocked?: boolean;
+}) {
+  const risk = agentProposalRisk(proposal);
+  const unavailable = !!proposal.taskBlocked || !!proposal.unavailable;
+  const quick = !!onDecide && risk === 'low' && !unavailable && !commandRequiresSignature(proposal.command);
+  const [busy, setBusy] = React.useState(false);
+  const decide = async (confirm:boolean) => {
+    if (!onDecide || blocked || busy) return;
+    setBusy(true);
+    try { await onDecide(proposal.id,confirm); } finally { setBusy(false); }
+  };
+  const recover=async()=>{
+    if(!onRecover||busy)return;
+    setBusy(true);
+    try { await onRecover(proposal.id); } finally { setBusy(false); }
+  };
   return <div className="mist-xz-card"><div className="mist-xz-card-h"><Icon icon={ShieldCheck} size="sm" /><b>{uiText('需要你确认')}</b><Pill tone={RISK_TONE[risk]}>{uiText(AGENT_RISK_LABEL[risk])}</Pill></div>
     <ul>{proposal.summary.slice(0, 5).map((line, i) => <li key={i}>{line}</li>)}</ul>
-    <div className="mist-row">{quick ? <><Button size="sm" variant="ai" loading={busy} disabled={busy} onClick={() => void decide(true)}>{uiText('确认执行')}</Button><Button size="sm" variant="quiet" disabled={busy} onClick={() => void decide(false)}>{uiText('拒绝')}</Button><span className="mist-spacer" /><Button size="sm" variant="quiet" disabled={busy} onClick={() => onOpen(proposal.id)}>{uiText('查看并确认')}</Button></> : <Button size="sm" variant="ai" onClick={() => onOpen(proposal.id)}>{uiText('查看并确认')}</Button>}</div></div>;
+    {unavailable&&<p role="status">{uiText(proposal.taskBlocked||'提议暂不可执行')}</p>}
+    {onRecover?<div className="mist-row">
+      <Pill tone="warn">{uiText('结果待核对')}</Pill>
+      <Button size="sm" variant="quiet" loading={busy} disabled={busy} onClick={()=>void recover()}>{uiText('核对原请求')}</Button>
+    </div>:<div className="mist-row">{quick ? <><Button size="sm" variant="ai" loading={busy} disabled={busy||blocked} onClick={() => void decide(true)}>{uiText('确认执行')}</Button><Button size="sm" variant="quiet" disabled={busy||blocked} onClick={() => void decide(false)}>{uiText('拒绝')}</Button><span className="mist-spacer" /><Button size="sm" variant="quiet" disabled={busy} onClick={() => onOpen(proposal.id)}>{uiText('查看并确认')}</Button></> : <Button size="sm" variant="ai" onClick={() => onOpen(proposal.id)}>{uiText(unavailable?'查看详情':'查看并确认')}</Button>}</div>}
+  </div>;
 }
 
 export type ThreadActions = {
@@ -108,6 +128,9 @@ export type ThreadActions = {
   onOpenRecord: OpenRecord;
   onProposal: (id: string) => void;
   onDecide?: (id: string, confirm: boolean) => Promise<void>;
+  proposalsBlocked?: boolean;
+  pendingProposalId?: string;
+  onRecoverProposal?: (id:string)=>Promise<void>;
   onOpenFile?: (fileId: string) => void;
   onDownloadAttachment?: (task: AgentTaskView, file: TaskAttachment) => Promise<void>;
   onPreviewAttachment?: (task: AgentTaskView, file: TaskAttachment) => void;
@@ -175,7 +198,8 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         {!!produced.length && actions.onOpenFile && <ProducedFiles proposals={produced} onOpen={actions.onOpenFile} />}
         {asking && <Question key={openQuestion?.id} task={t} onAnswer={actions.onAnswer} busy={control?.busy}/>}
         {control?.error&&(active||t.state==='paused')&&<p className="mist-xz-note" role="status">{uiText(control.error)}</p>}
-        {pending.map(p => <ProposalCard key={p.id} proposal={p} onOpen={actions.onProposal} onDecide={actions.onDecide} />)}
+        {pending.map(p => <ProposalCard key={p.id} proposal={p} onOpen={actions.onProposal} onDecide={actions.onDecide}
+          blocked={actions.proposalsBlocked} onRecover={actions.pendingProposalId===p.id?actions.onRecoverProposal:undefined}/>)}
         <div className="mist-xz-acts">
           {active && t.canControl && actions.composerStopTaskId!==t.id && <Button size="sm" variant="quiet" icon={Square}
             aria-label={t.name ? uiText('停止任务')+' '+t.name : undefined}

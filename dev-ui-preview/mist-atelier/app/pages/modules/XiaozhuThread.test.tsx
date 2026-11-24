@@ -2,15 +2,33 @@
 import React,{act} from 'react';import {createRoot,type Root} from 'react-dom/client';import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {getByRole,queryByRole,getByLabelText} from '@testing-library/dom';
 import {MistRoot} from '../../../../../components/mist';
-import {XiaozhuThread,dayLabel} from './XiaozhuThread';
+import {XiaozhuThread,dayLabel,type ThreadActions} from './XiaozhuThread';
 let host:HTMLDivElement,root:Root;
 const task=(over:any={})=>({id:'t1',instructions:'核对订单',state:'running',version:1,result:'',checkpoint:'',questions:[],waitingProposalIds:[],canControl:true,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),...over}) as any;
 const index=[{text:'SO-1001',view:'orders/detail',id:'o1'}];
 const proposal=(over:any={})=>({id:'p1',state:'pending',command:{type:'email.move',payload:{}},summary:['归档邮件 PO 确认'],...over}) as any;
 const fns=()=>({onAnswer:vi.fn(),onCancel:vi.fn(),onRetry:vi.fn(),onCopy:vi.fn(),onDraft:vi.fn(),onAutomate:vi.fn(),onOpenRecord:vi.fn(),onProposal:vi.fn()});
-const paint=(tasks:any[],f:ReturnType<typeof fns>&{composerStopTaskId?:string;onDownloadAttachment?: (task:any,file:any)=>Promise<void>}=fns(),proposals:any[]=[])=>act(async()=>root.render(<MistRoot><XiaozhuThread tasks={tasks} index={index} proposals={proposals} {...f}/></MistRoot>));
+const paint=(tasks:any[],f:ReturnType<typeof fns>&Partial<ThreadActions>=fns(),proposals:any[]=[])=>act(async()=>root.render(<MistRoot><XiaozhuThread tasks={tasks} index={index} proposals={proposals} {...f}/></MistRoot>));
 beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
+it('requires detailed review for medium risk and routes a pending receipt to its original proposal',async()=>{
+ const onDecide=vi.fn(async()=>{}),onRecoverProposal=vi.fn(async()=>{});
+ const f={...fns(),onDecide,onRecoverProposal};
+ const medium=proposal();
+ const low=proposal({id:'p2',command:{type:'task.complete',payload:{id:'a'}}});
+ const pendingTask=task({state:'waiting_human',waitingProposalIds:['p1','p2']});
+ await paint([pendingTask],f,[medium,{...low,taskBlocked:'原任务已停止'}]);
+ expect(queryByRole(host,'button',{name:'确认执行'})).toBeNull();
+ expect(host.textContent).toContain('原任务已停止');
+ await act(async()=>getByRole(host,'button',{name:'查看并确认'}).click());
+ expect(f.onProposal).toHaveBeenCalledWith('p1');
+
+ await paint([pendingTask],{...f,proposalsBlocked:true,pendingProposalId:'p1'},[medium,low]);
+ expect((getByRole(host,'button',{name:'确认执行'}) as HTMLButtonElement).disabled).toBe(true);
+ await act(async()=>getByRole(host,'button',{name:'核对原请求'}).click());
+ expect(onRecoverProposal).toHaveBeenCalledExactlyOnceWith('p1');
+ expect(onDecide).not.toHaveBeenCalled();
+});
 it('downloads the original from its own task and disables repeat requests while pending',async()=>{
  const file={id:'attachment',name:'delivery.pdf',size:43,mimeType:'application/pdf'};
  let finish!:()=>void;
