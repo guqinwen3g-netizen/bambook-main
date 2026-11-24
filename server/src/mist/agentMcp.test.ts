@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createMistLocalRuntime } from './local';
 import { createMistServer } from './server';
 import { AGENT_DELEGATION_HEADER as HEADER } from './agentDelegation';
-import { agentCommandSensitivity } from './agentMcp';
+import { agentCommandSensitivity, handleMcpMessage, type McpRepository } from './agentMcp';
 import { agentCommandRisk } from '../shared/mistAgentProposals';
 import { MistApiError } from './errors';
 import { MIST_COMMAND_CATALOG } from './agentCommandCatalog';
@@ -367,4 +367,30 @@ describe('proposal fallback summary', () => {
     expect(commandLabel({ type: 'email.move', payload: {} })).toBe('移动邮件');
     expect(commandLabel({})).toBe('业务操作');
   });
+});
+
+
+it('identifies stale order lines after a real preview conflict without upgrading the revision',async()=>{
+  const preview=vi.fn().mockRejectedValueOnce(new MistApiError('REVISION_CONFLICT','业务已更新',409))
+    .mockResolvedValueOnce({revision:63,events:[]});
+  const agentTaskExpectedRevision=vi.fn()
+    .mockResolvedValueOnce({revision:57,staleOrderLineIds:['line-trousers','line-waistcoat']})
+    .mockResolvedValueOnce({revision:63,staleOrderLineIds:[]});
+  const repo={
+    getForAgent:vi.fn().mockResolvedValue({workspace:{revision:63}}),
+    agentTaskExpectedRevision,
+    preview,
+  } as unknown as McpRepository;
+  const actor={actorKind:'agent',agentMode:'operate'} as any;
+  const request={jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'bambook_preview',arguments:{
+    workspaceId:'workspace',expectedRevision:63,command:{type:'order.governance.saveDraft',payload:{orderId:'order'}},
+  }}};
+  const conflict=await handleMcpMessage(repo,actor,request,()=> '预演未完成') as any;
+  expect(conflict.result.isError).toBe(true);
+  expect(conflict.result.content[0].text).toContain('只重读订单不会刷新订单行版本');
+  expect(conflict.result.content[0].text).toContain('{"type":"order_line","id":"line-trousers"}');
+  expect(preview.mock.calls[0][2].expectedRevision).toBe(57);
+  const retried=await handleMcpMessage(repo,actor,{...request,id:2},()=> '预演未完成') as any;
+  expect(retried.result.structuredContent.revision).toBe(63);
+  expect(preview.mock.calls[1][2].expectedRevision).toBe(63);
 });
