@@ -14,6 +14,47 @@ let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
 const view=(active=true, taskId?:string)=> <Nav.Provider value={{route:{view:'assistant',...(taskId?{section:'tasks',id:taskId}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
 const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
 
+it('restores the request, order and original attachment of a failed task for review before resending', async () => {
+  const failure = {
+    id: '00000000-0000-4000-8000-000000000047',
+    identityId: 'personal', executor: 'platform', conversationId: 'c_retry_file',
+    instructions: '核对原件\n（引用业务记录：SO-SELECTED · Fixture）',
+    state: 'failed', result: '读取暂时失败', questions: [], waitingProposalIds: [], canControl: false,
+    createdAt: '2026-11-24T00:00:00Z', updatedAt: '2026-11-24T00:01:00Z',
+    intentRefs: [{ kind: 'orders', id: 'order' }],
+    attachments: [{ id: '00000000-0000-4000-8000-000000000048', name: 'delivery.pdf', size: 42 }],
+  };
+  mock.fetch.mockResolvedValue(response({ configured: true }));
+  mock.api.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.includes('/agent-identities')) return { items: [{ id: 'personal', kind: 'personal', state: 'active' }] };
+    if (url.endsWith('/agent-task-capabilities')) return { platformAvailable: true };
+    if (init?.method === 'POST') return { item: { ...failure, id: 'retried', state: 'succeeded', result: '原件已读回' } };
+    return { items: url.endsWith('/agent-tasks') ? [failure] : [], nextCursor: null };
+  });
+  try {
+    await mount();
+    await click('核对原件');
+    await question('另一条尚未提交的问题');
+    expect(button('重新提问')?.disabled).toBe(true);
+    await question('');
+    await click('重新提问');
+    expect(host.querySelector('textarea')?.value).toBe('核对原件');
+    expect(button('移除 SO-SELECTED · Fixture')).toBeTruthy();
+    expect(button('移除附件 delivery.pdf')).toBeTruthy();
+    expect(mock.api.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+    await click('发送');
+    const [, init] = mock.api.mock.calls.find(([, opts]) => opts?.method === 'POST')!;
+    expect(JSON.parse(init.body)).toMatchObject({
+      conversationId: failure.conversationId,
+      instructions: failure.instructions,
+      intentRefs: failure.intentRefs,
+      attachmentRefs: [{ taskId: failure.id, fileId: failure.attachments[0].id }],
+    });
+  } finally {
+    localStorage.removeItem('mist.xiaozhu.conversation:session-a:workspace');
+  }
+});
+
 it('uses the original attachment reference on a follow-up without uploading the file again', async () => {
   const original = {
     id: '00000000-0000-4000-8000-000000000041',

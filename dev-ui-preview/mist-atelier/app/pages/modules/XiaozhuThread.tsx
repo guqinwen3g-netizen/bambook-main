@@ -95,7 +95,20 @@ function ProposalCard({ proposal, onOpen, onDecide }: { proposal: AgentProposal;
     <div className="mist-row">{quick ? <><Button size="sm" variant="ai" loading={busy} disabled={busy} onClick={() => void decide(true)}>{uiText('确认执行')}</Button><Button size="sm" variant="quiet" disabled={busy} onClick={() => void decide(false)}>{uiText('拒绝')}</Button><span className="mist-spacer" /><Button size="sm" variant="quiet" disabled={busy} onClick={() => onOpen(proposal.id)}>{uiText('查看并确认')}</Button></> : <Button size="sm" variant="ai" onClick={() => onOpen(proposal.id)}>{uiText('查看并确认')}</Button>}</div></div>;
 }
 
-export type ThreadActions = { onAnswer: (task: AgentTaskView, id: string, text: string) => void; onCancel: (task: AgentTaskView) => void; onRetry?: (text: string) => void; onCopy: (text: string) => void; onDraft: (text: string) => void; onAutomate: (text: string) => void; onOpenRecord: OpenRecord; onProposal: (id: string) => void; onDecide?: (id: string, confirm: boolean) => Promise<void>; onOpenFile?: (fileId: string) => void; onReuseAttachment?: (task: AgentTaskView, file: TaskAttachment) => void };
+export type ThreadActions = {
+  onAnswer: (task: AgentTaskView, id: string, text: string) => void;
+  onCancel: (task: AgentTaskView) => void;
+  onRetry?: (task: AgentTaskView) => void;
+  retryBlocked?: boolean;
+  onCopy: (text: string) => void;
+  onDraft: (text: string) => void;
+  onAutomate: (text: string) => void;
+  onOpenRecord: OpenRecord;
+  onProposal: (id: string) => void;
+  onDecide?: (id: string, confirm: boolean) => Promise<void>;
+  onOpenFile?: (fileId: string) => void;
+  onReuseAttachment?: (task: AgentTaskView, file: TaskAttachment) => void;
+};
 
 /** 本轮确认后生成的文件：放在回答下方，点开即下载。 */
 function ProducedFiles({ proposals, onOpen }: { proposals: AgentProposal[]; onOpen: (fileId: string) => void }) {
@@ -117,6 +130,8 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
     const pending = t.waitingProposalIds.map(id => proposals.find(p => p.id === id && p.state === 'pending')).filter((p): p is AgentProposal => !!p);
     const produced = proposals.filter(p => p.taskId === t.id && p.state === 'confirmed' && p.produced && !p.unavailable);
     const request = splitRequest(t.instructions), done = !active && t.state !== 'waiting_human', working = active && !asking && !pending.length;
+    const retryable = done && !!request.trim() && t.state !== 'access_changed'
+      && (!t.attachments?.length || (!!t.conversationId && ['succeeded','failed','cancelled'].includes(t.state)));
     const activeLabel = t.state === 'queued' ? (t.executionIssue?.retryAt ? '模型重试中' : '待执行')
       : t.state === 'waiting_time' || t.state === 'waiting_condition' ? STATE[t.state][0]
       : t.executionStage === 'model' ? '正在等待模型' : undefined;
@@ -141,7 +156,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         <div className="mist-xz-acts">
           {/* 办理中的停止在输入框；等待中的任务在这里停。 */}{active && t.canControl && !['queued', 'running'].includes(t.state) && <Button size="sm" variant="quiet" icon={Square} onClick={() => actions.onCancel(t)}>{uiText('停止')}</Button>}
           {done && t.result && <><IconButton size="sm" icon={Copy} label={uiText('复制')} onClick={() => actions.onCopy(t.result)} /><IconButton size="sm" icon={FileText} label={uiText('保存草稿')} onClick={() => actions.onDraft(t.result)} /></>}
-          {done && !t.attachments?.length && actions.onRetry && <IconButton size="sm" icon={RotateCcw} label={uiText('重新提问')} onClick={() => actions.onRetry?.(request)} />}
+          {retryable && actions.onRetry && <IconButton size="sm" icon={RotateCcw} label={uiText('重新提问')} disabled={actions.retryBlocked} onClick={() => actions.onRetry?.(t)} />}
           {done && t.state === 'succeeded' && <IconButton size="sm" icon={Zap} label={uiText('设为自动规则')} onClick={() => actions.onAutomate(request)} />}
           {done && <time className="mist-xz-time" dateTime={t.updatedAt}>{clock(t.updatedAt || t.createdAt)}</time>}
         </div>
