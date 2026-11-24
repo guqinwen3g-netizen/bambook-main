@@ -11,6 +11,53 @@ const task={id:'task',identityId:'identity',executor:'platform',state:'succeeded
 const loaded=async(url:string)=>url.includes('/agent-identities')?{items:[{id:'identity',kind:'personal',state:'active'}]}:url.includes('/agent-task-capabilities')?{platformAvailable:true}:{items:[task],nextCursor:null};
 function View({workspace='workspace'}:{workspace?:string}){channel=useXiaozhuCowork(workspace,'account:'+workspace,true);return <div>{channel.tasks.length}</div>}
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();api.mockReset();});
+
+it('recovers a lost stop receipt from the one task without rereading history',async()=>{
+ const waiting={...task,state:'waiting_time',version:2},stopped={...waiting,state:'cancelled',version:3};
+ let committed=false;
+ api.mockImplementation(async(url:string)=>{
+  if(url.endsWith('/task/cancel')){committed=true;throw Error('回执断开');}
+  if(url.endsWith('/task'))return {item:committed?stopped:waiting};
+  if(url.endsWith('/agent-tasks')){
+   if(committed)throw Error('历史暂不可读');
+   return {items:[waiting],nextCursor:null};
+  }
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View/>));
+ await act(async()=>{await channel.cancel(channel.tasks[0]);});
+ expect(channel.tasks).toEqual([stopped]);
+ expect(channel.error).toBe('');
+ expect(api.mock.calls.filter(([url])=>url.endsWith('/agent-tasks'))).toHaveLength(1);
+});
+
+it('retries an unconfirmed answer with the same operation ID and keeps the rest of the channel usable',async()=>{
+ const asking={...task,state:'waiting_human',version:2,questions:[{id:'q1',question:'请给出交期'}]};
+ const resumed={...asking,state:'queued',version:3,questions:[{...asking.questions[0],answer:'1 月 18 日',answeredAt:task.updatedAt}]};
+ const sent:unknown[]=[];
+ api.mockImplementation(async(url:string,init?:RequestInit)=>{
+  if(url.endsWith('/task/answer')){
+   sent.push(JSON.parse(String(init?.body)));
+   if(sent.length===1)throw Object.assign(new Error('连接断开'),{status:0});
+   return {item:resumed};
+  }
+  if(url.endsWith('/task'))return {item:sent.length>1?resumed:asking};
+  if(url.endsWith('/agent-tasks'))return {items:[asking],nextCursor:null};
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View/>));
+ await act(async()=>{await channel.answer(channel.tasks[0],'q1','1 月 18 日');});
+ expect(channel.tasks[0].state).toBe('waiting_human');
+ expect(channel.controls.task.error).toBe('回答未确认，可重试');
+ expect(channel.error).toBe('');
+ await act(async()=>{await channel.answer(channel.tasks[0],'q1','1 月 18 日');});
+ expect(sent).toHaveLength(2);
+ expect(sent[1]).toEqual(sent[0]);
+ expect(channel.tasks[0].questions?.[0]?.answer).toBe('1 月 18 日');
+ expect(channel.controls.task.error).toBe('');
+});
 it('retains the known task channel and history after a failed refresh, blocks a new task, and recovers on a read retry',async()=>{
  api.mockImplementation(loaded);host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<View/>));expect(channel.available).toBe(true);expect(channel.tasks.map(t=>t.id)).toEqual(['task']);
  api.mockRejectedValue(new Error('任务读取失败'));await act(async()=>channel.reload());expect(channel.available).toBe(true);expect(channel.tasks.map(t=>t.id)).toEqual(['task']);expect(channel.error).toBe('任务读取失败');await act(async()=>{expect(await channel.send('不应创建任务')).toBeNull()});expect(api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);

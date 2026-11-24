@@ -11,8 +11,8 @@ import { TASK_INSTRUCTION_LIMIT } from '../../runtime/xiaozhuCowork';
 type Voice = ReturnType<typeof usePersonalAgentVoice>;
 export const voiceInCall = (voice: Voice) => voice.state === 'connecting' || voice.state === 'listening' || voice.state === 'speaking';
 
-export function XiaozhuComposer({ value, onChange, onSend, ready, busy, working, onStop, sources, onRemoveSource, onAttach, files, onAddFiles, onRemoveFile, attachmentRefs, onRemoveAttachmentRef, voice, voiceAvailable, field, placeholder, disabled }: {
-  value: string; onChange: (v: string) => void; onSend: () => void; ready: boolean; busy: boolean; working?: boolean; onStop?: () => void;
+export function XiaozhuComposer({ value, onChange, onSend, ready, busy, working, onStop, stopping, sources, onRemoveSource, onAttach, files, onAddFiles, onRemoveFile, attachmentRefs, onRemoveAttachmentRef, voice, voiceAvailable, field, placeholder, disabled }: {
+  value: string; onChange: (v: string) => void; onSend: () => void; ready: boolean; busy: boolean; working?: boolean; onStop?: () => void; stopping?: boolean;
   sources: Array<{ id: string; label: string }>; onRemoveSource: (s: { id: string; label: string }) => void; onAttach: () => void;
   files: File[]; onAddFiles?: (files: File[]) => void; onRemoveFile: (index: number) => void;
   attachmentRefs: AssistantAttachmentRef[]; onRemoveAttachmentRef: (fileId: string) => void;
@@ -65,7 +65,7 @@ export function XiaozhuComposer({ value, onChange, onSend, ready, busy, working,
       <IconButton icon={Paperclip} label={uiText('添加附件')} disabled={!acceptsFiles} onClick={() => picker.current?.click()} />
       <IconButton icon={AtSign} label={uiText('引用业务记录')} disabled={busy || disabled} onClick={onAttach} />
       <span className="mist-spacer" />
-      {(busy || working && !value.trim()) && onStop ? <button type="button" className="mist-send" data-kind="stop" aria-label={uiText('停止生成')} onClick={onStop}><Icon icon={Square} size="sm" /></button>
+      {(busy || working && !value.trim()) && onStop ? <button type="button" className="mist-send" data-kind="stop" aria-label={uiText(stopping?'正在核对停止结果':'停止生成')} disabled={stopping} onClick={onStop}><Icon icon={Square} size="sm" /></button>
         : !attachments.length && !value.trim() && voiceAvailable && !busy ? <button type="button" className="mist-send" data-kind="voice" aria-label={uiText('语音通话')} title={uiText('语音通话')} onClick={() => void voice.start()}><Icon icon={AudioLines} size="sm" /></button>
         : <button type="button" className="mist-send" aria-label={uiText('发送')} disabled={!ready} onClick={onSend}><Icon icon={ArrowUp} size="sm" /></button>}
     </div>

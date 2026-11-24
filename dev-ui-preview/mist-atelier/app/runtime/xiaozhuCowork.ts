@@ -159,6 +159,8 @@ function mergeTaskUpdate(previous: AgentTaskView, next: AgentTaskView): AgentTas
   return previous.conversationId && !next.conversationId ? { ...next, conversationId: previous.conversationId } : next;
 }
 
+export type TaskControlState = { busy: boolean; error?: string };
+
 export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string) {
   const base = workspaceId ? '/api/mist/workspaces/' + encodeURIComponent(workspaceId) : '';
   const [available, setAvailable] = React.useState(false), [tasks, setTasks] = React.useState<AgentTaskView[]>([]);
@@ -169,6 +171,9 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const pending = React.useRef(new Map<string, PendingSubmission>());
   const [recoveredSubmissions, setRecoveredSubmissions] = React.useState<PendingSubmission[]>([]);
   const sendRequest = React.useRef<AbortController | undefined>(undefined);
+  const controlRequests = React.useRef(new Map<string,AbortController>());
+  const controlKeys = React.useRef(new Map<string,{ key:string; requestId:string }>());
+  const [controls,setControls] = React.useState<Record<string,TaskControlState>>({});
   const [sendFailure, setSendFailure] = React.useState<{conversationId?: string; message: string}>();
   const sendError = !visibleConversationId || sendFailure?.conversationId === visibleConversationId ? sendFailure?.message ?? '' : '';
   const historyRead = React.useRef<AbortController | undefined>(undefined);
@@ -244,7 +249,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if (run === version.current && live.current === bound) setLoading(false);
     }
   }, [base, enabled, scope]);
-  React.useEffect(() => { setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); setRecoveredSubmissions([]); setBusy(false); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); moreRead.current?.abort(); sendRequest.current?.abort(); sendRequest.current=undefined; }; }, [load,scope]);
+  React.useEffect(() => { setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); setRecoveredSubmissions([]); setControls({}); controlKeys.current.clear(); setBusy(false); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); moreRead.current?.abort(); sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [load,scope]);
   const activeTasks = tasks.filter(t => COWORK_ACTIVE.includes(t.state));
   const foregroundId = activeTasks.filter(t => visibleConversationId && t.conversationId === visibleConversationId
     && (t.state === 'running' || t.state === 'queued')).at(-1)?.id;
@@ -296,7 +301,6 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       document.removeEventListener('visibilitychange', refreshVisible);
     };
   }, [foregroundId, backgroundIds, progressId, base, available, scope]);
-  const post = async (path: string, body: object) => mistApiRequest(base + path, { method: 'POST', body: JSON.stringify(body) }) as Promise<{ item?: AgentTaskView }>;
   const send = async (text: string, history: AgentTaskView[] = [], conversationId?: string, intentRefs:AgentTaskIntentRef[]=[], files:File[]=[], attachmentRefs:ReadonlyArray<TaskAttachmentRef>=[]): Promise<AgentTaskView | null> => {
     const message = text.trim();
     if (!message || sendRequest.current || !base || loading || error || !available) return null;
@@ -413,12 +417,63 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       }
     }
   };
-  const answer = async (task: AgentTaskView, questionId: string, text: string) => {
-    try { applyTaskUpdate((await post('/agent-tasks/' + encodeURIComponent(task.id) + '/answer', { requestId: crypto.randomUUID(), version: task.version, questionId, answer: text.trim() })).item); } catch (e) { setError(e instanceof Error ? e.message : '回答未送达'); await load(); }
+  const controlTask = async (task:AgentTaskView, action:'answer'|'cancel', details:Record<string,string>, confirmed:(item:AgentTaskView)=>boolean) => {
+    if (!base || !enabled || controlRequests.current.has(task.id)) return;
+    let controller = new AbortController();
+    const isCurrent = () => live.current===scope && controlRequests.current.get(task.id)===controller;
+    controlRequests.current.set(task.id,controller);
+    setControls(old=>({...old,[task.id]:{busy:true}}));
+
+    const body = {version:task.version,...details};
+    const key = JSON.stringify([action,body]);
+    const existing = controlKeys.current.get(task.id);
+    const requestId = existing?.key===key ? existing.requestId : crypto.randomUUID();
+    controlKeys.current.set(task.id,{key,requestId});
+    const failure = action==='cancel'?'停止结果未确认，可重试':'回答未确认，可重试';
+    let error = '';
+    const accept = (item:AgentTaskView) => {
+      if (!isCurrent()) return;
+      applyTaskUpdate(item);
+      controlKeys.current.delete(task.id);
+    };
+
+    try {
+      const result = await withRequestDeadline(controller,HISTORY_READ_TIMEOUT_MS,failure,signal =>
+        mistApiRequest(base+'/agent-tasks/'+encodeURIComponent(task.id)+'/'+action,{
+          method:'POST',body:JSON.stringify({requestId,...body}),signal,
+        }) as Promise<{item:AgentTaskView}>);
+      if (result.item?.id!==task.id) throw new Error(failure);
+      accept(result.item);
+    } catch (problem) {
+      if (!isCurrent()) return;
+      error = (problem as {status?:number})?.status===0 ? failure
+        : problem instanceof Error ? problem.message : failure;
+      // A timeout has already aborted the write signal. The read has its own deadline.
+      controller = new AbortController();
+      controlRequests.current.set(task.id,controller);
+      try {
+        const latest = await readCoworkTask(base,task.id,controller.signal);
+        if (!isCurrent()) return;
+        applyTaskUpdate(latest);
+        if (confirmed(latest)) {
+          controlKeys.current.delete(task.id);
+          error = '';
+        }
+      } catch { /* The original operation remains available for an exact retry. */ }
+    } finally {
+      if (isCurrent()) {
+        controlRequests.current.delete(task.id);
+        setControls(old=>({...old,[task.id]:{busy:false,error}}));
+      }
+    }
   };
-  const cancel = async (task: AgentTaskView) => {
-    try { await post('/agent-tasks/' + encodeURIComponent(task.id) + '/cancel', { requestId: crypto.randomUUID(), version: task.version }); } catch (e) { setError(e instanceof Error ? e.message : '未能停止'); } finally { await load(); }
+  const answer = (task:AgentTaskView,questionId:string,text:string) => {
+    const answer = text.trim();
+    return controlTask(task,'answer',{questionId,answer},item =>
+      !!item.questions?.some(question=>question.id===questionId&&question.answeredAt&&question.answer===answer));
   };
+  const cancel = (task:AgentTaskView) => controlTask(task,'cancel',{},item=>
+    !COWORK_ACTIVE.includes(item.state)&&item.state!=='paused');
   const hasPendingSubmission = [...pending.current.values()].some(entry=>entry.recoveredFromStorage && (entry.sourceConversationId??entry.conversationId)===visibleConversationId);
-  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, error, sendError, hasPendingSubmission, recoveredSubmissions, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track: (task: AgentTaskView) => setTasks(old => [...old.filter(t => t.id !== task.id), task]) };
+  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, error, sendError, controls, hasPendingSubmission, recoveredSubmissions, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track: (task: AgentTaskView) => setTasks(old => [...old.filter(t => t.id !== task.id), task]) };
 }
