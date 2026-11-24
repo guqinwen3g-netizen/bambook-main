@@ -3,6 +3,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
 import { normalizeAgentTaskIntentRefs, type AgentTaskEvent, type AgentTaskQuestion, type AgentTaskView, type AgentTaskIntentRef } from '../shared/mistAgentTasks';
+import type { TaskAttachmentRef } from '../shared/mistTaskAttachments';
 import { taskIntentCeilingAllows } from './agentTaskIntentRefs';
 import { isAgentActor, type AgentActor } from './agentDelegation';
 import { identityRecord, assertServiceLease, serviceActorFromIdentity, type AgentServiceLease } from './agentIdentities';
@@ -501,7 +502,7 @@ export async function platformTaskUsage(db: any, workspaceId: string, month: str
   }
   return [...out.values()].sort((a, b) => b.modelTurns - a.modelTurns || a.ownerName.localeCompare(b.ownerName));
 }
-export async function listTasks(db: any, actor: TokenPayload, workspaceId: string, cursor: unknown, now: number, sourcesVisible: (c:TaskRecord)=>boolean = ()=>true) {
+export async function listTasks(db: any, actor: TokenPayload, workspaceId: string, cursor: unknown, now: number, sourcesVisible: (c:TaskRecord)=>boolean|Promise<boolean> = ()=>true) {
   const where: any = { workspaceId, actorId: actor.userId, inputHash: TASK_HASH };
   if ((actor as AgentActor).agentIdentity) where.AND = [{ result: { path: [TASK_FIELD, 'identityId'], equals: (actor as AgentActor).agentIdentity!.id } }];
   if (cursor !== undefined) {
@@ -515,7 +516,7 @@ export async function listTasks(db: any, actor: TokenPayload, workspaceId: strin
   for (const row of page) {
     const c = record(row, workspaceId); let valid = true;
     try { await assertTaskViewAuthority(db, actor, c, now); } catch (e) { if (!(e instanceof MistApiError)) throw e; valid = false; }
-    items.push(taskView(c, actor, now, valid&&sourcesVisible(c)));
+    items.push(taskView(c, actor, now, valid&&await sourcesVisible(c)));
   }
   return { items, nextCursor: rows.length > 30 && last ? Buffer.from(JSON.stringify({ at: new Date(last.createdAt).toISOString(), id: last.id })).toString('base64url') : null };
 }
@@ -549,4 +550,3 @@ export async function taskHistory(db:any,actor:TokenPayload,workspaceId:string,t
   const rows=await db.mistCommandReceipt.findMany({where,orderBy:[{createdAt:'desc'},{id:'desc'}],take:31}),page=rows.slice(0,30),last=page.at(-1);
   return {items:page.map((row:any)=>row.result.event as AgentTaskEvent),nextCursor:rows.length>30&&last?Buffer.from(JSON.stringify({at:new Date(last.createdAt).toISOString(),id:last.id})).toString('base64url'):null};
 }
-import type { TaskAttachmentRef } from '../shared/mistTaskAttachments';

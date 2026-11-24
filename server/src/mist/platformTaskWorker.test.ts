@@ -412,10 +412,13 @@ it('rejects a missing or changed prior original before creating a follow-up', as
   expect(tasks.map((task: { id: string }) => task.id)).toEqual([item.id]);
 });
 
-it('rechecks the original task source before providing a borrowed attachment to the worker', async () => {
+it('rechecks a borrowed attachment for the worker and redacts completed follow-up details after source access changes', async () => {
   const marker = 'source-access-check-marker-804';
-  const complete = vi.fn(async (_input: LlmCompletionInput) =>
-    tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '检查结束' }));
+  let turn = 0;
+  const complete = vi.fn(async (_input: LlmCompletionInput) => {
+    if (++turn === 2) return tool('bambook_task', { action: 'checkpoint', summary: marker });
+    return tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: marker });
+  });
   const f = await fixture(complete);
   f.worker.start(3_600_000);
   const orderId = f.workspace.state.orders[0].id;
@@ -426,6 +429,11 @@ it('rechecks the original task source before providing a borrowed attachment to 
   await f.drain();
   expect(complete.mock.calls.at(0)?.[0].messages[0].content).toContain(marker);
   const ref = { taskId: item.id, fileId: item.attachments[0].id };
+  const completedInput = { ...payload, requestId: randomUUID(), attachmentRefs: [ref] };
+  const completed = (await f.human.post(f.base + '/personal-agent/tasks').send(completedInput).expect(201)).body.item;
+  await f.drain();
+  expect(await f.current(completed.id)).toMatchObject({ result: marker, checkpoint: marker });
+  const callsBeforeRevocation = complete.mock.calls.length;
   const followUp = (await f.human.post(f.base + '/personal-agent/tasks').send({
     ...payload, requestId: randomUUID(), attachmentRefs: [ref],
   }).expect(201)).body.item;
@@ -436,10 +444,18 @@ it('rechecks the original task source before providing a borrowed attachment to 
     } } });
   });
   expect((await f.current(item.id)).attachments).toBeUndefined();
+  const listed = (await f.human.get(f.base + '/agent-tasks').expect(200)).body.items.find((task: { id: string }) => task.id === completed.id);
+  const summary = (await f.human.get(f.base + '/agent-tasks/' + completed.id + '?summary=1').expect(200)).body.item;
+  const replayed = (await f.human.post(f.base + '/personal-agent/tasks').send(completedInput).expect(201)).body.item;
+  for (const hidden of [await f.current(completed.id), listed, summary, replayed]) {
+    expect(hidden).toMatchObject({ id: completed.id, state: 'succeeded', result: '', checkpoint: '' });
+    expect(hidden.attachments).toBeUndefined();
+    expect(hidden.trail).toBeUndefined();
+  }
   const reads = vi.spyOn(MistPrivateFiles.prototype, 'read');
   await f.drain();
   expect(reads.mock.calls.some(([, file]) => file.id === ref.fileId)).toBe(false);
-  for (const [call] of complete.mock.calls.slice(1)) expect(call.messages[0].content).not.toContain(marker);
+  expect(complete).toHaveBeenCalledTimes(callsBeforeRevocation);
   expect((await taskRecord(f.local.database, f.workspace.id, followUp.id)).value.attachmentOrigins).toEqual([ref]);
 });
 
