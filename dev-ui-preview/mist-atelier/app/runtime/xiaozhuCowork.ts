@@ -475,5 +475,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const cancel = (task:AgentTaskView) => controlTask(task,'cancel',{},item=>
     !COWORK_ACTIVE.includes(item.state)&&item.state!=='paused');
   const hasPendingSubmission = [...pending.current.values()].some(entry=>entry.recoveredFromStorage && (entry.sourceConversationId??entry.conversationId)===visibleConversationId);
-  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, error, sendError, controls, hasPendingSubmission, recoveredSubmissions, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track: (task: AgentTaskView) => setTasks(old => [...old.filter(t => t.id !== task.id), task]) };
+  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, error, sendError, controls, hasPendingSubmission, recoveredSubmissions, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track: (task: AgentTaskView) => setTasks(old => old.some(item=>item.id===task.id)
+    ? old.map(item=>mergeTaskUpdate(item,task))
+    : [...old,task]) };
 }

@@ -6,9 +6,14 @@ import type {AgentTaskNotice} from '../../../../server/src/shared/mistAgentTasks
 const sounds=vi.hoisted(()=>({play:vi.fn(),mark:vi.fn((_scope:string,_ids:string[])=>true)}));
 vi.mock('../../../../services/uiSoundService',()=>({canPlayNotificationSound:()=>true,playNotificationSound:sounds.play}));
 vi.mock('./notificationSound',()=>({markNoticeSounds:sounds.mark}));
-import {agentTaskNoticeScope,readAllMistNotices,readMistNotice,useAgentTaskNotices,type AgentTaskNotices} from './agentTaskNotices';
+import {agentTaskNoticeScope,mistNoticeTarget,readAllMistNotices,readMistNotice,useAgentTaskNotices,type AgentTaskNotices} from './agentTaskNotices';
 let host:HTMLDivElement,root:Root,current:AgentTaskNotices;
 const notice=(id='one'):AgentTaskNotice=>({id:'agent-task:'+id+':key',taskId:id,key:'a'.repeat(64),title:'Agent待补充资料',detail:'核对交期',at:'2026-11-01T00:00:00Z',readAt:null,category:'general',target:{view:'assistant',id,section:'tasks'}});
+it('routes only personal task reminders through the original task lookup',()=>{
+ const item=notice();
+ expect(mistNoticeTarget(item)).toEqual({view:'assistant',id:'one',section:'task-origin'});
+ expect(mistNoticeTarget({...item,id:'ordinary'})).toEqual(item.target);
+});
 function Probe({scope,request,soundScope}:{scope:string;request:any;soundScope?:string}){current=useAgentTaskNotices(scope,scope?'workspace':undefined,request,soundScope);return <div>{current.items.map(n=><span key={n.id}>{n.detail}</span>)}{current.error}</div>;}
 const paint=async(scope:string,request:any,soundScope?:string)=>act(async()=>{root.render(<Probe scope={scope} request={request} soundScope={soundScope}/>);await Promise.resolve();await Promise.resolve();});
 const flush=()=>act(async()=>{await Promise.resolve();await Promise.resolve();});

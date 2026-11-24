@@ -163,6 +163,7 @@ function xiaozhuSuggestions(state:ReturnType<typeof useMistWorkspace>['state']):
 const XIAOZHU_PROMPTS=['哪些订单交期临近，需要优先跟进？','总结引用订单的当前进展和风险','列出未收款发票，按金额从高到低','起草一段给客户的出运进度说明'];
 export function AssistantPage(){
   const nav=useNav(),tasksOpen=nav.route.section==='tasks'||nav.route.section==='agent';
+  const originTaskId=nav.route.section==='task-origin'?nav.route.id:undefined;
   const w=usePlatform(),[kind,setKind]=React.useState('orders'),[query,setQuery]=React.useState(''),[editor,setEditor]=useRouteDraft<ModuleEditorSpec|null>(null);
   const scope=w.session.sessionKey+':'+(w.workspace?.id??'');
   const {question,setQuestion,selected,setSelected,messages,setMessages,files,setFiles,attachmentRefs,setAttachmentRefs,inactiveDrafts,switchDraft,clearDraft}=useAssistantConversation(scope);
@@ -170,6 +171,12 @@ export function AssistantPage(){
   const [navOpen,setNavOpen]=React.useState(()=>{try{return localStorage.getItem('mist.xiaozhu.nav')!=='0';}catch{return true;}}),[navDrawer,setNavDrawer]=React.useState(false),[confirmOpen,setConfirmOpen]=React.useState(false),[atBottom,setAtBottom]=React.useState(true),atBottomRef=React.useRef(true),scrollRef=React.useRef<HTMLDivElement>(null);
   const [automations,setAutomations]=React.useState(false),[automationSeed,setAutomationSeed]=React.useState(''),[newRule,setNewRule]=React.useState(0),[proposalId,setProposalId]=React.useState(''),[picker,setPicker]=React.useState(false),[drafts,setDrafts]=React.useState(false);
   const active=React.useRef<AbortController|null>(null),generation=React.useRef(0),live=React.useRef(''),sendLock=React.useRef(false),field=React.useRef<HTMLTextAreaElement>(null),end=React.useRef<HTMLDivElement>(null);
+  const originRead=React.useRef<AbortController|undefined>(undefined);
+  const originHandled=React.useRef('');
+  const [originStatus,setOriginStatus]=React.useState<'loading'|'unavailable'>();
+  const [originAttempt,setOriginAttempt]=React.useState(0);
+  const [originFocus,setOriginFocus]=React.useState<{conversationId:string;taskId:string}>();
+  const [openedOrigin,setOpenedOrigin]=React.useState<{scope:string;conversationId:string}>();
   live.current=scope;
   const ids=selected.map(s=>s.id),canChat=w.session.hasPermission('ai:chat');
   const toast=useToast(),convKey='mist.xiaozhu.conversation:'+scope;
@@ -186,6 +193,12 @@ export function AssistantPage(){
   const [conversationId,setConversationIdState]=React.useState(readConv);
   React.useEffect(()=>{setConversationIdState(readConv());},[convKey]);
   const openConversation=(id:string)=>{
+    if(originRead.current&&originTaskId)originHandled.current=JSON.stringify([scope,originTaskId,originAttempt]);
+    originRead.current?.abort();
+    originRead.current=undefined;
+    setOriginStatus(undefined);
+    setOriginFocus(undefined);
+    setOpenedOrigin(undefined);
     switchDraft(conversationId,id);
     try{sessionStorage.setItem(convKey,id);localStorage.setItem(convKey,id);}catch{/* 本页状态仍可切换 */}
     setConversationIdState(id);
@@ -231,7 +244,40 @@ export function AssistantPage(){
     } catch { /* A changed draft remains in the composer. */ }
   },[recoveredSubmission,conversationId,taskText,selected,files.length,attachmentRefs.length,clearDraft]);
   const showTaskHistory=canChat&&(cowork.available||cowork.tasks.length>0);
-  const index=React.useMemo(()=>recordIndex(w.state),[w.state]),automationRules=useAutomationRules(w.workspace?.id,showTaskHistory,automations),meta=useConversationMeta(w.workspace?.id,showTaskHistory),conversations=React.useMemo(()=>conversationsOf(cowork.tasks,meta.items),[cowork.tasks,meta.items]),current=conversations.find(c=>c.id===conversationId),visibleTasks=showTaskHistory?(current?.tasks??[]):[],proposals=(w.state?.agentProposals??[]).filter(p=>p.state==='pending'),voice=usePersonalAgentVoice(scope+':'+canChat,w.workspace?.id,cowork.track),inCall=voiceInCall(voice);
+  const index=React.useMemo(()=>recordIndex(w.state),[w.state]),automationRules=useAutomationRules(w.workspace?.id,showTaskHistory,automations),meta=useConversationMeta(w.workspace?.id,showTaskHistory),conversations=React.useMemo(()=>conversationsOf(cowork.tasks,meta.items),[cowork.tasks,meta.items]),current=conversations.find(c=>c.id===conversationId)??(openedOrigin?.scope===scope&&openedOrigin.conversationId===conversationId?conversationsOf(cowork.tasks.filter(task=>task.conversationId===conversationId))[0]:undefined),visibleTasks=showTaskHistory?(current?.tasks??[]):[],proposals=(w.state?.agentProposals??[]).filter(p=>p.state==='pending'),voice=usePersonalAgentVoice(scope+':'+canChat,w.workspace?.id,cowork.track),inCall=voiceInCall(voice);
+  const originActions=React.useRef({refreshTask:cowork.refreshTask,track:cowork.track,openConversation,go:nav.go});
+  originActions.current={refreshTask:cowork.refreshTask,track:cowork.track,openConversation,go:nav.go};
+  React.useEffect(()=>{
+    if(!originTaskId){originHandled.current='';setOriginStatus(undefined);return;}
+    const operation=JSON.stringify([scope,originTaskId,originAttempt]);
+    if(!w.workspace?.id||!canChat||cowork.loading||originHandled.current===operation)return;
+    const controller=new AbortController();
+    originRead.current=controller;
+    setOriginStatus('loading');
+    void originActions.current.refreshTask(originTaskId,controller.signal).then(task=>{
+      if(!task||controller.signal.aborted||originRead.current!==controller)return;
+      originRead.current=undefined;
+      originHandled.current=operation;
+      setOriginStatus(undefined);
+      if(task.executor!=='platform'||task.automationId||!task.conversationId||task.state==='access_changed'){
+        originActions.current.go('assistant',originTaskId,{section:'tasks'});
+        return;
+      }
+      originActions.current.track(task);
+      atBottomRef.current=false;
+      setAtBottom(false);
+      originActions.current.openConversation(task.conversationId);
+      setOpenedOrigin({scope,conversationId:task.conversationId});
+      setOriginFocus({conversationId:task.conversationId,taskId:task.id});
+    }).catch(()=>{
+      if(originRead.current===controller&&!controller.signal.aborted){
+        originRead.current=undefined;
+        originHandled.current=operation;
+        setOriginStatus('unavailable');
+      }
+    });
+    return ()=>{controller.abort();if(originRead.current===controller)originRead.current=undefined;};
+  },[originTaskId,w.workspace?.id,scope,canChat,cowork.loading,originAttempt]);
   const newConversation=()=>{
     const unsubmitted = cowork.available
       ? [...inactiveDrafts.keys()].reverse().find(id=>!conversations.some(conversation=>conversation.id===id))
@@ -409,6 +455,14 @@ export function AssistantPage(){
   // 执行中跟随新步骤；长回答完成后，从提问和第一行读起。
   const follow=()=>{const el=scrollRef.current;if(!el)return;const turns=el.querySelectorAll('.mist-xz-turn'),last=turns[turns.length-1] as HTMLElement|undefined;const bottom=el.scrollHeight-el.clientHeight;if(last&&['queued','running'].includes(last.dataset.taskState??'')){el.scrollTop=Math.max(0,bottom);return;}const start=last?last.getBoundingClientRect().top-el.getBoundingClientRect().top+el.scrollTop-16:bottom;el.scrollTop=Math.max(0,Math.min(bottom,start));};
   const threadKey=visibleTasks.map(t=>t.id+t.updatedAt).join()+messages.length+busy;
+  React.useEffect(()=>{
+    if(!originFocus||originFocus.conversationId!==conversationId)return;
+    const region=scrollRef.current;
+    const turn=Array.from(region?.querySelectorAll<HTMLElement>('[data-task-id]')??[]).find(node=>node.dataset.taskId===originFocus.taskId);
+    if(!region||!turn)return;
+    region.scrollTop+=turn.getBoundingClientRect().top-region.getBoundingClientRect().top-16;
+    setOriginFocus(undefined);
+  },[originFocus,conversationId,threadKey]);
   React.useEffect(()=>{if(atBottomRef.current)requestAnimationFrame(follow);},[threadKey]);
   // 回答排版、卡片展开等会在渲染后改变高度；停在底部时跟着到底。
   React.useEffect(()=>{const el=scrollRef.current,content=el?.firstElementChild;if(!el||!content||typeof ResizeObserver==='undefined')return;const watch=new ResizeObserver(()=>{if(atBottomRef.current)follow();});watch.observe(content);return()=>watch.disconnect();},[hasThread]);
@@ -433,6 +487,11 @@ export function AssistantPage(){
         </div>
         {!cowork.available&&configuration&&!configuration.configured&&<div className="mist-xz-col mist-xz-banner"><Banner tone="warn" title={uiText("生成模型尚未连接到此公司")}>{uiText(configuration.subscription?'请平台管理员连接平台模型。':'服务器未配置可用模型。')}{uiText("仍可引用业务记录并保存文字草稿。")}</Banner></div>}
         {cowork.progressStale&&<div className="mist-xz-col mist-xz-banner"><Banner variant="status" tone="warn" title={uiText("进度暂未更新，正在重试")}/></div>}
+        {originTaskId&&originStatus&&<div className="mist-xz-col mist-xz-banner">
+          <Banner variant="status" tone={originStatus==='loading'?'neutral':'warn'} title={uiText(originStatus==='loading'?'正在查找原对话':'任务暂时无法核对')}
+            actions={originStatus==='unavailable'?<><Button onClick={()=>setOriginAttempt(value=>value+1)}>{uiText('重试')}</Button>
+              <Button variant="quiet" onClick={()=>nav.go('assistant',originTaskId,{section:'tasks'})}>{uiText('打开任务详情')}</Button></>:undefined}/>
+        </div>}
         {cowork.error&&<div className="mist-xz-col mist-xz-banner"><Banner tone="warn" title={uiText("小竹操作未完成")} actions={<Button disabled={cowork.loading} onClick={()=>void cowork.reload()}>{uiText("重新读取任务")}</Button>}>{uiText(cowork.error)}</Banner></div>}
         {(cowork.sendError||cowork.hasPendingSubmission&&!cowork.loading)&&<div className="mist-xz-col mist-xz-banner"><Banner variant="status" tone="warn" title={uiText(cowork.sendError||'提交结果待核对')} actions={cowork.hasPendingSubmission?<Button disabled={cowork.loading||busy} onClick={()=>void cowork.reload()}>{uiText('核对提交结果')}</Button>:undefined}/></div>}
         {recoveredSubmission&&!cowork.sendError&&<div className="mist-xz-col mist-xz-banner"><Banner variant="status" tone="ok" title={uiText('已找回提交的任务')}/></div>}

@@ -179,7 +179,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
       : t.state === 'waiting_time' || t.state === 'waiting_condition' ? STATE[t.state][0]
       : t.executionStage === 'model' ? '正在等待模型' : undefined;
     const status = !active && t.state !== 'succeeded' ? <Pill tone={STATE[t.state][1]}>{uiText(STATE[t.state][0])}</Pill> : undefined;
-    return <div className="mist-xz-turn" key={t.id} data-task-state={t.state}>
+    return <div className="mist-xz-turn" key={t.id} data-task-state={t.state} data-task-id={t.id}>
       {divider && <div className="mist-xz-day"><span>{dayLabel(t.createdAt)}</span></div>}
       <div className="mist-xz-user">{request}
         {!!t.attachments?.length && <div className="mist-xz-sources" aria-label={uiText('附件')}>

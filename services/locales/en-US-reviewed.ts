@@ -612,6 +612,8 @@ export const reviewedEnglish: Record<string, string> = {
   '暂未查到原回执':'The original receipt is not available yet',
   '已核对原请求':'Original request verified',
   '重试原操作':'Retry original action',
+  '正在查找原对话':'Finding the original conversation',
+  '打开任务详情':'Open task details',
   '停止结果未确认，可重试':'Stop not confirmed. Try again.',
   '回答未确认，可重试':'Answer not confirmed. Try again.',
   '引用附件':'Reuse attachment',

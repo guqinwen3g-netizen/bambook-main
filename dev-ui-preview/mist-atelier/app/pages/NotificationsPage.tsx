@@ -11,7 +11,7 @@ import { useNav } from '../nav';
 import { useMistSession } from '../runtime/auth';
 import { useMistWorkspace, type MistCommandRecovery } from '../runtime/workspace';
 import { notificationPermissionView,visibleMistNotifications } from '../runtime/notificationPreferences';
-import {readAllMistNotices,readMistNotice} from '../runtime/agentTaskNotices';
+import {mistNoticeTarget,readAllMistNotices,readMistNotice} from '../runtime/agentTaskNotices';
 import { FailureNotice } from '../runtime/FailureNotice';
 
 export type NotificationTab = 'unread' | 'all';
@@ -60,7 +60,7 @@ export function NotificationsPage() {
     if (busy) return;
     clearFailure();
     void readMistNotice(workspace,n)
-      .then(() => { if (canOpen(n)) go(n.target.view, n.target.id, n.target); }).catch(report);
+      .then(() => { if(canOpen(n)){const target=mistNoticeTarget(n);go(target.view,target.id,target);} }).catch(report);
   };
   const readAll = () => { clearFailure(); void readAllMistNotices(workspace,visible).then(() => toast('已全部标为已读')).catch(report); };
   const columns: Column<MistNotification>[] = [

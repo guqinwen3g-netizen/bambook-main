@@ -11,8 +11,31 @@ vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>mock.workspace,mist
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({sessionKey:mock.sessionKey,user:{id:'actor'},hasPermission:(scope:string)=>scope!=='orders:read'||mock.readOrders}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 vi.mock('../../../../../services/apiService',()=>({apiService:{getAuthHeaders:()=>({'X-Test-Auth':'authenticated'})}}));
 let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
-const view=(active=true, taskId?:string)=> <Nav.Provider value={{route:{view:'assistant',...(taskId?{section:'tasks',id:taskId}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
+const view=(active=true, taskId?:string,section='tasks')=> <Nav.Provider value={{route:{view:'assistant',...(taskId?{section,id:taskId}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
 const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
+
+it('opens the exact task from a reminder even when it was absent from the loaded conversation pages', async () => {
+  const archived={
+    id:'older-task',conversationId:'c_archived_origin',executor:'platform',identityId:'personal',
+    name:'核对旧订单',instructions:'核对旧订单',state:'waiting_human',canControl:true,waitingProposalIds:[],
+    questions:[{id:'question',question:'客户书面确认的交期是哪天？'}],
+    createdAt:'2026-11-20T01:00:00Z',updatedAt:'2026-11-20T01:00:00Z',
+  };
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async (url:string)=>{
+    if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    if(url.endsWith('/agent-tasks/older-task'))return {item:archived};
+    if(url.endsWith('/agent-conversations'))return {items:[{id:archived.conversationId,hidden:true}]};
+    return {items:[],nextCursor:null};
+  });
+  await mount();
+  await act(async()=>root!.render(view(true,'older-task','task-origin')));
+  expect(host.querySelector('[data-task-id="older-task"]')?.textContent).toContain('客户书面确认的交期是哪天？');
+  expect(host.querySelector('[aria-label="回答小竹"]')).toBeTruthy();
+  expect(mock.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+  expect(go).not.toHaveBeenCalled();
+});
 
 it('asks which running task to check before issuing a read-only status request', async () => {
   const conversationId='c_status_choices';
