@@ -69,6 +69,34 @@ it('keeps a queue wake pending while the only worker slot is busy', async()=>{
  }finally{release(finish);}
 });
 
+it.each(['resume','answer'] as const)('wakes a continuing task after a committed %s action', async action=>{
+ const finish=tool('bambook_task',{action:'finish',outcome:'succeeded',result:'续办完成。'});
+ let mail='';
+ const complete=vi.fn(async()=>finish);
+ if(action==='answer')complete.mockResolvedValueOnce(tool('bambook_task',{action:'question',question:'请给本轮数量。'}))
+  .mockImplementationOnce(async()=>tool('bambook_get',{type:'email',id:mail}));
+ const f=await fixture(complete);
+ mail=f.workspace.state.email.messages[0].id;
+ f.worker.start(3_600_000);
+ const task=await f.create('platform');
+ if(action==='resume')await f.human.post(f.base+'/agent-tasks/'+task.id+'/pause').send({requestId:randomUUID(),version:task.version}).expect(200);
+ else await f.drain();
+ const prior=await f.current(task.id);
+ expect(prior.state).toBe(action==='resume'?'paused':'waiting_human');
+ await f.worker.stop();
+ const scanned=vi.spyOn(f.repository,'duePlatformTasks');
+ f.worker.start(0);
+ await vi.waitFor(()=>expect(scanned).toHaveBeenCalled(),{timeout:1500});
+ await f.worker.settled();
+ const payload={requestId:randomUUID(),version:prior.version,...(action==='answer'?{questionId:prior.questions[0].id,answer:'27 件'}:{})};
+ const resumed=(await f.human.post(f.base+'/agent-tasks/'+task.id+'/'+action).send(payload).expect(200)).body.item;
+ expect(resumed).toMatchObject({id:task.id,state:'queued'});
+ await vi.waitFor(()=>expect(complete).toHaveBeenCalledTimes(action==='answer'?2:1),{timeout:1500});
+ await f.worker.settled();
+ expect(complete).toHaveBeenCalledTimes(action==='answer'?3:1);
+ expect(await f.current(task.id)).toMatchObject({id:task.id,state:'succeeded',result:'续办完成。'});
+});
+
 it('pre-reads authorized intent references before first planning while supplying the current company business date and real lease time',async()=>{
  const seen:any[]=[];const complete=vi.fn(async(input:LlmCompletionInput)=>{const text=String(input.messages[0].content),facts=JSON.parse(text.slice(text.indexOf('User request:\n')+'User request:\n'.length));seen.push(facts);return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对所选资料。'});});
  const f=await fixture(complete),order=f.workspace.state.orders[0],invoice=f.workspace.state.invoices[0],intentRefs=[{kind:'orders',id:order.id},{kind:'invoices',id:invoice.id}];

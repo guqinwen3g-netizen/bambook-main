@@ -288,6 +288,9 @@ export class MistRepository {
   private wakePlatformTasks(){
     try{this.platformTaskWake?.();}catch{ /* The durable queue is also scanned periodically. */ }
   }
+  private wakeQueuedPlatformTask(item: {executor?:string;state:string}) {
+    if(item.executor==='platform'&&item.state==='queued')this.wakePlatformTasks();
+  }
   async platformTaskCapabilities(prior:TokenPayload,workspaceId:string){return this.transact(async db=>{const{actor}=await this.own(db,prior,workspaceId);return{platformAvailable:!isAgentActor(prior)&&hasScope(actor,'ai:chat')&&this.platformRuntimeAvailable()};});}
   async duePlatformTasks(now=Date.now(),take=2){return this.transact(db=>duePlatformTasks(db,now,take));}
   async duePlatformTaskConditions(now=Date.now(),take=50,after?:PlatformTaskScanCursor){return this.transact(db=>duePlatformTasks(db,now,take,{conditionsOnly:true,after}));}
@@ -950,7 +953,7 @@ export class MistRepository {
       const c=(await taskRecord(db,workspaceId,result.id)).value;
       return taskView(c,actor,Date.now(),result.state!=='access_changed'&&await this.taskViewSourcesAllowed(db,row,actor,c));
     });
-    if(item.executor==='platform'&&item.state==='queued')this.wakePlatformTasks();
+    this.wakeQueuedPlatformTask(item);
     return item;
   }
   async claimAgentTask(prior:TokenPayload,workspaceId:string,taskId:string,input:Record<string,unknown>,make:MakeTaskCredential){
@@ -959,7 +962,7 @@ export class MistRepository {
   }
   async changeAgentTask(prior:TokenPayload,workspaceId:string,taskId:string,action:'pause'|'resume',input:Record<string,unknown>){
     if(isAgentActor(prior))fail('FORBIDDEN','任务须由本人管理',403);
-    return this.connectionTransaction(async db=>{
+    const item=await this.connectionTransaction(async db=>{
       const{actor,row}=await this.own(db,prior,workspaceId,action==='resume'?'ai:chat':undefined);
       if(action==='resume'){
         const task=(await taskRecord(db,workspaceId,taskId)).value;
@@ -972,15 +975,19 @@ export class MistRepository {
       if(action==='resume')return taskView(await this.refreshTaskCondition(db,actor,row,task,Date.now()),actor,Date.now());
       return task.attachmentOrigins?.length?taskView(task,actor,Date.now(),await this.taskViewSourcesAllowed(db,row,actor,task)):result;
     });
+    this.wakeQueuedPlatformTask(item);
+    return item;
   }
   async answerAgentTaskQuestion(prior:TokenPayload,workspaceId:string,taskId:string,input:Record<string,unknown>){
     if(isAgentActor(prior))fail('FORBIDDEN','资料须由本人补充',403);
-    return this.connectionTransaction(async db=>{
+    const item=await this.connectionTransaction(async db=>{
       const{actor,row}=await this.own(db,prior,workspaceId,'ai:chat'),task=(await taskRecord(db,workspaceId,taskId)).value;
       this.assertTaskSources(row,actor,task);
       if(task.attachmentOrigins?.length)await this.assertTaskAttachmentOrigins(db,row,actor,task);
       return answerTaskQuestion(db,actor,workspaceId,taskId,input,Date.now());
     });
+    this.wakeQueuedPlatformTask(item);
+    return item;
   }
   async cancelAgentTask(prior:TokenPayload,workspaceId:string,taskId:string,input:Record<string,unknown>){
     if(isAgentActor(prior))fail('FORBIDDEN','任务须由本人停止',403);
