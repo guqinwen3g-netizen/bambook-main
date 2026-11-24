@@ -47,3 +47,24 @@ it('hides an unreadable referenced task and blocks resume while preserving owner
 it('keeps legacy personal clients without refs usable and does not rewrite their record shape',async()=>{
  const task=await repo.assignPersonalAgentTask(actor,workspaceId,input(),make);expect((await taskRecord(db,workspaceId,task.id)).value).not.toHaveProperty('intentRefs');
 });
+
+it('gates an enqueued automation task when its triggering order is transferred', async () => {
+ const first = db.workspaces.get(workspaceId)!.state.orders[0];
+ first.due = '2026-11-24';
+ first.state = '生产中';
+ for (const other of db.workspaces.get(workspaceId)!.state.orders.slice(1)) other.due = '2027-02-01';
+ const rule = await repo.saveAutomation(actor, workspaceId, undefined, {
+  name:'交期提醒', trigger:'due_soon', instructions:'核对交期', time:'00:00',
+ });
+ const run = await repo.runAutomation(actor, workspaceId, rule.id, make, Date.parse('2026-11-24T03:00:00Z'));
+ expect(run.fired).toBe(true);
+ const taskId = run.taskId!;
+ expect((await repo.getAgentTask(actor, workspaceId, taskId)).instructions).toContain(first.id);
+ const order = db.workspaces.get(workspaceId)!.state.orders[0];
+ order.ownerId = 'another-user';
+ order.customerId = db.workspaces.get(workspaceId)!.state.orders[1].customerId;
+ expect((await repo.get(actor, workspaceId)).state.orders.some(o => o.id === order.id)).toBe(false);
+ expect(await repo.getAgentTask(actor, workspaceId, taskId)).toMatchObject({state:'access_changed',instructions:'',result:''});
+ const [job] = await repo.duePlatformTasks();
+ await expect(repo.claimPlatformTask(job, 'source-test', make)).rejects.toMatchObject({code:'AGENT_TASK_SCOPE_CHANGED'});
+});

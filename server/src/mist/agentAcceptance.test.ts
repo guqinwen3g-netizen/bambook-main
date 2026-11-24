@@ -189,6 +189,87 @@ const automation = async (c: Awaited<ReturnType<typeof cowork>>, body: Record<st
 const fire = async (c: Awaited<ReturnType<typeof cowork>>, now = Date.now()) => { const app = (c.human as any).app, worker = app.locals.automationWorker; worker.options.now = () => now; await worker.tick(); await c.drain(); };
 const rules = async (c: Awaited<ReturnType<typeof cowork>>) => (await c.human.get(c.base + '/agent-automations').expect(200)).body.items;
 
+it('replays the same automation creation without duplicating the rule or resetting its live state', async () => {
+  const c = await cowork(() => finish('已核对本日待办'));
+  const requestId = randomUUID();
+  const fields = { name: '每日汇总', trigger: 'daily', time: '00:00', instructions: '汇总待办' };
+  const intent = { requestId, ...fields };
+  const [first, replay] = await Promise.all([
+    automation(c, intent),
+    automation(c, { ...intent, name: ' 每日汇总 ', enabled: true }),
+  ]);
+  expect(replay).toEqual(first);
+  expect(await rules(c)).toEqual([first]);
+  await c.human.post(c.base + '/agent-automations').send({ ...intent, instructions: '另一条规则' }).expect(409);
+
+  await fire(c);
+  const runs = (await rules(c))[0].runs;
+  expect(runs).toHaveLength(1);
+  const paused = (await c.human.put(c.base + '/agent-automations/' + first.id)
+    .send({ ...fields, enabled: false }).expect(200)).body.item;
+  expect(paused).toMatchObject({ enabled: false, runs });
+  expect(await automation(c, intent)).toEqual(paused);
+
+  await c.human.delete(c.base + '/agent-automations/' + first.id).expect(204);
+  const gone = await c.human.post(c.base + '/agent-automations').send(intent).expect(404);
+  expect(gone.body.error.code).toBe('AGENT_AUTOMATION_CREATED_RULE_GONE');
+  expect(await rules(c)).toEqual([]);
+});
+
+it('rejects stale automation changes and pauses only the live rule at the confirmed version', async () => {
+  const c = await cowork(() => finish('已核对本日待办'));
+  const fields = { name: '每日汇总', trigger: 'daily', time: '00:00', instructions: '汇总待办' };
+  const initial = await automation(c, fields);
+  const endpoint = c.base + '/agent-automations/' + initial.id;
+
+  await fire(c);
+  const [beforeEdit] = await rules(c);
+  expect(beforeEdit.runs).toHaveLength(1);
+  const newerFields = { ...fields, name: '修改后的汇总', time: '12:30', instructions: '只列出未处理待办' };
+  const updated = (await c.human.put(endpoint)
+    .send({ ...newerFields, expectedVersion: beforeEdit.version }).expect(200)).body.item;
+  expect(updated).toMatchObject({ ...newerFields, enabled: true, runs: beforeEdit.runs });
+
+  const stalePause = await c.human.patch(endpoint).send({ enabled: false, expectedVersion: beforeEdit.version }).expect(409);
+  const staleDelete = await c.human.delete(endpoint).query({ expectedVersion: beforeEdit.version }).expect(409);
+  const stalePut = await c.human.put(endpoint).send({ ...fields, expectedVersion: beforeEdit.version }).expect(409);
+  for (const response of [stalePause, staleDelete, stalePut]) expect(response.body.error.code).toBe('REVISION_CONFLICT');
+  expect(await rules(c)).toEqual([updated]);
+
+  await c.human.patch(endpoint).send({ enabled: false }).expect(400);
+  await c.human.patch(endpoint).send({ enabled: false, expectedVersion: updated.version, name: '不能顺带改名' }).expect(400);
+  await c.human.delete(endpoint).query({ expectedVersion: '1.0' }).expect(400);
+  const paused = (await c.human.patch(endpoint)
+    .send({ enabled: false, expectedVersion: updated.version }).expect(200)).body.item;
+  expect(paused).toMatchObject({ ...newerFields, enabled: false, runs: beforeEdit.runs, version: updated.version + 1 });
+  expect(await rules(c)).toEqual([paused]);
+  await c.human.delete(endpoint).query({ expectedVersion: paused.version }).expect(200, { removed: true });
+  expect(await rules(c)).toEqual([]);
+});
+
+it('isolates an automation creation key by owner and workspace', async () => {
+  const c = await cowork(() => finish('已核对本日待办'));
+  const intent = { requestId: randomUUID(), name: '本人的每日汇总', trigger: 'daily', instructions: '汇总待办', enabled: false };
+  const first = await automation(c, intent);
+  const db = (c.human as any).app.locals.acceptanceDb;
+  const { state: source } = await db.mistWorkspace.findUnique({ where: { id: c.workspace.id } });
+  await db.mistWorkspace.update({ where: { id: c.workspace.id },
+    data: { state: { ...source, memberIds: [...(source.memberIds ?? []), 'local-reviewer'] } } });
+  await c.human.post('/api/mist/session').send({ profileId: 'local-reviewer' }).expect(200);
+  const second = await automation(c, { ...intent, name: '审批员的规则' });
+  expect(second.id).not.toBe(first.id);
+  expect(await rules(c)).toEqual([second]);
+  await c.human.post('/api/mist/session').send({ profileId: 'local-operator' }).expect(200);
+  expect(await rules(c)).toEqual([first]);
+
+  const other = (await c.human.post('/api/mist/workspaces')
+    .send({ name: '另一个测试业务空间', slug: 'automation-other', seed: 'empty' }).expect(201)).body.workspace;
+  const third = await automation({ ...c, base: '/api/mist/workspaces/' + other.id }, intent);
+  expect(third.id).not.toBe(first.id);
+  expect(await rules(c)).toEqual([first]);
+  await c.human.post(c.base + '/agent-automations').send({ ...intent, requestId: '' }).expect(400);
+});
+
 it('runs a new-mail rule once per new mail with no one logged in, ignoring mail that was already there', async () => {
   let mail = ''; const c = await cowork((_i, n) => n % 2 === 1 ? tool('bambook_get', { type: 'email', id: mail }) : finish('已整理新邮件'));
   mail = c.workspace.state.email.messages[0].id;

@@ -58,7 +58,7 @@ import { AGENT_AUDIT_FIELD, AGENT_AUDIT_HASH, AGENT_AUDIT_PREFIX, agentAuditRece
 import { auditFromReceipt, auditMatchesParent, auditEntry, projectAgentAudit, readableCommand } from './agentAuditRead';
 import { markAgentProposalConfirmed, agentCommandRisk, effectiveAgentCommandRisk, AI_WRITE_SCOPES, AGENT_RISK_LABEL } from '../shared/mistAgentProposals';
 import { listConversationMeta, saveConversationMeta } from './agentConversations';
-import { AUTOMATION_FAILURE_LIMIT, AUTOMATION_FAILURE_SPAN_MS, automationInstructions, automationOverLimit, automationRecord, automationView, dueAutomations, evaluateAutomation, listAutomations, recordAutomationRun, removeAutomation, saveAutomation, writeAutomation, type AutomationDecision, type AutomationRecord } from './agentAutomations';
+import { AUTOMATION_FAILURE_LIMIT, AUTOMATION_FAILURE_SPAN_MS, automationInstructions, automationRecord, automationView, dueAutomations, evaluateAutomation, listAutomations, recordAutomationRun, removeAutomation, saveAutomation, setAutomationEnabled, shouldCommitAutomation, writeAutomation } from './agentAutomations';
 import { canGenerateScopedStatement, scopedMaterialIssueTargets, scopedMaterialDeliveryTargets, scopedFabricAccess, scopedFabricDestinations, scopedReferenceViolation, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
 import { buildTeamScopeGraph, resolveTeamScope, normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
 import { accountOwnedObjects, buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
@@ -762,28 +762,103 @@ export class MistRepository {
   async saveConversation(prior:TokenPayload,workspaceId:string,id:string,input:Record<string,unknown>){if(isAgentActor(prior))fail('FORBIDDEN','对话设置须由本人管理',403);return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,workspaceId,'ai:chat');return saveConversationMeta(db,actor,workspaceId,id,input,Date.now());});}
   async listAutomations(prior:TokenPayload,workspaceId:string){if(isAgentActor(prior))fail('FORBIDDEN','自动规则须由本人管理',403);return this.transact(async db=>{const{actor}=await this.own(db,prior,workspaceId,'ai:chat');return{items:(await listAutomations(db,workspaceId,actor.userId)).map(automationView)};});}
   async saveAutomation(prior:TokenPayload,workspaceId:string,id:string|undefined,input:Record<string,unknown>){if(isAgentActor(prior))fail('FORBIDDEN','自动规则须由本人管理',403);return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,workspaceId,'ai:chat');return automationView(await saveAutomation(db,actor,workspaceId,id,input,Date.now()));});}
-  async removeAutomation(prior:TokenPayload,workspaceId:string,id:string){if(isAgentActor(prior))fail('FORBIDDEN','自动规则须由本人管理',403);return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,workspaceId,'ai:chat');await removeAutomation(db,actor,workspaceId,id);});}
-  async dueAutomations(take:number){return this.connectionTransaction(db=>dueAutomations(db,take));}
-  /** 触发一次：按所有者当前权限读投影后判断；授权失效时停用规则并写明原因，不静默。 */
-  async runAutomation(prior:TokenPayload,workspaceId:string,id:string,make:MakeServiceCredential,now=Date.now()){
-    let decision:AutomationDecision,rule:AutomationRecord;
-    try{
-      const read=await this.transact(async db=>{const{row,actor}=await this.own(db,prior,workspaceId,'ai:chat');const{value}=await automationRecord(db,workspaceId,id);if(value.ownerId!==actor.userId)fail('NOT_FOUND','规则不存在',404);const last=value.runs[0]?.taskId;let busy=false;if(last){const task=await taskRecord(db,workspaceId,last).catch(()=>null);busy=!!task&&task.value.expiresAt>now&&['queued','running','waiting_time','waiting_condition','waiting_human'].includes(task.value.state);}return{rule:value,busy,decision:evaluateAutomation(value,(await this.preparedView(db,row,actor)).state,now)};});
-      rule=read.rule;decision=read.decision;
-      if(read.busy||!rule.enabled||automationOverLimit(rule,now)&&decision.fire)return{fired:false};
-    }catch(error:any){if([401,403].includes(error?.status)){await this.haltAutomation(workspaceId,id,'权限已变化，请重新启用规则',now);return{fired:false};}await this.automationFailed(workspaceId,id,error,now).catch(()=>undefined);throw error;}
-    let taskId:string|undefined;
-    if(decision.fire){
-      try{const task=await this.assignPersonalAgentTask(prior,workspaceId,{requestId:'auto-'+rule.id+'-'+rule.version,name:(rule.name+' · '+decision.fire.detail).slice(0,60),instructions:automationInstructions(rule,decision.fire.facts),locale:'zh-CN'},make,rule.id);taskId=task.id;}
-      catch(error:any){if(error?.code==='AGENT_TASK_LIMIT'||error?.code==='AGENT_DAILY_LIMIT'||error?.status===503)return{fired:false};if([401,403,422].includes(error?.status)){await this.haltAutomation(workspaceId,id,error?.message||'规则无法运行，请重新启用',now);return{fired:false};}await this.automationFailed(workspaceId,id,error,now).catch(()=>undefined);throw error;}
-    }
-    const changed=taskId||rule.failures||JSON.stringify(decision.next)!==JSON.stringify({seen:rule.seen,primed:rule.primed,lastDay:rule.lastDay,since:rule.since});
-    if(changed)await this.connectionTransaction(async db=>{const{row,value}=await automationRecord(db,workspaceId,id);await writeAutomation(db,row,value,recordAutomationRun(value,decision,taskId,decision.fire?.detail??'',now));});
-    return{fired:!!taskId,taskId};
+  async setAutomationEnabled(prior:TokenPayload,workspaceId:string,id:string,input:Record<string,unknown>){
+    if(isAgentActor(prior))fail('FORBIDDEN','自动规则须由本人管理',403);
+    return this.connectionTransaction(async db=>{
+      const {actor}=await this.own(db,prior,workspaceId,'ai:chat');
+      return automationView(await setAutomationEnabled(db,actor,workspaceId,id,input,Date.now()));
+    });
   }
-  /** 意外失败计次：连续达到上限后停用并写明原因，不再每 30 秒静默重试。 */
-  private async automationFailed(workspaceId:string,id:string,error:any,now:number){await this.connectionTransaction(async db=>{const{row,value}=await automationRecord(db,workspaceId,id);if(!value.enabled)return;const failures={count:(value.failures?.count??0)+1,since:value.failures?.since??now},stop=failures.count>=AUTOMATION_FAILURE_LIMIT&&now-failures.since>=AUTOMATION_FAILURE_SPAN_MS;const reason=typeof error?.message==='string'&&error.message.length<=120&&/[\u4e00-\u9fff]/.test(error.message)?error.message:'系统暂时无法创建任务';await writeAutomation(db,row,value,stop?{...value,version:value.version+1,enabled:false,authority:undefined,failures:undefined,updatedAt:new Date(now).toISOString(),halted:{code:'AUTOMATION_FAILED',message:`持续无法运行（${failures.count} 次）：${reason}`}}:{...value,version:value.version+1,failures});});}
-  private async haltAutomation(workspaceId:string,id:string,message:string,now:number){await this.connectionTransaction(async db=>{const{row,value}=await automationRecord(db,workspaceId,id);await writeAutomation(db,row,value,{...value,version:value.version+1,enabled:false,authority:undefined,updatedAt:new Date(now).toISOString(),halted:{code:'AUTOMATION_HALTED',message}});});}
+  async removeAutomation(prior:TokenPayload,workspaceId:string,id:string,expectedVersion?:number){
+    if(isAgentActor(prior))fail('FORBIDDEN','自动规则须由本人管理',403);
+    return this.connectionTransaction(async db=>{
+      const {actor}=await this.own(db,prior,workspaceId,'ai:chat');
+      await removeAutomation(db,actor,workspaceId,id,expectedVersion);
+    });
+  }
+  async dueAutomations(take:number,after?:string){return this.connectionTransaction(db=>dueAutomations(db,take,after));}
+  /** 按当前权限判断，再将同一规则版本的任务和运行记录原子提交。 */
+  async runAutomation(prior:TokenPayload,workspaceId:string,id:string,make:MakeServiceCredential,now=Date.now(),scannedVersion?:number){
+    let observedVersion: number | undefined;
+    try {
+      const read = await this.transact(async db => {
+        const {value: rule} = await automationRecord(db, workspaceId, id);
+        if (!rule.enabled || rule.removed || scannedVersion !== undefined && rule.version !== scannedVersion) return;
+        if (rule.ownerId !== prior.userId) fail('NOT_FOUND', '规则不存在', 404);
+        observedVersion = rule.version;
+        const {row, actor} = await this.own(db, prior, workspaceId, 'ai:chat');
+        const last = rule.runs[0]?.taskId;
+        if (last) {
+          const task = await taskRecord(db, workspaceId, last).catch(() => null);
+          if (task && task.value.expiresAt > now && ['queued','running','waiting_time','waiting_condition','waiting_human'].includes(task.value.state)) return;
+        }
+        const decision = evaluateAutomation(rule, (await this.preparedView(db, row, actor)).state, now);
+        if (!shouldCommitAutomation(rule, decision, now)) return;
+        return {rule, decision};
+      });
+      if (!read) return {fired: false};
+      return await this.connectionTransaction(async db => {
+        const {row, value} = await automationRecord(db, workspaceId, id);
+        if (!value.enabled || value.removed || value.version !== read.rule.version) return {fired: false};
+        const {row: workspace, actor} = await this.own(db, prior, workspaceId, 'ai:chat');
+        // The first read is only a probe. Persist facts and watermarks from the
+        // same authorized workspace snapshot as the task creation transaction.
+        const decision = value.trigger === 'daily' ? read.decision
+          : evaluateAutomation(value, (await this.preparedView(db, workspace, actor)).state, now);
+        if (!shouldCommitAutomation(value, decision, now)) return {fired: false};
+        let taskId: string | undefined;
+        if (decision.fire) {
+          if (!this.platformRuntimeAvailable()) fail('PRECONDITION','平台执行器或模型暂不可用',503);
+          const createdAt = Date.now();
+          const identity = await ensurePersonalIdentity(db, actor, workspaceId, make, createdAt, workspace.companyId ?? undefined);
+          const task = await createTask(db, actor, workspaceId, {
+            requestId: 'auto-' + value.id + '-' + value.version,
+            identityId: identity.id,
+            name: (value.name + ' · ' + decision.fire.detail).slice(0,60),
+            instructions: automationInstructions(value, decision.fire.facts),
+            executor: 'platform', locale: 'zh-CN',
+          }, createdAt, taskScopeHash(scopeOf(workspace), workspace.state), value.id, [], undefined, decision.fire.sources);
+          taskId = task.id;
+        }
+        // The task and its receipts roll back if a different rule version was committed first.
+        await writeAutomation(db, row, value, recordAutomationRun(value, decision, taskId, decision.fire?.detail ?? '', now), 'REVISION_CONFLICT');
+        return taskId ? {fired: true, taskId} : {fired: false};
+      });
+    } catch (error: any) {
+      if (['AGENT_TASK_LIMIT','AGENT_DAILY_LIMIT','REVISION_CONFLICT'].includes(error?.code) || error?.status === 503) return {fired: false};
+      if (observedVersion !== undefined) {
+        if ([401,403,422].includes(error?.status)) {
+          const message = error?.status === 422 ? error.message || '规则无法运行，请重新启用' : '权限已变化，请重新启用规则';
+          await this.haltAutomation(workspaceId, id, observedVersion, message, now);
+          return {fired: false};
+        }
+        await this.automationFailed(workspaceId, id, observedVersion, error, now).catch(() => undefined);
+      }
+      throw error;
+    }
+  }
+  /** 只对实际发生故障的规则版本计次。 */
+  private async automationFailed(workspaceId:string,id:string,version:number,error:any,now:number){
+    await this.connectionTransaction(async db => {
+      const {row, value} = await automationRecord(db, workspaceId, id);
+      if (!value.enabled || value.version !== version) return;
+      const failures = {count:(value.failures?.count ?? 0) + 1, since:value.failures?.since ?? now};
+      const stop = failures.count >= AUTOMATION_FAILURE_LIMIT && now - failures.since >= AUTOMATION_FAILURE_SPAN_MS;
+      const reason = typeof error?.message === 'string' && error.message.length <= 120 && /[\u4e00-\u9fff]/.test(error.message) ? error.message : '系统暂时无法创建任务';
+      await writeAutomation(db, row, value, {...value, version:value.version + 1, failures, ...(stop ? {
+        enabled:false, authority:undefined, failures:undefined, updatedAt:new Date(now).toISOString(),
+        halted:{code:'AUTOMATION_FAILED', message:`持续无法运行（${failures.count} 次）：${reason}`},
+      } : {})});
+    });
+  }
+  private async haltAutomation(workspaceId:string,id:string,version:number,message:string,now:number){
+    await this.connectionTransaction(async db => {
+      const {row, value} = await automationRecord(db, workspaceId, id);
+      if (!value.enabled || value.version !== version) return;
+      await writeAutomation(db, row, value, {...value, version:value.version + 1, enabled:false, authority:undefined,
+        updatedAt:new Date(now).toISOString(), halted:{code:'AUTOMATION_HALTED', message}});
+    });
+  }
   private async resolveTaskAttachment(db: any, row: MistWorkspaceRow, actor: TokenPayload, conversationId: string | undefined, ref: TaskAttachmentRef, visible?: MistState) {
     const source = (await taskRecord(db, row.id, ref.taskId)).value;
     if (!conversationId || source.conversationId !== conversationId || source.ownerId !== actor.userId

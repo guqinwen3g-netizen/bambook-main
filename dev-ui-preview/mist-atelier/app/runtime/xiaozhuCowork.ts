@@ -1,3 +1,4 @@
+import {withRequestDeadline} from './requestDeadline';
 /**
  * 小竹的 cowork（2026-11-07 定案）：对话里的每一条请求就是一项交给小竹的平台任务，
  * 小竹经平台 AI 与 MCP 业务工具办理，进度、追问和待确认事项回到同一条对话里；对话由服务端任务记录承载，换设备也在。
@@ -107,24 +108,6 @@ const UPLOAD_BYTES_PER_SECOND = 64 * 1024;
 const TASK_RETRY_INTERVAL_MS = 1000;
 const TASK_RETRY_MAX_MS = 8000;
 
-async function withRequestDeadline<T>(controller: AbortController, timeout: number, message: string, read: (signal: AbortSignal) => Promise<T>): Promise<T> {
-  const { signal } = controller;
-  signal.throwIfAborted();
-  const timer = window.setTimeout(() => controller.abort(new Error(message)), timeout);
-  let onAbort: () => void = () => {};
-  // Release the read slot even if the request or response processing does not settle after abort.
-  const interrupted = new Promise<never>((_, reject) => {
-    onAbort = () => reject(signal.reason);
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
-  try {
-    return await Promise.race([read(signal), interrupted]);
-  } finally {
-    window.clearTimeout(timer);
-    signal.removeEventListener('abort', onAbort);
-  }
-}
-
 async function readCoworkTask(base: string, id: string, signal: AbortSignal): Promise<AgentTaskView> {
   signal.throwIfAborted();
   const controller = new AbortController();
@@ -164,6 +147,7 @@ export type TaskControlState = { busy: boolean; error?: string };
 export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string) {
   const base = workspaceId ? '/api/mist/workspaces/' + encodeURIComponent(workspaceId) : '';
   const [available, setAvailable] = React.useState(false), [tasks, setTasks] = React.useState<AgentTaskView[]>([]);
+  const [checkingAvailability, setCheckingAvailability] = React.useState(true);
   const [loading, setLoading] = React.useState(true), [error, setError] = React.useState(''), [busy, setBusy] = React.useState(false), [more, setMore] = React.useState<string | undefined>(undefined);
   const [staleTask, setStaleTask] = React.useState<{ scope: string; id: string }>();
   const live = React.useRef(scope); live.current = scope;
@@ -177,6 +161,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const [sendFailure, setSendFailure] = React.useState<{conversationId?: string; message: string}>();
   const sendError = !visibleConversationId || sendFailure?.conversationId === visibleConversationId ? sendFailure?.message ?? '' : '';
   const historyRead = React.useRef<AbortController | undefined>(undefined);
+  const capabilityRead = React.useRef<AbortController | undefined>(undefined);
   const moreRead = React.useRef<AbortController | undefined>(undefined);
   const [loadingMore, setLoadingMore] = React.useState(false), [moreError, setMoreError] = React.useState('');
   const personalIdentity = React.useRef<string | undefined>(undefined);
@@ -184,24 +169,28 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const load = React.useCallback(async () => {
     const run = ++version.current, bound = scope;
     historyRead.current?.abort();
+    capabilityRead.current?.abort();
     moreRead.current?.abort();
     moreRead.current = undefined;
     setLoadingMore(false);
     setMoreError('');
-    if (!base || !enabled) { setLoading(false); setAvailable(false); return; }
-    const controller = new AbortController();
+    if (!base || !enabled) { setLoading(false); setCheckingAvailability(false); setAvailable(false); return; }
+    const controller = new AbortController(), capabilityController = new AbortController();
     historyRead.current = controller;
-    setLoading(true);setError('');
+    capabilityRead.current = capabilityController;
+    const current = () => run === version.current && live.current === bound;
+    setLoading(true);setCheckingAvailability(true);setError('');
+    const capability = withRequestDeadline(capabilityController, HISTORY_READ_TIMEOUT_MS, '任务服务检查超时', signal =>
+      mistApiRequest(base + '/agent-task-capabilities', { signal }) as Promise<{ platformAvailable: boolean }>
+    ).then(caps => ({ caps }), error => ({ error }));
     try {
-      const [mine, page, caps] = await withRequestDeadline(controller, HISTORY_READ_TIMEOUT_MS, '对话读取超时', signal => Promise.all([
+      const [mine, page] = await withRequestDeadline(controller, HISTORY_READ_TIMEOUT_MS, '对话读取超时', signal => Promise.all([
         mistApiRequest(base + '/agent-identities?scope=mine', { signal }) as Promise<{ items: AgentIdentityView[] }>,
         readCoworkHistory(base, signal),
-        mistApiRequest(base + '/agent-task-capabilities', { signal }) as Promise<{ platformAvailable: boolean }>,
       ]));
       if (run !== version.current || live.current !== bound) return;
       const own = mine.items.find(i => i.kind === 'personal') ?? null;
       personalIdentity.current = own?.id;
-      const nextAvailable=caps.platformAvailable === true && own?.state !== 'disabled';lastAvailability.current={scope:bound,available:nextAvailable};setAvailable(nextAvailable);
       const visible = page.items.filter(t => t.executor === 'platform' && (!own || t.identityId === own.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-THREAD_LIMIT);
       setTasks(old => {
         const previous = new Map(old.map(task => [task.id, task]));
@@ -211,6 +200,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         });
       });
       setMore(page.cursor);
+      setLoading(false);
       setError('');
 
       const missing = [...pending.current].filter(([,entry])=>entry.recoveredFromStorage);
@@ -240,16 +230,30 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
           }
         } catch { /* Keep the original request available for a later confirmation or retry. */ }
       }
+      const result = await capability;
+      if (!current()) return;
+      if ('error' in result) throw result.error;
+      const nextAvailable = result.caps.platformAvailable === true && own?.state !== 'disabled';
+      lastAvailability.current = {scope:bound, available:nextAvailable};
+      setAvailable(nextAvailable);
     } catch (e) {
       // A failed read cannot establish that the task channel is unavailable, or replace a known conversation mode.
-      if (run === version.current && live.current === bound) { setAvailable(lastAvailability.current?.scope===bound?lastAvailability.current.available:false); setError(e instanceof Error ? e.message : '读取失败'); }
+      if (current()) {
+        if ([401,403,404].includes(Number((e as {status?:number})?.status))) {
+          setTasks([]);setMore(undefined);personalIdentity.current=undefined;lastAvailability.current=null;
+        }
+        setAvailable(lastAvailability.current?.scope===bound?lastAvailability.current.available:false);
+        setError(e instanceof Error ? e.message : '读取失败');
+      }
     } finally {
       controller.abort();
+      capabilityController.abort();
       if (historyRead.current === controller) historyRead.current = undefined;
-      if (run === version.current && live.current === bound) setLoading(false);
+      if (capabilityRead.current === capabilityController) capabilityRead.current = undefined;
+      if (current()) { setLoading(false); setCheckingAvailability(false); }
     }
   }, [base, enabled, scope]);
-  React.useEffect(() => { setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); setRecoveredSubmissions([]); setControls({}); controlKeys.current.clear(); setBusy(false); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); moreRead.current?.abort(); sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [load,scope]);
+  React.useEffect(() => { setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); setRecoveredSubmissions([]); setControls({}); controlKeys.current.clear(); setBusy(false); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); moreRead.current?.abort(); sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [load,scope]);
   const activeTasks = tasks.filter(t => COWORK_ACTIVE.includes(t.state));
   const foregroundId = activeTasks.filter(t => visibleConversationId && t.conversationId === visibleConversationId
     && (t.state === 'running' || t.state === 'queued')).at(-1)?.id;
@@ -303,7 +307,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   }, [foregroundId, backgroundIds, progressId, base, available, scope]);
   const send = async (text: string, history: AgentTaskView[] = [], conversationId?: string, intentRefs:AgentTaskIntentRef[]=[], files:File[]=[], attachmentRefs:ReadonlyArray<TaskAttachmentRef>=[]): Promise<AgentTaskView | null> => {
     const message = text.trim();
-    if (!message || sendRequest.current || !base || loading || error || !available) return null;
+    if (!message || sendRequest.current || !base || loading || checkingAvailability || error || !available) return null;
     const bound = scope, controller = new AbortController();
     sendRequest.current = controller;
     const isCurrent = () => live.current === bound && sendRequest.current === controller;
@@ -475,7 +479,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const cancel = (task:AgentTaskView) => controlTask(task,'cancel',{},item=>
     !COWORK_ACTIVE.includes(item.state)&&item.state!=='paused');
   const hasPendingSubmission = [...pending.current.values()].some(entry=>entry.recoveredFromStorage && (entry.sourceConversationId??entry.conversationId)===visibleConversationId);
-  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, error, sendError, controls, hasPendingSubmission, recoveredSubmissions, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track: (task: AgentTaskView) => setTasks(old => old.some(item=>item.id===task.id)
+  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, controls, hasPendingSubmission, recoveredSubmissions, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track: (task: AgentTaskView) => setTasks(old => old.some(item=>item.id===task.id)
     ? old.map(item=>mergeTaskUpdate(item,task))
     : [...old,task]) };
 }

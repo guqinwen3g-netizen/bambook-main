@@ -3,11 +3,12 @@
  * 触发一次做一次，不是目标驱动的长会话。规则只属于本人，权限不超过本人；需要确认的写入留提议后本次运行结束。
  * 记录与收件授权同样放在回执表，不进业务状态，也不经 MCP 或业务命令改动。
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { TokenPayload } from '../auth/service';
 import type { MistState } from '../shared/mistWorkspace';
 import {mistBusinessDate,shiftCalendarDay} from '../shared/mistBusinessClock';
 import { fail } from './errors';
+import type { TaskSourceRef } from './agentTaskVisibility';
 
 export const AUTOMATION_PREFIX = 'mist-revision:agent-automation:';
 export const AUTOMATION_HASH = 'mist-agent-automation:v1';
@@ -32,7 +33,7 @@ export type AutomationRecord = {
   halted?: { code: string; message: string }; removed?: boolean;
 };
 export type AutomationView = Pick<AutomationRecord, 'id' | 'name' | 'trigger' | 'time' | 'instructions' | 'enabled' | 'version' | 'createdAt' | 'updatedAt' | 'runs' | 'halted'>;
-export type AutomationJob = { workspaceId: string; id: string; authority: AutomationAuthority };
+export type AutomationJob = { workspaceId: string; id: string; version: number; authority: AutomationAuthority };
 export const automationView = (c: AutomationRecord): AutomationView => ({ id: c.id, name: c.name, trigger: c.trigger, time: c.time, instructions: c.instructions, enabled: c.enabled, version: c.version, createdAt: c.createdAt, updatedAt: c.updatedAt, runs: c.runs, ...(c.halted ? { halted: c.halted } : {}) });
 
 const key = (id: string) => { if (!/^[A-Za-z0-9-]{1,80}$/.test(id)) fail('INVALID_INPUT', '规则编号无效', 400); return AUTOMATION_PREFIX + id; };
@@ -49,9 +50,9 @@ export async function ownAutomation(db: any, actor: TokenPayload, workspaceId: s
   if (found.value.ownerId !== actor.userId || found.value.removed) fail('NOT_FOUND', '规则不存在', 404);
   return found;
 }
-export async function writeAutomation(db: any, row: any, previous: AutomationRecord, next: AutomationRecord) {
+export async function writeAutomation(db: any, row: any, previous: AutomationRecord, next: AutomationRecord, conflictCode = 'CONFLICT') {
   const update = await db.mistCommandReceipt.updateMany({ where: { id: row.id, workspaceId: next.workspaceId, inputHash: AUTOMATION_HASH, result: { path: [AUTOMATION_FIELD, 'version'], equals: previous.version } }, data: { result: { revision: 0, [AUTOMATION_FIELD]: next } } });
-  if (update.count !== 1) fail('CONFLICT', '规则已变化，请刷新后重试', 409);
+  if (update.count !== 1) fail(conflictCode, '规则已变化，请刷新后重试', 409);
 }
 export async function listAutomations(db: any, workspaceId: string, ownerId: string): Promise<AutomationRecord[]> {
   const rows = await db.mistCommandReceipt.findMany({ where: { workspaceId, actorId: ownerId, inputHash: AUTOMATION_HASH, requestId: { startsWith: AUTOMATION_PREFIX } } });
@@ -65,38 +66,117 @@ export function parseAutomationInput(input: Record<string, unknown>) {
   if (input.enabled !== undefined && typeof input.enabled !== 'boolean') fail('INVALID_INPUT', '启用状态无效', 400);
   return { name: text(input.name, '规则名称', 40), trigger, time: time as string, instructions: text(input.instructions, '要做什么', 2000), enabled: input.enabled !== false };
 }
+function guardAutomationVersion(rule: AutomationRecord, expectedVersion: unknown, required = false) {
+  if (expectedVersion === undefined && !required) return 'CONFLICT';
+  if (typeof expectedVersion !== 'number' || !Number.isSafeInteger(expectedVersion) || expectedVersion < 1)
+    fail('INVALID_INPUT', '规则版本无效', 400);
+  if (rule.version !== expectedVersion) fail('REVISION_CONFLICT', '规则已变化，请刷新后重试', 409);
+  return 'REVISION_CONFLICT';
+}
+
+function automationAuthority(actor: TokenPayload, now: number): AutomationAuthority {
+  return { ownerId: actor.userId, ...(actor.companyId ? { companyId: actor.companyId } : {}), issuedAt: now, ...(actor.credentialVersion ? { credentialVersion: actor.credentialVersion } : {}) };
+}
+
+function updatedAutomation(rule: AutomationRecord, settings: Partial<ReturnType<typeof parseAutomationInput>>, actor: TokenPayload, now: number): AutomationRecord {
+  const enabled = settings.enabled ?? rule.enabled;
+  const reset = settings.trigger !== undefined && rule.trigger !== settings.trigger;
+  return {
+    ...rule, ...settings, version: rule.version + 1, updatedAt: new Date(now).toISOString(),
+    authority: enabled ? automationAuthority(actor, now) : undefined, halted: undefined, failures: undefined,
+    // 改了触发条件就重新记起点，已有邮件和到账不算新事件。
+    ...(reset ? { seen: [], primed: false, lastDay: undefined, since: undefined } : {}),
+  };
+}
+
+export async function setAutomationEnabled(db: any, actor: TokenPayload, workspaceId: string, id: string, input: Record<string, unknown>, now: number) {
+  const { row, value: rule } = await ownAutomation(db, actor, workspaceId, id);
+  const conflict = guardAutomationVersion(rule, input.expectedVersion, true);
+  if (typeof input.enabled !== 'boolean') fail('INVALID_INPUT', '启用状态无效', 400);
+  const next = updatedAutomation(rule, { enabled: input.enabled as boolean }, actor, now);
+  await writeAutomation(db, row, rule, next, conflict);
+  return next;
+}
+
 export async function saveAutomation(db: any, actor: TokenPayload, workspaceId: string, id: string | undefined, input: Record<string, unknown>, now: number) {
   const fields = parseAutomationInput(input), at = new Date(now).toISOString();
-  const authority: AutomationAuthority = { ownerId: actor.userId, ...(actor.companyId ? { companyId: actor.companyId } : {}), issuedAt: now, ...(actor.credentialVersion ? { credentialVersion: actor.credentialVersion } : {}) };
   if (id) {
-    const { row, value: c } = await ownAutomation(db, actor, workspaceId, id);
-    // 改了触发条件就重新记起点，已有邮件和到账不算新事件。
-    const reset = c.trigger !== fields.trigger;
-    const next: AutomationRecord = { ...c, ...fields, version: c.version + 1, updatedAt: at, authority: fields.enabled ? authority : undefined, halted: undefined, failures: undefined, ...(reset ? { seen: [], primed: false, lastDay: undefined, since: undefined } : {}) };
-    await writeAutomation(db, row, c, next); return next;
+    const { row, value: rule } = await ownAutomation(db, actor, workspaceId, id);
+    const conflict = guardAutomationVersion(rule, input.expectedVersion);
+    const next = updatedAutomation(rule, fields, actor, now);
+    await writeAutomation(db, row, rule, next, conflict);
+    return next;
+  }
+  const authority = automationAuthority(actor, now);
+  // The scoped receipt stores the original intent separately from the live, editable rule.
+  const request = input.requestId === undefined ? undefined : AUTOMATION_PREFIX + 'create:'
+    + createHash('sha256').update(JSON.stringify([actor.userId, text(input.requestId, '操作编号', 116)])).digest('hex');
+  const inputHash = createHash('sha256').update(JSON.stringify(fields)).digest('hex');
+  if (request) {
+    const receipt = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: request } } });
+    if (receipt) {
+      if (receipt.workspaceId !== workspaceId || receipt.actorId !== actor.userId || typeof receipt.result?.id !== 'string')
+        fail('NOT_FOUND', '规则不存在', 404);
+      if (receipt.inputHash !== inputHash) fail('CONFLICT', '操作编号已用于其他规则', 409);
+      const { value: rule } = await automationRecord(db, workspaceId, receipt.result.id);
+      if (rule.ownerId !== actor.userId) fail('NOT_FOUND', '规则不存在', 404);
+      if (rule.removed) fail('AGENT_AUTOMATION_CREATED_RULE_GONE', '原规则已删除', 404);
+      return rule;
+    }
   }
   if ((await listAutomations(db, workspaceId, actor.userId)).length >= AUTOMATION_RULE_LIMIT) fail('PRECONDITION', `每人最多 ${AUTOMATION_RULE_LIMIT} 条规则`, 422);
   const c: AutomationRecord = { schemaVersion: 1, id: randomUUID(), workspaceId, ownerId: actor.userId, ownerName: actor.displayName || actor.userId, version: 1, ...fields, createdAt: at, updatedAt: at, ...(fields.enabled ? { authority } : {}), seen: [], primed: false, runs: [] };
   await db.mistCommandReceipt.create({ data: { id: randomUUID(), workspaceId, requestId: key(c.id), actorId: actor.userId, inputHash: AUTOMATION_HASH, expectedRevision: 0, result: { revision: 0, [AUTOMATION_FIELD]: c }, createdAt: new Date(now) } });
+  if (request) {
+    await db.mistCommandReceipt.create({ data: { id: randomUUID(), workspaceId, requestId: request, actorId: actor.userId,
+      inputHash, expectedRevision: 0, result: { revision: 0, id: c.id }, createdAt: new Date(now) } });
+  }
   return c;
 }
-export async function removeAutomation(db: any, actor: TokenPayload, workspaceId: string, id: string) {
+export async function removeAutomation(db: any, actor: TokenPayload, workspaceId: string, id: string, expectedVersion?: number) {
   // 回执记录不物理删除：标记移除后不再列出，也不再触发。
   const { row, value: c } = await ownAutomation(db, actor, workspaceId, id);
-  await writeAutomation(db, row, c, { ...c, version: c.version + 1, enabled: false, authority: undefined, removed: true });
+  const conflict = guardAutomationVersion(c, expectedVersion);
+  await writeAutomation(db, row, c, { ...c, version: c.version + 1, enabled: false, authority: undefined, removed: true }, conflict);
 }
-export async function dueAutomations(db: any, take: number): Promise<AutomationJob[]> {
-  const rows = await db.mistCommandReceipt.findMany({ where: { inputHash: AUTOMATION_HASH, requestId: { startsWith: AUTOMATION_PREFIX }, result: { path: [AUTOMATION_FIELD, 'enabled'], equals: true } }, take });
-  return rows.flatMap((row: any) => { const c = row.result?.[AUTOMATION_FIELD] as AutomationRecord; return c?.schemaVersion === 1 && c.enabled && c.authority && !c.halted && row.workspaceId === c.workspaceId && row.actorId === c.ownerId ? [{ workspaceId: c.workspaceId, id: c.id, authority: c.authority }] : []; });
+export async function dueAutomations(db: any, take: number, after?: string): Promise<{ jobs: AutomationJob[]; next?: string }> {
+  const rows = await db.mistCommandReceipt.findMany({
+    where: {
+      inputHash: AUTOMATION_HASH,
+      requestId: { startsWith: AUTOMATION_PREFIX },
+      result: { path: [AUTOMATION_FIELD, 'enabled'], equals: true },
+      ...(after ? { id: { gt: after } } : {}),
+    },
+    orderBy: { id: 'asc' },
+    take,
+  });
+  const jobs = rows.flatMap((row: any) => {
+    const rule = row.result?.[AUTOMATION_FIELD] as AutomationRecord;
+    return rule?.schemaVersion === 1 && rule.enabled && rule.authority && !rule.halted
+      && row.workspaceId === rule.workspaceId && row.actorId === rule.ownerId
+      ? [{ workspaceId: rule.workspaceId, id: rule.id, version: rule.version, authority: rule.authority }] : [];
+  });
+  // Advance past the last scanned row even when some rows have no valid grant.
+  return { jobs, next: rows.length === take ? rows.at(-1)?.id : undefined };
 }
 
 const SHANGHAI_CLOCK = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 const clock = (now: number) => SHANGHAI_CLOCK.format(new Date(now));
 const addDays = (day: string, days: number) => shiftCalendarDay(day, days);
-export type AutomationDecision = { next: Pick<AutomationRecord, 'seen' | 'primed' | 'lastDay' | 'since'>; fire?: { detail: string; facts: string } };
+export type AutomationDecision = { next: Pick<AutomationRecord, 'seen' | 'primed' | 'lastDay' | 'since'>; fire?: { detail: string; facts: string; sources: TaskSourceRef[] } };
+const fullFactSources = (path: string, items: Array<{ id: string }>): TaskSourceRef[] =>
+  items.map(({id}) => ({path, id, partial:false, coverage:[]}));
+const automationPosition = ({seen, primed, lastDay, since}: AutomationRecord): AutomationDecision['next'] =>
+  ({seen, primed, lastDay, since});
+
+export function shouldCommitAutomation(rule: AutomationRecord, decision: AutomationDecision, now: number) {
+  if (decision.fire) return !automationOverLimit(rule, now);
+  return Boolean(rule.failures) || JSON.stringify(decision.next) !== JSON.stringify(automationPosition(rule));
+}
+
 /** 只判断要不要触发。state 是规则所有者的权限投影，看不到的邮件和到账不会触发。 */
 export function evaluateAutomation(c: AutomationRecord, state: MistState, now: number): AutomationDecision {
-  const base = { seen: c.seen, primed: c.primed, lastDay: c.lastDay, since: c.since }, day = mistBusinessDate(new Date(now));
+  const base = automationPosition(c), day = mistBusinessDate(new Date(now));
   if (c.trigger === 'new_mail' || c.trigger === 'new_receipt') {
     const time = (v: unknown) => { const t = typeof v === 'string' ? Date.parse(v) : NaN; return Number.isFinite(t) ? t : 0; };
     const rows: Array<{ id: string; line: string; at: number }> = c.trigger === 'new_mail'
@@ -114,14 +194,18 @@ export function evaluateAutomation(c: AutomationRecord, state: MistState, now: n
     const seen = [...c.seen.filter(id => keep.has(id)), ...fresh.map(r => r.id)].slice(-SEEN_LIMIT);
     if (!fresh.length) return { next: seen.length === c.seen.length ? base : { ...base, seen } };
     const label = c.trigger === 'new_mail' ? '封新邮件' : '笔新到账';
-    return { next: { ...base, seen, since }, fire: { detail: `${fresh.length} ${label}`, facts: fresh.slice(0, FACT_LIMIT).map(r => r.line).join('\n') } };
+    const facts = fresh.slice(0, FACT_LIMIT);
+    return { next: { ...base, seen, since }, fire: { detail: `${fresh.length} ${label}`, facts: facts.map(r => r.line).join('\n'),
+      sources: fullFactSources(c.trigger === 'new_mail' ? 'email.messages' : 'receipts', facts) } };
   }
   if (c.lastDay === day || clock(now) < c.time) return { next: base };
   const next = { ...base, primed: true, lastDay: day };
-  if (c.trigger === 'daily') return { next, fire: { detail: '每日定时', facts: `业务日期：${day}` } };
+  if (c.trigger === 'daily') return { next, fire: { detail: '每日定时', facts: `业务日期：${day}`, sources:[] } };
   const limit = addDays(day, DUE_SOON_DAYS), orders = ((state as any).orders ?? []).filter((o: any) => typeof o.due === 'string' && o.due && o.due.slice(0, 10) <= limit && !ENDED_ORDER_STATES.includes(o.state));
   if (!orders.length) return { next };
-  return { next, fire: { detail: `${orders.length} 张订单交期临近`, facts: orders.slice(0, FACT_LIMIT).map((o: any) => `order ${o.id}：${o.code ?? ''} 交期 ${o.due}`).join('\n') } };
+  const facts = orders.slice(0, FACT_LIMIT);
+  return { next, fire: { detail: `${orders.length} 张订单交期临近`, facts: facts.map((o: any) => `order ${o.id}：${o.code ?? ''} 交期 ${o.due}`).join('\n'),
+    sources: fullFactSources('orders', facts) } };
 }
 export const automationInstructions = (c: AutomationRecord, facts: string) => `【自动规则：${c.name}】\n${c.instructions}\n\n【本次触发】\n${facts}`.slice(0, 4000);
 export function recordAutomationRun(c: AutomationRecord, decision: AutomationDecision, taskId: string | undefined, detail: string, now: number): AutomationRecord {

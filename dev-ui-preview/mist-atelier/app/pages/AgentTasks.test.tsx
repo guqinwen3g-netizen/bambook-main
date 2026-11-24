@@ -19,6 +19,67 @@ it('opens the exact notification task even when it is absent from the first list
  seam.routeId='older-task';seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/older-task')?{item:{...row(),id:'older-task',name:'核对旧交接',state:'waiting_human',questions:[{id:'q',question:'请提供书面交期。',askedAt:'2026-11-01T00:00:00Z'}]}}:url.includes('/history')?{items:[],nextCursor:null}:url.includes('agent-identities')?{items:[identity()]}:{items:[],nextCursor:null}));
  act(paint);await flush();const dialog=getByRole(document.body,'dialog',{name:'核对旧交接'});expect(dialog.textContent).toContain('请提供书面交期。');expect(getByRole(dialog,'button',{name:'补充资料'})).toBeTruthy();expect(seam.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
 });
+it('does not show list-cached instructions while checking fresh detail access',async()=>{
+ let receive!: (value:unknown)=>void;
+ const fresh=new Promise(resolve=>{receive=resolve;});
+ seam.api.mockImplementation((url:string)=>url.endsWith('/task')?fresh:Promise.resolve(url.includes('agent-identities')?{items:[identity()]}:url.includes('/history')?{items:[]}:{items:[row()],nextCursor:null}));
+ act(paint);await flush();await click(getByText(host,'核对邮件'));
+ expect(getByRole(document.body,'dialog').textContent).not.toContain(row().instructions);
+ await act(async()=>receive({item:{...row(),name:'Agent任务',state:'access_changed',instructions:''}}));await flush();
+ expect(getByRole(document.body,'dialog',{name:'Agent任务'}).textContent).toContain('权限已变化');
+});
+it('opens the exact notified task while its history has yet to respond',async()=>{
+ seam.routeId='task';
+ seam.api.mockImplementation((url:string)=>url.includes('/history')?new Promise(()=>{}):Promise.resolve(url.endsWith('/task')?{item:row()}:url.includes('agent-identities')?{items:[identity()]}:{items:[],nextCursor:null}));
+ act(paint);await flush();
+ expect(getByRole(document.body,'dialog',{name:'核对邮件'}).textContent).toContain(row().instructions);
+});
+it('makes the task list usable before connections or capabilities respond',async()=>{
+ seam.api.mockImplementation((url:string)=>{
+  if(url.includes('agent-identities')||url.endsWith('/agent-task-capabilities'))return new Promise(()=>{});
+  return Promise.resolve(url.endsWith('/task')?{item:row()}:url.includes('/history')?{items:[]}:{items:[row()],nextCursor:null});
+ });
+ act(paint);await flush();
+ expect((getByRole(host,'button',{name:'刷新'}) as HTMLButtonElement).disabled).toBe(false);
+ expect((getByRole(host,'button',{name:'新建任务'}) as HTMLButtonElement).disabled).toBe(true);
+ await click(getByText(host,'核对邮件'));
+ expect(getByRole(document.body,'dialog',{name:'核对邮件'}).textContent).toContain(row().instructions);
+});
+it('releases a stalled list at its deadline and retries it from the same page',async()=>{
+ vi.useFakeTimers();
+ try{
+  let reads=0,signal:AbortSignal|undefined;
+  seam.api.mockImplementation((url:string,init:any)=>{
+   if(url.endsWith('/agent-tasks')&&++reads===1){signal=init.signal;return new Promise(()=>{});}
+   return Promise.resolve(url.includes('agent-identities')?{items:[identity()]}:{items:[row()],nextCursor:null});
+  });
+  act(paint);await flush();await act(async()=>vi.advanceTimersByTimeAsync(8_000));
+  expect(signal?.aborted).toBe(true);
+  expect(host.textContent).toContain('任务列表读取超时');
+  await click(getByRole(host,'button',{name:'刷新'}));
+  expect(reads).toBe(2);expect(getByText(host,'核对邮件')).toBeTruthy();
+ }finally{vi.useRealTimers();}
+});
+it('retries the exact task after a detail timeout without showing list-cached content',async()=>{
+ vi.useFakeTimers();
+ try {
+  seam.routeId='task';
+  let attempts=0,firstSignal:AbortSignal|undefined;
+  seam.api.mockImplementation((url:string,init:any)=>{
+   if(url.endsWith('/task')&&++attempts===1){firstSignal=init.signal;return new Promise(()=>{});}
+   return Promise.resolve(url.endsWith('/task')?{item:row()}:url.includes('agent-identities')?{items:[identity()]}:url.includes('/history')?{items:[]}:{items:[row()],nextCursor:null});
+  });
+  act(paint);await flush();
+  await act(async()=>vi.advanceTimersByTimeAsync(8_000));
+  const timeout=getByRole(document.body,'dialog',{name:'任务'});
+  expect(timeout.textContent).toContain('任务详情读取超时');
+  expect(firstSignal?.aborted).toBe(true);
+  expect(timeout.textContent).not.toContain(row().instructions);
+  await click(getByRole(timeout,'button',{name:'重试'}));
+  expect(attempts).toBe(2);
+  expect(getByRole(document.body,'dialog',{name:'核对邮件'}).textContent).toContain(row().instructions);
+ } finally {vi.useRealTimers();}
+});
 it('shows a scheduled continuation with pause and stop controls without presenting a waiting task as running',async()=>{
  const waiting={...row(),state:'waiting_time',resumeAt:'2026-11-01T08:00:00Z'};seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:waiting}:url.includes('/history')?{items:[],nextCursor:null}:url.includes('agent-identities')?{items:[identity()]}:{items:[waiting],nextCursor:null}));act(paint);await flush();await click(getByText(host,'核对邮件'));const dialog=getByRole(document.body,'dialog',{name:'核对邮件'});expect(dialog.textContent).toContain('计划继续');expect(dialog.textContent).toContain('等待继续');expect(dialog.textContent).not.toContain('执行中');expect(getByRole(dialog,'button',{name:'暂停任务'})).toBeTruthy();expect(getByRole(dialog,'button',{name:'停止任务'})).toBeTruthy();expect(queryByRole(dialog,'button',{name:'继续任务'})).toBeNull();
 });
@@ -68,9 +129,37 @@ it('includes active owner connections beyond the first page',async()=>{
 });
 it('keeps the owner stop action reachable for a masked task without offering new execution',async()=>{
  const masked={...row(),name:'Agent任务',state:'access_changed',instructions:'',canControl:true};
- seam.api.mockImplementation((url:string,init:any)=>Promise.resolve(init?.method==='POST'?{item:{...masked,state:'cancelled',canControl:false}}:url.includes('agent-identities')?{items:[{...identity(),state:'invalid',canIssue:false,canRevoke:true}],nextCursor:null}:url.includes('/history')?{items:[],nextCursor:null}:url.endsWith('/task')?{item:masked}:{items:[masked],nextCursor:null}));
+ let current=masked;
+ seam.api.mockImplementation((url:string,init:any)=>{
+  if(init?.method==='POST')current={...masked,state:'cancelled',canControl:false};
+  return Promise.resolve(init?.method==='POST'||url.endsWith('/task')?{item:current}:url.includes('agent-identities')?{items:[{...identity(),state:'invalid',canIssue:false,canRevoke:true}],nextCursor:null}:url.includes('/history')?{items:[],nextCursor:null}:{items:[current],nextCursor:null});
+ });
  act(paint);await flush();expect((getByRole(host,'button',{name:'新建任务'}) as HTMLButtonElement).disabled).toBe(true);expect(getByRole(host,'button',{name:'新建任务'}).title).toBe('当前无AI使用权限');await click(getByText(host,'Agent任务'));expect(queryByRole(document.body,'button',{name:'连接Agent',exact:true})).toBeNull();expect(queryByRole(document.body,'button',{name:'继续任务'})).toBeNull();
+ const dialog=getByRole(document.body,'dialog',{name:'Agent任务'});
+ expect(dialog.textContent).toContain('权限已变化');
+ expect(dialog.textContent).not.toContain('可办理');
+ expect(queryByRole(dialog,'button',{name:'暂停任务'})).toBeNull();
  await click(getByRole(document.body,'button',{name:'停止任务',exact:true}));await click(getByRole(document.body,'button',{name:'确认',exact:true}));const writes=seam.api.mock.calls.filter(([,init])=>init?.method==='POST');expect(writes).toHaveLength(1);expect(writes[0][0]).toMatch(/\/task\/cancel$/);expect(JSON.parse(writes[0][1].body).version).toBe(masked.version);
+ expect(dialog.textContent).toContain('已停止');
+ expect(dialog.textContent).not.toContain('可办理');
+});
+it('applies the detail permission change even when refreshing connections fails',async()=>{
+ let current={...row(),executor:'platform'},connectionsUnavailable=false;
+ seam.api.mockImplementation((url:string)=>{
+  if(url.includes('agent-identities'))return connectionsUnavailable?Promise.reject(new Error('连接暂不可用')):Promise.resolve({items:[identity()]});
+  return Promise.resolve(url.includes('/history')?{items:[],nextCursor:null}:url.endsWith('/task')?{item:current}:{items:[current],nextCursor:null});
+ });
+ act(paint);await flush();await click(getByText(host,'核对邮件'));
+ expect(getByRole(document.body,'dialog',{name:'核对邮件'}).textContent).toContain('可办理');
+ current={...current,state:'access_changed',name:'Agent任务',instructions:''};
+ connectionsUnavailable=true;
+ await click(getByRole(host,'button',{name:'刷新'}));
+ const dialog=getByRole(document.body,'dialog',{name:'Agent任务'});
+ expect(dialog.textContent).toContain('权限已变化');
+ expect(dialog.textContent).not.toContain('可办理');
+ expect(dialog.textContent).not.toContain(row().instructions);
+ expect(host.textContent).not.toContain(row().name);
+ expect(getByRole(dialog,'button',{name:'停止任务'})).toBeTruthy();
 });
 it('shows missing facts distinctly and submits an owner answer without confirming business',async()=>{
  const question={id:'question',question:'请提供准确工厂交期及书面依据。',askedAt:'2026-11-01T00:10:00Z'},waiting={...row(),state:'waiting_human',questions:[question]};

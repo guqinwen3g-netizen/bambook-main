@@ -45,6 +45,46 @@ it('drops old account content and late responses immediately on a scope switch',
  let resolve!:(value:any)=>void;const request=vi.fn(()=>new Promise(done=>{resolve=done;}));await paint('sales:workspace',request);await paint('',request);expect(current.items).toEqual([]);
  await act(async()=>resolve({items:[notice()]}));expect(current.items).toEqual([]);expect(host.textContent).not.toContain('核对交期');
 });
+
+it('releases a hung reminder read without erasing the last authorized list',async()=>{
+ vi.useFakeTimers();
+ let late!:(result:unknown)=>void;
+ const first=notice();
+ const request=vi.fn().mockResolvedValueOnce({items:[first]}).mockImplementationOnce(()=>new Promise(resolve=>{late=resolve;}))
+  .mockResolvedValue({items:[first,notice('new')]});
+ await paint('sales:workspace',request);
+ await act(async()=>{void current.refresh();await vi.advanceTimersByTimeAsync(8_000);});
+ expect(current.loading).toBe(false);
+ expect(current.items).toEqual([first]);
+ expect(current.error).toBe('任务提醒读取超时');
+ await act(async()=>current.refresh());
+ await act(async()=>late({items:[]}));
+ expect(current.items).toEqual([first,notice('new')]);
+ expect(current.error).toBe('');
+ expect(sounds.play).toHaveBeenCalledTimes(1);
+});
+
+it('releases a hung read mark, reconciles with the list, and allows a user retry',async()=>{
+ vi.useFakeTimers();
+ let committed=false,writes=0;
+ const request=vi.fn(async(_path:string,init?:RequestInit)=>{
+  if(init?.method==='POST'){
+   if(++writes===1)return new Promise(()=>{});
+   committed=true;return {read:true};
+  }
+  return {items:[{...notice(),readAt:committed?'2026-11-01T00:01:00Z':null}]};
+ });
+ await paint('sales:workspace',request);
+ let marking!:Promise<void|Error>;
+ act(()=>{marking=current.read(current.items).catch(error=>error);});
+ await act(async()=>{await vi.advanceTimersByTimeAsync(8_000);});
+ expect(current.reading).toBe(false);
+ expect(await marking).toEqual(expect.objectContaining({message:'标记已读超时'}));
+ expect(writes).toBe(1);
+ expect(current.items[0].readAt).toBeNull();
+ await act(async()=>current.read(current.items));
+ expect(current.items[0].readAt).toBe('2026-11-01T00:01:00Z');
+});
 it('deduplicates sounds by stable owner and workspace rather than the changing request session',async()=>{
  let rows:AgentTaskNotice[]=[];const request=vi.fn(async()=>({items:rows}));await paint('request-1',request,'sales:company');rows=[notice()];await act(async()=>current.refresh());await paint('request-2',request,'sales:company');expect(sounds.play).toHaveBeenCalledTimes(1);rows=[notice(),notice('two')];await act(async()=>current.refresh());expect(sounds.mark.mock.calls.map(args=>args[0])).toEqual(['sales:company','sales:company']);
 });
@@ -61,5 +101,10 @@ it('does not clear a changed reminder on a stale acknowledgment, and rejects an 
 });
 it('clears stale content on a permission failure and does not expose a second account to a late read result',async()=>{
  let fail=false,resolve!:(value:any)=>void;const request=vi.fn(async(_path:string,init?:RequestInit)=>{if(init?.method==='POST')return new Promise(done=>{resolve=done;});if(fail)throw Object.assign(Error('无权查看'),{status:403});return{items:[notice()]};});await paint('sales:workspace',request);fail=true;await act(async()=>current.refresh());expect(current.items).toEqual([]);expect(current.error).toBe('无权查看');fail=false;await act(async()=>current.refresh());
- const source=current;let pending:Promise<void>;act(()=>{pending=source.read(source.items);});await paint('',request);await act(async()=>{resolve({read:true});await expect(pending!).rejects.toThrow('账号或公司已切换');});expect(current.items).toEqual([]);
+ const source=current;let pending!:Promise<void|Error>;
+ act(()=>{pending=source.read(source.items).catch(error=>error);});
+ await paint('',request);
+ await act(async()=>resolve({read:true}));
+ expect(await pending).toEqual(expect.objectContaining({message:'账号或公司已切换'}));
+ expect(current.items).toEqual([]);
 });
