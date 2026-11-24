@@ -34,6 +34,32 @@ it('opens the exact notified task while its history has yet to respond',async()=
  act(paint);await flush();
  expect(getByRole(document.body,'dialog',{name:'核对邮件'}).textContent).toContain(row().instructions);
 });
+it('makes the task list usable before connections or capabilities respond',async()=>{
+ seam.api.mockImplementation((url:string)=>{
+  if(url.includes('agent-identities')||url.endsWith('/agent-task-capabilities'))return new Promise(()=>{});
+  return Promise.resolve(url.endsWith('/task')?{item:row()}:url.includes('/history')?{items:[]}:{items:[row()],nextCursor:null});
+ });
+ act(paint);await flush();
+ expect((getByRole(host,'button',{name:'刷新'}) as HTMLButtonElement).disabled).toBe(false);
+ expect((getByRole(host,'button',{name:'新建任务'}) as HTMLButtonElement).disabled).toBe(true);
+ await click(getByText(host,'核对邮件'));
+ expect(getByRole(document.body,'dialog',{name:'核对邮件'}).textContent).toContain(row().instructions);
+});
+it('releases a stalled list at its deadline and retries it from the same page',async()=>{
+ vi.useFakeTimers();
+ try{
+  let reads=0,signal:AbortSignal|undefined;
+  seam.api.mockImplementation((url:string,init:any)=>{
+   if(url.endsWith('/agent-tasks')&&++reads===1){signal=init.signal;return new Promise(()=>{});}
+   return Promise.resolve(url.includes('agent-identities')?{items:[identity()]}:{items:[row()],nextCursor:null});
+  });
+  act(paint);await flush();await act(async()=>vi.advanceTimersByTimeAsync(8_000));
+  expect(signal?.aborted).toBe(true);
+  expect(host.textContent).toContain('任务列表读取超时');
+  await click(getByRole(host,'button',{name:'刷新'}));
+  expect(reads).toBe(2);expect(getByText(host,'核对邮件')).toBeTruthy();
+ }finally{vi.useRealTimers();}
+});
 it('retries the exact task after a detail timeout without showing list-cached content',async()=>{
  vi.useFakeTimers();
  try {
