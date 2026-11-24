@@ -28,15 +28,30 @@ export function parsePlatformTaskPlan(text:string):PlatformTaskPlan{
 export function newPlatformTaskStep(plan:PlatformTaskPlan,now:number):PlatformTaskStep{
   const id='platform_'+randomUUID();return{id,plan:{...plan,arguments:{...plan.arguments,...(plan.name==='bambook_execute'||plan.name==='bambook_task'&&plan.arguments.action!=='status'?{requestId:id}:{})}},at:new Date(now).toISOString()};
 }
-/** Only the platform runner expands this shorthand. It uses the latest successful window of the same file. */
-export function resolvePlatformFileContinuation(plan: PlatformTaskPlan, steps: PlatformTaskStep[]): PlatformTaskPlan {
-  const {fileId,cursor}=plan.arguments;
-  if(plan.name!=='bambook_file_text'||cursor!=='next'||typeof fileId!=='string')return plan;
-  const last=[...steps].reverse().find(step=>step.plan.name==='bambook_file_text'&&step.plan.arguments.fileId===fileId
-    &&step.result!==undefined&&!(step.result as {error?:boolean})?.error);
-  const result=last?.result as {hasMore?:boolean;nextCursor?:unknown}|undefined;
-  if(last?.compacted||result?.hasMore!==true||typeof result.nextCursor!=='string'||!result.nextCursor.startsWith('aft1.'))return plan;
-  return {...plan,arguments:{...plan.arguments,cursor:result.nextCursor}};
+export const PLATFORM_TASK_ATTACHMENT_PREFIX = 'attachment_';
+
+/** Attachment order remains fixed for a task, so these model-only handles survive a resume. */
+export function platformTaskAttachmentHandles(attachments: AgentTaskView['attachments'] = []): ReadonlyMap<string, string> {
+  return new Map(attachments.map((file, index) => [file.id, `${PLATFORM_TASK_ATTACHMENT_PREFIX}${index + 1}`]));
+}
+
+/** Restore the canonical file ID first, then resolve continuation from that exact file's latest successful read. */
+export function resolvePlatformFileContinuation(
+  plan: PlatformTaskPlan, steps: PlatformTaskStep[], handles?: ReadonlyMap<string, string>,
+): PlatformTaskPlan {
+  if (plan.name !== 'bambook_file_text' || typeof plan.arguments.fileId !== 'string') return plan;
+  const requestedId = plan.arguments.fileId;
+  const fileId = requestedId.startsWith(PLATFORM_TASK_ATTACHMENT_PREFIX)
+    ? [...(handles ?? [])].find(([, handle]) => handle === requestedId)?.[0]
+    : requestedId;
+  if (fileId === undefined) return plan;
+  const resolved = fileId === requestedId ? plan : { ...plan, arguments: { ...plan.arguments, fileId } };
+  if (resolved.arguments.cursor !== 'next') return resolved;
+  const last = [...steps].reverse().find(step => step.plan.name === 'bambook_file_text' && step.plan.arguments.fileId === fileId
+    && step.result !== undefined && !(step.result as { error?: boolean })?.error);
+  const result = last?.result as { hasMore?: boolean; nextCursor?: unknown } | undefined;
+  if (last?.compacted || result?.hasMore !== true || typeof result.nextCursor !== 'string' || !result.nextCursor.startsWith('aft1.')) return resolved;
+  return { ...resolved, arguments: { ...resolved.arguments, cursor: result.nextCursor } };
 }
 /** Label the amount scopes from one complete quotation read without calculating or refetching business values. */
 function quotationAmountScope(result: unknown) {
