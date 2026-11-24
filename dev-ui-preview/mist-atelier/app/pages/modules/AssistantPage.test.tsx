@@ -172,7 +172,7 @@ it('restores the request, order and original attachment of a failed task for rev
   }
 });
 
-it('uses the original attachment reference on a follow-up without uploading the file again', async () => {
+it.each([true,false])('finds and downloads an attached original with model availability %s', async available => {
   const original = {
     id: '00000000-0000-4000-8000-000000000041',
     identityId: 'personal', executor: 'platform', conversationId: 'c_attachment',
@@ -184,18 +184,21 @@ it('uses the original attachment reference on a follow-up without uploading the 
   mock.fetch.mockResolvedValue(response({ configured: true }));
   mock.api.mockImplementation(async (url: string, init?: RequestInit) => {
     if (url.includes('/agent-identities')) return { items: [{ id: 'personal', kind: 'personal', state: 'active' }] };
-    if (url.endsWith('/agent-task-capabilities')) return { platformAvailable: true };
+    if (url.endsWith('/agent-task-capabilities')) return { platformAvailable: available };
     if (init?.method === 'POST') return { item: { ...original, id: 'follow-up', instructions: '核对第一行表头' } };
     return { items: url.endsWith('/agent-tasks') ? [original] : [], nextCursor: null };
   });
   try {
+    mock.workspace.downloadTaskAttachment=vi.fn(async()=>{});
     await mount();
     await click('核对最初的附件');
-    await click('引用附件 quantity.xlsx');
-    await click('引用附件 quantity.xlsx');
-    expect(Array.from(host.querySelectorAll('button')).filter(button =>
-      button.getAttribute('aria-label') === '移除附件 quantity.xlsx')).toHaveLength(1);
-    await click('移除附件 quantity.xlsx');
+    if(available){
+      await click('引用附件 quantity.xlsx');
+      await click('引用附件 quantity.xlsx');
+      expect(Array.from(host.querySelectorAll('button')).filter(button =>
+        button.getAttribute('aria-label') === '移除附件 quantity.xlsx')).toHaveLength(1);
+      await click('移除附件 quantity.xlsx');
+    }
     await click('引用业务记录');
     const menu = document.querySelector('select[aria-label="检索对象"]') as HTMLSelectElement;
     await act(async () => {
@@ -210,8 +213,18 @@ it('uses the original attachment reference on a follow-up without uploading the 
     await enterSearch('missing');
     expect(document.body.textContent).toContain('没有匹配的附件');
     await enterSearch('QUANTITY');
-    const add = search.closest('[role="dialog"]')?.querySelector<HTMLButtonElement>('button[aria-label="引用附件 quantity.xlsx"]');
+    const picker=search.closest('[role="dialog"]');
+    const download=picker?.querySelector<HTMLButtonElement>('button[aria-label="下载原附件 quantity.xlsx"]');
+    expect(download).toBeTruthy();
+    await act(async()=>download!.click());
+    expect(mock.workspace.downloadTaskAttachment).toHaveBeenCalledExactlyOnceWith(original.id,original.attachments[0]);
+    const add = picker?.querySelector<HTMLButtonElement>('button[aria-label="引用附件 quantity.xlsx"]');
     expect(add).toBeTruthy();
+    if(!available){
+      expect(add!.disabled).toBe(true);
+      expect(mock.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+      return;
+    }
     await act(async () => add!.click());
     await click('关闭');
     await question('核对第一行表头');

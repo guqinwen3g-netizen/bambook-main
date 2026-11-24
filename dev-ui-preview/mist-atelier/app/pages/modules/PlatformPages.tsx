@@ -42,7 +42,7 @@ import { PlatformReportsPage, buildOrderProgress, buildReceivableAging, AGING_BU
 export { PlatformReportsPage as ReportsPage, buildCustomerSales, buildReceivableAging, buildOrderProgress } from './PlatformReports';
 import { XiaozhuTasks } from './XiaozhuTasks';
 import { XiaozhuAutomations } from './XiaozhuAutomations';
-import { XiaozhuThread, xiaozhuTaskStatusLabel } from './XiaozhuThread';
+import { DownloadOriginal, XiaozhuThread, xiaozhuTaskStatusLabel } from './XiaozhuThread';
 import { XiaozhuMoreHistory, TitleEditor, XiaozhuNav, XiaozhuProposalList, useAutomationRules } from './XiaozhuNav';
 import { AgentProposalDialog } from '../AgentProposalDialog';
 import { recordIndex } from '../../runtime/xiaozhuRecords';
@@ -239,7 +239,7 @@ export function AssistantPage(){
   };
   const pickingAttachments=kind==='attachments';
   const attachmentChoices=new Map<string,{task:AgentTaskView;file:TaskAttachment}>();
-  if(picker&&pickingAttachments&&cowork.available){
+  if(picker&&pickingAttachments){
     const keyword=query.trim().toLocaleLowerCase();
     for(const task of [...visibleTasks].reverse()){
       if(task.conversationId!==conversationId)continue;
@@ -248,6 +248,10 @@ export function AssistantPage(){
       }
     }
   }
+  const downloadAttachment=async(task:AgentTaskView,file:TaskAttachment)=>{
+    try { await w.downloadTaskAttachment(task.id,file); }
+    catch (problem) { if(live.current===scope)toast(problem instanceof Error?problem.message:uiText('附件读取失败'),'bad'); }
+  };
   const request=async(path:string,init:RequestInit={})=>{const result=await fetch(path,{...init,headers:{...apiService.getAuthHeaders(),...(init.headers as Record<string,string>??{})},credentials:'include'});const body=await result.json().catch(()=>null);if(!result.ok)throw new Error(body?.error?.message??body?.message??'助手请求未完成');if(!body)throw new Error('助手没有返回可核对的结果');return body;};
   const check=React.useCallback(async()=>{if(!w.workspace?.id)return;const epoch=++generation.current,bound=scope;setChecking(true);setError('');try{const result=await request('/api/mist/workspaces/'+encodeURIComponent(w.workspace.id)+'/assistant/status');const status=result.status??result;if(typeof status.configured!=='boolean')throw new Error('模型配置状态响应无效');if(live.current===bound&&generation.current===epoch)setConfiguration(status);}catch(e){if(live.current===bound&&generation.current===epoch)setError(e instanceof Error?e.message:'无法读取模型配置');}finally{if(live.current===bound&&generation.current===epoch)setChecking(false);}},[w.workspace?.id,scope]);
   React.useEffect(()=>{active.current?.abort();active.current=null;sendLock.current=false;generation.current++;setConfiguration(null);setError('');setBusy(false);setPicker(false);void check();return()=>{active.current?.abort();generation.current++;};},[scope,check]);
@@ -393,7 +397,7 @@ export function AssistantPage(){
         {canChat&&cowork.loading&&!hasThread?<div className="mist-xz-scroll"><div className="mist-xz-col mist-xz-loading" role="status" aria-label={uiText('正在读取对话')}><i/><i/><i/><i/></div></div>:hasThread?<>
           <div className="mist-xz-scroll" ref={scrollRef} onScroll={e=>{const el=e.currentTarget,near=el.scrollHeight-el.scrollTop-el.clientHeight<96;atBottomRef.current=near;setAtBottom(near);}}>
             <div className="mist-xz-col">
-              {useTaskThread?<XiaozhuThread tasks={visibleTasks} onDownloadAttachment={async(task,file)=>{try{await w.downloadTaskAttachment(task.id,file);}catch(problem){if(live.current===scope)toast(problem instanceof Error?problem.message:uiText("附件读取失败"),"bad");}}} controls={cowork.controls} composerStopTaskId={composerStopTask?.id} onReuseAttachment={cowork.available&&!busy&&!inCall?reuseAttachment:undefined} index={index} proposals={w.state?.agentProposals??[]} onOpenFile={fileId=>{const file=w.state?.files.find(f=>f.id===fileId);if(!file){toast(uiText('文件已不可见'),'bad');return;}void w.downloadFile(file).catch((e:Error)=>toast(e.message,'bad'));}} onAnswer={(t,id,text)=>void cowork.answer(t,id,text)} onCancel={t=>void cowork.cancel(t)} onRetry={cowork.available?retryTask:undefined} retryBlocked={retryBlocked} onCopy={text=>{void navigator.clipboard?.writeText(text).then(()=>toast(uiText('已复制')),()=>toast(uiText('复制失败，请手动选择文字'),'bad'));}} onDraft={text=>draft(text)} onAutomate={text=>{setAutomationSeed(text);setAutomations(true);}} onOpenRecord={(view,id,target)=>{if(view)w.go(view,id,target);}} onProposal={setProposalId} onDecide={decide}/>
+              {useTaskThread?<XiaozhuThread tasks={visibleTasks} onDownloadAttachment={downloadAttachment} controls={cowork.controls} composerStopTaskId={composerStopTask?.id} onReuseAttachment={cowork.available&&!busy&&!inCall?reuseAttachment:undefined} index={index} proposals={w.state?.agentProposals??[]} onOpenFile={fileId=>{const file=w.state?.files.find(f=>f.id===fileId);if(!file){toast(uiText('文件已不可见'),'bad');return;}void w.downloadFile(file).catch((e:Error)=>toast(e.message,'bad'));}} onAnswer={(t,id,text)=>void cowork.answer(t,id,text)} onCancel={t=>void cowork.cancel(t)} onRetry={cowork.available?retryTask:undefined} retryBlocked={retryBlocked} onCopy={text=>{void navigator.clipboard?.writeText(text).then(()=>toast(uiText('已复制')),()=>toast(uiText('复制失败，请手动选择文字'),'bad'));}} onDraft={text=>draft(text)} onAutomate={text=>{setAutomationSeed(text);setAutomations(true);}} onOpenRecord={(view,id,target)=>{if(view)w.go(view,id,target);}} onProposal={setProposalId} onDecide={decide}/>
               :<div className="mist-xz-thread">{messages.map((m,i)=>m.role==='user'?<div key={i} className="mist-xz-turn"><div className="mist-xz-user">{m.content}</div></div>:<div key={i} className="mist-xz-turn"><XiaozhuTurnShell><XiaozhuMarkdown text={m.content} index={index} onOpen={(view,id,target)=>w.go(view,id,target)}/>{m.truncated&&<p className="mist-xz-note">{uiText("回复较长，已截断。可缩小问题范围继续询问。")}</p>}
                 <div className="mist-xz-acts">{m.sources?.map(source=><Button key={source.id} size="sm" variant="quiet" iconRight={ArrowRight} onClick={()=>w.go(source.view,source.entityId)}>{uiText(source.label)}</Button>)}{canChat&&<Button size="sm" variant="quiet" icon={FileText} onClick={()=>draft(m.content)}>{uiText("保存草稿")}</Button>}</div></XiaozhuTurnShell></div>)}
                 {busy&&<div className="mist-xz-turn"><XiaozhuTurnShell><span className="mist-xz-shimmer" aria-label={uiText("小竹正在回复")}>{uiText('正在思考')}</span></XiaozhuTurnShell></div>}</div>}
@@ -426,11 +430,12 @@ export function AssistantPage(){
         const on=attachmentRefs.some(ref=>ref.fileId===file.id);
         return <div key={file.id} className="mist-chat-pick" data-on={on||undefined}>
           <div className="mist-chat-pick-t"><b>{file.name}</b><span>{task.name}</span></div>
-          <Button size="sm" variant={on?'secondary':'ai'} aria-pressed={on} aria-label={ui`${on?'移除附件':'引用附件'} ${file.name}`} disabled={busy}
+          <DownloadOriginal name={file.name} onDownload={()=>downloadAttachment(task,file)}/>
+          <Button size="sm" variant={on?'secondary':'ai'} aria-pressed={on} aria-label={ui`${on?'移除附件':'引用附件'} ${file.name}`} disabled={busy||!on&&!cowork.available}
             onClick={()=>{if(on){setAttachmentRefs(refs=>refs.filter(ref=>ref.fileId!==file.id));setError('');}else reuseAttachment(task,file);}}>{uiText(on?'移除附件':'加入问题')}</Button>
         </div>;
-      })}</div>:<EmptyState title={uiText(cowork.loading?'正在读取对话':!cowork.available?'任务服务暂不可用':cowork.hasMore?'已加载的对话中没有匹配附件':query.trim()?'没有匹配的附件':'此对话暂无附件')} compact/>}
-        {cowork.hasMore&&cowork.available&&<XiaozhuMoreHistory loading={cowork.loadingMore} error={cowork.moreError} onLoad={()=>void cowork.loadMore()}/>}
+      })}</div>:<EmptyState title={uiText(cowork.loading?'正在读取对话':cowork.hasMore?'已加载的对话中没有匹配附件':query.trim()?'没有匹配的附件':'此对话暂无附件')} compact/>}
+        {cowork.hasMore&&<XiaozhuMoreHistory loading={cowork.loadingMore} error={cowork.moreError} onLoad={()=>void cowork.loadMore()}/>}
       </>
        :w.loading?<EmptyState title={uiText("正在读取业务记录")} compact/>:data.length?<div className="mist-chat-picks">{data.map(r=>{const on=ids.includes(r.id);return <div key={r.id} className="mist-chat-pick" data-on={on||undefined}><div className="mist-chat-pick-t"><b>{uiText(r.label)}</b><span>{r.detail}</span></div><Button size="sm" variant="quiet" onClick={()=>w.go(r.view,r.entityId)}>{uiText("打开来源")}</Button><Button size="sm" variant={on?'secondary':'ai'} aria-pressed={on} aria-label={ui`${on?'移除来源':'加入问题'} ${r.label}`} disabled={busy||(!on&&selected.length>=12)} onClick={()=>toggle(r)}>{uiText(on?'移除来源':'加入问题')}</Button></div>;})}</div>:<EmptyState title={uiText(canReadSource?'没有匹配的记录':'无权查看此类记录')} description={uiText(canReadSource?'调整检索对象或关键词后再试。':'请切换检索对象，或联系管理员开通查看权限。')} compact/>}
     </Drawer>

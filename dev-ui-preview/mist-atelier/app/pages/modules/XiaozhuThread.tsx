@@ -113,7 +113,7 @@ export type ThreadActions = {
   onReuseAttachment?: (task: AgentTaskView, file: TaskAttachment) => void;
 };
 
-function DownloadOriginal({name, onDownload}: {name:string;onDownload:()=>Promise<void>}) {
+export function DownloadOriginal({name, onDownload}: {name:string;onDownload:()=>Promise<void>}) {
   const [busy,setBusy]=React.useState(false);
   const download=async()=>{
     if(busy)return;
