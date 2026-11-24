@@ -350,6 +350,135 @@ it('researches a PDF, workbook and image together with a selected order, keeping
  await f.human.post(f.base+'/personal-agent/tasks').field('task',JSON.stringify(payload)).attach('attachments',Buffer.from('changed'),'change.txt').expect(409);
 });
 
+it('explicitly reopens a prior attachment in the same conversation without creating another original', async () => {
+  const marker = 'only-in-the-original-worksheet-7319';
+  const model = vi.fn(async (input: LlmCompletionInput) => {
+    expect(input.messages[0].content).toContain(marker);
+    return tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '已重新读取指定原件' });
+  });
+  const f = await fixture(model);
+  f.worker.start(3_600_000);
+  const conversationId = 'conv_12345678';
+  const payload = { requestId: randomUUID(), name: '继续核对原件', instructions: '逐字核对原文件', conversationId };
+  const original = (await f.human.post(f.base + '/personal-agent/tasks')
+    .field('task', JSON.stringify(payload)).attach('attachments', Buffer.from(marker), 'source.txt').expect(201)).body.item;
+  await f.drain();
+  expect((await f.current(original.id)).state).toBe('succeeded');
+  const ref = { taskId: original.id, fileId: original.attachments[0].id };
+  const next = { ...payload, requestId: randomUUID(), attachmentRefs: [ref] };
+  const writes = vi.spyOn(MistPrivateFiles.prototype, 'write');
+
+  const followUp = (await f.human.post(f.base + '/personal-agent/tasks').send(next).expect(201)).body.item;
+  expect(followUp.attachments).toEqual(original.attachments);
+  const repeated = (await f.human.post(f.base + '/personal-agent/tasks').send(next).expect(201)).body.item;
+  expect(repeated.id).toBe(followUp.id);
+  await f.human.post(f.base + '/personal-agent/tasks').send({ ...next, attachmentRefs: [] }).expect(409);
+  expect(writes).not.toHaveBeenCalled();
+  await f.drain();
+  expect(await f.current(followUp.id)).toMatchObject({ state: 'succeeded', result: '已重新读取指定原件' });
+  expect(model).toHaveBeenCalledTimes(2);
+
+  const mixedRequest = { ...next, requestId: randomUUID() };
+  const mixed = (await f.human.post(f.base + '/personal-agent/tasks')
+    .field('task', JSON.stringify(mixedRequest))
+    .attach('attachments', Buffer.from('newly added'), 'new.txt').expect(201)).body.item;
+  expect(mixed.attachments.map((file: { name: string }) => file.name)).toEqual(['new.txt', 'source.txt']);
+  expect(writes).toHaveBeenCalledTimes(1);
+  const reborrowed = (await f.human.post(f.base + '/personal-agent/tasks').send({
+    ...next, requestId: randomUUID(), attachmentRefs: [{ taskId: mixed.id, fileId: ref.fileId }],
+  }).expect(201)).body.item;
+  expect(reborrowed.attachments).toEqual(original.attachments);
+  expect((await taskRecord(f.local.database, f.workspace.id, reborrowed.id)).value.attachmentOrigins).toEqual([ref]);
+  expect(writes).toHaveBeenCalledTimes(1);
+});
+
+it('rejects a missing or changed prior original before creating a follow-up', async () => {
+  const f = await fixture(async () => tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '已读取' }));
+  f.worker.start(3_600_000);
+  const payload = { requestId: randomUUID(), name: '资料', instructions: '核对原文件', conversationId: 'conv_12345678' };
+  const fileContent = Buffer.from('reference sample');
+  const item = (await f.human.post(f.base + '/personal-agent/tasks')
+    .field('task', JSON.stringify(payload)).attach('attachments', fileContent, 'source.txt').expect(201)).body.item;
+  const ref = { taskId: item.id, fileId: item.attachments[0].id };
+  const next = { ...payload, requestId: randomUUID(), attachmentRefs: [ref] };
+  const original = path.join(directory, 'files', f.workspace.id, ref.fileId);
+  const tampered = Buffer.from(fileContent);
+  tampered[0] ^= 255;
+  await writeFile(original, tampered);
+  await f.human.post(f.base + '/personal-agent/tasks').send(next).expect(409);
+  await rm(original);
+  await f.human.post(f.base + '/personal-agent/tasks').send(next).expect(404);
+  const tasks = (await f.human.get(f.base + '/agent-tasks').expect(200)).body.items;
+  expect(tasks.map((task: { id: string }) => task.id)).toEqual([item.id]);
+});
+
+it('rechecks a borrowed attachment for the worker and redacts completed follow-up details after source access changes', async () => {
+  const marker = 'source-access-check-marker-804';
+  let turn = 0;
+  const complete = vi.fn(async (_input: LlmCompletionInput) => {
+    if (++turn === 2) return tool('bambook_task', { action: 'checkpoint', summary: marker });
+    return tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: marker });
+  });
+  const f = await fixture(complete);
+  f.worker.start(3_600_000);
+  const orderId = f.workspace.state.orders[0].id;
+  const payload = { requestId: randomUUID(), name: '资料', instructions: '核对原文件', conversationId: 'conv_12345678' };
+  const item = (await f.human.post(f.base + '/personal-agent/tasks')
+    .field('task', JSON.stringify({ ...payload, intentRefs: [{ kind: 'orders', id: orderId }] }))
+    .attach('attachments', Buffer.from(marker), 'source.txt').expect(201)).body.item;
+  await f.drain();
+  expect(complete.mock.calls.at(0)?.[0].messages[0].content).toContain(marker);
+  const ref = { taskId: item.id, fileId: item.attachments[0].id };
+  const completedInput = { ...payload, requestId: randomUUID(), attachmentRefs: [ref] };
+  const completed = (await f.human.post(f.base + '/personal-agent/tasks').send(completedInput).expect(201)).body.item;
+  await f.drain();
+  expect(await f.current(completed.id)).toMatchObject({ result: marker, checkpoint: marker });
+  const downloadPath = (taskId: string) => f.base + '/agent-tasks/' + taskId + '/attachments/' + ref.fileId;
+  expect((await f.human.get(downloadPath(completed.id)).expect(200)).body).toEqual(Buffer.from(marker));
+  const callsBeforeRevocation = complete.mock.calls.length;
+  const followUp = (await f.human.post(f.base + '/personal-agent/tasks').send({
+    ...payload, requestId: randomUUID(), attachmentRefs: [ref],
+  }).expect(201)).body.item;
+  const originalRead = MistPrivateFiles.prototype.read;
+  let revokedWhileReading = false;
+  const duringRead = vi.spyOn(MistPrivateFiles.prototype, 'read').mockImplementation(async function (this: MistPrivateFiles, workspaceId, file) {
+    const bytes = await originalRead.call(this, workspaceId, file);
+    if (file.id === ref.fileId && !revokedWhileReading) {
+      await f.local.database.$transaction(async db => {
+        const workspace = await db.mistWorkspace.findUnique({ where: { id: f.workspace.id } });
+        await db.mistWorkspace.update({ where: { id: f.workspace.id }, data: { state: {
+          ...workspace.state, orders: workspace.state.orders.filter((order: { id: string }) => order.id !== orderId),
+        } } });
+      });
+      revokedWhileReading = true;
+    }
+    return bytes;
+  });
+  try {
+    await f.human.get(downloadPath(completed.id)).expect(404);
+    expect(revokedWhileReading).toBe(true);
+  } finally {
+    duringRead.mockRestore();
+  }
+  await f.human.get(downloadPath(item.id)).expect(404);
+  await f.human.get(downloadPath(completed.id)).expect(404);
+  expect((await f.current(item.id)).attachments).toBeUndefined();
+  const listed = (await f.human.get(f.base + '/agent-tasks').expect(200)).body.items.find((task: { id: string }) => task.id === completed.id);
+  const summary = (await f.human.get(f.base + '/agent-tasks/' + completed.id + '?summary=1').expect(200)).body.item;
+  const replayed = (await f.human.post(f.base + '/personal-agent/tasks').send(completedInput).expect(201)).body.item;
+  const recovered = (await f.human.get(f.base + '/personal-agent/tasks/receipt/' + completedInput.requestId).expect(200)).body.item;
+  for (const hidden of [await f.current(completed.id), listed, summary, replayed, recovered]) {
+    expect(hidden).toMatchObject({ id: completed.id, state: 'succeeded', result: '', checkpoint: '' });
+    expect(hidden.attachments).toBeUndefined();
+    expect(hidden.trail).toBeUndefined();
+  }
+  const reads = vi.spyOn(MistPrivateFiles.prototype, 'read');
+  await f.drain();
+  expect(reads.mock.calls.some(([, file]) => file.id === ref.fileId)).toBe(false);
+  expect(complete).toHaveBeenCalledTimes(callsBeforeRevocation);
+  expect((await taskRecord(f.local.database, f.workspace.id, followUp.id)).value.attachmentOrigins).toEqual([ref]);
+});
+
 it.each(['unchanged', 'removed', 'replaced'] as const)(
   'only reuses rendered task images after the original is verified again (%s)',
   async (change) => {

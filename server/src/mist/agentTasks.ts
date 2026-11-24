@@ -3,6 +3,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
 import { normalizeAgentTaskIntentRefs, type AgentTaskEvent, type AgentTaskQuestion, type AgentTaskView, type AgentTaskIntentRef } from '../shared/mistAgentTasks';
+import type { TaskAttachmentRef } from '../shared/mistTaskAttachments';
 import { taskIntentCeilingAllows } from './agentTaskIntentRefs';
 import { isAgentActor, type AgentActor } from './agentDelegation';
 import { identityRecord, assertServiceLease, serviceActorFromIdentity, type AgentServiceLease } from './agentIdentities';
@@ -34,6 +35,8 @@ const plain = (v: unknown, max: number, label: string, optional = false) => {
 };
 const rid = (v: unknown) => plain(v, 116, '操作编号');
 const id = (v: unknown) => { if (!uuid(v)) fail('INVALID_INPUT', '任务编号无效', 400); return v as string; };
+const taskCreationReceiptKey = (ownerId: string, requestId: string) =>
+  TASK_PREFIX + 'create:' + hash(ownerId + ':' + requestId).slice(0, 32);
 /** Date.parse normalizes impossible civil dates (e.g. November 31); never schedule from that guess. */
 function absoluteWaitTime(value: unknown): number {
   const parts = typeof value === 'string' && /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(?:Z|([+-])(\d{2}):(\d{2}))$/.exec(value);
@@ -56,6 +59,7 @@ export type TaskRecord = {
   credentialVersion?: string;
   scopeHash: string; sources: TaskSourceRef[]; intentRefs?:AgentTaskIntentRef[];
   attachments?: MistStoredFile[];
+  attachmentOrigins?: TaskAttachmentRef[];
   mode: 'read'|'operate';
   lastHeartbeatAt?:number;
   control?:{generation:string;hash:string;issuedAt:number};
@@ -87,6 +91,19 @@ function record(row: any, workspaceId: string): TaskRecord {
 export async function taskRecord(db: any, workspaceId: string, taskId: unknown) {
   const row = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: TASK_PREFIX + id(taskId) } } });
   return { row, value: record(row, workspaceId) };
+}
+
+export async function taskFromCreationReceipt(db: any, actor: TokenPayload, workspaceId: string, requestId: unknown) {
+  const key = taskCreationReceiptKey(actor.userId, rid(requestId));
+  const receipt = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: key } } });
+  if (receipt?.workspaceId !== workspaceId || receipt.actorId !== actor.userId || !uuid(receipt.result?.id))
+    fail('NOT_FOUND', '任务不存在或无权访问', 404);
+  const { value: task } = await taskRecord(db, workspaceId, receipt.result.id);
+  owner(actor, task);
+  if (task.executor !== 'platform' || task.automationId) fail('NOT_FOUND', '任务不存在或无权访问', 404);
+  const { value: identity } = await identityRecord(db, workspaceId, task.identityId);
+  if (identity.kind !== 'personal' || identity.ownerId !== actor.userId) fail('NOT_FOUND', '任务不存在或无权访问', 404);
+  return task;
 }
 export async function lockTaskRecord(db: any, workspaceId: string, taskId: unknown) {
   await db.$queryRawUnsafe('SELECT "id" FROM "MistCommandReceipt" WHERE "workspaceId" = $1::uuid AND "requestId" = $2 FOR UPDATE', workspaceId, TASK_PREFIX + id(taskId));
@@ -132,14 +149,14 @@ function replay(c: TaskRecord, action: string, requestId: string, input: unknown
   if (c.lastAction !== action || c.lastInputHash !== hash(JSON.stringify(input))) fail('CONFLICT', '操作编号已用于其他内容', 409);
   return true;
 }
-export async function createTask(db: any, actor: TokenPayload, workspaceId: string, input: Record<string, unknown>, now: number, scopeHash = taskScopeHash(), automationId?: string, trustedIntentRefs:AgentTaskIntentRef[] = [], attachments?: { fingerprint: unknown; save: () => Promise<MistStoredFile[]> }) {
+export async function createTask(db: any, actor: TokenPayload, workspaceId: string, input: Record<string, unknown>, now: number, scopeHash = taskScopeHash(), automationId?: string, trustedIntentRefs:AgentTaskIntentRef[] = [], attachments?: { fingerprint: unknown; save: () => Promise<{ files: MistStoredFile[]; origins?: TaskAttachmentRef[] }> }) {
   if (Object.keys(input).some(k => !['requestId', 'identityId', 'name', 'instructions','executor','locale','conversationId'].includes(k))||input.executor!==undefined&&!['platform','external'].includes(input.executor as string)||input.locale!==undefined&&input.executor!=='platform'||input.conversationId!==undefined&&(input.executor!=='platform'||typeof input.conversationId!=='string'||!/^[A-Za-z0-9_-]{8,64}$/.test(input.conversationId))) fail('INVALID_INPUT', '任务字段无效', 400);
   const requestId = rid(input.requestId), name = plain(input.name, 60, '任务名称'), instructions = plain(input.instructions, 4000, '任务内容');
   const { value: identity } = await identityRecord(db, workspaceId, id(input.identityId));
   if (identity.ownerId !== actor.userId || !identity.enabled || !identity.key || identity.key.revokedAt || identity.key.expiresAt <= now || identity.key.credentialVersion !== actor.credentialVersion) fail('PRECONDITION', '请先启用本人负责的Agent连接', 422);
   const key = identity.key!, ceiling = key.ceiling.filter(scope => hasScope(actor, scope as any));
   const intentRefs=normalizeAgentTaskIntentRefs(trustedIntentRefs);if(!taskIntentCeilingAllows(intentRefs,ceiling))fail('FORBIDDEN','当前Agent无权读取引用记录',403);
-  const request = TASK_PREFIX + 'create:' + hash(actor.userId + ':' + requestId).slice(0, 32);
+  const request = taskCreationReceiptKey(actor.userId, requestId);
   const previous = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: request } } });
   const locale=input.executor==='platform'?responseLocale(input.locale):undefined,inputHash = hash(JSON.stringify([identity.id, name, instructions,...(input.executor==='platform'?['platform',locale]:[]),...(input.conversationId?[input.conversationId]:[]),...(intentRefs.length?[['intentRefs',intentRefs]]:[]),...(attachments?[['attachments',attachments.fingerprint]]:[])]));
   if (previous) { if (previous.inputHash !== inputHash) fail('CONFLICT', '操作编号已用于其他任务', 409);const c=(await taskRecord(db, workspaceId, previous.result.id)).value;let valid=c.scopeHash===scopeHash;try{await assertTaskAuthority(db,actor,c,now);}catch(e){if(!(e instanceof MistApiError))throw e;valid=false;}return taskView(c, actor, now,valid); }
@@ -148,7 +165,11 @@ export async function createTask(db: any, actor: TokenPayload, workspaceId: stri
   if (input.executor === 'platform') assertDailyRoom(await agentDailyUsage(db, workspaceId, actor.userId, now), true);
   const taskId = randomUUID(), at = new Date(now).toISOString();
   const c: TaskRecord = { schemaVersion: 1, id: taskId, workspaceId, identityId: identity.id, identityName: identity.name, ownerId: actor.userId, ownerName: actor.displayName || actor.userId, name, instructions, state: 'queued', version: 1, controlVersion: 1, createdAt: at, updatedAt: at, expiresAt: Math.min(now + TASK_TTL, key.expiresAt), authority: { id: identity.id, workspaceId, hash: key.hash, ownerId: actor.userId, issuedAt: key.issuedAt, expiresAt: key.expiresAt }, ceiling, credentialVersion: actor.credentialVersion, scopeHash, sources: [], mode:key.mode, stepsUsed: 0, runtimeUsedMs: 0, checkpoint: '', result: '', waitingProposalIds: [], operations: [], lastRequestId: requestId, lastAction: 'created', lastInputHash: inputHash };
-  if(attachments)c.attachments=await attachments.save();
+  if(attachments){
+    const {files,origins}=await attachments.save();
+    c.attachments=files;
+    if(origins?.length)c.attachmentOrigins=origins;
+  }
   if(intentRefs.length)c.intentRefs=intentRefs.map(ref=>({...ref}));
   if(input.executor==='platform'){c.executor='platform';c.locale=locale;c.platform={steps:[],nextRunAt:0};}
   if(automationId)c.automationId=automationId;
@@ -496,7 +517,7 @@ export async function platformTaskUsage(db: any, workspaceId: string, month: str
   }
   return [...out.values()].sort((a, b) => b.modelTurns - a.modelTurns || a.ownerName.localeCompare(b.ownerName));
 }
-export async function listTasks(db: any, actor: TokenPayload, workspaceId: string, cursor: unknown, now: number, sourcesVisible: (c:TaskRecord)=>boolean = ()=>true) {
+export async function listTasks(db: any, actor: TokenPayload, workspaceId: string, cursor: unknown, now: number, sourcesVisible: (c:TaskRecord)=>boolean|Promise<boolean> = ()=>true) {
   const where: any = { workspaceId, actorId: actor.userId, inputHash: TASK_HASH };
   if ((actor as AgentActor).agentIdentity) where.AND = [{ result: { path: [TASK_FIELD, 'identityId'], equals: (actor as AgentActor).agentIdentity!.id } }];
   if (cursor !== undefined) {
@@ -510,7 +531,7 @@ export async function listTasks(db: any, actor: TokenPayload, workspaceId: strin
   for (const row of page) {
     const c = record(row, workspaceId); let valid = true;
     try { await assertTaskViewAuthority(db, actor, c, now); } catch (e) { if (!(e instanceof MistApiError)) throw e; valid = false; }
-    items.push(taskView(c, actor, now, valid&&sourcesVisible(c)));
+    items.push(taskView(c, actor, now, valid&&await sourcesVisible(c)));
   }
   return { items, nextCursor: rows.length > 30 && last ? Buffer.from(JSON.stringify({ at: new Date(last.createdAt).toISOString(), id: last.id })).toString('base64url') : null };
 }

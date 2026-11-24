@@ -1,11 +1,12 @@
 /** 小竹对话：请求、办理过程、结果、追问和待确认事项都在同一条对话里，不用离开页面。 */
 import React from 'react';
-import { ChevronRight, Copy, Download, FileText, RotateCcw, Zap, ShieldCheck, Search, PenLine, HelpCircle, Clock, Check, Square } from 'lucide-react';
+import { ChevronRight, Copy, Download, Eye, FileText, RotateCcw, Zap, ShieldCheck, Search, PenLine, HelpCircle, Clock, Check, Square, Link2 } from 'lucide-react';
 import { AIBadge, AssistantEyes, Button, Icon, IconButton, Pill, type Tone } from '../../../../../components/mist';
 import type { AgentTaskTrailItem, AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
+import type { TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
 import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../../server/src/shared/mistAgentProposals';
 import { ui, uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
-import { COWORK_ACTIVE, splitRequest } from '../../runtime/xiaozhuCowork';
+import { COWORK_ACTIVE, splitRequest, type TaskControlState } from '../../runtime/xiaozhuCowork';
 import type { RecordRef } from '../../runtime/xiaozhuRecords';
 import { commandRequiresSignature } from '../../runtime/signatureRules';
 import { XiaozhuMarkdown } from './XiaozhuMarkdown';
@@ -75,26 +76,80 @@ function Trail({ items, active, activeLabel, since, onOpen }: {
   </div>;
 }
 
-function Question({ task, onAnswer }: { task: AgentTaskView; onAnswer: (task: AgentTaskView, id: string, text: string) => void }) {
+function Question({ task, onAnswer, busy }: { task: AgentTaskView; onAnswer: (task: AgentTaskView, id: string, text: string) => void; busy?: boolean }) {
   const [text, setText] = React.useState('');
   const open = (task.questions ?? []).find(q => !q.answeredAt);
   if (!open || !task.canControl) return null;
-  const send = () => { if (text.trim()) { onAnswer(task, open.id, text); setText(''); } };
+  const send = () => { if (text.trim()&&!busy) onAnswer(task, open.id, text); };
   return <div className="mist-xz-card" data-tone="ask"><div className="mist-xz-card-h"><Icon icon={HelpCircle} size="sm" /><b>{uiText('小竹想先确认')}</b></div>
     <p>{open.question}</p>
-    <div className="mist-xz-answer"><input aria-label={uiText('回答小竹')} value={text} maxLength={2000} placeholder={uiText('输入回答')} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />
-      <Button size="sm" variant="ai" disabled={!text.trim()} onClick={send}>{uiText('回答')}</Button></div></div>;
+    <div className="mist-xz-answer"><input aria-label={uiText('回答小竹')} value={text} maxLength={2000} disabled={busy} placeholder={uiText('输入回答')} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />
+      <Button size="sm" variant="ai" loading={busy} disabled={busy||!text.trim()} onClick={send}>{uiText('回答')}</Button></div></div>;
 }
 
-function ProposalCard({ proposal, onOpen, onDecide }: { proposal: AgentProposal; onOpen: (id: string) => void; onDecide?: (id: string, confirm: boolean) => Promise<void> }) {
-  const risk = agentProposalRisk(proposal), quick = !!onDecide && risk !== 'high' && !commandRequiresSignature(proposal.command), [busy, setBusy] = React.useState(false);
-  const decide = async (confirm: boolean) => { if (!onDecide) return; setBusy(true); try { await onDecide(proposal.id, confirm); } finally { setBusy(false); } };
+function ProposalCard({ proposal, onOpen, onDecide, onRecover, blocked }: {
+  proposal: AgentProposal; onOpen: (id: string) => void; onDecide?: (id: string, confirm: boolean) => Promise<void>;
+  onRecover?: (id:string)=>Promise<void>; blocked?: boolean;
+}) {
+  const risk = agentProposalRisk(proposal);
+  const unavailable = !!proposal.taskBlocked || !!proposal.unavailable;
+  const quick = !!onDecide && risk === 'low' && !unavailable && !commandRequiresSignature(proposal.command);
+  const [busy, setBusy] = React.useState(false);
+  const decide = async (confirm:boolean) => {
+    if (!onDecide || blocked || busy) return;
+    setBusy(true);
+    try { await onDecide(proposal.id,confirm); } finally { setBusy(false); }
+  };
+  const recover=async()=>{
+    if(!onRecover||busy)return;
+    setBusy(true);
+    try { await onRecover(proposal.id); } finally { setBusy(false); }
+  };
   return <div className="mist-xz-card"><div className="mist-xz-card-h"><Icon icon={ShieldCheck} size="sm" /><b>{uiText('需要你确认')}</b><Pill tone={RISK_TONE[risk]}>{uiText(AGENT_RISK_LABEL[risk])}</Pill></div>
     <ul>{proposal.summary.slice(0, 5).map((line, i) => <li key={i}>{line}</li>)}</ul>
-    <div className="mist-row">{quick ? <><Button size="sm" variant="ai" loading={busy} disabled={busy} onClick={() => void decide(true)}>{uiText('确认执行')}</Button><Button size="sm" variant="quiet" disabled={busy} onClick={() => void decide(false)}>{uiText('拒绝')}</Button><span className="mist-spacer" /><Button size="sm" variant="quiet" disabled={busy} onClick={() => onOpen(proposal.id)}>{uiText('查看并确认')}</Button></> : <Button size="sm" variant="ai" onClick={() => onOpen(proposal.id)}>{uiText('查看并确认')}</Button>}</div></div>;
+    {unavailable&&<p role="status">{uiText(proposal.taskBlocked||'提议暂不可执行')}</p>}
+    {onRecover?<div className="mist-row">
+      <Pill tone="warn">{uiText('结果待核对')}</Pill>
+      <Button size="sm" variant="quiet" loading={busy} disabled={busy} onClick={()=>void recover()}>{uiText('核对原请求')}</Button>
+    </div>:<div className="mist-row">{quick ? <><Button size="sm" variant="ai" loading={busy} disabled={busy||blocked} onClick={() => void decide(true)}>{uiText('确认执行')}</Button><Button size="sm" variant="quiet" disabled={busy||blocked} onClick={() => void decide(false)}>{uiText('拒绝')}</Button><span className="mist-spacer" /><Button size="sm" variant="quiet" disabled={busy} onClick={() => onOpen(proposal.id)}>{uiText('查看并确认')}</Button></> : <Button size="sm" variant="ai" onClick={() => onOpen(proposal.id)}>{uiText(unavailable?'查看详情':'查看并确认')}</Button>}</div>}
+  </div>;
 }
 
-export type ThreadActions = { onAnswer: (task: AgentTaskView, id: string, text: string) => void; onCancel: (task: AgentTaskView) => void; onRetry?: (text: string) => void; onCopy: (text: string) => void; onDraft: (text: string) => void; onAutomate: (text: string) => void; onOpenRecord: OpenRecord; onProposal: (id: string) => void; onDecide?: (id: string, confirm: boolean) => Promise<void>; onOpenFile?: (fileId: string) => void };
+export type ThreadActions = {
+  onAnswer: (task: AgentTaskView, id: string, text: string) => void;
+  onCancel: (task: AgentTaskView) => void;
+  controls?: Record<string,TaskControlState>;
+  composerStopTaskId?: string;
+  onRetry?: (task: AgentTaskView) => void;
+  retryBlocked?: boolean;
+  onCopy: (text: string) => void;
+  onDraft: (text: string) => void;
+  onAutomate: (text: string) => void;
+  onOpenRecord: OpenRecord;
+  onProposal: (id: string) => void;
+  onDecide?: (id: string, confirm: boolean) => Promise<void>;
+  proposalsBlocked?: boolean;
+  pendingProposalId?: string;
+  onRecoverProposal?: (id:string)=>Promise<void>;
+  onOpenFile?: (fileId: string) => void;
+  onDownloadAttachment?: (task: AgentTaskView, file: TaskAttachment) => Promise<void>;
+  onPreviewAttachment?: (task: AgentTaskView, file: TaskAttachment) => void;
+  onReuseAttachment?: (task: AgentTaskView, file: TaskAttachment) => void;
+};
+
+export function PreviewOriginal({name,onPreview}: {name:string;onPreview:()=>void}) {
+  return <IconButton size="sm" icon={Eye} label={uiText('预览原附件')+' '+name} onClick={onPreview}/>;
+}
+
+export function DownloadOriginal({name, onDownload}: {name:string;onDownload:()=>Promise<void>}) {
+  const [busy,setBusy]=React.useState(false);
+  const download=async()=>{
+    if(busy)return;
+    setBusy(true);
+    try { await onDownload(); } finally { setBusy(false); }
+  };
+  return <IconButton size="sm" icon={Download} label={uiText(busy?'正在下载附件':'下载原附件')+' '+name} disabled={busy} onClick={()=>void download()}/>;
+}
 
 /** 本轮确认后生成的文件：放在回答下方，点开即下载。 */
 function ProducedFiles({ proposals, onOpen }: { proposals: AgentProposal[]; onOpen: (fileId: string) => void }) {
@@ -112,19 +167,27 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
   const multiDay = new Set(tasks.map(t => dayKey(t.createdAt))).size > 1;
   return <div className="mist-xz-thread">{tasks.map(t => {
     const day = dayKey(t.createdAt), divider = multiDay && day !== lastDay; lastDay = day;
-    const active = COWORK_ACTIVE.includes(t.state), asking = t.state === 'waiting_human' && (t.questions ?? []).some(q => !q.answeredAt);
+    const openQuestion = t.questions?.find(q=>!q.answeredAt);
+    const active = COWORK_ACTIVE.includes(t.state), asking = t.state === 'waiting_human' && !!openQuestion;
+    const control = actions.controls?.[t.id];
     const pending = t.waitingProposalIds.map(id => proposals.find(p => p.id === id && p.state === 'pending')).filter((p): p is AgentProposal => !!p);
     const produced = proposals.filter(p => p.taskId === t.id && p.state === 'confirmed' && p.produced && !p.unavailable);
     const request = splitRequest(t.instructions), done = !active && t.state !== 'waiting_human', working = active && !asking && !pending.length;
+    const retryable = done && !!request.trim() && t.state !== 'access_changed'
+      && (!t.attachments?.length || (!!t.conversationId && ['succeeded','failed','cancelled'].includes(t.state)));
     const activeLabel = t.state === 'queued' ? (t.executionIssue?.retryAt ? '模型重试中' : '待执行')
       : t.state === 'waiting_time' || t.state === 'waiting_condition' ? STATE[t.state][0]
       : t.executionStage === 'model' ? '正在等待模型' : undefined;
     const status = !active && t.state !== 'succeeded' ? <Pill tone={STATE[t.state][1]}>{uiText(STATE[t.state][0])}</Pill> : undefined;
-    return <div className="mist-xz-turn" key={t.id} data-task-state={t.state}>
+    return <div className="mist-xz-turn" key={t.id} data-task-state={t.state} data-task-id={t.id}>
       {divider && <div className="mist-xz-day"><span>{dayLabel(t.createdAt)}</span></div>}
       <div className="mist-xz-user">{request}
         {!!t.attachments?.length && <div className="mist-xz-sources" aria-label={uiText('附件')}>
-          {t.attachments.map(file => <span className="mist-xz-source" key={file.id} data-attachment><span title={file.name}>{file.name}</span></span>)}
+          {t.attachments.map(file => <span className="mist-xz-source" key={file.id} data-attachment><span title={file.name}>{file.name}</span>
+            {actions.onPreviewAttachment&&<PreviewOriginal name={file.name} onPreview={()=>actions.onPreviewAttachment?.(t,file)}/>}
+            {actions.onDownloadAttachment&&<DownloadOriginal name={file.name} onDownload={()=>actions.onDownloadAttachment!(t,file)}/>}
+            {actions.onReuseAttachment && t.conversationId && <IconButton size="sm" icon={Link2} label={uiText('引用附件')+' '+file.name} onClick={() => actions.onReuseAttachment?.(t,file)} />}
+          </span>)}
         </div>}
       </div>
       <XiaozhuTurnShell status={status}>
@@ -133,12 +196,16 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         {active && t.checkpoint && !t.result && !working && <p className="mist-xz-note">{t.checkpoint}</p>}
         {!active && t.state !== 'succeeded' && !t.result && t.checkpoint && <p className="mist-xz-note">{t.checkpoint}</p>}
         {!!produced.length && actions.onOpenFile && <ProducedFiles proposals={produced} onOpen={actions.onOpenFile} />}
-        {asking && <Question task={t} onAnswer={actions.onAnswer} />}
-        {pending.map(p => <ProposalCard key={p.id} proposal={p} onOpen={actions.onProposal} onDecide={actions.onDecide} />)}
+        {asking && <Question key={openQuestion?.id} task={t} onAnswer={actions.onAnswer} busy={control?.busy}/>}
+        {control?.error&&(active||t.state==='paused')&&<p className="mist-xz-note" role="status">{uiText(control.error)}</p>}
+        {pending.map(p => <ProposalCard key={p.id} proposal={p} onOpen={actions.onProposal} onDecide={actions.onDecide}
+          blocked={actions.proposalsBlocked} onRecover={actions.pendingProposalId===p.id?actions.onRecoverProposal:undefined}/>)}
         <div className="mist-xz-acts">
-          {/* 办理中的停止在输入框；等待中的任务在这里停。 */}{active && t.canControl && !['queued', 'running'].includes(t.state) && <Button size="sm" variant="quiet" icon={Square} onClick={() => actions.onCancel(t)}>{uiText('停止')}</Button>}
+          {active && t.canControl && actions.composerStopTaskId!==t.id && <Button size="sm" variant="quiet" icon={Square}
+            aria-label={t.name ? uiText('停止任务')+' '+t.name : undefined}
+            disabled={control?.busy} loading={control?.busy} onClick={() => actions.onCancel(t)}>{uiText('停止')}</Button>}
           {done && t.result && <><IconButton size="sm" icon={Copy} label={uiText('复制')} onClick={() => actions.onCopy(t.result)} /><IconButton size="sm" icon={FileText} label={uiText('保存草稿')} onClick={() => actions.onDraft(t.result)} /></>}
-          {done && !t.attachments?.length && actions.onRetry && <IconButton size="sm" icon={RotateCcw} label={uiText('重新提问')} onClick={() => actions.onRetry?.(request)} />}
+          {retryable && actions.onRetry && <IconButton size="sm" icon={RotateCcw} label={uiText('重新提问')} disabled={actions.retryBlocked} onClick={() => actions.onRetry?.(t)} />}
           {done && t.state === 'succeeded' && <IconButton size="sm" icon={Zap} label={uiText('设为自动规则')} onClick={() => actions.onAutomate(request)} />}
           {done && <time className="mist-xz-time" dateTime={t.updatedAt}>{clock(t.updatedAt || t.createdAt)}</time>}
         </div>

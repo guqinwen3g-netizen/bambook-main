@@ -11,7 +11,7 @@ import { useNav } from '../nav';
 import { useMistSession } from '../runtime/auth';
 import { useMistWorkspace, type MistCommandRecovery } from '../runtime/workspace';
 import { notificationPermissionView,visibleMistNotifications } from '../runtime/notificationPreferences';
-import {readAllMistNotices,readMistNotice} from '../runtime/agentTaskNotices';
+import {openMistNotice,opensOriginalAgentTask,readAllMistNotices} from '../runtime/agentTaskNotices';
 import { FailureNotice } from '../runtime/FailureNotice';
 
 export type NotificationTab = 'unread' | 'all';
@@ -57,10 +57,9 @@ export function NotificationsPage() {
   };
   const canOpen = (n: MistNotification) => !!n.target?.view && session.canAccessView(notificationPermissionView(n.target.view) as View);
   const open = (n: MistNotification) => {
-    if (busy) return;
+    if (busy&&!opensOriginalAgentTask(n)) return;
     clearFailure();
-    void readMistNotice(workspace,n)
-      .then(() => { if (canOpen(n)) go(n.target.view, n.target.id, n.target); }).catch(report);
+    void openMistNotice(workspace,n,target=>{if(canOpen(n))go(target.view,target.id,target);}).catch(report);
   };
   const readAll = () => { clearFailure(); void readAllMistNotices(workspace,visible).then(() => toast('已全部标为已读')).catch(report); };
   const columns: Column<MistNotification>[] = [
@@ -68,7 +67,7 @@ export function NotificationsPage() {
     { key: 'kind', header: '类型', width: '104px', hideOnMobile: true, render: n => <Pill tone={TONE[category(n)]}>{NOTIFICATION_CATEGORY_LABEL[category(n)]}</Pill> },
     { key: 'at', header: '时间', width: '120px', hideOnMobile: true, render: n => <span className="mist-num">{when(n.at)}</span> },
     { key: 'state', header: '状态', width: '88px', render: n => <Pill tone={n.readAt ? 'neutral' : 'warn'}>{uiText(n.readAt ? '已读' : '未读')}</Pill> },
-    { key: 'open', header: '', width: '96px', render: n => <Button size="sm" variant="quiet" iconRight={ArrowUpRight} disabled={busy || !canOpen(n)} title={uiText(canOpen(n) ? undefined : '当前账号没有该对象的查看权限')} onClick={event => { event.stopPropagation(); open(n); }}>{uiText(canOpen(n) ? '打开' : '无权限')}</Button> },
+    { key: 'open', header: '', width: '96px', render: n => <Button size="sm" variant="quiet" iconRight={ArrowUpRight} disabled={!canOpen(n)||(busy&&!opensOriginalAgentTask(n))} title={uiText(canOpen(n) ? undefined : '当前账号没有该对象的查看权限')} onClick={event => { event.stopPropagation(); open(n); }}>{uiText(canOpen(n) ? '打开' : '无权限')}</Button> },
   ];
   return <MistPage>
     <PageHeader eyebrow={uiText("我的事务 · 通知")} title={uiText("通知中心")}

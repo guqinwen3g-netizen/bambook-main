@@ -50,6 +50,27 @@ export function readMistNotice(workspace:MistWorkspaceContext,notice:MistNotific
  if(notice.id.startsWith('agent-task:')){const item=workspace.agentTaskNotices?.items.find(n=>n.id===notice.id);if(!item)return Promise.reject(Error('请刷新当前任务提醒'));return workspace.agentTaskNotices!.read([item]);}
  return workspace.run({type:'notification.read',payload:{id:notice.id}});
 }
+export function mistNoticeTarget(notice:MistNotification):MistNotification['target']{
+ const target=notice.target;
+ return opensOriginalAgentTask(notice)
+  ? {...target,section:'task-origin'} : target;
+}
+export function opensOriginalAgentTask(notice:MistNotification) {
+ const target=notice.target;
+ return notice.id.startsWith('agent-task:')&&target?.view==='assistant'&&target.section==='tasks'&&!!target.id;
+}
+
+export async function openMistNotice(workspace:MistWorkspaceContext,notice:MistNotification,open:(target:MistNotification['target'])=>void){
+ const target=mistNoticeTarget(notice);
+ if(opensOriginalAgentTask(notice)){
+  open(target);
+  try{await readMistNotice(workspace,notice);}
+  catch{throw Error('提醒未标为已读');}
+ }else{
+  await readMistNotice(workspace,notice);
+  if(target)open(target);
+ }
+}
 export async function readAllMistNotices(workspace:MistWorkspaceContext,visible:MistNotification[]):Promise<void>{
  const unread=visible.filter(n=>!n.readAt),ids=new Set(unread.map(n=>n.id)),personal=workspace.agentTaskNotices?.items.filter(n=>ids.has(n.id))??[];
  await Promise.all([...(unread.some(n=>!n.id.startsWith('agent-task:'))?[workspace.run({type:'notification.readAll',payload:{}})]:[]),...(personal.length?[workspace.agentTaskNotices!.read(personal)]:[])]);

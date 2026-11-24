@@ -15,6 +15,7 @@ it('selects or drops several files and opens business references with @ in the s
     await act(async () => root.render(<XiaozhuComposer value="" onChange={() => {}} onSend={send}
       ready={false} busy={false} sources={[]} onRemoveSource={() => {}} onAttach={reference}
       files={[]} onAddFiles={add} onRemoveFile={() => {}} voice={{ state: 'idle' } as any}
+      attachmentRefs={[]} onRemoveAttachmentRef={() => {}}
       voiceAvailable={false} field={{ current: null }} placeholder="向助手提问" />));
     const input = host.querySelector('input[type=file]') as HTMLInputElement;
     expect(input.multiple).toBe(true);

@@ -11,8 +11,270 @@ vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>mock.workspace,mist
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({sessionKey:mock.sessionKey,user:{id:'actor'},hasPermission:(scope:string)=>scope!=='orders:read'||mock.readOrders}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 vi.mock('../../../../../services/apiService',()=>({apiService:{getAuthHeaders:()=>({'X-Test-Auth':'authenticated'})}}));
 let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
-const view=(active=true, taskId?:string)=> <Nav.Provider value={{route:{view:'assistant',...(taskId?{section:'tasks',id:taskId}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
+const view=(active=true, taskId?:string,section='tasks')=> <Nav.Provider value={{route:{view:'assistant',...(taskId?{section,id:taskId}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
 const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
+
+it('opens the exact task from a reminder even when it was absent from the loaded conversation pages', async () => {
+  const archived={
+    id:'older-task',conversationId:'c_archived_origin',executor:'platform',identityId:'personal',
+    name:'核对旧订单',instructions:'核对旧订单',state:'waiting_human',canControl:true,waitingProposalIds:[],
+    questions:[{id:'question',question:'客户书面确认的交期是哪天？'}],
+    createdAt:'2026-11-20T01:00:00Z',updatedAt:'2026-11-20T01:00:00Z',
+  };
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async (url:string)=>{
+    if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    if(url.endsWith('/agent-tasks/older-task'))return {item:archived};
+    if(url.endsWith('/agent-conversations'))return {items:[{id:archived.conversationId,hidden:true}]};
+    return {items:[],nextCursor:null};
+  });
+  await mount();
+  await act(async()=>root!.render(view(true,'older-task','task-origin')));
+  expect(host.querySelector('[data-task-id="older-task"]')?.textContent).toContain('客户书面确认的交期是哪天？');
+  expect(host.querySelector('[aria-label="回答小竹"]')).toBeTruthy();
+  expect(mock.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+  expect(go).not.toHaveBeenCalled();
+});
+
+it('asks which running task to check before issuing a read-only status request', async () => {
+  const conversationId='c_status_choices';
+  const a={
+    id:'check-a',identityId:'personal',executor:'platform',conversationId,name:'核对订单 A',instructions:'核对订单 A',
+    state:'running',version:1,canControl:true,questions:[],waitingProposalIds:[],
+    createdAt:'2026-11-24T01:00:00Z',updatedAt:'2026-11-24T01:00:00Z',
+  };
+  const b={...a,id:'check-b',name:'核对订单 B',instructions:'核对订单 B',createdAt:'2026-11-24T01:01:00Z'};
+  let picked=false;
+  sessionStorage.setItem('mist.xiaozhu.conversation:session-a:workspace',conversationId);
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async (url:string)=>{
+    if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    if(url.endsWith('/check-a'))return {item:a};
+    if(url.endsWith('/check-b'))return {item:picked?{...b,state:'succeeded',version:2,result:'已核对 B'}:b};
+    return {items:url.endsWith('/agent-tasks')?[a,b]:[],nextCursor:null};
+  });
+  await mount();
+  await question('完成了吗？');
+  await click('发送');
+  expect(document.body.textContent).toContain('选择要核对的任务');
+  expect(host.querySelector('textarea')?.value).toBe('完成了吗？');
+  await click('关闭');
+  expect(host.querySelector('textarea')?.value).toBe('完成了吗？');
+  await click('发送');
+  const before=mock.api.mock.calls.length;
+  picked=true;
+  await click('核对状态 核对订单 B');
+  expect(mock.api.mock.calls.slice(before).some(([url])=>url.endsWith('/check-b'))).toBe(true);
+  expect(mock.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+  expect(host.textContent).toContain('核对订单 B · 已完成');
+  expect(host.querySelector('textarea')?.value).toBe('');
+});
+
+it('lets a user stop one of two running tasks without losing the unsent question', async () => {
+  const conversationId='c_parallel_stop';
+  const first={
+    id:'task-a',identityId:'personal',executor:'platform',conversationId,name:'任务 A',instructions:'任务 A',
+    state:'running',version:1,canControl:true,questions:[],waitingProposalIds:[],
+    createdAt:'2026-11-24T01:00:00Z',updatedAt:'2026-11-24T01:00:00Z',
+  };
+  const second={...first,id:'task-b',name:'任务 B',instructions:'任务 B',createdAt:'2026-11-24T01:01:00Z'};
+  let taskA=first;
+  sessionStorage.setItem('mist.xiaozhu.conversation:session-a:workspace',conversationId);
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async (url:string,init?:RequestInit)=>{
+    if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    if(url.endsWith('/task-a/cancel')&&init?.method==='POST'){
+      taskA={...taskA,state:'cancelled',version:2};
+      return {item:taskA};
+    }
+    if(url.endsWith('/task-a'))return {item:taskA};
+    if(url.endsWith('/task-b'))return {item:second};
+    return {items:url.endsWith('/agent-tasks')?[taskA,second]:[],nextCursor:null};
+  });
+  await mount();
+  expect(button('停止生成')).toBeUndefined();
+  expect(button('停止任务 任务 A')).toBeTruthy();
+  expect(button('停止任务 任务 B')).toBeTruthy();
+  await question('保留这份未提交的草稿');
+  await click('停止任务 任务 A');
+  expect(host.querySelector('[data-task-state="cancelled"]')?.textContent).toContain('任务 A');
+  expect(host.querySelector('[data-task-state="running"]')?.textContent).toContain('任务 B');
+  expect(host.querySelector('textarea')?.value).toBe('保留这份未提交的草稿');
+  expect(mock.api.mock.calls.filter(([,init])=>init?.method==='POST').map(([url])=>url)).toEqual([
+    '/api/mist/workspaces/workspace/agent-tasks/task-a/cancel',
+  ]);
+  await question('');
+  expect(button('停止生成')).toBeTruthy();
+  expect(button('停止任务 任务 B')).toBeUndefined();
+});
+
+it.each([
+  {case:'clears the matching draft for a recovered task',question:'核对原 PDF',found:true,after:''},
+  {case:'preserves a different draft when recovering a task',question:'正在写另一条问题',found:true,after:'正在写另一条问题'},
+  {case:'blocks a fileless resend while the attachment receipt is unknown',question:'核对原 PDF',found:false,after:'核对原 PDF'},
+])('$case', async ({question,found,after}) => {
+  const conversationId='c_reload_task';
+  const task = {
+    id:'recovered-task', identityId:'personal', executor:'platform', conversationId, instructions:'核对原 PDF',
+    state:'succeeded', result:'原 PDF 已核对', questions:[], waitingProposalIds:[], canControl:false,
+    createdAt:'2026-11-24T00:00:00Z', updatedAt:'2026-11-24T00:01:00Z',
+  };
+  const requestId='00000000-0000-4000-8000-000000000051';
+  sessionStorage.setItem('mist.xiaozhu.conversation:session-a:workspace',conversationId);
+  sessionStorage.setItem('mist.assistant.conversation:session-a:workspace',JSON.stringify({question,selected:[],messages:[]}));
+  sessionStorage.setItem('mist.xiaozhu.submissions:session-a:workspace',JSON.stringify([['fingerprint',{
+    requestId,instructions:task.instructions,locale:'zh-CN',draftKey:JSON.stringify([task.instructions,[]]),
+    conversationId,sourceConversationId:conversationId,hasAttachments:true,
+  }]]));
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async (url: string) => {
+    if (url.includes('/agent-identities')) return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    if (url.endsWith('/agent-task-capabilities')) return {platformAvailable:true};
+    if (url.endsWith('/personal-agent/tasks/receipt/'+requestId)) {
+      if (!found) throw Object.assign(new Error('没有原回执'),{status:404});
+      return {item:task};
+    }
+    return {items:[],nextCursor:null};
+  });
+  await mount();
+  if(found){
+    expect(host.textContent).toContain('已找回提交的任务');
+    expect(host.textContent).toContain('原 PDF 已核对');
+    expect(sessionStorage.getItem('mist.xiaozhu.submissions:session-a:workspace')).toBeNull();
+  }else{
+    expect(host.textContent).toContain('提交结果待核对');
+    await click('发送');
+    expect(host.textContent).toContain('请恢复原附件后重试');
+    expect(sessionStorage.getItem('mist.xiaozhu.submissions:session-a:workspace')).toContain(requestId);
+  }
+  expect(host.querySelector('textarea')?.value).toBe(after);
+  expect(mock.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+});
+
+it('restores the request, order and original attachment of a failed task for review before resending', async () => {
+  const failure = {
+    id: '00000000-0000-4000-8000-000000000047',
+    identityId: 'personal', executor: 'platform', conversationId: 'c_retry_file',
+    instructions: '核对原件\n（引用业务记录：SO-SELECTED · Fixture）',
+    state: 'failed', result: '读取暂时失败', questions: [], waitingProposalIds: [], canControl: false,
+    createdAt: '2026-11-24T00:00:00Z', updatedAt: '2026-11-24T00:01:00Z',
+    intentRefs: [{ kind: 'orders', id: 'order' }],
+    attachments: [{ id: '00000000-0000-4000-8000-000000000048', name: 'delivery.pdf', size: 42 }],
+  };
+  mock.fetch.mockResolvedValue(response({ configured: true }));
+  mock.api.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.includes('/agent-identities')) return { items: [{ id: 'personal', kind: 'personal', state: 'active' }] };
+    if (url.endsWith('/agent-task-capabilities')) return { platformAvailable: true };
+    if (init?.method === 'POST') return { item: { ...failure, id: 'retried', state: 'succeeded', result: '原件已读回' } };
+    return { items: url.endsWith('/agent-tasks') ? [failure] : [], nextCursor: null };
+  });
+  try {
+    await mount();
+    await click('核对原件');
+    await question('另一条尚未提交的问题');
+    expect(button('重新提问')?.disabled).toBe(true);
+    await question('');
+    await click('重新提问');
+    expect(host.querySelector('textarea')?.value).toBe('核对原件');
+    expect(button('移除 SO-SELECTED · Fixture')).toBeTruthy();
+    expect(button('移除附件 delivery.pdf')).toBeTruthy();
+    expect(mock.api.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+    await click('发送');
+    const [, init] = mock.api.mock.calls.find(([, opts]) => opts?.method === 'POST')!;
+    expect(JSON.parse(init.body)).toMatchObject({
+      conversationId: failure.conversationId,
+      instructions: failure.instructions,
+      intentRefs: failure.intentRefs,
+      attachmentRefs: [{ taskId: failure.id, fileId: failure.attachments[0].id }],
+    });
+  } finally {
+    localStorage.removeItem('mist.xiaozhu.conversation:session-a:workspace');
+  }
+});
+
+it.each([true,false])('finds and downloads an attached original with model availability %s', async available => {
+  const original = {
+    id: '00000000-0000-4000-8000-000000000041',
+    identityId: 'personal', executor: 'platform', conversationId: 'c_attachment',
+    instructions: '核对最初的附件', state: 'succeeded', result: '资料已读取',
+    questions: [], waitingProposalIds: [], canControl: false,
+    createdAt: '2026-11-24T00:00:00Z', updatedAt: '2026-11-24T00:01:00Z',
+    attachments: [{ id: '00000000-0000-4000-8000-000000000042', name: 'quantity.xlsx', size: 42 }],
+  };
+  mock.fetch.mockResolvedValue(response({ configured: true }));
+  mock.api.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.includes('/agent-identities')) return { items: [{ id: 'personal', kind: 'personal', state: 'active' }] };
+    if (url.endsWith('/agent-task-capabilities')) return { platformAvailable: available };
+    if (init?.method === 'POST') return { item: { ...original, id: 'follow-up', instructions: '核对第一行表头' } };
+    return { items: url.endsWith('/agent-tasks') ? [original] : [], nextCursor: null };
+  });
+  try {
+    mock.workspace.downloadTaskAttachment=vi.fn(async()=>{});
+    mock.workspace.readTaskAttachment=vi.fn(()=>new Promise<Blob>(()=>{}));
+    await mount();
+    await click('核对最初的附件');
+    if(available){
+      await click('引用附件 quantity.xlsx');
+      await click('引用附件 quantity.xlsx');
+      expect(Array.from(host.querySelectorAll('button')).filter(button =>
+        button.getAttribute('aria-label') === '移除附件 quantity.xlsx')).toHaveLength(1);
+      await click('移除附件 quantity.xlsx');
+    }
+    await click('引用业务记录');
+    const menu = document.querySelector('select[aria-label="检索对象"]') as HTMLSelectElement;
+    await act(async () => {
+      menu.value = 'attachments';
+      menu.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const search = document.querySelector('input[aria-label="附件文件名"]') as HTMLInputElement;
+    const enterSearch = async (value: string) => act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, value);
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await enterSearch('missing');
+    expect(document.body.textContent).toContain('没有匹配的附件');
+    await enterSearch('QUANTITY');
+    const picker=search.closest('[role="dialog"]');
+    const preview=picker?.querySelector<HTMLButtonElement>('button[aria-label="预览原附件 quantity.xlsx"]');
+    expect(preview).toBeTruthy();
+    await act(async()=>preview!.click());
+    const viewer=document.querySelector('[data-file-preview="'+original.attachments[0].id+'"]');
+    expect(viewer).toBeTruthy();
+    expect(mock.workspace.readTaskAttachment).toHaveBeenCalledExactlyOnceWith(original.id,original.attachments[0]);
+    expect(mock.workspace.downloadTaskAttachment).not.toHaveBeenCalled();
+    await act(async()=>viewer!.querySelector<HTMLButtonElement>('button[aria-label="关闭"]')!.click());
+    expect(document.querySelector('[data-file-preview]')).toBeNull();
+    expect(search.value).toBe('QUANTITY');
+    const download=picker?.querySelector<HTMLButtonElement>('button[aria-label="下载原附件 quantity.xlsx"]');
+    expect(download).toBeTruthy();
+    await act(async()=>download!.click());
+    expect(mock.workspace.downloadTaskAttachment).toHaveBeenCalledExactlyOnceWith(original.id,original.attachments[0]);
+    const add = picker?.querySelector<HTMLButtonElement>('button[aria-label="引用附件 quantity.xlsx"]');
+    expect(add).toBeTruthy();
+    if(!available){
+      expect(add!.disabled).toBe(true);
+      expect(mock.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+      return;
+    }
+    await act(async () => add!.click());
+    await click('关闭');
+    await question('核对第一行表头');
+    await click('发送');
+    const [path, init] = mock.api.mock.calls.find(([, opts]) => opts?.method === 'POST')!;
+    expect(path).toMatch(/\/personal-agent\/tasks$/);
+    expect(typeof init.body).toBe('string');
+    expect(JSON.parse(init.body)).toMatchObject({
+      conversationId: original.conversationId,
+      attachmentRefs: [{ taskId: original.id, fileId: original.attachments[0].id }],
+    });
+    expect(button('移除附件 quantity.xlsx')).toBeUndefined();
+  } finally {
+    localStorage.removeItem('mist.xiaozhu.conversation:session-a:workspace');
+  }
+});
 
 it('keeps an unsent question, references and files with their own conversation', async () => {
   const first = {
