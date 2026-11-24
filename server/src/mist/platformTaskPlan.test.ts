@@ -70,3 +70,27 @@ it('uses the last verified continuation for the same file and only exposes a sho
  const done={...newPlatformTaskStep(next('first'),4),result:{hasMore:false}};
  expect(resolvePlatformFileContinuation(next('first'),[first,other,done])).toEqual(next('first'));
 });
+
+it('identifies the full quotation amount and the exact converted line amounts in a complete read', () => {
+  const plan={name:'bambook_get',arguments:{type:'quotation',id:'quote'}};
+  const object={type:'quotation',id:'quote',label:'QT-8',truncated:false,data:{
+    currency:'EUR',total:'28158.00',lines:[
+      {amount:'78.00',conversion:{orderId:'batch-a',orderCode:'SO-A'}},
+      {amount:'28080.00',conversion:{orderId:'batch-b',orderCode:'SO-B'}},
+      {amount:'0.00'},
+    ],
+  }};
+  const complete={...newPlatformTaskStep(plan,0),result:{revision:4,object}};
+  const duplicate={...newPlatformTaskStep(plan,1),result:complete.result};
+  const incomplete={...newPlatformTaskStep(plan,2),result:{revision:4,object:{...object,truncated:true}}};
+  const compacted={...newPlatformTaskStep(plan,3),result:complete.result,compacted:true};
+  const recent=platformTaskHistory([complete,duplicate,incomplete,compacted]).recent;
+  expect(recent[0]).not.toHaveProperty('quotationAmountScope');
+  expect(recent[1]).toMatchObject({quotationAmountScope:{currency:'EUR',fullQuotationTotal:'28158.00',convertedLines:[
+    {lineNumber:1,orderCode:'SO-A',quotationLineAmount:'78.00'},
+    {lineNumber:2,orderCode:'SO-B',quotationLineAmount:'28080.00'},
+  ]}});
+  expect(recent[2]).not.toHaveProperty('quotationAmountScope');
+  expect(recent[3]).not.toHaveProperty('quotationAmountScope');
+  expect(complete.result.object.data).toEqual(object.data);
+});
