@@ -1,3 +1,4 @@
+import {withRequestDeadline} from './requestDeadline';
 /**
  * 小竹的 cowork（2026-11-07 定案）：对话里的每一条请求就是一项交给小竹的平台任务，
  * 小竹经平台 AI 与 MCP 业务工具办理，进度、追问和待确认事项回到同一条对话里；对话由服务端任务记录承载，换设备也在。
@@ -106,24 +107,6 @@ const TASK_SEND_TIMEOUT_MS = 45_000;
 const UPLOAD_BYTES_PER_SECOND = 64 * 1024;
 const TASK_RETRY_INTERVAL_MS = 1000;
 const TASK_RETRY_MAX_MS = 8000;
-
-async function withRequestDeadline<T>(controller: AbortController, timeout: number, message: string, read: (signal: AbortSignal) => Promise<T>): Promise<T> {
-  const { signal } = controller;
-  signal.throwIfAborted();
-  const timer = window.setTimeout(() => controller.abort(new Error(message)), timeout);
-  let onAbort: () => void = () => {};
-  // Release the read slot even if the request or response processing does not settle after abort.
-  const interrupted = new Promise<never>((_, reject) => {
-    onAbort = () => reject(signal.reason);
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
-  try {
-    return await Promise.race([read(signal), interrupted]);
-  } finally {
-    window.clearTimeout(timer);
-    signal.removeEventListener('abort', onAbort);
-  }
-}
 
 async function readCoworkTask(base: string, id: string, signal: AbortSignal): Promise<AgentTaskView> {
   signal.throwIfAborted();

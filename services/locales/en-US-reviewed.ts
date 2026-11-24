@@ -614,6 +614,8 @@ export const reviewedEnglish: Record<string, string> = {
   '重试原操作':'Retry original action',
   '正在查找原对话':'Finding the original conversation',
   '提醒未标为已读':'The reminder was not marked read',
+  '任务提醒读取超时':'Loading task reminders timed out',
+  '标记已读超时':'Marking reminders as read timed out',
   '打开任务详情':'Open task details',
   '停止结果未确认，可重试':'Stop not confirmed. Try again.',
   '回答未确认，可重试':'Answer not confirmed. Try again.',
