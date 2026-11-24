@@ -68,6 +68,57 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     expect(invalid.structuredContent).toBeUndefined();
   });
 
+  it('reads the exact converted line at the end of a long quotation through MCP', async () => {
+    const local = createMistLocalRuntime({ directory });
+    const app = createMistServer(undefined, { local });
+    const { rpc, workspace, tool } = await as(app, 'local-operator', 'read');
+    const schema = (await rpc('tools/list')).result.tools.find((entry: any) => entry.name === 'bambook_get').inputSchema;
+    expect(schema.properties.orderId).toMatchObject({ type: 'string' });
+    expect(taskMcpTools().find(entry => entry.name === 'bambook_get')!.inputSchema.properties).toMatchObject({ orderId: schema.properties.orderId });
+
+    const state = structuredClone(workspace.state);
+    const quote = state.market.quotations.find((row: any) => row.code === 'QT-2026-0002');
+    const target = state.orders.find((order: any) => order.id === quote.convertedOrderId);
+    const first = state.orders.find((order: any) => order.id !== target.id);
+    const last = quote.lines[0];
+    quote.lines = [
+      ...Array.from({ length: 79 }, (_, index) => ({
+        ...last, id: randomUUID(), name: 'other-order-row-' + index, specification: 'private-other-row '.repeat(80),
+        conversion: { ...last.conversion, orderId: first.id, orderCode: first.code },
+      })), last,
+    ];
+    quote.convertedOrderId = first.id;
+    await local.database.$transaction(db => db.mistWorkspace.update({ where: { id: workspace.id }, data: { state } }));
+
+    const args = { workspaceId: workspace.id, type: 'quotation', id: quote.id };
+    const full = (await tool('bambook_get', args)).structuredContent.object;
+    expect(full.truncated).toBe(true);
+    expect(JSON.stringify(full)).not.toContain(last.id);
+
+    const scoped = (await tool('bambook_get', { ...args, orderId: target.id })).structuredContent.object;
+    expect(scoped).toMatchObject({
+      id: quote.id, truncated: true,
+      data: { id: quote.id, total: quote.total, currency: quote.currency, paymentTerms: quote.paymentTerms },
+      orderConversion: {
+        order: { type: 'order', id: target.id }, matchingLineCount: 1, truncated: false,
+        lines: [{ lineNumber: 80, quotationLineId: last.id, quotationLineAmount: last.amount }],
+      },
+    });
+    expect(JSON.stringify(scoped)).not.toContain('private-other-row');
+    expect(JSON.stringify(scoped)).not.toContain(first.id);
+    expect(JSON.stringify(scoped).length).toBeLessThan(16_000);
+
+    for (const invalid of [
+      { ...args, orderId: 'missing-order' },
+      { ...args, orderId: target.id, type: 'order', id: target.id },
+      { ...args, lineOffset: 0 },
+    ]) {
+      const result = await tool('bambook_get', invalid);
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toBeUndefined();
+    }
+  });
+
   it('rejects missing or invalid operation IDs before writing and rejects reusing an ID for different input', async () => {
     const app = createMistServer(undefined, { local: createMistLocalRuntime({ directory }) });
     const { client, workspace, rpc, tool } = await as(app, 'demo-buyer');
