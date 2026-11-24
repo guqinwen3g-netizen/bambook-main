@@ -218,6 +218,33 @@ it('restores the request, order and original attachment of a failed task for rev
   }
 });
 
+it('retains the original submission key when checking finds no receipt and the user resends',async()=>{
+ const posts:any[]=[];
+ mock.fetch.mockResolvedValue(response({configured:true}));
+ mock.api.mockImplementation(async(url:string, init:any)=>{
+  if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+  if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+  if(url.includes('/personal-agent/tasks/receipt/')){
+   expect(url.endsWith(posts[0].requestId)).toBe(true);
+   throw Object.assign(new Error('原回执不存在'),{status:404});
+  }
+  if(init?.method==='POST'&&url.endsWith('/personal-agent/tasks')){
+   posts.push(JSON.parse(init.body));
+   if(posts.length===1)throw new Error('请求在落库前断开');
+   return {item:{id:'retried-original',identityId:'personal',executor:'platform',conversationId:posts[0].conversationId,name:'原问题',instructions:posts[0].instructions,state:'succeeded',result:'原问题已处理',createdAt:'2026-11-24T00:00:00Z',updatedAt:'2026-11-24T00:01:00Z',questions:[],waitingProposalIds:[]}};
+  }
+  return {items:[],nextCursor:null};
+ });
+ await mount();await question('原问题');await click('发送');await click('核对提交结果');
+ expect(host.textContent).toContain('暂未查到原提交回执');
+ expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('原问题');
+ expect(posts).toHaveLength(1);
+ await click('发送');
+ expect(posts).toHaveLength(2);expect(posts[1]).toEqual(posts[0]);
+ expect(host.textContent).toContain('原问题已处理');
+ expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('');
+});
+
 it.each([true,false])('finds and downloads an attached original with model availability %s', async available => {
   const original = {
     id: '00000000-0000-4000-8000-000000000041',
