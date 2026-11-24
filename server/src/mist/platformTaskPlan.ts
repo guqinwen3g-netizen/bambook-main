@@ -4,10 +4,10 @@ import type{ResponseLocale}from'./responseLanguage';
 
 export type PlatformTaskPlan={name:string;arguments:Record<string,unknown>;progress?:string};
 export type PlatformTaskStep={id:string;plan:PlatformTaskPlan;result?:unknown;at:string;completedAt?:string;compacted?:boolean};
-export type PlatformTaskProgress={steps:PlatformTaskStep[];nextRunAt:number;requiresRead?:boolean;checkpointBeforeIssue?:string;retryAt?:number;failures?:number;issue?:'model_unavailable'|'model_response_invalid'};
+export type PlatformTaskProgress={steps:PlatformTaskStep[];nextRunAt:number;requiresRead?:boolean;requiresReadBeforeWrite?:boolean;checkpointBeforeIssue?:string;retryAt?:number;failures?:number;issue?:'model_unavailable'|'model_response_invalid'};
 export const PLATFORM_TASK_TURN_LIMIT=60;
 export const PLATFORM_TASK_RESULT_LIMIT=160_000;
-export type PlatformTaskContext={task:AgentTaskView;locale:ResponseLocale;businessAt?:string;requiresRead:boolean;steps:PlatformTaskStep[];decisions:Array<{id:string;state:string;note?:string;produced?:{fileId:string;fileName:string}}>};
+export type PlatformTaskContext={task:AgentTaskView;locale:ResponseLocale;businessAt?:string;requiresRead:boolean;requiresReadBeforeWrite?:boolean;steps:PlatformTaskStep[];decisions:Array<{id:string;state:string;note?:string;produced?:{fileId:string;fileName:string}}>};
 const names=new Set(['bambook_task','bambook_query','bambook_get','bambook_related','bambook_commands','bambook_preview','bambook_execute','bambook_audit','bambook_mail_receiving','bambook_file_text']);
 
 /** Persist an observable tool decision, never private reasoning or provider credentials. */
