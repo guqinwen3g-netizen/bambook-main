@@ -78,6 +78,25 @@ it('uses the original attachment reference on a follow-up without uploading the 
     await click('引用附件 quantity.xlsx');
     expect(Array.from(host.querySelectorAll('button')).filter(button =>
       button.getAttribute('aria-label') === '移除附件 quantity.xlsx')).toHaveLength(1);
+    await click('移除附件 quantity.xlsx');
+    await click('引用业务记录');
+    const menu = document.querySelector('select[aria-label="检索对象"]') as HTMLSelectElement;
+    await act(async () => {
+      menu.value = 'attachments';
+      menu.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const search = document.querySelector('input[aria-label="附件文件名"]') as HTMLInputElement;
+    const enterSearch = async (value: string) => act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, value);
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await enterSearch('missing');
+    expect(document.body.textContent).toContain('没有匹配的附件');
+    await enterSearch('QUANTITY');
+    const add = search.closest('[role="dialog"]')?.querySelector<HTMLButtonElement>('button[aria-label="引用附件 quantity.xlsx"]');
+    expect(add).toBeTruthy();
+    await act(async () => add!.click());
+    await click('关闭');
     await question('核对第一行表头');
     await click('发送');
     const [path, init] = mock.api.mock.calls.find(([, opts]) => opts?.method === 'POST')!;

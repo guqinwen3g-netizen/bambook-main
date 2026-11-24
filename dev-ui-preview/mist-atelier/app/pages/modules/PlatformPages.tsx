@@ -194,10 +194,11 @@ export function AssistantPage(){
   const liveConversation=React.useRef(conversationId);liveConversation.current=conversationId;
   const legacyTargets=React.useRef(new Map<string,string>());
   React.useEffect(()=>{legacyTargets.current.clear();},[scope]);
+  const attachmentLimitMessage='最多 6 个附件，单个不超过 8 MiB，总计不超过 24 MiB';
   const withinAttachmentLimits=(attachments:ReadonlyArray<{size:number}>)=>{
     if(attachments.length<=TASK_ATTACHMENT_COUNT&&attachments.every(file=>file.size>0&&file.size<=TASK_ATTACHMENT_BYTES)
       &&attachments.reduce((sum,file)=>sum+file.size,0)<=TASK_ATTACHMENT_TOTAL_BYTES)return true;
-    setError('最多 6 个附件，单个不超过 8 MiB，总计不超过 24 MiB');
+    setError(attachmentLimitMessage);
     return false;
   };
   const addFiles=(incoming:File[])=>{
@@ -210,7 +211,7 @@ export function AssistantPage(){
     if(task.conversationId!==conversationId||attachmentRefs.some(ref=>ref.fileId===file.id))return;
     const next=[...attachmentRefs,{taskId:task.id,fileId:file.id,name:file.name,size:file.size}];
     if(!withinAttachmentLimits([...files,...next]))return;
-    setError('');setAttachmentRefs(next);field.current?.focus();
+    setError('');setAttachmentRefs(next);if(!picker)field.current?.focus();
   };
   const cowork=useXiaozhuCowork(w.workspace?.id,scope,canChat,conversationId);
   const showTaskHistory=canChat&&(cowork.available||cowork.tasks.length>0);
@@ -222,6 +223,17 @@ export function AssistantPage(){
     openConversation(unsubmitted??newConversationId());
     requestAnimationFrame(()=>field.current?.focus());
   };
+  const pickingAttachments=kind==='attachments';
+  const attachmentChoices=new Map<string,{task:AgentTaskView;file:TaskAttachment}>();
+  if(picker&&pickingAttachments&&cowork.available){
+    const keyword=query.trim().toLocaleLowerCase();
+    for(const task of [...visibleTasks].reverse()){
+      if(task.conversationId!==conversationId)continue;
+      for(const file of task.attachments??[]){
+        if(file.name.toLocaleLowerCase().includes(keyword)&&!attachmentChoices.has(file.id))attachmentChoices.set(file.id,{task,file});
+      }
+    }
+  }
   const request=async(path:string,init:RequestInit={})=>{const result=await fetch(path,{...init,headers:{...apiService.getAuthHeaders(),...(init.headers as Record<string,string>??{})},credentials:'include'});const body=await result.json().catch(()=>null);if(!result.ok)throw new Error(body?.error?.message??body?.message??'助手请求未完成');if(!body)throw new Error('助手没有返回可核对的结果');return body;};
   const check=React.useCallback(async()=>{if(!w.workspace?.id)return;const epoch=++generation.current,bound=scope;setChecking(true);setError('');try{const result=await request('/api/mist/workspaces/'+encodeURIComponent(w.workspace.id)+'/assistant/status');const status=result.status??result;if(typeof status.configured!=='boolean')throw new Error('模型配置状态响应无效');if(live.current===bound&&generation.current===epoch)setConfiguration(status);}catch(e){if(live.current===bound&&generation.current===epoch)setError(e instanceof Error?e.message:'无法读取模型配置');}finally{if(live.current===bound&&generation.current===epoch)setChecking(false);}},[w.workspace?.id,scope]);
   React.useEffect(()=>{active.current?.abort();active.current=null;sendLock.current=false;generation.current++;setConfiguration(null);setError('');setBusy(false);setPicker(false);void check();return()=>{active.current?.abort();generation.current++;};},[scope,check]);
@@ -365,9 +377,21 @@ export function AssistantPage(){
         </>:<div className="mist-xz-scroll"><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}<XiaozhuEmpty name={w.session.user?.displayName} suggestions={xiaozhuSuggestions(w.state)} onPick={p=>{setQuestion(uiText(p));field.current?.focus();}}>{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</XiaozhuEmpty></div></div>}
       </div>
     </div>
-    <Drawer open={picker} onClose={()=>setPicker(false)} title={uiText("引用业务记录")} sub={uiText("选中的记录会随下一个问题提供给小竹，最多 12 条。")}>
-      <Toolbar><Select aria-label={uiText("检索对象")} value={kind} options={[{value:'orders',label:'订单'},{value:'customers',label:'客户'},{value:'purchases',label:'采购'},{value:'shipments',label:'出运'},{value:'developments',label:'开发案'},{value:'invoices',label:'发票'},{value:'risks',label:'风险'}]} onChange={e=>setKind(e.target.value)}/><TextInput aria-label={uiText("业务关键词")} placeholder={uiText("编号、客户或状态")} value={query} onChange={e=>setQuery(e.target.value)}/></Toolbar>
-      {w.loading?<EmptyState title={uiText("正在读取业务记录")} compact/>:data.length?<div className="mist-chat-picks">{data.map(r=>{const on=ids.includes(r.id);return <div key={r.id} className="mist-chat-pick" data-on={on||undefined}><div className="mist-chat-pick-t"><b>{uiText(r.label)}</b><span>{r.detail}</span></div><Button size="sm" variant="quiet" onClick={()=>w.go(r.view,r.entityId)}>{uiText("打开来源")}</Button><Button size="sm" variant={on?'secondary':'ai'} aria-pressed={on} aria-label={ui`${on?'移除来源':'加入问题'} ${r.label}`} disabled={busy||(!on&&selected.length>=12)} onClick={()=>toggle(r)}>{uiText(on?'移除来源':'加入问题')}</Button></div>;})}</div>:<EmptyState title={uiText(canReadSource?'没有匹配的记录':'无权查看此类记录')} description={uiText(canReadSource?'调整检索对象或关键词后再试。':'请切换检索对象，或联系管理员开通查看权限。')} compact/>}
+    <Drawer open={picker} onClose={()=>setPicker(false)} title={uiText("引用资料")}>
+      <Toolbar>
+        <Select aria-label={uiText("检索对象")} value={kind} options={[{value:'attachments',label:'对话附件'},{value:'orders',label:'订单'},{value:'customers',label:'客户'},{value:'purchases',label:'采购'},{value:'shipments',label:'出运'},{value:'developments',label:'开发案'},{value:'invoices',label:'发票'},{value:'risks',label:'风险'}]} onChange={e=>{setKind(e.target.value);setQuery('');}}/>
+        <TextInput aria-label={uiText(pickingAttachments?'附件文件名':'业务关键词')} placeholder={uiText(pickingAttachments?'附件文件名':'编号、客户或状态')} value={query} onChange={e=>setQuery(e.target.value)}/>
+      </Toolbar>
+      {pickingAttachments&&error===attachmentLimitMessage&&<Banner tone="warn" title={uiText(attachmentLimitMessage)}/>}
+      {pickingAttachments?(attachmentChoices.size?<div className="mist-chat-picks">{[...attachmentChoices.values()].map(({task,file})=>{
+        const on=attachmentRefs.some(ref=>ref.fileId===file.id);
+        return <div key={file.id} className="mist-chat-pick" data-on={on||undefined}>
+          <div className="mist-chat-pick-t"><b>{file.name}</b><span>{task.name}</span></div>
+          <Button size="sm" variant={on?'secondary':'ai'} aria-pressed={on} aria-label={ui`${on?'移除附件':'引用附件'} ${file.name}`} disabled={busy}
+            onClick={()=>{if(on){setAttachmentRefs(refs=>refs.filter(ref=>ref.fileId!==file.id));setError('');}else reuseAttachment(task,file);}}>{uiText(on?'移除附件':'加入问题')}</Button>
+        </div>;
+      })}</div>:<EmptyState title={uiText(cowork.loading?'正在读取对话':!cowork.available?'任务服务暂不可用':query.trim()?'没有匹配的附件':'此对话暂无附件')} compact/>)
+       :w.loading?<EmptyState title={uiText("正在读取业务记录")} compact/>:data.length?<div className="mist-chat-picks">{data.map(r=>{const on=ids.includes(r.id);return <div key={r.id} className="mist-chat-pick" data-on={on||undefined}><div className="mist-chat-pick-t"><b>{uiText(r.label)}</b><span>{r.detail}</span></div><Button size="sm" variant="quiet" onClick={()=>w.go(r.view,r.entityId)}>{uiText("打开来源")}</Button><Button size="sm" variant={on?'secondary':'ai'} aria-pressed={on} aria-label={ui`${on?'移除来源':'加入问题'} ${r.label}`} disabled={busy||(!on&&selected.length>=12)} onClick={()=>toggle(r)}>{uiText(on?'移除来源':'加入问题')}</Button></div>;})}</div>:<EmptyState title={uiText(canReadSource?'没有匹配的记录':'无权查看此类记录')} description={uiText(canReadSource?'调整检索对象或关键词后再试。':'请切换检索对象，或联系管理员开通查看权限。')} compact/>}
     </Drawer>
     <Drawer open={drafts} onClose={()=>setDrafts(false)} title={uiText("已保存草稿")} sub={uiText("审阅后保存的回复，尚未执行任何业务操作。")} footer={canChat?<Button icon={FileText} onClick={()=>{setDrafts(false);draft('');}}>{uiText("新建草稿")}</Button>:undefined}>
       {saved.length?<div className="mist-chat-picks">{saved.map(d=><div key={d.id} className="mist-chat-draft"><b>{d.title}</b><p className="mist-chat-text">{d.content}</p><div className="mist-row">{d.orderId&&<SourceOrder id={d.orderId}/>}<span className="mist-note">{d.createdAt.slice(0,10)}{uiText(" · 尚未执行")}</span></div></div>)}</div>:<EmptyState title={uiText("尚无草稿")} description={uiText("在小竹的回复下点“保存草稿”即可留存。")} compact/>}
