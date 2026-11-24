@@ -56,6 +56,7 @@ export type TaskRecord = {
   credentialVersion?: string;
   scopeHash: string; sources: TaskSourceRef[]; intentRefs?:AgentTaskIntentRef[];
   attachments?: MistStoredFile[];
+  attachmentOrigins?: TaskAttachmentRef[];
   mode: 'read'|'operate';
   lastHeartbeatAt?:number;
   control?:{generation:string;hash:string;issuedAt:number};
@@ -132,7 +133,7 @@ function replay(c: TaskRecord, action: string, requestId: string, input: unknown
   if (c.lastAction !== action || c.lastInputHash !== hash(JSON.stringify(input))) fail('CONFLICT', '操作编号已用于其他内容', 409);
   return true;
 }
-export async function createTask(db: any, actor: TokenPayload, workspaceId: string, input: Record<string, unknown>, now: number, scopeHash = taskScopeHash(), automationId?: string, trustedIntentRefs:AgentTaskIntentRef[] = [], attachments?: { fingerprint: unknown; save: () => Promise<MistStoredFile[]> }) {
+export async function createTask(db: any, actor: TokenPayload, workspaceId: string, input: Record<string, unknown>, now: number, scopeHash = taskScopeHash(), automationId?: string, trustedIntentRefs:AgentTaskIntentRef[] = [], attachments?: { fingerprint: unknown; save: () => Promise<{ files: MistStoredFile[]; origins?: TaskAttachmentRef[] }> }) {
   if (Object.keys(input).some(k => !['requestId', 'identityId', 'name', 'instructions','executor','locale','conversationId'].includes(k))||input.executor!==undefined&&!['platform','external'].includes(input.executor as string)||input.locale!==undefined&&input.executor!=='platform'||input.conversationId!==undefined&&(input.executor!=='platform'||typeof input.conversationId!=='string'||!/^[A-Za-z0-9_-]{8,64}$/.test(input.conversationId))) fail('INVALID_INPUT', '任务字段无效', 400);
   const requestId = rid(input.requestId), name = plain(input.name, 60, '任务名称'), instructions = plain(input.instructions, 4000, '任务内容');
   const { value: identity } = await identityRecord(db, workspaceId, id(input.identityId));
@@ -148,7 +149,11 @@ export async function createTask(db: any, actor: TokenPayload, workspaceId: stri
   if (input.executor === 'platform') assertDailyRoom(await agentDailyUsage(db, workspaceId, actor.userId, now), true);
   const taskId = randomUUID(), at = new Date(now).toISOString();
   const c: TaskRecord = { schemaVersion: 1, id: taskId, workspaceId, identityId: identity.id, identityName: identity.name, ownerId: actor.userId, ownerName: actor.displayName || actor.userId, name, instructions, state: 'queued', version: 1, controlVersion: 1, createdAt: at, updatedAt: at, expiresAt: Math.min(now + TASK_TTL, key.expiresAt), authority: { id: identity.id, workspaceId, hash: key.hash, ownerId: actor.userId, issuedAt: key.issuedAt, expiresAt: key.expiresAt }, ceiling, credentialVersion: actor.credentialVersion, scopeHash, sources: [], mode:key.mode, stepsUsed: 0, runtimeUsedMs: 0, checkpoint: '', result: '', waitingProposalIds: [], operations: [], lastRequestId: requestId, lastAction: 'created', lastInputHash: inputHash };
-  if(attachments)c.attachments=await attachments.save();
+  if(attachments){
+    const {files,origins}=await attachments.save();
+    c.attachments=files;
+    if(origins?.length)c.attachmentOrigins=origins;
+  }
   if(intentRefs.length)c.intentRefs=intentRefs.map(ref=>({...ref}));
   if(input.executor==='platform'){c.executor='platform';c.locale=locale;c.platform={steps:[],nextRunAt:0};}
   if(automationId)c.automationId=automationId;
@@ -544,3 +549,4 @@ export async function taskHistory(db:any,actor:TokenPayload,workspaceId:string,t
   const rows=await db.mistCommandReceipt.findMany({where,orderBy:[{createdAt:'desc'},{id:'desc'}],take:31}),page=rows.slice(0,30),last=page.at(-1);
   return {items:page.map((row:any)=>row.result.event as AgentTaskEvent),nextCursor:rows.length>30&&last?Buffer.from(JSON.stringify({at:new Date(last.createdAt).toISOString(),id:last.id})).toString('base64url'):null};
 }
+import type { TaskAttachmentRef } from '../shared/mistTaskAttachments';

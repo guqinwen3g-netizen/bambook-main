@@ -350,6 +350,99 @@ it('researches a PDF, workbook and image together with a selected order, keeping
  await f.human.post(f.base+'/personal-agent/tasks').field('task',JSON.stringify(payload)).attach('attachments',Buffer.from('changed'),'change.txt').expect(409);
 });
 
+it('explicitly reopens a prior attachment in the same conversation without creating another original', async () => {
+  const marker = 'only-in-the-original-worksheet-7319';
+  const model = vi.fn(async (input: LlmCompletionInput) => {
+    expect(input.messages[0].content).toContain(marker);
+    return tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '已重新读取指定原件' });
+  });
+  const f = await fixture(model);
+  f.worker.start(3_600_000);
+  const conversationId = 'conv_12345678';
+  const payload = { requestId: randomUUID(), name: '继续核对原件', instructions: '逐字核对原文件', conversationId };
+  const original = (await f.human.post(f.base + '/personal-agent/tasks')
+    .field('task', JSON.stringify(payload)).attach('attachments', Buffer.from(marker), 'source.txt').expect(201)).body.item;
+  await f.drain();
+  expect((await f.current(original.id)).state).toBe('succeeded');
+  const ref = { taskId: original.id, fileId: original.attachments[0].id };
+  const next = { ...payload, requestId: randomUUID(), attachmentRefs: [ref] };
+  const writes = vi.spyOn(MistPrivateFiles.prototype, 'write');
+
+  const followUp = (await f.human.post(f.base + '/personal-agent/tasks').send(next).expect(201)).body.item;
+  expect(followUp.attachments).toEqual(original.attachments);
+  const repeated = (await f.human.post(f.base + '/personal-agent/tasks').send(next).expect(201)).body.item;
+  expect(repeated.id).toBe(followUp.id);
+  await f.human.post(f.base + '/personal-agent/tasks').send({ ...next, attachmentRefs: [] }).expect(409);
+  expect(writes).not.toHaveBeenCalled();
+  await f.drain();
+  expect(await f.current(followUp.id)).toMatchObject({ state: 'succeeded', result: '已重新读取指定原件' });
+  expect(model).toHaveBeenCalledTimes(2);
+
+  const mixedRequest = { ...next, requestId: randomUUID() };
+  const mixed = (await f.human.post(f.base + '/personal-agent/tasks')
+    .field('task', JSON.stringify(mixedRequest))
+    .attach('attachments', Buffer.from('newly added'), 'new.txt').expect(201)).body.item;
+  expect(mixed.attachments.map((file: { name: string }) => file.name)).toEqual(['new.txt', 'source.txt']);
+  expect(writes).toHaveBeenCalledTimes(1);
+  const reborrowed = (await f.human.post(f.base + '/personal-agent/tasks').send({
+    ...next, requestId: randomUUID(), attachmentRefs: [{ taskId: mixed.id, fileId: ref.fileId }],
+  }).expect(201)).body.item;
+  expect(reborrowed.attachments).toEqual(original.attachments);
+  expect((await taskRecord(f.local.database, f.workspace.id, reborrowed.id)).value.attachmentOrigins).toEqual([ref]);
+  expect(writes).toHaveBeenCalledTimes(1);
+});
+
+it('rejects a missing or changed prior original before creating a follow-up', async () => {
+  const f = await fixture(async () => tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '已读取' }));
+  f.worker.start(3_600_000);
+  const payload = { requestId: randomUUID(), name: '资料', instructions: '核对原文件', conversationId: 'conv_12345678' };
+  const fileContent = Buffer.from('reference sample');
+  const item = (await f.human.post(f.base + '/personal-agent/tasks')
+    .field('task', JSON.stringify(payload)).attach('attachments', fileContent, 'source.txt').expect(201)).body.item;
+  const ref = { taskId: item.id, fileId: item.attachments[0].id };
+  const next = { ...payload, requestId: randomUUID(), attachmentRefs: [ref] };
+  const original = path.join(directory, 'files', f.workspace.id, ref.fileId);
+  const tampered = Buffer.from(fileContent);
+  tampered[0] ^= 255;
+  await writeFile(original, tampered);
+  await f.human.post(f.base + '/personal-agent/tasks').send(next).expect(409);
+  await rm(original);
+  await f.human.post(f.base + '/personal-agent/tasks').send(next).expect(404);
+  const tasks = (await f.human.get(f.base + '/agent-tasks').expect(200)).body.items;
+  expect(tasks.map((task: { id: string }) => task.id)).toEqual([item.id]);
+});
+
+it('rechecks the original task source before providing a borrowed attachment to the worker', async () => {
+  const marker = 'source-access-check-marker-804';
+  const complete = vi.fn(async (_input: LlmCompletionInput) =>
+    tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '检查结束' }));
+  const f = await fixture(complete);
+  f.worker.start(3_600_000);
+  const orderId = f.workspace.state.orders[0].id;
+  const payload = { requestId: randomUUID(), name: '资料', instructions: '核对原文件', conversationId: 'conv_12345678' };
+  const item = (await f.human.post(f.base + '/personal-agent/tasks')
+    .field('task', JSON.stringify({ ...payload, intentRefs: [{ kind: 'orders', id: orderId }] }))
+    .attach('attachments', Buffer.from(marker), 'source.txt').expect(201)).body.item;
+  await f.drain();
+  expect(complete.mock.calls.at(0)?.[0].messages[0].content).toContain(marker);
+  const ref = { taskId: item.id, fileId: item.attachments[0].id };
+  const followUp = (await f.human.post(f.base + '/personal-agent/tasks').send({
+    ...payload, requestId: randomUUID(), attachmentRefs: [ref],
+  }).expect(201)).body.item;
+  await f.local.database.$transaction(async db => {
+    const workspace = await db.mistWorkspace.findUnique({ where: { id: f.workspace.id } });
+    await db.mistWorkspace.update({ where: { id: f.workspace.id }, data: { state: {
+      ...workspace.state, orders: workspace.state.orders.filter((order: { id: string }) => order.id !== orderId),
+    } } });
+  });
+  expect((await f.current(item.id)).attachments).toBeUndefined();
+  const reads = vi.spyOn(MistPrivateFiles.prototype, 'read');
+  await f.drain();
+  expect(reads.mock.calls.some(([, file]) => file.id === ref.fileId)).toBe(false);
+  for (const [call] of complete.mock.calls.slice(1)) expect(call.messages[0].content).not.toContain(marker);
+  expect((await taskRecord(f.local.database, f.workspace.id, followUp.id)).value.attachmentOrigins).toEqual([ref]);
+});
+
 it.each(['unchanged', 'removed', 'replaced'] as const)(
   'only reuses rendered task images after the original is verified again (%s)',
   async (change) => {

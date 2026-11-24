@@ -15,6 +15,32 @@ async function human(app:any,profileId:string){const client=request.agent(app);a
 function server(complete:(input:LlmCompletionInput)=>Promise<string>){const local=createMistLocalRuntime({directory}),app=createMistServer(undefined,{local,agentTasks:{complete,tickMs:3_600_000,pulseMs:20}});const worker=app.locals.platformTaskWorker as MistPlatformTaskWorker;workers.push(worker);return{local,app,worker};}
 const tool=(name:string,args:Record<string,unknown>)=>JSON.stringify({name,arguments:args});
 
+it('limits attachment references to the same owner and conversation and counts uploads together', async () => {
+ const { app, worker } = server(async () => tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '已读' }));
+ worker.start(3_600_000);
+ const owner = await human(app, 'demo-sales');
+ const another = await human(app, 'demo-buyer');
+ const conversationId = 'conv_12345678';
+ const input = { requestId: randomUUID(), name: '样品清单', instructions: '重新读取资料', conversationId };
+ const original = (await owner.client.post(owner.base + '/personal-agent/tasks')
+   .field('task', JSON.stringify(input)).attach('attachments', Buffer.from('test only'), 'source.txt').expect(201)).body.item;
+ const ref = { taskId: original.id, fileId: original.attachments[0].id };
+ const next = { ...input, requestId: randomUUID(), attachmentRefs: [ref] };
+
+ await another.client.post(another.base + '/personal-agent/tasks').send(next).expect(404);
+ await owner.client.post(owner.base + '/personal-agent/tasks').send({ ...next, conversationId: 'conv_87654321' }).expect(404);
+ await owner.client.post(owner.base + '/personal-agent/tasks').send({ ...next, conversationId: undefined }).expect(400);
+ await owner.client.post(owner.base + '/personal-agent/tasks').send({ ...next, attachmentRefs: [ref, ref] }).expect(400);
+ await owner.client.post(owner.base + '/personal-agent/tasks').send({
+   ...next, attachmentRefs: [{ ...ref, fileId: randomUUID() }],
+ }).expect(404);
+ const tooMany = owner.client.post(owner.base + '/personal-agent/tasks').field('task', JSON.stringify(next));
+ for (let number = 0; number < 6; number++) tooMany.attach('attachments', Buffer.from('extra'), `extra-${number}.txt`);
+ await tooMany.expect(400);
+ expect((await owner.client.get(owner.base + '/agent-tasks').expect(200)).body.items).toHaveLength(1);
+ expect((await another.client.get(another.base + '/agent-tasks').expect(200)).body.items).toHaveLength(0);
+});
+
 it('each account opens one personal Agent owned by itself, without exposing a key, and hands it platform tasks',async()=>{
  const complete=vi.fn(async()=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对，没有需要处理的事项。'}));
  const {app,local,worker}=server(complete);worker.start(3_600_000);
