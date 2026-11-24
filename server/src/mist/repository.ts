@@ -902,7 +902,11 @@ export class MistRepository {
     const metadata=files.map(validateFileInput);
     // Keep the same private file IDs if the database transaction is retried.
     let stored: Promise<MistStoredFile[]> | undefined;
-    const item=await this.connectionTransaction(async db=>{
+    let staged: MistStoredFile[]=[];
+    let prepared=false;
+    const removeStaged=(files:MistStoredFile[])=>Promise.allSettled(files.map(file=>this.files.remove(workspaceId,file)));
+    const committed=await this.connectionTransaction(async db=>{
+      prepared=false;
       const{actor,row}=await this.own(db,prior,workspaceId,'ai:chat');
       if(input.executor==='platform'&&!this.platformRuntimeAvailable())fail('PRECONDITION','平台执行器或模型暂不可用',503);
       const{intentRefs:rawIntentRefs,...taskInput}=input,refs=validateTaskIntentRefs(rawIntentRefs,actor,this.accessView(row,actor,scopeOf(row)).state);
@@ -941,9 +945,10 @@ export class MistRepository {
             const saved:MistStoredFile[]=[];
             try{
               for(const file of files)saved.push(await this.files.write(workspaceId,file,new Date().toISOString(),{previews:false}));
+              staged=saved;
               return saved;
             }catch(error){
-              await Promise.allSettled(saved.map(file=>this.files.remove(workspaceId,file)));
+              await removeStaged(saved);
               throw error;
             }
           })());
@@ -952,10 +957,18 @@ export class MistRepository {
       }:undefined;
       const result=await createTask(db,actor,workspaceId,taskInput,Date.now(),taskScopeHash(scopeOf(row),row.state),automationId,refs,attachments);
       const c=(await taskRecord(db,workspaceId,result.id)).value;
-      return taskView(c,actor,Date.now(),result.state!=='access_changed'&&await this.taskViewSourcesAllowed(db,row,actor,c));
+      const item=taskView(c,actor,Date.now(),result.state!=='access_changed'&&await this.taskViewSourcesAllowed(db,row,actor,c));
+      prepared=true;
+      return {item,attachmentIds:new Set(c.attachments?.map(file=>file.id))};
+    }).catch(async error=>{
+      // If the commit outcome itself is unknown, keep the files: a committed
+      // task may still refer to them. Callback failures and write conflicts roll back.
+      if(!prepared||retryableTransaction(error))await removeStaged(staged);
+      throw error;
     });
-    this.wakeQueuedPlatformTask(item);
-    return item;
+    await removeStaged(staged.filter(file=>!committed.attachmentIds.has(file.id)));
+    this.wakeQueuedPlatformTask(committed.item);
+    return committed.item;
   }
   async claimAgentTask(prior:TokenPayload,workspaceId:string,taskId:string,input:Record<string,unknown>,make:MakeTaskCredential){
     if(!isAgentActor(prior)||!prior.agentServiceLease||prior.agentTaskLease)fail('FORBIDDEN','请使用执行器管理连接领取任务',403);

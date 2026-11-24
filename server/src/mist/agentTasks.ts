@@ -165,6 +165,9 @@ export async function createTask(db: any, actor: TokenPayload, workspaceId: stri
   if (input.executor === 'platform') assertDailyRoom(await agentDailyUsage(db, workspaceId, actor.userId, now), true);
   const taskId = randomUUID(), at = new Date(now).toISOString();
   const c: TaskRecord = { schemaVersion: 1, id: taskId, workspaceId, identityId: identity.id, identityName: identity.name, ownerId: actor.userId, ownerName: actor.displayName || actor.userId, name, instructions, state: 'queued', version: 1, controlVersion: 1, createdAt: at, updatedAt: at, expiresAt: Math.min(now + TASK_TTL, key.expiresAt), authority: { id: identity.id, workspaceId, hash: key.hash, ownerId: actor.userId, issuedAt: key.issuedAt, expiresAt: key.expiresAt }, ceiling, credentialVersion: actor.credentialVersion, scopeHash, sources: trustedSources, mode:key.mode, stepsUsed: 0, runtimeUsedMs: 0, checkpoint: '', result: '', waitingProposalIds: [], operations: [], lastRequestId: requestId, lastAction: 'created', lastInputHash: inputHash };
+  // Reserve the idempotency key before any filesystem writes. A losing
+  // concurrent transaction retries against the committed receipt.
+  await db.mistCommandReceipt.create({ data: { id: randomUUID(), workspaceId, requestId: request, actorId: actor.userId, inputHash, expectedRevision: 0, result: { revision: 0, id: taskId }, createdAt: new Date(now) } });
   if(attachments){
     const {files,origins}=await attachments.save();
     c.attachments=files;
@@ -175,7 +178,6 @@ export async function createTask(db: any, actor: TokenPayload, workspaceId: stri
   if(automationId)c.automationId=automationId;
   if(typeof input.conversationId==='string')c.conversationId=input.conversationId;
   await db.mistCommandReceipt.create({ data: { id: randomUUID(), workspaceId, requestId: TASK_PREFIX + taskId, actorId: actor.userId, inputHash: TASK_HASH, expectedRevision: 0, result: { revision: 0, [TASK_FIELD]: c }, createdAt: new Date(now) } });
-  await db.mistCommandReceipt.create({ data: { id: randomUUID(), workspaceId, requestId: request, actorId: actor.userId, inputHash, expectedRevision: 0, result: { revision: 0, id: taskId }, createdAt: new Date(now) } });
   await event(db, c, actor, 'created', requestId, now); return taskView(c, actor, now);
 }
 export async function assertTaskAuthority(db: any, actor: TokenPayload, c: TaskRecord, now: number) {
