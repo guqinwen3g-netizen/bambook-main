@@ -283,7 +283,7 @@ export function agentRelated(state: MistState, actor: TokenPayload, typeName: un
       : []),
     // The header is already covered by idsOf. Collect later orders directly from converted lines.
     ...(descriptor.type === 'quotation' && Array.isArray(r.lines)
-      ? r.lines.flatMap(line => {
+      ? r.lines.flatMap((line: { conversion?: { orderId?: unknown } } | null) => {
         const orderId = line?.conversion?.orderId;
         return typeof orderId === 'string' && orderId ? [orderId] : [];
       })
