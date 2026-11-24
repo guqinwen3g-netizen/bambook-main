@@ -133,10 +133,17 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const live = React.useRef(scope); live.current = scope;
   const version = React.useRef(0), pending = React.useRef<{ fingerprint: string; id: string } | undefined>(undefined);
   const historyRead = React.useRef<AbortController | undefined>(undefined);
+  const moreRead = React.useRef<AbortController | undefined>(undefined);
+  const [loadingMore, setLoadingMore] = React.useState(false), [moreError, setMoreError] = React.useState('');
+  const personalIdentity = React.useRef<string | undefined>(undefined);
   const lastAvailability=React.useRef<{scope:string;available:boolean}|null>(null);
   const load = React.useCallback(async () => {
     const run = ++version.current, bound = scope;
     historyRead.current?.abort();
+    moreRead.current?.abort();
+    moreRead.current = undefined;
+    setLoadingMore(false);
+    setMoreError('');
     if (!base || !enabled) { setLoading(false); setAvailable(false); return; }
     const controller = new AbortController();
     historyRead.current = controller;
@@ -149,6 +156,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       ]));
       if (run !== version.current || live.current !== bound) return;
       const own = mine.items.find(i => i.kind === 'personal') ?? null;
+      personalIdentity.current = own?.id;
       const nextAvailable=caps.platformAvailable === true && own?.state !== 'disabled';lastAvailability.current={scope:bound,available:nextAvailable};setAvailable(nextAvailable);
       const visible = page.items.filter(t => t.executor === 'platform' && (!own || t.identityId === own.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-THREAD_LIMIT);
       setTasks(old => {
@@ -169,7 +177,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if (run === version.current && live.current === bound) setLoading(false);
     }
   }, [base, enabled, scope]);
-  React.useEffect(() => { setTasks([]); setAvailable(false); setLoading(true);lastAvailability.current=null; pending.current = undefined; void load(); return () => { version.current++; historyRead.current?.abort(); }; }, [load]);
+  React.useEffect(() => { setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current = undefined; void load(); return () => { version.current++; historyRead.current?.abort(); moreRead.current?.abort(); }; }, [load]);
   const activeTasks = tasks.filter(t => COWORK_ACTIVE.includes(t.state));
   const foregroundId = activeTasks.filter(t => visibleConversationId && t.conversationId === visibleConversationId
     && (t.state === 'running' || t.state === 'queued')).at(-1)?.id;
@@ -262,13 +270,31 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     return item;
   };
   const loadMore = async () => {
-    if (!more || !base) return; const cursor = more; setMore(undefined);
+    if (!more || !base || !enabled || loading || moreRead.current) return;
+    const cursor = more, run = version.current, bound = scope, controller = new AbortController();
+    const isCurrent = () => moreRead.current === controller && run === version.current && live.current === bound;
+    moreRead.current = controller;
+    setLoadingMore(true);
+    setMoreError('');
     try {
-      const page = await mistApiRequest(base + '/agent-tasks?cursor=' + encodeURIComponent(cursor)) as AgentTaskPage;
-      const own = new Set(tasks.map(t => t.identityId));
-      setTasks(old => { const seen = new Set(old.map(t => t.id)); return [...page.items.filter(t => t.executor === 'platform' && (!own.size || own.has(t.identityId)) && !seen.has(t.id)), ...old].sort((a, b) => a.createdAt.localeCompare(b.createdAt)); });
+      const page = await withReadDeadline(controller, HISTORY_READ_TIMEOUT_MS, '对话读取超时', signal =>
+        mistApiRequest(base + '/agent-tasks?cursor=' + encodeURIComponent(cursor), { signal }) as Promise<AgentTaskPage>);
+      if (!isCurrent()) return;
+      const own = personalIdentity.current;
+      setTasks(old => {
+        const seen = new Set(old.map(t => t.id));
+        const older = page.items.filter(t => t.executor === 'platform' && (!own || t.identityId === own) && !seen.has(t.id));
+        return [...older, ...old].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      });
       setMore(page.nextCursor ?? undefined);
-    } catch (e) { setMore(cursor); setError(e instanceof Error ? e.message : '读取失败'); }
+    } catch (e) {
+      if (isCurrent()) setMoreError(e instanceof Error ? e.message : '读取失败');
+    } finally {
+      if (isCurrent()) {
+        moreRead.current = undefined;
+        setLoadingMore(false);
+      }
+    }
   };
   const answer = async (task: AgentTaskView, questionId: string, text: string) => {
     try { applyTaskUpdate((await post('/agent-tasks/' + encodeURIComponent(task.id) + '/answer', { requestId: crypto.randomUUID(), version: task.version, questionId, answer: text.trim() })).item); } catch (e) { setError(e instanceof Error ? e.message : '回答未送达'); await load(); }
@@ -276,5 +302,5 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const cancel = async (task: AgentTaskView) => {
     try { await post('/agent-tasks/' + encodeURIComponent(task.id) + '/cancel', { requestId: crypto.randomUUID(), version: task.version }); } catch (e) { setError(e instanceof Error ? e.message : '未能停止'); } finally { await load(); }
   };
-  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, error, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, hasMore: !!more, applyTaskUpdate, track: (task: AgentTaskView) => setTasks(old => [...old.filter(t => t.id !== task.id), task]) };
+  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, error, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track: (task: AgentTaskView) => setTasks(old => [...old.filter(t => t.id !== task.id), task]) };
 }
