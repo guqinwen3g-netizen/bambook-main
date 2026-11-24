@@ -428,8 +428,8 @@ export async function waitTaskForProposal(db: any, actor: TokenPayload, lease: A
 export async function settleTaskProposal(db: any, actor: TokenPayload, workspaceId: string, taskId: string, proposalId: string, requestId: string, outcome: 'confirmed' | 'rejected', now: number) {
   const { row, value: c } = await taskRecord(db, workspaceId, taskId); owner(actor, c);
   // 自动规则的运行留下提议后已结束；本人的决定只作用于提议本身。
-  if(c.automationId&&!c.waitingProposalIds.includes(proposalId))return;
-  if(outcome==='rejected'&&!c.waitingProposalIds.includes(proposalId))return;
+  if(c.automationId&&!c.waitingProposalIds.includes(proposalId))return false;
+  if(outcome==='rejected'&&!c.waitingProposalIds.includes(proposalId))return false;
   if (!['running','waiting_human','paused'].includes(c.state)) fail('AGENT_TASK_NOT_READY', '所属任务已停止，不能继续执行', 409);
   if (outcome === 'confirmed') await assertTaskAuthority(db, actor, c, now);
   if ((outcome === 'confirmed' && c.expiresAt <= now) || !c.waitingProposalIds.includes(proposalId)) fail('AGENT_TASK_NOT_READY', '所属任务或提议已失效', 409);
@@ -439,6 +439,7 @@ export async function settleTaskProposal(db: any, actor: TokenPayload, workspace
   n.checkpoint = outcome === 'confirmed' ? '本人已确认上一步提议；续办前核对业务结果。' : '本人已拒绝上一步提议；续办前查看拒绝原因。';
   if(n.platform)n.platform={...n.platform,nextRunAt:0,requiresRead:true};
   await save(db, row, c, n); await event(db, n, actor, outcome, requestId, now);
+  return n.executor==='platform'&&n.state==='queued';
 }
 export async function assertHumanTaskProposal(db: any, actor: TokenPayload, workspaceId: string, taskId: string, proposalId: string, now: number) {
   await lockTaskRecord(db, workspaceId, taskId);

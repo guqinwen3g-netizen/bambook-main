@@ -119,6 +119,54 @@ it.each(['plain reply','bound order','blind write'] as const)('applies the corre
  expect((await f.human.get(f.base).expect(200)).body.workspace.state.customers).toEqual(f.workspace.state.customers);
 });
 
+it.each(['confirm','reject','confirm while paused','rollback'] as const)('only wakes a queued platform task after a committed proposal %s',async scenario=>{
+ const decision=scenario==='reject'?'reject':'confirm',paused=scenario==='confirm while paused';
+ let mail='',turn=0;
+ const complete=vi.fn(async()=>{
+  turn++;
+  if(turn===1||turn===3)return tool('bambook_get',{type:'email',id:mail});
+  if(turn===2)return tool('bambook_execute',{command:{type:'email.move',payload:{id:mail,folder:'archive'}}});
+  return tool('bambook_task',{action:'finish',outcome:decision==='confirm'?'succeeded':'stopped',result:'已核对本人决定。'});
+ });
+ const f=await fixture(complete);mail=f.workspace.state.email.messages[0].id;
+ const original=f.workspace.state.email.messages[0].folder;
+ f.worker.start(3_600_000);
+ const task=await f.create('platform');await f.drain();
+ const pending=await f.current(task.id);
+ expect(pending.state).toBe('waiting_human');expect(pending.waitingProposalIds).toHaveLength(1);
+ if(paused)await f.human.post(f.base+'/agent-tasks/'+task.id+'/pause').send({requestId:randomUUID(),version:pending.version}).expect(200);
+ await f.worker.stop();
+ const scan=vi.spyOn(f.repository,'duePlatformTasks');f.worker.start(0);
+ await vi.waitFor(()=>expect(scan).toHaveBeenCalled(),{timeout:1500});await f.worker.settled();
+ const wake=vi.spyOn(f.worker,'wake');
+ if(scenario==='rollback'){
+  const repository=f.repository as unknown as {writeTransact:(workspaceId:string,run:(db:unknown)=>Promise<unknown>)=>Promise<unknown>};
+  const write=repository.writeTransact.bind(repository);
+  vi.spyOn(repository,'writeTransact').mockImplementationOnce((workspaceId,run)=>write(workspaceId,async db=>{
+   await run(db);
+   throw new Error('决策事务测试回滚');
+  }));
+  const latest=(await f.human.get(f.base).expect(200)).body.workspace;
+  await f.human.post(f.base+'/commands').send({requestId:randomUUID(),expectedRevision:latest.revision,command:{type:'agent.proposal.confirm',payload:{id:pending.waitingProposalIds[0]}}}).expect(500);
+  expect(wake).not.toHaveBeenCalled();
+  expect(await f.current(task.id)).toMatchObject({state:'waiting_human',waitingProposalIds:pending.waitingProposalIds});
+  const after=(await f.human.get(f.base).expect(200)).body.workspace;
+  expect(after.state.agentProposals).toEqual(latest.state.agentProposals);
+  expect(after.state.email).toEqual(latest.state.email);
+  return;
+ }
+ await f.command('agent.proposal.'+decision,{id:pending.waitingProposalIds[0],...(decision==='reject'?{note:'保持原状'}:{})});
+ if(paused){
+  expect(wake).not.toHaveBeenCalled();
+  expect(await f.current(task.id)).toMatchObject({id:task.id,state:'paused'});
+ }else{
+  await vi.waitFor(()=>expect(complete).toHaveBeenCalledTimes(4),{timeout:1500});await f.worker.settled();
+  expect(await f.current(task.id)).toMatchObject({id:task.id,state:decision==='confirm'?'succeeded':'cancelled',result:'已核对本人决定。'});
+ }
+ const state=(await f.human.get(f.base).expect(200)).body.workspace.state;
+ expect(state.email.messages.find((m:any)=>m.id===mail).folder).toBe(decision==='confirm'?'archive':original);
+});
+
 it('pre-reads authorized intent references before first planning while supplying the current company business date and real lease time',async()=>{
  const seen:any[]=[];const complete=vi.fn(async(input:LlmCompletionInput)=>{const text=String(input.messages[0].content),facts=JSON.parse(text.slice(text.indexOf('User request:\n')+'User request:\n'.length));seen.push(facts);return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对所选资料。'});});
  const f=await fixture(complete),order=f.workspace.state.orders[0],invoice=f.workspace.state.invoices[0],intentRefs=[{kind:'orders',id:order.id},{kind:'invoices',id:invoice.id}];
