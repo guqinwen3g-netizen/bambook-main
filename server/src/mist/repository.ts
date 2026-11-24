@@ -1191,14 +1191,16 @@ export class MistRepository {
       if (isAgentActor(prior)) fail('FORBIDDEN', 'Agent 不能确认提议，须本人在系统中确认', 403);
       const id = typeof input.command.payload.id === 'string' ? input.command.payload.id : '';
       const { workspace } = await this.getForAgent(prior, workspaceId);
-      const proposal = workspace.state.agentProposals?.find((p: { id: string; state: string }) => p.id === id && p.state === 'pending');
+      // A confirmed proposal can only replay its original receipt. The locked transaction still requires a pending proposal for any new request.
+      const proposal = workspace.state.agentProposals?.find(p => p.id === id && p.ownerId === prior.userId
+        && (p.state === 'pending' || p.state === 'confirmed'));
       if (!proposal) fail('NOT_FOUND', '提议不存在、已处理或不属于当前账号', 404);
       if(proposal!.unavailable||proposal!.taskBlocked)fail(proposal!.taskId?'AGENT_TASK_SCOPE_CHANGED':'AGENT_PROPOSAL_UNAVAILABLE',proposal!.taskBlocked||'提议来源已不可见',409);
       // 印章只能由本人直接管理和使用，不经 Agent 提议；需要签字的提议须附确认人本人当场手写的签字。
       if(SEAL_COMMANDS.includes(proposal!.command.type)||requestsSeal(proposal!.command))fail('FORBIDDEN','印章须由本人在系统中操作，不能经 Agent 提议',403);
       const proposalSignature = decisionSignature(prior, proposal!.command, input.signature);
       // 高风险：在取工作区行锁之前复验密码（bcrypt 不占用锁）；复验只对这一条提议的这一份命令有效，锁内按最新状态再核。
-      const grant = (proposal!.risk ?? effectiveAgentCommandRisk(proposal!.command,workspace.state)) === 'high' ? await this.reauthenticate(prior, workspaceId, id, proposal!.command, input.reauth) : undefined;
+      const grant = proposal!.state === 'pending' && (proposal!.risk ?? effectiveAgentCommandRisk(proposal!.command,workspace.state)) === 'high' ? await this.reauthenticate(prior, workspaceId, id, proposal!.command, input.reauth) : undefined;
       return this.executeInternal(prior, workspaceId, { ...input, command: proposal!.command }, { command: input.command, ...(proposalSignature ? { signature: proposalSignature } : {}) }, undefined, false, id, grant, proposalSignature);
     }
     const signature = decisionSignature(prior, input.command, input.signature);
@@ -1267,13 +1269,17 @@ export class MistRepository {
           if (previous.actorId !== actor.userId || previous.inputHash !== hash || previous.expectedRevision !== input.expectedRevision) fail('REQUEST_CONFLICT', '此请求编号已用于另一项操作', 409);
           return { workspace: await this.preparedView(db,row, actor), receipt: { requestId: previous.requestId, ...publicCommandReceiptResult(previous.result), expectedRevision: previous.expectedRevision }, replayed: true };
         }
+        const humanTaskProposal = confirmProposalId ? row.state.agentProposals?.find(p => p.id === confirmProposalId) : undefined;
+        if (confirmProposalId && (humanTaskProposal?.ownerId !== actor.userId || humanTaskProposal.state !== 'pending')) {
+          fail('NOT_FOUND', '提议不存在、已处理或不属于当前账号', 404);
+        }
         if(isAgentActor(prior)&&prior.agentTaskLease)assertTaskBusinessRead((await taskRecord(db,workspaceId,prior.agentTaskLease.taskId)).value);
         if(input.command?.type==='agent.task.cancel'){
           if(isAgentActor(prior))fail('FORBIDDEN','任务须由本人停止',403);
           await changeTask(db,actor,workspaceId,input.command.payload.id,'cancel',{requestId:input.requestId,version:input.command.payload.version},Date.now(),[]);
         }
         if(isAgentActor(prior)&&prior.agentTaskLease&&input.command?.type==='agent.proposal.create'&&await taskHasPendingMail(db,workspaceId,prior.agentTaskLease.taskId))fail('PRECONDITION','请先核对待同步的邮箱操作',422);
-        const humanTaskProposal=confirmProposalId?row.state.agentProposals?.find(p=>p.id===confirmProposalId):undefined;
+
         let executedProposalRisk:ReturnType<typeof agentCommandRisk>|undefined;
         // AI 写入三级确认：确认人须持有该命令风险等级对应的 ai:write:* 码（等级按 agentCommandRisk 规则，未登记的普通写入为中）；高风险的密码复验已在取锁前完成（reauthenticate），
         // 这里按锁内最新提议与将执行的命令再判风险：任一为高时，复验凭证必须属于同一提议、同一份命令，否则拒绝。

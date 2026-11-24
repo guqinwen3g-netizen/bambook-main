@@ -284,8 +284,13 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     const wrong = await runWith(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } }, 'not-the-password');
     expect(wrong.status).toBe(403); expect(wrong.body.error.code).toBe('REAUTH_FAILED');
     expect((await read(finance.client)).state.payables.settlements[0].state).toBe('pending');
-    const confirmed = await runWith(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } }, 'local-reauth-secret');
-    expect(confirmed.status).toBe(200);
+    const previousRevision = (await read(finance.client)).revision;
+    const confirmationRequest = { requestId: randomUUID(), expectedRevision: previousRevision, command: { type: 'agent.proposal.confirm', payload: { id: proposal.id } }, signature: TEST_SIGNATURE };
+    const confirmRoute = '/api/mist/workspaces/' + finance.workspace.id + '/commands';
+    const confirmed = await finance.client.post(confirmRoute).send({ ...confirmationRequest, reauth: { password: 'local-reauth-secret' } }).expect(200);
+    const replay = await finance.client.post(confirmRoute).send(confirmationRequest).expect(200);
+    expect(replay.body).toMatchObject({ replayed: true, receipt: confirmed.body.receipt, workspace: { revision: confirmed.body.workspace.revision } });
+    await buyer.client.post(confirmRoute).send(confirmationRequest).expect(404);
     expect(JSON.stringify(await local.database.mistCommandReceipt.findMany({ where: { workspaceId: finance.workspace.id } }))).not.toContain('local-reauth-secret');
     const confirmationReceipt = await local.database.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId: finance.workspace.id, requestId: agentAuditReceiptId(confirmed.body.receipt.requestId) } } });
     expect(confirmationReceipt.result[AGENT_AUDIT_FIELD]).toMatchObject({ actor: { id: 'demo-finance' }, source: 'human_confirmation', phase: 'confirmed', agentSessionId: finance.sessionId, proposalId: proposal.id, command: confirm, trigger: { type: 'agent.proposal.confirm', payload: { id: proposal.id } } });
