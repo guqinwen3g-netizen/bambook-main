@@ -275,7 +275,9 @@ export async function acknowledgePlatformStep(db:any,actor:AgentActor,lease:Agen
   const step=c.platform.steps.at(-1);if(!step||step.id!==stepId)fail('AGENT_TASK_CHANGED','执行步骤已变化',409);if(step.result!==undefined)return;
   const n={...next(c,now,'model_step','ack-'+stepId,[result]),platform:{...c.platform,steps:compactPlatformTaskSteps(c.platform.steps.map(s=>s.id===stepId?{...s,result,completedAt:new Date(now).toISOString()}:s)),failures:0,issue:undefined,retryAt:undefined,checkpointBeforeIssue:undefined}};
   if(c.platform.checkpointBeforeIssue!==undefined)n.checkpoint=c.platform.checkpointBeforeIssue;
-  const data=result as any;if(['bambook_get','bambook_query','bambook_related','bambook_audit','bambook_mail_receiving','bambook_file_text'].includes(step.plan.name)&&!data?.error&&!data?.truncated&&!data?.object?.truncated&&!c.requiredRead)n.platform.requiresRead=false;
+  const data=result as any;if(['bambook_get','bambook_query','bambook_related','bambook_audit','bambook_mail_receiving','bambook_file_text'].includes(step.plan.name)&&!data?.error&&!data?.truncated&&!data?.object?.truncated&&!c.requiredRead){
+    n.platform.requiresRead=false;n.platform.requiresReadBeforeWrite=undefined;
+  }
   await save(db,row,c,n);
 }
 /** Release only this completed local runner; human stop/pause or a revoked grant always wins. */
@@ -405,7 +407,13 @@ export async function answerTaskQuestion(db:any,actor:TokenPayload,workspaceId:s
   const question=c.questions?.find(q=>q.id===questionId&&!q.answeredAt);if(!question)fail('AGENT_TASK_CHANGED','问题已处理，请刷新核对',409);
   const n=next(c,now,'answered',requestId,values);n.controlVersion++;n.lease=undefined;n.questions=c.questions!.map(q=>q.id===questionId?{...q,answer,answeredAt:new Date(now).toISOString()}:q);
   n.state=c.state==='paused'?'paused':n.waitingProposalIds.length||hasUnansweredQuestion(n)?'waiting_human':'queued';n.checkpoint='本人已补充资料；续办前核对原问题与答案。';
-  if(n.platform)n.platform={...n.platform,nextRunAt:0,requiresRead:true};
+  if(n.platform){
+    // An answer can complete a standalone reply. A business write still needs
+    // a fresh read, and existing source or approval obligations stay in force.
+    const requiresRead=n.platform.requiresRead===true||!!(c.requiredRead||c.lastProposalDecision||c.condition||c.automationId
+      ||c.sources.length||c.intentRefs?.length||c.attachments?.length||c.waitingProposalIds.length);
+    n.platform={...n.platform,nextRunAt:0,requiresRead,requiresReadBeforeWrite:requiresRead?undefined:true};
+  }
   await save(db,row,c,n);await event(db,n,actor,'answered',requestId,now);return taskView(n,actor,now);
 }
 /** In the SAME transaction as proposal creation: a model cannot continue after requesting approval. */

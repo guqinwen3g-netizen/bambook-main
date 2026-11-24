@@ -97,6 +97,28 @@ it.each(['resume','answer'] as const)('wakes a continuing task after a committed
  expect(await f.current(task.id)).toMatchObject({id:task.id,state:'succeeded',result:'续办完成。'});
 });
 
+it.each(['plain reply','bound order','blind write'] as const)('applies the correct freshness check after a user answer: %s',async mode=>{
+ const finish=tool('bambook_task',{action:'finish',outcome:'succeeded',result:'核对完成。'});
+ let orderId='',customerId='';
+ const complete=vi.fn(async()=>finish).mockResolvedValueOnce(tool('bambook_task',{action:'question',question:'请给数量。'}));
+ if(mode==='bound order')complete.mockResolvedValueOnce(finish).mockImplementationOnce(async()=>tool('bambook_get',{type:'order',id:orderId}));
+ if(mode==='blind write')complete.mockImplementationOnce(async()=>tool('bambook_execute',{command:{type:'customer.update',payload:{id:customerId,patch:{name:'不应被写入'}}}}));
+ const f=await fixture(complete);
+ orderId=f.workspace.state.orders[0].id;customerId=f.workspace.state.customers[0].id;
+ f.worker.start(3_600_000);
+ const {item:task}=(await f.human.post(f.base+'/personal-agent/tasks').send({requestId:randomUUID(),name:'核对数量',instructions:'数量不足时请先提问。',...(mode==='bound order'?{intentRefs:[{kind:'orders',id:orderId}]}:{})}).expect(201)).body;
+ await f.drain();
+ const waiting=await f.current(task.id);
+ await f.human.post(f.base+'/agent-tasks/'+task.id+'/answer').send({requestId:randomUUID(),version:waiting.version,questionId:waiting.questions[0].id,answer:'27'}).expect(200);
+ await f.drain();
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'核对完成。'});
+ expect(complete).toHaveBeenCalledTimes(mode==='plain reply'?2:mode==='blind write'?3:4);
+ const record=(await taskRecord(f.local.database,f.workspace.id,task.id)).value;
+ const rejected=record.platform!.steps[mode==='bound order'?2:1]?.result;
+ if(mode!=='plain reply')expect(rejected).toMatchObject({error:true,message:expect.stringContaining('回源读取')});
+ expect((await f.human.get(f.base).expect(200)).body.workspace.state.customers).toEqual(f.workspace.state.customers);
+});
+
 it('pre-reads authorized intent references before first planning while supplying the current company business date and real lease time',async()=>{
  const seen:any[]=[];const complete=vi.fn(async(input:LlmCompletionInput)=>{const text=String(input.messages[0].content),facts=JSON.parse(text.slice(text.indexOf('User request:\n')+'User request:\n'.length));seen.push(facts);return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对所选资料。'});});
  const f=await fixture(complete),order=f.workspace.state.orders[0],invoice=f.workspace.state.invoices[0],intentRefs=[{kind:'orders',id:order.id},{kind:'invoices',id:invoice.id}];
