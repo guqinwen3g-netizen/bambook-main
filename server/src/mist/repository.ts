@@ -1234,6 +1234,7 @@ export class MistRepository {
     // 每次尝试都是一笔全新事务：重新读取最新状态并重新核验账号、成员、权限与业务门禁；不复用旧整份状态。
     for (let attempt = 1; ; attempt++) {
       let stored: MistStoredFile | undefined;
+      let platformTaskQueued=false;
       try { const response = await this.writeTransact(workspaceId, async db => {
         const permission = await permissionFor(db);
         const { actor, row } = await this.own(db, prior, workspaceId, permission, true, false, false, isAgentActor(prior) || !!confirmProposalId || input.command?.type === 'agent.proposal.reject');
@@ -1536,8 +1537,8 @@ export class MistRepository {
         }
         if(isAgentActor(prior)&&prior.agentTaskLease&&command.type==='agent.proposal.create')await waitTaskForProposal(db,actor,prior.agentTaskLease,String(applied.result.id),input.requestId,Date.now());
         const rejectedTaskProposal=command.type==='agent.proposal.reject'?row.state.agentProposals?.find(p=>p.id===command.payload.id):undefined;
-        if(humanTaskProposal?.taskId)await settleTaskProposal(db,actor,workspaceId,humanTaskProposal.taskId,humanTaskProposal.id,input.requestId,'confirmed',Date.now());
-        if(rejectedTaskProposal?.taskId)try{await settleTaskProposal(db,actor,workspaceId,rejectedTaskProposal.taskId,rejectedTaskProposal.id,input.requestId,'rejected',Date.now());}catch(e){if(!(e instanceof MistApiError)||e.code!=='NOT_FOUND')throw e;}
+        if(humanTaskProposal?.taskId)platformTaskQueued=await settleTaskProposal(db,actor,workspaceId,humanTaskProposal.taskId,humanTaskProposal.id,input.requestId,'confirmed',Date.now());
+        if(rejectedTaskProposal?.taskId)try{platformTaskQueued=await settleTaskProposal(db,actor,workspaceId,rejectedTaskProposal.taskId,rejectedTaskProposal.id,input.requestId,'rejected',Date.now());}catch(e){if(!(e instanceof MistApiError)||e.code!=='NOT_FOUND')throw e;}
         const previousEvents=new Set((row.state.events??[]).map((event:{id:string})=>event.id));
         for(const event of applied.state.events??[])if(!previousEvents.has(event.id))event.at=context.auditNow ?? context.now;
         if(upload&&input.claimId!==undefined)applied.result={...applied.result,claimId:input.claimId};
@@ -1603,6 +1604,7 @@ export class MistRepository {
         return { workspace: await this.preparedView(db,saved, actor), receipt: { requestId: input.requestId, ...result, expectedRevision: input.expectedRevision }, replayed: false };
       });
         if (input.command?.type && ['email.flag','email.move','email.state.retry'].includes(input.command.type)) this.mailStateWake?.();
+        if(platformTaskQueued)this.wakePlatformTasks();
         return response;
       } catch (error: any) {
         let blobSettled = true;
