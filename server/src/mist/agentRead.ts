@@ -10,6 +10,7 @@ import type { PermissionScope } from '../_shared/rolePermissionMatrix';
 import type { MistState } from '../shared/mistWorkspace';
 import { emailSendEffectiveStatus, emailSendRecipients } from '../shared/mistEmail';
 import { developmentReopenSource } from '../shared/mistDevelopmentLifecycle';
+import { quotationConvertedOrders } from '../shared/mistQuotationLineConversion';
 import {agentCommandSources,unavailableCommandSources,type AgentGetContext,type AgentCommandSources} from './agentReadCommandSources';
 import { MistApiError } from './errors';
 
@@ -272,13 +273,22 @@ export function agentRelated(state: MistState, actor: TokenPayload, typeName: un
   const { type, row } = find(state, actor, typeName, id);
   const idsOf = (r: any): string[] => Object.entries(r).flatMap(([k, v]) => !/(Id|Ids)$/.test(k) ? [] : typeof v === 'string' && v ? [v] : Array.isArray(v) ? v.filter(x => typeof x === 'string') : []);
   // 明细行里的引用也算（如票据 lines[].purchaseId、付款申请 lines[].billId），只展开一层。
-  const scalarRefs = (r: any) => new Set([...idsOf(r), ...(r.source?.kind==='developmentIncoming'&&typeof r.source.devId==='string'?[r.source.devId]:[]),...(r.referenceTransfer&&typeof r.referenceTransfer.referenceId==='string'?[r.referenceTransfer.referenceId]:[]), ...Object.values(r).flatMap(v => Array.isArray(v) ? v.filter(x => x && typeof x === 'object' && !Array.isArray(x)).flatMap(idsOf) : [])]);
-  const own = scalarRefs(row);
+  const scalarRefs = (descriptor: ObjectType, r: any) => new Set([
+    ...idsOf(r),
+    ...(r.source?.kind === 'developmentIncoming' && typeof r.source.devId === 'string' ? [r.source.devId] : []),
+    ...(typeof r.referenceTransfer?.referenceId === 'string' ? [r.referenceTransfer.referenceId] : []),
+    ...Object.values(r).flatMap(value => Array.isArray(value)
+      ? value.filter(item => item && typeof item === 'object' && !Array.isArray(item)).flatMap(idsOf)
+      : []),
+    // Split conversion records later orders on quotation lines, beyond the first order on the header.
+    ...(descriptor.type === 'quotation' && Array.isArray(r.lines) ? quotationConvertedOrders(r).map(order => order.id) : []),
+  ]);
+  const own = scalarRefs(type, row);
   const results: Array<ReturnType<typeof ref> & { relation: 'references' | 'referenced_by' }> = [];
   let total = 0;
   for (const other of readable(actor,options.excludeTypes)) for (const candidate of rows(state, other)) {
     if (other === type && candidate.id === row.id) continue;
-    const relation = own.has(candidate.id) ? 'references' : scalarRefs(candidate).has(row.id) ? 'referenced_by' : null;
+    const relation = own.has(candidate.id) ? 'references' : scalarRefs(other, candidate).has(row.id) ? 'referenced_by' : null;
     if (!relation) continue;
     total++;
     if (results.length < RELATED_LIMIT) results.push({ ...ref(other, candidate), relation });

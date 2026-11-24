@@ -46,7 +46,19 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
       case 'bambook_get': {
         const record = result?.object ?? result;
         const name = text(record?.label) || humanId(args.id), to = failed ? undefined : target(record?.link); out.push({ ...base, kind: 'read', label: `读取${typeLabel(args.type)}${name ? ' ' + name : ''}`, ...(typeof args.type === 'string' && typeof args.id === 'string' && completed && !failed ? { ref: { type: args.type, id: to?.id ?? args.id, label: name || typeLabel(args.type), ...(to ? { view: to.view, ...(to.section ? { section: to.section } : {}) } : {}) } } : {}) }); break; }
-      case 'bambook_related': out.push({ ...base, kind: 'read', label: `展开${typeLabel(args.type)}的关联记录` }); break;
+      case 'bambook_related': {
+        const record = completed && !failed && !step.compacted ? result?.object : undefined;
+        const name = text(record?.label);
+        const to = target(record?.link);
+        const detail = Number.isSafeInteger(record?.total) && record.total >= 0
+          ? record.truncated === true ? `部分结果 · 共 ${record.total} 条` : `${record.total} 条关联记录`
+          : '';
+        out.push({ ...base, kind: 'read', label: `展开${typeLabel(args.type)}${name ? ' ' + name + ' ' : ''}的关联记录`,
+          ...(detail ? { detail } : {}),
+          ...(to && typeof args.type === 'string' ? { ref: { ...to, type: args.type, label: name || typeLabel(args.type) } } : {}),
+        });
+        break;
+      }
       case 'bambook_commands': out.push({ ...base, kind: 'read', label: '查看可用操作' }); break;
       case 'bambook_audit': out.push({ ...base, kind: 'read', label: '查看操作记录' }); break;
       case 'bambook_file_text': {
