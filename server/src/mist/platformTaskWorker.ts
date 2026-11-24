@@ -50,15 +50,38 @@ export async function invokePlatformTaskTool(repository:MistRepository,actor:Age
 export class MistPlatformTaskWorker{
   private enabled=false;private timer?:ReturnType<typeof setInterval>;private initial?:ReturnType<typeof setTimeout>;private scanning=false;private scanDone:Promise<void>=Promise.resolve();
   private runs=new Map<string,{abort:AbortController;done:Promise<void>}>();private readonly owners=new Map<string,string>();private readonly complete:(input:LlmCompletionInput)=>Promise<string>;private readonly id='platform-'+randomUUID();
+  private wakeTimer?:ReturnType<typeof setTimeout>;
+  private wakeRequested=false;
   private conditionCursor?:{createdAt:string;id:string};
   constructor(private readonly repository:MistRepository,private readonly options:PlatformTaskWorkerOptions){this.complete=options.complete??createLlmCompleter({platformProfile:'agent-task',validateResponse:parsePlatformTaskPlan});}
   get running(){return this.enabled;}
   get available(){return this.enabled&&(this.options.configured?.()??(this.options.complete?true:getMistAssistantStatus().configured));}
-  start(delayMs=1000){if(this.enabled)return;this.enabled=true;this.timer=setInterval(()=>void this.tick(),this.options.tickMs??3000);this.initial=setTimeout(()=>void this.tick(),delayMs);this.timer.unref?.();this.initial.unref?.();}
-  async stop(){this.enabled=false;clearInterval(this.timer);clearTimeout(this.initial);for(const run of this.runs.values())run.abort.abort();await this.scanDone;await Promise.allSettled([...this.runs.values()].map(r=>r.done));}
+  start(delayMs=1000){
+    if(this.enabled)return;
+    this.enabled=true;
+    this.timer=setInterval(()=>void this.tick(),this.options.tickMs??3000);
+    this.initial=setTimeout(()=>{this.initial=undefined;void this.tick();},delayMs);
+    this.timer.unref?.();this.initial.unref?.();
+  }
+  wake(){
+    if(!this.enabled||this.initial)return;
+    this.wakeRequested=true;
+    if(this.scanning||this.wakeTimer||this.runs.size>=(this.options.concurrency??2))return;
+    this.wakeTimer=setTimeout(()=>{this.wakeTimer=undefined;void this.tick();},0);
+    this.wakeTimer.unref?.();
+  }
+  async stop(){
+    this.enabled=false;this.wakeRequested=false;
+    clearInterval(this.timer);clearTimeout(this.initial);clearTimeout(this.wakeTimer);
+    this.initial=undefined;this.wakeTimer=undefined;
+    for(const run of this.runs.values())run.abort.abort();
+    await this.scanDone;await Promise.allSettled([...this.runs.values()].map(r=>r.done));
+  }
   async settled(){await this.scanDone;await Promise.allSettled([...this.runs.values()].map(r=>r.done));}
   async tick(){
     if(!this.enabled||this.scanning)return;this.scanning=true;
+    clearTimeout(this.wakeTimer);this.wakeTimer=undefined;
+    if(this.runs.size<(this.options.concurrency??2))this.wakeRequested=false;
     let end!:()=>void;this.scanDone=new Promise<void>(resolve=>{end=resolve;});
     try{
       // Scheduling checks remain live even when every model slot is busy. A cyclic
@@ -89,13 +112,13 @@ export class MistPlatformTaskWorker{
         while(runnable.length&&startsLeft>0&&this.runs.size<capacity&&this.enabled){
           let pick=0;for(let i=1;i<runnable.length;i++)if((load.get(runnable[i].ownerId)??0)<(load.get(runnable[pick].ownerId)??0))pick=i;
           const job=runnable.splice(pick,1)[0],key=job.workspaceId+':'+job.taskId;
-          const abort=new AbortController(),run={abort,done:Promise.resolve()};this.runs.set(key,run);this.owners.set(key,job.ownerId);load.set(job.ownerId,(load.get(job.ownerId)??0)+1);startsLeft--;progressed=true;run.done=this.perform(job,abort).finally(()=>{this.runs.delete(key);this.owners.delete(key);});
+          const abort=new AbortController(),run={abort,done:Promise.resolve()};this.runs.set(key,run);this.owners.set(key,job.ownerId);load.set(job.ownerId,(load.get(job.ownerId)??0)+1);startsLeft--;progressed=true;run.done=this.perform(job,abort).finally(()=>{this.runs.delete(key);this.owners.delete(key);if(this.wakeRequested)this.wake();});
         }
         // 本轮没轮到的候选留给下一次扫描。
         for(const job of runnable)seen.delete(job.workspaceId+':'+job.taskId);
         if(!jobs.length||!progressed)break;
       }
-    }catch{this.options.onError?.('PLATFORM_TASK_SCAN_FAILED');}finally{this.scanning=false;end();}
+    }catch{this.options.onError?.('PLATFORM_TASK_SCAN_FAILED');}finally{this.scanning=false;end();if(this.wakeRequested)this.wake();}
   }
   private async model(input:Omit<LlmCompletionInput,'signal'>,signal:AbortSignal){
     const child=new AbortController(),stop=()=>child.abort();signal.addEventListener('abort',stop,{once:true});if(signal.aborted)stop();
