@@ -14,6 +14,52 @@ let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
 const view=(active=true, taskId?:string)=> <Nav.Provider value={{route:{view:'assistant',...(taskId?{section:'tasks',id:taskId}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
 const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
 
+it('keeps an unsent question, references and files with their own conversation', async () => {
+  const first = {
+    id: 'first', identityId: 'personal', executor: 'platform', conversationId: 'c_first',
+    instructions: '核对第一单', state: 'succeeded', result: '第一单已读取',
+    questions: [], waitingProposalIds: [], canControl: false,
+    createdAt: '2026-11-24T00:00:00Z', updatedAt: '2026-11-24T00:01:00Z',
+  };
+  const second = { ...first, id: 'second', conversationId: 'c_second', instructions: '核对第二单', result: '第二单已读取' };
+  mock.fetch.mockResolvedValue(response({ configured: true }));
+  mock.api.mockImplementation(async (url: string) => {
+    if (url.includes('/agent-identities')) return { items: [{ id: 'personal', kind: 'personal', state: 'active' }] };
+    if (url.endsWith('/agent-task-capabilities')) return { platformAvailable: true };
+    return { items: url.endsWith('/agent-tasks') ? [first, second] : [], nextCursor: null };
+  });
+  try {
+    await mount();
+    await click('核对第一单');
+    await question('第一单的未发送文字');
+    await click('引用业务记录');
+    await click('加入问题');
+    const input = host.querySelector('input[type="file"]')!;
+    Object.defineProperty(input, 'files', { value: [new File(['first'], 'first.pdf', { type: 'application/pdf' })] });
+    await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+    expect(button('移除附件 first.pdf')).toBeTruthy();
+    await click('核对第二单');
+    expect(host.querySelector('textarea')!.value).toBe('');
+    expect(button('移除附件 first.pdf')).toBeUndefined();
+    expect(button('移除 SO-SELECTED · Fixture')).toBeUndefined();
+    await question('第二单的未发送文字');
+    await click('核对第一单');
+    expect(host.querySelector('textarea')!.value).toBe('第一单的未发送文字');
+    expect(button('移除附件 first.pdf')).toBeTruthy();
+    expect(host.textContent).toContain('已引用 1 / 12 个来源');
+    localStorage.setItem('mist.xiaozhu.conversation:session-a:workspace', second.conversationId);
+    await act(async () => root!.render(view(false)));
+    await act(async () => root!.render(view()));
+    expect(host.querySelector('textarea')!.value).toBe('第一单的未发送文字');
+    expect(button('移除附件 first.pdf')).toBeTruthy();
+    await click('核对第二单');
+    expect(host.querySelector('textarea')!.value).toBe('第二单的未发送文字');
+    expect(mock.api.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  } finally {
+    localStorage.removeItem('mist.xiaozhu.conversation:session-a:workspace');
+  }
+});
+
 it('keeps the same conversation in sync when a paused task is resumed from its drawer', async () => {
   vi.useFakeTimers();
   let acknowledged = false;
