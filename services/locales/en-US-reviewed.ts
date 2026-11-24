@@ -602,6 +602,7 @@ export const reviewedEnglish: Record<string, string> = {
   '提交结果未确认，请重试发送':'Submission not confirmed. Send again to retry.',
   '提交结果待核对':'Submission confirmation pending',
   '核对提交结果':'Check submission',
+  '问题超过 4000 字，请缩短后重试':'Shorten the question to 4,000 characters and try again.',
   '提交结果暂时无法核对':'Could not check the submission right now',
   '请恢复原附件后重试，或先核对提交结果':'Restore the original attachments to retry, or check the submission first',
   '已找回提交的任务':'Submitted task recovered',

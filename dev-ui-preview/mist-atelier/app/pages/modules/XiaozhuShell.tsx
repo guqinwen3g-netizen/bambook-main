@@ -6,6 +6,7 @@ import { uiText } from '../../../../../services/interfaceLanguage';
 import { TASK_ATTACHMENT_ACCEPT } from '../../../../../server/src/shared/mistTaskAttachments';
 import type { usePersonalAgentVoice } from '../../runtime/personalAgentVoice';
 import type { AssistantAttachmentRef } from '../../runtime/assistantConversation';
+import { TASK_INSTRUCTION_LIMIT } from '../../runtime/xiaozhuCowork';
 
 type Voice = ReturnType<typeof usePersonalAgentVoice>;
 export const voiceInCall = (voice: Voice) => voice.state === 'connecting' || voice.state === 'listening' || voice.state === 'speaking';
@@ -50,7 +51,7 @@ export function XiaozhuComposer({ value, onChange, onSend, ready, busy, working,
         <IconButton size="sm" icon={X} label={uiText('移除附件')+' '+file.name} disabled={busy} onClick={file.remove} />
       </span>)}</div>}
     {sources.length > 0 && <div className="mist-xz-sources">{sources.map(s => <span key={s.id} className="mist-xz-source"><span>{uiText(s.label)}</span><IconButton size="sm" icon={X} label={uiText('移除 ' + s.label)} disabled={busy} onClick={() => onRemoveSource(s)} /></span>)}</div>}
-    <textarea ref={field as React.RefObject<HTMLTextAreaElement>} rows={1} aria-label={uiText('向助手提问')} placeholder={placeholder} value={value} maxLength={4000} disabled={busy || disabled} onChange={e => onChange(e.target.value)} onKeyDown={e => {
+    <textarea ref={field as React.RefObject<HTMLTextAreaElement>} rows={1} aria-label={uiText('向助手提问')} placeholder={placeholder} value={value} maxLength={TASK_INSTRUCTION_LIMIT} disabled={busy || disabled} onChange={e => onChange(e.target.value)} onKeyDown={e => {
       if (e.nativeEvent.isComposing) return;
       const before=value.slice(0,e.currentTarget.selectionStart);
       if (e.key === '@' && (!before || /[\s，。；、：]$/.test(before))) { e.preventDefault(); onAttach(); }

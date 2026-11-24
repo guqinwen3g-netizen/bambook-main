@@ -20,20 +20,51 @@ export function isCurrentTaskStatusQuestion(text: string): boolean {
 }
 
 const REQUEST_MARK = '\n【本次请求】\n';
-const CONTEXT_TURNS = 3, CONTEXT_REPLY = 300, THREAD_LIMIT = 90, LIST_PAGES = 3, INSTRUCTION_LIMIT = 4000, LEGACY_GAP_MS = 30 * 60_000;
+const CONTEXT_HEADER = '【此前对话】\n';
+const CONTEXT_TURNS = 3, CONTEXT_REPLY = 300, THREAD_LIMIT = 90, LIST_PAGES = 3, LEGACY_GAP_MS = 30 * 60_000;
+export const TASK_INSTRUCTION_LIMIT = 4000;
+
+function textPrefix(value: string, limit: number) {
+  const prefix = value.slice(0,limit);
+  return prefix.length < value.length ? prefix.replace(/[\uD800-\uDBFF]$/u,'') : prefix;
+}
+
+export function formatTaskQuestion(question: string, sources: ReadonlyArray<{label:string}>) {
+  const text = question.trim();
+  if (!sources.length) return text;
+  const footer = '\n（引用业务记录：'+sources.map(source=>source.label).join('、')+'）';
+  // The structured intent references are sent separately even when the display footer does not fit.
+  return text.length + footer.length <= TASK_INSTRUCTION_LIMIT ? text + footer : text;
+}
 
 /** 把此前几轮的问答压成一段上下文，随本次请求一起交给任务；展示时用 splitRequest 去掉。 */
 export function composeInstructions(history: AgentTaskView[], text: string): string {
-  const turns = history.filter(t => t.state === 'succeeded' && t.result).slice(-CONTEXT_TURNS);
   const message = text.trim();
-  if (!turns.length) return message.slice(0, INSTRUCTION_LIMIT);
-  const context = '【此前对话】\n' + turns.map(t => `我：${splitRequest(t.instructions)}\n小竹：${t.result.slice(0, CONTEXT_REPLY)}`).join('\n');
-  const head = context.slice(0, Math.max(0, INSTRUCTION_LIMIT - REQUEST_MARK.length - message.length));
-  return (head + REQUEST_MARK + message).slice(0, INSTRUCTION_LIMIT);
+  if (message.length > TASK_INSTRUCTION_LIMIT) throw new Error('问题超过 4000 字，请缩短后重试');
+  let remaining = TASK_INSTRUCTION_LIMIT - CONTEXT_HEADER.length - REQUEST_MARK.length - message.length;
+  if (remaining <= 0) return message;
+
+  const context: string[] = [];
+  const turns = history.filter(t => t.state === 'succeeded' && t.result).slice(-CONTEXT_TURNS).reverse();
+  for (const task of turns) {
+    const room = remaining - (context.length ? 1 : 0);
+    if (room < 3) break;
+    const historyText = `我：${splitRequest(task.instructions)}\n小竹：${textPrefix(task.result,CONTEXT_REPLY)}`
+      .replaceAll(REQUEST_MARK,'\n〔本次请求〕\n');
+    const item = textPrefix(historyText,room);
+    context.unshift(item);
+    remaining = room - item.length;
+  }
+  return context.length ? CONTEXT_HEADER + context.join('\n') + REQUEST_MARK + message : message;
 }
 export function splitRequest(instructions: string): string {
   const at = instructions.indexOf(REQUEST_MARK);
-  return at >= 0 ? instructions.slice(at + REQUEST_MARK.length) : instructions;
+  if (at < 0) return instructions;
+  const prefix = instructions.slice(0,at);
+  // Older instructions could have had their context header clipped before the separator.
+  return instructions.startsWith(CONTEXT_HEADER) || CONTEXT_HEADER.startsWith(prefix)
+    ? instructions.slice(at + REQUEST_MARK.length)
+    : instructions;
 }
 
 export type ConversationMeta = { id: string; title?: string; hidden?: true };
@@ -300,7 +331,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       }
       const {requestId,instructions,locale} = saved;
       const target = saved.conversationId;
-      const body = { requestId,instructions,locale,name: message.slice(0,60), ...(target ? { conversationId:target } : {}),
+      const body = { requestId,instructions,locale,name: textPrefix(message,60), ...(target ? { conversationId:target } : {}),
         ...(refs.length ? { intentRefs: refs } : {}), ...(attachmentRefs.length ? { attachmentRefs } : {}) };
       let submission: RequestInit = { method: 'POST', body: JSON.stringify(body) };
       if (files.length) {

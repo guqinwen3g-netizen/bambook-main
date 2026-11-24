@@ -49,7 +49,7 @@ import { recordIndex } from '../../runtime/xiaozhuRecords';
 import { XiaozhuComposer, XiaozhuEmpty, voiceInCall } from './XiaozhuShell';
 import { XiaozhuTurnShell } from './XiaozhuThread';
 import { XiaozhuMarkdown } from './XiaozhuMarkdown';
-import { COWORK_ACTIVE, conversationsOf, isCurrentTaskStatusQuestion, newConversationId, selectedTaskIntentRefs, splitRequest, useConversationMeta, useXiaozhuCowork } from '../../runtime/xiaozhuCowork';
+import { COWORK_ACTIVE, conversationsOf, formatTaskQuestion, isCurrentTaskStatusQuestion, newConversationId, selectedTaskIntentRefs, splitRequest, useConversationMeta, useXiaozhuCowork } from '../../runtime/xiaozhuCowork';
 import { usePersonalAgentVoice } from '../../runtime/personalAgentVoice';
 import { FileName } from '../../runtime/files';
 import { FailureNotice } from '../../runtime/FailureNotice';
@@ -217,7 +217,7 @@ export function AssistantPage(){
   const cowork=useXiaozhuCowork(w.workspace?.id,scope,canChat,conversationId);
   const handledRecoveries=React.useRef(new Set<string>());
   const recoveredSubmission=cowork.recoveredSubmissions.filter(entry=>(entry.sourceConversationId??entry.conversationId)===conversationId).at(-1);
-  const taskText=question.trim()+(selected.length?'\n（引用业务记录：'+selected.map(s=>s.label).join('、')+'）':'');
+  const taskText=formatTaskQuestion(question,selected);
   React.useEffect(()=>{
     if(!recoveredSubmission||handledRecoveries.current.has(recoveredSubmission.requestId))return;
     handledRecoveries.current.add(recoveredSubmission.requestId);
