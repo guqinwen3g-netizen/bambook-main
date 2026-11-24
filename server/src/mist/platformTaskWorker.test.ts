@@ -313,6 +313,8 @@ it('researches a PDF, workbook and image together with a selected order, keeping
    expect(input).toContain('PDF-DELIVERY-925');
    expect(input).toContain('XLSX-QUANTITY-318');
    expect(input).toContain('bambook_get');
+   expect(input).toContain('"imageSources":["sample.png"]');
+   expect(model.systemPrompt).toContain('bambook_file_text 不提取图片文字');
    expect(model.images).toEqual([{name:'sample.png',url:expect.stringMatching(/^data:image\/jpeg;base64,/)}]);
    return JSON.stringify({name:'bambook_task',arguments:{action:'finish',outcome:'succeeded',result:'已综合核对所选记录和三份附件。'},progress:'已读订单和两份文档，图片编号也已识别，正在整理对照结果。'});
  });
