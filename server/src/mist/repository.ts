@@ -248,6 +248,7 @@ const ORIGINAL_WRITE_STATE = new WeakMap<object, MistState>();
 const OWN_TEAMS = new WeakMap<object, string[]>();
 const TASK_PROPOSAL_ACCESS = new WeakMap<object,Map<string,{visible:boolean;blocked?:string}>>();
 const scopeOf=(row:MistWorkspaceRow)=>ROW_SCOPE.get(row);
+const platformTaskRequiresRead=(task:TaskRecord)=>task.platform?.requiresRead===true||!!task.requiredRead;
 const candidateIds=(row:MistWorkspaceRow)=>companyRow(row)?memberIds(row.state):[row.ownerId,...memberIds(row.state)];
 /** 同一数据库客户端共享的按公司写入队列（多个仓储实例共用一个连接池时也按同一队列排队）。 */
 const WRITE_QUEUES = new WeakMap<object, Map<string, Promise<void>>>();
@@ -284,7 +285,17 @@ export class MistRepository {
   }
   async platformTaskContext(prior:AgentActor):Promise<PlatformTaskContext>{
     if(prior.agentExecutor!=='platform'||!prior.agentTaskLease)fail('FORBIDDEN','请使用平台任务执行器',403);
-    return this.transact(async db=>{const{actor,row}=await this.own(db,prior,prior.agentTaskLease!.workspaceId,'ai:chat'),c=(await taskRecord(db,row.id,prior.agentTaskLease!.taskId)).value;const visible=(await this.preparedView(db,row,actor)).state;return{task:taskView(c,actor,Date.now()),locale:c.locale??'zh-CN',businessAt:this.context(actor,row.state).now,requiresRead:c.platform?.requiresRead===true||!!c.requiredRead,steps:structuredClone(c.platform?.steps??[]),decisions:(visible.agentProposals??[]).filter(p=>p.taskId===c.id&&p.ownerId===actor.userId).map(p=>({id:p.id,state:p.state,...(p.note?{note:p.note}:{}),...(p.produced?{produced:{fileId:p.produced.fileId,fileName:p.produced.fileName}}:{})}))};});
+    return this.transact(async db=>{const{actor,row}=await this.own(db,prior,prior.agentTaskLease!.workspaceId,'ai:chat'),c=(await taskRecord(db,row.id,prior.agentTaskLease!.taskId)).value;const visible=(await this.preparedView(db,row,actor)).state;return{task:taskView(c,actor,Date.now()),locale:c.locale??'zh-CN',businessAt:this.context(actor,row.state).now,requiresRead:platformTaskRequiresRead(c),steps:structuredClone(c.platform?.steps??[]),decisions:(visible.agentProposals??[]).filter(p=>p.taskId===c.id&&p.ownerId===actor.userId).map(p=>({id:p.id,state:p.state,...(p.note?{note:p.note}:{}),...(p.produced?{produced:{fileId:p.produced.fileId,fileName:p.produced.fileName}}:{})}))};});
+  }
+  async platformTaskNeedsRead(prior:AgentActor):Promise<boolean>{
+    const lease=prior.agentTaskLease;
+    if(prior.agentExecutor!=='platform'||!lease)fail('FORBIDDEN','请使用平台任务执行器',403);
+    return this.transact(async db=>{
+      // own rechecks the live lease and source permissions at tool dispatch.
+      const {row}=await this.own(db,prior,lease.workspaceId,'ai:chat');
+      const {value}=await taskRecord(db,row.id,lease.taskId);
+      return platformTaskRequiresRead(value);
+    });
   }
   async pulsePlatformTask(prior:AgentActor){
     if(prior.agentExecutor!=='platform'||!prior.agentTaskLease)fail('FORBIDDEN','请使用平台任务执行器',403);

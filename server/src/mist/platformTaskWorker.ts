@@ -19,10 +19,10 @@ const SYSTEM=`你是Bambook平台业务执行器，只处理当前本人明确�
 
 /** The same typed tools, permissions, source provenance and human gates as standard MCP. */
 export async function invokePlatformTaskTool(repository:MistRepository,actor:AgentActor,step:PlatformTaskStep){
-  const lease=actor.agentTaskLease!,context=await repository.platformTaskContext(actor);
-  if(context.requiresRead&&(step.plan.name==='bambook_execute'||step.plan.name==='bambook_task'&&step.plan.arguments.action==='finish'&&['succeeded','stopped'].includes(String(step.plan.arguments.outcome))))return{error:true,message:'本人决定或等待结束后，请先回源读取当前业务，再办理或报告结果。'};
+  const lease=actor.agentTaskLease!,requiresRead=await repository.platformTaskNeedsRead(actor);
+  if(requiresRead&&(step.plan.name==='bambook_execute'||step.plan.name==='bambook_task'&&step.plan.arguments.action==='finish'&&['succeeded','stopped'].includes(String(step.plan.arguments.outcome))))return{error:true,message:'本人决定或等待结束后，请先回源读取当前业务，再办理或报告结果。'};
   // The platform turn already includes current status/answers; it needs fresh business facts.
-  if(step.plan.name==='bambook_task'&&step.plan.arguments.action==='status')return{error:true,message:context.requiresRead?'当前任务状态已在上下文提供；请用业务读取工具重新核对原资料，任务状态不算回源读取。':'当前任务状态已在上下文提供，不要重复查询任务自身状态；未核对的业务请读取原资料，已核对则用finish提交准确报告。'};
+  if(step.plan.name==='bambook_task'&&step.plan.arguments.action==='status')return{error:true,message:requiresRead?'当前任务状态已在上下文提供；请用业务读取工具重新核对原资料，任务状态不算回源读取。':'当前任务状态已在上下文提供，不要重复查询任务自身状态；未核对的业务请读取原资料，已核对则用finish提交准确报告。'};
   const args={...step.plan.arguments,...(step.plan.name!=='bambook_commands'?{workspaceId:lease.workspaceId}:{}),...(step.plan.name==='bambook_task'?{taskId:lease.taskId}:{})};
   if(step.plan.name!=='bambook_task'){
     const operation=step.plan.name==='bambook_execute'?step.id:step.id+'_'+lease.runId.slice(0,8);
@@ -42,7 +42,7 @@ export async function invokePlatformTaskTool(repository:MistRepository,actor:Age
   if(!['bambook_execute','bambook_task'].includes(step.plan.name))await repository.recordAgentTaskRead(actor,lease.workspaceId,data);
   // 未列全的结果不算回源读取；不说明的话模型会反复查询直到耗尽步数。
   if(step.plan.name==='bambook_file_text')return data; // File windows already carry precise continuation instructions.
-  if(context.requiresRead&&(data as any)?.truncated===true&&step.plan.name!=='bambook_execute')return{...(data as object),readHint:'结果未列全，不算回源读取；用bambook_get读取要核对的具体对象。'};
+  if(requiresRead&&(data as any)?.truncated===true&&step.plan.name!=='bambook_execute')return{...(data as object),readHint:'结果未列全，不算回源读取；用bambook_get读取要核对的具体对象。'};
   return data;
 }
 

@@ -223,6 +223,40 @@ it('rechecks authority before saving a late model decision and retains owner cle
  await f.worker.tick();await vi.waitFor(()=>expect(complete).toHaveBeenCalledTimes(1));ceiling.value=[];resolve(tool('bambook_execute',{command:{type:'email.flag',payload:{id:before.messages[0].id,flag:'starred',value:true}}}));await f.worker.settled();const masked=await f.current(task.id);expect(masked).toMatchObject({state:'access_changed',instructions:'',questions:[]});
  await f.human.post(f.base+'/agent-tasks/'+task.id+'/cancel').send({requestId:randomUUID(),version:masked.version}).expect(200);ceiling.value=null;expect((await f.human.get(f.base).expect(200)).body.workspace.state.email).toEqual(before);
 });
+it('loads the full workspace projection for planning but not for individual tool gates',async()=>{
+ let turn=0;
+ const f=await fixture(async()=>++turn===1
+  ?tool('bambook_task',{action:'checkpoint',summary:'已核对任务。'})
+  :tool('bambook_task',{action:'finish',outcome:'succeeded',result:'核对结束。'}));
+ f.worker.start(3_600_000);
+ const task=await f.create('platform');
+ const prepared=vi.spyOn(f.repository as any,'preparedView');
+ await f.drain();
+ expect(turn).toBe(2);
+ expect(prepared).toHaveBeenCalledTimes(2);
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'核对结束。'});
+});
+it('rechecks live source access after persisting a tool plan and leaves the tool unexecuted on revocation',async()=>{
+ const ceiling:{value:string[]|null}={value:null};
+ const f=await fixture(async()=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'不应提交。'}),{ceiling});
+ f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks').send({
+  requestId:randomUUID(),name:'核对原订单',instructions:'核对订单。',intentRefs:[{kind:'orders',id:f.workspace.state.orders[0].id}],
+ }).expect(201)).body.item;
+ const save=f.repository.savePlatformTaskPlan.bind(f.repository);
+ vi.spyOn(f.repository,'savePlatformTaskPlan').mockImplementation(async(actor,plan)=>{
+  const step=await save(actor,plan);
+  if(plan.name==='bambook_task'&&plan.arguments.action==='finish')ceiling.value=['ai:chat'];
+  return step;
+ });
+ const runtime=vi.spyOn(f.repository,'agentTaskRuntime');
+ await f.drain();
+ expect(runtime).not.toHaveBeenCalled();
+ expect(await f.current(task.id)).toMatchObject({state:'access_changed',result:''});
+ const persisted=(await taskRecord(f.local.database,f.workspace.id,task.id)).value;
+ expect(persisted.platform?.steps.at(-1)).toMatchObject({plan:{name:'bambook_task',arguments:{action:'finish'}}});
+ expect(persisted.platform?.steps.at(-1)?.result).toBeUndefined();
+});
 it('retains read-only service ceilings when the platform model asks to write',async()=>{
  let index=0,mail='';const complete=vi.fn(async()=>[tool('bambook_execute',{command:{type:'email.flag',payload:{id:mail,flag:'starred',value:true}}}),tool('bambook_get',{type:'email',id:mail}),tool('bambook_task',{action:'finish',outcome:'succeeded',result:'只读权限，未修改邮件。'})][index++]);
  const f=await fixture(complete,{mode:'read'});mail=f.workspace.state.email.messages[0].id;f.worker.start(3_600_000);const task=await f.create('platform');await f.drain();expect((await f.current(task.id)).state).toBe('succeeded');expect((await f.human.get(f.base).expect(200)).body.workspace.state.email).toEqual(f.workspace.state.email);
