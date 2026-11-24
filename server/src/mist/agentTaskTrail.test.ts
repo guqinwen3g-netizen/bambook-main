@@ -44,3 +44,13 @@ it('uses the known attachment name and safe failure details for a rejected conti
   expect(JSON.stringify(actual)).not.toContain('private fixture');
   expect(JSON.stringify(actual)).not.toContain('aft1.');
 });
+
+it('names image-only PDF pages even when other pages in the window were readable',()=>{
+  const [final,more]=platformTrail([
+    step('bambook_file_text',{fileId:'mixed'},{file:{id:'mixed',name:'mixed.pdf'},kind:'pdf',text:'readable content',hasMore:false,range:{pageFrom:21,pageTo:23},pagesWithoutText:[22,22,99,'fixture-secret']}),
+    step('bambook_file_text',{fileId:'mixed'},{file:{id:'mixed',name:'mixed.pdf'},kind:'pdf',text:'readable content',hasMore:true,range:{pageFrom:1,pageTo:20},pagesWithoutText:[3]}),
+  ]);
+  expect(final).toMatchObject({label:'读取附件 mixed.pdf',detail:'本次读取第 21 至 23 页；第 22 页无可提取文字'});
+  expect(final.failed).toBeUndefined();
+  expect(more.detail).toBe('本次读取第 1 至 20 页；第 3 页无可提取文字；还有后续内容');
+});
