@@ -9,15 +9,15 @@ import{SERVICE_KEY_HEADER}from'./agentIdentities';
 import type{MistPlatformTaskWorker}from'./platformTaskWorker';
 import {platformTaskClock}from'./platformTaskWorker';
 import type{MistRepository}from'./repository';
-import type{LlmCompletionInput}from'../ai/llmProviders';
+import{createLlmCompleter,type LlmCompletionInput}from'../ai/llmProviders';
 import{taskRecord}from'./agentTasks';
 import{MistPrivateFiles}from'./files';
 let directory:string;const workers:MistPlatformTaskWorker[]=[];
 beforeEach(async()=>{directory=await mkdtemp(path.join(tmpdir(),'platform-agent-'));vi.stubEnv('MIST_LOCAL_WORKSPACE','1');vi.stubEnv('NODE_ENV','test');});
 afterEach(async()=>{await Promise.all(workers.splice(0).map(w=>w.stop()));vi.restoreAllMocks();vi.unstubAllEnvs();await rm(directory,{recursive:true,force:true});});
-async function fixture(complete:(input:LlmCompletionInput)=>Promise<string>,options:{ceiling?:{value:string[]|null};mode?:'read'|'operate';concurrency?:number;modelTimeoutMs?:number}={}){
+async function fixture(complete:(input:LlmCompletionInput)=>Promise<string>,options:{ceiling?:{value:string[]|null};mode?:'read'|'operate';concurrency?:number;modelTimeoutMs?:number;pulseMs?:number}={}){
  const local=createMistLocalRuntime({directory});if(options.ceiling){const authorize=local.authorize;local.authorize=(db,prior,permission)=>authorize(db,options.ceiling!.value===null?prior:{...prior,permissionCeiling:options.ceiling!.value},permission);}
- const app=createMistServer(undefined,{local,agentTasks:{complete,tickMs:3_600_000,pulseMs:20,concurrency:options.concurrency,modelTimeoutMs:options.modelTimeoutMs}}),human=request.agent(app);await human.get('/api/mist/session').expect(200);
+ const app=createMistServer(undefined,{local,agentTasks:{complete,tickMs:3_600_000,pulseMs:options.pulseMs??20,concurrency:options.concurrency,modelTimeoutMs:options.modelTimeoutMs}}),human=request.agent(app);await human.get('/api/mist/session').expect(200);
  const workspace=(await human.get('/api/mist/workspaces/default').expect(200)).body.workspace,base='/api/mist/workspaces/'+workspace.id,id=randomUUID();
  await human.post(base+'/agent-identities').send({id,name:'业务助理',ownerId:'local-operator',mode:options.mode??'operate'}).expect(201);
  const key=(await human.post(base+'/agent-identities/'+id+'/issue').send({requestId:randomUUID(),version:1}).expect(200)).body.token;
@@ -344,6 +344,25 @@ it('ignores late model output after human stop, even when the model ignores its 
  const before=(await f.human.get(f.base).expect(200)).body.workspace.state,job=(await f.repository.duePlatformTasks())[0];await f.worker.tick();await vi.waitFor(()=>expect(complete).toHaveBeenCalledTimes(1));await expect(f.repository.claimPlatformTask(job,'another-worker',f.local.agentDelegation.makeTaskCredential)).rejects.toMatchObject({code:'AGENT_TASK_BUSY'});
  const current=await f.current(task.id);await f.human.post(f.base+'/agent-tasks/'+task.id+'/cancel').send({requestId:randomUUID(),version:current.version}).expect(200);const stopped=(await f.human.get(f.base).expect(200)).body.workspace.state;await f.worker.stop();resolve(tool('bambook_execute',{command:{type:'email.flag',payload:{id:before.email.messages[0].id,flag:'starred',value:true}}}));await Promise.resolve();
  expect((await f.current(task.id)).state).toBe('cancelled');const after=(await f.human.get(f.base).expect(200)).body.workspace.state;expect(after).toEqual(stopped);expect(after.email).toEqual(before.email);
+});
+it('does not send a fallback when the user has cancelled between provider attempts', async () => {
+ vi.stubEnv('ARK_API_KEY','test-primary');
+ vi.stubEnv('BAMBOOK_LLM_BACKUP_URL','https://backup.example/v1');
+ vi.stubEnv('BAMBOOK_LLM_BACKUP_KEY','test-backup');
+ let releasePrimary!:(response:Response)=>void;
+ const primary=new Promise<Response>(resolve=>{releasePrimary=resolve;});
+ const fetchMock=vi.fn().mockReturnValueOnce(primary).mockResolvedValue(new Response('{}',{status:503}));
+ vi.stubGlobal('fetch',fetchMock);
+ try {
+  const complete=createLlmCompleter({platformProfile:'agent-task',platformProviders:{chain:()=>[]},subscriptions:{isConnected:()=>false,complete:async()=>''}});
+  const f=await fixture(complete,{pulseMs:60_000});f.worker.start(3_600_000);
+  const task=await f.create('platform');await f.worker.tick();await vi.waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(1));
+  const waiting=await f.current(task.id);
+  await f.human.post(f.base+'/agent-tasks/'+task.id+'/cancel').send({requestId:randomUUID(),version:waiting.version}).expect(200);
+  releasePrimary(new Response('{}',{status:503}));await f.worker.settled();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(await f.current(task.id)).toMatchObject({state:'cancelled'});
+ } finally { releasePrimary(new Response('{}',{status:503}));vi.unstubAllGlobals(); }
 });
 it('retries a model outage without clearing the task, then uses the saved request language',async()=>{
  let calls=0,mail='';const complete=vi.fn(async(_input:LlmCompletionInput)=>{calls++;if(calls===1)throw Error('model transport unavailable');return calls===2?tool('bambook_get',{type:'email',id:mail}):tool('bambook_task',{action:'finish',outcome:'succeeded',result:'Reviewed the original email; no business changes.'});});

@@ -330,6 +330,10 @@ export class MistRepository {
       return {beforeFinish,beforeWrite:beforeFinish||value.platform?.requiresReadBeforeWrite===true};
     });
   }
+  async assertPlatformTaskActive(prior: AgentActor) {
+    if (prior.agentExecutor !== 'platform' || !prior.agentTaskLease) fail('FORBIDDEN', '请使用平台任务执行器', 403);
+    await this.transact(db => this.own(db, prior, prior.agentTaskLease!.workspaceId, 'ai:chat'));
+  }
   async pulsePlatformTask(prior:AgentActor){
     if(prior.agentExecutor!=='platform'||!prior.agentTaskLease)fail('FORBIDDEN','请使用平台任务执行器',403);
     return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,prior.agentTaskLease!.workspaceId,'ai:chat'),c=(await taskRecord(db,prior.agentTaskLease!.workspaceId,prior.agentTaskLease!.taskId)).value;return heartbeatTask(db,actor,prior.agentTaskLease!,c.lease!.sequence+1,Date.now());});
