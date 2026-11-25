@@ -244,11 +244,16 @@ describe('Agent model provider deadline', () => {
     vi.useFakeTimers();
     try {
       const fetchMock = configure();
-      const answer = createLlmCompleter({ platformProfile: 'agent-task' })(BASE_INPUT);
+      const beforeFallback = vi.fn(async () => {
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      });
+      const answer = createLlmCompleter({ platformProfile: 'agent-task' })({ ...BASE_INPUT, beforeFallback });
       await vi.advanceTimersByTimeAsync(44_999);
       expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(beforeFallback).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
       await expect(answer).resolves.toBe('fallback reply');
+      expect(beforeFallback).toHaveBeenCalledOnce();
       expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
       expect(String(fetchMock.mock.calls[1][0])).toBe('https://backup.example/v1/chat/completions');
     } finally {
