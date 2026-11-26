@@ -1,6 +1,6 @@
 /** 小竹页的输入区、通话条和空对话：输入区始终在对话下方居中，空对话时和问候一起居中。 */
 import React from 'react';
-import { ArrowUp, AtSign, AudioLines, Mic, MicOff, Paperclip, PhoneOff, Square, X, CalendarClock, Landmark, Mail, ListTodo, Sparkles } from 'lucide-react';
+import { ArrowDown, ArrowUp, AtSign, AudioLines, Mic, MicOff, Paperclip, PhoneOff, Square, X, CalendarClock, Landmark, Mail, ListTodo, Sparkles } from 'lucide-react';
 import { AIBadge, AssistantEyes, Icon, IconButton } from '../../../../../components/mist';
 import { uiText } from '../../../../../services/interfaceLanguage';
 import { TASK_ATTACHMENT_ACCEPT } from '../../../../../server/src/shared/mistTaskAttachments';
@@ -11,8 +11,8 @@ import { TASK_INSTRUCTION_LIMIT } from '../../runtime/xiaozhuCowork';
 type Voice = ReturnType<typeof usePersonalAgentVoice>;
 export const voiceInCall = (voice: Voice) => voice.state === 'connecting' || voice.state === 'listening' || voice.state === 'speaking';
 
-export function XiaozhuComposer({ value, onChange, onSend, ready, busy, working, onStop, stopping, sources, onRemoveSource, onAttach, files, onAddFiles, onRemoveFile, attachmentRefs, onRemoveAttachmentRef, voice, voiceAvailable, field, placeholder, disabled }: {
-  value: string; onChange: (v: string) => void; onSend: () => void; ready: boolean; busy: boolean; working?: boolean; onStop?: () => void; stopping?: boolean;
+export function XiaozhuComposer({ value, onChange, onSend, ready, busy, working, onStop, stopping, onLatest, sources, onRemoveSource, onAttach, files, onAddFiles, onRemoveFile, attachmentRefs, onRemoveAttachmentRef, voice, voiceAvailable, field, placeholder, disabled }: {
+  value: string; onChange: (v: string) => void; onSend: () => void; ready: boolean; busy: boolean; working?: boolean; onStop?: () => void; stopping?: boolean; onLatest?: () => void;
   sources: Array<{ id: string; label: string }>; onRemoveSource: (s: { id: string; label: string }) => void; onAttach: () => void;
   files: File[]; onAddFiles?: (files: File[]) => void; onRemoveFile: (index: number) => void;
   attachmentRefs: AssistantAttachmentRef[]; onRemoveAttachmentRef: (fileId: string) => void;
@@ -28,8 +28,10 @@ export function XiaozhuComposer({ value, onChange, onSend, ready, busy, working,
     ...attachmentRefs.map(file => ({ key: file.fileId, name: file.name, remove: () => onRemoveAttachmentRef(file.fileId) })),
   ];
   const hasFiles = (event: React.DragEvent) => Array.from(event.dataTransfer.types).includes('Files');
+  const latestButton = onLatest && <IconButton className="mist-xz-tobottom" icon={ArrowDown} label={uiText('回到最新')} onClick={onLatest} />;
   if (inCall) return <div className="mist-xz-composer mist-xz-call" data-state={voice.state}>
     <div className="mist-xz-call-row"><span className="mist-xz-pulse" aria-hidden /><b>{uiText(voice.state === 'connecting' ? '正在接通' : voice.muted ? '已静音' : voice.state === 'speaking' ? '小竹正在说' : '正在听')}</b><span className="mist-spacer" />
+      {latestButton}
       <IconButton icon={voice.muted ? MicOff : Mic} label={uiText(voice.muted ? '取消静音' : '静音')} disabled={voice.state === 'connecting'} onClick={voice.toggleMute} />
       <IconButton icon={Square} label={uiText('停止播放')} disabled={voice.state !== 'speaking'} onClick={voice.interrupt} />
       <button type="button" className="mist-xz-hangup" aria-label={uiText('结束通话')} onClick={voice.end}><Icon icon={PhoneOff} size="sm" /></button></div>
@@ -65,6 +67,7 @@ export function XiaozhuComposer({ value, onChange, onSend, ready, busy, working,
       <IconButton icon={Paperclip} label={uiText('添加附件')} disabled={!acceptsFiles} onClick={() => picker.current?.click()} />
       <IconButton icon={AtSign} label={uiText('引用业务记录')} disabled={busy || disabled} onClick={onAttach} />
       <span className="mist-spacer" />
+      {latestButton}
       {(busy || working && !value.trim()) && onStop ? <button type="button" className="mist-send" data-kind="stop" aria-label={uiText(stopping?'正在核对停止结果':'停止生成')} disabled={stopping} onClick={onStop}><Icon icon={Square} size="sm" /></button>
         : !attachments.length && !value.trim() && voiceAvailable && !busy ? <button type="button" className="mist-send" data-kind="voice" aria-label={uiText('语音通话')} title={uiText('语音通话')} onClick={() => void voice.start()}><Icon icon={AudioLines} size="sm" /></button>
         : <button type="button" className="mist-send" aria-label={uiText('发送')} disabled={!ready} onClick={onSend}><Icon icon={ArrowUp} size="sm" /></button>}
