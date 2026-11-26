@@ -372,6 +372,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       setTasks(old => old.some(task => task.id === item.id)
         ? old.map(task => mergeTaskUpdate(task,item))
         : [...old,item]);
+      window.dispatchEvent(new Event('bambook:agent-task-update'));
       return item;
     } catch (e) {
       if (isCurrent()) {
@@ -450,6 +451,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if (!isCurrent()) return;
       applyTaskUpdate(item);
       controlKeys.current.delete(task.id);
+      window.dispatchEvent(new Event('bambook:agent-task-update'));
     };
 
     try {
@@ -473,6 +475,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         if (confirmed(latest)) {
           controlKeys.current.delete(task.id);
           error = '';
+          window.dispatchEvent(new Event('bambook:agent-task-update'));
         }
       } catch { /* The original operation remains available for an exact retry. */ }
     } finally {

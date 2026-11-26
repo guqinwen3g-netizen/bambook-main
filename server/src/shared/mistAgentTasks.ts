@@ -47,6 +47,16 @@ export type AgentTaskView = {
   requiredRead?:{type:string;id:string}|null;
 };
 export type AgentTaskPage = { items: AgentTaskView[]; nextCursor: string | null };
+/** Personal sidebar metadata for work in progress. */
+export type AgentTaskActivity = {
+  id: string;
+  name: string;
+  state: 'queued' | 'running';
+  executionStage?: AgentTaskView['executionStage'];
+  runnerStatus?: AgentTaskView['runnerStatus'];
+  retrying?: boolean;
+  currentStep?: string;
+};
 export type AgentTaskEvent = { action: string; at: string; actorId: string; actorName: string; version: number; state: AgentTaskState };
 export type AgentTaskCommand = { type: 'agent.task.cancel'; payload: { id: string; version: number } };
 /** Personal attention metadata; never carries questions, reports, credentials or business payloads. */

@@ -58,7 +58,7 @@ export type SidebarPresentationProps = {
   workspace?: { symbol: string; lead?: React.ReactNode; name: string; caption?: string; onClick?: () => void; expanded?: boolean; disclosure?: React.ReactNode };
   account: { name: string; identityKey?: string; caption?: string; avatarUrl?: string; onClick?: () => void };
   onSearch?: () => void;
-  assistant?: { title: string; text: React.ReactNode; onClick: () => void };
+  assistant?: { title: string; text: React.ReactNode; activityLabel?: string; onClick: () => void };
 };
 /** 侧栏（纯展示，无数据依赖）。生产环境用 MistSidebar（已接好模块注册表与权限）。 */
 export function MistSidebarPresentation({ sections, activeId, onNavigate, collapsed, onToggleCollapsed, workspace, account, onSearch, assistant }: SidebarPresentationProps) {
@@ -133,7 +133,10 @@ export function MistSidebarPresentation({ sections, activeId, onNavigate, collap
           </div>
         ))}
       </nav>
-      {assistant && <button type="button" className="mist-side-ai" onClick={within(assistant.onClick)}><div className="mist-side-ai-t"><AIBadge />{uiText(assistant.title)}</div><p>{uiText(assistant.text)}</p></button>}
+      {assistant && <button type="button" className="mist-side-ai" data-activity={!!assistant.activityLabel || undefined}
+        aria-label={assistant.activityLabel} title={assistant.activityLabel} onClick={within(assistant.onClick)}>
+        <div className="mist-side-ai-t"><AIBadge /><span>{uiText(assistant.title)}</span></div><p>{uiText(assistant.text)}</p>
+      </button>}
       <button type="button" className="mist-me" aria-current={activeId === 'account' ? 'page' : undefined} onClick={within(account.onClick)}><Avatar name={account.name} identityKey={account.identityKey} src={account.avatarUrl} /><div><b>{account.name}</b>{account.caption && <small>{uiText(account.caption)}</small>}</div><Icon icon={ChevronRight} size="sm" /></button>
     </aside>
   );

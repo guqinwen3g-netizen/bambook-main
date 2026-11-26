@@ -192,7 +192,7 @@ export function AssistantPage(){
   };
   const [conversationId,setConversationIdState]=React.useState(readConv);
   React.useEffect(()=>{setConversationIdState(readConv());},[convKey]);
-  const openConversation=(id:string)=>{
+  const openConversation=(id:string, fromTaskOrigin=false)=>{
     if(originRead.current&&originTaskId)originHandled.current=JSON.stringify([scope,originTaskId,originAttempt]);
     originRead.current?.abort();
     originRead.current=undefined;
@@ -204,6 +204,7 @@ export function AssistantPage(){
     setConversationIdState(id);
     setNavDrawer(false);
     setStatusChoices(undefined);
+    if(originTaskId&&!fromTaskOrigin)nav.go('assistant');
   };
   const attachmentScope=scope+':'+conversationId;
   const [taskPreview,setTaskPreview]=React.useState<{scope:string;taskId:string;fileId:string}>();
@@ -281,7 +282,7 @@ export function AssistantPage(){
       originActions.current.track(task);
       atBottomRef.current=false;
       setAtBottom(false);
-      originActions.current.openConversation(task.conversationId);
+      originActions.current.openConversation(task.conversationId,true);
       setOpenedOrigin({scope,conversationId:task.conversationId});
       setOriginFocus({conversationId:task.conversationId,taskId:task.id});
     }).catch(()=>{

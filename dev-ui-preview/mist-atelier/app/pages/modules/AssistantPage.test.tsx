@@ -35,6 +35,11 @@ it('opens the exact task from a reminder even when it was absent from the loaded
   expect(host.querySelector('[aria-label="回答小竹"]')).toBeTruthy();
   expect(mock.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
   expect(go).not.toHaveBeenCalled();
+  await click('新对话');
+  expect(go).toHaveBeenCalledExactlyOnceWith('assistant');
+  await act(async()=>root!.render(view()));
+  await act(async()=>root!.render(view(true,'older-task','task-origin')));
+  expect(host.querySelector('[data-task-id="older-task"]')?.textContent).toContain('客户书面确认的交期是哪天？');
 });
 
 it('asks which running task to check before issuing a read-only status request', async () => {

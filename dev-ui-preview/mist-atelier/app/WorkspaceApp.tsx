@@ -14,6 +14,7 @@ import { ExportConfirmHost } from './runtime/ExportConfirmHost';
 import { preloadPagesWhenIdle } from './pagePreload';
 import { primaryImageId } from '../../../server/src/shared/mistPrimaryImage';
 import { useAssistantConversation } from './runtime/assistantConversation';
+import { useXiaozhuActivity, xiaozhuActivityLabel } from './runtime/xiaozhuActivity';
 import { Bell, ClipboardList, Component, KeyRound, Layers, ListTodo, Moon, Search, Settings2, ShieldCheck, Sparkles, SquareDashed, Users } from 'lucide-react';
 
 import {
@@ -174,6 +175,8 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
   const [toastIds, setToastIds] = React.useState<string[]>([]);
   const seenNotices = React.useRef<{ scope: string; ids: Set<string> } | null>(null);
   const noticeScope = session.sessionKey + ':' + (workspace.workspace?.id || '');
+  const [activeAgentTask] = useXiaozhuActivity(workspace.workspace?.id, noticeScope, canAI);
+  const agentActivityLabel = activeAgentTask ? uiText(xiaozhuActivityLabel(activeAgentTask)) : '';
   const unreadIds = visibleNotifications.filter(n => !n.readAt).map(n => n.id).join('|');
   React.useEffect(() => {
     const unread = visibleNotifications.filter(n => !n.readAt), seen = seenNotices.current;
@@ -410,7 +413,15 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
             expanded: organizationOpen, onClick:()=>{setOrganizationOpen(value=>!value);if(!organizationOpen)organization.retry();} }}
           account={{ name, identityKey:user.id, caption: roles, avatarUrl: user.avatarUrl ?? undefined, onClick: () => go('account') }}
           onSearch={() => setPalette(true)}
-          assistant={!canAI || base === 'assistant' ? undefined : { title: '小竹', text: '查询当前公司的进展', onClick: ()=>openAI() }} />}
+          assistant={activeAgentTask ? {
+            title: '小竹',
+            activityLabel: [uiText('小竹'), activeAgentTask.name, agentActivityLabel].join(' · '),
+            text: <span aria-live="polite" aria-atomic="true">
+              <span className="mist-side-ai-task" title={activeAgentTask.name}>{activeAgentTask.name}</span>
+              <span className="mist-side-ai-stage">{agentActivityLabel}</span>
+            </span>,
+            onClick: () => go('assistant', activeAgentTask.id, { section: 'task-origin' }),
+          } : undefined} />}
         topbar={scrolled => <MistTopbar scrolled={scrolled} onBack={backTarget ? goBack : undefined} backLabel={backTarget ? '返回' + backTarget.label : undefined} crumbs={platformOnly && ['system-settings','settings'].includes(route.view) ? [{label:'平台运营'},{label:'平台设置'}] : crumbsFor(route, go, state?.devs.find(d=>d.id===route.id)?.code || state?.orders.find(o=>o.id===route.id)?.code, state?.versions.find(v=>v.id===route.versionId)?.label)}
           sync={base === 'account' || !Page ? undefined : platformOnly ? { state: 'ok', text: '平台运营' } : platformCompany ? { state: 'ok', text: '平台管理' } : !live||workspace.error||workspace.pending||workspace.pendingCreate||workspace.loading||workspace.saving||shellNoticeList.length ? { state: workspace.error||workspace.pending&&!workspace.saving ? 'offline' : workspace.loading||workspace.saving ? 'syncing' : 'ok', text: workspace.saving ? '正在保存' : workspace.loading ? '读取公司数据' : workspace.pending ? '需要核对同步状态' : workspace.error ? (workspace.pendingCreate ? '需要核对同步状态' : '操作未完成') : live ? '查看提示' : '设计组件展示', ...(shellNoticeList.length ? { onClick: () => setHiddenNoticeKey(noticesHidden ? '' : shellNoticeKey), expanded: !noticesHidden } : {}) } : undefined}
           theme={theme} onToggleTheme={toggleTheme} onSearch={() => setPalette(true)}

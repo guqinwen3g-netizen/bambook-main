@@ -29,6 +29,65 @@ async function fixture(complete:(input:LlmCompletionInput)=>Promise<string>,opti
  return{local,app,human,workspace,base,id,key,worker,repository,create,current,command,drain};
 }
 const tool=(name:string,args:Record<string,unknown>)=>JSON.stringify({name,arguments:args});
+
+it('shows only the owner’s active XiaoZhu tasks with a live stage and hides tasks that need the owner', async () => {
+ const waiting = Promise.withResolvers<string>();
+ const entered = Promise.withResolvers<void>();
+ const complete = vi.fn(async () => {
+  if (complete.mock.calls.length === 1) {
+   entered.resolve();
+   return waiting.promise;
+  }
+  return tool('bambook_task', {action:'finish',outcome:'succeeded',result:'试验结果不应出现在活动记录。'});
+ });
+ const f = await fixture(complete, {concurrency:1});
+ f.worker.start(3_600_000);
+ const path = f.base + '/personal-agent/activity';
+ const submit = async (name: string) => (await f.human.post(f.base + '/personal-agent/tasks')
+  .send({requestId:randomUUID(),name,instructions:'原任务指示不应出现在活动记录。'}).expect(201)).body.item;
+ expect((await f.human.get(path).expect(200)).body).toEqual({items:[]});
+ const personal = await submit('核对交期');
+ const queued = await submit('核对数量');
+ await f.create('platform');
+ await request(f.app).get(path).set(SERVICE_KEY_HEADER,f.key).expect(403);
+ const pending = await f.human.get(path).expect(200);
+ expect(pending.headers['cache-control']).toBe('private, no-store');
+ expect(pending.body.items).toEqual([
+  {id:queued.id,name:'核对数量',state:'queued'},
+  {id:personal.id,name:'核对交期',state:'queued'},
+ ]);
+ try {
+  await f.worker.tick();
+  await entered.promise;
+  const active = (await f.human.get(path).expect(200)).body.items;
+  expect(active).toEqual([
+   {id:personal.id,name:'核对交期',state:'running',executionStage:'model'},
+   {id:queued.id,name:'核对数量',state:'queued'},
+  ]);
+ } finally {
+  waiting.resolve(tool('bambook_task', {action:'question',question:'需要哪批订单？'}));
+ }
+ await f.drain();
+ expect((await f.current(personal.id)).state).toBe('waiting_human');
+ await f.drain();
+ expect((await f.current(queued.id)).state).toBe('succeeded');
+ expect((await f.human.get(path).expect(200)).body.items).toEqual([]);
+});
+
+it('discards active sidebar information when its original scopes are reduced', async () => {
+ const ceiling:{value:string[]|null} = {value:null};
+ const f = await fixture(async () => '', {ceiling});
+ f.worker.start(3_600_000);
+ const item = (await f.human.post(f.base + '/personal-agent/tasks').send({requestId:randomUUID(),name:'核对原件',
+  instructions:'仅核对所选订单。',intentRefs:[{kind:'orders',id:f.workspace.state.orders[0].id}]}).expect(201)).body.item;
+ const path = f.base + '/personal-agent/activity';
+ expect((await f.human.get(path).expect(200)).body.items).toEqual([{id:item.id,name:'核对原件',state:'queued'}]);
+ ceiling.value = ['ai:chat'];
+ expect((await f.human.get(path).expect(200)).body).toEqual({items:[]});
+ ceiling.value = [];
+ await f.human.get(path).expect(403);
+});
+
 it('wakes the idle platform worker only after a committed task and keeps submission replay on that same run', async()=>{
  const finish=tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对。'});
  const complete=vi.fn(async()=>finish);
