@@ -149,9 +149,10 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
       if (conversationId !== undefined && item.conversationId !== conversationId) fail('FORBIDDEN', '只能接续当前对话的事项', 403);
       return item;
     };
+    const taskId = body.taskId ?? (conversationId === undefined ? undefined : await repository.personalVoiceResumeTaskId(prior, workspaceId, conversationId));
     res.setHeader('Cache-Control', 'private, no-store');
     res.status(201).json(await voice!.issue({
-      owner: workspaceId + ':' + prior.userId, workspaceId, locale: responseLocale(body.locale), taskId: body.taskId, authorize, task,
+      owner: workspaceId + ':' + prior.userId, workspaceId, locale: responseLocale(body.locale), taskId, authorize, task,
       submit: async (text, requestId, current) => {
         if (current?.waitingProposalIds.length) fail('AGENT_CONFIRMATION_REQUIRED', '请先在页面确认当前事项', 422);
         const question = current?.questions?.find(q => !q.answer);

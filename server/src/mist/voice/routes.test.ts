@@ -11,6 +11,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { createMistServer } from '../server';
 import { createMistLocalRuntime } from '../local';
 import type { AgentTaskView } from '../../shared/mistAgentTasks';
+import type { VoiceBinding } from './service';
 let dir: string;
 beforeEach(async () => { dir = await mkdtemp(path.join(tmpdir(), 'bambook-voice-routes-')); vi.stubEnv('MIST_LOCAL_WORKSPACE', '1'); vi.stubEnv('NODE_ENV', 'test'); });
 afterEach(async () => { vi.unstubAllEnvs(); await rm(dir, { recursive: true, force: true }); });
@@ -123,4 +124,61 @@ it('stops authorizing voice when the company administrator disables the personal
   const identity = (await sales.client.post(sales.base + '/personal-agent').send({}).expect(200)).body.identity;
   await admin.client.post(admin.base + '/agent-identities/' + identity.id + '/configure').send({ requestId: randomUUID(), version: identity.version, name: identity.name, ownerId: 'demo-sales', mode: 'operate', enabled: false }).expect(200);
   await sales.client.get(sales.base + '/voice/status').expect(403);
+});
+
+it('resumes only the sole authorized unfinished task in the requested conversation', async () => {
+  const app = createMistServer(undefined, {
+    local: createMistLocalRuntime({ directory: dir }),
+    voice: { config: () => ({ apiKey: 'test-only', voice: 'voice', speed: 0, loudness: 0 }) },
+    agentTasks: {
+      configured: () => true,
+      complete: async input => JSON.stringify({
+        name: 'bambook_task',
+        arguments: String(input.messages[0].content).includes('结束归档')
+          ? { action: 'finish', outcome: 'succeeded', result: '模拟报告已归档。' }
+          : { action: 'question', question: '请补充模拟订单编号。' },
+      }),
+    },
+  });
+  app.locals.platformTaskWorker.start(3_600_000);
+  const issue = vi.spyOn(app.locals.voice, 'issue');
+  try {
+    const sales = await human(app, 'demo-sales'), buyer = await human(app, 'demo-buyer');
+    const create = async (owner: typeof sales, conversationId: string, text: string, state: AgentTaskView['state']) => {
+      const { item } = (await owner.client.post(owner.base + '/personal-agent/tasks').send({
+        requestId: randomUUID(), name: text, instructions: text, conversationId,
+      }).expect(201)).body;
+      await app.locals.platformTaskWorker.tick();
+      await app.locals.platformTaskWorker.settled();
+      return vi.waitFor(async () => {
+        const current = (await owner.client.get(owner.base + '/agent-tasks/' + item.id).expect(200)).body.item as AgentTaskView;
+        expect(current.state).toBe(state);
+        return current;
+      }, { timeout: 3000 });
+    };
+    const bound = async (body: { conversationId?: string; taskId?: string }) => {
+      await sales.client.post(sales.base + '/voice/sessions').set('Origin', 'http://127.0.0.1').send(body).expect(201);
+      return (issue.mock.calls.at(-1)?.[0] as VoiceBinding).taskId;
+    };
+    const current = 'c_voice_resume_current';
+    await create(sales, current, '结束归档', 'succeeded');
+    await create(sales, 'c_voice_resume_other', '另一段对话待补充', 'waiting_human');
+    await create(buyer, current, '其他成员待补充', 'waiting_human');
+    expect(await bound({ conversationId: current })).toBeUndefined();
+
+    const waiting = await create(sales, current, '当前对话待补充', 'waiting_human');
+    expect(await bound({ conversationId: current })).toBe(waiting.id);
+    await sales.client.post(sales.base + '/agent-tasks/' + waiting.id + '/pause')
+      .send({ requestId: randomUUID(), version: waiting.version }).expect(200);
+    expect(await bound({ conversationId: current })).toBe(waiting.id);
+
+    const another = await create(sales, current, '同一对话的第二项待补充', 'waiting_human');
+    expect(await bound({ conversationId: current })).toBeUndefined();
+    expect(await bound({ conversationId: current, taskId: another.id })).toBe(another.id);
+    expect(await bound({})).toBeUndefined();
+  } finally {
+    issue.mockRestore();
+    await app.locals.platformTaskWorker.stop();
+    app.locals.voice.stopCalls();
+  }
 });
