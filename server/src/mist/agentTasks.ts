@@ -589,7 +589,6 @@ export function personalTaskActivity(view: AgentTaskView): AgentTaskActivity | u
     || view.questions?.some(question => !question.answeredAt)) return;
   const last = view.trail?.at(-1);
   const currentStep = view.executionStage === 'tool' && last && !last.completed ? activityText(last.label) : undefined;
-  const progress = last && !last.failed ? activityText(last.progress) : undefined;
   return {
     id: view.id,
     name: activityText(view.name) ?? '小竹任务',
@@ -598,7 +597,6 @@ export function personalTaskActivity(view: AgentTaskView): AgentTaskActivity | u
     ...(view.runnerStatus && { runnerStatus: view.runnerStatus }),
     ...(view.state === 'queued' && view.executionIssue?.retryAt && { retrying: true }),
     ...(currentStep && { currentStep }),
-    ...(progress && { progress }),
   };
 }
 export function assertTaskBusinessRead(c:TaskRecord){if(c.requiredRead)fail('AGENT_TASK_READ_REQUIRED','请先重新完整读取等待对象',422);}

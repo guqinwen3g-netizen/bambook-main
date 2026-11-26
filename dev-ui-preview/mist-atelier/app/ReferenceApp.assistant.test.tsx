@@ -6,9 +6,9 @@ import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {getByRole,queryByRole} from '@testing-library/dom';
 import {createMistState} from '../../../server/src/shared/mistWorkspace';
-const bridge=vi.hoisted(()=>({workspace:null as any,sessionKey:'session-a',canAsk:true,fetch:vi.fn()}));
+const bridge=vi.hoisted(()=>({workspace:null as any,sessionKey:'session-a',canAsk:true,fetch:vi.fn(),activity:vi.fn()}));
 vi.mock('./runtime/auth',()=>({MistSessionProvider:({children}:any)=>children,useMistSession:()=>({status:'authenticated',sessionKey:bridge.sessionKey,user:{id:bridge.sessionKey,displayName:'Test user',email:'test@example.test',roles:['sales'],permissions:['*'],roleLabels:[]},hasRole:()=>false,hasPermission:()=>bridge.canAsk,canAccessView:()=>true})}));
-vi.mock('./runtime/workspace',()=>({MistWorkspaceProvider:({children}:any)=>children,useMistWorkspace:()=>bridge.workspace}));
+vi.mock('./runtime/workspace',()=>({MistWorkspaceProvider:({children}:any)=>children,useMistWorkspace:()=>bridge.workspace,mistApiRequest:bridge.activity}));
 vi.mock('../../../services/apiService',()=>({apiService:{getAuthHeaders:()=>({'X-Test-Auth':'authenticated'})}}));
 vi.mock('./runtime/reviews',()=>({MistReviewButton:()=>null,MistReviewProvider:({children}:{children:React.ReactNode})=>children,useOptionalMistReviews:()=>null}));
 vi.mock('./pages/HomePage',()=>({HomePage:()=>null}));
@@ -21,6 +21,7 @@ let root:Root|undefined,host:HTMLDivElement;const originalScroll=HTMLElement.pro
 const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
 function workspace(id='workspace-a',code='SO-ONE'){let i=0;const state=createMistState({id:()=>`drawer-${++i}`,now:'2026-10-13T00:00:00Z',actorName:'Test'},'empty');state.orders.push({id:'order-a',code,customer:'Fixture customer',state:'Open',currency:'USD',amount:10} as any);return{state,workspace:{id,name:'Test workspace',revision:2},workspaces:[],error:'',loading:false,saving:false,pending:null,run:vi.fn(),refresh:vi.fn()};}
 beforeEach(()=>{localStorage.removeItem('bambook.device.locale');(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;bridge.workspace=workspace();bridge.sessionKey='session-a';bridge.canAsk=true;bridge.fetch.mockReset();vi.stubGlobal('fetch',(url:unknown,init?:RequestInit)=>url==='/api/hr/teams/mine'?Promise.resolve({ok:true,json:async()=>({ok:true,teams:[]})}):bridge.fetch(url,init));vi.stubGlobal('matchMedia',()=>({matches:false,addEventListener(){},removeEventListener(){}}));HTMLElement.prototype.scrollTo=vi.fn();history.replaceState(null,'','/?intro=0&theme=light&view=orders/detail&id=order-a');});
+beforeEach(()=>bridge.activity.mockReset().mockResolvedValue({items:[]}));
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();localStorage.removeItem('bambook.device.locale');HTMLElement.prototype.scrollTo=originalScroll;vi.unstubAllGlobals();vi.restoreAllMocks();});
 async function mount(){
   host=document.createElement('div');document.body.append(host);root=createRoot(host);
@@ -29,6 +30,40 @@ async function mount(){
 }
 async function open(){await act(async()=>window.dispatchEvent(new KeyboardEvent('keydown',{key:'j',metaKey:true,bubbles:true,cancelable:true})));return getByRole(document.body,'dialog',{name:uiText('小竹')});}
 async function click(button:HTMLElement){await act(async()=>button.click());}
+it('shows live activity in the sidebar, opens its original task, and hides after completion', async () => {
+  vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+  const task = { id:'task-a', name:'核对采购附件', state:'running', executionStage:'tool', currentStep:'读取附件' };
+  const change = () => act(async () => window.dispatchEvent(new Event('bambook:agent-task-update')));
+  const card = () => host.querySelector<HTMLButtonElement>('.mist-side-ai');
+  await mount();
+  expect(card()).toBeNull();
+  expect(bridge.activity).toHaveBeenCalledWith('/api/mist/workspaces/workspace-a/personal-agent/activity', expect.objectContaining({cache:'no-store'}));
+  bridge.activity.mockResolvedValue({items:[task]});
+  await change();
+  expect(card()?.textContent).toContain('核对采购附件');
+  expect(card()?.textContent).toContain('读取附件');
+  bridge.activity.mockResolvedValue({items:[{...task,executionStage:'model'}]});
+  await change();
+  expect(card()?.textContent).toContain('正在等待模型');
+  await click(card()!);
+  expect(Object.fromEntries(new URLSearchParams(location.search))).toMatchObject({view:'assistant',id:'task-a',section:'task-origin'});
+  bridge.activity.mockResolvedValue({items:[]});
+  await change();
+  expect(card()).toBeNull();
+});
+it('discards an activity response from a previous workspace before rendering the new sidebar', async () => {
+  vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+  let complete!: (value: unknown) => void;
+  bridge.activity.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+  await mount();
+  const signal = bridge.activity.mock.calls[0][1].signal as AbortSignal;
+  bridge.workspace = workspace('workspace-b', 'SO-TWO');
+  await act(async () => root!.render(<ReferenceApp/>));
+  expect(signal.aborted).toBe(true);
+  await act(async () => complete({items:[{id:'old-task',name:'原公司的任务',state:'running'}]}));
+  expect(host.querySelector('.mist-side-ai')).toBeNull();
+  expect(bridge.activity).toHaveBeenCalledWith('/api/mist/workspaces/workspace-b/personal-agent/activity', expect.anything());
+});
 async function send(question:string){const drawer=getByRole(document.body,'dialog',{name:uiText('小竹')}),field=getByRole(drawer,'textbox',{name:uiText('输入问题')}) as HTMLTextAreaElement;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,question);field.dispatchEvent(new Event('input',{bubbles:true}));});await click(getByRole(drawer,'button',{name:uiText('发送')}));}
 it('keeps the original drawer and local overview without an automatic model request',async()=>{await mount();const drawer=await open();expect(drawer.textContent).not.toContain('本地记录查询');expect(drawer.textContent).not.toContain('尚未连接模型服务');expect(bridge.fetch).not.toHaveBeenCalled();expect(queryByRole(drawer,'button',{name:'完整版'})).not.toBeNull();});
 it('sends no record by default, only the explicit question and bounded history',async()=>{bridge.fetch.mockResolvedValue(response({mode:'read_only',text:'Review this suggestion.',revision:2,sources:[]}));await mount();await open();await send('What should happen next?');expect(bridge.fetch).toHaveBeenCalledTimes(1);const [path,init]=bridge.fetch.mock.calls[0];expect(path).toBe('/api/mist/workspaces/workspace-a/assistant');expect(JSON.parse(init.body)).toEqual({message:'What should happen next?',history:[],sourceIds:[]});expect(init.headers['X-Test-Auth']).toBe('authenticated');expect(document.body.textContent).toContain('Review this suggestion.');expect(bridge.workspace.run).not.toHaveBeenCalled();});

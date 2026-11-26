@@ -78,6 +78,11 @@
 .mist-side-ai-t { display: flex; align-items: center; gap: 8px; font-size: var(--mist-text-sm); font-weight: var(--mist-fw-medium); }
 .mist-side-ai-t .mist-badge { width: 28px; height: 28px; border-radius: var(--mist-r-md); }
 .mist-side-ai p { margin-top: 6px; font-size: var(--mist-text-xs); color: var(--mist-side-ink-2); line-height: 1.45; }
+.mist-side-ai[data-activity] { background: var(--mist-card-2); color: var(--mist-ink); }
+.mist-side-ai[data-activity]:hover { background: var(--mist-card); }
+.mist-side-ai-task, .mist-side-ai-stage { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.mist-side-ai-task { color: var(--mist-ink); font-weight: var(--mist-fw-medium); }
+.mist-side-ai-stage { margin-top: 4px; color: var(--mist-ai-ink); }
 .mist-me { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 14px; text-align: left; }
 .mist-me:hover { background: var(--mist-side-hover); }
 .mist-me[aria-current="page"] { background: var(--mist-side-hover); }
@@ -96,6 +101,8 @@
 .mist-app[data-collapsed] .mist-nav-head { height: 0; opacity: 0; pointer-events: none; }
 .mist-side .mist-side-ai { max-height: 240px; overflow: hidden; transition: max-height var(--mist-dur-slow) var(--mist-ease), padding var(--mist-dur-slow) var(--mist-ease), margin var(--mist-dur-slow) var(--mist-ease), opacity .22s var(--mist-ease) .14s, visibility 0s; }
 .mist-app[data-collapsed] .mist-side-ai { max-height: 0; padding-top: 0; padding-bottom: 0; margin-top: 0; margin-bottom: 0; }
+.mist-app[data-collapsed] .mist-side-ai[data-activity] { display: grid; place-items: center; min-height: 38px; max-height: 38px; padding: 0; margin: 6px 0; opacity: 1; visibility: visible; pointer-events: auto; }
+.mist-app[data-collapsed] .mist-side-ai[data-activity] :is(.mist-side-ai-t > span:last-child, p) { display: none; }
 /* 收起时标志保持展开时的位置（左内边距不变，正好落在 76px 窄栏中央），只转动不平移。 */
 .mist-app[data-collapsed] .mist-brand { cursor: pointer; }
 /* 收起 / 展开时标志转动（沿用旧版侧栏：收起转到 -60°），与侧栏宽度同一时长与缓动；手机抽屉不转。 */
@@ -578,6 +585,8 @@ button.mist-sync:hover { background: var(--mist-fill); color: var(--mist-ink); }
   .mist-app .mist-organization { display: none; }
   .mist-app .mist-brand { justify-content: center; padding: 4px 0; }
   .mist-app .mist-nav-group[data-closed] .mist-nav-items { grid-template-rows: 1fr; }
+  .mist-app .mist-side-ai[data-activity] { display: grid; place-items: center; min-height: 38px; padding: 0; margin: 6px 0; }
+  .mist-app .mist-side-ai[data-activity] :is(.mist-side-ai-t > span:last-child, p) { display: none; }
 }
 @media (max-width: 1180px) {
   .mist-split { grid-template-columns: 1fr; } .mist-preview { display: none; }

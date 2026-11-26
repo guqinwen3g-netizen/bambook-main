@@ -56,7 +56,6 @@ export type AgentTaskActivity = {
   runnerStatus?: AgentTaskView['runnerStatus'];
   retrying?: boolean;
   currentStep?: string;
-  progress?: string;
 };
 export type AgentTaskEvent = { action: string; at: string; actorId: string; actorName: string; version: number; state: AgentTaskState };
 export type AgentTaskCommand = { type: 'agent.task.cancel'; payload: { id: string; version: number } };

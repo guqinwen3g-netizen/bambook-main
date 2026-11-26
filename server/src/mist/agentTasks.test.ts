@@ -33,7 +33,7 @@ it('projects only current public tool activity and drops credential-like strings
     trail:[{at:saved.createdAt,kind:'read' as const,label:'读取附件 样品.pdf',progress:'已经核对订单交期',completed:false}],
   };
   expect(personalTaskActivity(view)).toEqual({
-    id:taskId,name:'核对订单',state:'running',executionStage:'tool',currentStep:'读取附件 样品.pdf',progress:'已经核对订单交期',
+    id:taskId,name:'核对订单',state:'running',executionStage:'tool',currentStep:'读取附件 样品.pdf',
   });
   expect(personalTaskActivity({
     ...view,name:'请使用 sk-test-secret-1234',trail:[{...view.trail[0],label:'aft1.private-cursor',progress:'bms1_private'}],
