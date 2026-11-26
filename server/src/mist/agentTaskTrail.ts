@@ -72,15 +72,18 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
         const missingPages=pageRange&&Array.isArray(result.pagesWithoutText)
           ? [...new Set<number>(result.pagesWithoutText.filter((page:unknown)=>typeof page==='number'&&Number.isSafeInteger(page)&&page>=pages.pageFrom&&page<=pages.pageTo))].sort((a,b)=>a-b).slice(0,20)
           : [];
+        const partialText = pages?.textLimited === true || pages?.start > 0;
+        const rangeDetail = pageRange ? partialText
+          ? `${pageRange}的部分正文` : `提取范围${pageRange}` : '';
         const unreadablePages = missingPages.length > 0 && missingPages.length === pages.pageTo - pages.pageFrom + 1
           ? `${pageRange}无可提取文字`
-          : missingPages.length ? `提取范围${pageRange}；第 ${missingPages.join('、')} 页无可提取文字` : '';
+          : missingPages.length ? `${rangeDetail}；第 ${missingPages.join('、')} 页无可提取文字` : '';
+        const pdfDetail = unreadablePages || (!failed ? rangeDetail : '');
         const detail = result?.error === true ? FILE_FAILURE_DETAILS.get(result.message)
-          : unreadablePages ? `${unreadablePages}${result.hasMore?'；还有后续内容':''}`
+          : pdfDetail ? `${pdfDetail}${result.hasMore?'；还有后续内容':''}`
           : failed ? text(result?.reason, 120)
           : result?.hasMore ? '本次读取部分正文，还有后续内容'
-          : result?.complete ? '已提取可读取正文'
-          : pageRange ? `提取范围${pageRange}` : '';
+          : result?.complete ? '已提取可读取正文' : '';
         out.push({ ...base, kind: 'read', label: result?.error===true?`附件读取失败${file?' '+file:''}`:file?`读取附件 ${file}`:'读取附件正文', ...(detail ? { detail } : {}) });
         break;
       }
