@@ -35,6 +35,25 @@ export function platformTaskAttachmentHandles(attachments: AgentTaskView['attach
   return new Map(attachments.map((file, index) => [file.id, `${PLATFORM_TASK_ATTACHMENT_PREFIX}${index + 1}`]));
 }
 
+/** Pre-read at most one short physical page window from the task's sole PDF attachment. */
+export function shortPdfTailPlan(attachments: AgentTaskView['attachments'] = [], steps: PlatformTaskStep[]): PlatformTaskPlan | undefined {
+  const pdfs = attachments.filter(file => file.mimeType === 'application/pdf' || /\.pdf$/i.test(file.name));
+  if (pdfs.length !== 1) return;
+  const [file] = pdfs;
+  const reads = steps.filter(step => step.plan.name === 'bambook_file_text' && step.plan.arguments.fileId === file.id);
+  if (reads.length !== 1) return;
+  const [initial] = reads;
+  const result = initial.result as {
+    kind?: string; error?: boolean; pages?: number; hasMore?: boolean;
+    range?: { pageFrom?: number; pageTo?: number }; nextPageFrom?: number; nextCursor?: unknown;
+  } | undefined;
+  if (initial.compacted || initial.plan.arguments.cursor !== undefined || result?.error || result?.kind !== 'pdf'
+    || typeof result.pages !== 'number' || !Number.isInteger(result.pages) || result.pages < 21 || result.pages > 24
+    || result.range?.pageFrom !== 1 || result.range.pageTo !== 20 || result.hasMore !== true
+    || result.nextPageFrom !== 21 || typeof result.nextCursor !== 'string' || !result.nextCursor.startsWith('aft1.')) return;
+  return {name:'bambook_file_text',arguments:{fileId:file.id,cursor:result.nextCursor,maxChars:3500}};
+}
+
 /** Restore the canonical file ID first, then resolve continuation from that exact file's latest successful read. */
 export function resolvePlatformFileContinuation(
   plan: PlatformTaskPlan, steps: PlatformTaskStep[], handles?: ReadonlyMap<string, string>,
