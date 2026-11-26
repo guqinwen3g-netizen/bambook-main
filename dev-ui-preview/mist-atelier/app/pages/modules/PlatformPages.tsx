@@ -444,6 +444,10 @@ export function AssistantPage(){
   const pendingCommand=w.pending?.command;
   const pendingProposalId=pendingCommand?.type==='agent.proposal.confirm'||pendingCommand?.type==='agent.proposal.reject'
     ? pendingCommand.payload.id : undefined;
+  const pendingProposalKey=JSON.stringify([attachmentScope,pendingProposalId,w.pending?.requestId,pendingCommand?.type]);
+  const pendingProposalBinding=React.useRef({key:pendingProposalKey});
+  if(pendingProposalBinding.current.key!==pendingProposalKey)pendingProposalBinding.current={key:pendingProposalKey};
+  const [missingProposalReceipt,setMissingProposalReceipt]=React.useState<{key:string}>();
   const pendingProposalVisible=!!pendingProposalId&&proposals.some(proposal=>proposal.id===pendingProposalId)
     &&visibleTasks.some(task=>task.waitingProposalIds.includes(pendingProposalId));
   const decide=async(id:string,confirm:boolean)=>{
@@ -460,14 +464,23 @@ export function AssistantPage(){
         toast(problem instanceof Error?problem.message:'操作未完成，请重试','bad');
     }
   };
+  const checkProposalReceipt=async(requestId:string):Promise<'confirmed'|'missing'|'unknown'>=>{
+    let missing=false;
+    const receipt=await w.recover({requestId,receiptOnly:true,onMissingReceipt:()=>{missing=true;}});
+    return receipt?'confirmed':missing?'missing':'unknown';
+  };
   const recoverProposal=async(id:string)=>{
     const requestId=w.pending?.requestId;
     if(!requestId||id!==pendingProposalId||w.saving||!w.isCurrent())return;
+    const binding=pendingProposalBinding.current;
     try {
-      const receipt=await w.recover({requestId,receiptOnly:true});
+      const outcome=await checkProposalReceipt(requestId);
       if(live.current!==scope||!w.isCurrent())return;
-      if(receipt)void cowork.reload();
-      else if(liveConversation.current===conversationId)setProposalId(id);
+      if(outcome==='confirmed')void cowork.reload();
+      else if(pendingProposalBinding.current===binding){
+        setMissingProposalReceipt(outcome==='missing'?binding:undefined);
+        setProposalId(id);
+      }
     } catch (problem) {
       if(live.current===scope&&liveConversation.current===conversationId)
         toast(problem instanceof Error?problem.message:'操作未完成，请重试','bad');
@@ -538,9 +551,10 @@ export function AssistantPage(){
   const composerStopTask=runningTasks.length===1&&cowork.available&&!busy&&!inCall&&!question.trim()?runningTasks[0]:undefined;
   const composer=<XiaozhuComposer value={question} onChange={setQuestion} onSend={()=>void send()} onLatest={hasThread&&!atBottom?returnToLatest:undefined} ready={ready} busy={busy} working={!!composerStopTask} stopping={!!composerStopTask&&cowork.controls[composerStopTask.id]?.busy} onStop={active.current?()=>active.current?.abort():composerStopTask?()=>void cowork.cancel(composerStopTask):undefined} sources={selected} onRemoveSource={toggle} onAttach={()=>setPicker(true)} files={files} onAddFiles={cowork.available?addFiles:undefined} onRemoveFile={index=>setFiles(files.filter((_,i)=>i!==index))} attachmentRefs={attachmentRefs.map(ref=>restrictedTaskIds.has(ref.taskId)?{...ref,name:uiText('原件读取权限已变化')}:ref)} onRemoveAttachmentRef={fileId=>setAttachmentRefs(refs=>refs.filter(ref=>ref.fileId!==fileId))} voice={voice} voiceAvailable={cowork.available&&(!cowork.loading&&!cowork.error||inCall)} field={field} placeholder={uiText(canChat?'问小竹，或交代一件事':'当前账号无模型助手权限')} disabled={!canChat}/>;
   const leftNav=<XiaozhuNav conversations={conversations} activeId={conversationId} onSelect={openConversation} onNew={newConversation} confirmCount={proposals.length} runningCount={running} ruleCount={automationRules.rules.filter(r=>r.enabled).length} draftCount={saved.length} onOpenConfirm={()=>{setNavDrawer(false);setConfirmOpen(true);}} onOpenTasks={()=>{setNavDrawer(false);nav.go('assistant',undefined,{section:'tasks'});}} onOpenRules={()=>{setNavDrawer(false);setAutomations(true);}} onOpenDrafts={()=>{setNavDrawer(false);setDrafts(true);}} unread={unread} renaming={renaming?.startsWith('nav:')?renaming.slice(4):undefined} setRenaming={id=>setRenaming(id?'nav:'+id:undefined)} onRename={rename} onRemove={id=>setRemoving(id)} hasMore={cowork.hasMore} loadingMore={cowork.loadingMore} moreError={cowork.moreError} onLoadMore={()=>void cowork.loadMore()}/>;
-  return <MistPage><ErrorNotice inlinePending={pendingProposalVisible}/><XiaozhuAutomations key={scope} scopeKey={scope} open={rulesOpen} onClose={()=>{setAutomations(false);setAutomationSeed('');if(rulesRoute)nav.go('assistant');}} workspaceId={w.workspace?.id} seed={automationSeed} newRule={newRule} returnRuleId={rulesRoute?nav.route.id:undefined}/><XiaozhuTasks refreshSignal={cowork.tasks.length} open={tasksOpen} onClose={()=>nav.go('assistant')} onTaskUpdate={cowork.applyTaskUpdate}/><AgentProposalDialog incomingAccess={w.workspace?.developmentIncomingAccess} referenceAccess={w.workspace?.developmentReferenceAccess} taskClosePlans={w.workspace?.developmentTaskClosePlans} commercialSampleLoanSources={w.workspace?.commercialSampleLoanSources} canConfirmShippingBasis={w.session.hasPermission('products:write')} state={w.state} scopeKey={attachmentScope} onRejection={w.dismissError} proposal={proposals.find(p=>p.id===proposalId)} onClose={()=>setProposalId('')} run={(command,options)=>w.run(command,options)} pendingRequestId={pendingProposalId===proposalId?w.pending?.requestId:undefined} pendingDecision={pendingProposalId!==proposalId?undefined:pendingCommand?.type==='agent.proposal.reject'?'reject':'confirm'}
-    onReplayOriginal={async requestId=>!!await w.recover({requestId})}
-    onRecoverOriginal={async requestId=>!!await w.recover({requestId,receiptOnly:true})} onDone={message=>{toast(uiText(message));void cowork.reload();}}/>
+  return <MistPage><ErrorNotice inlinePending={pendingProposalVisible}/><XiaozhuAutomations key={scope} scopeKey={scope} open={rulesOpen} onClose={()=>{setAutomations(false);setAutomationSeed('');if(rulesRoute)nav.go('assistant');}} workspaceId={w.workspace?.id} seed={automationSeed} newRule={newRule} returnRuleId={rulesRoute?nav.route.id:undefined}/><XiaozhuTasks refreshSignal={cowork.tasks.length} open={tasksOpen} onClose={()=>nav.go('assistant')} onTaskUpdate={cowork.applyTaskUpdate}/><AgentProposalDialog incomingAccess={w.workspace?.developmentIncomingAccess} referenceAccess={w.workspace?.developmentReferenceAccess} taskClosePlans={w.workspace?.developmentTaskClosePlans} commercialSampleLoanSources={w.workspace?.commercialSampleLoanSources} canConfirmShippingBasis={w.session.hasPermission('products:write')} state={w.state} scopeKey={attachmentScope} onRejection={w.dismissError} proposal={proposals.find(p=>p.id===proposalId)} onClose={()=>{setMissingProposalReceipt(undefined);setProposalId('');}} run={(command,options)=>w.run(command,options)} pendingRequestId={pendingProposalId===proposalId?w.pending?.requestId:undefined} pendingDecision={pendingProposalId!==proposalId?undefined:pendingCommand?.type==='agent.proposal.reject'?'reject':'confirm'}
+    missingOriginalReceipt={missingProposalReceipt===pendingProposalBinding.current}
+    onReplayOriginal={async requestId=>{setMissingProposalReceipt(undefined);return !!await w.recover({requestId});}}
+    onRecoverOriginal={requestId=>{setMissingProposalReceipt(undefined);return checkProposalReceipt(requestId);}} onDone={message=>{toast(uiText(message));void cowork.reload();}}/>
     <Drawer open={navDrawer} onClose={()=>setNavDrawer(false)} title={uiText('对话列表')} tone="ai">{leftNav}</Drawer>
     <Drawer open={confirmOpen} onClose={()=>setConfirmOpen(false)} title={uiText('待我确认')} tone="ai"><XiaozhuProposalList proposals={proposals} onOpen={id=>{setConfirmOpen(false);setProposalId(id);}}/></Drawer>
     <Dialog open={!!removing} onClose={()=>setRemoving(undefined)} title={uiText('从列表移除这段对话？')} description={uiText('办理记录和待确认事项仍会保留。')} tone="warn" footer={<><Button variant="quiet" onClick={()=>setRemoving(undefined)}>{uiText('取消')}</Button><Button variant="danger" onClick={()=>removing&&void remove(removing)}>{uiText('移除')}</Button></>}/>

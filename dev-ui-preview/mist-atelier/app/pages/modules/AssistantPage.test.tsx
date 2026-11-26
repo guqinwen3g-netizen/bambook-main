@@ -751,6 +751,53 @@ function mockTaskStatus(read: (task: Record<string, unknown>) => Promise<unknown
   });
 }
 
+it.each(['confirmed missing','unknown','changed request'])('only carries an exact missing receipt from the task card (%s)',async outcome=>{
+  const id='proposal-1', requestId='customer-update-original';
+  let finishLookup=()=>{};
+  const recover=vi.fn(async (options:{requestId:string;receiptOnly?:true;onMissingReceipt?:()=>void})=>{
+    if(!options.receiptOnly)return {requestId};
+    if(outcome==='changed request')await new Promise<void>(resolve=>{finishLookup=resolve;});
+    if(outcome!=='unknown')options.onMissingReceipt?.();
+    return undefined;
+  });
+  mockTaskStatus(async task=>({item:task}),true,false,'waiting_human');
+  const statusApi=mock.api.getMockImplementation()!;
+  mock.api.mockImplementation(async(url:string,opts:any)=>{
+    const result=await statusApi(url,opts);
+    if(url.endsWith('/agent-tasks'))return {...result,items:result.items.map((task:any)=>({...task,waitingProposalIds:[id]}))};
+    if(url.endsWith('/agent-tasks/existing-task'))return {...result,item:{...result.item,waitingProposalIds:[id]}};
+    return result;
+  });
+  mock.workspace.state.agentProposals=[{id,ownerId:'actor',owner:'User',summary:['Update'],state:'pending',createdAt:'2026-11-24T00:00:00Z',command:{type:'customer.update',payload:{id:'c',patch:{city:'York'}}}}];
+  mock.workspace.pending={requestId,command:{type:'agent.proposal.confirm',payload:{id}}};
+  mock.workspace.recover=recover;
+  mock.workspace.isCurrent=()=>true;
+  sessionStorage.setItem('mist.xiaozhu.conversation:session-a:workspace','current-task-conversation');
+  await mount();
+  await click('核对原请求');
+  expect(recover).toHaveBeenCalledExactlyOnceWith({requestId,receiptOnly:true,onMissingReceipt:expect.any(Function)});
+  expect(mock.workspace.run).not.toHaveBeenCalled();
+  if(outcome==='changed request'){
+    mock.workspace.pending={...mock.workspace.pending,requestId:'new-original'};
+    await act(async()=>root!.render(view()));
+    await act(async()=>finishLookup());
+    expect(document.querySelector('[data-agent-proposal-dialog]')).toBeNull();
+    expect(button('重试原操作')).toBeUndefined();
+    expect(recover).toHaveBeenCalledTimes(1);
+    return;
+  }
+  expect(document.querySelector('[data-agent-proposal-dialog]')).not.toBeNull();
+  if(outcome==='confirmed missing'){
+    expect(document.body.textContent).toContain('暂未查到原回执');
+    await click('重试原操作');
+    expect(recover).toHaveBeenNthCalledWith(2,{requestId});
+  }else{
+    expect(document.body.textContent).not.toContain('暂未查到原回执');
+    expect(button('重试原操作')).toBeUndefined();
+    expect(recover).toHaveBeenCalledTimes(1);
+  }
+});
+
 it('answers a direct status inquiry from the existing task without submitting a new one',async()=>{
   mockTaskStatus(async task=>({item:{...task,state:'waiting_human',waitingProposalIds:['proposal-1'],updatedAt:'2026-11-24T00:00:03Z'}}),false);
   await mount();await click('修改付款条件');
