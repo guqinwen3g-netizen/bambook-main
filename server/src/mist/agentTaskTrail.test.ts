@@ -79,16 +79,16 @@ it('opens only the original confirmed by a read within the current task attachme
   const workspaceFile={id:'workspace-file',name:'scan.pdf'};
   const read=(requested:string,file:typeof taskFile,extra={})=>step('bambook_file_text',{fileId:requested},{file,kind:'pdf',text:'',...extra});
   const entries=platformTrail([
-    read(taskFile.id,taskFile),
-    read(workspaceFile.id,workspaceFile),
+    read(taskFile.id,taskFile,{range:{pageFrom:21,pageTo:23},pagesWithoutText:[22]}),
+    read(workspaceFile.id,workspaceFile,{range:{pageFrom:21,pageTo:23},pagesWithoutText:[22]}),
     read(taskFile.id,workspaceFile),
     read(taskFile.id,taskFile,{error:true}),
     step('bambook_file_text',{fileId:taskFile.id}),
     {...read(taskFile.id,taskFile),compacted:true},
     read(workspaceFile.id,workspaceFile),
   ],[taskFile]);
-  expect(entries[0]).toMatchObject({taskAttachmentId:taskFile.id,failed:true});
-  expect(entries.slice(1).every(entry=>!entry.taskAttachmentId)).toBe(true);
+  expect(entries[0]).toMatchObject({taskAttachmentId:taskFile.id,taskAttachmentPage:22,failed:true});
+  expect(entries.slice(1).every(entry=>!entry.taskAttachmentId&&!('taskAttachmentPage' in entry))).toBe(true);
 });
 
 it('names image-only PDF pages even when other pages in the window were readable',()=>{
