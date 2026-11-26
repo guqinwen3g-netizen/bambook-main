@@ -173,6 +173,7 @@ export function AssistantPage(){
   const [automations,setAutomations]=React.useState(false),[automationSeed,setAutomationSeed]=React.useState(''),[newRule,setNewRule]=React.useState(0),[proposalId,setProposalId]=React.useState(''),[picker,setPicker]=React.useState(false),[drafts,setDrafts]=React.useState(false);
   const rulesOpen=!tasksOpen&&(rulesRoute||automations);
   const active=React.useRef<AbortController|null>(null),generation=React.useRef(0),live=React.useRef(''),sendLock=React.useRef(false),field=React.useRef<HTMLTextAreaElement>(null),end=React.useRef<HTMLDivElement>(null);
+  const composerDock=React.useRef<HTMLDivElement>(null);
   const originRead=React.useRef<AbortController|undefined>(undefined);
   const originHandled=React.useRef('');
   const [originStatus,setOriginStatus]=React.useState<'loading'|'unavailable'>();
@@ -471,8 +472,12 @@ export function AssistantPage(){
   const remove=async(id:string)=>{setRemoving(undefined);try{await meta.save(id,{hidden:true});if(id===conversationId)newConversation();toast(uiText('已从列表移除'));}catch(e){toast(e instanceof Error?e.message:'未能移除','bad');}};
   const returnToLatest=()=>{
     const el=scrollRef.current;
-    if(!el?.scrollTo)return;
-    el.scrollTo({top:el.scrollHeight,behavior:'smooth'});
+    if(!el)return;
+    if(getComputedStyle(el).overflowY==='visible'&&end.current?.scrollIntoView){
+      end.current.scrollIntoView({block:'start',inline:'nearest'});
+      return;
+    }
+    el.scrollTo?.({top:el.scrollHeight,behavior:'smooth'});
     field.current?.focus({preventScroll:true});
   };
   // 执行中跟随新步骤；长回答完成后，从提问和第一行读起。
@@ -491,6 +496,30 @@ export function AssistantPage(){
   React.useEffect(()=>{if(atBottomRef.current)requestAnimationFrame(follow);},[threadKey]);
   // 回答排版、卡片展开等会在渲染后改变高度；停在底部时跟着到底。
   React.useEffect(()=>{const el=scrollRef.current,content=el?.firstElementChild;if(!el||!content||typeof ResizeObserver==='undefined')return;const watch=new ResizeObserver(()=>{if(atBottomRef.current)follow();});watch.observe(content);return()=>watch.disconnect();},[hasThread]);
+  React.useEffect(()=>{
+    const region=scrollRef.current,dock=composerDock.current,sentinel=end.current;
+    if(!hasThread||!region||!dock||!sentinel||typeof window.matchMedia!=='function')return;
+    const narrow=window.matchMedia('(max-width: 760px)');
+    const update=()=>{
+      if(!narrow.matches)return;
+      const visibleEnd=Math.min(dock.getBoundingClientRect().top,window.innerHeight);
+      setAtBottom(sentinel.getBoundingClientRect().top<=visibleEnd+1);
+    };
+    const resizeMode=()=>{if(narrow.matches)update();else setAtBottom(atBottomRef.current);};
+    const sizes=typeof ResizeObserver==='undefined'?undefined:new ResizeObserver(update);
+    sizes?.observe(region);
+    sizes?.observe(dock);
+    window.addEventListener('scroll',update,{capture:true,passive:true});
+    window.addEventListener('resize',update);
+    narrow.addEventListener?.('change',resizeMode);
+    update();
+    return()=>{
+      sizes?.disconnect();
+      window.removeEventListener('scroll',update,true);
+      window.removeEventListener('resize',update);
+      narrow.removeEventListener?.('change',resizeMode);
+    };
+  },[hasThread]);
   const runningTasks=visibleTasks.filter(t=>['queued','running'].includes(t.state)&&t.canControl);
   // The composer stop button is only unambiguous for one running task while the composer is idle.
   const composerStopTask=runningTasks.length===1&&cowork.available&&!busy&&!inCall&&!question.trim()?runningTasks[0]:undefined;
@@ -530,7 +559,7 @@ export function AssistantPage(){
               <div ref={end}/>
             </div>
           </div>
-          <div className="mist-xz-dock"><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}{checkedTask&&<p className="mist-xz-hint" role="status">{(statusCheck?.named?checkedTask.name:uiText('当前任务'))+' · '+uiText(xiaozhuTaskStatusLabel(checkedTask))}</p>}{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</div></div>
+          <div className="mist-xz-dock" ref={composerDock}><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}{checkedTask&&<p className="mist-xz-hint" role="status">{(statusCheck?.named?checkedTask.name:uiText('当前任务'))+' · '+uiText(xiaozhuTaskStatusLabel(checkedTask))}</p>}{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</div></div>
         </>:<div className="mist-xz-scroll"><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}<XiaozhuEmpty name={w.session.user?.displayName} suggestions={xiaozhuSuggestions(w.state)} onPick={p=>{setQuestion(uiText(p));field.current?.focus();}}>{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</XiaozhuEmpty></div></div>}
       </div>
     </div>
