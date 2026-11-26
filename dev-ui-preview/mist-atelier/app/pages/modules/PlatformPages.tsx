@@ -22,7 +22,7 @@ export { InvoicePage } from './InvoicePage';
 import { useRouteDraft, useRouteScope } from './useRouteDraft';
 import { useAssistantConversation } from '../../runtime/assistantConversation';
 import { submissionDraftKey, submissionFingerprint } from '../../runtime/xiaozhuSubmissions';
-import { ArrowRight, ArrowUp, Calculator, Download, FileText, ArrowDown, PanelLeftClose, PanelLeftOpen, SquarePen, ChevronDown, PenLine, Trash2, RefreshCw, Sparkles, Square, X, Package, Receipt, ShieldCheck, Users, Database, Building2 } from 'lucide-react';
+import { ArrowRight, ArrowUp, Calculator, Download, FileText, PanelLeftClose, PanelLeftOpen, SquarePen, ChevronDown, PenLine, Trash2, RefreshCw, Sparkles, Square, X, Package, Receipt, ShieldCheck, Users, Database, Building2 } from 'lucide-react';
 import { ActionMenu, AIBadge, AssistantEyes, Banner, Button, Card, CardHeader, DataTable, Dialog, Drawer, EmptyState, FilePreview, Icon, IconButton, Field, FormGrid, KeyValue, Meter, MistPage, Mono, PageHeader, Pill, Select, StatCard, StatGrid, SummaryBar, Tabs, TextArea, TextInput, Toolbar, UploadZone, useToast, type Column } from '../../../../../components/mist';
 import { apiService, type CompanyExporterProfileValue } from '../../../../../services/apiService';
 import { calculatePlatformBom, calculatePlatformPricing, platformBusinessDate, platformCreditRemaining, platformCreditEffectiveAmount, getPlatformClaimSourceOptions, canEditPlatformClaimDraft, type PlatformState, type PlatformBom, type PlatformBomLine, type PlatformClaim, type PlatformCommand, type PlatformRisk, type PlatformClaimDisposition } from '../../../../../server/src/shared/mistPlatform';
@@ -163,6 +163,7 @@ function xiaozhuSuggestions(state:ReturnType<typeof useMistWorkspace>['state']):
 const XIAOZHU_PROMPTS=['哪些订单交期临近，需要优先跟进？','总结引用订单的当前进展和风险','列出未收款发票，按金额从高到低','起草一段给客户的出运进度说明'];
 export function AssistantPage(){
   const nav=useNav(),tasksOpen=nav.route.section==='tasks'||nav.route.section==='agent';
+  const rulesRoute=nav.route.section==='automations';
   const originTaskId=nav.route.section==='task-origin'?nav.route.id:undefined;
   const w=usePlatform(),[kind,setKind]=React.useState('orders'),[query,setQuery]=React.useState(''),[editor,setEditor]=useRouteDraft<ModuleEditorSpec|null>(null);
   const scope=w.session.sessionKey+':'+(w.workspace?.id??'');
@@ -170,6 +171,7 @@ export function AssistantPage(){
   const [configuration,setConfiguration]=React.useState<{configured:boolean;models?:string[];subscription?:{provider:'chatgpt';connected:boolean}}|null>(null),[checking,setChecking]=React.useState(false),[busy,setBusy]=React.useState(false),[error,setError]=useRouteDraft('');
   const [navOpen,setNavOpen]=React.useState(()=>{try{return localStorage.getItem('mist.xiaozhu.nav')!=='0';}catch{return true;}}),[navDrawer,setNavDrawer]=React.useState(false),[confirmOpen,setConfirmOpen]=React.useState(false),[atBottom,setAtBottom]=React.useState(true),atBottomRef=React.useRef(true),scrollRef=React.useRef<HTMLDivElement>(null);
   const [automations,setAutomations]=React.useState(false),[automationSeed,setAutomationSeed]=React.useState(''),[newRule,setNewRule]=React.useState(0),[proposalId,setProposalId]=React.useState(''),[picker,setPicker]=React.useState(false),[drafts,setDrafts]=React.useState(false);
+  const rulesOpen=!tasksOpen&&(rulesRoute||automations);
   const active=React.useRef<AbortController|null>(null),generation=React.useRef(0),live=React.useRef(''),sendLock=React.useRef(false),field=React.useRef<HTMLTextAreaElement>(null),end=React.useRef<HTMLDivElement>(null);
   const originRead=React.useRef<AbortController|undefined>(undefined);
   const originHandled=React.useRef('');
@@ -260,7 +262,7 @@ export function AssistantPage(){
     return()=>{cancelled=true;};
   },[cowork.recoveredSubmissions,conversationId,taskText,selected,files,attachmentRefs,clearDraft]);
   const showTaskHistory=canChat&&(cowork.available||cowork.tasks.length>0);
-  const index=React.useMemo(()=>recordIndex(w.state),[w.state]),automationRules=useAutomationRules(w.workspace?.id,showTaskHistory,automations),meta=useConversationMeta(w.workspace?.id,showTaskHistory),conversations=React.useMemo(()=>conversationsOf(cowork.tasks,meta.items),[cowork.tasks,meta.items]),current=conversations.find(c=>c.id===conversationId)??(openedOrigin?.scope===scope&&openedOrigin.conversationId===conversationId?conversationsOf(cowork.tasks.filter(task=>task.conversationId===conversationId))[0]:undefined),visibleTasks=showTaskHistory?(current?.tasks??[]):[],proposals=(w.state?.agentProposals??[]).filter(p=>p.state==='pending'),voice=usePersonalAgentVoice(scope+':'+canChat,w.workspace?.id,cowork.track),inCall=voiceInCall(voice);
+  const index=React.useMemo(()=>recordIndex(w.state),[w.state]),automationRules=useAutomationRules(w.workspace?.id,showTaskHistory,rulesOpen),meta=useConversationMeta(w.workspace?.id,showTaskHistory),conversations=React.useMemo(()=>conversationsOf(cowork.tasks,meta.items),[cowork.tasks,meta.items]),current=conversations.find(c=>c.id===conversationId)??(openedOrigin?.scope===scope&&openedOrigin.conversationId===conversationId?conversationsOf(cowork.tasks.filter(task=>task.conversationId===conversationId))[0]:undefined),visibleTasks=showTaskHistory?(current?.tasks??[]):[],proposals=(w.state?.agentProposals??[]).filter(p=>p.state==='pending'),voice=usePersonalAgentVoice(scope+':'+canChat,w.workspace?.id,cowork.track),inCall=voiceInCall(voice);
   const originActions=React.useRef({refreshTask:cowork.refreshTask,track:cowork.track,openConversation,go:nav.go});
   originActions.current={refreshTask:cowork.refreshTask,track:cowork.track,openConversation,go:nav.go};
   React.useEffect(()=>{
@@ -467,7 +469,12 @@ export function AssistantPage(){
   const [renaming,setRenaming]=React.useState<string|undefined>(undefined),[removing,setRemoving]=React.useState<string|undefined>(undefined);
   const rename=(id:string,title:string)=>{void meta.save(id,{title}).catch(e=>toast(e instanceof Error?e.message:'未能改名','bad'));};
   const remove=async(id:string)=>{setRemoving(undefined);try{await meta.save(id,{hidden:true});if(id===conversationId)newConversation();toast(uiText('已从列表移除'));}catch(e){toast(e instanceof Error?e.message:'未能移除','bad');}};
-  const toBottom=(smooth=true)=>{const el=scrollRef.current;if(el?.scrollTo)el.scrollTo({top:el.scrollHeight,behavior:smooth?'smooth':'auto'});};
+  const returnToLatest=()=>{
+    const el=scrollRef.current;
+    if(!el?.scrollTo)return;
+    el.scrollTo({top:el.scrollHeight,behavior:'smooth'});
+    field.current?.focus({preventScroll:true});
+  };
   // 执行中跟随新步骤；长回答完成后，从提问和第一行读起。
   const follow=()=>{const el=scrollRef.current;if(!el)return;const turns=el.querySelectorAll('.mist-xz-turn'),last=turns[turns.length-1] as HTMLElement|undefined;const bottom=el.scrollHeight-el.clientHeight;if(last&&['queued','running'].includes(last.dataset.taskState??'')){el.scrollTop=Math.max(0,bottom);return;}const start=last?last.getBoundingClientRect().top-el.getBoundingClientRect().top+el.scrollTop-16:bottom;el.scrollTop=Math.max(0,Math.min(bottom,start));};
   const threadKey=visibleTasks.map(t=>t.id+t.updatedAt).join()+messages.length+busy;
@@ -476,7 +483,9 @@ export function AssistantPage(){
     const region=scrollRef.current;
     const turn=Array.from(region?.querySelectorAll<HTMLElement>('[data-task-id]')??[]).find(node=>node.dataset.taskId===originFocus.taskId);
     if(!region||!turn)return;
-    region.scrollTop+=turn.getBoundingClientRect().top-region.getBoundingClientRect().top-16;
+    // Narrow Mist layouts scroll the document instead of the thread.
+    if(getComputedStyle(region).overflowY==='visible'&&typeof turn.scrollIntoView==='function')turn.scrollIntoView({block:'start',inline:'nearest'});
+    else region.scrollTop+=turn.getBoundingClientRect().top-region.getBoundingClientRect().top-16;
     setOriginFocus(undefined);
   },[originFocus,conversationId,threadKey]);
   React.useEffect(()=>{if(atBottomRef.current)requestAnimationFrame(follow);},[threadKey]);
@@ -485,9 +494,9 @@ export function AssistantPage(){
   const runningTasks=visibleTasks.filter(t=>['queued','running'].includes(t.state)&&t.canControl);
   // The composer stop button is only unambiguous for one running task while the composer is idle.
   const composerStopTask=runningTasks.length===1&&cowork.available&&!busy&&!inCall&&!question.trim()?runningTasks[0]:undefined;
-  const composer=<XiaozhuComposer value={question} onChange={setQuestion} onSend={()=>void send()} ready={ready} busy={busy} working={!!composerStopTask} stopping={!!composerStopTask&&cowork.controls[composerStopTask.id]?.busy} onStop={active.current?()=>active.current?.abort():composerStopTask?()=>void cowork.cancel(composerStopTask):undefined} sources={selected} onRemoveSource={toggle} onAttach={()=>setPicker(true)} files={files} onAddFiles={cowork.available?addFiles:undefined} onRemoveFile={index=>setFiles(files.filter((_,i)=>i!==index))} attachmentRefs={attachmentRefs} onRemoveAttachmentRef={fileId=>setAttachmentRefs(refs=>refs.filter(ref=>ref.fileId!==fileId))} voice={voice} voiceAvailable={cowork.available&&(!cowork.loading&&!cowork.error||inCall)} field={field} placeholder={uiText(canChat?'问小竹，或交代一件事':'当前账号无模型助手权限')} disabled={!canChat}/>;
+  const composer=<XiaozhuComposer value={question} onChange={setQuestion} onSend={()=>void send()} onLatest={hasThread&&!atBottom?returnToLatest:undefined} ready={ready} busy={busy} working={!!composerStopTask} stopping={!!composerStopTask&&cowork.controls[composerStopTask.id]?.busy} onStop={active.current?()=>active.current?.abort():composerStopTask?()=>void cowork.cancel(composerStopTask):undefined} sources={selected} onRemoveSource={toggle} onAttach={()=>setPicker(true)} files={files} onAddFiles={cowork.available?addFiles:undefined} onRemoveFile={index=>setFiles(files.filter((_,i)=>i!==index))} attachmentRefs={attachmentRefs} onRemoveAttachmentRef={fileId=>setAttachmentRefs(refs=>refs.filter(ref=>ref.fileId!==fileId))} voice={voice} voiceAvailable={cowork.available&&(!cowork.loading&&!cowork.error||inCall)} field={field} placeholder={uiText(canChat?'问小竹，或交代一件事':'当前账号无模型助手权限')} disabled={!canChat}/>;
   const leftNav=<XiaozhuNav conversations={conversations} activeId={conversationId} onSelect={openConversation} onNew={newConversation} confirmCount={proposals.length} runningCount={running} ruleCount={automationRules.rules.filter(r=>r.enabled).length} draftCount={saved.length} onOpenConfirm={()=>{setNavDrawer(false);setConfirmOpen(true);}} onOpenTasks={()=>{setNavDrawer(false);nav.go('assistant',undefined,{section:'tasks'});}} onOpenRules={()=>{setNavDrawer(false);setAutomations(true);}} onOpenDrafts={()=>{setNavDrawer(false);setDrafts(true);}} unread={unread} renaming={renaming?.startsWith('nav:')?renaming.slice(4):undefined} setRenaming={id=>setRenaming(id?'nav:'+id:undefined)} onRename={rename} onRemove={id=>setRemoving(id)} hasMore={cowork.hasMore} loadingMore={cowork.loadingMore} moreError={cowork.moreError} onLoadMore={()=>void cowork.loadMore()}/>;
-  return <MistPage><ErrorNotice inlinePending={pendingProposalVisible}/><XiaozhuAutomations key={scope} scopeKey={scope} open={automations} onClose={()=>{setAutomations(false);setAutomationSeed('');}} workspaceId={w.workspace?.id} seed={automationSeed} newRule={newRule}/><XiaozhuTasks refreshSignal={cowork.tasks.length} open={tasksOpen} onClose={()=>nav.go('assistant')} onTaskUpdate={cowork.applyTaskUpdate}/><AgentProposalDialog incomingAccess={w.workspace?.developmentIncomingAccess} referenceAccess={w.workspace?.developmentReferenceAccess} taskClosePlans={w.workspace?.developmentTaskClosePlans} commercialSampleLoanSources={w.workspace?.commercialSampleLoanSources} canConfirmShippingBasis={w.session.hasPermission('products:write')} state={w.state} scopeKey={attachmentScope} onRejection={w.dismissError} proposal={proposals.find(p=>p.id===proposalId)} onClose={()=>setProposalId('')} run={(command,options)=>w.run(command,options)} pendingRequestId={pendingProposalId===proposalId?w.pending?.requestId:undefined} pendingDecision={pendingProposalId!==proposalId?undefined:pendingCommand?.type==='agent.proposal.reject'?'reject':'confirm'}
+  return <MistPage><ErrorNotice inlinePending={pendingProposalVisible}/><XiaozhuAutomations key={scope} scopeKey={scope} open={rulesOpen} onClose={()=>{setAutomations(false);setAutomationSeed('');if(rulesRoute)nav.go('assistant');}} workspaceId={w.workspace?.id} seed={automationSeed} newRule={newRule} returnRuleId={rulesRoute?nav.route.id:undefined}/><XiaozhuTasks refreshSignal={cowork.tasks.length} open={tasksOpen} onClose={()=>nav.go('assistant')} onTaskUpdate={cowork.applyTaskUpdate}/><AgentProposalDialog incomingAccess={w.workspace?.developmentIncomingAccess} referenceAccess={w.workspace?.developmentReferenceAccess} taskClosePlans={w.workspace?.developmentTaskClosePlans} commercialSampleLoanSources={w.workspace?.commercialSampleLoanSources} canConfirmShippingBasis={w.session.hasPermission('products:write')} state={w.state} scopeKey={attachmentScope} onRejection={w.dismissError} proposal={proposals.find(p=>p.id===proposalId)} onClose={()=>setProposalId('')} run={(command,options)=>w.run(command,options)} pendingRequestId={pendingProposalId===proposalId?w.pending?.requestId:undefined} pendingDecision={pendingProposalId!==proposalId?undefined:pendingCommand?.type==='agent.proposal.reject'?'reject':'confirm'}
     onReplayOriginal={async requestId=>!!await w.recover({requestId})}
     onRecoverOriginal={async requestId=>!!await w.recover({requestId,receiptOnly:true})} onDone={message=>{toast(uiText(message));void cowork.reload();}}/>
     <Drawer open={navDrawer} onClose={()=>setNavDrawer(false)} title={uiText('对话列表')} tone="ai">{leftNav}</Drawer>
@@ -521,7 +530,6 @@ export function AssistantPage(){
               <div ref={end}/>
             </div>
           </div>
-          {!atBottom&&<IconButton className="mist-xz-tobottom" icon={ArrowDown} label={uiText('回到最新')} onClick={()=>toBottom()}/>}
           <div className="mist-xz-dock"><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}{checkedTask&&<p className="mist-xz-hint" role="status">{(statusCheck?.named?checkedTask.name:uiText('当前任务'))+' · '+uiText(xiaozhuTaskStatusLabel(checkedTask))}</p>}{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</div></div>
         </>:<div className="mist-xz-scroll"><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}<XiaozhuEmpty name={w.session.user?.displayName} suggestions={xiaozhuSuggestions(w.state)} onPick={p=>{setQuestion(uiText(p));field.current?.focus();}}>{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</XiaozhuEmpty></div></div>}
       </div>
