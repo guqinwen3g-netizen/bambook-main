@@ -51,8 +51,11 @@ it('reports PDF page windows and partial text honestly in the same task trail', 
   id:String(index),at:'2026-11-26T00:00:00Z',plan:{name:'bambook_file_text',arguments:{fileId:scope.fileId}},result,
  }));
  expect(limited.range.textLimited).toBe(true);
+ expect(limited.nextPageFrom).toBeUndefined();
  expect(first.range.textLimited).toBeUndefined();
+ expect(first.nextPageFrom).toBe(21);
  expect(continued.range.textLimited).toBeUndefined();
+ expect(continued.nextPageFrom).toBe(21);
  expect(platformTrail(steps).map(step=>step.detail)).toEqual([
   '提取范围第 1 至 20 页；还有后续内容',
   '提取范围第 21 至 23 页；第 22 页无可提取文字',
