@@ -16,16 +16,18 @@ export function recordIndex(state: MistState | null | undefined): RecordRef[] {
   for (const sp of s.market?.suppliers ?? []) { add(sp.code, 'suppliers', sp.id); add(sp.name, 'suppliers', sp.id); }
   return out.sort((a, b) => b.text.length - a.text.length);
 }
-const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export const escapeSourceLabel = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** 把已知编号改写成 bambook://r/<序号> 链接；代码片段和已有链接里的不动。 */
-export function linkRecords(text: string, index: RecordRef[]): string {
+export function linkRecords(text: string, index: RecordRef[], attachmentNames: readonly string[] = []): string {
   if (!index.length || !text) return text;
-  const pattern = new RegExp('(?<![\\w-])(' + index.map(r => escape(r.text)).join('|') + ')(?![\\w-])', 'g');
+  const filenames = new Set(attachmentNames);
+  const names = [...new Set([...index.map(r => r.text), ...filenames])].sort((a, b) => b.length - a.length);
+  const pattern = new RegExp('(?<![\\w-])(' + names.map(escapeSourceLabel).join('|') + ')(?![\\w-])', 'g');
   const at = new Map(index.map((r, i) => [r.text, i]));
   let fenced = false;
   return text.split('\n').map(line => {
     if (/^\s*```/.test(line)) { fenced = !fenced; return line; }
     if (fenced) return line;
-    return line.split(/(`[^`]*`|\[[^\]]*\]\([^)]*\))/).map((part, i) => i % 2 ? part : part.replace(pattern, m => `[${m}](bambook://r/${at.get(m)})`)).join('');
+    return line.split(/(`[^`]*`|\[[^\]]*\]\([^)]*\))/).map((part, i) => i % 2 ? part : part.replace(pattern, m => filenames.has(m) ? m : `[${m}](bambook://r/${at.get(m)})`)).join('');
   }).join('\n');
 }

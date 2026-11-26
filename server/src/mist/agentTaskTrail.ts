@@ -32,6 +32,7 @@ const FILE_FAILURE_DETAILS = new Map([
 
 export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments: readonly {id:string;name:string}[] = []): AgentTaskTrailItem[] {
   const names=new Map(attachments.map(file=>[file.id,text(file.name,60)]));
+  const taskAttachmentIds=new Set(names.keys());
   const out: AgentTaskTrailItem[] = [];
   for (const step of steps ?? []) {
     const { name, arguments: args } = step.plan as { name: string; arguments: Record<string, any> }, result = step.result as any, at = step.at;
@@ -61,16 +62,28 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
       }
       case 'bambook_get_orders': {
         const orders = completed && !failed && !step.compacted && Array.isArray(result?.orders) ? result.orders : [];
-        const labels = orders.map((order: {label?: unknown}) => text(order.label, 32)).filter(Boolean);
-        const detail = [...labels, ...(orders.length && result.truncated ? ['部分详情需回原单核对'] : [])].join(' · ');
-        out.push({ ...base, kind:'read', label:orders.length ? `读取 ${orders.length} 张订单` : '读取订单详情', ...(detail ? { detail } : {}) });
+        const refs: NonNullable<AgentTaskTrailItem['refs']> = [];
+        const labels: string[] = [];
+        for (const order of orders) {
+          const label = text(order?.label, 32);
+          const to = target(order?.link);
+          if (order?.type === 'order' && to?.view === 'orders/detail' && to.id === order.id) {
+            refs.push({ ...to, type: 'order', label: label || typeLabel('order') });
+          } else if (label) labels.push(label);
+        }
+        if (orders.length && result.truncated) labels.push('部分详情需回原单核对');
+        const detail = labels.join(' · ');
+        out.push({ ...base, kind:'read', label:orders.length ? `读取 ${orders.length} 张订单` : '读取订单详情',
+          ...(refs.length ? { refs } : {}), ...(detail ? { detail } : {}) });
         break;
       }
       case 'bambook_commands': out.push({ ...base, kind: 'read', label: '查看可用操作' }); break;
       case 'bambook_audit': out.push({ ...base, kind: 'read', label: '查看操作记录' }); break;
       case 'bambook_file_text': {
         const observedName=text(result?.file?.name,60);
-        if(observedName&&typeof args.fileId==='string'&&result?.file?.id===args.fileId)names.set(args.fileId,observedName);
+        const matchedId=typeof args.fileId==='string'&&result?.file?.id===args.fileId ? args.fileId : undefined;
+        if(observedName&&matchedId)names.set(matchedId,observedName);
+        const taskAttachmentId=completed&&!step.compacted&&result?.error!==true&&matchedId&&taskAttachmentIds.has(matchedId) ? matchedId : undefined;
         const file=observedName||names.get(args.fileId);
         const pages=result?.range;
         const pageRange=result?.kind==='pdf'&&Number.isSafeInteger(pages?.pageFrom)&&Number.isSafeInteger(pages?.pageTo)
@@ -91,7 +104,7 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
           : failed ? text(result?.reason, 120)
           : result?.hasMore ? '本次读取部分正文，还有后续内容'
           : result?.complete ? '已提取可读取正文' : '';
-        out.push({ ...base, kind: 'read', label: result?.error===true?`附件读取失败${file?' '+file:''}`:file?`读取附件 ${file}`:'读取附件正文', ...(detail ? { detail } : {}) });
+        out.push({ ...base, kind: 'read', label: result?.error===true?`附件读取失败${file?' '+file:''}`:file?`读取附件 ${file}`:'读取附件正文', ...(detail ? { detail } : {}), ...(taskAttachmentId ? { taskAttachmentId } : {}) });
         break;
       }
       case 'bambook_mail_receiving': out.push({ ...base, kind: 'read', label: '查看邮箱收件状态' }); break;

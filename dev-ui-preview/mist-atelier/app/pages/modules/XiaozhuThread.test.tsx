@@ -2,6 +2,7 @@
 import React,{act} from 'react';import {createRoot,type Root} from 'react-dom/client';import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {getByRole,queryByRole,getByLabelText} from '@testing-library/dom';
 import {MistRoot} from '../../../../../components/mist';
+import {platformTrail} from '../../../../../server/src/mist/agentTaskTrail';
 import {XiaozhuThread,dayLabel,type ThreadActions} from './XiaozhuThread';
 let host:HTMLDivElement,root:Root;
 const task=(over:any={})=>({id:'t1',instructions:'核对订单',state:'running',version:1,result:'',checkpoint:'',questions:[],waitingProposalIds:[],canControl:true,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),...over}) as any;
@@ -56,6 +57,19 @@ it('downloads the original from its own task and disables repeat requests while 
  expect(onDownloadAttachment).toHaveBeenCalledExactlyOnceWith(original,file);
  await act(async()=>finish());
  expect(getByRole(host,'button',{name:'下载原附件 delivery.pdf'})).toBeTruthy();
+});
+it('opens the exact PDF and Excel originals from the completed report work trail',async()=>{
+ const files=[{id:'pdf-file',name:'交期.pdf',size:43,mimeType:'application/pdf'},{id:'sheet-file',name:'核对表.xlsx',size:71,mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}];
+ const trail=platformTrail(files.map((file,i)=>({id:'read-'+i,at:new Date().toISOString(),plan:{name:'bambook_file_text',arguments:{fileId:file.id}},result:{kind:i?'sheet':'pdf',file,text:'仅用于测试'}})),files);
+ trail.push({...trail[0],label:'已经撤回的原件',taskAttachmentId:'missing'});
+ const complete=task({state:'succeeded',attachments:files,trail,result:'已完成附件核对。'});
+ const onPreviewAttachment=vi.fn();
+ await paint([complete],{...fns(),onPreviewAttachment});
+ await act(async()=>getByRole(host,'button',{name:'办理过程'}).click());
+ const steps=host.querySelector<HTMLOListElement>('.mist-xz-steps')!;
+ for(const file of files)await act(async()=>getByRole(steps,'button',{name:'读取附件 '+file.name}).click());
+ expect(onPreviewAttachment.mock.calls).toEqual(files.map(file=>[complete,file]));
+ expect(queryByRole(steps,'button',{name:'已经撤回的原件'})).toBeNull();
 });
 it('shows the latest step while it works, leaving stop to the composer; a waiting request can be stopped in place',async()=>{const f=fns();await paint([task({trail:[{at:'',kind:'read',label:'查询订单 · 8 条'}]})],{...f,composerStopTaskId:'t1'});expect(host.textContent).toContain('核对订单');expect(host.textContent).toContain('查询订单 · 8 条');expect(queryByRole(host,'button',{name:/^停止/})).toBeNull();
   await paint([task({state:'waiting_time'})],f);await act(async()=>getByRole(host,'button',{name:/^停止/}).click());expect(f.onCancel).toHaveBeenCalledOnce();});
@@ -118,6 +132,28 @@ it('opens source records from the work log while the model is running', async ()
   await act(async()=>getByRole(host,'button',{name:'读取订单 SO-1001'}).click());
   expect(actions.onOpenRecord).toHaveBeenCalledWith('orders/detail','o1',undefined);
   expect(getByRole(host,'status').textContent).toContain('正在等待模型');
+});
+
+it('opens every order source from a single batch step even when the report does not repeat the order numbers', async () => {
+  const actions = fns();
+  await paint([task({ state:'succeeded', result:'已核对交期。', trail:[
+    { at:'',kind:'read',label:'读取报价 Q-01',ref:{type:'quotation',id:'q1',label:'Q-01',view:'quotations'} },
+    { at:'',kind:'read',label:'读取 2 张订单',completed:true,refs:[
+      {type:'order',id:'o1',label:'SO-1001',view:'orders/detail'},
+      {type:'order',id:'o2',label:'SO-1002',view:'orders/detail'},
+    ] },
+    { at:'',kind:'read',label:'读取订单详情',completed:true,failed:true },
+  ] })], actions);
+  await act(async()=>getByRole(host,'button',{name:'办理过程'}).click());
+  const trail = host.querySelector<HTMLOListElement>('.mist-xz-steps')!;
+  expect(trail.querySelectorAll('li')).toHaveLength(3);
+  for (const label of ['读取报价 Q-01','SO-1001','SO-1002']) {
+    await act(async()=>getByRole(trail,'button',{name:label,exact:true}).click());
+  }
+  expect(actions.onOpenRecord.mock.calls).toEqual([
+    ['quotations','q1',undefined],['orders/detail','o1',undefined],['orders/detail','o2',undefined],
+  ]);
+  expect(queryByRole(trail,'button',{name:'读取订单详情'})).toBeNull();
 });
 
 
