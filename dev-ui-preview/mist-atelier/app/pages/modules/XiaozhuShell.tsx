@@ -28,7 +28,7 @@ export function XiaozhuComposer({ value, onChange, onSend, ready, busy, working,
     ...attachmentRefs.map(file => ({ key: file.fileId, name: file.name, remove: () => onRemoveAttachmentRef(file.fileId) })),
   ];
   const hasFiles = (event: React.DragEvent) => Array.from(event.dataTransfer.types).includes('Files');
-  const latestButton = onLatest && <IconButton className="mist-xz-tobottom" icon={ArrowDown} label={uiText('回到最新')} onClick={onLatest} />;
+  const latestButton = onLatest && <IconButton icon={ArrowDown} label={uiText('回到最新')} onClick={onLatest} />;
   if (inCall) return <div className="mist-xz-composer mist-xz-call" data-state={voice.state}>
     <div className="mist-xz-call-row"><span className="mist-xz-pulse" aria-hidden /><b>{uiText(voice.state === 'connecting' ? '正在接通' : voice.muted ? '已静音' : voice.state === 'speaking' ? '小竹正在说' : '正在听')}</b><span className="mist-spacer" />
       {latestButton}
