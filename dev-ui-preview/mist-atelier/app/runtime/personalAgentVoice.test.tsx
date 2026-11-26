@@ -72,6 +72,31 @@ it('reconnects to the existing persistent task without replaying old audio or su
   act(() => old.event({ type: 'task', item: { id: 'stale-task' } })); expect(seam.onTask).toHaveBeenCalledTimes(1);
 });
 
+it('clears queued playback, the old reply and the restricted selection before reconnecting', async () => {
+  await click('start'); const socket = Socket.instances[0];
+  act(() => {
+    socket.event({ type: 'ready' });
+    socket.event({ type: 'task', item: { id: 'restricted-task' } });
+    socket.event({ type: 'reply', text: '原报告正文' });
+  });
+  expect(latestVoice.reply).toBe('原报告正文');
+  act(() => {
+    socket.event({ type: 'task', item: { id: 'restricted-task', contentRestricted: true } });
+    socket.event({ type: 'speech_stopped' });
+    socket.event({ type: 'error', code: 'VOICE_ACCESS_CHANGED', message: '语音授权已变化，请重新连接' });
+    socket.event({ type: 'reply', text: '迟到的原报告正文' });
+  });
+  expect(latestVoice.reply).toBe('');
+  expect(latestVoice.state).toBe('error');
+  expect(seam.stopAudio).toHaveBeenCalledOnce();
+  expect(seam.close).toHaveBeenCalledOnce();
+  expect(tracks[0].stop).toHaveBeenCalledOnce();
+  expect(seam.onTask).toHaveBeenLastCalledWith({ id: 'restricted-task', contentRestricted: true });
+  await click('start');
+  const posts = seam.api.mock.calls.filter(([, init]) => init?.method === 'POST');
+  expect(JSON.parse(posts[1][1].body)).not.toHaveProperty('taskId');
+});
+
 it('keeps the task on same-conversation reconnect and drops late bindings after switching conversations', async () => {
   act(() => root.render(<Harness conversationId="c_original_room" />));
   await click('start');

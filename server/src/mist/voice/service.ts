@@ -10,6 +10,8 @@ import { VOICE_ENDPOINT, VOICE_INPUT_RATE, VOICE_OUTPUT_RATE, voiceConfig, voice
 const fail = (code: string, message: string, status = 400): never => { throw new MistApiError(code, message, status); };
 const digest = (text: string) => createHash('sha256').update(text).digest('hex');
 const TICKET_TTL = 30_000, CALL_TTL = 15 * 60_000, MAX_BUFFER = 1_048_576;
+const ACCESS_CHANGED_CODE = 'VOICE_ACCESS_CHANGED';
+const ACCESS_CHANGED_MESSAGE = '语音授权已变化，请重新连接';
 export type VoiceBinding = {
   owner: string; workspaceId: string; locale: string; taskId?: string;
   authorize(): Promise<void>;
@@ -33,7 +35,7 @@ export class MistVoiceService {
     await binding.authorize();
     if (!this.config()) fail('VOICE_NOT_CONFIGURED', '平台尚未配置实时语音', 503);
     if (!/^https?:\/\//.test(origin) || new URL(origin).origin !== origin) fail('VOICE_ORIGIN_INVALID', '语音来源无效', 403);
-    if (binding.taskId) await binding.task(binding.taskId);
+    if (binding.taskId && (await binding.task(binding.taskId)).contentRestricted) fail(ACCESS_CHANGED_CODE, ACCESS_CHANGED_MESSAGE, 403);
     const now = this.now();
     let replaceTicket: string | undefined;
     // After all authorization awaits, replace only a ticket that has not entered an upgrade.
@@ -89,9 +91,9 @@ export class MistVoiceService {
     let bindingChange: Promise<void> = Promise.resolve();
     let suppressAudio = false, lastResponseId = '';
     const blockedResponses = new Set<string>();
-    const handled = new Map<string, Promise<unknown>>();
-    const send = (payload: unknown) => { if (browser.readyState === WebSocket.OPEN && browser.bufferedAmount < MAX_BUFFER) browser.send(JSON.stringify(payload)); else if (browser.bufferedAmount >= MAX_BUFFER) close(); };
-    const upstream = (payload: unknown) => { if (provider.readyState === WebSocket.OPEN && provider.bufferedAmount < MAX_BUFFER) provider.send(JSON.stringify(payload)); else if (provider.bufferedAmount >= MAX_BUFFER) close(); };
+    const handled = new Map<string, { work: Promise<unknown>; binding: Promise<void>; taskId?: string }>();
+    const send = (payload: unknown) => { if (closed) return; if (browser.readyState === WebSocket.OPEN && browser.bufferedAmount < MAX_BUFFER) browser.send(JSON.stringify(payload)); else if (browser.bufferedAmount >= MAX_BUFFER) close(); };
+    const upstream = (payload: unknown) => { if (closed) return; if (provider.readyState === WebSocket.OPEN && provider.bufferedAmount < MAX_BUFFER) provider.send(JSON.stringify(payload)); else if (provider.bufferedAmount >= MAX_BUFFER) close(); };
     const interrupt = () => {
       suppressAudio = true;
       if (lastResponseId) blockedResponses.add(lastResponseId);
@@ -106,12 +108,36 @@ export class MistVoiceService {
       // Hanging up only closes speech. It never cancels a persistent work task.
     };
     const error = (code: string, message: string) => { send({ type: 'error', code, message }); close(); };
+    const accessChanged = () => error(ACCESS_CHANGED_CODE, ACCESS_CHANGED_MESSAGE);
+    const stopIfRestricted = (task: AgentTaskView | undefined) => {
+      if (!task?.contentRestricted) return false;
+      // End the provider context as well as playback: that session can still hold the original report.
+      send({ type: 'task', item: task });
+      send({ type: 'speech_stopped' });
+      accessChanged();
+      return true;
+    };
     const timeout = setTimeout(() => error('VOICE_TIME_LIMIT', '本次语音已结束，可重新连接'), CALL_TTL);
     const handshake = setTimeout(() => error('VOICE_CONNECT_TIMEOUT', '语音连接超时，请重试'), 15_000);
-    const current = async () => { await bindingChange; return taskId ? binding.task(taskId) : undefined; };
+    const current = async () => {
+      while (!closed) {
+        const change = bindingChange;
+        await change;
+        if (closed) return;
+        if (change !== bindingChange) continue;
+        const id = taskId;
+        if (!id) return;
+        try {
+          const task = await binding.task(id);
+          if (!closed && change === bindingChange && id === taskId) return task;
+        } catch (failure) {
+          if (!closed && change === bindingChange && id === taskId) throw failure;
+        }
+      }
+    };
     const publishTask = async () => {
       const task = await current();
-      if (!task) return;
+      if (!task || stopIfRestricted(task)) return;
       const key = JSON.stringify([task.id, task.state, task.checkpoint, task.result, task.questions, task.waitingProposalIds]);
       if (key === lastTask) return; lastTask = key;
       send({ type: 'task', item: task });
@@ -126,12 +152,13 @@ export class MistVoiceService {
         if (this.now() - pingAt >= 20_000) { browser.ping(); pingAt = this.now(); }
         if (this.now() - authAt >= 10_000) { await binding.authorize(); authAt = this.now(); }
         await publishTask();
-      })().catch(() => error('VOICE_ACCESS_CHANGED', '语音授权已变化，请重新连接')).finally(() => { polling = false; });
+      })().catch(accessChanged).finally(() => { polling = false; });
     }, this.options.pollMs ?? 2000);
     this.calls.set(ticket.id, close);
     const dispatch = async (name: string, args: Record<string, unknown>, callId: string) => {
       await binding.authorize();
       const task = await current();
+      if (closed || stopIfRestricted(task)) return;
       if (name === 'bambook_voice_context') {
         if (Object.keys(args).length) fail('INVALID_INPUT', '上下文不接受额外参数');
         return { task: task ? { name: task.name, state: task.state, instructions: task.instructions, checkpoint: task.checkpoint, result: task.result, questions: task.questions, requiresPageConfirmation: task.waitingProposalIds.length > 0 } : null };
@@ -149,19 +176,23 @@ export class MistVoiceService {
       // instruction. One final utterance can cause at most one task/control action.
       consumedTranscript = transcriptKey;
       let result: AgentTaskView;
+      const priorTaskId = taskId, priorBinding = bindingChange;
       const requestId = 'voice-' + digest(ticket.id + ':' + callId).slice(0, 56);
       if (name === 'bambook_voice_task') {
         result = await binding.submit(transcript, requestId, task);
       } else {
         result = await binding.control(args.action as 'pause' | 'resume' | 'cancel', task!, requestId);
       }
+      if (closed) return;
+      if (priorTaskId !== taskId || priorBinding !== bindingChange) fail('AGENT_TASK_CHANGED', '任务已更新，请核对状态', 409);
+      taskId = result.id;
+      if (stopIfRestricted(result)) return;
       // Only the committed spoken answer acknowledges a question to the browser.
       // Periodic task snapshots may also contain answers written by another client.
       const answeredQuestionId = name === 'bambook_voice_task' && task?.id === result.id
         ? result.questions?.find(question => question.answeredAt
           && task.questions?.some(previous => previous.id === question.id && !previous.answeredAt))?.id
         : undefined;
-      taskId = result.id;
       send({ type: 'task', item: result, ...(answeredQuestionId ? { answeredQuestionId } : {}) });
       return { name: result.name, state: result.state, result: result.result, question: result.questions?.find(q => !q.answer)?.question, requiresPageConfirmation: result.waitingProposalIds.length > 0, outcome_spoken: false };
     };
@@ -181,14 +212,28 @@ export class MistVoiceService {
         for (const item of items.slice(0, 5)) {
           const callId = item.call_id, name = item.name ?? item.function?.name;
           if (typeof callId !== 'string' || !callId || callId.length > 200 || typeof name !== 'string') continue;
-          if (!handled.has(callId)) {
+          let callback = handled.get(callId);
+          const duplicate = !!callback;
+          if (!callback) {
             if (handled.size >= 100) { error('VOICE_CALL_LIMIT', '本次语音已达到限额，请重新连接'); return; }
             let args: unknown;
             try { const rawArgs = item.arguments ?? item.function?.arguments ?? {}; args = typeof rawArgs === 'string' ? JSON.parse(rawArgs) : rawArgs; } catch { args = null; }
             const work = args && typeof args === 'object' && !Array.isArray(args) ? dispatch(name, args as Record<string, unknown>, callId) : Promise.reject(new MistApiError('INVALID_INPUT', '语音参数无效', 400));
-            handled.set(callId, work.catch(e => ({ error: true, message: e instanceof MistApiError ? e.message : '操作未完成，请在任务页核对原结果' })));
+            callback = { binding: bindingChange, taskId, work: work.catch(e => ({ error: true, message: e instanceof MistApiError ? e.message : '操作未完成，请在任务页核对原结果' })) };
+            handled.set(callId, callback);
           }
-          void handled.get(callId)!.then(result => { if (!closed) upstream(voiceToolResult(callId, result)); });
+          const sameBinding = () => callback.binding === bindingChange && callback.taskId === taskId;
+          void callback.work.then(async result => {
+            if (closed) return;
+            if (duplicate) {
+              // A repeated provider callback cannot reuse an earlier result across an access change.
+              if (!sameBinding()) return;
+              await binding.authorize();
+              const task = await current();
+              if (!sameBinding() || stopIfRestricted(task)) return;
+            }
+            if (!closed) upstream(voiceToolResult(callId, result));
+          }).catch(accessChanged);
         }
         return;
       }
@@ -218,7 +263,14 @@ export class MistVoiceService {
       if (message.type === 'interrupt') interrupt();
       else if (message.type === 'mute' && typeof message.muted === 'boolean') upstream({ type: message.muted ? 'input_audio_mute.commit' : 'input_audio_unmute.commit', event_id: randomUUID() });
       else if (message.type === 'bind_task' && typeof message.taskId === 'string' && message.taskId.length <= 100 && !Object.keys(message).some(key => !['type', 'taskId'].includes(key))) {
-        bindingChange = bindingChange.then(async () => { await binding.authorize(); const item = await binding.task(message.taskId); taskId = item.id; lastTask = ''; send({ type: 'task', item }); }).catch(() => error('VOICE_TASK_UNAVAILABLE', '该事项无法接续，请在任务页核对'));
+        bindingChange = bindingChange.then(async () => {
+          if (closed) return;
+          await binding.authorize();
+          const item = await binding.task(message.taskId);
+          if (closed) return;
+          taskId = item.id; lastTask = '';
+          if (!stopIfRestricted(item)) send({ type: 'task', item });
+        }).catch(() => error('VOICE_TASK_UNAVAILABLE', '该事项无法接续，请在任务页核对'));
       }
       else if (message.type === 'end') close();
       else error('VOICE_INPUT_INVALID', '语音请求无效');
