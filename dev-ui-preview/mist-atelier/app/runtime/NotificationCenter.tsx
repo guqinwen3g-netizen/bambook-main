@@ -4,6 +4,7 @@ import { Button, Drawer, EmptyState, Icon, Segmented } from '../../../../compone
 import { ArrowRight, X } from 'lucide-react';
 import type { MistNotification, MistTarget } from '../../../../server/src/shared/mistWorkspace';
 import type { MistDigestItem } from './notificationPreferences';
+import { opensOriginalAgentTask } from './agentTaskNotices';
 
 /** Times are shown in the company's business time zone, the same zone the server uses for business dates. */
 const BUSINESS_TZ = 'Asia/Shanghai';
@@ -53,7 +54,7 @@ export function NotificationCenter({ open, onClose, items, digest, digestEnabled
       </section>}
       {groups.length ? groups.map(g => <section key={g.id} className="mist-notice-group" aria-label={uiText(g.label)}>
         <h3 className="mist-notice-group-h">{uiText(g.label)}</h3>
-        {g.rows.map(n => <NoticeRow key={n.id} n={n} today={today} busy={busy} onOpen={() => onOpenItem(n)} />)}
+        {g.rows.map(n => <NoticeRow key={n.id} n={n} today={today} busy={busy&&!opensOriginalAgentTask(n)} onOpen={() => onOpenItem(n)} />)}
       </section>) : <EmptyState title={uiText(filter === 'unread' ? '没有未读通知' : '暂无通知')} />}
     </div>
   </Drawer>;

@@ -27,16 +27,54 @@ afterEach(async () => { vi.restoreAllMocks(); await rm(directory, { recursive: t
 
 it('saves a rule in a session, then runs it from the stored grant without one', async () => {
   const saved = await repo.saveAutomation(clerk(), workspaceId, undefined, { name: '每日汇总', trigger: 'daily', time: '00:00', instructions: '汇总待办' });
-  const [job] = await repo.dueAutomations(10); expect(job).toMatchObject({ workspaceId, id: saved.id }); expect(job.authority).toMatchObject({ ownerId: 'clerk', companyId: company });
+  const [job] = (await repo.dueAutomations(10)).jobs; expect(job).toMatchObject({ workspaceId, id: saved.id }); expect(job.authority).toMatchObject({ ownerId: 'clerk', companyId: company });
   const result = await repo.runAutomation(await worker.actor(job.authority), workspaceId, saved.id, () => 'bma1_test', now);
   expect(result.fired).toBe(true);
   const [rule] = (await repo.listAutomations(clerk(), workspaceId)).items; expect(rule.runs).toHaveLength(1); expect(rule.halted).toBeUndefined();
 });
 it('halts with a reason when the owner can no longer act, and never runs for them again', async () => {
   const saved = await repo.saveAutomation(clerk(), workspaceId, undefined, { name: '每日汇总', trigger: 'daily', time: '00:00', instructions: '汇总待办' });
-  const [job] = await repo.dueAutomations(10); auth.users.get('clerk')!.active = false;
+  const [job] = (await repo.dueAutomations(10)).jobs; auth.users.get('clerk')!.active = false;
   await expect(repo.runAutomation(await worker.actor(job.authority), workspaceId, saved.id, () => 'bma1_test', now)).resolves.toMatchObject({ fired: false });
   auth.users.get('clerk')!.active = true;
   const [rule] = (await repo.listAutomations(clerk(), workspaceId)).items; expect(rule).toMatchObject({ enabled: false }); expect(rule.halted?.message).toBeTruthy();
-  expect(await repo.dueAutomations(10)).toEqual([]);
+  expect((await repo.dueAutomations(10)).jobs).toEqual([]);
+});
+
+it('reaches later companies beyond the first 50 enabled rules and keeps the original run after restart', async () => {
+  const firstCompanyActor = clerk();
+  for (const userId of ['clerk', 'second', 'third']) {
+    auth.users.set(userId, { active: true, permissions: ['ai:chat'] });
+    db.companyMembers.push({ companyId: company, userId, status: 'active' } as any);
+    for (let index = 0; index < 20; index++) {
+      await repo.saveAutomation({ ...firstCompanyActor, userId }, workspaceId, undefined, {
+        name: '晚间汇总 ' + index, trigger: 'daily', time: '23:00', instructions: '汇总待办',
+      }, now);
+    }
+  }
+
+  const laterCompany = randomUUID(), laterWorkspace = randomUUID();
+  db.workspaces.set(laterWorkspace, {
+    ...db.workspaces.get(workspaceId)!, id: laterWorkspace, companyId: laterCompany, slug: 'company@' + laterCompany,
+  });
+  db.companyMembers.push({ companyId: laterCompany, userId: 'clerk', status: 'active' } as any);
+  const laterActor = {
+    ...firstCompanyActor, companyId: laterCompany, roleIds: [SYSTEM_ROLE_IDS.SUPER_ADMIN + '@' + laterCompany],
+  };
+  const laterRule = await repo.saveAutomation(laterActor, laterWorkspace, undefined, {
+    name: '上午汇总', trigger: 'daily', time: '10:00', instructions: '汇总待办',
+  }, now);
+
+  const run = vi.spyOn(repo, 'runAutomation');
+  await worker.tick();
+  expect(run).toHaveBeenCalledTimes(61);
+  expect(new Set(run.mock.calls.map(call => call[2])).size).toBe(61);
+  const [saved] = (await repo.listAutomations(laterActor, laterWorkspace)).items;
+  expect(saved.id).toBe(laterRule.id);
+  expect(saved.runs).toHaveLength(1);
+  expect((await repo.listAutomations(firstCompanyActor, workspaceId)).items.every(rule => !rule.runs.length)).toBe(true);
+
+  const restarted = new MistAutomationWorker(repo, { make: () => 'bma1_test', now: () => now + 30_000 });
+  await restarted.tick();
+  expect((await repo.listAutomations(laterActor, laterWorkspace)).items[0].runs).toEqual(saved.runs);
 });

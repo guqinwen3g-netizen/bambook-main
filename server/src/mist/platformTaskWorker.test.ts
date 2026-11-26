@@ -2,21 +2,22 @@ import sharp from 'sharp';
 import * as XLSX from 'xlsx';
 import{afterEach,beforeEach,expect,it,vi}from'vitest';
 import request from'supertest';
-import{mkdtemp,rm}from'node:fs/promises';
+import{mkdtemp,rm,writeFile}from'node:fs/promises';
 import{tmpdir}from'node:os';import path from'node:path';import{randomUUID}from'node:crypto';
 import{createMistLocalRuntime}from'./local';import{createMistServer}from'./server';
 import{SERVICE_KEY_HEADER}from'./agentIdentities';
 import type{MistPlatformTaskWorker}from'./platformTaskWorker';
 import {platformTaskClock}from'./platformTaskWorker';
 import type{MistRepository}from'./repository';
-import type{LlmCompletionInput}from'../ai/llmProviders';
+import{createLlmCompleter,type LlmCompletionInput}from'../ai/llmProviders';
 import{taskRecord}from'./agentTasks';
+import{MistPrivateFiles}from'./files';
 let directory:string;const workers:MistPlatformTaskWorker[]=[];
 beforeEach(async()=>{directory=await mkdtemp(path.join(tmpdir(),'platform-agent-'));vi.stubEnv('MIST_LOCAL_WORKSPACE','1');vi.stubEnv('NODE_ENV','test');});
 afterEach(async()=>{await Promise.all(workers.splice(0).map(w=>w.stop()));vi.restoreAllMocks();vi.unstubAllEnvs();await rm(directory,{recursive:true,force:true});});
-async function fixture(complete:(input:LlmCompletionInput)=>Promise<string>,options:{ceiling?:{value:string[]|null};mode?:'read'|'operate';concurrency?:number}={}){
+async function fixture(complete:(input:LlmCompletionInput)=>Promise<string>,options:{ceiling?:{value:string[]|null};mode?:'read'|'operate';concurrency?:number;modelTimeoutMs?:number;pulseMs?:number}={}){
  const local=createMistLocalRuntime({directory});if(options.ceiling){const authorize=local.authorize;local.authorize=(db,prior,permission)=>authorize(db,options.ceiling!.value===null?prior:{...prior,permissionCeiling:options.ceiling!.value},permission);}
- const app=createMistServer(undefined,{local,agentTasks:{complete,tickMs:3_600_000,pulseMs:20,concurrency:options.concurrency}}),human=request.agent(app);await human.get('/api/mist/session').expect(200);
+ const app=createMistServer(undefined,{local,agentTasks:{complete,tickMs:3_600_000,pulseMs:options.pulseMs??20,concurrency:options.concurrency,modelTimeoutMs:options.modelTimeoutMs}}),human=request.agent(app);await human.get('/api/mist/session').expect(200);
  const workspace=(await human.get('/api/mist/workspaces/default').expect(200)).body.workspace,base='/api/mist/workspaces/'+workspace.id,id=randomUUID();
  await human.post(base+'/agent-identities').send({id,name:'业务助理',ownerId:'local-operator',mode:options.mode??'operate'}).expect(201);
  const key=(await human.post(base+'/agent-identities/'+id+'/issue').send({requestId:randomUUID(),version:1}).expect(200)).body.token;
@@ -28,6 +29,144 @@ async function fixture(complete:(input:LlmCompletionInput)=>Promise<string>,opti
  return{local,app,human,workspace,base,id,key,worker,repository,create,current,command,drain};
 }
 const tool=(name:string,args:Record<string,unknown>)=>JSON.stringify({name,arguments:args});
+it('wakes the idle platform worker only after a committed task and keeps submission replay on that same run', async()=>{
+ const finish=tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对。'});
+ const complete=vi.fn(async()=>finish);
+ const f=await fixture(complete), scanned=vi.spyOn(f.repository,'duePlatformTasks');
+ f.worker.start(0); // The fixture's regular scan is once an hour.
+ await vi.waitFor(()=>expect(scanned).toHaveBeenCalled(),{timeout:1500});
+ await f.worker.settled();
+ const body={requestId:randomUUID(),name:'立即核对',instructions:'只读核对。'};
+ const submit=()=>f.human.post(f.base+'/personal-agent/tasks').send(body).expect(201);
+ const first=(await submit()).body.item;
+ await vi.waitFor(()=>expect(complete).toHaveBeenCalledTimes(1),{timeout:1500});
+ await f.worker.settled();
+ expect((await f.current(first.id)).state).toBe('succeeded');
+ expect((await submit()).body.item.id).toBe(first.id);
+ expect(complete).toHaveBeenCalledTimes(1);
+});
+
+it('keeps a queue wake pending while the only worker slot is busy', async()=>{
+ const finish=tool('bambook_task',{action:'finish',outcome:'succeeded',result:'只读完成。'});
+ let release!: (result:string)=>void;
+ const firstModel=new Promise<string>(resolve=>{release=resolve;});
+ const complete=vi.fn(async()=>finish).mockImplementationOnce(()=>firstModel);
+ const f=await fixture(complete,{concurrency:1}), scanned=vi.spyOn(f.repository,'duePlatformTasks');
+ f.worker.start(0);
+ await vi.waitFor(()=>expect(scanned).toHaveBeenCalled(),{timeout:1500});
+ await f.worker.settled();
+ try{
+  const first=await f.create('platform');
+  await vi.waitFor(()=>expect(complete).toHaveBeenCalledTimes(1),{timeout:1500});
+  const second=await f.create('platform');
+  expect((await f.current(second.id)).state).toBe('queued');
+  expect(complete).toHaveBeenCalledTimes(1);
+  release(finish);
+  await vi.waitFor(()=>expect(complete).toHaveBeenCalledTimes(2),{timeout:1500});
+  await f.worker.settled();
+  expect((await f.current(first.id)).state).toBe('succeeded');
+  expect((await f.current(second.id)).state).toBe('succeeded');
+ }finally{release(finish);}
+});
+
+it.each(['resume','answer'] as const)('wakes a continuing task after a committed %s action', async action=>{
+ const finish=tool('bambook_task',{action:'finish',outcome:'succeeded',result:'续办完成。'});
+ let mail='';
+ const complete=vi.fn(async()=>finish);
+ if(action==='answer')complete.mockResolvedValueOnce(tool('bambook_task',{action:'question',question:'请给本轮数量。'}))
+  .mockImplementationOnce(async()=>tool('bambook_get',{type:'email',id:mail}));
+ const f=await fixture(complete);
+ mail=f.workspace.state.email.messages[0].id;
+ f.worker.start(3_600_000);
+ const task=await f.create('platform');
+ if(action==='resume')await f.human.post(f.base+'/agent-tasks/'+task.id+'/pause').send({requestId:randomUUID(),version:task.version}).expect(200);
+ else await f.drain();
+ const prior=await f.current(task.id);
+ expect(prior.state).toBe(action==='resume'?'paused':'waiting_human');
+ await f.worker.stop();
+ const scanned=vi.spyOn(f.repository,'duePlatformTasks');
+ f.worker.start(0);
+ await vi.waitFor(()=>expect(scanned).toHaveBeenCalled(),{timeout:1500});
+ await f.worker.settled();
+ const payload={requestId:randomUUID(),version:prior.version,...(action==='answer'?{questionId:prior.questions[0].id,answer:'27 件'}:{})};
+ const resumed=(await f.human.post(f.base+'/agent-tasks/'+task.id+'/'+action).send(payload).expect(200)).body.item;
+ expect(resumed).toMatchObject({id:task.id,state:'queued'});
+ await vi.waitFor(()=>expect(complete).toHaveBeenCalledTimes(action==='answer'?2:1),{timeout:1500});
+ await f.worker.settled();
+ expect(complete).toHaveBeenCalledTimes(action==='answer'?3:1);
+ expect(await f.current(task.id)).toMatchObject({id:task.id,state:'succeeded',result:'续办完成。'});
+});
+
+it.each(['plain reply','bound order','blind write'] as const)('applies the correct freshness check after a user answer: %s',async mode=>{
+ const finish=tool('bambook_task',{action:'finish',outcome:'succeeded',result:'核对完成。'});
+ let orderId='',customerId='';
+ const complete=vi.fn(async()=>finish).mockResolvedValueOnce(tool('bambook_task',{action:'question',question:'请给数量。'}));
+ if(mode==='bound order')complete.mockResolvedValueOnce(finish).mockImplementationOnce(async()=>tool('bambook_get',{type:'order',id:orderId}));
+ if(mode==='blind write')complete.mockImplementationOnce(async()=>tool('bambook_execute',{command:{type:'customer.update',payload:{id:customerId,patch:{name:'不应被写入'}}}}));
+ const f=await fixture(complete);
+ orderId=f.workspace.state.orders[0].id;customerId=f.workspace.state.customers[0].id;
+ f.worker.start(3_600_000);
+ const {item:task}=(await f.human.post(f.base+'/personal-agent/tasks').send({requestId:randomUUID(),name:'核对数量',instructions:'数量不足时请先提问。',...(mode==='bound order'?{intentRefs:[{kind:'orders',id:orderId}]}:{})}).expect(201)).body;
+ await f.drain();
+ const waiting=await f.current(task.id);
+ await f.human.post(f.base+'/agent-tasks/'+task.id+'/answer').send({requestId:randomUUID(),version:waiting.version,questionId:waiting.questions[0].id,answer:'27'}).expect(200);
+ await f.drain();
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'核对完成。'});
+ expect(complete).toHaveBeenCalledTimes(mode==='plain reply'?2:mode==='blind write'?3:4);
+ const record=(await taskRecord(f.local.database,f.workspace.id,task.id)).value;
+ const rejected=record.platform!.steps[mode==='bound order'?2:1]?.result;
+ if(mode!=='plain reply')expect(rejected).toMatchObject({error:true,message:expect.stringContaining('回源读取')});
+ expect((await f.human.get(f.base).expect(200)).body.workspace.state.customers).toEqual(f.workspace.state.customers);
+});
+
+it.each(['confirm','reject','confirm while paused','rollback'] as const)('only wakes a queued platform task after a committed proposal %s',async scenario=>{
+ const decision=scenario==='reject'?'reject':'confirm',paused=scenario==='confirm while paused';
+ let mail='',turn=0;
+ const complete=vi.fn(async()=>{
+  turn++;
+  if(turn===1||turn===3)return tool('bambook_get',{type:'email',id:mail});
+  if(turn===2)return tool('bambook_execute',{command:{type:'email.move',payload:{id:mail,folder:'archive'}}});
+  return tool('bambook_task',{action:'finish',outcome:decision==='confirm'?'succeeded':'stopped',result:'已核对本人决定。'});
+ });
+ const f=await fixture(complete);mail=f.workspace.state.email.messages[0].id;
+ const original=f.workspace.state.email.messages[0].folder;
+ f.worker.start(3_600_000);
+ const task=await f.create('platform');await f.drain();
+ const pending=await f.current(task.id);
+ expect(pending.state).toBe('waiting_human');expect(pending.waitingProposalIds).toHaveLength(1);
+ if(paused)await f.human.post(f.base+'/agent-tasks/'+task.id+'/pause').send({requestId:randomUUID(),version:pending.version}).expect(200);
+ await f.worker.stop();
+ const scan=vi.spyOn(f.repository,'duePlatformTasks');f.worker.start(0);
+ await vi.waitFor(()=>expect(scan).toHaveBeenCalled(),{timeout:1500});await f.worker.settled();
+ const wake=vi.spyOn(f.worker,'wake');
+ if(scenario==='rollback'){
+  const repository=f.repository as unknown as {writeTransact:(workspaceId:string,run:(db:unknown)=>Promise<unknown>)=>Promise<unknown>};
+  const write=repository.writeTransact.bind(repository);
+  vi.spyOn(repository,'writeTransact').mockImplementationOnce((workspaceId,run)=>write(workspaceId,async db=>{
+   await run(db);
+   throw new Error('决策事务测试回滚');
+  }));
+  const latest=(await f.human.get(f.base).expect(200)).body.workspace;
+  await f.human.post(f.base+'/commands').send({requestId:randomUUID(),expectedRevision:latest.revision,command:{type:'agent.proposal.confirm',payload:{id:pending.waitingProposalIds[0]}}}).expect(500);
+  expect(wake).not.toHaveBeenCalled();
+  expect(await f.current(task.id)).toMatchObject({state:'waiting_human',waitingProposalIds:pending.waitingProposalIds});
+  const after=(await f.human.get(f.base).expect(200)).body.workspace;
+  expect(after.state.agentProposals).toEqual(latest.state.agentProposals);
+  expect(after.state.email).toEqual(latest.state.email);
+  return;
+ }
+ await f.command('agent.proposal.'+decision,{id:pending.waitingProposalIds[0],...(decision==='reject'?{note:'保持原状'}:{})});
+ if(paused){
+  expect(wake).not.toHaveBeenCalled();
+  expect(await f.current(task.id)).toMatchObject({id:task.id,state:'paused'});
+ }else{
+  await vi.waitFor(()=>expect(complete).toHaveBeenCalledTimes(4),{timeout:1500});await f.worker.settled();
+  expect(await f.current(task.id)).toMatchObject({id:task.id,state:decision==='confirm'?'succeeded':'cancelled',result:'已核对本人决定。'});
+ }
+ const state=(await f.human.get(f.base).expect(200)).body.workspace.state;
+ expect(state.email.messages.find((m:any)=>m.id===mail).folder).toBe(decision==='confirm'?'archive':original);
+});
+
 it('pre-reads authorized intent references before first planning while supplying the current company business date and real lease time',async()=>{
  const seen:any[]=[];const complete=vi.fn(async(input:LlmCompletionInput)=>{const text=String(input.messages[0].content),facts=JSON.parse(text.slice(text.indexOf('User request:\n')+'User request:\n'.length));seen.push(facts);return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对所选资料。'});});
  const f=await fixture(complete),order=f.workspace.state.orders[0],invoice=f.workspace.state.invoices[0],intentRefs=[{kind:'orders',id:order.id},{kind:'invoices',id:invoice.id}];
@@ -206,11 +345,51 @@ it('ignores late model output after human stop, even when the model ignores its 
  const current=await f.current(task.id);await f.human.post(f.base+'/agent-tasks/'+task.id+'/cancel').send({requestId:randomUUID(),version:current.version}).expect(200);const stopped=(await f.human.get(f.base).expect(200)).body.workspace.state;await f.worker.stop();resolve(tool('bambook_execute',{command:{type:'email.flag',payload:{id:before.email.messages[0].id,flag:'starred',value:true}}}));await Promise.resolve();
  expect((await f.current(task.id)).state).toBe('cancelled');const after=(await f.human.get(f.base).expect(200)).body.workspace.state;expect(after).toEqual(stopped);expect(after.email).toEqual(before.email);
 });
+it('does not send a fallback when the user has cancelled between provider attempts', async () => {
+ vi.stubEnv('ARK_API_KEY','test-primary');
+ vi.stubEnv('BAMBOOK_LLM_BACKUP_URL','https://backup.example/v1');
+ vi.stubEnv('BAMBOOK_LLM_BACKUP_KEY','test-backup');
+ let releasePrimary!:(response:Response)=>void;
+ const primary=new Promise<Response>(resolve=>{releasePrimary=resolve;});
+ const fetchMock=vi.fn().mockReturnValueOnce(primary).mockResolvedValue(new Response('{}',{status:503}));
+ vi.stubGlobal('fetch',fetchMock);
+ try {
+  const complete=createLlmCompleter({platformProfile:'agent-task',platformProviders:{chain:()=>[]},subscriptions:{isConnected:()=>false,complete:async()=>''}});
+  const f=await fixture(complete,{pulseMs:60_000});f.worker.start(3_600_000);
+  const task=await f.create('platform');await f.worker.tick();await vi.waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(1));
+  const waiting=await f.current(task.id);
+  await f.human.post(f.base+'/agent-tasks/'+task.id+'/cancel').send({requestId:randomUUID(),version:waiting.version}).expect(200);
+  releasePrimary(new Response('{}',{status:503}));await f.worker.settled();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(await f.current(task.id)).toMatchObject({state:'cancelled'});
+ } finally { releasePrimary(new Response('{}',{status:503}));vi.unstubAllGlobals(); }
+});
 it('retries a model outage without clearing the task, then uses the saved request language',async()=>{
  let calls=0,mail='';const complete=vi.fn(async(_input:LlmCompletionInput)=>{calls++;if(calls===1)throw Error('model transport unavailable');return calls===2?tool('bambook_get',{type:'email',id:mail}):tool('bambook_task',{action:'finish',outcome:'succeeded',result:'Reviewed the original email; no business changes.'});});
  const f=await fixture(complete);mail=f.workspace.state.email.messages[0].id;f.worker.start(3_600_000);const task=await f.create('platform','en-US');await f.drain();let state=await f.current(task.id);expect(state.state).toBe('queued');expect(state.executionIssue.code).toBe('model_unavailable');await f.drain();expect(complete).toHaveBeenCalledTimes(1);
  vi.spyOn(Date,'now').mockReturnValue(Date.now()+30_000);await f.drain();state=await f.current(task.id);expect(state.state).toBe('succeeded');expect(state.executionIssue).toBeUndefined();expect(state.checkpoint).not.toContain('模型暂不可用');expect(complete.mock.calls[1][0].systemPrompt).toContain('Default response language: English');
  for(const [input] of complete.mock.calls){expect(input.messages[0].content).toMatch(/^Interface language: English \(en-US\)/);expect(input.messages[0].content).toContain('核对当前来信');}
+});
+it('retries the first full model timeout promptly and resumes the same task from its acknowledged read', async () => {
+ const complete = vi.fn<(input:LlmCompletionInput)=>Promise<string>>();
+ const f=await fixture(complete,{modelTimeoutMs:45});
+ const mail=f.workspace.state.email.messages[0].id;
+ complete.mockResolvedValueOnce(tool('bambook_get',{type:'email',id:mail}))
+  .mockImplementationOnce(()=>new Promise<string>(()=>{}))
+  .mockResolvedValueOnce(tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对原来信。'}));
+ f.worker.start(3_600_000);
+ const task=await f.create('platform');
+ let clock=Date.now();vi.spyOn(Date,'now').mockImplementation(()=>clock);
+ await f.drain();
+ const queued=await f.current(task.id);
+ expect(queued).toMatchObject({state:'queued',executionIssue:{code:'model_unavailable'}});
+ expect(Date.parse(queued.executionIssue.retryAt)-clock).toBe(5000);
+ expect(queued.trail.filter((step:any)=>step.kind==='read'&&step.completed)).toHaveLength(1);
+ clock+=4999;await f.drain();expect(complete).toHaveBeenCalledTimes(2);
+ clock+=1;await f.drain();
+ expect(await f.current(task.id)).toMatchObject({id:task.id,state:'succeeded',result:'已核对原来信。'});
+ expect(complete).toHaveBeenCalledTimes(3);
+ expect(complete.mock.calls[2][0].messages[0].content).toContain('bambook_get');
 });
 it('pauses repeated invalid model output and allows explicit owner recovery on the same task',async()=>{
  let valid=false,mail='',read=false;const complete=vi.fn(async()=>!valid?'not a tool decision':!read?(read=true,tool('bambook_get',{type:'email',id:mail})):tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对原邮件。'}));
@@ -223,6 +402,40 @@ it('rechecks authority before saving a late model decision and retains owner cle
  await f.worker.tick();await vi.waitFor(()=>expect(complete).toHaveBeenCalledTimes(1));ceiling.value=[];resolve(tool('bambook_execute',{command:{type:'email.flag',payload:{id:before.messages[0].id,flag:'starred',value:true}}}));await f.worker.settled();const masked=await f.current(task.id);expect(masked).toMatchObject({state:'access_changed',instructions:'',questions:[]});
  await f.human.post(f.base+'/agent-tasks/'+task.id+'/cancel').send({requestId:randomUUID(),version:masked.version}).expect(200);ceiling.value=null;expect((await f.human.get(f.base).expect(200)).body.workspace.state.email).toEqual(before);
 });
+it('loads the full workspace projection for planning but not for individual tool gates',async()=>{
+ let turn=0;
+ const f=await fixture(async()=>++turn===1
+  ?tool('bambook_task',{action:'checkpoint',summary:'已核对任务。'})
+  :tool('bambook_task',{action:'finish',outcome:'succeeded',result:'核对结束。'}));
+ f.worker.start(3_600_000);
+ const task=await f.create('platform');
+ const prepared=vi.spyOn(f.repository as any,'preparedView');
+ await f.drain();
+ expect(turn).toBe(2);
+ expect(prepared).toHaveBeenCalledTimes(2);
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'核对结束。'});
+});
+it('rechecks live source access after persisting a tool plan and leaves the tool unexecuted on revocation',async()=>{
+ const ceiling:{value:string[]|null}={value:null};
+ const f=await fixture(async()=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'不应提交。'}),{ceiling});
+ f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks').send({
+  requestId:randomUUID(),name:'核对原订单',instructions:'核对订单。',intentRefs:[{kind:'orders',id:f.workspace.state.orders[0].id}],
+ }).expect(201)).body.item;
+ const save=f.repository.savePlatformTaskPlan.bind(f.repository);
+ vi.spyOn(f.repository,'savePlatformTaskPlan').mockImplementation(async(actor,plan)=>{
+  const step=await save(actor,plan);
+  if(plan.name==='bambook_task'&&plan.arguments.action==='finish')ceiling.value=['ai:chat'];
+  return step;
+ });
+ const runtime=vi.spyOn(f.repository,'agentTaskRuntime');
+ await f.drain();
+ expect(runtime).not.toHaveBeenCalled();
+ expect(await f.current(task.id)).toMatchObject({state:'access_changed',result:''});
+ const persisted=(await taskRecord(f.local.database,f.workspace.id,task.id)).value;
+ expect(persisted.platform?.steps.at(-1)).toMatchObject({plan:{name:'bambook_task',arguments:{action:'finish'}}});
+ expect(persisted.platform?.steps.at(-1)?.result).toBeUndefined();
+});
 it('retains read-only service ceilings when the platform model asks to write',async()=>{
  let index=0,mail='';const complete=vi.fn(async()=>[tool('bambook_execute',{command:{type:'email.flag',payload:{id:mail,flag:'starred',value:true}}}),tool('bambook_get',{type:'email',id:mail}),tool('bambook_task',{action:'finish',outcome:'succeeded',result:'只读权限，未修改邮件。'})][index++]);
  const f=await fixture(complete,{mode:'read'});mail=f.workspace.state.email.messages[0].id;f.worker.start(3_600_000);const task=await f.create('platform');await f.drain();expect((await f.current(task.id)).state).toBe('succeeded');expect((await f.human.get(f.base).expect(200)).body.workspace.state.email).toEqual(f.workspace.state.email);
@@ -234,10 +447,23 @@ it('turns a business command the model executes into an owner proposal, waits fo
  ][index++]);
  const f=await fixture(complete);customer=f.workspace.state.customers[0].id;const original=f.workspace.state.customers[0].terms;f.worker.start(3_600_000);const task=await f.create('platform');
  await f.drain();let state=await f.current(task.id);expect(state.state).toBe('waiting_human');expect(state.waitingProposalIds).toHaveLength(1);expect(complete).toHaveBeenCalledTimes(2);
- let ws=(await f.human.get(f.base).expect(200)).body.workspace.state;expect(ws.customers.find((c:any)=>c.id===customer).terms).toBe(original);
+ const ws=(await f.human.get(f.base).expect(200)).body.workspace.state;expect(ws.customers.find((c:any)=>c.id===customer).terms).toBe(original);
  expect(ws.agentProposals.find((p:any)=>p.id===state.waitingProposalIds[0])).toMatchObject({state:'pending',taskId:task.id,command:{type:'customer.update'}});
- await f.command('agent.proposal.confirm',{id:state.waitingProposalIds[0]});await f.drain();state=await f.current(task.id);expect(state.state).toBe('succeeded');expect(complete).toHaveBeenCalledTimes(4);
- ws=(await f.human.get(f.base).expect(200)).body.workspace.state;expect(ws.customers.find((c:any)=>c.id===customer).terms).toBe('T/T 30% 预付');
+ const proposalId=state.waitingProposalIds[0];
+ const current=(await f.human.get(f.base).expect(200)).body.workspace;
+ const confirmation={requestId:randomUUID(),expectedRevision:current.revision,command:{type:'agent.proposal.confirm',payload:{id:proposalId}}};
+ const send=(body:typeof confirmation)=>f.human.post(f.base+'/commands').send(body);
+ const confirmed=await send(confirmation).expect(200);
+ await f.drain();state=await f.current(task.id);expect(state.state).toBe('succeeded');expect(complete).toHaveBeenCalledTimes(4);
+ const written=(await f.human.get(f.base).expect(200)).body.workspace;
+ expect(written.state.customers.find((c:any)=>c.id===customer).terms).toBe('T/T 30% 预付');
+ const replay=await send(confirmation).expect(200);
+ expect(replay.body).toMatchObject({replayed:true,receipt:confirmed.body.receipt,workspace:{revision:written.revision}});
+ await send({...confirmation,expectedRevision:written.revision}).expect(409);
+ await send({...confirmation,requestId:randomUUID(),expectedRevision:written.revision}).expect(404);
+ const final=(await f.human.get(f.base).expect(200)).body.workspace;
+ expect(final.revision).toBe(written.revision);
+ expect(final.state.customers).toEqual(written.state.customers);
 });
 it.each([false,true])('keeps a valid development draft proposal visible across reads and rejects stale source (changed: %s)',async changed=>{
  let calls=0,draft='';const values={name:'大衣',customer:'Cedar & Crown',style:'',season:'',category:'',kind:'new',fabric:'',color:'',target:'',sizeBase:'',goal:'',factories:[],due:'',collaborators:[],sampleQuantity:1};
@@ -256,9 +482,14 @@ it.each([false,true])('keeps a valid development draft proposal visible across r
  await f.command('agent.proposal.confirm',{id:proposal.id});await f.drain();const after=(await f.human.get(f.base).expect(200)).body.workspace;expect(after.state.drafts.find((d:any)=>d.id===draft).values.style).toBe('NW-31');expect(after.state.drafts).toHaveLength(direct.state.drafts.length);expect(after.state.devs).toHaveLength(direct.state.devs.length);
 });
 
-function pdf(text:string){
- const objects=['<</Type/Catalog/Pages 2 0 R>>','<</Type/Pages/Kids[3 0 R]/Count 1>>','<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 100]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>',null,'<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>'];
- const stream=`BT /F1 12 Tf 10 50 Td (${text}) Tj ET`;objects[3]=`<</Length ${stream.length}>>\nstream\n${stream}\nendstream`;
+function pdf(text:string, pageCount=1){
+ const font=3+2*pageCount;
+ const objects=['<</Type/Catalog/Pages 2 0 R>>',`<</Type/Pages/Kids[${Array.from({length:pageCount},(_,i)=>`${3+2*i} 0 R`).join(' ')}]/Count ${pageCount}>>`];
+ for(let page=1;page<=pageCount;page++){
+   const stream=`BT /F1 12 Tf 10 50 Td (${page===pageCount?text:`Page ${page}: general terms`}) Tj ET`;
+   objects.push(`<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 100]/Contents ${2+2*page} 0 R/Resources<</Font<</F1 ${font} 0 R>>>>>>`, `<</Length ${stream.length}>>\nstream\n${stream}\nendstream`);
+ }
+ objects.push('<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>');
  let out='%PDF-1.4\n';const offsets:number[]=[];objects.forEach((o,i)=>{offsets.push(out.length);out+=`${i+1} 0 obj\n${o}\nendobj\n`;});
  const xref=out.length;out+=`xref\n0 ${objects.length+1}\n0000000000 65535 f \n${offsets.map(o=>String(o).padStart(10,'0')+' 00000 n \n').join('')}trailer\n<</Size ${objects.length+1}/Root 1 0 R>>\nstartxref\n${xref}\n%%EOF`;
  return Buffer.from(out);
@@ -266,19 +497,41 @@ function pdf(text:string){
 
 it('researches a PDF, workbook and image together with a selected order, keeping all uploaded files task-private',async()=>{
  let readTask: (()=>Promise<any>) | undefined;
+ let turns=0;
  const complete=vi.fn(async(model:LlmCompletionInput)=>{
    expect(readTask).toBeDefined();
    const current=await readTask!();
    expect(current).toMatchObject({state:'running',executionStage:'model'});
    expect(Number.isFinite(Date.parse(current.executionStageSince))).toBe(true);
-   expect(current.trail.filter((step:any)=>step.kind==='read'&&step.completed)).toHaveLength(3);
+   if(turns===0)expect(current.trail.filter((step:any)=>step.kind==='read'&&step.completed)).toHaveLength(3);
    await new Promise(resolve=>setTimeout(resolve,55));
    expect((await readTask!()).executionStageSince).toBe(current.executionStageSince);
    const input=model.messages[0].content;
-   expect(input).toContain('PDF-DELIVERY-925');
+   expect(typeof input).toBe('string');
+   const facts=JSON.parse((input as string).slice((input as string).indexOf('{')));
+   expect(facts.task.attachments.map(({id, name}: {id:string;name:string})=>[id,name])).toEqual([
+     ['attachment_1','delivery.pdf'],['attachment_2','quantities.xlsx'],['attachment_3','sample.png'],
+   ]);
+   for(const {id} of current.attachments)expect(input).not.toContain(id);
+   const reads=facts.history.recent.filter((step:{name:string})=>step.name==='bambook_file_text');
+   expect(reads[0]).toMatchObject({arguments:{fileId:'attachment_1'},result:{file:{id:'attachment_1'},nextCursor:'next'}});
+   expect(reads[1]).toMatchObject({arguments:{fileId:'attachment_2'},result:{file:{id:'attachment_2'},hasMore:false}});
    expect(input).toContain('XLSX-QUANTITY-318');
    expect(input).toContain('bambook_get');
+   expect(input).toContain('"imageSources":["sample.png"]');
+   expect(model.systemPrompt).toContain('bambook_file_text 不提取图片文字');
    expect(model.images).toEqual([{name:'sample.png',url:expect.stringMatching(/^data:image\/jpeg;base64,/)}]);
+   turns++;
+   if(turns===1){
+     expect(input).not.toContain('PDF-DELIVERY-925');
+     return tool('bambook_file_text',{fileId:'attachment_99',cursor:'next'});
+   }
+   if(turns===2){
+     expect(reads[2]).toMatchObject({arguments:{fileId:'attachment_99'},result:{error:true,message:expect.stringContaining('附件编号')}});
+     return tool('bambook_file_text',{fileId:'attachment_1',cursor:'next'});
+   }
+   expect(reads[3]).toMatchObject({arguments:{fileId:'attachment_1',cursor:'next'},result:{file:{id:'attachment_1'},range:{pageFrom:21,pageTo:23},hasMore:false}});
+   expect(input).toContain('PDF-DELIVERY-925');
    return JSON.stringify({name:'bambook_task',arguments:{action:'finish',outcome:'succeeded',result:'已综合核对所选记录和三份附件。'},progress:'已读订单和两份文档，图片编号也已识别，正在整理对照结果。'});
  });
  const f=await fixture(complete);
@@ -289,7 +542,7 @@ it('researches a PDF, workbook and image together with a selected order, keeping
  const payload={requestId:randomUUID(),name:'对照订单',instructions:'对照所选订单与附件。',intentRefs:[{kind:'orders',id:f.workspace.state.orders[0].id}]};
  const submit=()=>f.human.post(f.base+'/personal-agent/tasks')
    .field('task',JSON.stringify(payload))
-   .attach('attachments',pdf('PDF-DELIVERY-925'),'delivery.pdf')
+   .attach('attachments',pdf('PDF-DELIVERY-925',23),'delivery.pdf')
    .attach('attachments',workbook,'quantities.xlsx')
    .attach('attachments',image,'sample.png');
  f.worker.start(3_600_000);
@@ -304,7 +557,7 @@ it('researches a PDF, workbook and image together with a selected order, keeping
  expect(state.files).toEqual(f.workspace.state.files);
  for(const file of task.attachments)await f.human.get(f.base+'/files/'+file.id).expect(404);
  await f.drain();
- expect(complete).toHaveBeenCalledTimes(1);
+ expect(complete).toHaveBeenCalledTimes(3);
  const completed=await f.current(task.id);
  expect(completed).toMatchObject({state:'succeeded',attachments:task.attachments});
  expect(completed.trail).toEqual(expect.arrayContaining([
@@ -314,3 +567,178 @@ it('researches a PDF, workbook and image together with a selected order, keeping
  ]));
  await f.human.post(f.base+'/personal-agent/tasks').field('task',JSON.stringify(payload)).attach('attachments',Buffer.from('changed'),'change.txt').expect(409);
 });
+
+it('explicitly reopens a prior attachment in the same conversation without creating another original', async () => {
+  const marker = 'only-in-the-original-worksheet-7319';
+  const model = vi.fn(async (input: LlmCompletionInput) => {
+    expect(input.messages[0].content).toContain(marker);
+    return tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '已重新读取指定原件' });
+  });
+  const f = await fixture(model);
+  f.worker.start(3_600_000);
+  const conversationId = 'conv_12345678';
+  const payload = { requestId: randomUUID(), name: '继续核对原件', instructions: '逐字核对原文件', conversationId };
+  const original = (await f.human.post(f.base + '/personal-agent/tasks')
+    .field('task', JSON.stringify(payload)).attach('attachments', Buffer.from(marker), 'source.txt').expect(201)).body.item;
+  await f.drain();
+  expect((await f.current(original.id)).state).toBe('succeeded');
+  const ref = { taskId: original.id, fileId: original.attachments[0].id };
+  const next = { ...payload, requestId: randomUUID(), attachmentRefs: [ref] };
+  const writes = vi.spyOn(MistPrivateFiles.prototype, 'write');
+
+  const followUp = (await f.human.post(f.base + '/personal-agent/tasks').send(next).expect(201)).body.item;
+  expect(followUp.attachments).toEqual(original.attachments);
+  const repeated = (await f.human.post(f.base + '/personal-agent/tasks').send(next).expect(201)).body.item;
+  expect(repeated.id).toBe(followUp.id);
+  await f.human.post(f.base + '/personal-agent/tasks').send({ ...next, attachmentRefs: [] }).expect(409);
+  expect(writes).not.toHaveBeenCalled();
+  await f.drain();
+  expect(await f.current(followUp.id)).toMatchObject({ state: 'succeeded', result: '已重新读取指定原件' });
+  expect(model).toHaveBeenCalledTimes(2);
+
+  const mixedRequest = { ...next, requestId: randomUUID() };
+  const mixed = (await f.human.post(f.base + '/personal-agent/tasks')
+    .field('task', JSON.stringify(mixedRequest))
+    .attach('attachments', Buffer.from('newly added'), 'new.txt').expect(201)).body.item;
+  expect(mixed.attachments.map((file: { name: string }) => file.name)).toEqual(['new.txt', 'source.txt']);
+  expect(writes).toHaveBeenCalledTimes(1);
+  const reborrowed = (await f.human.post(f.base + '/personal-agent/tasks').send({
+    ...next, requestId: randomUUID(), attachmentRefs: [{ taskId: mixed.id, fileId: ref.fileId }],
+  }).expect(201)).body.item;
+  expect(reborrowed.attachments).toEqual(original.attachments);
+  expect((await taskRecord(f.local.database, f.workspace.id, reborrowed.id)).value.attachmentOrigins).toEqual([ref]);
+  expect(writes).toHaveBeenCalledTimes(1);
+});
+
+it('rejects a missing or changed prior original before creating a follow-up', async () => {
+  const f = await fixture(async () => tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '已读取' }));
+  f.worker.start(3_600_000);
+  const payload = { requestId: randomUUID(), name: '资料', instructions: '核对原文件', conversationId: 'conv_12345678' };
+  const fileContent = Buffer.from('reference sample');
+  const item = (await f.human.post(f.base + '/personal-agent/tasks')
+    .field('task', JSON.stringify(payload)).attach('attachments', fileContent, 'source.txt').expect(201)).body.item;
+  const ref = { taskId: item.id, fileId: item.attachments[0].id };
+  const next = { ...payload, requestId: randomUUID(), attachmentRefs: [ref] };
+  const original = path.join(directory, 'files', f.workspace.id, ref.fileId);
+  const tampered = Buffer.from(fileContent);
+  tampered[0] ^= 255;
+  await writeFile(original, tampered);
+  await f.human.post(f.base + '/personal-agent/tasks').send(next).expect(409);
+  await rm(original);
+  await f.human.post(f.base + '/personal-agent/tasks').send(next).expect(404);
+  const tasks = (await f.human.get(f.base + '/agent-tasks').expect(200)).body.items;
+  expect(tasks.map((task: { id: string }) => task.id)).toEqual([item.id]);
+});
+
+it('rechecks a borrowed attachment for the worker and redacts completed follow-up details after source access changes', async () => {
+  const marker = 'source-access-check-marker-804';
+  let turn = 0;
+  const complete = vi.fn(async (_input: LlmCompletionInput) => {
+    if (++turn === 2) return tool('bambook_task', { action: 'checkpoint', summary: marker });
+    return tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: marker });
+  });
+  const f = await fixture(complete);
+  f.worker.start(3_600_000);
+  const orderId = f.workspace.state.orders[0].id;
+  const payload = { requestId: randomUUID(), name: '资料', instructions: '核对原文件', conversationId: 'conv_12345678' };
+  const item = (await f.human.post(f.base + '/personal-agent/tasks')
+    .field('task', JSON.stringify({ ...payload, intentRefs: [{ kind: 'orders', id: orderId }] }))
+    .attach('attachments', Buffer.from(marker), 'source.txt').expect(201)).body.item;
+  await f.drain();
+  expect(complete.mock.calls.at(0)?.[0].messages[0].content).toContain(marker);
+  const ref = { taskId: item.id, fileId: item.attachments[0].id };
+  const completedInput = { ...payload, requestId: randomUUID(), attachmentRefs: [ref] };
+  const completed = (await f.human.post(f.base + '/personal-agent/tasks').send(completedInput).expect(201)).body.item;
+  await f.drain();
+  expect(await f.current(completed.id)).toMatchObject({ result: marker, checkpoint: marker });
+  const downloadPath = (taskId: string) => f.base + '/agent-tasks/' + taskId + '/attachments/' + ref.fileId;
+  expect((await f.human.get(downloadPath(completed.id)).expect(200)).body).toEqual(Buffer.from(marker));
+  const callsBeforeRevocation = complete.mock.calls.length;
+  const followUp = (await f.human.post(f.base + '/personal-agent/tasks').send({
+    ...payload, requestId: randomUUID(), attachmentRefs: [ref],
+  }).expect(201)).body.item;
+  const originalRead = MistPrivateFiles.prototype.read;
+  let revokedWhileReading = false;
+  const duringRead = vi.spyOn(MistPrivateFiles.prototype, 'read').mockImplementation(async function (this: MistPrivateFiles, workspaceId, file) {
+    const bytes = await originalRead.call(this, workspaceId, file);
+    if (file.id === ref.fileId && !revokedWhileReading) {
+      await f.local.database.$transaction(async db => {
+        const workspace = await db.mistWorkspace.findUnique({ where: { id: f.workspace.id } });
+        await db.mistWorkspace.update({ where: { id: f.workspace.id }, data: { state: {
+          ...workspace.state, orders: workspace.state.orders.filter((order: { id: string }) => order.id !== orderId),
+        } } });
+      });
+      revokedWhileReading = true;
+    }
+    return bytes;
+  });
+  try {
+    await f.human.get(downloadPath(completed.id)).expect(404);
+    expect(revokedWhileReading).toBe(true);
+  } finally {
+    duringRead.mockRestore();
+  }
+  await f.human.get(downloadPath(item.id)).expect(404);
+  await f.human.get(downloadPath(completed.id)).expect(404);
+  expect((await f.current(item.id)).attachments).toBeUndefined();
+  const listed = (await f.human.get(f.base + '/agent-tasks').expect(200)).body.items.find((task: { id: string }) => task.id === completed.id);
+  const summary = (await f.human.get(f.base + '/agent-tasks/' + completed.id + '?summary=1').expect(200)).body.item;
+  const replayed = (await f.human.post(f.base + '/personal-agent/tasks').send(completedInput).expect(201)).body.item;
+  const recovered = (await f.human.get(f.base + '/personal-agent/tasks/receipt/' + completedInput.requestId).expect(200)).body.item;
+  for (const hidden of [await f.current(completed.id), listed, summary, replayed, recovered]) {
+    expect(hidden).toMatchObject({ id: completed.id, state: 'succeeded', result: '', checkpoint: '' });
+    expect(hidden.attachments).toBeUndefined();
+    expect(hidden.trail).toBeUndefined();
+  }
+  const reads = vi.spyOn(MistPrivateFiles.prototype, 'read');
+  await f.drain();
+  expect(reads.mock.calls.some(([, file]) => file.id === ref.fileId)).toBe(false);
+  expect(complete).toHaveBeenCalledTimes(callsBeforeRevocation);
+  expect((await taskRecord(f.local.database, f.workspace.id, followUp.id)).value.attachmentOrigins).toEqual([ref]);
+});
+
+it.each(['unchanged', 'removed', 'replaced'] as const)(
+  'only reuses rendered task images after the original is verified again (%s)',
+  async (change) => {
+    const image = await sharp({ create: { width: 16, height: 12, channels: 3, background: '#5cb388' } }).png().toBuffer();
+    const inputs: LlmCompletionInput['images'][] = [];
+    let original: string;
+    let orderId: string;
+    const complete = vi.fn(async (input: LlmCompletionInput) => {
+      inputs.push(input.images);
+      if (inputs.length > 1) return tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '已核对图片。' });
+      if (change === 'removed') {
+        await rm(original);
+      } else if (change === 'replaced') {
+        const changed = Buffer.from(image);
+        changed[0] ^= 0xff;
+        await writeFile(original, changed);
+      }
+      return tool('bambook_get', { type: 'order', id: orderId });
+    });
+    const f = await fixture(complete);
+    orderId = f.workspace.state.orders[0].id;
+    f.worker.start(3_600_000);
+    const { item } = (await f.human.post(f.base + '/personal-agent/tasks')
+      .field('task', JSON.stringify({ requestId: randomUUID(), name: '核对图片', instructions: '核对图片与订单。' }))
+      .attach('attachments', image, 'sample.png').expect(201)).body;
+    const imageId = item.attachments[0].id;
+    original = path.join(directory, 'files', f.workspace.id, imageId);
+    const reads = vi.spyOn(MistPrivateFiles.prototype, 'read');
+    const renders = vi.spyOn(sharp.prototype, 'toBuffer');
+
+    await f.drain();
+
+    expect(reads.mock.calls.filter(([, file]) => file.id === imageId)).toHaveLength(2);
+    expect(renders).toHaveBeenCalledTimes(1);
+    expect(inputs[0]).toEqual([{ name: 'sample.png', url: expect.stringMatching(/^data:image\/jpeg;base64,/) }]);
+    if (change === 'unchanged') {
+      expect(complete).toHaveBeenCalledTimes(2);
+      expect(inputs[1]).toEqual(inputs[0]);
+      expect(await f.current(item.id)).toMatchObject({ state: 'succeeded' });
+    } else {
+      expect(complete).toHaveBeenCalledTimes(1);
+      expect(await f.current(item.id)).toMatchObject({ state: 'queued', executionIssue: { code: 'model_unavailable' } });
+    }
+  },
+);

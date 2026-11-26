@@ -1,22 +1,30 @@
 import React from 'react';
+import type { TaskAttachment, TaskAttachmentRef } from '../../../../server/src/shared/mistTaskAttachments';
 
 export type AssistantReply = {
   role: 'user' | 'assistant'; content: string;
   sources?: Array<{ id: string; label: string; view: string; entityId: string }>;
   revision?: number; truncated?: boolean;
 };
-type Conversation = {
+export type AssistantAttachmentRef = TaskAttachmentRef & Pick<TaskAttachment, 'name' | 'size'>;
+type ComposerDraft = {
   question: string;
   selected: Array<{ id: string; label: string }>;
-  messages: AssistantReply[];
+  files: File[];
+  attachmentRefs: AssistantAttachmentRef[];
 };
-const empty = (): Conversation => ({ question: '', selected: [], messages: [] });
+type Conversation = ComposerDraft & {
+  messages: AssistantReply[];
+  inactiveDrafts: Map<string, ComposerDraft>;
+};
+const emptyDraft = (): ComposerDraft => ({ question: '', selected: [], files: [], attachmentRefs: [] });
+const empty = (): Conversation => ({ ...emptyDraft(), messages: [], inactiveDrafts: new Map() });
 /** fin50：对话按账号与公司（scope）存本标签页 sessionStorage，切页与刷新后保留；换账号或关标签即清空。 */
 const KEY = (scope: string) => 'mist.assistant.conversation:' + scope;
 function load(scope: string): Conversation {
-  try { const raw = typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem(KEY(scope)); if (!raw) return empty(); const v = JSON.parse(raw) as Conversation; return Array.isArray(v?.messages) ? { question: String(v.question || ''), selected: Array.isArray(v.selected) ? v.selected : [], messages: v.messages.slice(-40) } : empty(); } catch { return empty(); }
+  try { const raw = typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem(KEY(scope)); if (!raw) return empty(); const v = JSON.parse(raw) as Conversation; return Array.isArray(v?.messages) ? { ...empty(), question: String(v.question || ''), selected: Array.isArray(v.selected) ? v.selected : [], messages: v.messages.slice(-40) } : empty(); } catch { return empty(); }
 }
-function save(scope: string, value: Conversation) { try { if (typeof sessionStorage !== 'undefined' && scope) sessionStorage.setItem(KEY(scope), JSON.stringify(value)); } catch { /* storage full or blocked: keep in memory only */ } }
+function save(scope: string, { question, selected, messages }: Conversation) { try { if (typeof sessionStorage !== 'undefined' && scope) sessionStorage.setItem(KEY(scope), JSON.stringify({ question, selected, messages })); } catch { /* storage full or blocked: keep in memory only */ } }
 
 function useConversationState(scope: string) {
   const [entry, setEntry] = React.useState(() => ({ scope, value: load(scope) }));
@@ -40,7 +48,32 @@ function useConversationState(scope: string) {
   const setQuestion = React.useCallback<React.Dispatch<React.SetStateAction<string>>>(value => update('question', value), [update]);
   const setSelected = React.useCallback<React.Dispatch<React.SetStateAction<Conversation['selected']>>>(value => update('selected', value), [update]);
   const setMessages = React.useCallback<React.Dispatch<React.SetStateAction<AssistantReply[]>>>(value => update('messages', value), [update]);
-  return { scope, ...(entry.scope === scope ? entry.value : fresh), setQuestion, setSelected, setMessages };
+  const setFiles = React.useCallback<React.Dispatch<React.SetStateAction<File[]>>>(value => update('files', value), [update]);
+  const setAttachmentRefs = React.useCallback<React.Dispatch<React.SetStateAction<AssistantAttachmentRef[]>>>(value => update('attachmentRefs', value), [update]);
+  const switchDraft = React.useCallback((from: string, to: string) => {
+    if (from === to || live.current !== scope) return;
+    setEntry(previous => {
+      if (previous.scope !== scope || live.current !== scope) return previous;
+      const { question, selected, files, attachmentRefs, inactiveDrafts } = previous.value;
+      const drafts = new Map(inactiveDrafts);
+      const incoming = drafts.get(to) ?? emptyDraft();
+      drafts.delete(to);
+      if (question || selected.length || files.length || attachmentRefs.length) drafts.set(from, { question, selected, files, attachmentRefs });
+      return { scope, value: { ...previous.value, ...incoming, inactiveDrafts: drafts } };
+    });
+  }, [scope]);
+  const clearDraft = React.useCallback((id: string, activeId: string) => {
+    if (live.current !== scope) return;
+    setEntry(previous => {
+      if (previous.scope !== scope || live.current !== scope) return previous;
+      if (id === activeId) return { scope, value: { ...previous.value, ...emptyDraft() } };
+      if (!previous.value.inactiveDrafts.has(id)) return previous;
+      const inactiveDrafts = new Map(previous.value.inactiveDrafts);
+      inactiveDrafts.delete(id);
+      return { scope, value: { ...previous.value, inactiveDrafts } };
+    });
+  }, [scope]);
+  return { scope, ...(entry.scope === scope ? entry.value : fresh), setQuestion, setSelected, setMessages, setFiles, setAttachmentRefs, switchDraft, clearDraft };
 }
 
 const Context = React.createContext<ReturnType<typeof useConversationState> | null>(null);
@@ -54,6 +87,7 @@ export function AssistantConversationProvider({ scope, children }: { scope: stri
 export function useAssistantConversation(scope: string) {
   const shared = React.useContext(Context);
   // Standalone reference pages have no workspace provider and retain page-local behavior.
-  const local = useConversationState(scope);
-  return shared?.scope === scope ? shared : local;
+  const scoped = shared?.scope === scope ? shared : undefined;
+  const local = useConversationState(scoped ? '' : scope);
+  return scoped ?? local;
 }

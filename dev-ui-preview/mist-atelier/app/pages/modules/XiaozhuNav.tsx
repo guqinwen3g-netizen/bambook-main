@@ -37,11 +37,18 @@ export function TitleEditor({ initial, onDone, className }: { initial: string; o
     onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); finish(value.trim() && value.trim() !== initial ? value.trim() : null); } else if (e.key === 'Escape') { e.preventDefault(); finish(null); } }} />;
 }
 
-export function XiaozhuNav({ conversations, activeId, onSelect, onNew, confirmCount, runningCount, ruleCount, draftCount, onOpenConfirm, onOpenTasks, onOpenRules, onOpenDrafts, unread = new Set(), renaming, setRenaming, onRename, onRemove, hasMore, onLoadMore, now = new Date() }: {
+export function XiaozhuMoreHistory({loading, error, onLoad}: {loading?: boolean; error?: string; onLoad: () => void}) {
+  return <>
+    {error&&<p className="mist-xz-quiet mist-xz-navempty" role="status">{uiText(error)}</p>}
+    <Button size="sm" variant="quiet" className="mist-xz-more" loading={loading} disabled={loading} onClick={onLoad}>{uiText(error?'重试加载更早的对话':'加载更早的对话')}</Button>
+  </>;
+}
+
+export function XiaozhuNav({ conversations, activeId, onSelect, onNew, confirmCount, runningCount, ruleCount, draftCount, onOpenConfirm, onOpenTasks, onOpenRules, onOpenDrafts, unread = new Set(), renaming, setRenaming, onRename, onRemove, hasMore, onLoadMore, loadingMore, moreError, now = new Date() }: {
   conversations: XiaozhuConversation[]; activeId: string; onSelect: (id: string) => void; onNew: () => void;
   confirmCount: number; runningCount: number; ruleCount: number; draftCount: number;
   onOpenConfirm: () => void; onOpenTasks: () => void; onOpenRules: () => void; onOpenDrafts: () => void;
-  unread?: Set<string>; renaming?: string; setRenaming?: (id: string | undefined) => void; hasMore?: boolean; onLoadMore?: () => void; now?: Date;
+  unread?: Set<string>; renaming?: string; setRenaming?: (id: string | undefined) => void; hasMore?: boolean; onLoadMore?: () => void; loadingMore?: boolean; moreError?: string; now?: Date;
 } & Partial<ConversationActions>) {
   const [query, setQuery] = React.useState('');
   const entries: Entry[] = [
@@ -59,7 +66,7 @@ export function XiaozhuNav({ conversations, activeId, onSelect, onNew, confirmCo
     <div className="mist-xz-navgroup">{entries.map(e => <button key={e.key} type="button" className="mist-xz-navitem" onClick={e.onClick}><Icon icon={e.icon} size="sm" /><span>{uiText(e.label)}</span>{e.count > 0 && <b data-tone={e.tone}>{e.count}</b>}</button>)}</div>
     {(conversations.length > 6 || q) && <label className="mist-xz-search"><Icon icon={Search} size="sm" /><input type="search" aria-label={uiText('搜索对话')} placeholder={uiText('搜索对话')} value={query} onChange={e => setQuery(e.target.value)} /></label>}
     <div className="mist-xz-history">
-      {q && !shown.length && <p className="mist-xz-quiet mist-xz-navempty">{uiText('没有匹配的对话')}</p>}
+      {q && !shown.length && <p className="mist-xz-quiet mist-xz-navempty">{uiText(hasMore?'已加载的对话中没有匹配项':'没有匹配的对话')}</p>}
       {groups.map(([label, list]) => <div key={label} className="mist-xz-navgroup"><span className="mist-xz-navlabel">{uiText(label)}</span>
         {list.map(c => renaming === c.id && onRename ? <TitleEditor key={c.id} initial={c.title} onDone={title => { setRenaming?.(undefined); if (title) onRename(c.id, title); }} />
           : <div key={c.id} className="mist-xz-conv" data-active={c.id === activeId || undefined} data-unread={unread.has(c.id) || undefined}>
@@ -67,7 +74,7 @@ export function XiaozhuNav({ conversations, activeId, onSelect, onNew, confirmCo
             {onRename && onRemove && <ActionMenu className="mist-xz-conv-menu" icon={MoreHorizontal} label={uiText('对话操作')} items={[{ label: '重命名', icon: PenLine, onSelect: () => setRenaming?.(c.id) }, { label: '从列表移除', icon: Trash2, tone: 'bad', onSelect: () => onRemove(c.id) }]} />}
           </div>)}
       </div>)}
-      {hasMore && onLoadMore && !q && <Button size="sm" variant="quiet" className="mist-xz-more" onClick={onLoadMore}>{uiText('加载更早的对话')}</Button>}
+      {hasMore && onLoadMore && <XiaozhuMoreHistory loading={loadingMore} error={moreError} onLoad={onLoadMore}/>}
     </div>
   </nav>;
 }

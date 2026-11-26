@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createMistLocalRuntime } from './local';
 import { createMistServer } from './server';
 import { AGENT_DELEGATION_HEADER as HEADER } from './agentDelegation';
-import { agentCommandSensitivity, handleMcpMessage, type McpRepository } from './agentMcp';
+import { agentCommandSensitivity, handleMcpMessage, taskMcpTools, type McpRepository } from './agentMcp';
 import { agentCommandRisk } from '../shared/mistAgentProposals';
 import { MistApiError } from './errors';
 import { MIST_COMMAND_CATALOG } from './agentCommandCatalog';
@@ -45,6 +45,118 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     expect((await rpc('resources/list')).error.code).toBe(-32601);
     await request(app).post('/api/mist/mcp').send({ jsonrpc: '2.0', id: 1, method: 'ping' }).expect(401);
     await request(app).get('/api/mist/mcp').set(HEADER, token).expect(405);
+  });
+
+  it('exposes and applies the optional related type in the MCP endpoint', async () => {
+    const app = createMistServer(undefined, { local: createMistLocalRuntime({ directory }) });
+    const { rpc, workspace, tool } = await as(app, 'local-operator', 'read');
+    const toolSchema = (await rpc('tools/list')).result.tools.find((entry: any) => entry.name === 'bambook_related').inputSchema;
+    const taskSchema = taskMcpTools().find(entry => entry.name === 'bambook_related')!.inputSchema;
+    expect(toolSchema.properties.relatedType.enum).toContain('quotation');
+    expect(taskSchema.properties.relatedType).toEqual(toolSchema.properties.relatedType);
+    expect(toolSchema.required).toEqual(['workspaceId', 'type', 'id']);
+    expect(taskSchema.required).toEqual(['type', 'id']);
+
+    const quote = workspace.state.market.quotations.find((row: any) => row.code === 'QT-2026-0002');
+    const args = { workspaceId: workspace.id, type: 'order', id: quote.convertedOrderId };
+    const unfiltered = (await tool('bambook_related', args)).structuredContent.object;
+    const filtered = (await tool('bambook_related', { ...args, relatedType: 'quotation' })).structuredContent.object;
+    expect(unfiltered.total).toBeGreaterThan(1);
+    expect(filtered).toMatchObject({ total: 1, truncated: false, related: [{ type: 'quotation', id: quote.id }] });
+    const invalid = await tool('bambook_related', { ...args, relatedType: ['quotation'] });
+    expect(invalid.isError).toBe(true);
+    expect(invalid.structuredContent).toBeUndefined();
+  });
+
+  it('reads the exact converted line at the end of a long quotation through MCP', async () => {
+    const local = createMistLocalRuntime({ directory });
+    const app = createMistServer(undefined, { local });
+    const { rpc, workspace, tool } = await as(app, 'local-operator', 'read');
+    const schema = (await rpc('tools/list')).result.tools.find((entry: any) => entry.name === 'bambook_get').inputSchema;
+    expect(schema.properties.orderId).toMatchObject({ type: 'string' });
+    expect(schema.properties.lineSourceHash).toMatchObject({ type: 'string' });
+    expect(taskMcpTools().find(entry => entry.name === 'bambook_get')!.inputSchema.properties).toMatchObject({ orderId: schema.properties.orderId, lineSourceHash: schema.properties.lineSourceHash });
+
+    const state = structuredClone(workspace.state);
+    const quote = state.market.quotations.find((row: any) => row.code === 'QT-2026-0002');
+    const target = state.orders.find((order: any) => order.id === quote.convertedOrderId);
+    const first = state.orders.find((order: any) => order.id !== target.id);
+    const last = quote.lines[0];
+    quote.lines = [
+      ...Array.from({ length: 79 }, (_, index) => ({
+        ...last, id: randomUUID(), name: 'other-order-row-' + index, specification: 'private-other-row '.repeat(80),
+        conversion: { ...last.conversion, orderId: first.id, orderCode: first.code },
+      })), last,
+    ];
+    quote.convertedOrderId = first.id;
+    await local.database.$transaction(db => db.mistWorkspace.update({ where: { id: workspace.id }, data: { state } }));
+
+    const args = { workspaceId: workspace.id, type: 'quotation', id: quote.id };
+    const full = (await tool('bambook_get', args)).structuredContent.object;
+    expect(full.truncated).toBe(true);
+    expect(JSON.stringify(full)).not.toContain(last.id);
+
+    const scoped = (await tool('bambook_get', { ...args, orderId: target.id })).structuredContent.object;
+    expect(scoped).toMatchObject({
+      id: quote.id, truncated: true,
+      data: { id: quote.id, total: quote.total, currency: quote.currency, paymentTerms: quote.paymentTerms },
+      orderConversion: {
+        order: { type: 'order', id: target.id }, matchingLineCount: 1, truncated: false,
+        lines: [{ lineNumber: 80, quotationLineId: last.id, quotationLineAmount: last.amount }],
+      },
+    });
+    expect(JSON.stringify(scoped)).not.toContain('private-other-row');
+    expect(JSON.stringify(scoped)).not.toContain(first.id);
+    expect(JSON.stringify(scoped).length).toBeLessThan(16_000);
+
+    for (const invalid of [
+      { ...args, orderId: 'missing-order' },
+      { ...args, orderId: target.id, type: 'order', id: target.id },
+      { ...args, lineOffset: 0 },
+    ]) {
+      const result = await tool('bambook_get', invalid);
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toBeUndefined();
+    }
+  });
+
+  it('continues a quotation snapshot across unrelated workspace revisions and rejects changed source lines', async () => {
+    const local = createMistLocalRuntime({ directory });
+    const app = createMistServer(undefined, { local });
+    const { workspace, tool } = await as(app, 'local-operator', 'read');
+    const state = structuredClone(workspace.state);
+    const quote = state.market.quotations.find((row: any) => row.code === 'QT-2026-0002');
+    const template = quote.lines[0];
+    quote.lines = Array.from({ length: 80 }, (_, index) => ({
+      ...template, id: randomUUID(), name: `row ${index + 1} ` + 'synthetic specification '.repeat(40),
+    }));
+    const save = () => local.database.$transaction(db => db.mistWorkspace.update({
+      where: { id: workspace.id }, data: { state, revision: { increment: 1 } },
+    }));
+    await save();
+    const args = { workspaceId: workspace.id, type: 'quotation', id: quote.id, orderId: quote.convertedOrderId };
+    const first = (await tool('bambook_get', args)).structuredContent;
+    const { nextOffset, sourceHash } = first.object.orderConversion;
+    expect(nextOffset).toBeGreaterThan(0);
+    const pageArgs = { ...args, lineOffset: nextOffset, lineSourceHash: sourceHash };
+
+    const invalid = await tool('bambook_get', { ...args, lineOffset: nextOffset });
+    expect(invalid.isError).toBe(true);
+    expect(invalid.content[0].text).toContain('重读首段');
+
+    await save(); // A workspace revision can advance without changing this quote or order.
+    const next = (await tool('bambook_get', pageArgs)).structuredContent;
+    expect(next.revision).toBeGreaterThan(first.revision);
+    expect(next.object.orderConversion).toMatchObject({ offset: nextOffset, sourceHash });
+    expect(next.object.orderConversion.lines[0].lineNumber).toBe(nextOffset + 1);
+    expect(JSON.stringify(next.object).length).toBeLessThan(16_000);
+
+    quote.lines.at(-1).amount = '7.00';
+    await save();
+    const stale = await tool('bambook_get', pageArgs);
+    expect(stale.isError).toBe(true);
+    expect(stale.content[0].text).toContain('已变化');
+    expect(stale.structuredContent).toBeUndefined();
   });
 
   it('rejects missing or invalid operation IDs before writing and rejects reusing an ID for different input', async () => {
@@ -172,8 +284,13 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     const wrong = await runWith(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } }, 'not-the-password');
     expect(wrong.status).toBe(403); expect(wrong.body.error.code).toBe('REAUTH_FAILED');
     expect((await read(finance.client)).state.payables.settlements[0].state).toBe('pending');
-    const confirmed = await runWith(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } }, 'local-reauth-secret');
-    expect(confirmed.status).toBe(200);
+    const previousRevision = (await read(finance.client)).revision;
+    const confirmationRequest = { requestId: randomUUID(), expectedRevision: previousRevision, command: { type: 'agent.proposal.confirm', payload: { id: proposal.id } }, signature: TEST_SIGNATURE };
+    const confirmRoute = '/api/mist/workspaces/' + finance.workspace.id + '/commands';
+    const confirmed = await finance.client.post(confirmRoute).send({ ...confirmationRequest, reauth: { password: 'local-reauth-secret' } }).expect(200);
+    const replay = await finance.client.post(confirmRoute).send(confirmationRequest).expect(200);
+    expect(replay.body).toMatchObject({ replayed: true, receipt: confirmed.body.receipt, workspace: { revision: confirmed.body.workspace.revision } });
+    await buyer.client.post(confirmRoute).send(confirmationRequest).expect(404);
     expect(JSON.stringify(await local.database.mistCommandReceipt.findMany({ where: { workspaceId: finance.workspace.id } }))).not.toContain('local-reauth-secret');
     const confirmationReceipt = await local.database.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId: finance.workspace.id, requestId: agentAuditReceiptId(confirmed.body.receipt.requestId) } } });
     expect(confirmationReceipt.result[AGENT_AUDIT_FIELD]).toMatchObject({ actor: { id: 'demo-finance' }, source: 'human_confirmation', phase: 'confirmed', agentSessionId: finance.sessionId, proposalId: proposal.id, command: confirm, trigger: { type: 'agent.proposal.confirm', payload: { id: proposal.id } } });

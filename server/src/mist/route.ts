@@ -165,8 +165,22 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   const mailRecordReadOptions=(req:Request)=>{if(req.query.includeMailRecords!==undefined&&req.query.includeMailRecords!=='1')fail('INVALID_INPUT','邮件读取能力参数无效',400);return{excludeTypes:req.query.includeMailRecords==='1'?[]:['email_draft','email_send']};};
   router.get('/workspaces/:id/agent-tasks',run(async(req,res)=>{exactBody(req.query,['cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.listAgentTasks(actor(req),req.params.id,req.query.cursor));}));
   router.get('/workspaces/:id/agent-tasks/:taskId',run(async(req,res)=>{exactBody(req.query,['summary']);if(req.query.summary!==undefined&&req.query.summary!=='1')fail('INVALID_INPUT','任务查询字段无效',400);res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.getAgentTask(actor(req),req.params.id,req.params.taskId,req.query.summary==='1')});}));
+  router.get('/workspaces/:id/agent-tasks/:taskId/attachments/:fileId', run(async (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    exactBody(req.query, []);
+    const { file, bytes } = await repository.downloadTaskAttachment(actor(req), req.params.id, req.params.taskId, req.params.fileId);
+    const filename = encodeURIComponent(file.name).replace(/['()*]/g, char => '%' + char.charCodeAt(0).toString(16).toUpperCase());
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
+    res.type('application/octet-stream').send(Buffer.from(bytes));
+  }));
   router.get('/workspaces/:id/agent-tasks/:taskId/history',run(async(req,res)=>{exactBody(req.query,['cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.agentTaskHistory(actor(req),req.params.id,req.params.taskId,req.query.cursor));}));
   router.post('/workspaces/:id/personal-agent',run(async(req,res)=>{exactBody(req.body??{},[]);res.setHeader('Cache-Control','private, no-store');res.json({identity:await repository.ensurePersonalAgent(actor(req),req.params.id,delegation.makeServiceCredential,delegation.timestamp())});}));
+  router.get('/workspaces/:id/personal-agent/tasks/receipt/:requestId',run(async(req,res)=>{
+    exactBody(req.query,[]);
+    res.setHeader('Cache-Control','private, no-store');
+    res.json({item:await repository.getPersonalTaskReceipt(actor(req),req.params.id,req.params.requestId)});
+  }));
   const taskUpload=multer({storage:multer.memoryStorage(),limits:{files:TASK_ATTACHMENT_COUNT,fileSize:TASK_ATTACHMENT_BYTES+1,fields:1,fieldSize:24_000,parts:TASK_ATTACHMENT_COUNT+2}}).array('attachments',TASK_ATTACHMENT_COUNT);
   router.post('/workspaces/:id/personal-agent/tasks',(req:Request,res:Response,next:NextFunction)=>{
     if(!req.is('multipart/form-data'))return next();
@@ -183,7 +197,7 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
       if(typeof form.task!=='string'||!files.length)fail('INVALID_UPLOAD','请求缺少任务内容或附件',400);
       try{body=JSON.parse(form.task as string);}catch{fail('INVALID_INPUT','任务内容无效',400);}
     }
-    const task=exactBody(body,['requestId','name','instructions','locale','conversationId','intentRefs']);
+    const task=exactBody(body,['requestId','name','instructions','locale','conversationId','intentRefs','attachmentRefs']);
     const attachments=files.map(file=>({bytes:file.buffer,name:file.originalname,mimeType:file.mimetype,multipartFilename:true}));
     const item=attachments.length
       ? await repository.assignPersonalAgentTask(actor(req),req.params.id,task,delegation.makeServiceCredential,undefined,attachments)
@@ -193,9 +207,22 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   router.get('/workspaces/:id/agent-conversations',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.listConversations(actor(req),req.params.id));}));
   router.put('/workspaces/:id/agent-conversations/:conversationId',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.saveConversation(actor(req),req.params.id,req.params.conversationId,exactBody(req.body,['title','hidden']))});}));
   router.get('/workspaces/:id/agent-automations',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.listAutomations(actor(req),req.params.id));}));
-  router.post('/workspaces/:id/agent-automations',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.status(201).json({item:await repository.saveAutomation(actor(req),req.params.id,undefined,exactBody(req.body,['name','trigger','time','instructions','enabled']))});}));
-  router.put('/workspaces/:id/agent-automations/:automationId',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.saveAutomation(actor(req),req.params.id,req.params.automationId,exactBody(req.body,['name','trigger','time','instructions','enabled']))});}));
-  router.delete('/workspaces/:id/agent-automations/:automationId',run(async(req,res)=>{await repository.removeAutomation(actor(req),req.params.id,req.params.automationId);res.status(204).end();}));
+  router.post('/workspaces/:id/agent-automations',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.status(201).json({item:await repository.saveAutomation(actor(req),req.params.id,undefined,exactBody(req.body,['requestId','name','trigger','time','instructions','enabled']))});}));
+  router.put('/workspaces/:id/agent-automations/:automationId',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.saveAutomation(actor(req),req.params.id,req.params.automationId,exactBody(req.body,['name','trigger','time','instructions','enabled','expectedVersion']))});}));
+  router.patch('/workspaces/:id/agent-automations/:automationId',run(async(req,res)=>{
+    const input=exactBody(req.body,['enabled','expectedVersion']);
+    res.setHeader('Cache-Control','private, no-store');
+    res.json({item:await repository.setAutomationEnabled(actor(req),req.params.id,req.params.automationId,input)});
+  }));
+  router.delete('/workspaces/:id/agent-automations/:automationId',run(async(req,res)=>{
+    const {expectedVersion:raw}=exactBody(req.query,['expectedVersion']);
+    if(raw!==undefined&&(typeof raw!=='string'||!/^[1-9]\d*$/.test(raw)||!Number.isSafeInteger(Number(raw))))
+      fail('INVALID_INPUT','规则版本无效',400);
+    await repository.removeAutomation(actor(req),req.params.id,req.params.automationId,raw===undefined?undefined:Number(raw));
+    if(raw===undefined){res.status(204).end();return;}
+    res.setHeader('Cache-Control','private, no-store');
+    res.json({removed:true});
+  }));
   router.get('/workspaces/:id/personal-agent/usage',run(async(req,res)=>{exactBody(req.query,['month']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.personalAgentUsage(actor(req),req.params.id,req.query.month));}));
   router.get('/workspaces/:id/agent-task-capabilities',run(async(req,res)=>{exactBody(req.query,[]);res.setHeader('Cache-Control','private, no-store');res.json(await repository.platformTaskCapabilities(actor(req),req.params.id));}));
   router.get('/workspaces/:id/agent-task-notices',run(async(req,res)=>{exactBody(req.query,[]);res.setHeader('Cache-Control','private, no-store');res.json(await repository.listAgentTaskNotices(actor(req),req.params.id));}));

@@ -34,6 +34,8 @@ export type AgentTaskView = {
   /** 平台任务的办理过程（做了什么、读了哪条记录）；不含读取到的内容。 */
   trail?:AgentTaskTrailItem[];
   executionStage?: 'tool' | 'model';
+  /** Server-observed worker state; it does not change the task lease. */
+  runnerStatus?: 'heartbeat_stale' | 'awaiting_reclaim';
   executionStageSince?: string;
   executionIssue?:{code:'model_unavailable'|'model_response_invalid';retryAt?:string};
   /** Absent in older servers; questions and answers use the task's existing content visibility. */

@@ -34,6 +34,8 @@ export type LlmCompletionInput = {
   signal: AbortSignal;
   jsonMode?: boolean;
   onDelta?: (chunk: string) => void;
+  /** Recheck caller authority before sending the same input to another provider. */
+  beforeFallback?: () => Promise<void>;
 };
 
 import { codexSubscriptions, PLATFORM_SUBJECT, type CodexSubscriptionService } from './codexSubscription';
@@ -132,9 +134,15 @@ export function createLlmCompleter(options: LlmCompleterOptions = {}) {
     const available = (step: typeof steps[number]) => step.kind === 'api' || (!!profile && subscriptions.isConnected(PLATFORM_SUBJECT));
     const failures: Array<{ providerId: string; error: string }> = [];
     let invalidResponse: Error | undefined;
+    let attemptedProvider = false;
     for (const [index, step] of steps.entries()) {
       if (!available(step)) continue;
       input.signal.throwIfAborted();
+      if (attemptedProvider && input.beforeFallback) {
+        await input.beforeFallback();
+        input.signal.throwIfAborted();
+      }
+      attemptedProvider = true;
       const remaining = steps.slice(index + 1).filter(available);
       const deadline = profile === 'agent-task' && !input.onDelta && remaining.length ? new AbortController() : undefined;
       const hasDeepseekBackup = remaining.some(next => next.kind === 'api'

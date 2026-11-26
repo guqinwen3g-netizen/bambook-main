@@ -11,11 +11,12 @@ import { uiText } from '../../../../../services/interfaceLanguage';
 import { businessDate } from '../../runtime/businessClock';
 import { FailureNotice } from '../../runtime/FailureNotice';
 import { AgentTasks } from '../AgentTasks';
+import type { AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
 
 type Usage = { month: string; scope: 'mine' | 'company'; items: Array<{ ownerId: string; ownerName: string; tasks: number; modelTurns: number; runtimeMs: number }>;
   today?: { tasks: number; turns: number; taskLimit: number; turnLimit: number; companyTurns?: number; companyTurnLimit?: number } };
 
-export function XiaozhuTasks({ open, onClose, refreshSignal }: { open: boolean; onClose: () => void; refreshSignal?: number }) {
+export function XiaozhuTasks({ open, onClose, refreshSignal, onTaskUpdate }: { open: boolean; onClose: () => void; refreshSignal?: number; onTaskUpdate?: (item: AgentTaskView) => void }) {
   const w = useMistWorkspace(), session = useMistSession(), { go } = useNav();
   const workspaceId = w.workspace?.id, canChat = session.hasPermission('ai:chat');
   const base = workspaceId ? '/api/mist/workspaces/' + encodeURIComponent(workspaceId) : '';
@@ -32,7 +33,7 @@ export function XiaozhuTasks({ open, onClose, refreshSignal }: { open: boolean; 
   return <Drawer open={open} onClose={onClose} size="lg" title={uiText('任务')} tone="ai">
     {!canChat ? <Banner tone="warn" title={uiText('无 AI 使用权限')} /> : <div className="mist-col">
       {error && <FailureNotice title={'未完成'} detail={error} />}
-      <AgentTasks onConnections={() => go('account', undefined, { section: 'connections' })} refreshSignal={refreshSignal} />
+      <AgentTasks onConnections={() => go('account', undefined, { section: 'connections' })} refreshSignal={refreshSignal} onTaskUpdate={onTaskUpdate} />
       {usage?.today && <KeyValue items={[
         { label: uiText('今日用量'), value: `${usage.today.tasks} / ${usage.today.taskLimit} 项 · 模型调用 ${usage.today.turns} / ${usage.today.turnLimit} 次` },
         ...(usage.today.companyTurnLimit !== undefined ? [{ label: uiText('公司今日'), value: `模型调用 ${usage.today.companyTurns ?? 0} / ${usage.today.companyTurnLimit} 次` }] : []),

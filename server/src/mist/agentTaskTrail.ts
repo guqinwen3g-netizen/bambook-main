@@ -19,7 +19,19 @@ function target(link: unknown): { view: string; id: string; section?: string } |
   } catch { return undefined; }
 }
 
-export function platformTrail(steps: PlatformTaskStep[] | undefined): AgentTaskTrailItem[] {
+// Tool errors can include source content. Only stable server messages are shown.
+const FILE_FAILURE_DETAILS = new Map([
+  ['附件已变化，请从首段重新读取','原件已变化，无法继续读取'],
+  ['引用的原附件已变化','原件已变化，无法继续读取'],
+  ['附件不存在或当前账号无权访问','原件不存在或无权访问'],
+  ['原附件不存在或无权访问','原件不存在或无权访问'],
+  ['该附件的原件权限已变化','原件读取权限已变化'],
+  ['附件原文件无法核验','无法核验原件'],
+  ['该附件没有可用的下一段；请核对最近一次读取结果。','原件没有可继续读取的位置'],
+]);
+
+export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments: readonly {id:string;name:string}[] = []): AgentTaskTrailItem[] {
+  const names=new Map(attachments.map(file=>[file.id,text(file.name,60)]));
   const out: AgentTaskTrailItem[] = [];
   for (const step of steps ?? []) {
     const { name, arguments: args } = step.plan as { name: string; arguments: Record<string, any> }, result = step.result as any, at = step.at;
@@ -34,18 +46,42 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined): AgentTaskT
       case 'bambook_get': {
         const record = result?.object ?? result;
         const name = text(record?.label) || humanId(args.id), to = failed ? undefined : target(record?.link); out.push({ ...base, kind: 'read', label: `读取${typeLabel(args.type)}${name ? ' ' + name : ''}`, ...(typeof args.type === 'string' && typeof args.id === 'string' && completed && !failed ? { ref: { type: args.type, id: to?.id ?? args.id, label: name || typeLabel(args.type), ...(to ? { view: to.view, ...(to.section ? { section: to.section } : {}) } : {}) } } : {}) }); break; }
-      case 'bambook_related': out.push({ ...base, kind: 'read', label: `展开${typeLabel(args.type)}的关联记录` }); break;
+      case 'bambook_related': {
+        const record = completed && !failed && !step.compacted ? result?.object : undefined;
+        const name = text(record?.label);
+        const to = target(record?.link);
+        const detail = Number.isSafeInteger(record?.total) && record.total >= 0
+          ? record.truncated === true ? `部分结果 · 共 ${record.total} 条` : `${record.total} 条关联记录`
+          : '';
+        out.push({ ...base, kind: 'read', label: `展开${typeLabel(args.type)}${name ? ' ' + name + ' ' : ''}的关联记录`,
+          ...(detail ? { detail } : {}),
+          ...(to && typeof args.type === 'string' ? { ref: { ...to, type: args.type, label: name || typeLabel(args.type) } } : {}),
+        });
+        break;
+      }
       case 'bambook_commands': out.push({ ...base, kind: 'read', label: '查看可用操作' }); break;
       case 'bambook_audit': out.push({ ...base, kind: 'read', label: '查看操作记录' }); break;
       case 'bambook_file_text': {
-        const file = text(result?.file?.name, 60);
-        const pages = result?.range;
-        const detail = failed ? text(result?.reason, 120)
+        const observedName=text(result?.file?.name,60);
+        if(observedName&&typeof args.fileId==='string'&&result?.file?.id===args.fileId)names.set(args.fileId,observedName);
+        const file=observedName||names.get(args.fileId);
+        const pages=result?.range;
+        const pageRange=result?.kind==='pdf'&&Number.isSafeInteger(pages?.pageFrom)&&Number.isSafeInteger(pages?.pageTo)
+          &&pages.pageFrom>=1&&pages.pageTo>=pages.pageFrom
+          ? `第 ${pages.pageFrom===pages.pageTo?pages.pageFrom:`${pages.pageFrom} 至 ${pages.pageTo}`} 页` : '';
+        const missingPages=pageRange&&Array.isArray(result.pagesWithoutText)
+          ? [...new Set<number>(result.pagesWithoutText.filter((page:unknown)=>typeof page==='number'&&Number.isSafeInteger(page)&&page>=pages.pageFrom&&page<=pages.pageTo))].sort((a,b)=>a-b).slice(0,20)
+          : [];
+        const unreadablePages = missingPages.length > 0 && missingPages.length === pages.pageTo - pages.pageFrom + 1
+          ? `${pageRange}无可提取文字`
+          : missingPages.length ? `提取范围${pageRange}；第 ${missingPages.join('、')} 页无可提取文字` : '';
+        const detail = result?.error === true ? FILE_FAILURE_DETAILS.get(result.message)
+          : unreadablePages ? `${unreadablePages}${result.hasMore?'；还有后续内容':''}`
+          : failed ? text(result?.reason, 120)
           : result?.hasMore ? '本次读取部分正文，还有后续内容'
           : result?.complete ? '已提取可读取正文'
-          : Number.isSafeInteger(pages?.pageFrom) && Number.isSafeInteger(pages?.pageTo)
-            ? `本次读取第 ${pages.pageFrom} 至 ${pages.pageTo} 页` : '';
-        out.push({ ...base, kind: 'read', label: file ? `读取附件 ${file}` : '读取附件正文', ...(detail ? { detail } : {}) });
+          : pageRange ? `提取范围${pageRange}` : '';
+        out.push({ ...base, kind: 'read', label: result?.error===true?`附件读取失败${file?' '+file:''}`:file?`读取附件 ${file}`:'读取附件正文', ...(detail ? { detail } : {}) });
         break;
       }
       case 'bambook_mail_receiving': out.push({ ...base, kind: 'read', label: '查看邮箱收件状态' }); break;

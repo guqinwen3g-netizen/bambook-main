@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {developmentReferenceReadRows,developmentReferenceCaseReadRecord} from './developmentReferenceReadRecords';
 /**
  * 工作助手业务读取（bambook_query / bambook_get / bambook_expand）。
@@ -10,6 +11,8 @@ import type { PermissionScope } from '../_shared/rolePermissionMatrix';
 import type { MistState } from '../shared/mistWorkspace';
 import { emailSendEffectiveStatus, emailSendRecipients } from '../shared/mistEmail';
 import { developmentReopenSource } from '../shared/mistDevelopmentLifecycle';
+import type { MarketQuotation } from '../shared/mistMarket';
+import { quotationLegacyConverted } from '../shared/mistQuotationLineConversion';
 import {agentCommandSources,unavailableCommandSources,type AgentGetContext,type AgentCommandSources} from './agentReadCommandSources';
 import { MistApiError } from './errors';
 
@@ -267,18 +270,89 @@ export function agentGet(state: MistState, actor: TokenPayload, typeName: unknow
   return { ...ref(type, row), ...metadata, data, truncated:true,readHint:'超出单次读取范围；当前结果不完整，请读取关联明细或交本人核对。',...files };
 }
 
+/** Report-only read. The quote and target order must both be visible in the current projection. */
+export function agentGetQuotationForOrder(
+  state: MistState, actor: TokenPayload, id: unknown, orderId: unknown, inputOffset: unknown,
+  continuation: { workspaceId?: string; sourceHash?: unknown } = {},
+) {
+  const { type: quoteType, row } = find(state, actor, 'quotation', id);
+  const { type: orderType, row: order } = find(state, actor, 'order', orderId);
+  const quote = row as MarketQuotation;
+  const offset = inputOffset === undefined ? 0 : inputOffset;
+  if (typeof offset !== 'number' || !Number.isSafeInteger(offset) || offset < 0) deny('INVALID_INPUT', '条目偏移须为非负整数');
+  const source = continuation.sourceHash;
+  if ((offset > 0 || source !== undefined) && (typeof source !== 'string' || !/^[a-f0-9]{64}$/.test(source))) {
+    deny('INVALID_INPUT', '报价续读缺少有效的来源校验值，请重读首段');
+  }
+
+  const legacy = quote.convertedOrderId === order.id && quotationLegacyConverted(quote);
+  const matched = quote.lines.flatMap((line, index) => legacy || line.conversion?.orderId === order.id ? [{
+    lineNumber: index + 1, quotationLineId: line.id, name: line.name, style: line.style,
+    quantity: line.qty, unit: line.unit, unitPrice: line.price, quotationLineAmount: line.amount,
+  }] : []);
+  const data = { id: quote.id, code: quote.code, currency: quote.currency, total: quote.total, paymentTerms: quote.paymentTerms };
+  const quoteRef = ref(quoteType, quote), orderRef = ref(orderType, order);
+  const relation = legacy ? 'legacy_whole_quotation' : 'recorded_line_conversion';
+  // Hash exactly the authorized evidence shared by the pages. Workspace-wide edits do not invalidate it.
+  const sourceHash = createHash('sha256').update(JSON.stringify([
+    'quotation-order-lines-v1', continuation.workspaceId, quoteRef, orderRef, data, relation, matched,
+  ])).digest('hex');
+  if (source !== undefined && source !== sourceHash) {
+    deny('QUOTATION_LINES_SOURCE_CHANGED', '报价或订单的转单依据已变化，请重读首段', 409);
+  }
+  if (!matched.length) deny('NOT_FOUND', '未找到该报价与订单的转单条目', 404);
+  if (offset >= matched.length) deny('INVALID_INPUT', '条目偏移超出该订单的转单范围');
+  const scope = { order: orderRef, relation, matchingLineCount: matched.length, offset, sourceHash };
+  const lines = [];
+  const response = {
+    ...quoteRef, data, truncated: true,
+    readHint: '仅返回该订单的转单条目；total 是整份报价总额，本次读取不算完整报价回源。',
+  };
+  // Leave room for the result envelope, continuation offset, and explanation.
+  let remaining = GET_LIMIT - 300 - JSON.stringify({ ...response, orderConversion: scope }).length;
+  for (const item of matched.slice(offset)) {
+    const size = JSON.stringify(item).length + 1;
+    if (size > remaining) break;
+    lines.push(item);
+    remaining -= size;
+  }
+  if (!lines.length) deny('INVALID_INPUT', '转单条目超过单次读取范围，请打开原报价核对', 422);
+  const next = offset + lines.length;
+  const truncated = next < matched.length;
+  return {
+    ...response,
+    orderConversion: { ...scope, lines, truncated, ...(truncated ? { nextOffset: next } : {}) },
+  };
+}
+
 /** 关联对象：本对象字段直接引用的对象，以及字段引用了本对象的其它对象（均限当前可读类型）。 */
-export function agentRelated(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown,options:{excludeTypes?:readonly string[]}={}) {
+export function agentRelated(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown, options: { excludeTypes?: readonly string[]; relatedType?: unknown } = {}) {
   const { type, row } = find(state, actor, typeName, id);
+  const relatedType = options.relatedType === undefined ? undefined : typeOf(options.relatedType, actor);
+  const candidates = readable(actor, options.excludeTypes).filter(candidate => relatedType === undefined || candidate === relatedType);
   const idsOf = (r: any): string[] => Object.entries(r).flatMap(([k, v]) => !/(Id|Ids)$/.test(k) ? [] : typeof v === 'string' && v ? [v] : Array.isArray(v) ? v.filter(x => typeof x === 'string') : []);
   // 明细行里的引用也算（如票据 lines[].purchaseId、付款申请 lines[].billId），只展开一层。
-  const scalarRefs = (r: any) => new Set([...idsOf(r), ...(r.source?.kind==='developmentIncoming'&&typeof r.source.devId==='string'?[r.source.devId]:[]),...(r.referenceTransfer&&typeof r.referenceTransfer.referenceId==='string'?[r.referenceTransfer.referenceId]:[]), ...Object.values(r).flatMap(v => Array.isArray(v) ? v.filter(x => x && typeof x === 'object' && !Array.isArray(x)).flatMap(idsOf) : [])]);
-  const own = scalarRefs(row);
+  const scalarRefs = (descriptor: ObjectType, r: any) => new Set([
+    ...idsOf(r),
+    ...(r.source?.kind === 'developmentIncoming' && typeof r.source.devId === 'string' ? [r.source.devId] : []),
+    ...(typeof r.referenceTransfer?.referenceId === 'string' ? [r.referenceTransfer.referenceId] : []),
+    ...Object.values(r).flatMap(value => Array.isArray(value)
+      ? value.filter(item => item && typeof item === 'object' && !Array.isArray(item)).flatMap(idsOf)
+      : []),
+    // The header is already covered by idsOf. Collect later orders directly from converted lines.
+    ...(descriptor.type === 'quotation' && Array.isArray(r.lines)
+      ? r.lines.flatMap((line: { conversion?: { orderId?: unknown } } | null) => {
+        const orderId = line?.conversion?.orderId;
+        return typeof orderId === 'string' && orderId ? [orderId] : [];
+      })
+      : []),
+  ]);
+  const own = scalarRefs(type, row);
   const results: Array<ReturnType<typeof ref> & { relation: 'references' | 'referenced_by' }> = [];
   let total = 0;
-  for (const other of readable(actor,options.excludeTypes)) for (const candidate of rows(state, other)) {
+  for (const other of candidates) for (const candidate of rows(state, other)) {
     if (other === type && candidate.id === row.id) continue;
-    const relation = own.has(candidate.id) ? 'references' : scalarRefs(candidate).has(row.id) ? 'referenced_by' : null;
+    const relation = own.has(candidate.id) ? 'references' : scalarRefs(other, candidate).has(row.id) ? 'referenced_by' : null;
     if (!relation) continue;
     total++;
     if (results.length < RELATED_LIMIT) results.push({ ...ref(other, candidate), relation });

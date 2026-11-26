@@ -1,5 +1,6 @@
 /** Limits for a single personal Agent message. */
 export const TASK_ATTACHMENT_COUNT = 6;
+export type TaskAttachmentRef = { taskId: string; fileId: string };
 export const TASK_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 export const TASK_ATTACHMENT_TOTAL_BYTES = 24 * 1024 * 1024;
 export const TASK_ATTACHMENT_ACCEPT = '.jpg,.jpeg,.png,.webp,.gif,.pdf,.xlsx,.csv,.txt,.md,.docx,.pptx';

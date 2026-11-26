@@ -4,8 +4,8 @@ import {randomUUID} from 'node:crypto';
 import {applyMistCommand,createMistState,type DevelopmentValues} from '../shared/mistWorkspace';
 import {withTestFactories} from '../shared/__tests__/utils/devFactories';
 import type {TokenPayload} from '../auth/service';
-import {agentGet,agentQuery} from './agentRead';
-import {collectTaskSources,taskReadHash} from './agentTaskVisibility';
+import {agentGet,agentGetQuotationForOrder,agentQuery,agentRelated} from './agentRead';
+import {collectTaskSources,taskReadHash,taskScopeHash,taskSourcesVisible} from './agentTaskVisibility';
 
 const actor={userId:'owner',permissions:['emails:read','orders:read'],roles:[],departmentIds:[],authorizationLoaded:true} as TokenPayload;
 const state=()=>createMistState({id:randomUUID,actorName:'Test',now:'2026-11-01T00:00:00Z'},'empty');
@@ -87,4 +87,121 @@ it('does not reuse a past token for an open development or truncate an oversized
  const {s,dev,permitted}=legacyClosedDevelopment();const closure=dev.closure;delete dev.closure;
  expect(agentGet(s,permitted,'development',dev.id).reopenSource).toBeNull();dev.closure={...closure!,id:'x'.repeat(201)};
  expect(agentGet(s,permitted,'development',dev.id).reopenSource).toBeNull();
+});
+
+
+it('relates every order produced by split quotation lines in both directions', () => {
+ const s=state(), reader={...actor,permissions:['orders:read','quotations:read']} as TokenPayload;
+ s.orders.push(...['first','second','unrelated'].map(id=>({id,code:`SO-${id}`} as any)));
+ const conversion=(orderId:string)=>({conversion:{orderId,orderCode:`SO-${orderId}`}});
+ s.market.quotations.push(
+  {id:'split',code:'QT-SPLIT',customerId:'customer',total:'250.00',convertedOrderId:'first',lines:[conversion('first'),conversion('second')]} as any,
+  {id:'same-value',code:'QT-SAME',customerId:'customer',total:'250.00',convertedOrderId:null,lines:[]} as any,
+ );
+ const quoteRefs=agentRelated(s,reader,'order','second').related.filter(row=>row.type==='quotation');
+ expect(quoteRefs.map(({id,relation})=>({id,relation}))).toEqual([{id:'split',relation:'referenced_by'}]);
+ const orderRefs=agentRelated(s,reader,'quotation','split').related.filter(row=>row.type==='order');
+ expect(orderRefs.map(row=>row.id)).toEqual(['first','second']);
+ expect(agentRelated(s,actor,'order','second').related.some(row=>row.type==='quotation')).toBe(false);
+});
+
+it('filters related types before applying the limit and reports only authorized matches', () => {
+ const s=state(), reader={...actor,permissions:['orders:read','quotations:read']} as TokenPayload;
+ s.orders.push({id:'target',code:'SO-TARGET'} as any);
+ s.orderLines.push(...Array.from({length:31},(_,i)=>({id:`line-${i}`,orderId:'target'}) as any));
+ s.market.quotations.push(
+  {id:'original',code:'QT-ORIGINAL',convertedOrderId:'first',lines:[{conversion:{orderId:'target',orderCode:'SO-TARGET'}}]} as any,
+  {id:'unrelated',code:'QT-UNRELATED',convertedOrderId:null,lines:[]} as any,
+ );
+ const unfiltered=agentRelated(s,reader,'order','target');
+ expect(unfiltered).toMatchObject({total:32,truncated:true});
+ expect(unfiltered.related).toHaveLength(30);
+ expect(unfiltered.related.every(row=>row.type==='order_line')).toBe(true);
+ expect(agentRelated(s,reader,'order','target',{relatedType:'quotation'})).toMatchObject({total:1,truncated:false,related:[{type:'quotation',id:'original',relation:'referenced_by'}]});
+ expect(agentRelated(s,reader,'order','target',{relatedType:'order_line'})).toMatchObject({total:31,truncated:true});
+ expect(agentRelated(s,reader,'order','target',{relatedType:'quotation',excludeTypes:['quotation']})).toMatchObject({total:0,truncated:false,related:[]});
+ expect(()=>agentRelated(s,actor,'order','target',{relatedType:'quotation'})).toThrow(/无权读取报价/);
+ expect(()=>agentRelated(s,{...reader,permissionCeiling:['orders:read']},'order','target',{relatedType:'quotation'})).toThrow(/无权读取报价/);
+ expect(()=>agentRelated(s,reader,'order','target',{relatedType:'unknown'})).toThrow(/不支持的对象类型/);
+});
+
+it('requires both the quotation and order, and registers both as report sources without a full-read baseline', () => {
+ const s=state(), reader={...actor,permissions:['orders:read','quotations:read']} as TokenPayload;
+ s.orders.push({id:'target',code:'SO-TARGET'} as any,{id:'other',code:'SO-OTHER'} as any);
+ s.market.quotations.push({
+   id:'quote',code:'QT-ORIGINAL',currency:'EUR',total:'15.00',lines:[{id:'line',amount:'15.00',conversion:{orderId:'target'}}],convertedOrderId:'target',
+ } as any);
+ const result=agentGetQuotationForOrder(s,reader,'quote','SO-TARGET',undefined);
+ const refs=collectTaskSources({revision:1,object:result},s,[]);
+ expect(refs.map(x=>[x.path,x.id]).sort()).toEqual([['market.quotations','quote'],['orders','target']]);
+ expect(refs.every(x=>!x.fullReadHash)).toBe(true);
+ expect(taskSourcesVisible(refs,taskScopeHash(undefined,s),s,s)).toBe(true);
+
+ const withoutOrder={...s,orders:s.orders.filter(row=>row.id!=='target')};
+ const withoutQuotation={...s,market:{...s.market,quotations:[]}};
+ expect(taskSourcesVisible(refs,taskScopeHash(undefined,s),withoutOrder,s)).toBe(false);
+ expect(taskSourcesVisible(refs,taskScopeHash(undefined,s),withoutQuotation,s)).toBe(false);
+ expect(()=>agentGetQuotationForOrder(withoutOrder,reader,'quote','target',undefined)).toThrow(/订单不存在或当前账号不可见/);
+ expect(()=>agentGetQuotationForOrder(withoutQuotation,reader,'quote','target',undefined)).toThrow(/报价不存在或当前账号不可见/);
+ expect(()=>agentGetQuotationForOrder(s,reader,'quote','other',undefined)).toThrow(/未找到该报价与订单的转单条目/);
+ expect(()=>agentGetQuotationForOrder(s,{...reader,permissionCeiling:['quotations:read']},'quote','target',undefined)).toThrow(/无权读取订单/);
+ expect(()=>agentGetQuotationForOrder(s,{...reader,permissionCeiling:['orders:read']},'quote','target',undefined)).toThrow(/无权读取报价/);
+});
+
+it('paginates only the authorized converted lines and retains the historical whole-quotation relation', () => {
+ const s=state(), reader={...actor,permissions:['orders:read','quotations:read']} as TokenPayload;
+ s.orders.push({id:'legacy-order',code:'SO-LEGACY'} as any);
+ const lines=Array.from({length:80},(_,i)=>({
+   id:'line-'+i,name:'long name '.repeat(55),qty:'1',unit:'米',price:'20.00',amount:'20.00',
+ }));
+ s.market.quotations.push({
+   id:'legacy-quote',code:'QT-LEGACY',currency:'EUR',total:'1600.00',convertedOrderId:'legacy-order',lines,
+ } as any);
+ const read=(offset:number, sourceHash?:string)=>agentGetQuotationForOrder(s,reader,'legacy-quote','legacy-order',offset,{workspaceId:'workspace-a',sourceHash});
+ const first=read(0);
+ const sourceHash=first.orderConversion.sourceHash;
+ expect(sourceHash).toMatch(/^[a-f0-9]{64}$/);
+ expect(first).toMatchObject({truncated:true,orderConversion:{relation:'legacy_whole_quotation',matchingLineCount:80,truncated:true}});
+ const collected=first.orderConversion.lines.map(x=>x.quotationLineId);
+ let offset=first.orderConversion.nextOffset;
+ while(offset!==undefined){
+   const page=read(offset,sourceHash);
+   expect(page.orderConversion.sourceHash).toBe(sourceHash);
+   expect(JSON.stringify(page).length).toBeLessThan(16_000);
+   collected.push(...page.orderConversion.lines.map(x=>x.quotationLineId));
+   offset=page.orderConversion.nextOffset;
+ }
+ expect(collected).toEqual(lines.map(x=>x.id));
+ expect(()=>read(80,sourceHash)).toThrow(/条目偏移超出/);
+});
+
+
+it('keeps continuations on the same visible quotation and order snapshot', () => {
+ const s=state(), reader={...actor,permissions:['orders:read','quotations:read']} as TokenPayload;
+ const target={id:'target',code:'SO-TARGET'};const other={...target,id:'other'};
+ s.orders.push(target as any,other as any);
+ const lines=Array.from({length:60},(_,i)=>({
+   id:'line-'+i,name:'long name '.repeat(55),qty:'1',unit:'米',price:'20.00',amount:'20.00',
+ }));
+ const quote={id:'quote',code:'QT-ORIGINAL',currency:'EUR',total:'1200.00',paymentTerms:'T/T',convertedOrderId:target.id,lines} as any;
+ const anotherQuote={...quote,id:'other-quote'};
+ s.market.quotations.push(quote,anotherQuote);
+ const read=(offset:unknown,sourceHash?:string,quoteId=quote.id,orderId=target.id,workspaceId='workspace-a')=>
+   agentGetQuotationForOrder(s,reader,quoteId,orderId,offset,{workspaceId,sourceHash});
+ const first=read(undefined).orderConversion;
+ expect(first.nextOffset).toBeDefined();
+ expect(()=>read(first.nextOffset)).toThrow(/重读首段/);
+ expect(()=>read(first.nextOffset,first.sourceHash,anotherQuote.id)).toThrow(/已变化/);
+ expect(()=>read(first.nextOffset,first.sourceHash,quote.id,target.id,'workspace-b')).toThrow(/已变化/);
+ quote.convertedOrderId=other.id;
+ expect(()=>read(first.nextOffset,first.sourceHash,quote.id,other.id)).toThrow(/已变化/);
+ quote.convertedOrderId=target.id;
+
+ s.orders.push({id:'unrelated',code:'SO-UNRELATED'} as any);
+ const next=read(first.nextOffset,first.sourceHash).orderConversion;
+ expect(next.lines[0].lineNumber).toBe(first.lines.length+1);
+ expect(next.sourceHash).toBe(first.sourceHash);
+ lines.at(-1)!.qty='2';
+ expect(()=>read(first.nextOffset,first.sourceHash)).toThrow(/已变化/);
+ expect(read(undefined).orderConversion.sourceHash).not.toBe(first.sourceHash);
 });

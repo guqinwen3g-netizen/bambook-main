@@ -1,5 +1,5 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import request from 'supertest';import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import path from 'node:path';import {randomUUID} from 'node:crypto';
+import request from 'supertest';import {mkdtemp,rm,writeFile} from 'node:fs/promises';import {tmpdir} from 'node:os';import path from 'node:path';import {randomUUID} from 'node:crypto';
 import {createMistLocalRuntime} from './local';import {createMistServer} from './server';
 import type {MistPlatformTaskWorker} from './platformTaskWorker';
 import type {LlmCompletionInput} from '../ai/llmProviders';
@@ -14,6 +14,100 @@ afterEach(async()=>{await Promise.all(workers.splice(0).map(w=>w.stop()));vi.uns
 async function human(app:any,profileId:string){const client=request.agent(app);await client.get('/api/mist/session').expect(200);await client.post('/api/mist/session').send({profileId}).expect(200);const workspace=(await client.get('/api/mist/workspaces/default').expect(200)).body.workspace;return{client,workspace,base:'/api/mist/workspaces/'+workspace.id};}
 function server(complete:(input:LlmCompletionInput)=>Promise<string>){const local=createMistLocalRuntime({directory}),app=createMistServer(undefined,{local,agentTasks:{complete,tickMs:3_600_000,pulseMs:20}});const worker=app.locals.platformTaskWorker as MistPlatformTaskWorker;workers.push(worker);return{local,app,worker};}
 const tool=(name:string,args:Record<string,unknown>)=>JSON.stringify({name,arguments:args});
+
+it('recovers the same personal task by request ID without writing receipts or exposing another account', async () => {
+ const { app, local, worker } = server(async () => tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '核对完成' }));
+ worker.start(3_600_000);
+ const owner = await human(app, 'demo-sales');
+ const another = await human(app, 'demo-buyer');
+ const input = { requestId: randomUUID(), name: '核对附件', instructions: '核对原文件', conversationId: 'conv_12345678' };
+ const read = (id: string) => owner.base + '/personal-agent/tasks/receipt/' + id;
+ await owner.client.get(read(input.requestId)).expect(404);
+ const accepted = (await owner.client.post(owner.base + '/personal-agent/tasks')
+   .field('task', JSON.stringify(input)).attach('attachments', Buffer.from('synthetic receipt'), 'source.txt').expect(201)).body.item;
+ await worker.tick();
+ await worker.settled();
+ const before = await local.database.mistCommandReceipt.findMany({ where: { workspaceId: owner.workspace.id } });
+
+ const recovered = await owner.client.get(read(input.requestId)).expect('Cache-Control','private, no-store').expect(200);
+ expect(recovered.body.item).toMatchObject({
+   id: accepted.id, conversationId: input.conversationId, state: 'succeeded', result: '核对完成',
+   attachments: accepted.attachments,
+ });
+ expect(recovered.body.item.attachments[0]).not.toHaveProperty('storageKey');
+ await another.client.get(another.base + '/personal-agent/tasks/receipt/' + input.requestId).expect(404);
+ await owner.client.get('/api/mist/workspaces/' + randomUUID() + '/personal-agent/tasks/receipt/' + input.requestId).expect(404);
+ await owner.client.get(read(accepted.id)).expect(404);
+ await owner.client.get(read(input.requestId) + '?extra=1').expect(400);
+ const identity = (await identityRecord(local.database, owner.workspace.id, accepted.identityId)).value;
+ const token = local.agentDelegation.makeServiceCredential(owner.workspace.id, identity.id, identity.key!.generation);
+ await request(app).get(read(input.requestId)).set('x-bambook-agent-key', token).expect(403);
+ expect(await local.database.mistCommandReceipt.findMany({ where: { workspaceId: owner.workspace.id } })).toEqual(before);
+});
+
+it('downloads the exact task original only for its owner, and checks integrity without writing receipts', async () => {
+ const { app, local, worker } = server(async () => tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '已读' }));
+ worker.start(3_600_000);
+ const owner = await human(app, 'demo-sales');
+ const another = await human(app, 'demo-buyer');
+ const bytes = Buffer.from('synthetic original\nsecond line');
+ const name = '原始清单.txt';
+ const taskInput = { requestId: randomUUID(), name: '清单', instructions: '核对附件', conversationId: 'conv_12345678' };
+ const original = (await owner.client.post(owner.base + '/personal-agent/tasks')
+   .field('task', JSON.stringify(taskInput)).attach('attachments', bytes, name).expect(201)).body.item;
+ const fileId = original.attachments[0].id;
+ const ref = { taskId: original.id, fileId };
+ const reused = (await owner.client.post(owner.base + '/personal-agent/tasks')
+   .send({ ...taskInput, requestId: randomUUID(), attachmentRefs: [ref] }).expect(201)).body.item;
+ const pathFor = (taskId: string, originalId = fileId) => '/agent-tasks/' + taskId + '/attachments/' + originalId;
+ const before = await local.database.mistCommandReceipt.findMany({ where: { workspaceId: owner.workspace.id } });
+
+ for (const taskId of [original.id, reused.id]) {
+   const downloaded = await owner.client.get(owner.base + pathFor(taskId)).expect(200)
+     .expect('Cache-Control', 'private, no-store').expect('X-Content-Type-Options', 'nosniff')
+     .expect('Content-Type', 'application/octet-stream')
+     .expect('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent(name));
+   expect(downloaded.body).toEqual(bytes);
+ }
+ await another.client.get(another.base + pathFor(original.id)).expect(404);
+ await owner.client.get('/api/mist/workspaces/' + randomUUID() + pathFor(original.id)).expect(404);
+ await owner.client.get(owner.base + pathFor(randomUUID())).expect(404);
+ await owner.client.get(owner.base + pathFor(original.id, randomUUID())).expect(404);
+ await owner.client.get(owner.base + pathFor(original.id) + '?extra=1').expect(400);
+ const identity = (await identityRecord(local.database, owner.workspace.id, original.identityId)).value;
+ const token = local.agentDelegation.makeServiceCredential(owner.workspace.id, identity.id, identity.key!.generation);
+ await request(app).get(owner.base + pathFor(original.id)).set('x-bambook-agent-key', token).expect(403);
+ await writeFile(path.join(directory, 'files', owner.workspace.id, fileId), Buffer.alloc(bytes.length, 1));
+ await owner.client.get(owner.base + pathFor(original.id)).expect(404);
+ await owner.client.get(owner.base + pathFor(reused.id)).expect(404);
+ expect(await local.database.mistCommandReceipt.findMany({ where: { workspaceId: owner.workspace.id } })).toEqual(before);
+});
+
+it('limits attachment references to the same owner and conversation and counts uploads together', async () => {
+ const { app, worker } = server(async () => tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '已读' }));
+ worker.start(3_600_000);
+ const owner = await human(app, 'demo-sales');
+ const another = await human(app, 'demo-buyer');
+ const conversationId = 'conv_12345678';
+ const input = { requestId: randomUUID(), name: '样品清单', instructions: '重新读取资料', conversationId };
+ const original = (await owner.client.post(owner.base + '/personal-agent/tasks')
+   .field('task', JSON.stringify(input)).attach('attachments', Buffer.from('test only'), 'source.txt').expect(201)).body.item;
+ const ref = { taskId: original.id, fileId: original.attachments[0].id };
+ const next = { ...input, requestId: randomUUID(), attachmentRefs: [ref] };
+
+ await another.client.post(another.base + '/personal-agent/tasks').send(next).expect(404);
+ await owner.client.post(owner.base + '/personal-agent/tasks').send({ ...next, conversationId: 'conv_87654321' }).expect(404);
+ await owner.client.post(owner.base + '/personal-agent/tasks').send({ ...next, conversationId: undefined }).expect(400);
+ await owner.client.post(owner.base + '/personal-agent/tasks').send({ ...next, attachmentRefs: [ref, ref] }).expect(400);
+ await owner.client.post(owner.base + '/personal-agent/tasks').send({
+   ...next, attachmentRefs: [{ ...ref, fileId: randomUUID() }],
+ }).expect(404);
+ const tooMany = owner.client.post(owner.base + '/personal-agent/tasks').field('task', JSON.stringify(next));
+ for (let number = 0; number < 6; number++) tooMany.attach('attachments', Buffer.from('extra'), `extra-${number}.txt`);
+ await tooMany.expect(400);
+ expect((await owner.client.get(owner.base + '/agent-tasks').expect(200)).body.items).toHaveLength(1);
+ expect((await another.client.get(another.base + '/agent-tasks').expect(200)).body.items).toHaveLength(0);
+});
 
 it('each account opens one personal Agent owned by itself, without exposing a key, and hands it platform tasks',async()=>{
  const complete=vi.fn(async()=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对，没有需要处理的事项。'}));

@@ -38,6 +38,18 @@ it('keeps the legacy creation hash and row shape unchanged when references are a
  const first=await tx(d=>createTask(d,actor,workspaceId,input,now));const second=await tx(d=>(createTask as any)(d,actor,workspaceId,input,now,undefined,undefined,[]));expect(second.id).toBe(first.id);
  const saved=(await tx(d=>taskRecord(d,workspaceId,first.id))).value;expect(saved).not.toHaveProperty('intentRefs');expect(saved.lastInputHash).toBe(digest(JSON.stringify([identityId,input.name,input.instructions])));
 });
+it('reports stale platform heartbeat and expired lease independently of model waiting',async()=>{
+ await claim();
+ const saved=(await tx(d=>taskRecord(d,workspaceId,taskId))).value;
+ const task={...saved,executor:'platform' as const,platform:{steps:[],nextRunAt:saved.lease!.expiresAt}};
+ expect(taskView(task,actor,now+19_999)).not.toHaveProperty('runnerStatus');
+ expect(taskView(task,actor,now+20_000)).toMatchObject({state:'running',runnerStatus:'heartbeat_stale'});
+ expect(taskView(task,actor,saved.lease!.expiresAt)).toMatchObject({state:'queued',runnerStatus:'awaiting_reclaim'});
+ expect(taskView(task,actor,now+20_000,false)).not.toHaveProperty('runnerStatus');
+ const resumed={...task,lease:{...task.lease!,heartbeatAt:now+30_000,expiresAt:now+120_000}};
+ expect(taskView(resumed,actor,now+31_000)).not.toHaveProperty('runnerStatus');
+});
+
 const conditionTarget={type:'order',id:'source-order'},preparedCondition=()=>({...conditionTarget,label:'SO-1',hash:'server-full-read-hash'});
 it('aggregates platform usage by actual Shanghai month at both UTC boundaries',async()=>{
  const start=Date.parse('2026-10-01T00:00:00Z'),identity=await tx(d=>createIdentity(d,actor,workspaceId,{id:randomUUID(),name:'月度核对',ownerId:actor.userId,mode:'read'},{id:actor.userId,name:actor.displayName!},start));

@@ -2,24 +2,55 @@
 import React,{act} from 'react';import {createRoot,type Root} from 'react-dom/client';import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {getByRole,queryByRole,getByLabelText} from '@testing-library/dom';
 import {MistRoot} from '../../../../../components/mist';
-import {XiaozhuThread,dayLabel} from './XiaozhuThread';
+import {XiaozhuThread,dayLabel,type ThreadActions} from './XiaozhuThread';
 let host:HTMLDivElement,root:Root;
 const task=(over:any={})=>({id:'t1',instructions:'核对订单',state:'running',version:1,result:'',checkpoint:'',questions:[],waitingProposalIds:[],canControl:true,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),...over}) as any;
 const index=[{text:'SO-1001',view:'orders/detail',id:'o1'}];
 const proposal=(over:any={})=>({id:'p1',state:'pending',command:{type:'email.move',payload:{}},summary:['归档邮件 PO 确认'],...over}) as any;
 const fns=()=>({onAnswer:vi.fn(),onCancel:vi.fn(),onRetry:vi.fn(),onCopy:vi.fn(),onDraft:vi.fn(),onAutomate:vi.fn(),onOpenRecord:vi.fn(),onProposal:vi.fn()});
-const paint=(tasks:any[],f=fns(),proposals:any[]=[])=>act(async()=>root.render(<MistRoot><XiaozhuThread tasks={tasks} index={index} proposals={proposals} {...f}/></MistRoot>));
+const paint=(tasks:any[],f:ReturnType<typeof fns>&Partial<ThreadActions>=fns(),proposals:any[]=[])=>act(async()=>root.render(<MistRoot><XiaozhuThread tasks={tasks} index={index} proposals={proposals} {...f}/></MistRoot>));
 beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
-it('shows the latest step while it works, leaving stop to the composer; a waiting request can be stopped in place',async()=>{const f=fns();await paint([task({trail:[{at:'',kind:'read',label:'查询订单 · 8 条'}]})],f);expect(host.textContent).toContain('核对订单');expect(host.textContent).toContain('查询订单 · 8 条');expect(queryByRole(host,'button',{name:'停止'})).toBeNull();
-  await paint([task({state:'waiting_time'})],f);await act(async()=>getByRole(host,'button',{name:'停止'}).click());expect(f.onCancel).toHaveBeenCalledOnce();});
+it('requires detailed review for medium risk and routes a pending receipt to its original proposal',async()=>{
+ const onDecide=vi.fn(async()=>{}),onRecoverProposal=vi.fn(async()=>{});
+ const f={...fns(),onDecide,onRecoverProposal};
+ const medium=proposal();
+ const low=proposal({id:'p2',command:{type:'task.complete',payload:{id:'a'}}});
+ const pendingTask=task({state:'waiting_human',waitingProposalIds:['p1','p2']});
+ await paint([pendingTask],f,[medium,{...low,taskBlocked:'原任务已停止'}]);
+ expect(queryByRole(host,'button',{name:'确认执行'})).toBeNull();
+ expect(host.textContent).toContain('原任务已停止');
+ await act(async()=>getByRole(host,'button',{name:'查看并确认'}).click());
+ expect(f.onProposal).toHaveBeenCalledWith('p1');
+
+ await paint([pendingTask],{...f,proposalsBlocked:true,pendingProposalId:'p1'},[medium,low]);
+ expect((getByRole(host,'button',{name:'确认执行'}) as HTMLButtonElement).disabled).toBe(true);
+ await act(async()=>getByRole(host,'button',{name:'核对原请求'}).click());
+ expect(onRecoverProposal).toHaveBeenCalledExactlyOnceWith('p1');
+ expect(onDecide).not.toHaveBeenCalled();
+});
+it('downloads the original from its own task and disables repeat requests while pending',async()=>{
+ const file={id:'attachment',name:'delivery.pdf',size:43,mimeType:'application/pdf'};
+ let finish!:()=>void;
+ const onDownloadAttachment=vi.fn(()=>new Promise<void>(resolve=>{finish=resolve;}));
+ const original=task({state:'succeeded',attachments:[file]});
+ await paint([original],{...fns(),onDownloadAttachment});
+ await act(async()=>getByRole(host,'button',{name:'下载原附件 delivery.pdf'}).click());
+ const waiting=getByRole(host,'button',{name:'正在下载附件 delivery.pdf'}) as HTMLButtonElement;
+ expect(waiting.disabled).toBe(true);
+ expect(onDownloadAttachment).toHaveBeenCalledExactlyOnceWith(original,file);
+ await act(async()=>finish());
+ expect(getByRole(host,'button',{name:'下载原附件 delivery.pdf'})).toBeTruthy();
+});
+it('shows the latest step while it works, leaving stop to the composer; a waiting request can be stopped in place',async()=>{const f=fns();await paint([task({trail:[{at:'',kind:'read',label:'查询订单 · 8 条'}]})],{...f,composerStopTaskId:'t1'});expect(host.textContent).toContain('核对订单');expect(host.textContent).toContain('查询订单 · 8 条');expect(queryByRole(host,'button',{name:/^停止/})).toBeNull();
+  await paint([task({state:'waiting_time'})],f);await act(async()=>getByRole(host,'button',{name:/^停止/}).click());expect(f.onCancel).toHaveBeenCalledOnce();});
 it('renders a finished answer as formatted content with openable record numbers',async()=>{const f=fns();await paint([task({state:'succeeded',result:'## 结论\n\n- 先跟进 SO-1001\n\n| 订单 | 交期 |\n| --- | --- |\n| SO-1001 | 11-08 |'})],f);expect(host.querySelector('h2')?.textContent).toBe('结论');expect(host.querySelector('table')).toBeTruthy();const chips=[...host.querySelectorAll('button.mist-xz-ref')];expect(chips.length).toBe(2);await act(async()=>(chips[0] as HTMLButtonElement).click());expect(f.onOpenRecord).toHaveBeenCalledWith('orders/detail','o1');});
 it('never renders raw html from a model answer',async()=>{await paint([task({state:'succeeded',result:'<img src=x onerror="window.__xss=1"> 正文 <script>window.__xss=2</script>'})]);expect(host.querySelector('img')).toBeNull();expect(host.querySelector('script')).toBeNull();expect((window as any).__xss).toBeUndefined();});
-it('offers copy, draft, retry and make-rule only once the request is finished',async()=>{const f=fns();await paint([task({state:'succeeded',result:'答复正文'})],f);for(const name of ['复制','保存草稿','重新提问','设为自动规则'])await act(async()=>getByRole(host,'button',{name}).click());expect(f.onCopy).toHaveBeenCalledWith('答复正文');expect(f.onDraft).toHaveBeenCalledWith('答复正文');expect(f.onRetry).toHaveBeenCalledWith('核对订单');expect(f.onAutomate).toHaveBeenCalledWith('核对订单');});
+it('offers copy, draft, retry and make-rule only once the request is finished',async()=>{const f=fns();await paint([task({state:'succeeded',result:'答复正文'})],f);for(const name of ['复制','保存草稿','重新提问','设为自动规则'])await act(async()=>getByRole(host,'button',{name}).click());expect(f.onCopy).toHaveBeenCalledWith('答复正文');expect(f.onDraft).toHaveBeenCalledWith('答复正文');expect(f.onRetry).toHaveBeenCalledWith(expect.objectContaining({id:'t1',instructions:'核对订单'}));expect(f.onAutomate).toHaveBeenCalledWith('核对订单');});
 it('opens a trail record on the page and section the server linked, including types without a fixed page',async()=>{const f=fns();await paint([task({state:'succeeded',result:'好了',trail:[{at:'',kind:'read',label:'读取应付票据 AP-1',ref:{type:'payable_bill',id:'b1',label:'AP-1',view:'payment-vouchers',section:'payables'}},{at:'',kind:'read',label:'读取样品 SP-1',ref:{type:'sample',id:'s1',label:'SP-1'}}]})],f);await act(async()=>(host.querySelector('.mist-xz-trail-h') as HTMLButtonElement).click());const links=[...host.querySelectorAll('.mist-xz-steps button.mist-xz-ref')];expect(links.length).toBe(1);await act(async()=>(links[0] as HTMLButtonElement).click());expect(f.onOpenRecord).toHaveBeenCalledWith('payment-vouchers','b1',{section:'payables'});});
 it('shows the file a confirmed proposal produced under its own turn and opens it',async()=>{const f={...fns(),onOpenFile:vi.fn()};const made={id:'p1',ownerId:'u',owner:'',command:{type:'order.document.generate',payload:{}},summary:[],createdAt:'',state:'confirmed',taskId:'t1',produced:{fileId:'f1',fileName:'PI-SO-1001.pdf'}} as any;const other={...made,id:'p2',taskId:'elsewhere',produced:{fileId:'f2',fileName:'别的.pdf'}};await paint([task({id:'t1',state:'succeeded',result:'已生成 PI'})],f,[made,other]);const files=[...host.querySelectorAll('.mist-xz-file')];expect(files.map(b=>b.textContent)).toEqual(['PI-SO-1001.pdf']);await act(async()=>(files[0] as HTMLButtonElement).click());expect(f.onOpenFile).toHaveBeenCalledWith('f1');});
 it('keeps the work trail collapsed after the request is done, and expands it on demand',async()=>{await paint([task({state:'succeeded',result:'好了',trail:[{at:'',kind:'read',label:'读取订单 SO-1001',ref:{type:'order',id:'o1',label:'SO-1001'}},{at:'',kind:'write',label:'预演 email.move'}]})]);expect(getByRole(host,'button',{name:'办理过程'}).getAttribute('aria-expanded')).toBe('false');expect(host.querySelector('.mist-xz-steps')).toBeNull();await act(async()=>(host.querySelector('.mist-xz-trail-h') as HTMLButtonElement).click());expect(host.querySelector('.mist-xz-steps')!.textContent).toContain('预演 email.move');});
-it('asks the open question inline and sends the answer for that question',async()=>{const f=fns();await paint([task({state:'waiting_human',questions:[{id:'q1',question:'核对哪个客户？',askedAt:''}]})],f);expect(host.textContent).toContain('核对哪个客户？');const box=getByLabelText(host,'回答小竹') as HTMLInputElement;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(box,'客户A');box.dispatchEvent(new Event('input',{bubbles:true}));});await act(async()=>getByRole(host,'button',{name:'回答'}).click());expect(f.onAnswer).toHaveBeenCalledWith(expect.objectContaining({id:'t1'}),'q1','客户A');});
+it('asks the open question inline and sends the answer for that question',async()=>{const f=fns();await paint([task({state:'waiting_human',questions:[{id:'q1',question:'核对哪个客户？',askedAt:''}]})],f);expect(host.textContent).toContain('核对哪个客户？');const box=getByLabelText(host,'回答小竹') as HTMLInputElement;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(box,'客户A');box.dispatchEvent(new Event('input',{bubbles:true}));});await act(async()=>getByRole(host,'button',{name:'回答'}).click());expect(f.onAnswer).toHaveBeenCalledWith(expect.objectContaining({id:'t1'}),'q1','客户A');expect(box.value).toBe('客户A');});
 it('shows what will change and opens the confirmation without leaving the conversation',async()=>{const f=fns();await paint([task({state:'waiting_human',waitingProposalIds:['p1']})],f,[proposal()]);expect(host.textContent).toContain('需要你确认');expect(host.textContent).toContain('归档邮件 PO 确认');expect(host.textContent).toContain('中风险');await act(async()=>getByRole(host,'button',{name:'查看并确认'}).click());expect(f.onProposal).toHaveBeenCalledWith('p1');});
 it('labels a stopped request instead of leaving it blank',async()=>{await paint([task({state:'budget_exhausted',checkpoint:'已读 20 条'})]);expect(host.textContent).toContain('达到限额');});
 it('groups requests by day',()=>{const now=new Date('2026-11-09T10:00:00+08:00');expect(dayLabel('2026-11-09T01:00:00+08:00',now)).toBe('今天');expect(dayLabel('2026-11-08T17:30:00Z',now)).toBe('今天');expect(dayLabel('2026-11-08T23:00:00+08:00',now)).toBe('昨天');});
@@ -72,4 +103,14 @@ it('opens source records from the work log while the model is running', async ()
   await act(async()=>getByRole(host,'button',{name:'读取订单 SO-1001'}).click());
   expect(actions.onOpenRecord).toHaveBeenCalledWith('orders/detail','o1',undefined);
   expect(getByRole(host,'status').textContent).toContain('正在等待模型');
+});
+
+
+it('shows recovery independently of the model stage and returns to live model waiting',async()=>{
+ await paint([task({runnerStatus:'heartbeat_stale',executionStage:'model',lastHeartbeatAt:new Date(Date.now()-20_000).toISOString()})]);
+ expect(getByRole(host,'status').textContent).toBe('执行进度暂未更新');
+ await paint([task({state:'queued',runnerStatus:'awaiting_reclaim'})]);
+ expect(getByRole(host,'status').textContent).toBe('待重新领取');
+ await paint([task({executionStage:'model'})]);
+ expect(getByRole(host,'status').textContent).toBe('正在等待模型');
 });
