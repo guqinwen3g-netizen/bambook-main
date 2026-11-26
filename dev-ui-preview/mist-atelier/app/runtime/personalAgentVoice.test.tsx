@@ -23,7 +23,7 @@ class Socket {
 function Harness({ scope = 'A', workspaceId = 'company-A', conversationId }: { scope?: string; workspaceId?: string; conversationId?: string }) {
   const voice = usePersonalAgentVoice(scope, workspaceId, seam.onTask, conversationId);
   latestVoice = voice;
-  return <><span data-testid="state">{voice.state}</span><span>{voice.error}</span><button onClick={() => void voice.start()}>start</button><button onClick={voice.end}>end</button><button onClick={voice.toggleMute}>mute</button><button onClick={voice.interrupt}>interrupt</button></>;
+  return <><span data-testid="state">{voice.state}</span><span>{voice.error}</span><button onClick={() => void voice.start()}>start</button><button onClick={() => void voice.start('task-with-question', 'question-1')}>start selected question</button><button onClick={voice.end}>end</button><button onClick={voice.toggleMute}>mute</button><button onClick={voice.interrupt}>interrupt</button></>;
 }
 const flush = async () => act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); });
 const click = async (text: string) => { act(() => [...host.querySelectorAll('button')].find(button => button.textContent === text)!.click()); await flush(); };
@@ -100,6 +100,46 @@ it('keeps the task on same-conversation reconnect and drops late bindings after 
     expect.objectContaining({conversationId:'c_next_room'}),
   ]);
   expect(posts[2]).not.toHaveProperty('taskId');
+});
+
+it('preserves the selected question across a disconnect and releases it only after the server rejects the stale ticket', async () => {
+  let stale = false;
+  seam.api.mockImplementation(async (_url: string, init: any) => {
+    if (init?.method !== 'POST') return {configured:true};
+    if (stale && JSON.parse(init.body).questionId) throw Object.assign(Error('问题已更新，请在原事项核对'),{code:'AGENT_TASK_CHANGED'});
+    return {id:'call',ticket:'private-one-use-ticket'};
+  });
+  await click('start selected question');
+  const socket=Socket.instances[0];
+  act(() => {
+    socket.event({type:'ready'});
+    socket.event({type:'task',item:{id:'task-with-question',questions:[{id:'question-1',answer:'另一页回答',answeredAt:'2026-11-26T01:00:00Z'}]}});
+    socket.onclose?.();
+  });
+  stale=true;
+  await click('start');
+  expect(host.textContent).toContain('问题已更新，请在原事项核对');
+  expect(Socket.instances).toHaveLength(1);
+  await click('start');
+  expect(Socket.instances).toHaveLength(2);
+  const posts=seam.api.mock.calls.filter(([,init])=>init?.method==='POST').map(([,init])=>JSON.parse(init.body));
+  expect(posts[1]).toMatchObject({taskId:'task-with-question',questionId:'question-1'});
+  expect(posts[2]).not.toHaveProperty('taskId');
+  expect(posts[2]).not.toHaveProperty('questionId');
+});
+
+it('clears the selected question on the receipt for its own spoken answer',async()=>{
+  await click('start selected question');
+  const socket=Socket.instances[0];
+  act(() => {
+    socket.event({type:'ready'});
+    socket.event({type:'task',item:{id:'task-with-question'},answeredQuestionId:'question-1'});
+    socket.onclose?.();
+  });
+  await click('start');
+  const posts=seam.api.mock.calls.filter(([,init])=>init?.method==='POST').map(([,init])=>JSON.parse(init.body));
+  expect(posts[1].taskId).toBe('task-with-question');
+  expect(posts[1]).not.toHaveProperty('questionId');
 });
 
 it('does not request the microphone when the platform has no voice connection', async () => {
