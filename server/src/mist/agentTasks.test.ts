@@ -5,7 +5,7 @@ import { createIdentity, identityRecord, identityView, issueServiceKey, revokeSe
 import { answerTaskQuestion, askTaskQuestion, assertTaskLease, changeTask, checkTaskCondition, checkpointTask, claimTask, createTask, finishTask, heartbeatTask, issueTaskControl, reserveTaskStep, saveTaskSources, settleTaskProposal, taskRecord, taskView, waitTaskForProposal, waitTaskUntil, type AgentTaskLease } from './agentTasks';
 import type { AgentActor } from './agentDelegation';
 import type { TokenPayload } from '../auth/service';
-import {platformTaskUsage} from './agentTasks';
+import {personalTaskActivity, platformTaskUsage} from './agentTasks';
 
 let db: MemoryMistDatabase, actor: TokenPayload, service: AgentActor, workspaceId: string, identityId: string, taskId: string;
 let now: number;
@@ -26,6 +26,20 @@ async function claim(requestId = randomUUID(), workerId = 'worker') {
   const c = (await tx(d => taskRecord(d, workspaceId, taskId))).value;
   return { result, lease: { taskId, workspaceId, runId: c.lease!.id, grantHash: digest(result.token!), serviceLease: c.authority } as AgentTaskLease };
 }
+it('projects only current public tool activity and drops credential-like strings', async () => {
+  const saved = (await tx(d => taskRecord(d, workspaceId, taskId))).value;
+  const view = {
+    ...taskView(saved, actor, now), state:'running' as const, executionStage:'tool' as const,
+    trail:[{at:saved.createdAt,kind:'read' as const,label:'读取附件 样品.pdf',progress:'已经核对订单交期',completed:false}],
+  };
+  expect(personalTaskActivity(view)).toEqual({
+    id:taskId,name:'核对订单',state:'running',executionStage:'tool',currentStep:'读取附件 样品.pdf',progress:'已经核对订单交期',
+  });
+  expect(personalTaskActivity({
+    ...view,name:'请使用 sk-test-secret-1234',trail:[{...view.trail[0],label:'aft1.private-cursor',progress:'bms1_private'}],
+  })).toEqual({id:taskId,name:'小竹任务',state:'running',executionStage:'tool'});
+  expect(personalTaskActivity({...view,state:'waiting_time'})).toBeUndefined();
+});
 it('persists exact intent references separately from actual task reads and distinguishes same-label identity in idempotency',async()=>{
  const requestId=randomUUID(),input={requestId,identityId,name:'同名资料',instructions:'核对同名资料'};
  const created=await tx(d=>(createTask as any)(d,actor,workspaceId,input,now,undefined,undefined,[{kind:'orders',id:'order-A'}]));

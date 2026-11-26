@@ -2,11 +2,11 @@ import type { MistStoredFile } from './files';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
-import { normalizeAgentTaskIntentRefs, type AgentTaskEvent, type AgentTaskQuestion, type AgentTaskView, type AgentTaskIntentRef } from '../shared/mistAgentTasks';
+import { normalizeAgentTaskIntentRefs, type AgentTaskActivity, type AgentTaskEvent, type AgentTaskQuestion, type AgentTaskView, type AgentTaskIntentRef } from '../shared/mistAgentTasks';
 import type { TaskAttachmentRef } from '../shared/mistTaskAttachments';
 import { taskIntentCeilingAllows } from './agentTaskIntentRefs';
 import { isAgentActor, type AgentActor } from './agentDelegation';
-import { identityRecord, assertServiceLease, serviceActorFromIdentity, type AgentServiceLease } from './agentIdentities';
+import { identityRecord, personalIdentityId, assertServiceLease, serviceActorFromIdentity, type AgentServiceLease } from './agentIdentities';
 import { fail, MistApiError } from './errors';
 import { taskScopeHash, type TaskSourceRef } from './agentTaskVisibility';
 import {compactPlatformTaskSteps,newPlatformTaskStep,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskProgress} from './platformTaskPlan';
@@ -556,6 +556,48 @@ export async function listTasks(db: any, actor: TokenPayload, workspaceId: strin
     items.push(taskView(c, actor, now, valid&&await sourcesVisible(c)));
   }
   return { items, nextCursor: rows.length > 30 && last ? Buffer.from(JSON.stringify({ at: new Date(last.createdAt).toISOString(), id: last.id })).toString('base64url') : null };
+}
+
+/** Find live work without scanning or paging through completed conversation history. */
+export async function personalTaskActivityCandidates(db: any, workspaceId: string, ownerId: string, now: number): Promise<TaskRecord[]> {
+  const at = (key: string, condition: { equals: string } | { gte: number }) => ({ result: { path: [TASK_FIELD, key], ...condition } });
+  const rows = await db.mistCommandReceipt.findMany({
+    where: {
+      workspaceId, actorId: ownerId, inputHash: TASK_HASH,
+      AND: [
+        at('identityId', { equals: personalIdentityId(workspaceId, ownerId) }),
+        at('executor', { equals: 'platform' }),
+        { OR: [at('state', { equals: 'queued' }), at('state', { equals: 'running' })] },
+        at('expiresAt', { gte: now + 1 }),
+      ],
+    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: ACTIVE_TASK_LIMIT,
+  });
+  return rows.map((row: unknown) => record(row, workspaceId));
+}
+
+function activityText(value: string | undefined) {
+  if (!value || /\b(?:bma1|bmc1|bms1|bmt1|aft1)[_.][A-Za-z0-9_-]+|\b(?:Bearer\s+|sk-)[A-Za-z0-9_-]{8,}/i.test(value)) return;
+  return value.replace(/[\u0000-\u001f\u007f\s]+/gu, ' ').trim() || undefined;
+}
+
+export function personalTaskActivity(view: AgentTaskView): AgentTaskActivity | undefined {
+  if ((view.state !== 'running' && view.state !== 'queued') || view.waitingProposalIds.length
+    || view.questions?.some(question => !question.answeredAt)) return;
+  const last = view.trail?.at(-1);
+  const currentStep = view.executionStage === 'tool' && last && !last.completed ? activityText(last.label) : undefined;
+  const progress = last && !last.failed ? activityText(last.progress) : undefined;
+  return {
+    id: view.id,
+    name: activityText(view.name) ?? '小竹任务',
+    state: view.state,
+    ...(view.executionStage && { executionStage: view.executionStage }),
+    ...(view.runnerStatus && { runnerStatus: view.runnerStatus }),
+    ...(view.state === 'queued' && view.executionIssue?.retryAt && { retrying: true }),
+    ...(currentStep && { currentStep }),
+    ...(progress && { progress }),
+  };
 }
 export function assertTaskBusinessRead(c:TaskRecord){if(c.requiredRead)fail('AGENT_TASK_READ_REQUIRED','请先重新完整读取等待对象',422);}
 export async function saveTaskSources(db: any, actor: TokenPayload, lease: AgentTaskLease, sources: TaskSourceRef[], now: number,fullRead?:TaskConditionTarget) {
