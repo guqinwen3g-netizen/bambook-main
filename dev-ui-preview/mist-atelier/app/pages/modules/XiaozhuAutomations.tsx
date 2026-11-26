@@ -32,12 +32,14 @@ function readRuleIntent(scope:string):RuleIntent|undefined {
   } catch { /* The active page can still retry in memory. */ }
 }
 
-export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed, newRule }: { open: boolean; onClose: () => void; workspaceId?: string; scopeKey?:string; seed?: string; newRule?: number }) {
+export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed, newRule, returnRuleId }: { open: boolean; onClose: () => void; workspaceId?: string; scopeKey?:string; seed?: string; newRule?: number; returnRuleId?: string }) {
   const { go } = useNav(), toast = useToast(), base = workspaceId ? '/api/mist/workspaces/' + encodeURIComponent(workspaceId) + '/agent-automations' : '';
   const scope=scopeKey??workspaceId??'';
   const liveScope=React.useRef(scope);liveScope.current=scope;
   const [rules, setRules] = React.useState<Rule[] | null>(null), [loading, setLoading] = React.useState(false);
   const [expandedRuns, setExpandedRuns] = React.useState<Record<string,boolean>>({});
+  const returnedRule = React.useRef<HTMLDivElement>(null);
+  const lastRestoredRule = React.useRef<string|undefined>(undefined);
   const [readError, setReadError] = React.useState(''), [error, setError] = React.useState('');
   const readGeneration = React.useRef(0);
   const listing=React.useRef<AbortController|undefined>(undefined);
@@ -91,6 +93,15 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
       if (!activeIntent.current) setDraft(null);
     }
   }, [open, load]);
+  React.useEffect(() => {
+    if (!open || !returnRuleId) {
+      lastRestoredRule.current = undefined;
+      return;
+    }
+    if (!returnedRule.current || lastRestoredRule.current === returnRuleId) return;
+    returnedRule.current.scrollIntoView?.({block:'start',inline:'nearest'});
+    lastRestoredRule.current = returnRuleId;
+  }, [open, returnRuleId, rules]);
   React.useEffect(() => { if (open && seed && !activeIntent.current) setDraft({ trigger: 'daily', name: seed.slice(0, 20), instructions: seed, time: '09:00' }); }, [open, seed]);
   React.useEffect(() => { if (open && newRule && !activeIntent.current) start(); }, [open, newRule]);
   React.useEffect(() => { if (!open) return; const timer = setInterval(() => { if (document.visibilityState !== 'hidden') void load(); }, 10_000); return () => clearInterval(timer); }, [open, load]);
@@ -173,20 +184,20 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
       </div>}
       {rules?.length === 0 && !draft && !loading && !readError && <EmptyState title={uiText('还没有规则')} compact />}
       {rules?.map(r => {
-        const expanded = expandedRuns[r.id] === true, runsId = 'mist-rule-runs-' + r.id;
+        const expanded = expandedRuns[r.id] ?? (r.id === returnRuleId), runsId = 'mist-rule-runs-' + r.id;
         const runs = expanded ? r.runs : r.runs.slice(0, 3);
-        return <div className="mist-col mist-section" key={r.id}>
+        return <div className="mist-col mist-section" key={r.id} ref={r.id===returnRuleId?returnedRule:undefined}>
           <div className="mist-row"><b>{r.name}</b><Pill tone="ai">{uiText(label(r.trigger))}{timed(r.trigger) ? ' ' + r.time : ''}</Pill><span className="mist-spacer" />
             <Switch ariaLabel={uiText(`开启 ${r.name}`)} checked={r.enabled} disabled={busy||!!pendingHere} onChange={v => void toggle(r, v)} />
             <IconButton icon={Trash2} label={uiText(`删除 ${r.name}`)} disabled={busy||!!pendingHere} onClick={() => void remove(r)} /></div>
           {r.halted && <Banner tone="warn" title={uiText(r.halted.message)} />}
           <p className="mist-sub">{r.instructions}</p>
           {!!runs.length && <div className="mist-col" id={runsId}>
-            {runs.map(run => <div className="mist-row" key={run.taskId}><span className="mist-note">{new Date(run.at).toLocaleString(interfaceLocale(),{timeZone:'Asia/Shanghai',hour12:false})} · {run.detail}</span><span className="mist-spacer" /><Button size="sm" variant="quiet" onClick={() => go('assistant', run.taskId, { section: 'tasks' })}>{uiText('查看')}</Button></div>)}
+            {runs.map(run => <div className="mist-row" key={run.taskId}><span className="mist-note">{new Date(run.at).toLocaleString(interfaceLocale(),{timeZone:'Asia/Shanghai',hour12:false})} · {run.detail}</span><span className="mist-spacer" /><Button size="sm" variant="quiet" onClick={() => go('assistant', run.taskId, { section: 'tasks', automationId:r.id })}>{uiText('查看')}</Button></div>)}
           </div>}
           {r.runs.length > 3 && <div className="mist-row">
             <Button size="sm" variant="quiet" aria-expanded={expanded} aria-controls={runsId}
-              onClick={() => setExpandedRuns(current => ({...current, [r.id]: !current[r.id]}))}>
+              onClick={() => setExpandedRuns(current => ({...current, [r.id]: !(current[r.id] ?? (r.id === returnRuleId))}))}>
               {uiText(expanded ? '收起运行记录' : '查看全部运行记录')}
             </Button>
           </div>}
