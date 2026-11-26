@@ -495,6 +495,27 @@ function pdf(text:string, pageCount=1){
  return Buffer.from(out);
 }
 
+it('reads one short PDF tail before asking the model to prepare the report', async () => {
+ const complete = vi.fn(async (_input: LlmCompletionInput) =>
+   tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '已整理附件核对报告' }));
+ const f = await fixture(complete);
+ f.worker.start(3_600_000);
+ const task = (await f.human.post(f.base + '/personal-agent/tasks')
+   .field('task', JSON.stringify({requestId:randomUUID(),name:'核对附件',instructions:'核对 PDF 和最后一页。'}))
+   .attach('attachments', pdf('PDF-TAIL-CONTROL-23', 23), 'delivery.pdf').expect(201)).body.item;
+ await f.drain();
+ expect(complete).toHaveBeenCalledTimes(1);
+ const input = complete.mock.calls[0][0].messages[0].content as string;
+ const facts = JSON.parse(input.slice(input.indexOf('{')));
+ const reads = facts.history.recent.filter((step: {name:string}) => step.name === 'bambook_file_text');
+ expect(reads).toEqual([
+   expect.objectContaining({result:expect.objectContaining({range:expect.objectContaining({pageFrom:1,pageTo:20}),hasMore:true})}),
+   expect.objectContaining({result:expect.objectContaining({range:expect.objectContaining({pageFrom:21,pageTo:23}),hasMore:false,text:expect.stringContaining('PDF-TAIL-CONTROL-23')})}),
+ ]);
+ expect(reads[1].result.sourceHash).toBe(reads[0].result.sourceHash);
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'已整理附件核对报告'});
+});
+
 it('researches a PDF, workbook and image together with a selected order, keeping all uploaded files task-private',async()=>{
  let readTask: (()=>Promise<any>) | undefined;
  let turns=0;
@@ -530,7 +551,7 @@ it('researches a PDF, workbook and image together with a selected order, keeping
      expect(reads[2]).toMatchObject({arguments:{fileId:'attachment_99'},result:{error:true,message:expect.stringContaining('附件编号')}});
      return tool('bambook_file_text',{fileId:'attachment_1',cursor:'next'});
    }
-   expect(reads[3]).toMatchObject({arguments:{fileId:'attachment_1',cursor:'next'},result:{file:{id:'attachment_1'},range:{pageFrom:21,pageTo:23},hasMore:false}});
+   expect(reads[3]).toMatchObject({arguments:{fileId:'attachment_1',cursor:'next'},result:{file:{id:'attachment_1'},range:{pageFrom:21,pageTo:25},hasMore:false}});
    expect(input).toContain('PDF-DELIVERY-925');
    return JSON.stringify({name:'bambook_task',arguments:{action:'finish',outcome:'succeeded',result:'已综合核对所选记录和三份附件。'},progress:'已读订单和两份文档，图片编号也已识别，正在整理对照结果。'});
  });
@@ -542,7 +563,7 @@ it('researches a PDF, workbook and image together with a selected order, keeping
  const payload={requestId:randomUUID(),name:'对照订单',instructions:'对照所选订单与附件。',intentRefs:[{kind:'orders',id:f.workspace.state.orders[0].id}]};
  const submit=()=>f.human.post(f.base+'/personal-agent/tasks')
    .field('task',JSON.stringify(payload))
-   .attach('attachments',pdf('PDF-DELIVERY-925',23),'delivery.pdf')
+   .attach('attachments',pdf('PDF-DELIVERY-925',25),'delivery.pdf')
    .attach('attachments',workbook,'quantities.xlsx')
    .attach('attachments',image,'sample.png');
  f.worker.start(3_600_000);
