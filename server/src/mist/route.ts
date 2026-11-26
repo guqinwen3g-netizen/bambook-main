@@ -156,7 +156,8 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
       const item = await repository.getAgentTask(prior, workspaceId, id);
       if (item.executor !== 'platform' || item.identityId !== personalIdentityId(workspaceId, prior.userId)) fail('FORBIDDEN', '只能接续本人的个人 Agent 事项', 403);
       if (conversationId !== undefined && item.conversationId !== conversationId) fail('FORBIDDEN', '只能接续当前对话的事项', 403);
-      if (captureInitialQuestion && id === taskId) {
+      // A restricted view omits questions. Let the voice service report the access change.
+      if (!item.contentRestricted && captureInitialQuestion && id === taskId) {
         captureInitialQuestion = false;
         const question = pendingQuestion(item, questionId);
         if (questionId !== undefined && !question) fail('AGENT_TASK_CHANGED', '问题已更新，请在原事项核对', 409);
