@@ -16,7 +16,13 @@ export function normalizeAgentTaskIntentRefs(value: unknown): AgentTaskIntentRef
 }
 export type AgentTaskState = 'queued' | 'running' | 'waiting_time' | 'waiting_condition' | 'waiting_human' | 'paused' | 'succeeded' | 'failed' | 'cancelled' | 'expired' | 'budget_exhausted' | 'access_changed';
 export type AgentTaskQuestion = {id:string;question:string;askedAt:string;answer?:string;answeredAt?:string};
-export type AgentTaskTrailItem = { at: string; kind: 'read' | 'write' | 'ask' | 'wait' | 'note'; label: string; completed?: boolean; failed?: boolean; progress?: string; detail?: string; ref?: { type: string; id: string; label: string; /** 读取结果给出的页面与锚点；id 为页面要打开的编号（可能是上级单据）。 */ view?: string; section?: string } };
+export type AgentTaskTrailItem = {
+  at: string; kind: 'read' | 'write' | 'ask' | 'wait' | 'note'; label: string;
+  completed?: boolean; failed?: boolean; progress?: string; detail?: string;
+  /** A verified read of an original listed in this task's attachments. */
+  taskAttachmentId?: string;
+  ref?: { type: string; id: string; label: string; /** 读取结果给出的页面与锚点；id 为页面要打开的编号（可能是上级单据）。 */ view?: string; section?: string };
+};
 export type AgentTaskView = {
   id: string; identityId: string; identityName: string; name: string; ownerId: string; ownerName: string;
   instructions: string; state: AgentTaskState; version: number; createdAt: string; updatedAt: string; expiresAt: string;

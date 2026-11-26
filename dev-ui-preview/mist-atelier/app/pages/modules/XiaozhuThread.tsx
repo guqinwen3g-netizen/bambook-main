@@ -46,8 +46,9 @@ function Elapsed({ since }: { since: string }) {
   return <span className="mist-xz-elapsed" role="timer" aria-live="off">· {ui`${seconds} 秒`}</span>;
 }
 
-function Trail({ items, active, activeLabel, since, recovering, onOpen }: {
-  items: AgentTaskTrailItem[]; active: boolean; activeLabel?: string; since?: string; recovering?: boolean; onOpen: OpenRecord;
+function Trail({ task, items, active, activeLabel, since, recovering, onOpen, onPreviewAttachment }: {
+  task: AgentTaskView; items: AgentTaskTrailItem[]; active: boolean; activeLabel?: string; since?: string; recovering?: boolean; onOpen: OpenRecord;
+  onPreviewAttachment?: ThreadActions['onPreviewAttachment'];
 }) {
   const [expanded, setExpanded] = React.useState<boolean>();
   const open = expanded ?? active;
@@ -64,11 +65,13 @@ function Trail({ items, active, activeLabel, since, recovering, onOpen }: {
       {items.map((step, n) => {
         const ref = step.ref;
         const view = ref && (ref.view ?? VIEW[ref.type]);
+        const attachment = step.taskAttachmentId && task.attachments?.find(file => file.id === step.taskAttachmentId);
         return <li key={n} data-failed={step.failed || undefined}>
           <Icon icon={KIND_ICON[step.kind]} size="xs" />
           <div className="mist-xz-step-body">
             {ref && view
               ? <button type="button" className="mist-xz-ref" onClick={() => onOpen(view, ref.id, ref.section ? { section: ref.section } : undefined)}>{step.label}</button>
+              : attachment && onPreviewAttachment ? <button type="button" className="mist-xz-ref" onClick={() => onPreviewAttachment(task, attachment)}>{uiText(step.label)}</button>
               : <span>{uiText(step.label)}</span>}
             {step.progress && <p>{step.progress}</p>}
             {step.detail && <p>{uiText(step.detail)}</p>}
@@ -201,7 +204,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         </div>}
       </div>
       <XiaozhuTurnShell status={status}>
-        {(!!t.trail?.length || working) && <Trail items={t.trail ?? []} active={working} activeLabel={activeLabel} recovering={!!t.runnerStatus} since={t.runnerStatus==='heartbeat_stale'?t.lastHeartbeatAt??undefined:t.executionStageSince} onOpen={actions.onOpenRecord} />}
+        {(!!t.trail?.length || working) && <Trail task={t} items={t.trail ?? []} active={working} activeLabel={activeLabel} recovering={!!t.runnerStatus} since={t.runnerStatus==='heartbeat_stale'?t.lastHeartbeatAt??undefined:t.executionStageSince} onOpen={actions.onOpenRecord} onPreviewAttachment={actions.onPreviewAttachment} />}
         {t.result && <XiaozhuMarkdown text={t.result} index={index} onOpen={actions.onOpenRecord} />}
         {active && t.checkpoint && !t.result && !working && <p className="mist-xz-note">{t.checkpoint}</p>}
         {!active && t.state !== 'succeeded' && !t.result && t.checkpoint && <p className="mist-xz-note">{t.checkpoint}</p>}

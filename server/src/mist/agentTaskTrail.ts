@@ -32,6 +32,7 @@ const FILE_FAILURE_DETAILS = new Map([
 
 export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments: readonly {id:string;name:string}[] = []): AgentTaskTrailItem[] {
   const names=new Map(attachments.map(file=>[file.id,text(file.name,60)]));
+  const taskAttachmentIds=new Set(names.keys());
   const out: AgentTaskTrailItem[] = [];
   for (const step of steps ?? []) {
     const { name, arguments: args } = step.plan as { name: string; arguments: Record<string, any> }, result = step.result as any, at = step.at;
@@ -70,7 +71,9 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
       case 'bambook_audit': out.push({ ...base, kind: 'read', label: '查看操作记录' }); break;
       case 'bambook_file_text': {
         const observedName=text(result?.file?.name,60);
-        if(observedName&&typeof args.fileId==='string'&&result?.file?.id===args.fileId)names.set(args.fileId,observedName);
+        const matchedId=typeof args.fileId==='string'&&result?.file?.id===args.fileId ? args.fileId : undefined;
+        if(observedName&&matchedId)names.set(matchedId,observedName);
+        const taskAttachmentId=completed&&!step.compacted&&result?.error!==true&&matchedId&&taskAttachmentIds.has(matchedId) ? matchedId : undefined;
         const file=observedName||names.get(args.fileId);
         const pages=result?.range;
         const pageRange=result?.kind==='pdf'&&Number.isSafeInteger(pages?.pageFrom)&&Number.isSafeInteger(pages?.pageTo)
@@ -91,7 +94,7 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
           : failed ? text(result?.reason, 120)
           : result?.hasMore ? '本次读取部分正文，还有后续内容'
           : result?.complete ? '已提取可读取正文' : '';
-        out.push({ ...base, kind: 'read', label: result?.error===true?`附件读取失败${file?' '+file:''}`:file?`读取附件 ${file}`:'读取附件正文', ...(detail ? { detail } : {}) });
+        out.push({ ...base, kind: 'read', label: result?.error===true?`附件读取失败${file?' '+file:''}`:file?`读取附件 ${file}`:'读取附件正文', ...(detail ? { detail } : {}), ...(taskAttachmentId ? { taskAttachmentId } : {}) });
         break;
       }
       case 'bambook_mail_receiving': out.push({ ...base, kind: 'read', label: '查看邮箱收件状态' }); break;
