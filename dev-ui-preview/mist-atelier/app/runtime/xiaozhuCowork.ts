@@ -250,9 +250,14 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     }
   }, [base, enabled, scope, checkReceipts]);
   React.useEffect(() => { restrictedReports.current = new Set(); setReportAccess(undefined); setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); setRecoveredSubmissions([]); setCheckingReceipt(false); setControls({}); controlKeys.current.clear(); setBusy(false); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); moreRead.current?.abort(); receiptRead.current?.abort(); receiptRead.current=undefined; sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [load,scope]);
-  const openReportIds = React.useMemo(() => visibleConversationId ? (conversationsOf(cachedTasks.filter(task => !task.automationId))
-    .find(conversation => conversation.id === visibleConversationId)?.tasks.map(task => task.id).join(',') ?? '') : '',
-    [cachedTasks, visibleConversationId]);
+  const openReportIds = React.useMemo(() => {
+    if (!visibleConversationId) return '';
+    const personal = cachedTasks.filter(task => !task.automationId);
+    const reports = visibleConversationId.startsWith('legacy_')
+      ? conversationsOf(personal.filter(task => !task.conversationId)).find(conversation => conversation.id === visibleConversationId)?.tasks ?? []
+      : personal.filter(task => task.conversationId === visibleConversationId);
+    return reports.map(task => task.id).join(',');
+  }, [cachedTasks, visibleConversationId]);
   React.useEffect(() => {
     if (!base || !enabled || !openReportIds) return;
     const ids = openReportIds.split(',');
