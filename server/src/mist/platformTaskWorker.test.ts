@@ -60,6 +60,67 @@ it('compiles a read-only order report in one query, one detail batch, and one re
  expect((await f.human.get(f.base).expect(200)).body.workspace.state).toEqual(f.workspace.state);
 });
 
+it('only carries authorized task history into a follow-up and masks it when its source is withdrawn', async () => {
+ const previousResult = 'HISTORY-AUTHORIZED-ORDER-RECAP';
+ const followUpResult = 'HISTORY-FOLLOW-UP-DERIVED-REPORT';
+ const prompt = '续核原订单，不改业务。';
+ const conversationId = 'c_history_authority';
+ const finish = (result:string) => tool('bambook_task', {action:'finish',outcome:'succeeded',result});
+ const complete = vi.fn(async (_input:LlmCompletionInput) => finish('意外执行了无权读取的续问。'))
+   .mockResolvedValueOnce(finish(previousResult))
+   .mockResolvedValueOnce(finish(followUpResult));
+ const f = await fixture(complete), order = f.workspace.state.orders[0];
+ const endpoint = f.base + '/personal-agent/tasks';
+ f.worker.start(3_600_000);
+ const {item:previous} = (await f.human.post(endpoint).send({
+   requestId:randomUUID(), name:'核对原订单', instructions:'核对本人当前授权的原订单。', conversationId,
+   intentRefs:[{kind:'orders',id:order.id}],
+ }).expect(201)).body;
+ await f.drain();
+ expect(await f.current(previous.id)).toMatchObject({state:'succeeded',result:previousResult});
+
+ const followUp = {requestId:randomUUID(),name:'续核订单',instructions:prompt,conversationId,historyTaskIds:[previous.id]};
+ const {item:finished} = (await f.human.post(endpoint).send(followUp).expect(201)).body;
+ expect(finished.instructions).toBe(prompt);
+ await f.drain();
+ expect(complete).toHaveBeenCalledTimes(2);
+ const allowedInput = String(complete.mock.calls[1][0].messages[0].content);
+ expect(allowedInput).toContain(prompt);
+ expect(allowedInput).toContain(previousResult);
+ expect(await f.current(finished.id)).toMatchObject({state:'succeeded',instructions:prompt,result:followUpResult});
+
+ const pendingInput = {...followUp,requestId:randomUUID()};
+ const {item:queued} = (await f.human.post(endpoint).send(pendingInput).expect(201)).body;
+ expect(queued).toMatchObject({state:'queued',instructions:prompt});
+ await f.local.database.$transaction(async db => {
+   const row = await db.mistWorkspace.findUnique({where:{id:f.workspace.id}});
+   await db.mistWorkspace.update({where:{id:f.workspace.id},data:{state:{
+     ...row.state,orders:row.state.orders.filter((record:{id:string})=>record.id!==order.id),
+   }}});
+ });
+
+ await f.drain();
+ expect(complete).toHaveBeenCalledTimes(2);
+ const pendingReplay = (await f.human.post(endpoint).send(pendingInput).expect(201)).body.item;
+ const pendingReceipt = (await f.human.get(endpoint+'/receipt/'+pendingInput.requestId).expect(200)).body.item;
+ for (const hidden of [await f.current(queued.id),pendingReplay,pendingReceipt]) {
+   expect(hidden).toMatchObject({id:queued.id,state:'access_changed',instructions:'',result:''});
+ }
+
+ const entries = (await f.human.get(f.base+'/agent-tasks').expect(200)).body.items;
+ const listed = entries.find((item:{id:string})=>item.id===finished.id);
+ const replayed = (await f.human.post(endpoint).send(followUp).expect(201)).body.item;
+ const recovered = (await f.human.get(endpoint+'/receipt/'+followUp.requestId).expect(200)).body.item;
+ expect(entries.filter((item:{id:string})=>item.id===queued.id)).toHaveLength(1);
+ for (const hidden of [await f.current(finished.id),listed,replayed,recovered]) {
+   expect(hidden).toMatchObject({id:finished.id,state:'succeeded',instructions:'',result:''});
+   expect(JSON.stringify(hidden)).not.toContain(previousResult);
+   expect(JSON.stringify(hidden)).not.toContain(followUpResult);
+ }
+ await f.drain();
+ expect(complete).toHaveBeenCalledTimes(2);
+});
+
 it('shows only the owner’s active XiaoZhu tasks with a live stage and hides tasks that need the owner', async () => {
  const waiting = Promise.withResolvers<string>();
  const entered = Promise.withResolvers<void>();
