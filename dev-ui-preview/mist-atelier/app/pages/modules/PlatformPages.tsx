@@ -262,7 +262,7 @@ export function AssistantPage(){
     return()=>{cancelled=true;};
   },[cowork.recoveredSubmissions,conversationId,taskText,selected,files,attachmentRefs,clearDraft]);
   const showTaskHistory=canChat&&(cowork.available||cowork.tasks.length>0);
-  const index=React.useMemo(()=>recordIndex(w.state),[w.state]),automationRules=useAutomationRules(w.workspace?.id,showTaskHistory,rulesOpen),meta=useConversationMeta(w.workspace?.id,showTaskHistory),conversations=React.useMemo(()=>conversationsOf(cowork.tasks,meta.items),[cowork.tasks,meta.items]),current=conversations.find(c=>c.id===conversationId)??(openedOrigin?.scope===scope&&openedOrigin.conversationId===conversationId?conversationsOf(cowork.tasks.filter(task=>task.conversationId===conversationId))[0]:undefined),visibleTasks=showTaskHistory?(current?.tasks??[]):[],proposals=(w.state?.agentProposals??[]).filter(p=>p.state==='pending'),voice=usePersonalAgentVoice(scope+':'+canChat,w.workspace?.id,cowork.track),inCall=voiceInCall(voice);
+  const index=React.useMemo(()=>recordIndex(w.state),[w.state]),automationRules=useAutomationRules(w.workspace?.id,showTaskHistory,rulesOpen),meta=useConversationMeta(w.workspace?.id,showTaskHistory),conversations=React.useMemo(()=>conversationsOf(cowork.tasks,meta.items),[cowork.tasks,meta.items]),current=conversations.find(c=>c.id===conversationId)??(openedOrigin?.scope===scope&&openedOrigin.conversationId===conversationId?conversationsOf(cowork.tasks.filter(task=>task.conversationId===conversationId))[0]:undefined),visibleTasks=showTaskHistory?(current?.tasks??[]):[],proposals=(w.state?.agentProposals??[]).filter(p=>p.state==='pending'),voice=usePersonalAgentVoice(scope+':'+canChat,w.workspace?.id,cowork.track,conversationId),inCall=voiceInCall(voice);
   const originActions=React.useRef({refreshTask:cowork.refreshTask,track:cowork.track,openConversation,go:nav.go});
   originActions.current={refreshTask:cowork.refreshTask,track:cowork.track,openConversation,go:nav.go};
   React.useEffect(()=>{
@@ -391,7 +391,7 @@ export function AssistantPage(){
         atBottomRef.current=true;
         const sent=await cowork.send(text,visibleTasks,target,selectedTaskIntentRefs(selected),files,refs);
         if(sent&&live.current===scope){
-          voice.followTask(sent.id);
+          voice.followTask(sent);
           clearDraft(conversationId,liveConversation.current);
           if(sent.conversationId&&sent.conversationId!==conversationId&&liveConversation.current===conversationId)openConversation(sent.conversationId);
         }
