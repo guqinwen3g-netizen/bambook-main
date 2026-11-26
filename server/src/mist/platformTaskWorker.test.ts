@@ -121,6 +121,33 @@ it('only carries authorized task history into a follow-up and masks it when its 
  expect(complete).toHaveBeenCalledTimes(2);
 });
 
+it('ignores requested history from a different conversation even when the task belongs to the same person', async () => {
+ const previousResult = 'OTHER-CONVERSATION-REPORT-MUST-STAY-OUT';
+ const finish = (result:string) => tool('bambook_task', {action:'finish',outcome:'succeeded',result});
+ const complete = vi.fn(async (_input:LlmCompletionInput) => finish('已答复当前问题。'))
+   .mockResolvedValueOnce(finish(previousResult));
+ const f = await fixture(complete);
+ const endpoint = f.base + '/personal-agent/tasks';
+ f.worker.start(3_600_000);
+ const {item:previous} = (await f.human.post(endpoint).send({
+   requestId:randomUUID(),name:'旧对话报告',instructions:'汇总这段旧对话。',conversationId:'c_other_history',
+ }).expect(201)).body;
+ await f.drain();
+ expect(await f.current(previous.id)).toMatchObject({state:'succeeded',result:previousResult});
+
+ const prompt = '只回答当前对话的原始问题。';
+ const {item:followUp} = (await f.human.post(endpoint).send({
+   requestId:randomUUID(),name:'当前问题',instructions:prompt,conversationId:'c_current_history',
+   historyTaskIds:[previous.id,randomUUID()],
+ }).expect(201)).body;
+ await f.drain();
+ expect(complete).toHaveBeenCalledTimes(2);
+ const input = String(complete.mock.calls[1][0].messages[0].content);
+ expect(input).toContain(prompt);
+ expect(input).not.toContain(previousResult);
+ expect(await f.current(followUp.id)).toMatchObject({state:'succeeded',result:'已答复当前问题。'});
+});
+
 it('shows only the owner’s active XiaoZhu tasks with a live stage and hides tasks that need the owner', async () => {
  const waiting = Promise.withResolvers<string>();
  const entered = Promise.withResolvers<void>();
