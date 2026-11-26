@@ -24,6 +24,8 @@ export type AgentTaskView = {
   stepsUsed: number; stepLimit: number; runtimeUsedMs: number; runtimeLimitMs: number;
   lastHeartbeatAt: string | null; checkpoint: string; waitingProposalIds: string[]; result: string;
   canControl: boolean;
+  /** Current server authorization withheld the original task contents. */
+  contentRestricted?: true;
   /** Only the server can record that this terminal stop follows a real owner refusal. */
   stopReason?:'owner_declined';
   executor?:'external'|'platform';
@@ -47,6 +49,8 @@ export type AgentTaskView = {
   requiredRead?:{type:string;id:string}|null;
 };
 export type AgentTaskPage = { items: AgentTaskView[]; nextCursor: string | null };
+export const TASK_ACCESS_BATCH_LIMIT = 30;
+export type PersonalTaskAccess = { restrictedIds: string[] };
 /** Personal sidebar metadata for work in progress. */
 export type AgentTaskActivity = {
   id: string;
