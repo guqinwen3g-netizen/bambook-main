@@ -8,7 +8,7 @@ import type{MakeTaskCredential,PlatformTaskJob,PlatformTaskReleaseIssue}from'./a
 import type{MistRepository,PlatformTaskImageCache}from'./repository';
 import{MistApiError}from'./errors';
 import{responseLanguagePrompt,responseUserMessage}from'./responseLanguage';
-import{parsePlatformTaskPlan,platformTaskHistory,platformTaskAttachmentHandles,resolvePlatformFileContinuation,PLATFORM_TASK_ATTACHMENT_PREFIX,PLATFORM_TASK_RESULT_LIMIT,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskStep}from'./platformTaskPlan';
+import{parsePlatformTaskPlan,platformTaskHistory,platformTaskAttachmentHandles,shortPdfTailPlan,resolvePlatformFileContinuation,PLATFORM_TASK_ATTACHMENT_PREFIX,PLATFORM_TASK_RESULT_LIMIT,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskStep}from'./platformTaskPlan';
 import{nextTaskIntentRead}from'./agentTaskIntentRefs';
 
 class PlatformModelTimeout extends Error {}
@@ -152,8 +152,11 @@ export class MistPlatformTaskWorker{
           if(intentRead.plan){step=await this.repository.savePlatformTaskPlan(actor,intentRead.plan);}
           else{
             const attachment=context.task.attachments?.find(file=>!isTaskImage(file.name)&&!context.steps.some(step=>step.plan.name==='bambook_file_text'&&step.plan.arguments.fileId===file.id&&step.result!==undefined));
-            if(attachment){
-              step=await this.repository.savePlatformTaskPlan(actor,{name:'bambook_file_text',arguments:{fileId:attachment.id,maxChars:3500}});
+            const attachmentPlan:PlatformTaskPlan|undefined=attachment
+              ?{name:'bambook_file_text',arguments:{fileId:attachment.id,maxChars:3500}}
+              :shortPdfTailPlan(context.task.attachments,context.steps);
+            if(attachmentPlan){
+              step=await this.repository.savePlatformTaskPlan(actor,attachmentPlan);
             }else{
               if(!await this.repository.platformTaskDailyRoom(actor)){issue='daily_limit';return;}
               phase='model';
