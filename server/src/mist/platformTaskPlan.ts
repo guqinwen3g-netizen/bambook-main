@@ -9,7 +9,7 @@ export type PlatformTaskProgress={steps:PlatformTaskStep[];nextRunAt:number;requ
 export const PLATFORM_TASK_TURN_LIMIT=60;
 export const PLATFORM_TASK_RESULT_LIMIT=160_000;
 export type PlatformTaskContext={task:AgentTaskView;locale:ResponseLocale;businessAt?:string;requiresRead:boolean;requiresReadBeforeWrite?:boolean;steps:PlatformTaskStep[];decisions:Array<{id:string;state:string;note?:string;produced?:{fileId:string;fileName:string}}>};
-const names=new Set(['bambook_task','bambook_query','bambook_get','bambook_related','bambook_commands','bambook_preview','bambook_execute','bambook_audit','bambook_mail_receiving','bambook_file_text']);
+const names=new Set(['bambook_task','bambook_query','bambook_get','bambook_get_orders','bambook_related','bambook_commands','bambook_preview','bambook_execute','bambook_audit','bambook_mail_receiving','bambook_file_text']);
 
 /** Persist an observable tool decision, never private reasoning or provider credentials. */
 export function parsePlatformTaskPlan(text:string):PlatformTaskPlan{
@@ -97,7 +97,7 @@ export function platformTaskHistory(steps:PlatformTaskStep[]){
   const readResults = new Map<string,string>();
   for(const step of [...steps].reverse()){
     if(step.result===undefined)continue;
-    const read = ['bambook_get','bambook_query','bambook_related','bambook_file_text','bambook_commands'].includes(step.plan.name);
+    const read = ['bambook_get','bambook_get_orders','bambook_query','bambook_related','bambook_file_text','bambook_commands'].includes(step.plan.name);
     const key=read&&!step.compacted
       ? createHash('sha256').update(JSON.stringify([step.plan.name,step.plan.arguments,step.result])).digest('hex')
       : undefined;
