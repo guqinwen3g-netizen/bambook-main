@@ -855,7 +855,7 @@ export class MistRepository {
         valid=await this.taskViewSourcesAllowed(db,current.row,current.actor,c);
       }
       const view=taskView(c,actor,Date.now(),valid);
-      return {...view,trail:view.trail?.map(({progress:_progress,detail:_detail,...step})=>step),name:'Agent任务',instructions:'',checkpoint:'',result:'',intentRefs:undefined,questions:[],waitingFor:null,requiredRead:null,wakeReason:undefined};
+      return {...view,trail:view.trail?.map(({progress:_progress,detail:_detail,refs:_refs,...step})=>step),name:'Agent任务',instructions:'',checkpoint:'',result:'',intentRefs:undefined,questions:[],waitingFor:null,requiredRead:null,wakeReason:undefined};
     });
     return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,isAgentActor(prior)?'ai:chat':undefined);let c=(await taskRecord(db,workspaceId,taskId)).value;if(isAgentActor(prior)&&prior.agentIdentity?.id!==c.identityId)fail('NOT_FOUND','任务不存在或无权访问',404);let valid=await this.taskViewSourcesAllowed(db,row,actor,c);try{await assertTaskViewAuthority(db,actor,c,Date.now());if(valid)c=await this.refreshTaskCondition(db,actor,row,c,Date.now());}catch(e){if(!(e instanceof MistApiError))throw e;valid=false;}return taskView(c,actor,Date.now(),valid);});
   }

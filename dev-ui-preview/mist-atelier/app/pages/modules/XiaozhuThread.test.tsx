@@ -134,6 +134,28 @@ it('opens source records from the work log while the model is running', async ()
   expect(getByRole(host,'status').textContent).toContain('正在等待模型');
 });
 
+it('opens every order source from a single batch step even when the report does not repeat the order numbers', async () => {
+  const actions = fns();
+  await paint([task({ state:'succeeded', result:'已核对交期。', trail:[
+    { at:'',kind:'read',label:'读取报价 Q-01',ref:{type:'quotation',id:'q1',label:'Q-01',view:'quotations'} },
+    { at:'',kind:'read',label:'读取 2 张订单',completed:true,refs:[
+      {type:'order',id:'o1',label:'SO-1001',view:'orders/detail'},
+      {type:'order',id:'o2',label:'SO-1002',view:'orders/detail'},
+    ] },
+    { at:'',kind:'read',label:'读取订单详情',completed:true,failed:true },
+  ] })], actions);
+  await act(async()=>getByRole(host,'button',{name:'办理过程'}).click());
+  const trail = host.querySelector<HTMLOListElement>('.mist-xz-steps')!;
+  expect(trail.querySelectorAll('li')).toHaveLength(3);
+  for (const label of ['读取报价 Q-01','SO-1001','SO-1002']) {
+    await act(async()=>getByRole(trail,'button',{name:label,exact:true}).click());
+  }
+  expect(actions.onOpenRecord.mock.calls).toEqual([
+    ['quotations','q1',undefined],['orders/detail','o1',undefined],['orders/detail','o2',undefined],
+  ]);
+  expect(queryByRole(trail,'button',{name:'读取订单详情'})).toBeNull();
+});
+
 
 it('shows recovery independently of the model stage and returns to live model waiting',async()=>{
  await paint([task({runnerStatus:'heartbeat_stale',executionStage:'model',lastHeartbeatAt:new Date(Date.now()-20_000).toISOString()})]);

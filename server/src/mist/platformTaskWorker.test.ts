@@ -91,6 +91,14 @@ it('compiles a read-only order report in one query, one detail batch, and one re
  expect(evidence.result).not.toHaveProperty('revision');
  const result=await f.current(task.id);
  expect(result).toMatchObject({state:'succeeded',trail:expect.arrayContaining([expect.objectContaining({label:'读取 3 张订单',completed:true})])});
+ const batchStep=result.trail.find((step:{label:string})=>step.label==='读取 3 张订单');
+ expect(batchStep.refs).toEqual(evidence.result.orders.map((order:{id:string;label:string})=>({
+  type:'order', id:order.id, label:order.label, view:'orders/detail',
+ })));
+ const summary=(await f.human.get(f.base+'/agent-tasks/'+task.id+'?summary=1').expect(200)).body.item;
+ const batchSummary=summary.trail.find((step:{label:string})=>step.label==='读取 3 张订单');
+ expect(batchSummary).not.toHaveProperty('refs');
+ expect(batchSummary).not.toHaveProperty('detail');
  expect(result.result).toBe(evidence.result.orders.map((row:{label:string})=>row.label).join('、'));
  expect((await f.human.get(f.base).expect(200)).body.workspace.state).toEqual(f.workspace.state);
 });

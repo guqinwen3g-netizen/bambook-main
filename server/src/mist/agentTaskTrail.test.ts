@@ -3,6 +3,35 @@ import { platformTrail } from './agentTaskTrail';
 
 const step = (name: string, args: Record<string, unknown>, result?: unknown) => ({ id: 's', at: '', plan: { name, arguments: args }, ...(result === undefined ? {} : { result }) }) as any;
 
+it('links only verified orders in a completed batch alongside singular record references', () => {
+  const orders = [
+    { type:'order', id:'o1', label:'SO-1001', link:'bambook://open?view=orders%2Fdetail&id=o1', data:{ notes:'private order contents' } },
+    { type:'order', id:'o2', label:'SO-1002', link:'bambook://open?view=orders%2Fdetail&id=o2' },
+    { type:'order', id:'o3', label:'SO-1003', link:'bambook://open?view=orders%2Fdetail&id=o999' },
+    { type:'order', id:'o4', label:'SO-1004', link:'https://example.test/orders/o4' },
+  ];
+  const args = { ids:['SO-1001', 'o2', 'o3', 'o4'] };
+  const [original, batch, denied, pending, compacted] = platformTrail([
+    step('bambook_get', { type:'quotation', id:'q1' }, { object:{ label:'Q-01', link:'bambook://open?view=quotations&id=q1' } }),
+    step('bambook_get_orders', args, { orders, truncated:true }),
+    step('bambook_get_orders', { ids:['o1', 'unavailable-order'] }, { error:true, orders }),
+    step('bambook_get_orders', args),
+    { ...step('bambook_get_orders', args, { orders }), compacted:true },
+  ]);
+  expect(original.ref).toMatchObject({ type:'quotation', id:'q1', view:'quotations' });
+  expect(batch).toMatchObject({ label:'读取 4 张订单', refs:[
+    { type:'order', id:'o1', label:'SO-1001', view:'orders/detail' },
+    { type:'order', id:'o2', label:'SO-1002', view:'orders/detail' },
+  ], detail:'SO-1003 · SO-1004 · 部分详情需回原单核对' });
+  expect(batch.ref).toBeUndefined();
+  expect(JSON.stringify(batch)).not.toContain('private order contents');
+  expect(denied).toMatchObject({ label:'读取订单详情', failed:true });
+  for (const row of [denied, pending, compacted]) {
+    expect(row.refs).toBeUndefined();
+    expect(row.detail).toBeUndefined();
+  }
+});
+
 it('names a record read by its number, and never shows an internal id while the read is still in flight', () => {
   const [done, pending, coded] = platformTrail([
     step('bambook_get', { type: 'order', id: '7639f2bd-15de-4dc0-ba7c-0a1b2c3d4e5f' }, { label: 'SO-G-2026-017' }),

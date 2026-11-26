@@ -74,6 +74,12 @@ function Trail({ task, items, active, activeLabel, since, recovering, onOpen, on
               : attachment && onPreviewAttachment ? <button type="button" className="mist-xz-ref" onClick={() => onPreviewAttachment(task, attachment)}>{uiText(step.label)}</button>
               : <span>{uiText(step.label)}</span>}
             {step.progress && <p>{step.progress}</p>}
+            {!!step.refs?.length && <p>{step.refs.map(({ id, label, view, section }, index) => <React.Fragment key={id}>
+              {index > 0 && ' · '}
+              {view
+                ? <button type="button" className="mist-xz-ref" onClick={() => onOpen(view, id, section ? { section } : undefined)}>{label}</button>
+                : label}
+            </React.Fragment>)}</p>}
             {step.detail && <p>{uiText(step.detail)}</p>}
           </div>
         </li>;

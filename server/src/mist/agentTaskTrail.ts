@@ -62,9 +62,19 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
       }
       case 'bambook_get_orders': {
         const orders = completed && !failed && !step.compacted && Array.isArray(result?.orders) ? result.orders : [];
-        const labels = orders.map((order: {label?: unknown}) => text(order.label, 32)).filter(Boolean);
-        const detail = [...labels, ...(orders.length && result.truncated ? ['部分详情需回原单核对'] : [])].join(' · ');
-        out.push({ ...base, kind:'read', label:orders.length ? `读取 ${orders.length} 张订单` : '读取订单详情', ...(detail ? { detail } : {}) });
+        const refs: NonNullable<AgentTaskTrailItem['refs']> = [];
+        const labels: string[] = [];
+        for (const order of orders) {
+          const label = text(order?.label, 32);
+          const to = target(order?.link);
+          if (order?.type === 'order' && to?.view === 'orders/detail' && to.id === order.id) {
+            refs.push({ ...to, type: 'order', label: label || typeLabel('order') });
+          } else if (label) labels.push(label);
+        }
+        if (orders.length && result.truncated) labels.push('部分详情需回原单核对');
+        const detail = labels.join(' · ');
+        out.push({ ...base, kind:'read', label:orders.length ? `读取 ${orders.length} 张订单` : '读取订单详情',
+          ...(refs.length ? { refs } : {}), ...(detail ? { detail } : {}) });
         break;
       }
       case 'bambook_commands': out.push({ ...base, kind: 'read', label: '查看可用操作' }); break;
