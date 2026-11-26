@@ -230,7 +230,7 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
       if(typeof form.task!=='string'||!files.length)fail('INVALID_UPLOAD','请求缺少任务内容或附件',400);
       try{body=JSON.parse(form.task as string);}catch{fail('INVALID_INPUT','任务内容无效',400);}
     }
-    const task=exactBody(body,['requestId','name','instructions','locale','conversationId','intentRefs','attachmentRefs']);
+    const task=exactBody(body,['requestId','name','instructions','locale','conversationId','intentRefs','attachmentRefs','historyTaskIds']);
     const attachments=files.map(file=>({bytes:file.buffer,name:file.originalname,mimeType:file.mimetype,multipartFilename:true}));
     const item=attachments.length
       ? await repository.assignPersonalAgentTask(actor(req),req.params.id,task,delegation.makeServiceCredential,undefined,attachments)

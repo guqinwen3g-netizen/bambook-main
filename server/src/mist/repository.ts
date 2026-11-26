@@ -1,5 +1,6 @@
 import sharp from 'sharp';
 import { isTaskAttachment, isTaskImage, TASK_ATTACHMENT_BYTES, TASK_ATTACHMENT_COUNT, TASK_ATTACHMENT_TOTAL_BYTES, type TaskAttachmentRef } from '../shared/mistTaskAttachments';
+import { composeTaskInstructions, splitTaskRequest } from '../shared/mistTaskHistoryText';
 import {materialReadKeys} from '../shared/mistGarmentMaterials';
 import { prepareTrimTaskNotice, trimTaskReadKeys } from '../shared/mistGarmentTrimTasks';
 import { buildTrimTaskNotice } from './trimTaskNoticePrint';
@@ -41,7 +42,7 @@ import { exportRebateExtraPermissions } from '../shared/mistExportRebate';
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyCompanyRoster, canMaintainCompany, companyDataScope, companyTeamIds, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
 import { isAgentActor, type AgentActor } from './agentDelegation';
-import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, assertTaskLease, assertTaskAuthority, assertTaskViewAuthority, acknowledgePlatformStep, advanceTaskSources, answerTaskQuestion, askTaskQuestion, changeTask, checkpointTask, claimTask, deferPlatformJob, duePlatformTasks, createTask, finishTask, finishTaskSession, heartbeatTask, issueTaskControl, listTasks, readTaskRecord, reserveTaskStep, resolveTaskControl, resolveTaskCredential, releasePlatformTask, savePlatformPlan, saveTaskSources, settleTaskProposal, taskFromCreationReceipt, taskHistory, taskRecord, taskView, waitTaskForProposal, type MakeTaskCredential, type MakeTaskControl, type TaskRecord, type PlatformTaskJob, type PlatformTaskReleaseIssue } from './agentTasks';
+import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, assertTaskLease, assertTaskAuthority, assertTaskViewAuthority, acknowledgePlatformStep, advanceTaskSources, answerTaskQuestion, askTaskQuestion, changeTask, checkpointTask, claimTask, deferPlatformJob, duePlatformTasks, createTask, finishTask, finishTaskSession, heartbeatTask, issueTaskControl, listTasks, parseTaskHistoryIds, readTaskRecord, reserveTaskStep, resolveTaskControl, resolveTaskCredential, releasePlatformTask, savePlatformPlan, saveTaskSources, settleTaskProposal, taskFromCreationReceipt, taskHistory, taskRecord, taskView, waitTaskForProposal, type MakeTaskCredential, type MakeTaskControl, type TaskConversationHistory, type TaskRecord, type PlatformTaskJob, type PlatformTaskReleaseIssue } from './agentTasks';
 import { collectTaskSources, knownCommandSourcesVisible, taskScopeHash, taskSourcesVisible } from './agentTaskVisibility';
 import { taskIntentRefsVisible, validateTaskIntentRefs } from './agentTaskIntentRefs';
 import {taskNotice,taskNoticeCandidates} from './agentTaskAttention';
@@ -52,7 +53,7 @@ import {assertTaskBusinessRead,checkTaskCondition,type PlatformTaskScanCursor} f
 import {prepareTaskCondition,taskConditionChanged} from './agentTaskConditions';
 import type {PlatformTaskContext,PlatformTaskPlan} from './platformTaskPlan';
 import {assertConnection,listConnections,getConnection,createConnection,changeConnection,type MakeAgentLease} from './agentConnections';
-import {ensurePersonalIdentity,assertPersonalVoiceAvailable,assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceActorFromIdentity,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
+import {ensurePersonalIdentity,personalIdentityId,assertPersonalVoiceAvailable,assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceActorFromIdentity,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
 import { assertReceivingLease, receivingRecord, receivingView, setReceiving, claimReceiving, finishReceiving, blockReceiving, invalidateReceiving, dueReceiving, RECEIVE_LEASE_MS, RECEIVE_INTERVAL_MS, type MailSyncActor, type MailSyncLease, type ReceivingJob, receiveSource } from './mail/receiverRegistry';
 import { enqueueMailState, taskHasPendingMail, mailStateViews, pendingMailFields, dueMailState, readMailState, claimMailState, planMailState, rememberMailState, failMailState, completeMailState, type MailStateRecord, type MailStateAttempt } from './mail/stateQueue';
 import type { MailStateObservation } from '../shared/mistMailState';
@@ -61,6 +62,9 @@ import { auditFromReceipt, auditMatchesParent, auditEntry, projectAgentAudit, re
 import { markAgentProposalConfirmed, agentCommandRisk, effectiveAgentCommandRisk, AI_WRITE_SCOPES, AGENT_RISK_LABEL } from '../shared/mistAgentProposals';
 import { listConversationMeta, saveConversationMeta } from './agentConversations';
 import { AUTOMATION_FAILURE_LIMIT, AUTOMATION_FAILURE_SPAN_MS, automationInstructions, automationRecord, automationView, dueAutomations, evaluateAutomation, listAutomations, recordAutomationRun, removeAutomation, saveAutomation, setAutomationEnabled, shouldCommitAutomation, writeAutomation } from './agentAutomations';
+
+/** Bound provenance independently of the three turns that are sent to the model. */
+const TASK_HISTORY_AUTHORITY_LIMIT = 24;
 import { canGenerateScopedStatement, scopedMaterialIssueTargets, scopedMaterialDeliveryTargets, scopedFabricAccess, scopedFabricDestinations, scopedReferenceViolation, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
 import { buildTeamScopeGraph, resolveTeamScope, normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
 import { accountOwnedObjects, buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
@@ -312,6 +316,7 @@ export class MistRepository {
       const identity=(await identityRecord(db,c.workspaceId,c.identityId)).value;if(!identity.key)fail('AGENT_KEY_INVALID','Agent密钥已失效',401);const prior=await this.platformActor(serviceActorFromIdentity(identity,c.authority.hash));prior.permissionCeiling=[...c.ceiling];prior.agentExecutor='platform';
       const{actor,row}=await this.own(db,prior,c.workspaceId,'ai:chat');this.assertTaskSources(row,actor,c);
       if(c.attachmentOrigins?.length)await this.assertTaskAttachmentOrigins(db,row,actor,c);
+      await this.assertTaskHistorySources(db,row,actor,c);
       const pending=(row.state.agentProposals??[]).filter(p=>p.taskId===c.id&&p.ownerId===actor.userId&&p.state==='pending').map(p=>p.id);
       const result=await claimTask(db,{...prior,...actor,agentExecutor:'platform'},c.workspaceId,c.id,{requestId:randomUUID(),workerId},make,Date.now(),pending);
       if(!result.token)return null;const execution=await this.platformActor(await resolveTaskCredential(db,result.token,Date.now()));execution.agentExecutor='platform';execution.agentTaskWorkerId=workerId;return execution;
@@ -319,7 +324,13 @@ export class MistRepository {
   }
   async platformTaskContext(prior:AgentActor):Promise<PlatformTaskContext>{
     if(prior.agentExecutor!=='platform'||!prior.agentTaskLease)fail('FORBIDDEN','请使用平台任务执行器',403);
-    return this.transact(async db=>{const{actor,row}=await this.own(db,prior,prior.agentTaskLease!.workspaceId,'ai:chat'),c=(await taskRecord(db,row.id,prior.agentTaskLease!.taskId)).value;const visible=(await this.preparedView(db,row,actor)).state;return{task:taskView(c,actor,Date.now()),locale:c.locale??'zh-CN',businessAt:this.context(actor,row.state).now,requiresRead:platformTaskRequiresRead(c),...(c.platform?.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),steps:structuredClone(c.platform?.steps??[]),decisions:(visible.agentProposals??[]).filter(p=>p.taskId===c.id&&p.ownerId===actor.userId).map(p=>({id:p.id,state:p.state,...(p.note?{note:p.note}:{}),...(p.produced?{produced:{fileId:p.produced.fileId,fileName:p.produced.fileName}}:{})}))};});
+    return this.transact(async db=>{const{actor,row}=await this.own(db,prior,prior.agentTaskLease!.workspaceId,'ai:chat'),c=(await taskRecord(db,row.id,prior.agentTaskLease!.taskId)).value;const visible=(await this.preparedView(db,row,actor)).state;
+      const task=taskView(c,actor,Date.now());
+      if(c.conversationHistory){
+        const history=await Promise.all(c.conversationHistory.taskIds.map(async id=>(await taskRecord(db,row.id,id)).value));
+        task.instructions=composeTaskInstructions(history,task.instructions);
+      }
+      return{task,locale:c.locale??'zh-CN',businessAt:this.context(actor,row.state).now,requiresRead:platformTaskRequiresRead(c),...(c.platform?.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),steps:structuredClone(c.platform?.steps??[]),decisions:(visible.agentProposals??[]).filter(p=>p.taskId===c.id&&p.ownerId===actor.userId).map(p=>({id:p.id,state:p.state,...(p.note?{note:p.note}:{}),...(p.produced?{produced:{fileId:p.produced.fileId,fileName:p.produced.fileName}}:{})}))};});
   }
   async platformTaskReadRequirements(prior:AgentActor){
     const lease=prior.agentTaskLease;
@@ -421,6 +432,7 @@ export class MistRepository {
       if(taskActor===actor)this.assertTaskSources(row,actor,task);
       else{const taskScope=await companyDataScope(db,row,taskActor),visible=this.accessView(row, taskActor, taskScope).state;if(!taskSourcesVisible(task.sources,task.scopeHash,visible,row.state,taskScope)||!taskIntentRefsVisible(task.intentRefs??[],taskActor,visible))fail('AGENT_TASK_SCOPE_CHANGED','任务可见范围已变化',403);}
       if(task.attachmentOrigins?.length)await this.assertTaskAttachmentOrigins(db,row,taskActor,task);
+      await this.assertTaskHistorySources(db,row,taskActor,task);
     }
     await this.prepareTaskProposalAccess(db,row,actor);
     return { actor, row };
@@ -459,8 +471,10 @@ export class MistRepository {
   private assertTaskSources(row:MistWorkspaceRow,actor:TokenPayload,c:TaskRecord){if(!this.taskSourcesAllowed(row,actor,c))fail('AGENT_TASK_SCOPE_CHANGED','任务可见范围已变化，请重新安排任务',403);}
   private async taskViewSourcesAllowed(db: any, row: MistWorkspaceRow, actor: TokenPayload, task: TaskRecord, visible?: MistState) {
     if (!this.taskSourcesAllowed(row, actor, task, visible)) return false;
-    if (!task.attachmentOrigins?.length) return true;
-    try { await this.assertTaskAttachmentOrigins(db, row, actor, task, visible); }
+    try {
+      if (task.attachmentOrigins?.length) await this.assertTaskAttachmentOrigins(db, row, actor, task, visible);
+      await this.assertTaskHistorySources(db,row,actor,task,visible);
+    }
     catch (error) { if (error instanceof MistApiError) return false; throw error; }
     return true;
   }
@@ -657,8 +671,11 @@ export class MistRepository {
   async authorizePersonalAgentVoice(prior:TokenPayload,workspaceId:string){if(isAgentActor(prior))fail('FORBIDDEN','语音只供本人使用',403);await this.transact(async db=>{const actor=await this.taskAccess(db,prior,workspaceId,'ai:chat');await assertPersonalVoiceAvailable(db,actor,workspaceId);});}
   async assignPersonalAgentTask(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>,make:MakeServiceCredential,automationId?:string,files: MistFileInput[] = []){
     if(isAgentActor(prior))fail('FORBIDDEN','任务须由本人安排',403);
-    if(Object.keys(input).some(k=>!['requestId','name','instructions','locale','conversationId','intentRefs','attachmentRefs'].includes(k)))fail('INVALID_INPUT','任务字段无效',400);
+    if(Object.keys(input).some(k=>!['requestId','name','instructions','locale','conversationId','intentRefs','attachmentRefs','historyTaskIds'].includes(k)))fail('INVALID_INPUT','任务字段无效',400);
     const attachmentRefs = taskAttachmentRefs(input.attachmentRefs);
+    const historyIds = parseTaskHistoryIds(input.historyTaskIds);
+    if (historyIds?.length && (automationId || typeof input.conversationId !== 'string'
+      || !/^[A-Za-z0-9_-]{8,64}$/.test(input.conversationId))) fail('INVALID_INPUT', '仅可引用当前对话的历史任务', 400);
     if (attachmentRefs.length && (automationId || typeof input.conversationId !== 'string'
       || !/^[A-Za-z0-9_-]{8,64}$/.test(input.conversationId))) fail('INVALID_UPLOAD', '仅可引用当前对话的附件', 400);
     if (files.length + attachmentRefs.length > TASK_ATTACHMENT_COUNT) fail('INVALID_UPLOAD', '最多 6 个附件', 400);
@@ -673,7 +690,7 @@ export class MistRepository {
       if(!image?.format||!['jpeg','png','webp','gif'].includes(image.format))fail('INVALID_UPLOAD','图片无法读取或尺寸过大',400);
     }
     const identity=await this.ensurePersonalAgent(prior,workspaceId,make);
-    return this.createAgentTask(prior,workspaceId,{requestId:input.requestId,identityId:identity.id,name:input.name,instructions:input.instructions,executor:'platform',...(input.locale!==undefined?{locale:input.locale}:{}),...(input.conversationId!==undefined?{conversationId:input.conversationId}:{}),...(input.intentRefs!==undefined?{intentRefs:input.intentRefs}:{})},automationId,files,attachmentRefs);
+    return this.createAgentTask(prior,workspaceId,{requestId:input.requestId,identityId:identity.id,name:input.name,instructions:input.instructions,executor:'platform',...(input.locale!==undefined?{locale:input.locale}:{}),...(input.conversationId!==undefined?{conversationId:input.conversationId}:{}),...(input.intentRefs!==undefined?{intentRefs:input.intentRefs}:{})},automationId,files,attachmentRefs,{requestedIds:historyIds});
   }
   async authorizePersonalTaskUpload(prior:TokenPayload,workspaceId:string){
     if(isAgentActor(prior))fail('FORBIDDEN','任务须由本人安排',403);
@@ -804,7 +821,7 @@ export class MistRepository {
       if(isAgentActor(prior)&&prior.agentIdentity?.id!==c.identityId)fail('NOT_FOUND','任务不存在或无权访问',404);
       let valid=true;
       try{await assertTaskViewAuthority(db,actor,c,Date.now());}catch(e){if(!(e instanceof MistApiError))throw e;valid=false;}
-      if(valid&&c.attachmentOrigins?.length){
+      if(valid&&(c.attachmentOrigins?.length||c.conversationHistory?.authorityTaskIds.length)){
         const current=await this.own(db,prior,workspaceId);
         valid=await this.taskViewSourcesAllowed(db,current.row,current.actor,c);
       }
@@ -943,7 +960,71 @@ export class MistRepository {
       if (restrictedUploadContent(row.state,actor,fileOwner(row),privacy,file.sha256!,file.size)) fail('FORBIDDEN','附件的原件权限已变化',403);
     }
   }
-  async createAgentTask(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>,automationId?:string,files:MistFileInput[]=[],attachmentRefs:TaskAttachmentRef[]=[]){
+  private async readTaskHistorySource(
+    db: any, row: MistWorkspaceRow, actor: TokenPayload, conversationId: string, id: string, visible: MistState,
+  ): Promise<TaskRecord | undefined> {
+    try {
+      const { value: source } = await taskRecord(db,row.id,id);
+      // A closed turn is readable under present human authority, even if its old executor key expired.
+      if(source.ownerId!==actor.userId || source.identityId!==personalIdentityId(row.id,actor.userId)
+        || source.executor!=='platform' || source.automationId || source.conversationId!==conversationId
+        || source.state!=='succeeded' || !source.result || source.credentialVersion!==actor.credentialVersion) return;
+      // An old generated envelope may already have laundered data from an unrecorded predecessor.
+      if(!source.conversationHistory && splitTaskRequest(source.instructions)!==source.instructions) return;
+      if(!this.taskSourcesAllowed(row,actor,source,visible)) return;
+      if(source.attachmentOrigins?.length) await this.assertTaskAttachmentOrigins(db,row,actor,source,visible);
+      if(source.attachments?.length){
+        const privacy=this.filePrivacy(row);
+        if(source.attachments.some(file=>!file.sha256 || restrictedUploadContent(row.state,actor,fileOwner(row),privacy,file.sha256,file.size)))return;
+      }
+      return source;
+    } catch(error) {
+      if(error instanceof MistApiError) return;
+      throw error;
+    }
+  }
+  private async prepareTaskHistory(
+    db: any, row: MistWorkspaceRow, actor: TokenPayload, conversationId: string | undefined,
+    requestedIds: string[], instructions: string, visible: MistState,
+  ): Promise<TaskConversationHistory> {
+    const taskIds:string[]=[], authorityTaskIds=new Set<string>();
+    if(!conversationId || !requestedIds.length) return {taskIds,authorityTaskIds:[]};
+    const loaded=new Map<string,Promise<TaskRecord|undefined>>();
+    const load=(id:string)=>{
+      const found=loaded.get(id);
+      if(found)return found;
+      const result=this.readTaskHistorySource(db,row,actor,conversationId,id,visible);
+      loaded.set(id,result);
+      return result;
+    };
+    const turns:TaskRecord[]=[];
+    for(const id of [...requestedIds].reverse()){
+      const turn=await load(id);
+      if(!turn)continue;
+      if(composeTaskInstructions([turn,...turns],instructions)===composeTaskInstructions(turns,instructions))break;
+      const inherited=[id,...(turn.conversationHistory?.authorityTaskIds??[])];
+      const combined=new Set([...authorityTaskIds,...inherited]);
+      if(combined.size>TASK_HISTORY_AUTHORITY_LIMIT)continue;
+      const roots=await Promise.all(inherited.map(load));
+      if(roots.some(root=>!root))continue;
+      turns.unshift(turn);
+      taskIds.unshift(id);
+      for(const ref of inherited)authorityTaskIds.add(ref);
+    }
+    return {taskIds,authorityTaskIds:[...authorityTaskIds]};
+  }
+  private async assertTaskHistorySources(db:any,row:MistWorkspaceRow,actor:TokenPayload,task:TaskRecord,visible?:MistState) {
+    const history=task.conversationHistory;
+    if(!history?.authorityTaskIds.length)return;
+    if(!task.conversationId)fail('AGENT_TASK_SCOPE_CHANGED','历史任务已不可见，请重新安排任务',403);
+    const projected=visible??this.accessView(row,actor,scopeOf(row)).state;
+    for(const id of history.authorityTaskIds){
+      if(!await this.readTaskHistorySource(db,row,actor,task.conversationId,id,projected)){
+        fail('AGENT_TASK_SCOPE_CHANGED','历史任务已不可见，请重新安排任务',403);
+      }
+    }
+  }
+  async createAgentTask(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>,automationId?:string,files:MistFileInput[]=[],attachmentRefs:TaskAttachmentRef[]=[],personalHistory?:{requestedIds?:string[]}){
     if(isAgentActor(prior))fail('FORBIDDEN','任务须由本人安排',403);
     if(attachmentRefs.length&&(input.executor!=='platform'||automationId))fail('INVALID_UPLOAD','附件仅用于本人的小竹对话',400);
     const metadata=files.map(validateFileInput);
@@ -956,7 +1037,8 @@ export class MistRepository {
       prepared=false;
       const{actor,row}=await this.own(db,prior,workspaceId,'ai:chat');
       if(input.executor==='platform'&&!this.platformRuntimeAvailable())fail('PRECONDITION','平台执行器或模型暂不可用',503);
-      const{intentRefs:rawIntentRefs,...taskInput}=input,refs=validateTaskIntentRefs(rawIntentRefs,actor,this.accessView(row,actor,scopeOf(row)).state);
+      const visible=this.accessView(row,actor,scopeOf(row)).state;
+      const{intentRefs:rawIntentRefs,...taskInput}=input,refs=validateTaskIntentRefs(rawIntentRefs,actor,visible);
       let privacy: FilePrivacyContext | undefined;
       if(files.length){
         if(input.executor!=='platform'||automationId)fail('INVALID_UPLOAD','附件仅用于本人的小竹对话',400);
@@ -1002,7 +1084,11 @@ export class MistRepository {
           return { files: [...uploaded, ...reused], origins };
         },
       }:undefined;
-      const result=await createTask(db,actor,workspaceId,taskInput,Date.now(),taskScopeHash(scopeOf(row),row.state),automationId,refs,attachments);
+      const history=personalHistory ? {
+        ...personalHistory,
+        prepare:(instructions:string)=>this.prepareTaskHistory(db,row,actor,taskInput.conversationId as string|undefined,personalHistory.requestedIds??[],instructions,visible),
+      }:undefined;
+      const result=await createTask(db,actor,workspaceId,taskInput,Date.now(),taskScopeHash(scopeOf(row),row.state),automationId,refs,attachments,[],history);
       const c=(await taskRecord(db,workspaceId,result.id)).value;
       const item=taskView(c,actor,Date.now(),result.state!=='access_changed'&&await this.taskViewSourcesAllowed(db,row,actor,c));
       prepared=true;
@@ -1029,12 +1115,13 @@ export class MistRepository {
         const task=(await taskRecord(db,workspaceId,taskId)).value;
         this.assertTaskSources(row,actor,task);
         if(task.attachmentOrigins?.length)await this.assertTaskAttachmentOrigins(db,row,actor,task);
+        await this.assertTaskHistorySources(db,row,actor,task);
       }
       const pending=(row.state.agentProposals??[]).filter(p=>p.taskId===taskId&&p.ownerId===actor.userId&&p.state==='pending').map(p=>p.id);
       const result=await changeTask(db,actor,workspaceId,taskId,action,input,Date.now(),pending);
       const task=(await taskRecord(db,workspaceId,taskId)).value;
       if(action==='resume')return taskView(await this.refreshTaskCondition(db,actor,row,task,Date.now()),actor,Date.now());
-      return task.attachmentOrigins?.length?taskView(task,actor,Date.now(),await this.taskViewSourcesAllowed(db,row,actor,task)):result;
+      return task.attachmentOrigins?.length||task.conversationHistory?.authorityTaskIds.length?taskView(task,actor,Date.now(),await this.taskViewSourcesAllowed(db,row,actor,task)):result;
     });
     this.wakeQueuedPlatformTask(item);
     return item;
@@ -1045,6 +1132,7 @@ export class MistRepository {
       const{actor,row}=await this.own(db,prior,workspaceId,'ai:chat'),task=(await taskRecord(db,workspaceId,taskId)).value;
       this.assertTaskSources(row,actor,task);
       if(task.attachmentOrigins?.length)await this.assertTaskAttachmentOrigins(db,row,actor,task);
+      await this.assertTaskHistorySources(db,row,actor,task);
       return answerTaskQuestion(db,actor,workspaceId,taskId,input,Date.now());
     });
     this.wakeQueuedPlatformTask(item);
@@ -1344,6 +1432,7 @@ export class MistRepository {
           const task=(await taskRecord(db,workspaceId,humanTaskProposal.taskId)).value;
           this.assertTaskSources(row,actor,task);
           if(task.attachmentOrigins?.length)await this.assertTaskAttachmentOrigins(db,row,actor,task);
+          await this.assertTaskHistorySources(db,row,actor,task);
           await assertHumanTaskProposal(db,actor,workspaceId,humanTaskProposal.taskId,humanTaskProposal.id,Date.now());
         }
         // 版本落后时只在能证明安全时把本命令重新应用到最新状态；否则照旧明确拒绝。
