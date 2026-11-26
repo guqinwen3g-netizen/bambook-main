@@ -120,7 +120,7 @@ function mergeTaskUpdate(previous: AgentTaskView, next: AgentTaskView): AgentTas
 
 export type TaskControlState = { busy: boolean; error?: string };
 
-export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string) {
+export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string, originTaskId?: string) {
   const base = workspaceId ? '/api/mist/workspaces/' + encodeURIComponent(workspaceId) : '';
   const [available, setAvailable] = React.useState(false), [cachedTasks, setTasks] = React.useState<AgentTaskView[]>([]);
   const [reportAccess, setReportAccess] = React.useState<{scope:string; restricted:Set<string>}>();
@@ -133,6 +133,9 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const [loading, setLoading] = React.useState(true), [error, setError] = React.useState(''), [busy, setBusy] = React.useState(false), [more, setMore] = React.useState<string | undefined>(undefined);
   const [staleTask, setStaleTask] = React.useState<{ scope: string; id: string }>();
   const live = React.useRef(scope); live.current = scope;
+  const origin = React.useRef(originTaskId); origin.current = originTaskId;
+  const trackedOrigin = React.useRef<{scope:string;id:string}|undefined>(undefined);
+  const deniedHistory = React.useRef(0);
   const version = React.useRef(0);
   const pending = React.useRef(new Map<string, PendingSubmission>());
   const [recoveredSubmissions, setRecoveredSubmissions] = React.useState<Array<PendingSubmission&{fingerprint:string}>>([]);
@@ -216,10 +219,15 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       const visible = page.items.filter(t => t.executor === 'platform' && (!own || t.identityId === own.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-THREAD_LIMIT);
       setTasks(old => {
         const previous = new Map(old.map(task => [task.id, task]));
-        return visible.map(task => {
+        const history = visible.map(task => {
           const prior = previous.get(task.id);
           return prior ? mergeTaskUpdate(prior, task) : task;
         });
+        // The exact source may be older than the bounded history, even on a successful list read.
+        const tracked = trackedOrigin.current;
+        const retained = tracked?.scope === bound && tracked.id === origin.current ? previous.get(tracked.id) : undefined;
+        return retained && (!own || retained.identityId === own.id) && !history.some(task => task.id === retained.id)
+          ? [...history, retained].sort((a, b) => a.createdAt.localeCompare(b.createdAt)) : history;
       });
       setMore(page.cursor);
       setLoading(false);
@@ -236,6 +244,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       // A failed read cannot establish that the task channel is unavailable, or replace a known conversation mode.
       if (current()) {
         if ([401,403,404].includes(Number((e as {status?:number})?.status))) {
+          deniedHistory.current++;trackedOrigin.current=undefined;
           setTasks([]);setMore(undefined);personalIdentity.current=undefined;lastAvailability.current=null;
         }
         setAvailable(lastAvailability.current?.scope===bound?lastAvailability.current.available:false);
@@ -459,12 +468,19 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     if (!item || live.current !== scope) return;
     setTasks(old => old.map(task => mergeTaskUpdate(task, item)));
   };
-  const refreshTask = async (taskId: string, signal: AbortSignal) => {
-    const bound = scope;
+  const track = (task: AgentTaskView) => setTasks(old => old.some(item=>item.id===task.id)
+    ? old.map(item=>mergeTaskUpdate(item,task)) : [...old,task]);
+  const refreshTask = async (taskId: string, signal: AbortSignal, {retainOrigin = false}: {retainOrigin?: boolean} = {}) => {
+    const bound = scope, denial = deniedHistory.current;
     const item = await readCoworkTask(base, taskId, signal);
     if (signal.aborted || live.current !== bound) return;
+    if (deniedHistory.current !== denial) throw new Error('任务暂时无法核对');
     setStaleTask(old => old?.scope === bound && old.id === taskId ? undefined : old);
-    applyTaskUpdate(item);
+    if (retainOrigin && origin.current === item.id && item.executor === 'platform' && !item.automationId
+      && item.conversationId && item.state !== 'access_changed') {
+      trackedOrigin.current = {scope:bound,id:item.id};
+      track(item);
+    } else applyTaskUpdate(item);
     return item;
   };
   const loadMore = async () => {
@@ -554,7 +570,5 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const cancel = (task:AgentTaskView) => controlTask(task,'cancel',{},item=>
     !COWORK_ACTIVE.includes(item.state)&&item.state!=='paused');
   const hasPendingSubmission = [...pending.current.values()].some(entry=>(entry.sourceConversationId??entry.conversationId)===visibleConversationId);
-  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls, hasPendingSubmission, recoveredSubmissions, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track: (task: AgentTaskView) => setTasks(old => old.some(item=>item.id===task.id)
-    ? old.map(item=>mergeTaskUpdate(item,task))
-    : [...old,task]) };
+  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls, hasPendingSubmission, recoveredSubmissions, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track };
 }

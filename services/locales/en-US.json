@@ -6662,5 +6662,6 @@
   "整理回复": "Preparing the reply",
   "当前任务 · {0}": "Current task · {0}",
   "任务暂时无法核对": "Couldn't check the task right now",
+  "部分历史答复需重新核对": "Some earlier replies need to be checked again",
   "等待补充资料": "Waiting for more information"
 }
