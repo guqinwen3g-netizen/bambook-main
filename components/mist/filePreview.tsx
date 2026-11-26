@@ -198,7 +198,16 @@ async function loadPdfjs() {
 function PdfView({ blob, zoom, onFitScale, onPages, onFail, initialPdfPage }: RendererProps) {
   const box = React.useRef<HTMLDivElement>(null);
   const openingPage = React.useRef(initialPdfPage).current;
-  const positioned = React.useRef<PdfDoc | null>(null);
+  const initialZoom = React.useRef(zoom).current;
+  const hasOpeningPage = openingPage !== undefined && Number.isSafeInteger(openingPage) && openingPage > 1;
+  const keepOpeningPosition = React.useRef(hasOpeningPage);
+  const positionFrame = React.useRef<number | null>(null);
+  const lastAlignment = React.useRef<{ top: number; max: number } | null>(null);
+  const releaseOpeningPosition = React.useCallback(() => {
+    keepOpeningPosition.current = false;
+    if (positionFrame.current !== null) window.cancelAnimationFrame(positionFrame.current);
+    positionFrame.current = null;
+  }, []);
   const [doc, setDoc] = React.useState<PdfDoc | null>(null), [base, setBase] = React.useState<{ w: number; h: number } | null>(null), [width, setWidth] = React.useState(0);
   React.useEffect(() => {
     let live = true, loaded: PdfDoc | null = null;
@@ -221,25 +230,56 @@ function PdfView({ blob, zoom, onFitScale, onPages, onFail, initialPdfPage }: Re
   const fit = base && width ? Math.max(0.2, Math.min(1.6, (width - 40) / base.w)) : 1;
   React.useEffect(() => { onFitScale(fit); }, [fit, onFitScale]);
   const scale = zoom === 'fit' ? fit : zoom;
-  React.useLayoutEffect(() => {
+  const alignOpeningPage = React.useCallback(() => {
     const scroll = box.current;
-    if (!scroll || !doc || !width || openingPage === undefined || !Number.isSafeInteger(openingPage) || positioned.current === doc) return;
-    const page = Math.max(1, Math.min(openingPage, doc.numPages));
+    if (!keepOpeningPosition.current || !scroll || !doc || !width || openingPage === undefined) return;
+    const page = Math.min(openingPage, doc.numPages);
     const target = scroll.children.item(page - 1);
-    if (!(target instanceof HTMLElement)) return;
-    positioned.current = doc;
-    if (page > 1) {
-      // Use the pane's layout coordinates before the opening dialog scale settles.
-      scroll.scrollTop = target.offsetTop;
-    }
+    if (page <= 1 || !(target instanceof HTMLElement)) return;
+    scroll.scrollTop = target.offsetTop;
+    lastAlignment.current = { top: scroll.scrollTop, max: scroll.scrollHeight - scroll.clientHeight };
   }, [doc, openingPage, width]);
-  return <div ref={box} className="mist-viewer-scroll mist-viewer-pages" style={openingPage === undefined ? undefined : { position: 'relative' }}>
-    {doc && base ? Array.from({ length: doc.numPages }, (_, i) => <PdfPage key={i} doc={doc} n={i + 1} scale={scale} base={base} root={box} />) : <Loading />}
+  const onPageLayout = React.useCallback(() => {
+    // Mixed page dimensions replace estimates as nearby pages render. Batch realignment without loading more canvases.
+    if (!keepOpeningPosition.current || positionFrame.current !== null) return;
+    positionFrame.current = window.requestAnimationFrame(() => {
+      positionFrame.current = null;
+      alignOpeningPage();
+    });
+  }, [alignOpeningPage]);
+  React.useLayoutEffect(() => {
+    if (zoom !== initialZoom) releaseOpeningPosition();
+    else alignOpeningPage();
+    return () => {
+      if (positionFrame.current !== null) window.cancelAnimationFrame(positionFrame.current);
+      positionFrame.current = null;
+    };
+  }, [alignOpeningPage, initialZoom, releaseOpeningPosition, zoom]);
+  React.useEffect(() => {
+    const dialog = box.current?.closest('[role="dialog"]');
+    if (!hasOpeningPage || !dialog) return;
+    const scrollKeys = ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' '];
+    const handleKey = (event: Event) => {
+      if (event instanceof KeyboardEvent && scrollKeys.includes(event.key)) releaseOpeningPosition();
+    };
+    dialog.addEventListener('keydown', handleKey);
+    return () => dialog.removeEventListener('keydown', handleKey);
+  }, [hasOpeningPage, releaseOpeningPosition]);
+  const releaseAfterScroll = ({ currentTarget: pane }: React.UIEvent<HTMLDivElement>) => {
+    if (!keepOpeningPosition.current || !lastAlignment.current) return;
+    // A stable scroll range with a new position also covers native scrollbar navigation.
+    const { top, max } = lastAlignment.current;
+    if (pane.scrollHeight - pane.clientHeight === max && Math.abs(pane.scrollTop - top) > 1) releaseOpeningPosition();
+  };
+  return <div ref={box} className="mist-viewer-scroll mist-viewer-pages" style={hasOpeningPage ? { position: 'relative' } : undefined}
+    onWheel={releaseOpeningPosition} onPointerDown={releaseOpeningPosition} onTouchStart={releaseOpeningPosition} onScroll={releaseAfterScroll}>
+    {doc && base ? Array.from({ length: doc.numPages }, (_, i) => <PdfPage key={i} doc={doc} n={i + 1} scale={scale} base={base} root={box} onLayout={hasOpeningPage ? onPageLayout : undefined} />) : <Loading />}
   </div>;
 }
-function PdfPage({ doc, n, scale, base, root }: { doc: PdfDoc; n: number; scale: number; base: { w: number; h: number }; root: React.RefObject<HTMLDivElement | null> }) {
+function PdfPage({ doc, n, scale, base, root, onLayout }: { doc: PdfDoc; n: number; scale: number; base: { w: number; h: number }; root: React.RefObject<HTMLDivElement | null>; onLayout?: () => void }) {
   const wrap = React.useRef<HTMLDivElement>(null), canvas = React.useRef<HTMLCanvasElement>(null);
   const [visible, setVisible] = React.useState(n <= 2), [size, setSize] = React.useState({ w: base.w * scale, h: base.h * scale });
+  React.useLayoutEffect(() => { onLayout?.(); }, [size.w, size.h, onLayout]);
   React.useEffect(() => {
     const el = wrap.current; if (!el || typeof IntersectionObserver === 'undefined') { setVisible(true); return; }
     const io = new IntersectionObserver(entries => { if (entries.some(e => e.isIntersecting)) { setVisible(true); io.disconnect(); } }, { root: root.current, rootMargin: '600px 0px' });

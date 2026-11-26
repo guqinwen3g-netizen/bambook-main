@@ -60,6 +60,53 @@ it.each([[22,21], [90,22], [-6,0], [1.5,0], [undefined,0]])('positions a request
   } finally { bounds.mockRestore();layout.mockRestore();canvas.mockRestore();mockWidth.mockRestore(); }
 });
 
+it.each(['wheel', 'touch', 'keyboard', 'scrollbar'])('keeps the requested page aligned during lazy layout until %s navigation', async (input) => {
+  const pdfPage = (height: number) => ({ getViewport: ({ scale }: { scale: number }) => ({ width: 600 * scale, height: height * scale }) });
+  const pendingFirst = Promise.withResolvers<ReturnType<typeof pdfPage>>();
+  const pendingSecond = Promise.withResolvers<ReturnType<typeof pdfPage>>();
+  let firstReads = 0;
+  const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(640);
+  const canvas = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+  const layout = vi.spyOn(HTMLElement.prototype, 'offsetTop', 'get').mockImplementation(function(this: HTMLElement) {
+    if (!this.classList.contains('mist-viewer-page')) return 0;
+    const siblings = [...this.parentElement!.children] as HTMLElement[];
+    return siblings.slice(0, siblings.indexOf(this)).reduce((sum, page) => sum + Number.parseFloat(page.style.height), 0);
+  });
+  try {
+    pdfMock.getDocument.mockReturnValue({ promise: Promise.resolve({
+      numPages: 4,
+      getPage: vi.fn(async (page: number) => {
+        if (page === 2) return pendingSecond.promise;
+        if (page === 1 && ++firstReads > 1) return pendingFirst.promise;
+        return pdfPage(300);
+      }),
+      destroy: vi.fn(async () => {}),
+    }) });
+    const blob = new Blob(['%PDF-1.4'], { type: 'application/pdf' });
+    (blob as any).arrayBuffer ??= async () => new ArrayBuffer(0);
+    mount([{ id: 'pdf', name: '验货报告.pdf' }], async () => blob, { initialPdfPage: 3 });
+    await flush();
+    const pane = document.querySelector<HTMLElement>('.mist-viewer-pages')!;
+    expect(pane.scrollTop).toBe(600);
+    await act(async () => { pendingSecond.resolve(pdfPage(700)); });
+    await act(async () => { await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve())); });
+    expect(pane.scrollTop).toBe(1000);
+    await act(async () => {
+      if (input === 'wheel') pane.dispatchEvent(new WheelEvent('wheel', { bubbles: true }));
+      if (input === 'touch') pane.dispatchEvent(new Event('touchstart', { bubbles: true }));
+      if (input === 'keyboard') pane.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true }));
+      pane.scrollTop = 450;
+      if (input === 'scrollbar') pane.dispatchEvent(new Event('scroll'));
+      pendingFirst.resolve(pdfPage(500));
+    });
+    await act(async () => { await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve())); });
+    expect(pane.scrollTop).toBe(450);
+    await act(async () => btn('放大').click());
+    await flush();
+    expect(pane.scrollTop).toBe(450);
+  } finally { layout.mockRestore(); canvas.mockRestore(); width.mockRestore(); }
+});
+
 describe('附件预览浮层', () => {
   it('图片：加载后显示图片，可缩放与旋转，下载走调用方', async () => {
     const load = vi.fn(async () => new Blob(['x'], { type: 'image/png' })), onDownload = vi.fn();
