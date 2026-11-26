@@ -135,6 +135,12 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
  };
  React.useEffect(()=>{if(refreshSignal)void currentLoad.current();},[refreshSignal]);
  const routeTaskId=nav?.route?.section==='tasks'?nav.route.id:undefined;
+ const closeDetail=()=>{
+  detailGeneration.current++;detailAbort.current?.abort();historyAbort.current?.abort();setDetailTarget(null);setDetail(null);setOpening(false);
+  if(!routeTaskId)return;
+  const automationId=nav.route.automationId;
+  nav.go('assistant',automationId,{section:automationId?'automations':'tasks'});
+ };
  React.useEffect(()=>{if(routeTaskId)void openDetail(routeTaskId);},[routeTaskId,base]);
  const begin=(next:Plan)=>{setFailure('');setUncertain(false);setCredential(null);setPlan(next);};
  const closePlan=()=>{if(busy)return;writeGeneration.current++;writeAbort.current?.abort();setPlan(null);setCredential(null);setFailure('');setUncertain(false);};
@@ -172,7 +178,7 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
   {!error&&connectionError&&<FailureNotice title="Agent连接读取失败" detail={connectionError} />}
   {(!error||page.items.length>0)&&<DataTable ariaLabel={uiText('Agent任务')} loading={loading} columns={columns} rows={page.items} rowKey={r=>r.id} onRowClick={r=>void openDetail(r.id)} empty={<EmptyState icon={Bot} title={uiText(active.length||rowAction?'暂无任务':'暂无可用的Agent连接')} action={!active.length&&!rowAction?<Button onClick={onConnections}>{uiText('管理连接')}</Button>:undefined}/>} />}
   {page.nextCursor&&<Button onClick={()=>void load(true)}>{uiText('加载更多')}</Button>}
-  <Drawer open={!!detailTarget} onClose={()=>{detailGeneration.current++;detailAbort.current?.abort();historyAbort.current?.abort();setDetailTarget(null);setDetail(null);setOpening(false);if(routeTaskId)nav.go('assistant',undefined,{section:'tasks'});}} title={detail?.name??uiText('任务')} footer={detail&&detail.canControl?control(detail):undefined}>
+  <Drawer open={!!detailTarget} onClose={closeDetail} title={detail?.name??uiText('任务')} footer={detail&&detail.canControl?control(detail):undefined}>
    {opening&&!detail&&<Skeleton/>}
    {detailError&&detailTarget&&<FailureNotice title="任务详情读取失败" detail={detailError} retry={()=>void openDetail(detailTarget)}/>}
    {detail&&<div className="mist-col"><div className="mist-row"><Pill tone={tone(detail.state)}>{uiText(statusLabel(detail))}</Pill></div>
