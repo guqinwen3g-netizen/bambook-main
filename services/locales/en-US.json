@@ -6577,6 +6577,7 @@
   "语音接续 {0}": "Continue by voice: {0}",
   "平台尚未配置实时语音": "Live voice has not been configured",
   "语音已断开，已交办事项继续执行": "Voice disconnected. Assigned tasks continue running.",
+  "语音授权已变化，请重新连接": "Voice access changed. Reconnect to start a new call.",
   "当前设备不支持实时语音": "This device does not support live voice",
   "请允许使用麦克风后重试": "Allow microphone access and try again",
   "语音连接失败，请重试": "Voice connection failed. Try again.",

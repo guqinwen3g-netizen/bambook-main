@@ -32,7 +32,11 @@ export function usePersonalAgentVoice(scope: string, workspaceId: string | undef
     if (!workspaceId || liveScope.current !== callScope) return;
     dispose(); const epoch = generation.current, r: Resources = {}; resources.current = r;
     const current = () => generation.current === epoch && liveScope.current === callScope;
-    const fail = (message: string) => { if (!current()) return; dispose(); setState('error'); setError(message); setMuted(false); };
+    const fail = (message: string, code?: string) => {
+      if (!current()) return;
+      if (code === 'VOICE_ACCESS_CHANGED') { selection.current = undefined; setReply(''); }
+      dispose(); setState('error'); setError(message); setMuted(false);
+    };
     setState('connecting'); setError(''); setMuted(false); setTranscript(''); setReply('');
     if (taskId) selection.current = { taskId, questionId };
     let ticketBinding: VoiceTaskBinding | undefined;
@@ -93,7 +97,7 @@ export function usePersonalAgentVoice(scope: string, workspaceId: string | undef
           if (selected?.taskId !== message.item.id || selected?.questionId === message.answeredQuestionId) selection.current = { taskId:message.item.id };
           onTaskRef.current(message.item);
         }
-        else if (message.type === 'error') fail(message.message || '语音未完成，请重试');
+        else if (message.type === 'error') fail(message.message || '语音未完成，请重试', message.code);
       };
       socket.onerror = () => fail('语音连接失败，请重试');
       socket.onclose = () => fail('语音已断开，已交办事项继续执行');
@@ -102,7 +106,7 @@ export function usePersonalAgentVoice(scope: string, workspaceId: string | undef
         selection.current = undefined;
       }
       const denied = e instanceof DOMException && e.name === 'NotAllowedError';
-      fail(denied ? '请允许使用麦克风后重试' : e instanceof Error ? e.message : '语音连接失败，请重试');
+      fail(denied ? '请允许使用麦克风后重试' : e instanceof Error ? e.message : '语音连接失败，请重试', (e as {code?:string})?.code);
     }
   }, [workspaceId, callScope, storedConversationId, dispose]);
   const toggleMute = () => {

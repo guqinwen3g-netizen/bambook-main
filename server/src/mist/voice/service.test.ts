@@ -128,6 +128,104 @@ it('publishes current task questions/results once without treating heartbeat upd
   expect(b.submit).toHaveBeenCalledWith('十一月二十日交货', expect.any(String), expect.objectContaining({ id: 'task-1', version: 2 }));
 });
 
+it('stops relaying a report response after publishing its restricted projection', async () => {
+  const b = binding(); b.taskId = 'task-1';
+  const source = 'SYNTHETIC_VOICE_REPORT_SOURCE';
+  let current = item({ state: 'succeeded', result: source, canControl: false });
+  vi.mocked(b.task).mockImplementation(async () => current);
+  const { socket, messages } = await connect(await service.issue(b, 'http://127.0.0.1'));
+  await wait(() => received.some(m => m.type === 'speech_text_buffer.commit' && JSON.stringify(m).includes(source)));
+  const sendFrame = (type: string, body: Record<string, unknown> = {}) => provider.send(JSON.stringify({ type, response_id: 'private-report', ...body }));
+  const permittedAudio = Buffer.alloc(20, 1).toString('base64');
+  sendFrame('response.output_audio.started');
+  sendFrame('response.output_audio.delta', { audio: permittedAudio });
+  await wait(() => messages.some(m => m.type === 'audio' && m.audio === permittedAudio));
+
+  current = { ...current, contentRestricted: true, name: 'Agent任务', instructions: '', result: '' };
+  await wait(() => messages.some(m => m.type === 'task' && m.item.contentRestricted === true));
+  const boundary = messages.length;
+  const lateAudio = Buffer.alloc(20, 2).toString('base64');
+  if (provider.readyState === WebSocket.OPEN) {
+    sendFrame('response.output_audio.delta', { audio: lateAudio });
+    sendFrame('response.output_text.delta', { delta: source });
+    sendFrame('response.output_text.done', { text: source });
+    // Frames sent on this same connection are handled in order.
+    transcript('stream-observation-boundary');
+  }
+  await wait(() => socket.readyState === WebSocket.CLOSED || messages.some(m => m.type === 'transcript' && m.text === 'stream-observation-boundary'));
+  const lateFrames = messages.slice(boundary).filter(m => m.type === 'audio' && m.audio === lateAudio || m.type === 'reply' && m.text === source);
+  expect(lateFrames).toEqual([]);
+  const maskIndex = messages.findIndex(m => m.type === 'task' && m.item.contentRestricted === true);
+  expect(messages.slice(maskIndex, maskIndex + 3).map(m => m.type)).toEqual(['task', 'speech_stopped', 'error']);
+  expect(messages[maskIndex + 2].code).toBe('VOICE_ACCESS_CHANGED');
+  expect(socket.readyState).toBe(WebSocket.CLOSED);
+  expect(b.control).not.toHaveBeenCalled();
+  expect(b.submit).not.toHaveBeenCalled();
+  await expect(service.issue({ ...b, taskId: undefined }, 'http://127.0.0.1')).resolves.toHaveProperty('ticket');
+});
+
+it('checks the current task before a voice control and sends no tool result after confirmed restriction', async () => {
+  const b = binding(); b.taskId = 'task-1';
+  const allowed = item({ state: 'waiting_human' });
+  let current = allowed;
+  vi.mocked(b.task).mockImplementation(async () => current);
+  const { socket, messages } = await connect(await service.issue(b, 'http://127.0.0.1'));
+  await wait(() => messages.some(m => m.type === 'task' && m.item.id === allowed.id));
+  call('authorized-context', 'bambook_voice_context'); await wait(() => result('authorized-context'));
+  vi.mocked(b.authorize).mockImplementationOnce(async () => {
+    current = { ...allowed, name: 'Agent任务', instructions: '', state: 'access_changed', contentRestricted: true };
+  });
+  transcript('暂停这项工作');
+  call('restricted-control', 'bambook_voice_control', { action: 'pause' });
+  await wait(() => socket.readyState === WebSocket.CLOSED);
+  expect(messages.some(m => m.type === 'task' && m.item.contentRestricted)).toBe(true);
+  expect(messages.some(m => m.code === 'VOICE_ACCESS_CHANGED')).toBe(true);
+  expect(b.control).not.toHaveBeenCalled();
+  expect(result('restricted-control')).toBeUndefined();
+  await expect(service.issue(b, 'http://127.0.0.1')).rejects.toMatchObject({ code: 'VOICE_ACCESS_CHANGED' });
+});
+
+it('does not replay a cached context result when a repeated provider callback discovers restriction', async () => {
+  const b = binding(); b.taskId = 'task-1';
+  const report = item({ state: 'succeeded', result: 'SYNTHETIC_CACHED_VOICE_CONTEXT', canControl: false });
+  let current = report;
+  vi.mocked(b.task).mockImplementation(async () => current);
+  const { socket, messages } = await connect(await service.issue(b, 'http://127.0.0.1'));
+  call('cached-context', 'bambook_voice_context'); await wait(() => result('cached-context'));
+  expect(JSON.stringify(result('cached-context'))).toContain(report.result);
+  vi.mocked(b.authorize).mockImplementationOnce(async () => {
+    current = { ...report, name: 'Agent任务', instructions: '', result: '', contentRestricted: true };
+  });
+  call('cached-context', 'bambook_voice_context');
+  await wait(() => socket.readyState === WebSocket.CLOSED);
+  expect(messages.some(m => m.code === 'VOICE_ACCESS_CHANGED')).toBe(true);
+  expect(received.filter(m => m.type === 'conversation.item.create' && m.items[0].call_id === 'cached-context')).toHaveLength(1);
+});
+
+it('does not close the new binding for a late restricted read of the former task', async () => {
+  const b = binding(); b.taskId = 'task-1';
+  const oldRead = Promise.withResolvers<AgentTaskView>();
+  const next = item({ id: 'task-2', state: 'running' });
+  const { socket, messages } = await connect(await service.issue(b, 'http://127.0.0.1'));
+  await wait(() => messages.some(m => m.type === 'task' && m.item.id === 'task-1'));
+  call('former-context', 'bambook_voice_context'); await wait(() => result('former-context'));
+  let previousInFlight = false;
+  vi.mocked(b.task).mockImplementation(async id => {
+    if (id === next.id) return next;
+    previousInFlight = true;
+    return oldRead.promise;
+  });
+  await wait(() => previousInFlight);
+  socket.send(JSON.stringify({ type: 'bind_task', taskId: next.id }));
+  await wait(() => messages.some(m => m.type === 'task' && m.item.id === next.id));
+  oldRead.resolve(item({ state: 'access_changed', contentRestricted: true }));
+  call('former-context', 'bambook_voice_context');
+  call('current-context', 'bambook_voice_context'); await wait(() => result('current-context'));
+  expect(socket.readyState).toBe(WebSocket.OPEN);
+  expect(messages.some(m => m.item?.contentRestricted)).toBe(false);
+  expect(received.filter(m => m.type === 'conversation.item.create' && m.items[0].call_id === 'former-context')).toHaveLength(1);
+});
+
 it('expires abandoned tickets and rejects arbitrary client tool commands', async () => {
   const b = binding(), old = await service.issue(b, 'http://127.0.0.1'); now += 30_001;
   await expect(connect(old)).rejects.toThrow('401');

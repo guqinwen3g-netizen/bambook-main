@@ -48,6 +48,7 @@ export function XiaozhuComposer({ value, onChange, onSend, ready, busy, working,
       setDragging(false);
       if (acceptsFiles) onAddFiles?.(Array.from(event.dataTransfer.files));
     }}>
+    {voice.state === 'error' && voice.error && <p className="mist-xz-note" role="alert">{uiText(voice.error)}</p>}
     {!!attachments.length && <div className="mist-xz-sources" aria-label={uiText('附件')}>{attachments.map(file =>
       <span key={file.key} className="mist-xz-source" data-attachment><Icon icon={Paperclip} size="xs" /><span title={file.name}>{file.name}</span>
         <IconButton size="sm" icon={X} label={uiText('移除附件')+' '+file.name} disabled={busy} onClick={file.remove} />

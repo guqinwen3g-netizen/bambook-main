@@ -14,6 +14,17 @@ let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
 const view=(active=true, taskId?:string,section='tasks')=> <Nav.Provider value={{route:{view:'assistant',...(taskId?{section,id:taskId}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
 const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
 
+it('shows why a voice call ended and keeps the composer available', async () => {
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async(url:string)=>url.endsWith('/agent-task-capabilities')
+    ? {platformAvailable:true} : {items:[],nextCursor:null});
+  await mount();
+  await click('语音通话');
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe('当前设备不支持实时语音');
+  expect(host.querySelector('textarea[aria-label="向助手提问"]')).toBeTruthy();
+  expect(button('语音通话')).toBeTruthy();
+});
+
 it('sends the current question and a history reference without copying the displayed prior report', async () => {
   const conversationId='c_history_auth_case';
   const id='11111111-1111-4111-8111-111111111111';
