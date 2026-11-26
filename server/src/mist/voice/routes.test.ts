@@ -44,6 +44,58 @@ it('rejects cross-origin tickets and binding another employee’s task', async (
     expect(JSON.stringify(issued.body)).not.toContain('test-only');
   } finally { await app.locals.platformTaskWorker.stop(); app.locals.voice.stopCalls(); }
 });
+it('reports access change when an explicit voice question is redacted before issuing the ticket', async () => {
+  const local = createMistLocalRuntime({ directory: dir });
+  const authorize = local.authorize;
+  let revoked = false;
+  local.authorize = (db, prior, permission) => authorize(db, revoked ? { ...prior, permissionCeiling: ['ai:chat'] } : prior, permission);
+  const app = createMistServer(undefined, {
+    local,
+    voice: { config: () => ({ apiKey: 'test-only', voice: 'voice', speed: 0, loudness: 0 }) },
+    agentTasks: {
+      configured: () => true,
+      tickMs: 3_600_000,
+      complete: async () => JSON.stringify({
+        name: 'bambook_task', arguments: { action: 'question', question: '请补充模拟订单编号。' },
+      }),
+    },
+  });
+  const worker = app.locals.platformTaskWorker;
+  worker.start(3_600_000);
+  try {
+    const { client, base } = await human(app, 'demo-sales');
+    const conversationId = 'c_voice_question_revoked';
+    const { item } = (await client.post(base + '/personal-agent/tasks').send({
+      requestId: randomUUID(), name: '核对待补充订单', instructions: '核对模拟订单。', conversationId,
+    }).expect(201)).body;
+    await worker.tick();
+    await worker.settled();
+    const details = () => client.get(base + '/agent-tasks/' + item.id).expect(200);
+    const waiting: AgentTaskView = (await details()).body.item;
+    expect(waiting.state).toBe('waiting_human');
+    const question = waiting.questions![0];
+    const ticket = () => client.post(base + '/voice/sessions').set('Origin', 'http://127.0.0.1').send({
+      conversationId, taskId: item.id, questionId: question.id,
+    });
+
+    revoked = true;
+    expect((await details()).body.item).toMatchObject({
+      state: 'access_changed', contentRestricted: true, version: waiting.version, questions: [],
+    });
+    const denied = await ticket().expect(403);
+    expect(denied.body).toEqual({ ok: false, error: { code: 'VOICE_ACCESS_CHANGED', message: '语音授权已变化，请重新连接' } });
+
+    revoked = false;
+    expect((await details()).body.item).toMatchObject({ version: waiting.version, questions: [question] });
+    const issued = await ticket().expect(201);
+    expect(issued.body.ticket).toHaveLength(43);
+    await client.post(base + '/agent-tasks/' + item.id + '/answer').send({
+      requestId: randomUUID(), version: waiting.version, questionId: question.id, answer: '模拟订单 A。',
+    }).expect(200);
+    const changed = await ticket().expect(409);
+    expect(changed.body.error.code).toBe('AGENT_TASK_CHANGED');
+  } finally { await worker.stop(); app.locals.voice.stopCalls(); }
+});
 it('saves spoken tasks in the ticket conversation and refuses other conversations owned by the same user', async () => {
   const upstream = new WebSocketServer({ port: 0, host: '127.0.0.1' });
   await once(upstream, 'listening');
