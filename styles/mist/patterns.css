@@ -1242,7 +1242,6 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .mist-root::-webkit-scrollbar,
 .mist-xz-dock .mist-xz-col { display: flex; flex-direction: column; gap: 8px; }
 .mist-xz-hint { margin: 0; padding: 0 6px; color: var(--mist-ink-3); font-size: var(--mist-text-2xs); }
 .mist-xz-older { display: flex; justify-content: center; padding-bottom: 8px; }
-.mist-xz-tobottom { position: absolute; left: 50%; bottom: 112px; z-index: 2; transform: translateX(-50%); background: var(--mist-card) !important; }
 
 .mist-xz-thread { display: flex; flex-direction: column; gap: 28px; }
 .mist-xz-turn { display: flex; flex-direction: column; gap: 14px; animation: mist-xz-in var(--mist-dur) var(--mist-ease); }
