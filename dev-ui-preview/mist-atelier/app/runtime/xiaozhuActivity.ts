@@ -50,6 +50,7 @@ export function useXiaozhuActivity(workspaceId: string | undefined, scope: strin
       if (document.hidden) {
         window.clearTimeout(timer);
         request?.abort();
+        setSnapshot(undefined);
       } else {
         update();
       }
