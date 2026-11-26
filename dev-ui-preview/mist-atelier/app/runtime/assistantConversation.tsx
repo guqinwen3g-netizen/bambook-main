@@ -4,7 +4,7 @@ import type { TaskAttachment, TaskAttachmentRef } from '../../../../server/src/s
 export type AssistantReply = {
   role: 'user' | 'assistant'; content: string;
   sources?: Array<{ id: string; label: string; view: string; entityId: string }>;
-  revision?: number; truncated?: boolean;
+  revision?: number; truncated?: boolean; contextToken?: string;
 };
 export type AssistantAttachmentRef = TaskAttachmentRef & Pick<TaskAttachment, 'name' | 'size'>;
 type ComposerDraft = {

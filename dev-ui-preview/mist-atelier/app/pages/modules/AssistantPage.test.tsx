@@ -12,7 +12,47 @@ vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({sessionKey:mo
 vi.mock('../../../../../services/apiService',()=>({apiService:{getAuthHeaders:()=>({'X-Test-Auth':'authenticated'})}}));
 let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
 const view=(active=true, taskId?:string,section='tasks')=> <Nav.Provider value={{route:{view:'assistant',...(taskId?{section,id:taskId}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
-const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
+const response=(body:unknown,ok=true)=>{
+  const result=body&&typeof body==='object'&&(body as {mode?:unknown}).mode==='read_only'
+    ? {contextToken:crypto.randomUUID(),...body}:body;
+  return {ok,json:async()=>result};
+};
+
+it('keeps an authorized read-only turn usable and omits it after access is withdrawn',async()=>{
+  const key='mist.assistant.conversation:session-a:workspace';
+  sessionStorage.setItem(key,JSON.stringify({messages:[{role:'user',content:'旧订单问题'},
+    {role:'assistant',content:'模拟订单旧答复',contextToken:'previous-authority',sources:[],revision:1}]}));
+  let allowedTokens=['previous-authority'];
+  const requests: unknown[]=[];
+  mock.api.mockImplementation(async(url:string)=>url.endsWith('/assistant/history-access')?{allowedTokens}:
+    url.endsWith('/agent-task-capabilities')?{platformAvailable:false}:{items:[],nextCursor:null});
+  mock.fetch.mockImplementation(async(url:string,options?:RequestInit)=>{
+    if(url.endsWith('/status'))return response({configured:true});
+    requests.push(JSON.parse(String(options?.body)));
+    return response({text:'新答复',mode:'read_only',revision:1,sources:[]});
+  });
+  await mount();
+  expect(host.textContent).toContain('模拟订单旧答复');
+  await question('沿用有效答复');await click('发送');
+  expect(requests[0]).toMatchObject({history:[{role:'user',content:'旧订单问题'},
+    {role:'assistant',content:'模拟订单旧答复',contextToken:'previous-authority'}]});
+  allowedTokens=[];
+  await act(async()=>window.dispatchEvent(new Event('focus')));
+  expect(host.textContent).not.toContain('模拟订单旧答复');
+  expect(host.textContent).toContain('部分历史答复需重新核对');
+  await question('撤权后继续提问');await click('发送');
+  expect(requests[1]).toMatchObject({history:[]});
+});
+
+it('does not render legacy cached read-only answers without an authorization token',async()=>{
+  sessionStorage.setItem('mist.assistant.conversation:session-a:workspace',JSON.stringify({messages:[
+    {role:'user',content:'上次问答'}, {role:'assistant',content:'旧版缓存的模拟记录',revision:1,sources:[]},
+  ]}));
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  await mount();
+  expect(host.textContent).not.toContain('旧版缓存的模拟记录');
+  expect(host.textContent).toContain('部分历史答复需重新核对');
+});
 
 it.each([
   ['customers','crm'], ['purchases','procurement'], ['shipments','shipments'], ['developments','development/detail'],
@@ -683,7 +723,7 @@ it('clears retained conversation when the authenticated session changes outside 
   expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('');
   expect(host.textContent).not.toContain('Private account-A question');
 });
-beforeEach(()=>{mock.api.mockReset();mock.api.mockImplementation(async(url:string)=>{if(url.includes('/agent-identities'))return{items:[]};if(url.includes('/agent-task-capabilities'))return{platformAvailable:false};if(url.endsWith('/agent-tasks'))return{items:[],nextCursor:null};throw new Error('unexpected task API');});(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;sessionStorage.clear();let i=0;const state=createMistState({id:()=>`assistant-ui-${++i}`,now:'2026-10-13T00:00:00Z',actorName:'Test'},'empty');state.orders.push({id:'order',code:'SO-SELECTED',customer:'Fixture',state:'Open',amount:10,currency:'USD'} as any);mock.workspace={state,workspace:{id:'workspace',name:'Test workspace',revision:1},error:'',loading:false,saving:false,pending:null,refresh:vi.fn(),run:vi.fn()};mock.sessionKey='session-a';mock.readOrders=true;go.mockReset();mock.fetch.mockReset();vi.stubGlobal('fetch',mock.fetch);});
+beforeEach(()=>{mock.api.mockReset();mock.api.mockImplementation(async(url:string,init?:RequestInit)=>{if(url.endsWith('/assistant/history-access'))return {allowedTokens:JSON.parse(String(init?.body)).tokens};if(url.includes('/agent-identities'))return{items:[]};if(url.includes('/agent-task-capabilities'))return{platformAvailable:false};if(url.endsWith('/agent-tasks'))return{items:[],nextCursor:null};throw new Error('unexpected task API');});(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;sessionStorage.clear();let i=0;const state=createMistState({id:()=>`assistant-ui-${++i}`,now:'2026-10-13T00:00:00Z',actorName:'Test'},'empty');state.orders.push({id:'order',code:'SO-SELECTED',customer:'Fixture',state:'Open',amount:10,currency:'USD'} as any);mock.workspace={state,workspace:{id:'workspace',name:'Test workspace',revision:1},error:'',loading:false,saving:false,pending:null,refresh:vi.fn(),run:vi.fn()};mock.sessionKey='session-a';mock.readOrders=true;go.mockReset();mock.fetch.mockReset();vi.stubGlobal('fetch',mock.fetch);});
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();vi.unstubAllGlobals();});
 async function mount(){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(view()));}
 const button=(name:string)=>[...document.querySelectorAll('button')].find(b=>b.textContent?.trim()===name||b.getAttribute('aria-label')===name) as HTMLButtonElement|undefined;
