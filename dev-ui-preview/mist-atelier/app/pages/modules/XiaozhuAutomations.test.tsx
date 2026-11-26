@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React,{act} from 'react';import {createRoot,type Root} from 'react-dom/client';import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {getByLabelText,getByRole} from '@testing-library/dom';
+import {getAllByRole,getByLabelText,getByRole} from '@testing-library/dom';
 import {MistRoot,ToastProvider} from '../../../../../components/mist';
 const seam=vi.hoisted(()=>({api:vi.fn(),go:vi.fn()}));
 vi.mock('../../runtime/workspace',()=>({mistApiRequest:(...a:any[])=>seam.api(...a)}));
@@ -13,9 +13,22 @@ const paint=async()=>{await act(async()=>root.render(<MistRoot><ToastProvider><X
 beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;sessionStorage.clear();rules=[];seam.go.mockClear();seam.api.mockReset();seam.api.mockImplementation(async(_u:string,i:any)=>{if(!i?.method||i.method==='GET')return{items:rules};if(i.method==='POST'){rules=[rule(JSON.parse(i.body))];return{item:rules[0]};}if(i.method==='PATCH'){rules=[{...rules[0],enabled:JSON.parse(i.body).enabled,version:rules[0].version+1}];return{item:rules[0]};}rules=[];return {removed:true};});host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 const button=(name:string)=>getByRole(document.body,'button',{name});
+it('expands retained runs per rule and opens the exact older task', async () => {
+  rules = [rule({runs:Array.from({length:5},(_,i)=>({at:'2026-11-07T01:00:00Z',taskId:'task-'+i,detail:'每日定时'}))})];
+  await paint();
+  const runButtons = () => getAllByRole(document.body,'button',{name:'查看'});
+  expect(runButtons()).toHaveLength(3);
+  await act(async()=>button('查看全部运行记录').click());
+  expect(button('收起运行记录').getAttribute('aria-expanded')).toBe('true');
+  expect(runButtons()).toHaveLength(5);
+  await act(async()=>runButtons()[4].click());
+  expect(seam.go).toHaveBeenCalledWith('assistant','task-4',{section:'tasks',automationId:'r1'});
+  await act(async()=>button('收起运行记录').click());
+  expect(runButtons()).toHaveLength(3);
+});
 it('creates a rule from a template and shows it',async()=>{await paint();expect(document.body.textContent).toContain('还没有规则');await act(async()=>button('新建规则').click());expect((getByLabelText(document.body,'规则名称') as HTMLInputElement).value).toBe('新邮件整理');await act(async()=>button('开启').click());await flush();const post=seam.api.mock.calls.find(([,i])=>i?.method==='POST')!;expect(JSON.parse(post[1].body)).toMatchObject({trigger:'new_mail',enabled:true});expect(document.body.textContent).toContain('收到新邮件');});
 it('switches a rule off and removes it',async()=>{rules=[rule()];await paint();await act(async()=>getByRole(document.body,'switch',{name:'开启 每日汇总'}).click());await flush();expect(JSON.parse(seam.api.mock.calls.find(([,i])=>i?.method==='PATCH')![1].body)).toEqual({enabled:false,expectedVersion:1});await act(async()=>button('删除 每日汇总').click());await flush();expect(seam.api.mock.calls.find(([,i])=>i?.method==='DELETE')?.[0]).toMatch(/expectedVersion=2$/);expect(document.body.textContent).toContain('还没有规则');});
-it('shows why a rule stopped and opens a run',async()=>{rules=[rule({enabled:false,halted:{message:'权限已变化，请重新启用规则'},runs:[{at:'2026-11-07T01:00:00Z',taskId:'t1',detail:'每日定时'}]})];await paint();expect(document.body.textContent).toContain('权限已变化');await act(async()=>button('查看').click());expect(seam.go).toHaveBeenCalledWith('assistant','t1',{section:'tasks'});});
+it('shows why a rule stopped and opens a run',async()=>{rules=[rule({enabled:false,halted:{message:'权限已变化，请重新启用规则'},runs:[{at:'2026-11-07T01:00:00Z',taskId:'t1',detail:'每日定时'}]})];await paint();expect(document.body.textContent).toContain('权限已变化');await act(async()=>button('查看').click());expect(seam.go).toHaveBeenCalledWith('assistant','t1',{section:'tasks',automationId:'r1'});});
 it('refreshes the newer rule after a stale pause or delete instead of applying either change', async()=>{
   rules=[rule()];
   seam.api.mockImplementation(async(_url:string,init?:RequestInit)=>{

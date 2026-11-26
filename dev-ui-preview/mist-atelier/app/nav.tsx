@@ -3,7 +3,7 @@ import type { ThemeMode } from '../../../components/mist';
 import type { WorkbenchTarget } from '../../../services/dashboardTaskService';
 
 /** Mist owns navigation; exact business identities stay attached to the route. */
-export type RouteTarget = { versionId?: string; batchId?: string; section?: string; customerId?: string; orderLineId?: string; productionId?: string; detail?: 'full'; workbenchTarget?: WorkbenchTarget };
+export type RouteTarget = { versionId?: string; batchId?: string; section?: string; customerId?: string; orderLineId?: string; productionId?: string; automationId?: string; detail?: 'full'; workbenchTarget?: WorkbenchTarget };
 type SourcePosition =
   | {view:'calendar';scope:string;date:string;mode:'week'|'month';mineOnly:boolean}
   | {view:'crm';scope:string;customerId:string;tab:string}
@@ -23,7 +23,7 @@ export type NavCtx = {
 export const Nav = React.createContext<NavCtx>(null as unknown as NavCtx);
 export const useNav = () => React.useContext(Nav);
 
-const ROUTE_KEYS = ['view','id','versionId','batchId','section','customerId','orderLineId','productionId','detail'] as const;
+const ROUTE_KEYS = ['view','id','versionId','batchId','section','customerId','orderLineId','productionId','automationId','detail'] as const;
 export function readMistRoute(): Route {
   const qs = new URLSearchParams(location.search);
   const view = qs.get('view') || 'cockpit', id = qs.get('id') || undefined;
