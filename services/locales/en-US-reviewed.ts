@@ -617,6 +617,8 @@ export const reviewedEnglish: Record<string, string> = {
   '任务提醒读取超时':'Loading task reminders timed out',
   '标记已读超时':'Marking reminders as read timed out',
   '规则读取超时':'Loading rules timed out',
+  '查看全部运行记录':'View all runs',
+  '收起运行记录':'Collapse run history',
   '规则开启结果待核对':'Rule creation confirmation pending',
   '规则操作结果待核对':'Rule action confirmation pending',
   '规则已更新，请核对后重试':'Rule updated. Check it before trying again.',
