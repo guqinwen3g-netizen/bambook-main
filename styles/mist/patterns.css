@@ -1242,7 +1242,6 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .mist-root::-webkit-scrollbar,
 .mist-xz-dock .mist-xz-col { display: flex; flex-direction: column; gap: 8px; }
 .mist-xz-hint { margin: 0; padding: 0 6px; color: var(--mist-ink-3); font-size: var(--mist-text-2xs); }
 .mist-xz-older { display: flex; justify-content: center; padding-bottom: 8px; }
-.mist-xz-tobottom { position: absolute; left: 50%; bottom: 112px; z-index: 2; transform: translateX(-50%); background: var(--mist-card) !important; }
 
 .mist-xz-thread { display: flex; flex-direction: column; gap: 28px; }
 .mist-xz-turn { display: flex; flex-direction: column; gap: 14px; animation: mist-xz-in var(--mist-dur) var(--mist-ease); }
@@ -1401,6 +1400,7 @@ button.mist-xz-item:hover { background: var(--mist-card-2); }
   .mist-xz { display: block; min-height: calc(100dvh - 72px); overflow: visible; }
   .mist-xz-head { padding: 10px 8px 0 14px; }
   .mist-xz-scroll { overflow: visible; padding: 8px 14px 16px; }
+  .mist-xz-turn[data-task-id] { scroll-margin-block-start: calc(72px + env(safe-area-inset-top)); }
   .mist-xz-dock { position: sticky; bottom: calc(-40px - env(safe-area-inset-bottom)); z-index: 2; padding: 8px 10px calc(50px + env(safe-area-inset-bottom)); background: var(--mist-canvas); }
   .mist-xz-tobottom { display: none !important; }
   .mist-xz-tiles { grid-template-columns: minmax(0, 1fr); }
