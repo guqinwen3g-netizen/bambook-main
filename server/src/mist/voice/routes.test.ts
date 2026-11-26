@@ -205,6 +205,7 @@ it('keeps an explicit spoken answer on its chosen question when text and voice r
     voice: {
       config: () => ({ apiKey: 'test-only', voice: 'voice', speed: 0, loudness: 0 }),
       connect: () => new WebSocket('ws://127.0.0.1:' + (upstream.address() as AddressInfo).port),
+      pollMs: 25,
     },
     agentTasks: {
       configured: () => true,
@@ -239,7 +240,7 @@ it('keeps an explicit spoken answer on its chosen question when text and voice r
     const connect = async (issued: { id: string; ticket: string }) => {
       browser = new WebSocket('ws://127.0.0.1:' + (server.address() as AddressInfo).port + '/api/mist/voice/stream?id=' + issued.id,
         ['bambook-voice-v1', 'bambook-ticket.' + issued.ticket], { origin });
-      const messages: Array<{ type: string; item?: AgentTaskView }> = [];
+      const messages: Array<{ type: string; item?: AgentTaskView; answeredQuestionId?: string }> = [];
       browser.on('message', raw => messages.push(JSON.parse(raw.toString())));
       await once(browser, 'open');
       await vi.waitFor(() => expect(messages.some(message => message.type === 'ready')).toBe(true));
@@ -272,8 +273,14 @@ it('keeps an explicit spoken answer on its chosen question when text and voice r
     await client.post(base + '/agent-tasks/' + stale.id + '/answer').send({
       requestId: randomUUID(), version: stale.version, questionId, answer: '文字答案：订单 A。',
     }).expect(200);
-    await connect(issued);
+    const staleMessages = await connect(issued);
+    await vi.waitFor(() => expect(staleMessages).toContainEqual(expect.objectContaining({
+      type: 'task', item: expect.objectContaining({
+        id: stale.id, questions: [expect.objectContaining({ id: questionId, answer: '文字答案：订单 A。' })],
+      }),
+    })));
     expect(await speak('stale-spoken', '语音答案：订单 B。')).toEqual({ error: true, message: '问题已更新，请在原事项核对' });
+    expect(staleMessages.some(message => message.answeredQuestionId !== undefined)).toBe(false);
     expect((await getTask(stale.id)).questions?.[0].answer).toBe('文字答案：订单 A。');
     const current = (await client.get(base + '/agent-tasks').expect(200)).body.items as AgentTaskView[];
     expect(current.filter(task => task.conversationId === staleConversation).map(task => task.id)).toEqual([stale.id]);
@@ -283,15 +290,19 @@ it('keeps an explicit spoken answer on its chosen question when text and voice r
 
     const happyConversation = 'c_voice_happy_question';
     const happy = await createWaiting(happyConversation);
-    const newTicket = (await ticket({ conversationId: happyConversation, taskId: happy.id, questionId: happy.questions![0].id }).expect(201)).body;
+    const happyQuestionId = happy.questions![0].id;
+    const newTicket = (await ticket({ conversationId: happyConversation, taskId: happy.id, questionId: happyQuestionId }).expect(201)).body;
     const messages = await connect(newTicket);
     expect(await speak('correct-spoken', '模拟订单 C。')).toMatchObject({ state: 'queued' });
     expect((await getTask(happy.id)).questions?.[0].answer).toBe('模拟订单 C。');
-    expect(messages.find(message => message.type === 'task')?.item?.id).toBe(happy.id);
+    expect(messages.filter(message => message.answeredQuestionId !== undefined)).toEqual([expect.objectContaining({
+      type: 'task', item: expect.objectContaining({ id: happy.id }), answeredQuestionId: happyQuestionId,
+    })]);
     expect(await speak('next-task', '再核对模拟订单 D。')).toMatchObject({ state: 'queued' });
     expect(messages.find(message => message.type === 'task' && message.item?.id !== happy.id)?.item).toMatchObject({
       conversationId: happyConversation, instructions: '再核对模拟订单 D。',
     });
+    expect(messages.filter(message => message.answeredQuestionId !== undefined)).toHaveLength(1);
   } finally {
     browser?.terminate();
     detach();

@@ -155,7 +155,14 @@ export class MistVoiceService {
       } else {
         result = await binding.control(args.action as 'pause' | 'resume' | 'cancel', task!, requestId);
       }
-      taskId = result.id; send({ type: 'task', item: result });
+      // Only the committed spoken answer acknowledges a question to the browser.
+      // Periodic task snapshots may also contain answers written by another client.
+      const answeredQuestionId = name === 'bambook_voice_task' && task?.id === result.id
+        ? result.questions?.find(question => question.answeredAt
+          && task.questions?.some(previous => previous.id === question.id && !previous.answeredAt))?.id
+        : undefined;
+      taskId = result.id;
+      send({ type: 'task', item: result, ...(answeredQuestionId ? { answeredQuestionId } : {}) });
       return { name: result.name, state: result.state, result: result.result, question: result.questions?.find(q => !q.answer)?.question, requiresPageConfirmation: result.waitingProposalIds.length > 0, outcome_spoken: false };
     };
     provider.on('open', () => upstream(voiceSession(config, ticket.id, binding.locale)));
