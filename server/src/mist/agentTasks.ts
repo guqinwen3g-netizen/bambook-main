@@ -564,6 +564,8 @@ export async function personalTaskActivityCandidates(db: any, workspaceId: strin
   const rows = await db.mistCommandReceipt.findMany({
     where: {
       workspaceId, actorId: ownerId, inputHash: TASK_HASH,
+      // The task TTL never extends. Bound the actor/createdAt index scan even when idle.
+      createdAt: { gt: new Date(now - TASK_TTL) },
       AND: [
         at('identityId', { equals: personalIdentityId(workspaceId, ownerId) }),
         at('executor', { equals: 'platform' }),
