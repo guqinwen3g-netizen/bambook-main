@@ -38,4 +38,3 @@ export function splitTaskRequest(instructions: string): string {
     ? instructions.slice(at + REQUEST_MARK.length)
     : instructions;
 }
-
