@@ -209,6 +209,11 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
     res.setHeader('Cache-Control', 'private, no-store');
     res.json(await repository.listPersonalTaskActivity(actor(req), req.params.id));
   }));
+  router.get('/workspaces/:id/personal-agent/task-access', run(async (req, res) => {
+    const {taskIds} = exactBody(req.query, ['taskIds']);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.json(await repository.getPersonalTaskAccess(actor(req), req.params.id, taskIds));
+  }));
   router.get('/workspaces/:id/personal-agent/tasks/receipt/:requestId',run(async(req,res)=>{
     exactBody(req.query,[]);
     res.setHeader('Cache-Control','private, no-store');

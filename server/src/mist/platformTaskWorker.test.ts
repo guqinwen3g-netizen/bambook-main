@@ -30,6 +30,41 @@ async function fixture(complete:(input:LlmCompletionInput)=>Promise<string>,opti
 }
 const tool=(name:string,args:Record<string,unknown>)=>JSON.stringify({name,arguments:args});
 
+it('reports open personal task access without exposing reports or distinguishing inaccessible task IDs', async () => {
+ const ceiling = { value: null as string[] | null };
+ const finish = tool('bambook_task', {action:'finish',outcome:'succeeded',result:'private report'});
+ const f = await fixture(async () => finish, { ceiling });
+ f.worker.start(3_600_000);
+ const {item: personal} = (await f.human.post(f.base+'/personal-agent/tasks').send({
+   requestId:randomUUID(),name:'核对资料',instructions:'请核对资料。',
+ }).expect(201)).body;
+ const otherAgent = await f.create('platform');
+ await f.drain();
+ expect(await f.current(personal.id)).toMatchObject({state:'succeeded',result:'private report'});
+
+ const foreign = randomUUID(), missing = randomUUID(), endpoint = f.base+'/personal-agent/task-access';
+ await f.local.database.$transaction(async db => {
+   const {row,value} = await taskRecord(db,f.workspace.id,personal.id);
+   await db.mistCommandReceipt.create({ data: {
+     ...row,id:randomUUID(),requestId:'mist-revision:agent-task:'+foreign,actorId:'different-owner',
+     result:{...row.result,__agentTask:{...value,id:foreign,ownerId:'different-owner'}},
+   } });
+ });
+ const taskIds = [foreign, personal.id, otherAgent.id, missing].join(',');
+ await f.human.get(endpoint).query({taskIds}).expect('Cache-Control','private, no-store')
+   .expect(200,{restrictedIds:[foreign,otherAgent.id,missing]});
+ await f.human.get(endpoint).expect(400);
+ await f.human.get(endpoint).query({taskIds: personal.id+',invalid'}).expect(400);
+ await f.human.get(endpoint).query({taskIds: personal.id+','+personal.id}).expect(400);
+ await f.human.get(endpoint).query({taskIds: Array.from({length:31},()=>randomUUID()).join(',')}).expect(400);
+ await f.human.get(endpoint).query({taskIds:personal.id,ownerId:'different-owner'}).expect(400);
+ await request(f.app).get(endpoint).query({taskIds}).expect(401);
+ await request(f.app).get(endpoint).set(SERVICE_KEY_HEADER,f.key).query({taskIds}).expect(403);
+ await f.human.get('/api/mist/workspaces/'+randomUUID()+'/personal-agent/task-access').query({taskIds}).expect(404);
+ ceiling.value = ['orders:read'];
+ await f.human.get(endpoint).query({taskIds}).expect(403);
+});
+
 it('compiles a read-only order report in one query, one detail batch, and one report turn', async () => {
  const complete = vi.fn(async (input: LlmCompletionInput) => {
   const message = String(input.messages[0].content);
@@ -88,6 +123,8 @@ it('only carries authorized task history into a follow-up and masks it when its 
  expect(allowedInput).toContain(prompt);
  expect(allowedInput).toContain(previousResult);
  expect(await f.current(finished.id)).toMatchObject({state:'succeeded',instructions:prompt,result:followUpResult});
+ const access = () => f.human.get(f.base+'/personal-agent/task-access').query({taskIds:[previous.id,finished.id].join(',')});
+ await access().expect(200,{restrictedIds:[]});
 
  const pendingInput = {...followUp,requestId:randomUUID()};
  const {item:queued} = (await f.human.post(endpoint).send(pendingInput).expect(201)).body;
@@ -101,6 +138,7 @@ it('only carries authorized task history into a follow-up and masks it when its 
 
  await f.drain();
  expect(complete).toHaveBeenCalledTimes(2);
+ await access().expect(200,{restrictedIds:[previous.id,finished.id]});
  const pendingReplay = (await f.human.post(endpoint).send(pendingInput).expect(201)).body.item;
  const pendingReceipt = (await f.human.get(endpoint+'/receipt/'+pendingInput.requestId).expect(200)).body.item;
  for (const hidden of [await f.current(queued.id),pendingReplay,pendingReceipt]) {
@@ -902,6 +940,9 @@ it('rechecks a borrowed attachment for the worker and redacts completed follow-u
   const completed = (await f.human.post(f.base + '/personal-agent/tasks').send(completedInput).expect(201)).body.item;
   await f.drain();
   expect(await f.current(completed.id)).toMatchObject({ result: marker, checkpoint: marker });
+  const reportAccessPath = f.base + '/personal-agent/task-access';
+  const taskIds = [item.id, completed.id].join(',');
+  await f.human.get(reportAccessPath).query({taskIds}).expect(200, { restrictedIds: [] });
   const downloadPath = (taskId: string) => f.base + '/agent-tasks/' + taskId + '/attachments/' + ref.fileId;
   expect((await f.human.get(downloadPath(completed.id)).expect(200)).body).toEqual(Buffer.from(marker));
   const callsBeforeRevocation = complete.mock.calls.length;
@@ -937,10 +978,11 @@ it('rechecks a borrowed attachment for the worker and redacts completed follow-u
   const replayed = (await f.human.post(f.base + '/personal-agent/tasks').send(completedInput).expect(201)).body.item;
   const recovered = (await f.human.get(f.base + '/personal-agent/tasks/receipt/' + completedInput.requestId).expect(200)).body.item;
   for (const hidden of [await f.current(completed.id), listed, summary, replayed, recovered]) {
-    expect(hidden).toMatchObject({ id: completed.id, state: 'succeeded', result: '', checkpoint: '' });
+    expect(hidden).toMatchObject({ id: completed.id, state: 'succeeded', contentRestricted: true, result: '', checkpoint: '' });
     expect(hidden.attachments).toBeUndefined();
     expect(hidden.trail).toBeUndefined();
   }
+  await f.human.get(reportAccessPath).query({taskIds}).expect(200, { restrictedIds: [item.id, completed.id] });
   const reads = vi.spyOn(MistPrivateFiles.prototype, 'read');
   await f.drain();
   expect(reads.mock.calls.some(([, file]) => file.id === ref.fileId)).toBe(false);

@@ -46,8 +46,8 @@ import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, ass
 import { collectTaskSources, knownCommandSourcesVisible, taskScopeHash, taskSourcesVisible } from './agentTaskVisibility';
 import { taskIntentRefsVisible, validateTaskIntentRefs } from './agentTaskIntentRefs';
 import {taskNotice,taskNoticeCandidates} from './agentTaskAttention';
-import {personalTaskActivity,personalTaskActivityCandidates,UNFINISHED_TASK_STATES} from './agentTasks';
-import type {AgentTaskActivity} from '../shared/mistAgentTasks';
+import {parseTaskAccessIds,personalTaskActivity,personalTaskActivityCandidates,UNFINISHED_TASK_STATES} from './agentTasks';
+import type {AgentTaskActivity,PersonalTaskAccess} from '../shared/mistAgentTasks';
 import {markTaskNoticeRead,waitTaskUntil,platformTaskUsage,agentDailyUsage,assertDailyRoom} from './agentTasks';
 import {assertTaskBusinessRead,checkTaskCondition,type PlatformTaskScanCursor} from './agentTasks';
 import {prepareTaskCondition,taskConditionChanged} from './agentTaskConditions';
@@ -740,6 +740,35 @@ export class MistRepository {
   async listAgentTasks(prior:TokenPayload,workspaceId:string,cursor?:unknown){
     if(isAgentActor(prior)&&(!prior.agentServiceLease||prior.agentTaskLease))fail('FORBIDDEN','请使用执行器管理连接',403);
     return this.transact(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,isAgentActor(prior)?'ai:chat':undefined);const visible=this.accessView(row, actor, scopeOf(row)).state;return listTasks(db,{...prior,...actor},workspaceId,cursor,Date.now(),c=>this.taskViewSourcesAllowed(db,row,actor,c,visible));});
+  }
+  async getPersonalTaskAccess(prior: TokenPayload, workspaceId: string, query: unknown): Promise<PersonalTaskAccess> {
+    if (isAgentActor(prior)) fail('FORBIDDEN', '任务权限只供本人核对', 403);
+    const ids = parseTaskAccessIds(query);
+    return this.transact(async db => {
+      const {actor, row} = await this.own(db, prior, workspaceId, 'ai:chat');
+      const records = await db.mistCommandReceipt.findMany({where: {
+        workspaceId: row.id, actorId: actor.userId, inputHash: TASK_HASH,
+        requestId: {in: ids.map(id => TASK_PREFIX + id)},
+      }});
+      if (!records.length) return {restrictedIds: ids};
+
+      const visible = this.accessView(row, actor, scopeOf(row)).state;
+      const identityId = personalIdentityId(row.id, actor.userId);
+      const now = Date.now();
+      const allowed = new Set<string>();
+      for (const record of records) {
+        try {
+          const task = readTaskRecord(record, row.id);
+          if (task.executor !== 'platform' || task.automationId || task.identityId !== identityId
+            || task.credentialVersion !== actor.credentialVersion) continue;
+          await assertTaskViewAuthority(db, actor, task, now);
+          if (await this.taskViewSourcesAllowed(db, row, actor, task, visible)) allowed.add(task.id);
+        } catch (error) {
+          if (!(error instanceof MistApiError)) throw error;
+        }
+      }
+      return {restrictedIds: ids.filter(id => !allowed.has(id))};
+    });
   }
   async listPersonalTaskActivity(prior: TokenPayload, workspaceId: string): Promise<{items: AgentTaskActivity[]}> {
     if (isAgentActor(prior)) fail('FORBIDDEN', '办理动态只供本人查看', 403);

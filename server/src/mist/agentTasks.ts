@@ -2,7 +2,7 @@ import type { MistStoredFile } from './files';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
-import { normalizeAgentTaskIntentRefs, type AgentTaskActivity, type AgentTaskEvent, type AgentTaskQuestion, type AgentTaskView, type AgentTaskIntentRef } from '../shared/mistAgentTasks';
+import { normalizeAgentTaskIntentRefs, TASK_ACCESS_BATCH_LIMIT, type AgentTaskActivity, type AgentTaskEvent, type AgentTaskQuestion, type AgentTaskView, type AgentTaskIntentRef } from '../shared/mistAgentTasks';
 import type { TaskAttachmentRef } from '../shared/mistTaskAttachments';
 import { splitTaskRequest, TASK_HISTORY_TURNS } from '../shared/mistTaskHistoryText';
 import { taskIntentCeilingAllows } from './agentTaskIntentRefs';
@@ -39,6 +39,12 @@ const plain = (v: unknown, max: number, label: string, optional = false) => {
 };
 const rid = (v: unknown) => plain(v, 116, '操作编号');
 const id = (v: unknown) => { if (!uuid(v)) fail('INVALID_INPUT', '任务编号无效', 400); return v as string; };
+export function parseTaskAccessIds(value: unknown): string[] {
+  if (typeof value !== 'string' || value.length > TASK_ACCESS_BATCH_LIMIT * 37 - 1) fail('INVALID_INPUT', '任务编号无效', 400);
+  const ids = value.split(',');
+  if (ids.length > TASK_ACCESS_BATCH_LIMIT || !ids.every(uuid) || new Set(ids).size !== ids.length) fail('INVALID_INPUT', '任务编号无效', 400);
+  return ids;
+}
 export function parseTaskHistoryIds(value: unknown): string[] | undefined {
   if (value === undefined) return;
   if (!Array.isArray(value) || value.length > TASK_HISTORY_TURNS || !value.every(uuid) || new Set(value).size !== value.length) {
@@ -154,7 +160,9 @@ export function taskView(c: TaskRecord, actor: TokenPayload, now: number, author
   // Legacy personal requests may contain a caller-composed context header without source provenance.
   const instructions = c.executor==='platform' && !c.automationId && !c.conversationHistory
     && c.identityId===personalIdentityId(c.workspaceId,c.ownerId) ? splitTaskRequest(c.instructions) : c.instructions;
-  return { ...(c.automationId?{automationId:c.automationId}:{}), ...(c.conversationId?{conversationId:c.conversationId}:{}),...(readable&&c.intentRefs?.length?{intentRefs:c.intentRefs.map(ref=>({...ref}))}:{}), ...(readable&&c.attachments?.length?{attachments:c.attachments.map(({id,name,mimeType,size})=>({id,name,mimeType,size}))}:{}), ...(readable&&c.platform?.steps?.length?{trail:platformTrail(c.platform.steps,c.attachments)}:{}), id: c.id, identityId: c.identityId, identityName: c.identityName, name: readable ? c.name : 'Agent任务', ownerId: c.ownerId, ownerName: c.ownerName, instructions: readable ? instructions : '', mode:c.mode, state, version: c.controlVersion, createdAt: c.createdAt, updatedAt: c.updatedAt, expiresAt: new Date(c.expiresAt).toISOString(), stepsUsed: c.stepsUsed, stepLimit: STEP_LIMIT, runtimeUsedMs: usedRuntime(c, now), runtimeLimitMs: RUNTIME_LIMIT, lastHeartbeatAt: c.lastHeartbeatAt ? new Date(c.lastHeartbeatAt).toISOString() : c.lease ? new Date(c.lease.heartbeatAt).toISOString() : null, checkpoint: readable ? c.checkpoint : '', result: readable ? c.result : '', waitingProposalIds: readable ? c.waitingProposalIds : [], canControl: !ended, executor:c.executor??'external',...(executionStage?{executionStage}:{}),...(executionStageSince?{executionStageSince}:{}),...(runnerStatus?{runnerStatus}:{}),...(readable&&c.stopReason?{stopReason:c.stopReason}:{}), ...(c.platform?.issue?{executionIssue:{code:c.platform.issue,...(c.platform.retryAt?{retryAt:new Date(c.platform.retryAt).toISOString()}:{} )}}:{}), questions:readable?c.questions??[]:[],resumeAt:readable&&c.resumeAt?new Date(c.resumeAt).toISOString():null,waitingFor:readable&&c.condition?{type:c.condition.type,id:c.condition.id,label:c.condition.label,...(c.condition.link?{link:c.condition.link}:{})}:null,nextCheckAt:readable&&c.condition?new Date(c.condition.nextCheckAt).toISOString():null,...(readable&&c.wakeReason?{wakeReason:c.wakeReason}:{}),requiredRead:readable?c.requiredRead??null:null };
+  return {
+    ...(!readable ? { contentRestricted: true as const } : {}),
+    ...(c.automationId?{automationId:c.automationId}:{}), ...(c.conversationId?{conversationId:c.conversationId}:{}),...(readable&&c.intentRefs?.length?{intentRefs:c.intentRefs.map(ref=>({...ref}))}:{}), ...(readable&&c.attachments?.length?{attachments:c.attachments.map(({id,name,mimeType,size})=>({id,name,mimeType,size}))}:{}), ...(readable&&c.platform?.steps?.length?{trail:platformTrail(c.platform.steps,c.attachments)}:{}), id: c.id, identityId: c.identityId, identityName: c.identityName, name: readable ? c.name : 'Agent任务', ownerId: c.ownerId, ownerName: c.ownerName, instructions: readable ? instructions : '', mode:c.mode, state, version: c.controlVersion, createdAt: c.createdAt, updatedAt: c.updatedAt, expiresAt: new Date(c.expiresAt).toISOString(), stepsUsed: c.stepsUsed, stepLimit: STEP_LIMIT, runtimeUsedMs: usedRuntime(c, now), runtimeLimitMs: RUNTIME_LIMIT, lastHeartbeatAt: c.lastHeartbeatAt ? new Date(c.lastHeartbeatAt).toISOString() : c.lease ? new Date(c.lease.heartbeatAt).toISOString() : null, checkpoint: readable ? c.checkpoint : '', result: readable ? c.result : '', waitingProposalIds: readable ? c.waitingProposalIds : [], canControl: !ended, executor:c.executor??'external',...(executionStage?{executionStage}:{}),...(executionStageSince?{executionStageSince}:{}),...(runnerStatus?{runnerStatus}:{}),...(readable&&c.stopReason?{stopReason:c.stopReason}:{}), ...(c.platform?.issue?{executionIssue:{code:c.platform.issue,...(c.platform.retryAt?{retryAt:new Date(c.platform.retryAt).toISOString()}:{} )}}:{}), questions:readable?c.questions??[]:[],resumeAt:readable&&c.resumeAt?new Date(c.resumeAt).toISOString():null,waitingFor:readable&&c.condition?{type:c.condition.type,id:c.condition.id,label:c.condition.label,...(c.condition.link?{link:c.condition.link}:{})}:null,nextCheckAt:readable&&c.condition?new Date(c.condition.nextCheckAt).toISOString():null,...(readable&&c.wakeReason?{wakeReason:c.wakeReason}:{}),requiredRead:readable?c.requiredRead??null:null };
 }
 async function save(db: any, row: any, before: TaskRecord, next: TaskRecord) {
   const changed = await db.mistCommandReceipt.updateMany({ where: { id: row.id, workspaceId: before.workspaceId, inputHash: TASK_HASH, result: { path: [TASK_FIELD, 'version'], equals: before.version } }, data: { result: { revision: 0, [TASK_FIELD]: next } } });

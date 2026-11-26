@@ -16,6 +16,8 @@ import { withRequestDeadline } from '../runtime/requestDeadline';
 const LABEL:Record<AgentTaskView['state'],string>={queued:'待领取',running:'执行中',waiting_time:'等待继续',waiting_condition:'等待资料变化',waiting_human:'待本人确认',paused:'已暂停',succeeded:'执行结束',failed:'执行失败',cancelled:'已停止',expired:'已到期',budget_exhausted:'达到限额',access_changed:'权限已变化'};
 const ACTION:Record<string,string>={created:'安排任务',connected:'签发任务连接',claimed:'执行器领取',checkpoint:'保存检查点',waiting_human:'等待本人确认',question:'请求补充资料',waiting_time:'等待约定时间',waiting_condition:'等待资料变化',condition_changed:'资料已变化',condition_deadline:'到达最晚时间',answered:'本人补充资料',model_retry:'模型重试',model_paused:'模型已暂停',recovering:'等待接续',confirmed:'本人确认',rejected:'本人拒绝',pause:'暂停任务',resume:'继续任务',cancel:'停止任务',finished:'执行结束'};
 const statusLabel=(row:AgentTaskView)=>row.runnerStatus==='heartbeat_stale'?'执行进度暂未更新':row.runnerStatus==='awaiting_reclaim'?'待重新领取':row.state==='waiting_human'&&row.questions?.some(q=>!q.answeredAt)?'待补充资料':row.state==='queued'&&row.executionIssue?'等待重试':row.state==='queued'&&row.executor==='platform'?'待执行':row.state==='queued'&&row.lastHeartbeatAt?'待重新领取':LABEL[row.state];
+const contentRestricted=(row:AgentTaskView)=>'contentRestricted' in row&&row.contentRestricted===true;
+const accessDenied=(error:unknown)=>[401,403,404].includes(Number((error as {status?:number})?.status));
 const tone=(state:AgentTaskView['state']):Tone=>state==='running'?'accent':state==='succeeded'?'ok':['waiting_human','expired','budget_exhausted'].includes(state)?'warn':['failed','access_changed'].includes(state)?'bad':'neutral';
 const time=(v:string|null)=>v?new Date(v).toLocaleString(interfaceLocale(),{timeZone:'Asia/Shanghai', year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}):'—';
 const duration=(ms:number)=>`${Math.floor(ms/60000)}:${String(Math.floor(ms/1000)%60).padStart(2,'0')}`;
@@ -38,26 +40,60 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
  const [detail,setDetail]=React.useState<AgentTaskView|null>(null),[history,setHistory]=React.useState<{items:AgentTaskEvent[];nextCursor:string|null}>({items:[],nextCursor:null}),[detailError,setDetailError]=React.useState('');
  const [detailTarget,setDetailTarget]=React.useState<string|null>(null),[opening,setOpening]=React.useState(false);
  const [historyLoading,setHistoryLoading]=React.useState(false),[historyError,setHistoryError]=React.useState('');
- const detailRef=React.useRef(detail);detailRef.current=detail;
+ const detailRef=React.useRef<AgentTaskView|null>(null);
+ const setCurrentDetail=(item:AgentTaskView|null)=>{detailRef.current=item;setDetail(item);};
+ const onTaskUpdateRef=React.useRef(onTaskUpdate);onTaskUpdateRef.current=onTaskUpdate;
  const alive=React.useRef(false),readGeneration=React.useRef(0),writeGeneration=React.useRef(0),detailGeneration=React.useRef(0),readAbort=React.useRef<AbortController|null>(null),writeAbort=React.useRef<AbortController|null>(null);
  const listAbort=React.useRef<AbortController|null>(null);
  const [connectionError,setConnectionError]=React.useState('');
  const detailAbort=React.useRef<AbortController|null>(null),historyAbort=React.useRef<AbortController|null>(null);
+ const readDetail=React.useCallback(async(id:string,opening=false)=>{
+  if(detailAbort.current&&!opening)return;
+  const epoch=detailGeneration.current,abort=new AbortController();detailAbort.current=abort;
+  const current=()=>alive.current&&epoch===detailGeneration.current&&detailAbort.current===abort;
+  const clearDetailActions=()=>{
+   setPlan(plan=>plan&&'row' in plan&&plan.row.id===id?null:plan);
+   setCredential(credential=>credential?.item.id===id?null:credential);
+  };
+  try{
+   const result=await withRequestDeadline(abort,8_000,'任务详情读取超时',signal=>
+    mistApiRequest(base+'/'+encodeURIComponent(id),{signal,cache:'no-store'}));
+   if(result.item?.id!==id)throw new Error('任务详情响应无效');
+   if(!current())return;
+   const item:AgentTaskView=result.item;
+   const previous=detailRef.current;
+   if(previous?.id===id&&item.version<previous.version)return;
+   if(contentRestricted(item))clearDetailActions();
+   setCurrentDetail(item);setDetailError('');
+   setPage(page=>({...page,items:page.items.map(row=>row.id===id&&row.version<=item.version?item:row)}));
+   if(!previous||previous.id!==id||previous.version!==item.version||previous.updatedAt!==item.updatedAt
+    ||contentRestricted(previous)!==contentRestricted(item))onTaskUpdateRef.current?.(item);
+  }catch(error){
+   if(!current())return;
+   if(accessDenied(error)){
+    setCurrentDetail(null);clearDetailActions();
+    setPage(page=>({...page,items:page.items.filter(row=>row.id!==id)}));
+   }
+   setDetailError(error instanceof Error?error.message:'任务详情读取失败');
+  }finally{
+   if(current()){detailAbort.current=null;if(opening)setOpening(false);}
+  }
+ },[base]);
  const load=React.useCallback(async(append=false)=>{
   const epoch=++readGeneration.current;
   readAbort.current?.abort();listAbort.current?.abort();
   const auxiliary=new AbortController(),listing=new AbortController();
   readAbort.current=auxiliary;listAbort.current=listing;setError('');
-  const selected=detailRef.current?.id,selectedGeneration=detailGeneration.current;
-  let accessDenied=false;
+  const selectedSnapshot=detailRef.current,selected=selectedSnapshot?.id,selectedGeneration=detailGeneration.current;
+  let denied=false;
   const current=()=>alive.current&&epoch===readGeneration.current;
   const detailIsCurrent=()=>current()&&selectedGeneration===detailGeneration.current&&detailRef.current?.id===selected;
   const deny=(error:unknown)=>{
-   if(![401,403,404].includes(Number((error as {status?:number})?.status)))return false;
-   accessDenied=true;
+   if(!accessDenied(error))return false;
+   denied=true;
    auxiliary.abort();listing.abort();detailGeneration.current++;
    detailAbort.current?.abort();historyAbort.current?.abort();
-   setPage({items:[],nextCursor:null});setDetail(null);setDetailTarget(null);setOpening(false);setPlan(null);setCredential(null);
+   setPage({items:[],nextCursor:null});setCurrentDetail(null);setDetailTarget(null);setOpening(false);setPlan(null);setCredential(null);
    setIdentities([]);setPlatformAvailable(false);setError(error instanceof Error?error.message:'任务读取失败');
    return true;
   };
@@ -66,8 +102,16 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
    .then(result=>{
     if(!current()||listing.signal.aborted)return;
     if(!Array.isArray(result.items))throw new Error('任务响应无效');
-    setPage(previous=>append?{...result,items:[...previous.items,...result.items.filter((r:AgentTaskView)=>!previous.items.some(p=>p.id===r.id))]}:result);
-   }).catch(error=>{if(current()&&!accessDenied&&!deny(error))setError(error instanceof Error?error.message:'任务读取失败');})
+    // An overlapping detail read may have applied a newer access projection at the same task version.
+    const latest=detailRef.current;
+    const detailAdvanced=latest!==selectedSnapshot&&selectedGeneration===detailGeneration.current;
+    const items=(result.items as AgentTaskView[]).flatMap(row=>{
+     if(!detailAdvanced||row.id!==selected)return [row];
+     if(latest?.id===selected&&latest.version>=row.version)return [latest];
+     return latest===null?[]:[row];
+    });
+    setPage(previous=>append?{...result,items:[...previous.items,...items.filter(row=>!previous.items.some(p=>p.id===row.id))]}:{...result,items});
+   }).catch(error=>{if(current()&&!denied&&!deny(error))setError(error instanceof Error?error.message:'任务读取失败');})
    .finally(()=>{if(current())setLoading(false);});
   let connectionsPending=true,capabilitiesPending=true;
   const auxiliaryCurrent=()=>current()&&!auxiliary.signal.aborted;
@@ -91,23 +135,26 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
    mistApiRequest('/api/mist/workspaces/'+encodeURIComponent(workspaceId)+'/agent-task-capabilities',{signal})
     .then(result=>{if(auxiliaryCurrent())setPlatformAvailable(result.platformAvailable===true);})
     .catch(()=>{if(auxiliaryCurrent())setPlatformAvailable(false);}).finally(()=>{capabilitiesPending=false;}),
-   selected?mistApiRequest(base+'/'+encodeURIComponent(selected),{signal}).then(result=>{
-    if(result.item?.id===selected&&auxiliaryCurrent()&&detailIsCurrent()){setDetail(result.item);setDetailError('');}
-   }).catch(error=>{if(auxiliaryCurrent()&&detailIsCurrent()&&!deny(error))setDetailError(error instanceof Error?error.message:'任务详情读取失败');}):null,
    selected&&!historyAbort.current?mistApiRequest(base+'/'+encodeURIComponent(selected)+'/history',{signal}).then(events=>{
     if(!auxiliaryCurrent()||!detailIsCurrent()||!Array.isArray(events.items))return;
     setHistory(previous=>{const fresh=events.items as AgentTaskEvent[];return{items:[...fresh,...previous.items.filter(old=>!fresh.some(event=>event.version===old.version&&event.action===old.action))],nextCursor:previous.items.length>30?previous.nextCursor:events.nextCursor};});
     setHistoryError('');
    }).catch(error=>{if(auxiliaryCurrent()&&detailIsCurrent()&&!deny(error))setHistoryError(error instanceof Error?error.message:'任务记录读取失败');}):null,
   ])).catch(()=>{
-   if(!current()||accessDenied)return;
+   if(!current()||denied)return;
    if(connectionsPending){setIdentities([]);setConnectionError('连接读取超时');}
    if(capabilitiesPending)setPlatformAvailable(false);
   });
-  await Promise.all([listRead,auxiliaryRead]);
- },[base,workspaceId,page.nextCursor]);
+  await Promise.all([listRead,auxiliaryRead,selected?readDetail(selected):null]);
+ },[base,workspaceId,page.nextCursor,readDetail]);
  const currentLoad=React.useRef(load);currentLoad.current=load;
  React.useEffect(()=>{alive.current=true;void currentLoad.current();const timer=setInterval(()=>void currentLoad.current(),10_000);return()=>{alive.current=false;readGeneration.current++;writeGeneration.current++;detailGeneration.current++;clearInterval(timer);readAbort.current?.abort();listAbort.current?.abort();writeAbort.current?.abort();detailAbort.current?.abort();historyAbort.current?.abort();};},[base]);
+ React.useEffect(()=>{
+  if(!detailTarget)return;
+  const wake=()=>{if(!document.hidden)void readDetail(detailTarget);};
+  window.addEventListener('focus',wake);document.addEventListener('visibilitychange',wake);
+  return()=>{window.removeEventListener('focus',wake);document.removeEventListener('visibilitychange',wake);};
+ },[detailTarget,readDetail]);
  const readDetailHistory=async(id:string,cursor?:string|null)=>{
   const epoch=detailGeneration.current, abort=new AbortController();
   historyAbort.current?.abort();historyAbort.current=abort;setHistoryLoading(true);setHistoryError('');
@@ -120,23 +167,16 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
   }catch(error){if(current())setHistoryError(error instanceof Error?error.message:'任务记录读取失败');}
   finally{if(current()){historyAbort.current=null;setHistoryLoading(false);}}
  };
- const openDetail=async(id:string)=>{
-  const epoch=++detailGeneration.current, abort=new AbortController();
-  detailAbort.current?.abort();detailAbort.current=abort;
-  setDetailTarget(id);setDetail(null);setHistory({items:[],nextCursor:null});setOpening(true);setDetailError('');
+ const openDetail=(id:string)=>{
+  detailGeneration.current++;detailAbort.current?.abort();
+  setDetailTarget(id);setCurrentDetail(null);setHistory({items:[],nextCursor:null});setOpening(true);setDetailError('');
   void readDetailHistory(id);
-  const current=()=>alive.current&&epoch===detailGeneration.current;
-  try{
-   const result=await withRequestDeadline(abort,8_000,'任务详情读取超时',signal=>mistApiRequest(base+'/'+encodeURIComponent(id),{signal}));
-   if(result.item?.id!==id)throw new Error('任务详情响应无效');
-   if(current())setDetail(result.item);
-  }catch(error){if(current())setDetailError(error instanceof Error?error.message:'任务详情读取失败');}
-  finally{if(current()){detailAbort.current=null;setOpening(false);}}
+  return readDetail(id,true);
  };
  React.useEffect(()=>{if(refreshSignal)void currentLoad.current();},[refreshSignal]);
  const routeTaskId=nav?.route?.section==='tasks'?nav.route.id:undefined;
  const closeDetail=()=>{
-  detailGeneration.current++;detailAbort.current?.abort();historyAbort.current?.abort();setDetailTarget(null);setDetail(null);setOpening(false);
+  detailGeneration.current++;detailAbort.current?.abort();historyAbort.current?.abort();setDetailTarget(null);setCurrentDetail(null);setOpening(false);
   if(!routeTaskId)return;
   const automationId=nav.route.automationId;
   nav.go('assistant',automationId,{section:automationId?'automations':'tasks'});
@@ -151,8 +191,11 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
   try{const result=await mistApiRequest(url,{method:'POST',body:JSON.stringify(body),signal:abort.signal});if(!alive.current||epoch!==writeGeneration.current)return;
    if(plan.kind==='issue'){if(typeof result.token!=='string'||!result.item?.id)throw new Error('任务连接响应无效');setCredential(result);}else toast(uiText(plan.kind==='answer'?'资料已补充':plan.kind==='create'&&result.item.state==='queued'?'任务已安排':LABEL[result.item.state as AgentTaskView['state']]??'已核对当前任务状态'),'ok');
    setPlan(null);setUncertain(false);
-   if(detail?.id===result.item?.id)setDetail(result.item);
-   if(result.item&&plan.kind!=='issue')onTaskUpdate?.(result.item);
+   const openItem=detailRef.current;
+   const sameTask=openItem&&openItem.id===result.item?.id;
+   const mayPublish=!sameTask||!contentRestricted(openItem)||contentRestricted(result.item);
+   if(sameTask){detailAbort.current?.abort();detailAbort.current=null;if(mayPublish)setCurrentDetail(result.item);}
+   if(result.item&&plan.kind!=='issue'&&mayPublish)onTaskUpdate?.(result.item);
    void currentLoad.current();
    window.dispatchEvent(new Event('bambook:agent-task-update'));
    if(plan.kind==='cancel')void w.refresh();
@@ -181,7 +224,9 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
   <Drawer open={!!detailTarget} onClose={closeDetail} title={detail?.name??uiText('任务')} footer={detail&&detail.canControl?control(detail):undefined}>
    {opening&&!detail&&<Skeleton/>}
    {detailError&&detailTarget&&<FailureNotice title="任务详情读取失败" detail={detailError} retry={()=>void openDetail(detailTarget)}/>}
-   {detail&&<div className="mist-col"><div className="mist-row"><Pill tone={tone(detail.state)}>{uiText(statusLabel(detail))}</Pill></div>
+   {detail&&<div className="mist-col"><div className="mist-row"><Pill tone={tone(detail.state)}>{uiText(statusLabel(detail))}</Pill>
+    {contentRestricted(detail)&&detail.state!=='access_changed'&&<Pill tone="warn">{uiText('权限已变化')}</Pill>}
+   </div>
     <KeyValue items={[
       {label:uiText('执行方式'),value:uiText(detail.executor==='platform'?'平台执行':'外部客户端')},
       {label:uiText('Agent连接'),value:detail.identityName},

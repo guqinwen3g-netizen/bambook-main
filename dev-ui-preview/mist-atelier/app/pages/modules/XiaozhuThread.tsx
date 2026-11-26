@@ -13,6 +13,7 @@ import { XiaozhuMarkdown } from './XiaozhuMarkdown';
 
 const STATE: Record<AgentTaskView['state'], [string, Tone]> = { queued: ['待执行', 'accent'], running: ['办理中', 'accent'], waiting_time: ['等待继续', 'neutral'], waiting_condition: ['等待资料变化', 'neutral'], waiting_human: ['待我确认', 'warn'], paused: ['已暂停', 'neutral'], succeeded: ['已完成', 'ok'], failed: ['未完成', 'bad'], cancelled: ['已停止', 'neutral'], expired: ['已到期', 'neutral'], budget_exhausted: ['达到限额', 'warn'], access_changed: ['权限已变化', 'warn'] };
 export function xiaozhuTaskStatusLabel(task: AgentTaskView): string {
+  if (task.contentRestricted) return '权限已变化';
   if (task.runnerStatus === 'heartbeat_stale') return '执行进度暂未更新';
   if (task.runnerStatus === 'awaiting_reclaim') return '待重新领取';
   if (task.state === 'queued' && task.executionIssue?.retryAt) return '模型重试中';
@@ -170,6 +171,12 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
   const multiDay = new Set(tasks.map(t => dayKey(t.createdAt))).size > 1;
   return <div className="mist-xz-thread">{tasks.map(t => {
     const day = dayKey(t.createdAt), divider = multiDay && day !== lastDay; lastDay = day;
+    if (t.contentRestricted) return <div className="mist-xz-turn" key={t.id} data-task-state={t.state} data-task-id={t.id}>
+      {divider && <div className="mist-xz-day"><span>{dayLabel(t.createdAt)}</span></div>}
+      <XiaozhuTurnShell status={<span role="status"><Pill tone="warn">{uiText('权限已变化')}</Pill></span>}>
+        <time className="mist-xz-time" dateTime={t.updatedAt}>{clock(t.updatedAt || t.createdAt)}</time>
+      </XiaozhuTurnShell>
+    </div>;
     const openQuestion = t.questions?.find(q=>!q.answeredAt);
     const active = COWORK_ACTIVE.includes(t.state), asking = t.state === 'waiting_human' && !!openQuestion;
     const control = actions.controls?.[t.id];

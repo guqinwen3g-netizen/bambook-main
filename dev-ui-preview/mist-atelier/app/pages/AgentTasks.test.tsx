@@ -168,6 +168,66 @@ it('applies the detail permission change even when refreshing connections fails'
  expect(host.textContent).not.toContain(row().name);
  expect(getByRole(dialog,'button',{name:'停止任务'})).toBeTruthy();
 });
+it('rechecks an open report on focus and visibility, withholds it after confirmed restriction, and restores it after access returns',async()=>{
+ const report={...row(),executor:'platform',state:'succeeded',result:'原件中的经营事实',canControl:false};
+ const masked={...report,contentRestricted:true,name:'Agent任务',instructions:'',result:''};
+ let current=report,fail=false,detailRequests=0;
+ seam.api.mockImplementation((url:string,init:any)=>{
+  if(url.endsWith('/task')){
+   detailRequests++;
+   if(fail)return Promise.reject(new Error('网络中断'));
+   if(detailRequests>1)expect(init.cache).toBe('no-store');
+   return Promise.resolve({item:current});
+  }
+  return Promise.resolve(url.includes('agent-identities')?{items:[identity()]}:url.includes('/history')?{items:[],nextCursor:null}:{items:[current],nextCursor:null});
+ });
+ act(paint);await flush();await click(getByText(host,'核对邮件'));
+ expect(getByText(document.body,report.result)).toBeTruthy();
+ fail=true;
+ await act(async()=>window.dispatchEvent(new Event('focus')));await flush();
+ expect(detailRequests).toBe(2);
+ expect(getByText(document.body,report.result)).toBeTruthy();
+ expect(getByText(document.body,'任务详情读取失败')).toBeTruthy();
+ fail=false;current=masked;
+ await act(async()=>{
+  document.dispatchEvent(new Event('visibilitychange'));
+  window.dispatchEvent(new Event('focus'));
+ });await flush();
+ expect(detailRequests).toBe(3);
+ const restricted=getByRole(document.body,'dialog',{name:'Agent任务'});
+ expect(restricted.textContent).toContain('权限已变化');
+ expect(restricted.textContent).toContain('执行结束');
+ expect(restricted.textContent).not.toContain(report.instructions);
+ expect(document.body.textContent).not.toContain(report.result);
+ expect(host.textContent).not.toContain(report.name);
+ current=report;
+ await act(async()=>window.dispatchEvent(new Event('focus')));await flush();
+ expect(detailRequests).toBe(4);
+ expect(getByRole(document.body,'dialog',{name:'核对邮件'}).textContent).toContain(report.result);
+});
+it('does not replace a committed task control receipt with an older focus read',async()=>{
+ const active={...row(),executor:'platform',state:'running'};
+ const stopped={...active,state:'cancelled',version:active.version+1,canControl:false};
+ let current=active,delayNext=false,focusSignal:AbortSignal|undefined,deliver:((value:unknown)=>void)|undefined;
+ seam.api.mockImplementation((url:string,init:any)=>{
+  if(init?.method==='POST'){current=stopped;return Promise.resolve({item:current});}
+  if(url.endsWith('/task')&&delayNext){
+   delayNext=false;focusSignal=init.signal;return new Promise(resolve=>{deliver=resolve;});
+  }
+  return Promise.resolve(url.endsWith('/task')?{item:current}:url.includes('agent-identities')?{items:[identity()]}:url.includes('/history')?{items:[],nextCursor:null}:{items:[current],nextCursor:null});
+ });
+ act(paint);await flush();await click(getByText(host,active.name));
+ delayNext=true;
+ await act(async()=>window.dispatchEvent(new Event('focus')));await flush();
+ expect(focusSignal?.aborted).toBe(false);
+ const dialog=getByRole(document.body,'dialog',{name:active.name});
+ await click(getByRole(dialog,'button',{name:'停止任务'}));
+ await click(getByRole(document.body,'button',{name:'确认',exact:true}));
+ expect(focusSignal?.aborted).toBe(true);
+ await act(async()=>deliver?.({item:active}));await flush();
+ expect(dialog.textContent).toContain('已停止');
+ expect(dialog.textContent).not.toContain('执行中');
+});
 it('shows missing facts distinctly and submits an owner answer without confirming business',async()=>{
  const question={id:'question',question:'请提供准确工厂交期及书面依据。',askedAt:'2026-11-01T00:10:00Z'},waiting={...row(),state:'waiting_human',questions:[question]};
  let answered=false;const current=()=>answered?{...waiting,state:'queued',questions:[{...question,answer:'请按11月25日核对原件。',answeredAt:'2026-11-01T00:20:00Z'}]}:waiting;
