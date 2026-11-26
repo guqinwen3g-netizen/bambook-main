@@ -1,5 +1,5 @@
 import{expect,it}from'vitest';
-import{compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation}from'./platformTaskPlan';
+import{compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,shortPdfTailPlan}from'./platformTaskPlan';
 import{platformReasoning}from'../ai/platformModel';
 
 it('accepts only a bound business tool decision, without thoughts, owner impersonation or model request IDs',()=>{
@@ -69,6 +69,20 @@ it('uses the last verified continuation for the same file and only exposes a sho
  expect(resolvePlatformFileContinuation(next('missing'),[first,other])).toEqual(next('missing'));
  const done={...newPlatformTaskStep(next('first'),4),result:{hasMore:false}};
  expect(resolvePlatformFileContinuation(next('first'),[first,other,done])).toEqual(next('first'));
+});
+
+it('limits automatic PDF continuation to one short page window without a prior continuation attempt', () => {
+ const file={id:'pdf',name:'sample.pdf',mimeType:'application/pdf',size:1500};
+ const plan={name:'bambook_file_text',arguments:{fileId:file.id}};
+ const result={kind:'pdf',pages:24,range:{pageFrom:1,pageTo:20},hasMore:true,nextPageFrom:21,nextCursor:'aft1.original'};
+ const first={...newPlatformTaskStep(plan,0),result};
+ expect(shortPdfTailPlan([file],[first])?.arguments).toEqual({fileId:file.id,cursor:'aft1.original',maxChars:3500});
+ expect(shortPdfTailPlan([file,{...file,id:'another-pdf'}],[first])).toBeUndefined();
+ expect(shortPdfTailPlan([file],[{...first,result:{...result,pages:25}}])).toBeUndefined();
+ expect(shortPdfTailPlan([file],[{...first,result:{...result,nextPageFrom:undefined}}])).toBeUndefined();
+ expect(shortPdfTailPlan([file],[{...first,compacted:true}])).toBeUndefined();
+ const failed={...newPlatformTaskStep({...plan,arguments:{...plan.arguments,cursor:result.nextCursor}},1),result:{error:true}};
+ expect(shortPdfTailPlan([file],[first,failed])).toBeUndefined();
 });
 
 it('identifies the full quotation amount and the exact converted line amounts in a complete read', () => {

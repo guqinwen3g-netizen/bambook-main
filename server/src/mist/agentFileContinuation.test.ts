@@ -1,6 +1,7 @@
 import {expect,it} from 'vitest';
 import JSZip from 'jszip';
 import {readFileTextWindow} from './agentFileWindow';
+import {platformTrail} from './agentTaskTrail';
 const scope={workspaceId:'w',fileId:'f'};
 it('returns consecutive stable text windows, never calling the final fragment a complete document',async()=>{
  const file={name:'contract.txt',mimeType:'text/plain'},bytes=Buffer.from('条款 ABC '.repeat(5000)+'尾部交期 2026-12-31');
@@ -38,6 +39,29 @@ it('allows a changed response size without splitting surrogate pairs or skipping
  const text='🧵'.repeat(160)+'END',bytes=Buffer.from(text),file={name:'unicode.txt',mimeType:'text/plain'};
  const a=await readFileTextWindow(scope,file,bytes,201),b=await readFileTextWindow(scope,file,bytes,300,a.nextCursor);
  expect(a.text.length).toBe(200);expect(a.text+b.text).toBe(text);expect(b.range.start).toBe(a.range.end);expect(b.hasMore).toBe(false);expect(b.complete).toBe(false);
+});
+
+it('reports PDF page windows and partial text honestly in the same task trail', async () => {
+ const bytes = contractPdf(23,22), file = {name:'contract.pdf',mimeType:'application/pdf'};
+ const first = await readFileTextWindow(scope,file,bytes,8000);
+ const tail = await readFileTextWindow(scope,file,bytes,8000,first.nextCursor);
+ const limited = await readFileTextWindow(scope,file,bytes,1000);
+ const continued = await readFileTextWindow(scope,file,bytes,8000,limited.nextCursor);
+ const steps = [first,tail,limited,continued].map((result,index)=>({
+  id:String(index),at:'2026-11-26T00:00:00Z',plan:{name:'bambook_file_text',arguments:{fileId:scope.fileId}},result,
+ }));
+ expect(limited.range.textLimited).toBe(true);
+ expect(limited.nextPageFrom).toBeUndefined();
+ expect(first.range.textLimited).toBeUndefined();
+ expect(first.nextPageFrom).toBe(21);
+ expect(continued.range.textLimited).toBeUndefined();
+ expect(continued.nextPageFrom).toBe(21);
+ expect(platformTrail(steps).map(step=>step.detail)).toEqual([
+  '提取范围第 1 至 20 页；还有后续内容',
+  '提取范围第 21 至 23 页；第 22 页无可提取文字',
+  '第 1 至 20 页的部分正文；还有后续内容',
+  '第 1 至 20 页的部分正文；还有后续内容',
+ ]);
 });
 
 it('does not call a mixed text/image PDF complete when a page has no extractable text',async()=>{

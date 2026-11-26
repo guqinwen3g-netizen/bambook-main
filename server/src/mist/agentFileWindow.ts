@@ -32,7 +32,10 @@ export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:
  const complete=readable&&fromStart&&!hasMore&&!extractionLimited&&!raw.reason;
  return {kind:raw.kind,text,truncated:readable&&(!complete),complete,hasMore,
   ...(next?{nextCursor:'aft1.'+Buffer.from(JSON.stringify(next)).toString('base64url')}:{}),
-  sourceHash,sha256,range:{unit:'utf16' as const,start:p.offset,end,...(raw.window?{pageFrom:raw.window.start,pageTo:raw.window.end}:{})},
+  ...(next&&next.page>p.page?{nextPageFrom:next.page}:{}),
+  sourceHash,sha256,range:{unit:'utf16' as const,start:p.offset,end,...(raw.window?{
+   pageFrom:raw.window.start,pageTo:raw.window.end,...(end<content.length||extractionLimited?{textLimited:true as const}:{})
+  }:{})},
   ...(raw.pages!==undefined?{pages:raw.pages}:{}),...(raw.sheets?{sheets:raw.sheets}:{}),
   ...(raw.pagesWithoutText?.length?{pagesWithoutText:raw.pagesWithoutText}:{}),
   ...(raw.reason?{reason:raw.reason}:extractionLimited?{reason:'正文超过安全提取范围，当前片段不能代表完整原件'}:{}),
