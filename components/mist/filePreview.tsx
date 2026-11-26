@@ -66,10 +66,12 @@ const pct = (v: number) => `${Math.round(v * 100)}%`;
 export type FilePreviewProps = {
   files: PreviewFile[]; index: number; onIndex: (index: number) => void; onClose: () => void;
   load: (file: PreviewFile) => Promise<Blob>; onDownload?: (file: PreviewFile) => Promise<void> | void;
+  /** One-based PDF page for this opening. Omit when switching to a different attachment. */
+  initialPdfPage?: number;
 };
 
 /** 附件预览浮层：大尺寸查看，支持多附件左右切换、图片/PDF 缩放、下载。 */
-export function FilePreview({ files, index, onIndex, onClose, load, onDownload }: FilePreviewProps) {
+export function FilePreview({ files, index, onIndex, onClose, load, onDownload, initialPdfPage }: FilePreviewProps) {
   const ref = React.useRef<HTMLDivElement>(null);
   const id = React.useId();
   const file = files[index];
@@ -132,7 +134,7 @@ export function FilePreview({ files, index, onIndex, onClose, load, onDownload }
         {info.kind === 'unsupported' ? <Unsupported reason={info.reason} onDownload={onDownload ? download : undefined} />
           : error ? <div className="mist-viewer-center"><EmptyState icon={FileQuestion} title={uiText("预览未能打开")} description={uiText(error)} action={onDownload ? <Button icon={Download} onClick={() => void download()}>{uiText("下载原件")}</Button> : undefined} /></div>
           : !blob ? <Loading />
-          : <Renderer key={file.id} kind={info.kind} blob={blob} name={file.name} zoom={zoom} rotate={rotate} onFitScale={setFitScale} onPages={setPages} onFail={setError} />}
+          : <Renderer key={file.id} kind={info.kind} blob={blob} name={file.name} zoom={zoom} rotate={rotate} onFitScale={setFitScale} onPages={setPages} onFail={setError} initialPdfPage={initialPdfPage} />}
       </div>
     </div></Portal>;
 }
@@ -142,7 +144,7 @@ function Unsupported({ reason, onDownload }: { reason?: string; onDownload?: () 
   return <div className="mist-viewer-center"><EmptyState icon={FileQuestion} title={uiText("此格式暂不支持在线预览")} description={uiText(reason)} action={onDownload ? <Button icon={Download} onClick={onDownload}>{uiText("下载原件")}</Button> : undefined} /></div>;
 }
 
-type RendererProps = { kind: PreviewKind; blob: Blob; name: string; zoom: Zoom; rotate: number; onFitScale: (v: number) => void; onPages: (n: number) => void; onFail: (msg: string) => void };
+type RendererProps = { kind: PreviewKind; blob: Blob; name: string; zoom: Zoom; rotate: number; onFitScale: (v: number) => void; onPages: (n: number) => void; onFail: (msg: string) => void; initialPdfPage?: number };
 function Renderer(p: RendererProps) {
   switch (p.kind) {
     case 'image': return <ImageView {...p} />;
@@ -188,8 +190,10 @@ async function loadPdfjs() {
   if (!pdfjs.GlobalWorkerOptions.workerSrc) pdfjs.GlobalWorkerOptions.workerSrc = worker.default + (worker.default.includes('?') ? '&' : '?') + 'module=1';
   return pdfjs;
 }
-function PdfView({ blob, zoom, onFitScale, onPages, onFail }: RendererProps) {
+function PdfView({ blob, zoom, onFitScale, onPages, onFail, initialPdfPage }: RendererProps) {
   const box = React.useRef<HTMLDivElement>(null);
+  const openingPage = React.useRef(initialPdfPage).current;
+  const positioned = React.useRef<PdfDoc | null>(null);
   const [doc, setDoc] = React.useState<PdfDoc | null>(null), [base, setBase] = React.useState<{ w: number; h: number } | null>(null), [width, setWidth] = React.useState(0);
   React.useEffect(() => {
     let live = true, loaded: PdfDoc | null = null;
@@ -212,6 +216,18 @@ function PdfView({ blob, zoom, onFitScale, onPages, onFail }: RendererProps) {
   const fit = base && width ? Math.max(0.2, Math.min(1.6, (width - 40) / base.w)) : 1;
   React.useEffect(() => { onFitScale(fit); }, [fit, onFitScale]);
   const scale = zoom === 'fit' ? fit : zoom;
+  React.useLayoutEffect(() => {
+    const scroll = box.current;
+    if (!scroll || !doc || !width || openingPage === undefined || !Number.isSafeInteger(openingPage) || positioned.current === doc) return;
+    const page = Math.max(1, Math.min(openingPage, doc.numPages));
+    const target = scroll.children.item(page - 1);
+    if (!target) return;
+    positioned.current = doc;
+    if (page > 1) {
+      // Scroll only the PDF pane so dialog and keyboard focus stay in place.
+      scroll.scrollTop += target.getBoundingClientRect().top - scroll.getBoundingClientRect().top - scroll.clientTop;
+    }
+  }, [doc, openingPage, width]);
   return <div ref={box} className="mist-viewer-scroll mist-viewer-pages">
     {doc && base ? Array.from({ length: doc.numPages }, (_, i) => <PdfPage key={i} doc={doc} n={i + 1} scale={scale} base={base} root={box} />) : <Loading />}
   </div>;
