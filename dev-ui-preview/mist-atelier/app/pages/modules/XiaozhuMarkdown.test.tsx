@@ -34,6 +34,11 @@ it('opens exact report filenames from this task and leaves ambiguous, embedded a
     expect(preview.mock.calls).toEqual(attachments.slice(0, 3).map(file => [file]));
     expect([...host.querySelectorAll('code')].map(code => code.textContent?.trim())).toEqual(['mixed-scan-qc.pdf', 'SO-1001.xlsx']);
     expect(host.querySelector('a')?.getAttribute('href')).toBe('https://example.invalid/source');
+    const pdf = buttons[1];
+    pdf.focus();
+    await act(async () => root.render(<XiaozhuMarkdown text={text} index={index} onOpen={open} attachments={attachments} onOpenAttachment={file => preview(file)} />));
+    expect(host.querySelectorAll('button')[1]).toBe(pdf);
+    expect(document.activeElement).toBe(pdf);
     await act(async () => root.render(<XiaozhuMarkdown text={text} index={index} onOpen={open} onOpenAttachment={preview} />));
     expect([...host.querySelectorAll('button')].some(button => button.textContent === 'mixed-scan-qc.pdf')).toBe(false);
   } finally {

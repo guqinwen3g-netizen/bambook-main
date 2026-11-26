@@ -1,6 +1,6 @@
 /** 小竹回答的排版：标题、列表、表格、强调；记录编号可点开。不允许内嵌 HTML。 */
 import React from 'react';
-import Markdown from 'react-markdown';
+import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Link, Root, Text } from 'mdast';
 import type { Node, Parent } from 'unist';
@@ -13,6 +13,31 @@ import type {RouteTarget} from '../../nav';
 const SAFE = /^(https?:|mailto:|bambook:)/i;
 const ATTACHMENT_LINK = 'bambook://task-attachment';
 const EMPTY_ATTACHMENTS: readonly TaskAttachment[] = [];
+type LinkScope = {
+  files: readonly TaskAttachment[];
+  index: RecordRef[];
+  onOpen: (view: string, id: string, target?:RouteTarget) => void;
+  onOpenAttachment?: (file: TaskAttachment) => void;
+};
+const MarkdownLinks = React.createContext<LinkScope | null>(null);
+const markdownComponents: Components = {
+  // Attachment-derived Markdown must not initiate requests to a model-supplied image host.
+  img: ({alt}) => <span>{alt}</span>,
+  a: function SourceLink({href, children, node}) {
+    const links = React.useContext(MarkdownLinks);
+    if (!links) return <>{children}</>;
+    const {files, index, onOpen, onOpenAttachment} = links;
+    const fileIndex = node?.properties['data-task-attachment-index'];
+    const file = href === ATTACHMENT_LINK && typeof fileIndex === 'number' ? files[fileIndex] : undefined;
+    if (file && onOpenAttachment) return <button type="button" className="mist-xz-ref" onClick={() => onOpenAttachment(file)}>{children}</button>;
+    const hit = href?.startsWith('bambook://r/') ? index[Number(href.slice(12))] : undefined;
+    if (hit) return <button type="button" className="mist-xz-ref" data-code={/\d/.test(hit.text) || undefined} onClick={() => onOpen(hit.view, hit.id)}>{children}</button>;
+    const source=agentSource(href);
+    if(source)return <button type="button" className="mist-xz-ref" onClick={()=>onOpen(source.view,source.id,source.target)}>{children}</button>;
+    return href && /^https?:/i.test(href) ? <a href={href} target="_blank" rel="noopener noreferrer">{children}</a> : <>{children}</>;
+  },
+  table: ({ children }) => <div className="mist-xz-table"><table>{children}</table></div>,
+};
 
 function attachmentLinks(files: readonly TaskAttachment[]) {
   const byName = new Map<string, number | undefined>();
@@ -60,19 +85,8 @@ export function XiaozhuMarkdown({ text, index, onOpen, attachments = EMPTY_ATTAC
   const files = onOpenAttachment ? attachments : EMPTY_ATTACHMENTS;
   const attachment = React.useMemo(() => attachmentLinks(files), [files]);
   const source = React.useMemo(() => linkRecords(text, index, attachment.names), [text, index, attachment]);
-  return <div className="mist-xz-md"><Markdown remarkPlugins={[remarkGfm, attachment.plugin]} skipHtml urlTransform={url => SAFE.test(url) ? url : ''} components={{
-    // Attachment-derived Markdown must not initiate requests to a model-supplied image host.
-    img: ({alt}) => <span>{alt}</span>,
-    a: ({ href, children, node }) => {
-      const fileIndex = node?.properties['data-task-attachment-index'];
-      const file = href === ATTACHMENT_LINK && typeof fileIndex === 'number' ? files[fileIndex] : undefined;
-      if (file && onOpenAttachment) return <button type="button" className="mist-xz-ref" onClick={() => onOpenAttachment(file)}>{children}</button>;
-      const hit = href?.startsWith('bambook://r/') ? index[Number(href.slice(12))] : undefined;
-      if (hit) return <button type="button" className="mist-xz-ref" data-code={/\d/.test(hit.text) || undefined} onClick={() => onOpen(hit.view, hit.id)}>{children}</button>;
-      const source=agentSource(href);
-      if(source)return <button type="button" className="mist-xz-ref" onClick={()=>onOpen(source.view,source.id,source.target)}>{children}</button>;
-      return href && /^https?:/i.test(href) ? <a href={href} target="_blank" rel="noopener noreferrer">{children}</a> : <>{children}</>;
-    },
-    table: ({ children }) => <div className="mist-xz-table"><table>{children}</table></div>,
-  }}>{source}</Markdown></div>;
+  return <MarkdownLinks.Provider value={{files,index,onOpen,onOpenAttachment}}>
+    <div className="mist-xz-md"><Markdown remarkPlugins={[remarkGfm, attachment.plugin]} skipHtml
+      urlTransform={url => SAFE.test(url) ? url : ''} components={markdownComponents}>{source}</Markdown></div>
+  </MarkdownLinks.Provider>;
 }
