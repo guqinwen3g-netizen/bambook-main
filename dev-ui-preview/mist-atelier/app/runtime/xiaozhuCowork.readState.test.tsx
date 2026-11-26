@@ -9,8 +9,34 @@ import {useXiaozhuCowork} from './xiaozhuCowork';
 let root:Root|undefined,host:HTMLElement,channel:ReturnType<typeof useXiaozhuCowork>;
 const task={id:'task',identityId:'identity',executor:'platform',state:'succeeded',instructions:'原业务核对',result:'已完成',createdAt:'2026-11-17T04:00:00Z',updatedAt:'2026-11-17T04:01:00Z'};
 const loaded=async(url:string)=>url.includes('/agent-identities')?{items:[{id:'identity',kind:'personal',state:'active'}]}:url.includes('/agent-task-capabilities')?{platformAvailable:true}:{items:[task],nextCursor:null};
-function View({workspace='workspace'}:{workspace?:string}){channel=useXiaozhuCowork(workspace,'account:'+workspace,true);return <div>{channel.tasks.length}</div>}
+function View({workspace='workspace',conversationId}:{workspace?:string;conversationId?:string}){channel=useXiaozhuCowork(workspace,'account:'+workspace,true,conversationId);return <div>{channel.tasks.length}</div>}
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();api.mockReset();});
+
+it('rechecks opened completed reports on focus and restores access from a fresh report',async()=>{
+ const conversationId='conversation_current';
+ const report={...task,conversationId,result:'已核对原件',attachments:[{id:'file',name:'原件.pdf'}]};
+ const another={...task,id:'another',conversationId:'conversation_other'};
+ let restricted=false;
+ api.mockImplementation(async(url:string)=>{
+  if(url.includes('/personal-agent/task-access?'))return {restrictedIds:restricted?['task']:[]};
+  if(url.endsWith('/agent-tasks/task'))return {item:{...report,result:'已重新读取原件'}};
+  if(url.endsWith('/agent-tasks'))return {items:[report,another],nextCursor:null};
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View conversationId={conversationId}/>));
+ expect(channel.tasks.find(item=>item.id==='task')?.result).toBe('已核对原件');
+ restricted=true;
+ await act(async()=>window.dispatchEvent(new Event('focus')));
+ const masked=channel.tasks.find(item=>item.id==='task');
+ expect(masked).toMatchObject({state:'succeeded',contentRestricted:true,result:'',instructions:''});
+ expect(masked?.attachments).toBeUndefined();
+ expect(channel.tasks.find(item=>item.id==='another')).toEqual(another);
+ expect(api.mock.calls.filter(([url])=>url.includes('/personal-agent/task-access?')).every(([url])=>url.endsWith('?taskIds=task'))).toBe(true);
+ restricted=false;
+ await act(async()=>window.dispatchEvent(new Event('focus')));
+ expect(channel.tasks.find(item=>item.id==='task')?.result).toBe('已重新读取原件');
+});
 
 it('recovers a lost stop receipt from the one task without rereading history',async()=>{
  const waiting={...task,state:'waiting_time',version:2},stopped={...waiting,state:'cancelled',version:3};

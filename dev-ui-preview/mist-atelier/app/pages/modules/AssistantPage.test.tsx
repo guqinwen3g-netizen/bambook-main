@@ -452,6 +452,7 @@ it('keeps an unsent question, references and files with their own conversation',
 it('keeps the same conversation in sync when a paused task is resumed from its drawer', async () => {
   vi.useFakeTimers();
   let acknowledged = false;
+  let completed = false;
   let statusReads = 0;
   const paused = {
     id: 'paused-task', name: '核对模拟订单', instructions: '核对模拟订单', conversationId: 'c_resume',
@@ -472,9 +473,10 @@ it('keeps the same conversation in sync when a paused task is resumed from its d
         return { item: resumed };
       }
       if (url.endsWith('/paused-task')) {
-        if (init?.cache === 'no-store') return { item: ++statusReads > 1 ? finished : paused };
-        return { item: acknowledged ? resumed : paused };
+        statusReads++;
+        return { item: completed ? finished : acknowledged ? resumed : paused };
       }
+      if (url.includes('/personal-agent/task-access?')) return { restrictedIds: [] };
       return { items: url.endsWith('/agent-tasks') ? [acknowledged ? resumed : paused] : [], nextCursor: null };
     });
     await mount();
@@ -486,8 +488,10 @@ it('keeps the same conversation in sync when a paused task is resumed from its d
     expect(acknowledged).toBe(true);
     await act(async () => root!.render(view()));
     expect(host.textContent).not.toContain('已暂停');
-    expect(statusReads).toBe(1);
+    const readsBeforeCompletion = statusReads;
+    completed = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(statusReads).toBeGreaterThan(readsBeforeCompletion);
     expect(host.textContent).toContain('同一订单已核对');
     expect(mock.api.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
   } finally {

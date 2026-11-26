@@ -9,7 +9,7 @@ import type { AgentIdentityView } from '../../../../server/src/shared/mistAgentI
 import type { AgentTaskPage, AgentTaskView } from '../../../../server/src/shared/mistAgentTasks';
 import type { TaskAttachmentRef } from '../../../../server/src/shared/mistTaskAttachments';
 import { readPendingSubmissions, savePendingSubmissions, submissionDraftKey, submissionFingerprint, type PendingSubmission } from './xiaozhuSubmissions';
-import { normalizeAgentTaskIntentRefs, type AgentTaskIntentRef } from '../../../../server/src/shared/mistAgentTasks';
+import { normalizeAgentTaskIntentRefs, TASK_ACCESS_BATCH_LIMIT, type AgentTaskIntentRef } from '../../../../server/src/shared/mistAgentTasks';
 import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { mistApiRequest } from './workspace';
 import { splitTaskRequest as splitRequest, TASK_HISTORY_TURNS, TASK_INSTRUCTION_LIMIT } from '../../../../server/src/shared/mistTaskHistoryText';
@@ -76,6 +76,13 @@ const TASK_SEND_TIMEOUT_MS = 45_000;
 const UPLOAD_BYTES_PER_SECOND = 64 * 1024;
 const TASK_RETRY_INTERVAL_MS = 1000;
 const TASK_RETRY_MAX_MS = 8000;
+const REPORT_ACCESS_INTERVAL_MS = 10_000;
+
+function restrictReport(task: AgentTaskView): AgentTaskView {
+  return { ...task, contentRestricted: true, name: 'Agent任务', instructions: '', checkpoint: '', result: '',
+    canControl: false, attachments: undefined, intentRefs: undefined, trail: undefined, questions: [],
+    waitingProposalIds: [], resumeAt: null, waitingFor: null, nextCheckAt: null, requiredRead: null };
+}
 
 async function readCoworkTask(base: string, id: string, signal: AbortSignal): Promise<AgentTaskView> {
   signal.throwIfAborted();
@@ -115,7 +122,13 @@ export type TaskControlState = { busy: boolean; error?: string };
 
 export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string) {
   const base = workspaceId ? '/api/mist/workspaces/' + encodeURIComponent(workspaceId) : '';
-  const [available, setAvailable] = React.useState(false), [tasks, setTasks] = React.useState<AgentTaskView[]>([]);
+  const [available, setAvailable] = React.useState(false), [cachedTasks, setTasks] = React.useState<AgentTaskView[]>([]);
+  const [reportAccess, setReportAccess] = React.useState<{scope:string; restricted:Set<string>}>();
+  const tasks = React.useMemo(() => cachedTasks.map(task => reportAccess?.scope === scope && reportAccess.restricted.has(task.id)
+    ? restrictReport(task) : task), [cachedTasks, reportAccess, scope]);
+  const restrictedReports = React.useRef(new Set<string>());
+  const currentTasks = React.useRef(tasks);
+  currentTasks.current = tasks;
   const [checkingAvailability, setCheckingAvailability] = React.useState(true);
   const [loading, setLoading] = React.useState(true), [error, setError] = React.useState(''), [busy, setBusy] = React.useState(false), [more, setMore] = React.useState<string | undefined>(undefined);
   const [staleTask, setStaleTask] = React.useState<{ scope: string; id: string }>();
@@ -236,7 +249,77 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if (current()) { setLoading(false); setCheckingAvailability(false); }
     }
   }, [base, enabled, scope, checkReceipts]);
-  React.useEffect(() => { setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); setRecoveredSubmissions([]); setCheckingReceipt(false); setControls({}); controlKeys.current.clear(); setBusy(false); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); moreRead.current?.abort(); receiptRead.current?.abort(); receiptRead.current=undefined; sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [load,scope]);
+  React.useEffect(() => { restrictedReports.current = new Set(); setReportAccess(undefined); setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); setRecoveredSubmissions([]); setCheckingReceipt(false); setControls({}); controlKeys.current.clear(); setBusy(false); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); moreRead.current?.abort(); receiptRead.current?.abort(); receiptRead.current=undefined; sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [load,scope]);
+  const openReportIds = React.useMemo(() => visibleConversationId ? (conversationsOf(cachedTasks.filter(task => !task.automationId))
+    .find(conversation => conversation.id === visibleConversationId)?.tasks.map(task => task.id).join(',') ?? '') : '',
+    [cachedTasks, visibleConversationId]);
+  React.useEffect(() => {
+    if (!base || !enabled || !openReportIds) return;
+    const ids = openReportIds.split(',');
+    let request: AbortController | undefined;
+    const poll = async () => {
+      if (request || document.visibilityState === 'hidden') return;
+      const controller = new AbortController();
+      request = controller;
+      const current = () => request === controller && live.current === scope;
+      const restricted = new Set(restrictedReports.current);
+      const readable = new Set<string>();
+      try {
+        await withRequestDeadline(controller, TASK_READ_TIMEOUT_MS, '任务暂时无法核对', async signal => {
+          for (let offset = 0; offset < ids.length; offset += TASK_ACCESS_BATCH_LIMIT) {
+            signal.throwIfAborted();
+            const batch = ids.slice(offset, offset + TASK_ACCESS_BATCH_LIMIT);
+            const result = await mistApiRequest(base + '/personal-agent/task-access?taskIds=' + encodeURIComponent(batch.join(',')),
+              { signal, cache: 'no-store' }) as { restrictedIds?: string[] };
+            if (!Array.isArray(result.restrictedIds) || result.restrictedIds.some(id => !batch.includes(id))) continue;
+            for (const id of batch) if (!result.restrictedIds.includes(id)) readable.add(id);
+            for (const id of result.restrictedIds) restricted.add(id);
+          }
+        });
+      } catch (error) {
+        if ([401, 403, 404].includes(Number((error as {status?: number})?.status))) {
+          for (const id of ids) restricted.add(id);
+          readable.clear();
+        }
+      }
+      if (!current()) return;
+      const prior = restrictedReports.current;
+      if (restricted.size !== prior.size) {
+        restrictedReports.current = restricted;
+        setReportAccess({ scope, restricted });
+        setTasks(old => old.map(task => restricted.has(task.id) && !task.contentRestricted ? restrictReport(task) : task));
+      }
+      // Reopen a restricted report only after a fresh full read under the new authority.
+      const toRestore = currentTasks.current.filter(task => readable.has(task.id) && task.contentRestricted).slice(0, 4);
+      const restored = await Promise.allSettled(toRestore.map(task => readCoworkTask(base, task.id, controller.signal)));
+      if (!current()) return;
+      const confirmed = new Map(restored.flatMap(reply => reply.status === 'fulfilled' && !reply.value.contentRestricted
+        ? [[reply.value.id, reply.value] as const] : []));
+      if (confirmed.size) {
+        const remaining = new Set([...restrictedReports.current].filter(id => !confirmed.has(id)));
+        restrictedReports.current = remaining;
+        setTasks(old => old.map(item => {
+          const next = confirmed.get(item.id);
+          return next ? mergeTaskUpdate(item, next) : item;
+        }));
+        setReportAccess({ scope, restricted: remaining });
+      }
+      request = undefined;
+    };
+    const wake = () => void poll();
+    const timer = window.setInterval(wake, REPORT_ACCESS_INTERVAL_MS);
+    document.addEventListener('visibilitychange', wake);
+    window.addEventListener('focus', wake);
+    wake();
+    return () => {
+      const previous = request;
+      request = undefined;
+      previous?.abort();
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('focus', wake);
+    };
+  }, [base, enabled, openReportIds, scope]);
   const activeTasks = tasks.filter(t => COWORK_ACTIVE.includes(t.state));
   const foregroundId = activeTasks.filter(t => visibleConversationId && t.conversationId === visibleConversationId
     && (t.state === 'running' || t.state === 'queued')).at(-1)?.id;
