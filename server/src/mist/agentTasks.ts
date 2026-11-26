@@ -5,6 +5,7 @@ import { hasScope } from '../auth/permissionService';
 import { normalizeAgentTaskIntentRefs, type AgentTaskActivity, type AgentTaskEvent, type AgentTaskQuestion, type AgentTaskView, type AgentTaskIntentRef } from '../shared/mistAgentTasks';
 import type { TaskAttachmentRef } from '../shared/mistTaskAttachments';
 import { taskIntentCeilingAllows } from './agentTaskIntentRefs';
+import { validConversationId } from './agentConversations';
 import { isAgentActor, type AgentActor } from './agentDelegation';
 import { identityRecord, personalIdentityId, assertServiceLease, serviceActorFromIdentity, type AgentServiceLease } from './agentIdentities';
 import { fail, MistApiError } from './errors';
@@ -155,7 +156,7 @@ function replay(c: TaskRecord, action: string, requestId: string, input: unknown
   return true;
 }
 export async function createTask(db: any, actor: TokenPayload, workspaceId: string, input: Record<string, unknown>, now: number, scopeHash = taskScopeHash(), automationId?: string, trustedIntentRefs:AgentTaskIntentRef[] = [], attachments?: { fingerprint: unknown; save: () => Promise<{ files: MistStoredFile[]; origins?: TaskAttachmentRef[] }> }, trustedSources:TaskSourceRef[] = []) {
-  if (Object.keys(input).some(k => !['requestId', 'identityId', 'name', 'instructions','executor','locale','conversationId'].includes(k))||input.executor!==undefined&&!['platform','external'].includes(input.executor as string)||input.locale!==undefined&&input.executor!=='platform'||input.conversationId!==undefined&&(input.executor!=='platform'||typeof input.conversationId!=='string'||!/^[A-Za-z0-9_-]{8,64}$/.test(input.conversationId))) fail('INVALID_INPUT', '任务字段无效', 400);
+  if (Object.keys(input).some(k => !['requestId', 'identityId', 'name', 'instructions','executor','locale','conversationId'].includes(k))||input.executor!==undefined&&!['platform','external'].includes(input.executor as string)||input.locale!==undefined&&input.executor!=='platform'||input.conversationId!==undefined&&(input.executor!=='platform'||!validConversationId(input.conversationId))) fail('INVALID_INPUT', '任务字段无效', 400);
   const requestId = rid(input.requestId), name = plain(input.name, 60, '任务名称'), instructions = plain(input.instructions, 4000, '任务内容');
   const { value: identity } = await identityRecord(db, workspaceId, id(input.identityId));
   if (identity.ownerId !== actor.userId || !identity.enabled || !identity.key || identity.key.revokedAt || identity.key.expiresAt <= now || identity.key.credentialVersion !== actor.credentialVersion) fail('PRECONDITION', '请先启用本人负责的Agent连接', 422);

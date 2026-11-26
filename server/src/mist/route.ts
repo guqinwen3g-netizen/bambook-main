@@ -32,6 +32,7 @@ import { samePublicOrigin } from '../shared/bambookPublicOrigins';
 import { responseLocale } from './responseLanguage';
 import type { PlatformVoiceStore } from '../ai/platformVoice';
 import { TASK_HEADER, TASK_CONTROL_HEADER } from './agentTasks';
+import { validConversationId } from './agentConversations';
 import type { MistMailReceiver } from './mail/receiverWorker';
 import { MistMailService } from './mail/service';
 import { MistMailCredentials } from './mail/credentials';
@@ -133,8 +134,10 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   router.post('/workspaces/:id/voice/sessions', run(async (req, res) => {
     const prior = actor(req), workspaceId = req.params.id;
     if (isAgentActor(prior)) fail('FORBIDDEN', '语音只供本人使用', 403);
-    const body = exactBody(req.body, ['locale', 'taskId']);
+    const body = exactBody(req.body, ['locale', 'taskId', 'conversationId']);
     if (body.taskId !== undefined && (typeof body.taskId !== 'string' || body.taskId.length > 100)) fail('INVALID_INPUT', '任务编号无效', 400);
+    const { conversationId } = body;
+    if (conversationId !== undefined && !validConversationId(conversationId)) fail('INVALID_INPUT', '对话编号无效', 400);
     const origin = req.get('Origin') ?? '';
     if (!samePublicOrigin(req.get('Host') ?? '', origin) && !(/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.get('Host') ?? ''))) fail('FORBIDDEN', '语音来源无效', 403);
     const voice = options.voice; if (!voice) fail('VOICE_NOT_CONFIGURED', '平台尚未配置实时语音', 503);
@@ -143,6 +146,7 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
     const task = async (id: string) => {
       const item = await repository.getAgentTask(prior, workspaceId, id);
       if (item.executor !== 'platform' || item.identityId !== personalIdentityId(workspaceId, prior.userId)) fail('FORBIDDEN', '只能接续本人的个人 Agent 事项', 403);
+      if (conversationId !== undefined && item.conversationId !== conversationId) fail('FORBIDDEN', '只能接续当前对话的事项', 403);
       return item;
     };
     res.setHeader('Cache-Control', 'private, no-store');
@@ -152,7 +156,7 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
         if (current?.waitingProposalIds.length) fail('AGENT_CONFIRMATION_REQUIRED', '请先在页面确认当前事项', 422);
         const question = current?.questions?.find(q => !q.answer);
         if (current && question) return repository.answerAgentTaskQuestion(prior, workspaceId, current.id, { requestId, version: current.version, questionId: question.id, answer: text });
-        return repository.assignPersonalAgentTask(prior, workspaceId, { requestId, name: text.slice(0, 60), instructions: text, locale: responseLocale(body.locale) }, delegation.makeServiceCredential);
+        return repository.assignPersonalAgentTask(prior, workspaceId, { requestId, name: text.slice(0, 60), instructions: text, locale: responseLocale(body.locale), ...(conversationId === undefined ? {} : { conversationId }) }, delegation.makeServiceCredential);
       },
       control: async (action, current, requestId) => {
         if (action !== 'cancel') return repository.changeAgentTask(prior, workspaceId, current.id, action, { requestId, version: current.version });
