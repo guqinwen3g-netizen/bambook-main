@@ -22,7 +22,7 @@ export function composeTaskInstructions(history: ReadonlyArray<{state:string;ins
     const room = remaining - (context.length ? 1 : 0);
     if (room < 3) break;
     const historyText = `我：${splitTaskRequest(task.instructions)}\n小竹：${textPrefix(task.result,CONTEXT_REPLY)}`
-      .replaceAll(REQUEST_MARK,'\n〔本次请求〕\n');
+      .split(REQUEST_MARK).join('\n〔本次请求〕\n');
     const item = textPrefix(historyText,room);
     context.unshift(item);
     remaining = room - item.length;
