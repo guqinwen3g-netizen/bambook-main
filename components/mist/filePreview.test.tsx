@@ -38,10 +38,12 @@ describe('附件预览类型', () => {
 it.each([[22,21], [90,22], [-6,0], [1.5,0], [undefined,0]])('positions a requested PDF page once (%s)',async(initialPdfPage,pageOffset)=>{
   const mockWidth=vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(640);
   const canvas=vi.spyOn(HTMLCanvasElement.prototype,'getContext').mockReturnValue(null);
+  const layout=vi.spyOn(HTMLElement.prototype,'offsetTop','get').mockImplementation(function(this:HTMLElement){
+    return this.classList.contains('mist-viewer-page')?[...this.parentElement!.children].indexOf(this)*100:0;
+  });
   const bounds=vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(function(this:HTMLElement){
     if(!this.classList.contains('mist-viewer-page'))return new DOMRect(0,77,640,800);
-    const page=[...this.parentElement!.children].indexOf(this);
-    return new DOMRect(0,77+page*100-this.parentElement!.scrollTop,620,90);
+    return new DOMRect(0,77+(this.offsetTop-this.parentElement!.scrollTop)*0.98,620,90);
   });
   try {
     const pdfPage={getViewport:({scale}: {scale:number})=>({width:600*scale,height:850*scale}),render:()=>({promise:Promise.resolve(),cancel:vi.fn()})};
@@ -55,7 +57,7 @@ it.each([[22,21], [90,22], [-6,0], [1.5,0], [undefined,0]])('positions a request
     await act(async()=>btn('放大').click());
     await flush();
     expect(scroll.scrollTop).toBe(1234);
-  } finally { bounds.mockRestore();canvas.mockRestore();mockWidth.mockRestore(); }
+  } finally { bounds.mockRestore();layout.mockRestore();canvas.mockRestore();mockWidth.mockRestore(); }
 });
 
 describe('附件预览浮层', () => {

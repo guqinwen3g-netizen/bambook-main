@@ -221,14 +221,14 @@ function PdfView({ blob, zoom, onFitScale, onPages, onFail, initialPdfPage }: Re
     if (!scroll || !doc || !width || openingPage === undefined || !Number.isSafeInteger(openingPage) || positioned.current === doc) return;
     const page = Math.max(1, Math.min(openingPage, doc.numPages));
     const target = scroll.children.item(page - 1);
-    if (!target) return;
+    if (!(target instanceof HTMLElement)) return;
     positioned.current = doc;
     if (page > 1) {
-      // Scroll only the PDF pane so dialog and keyboard focus stay in place.
-      scroll.scrollTop += target.getBoundingClientRect().top - scroll.getBoundingClientRect().top - scroll.clientTop;
+      // Use the pane's layout coordinates before the opening dialog scale settles.
+      scroll.scrollTop = target.offsetTop;
     }
   }, [doc, openingPage, width]);
-  return <div ref={box} className="mist-viewer-scroll mist-viewer-pages">
+  return <div ref={box} className="mist-viewer-scroll mist-viewer-pages" style={openingPage === undefined ? undefined : { position: 'relative' }}>
     {doc && base ? Array.from({ length: doc.numPages }, (_, i) => <PdfPage key={i} doc={doc} n={i + 1} scale={scale} base={base} root={box} />) : <Loading />}
   </div>;
 }
