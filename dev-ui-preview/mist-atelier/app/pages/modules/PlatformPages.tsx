@@ -245,7 +245,7 @@ export function AssistantPage(){
     if(!withinAttachmentLimits([...files,...next]))return;
     setError('');setAttachmentRefs(next);if(!picker)field.current?.focus();
   };
-  const cowork=useXiaozhuCowork(w.workspace?.id,scope,canChat,conversationId);
+  const cowork=useXiaozhuCowork(w.workspace?.id,scope,canChat,conversationId,originTaskId);
   const restrictedTaskIds=new Set(cowork.tasks.filter(task=>task.contentRestricted).map(task=>task.id));
   const hasRestrictedAttachment=attachmentRefs.some(ref=>restrictedTaskIds.has(ref.taskId));
   const handledRecoveries=React.useRef(new Set<string>());
@@ -277,16 +277,16 @@ export function AssistantPage(){
   },[cowork.recoveredSubmissions,conversationId,taskText,selected,files,attachmentRefs,clearDraft]);
   const showTaskHistory=canChat&&(cowork.available||cowork.tasks.length>0);
   const index=React.useMemo(()=>recordIndex(w.state),[w.state]),automationRules=useAutomationRules(w.workspace?.id,showTaskHistory,rulesOpen),meta=useConversationMeta(w.workspace?.id,showTaskHistory),conversations=React.useMemo(()=>conversationsOf(cowork.tasks,meta.items),[cowork.tasks,meta.items]),current=conversations.find(c=>c.id===conversationId)??(openedOrigin?.scope===scope&&openedOrigin.conversationId===conversationId?conversationsOf(cowork.tasks.filter(task=>task.conversationId===conversationId))[0]:undefined),visibleTasks=showTaskHistory?(current?.tasks??[]):[],proposals=(w.state?.agentProposals??[]).filter(p=>p.state==='pending'),voice=usePersonalAgentVoice(scope+':'+canChat,w.workspace?.id,cowork.track,conversationId),inCall=voiceInCall(voice);
-  const originActions=React.useRef({refreshTask:cowork.refreshTask,track:cowork.track,openConversation,go:nav.go});
-  originActions.current={refreshTask:cowork.refreshTask,track:cowork.track,openConversation,go:nav.go};
+  const originActions=React.useRef({refreshTask:cowork.refreshTask,openConversation,go:nav.go});
+  originActions.current={refreshTask:cowork.refreshTask,openConversation,go:nav.go};
   React.useEffect(()=>{
     if(!originTaskId){originHandled.current='';setOriginStatus(undefined);return;}
     const operation=JSON.stringify([scope,originTaskId,originAttempt]);
-    if(!w.workspace?.id||!canChat||cowork.loading||originHandled.current===operation)return;
+    if(!w.workspace?.id||!canChat||originHandled.current===operation)return;
     const controller=new AbortController();
     originRead.current=controller;
     setOriginStatus('loading');
-    void originActions.current.refreshTask(originTaskId,controller.signal).then(task=>{
+    void originActions.current.refreshTask(originTaskId,controller.signal,{retainOrigin:true}).then(task=>{
       if(!task||controller.signal.aborted||originRead.current!==controller)return;
       originRead.current=undefined;
       originHandled.current=operation;
@@ -295,7 +295,6 @@ export function AssistantPage(){
         originActions.current.go('assistant',originTaskId,{section:'tasks'});
         return;
       }
-      originActions.current.track(task);
       atBottomRef.current=false;
       setAtBottom(false);
       originActions.current.openConversation(task.conversationId,true);
@@ -309,7 +308,7 @@ export function AssistantPage(){
       }
     });
     return ()=>{controller.abort();if(originRead.current===controller)originRead.current=undefined;};
-  },[originTaskId,w.workspace?.id,scope,canChat,cowork.loading,originAttempt]);
+  },[originTaskId,w.workspace?.id,scope,canChat,originAttempt]);
   const newConversation=()=>{
     const unsubmitted = cowork.available
       ? [...inactiveDrafts.keys()].reverse().find(id=>!conversations.some(conversation=>conversation.id===id))

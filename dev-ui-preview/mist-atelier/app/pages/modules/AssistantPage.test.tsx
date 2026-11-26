@@ -105,6 +105,54 @@ it('opens the exact task from a reminder even when it was absent from the loaded
   expect(host.querySelector('[data-task-id="older-task"]')?.textContent).toContain('客户书面确认的交期是哪天？');
 });
 
+it('opens a pending question from its reminder without waiting for unrelated history', async () => {
+  const task={id:'pending-reminder',conversationId:'c_pending_reminder',identityId:'personal',executor:'platform',
+    name:'核对交期',instructions:'核对订单',state:'waiting_human',version:1,canControl:true,
+    waitingProposalIds:[],questions:[{id:'question',question:'客户已确认哪天交货？'}],
+    createdAt:'2026-11-26T01:00:00Z',updatedAt:'2026-11-26T01:00:00Z'};
+  let finishHistory!: (page:{items:never[];nextCursor:null})=>void;
+  const history=new Promise<{items:never[];nextCursor:null}>(resolve=>{finishHistory=resolve;});
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async(url:string)=>{
+    if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    if(url.endsWith('/agent-tasks/pending-reminder'))return {item:task};
+    if(url.endsWith('/agent-tasks'))return history;
+    return {items:[],nextCursor:null};
+  });
+  await mount();
+  await act(async()=>root!.render(view(true,task.id,'task-origin')));
+  expect(mock.api.mock.calls.some(([url])=>url.endsWith('/agent-tasks/pending-reminder'))).toBe(true);
+  expect(host.querySelector('[data-task-id="pending-reminder"]')?.textContent).toContain('客户已确认哪天交货？');
+  await act(async()=>finishHistory({items:[],nextCursor:null}));
+  expect(host.querySelector('[data-task-id="pending-reminder"]')?.textContent).toContain('客户已确认哪天交货？');
+});
+
+it('does not reopen a reminder read that was in flight when history access was denied', async () => {
+  const task={id:'protected-reminder',conversationId:'c_protected_reminder',identityId:'personal',executor:'platform',
+    name:'核对交期',instructions:'核对订单',state:'waiting_human',version:1,canControl:true,
+    waitingProposalIds:[],questions:[{id:'question',question:'仅本人可见的交期确认'}],
+    createdAt:'2026-11-26T01:00:00Z',updatedAt:'2026-11-26T01:00:00Z'};
+  let denyHistory!: (error:Error)=>void, finishTask!: (response:{item:typeof task})=>void;
+  const history=new Promise((_,reject)=>{denyHistory=reject;});
+  const direct=new Promise<{item:typeof task}>(resolve=>{finishTask=resolve;});
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async(url:string)=>{
+    if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    if(url.endsWith('/agent-tasks/protected-reminder'))return direct;
+    if(url.endsWith('/agent-tasks'))return history;
+    return {items:[],nextCursor:null};
+  });
+  await mount();
+  await act(async()=>root!.render(view(true,task.id,'task-origin')));
+  expect(mock.api.mock.calls.some(([url])=>url.endsWith('/agent-tasks/protected-reminder'))).toBe(true);
+  await act(async()=>denyHistory(Object.assign(new Error('任务访问已失效'),{status:403})));
+  await act(async()=>finishTask({item:task}));
+  expect(host.textContent).not.toContain('仅本人可见的交期确认');
+  expect(host.textContent).toContain('任务暂时无法核对');
+});
+
 it('asks which running task to check before issuing a read-only status request', async () => {
   const conversationId='c_status_choices';
   const a={
