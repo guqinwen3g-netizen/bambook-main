@@ -79,6 +79,7 @@ export function FilePreview({ files, index, onIndex, onClose, load, onDownload, 
   useModalFocus(open, onClose, ref);
   const cache = React.useRef(new Map<string, Promise<Blob>>());
   const [blob, setBlob] = React.useState<Blob | null>(null), [error, setError] = React.useState(''), [downloadError, setDownloadError] = React.useState('');
+  const [readAttempt, retryRead] = React.useReducer((attempt: number) => attempt + 1, 0);
   const [zoom, setZoom] = React.useState<Zoom>('fit'), [rotate, setRotate] = React.useState(0), [fitScale, setFitScale] = React.useState(1), [pages, setPages] = React.useState(0);
   const info = file ? previewKind(file) : { kind: 'unsupported' as PreviewKind };
   React.useEffect(() => {
@@ -88,7 +89,7 @@ export function FilePreview({ files, index, onIndex, onClose, load, onDownload, 
     let p = cache.current.get(file.id); if (!p) { p = load(file); cache.current.set(file.id, p); p.catch(() => cache.current.delete(file.id)); }
     p.then(b => { if (live) setBlob(b); }, e => { if (live) setError(e instanceof Error ? e.message : '附件读取失败'); });
     return () => { live = false; };
-  }, [file?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [file?.id, readAttempt]); // eslint-disable-line react-hooks/exhaustive-deps
   const many = files.length > 1;
   const go = React.useCallback((d: 1 | -1) => { if (files.length > 1) onIndex((index + d + files.length) % files.length); }, [files.length, index, onIndex]);
   const zoomable = info.kind === 'image' || info.kind === 'pdf';
@@ -106,6 +107,7 @@ export function FilePreview({ files, index, onIndex, onClose, load, onDownload, 
   }, [open, many, go, zoomable, fitScale]);
   if (!file) return null;
   const download = async () => { if (!onDownload) return; setDownloadError(''); try { await onDownload(file); } catch (e) { setDownloadError(e instanceof Error ? e.message : '下载失败'); } };
+  const retry = () => { ref.current?.focus(); retryRead(); };
   const sub = [KIND_LABEL[info.kind], formatFileSize(file.size), info.kind === 'pdf' && pages ? `共 ${pages} 页` : ''].filter(Boolean).join(' · ');
   const currentScale = zoom === 'fit' ? fitScale : zoom;
   return <Portal><div className="mist-scrim" onClick={onClose} />
@@ -132,7 +134,10 @@ export function FilePreview({ files, index, onIndex, onClose, load, onDownload, 
       {downloadError && <div className="mist-viewer-note"><Banner tone="bad" title={uiText("下载失败")}>{downloadError}</Banner></div>}
       <div className="mist-viewer-stage" data-kind={info.kind}>
         {info.kind === 'unsupported' ? <Unsupported reason={info.reason} onDownload={onDownload ? download : undefined} />
-          : error ? <div className="mist-viewer-center"><EmptyState icon={FileQuestion} title={uiText("预览未能打开")} description={uiText(error)} action={onDownload ? <Button icon={Download} onClick={() => void download()}>{uiText("下载原件")}</Button> : undefined} /></div>
+          : error ? <div className="mist-viewer-center"><EmptyState icon={FileQuestion} title={uiText("预览未能打开")} description={uiText(error)} action={(!blob || onDownload) && <div className="mist-row">
+            {!blob && <Button onClick={retry}>{uiText('重试')}</Button>}
+            {onDownload && <Button icon={Download} onClick={() => void download()}>{uiText("下载原件")}</Button>}
+          </div>} /></div>
           : !blob ? <Loading />
           : <Renderer key={file.id} kind={info.kind} blob={blob} name={file.name} zoom={zoom} rotate={rotate} onFitScale={setFitScale} onPages={setPages} onFail={setError} initialPdfPage={initialPdfPage} />}
       </div>

@@ -105,6 +105,20 @@ describe('附件预览浮层', () => {
     mount([{ id: 'e', name: '报告.pdf' }], async () => { throw new Error('附件读取失败'); }); await flush();
     expect(document.body.textContent).toContain('预览未能打开'); expect(document.body.textContent).toContain('附件读取失败');
   });
+  it('retries the same original in the open preview after a temporary read failure', async () => {
+    const file = { id: 'report', name: '原件.png' };
+    const load = vi.fn(async () => new Blob(['image'], { type: 'image/png' }));
+    load.mockRejectedValueOnce(new Error('附件读取失败'));
+    const view = mount([file], load);
+    await flush();
+    const dialog = document.querySelector('[data-file-preview="report"]')!;
+    await act(async () => btn('重试').click());
+    await flush();
+    expect(load.mock.calls).toEqual([[file], [file]]);
+    expect(document.querySelector('[data-file-preview="report"]')).toBe(dialog);
+    expect(dialog.querySelector('img')?.alt).toBe(file.name);
+    expect(view.onClose).not.toHaveBeenCalled();
+  });
   it('关闭按钮回调 onClose', async () => {
     const view = mount([{ id: 'a', name: 'a.png' }], async () => new Blob(['x'])); await flush();
     await act(async () => btn('关闭').click()); expect(view.onClose).toHaveBeenCalled();
