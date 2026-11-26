@@ -30,6 +30,36 @@ async function fixture(complete:(input:LlmCompletionInput)=>Promise<string>,opti
 }
 const tool=(name:string,args:Record<string,unknown>)=>JSON.stringify({name,arguments:args});
 
+it('compiles a read-only order report in one query, one detail batch, and one report turn', async () => {
+ const complete = vi.fn(async (input: LlmCompletionInput) => {
+  const message = String(input.messages[0].content);
+  const facts = JSON.parse(message.slice(message.indexOf('{"task":')));
+  const last = facts.history.recent.at(-1);
+  if (!last) return tool('bambook_query', {type:'order',limit:3});
+  if (last.name==='bambook_query') {
+   const ids = last.result.results.map((row:{id:string})=>row.id);
+   return tool('bambook_get_orders', {ids});
+  }
+  return tool('bambook_task', {action:'finish',outcome:'succeeded',result:last.result.orders?.map((order:{label:string})=>order.label).join('、')??'缺少订单详情'});
+ });
+ const f=await fixture(complete,{mode:'read'});
+ f.worker.start(3_600_000);
+ const {item:task}=(await f.human.post(f.base+'/agent-tasks').send({
+  requestId:randomUUID(),identityId:f.id,name:'核对订单进度',instructions:'只读核对当前三张订单并汇总。',executor:'platform',
+ }).expect(201)).body;
+ await f.drain();
+ expect(complete).toHaveBeenCalledTimes(3);
+ const lastPrompt=String(complete.mock.calls[2][0].messages[0].content);
+ const evidence=JSON.parse(lastPrompt.slice(lastPrompt.indexOf('{"task":'))).history.recent.at(-1);
+ expect(evidence).toMatchObject({name:'bambook_get_orders',result:{orders:[expect.objectContaining({type:'order'}),expect.objectContaining({type:'order'}),expect.objectContaining({type:'order'})]}});
+ expect(evidence.result).not.toHaveProperty('object');
+ expect(evidence.result).not.toHaveProperty('revision');
+ const result=await f.current(task.id);
+ expect(result).toMatchObject({state:'succeeded',trail:expect.arrayContaining([expect.objectContaining({label:'读取 3 张订单',completed:true})])});
+ expect(result.result).toBe(evidence.result.orders.map((row:{label:string})=>row.label).join('、'));
+ expect((await f.human.get(f.base).expect(200)).body.workspace.state).toEqual(f.workspace.state);
+});
+
 it('shows only the owner’s active XiaoZhu tasks with a live stage and hides tasks that need the owner', async () => {
  const waiting = Promise.withResolvers<string>();
  const entered = Promise.withResolvers<void>();
@@ -156,24 +186,27 @@ it.each(['resume','answer'] as const)('wakes a continuing task after a committed
  expect(await f.current(task.id)).toMatchObject({id:task.id,state:'succeeded',result:'续办完成。'});
 });
 
-it.each(['plain reply','bound order','blind write'] as const)('applies the correct freshness check after a user answer: %s',async mode=>{
+it.each(['plain reply','bound order','batch report','blind write'] as const)('applies the correct freshness check after a user answer: %s',async mode=>{
  const finish=tool('bambook_task',{action:'finish',outcome:'succeeded',result:'核对完成。'});
- let orderId='',customerId='';
+ let orderId='',otherOrderId='',customerId='';
+ const boundOrder=mode==='bound order'||mode==='batch report';
  const complete=vi.fn(async()=>finish).mockResolvedValueOnce(tool('bambook_task',{action:'question',question:'请给数量。'}));
- if(mode==='bound order')complete.mockResolvedValueOnce(finish).mockImplementationOnce(async()=>tool('bambook_get',{type:'order',id:orderId}));
+ if(mode==='batch report')complete.mockImplementationOnce(async()=>tool('bambook_get_orders',{ids:[orderId,otherOrderId]}));
+ if(boundOrder)complete.mockResolvedValueOnce(finish).mockImplementationOnce(async()=>tool('bambook_get',{type:'order',id:orderId}));
  if(mode==='blind write')complete.mockImplementationOnce(async()=>tool('bambook_execute',{command:{type:'customer.update',payload:{id:customerId,patch:{name:'不应被写入'}}}}));
  const f=await fixture(complete);
- orderId=f.workspace.state.orders[0].id;customerId=f.workspace.state.customers[0].id;
+ orderId=f.workspace.state.orders[0].id;otherOrderId=f.workspace.state.orders[1].id;customerId=f.workspace.state.customers[0].id;
  f.worker.start(3_600_000);
- const {item:task}=(await f.human.post(f.base+'/personal-agent/tasks').send({requestId:randomUUID(),name:'核对数量',instructions:'数量不足时请先提问。',...(mode==='bound order'?{intentRefs:[{kind:'orders',id:orderId}]}:{})}).expect(201)).body;
+ const {item:task}=(await f.human.post(f.base+'/personal-agent/tasks').send({requestId:randomUUID(),name:'核对数量',instructions:'数量不足时请先提问。',...(boundOrder?{intentRefs:[{kind:'orders',id:orderId}]}:{})}).expect(201)).body;
  await f.drain();
  const waiting=await f.current(task.id);
  await f.human.post(f.base+'/agent-tasks/'+task.id+'/answer').send({requestId:randomUUID(),version:waiting.version,questionId:waiting.questions[0].id,answer:'27'}).expect(200);
  await f.drain();
  expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'核对完成。'});
- expect(complete).toHaveBeenCalledTimes(mode==='plain reply'?2:mode==='blind write'?3:4);
+ expect(complete).toHaveBeenCalledTimes({'plain reply':2,'blind write':3,'bound order':4,'batch report':5}[mode]);
  const record=(await taskRecord(f.local.database,f.workspace.id,task.id)).value;
- const rejected=record.platform!.steps[mode==='bound order'?2:1]?.result;
+ const rejected=record.platform!.steps[mode==='batch report'?3:mode==='bound order'?2:1]?.result;
+ if(mode==='batch report')expect(record.platform!.steps[2]?.result).toMatchObject({orders:[expect.objectContaining({id:orderId}),expect.objectContaining({id:otherOrderId})]});
  if(mode!=='plain reply')expect(rejected).toMatchObject({error:true,message:expect.stringContaining('回源读取')});
  expect((await f.human.get(f.base).expect(200)).body.workspace.state.customers).toEqual(f.workspace.state.customers);
 });
