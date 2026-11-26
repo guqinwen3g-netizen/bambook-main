@@ -182,3 +182,124 @@ it('resumes only the sole authorized unfinished task in the requested conversati
     app.locals.voice.stopCalls();
   }
 });
+
+it('keeps an explicit spoken answer on its chosen question when text and voice race', async () => {
+  const origin = 'http://127.0.0.1';
+  const upstream = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  await once(upstream, 'listening');
+  let provider: WebSocket | undefined;
+  const replies = new Map<string, Record<string, unknown>>();
+  upstream.on('connection', peer => {
+    provider = peer;
+    peer.on('message', raw => {
+      const message = JSON.parse(raw.toString());
+      if (message.type === 'session.create') peer.send(JSON.stringify({ type: 'session.created' }));
+      if (message.type === 'conversation.item.create') {
+        const item = message.items[0];
+        replies.set(item.call_id, JSON.parse(item.content[0].text));
+      }
+    });
+  });
+  const app = createMistServer(undefined, {
+    local: createMistLocalRuntime({ directory: dir }),
+    voice: {
+      config: () => ({ apiKey: 'test-only', voice: 'voice', speed: 0, loudness: 0 }),
+      connect: () => new WebSocket('ws://127.0.0.1:' + (upstream.address() as AddressInfo).port),
+    },
+    agentTasks: {
+      configured: () => true,
+      tickMs: 3_600_000,
+      complete: async () => JSON.stringify({
+        name: 'bambook_task', arguments: { action: 'question', question: '请补充模拟订单编号。' },
+      }),
+    },
+  });
+  const server = createServer(app), detach = app.locals.voice.attach(server);
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const worker = app.locals.platformTaskWorker;
+  worker.start(3_600_000);
+  let browser: WebSocket | undefined;
+  try {
+    const { client, base } = await human(app, 'demo-sales');
+    const getTask = async (id: string): Promise<AgentTaskView> =>
+      (await client.get(base + '/agent-tasks/' + id).expect(200)).body.item;
+    const createWaiting = async (conversationId: string) => {
+      const { item } = (await client.post(base + '/personal-agent/tasks').send({
+        requestId: randomUUID(), name: '待补充资料', instructions: '核对模拟订单。', conversationId,
+      }).expect(201)).body;
+      await worker.tick();
+      await worker.settled();
+      const task = await getTask(item.id);
+      expect(task.state).toBe('waiting_human');
+      return task;
+    };
+    const ticket = (data: { conversationId: string; taskId?: string; questionId?: string }) =>
+      client.post(base + '/voice/sessions').set('Origin', origin).send(data);
+    const connect = async (issued: { id: string; ticket: string }) => {
+      browser = new WebSocket('ws://127.0.0.1:' + (server.address() as AddressInfo).port + '/api/mist/voice/stream?id=' + issued.id,
+        ['bambook-voice-v1', 'bambook-ticket.' + issued.ticket], { origin });
+      const messages: Array<{ type: string; item?: AgentTaskView }> = [];
+      browser.on('message', raw => messages.push(JSON.parse(raw.toString())));
+      await once(browser, 'open');
+      await vi.waitFor(() => expect(messages.some(message => message.type === 'ready')).toBe(true));
+      return messages;
+    };
+    const speak = async (id: string, transcript: string) => {
+      provider!.send(JSON.stringify({ type: 'conversation.item.input_audio_transcription.started' }));
+      provider!.send(JSON.stringify({ type: 'conversation.item.input_audio_transcription.completed', event_id: id, transcript }));
+      provider!.send(JSON.stringify({
+        type: 'response.function_call_arguments.done', items: [{ call_id: id, name: 'bambook_voice_task', arguments: '{}' }],
+      }));
+      return vi.waitFor(() => {
+        expect(replies.has(id)).toBe(true);
+        return replies.get(id);
+      }, { timeout: 3000 });
+    };
+    const closeBrowser = async () => {
+      const closed = once(browser!, 'close');
+      browser!.close();
+      await closed;
+      browser = undefined;
+    };
+
+    const staleConversation = 'c_voice_stale_question';
+    const stale = await createWaiting(staleConversation);
+    const questionId = stale.questions![0].id;
+    await ticket({ conversationId: staleConversation, questionId }).expect(400);
+    await ticket({ conversationId: 'c_voice_other', taskId: stale.id, questionId }).expect(403);
+    const issued = (await ticket({ conversationId: staleConversation, taskId: stale.id, questionId }).expect(201)).body;
+    await client.post(base + '/agent-tasks/' + stale.id + '/answer').send({
+      requestId: randomUUID(), version: stale.version, questionId, answer: '文字答案：订单 A。',
+    }).expect(200);
+    await connect(issued);
+    expect(await speak('stale-spoken', '语音答案：订单 B。')).toEqual({ error: true, message: '问题已更新，请在原事项核对' });
+    expect((await getTask(stale.id)).questions?.[0].answer).toBe('文字答案：订单 A。');
+    const current = (await client.get(base + '/agent-tasks').expect(200)).body.items as AgentTaskView[];
+    expect(current.filter(task => task.conversationId === staleConversation).map(task => task.id)).toEqual([stale.id]);
+    await closeBrowser();
+    const rejected = await ticket({ conversationId: staleConversation, taskId: stale.id, questionId }).expect(409);
+    expect(rejected.body.error.code).toBe('AGENT_TASK_CHANGED');
+
+    const happyConversation = 'c_voice_happy_question';
+    const happy = await createWaiting(happyConversation);
+    const newTicket = (await ticket({ conversationId: happyConversation, taskId: happy.id, questionId: happy.questions![0].id }).expect(201)).body;
+    const messages = await connect(newTicket);
+    expect(await speak('correct-spoken', '模拟订单 C。')).toMatchObject({ state: 'queued' });
+    expect((await getTask(happy.id)).questions?.[0].answer).toBe('模拟订单 C。');
+    expect(messages.find(message => message.type === 'task')?.item?.id).toBe(happy.id);
+    expect(await speak('next-task', '再核对模拟订单 D。')).toMatchObject({ state: 'queued' });
+    expect(messages.find(message => message.type === 'task' && message.item?.id !== happy.id)?.item).toMatchObject({
+      conversationId: happyConversation, instructions: '再核对模拟订单 D。',
+    });
+  } finally {
+    browser?.terminate();
+    detach();
+    upstream.clients.forEach(peer => peer.terminate());
+    await Promise.all([
+      worker.stop(),
+      new Promise<void>(resolve => server.close(() => resolve())),
+      new Promise<void>(resolve => upstream.close(() => resolve())),
+    ]);
+  }
+});
