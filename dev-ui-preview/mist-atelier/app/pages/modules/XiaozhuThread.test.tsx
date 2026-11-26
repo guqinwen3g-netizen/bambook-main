@@ -11,6 +11,21 @@ const fns=()=>({onAnswer:vi.fn(),onCancel:vi.fn(),onRetry:vi.fn(),onCopy:vi.fn()
 const paint=(tasks:any[],f:ReturnType<typeof fns>&Partial<ThreadActions>=fns(),proposals:any[]=[])=>act(async()=>root.render(<MistRoot><XiaozhuThread tasks={tasks} index={index} proposals={proposals} {...f}/></MistRoot>));
 beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
+it('offers explicit voice continuation only on eligible tasks and passes the selected task', async () => {
+ const onVoiceTask=vi.fn();
+ const first=task({id:'first',name:'核对交期',executor:'platform',conversationId:'c_order_review',state:'waiting_human',
+  questions:[{id:'delivery-question',question:'请给交期',askedAt:'2026-11-26T01:00:00Z'}]});
+ const second=task({id:'second',name:'核对数量',executor:'platform',conversationId:'c_order_review',state:'paused'});
+ const done=task({id:'done',name:'已办完',executor:'platform',conversationId:'c_order_review',state:'succeeded'});
+ const legacy=task({id:'legacy',name:'旧任务',executor:'platform'});
+ await paint([first,second,done,legacy],{...fns(),onVoiceTask});
+ expect(queryByRole(host,'button',{name:'语音接续 已办完'})).toBeNull();
+ expect(queryByRole(host,'button',{name:'语音接续 旧任务'})).toBeNull();
+ await act(async()=>getByRole(host,'button',{name:'语音接续 核对数量'}).click());
+ expect(onVoiceTask).toHaveBeenCalledExactlyOnceWith(second,undefined);
+ await act(async()=>getByRole(host,'button',{name:'语音接续 核对交期'}).click());
+ expect(onVoiceTask).toHaveBeenLastCalledWith(first,'delivery-question');
+});
 it('requires detailed review for medium risk and routes a pending receipt to its original proposal',async()=>{
  const onDecide=vi.fn(async()=>{}),onRecoverProposal=vi.fn(async()=>{});
  const f={...fns(),onDecide,onRecoverProposal};

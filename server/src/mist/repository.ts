@@ -45,7 +45,7 @@ import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, ass
 import { collectTaskSources, knownCommandSourcesVisible, taskScopeHash, taskSourcesVisible } from './agentTaskVisibility';
 import { taskIntentRefsVisible, validateTaskIntentRefs } from './agentTaskIntentRefs';
 import {taskNotice,taskNoticeCandidates} from './agentTaskAttention';
-import {personalTaskActivity,personalTaskActivityCandidates} from './agentTasks';
+import {personalTaskActivity,personalTaskActivityCandidates,UNFINISHED_TASK_STATES} from './agentTasks';
 import type {AgentTaskActivity} from '../shared/mistAgentTasks';
 import {markTaskNoticeRead,waitTaskUntil,platformTaskUsage,agentDailyUsage,assertDailyRoom} from './agentTasks';
 import {assertTaskBusinessRead,checkTaskCondition,type PlatformTaskScanCursor} from './agentTasks';
@@ -742,6 +742,27 @@ export class MistRepository {
         if (item) (item.state === 'running' ? running : queued).push(item);
       }
       return { items: [...running, ...queued] };
+    });
+  }
+  async personalVoiceResumeTaskId(prior: TokenPayload, workspaceId: string, conversationId: string): Promise<string | undefined> {
+    if (isAgentActor(prior)) fail('FORBIDDEN', '语音只供本人使用', 403);
+    return this.transact(async db => {
+      const metadataActor = await this.taskAccess(db, prior, workspaceId, 'ai:chat');
+      const now = Date.now();
+      const candidates = await personalTaskActivityCandidates(db, workspaceId, metadataActor.userId, now, conversationId);
+      if (!candidates.length) return;
+      const { actor, row } = await this.own(db, prior, workspaceId, 'ai:chat');
+      const visible = this.accessView(row, actor, scopeOf(row)).state;
+      let selected: string | undefined;
+      for (const task of candidates) {
+        try { await assertTaskViewAuthority(db, actor, task, now); }
+        catch (error) { if (error instanceof MistApiError) continue; throw error; }
+        if (!UNFINISHED_TASK_STATES.includes(taskView(task, actor, now).state)) continue;
+        if (!await this.taskViewSourcesAllowed(db, row, actor, task, visible)) continue;
+        if (selected !== undefined) return;
+        selected = task.id;
+      }
+      return selected;
     });
   }
   async listAgentTaskNotices(prior:TokenPayload,workspaceId:string){

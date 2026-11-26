@@ -33,12 +33,23 @@ export class MistVoiceService {
     await binding.authorize();
     if (!this.config()) fail('VOICE_NOT_CONFIGURED', '平台尚未配置实时语音', 503);
     if (!/^https?:\/\//.test(origin) || new URL(origin).origin !== origin) fail('VOICE_ORIGIN_INVALID', '语音来源无效', 403);
-    for (const [key, ticket] of this.tickets) if (this.now() - ticket.at >= TICKET_TTL) { this.tickets.delete(key); this.owners.delete(ticket.binding.owner); }
-    if (this.owners.has(binding.owner)) fail('VOICE_ALREADY_ACTIVE', '请先结束当前语音', 409);
-    if (this.tickets.size + this.calls.size >= 100) fail('VOICE_BUSY', '语音繁忙，请稍后重试', 429);
     if (binding.taskId) await binding.task(binding.taskId);
+    const now = this.now();
+    let replaceTicket: string | undefined;
+    // After all authorization awaits, replace only a ticket that has not entered an upgrade.
+    for (const [key, ticket] of this.tickets) {
+      if (now - ticket.at >= TICKET_TTL) {
+        this.tickets.delete(key);
+        this.owners.delete(ticket.binding.owner);
+      } else if (ticket.binding.owner === binding.owner) {
+        replaceTicket = key;
+      }
+    }
+    if (!replaceTicket && this.owners.has(binding.owner)) fail('VOICE_ALREADY_ACTIVE', '请先结束当前语音', 409);
+    if (!replaceTicket && this.owners.size >= 100) fail('VOICE_BUSY', '语音繁忙，请稍后重试', 429);
     const token = randomBytes(32).toString('base64url'), id = randomUUID();
-    this.tickets.set(id, { id, tokenHash: digest(token), origin, at: this.now(), binding });
+    if (replaceTicket) this.tickets.delete(replaceTicket);
+    this.tickets.set(id, { id, tokenHash: digest(token), origin, at: now, binding });
     this.owners.add(binding.owner);
     return { id, ticket: token, expiresIn: TICKET_TTL / 1000 };
   }

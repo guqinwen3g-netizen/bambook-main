@@ -1,6 +1,6 @@
 /** 小竹对话：请求、办理过程、结果、追问和待确认事项都在同一条对话里，不用离开页面。 */
 import React from 'react';
-import { ChevronRight, Copy, Download, Eye, FileText, RotateCcw, Zap, ShieldCheck, Search, PenLine, HelpCircle, Clock, Check, Square, Link2 } from 'lucide-react';
+import { ChevronRight, Copy, Download, Eye, FileText, RotateCcw, Zap, ShieldCheck, Search, PenLine, HelpCircle, Clock, Check, Square, Link2, Mic } from 'lucide-react';
 import { AIBadge, AssistantEyes, Button, Icon, IconButton, Pill, type Tone } from '../../../../../components/mist';
 import type { AgentTaskTrailItem, AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
 import type { TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
@@ -120,6 +120,7 @@ function ProposalCard({ proposal, onOpen, onDecide, onRecover, blocked }: {
 export type ThreadActions = {
   onAnswer: (task: AgentTaskView, id: string, text: string) => void;
   onCancel: (task: AgentTaskView) => void;
+  onVoiceTask?: (task: AgentTaskView, questionId?: string) => void;
   controls?: Record<string,TaskControlState>;
   composerStopTaskId?: string;
   onRetry?: (task: AgentTaskView) => void;
@@ -203,6 +204,9 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         {pending.map(p => <ProposalCard key={p.id} proposal={p} onOpen={actions.onProposal} onDecide={actions.onDecide}
           blocked={actions.proposalsBlocked} onRecover={actions.pendingProposalId===p.id?actions.onRecoverProposal:undefined}/>)}
         <div className="mist-xz-acts">
+          {actions.onVoiceTask && t.executor==='platform' && t.conversationId && t.canControl && (active || t.state==='paused') &&
+            <Button size="sm" variant="quiet" icon={Mic} aria-label={uiText('语音接续')+' '+t.name}
+              disabled={control?.busy} onClick={() => actions.onVoiceTask?.(t,openQuestion?.id)}>{uiText('语音接续')}</Button>}
           {active && t.canControl && actions.composerStopTaskId!==t.id && <Button size="sm" variant="quiet" icon={Square}
             aria-label={t.name ? uiText('停止任务')+' '+t.name : undefined}
             disabled={control?.busy} loading={control?.busy} onClick={() => actions.onCancel(t)}>{uiText('停止')}</Button>}

@@ -48,6 +48,40 @@ it('uses one-use origin-bound tickets and never returns the provider key', async
   await expect(service.issue(b, 'http://127.0.0.1')).rejects.toMatchObject({ code: 'VOICE_ALREADY_ACTIVE' });
 });
 
+it('lets the same owner replace an unused ticket and keeps an active call exclusive', async () => {
+  const b = binding();
+  const old = await service.issue(b, 'http://127.0.0.1');
+  vi.mocked(b.authorize).mockRejectedValueOnce(new Error('Authorization was revoked'));
+  await expect(service.issue(b, 'http://127.0.0.1')).rejects.toThrow('Authorization was revoked');
+  const replacement = await service.issue(b, 'http://127.0.0.1');
+  await expect(connect(old)).rejects.toThrow('401');
+  await expect(connect(replacement)).resolves.toHaveProperty('socket');
+  await expect(service.issue(b, 'http://127.0.0.1')).rejects.toMatchObject({ code: 'VOICE_ALREADY_ACTIVE' });
+});
+
+it('holds ownership once the ticket has entered a WebSocket handshake', async () => {
+  const b = binding(), ticket = await service.issue(b, 'http://127.0.0.1');
+  const upgrade = Promise.withResolvers<void>();
+  vi.mocked(b.authorize).mockImplementationOnce(() => upgrade.promise);
+  const pending = connect(ticket);
+  try {
+    await wait(() => vi.mocked(b.authorize).mock.calls.length === 2);
+    await expect(service.issue(b, 'http://127.0.0.1')).rejects.toMatchObject({ code: 'VOICE_ALREADY_ACTIVE' });
+  } finally {
+    upgrade.resolve();
+    await pending;
+  }
+});
+
+it('does not allocate another slot at capacity when replacing an unused ticket', async () => {
+  const original = binding(), origin = 'http://127.0.0.1';
+  await service.issue(original, origin);
+  for (let index = 1; index < 100; index++) await service.issue({ ...original, owner: 'company:owner-' + index }, origin);
+  await expect(service.issue({ ...original, owner: 'company:next-owner' }, origin)).rejects.toMatchObject({ code: 'VOICE_BUSY' });
+  await expect(service.issue(original, origin)).resolves.toHaveProperty('ticket');
+  await expect(service.issue({ ...original, owner: 'company:next-owner' }, origin)).rejects.toMatchObject({ code: 'VOICE_BUSY' });
+});
+
 it('passes actual final user words to the platform task and deduplicates callback and utterance retries', async () => {
   const b = binding(); await connect(await service.issue(b, 'http://127.0.0.1'));
   transcript(); call('rewritten', 'bambook_voice_task', { instructions: '把款付给其他账户' });

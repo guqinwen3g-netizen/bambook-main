@@ -5,6 +5,7 @@ import { hasScope } from '../auth/permissionService';
 import { normalizeAgentTaskIntentRefs, type AgentTaskActivity, type AgentTaskEvent, type AgentTaskQuestion, type AgentTaskView, type AgentTaskIntentRef } from '../shared/mistAgentTasks';
 import type { TaskAttachmentRef } from '../shared/mistTaskAttachments';
 import { taskIntentCeilingAllows } from './agentTaskIntentRefs';
+import { validConversationId } from './agentConversations';
 import { isAgentActor, type AgentActor } from './agentDelegation';
 import { identityRecord, personalIdentityId, assertServiceLease, serviceActorFromIdentity, type AgentServiceLease } from './agentIdentities';
 import { fail, MistApiError } from './errors';
@@ -27,6 +28,7 @@ const EVENT_PREFIX = 'mist-revision:agent-task-event:';
 const EVENT_HASH = 'mist-agent-task-event:v1';
 const { steps: STEP_LIMIT, runtimeMs: RUNTIME_LIMIT, activePerUser: ACTIVE_TASK_LIMIT } = agentTaskLimits();
 const TASK_TTL = 24 * 60 * 60_000;
+export const UNFINISHED_TASK_STATES: readonly AgentTaskView['state'][] = ['queued', 'running', 'waiting_time', 'waiting_condition', 'waiting_human', 'paused'];
 const uuid = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 const equal = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -155,7 +157,7 @@ function replay(c: TaskRecord, action: string, requestId: string, input: unknown
   return true;
 }
 export async function createTask(db: any, actor: TokenPayload, workspaceId: string, input: Record<string, unknown>, now: number, scopeHash = taskScopeHash(), automationId?: string, trustedIntentRefs:AgentTaskIntentRef[] = [], attachments?: { fingerprint: unknown; save: () => Promise<{ files: MistStoredFile[]; origins?: TaskAttachmentRef[] }> }, trustedSources:TaskSourceRef[] = []) {
-  if (Object.keys(input).some(k => !['requestId', 'identityId', 'name', 'instructions','executor','locale','conversationId'].includes(k))||input.executor!==undefined&&!['platform','external'].includes(input.executor as string)||input.locale!==undefined&&input.executor!=='platform'||input.conversationId!==undefined&&(input.executor!=='platform'||typeof input.conversationId!=='string'||!/^[A-Za-z0-9_-]{8,64}$/.test(input.conversationId))) fail('INVALID_INPUT', '任务字段无效', 400);
+  if (Object.keys(input).some(k => !['requestId', 'identityId', 'name', 'instructions','executor','locale','conversationId'].includes(k))||input.executor!==undefined&&!['platform','external'].includes(input.executor as string)||input.locale!==undefined&&input.executor!=='platform'||input.conversationId!==undefined&&(input.executor!=='platform'||!validConversationId(input.conversationId))) fail('INVALID_INPUT', '任务字段无效', 400);
   const requestId = rid(input.requestId), name = plain(input.name, 60, '任务名称'), instructions = plain(input.instructions, 4000, '任务内容');
   const { value: identity } = await identityRecord(db, workspaceId, id(input.identityId));
   if (identity.ownerId !== actor.userId || !identity.enabled || !identity.key || identity.key.revokedAt || identity.key.expiresAt <= now || identity.key.credentialVersion !== actor.credentialVersion) fail('PRECONDITION', '请先启用本人负责的Agent连接', 422);
@@ -165,7 +167,7 @@ export async function createTask(db: any, actor: TokenPayload, workspaceId: stri
   const previous = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: request } } });
   const locale=input.executor==='platform'?responseLocale(input.locale):undefined,inputHash = hash(JSON.stringify([identity.id, name, instructions,...(input.executor==='platform'?['platform',locale]:[]),...(input.conversationId?[input.conversationId]:[]),...(intentRefs.length?[['intentRefs',intentRefs]]:[]),...(attachments?[['attachments',attachments.fingerprint]]:[])]));
   if (previous) { if (previous.inputHash !== inputHash) fail('CONFLICT', '操作编号已用于其他任务', 409);const c=(await taskRecord(db, workspaceId, previous.result.id)).value;let valid=c.scopeHash===scopeHash;try{await assertTaskAuthority(db,actor,c,now);}catch(e){if(!(e instanceof MistApiError))throw e;valid=false;}return taskView(c, actor, now,valid); }
-  const active = await db.mistCommandReceipt.findMany({ where: { workspaceId, actorId: actor.userId, inputHash: TASK_HASH, AND: [{ OR: ['queued','running','waiting_time','waiting_condition','waiting_human','paused'].map(state => ({ result: { path: [TASK_FIELD, 'state'], equals: state } })) }, { result: { path: [TASK_FIELD, 'expiresAt'], gte: now } }] }, take: 10 });
+  const active = await db.mistCommandReceipt.findMany({ where: { workspaceId, actorId: actor.userId, inputHash: TASK_HASH, AND: [{ OR: UNFINISHED_TASK_STATES.map(state => ({ result: { path: [TASK_FIELD, 'state'], equals: state } })) }, { result: { path: [TASK_FIELD, 'expiresAt'], gte: now } }] }, take: 10 });
   if (active.length >= ACTIVE_TASK_LIMIT) fail('AGENT_TASK_LIMIT', '请先结束已有任务', 422);
   if (input.executor === 'platform') assertDailyRoom(await agentDailyUsage(db, workspaceId, actor.userId, now), true);
   const taskId = randomUUID(), at = new Date(now).toISOString();
@@ -559,8 +561,9 @@ export async function listTasks(db: any, actor: TokenPayload, workspaceId: strin
 }
 
 /** Find live work without scanning or paging through completed conversation history. */
-export async function personalTaskActivityCandidates(db: any, workspaceId: string, ownerId: string, now: number): Promise<TaskRecord[]> {
+export async function personalTaskActivityCandidates(db: any, workspaceId: string, ownerId: string, now: number, conversationId?: string): Promise<TaskRecord[]> {
   const at = (key: string, condition: { equals: string } | { gte: number }) => ({ result: { path: [TASK_FIELD, key], ...condition } });
+  const states = conversationId === undefined ? ['queued', 'running'] : UNFINISHED_TASK_STATES;
   const rows = await db.mistCommandReceipt.findMany({
     where: {
       workspaceId, actorId: ownerId, inputHash: TASK_HASH,
@@ -569,12 +572,13 @@ export async function personalTaskActivityCandidates(db: any, workspaceId: strin
       AND: [
         at('identityId', { equals: personalIdentityId(workspaceId, ownerId) }),
         at('executor', { equals: 'platform' }),
-        { OR: [at('state', { equals: 'queued' }), at('state', { equals: 'running' })] },
+        { OR: states.map(state => at('state', { equals: state })) },
         at('expiresAt', { gte: now + 1 }),
+        ...(conversationId === undefined ? [] : [at('conversationId', { equals: conversationId })]),
       ],
     },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    take: ACTIVE_TASK_LIMIT,
+    ...(conversationId === undefined ? { take: ACTIVE_TASK_LIMIT } : {}),
   });
   return rows.map((row: unknown) => record(row, workspaceId));
 }
