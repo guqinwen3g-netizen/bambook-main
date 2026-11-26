@@ -161,6 +161,17 @@ function xiaozhuSuggestions(state:ReturnType<typeof useMistWorkspace>['state']):
   return list.length>1?list:XIAOZHU_PROMPTS;
 }
 const XIAOZHU_PROMPTS=['哪些订单交期临近，需要优先跟进？','总结引用订单的当前进展和风险','列出未收款发票，按金额从高到低','起草一段给客户的出运进度说明'];
+const ASSISTANT_SOURCE_KIND_BY_VIEW = new Map([
+  ['orders/detail','orders'], ['invoices','invoices'], ['risks','risks'], ['crm','customers'],
+  ['procurement','purchases'], ['shipments','shipments'], ['development/detail','developments'],
+]);
+function matchesReadOnlySource(source: unknown, selectedIds: readonly string[]): boolean {
+  if (!source || typeof source !== 'object') return false;
+  const {id,label,view,entityId} = source as Record<string,unknown>;
+  const kind = typeof view === 'string' ? ASSISTANT_SOURCE_KIND_BY_VIEW.get(view) : undefined;
+  return !!kind && typeof id === 'string' && typeof label === 'string' && typeof entityId === 'string'
+    && id === kind + ':' + entityId && selectedIds.includes(id);
+}
 export function AssistantPage(){
   const nav=useNav(),tasksOpen=nav.route.section==='tasks'||nav.route.section==='agent';
   const rulesRoute=nav.route.section==='automations';
@@ -406,7 +417,7 @@ export function AssistantPage(){
       }
       return;
     }
-  if(sendLock.current||busy||!question.trim()||!w.workspace?.id||!configuration?.configured||!canChat)return;const bound=scope,controller=new AbortController();active.current=controller;const content=question.trim(),sent=ids;sendLock.current=true;setBusy(true);setError('');try{const result=await request('/api/mist/workspaces/'+encodeURIComponent(w.workspace.id)+'/assistant',{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json','X-Bambook-Locale':interfaceLocale()},body:JSON.stringify({message:content,history:messages.slice(-8).map(m=>({role:m.role,content:m.content.slice(0,2000)})),sourceIds:sent})});if(result.mode!=='read_only'||typeof result.text!=='string'||!result.text.trim()||!Number.isSafeInteger(result.revision)||!Array.isArray(result.sources)||result.sources.some((source:any)=>!source||!sent.includes(source.id)||typeof source.label!=='string'||typeof source.entityId!=='string'||!['orders/detail','invoices','risks'].includes(source.view)||source.id!==(source.view==='orders/detail'?'orders':source.view)+':'+source.entityId))throw new Error('助手响应格式无效');if(live.current===bound){setMessages(previous=>[...previous,{role:'user',content},{role:'assistant',content:result.text,sources:result.sources,revision:result.revision,truncated:!!result.truncated}]);if(liveConversation.current===conversationId)setQuestion('');}}catch(e){if(live.current===bound&&!(e instanceof Error&&e.name==='AbortError'))setError(e instanceof Error?e.message:'模型调用失败');}finally{if(active.current===controller){active.current=null;sendLock.current=false;if(live.current===bound)setBusy(false);}}};
+  if(sendLock.current||busy||!question.trim()||!w.workspace?.id||!configuration?.configured||!canChat)return;const bound=scope,controller=new AbortController();active.current=controller;const content=question.trim(),sent=ids;sendLock.current=true;setBusy(true);setError('');try{const result=await request('/api/mist/workspaces/'+encodeURIComponent(w.workspace.id)+'/assistant',{method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json','X-Bambook-Locale':interfaceLocale()},body:JSON.stringify({message:content,history:messages.slice(-8).map(m=>({role:m.role,content:m.content.slice(0,2000)})),sourceIds:sent})});if(result.mode!=='read_only'||typeof result.text!=='string'||!result.text.trim()||!Number.isSafeInteger(result.revision)||!Array.isArray(result.sources)||result.sources.some((source:unknown)=>!matchesReadOnlySource(source,sent)))throw new Error('助手响应格式无效');if(live.current===bound){setMessages(previous=>[...previous,{role:'user',content},{role:'assistant',content:result.text,sources:result.sources,revision:result.revision,truncated:!!result.truncated}]);if(liveConversation.current===conversationId)setQuestion('');}}catch(e){if(live.current===bound&&!(e instanceof Error&&e.name==='AbortError'))setError(e instanceof Error?e.message:'模型调用失败');}finally{if(active.current===controller){active.current=null;sendLock.current=false;if(live.current===bound)setBusy(false);}}};
   const retryBlocked=busy||cowork.loading||!!cowork.error||inCall||!!(question.trim()||selected.length||files.length||attachmentRefs.length);
   const retryTask=(task:AgentTaskView)=>{
     if(retryBlocked||sendLock.current||!cowork.available)return;

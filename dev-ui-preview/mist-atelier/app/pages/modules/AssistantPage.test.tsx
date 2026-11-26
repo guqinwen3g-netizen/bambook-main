@@ -14,6 +14,30 @@ let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
 const view=(active=true, taskId?:string,section='tasks')=> <Nav.Provider value={{route:{view:'assistant',...(taskId?{section,id:taskId}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
 const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
 
+it.each([
+  ['customers','crm'], ['purchases','procurement'], ['shipments','shipments'], ['developments','development/detail'],
+])('opens an authorized %s source from a read-only model reply',async(kind,sourceView)=>{
+  const record={id:'record-1',name:'原始记录',code:'DOC-001',state:'open',supplier:'模拟供应商',customer:'模拟客户',description:'模拟业务记录'};
+  const state=mock.workspace.state;
+  const catalog=kind==='purchases'||kind==='shipments'?state.fulfillment:state;
+  catalog[kind==='developments'?'devs':kind].push(record);
+  const id=kind+':'+record.id;
+  mock.fetch.mockImplementation(async(url:string)=>response(url.endsWith('/status')?{configured:true,models:['test-model']}:
+    {text:'所选业务来源已核对',mode:'read_only',revision:1,sources:[{id,label:'打开已核对的原记录',view:sourceView,entityId:record.id}]}));
+  await mount();
+  await click('引用业务记录');
+  const select=document.querySelector<HTMLSelectElement>('select[aria-label="检索对象"]')!;
+  await act(async()=>{select.value=kind;select.dispatchEvent(new Event('change',{bubbles:true}));});
+  await click('加入问题');
+  await question('请核对已选来源');
+  await click('发送');
+  const [,init]=mock.fetch.mock.calls.find(([url])=>String(url).endsWith('/assistant'))!;
+  expect(JSON.parse(init.body).sourceIds).toEqual([id]);
+  expect(host.textContent).toContain('所选业务来源已核对');
+  await click('打开已核对的原记录');
+  expect(go).toHaveBeenCalledWith(sourceView,record.id);
+});
+
 it('shows why a voice call ended and keeps the composer available', async () => {
   mock.fetch.mockResolvedValue(response({configured:true}));
   mock.api.mockImplementation(async(url:string)=>url.endsWith('/agent-task-capabilities')
