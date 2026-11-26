@@ -13,7 +13,8 @@ beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;host=document.
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 it('offers explicit voice continuation only on eligible tasks and passes the selected task', async () => {
  const onVoiceTask=vi.fn();
- const first=task({id:'first',name:'核对交期',executor:'platform',conversationId:'c_order_review',state:'waiting_human'});
+ const first=task({id:'first',name:'核对交期',executor:'platform',conversationId:'c_order_review',state:'waiting_human',
+  questions:[{id:'delivery-question',question:'请给交期',askedAt:'2026-11-26T01:00:00Z'}]});
  const second=task({id:'second',name:'核对数量',executor:'platform',conversationId:'c_order_review',state:'paused'});
  const done=task({id:'done',name:'已办完',executor:'platform',conversationId:'c_order_review',state:'succeeded'});
  const legacy=task({id:'legacy',name:'旧任务',executor:'platform'});
@@ -21,7 +22,9 @@ it('offers explicit voice continuation only on eligible tasks and passes the sel
  expect(queryByRole(host,'button',{name:'语音接续 已办完'})).toBeNull();
  expect(queryByRole(host,'button',{name:'语音接续 旧任务'})).toBeNull();
  await act(async()=>getByRole(host,'button',{name:'语音接续 核对数量'}).click());
- expect(onVoiceTask).toHaveBeenCalledExactlyOnceWith(second);
+ expect(onVoiceTask).toHaveBeenCalledExactlyOnceWith(second,undefined);
+ await act(async()=>getByRole(host,'button',{name:'语音接续 核对交期'}).click());
+ expect(onVoiceTask).toHaveBeenLastCalledWith(first,'delivery-question');
 });
 it('requires detailed review for medium risk and routes a pending receipt to its original proposal',async()=>{
  const onDecide=vi.fn(async()=>{}),onRecoverProposal=vi.fn(async()=>{});

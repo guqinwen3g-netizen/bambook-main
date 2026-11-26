@@ -120,7 +120,7 @@ function ProposalCard({ proposal, onOpen, onDecide, onRecover, blocked }: {
 export type ThreadActions = {
   onAnswer: (task: AgentTaskView, id: string, text: string) => void;
   onCancel: (task: AgentTaskView) => void;
-  onVoiceTask?: (task: AgentTaskView) => void;
+  onVoiceTask?: (task: AgentTaskView, questionId?: string) => void;
   controls?: Record<string,TaskControlState>;
   composerStopTaskId?: string;
   onRetry?: (task: AgentTaskView) => void;
@@ -206,7 +206,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         <div className="mist-xz-acts">
           {actions.onVoiceTask && t.executor==='platform' && t.conversationId && t.canControl && (active || t.state==='paused') &&
             <Button size="sm" variant="quiet" icon={Mic} aria-label={uiText('语音接续')+' '+t.name}
-              disabled={control?.busy} onClick={() => actions.onVoiceTask?.(t)}>{uiText('语音接续')}</Button>}
+              disabled={control?.busy} onClick={() => actions.onVoiceTask?.(t,openQuestion?.id)}>{uiText('语音接续')}</Button>}
           {active && t.canControl && actions.composerStopTaskId!==t.id && <Button size="sm" variant="quiet" icon={Square}
             aria-label={t.name ? uiText('停止任务')+' '+t.name : undefined}
             disabled={control?.busy} loading={control?.busy} onClick={() => actions.onCancel(t)}>{uiText('停止')}</Button>}

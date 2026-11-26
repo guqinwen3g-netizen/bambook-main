@@ -27,7 +27,7 @@ export function usePersonalAgentVoice(scope: string, workspaceId: string | undef
   }, []);
   const end = React.useCallback(() => { dispose(); setState('idle'); setMuted(false); }, [dispose]);
   React.useEffect(() => { setState('idle'); setError(''); setTranscript(''); setReply(''); selectedTask.current = undefined; return dispose; }, [callScope, dispose]);
-  const start = React.useCallback(async (taskId?: string) => {
+  const start = React.useCallback(async (taskId?: string, questionId?: string) => {
     if (!workspaceId || liveScope.current !== callScope) return;
     dispose(); const epoch = generation.current, r: Resources = {}; resources.current = r;
     const current = () => generation.current === epoch && liveScope.current === callScope;
@@ -51,7 +51,7 @@ export function usePersonalAgentVoice(scope: string, workspaceId: string | undef
       const bound = taskId ?? selectedTask.current;
       const session = await mistApiRequest(`/api/mist/workspaces/${encodeURIComponent(workspaceId)}/voice/sessions`, {
         method: 'POST',
-        body: JSON.stringify({ locale: interfaceLocale(), taskId: bound, conversationId: storedConversationId }),
+        body: JSON.stringify({ locale: interfaceLocale(), taskId: bound, conversationId: storedConversationId, questionId }),
       });
       if (!current()) return;
       const url = new URL('/api/mist/voice/stream', window.location.href); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
