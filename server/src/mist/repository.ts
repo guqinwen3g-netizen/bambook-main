@@ -330,7 +330,7 @@ export class MistRepository {
         const history=await Promise.all(c.conversationHistory.taskIds.map(async id=>(await taskRecord(db,row.id,id)).value));
         task.instructions=composeTaskInstructions(history,task.instructions);
       }
-      return{task,locale:c.locale??'zh-CN',businessAt:this.context(actor,row.state).now,requiresRead:platformTaskRequiresRead(c),...(c.platform?.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),steps:structuredClone(c.platform?.steps??[]),decisions:(visible.agentProposals??[]).filter(p=>p.taskId===c.id&&p.ownerId===actor.userId).map(p=>({id:p.id,state:p.state,...(p.note?{note:p.note}:{}),...(p.produced?{produced:{fileId:p.produced.fileId,fileName:p.produced.fileName}}:{})}))};});
+      return{task,locale:c.locale??'zh-CN',businessAt:this.context(actor,row.state).now,hasTaskHistory:!!c.conversationHistory?.taskIds.length,requiresRead:platformTaskRequiresRead(c),...(c.platform?.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),steps:structuredClone(c.platform?.steps??[]),decisions:(visible.agentProposals??[]).filter(p=>p.taskId===c.id&&p.ownerId===actor.userId).map(p=>({id:p.id,state:p.state,...(p.note?{note:p.note}:{}),...(p.produced?{produced:{fileId:p.produced.fileId,fileName:p.produced.fileName}}:{})}))};});
   }
   async platformTaskReadRequirements(prior:AgentActor){
     const lease=prior.agentTaskLease;

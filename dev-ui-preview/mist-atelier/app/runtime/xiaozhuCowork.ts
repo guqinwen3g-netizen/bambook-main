@@ -12,6 +12,8 @@ import { readPendingSubmissions, savePendingSubmissions, submissionDraftKey, sub
 import { normalizeAgentTaskIntentRefs, type AgentTaskIntentRef } from '../../../../server/src/shared/mistAgentTasks';
 import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { mistApiRequest } from './workspace';
+import { splitTaskRequest as splitRequest, TASK_HISTORY_TURNS, TASK_INSTRUCTION_LIMIT } from '../../../../server/src/shared/mistTaskHistoryText';
+export { splitRequest, TASK_INSTRUCTION_LIMIT };
 
 export const COWORK_ACTIVE: ReadonlyArray<AgentTaskView['state']> = ['queued', 'running', 'waiting_time', 'waiting_condition', 'waiting_human'];
 /** A bare status question in a conversation refers to the current task. */
@@ -20,10 +22,7 @@ export function isCurrentTaskStatusQuestion(text: string): boolean {
   return /^(?:(?:这个任务|当前任务|任务)?(?:完成了没有|完成了吗|完成了没|做完了没有|做完了吗|做完了没|进度怎么样|做到哪一步了)|is (?:it|the task) done|what is the task status)$/i.test(normalized);
 }
 
-const REQUEST_MARK = '\n【本次请求】\n';
-const CONTEXT_HEADER = '【此前对话】\n';
-const CONTEXT_TURNS = 3, CONTEXT_REPLY = 300, THREAD_LIMIT = 90, LIST_PAGES = 3, LEGACY_GAP_MS = 30 * 60_000;
-export const TASK_INSTRUCTION_LIMIT = 4000;
+const THREAD_LIMIT = 90, LIST_PAGES = 3, LEGACY_GAP_MS = 30 * 60_000;
 
 function textPrefix(value: string, limit: number) {
   const prefix = value.slice(0,limit);
@@ -36,36 +35,6 @@ export function formatTaskQuestion(question: string, sources: ReadonlyArray<{lab
   const footer = '\n（引用业务记录：'+sources.map(source=>source.label).join('、')+'）';
   // The structured intent references are sent separately even when the display footer does not fit.
   return text.length + footer.length <= TASK_INSTRUCTION_LIMIT ? text + footer : text;
-}
-
-/** 把此前几轮的问答压成一段上下文，随本次请求一起交给任务；展示时用 splitRequest 去掉。 */
-export function composeInstructions(history: AgentTaskView[], text: string): string {
-  const message = text.trim();
-  if (message.length > TASK_INSTRUCTION_LIMIT) throw new Error('问题超过 4000 字，请缩短后重试');
-  let remaining = TASK_INSTRUCTION_LIMIT - CONTEXT_HEADER.length - REQUEST_MARK.length - message.length;
-  if (remaining <= 0) return message;
-
-  const context: string[] = [];
-  const turns = history.filter(t => t.state === 'succeeded' && t.result).slice(-CONTEXT_TURNS).reverse();
-  for (const task of turns) {
-    const room = remaining - (context.length ? 1 : 0);
-    if (room < 3) break;
-    const historyText = `我：${splitRequest(task.instructions)}\n小竹：${textPrefix(task.result,CONTEXT_REPLY)}`
-      .replaceAll(REQUEST_MARK,'\n〔本次请求〕\n');
-    const item = textPrefix(historyText,room);
-    context.unshift(item);
-    remaining = room - item.length;
-  }
-  return context.length ? CONTEXT_HEADER + context.join('\n') + REQUEST_MARK + message : message;
-}
-export function splitRequest(instructions: string): string {
-  const at = instructions.indexOf(REQUEST_MARK);
-  if (at < 0) return instructions;
-  const prefix = instructions.slice(0,at);
-  // Older instructions could have had their context header clipped before the separator.
-  return instructions.startsWith(CONTEXT_HEADER) || CONTEXT_HEADER.startsWith(prefix)
-    ? instructions.slice(at + REQUEST_MARK.length)
-    : instructions;
 }
 
 export type ConversationMeta = { id: string; title?: string; hidden?: true };
@@ -342,16 +311,20 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         if ([...pending.current.values()].some(entry=>entry.recoveredFromStorage && entry.hasAttachments
           && (entry.sourceConversationId??entry.conversationId)===(visibleConversationId??conversationId) && entry.draftKey===draftKey))
           throw new Error('请恢复原附件后重试，或先核对提交结果');
-        saved = { requestId: crypto.randomUUID(), instructions: composeInstructions(history, message), locale: interfaceLocale(),
+        if (message.length > TASK_INSTRUCTION_LIMIT) throw new Error('问题超过 4000 字，请缩短后重试');
+        const historyTaskIds = conversationId ? [...new Set(history
+          .filter(task=>task.conversationId===conversationId&&task.executor==='platform'&&task.state==='succeeded'&&task.result)
+          .map(task=>task.id))].slice(-TASK_HISTORY_TURNS) : [];
+        saved = { requestId: crypto.randomUUID(), instructions: message, historyTaskIds, locale: interfaceLocale(),
           conversationId, sourceConversationId:visibleConversationId??conversationId, draftKey, hasAttachments:!!(files.length||attachmentRefs.length) };
         pending.current.set(fingerprint, saved);
         savePendingSubmissions(bound,pending.current);
         firstAttempt = fingerprint;
       }
-      const {requestId,instructions,locale} = saved;
+      const {requestId,instructions,locale,historyTaskIds} = saved;
       const target = saved.conversationId;
       const body = { requestId,instructions,locale,name: textPrefix(message,60), ...(target ? { conversationId:target } : {}),
-        ...(refs.length ? { intentRefs: refs } : {}), ...(attachmentRefs.length ? { attachmentRefs } : {}) };
+        ...(historyTaskIds !== undefined ? { historyTaskIds } : {}), ...(refs.length ? { intentRefs: refs } : {}), ...(attachmentRefs.length ? { attachmentRefs } : {}) };
       let submission: RequestInit = { method: 'POST', body: JSON.stringify(body) };
       if (files.length) {
         const form = new FormData();

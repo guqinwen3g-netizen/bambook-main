@@ -121,6 +121,56 @@ it('only carries authorized task history into a follow-up and masks it when its 
  expect(complete).toHaveBeenCalledTimes(2);
 });
 
+it('strips legacy automatic history and keeps an identical request replay bound to its original receipt', async () => {
+ const stale='LEGACY-CACHED-REPORT-DO-NOT-SEND';
+ const current='本次只核对公开状态。';
+ const legacy=`【此前对话】\n我：核对过期来源。\n小竹：${stale}\n【本次请求】\n${current}`;
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'仅核对本轮。'}));
+ const f=await fixture(complete),endpoint=f.base+'/personal-agent/tasks';
+ f.worker.start(3_600_000);
+ const payload={requestId:randomUUID(),name:'核对公开状态',instructions:legacy,conversationId:'c_legacy_context_case'};
+ const {item:task}=(await f.human.post(endpoint).send(payload).expect(201)).body;
+ expect(task.instructions).toBe(current);
+ await f.drain();
+ const replayed=(await f.human.post(endpoint).send(payload).expect(201)).body.item;
+ expect(replayed).toMatchObject({id:task.id,state:'succeeded',instructions:current});
+ expect(complete).toHaveBeenCalledTimes(1);
+ const prompt=String(complete.mock.calls[0][0].messages[0].content);
+ expect(prompt).toContain(current);
+ expect(prompt).not.toContain(stale);
+});
+
+it('rechecks reused history immediately before the first model request', async () => {
+ const recap='LOCAL-AUTHORIZED-REPORT';
+ const complete=vi.fn(async()=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:recap}));
+ const f=await fixture(complete),orderId=f.workspace.state.orders[0].id;
+ const conversationId='c_history_late_check',endpoint=f.base+'/personal-agent/tasks';
+ f.worker.start(3_600_000);
+ const {item:previous}=(await f.human.post(endpoint).send({
+  requestId:randomUUID(),name:'核对原资料',instructions:'核对模拟订单。',conversationId,intentRefs:[{kind:'orders',id:orderId}],
+ }).expect(201)).body;
+ await f.drain();
+ expect(await f.current(previous.id)).toMatchObject({state:'succeeded',result:recap});
+ const {item:child}=(await f.human.post(endpoint).send({
+  requestId:randomUUID(),name:'续核资料',instructions:'续核原资料。',conversationId,historyTaskIds:[previous.id],
+ }).expect(201)).body;
+ const verifyRoom=f.repository.platformTaskDailyRoom.bind(f.repository);
+ const room=vi.spyOn(f.repository,'platformTaskDailyRoom').mockImplementationOnce(async actor=>{
+  const permitted=await verifyRoom(actor);
+  await f.local.database.$transaction(async db=>{
+   const row=await db.mistWorkspace.findUnique({where:{id:f.workspace.id}});
+   await db.mistWorkspace.update({where:{id:f.workspace.id},data:{state:{
+    ...row.state,orders:row.state.orders.filter((order:{id:string})=>order.id!==orderId),
+   }}});
+  });
+  return permitted;
+ });
+ await f.drain();
+ expect(room).toHaveBeenCalledOnce();
+ expect(complete).toHaveBeenCalledTimes(1);
+ expect(await f.current(child.id)).toMatchObject({state:'access_changed',result:''});
+});
+
 it('ignores requested history from a different conversation even when the task belongs to the same person', async () => {
  const previousResult = 'OTHER-CONVERSATION-REPORT-MUST-STAY-OUT';
  const finish = (result:string) => tool('bambook_task', {action:'finish',outcome:'succeeded',result});
