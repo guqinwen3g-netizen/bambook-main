@@ -1,5 +1,6 @@
 import {expect,it} from 'vitest';
-import {composeInstructions,splitRequest,formatTaskQuestion} from './xiaozhuCowork';
+import {splitRequest,formatTaskQuestion} from './xiaozhuCowork';
+import { composeTaskInstructions as composeInstructions } from '../../../../server/src/shared/mistTaskHistoryText';
 const task=(over:any={})=>({id:'t',instructions:'上一个问题',state:'succeeded',result:'上一个答复',...over}) as any;
 it('sends a first message as is, and carries recent answers as context afterwards',()=>{
  expect(composeInstructions([],'核对订单 SO-1')).toBe('核对订单 SO-1');

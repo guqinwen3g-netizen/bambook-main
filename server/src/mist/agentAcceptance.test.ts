@@ -50,7 +50,7 @@ it('sweeps every tool and object type as the company owner', async () => {
   }
   await report('object types', rows.join('\n'));
   expect(rows.filter(r => /ERR|ERROR/.test(r))).toEqual([]);
-  expect(tools).toHaveLength(11);
+  expect(tools).toHaveLength(12);
   for (const [n, a] of [['bambook_workspaces', {}], ['bambook_commands', {}], ['bambook_audit', { workspaceId: id }], ['bambook_mail_receiving', { workspaceId: id }]] as const) { const r = await f.call(n, a); await report(n, { error: r.error, sample: r.text.slice(0, 200) }); }
 }, 120000);
 

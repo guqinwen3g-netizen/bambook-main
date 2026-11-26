@@ -40,11 +40,83 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     const init = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } });
     expect(init.result).toMatchObject({ protocolVersion: '2025-06-18', serverInfo: { name: 'bambook-mist' }, capabilities: { tools: {} } });
     expect(init.result.instructions).toContain('不可信资料');expect(init.result.instructions).toContain('truncated');
-    expect((await rpc('tools/list')).result.tools.map((t: any) => t.name)).toEqual(['bambook_workspaces', 'bambook_query', 'bambook_get', 'bambook_related', 'bambook_commands', 'bambook_audit', 'bambook_file_text', 'bambook_mail_receiving', 'bambook_task', 'bambook_preview', 'bambook_execute']);
+    expect((await rpc('tools/list')).result.tools.map((t: any) => t.name)).toEqual(['bambook_workspaces', 'bambook_query', 'bambook_get', 'bambook_get_orders', 'bambook_related', 'bambook_commands', 'bambook_audit', 'bambook_file_text', 'bambook_mail_receiving', 'bambook_task', 'bambook_preview', 'bambook_execute']);
     await request(app).post('/api/mist/mcp').set(HEADER, token).send({ jsonrpc: '2.0', method: 'notifications/initialized' }).expect(202);
     expect((await rpc('resources/list')).error.code).toBe(-32601);
     await request(app).post('/api/mist/mcp').send({ jsonrpc: '2.0', id: 1, method: 'ping' }).expect(401);
     await request(app).get('/api/mist/mcp').set(HEADER, token).expect(405);
+  });
+
+  it('reads distinct order IDs and codes from one authorized snapshot without exposing command sources', async () => {
+    const app = createMistServer(undefined, { local: createMistLocalRuntime({ directory }) });
+    const { workspace, client, tool } = await as(app, 'local-operator', 'read');
+    const [first, second] = workspace.state.orders;
+    const args = { workspaceId: workspace.id, ids: [second.code, first.id] };
+    const getForAgent = vi.spyOn(app.locals.mistRepository, 'getForAgent');
+    const result = await tool('bambook_get_orders', args);
+    expect(result.isError).toBeUndefined();
+    expect(getForAgent).toHaveBeenCalledTimes(1);
+    const batch = result.structuredContent;
+    expect(batch.snapshotRevision).toBe(workspace.revision);
+    expect(batch).not.toHaveProperty('revision');
+    expect(batch).not.toHaveProperty('object');
+    expect(batch.orders.map((order: any) => order.id)).toEqual([second.id, first.id]);
+    expect(batch.truncated).toBe(batch.orders.some((order: any) => order.truncated));
+    for (const [index, order] of [second, first].entries()) {
+      const single = (await tool('bambook_get', { workspaceId: workspace.id, type: 'order', id: order.id })).structuredContent.object;
+      const { type, id, label, link, data, truncated } = single;
+      expect(batch.orders[index]).toEqual({ type, id, label, link, data, truncated });
+    }
+    const boundTool = taskMcpTools().find(entry => entry.name === 'bambook_get_orders')!;
+    expect(boundTool.inputSchema.required).toEqual(['ids']);
+    expect(boundTool.annotations).toEqual({ readOnlyHint: true });
+    expect((await client.get('/api/mist/workspaces/' + workspace.id).expect(200)).body.workspace.revision).toBe(workspace.revision);
+  });
+
+  it('rejects malformed batches, duplicate orders and an unavailable order without returning the rest', async () => {
+    const app = createMistServer(undefined, { local: createMistLocalRuntime({ directory }) });
+    const { workspace, tool } = await as(app, 'local-operator', 'read');
+    const [first, second] = workspace.state.orders;
+    const args = { workspaceId: workspace.id };
+    for (const invalid of [
+      { ...args, ids: [first.id] },
+      { ...args, ids: Array.from({ length: 7 }, (_, i) => `order-${i}`) },
+      { ...args, ids: [first.id, first.id] },
+      { ...args, ids: [first.id, first.code] },
+      { ...args, ids: [first.id, ` ${second.id}`] },
+      { ...args, ids: [first.id, 'x'.repeat(201)] },
+      { ...args, ids: [first.id, 1] },
+      { ...args, ids: [first.id, second.id], type: 'order' },
+      { ...args, ids: [first.id, 'unavailable-order'] },
+    ]) {
+      const result = await tool('bambook_get_orders', invalid);
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toBeUndefined();
+      expect(result.content[0].text).not.toContain(first.code);
+    }
+  });
+
+  it('uses the current actor and workspace projection to reject unassigned order details', async () => {
+    const app = createMistServer(undefined, { local: createMistLocalRuntime({ directory }) });
+    const { workspace } = await as(app, 'local-operator', 'read');
+    const [allowed, hidden] = workspace.state.orders;
+    const state = { ...workspace.state, orders: [allowed] };
+    const repo = {
+      getForAgent: vi.fn().mockResolvedValue({ workspace: { ...workspace, state }, actor: { permissions: ['orders:read'] } }),
+    } as unknown as McpRepository;
+    const caller = { permissions: ['orders:read'] } as any;
+    const message = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+      name: 'bambook_get_orders', arguments: { workspaceId: workspace.id, ids: [allowed.id, hidden.id] },
+    } };
+    const result = await handleMcpMessage(repo, caller, message, (error: any) => error.message) as any;
+    expect(result.result).toMatchObject({ isError: true, content: [{ text: '订单不存在或当前账号不可见' }] });
+    expect(result.result.structuredContent).toBeUndefined();
+    expect(vi.mocked(repo.getForAgent).mock.calls).toEqual([[caller, workspace.id]]);
+
+    vi.mocked(repo.getForAgent).mockResolvedValueOnce({ workspace, actor: { permissions: [] } as any });
+    const revoked = await handleMcpMessage(repo, caller, message, (error: any) => error.message) as any;
+    expect(revoked.result).toMatchObject({ isError: true, content: [{ text: '当前账号无权读取订单' }] });
+    expect(revoked.result.structuredContent).toBeUndefined();
   });
 
   it('exposes and applies the optional related type in the MCP endpoint', async () => {

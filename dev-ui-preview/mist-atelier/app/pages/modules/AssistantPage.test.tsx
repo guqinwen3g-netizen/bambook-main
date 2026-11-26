@@ -14,6 +14,34 @@ let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
 const view=(active=true, taskId?:string,section='tasks')=> <Nav.Provider value={{route:{view:'assistant',...(taskId?{section,id:taskId}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
 const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
 
+it('sends the current question and a history reference without copying the displayed prior report', async () => {
+  const conversationId='c_history_auth_case';
+  const id='11111111-1111-4111-8111-111111111111';
+  const marker='旧报告中的模拟来源标记';
+  const original={id,identityId:'personal',executor:'platform',conversationId,
+    name:'原资料核对',instructions:'核对原资料',result:marker,state:'succeeded',canControl:false,waitingProposalIds:[],
+    createdAt:'2026-11-26T06:00:00Z',updatedAt:'2026-11-26T06:01:00Z'};
+  sessionStorage.setItem('mist.xiaozhu.conversation:session-a:workspace',conversationId);
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  const submitted:any[]=[];
+  mock.api.mockImplementation(async(url:string,init?:RequestInit)=>{
+    if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    if(init?.method==='POST'&&url.endsWith('/personal-agent/tasks')){
+      const body=JSON.parse(String(init.body));submitted.push(body);
+      return {item:{...original,id:'22222222-2222-4222-8222-222222222222',instructions:body.instructions,result:'已收到追问'}};
+    }
+    return {items:url.endsWith('/agent-tasks')?[original]:[],nextCursor:null};
+  });
+  await mount();
+  expect(host.textContent).toContain(marker);
+  await question('请重新核对。');
+  await click('发送');
+  expect(submitted).toHaveLength(1);
+  expect(submitted[0]).toMatchObject({instructions:'请重新核对。',historyTaskIds:[id]});
+  expect(JSON.stringify(submitted[0])).not.toContain(marker);
+});
+
 it('opens the exact task from a reminder even when it was absent from the loaded conversation pages', async () => {
   const archived={
     id:'older-task',conversationId:'c_archived_origin',executor:'platform',identityId:'personal',

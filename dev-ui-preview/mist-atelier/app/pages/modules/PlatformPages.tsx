@@ -173,6 +173,7 @@ export function AssistantPage(){
   const [automations,setAutomations]=React.useState(false),[automationSeed,setAutomationSeed]=React.useState(''),[newRule,setNewRule]=React.useState(0),[proposalId,setProposalId]=React.useState(''),[picker,setPicker]=React.useState(false),[drafts,setDrafts]=React.useState(false);
   const rulesOpen=!tasksOpen&&(rulesRoute||automations);
   const active=React.useRef<AbortController|null>(null),generation=React.useRef(0),live=React.useRef(''),sendLock=React.useRef(false),field=React.useRef<HTMLTextAreaElement>(null),end=React.useRef<HTMLDivElement>(null);
+  const composerDock=React.useRef<HTMLDivElement>(null);
   const originRead=React.useRef<AbortController|undefined>(undefined);
   const originHandled=React.useRef('');
   const [originStatus,setOriginStatus]=React.useState<'loading'|'unavailable'>();
@@ -262,7 +263,7 @@ export function AssistantPage(){
     return()=>{cancelled=true;};
   },[cowork.recoveredSubmissions,conversationId,taskText,selected,files,attachmentRefs,clearDraft]);
   const showTaskHistory=canChat&&(cowork.available||cowork.tasks.length>0);
-  const index=React.useMemo(()=>recordIndex(w.state),[w.state]),automationRules=useAutomationRules(w.workspace?.id,showTaskHistory,rulesOpen),meta=useConversationMeta(w.workspace?.id,showTaskHistory),conversations=React.useMemo(()=>conversationsOf(cowork.tasks,meta.items),[cowork.tasks,meta.items]),current=conversations.find(c=>c.id===conversationId)??(openedOrigin?.scope===scope&&openedOrigin.conversationId===conversationId?conversationsOf(cowork.tasks.filter(task=>task.conversationId===conversationId))[0]:undefined),visibleTasks=showTaskHistory?(current?.tasks??[]):[],proposals=(w.state?.agentProposals??[]).filter(p=>p.state==='pending'),voice=usePersonalAgentVoice(scope+':'+canChat,w.workspace?.id,cowork.track),inCall=voiceInCall(voice);
+  const index=React.useMemo(()=>recordIndex(w.state),[w.state]),automationRules=useAutomationRules(w.workspace?.id,showTaskHistory,rulesOpen),meta=useConversationMeta(w.workspace?.id,showTaskHistory),conversations=React.useMemo(()=>conversationsOf(cowork.tasks,meta.items),[cowork.tasks,meta.items]),current=conversations.find(c=>c.id===conversationId)??(openedOrigin?.scope===scope&&openedOrigin.conversationId===conversationId?conversationsOf(cowork.tasks.filter(task=>task.conversationId===conversationId))[0]:undefined),visibleTasks=showTaskHistory?(current?.tasks??[]):[],proposals=(w.state?.agentProposals??[]).filter(p=>p.state==='pending'),voice=usePersonalAgentVoice(scope+':'+canChat,w.workspace?.id,cowork.track,conversationId),inCall=voiceInCall(voice);
   const originActions=React.useRef({refreshTask:cowork.refreshTask,track:cowork.track,openConversation,go:nav.go});
   originActions.current={refreshTask:cowork.refreshTask,track:cowork.track,openConversation,go:nav.go};
   React.useEffect(()=>{
@@ -391,7 +392,7 @@ export function AssistantPage(){
         atBottomRef.current=true;
         const sent=await cowork.send(text,visibleTasks,target,selectedTaskIntentRefs(selected),files,refs);
         if(sent&&live.current===scope){
-          voice.followTask(sent.id);
+          voice.followTask(sent);
           clearDraft(conversationId,liveConversation.current);
           if(sent.conversationId&&sent.conversationId!==conversationId&&liveConversation.current===conversationId)openConversation(sent.conversationId);
         }
@@ -471,8 +472,12 @@ export function AssistantPage(){
   const remove=async(id:string)=>{setRemoving(undefined);try{await meta.save(id,{hidden:true});if(id===conversationId)newConversation();toast(uiText('已从列表移除'));}catch(e){toast(e instanceof Error?e.message:'未能移除','bad');}};
   const returnToLatest=()=>{
     const el=scrollRef.current;
-    if(!el?.scrollTo)return;
-    el.scrollTo({top:el.scrollHeight,behavior:'smooth'});
+    if(!el)return;
+    if(getComputedStyle(el).overflowY==='visible'&&end.current?.scrollIntoView){
+      end.current.scrollIntoView({block:'start',inline:'nearest'});
+      return;
+    }
+    el.scrollTo?.({top:el.scrollHeight,behavior:'smooth'});
     field.current?.focus({preventScroll:true});
   };
   // 执行中跟随新步骤；长回答完成后，从提问和第一行读起。
@@ -491,7 +496,32 @@ export function AssistantPage(){
   React.useEffect(()=>{if(atBottomRef.current)requestAnimationFrame(follow);},[threadKey]);
   // 回答排版、卡片展开等会在渲染后改变高度；停在底部时跟着到底。
   React.useEffect(()=>{const el=scrollRef.current,content=el?.firstElementChild;if(!el||!content||typeof ResizeObserver==='undefined')return;const watch=new ResizeObserver(()=>{if(atBottomRef.current)follow();});watch.observe(content);return()=>watch.disconnect();},[hasThread]);
+  React.useEffect(()=>{
+    const region=scrollRef.current,dock=composerDock.current,sentinel=end.current;
+    if(!hasThread||!region||!dock||!sentinel||typeof window.matchMedia!=='function')return;
+    const narrow=window.matchMedia('(max-width: 760px)');
+    const update=()=>{
+      if(!narrow.matches)return;
+      const visibleEnd=Math.min(dock.getBoundingClientRect().top,window.innerHeight);
+      setAtBottom(sentinel.getBoundingClientRect().top<=visibleEnd+1);
+    };
+    const resizeMode=()=>{if(narrow.matches)update();else setAtBottom(atBottomRef.current);};
+    const sizes=typeof ResizeObserver==='undefined'?undefined:new ResizeObserver(update);
+    sizes?.observe(region);
+    sizes?.observe(dock);
+    window.addEventListener('scroll',update,{capture:true,passive:true});
+    window.addEventListener('resize',update);
+    narrow.addEventListener?.('change',resizeMode);
+    update();
+    return()=>{
+      sizes?.disconnect();
+      window.removeEventListener('scroll',update,true);
+      window.removeEventListener('resize',update);
+      narrow.removeEventListener?.('change',resizeMode);
+    };
+  },[hasThread]);
   const runningTasks=visibleTasks.filter(t=>['queued','running'].includes(t.state)&&t.canControl);
+  const canStartTaskVoice=canChat&&cowork.available&&!cowork.loading&&!cowork.error&&!busy&&!inCall;
   // The composer stop button is only unambiguous for one running task while the composer is idle.
   const composerStopTask=runningTasks.length===1&&cowork.available&&!busy&&!inCall&&!question.trim()?runningTasks[0]:undefined;
   const composer=<XiaozhuComposer value={question} onChange={setQuestion} onSend={()=>void send()} onLatest={hasThread&&!atBottom?returnToLatest:undefined} ready={ready} busy={busy} working={!!composerStopTask} stopping={!!composerStopTask&&cowork.controls[composerStopTask.id]?.busy} onStop={active.current?()=>active.current?.abort():composerStopTask?()=>void cowork.cancel(composerStopTask):undefined} sources={selected} onRemoveSource={toggle} onAttach={()=>setPicker(true)} files={files} onAddFiles={cowork.available?addFiles:undefined} onRemoveFile={index=>setFiles(files.filter((_,i)=>i!==index))} attachmentRefs={attachmentRefs} onRemoveAttachmentRef={fileId=>setAttachmentRefs(refs=>refs.filter(ref=>ref.fileId!==fileId))} voice={voice} voiceAvailable={cowork.available&&(!cowork.loading&&!cowork.error||inCall)} field={field} placeholder={uiText(canChat?'问小竹，或交代一件事':'当前账号无模型助手权限')} disabled={!canChat}/>;
@@ -523,14 +553,14 @@ export function AssistantPage(){
         {canChat&&cowork.loading&&!hasThread?<div className="mist-xz-scroll"><div className="mist-xz-col mist-xz-loading" role="status" aria-label={uiText('正在读取对话')}><i/><i/><i/><i/></div></div>:hasThread?<>
           <div className="mist-xz-scroll" ref={scrollRef} onScroll={e=>{const el=e.currentTarget,near=el.scrollHeight-el.scrollTop-el.clientHeight<96;atBottomRef.current=near;setAtBottom(near);}}>
             <div className="mist-xz-col">
-              {useTaskThread?<XiaozhuThread tasks={visibleTasks} onPreviewAttachment={previewAttachment} onDownloadAttachment={downloadAttachment} controls={cowork.controls} composerStopTaskId={composerStopTask?.id} onReuseAttachment={cowork.available&&!busy&&!inCall?reuseAttachment:undefined} index={index} proposals={w.state?.agentProposals??[]} onOpenFile={fileId=>{const file=w.state?.files.find(f=>f.id===fileId);if(!file){toast(uiText('文件已不可见'),'bad');return;}void w.downloadFile(file).catch((e:Error)=>toast(e.message,'bad'));}} onAnswer={(t,id,text)=>void cowork.answer(t,id,text)} onCancel={t=>void cowork.cancel(t)} onRetry={cowork.available?retryTask:undefined} retryBlocked={retryBlocked} onCopy={text=>{void navigator.clipboard?.writeText(text).then(()=>toast(uiText('已复制')),()=>toast(uiText('复制失败，请手动选择文字'),'bad'));}} onDraft={text=>draft(text)} onAutomate={text=>{setAutomationSeed(text);setAutomations(true);}} onOpenRecord={(view,id,target)=>{if(view)w.go(view,id,target);}} onProposal={setProposalId} onDecide={decide} proposalsBlocked={w.saving||!!w.pending||!!w.pendingCreate} pendingProposalId={pendingProposalId} onRecoverProposal={recoverProposal}/>
+              {useTaskThread?<XiaozhuThread tasks={visibleTasks} onVoiceTask={canStartTaskVoice?(task,questionId)=>void voice.start(task.id,questionId):undefined} onPreviewAttachment={previewAttachment} onDownloadAttachment={downloadAttachment} controls={cowork.controls} composerStopTaskId={composerStopTask?.id} onReuseAttachment={cowork.available&&!busy&&!inCall?reuseAttachment:undefined} index={index} proposals={w.state?.agentProposals??[]} onOpenFile={fileId=>{const file=w.state?.files.find(f=>f.id===fileId);if(!file){toast(uiText('文件已不可见'),'bad');return;}void w.downloadFile(file).catch((e:Error)=>toast(e.message,'bad'));}} onAnswer={(t,id,text)=>void cowork.answer(t,id,text)} onCancel={t=>void cowork.cancel(t)} onRetry={cowork.available?retryTask:undefined} retryBlocked={retryBlocked} onCopy={text=>{void navigator.clipboard?.writeText(text).then(()=>toast(uiText('已复制')),()=>toast(uiText('复制失败，请手动选择文字'),'bad'));}} onDraft={text=>draft(text)} onAutomate={text=>{setAutomationSeed(text);setAutomations(true);}} onOpenRecord={(view,id,target)=>{if(view)w.go(view,id,target);}} onProposal={setProposalId} onDecide={decide} proposalsBlocked={w.saving||!!w.pending||!!w.pendingCreate} pendingProposalId={pendingProposalId} onRecoverProposal={recoverProposal}/>
               :<div className="mist-xz-thread">{messages.map((m,i)=>m.role==='user'?<div key={i} className="mist-xz-turn"><div className="mist-xz-user">{m.content}</div></div>:<div key={i} className="mist-xz-turn"><XiaozhuTurnShell><XiaozhuMarkdown text={m.content} index={index} onOpen={(view,id,target)=>w.go(view,id,target)}/>{m.truncated&&<p className="mist-xz-note">{uiText("回复较长，已截断。可缩小问题范围继续询问。")}</p>}
                 <div className="mist-xz-acts">{m.sources?.map(source=><Button key={source.id} size="sm" variant="quiet" iconRight={ArrowRight} onClick={()=>w.go(source.view,source.entityId)}>{uiText(source.label)}</Button>)}{canChat&&<Button size="sm" variant="quiet" icon={FileText} onClick={()=>draft(m.content)}>{uiText("保存草稿")}</Button>}</div></XiaozhuTurnShell></div>)}
                 {busy&&<div className="mist-xz-turn"><XiaozhuTurnShell><span className="mist-xz-shimmer" aria-label={uiText("小竹正在回复")}>{uiText('正在思考')}</span></XiaozhuTurnShell></div>}</div>}
               <div ref={end}/>
             </div>
           </div>
-          <div className="mist-xz-dock"><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}{checkedTask&&<p className="mist-xz-hint" role="status">{(statusCheck?.named?checkedTask.name:uiText('当前任务'))+' · '+uiText(xiaozhuTaskStatusLabel(checkedTask))}</p>}{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</div></div>
+          <div className="mist-xz-dock" ref={composerDock}><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}{checkedTask&&<p className="mist-xz-hint" role="status">{(statusCheck?.named?checkedTask.name:uiText('当前任务'))+' · '+uiText(xiaozhuTaskStatusLabel(checkedTask))}</p>}{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</div></div>
         </>:<div className="mist-xz-scroll"><div className="mist-xz-col">{error&&<Banner tone="bad" title={uiText("助手请求未完成")}>{uiText(error)}{uiText("。问题已保留，可直接重试。")}</Banner>}<XiaozhuEmpty name={w.session.user?.displayName} suggestions={xiaozhuSuggestions(w.state)} onPick={p=>{setQuestion(uiText(p));field.current?.focus();}}>{composer}{hint&&<p className="mist-xz-hint">{uiText(hint)}</p>}</XiaozhuEmpty></div></div>}
       </div>
     </div>

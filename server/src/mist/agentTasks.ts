@@ -4,7 +4,9 @@ import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
 import { normalizeAgentTaskIntentRefs, type AgentTaskActivity, type AgentTaskEvent, type AgentTaskQuestion, type AgentTaskView, type AgentTaskIntentRef } from '../shared/mistAgentTasks';
 import type { TaskAttachmentRef } from '../shared/mistTaskAttachments';
+import { splitTaskRequest, TASK_HISTORY_TURNS } from '../shared/mistTaskHistoryText';
 import { taskIntentCeilingAllows } from './agentTaskIntentRefs';
+import { validConversationId } from './agentConversations';
 import { isAgentActor, type AgentActor } from './agentDelegation';
 import { identityRecord, personalIdentityId, assertServiceLease, serviceActorFromIdentity, type AgentServiceLease } from './agentIdentities';
 import { fail, MistApiError } from './errors';
@@ -27,6 +29,7 @@ const EVENT_PREFIX = 'mist-revision:agent-task-event:';
 const EVENT_HASH = 'mist-agent-task-event:v1';
 const { steps: STEP_LIMIT, runtimeMs: RUNTIME_LIMIT, activePerUser: ACTIVE_TASK_LIMIT } = agentTaskLimits();
 const TASK_TTL = 24 * 60 * 60_000;
+export const UNFINISHED_TASK_STATES: readonly AgentTaskView['state'][] = ['queued', 'running', 'waiting_time', 'waiting_condition', 'waiting_human', 'paused'];
 const uuid = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 const equal = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -36,6 +39,13 @@ const plain = (v: unknown, max: number, label: string, optional = false) => {
 };
 const rid = (v: unknown) => plain(v, 116, '操作编号');
 const id = (v: unknown) => { if (!uuid(v)) fail('INVALID_INPUT', '任务编号无效', 400); return v as string; };
+export function parseTaskHistoryIds(value: unknown): string[] | undefined {
+  if (value === undefined) return;
+  if (!Array.isArray(value) || value.length > TASK_HISTORY_TURNS || !value.every(uuid) || new Set(value).size !== value.length) {
+    fail('INVALID_INPUT', '历史任务引用无效', 400);
+  }
+  return [...value] as string[];
+}
 const taskCreationReceiptKey = (ownerId: string, requestId: string) =>
   TASK_PREFIX + 'create:' + hash(ownerId + ':' + requestId).slice(0, 32);
 /** Date.parse normalizes impossible civil dates (e.g. November 31); never schedule from that guess. */
@@ -53,6 +63,11 @@ export type AgentTaskLease = { workspaceId: string; taskId: string; runId: strin
 export type AgentTaskControlLease = { workspaceId:string; taskId:string; hash:string };
 export type MakeTaskCredential = (workspaceId: string, taskId: string, runId: string, nonce: string) => string;
 export type MakeTaskControl = (workspaceId:string,taskId:string,generation:string)=>string;
+export type TaskConversationHistory = { taskIds: string[]; authorityTaskIds: string[] };
+type PersonalHistory = {
+  requestedIds?: string[];
+  prepare: (instructions: string) => Promise<TaskConversationHistory>;
+};
 export type TaskRecord = {
   schemaVersion: 1; id: string; workspaceId: string; identityId: string; identityName: string; ownerId: string; ownerName: string;
   name: string; instructions: string; state: Exclude<AgentTaskView['state'], 'expired' | 'budget_exhausted' | 'access_changed'>; version: number; controlVersion: number;
@@ -72,6 +87,8 @@ export type TaskRecord = {
   automationId?:string;
   /** 小竹对话分组：同一对话的多次提问共用，只用于列表归组，不影响权限与执行。 */
   conversationId?:string;
+  /** Prior results are composed at execution time and inherit every upstream authorization. */
+  conversationHistory?:TaskConversationHistory;
   executor?:'platform';
   locale?:ResponseLocale;
   platform?:PlatformTaskProgress;
@@ -134,7 +151,10 @@ export function taskView(c: TaskRecord, actor: TokenPayload, now: number, author
       : undefined;
   const executionStageSince=readable&&c.executor==='platform'&&stageSince&&Number.isFinite(stageSince)
     ? new Date(stageSince).toISOString() : undefined;
-  return { ...(c.automationId?{automationId:c.automationId}:{}), ...(c.conversationId?{conversationId:c.conversationId}:{}),...(readable&&c.intentRefs?.length?{intentRefs:c.intentRefs.map(ref=>({...ref}))}:{}), ...(readable&&c.attachments?.length?{attachments:c.attachments.map(({id,name,mimeType,size})=>({id,name,mimeType,size}))}:{}), ...(readable&&c.platform?.steps?.length?{trail:platformTrail(c.platform.steps,c.attachments)}:{}), id: c.id, identityId: c.identityId, identityName: c.identityName, name: readable ? c.name : 'Agent任务', ownerId: c.ownerId, ownerName: c.ownerName, instructions: readable ? c.instructions : '', mode:c.mode, state, version: c.controlVersion, createdAt: c.createdAt, updatedAt: c.updatedAt, expiresAt: new Date(c.expiresAt).toISOString(), stepsUsed: c.stepsUsed, stepLimit: STEP_LIMIT, runtimeUsedMs: usedRuntime(c, now), runtimeLimitMs: RUNTIME_LIMIT, lastHeartbeatAt: c.lastHeartbeatAt ? new Date(c.lastHeartbeatAt).toISOString() : c.lease ? new Date(c.lease.heartbeatAt).toISOString() : null, checkpoint: readable ? c.checkpoint : '', result: readable ? c.result : '', waitingProposalIds: readable ? c.waitingProposalIds : [], canControl: !ended, executor:c.executor??'external',...(executionStage?{executionStage}:{}),...(executionStageSince?{executionStageSince}:{}),...(runnerStatus?{runnerStatus}:{}),...(readable&&c.stopReason?{stopReason:c.stopReason}:{}), ...(c.platform?.issue?{executionIssue:{code:c.platform.issue,...(c.platform.retryAt?{retryAt:new Date(c.platform.retryAt).toISOString()}:{} )}}:{}), questions:readable?c.questions??[]:[],resumeAt:readable&&c.resumeAt?new Date(c.resumeAt).toISOString():null,waitingFor:readable&&c.condition?{type:c.condition.type,id:c.condition.id,label:c.condition.label,...(c.condition.link?{link:c.condition.link}:{})}:null,nextCheckAt:readable&&c.condition?new Date(c.condition.nextCheckAt).toISOString():null,...(readable&&c.wakeReason?{wakeReason:c.wakeReason}:{}),requiredRead:readable?c.requiredRead??null:null };
+  // Legacy personal requests may contain a caller-composed context header without source provenance.
+  const instructions = c.executor==='platform' && !c.automationId && !c.conversationHistory
+    && c.identityId===personalIdentityId(c.workspaceId,c.ownerId) ? splitTaskRequest(c.instructions) : c.instructions;
+  return { ...(c.automationId?{automationId:c.automationId}:{}), ...(c.conversationId?{conversationId:c.conversationId}:{}),...(readable&&c.intentRefs?.length?{intentRefs:c.intentRefs.map(ref=>({...ref}))}:{}), ...(readable&&c.attachments?.length?{attachments:c.attachments.map(({id,name,mimeType,size})=>({id,name,mimeType,size}))}:{}), ...(readable&&c.platform?.steps?.length?{trail:platformTrail(c.platform.steps,c.attachments)}:{}), id: c.id, identityId: c.identityId, identityName: c.identityName, name: readable ? c.name : 'Agent任务', ownerId: c.ownerId, ownerName: c.ownerName, instructions: readable ? instructions : '', mode:c.mode, state, version: c.controlVersion, createdAt: c.createdAt, updatedAt: c.updatedAt, expiresAt: new Date(c.expiresAt).toISOString(), stepsUsed: c.stepsUsed, stepLimit: STEP_LIMIT, runtimeUsedMs: usedRuntime(c, now), runtimeLimitMs: RUNTIME_LIMIT, lastHeartbeatAt: c.lastHeartbeatAt ? new Date(c.lastHeartbeatAt).toISOString() : c.lease ? new Date(c.lease.heartbeatAt).toISOString() : null, checkpoint: readable ? c.checkpoint : '', result: readable ? c.result : '', waitingProposalIds: readable ? c.waitingProposalIds : [], canControl: !ended, executor:c.executor??'external',...(executionStage?{executionStage}:{}),...(executionStageSince?{executionStageSince}:{}),...(runnerStatus?{runnerStatus}:{}),...(readable&&c.stopReason?{stopReason:c.stopReason}:{}), ...(c.platform?.issue?{executionIssue:{code:c.platform.issue,...(c.platform.retryAt?{retryAt:new Date(c.platform.retryAt).toISOString()}:{} )}}:{}), questions:readable?c.questions??[]:[],resumeAt:readable&&c.resumeAt?new Date(c.resumeAt).toISOString():null,waitingFor:readable&&c.condition?{type:c.condition.type,id:c.condition.id,label:c.condition.label,...(c.condition.link?{link:c.condition.link}:{})}:null,nextCheckAt:readable&&c.condition?new Date(c.condition.nextCheckAt).toISOString():null,...(readable&&c.wakeReason?{wakeReason:c.wakeReason}:{}),requiredRead:readable?c.requiredRead??null:null };
 }
 async function save(db: any, row: any, before: TaskRecord, next: TaskRecord) {
   const changed = await db.mistCommandReceipt.updateMany({ where: { id: row.id, workspaceId: before.workspaceId, inputHash: TASK_HASH, result: { path: [TASK_FIELD, 'version'], equals: before.version } }, data: { result: { revision: 0, [TASK_FIELD]: next } } });
@@ -154,18 +174,19 @@ function replay(c: TaskRecord, action: string, requestId: string, input: unknown
   if (c.lastAction !== action || c.lastInputHash !== hash(JSON.stringify(input))) fail('CONFLICT', '操作编号已用于其他内容', 409);
   return true;
 }
-export async function createTask(db: any, actor: TokenPayload, workspaceId: string, input: Record<string, unknown>, now: number, scopeHash = taskScopeHash(), automationId?: string, trustedIntentRefs:AgentTaskIntentRef[] = [], attachments?: { fingerprint: unknown; save: () => Promise<{ files: MistStoredFile[]; origins?: TaskAttachmentRef[] }> }, trustedSources:TaskSourceRef[] = []) {
-  if (Object.keys(input).some(k => !['requestId', 'identityId', 'name', 'instructions','executor','locale','conversationId'].includes(k))||input.executor!==undefined&&!['platform','external'].includes(input.executor as string)||input.locale!==undefined&&input.executor!=='platform'||input.conversationId!==undefined&&(input.executor!=='platform'||typeof input.conversationId!=='string'||!/^[A-Za-z0-9_-]{8,64}$/.test(input.conversationId))) fail('INVALID_INPUT', '任务字段无效', 400);
-  const requestId = rid(input.requestId), name = plain(input.name, 60, '任务名称'), instructions = plain(input.instructions, 4000, '任务内容');
+export async function createTask(db: any, actor: TokenPayload, workspaceId: string, input: Record<string, unknown>, now: number, scopeHash = taskScopeHash(), automationId?: string, trustedIntentRefs:AgentTaskIntentRef[] = [], attachments?: { fingerprint: unknown; save: () => Promise<{ files: MistStoredFile[]; origins?: TaskAttachmentRef[] }> }, trustedSources:TaskSourceRef[] = [], personalHistory?:PersonalHistory) {
+  if (Object.keys(input).some(k => !['requestId', 'identityId', 'name', 'instructions','executor','locale','conversationId'].includes(k))||input.executor!==undefined&&!['platform','external'].includes(input.executor as string)||input.locale!==undefined&&input.executor!=='platform'||input.conversationId!==undefined&&(input.executor!=='platform'||!validConversationId(input.conversationId))) fail('INVALID_INPUT', '任务字段无效', 400);
+  const requestId = rid(input.requestId), name = plain(input.name, 60, '任务名称'), wireInstructions = plain(input.instructions, 4000, '任务内容');
+  const instructions = personalHistory && personalHistory.requestedIds === undefined ? splitTaskRequest(wireInstructions) : wireInstructions;
   const { value: identity } = await identityRecord(db, workspaceId, id(input.identityId));
   if (identity.ownerId !== actor.userId || !identity.enabled || !identity.key || identity.key.revokedAt || identity.key.expiresAt <= now || identity.key.credentialVersion !== actor.credentialVersion) fail('PRECONDITION', '请先启用本人负责的Agent连接', 422);
   const key = identity.key!, ceiling = key.ceiling.filter(scope => hasScope(actor, scope as any));
   const intentRefs=normalizeAgentTaskIntentRefs(trustedIntentRefs);if(!taskIntentCeilingAllows(intentRefs,ceiling))fail('FORBIDDEN','当前Agent无权读取引用记录',403);
   const request = taskCreationReceiptKey(actor.userId, requestId);
   const previous = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: request } } });
-  const locale=input.executor==='platform'?responseLocale(input.locale):undefined,inputHash = hash(JSON.stringify([identity.id, name, instructions,...(input.executor==='platform'?['platform',locale]:[]),...(input.conversationId?[input.conversationId]:[]),...(intentRefs.length?[['intentRefs',intentRefs]]:[]),...(attachments?[['attachments',attachments.fingerprint]]:[])]));
+  const locale=input.executor==='platform'?responseLocale(input.locale):undefined,inputHash = hash(JSON.stringify([identity.id, name, wireInstructions,...(input.executor==='platform'?['platform',locale]:[]),...(input.conversationId?[input.conversationId]:[]),...(intentRefs.length?[['intentRefs',intentRefs]]:[]),...(attachments?[['attachments',attachments.fingerprint]]:[]),...(personalHistory?.requestedIds!==undefined?[['historyTaskIds',personalHistory.requestedIds]]:[])]));
   if (previous) { if (previous.inputHash !== inputHash) fail('CONFLICT', '操作编号已用于其他任务', 409);const c=(await taskRecord(db, workspaceId, previous.result.id)).value;let valid=c.scopeHash===scopeHash;try{await assertTaskAuthority(db,actor,c,now);}catch(e){if(!(e instanceof MistApiError))throw e;valid=false;}return taskView(c, actor, now,valid); }
-  const active = await db.mistCommandReceipt.findMany({ where: { workspaceId, actorId: actor.userId, inputHash: TASK_HASH, AND: [{ OR: ['queued','running','waiting_time','waiting_condition','waiting_human','paused'].map(state => ({ result: { path: [TASK_FIELD, 'state'], equals: state } })) }, { result: { path: [TASK_FIELD, 'expiresAt'], gte: now } }] }, take: 10 });
+  const active = await db.mistCommandReceipt.findMany({ where: { workspaceId, actorId: actor.userId, inputHash: TASK_HASH, AND: [{ OR: UNFINISHED_TASK_STATES.map(state => ({ result: { path: [TASK_FIELD, 'state'], equals: state } })) }, { result: { path: [TASK_FIELD, 'expiresAt'], gte: now } }] }, take: 10 });
   if (active.length >= ACTIVE_TASK_LIMIT) fail('AGENT_TASK_LIMIT', '请先结束已有任务', 422);
   if (input.executor === 'platform') assertDailyRoom(await agentDailyUsage(db, workspaceId, actor.userId, now), true);
   const taskId = randomUUID(), at = new Date(now).toISOString();
@@ -179,6 +200,7 @@ export async function createTask(db: any, actor: TokenPayload, workspaceId: stri
     if(origins?.length)c.attachmentOrigins=origins;
   }
   if(intentRefs.length)c.intentRefs=intentRefs.map(ref=>({...ref}));
+  if(personalHistory)c.conversationHistory=await personalHistory.prepare(instructions);
   if(input.executor==='platform'){c.executor='platform';c.locale=locale;c.platform={steps:[],nextRunAt:0};}
   if(automationId)c.automationId=automationId;
   if(typeof input.conversationId==='string')c.conversationId=input.conversationId;
@@ -559,8 +581,9 @@ export async function listTasks(db: any, actor: TokenPayload, workspaceId: strin
 }
 
 /** Find live work without scanning or paging through completed conversation history. */
-export async function personalTaskActivityCandidates(db: any, workspaceId: string, ownerId: string, now: number): Promise<TaskRecord[]> {
+export async function personalTaskActivityCandidates(db: any, workspaceId: string, ownerId: string, now: number, conversationId?: string): Promise<TaskRecord[]> {
   const at = (key: string, condition: { equals: string } | { gte: number }) => ({ result: { path: [TASK_FIELD, key], ...condition } });
+  const states = conversationId === undefined ? ['queued', 'running'] : UNFINISHED_TASK_STATES;
   const rows = await db.mistCommandReceipt.findMany({
     where: {
       workspaceId, actorId: ownerId, inputHash: TASK_HASH,
@@ -569,12 +592,13 @@ export async function personalTaskActivityCandidates(db: any, workspaceId: strin
       AND: [
         at('identityId', { equals: personalIdentityId(workspaceId, ownerId) }),
         at('executor', { equals: 'platform' }),
-        { OR: [at('state', { equals: 'queued' }), at('state', { equals: 'running' })] },
+        { OR: states.map(state => at('state', { equals: state })) },
         at('expiresAt', { gte: now + 1 }),
+        ...(conversationId === undefined ? [] : [at('conversationId', { equals: conversationId })]),
       ],
     },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    take: ACTIVE_TASK_LIMIT,
+    ...(conversationId === undefined ? { take: ACTIVE_TASK_LIMIT } : {}),
   });
   return rows.map((row: unknown) => record(row, workspaceId));
 }

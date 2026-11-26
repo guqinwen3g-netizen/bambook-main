@@ -59,6 +59,13 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
         });
         break;
       }
+      case 'bambook_get_orders': {
+        const orders = completed && !failed && !step.compacted && Array.isArray(result?.orders) ? result.orders : [];
+        const labels = orders.map((order: {label?: unknown}) => text(order.label, 32)).filter(Boolean);
+        const detail = [...labels, ...(orders.length && result.truncated ? ['部分详情需回原单核对'] : [])].join(' · ');
+        out.push({ ...base, kind:'read', label:orders.length ? `读取 ${orders.length} 张订单` : '读取订单详情', ...(detail ? { detail } : {}) });
+        break;
+      }
       case 'bambook_commands': out.push({ ...base, kind: 'read', label: '查看可用操作' }); break;
       case 'bambook_audit': out.push({ ...base, kind: 'read', label: '查看操作记录' }); break;
       case 'bambook_file_text': {

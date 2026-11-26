@@ -1,8 +1,10 @@
 import type { AgentTaskIntentRef } from '../../../../server/src/shared/mistAgentTasks';
+import { TASK_HISTORY_TURNS } from '../../../../server/src/shared/mistTaskHistoryText';
 
 export type PendingSubmission = {
   requestId: string;
   instructions: string;
+  historyTaskIds?: string[];
   locale: string;
   draftKey: string;
   conversationId?: string;
@@ -31,6 +33,8 @@ export function readPendingSubmissions(scope: string): Map<string, PendingSubmis
       if (typeof key !== 'string' || typeof entry?.requestId !== 'string' || !/^[a-f0-9-]{36}$/i.test(entry.requestId)
         || typeof entry.instructions !== 'string' || typeof entry.locale !== 'string' || typeof entry.draftKey !== 'string'
         || typeof entry.hasAttachments !== 'boolean' || (entry.conversationId !== undefined && typeof entry.conversationId !== 'string')
+        || (entry.historyTaskIds !== undefined && (!Array.isArray(entry.historyTaskIds) || entry.historyTaskIds.length > TASK_HISTORY_TURNS
+          || entry.historyTaskIds.some((id: unknown) => typeof id !== 'string' || !id.length || id.length > 100)))
         || (entry.sourceConversationId !== undefined && typeof entry.sourceConversationId !== 'string')) continue;
       entries.set(key, { ...entry, recoveredFromStorage: true });
     }

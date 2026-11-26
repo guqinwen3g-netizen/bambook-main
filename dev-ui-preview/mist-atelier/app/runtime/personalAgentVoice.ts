@@ -6,13 +6,17 @@ import { RealtimePcmPlayer } from './voiceAudio';
 
 export type VoiceState = 'idle' | 'connecting' | 'listening' | 'speaking' | 'error';
 type Resources = { socket?: WebSocket; stream?: MediaStream; player?: RealtimePcmPlayer; capture?: AudioWorkletNode; source?: MediaStreamAudioSourceNode; gain?: GainNode; timer?: ReturnType<typeof setInterval> };
-/** A call is bound to its original account/company; audio is never replayed on reconnect. */
-export function usePersonalAgentVoice(scope: string, workspaceId: string | undefined, onTask: (task: AgentTaskView) => void) {
+type VoiceTaskBinding = { taskId: string; questionId?: string };
+/** A call stays with its original account, company and conversation. */
+export function usePersonalAgentVoice(scope: string, workspaceId: string | undefined, onTask: (task: AgentTaskView) => void, conversationId?: string) {
+  const callScope = JSON.stringify([scope, conversationId]);
+  // Legacy groups have display IDs only; the older ticket behavior remains available.
+  const storedConversationId = conversationId?.startsWith('legacy_') ? undefined : conversationId;
   const [state, setState] = React.useState<VoiceState>('idle'), [error, setError] = React.useState('');
   const [muted, setMuted] = React.useState(false), [transcript, setTranscript] = React.useState(''), [reply, setReply] = React.useState('');
-  const resources = React.useRef<Resources>({}), generation = React.useRef(0), selectedTask = React.useRef<string | undefined>(undefined);
+  const resources = React.useRef<Resources>({}), generation = React.useRef(0), selection = React.useRef<VoiceTaskBinding | undefined>(undefined);
   const onTaskRef = React.useRef(onTask); onTaskRef.current = onTask;
-  const liveScope = React.useRef(scope); liveScope.current = scope;
+  const liveScope = React.useRef(callScope); liveScope.current = callScope;
   const dispose = React.useCallback(() => {
     generation.current++;
     const r = resources.current; resources.current = {};
@@ -23,14 +27,15 @@ export function usePersonalAgentVoice(scope: string, workspaceId: string | undef
     void r.player?.close();
   }, []);
   const end = React.useCallback(() => { dispose(); setState('idle'); setMuted(false); }, [dispose]);
-  React.useEffect(() => { setState('idle'); setError(''); setTranscript(''); setReply(''); selectedTask.current = undefined; return dispose; }, [scope, dispose]);
-  const start = React.useCallback(async (taskId?: string) => {
-    if (!workspaceId) return;
+  React.useEffect(() => { setState('idle'); setError(''); setTranscript(''); setReply(''); selection.current = undefined; return dispose; }, [callScope, dispose]);
+  const start = React.useCallback(async (taskId?: string, questionId?: string) => {
+    if (!workspaceId || liveScope.current !== callScope) return;
     dispose(); const epoch = generation.current, r: Resources = {}; resources.current = r;
-    const current = () => generation.current === epoch && liveScope.current === scope;
+    const current = () => generation.current === epoch && liveScope.current === callScope;
     const fail = (message: string) => { if (!current()) return; dispose(); setState('error'); setError(message); setMuted(false); };
     setState('connecting'); setError(''); setMuted(false); setTranscript(''); setReply('');
-    if (taskId) selectedTask.current = taskId;
+    if (taskId) selection.current = { taskId, questionId };
+    let ticketBinding: VoiceTaskBinding | undefined;
     try {
       if (!navigator.mediaDevices?.getUserMedia || !window.AudioContext || !window.AudioWorkletNode) throw new Error('当前设备不支持实时语音');
       // Unlock playback within the original click, before any network or permission wait.
@@ -45,8 +50,12 @@ export function usePersonalAgentVoice(scope: string, workspaceId: string | undef
       const context = r.player.getAudioContext();
       await context.audioWorklet.addModule(new URL('./voiceCapture.worklet.js', import.meta.url));
       if (!current()) return;
-      const bound = taskId ?? selectedTask.current;
-      const session = await mistApiRequest(`/api/mist/workspaces/${encodeURIComponent(workspaceId)}/voice/sessions`, { method: 'POST', body: JSON.stringify({ locale: interfaceLocale(), ...(bound ? { taskId: bound } : {}) }) });
+      ticketBinding = selection.current;
+      const bound = ticketBinding?.taskId;
+      const session = await mistApiRequest(`/api/mist/workspaces/${encodeURIComponent(workspaceId)}/voice/sessions`, {
+        method: 'POST',
+        body: JSON.stringify({ locale: interfaceLocale(), taskId: bound, conversationId: storedConversationId, questionId: ticketBinding?.questionId }),
+      });
       if (!current()) return;
       const url = new URL('/api/mist/voice/stream', window.location.href); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
       url.searchParams.set('id', session.id);
@@ -55,7 +64,8 @@ export function usePersonalAgentVoice(scope: string, workspaceId: string | undef
         if (!current()) return;
         let message: any; try { message = JSON.parse(event.data); } catch { fail('语音响应无效，请重试'); return; }
         if (message.type === 'ready') {
-          if (selectedTask.current && selectedTask.current !== bound) socket.send(JSON.stringify({ type: 'bind_task', taskId: selectedTask.current }));
+          const selectedTaskId = selection.current?.taskId;
+          if (selectedTaskId && selectedTaskId !== bound) socket.send(JSON.stringify({ type: 'bind_task', taskId: selectedTaskId }));
           r.source = context.createMediaStreamSource(stream);
           r.capture = new AudioWorkletNode(context, 'bambook-voice-capture');
           // Microphone or capture loss ends the call; delegated tasks keep running server-side.
@@ -77,16 +87,24 @@ export function usePersonalAgentVoice(scope: string, workspaceId: string | undef
         else if (message.type === 'transcript') setTranscript(String(message.text ?? ''));
         else if (message.type === 'reply') setReply(previous => message.final ? String(message.text ?? '') : previous + String(message.text ?? ''));
         else if (message.type === 'audio') void r.player?.enqueue(message.audio).catch(() => fail('语音播放失败，请重试'));
-        else if (message.type === 'task' && message.item?.id) { selectedTask.current = message.item.id; onTaskRef.current(message.item); }
+        else if (message.type === 'task' && message.item?.id) {
+          const selected = selection.current;
+          // A poll can show a text answer from another tab. Only the voice receipt settles our selected question.
+          if (selected?.taskId !== message.item.id || selected?.questionId === message.answeredQuestionId) selection.current = { taskId:message.item.id };
+          onTaskRef.current(message.item);
+        }
         else if (message.type === 'error') fail(message.message || '语音未完成，请重试');
       };
       socket.onerror = () => fail('语音连接失败，请重试');
       socket.onclose = () => fail('语音已断开，已交办事项继续执行');
     } catch (e) {
+      if (current() && ticketBinding?.questionId && selection.current === ticketBinding && (e as {code?:string})?.code === 'AGENT_TASK_CHANGED') {
+        selection.current = undefined;
+      }
       const denied = e instanceof DOMException && e.name === 'NotAllowedError';
       fail(denied ? '请允许使用麦克风后重试' : e instanceof Error ? e.message : '语音连接失败，请重试');
     }
-  }, [workspaceId, scope, dispose]);
+  }, [workspaceId, callScope, storedConversationId, dispose]);
   const toggleMute = () => {
     const next = !muted, r = resources.current;
     r.stream?.getAudioTracks().forEach(track => { track.enabled = !next; });
@@ -98,10 +116,11 @@ export function usePersonalAgentVoice(scope: string, workspaceId: string | undef
     const socket = resources.current.socket;
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'interrupt' }));
   };
-  const followTask = (id: string) => {
-    selectedTask.current = id;
+  const followTask = (task: AgentTaskView) => {
+    if (liveScope.current !== callScope || (conversationId && task.conversationId !== storedConversationId)) return;
+    if (selection.current?.taskId !== task.id) selection.current = { taskId:task.id };
     const socket = resources.current.socket;
-    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'bind_task', taskId: id }));
+    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'bind_task', taskId: task.id }));
   };
   return { state, error, muted, transcript, reply, start, end, toggleMute, interrupt, followTask };
 }
