@@ -476,7 +476,9 @@ export function AssistantPage(){
     const region=scrollRef.current;
     const turn=Array.from(region?.querySelectorAll<HTMLElement>('[data-task-id]')??[]).find(node=>node.dataset.taskId===originFocus.taskId);
     if(!region||!turn)return;
-    region.scrollTop+=turn.getBoundingClientRect().top-region.getBoundingClientRect().top-16;
+    // Narrow Mist layouts scroll the document instead of the thread.
+    if(getComputedStyle(region).overflowY==='visible'&&typeof turn.scrollIntoView==='function')turn.scrollIntoView({block:'start',inline:'nearest'});
+    else region.scrollTop+=turn.getBoundingClientRect().top-region.getBoundingClientRect().top-16;
     setOriginFocus(undefined);
   },[originFocus,conversationId,threadKey]);
   React.useEffect(()=>{if(atBottomRef.current)requestAnimationFrame(follow);},[threadKey]);
