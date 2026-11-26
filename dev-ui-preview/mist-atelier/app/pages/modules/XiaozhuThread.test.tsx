@@ -60,7 +60,7 @@ it('downloads the original from its own task and disables repeat requests while 
 });
 it('opens the exact PDF and Excel originals from the completed report work trail',async()=>{
  const files=[{id:'pdf-file',name:'交期.pdf',size:43,mimeType:'application/pdf'},{id:'sheet-file',name:'核对表.xlsx',size:71,mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}];
- const trail=platformTrail(files.map((file,i)=>({id:'read-'+i,at:new Date().toISOString(),plan:{name:'bambook_file_text',arguments:{fileId:file.id}},result:{kind:i?'sheet':'pdf',file,text:'仅用于测试'}})),files);
+ const trail=platformTrail(files.map((file,i)=>({id:'read-'+i,at:new Date().toISOString(),plan:{name:'bambook_file_text',arguments:{fileId:file.id}},result:{kind:i?'sheet':'pdf',file,text:'仅用于测试',...(i?{}:{range:{pageFrom:21,pageTo:23},pagesWithoutText:[22]})}})),files);
  trail.push({...trail[0],label:'已经撤回的原件',taskAttachmentId:'missing'});
  const complete=task({state:'succeeded',attachments:files,trail,result:'已完成附件核对。'});
  const onPreviewAttachment=vi.fn();
@@ -68,7 +68,7 @@ it('opens the exact PDF and Excel originals from the completed report work trail
  await act(async()=>getByRole(host,'button',{name:'办理过程'}).click());
  const steps=host.querySelector<HTMLOListElement>('.mist-xz-steps')!;
  for(const file of files)await act(async()=>getByRole(steps,'button',{name:'读取附件 '+file.name}).click());
- expect(onPreviewAttachment.mock.calls).toEqual(files.map(file=>[complete,file]));
+ expect(onPreviewAttachment.mock.calls).toEqual([[complete,files[0],22],[complete,files[1]]]);
  expect(queryByRole(steps,'button',{name:'已经撤回的原件'})).toBeNull();
 });
 it('shows the latest step while it works, leaving stop to the composer; a waiting request can be stopped in place',async()=>{const f=fns();await paint([task({trail:[{at:'',kind:'read',label:'查询订单 · 8 条'}]})],{...f,composerStopTaskId:'t1'});expect(host.textContent).toContain('核对订单');expect(host.textContent).toContain('查询订单 · 8 条');expect(queryByRole(host,'button',{name:/^停止/})).toBeNull();

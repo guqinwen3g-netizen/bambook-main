@@ -12,9 +12,9 @@ let host: HTMLDivElement, root: Root;
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; host = document.createElement('div'); document.body.append(host); root = createRoot(host); (URL as any).createObjectURL ??= () => 'blob:mock'; (URL as any).revokeObjectURL ??= () => {}; });
 afterEach(() => { act(() => root.unmount()); host.remove(); document.body.innerHTML = ''; });
 const flush = async () => { for (let i = 0; i < 6; i++) await act(async () => { await new Promise(r => setTimeout(r, 0)); }); };
-function mount(files: PreviewFile[], load: (f: PreviewFile) => Promise<Blob>, extra: { onDownload?: (f: PreviewFile) => void } = {}) {
+function mount(files: PreviewFile[], load: (f: PreviewFile) => Promise<Blob>, extra: { onDownload?: (f: PreviewFile) => void; initialPdfPage?:number } = {}) {
   let index = 0; const onClose = vi.fn();
-  const render = () => act(() => root.render(<FilePreview files={files} index={index} onIndex={i => { index = i; render(); }} onClose={onClose} load={load} onDownload={extra.onDownload} />));
+  const render = () => act(() => root.render(<FilePreview files={files} index={index} onIndex={i => { index = i; render(); }} onClose={onClose} load={load} onDownload={extra.onDownload} initialPdfPage={extra.initialPdfPage} />));
   render(); return { onClose, get index() { return index; } };
 }
 const btn = (label: string) => [...document.body.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === label || b.textContent?.trim() === label) as HTMLButtonElement;
@@ -33,6 +33,78 @@ describe('附件预览类型', () => {
     expect(previewKind({ id: '1', name: 'IMG_1.HEIC', mimeType: 'image/heic' }).kind).toBe('unsupported');
     expect(formatFileSize(2.5 * 1024 * 1024)).toBe('2.5 MB');
   });
+});
+
+it.each([[22,21], [90,22], [-6,0], [1.5,0], [undefined,0]])('positions a requested PDF page once (%s)',async(initialPdfPage,pageOffset)=>{
+  const mockWidth=vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(640);
+  const canvas=vi.spyOn(HTMLCanvasElement.prototype,'getContext').mockReturnValue(null);
+  const layout=vi.spyOn(HTMLElement.prototype,'offsetTop','get').mockImplementation(function(this:HTMLElement){
+    return this.classList.contains('mist-viewer-page')?[...this.parentElement!.children].indexOf(this)*100:0;
+  });
+  const bounds=vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(function(this:HTMLElement){
+    if(!this.classList.contains('mist-viewer-page'))return new DOMRect(0,77,640,800);
+    return new DOMRect(0,77+(this.offsetTop-this.parentElement!.scrollTop)*0.98,620,90);
+  });
+  try {
+    const pdfPage={getViewport:({scale}: {scale:number})=>({width:600*scale,height:850*scale}),render:()=>({promise:Promise.resolve(),cancel:vi.fn()})};
+    pdfMock.getDocument.mockReturnValue({promise:Promise.resolve({numPages:23,getPage:vi.fn(async()=>pdfPage),destroy:vi.fn(async()=>{})})});
+    const blob=new Blob(['%PDF-1.4'],{type:'application/pdf'});(blob as any).arrayBuffer??=async()=>new ArrayBuffer(0);
+    mount([{id:'pdf',name:'验货报告.pdf'}],async()=>blob,{initialPdfPage});
+    await flush();
+    const scroll=document.querySelector<HTMLElement>('.mist-viewer-pages')!;
+    expect(scroll.scrollTop).toBe(Number(pageOffset)*100);
+    scroll.scrollTop=1234;
+    await act(async()=>btn('放大').click());
+    await flush();
+    expect(scroll.scrollTop).toBe(1234);
+  } finally { bounds.mockRestore();layout.mockRestore();canvas.mockRestore();mockWidth.mockRestore(); }
+});
+
+it.each(['wheel', 'touch', 'keyboard', 'scrollbar'])('keeps the requested page aligned during lazy layout until %s navigation', async (input) => {
+  const pdfPage = (height: number) => ({ getViewport: ({ scale }: { scale: number }) => ({ width: 600 * scale, height: height * scale }) });
+  const pendingFirst = Promise.withResolvers<ReturnType<typeof pdfPage>>();
+  const pendingSecond = Promise.withResolvers<ReturnType<typeof pdfPage>>();
+  let firstReads = 0;
+  const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(640);
+  const canvas = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+  const layout = vi.spyOn(HTMLElement.prototype, 'offsetTop', 'get').mockImplementation(function(this: HTMLElement) {
+    if (!this.classList.contains('mist-viewer-page')) return 0;
+    const siblings = [...this.parentElement!.children] as HTMLElement[];
+    return siblings.slice(0, siblings.indexOf(this)).reduce((sum, page) => sum + Number.parseFloat(page.style.height), 0);
+  });
+  try {
+    pdfMock.getDocument.mockReturnValue({ promise: Promise.resolve({
+      numPages: 4,
+      getPage: vi.fn(async (page: number) => {
+        if (page === 2) return pendingSecond.promise;
+        if (page === 1 && ++firstReads > 1) return pendingFirst.promise;
+        return pdfPage(300);
+      }),
+      destroy: vi.fn(async () => {}),
+    }) });
+    const blob = new Blob(['%PDF-1.4'], { type: 'application/pdf' });
+    (blob as any).arrayBuffer ??= async () => new ArrayBuffer(0);
+    mount([{ id: 'pdf', name: '验货报告.pdf' }], async () => blob, { initialPdfPage: 3 });
+    await flush();
+    const pane = document.querySelector<HTMLElement>('.mist-viewer-pages')!;
+    expect(pane.scrollTop).toBe(600);
+    await act(async () => { pendingSecond.resolve(pdfPage(700)); });
+    await act(async () => { await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve())); });
+    expect(pane.scrollTop).toBe(1000);
+    await act(async () => {
+      if (input === 'wheel') pane.dispatchEvent(new WheelEvent('wheel', { bubbles: true }));
+      if (input === 'touch') pane.dispatchEvent(new Event('touchstart', { bubbles: true }));
+      if (input === 'keyboard') pane.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', bubbles: true }));
+      pane.scrollTop = 450;
+      if (input === 'scrollbar') pane.dispatchEvent(new Event('scroll'));
+      pendingFirst.resolve(pdfPage(500));
+    });
+    await act(async () => { await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve())); });
+    expect(pane.scrollTop).toBe(450);
+    await act(async () => btn('放大').click());
+    await flush();
+    expect(pane.scrollTop).toBe(450);
+  } finally { layout.mockRestore(); canvas.mockRestore(); width.mockRestore(); }
 });
 
 describe('附件预览浮层', () => {

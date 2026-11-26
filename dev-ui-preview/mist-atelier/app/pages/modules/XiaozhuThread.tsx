@@ -71,7 +71,8 @@ function Trail({ task, items, active, activeLabel, since, recovering, onOpen, on
           <div className="mist-xz-step-body">
             {ref && view
               ? <button type="button" className="mist-xz-ref" onClick={() => onOpen(view, ref.id, ref.section ? { section: ref.section } : undefined)}>{step.label}</button>
-              : attachment && onPreviewAttachment ? <button type="button" className="mist-xz-ref" onClick={() => onPreviewAttachment(task, attachment)}>{uiText(step.label)}</button>
+              : attachment && onPreviewAttachment ? <button type="button" className="mist-xz-ref" onClick={() => step.taskAttachmentPage === undefined
+                ? onPreviewAttachment(task, attachment) : onPreviewAttachment(task, attachment, step.taskAttachmentPage)}>{uiText(step.label)}</button>
               : <span>{uiText(step.label)}</span>}
             {step.progress && <p>{step.progress}</p>}
             {!!step.refs?.length && <p>{step.refs.map(({ id, label, view, section }, index) => <React.Fragment key={id}>
@@ -146,7 +147,7 @@ export type ThreadActions = {
   onRecoverProposal?: (id:string)=>Promise<void>;
   onOpenFile?: (fileId: string) => void;
   onDownloadAttachment?: (task: AgentTaskView, file: TaskAttachment) => Promise<void>;
-  onPreviewAttachment?: (task: AgentTaskView, file: TaskAttachment) => void;
+  onPreviewAttachment?: (task: AgentTaskView, file: TaskAttachment, pdfPage?: number) => void;
   onReuseAttachment?: (task: AgentTaskView, file: TaskAttachment) => void;
 };
 

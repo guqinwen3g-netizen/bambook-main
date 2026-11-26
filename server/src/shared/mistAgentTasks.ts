@@ -22,6 +22,8 @@ export type AgentTaskTrailItem = {
   completed?: boolean; failed?: boolean; progress?: string; detail?: string;
   /** A verified read of an original listed in this task's attachments. */
   taskAttachmentId?: string;
+  /** A PDF page from the same authorized extraction window. */
+  taskAttachmentPage?: number;
   ref?: AgentTaskTrailSource;
   refs?: AgentTaskTrailSource[];
 };
