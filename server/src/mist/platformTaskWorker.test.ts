@@ -1,4 +1,5 @@
 import sharp from 'sharp';
+import JSZip from 'jszip';
 import * as XLSX from 'xlsx';
 import{afterEach,beforeEach,expect,it,vi}from'vitest';
 import request from'supertest';
@@ -958,6 +959,36 @@ it('pre-reads both text slices and the short tail of a dense PDF before calling 
  expect(completed).toMatchObject({state:'succeeded',result:'已核对测试资料。'});
  expect(completed.trail.filter((entry:{taskAttachmentId?:string})=>entry.taskAttachmentId).map((entry:{taskAttachmentPageRange:unknown})=>entry.taskAttachmentPageRange))
   .toEqual([{from:1,to:20},{from:1,to:20},{from:21,to:23}]);
+});
+
+it('reads short Word and Excel tails before the first model request',async()=>{
+ const complete=vi.fn(async(_model:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对短尾段。'}));
+ const doc=new JSZip();
+ doc.file('word/document.xml','<w:document><w:body><w:p><w:r><w:t>'+'Terms and conditions. '.repeat(210)+' WORD-TAIL-041</w:t></w:r></w:p></w:body></w:document>');
+ const book=XLSX.utils.book_new();
+ XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet(Array.from({length:90},(_,row)=>['Quote row '+row+' quality conditions and original sample notes.'])),'草案');
+ XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([['EXCEL-TAIL-921']]),'确认报价');
+ const f=await fixture(complete);
+ f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+   .field('task',JSON.stringify({requestId:randomUUID(),name:'短尾段核对',instructions:'核对两份附件的最后编号。'}))
+   .attach('attachments',await doc.generateAsync({type:'nodebuffer'}),'requirements.docx')
+   .attach('attachments',XLSX.write(book,{type:'buffer',bookType:'xlsx',bookSST:true}),'quote.xlsx').expect(201)).body.item;
+ await f.drain();
+ expect(complete).toHaveBeenCalledTimes(1);
+ const model=complete.mock.calls[0][0];
+ const content=String(model.messages[0].content),facts=JSON.parse(content.slice(content.indexOf('{')));
+ const reads=facts.history.recent.filter((step:{name:string})=>step.name==='bambook_file_text');
+ expect(reads).toHaveLength(4);
+ for(const [index,id,marker] of [[0,'attachment_1','WORD-TAIL-041'],[1,'attachment_2','EXCEL-TAIL-921']] as const){
+  const first=reads[index].result,tail=reads[index+2];
+  expect(first.remainingOfficeChars).toBeGreaterThan(0);
+  expect(tail.arguments).toMatchObject({fileId:id,cursor:'next'});
+  expect(tail.result).toMatchObject({hasMore:false,sourceHash:first.sourceHash,range:{start:3500,end:3500+first.remainingOfficeChars}});
+  expect(tail.result.text).toContain(marker);
+ }
+ expect(reads[3].result.observedSheets).toContain('确认报价');
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'已核对短尾段。'});
 });
 
 it('supplies separate report labels and reads for attachments with identical original filenames',async()=>{
