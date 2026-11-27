@@ -1,5 +1,6 @@
 import {expect,it,vi} from 'vitest';
 import {PDFParse} from 'pdf-parse';
+import {createHash} from 'node:crypto';
 import JSZip from 'jszip';
 import {readFileTextWindow,type FileTextWindowCache} from './agentFileWindow';
 import {platformTrail} from './agentTaskTrail';
@@ -171,4 +172,31 @@ it('reuses one parsed PDF window for consecutive slices while keeping byte and p
   expect(parse).toHaveBeenCalledTimes(4);
   expect(cache.size).toBe(0);
  }finally{parse.mockRestore();}
+});
+
+it.each([true,false])('handles old Excel cursors safely when the corrected value form is present: %s',async changed=>{
+ const zip=new JSZip();
+ zip.file('xl/workbook.xml','<workbook><sheets><sheet name="报价" r:id="r1"/></sheets></workbook>');
+ zip.file('xl/_rels/workbook.xml.rels','<Relationships><Relationship Id="r1" Target="worksheets/sheet1.xml"/></Relationships>');
+ zip.file('xl/worksheets/sheet1.xml','<worksheet><row><c r="A1" t="str"><v'+(changed?' xml:space="preserve"':'')+'> QUOTE-SPACE-155 </v></c></row>'
+  +'<row><c r="A2" t="str"><v>'+('Long terms. '.repeat(40))+'EXCEL-FINAL-399</v></c></row></worksheet>');
+ const bytes=await zip.generateAsync({type:'nodebuffer'}),file={name:'quote.xlsx',mimeType:''};
+ const hash=(value:Buffer|string)=>createHash('sha256').update(value).digest('hex');
+ const legacySource=hash(JSON.stringify(['file-text-v1',hash(bytes),file.name,file.mimeType]));
+ const legacy='aft1.'+Buffer.from(JSON.stringify({...scope,v:1,source:legacySource,page:1,offset:200})).toString('base64url');
+ const first=await readFileTextWindow(scope,file,bytes,200);
+ expect(first.text).toContain('QUOTE-SPACE-155');
+ expect(first.observedSheets).toEqual(['报价']);
+ expect(first.nextCursor).toMatch(changed?/^aft2\./:/^aft1\./);
+ if(changed){
+  await expect(readFileTextWindow(scope,file,bytes,1000,legacy)).rejects.toMatchObject({code:'FILE_TEXT_CURSOR_UPDATED',status:409});
+  expect(first.sourceHash).not.toBe(legacySource);
+ }else{
+  expect(first.sourceHash).toBe(legacySource);
+  expect((await readFileTextWindow(scope,file,bytes,1000,legacy)).text).toContain('EXCEL-FINAL-399');
+ }
+ const tail=await readFileTextWindow(scope,file,bytes,1000,first.nextCursor);
+ expect(tail.sourceHash).toBe(first.sourceHash);
+ expect(tail.text).toContain('EXCEL-FINAL-399');
+ expect(tail.range.start).toBe(first.range.end);
 });
