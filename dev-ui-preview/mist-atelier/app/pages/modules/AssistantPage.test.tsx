@@ -18,6 +18,38 @@ const response=(body:unknown,ok=true)=>{
   return {ok,json:async()=>result};
 };
 
+it('restores an unsent task answer only in its original task and account after navigation',async()=>{
+  const item=(id:string)=>({id,conversationId:'c_'+id,executor:'platform',identityId:'personal',
+    name:'模拟待补任务',instructions:'核对来源',state:'waiting_human',canControl:true,waitingProposalIds:[],
+    questions:[{id:'shared-question-id',question:'请补充模拟客户交期'}],createdAt:'2026-11-26T06:00:00Z',updatedAt:'2026-11-26T06:00:00Z'});
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async(url:string)=>{
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    if(url.endsWith('/agent-tasks/draft-task-a'))return {item:item('draft-task-a')};
+    if(url.endsWith('/agent-tasks/draft-task-b'))return {item:item('draft-task-b')};
+    return {items:[],nextCursor:null};
+  });
+  await mount();
+  await act(async()=>root!.render(view(true,'draft-task-a','task-origin')));
+  const answer=()=>host.querySelector<HTMLInputElement>('[aria-label="回答小竹"]')!;
+  await act(async()=>{
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(answer(),'模拟未提交交期');
+    answer().dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  expect(answer().value).toBe('模拟未提交交期');
+  expect(sessionStorage.getItem('mist.assistant.conversation:session-a:workspace')).not.toContain('模拟未提交交期');
+  await act(async()=>root!.render(view(false)));
+  await act(async()=>root!.render(view(true,'draft-task-b','task-origin')));
+  expect(answer().value).toBe('');
+  await act(async()=>root!.render(view(true,'draft-task-a','task-origin')));
+  expect(answer().value).toBe('模拟未提交交期');
+  mock.sessionKey='session-b';
+  await act(async()=>root!.render(view(true,'draft-task-a','task-origin')));
+  expect(answer().value).toBe('');
+  expect(mock.api.mock.calls.some(([url,init])=>url.endsWith('/answer')&&init?.method==='POST')).toBe(false);
+});
+
 it('keeps an authorized read-only turn usable and omits it after access is withdrawn',async()=>{
   const key='mist.assistant.conversation:session-a:workspace';
   sessionStorage.setItem(key,JSON.stringify({messages:[{role:'user',content:'旧订单问题'},

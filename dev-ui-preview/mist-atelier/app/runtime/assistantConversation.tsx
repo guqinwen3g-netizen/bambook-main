@@ -7,6 +7,8 @@ export type AssistantReply = {
   revision?: number; truncated?: boolean; contextToken?: string;
 };
 export type AssistantAttachmentRef = TaskAttachmentRef & Pick<TaskAttachment, 'name' | 'size'>;
+type TaskAnswerDraft = {taskId:string;questionId:string;text:string};
+export const taskAnswerDraftKey=(taskId:string,questionId:string)=>JSON.stringify([taskId,questionId]);
 type ComposerDraft = {
   question: string;
   selected: Array<{ id: string; label: string }>;
@@ -16,9 +18,10 @@ type ComposerDraft = {
 type Conversation = ComposerDraft & {
   messages: AssistantReply[];
   inactiveDrafts: Map<string, ComposerDraft>;
+  answerDrafts: Map<string,TaskAnswerDraft>;
 };
 const emptyDraft = (): ComposerDraft => ({ question: '', selected: [], files: [], attachmentRefs: [] });
-const empty = (): Conversation => ({ ...emptyDraft(), messages: [], inactiveDrafts: new Map() });
+const empty = (): Conversation => ({ ...emptyDraft(), messages: [], inactiveDrafts: new Map(),answerDrafts:new Map() });
 /** fin50：对话按账号与公司（scope）存本标签页 sessionStorage，切页与刷新后保留；换账号或关标签即清空。 */
 const KEY = (scope: string) => 'mist.assistant.conversation:' + scope;
 function load(scope: string): Conversation {
@@ -42,6 +45,7 @@ function useConversationState(scope: string) {
       const value = previous.scope === scope ? previous.value : empty();
       const next = typeof action === 'function'
         ? (action as (old: Conversation[K]) => Conversation[K])(value[key]) : action;
+      if (next === value[key]) return previous;
       return { scope, value: { ...value, [key]: key === 'messages' ? (next as AssistantReply[]).slice(-40) : next } };
     });
   }, [scope]);
@@ -50,6 +54,15 @@ function useConversationState(scope: string) {
   const setMessages = React.useCallback<React.Dispatch<React.SetStateAction<AssistantReply[]>>>(value => update('messages', value), [update]);
   const setFiles = React.useCallback<React.Dispatch<React.SetStateAction<File[]>>>(value => update('files', value), [update]);
   const setAttachmentRefs = React.useCallback<React.Dispatch<React.SetStateAction<AssistantAttachmentRef[]>>>(value => update('attachmentRefs', value), [update]);
+  const setAnswerDraft = React.useCallback((taskId:string,questionId:string,text:string)=>update('answerDrafts',old=>{
+    const key=taskAnswerDraftKey(taskId,questionId), next=new Map(old);
+    if(text)next.set(key,{taskId,questionId,text});else next.delete(key);
+    return next;
+  }),[update]);
+  const discardAnswerDrafts = React.useCallback((discard:(draft:TaskAnswerDraft)=>boolean)=>update('answerDrafts',old=>{
+    const retained=[...old].filter(([,draft])=>!discard(draft));
+    return retained.length===old.size?old:new Map(retained);
+  }),[update]);
   const switchDraft = React.useCallback((from: string, to: string) => {
     if (from === to || live.current !== scope) return;
     setEntry(previous => {
@@ -73,7 +86,7 @@ function useConversationState(scope: string) {
       return { scope, value: { ...previous.value, inactiveDrafts } };
     });
   }, [scope]);
-  return { scope, ...(entry.scope === scope ? entry.value : fresh), setQuestion, setSelected, setMessages, setFiles, setAttachmentRefs, switchDraft, clearDraft };
+  return { scope, ...(entry.scope === scope ? entry.value : fresh), setQuestion, setSelected, setMessages, setFiles, setAttachmentRefs, switchDraft, clearDraft,setAnswerDraft,discardAnswerDrafts };
 }
 
 const Context = React.createContext<ReturnType<typeof useConversationState> | null>(null);

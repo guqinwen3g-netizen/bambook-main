@@ -20,7 +20,7 @@ export { PricingPage, validatePlatformPricingDraft } from './PricingPage';
 import { InvoicePage } from './InvoicePage';
 export { InvoicePage } from './InvoicePage';
 import { useRouteDraft, useRouteScope } from './useRouteDraft';
-import { useAssistantConversation } from '../../runtime/assistantConversation';
+import { taskAnswerDraftKey, useAssistantConversation } from '../../runtime/assistantConversation';
 import { useReadOnlyAssistantHistory } from '../../runtime/readonlyAssistantHistory';
 import { submissionDraftKey, submissionFingerprint } from '../../runtime/xiaozhuSubmissions';
 import { ArrowRight, ArrowUp, Calculator, Download, FileText, PanelLeftClose, PanelLeftOpen, SquarePen, ChevronDown, PenLine, Trash2, RefreshCw, Sparkles, Square, X, Package, Receipt, ShieldCheck, Users, Database, Building2 } from 'lucide-react';
@@ -179,7 +179,7 @@ export function AssistantPage(){
   const originTaskId=nav.route.section==='task-origin'?nav.route.id:undefined;
   const w=usePlatform(),[kind,setKind]=React.useState('orders'),[query,setQuery]=React.useState(''),[editor,setEditor]=useRouteDraft<ModuleEditorSpec|null>(null);
   const scope=w.session.sessionKey+':'+(w.workspace?.id??'');
-  const {question,setQuestion,selected,setSelected,messages,setMessages,files,setFiles,attachmentRefs,setAttachmentRefs,inactiveDrafts,switchDraft,clearDraft}=useAssistantConversation(scope);
+  const {question,setQuestion,selected,setSelected,messages,setMessages,files,setFiles,attachmentRefs,setAttachmentRefs,inactiveDrafts,switchDraft,clearDraft,answerDrafts,setAnswerDraft,discardAnswerDrafts}=useAssistantConversation(scope);
   const [configuration,setConfiguration]=React.useState<{configured:boolean;models?:string[];subscription?:{provider:'chatgpt';connected:boolean}}|null>(null),[checking,setChecking]=React.useState(false),[busy,setBusy]=React.useState(false),[error,setError]=useRouteDraft('');
   const [navOpen,setNavOpen]=React.useState(()=>{try{return localStorage.getItem('mist.xiaozhu.nav')!=='0';}catch{return true;}}),[navDrawer,setNavDrawer]=React.useState(false),[confirmOpen,setConfirmOpen]=React.useState(false),[atBottom,setAtBottom]=React.useState(true),atBottomRef=React.useRef(true),scrollRef=React.useRef<HTMLDivElement>(null);
   const [automations,setAutomations]=React.useState(false),[automationSeed,setAutomationSeed]=React.useState(''),[newRule,setNewRule]=React.useState(0),[proposalId,setProposalId]=React.useState(''),[picker,setPicker]=React.useState(false),[drafts,setDrafts]=React.useState(false);
@@ -247,6 +247,14 @@ export function AssistantPage(){
     setError('');setAttachmentRefs(next);if(!picker)field.current?.focus();
   };
   const cowork=useXiaozhuCowork(w.workspace?.id,scope,canChat,conversationId,originTaskId);
+  React.useEffect(()=>{
+    if(!answerDrafts.size)return;
+    const tasks=new Map(cowork.all.map(task=>[task.id,task]));
+    discardAnswerDrafts(({taskId,questionId})=>{
+      const task=tasks.get(taskId);
+      return !!task&&(!!task.contentRestricted||!task.canControl||task.questions?.some(question=>question.id===questionId&&!!question.answeredAt)===true);
+    });
+  },[answerDrafts,cowork.all,discardAnswerDrafts]);
   const restrictedTaskIds=new Set(cowork.tasks.filter(task=>task.contentRestricted).map(task=>task.id));
   const hasRestrictedAttachment=attachmentRefs.some(ref=>restrictedTaskIds.has(ref.taskId));
   const handledRecoveries=React.useRef(new Set<string>());
@@ -609,7 +617,7 @@ export function AssistantPage(){
         {canChat&&cowork.loading&&!hasThread?<div className="mist-xz-scroll"><div className="mist-xz-col mist-xz-loading" role="status" aria-label={uiText('正在读取对话')}><i/><i/><i/><i/></div></div>:hasThread?<>
           <div className="mist-xz-scroll" ref={scrollRef} onScroll={e=>{const el=e.currentTarget,near=el.scrollHeight-el.scrollTop-el.clientHeight<96;atBottomRef.current=near;setAtBottom(near);}}>
             <div className="mist-xz-col">
-              {useTaskThread?<XiaozhuThread tasks={visibleTasks} onVoiceTask={canStartTaskVoice?(task,questionId)=>void voice.start(task.id,questionId):undefined} onPreviewAttachment={previewAttachment} onDownloadAttachment={downloadAttachment} controls={cowork.controls} composerStopTaskId={composerStopTask?.id} onReuseAttachment={cowork.available&&!busy&&!inCall?reuseAttachment:undefined} index={index} proposals={w.state?.agentProposals??[]} onOpenFile={fileId=>{const file=w.state?.files.find(f=>f.id===fileId);if(!file){toast(uiText('文件已不可见'),'bad');return;}void w.downloadFile(file).catch((e:Error)=>toast(e.message,'bad'));}} onAnswer={(t,id,text)=>void cowork.answer(t,id,text)} onCancel={t=>void cowork.cancel(t)} onRetry={cowork.available?retryTask:undefined} retryBlocked={retryBlocked} onCopy={text=>{void navigator.clipboard?.writeText(text).then(()=>toast(uiText('已复制')),()=>toast(uiText('复制失败，请手动选择文字'),'bad'));}} onDraft={text=>draft(text)} onAutomate={text=>{setAutomationSeed(text);setAutomations(true);}} onOpenRecord={(view,id,target)=>{if(view)w.go(view,id,target);}} onProposal={setProposalId} onDecide={decide} proposalsBlocked={w.saving||!!w.pending||!!w.pendingCreate} pendingProposalId={pendingProposalId} onRecoverProposal={recoverProposal}/>
+              {useTaskThread?<XiaozhuThread tasks={visibleTasks} answerDraft={{read:(taskId,questionId)=>answerDrafts.get(taskAnswerDraftKey(taskId,questionId))?.text??'',write:setAnswerDraft}} onVoiceTask={canStartTaskVoice?(task,questionId)=>void voice.start(task.id,questionId):undefined} onPreviewAttachment={previewAttachment} onDownloadAttachment={downloadAttachment} controls={cowork.controls} composerStopTaskId={composerStopTask?.id} onReuseAttachment={cowork.available&&!busy&&!inCall?reuseAttachment:undefined} index={index} proposals={w.state?.agentProposals??[]} onOpenFile={fileId=>{const file=w.state?.files.find(f=>f.id===fileId);if(!file){toast(uiText('文件已不可见'),'bad');return;}void w.downloadFile(file).catch((e:Error)=>toast(e.message,'bad'));}} onAnswer={(t,id,text)=>void cowork.answer(t,id,text)} onCancel={t=>void cowork.cancel(t)} onRetry={cowork.available?retryTask:undefined} retryBlocked={retryBlocked} onCopy={text=>{void navigator.clipboard?.writeText(text).then(()=>toast(uiText('已复制')),()=>toast(uiText('复制失败，请手动选择文字'),'bad'));}} onDraft={text=>draft(text)} onAutomate={text=>{setAutomationSeed(text);setAutomations(true);}} onOpenRecord={(view,id,target)=>{if(view)w.go(view,id,target);}} onProposal={setProposalId} onDecide={decide} proposalsBlocked={w.saving||!!w.pending||!!w.pendingCreate} pendingProposalId={pendingProposalId} onRecoverProposal={recoverProposal}/>
               :<div className="mist-xz-thread">{visibleMessages.map((m,i)=>m.role==='user'?<div key={i} className="mist-xz-turn"><div className="mist-xz-user">{m.content}</div></div>:<div key={i} className="mist-xz-turn"><XiaozhuTurnShell><XiaozhuMarkdown text={m.content} index={index} onOpen={(view,id,target)=>w.go(view,id,target)}/>{m.truncated&&<p className="mist-xz-note">{uiText("回复较长，已截断。可缩小问题范围继续询问。")}</p>}
                 <div className="mist-xz-acts">{m.sources?.map(source=><Button key={source.id} size="sm" variant="quiet" iconRight={ArrowRight} onClick={()=>w.go(source.view,source.entityId)}>{uiText(source.label)}</Button>)}{canChat&&<Button size="sm" variant="quiet" icon={FileText} onClick={()=>draft(m.content)}>{uiText("保存草稿")}</Button>}</div></XiaozhuTurnShell></div>)}
                 {busy&&<div className="mist-xz-turn"><XiaozhuTurnShell><span className="mist-xz-shimmer" aria-label={uiText("小竹正在回复")}>{uiText('正在思考')}</span></XiaozhuTurnShell></div>}</div>}

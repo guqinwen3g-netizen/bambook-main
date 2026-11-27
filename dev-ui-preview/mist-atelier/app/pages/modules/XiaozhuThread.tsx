@@ -89,14 +89,16 @@ function Trail({ task, items, active, activeLabel, since, recovering, onOpen, on
   </div>;
 }
 
-function Question({ task, onAnswer, busy }: { task: AgentTaskView; onAnswer: (task: AgentTaskView, id: string, text: string) => void; busy?: boolean }) {
-  const [text, setText] = React.useState('');
+function Question({ task, onAnswer, busy, draft }: { task: AgentTaskView; onAnswer: (task: AgentTaskView, id: string, text: string) => void; busy?: boolean;draft?:ThreadActions['answerDraft'] }) {
+  const [localText, setLocalText] = React.useState('');
   const open = (task.questions ?? []).find(q => !q.answeredAt);
   if (!open || !task.canControl) return null;
+  const text = draft?.read(task.id,open.id) ?? localText;
+  const change=(value:string)=>draft?draft.write(task.id,open.id,value):setLocalText(value);
   const send = () => { if (text.trim()&&!busy) onAnswer(task, open.id, text); };
   return <div className="mist-xz-card" data-tone="ask"><div className="mist-xz-card-h"><Icon icon={HelpCircle} size="sm" /><b>{uiText('小竹想先确认')}</b></div>
     <p>{open.question}</p>
-    <div className="mist-xz-answer"><input aria-label={uiText('回答小竹')} value={text} maxLength={2000} disabled={busy} placeholder={uiText('输入回答')} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />
+    <div className="mist-xz-answer"><input aria-label={uiText('回答小竹')} value={text} maxLength={2000} disabled={busy} placeholder={uiText('输入回答')} onChange={e => change(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />
       <Button size="sm" variant="ai" loading={busy} disabled={busy||!text.trim()} onClick={send}>{uiText('回答')}</Button></div></div>;
 }
 
@@ -132,6 +134,7 @@ export type ThreadActions = {
   onAnswer: (task: AgentTaskView, id: string, text: string) => void;
   onCancel: (task: AgentTaskView) => void;
   onVoiceTask?: (task: AgentTaskView, questionId?: string) => void;
+  answerDraft?: {read:(taskId:string,questionId:string)=>string;write:(taskId:string,questionId:string,text:string)=>void};
   controls?: Record<string,TaskControlState>;
   composerStopTaskId?: string;
   onRetry?: (task: AgentTaskView) => void;
@@ -217,7 +220,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         {active && t.checkpoint && !t.result && !working && <p className="mist-xz-note">{t.checkpoint}</p>}
         {!active && t.state !== 'succeeded' && !t.result && t.checkpoint && <p className="mist-xz-note">{t.checkpoint}</p>}
         {!!produced.length && actions.onOpenFile && <ProducedFiles proposals={produced} onOpen={actions.onOpenFile} />}
-        {asking && <Question key={openQuestion?.id} task={t} onAnswer={actions.onAnswer} busy={control?.busy}/>}
+        {asking && <Question key={openQuestion?.id} task={t} onAnswer={actions.onAnswer} busy={control?.busy} draft={actions.answerDraft}/>}
         {control?.error&&(active||t.state==='paused')&&<p className="mist-xz-note" role="status">{uiText(control.error)}</p>}
         {pending.map(p => <ProposalCard key={p.id} proposal={p} onOpen={actions.onProposal} onDecide={actions.onDecide}
           blocked={actions.proposalsBlocked} onRecover={actions.pendingProposalId===p.id?actions.onRecoverProposal:undefined}/>)}
