@@ -117,6 +117,29 @@ it('summarizes confirmed sources while the model waits without counting repeated
  expect(host.textContent).not.toContain('已摘录 1 份附件');
 });
 
+it('shows the newest authorized PDF read receipt while reading or waiting with a collapsed work log',async()=>{
+ const pdf={id:'pdf',name:'长附件.pdf',mimeType:'application/pdf',size:400};
+ const initial={kind:'read' as const,at:'',label:'读取附件 长附件.pdf',completed:true,
+  taskAttachmentId:pdf.id,taskAttachmentPageRange:{from:1,to:20},detail:'提取范围第 1 至 20 页；第 3 页无可提取文字；本次未读第 21 至 26 页'};
+ const tail={...initial,taskAttachmentPageRange:{from:21,to:26},detail:'提取范围第 21 至 26 页'};
+ const waiting=task({executionStage:'model',attachments:[pdf],trail:[initial]});
+ const f={...fns(),workLog:{expanded:new Map([['t1',false]]),setExpanded:vi.fn()}};
+ await paint([waiting],f);
+ expect(host.querySelector('.mist-xz-steps')).toBeNull();
+ expect(host.textContent).toContain('长附件.pdf：'+initial.detail);
+ await paint([task({...waiting,executionStage:'tool',trail:[initial,{...tail,completed:false,label:'续读附件 长附件.pdf'}]})],f);
+ expect(host.textContent).toContain('长附件.pdf：'+initial.detail);
+ await paint([task({...waiting,trail:[initial,tail,{...tail,taskAttachmentId:'foreign',detail:'其他任务的读取范围'}]})],f);
+ expect(host.textContent).toContain('长附件.pdf：'+tail.detail);
+ expect(host.textContent).not.toContain(initial.detail);
+ expect(host.textContent).not.toContain('其他任务的读取范围');
+ await paint([waiting],{...f,workLog:{...f.workLog,expanded:new Map([['t1',true]])}});
+ expect(host.querySelector('.mist-xz-steps')?.textContent).toContain(initial.detail);
+ expect(host.textContent).not.toContain('长附件.pdf：'+initial.detail);
+ await paint([waiting],{...f,staleProgressIds:new Set(['t1'])});
+ expect(host.textContent).not.toContain(initial.detail);
+});
+
 it('offers a stop status check on the same task without invoking stop again',async()=>{
  const waiting=task({name:'原任务',state:'waiting_time'});
  const onCheckStop=vi.fn(),f=fns();
