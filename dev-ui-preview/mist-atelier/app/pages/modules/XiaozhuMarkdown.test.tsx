@@ -140,3 +140,34 @@ it('links evidenced pages inside an unambiguous PDF section without guessing for
   expect(preview.mock.calls).toEqual([[first],[first,23],[first,22],[second],[second,21]]);
  }finally{await act(async()=>root.unmount());host.remove();}
 });
+
+
+it('opens an observed worksheet from separate report details without choosing an ambiguous or unread sheet', async () => {
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();
+ document.body.append(host);
+ const first={id:'a',name:'报价.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',size:120};
+ const second={...first,id:'b'};
+ const text=[
+  '### 报价.xlsx（1）',
+  '- 工作表：核对结果：报价正确。\n- 工作表：**核对结果 2026**\n- 工作表：核对结果、趋势。\n- 工作表：**核对结果**、趋势。\n- 工作表：内部底表。\n- 工作表：趋势见另一份.xlsx。',
+  '**报价.xlsx（2）**',
+  'worksheet: Details',
+  '**报价.xlsx**',
+  '工作表：核对结果。',
+ ].join('\n\n');
+ const attachmentReads=[
+  {at:'',kind:'read' as const,label:'已读',taskAttachmentId:'a',taskAttachmentObservedSheets:['核对结果','核对结果 2026','趋势']},
+  {at:'',kind:'read' as const,label:'已读',taskAttachmentId:'b',taskAttachmentObservedSheets:['Details','内部底表']},
+ ];
+ try {
+  await act(async()=>root.render(<XiaozhuMarkdown text={text} index={[]} onOpen={vi.fn()} attachments={[first,second]} attachmentReads={attachmentReads} onOpenAttachment={preview}/>));
+  const buttons=[...host.querySelectorAll('button')];
+  expect(buttons.map(button=>button.textContent)).toEqual(['报价.xlsx（1）','工作表：核对结果','核对结果 2026','报价.xlsx（2）','worksheet: Details']);
+  await act(async()=>buttons.forEach(button=>button.click()));
+  expect(preview.mock.calls).toEqual([[first],[first,'核对结果'],[first,'核对结果 2026'],[second],[second,'Details']]);
+ } finally {
+  await act(async()=>root.unmount());
+  host.remove();
+ }
+});
