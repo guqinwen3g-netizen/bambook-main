@@ -9,6 +9,7 @@ export type AssistantReply = {
 export type AssistantAttachmentRef = TaskAttachmentRef & Pick<TaskAttachment, 'name' | 'size'> & { needsVerification?: true };
 type TaskAnswerDraft = {taskId:string;questionId:string;text:string};
 export const taskAnswerDraftKey=(taskId:string,questionId:string)=>JSON.stringify([taskId,questionId]);
+export type TaskControlRequest = {action:'answer'|'cancel';version:number;key:string;requestId:string};
 type ComposerDraft = {
   question: string;
   selected: Array<{ id: string; label: string }>;
@@ -43,6 +44,7 @@ function save(scope: string, { question, selected, messages, attachmentRefs }: C
 
 function useConversationState(scope: string) {
   const [entry, setEntry] = React.useState(() => ({ scope, value: load(scope) }));
+  const taskControlRequests=React.useMemo(()=>new Map<string,TaskControlRequest>(),[scope]);
   React.useEffect(() => { if (entry.scope === scope) save(scope, entry.value); }, [entry, scope]);
   const live = React.useRef(scope);
   live.current = scope;
@@ -98,7 +100,7 @@ function useConversationState(scope: string) {
       return { scope, value: { ...previous.value, inactiveDrafts } };
     });
   }, [scope]);
-  return { scope, ...(entry.scope === scope ? entry.value : fresh), setQuestion, setSelected, setMessages, setFiles, setAttachmentRefs, switchDraft, clearDraft,setAnswerDraft,discardAnswerDrafts };
+  return { scope, ...(entry.scope === scope ? entry.value : fresh), setQuestion, setSelected, setMessages, setFiles, setAttachmentRefs, switchDraft, clearDraft,setAnswerDraft,discardAnswerDrafts,taskControlRequests };
 }
 
 const Context = React.createContext<ReturnType<typeof useConversationState> | null>(null);
