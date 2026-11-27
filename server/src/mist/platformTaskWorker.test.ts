@@ -30,6 +30,31 @@ async function fixture(complete:(input:LlmCompletionInput)=>Promise<string>,opti
 }
 const tool=(name:string,args:Record<string,unknown>)=>JSON.stringify({name,arguments:args});
 
+it('sends one shared object-type definition and source receipts without duplicating the UI trail',async()=>{
+ let input:LlmCompletionInput|undefined;
+ const f=await fixture(async prompt=>{input=prompt;return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对模拟订单。'});});
+ const order=f.workspace.state.orders[0];
+ f.worker.start(3_600_000);
+ const {item:task}=(await f.human.post(f.base+'/personal-agent/tasks').send({
+  requestId:randomUUID(),name:'核对模拟订单',instructions:'只读核对模拟订单。',
+  intentRefs:[{kind:'orders',id:order.id}],
+ }).expect(201)).body;
+ await f.drain();
+ expect(input).toBeDefined();
+ const prompt=String(input!.messages[0].content);
+ const facts=JSON.parse(prompt.slice(prompt.indexOf('{"task":')));
+ expect(facts.task).not.toHaveProperty('trail');
+ expect(facts.history.recent).toEqual([expect.objectContaining({name:'bambook_get',result:expect.objectContaining({object:expect.objectContaining({id:order.id})})})]);
+ const system=input!.systemPrompt;
+ const catalog=JSON.parse(system.slice(system.lastIndexOf('工具：')+'工具：'.length));
+ expect(catalog.$defs.objectType.enum).toContain('order');
+ expect(catalog.tools.find((entry:{name:string})=>entry.name==='bambook_related').inputSchema.properties.relatedType)
+  .toMatchObject({$ref:'#/$defs/objectType',description:expect.any(String)});
+ const finished=await f.current(task.id);
+ expect(finished.state).toBe('succeeded');
+ expect(finished.trail).toEqual(expect.arrayContaining([expect.objectContaining({ref:expect.objectContaining({id:order.id})})]));
+});
+
 it('reports open personal task access without exposing reports or distinguishing inaccessible task IDs', async () => {
  const ceiling = { value: null as string[] | null };
  const finish = tool('bambook_task', {action:'finish',outcome:'succeeded',result:'private report'});
@@ -167,6 +192,58 @@ it('only carries authorized task history into a follow-up and masks it when its 
  expect(complete).toHaveBeenCalledTimes(2);
 });
 
+it.each(['selected','discovered','exact order code'] as const)('re-reads the %s order for a follow-up without changing the old report', async source => {
+ const originalDue='2027-05-07', currentDue='2027-05-21';
+ const conversationId='c_history_current_order';
+ const followRequest='现在这张订单是哪天交货？';
+ let orderId:string, lookupId:string;
+ const facts=(input:LlmCompletionInput)=>{
+  const text=String(input.messages[0].content);
+  return JSON.parse(text.slice(text.indexOf('{"task":')));
+ };
+ const complete=vi.fn(async (input:LlmCompletionInput)=>{
+  const turn=facts(input), read=turn.history.recent.at(-1)?.result?.object;
+  if(!read && !turn.task.instructions.includes(followRequest))return tool('bambook_get',{type:'order',id:lookupId});
+  return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'确认交期 '+(read?.data.due??originalDue)});
+ });
+ const f=await fixture(complete,{mode:'read'});
+ const created=await f.command('order.create',{
+  type:'garment',customerId:f.workspace.state.customers[0].id,season:'AW',currency:'USD',due:originalDue,ownerId:'local-operator',
+  lines:[{name:'模拟样衣',style:'SYNTH-FRESHNESS',qty:20,unit:'件',price:5,img:'coat',fulfillmentMode:'full_package',cmtIncludedItems:[]}],
+ });
+ orderId=created.body.receipt.result.orderId;
+ const storedOrder=created.body.workspace.state.orders.find((order:{id:string})=>order.id===orderId);
+ lookupId=source==='exact order code'?storedOrder.code:orderId;
+ const endpoint=f.base+'/personal-agent/tasks';
+ const post=async (instructions:string,options:Record<string,unknown>={})=>(await f.human.post(endpoint).send({
+  requestId:randomUUID(),name:'核对模拟交期',instructions,conversationId,...options,
+ }).expect(201)).body.item;
+ f.worker.start(3_600_000);
+ const original=await post('只读核对订单原交期。',source==='selected'?{intentRefs:[{kind:'orders',id:orderId}]}:{});
+ await f.drain();
+ expect(await f.current(original.id)).toMatchObject({state:'succeeded',result:'确认交期 '+originalDue});
+ await f.command('order.update',{orderId,due:currentDue});
+ const follow=await post(followRequest,{historyTaskIds:[original.id]});
+ await f.drain();
+ const latest=facts(complete.mock.calls.at(-1)![0]);
+ expect(latest.task.instructions).toContain(originalDue);
+ expect(latest.history.recent.map((step:any)=>step.name)).toEqual(['bambook_get']);
+ expect(latest.history.recent[0].result.object).toMatchObject({id:orderId,data:{due:currentDue}});
+ expect(await f.current(follow.id)).toMatchObject({state:'succeeded',instructions:followRequest,result:'确认交期 '+currentDue});
+ expect(await f.current(original.id)).toMatchObject({state:'succeeded',result:'确认交期 '+originalDue});
+ expect(follow).not.toHaveProperty('intentRefs');
+ if(source==='selected'){
+  const other=f.workspace.state.orders[0];
+  const explicit=await post('改为核对我新选的订单。',{historyTaskIds:[original.id,follow.id],intentRefs:[{kind:'orders',id:other.id}]});
+  await f.drain();
+  const selected=facts(complete.mock.calls.at(-1)![0]);
+  expect(selected.task.instructions).not.toContain(originalDue);
+  expect(selected.task.instructions).not.toContain(currentDue);
+  expect(selected.history.recent.map((step:any)=>step.result.object.id)).toEqual([other.id]);
+  expect(await f.current(explicit.id)).toMatchObject({state:'succeeded',result:'确认交期 '+other.due});
+ }
+});
+
 it('strips legacy automatic history and keeps an identical request replay bound to its original receipt', async () => {
  const stale='LEGACY-CACHED-REPORT-DO-NOT-SEND';
  const current='本次只核对公开状态。';
@@ -274,8 +351,10 @@ it('shows only the owner’s active XiaoZhu tasks with a live stage and hides ta
   await f.worker.tick();
   await entered.promise;
   const active = (await f.human.get(path).expect(200)).body.items;
+  const executionStageSince = (await f.current(personal.id)).executionStageSince;
+  expect(Number.isFinite(Date.parse(executionStageSince))).toBe(true);
   expect(active).toEqual([
-   {id:personal.id,name:'核对交期',state:'running',executionStage:'model'},
+   {id:personal.id,name:'核对交期',state:'running',executionStage:'model',executionStageSince},
    {id:queued.id,name:'核对数量',state:'queued'},
   ]);
  } finally {
@@ -621,6 +700,51 @@ it('ignores late model output after human stop, even when the model ignores its 
  const current=await f.current(task.id);await f.human.post(f.base+'/agent-tasks/'+task.id+'/cancel').send({requestId:randomUUID(),version:current.version}).expect(200);const stopped=(await f.human.get(f.base).expect(200)).body.workspace.state;await f.worker.stop();resolve(tool('bambook_execute',{command:{type:'email.flag',payload:{id:before.email.messages[0].id,flag:'starred',value:true}}}));await Promise.resolve();
  expect((await f.current(task.id)).state).toBe('cancelled');const after=(await f.human.get(f.base).expect(200)).body.workspace.state;expect(after).toEqual(stopped);expect(after.email).toEqual(before.email);
 });
+it('reports a same-turn backup through the task and personal activity until the next tool starts', async () => {
+ vi.stubEnv('ARK_API_KEY','test-primary');
+ vi.stubEnv('BAMBOOK_LLM_BACKUP_URL','https://backup.example/v1');
+ vi.stubEnv('BAMBOOK_LLM_BACKUP_KEY','test-backup');
+ const success=(content:string)=>new Response(JSON.stringify({choices:[{message:{content}}]}),{headers:{'content-type':'application/json'}});
+ let releasePrimary!:(response:Response)=>void,releaseBackup!:(response:Response)=>void,releaseNext!:(response:Response)=>void;
+ const primary=new Promise<Response>(resolve=>{releasePrimary=resolve;});
+ const backup=new Promise<Response>(resolve=>{releaseBackup=resolve;});
+ const next=new Promise<Response>(resolve=>{releaseNext=resolve;});
+ const fetchMock=vi.fn().mockReturnValueOnce(primary).mockReturnValueOnce(backup).mockReturnValueOnce(next);
+ vi.stubGlobal('fetch',fetchMock);
+ try {
+  const complete=createLlmCompleter({platformProfile:'agent-task',platformProviders:{chain:()=>[]},subscriptions:{isConnected:()=>false,complete:async()=>''}});
+  const f=await fixture(complete,{pulseMs:60000});
+  f.worker.start(3_600_000);
+  const {item:task}=(await f.human.post(f.base+'/personal-agent/tasks').send({
+   requestId:randomUUID(),name:'模拟备用模型',instructions:'只读核对当前来信。',
+  }).expect(201)).body;
+  await f.worker.tick();
+  await vi.waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(1));
+  expect(await f.current(task.id)).not.toHaveProperty('modelFallbackSince');
+  releasePrimary(new Response('{}',{status:503}));
+  await vi.waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(2));
+  const backupView=await f.current(task.id);
+  expect(backupView).toMatchObject({state:'running',executionStage:'model',modelFallbackSince:expect.any(String)});
+  expect(Date.parse(backupView.modelFallbackSince)).toBeGreaterThanOrEqual(Date.parse(backupView.executionStageSince));
+  expect((await f.human.get(f.base+'/personal-agent/activity').expect(200)).body.items).toEqual([
+   expect.objectContaining({id:task.id,modelFallbackSince:backupView.modelFallbackSince}),
+  ]);
+  releaseBackup(success(tool('bambook_get',{type:'email',id:f.workspace.state.email.messages[0].id})));
+  await vi.waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(3));
+  expect(await f.current(task.id)).not.toHaveProperty('modelFallbackSince');
+  releaseNext(success(tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对模拟来信。'})));
+  await f.worker.settled();
+  const finished=await f.current(task.id);
+  expect(finished).toMatchObject({state:'succeeded',result:'已核对模拟来信。'});
+  expect(finished).not.toHaveProperty('modelFallbackSince');
+ } finally {
+  releasePrimary(new Response('{}',{status:503}));
+  releaseBackup(new Response('{}',{status:503}));
+  releaseNext(new Response('{}',{status:503}));
+  vi.unstubAllGlobals();
+ }
+});
+
 it('does not send a fallback when the user has cancelled between provider attempts', async () => {
  vi.stubEnv('ARK_API_KEY','test-primary');
  vi.stubEnv('BAMBOOK_LLM_BACKUP_URL','https://backup.example/v1');
@@ -758,12 +882,13 @@ it.each([false,true])('keeps a valid development draft proposal visible across r
  await f.command('agent.proposal.confirm',{id:proposal.id});await f.drain();const after=(await f.human.get(f.base).expect(200)).body.workspace;expect(after.state.drafts.find((d:any)=>d.id===draft).values.style).toBe('NW-31');expect(after.state.drafts).toHaveLength(direct.state.drafts.length);expect(after.state.devs).toHaveLength(direct.state.devs.length);
 });
 
-function pdf(text:string, pageCount=1){
+function pdf(text:string, pageCount=1,dense=false){
  const font=3+2*pageCount;
  const objects=['<</Type/Catalog/Pages 2 0 R>>',`<</Type/Pages/Kids[${Array.from({length:pageCount},(_,i)=>`${3+2*i} 0 R`).join(' ')}]/Count ${pageCount}>>`];
  for(let page=1;page<=pageCount;page++){
-   const stream=`BT /F1 12 Tf 10 50 Td (${page===pageCount?text:`Page ${page}: general terms`}) Tj ET`;
-   objects.push(`<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 100]/Contents ${2+2*page} 0 R/Resources<</Font<</F1 ${font} 0 R>>>>>>`, `<</Length ${stream.length}>>\nstream\n${stream}\nendstream`);
+   const extra=dense?Array.from({length:5},(_,index)=>`BT /F1 9 Tf 10 ${120+14*index} Td (Page ${page}, line ${index}: synthetic detailed invoice terms) Tj ET`).join('\n'):'';
+   const stream=`BT /F1 12 Tf 10 50 Td (${page===pageCount?text:`Page ${page}: general terms`}) Tj ET\n${extra}`;
+   objects.push(`<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 ${dense?200:100}]/Contents ${2+2*page} 0 R/Resources<</Font<</F1 ${font} 0 R>>>>>>`, `<</Length ${stream.length}>>\nstream\n${stream}\nendstream`);
  }
  objects.push('<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>');
  let out='%PDF-1.4\n';const offsets:number[]=[];objects.forEach((o,i)=>{offsets.push(out.length);out+=`${i+1} 0 obj\n${o}\nendobj\n`;});
@@ -771,25 +896,105 @@ function pdf(text:string, pageCount=1){
  return Buffer.from(out);
 }
 
-it('reads one short PDF tail before asking the model to prepare the report', async () => {
+it('reads the short tail of each PDF before asking the model to prepare the report', async () => {
  const complete = vi.fn(async (_input: LlmCompletionInput) =>
    tool('bambook_task', { action: 'finish', outcome: 'succeeded', result: '已整理附件核对报告' }));
  const f = await fixture(complete);
  f.worker.start(3_600_000);
  const task = (await f.human.post(f.base + '/personal-agent/tasks')
-   .field('task', JSON.stringify({requestId:randomUUID(),name:'核对附件',instructions:'核对 PDF 和最后一页。'}))
-   .attach('attachments', pdf('PDF-TAIL-CONTROL-23', 23), 'delivery.pdf').expect(201)).body.item;
+   .field('task', JSON.stringify({requestId:randomUUID(),name:'核对附件',instructions:'核对两份 PDF 和各自的最后一页。'}))
+   .attach('attachments', pdf('PDF-TAIL-CONTROL-23', 23), 'delivery.pdf')
+   .attach('attachments', pdf('PDF-TAIL-INVOICE-21', 21), 'invoice.pdf').expect(201)).body.item;
  await f.drain();
  expect(complete).toHaveBeenCalledTimes(1);
  const input = complete.mock.calls[0][0].messages[0].content as string;
  const facts = JSON.parse(input.slice(input.indexOf('{')));
  const reads = facts.history.recent.filter((step: {name:string}) => step.name === 'bambook_file_text');
  expect(reads).toEqual([
-   expect.objectContaining({result:expect.objectContaining({range:expect.objectContaining({pageFrom:1,pageTo:20}),hasMore:true})}),
-   expect.objectContaining({result:expect.objectContaining({range:expect.objectContaining({pageFrom:21,pageTo:23}),hasMore:false,text:expect.stringContaining('PDF-TAIL-CONTROL-23')})}),
+   expect.objectContaining({arguments:expect.objectContaining({fileId:'attachment_1'}),result:expect.objectContaining({range:expect.objectContaining({pageFrom:1,pageTo:20})})}),
+   expect.objectContaining({arguments:expect.objectContaining({fileId:'attachment_2'}),result:expect.objectContaining({range:expect.objectContaining({pageFrom:1,pageTo:20})})}),
+   expect.objectContaining({arguments:expect.objectContaining({fileId:'attachment_1',cursor:'next'}),result:expect.objectContaining({range:expect.objectContaining({pageFrom:21,pageTo:23}),hasMore:false,text:expect.stringContaining('PDF-TAIL-CONTROL-23')})}),
+   expect.objectContaining({arguments:expect.objectContaining({fileId:'attachment_2',cursor:'next'}),result:expect.objectContaining({range:expect.objectContaining({pageFrom:21,pageTo:21}),hasMore:false,text:expect.stringContaining('PDF-TAIL-INVOICE-21')})}),
  ]);
- expect(reads[1].result.sourceHash).toBe(reads[0].result.sourceHash);
+ expect(facts.history.pdfCoverage).toEqual([
+  {fileId:'attachment_1',pagesChecked:23,pagesWithoutText:[]},
+  {fileId:'attachment_2',pagesChecked:21,pagesWithoutText:[]},
+ ]);
+ expect(complete.mock.calls[0][0].systemPrompt).toContain('逐字保留该标识');
+ expect(reads[2].result.sourceHash).toBe(reads[0].result.sourceHash);
+ expect(reads[3].result.sourceHash).toBe(reads[1].result.sourceHash);
+ expect(reads[0].result.sourceHash).not.toBe(reads[1].result.sourceHash);
  expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'已整理附件核对报告'});
+});
+
+it('pre-reads both text slices and the short tail of a dense PDF before calling the model',async()=>{
+ const complete=vi.fn(async(model:LlmCompletionInput)=>{
+  const content=model.messages[0].content as string,facts=JSON.parse(content.slice(content.indexOf('{')));
+  const reads=facts.history.recent.filter((step:{name:string})=>step.name==='bambook_file_text');
+  expect(reads).toHaveLength(3);
+  expect(reads[0].result.range).toMatchObject({pageFrom:1,pageTo:20,start:0,end:3500,textLimited:true});
+  expect(reads[1].result.range).toMatchObject({pageFrom:1,pageTo:20,start:3500});
+  expect(reads[1].result.nextPageFrom).toBe(21);
+  expect(reads[2].result.range).toMatchObject({pageFrom:21,pageTo:23,start:0});
+  expect(reads[2].result.text).toContain('DENSE-INVOICE-TAIL-23');
+  expect(facts.history.pdfCoverage).toEqual([{fileId:'attachment_1',pagesChecked:23,pagesWithoutText:[]}]);
+  return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对测试资料。'});
+ });
+ const f=await fixture(complete);
+ f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'密集资料核对',instructions:'核对模拟条款。'}))
+  .attach('attachments',pdf('DENSE-INVOICE-TAIL-23',23,true),'dense.pdf').expect(201)).body.item;
+ await f.drain();
+ expect(complete).toHaveBeenCalledTimes(1);
+ const completed=await f.current(task.id);
+ expect(completed).toMatchObject({state:'succeeded',result:'已核对测试资料。'});
+ expect(completed.trail.filter((entry:{taskAttachmentId?:string})=>entry.taskAttachmentId).map((entry:{taskAttachmentPageRange:unknown})=>entry.taskAttachmentPageRange))
+  .toEqual([{from:1,to:20},{from:1,to:20},{from:21,to:23}]);
+});
+
+it('supplies separate report labels and reads for attachments with identical original filenames',async()=>{
+ const complete=vi.fn(async(_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'核对 quote.pdf（1） 和 quote.pdf（2）。'}));
+ const f=await fixture(complete);
+ f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'核对同名附件',instructions:'区分两份报价。'}))
+  .attach('attachments',pdf('FIRST-QUOTE-781'),'quote.pdf')
+  .attach('attachments',pdf('SECOND-QUOTE-972'),'quote.pdf').expect(201)).body.item;
+ await f.drain();
+ expect(complete).toHaveBeenCalledTimes(1);
+ const input=complete.mock.calls[0][0].messages[0].content as string;
+ const facts=JSON.parse(input.slice(input.indexOf('{')));
+ expect(facts.task.attachments).toEqual([
+  expect.objectContaining({id:'attachment_1',name:'quote.pdf',reportLabel:'quote.pdf（1）'}),
+  expect.objectContaining({id:'attachment_2',name:'quote.pdf',reportLabel:'quote.pdf（2）'}),
+ ]);
+ expect(facts.history.recent).toEqual([
+  expect.objectContaining({arguments:expect.objectContaining({fileId:'attachment_1'}),result:expect.objectContaining({text:expect.stringContaining('FIRST-QUOTE-781')})}),
+  expect.objectContaining({arguments:expect.objectContaining({fileId:'attachment_2'}),result:expect.objectContaining({text:expect.stringContaining('SECOND-QUOTE-972')})}),
+ ]);
+ const saved=await f.current(task.id);
+ expect(saved.attachments.map((file:{name:string})=>file.name)).toEqual(['quote.pdf','quote.pdf']);
+ expect(saved.trail.filter((step:{taskAttachmentId?:string})=>step.taskAttachmentId).map((step:{label:string})=>step.label))
+  .toEqual(['读取附件 quote.pdf（1）','读取附件 quote.pdf（2）']);
+});
+
+it('labels identical image filenames in the same order as the actual image payloads',async()=>{
+ const complete=vi.fn(async(_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'核对照片。'}));
+ const f=await fixture(complete);
+ f.worker.start(3_600_000);
+ const bytes=async(background:string)=>sharp({create:{width:16,height:12,channels:3,background}}).png().toBuffer();
+ const first=await bytes('#112233'),second=await bytes('#ffaa55');
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'同名图片',instructions:'核对两份照片。'}))
+  .attach('attachments',first,'sample.png').attach('attachments',second,'sample.png').expect(201)).body.item;
+ await f.drain();
+ expect(complete).toHaveBeenCalledTimes(1);
+ const model=complete.mock.calls[0][0],input=model.messages[0].content as string;
+ expect(model.images?.map(image=>image.name)).toEqual(['sample.png（1）','sample.png（2）']);
+ expect(model.images?.[0].url).not.toBe(model.images?.[1].url);
+ expect(input).toContain('"imageSources":["sample.png（1）","sample.png（2）"]');
+ expect((await f.current(task.id)).state).toBe('succeeded');
 });
 
 it('researches a PDF, workbook and image together with a selected order, keeping all uploaded files task-private',async()=>{

@@ -1,14 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type {AgentTaskView} from '../shared/mistAgentTasks';
+import type {AgentTaskIntentRef,AgentTaskView} from '../shared/mistAgentTasks';
 import type { MarketQuotation } from '../shared/mistMarket';
 import type{ResponseLocale}from'./responseLanguage';
 
 export type PlatformTaskPlan={name:string;arguments:Record<string,unknown>;progress?:string};
 export type PlatformTaskStep={id:string;plan:PlatformTaskPlan;result?:unknown;at:string;completedAt?:string;compacted?:boolean};
-export type PlatformTaskProgress={steps:PlatformTaskStep[];nextRunAt:number;requiresRead?:boolean;requiresReadBeforeWrite?:boolean;checkpointBeforeIssue?:string;retryAt?:number;failures?:number;issue?:'model_unavailable'|'model_response_invalid'};
+export type PlatformTaskProgress={steps:PlatformTaskStep[];nextRunAt:number;modelFallbackAt?:number;requiresRead?:boolean;requiresReadBeforeWrite?:boolean;checkpointBeforeIssue?:string;retryAt?:number;failures?:number;issue?:'model_unavailable'|'model_response_invalid'};
 export const PLATFORM_TASK_TURN_LIMIT=60;
 export const PLATFORM_TASK_RESULT_LIMIT=160_000;
-export type PlatformTaskContext={task:AgentTaskView;locale:ResponseLocale;businessAt?:string;hasTaskHistory?:boolean;requiresRead:boolean;requiresReadBeforeWrite?:boolean;steps:PlatformTaskStep[];decisions:Array<{id:string;state:string;note?:string;produced?:{fileId:string;fileName:string}}>};
+export type PlatformTaskContext={task:AgentTaskView;locale:ResponseLocale;businessAt?:string;hasTaskHistory?:boolean;taskReadRefs:AgentTaskIntentRef[];requiresRead:boolean;requiresReadBeforeWrite?:boolean;steps:PlatformTaskStep[];decisions:Array<{id:string;state:string;note?:string;produced?:{fileId:string;fileName:string}}>};
 const names=new Set(['bambook_task','bambook_query','bambook_get','bambook_get_orders','bambook_related','bambook_commands','bambook_preview','bambook_execute','bambook_audit','bambook_mail_receiving','bambook_file_text']);
 
 /** Persist an observable tool decision, never private reasoning or provider credentials. */
@@ -35,23 +35,21 @@ export function platformTaskAttachmentHandles(attachments: AgentTaskView['attach
   return new Map(attachments.map((file, index) => [file.id, `${PLATFORM_TASK_ATTACHMENT_PREFIX}${index + 1}`]));
 }
 
-/** Pre-read at most one short physical page window from the task's sole PDF attachment. */
-export function shortPdfTailPlan(attachments: AgentTaskView['attachments'] = [], steps: PlatformTaskStep[]): PlatformTaskPlan | undefined {
-  const pdfs = attachments.filter(file => file.mimeType === 'application/pdf' || /\.pdf$/i.test(file.name));
-  if (pdfs.length !== 1) return;
-  const [file] = pdfs;
-  const reads = steps.filter(step => step.plan.name === 'bambook_file_text' && step.plan.arguments.fileId === file.id);
-  if (reads.length !== 1) return;
-  const [initial] = reads;
-  const result = initial.result as {
-    kind?: string; error?: boolean; pages?: number; hasMore?: boolean;
-    range?: { pageFrom?: number; pageTo?: number }; nextPageFrom?: number; nextCursor?: unknown;
-  } | undefined;
-  if (initial.compacted || initial.plan.arguments.cursor !== undefined || result?.error || result?.kind !== 'pdf'
-    || typeof result.pages !== 'number' || !Number.isInteger(result.pages) || result.pages < 21 || result.pages > 24
-    || result.range?.pageFrom !== 1 || result.range.pageTo !== 20 || result.hasMore !== true
-    || result.nextPageFrom !== 21 || typeof result.nextCursor !== 'string' || !result.nextCursor.startsWith('aft1.')) return;
-  return {name:'bambook_file_text',arguments:{fileId:file.id,cursor:result.nextCursor,maxChars:3500}};
+/** Pre-read a short PDF's next text slice and at most one tail window. */
+export function shortPdfContinuationPlan(attachments: AgentTaskView['attachments'] = [], steps: PlatformTaskStep[]): PlatformTaskPlan | undefined {
+  for (const file of attachments) {
+    if (file.mimeType !== 'application/pdf' && !/\.pdf$/i.test(file.name)) continue;
+    const reads = steps.filter(step => step.plan.name === 'bambook_file_text' && step.plan.arguments.fileId === file.id);
+    if (reads.length === 0 || reads.length > 2) continue;
+    const verified = pdfReadCoverage(reads).get(file.id);
+    if (!verified?.next || verified.pages > 24) continue;
+
+    const first = reads[0].result as PdfReadWindow;
+    if (first.range?.pageTo !== Math.min(20, verified.pages)) continue;
+    if (reads.length === 2 && (first.nextPageFrom !== undefined || verified.next.from !== 21 || verified.next.offset !== 0)) continue;
+
+    return { name: 'bambook_file_text', arguments: { fileId: file.id, cursor: verified.next.cursor, maxChars: 3500 } };
+  }
 }
 
 /** Restore the canonical file ID first, then resolve continuation from that exact file's latest successful read. */
@@ -91,6 +89,53 @@ function quotationAmountScope(result: unknown) {
   };
 }
 
+type PdfReadWindow = {
+  kind?:string; error?:boolean; file?:{id?:string}; sourceHash?:string; pages?:number;
+  range?:{start:number;end:number;pageFrom:number;pageTo:number;textLimited?:boolean};
+  hasMore?:boolean; nextCursor?:string; nextPageFrom?:number; pagesWithoutText?:number[]; reason?:string;
+};
+
+type PdfContinuation = {cursor:string;from:number;offset:number;to?:number};
+
+/** Track coverage only across an exact continuation chain for the same original. */
+function pdfReadCoverage(steps:PlatformTaskStep[]){
+  const coverage=new Map<string,{sourceHash:string;pages:number;next?:PdfContinuation;pagesWithoutText:number[]}>();
+  for(const step of steps){
+    const {name,arguments:args}=step.plan;
+    const fileId=args.fileId;
+    if(name!=='bambook_file_text'||typeof fileId!=='string')continue;
+    const previous=coverage.get(fileId);
+    coverage.delete(fileId);
+    const read=step.result as PdfReadWindow|undefined,range=read?.range,missing=read?.pagesWithoutText??[];
+    if(step.compacted||read?.error||read?.kind!=='pdf'||read.file?.id!==fileId||typeof read.sourceHash!=='string'||!/^[a-f0-9]{64}$/.test(read.sourceHash)
+      ||!range||!Number.isSafeInteger(range.start)||range.start<0||!Number.isSafeInteger(range.end)||range.end<range.start
+      ||!Number.isSafeInteger(range.pageFrom)||!Number.isSafeInteger(range.pageTo)||range.pageFrom<1||range.pageTo<range.pageFrom
+      ||typeof read.pages!=='number'||!Number.isSafeInteger(read.pages)||range.pageTo>read.pages||typeof read.hasMore!=='boolean'
+      ||!Array.isArray(missing)||missing.some(page=>!Number.isSafeInteger(page)||page<range.pageFrom||page>range.pageTo)
+      ||(read.reason&&!missing.length))continue;
+    const head=args.cursor===undefined;
+    const expected=previous?.next;
+    if(head?range.pageFrom!==1||range.start!==0:!expected||expected.cursor!==args.cursor
+      ||previous?.sourceHash!==read.sourceHash||previous.pages!==read.pages||range.pageFrom!==expected.from
+      ||range.start!==expected.offset||(expected.to!==undefined&&range.pageTo!==expected.to))continue;
+
+    let next:PdfContinuation|undefined;
+    if(read.hasMore){
+      if(typeof read.nextCursor!=='string'||!read.nextCursor.startsWith('aft1.'))continue;
+      if(read.nextPageFrom===undefined){
+        if(!range.textLimited||range.end===range.start)continue;
+        next={cursor:read.nextCursor,from:range.pageFrom,to:range.pageTo,offset:range.end};
+      }else{
+        if(range.textLimited||read.nextPageFrom!==range.pageTo+1||range.pageTo>=read.pages)continue;
+        next={cursor:read.nextCursor,from:read.nextPageFrom,offset:0};
+      }
+    }else if(read.nextCursor!==undefined||range.textLimited||range.pageTo!==read.pages)continue;
+    coverage.set(fileId,{sourceHash:read.sourceHash,pages:read.pages,next,
+      pagesWithoutText:[...new Set([...(head?[]:previous?.pagesWithoutText??[]),...missing])]});
+  }
+  return coverage;
+}
+
 /** Model context is explicit about omitted history; it cannot silently become full-read evidence. */
 export function platformTaskHistory(steps:PlatformTaskStep[]){
   let remaining=240_000;const recent:Array<{operationId:string;name:string;arguments:unknown;result:unknown;compacted?:boolean;quotationAmountScope?:ReturnType<typeof quotationAmountScope>}>=[];
@@ -114,7 +159,11 @@ export function platformTaskHistory(steps:PlatformTaskStep[]){
     recent.unshift(item);remaining-=size;
     if(key&&!duplicateOf)readResults.set(key,step.id);
   }
-  return{recent,omitted:steps.filter(s=>s.result!==undefined).length-recent.length,operations:steps.map(s=>({operationId:s.id,name:s.plan.name,completed:s.result!==undefined}))};
+  const included=new Set(recent.map(item=>item.operationId));
+  const coverage=pdfReadCoverage(steps.filter(step=>included.has(step.id)));
+  const pdfCoverage=[...coverage].flatMap(([fileId,read])=>!read.next
+    ? [{fileId,pagesChecked:read.pages,pagesWithoutText:read.pagesWithoutText}] : []);
+  return{recent,...(pdfCoverage.length?{pdfCoverage}:{}),omitted:steps.filter(s=>s.result!==undefined).length-recent.length,operations:steps.map(s=>({operationId:s.id,name:s.plan.name,completed:s.result!==undefined}))};
 }
 /** Keep durable completed-operation references, while bounding the registry and future prompts. */
 export function compactPlatformTaskSteps(input:PlatformTaskStep[]):PlatformTaskStep[]{
