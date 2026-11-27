@@ -54,6 +54,28 @@ it('does not render legacy cached read-only answers without an authorization tok
   expect(host.textContent).toContain('部分历史答复需重新核对');
 });
 
+it('can retry a failed history check without reopening the thread',async()=>{
+  sessionStorage.setItem('mist.assistant.conversation:session-a:workspace',JSON.stringify({messages:[
+    {role:'user',content:'原始只读问题'}, {role:'assistant',content:'原始只读答复',contextToken:'saved-ticket'},
+  ]}));
+  let reads=0;
+  mock.api.mockImplementation(async(url:string)=>{
+    if(url.endsWith('/assistant/history-access')){
+      if(++reads===1)throw Object.assign(new Error('temporary failure'),{status:503});
+      return {allowedTokens:['saved-ticket']};
+    }
+    return url.endsWith('/agent-task-capabilities')?{platformAvailable:false}:{items:[],nextCursor:null};
+  });
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  await mount();
+  expect(host.textContent).not.toContain('原始只读答复');
+  expect(host.textContent).toContain('历史答复暂时无法核对');
+  await click('重试核对历史答复');
+  expect(reads).toBe(2);
+  expect(host.textContent).toContain('原始只读答复');
+  expect(host.textContent).not.toContain('历史答复暂时无法核对');
+});
+
 it.each([
   ['customers','crm'], ['purchases','procurement'], ['shipments','shipments'], ['developments','development/detail'],
 ])('opens an authorized %s source from a read-only model reply',async(kind,sourceView)=>{

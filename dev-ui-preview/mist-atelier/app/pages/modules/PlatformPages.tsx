@@ -594,7 +594,9 @@ export function AssistantPage(){
           {!cowork.available&&hasThread&&<IconButton icon={SquarePen} label={uiText('新对话')} onClick={newConversation}/>}
         </div>
         {!cowork.available&&configuration&&!configuration.configured&&<div className="mist-xz-col mist-xz-banner"><Banner tone="warn" title={uiText("生成模型尚未连接到此公司")}>{uiText(configuration.subscription?'请平台管理员连接平台模型。':'服务器未配置可用模型。')}{uiText("仍可引用业务记录并保存文字草稿。")}</Banner></div>}
-        {!useTaskThread&&readOnlyHistory.hidden&&<div className="mist-xz-col mist-xz-banner"><Banner variant="status" tone="warn" title={uiText('部分历史答复需重新核对')}/></div>}
+        {!useTaskThread&&(readOnlyHistory.unavailable?<div className="mist-xz-col mist-xz-banner"><Banner variant="status" tone="warn" title={uiText('历史答复暂时无法核对')}
+          actions={<Button aria-label={uiText('重试核对历史答复')} onClick={readOnlyHistory.retry}>{uiText('重试')}</Button>}/></div>
+          :readOnlyHistory.hidden&&<div className="mist-xz-col mist-xz-banner"><Banner variant="status" tone="warn" title={uiText('部分历史答复需重新核对')}/></div>)}
         {cowork.progressStale&&<div className="mist-xz-col mist-xz-banner"><Banner variant="status" tone="warn" title={uiText("进度暂未更新，正在重试")}/></div>}
         {originTaskId&&originStatus&&<div className="mist-xz-col mist-xz-banner">
           <Banner variant="status" tone={originStatus==='loading'?'neutral':'warn'} title={uiText(originStatus==='loading'?'正在查找原对话':'任务暂时无法核对')}
