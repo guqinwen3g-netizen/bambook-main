@@ -114,6 +114,19 @@ it('uses only an explicit, unambiguous prefix in the original task request',()=>
  expect(requestedPdfRange([file,{...file,id:'other',name:'other.pdf'}],'请只读前 10 页。')).toBeUndefined();
 });
 
+it('recognizes a single explicitly requested PDF page without interpreting a wider request as one page',()=>{
+ const file={id:'pdf',name:'sample.pdf',mimeType:'application/pdf',size:1200};
+ for(const request of ['请只读取 sample.pdf 的第 22 页。','仅核对第 22 页的交期。','Read only page 22 of sample.pdf.','Please only review the 22nd page of sample.pdf.']){
+  expect(requestedPdfRange([file],request)).toEqual({fileId:'pdf',from:22,to:22});
+ }
+ for(const request of ['请只读取第 22 页和第 23 页。','只读第 22 页之后的内容。','请只读取第 22 页以外的正文。','Read only page 22 and page 23.','Read only page 22-23.']){
+  expect(requestedPdfRange([file],request)).toBeUndefined();
+ }
+ const exclusive=requestedTaskAttachmentScope(mixedFiles,'请只读取 quote.pdf（2）的第 22 页，其他附件不要读。');
+ expect(exclusive.pdf).toEqual({fileId:'pdf2',from:22,to:22});
+ expect([...exclusive.allowedFiles!]).toEqual(['pdf2']);
+});
+
 it('limits automatic PDF continuation to one short page window without a prior continuation attempt', () => {
  const file={id:'pdf',name:'sample.pdf',mimeType:'application/pdf',size:1500};
  const plan={name:'bambook_file_text',arguments:{fileId:file.id}};

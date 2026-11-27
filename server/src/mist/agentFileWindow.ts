@@ -49,6 +49,8 @@ export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:
  const morePages=originalHasLaterPages&&raw.window!.end<(pdfPages?.to??Infinity);
  const pageScopeStart=pdf&&pdfPages&&pdfPages.from>1?pdfPages.from:undefined;
  const pageScopeLimit=pdf&&pdfPages&&pdfPages.to<(raw.pages??0)?pdfPages.to:undefined;
+ const singlePageScope=pdf&&pdfPages&&pdfPages.from===pdfPages.to&&(pageScopeStart!==undefined||pageScopeLimit!==undefined)
+  ?pdfPages.from:undefined;
  const office=raw.kind==='docx'||raw.kind==='xlsx'||raw.kind==='pptx';
  if(!pdf&&p.page!==1||p.offset>content.length||p.offset>0&&/[\uDC00-\uDFFF]/.test(content[p.offset]??''))throw new RangeError('附件续读位置超出当前正文');
  const readable=!['unreadable','unsupported'].includes(raw.kind);
@@ -93,7 +95,7 @@ export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:
   ...(raw.kind==='xlsx'?{observedSheets:raw.sheetTextSpans?.filter(span=>span.end>p.offset&&span.start<end).map(span=>span.name)??[]}:{}),
   ...(pdf?{pageTextSpans:pageTextSpans??[]}:{}),
   ...(raw.reason?{reason:raw.reason}:extractionLimited?{reason:'正文超过安全提取范围，当前片段不能代表完整原件'}:{}),
-  ...(hasMore?{readHint:'用同一 fileId 和 nextCursor 调用 bambook_file_text 继续读取；累计范围连续且 sourceHash 一致才可认定没有漏读。'}:pageScopeStart!==undefined?{readHint:`本任务只读取第 ${pageScopeStart} 至 ${pageScopeLimit??raw.pages} 页，范围外未核实。`}:pageScopeLimit!==undefined?{readHint:`本任务只读取前 ${pageScopeLimit} 页，之后的页未核实。`}:worksheetScope!==undefined?{readHint:worksheetComplete
+  ...(hasMore?{readHint:'用同一 fileId 和 nextCursor 调用 bambook_file_text 继续读取；累计范围连续且 sourceHash 一致才可认定没有漏读。'}:singlePageScope!==undefined?{readHint:`本任务只读取第 ${singlePageScope} 页，其他页未核实。`}:pageScopeStart!==undefined?{readHint:`本任务只读取第 ${pageScopeStart} 至 ${pageScopeLimit??raw.pages} 页，范围外未核实。`}:pageScopeLimit!==undefined?{readHint:`本任务只读取前 ${pageScopeLimit} 页，之后的页未核实。`}:worksheetScope!==undefined?{readHint:worksheetComplete
    ?'本次已返回所选工作表的全部可提取正文，其他工作表未核实。'
    :'本任务只读取指定工作表，其他工作表未核实。'}:!fromStart?{readHint:'本段已到可提取范围末尾，但仅是片段；须与此前相同 sourceHash 的连续范围一起核对，不代表此前部分已读取。'}:{})};
 }
