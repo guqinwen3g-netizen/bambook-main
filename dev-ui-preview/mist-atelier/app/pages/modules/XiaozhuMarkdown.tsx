@@ -102,6 +102,37 @@ function citedSheet(suffix:string,file:TaskAttachment,reads:readonly AgentTaskTr
   if(syntax)return observedWorksheet(reference.slice(syntax[0].length),file,reads,/^[ \t]*[）)]/);
 }
 
+type ReportInline = Paragraph['children'][number];
+
+/** Split report lines without turning soft breaks into visible hard breaks or discarding styling. */
+function splitSectionLines(children: ReportInline[]) {
+  const lines: ReportInline[][] = [[]], separators: ReportInline[] = [];
+  const separate = (separator: ReportInline) => {
+    separators.push(separator);
+    lines.push([]);
+  };
+  for (const child of children) {
+    if (child.type === 'break') {
+      separate(child);
+    } else if (child.type === 'text' && child.value.includes('\n')) {
+      child.value.split('\n').forEach((value,index)=>{
+        if(index>0)separate({type:'text',value:'\n'});
+        if(value)lines.at(-1)!.push({type:'text',value});
+      });
+    } else if (child.type === 'strong' || child.type === 'emphasis') {
+      const nested=splitSectionLines(child.children);
+      if(!nested.separators.length){lines.at(-1)!.push(child);continue;}
+      nested.lines.forEach((items,index)=>{
+        if(index>0)separate(nested.separators[index-1]);
+        if(items.length)lines.at(-1)!.push({...child,children:items});
+      });
+    } else {
+      lines.at(-1)!.push(child);
+    }
+  }
+  return {lines,separators};
+}
+
 function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTaskTrailItem[]) {
   const byName = new Map<string, number | undefined>();
   files.forEach((file, index) => {
@@ -123,8 +154,7 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
   const names = [...byName.keys()].sort((a, b) => b.length - a.length);
   const pattern = new RegExp('(?<![\\p{L}\\p{N}_./\\\\-])(' + names.map(escapeSourceLabel).join('|') + ')(?:(?=第[ \\t]*[1-9])|(?![\\p{L}\\p{N}_/\\\\-]|\\.[\\p{L}\\p{N}_]))', 'gu');
   const observedReads = reads.filter(read => read.taskAttachmentObservedPages !== undefined);
-  const linkSectionReference = (paragraph: Paragraph, index: number) => {
-    if (mentionsAnotherSource(paragraph)) return;
+  const linkSectionLine = (paragraph: Paragraph, index: number) => {
     const first = paragraph.children[0];
     const container = first?.type === 'strong' || first?.type === 'emphasis' ? first : paragraph;
     const start = container.children[0];
@@ -147,6 +177,20 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
     const remainder = text.slice(label.length);
     container.children.splice(0,1,toAttachment(index,{type:'text',value:label},'',page??sheet),
       ...(remainder ? [{type:'text' as const,value:remainder}] : []));
+  };
+  const linkSectionReference = (paragraph: Paragraph, index: number) => {
+    const {lines,separators}=splitSectionLines(paragraph.children);
+    let sameSource=true, continuedRange=false;
+    paragraph.children=lines.flatMap((children,position)=>{
+      const line:Paragraph={type:'paragraph',children};
+      if(mentionsAnotherSource(line))sameSource=false;
+      const text=children.map(inlineTextStart).join('');
+      const page=PDF_PAGE_REFERENCE.exec(text);
+      const rangeContinues=!!page&&/^[ \t]*[）)]?[ \t]*(?:至|到|[-~–—/,，、]|和|或|及|and|to)[ \t]*$/i.test(text.slice(page[0].length));
+      if(sameSource&&!continuedRange&&!rangeContinues)linkSectionLine(line,index);
+      continuedRange=rangeContinues;
+      return position===0?line.children:[separators[position-1],...line.children];
+    });
   };
   return {
     names,
