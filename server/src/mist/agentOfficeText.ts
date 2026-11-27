@@ -5,6 +5,9 @@
  */
 import JSZip from 'jszip';
 import { posix } from 'node:path';
+import { officeKind, type OfficeKind } from '../shared/mistTaskAttachments';
+
+export { officeKind, type OfficeKind } from '../shared/mistTaskAttachments';
 
 const ENTRY_MAX = 30 * 1024 * 1024;
 const TOTAL_MAX = 60 * 1024 * 1024;
@@ -12,19 +15,9 @@ const SHEETS_MAX = 20;
 const COLUMNS_MAX = 60;
 const SLIDES_MAX = 200;
 
-export type OfficeKind = 'docx' | 'xlsx' | 'pptx';
 type SheetBlock = {name:string;start:number;bodyStart:number;end:number;observed:boolean};
 export type OfficeText = { text: string; truncated: boolean; sheets?: string[]; sheetBlocks?: SheetBlock[]; attributedValues?:true; pages?: number; reason?: string };
 
-const OFFICE_MIME: Record<OfficeKind, RegExp> = {
-  docx: /wordprocessingml\.document/i,
-  xlsx: /spreadsheetml\.sheet/i,
-  pptx: /presentationml\.presentation/i,
-};
-export function officeKind(file: { name: string; mimeType: string }): OfficeKind | undefined {
-  const ext = /\.(docx|xlsx|pptx)$/i.exec(file.name)?.[1]?.toLowerCase() as OfficeKind | undefined;
-  return ext ?? (Object.keys(OFFICE_MIME) as OfficeKind[]).find(k => OFFICE_MIME[k].test(file.mimeType));
-}
 export const LEGACY_OFFICE = /\.(doc|xls|ppt)$/i;
 
 class OfficeLimit extends Error {}

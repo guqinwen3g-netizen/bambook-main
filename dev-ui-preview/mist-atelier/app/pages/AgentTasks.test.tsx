@@ -449,6 +449,30 @@ it('shows missing facts distinctly and submits an owner answer without confirmin
  await act(async()=>fireEvent.input(getByLabelText(document.body,/答复/,{selector:'textarea'}),{target:{value:'请按11月25日核对原件。'}}));await click(getByRole(document.body,'button',{name:'提交答复'}));
  const writes=seam.api.mock.calls.filter(([,init])=>init?.method==='POST');expect(writes).toHaveLength(1);expect(writes[0][0]).toMatch(/\/task\/answer$/);expect(JSON.parse(writes[0][1].body)).toMatchObject({version:3,questionId:'question',answer:'请按11月25日核对原件。'});expect(queryByRole(document.body,'dialog',{name:'补充资料'})).toBeNull();expect(getByText(document.body,'请按11月25日核对原件。')).toBeTruthy();
 });
+it('submits the numbered workbook selected in task details', async () => {
+ const question = {id:'question',question:'请回复要核对的工作簿完整文件名，包括名称后显示的编号。',askedAt:'2026-11-01T00:10:00Z'};
+ const waiting = {...row(),state:'waiting_human',questions:[question],attachments:[
+  {id:'a1',name:'报价.xlsx',mimeType:'application/octet-stream',size:10},
+  {id:'a2',name:'报价.xlsx',mimeType:'application/octet-stream',size:10},
+ ]};
+ seam.api.mockImplementation((url:string,init:any)=>Promise.resolve(init?.method==='POST'?{item:{...waiting,state:'queued',questions:[]}}:
+  url.includes('agent-identities')?{items:[identity()],nextCursor:null}:url.includes('/history')?{items:[],nextCursor:null}:url.endsWith('/task')?{item:waiting}:{items:[waiting],nextCursor:null}));
+ act(paint);
+ await flush();
+ await click(getByText(host,'核对邮件'));
+ await click(getByRole(document.body,'button',{name:'补充资料',exact:true}));
+ const dialog=getByRole(document.body,'dialog',{name:'补充资料'});
+ expect(queryByRole(dialog,'textbox')).toBeNull();
+ const submit=getByRole(dialog,'button',{name:'提交答复'}) as HTMLButtonElement;
+ expect(submit.disabled).toBe(true);
+ await click(getByRole(dialog,'button',{name:'报价.xlsx（2）',exact:true}));
+ expect(seam.api.mock.calls.filter(([,init])=>init?.method==='POST')).toHaveLength(0);
+ await click(submit);
+ const writes=seam.api.mock.calls.filter(([,init])=>init?.method==='POST');
+ expect(writes).toHaveLength(1);
+ expect(JSON.parse(writes[0][1].body)).toMatchObject({version:3,questionId:'question',answer:'报价.xlsx（2）'});
+});
+
 it('freezes an uncertain owner answer and retries the same question and request',async()=>{
  const question={id:'question',question:'请补充书面确认依据。',askedAt:'2026-11-01T00:10:00Z'},waiting={...row(),state:'waiting_human',questions:[question]};let first:any=null;
  seam.api.mockImplementation((url:string,init:any)=>{if(init?.method==='POST'){if(!first){first=JSON.parse(init.body);return Promise.reject(new Error('网络中断'));}return Promise.resolve({item:{...waiting,state:'queued'}});}return Promise.resolve(url.includes('agent-identities')?{items:[identity()],nextCursor:null}:url.includes('/history')?{items:[],nextCursor:null}:url.endsWith('/task')?{item:waiting}:{items:[waiting],nextCursor:null});});

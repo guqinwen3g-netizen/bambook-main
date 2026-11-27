@@ -2,9 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import type {AgentTaskIntentRef,AgentTaskQuestion,AgentTaskView} from '../shared/mistAgentTasks';
 import type { MarketQuotation } from '../shared/mistMarket';
 import { splitTaskRequest } from '../shared/mistTaskHistoryText';
-import { taskAttachmentLabels } from '../shared/mistTaskAttachments';
+import { officeKind, taskWorkbookChoices, WORKBOOK_SELECTION_QUESTION } from '../shared/mistTaskAttachments';
 import type { PdfPageTextSpan } from './agentFileText';
-import { officeKind } from './agentOfficeText';
 import { isFileTextCursor } from './agentFileWindow';
 import type{ResponseLocale}from'./responseLanguage';
 
@@ -59,12 +58,9 @@ export function requestedPdfRange(attachments:AgentTaskView['attachments']=[],in
     return {fileId:file.id,...range};
 }
 
-export const WORKBOOK_SELECTION_QUESTION='请回复要核对的工作簿完整文件名，包括名称后显示的编号。';
-
 export function requestedWorkbookWorksheet(attachments:AgentTaskView['attachments']=[],instructions='',questions:readonly AgentTaskQuestion[]=[]) {
   const request=splitTaskRequest(instructions);
-  const labels=taskAttachmentLabels(attachments);
-  const workbooks=attachments.flatMap((file,index)=>officeKind(file)==='xlsx'?[{file,label:labels[index]}]:[]);
+  const workbooks=taskWorkbookChoices(attachments);
   if(!workbooks.length)return;
   const chinese=[...request.matchAll(/(?:^|[。；;\n])[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:只|仅)[ \t]*(?:读取|阅读|核对|查看|检查|读|看)([^。；;，,\n]{0,48}?)(?:[「“]([^」”\n]{1,31})[」”][ \t]*工作表|工作表[ \t]*[：:][ \t]*([^。；;，,\n]{1,31})(?=[。；;，,\n]|$))/gu)];
   const english=[...request.matchAll(/(?:^|[.;\n])[ \t]*(?:please[ \t]+)?(?:only[ \t]+(?:read|check|review)|(?:read|check|review)[ \t]+only)[ \t]+(?:the[ \t]+)?worksheet[ \t]+["“]([^"”\n]{1,31})["”]/gi)];

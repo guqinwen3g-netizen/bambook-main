@@ -1,11 +1,12 @@
 import {agentSource} from '../runtime/agentSource';
 import {XiaozhuMarkdown} from './modules/XiaozhuMarkdown';
 import {XiaozhuPhaseTimer} from './modules/XiaozhuPhaseTimer';
+import {XiaozhuWorkbookChoices, workbookChoicePrompt} from './modules/XiaozhuWorkbookChoices';
 import React from 'react';
 import { Bot, Copy, MessageSquare, Plus, RefreshCw, Zap } from 'lucide-react';
 import { Banner, Button, Card, CardBody, CardHeader, DataTable, Dialog, Drawer, EmptyState, Field, FilePreview, FormGrid, KeyValue, Pill, Select, Skeleton, TextArea, TextInput, useToast, type Column, type Tone } from '../../../../components/mist';
 import type { AgentTaskEvent, AgentTaskPage, AgentTaskView } from '../../../../server/src/shared/mistAgentTasks';
-import type { TaskAttachment } from '../../../../server/src/shared/mistTaskAttachments';
+import { taskWorkbookChoices, WORKBOOK_SELECTION_QUESTION, type TaskAttachment } from '../../../../server/src/shared/mistTaskAttachments';
 import type { AgentIdentityView } from '../../../../server/src/shared/mistAgentIdentities';
 import { uiText, interfaceLocale } from '../../../../services/interfaceLanguage';
 import { mistApiRequest, useMistWorkspace } from '../runtime/workspace';
@@ -294,6 +295,8 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
   const target=agentSource(source);if(target)nav.go(target.view,target.id,target.target);
  };
  const active=identities.filter(i=>i.state==='active'),aiUnavailable=identities.some(i=>i.state==='invalid'&&i.canIssue===false),create=plan?.kind==='create'?plan:null,answer=plan?.kind==='answer'?plan:null;
+ const answerQuestion=answer?.row.questions?.find(q=>q.id===answer.questionId)?.question;
+ const answerWorkbooks=answerQuestion===WORKBOOK_SELECTION_QUESTION?taskWorkbookChoices(answer?.row.attachments):[];
  const detailOrigin=detail&&!contentRestricted(detail)&&detail.state!=='access_changed'&&detail.executor==='platform'
   ? detail.automationId?{id:detail.id,section:'automations',automationId:detail.automationId,label:'打开原规则',icon:Zap}
    :detail.conversationId?{id:detail.id,section:'task-origin',label:'打开原对话',icon:MessageSquare}
@@ -346,7 +349,15 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
   </Drawer>
   <Dialog open={!!plan} onClose={closePlan} title={uiText(create?'新建任务':answer?'补充资料':plan?.kind==='issue'?'连接Agent':plan?.kind==='pause'?'暂停任务':plan?.kind==='resume'?'继续任务':'停止任务')} footer={<><Button disabled={busy} onClick={closePlan}>{uiText(uncertain?'关闭':'取消')}</Button><Button variant={plan?.kind==='cancel'?'danger':'primary'} loading={busy} disabled={busy||!!create&&(!create.identityId||!create.name.trim()||!create.instructions.trim()||create.executor==='platform'&&!platformAvailable)||!!answer&&!answer.answer.trim()} onClick={()=>void submit()}>{uiText(uncertain?'核对原操作':create?'安排任务':answer?'提交答复':plan?.kind==='issue'?'生成任务连接':'确认')}</Button></>}>
    <div className="mist-col">{failure&&<Banner tone="bad" title={failure}/>}
-    {create?.executor==='platform'&&!platformAvailable&&<Banner tone="bad" title={uiText('平台执行暂不可用')}/>}{create?<FormGrid><Field label={uiText('执行方式')} required full><Select value={create.executor} disabled={uncertain||busy} options={[{value:'external',label:uiText('外部客户端')},{value:'platform',label:uiText('平台执行')}]} onChange={e=>setPlan({...create,executor:e.target.value as 'external'|'platform'})}/></Field><Field label={uiText('Agent连接')} required full><Select value={create.identityId} disabled={uncertain} onChange={e=>setPlan({...create,identityId:e.target.value})} placeholder={uiText('请选择连接')} options={active.map(i=>({value:i.id,label:`${i.name} · ${uiText(i.mode==='read'?'只读':'可办理')}`}))}/></Field><Field label={uiText('任务名称')} required full><TextInput value={create.name} disabled={uncertain} onChange={e=>setPlan({...create,name:e.target.value})} maxLength={60}/></Field><Field label={uiText('任务内容')} required full><TextArea value={create.instructions} disabled={uncertain} onChange={e=>setPlan({...create,instructions:e.target.value})} maxLength={4000} rows={5}/></Field></FormGrid>:answer?<><KeyValue items={[{label:uiText('任务'),value:answer.row.name}]} /><p className="mist-sub">{answer.row.questions?.find(q=>q.id===answer.questionId)?.question}</p><Field label={uiText('答复')} required><TextArea value={answer.answer} disabled={uncertain} onChange={e=>setPlan({...answer,answer:e.target.value})} maxLength={4000} rows={5}/></Field></>:plan&&'row'in plan?<><KeyValue items={[{label:uiText('任务'),value:plan.row.name},{label:uiText('当前状态'),value:uiText(statusLabel(plan.row))}]} />{plan.kind==='cancel'&&<p className="mist-sub">{uiText('停止后不再续办，已办理的业务保留。')}</p>}{plan.kind==='issue'&&plan.row.state==='running'&&<p className="mist-sub">{uiText('重新连接将中断当前执行器。')}</p>}</>:null}
+    {create?.executor==='platform'&&!platformAvailable&&<Banner tone="bad" title={uiText('平台执行暂不可用')}/>}{create?<FormGrid><Field label={uiText('执行方式')} required full><Select value={create.executor} disabled={uncertain||busy} options={[{value:'external',label:uiText('外部客户端')},{value:'platform',label:uiText('平台执行')}]} onChange={e=>setPlan({...create,executor:e.target.value as 'external'|'platform'})}/></Field><Field label={uiText('Agent连接')} required full><Select value={create.identityId} disabled={uncertain} onChange={e=>setPlan({...create,identityId:e.target.value})} placeholder={uiText('请选择连接')} options={active.map(i=>({value:i.id,label:`${i.name} · ${uiText(i.mode==='read'?'只读':'可办理')}`}))}/></Field><Field label={uiText('任务名称')} required full><TextInput value={create.name} disabled={uncertain} onChange={e=>setPlan({...create,name:e.target.value})} maxLength={60}/></Field><Field label={uiText('任务内容')} required full><TextArea value={create.instructions} disabled={uncertain} onChange={e=>setPlan({...create,instructions:e.target.value})} maxLength={4000} rows={5}/></Field></FormGrid>:answer?<><KeyValue items={[{label:uiText('任务'),value:answer.row.name}]} />
+    {answerWorkbooks.length ? <>
+     <p className="mist-sub">{uiText(workbookChoicePrompt)}</p>
+     <XiaozhuWorkbookChoices choices={answerWorkbooks} selected={answer.answer} disabled={busy||uncertain} onChoose={label=>setPlan({...answer,answer:label})} />
+    </> : <>
+     <p className="mist-sub">{answerQuestion}</p>
+     <Field label={uiText('答复')} required><TextArea value={answer.answer} disabled={uncertain} onChange={e=>setPlan({...answer,answer:e.target.value})} maxLength={4000} rows={5}/></Field>
+    </>}
+   </>:plan&&'row'in plan?<><KeyValue items={[{label:uiText('任务'),value:plan.row.name},{label:uiText('当前状态'),value:uiText(statusLabel(plan.row))}]} />{plan.kind==='cancel'&&<p className="mist-sub">{uiText('停止后不再续办，已办理的业务保留。')}</p>}{plan.kind==='issue'&&plan.row.state==='running'&&<p className="mist-sub">{uiText('重新连接将中断当前执行器。')}</p>}</>:null}
    </div>
   </Dialog>
   <Dialog open={!!credential} onClose={()=>setCredential(null)} title={uiText('任务连接')} footer={<><Button onClick={()=>setCredential(null)}>{uiText('关闭')}</Button><Button icon={Copy} disabled={!credential||!endpoint} onClick={()=>credential&&endpoint&&void copy(JSON.stringify({mcpServers:{'bambook-task':{url:endpoint,headers:{'x-bambook-task-control':credential.token}}}},null,2))}>{uiText('复制配置')}</Button></>}>

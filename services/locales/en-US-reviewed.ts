@@ -5,6 +5,7 @@ import { mailReceivingEnglish } from './en-US-mail-receiving';
 import { sampleCustodyEnglish } from './en-US-sample-custody';
 export const reviewedEnglish: Record<string, string> = {
   ...sampleCustodyEnglish,
+  '选择要读取的工作簿': 'Choose a workbook to read',
   '原承诺 ': 'Former promise ',
   '原跟进日 ': 'Former follow-up date ',
   '同刻回款待核对': 'Verify payment timing',
