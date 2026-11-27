@@ -15,6 +15,43 @@ const identity=()=>({id:'identity',name:'邮件助理',mode:'operate',state:'act
 const paint=()=>root.render(<MistRoot><ToastProvider><AgentTasks onConnections={()=>{}}/></ToastProvider></MistRoot>);
 const flush=async()=>{await act(async()=>{await Promise.resolve();await Promise.resolve();});};
 const click=async(node:HTMLElement)=>{await act(async()=>node.click());await flush();};
+it('refreshes the opened platform task as it switches models without reloading connection data', async () => {
+ vi.useFakeTimers();
+ vi.spyOn(document,'hidden','get').mockReturnValue(false);
+ const executionStageSince=new Date(Date.now()-5_000).toISOString();
+ let current={...row(),executor:'platform',state:'running',executionStage:'model',executionStageSince,
+  modelFallbackSince:undefined as string|undefined};
+ const count=(suffix:string)=>seam.api.mock.calls.filter(([url])=>String(url).endsWith(suffix)).length;
+ seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:current}
+  :url.includes('agent-identities')?{items:[identity()]}:url.endsWith('/history')?{items:[],nextCursor:null}:{items:[current],nextCursor:null}));
+ try{
+  act(paint);await flush();
+  expect(getByText(host,'正在等待模型')).toBeTruthy();
+  await click(getByText(host,'核对邮件'));
+  const dialog=getByRole(document.body,'dialog',{name:'核对邮件'});
+  expect(getByRole(dialog,'timer').textContent).toBe('· 5 秒');
+  const connections=count('agent-identities?scope=mine');
+  current={...current,modelFallbackSince:new Date(Date.now()+2_500).toISOString()};
+  await act(async()=>vi.advanceTimersByTimeAsync(2_500));
+  expect(getByText(dialog,'正在等待备用模型')).toBeTruthy();
+  expect(getByText(getByRole(host,'table',{hidden:true}),'正在等待备用模型')).toBeTruthy();
+  expect(getByRole(dialog,'timer').textContent).toBe('· 0 秒');
+  expect(count('agent-identities?scope=mine')).toBe(connections);
+  expect(count('/task')).toBe(2);
+
+  const online=vi.spyOn(navigator,'onLine','get').mockReturnValue(false);
+  await act(async()=>window.dispatchEvent(new Event('offline')));
+  expect(getByText(dialog,'执行进度暂未更新')).toBeTruthy();
+  expect(queryByRole(dialog,'timer')).toBeNull();
+  await act(async()=>vi.advanceTimersByTimeAsync(2_500));
+  expect(count('/task')).toBe(2);
+  online.mockReturnValue(true);
+  await act(async()=>window.dispatchEvent(new Event('online')));
+  expect(count('/task')).toBe(3);
+  expect(getByText(dialog,'正在等待备用模型')).toBeTruthy();
+ }finally{vi.useRealTimers();vi.restoreAllMocks();}
+});
+
 it('returns the task detail to its original automation rule when closed',async()=>{
  seam.routeId='task';seam.automationId='rule-a';
  seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:{...row(),automationId:'rule-a'}}:url.includes('agent-identities')?{items:[identity()]}:{items:[],nextCursor:null}));
