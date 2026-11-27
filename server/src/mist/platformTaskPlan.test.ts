@@ -117,7 +117,7 @@ it('uses only an explicit, unambiguous prefix in the original task request',()=>
  expect(requestedPdfRange([file],'Read only pages 11–15.')).toEqual({fileId:'pdf',from:11,to:15});
  expect(requestedPdfRange([file],'请只读取第 15 至第 11 页。')).toBeUndefined();
  expect(requestedPdfRange([file],'如果只读取前 10 页没找到条款，请继续。')).toBeUndefined();
- expect(requestedPdfRange([file],'只读前 10 页。请只读前 5 页。')).toBeUndefined();
+ expect(requestedPdfRange([file],'只读前 10 页。请只读前 5 页。')).toEqual({fileId:'pdf',from:1,to:10});
  expect(requestedPdfRange([file,{...file,id:'other',name:'other.pdf'}],'请只读前 10 页。')).toBeUndefined();
 });
 
@@ -126,7 +126,7 @@ it('recognizes a single explicitly requested PDF page without interpreting a wid
  for(const request of ['请只读取 sample.pdf 的第 22 页。','仅核对第 22 页的交期。','Read only page 22 of sample.pdf.','Please only review the 22nd page of sample.pdf.']){
   expect(requestedPdfRange([file],request)).toEqual({fileId:'pdf',from:22,to:22});
  }
- for(const request of ['请只读取第 22 页和第 23 页。','只读第 22 页之后的内容。','请只读取第 22 页以外的正文。','Read only page 22 and page 23.','Read only page 22-23.']){
+ for(const request of ['只读第 22 页之后的内容。','请只读取第 22 页以外的正文。']){
   expect(requestedPdfRange([file],request)).toBeUndefined();
  }
  const exclusive=requestedTaskAttachmentScope(mixedFiles,'请只读取 quote.pdf（2）的第 22 页，其他附件不要读。');
@@ -154,7 +154,7 @@ it('keeps different page limits per original and gives each unresolved range its
  expect([...selected.pdfRanges]).toEqual([['pdf2',{from:22,to:22}],['terms',{from:2,to:4}]]);
  const doc={id:'word',name:'sample.docx',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',size:1};
  expect(requestedTaskAttachmentScope([...mixedFiles,doc],'请只读取 sample.docx 第 2 页。').pdfChoice).toBeUndefined();
- const conflict=requestedTaskAttachmentScope([terms],'只读 terms.pdf 第 1 页。只读 terms.pdf 第 3 页。');
+ const conflict=requestedTaskAttachmentScope([terms],'只读 terms.pdf 第 3 至 1 页。');
  expect(conflict.pdfScopeConflict).toBe(true);
  const files=[...mixedFiles,terms,{...terms,id:'terms2'}];
  const text='请只读取 quote.pdf 第 22 页。请只读取 terms.pdf 第 2 至 4 页。';
@@ -167,6 +167,26 @@ it('keeps different page limits per original and gives each unresolved range its
  const second={...first,id:'q2',question:next.question,answer:'terms.pdf（5）'};
  expect([...requestedTaskAttachmentScope(files,text,[first,second]).pdfRanges])
   .toEqual([['pdf2',{from:22,to:22}],['terms',{from:2,to:4}]]);
+});
+
+it('retains disjoint pages in a single original across natural page lists and repeated clauses',()=>{
+ const file={id:'pdf',name:'terms.pdf',mimeType:'application/pdf',size:1};
+ const requests=[
+  '请只读取 terms.pdf 第 22 页和第 24 页。',
+  '仅核对 terms.pdf 第22、24页。',
+  '请只读 terms.pdf 第24页。请只读 terms.pdf 第22页。',
+  'Read only pages 22 and 24 of terms.pdf.',
+ ];
+ for(const text of requests){
+  expect(requestedTaskAttachmentScope([file],text).pdfRanges.get(file.id)).toEqual({
+   from:22,to:24,windows:[{from:22,to:22},{from:24,to:24}],
+  });
+ }
+ expect(requestedTaskAttachmentScope([file],'只读 terms.pdf 第 2 至 4 页和第 8 页。').pdfRanges.get(file.id))
+  .toEqual({from:2,to:8,windows:[{from:2,to:4},{from:8,to:8}]});
+ expect(requestedTaskAttachmentScope([file],'Read only pages 22, 24–25, and 27 of terms.pdf.').pdfRanges.get(file.id))
+  .toMatchObject({windows:[{from:22,to:22},{from:24,to:25},{from:27,to:27}]});
+ expect(requestedTaskAttachmentScope([file],'只读 terms.pdf 第 2 页或第 4 页。').pdfScopeConflict).toBe(true);
 });
 
 it('limits automatic PDF continuation to one short page window without a prior continuation attempt', () => {

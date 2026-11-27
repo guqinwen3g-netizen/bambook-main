@@ -1134,6 +1134,35 @@ it.each([false,true])('enforces independent PDF ranges and discards wider prior 
  }
 });
 
+it.each([false,true])('prefetches the disjoint PDF pages without passing the intervening page or prior report (%s)',async legacy=>{
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对第 22 和 24 页。'}));
+ const f=await fixture(complete);
+ vi.spyOn(f.worker,'wake').mockImplementation(()=>{});
+ f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'隔页核对',instructions:'请只读取 terms.pdf 第 22 页和第 24 页。'}))
+  .attach('attachments',pdf('OUTSIDE-LAST',26),'terms.pdf').expect(201)).body.item;
+ if(legacy)await f.local.database.$transaction(async db=>{
+  const {row,value}=await taskRecord(db,f.workspace.id,task.id),at=new Date().toISOString(),fileId=task.attachments[0].id;
+  const old={id:'platform_legacy_overlap',at,plan:{name:'bambook_file_text',arguments:{fileId}},
+   result:{kind:'pdf',file:{id:fileId},pages:26,pageScopeStart:22,pageScopeLimit:24,range:{pageFrom:22,pageTo:24},text:'OLD-GAP-TEXT'}};
+  const next={id:'platform_legacy_finish',at,plan:{name:'bambook_task',arguments:{
+   action:'finish',outcome:'succeeded',requestId:'platform_legacy_finish',result:'OLD-GAP-REPORT',
+  }}};
+  await db.mistCommandReceipt.updateMany({where:{id:row.id},data:{result:{...row.result,__agentTask:{
+   ...value,checkpoint:'OLD-GAP-CHECKPOINT',platform:{...value.platform,steps:[old,next],nextRunAt:Date.now()},
+  }}}});
+ });
+ await f.drain();
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'已核对第 22 和 24 页。'});
+ expect(complete).toHaveBeenCalledTimes(1);
+ const message=complete.mock.calls[0][0].messages[0].content,{history}=JSON.parse(message.slice(message.indexOf('{')));
+ const pages=history.recent.filter((step:any)=>step.name==='bambook_file_text').flatMap((step:any)=>step.result.pdfTextByPage.map((entry:any)=>entry.page));
+ expect(pages).toEqual([22,24]);
+ expect(message).not.toMatch(/OUTSIDE-LAST|OLD-GAP-|Page 23: general terms/);
+ expect(history).not.toHaveProperty('pdfCoverage');
+});
+
 it('keeps two ambiguous page requests separate and reads neither until both are answered',async()=>{
  const complete=vi.fn(async (_input:LlmCompletionInput)=>
   tool('bambook_task',{action:'finish',outcome:'succeeded',result:'两份原件已按页核对。'}));
@@ -1170,16 +1199,16 @@ it('keeps two ambiguous page requests separate and reads neither until both are 
  expect(text).not.toMatch(/EXCLUDED-QUOTE|EXCLUDED-TERMS|OUTSIDE-QUOTE|OUTSIDE-TERMS/);
 });
 
-it('reports conflicting limits on the same PDF before reading it or using the model',async()=>{
+it('reports a reversed PDF range before reading it or using the model',async()=>{
  const complete=vi.fn(async (_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'意外读取'}));
  const f=await fixture(complete);
  f.worker.start(3_600_000);
  const {body:{item:task}}=await f.human.post(f.base+'/personal-agent/tasks')
-  .field('task',JSON.stringify({requestId:randomUUID(),name:'冲突页码',instructions:'只读 terms.pdf 第 1 页。只读 terms.pdf 第 3 页。'}))
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'冲突页码',instructions:'只读 terms.pdf 第 3 至 1 页。'}))
   .attach('attachments',pdf('OUTSIDE-CONFLICT',5),'terms.pdf').expect(201);
  await f.drain();
  const done=await f.current(task.id);
- expect(done).toMatchObject({state:'failed',result:expect.stringContaining('PDF 页码范围不一致')});
+ expect(done).toMatchObject({state:'failed',result:expect.stringContaining('PDF 页码范围无效')});
  expect(done.trail?.some((row:any)=>row.kind==='read')).not.toBe(true);
  expect(complete).not.toHaveBeenCalled();
 });

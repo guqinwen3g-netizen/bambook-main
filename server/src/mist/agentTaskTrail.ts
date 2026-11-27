@@ -129,7 +129,10 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
           && Number.isSafeInteger(nextPage) && nextPage === pages.pageTo+1
           && Number.isSafeInteger(result.pages) && nextPage <= result.pages
           ? pdfPageRange(nextPage,result.pages) : '';
-        const pdfContinuation = unreadPageRange ? '；本次未读'+unreadPageRange : !result?.hasMore ? ''
+        const selectedWindows=Array.isArray(result?.pageScopeWindows);
+        const selectedContinuation=!result?.hasMore?'；范围外未核实'
+          :Number.isSafeInteger(nextPage)?`；下一指定页第 ${nextPage} 页`:'；本页段正文待续读';
+        const pdfContinuation = selectedWindows ? selectedContinuation : unreadPageRange ? '；本次未读'+unreadPageRange : !result?.hasMore ? ''
           : pages?.textLimited === true && nextPage === undefined && typeof result.nextCursor === 'string'
             ? '；本页段正文待续读' : '；还有后续内容';
         const scopeStart = result?.pageScopeStart;

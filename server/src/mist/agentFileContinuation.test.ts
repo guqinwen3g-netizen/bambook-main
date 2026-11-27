@@ -88,6 +88,23 @@ function contractPdf(count:number,blankPage=0){
  for(let i=1;i<=count;i++){const line=`Clause P${i}: ${i===count?'DELIVERY 2026-12-31 and FINAL TERM.':'General terms. '.repeat(20)}`;const stream=i===blankPage?'':`BT /F1 10 Tf 10 100 Td (${line}) Tj ET`;objects.push(`<</Type/Page/Parent 2 0 R/MediaBox[0 0 1000 200]/Contents ${2+i*2} 0 R/Resources<</Font<</F1 ${font} 0 R>>>>>>`);objects.push(`<</Length ${stream.length}>>\nstream\n${stream}\nendstream`);}
  objects.push('<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>');let out='%PDF-1.4\n';const offsets:number[]=[];for(const [i,o]of objects.entries()){offsets.push(out.length);out+=`${i+1} 0 obj\n${o}\nendobj\n`;}const xref=out.length;out+=`xref\n0 ${objects.length+1}\n0000000000 65535 f \n${offsets.map(o=>String(o).padStart(10,'0')+' 00000 n \n').join('')}trailer\n<</Size ${objects.length+1}/Root 1 0 R>>\nstartxref\n${xref}\n%%EOF`;return Buffer.from(out);
 }
+it('continues a disjoint PDF selection at the next allowed page and rejects a cursor in the gap',async()=>{
+ const bytes=contractPdf(26),file={name:'contract.pdf',mimeType:'application/pdf'};
+ const pages={from:22,to:24,windows:[{from:22,to:22},{from:24,to:24}]};
+ const first=await readFileTextWindow(scope,file,bytes,8000,undefined,undefined,pages);
+ expect(first).toMatchObject({range:{pageFrom:22,pageTo:22},pageScopeWindows:pages.windows,nextPageFrom:24,hasMore:true,complete:false});
+ const tail=await readFileTextWindow(scope,file,bytes,8000,first.nextCursor,undefined,pages);
+ expect(tail).toMatchObject({range:{pageFrom:24,pageTo:24},hasMore:false,complete:false});
+ expect(first.text+tail.text).not.toContain('Clause P23:');
+ const forged='aft1.'+Buffer.from(JSON.stringify({...scope,v:1,source:first.sourceHash,page:23,offset:0})).toString('base64url');
+ await expect(readFileTextWindow(scope,file,bytes,8000,forged,undefined,pages)).rejects.toMatchObject({code:'FILE_TEXT_PAGE_SCOPE'});
+ await expect(readFileTextWindow(scope,file,bytes,8000,first.nextCursor,undefined,{from:22,to:24})).rejects.toMatchObject({code:'FILE_TEXT_SOURCE_CHANGED'});
+ const withScan=contractPdf(26,22);
+ const blank=await readFileTextWindow(scope,file,withScan,8000,undefined,undefined,pages);
+ expect(blank).toMatchObject({pagesWithoutText:[22],nextPageFrom:24,hasMore:true,text:''});
+ expect((await readFileTextWindow(scope,file,withScan,8000,blank.nextCursor,undefined,pages)).text).toContain('Clause P24:');
+});
+
 it('continues within a PDF window and past page twenty to the final clause without duplicate text',async()=>{
  const bytes=contractPdf(27),file={name:'contract.pdf',mimeType:'application/pdf'};let cursor:unknown,joined='',lastPage=1,lastEnd=0,calls=0;
  do{const r=await readFileTextWindow(scope,file,bytes,1000,cursor);if(r.range.pageFrom===lastPage)expect(r.range.start).toBe(lastEnd);else{expect(r.range.pageFrom).toBe(21);expect(r.range.start).toBe(0);}lastPage=r.range.pageFrom!;lastEnd=r.range.end;expect(r.pages).toBe(27);joined+=r.text;cursor=r.nextCursor;expect(++calls).toBeLessThan(15);}while(cursor);

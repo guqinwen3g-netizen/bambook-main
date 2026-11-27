@@ -4,7 +4,7 @@ import type { MarketQuotation } from '../shared/mistMarket';
 import { splitTaskRequest } from '../shared/mistTaskHistoryText';
 import { officeKind, taskAttachmentLabels, taskWorkbookChoices, taskPdfChoices, isTaskPdf, PDF_SELECTION_QUESTION, WORKBOOK_SELECTION_QUESTION } from '../shared/mistTaskAttachments';
 import type { PdfPageTextSpan } from './agentFileText';
-import { isFileTextCursor } from './agentFileWindow';
+import { isFileTextCursor, type PdfPageRange, type PdfPageScope } from './agentFileWindow';
 import type{ResponseLocale}from'./responseLanguage';
 
 export type PlatformTaskPlan={name:string;arguments:Record<string,unknown>;progress?:string};
@@ -56,7 +56,6 @@ function taskAttachmentNames(attachments:NonNullable<AgentTaskView['attachments'
   };
 }
 
-type PdfPageScope = {from:number;to:number};
 type PdfChoice = {question:string;ids:string[]};
 type PdfSelection = {
   pdfRanges: Map<string,PdfPageScope>;
@@ -64,6 +63,31 @@ type PdfSelection = {
   pdfChoice?: PdfChoice;
   pdfScopeConflict?: boolean;
 };
+
+function mergePdfRanges(ranges:readonly PdfPageRange[]):PdfPageScope {
+  const windows:PdfPageRange[]=[];
+  for(const range of [...ranges].sort((a,b)=>a.from-b.from||a.to-b.to)){
+    const previous=windows.at(-1);
+    if(previous&&range.from<=previous.to+1)previous.to=Math.max(previous.to,range.to);
+    else windows.push({...range});
+  }
+  return windows.length===1?windows[0]:{from:windows[0].from,to:windows.at(-1)!.to,windows};
+}
+
+const CHINESE_PDF_LIST_ITEM=/^[ \t]*(?:、|，|,|和|与|以及|及)[ \t]*(?:第[ \t]*)?([1-9]\d*)(?:[ \t]*(?:页[ \t]*)?(?:至|到|[-–—])[ \t]*(?:第[ \t]*)?([1-9]\d*))?(?:[ \t]*页|(?=[ \t]*(?:$|[。；;、，,]|和|与|以及|及|或)))/u;
+const ENGLISH_PDF_LIST_ITEM=/^[ \t]*(?:,[ \t]*(?:and[ \t]+)?|and[ \t]+)(?:pages?[ \t]+)?([1-9]\d*)\b(?:[ \t]*(?:to|[-–—])[ \t]*([1-9]\d*)\b)?/iu;
+const CHINESE_WIDER_PDF=/^[ \t]*(?:之?[前后]|以[前后外]|之外|起|开始|往[前后]|及其后|(?:和|与|及|以及|或|至|到|[、，,–—/-])[ \t]*(?:(?:第[ \t]*)?[0-9]|末页|最后))/u;
+const ENGLISH_WIDER_PDF=/^[ \t]*(?:(?:and|or|to|through|[–—/,-])[ \t]*(?:(?:page[ \t]+)?[0-9]|later|earlier)|onward|before|after)/iu;
+
+function readPdfPageList(first:PdfPageRange,tail:string,item:RegExp,wider:RegExp) {
+  const ranges=[first];
+  for(let match=item.exec(tail);match;match=item.exec(tail)){
+    const from=Number(match[1]);
+    ranges.push({from,to:Number(match[2]??match[1])});
+    tail=tail.slice(match[0].length);
+  }
+  return {ranges,tail,invalid:wider.test(tail)};
+}
 
 function pdfSelection(attachments:AgentTaskView['attachments']=[],instructions='',questions:readonly AgentTaskQuestion[]=[]):PdfSelection {
   const pdfRanges=new Map<string,PdfPageScope>();
@@ -73,47 +97,43 @@ function pdfSelection(attachments:AgentTaskView['attachments']=[],instructions='
   if(!files.length)return {pdfRanges,confirmedPdfChoices};
   const namesIn=taskAttachmentNames(attachments);
   const pdfIds=new Set(files.map(file=>file.id));
-  const bind=(match:RegExpMatchArray,from:number,to:number)=>{
+  const bind=(match:RegExpMatchArray,list:ReturnType<typeof readPdfPageList>)=>{
     const index=match.index??0;
-    const suffix=request.slice(index+match[0].length).split(/[。；;！？!?，,\n]|\.(?=\s|$)/u,1)[0];
-    const clause=match[0]+suffix;
+    const suffix=list.tail.split(/[。；;！？!?，,\n]|\.(?=\s|$)/u,1)[0];
+    const clause=match[0]+' '+suffix;
     const mentioned=namesIn(clause).flat();
     const ids=[...new Set(mentioned.filter(file=>pdfIds.has(file.id)).map(file=>file.id))];
-    if(ids.length)return {ids,from,to,index,confirm:ids.length>1};
+    const binding={index,ranges:list.ranges,invalid:list.invalid};
+    if(ids.length)return {...binding,ids,confirm:ids.length>1};
     const namedPdf= /[^\s。；;，,]+\.pdf\b/iu.test(clause);
     if(mentioned.length&&!namedPdf)return;
-    if(namedPdf||files.length>1)return {ids:[...pdfIds],from,to,index,confirm:true};
-    if(attachments.length===1||/\bpdf\b/i.test(clause))return {ids:[files[0].id],from,to,index,confirm:false};
+    if(namedPdf||files.length>1)return {...binding,ids:[...pdfIds],confirm:true};
+    if(attachments.length===1||/\bpdf\b/i.test(clause))return {...binding,ids:[files[0].id],confirm:false};
   };
-  const chinese=[...request.matchAll(/(?:^|[。；;，,\n])[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:只|仅)[ \t]*(?:读取|阅读|核对|查看|检查|读|看)[^。；;，,\n]{0,32}?(?:前[ \t]*([1-9]\d*)|第[ \t]*([1-9]\d*)(?:[ \t]*(?:页[ \t]*)?(?:至|到|[-–—])[ \t]*第?[ \t]*([1-9]\d*))?)[ \t]*页/gu)];
-  const english=[...request.matchAll(/(?:^|[.;,\n])[ \t]*(?:please[ \t]+)?(?:only[ \t]+(?:read|check|review)|(?:read|check|review)[ \t]+only)[ \t]+(?:the[ \t]+)?(?:first[ \t]+([1-9]\d*)[ \t]+pages?\b|pages[ \t]+([1-9]\d*)[ \t]*(?:to|[-–—])[ \t]*([1-9]\d*)\b|page[ \t]+([1-9]\d*)\b|([1-9]\d*)(?:st|nd|rd|th)[ \t]+page\b)/gi)];
-  // Check the suffix after finding the first page expression, so a list cannot backtrack to its last item.
-  const widerChinese=/^[ \t]*(?:之?[前后]|以[前后外]|之外|起|开始|往[前后]|及其后|(?:和|与|及|以及|或|至|到|[、，,–—/-])[ \t]*(?:(?:第[ \t]*)?[0-9]|末页|最后))/u;
-  const widerEnglish=/^[ \t]*(?:(?:and|or|to|through|[–—/,-])[ \t]*(?:(?:page[ \t]+)?[0-9]|later|earlier)|onward|before|after)/i;
+  const chinese=[...request.matchAll(/(?:^|[。；;，,\n])[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:只|仅)[ \t]*(?:读取|阅读|核对|查看|检查|读|看)[^。；;，,\n]{0,32}?(?:前[ \t]*([1-9]\d*)[ \t]*页|第[ \t]*([1-9]\d*)(?:[ \t]*(?:页[ \t]*)?(?:至|到|[-–—])[ \t]*第?[ \t]*([1-9]\d*))?(?:[ \t]*页|(?=[ \t]*(?:、|，|,|和|与|及|以及)[ \t]*(?:第[ \t]*)?[1-9]\d*[^。；;\n]{0,32}页)))/gu)];
+  const english=[...request.matchAll(/(?:^|[.;,\n])[ \t]*(?:please[ \t]+)?(?:only[ \t]+(?:read|check|review)|(?:read|check|review)[ \t]+only)[ \t]+(?:the[ \t]+)?(?:first[ \t]+([1-9]\d*)[ \t]+pages?\b|pages?[ \t]+([1-9]\d*)\b(?:[ \t]*(?:to|[-–—])[ \t]*([1-9]\d*)\b)?|([1-9]\d*)(?:st|nd|rd|th)[ \t]+page\b)/gi)];
+  const tailAfter=(match:RegExpMatchArray)=>request.slice((match.index??0)+match[0].length);
   const ranges=[
-    ...chinese.flatMap(match=>{
+    ...chinese.map(match=>{
       const [,first,start,end]=match;
-      if(first)return [bind(match,1,Number(first))];
-      if(end)return [bind(match,Number(start),Number(end))];
-      const suffix=request.slice((match.index??0)+match[0].length);
-      return widerChinese.test(suffix)?[]:[bind(match,Number(start),Number(start))];
+      return bind(match,readPdfPageList({from:first?1:Number(start),to:Number(first??end??start)},
+        tailAfter(match),CHINESE_PDF_LIST_ITEM,CHINESE_WIDER_PDF));
     }),
-    ...english.flatMap(match=>{
-      const [,first,start,end,page,ordinal]=match;
-      if(first)return [bind(match,1,Number(first))];
-      if(start)return [bind(match,Number(start),Number(end))];
-      const suffix=request.slice((match.index??0)+match[0].length);
-      return widerEnglish.test(suffix)?[]:[bind(match,Number(page??ordinal),Number(page??ordinal))];
+    ...english.map(match=>{
+      const [,first,start,end,ordinal]=match;
+      return bind(match,readPdfPageList({from:first?1:Number(start??ordinal),to:Number(first??end??start??ordinal)},
+        tailAfter(match),ENGLISH_PDF_LIST_ITEM,ENGLISH_WIDER_PDF));
     }),
   ];
   const bindings=ranges.flatMap(range=>range?[range]:[]).sort((a,b)=>a.index-b.index);
   const removed=new Set<string>();
-  for(const [index,{from,to,ids,confirm}] of bindings.entries()){
-    if(!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||from>to||to>1_000_000)
+  for(const [index,{ranges,ids,confirm,invalid}] of bindings.entries()){
+    if(invalid||ranges.some(({from,to})=>!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||from>to||to>1_000_000))
       return {pdfRanges,confirmedPdfChoices,pdfScopeConflict:true};
     let selected=ids[0];
     if(confirm){
-      const pages=from===to?String(from):from+'–'+to;
+      const planned=mergePdfRanges(ranges);
+      const pages=(planned.windows??[planned]).map(({from,to})=>from===to?String(from):from+'–'+to).join('、');
       const question=bindings.length===1?PDF_SELECTION_QUESTION:`选择第 ${pages} 页对应的 PDF（第 ${index+1} 处）`;
       const answer=[...questions].reverse().find(q=>q.question===question&&q.answeredAt)?.answer?.trim();
       const name=answer?.replace(/(\.pdf)\((\d+)\)/gi,'$1（$2）');
@@ -123,9 +143,7 @@ function pdfSelection(attachments:AgentTaskView['attachments']=[],instructions='
       for(const id of ids)if(id!==selected)removed.add(id);
     }
     const previous=pdfRanges.get(selected);
-    if(previous&&(previous.from!==from||previous.to!==to))
-      return {pdfRanges,confirmedPdfChoices,pdfScopeConflict:true};
-    pdfRanges.set(selected,{from,to});
+    pdfRanges.set(selected,mergePdfRanges([...(previous?.windows??(previous?[previous]:[])),...ranges]));
   }
   for(const id of removed)if(!pdfRanges.has(id))confirmedPdfChoices.add(id);
   return {pdfRanges,confirmedPdfChoices};
@@ -226,7 +244,16 @@ export function scopedAttachmentTaskSteps(steps:PlatformTaskStep[],pdfRanges:Rea
       &&Array.isArray(read.observedSheets)&&read.observedSheets.every(name=>name===worksheetScope.worksheet);
     if(!pdfScope)return false;
     const range=read?.range;
-    return read?.kind==='pdf'&&read.file?.id===fileId&&!!range
+    if(pdfScope.windows){
+      const windows=read?.pageScopeWindows;
+      return read?.kind==='pdf'&&read.file?.id===fileId&&!!range
+        &&Number.isSafeInteger(range.pageFrom)&&Number.isSafeInteger(range.pageTo)&&range.pageFrom<=range.pageTo
+        &&pdfScope.windows.some(window=>window.from<=range.pageFrom&&range.pageTo<=window.to)
+        &&typeof read.pages==='number'&&Number.isSafeInteger(read.pages)&&range.pageTo<=read.pages
+        &&Array.isArray(windows)&&windows.length===pdfScope.windows.length
+        &&pdfScope.windows.every((window,index)=>window.from===windows[index]?.from&&window.to===windows[index]?.to);
+    }
+    return !read?.pageScopeWindows&&read?.kind==='pdf'&&read.file?.id===fileId&&!!range
       &&Number.isSafeInteger(range.pageFrom)&&Number.isSafeInteger(range.pageTo)
       &&range.pageFrom>=pdfScope.from&&range.pageTo>=range.pageFrom&&range.pageTo<=pdfScope.to
       &&(pdfScope.from===1||read.pageScopeStart===pdfScope.from)
@@ -235,6 +262,19 @@ export function scopedAttachmentTaskSteps(steps:PlatformTaskStep[],pdfRanges:Rea
   });
   // Old checkpoints can summarize excluded reads. They must not reintroduce those facts.
   return eligible.length===steps.length?eligible:eligible.filter(step=>step.plan.name!=='bambook_task'||step.plan.arguments.action!=='checkpoint');
+}
+
+/** Fetch a few adjacent cursor windows before asking the model about a disjoint selection. */
+export function shortDisjointPdfContinuationPlan(pdfRanges:ReadonlyMap<string,PdfPageScope>,steps:PlatformTaskStep[]):PlatformTaskPlan|undefined {
+  for(const [fileId,scope] of pdfRanges){
+    if(!scope.windows)continue;
+    const reads=steps.filter(step=>step.plan.name==='bambook_file_text'&&step.plan.arguments.fileId===fileId);
+    if(!reads.length||reads.length>=4)continue;
+    const last=reads.at(-1)!;
+    const read=last.result as PdfReadWindow|undefined;
+    if(last.compacted||read?.error||read?.kind!=='pdf'||read.file?.id!==fileId||!read.hasMore||!isFileTextCursor(read.nextCursor))continue;
+    return {name:'bambook_file_text',arguments:{fileId,cursor:read.nextCursor,maxChars:ATTACHMENT_PREFETCH_CHARS}};
+  }
 }
 
 /** Pre-read a short PDF or an explicitly requested last page within one additional window. */
@@ -327,7 +367,7 @@ type PdfReadWindow = {
   kind?:string; error?:boolean; file?:{id?:string}; sourceHash?:string; pages?:number;
   range?:{start:number;end:number;pageFrom:number;pageTo:number;textLimited?:boolean};
   hasMore?:boolean; nextCursor?:string; nextPageFrom?:number; pagesWithoutText?:number[]; reason?:string;
-  text?:string; pageTextSpans?:PdfPageTextSpan[]; pageScopeStart?:number; pageScopeLimit?:number;
+  text?:string; pageTextSpans?:PdfPageTextSpan[]; pageScopeStart?:number; pageScopeLimit?:number; pageScopeWindows?:PdfPageRange[];
 };
 
 type PdfContinuation = {cursor:string;from:number;offset:number;to?:number};
@@ -342,7 +382,7 @@ function pdfReadCoverage(steps:PlatformTaskStep[]){
     const previous=coverage.get(fileId);
     coverage.delete(fileId);
     const read=step.result as PdfReadWindow|undefined,range=read?.range,missing=read?.pagesWithoutText??[];
-    if(step.compacted||read?.error||read?.kind!=='pdf'||read.file?.id!==fileId||typeof read.sourceHash!=='string'||!/^[a-f0-9]{64}$/.test(read.sourceHash)
+    if(step.compacted||read?.error||read?.kind!=='pdf'||read.pageScopeWindows||read.file?.id!==fileId||typeof read.sourceHash!=='string'||!/^[a-f0-9]{64}$/.test(read.sourceHash)
       ||!range||!Number.isSafeInteger(range.start)||range.start<0||!Number.isSafeInteger(range.end)||range.end<range.start
       ||!Number.isSafeInteger(range.pageFrom)||!Number.isSafeInteger(range.pageTo)||range.pageFrom<1||range.pageTo<range.pageFrom
       ||typeof read.pages!=='number'||!Number.isSafeInteger(read.pages)||range.pageTo>read.pages||typeof read.hasMore!=='boolean'
