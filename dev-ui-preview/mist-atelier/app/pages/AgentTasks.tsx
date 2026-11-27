@@ -17,6 +17,7 @@ import { activeModelFallbackSince } from '../runtime/xiaozhuActivity';
 
 const LABEL:Record<AgentTaskView['state'],string>={queued:'待领取',running:'执行中',waiting_time:'等待继续',waiting_condition:'等待资料变化',waiting_human:'待本人确认',paused:'已暂停',succeeded:'执行结束',failed:'执行失败',cancelled:'已停止',expired:'已到期',budget_exhausted:'达到限额',access_changed:'权限已变化'};
 const ACTION:Record<string,string>={created:'安排任务',connected:'签发任务连接',claimed:'执行器领取',checkpoint:'保存检查点',waiting_human:'等待本人确认',question:'请求补充资料',waiting_time:'等待约定时间',waiting_condition:'等待资料变化',condition_changed:'资料已变化',condition_deadline:'到达最晚时间',answered:'本人补充资料',model_retry:'模型重试',model_paused:'模型已暂停',recovering:'等待接续',confirmed:'本人确认',rejected:'本人拒绝',pause:'暂停任务',resume:'继续任务',cancel:'停止任务',finished:'执行结束'};
+const TASK_REFRESH_MS=10_000, CONNECTION_REFRESH_MS=60_000;
 const livePlatformTask=(row:AgentTaskView)=>row.executor==='platform'&&(row.state==='running'||row.state==='queued');
 const statusLabel=(row:AgentTaskView,progressUnavailable=false)=>{
  if(row.runnerStatus==='heartbeat_stale'||(progressUnavailable&&livePlatformTask(row)))return '执行进度暂未更新';
@@ -58,6 +59,7 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
  const onTaskUpdateRef=React.useRef(onTaskUpdate);onTaskUpdateRef.current=onTaskUpdate;
  const alive=React.useRef(false),readGeneration=React.useRef(0),writeGeneration=React.useRef(0),detailGeneration=React.useRef(0),readAbort=React.useRef<AbortController|null>(null),writeAbort=React.useRef<AbortController|null>(null);
  const listAbort=React.useRef<AbortController|null>(null);
+ const connectionReadAt=React.useRef<number>();
  const [connectionError,setConnectionError]=React.useState('');
  const detailAbort=React.useRef<AbortController|null>(null),historyAbort=React.useRef<AbortController|null>(null);
  const readDetail=React.useCallback(async(id:string,opening=false)=>{
@@ -92,10 +94,13 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
    if(current()){detailAbort.current=null;if(opening)setOpening(false);}
   }
  },[base]);
- const load=React.useCallback(async(append=false)=>{
+ const load=React.useCallback(async(append=false,refreshConnections=true)=>{
   const epoch=++readGeneration.current;
   readAbort.current?.abort();listAbort.current?.abort();
   const auxiliary=new AbortController(),listing=new AbortController();
+  const readConnectionSettings=refreshConnections||connectionReadAt.current===undefined
+   ||Date.now()-connectionReadAt.current>=CONNECTION_REFRESH_MS;
+  if(readConnectionSettings)connectionReadAt.current=undefined;
   readAbort.current=auxiliary;listAbort.current=listing;setError('');
   const selectedSnapshot=detailRef.current,selected=selectedSnapshot?.id,selectedGeneration=detailGeneration.current;
   let denied=false;
@@ -103,7 +108,7 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
   const detailIsCurrent=()=>current()&&selectedGeneration===detailGeneration.current&&detailRef.current?.id===selected;
   const deny=(error:unknown)=>{
    if(!accessDenied(error))return false;
-   denied=true;
+   denied=true;connectionReadAt.current=undefined;
    auxiliary.abort();listing.abort();detailGeneration.current++;
    detailAbort.current?.abort();historyAbort.current?.abort();
    setPage({items:[],nextCursor:null});setCurrentDetail(null);setDetailTarget(null);setOpening(false);setPlan(null);setCredential(null);
@@ -126,8 +131,9 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
     setPage(previous=>append?{...result,items:[...previous.items,...items.filter(row=>!previous.items.some(p=>p.id===row.id))]}:{...result,items});
    }).catch(error=>{if(current()&&!denied&&!deny(error))setError(error instanceof Error?error.message:'任务读取失败');})
    .finally(()=>{if(current())setLoading(false);});
-  let connectionsPending=true,capabilitiesPending=true;
+  let connectionsPending=readConnectionSettings,capabilitiesPending=readConnectionSettings,metadataReads=0;
   const auxiliaryCurrent=()=>current()&&!auxiliary.signal.aborted;
+  const confirmMetadata=()=>{if(++metadataReads===2)connectionReadAt.current=Date.now();};
   const readConnections=async(signal:AbortSignal)=>{
    const items:AgentIdentityView[]=[],seen=new Set<string>();let cursor:string|null=null;
    do{
@@ -140,14 +146,18 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
    return items;
   };
   const auxiliaryRead=withRequestDeadline(auxiliary,8_000,'任务辅助请求超时',signal=>Promise.allSettled([
-   readConnections(signal).then(items=>{
-    if(auxiliaryCurrent()){setIdentities(items);setConnectionError('');}
+   readConnectionSettings?readConnections(signal).then(items=>{
+    if(auxiliaryCurrent()){setIdentities(items);setConnectionError('');confirmMetadata();}
    }).catch(error=>{
     if(auxiliaryCurrent()&&!deny(error)){setIdentities([]);setConnectionError(error instanceof Error?error.message:'连接读取失败');}
-   }).finally(()=>{connectionsPending=false;}),
-   mistApiRequest('/api/mist/workspaces/'+encodeURIComponent(workspaceId)+'/agent-task-capabilities',{signal})
-    .then(result=>{if(auxiliaryCurrent())setPlatformAvailable(result.platformAvailable===true);})
-    .catch(()=>{if(auxiliaryCurrent())setPlatformAvailable(false);}).finally(()=>{capabilitiesPending=false;}),
+   }).finally(()=>{connectionsPending=false;}):null,
+   readConnectionSettings?mistApiRequest('/api/mist/workspaces/'+encodeURIComponent(workspaceId)+'/agent-task-capabilities',{signal})
+    .then(result=>{
+     if(!auxiliaryCurrent())return;
+     if(typeof result.platformAvailable!=='boolean')throw new Error('任务执行能力响应无效');
+     setPlatformAvailable(result.platformAvailable);confirmMetadata();
+    })
+    .catch(()=>{if(auxiliaryCurrent())setPlatformAvailable(false);}).finally(()=>{capabilitiesPending=false;}):null,
    selected&&!historyAbort.current?mistApiRequest(base+'/'+encodeURIComponent(selected)+'/history',{signal}).then(events=>{
     if(!auxiliaryCurrent()||!detailIsCurrent()||!Array.isArray(events.items))return;
     setHistory(previous=>{const fresh=events.items as AgentTaskEvent[];return{items:[...fresh,...previous.items.filter(old=>!fresh.some(event=>event.version===old.version&&event.action===old.action))],nextCursor:previous.items.length>30?previous.nextCursor:events.nextCursor};});
@@ -161,7 +171,22 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
   await Promise.all([listRead,auxiliaryRead,selected?readDetail(selected):null]);
  },[base,workspaceId,page.nextCursor,readDetail]);
  const currentLoad=React.useRef(load);currentLoad.current=load;
- React.useEffect(()=>{alive.current=true;void currentLoad.current();const timer=setInterval(()=>void currentLoad.current(),10_000);return()=>{alive.current=false;readGeneration.current++;writeGeneration.current++;detailGeneration.current++;clearInterval(timer);readAbort.current?.abort();listAbort.current?.abort();writeAbort.current?.abort();detailAbort.current?.abort();historyAbort.current?.abort();};},[base]);
+ React.useEffect(()=>{
+  alive.current=true;connectionReadAt.current=undefined;
+  const wake=()=>{if(!document.hidden&&navigator.onLine)void currentLoad.current();};
+  wake();
+  const timer=window.setInterval(()=>{
+   if(!document.hidden&&navigator.onLine)void currentLoad.current(false,false);
+  },TASK_REFRESH_MS);
+  window.addEventListener('online',wake);
+  document.addEventListener('visibilitychange',wake);
+  return()=>{
+   alive.current=false;readGeneration.current++;writeGeneration.current++;detailGeneration.current++;
+   window.clearInterval(timer);
+   window.removeEventListener('online',wake);document.removeEventListener('visibilitychange',wake);
+   readAbort.current?.abort();listAbort.current?.abort();writeAbort.current?.abort();detailAbort.current?.abort();historyAbort.current?.abort();
+  };
+ },[base]);
  const watchingDetail=!!detail&&livePlatformTask(detail);
  React.useEffect(()=>{
   if(!detailTarget)return;
