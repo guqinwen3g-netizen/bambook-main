@@ -949,7 +949,8 @@ it('works with Xiaozhu as a coworker: a request becomes a platform task whose pr
 function mockTaskStatus(read: (task: Record<string, unknown>) => Promise<unknown>, available=true, terminal=false, activeState = 'paused') {
   const task={id:'existing-task',identityId:'personal',executor:'platform',name:'修改付款条件',instructions:'修改付款条件',
     conversationId:'current-task-conversation',state:terminal?'budget_exhausted':activeState,result:'',checkpoint:'',questions:[],waitingProposalIds:[],
-    version:1,canControl:true,createdAt:'2026-11-24T00:00:00Z',updatedAt:'2026-11-24T00:00:00Z'};
+    version:1,canControl:true,createdAt:'2026-11-24T00:00:00Z',updatedAt:'2026-11-24T00:00:00Z',
+    ...(activeState==='running'?{executionStage:'model',executionStageSince:new Date().toISOString()}:{})};
   mock.fetch.mockResolvedValue(response({configured:false,models:[]}));
   mock.api.mockImplementation(async(url:string,opts:any)=>{
     if(opts?.method==='POST')throw new Error('task submission captured');
@@ -1073,16 +1074,19 @@ it('announces a delayed progress read without blocking the composer and shows th
     await mount();
     await click('修改付款条件');
 
+    const originalTask = () => host.querySelector('[data-task-id="existing-task"]');
+    expect(originalTask()?.querySelector('[role="timer"]')).toBeTruthy();
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-    expect([...host.querySelectorAll('[role="status"]')].some(status => status.textContent === '进度暂未更新，正在重试')).toBe(true);
+    expect(originalTask()?.querySelector('[role="status"]')?.textContent).toBe('执行进度暂未更新');
+    expect(originalTask()?.querySelector('[role="timer"]')).toBeNull();
     expect(host.textContent).not.toContain('小竹操作未完成');
     const field = await question('另一件独立的业务');
     expect(button('发送')?.disabled).toBe(false);
 
     recovered = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-    expect(host.textContent).toContain('订单核对完成');
-    expect(host.textContent).not.toContain('进度暂未更新，正在重试');
+    expect(originalTask()?.textContent).toContain('订单核对完成');
+    expect(originalTask()?.textContent).not.toContain('执行进度暂未更新');
     expect(field.value).toBe('另一件独立的业务');
     expect(mock.api.mock.calls.filter(([, opts]) => opts?.method === 'POST')).toHaveLength(0);
   } finally {
