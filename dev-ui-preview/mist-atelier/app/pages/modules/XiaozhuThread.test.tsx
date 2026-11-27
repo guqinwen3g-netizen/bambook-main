@@ -215,6 +215,28 @@ it('offers copy, draft, retry and make-rule only once the request is finished',a
 it('opens a trail record on the page and section the server linked, including types without a fixed page',async()=>{const f=fns();await paint([task({state:'succeeded',result:'好了',trail:[{at:'',kind:'read',label:'读取应付票据 AP-1',ref:{type:'payable_bill',id:'b1',label:'AP-1',view:'payment-vouchers',section:'payables'}},{at:'',kind:'read',label:'读取样品 SP-1',ref:{type:'sample',id:'s1',label:'SP-1'}}]})],f);await act(async()=>(host.querySelector('.mist-xz-trail-h') as HTMLButtonElement).click());const links=[...host.querySelectorAll('.mist-xz-steps button.mist-xz-ref')];expect(links.length).toBe(1);await act(async()=>(links[0] as HTMLButtonElement).click());expect(f.onOpenRecord).toHaveBeenCalledWith('payment-vouchers','b1',{section:'payables'});});
 it('shows the file a confirmed proposal produced under its own turn and opens it',async()=>{const f={...fns(),onOpenFile:vi.fn()};const made={id:'p1',ownerId:'u',owner:'',command:{type:'order.document.generate',payload:{}},summary:[],createdAt:'',state:'confirmed',taskId:'t1',produced:{fileId:'f1',fileName:'PI-SO-1001.pdf'}} as any;const other={...made,id:'p2',taskId:'elsewhere',produced:{fileId:'f2',fileName:'别的.pdf'}};await paint([task({id:'t1',state:'succeeded',result:'已生成 PI'})],f,[made,other]);const files=[...host.querySelectorAll('.mist-xz-file')];expect(files.map(b=>b.textContent)).toEqual(['PI-SO-1001.pdf']);await act(async()=>(files[0] as HTMLButtonElement).click());expect(f.onOpenFile).toHaveBeenCalledWith('f1');});
 it('keeps the work trail collapsed after the request is done, and expands it on demand',async()=>{await paint([task({state:'succeeded',result:'好了',trail:[{at:'',kind:'read',label:'读取订单 SO-1001',ref:{type:'order',id:'o1',label:'SO-1001'}},{at:'',kind:'write',label:'预演 email.move'}]})]);expect(getByRole(host,'button',{name:'办理过程'}).getAttribute('aria-expanded')).toBe('false');expect(host.querySelector('.mist-xz-steps')).toBeNull();await act(async()=>(host.querySelector('.mist-xz-trail-h') as HTMLButtonElement).click());expect(host.querySelector('.mist-xz-steps')!.textContent).toContain('预演 email.move');});
+it('answers the workbook question with the exact numbered attachment from the task', async () => {
+ const f = fns();
+ const waiting = task({state:'waiting_human', questions:[{
+  id:'q1', question:'请回复要核对的工作簿完整文件名，包括名称后显示的编号。',
+ }], attachments:[
+  {id:'pdf', name:'原报价.pdf', mimeType:'application/pdf'},
+  {id:'first', name:'报价比对.xlsx', mimeType:'application/octet-stream'},
+  {id:'second', name:'报价比对.xlsx', mimeType:'application/octet-stream'},
+ ]});
+ await paint([waiting], f);
+ expect(queryByRole(host,'textbox',{name:'回答小竹'})).toBeNull();
+ expect(getByRole(host,'button',{name:'报价比对.xlsx（2）',exact:true})).toBeTruthy();
+ expect(queryByRole(host,'button',{name:'原报价.pdf',exact:true})).toBeNull();
+ await act(async()=>getByRole(host,'button',{name:'报价比对.xlsx（3）',exact:true}).click());
+ expect(f.onAnswer).toHaveBeenCalledExactlyOnceWith(waiting,'q1','报价比对.xlsx（3）');
+
+ await paint([waiting], {...f, controls:{t1:{busy:true}}});
+ expect((getByRole(host,'button',{name:'报价比对.xlsx（3）',exact:true}) as HTMLButtonElement).disabled).toBe(true);
+ await paint([{...waiting,canControl:false}], f);
+ expect(queryByRole(host,'button',{name:'报价比对.xlsx（3）',exact:true})).toBeNull();
+});
+
 it('asks the open question inline and sends the answer for that question',async()=>{const f=fns();await paint([task({state:'waiting_human',questions:[{id:'q1',question:'核对哪个客户？',askedAt:''}]})],f);expect(host.textContent).toContain('核对哪个客户？');const box=getByLabelText(host,'回答小竹') as HTMLInputElement;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(box,'客户A');box.dispatchEvent(new Event('input',{bubbles:true}));});await act(async()=>getByRole(host,'button',{name:'回答'}).click());expect(f.onAnswer).toHaveBeenCalledWith(expect.objectContaining({id:'t1'}),'q1','客户A');expect(box.value).toBe('客户A');});
 it('shows what will change and opens the confirmation without leaving the conversation',async()=>{const f=fns();await paint([task({state:'waiting_human',waitingProposalIds:['p1']})],f,[proposal()]);expect(host.textContent).toContain('需要你确认');expect(host.textContent).toContain('归档邮件 PO 确认');expect(host.textContent).toContain('中风险');await act(async()=>getByRole(host,'button',{name:'查看并确认'}).click());expect(f.onProposal).toHaveBeenCalledWith('p1');});
 it('labels a stopped request instead of leaving it blank',async()=>{await paint([task({state:'budget_exhausted',checkpoint:'已读 20 条'})]);expect(host.textContent).toContain('达到限额');});
