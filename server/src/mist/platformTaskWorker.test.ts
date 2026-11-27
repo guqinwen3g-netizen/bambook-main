@@ -1024,6 +1024,8 @@ it('researches a PDF, workbook and image together with a selected order, keeping
    expect(reads[0]).toMatchObject({arguments:{fileId:'attachment_1'},result:{file:{id:'attachment_1'},nextCursor:'next'}});
    expect(reads[1]).toMatchObject({arguments:{fileId:'attachment_2'},result:{file:{id:'attachment_2'},hasMore:false}});
    expect(input).toContain('XLSX-QUANTITY-318');
+   expect(reads[1].result.observedSheets).toEqual(['Data']);
+   expect(model.systemPrompt).toContain('首句分别注明涉及的来源');
    expect(input).toContain('bambook_get');
    expect(input).toContain('"imageSources":["sample.png"]');
    expect(model.systemPrompt).toContain('bambook_file_text 不提取图片文字');

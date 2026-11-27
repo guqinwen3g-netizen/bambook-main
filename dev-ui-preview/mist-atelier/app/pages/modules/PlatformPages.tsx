@@ -233,7 +233,7 @@ export function AssistantPage(){
     if(originTaskId&&!fromTaskOrigin)nav.go('assistant');
   };
   const attachmentScope=scope+':'+conversationId;
-  const [taskPreview,setTaskPreview]=React.useState<{scope:string;taskId:string;fileId:string;pdfPage?:number}>();
+  const [taskPreview,setTaskPreview]=React.useState<{scope:string;taskId:string;fileId:string;target?:number|string}>();
   React.useEffect(()=>{setTaskPreview(undefined);},[attachmentScope]);
   const liveConversation=React.useRef(conversationId);liveConversation.current=conversationId;
   const legacyTargets=React.useRef(new Map<string,string>());
@@ -388,8 +388,8 @@ export function AssistantPage(){
   const previewFiles=previewTask?.attachments??[];
   const previewIndex=previewFiles.findIndex(file=>file.id===taskPreview?.fileId);
   const previewFile=previewFiles[previewIndex];
-  const previewAttachment=(task:AgentTaskView,file:TaskAttachment,pdfPage?:number)=>{
-    setTaskPreview({scope:attachmentScope,taskId:task.id,fileId:file.id,pdfPage});
+  const previewAttachment=(task:AgentTaskView,file:TaskAttachment,target?:number|string)=>{
+    setTaskPreview({scope:attachmentScope,taskId:task.id,fileId:file.id,target});
   };
   const downloadAttachment=async(task:AgentTaskView,file:TaskAttachment)=>{
     try { await w.downloadTaskAttachment(task.id,file); }
@@ -714,7 +714,9 @@ export function AssistantPage(){
     <Drawer open={drafts} onClose={()=>setDrafts(false)} title={uiText("已保存草稿")} sub={uiText("审阅后保存的回复，尚未执行任何业务操作。")} footer={canChat?<Button icon={FileText} onClick={()=>{setDrafts(false);draft('');}}>{uiText("新建草稿")}</Button>:undefined}>
       {saved.length?<div className="mist-chat-picks">{saved.map(d=><div key={d.id} className="mist-chat-draft"><b>{d.title}</b><p className="mist-chat-text">{d.content}</p><div className="mist-row">{d.orderId&&<SourceOrder id={d.orderId}/>}<span className="mist-note">{d.createdAt.slice(0,10)}{uiText(" · 尚未执行")}</span></div></div>)}</div>:<EmptyState title={uiText("尚无草稿")} description={uiText("在小竹的回复下点“保存草稿”即可留存。")} compact/>}
     </Drawer>
-    {previewTask&&previewFile&&<FilePreview key={previewTask.id} files={previewFiles} index={previewIndex} initialPdfPage={taskPreview?.pdfPage}
+    {previewTask&&previewFile&&<FilePreview key={previewTask.id} files={previewFiles} index={previewIndex}
+      initialPdfPage={typeof taskPreview?.target==='number'?taskPreview.target:undefined}
+      initialSheetName={typeof taskPreview?.target==='string'?taskPreview.target:undefined}
       onIndex={index=>setTaskPreview({scope:attachmentScope,taskId:previewTask.id,fileId:previewFiles[index].id})}
       onClose={()=>setTaskPreview(undefined)}
       load={()=>w.readTaskAttachment(previewTask.id,previewFile)}

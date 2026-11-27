@@ -20,7 +20,7 @@ type LinkScope = {
   files: readonly TaskAttachment[];
   index: RecordRef[];
   onOpen: (view: string, id: string, target?:RouteTarget) => void;
-  onOpenAttachment?: (file: TaskAttachment,pdfPage?: number) => void;
+  onOpenAttachment?: (file: TaskAttachment,target?: number | string) => void;
 };
 const MarkdownLinks = React.createContext<LinkScope | null>(null);
 const markdownComponents: Components = {
@@ -32,9 +32,11 @@ const markdownComponents: Components = {
     const {files, index, onOpen, onOpenAttachment} = links;
     const fileIndex = node?.properties['data-task-attachment-index'];
     const file = href === ATTACHMENT_LINK && typeof fileIndex === 'number' ? files[fileIndex] : undefined;
-    const page=node?.properties['data-task-attachment-page'];
-    if(file&&onOpenAttachment)return <button type="button" className="mist-xz-ref" title={typeof page==='number'?ui`第 ${page} 页`:undefined} onClick={()=>
-      typeof page==='number'?onOpenAttachment(file,page):onOpenAttachment(file)}>{children}</button>;
+    const page=node?.properties['data-task-attachment-page'],sheet=node?.properties['data-task-attachment-sheet'];
+    const target=typeof page==='number'?page:typeof sheet==='string'?sheet:undefined;
+    const title=typeof target==='number'?ui`第 ${target} 页`:typeof target==='string'?ui`工作表 ${target}`:undefined;
+    if(file&&onOpenAttachment)return <button type="button" className="mist-xz-ref" title={title}
+      onClick={()=>target===undefined?onOpenAttachment(file):onOpenAttachment(file,target)}>{children}</button>;
     const hit = href?.startsWith('bambook://r/') ? index[Number(href.slice(12))] : undefined;
     if (hit) return <button type="button" className="mist-xz-ref" data-code={/\d/.test(hit.text) || undefined} onClick={() => onOpen(hit.view, hit.id)}>{children}</button>;
     const source=agentSource(href);
@@ -68,6 +70,15 @@ function citedPdfPage(suffix:string,file:TaskAttachment,reads:readonly AgentTask
   )))return page;
 }
 
+function citedSheet(suffix:string,file:TaskAttachment,reads:readonly AgentTaskTrailItem[]):string|undefined {
+  if(!/\.xlsx$/i.test(file.name)&&!/spreadsheetml\.sheet/i.test(file.mimeType))return;
+  const syntax=/^[ \t]*[（(][ \t]*(?:工作表|worksheet)(?:[ \t]*[：:][ \t]*|[ \t]+)/i.exec(suffix);
+  if(!syntax)return;
+  const nameAndEnd=suffix.slice(syntax[0].length);
+  const names=reads.filter(read=>read.taskAttachmentId===file.id).flatMap(read=>read.taskAttachmentObservedSheets??[]);
+  return names.sort((a,b)=>b.length-a.length).find(name=>nameAndEnd.startsWith(name)&&/^[ \t]*[）)]/.test(nameAndEnd.slice(name.length)));
+}
+
 function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTaskTrailItem[]) {
   const byName = new Map<string, number | undefined>();
   files.forEach((file, index) => {
@@ -81,8 +92,10 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
   });
   const toAttachment=(index:number,child:Link['children'][number],following:string):Link=>{
     const page=citedPdfPage(following,files[index],reads);
+    const sheet=citedSheet(following,files[index],reads);
     return {type:'link',url:ATTACHMENT_LINK,data:{hProperties:{'data-task-attachment-index':index,
-      ...(page!==undefined?{'data-task-attachment-page':page}:{})}},children:[child]};
+      ...(page!==undefined?{'data-task-attachment-page':page}:{}),
+      ...(sheet!==undefined?{'data-task-attachment-sheet':sheet}:{})}},children:[child]};
   };
   const names = [...byName.keys()].sort((a, b) => b.length - a.length);
   const pattern = new RegExp('(?<![\\p{L}\\p{N}_./\\\\-])(' + names.map(escapeSourceLabel).join('|') + ')(?:(?=第[ \\t]*[1-9])|(?![\\p{L}\\p{N}_/\\\\-]|\\.[\\p{L}\\p{N}_]))', 'gu');
@@ -124,7 +137,7 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
 export function XiaozhuMarkdown({ text, index, onOpen, attachments = EMPTY_ATTACHMENTS, attachmentReads=EMPTY_READS, onOpenAttachment }: {
   text: string; index: RecordRef[]; onOpen: (view: string, id: string, target?:RouteTarget) => void;
   attachments?: readonly TaskAttachment[];
-  attachmentReads?: readonly AgentTaskTrailItem[]; onOpenAttachment?: (file: TaskAttachment,pdfPage?: number) => void;
+  attachmentReads?: readonly AgentTaskTrailItem[]; onOpenAttachment?: (file: TaskAttachment,target?: number | string) => void;
 }) {
   const files = onOpenAttachment ? attachments : EMPTY_ATTACHMENTS;
   const attachment = React.useMemo(() => attachmentLinks(files,attachmentReads), [files,attachmentReads]);

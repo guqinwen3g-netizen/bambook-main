@@ -93,3 +93,24 @@ it('binds excerpts to their physical pages within each returned character slice'
  expect(trail[1].taskAttachmentPage).toBe(5);
  expect(trail[2].taskAttachmentObservedPages).toEqual([21,22,23]);
 });
+
+it('reports only workbook tabs represented in the current slice, excluding hidden tabs',async()=>{
+ const zip=new JSZip();
+ zip.file('xl/workbook.xml','<workbook><sheets><sheet name="报价草案" r:id="r1"/><sheet name="核对结果" r:id="r2"/><sheet name="内部底表" state="hidden" r:id="r3"/></sheets></workbook>');
+ zip.file('xl/_rels/workbook.xml.rels','<Relationships>'+[1,2,3].map(num=>'<Relationship Id="r'+num+'" Target="worksheets/sheet'+num+'.xml"/>').join('')+'</Relationships>');
+ for(const [index,value] of ['draft-'.repeat(90),'QUOTE-FINAL-USD','PRIVATE-HIDDEN-TAB'].entries()){
+  zip.file('xl/worksheets/sheet'+(index+1)+'.xml','<worksheet><sheetData><row><c r="A1" t="inlineStr"><is><t>'+value+'</t></is></c></row></sheetData></worksheet>');
+ }
+ const bytes=await zip.generateAsync({type:'nodebuffer'});
+ const file={name:'quote.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'};
+ const first=await readFileTextWindow(scope,file,bytes,200);
+ const last=await readFileTextWindow(scope,file,bytes,1000,first.nextCursor);
+ expect(first.sheets).toEqual(['报价草案','核对结果']);
+ expect(first.observedSheets).toEqual(['报价草案']);
+ expect(last.observedSheets).toEqual(['报价草案','核对结果']);
+ expect(last.text).toContain('QUOTE-FINAL-USD');
+ expect(first.text+last.text).not.toContain('PRIVATE-HIDDEN-TAB');
+ const fileRef={id:scope.fileId,name:file.name};
+ const trail=platformTrail([{id:'xlsx',at:'',plan:{name:'bambook_file_text',arguments:{fileId:fileRef.id}},result:{...first,file:fileRef}}],[fileRef]);
+ expect(trail[0].taskAttachmentObservedSheets).toEqual(['报价草案']);
+});

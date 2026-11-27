@@ -13,7 +13,8 @@ const COLUMNS_MAX = 60;
 const SLIDES_MAX = 200;
 
 export type OfficeKind = 'docx' | 'xlsx' | 'pptx';
-export type OfficeText = { text: string; truncated: boolean; sheets?: string[]; pages?: number; reason?: string };
+type SheetBlock = {name:string;start:number;bodyStart:number;end:number;observed:boolean};
+export type OfficeText = { text: string; truncated: boolean; sheets?: string[]; sheetBlocks?: SheetBlock[]; pages?: number; reason?: string };
 
 const OFFICE_MIME: Record<OfficeKind, RegExp> = {
   docx: /wordprocessingml\.document/i,
@@ -143,7 +144,8 @@ async function xlsxText(read: (p: string) => Promise<string | undefined>, limit:
   const dates = dateStyles(await read('xl/styles.xml'));
   const date1904 = /<workbookPr\b[^>]*\sdate1904="(1|true)"/.test(workbook);
   const sheets = [...workbook.matchAll(/<sheet\b[^>]*>/g)].map(m => ({ name: attr(m[0], 'name') ?? '', rid: attr(m[0], 'r:id'), hidden: /state="(hidden|veryHidden)"/.test(m[0]) })).filter(s => !s.hidden);
-  const parts: string[] = []; let truncated = sheets.length > SHEETS_MAX, used = 0;
+  const parts: string[] = [], sheetBlocks: SheetBlock[] = [];
+  let truncated = sheets.length > SHEETS_MAX, used = 0;
   for (const sheet of sheets.slice(0, SHEETS_MAX)) {
     const path = sheet.rid && target.get(sheet.rid);
     const xml = path ? await read(path) : undefined;
@@ -152,10 +154,12 @@ async function xlsxText(read: (p: string) => Promise<string | undefined>, limit:
     const { lines, truncated: cut } = sheetRows(xml, shared, dates, date1904, Math.max(0, limit - used - head.length - 2));
     truncated ||= cut;
     const block = [head, ...(lines.length ? lines : [cut?'（正文超出本次摘录范围）':'（空）'])].join('\n');
-    parts.push(block); used += block.length + 2;
+    parts.push(block);
+    sheetBlocks.push({name:sheet.name,start:used,bodyStart:used+head.length+1,end:used+block.length,observed:lines.length>0||!cut});
+    used += block.length + 2;
     if (used >= limit) { truncated = true; break; }
   }
-  return { text: parts.join('\n\n'), truncated, sheets: sheets.map(s => s.name) };
+  return { text: parts.join('\n\n'), truncated, sheets: sheets.map(s => s.name), sheetBlocks };
 }
 
 async function pptxText(read: (p: string) => Promise<string | undefined>): Promise<OfficeText> {

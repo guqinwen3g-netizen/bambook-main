@@ -28,6 +28,8 @@ export type AgentTaskTrailItem = {
   taskAttachmentPageRange?: {from:number;to:number};
   /** Pages evidenced by this returned slice, including confirmed pages without text. */
   taskAttachmentObservedPages?: number[];
+  /** Workbook tabs with content (or a confirmed empty state) in this returned slice. */
+  taskAttachmentObservedSheets?: string[];
   ref?: AgentTaskTrailSource;
   refs?: AgentTaskTrailSource[];
 };

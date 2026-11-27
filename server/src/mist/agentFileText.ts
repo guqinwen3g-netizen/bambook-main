@@ -4,7 +4,7 @@
  * 摘录是外部来源的不可信资料，不得当作本人指令。
  */
 import { PDFParse } from 'pdf-parse';
-import { extractOfficeText, LEGACY_OFFICE, officeKind } from './agentOfficeText';
+import { extractOfficeText, LEGACY_OFFICE, officeKind, type OfficeText } from './agentOfficeText';
 
 export const FILE_TEXT_DEFAULT = 8_000;
 export const FILE_TEXT_MAX = 20_000;
@@ -17,7 +17,9 @@ const TEXT_EXT = /\.(txt|csv|json|xml|md|log)$/i;
 /** Offsets in UTF-16 code units relative to the returned text slice. */
 export type PdfPageTextSpan = {page:number;start:number;end:number};
 
-export type FileTextResult = { kind: 'text' | 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'unsupported' | 'unreadable'; text: string; truncated: boolean; pages?: number; window?: {start:number;end:number}; pagesWithoutText?:number[]; pageTextSpans?:PdfPageTextSpan[]; sheets?: string[]; reason?: string };
+type SheetTextSpan = {name:string;start:number;end:number};
+
+export type FileTextResult = { kind: 'text' | 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'unsupported' | 'unreadable'; text: string; truncated: boolean; pages?: number; window?: {start:number;end:number}; pagesWithoutText?:number[]; pageTextSpans?:PdfPageTextSpan[]; sheetTextSpans?:SheetTextSpan[]; sheets?: string[]; reason?: string };
 
 export const fileTextLimit = (value: unknown): number => {
   if (value === undefined) return FILE_TEXT_DEFAULT;
@@ -41,6 +43,21 @@ function pdfPageTextSpans(text:string, pages:ReadonlyMap<number,string>, startPa
     spans.push({page,start,end});
   }
   if(!text.slice(end).trim())return spans;
+}
+
+/** Locate only admitted worksheet rows in the existing normalized workbook text. */
+function sheetTextSpans(text:string, raw:OfficeText):SheetTextSpan[] {
+  const spans:SheetTextSpan[]=[];
+  let offset=0;
+  for(const block of raw.sheetBlocks??[]){
+    const part=clean(raw.text.slice(block.start,block.end));
+    const start=text.indexOf(part,offset);
+    if(start<0||text.slice(offset,start).trim())return [];
+    offset=start+part.length;
+    const body=clean(raw.text.slice(block.bodyStart,block.end));
+    if(block.observed&&body&&part.endsWith(body))spans.push({name:block.name,start:offset-body.length,end:offset});
+  }
+  return spans;
 }
 
 export async function extractFileText(file: { name: string; mimeType: string }, bytes: Uint8Array, limit: number, startPage=1): Promise<FileTextResult> {
@@ -75,9 +92,11 @@ export async function extractFileText(file: { name: string; mimeType: string }, 
   if (office) {
     const result = await extractOfficeText(office, bytes, limit);
     if (result.unreadable) return { kind: 'unreadable', text: '', truncated: false, reason: result.reason };
-    const out = cut(clean(result.text), limit);
+    const normalized = clean(result.text);
+    const out = cut(normalized, limit);
     if (!out.text) return { kind: office, text: '', truncated: false, ...(result.sheets ? { sheets: result.sheets } : {}), ...(result.pages !== undefined ? { pages: result.pages } : {}), reason: '文档里没有可提取的文字' };
-    return { kind: office, ...out, truncated: out.truncated || result.truncated, ...(result.sheets ? { sheets: result.sheets } : {}), ...(result.pages !== undefined ? { pages: result.pages } : {}) };
+    const spans=office==='xlsx'?sheetTextSpans(normalized,result).filter(span=>span.start<limit):undefined;
+    return { kind: office, ...out, truncated: out.truncated || result.truncated, ...(spans?{sheetTextSpans:spans}:{}), ...(result.sheets ? { sheets: result.sheets } : {}), ...(result.pages !== undefined ? { pages: result.pages } : {}) };
   }
   if (LEGACY_OFFICE.test(file.name)) return { kind: 'unsupported', text: '', truncated: false, reason: '旧版 Office 格式（.doc/.xls/.ppt）暂不提取，可另存为 .docx/.xlsx/.pptx 后上传' };
   if (/^image\//i.test(file.mimeType) || /\.(png|jpe?g|gif|webp|heic|bmp|tiff?)$/i.test(file.name)) return { kind: 'unsupported', text: '', truncated: false, reason: '图片不提取文字，请本人查看' };
