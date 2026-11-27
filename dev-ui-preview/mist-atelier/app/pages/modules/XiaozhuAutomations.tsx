@@ -24,6 +24,22 @@ const timed = (t: Trigger) => t === 'daily' || t === 'due_soon';
 const label = (t: Trigger) => TRIGGERS.find(x => x.value === t)!.label;
 
 const storageKey=(scope:string)=>'mist.xiaozhu.rule-submission:'+scope;
+const ruleVerificationKey=(scope:string)=>'mist.xiaozhu.rule-verification:'+scope;
+function readRuleVerifications(scope:string):UnconfirmedRuleChange[] {
+  try {
+    const value:unknown=JSON.parse(sessionStorage.getItem(ruleVerificationKey(scope))??'[]');
+    if(!Array.isArray(value))return [];
+    return value.slice(-20).flatMap((item:unknown)=>{
+      if(!item||typeof item!=='object')return [];
+      const {id,version,kind,enabled}=item as Record<string,unknown>;
+      if(typeof id!=='string'||!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id)
+        ||typeof version!=='number'||!Number.isSafeInteger(version)||version<1)return [];
+      const change:RuleChange|undefined=kind==='delete'?{id,version,kind}:
+        kind==='toggle'&&typeof enabled==='boolean'?{id,version,kind,enabled}:undefined;
+      return change?[{scope,afterRead:-1,change}]:[];
+    });
+  } catch {return [];}
+}
 function readRuleIntent(scope:string):RuleIntent|undefined {
   try {
     const value=JSON.parse(sessionStorage.getItem(storageKey(scope))??'null');
@@ -50,7 +66,20 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
   const activeIntent=React.useRef<RuleIntent|undefined>(undefined);
   const mutation=React.useRef<AbortController|undefined>(undefined);
   const [unconfirmedChanges,setUnconfirmedChanges]=React.useState<UnconfirmedRuleChange[]>([]);
-  const unconfirmedHere=unconfirmedChanges.filter(entry=>entry.scope===scope);
+  const unconfirmedRef=React.useRef<UnconfirmedRuleChange[]>([]);
+  const updateUnconfirmed=React.useCallback((update:(previous:UnconfirmedRuleChange[])=>UnconfirmedRuleChange[])=>{
+    if(liveScope.current!==scope)return;
+    const previous=unconfirmedRef.current, next=update(previous);
+    if(next===previous)return;
+    unconfirmedRef.current=next;
+    setUnconfirmedChanges(next);
+    try {
+      const stored=next.filter(entry=>entry.scope===scope).map(({change})=>change).slice(-20);
+      if(stored.length)sessionStorage.setItem(ruleVerificationKey(scope),JSON.stringify(stored));
+      else sessionStorage.removeItem(ruleVerificationKey(scope));
+    } catch {/* The active drawer can still reconcile in memory. */}
+  },[scope]);
+  const unconfirmedHere=unconfirmedChanges.filter(entry=>entry.scope===scope&&Number.isFinite(entry.afterRead));
   const unconfirmedNames=rules?.filter(rule=>unconfirmedHere.some(({change})=>change.id===rule.id)).map(rule=>rule.name).join('、');
   const pendingHere=pending?.scope===scope?pending.intent:undefined;
   const remember=(intent?:RuleIntent)=>{
@@ -66,7 +95,9 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
     activeIntent.current=restored;
     setPending(restored?{scope,intent:restored}:undefined);
     setDraft(restored?.draft??null);
-    setUnconfirmedChanges([]);
+    const restoredVerifications=readRuleVerifications(scope);
+    unconfirmedRef.current=restoredVerifications;
+    setUnconfirmedChanges(restoredVerifications);
     setRules(null);setExpandedRuns({});setError('');setReadError('');setBusy(false);
     return()=>{mutation.current?.abort();mutation.current=undefined;listing.current?.abort();readGeneration.current++;};
   },[scope]);
@@ -84,7 +115,7 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
       if (generation !== readGeneration.current || liveScope.current!==scope) return;
       setRules(result.items);
       setReadError('');
-      setUnconfirmedChanges(previous=>{
+      updateUnconfirmed(previous=>{
         const remaining=previous.filter(({scope:bound,afterRead,change})=>{
           if(bound!==scope||generation<=afterRead)return true;
           const currentRule=result.items.find(rule=>rule.id===change.id);
@@ -100,7 +131,7 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
     } finally {
       if (generation === readGeneration.current&&liveScope.current===scope){listing.current=undefined;setLoading(false);}
     }
-  }, [base,scope]);
+  }, [base,scope,updateUnconfirmed]);
   React.useEffect(() => {
     if (open) void load();
     else {
@@ -129,19 +160,25 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
     const current=()=>liveScope.current===scope&&mutation.current===controller;
     setBusy(true);setError('');
     const otherChanges=(previous:UnconfirmedRuleChange[])=>previous.filter(entry=>entry.scope!==scope||entry.change.id!==change.id);
+    const priorChange=unconfirmedRef.current.find(entry=>entry.scope===scope&&entry.change.id===change.id);
+    // Record the possible write before the route can unmount or the response can be lost.
+    updateUnconfirmed(previous=>[...otherChanges(previous),{scope,change,afterRead:Infinity}]);
     try {
       const result=await withRequestDeadline(controller,10_000,'规则操作结果待核对',run);
       if(current()){
         apply(result);
-        setUnconfirmedChanges(otherChanges);
+        updateUnconfirmed(otherChanges);
       }
     } catch (problem) {
       if(current()){
         const status=(problem as {status?:number})?.status;
         if(!status||status===408||status>=500){
           const afterRead=readGeneration.current;
-          setUnconfirmedChanges(previous=>[...otherChanges(previous),{scope,change,afterRead}]);
-        } else setError(status===409?'规则已更新，请核对后重试':problem instanceof Error?problem.message:'操作未完成');
+          updateUnconfirmed(previous=>[...otherChanges(previous),{scope,change,afterRead}]);
+        } else {
+          updateUnconfirmed(previous=>priorChange?[...otherChanges(previous),priorChange]:otherChanges(previous));
+          setError(status===409?'规则已更新，请核对后重试':problem instanceof Error?problem.message:'操作未完成');
+        }
       }
     } finally {
       if(current()){
