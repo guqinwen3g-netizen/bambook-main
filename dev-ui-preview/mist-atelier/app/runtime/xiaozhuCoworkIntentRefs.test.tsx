@@ -107,13 +107,13 @@ it('recovers the same running task after a hung status read and ignores its late
     expect(statusSignals).toHaveLength(1);
     expect(statusSignals[0].aborted).toBe(true);
     expect(cowork.tasks[0].state).toBe('running');
-    expect(cowork.progressStale).toBe(true);
+    expect(cowork.staleProgressIds?.has('task')).toBe(true);
     expect(cowork.error).toBe('');
 
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(statusSignals).toHaveLength(2);
     expect(cowork.tasks).toEqual([completed]);
-    expect(cowork.progressStale).toBe(false);
+    expect(cowork.staleProgressIds?.has('task') ?? false).toBe(false);
 
     await act(async () => {
       lateResponse({ item: { ...running, updatedAt: '2026-11-23T00:00:11Z' } });

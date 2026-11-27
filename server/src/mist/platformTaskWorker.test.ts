@@ -167,6 +167,58 @@ it('only carries authorized task history into a follow-up and masks it when its 
  expect(complete).toHaveBeenCalledTimes(2);
 });
 
+it.each(['selected','discovered','exact order code'] as const)('re-reads the %s order for a follow-up without changing the old report', async source => {
+ const originalDue='2027-05-07', currentDue='2027-05-21';
+ const conversationId='c_history_current_order';
+ const followRequest='现在这张订单是哪天交货？';
+ let orderId:string, lookupId:string;
+ const facts=(input:LlmCompletionInput)=>{
+  const text=String(input.messages[0].content);
+  return JSON.parse(text.slice(text.indexOf('{"task":')));
+ };
+ const complete=vi.fn(async (input:LlmCompletionInput)=>{
+  const turn=facts(input), read=turn.history.recent.at(-1)?.result?.object;
+  if(!read && !turn.task.instructions.includes(followRequest))return tool('bambook_get',{type:'order',id:lookupId});
+  return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'确认交期 '+(read?.data.due??originalDue)});
+ });
+ const f=await fixture(complete,{mode:'read'});
+ const created=await f.command('order.create',{
+  type:'garment',customerId:f.workspace.state.customers[0].id,season:'AW',currency:'USD',due:originalDue,ownerId:'local-operator',
+  lines:[{name:'模拟样衣',style:'SYNTH-FRESHNESS',qty:20,unit:'件',price:5,img:'coat',fulfillmentMode:'full_package',cmtIncludedItems:[]}],
+ });
+ orderId=created.body.receipt.result.orderId;
+ const storedOrder=created.body.workspace.state.orders.find((order:{id:string})=>order.id===orderId);
+ lookupId=source==='exact order code'?storedOrder.code:orderId;
+ const endpoint=f.base+'/personal-agent/tasks';
+ const post=async (instructions:string,options:Record<string,unknown>={})=>(await f.human.post(endpoint).send({
+  requestId:randomUUID(),name:'核对模拟交期',instructions,conversationId,...options,
+ }).expect(201)).body.item;
+ f.worker.start(3_600_000);
+ const original=await post('只读核对订单原交期。',source==='selected'?{intentRefs:[{kind:'orders',id:orderId}]}:{});
+ await f.drain();
+ expect(await f.current(original.id)).toMatchObject({state:'succeeded',result:'确认交期 '+originalDue});
+ await f.command('order.update',{orderId,due:currentDue});
+ const follow=await post(followRequest,{historyTaskIds:[original.id]});
+ await f.drain();
+ const latest=facts(complete.mock.calls.at(-1)![0]);
+ expect(latest.task.instructions).toContain(originalDue);
+ expect(latest.history.recent.map((step:any)=>step.name)).toEqual(['bambook_get']);
+ expect(latest.history.recent[0].result.object).toMatchObject({id:orderId,data:{due:currentDue}});
+ expect(await f.current(follow.id)).toMatchObject({state:'succeeded',instructions:followRequest,result:'确认交期 '+currentDue});
+ expect(await f.current(original.id)).toMatchObject({state:'succeeded',result:'确认交期 '+originalDue});
+ expect(follow).not.toHaveProperty('intentRefs');
+ if(source==='selected'){
+  const other=f.workspace.state.orders[0];
+  const explicit=await post('改为核对我新选的订单。',{historyTaskIds:[original.id,follow.id],intentRefs:[{kind:'orders',id:other.id}]});
+  await f.drain();
+  const selected=facts(complete.mock.calls.at(-1)![0]);
+  expect(selected.task.instructions).not.toContain(originalDue);
+  expect(selected.task.instructions).not.toContain(currentDue);
+  expect(selected.history.recent.map((step:any)=>step.result.object.id)).toEqual([other.id]);
+  expect(await f.current(explicit.id)).toMatchObject({state:'succeeded',result:'确认交期 '+other.due});
+ }
+});
+
 it('strips legacy automatic history and keeps an identical request replay bound to its original receipt', async () => {
  const stale='LEGACY-CACHED-REPORT-DO-NOT-SEND';
  const current='本次只核对公开状态。';

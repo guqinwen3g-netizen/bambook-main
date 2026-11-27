@@ -21,7 +21,7 @@ export function useXiaozhuActivity(workspaceId: string | undefined, scope: strin
     let recheck = false;
     const refresh = async () => {
       window.clearTimeout(timer);
-      if (!live || document.hidden || request) return;
+      if (!live || document.hidden || !navigator.onLine || request) return;
       const controller = new AbortController();
       request = controller;
       let next = IDLE_INTERVAL;
@@ -37,26 +37,29 @@ export function useXiaozhuActivity(workspaceId: string | undefined, scope: strin
         if (live && !document.hidden) setSnapshot(undefined);
       } finally {
         request = undefined;
-        if (live && !document.hidden) timer = window.setTimeout(() => void refresh(), recheck ? 0 : next);
+        if (live && !document.hidden && navigator.onLine) timer = window.setTimeout(() => void refresh(), recheck ? 0 : next);
         recheck = false;
       }
     };
     const update = () => {
-      if (document.hidden) return;
+      if (document.hidden || !navigator.onLine) return;
       if (request) recheck = true;
       else void refresh();
     };
+    const suspend = () => {
+      window.clearTimeout(timer);
+      recheck = false;
+      request?.abort();
+      setSnapshot(undefined);
+    };
     const wake = () => {
-      if (document.hidden) {
-        window.clearTimeout(timer);
-        request?.abort();
-        setSnapshot(undefined);
-      } else {
-        update();
-      }
+      if (document.hidden) suspend();
+      else update();
     };
     window.addEventListener('bambook:agent-task-update', update);
     document.addEventListener('visibilitychange', wake);
+    window.addEventListener('offline', suspend);
+    window.addEventListener('online', update);
     void refresh();
     return () => {
       live = false;
@@ -64,6 +67,8 @@ export function useXiaozhuActivity(workspaceId: string | undefined, scope: strin
       request?.abort();
       window.removeEventListener('bambook:agent-task-update', update);
       document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('offline', suspend);
+      window.removeEventListener('online', update);
     };
   }, [path, scope, enabled]);
   return enabled && snapshot?.scope === scope ? snapshot.items : [];
@@ -72,7 +77,7 @@ export function useXiaozhuActivity(workspaceId: string | undefined, scope: strin
 export function xiaozhuActivityLabel(task: AgentTaskActivity) {
   if (task.runnerStatus === 'heartbeat_stale') return '执行进度暂未更新';
   if (task.runnerStatus === 'awaiting_reclaim') return '待重新领取';
-  if (task.retrying) return '模型重试中';
+  if (task.retrying) return '等待模型重试';
   if (task.state === 'queued') return '待执行';
   if (task.executionStage === 'model') return '正在等待模型';
   return task.currentStep || '办理中';
