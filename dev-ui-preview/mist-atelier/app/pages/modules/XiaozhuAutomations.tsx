@@ -63,6 +63,7 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
   const listing=React.useRef<AbortController|undefined>(undefined);
   const [draft, setDraft] = React.useState<RuleDraft | null>(null), [busy, setBusy] = React.useState(false);
   const [pending,setPending]=React.useState<{scope:string;intent:RuleIntent}>();
+  const [missingReceipt,setMissingReceipt]=React.useState<{scope:string;requestId:string}>();
   const activeIntent=React.useRef<RuleIntent|undefined>(undefined);
   const mutation=React.useRef<AbortController|undefined>(undefined);
   const [unconfirmedChanges,setUnconfirmedChanges]=React.useState<UnconfirmedRuleChange[]>([]);
@@ -82,6 +83,7 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
   const unconfirmedHere=unconfirmedChanges.filter(entry=>entry.scope===scope&&Number.isFinite(entry.afterRead));
   const unconfirmedNames=rules?.filter(rule=>unconfirmedHere.some(({change})=>change.id===rule.id)).map(rule=>rule.name).join('、');
   const pendingHere=pending?.scope===scope?pending.intent:undefined;
+  const retryOriginal=!!pendingHere&&missingReceipt?.scope===scope&&missingReceipt.requestId===pendingHere.requestId;
   const remember=(intent?:RuleIntent)=>{
     activeIntent.current=intent;
     setPending(intent?{scope,intent}:undefined);
@@ -94,6 +96,7 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
     const restored=readRuleIntent(scope);
     activeIntent.current=restored;
     setPending(restored?{scope,intent:restored}:undefined);
+    setMissingReceipt(undefined);
     setDraft(restored?.draft??null);
     const restoredVerifications=readRuleVerifications(scope);
     unconfirmedRef.current=restoredVerifications;
@@ -187,22 +190,46 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
       }
     }
   };
-  const create = async () => {
+  const create = async (checkOnly=false) => {
     if(!base||!draft||busy||mutation.current)return;
     const original=activeIntent.current;
+    if(checkOnly&&!original||original&&!checkOnly&&!retryOriginal)return;
     const intent=original??{requestId:crypto.randomUUID(),draft};
     const controller=new AbortController();
     mutation.current=controller;
     const isCurrent=()=>liveScope.current===scope&&mutation.current===controller;
-    remember(intent);setBusy(true);setError('');
+    remember(intent);setMissingReceipt(undefined);setBusy(true);setError('');
     try {
-      const result=await withRequestDeadline(controller,10_000,'规则开启结果待核对',signal=>
-        mistApiRequest(base,{method:'POST',signal,body:JSON.stringify({...intent.draft,enabled:true,requestId:intent.requestId})}) as Promise<{item:Rule}>);
+      let item:Rule|undefined;
+      if(original){
+        try {
+          const receipt=await withRequestDeadline(controller,8_000,'规则开启结果待核对',signal=>
+            mistApiRequest(base+'/receipt/'+encodeURIComponent(intent.requestId),{signal,cache:'no-store'}) as Promise<{item:Rule}>);
+          if(!receipt?.item?.id)throw Error('规则开启结果待核对');
+          item=receipt.item;
+        } catch (problem) {
+          const {status,code}=(problem as {status?:number;code?:string})??{};
+          if(status!==404||code!=='AGENT_AUTOMATION_RECEIPT_NOT_FOUND')throw problem;
+        }
+        if(!isCurrent())return;
+      }
+      const recovered=!!item;
+      if(!item){
+        if(checkOnly){
+          setMissingReceipt({scope,requestId:intent.requestId});
+          setError('暂未查到原回执');
+          return;
+        }
+        const result=await withRequestDeadline(controller,10_000,'规则开启结果待核对',signal=>
+          mistApiRequest(base,{method:'POST',signal,body:JSON.stringify({...intent.draft,enabled:true,requestId:intent.requestId})}) as Promise<{item:Rule}>);
+        item=result?.item;
+      }
       if(!isCurrent())return;
-      if(!result.item?.id)throw new Error('规则开启结果待核对');
+      if(!item?.id)throw new Error('规则开启结果待核对');
+      const saved=item;
       remember();setDraft(null);
-      setRules(old=>[result.item,...(old??[]).filter(rule=>rule.id!==result.item.id)]);
-      toast(uiText(result.item.enabled?'规则已开启':'已找回原规则'));
+      setRules(old=>[saved,...(old??[]).filter(rule=>rule.id!==saved.id)]);
+      toast(uiText(!recovered&&saved.enabled?'规则已开启':'已找回原规则'));
       void load();
     } catch (problem) {
       if(!isCurrent())return;
@@ -240,7 +267,7 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
         {timed(draft.trigger) && <Field label={uiText('每天几点')}><TextInput aria-label={uiText('每天几点')} disabled={!!pendingHere} type="time" value={draft.time} onChange={e => setDraft({ ...draft, time: e.target.value })} /></Field>}
         <Field label={uiText('规则名称')} required><TextInput aria-label={uiText('规则名称')} disabled={!!pendingHere} value={draft.name} maxLength={40} onChange={e => setDraft({ ...draft, name: e.target.value })} /></Field>
         <Field label={uiText('要做什么')} required><TextArea aria-label={uiText('规则要做什么')} disabled={!!pendingHere} rows={3} maxLength={2000} value={draft.instructions} onChange={e => setDraft({ ...draft, instructions: e.target.value })} /></Field>
-        <div className="mist-row"><span className="mist-spacer" /><Button disabled={busy||!!pendingHere} onClick={() => setDraft(null)}>{uiText('取消')}</Button><Button variant="primary" loading={busy} disabled={busy || !draft.name.trim() || !draft.instructions.trim()} onClick={() => void create()}>{uiText(pendingHere?'用原请求重试':'开启')}</Button></div>
+        <div className="mist-row"><span className="mist-spacer" /><Button disabled={busy||!!pendingHere} onClick={() => setDraft(null)}>{uiText('取消')}</Button><Button variant="primary" loading={busy} disabled={busy || !draft.name.trim() || !draft.instructions.trim()} onClick={() => void create(!!pendingHere&&!retryOriginal)}>{uiText(pendingHere?(retryOriginal?'用原请求重试':'核对开启结果'):'开启')}</Button></div>
       </div>}
       {rules?.length === 0 && !draft && !loading && !readError && <EmptyState title={uiText('还没有规则')} compact />}
       {rules?.map(r => {

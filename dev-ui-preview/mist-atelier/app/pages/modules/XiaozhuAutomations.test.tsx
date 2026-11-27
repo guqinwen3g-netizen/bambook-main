@@ -183,9 +183,10 @@ it('refreshes the newer rule after a stale pause or delete instead of applying e
   expect((getByRole(document.body,'switch',{name:'开启 每日汇总'}) as HTMLInputElement).checked).toBe(true);
 });
 it('reports a failed save instead of closing the form',async()=>{await paint();seam.api.mockRejectedValueOnce(new Error('每人最多 20 条规则'));await act(async()=>button('新建规则').click());await act(async()=>button('开启').click());await flush();expect(document.body.textContent).toContain('每人最多 20 条规则');expect(button('取消')).toBeTruthy();});
-it('restores a lost creation receipt and replays the identical request after remount',async()=>{
+it('restores an existing creation receipt without replaying the write after remount',async()=>{
   const posts:any[]=[];
-  seam.api.mockImplementation(async(_url:string,init?:RequestInit)=>{
+  seam.api.mockImplementation(async(url:string,init?:RequestInit)=>{
+    if(url.includes('/receipt/'))return {item:rules[0]};
     if(init?.method!=='POST')return {items:rules};
     posts.push(JSON.parse(String(init.body)));
     if(posts.length===1){rules=[rule(posts[0])];throw Object.assign(Error('连接中断'),{status:0});}
@@ -216,8 +217,55 @@ it('restores a lost creation receipt and replays the identical request after rem
   expect(posts).toHaveLength(1);
   expect((getByLabelText(document.body,'规则名称') as HTMLInputElement).value).toBe(posts[0].name);
   expect((getByLabelText(document.body,'每天几点') as HTMLInputElement).value).toBe('17:35');
-  await act(async()=>button('用原请求重试').click());
-  expect(posts[1]).toEqual(posts[0]);
+  await act(async()=>button('核对开启结果').click());
+  expect(seam.api.mock.calls.some(([url])=>String(url).endsWith('/receipt/'+posts[0].requestId))).toBe(true);
+  expect(posts).toHaveLength(1);
   expect(rules).toHaveLength(1);
   expect(sessionStorage.getItem('mist.xiaozhu.rule-submission:ws')).toBeNull();
+});
+
+it.each([false,true])('rechecks a missing receipt before an explicit replay (%s)',async arrivedLate=>{
+  const posts:any[]=[];
+  const reads:string[]=[];
+  seam.api.mockImplementation(async(url:string,init?:RequestInit)=>{
+    if(url.includes('/receipt/')){
+      reads.push(url);
+      if(rules.length)return {item:rules[0]};
+      throw Object.assign(Error('未找到规则开启回执'),{status:404,code:'AGENT_AUTOMATION_RECEIPT_NOT_FOUND'});
+    }
+    if(init?.method!=='POST')return {items:rules};
+    posts.push(JSON.parse(String(init.body)));
+    if(posts.length===1)throw Object.assign(Error('模拟断线'),{status:0});
+    rules=[rule(posts[0])];return {item:rules[0]};
+  });
+  await paint();
+  await act(async()=>button('新建规则').click());
+  await act(async()=>button('开启').click());
+  expect(posts).toHaveLength(1);
+  await act(async()=>button('核对开启结果').click());
+  expect(reads).toHaveLength(1);
+  expect(posts).toHaveLength(1);
+  if(arrivedLate)rules=[rule(posts[0])];
+  await act(async()=>button('用原请求重试').click());
+  expect(reads).toHaveLength(2);
+  expect(posts).toHaveLength(arrivedLate?1:2);
+  if(!arrivedLate)expect(posts[1]).toEqual(posts[0]);
+  expect(sessionStorage.getItem('mist.xiaozhu.rule-submission:ws')).toBeNull();
+});
+
+it.each([{status:403,code:'FORBIDDEN'},{status:404,code:'NOT_FOUND'},{status:503,code:'UNAVAILABLE'}])
+('keeps replay unavailable when the receipt check is inconclusive (%o)',async failure=>{
+  const posts:unknown[]=[];
+  seam.api.mockImplementation(async(url:string,init?:RequestInit)=>{
+    if(url.includes('/receipt/'))throw Object.assign(Error('暂时无法核对规则'),failure);
+    if(init?.method==='POST'){posts.push(init.body);throw Object.assign(Error('连接中断'),{status:0});}
+    return {items:rules};
+  });
+  await paint();
+  await act(async()=>button('新建规则').click());
+  await act(async()=>button('开启').click());
+  await act(async()=>button('核对开启结果').click());
+  expect(button('核对开启结果')).toBeTruthy();
+  expect(document.body.textContent).not.toContain('用原请求重试');
+  expect(posts).toHaveLength(1);
 });
