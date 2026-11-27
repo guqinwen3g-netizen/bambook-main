@@ -67,7 +67,7 @@ export type AgentTaskView = {
   requiredRead?:{type:string;id:string}|null;
 };
 export function agentTaskActivityText(value: string | undefined) {
-  if (!value || /\b(?:bma1|bmc1|bms1|bmt1|aft1)[_.][A-Za-z0-9_-]+|\b(?:Bearer\s+|sk-)[A-Za-z0-9_-]{8,}/i.test(value)) return;
+  if (!value || /\b(?:bma1|bmc1|bms1|bmt1|aft[12])[_.][A-Za-z0-9_-]+|\b(?:Bearer\s+|sk-)[A-Za-z0-9_-]{8,}/i.test(value)) return;
   return value.replace(/[\u0000-\u001f\u007f\s]+/gu, ' ').trim() || undefined;
 }
 

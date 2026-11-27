@@ -19,7 +19,7 @@ export type PdfPageTextSpan = {page:number;start:number;end:number};
 
 type SheetTextSpan = {name:string;start:number;end:number};
 
-export type FileTextResult = { kind: 'text' | 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'unsupported' | 'unreadable'; text: string; truncated: boolean; pages?: number; window?: {start:number;end:number}; pagesWithoutText?:number[]; pageTextSpans?:PdfPageTextSpan[]; sheetTextSpans?:SheetTextSpan[]; sheets?: string[]; reason?: string };
+export type FileTextResult = { kind: 'text' | 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'unsupported' | 'unreadable'; text: string; truncated: boolean; pages?: number; window?: {start:number;end:number}; pagesWithoutText?:number[]; pageTextSpans?:PdfPageTextSpan[]; sheetTextSpans?:SheetTextSpan[]; attributedValues?:true; sheets?: string[]; reason?: string };
 
 export const fileTextLimit = (value: unknown): number => {
   if (value === undefined) return FILE_TEXT_DEFAULT;
@@ -96,7 +96,7 @@ export async function extractFileText(file: { name: string; mimeType: string }, 
     const out = cut(normalized, limit);
     if (!out.text) return { kind: office, text: '', truncated: false, ...(result.sheets ? { sheets: result.sheets } : {}), ...(result.pages !== undefined ? { pages: result.pages } : {}), reason: '文档里没有可提取的文字' };
     const spans=office==='xlsx'?sheetTextSpans(normalized,result).filter(span=>span.start<limit):undefined;
-    return { kind: office, ...out, truncated: out.truncated || result.truncated, ...(spans?{sheetTextSpans:spans}:{}), ...(result.sheets ? { sheets: result.sheets } : {}), ...(result.pages !== undefined ? { pages: result.pages } : {}) };
+    return { kind: office, ...out, truncated: out.truncated || result.truncated, ...(spans?{sheetTextSpans:spans}:{}), ...(result.attributedValues?{attributedValues:true}:{}), ...(result.sheets ? { sheets: result.sheets } : {}), ...(result.pages !== undefined ? { pages: result.pages } : {}) };
   }
   if (LEGACY_OFFICE.test(file.name)) return { kind: 'unsupported', text: '', truncated: false, reason: '旧版 Office 格式（.doc/.xls/.ppt）暂不提取，可另存为 .docx/.xlsx/.pptx 后上传' };
   if (/^image\//i.test(file.mimeType) || /\.(png|jpe?g|gif|webp|heic|bmp|tiff?)$/i.test(file.name)) return { kind: 'unsupported', text: '', truncated: false, reason: '图片不提取文字，请本人查看' };

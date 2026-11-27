@@ -23,6 +23,7 @@ function target(link: unknown): { view: string; id: string; section?: string } |
 // Tool errors can include source content. Only stable server messages are shown.
 const FILE_FAILURE_DETAILS = new Map([
   ['附件已变化，请从首段重新读取','原件已变化，无法继续读取'],
+  ['Excel 正文读取方式已更新，请从首段重新读取','Excel 正文读取方式已更新，请从首段重新读取'],
   ['引用的原附件已变化','原件已变化，无法继续读取'],
   ['附件不存在或当前账号无权访问','原件不存在或无权访问'],
   ['原附件不存在或无权访问','原件不存在或无权访问'],

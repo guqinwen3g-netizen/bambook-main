@@ -3,6 +3,7 @@ import type {AgentTaskIntentRef,AgentTaskView} from '../shared/mistAgentTasks';
 import type { MarketQuotation } from '../shared/mistMarket';
 import type { PdfPageTextSpan } from './agentFileText';
 import { officeKind } from './agentOfficeText';
+import { isFileTextCursor } from './agentFileWindow';
 import type{ResponseLocale}from'./responseLanguage';
 
 export type PlatformTaskPlan={name:string;arguments:Record<string,unknown>;progress?:string};
@@ -70,7 +71,7 @@ export function shortOfficeTailPlan(attachments:AgentTaskView['attachments']=[],
     if(first.compacted||first.plan.arguments.cursor!==undefined||read?.kind!==kind||read.error||read.reason
       ||read.file?.id!==file.id||typeof read.sourceHash!=='string'||!/^[a-f0-9]{64}$/.test(read.sourceHash)
       ||read.range?.start!==0||!Number.isSafeInteger(read.range.end)||read.range.end<1
-      ||read.hasMore!==true||typeof read.nextCursor!=='string'||!read.nextCursor.startsWith('aft1.')
+      ||read.hasMore!==true||!isFileTextCursor(read.nextCursor)
       ||typeof read.remainingOfficeChars!=='number'||!Number.isSafeInteger(read.remainingOfficeChars)
       ||read.remainingOfficeChars<1||read.remainingOfficeChars>ATTACHMENT_PREFETCH_CHARS)continue;
     return {name:'bambook_file_text',arguments:{fileId:file.id,cursor:read.nextCursor,maxChars:ATTACHMENT_PREFETCH_CHARS}};
@@ -92,7 +93,7 @@ export function resolvePlatformFileContinuation(
   const last = [...steps].reverse().find(step => step.plan.name === 'bambook_file_text' && step.plan.arguments.fileId === fileId
     && step.result !== undefined && !(step.result as { error?: boolean })?.error);
   const result = last?.result as { hasMore?: boolean; nextCursor?: unknown } | undefined;
-  if (last?.compacted || result?.hasMore !== true || typeof result.nextCursor !== 'string' || !result.nextCursor.startsWith('aft1.')) return resolved;
+  if (last?.compacted || result?.hasMore !== true || !isFileTextCursor(result.nextCursor)) return resolved;
   return { ...resolved, arguments: { ...resolved.arguments, cursor: result.nextCursor } };
 }
 /** Label the amount scopes from one complete quotation read without calculating or refetching business values. */

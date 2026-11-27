@@ -14,7 +14,7 @@ const SLIDES_MAX = 200;
 
 export type OfficeKind = 'docx' | 'xlsx' | 'pptx';
 type SheetBlock = {name:string;start:number;bodyStart:number;end:number;observed:boolean};
-export type OfficeText = { text: string; truncated: boolean; sheets?: string[]; sheetBlocks?: SheetBlock[]; pages?: number; reason?: string };
+export type OfficeText = { text: string; truncated: boolean; sheets?: string[]; sheetBlocks?: SheetBlock[]; attributedValues?:true; pages?: number; reason?: string };
 
 const OFFICE_MIME: Record<OfficeKind, RegExp> = {
   docx: /wordprocessingml\.document/i,
@@ -105,21 +105,23 @@ const columnIndex = (ref: string | undefined, fallback: number) => {
 };
 const cellText = (s: string) => s.replace(/[\t\r\n]+/g, ' ').trim();
 
-export function sheetRows(xml: string, shared: string[], dates: Set<number>, date1904: boolean, budget: number): { lines: string[]; truncated: boolean } {
-  const lines: string[] = []; let used = 0, truncated = false;
+export function sheetRows(xml: string, shared: string[], dates: Set<number>, date1904: boolean, budget: number): { lines: string[]; truncated: boolean; attributedValues?:true } {
+  const lines: string[] = []; let used = 0, truncated = false, attributedValues = false;
   for (const row of xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
     const cells: string[] = []; let next = 0;
     for (const c of row[1].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
       const head = c[1], body = c[2] ?? '', col = columnIndex(attr(' ' + head, 'r'), next); next = col + 1;
       if (col >= COLUMNS_MAX) { truncated = true; continue; }
       const type = attr(' ' + head, 't'), style = Number(attr(' ' + head, 's') ?? -1);
-      const raw = /<v>([\s\S]*?)<\/v>/.exec(body)?.[1];
+      const valueTag = /<v(\s[^>]*)?>([\s\S]*?)<\/v>/.exec(body);
+      const raw = valueTag?.[2];
       let value = '';
       if (type === 's') value = shared[Number(raw)] ?? '';
       else if (type === 'inlineStr') value = [...body.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map(t => decodeXml(t[1])).join('');
       else if (type === 'b') value = raw === '1' ? 'TRUE' : raw === '0' ? 'FALSE' : '';
       else if (raw !== undefined) { const v = decodeXml(raw); const n = Number(v); value = (!type || type === 'n') && dates.has(style) && Number.isFinite(n) ? serialDate(n, date1904) : v; }
       cells[col] = cellText(value);
+      if(valueTag?.[1]&&type!=='inlineStr'&&cells[col])attributedValues=true;
     }
     while (cells.length && !cells[cells.length - 1]) cells.pop();
     if (!cells.length) continue;
@@ -131,7 +133,7 @@ export function sheetRows(xml: string, shared: string[], dates: Set<number>, dat
     }
     lines.push(line); used += line.length + 1;
   }
-  return { lines, truncated };
+  return { lines, truncated, ...(attributedValues?{attributedValues:true}:{}) };
 }
 
 async function xlsxText(read: (p: string) => Promise<string | undefined>, limit: number): Promise<OfficeText> {
@@ -145,21 +147,22 @@ async function xlsxText(read: (p: string) => Promise<string | undefined>, limit:
   const date1904 = /<workbookPr\b[^>]*\sdate1904="(1|true)"/.test(workbook);
   const sheets = [...workbook.matchAll(/<sheet\b[^>]*>/g)].map(m => ({ name: attr(m[0], 'name') ?? '', rid: attr(m[0], 'r:id'), hidden: /state="(hidden|veryHidden)"/.test(m[0]) })).filter(s => !s.hidden);
   const parts: string[] = [], sheetBlocks: SheetBlock[] = [];
-  let truncated = sheets.length > SHEETS_MAX, used = 0;
+  let truncated = sheets.length > SHEETS_MAX, used = 0, attributedValues = false;
   for (const sheet of sheets.slice(0, SHEETS_MAX)) {
     const path = sheet.rid && target.get(sheet.rid);
     const xml = path ? await read(path) : undefined;
     if (!xml) throw new Error('Missing worksheet');
     const head = `## 工作表：${sheet.name}`;
-    const { lines, truncated: cut } = sheetRows(xml, shared, dates, date1904, Math.max(0, limit - used - head.length - 2));
+    const { lines, truncated: cut, attributedValues: restoredValues } = sheetRows(xml, shared, dates, date1904, Math.max(0, limit - used - head.length - 2));
     truncated ||= cut;
+    attributedValues ||= !!restoredValues;
     const block = [head, ...(lines.length ? lines : [cut?'（正文超出本次摘录范围）':'（空）'])].join('\n');
     parts.push(block);
     sheetBlocks.push({name:sheet.name,start:used,bodyStart:used+head.length+1,end:used+block.length,observed:lines.length>0||!cut});
     used += block.length + 2;
     if (used >= limit) { truncated = true; break; }
   }
-  return { text: parts.join('\n\n'), truncated, sheets: sheets.map(s => s.name), sheetBlocks };
+  return { text: parts.join('\n\n'), truncated, sheets: sheets.map(s => s.name), sheetBlocks, ...(attributedValues?{attributedValues:true}:{}) };
 }
 
 async function pptxText(read: (p: string) => Promise<string | undefined>): Promise<OfficeText> {
