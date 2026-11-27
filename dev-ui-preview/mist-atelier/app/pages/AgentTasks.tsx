@@ -3,8 +3,9 @@ import {XiaozhuMarkdown} from './modules/XiaozhuMarkdown';
 import {XiaozhuPhaseTimer} from './modules/XiaozhuPhaseTimer';
 import React from 'react';
 import { Bot, Copy, MessageSquare, Plus, RefreshCw, Zap } from 'lucide-react';
-import { Banner, Button, Card, CardBody, CardHeader, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, KeyValue, Pill, Select, Skeleton, TextArea, TextInput, useToast, type Column, type Tone } from '../../../../components/mist';
+import { Banner, Button, Card, CardBody, CardHeader, DataTable, Dialog, Drawer, EmptyState, Field, FilePreview, FormGrid, KeyValue, Pill, Select, Skeleton, TextArea, TextInput, useToast, type Column, type Tone } from '../../../../components/mist';
 import type { AgentTaskEvent, AgentTaskPage, AgentTaskView } from '../../../../server/src/shared/mistAgentTasks';
+import type { TaskAttachment } from '../../../../server/src/shared/mistTaskAttachments';
 import type { AgentIdentityView } from '../../../../server/src/shared/mistAgentIdentities';
 import { uiText, interfaceLocale } from '../../../../services/interfaceLanguage';
 import { mistApiRequest, useMistWorkspace } from '../runtime/workspace';
@@ -325,7 +326,7 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
     {(detail.waitingFor||detail.resumeAt||detail.wakeReason)&&<KeyValue items={[...(detail.waitingFor?[{label:uiText('等待资料'),value:detail.waitingFor.label}]:[]),...(detail.resumeAt?[{label:uiText(detail.waitingFor?'等待截止':'计划继续'),value:time(detail.resumeAt)}]:[]),...(detail.wakeReason?[{label:uiText('继续原因'),value:uiText(detail.wakeReason==='changed'?'资料已变化':'到达最晚时间')}]:[])]}/>}
     {detail.waitingFor?.link&&<Button onClick={openOriginal}>{uiText('查看原资料')}</Button>}
     {detail.instructions&&<div className="mist-col"><span className="mist-label">{uiText('任务内容')}</span><p className="mist-sub">{detail.instructions}</p></div>}
-    {detail.executionIssue&&<Banner tone="bad" title={uiText(detail.executionIssue.code==='model_response_invalid'?'模型响应无效':'模型暂不可用')}>{detail.executionIssue.retryAt?uiText('下次重试')+' '+time(detail.executionIssue.retryAt):undefined}</Banner>}{detail.checkpoint&&<Banner tone="ai" title={uiText('最近检查点')}>{detail.checkpoint}</Banner>}{detail.result&&<Card><CardHeader title={uiText('Agent执行报告')}/><CardBody><XiaozhuMarkdown text={detail.result} index={[]} onOpen={(view,id,target)=>nav.go(view,id,target)}/></CardBody></Card>}
+    {detail.executionIssue&&<Banner tone="bad" title={uiText(detail.executionIssue.code==='model_response_invalid'?'模型响应无效':'模型暂不可用')}>{detail.executionIssue.retryAt?uiText('下次重试')+' '+time(detail.executionIssue.retryAt):undefined}</Banner>}{detail.checkpoint&&<Banner tone="ai" title={uiText('最近检查点')}>{detail.checkpoint}</Banner>}{detail.result&&!contentRestricted(detail)&&<TaskReport key={detail.id} task={detail}/>}
     {(detail.questions??[]).map(q=><div className="mist-col" key={q.id}><span className="mist-label">{uiText(q.answeredAt?'Agent提问':'待补充资料')}</span><p className="mist-sub">{q.question}</p>{q.answer&&<><span className="mist-label">{uiText('本人答复')}</span><p className="mist-sub">{q.answer}</p></>}{!q.answeredAt&&detail.canControl&&['waiting_human','paused'].includes(detail.state)&&<Button onClick={()=>begin({kind:'answer',row:detail,questionId:q.id,answer:'',requestId:crypto.randomUUID()})}>{uiText('补充资料')}</Button>}</div>)}
     {detail.state==='waiting_human'&&detail.waitingProposalIds.length>0&&<Button onClick={()=>nav.go('cockpit')}>{uiText('查看待确认事项')}</Button>}
     <Button variant="quiet" icon={Copy} onClick={()=>void copy(detail.id)}>{uiText('复制任务编号')}</Button>
@@ -342,4 +343,32 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
    {credential&&<FormGrid><Field label={uiText('连接地址')} full><TextInput value={endpoint??''} readOnly/></Field><Field label={uiText('连接凭据')} full><TextInput type="password" value={credential.token} readOnly/></Field><KeyValue items={[{label:uiText('任务'),value:credential.item.name},{label:uiText('有效期至'),value:time(credential.item.expiresAt)}]}/></FormGrid>}
   </Dialog>
  </div>;
+}
+
+function TaskReport({ task }: { task: AgentTaskView }) {
+ const workspace = useMistWorkspace(), nav = useNav();
+ const [selection, setSelection] = React.useState<{ fileId: string; target?: number | string }>();
+ const files = task.attachments ?? [];
+ const index = files.findIndex(file => file.id === selection?.fileId);
+ const file = files[index];
+ React.useEffect(() => {
+  if (selection && !file) setSelection(undefined);
+ }, [selection, file]);
+
+ const open = (attachment: TaskAttachment, target?: number | string) => setSelection({ fileId: attachment.id, target });
+ return <>
+  <Card>
+   <CardHeader title={uiText('Agent执行报告')}/>
+   <CardBody>
+    <XiaozhuMarkdown text={task.result} index={[]} onOpen={(view,id,target)=>nav.go(view,id,target)}
+      attachments={files} attachmentReads={task.trail} onOpenAttachment={files.length ? open : undefined}/>
+   </CardBody>
+  </Card>
+  {file&&<FilePreview files={files} index={index}
+    initialPdfPage={typeof selection?.target==='number'?selection.target:undefined}
+    initialSheetName={typeof selection?.target==='string'?selection.target:undefined}
+    onIndex={next=>setSelection({fileId:files[next].id})} onClose={()=>setSelection(undefined)}
+    load={()=>workspace.readTaskAttachment(task.id,file)}
+    onDownload={()=>workspace.downloadTaskAttachment(task.id,file)}/>}
+ </>;
 }
