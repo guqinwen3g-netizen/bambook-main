@@ -68,3 +68,28 @@ it('does not call a mixed text/image PDF complete when a page has no extractable
  const r=await readFileTextWindow(scope,{name:'mixed.pdf',mimeType:'application/pdf'},contractPdf(3,2),8000);
  expect(r).toMatchObject({hasMore:false,complete:false,pagesWithoutText:[2]});expect(r.reason).toContain('2');
 });
+
+it('binds excerpts to their physical pages within each returned character slice',async()=>{
+ const bytes=contractPdf(23,22),file={name:'paged.pdf',mimeType:'application/pdf'};
+ const head=await readFileTextWindow(scope,file,bytes,1000);
+ expect(head.pageTextSpans?.map(span=>span.page)).toEqual([1,2,3,4,5]);
+ expect(head.pageTextSpans?.at(-1)?.end).toBe(head.text.length);
+ const continued=await readFileTextWindow(scope,file,bytes,8000,head.nextCursor);
+ expect(continued.pageTextSpans?.[0]).toMatchObject({page:5,start:0});
+ const tail=await readFileTextWindow(scope,file,bytes,8000,continued.nextCursor);
+ expect(tail.pageTextSpans?.map(span=>[span.page,tail.text.slice(span.start,span.end)])).toEqual([
+  [21,expect.stringContaining('Clause P21:')],
+  [23,expect.stringContaining('FINAL TERM')],
+ ]);
+ expect(tail.pagesWithoutText).toEqual([22]);
+ expect(tail.sourceHash).toBe(head.sourceHash);
+ const fileRef={id:scope.fileId,name:file.name};
+ const trail=platformTrail([head,continued,tail].map((result,index)=>({
+  id:String(index),at:'2026-11-26T00:00:00Z',
+  plan:{name:'bambook_file_text',arguments:{fileId:fileRef.id}},
+  result:{...result,file:fileRef},
+ })),[fileRef]);
+ expect(trail[0].taskAttachmentObservedPages).toEqual([1,2,3,4,5]);
+ expect(trail[1].taskAttachmentPage).toBe(5);
+ expect(trail[2].taskAttachmentObservedPages).toEqual([21,22,23]);
+});

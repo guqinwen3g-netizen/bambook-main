@@ -71,18 +71,19 @@ it('opens an explicitly cited checked PDF page and keeps ambiguous or unchecked 
  const text=[
   '**quote.pdf（1）** 第 23 页；`quote.pdf（2）` page 21。',
   'quote.pdf（1）第 21 至 23 页、quote.pdf（1）第 90 页。',
+  'quote.pdf（1）第 21 页、quote.pdf（1）第 22 页。',
   '报价.xlsx 第 21 页；quote.pdf 第 23 页。',
   'quote.pdf（1）：共 23 页；末页（第 23 页）载有标识。',
  ].join('\n\n');
  const attachmentReads=[
-  {at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:'a',taskAttachmentPageRange:{from:21,to:23}},
+  {at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:'a',taskAttachmentPageRange:{from:21,to:23},taskAttachmentObservedPages:[22,23]},
   {at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:'b',taskAttachmentPageRange:{from:21,to:21}},
  ];
  try{
   await act(async()=>root.render(<XiaozhuMarkdown text={text} index={[]} onOpen={vi.fn()} attachments={[first,second,sheet]} attachmentReads={attachmentReads} onOpenAttachment={preview}/>));
   const buttons=[...host.querySelectorAll('button')];
-  expect(buttons.map(x=>x.textContent)).toEqual(['quote.pdf（1）','quote.pdf（2）','quote.pdf（1）','quote.pdf（1）','报价.xlsx','quote.pdf（1）']);
+  expect(buttons.map(x=>x.textContent)).toEqual(['quote.pdf（1）','quote.pdf（2）','quote.pdf（1）','quote.pdf（1）','quote.pdf（1）','quote.pdf（1）','报价.xlsx','quote.pdf（1）']);
   await act(async()=>buttons.forEach(button=>button.click()));
-  expect(preview.mock.calls).toEqual([[first,23],[second,21],[first],[first],[sheet],[first,23]]);
+  expect(preview.mock.calls).toEqual([[first,23],[second,21],[first],[first],[first],[first,22],[sheet],[first,23]]);
  }finally{await act(async()=>root.unmount());host.remove();}
 });

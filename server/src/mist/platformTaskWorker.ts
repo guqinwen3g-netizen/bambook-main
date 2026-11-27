@@ -167,7 +167,7 @@ export class MistPlatformTaskWorker{
               const images=context.task.attachments?.some(file=>isTaskImage(file.name))?await this.repository.platformTaskImages(actor,job.workspaceId,renderedImages):undefined;
               const imageSources=images?.map(image=>image.name);
               const attachmentHandles=platformTaskAttachmentHandles(context.task.attachments);
-              const attachmentRules=attachmentHandles.size ? '\n本任务附件用 task.attachments 中的简短 id，例如 attachment_1。调用 bambook_file_text 时把对应附件的简短 id 原样填入 fileId；续读保留同一简短 id，不猜原件编号或借用其他附件的编号。报告引用 PDF 的明确单页时，将文件名或 reportLabel 紧接“第 N 页”（英文 page N），仅使用已核对的页。' : '';
+              const attachmentRules=attachmentHandles.size ? '\n本任务附件用 task.attachments 中的简短 id，例如 attachment_1。调用 bambook_file_text 时把对应附件的简短 id 原样填入 fileId；续读保留同一简短 id，不猜原件编号或借用其他附件的编号。PDF 的 pdfTextByPage 逐页对应原件；引用正文的明确单页时，以其中对应文字为准，文件名或 reportLabel 紧接“第 N 页”（英文 page N）。只有页段时，不推断段落属于哪一页。pagesWithoutText 只用于说明哪些页无可提取文字。' : '';
               const labels=taskAttachmentLabels(context.task.attachments);
               const attachments=context.task.attachments?.map((file,index)=>labels[index]===file.name?file:{...file,reportLabel:labels[index]});
               const identifierRules=attachmentHandles.size

@@ -26,6 +26,8 @@ export type AgentTaskTrailItem = {
   taskAttachmentPage?: number;
   /** Checked PDF window for this original, including pages with no readable text. */
   taskAttachmentPageRange?: {from:number;to:number};
+  /** Pages evidenced by this returned slice, including confirmed pages without text. */
+  taskAttachmentObservedPages?: number[];
   ref?: AgentTaskTrailSource;
   refs?: AgentTaskTrailSource[];
 };

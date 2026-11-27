@@ -101,8 +101,14 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
           : [];
         const taskAttachmentPageRange=taskAttachmentId&&pageRange
           ? {from:pages.pageFrom,to:pages.pageTo} : undefined;
-        const taskAttachmentPage: number | undefined = taskAttachmentId && pageRange
-          ? (missingPages.length === 1 ? missingPages[0] : pages.pageFrom) : undefined;
+        const observedPages = taskAttachmentPageRange && Array.isArray(result.pageTextSpans)
+          ? [...new Set<number>([
+            ...result.pageTextSpans.map((span: {page?:unknown})=>span?.page)
+              .filter((page:unknown)=>typeof page==='number'&&Number.isSafeInteger(page)&&page>=pages.pageFrom&&page<=pages.pageTo),
+            ...missingPages,
+          ])].sort((a,b)=>a-b).slice(0,20) : undefined;
+        const taskAttachmentPage: number | undefined = taskAttachmentPageRange
+          ? (missingPages.length === 1 ? missingPages[0] : observedPages?.[0] ?? pages.pageFrom) : undefined;
         const partialText = pages?.textLimited === true || pages?.start > 0;
         const rangeDetail = pageRange ? partialText
           ? `${pageRange}的部分正文` : `提取范围${pageRange}` : '';
@@ -115,7 +121,7 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
           : failed ? text(result?.reason, 120)
           : result?.hasMore ? '本次读取部分正文，还有后续内容'
           : result?.complete ? '已提取可读取正文' : '';
-        out.push({ ...base, kind: 'read', label: result?.error===true?`附件读取失败${file?' '+file:''}`:file?`读取附件 ${file}`:'读取附件正文', ...(detail ? { detail } : {}), ...(taskAttachmentId ? { taskAttachmentId } : {}), ...(taskAttachmentPage !== undefined ? { taskAttachmentPage, taskAttachmentPageRange } : {}) });
+        out.push({ ...base, kind: 'read', label: result?.error===true?`附件读取失败${file?' '+file:''}`:file?`读取附件 ${file}`:'读取附件正文', ...(detail ? { detail } : {}), ...(taskAttachmentId ? { taskAttachmentId } : {}), ...(taskAttachmentPage !== undefined ? { taskAttachmentPage, taskAttachmentPageRange } : {}), ...(observedPages ? {taskAttachmentObservedPages:observedPages} : {}) });
         break;
       }
       case 'bambook_mail_receiving': out.push({ ...base, kind: 'read', label: '查看邮箱收件状态' }); break;
