@@ -132,6 +132,22 @@ it('opens the failed drawer question as an unsent read-only draft without releas
   const again=await open();
   expect(again.textContent).not.toContain('继续核对未完成的问题');
 });
+it('moves the unsent drawer draft to the full read-only route without posting it', async () => {
+  await mount();
+  const drawer=await open();
+  await click(getByRole(drawer,'button',{name:'引用当前来源：SO-ONE'}));
+  const field=getByRole(drawer,'textbox',{name:'输入问题'}) as HTMLTextAreaElement;
+  await act(async()=>{
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,'尚未发送的订单问题');
+    field.dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  await click(getByRole(drawer,'button',{name:'完整版'}));
+  expect(new URLSearchParams(location.search).get('section')).toBe('read-only');
+  expect(bridge.fetch).not.toHaveBeenCalled();
+  const again=await open();
+  expect((getByRole(again,'textbox',{name:'输入问题'}) as HTMLTextAreaElement).value).toBe('');
+});
+
 it('keeps the failed question in the drawer when its source is no longer visible', async () => {
   bridge.fetch.mockResolvedValueOnce(response({error:{message:'模拟查询失败'}},false));
   await mount();
