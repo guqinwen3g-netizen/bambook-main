@@ -458,6 +458,44 @@ it('creates an explicit platform task without issuing any external credential',a
 it('does not offer a platform task as ready when the runtime is unavailable, while retaining external creation',async()=>{
  act(paint);await flush();await click(getByRole(host,'button',{name:'新建任务'}));await act(async()=>fireEvent.change(getByLabelText(document.body,/执行方式/,{selector:'select'}),{target:{value:'platform'}}));expect(getByText(document.body,'平台执行暂不可用')).toBeTruthy();expect((getByRole(document.body,'button',{name:'安排任务',exact:true}) as HTMLButtonElement).disabled).toBe(true);
 });
+it('links verified report references and records the drawer route before leaving a task opened from the list', async () => {
+ const report={...row(),state:'succeeded',result:'核对 SO-1200、PO-1200、SO-8888、重复编号。',canControl:false,
+  trail:[
+   {kind:'read',ref:{type:'order',id:'order-id',label:'SO-1200',view:'orders/detail'}},
+   {kind:'read',refs:[
+    {type:'purchase',id:'purchase-id',label:'PO-1200',view:'procurement',section:'supplies'},
+    {type:'order',id:'a',label:'重复编号',view:'orders/detail'},
+    {type:'order',id:'b',label:'重复编号',view:'orders/detail'},
+   ]},
+   {kind:'read',failed:true,ref:{type:'order',id:'failed',label:'SO-8888',view:'orders/detail'}},
+  ]};
+ seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:report}
+  :url.includes('agent-identities')?{items:[identity()]}:url.includes('/history')?{items:[],nextCursor:null}:{items:[report],nextCursor:null}));
+ act(paint);await flush();await click(getByText(host,report.name));
+ const dialog=getByRole(document.body,'dialog',{name:report.name});
+ expect(queryByRole(dialog,'button',{name:'重复编号'})).toBeNull();
+ expect(queryByRole(dialog,'button',{name:'SO-8888'})).toBeNull();
+ expect(getByRole(dialog,'button',{name:'SO-1200'})).toBeTruthy();
+ await click(getByRole(dialog,'button',{name:'PO-1200'}));
+ expect(seam.go.mock.calls).toEqual([
+  ['assistant','task',{section:'tasks'}],
+  ['procurement','purchase-id',{section:'supplies'}],
+ ]);
+});
+
+it('closes a routed report when browser history returns to the task list', async () => {
+ const report={...row(),state:'succeeded',result:'已核对',canControl:false};
+ seam.routeId=report.id;
+ seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:report}
+  :url.includes('agent-identities')?{items:[identity()]}:url.endsWith('/history')?{items:[],nextCursor:null}:{items:[report],nextCursor:null}));
+ act(paint);await flush();
+ expect(getByRole(document.body,'dialog',{name:report.name})).toBeTruthy();
+ seam.routeId='';
+ act(paint);await flush();
+ expect(queryByRole(document.body,'dialog',{name:report.name})).toBeNull();
+ expect(seam.go).not.toHaveBeenCalled();
+});
+
 it('opens the exact attachment source version from a formatted task report',async()=>{
  const finished={...row(),state:'succeeded',result:'[来源版本](bambook://open?view=development/detail&id=dev&versionId=old)\n\n| 规格 | 数量 |\n| --- | --- |\n| A | 1200 |',canControl:false};
  seam.routeId='task';seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:finished}:url.includes('/history')?{items:[],nextCursor:null}:url.includes('agent-identities')?{items:[identity()]}:{items:[finished],nextCursor:null}));
