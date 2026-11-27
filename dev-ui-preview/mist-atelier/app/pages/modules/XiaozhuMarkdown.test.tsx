@@ -111,3 +111,32 @@ it('opens exact observed worksheet names and keeps unread or other-file tabs at 
   expect(preview.mock.calls).toEqual([[first,'核对结果'],[first,'Details'],[first],[second]]);
  }finally{await act(async()=>root.unmount());host.remove();}
 });
+
+
+it('links evidenced pages inside an unambiguous PDF section without guessing for the section heading',async()=>{
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
+ const first={id:'first',name:'quote.pdf',mimeType:'application/pdf',size:100};
+ const second={...first,id:'second'};
+ const text=[
+  '**quote.pdf（1）**',
+  '- 第 23 页有交期。\n- **第 22 页**无法核对。\n- 第 22 页至第 23 页不是单页。\n- 第 21 页未核实。\n- 第 23 页见 [另一原件](https://example.invalid/other.pdf)。',
+  '### quote.pdf（2）',
+  '第 21 页有日期。',
+  '### 其他资料',
+  '- 第 23 页与上一个原件无关。',
+  '**quote.pdf**',
+  '- 第 23 页无法区分原件。',
+ ].join('\n\n');
+ const attachmentReads=[
+  {at:'',kind:'read' as const,label:'已读',taskAttachmentId:'first',taskAttachmentObservedPages:[22,23],taskAttachmentPageRange:{from:20,to:23}},
+  {at:'',kind:'read' as const,label:'已读',taskAttachmentId:'second',taskAttachmentObservedPages:[21]},
+ ];
+ try{
+  await act(async()=>root.render(<XiaozhuMarkdown text={text} index={[]} onOpen={vi.fn()} attachments={[first,second]} attachmentReads={attachmentReads} onOpenAttachment={preview}/>));
+  const buttons=[...host.querySelectorAll('button')];
+  expect(buttons.map(button=>button.textContent)).toEqual(['quote.pdf（1）','第 23 页','第 22 页','quote.pdf（2）','第 21 页']);
+  await act(async()=>buttons.forEach(button=>button.click()));
+  expect(preview.mock.calls).toEqual([[first],[first,23],[first,22],[second],[second,21]]);
+ }finally{await act(async()=>root.unmount());host.remove();}
+});

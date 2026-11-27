@@ -2,7 +2,7 @@
 import React from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { Link, Root, Text } from 'mdast';
+import type { Link, Paragraph, Root, Text } from 'mdast';
 import type { Node, Parent } from 'unist';
 import { ui } from '../../../../../services/interfaceLanguage';
 import { escapeSourceLabel, linkRecords, type RecordRef } from '../../runtime/xiaozhuRecords';
@@ -53,14 +53,30 @@ function inlineTextStart(node:Node|undefined):string {
   return '';
 }
 
+const PDF_PAGE_REFERENCE = /^(?:第[ \t]*([1-9]\d*)[ \t]*页|page[ \t]+([1-9]\d*)\b)/i;
+
+function singleLabel(node: Node): string {
+  if ('value' in node && (node.type === 'text' || node.type === 'inlineCode') && typeof node.value === 'string') return node.value;
+  if ('children' in node && Array.isArray(node.children) && node.children.length === 1
+    && ['heading', 'paragraph', 'strong', 'emphasis'].includes(node.type)) return singleLabel(node.children[0]);
+  return '';
+}
+
+function mentionsAnotherSource(node: Node): boolean {
+  if (node.type === 'link' || node.type === 'linkReference') return true;
+  if ('value' in node && typeof node.value === 'string') return /\.pdf(?![a-z0-9_-])/i.test(node.value);
+  return 'children' in node && Array.isArray(node.children) && node.children.some(mentionsAnotherSource);
+}
+
 function citedPdfPage(suffix:string,file:TaskAttachment,reads:readonly AgentTaskTrailItem[]):number|undefined {
   if(file.mimeType!=='application/pdf'&&!/\.pdf$/i.test(file.name))return;
   const scoped=suffix.replace(/^[ \t]*[：:]?[ \t]*/,'');
-  const direct=/^[（(]?[ \t]*(?:第[ \t]*([1-9]\d*)[ \t]*页|page[ \t]+([1-9]\d*)\b)/i.exec(scoped);
+  const prefix = /^[（(]?[ \t]*/.exec(scoped)?.[0].length ?? 0;
+  const direct = PDF_PAGE_REFERENCE.exec(scoped.slice(prefix));
   const lastPage=direct?null:/^共[ \t]*([1-9]\d*)[ \t]*页[；;，,][ \t]*(?:末页|最后一页)[ \t]*[（(][ \t]*第[ \t]*([1-9]\d*)[ \t]*页[ \t]*[）)]/.exec(scoped);
   const citation=direct??lastPage;
   if(!citation||lastPage&&lastPage[1]!==lastPage[2])return;
-  const rest=scoped.slice(citation[0].length);
+  const rest=scoped.slice(citation[0].length+(direct?prefix:0));
   if(/^[ \t]*[）)]?[ \t]*(?:至|到|[-~–—/,，、]|和|或|及|and\b|to\b)[ \t]*(?:第[ \t]*|pages?[ \t]+)?\d/i.test(rest))return;
   const page=Number(lastPage?lastPage[2]:citation[1]??citation[2]);
   if(!Number.isSafeInteger(page))return;
@@ -90,8 +106,7 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
     byName.set(label,index);
     aliases.set(label,index);
   });
-  const toAttachment=(index:number,child:Link['children'][number],following:string):Link=>{
-    const page=citedPdfPage(following,files[index],reads);
+  const toAttachment=(index:number,child:Link['children'][number],following:string,page=citedPdfPage(following,files[index],reads)):Link=>{
     const sheet=citedSheet(following,files[index],reads);
     return {type:'link',url:ATTACHMENT_LINK,data:{hProperties:{'data-task-attachment-index':index,
       ...(page!==undefined?{'data-task-attachment-page':page}:{}),
@@ -99,10 +114,40 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
   };
   const names = [...byName.keys()].sort((a, b) => b.length - a.length);
   const pattern = new RegExp('(?<![\\p{L}\\p{N}_./\\\\-])(' + names.map(escapeSourceLabel).join('|') + ')(?:(?=第[ \\t]*[1-9])|(?![\\p{L}\\p{N}_/\\\\-]|\\.[\\p{L}\\p{N}_]))', 'gu');
+  const observedReads = reads.filter(read => read.taskAttachmentObservedPages !== undefined);
+  const linkSectionPage = (paragraph: Paragraph, index: number) => {
+    if (mentionsAnotherSource(paragraph)) return;
+    const first = paragraph.children[0];
+    const container = first?.type === 'strong' || first?.type === 'emphasis' ? first : paragraph;
+    const start = container.children[0];
+    if (start?.type !== 'text') return;
+    const citation = PDF_PAGE_REFERENCE.exec(start.value)?.[0];
+    if (!citation) return;
+    const next = inlineTextStart(container.children[1]) || (container !== paragraph ? inlineTextStart(paragraph.children[1]) : '');
+    const page = citedPdfPage(start.value+next, files[index], observedReads);
+    if (page === undefined) return;
+    const remainder = start.value.slice(citation.length);
+    container.children.splice(0,1,toAttachment(index,{type:'text',value:citation},'',page),
+      ...(remainder ? [{type:'text' as const,value:remainder}] : []));
+  };
   return {
     names,
     plugin: () => (tree: Root) => {
       if (!names.length) return;
+      for (let position=1;position<tree.children.length;position++) {
+        const heading = tree.children[position-1];
+        if (heading.type !== 'heading' && heading.type !== 'paragraph') continue;
+        const index = byName.get(singleLabel(heading).trim().replace(/[：:]$/,'').trim());
+        if (index === undefined) continue;
+        const details = tree.children[position];
+        if (details.type === 'paragraph') linkSectionPage(details,index);
+        if (details.type === 'list') {
+          for (const item of details.children) {
+            const paragraph = item.children[0];
+            if (paragraph?.type === 'paragraph') linkSectionPage(paragraph,index);
+          }
+        }
+      }
       const visit = (parent: Parent, following='') => {
         const children=parent.children;
         parent.children = children.flatMap<Node>((child,position) => {
