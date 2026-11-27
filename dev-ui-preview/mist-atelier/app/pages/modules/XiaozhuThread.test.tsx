@@ -48,6 +48,25 @@ it('keeps an unreceived confirmation in its original task and offers a read-only
  expect(host.textContent).toContain('已停止');
 });
 
+it('summarizes confirmed sources while the model waits without counting repeated or failed reads',async()=>{
+ const record={type:'order',id:'o1',label:'SO-1'};
+ const completed={at:'',kind:'read' as const,label:'读取订单 SO-1',completed:true,ref:record};
+ const file={...completed,label:'读取附件 报价.pdf',ref:undefined,taskAttachmentId:'pdf'};
+ const waiting=task({executionStage:'model',trail:[
+  completed,{...completed,ref:undefined,refs:[record,{type:'order',id:'o2',label:'SO-2'}]},
+  file,{...file,detail:'读取第 21 至 23 页'},{...file,taskAttachmentId:'unavailable',failed:true},
+  {...file,taskAttachmentId:'pending',completed:false},
+ ]});
+ await paint([waiting],{...fns(),workLog:{expanded:new Map([['t1',false]]),setExpanded:vi.fn()}});
+ expect(getByRole(host,'status').textContent).toBe('正在等待模型');
+ expect(host.textContent).toContain('已读取 2 条业务记录 · 已摘录 1 份附件');
+ expect(host.querySelector('.mist-xz-steps')).toBeNull();
+ await paint([waiting],{...fns(),staleProgressIds:new Set(['t1'])});
+ expect(host.textContent).not.toContain('已读取 2 条业务记录');
+ await paint([task({...waiting,state:'succeeded'})]);
+ expect(host.textContent).not.toContain('已摘录 1 份附件');
+});
+
 it('offers a stop status check on the same task without invoking stop again',async()=>{
  const waiting=task({name:'原任务',state:'waiting_time'});
  const onCheckStop=vi.fn(),f=fns();

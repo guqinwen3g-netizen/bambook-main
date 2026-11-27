@@ -602,6 +602,8 @@ export const reviewedEnglish: Record<string, string> = {
   '刷新待确认事项':'Refresh pending confirmations',
   '核对停止结果':'Check stop result',
   '核对回答结果':'Check answer result',
+  '已读取 {0} 条业务记录':'{0} business record(s) read',
+  '已摘录 {0} 份附件':'Excerpts from {0} attachment(s)',
   '提交结果未确认，请重试发送':'Submission not confirmed. Send again to retry.',
   '提交结果待核对':'Submission confirmation pending',
   '核对提交结果':'Check submission',

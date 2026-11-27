@@ -5,7 +5,7 @@ import { AIBadge, AssistantEyes, Button, Icon, IconButton, Pill, type Tone } fro
 import type { AgentTaskTrailItem, AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
 import { taskAttachmentLabels, type TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
 import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../../server/src/shared/mistAgentProposals';
-import { uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
+import { ui, uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { activeModelFallbackSince } from '../../runtime/xiaozhuActivity';
 import { COWORK_ACTIVE, splitRequest, type TaskControlState } from '../../runtime/xiaozhuCowork';
 import type { RecordRef } from '../../runtime/xiaozhuRecords';
@@ -35,6 +35,20 @@ const clock = (iso: string) => new Date(iso).toLocaleTimeString(interfaceLocale(
 const VIEW: Record<string, string> = { order: 'orders/detail', customer: 'crm', development: 'development/detail', purchase: 'procurement', shipment: 'shipments', invoice: 'invoices', quotation: 'quotations', supplier: 'suppliers', email: 'emails', production: 'production-board', risk: 'risks', claim: 'claims' };
 
 type OpenRecord = (view: string, id: string, target?: import('../../nav').RouteTarget) => void;
+function sourceSummary(items:readonly AgentTaskTrailItem[]):string {
+  const records=new Set<string>(), attachments=new Set<string>();
+  for(const item of items){
+    if(item.kind!=='read'||item.completed!==true||item.failed)continue;
+    if(item.ref)records.add(JSON.stringify([item.ref.type,item.ref.id]));
+    for(const ref of item.refs??[])records.add(JSON.stringify([ref.type,ref.id]));
+    if(item.taskAttachmentId)attachments.add(item.taskAttachmentId);
+  }
+  return [
+    records.size ? ui`已读取 ${records.size} 条业务记录` : '',
+    attachments.size ? ui`已摘录 ${attachments.size} 份附件` : '',
+  ].filter(Boolean).join(' · ');
+}
+
 function Trail({ task, items, active, activeLabel, since, retryAt, recovering, workLog, onOpen, onPreviewAttachment }: {
   task: AgentTaskView; items: AgentTaskTrailItem[]; active: boolean; activeLabel?: string; since?: string; retryAt?: string; recovering?: boolean; onOpen: OpenRecord;
   workLog?: ThreadActions['workLog'];
@@ -43,11 +57,14 @@ function Trail({ task, items, active, activeLabel, since, retryAt, recovering, w
   const [expanded, setExpanded] = React.useState<boolean>();
   const open = workLog?.expanded.get(task.id) ?? expanded ?? active;
   const label = uiText(activeLabel ?? '正在办理');
+  const summary = active && !recovering && task.state==='running' && task.executionStage==='model'
+    ? sourceSummary(items) : '';
   return <div className="mist-xz-trail" data-open={open || undefined}>
     {active && <div className="mist-xz-progress">
       <span role="status" className={recovering?undefined:'mist-xz-shimmer'}>{label}</span>
       {retryAt ? <XiaozhuPhaseTimer at={retryAt} countdown /> : since && <XiaozhuPhaseTimer at={since} />}
     </div>}
+    {summary && <p className="mist-xz-note" aria-live="polite">{summary}</p>}
     {!!items.length && <button type="button" className="mist-xz-trail-h" aria-expanded={open} onClick={() => workLog ? workLog.setExpanded(task.id, !open) : setExpanded(!open)}>
       {uiText('办理过程')}<ChevronRight size={13} />
     </button>}
