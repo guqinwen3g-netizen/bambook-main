@@ -1013,7 +1013,7 @@ it('clears retained conversation when the authenticated session changes outside 
   expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('');
   expect(host.textContent).not.toContain('Private account-A question');
 });
-beforeEach(()=>{mock.api.mockReset();mock.api.mockImplementation(async(url:string,init?:RequestInit)=>{if(url.endsWith('/assistant/history-access'))return {allowedTokens:JSON.parse(String(init?.body)).tokens};if(url.includes('/agent-identities'))return{items:[]};if(url.includes('/agent-task-capabilities'))return{platformAvailable:false};if(url.endsWith('/agent-tasks'))return{items:[],nextCursor:null};throw new Error('unexpected task API');});(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;sessionStorage.clear();let i=0;const state=createMistState({id:()=>`assistant-ui-${++i}`,now:'2026-10-13T00:00:00Z',actorName:'Test'},'empty');state.orders.push({id:'order',code:'SO-SELECTED',customer:'Fixture',state:'Open',amount:10,currency:'USD'} as any);mock.workspace={state,workspace:{id:'workspace',name:'Test workspace',revision:1},error:'',loading:false,saving:false,pending:null,refresh:vi.fn(),run:vi.fn()};mock.sessionKey='session-a';mock.readOrders=true;go.mockReset();mock.fetch.mockReset();vi.stubGlobal('fetch',mock.fetch);});
+beforeEach(()=>{mock.api.mockReset();mock.api.mockImplementation(async(url:string,init?:RequestInit)=>{if(url.endsWith('/assistant/history-access'))return {allowedTokens:JSON.parse(String(init?.body)).tokens};if(url.includes('/agent-identities'))return{items:[]};if(url.includes('/agent-task-capabilities'))return{platformAvailable:false};if(url.endsWith('/agent-tasks'))return{items:[],nextCursor:null};throw new Error('unexpected task API');});(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;sessionStorage.clear();let i=0;const state=createMistState({id:()=>`assistant-ui-${++i}`,now:'2026-10-13T00:00:00Z',actorName:'Test'},'empty');state.orders.push({id:'order',code:'SO-SELECTED',customer:'Fixture',state:'Open',amount:10,currency:'USD'} as any);mock.workspace={state,workspace:{id:'workspace',name:'Test workspace',revision:1},error:'',loading:false,saving:false,pending:null,refresh:vi.fn(async()=>{}),run:vi.fn()};mock.sessionKey='session-a';mock.readOrders=true;go.mockReset();mock.fetch.mockReset();vi.stubGlobal('fetch',mock.fetch);});
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();vi.unstubAllGlobals();});
 async function mount(){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(view()));}
 const button=(name:string)=>[...document.querySelectorAll('button')].find(b=>b.textContent?.trim()===name||b.getAttribute('aria-label')===name) as HTMLButtonElement|undefined;
@@ -1136,6 +1136,7 @@ it('answers a direct status inquiry from the existing task without submitting a 
   expect(mock.api.mock.calls.filter(([,opts])=>opts?.method==='POST')).toHaveLength(0);
   expect(mock.api.mock.calls.some(([url])=>url.endsWith('/agent-tasks/existing-task'))).toBe(true);
   expect(host.textContent).toContain('当前任务 · 待我确认');
+  expect(mock.workspace.refresh).toHaveBeenCalledTimes(1);
   expect(field.value).toBe('');
 });
 
