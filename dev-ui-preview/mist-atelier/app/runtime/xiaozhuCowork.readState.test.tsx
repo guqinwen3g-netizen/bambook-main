@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import React,{act} from 'react';
+import {webcrypto} from 'node:crypto';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,expect,it,vi} from 'vitest';
 const api=vi.hoisted(()=>vi.fn());
 vi.mock('./workspace',()=>({mistApiRequest:(...args:any[])=>api(...args)}));
 import {useXiaozhuCowork} from './xiaozhuCowork';
+import {readTaskControls} from './xiaozhuControlRequests';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let root:Root|undefined,host:HTMLElement,channel:ReturnType<typeof useXiaozhuCowork>;
 const task={id:'task',identityId:'identity',executor:'platform',state:'succeeded',instructions:'原业务核对',result:'已完成',createdAt:'2026-11-17T04:00:00Z',updatedAt:'2026-11-17T04:01:00Z'};
@@ -117,6 +119,47 @@ it('reads the original submitted answer after a lost receipt without sending a n
  expect(channel.controls.task?.answerQuestionToCheck).toBeUndefined();
  expect(channel.controls.task?.error).toBeFalsy();
  expect(api.mock.calls.filter(([url])=>url.endsWith('/task/answer'))).toHaveLength(1);
+});
+
+it('keeps the exact answer request after a fresh page without storing the answer',async()=>{
+ const storageScope='["test-operator","workspace"]';
+ const asking={...task,state:'waiting_human',version:2,canControl:true,questions:[{id:'q1',question:'请给交期'}]};
+ const answer='只在本轮提交的模拟答复';
+ const resolved={...asking,state:'queued',version:3,questions:[{...asking.questions[0],answer,answeredAt:task.updatedAt}]};
+ const posted:unknown[]=[];
+ function DurableView({session}:{session:string}){
+  const saved=React.useMemo(()=>readTaskControls(storageScope),[session]);
+  channel=useXiaozhuCowork('workspace',session,true,undefined,undefined,saved,storageScope);
+  return <div/>;
+ }
+ vi.stubGlobal('crypto',webcrypto);
+ try{
+  api.mockImplementation(async(url:string,init?:RequestInit)=>{
+   if(url.endsWith('/task/answer')){
+    posted.push(JSON.parse(String(init?.body)));
+    if(posted.length===1)throw Object.assign(new Error('回执断开'),{status:0});
+    return {item:resolved};
+   }
+   if(url.endsWith('/task'))return {item:asking};
+   if(url.endsWith('/agent-tasks'))return {items:[asking],nextCursor:null};
+   return loaded(url);
+  });
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  await act(async()=>root!.render(<DurableView key="first" session="first"/>));
+  await act(async()=>{await channel.answer(channel.tasks[0],'q1',answer);});
+  expect(readTaskControls(storageScope).get('task')).toMatchObject({action:'answer',questionId:'q1',fingerprint:expect.stringMatching(/^[a-f0-9]{64}$/)});
+  expect(sessionStorage.getItem('mist.xiaozhu.controls:'+storageScope)).not.toContain(answer);
+  expect(readTaskControls('["another-operator","workspace"]').size).toBe(0);
+  await act(async()=>root!.render(<DurableView key="second" session="second"/>));
+  expect(channel.controls.task?.answerQuestionToCheck).toBe('q1');
+  await act(async()=>{await channel.answer(channel.tasks[0],'q1',answer);});
+  expect(posted).toHaveLength(2);
+  expect(posted[1]).toEqual(posted[0]);
+  expect(readTaskControls(storageScope).size).toBe(0);
+ }finally{
+  sessionStorage.removeItem('mist.xiaozhu.controls:'+storageScope);
+  vi.unstubAllGlobals();
+ }
 });
 
 it('does not keep an unconfirmed answer warning on a newer task question',async()=>{

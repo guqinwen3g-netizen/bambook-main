@@ -184,7 +184,7 @@ export function AssistantPage(){
   const w=usePlatform(),[kind,setKind]=React.useState('orders'),[query,setQuery]=React.useState(''),[editor,setEditor]=useRouteDraft<ModuleEditorSpec|null>(null);
   const scope=w.session.sessionKey+':'+(w.workspace?.id??'');
   const conversation=useAssistantConversation(scope);
-  const {messages,setMessages,setFiles,setAttachmentRefs,inactiveDrafts,switchDraft,clearDraft,answerDrafts,setAnswerDraft,discardAnswerDrafts,taskControlRequests,workLogExpanded,setWorkLogExpanded}=conversation;
+  const {messages,setMessages,setFiles,setAttachmentRefs,inactiveDrafts,switchDraft,clearDraft,answerDrafts,setAnswerDraft,discardAnswerDrafts,taskControlRequests,controlStorageScope,workLogExpanded,setWorkLogExpanded}=conversation;
   const question=readOnlyRoute?conversation.readOnlyQuestion:conversation.question;
   const setQuestion=readOnlyRoute?conversation.setReadOnlyQuestion:conversation.setQuestion;
   const selected=readOnlyRoute?conversation.readOnlySelected:conversation.selected;
@@ -257,7 +257,7 @@ export function AssistantPage(){
     if(!withinAttachmentLimits([...files,...next]))return;
     setError('');setAttachmentRefs(next);if(!picker)field.current?.focus();
   };
-  const cowork=useXiaozhuCowork(w.workspace?.id,scope,canChat&&!readOnlyRoute,conversationId,originTaskId,taskControlRequests);
+  const cowork=useXiaozhuCowork(w.workspace?.id,scope,canChat&&!readOnlyRoute,conversationId,originTaskId,taskControlRequests,controlStorageScope);
   React.useEffect(()=>{
     if(!answerDrafts.size)return;
     const tasks=new Map(cowork.all.map(task=>[task.id,task]));

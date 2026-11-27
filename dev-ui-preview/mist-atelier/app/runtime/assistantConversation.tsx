@@ -1,4 +1,5 @@
 import React from 'react';
+import { readTaskControls } from './xiaozhuControlRequests';
 import { TASK_ATTACHMENT_COUNT, type TaskAttachment, type TaskAttachmentRef } from '../../../../server/src/shared/mistTaskAttachments';
 
 export type AssistantReply = {
@@ -9,8 +10,6 @@ export type AssistantReply = {
 export type AssistantAttachmentRef = TaskAttachmentRef & Pick<TaskAttachment, 'name' | 'size'> & { needsVerification?: true };
 type TaskAnswerDraft = {taskId:string;questionId:string;text:string};
 export const taskAnswerDraftKey=(taskId:string,questionId:string)=>JSON.stringify([taskId,questionId]);
-export type TaskControlIntent = {action:'answer';questionId:string;answer:string} | {action:'cancel'};
-export type TaskControlRequest = TaskControlIntent & {version:number;key:string;requestId:string};
 type ComposerDraft = {
   question: string;
   selected: Array<{ id: string; label: string }>;
@@ -46,9 +45,9 @@ function load(scope: string): Conversation {
 }
 function save(scope: string, { question, selected, messages, attachmentRefs }: Conversation) { try { if (typeof sessionStorage !== 'undefined' && scope) sessionStorage.setItem(KEY(scope), JSON.stringify({ question, selected, messages, attachmentRefs: attachmentRefs.map(({taskId,fileId})=>({taskId,fileId})) })); } catch { /* storage full or blocked: keep in memory only */ } }
 
-function useConversationState(scope: string) {
+function useConversationState(scope: string, controlStorageScope?: string) {
   const [entry, setEntry] = React.useState(() => ({ scope, value: load(scope) }));
-  const taskControlRequests=React.useMemo(()=>new Map<string,TaskControlRequest>(),[scope]);
+  const taskControlRequests=React.useMemo(()=>readTaskControls(controlStorageScope??''),[scope,controlStorageScope]);
   React.useEffect(() => { if (entry.scope === scope) save(scope, entry.value); }, [entry, scope]);
   const live = React.useRef(scope);
   live.current = scope;
@@ -109,14 +108,14 @@ function useConversationState(scope: string) {
       return { scope, value: { ...previous.value, inactiveDrafts } };
     });
   }, [scope]);
-  return { scope, ...(entry.scope === scope ? entry.value : fresh), setQuestion, setSelected, setMessages, setFiles, setAttachmentRefs, switchDraft, clearDraft,setAnswerDraft,discardAnswerDrafts,taskControlRequests,setWorkLogExpanded,setReadOnlyQuestion,setReadOnlySelected };
+  return { scope, ...(entry.scope === scope ? entry.value : fresh), setQuestion, setSelected, setMessages, setFiles, setAttachmentRefs, switchDraft, clearDraft,setAnswerDraft,discardAnswerDrafts,taskControlRequests,controlStorageScope,setWorkLogExpanded,setReadOnlyQuestion,setReadOnlySelected };
 }
 
 const Context = React.createContext<ReturnType<typeof useConversationState> | null>(null);
 
 /** The active draft is tab/account/company scoped. Local file bytes and drafts in inactive threads stay in memory. */
-export function AssistantConversationProvider({ scope, children }: { scope: string; children: React.ReactNode }) {
-  const value = useConversationState(scope);
+export function AssistantConversationProvider({ scope, controlStorageScope, children }: { scope: string; controlStorageScope?: string; children: React.ReactNode }) {
+  const value = useConversationState(scope,controlStorageScope);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
