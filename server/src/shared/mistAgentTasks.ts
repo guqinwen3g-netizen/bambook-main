@@ -24,6 +24,8 @@ export type AgentTaskTrailItem = {
   taskAttachmentId?: string;
   /** A PDF page from the same authorized extraction window. */
   taskAttachmentPage?: number;
+  /** Checked PDF window for this original, including pages with no readable text. */
+  taskAttachmentPageRange?: {from:number;to:number};
   ref?: AgentTaskTrailSource;
   refs?: AgentTaskTrailSource[];
 };
