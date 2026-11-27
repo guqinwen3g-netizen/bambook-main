@@ -1,7 +1,8 @@
 import {agentSource} from '../runtime/agentSource';
 import {XiaozhuMarkdown} from './modules/XiaozhuMarkdown';
+import {XiaozhuPhaseTimer} from './modules/XiaozhuPhaseTimer';
 import React from 'react';
-import { Bot, Copy, Plus, RefreshCw } from 'lucide-react';
+import { Bot, Copy, MessageSquare, Plus, RefreshCw, Zap } from 'lucide-react';
 import { Banner, Button, Card, CardBody, CardHeader, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, KeyValue, Pill, Select, Skeleton, TextArea, TextInput, useToast, type Column, type Tone } from '../../../../components/mist';
 import type { AgentTaskEvent, AgentTaskPage, AgentTaskView } from '../../../../server/src/shared/mistAgentTasks';
 import type { AgentIdentityView } from '../../../../server/src/shared/mistAgentIdentities';
@@ -12,16 +13,43 @@ import { useNav } from '../nav';
 import { agentConnectionEndpoint } from './AgentConnections';
 import { FailureNotice } from '../runtime/FailureNotice';
 import { withRequestDeadline } from '../runtime/requestDeadline';
+import { activeModelFallbackSince } from '../runtime/xiaozhuActivity';
 
 const LABEL:Record<AgentTaskView['state'],string>={queued:'待领取',running:'执行中',waiting_time:'等待继续',waiting_condition:'等待资料变化',waiting_human:'待本人确认',paused:'已暂停',succeeded:'执行结束',failed:'执行失败',cancelled:'已停止',expired:'已到期',budget_exhausted:'达到限额',access_changed:'权限已变化'};
 const ACTION:Record<string,string>={created:'安排任务',connected:'签发任务连接',claimed:'执行器领取',checkpoint:'保存检查点',waiting_human:'等待本人确认',question:'请求补充资料',waiting_time:'等待约定时间',waiting_condition:'等待资料变化',condition_changed:'资料已变化',condition_deadline:'到达最晚时间',answered:'本人补充资料',model_retry:'模型重试',model_paused:'模型已暂停',recovering:'等待接续',confirmed:'本人确认',rejected:'本人拒绝',pause:'暂停任务',resume:'继续任务',cancel:'停止任务',finished:'执行结束'};
-const statusLabel=(row:AgentTaskView)=>row.runnerStatus==='heartbeat_stale'?'执行进度暂未更新':row.runnerStatus==='awaiting_reclaim'?'待重新领取':row.state==='waiting_human'&&row.questions?.some(q=>!q.answeredAt)?'待补充资料':row.state==='queued'&&row.executionIssue?'等待重试':row.state==='queued'&&row.executor==='platform'?'待执行':row.state==='queued'&&row.lastHeartbeatAt?'待重新领取':LABEL[row.state];
+const TASK_REFRESH_MS=10_000, CONNECTION_REFRESH_MS=60_000;
+const livePlatformTask=(row:AgentTaskView)=>row.executor==='platform'&&(row.state==='running'||row.state==='queued');
+const statusLabel=(row:AgentTaskView,progressUnavailable=false)=>{
+ if(row.runnerStatus==='heartbeat_stale'||(progressUnavailable&&livePlatformTask(row)))return '执行进度暂未更新';
+ if(row.runnerStatus==='awaiting_reclaim')return '待重新领取';
+ if(row.state==='waiting_human'&&row.questions?.some(q=>!q.answeredAt))return '待补充资料';
+ if(row.state==='queued'&&row.executionIssue)return row.executionIssue.retryAt?'等待模型重试':'等待重试';
+ if(row.state==='queued'&&row.executor==='platform')return '待执行';
+ if(row.state==='queued'&&row.lastHeartbeatAt)return '待重新领取';
+ if(row.state==='running'&&row.executionStage==='model')return activeModelFallbackSince(row)?'正在等待备用模型':'正在等待模型';
+ return LABEL[row.state];
+};
 const contentRestricted=(row:AgentTaskView)=>'contentRestricted' in row&&row.contentRestricted===true;
 const accessDenied=(error:unknown)=>[401,403,404].includes(Number((error as {status?:number})?.status));
 const tone=(state:AgentTaskView['state']):Tone=>state==='running'?'accent':state==='succeeded'?'ok':['waiting_human','expired','budget_exhausted'].includes(state)?'warn':['failed','access_changed'].includes(state)?'bad':'neutral';
 const time=(v:string|null)=>v?new Date(v).toLocaleString(interfaceLocale(),{timeZone:'Asia/Shanghai', year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}):'—';
 const duration=(ms:number)=>`${Math.floor(ms/60000)}:${String(Math.floor(ms/1000)%60).padStart(2,'0')}`;
 type Plan={kind:'create';requestId:string;identityId:string;name:string;instructions:string;executor:'external'|'platform'}|{kind:'answer';requestId:string;row:AgentTaskView;questionId:string;answer:string}|{kind:'pause'|'resume'|'cancel'|'issue';requestId:string;row:AgentTaskView};
+async function readTaskPages(base:string,initialCursor:string|null,limit:number,signal:AbortSignal) {
+ const items=new Map<string,AgentTaskView>(),seen=new Set<string>();
+ let nextCursor=initialCursor,pages=0;
+ do{
+  signal.throwIfAborted();
+  if(nextCursor)seen.add(nextCursor);
+  const result=await mistApiRequest(base+(nextCursor?'?cursor='+encodeURIComponent(nextCursor):''),{signal}) as AgentTaskPage;
+  if(!Array.isArray(result.items))throw new Error('任务响应无效');
+  nextCursor=result.nextCursor??null;
+  if(nextCursor!==null&&(typeof nextCursor!=='string'||!nextCursor||seen.has(nextCursor)))throw new Error('任务翻页响应无效');
+  for(const item of result.items)items.set(item.id,item);
+  pages++;
+ }while(nextCursor&&pages<limit);
+ return {items:[...items.values()],nextCursor,pages};
+}
 type TaskPanelProps = {
   onConnections: () => void;
   rowAction?: (row: AgentTaskView) => React.ReactNode;
@@ -36,15 +64,19 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
  const w=useMistWorkspace(),nav=useNav(),toast=useToast(),base='/api/mist/workspaces/'+encodeURIComponent(workspaceId)+'/agent-tasks',endpoint=agentConnectionEndpoint(location.origin);
  const [platformAvailable,setPlatformAvailable]=React.useState(false);
  const [page,setPage]=React.useState<AgentTaskPage>({items:[],nextCursor:null}),[identities,setIdentities]=React.useState<AgentIdentityView[]>([]),[loading,setLoading]=React.useState(true),[error,setError]=React.useState('');
+ const [loadingMore,setLoadingMore]=React.useState(false);
  const [plan,setPlan]=React.useState<Plan|null>(null),[busy,setBusy]=React.useState(false),[failure,setFailure]=React.useState(''),[uncertain,setUncertain]=React.useState(false),[credential,setCredential]=React.useState<{item:AgentTaskView;token:string}|null>(null);
  const [detail,setDetail]=React.useState<AgentTaskView|null>(null),[history,setHistory]=React.useState<{items:AgentTaskEvent[];nextCursor:string|null}>({items:[],nextCursor:null}),[detailError,setDetailError]=React.useState('');
  const [detailTarget,setDetailTarget]=React.useState<string|null>(null),[opening,setOpening]=React.useState(false);
  const [historyLoading,setHistoryLoading]=React.useState(false),[historyError,setHistoryError]=React.useState('');
+ const [detailNeedsRead,setDetailNeedsRead]=React.useState(false);
  const detailRef=React.useRef<AgentTaskView|null>(null);
  const setCurrentDetail=(item:AgentTaskView|null)=>{detailRef.current=item;setDetail(item);};
  const onTaskUpdateRef=React.useRef(onTaskUpdate);onTaskUpdateRef.current=onTaskUpdate;
  const alive=React.useRef(false),readGeneration=React.useRef(0),writeGeneration=React.useRef(0),detailGeneration=React.useRef(0),readAbort=React.useRef<AbortController|null>(null),writeAbort=React.useRef<AbortController|null>(null);
  const listAbort=React.useRef<AbortController|null>(null);
+ const connectionReadAt=React.useRef<number|undefined>(undefined);
+ const loadedPages=React.useRef(1);
  const [connectionError,setConnectionError]=React.useState('');
  const detailAbort=React.useRef<AbortController|null>(null),historyAbort=React.useRef<AbortController|null>(null);
  const readDetail=React.useCallback(async(id:string,opening=false)=>{
@@ -64,7 +96,7 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
    const previous=detailRef.current;
    if(previous?.id===id&&item.version<previous.version)return;
    if(contentRestricted(item))clearDetailActions();
-   setCurrentDetail(item);setDetailError('');
+   setCurrentDetail(item);setDetailError('');setDetailNeedsRead(false);
    setPage(page=>({...page,items:page.items.map(row=>row.id===id&&row.version<=item.version?item:row)}));
    if(!previous||previous.id!==id||previous.version!==item.version||previous.updatedAt!==item.updatedAt
     ||contentRestricted(previous)!==contentRestricted(item))onTaskUpdateRef.current?.(item);
@@ -79,18 +111,22 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
    if(current()){detailAbort.current=null;if(opening)setOpening(false);}
   }
  },[base]);
- const load=React.useCallback(async(append=false)=>{
+ const load=React.useCallback(async(append=false,refreshConnections=true)=>{
+  if(append&&(listAbort.current||!page.nextCursor))return;
   const epoch=++readGeneration.current;
   readAbort.current?.abort();listAbort.current?.abort();
   const auxiliary=new AbortController(),listing=new AbortController();
-  readAbort.current=auxiliary;listAbort.current=listing;setError('');
+  const readConnectionSettings=refreshConnections||connectionReadAt.current===undefined
+   ||Date.now()-connectionReadAt.current>=CONNECTION_REFRESH_MS;
+  if(readConnectionSettings)connectionReadAt.current=undefined;
+  readAbort.current=auxiliary;listAbort.current=listing;setError('');setLoadingMore(append);
   const selectedSnapshot=detailRef.current,selected=selectedSnapshot?.id,selectedGeneration=detailGeneration.current;
   let denied=false;
   const current=()=>alive.current&&epoch===readGeneration.current;
   const detailIsCurrent=()=>current()&&selectedGeneration===detailGeneration.current&&detailRef.current?.id===selected;
   const deny=(error:unknown)=>{
    if(!accessDenied(error))return false;
-   denied=true;
+   denied=true;connectionReadAt.current=undefined;loadedPages.current=1;
    auxiliary.abort();listing.abort();detailGeneration.current++;
    detailAbort.current?.abort();historyAbort.current?.abort();
    setPage({items:[],nextCursor:null});setCurrentDetail(null);setDetailTarget(null);setOpening(false);setPlan(null);setCredential(null);
@@ -98,23 +134,30 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
    return true;
   };
   const listRead=withRequestDeadline(listing,8_000,'任务列表读取超时',signal=>
-   mistApiRequest(base+(append&&page.nextCursor?'?cursor='+encodeURIComponent(page.nextCursor):''),{signal}))
+   readTaskPages(base,append?page.nextCursor:null,append?1:loadedPages.current,signal))
    .then(result=>{
     if(!current()||listing.signal.aborted)return;
-    if(!Array.isArray(result.items))throw new Error('任务响应无效');
     // An overlapping detail read may have applied a newer access projection at the same task version.
     const latest=detailRef.current;
     const detailAdvanced=latest!==selectedSnapshot&&selectedGeneration===detailGeneration.current;
-    const items=(result.items as AgentTaskView[]).flatMap(row=>{
+    const items=result.items.flatMap(row=>{
      if(!detailAdvanced||row.id!==selected)return [row];
      if(latest?.id===selected&&latest.version>=row.version)return [latest];
      return latest===null?[]:[row];
     });
-    setPage(previous=>append?{...result,items:[...previous.items,...items.filter(row=>!previous.items.some(p=>p.id===row.id))]}:{...result,items});
+    loadedPages.current=append?loadedPages.current+result.pages:result.pages;
+    const nextCursor=result.nextCursor;
+    setPage(previous=>({nextCursor,items:append
+     ? [...new Map([...previous.items,...items].map(row=>[row.id,row])).values()]
+     : items}));
    }).catch(error=>{if(current()&&!denied&&!deny(error))setError(error instanceof Error?error.message:'任务读取失败');})
-   .finally(()=>{if(current())setLoading(false);});
-  let connectionsPending=true,capabilitiesPending=true;
+   .finally(()=>{
+    if(!current())return;
+    listAbort.current=null;setLoading(false);setLoadingMore(false);
+   });
+  let connectionsPending=readConnectionSettings,capabilitiesPending=readConnectionSettings,metadataReads=0;
   const auxiliaryCurrent=()=>current()&&!auxiliary.signal.aborted;
+  const confirmMetadata=()=>{if(++metadataReads===2)connectionReadAt.current=Date.now();};
   const readConnections=async(signal:AbortSignal)=>{
    const items:AgentIdentityView[]=[],seen=new Set<string>();let cursor:string|null=null;
    do{
@@ -127,14 +170,18 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
    return items;
   };
   const auxiliaryRead=withRequestDeadline(auxiliary,8_000,'任务辅助请求超时',signal=>Promise.allSettled([
-   readConnections(signal).then(items=>{
-    if(auxiliaryCurrent()){setIdentities(items);setConnectionError('');}
+   readConnectionSettings?readConnections(signal).then(items=>{
+    if(auxiliaryCurrent()){setIdentities(items);setConnectionError('');confirmMetadata();}
    }).catch(error=>{
     if(auxiliaryCurrent()&&!deny(error)){setIdentities([]);setConnectionError(error instanceof Error?error.message:'连接读取失败');}
-   }).finally(()=>{connectionsPending=false;}),
-   mistApiRequest('/api/mist/workspaces/'+encodeURIComponent(workspaceId)+'/agent-task-capabilities',{signal})
-    .then(result=>{if(auxiliaryCurrent())setPlatformAvailable(result.platformAvailable===true);})
-    .catch(()=>{if(auxiliaryCurrent())setPlatformAvailable(false);}).finally(()=>{capabilitiesPending=false;}),
+   }).finally(()=>{connectionsPending=false;}):null,
+   readConnectionSettings?mistApiRequest('/api/mist/workspaces/'+encodeURIComponent(workspaceId)+'/agent-task-capabilities',{signal})
+    .then(result=>{
+     if(!auxiliaryCurrent())return;
+     if(typeof result.platformAvailable!=='boolean')throw new Error('任务执行能力响应无效');
+     setPlatformAvailable(result.platformAvailable);confirmMetadata();
+    })
+    .catch(()=>{if(auxiliaryCurrent())setPlatformAvailable(false);}).finally(()=>{capabilitiesPending=false;}):null,
    selected&&!historyAbort.current?mistApiRequest(base+'/'+encodeURIComponent(selected)+'/history',{signal}).then(events=>{
     if(!auxiliaryCurrent()||!detailIsCurrent()||!Array.isArray(events.items))return;
     setHistory(previous=>{const fresh=events.items as AgentTaskEvent[];return{items:[...fresh,...previous.items.filter(old=>!fresh.some(event=>event.version===old.version&&event.action===old.action))],nextCursor:previous.items.length>30?previous.nextCursor:events.nextCursor};});
@@ -148,13 +195,40 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
   await Promise.all([listRead,auxiliaryRead,selected?readDetail(selected):null]);
  },[base,workspaceId,page.nextCursor,readDetail]);
  const currentLoad=React.useRef(load);currentLoad.current=load;
- React.useEffect(()=>{alive.current=true;void currentLoad.current();const timer=setInterval(()=>void currentLoad.current(),10_000);return()=>{alive.current=false;readGeneration.current++;writeGeneration.current++;detailGeneration.current++;clearInterval(timer);readAbort.current?.abort();listAbort.current?.abort();writeAbort.current?.abort();detailAbort.current?.abort();historyAbort.current?.abort();};},[base]);
+ React.useEffect(()=>{
+  alive.current=true;connectionReadAt.current=undefined;
+  const wake=()=>{if(!document.hidden&&navigator.onLine)void currentLoad.current();};
+  wake();
+  const timer=window.setInterval(()=>{
+   if(!document.hidden&&navigator.onLine&&!listAbort.current)void currentLoad.current(false,false);
+  },TASK_REFRESH_MS);
+  window.addEventListener('online',wake);
+  document.addEventListener('visibilitychange',wake);
+  return()=>{
+   alive.current=false;readGeneration.current++;writeGeneration.current++;detailGeneration.current++;
+   window.clearInterval(timer);
+   window.removeEventListener('online',wake);document.removeEventListener('visibilitychange',wake);
+   readAbort.current?.abort();listAbort.current?.abort();writeAbort.current?.abort();detailAbort.current?.abort();historyAbort.current?.abort();
+  };
+ },[base]);
+ const watchingDetail=!!detail&&livePlatformTask(detail);
  React.useEffect(()=>{
   if(!detailTarget)return;
-  const wake=()=>{if(!document.hidden)void readDetail(detailTarget);};
+  const wake=()=>{if(!document.hidden&&navigator.onLine)void readDetail(detailTarget);};
+  const offline=()=>{
+   if(!watchingDetail)return;
+   detailAbort.current?.abort();detailAbort.current=null;
+   setDetailNeedsRead(true);
+  };
   window.addEventListener('focus',wake);document.addEventListener('visibilitychange',wake);
-  return()=>{window.removeEventListener('focus',wake);document.removeEventListener('visibilitychange',wake);};
- },[detailTarget,readDetail]);
+  window.addEventListener('online',wake);window.addEventListener('offline',offline);
+  const timer=watchingDetail?window.setInterval(wake,2500):undefined;
+  return()=>{
+   window.clearInterval(timer);
+   window.removeEventListener('focus',wake);document.removeEventListener('visibilitychange',wake);
+   window.removeEventListener('online',wake);window.removeEventListener('offline',offline);
+  };
+ },[detailTarget,readDetail,watchingDetail]);
  const readDetailHistory=async(id:string,cursor?:string|null)=>{
   const epoch=detailGeneration.current, abort=new AbortController();
   historyAbort.current?.abort();historyAbort.current=abort;setHistoryLoading(true);setHistoryError('');
@@ -179,7 +253,8 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
   detailGeneration.current++;detailAbort.current?.abort();historyAbort.current?.abort();setDetailTarget(null);setCurrentDetail(null);setOpening(false);
   if(!routeTaskId)return;
   const automationId=nav.route.automationId;
-  nav.go('assistant',automationId,{section:automationId?'automations':'tasks'});
+  if(automationId)nav.go('assistant',routeTaskId,{section:'automations',automationId});
+  else nav.go('assistant',undefined,{section:'tasks'});
  };
  React.useEffect(()=>{if(routeTaskId)void openDetail(routeTaskId);},[routeTaskId,base]);
  const begin=(next:Plan)=>{setFailure('');setUncertain(false);setCredential(null);setPlan(next);};
@@ -208,6 +283,15 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
   const target=agentSource(source);if(target)nav.go(target.view,target.id,target.target);
  };
  const active=identities.filter(i=>i.state==='active'),aiUnavailable=identities.some(i=>i.state==='invalid'&&i.canIssue===false),create=plan?.kind==='create'?plan:null,answer=plan?.kind==='answer'?plan:null;
+ const detailOrigin=detail&&!contentRestricted(detail)&&detail.state!=='access_changed'&&detail.executor==='platform'
+  ? detail.automationId?{id:detail.id,section:'automations',automationId:detail.automationId,label:'打开原规则',icon:Zap}
+   :detail.conversationId?{id:detail.id,section:'task-origin',label:'打开原对话',icon:MessageSquare}
+   :undefined
+  :undefined;
+ const detailProgressUnavailable=detailNeedsRead||!!detailError;
+ const detailModelSince=detail&&!detailProgressUnavailable&&!detail.runnerStatus
+  &&detail.state==='running'&&detail.executionStage==='model'
+  ? activeModelFallbackSince(detail)??detail.executionStageSince : undefined;
  const columns:Column<AgentTaskView>[]=[{key:'name',header:uiText('任务'),render:r=><div className="mist-col"><span className="mist-cell-strong">{r.name}</span><span className="mist-cell-sub">{r.identityName}</span></div>},{key:'state',header:uiText('状态'),width:'118px',render:r=><Pill tone={tone(r.state)}>{uiText(statusLabel(r))}</Pill>},{key:'usage',header:uiText('业务操作'),width:'90px',render:r=><span>{r.stepsUsed} / {r.stepLimit}</span>,hideOnMobile:true},...(rowAction?[{key:'act',header:'',width:'90px',render:rowAction}]:[])];
  const control=(row:AgentTaskView)=><div className="mist-row" data-wrap>
   {row.executor!=='platform'&&!['succeeded','failed','cancelled','expired','budget_exhausted','access_changed'].includes(row.state)&&<Button disabled={!endpoint||busy} onClick={()=>begin({kind:'issue',requestId:crypto.randomUUID(),row})}>{uiText('连接Agent')}</Button>}
@@ -220,12 +304,13 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
   {error&&<FailureNotice title="任务读取失败" detail={error} />}
   {!error&&connectionError&&<FailureNotice title="Agent连接读取失败" detail={connectionError} />}
   {(!error||page.items.length>0)&&<DataTable ariaLabel={uiText('Agent任务')} loading={loading} columns={columns} rows={page.items} rowKey={r=>r.id} onRowClick={r=>void openDetail(r.id)} empty={<EmptyState icon={Bot} title={uiText(active.length||rowAction?'暂无任务':'暂无可用的Agent连接')} action={!active.length&&!rowAction?<Button onClick={onConnections}>{uiText('管理连接')}</Button>:undefined}/>} />}
-  {page.nextCursor&&<Button onClick={()=>void load(true)}>{uiText('加载更多')}</Button>}
+  {page.nextCursor&&<Button loading={loadingMore} onClick={()=>void load(true,false)}>{uiText('加载更多')}</Button>}
   <Drawer open={!!detailTarget} onClose={closeDetail} title={detail?.name??uiText('任务')} footer={detail&&detail.canControl?control(detail):undefined}>
    {opening&&!detail&&<Skeleton/>}
    {detailError&&detailTarget&&<FailureNotice title="任务详情读取失败" detail={detailError} retry={()=>void openDetail(detailTarget)}/>}
-   {detail&&<div className="mist-col"><div className="mist-row"><Pill tone={tone(detail.state)}>{uiText(statusLabel(detail))}</Pill>
+   {detail&&<div className="mist-col"><div className="mist-row"><Pill tone={tone(detail.state)}>{uiText(statusLabel(detail,detailProgressUnavailable))}</Pill>{detailModelSince&&<XiaozhuPhaseTimer at={detailModelSince}/>}
     {contentRestricted(detail)&&detail.state!=='access_changed'&&<Pill tone="warn">{uiText('权限已变化')}</Pill>}
+    {detailOrigin&&<Button size="sm" variant="quiet" icon={detailOrigin.icon} onClick={()=>nav.go('assistant',detailOrigin.id,{section:detailOrigin.section,...(detailOrigin.automationId?{automationId:detailOrigin.automationId}:{})})}>{uiText(detailOrigin.label)}</Button>}
    </div>
     <KeyValue items={[
       {label:uiText('执行方式'),value:uiText(detail.executor==='platform'?'平台执行':'外部客户端')},
