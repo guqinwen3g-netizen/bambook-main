@@ -581,8 +581,10 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const hasPendingSubmission = [...pending.current.values()].some(entry=>(entry.sourceConversationId??entry.conversationId)===visibleConversationId);
   const visibleControls={...controls};
   for(const task of tasks){
-    const pending=controlKeys.get(task.id);
-    if(!visibleControls[task.id]&&task.canControl&&!task.contentRestricted&&pending&&pending.version===task.version)
+    const pending=controlKeys.get(task.id),previous=controls[task.id];
+    const matching=pending&&pending.version===task.version&&!task.contentRestricted&&task.canControl!==false;
+    if(previous?.error&&!matching)visibleControls[task.id]={...previous,error:''};
+    if(!previous&&matching&&task.canControl)
       visibleControls[task.id]={busy:false,error:CONTROL_FAILURE[pending.action]};
   }
   return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls:visibleControls, hasPendingSubmission, recoveredSubmissions, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track };

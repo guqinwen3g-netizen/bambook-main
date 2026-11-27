@@ -58,6 +58,22 @@ it('recovers a lost stop receipt from the one task without rereading history',as
  expect(api.mock.calls.filter(([url])=>url.endsWith('/agent-tasks'))).toHaveLength(1);
 });
 
+it('does not keep an unconfirmed answer warning on a newer task question',async()=>{
+ const asking={...task,state:'waiting_human',version:2,canControl:true,questions:[{id:'q1',question:'请给出交期'}]};
+ api.mockImplementation(async(url:string)=>{
+  if(url.endsWith('/task/answer'))throw Object.assign(new Error('连接断开'),{status:0});
+  if(url.endsWith('/task'))return {item:asking};
+  if(url.endsWith('/agent-tasks'))return {items:[asking],nextCursor:null};
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View/>));
+ await act(async()=>{await channel.answer(channel.tasks[0],'q1','1 月 18 日');});
+ expect(channel.controls.task.error).toBe('回答未确认，可重试');
+ await act(async()=>channel.track({...asking,version:3,questions:[{id:'q2',question:'请给出出运港'}]} as any));
+ expect(channel.controls.task?.error).toBeFalsy();
+});
+
 it('retries an unconfirmed answer with the same operation ID and keeps the rest of the channel usable',async()=>{
  const asking={...task,state:'waiting_human',version:2,questions:[{id:'q1',question:'请给出交期'}]};
  const resumed={...asking,state:'queued',version:3,questions:[{...asking.questions[0],answer:'1 月 18 日',answeredAt:task.updatedAt}]};
