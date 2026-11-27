@@ -169,6 +169,28 @@ it('lets a pending older page finish without the automatic refresh aborting it',
  }finally{vi.useRealTimers();vi.restoreAllMocks();}
 });
 
+it.each([
+ ['personal', {executor:'platform',conversationId:'c_original_report'}, '打开原对话', ['assistant','task',{section:'task-origin'}]],
+ ['automation', {executor:'platform',automationId:'rule-original'}, '打开原规则', ['assistant','rule-original',{section:'automations'}]],
+ ['external', {executor:'external',conversationId:'c_external_report'}, undefined, []],
+ ['restricted', {executor:'platform',conversationId:'c_restricted_report',contentRestricted:true}, undefined, []],
+] as const)('offers an exact origin only for a readable task with an origin (%s)',async(_kind,metadata,label,route)=>{
+ const report={...row(),...metadata,state:'succeeded',result:'模拟订单已核对',canControl:false};
+ const api=seam.api.getMockImplementation()!;
+ seam.api.mockImplementation((url:string,init?:RequestInit)=>url.endsWith('/agent-tasks')
+  ? Promise.resolve({items:[report],nextCursor:null}) : url.endsWith('/task') ? Promise.resolve({item:report}) : api(url,init));
+ act(paint);await flush();await click(getByText(host,report.name));
+ const dialog=getByRole(document.body,'dialog',{name:report.name});
+ if(label){
+  await click(getByRole(dialog,'button',{name:label}));
+  expect(seam.go).toHaveBeenCalledExactlyOnceWith(...route);
+ }else{
+  expect(queryByRole(dialog,'button',{name:'打开原对话'})).toBeNull();
+  expect(queryByRole(dialog,'button',{name:'打开原规则'})).toBeNull();
+ }
+ expect(seam.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+});
+
 it('returns the task detail to its original automation rule when closed',async()=>{
  seam.routeId='task';seam.automationId='rule-a';
  seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:{...row(),automationId:'rule-a'}}:url.includes('agent-identities')?{items:[identity()]}:{items:[],nextCursor:null}));
