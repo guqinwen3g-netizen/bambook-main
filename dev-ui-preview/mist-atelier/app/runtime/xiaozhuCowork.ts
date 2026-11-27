@@ -1,5 +1,5 @@
 import {withRequestDeadline} from './requestDeadline';
-import type {TaskControlIntent,TaskControlRequest} from './assistantConversation';
+import {answerFingerprint,saveTaskControls,type TaskControlIntent,type TaskControlRequest} from './xiaozhuControlRequests';
 /**
  * 小竹的 cowork（2026-11-07 定案）：对话里的每一条请求就是一项交给小竹的平台任务，
  * 小竹经平台 AI 与 MCP 业务工具办理，进度、追问和待确认事项回到同一条对话里；对话由服务端任务记录承载，换设备也在。
@@ -122,7 +122,7 @@ function mergeTaskUpdate(previous: AgentTaskView, next: AgentTaskView): AgentTas
 export type TaskControlState = { busy: boolean; error?: string; canCheckStop?: boolean; answerQuestionToCheck?: string };
 const CONTROL_FAILURE={answer:'回答未确认，可重试',cancel:'停止结果未确认，可重试'};
 
-export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string, originTaskId?: string, savedControls?:Map<string,TaskControlRequest>) {
+export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string, originTaskId?: string, savedControls?:Map<string,TaskControlRequest>, controlStorageScope?:string) {
   const base = workspaceId ? '/api/mist/workspaces/' + encodeURIComponent(workspaceId) : '';
   const [available, setAvailable] = React.useState(false), [cachedTasks, setTasks] = React.useState<AgentTaskView[]>([]);
   const [reportAccess, setReportAccess] = React.useState<{scope:string; restricted:Set<string>}>();
@@ -154,11 +154,16 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const localControls=React.useMemo(()=>new Map<string,TaskControlRequest>(),[scope]);
   const controlKeys=savedControls??localControls;
   React.useEffect(()=>{
+    let changed=false;
     for(const task of tasks){
       const pending=controlKeys.get(task.id);
-      if(pending&&(task.version>pending.version||task.contentRestricted||task.canControl===false))controlKeys.delete(task.id);
+      if(pending&&(task.version>pending.version||task.contentRestricted||task.canControl===false)) {
+        controlKeys.delete(task.id);
+        changed=true;
+      }
     }
-  },[controlKeys,tasks]);
+    if(changed&&controlStorageScope)saveTaskControls(controlStorageScope,controlKeys);
+  },[controlKeys,controlStorageScope,tasks]);
   const [controls,setControls] = React.useState<Record<string,TaskControlState>>({});
   const [sendFailure, setSendFailure] = React.useState<{conversationId?: string; message: string}>();
   const sendError = !visibleConversationId || sendFailure?.conversationId === visibleConversationId ? sendFailure?.message ?? '' : '';
@@ -540,37 +545,37 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       }
     }
   };
-  const controlTask = async (task:AgentTaskView, intent:TaskControlIntent, checkOnly=false) => {
+  const controlTask = async (task:AgentTaskView, intent:TaskControlIntent|TaskControlRequest) => {
     if (!base || !enabled || controlRequests.current.has(task.id)) return;
-    const {action,...details}=intent;
-    const body = {version:task.version,...details};
-    const key = JSON.stringify([action,body]);
-    const existing = controlKeys.get(task.id);
-    if (checkOnly && (existing?.key!==key || task.contentRestricted || !task.canControl)) return;
+    const {action}=intent;
+    const checkOnly='requestId' in intent;
+    if(checkOnly&&(intent.version!==task.version||task.contentRestricted||!task.canControl))return;
     const failure = CONTROL_FAILURE[action];
     let controller = new AbortController();
     const isCurrent = () => live.current===scope && controlRequests.current.get(task.id)===controller;
     controlRequests.current.set(task.id,controller);
     setControls(old=>({...old,[task.id]:{busy:true,...(checkOnly?{error:failure}:{})}}));
 
-    const requestId = existing?.key===key ? existing.requestId : crypto.randomUUID();
-    if (!checkOnly) controlKeys.set(task.id,{...intent,version:task.version,key,requestId});
+    let submitted:TaskControlRequest|undefined=checkOnly?intent:undefined;
     let error = '';
     const accept = (item:AgentTaskView) => {
       if (!isCurrent()) return;
       applyTaskUpdate(item);
       controlKeys.delete(task.id);
+      if(controlStorageScope)saveTaskControls(controlStorageScope,controlKeys);
       window.dispatchEvent(new Event('bambook:agent-task-update'));
     };
-
-    const checkTask = async () => {
+    const checkTask = async (request:TaskControlRequest) => {
       const denial = deniedHistory.current;
       const latest = await readCoworkTask(base,task.id,controller.signal);
+      const answer=request.action==='answer'
+        ? latest.questions?.find(question=>question.id===request.questionId&&question.answeredAt)?.answer : undefined;
+      const confirmed = request.action==='answer'
+        ? answer!==undefined&&(request.answer!==undefined
+          ? answer===request.answer : !!request.fingerprint&&await answerFingerprint(task.id,request.questionId,answer)===request.fingerprint)
+        : !COWORK_ACTIVE.includes(latest.state)&&latest.state!=='paused';
       if (!isCurrent() || deniedHistory.current!==denial) return;
       clearStaleProgress(task.id);
-      const confirmed = intent.action==='answer'
-        ? latest.questions?.some(question=>question.id===intent.questionId&&question.answeredAt&&question.answer===intent.answer)
-        : !COWORK_ACTIVE.includes(latest.state)&&latest.state!=='paused';
       if (confirmed) {
         accept(latest);
         error = '';
@@ -579,12 +584,24 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     try {
       if (checkOnly) {
         error = failure;
-        await checkTask();
+        await checkTask(intent);
         return;
       }
+      const {action,...details}=intent;
+      const existing=controlKeys.get(task.id);
+      const fingerprint=intent.action==='answer'?await answerFingerprint(task.id,intent.questionId,intent.answer):undefined;
+      if(!isCurrent())return;
+      const same=existing?.version===task.version&&(intent.action==='cancel'?existing.action==='cancel'
+        : existing.action==='answer'&&existing.questionId===intent.questionId
+          &&(existing.answer===intent.answer||!!fingerprint&&existing.fingerprint===fingerprint));
+      const requestId=same?existing.requestId:crypto.randomUUID();
+      submitted=intent.action==='cancel'?{action:'cancel',requestId,version:task.version}
+        : {...intent,requestId,version:task.version,fingerprint};
+      controlKeys.set(task.id,submitted);
+      if(controlStorageScope)saveTaskControls(controlStorageScope,controlKeys);
       const result = await withRequestDeadline(controller,HISTORY_READ_TIMEOUT_MS,failure,signal =>
         mistApiRequest(base+'/agent-tasks/'+encodeURIComponent(task.id)+'/'+action,{
-          method:'POST',body:JSON.stringify({requestId,...body}),signal,
+          method:'POST',body:JSON.stringify({requestId,version:task.version,...details}),signal,
         }) as Promise<{item:AgentTaskView}>);
       if (result.item?.id!==task.id) throw new Error(failure);
       accept(result.item);
@@ -592,10 +609,9 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if (!isCurrent() || checkOnly) return;
       error = (problem as {status?:number})?.status===0 ? failure
         : problem instanceof Error ? problem.message : failure;
-      // A timeout has already aborted the write signal. The read has its own deadline.
       controller = new AbortController();
       controlRequests.current.set(task.id,controller);
-      try { await checkTask(); }
+      try { if(submitted)await checkTask(submitted); }
       catch { /* The original operation remains available for an exact retry. */ }
     } finally {
       if (isCurrent()) {
@@ -608,11 +624,13 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     controlTask(task,{action:'answer',questionId,answer:text.trim()});
   const checkAnswer = (task:AgentTaskView,questionId:string) => {
     const submitted=controlKeys.get(task.id);
-    if (submitted?.action!=='answer'||submitted.questionId!==questionId) return;
-    return controlTask(task,{action:'answer',questionId,answer:submitted.answer},true);
+    if (submitted?.action==='answer'&&submitted.questionId===questionId)return controlTask(task,submitted);
   };
   const cancel = (task:AgentTaskView) => controlTask(task,{action:'cancel'});
-  const checkStop = (task:AgentTaskView) => controlTask(task,{action:'cancel'},true);
+  const checkStop = (task:AgentTaskView) => {
+    const submitted=controlKeys.get(task.id);
+    if(submitted?.action==='cancel')return controlTask(task,submitted);
+  };
   const hasPendingSubmission = [...pending.current.values()].some(entry=>(entry.sourceConversationId??entry.conversationId)===visibleConversationId);
   const visibleControls={...controls};
   for(const task of tasks){
