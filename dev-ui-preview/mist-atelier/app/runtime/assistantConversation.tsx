@@ -9,7 +9,8 @@ export type AssistantReply = {
 export type AssistantAttachmentRef = TaskAttachmentRef & Pick<TaskAttachment, 'name' | 'size'> & { needsVerification?: true };
 type TaskAnswerDraft = {taskId:string;questionId:string;text:string};
 export const taskAnswerDraftKey=(taskId:string,questionId:string)=>JSON.stringify([taskId,questionId]);
-export type TaskControlRequest = {action:'answer'|'cancel';version:number;key:string;requestId:string};
+export type TaskControlIntent = {action:'answer';questionId:string;answer:string} | {action:'cancel'};
+export type TaskControlRequest = TaskControlIntent & {version:number;key:string;requestId:string};
 type ComposerDraft = {
   question: string;
   selected: Array<{ id: string; label: string }>;
