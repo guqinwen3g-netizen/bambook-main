@@ -92,13 +92,15 @@ it('opens only the original confirmed by a read within the current task attachme
 });
 
 it('names image-only PDF pages even when other pages in the window were readable',()=>{
-  const [final,more]=platformTrail([
+  const [final,more,uncertain]=platformTrail([
     step('bambook_file_text',{fileId:'mixed'},{file:{id:'mixed',name:'mixed.pdf'},kind:'pdf',text:'readable content',hasMore:false,range:{pageFrom:21,pageTo:23},pagesWithoutText:[22,22,99,'fixture-secret']}),
-    step('bambook_file_text',{fileId:'mixed'},{file:{id:'mixed',name:'mixed.pdf'},kind:'pdf',text:'readable content',hasMore:true,range:{pageFrom:1,pageTo:20},pagesWithoutText:[3]}),
+    step('bambook_file_text',{fileId:'mixed'},{file:{id:'mixed',name:'mixed.pdf'},kind:'pdf',text:'readable content',hasMore:true,pages:26,nextPageFrom:21,range:{pageFrom:1,pageTo:20},pagesWithoutText:[3]}),
+    step('bambook_file_text',{fileId:'mixed'},{file:{id:'mixed',name:'mixed.pdf'},kind:'pdf',text:'readable content',hasMore:true,pages:26,nextPageFrom:22,range:{pageFrom:1,pageTo:20},pagesWithoutText:[3]}),
   ]);
   expect(final).toMatchObject({label:'读取附件 mixed.pdf',detail:'提取范围第 21 至 23 页；第 22 页无可提取文字'});
   expect(final.failed).toBeUndefined();
-  expect(more.detail).toBe('提取范围第 1 至 20 页；第 3 页无可提取文字；还有后续内容');
+  expect(more.detail).toBe('提取范围第 1 至 20 页；第 3 页无可提取文字；本次未读第 21 至 26 页');
+  expect(uncertain.detail).toBe('提取范围第 1 至 20 页；第 3 页无可提取文字；还有后续内容');
 });
 
 it('links a completed relationship lookup to its source and indicates partial counts', () => {
