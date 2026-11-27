@@ -2,7 +2,7 @@
 import React from 'react';
 import { ChevronRight, Copy, Download, Eye, FileText, RotateCcw, Zap, ShieldCheck, Search, PenLine, HelpCircle, Clock, Check, Square, Link2, Mic } from 'lucide-react';
 import { AIBadge, AssistantEyes, Button, Icon, IconButton, Pill, type Tone } from '../../../../../components/mist';
-import { activeAgentTaskStep, type AgentTaskTrailItem, type AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
+import { activeAgentTaskStep, agentTaskActivityText, type AgentTaskTrailItem, type AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
 import { taskAttachmentLabels, type TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
 import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../../server/src/shared/mistAgentProposals';
 import { ui, uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
@@ -35,7 +35,7 @@ const clock = (iso: string) => new Date(iso).toLocaleTimeString(interfaceLocale(
 const VIEW: Record<string, string> = { order: 'orders/detail', customer: 'crm', development: 'development/detail', purchase: 'procurement', shipment: 'shipments', invoice: 'invoices', quotation: 'quotations', supplier: 'suppliers', email: 'emails', production: 'production-board', risk: 'risks', claim: 'claims' };
 
 type OpenRecord = (view: string, id: string, target?: import('../../nav').RouteTarget) => void;
-function sourceSummary(items:readonly AgentTaskTrailItem[]):string {
+function sourceSummary(items:readonly AgentTaskTrailItem[], files:readonly TaskAttachment[]):string {
   const records=new Set<string>(), attachments=new Set<string>();
   for(const item of items){
     if(item.kind!=='read'||item.completed!==true||item.failed)continue;
@@ -43,9 +43,14 @@ function sourceSummary(items:readonly AgentTaskTrailItem[]):string {
     for(const ref of item.refs??[])records.add(JSON.stringify([ref.type,ref.id]));
     if(item.taskAttachmentId)attachments.add(item.taskAttachmentId);
   }
+  const latestPdf = [...items].reverse().find(item => item.kind==='read' && item.completed===true
+    && item.taskAttachmentPageRange && item.detail && files.some(file=>file.id===item.taskAttachmentId));
+  const boundary = agentTaskActivityText(latestPdf?.detail);
+  const latestName = latestPdf && taskAttachmentLabels(files)[files.findIndex(file=>file.id===latestPdf.taskAttachmentId)];
   return [
     records.size ? ui`已读取 ${records.size} 条业务记录` : '',
     attachments.size ? ui`已摘录 ${attachments.size} 份附件` : '',
+    latestName && boundary ? ui`${latestName}：${boundary}` : '',
   ].filter(Boolean).join(' · ');
 }
 
@@ -57,8 +62,9 @@ function Trail({ task, items, active, activeLabel, since, retryAt, recovering, w
   const [expanded, setExpanded] = React.useState<boolean>();
   const open = workLog?.expanded.get(task.id) ?? expanded ?? active;
   const label = uiText(activeLabel ?? '正在办理');
-  const summary = active && !recovering && task.state==='running' && task.executionStage==='model'
-    ? sourceSummary(items) : '';
+  const summary = active && !recovering && !task.contentRestricted && task.state==='running'
+    && (task.executionStage==='model' || task.executionStage==='tool')
+    ? sourceSummary(items,open?[]:task.attachments??[]) : '';
   return <div className="mist-xz-trail" data-open={open || undefined}>
     {active && <div className="mist-xz-progress">
       <span role="status" className={recovering?undefined:'mist-xz-shimmer'}>{label}</span>
