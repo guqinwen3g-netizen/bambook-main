@@ -2233,8 +2233,8 @@ export class MistRepository {
   async fileText(prior: TokenPayload, workspaceId: string, fileId: string, maxChars?: number, cursor?: unknown, fileCache?: FileTextWindowCache) {
     const {files,instructions,questions}=await this.privateTaskAttachments(prior,workspaceId);
     const taskFile=files.find(file=>file.id===fileId);
-    const {pdf:range,worksheet:sheet,allowedFiles}=requestedTaskAttachmentScope(files,instructions,questions);
-    if(allowedFiles&&!allowedFiles.has(fileId))fail('FILE_TEXT_ATTACHMENT_SCOPE','本任务不读取该附件',422);
+    const {pdf:range,worksheet:sheet,allowedFiles,excludedPdfIds}=requestedTaskAttachmentScope(files,instructions,questions);
+    if(excludedPdfIds?.has(fileId)||allowedFiles&&!allowedFiles.has(fileId))fail('FILE_TEXT_ATTACHMENT_SCOPE','本任务不读取该附件',422);
     if(sheet?.workbookIds.includes(fileId)&&sheet.fileId!==fileId)
       fail('FILE_TEXT_WORKBOOK_SCOPE','该工作簿未被选中，本任务不读取它的正文',422);
     const {file,bytes}=taskFile?{file:taskFile,bytes:await this.files.read(workspaceId,taskFile)}:await this.download(prior,workspaceId,fileId);

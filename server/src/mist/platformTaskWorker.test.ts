@@ -1097,6 +1097,34 @@ it.each([22,3])('extracts only a single requested PDF page and refuses page-wind
  }
 });
 
+it('binds a page range to the numbered PDF without reading a same-name sibling',async()=>{
+ let calls=0;
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>++calls===1
+  ?tool('bambook_file_text',{fileId:'attachment_1'})
+  :tool('bambook_task',{action:'finish',outcome:'succeeded',result:'编号原件第 22 页已核对。'}));
+ const f=await fixture(complete);
+ f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'核对第 2 份 PDF',instructions:'请只读取 long.pdf（2）的第 22 页。也核对 terms.pdf 的标签。'}))
+  .attach('attachments',pdf('WRONG-ORIGINAL'),'long.pdf')
+  .attach('attachments',pdf('WRONG-PAGE',23,false,3),'long.pdf')
+  .attach('attachments',pdf('REQUESTED-OTHER'),'terms.pdf').expect(201)).body.item;
+ await f.drain();
+ expect((await f.current(task.id)).state).toBe('succeeded');
+ expect(complete).toHaveBeenCalledTimes(2);
+ for(const [input] of complete.mock.calls){
+  const message=input.messages[0].content,{history}=JSON.parse(message.slice(message.indexOf('{')));
+  const reads=history.recent.filter((step:{name:string})=>step.name==='bambook_file_text');
+  expect(reads.find((row:any)=>row.arguments.fileId==='attachment_2')?.result)
+   .toMatchObject({pageScopeStart:22,pageScopeLimit:22,range:{pageFrom:22,pageTo:22},hasMore:false});
+  expect(message).toContain('REQUESTED-OTHER');
+  expect(message).not.toMatch(/WRONG-ORIGINAL|WRONG-PAGE|Page 21: general terms/);
+ }
+ const stored=await f.local.database.$transaction(db=>taskRecord(db,f.workspace.id,task.id));
+ expect(stored.value.platform?.steps.some(step=>step.plan.arguments.fileId===task.attachments[0].id
+  &&(step.result as {error?:boolean}|undefined)?.error)).toBe(true);
+});
+
 it.each([
  [false,11,15],[true,11,15],[true,22,22],
 ])('re-reads only permitted pages after a wider legacy PDF receipt (finish %s, pages %s–%s)',async (frozenFinish,from,to)=>{

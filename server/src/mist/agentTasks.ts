@@ -166,8 +166,8 @@ export function taskView(c: TaskRecord, actor: TokenPayload, now: number, author
     && c.identityId===personalIdentityId(c.workspaceId,c.ownerId) ? splitTaskRequest(c.instructions) : c.instructions;
   let visibleSteps = readable ? c.platform?.steps : undefined;
   if(visibleSteps?.length){
-    const {pdf,worksheet,allowedFiles}=requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions);
-    if(allowedFiles)visibleSteps=scopedAttachmentTaskSteps(visibleSteps,pdf,worksheet,allowedFiles);
+    const {pdf,worksheet,allowedFiles,excludedPdfIds}=requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions);
+    if(allowedFiles||excludedPdfIds)visibleSteps=scopedAttachmentTaskSteps(visibleSteps,pdf,worksheet,allowedFiles,excludedPdfIds);
   }
   return {
     ...(!readable ? { contentRestricted: true as const } : {}),
