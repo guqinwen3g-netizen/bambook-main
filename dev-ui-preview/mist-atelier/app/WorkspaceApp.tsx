@@ -194,7 +194,7 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
   React.useEffect(() => { if (notifications) setToastIds([]); }, [notifications]);
   const toastItems = toastIds.map(id => visibleNotifications.find(n => n.id === id)).filter((n): n is NonNullable<typeof n> => !!n && !n.readAt && !(route.view === 'assistant' && n.id.startsWith('agent-task:')));
   const [drawer, setDrawer] = React.useState<{scope:string;turns:DrawerTurn[]}>({scope:'',turns:[]});
-  const [aiBusy,setAiBusy]=React.useState(false),[aiUseRouteSource,setAiUseRouteSource]=React.useState(false);
+  const [aiBusy,setAiBusy]=React.useState(false),[aiSource,setAiSource]=React.useState<{scope:string;id:string}>();
   const aiScope=session.sessionKey+':'+(workspace.workspace?.id??'');
   React.useEffect(() => {
     const workspaceId = workspace.workspace?.id;
@@ -220,8 +220,7 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
   const drawerHistory = useReadOnlyAssistantHistory(drawerExchanges, aiScope, workspace.workspace?.id, workspace.workspace?.revision, ai && canAI);
   const visibleDrawerTokens = new Set(drawerHistory.visible.flatMap(reply => reply.contextToken ? [reply.contextToken] : []));
   React.useEffect(()=>{aiMounted.current=true;return()=>{aiMounted.current=false;aiController.current?.abort();aiRun.current=null;};},[]);
-  React.useEffect(()=>{aiController.current?.abort();aiController.current=null;aiRun.current=null;setAiBusy(false);setAiUseRouteSource(false);},[aiScope]);
-  React.useEffect(()=>setAiUseRouteSource(false),[route.view,route.id]);
+  React.useEffect(()=>{aiController.current?.abort();aiController.current=null;aiRun.current=null;setAiBusy(false);setAiSource(undefined);},[aiScope]);
   const sections = useSections();
   // 侧栏「开发与寻样」回到本次会话最近查看的页签；未查看过时为「成衣开发」。
   const lastDevelopmentTab = React.useRef<DevelopmentListTab | null>(null);
@@ -319,17 +318,30 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
     return null;
   };
   const currentAiSource=findAiSource(routeBase,route.id);
+  const aiSourceId=aiSource?.scope===aiScope?aiSource.id:undefined;
+  const resolveAiSource=(id:string|undefined)=>{
+    const separator=id?.indexOf(':')??-1;
+    return id&&separator>0?findAiSource(id.slice(0,separator),id.slice(separator+1)):null;
+  };
+  const selectedAiSource=resolveAiSource(aiSourceId);
+  const sourceAction=aiSourceId
+    ? <Button aria-pressed disabled={aiBusy} onClick={()=>setAiSource(undefined)}>
+        {selectedAiSource?uiText('取消引用：')+uiText(selectedAiSource.label):uiText('移除不可用引用')}
+      </Button>
+    : currentAiSource&&<Button aria-pressed={false} disabled={aiBusy} onClick={()=>setAiSource({scope:aiScope,id:currentAiSource.id})}>
+        {uiText('引用当前来源：')}{uiText(currentAiSource.label)}
+      </Button>;
   const overview = (): ChatMessage => {
     if (!state) return {role:'assistant',content:'公司数据尚未读取，请稍后再试。'};
     const visibleDevs=canDevelopment?state.devs:[],visibleOrders=canOrders?state.orders:[],visibleTasks=state.tasks.filter(t=>session.canAccessView(t.target.view.split('/')[0] as View));
     const devs=visibleDevs.filter(d=>d.stage<4).slice(0,4),late=(canProduction?state.productions:[]).filter(p=>!p.closed&&p.col!=='done'&&p.due<platformBusinessDate(businessNow()));
-    return {role:'assistant',content:<div><p>{uiText("当前公司有 ")}{visibleDevs.length}{uiText(" 个可见开发案、")}{visibleOrders.length}{uiText(" 张订单；")}{visibleTasks.filter(t=>!t.done).length}{uiText(" 项待办未完成，")}{late.length}{uiText(" 项生产已过交期。")}</p>{devs.map(d=><p key={d.id}><Button variant="quiet" onClick={()=>go('development/detail',d.id,{versionId:d.currentVersionId||undefined})}>{d.code} · {d.name} · {d.state}</Button></p>)}</div>,sources:[state.settings.workspaceName || '当前公司'],actions:<>{currentAiSource?<Button aria-pressed={aiUseRouteSource} disabled={aiBusy} onClick={()=>setAiUseRouteSource(value=>!value)}>{uiText(aiUseRouteSource?'取消引用：':'引用当前来源：')}{uiText(currentAiSource.label)}</Button>:null}</>};
+    return {role:'assistant',content:<div><p>{uiText("当前公司有 ")}{visibleDevs.length}{uiText(" 个可见开发案、")}{visibleOrders.length}{uiText(" 张订单；")}{visibleTasks.filter(t=>!t.done).length}{uiText(" 项待办未完成，")}{late.length}{uiText(" 项生产已过交期。")}</p>{devs.map(d=><p key={d.id}><Button variant="quiet" onClick={()=>go('development/detail',d.id,{versionId:d.currentVersionId||undefined})}>{d.code} · {d.name} · {d.state}</Button></p>)}</div>,sources:[state.settings.workspaceName || '当前公司'],actions:sourceAction};
   };
   const send = async (question:string,retryTurn?:DrawerTurn) => {
     const content=question.trim();
     const available=()=>aiMounted.current&&aiCurrent.current===aiScope;
     if(!content||!canAI||!available())return;
-    const sourceIds=retryTurn?.retrySources??(aiUseRouteSource&&currentAiSource?[currentAiSource.id]:[]);
+    const sourceIds=retryTurn?.retrySources??(aiSourceId?[aiSourceId]:[]);
     const turn=retryTurn??{id:Symbol('assistant-turn'),question:content};
     const add=(error?:string,retry=true)=>setDrawer(old=>({scope:aiScope,turns:[
       ...(old.scope===aiScope?old.turns:[]),{...turn,...(error?{error,retrySources:retry?sourceIds:undefined}:{})},
@@ -380,25 +392,24 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
     actions:<Button onClick={drawerHistory.retry}>{uiText('重试核对历史答复')}</Button>});
   else if(drawerHistory.hidden)drawerMessages.push({role:'assistant',content:uiText('部分历史答复需重新核对')});
   const conversation=useAssistantConversation(aiScope);
-  const expandAI=()=>{
+  const expandAI=(draft:string)=>{
     // The full page revalidates the signed exchanges before showing or reusing them.
     if(drawerExchanges.length)conversation.setMessages(old=>[...old,...drawerExchanges]);
+    const hasDraft=!!draft.trim();
     const failed=drawerTurns.filter(turn=>turn.retrySources!==undefined).at(-1);
-    let moved:DrawerTurn|undefined;
-    if(failed&&!conversation.readOnlyQuestion.trim()&&!conversation.readOnlySelected.length){
-      const firstId=failed.retrySources?.[0];
-      const separator=firstId?.indexOf(':')??-1;
-      const source=firstId&&separator>0?findAiSource(firstId.slice(0,separator),firstId.slice(separator+1)):null;
-      // A referenced draft is transferred only with its currently visible reference.
-      if(!firstId||source){
-        conversation.setReadOnlyQuestion(failed.question);
-        conversation.setReadOnlySelected(source?[source]:[]);
-        moved=failed;
-      }
+    const question=hasDraft?draft:failed?.question;
+    const sourceId=hasDraft?aiSourceId:failed?.retrySources?.[0];
+    const source=resolveAiSource(sourceId);
+    const moved=!!question&&!conversation.readOnlyQuestion.trim()&&!conversation.readOnlySelected.length&&(!sourceId||!!source);
+    if(moved){
+      conversation.setReadOnlyQuestion(question);
+      conversation.setReadOnlySelected(source?[source]:[]);
     }
-    setDrawer({scope:aiScope,turns:drawerTurns.filter(turn=>!turn.reply&&turn.id!==moved?.id)});
+    setDrawer({scope:aiScope,turns:drawerTurns.filter(turn=>!turn.reply&&(!moved||hasDraft||turn.id!==failed?.id))});
     setAI(false);
-    go('assistant',undefined,drawerExchanges.length||failed?{section:'read-only'}:{});
+    go('assistant',undefined,drawerExchanges.length||question?{section:'read-only'}:{});
+    if(moved&&hasDraft)setAiSource(undefined);
+    return moved&&hasDraft;
   };
   const openAI = (prompt?: string) => {if(!canAI)return;setAI(true);setPalette(false);if(prompt)void send(prompt);};
   useHotkey('k', () => { if (session.status === 'authenticated') setPalette(value => !value); }, { meta: true });

@@ -6656,6 +6656,7 @@
   "正在等待模型": "Waiting for the model",
   "只读对话": "Read-only conversation",
   "返回工作任务": "Back to work tasks",
+  "移除不可用引用": "Remove unavailable reference",
   "向小竹提问": "Ask Xiaozhu",
   "等待模型重试": "Waiting to retry the model",
   "最早 {0} 秒后重试": "Retry in at least {0} seconds",
