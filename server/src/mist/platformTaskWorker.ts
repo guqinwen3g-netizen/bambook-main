@@ -9,7 +9,7 @@ import type{MakeTaskCredential,PlatformTaskJob,PlatformTaskReleaseIssue}from'./a
 import type{MistRepository,PlatformTaskImageCache}from'./repository';
 import{MistApiError}from'./errors';
 import{responseLanguagePrompt,responseUserMessage}from'./responseLanguage';
-import{parsePlatformTaskPlan,platformTaskHistory,platformTaskAttachmentHandles,shortPdfContinuationPlan,shortOfficeTailPlan,ATTACHMENT_PREFETCH_CHARS,resolvePlatformFileContinuation,PLATFORM_TASK_ATTACHMENT_PREFIX,PLATFORM_TASK_RESULT_LIMIT,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskStep}from'./platformTaskPlan';
+import{parsePlatformTaskPlan,platformTaskHistory,platformTaskAttachmentHandles,requestedPdfRange,scopedPdfTaskSteps,shortPdfContinuationPlan,shortOfficeTailPlan,ATTACHMENT_PREFETCH_CHARS,resolvePlatformFileContinuation,PLATFORM_TASK_ATTACHMENT_PREFIX,PLATFORM_TASK_RESULT_LIMIT,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskStep}from'./platformTaskPlan';
 import{nextTaskIntentRead}from'./agentTaskIntentRefs';
 
 class PlatformModelTimeout extends Error {}
@@ -160,6 +160,16 @@ export class MistPlatformTaskWorker{
       pulse=setInterval(()=>{if(pulsing)return;pulsing=true;void this.repository.pulsePlatformTask(actor!).catch(()=>abort.abort()).finally(()=>{pulsing=false;});},this.options.pulseMs??5000);pulse.unref?.();
       while(!abort.signal.aborted&&this.enabled){
         phase='store';const context=await this.repository.platformTaskContext(actor);let step=context.steps.at(-1);
+        const pdfScope=requestedPdfRange(context.task.attachments,context.task.instructions);
+        const readableSteps=scopedPdfTaskSteps(context.steps,pdfScope);
+        const excludedThrough=readableSteps.length===context.steps.length?-1
+          :context.steps.reduce((last,previous,index)=>readableSteps.includes(previous)?last:index,-1);
+        const needsScopedReread=pdfScope&&excludedThrough>=0&&!context.steps.slice(excludedThrough+1).some(previous=>
+          previous.plan.name==='bambook_file_text'&&previous.plan.arguments.fileId===pdfScope.fileId&&previous.result!==undefined);
+        if(needsScopedReread&&step&&step.result===undefined&&step.plan.name==='bambook_task'&&step.plan.arguments.action==='finish'){
+          await this.repository.acknowledgePlatformTaskStep(actor,step.id,{error:true,pdfScopeRereadRequired:true});
+          continue;
+        }
         if(!step||step.result!==undefined){
           const intentRead=nextTaskIntentRead(context.taskReadRefs,context.steps);
           if(intentRead.failed){await this.repository.agentTaskRuntime(actor,job.workspaceId,'finish',{requestId:'platform-intent-read-'+job.taskId,outcome:'failed',result:'引用资料未能读取，请回原记录核对后重新安排。'});return;}
@@ -167,10 +177,11 @@ export class MistPlatformTaskWorker{
           if(!this.available)throw Error('MODEL_UNAVAILABLE');
           if(intentRead.plan){step=await this.repository.savePlatformTaskPlan(actor,intentRead.plan);}
           else{
-            const attachment=context.task.attachments?.find(file=>!isTaskImage(file.name)&&!context.steps.some(step=>step.plan.name==='bambook_file_text'&&step.plan.arguments.fileId===file.id&&step.result!==undefined));
+            const attachment=context.task.attachments?.find(file=>!isTaskImage(file.name)&&(needsScopedReread&&file.id===pdfScope?.fileId
+              ||!readableSteps.some(step=>step.plan.name==='bambook_file_text'&&step.plan.arguments.fileId===file.id&&step.result!==undefined)));
             const attachmentPlan:PlatformTaskPlan|undefined=attachment
               ?{name:'bambook_file_text',arguments:{fileId:attachment.id,maxChars:ATTACHMENT_PREFETCH_CHARS}}
-              :shortPdfContinuationPlan(context.task.attachments,context.steps,context.task.instructions)??shortOfficeTailPlan(context.task.attachments,context.steps);
+              :shortPdfContinuationPlan(context.task.attachments,readableSteps,context.task.instructions)??shortOfficeTailPlan(context.task.attachments,readableSteps);
             if(attachmentPlan){
               step=await this.repository.savePlatformTaskPlan(actor,attachmentPlan);
             }else{
@@ -192,7 +203,7 @@ export class MistPlatformTaskWorker{
                 : '';
               // Tool receipts provide the evidence. The UI trail is a second rendering of the same work.
               const {trail:_uiTrail,...modelTask}=context.task;
-              const history=platformTaskHistory(context.steps);
+              const history=platformTaskHistory(readableSteps);
               const coverageRule=history.pdfCoverage
                 ? '\nhistory.pdfCoverage 是同一原件从第一页到末页的连续核对范围。单个续读段的 truncated 只描述该段。仍须注明 pagesWithoutText 中不能核对的页，并以各段原文为准。'
                 : '';
@@ -224,7 +235,7 @@ export class MistPlatformTaskWorker{
               };
               if(context.hasTaskHistory)await checkModelAuthority(false);
               const response=await this.model({images,beforeFallback:()=>checkModelAuthority(true),systemPrompt:MODEL_PROMPT_PREFIX+attachmentRules+numberedAttachments+identifierRules+coverageRule+pendingCoverageRule+pdfTextRangeRule+imageRules+answerRule+historyRule+attachmentAttributionRule+'\n'+responseLanguagePrompt(context.locale),messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts, (_key, value) => typeof value === 'string' ? attachmentHandles.get(value) ?? value : value)),context.locale)}],temperature:0.1,jsonMode:true},abort.signal);
-              if(abort.signal.aborted)return;const plan=resolvePlatformFileContinuation(parsePlatformTaskPlan(response),context.steps,attachmentHandles);phase='store';step=await this.repository.savePlatformTaskPlan(actor,plan);
+              if(abort.signal.aborted)return;const plan=resolvePlatformFileContinuation(parsePlatformTaskPlan(response),readableSteps,attachmentHandles);phase='store';step=await this.repository.savePlatformTaskPlan(actor,plan);
             }
           }
         }

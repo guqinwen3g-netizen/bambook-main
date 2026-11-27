@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type {AgentTaskIntentRef,AgentTaskView} from '../shared/mistAgentTasks';
 import type { MarketQuotation } from '../shared/mistMarket';
+import { splitTaskRequest } from '../shared/mistTaskHistoryText';
 import type { PdfPageTextSpan } from './agentFileText';
 import { officeKind } from './agentOfficeText';
 import { isFileTextCursor } from './agentFileWindow';
@@ -40,12 +41,13 @@ export function platformTaskAttachmentHandles(attachments: AgentTaskView['attach
 }
 
 export function requestedPdfRange(attachments:AgentTaskView['attachments']=[],instructions='') {
+  const request=splitTaskRequest(instructions);
   const files=attachments.filter(file=>/^application\/pdf\b/i.test(file.mimeType)||/\.pdf$/i.test(file.name));
   if(files.length!==1)return;
   const file=files[0];
-  if(attachments.length>1&&!instructions.includes(file.name)&&!/\bpdf\b/i.test(instructions))return;
-  const chinese=[...instructions.matchAll(/(?:^|[。；;\n])[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:只|仅)[ \t]*(?:读取|阅读|核对|查看|检查|读|看)[^。；;，,\n]{0,32}?(?:前[ \t]*|第[ \t]*([1-9]\d*)[ \t]*(?:至|到|[-–—])[ \t]*第?[ \t]*)([1-9]\d*)[ \t]*页/gu)];
-  const english=[...instructions.matchAll(/(?:^|[.;\n])[ \t]*(?:please[ \t]+)?(?:only[ \t]+(?:read|check|review)|(?:read|check|review)[ \t]+only)[ \t]+(?:(?:the[ \t]+)?first[ \t]+([1-9]\d*)[ \t]+pages?\b|pages[ \t]+([1-9]\d*)[ \t]*(?:to|[-–—])[ \t]*([1-9]\d*)\b)/gi)];
+  if(attachments.length>1&&!request.includes(file.name)&&!/\bpdf\b/i.test(request))return;
+  const chinese=[...request.matchAll(/(?:^|[。；;\n])[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:只|仅)[ \t]*(?:读取|阅读|核对|查看|检查|读|看)[^。；;，,\n]{0,32}?(?:前[ \t]*|第[ \t]*([1-9]\d*)[ \t]*(?:至|到|[-–—])[ \t]*第?[ \t]*)([1-9]\d*)[ \t]*页/gu)];
+  const english=[...request.matchAll(/(?:^|[.;\n])[ \t]*(?:please[ \t]+)?(?:only[ \t]+(?:read|check|review)|(?:read|check|review)[ \t]+only)[ \t]+(?:(?:the[ \t]+)?first[ \t]+([1-9]\d*)[ \t]+pages?\b|pages[ \t]+([1-9]\d*)[ \t]*(?:to|[-–—])[ \t]*([1-9]\d*)\b)/gi)];
   const ranges=[
     ...chinese.map(match=>({from:Number(match[1]??1),to:Number(match[2])})),
     ...english.map(match=>({from:Number(match[2]??1),to:Number(match[1]??match[3])})),
@@ -54,6 +56,25 @@ export function requestedPdfRange(attachments:AgentTaskView['attachments']=[],in
   if(!range||ranges.some(({from,to})=>from!==range.from||to!==range.to))return;
   if(Number.isSafeInteger(range.from)&&Number.isSafeInteger(range.to)&&range.from<=range.to&&range.to<=1_000_000)
     return {fileId:file.id,...range};
+}
+
+/** Older receipts without the current scope can still be kept as history, but cannot authorize a new model turn. */
+export function scopedPdfTaskSteps(steps:PlatformTaskStep[],scope:ReturnType<typeof requestedPdfRange>):PlatformTaskStep[] {
+  if(!scope)return steps;
+  return steps.filter(step=>{
+    if(step.plan.name==='bambook_task'&&step.plan.arguments.action==='finish'
+      &&(step.result as {pdfScopeRereadRequired?:boolean}|undefined)?.pdfScopeRereadRequired===true)return false;
+    if(step.plan.name!=='bambook_file_text'||step.plan.arguments.fileId!==scope.fileId||step.result===undefined)return true;
+    const read=step.result as PdfReadWindow|undefined;
+    if(read?.error===true||read?.kind==='unreadable'||read?.kind==='unsupported')return !read.text;
+    const range=read?.range;
+    return read?.kind==='pdf'&&read.file?.id===scope.fileId&&!!range
+      &&Number.isSafeInteger(range.pageFrom)&&Number.isSafeInteger(range.pageTo)
+      &&range.pageFrom>=scope.from&&range.pageTo>=range.pageFrom&&range.pageTo<=scope.to
+      &&(scope.from===1||read.pageScopeStart===scope.from)
+      &&typeof read.pages==='number'&&Number.isSafeInteger(read.pages)
+      &&(read.pages<=scope.to||read.pageScopeLimit===scope.to);
+  });
 }
 
 /** Pre-read a short PDF or an explicitly requested last page within one additional window. */
@@ -146,7 +167,7 @@ type PdfReadWindow = {
   kind?:string; error?:boolean; file?:{id?:string}; sourceHash?:string; pages?:number;
   range?:{start:number;end:number;pageFrom:number;pageTo:number;textLimited?:boolean};
   hasMore?:boolean; nextCursor?:string; nextPageFrom?:number; pagesWithoutText?:number[]; reason?:string;
-  text?:string; pageTextSpans?:PdfPageTextSpan[];
+  text?:string; pageTextSpans?:PdfPageTextSpan[]; pageScopeStart?:number; pageScopeLimit?:number;
 };
 
 type PdfContinuation = {cursor:string;from:number;offset:number;to?:number};

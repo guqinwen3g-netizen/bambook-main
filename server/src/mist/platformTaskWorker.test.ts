@@ -1074,6 +1074,40 @@ it('reads only the selected middle pages of a task PDF before asking the model',
  expect(history).not.toHaveProperty('pdfCoverage');
 });
 
+it.each([false,true])('re-reads only permitted pages after a wider legacy PDF receipt (finish already planned: %s)',async frozenFinish=>{
+ const complete=vi.fn(async(_input:LlmCompletionInput)=>
+  tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已按当前限定范围核对。'}));
+ const f=await fixture(complete);
+ vi.spyOn(f.worker,'wake').mockImplementation(()=>{});
+ f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'只核对指定页段',instructions:'请只读取 long.pdf 第 11 至 15 页。'}))
+  .attach('attachments',pdf('OUTSIDE RANGE',23,false,3),'long.pdf').expect(201)).body.item;
+ const fileId=task.attachments[0].id;
+ await f.local.database.$transaction(async db=>{
+  const {row,value}=await taskRecord(db,f.workspace.id,task.id);
+  const legacy={id:'platform_legacy_pdf',at:new Date().toISOString(),
+   plan:{name:'bambook_file_text',arguments:{fileId}},result:{kind:'pdf',file:{id:fileId},pages:23,sourceHash:'a'.repeat(64),
+    range:{pageFrom:1,pageTo:20,start:0,end:15},text:'OUTSIDE RECEIPT',hasMore:true,nextPageFrom:21,nextCursor:'aft1.legacy'}};
+  const seeded=await db.mistCommandReceipt.updateMany({where:{id:row.id},data:{
+   result:{...row.result,__agentTask:{...value,platform:{...value.platform,nextRunAt:Date.now(),steps:[
+    legacy,...(frozenFinish?[{id:'platform_legacy_finish',at:new Date().toISOString(),plan:{name:'bambook_task',
+     arguments:{action:'finish',outcome:'succeeded',requestId:'platform_legacy_finish',result:'OUTSIDE PLAN'}}}]:[]),
+   ]}}},
+  }});
+  expect(seeded.count).toBe(1);
+ });
+ await f.drain();
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'已按当前限定范围核对。'});
+ expect(complete).toHaveBeenCalledTimes(1);
+ const message=complete.mock.calls[0][0].messages[0].content;
+ expect(message).not.toContain('OUTSIDE RECEIPT');
+ expect(message).not.toContain('OUTSIDE PLAN');
+ const {history}=JSON.parse(message.slice(message.indexOf('{')));
+ const result=history.recent.find((step:{name:string})=>step.name==='bambook_file_text').result;
+ expect(result).toMatchObject({pageScopeStart:11,pageScopeLimit:15,range:{pageFrom:11,pageTo:15},hasMore:false});
+});
+
 it('pre-reads both text slices and the short tail of a dense PDF before calling the model',async()=>{
  const complete=vi.fn(async(model:LlmCompletionInput)=>{
   const content=model.messages[0].content as string,facts=JSON.parse(content.slice(content.indexOf('{')));
