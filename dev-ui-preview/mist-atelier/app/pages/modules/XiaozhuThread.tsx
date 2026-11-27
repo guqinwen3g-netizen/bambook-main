@@ -150,6 +150,8 @@ export type ThreadActions = {
   onAutomate: (text: string) => void;
   onOpenRecord: OpenRecord;
   onProposal: (id: string) => void;
+  onRefreshProposals?: () => void;
+  refreshingProposals?: boolean;
   onDecide?: (id: string, confirm: boolean) => Promise<void>;
   proposalsBlocked?: boolean;
   pendingProposalId?: string;
@@ -202,7 +204,9 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
     const attachmentLabels=taskAttachmentLabels(t.attachments);
     const pending = t.waitingProposalIds.map(id => proposals.find(p => p.id === id && p.state === 'pending')).filter((p): p is AgentProposal => !!p);
     const produced = proposals.filter(p => p.taskId === t.id && p.state === 'confirmed' && p.produced && !p.unavailable);
-    const request = splitRequest(t.instructions), done = !active && t.state !== 'waiting_human', working = active && !asking && !pending.length;
+    const missingProposals = t.state === 'waiting_human' && pending.length < t.waitingProposalIds.length;
+    const request = splitRequest(t.instructions), done = !active && t.state !== 'waiting_human';
+    const working = active && t.state !== 'waiting_human' && !pending.length;
     const retryable = done && !!request.trim() && t.state !== 'access_changed'
       && (!t.attachments?.length || (!!t.conversationId && ['succeeded','failed','cancelled'].includes(t.state)));
     const progressStale = active && actions.staleProgressIds?.has(t.id);
@@ -213,6 +217,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
       || t.state === 'waiting_condition' || (t.state === 'running' && t.executionStage === 'model');
     const activeLabel = progressStale ? '执行进度暂未更新' : hasSpecificStatus ? xiaozhuTaskStatusLabel(t) : undefined;
     const status = progressStale && !working ? <span role="status"><Pill tone="warn">{uiText('执行进度暂未更新')}</Pill></span>
+      : t.state === 'waiting_human' && !asking && !pending.length ? <span role="status"><Pill tone="warn">{uiText('待我确认')}</Pill></span>
       : !active && t.state !== 'succeeded' ? <Pill tone={STATE[t.state][1]}>{uiText(STATE[t.state][0])}</Pill> : undefined;
     return <div className="mist-xz-turn" key={t.id} data-task-state={t.state} data-task-id={t.id}>
       {divider && <div className="mist-xz-day"><span>{dayLabel(t.createdAt)}</span></div>}
@@ -238,6 +243,9 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         {pending.map(p => <ProposalCard key={p.id} proposal={p} onOpen={actions.onProposal} onDecide={actions.onDecide}
           blocked={actions.proposalsBlocked} onRecover={actions.pendingProposalId===p.id?actions.onRecoverProposal:undefined}/>)}
         <div className="mist-xz-acts">
+          {missingProposals && actions.onRefreshProposals && <Button size="sm" variant="quiet"
+            disabled={actions.refreshingProposals} loading={actions.refreshingProposals}
+            onClick={actions.onRefreshProposals}>{uiText('刷新待确认事项')}</Button>}
           {actions.onVoiceTask && t.executor==='platform' && t.conversationId && t.canControl && (active || t.state==='paused') &&
             <Button size="sm" variant="quiet" icon={Mic} aria-label={uiText('语音接续')+' '+t.name}
               disabled={control?.busy} onClick={() => actions.onVoiceTask?.(t,openQuestion?.id)}>{uiText('语音接续')}</Button>}
