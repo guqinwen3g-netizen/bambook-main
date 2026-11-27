@@ -1057,6 +1057,23 @@ it('keeps the platform PDF prefix when the model asks for another page window',a
  }
 });
 
+it('reads only the selected middle pages of a task PDF before asking the model',async()=>{
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>
+  tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对第 11 至 15 页。'}));
+ const f=await fixture(complete);f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'核对中间页段',instructions:'请只读取 long.pdf 第 11 至 15 页。'}))
+  .attach('attachments',pdf('OUTSIDE RANGE',23,false,3),'long.pdf').expect(201)).body.item;
+ await f.drain();
+ expect((await f.current(task.id)).state).toBe('succeeded');
+ expect(complete).toHaveBeenCalledTimes(1);
+ const message=complete.mock.calls[0][0].messages[0].content,{history}=JSON.parse(message.slice(message.indexOf('{')));
+ const result=history.recent.find((step:{name:string})=>step.name==='bambook_file_text').result;
+ expect(result).toMatchObject({pageScopeStart:11,pageScopeLimit:15,range:{pageFrom:11,pageTo:15},hasMore:false,complete:false});
+ expect(result.pdfTextByPage.map(({page}:{page:number})=>page)).toEqual([11,12,13,14,15]);
+ expect(history).not.toHaveProperty('pdfCoverage');
+});
+
 it('pre-reads both text slices and the short tail of a dense PDF before calling the model',async()=>{
  const complete=vi.fn(async(model:LlmCompletionInput)=>{
   const content=model.messages[0].content as string,facts=JSON.parse(content.slice(content.indexOf('{')));
