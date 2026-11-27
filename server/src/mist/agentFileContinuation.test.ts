@@ -88,10 +88,10 @@ it('reports PDF page windows and partial text honestly in the same task trail', 
  expect(continued.range.textLimited).toBeUndefined();
  expect(continued.nextPageFrom).toBe(21);
  expect(platformTrail(steps).map(step=>step.detail)).toEqual([
-  '提取范围第 1 至 20 页；还有后续内容',
+  '提取范围第 1 至 20 页；本次未读第 21 至 23 页',
   '提取范围第 21 至 23 页；第 22 页无可提取文字',
-  '第 1 至 20 页的部分正文；还有后续内容',
-  '第 1 至 20 页的部分正文；还有后续内容',
+  '第 1 至 20 页的部分正文；本页段正文待续读',
+  '第 1 至 20 页的部分正文；本次未读第 21 至 23 页',
  ]);
 });
 

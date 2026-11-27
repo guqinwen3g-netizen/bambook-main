@@ -32,6 +32,8 @@ const FILE_FAILURE_DETAILS = new Map([
   ['该附件没有可用的下一段；请核对最近一次读取结果。','原件没有可继续读取的位置'],
 ]);
 
+const pdfPageRange = (from: number, to: number) => `第 ${from === to ? from : `${from} 至 ${to}`} 页`;
+
 export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments: readonly {id:string;name:string}[] = []): AgentTaskTrailItem[] {
   const labels=taskAttachmentLabels(attachments);
   const numberedNames=new Map(attachments.flatMap((file,index)=>{
@@ -96,7 +98,7 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
         const pages=result?.range;
         const pageRange=result?.kind==='pdf'&&Number.isSafeInteger(pages?.pageFrom)&&Number.isSafeInteger(pages?.pageTo)
           &&pages.pageFrom>=1&&pages.pageTo>=pages.pageFrom
-          ? `第 ${pages.pageFrom===pages.pageTo?pages.pageFrom:`${pages.pageFrom} 至 ${pages.pageTo}`} 页` : '';
+          ? pdfPageRange(pages.pageFrom,pages.pageTo) : '';
         const missingPages=pageRange&&Array.isArray(result.pagesWithoutText)
           ? [...new Set<number>(result.pagesWithoutText.filter((page:unknown)=>typeof page==='number'&&Number.isSafeInteger(page)&&page>=pages.pageFrom&&page<=pages.pageTo))].sort((a,b)=>a-b).slice(0,20)
           : [];
@@ -120,8 +122,16 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
           ? `${pageRange}无可提取文字`
           : missingPages.length ? `${rangeDetail}；第 ${missingPages.join('、')} 页无可提取文字` : '';
         const pdfDetail = unreadablePages || (!failed ? rangeDetail : '');
+        const nextPage = result?.nextPageFrom;
+        const unreadPageRange = pageRange && result?.hasMore === true && pages.textLimited !== true
+          && Number.isSafeInteger(nextPage) && nextPage === pages.pageTo+1
+          && Number.isSafeInteger(result.pages) && nextPage <= result.pages
+          ? pdfPageRange(nextPage,result.pages) : '';
+        const pdfContinuation = !result?.hasMore ? '' : unreadPageRange ? '；本次未读'+unreadPageRange
+          : pages?.textLimited === true && nextPage === undefined && typeof result.nextCursor === 'string'
+            ? '；本页段正文待续读' : '；还有后续内容';
         const detail = result?.error === true ? FILE_FAILURE_DETAILS.get(result.message)
-          : pdfDetail ? `${pdfDetail}${result.hasMore?'；还有后续内容':''}`
+          : pdfDetail ? pdfDetail+pdfContinuation
           : failed ? text(result?.reason, 120)
           : result?.hasMore ? '本次读取部分正文，还有后续内容'
           : result?.complete ? '已提取可读取正文' : '';
