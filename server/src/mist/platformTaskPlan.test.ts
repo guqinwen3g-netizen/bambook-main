@@ -127,6 +127,20 @@ it('recognizes a single explicitly requested PDF page without interpreting a wid
  expect([...exclusive.allowedFiles!]).toEqual(['pdf2']);
 });
 
+it('binds a PDF page limit to an exact name or numbered original in its own clause',()=>{
+ const named={id:'terms',name:'terms.pdf',mimeType:'application/pdf',size:1};
+ const files=[...mixedFiles,named];
+ expect(requestedPdfRange(files,'请只读取 terms.pdf 第 2 至 4 页。')).toEqual({fileId:'terms',from:2,to:4});
+ expect(requestedPdfRange(files,'请只读取 quote.pdf（2）的第 22 页。')).toEqual({fileId:'pdf2',from:22,to:22});
+ expect(requestedPdfRange(files,'Read only page 22 of quote.pdf(2).')).toEqual({fileId:'pdf2',from:22,to:22});
+ expect(requestedPdfRange(files,'先比较 terms.pdf。请只读取 quote.pdf（2）的第 22 页。')).toEqual({fileId:'pdf2',from:22,to:22});
+ expect(requestedPdfRange(files,'请只读取 quote.pdf 的第 22 页。')).toBeUndefined();
+ expect(requestedPdfRange(files,'请只读取第 22 页。之后看 terms.pdf。')).toBeUndefined();
+ const scoped=requestedTaskAttachmentScope(files,'请只读取 quote.pdf（2）的第 22 页。也核对 terms.pdf。');
+ expect(scoped.excludedPdfIds).toEqual(new Set(['pdf1']));
+ expect(requestedTaskAttachmentScope(files,'请只读取 quote.pdf（2）的第 22 页。也核对 quote.pdf（1）。').excludedPdfIds).toBeUndefined();
+});
+
 it('limits automatic PDF continuation to one short page window without a prior continuation attempt', () => {
  const file={id:'pdf',name:'sample.pdf',mimeType:'application/pdf',size:1500};
  const plan={name:'bambook_file_text',arguments:{fileId:file.id}};

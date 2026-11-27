@@ -40,12 +40,36 @@ export function platformTaskAttachmentHandles(attachments: AgentTaskView['attach
   return new Map(attachments.map((file, index) => [file.id, `${PLATFORM_TASK_ATTACHMENT_PREFIX}${index + 1}`]));
 }
 
+const escapeAttachmentName = (value:string)=>value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+
+function taskAttachmentNames(attachments:NonNullable<AgentTaskView['attachments']>) {
+  const labels=taskAttachmentLabels(attachments);
+  const names=[...new Set([...attachments.map(file=>file.name),...labels])].sort((a,b)=>b.length-a.length);
+  const pattern=names.length?new RegExp(
+    '(?<![A-Za-z0-9_./-])(?:'+names.map(escapeAttachmentName).join('|')+')(?![A-Za-z0-9_/-]|\\.[A-Za-z0-9]|[（(]\\d+)','gu',
+  ):undefined;
+  return (text:string) => {
+    if(!pattern)return [];
+    const normalized=text.replace(/(\.[a-z0-9]+)\((\d+)\)/gi,'$1（$2）');
+    return [...normalized.matchAll(pattern)].map(([name])=>
+      attachments.filter((file,index)=>file.name===name||labels[index]===name));
+  };
+}
+
 export function requestedPdfRange(attachments:AgentTaskView['attachments']=[],instructions='') {
   const request=splitTaskRequest(instructions);
   const files=attachments.filter(file=>/^application\/pdf\b/i.test(file.mimeType)||/\.pdf$/i.test(file.name));
-  if(files.length!==1)return;
-  const file=files[0];
-  if(attachments.length>1&&!request.includes(file.name)&&!/\bpdf\b/i.test(request))return;
+  if(!files.length)return;
+  const namesIn=taskAttachmentNames(attachments);
+  const pdfIds=new Set(files.map(file=>file.id));
+  const bind=(match:RegExpMatchArray,from:number,to:number)=>{
+    const suffix=request.slice((match.index??0)+match[0].length).split(/[。；;！？!?，,\n]|\.(?=\s|$)/u,1)[0];
+    const named=namesIn(match[0]+suffix).flat().filter(file=>pdfIds.has(file.id));
+    const ids=new Set(named.map(file=>file.id));
+    if(ids.size===1)return {fileId:[...ids][0],from,to};
+    if(!ids.size&&files.length===1&&(attachments.length===1||/\bpdf\b/i.test(match[0]+suffix)))
+      return {fileId:files[0].id,from,to};
+  };
   const chinese=[...request.matchAll(/(?:^|[。；;\n])[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:只|仅)[ \t]*(?:读取|阅读|核对|查看|检查|读|看)[^。；;，,\n]{0,32}?(?:前[ \t]*([1-9]\d*)|第[ \t]*([1-9]\d*)(?:[ \t]*(?:页[ \t]*)?(?:至|到|[-–—])[ \t]*第?[ \t]*([1-9]\d*))?)[ \t]*页/gu)];
   const english=[...request.matchAll(/(?:^|[.;\n])[ \t]*(?:please[ \t]+)?(?:only[ \t]+(?:read|check|review)|(?:read|check|review)[ \t]+only)[ \t]+(?:the[ \t]+)?(?:first[ \t]+([1-9]\d*)[ \t]+pages?\b|pages[ \t]+([1-9]\d*)[ \t]*(?:to|[-–—])[ \t]*([1-9]\d*)\b|page[ \t]+([1-9]\d*)\b|([1-9]\d*)(?:st|nd|rd|th)[ \t]+page\b)/gi)];
   // Check the suffix after finding the first page expression, so a list cannot backtrack to its last item.
@@ -54,26 +78,24 @@ export function requestedPdfRange(attachments:AgentTaskView['attachments']=[],in
   const ranges=[
     ...chinese.flatMap(match=>{
       const [,first,start,end]=match;
-      if(first)return [{from:1,to:Number(first)}];
-      if(end)return [{from:Number(start),to:Number(end)}];
+      if(first)return [bind(match,1,Number(first))];
+      if(end)return [bind(match,Number(start),Number(end))];
       const suffix=request.slice((match.index??0)+match[0].length);
-      return widerChinese.test(suffix)?[]:[{from:Number(start),to:Number(start)}];
+      return widerChinese.test(suffix)?[]:[bind(match,Number(start),Number(start))];
     }),
     ...english.flatMap(match=>{
       const [,first,start,end,page,ordinal]=match;
-      if(first)return [{from:1,to:Number(first)}];
-      if(start)return [{from:Number(start),to:Number(end)}];
+      if(first)return [bind(match,1,Number(first))];
+      if(start)return [bind(match,Number(start),Number(end))];
       const suffix=request.slice((match.index??0)+match[0].length);
-      return widerEnglish.test(suffix)?[]:[{from:Number(page??ordinal),to:Number(page??ordinal)}];
+      return widerEnglish.test(suffix)?[]:[bind(match,Number(page??ordinal),Number(page??ordinal))];
     }),
   ];
   const range=ranges[0];
-  if(!range||ranges.some(({from,to})=>from!==range.from||to!==range.to))return;
+  if(!range||ranges.some(value=>!value||value.fileId!==range.fileId||value.from!==range.from||value.to!==range.to))return;
   if(Number.isSafeInteger(range.from)&&Number.isSafeInteger(range.to)&&range.from<=range.to&&range.to<=1_000_000)
-    return {fileId:file.id,...range};
+    return range;
 }
-
-const escapeAttachmentName = (value:string)=>value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 
 export function requestedWorkbookWorksheet(attachments:AgentTaskView['attachments']=[],instructions='',questions:readonly AgentTaskQuestion[]=[]) {
   const request=splitTaskRequest(instructions);
@@ -127,27 +149,24 @@ export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachme
     || /\b(?:do not|don't|never) (?:read|open|check|review|inspect) (?:any|all) attachments\b/iu.test(request);
   const othersExcluded = EXCLUDE_OTHER_FILES.test(request)
     || /\b(?:do not|don't|never) (?:read|open|check|review|inspect) (?:any )?(?:other|remaining) (?:attachments|files)\b/iu.test(request);
-  if (!allExcluded && !othersExcluded) return {pdf,worksheet};
+  const pdfOriginal=pdf&&attachments.find(file=>file.id===pdf.fileId);
+  const siblings=pdfOriginal?attachments.filter(file=>file.id!==pdfOriginal.id&&file.name===pdfOriginal.name):[];
+  if(!allExcluded&&!othersExcluded&&!siblings.length)return {pdf,worksheet};
 
-  const allowed = new Set<string>();
-  if (allExcluded) return {pdf:undefined,worksheet:undefined,allowedFiles:allowed};
-  if (pdf) allowed.add(pdf.fileId);
-  if (worksheet?.fileId) allowed.add(worksheet.fileId);
-
-  // Specialised scopes disambiguate same-name originals. For a whole-file request, require
-  // an exact filename or numbered label in the affirmative part before a clause separator.
-  if (attachments.length) {
-    const labels = taskAttachmentLabels(attachments);
-    const names = [...new Set([...attachments.map(file=>file.name),...labels])].sort((a,b)=>b.length-a.length);
-    const namedFile = new RegExp('(?<![A-Za-z0-9_./-])(?:'+names.map(escapeAttachmentName).join('|')+')(?![A-Za-z0-9_/-]|\\.[A-Za-z0-9]|[（(]\\d+)','gu');
-    const affirmative = /(?:^|[。！？；;!?\n]|\.[ \t]+)[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:(?:只|仅)?(?:读取|阅读|核对|查看|检查|处理|读|看)|(?:please[ \t]+)?(?:only[ \t]+)?(?:read|open|check|review|inspect)(?:[ \t]+only)?\b)(?:(?!\.[ \t])[^。！？；;!?，,\n])+/giu;
-    for (const clause of request.matchAll(affirmative)) {
-      const normalized = clause[0].split(SKIP_FILE_READ,1)[0].replace(/(\.[a-z0-9]+)\((\d+)\)/gi,'$1（$2）');
-      for (const [name] of normalized.matchAll(namedFile)) {
-        const matches = attachments.filter((file,index)=>file.name===name||labels[index]===name);
-        if (matches.length === 1 && !worksheet?.workbookIds.includes(matches[0].id)) allowed.add(matches[0].id);
-      }
+  const allowed=new Set<string>();
+  if(allExcluded)return {pdf:undefined,worksheet:undefined,allowedFiles:allowed};
+  if(pdf)allowed.add(pdf.fileId);
+  if(worksheet?.fileId)allowed.add(worksheet.fileId);
+  const namesIn=taskAttachmentNames(attachments);
+  const affirmative = /(?:^|[。！？；;!?\n]|\.[ \t]+)[ \t]*(?:(?:本次|这次|请|也|再)[ \t]*){0,2}(?:(?:只|仅)?(?:读取|阅读|核对|查看|检查|处理|读|看)|(?:please[ \t]+)?(?:only[ \t]+)?(?:read|open|check|review|inspect)(?:[ \t]+only)?\b)(?:(?!\.[ \t])[^。！？；;!?，,\n])+/giu;
+  for(const clause of request.matchAll(affirmative)){
+    for(const match of namesIn(clause[0].split(SKIP_FILE_READ,1)[0])){
+      if(match.length===1&&!worksheet?.workbookIds.includes(match[0].id))allowed.add(match[0].id);
     }
+  }
+  if(!othersExcluded){
+    const excludedSiblings=siblings.filter(file=>!allowed.has(file.id)).map(file=>file.id);
+    return {pdf,worksheet,excludedPdfIds:excludedSiblings.length?new Set(excludedSiblings):undefined};
   }
   const eligibleFiles = attachments.filter(file=>allowed.has(file.id));
   return {pdf:pdf??requestedPdfRange(eligibleFiles,instructions),worksheet,allowedFiles:allowed};
@@ -155,8 +174,8 @@ export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachme
 
 /** Older receipts without the requested scope cannot inform a new model turn. */
 export function scopedAttachmentTaskSteps(steps:PlatformTaskStep[],pdfScope:ReturnType<typeof requestedPdfRange>,
-  worksheetScope:ReturnType<typeof requestedWorkbookWorksheet>,allowedFiles?:ReadonlySet<string>):PlatformTaskStep[] {
-  if(!pdfScope&&!worksheetScope&&!allowedFiles)return steps;
+  worksheetScope:ReturnType<typeof requestedWorkbookWorksheet>,allowedFiles?:ReadonlySet<string>,excludedPdfIds?:ReadonlySet<string>):PlatformTaskStep[] {
+  if(!pdfScope&&!worksheetScope&&!allowedFiles&&!excludedPdfIds)return steps;
   const eligible=steps.filter(step=>{
     const read=step.result as (PdfReadWindow&{worksheetScope?:string;sheets?:string[];observedSheets?:string[];attachmentScopeRereadRequired?:boolean;pdfScopeRereadRequired?:boolean;excludedAttachmentHistoryDiscarded?:boolean})|undefined;
     if(read?.excludedAttachmentHistoryDiscarded===true)return false;
@@ -164,7 +183,7 @@ export function scopedAttachmentTaskSteps(steps:PlatformTaskStep[],pdfScope:Retu
       &&(read?.pdfScopeRereadRequired===true||read?.attachmentScopeRereadRequired===true))return false;
     if(step.plan.name!=='bambook_file_text'||step.result===undefined)return true;
     const fileId=step.plan.arguments.fileId;
-    if(typeof fileId==='string'&&allowedFiles&&!allowedFiles.has(fileId))return false;
+    if(typeof fileId==='string'&&(excludedPdfIds?.has(fileId)||allowedFiles&&!allowedFiles.has(fileId)))return false;
     const workbookInScope=typeof fileId==='string'&&worksheetScope?.workbookIds.includes(fileId);
     if(typeof fileId!=='string'||!workbookInScope&&pdfScope?.fileId!==fileId)return true;
     if(read?.error===true||read?.kind==='unreadable'||read?.kind==='unsupported')return !read.text;
