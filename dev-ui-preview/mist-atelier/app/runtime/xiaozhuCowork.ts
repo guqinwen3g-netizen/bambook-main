@@ -1,4 +1,5 @@
 import {withRequestDeadline} from './requestDeadline';
+import {answerFingerprint,saveTaskControls,type TaskControlIntent,type TaskControlRequest} from './xiaozhuControlRequests';
 /**
  * 小竹的 cowork（2026-11-07 定案）：对话里的每一条请求就是一项交给小竹的平台任务，
  * 小竹经平台 AI 与 MCP 业务工具办理，进度、追问和待确认事项回到同一条对话里；对话由服务端任务记录承载，换设备也在。
@@ -118,9 +119,10 @@ function mergeTaskUpdate(previous: AgentTaskView, next: AgentTaskView): AgentTas
   return previous.conversationId && !next.conversationId ? { ...next, conversationId: previous.conversationId } : next;
 }
 
-export type TaskControlState = { busy: boolean; error?: string };
+export type TaskControlState = { busy: boolean; error?: string; canCheckStop?: boolean; answerQuestionToCheck?: string };
+const CONTROL_FAILURE={answer:'回答未确认，可重试',cancel:'停止结果未确认，可重试'};
 
-export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string) {
+export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string, originTaskId?: string, savedControls?:Map<string,TaskControlRequest>, controlStorageScope?:string) {
   const base = workspaceId ? '/api/mist/workspaces/' + encodeURIComponent(workspaceId) : '';
   const [available, setAvailable] = React.useState(false), [cachedTasks, setTasks] = React.useState<AgentTaskView[]>([]);
   const [reportAccess, setReportAccess] = React.useState<{scope:string; restricted:Set<string>}>();
@@ -131,8 +133,17 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   currentTasks.current = tasks;
   const [checkingAvailability, setCheckingAvailability] = React.useState(true);
   const [loading, setLoading] = React.useState(true), [error, setError] = React.useState(''), [busy, setBusy] = React.useState(false), [more, setMore] = React.useState<string | undefined>(undefined);
-  const [staleTask, setStaleTask] = React.useState<{ scope: string; id: string }>();
+  const [staleProgress, setStaleProgress] = React.useState<{ scope: string; ids: ReadonlySet<string> }>();
+  const clearStaleProgress = React.useCallback((id: string) => setStaleProgress(old => {
+    if (old?.scope !== scope || !old.ids.has(id)) return old;
+    const ids = new Set(old.ids);
+    ids.delete(id);
+    return ids.size ? { scope, ids } : undefined;
+  }), [scope]);
   const live = React.useRef(scope); live.current = scope;
+  const origin = React.useRef(originTaskId); origin.current = originTaskId;
+  const trackedOrigin = React.useRef<{scope:string;id:string}|undefined>(undefined);
+  const deniedHistory = React.useRef(0);
   const version = React.useRef(0);
   const pending = React.useRef(new Map<string, PendingSubmission>());
   const [recoveredSubmissions, setRecoveredSubmissions] = React.useState<Array<PendingSubmission&{fingerprint:string}>>([]);
@@ -140,7 +151,19 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const [checkingReceipt,setCheckingReceipt] = React.useState(false);
   const sendRequest = React.useRef<AbortController | undefined>(undefined);
   const controlRequests = React.useRef(new Map<string,AbortController>());
-  const controlKeys = React.useRef(new Map<string,{ key:string; requestId:string }>());
+  const localControls=React.useMemo(()=>new Map<string,TaskControlRequest>(),[scope]);
+  const controlKeys=savedControls??localControls;
+  React.useEffect(()=>{
+    let changed=false;
+    for(const task of tasks){
+      const pending=controlKeys.get(task.id);
+      if(pending&&(task.version>pending.version||task.contentRestricted||task.canControl===false)) {
+        controlKeys.delete(task.id);
+        changed=true;
+      }
+    }
+    if(changed&&controlStorageScope)saveTaskControls(controlStorageScope,controlKeys);
+  },[controlKeys,controlStorageScope,tasks]);
   const [controls,setControls] = React.useState<Record<string,TaskControlState>>({});
   const [sendFailure, setSendFailure] = React.useState<{conversationId?: string; message: string}>();
   const sendError = !visibleConversationId || sendFailure?.conversationId === visibleConversationId ? sendFailure?.message ?? '' : '';
@@ -216,10 +239,15 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       const visible = page.items.filter(t => t.executor === 'platform' && (!own || t.identityId === own.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-THREAD_LIMIT);
       setTasks(old => {
         const previous = new Map(old.map(task => [task.id, task]));
-        return visible.map(task => {
+        const history = visible.map(task => {
           const prior = previous.get(task.id);
           return prior ? mergeTaskUpdate(prior, task) : task;
         });
+        // The exact source may be older than the bounded history, even on a successful list read.
+        const tracked = trackedOrigin.current;
+        const retained = tracked?.scope === bound && tracked.id === origin.current ? previous.get(tracked.id) : undefined;
+        return retained && (!own || retained.identityId === own.id) && !history.some(task => task.id === retained.id)
+          ? [...history, retained].sort((a, b) => a.createdAt.localeCompare(b.createdAt)) : history;
       });
       setMore(page.cursor);
       setLoading(false);
@@ -236,6 +264,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       // A failed read cannot establish that the task channel is unavailable, or replace a known conversation mode.
       if (current()) {
         if ([401,403,404].includes(Number((e as {status?:number})?.status))) {
+          deniedHistory.current++;trackedOrigin.current=undefined;
           setTasks([]);setMore(undefined);personalIdentity.current=undefined;lastAvailability.current=null;
         }
         setAvailable(lastAvailability.current?.scope===bound?lastAvailability.current.available:false);
@@ -249,7 +278,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if (current()) { setLoading(false); setCheckingAvailability(false); }
     }
   }, [base, enabled, scope, checkReceipts]);
-  React.useEffect(() => { restrictedReports.current = new Set(); setReportAccess(undefined); setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); setRecoveredSubmissions([]); setCheckingReceipt(false); setControls({}); controlKeys.current.clear(); setBusy(false); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); moreRead.current?.abort(); receiptRead.current?.abort(); receiptRead.current=undefined; sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [load,scope]);
+  React.useEffect(() => { restrictedReports.current = new Set(); setReportAccess(undefined); setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); setRecoveredSubmissions([]); setCheckingReceipt(false); setControls({});  setBusy(false); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); moreRead.current?.abort(); receiptRead.current?.abort(); receiptRead.current=undefined; sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [load,scope]);
   const openReportIds = React.useMemo(() => {
     if (!visibleConversationId) return '';
     const personal = cachedTasks.filter(task => !task.automationId);
@@ -328,18 +357,21 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const activeTasks = tasks.filter(t => COWORK_ACTIVE.includes(t.state));
   const foregroundId = activeTasks.filter(t => visibleConversationId && t.conversationId === visibleConversationId
     && (t.state === 'running' || t.state === 'queued')).at(-1)?.id;
-  const progressId = foregroundId ?? activeTasks.filter(t => visibleConversationId && t.conversationId === visibleConversationId).at(-1)?.id;
-  const progressStale = !!progressId && staleTask?.scope === scope && staleTask.id === progressId;
+  const staleProgressIds = staleProgress?.scope === scope ? staleProgress.ids : undefined;
   const backgroundIds = activeTasks.filter(t => t.id !== foregroundId).map(t => t.id).join(',');
   React.useEffect(() => {
     if ((!foregroundId && !backgroundIds) || !base || !available) return;
-    const controller = new AbortController();
     const background = backgroundIds ? backgroundIds.split(',') : [];
-    const inFlight = new Set<string>();
+    const inFlight = new Map<string, AbortController>();
     const retry = new Map<string, { delay: number; at: number }>();
     let lastBackground = 0;
+    const markStale = (ids: string[]) => setStaleProgress(old => {
+      const previous = old?.scope === scope ? old.ids : undefined;
+      if (previous && ids.every(id => previous.has(id))) return old;
+      return { scope, ids: new Set([...(previous ?? []), ...ids]) };
+    });
     const poll = () => {
-      if (controller.signal.aborted || live.current !== scope || document.visibilityState === 'hidden') return;
+      if (live.current !== scope || !navigator.onLine || document.visibilityState === 'hidden') return;
       const ids = foregroundId ? [foregroundId] : [];
       const now = Date.now();
       if (background.length && now - lastBackground >= 3000) {
@@ -348,34 +380,46 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       }
       for (const id of ids) {
         if (inFlight.has(id) || now < (retry.get(id)?.at ?? 0)) continue;
-        inFlight.add(id);
-        void readCoworkTask(base, id, controller.signal)
+        const request = new AbortController();
+        inFlight.set(id, request);
+        void readCoworkTask(base, id, request.signal)
           .then(next => {
-            if (controller.signal.aborted || live.current !== scope) return;
+            if (request.signal.aborted || live.current !== scope) return;
             retry.delete(id);
             setTasks(old => old.map(task => mergeTaskUpdate(task, next)));
-            if (progressId === id) setStaleTask(old => old?.scope === scope && old.id === id ? undefined : old);
+            clearStaleProgress(id);
           })
           .catch(() => {
-            if (controller.signal.aborted || live.current !== scope) return;
+            if (request.signal.aborted || live.current !== scope) return;
             const previous = retry.get(id);
             const delay = previous ? Math.min(TASK_RETRY_MAX_MS, previous.delay * 2) : TASK_RETRY_INTERVAL_MS;
             retry.set(id, { delay, at: Date.now() + delay });
-            if (progressId === id) setStaleTask(old => old?.scope === scope && old.id === id ? old : { scope, id });
+            markStale([id]);
           })
-          .finally(() => inFlight.delete(id));
+          .finally(() => { if (inFlight.get(id) === request) inFlight.delete(id); });
       }
     };
+    const abortReads = () => {
+      for (const request of inFlight.values()) request.abort();
+      inFlight.clear();
+    };
+    const offline = () => { abortReads(); markStale(foregroundId ? [foregroundId, ...background] : background); };
     const refreshVisible = () => { lastBackground = 0; void poll(); };
-    const timer = window.setInterval(() => void poll(), foregroundId ? 1000 : 3000);
+    const reconnect = () => { retry.clear(); refreshVisible(); };
+    const timer = window.setInterval(poll, foregroundId ? 1000 : 3000);
     document.addEventListener('visibilitychange', refreshVisible);
-    void poll();
+    window.addEventListener('offline', offline);
+    window.addEventListener('online', reconnect);
+    if (navigator.onLine) poll();
+    else offline();
     return () => {
-      controller.abort();
+      abortReads();
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', refreshVisible);
+      window.removeEventListener('offline', offline);
+      window.removeEventListener('online', reconnect);
     };
-  }, [foregroundId, backgroundIds, progressId, base, available, scope]);
+  }, [foregroundId, backgroundIds, base, available, scope, clearStaleProgress]);
   const send = async (text: string, history: AgentTaskView[] = [], conversationId?: string, intentRefs:AgentTaskIntentRef[]=[], files:File[]=[], attachmentRefs:ReadonlyArray<TaskAttachmentRef>=[]): Promise<AgentTaskView | null> => {
     const message = text.trim();
     if (!message || sendRequest.current || receiptRead.current || !base || loading || checkingAvailability || error || !available) return null;
@@ -459,12 +503,19 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     if (!item || live.current !== scope) return;
     setTasks(old => old.map(task => mergeTaskUpdate(task, item)));
   };
-  const refreshTask = async (taskId: string, signal: AbortSignal) => {
-    const bound = scope;
+  const track = (task: AgentTaskView) => setTasks(old => old.some(item=>item.id===task.id)
+    ? old.map(item=>mergeTaskUpdate(item,task)) : [...old,task]);
+  const refreshTask = async (taskId: string, signal: AbortSignal, {retainOrigin = false}: {retainOrigin?: boolean} = {}) => {
+    const bound = scope, denial = deniedHistory.current;
     const item = await readCoworkTask(base, taskId, signal);
     if (signal.aborted || live.current !== bound) return;
-    setStaleTask(old => old?.scope === bound && old.id === taskId ? undefined : old);
-    applyTaskUpdate(item);
+    if (deniedHistory.current !== denial) throw new Error('任务暂时无法核对');
+    clearStaleProgress(taskId);
+    if (retainOrigin && origin.current === item.id && item.executor === 'platform' && !item.automationId
+      && item.conversationId && item.state !== 'access_changed') {
+      trackedOrigin.current = {scope:bound,id:item.id};
+      track(item);
+    } else applyTaskUpdate(item);
     return item;
   };
   const loadMore = async () => {
@@ -494,51 +545,74 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       }
     }
   };
-  const controlTask = async (task:AgentTaskView, action:'answer'|'cancel', details:Record<string,string>, confirmed:(item:AgentTaskView)=>boolean) => {
+  const controlTask = async (task:AgentTaskView, intent:TaskControlIntent|TaskControlRequest) => {
     if (!base || !enabled || controlRequests.current.has(task.id)) return;
+    const {action}=intent;
+    const checkOnly='requestId' in intent;
+    if(checkOnly&&(intent.version!==task.version||task.contentRestricted||!task.canControl))return;
+    const failure = CONTROL_FAILURE[action];
     let controller = new AbortController();
     const isCurrent = () => live.current===scope && controlRequests.current.get(task.id)===controller;
     controlRequests.current.set(task.id,controller);
-    setControls(old=>({...old,[task.id]:{busy:true}}));
+    setControls(old=>({...old,[task.id]:{busy:true,...(checkOnly?{error:failure}:{})}}));
 
-    const body = {version:task.version,...details};
-    const key = JSON.stringify([action,body]);
-    const existing = controlKeys.current.get(task.id);
-    const requestId = existing?.key===key ? existing.requestId : crypto.randomUUID();
-    controlKeys.current.set(task.id,{key,requestId});
-    const failure = action==='cancel'?'停止结果未确认，可重试':'回答未确认，可重试';
+    let submitted:TaskControlRequest|undefined=checkOnly?intent:undefined;
     let error = '';
     const accept = (item:AgentTaskView) => {
       if (!isCurrent()) return;
       applyTaskUpdate(item);
-      controlKeys.current.delete(task.id);
+      controlKeys.delete(task.id);
+      if(controlStorageScope)saveTaskControls(controlStorageScope,controlKeys);
       window.dispatchEvent(new Event('bambook:agent-task-update'));
     };
-
+    const checkTask = async (request:TaskControlRequest) => {
+      const denial = deniedHistory.current;
+      const latest = await readCoworkTask(base,task.id,controller.signal);
+      const answer=request.action==='answer'
+        ? latest.questions?.find(question=>question.id===request.questionId&&question.answeredAt)?.answer : undefined;
+      const confirmed = request.action==='answer'
+        ? answer!==undefined&&(request.answer!==undefined
+          ? answer===request.answer : !!request.fingerprint&&await answerFingerprint(task.id,request.questionId,answer)===request.fingerprint)
+        : !COWORK_ACTIVE.includes(latest.state)&&latest.state!=='paused';
+      if (!isCurrent() || deniedHistory.current!==denial) return;
+      clearStaleProgress(task.id);
+      if (confirmed) {
+        accept(latest);
+        error = '';
+      } else applyTaskUpdate(latest);
+    };
     try {
+      if (checkOnly) {
+        error = failure;
+        await checkTask(intent);
+        return;
+      }
+      const {action,...details}=intent;
+      const existing=controlKeys.get(task.id);
+      const fingerprint=intent.action==='answer'?await answerFingerprint(task.id,intent.questionId,intent.answer):undefined;
+      if(!isCurrent())return;
+      const same=existing?.version===task.version&&(intent.action==='cancel'?existing.action==='cancel'
+        : existing.action==='answer'&&existing.questionId===intent.questionId
+          &&(existing.answer===intent.answer||!!fingerprint&&existing.fingerprint===fingerprint));
+      const requestId=same?existing.requestId:crypto.randomUUID();
+      submitted=intent.action==='cancel'?{action:'cancel',requestId,version:task.version}
+        : {...intent,requestId,version:task.version,fingerprint};
+      controlKeys.set(task.id,submitted);
+      if(controlStorageScope)saveTaskControls(controlStorageScope,controlKeys);
       const result = await withRequestDeadline(controller,HISTORY_READ_TIMEOUT_MS,failure,signal =>
         mistApiRequest(base+'/agent-tasks/'+encodeURIComponent(task.id)+'/'+action,{
-          method:'POST',body:JSON.stringify({requestId,...body}),signal,
+          method:'POST',body:JSON.stringify({requestId,version:task.version,...details}),signal,
         }) as Promise<{item:AgentTaskView}>);
       if (result.item?.id!==task.id) throw new Error(failure);
       accept(result.item);
     } catch (problem) {
-      if (!isCurrent()) return;
+      if (!isCurrent() || checkOnly) return;
       error = (problem as {status?:number})?.status===0 ? failure
         : problem instanceof Error ? problem.message : failure;
-      // A timeout has already aborted the write signal. The read has its own deadline.
       controller = new AbortController();
       controlRequests.current.set(task.id,controller);
-      try {
-        const latest = await readCoworkTask(base,task.id,controller.signal);
-        if (!isCurrent()) return;
-        applyTaskUpdate(latest);
-        if (confirmed(latest)) {
-          controlKeys.current.delete(task.id);
-          error = '';
-          window.dispatchEvent(new Event('bambook:agent-task-update'));
-        }
-      } catch { /* The original operation remains available for an exact retry. */ }
+      try { if(submitted)await checkTask(submitted); }
+      catch { /* The original operation remains available for an exact retry. */ }
     } finally {
       if (isCurrent()) {
         controlRequests.current.delete(task.id);
@@ -546,15 +620,29 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       }
     }
   };
-  const answer = (task:AgentTaskView,questionId:string,text:string) => {
-    const answer = text.trim();
-    return controlTask(task,'answer',{questionId,answer},item =>
-      !!item.questions?.some(question=>question.id===questionId&&question.answeredAt&&question.answer===answer));
+  const answer = (task:AgentTaskView,questionId:string,text:string) =>
+    controlTask(task,{action:'answer',questionId,answer:text.trim()});
+  const checkAnswer = (task:AgentTaskView,questionId:string) => {
+    const submitted=controlKeys.get(task.id);
+    if (submitted?.action==='answer'&&submitted.questionId===questionId)return controlTask(task,submitted);
   };
-  const cancel = (task:AgentTaskView) => controlTask(task,'cancel',{},item=>
-    !COWORK_ACTIVE.includes(item.state)&&item.state!=='paused');
+  const cancel = (task:AgentTaskView) => controlTask(task,{action:'cancel'});
+  const checkStop = (task:AgentTaskView) => {
+    const submitted=controlKeys.get(task.id);
+    if(submitted?.action==='cancel')return controlTask(task,submitted);
+  };
   const hasPendingSubmission = [...pending.current.values()].some(entry=>(entry.sourceConversationId??entry.conversationId)===visibleConversationId);
-  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls, hasPendingSubmission, recoveredSubmissions, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track: (task: AgentTaskView) => setTasks(old => old.some(item=>item.id===task.id)
-    ? old.map(item=>mergeTaskUpdate(item,task))
-    : [...old,task]) };
+  const visibleControls={...controls};
+  for(const task of tasks){
+    const pending=controlKeys.get(task.id),previous=controls[task.id];
+    const matching=pending&&pending.version===task.version&&!task.contentRestricted&&task.canControl!==false;
+    if(previous?.error&&!matching)visibleControls[task.id]={...previous,error:''};
+    if(!previous&&matching&&task.canControl)
+      visibleControls[task.id]={busy:false,error:CONTROL_FAILURE[pending.action]};
+    if(matching&&visibleControls[task.id]?.error) {
+      visibleControls[task.id]={...visibleControls[task.id],...(pending.action==='cancel'
+        ? {canCheckStop:true} : {answerQuestionToCheck:pending.questionId})};
+    }
+  }
+  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls:visibleControls, hasPendingSubmission, recoveredSubmissions, staleProgressIds, busy, send, refreshTask, answer, checkAnswer, cancel, checkStop, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track };
 }

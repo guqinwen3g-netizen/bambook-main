@@ -24,6 +24,12 @@ export type AgentTaskTrailItem = {
   taskAttachmentId?: string;
   /** A PDF page from the same authorized extraction window. */
   taskAttachmentPage?: number;
+  /** Checked PDF window for this original, including pages with no readable text. */
+  taskAttachmentPageRange?: {from:number;to:number};
+  /** Pages evidenced by this returned slice, including confirmed pages without text. */
+  taskAttachmentObservedPages?: number[];
+  /** Workbook tabs with content (or a confirmed empty state) in this returned slice. */
+  taskAttachmentObservedSheets?: string[];
   ref?: AgentTaskTrailSource;
   refs?: AgentTaskTrailSource[];
 };
@@ -49,6 +55,8 @@ export type AgentTaskView = {
   /** Server-observed worker state; it does not change the task lease. */
   runnerStatus?: 'heartbeat_stale' | 'awaiting_reclaim';
   executionStageSince?: string;
+  /** Start of the same-turn backup model attempt. */
+  modelFallbackSince?: string;
   executionIssue?:{code:'model_unavailable'|'model_response_invalid';retryAt?:string};
   /** Absent in older servers; questions and answers use the task's existing content visibility. */
   questions?:AgentTaskQuestion[];
@@ -58,6 +66,17 @@ export type AgentTaskView = {
   wakeReason?:'changed'|'deadline';
   requiredRead?:{type:string;id:string}|null;
 };
+export function agentTaskActivityText(value: string | undefined) {
+  if (!value || /\b(?:bma1|bmc1|bms1|bmt1|aft[12])[_.][A-Za-z0-9_-]+|\b(?:Bearer\s+|sk-)[A-Za-z0-9_-]{8,}/i.test(value)) return;
+  return value.replace(/[\u0000-\u001f\u007f\s]+/gu, ' ').trim() || undefined;
+}
+
+export function activeAgentTaskStep(task: Pick<AgentTaskView, 'state' | 'executionStage' | 'runnerStatus' | 'contentRestricted' | 'trail'>) {
+  if (task.state!=='running' || task.executionStage!=='tool' || task.runnerStatus || task.contentRestricted) return;
+  const last=task.trail?.at(-1);
+  if(last && last.completed===false && !last.failed) return agentTaskActivityText(last.label);
+}
+
 export type AgentTaskPage = { items: AgentTaskView[]; nextCursor: string | null };
 export const TASK_ACCESS_BATCH_LIMIT = 30;
 export type PersonalTaskAccess = { restrictedIds: string[] };
@@ -67,6 +86,8 @@ export type AgentTaskActivity = {
   name: string;
   state: 'queued' | 'running';
   executionStage?: AgentTaskView['executionStage'];
+  executionStageSince?: AgentTaskView['executionStageSince'];
+  modelFallbackSince?: AgentTaskView['modelFallbackSince'];
   runnerStatus?: AgentTaskView['runnerStatus'];
   retrying?: boolean;
   currentStep?: string;
