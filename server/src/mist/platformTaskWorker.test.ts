@@ -1108,6 +1108,40 @@ it.each([false,true])('re-reads only permitted pages after a wider legacy PDF re
  expect(result).toMatchObject({pageScopeStart:11,pageScopeLimit:15,range:{pageFrom:11,pageTo:15},hasMore:false});
 });
 
+it.each([false,true])('uses only the selected worksheet, including on resuming wider history (%s)', async legacy=>{
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>
+  tool('bambook_task',{action:'finish',outcome:'succeeded',result:'仅核对确认报价。'}));
+ const book=XLSX.utils.book_new();
+ XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([['DRAFT-USD-1800']]),'报价草案');
+ XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([['FINAL-EUR-2500']]),'确认报价');
+ const f=await fixture(complete);
+ vi.spyOn(f.worker,'wake').mockImplementation(()=>{});
+ f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'只核对确认报价',instructions:'请只读取 quote.xlsx 的「确认报价」工作表。'}))
+  .attach('attachments',XLSX.write(book,{type:'buffer',bookType:'xlsx'}),'quote.xlsx').expect(201)).body.item;
+ if(legacy)await f.local.database.$transaction(async db=>{
+  const {row,value}=await taskRecord(db,f.workspace.id,task.id),fileId=task.attachments[0].id;
+  const prior={id:'platform_legacy_workbook',at:new Date().toISOString(),plan:{name:'bambook_file_text',arguments:{fileId}},
+   result:{kind:'xlsx',file:{id:fileId},text:'DRAFT-USD-1800',observedSheets:['报价草案'],hasMore:false}};
+  const seeded=await db.mistCommandReceipt.updateMany({where:{id:row.id},data:{
+   result:{...row.result,__agentTask:{...value,checkpoint:'DRAFT-USD-1800',platform:{...value.platform,nextRunAt:Date.now(),steps:[
+    prior,{id:'platform_legacy_checkpoint',at:new Date().toISOString(),
+     plan:{name:'bambook_task',arguments:{action:'checkpoint',summary:'DRAFT-USD-1800'}},result:{item:{state:'running'}}},
+   ]}}},
+  }});
+  expect(seeded.count).toBe(1);
+ });
+ await f.drain();
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded'});
+ expect(complete).toHaveBeenCalledTimes(1);
+ const payload=complete.mock.calls[0][0].messages[0].content,{history}=JSON.parse(payload.slice(payload.indexOf('{')));
+ expect(payload).not.toContain('DRAFT-USD-1800');
+ expect(payload).toContain('FINAL-EUR-2500');
+ expect(history.recent.find((e:{name:string})=>e.name==='bambook_file_text').result)
+  .toMatchObject({worksheetScope:'确认报价',observedSheets:['确认报价'],complete:false});
+});
+
 it('pre-reads both text slices and the short tail of a dense PDF before calling the model',async()=>{
  const complete=vi.fn(async(model:LlmCompletionInput)=>{
   const content=model.messages[0].content as string,facts=JSON.parse(content.slice(content.indexOf('{')));

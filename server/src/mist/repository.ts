@@ -52,7 +52,7 @@ import type {AgentTaskActivity,PersonalTaskAccess} from '../shared/mistAgentTask
 import {markTaskNoticeRead,waitTaskUntil,platformTaskUsage,agentDailyUsage,assertDailyRoom} from './agentTasks';
 import {assertTaskBusinessRead,checkTaskCondition,type PlatformTaskScanCursor} from './agentTasks';
 import {prepareTaskCondition,taskConditionChanged} from './agentTaskConditions';
-import {requestedPdfRange,type PlatformTaskContext,type PlatformTaskPlan} from './platformTaskPlan';
+import {requestedPdfRange,requestedWorkbookWorksheet,type PlatformTaskContext,type PlatformTaskPlan} from './platformTaskPlan';
 import {assertConnection,listConnections,getConnection,createConnection,changeConnection,type MakeAgentLease} from './agentConnections';
 import {ensurePersonalIdentity,personalIdentityId,assertPersonalVoiceAvailable,assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceActorFromIdentity,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
 import { assertReceivingLease, receivingRecord, receivingView, setReceiving, claimReceiving, finishReceiving, blockReceiving, invalidateReceiving, dueReceiving, RECEIVE_LEASE_MS, RECEIVE_INTERVAL_MS, type MailSyncActor, type MailSyncLease, type ReceivingJob, receiveSource } from './mail/receiverRegistry';
@@ -2233,8 +2233,9 @@ export class MistRepository {
     const {files,instructions}=await this.privateTaskAttachments(prior,workspaceId);
     const taskFile=files.find(file=>file.id===fileId);
     const range=taskFile?requestedPdfRange(files,instructions):undefined;
+    const sheet=taskFile?requestedWorkbookWorksheet(files,instructions):undefined;
     const {file,bytes}=taskFile?{file:taskFile,bytes:await this.files.read(workspaceId,taskFile)}:await this.download(prior,workspaceId,fileId);
-    const result=await readFileTextWindow({workspaceId,fileId},file,bytes,maxChars,cursor,fileCache,range?.fileId===fileId?range:undefined);
+    const result=await readFileTextWindow({workspaceId,fileId},file,bytes,maxChars,cursor,fileCache,range?.fileId===fileId?range:undefined,sheet?.fileId===fileId?sheet.worksheet:undefined);
     // Parsing is asynchronous. Recheck live file access before releasing the result.
     const current=taskFile?{file,bytes:await this.files.read(workspaceId,file)}:await this.download(prior,workspaceId,fileId);
     if(taskFile&&!(await this.privateTaskAttachments(prior,workspaceId)).files.some(item=>item.id===fileId))fail('FILE_NOT_FOUND','附件不在当前任务内',404);
