@@ -51,6 +51,34 @@ it('shows live activity in the sidebar, opens its original task, and hides after
   await change();
   expect(card()).toBeNull();
 });
+it('hides offline activity immediately and shows only the fresh result on reconnect', async () => {
+  vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+  const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+  const task = { id:'task-a', name:'核对采购附件', state:'running', executionStage:'model' };
+  bridge.activity.mockResolvedValue({ items: [task] });
+  await mount();
+  const card = () => host.querySelector('.mist-side-ai');
+  expect(card()?.textContent).toContain('正在等待模型');
+  let finishOld: (value: unknown) => void = () => {};
+  bridge.activity.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }));
+  await act(async () => window.dispatchEvent(new Event('bambook:agent-task-update')));
+  const oldSignal = bridge.activity.mock.lastCall?.[1]?.signal as AbortSignal;
+
+  online.mockReturnValue(false);
+  await act(async () => window.dispatchEvent(new Event('offline')));
+  expect(oldSignal.aborted).toBe(true);
+  expect(card()).toBeNull();
+  await act(async () => window.dispatchEvent(new Event('bambook:agent-task-update')));
+  expect(bridge.activity).toHaveBeenCalledTimes(2);
+
+  online.mockReturnValue(true);
+  bridge.activity.mockResolvedValue({ items: [{ ...task, state:'queued', retrying:true }] });
+  await act(async () => window.dispatchEvent(new Event('online')));
+  expect(bridge.activity).toHaveBeenCalledTimes(3);
+  expect(card()?.textContent).toContain('等待模型重试');
+  await act(async () => finishOld({ items: [task] }));
+  expect(card()?.textContent).toContain('等待模型重试');
+});
 it('discards an activity response from a previous workspace before rendering the new sidebar', async () => {
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
   let complete!: (value: unknown) => void;
