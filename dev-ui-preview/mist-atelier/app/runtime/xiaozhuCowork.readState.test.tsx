@@ -183,3 +183,40 @@ it('releases a stalled paginated history read and ignores its late response afte
     vi.useRealTimers();
   }
 });
+
+it('checks the original task immediately when the browser reconnects during progress backoff', async () => {
+  vi.useFakeTimers();
+  const conversationId = 'conversation_reconnect';
+  const running = { ...task, conversationId, state: 'running', version: 2, result: '' };
+  const finished = { ...task, conversationId, version: 3 };
+  let connected = false;
+  const attempted = () => api.mock.calls.filter(([url]) => url.endsWith('/agent-tasks/task')).length;
+  try {
+    api.mockImplementation(async (url: string) => {
+      if (url.includes('/personal-agent/task-access?')) return { restrictedIds: [] };
+      if (url.endsWith('/agent-tasks')) return { items: [running], nextCursor: null };
+      if (url.endsWith('/agent-tasks/task')) {
+        if (!connected) throw new TypeError('Failed to fetch');
+        return { item: finished };
+      }
+      return loaded(url);
+    });
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+    await act(async () => root!.render(<View conversationId={conversationId} />));
+    await act(async () => vi.advanceTimersByTimeAsync(7000));
+    expect(attempted()).toBe(4);
+    expect(channel.progressStale).toBe(true);
+
+    connected = true;
+    await act(async () => window.dispatchEvent(new Event('online')));
+    expect(attempted()).toBe(5);
+    expect(channel.tasks[0]).toEqual(finished);
+    expect(channel.progressStale).toBe(false);
+    expect(api.mock.calls.filter(([url]) => url.endsWith('/agent-tasks'))).toHaveLength(1);
+    expect(api.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  } finally {
+    vi.useRealTimers();
+  }
+});

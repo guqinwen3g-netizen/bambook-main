@@ -351,13 +351,13 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const backgroundIds = activeTasks.filter(t => t.id !== foregroundId).map(t => t.id).join(',');
   React.useEffect(() => {
     if ((!foregroundId && !backgroundIds) || !base || !available) return;
-    const controller = new AbortController();
     const background = backgroundIds ? backgroundIds.split(',') : [];
-    const inFlight = new Set<string>();
+    const inFlight = new Map<string, AbortController>();
     const retry = new Map<string, { delay: number; at: number }>();
     let lastBackground = 0;
+    const markStale = (id: string) => setStaleTask(old => old?.scope === scope && old.id === id ? old : { scope, id });
     const poll = () => {
-      if (controller.signal.aborted || live.current !== scope || document.visibilityState === 'hidden') return;
+      if (live.current !== scope || !navigator.onLine || document.visibilityState === 'hidden') return;
       const ids = foregroundId ? [foregroundId] : [];
       const now = Date.now();
       if (background.length && now - lastBackground >= 3000) {
@@ -366,32 +366,44 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       }
       for (const id of ids) {
         if (inFlight.has(id) || now < (retry.get(id)?.at ?? 0)) continue;
-        inFlight.add(id);
-        void readCoworkTask(base, id, controller.signal)
+        const request = new AbortController();
+        inFlight.set(id, request);
+        void readCoworkTask(base, id, request.signal)
           .then(next => {
-            if (controller.signal.aborted || live.current !== scope) return;
+            if (request.signal.aborted || live.current !== scope) return;
             retry.delete(id);
             setTasks(old => old.map(task => mergeTaskUpdate(task, next)));
             if (progressId === id) setStaleTask(old => old?.scope === scope && old.id === id ? undefined : old);
           })
           .catch(() => {
-            if (controller.signal.aborted || live.current !== scope) return;
+            if (request.signal.aborted || live.current !== scope) return;
             const previous = retry.get(id);
             const delay = previous ? Math.min(TASK_RETRY_MAX_MS, previous.delay * 2) : TASK_RETRY_INTERVAL_MS;
             retry.set(id, { delay, at: Date.now() + delay });
-            if (progressId === id) setStaleTask(old => old?.scope === scope && old.id === id ? old : { scope, id });
+            if (progressId === id) markStale(id);
           })
-          .finally(() => inFlight.delete(id));
+          .finally(() => { if (inFlight.get(id) === request) inFlight.delete(id); });
       }
     };
+    const abortReads = () => {
+      for (const request of inFlight.values()) request.abort();
+      inFlight.clear();
+    };
+    const offline = () => { abortReads(); if (progressId) markStale(progressId); };
     const refreshVisible = () => { lastBackground = 0; void poll(); };
-    const timer = window.setInterval(() => void poll(), foregroundId ? 1000 : 3000);
+    const reconnect = () => { retry.clear(); refreshVisible(); };
+    const timer = window.setInterval(poll, foregroundId ? 1000 : 3000);
     document.addEventListener('visibilitychange', refreshVisible);
-    void poll();
+    window.addEventListener('offline', offline);
+    window.addEventListener('online', reconnect);
+    if (navigator.onLine) poll();
+    else offline();
     return () => {
-      controller.abort();
+      abortReads();
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', refreshVisible);
+      window.removeEventListener('offline', offline);
+      window.removeEventListener('online', reconnect);
     };
   }, [foregroundId, backgroundIds, progressId, base, available, scope]);
   const send = async (text: string, history: AgentTaskView[] = [], conversationId?: string, intentRefs:AgentTaskIntentRef[]=[], files:File[]=[], attachmentRefs:ReadonlyArray<TaskAttachmentRef>=[]): Promise<AgentTaskView | null> => {
