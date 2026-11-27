@@ -3,7 +3,7 @@ import React from 'react';
 import { ArrowDown, ArrowUp, AtSign, AudioLines, Mic, MicOff, Paperclip, PhoneOff, Square, X, CalendarClock, Landmark, Mail, ListTodo, Sparkles } from 'lucide-react';
 import { AIBadge, AssistantEyes, Icon, IconButton } from '../../../../../components/mist';
 import { uiText } from '../../../../../services/interfaceLanguage';
-import { TASK_ATTACHMENT_ACCEPT } from '../../../../../server/src/shared/mistTaskAttachments';
+import { TASK_ATTACHMENT_ACCEPT, taskAttachmentLabels } from '../../../../../server/src/shared/mistTaskAttachments';
 import type { usePersonalAgentVoice } from '../../runtime/personalAgentVoice';
 import type { AssistantAttachmentRef } from '../../runtime/assistantConversation';
 import { TASK_INSTRUCTION_LIMIT } from '../../runtime/xiaozhuCowork';
@@ -27,6 +27,7 @@ export function XiaozhuComposer({ value, onChange, onSend, ready, busy, working,
     ...files.map((file, index) => ({ key: 'new:' + index, name: file.name, remove: () => onRemoveFile(index) })),
     ...attachmentRefs.map(file => ({ key: file.fileId, name: file.name, remove: () => onRemoveAttachmentRef(file.fileId) })),
   ];
+  const attachmentLabels=taskAttachmentLabels(attachments);
   const hasFiles = (event: React.DragEvent) => Array.from(event.dataTransfer.types).includes('Files');
   const latestButton = onLatest && <IconButton icon={ArrowDown} label={uiText('回到最新')} onClick={onLatest} />;
   if (inCall) return <div className="mist-xz-composer mist-xz-call" data-state={voice.state}>
@@ -49,9 +50,9 @@ export function XiaozhuComposer({ value, onChange, onSend, ready, busy, working,
       if (acceptsFiles) onAddFiles?.(Array.from(event.dataTransfer.files));
     }}>
     {voice.state === 'error' && voice.error && <p className="mist-xz-note" role="alert">{uiText(voice.error)}</p>}
-    {!!attachments.length && <div className="mist-xz-sources" aria-label={uiText('附件')}>{attachments.map(file =>
-      <span key={file.key} className="mist-xz-source" data-attachment><Icon icon={Paperclip} size="xs" /><span title={file.name}>{file.name}</span>
-        <IconButton size="sm" icon={X} label={uiText('移除附件')+' '+file.name} disabled={busy} onClick={file.remove} />
+    {!!attachments.length && <div className="mist-xz-sources" aria-label={uiText('附件')}>{attachments.map((file,index) =>
+      <span key={file.key} className="mist-xz-source" data-attachment><Icon icon={Paperclip} size="xs" /><span title={attachmentLabels[index]}>{attachmentLabels[index]}</span>
+        <IconButton size="sm" icon={X} label={uiText('移除附件')+' '+attachmentLabels[index]} disabled={busy} onClick={file.remove} />
       </span>)}</div>}
     {sources.length > 0 && <div className="mist-xz-sources">{sources.map(s => <span key={s.id} className="mist-xz-source"><span>{uiText(s.label)}</span><IconButton size="sm" icon={X} label={uiText('移除 ' + s.label)} disabled={busy} onClick={() => onRemoveSource(s)} /></span>)}</div>}
     <textarea ref={field as React.RefObject<HTMLTextAreaElement>} rows={1} aria-label={uiText('向助手提问')} placeholder={placeholder} value={value} maxLength={TASK_INSTRUCTION_LIMIT} disabled={busy || disabled} onChange={e => onChange(e.target.value)} onKeyDown={e => {

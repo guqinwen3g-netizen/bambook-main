@@ -12,9 +12,9 @@ let host: HTMLDivElement, root: Root;
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; host = document.createElement('div'); document.body.append(host); root = createRoot(host); (URL as any).createObjectURL ??= () => 'blob:mock'; (URL as any).revokeObjectURL ??= () => {}; });
 afterEach(() => { act(() => root.unmount()); host.remove(); document.body.innerHTML = ''; });
 const flush = async () => { for (let i = 0; i < 6; i++) await act(async () => { await new Promise(r => setTimeout(r, 0)); }); };
-function mount(files: PreviewFile[], load: (f: PreviewFile) => Promise<Blob>, extra: { onDownload?: (f: PreviewFile) => void; initialPdfPage?:number } = {}) {
+function mount(files: PreviewFile[], load: (f: PreviewFile) => Promise<Blob>, extra: { onDownload?: (f: PreviewFile) => void; initialPdfPage?:number; initialSheetName?:string } = {}) {
   let index = 0; const onClose = vi.fn();
-  const render = () => act(() => root.render(<FilePreview files={files} index={index} onIndex={i => { index = i; render(); }} onClose={onClose} load={load} onDownload={extra.onDownload} initialPdfPage={extra.initialPdfPage} />));
+  const render = () => act(() => root.render(<FilePreview files={files} index={index} onIndex={i => { index = i; render(); }} onClose={onClose} load={load} onDownload={extra.onDownload} initialPdfPage={extra.initialPdfPage} initialSheetName={extra.initialSheetName} />));
   render(); return { onClose, get index() { return index; } };
 }
 const btn = (label: string) => [...document.body.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === label || b.textContent?.trim() === label) as HTMLButtonElement;
@@ -140,6 +140,31 @@ describe('附件预览浮层', () => {
     const tab = [...document.querySelectorAll('[role="tab"]')].find(t => t.textContent === '辅料') as HTMLButtonElement;
     await act(async () => tab.click());
     expect(document.querySelector('table.mist-viewer-table')!.textContent).toContain('主唛');
+  });
+  it.each([
+    ['辅料', '辅料'],
+    ['内部草稿', '尺寸表'],
+    ['内部备注', '尺寸表'],
+    [' 辅料', '尺寸表'],
+  ])('Excel：定位到精确匹配的可见工作表（%s）', async (initialSheetName, expected) => {
+    const book = XLSX.utils.book_new();
+    for (const name of ['内部草稿', '尺寸表', '辅料', '内部备注']) {
+      XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([[name + '内容']]), name);
+    }
+    XLSX.utils.book_set_sheet_visibility(book, '内部草稿', 1);
+    XLSX.utils.book_set_sheet_visibility(book, '内部备注', 2);
+    const bytes = XLSX.write(book, { type: 'array', bookType: 'xlsx' });
+    const blob = new Blob([bytes]);
+    blob.arrayBuffer ??= async () => bytes;
+    mount([{ id: 's', name: '用量.xlsx' }], async () => blob, { initialSheetName });
+    await flush();
+
+    expect(document.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(expected);
+    expect(document.querySelector('table.mist-viewer-table')?.textContent).toContain(expected + '内容');
+
+    const other = expected === '尺寸表' ? '辅料' : '尺寸表';
+    await act(async () => btn(other).click());
+    expect(document.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe(other);
   });
   it('不支持的格式不读取原件，说明原因并提供下载', async () => {
     const load = vi.fn(), onDownload = vi.fn();
