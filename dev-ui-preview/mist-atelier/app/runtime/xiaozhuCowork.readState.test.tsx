@@ -207,13 +207,13 @@ it('checks the original task immediately when the browser reconnects during prog
     await act(async () => root!.render(<View conversationId={conversationId} />));
     await act(async () => vi.advanceTimersByTimeAsync(7000));
     expect(attempted()).toBe(4);
-    expect(channel.progressStale).toBe(true);
+    expect(channel.staleProgressIds?.has('task')).toBe(true);
 
     connected = true;
     await act(async () => window.dispatchEvent(new Event('online')));
     expect(attempted()).toBe(5);
     expect(channel.tasks[0]).toEqual(finished);
-    expect(channel.progressStale).toBe(false);
+    expect(channel.staleProgressIds?.has('task') ?? false).toBe(false);
     expect(api.mock.calls.filter(([url]) => url.endsWith('/agent-tasks'))).toHaveLength(1);
     expect(api.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   } finally {

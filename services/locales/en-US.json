@@ -6652,6 +6652,7 @@
   "最多 6 个附件，单个不超过 8 MiB，总计不超过 24 MiB": "Up to 6 attachments, 8 MiB each and 24 MiB total",
   "图片无法读取或尺寸过大": "The image cannot be read or exceeds the size limit",
   "此文件类型暂不支持": "This file type is not supported",
+  "执行进度暂未更新": "Progress unavailable",
   "正在等待模型": "Waiting for the model",
   "等待模型重试": "Waiting to retry the model",
   "最早 {0} 秒后重试": "Retry in at least {0} seconds",

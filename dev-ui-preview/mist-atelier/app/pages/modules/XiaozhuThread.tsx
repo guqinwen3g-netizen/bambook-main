@@ -157,6 +157,7 @@ export type ThreadActions = {
   onVoiceTask?: (task: AgentTaskView, questionId?: string) => void;
   answerDraft?: {read:(taskId:string,questionId:string)=>string;write:(taskId:string,questionId:string,text:string)=>void};
   controls?: Record<string,TaskControlState>;
+  staleProgressIds?: ReadonlySet<string>;
   composerStopTaskId?: string;
   onRetry?: (task: AgentTaskView) => void;
   retryBlocked?: boolean;
@@ -219,11 +220,14 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
     const request = splitRequest(t.instructions), done = !active && t.state !== 'waiting_human', working = active && !asking && !pending.length;
     const retryable = done && !!request.trim() && t.state !== 'access_changed'
       && (!t.attachments?.length || (!!t.conversationId && ['succeeded','failed','cancelled'].includes(t.state)));
-    const retryAt = t.state === 'queued' && !t.runnerStatus ? t.executionIssue?.retryAt : undefined;
+    const progressStale = active && actions.staleProgressIds?.has(t.id);
+    const retryAt = !progressStale && t.state === 'queued' && !t.runnerStatus ? t.executionIssue?.retryAt : undefined;
+    const since = progressStale ? undefined : t.runnerStatus === 'heartbeat_stale' ? t.lastHeartbeatAt ?? undefined : t.executionStageSince;
     const hasSpecificStatus = t.runnerStatus || t.state === 'queued' || t.state === 'waiting_time'
       || t.state === 'waiting_condition' || (t.state === 'running' && t.executionStage === 'model');
-    const activeLabel = hasSpecificStatus ? xiaozhuTaskStatusLabel(t) : undefined;
-    const status = !active && t.state !== 'succeeded' ? <Pill tone={STATE[t.state][1]}>{uiText(STATE[t.state][0])}</Pill> : undefined;
+    const activeLabel = progressStale ? '执行进度暂未更新' : hasSpecificStatus ? xiaozhuTaskStatusLabel(t) : undefined;
+    const status = progressStale && !working ? <span role="status"><Pill tone="warn">{uiText('执行进度暂未更新')}</Pill></span>
+      : !active && t.state !== 'succeeded' ? <Pill tone={STATE[t.state][1]}>{uiText(STATE[t.state][0])}</Pill> : undefined;
     return <div className="mist-xz-turn" key={t.id} data-task-state={t.state} data-task-id={t.id}>
       {divider && <div className="mist-xz-day"><span>{dayLabel(t.createdAt)}</span></div>}
       <div className="mist-xz-user">{request}
@@ -236,7 +240,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         </div>}
       </div>
       <XiaozhuTurnShell status={status}>
-        {(!!t.trail?.length || working) && <Trail task={t} items={t.trail ?? []} active={working} activeLabel={activeLabel} retryAt={retryAt} recovering={!!t.runnerStatus} since={t.runnerStatus==='heartbeat_stale'?t.lastHeartbeatAt??undefined:t.executionStageSince} onOpen={actions.onOpenRecord} onPreviewAttachment={actions.onPreviewAttachment} />}
+        {(!!t.trail?.length || working) && <Trail task={t} items={t.trail ?? []} active={working} activeLabel={activeLabel} retryAt={retryAt} recovering={progressStale || !!t.runnerStatus} since={since} onOpen={actions.onOpenRecord} onPreviewAttachment={actions.onPreviewAttachment} />}
         <AnsweredQuestions questions={t.questions}/>
         {t.result && <XiaozhuMarkdown text={t.result} index={index} onOpen={actions.onOpenRecord} attachments={t.attachments}
           onOpenAttachment={actions.onPreviewAttachment ? file => actions.onPreviewAttachment?.(t, file) : undefined} />}

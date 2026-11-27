@@ -133,7 +133,13 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   currentTasks.current = tasks;
   const [checkingAvailability, setCheckingAvailability] = React.useState(true);
   const [loading, setLoading] = React.useState(true), [error, setError] = React.useState(''), [busy, setBusy] = React.useState(false), [more, setMore] = React.useState<string | undefined>(undefined);
-  const [staleTask, setStaleTask] = React.useState<{ scope: string; id: string }>();
+  const [staleProgress, setStaleProgress] = React.useState<{ scope: string; ids: ReadonlySet<string> }>();
+  const clearStaleProgress = React.useCallback((id: string) => setStaleProgress(old => {
+    if (old?.scope !== scope || !old.ids.has(id)) return old;
+    const ids = new Set(old.ids);
+    ids.delete(id);
+    return ids.size ? { scope, ids } : undefined;
+  }), [scope]);
   const live = React.useRef(scope); live.current = scope;
   const origin = React.useRef(originTaskId); origin.current = originTaskId;
   const trackedOrigin = React.useRef<{scope:string;id:string}|undefined>(undefined);
@@ -346,8 +352,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const activeTasks = tasks.filter(t => COWORK_ACTIVE.includes(t.state));
   const foregroundId = activeTasks.filter(t => visibleConversationId && t.conversationId === visibleConversationId
     && (t.state === 'running' || t.state === 'queued')).at(-1)?.id;
-  const progressId = foregroundId ?? activeTasks.filter(t => visibleConversationId && t.conversationId === visibleConversationId).at(-1)?.id;
-  const progressStale = !!progressId && staleTask?.scope === scope && staleTask.id === progressId;
+  const staleProgressIds = staleProgress?.scope === scope ? staleProgress.ids : undefined;
   const backgroundIds = activeTasks.filter(t => t.id !== foregroundId).map(t => t.id).join(',');
   React.useEffect(() => {
     if ((!foregroundId && !backgroundIds) || !base || !available) return;
@@ -355,7 +360,11 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     const inFlight = new Map<string, AbortController>();
     const retry = new Map<string, { delay: number; at: number }>();
     let lastBackground = 0;
-    const markStale = (id: string) => setStaleTask(old => old?.scope === scope && old.id === id ? old : { scope, id });
+    const markStale = (ids: string[]) => setStaleProgress(old => {
+      const previous = old?.scope === scope ? old.ids : undefined;
+      if (previous && ids.every(id => previous.has(id))) return old;
+      return { scope, ids: new Set([...(previous ?? []), ...ids]) };
+    });
     const poll = () => {
       if (live.current !== scope || !navigator.onLine || document.visibilityState === 'hidden') return;
       const ids = foregroundId ? [foregroundId] : [];
@@ -373,14 +382,14 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
             if (request.signal.aborted || live.current !== scope) return;
             retry.delete(id);
             setTasks(old => old.map(task => mergeTaskUpdate(task, next)));
-            if (progressId === id) setStaleTask(old => old?.scope === scope && old.id === id ? undefined : old);
+            clearStaleProgress(id);
           })
           .catch(() => {
             if (request.signal.aborted || live.current !== scope) return;
             const previous = retry.get(id);
             const delay = previous ? Math.min(TASK_RETRY_MAX_MS, previous.delay * 2) : TASK_RETRY_INTERVAL_MS;
             retry.set(id, { delay, at: Date.now() + delay });
-            if (progressId === id) markStale(id);
+            markStale([id]);
           })
           .finally(() => { if (inFlight.get(id) === request) inFlight.delete(id); });
       }
@@ -389,7 +398,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       for (const request of inFlight.values()) request.abort();
       inFlight.clear();
     };
-    const offline = () => { abortReads(); if (progressId) markStale(progressId); };
+    const offline = () => { abortReads(); markStale(foregroundId ? [foregroundId, ...background] : background); };
     const refreshVisible = () => { lastBackground = 0; void poll(); };
     const reconnect = () => { retry.clear(); refreshVisible(); };
     const timer = window.setInterval(poll, foregroundId ? 1000 : 3000);
@@ -405,7 +414,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       window.removeEventListener('offline', offline);
       window.removeEventListener('online', reconnect);
     };
-  }, [foregroundId, backgroundIds, progressId, base, available, scope]);
+  }, [foregroundId, backgroundIds, base, available, scope, clearStaleProgress]);
   const send = async (text: string, history: AgentTaskView[] = [], conversationId?: string, intentRefs:AgentTaskIntentRef[]=[], files:File[]=[], attachmentRefs:ReadonlyArray<TaskAttachmentRef>=[]): Promise<AgentTaskView | null> => {
     const message = text.trim();
     if (!message || sendRequest.current || receiptRead.current || !base || loading || checkingAvailability || error || !available) return null;
@@ -496,7 +505,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     const item = await readCoworkTask(base, taskId, signal);
     if (signal.aborted || live.current !== bound) return;
     if (deniedHistory.current !== denial) throw new Error('任务暂时无法核对');
-    setStaleTask(old => old?.scope === bound && old.id === taskId ? undefined : old);
+    clearStaleProgress(taskId);
     if (retainOrigin && origin.current === item.id && item.executor === 'platform' && !item.automationId
       && item.conversationId && item.state !== 'access_changed') {
       trackedOrigin.current = {scope:bound,id:item.id};
@@ -599,5 +608,5 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     if(!previous&&matching&&task.canControl)
       visibleControls[task.id]={busy:false,error:CONTROL_FAILURE[pending.action]};
   }
-  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls:visibleControls, hasPendingSubmission, recoveredSubmissions, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track };
+  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls:visibleControls, hasPendingSubmission, recoveredSubmissions, staleProgressIds, busy, send, refreshTask, answer, cancel, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track };
 }
