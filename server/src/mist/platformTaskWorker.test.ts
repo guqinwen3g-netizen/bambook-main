@@ -30,6 +30,31 @@ async function fixture(complete:(input:LlmCompletionInput)=>Promise<string>,opti
 }
 const tool=(name:string,args:Record<string,unknown>)=>JSON.stringify({name,arguments:args});
 
+it('sends one shared object-type definition and source receipts without duplicating the UI trail',async()=>{
+ let input:LlmCompletionInput|undefined;
+ const f=await fixture(async prompt=>{input=prompt;return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对模拟订单。'});});
+ const order=f.workspace.state.orders[0];
+ f.worker.start(3_600_000);
+ const {item:task}=(await f.human.post(f.base+'/personal-agent/tasks').send({
+  requestId:randomUUID(),name:'核对模拟订单',instructions:'只读核对模拟订单。',
+  intentRefs:[{kind:'orders',id:order.id}],
+ }).expect(201)).body;
+ await f.drain();
+ expect(input).toBeDefined();
+ const prompt=String(input!.messages[0].content);
+ const facts=JSON.parse(prompt.slice(prompt.indexOf('{"task":')));
+ expect(facts.task).not.toHaveProperty('trail');
+ expect(facts.history.recent).toEqual([expect.objectContaining({name:'bambook_get',result:expect.objectContaining({object:expect.objectContaining({id:order.id})})})]);
+ const system=input!.systemPrompt;
+ const catalog=JSON.parse(system.slice(system.lastIndexOf('工具：')+'工具：'.length));
+ expect(catalog.$defs.objectType.enum).toContain('order');
+ expect(catalog.tools.find((entry:{name:string})=>entry.name==='bambook_related').inputSchema.properties.relatedType)
+  .toMatchObject({$ref:'#/$defs/objectType',description:expect.any(String)});
+ const finished=await f.current(task.id);
+ expect(finished.state).toBe('succeeded');
+ expect(finished.trail).toEqual(expect.arrayContaining([expect.objectContaining({ref:expect.objectContaining({id:order.id})})]));
+});
+
 it('reports open personal task access without exposing reports or distinguishing inaccessible task IDs', async () => {
  const ceiling = { value: null as string[] | null };
  const finish = tool('bambook_task', {action:'finish',outcome:'succeeded',result:'private report'});

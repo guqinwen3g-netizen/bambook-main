@@ -103,6 +103,20 @@ const TOOLS = [
 class ToolInputError extends Error {}
 /** One bound catalog for both a standard task client and the platform model executor. */
 export function taskMcpTools(){return TOOLS.filter(t=>t.name!=='bambook_workspaces').map(t=>{const properties:Record<string,unknown>={...t.inputSchema.properties};delete properties.workspaceId;delete properties.taskId;return{...t,inputSchema:{...t.inputSchema,properties,required:(t.inputSchema.required??[]).filter(k=>!['workspaceId','taskId'].includes(k)),additionalProperties:false}};});}
+/** The platform prompt shares repeated definitions. The published MCP catalog keeps complete schemas. */
+export function platformTaskModelToolCatalog(){
+  const objectTypes=AGENT_OBJECT_TYPES.map(type=>type.type);
+  const serializedTypes=JSON.stringify(objectTypes);
+  const tools=taskMcpTools().map(tool=>{
+    const properties=Object.fromEntries(Object.entries(tool.inputSchema.properties).map(([key,shape])=>{
+      if(!shape||typeof shape!=='object'||!('enum' in shape)||JSON.stringify(shape.enum)!==serializedTypes)return [key,shape];
+      const {enum:_types,...details}=shape;
+      return [key,{...details,$ref:'#/$defs/objectType'}];
+    }));
+    return {...tool,inputSchema:{...tool.inputSchema,properties}};
+  });
+  return {$defs:{objectType:{type:'string',enum:objectTypes}},tools};
+}
 const need = (args: Record<string, unknown>, key: string) => { const v = args[key]; if (typeof v !== 'string' || !v.trim() || v.length > 300) throw new ToolInputError(`缺少参数 ${key}`); return v; };
 function commandOf(args: Record<string, unknown>) {
   const command = args.command as { type?: unknown; payload?: unknown } | undefined;
