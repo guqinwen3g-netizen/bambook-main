@@ -91,6 +91,41 @@ function quotationAmountScope(result: unknown) {
   };
 }
 
+type PdfReadWindow = {
+  kind?:string; error?:boolean; file?:{id?:string}; sourceHash?:string; pages?:number;
+  range?:{start:number;end:number;pageFrom:number;pageTo:number;textLimited?:boolean};
+  hasMore?:boolean; nextCursor?:string; nextPageFrom?:number; pagesWithoutText?:number[]; reason?:string;
+};
+
+/** Summarize checked physical pages only when every full window remains in the model context. */
+function checkedPdfCoverage(steps:PlatformTaskStep[]){
+  const coverage=new Map<string,{sourceHash:string;pages:number;checkedUntil:number;nextCursor?:string;pagesWithoutText:number[]}>();
+  for(const step of steps){
+    const {name,arguments:args}=step.plan;
+    const fileId=args.fileId;
+    if(name!=='bambook_file_text'||typeof fileId!=='string')continue;
+    const previous=coverage.get(fileId);
+    coverage.delete(fileId);
+    const read=step.result as PdfReadWindow|undefined,range=read?.range,missing=read?.pagesWithoutText??[];
+    if(step.compacted||read?.error||read?.kind!=='pdf'||read.file?.id!==fileId||typeof read.sourceHash!=='string'||!/^[a-f0-9]{64}$/.test(read.sourceHash)
+      ||!range||range.textLimited||range.start!==0||!Number.isSafeInteger(range.end)||range.end<0
+      ||!Number.isSafeInteger(range.pageFrom)||!Number.isSafeInteger(range.pageTo)||range.pageFrom<1||range.pageTo<range.pageFrom
+      ||typeof read.pages!=='number'||!Number.isSafeInteger(read.pages)||range.pageTo>read.pages||typeof read.hasMore!=='boolean'
+      ||!Array.isArray(missing)||missing.some(page=>!Number.isSafeInteger(page)||page<range.pageFrom||page>range.pageTo)
+      ||(read.reason&&!missing.length))continue;
+    if(read.hasMore
+      ? typeof read.nextCursor!=='string'||!read.nextCursor.startsWith('aft1.')||read.nextPageFrom!==range.pageTo+1||range.pageTo>=read.pages
+      : read.nextCursor!==undefined||range.pageTo!==read.pages)continue;
+    const head=args.cursor===undefined;
+    if(head?range.pageFrom!==1:!previous?.nextCursor||previous.nextCursor!==args.cursor
+      ||previous.sourceHash!==read.sourceHash||previous.pages!==read.pages||range.pageFrom!==previous.checkedUntil+1)continue;
+    coverage.set(fileId,{sourceHash:read.sourceHash,pages:read.pages,checkedUntil:range.pageTo,
+      nextCursor:read.nextCursor,pagesWithoutText:[...new Set([...(head?[]:previous?.pagesWithoutText??[]),...missing])]});
+  }
+  return [...coverage].flatMap(([fileId,read])=>read.checkedUntil===read.pages&&!read.nextCursor
+    ? [{fileId,pagesChecked:read.pages,pagesWithoutText:read.pagesWithoutText}] : []);
+}
+
 /** Model context is explicit about omitted history; it cannot silently become full-read evidence. */
 export function platformTaskHistory(steps:PlatformTaskStep[]){
   let remaining=240_000;const recent:Array<{operationId:string;name:string;arguments:unknown;result:unknown;compacted?:boolean;quotationAmountScope?:ReturnType<typeof quotationAmountScope>}>=[];
@@ -114,7 +149,9 @@ export function platformTaskHistory(steps:PlatformTaskStep[]){
     recent.unshift(item);remaining-=size;
     if(key&&!duplicateOf)readResults.set(key,step.id);
   }
-  return{recent,omitted:steps.filter(s=>s.result!==undefined).length-recent.length,operations:steps.map(s=>({operationId:s.id,name:s.plan.name,completed:s.result!==undefined}))};
+  const included=new Set(recent.map(item=>item.operationId));
+  const pdfCoverage=checkedPdfCoverage(steps.filter(step=>included.has(step.id)));
+  return{recent,...(pdfCoverage.length?{pdfCoverage}:{}),omitted:steps.filter(s=>s.result!==undefined).length-recent.length,operations:steps.map(s=>({operationId:s.id,name:s.plan.name,completed:s.result!==undefined}))};
 }
 /** Keep durable completed-operation references, while bounding the registry and future prompts. */
 export function compactPlatformTaskSteps(input:PlatformTaskStep[]):PlatformTaskStep[]{
