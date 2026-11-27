@@ -1022,6 +1022,8 @@ it('researches a PDF, workbook and image together with a selected order, keeping
    expect(input).toContain('bambook_get');
    expect(input).toContain('"imageSources":["sample.png"]');
    expect(model.systemPrompt).toContain('bambook_file_text 不提取图片文字');
+   expect(model.systemPrompt).toContain('摘要、明细和未核实项都沿用事实的实际出处');
+   expect(model.systemPrompt).toContain('分别写明在哪份附件看到什么、哪份附件缺少依据');
    expect(model.images).toEqual([{name:'sample.png',url:expect.stringMatching(/^data:image\/jpeg;base64,/)}]);
    turns++;
    if(turns===1){
