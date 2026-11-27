@@ -949,12 +949,12 @@ it.each([false,true])('keeps a valid development draft proposal visible across r
  await f.command('agent.proposal.confirm',{id:proposal.id});await f.drain();const after=(await f.human.get(f.base).expect(200)).body.workspace;expect(after.state.drafts.find((d:any)=>d.id===draft).values.style).toBe('NW-31');expect(after.state.drafts).toHaveLength(direct.state.drafts.length);expect(after.state.devs).toHaveLength(direct.state.devs.length);
 });
 
-function pdf(text:string, pageCount=1,dense=false){
+function pdf(text:string, pageCount=1,dense=false,noTextPage?:number){
  const font=3+2*pageCount;
  const objects=['<</Type/Catalog/Pages 2 0 R>>',`<</Type/Pages/Kids[${Array.from({length:pageCount},(_,i)=>`${3+2*i} 0 R`).join(' ')}]/Count ${pageCount}>>`];
  for(let page=1;page<=pageCount;page++){
    const extra=dense?Array.from({length:5},(_,index)=>`BT /F1 9 Tf 10 ${120+14*index} Td (Page ${page}, line ${index}: synthetic detailed invoice terms) Tj ET`).join('\n'):'';
-   const stream=`BT /F1 12 Tf 10 50 Td (${page===pageCount?text:`Page ${page}: general terms`}) Tj ET\n${extra}`;
+   const stream=page===noTextPage?'':`BT /F1 12 Tf 10 50 Td (${page===pageCount?text:`Page ${page}: general terms`}) Tj ET\n${extra}`;
    objects.push(`<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 ${dense?200:100}]/Contents ${2+2*page} 0 R/Resources<</Font<</F1 ${font} 0 R>>>>>>`, `<</Length ${stream.length}>>\nstream\n${stream}\nendstream`);
  }
  objects.push('<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>');
@@ -962,6 +962,24 @@ function pdf(text:string, pageCount=1,dense=false){
  const xref=out.length;out+=`xref\n0 ${objects.length+1}\n0000000000 65535 f \n${offsets.map(o=>String(o).padStart(10,'0')+' 00000 n \n').join('')}trailer\n<</Size ${objects.length+1}/Root 1 0 R>>\nstartxref\n${xref}\n%%EOF`;
  return Buffer.from(out);
 }
+
+it('keeps pages without text outside the report text ranges for the same original', async () => {
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>
+  tool('bambook_task',{action:'finish',outcome:'succeeded',result:'第 3 页无可提取文字。'}));
+ const f=await fixture(complete);f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'核对有缺字页的 PDF',instructions:'概括 PDF 正文。'}))
+  .attach('attachments',pdf('Closing reference',5,false,3),'mixed.pdf').expect(201)).body.item;
+ await f.drain();
+ expect((await f.current(task.id)).state).toBe('succeeded');
+ expect(complete).toHaveBeenCalledTimes(1);
+ const [input]=complete.mock.calls[0];
+ const text=input.messages[0].content;
+ const {history}=JSON.parse(text.slice(text.indexOf('{')));
+ expect(history.pdfCoverage).toEqual([{fileId:'attachment_1',pagesChecked:5,pagesWithoutText:[3]}]);
+ expect(history.pdfTextPageRanges).toEqual([{fileId:'attachment_1',ranges:[{from:1,to:2},{from:4,to:5}]}]);
+ expect(input.systemPrompt).toContain('同一句明示排除无可提取文字的页');
+});
 
 it('reads the short tail of each PDF before asking the model to prepare the report', async () => {
  const complete = vi.fn(async (_input: LlmCompletionInput) =>

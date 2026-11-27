@@ -119,13 +119,14 @@ type PdfReadWindow = {
   kind?:string; error?:boolean; file?:{id?:string}; sourceHash?:string; pages?:number;
   range?:{start:number;end:number;pageFrom:number;pageTo:number;textLimited?:boolean};
   hasMore?:boolean; nextCursor?:string; nextPageFrom?:number; pagesWithoutText?:number[]; reason?:string;
+  text?:string; pageTextSpans?:PdfPageTextSpan[];
 };
 
 type PdfContinuation = {cursor:string;from:number;offset:number;to?:number};
 
 /** Track coverage only across an exact continuation chain for the same original. */
 function pdfReadCoverage(steps:PlatformTaskStep[]){
-  const coverage=new Map<string,{sourceHash:string;pages:number;next?:PdfContinuation;pagesWithoutText:number[]}>();
+  const coverage=new Map<string,{sourceHash:string;pages:number;next?:PdfContinuation;pagesWithoutText:number[];textPages:Set<number>}>();
   for(const step of steps){
     const {name,arguments:args}=step.plan;
     const fileId=args.fileId;
@@ -156,7 +157,15 @@ function pdfReadCoverage(steps:PlatformTaskStep[]){
         next={cursor:read.nextCursor,from:read.nextPageFrom,offset:0};
       }
     }else if(read.nextCursor!==undefined||range.textLimited||range.pageTo!==read.pages)continue;
-    coverage.set(fileId,{sourceHash:read.sourceHash,pages:read.pages,next,
+    const textPages=new Set(head?[]:previous?.textPages);
+    if(typeof read.text==='string'&&Array.isArray(read.pageTextSpans)){
+      for(const span of read.pageTextSpans){
+        if(span&&Number.isSafeInteger(span.page)&&span.page>=range.pageFrom&&span.page<=range.pageTo
+          &&Number.isSafeInteger(span.start)&&Number.isSafeInteger(span.end)&&span.start>=0
+          &&span.end>span.start&&span.end<=read.text.length&&read.text.slice(span.start,span.end).trim())textPages.add(span.page);
+      }
+    }
+    coverage.set(fileId,{sourceHash:read.sourceHash,pages:read.pages,next,textPages,
       pagesWithoutText:[...new Set([...(head?[]:previous?.pagesWithoutText??[]),...missing])]});
   }
   return coverage;
@@ -211,7 +220,20 @@ export function platformTaskHistory(steps:PlatformTaskStep[]){
       ...(unreadFrom<=read.pages?{unreadPages:{from:unreadFrom,to:read.pages}}:{}),
     }];
   });
+  const pdfTextPageRanges=[...coverage].flatMap(([fileId,read])=>{
+    if(!read.pagesWithoutText.length)return [];
+    const missing=new Set(read.pagesWithoutText);
+    const ranges:Array<{from:number;to:number}>=[];
+    for(const page of [...read.textPages].sort((a,b)=>a-b)){
+      if(missing.has(page))continue;
+      const last=ranges.at(-1);
+      if(last&&last.to+1===page)last.to=page;
+      else ranges.push({from:page,to:page});
+    }
+    return ranges.length?[{fileId,ranges}]:[];
+  });
   return{recent,...(pdfCoverage.length?{pdfCoverage}:{}),...(pdfPendingCoverage.length?{pdfPendingCoverage}:{}),
+    ...(pdfTextPageRanges.length?{pdfTextPageRanges}:{}),
     omitted:steps.filter(s=>s.result!==undefined).length-recent.length,operations:steps.map(s=>({operationId:s.id,name:s.plan.name,completed:s.result!==undefined}))};
 }
 /** Keep durable completed-operation references, while bounding the registry and future prompts. */
