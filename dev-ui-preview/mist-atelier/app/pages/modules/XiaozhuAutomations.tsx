@@ -13,6 +13,7 @@ type Rule = { id: string; name: string; trigger: Trigger; time: string; instruct
 type RuleDraft = Pick<Rule,'trigger'|'name'|'instructions'|'time'>;
 type RuleIntent = {requestId:string;draft:RuleDraft};
 type RuleChange = {id:string;version:number} & ({kind:'toggle';enabled:boolean}|{kind:'delete'});
+type UnconfirmedRuleChange = {scope:string;afterRead:number;change:RuleChange};
 const TRIGGERS: Array<{ value: Trigger; label: string; name: string; instructions: string }> = [
   { value: 'new_mail', label: '收到新邮件', name: '新邮件整理', instructions: '读取新邮件，总结要点，判断是否需要跟进，并起草回复。' },
   { value: 'new_receipt', label: '收到新到账', name: '到账核对', instructions: '核对新到账，匹配对应应收，说明依据和需要人工确认的地方。' },
@@ -48,7 +49,9 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
   const [pending,setPending]=React.useState<{scope:string;intent:RuleIntent}>();
   const activeIntent=React.useRef<RuleIntent|undefined>(undefined);
   const mutation=React.useRef<AbortController|undefined>(undefined);
-  const uncertainChange=React.useRef<{scope:string;change:RuleChange}|undefined>(undefined);
+  const [unconfirmedChanges,setUnconfirmedChanges]=React.useState<UnconfirmedRuleChange[]>([]);
+  const unconfirmedHere=unconfirmedChanges.filter(entry=>entry.scope===scope);
+  const unconfirmedNames=rules?.filter(rule=>unconfirmedHere.some(({change})=>change.id===rule.id)).map(rule=>rule.name).join('、');
   const pendingHere=pending?.scope===scope?pending.intent:undefined;
   const remember=(intent?:RuleIntent)=>{
     activeIntent.current=intent;
@@ -63,14 +66,13 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
     activeIntent.current=restored;
     setPending(restored?{scope,intent:restored}:undefined);
     setDraft(restored?.draft??null);
-    uncertainChange.current=undefined;
+    setUnconfirmedChanges([]);
     setRules(null);setExpandedRuns({});setError('');setReadError('');setBusy(false);
     return()=>{mutation.current?.abort();mutation.current=undefined;listing.current?.abort();readGeneration.current++;};
   },[scope]);
   const load = React.useCallback(async () => {
     if (!base) return;
     const generation = ++readGeneration.current;
-    const checking=uncertainChange.current;
     const controller=new AbortController();
     listing.current?.abort();
     listing.current=controller;
@@ -82,13 +84,15 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
       if (generation !== readGeneration.current || liveScope.current!==scope) return;
       setRules(result.items);
       setReadError('');
-      if(checking?.scope===scope&&uncertainChange.current===checking){
-        const {change}=checking;
-        const currentRule=result.items.find(rule=>rule.id===change.id);
-        const observed=change.kind==='delete'?!currentRule:
-          !!currentRule&&Number.isSafeInteger(currentRule.version)&&currentRule.version>change.version&&currentRule.enabled===change.enabled;
-        if(observed){uncertainChange.current=undefined;setError('');}
-      }
+      setUnconfirmedChanges(previous=>{
+        const remaining=previous.filter(({scope:bound,afterRead,change})=>{
+          if(bound!==scope||generation<=afterRead)return true;
+          const currentRule=result.items.find(rule=>rule.id===change.id);
+          if(change.kind==='delete')return !!currentRule;
+          return !currentRule||!Number.isSafeInteger(currentRule.version)||currentRule.version<=change.version||currentRule.enabled!==change.enabled;
+        });
+        return remaining.length===previous.length?previous:remaining;
+      });
     } catch (e) {
       if (generation !== readGeneration.current || liveScope.current!==scope) return;
       if (e instanceof Error && 'status' in e && [401, 403, 404].includes(Number(e.status))) setRules(null);
@@ -123,15 +127,21 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
     const controller=new AbortController();
     mutation.current=controller;
     const current=()=>liveScope.current===scope&&mutation.current===controller;
-    uncertainChange.current=undefined;setBusy(true);setError('');
+    setBusy(true);setError('');
+    const otherChanges=(previous:UnconfirmedRuleChange[])=>previous.filter(entry=>entry.scope!==scope||entry.change.id!==change.id);
     try {
       const result=await withRequestDeadline(controller,10_000,'规则操作结果待核对',run);
-      if(current())apply(result);
+      if(current()){
+        apply(result);
+        setUnconfirmedChanges(otherChanges);
+      }
     } catch (problem) {
       if(current()){
         const status=(problem as {status?:number})?.status;
-        if(!status||status===408||status>=500)uncertainChange.current={scope,change};
-        setError(status===409?'规则已更新，请核对后重试':problem instanceof Error?problem.message:'操作未完成');
+        if(!status||status===408||status>=500){
+          const afterRead=readGeneration.current;
+          setUnconfirmedChanges(previous=>[...otherChanges(previous),{scope,change,afterRead}]);
+        } else setError(status===409?'规则已更新，请核对后重试':problem instanceof Error?problem.message:'操作未完成');
       }
     } finally {
       if(current()){
@@ -147,7 +157,7 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
     const controller=new AbortController();
     mutation.current=controller;
     const isCurrent=()=>liveScope.current===scope&&mutation.current===controller;
-    uncertainChange.current=undefined;remember(intent);setBusy(true);setError('');
+    remember(intent);setBusy(true);setError('');
     try {
       const result=await withRequestDeadline(controller,10_000,'规则开启结果待核对',signal=>
         mistApiRequest(base,{method:'POST',signal,body:JSON.stringify({...intent.draft,enabled:true,requestId:intent.requestId})}) as Promise<{item:Rule}>);
@@ -183,6 +193,7 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
   return <Drawer open={open} onClose={onClose} size="lg" title={uiText('自动')} tone="ai" footer={draft ? undefined : <Button icon={Plus} variant="primary" onClick={start}>{uiText('新建规则')}</Button>}>
     <div className="mist-col">
       {readError && <FailureNotice title={uiText("规则读取失败")} detail={readError} retry={loading ? undefined : () => void load()} retryLabel="重新读取" />}
+      {unconfirmedHere.length>0&&<Banner tone="warn" title={uiText('规则操作结果待核对')}>{unconfirmedNames||undefined}</Banner>}
       {error&&!pendingHere&&<Banner tone="bad" title={uiText(error)} />}
       {draft && <div className="mist-col">
         {pendingHere&&!busy&&<Banner tone="warn" title={uiText('规则开启结果待核对')}>

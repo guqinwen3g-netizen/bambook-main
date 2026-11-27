@@ -81,6 +81,7 @@ it('uses an authorized list to reconcile only the exact delete target',async()=>
   await act(async()=>button('删除 每日汇总').click());
   expect(document.body.textContent).toContain('规则读取失败');
   expect(document.body.textContent).toContain('规则操作结果待核对');
+  expect(document.body.textContent).not.toContain('每日汇总');
   await act(async()=>button('重新读取').click());
   expect(document.body.textContent).not.toContain('每日汇总');
   expect(document.body.textContent).toContain('其他规则');
@@ -88,6 +89,49 @@ it('uses an authorized list to reconcile only the exact delete target',async()=>
   const writes=seam.api.mock.calls.filter(([,init])=>init?.method==='DELETE');
   expect(writes).toHaveLength(1);
   expect(writes[0][0]).toMatch(/\/r1\?expectedVersion=1$/);
+});
+it('keeps one rule pending when a different rule is deleted successfully',async()=>{
+  rules=[rule(),rule({id:'r2',name:'其他规则'})];
+  seam.api.mockImplementation(async(_url:string,init?:RequestInit)=>{
+    if(init?.method==='PATCH')throw Object.assign(Error('规则操作结果待核对'),{status:0});
+    if(init?.method==='DELETE'){
+      rules=rules.filter(item=>item.id!=='r2');
+      return {removed:true};
+    }
+    return {items:rules};
+  });
+  await paint();
+  await act(async()=>getByRole(document.body,'switch',{name:'开启 每日汇总'}).click());
+  expect(document.body.textContent).toContain('规则操作结果待核对');
+  await act(async()=>button('删除 其他规则').click());
+  expect(document.body.textContent).not.toContain('其他规则');
+  expect(document.body.textContent).toContain('规则操作结果待核对');
+  expect(getByRole(document.body,'status').textContent).toContain('每日汇总');
+  expect(seam.api.mock.calls.filter(([,init])=>['PATCH','DELETE'].includes(init?.method))).toHaveLength(2);
+});
+it('clears only the matching result when two rule changes are awaiting verification',async()=>{
+  rules=[rule(),rule({id:'r2',name:'其他规则'})];
+  let failNextRead=false;
+  seam.api.mockImplementation(async(url:string,init?:RequestInit)=>{
+    if(init?.method==='PATCH'){
+      if(url.endsWith('/r2')){
+        rules=rules.map(item=>item.id==='r2'?{...item,enabled:false,version:2}:item);
+        failNextRead=true;
+      }
+      throw Object.assign(Error('规则操作结果待核对'),{status:0});
+    }
+    if(failNextRead){failNextRead=false;throw Object.assign(Error('规则读取暂不可用'),{status:503});}
+    return {items:rules};
+  });
+  await paint();
+  await act(async()=>getByRole(document.body,'switch',{name:'开启 每日汇总'}).click());
+  await act(async()=>getByRole(document.body,'switch',{name:'开启 其他规则'}).click());
+  const notices=()=>getAllByRole(document.body,'status').find(el=>el.textContent?.includes('规则操作结果待核对'))!;
+  expect(notices().textContent).toContain('每日汇总、其他规则');
+  await act(async()=>button('重新读取').click());
+  expect(notices().textContent).toContain('每日汇总');
+  expect(notices().textContent).not.toContain('其他规则');
+  expect(seam.api.mock.calls.filter(([,init])=>init?.method==='PATCH')).toHaveLength(2);
 });
 it('refreshes the newer rule after a stale pause or delete instead of applying either change', async()=>{
   rules=[rule()];
