@@ -24,6 +24,12 @@ export type AgentTaskTrailItem = {
   taskAttachmentId?: string;
   /** A PDF page from the same authorized extraction window. */
   taskAttachmentPage?: number;
+  /** Checked PDF window for this original, including pages with no readable text. */
+  taskAttachmentPageRange?: {from:number;to:number};
+  /** Pages evidenced by this returned slice, including confirmed pages without text. */
+  taskAttachmentObservedPages?: number[];
+  /** Workbook tabs with content (or a confirmed empty state) in this returned slice. */
+  taskAttachmentObservedSheets?: string[];
   ref?: AgentTaskTrailSource;
   refs?: AgentTaskTrailSource[];
 };
@@ -49,6 +55,8 @@ export type AgentTaskView = {
   /** Server-observed worker state; it does not change the task lease. */
   runnerStatus?: 'heartbeat_stale' | 'awaiting_reclaim';
   executionStageSince?: string;
+  /** Start of the same-turn backup model attempt. */
+  modelFallbackSince?: string;
   executionIssue?:{code:'model_unavailable'|'model_response_invalid';retryAt?:string};
   /** Absent in older servers; questions and answers use the task's existing content visibility. */
   questions?:AgentTaskQuestion[];
@@ -67,6 +75,8 @@ export type AgentTaskActivity = {
   name: string;
   state: 'queued' | 'running';
   executionStage?: AgentTaskView['executionStage'];
+  executionStageSince?: AgentTaskView['executionStageSince'];
+  modelFallbackSince?: AgentTaskView['modelFallbackSince'];
   runnerStatus?: AgentTaskView['runnerStatus'];
   retrying?: boolean;
   currentStep?: string;

@@ -68,10 +68,12 @@ export type FilePreviewProps = {
   load: (file: PreviewFile) => Promise<Blob>; onDownload?: (file: PreviewFile) => Promise<void> | void;
   /** One-based PDF page for this opening. Omit when switching to a different attachment. */
   initialPdfPage?: number;
+  /** Exact visible workbook sheet name for this opening. Omit when switching attachments. */
+  initialSheetName?: string;
 };
 
 /** 附件预览浮层：大尺寸查看，支持多附件左右切换、图片/PDF 缩放、下载。 */
-export function FilePreview({ files, index, onIndex, onClose, load, onDownload, initialPdfPage }: FilePreviewProps) {
+export function FilePreview({ files, index, onIndex, onClose, load, onDownload, initialPdfPage, initialSheetName }: FilePreviewProps) {
   const ref = React.useRef<HTMLDivElement>(null);
   const id = React.useId();
   const file = files[index];
@@ -139,7 +141,7 @@ export function FilePreview({ files, index, onIndex, onClose, load, onDownload, 
             {onDownload && <Button icon={Download} onClick={() => void download()}>{uiText("下载原件")}</Button>}
           </div>} /></div>
           : !blob ? <Loading />
-          : <Renderer key={file.id} kind={info.kind} blob={blob} name={file.name} zoom={zoom} rotate={rotate} onFitScale={setFitScale} onPages={setPages} onFail={setError} initialPdfPage={initialPdfPage} />}
+          : <Renderer key={file.id} kind={info.kind} blob={blob} name={file.name} zoom={zoom} rotate={rotate} onFitScale={setFitScale} onPages={setPages} onFail={setError} initialPdfPage={initialPdfPage} initialSheetName={initialSheetName} />}
       </div>
     </div></Portal>;
 }
@@ -149,7 +151,7 @@ function Unsupported({ reason, onDownload }: { reason?: string; onDownload?: () 
   return <div className="mist-viewer-center"><EmptyState icon={FileQuestion} title={uiText("此格式暂不支持在线预览")} description={uiText(reason)} action={onDownload ? <Button icon={Download} onClick={onDownload}>{uiText("下载原件")}</Button> : undefined} /></div>;
 }
 
-type RendererProps = { kind: PreviewKind; blob: Blob; name: string; zoom: Zoom; rotate: number; onFitScale: (v: number) => void; onPages: (n: number) => void; onFail: (msg: string) => void; initialPdfPage?: number };
+type RendererProps = { kind: PreviewKind; blob: Blob; name: string; zoom: Zoom; rotate: number; onFitScale: (v: number) => void; onPages: (n: number) => void; onFail: (msg: string) => void; initialPdfPage?: number; initialSheetName?: string };
 function Renderer(p: RendererProps) {
   switch (p.kind) {
     case 'image': return <ImageView {...p} />;
@@ -323,7 +325,7 @@ function DocxView({ blob, onFail }: RendererProps) {
 
 const MAX_ROWS = 1000, MAX_COLS = 60;
 const colName = (i: number) => { let s = ''; i += 1; while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
-function SheetView({ blob, name, onFail }: RendererProps) {
+function SheetView({ blob, name, onFail, initialSheetName }: RendererProps) {
   const [book, setBook] = React.useState<{ names: string[]; rows: Record<string, string[][]>; truncated: Record<string, boolean> } | null>(null), [sheet, setSheet] = React.useState('');
   React.useEffect(() => {
     let live = true;
@@ -340,7 +342,12 @@ function SheetView({ blob, name, onFail }: RendererProps) {
           truncated[n] = used.length > MAX_ROWS || used.some(r => r.length > MAX_COLS);
           rows[n] = used.slice(0, MAX_ROWS).map(r => r.slice(0, MAX_COLS).map(v => String(v ?? '')));
         }
-        if (!live) return; setBook({ names: wb.SheetNames, rows, truncated }); setSheet(wb.SheetNames[0] || '');
+        if (!live) return;
+        const openingSheets = initialSheetName === undefined
+          ? wb.SheetNames
+          : wb.SheetNames.filter((_, index) => !wb.Workbook?.Sheets?.[index]?.Hidden);
+        setBook({ names: wb.SheetNames, rows, truncated });
+        setSheet(openingSheets.find(sheetName => sheetName === initialSheetName) ?? openingSheets[0] ?? '');
       } catch { if (live) onFail('表格无法解析，请下载后用 Excel 打开'); }
     })();
     return () => { live = false; };

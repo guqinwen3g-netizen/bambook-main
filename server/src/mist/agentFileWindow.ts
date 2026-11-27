@@ -26,6 +26,9 @@ export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:
  let end=Math.min(content.length,p.offset+limit);
  if(end<content.length&&/[\uD800-\uDBFF]/.test(content[end-1]??''))end--;
  const text=content.slice(p.offset,end);
+ const pageTextSpans=raw.pageTextSpans?.filter(span=>span.end>p.offset&&span.start<end).map(span=>({
+  page:span.page,start:Math.max(span.start,p.offset)-p.offset,end:Math.min(span.end,end)-p.offset,
+ }));
  const extractionLimited=raw.text.length>TEXT_WINDOW_MAX || raw.truncated&&!morePages;
  const next=readable&&end<content.length?{...p,offset:end}:readable&&morePages&&!extractionLimited?{...p,page:raw.window!.end+1,offset:0}:undefined;
  const fromStart=p.page===1&&p.offset===0,hasMore=!!next;
@@ -38,6 +41,8 @@ export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:
   }:{})},
   ...(raw.pages!==undefined?{pages:raw.pages}:{}),...(raw.sheets?{sheets:raw.sheets}:{}),
   ...(raw.pagesWithoutText?.length?{pagesWithoutText:raw.pagesWithoutText}:{}),
+  ...(raw.kind==='xlsx'?{observedSheets:raw.sheetTextSpans?.filter(span=>span.end>p.offset&&span.start<end).map(span=>span.name)??[]}:{}),
+  ...(pdf?{pageTextSpans:pageTextSpans??[]}:{}),
   ...(raw.reason?{reason:raw.reason}:extractionLimited?{reason:'正文超过安全提取范围，当前片段不能代表完整原件'}:{}),
   ...(hasMore?{readHint:'用同一 fileId 和 nextCursor 调用 bambook_file_text 继续读取；累计范围连续且 sourceHash 一致才可认定没有漏读。'}:!fromStart?{readHint:'本段已到可提取范围末尾，但仅是片段；须与此前相同 sourceHash 的连续范围一起核对，不代表此前部分已读取。'}:{})};
 }

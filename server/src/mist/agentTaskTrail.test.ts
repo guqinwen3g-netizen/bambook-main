@@ -87,7 +87,7 @@ it('opens only the original confirmed by a read within the current task attachme
     {...read(taskFile.id,taskFile),compacted:true},
     read(workspaceFile.id,workspaceFile),
   ],[taskFile]);
-  expect(entries[0]).toMatchObject({taskAttachmentId:taskFile.id,taskAttachmentPage:22,failed:true});
+  expect(entries[0]).toMatchObject({taskAttachmentId:taskFile.id,taskAttachmentPage:22,taskAttachmentPageRange:{from:21,to:23},failed:true});
   expect(entries.slice(1).every(entry=>!entry.taskAttachmentId&&!('taskAttachmentPage' in entry))).toBe(true);
 });
 
