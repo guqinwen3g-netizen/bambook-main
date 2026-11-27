@@ -89,15 +89,31 @@ function Trail({ task, items, active, activeLabel, since, recovering, onOpen, on
   </div>;
 }
 
-function Question({ task, onAnswer, busy }: { task: AgentTaskView; onAnswer: (task: AgentTaskView, id: string, text: string) => void; busy?: boolean }) {
-  const [text, setText] = React.useState('');
+function Question({ task, onAnswer, busy, draft }: { task: AgentTaskView; onAnswer: (task: AgentTaskView, id: string, text: string) => void; busy?: boolean;draft?:ThreadActions['answerDraft'] }) {
+  const [localText, setLocalText] = React.useState('');
   const open = (task.questions ?? []).find(q => !q.answeredAt);
   if (!open || !task.canControl) return null;
+  const text = draft?.read(task.id,open.id) ?? localText;
+  const change=(value:string)=>draft?draft.write(task.id,open.id,value):setLocalText(value);
   const send = () => { if (text.trim()&&!busy) onAnswer(task, open.id, text); };
   return <div className="mist-xz-card" data-tone="ask"><div className="mist-xz-card-h"><Icon icon={HelpCircle} size="sm" /><b>{uiText('小竹想先确认')}</b></div>
     <p>{open.question}</p>
-    <div className="mist-xz-answer"><input aria-label={uiText('回答小竹')} value={text} maxLength={2000} disabled={busy} placeholder={uiText('输入回答')} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />
+    <div className="mist-xz-answer"><input aria-label={uiText('回答小竹')} value={text} maxLength={2000} disabled={busy} placeholder={uiText('输入回答')} onChange={e => change(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />
       <Button size="sm" variant="ai" loading={busy} disabled={busy||!text.trim()} onClick={send}>{uiText('回答')}</Button></div></div>;
+}
+
+function AnsweredQuestions({questions}: {questions:AgentTaskView['questions']}) {
+  const answered=questions?.flatMap(({id,question,answer,answeredAt})=>answeredAt&&answer?[{id,question,answer,answeredAt}]:[])??[];
+  if(!answered.length)return null;
+  return <div className="mist-xz-card">
+    <div className="mist-xz-card-h"><Icon icon={Check} size="sm"/><b>{uiText('资料已补充')}</b></div>
+    {answered.map(question=><div key={question.id} className="mist-col">
+      <p>{question.question}</p>
+      <div><span className="mist-label">{uiText('本人答复')}</span>
+        <time className="mist-xz-time" dateTime={question.answeredAt}>{clock(question.answeredAt)}</time></div>
+      <p>{question.answer}</p>
+    </div>)}
+  </div>;
 }
 
 function ProposalCard({ proposal, onOpen, onDecide, onRecover, blocked }: {
@@ -132,6 +148,7 @@ export type ThreadActions = {
   onAnswer: (task: AgentTaskView, id: string, text: string) => void;
   onCancel: (task: AgentTaskView) => void;
   onVoiceTask?: (task: AgentTaskView, questionId?: string) => void;
+  answerDraft?: {read:(taskId:string,questionId:string)=>string;write:(taskId:string,questionId:string,text:string)=>void};
   controls?: Record<string,TaskControlState>;
   composerStopTaskId?: string;
   onRetry?: (task: AgentTaskView) => void;
@@ -212,12 +229,13 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
       </div>
       <XiaozhuTurnShell status={status}>
         {(!!t.trail?.length || working) && <Trail task={t} items={t.trail ?? []} active={working} activeLabel={activeLabel} recovering={!!t.runnerStatus} since={t.runnerStatus==='heartbeat_stale'?t.lastHeartbeatAt??undefined:t.executionStageSince} onOpen={actions.onOpenRecord} onPreviewAttachment={actions.onPreviewAttachment} />}
+        <AnsweredQuestions questions={t.questions}/>
         {t.result && <XiaozhuMarkdown text={t.result} index={index} onOpen={actions.onOpenRecord} attachments={t.attachments}
           onOpenAttachment={actions.onPreviewAttachment ? file => actions.onPreviewAttachment?.(t, file) : undefined} />}
         {active && t.checkpoint && !t.result && !working && <p className="mist-xz-note">{t.checkpoint}</p>}
         {!active && t.state !== 'succeeded' && !t.result && t.checkpoint && <p className="mist-xz-note">{t.checkpoint}</p>}
         {!!produced.length && actions.onOpenFile && <ProducedFiles proposals={produced} onOpen={actions.onOpenFile} />}
-        {asking && <Question key={openQuestion?.id} task={t} onAnswer={actions.onAnswer} busy={control?.busy}/>}
+        {asking && <Question key={openQuestion?.id} task={t} onAnswer={actions.onAnswer} busy={control?.busy} draft={actions.answerDraft}/>}
         {control?.error&&(active||t.state==='paused')&&<p className="mist-xz-note" role="status">{uiText(control.error)}</p>}
         {pending.map(p => <ProposalCard key={p.id} proposal={p} onOpen={actions.onProposal} onDecide={actions.onDecide}
           blocked={actions.proposalsBlocked} onRecover={actions.pendingProposalId===p.id?actions.onRecoverProposal:undefined}/>)}
