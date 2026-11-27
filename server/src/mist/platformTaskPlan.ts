@@ -140,7 +140,10 @@ function pdfReadCoverage(steps:PlatformTaskStep[]){
 /** Give the model physical page identities without sending the same excerpt twice. */
 function modelFileRead(result:unknown) {
   if(!result||typeof result!=='object')return result;
-  const read=result as {kind?:string;nextCursor?:unknown;text?:string;pageTextSpans?:PdfPageTextSpan[]};
+  // Binary integrity is checked by the repository. Models only need sourceHash to join excerpts.
+  const {sha256:_binaryDigest,notice:_repeatedNotice,...read}=result as {
+    sha256?:string;notice?:string;kind?:string;nextCursor?:unknown;text?:string;pageTextSpans?:PdfPageTextSpan[];
+  };
   const cursor=typeof read.nextCursor==='string'?{nextCursor:'next'}:{};
   if(read.kind!=='pdf'||typeof read.text!=='string'||!read.pageTextSpans?.length)return {...read,...cursor};
   const {text,pageTextSpans,...metadata}=read;
