@@ -110,6 +110,65 @@ it('checks connection metadata on the next visible poll after a transient failur
  }finally{vi.useRealTimers();vi.restoreAllMocks();}
 });
 
+it('keeps the loaded task pages through refresh and rechecks access to older rows',async()=>{
+ vi.useFakeTimers();
+ vi.spyOn(document,'hidden','get').mockReturnValue(false);
+ const api=seam.api.getMockImplementation()!;
+ const recent={...row(),name:'当前一页的任务'};
+ const older={...row(),id:'second-task',name:'旧一页的报告'};
+ let refreshed=false;
+ const cursors:string[]=[];
+ seam.api.mockImplementation((url:string,init?:RequestInit)=>{
+  if(url.endsWith('/agent-tasks'))return Promise.resolve({items:[recent],nextCursor:refreshed?'fresh-cursor':'earlier-cursor'});
+  const cursor=new URL(url,'http://local.test').searchParams.get('cursor');
+  if(cursor){
+   cursors.push(cursor);
+   return Promise.resolve({items:[refreshed?{...older,name:'Agent任务',state:'access_changed',contentRestricted:true}:older],nextCursor:null});
+  }
+  return api(url,init);
+ });
+ try{
+  act(paint);await flush();
+  await click(getByRole(host,'button',{name:'加载更多'}));
+  expect(getByText(host,older.name)).toBeTruthy();
+  refreshed=true;
+  await act(async()=>vi.advanceTimersByTimeAsync(10_000));
+  expect(cursors).toEqual(['earlier-cursor','fresh-cursor']);
+  expect(getByText(host,'当前一页的任务')).toBeTruthy();
+  expect(getByText(host,'Agent任务')).toBeTruthy();
+  expect(host.textContent).not.toContain(older.name);
+  expect(queryByRole(host,'button',{name:'加载更多'})).toBeNull();
+ }finally{vi.useRealTimers();vi.restoreAllMocks();}
+});
+
+it('lets a pending older page finish without the automatic refresh aborting it',async()=>{
+ vi.useFakeTimers();
+ vi.spyOn(document,'hidden','get').mockReturnValue(false);
+ const api=seam.api.getMockImplementation()!;
+ let reply:(value:unknown)=>void=()=>{};
+ let signal:AbortSignal|undefined,firstPageReads=0;
+ seam.api.mockImplementation((url:string,init?:RequestInit)=>{
+  if(url.endsWith('/agent-tasks')){
+   firstPageReads++;return Promise.resolve({items:[row()],nextCursor:'older'});
+  }
+  if(url.endsWith('?cursor=older')){
+   signal=init?.signal??undefined;
+   return new Promise(resolve=>{reply=resolve;});
+  }
+  return api(url,init);
+ });
+ try{
+  act(paint);await flush();
+  await act(async()=>vi.advanceTimersByTimeAsync(7_000));
+  await click(getByRole(host,'button',{name:'加载更多'}));
+  await act(async()=>vi.advanceTimersByTimeAsync(3_000));
+  expect(signal?.aborted).toBe(false);
+  expect(firstPageReads).toBe(1);
+  await act(async()=>reply({items:[{...row(),id:'second',name:'已加载旧任务'}],nextCursor:null}));
+  expect(getByText(host,'已加载旧任务')).toBeTruthy();
+ }finally{vi.useRealTimers();vi.restoreAllMocks();}
+});
+
 it('returns the task detail to its original automation rule when closed',async()=>{
  seam.routeId='task';seam.automationId='rule-a';
  seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:{...row(),automationId:'rule-a'}}:url.includes('agent-identities')?{items:[identity()]}:{items:[],nextCursor:null}));
