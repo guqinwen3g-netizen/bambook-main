@@ -73,3 +73,27 @@ it('adds pasted files once, permits clipboard text, and keeps unavailable drafts
     host.remove();
   }
 });
+
+
+it('announces submission independently from running tasks and prevents a second send', async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host), stop = vi.fn(), send = vi.fn();
+  try {
+    await act(async () => root.render(<XiaozhuComposer value="上传中的截图" onChange={() => {}} onSend={send}
+      ready={false} busy working onStop={stop} submissionStatus="正在提交任务" sources={[]}
+      onRemoveSource={() => {}} onAttach={() => {}} files={[]} onRemoveFile={() => {}} voice={{ state:'idle' } as any}
+      attachmentRefs={[]} onRemoveAttachmentRef={() => {}} voiceAvailable={false} field={{ current:null }} placeholder="提问" />));
+    expect(host.querySelector('[role=status]')?.textContent).toBe('正在提交任务');
+    expect(host.querySelector('button[aria-label="停止生成"]')).toBeNull();
+    const submit = host.querySelector<HTMLButtonElement>('button[aria-label="发送"]');
+    expect(submit?.disabled).toBe(true);
+    await act(async () => submit?.click());
+    expect(send).not.toHaveBeenCalled();
+    expect(stop).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+  }
+});
