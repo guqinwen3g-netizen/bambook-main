@@ -1015,6 +1015,8 @@ it('reads the short tail of each PDF before asking the model to prepare the repo
 it.each([
  {pages:26,request:'请核对 long.pdf，续读到第 26 页并确认末页编号。',last:26,readCount:2},
  {pages:23,request:'这次只核对 long.pdf 的前 20 页，不要续读第 21 页及之后。',last:20,readCount:1},
+ {pages:26,request:'请核对 long.pdf 开头的条款。这次不要核对末页。',last:20,readCount:1},
+ {pages:23,request:'先核对 long.pdf 的前 20 页，末页留到下一轮。',last:20,readCount:1},
 ])('prefetches within the requested PDF range ($pages pages)',async ({pages,request,last,readCount})=>{
  const complete=vi.fn(async (_input:LlmCompletionInput)=>
   tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对指定范围。'}));

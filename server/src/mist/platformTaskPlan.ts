@@ -41,10 +41,11 @@ export function platformTaskAttachmentHandles(attachments: AgentTaskView['attach
 
 /** Pre-read a short PDF or an explicitly requested last page within one additional window. */
 export function shortPdfContinuationPlan(attachments: AgentTaskView['attachments'] = [], steps: PlatformTaskStep[], instructions = ''): PlatformTaskPlan | undefined {
-  const limitedRange = /(?:只|仅)[^。；;\n]{0,48}(?:前[ \t]*[1-9]\d*[ \t]*页|第[ \t]*[1-9]\d*[ \t]*(?:至|到|[-–—])[ \t]*[1-9]\d*[ \t]*页)/u;
-  const noContinuation = /(?:不要|无需|不必|暂不|不)[ \t]*(?:续读|继续读|再读)|\b(?:only the first|do not continue reading)\b/i;
+  const limitedRange = /(?:只|仅|先)[^。；;\n]{0,48}(?:前[ \t]*[1-9]\d*[ \t]*页|第[ \t]*[1-9]\d*[ \t]*(?:至|到|[-–—])[ \t]*[1-9]\d*[ \t]*页)/u;
+  const noContinuation = /(?:不要|无需|无须|不用|不必|暂不|先不|别|不)[ \t]*(?:续读|继续读|再读|(?:阅读|核对|读取|确认|检查|查看|看|读)[^。；;，,\n]{0,28}(?:末页|最后一页|尾段|后续页|第[ \t]*[1-9]\d*[ \t]*页))|\b(?:only the first|do not continue reading|(?:do not|don't) (?:read|check|review) (?:the )?(?:last|final) page|skip (?:the )?(?:last|final) page)\b/i;
+  const tailDeferred = /(?:末页|最后一页|尾段|后续页)[ \t]*[，,]?[ \t]*(?:暂不|先不|稍后|留待|留到)/u;
   const onlyOnePage = /(?:只|仅)[ \t]*(?:核对|查看|读取|读(?!核对))[^。；;\n]{0,32}第[ \t]*[1-9]\d*[ \t]*页|\bonly page[ \t]+[1-9]\d*\b/i;
-  if (limitedRange.test(instructions) || onlyOnePage.test(instructions) || noContinuation.test(instructions)) return;
+  if (limitedRange.test(instructions) || onlyOnePage.test(instructions) || noContinuation.test(instructions) || tailDeferred.test(instructions)) return;
   const pdfFiles = attachments.filter(file=>file.mimeType==='application/pdf'||/\.pdf$/i.test(file.name));
   const requestedPages = [...instructions.matchAll(/(?:读到|核对|确认|查看|检查)[ \t]*第[ \t]*([1-9]\d*)[ \t]*页/gu)].map(match=>Number(match[1]));
   const requestedTail = /(?:核对|读取|查看|检查|确认)[^。；;\n]{0,28}(?:末页|最后一页)/u.test(instructions);
