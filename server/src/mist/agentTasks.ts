@@ -333,7 +333,7 @@ export async function acknowledgePlatformStep(db:any,actor:AgentActor,lease:Agen
 }
 /** Release only this completed local runner; human stop/pause or a revoked grant always wins. */
 export type PlatformTaskReleaseIssue = 'model_unavailable' | 'model_timeout' | 'model_response_invalid' | 'daily_limit';
-export async function releasePlatformTask(db:any,actor:AgentActor,lease:AgentTaskLease,issue:PlatformTaskReleaseIssue|undefined,now:number){
+export async function releasePlatformTask(db:any,actor:AgentActor,lease:AgentTaskLease,issue:PlatformTaskReleaseIssue|undefined,now:number,providerRetryAt?:number){
   await lockTaskRecord(db,lease.workspaceId,lease.taskId);const{row,value:c}=await assertTaskLease(db,actor,lease,now);
   if(c.executor!=='platform'||actor.agentExecutor!=='platform'||!c.platform)fail('FORBIDDEN','请使用平台任务执行器',403);
   if(issue==='daily_limit'){
@@ -345,7 +345,10 @@ export async function releasePlatformTask(db:any,actor:AgentActor,lease:AgentTas
   // The first full deadline already spaced out requests. Fast errors and repeated failures retain the existing backoff.
   const retryDelay = issue === 'model_timeout' && failures === 1 ? 5000
     : issue ? Math.min(300_000, 10_000 * 2 ** Math.min(failures, 5)) : 1000;
-  const retryAt = now + retryDelay, paused = !!issue && failures >= 3;
+  const defaultRetryAt = now + retryDelay;
+  const retryAt = issue && providerRetryAt !== undefined && Number.isSafeInteger(providerRetryAt)
+    ? Math.min(c.expiresAt, Math.max(defaultRetryAt,providerRetryAt)) : defaultRetryAt;
+  const paused = !!issue && failures >= 3;
   const visibleIssue = issue === 'model_timeout' ? 'model_unavailable' : issue;
   const requestId=randomUUID(),action=issue?(paused?'model_paused':'model_retry'):'recovering',n={...next(c,now,action,requestId,[issue??'interrupted']),state:paused?'paused' as const:'queued' as const,controlVersion:c.controlVersion+(paused?1:0),runtimeUsedMs:usedRuntime(c,now),lease:undefined,platform:{...c.platform,nextRunAt:retryAt,modelFallbackAt:undefined,retryAt:issue&&!paused?retryAt:undefined,issue:visibleIssue,failures}};
   if(issue)n.checkpoint=(issue==='model_response_invalid'?'模型响应无效':'模型暂不可用')+(paused?'，任务已暂停；恢复后可从原步骤继续。':'，稍后核对原步骤重试。');

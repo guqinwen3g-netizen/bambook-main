@@ -1,7 +1,7 @@
 import type { FileTextWindowCache } from './agentFileWindow';
 import { isTaskImage, taskAttachmentLabels } from '../shared/mistTaskAttachments';
 import{randomUUID}from'node:crypto';
-import{createLlmCompleter,type LlmCompletionInput}from'../ai/llmProviders';
+import{createLlmCompleter,LlmProviderRetryError,type LlmCompletionInput}from'../ai/llmProviders';
 import{getMistAssistantStatus}from'./assistant';
 import{handleMcpMessage,MCP_SOURCE_RULES,platformTaskModelToolCatalog,type McpRepository}from'./agentMcp';
 import type{AgentActor}from'./agentDelegation';
@@ -151,6 +151,7 @@ export class MistPlatformTaskWorker{
     try{return await Promise.race([this.complete({...input,signal:child.signal}),cancelled]);}finally{clearTimeout(timer);signal.removeEventListener('abort',stop);child.signal.removeEventListener('abort',onAbort);}
   }
   private async perform(job:PlatformTaskJob,abort:AbortController){
+    let providerRetryAt:number|undefined;
     let actor:AgentActor|null=null,phase:'model'|'tool'|'store'='store',issue:PlatformTaskReleaseIssue|undefined,pulse:ReturnType<typeof setInterval>|undefined,pulsing=false;
     try{
       actor=await this.repository.claimPlatformTask(job,this.id,this.options.makeCredential);if(!actor)return;
@@ -228,9 +229,15 @@ export class MistPlatformTaskWorker{
       }
     }catch(error:any){
       if(!actor){await this.repository.deferPlatformTaskJob(job).catch(()=>this.options.onError?.('PLATFORM_TASK_DEFER_FAILED'));return;}
-      if(!abort.signal.aborted){issue=/^MODEL_PLAN_/.test(String(error?.message))?'model_response_invalid':phase==='model'&&error instanceof PlatformModelTimeout?'model_timeout':phase==='model'||error?.message==='MODEL_UNAVAILABLE'?'model_unavailable':undefined;this.options.onError?.(issue?'PLATFORM_TASK_MODEL_RETRY':'PLATFORM_TASK_RECOVERY_REQUIRED');}
+      if(!abort.signal.aborted){
+        if(phase==='model'&&error instanceof LlmProviderRetryError)providerRetryAt=error.retryNotBefore;
+        issue=/^MODEL_PLAN_/.test(String(error?.message))?'model_response_invalid'
+          :phase==='model'&&error instanceof PlatformModelTimeout?'model_timeout'
+          :phase==='model'||error?.message==='MODEL_UNAVAILABLE'?'model_unavailable':undefined;
+        this.options.onError?.(issue?'PLATFORM_TASK_MODEL_RETRY':'PLATFORM_TASK_RECOVERY_REQUIRED');
+      }
     }finally{
-      clearInterval(pulse);if(actor)await this.repository.releasePlatformTask(actor,issue).catch(()=>{});
+      clearInterval(pulse);if(actor)await this.repository.releasePlatformTask(actor,issue,providerRetryAt).catch(()=>{});
     }
   }
 }

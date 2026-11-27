@@ -794,6 +794,43 @@ it('retries the first full model timeout promptly and resumes the same task from
  expect(complete).toHaveBeenCalledTimes(3);
  expect(complete.mock.calls[2][0].messages[0].content).toContain('bambook_get');
 });
+it.each([429,503])('respects provider retry timing for %i and retains acknowledged reads',async status=>{
+ vi.stubEnv('ARK_API_KEY','fixture-flash-key');
+ vi.stubEnv('BAMBOOK_MODEL_BASE_URL','https://ark.cn-beijing.volces.com/api/plan/v3');
+ vi.stubEnv('BAMBOOK_MODEL_NAME','deepseek-v4.1-flash');
+ const complete=createLlmCompleter({platformProfile:'agent-task',platformProviders:{chain:()=>[]},subscriptions:{isConnected:()=>false,complete:async()=>''}});
+ const f=await fixture(complete);const order=f.workspace.state.orders[0];
+ f.worker.start(3_600_000);
+ let clock=Math.floor(Date.now()/1000)*1000;
+ vi.spyOn(Date,'now').mockImplementation(()=>clock);
+ const retryAfter=status===429?'60':new Date(clock+60_000).toUTCString();
+ const fetchMock=vi.fn()
+  .mockResolvedValueOnce(new Response(JSON.stringify({error:{message:'Provider briefly busy'}}),{status,headers:{'Retry-After':retryAfter}}))
+  .mockResolvedValueOnce(new Response(JSON.stringify({choices:[{message:{content:tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对原单。'})}}]})));
+ vi.stubGlobal('fetch',fetchMock);
+ try{
+  const {item}= (await f.human.post(f.base+'/personal-agent/tasks').send({
+   requestId:randomUUID(),name:'核对交期',instructions:'只读核对原单。',intentRefs:[{kind:'orders',id:order.id}],
+  }).expect(201)).body;
+  await f.drain();
+  const waiting=await f.current(item.id);
+  expect(waiting).toMatchObject({state:'queued',executionIssue:{code:'model_unavailable',retryAt:new Date(clock+60_000).toISOString()}});
+  expect(waiting.trail.filter((entry:{completed?:boolean})=>entry.completed)).toHaveLength(1);
+  clock+=59_999;await f.drain();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  clock+=1;await f.drain();
+  expect(await f.current(item.id)).toMatchObject({state:'succeeded',result:'已核对原单。'});
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  const toolFacts=fetchMock.mock.calls.map(([,init])=>{
+   const body=JSON.parse(String(init.body));
+   expect(body.model).toBe('deepseek-v4.1-flash');
+   const content=body.messages[1].content;
+   return JSON.parse(content.slice(content.indexOf('{'))).history.recent;
+  });
+  expect(toolFacts[0]).toEqual(toolFacts[1]);
+ }finally{vi.unstubAllGlobals();}
+});
+
 it('pauses repeated invalid model output and allows explicit owner recovery on the same task',async()=>{
  let valid=false,mail='',read=false;const complete=vi.fn(async()=>!valid?'not a tool decision':!read?(read=true,tool('bambook_get',{type:'email',id:mail})):tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对原邮件。'}));
  const f=await fixture(complete);mail=f.workspace.state.email.messages[0].id;f.worker.start(3_600_000);const task=await f.create('platform');let clock=Date.now();vi.spyOn(Date,'now').mockImplementation(()=>clock);
