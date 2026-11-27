@@ -246,6 +246,11 @@ export function createMistRouter(options: { prisma?: any; voice?: MistVoiceServi
   router.get('/workspaces/:id/agent-conversations',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.listConversations(actor(req),req.params.id));}));
   router.put('/workspaces/:id/agent-conversations/:conversationId',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.saveConversation(actor(req),req.params.id,req.params.conversationId,exactBody(req.body,['title','hidden']))});}));
   router.get('/workspaces/:id/agent-automations',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.listAutomations(actor(req),req.params.id));}));
+  router.get('/workspaces/:id/agent-automations/receipt/:requestId',run(async(req,res)=>{
+    res.setHeader('Cache-Control','private, no-store');
+    exactBody(req.query,[]);
+    res.json({item:await repository.getAutomationCreationReceipt(actor(req),req.params.id,req.params.requestId)});
+  }));
   router.post('/workspaces/:id/agent-automations',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.status(201).json({item:await repository.saveAutomation(actor(req),req.params.id,undefined,exactBody(req.body,['requestId','name','trigger','time','instructions','enabled']))});}));
   router.put('/workspaces/:id/agent-automations/:automationId',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.saveAutomation(actor(req),req.params.id,req.params.automationId,exactBody(req.body,['name','trigger','time','instructions','enabled','expectedVersion']))});}));
   router.patch('/workspaces/:id/agent-automations/:automationId',run(async(req,res)=>{
