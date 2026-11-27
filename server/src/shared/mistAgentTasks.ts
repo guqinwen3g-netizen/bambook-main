@@ -15,7 +15,7 @@ export function normalizeAgentTaskIntentRefs(value: unknown): AgentTaskIntentRef
   return out;
 }
 export type AgentTaskState = 'queued' | 'running' | 'waiting_time' | 'waiting_condition' | 'waiting_human' | 'paused' | 'succeeded' | 'failed' | 'cancelled' | 'expired' | 'budget_exhausted' | 'access_changed';
-export type AgentTaskQuestion = {id:string;question:string;askedAt:string;answer?:string;answeredAt?:string};
+export type AgentTaskQuestion = {id:string;question:string;askedAt:string;attachmentChoiceIds?:string[];answer?:string;answeredAt?:string};
 type AgentTaskTrailSource = { type: string; id: string; label: string; /** 读取结果给出的页面与锚点；id 为页面要打开的编号（可能是上级单据）。 */ view?: string; section?: string };
 export type AgentTaskTrailItem = {
   at: string; kind: 'read' | 'write' | 'ask' | 'wait' | 'note'; label: string;

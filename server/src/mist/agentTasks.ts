@@ -11,6 +11,7 @@ import { isAgentActor, type AgentActor } from './agentDelegation';
 import { identityRecord, personalIdentityId, assertServiceLease, serviceActorFromIdentity, type AgentServiceLease } from './agentIdentities';
 import { fail, MistApiError } from './errors';
 import { taskScopeHash, type TaskSourceRef } from './agentTaskVisibility';
+import { PDF_SELECTION_QUESTION } from '../shared/mistTaskAttachments';
 import {compactPlatformTaskSteps,newPlatformTaskStep,requestedTaskAttachmentScope,scopedAttachmentTaskSteps,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskProgress} from './platformTaskPlan';
 import{responseLocale,type ResponseLocale}from'./responseLanguage';
 import {CONDITION_CHECK_MS,taskConditionInput,type TaskCondition,type TaskConditionTarget} from './agentTaskConditions';
@@ -165,13 +166,18 @@ export function taskView(c: TaskRecord, actor: TokenPayload, now: number, author
   const instructions = c.executor==='platform' && !c.automationId && !c.conversationHistory
     && c.identityId===personalIdentityId(c.workspaceId,c.ownerId) ? splitTaskRequest(c.instructions) : c.instructions;
   let visibleSteps = readable ? c.platform?.steps : undefined;
-  if(visibleSteps?.length){
-    const {pdf,worksheet,allowedFiles,excludedPdfIds}=requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions);
-    if(allowedFiles||excludedPdfIds)visibleSteps=scopedAttachmentTaskSteps(visibleSteps,pdf,worksheet,allowedFiles,excludedPdfIds);
+  let questions=readable?c.questions??[]:[];
+  if(visibleSteps?.length||questions.some(q=>q.question===PDF_SELECTION_QUESTION&&!q.answeredAt)){
+    const {pdf,worksheet,allowedFiles,excludedPdfIds,pdfChoiceIds}=requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions);
+    if(visibleSteps&&(allowedFiles||excludedPdfIds||pdfChoiceIds)){
+      const permitted=pdfChoiceIds?new Set<string>():allowedFiles;
+      visibleSteps=scopedAttachmentTaskSteps(visibleSteps,pdf,worksheet,permitted,excludedPdfIds);
+    }
+    if(pdfChoiceIds)questions=questions.map(q=>q.question===PDF_SELECTION_QUESTION&&!q.answeredAt?{...q,attachmentChoiceIds:pdfChoiceIds}:q);
   }
   return {
     ...(!readable ? { contentRestricted: true as const } : {}),
-    ...(c.automationId?{automationId:c.automationId}:{}), ...(c.conversationId?{conversationId:c.conversationId}:{}),...(readable&&c.intentRefs?.length?{intentRefs:c.intentRefs.map(ref=>({...ref}))}:{}), ...(readable&&c.attachments?.length?{attachments:c.attachments.map(({id,name,mimeType,size})=>({id,name,mimeType,size}))}:{}), ...(visibleSteps?.length?{trail:platformTrail(visibleSteps,c.attachments)}:{}), id: c.id, identityId: c.identityId, identityName: c.identityName, name: readable ? c.name : 'Agent任务', ownerId: c.ownerId, ownerName: c.ownerName, instructions: readable ? instructions : '', mode:c.mode, state, version: c.controlVersion, createdAt: c.createdAt, updatedAt: c.updatedAt, expiresAt: new Date(c.expiresAt).toISOString(), stepsUsed: c.stepsUsed, stepLimit: STEP_LIMIT, runtimeUsedMs: usedRuntime(c, now), runtimeLimitMs: RUNTIME_LIMIT, lastHeartbeatAt: c.lastHeartbeatAt ? new Date(c.lastHeartbeatAt).toISOString() : c.lease ? new Date(c.lease.heartbeatAt).toISOString() : null, checkpoint: readable ? c.checkpoint : '', result: readable ? c.result : '', waitingProposalIds: readable ? c.waitingProposalIds : [], canControl: !ended, executor:c.executor??'external',...(executionStage?{executionStage}:{}),...(executionStageSince?{executionStageSince}:{}),...(modelFallbackSince?{modelFallbackSince}:{}),...(runnerStatus?{runnerStatus}:{}),...(readable&&c.stopReason?{stopReason:c.stopReason}:{}), ...(c.platform?.issue?{executionIssue:{code:c.platform.issue,...(c.platform.retryAt?{retryAt:new Date(c.platform.retryAt).toISOString()}:{} )}}:{}), questions:readable?c.questions??[]:[],resumeAt:readable&&c.resumeAt?new Date(c.resumeAt).toISOString():null,waitingFor:readable&&c.condition?{type:c.condition.type,id:c.condition.id,label:c.condition.label,...(c.condition.link?{link:c.condition.link}:{})}:null,nextCheckAt:readable&&c.condition?new Date(c.condition.nextCheckAt).toISOString():null,...(readable&&c.wakeReason?{wakeReason:c.wakeReason}:{}),requiredRead:readable?c.requiredRead??null:null };
+    ...(c.automationId?{automationId:c.automationId}:{}), ...(c.conversationId?{conversationId:c.conversationId}:{}),...(readable&&c.intentRefs?.length?{intentRefs:c.intentRefs.map(ref=>({...ref}))}:{}), ...(readable&&c.attachments?.length?{attachments:c.attachments.map(({id,name,mimeType,size})=>({id,name,mimeType,size}))}:{}), ...(visibleSteps?.length?{trail:platformTrail(visibleSteps,c.attachments)}:{}), id: c.id, identityId: c.identityId, identityName: c.identityName, name: readable ? c.name : 'Agent任务', ownerId: c.ownerId, ownerName: c.ownerName, instructions: readable ? instructions : '', mode:c.mode, state, version: c.controlVersion, createdAt: c.createdAt, updatedAt: c.updatedAt, expiresAt: new Date(c.expiresAt).toISOString(), stepsUsed: c.stepsUsed, stepLimit: STEP_LIMIT, runtimeUsedMs: usedRuntime(c, now), runtimeLimitMs: RUNTIME_LIMIT, lastHeartbeatAt: c.lastHeartbeatAt ? new Date(c.lastHeartbeatAt).toISOString() : c.lease ? new Date(c.lease.heartbeatAt).toISOString() : null, checkpoint: readable ? c.checkpoint : '', result: readable ? c.result : '', waitingProposalIds: readable ? c.waitingProposalIds : [], canControl: !ended, executor:c.executor??'external',...(executionStage?{executionStage}:{}),...(executionStageSince?{executionStageSince}:{}),...(modelFallbackSince?{modelFallbackSince}:{}),...(runnerStatus?{runnerStatus}:{}),...(readable&&c.stopReason?{stopReason:c.stopReason}:{}), ...(c.platform?.issue?{executionIssue:{code:c.platform.issue,...(c.platform.retryAt?{retryAt:new Date(c.platform.retryAt).toISOString()}:{} )}}:{}), questions,resumeAt:readable&&c.resumeAt?new Date(c.resumeAt).toISOString():null,waitingFor:readable&&c.condition?{type:c.condition.type,id:c.condition.id,label:c.condition.label,...(c.condition.link?{link:c.condition.link}:{})}:null,nextCheckAt:readable&&c.condition?new Date(c.condition.nextCheckAt).toISOString():null,...(readable&&c.wakeReason?{wakeReason:c.wakeReason}:{}),requiredRead:readable?c.requiredRead??null:null };
 }
 async function save(db: any, row: any, before: TaskRecord, next: TaskRecord) {
   const changed = await db.mistCommandReceipt.updateMany({ where: { id: row.id, workspaceId: before.workspaceId, inputHash: TASK_HASH, result: { path: [TASK_FIELD, 'version'], equals: before.version } }, data: { result: { revision: 0, [TASK_FIELD]: next } } });
@@ -476,8 +482,12 @@ export async function answerTaskQuestion(db:any,actor:TokenPayload,workspaceId:s
   if(n.platform){
     // An answer can complete a standalone reply. A business write still needs
     // a fresh read, and existing source or approval obligations stay in force.
+    // A deterministic PDF choice binds the prefetch in the next lease. It does not
+    // require an unrelated whole-file or business read before a read-only report.
+    const choosingPdf=question.question===PDF_SELECTION_QUESTION
+      &&!!requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions).pdfChoiceIds;
     const requiresRead=n.platform.requiresRead===true||!!(c.requiredRead||c.lastProposalDecision||c.condition||c.automationId
-      ||c.sources.length||c.intentRefs?.length||c.attachments?.length||c.waitingProposalIds.length);
+      ||c.sources.length||c.intentRefs?.length||!choosingPdf&&c.attachments?.length||c.waitingProposalIds.length);
     n.platform={...n.platform,nextRunAt:0,requiresRead,requiresReadBeforeWrite:requiresRead?undefined:true};
   }
   await save(db,row,c,n);await event(db,n,actor,'answered',requestId,now);return taskView(n,actor,now);

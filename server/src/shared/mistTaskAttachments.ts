@@ -35,3 +35,28 @@ export function taskWorkbookChoices(files: readonly TaskAttachment[] = []) {
   const labels = taskAttachmentLabels(files);
   return files.flatMap((file, index) => officeKind(file) === 'xlsx' ? [{ file, label: labels[index] }] : []);
 }
+
+export const PDF_SELECTION_QUESTION = '请回复要核对的 PDF 完整文件名，包括名称后显示的编号。';
+
+export function isTaskPdf(file: { name: string; mimeType: string }) {
+  return /^application\/pdf\b/i.test(file.mimeType) || /\.pdf$/i.test(file.name);
+}
+
+export function taskPdfChoices(files: readonly TaskAttachment[] = [], ids?: readonly string[]) {
+  const labels = taskAttachmentLabels(files);
+  const candidates = ids && new Set(ids);
+  return files.flatMap((file, index) => isTaskPdf(file) && (!candidates || candidates.has(file.id))
+    ? [{ file, label: labels[index] }] : []);
+}
+
+export function taskAttachmentChoicesForQuestion(
+  question: { question: string; attachmentChoiceIds?: readonly string[] } | undefined,
+  files: readonly TaskAttachment[] = [],
+) {
+  if (question?.question === WORKBOOK_SELECTION_QUESTION) return {
+    prompt: '选择要读取的工作簿', choices: taskWorkbookChoices(files),
+  };
+  if (question?.question === PDF_SELECTION_QUESTION && question.attachmentChoiceIds?.length) return {
+    prompt: '选择要读取的 PDF', choices: taskPdfChoices(files, question.attachmentChoiceIds),
+  };
+}

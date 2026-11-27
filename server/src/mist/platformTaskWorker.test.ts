@@ -1097,6 +1097,52 @@ it.each([22,3])('extracts only a single requested PDF page and refuses page-wind
  }
 });
 
+it('waits for the owner to pick a candidate before reading an ambiguous PDF',async()=>{
+ const finish=(result:string)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result});
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>finish('已核对指定 PDF。'))
+  .mockResolvedValueOnce(finish('OUTSIDE-PRIOR-REPORT'))
+  .mockResolvedValueOnce(tool('bambook_execute',{command:{type:'email.flag',payload:{messageId:'not-selected',flagged:true}}}));
+ const f=await fixture(complete);
+ f.worker.start(3_600_000);
+ const conversationId='c_pdf_source_confirmation';
+ const previous=(await f.human.post(f.base+'/personal-agent/tasks')
+  .send({requestId:randomUUID(),name:'前一轮',instructions:'旧 PDF 的内容。',conversationId}).expect(201)).body.item;
+ await f.drain();
+ expect(await f.current(previous.id)).toMatchObject({state:'succeeded',result:'OUTSIDE-PRIOR-REPORT'});
+ complete.mockClear();
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'核对 PDF 第 22 页',conversationId,historyTaskIds:[previous.id],instructions:'请只读取 quote.pdf 的第 22 页。不要读其他附件。'}))
+  .attach('attachments',pdf('WRONG-ORIGINAL'),'quote.pdf')
+  .attach('attachments',pdf('WRONG-PAGE',23),'quote.pdf')
+  .attach('attachments',pdf('UNRELATED-PDF'),'other.pdf').expect(201)).body.item;
+ const answer=(current:any,value:string)=>f.human.post(f.base+'/agent-tasks/'+task.id+'/answer')
+  .send({requestId:randomUUID(),version:current.version,questionId:current.questions.at(-1).id,answer:value}).expect(200);
+ await f.drain();
+ const first=await f.current(task.id);
+ expect(first.state).toBe('waiting_human');
+ expect(first.questions[0].attachmentChoiceIds).toEqual(task.attachments.slice(0,2).map((f:any)=>f.id));
+ expect(first.trail?.filter((row:any)=>row.kind==='read')??[]).toEqual([]);
+ expect(complete).not.toHaveBeenCalled();
+ await answer(first,'other.pdf');
+ await f.drain();
+ const second=await f.current(task.id);
+ expect(second.state).toBe('waiting_human');
+ expect(second.questions).toHaveLength(2);
+ expect(complete).not.toHaveBeenCalled();
+ await answer(second,'quote.pdf(2)');
+ await f.drain();
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded',id:task.id});
+ expect(complete).toHaveBeenCalledTimes(2);
+ const message=complete.mock.calls[0][0].messages[0].content;
+ expect(message).toContain('Page 22: general terms');
+ expect(message).not.toMatch(/OUTSIDE-PRIOR-REPORT|WRONG-ORIGINAL|WRONG-PAGE|UNRELATED-PDF|Page 21: general terms/);
+ const saved=await f.local.database.$transaction(db=>taskRecord(db,f.workspace.id,task.id));
+ expect(saved.value.conversationHistory?.taskIds).toContain(previous.id);
+ expect(saved.value.platform?.steps.find(step=>step.plan.name==='bambook_execute')?.result)
+  .toMatchObject({error:true,message:'本人决定或等待结束后，请先回源读取当前业务，再办理或报告结果。'});
+ expect((await f.human.get(f.base).expect(200)).body.workspace.state).toEqual(f.workspace.state);
+});
+
 it('binds a page range to the numbered PDF without reading a same-name sibling',async()=>{
  let calls=0;
  const complete=vi.fn(async (_input:LlmCompletionInput)=>++calls===1

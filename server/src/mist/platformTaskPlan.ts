@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type {AgentTaskIntentRef,AgentTaskQuestion,AgentTaskView} from '../shared/mistAgentTasks';
 import type { MarketQuotation } from '../shared/mistMarket';
 import { splitTaskRequest } from '../shared/mistTaskHistoryText';
-import { officeKind, taskAttachmentLabels, taskWorkbookChoices, WORKBOOK_SELECTION_QUESTION } from '../shared/mistTaskAttachments';
+import { officeKind, taskAttachmentLabels, taskWorkbookChoices, taskPdfChoices, isTaskPdf, PDF_SELECTION_QUESTION, WORKBOOK_SELECTION_QUESTION } from '../shared/mistTaskAttachments';
 import type { PdfPageTextSpan } from './agentFileText';
 import { isFileTextCursor } from './agentFileWindow';
 import type{ResponseLocale}from'./responseLanguage';
@@ -56,19 +56,24 @@ function taskAttachmentNames(attachments:NonNullable<AgentTaskView['attachments'
   };
 }
 
-export function requestedPdfRange(attachments:AgentTaskView['attachments']=[],instructions='') {
+type PdfPageScope = {fileId:string;from:number;to:number};
+type PdfSelection = {pdf?:PdfPageScope;pdfChoiceIds?:string[];confirmedPdfChoices?:string[]};
+
+function pdfSelection(attachments:AgentTaskView['attachments']=[],instructions='',questions:readonly AgentTaskQuestion[]=[]):PdfSelection {
   const request=splitTaskRequest(instructions);
-  const files=attachments.filter(file=>/^application\/pdf\b/i.test(file.mimeType)||/\.pdf$/i.test(file.name));
-  if(!files.length)return;
+  const files=attachments.filter(isTaskPdf);
+  if(!files.length)return {};
   const namesIn=taskAttachmentNames(attachments);
   const pdfIds=new Set(files.map(file=>file.id));
   const bind=(match:RegExpMatchArray,from:number,to:number)=>{
     const suffix=request.slice((match.index??0)+match[0].length).split(/[。；;！？!?，,\n]|\.(?=\s|$)/u,1)[0];
-    const named=namesIn(match[0]+suffix).flat().filter(file=>pdfIds.has(file.id));
-    const ids=new Set(named.map(file=>file.id));
-    if(ids.size===1)return {fileId:[...ids][0],from,to};
-    if(!ids.size&&files.length===1&&(attachments.length===1||/\bpdf\b/i.test(match[0]+suffix)))
-      return {fileId:files[0].id,from,to};
+    const clause=match[0]+suffix;
+    const named=namesIn(clause).flat().filter(file=>pdfIds.has(file.id));
+    const ids=[...new Set(named.map(file=>file.id))];
+    if(ids.length)return {ids,from,to,confirm:ids.length>1};
+    const namedPdf= /[^\s。；;，,]+\.pdf\b/iu.test(clause);
+    if(namedPdf||files.length>1)return {ids:[...pdfIds],from,to,confirm:true};
+    if(attachments.length===1||/\bpdf\b/i.test(clause))return {ids:[files[0].id],from,to,confirm:false};
   };
   const chinese=[...request.matchAll(/(?:^|[。；;\n])[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:只|仅)[ \t]*(?:读取|阅读|核对|查看|检查|读|看)[^。；;，,\n]{0,32}?(?:前[ \t]*([1-9]\d*)|第[ \t]*([1-9]\d*)(?:[ \t]*(?:页[ \t]*)?(?:至|到|[-–—])[ \t]*第?[ \t]*([1-9]\d*))?)[ \t]*页/gu)];
   const english=[...request.matchAll(/(?:^|[.;\n])[ \t]*(?:please[ \t]+)?(?:only[ \t]+(?:read|check|review)|(?:read|check|review)[ \t]+only)[ \t]+(?:the[ \t]+)?(?:first[ \t]+([1-9]\d*)[ \t]+pages?\b|pages[ \t]+([1-9]\d*)[ \t]*(?:to|[-–—])[ \t]*([1-9]\d*)\b|page[ \t]+([1-9]\d*)\b|([1-9]\d*)(?:st|nd|rd|th)[ \t]+page\b)/gi)];
@@ -92,9 +97,23 @@ export function requestedPdfRange(attachments:AgentTaskView['attachments']=[],in
     }),
   ];
   const range=ranges[0];
-  if(!range||ranges.some(value=>!value||value.fileId!==range.fileId||value.from!==range.from||value.to!==range.to))return;
-  if(Number.isSafeInteger(range.from)&&Number.isSafeInteger(range.to)&&range.from<=range.to&&range.to<=1_000_000)
-    return range;
+  if(!range||ranges.some(value=>!value||value.from!==range.from||value.to!==range.to))return {};
+  const {from,to}=range;
+  if(!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||from>to||to>1_000_000)return {};
+  const ids=range.ids.filter(id=>ranges.every(value=>value?.ids.includes(id)));
+  if(!ids.length)return {};
+  if(ids.length===1&&ranges.some(value=>value?.ids.length===1&&!value.confirm))return {pdf:{fileId:ids[0],from,to}};
+
+  const answer=[...questions].reverse().find(q=>q.question===PDF_SELECTION_QUESTION&&q.answeredAt)?.answer?.trim();
+  const name=answer?.replace(/(\.pdf)\((\d+)\)/gi,'$1（$2）');
+  const selected=taskPdfChoices(attachments,ids).filter(({label})=>label===name);
+  return selected.length===1
+    ?{pdf:{fileId:selected[0].file.id,from,to},confirmedPdfChoices:ids}
+    :{pdfChoiceIds:ids};
+}
+
+export function requestedPdfRange(attachments:AgentTaskView['attachments']=[],instructions='') {
+  return pdfSelection(attachments,instructions).pdf;
 }
 
 export function requestedWorkbookWorksheet(attachments:AgentTaskView['attachments']=[],instructions='',questions:readonly AgentTaskQuestion[]=[]) {
@@ -142,7 +161,7 @@ const SKIP_FILE_READ = new RegExp(SKIP_READ_ZH+String.raw`|\b(?:do not|don't|nev
  * its own still allows the task to check other requested sources.
  */
 export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachments']=[],instructions='',questions:readonly AgentTaskQuestion[]=[]) {
-  const pdf = requestedPdfRange(attachments,instructions);
+  const {pdf,pdfChoiceIds,confirmedPdfChoices}=pdfSelection(attachments,instructions,questions);
   const worksheet = requestedWorkbookWorksheet(attachments,instructions,questions);
   const request = splitTaskRequest(instructions);
   const allExcluded = EXCLUDE_ALL_FILES.test(request)
@@ -150,8 +169,8 @@ export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachme
   const othersExcluded = EXCLUDE_OTHER_FILES.test(request)
     || /\b(?:do not|don't|never) (?:read|open|check|review|inspect) (?:any )?(?:other|remaining) (?:attachments|files)\b/iu.test(request);
   const pdfOriginal=pdf&&attachments.find(file=>file.id===pdf.fileId);
-  const siblings=pdfOriginal?attachments.filter(file=>file.id!==pdfOriginal.id&&file.name===pdfOriginal.name):[];
-  if(!allExcluded&&!othersExcluded&&!siblings.length)return {pdf,worksheet};
+  const siblings=pdfOriginal?attachments.filter(file=>file.id!==pdfOriginal.id&&(file.name===pdfOriginal.name||confirmedPdfChoices?.includes(file.id))):[];
+  if(!allExcluded&&!othersExcluded&&!siblings.length)return {pdf,worksheet,pdfChoiceIds};
 
   const allowed=new Set<string>();
   if(allExcluded)return {pdf:undefined,worksheet:undefined,allowedFiles:allowed};
@@ -166,10 +185,10 @@ export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachme
   }
   if(!othersExcluded){
     const excludedSiblings=siblings.filter(file=>!allowed.has(file.id)).map(file=>file.id);
-    return {pdf,worksheet,excludedPdfIds:excludedSiblings.length?new Set(excludedSiblings):undefined};
+    return {pdf,worksheet,pdfChoiceIds,excludedPdfIds:excludedSiblings.length?new Set(excludedSiblings):undefined};
   }
   const eligibleFiles = attachments.filter(file=>allowed.has(file.id));
-  return {pdf:pdf??requestedPdfRange(eligibleFiles,instructions),worksheet,allowedFiles:allowed};
+  return {pdf:pdf??requestedPdfRange(eligibleFiles,instructions),worksheet,pdfChoiceIds,allowedFiles:allowed};
 }
 
 /** Older receipts without the requested scope cannot inform a new model turn. */

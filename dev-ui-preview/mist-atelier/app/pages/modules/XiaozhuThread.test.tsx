@@ -237,6 +237,18 @@ it('answers the workbook question with the exact numbered attachment from the ta
  expect(queryByRole(host,'button',{name:'报价比对.xlsx（3）',exact:true})).toBeNull();
 });
 
+it('offers the server-selected PDF originals and answers with the task-wide label',async()=>{
+ const f=fns(), question='请回复要核对的 PDF 完整文件名，包括名称后显示的编号。';
+ const waiting=task({state:'waiting_human',questions:[{id:'pdf-question',question,attachmentChoiceIds:['first','second']}],
+  attachments:[{id:'other',name:'其他.pdf',mimeType:'application/pdf'},
+   {id:'first',name:'报价.pdf',mimeType:'application/pdf'},{id:'second',name:'报价.pdf',mimeType:'application/pdf'}]});
+ await paint([waiting],f);
+ expect(queryByRole(host,'button',{name:'其他.pdf',exact:true})).toBeNull();
+ expect(queryByRole(host,'textbox',{name:'回答小竹'})).toBeNull();
+ await act(async()=>getByRole(host,'button',{name:'报价.pdf（3）',exact:true}).click());
+ expect(f.onAnswer).toHaveBeenCalledExactlyOnceWith(waiting,'pdf-question','报价.pdf（3）');
+});
+
 it('asks the open question inline and sends the answer for that question',async()=>{const f=fns();await paint([task({state:'waiting_human',questions:[{id:'q1',question:'核对哪个客户？',askedAt:''}]})],f);expect(host.textContent).toContain('核对哪个客户？');const box=getByLabelText(host,'回答小竹') as HTMLInputElement;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(box,'客户A');box.dispatchEvent(new Event('input',{bubbles:true}));});await act(async()=>getByRole(host,'button',{name:'回答'}).click());expect(f.onAnswer).toHaveBeenCalledWith(expect.objectContaining({id:'t1'}),'q1','客户A');expect(box.value).toBe('客户A');});
 it('shows what will change and opens the confirmation without leaving the conversation',async()=>{const f=fns();await paint([task({state:'waiting_human',waitingProposalIds:['p1']})],f,[proposal()]);expect(host.textContent).toContain('需要你确认');expect(host.textContent).toContain('归档邮件 PO 确认');expect(host.textContent).toContain('中风险');await act(async()=>getByRole(host,'button',{name:'查看并确认'}).click());expect(f.onProposal).toHaveBeenCalledWith('p1');});
 it('labels a stopped request instead of leaving it blank',async()=>{await paint([task({state:'budget_exhausted',checkpoint:'已读 20 条'})]);expect(host.textContent).toContain('达到限额');});

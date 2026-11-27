@@ -3,7 +3,7 @@ import React from 'react';
 import { ChevronRight, Copy, Download, Eye, FileText, RotateCcw, Zap, ShieldCheck, Search, PenLine, HelpCircle, Clock, Check, Square, Link2, Mic } from 'lucide-react';
 import { AIBadge, AssistantEyes, Button, Icon, IconButton, Pill, type Tone } from '../../../../../components/mist';
 import { activeAgentTaskStep, agentTaskActivityText, type AgentTaskTrailItem, type AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
-import { taskAttachmentLabels, taskWorkbookChoices, WORKBOOK_SELECTION_QUESTION, type TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
+import { taskAttachmentLabels, taskAttachmentChoicesForQuestion, type TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
 import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../../server/src/shared/mistAgentProposals';
 import { ui, uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { activeModelFallbackSince } from '../../runtime/xiaozhuActivity';
@@ -12,7 +12,7 @@ import type { RecordRef } from '../../runtime/xiaozhuRecords';
 import { commandRequiresSignature } from '../../runtime/signatureRules';
 import { XiaozhuPhaseTimer } from './XiaozhuPhaseTimer';
 import { XiaozhuMarkdown } from './XiaozhuMarkdown';
-import { XiaozhuWorkbookChoices, workbookChoicePrompt } from './XiaozhuWorkbookChoices';
+import { XiaozhuAttachmentChoices } from './XiaozhuAttachmentChoices';
 
 const STATE: Record<AgentTaskView['state'], [string, Tone]> = { queued: ['待执行', 'accent'], running: ['办理中', 'accent'], waiting_time: ['等待继续', 'neutral'], waiting_condition: ['等待资料变化', 'neutral'], waiting_human: ['待我确认', 'warn'], paused: ['已暂停', 'neutral'], succeeded: ['已完成', 'ok'], failed: ['未完成', 'bad'], cancelled: ['已停止', 'neutral'], expired: ['已到期', 'neutral'], budget_exhausted: ['达到限额', 'warn'], access_changed: ['权限已变化', 'warn'] };
 export function xiaozhuTaskStatusLabel(task: AgentTaskView): string {
@@ -107,14 +107,14 @@ function Question({ task, onAnswer, busy, draft }: { task: AgentTaskView; onAnsw
   const [localText, setLocalText] = React.useState('');
   const open = (task.questions ?? []).find(q => !q.answeredAt);
   if (!open || !task.canControl) return null;
-  const choices = open.question === WORKBOOK_SELECTION_QUESTION ? taskWorkbookChoices(task.attachments) : [];
+  const picker = taskAttachmentChoicesForQuestion(open, task.attachments);
   const text = draft?.read(task.id,open.id) ?? localText;
   const change=(value:string)=>draft?draft.write(task.id,open.id,value):setLocalText(value);
   const send = () => { if (text.trim()&&!busy) onAnswer(task, open.id, text); };
   return <div className="mist-xz-card" data-tone="ask"><div className="mist-xz-card-h"><Icon icon={HelpCircle} size="sm" /><b>{uiText('小竹想先确认')}</b></div>
-    {choices.length ? <>
-      <p>{uiText(workbookChoicePrompt)}</p>
-      <XiaozhuWorkbookChoices choices={choices} disabled={busy} onChoose={label => onAnswer(task, open.id, label)} />
+    {picker?.choices.length ? <>
+      <p>{uiText(picker.prompt)}</p>
+      <XiaozhuAttachmentChoices {...picker} disabled={busy} onChoose={label => onAnswer(task, open.id, label)} />
     </> : <>
       <p>{open.question}</p>
       <div className="mist-xz-answer">

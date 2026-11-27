@@ -1,18 +1,17 @@
 import React from 'react';
 import { FileText } from 'lucide-react';
 import { Button } from '../../../../../components/mist';
-import type { taskWorkbookChoices } from '../../../../../server/src/shared/mistTaskAttachments';
+import type { TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
 import { uiText } from '../../../../../services/interfaceLanguage';
 
-export const workbookChoicePrompt = '选择要读取的工作簿';
-
-export function XiaozhuWorkbookChoices({ choices, selected, disabled, onChoose }: {
-  choices: ReturnType<typeof taskWorkbookChoices>;
+export function XiaozhuAttachmentChoices({ prompt, choices, selected, disabled, onChoose }: {
+  prompt: string;
+  choices: readonly {file:TaskAttachment;label:string}[];
   selected?: string;
   disabled?: boolean;
   onChoose: (label: string) => void;
 }) {
-  return <div className="mist-xz-workbook-choices" role="group" aria-label={uiText(workbookChoicePrompt)}>
+  return <div className="mist-xz-attachment-choices" role="group" aria-label={uiText(prompt)}>
     {choices.map(({ file, label }) => {
       const pressed = selected === undefined ? undefined : selected === label;
       return <Button key={file.id} size="sm" icon={FileText} variant={pressed ? 'ai' : 'secondary'}
