@@ -135,8 +135,11 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
         const scopeStart = result?.pageScopeStart;
         const earlierPages = pageRange && Number.isSafeInteger(scopeStart) && scopeStart > 1 && scopeStart === pages.pageFrom
           ? '；本次未读'+pdfPageRange(1,scopeStart-1) : '';
+        const worksheetRead = result?.worksheetComplete===true&&typeof result.worksheetScope==='string'
+          && observedSheets?.includes(result.worksheetScope) ? text(result.worksheetScope,60) : '';
         const detail = result?.error === true ? FILE_FAILURE_DETAILS.get(result.message)
           : pdfDetail ? pdfDetail+earlierPages+pdfContinuation
+          : worksheetRead ? '已读取工作表：'+worksheetRead
           : failed ? text(result?.reason, 120)
           : result?.hasMore ? '本次读取部分正文，还有后续内容'
           : result?.complete ? '已提取可读取正文' : '';

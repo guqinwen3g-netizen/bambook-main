@@ -75,8 +75,10 @@ export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:
  }
  const fromStart=p.page===1&&p.offset===0,hasMore=!!next;
  const worksheetScope=raw.kind==='xlsx'?worksheet:undefined;
- const complete=readable&&fromStart&&!hasMore&&!extractionLimited&&!raw.reason&&pageScopeLimit===undefined&&worksheetScope===undefined;
- return {kind:raw.kind,text,truncated:readable&&(!complete),complete,hasMore,
+ const wholeResponse=readable&&fromStart&&!hasMore&&!extractionLimited&&!raw.reason;
+ const worksheetComplete=worksheetScope!==undefined&&wholeResponse;
+ const complete=wholeResponse&&pageScopeLimit===undefined&&worksheetScope===undefined;
+ return {kind:raw.kind,text,truncated:readable&&!complete&&!worksheetComplete,complete,hasMore,
   ...(next?{nextCursor:'aft'+next.v+'.'+Buffer.from(JSON.stringify(next)).toString('base64url')}:{}),
   ...(next&&next.page>p.page?{nextPageFrom:next.page}:{}),
   ...(office&&next&&!extractionLimited?{remainingOfficeChars:content.length-end}:{}),
@@ -85,11 +87,13 @@ export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:
   }:{})},
   ...(pageScopeStart!==undefined?{pageScopeStart}:{}),
   ...(pageScopeLimit!==undefined?{pageScopeLimit}:{}),
-  ...(worksheetScope!==undefined?{worksheetScope}:{}),
+  ...(worksheetScope!==undefined?{worksheetScope,worksheetComplete}:{}),
   ...(raw.pages!==undefined?{pages:raw.pages}:{}),...(raw.sheets?{sheets:[...raw.sheets]}:{}),
   ...(raw.pagesWithoutText?.length?{pagesWithoutText:[...raw.pagesWithoutText]}:{}),
   ...(raw.kind==='xlsx'?{observedSheets:raw.sheetTextSpans?.filter(span=>span.end>p.offset&&span.start<end).map(span=>span.name)??[]}:{}),
   ...(pdf?{pageTextSpans:pageTextSpans??[]}:{}),
   ...(raw.reason?{reason:raw.reason}:extractionLimited?{reason:'正文超过安全提取范围，当前片段不能代表完整原件'}:{}),
-  ...(hasMore?{readHint:'用同一 fileId 和 nextCursor 调用 bambook_file_text 继续读取；累计范围连续且 sourceHash 一致才可认定没有漏读。'}:pageScopeStart!==undefined?{readHint:`本任务只读取第 ${pageScopeStart} 至 ${pageScopeLimit??raw.pages} 页，范围外未核实。`}:pageScopeLimit!==undefined?{readHint:`本任务只读取前 ${pageScopeLimit} 页，之后的页未核实。`}:worksheetScope!==undefined?{readHint:'本任务只读取指定工作表，其他工作表未核实。'}:!fromStart?{readHint:'本段已到可提取范围末尾，但仅是片段；须与此前相同 sourceHash 的连续范围一起核对，不代表此前部分已读取。'}:{})};
+  ...(hasMore?{readHint:'用同一 fileId 和 nextCursor 调用 bambook_file_text 继续读取；累计范围连续且 sourceHash 一致才可认定没有漏读。'}:pageScopeStart!==undefined?{readHint:`本任务只读取第 ${pageScopeStart} 至 ${pageScopeLimit??raw.pages} 页，范围外未核实。`}:pageScopeLimit!==undefined?{readHint:`本任务只读取前 ${pageScopeLimit} 页，之后的页未核实。`}:worksheetScope!==undefined?{readHint:worksheetComplete
+   ?'本次已返回所选工作表的全部可提取正文，其他工作表未核实。'
+   :'本任务只读取指定工作表，其他工作表未核实。'}:!fromStart?{readHint:'本段已到可提取范围末尾，但仅是片段；须与此前相同 sourceHash 的连续范围一起核对，不代表此前部分已读取。'}:{})};
 }

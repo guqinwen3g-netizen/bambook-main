@@ -1139,7 +1139,8 @@ it.each([false,true])('uses only the selected worksheet, including on resuming w
  expect(payload).not.toContain('DRAFT-USD-1800');
  expect(payload).toContain('FINAL-EUR-2500');
  expect(history.recent.find((e:{name:string})=>e.name==='bambook_file_text').result)
-  .toMatchObject({worksheetScope:'确认报价',observedSheets:['确认报价'],complete:false});
+  .toMatchObject({worksheetScope:'确认报价',observedSheets:['确认报价'],complete:false,worksheetComplete:true,truncated:false});
+ expect((await f.current(task.id)).trail.at(-1)?.detail).toBe('已读取工作表：确认报价');
 });
 
 it('pre-reads both text slices and the short tail of a dense PDF before calling the model',async()=>{

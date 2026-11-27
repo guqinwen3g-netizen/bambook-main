@@ -20,7 +20,9 @@ it('restricts workbook extraction and continuations to one exactly named visible
  while(position){
   last=await readFileTextWindow(scope,file,bytes,500,position,undefined,undefined,'确认报价');joined+=last.text;position=last.nextCursor;
  }
- expect(last).toMatchObject({hasMore:false,complete:false,sourceHash:first.sourceHash});
+ expect(last).toMatchObject({hasMore:false,complete:false,worksheetComplete:false,sourceHash:first.sourceHash});
+ const whole=await readFileTextWindow(scope,file,bytes,8000,undefined,undefined,undefined,'确认报价');
+ expect(whole).toMatchObject({hasMore:false,complete:false,worksheetComplete:true,truncated:false});
  expect(joined).toContain('FINAL-CELL');
  expect(joined).not.toMatch(/DRAFT QUOTE|HIDDEN CONTENT/);
  await expect(readFileTextWindow(scope,file,bytes,500,first.nextCursor,undefined,undefined,'报价草案')).rejects.toMatchObject({code:'FILE_TEXT_SOURCE_CHANGED'});
