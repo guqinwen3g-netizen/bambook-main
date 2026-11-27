@@ -38,7 +38,7 @@ const markdownComponents: Components = {
     if(file&&onOpenAttachment)return <button type="button" className="mist-xz-ref" title={title}
       onClick={()=>target===undefined?onOpenAttachment(file):onOpenAttachment(file,target)}>{children}</button>;
     const hit = href?.startsWith('bambook://r/') ? index[Number(href.slice(12))] : undefined;
-    if (hit) return <button type="button" className="mist-xz-ref" data-code={/\d/.test(hit.text) || undefined} onClick={() => onOpen(hit.view, hit.id)}>{children}</button>;
+    if (hit) return <button type="button" className="mist-xz-ref" data-code={/\d/.test(hit.text) || undefined} onClick={() => hit.target ? onOpen(hit.view, hit.id, hit.target) : onOpen(hit.view, hit.id)}>{children}</button>;
     const source=agentSource(href);
     if(source)return <button type="button" className="mist-xz-ref" onClick={()=>onOpen(source.view,source.id,source.target)}>{children}</button>;
     return href && /^https?:/i.test(href) ? <a href={href} target="_blank" rel="noopener noreferrer">{children}</a> : <>{children}</>;

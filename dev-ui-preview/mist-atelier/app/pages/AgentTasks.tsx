@@ -3,13 +3,15 @@ import {XiaozhuMarkdown} from './modules/XiaozhuMarkdown';
 import {XiaozhuPhaseTimer} from './modules/XiaozhuPhaseTimer';
 import React from 'react';
 import { Bot, Copy, MessageSquare, Plus, RefreshCw, Zap } from 'lucide-react';
-import { Banner, Button, Card, CardBody, CardHeader, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, KeyValue, Pill, Select, Skeleton, TextArea, TextInput, useToast, type Column, type Tone } from '../../../../components/mist';
+import { Banner, Button, Card, CardBody, CardHeader, DataTable, Dialog, Drawer, EmptyState, Field, FilePreview, FormGrid, KeyValue, Pill, Select, Skeleton, TextArea, TextInput, useToast, type Column, type Tone } from '../../../../components/mist';
 import type { AgentTaskEvent, AgentTaskPage, AgentTaskView } from '../../../../server/src/shared/mistAgentTasks';
+import type { TaskAttachment } from '../../../../server/src/shared/mistTaskAttachments';
 import type { AgentIdentityView } from '../../../../server/src/shared/mistAgentIdentities';
 import { uiText, interfaceLocale } from '../../../../services/interfaceLanguage';
 import { mistApiRequest, useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
-import { useNav } from '../nav';
+import { readMistRoute, rememberMistSource, useNav, type RouteTarget } from '../nav';
+import { taskReportRecordIndex } from '../runtime/xiaozhuRecords';
 import { agentConnectionEndpoint } from './AgentConnections';
 import { FailureNotice } from '../runtime/FailureNotice';
 import { withRequestDeadline } from '../runtime/requestDeadline';
@@ -249,14 +251,23 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
  };
  React.useEffect(()=>{if(refreshSignal)void currentLoad.current();},[refreshSignal]);
  const routeTaskId=nav?.route?.section==='tasks'?nav.route.id:undefined;
- const closeDetail=()=>{
+ const previousRouteTask=React.useRef(routeTaskId);
+ const resetDetail=()=>{
   detailGeneration.current++;detailAbort.current?.abort();historyAbort.current?.abort();setDetailTarget(null);setCurrentDetail(null);setOpening(false);
+ };
+ const closeDetail=()=>{
+  resetDetail();
   if(!routeTaskId)return;
   const automationId=nav.route.automationId;
   if(automationId)nav.go('assistant',routeTaskId,{section:'automations',automationId});
   else nav.go('assistant',undefined,{section:'tasks'});
  };
- React.useEffect(()=>{if(routeTaskId)void openDetail(routeTaskId);},[routeTaskId,base]);
+ React.useEffect(()=>{
+  const previous=previousRouteTask.current;
+  previousRouteTask.current=routeTaskId;
+  if(routeTaskId)void openDetail(routeTaskId);
+  else if(previous)resetDetail();
+ },[routeTaskId,base]);
  const begin=(next:Plan)=>{setFailure('');setUncertain(false);setCredential(null);setPlan(next);};
  const closePlan=()=>{if(busy)return;writeGeneration.current++;writeAbort.current?.abort();setPlan(null);setCredential(null);setFailure('');setUncertain(false);};
  const submit=async()=>{
@@ -325,7 +336,7 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
     {(detail.waitingFor||detail.resumeAt||detail.wakeReason)&&<KeyValue items={[...(detail.waitingFor?[{label:uiText('等待资料'),value:detail.waitingFor.label}]:[]),...(detail.resumeAt?[{label:uiText(detail.waitingFor?'等待截止':'计划继续'),value:time(detail.resumeAt)}]:[]),...(detail.wakeReason?[{label:uiText('继续原因'),value:uiText(detail.wakeReason==='changed'?'资料已变化':'到达最晚时间')}]:[])]}/>}
     {detail.waitingFor?.link&&<Button onClick={openOriginal}>{uiText('查看原资料')}</Button>}
     {detail.instructions&&<div className="mist-col"><span className="mist-label">{uiText('任务内容')}</span><p className="mist-sub">{detail.instructions}</p></div>}
-    {detail.executionIssue&&<Banner tone="bad" title={uiText(detail.executionIssue.code==='model_response_invalid'?'模型响应无效':'模型暂不可用')}>{detail.executionIssue.retryAt?uiText('下次重试')+' '+time(detail.executionIssue.retryAt):undefined}</Banner>}{detail.checkpoint&&<Banner tone="ai" title={uiText('最近检查点')}>{detail.checkpoint}</Banner>}{detail.result&&<Card><CardHeader title={uiText('Agent执行报告')}/><CardBody><XiaozhuMarkdown text={detail.result} index={[]} onOpen={(view,id,target)=>nav.go(view,id,target)}/></CardBody></Card>}
+    {detail.executionIssue&&<Banner tone="bad" title={uiText(detail.executionIssue.code==='model_response_invalid'?'模型响应无效':'模型暂不可用')}>{detail.executionIssue.retryAt?uiText('下次重试')+' '+time(detail.executionIssue.retryAt):undefined}</Banner>}{detail.checkpoint&&<Banner tone="ai" title={uiText('最近检查点')}>{detail.checkpoint}</Banner>}{detail.result&&!contentRestricted(detail)&&<TaskReport key={detail.id} task={detail}/>}
     {(detail.questions??[]).map(q=><div className="mist-col" key={q.id}><span className="mist-label">{uiText(q.answeredAt?'Agent提问':'待补充资料')}</span><p className="mist-sub">{q.question}</p>{q.answer&&<><span className="mist-label">{uiText('本人答复')}</span><p className="mist-sub">{q.answer}</p></>}{!q.answeredAt&&detail.canControl&&['waiting_human','paused'].includes(detail.state)&&<Button onClick={()=>begin({kind:'answer',row:detail,questionId:q.id,answer:'',requestId:crypto.randomUUID()})}>{uiText('补充资料')}</Button>}</div>)}
     {detail.state==='waiting_human'&&detail.waitingProposalIds.length>0&&<Button onClick={()=>nav.go('cockpit')}>{uiText('查看待确认事项')}</Button>}
     <Button variant="quiet" icon={Copy} onClick={()=>void copy(detail.id)}>{uiText('复制任务编号')}</Button>
@@ -342,4 +353,69 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
    {credential&&<FormGrid><Field label={uiText('连接地址')} full><TextInput value={endpoint??''} readOnly/></Field><Field label={uiText('连接凭据')} full><TextInput type="password" value={credential.token} readOnly/></Field><KeyValue items={[{label:uiText('任务'),value:credential.item.name},{label:uiText('有效期至'),value:time(credential.item.expiresAt)}]}/></FormGrid>}
   </Dialog>
  </div>;
+}
+
+function TaskReport({ task }: { task: AgentTaskView }) {
+ const workspace = useMistWorkspace(), session = useMistSession(), nav = useNav();
+ const [selection, setSelection] = React.useState<{ fileId: string; target?: number | string }>();
+ const recordRefs = React.useMemo(() => taskReportRecordIndex(task.trail), [task.trail]);
+ const reportBody = React.useRef<HTMLDivElement>(null), clickedSource = React.useRef<HTMLButtonElement | null>(null);
+ const scope = session.sessionKey + ':' + workspace.workspace?.id;
+ const { sourcePosition } = nav.route;
+ const openRecord = (view: string, id: string, target?: RouteTarget) => {
+  // A task opened from a list row has no history entry until it leaves the drawer.
+  if (nav.route.section !== 'tasks' || nav.route.id !== task.id) nav.go('assistant', task.id, { section: 'tasks' });
+  const route = readMistRoute();
+  const button = clickedSource.current;
+  const body = button?.closest<HTMLElement>('.mist-drawer-body');
+  if (route.view === 'assistant' && route.section === 'tasks' && route.id === task.id && body && button && reportBody.current) {
+   const citation = [...reportBody.current.querySelectorAll('button.mist-xz-ref')].indexOf(button);
+   if (citation >= 0) {
+    const offset = button.getBoundingClientRect().top - body.getBoundingClientRect().top;
+    rememberMistSource(route, { view:'assistant', scope, taskId:task.id, version:task.version, updatedAt:task.updatedAt, citation, offset });
+   }
+  }
+  nav.go(view, id, target);
+ };
+ React.useLayoutEffect(() => {
+  if (sourcePosition?.view !== 'assistant' || sourcePosition.scope !== scope || sourcePosition.taskId !== task.id
+   || sourcePosition.version !== task.version || sourcePosition.updatedAt !== task.updatedAt) return;
+  const button = reportBody.current?.querySelectorAll<HTMLButtonElement>('button.mist-xz-ref')[sourcePosition.citation];
+  const body = button?.closest<HTMLElement>('.mist-drawer-body');
+  if (!button || !body || !Number.isFinite(sourcePosition.offset)) return;
+  // Let both drawers finish their initial focus before restoring the original citation.
+  const frame = requestAnimationFrame(() => {
+   body.scrollTop += button.getBoundingClientRect().top - body.getBoundingClientRect().top - sourcePosition.offset;
+   button.focus({ preventScroll:true });
+  });
+  return () => cancelAnimationFrame(frame);
+ }, [sourcePosition, scope, task.id, task.version, task.updatedAt]);
+
+ const files = task.attachments ?? [];
+ const index = files.findIndex(file => file.id === selection?.fileId);
+ const file = files[index];
+ React.useEffect(() => {
+  if (selection && !file) setSelection(undefined);
+ }, [selection, file]);
+
+ const open = (attachment: TaskAttachment, target?: number | string) => setSelection({ fileId: attachment.id, target });
+ return <>
+  <Card>
+   <CardHeader title={uiText('Agent执行报告')}/>
+   <CardBody>
+    <div ref={reportBody} onClickCapture={event => {
+     clickedSource.current = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button.mist-xz-ref') : null;
+    }}>
+     <XiaozhuMarkdown text={task.result} index={recordRefs} onOpen={openRecord}
+       attachments={files} attachmentReads={task.trail} onOpenAttachment={files.length ? open : undefined}/>
+    </div>
+   </CardBody>
+  </Card>
+  {file&&<FilePreview files={files} index={index}
+    initialPdfPage={typeof selection?.target==='number'?selection.target:undefined}
+    initialSheetName={typeof selection?.target==='string'?selection.target:undefined}
+    onIndex={next=>setSelection({fileId:files[next].id})} onClose={()=>setSelection(undefined)}
+    load={()=>workspace.readTaskAttachment(task.id,file)}
+    onDownload={()=>workspace.downloadTaskAttachment(task.id,file)}/>}
+ </>;
 }

@@ -4,10 +4,15 @@ import {createRoot,type Root} from 'react-dom/client';
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 import {getByRole,getByLabelText,getByText,queryByRole,fireEvent} from '@testing-library/dom';
 import {MistRoot,ToastProvider} from '../../../../components/mist';
-const seam=vi.hoisted(()=>({api:vi.fn(),copy:vi.fn(),refresh:vi.fn(),go:vi.fn(),identity:'A',userId:'sales',routeId:'',automationId:''}));
+import type { Route } from '../nav';
+const seam=vi.hoisted(()=>({api:vi.fn(),readAttachment:vi.fn(),copy:vi.fn(),refresh:vi.fn(),go:vi.fn(),identity:'A',userId:'sales',routeId:'',automationId:'',sourcePosition:undefined as Route['sourcePosition']}));
 vi.mock('../runtime/auth',()=>({useMistSession:()=>({sessionKey:seam.identity,user:{id:seam.userId}})}));
-vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>({workspace:{id:'workspace'},refresh:seam.refresh}),mistApiRequest:(...args:any[])=>seam.api(...args)}));
-vi.mock('../nav',()=>({useNav:()=>({go:seam.go,route:{view:'assistant',section:'tasks',id:seam.routeId||undefined,automationId:seam.automationId||undefined}})}));
+vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>({workspace:{id:'workspace'},refresh:seam.refresh,readTaskAttachment:seam.readAttachment}),mistApiRequest:(...args:any[])=>seam.api(...args)}));
+vi.mock('../nav',async importOriginal=>({
+ ...await importOriginal<typeof import('../nav')>(),
+ useNav:()=>({go:seam.go,route:{view:'assistant',section:'tasks',id:seam.routeId||undefined,
+  automationId:seam.automationId||undefined,sourcePosition:seam.sourcePosition}}),
+}));
 import {AgentTasks} from './AgentTasks';
 let host:HTMLDivElement,root:Root;
 const row=()=>({id:'task',identityId:'identity',identityName:'邮件助理',name:'核对邮件',ownerId:'sales',ownerName:'顾言',mode:'operate',instructions:'核对本人来信，移动前交本人确认。',state:'queued',version:3,createdAt:'2026-11-01T00:00:00Z',updatedAt:'2026-11-01T00:00:00Z',expiresAt:'2026-11-02T00:00:00Z',stepsUsed:0,stepLimit:40,runtimeUsedMs:0,runtimeLimitMs:1800000,lastHeartbeatAt:null,checkpoint:'',result:'',waitingProposalIds:[],canControl:true});
@@ -381,6 +386,38 @@ it('rechecks an open report on focus and visibility, withholds it after confirme
  expect(detailRequests).toBe(4);
  expect(getByRole(document.body,'dialog',{name:'核对邮件'}).textContent).toContain(report.result);
 });
+it('opens a report attachment from the task drawer and removes its preview on restriction', async () => {
+ const pdf={id:'pdf-a',name:'发票.pdf',mimeType:'application/pdf',size:30};
+ const report={...row(),state:'succeeded',executor:'platform',result:'请核对 发票.pdf 第 23 页。',canControl:false,contentRestricted:false,
+  attachments:[pdf],trail:[{at:'',kind:'read',label:'已读',taskAttachmentId:pdf.id,taskAttachmentObservedPages:[23]}]};
+ let current=report;
+ seam.readAttachment.mockRejectedValue(new Error('暂时无法读取'));
+ seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:current}
+  :url.includes('agent-identities')?{items:[identity()]}:url.endsWith('/history')?{items:[],nextCursor:null}:{items:[current],nextCursor:null}));
+ act(paint);await flush();await click(getByText(host,report.name));
+ expect(seam.readAttachment).not.toHaveBeenCalled();
+ const dialog=getByRole(document.body,'dialog',{name:report.name});
+ const citation=getByRole(dialog,'button',{name:pdf.name});
+ expect(citation.title).toBe('第 23 页');
+ citation.focus();await click(citation);
+ expect(getByRole(document.body,'dialog',{name:pdf.name})).toBeTruthy();
+ expect(seam.readAttachment).toHaveBeenLastCalledWith(report.id,pdf);
+ await act(async()=>document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));await flush();
+ expect(document.activeElement).toBe(citation);
+ await click(citation);
+ current={...report,name:'Agent任务',result:'',attachments:[],trail:[],contentRestricted:true};
+ await act(async()=>window.dispatchEvent(new Event('focus')));await flush();
+ expect(queryByRole(document.body,'dialog',{name:pdf.name})).toBeNull();
+ expect(getByRole(document.body,'dialog',{name:'Agent任务'})).toBeTruthy();
+ expect(queryByRole(document.body,'button',{name:pdf.name})).toBeNull();
+ current=report;
+ await act(async()=>window.dispatchEvent(new Event('focus')));await flush();
+ expect(getByRole(document.body,'button',{name:pdf.name})).toBeTruthy();
+ expect(queryByRole(document.body,'dialog',{name:pdf.name})).toBeNull();
+ expect(seam.readAttachment).toHaveBeenCalledTimes(2);
+ expect(seam.api.mock.calls.every(([,init])=>!init?.method||init.method==='GET')).toBe(true);
+});
+
 it('does not replace a committed task control receipt with an older focus read',async()=>{
  const active={...row(),executor:'platform',state:'running'};
  const stopped={...active,state:'cancelled',version:active.version+1,canControl:false};
@@ -426,6 +463,71 @@ it('creates an explicit platform task without issuing any external credential',a
 it('does not offer a platform task as ready when the runtime is unavailable, while retaining external creation',async()=>{
  act(paint);await flush();await click(getByRole(host,'button',{name:'新建任务'}));await act(async()=>fireEvent.change(getByLabelText(document.body,/执行方式/,{selector:'select'}),{target:{value:'platform'}}));expect(getByText(document.body,'平台执行暂不可用')).toBeTruthy();expect((getByRole(document.body,'button',{name:'安排任务',exact:true}) as HTMLButtonElement).disabled).toBe(true);
 });
+it('links verified report references and records the drawer route before leaving a task opened from the list', async () => {
+ const report={...row(),state:'succeeded',result:'核对 SO-1200、PO-1200、SO-8888、重复编号。',canControl:false,
+  trail:[
+   {kind:'read',ref:{type:'order',id:'order-id',label:'SO-1200',view:'orders/detail'}},
+   {kind:'read',refs:[
+    {type:'purchase',id:'purchase-id',label:'PO-1200',view:'procurement',section:'supplies'},
+    {type:'order',id:'a',label:'重复编号',view:'orders/detail'},
+    {type:'order',id:'b',label:'重复编号',view:'orders/detail'},
+   ]},
+   {kind:'read',failed:true,ref:{type:'order',id:'failed',label:'SO-8888',view:'orders/detail'}},
+  ]};
+ seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:report}
+  :url.includes('agent-identities')?{items:[identity()]}:url.includes('/history')?{items:[],nextCursor:null}:{items:[report],nextCursor:null}));
+ act(paint);await flush();await click(getByText(host,report.name));
+ const dialog=getByRole(document.body,'dialog',{name:report.name});
+ expect(queryByRole(dialog,'button',{name:'重复编号'})).toBeNull();
+ expect(queryByRole(dialog,'button',{name:'SO-8888'})).toBeNull();
+ expect(getByRole(dialog,'button',{name:'SO-1200'})).toBeTruthy();
+ await click(getByRole(dialog,'button',{name:'PO-1200'}));
+ expect(seam.go.mock.calls).toEqual([
+  ['assistant','task',{section:'tasks'}],
+  ['procurement','purchase-id',{section:'supplies'}],
+ ]);
+});
+
+it('closes a routed report when browser history returns to the task list', async () => {
+ const report={...row(),state:'succeeded',result:'已核对',canControl:false};
+ seam.routeId=report.id;
+ seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:report}
+  :url.includes('agent-identities')?{items:[identity()]}:url.endsWith('/history')?{items:[],nextCursor:null}:{items:[report],nextCursor:null}));
+ act(paint);await flush();
+ expect(getByRole(document.body,'dialog',{name:report.name})).toBeTruthy();
+ seam.routeId='';
+ act(paint);await flush();
+ expect(queryByRole(document.body,'dialog',{name:report.name})).toBeNull();
+ expect(seam.go).not.toHaveBeenCalled();
+});
+
+it('restores the exact repeated report citation only for the same session and report version', async () => {
+ const report={...row(),state:'succeeded',result:'起始 SO-1200。末段 SO-1200。',canControl:false,
+  trail:[{kind:'read',ref:{type:'order',id:'order-id',label:'SO-1200',view:'orders/detail'}}]};
+ const saved={view:'assistant' as const,scope:seam.identity+':workspace',taskId:report.id,
+  version:report.version,updatedAt:report.updatedAt,citation:1,offset:30};
+ seam.routeId=report.id;
+ seam.sourcePosition={...saved,scope:'other-session:workspace'};
+ seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:report}
+  :url.includes('agent-identities')?{items:[identity()]}:url.endsWith('/history')?{items:[],nextCursor:null}:{items:[report],nextCursor:null}));
+ const nextFrame=()=>act(async()=>{await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));});
+ try {
+  act(paint);await flush();await nextFrame();
+  const dialog=getByRole(document.body,'dialog',{name:report.name});
+  const citations=[...dialog.querySelectorAll('button.mist-xz-ref')];
+  expect(citations).toHaveLength(2);
+  expect(citations).not.toContain(document.activeElement);
+  seam.sourcePosition={...saved,version:report.version-1};
+  act(paint);await nextFrame();
+  expect(citations).not.toContain(document.activeElement);
+  seam.sourcePosition=saved;
+  act(paint);await nextFrame();
+  expect(document.activeElement).toBe(citations[1]);
+ } finally {
+  seam.sourcePosition=undefined;
+ }
+});
+
 it('opens the exact attachment source version from a formatted task report',async()=>{
  const finished={...row(),state:'succeeded',result:'[来源版本](bambook://open?view=development/detail&id=dev&versionId=old)\n\n| 规格 | 数量 |\n| --- | --- |\n| A | 1200 |',canControl:false};
  seam.routeId='task';seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:finished}:url.includes('/history')?{items:[],nextCursor:null}:url.includes('agent-identities')?{items:[identity()]}:{items:[finished],nextCursor:null}));
