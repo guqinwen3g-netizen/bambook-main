@@ -253,7 +253,8 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
   detailGeneration.current++;detailAbort.current?.abort();historyAbort.current?.abort();setDetailTarget(null);setCurrentDetail(null);setOpening(false);
   if(!routeTaskId)return;
   const automationId=nav.route.automationId;
-  nav.go('assistant',automationId,{section:automationId?'automations':'tasks'});
+  if(automationId)nav.go('assistant',routeTaskId,{section:'automations',automationId});
+  else nav.go('assistant',undefined,{section:'tasks'});
  };
  React.useEffect(()=>{if(routeTaskId)void openDetail(routeTaskId);},[routeTaskId,base]);
  const begin=(next:Plan)=>{setFailure('');setUncertain(false);setCredential(null);setPlan(next);};
@@ -283,7 +284,7 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
  };
  const active=identities.filter(i=>i.state==='active'),aiUnavailable=identities.some(i=>i.state==='invalid'&&i.canIssue===false),create=plan?.kind==='create'?plan:null,answer=plan?.kind==='answer'?plan:null;
  const detailOrigin=detail&&!contentRestricted(detail)&&detail.state!=='access_changed'&&detail.executor==='platform'
-  ? detail.automationId?{id:detail.automationId,section:'automations',label:'打开原规则',icon:Zap}
+  ? detail.automationId?{id:detail.id,section:'automations',automationId:detail.automationId,label:'打开原规则',icon:Zap}
    :detail.conversationId?{id:detail.id,section:'task-origin',label:'打开原对话',icon:MessageSquare}
    :undefined
   :undefined;
@@ -309,7 +310,7 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
    {detailError&&detailTarget&&<FailureNotice title="任务详情读取失败" detail={detailError} retry={()=>void openDetail(detailTarget)}/>}
    {detail&&<div className="mist-col"><div className="mist-row"><Pill tone={tone(detail.state)}>{uiText(statusLabel(detail,detailProgressUnavailable))}</Pill>{detailModelSince&&<XiaozhuPhaseTimer at={detailModelSince}/>}
     {contentRestricted(detail)&&detail.state!=='access_changed'&&<Pill tone="warn">{uiText('权限已变化')}</Pill>}
-    {detailOrigin&&<Button size="sm" variant="quiet" icon={detailOrigin.icon} onClick={()=>nav.go('assistant',detailOrigin.id,{section:detailOrigin.section})}>{uiText(detailOrigin.label)}</Button>}
+    {detailOrigin&&<Button size="sm" variant="quiet" icon={detailOrigin.icon} onClick={()=>nav.go('assistant',detailOrigin.id,{section:detailOrigin.section,...(detailOrigin.automationId?{automationId:detailOrigin.automationId}:{})})}>{uiText(detailOrigin.label)}</Button>}
    </div>
     <KeyValue items={[
       {label:uiText('执行方式'),value:uiText(detail.executor==='platform'?'平台执行':'外部客户端')},
