@@ -1,6 +1,8 @@
-import {expect,it} from 'vitest';
+import {expect,it,vi} from 'vitest';
+import {PDFParse} from 'pdf-parse';
+import {createHash} from 'node:crypto';
 import JSZip from 'jszip';
-import {readFileTextWindow} from './agentFileWindow';
+import {readFileTextWindow,type FileTextWindowCache} from './agentFileWindow';
 import {platformTrail} from './agentTaskTrail';
 const scope={workspaceId:'w',fileId:'f'};
 it('returns consecutive stable text windows, never calling the final fragment a complete document',async()=>{
@@ -13,15 +15,44 @@ it('returns consecutive stable text windows, never calling the final fragment a 
  await expect(readFileTextWindow({...scope,fileId:'other'},file,bytes,8000,first.nextCursor)).rejects.toThrow('续读');
  await expect(readFileTextWindow(scope,file,bytes,8000,'invalid')).rejects.toThrow('续读');
 });
-it('continues long Word and Excel attachments without dropping a long cell',async()=>{
- for(const ext of ['docx','xlsx']){
-  const z=new JSZip(),body='质量要求 '.repeat(5000)+'最后条款 END-991';
-  if(ext==='docx')z.file('word/document.xml','<w:document><w:body><w:p><w:r><w:t>'+body+'</w:t></w:r></w:p></w:body></w:document>');
-  else{z.file('xl/workbook.xml','<workbook><sheets><sheet name="要求" r:id="r"/></sheets></workbook>');z.file('xl/_rels/workbook.xml.rels','<Relationships><Relationship Id="r" Target="worksheets/sheet1.xml"/></Relationships>');z.file('xl/worksheets/sheet1.xml','<worksheet><row><c r="A1" t="inlineStr"><is><t>'+body+'</t></is></c></row></worksheet>');}
-  const bytes=await z.generateAsync({type:'nodebuffer'});let cursor:unknown,joined='';
-  do{const r=await readFileTextWindow(scope,{name:'requirements.'+ext,mimeType:''},bytes,8000,cursor);joined+=r.text;cursor=r.nextCursor;}while(cursor);
-  expect(joined).toContain('最后条款 END-991');expect(joined.match(/END-991/g)).toHaveLength(1);
+it.each(['docx','xlsx','pptx'])('reuses Office extraction across long %s slices without dropping the tail',async ext=>{
+ const z=new JSZip(),body='质量要求 '.repeat(5000)+'最后条款 END-991';
+ if(ext==='docx'){
+  z.file('word/document.xml','<w:document><w:body><w:p><w:r><w:t>'+body+'</w:t></w:r></w:p></w:body></w:document>');
+ }else if(ext==='xlsx'){
+  z.file('xl/workbook.xml','<workbook><sheets><sheet name="要求" r:id="r1"/></sheets></workbook>');
+  z.file('xl/_rels/workbook.xml.rels','<Relationships><Relationship Id="r1" Target="worksheets/sheet1.xml"/></Relationships>');
+  z.file('xl/worksheets/sheet1.xml','<worksheet><row><c r="A1" t="inlineStr"><is><t>'+body+'</t></is></c></row></worksheet>');
+ }else{
+  z.file('ppt/presentation.xml','<p:presentation><p:sldId r:id="r1"/></p:presentation>');
+  z.file('ppt/_rels/presentation.xml.rels','<Relationships><Relationship Id="r1" Target="slides/slide1.xml"/></Relationships>');
+  z.file('ppt/slides/slide1.xml','<p:sld><a:p><a:r><a:t>'+body+'</a:t></a:r></a:p></p:sld>');
  }
+ const bytes=await z.generateAsync({type:'nodebuffer'}),file={name:'requirements.'+ext,mimeType:''};
+ const gather=async(cache?:FileTextWindowCache)=>{
+  let cursor:unknown;
+  const results=[];
+  do{
+   const part=await readFileTextWindow(scope,file,bytes,8000,cursor,cache);
+   results.push(part);
+   cursor=part.nextCursor;
+  }while(cursor);
+  return results;
+ };
+ const unzip=vi.spyOn(JSZip,'loadAsync');
+ try{
+  const original=await gather();
+  expect(original.length).toBeGreaterThan(1);
+  expect(unzip).toHaveBeenCalledTimes(original.length);
+  const cache:FileTextWindowCache=new Map();
+  const reused=await gather(cache);
+  expect(unzip).toHaveBeenCalledTimes(original.length+1);
+  expect(reused).toEqual(original);
+  expect(reused.at(-1)?.text).toContain('最后条款 END-991');
+  expect(cache.size).toBe(0);
+  if(ext==='xlsx')expect(reused.every(part=>part.observedSheets?.includes('要求'))).toBe(true);
+  if(ext==='pptx')expect(reused.every(part=>part.pages===1)).toBe(true);
+ }finally{unzip.mockRestore();}
 });
 
 function contractPdf(count:number,blankPage=0){
@@ -67,4 +98,105 @@ it('reports PDF page windows and partial text honestly in the same task trail', 
 it('does not call a mixed text/image PDF complete when a page has no extractable text',async()=>{
  const r=await readFileTextWindow(scope,{name:'mixed.pdf',mimeType:'application/pdf'},contractPdf(3,2),8000);
  expect(r).toMatchObject({hasMore:false,complete:false,pagesWithoutText:[2]});expect(r.reason).toContain('2');
+});
+
+it('binds excerpts to their physical pages within each returned character slice',async()=>{
+ const bytes=contractPdf(23,22),file={name:'paged.pdf',mimeType:'application/pdf'};
+ const head=await readFileTextWindow(scope,file,bytes,1000);
+ expect(head.pageTextSpans?.map(span=>span.page)).toEqual([1,2,3,4,5]);
+ expect(head.pageTextSpans?.at(-1)?.end).toBe(head.text.length);
+ const continued=await readFileTextWindow(scope,file,bytes,8000,head.nextCursor);
+ expect(continued.pageTextSpans?.[0]).toMatchObject({page:5,start:0});
+ const tail=await readFileTextWindow(scope,file,bytes,8000,continued.nextCursor);
+ expect(tail.pageTextSpans?.map(span=>[span.page,tail.text.slice(span.start,span.end)])).toEqual([
+  [21,expect.stringContaining('Clause P21:')],
+  [23,expect.stringContaining('FINAL TERM')],
+ ]);
+ expect(tail.pagesWithoutText).toEqual([22]);
+ expect(tail.sourceHash).toBe(head.sourceHash);
+ const fileRef={id:scope.fileId,name:file.name};
+ const trail=platformTrail([head,continued,tail].map((result,index)=>({
+  id:String(index),at:'2026-11-26T00:00:00Z',
+  plan:{name:'bambook_file_text',arguments:{fileId:fileRef.id}},
+  result:{...result,file:fileRef},
+ })),[fileRef]);
+ expect(trail[0].taskAttachmentObservedPages).toEqual([1,2,3,4,5]);
+ expect(trail[1].taskAttachmentPage).toBe(5);
+ expect(trail[2].taskAttachmentObservedPages).toEqual([21,22,23]);
+});
+
+it('reports only workbook tabs represented in the current slice, excluding hidden tabs',async()=>{
+ const zip=new JSZip();
+ zip.file('xl/workbook.xml','<workbook><sheets><sheet name="报价草案" r:id="r1"/><sheet name="核对结果" r:id="r2"/><sheet name="内部底表" state="hidden" r:id="r3"/></sheets></workbook>');
+ zip.file('xl/_rels/workbook.xml.rels','<Relationships>'+[1,2,3].map(num=>'<Relationship Id="r'+num+'" Target="worksheets/sheet'+num+'.xml"/>').join('')+'</Relationships>');
+ for(const [index,value] of ['draft-'.repeat(90),'QUOTE-FINAL-USD','PRIVATE-HIDDEN-TAB'].entries()){
+  zip.file('xl/worksheets/sheet'+(index+1)+'.xml','<worksheet><sheetData><row><c r="A1" t="inlineStr"><is><t>'+value+'</t></is></c></row></sheetData></worksheet>');
+ }
+ const bytes=await zip.generateAsync({type:'nodebuffer'});
+ const file={name:'quote.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'};
+ const first=await readFileTextWindow(scope,file,bytes,200);
+ const last=await readFileTextWindow(scope,file,bytes,1000,first.nextCursor);
+ expect(first.sheets).toEqual(['报价草案','核对结果']);
+ expect(first.observedSheets).toEqual(['报价草案']);
+ expect(last.observedSheets).toEqual(['报价草案','核对结果']);
+ expect(last.text).toContain('QUOTE-FINAL-USD');
+ expect(first.text+last.text).not.toContain('PRIVATE-HIDDEN-TAB');
+ const fileRef={id:scope.fileId,name:file.name};
+ const trail=platformTrail([{id:'xlsx',at:'',plan:{name:'bambook_file_text',arguments:{fileId:fileRef.id}},result:{...first,file:fileRef}}],[fileRef]);
+ expect(trail[0].taskAttachmentObservedSheets).toEqual(['报价草案']);
+});
+
+it('reuses one parsed PDF window for consecutive slices while keeping byte and page checks',async()=>{
+ const file={name:'dense.pdf',mimeType:'application/pdf'},bytes=contractPdf(23,22);
+ const cache:FileTextWindowCache=new Map();
+ const parse=vi.spyOn(PDFParse.prototype,'getText');
+ try {
+  const first=await readFileTextWindow(scope,file,bytes,1000,undefined,cache);
+  expect(parse).toHaveBeenCalledTimes(1);
+  await expect(readFileTextWindow(scope,file,contractPdf(23,21),8000,first.nextCursor,cache))
+   .rejects.toMatchObject({code:'FILE_TEXT_SOURCE_CHANGED'});
+  await expect(readFileTextWindow({...scope,fileId:'other'},file,bytes,8000,first.nextCursor,cache)).rejects.toThrow('续读');
+  const otherScope={...scope,fileId:'other'};
+  const other=await readFileTextWindow(otherScope,file,bytes,1000,undefined,cache);
+  expect(parse).toHaveBeenCalledTimes(2);
+  const middle=await readFileTextWindow(scope,file,bytes,8000,first.nextCursor,cache);
+  expect(parse).toHaveBeenCalledTimes(2);
+  expect(middle.nextPageFrom).toBe(21);
+  expect(middle).toEqual(await readFileTextWindow(scope,file,bytes,8000,first.nextCursor));
+  const tail=await readFileTextWindow(scope,file,bytes,8000,middle.nextCursor,cache);
+  expect(parse).toHaveBeenCalledTimes(4);
+  expect(tail.pagesWithoutText).toEqual([22]);
+  expect(tail.text).toContain('FINAL TERM');
+  expect(cache.size).toBe(1);
+  expect((await readFileTextWindow(otherScope,file,bytes,8000,other.nextCursor,cache)).nextPageFrom).toBe(21);
+  expect(parse).toHaveBeenCalledTimes(4);
+  expect(cache.size).toBe(0);
+ }finally{parse.mockRestore();}
+});
+
+it.each([true,false])('handles old Excel cursors safely when the corrected value form is present: %s',async changed=>{
+ const zip=new JSZip();
+ zip.file('xl/workbook.xml','<workbook><sheets><sheet name="报价" r:id="r1"/></sheets></workbook>');
+ zip.file('xl/_rels/workbook.xml.rels','<Relationships><Relationship Id="r1" Target="worksheets/sheet1.xml"/></Relationships>');
+ zip.file('xl/worksheets/sheet1.xml','<worksheet><row><c r="A1" t="str"><v'+(changed?' xml:space="preserve"':'')+'> QUOTE-SPACE-155 </v></c></row>'
+  +'<row><c r="A2" t="str"><v>'+('Long terms. '.repeat(40))+'EXCEL-FINAL-399</v></c></row></worksheet>');
+ const bytes=await zip.generateAsync({type:'nodebuffer'}),file={name:'quote.xlsx',mimeType:''};
+ const hash=(value:Buffer|string)=>createHash('sha256').update(value).digest('hex');
+ const legacySource=hash(JSON.stringify(['file-text-v1',hash(bytes),file.name,file.mimeType]));
+ const legacy='aft1.'+Buffer.from(JSON.stringify({...scope,v:1,source:legacySource,page:1,offset:200})).toString('base64url');
+ const first=await readFileTextWindow(scope,file,bytes,200);
+ expect(first.text).toContain('QUOTE-SPACE-155');
+ expect(first.observedSheets).toEqual(['报价']);
+ expect(first.nextCursor).toMatch(changed?/^aft2\./:/^aft1\./);
+ if(changed){
+  await expect(readFileTextWindow(scope,file,bytes,1000,legacy)).rejects.toMatchObject({code:'FILE_TEXT_CURSOR_UPDATED',status:409});
+  expect(first.sourceHash).not.toBe(legacySource);
+ }else{
+  expect(first.sourceHash).toBe(legacySource);
+  expect((await readFileTextWindow(scope,file,bytes,1000,legacy)).text).toContain('EXCEL-FINAL-399');
+ }
+ const tail=await readFileTextWindow(scope,file,bytes,1000,first.nextCursor);
+ expect(tail.sourceHash).toBe(first.sourceHash);
+ expect(tail.text).toContain('EXCEL-FINAL-399');
+ expect(tail.range.start).toBe(first.range.end);
 });

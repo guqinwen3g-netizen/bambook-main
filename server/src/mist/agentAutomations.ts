@@ -98,6 +98,27 @@ export async function setAutomationEnabled(db: any, actor: TokenPayload, workspa
   return next;
 }
 
+const automationCreationKey = (actor: TokenPayload, requestId: unknown) => AUTOMATION_PREFIX + 'create:'
+  + createHash('sha256').update(JSON.stringify([actor.userId, text(requestId, '操作编号', 116)])).digest('hex');
+
+async function findCreatedAutomation(db: any, actor: TokenPayload, workspaceId: string, request: string, inputHash?: string) {
+  const receipt = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: request } } });
+  if (!receipt) return undefined;
+  if (receipt.workspaceId !== workspaceId || receipt.actorId !== actor.userId || typeof receipt.result?.id !== 'string')
+    fail('NOT_FOUND', '规则不存在', 404);
+  if (inputHash !== undefined && receipt.inputHash !== inputHash) fail('CONFLICT', '操作编号已用于其他规则', 409);
+  const { value: rule } = await automationRecord(db, workspaceId, receipt.result.id);
+  if (rule.ownerId !== actor.userId) fail('NOT_FOUND', '规则不存在', 404);
+  if (rule.removed) fail('AGENT_AUTOMATION_CREATED_RULE_GONE', '原规则已删除', 404);
+  return rule;
+}
+
+export async function automationFromCreationReceipt(db: any, actor: TokenPayload, workspaceId: string, requestId: unknown) {
+  const rule = await findCreatedAutomation(db, actor, workspaceId, automationCreationKey(actor, requestId));
+  if (!rule) fail('AGENT_AUTOMATION_RECEIPT_NOT_FOUND', '暂未查到原规则开启回执', 404);
+  return rule;
+}
+
 export async function saveAutomation(db: any, actor: TokenPayload, workspaceId: string, id: string | undefined, input: Record<string, unknown>, now: number) {
   const fields = parseAutomationInput(input), at = new Date(now).toISOString();
   if (id) {
@@ -109,20 +130,11 @@ export async function saveAutomation(db: any, actor: TokenPayload, workspaceId: 
   }
   const authority = automationAuthority(actor, now);
   // The scoped receipt stores the original intent separately from the live, editable rule.
-  const request = input.requestId === undefined ? undefined : AUTOMATION_PREFIX + 'create:'
-    + createHash('sha256').update(JSON.stringify([actor.userId, text(input.requestId, '操作编号', 116)])).digest('hex');
+  const request = input.requestId === undefined ? undefined : automationCreationKey(actor, input.requestId);
   const inputHash = createHash('sha256').update(JSON.stringify(fields)).digest('hex');
   if (request) {
-    const receipt = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: request } } });
-    if (receipt) {
-      if (receipt.workspaceId !== workspaceId || receipt.actorId !== actor.userId || typeof receipt.result?.id !== 'string')
-        fail('NOT_FOUND', '规则不存在', 404);
-      if (receipt.inputHash !== inputHash) fail('CONFLICT', '操作编号已用于其他规则', 409);
-      const { value: rule } = await automationRecord(db, workspaceId, receipt.result.id);
-      if (rule.ownerId !== actor.userId) fail('NOT_FOUND', '规则不存在', 404);
-      if (rule.removed) fail('AGENT_AUTOMATION_CREATED_RULE_GONE', '原规则已删除', 404);
-      return rule;
-    }
+    const existing = await findCreatedAutomation(db, actor, workspaceId, request, inputHash);
+    if (existing) return existing;
   }
   if ((await listAutomations(db, workspaceId, actor.userId)).length >= AUTOMATION_RULE_LIMIT) fail('PRECONDITION', `每人最多 ${AUTOMATION_RULE_LIMIT} 条规则`, 422);
   const c: AutomationRecord = { schemaVersion: 1, id: randomUUID(), workspaceId, ownerId: actor.userId, ownerName: actor.displayName || actor.userId, version: 1, ...fields, createdAt: at, updatedAt: at, ...(fields.enabled ? { authority } : {}), seen: [], primed: false, runs: [] };

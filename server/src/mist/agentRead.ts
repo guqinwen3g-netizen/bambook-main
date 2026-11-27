@@ -212,10 +212,14 @@ export function agentQuery(state: MistState, actor: TokenPayload, input: { type?
   return { results: matches, total, truncated: total > matches.length, readableTypes: types.map(t => t.type) };
 }
 
+export function matchesAgentObjectIdentifier(row: { id?: unknown; code?: unknown; sku?: unknown }, identifier: string): boolean {
+  return row.id === identifier || row.code === identifier || row.sku === identifier;
+}
+
 function find(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown) {
   const type = typeOf(typeName, actor);
   if (typeof id !== 'string' || !id || id.length > 200) deny('INVALID_INPUT', '对象编号无效');
-  const row = rows(state, type).find(r => r.id === id || r.code === id || r.sku === id);
+  const row = rows(state, type).find(row => matchesAgentObjectIdentifier(row, id));
   if (!row) deny('NOT_FOUND', `${type.label}不存在或当前账号不可见`, 404);
   return { type, row };
 }
