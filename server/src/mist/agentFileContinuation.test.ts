@@ -1,7 +1,7 @@
 import {expect,it,vi} from 'vitest';
 import {PDFParse} from 'pdf-parse';
 import JSZip from 'jszip';
-import {readFileTextWindow,type PdfTextWindowCache} from './agentFileWindow';
+import {readFileTextWindow,type FileTextWindowCache} from './agentFileWindow';
 import {platformTrail} from './agentTaskTrail';
 const scope={workspaceId:'w',fileId:'f'};
 it('returns consecutive stable text windows, never calling the final fragment a complete document',async()=>{
@@ -14,15 +14,44 @@ it('returns consecutive stable text windows, never calling the final fragment a 
  await expect(readFileTextWindow({...scope,fileId:'other'},file,bytes,8000,first.nextCursor)).rejects.toThrow('续读');
  await expect(readFileTextWindow(scope,file,bytes,8000,'invalid')).rejects.toThrow('续读');
 });
-it('continues long Word and Excel attachments without dropping a long cell',async()=>{
- for(const ext of ['docx','xlsx']){
-  const z=new JSZip(),body='质量要求 '.repeat(5000)+'最后条款 END-991';
-  if(ext==='docx')z.file('word/document.xml','<w:document><w:body><w:p><w:r><w:t>'+body+'</w:t></w:r></w:p></w:body></w:document>');
-  else{z.file('xl/workbook.xml','<workbook><sheets><sheet name="要求" r:id="r"/></sheets></workbook>');z.file('xl/_rels/workbook.xml.rels','<Relationships><Relationship Id="r" Target="worksheets/sheet1.xml"/></Relationships>');z.file('xl/worksheets/sheet1.xml','<worksheet><row><c r="A1" t="inlineStr"><is><t>'+body+'</t></is></c></row></worksheet>');}
-  const bytes=await z.generateAsync({type:'nodebuffer'});let cursor:unknown,joined='';
-  do{const r=await readFileTextWindow(scope,{name:'requirements.'+ext,mimeType:''},bytes,8000,cursor);joined+=r.text;cursor=r.nextCursor;}while(cursor);
-  expect(joined).toContain('最后条款 END-991');expect(joined.match(/END-991/g)).toHaveLength(1);
+it.each(['docx','xlsx','pptx'])('reuses Office extraction across long %s slices without dropping the tail',async ext=>{
+ const z=new JSZip(),body='质量要求 '.repeat(5000)+'最后条款 END-991';
+ if(ext==='docx'){
+  z.file('word/document.xml','<w:document><w:body><w:p><w:r><w:t>'+body+'</w:t></w:r></w:p></w:body></w:document>');
+ }else if(ext==='xlsx'){
+  z.file('xl/workbook.xml','<workbook><sheets><sheet name="要求" r:id="r1"/></sheets></workbook>');
+  z.file('xl/_rels/workbook.xml.rels','<Relationships><Relationship Id="r1" Target="worksheets/sheet1.xml"/></Relationships>');
+  z.file('xl/worksheets/sheet1.xml','<worksheet><row><c r="A1" t="inlineStr"><is><t>'+body+'</t></is></c></row></worksheet>');
+ }else{
+  z.file('ppt/presentation.xml','<p:presentation><p:sldId r:id="r1"/></p:presentation>');
+  z.file('ppt/_rels/presentation.xml.rels','<Relationships><Relationship Id="r1" Target="slides/slide1.xml"/></Relationships>');
+  z.file('ppt/slides/slide1.xml','<p:sld><a:p><a:r><a:t>'+body+'</a:t></a:r></a:p></p:sld>');
  }
+ const bytes=await z.generateAsync({type:'nodebuffer'}),file={name:'requirements.'+ext,mimeType:''};
+ const gather=async(cache?:FileTextWindowCache)=>{
+  let cursor:unknown;
+  const results=[];
+  do{
+   const part=await readFileTextWindow(scope,file,bytes,8000,cursor,cache);
+   results.push(part);
+   cursor=part.nextCursor;
+  }while(cursor);
+  return results;
+ };
+ const unzip=vi.spyOn(JSZip,'loadAsync');
+ try{
+  const original=await gather();
+  expect(original.length).toBeGreaterThan(1);
+  expect(unzip).toHaveBeenCalledTimes(original.length);
+  const cache:FileTextWindowCache=new Map();
+  const reused=await gather(cache);
+  expect(unzip).toHaveBeenCalledTimes(original.length+1);
+  expect(reused).toEqual(original);
+  expect(reused.at(-1)?.text).toContain('最后条款 END-991');
+  expect(cache.size).toBe(0);
+  if(ext==='xlsx')expect(reused.every(part=>part.observedSheets?.includes('要求'))).toBe(true);
+  if(ext==='pptx')expect(reused.every(part=>part.pages===1)).toBe(true);
+ }finally{unzip.mockRestore();}
 });
 
 function contractPdf(count:number,blankPage=0){
@@ -118,7 +147,7 @@ it('reports only workbook tabs represented in the current slice, excluding hidde
 
 it('reuses one parsed PDF window for consecutive slices while keeping byte and page checks',async()=>{
  const file={name:'dense.pdf',mimeType:'application/pdf'},bytes=contractPdf(23,22);
- const cache:PdfTextWindowCache=new Map();
+ const cache:FileTextWindowCache=new Map();
  const parse=vi.spyOn(PDFParse.prototype,'getText');
  try {
   const first=await readFileTextWindow(scope,file,bytes,1000,undefined,cache);

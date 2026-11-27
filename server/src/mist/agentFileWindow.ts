@@ -7,9 +7,9 @@ import {MistApiError} from './errors';
 const TEXT_WINDOW_MAX=2_000_000;
 type Scope={workspaceId:string;fileId:string};
 type Position=Scope&{v:1;source:string;page:number;offset:number};
-/** Parsed windows scoped to one active task run. File bytes still get checked on every read. */
-export type PdfTextWindowCache=Map<string,{sourceHash:string;page:number;result:FileTextResult}>;
-const PDF_CACHE_FILES_MAX=6;
+/** Parsed PDF and Office excerpts scoped to one active task run. Each read still verifies the original bytes. */
+export type FileTextWindowCache=Map<string,{sourceHash:string;page:number;result:FileTextResult}>;
+const FILE_CACHE_COUNT_MAX=6;
 const hash=(data:Uint8Array|string)=>createHash('sha256').update(data).digest('hex');
 function position(value:unknown,scope:Scope,source:string):Position{
  if(value===undefined)return {...scope,v:1,source,page:1,offset:0};
@@ -19,11 +19,11 @@ function position(value:unknown,scope:Scope,source:string):Position{
  if(p.source!==source)throw new MistApiError('FILE_TEXT_SOURCE_CHANGED','附件已变化，请从首段重新读取',409);
  return p;
 }
-export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:string},bytes:Uint8Array,maxChars?:number,cursor?:unknown,pdfCache?:PdfTextWindowCache){
+export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:string},bytes:Uint8Array,maxChars?:number,cursor?:unknown,fileCache?:FileTextWindowCache){
  // Bump the protocol tag and cursor version if extraction/normalization semantics change.
  const limit=fileTextLimit(maxChars),sha256=hash(bytes),sourceHash=hash(JSON.stringify(['file-text-v1',sha256,file.name,file.mimeType])),p=position(cursor,scope,sourceHash);
  const cacheKey=JSON.stringify([scope.workspaceId,scope.fileId]);
- const cached=pdfCache?.get(cacheKey);
+ const cached=fileCache?.get(cacheKey);
  const raw=p.offset>0&&cached?.sourceHash===sourceHash&&cached.page===p.page
    ? cached.result : await extractFileText(file,bytes,TEXT_WINDOW_MAX+1,p.page);
  const content=raw.text.slice(0,TEXT_WINDOW_MAX),pdf=raw.kind==='pdf',morePages=!!raw.window&&raw.window.end<(raw.pages??0);
@@ -37,15 +37,16 @@ export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:
  }));
  const extractionLimited=raw.text.length>TEXT_WINDOW_MAX || raw.truncated&&!morePages;
  const next=readable&&end<content.length?{...p,offset:end}:readable&&morePages&&!extractionLimited?{...p,page:raw.window!.end+1,offset:0}:undefined;
- if(pdfCache){
-   pdfCache.delete(cacheKey);
-   if(pdf&&next?.page===p.page&&raw.text.length<=TEXT_WINDOW_MAX){
-     pdfCache.set(cacheKey,{sourceHash,page:p.page,result:raw});
+ if(fileCache){
+   fileCache.delete(cacheKey);
+   const reusable=pdf||raw.kind==='docx'||raw.kind==='xlsx'||raw.kind==='pptx';
+   if(reusable&&next?.page===p.page&&raw.text.length<=TEXT_WINDOW_MAX){
+     fileCache.set(cacheKey,{sourceHash,page:p.page,result:raw});
      let retainedChars=0;
-     for(const window of pdfCache.values())retainedChars+=window.result.text.length;
-     for(const [key,window] of pdfCache){
-       if(pdfCache.size<=PDF_CACHE_FILES_MAX&&retainedChars<=TEXT_WINDOW_MAX)break;
-       pdfCache.delete(key);
+     for(const window of fileCache.values())retainedChars+=window.result.text.length;
+     for(const [key,window] of fileCache){
+       if(fileCache.size<=FILE_CACHE_COUNT_MAX&&retainedChars<=TEXT_WINDOW_MAX)break;
+       fileCache.delete(key);
        retainedChars-=window.result.text.length;
      }
    }
@@ -58,7 +59,7 @@ export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:
   sourceHash,sha256,range:{unit:'utf16' as const,start:p.offset,end,...(raw.window?{
    pageFrom:raw.window.start,pageTo:raw.window.end,...(end<content.length||extractionLimited?{textLimited:true as const}:{})
   }:{})},
-  ...(raw.pages!==undefined?{pages:raw.pages}:{}),...(raw.sheets?{sheets:raw.sheets}:{}),
+  ...(raw.pages!==undefined?{pages:raw.pages}:{}),...(raw.sheets?{sheets:[...raw.sheets]}:{}),
   ...(raw.pagesWithoutText?.length?{pagesWithoutText:[...raw.pagesWithoutText]}:{}),
   ...(raw.kind==='xlsx'?{observedSheets:raw.sheetTextSpans?.filter(span=>span.end>p.offset&&span.start<end).map(span=>span.name)??[]}:{}),
   ...(pdf?{pageTextSpans:pageTextSpans??[]}:{}),
