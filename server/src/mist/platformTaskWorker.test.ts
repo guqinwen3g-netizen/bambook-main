@@ -1026,6 +1026,9 @@ it('researches a PDF, workbook and image together with a selected order, keeping
    expect(input).toContain('XLSX-QUANTITY-318');
    expect(reads[1].result.observedSheets).toEqual(['Data']);
    expect(model.systemPrompt).toContain('首句分别注明涉及的来源');
+   expect(model.systemPrompt).toContain('币种相同也须确认金额性质、覆盖范围及相关费用口径可比');
+   expect(model.systemPrompt).toContain('只列原值和缺少的依据，不核算业务差额');
+   expect(model.systemPrompt).toContain('本人明确要求对指定数值作算术运算时，可以列算式');
    expect(input).toContain('bambook_get');
    expect(input).toContain('"imageSources":["sample.png"]');
    expect(model.systemPrompt).toContain('bambook_file_text 不提取图片文字');
