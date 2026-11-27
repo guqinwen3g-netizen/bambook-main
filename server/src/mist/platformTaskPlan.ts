@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type {AgentTaskIntentRef,AgentTaskView} from '../shared/mistAgentTasks';
+import type {AgentTaskIntentRef,AgentTaskQuestion,AgentTaskView} from '../shared/mistAgentTasks';
 import type { MarketQuotation } from '../shared/mistMarket';
 import { splitTaskRequest } from '../shared/mistTaskHistoryText';
+import { taskAttachmentLabels } from '../shared/mistTaskAttachments';
 import type { PdfPageTextSpan } from './agentFileText';
 import { officeKind } from './agentOfficeText';
 import { isFileTextCursor } from './agentFileWindow';
@@ -58,18 +59,40 @@ export function requestedPdfRange(attachments:AgentTaskView['attachments']=[],in
     return {fileId:file.id,...range};
 }
 
-export function requestedWorkbookWorksheet(attachments:AgentTaskView['attachments']=[],instructions='') {
+export const WORKBOOK_SELECTION_QUESTION='请回复要核对的工作簿完整文件名，包括名称后显示的编号。';
+
+export function requestedWorkbookWorksheet(attachments:AgentTaskView['attachments']=[],instructions='',questions:readonly AgentTaskQuestion[]=[]) {
   const request=splitTaskRequest(instructions);
-  const workbooks=attachments.filter(file=>/\.xlsx$/i.test(file.name)||/spreadsheetml\.sheet/i.test(file.mimeType));
-  const candidates=workbooks.length===1?workbooks:workbooks.filter(file=>request.includes(file.name));
-  if(candidates.length!==1)return;
-  const file=candidates[0];
-  const chinese=[...request.matchAll(/(?:^|[。；;\n])[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:只|仅)[ \t]*(?:读取|阅读|核对|查看|检查|读|看)[^。；;，,\n]{0,48}?(?:[「“]([^」”\n]{1,31})[」”][ \t]*工作表|工作表[ \t]*[：:][ \t]*([^。；;，,\n]{1,31})(?=[。；;，,\n]|$))/gu)];
+  const labels=taskAttachmentLabels(attachments);
+  const workbooks=attachments.flatMap((file,index)=>officeKind(file)==='xlsx'?[{file,label:labels[index]}]:[]);
+  if(!workbooks.length)return;
+  const chinese=[...request.matchAll(/(?:^|[。；;\n])[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:只|仅)[ \t]*(?:读取|阅读|核对|查看|检查|读|看)([^。；;，,\n]{0,48}?)(?:[「“]([^」”\n]{1,31})[」”][ \t]*工作表|工作表[ \t]*[：:][ \t]*([^。；;，,\n]{1,31})(?=[。；;，,\n]|$))/gu)];
   const english=[...request.matchAll(/(?:^|[.;\n])[ \t]*(?:please[ \t]+)?(?:only[ \t]+(?:read|check|review)|(?:read|check|review)[ \t]+only)[ \t]+(?:the[ \t]+)?worksheet[ \t]+["“]([^"”\n]{1,31})["”]/gi)];
-  const names=new Set([...chinese.map(match=>match[1]??match[2].trim()),...english.map(match=>match[1])]);
+  const names=new Set([...chinese.map(match=>match[2]??match[3].trim()),...english.map(match=>match[1])]);
   if(names.size!==1)return;
   const [worksheet]=names;
-  if(worksheet)return {fileId:file.id,worksheet};
+  if(!worksheet)return;
+
+  const workbookIds=workbooks.map(({file})=>file.id);
+  const aliases=[...new Set(workbooks.flatMap(({file,label})=>[file.name,label]))].sort((a,b)=>b.length-a.length);
+  const escape=(value:string)=>value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  const pattern=new RegExp('(?<![\\w./-])(?:'+aliases.map(escape).join('|')+')(?![\\w./-]|[（(]\\d+)','gu');
+  const normalizeLabel=(value:string)=>value.replace(/(\.xlsx)\((\d+)\)/gi,'$1（$2）');
+  const subjects=chinese.map(match=>normalizeLabel(match[1]));
+  const candidates=new Set<string>();
+  let unknownWorkbook=false;
+  for(const subject of subjects){
+    const matches=[...subject.matchAll(pattern)].map(match=>match[0]);
+    if(!matches.length&&/\.xlsx(?:[（(]|\b)/i.test(subject))unknownWorkbook=true;
+    for(const token of matches){
+      for(const {file,label} of workbooks)if(token===label||token===file.name)candidates.add(file.id);
+    }
+  }
+  if(!unknownWorkbook&&candidates.size===1)return {fileId:[...candidates][0],worksheet,workbookIds};
+  if(!unknownWorkbook&&!candidates.size&&workbooks.length===1)return {fileId:workbooks[0].file.id,worksheet,workbookIds};
+  const answer=[...questions].reverse().find(q=>q.question===WORKBOOK_SELECTION_QUESTION&&q.answeredAt)?.answer?.trim();
+  const matching=answer?workbooks.filter(item=>item.label===normalizeLabel(answer)):[];
+  return {fileId:matching.length===1?matching[0].file.id:undefined,worksheet,workbookIds};
 }
 
 /** Older receipts without the requested scope cannot inform a new model turn. */
@@ -82,9 +105,10 @@ export function scopedAttachmentTaskSteps(steps:PlatformTaskStep[],pdfScope:Retu
       &&(read?.pdfScopeRereadRequired===true||read?.attachmentScopeRereadRequired===true))return false;
     if(step.plan.name!=='bambook_file_text'||step.result===undefined)return true;
     const fileId=step.plan.arguments.fileId;
-    if(typeof fileId!=='string'||worksheetScope?.fileId!==fileId&&pdfScope?.fileId!==fileId)return true;
+    const workbookInScope=typeof fileId==='string'&&worksheetScope?.workbookIds.includes(fileId);
+    if(typeof fileId!=='string'||!workbookInScope&&pdfScope?.fileId!==fileId)return true;
     if(read?.error===true||read?.kind==='unreadable'||read?.kind==='unsupported')return !read.text;
-    if(worksheetScope&&fileId===worksheetScope.fileId)return read?.kind==='xlsx'&&read.file?.id===fileId
+    if(workbookInScope&&worksheetScope)return fileId===worksheetScope.fileId&&read?.kind==='xlsx'&&read.file?.id===fileId
       &&read.worksheetScope===worksheetScope.worksheet
       &&Array.isArray(read.sheets)&&read.sheets.length===1&&read.sheets[0]===worksheetScope.worksheet
       &&Array.isArray(read.observedSheets)&&read.observedSheets.every(name=>name===worksheetScope.worksheet);

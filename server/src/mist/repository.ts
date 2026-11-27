@@ -16,7 +16,7 @@ import { emailAnalysisHash } from './mail/intelligence';
 import { createHash, randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import type { TokenPayload } from '../auth/service';
-import type { AgentTaskIntentRef } from '../shared/mistAgentTasks';
+import type { AgentTaskIntentRef, AgentTaskQuestion } from '../shared/mistAgentTasks';
 import type { MistState, MistCommand, MistContext } from '../shared/mistWorkspace';
 import { freshMistAuthority, type FreshAuthority } from './authority';
 import { fail, MistApiError } from './errors';
@@ -2193,7 +2193,7 @@ export class MistRepository {
     if (!this.sameTaskAttachment(file, current)) fail('FILE_NOT_FOUND', '附件原文件无法核验', 404);
     return { file: current, bytes };
   }
-  private async privateTaskAttachments(prior:TokenPayload,workspaceId:string):Promise<{files:MistStoredFile[];instructions:string}>{
+  private async privateTaskAttachments(prior:TokenPayload,workspaceId:string):Promise<{files:MistStoredFile[];instructions:string;questions?:readonly AgentTaskQuestion[]}>{
     if(!isAgentActor(prior)||prior.agentExecutor!=='platform'||prior.agentTaskLease?.workspaceId!==workspaceId)return {files:[],instructions:''};
     const taskId=prior.agentTaskLease.taskId;
     return this.transact(async db=>{
@@ -2205,7 +2205,7 @@ export class MistRepository {
         const privacy=await prepareFilePrivacy(this.files,row.id,row.state);
         if(files.some(file=>file.sha256&&restrictedUploadContent(row.state,actor,fileOwner(row),privacy,file.sha256,file.size)))fail('FORBIDDEN','附件的原件权限已变化',403);
       }
-      return {files,instructions:c.instructions};
+      return {files,instructions:c.instructions,questions:c.questions};
     });
   }
   async platformTaskImages(prior: AgentActor, workspaceId: string, rendered: PlatformTaskImageCache) {
@@ -2230,10 +2230,12 @@ export class MistRepository {
   }
   /** 复用附件下载的同一授权（canReadFile）后提取有界正文摘录；不返回字节。 */
   async fileText(prior: TokenPayload, workspaceId: string, fileId: string, maxChars?: number, cursor?: unknown, fileCache?: FileTextWindowCache) {
-    const {files,instructions}=await this.privateTaskAttachments(prior,workspaceId);
+    const {files,instructions,questions}=await this.privateTaskAttachments(prior,workspaceId);
     const taskFile=files.find(file=>file.id===fileId);
     const range=taskFile?requestedPdfRange(files,instructions):undefined;
-    const sheet=taskFile?requestedWorkbookWorksheet(files,instructions):undefined;
+    const sheet=taskFile?requestedWorkbookWorksheet(files,instructions,questions):undefined;
+    if(sheet?.workbookIds.includes(fileId)&&sheet.fileId!==fileId)
+      fail('FILE_TEXT_WORKBOOK_SCOPE','该工作簿未被选中，本任务不读取它的正文',422);
     const {file,bytes}=taskFile?{file:taskFile,bytes:await this.files.read(workspaceId,taskFile)}:await this.download(prior,workspaceId,fileId);
     const result=await readFileTextWindow({workspaceId,fileId},file,bytes,maxChars,cursor,fileCache,range?.fileId===fileId?range:undefined,sheet?.fileId===fileId?sheet.worksheet:undefined);
     // Parsing is asynchronous. Recheck live file access before releasing the result.

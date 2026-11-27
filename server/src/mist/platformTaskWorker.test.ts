@@ -1143,6 +1143,52 @@ it.each([false,true])('uses only the selected worksheet, including on resuming w
  expect((await f.current(task.id)).trail.at(-1)?.detail).toBe('已读取工作表：确认报价');
 });
 
+it.each([true,false])('reads only the numbered workbook and asks when the number is missing (%s)',async explicitlyNumbered=>{
+ let calls=0;
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>++calls===1
+  ?tool('bambook_file_text',{fileId:'attachment_1'})
+  :tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对选定原件。'}));
+ const f=await fixture(complete);f.worker.start(3_600_000);
+ const book=(marker:string)=>{
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['DRAFT-OUTSIDE']]),'草案');
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([[marker]]),'确认报价');
+  return XLSX.write(wb,{type:'buffer',bookType:'xlsx'});
+ };
+ const name=explicitlyNumbered?'quote.xlsx（2）':'quote.xlsx';
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'只核对指定工作簿',instructions:'请只读取 '+name+' 的「确认报价」工作表。'}))
+  .attach('attachments',book('OTHER-BOOK'),'quote.xlsx').attach('attachments',book('SELECTED-EUR'),'quote.xlsx').expect(201)).body.item;
+ await f.drain();
+ if(!explicitlyNumbered){
+  const pending=await f.current(task.id);
+  expect(pending.state).toBe('waiting_human');
+  expect(complete).not.toHaveBeenCalled();
+  expect(pending.trail?.some((step:{taskAttachmentId?:string})=>step.taskAttachmentId)).not.toBe(true);
+  const question=pending.questions.find((q:{answeredAt?:string})=>!q.answeredAt);
+  expect(question.question).toContain('工作簿');
+  await f.human.post(f.base+'/agent-tasks/'+task.id+'/answer').send({
+   requestId:randomUUID(),version:pending.version,questionId:question.id,answer:'quote.xlsx（99）',
+  }).expect(200);
+  await f.drain();
+  const correction=await f.current(task.id);
+  expect(correction.state).toBe('waiting_human');
+  expect(complete).not.toHaveBeenCalled();
+  const retry=correction.questions.find((q:{answeredAt?:string})=>!q.answeredAt);
+  await f.human.post(f.base+'/agent-tasks/'+task.id+'/answer').send({
+   requestId:randomUUID(),version:correction.version,questionId:retry.id,answer:'quote.xlsx(2)',
+  }).expect(200);
+  await f.drain();
+ }
+ expect(complete).toHaveBeenCalledTimes(2);
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded'});
+ for(const [input] of complete.mock.calls){
+  const text=input.messages[0].content;
+  expect(text).toContain('SELECTED-EUR');
+  expect(text).not.toMatch(/OTHER-BOOK|DRAFT-OUTSIDE/);
+ }
+});
+
 it('pre-reads both text slices and the short tail of a dense PDF before calling the model',async()=>{
  const complete=vi.fn(async(model:LlmCompletionInput)=>{
   const content=model.messages[0].content as string,facts=JSON.parse(content.slice(content.indexOf('{')));
