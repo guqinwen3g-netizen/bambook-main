@@ -6,9 +6,9 @@ import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import {createMistState} from '../../../../../server/src/shared/mistWorkspace';
 import {AssistantPage} from './PlatformPages';
 import {Nav} from '../../nav';
-const mock=vi.hoisted(()=>({api:vi.fn(),workspace:null as any,fetch:vi.fn(),sessionKey:'session-a',readOrders:true}));
+const mock=vi.hoisted(()=>({api:vi.fn(),workspace:null as any,fetch:vi.fn(),sessionKey:'session-a',readOrders:true,chatPermission:true}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>mock.workspace,mistApiRequest:(...a:any[])=>mock.api(...a)}));
-vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({sessionKey:mock.sessionKey,user:{id:'actor'},hasPermission:(scope:string)=>scope!=='orders:read'||mock.readOrders}); return { useMistSession, useOptionalMistSession: useMistSession }; });
+vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({sessionKey:mock.sessionKey,user:{id:'actor'},hasPermission:(scope:string)=>scope==='ai:chat'?mock.chatPermission:scope!=='orders:read'||mock.readOrders}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 vi.mock('../../../../../services/apiService',()=>({apiService:{getAuthHeaders:()=>({'X-Test-Auth':'authenticated'})}}));
 let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
 const view=(active=true, taskId?:string,section='tasks')=> <Nav.Provider value={{route:{view:'assistant',...(taskId?{section,id:taskId}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
@@ -1122,4 +1122,40 @@ it('retries a failed automation read and only shows an empty list after success'
   await click('重新读取');
   expect(document.body.textContent).toContain('还没有规则');
   expect(document.body.textContent).not.toContain('规则暂时无法读取');
+});
+
+it('opens and pauses existing rules without task service or prior tasks', async () => {
+  let rule={id:'existing-rule',name:'模拟离线规则',trigger:'daily',time:'09:00',instructions:'检查待办',enabled:true,version:2,runs:[]};
+  mock.api.mockImplementation(async (url: string, init?: RequestInit) => {
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:false};
+    if(url.endsWith('/agent-automations'))return {items:[rule]};
+    if(url.endsWith('/agent-automations/existing-rule') && init?.method==='PATCH'){
+      rule={...rule,enabled:false,version:3};
+      return {item:rule};
+    }
+    return {items:[],nextCursor:null};
+  });
+  mock.fetch.mockResolvedValue(response({configured:false,models:[]}));
+  await mount();
+  expect(mock.api.mock.calls.some(([path])=>path.endsWith('/agent-automations'))).toBe(false);
+  await click('自动规则');
+  const toggle=document.querySelector<HTMLInputElement>('input[role="switch"][aria-label="开启 模拟离线规则"]');
+  expect(toggle?.checked).toBe(true);
+  await act(async()=>toggle!.click());
+  expect(toggle?.checked).toBe(false);
+  const patch=mock.api.mock.calls.filter(([,options])=>options?.method==='PATCH');
+  expect(patch).toHaveLength(1);
+  expect(JSON.parse(patch[0][1].body)).toEqual({enabled:false,expectedVersion:2});
+});
+
+it('keeps the fallback rules entry hidden without the chat permission', async () => {
+  mock.chatPermission=false;
+  try {
+    mock.fetch.mockResolvedValue(response({configured:false,models:[]}));
+    await mount();
+    expect(button('自动规则')).toBeUndefined();
+    expect(mock.api.mock.calls.some(([path])=>path.includes('/agent-automations'))).toBe(false);
+  } finally {
+    mock.chatPermission=true;
+  }
 });
