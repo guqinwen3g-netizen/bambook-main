@@ -599,6 +599,7 @@ export const reviewedEnglish: Record<string, string> = {
   '小竹操作未完成':'Xiaozhu action incomplete',
   '进度暂未更新，正在重试':'Progress update delayed. Retrying…',
   '重新读取任务':'Reload tasks',
+  '重新读取进度':'Refresh task progress',
   '刷新待确认事项':'Refresh pending confirmations',
   '核对停止结果':'Check stop result',
   '核对回答结果':'Check answer result',

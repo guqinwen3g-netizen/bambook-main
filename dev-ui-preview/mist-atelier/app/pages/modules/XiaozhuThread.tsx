@@ -151,6 +151,18 @@ function ProposalCard({ proposal, onOpen, onDecide, onRecover, blocked }: {
   </div>;
 }
 
+function ProgressRecheck({taskId,onRead}:{taskId:string;onRead:(taskId:string)=>Promise<void>}) {
+  const running=React.useRef(false);
+  const [busy,setBusy]=React.useState(false);
+  const read=async()=>{
+    if(running.current)return;
+    running.current=true;
+    setBusy(true);
+    try{await onRead(taskId);}finally{running.current=false;setBusy(false);}
+  };
+  return <Button size="sm" variant="quiet" loading={busy} disabled={busy} onClick={()=>void read()}>{uiText('重新读取进度')}</Button>;
+}
+
 export type ThreadActions = {
   onAnswer: (task: AgentTaskView, id: string, text: string) => void;
   onCheckAnswer?: (task: AgentTaskView, questionId: string) => void;
@@ -160,6 +172,7 @@ export type ThreadActions = {
   answerDraft?: {read:(taskId:string,questionId:string)=>string;write:(taskId:string,questionId:string,text:string)=>void};
   controls?: Record<string,TaskControlState>;
   staleProgressIds?: ReadonlySet<string>;
+  onRecheckProgress?: (taskId: string) => Promise<void>;
   workLog?: { expanded: ReadonlyMap<string, boolean>; setExpanded: (taskId: string, expanded: boolean) => void };
   composerStopTaskId?: string;
   onRetry?: (task: AgentTaskView) => void;
@@ -262,6 +275,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         {pending.map(p => <ProposalCard key={p.id} proposal={p} onOpen={actions.onProposal} onDecide={actions.onDecide}
           blocked={actions.proposalsBlocked} onRecover={actions.pendingProposalId===p.id?actions.onRecoverProposal:undefined}/>)}
         <div className="mist-xz-acts">
+          {progressStale && actions.onRecheckProgress && <ProgressRecheck taskId={t.id} onRead={actions.onRecheckProgress} />}
           {missingProposals && actions.onRefreshProposals && <Button size="sm" variant="quiet"
             disabled={actions.refreshingProposals} loading={actions.refreshingProposals}
             onClick={actions.onRefreshProposals}>{uiText('刷新待确认事项')}</Button>}

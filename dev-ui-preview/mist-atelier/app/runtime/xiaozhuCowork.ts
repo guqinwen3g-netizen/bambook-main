@@ -359,10 +359,13 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     && (t.state === 'running' || t.state === 'queued')).at(-1)?.id;
   const staleProgressIds = staleProgress?.scope === scope ? staleProgress.ids : undefined;
   const backgroundIds = activeTasks.filter(t => t.id !== foregroundId).map(t => t.id).join(',');
+  const manualProgressRead = React.useRef<((taskId:string)=>Promise<void>|undefined)|undefined>(undefined);
+  const recheckProgress = React.useCallback(async(taskId:string)=>{ await manualProgressRead.current?.(taskId); },[]);
+
   React.useEffect(() => {
     if ((!foregroundId && !backgroundIds) || !base || !available) return;
     const background = backgroundIds ? backgroundIds.split(',') : [];
-    const inFlight = new Map<string, AbortController>();
+    const inFlight = new Map<string, {controller:AbortController;promise:Promise<void>}>();
     const retry = new Map<string, { delay: number; at: number }>();
     let lastBackground = 0;
     const markStale = (ids: string[]) => setStaleProgress(old => {
@@ -370,6 +373,33 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if (previous && ids.every(id => previous.has(id))) return old;
       return { scope, ids: new Set([...(previous ?? []), ...ids]) };
     });
+    const readProgress=(id:string)=>{
+      const pending=inFlight.get(id);
+      if(pending)return pending.promise;
+      const controller=new AbortController(), denial=deniedHistory.current;
+      const promise=readCoworkTask(base,id,controller.signal)
+        .then(next=>{
+          if(controller.signal.aborted||live.current!==scope||deniedHistory.current!==denial)return;
+          retry.delete(id);
+          setTasks(old=>old.map(task=>mergeTaskUpdate(task,next)));
+          clearStaleProgress(id);
+        })
+        .catch(()=>{
+          if(controller.signal.aborted||live.current!==scope)return;
+          const previous=retry.get(id);
+          const delay=previous?Math.min(TASK_RETRY_MAX_MS,previous.delay*2):TASK_RETRY_INTERVAL_MS;
+          retry.set(id,{delay,at:Date.now()+delay});
+          markStale([id]);
+        })
+        .finally(()=>{if(inFlight.get(id)?.controller===controller)inFlight.delete(id);});
+      inFlight.set(id,{controller,promise});
+      return promise;
+    };
+    const manual=(id:string)=>{
+      if(live.current!==scope||!navigator.onLine||(id!==foregroundId&&!background.includes(id)))return;
+      return readProgress(id);
+    };
+    manualProgressRead.current=manual;
     const poll = () => {
       if (live.current !== scope || !navigator.onLine || document.visibilityState === 'hidden') return;
       const ids = foregroundId ? [foregroundId] : [];
@@ -378,29 +408,13 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         ids.push(...background);
         lastBackground = now;
       }
-      for (const id of ids) {
-        if (inFlight.has(id) || now < (retry.get(id)?.at ?? 0)) continue;
-        const request = new AbortController();
-        inFlight.set(id, request);
-        void readCoworkTask(base, id, request.signal)
-          .then(next => {
-            if (request.signal.aborted || live.current !== scope) return;
-            retry.delete(id);
-            setTasks(old => old.map(task => mergeTaskUpdate(task, next)));
-            clearStaleProgress(id);
-          })
-          .catch(() => {
-            if (request.signal.aborted || live.current !== scope) return;
-            const previous = retry.get(id);
-            const delay = previous ? Math.min(TASK_RETRY_MAX_MS, previous.delay * 2) : TASK_RETRY_INTERVAL_MS;
-            retry.set(id, { delay, at: Date.now() + delay });
-            markStale([id]);
-          })
-          .finally(() => { if (inFlight.get(id) === request) inFlight.delete(id); });
+      for(const id of ids){
+        if(inFlight.has(id)||now<(retry.get(id)?.at??0))continue;
+        void readProgress(id);
       }
     };
     const abortReads = () => {
-      for (const request of inFlight.values()) request.abort();
+      for(const {controller} of inFlight.values())controller.abort();
       inFlight.clear();
     };
     const offline = () => { abortReads(); markStale(foregroundId ? [foregroundId, ...background] : background); };
@@ -413,6 +427,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     if (navigator.onLine) poll();
     else offline();
     return () => {
+      if(manualProgressRead.current===manual)manualProgressRead.current=undefined;
       abortReads();
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', refreshVisible);
@@ -644,5 +659,5 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         ? {canCheckStop:true} : {answerQuestionToCheck:pending.questionId})};
     }
   }
-  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls:visibleControls, hasPendingSubmission, recoveredSubmissions, staleProgressIds, busy, send, refreshTask, answer, checkAnswer, cancel, checkStop, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track };
+  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls:visibleControls, hasPendingSubmission, recoveredSubmissions, staleProgressIds, busy, send, refreshTask, answer, checkAnswer, cancel, checkStop, recheckProgress, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track };
 }
