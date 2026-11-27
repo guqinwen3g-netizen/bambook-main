@@ -85,6 +85,13 @@ function restrictReport(task: AgentTaskView): AgentTaskView {
     waitingProposalIds: [], resumeAt: null, waitingFor: null, nextCheckAt: null, requiredRead: null };
 }
 
+async function readSubmissionReceipt(base: string, entry: PendingSubmission, signal: AbortSignal): Promise<AgentTaskView> {
+  const {item} = await mistApiRequest(base + '/personal-agent/tasks/receipt/' + encodeURIComponent(entry.requestId), {signal,cache:'no-store'}) as {item:AgentTaskView};
+  if (!item?.id || item.executor !== 'platform' || item.conversationId !== entry.conversationId)
+    throw new Error('提交结果暂时无法核对');
+  return item;
+}
+
 async function readCoworkTask(base: string, id: string, signal: AbortSignal): Promise<AgentTaskView> {
   signal.throwIfAborted();
   const controller = new AbortController();
@@ -187,9 +194,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     try {
       const replies = await withRequestDeadline(controller, HISTORY_READ_TIMEOUT_MS, '提交结果暂时无法核对', signal =>
         Promise.allSettled(missing.map(async ([fingerprint,entry]) => {
-          const {item:task} = await mistApiRequest(base + '/personal-agent/tasks/receipt/' + encodeURIComponent(entry.requestId), {signal,cache:'no-store'}) as {item:AgentTaskView};
-          if (!task?.id || task.executor !== 'platform' || task.conversationId !== entry.conversationId)
-            throw new Error('提交结果暂时无法核对');
+          const task = await readSubmissionReceipt(base,entry,signal);
           if (signal.aborted || !current() || pending.current.get(fingerprint)!==entry) return;
           pending.current.delete(fingerprint);
           savePendingSubmissions(scope,pending.current);
@@ -461,6 +466,19 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
 
       // A receipt can be lost after commit. A refreshed thread must not change the original POST.
       let saved = pending.current.get(fingerprint);
+      let result: {item:AgentTaskView} | undefined;
+      if (saved && files.length) {
+        const original = saved;
+        try {
+          const item = await withRequestDeadline(controller,HISTORY_READ_TIMEOUT_MS,'提交结果暂时无法核对',
+            signal => readSubmissionReceipt(base,original,signal));
+          result = {item};
+        } catch (problem) {
+          // Only a missing receipt should resend the original multipart request.
+          if ((problem as {status?:number})?.status !== 404) throw problem;
+        }
+        if (!isCurrent() || controller.signal.aborted) return null;
+      }
       if (!saved) {
         const draftKey = submissionDraftKey(message,refs);
         if ([...pending.current.values()].some(entry=>entry.recoveredFromStorage && entry.hasAttachments
@@ -478,18 +496,20 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       }
       const {requestId,instructions,locale,historyTaskIds} = saved;
       const target = saved.conversationId;
-      const body = { requestId,instructions,locale,name: textPrefix(message,60), ...(target ? { conversationId:target } : {}),
-        ...(historyTaskIds !== undefined ? { historyTaskIds } : {}), ...(refs.length ? { intentRefs: refs } : {}), ...(attachmentRefs.length ? { attachmentRefs } : {}) };
-      let submission: RequestInit = { method: 'POST', body: JSON.stringify(body) };
-      if (files.length) {
-        const form = new FormData();
-        form.append('task', JSON.stringify(body));
-        for (const file of files) form.append('attachments',file);
-        submission = { method: 'POST', body: form };
+      if (!result) {
+        const body = { requestId,instructions,locale,name: textPrefix(message,60), ...(target ? { conversationId:target } : {}),
+          ...(historyTaskIds !== undefined ? { historyTaskIds } : {}), ...(refs.length ? { intentRefs: refs } : {}), ...(attachmentRefs.length ? { attachmentRefs } : {}) };
+        let submission: RequestInit = { method: 'POST', body: JSON.stringify(body) };
+        if (files.length) {
+          const form = new FormData();
+          form.append('task', JSON.stringify(body));
+          for (const file of files) form.append('attachments',file);
+          submission = { method: 'POST', body: form };
+        }
+        const uploadSeconds = Math.ceil(files.reduce((bytes,file) => bytes + file.size, 0) / UPLOAD_BYTES_PER_SECOND);
+        result = await withRequestDeadline(controller, TASK_SEND_TIMEOUT_MS + uploadSeconds * 1000, '提交结果待核对', signal =>
+          mistApiRequest(base + '/personal-agent/tasks', { ...submission, signal }) as Promise<{item: AgentTaskView}>);
       }
-      const uploadSeconds = Math.ceil(files.reduce((bytes,file) => bytes + file.size, 0) / UPLOAD_BYTES_PER_SECOND);
-      const result = await withRequestDeadline(controller, TASK_SEND_TIMEOUT_MS + uploadSeconds * 1000, '提交结果待核对', signal =>
-        mistApiRequest(base + '/personal-agent/tasks', { ...submission, signal }) as Promise<{item: AgentTaskView}>);
       if (!isCurrent()) return null;
       if (!result.item?.id || result.item.conversationId && result.item.conversationId !== target)
         throw new Error('提交结果待核对');
