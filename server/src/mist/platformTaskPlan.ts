@@ -39,6 +39,19 @@ export function platformTaskAttachmentHandles(attachments: AgentTaskView['attach
   return new Map(attachments.map((file, index) => [file.id, `${PLATFORM_TASK_ATTACHMENT_PREFIX}${index + 1}`]));
 }
 
+export function requestedPdfPrefix(attachments:AgentTaskView['attachments']=[],instructions='') {
+  const files=attachments.filter(file=>/^application\/pdf\b/i.test(file.mimeType)||/\.pdf$/i.test(file.name));
+  if(files.length!==1)return;
+  const file=files[0];
+  if(attachments.length>1&&!instructions.includes(file.name)&&!/\bpdf\b/i.test(instructions))return;
+  const chinese=[...instructions.matchAll(/(?:^|[。；;\n])[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:只|仅)[ \t]*(?:读取|阅读|核对|查看|读)[^。；;，,\n]{0,32}?(?:前[ \t]*|第[ \t]*1[ \t]*(?:至|到|[-–—])[ \t]*第?[ \t]*)([1-9]\d*)[ \t]*页/gu)];
+  const english=[...instructions.matchAll(/(?:^|[.;\n])[ \t]*(?:please[ \t]+)?(?:only[ \t]+(?:read|check|review)|(?:read|check|review)[ \t]+only)[ \t]+(?:the[ \t]+)?first[ \t]+([1-9]\d*)[ \t]+pages?\b/gi)];
+  const limits=new Set([...chinese,...english].map(match=>Number(match[1])));
+  if(limits.size!==1)return;
+  const [lastPage]=limits;
+  if(Number.isSafeInteger(lastPage)&&lastPage<=1_000_000)return {fileId:file.id,lastPage};
+}
+
 /** Pre-read a short PDF or an explicitly requested last page within one additional window. */
 export function shortPdfContinuationPlan(attachments: AgentTaskView['attachments'] = [], steps: PlatformTaskStep[], instructions = ''): PlatformTaskPlan | undefined {
   const limitedRange = /(?:只|仅|先)[^。；;\n]{0,48}(?:前[ \t]*[1-9]\d*[ \t]*页|第[ \t]*[1-9]\d*[ \t]*(?:至|到|[-–—])[ \t]*[1-9]\d*[ \t]*页)/u;

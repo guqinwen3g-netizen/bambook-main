@@ -72,6 +72,25 @@ it('allows a changed response size without splitting surrogate pairs or skipping
  expect(a.text.length).toBe(200);expect(a.text+b.text).toBe(text);expect(b.range.start).toBe(a.range.end);expect(b.hasMore).toBe(false);expect(b.complete).toBe(false);
 });
 
+it('never returns PDF text beyond a task prefix, including across character slices', async () => {
+ const file={name:'contract.pdf',mimeType:'application/pdf'}, bytes=contractPdf(23,3);
+ const first=await readFileTextWindow(scope,file,bytes,1000,undefined,undefined,10);
+ let position:unknown=first.nextCursor,last=first,body=first.text;
+ while(position){
+  last=await readFileTextWindow(scope,file,bytes,1000,position,undefined,10);
+  body+=last.text;position=last.nextCursor;
+ }
+ expect(first).toMatchObject({pages:23,pagesWithoutText:[3],pageScopeLimit:10,range:{pageFrom:1,pageTo:10}});
+ expect(last).toMatchObject({hasMore:false,complete:false,range:{pageFrom:1,pageTo:10}});
+ const [receipt]=platformTrail([{id:'prefix',at:'',plan:{name:'bambook_file_text',arguments:{fileId:scope.fileId}},result:last}]);
+ expect(receipt.detail).toContain('本次未读第 11 至 23 页');
+ expect(body).toContain('Clause P10:');
+ expect(body).not.toContain('Clause P11:');
+ expect(body).not.toContain('FINAL TERM');
+ const forged='aft1.'+Buffer.from(JSON.stringify({...scope,v:1,source:first.sourceHash,page:21,offset:0})).toString('base64url');
+ await expect(readFileTextWindow(scope,file,bytes,1000,forged,undefined,10)).rejects.toMatchObject({code:'FILE_TEXT_PAGE_SCOPE'});
+});
+
 it('reports PDF page windows and partial text honestly in the same task trail', async () => {
  const bytes = contractPdf(23,22), file = {name:'contract.pdf',mimeType:'application/pdf'};
  const first = await readFileTextWindow(scope,file,bytes,8000);

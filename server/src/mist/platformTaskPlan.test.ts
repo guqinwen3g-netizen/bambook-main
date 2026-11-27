@@ -1,5 +1,5 @@
 import{expect,it}from'vitest';
-import{compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,shortPdfContinuationPlan,shortOfficeTailPlan}from'./platformTaskPlan';
+import{compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,requestedPdfPrefix,shortPdfContinuationPlan,shortOfficeTailPlan}from'./platformTaskPlan';
 import{platformReasoning}from'../ai/platformModel';
 
 it('accepts only a bound business tool decision, without thoughts, owner impersonation or model request IDs',()=>{
@@ -69,6 +69,16 @@ it('uses the last verified continuation for the same file and only exposes a sho
  expect(resolvePlatformFileContinuation(next('missing'),[first,other])).toEqual(next('missing'));
  const done={...newPlatformTaskStep(next('first'),4),result:{hasMore:false}};
  expect(resolvePlatformFileContinuation(next('first'),[first,other,done])).toEqual(next('first'));
+});
+
+it('uses only an explicit, unambiguous prefix in the original task request',()=>{
+ const file={id:'pdf',name:'sample.pdf',mimeType:'application/pdf',size:1200};
+ expect(requestedPdfPrefix([file],'请只读取 sample.pdf 前 10 页。')).toEqual({fileId:'pdf',lastPage:10});
+ expect(requestedPdfPrefix([file],'本次仅核对第 1 至 5 页。')).toEqual({fileId:'pdf',lastPage:5});
+ expect(requestedPdfPrefix([file],'Please read only the first 12 pages.')).toEqual({fileId:'pdf',lastPage:12});
+ expect(requestedPdfPrefix([file],'如果只读取前 10 页没找到条款，请继续。')).toBeUndefined();
+ expect(requestedPdfPrefix([file],'只读前 10 页。请只读前 5 页。')).toBeUndefined();
+ expect(requestedPdfPrefix([file,{...file,id:'other',name:'other.pdf'}],'请只读前 10 页。')).toBeUndefined();
 });
 
 it('limits automatic PDF continuation to one short page window without a prior continuation attempt', () => {
