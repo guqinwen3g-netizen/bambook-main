@@ -600,6 +600,7 @@ export const reviewedEnglish: Record<string, string> = {
   '进度暂未更新，正在重试':'Progress update delayed. Retrying…',
   '重新读取任务':'Reload tasks',
   '刷新待确认事项':'Refresh pending confirmations',
+  '核对停止结果':'Check stop result',
   '提交结果未确认，请重试发送':'Submission not confirmed. Send again to retry.',
   '提交结果待核对':'Submission confirmation pending',
   '核对提交结果':'Check submission',

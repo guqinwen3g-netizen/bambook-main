@@ -48,6 +48,17 @@ it('keeps an unreceived confirmation in its original task and offers a read-only
  expect(host.textContent).toContain('已停止');
 });
 
+it('offers a stop status check on the same task without invoking stop again',async()=>{
+ const waiting=task({name:'原任务',state:'waiting_time'});
+ const onCheckStop=vi.fn(),f=fns();
+ await paint([waiting],{...f,onCheckStop,controls:{t1:{busy:false,canCheckStop:true,error:'停止结果未确认，可重试'}}});
+ await act(async()=>getByRole(host,'button',{name:'核对停止结果',exact:true}).click());
+ expect(onCheckStop).toHaveBeenCalledExactlyOnceWith(waiting);
+ expect(f.onCancel).not.toHaveBeenCalled();
+ await paint([task({name:'原任务',state:'cancelled'})],{...f,onCheckStop});
+ expect(queryByRole(host,'button',{name:'核对停止结果'})).toBeNull();
+});
+
 it('requires detailed review for medium risk and routes a pending receipt to its original proposal',async()=>{
  const onDecide=vi.fn(async()=>{}),onRecoverProposal=vi.fn(async()=>{});
  const f={...fns(),onDecide,onRecoverProposal};

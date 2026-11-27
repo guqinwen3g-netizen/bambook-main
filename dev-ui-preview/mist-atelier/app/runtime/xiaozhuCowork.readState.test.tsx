@@ -58,6 +58,39 @@ it('recovers a lost stop receipt from the one task without rereading history',as
  expect(api.mock.calls.filter(([url])=>url.endsWith('/agent-tasks'))).toHaveLength(1);
 });
 
+it('checks an unconfirmed stop by reading the same task without sending another stop',async()=>{
+ const waiting={...task,state:'waiting_time',version:2,canControl:true};
+ const stopped={...waiting,state:'cancelled',version:3,canControl:false};
+ let stopSent=false,readable=false,settled=false;
+ api.mockImplementation(async(url:string)=>{
+  if(url.endsWith('/task/cancel')){
+   stopSent=true;
+   throw Object.assign(new Error('停止回执未送达'),{status:0});
+  }
+  if(url.endsWith('/task')){
+   if(stopSent&&!readable)throw new Error('任务读取暂不可用');
+   return {item:settled?stopped:waiting};
+  }
+  if(url.endsWith('/agent-tasks'))return {items:[waiting],nextCursor:null};
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View/>));
+ await act(async()=>{await channel.cancel(channel.tasks[0]);});
+ expect(channel.controls.task).toMatchObject({canCheckStop:true,error:'停止结果未确认，可重试'});
+ readable=true;
+ await act(async()=>{await channel.checkStop(channel.tasks[0]);});
+ expect(channel.tasks[0]).toMatchObject({state:'waiting_time',version:2});
+ expect(channel.controls.task).toMatchObject({canCheckStop:true,error:'停止结果未确认，可重试'});
+ settled=true;
+ await act(async()=>{await channel.checkStop(channel.tasks[0]);});
+ expect(channel.tasks[0]).toMatchObject({state:'cancelled',version:3});
+ expect(channel.controls.task?.canCheckStop).toBeFalsy();
+ expect(channel.controls.task?.error).toBeFalsy();
+ expect(api.mock.calls.filter(([url])=>url.endsWith('/task/cancel'))).toHaveLength(1);
+ expect(api.mock.calls.filter(([url])=>url.endsWith('/agent-tasks'))).toHaveLength(1);
+});
+
 it('does not keep an unconfirmed answer warning on a newer task question',async()=>{
  const asking={...task,state:'waiting_human',version:2,canControl:true,questions:[{id:'q1',question:'请给出交期'}]};
  api.mockImplementation(async(url:string)=>{
