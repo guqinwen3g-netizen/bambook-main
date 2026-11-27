@@ -1,6 +1,7 @@
 /** 小竹的办理过程：只给本人看“做了什么、读了哪条记录”，不带任何读取到的内容。 */
 import { AGENT_OBJECT_TYPES } from './agentRead';
 import { commandLabel } from './agentCommandLabel';
+import { taskAttachmentLabels } from '../shared/mistTaskAttachments';
 import type { AgentTaskTrailItem } from '../shared/mistAgentTasks';
 import { PLATFORM_TASK_TURN_LIMIT, type PlatformTaskStep } from './platformTaskPlan';
 
@@ -31,6 +32,12 @@ const FILE_FAILURE_DETAILS = new Map([
 ]);
 
 export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments: readonly {id:string;name:string}[] = []): AgentTaskTrailItem[] {
+  const labels=taskAttachmentLabels(attachments);
+  const numberedNames=new Map(attachments.flatMap((file,index)=>{
+    if(labels[index]===file.name)return [];
+    const suffix=labels[index].slice(file.name.length);
+    return [[file.id,text(file.name,60-suffix.length)+suffix] as const];
+  }));
   const names=new Map(attachments.map(file=>[file.id,text(file.name,60)]));
   const taskAttachmentIds=new Set(names.keys());
   const out: AgentTaskTrailItem[] = [];
@@ -84,7 +91,7 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
         const matchedId=typeof args.fileId==='string'&&result?.file?.id===args.fileId ? args.fileId : undefined;
         if(observedName&&matchedId)names.set(matchedId,observedName);
         const taskAttachmentId=completed&&!step.compacted&&result?.error!==true&&matchedId&&taskAttachmentIds.has(matchedId) ? matchedId : undefined;
-        const file=observedName||names.get(args.fileId);
+        const file=numberedNames.get(args.fileId)||observedName||names.get(args.fileId);
         const pages=result?.range;
         const pageRange=result?.kind==='pdf'&&Number.isSafeInteger(pages?.pageFrom)&&Number.isSafeInteger(pages?.pageTo)
           &&pages.pageFrom>=1&&pages.pageTo>=pages.pageFrom

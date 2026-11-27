@@ -1,5 +1,5 @@
 import sharp from 'sharp';
-import { isTaskAttachment, isTaskImage, TASK_ATTACHMENT_BYTES, TASK_ATTACHMENT_COUNT, TASK_ATTACHMENT_TOTAL_BYTES, type TaskAttachmentRef } from '../shared/mistTaskAttachments';
+import { isTaskAttachment, isTaskImage, taskAttachmentLabels, TASK_ATTACHMENT_BYTES, TASK_ATTACHMENT_COUNT, TASK_ATTACHMENT_TOTAL_BYTES, type TaskAttachmentRef } from '../shared/mistTaskAttachments';
 import { composeTaskInstructions, splitTaskRequest } from '../shared/mistTaskHistoryText';
 import {materialReadKeys} from '../shared/mistGarmentMaterials';
 import { prepareTrimTaskNotice, trimTaskReadKeys } from '../shared/mistGarmentTrimTasks';
@@ -2209,12 +2209,13 @@ export class MistRepository {
     });
   }
   async platformTaskImages(prior: AgentActor, workspaceId: string, rendered: PlatformTaskImageCache) {
-    const files=(await this.privateTaskFiles(prior,workspaceId)).filter(file=>isTaskImage(file.name));
-    return Promise.all(files.map(async file => {
+    const files=await this.privateTaskFiles(prior,workspaceId),labels=taskAttachmentLabels(files);
+    const images=files.flatMap((file,index)=>isTaskImage(file.name)?[{file,name:labels[index]}]:[]);
+    return Promise.all(images.map(async ({file,name}) => {
       // Check the live original even when a previous model turn rendered the same image.
       const bytes = await this.files.read(workspaceId, file);
       const cached = rendered.get(file.id);
-      if (cached && cached.sha256 === file.sha256) return { name: file.name, url: cached.url };
+      if (cached && cached.sha256 === file.sha256) return { name, url: cached.url };
       rendered.delete(file.id);
 
       const image = await sharp(bytes, { limitInputPixels: 40_000_000 })
@@ -2224,7 +2225,7 @@ export class MistRepository {
       if (file.sha256 && rendered.size < TASK_ATTACHMENT_COUNT && url.length <= MAX_CACHED_TASK_IMAGE_URL_LENGTH) {
         rendered.set(file.id, { sha256: file.sha256, url });
       }
-      return { name: file.name, url };
+      return { name, url };
     }));
   }
   /** 复用附件下载的同一授权（canReadFile）后提取有界正文摘录；不返回字节。 */

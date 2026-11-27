@@ -46,3 +46,18 @@ it('opens exact report filenames from this task and leaves ambiguous, embedded a
     host.remove();
   }
 });
+
+it('opens numbered references for both same-name originals without guessing for the bare name',async()=>{
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
+ const first={id:'quote-a',name:'报价单.pdf',mimeType:'application/pdf',size:100};
+ const second={...first,id:'quote-b',size:200};
+ const text='报价单.pdf。两份来源分别为 **报价单.pdf（1）** 和 `报价单.pdf（2）`。';
+ try{
+  await act(async()=>root.render(<XiaozhuMarkdown text={text} index={[]} onOpen={vi.fn()} attachments={[first,second]} onOpenAttachment={preview}/>));
+  const buttons=[...host.querySelectorAll('button')];
+  expect(buttons.map(button=>button.textContent)).toEqual(['报价单.pdf（1）','报价单.pdf（2）']);
+  await act(async()=>buttons.forEach(button=>button.click()));
+  expect(preview.mock.calls).toEqual([[first],[second]]);
+ }finally{await act(async()=>root.unmount());host.remove();}
+});
