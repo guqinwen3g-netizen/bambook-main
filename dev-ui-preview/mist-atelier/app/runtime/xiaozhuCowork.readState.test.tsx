@@ -14,6 +14,33 @@ const loaded=async(url:string)=>url.includes('/agent-identities')?{items:[{id:'i
 function View({workspace='workspace',conversationId}:{workspace?:string;conversationId?:string}){channel=useXiaozhuCowork(workspace,'account:'+workspace,true,conversationId);return <div>{channel.tasks.length}</div>}
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();api.mockReset();});
 
+it('rechecks a stale task directly and coalesces concurrent progress reads',async()=>{
+ const waiting={...task,state:'running',executionStage:'model',version:2,canControl:true};
+ const finished={...waiting,state:'succeeded',version:3,result:'已恢复原报告'};
+ let resolveRead:(item:unknown)=>void=()=>{};
+ let available=false;
+ api.mockImplementation(async(url:string)=>{
+  if(url.endsWith('/agent-tasks/task')){
+   if(!available)throw Error('进度读取暂不可用');
+   return new Promise(resolve=>{resolveRead=resolve;});
+  }
+  if(url.endsWith('/agent-tasks'))return {items:[waiting],nextCursor:null};
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View/>));
+ expect(channel.staleProgressIds?.has('task')).toBe(true);
+ api.mockClear();available=true;
+ await act(async()=>{
+  const first=channel.recheckProgress('task'),second=channel.recheckProgress('task');
+  resolveRead({item:finished});
+  await Promise.all([first,second]);
+ });
+ expect(channel.tasks[0]).toMatchObject({state:'succeeded',version:3,result:'已恢复原报告'});
+ expect(channel.staleProgressIds?.has('task')).toBeFalsy();
+ expect(api.mock.calls.map(([url])=>url)).toEqual(['/api/mist/workspaces/workspace/agent-tasks/task']);
+});
+
 it('rechecks opened completed reports on focus and restores access from a fresh report',async()=>{
  const conversationId='conversation_current';
  const report={...task,conversationId,result:'已核对原件',attachments:[{id:'file',name:'原件.pdf'}]};

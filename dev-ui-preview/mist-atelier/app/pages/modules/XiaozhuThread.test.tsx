@@ -48,6 +48,16 @@ it('keeps an unreceived confirmation in its original task and offers a read-only
  expect(host.textContent).toContain('已停止');
 });
 
+it('exposes a focused recheck while task progress is stale',async()=>{
+ const waiting=task({state:'running',executionStage:'model'});
+ const onRecheckProgress=vi.fn(async()=>{});
+ await paint([waiting],{...fns(),onRecheckProgress,staleProgressIds:new Set(['t1'])});
+ await act(async()=>getByRole(host,'button',{name:'重新读取进度',exact:true}).click());
+ expect(onRecheckProgress).toHaveBeenCalledExactlyOnceWith('t1');
+ await paint([waiting],{...fns(),onRecheckProgress});
+ expect(queryByRole(host,'button',{name:'重新读取进度',exact:true})).toBeNull();
+});
+
 it('shows the current read on a collapsed task and clears it after the phase changes',async()=>{
  const first={at:'',kind:'read',label:'读取附件 报价.pdf',completed:false};
  const f={...fns(),workLog:{expanded:new Map([['t1',false]]),setExpanded:vi.fn()}};
