@@ -10,7 +10,7 @@ import type { AgentIdentityView } from '../../../../server/src/shared/mistAgentI
 import { uiText, interfaceLocale } from '../../../../services/interfaceLanguage';
 import { mistApiRequest, useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
-import { useNav, type RouteTarget } from '../nav';
+import { readMistRoute, rememberMistSource, useNav, type RouteTarget } from '../nav';
 import { taskReportRecordIndex } from '../runtime/xiaozhuRecords';
 import { agentConnectionEndpoint } from './AgentConnections';
 import { FailureNotice } from '../runtime/FailureNotice';
@@ -356,14 +356,40 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
 }
 
 function TaskReport({ task }: { task: AgentTaskView }) {
- const workspace = useMistWorkspace(), nav = useNav();
+ const workspace = useMistWorkspace(), session = useMistSession(), nav = useNav();
  const [selection, setSelection] = React.useState<{ fileId: string; target?: number | string }>();
  const recordRefs = React.useMemo(() => taskReportRecordIndex(task.trail), [task.trail]);
+ const reportBody = React.useRef<HTMLDivElement>(null), clickedSource = React.useRef<HTMLButtonElement | null>(null);
+ const scope = session.sessionKey + ':' + workspace.workspace?.id;
+ const { sourcePosition } = nav.route;
  const openRecord = (view: string, id: string, target?: RouteTarget) => {
   // A task opened from a list row has no history entry until it leaves the drawer.
   if (nav.route.section !== 'tasks' || nav.route.id !== task.id) nav.go('assistant', task.id, { section: 'tasks' });
+  const route = readMistRoute();
+  const button = clickedSource.current;
+  const body = button?.closest<HTMLElement>('.mist-drawer-body');
+  if (route.view === 'assistant' && route.section === 'tasks' && route.id === task.id && body && button && reportBody.current) {
+   const citation = [...reportBody.current.querySelectorAll('button.mist-xz-ref')].indexOf(button);
+   if (citation >= 0) {
+    const offset = button.getBoundingClientRect().top - body.getBoundingClientRect().top;
+    rememberMistSource(route, { view:'assistant', scope, taskId:task.id, version:task.version, updatedAt:task.updatedAt, citation, offset });
+   }
+  }
   nav.go(view, id, target);
  };
+ React.useLayoutEffect(() => {
+  if (sourcePosition?.view !== 'assistant' || sourcePosition.scope !== scope || sourcePosition.taskId !== task.id
+   || sourcePosition.version !== task.version || sourcePosition.updatedAt !== task.updatedAt) return;
+  const button = reportBody.current?.querySelectorAll<HTMLButtonElement>('button.mist-xz-ref')[sourcePosition.citation];
+  const body = button?.closest<HTMLElement>('.mist-drawer-body');
+  if (!button || !body || !Number.isFinite(sourcePosition.offset)) return;
+  // Let both drawers finish their initial focus before restoring the original citation.
+  const frame = requestAnimationFrame(() => {
+   body.scrollTop += button.getBoundingClientRect().top - body.getBoundingClientRect().top - sourcePosition.offset;
+   button.focus({ preventScroll:true });
+  });
+  return () => cancelAnimationFrame(frame);
+ }, [sourcePosition, scope, task.id, task.version, task.updatedAt]);
 
  const files = task.attachments ?? [];
  const index = files.findIndex(file => file.id === selection?.fileId);
@@ -377,8 +403,12 @@ function TaskReport({ task }: { task: AgentTaskView }) {
   <Card>
    <CardHeader title={uiText('Agent执行报告')}/>
    <CardBody>
-    <XiaozhuMarkdown text={task.result} index={recordRefs} onOpen={openRecord}
-      attachments={files} attachmentReads={task.trail} onOpenAttachment={files.length ? open : undefined}/>
+    <div ref={reportBody} onClickCapture={event => {
+     clickedSource.current = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button.mist-xz-ref') : null;
+    }}>
+     <XiaozhuMarkdown text={task.result} index={recordRefs} onOpen={openRecord}
+       attachments={files} attachmentReads={task.trail} onOpenAttachment={files.length ? open : undefined}/>
+    </div>
    </CardBody>
   </Card>
   {file&&<FilePreview files={files} index={index}
