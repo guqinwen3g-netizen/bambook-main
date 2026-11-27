@@ -640,6 +640,8 @@ export function personalTaskActivity(view: AgentTaskView): AgentTaskActivity | u
     name: activityText(view.name) ?? '小竹任务',
     state: view.state,
     ...(view.executionStage && { executionStage: view.executionStage }),
+    ...(view.state === 'running' && view.executionStage === 'model' && !view.runnerStatus && view.executionStageSince
+      && { executionStageSince: view.executionStageSince }),
     ...(view.modelFallbackSince && { modelFallbackSince: view.modelFallbackSince }),
     ...(view.runnerStatus && { runnerStatus: view.runnerStatus }),
     ...(view.state === 'queued' && view.executionIssue?.retryAt && { retrying: true }),
