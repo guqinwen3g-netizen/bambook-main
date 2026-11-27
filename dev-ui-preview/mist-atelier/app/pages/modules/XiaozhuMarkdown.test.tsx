@@ -201,3 +201,37 @@ it('opens independent verified references on later lines inside the same report 
   await act(async()=>root.unmount());host.remove();
  }
 });
+
+
+it('links verified pages under a PDF reading sentence without crossing the declared source range', async () => {
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();
+ document.body.append(host);
+ const first={id:'a',name:'long.pdf',mimeType:'application/pdf',size:200};
+ const other={...first,id:'b',name:'other.pdf'};
+ const text=[
+  '已按指定范围只读取 **long.pdf** 第 11 至 15 页；第 1 至 10 页均未读。',
+  '- 第 11 页原文。\n- 第 15 页内容。\n- 第 12 页尚无证据。\n- 第 3 页不在本段。\n- 第 11–15 页列表不选单页。',
+  '未读取 long.pdf 第 11 至 15 页。',
+  '- 第 11 页不能核对。',
+  '已读取 long.pdf 第 11 至 15 页，与 other.pdf 比较。',
+  '- 第 15 页归属不明确。',
+  '已读取 long.pdf 第 11 至 15 页。',
+  '- 第 15 页请参见 other.pdf。\n- 第 11 页归属不明确。',
+  'I read other.pdf pages 12–14.',
+  '- Page 12 has the evidence.',
+ ].join('\n\n');
+ const evidence=[
+  {at:'',kind:'read' as const,label:'已读',taskAttachmentId:'a',taskAttachmentObservedPages:[3,11,15]},
+  {at:'',kind:'read' as const,label:'已读',taskAttachmentId:'b',taskAttachmentObservedPages:[12]},
+ ];
+ try {
+  await act(async()=>root.render(<XiaozhuMarkdown text={text} index={[]} onOpen={vi.fn()} attachments={[first,other]} attachmentReads={evidence} onOpenAttachment={preview}/>));
+  const buttons=[...host.querySelectorAll<HTMLButtonElement>('button[title]')];
+  expect(buttons.map(v=>v.title)).toEqual(['第 11 页','第 15 页','第 12 页']);
+  await act(async()=>buttons.forEach(button=>button.click()));
+  expect(preview.mock.calls).toEqual([[first,11],[first,15],[other,12]]);
+ } finally {
+  await act(async()=>root.unmount());host.remove();
+ }
+});

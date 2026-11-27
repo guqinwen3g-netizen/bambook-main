@@ -62,9 +62,12 @@ function singleLabel(node: Node): string {
   return '';
 }
 
+const ATTACHMENT_EXT_IN_PROSE = /\.(?:pdf|xlsx)(?![a-z0-9_-])/i;
+type CitationPageRange = {from:number;to:number};
+
 function mentionsAnotherSource(node: Node): boolean {
   if (node.type === 'link' || node.type === 'linkReference') return true;
-  if ('value' in node && typeof node.value === 'string') return /\.(?:pdf|xlsx)(?![a-z0-9_-])/i.test(node.value);
+  if ('value' in node && typeof node.value === 'string') return ATTACHMENT_EXT_IN_PROSE.test(node.value);
   return 'children' in node && Array.isArray(node.children) && node.children.some(mentionsAnotherSource);
 }
 
@@ -154,7 +157,28 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
   const names = [...byName.keys()].sort((a, b) => b.length - a.length);
   const pattern = new RegExp('(?<![\\p{L}\\p{N}_./\\\\-])(' + names.map(escapeSourceLabel).join('|') + ')(?:(?=第[ \\t]*[1-9])|(?![\\p{L}\\p{N}_/\\\\-]|\\.[\\p{L}\\p{N}_]))', 'gu');
   const observedReads = reads.filter(read => read.taskAttachmentObservedPages !== undefined);
-  const linkSectionLine = (paragraph: Paragraph, index: number) => {
+  const readLead = (heading:Root['children'][number]) => {
+    if (heading.type !== 'paragraph') return;
+    const parts=heading.children.map(singleLabel);
+    if(parts.some(part=>!part||part.includes('\n')))return;
+    const sentence=parts.join('').trim();
+    const [mention,other]=sentence.matchAll(pattern);
+    if(!mention||other)return;
+    const index=byName.get(mention[0]);
+    if(index===undefined||!/^application\/pdf\b/i.test(files[index].mimeType)&&!/\.pdf$/i.test(files[index].name))return;
+    const prefix=sentence.slice(0,mention.index).trim();
+    const suffix=sentence.slice(mention.index+mention[0].length);
+    const readInChinese=/^(?:本次[ \t]*)?已(?:按(?:指定|所选)范围)?(?:只|仅)?(?:读取|读到|核对|摘录)(?:了)?$/u.test(prefix);
+    const readInEnglish=/^(?:I|We)[ \t]+(?:read|checked|reviewed)$/i.test(prefix);
+    if((!readInChinese&&!readInEnglish)||ATTACHMENT_EXT_IN_PROSE.test(suffix))return;
+    const bounds=readInChinese
+      ? /^[ \t]*(?:的[ \t]*)?第[ \t]*([1-9]\d*)(?:[ \t]*(?:至|到|[-–—])[ \t]*第?[ \t]*([1-9]\d*))?[ \t]*页/u.exec(suffix)
+      : /^[ \t]+pages?[ \t]+([1-9]\d*)(?:[ \t]*(?:to|[-–—])[ \t]*([1-9]\d*))?\b/i.exec(suffix);
+    if(!bounds||!/^[ \t]*(?:[.。；;：:，,]|$)/u.test(suffix.slice(bounds[0].length)))return;
+    const from=Number(bounds[1]),to=Number(bounds[2]??bounds[1]);
+    if(Number.isSafeInteger(from)&&Number.isSafeInteger(to)&&from<=to)return {index,range:{from,to}};
+  };
+  const linkSectionLine = (paragraph: Paragraph, index: number, range?:CitationPageRange) => {
     const first = paragraph.children[0];
     const container = first?.type === 'strong' || first?.type === 'emphasis' ? first : paragraph;
     const start = container.children[0];
@@ -166,6 +190,7 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
     const file = files[index], text = start.value;
     const pageLabel = PDF_PAGE_REFERENCE.exec(text)?.[0];
     const page = pageLabel ? citedPdfPage(text+next,file,observedReads) : undefined;
+    if(page!==undefined&&range&&(page<range.from||page>range.to))return;
     const sheetPrefix = WORKSHEET_REFERENCE.exec(text)?.[0];
     const sheet = sheetPrefix ? observedWorksheet((text+next).slice(sheetPrefix.length),file,reads,/^[ \t]*(?:$|[：:。])/u) : undefined;
     if (sheet && sheetPrefix === text && following && singleLabel(following) === sheet) {
@@ -178,7 +203,7 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
     container.children.splice(0,1,toAttachment(index,{type:'text',value:label},'',page??sheet),
       ...(remainder ? [{type:'text' as const,value:remainder}] : []));
   };
-  const linkSectionReference = (paragraph: Paragraph, index: number) => {
+  const linkSectionReference = (paragraph: Paragraph, index: number, range?:CitationPageRange) => {
     const {lines,separators}=splitSectionLines(paragraph.children);
     let sameSource=true, continuedRange=false;
     paragraph.children=lines.flatMap((children,position)=>{
@@ -187,7 +212,7 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
       const text=children.map(inlineTextStart).join('');
       const page=PDF_PAGE_REFERENCE.exec(text);
       const rangeContinues=!!page&&/^[ \t]*[）)]?[ \t]*(?:至|到|[-~–—/,，、]|和|或|及|and|to)[ \t]*$/i.test(text.slice(page[0].length));
-      if(sameSource&&!continuedRange&&!rangeContinues)linkSectionLine(line,index);
+      if(sameSource&&!continuedRange&&!rangeContinues)linkSectionLine(line,index,range);
       continuedRange=rangeContinues;
       return position===0?line.children:[separators[position-1],...line.children];
     });
@@ -199,14 +224,17 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
       for (let position=1;position<tree.children.length;position++) {
         const heading = tree.children[position-1];
         if (heading.type !== 'heading' && heading.type !== 'paragraph') continue;
-        const index = byName.get(singleLabel(heading).trim().replace(/[：:]$/,'').trim());
+        const lead = readLead(heading);
+        const index = lead?.index ?? byName.get(singleLabel(heading).trim().replace(/[：:]$/,'').trim());
         if (index === undefined) continue;
         const details = tree.children[position];
-        if (details.type === 'paragraph') linkSectionReference(details,index);
+        if (details.type === 'paragraph') linkSectionReference(details,index,lead?.range);
         if (details.type === 'list') {
           for (const item of details.children) {
             const paragraph = item.children[0];
-            if (paragraph?.type === 'paragraph') linkSectionReference(paragraph,index);
+            if (paragraph?.type !== 'paragraph') continue;
+            if (lead && mentionsAnotherSource(paragraph)) break;
+            linkSectionReference(paragraph,index,lead?.range);
           }
         }
       }
