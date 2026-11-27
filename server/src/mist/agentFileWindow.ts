@@ -41,6 +41,7 @@ export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:
   }:{})},
   ...(raw.pages!==undefined?{pages:raw.pages}:{}),...(raw.sheets?{sheets:raw.sheets}:{}),
   ...(raw.pagesWithoutText?.length?{pagesWithoutText:raw.pagesWithoutText}:{}),
+  ...(raw.kind==='xlsx'?{observedSheets:raw.sheetTextSpans?.filter(span=>span.end>p.offset&&span.start<end).map(span=>span.name)??[]}:{}),
   ...(pdf?{pageTextSpans:pageTextSpans??[]}:{}),
   ...(raw.reason?{reason:raw.reason}:extractionLimited?{reason:'正文超过安全提取范围，当前片段不能代表完整原件'}:{}),
   ...(hasMore?{readHint:'用同一 fileId 和 nextCursor 调用 bambook_file_text 继续读取；累计范围连续且 sourceHash 一致才可认定没有漏读。'}:!fromStart?{readHint:'本段已到可提取范围末尾，但仅是片段；须与此前相同 sourceHash 的连续范围一起核对，不代表此前部分已读取。'}:{})};

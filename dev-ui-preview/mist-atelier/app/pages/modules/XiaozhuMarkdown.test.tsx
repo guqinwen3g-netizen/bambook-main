@@ -87,3 +87,27 @@ it('opens an explicitly cited checked PDF page and keeps ambiguous or unchecked 
   expect(preview.mock.calls).toEqual([[first,23],[second,21],[first],[first],[first],[first,22],[sheet],[first,23]]);
  }finally{await act(async()=>root.unmount());host.remove();}
 });
+
+it('opens exact observed worksheet names and keeps unread or other-file tabs at workbook level',async()=>{
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();document.body.append(host);
+ const first={id:'first',name:'报价.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',size:100};
+ const second={...first,id:'second'};
+ const text=[
+  '**报价.xlsx（1）**（工作表：核对结果）',
+  '报价.xlsx（1）(worksheet Details)',
+  '报价.xlsx（1）（工作表：只在名称列表里）',
+  '报价.xlsx（2）（工作表：核对结果）',
+ ].join('\n\n');
+ const attachmentReads=[
+  {at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:first.id,taskAttachmentObservedSheets:['核对结果','Details']},
+  {at:'',kind:'read' as const,label:'读取附件',taskAttachmentId:second.id,taskAttachmentObservedSheets:['只在名称列表里']},
+ ];
+ try{
+  await act(async()=>root.render(<XiaozhuMarkdown text={text} index={[]} onOpen={vi.fn()} attachments={[first,second]} attachmentReads={attachmentReads} onOpenAttachment={preview}/>));
+  const buttons=[...host.querySelectorAll('button')];
+  expect(buttons).toHaveLength(4);
+  await act(async()=>buttons.forEach(button=>button.click()));
+  expect(preview.mock.calls).toEqual([[first,'核对结果'],[first,'Details'],[first],[second]]);
+ }finally{await act(async()=>root.unmount());host.remove();}
+});
