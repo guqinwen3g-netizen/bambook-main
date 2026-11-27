@@ -18,6 +18,43 @@ const response=(body:unknown,ok=true)=>{
   return {ok,json:async()=>result};
 };
 
+it('reuses the exact unconfirmed answer request after leaving and reopening its task',async()=>{
+  const pending={id:'answer-task',conversationId:'c_answer_task',executor:'platform',identityId:'personal',version:3,
+    name:'待补交期',instructions:'核对订单',state:'waiting_human',canControl:true,waitingProposalIds:[],
+    questions:[{id:'question-1',question:'请给出模拟交期'}],createdAt:'2026-11-26T06:00:00Z',updatedAt:'2026-11-26T06:00:00Z'};
+  const posts:unknown[]=[];
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async(url:string,init?:RequestInit)=>{
+    if(url.endsWith('/answer')){
+      posts.push(JSON.parse(String(init?.body)));
+      if(posts.length===1)throw Object.assign(new Error('模拟断线'),{status:0});
+      return {item:{...pending,version:4,state:'queued',questions:[{...pending.questions[0],answer:'1 月 22 日',answeredAt:pending.updatedAt}]}};
+    }
+    if(url.endsWith('/agent-tasks/answer-task'))return {item:pending};
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    return {items:[],nextCursor:null};
+  });
+  await mount();
+  await act(async()=>root!.render(view(true,pending.id,'task-origin')));
+  const answer=()=>host.querySelector<HTMLInputElement>('[aria-label="回答小竹"]')!;
+  await act(async()=>{
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(answer(),'1 月 22 日');
+    answer().dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  await click('回答');
+  expect(posts).toHaveLength(1);
+  expect(host.textContent).toContain('回答未确认，可重试');
+  await act(async()=>root!.render(view(false)));
+  await act(async()=>root!.render(view(true,pending.id,'task-origin')));
+  expect(answer().value).toBe('1 月 22 日');
+  expect(host.textContent).toContain('回答未确认，可重试');
+  expect(posts).toHaveLength(1);
+  await click('回答');
+  expect(posts).toHaveLength(2);
+  expect(posts[1]).toEqual(posts[0]);
+});
+
 it('restores an unsent task answer only in its original task and account after navigation',async()=>{
   const item=(id:string)=>({id,conversationId:'c_'+id,executor:'platform',identityId:'personal',
     name:'模拟待补任务',instructions:'核对来源',state:'waiting_human',canControl:true,waitingProposalIds:[],

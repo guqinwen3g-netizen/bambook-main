@@ -1,4 +1,5 @@
 import {withRequestDeadline} from './requestDeadline';
+import type {TaskControlRequest} from './assistantConversation';
 /**
  * 小竹的 cowork（2026-11-07 定案）：对话里的每一条请求就是一项交给小竹的平台任务，
  * 小竹经平台 AI 与 MCP 业务工具办理，进度、追问和待确认事项回到同一条对话里；对话由服务端任务记录承载，换设备也在。
@@ -119,8 +120,9 @@ function mergeTaskUpdate(previous: AgentTaskView, next: AgentTaskView): AgentTas
 }
 
 export type TaskControlState = { busy: boolean; error?: string };
+const CONTROL_FAILURE={answer:'回答未确认，可重试',cancel:'停止结果未确认，可重试'};
 
-export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string, originTaskId?: string) {
+export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string, originTaskId?: string, savedControls?:Map<string,TaskControlRequest>) {
   const base = workspaceId ? '/api/mist/workspaces/' + encodeURIComponent(workspaceId) : '';
   const [available, setAvailable] = React.useState(false), [cachedTasks, setTasks] = React.useState<AgentTaskView[]>([]);
   const [reportAccess, setReportAccess] = React.useState<{scope:string; restricted:Set<string>}>();
@@ -143,7 +145,14 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const [checkingReceipt,setCheckingReceipt] = React.useState(false);
   const sendRequest = React.useRef<AbortController | undefined>(undefined);
   const controlRequests = React.useRef(new Map<string,AbortController>());
-  const controlKeys = React.useRef(new Map<string,{ key:string; requestId:string }>());
+  const localControls=React.useMemo(()=>new Map<string,TaskControlRequest>(),[scope]);
+  const controlKeys=savedControls??localControls;
+  React.useEffect(()=>{
+    for(const task of tasks){
+      const pending=controlKeys.get(task.id);
+      if(pending&&(task.version>pending.version||task.contentRestricted||task.canControl===false))controlKeys.delete(task.id);
+    }
+  },[controlKeys,tasks]);
   const [controls,setControls] = React.useState<Record<string,TaskControlState>>({});
   const [sendFailure, setSendFailure] = React.useState<{conversationId?: string; message: string}>();
   const sendError = !visibleConversationId || sendFailure?.conversationId === visibleConversationId ? sendFailure?.message ?? '' : '';
@@ -258,7 +267,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if (current()) { setLoading(false); setCheckingAvailability(false); }
     }
   }, [base, enabled, scope, checkReceipts]);
-  React.useEffect(() => { restrictedReports.current = new Set(); setReportAccess(undefined); setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); setRecoveredSubmissions([]); setCheckingReceipt(false); setControls({}); controlKeys.current.clear(); setBusy(false); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); moreRead.current?.abort(); receiptRead.current?.abort(); receiptRead.current=undefined; sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [load,scope]);
+  React.useEffect(() => { restrictedReports.current = new Set(); setReportAccess(undefined); setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); setRecoveredSubmissions([]); setCheckingReceipt(false); setControls({});  setBusy(false); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); moreRead.current?.abort(); receiptRead.current?.abort(); receiptRead.current=undefined; sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [load,scope]);
   const openReportIds = React.useMemo(() => {
     if (!visibleConversationId) return '';
     const personal = cachedTasks.filter(task => !task.automationId);
@@ -519,15 +528,15 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
 
     const body = {version:task.version,...details};
     const key = JSON.stringify([action,body]);
-    const existing = controlKeys.current.get(task.id);
+    const existing = controlKeys.get(task.id);
     const requestId = existing?.key===key ? existing.requestId : crypto.randomUUID();
-    controlKeys.current.set(task.id,{key,requestId});
-    const failure = action==='cancel'?'停止结果未确认，可重试':'回答未确认，可重试';
+    controlKeys.set(task.id,{action,version:task.version,key,requestId});
+    const failure = CONTROL_FAILURE[action];
     let error = '';
     const accept = (item:AgentTaskView) => {
       if (!isCurrent()) return;
       applyTaskUpdate(item);
-      controlKeys.current.delete(task.id);
+      controlKeys.delete(task.id);
       window.dispatchEvent(new Event('bambook:agent-task-update'));
     };
 
@@ -550,7 +559,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         if (!isCurrent()) return;
         applyTaskUpdate(latest);
         if (confirmed(latest)) {
-          controlKeys.current.delete(task.id);
+          controlKeys.delete(task.id);
           error = '';
           window.dispatchEvent(new Event('bambook:agent-task-update'));
         }
@@ -570,5 +579,13 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const cancel = (task:AgentTaskView) => controlTask(task,'cancel',{},item=>
     !COWORK_ACTIVE.includes(item.state)&&item.state!=='paused');
   const hasPendingSubmission = [...pending.current.values()].some(entry=>(entry.sourceConversationId??entry.conversationId)===visibleConversationId);
-  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls, hasPendingSubmission, recoveredSubmissions, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track };
+  const visibleControls={...controls};
+  for(const task of tasks){
+    const pending=controlKeys.get(task.id),previous=controls[task.id];
+    const matching=pending&&pending.version===task.version&&!task.contentRestricted&&task.canControl!==false;
+    if(previous?.error&&!matching)visibleControls[task.id]={...previous,error:''};
+    if(!previous&&matching&&task.canControl)
+      visibleControls[task.id]={busy:false,error:CONTROL_FAILURE[pending.action]};
+  }
+  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls:visibleControls, hasPendingSubmission, recoveredSubmissions, progressStale, busy, send, refreshTask, answer, cancel, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track };
 }
