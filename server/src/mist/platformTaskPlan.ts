@@ -58,23 +58,47 @@ export function requestedPdfRange(attachments:AgentTaskView['attachments']=[],in
     return {fileId:file.id,...range};
 }
 
-/** Older receipts without the current scope can still be kept as history, but cannot authorize a new model turn. */
-export function scopedPdfTaskSteps(steps:PlatformTaskStep[],scope:ReturnType<typeof requestedPdfRange>):PlatformTaskStep[] {
-  if(!scope)return steps;
-  return steps.filter(step=>{
+export function requestedWorkbookWorksheet(attachments:AgentTaskView['attachments']=[],instructions='') {
+  const request=splitTaskRequest(instructions);
+  const workbooks=attachments.filter(file=>/\.xlsx$/i.test(file.name)||/spreadsheetml\.sheet/i.test(file.mimeType));
+  const candidates=workbooks.length===1?workbooks:workbooks.filter(file=>request.includes(file.name));
+  if(candidates.length!==1)return;
+  const file=candidates[0];
+  const chinese=[...request.matchAll(/(?:^|[。；;\n])[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:只|仅)[ \t]*(?:读取|阅读|核对|查看|检查|读|看)[^。；;，,\n]{0,48}?(?:[「“]([^」”\n]{1,31})[」”][ \t]*工作表|工作表[ \t]*[：:][ \t]*([^。；;，,\n]{1,31})(?=[。；;，,\n]|$))/gu)];
+  const english=[...request.matchAll(/(?:^|[.;\n])[ \t]*(?:please[ \t]+)?(?:only[ \t]+(?:read|check|review)|(?:read|check|review)[ \t]+only)[ \t]+(?:the[ \t]+)?worksheet[ \t]+["“]([^"”\n]{1,31})["”]/gi)];
+  const names=new Set([...chinese.map(match=>match[1]??match[2].trim()),...english.map(match=>match[1])]);
+  if(names.size!==1)return;
+  const [worksheet]=names;
+  if(worksheet)return {fileId:file.id,worksheet};
+}
+
+/** Older receipts without the requested scope cannot inform a new model turn. */
+export function scopedAttachmentTaskSteps(steps:PlatformTaskStep[],pdfScope:ReturnType<typeof requestedPdfRange>,
+  worksheetScope:ReturnType<typeof requestedWorkbookWorksheet>):PlatformTaskStep[] {
+  if(!pdfScope&&!worksheetScope)return steps;
+  const eligible=steps.filter(step=>{
+    const read=step.result as (PdfReadWindow&{worksheetScope?:string;sheets?:string[];observedSheets?:string[];attachmentScopeRereadRequired?:boolean;pdfScopeRereadRequired?:boolean})|undefined;
     if(step.plan.name==='bambook_task'&&step.plan.arguments.action==='finish'
-      &&(step.result as {pdfScopeRereadRequired?:boolean}|undefined)?.pdfScopeRereadRequired===true)return false;
-    if(step.plan.name!=='bambook_file_text'||step.plan.arguments.fileId!==scope.fileId||step.result===undefined)return true;
-    const read=step.result as PdfReadWindow|undefined;
+      &&(read?.pdfScopeRereadRequired===true||read?.attachmentScopeRereadRequired===true))return false;
+    if(step.plan.name!=='bambook_file_text'||step.result===undefined)return true;
+    const fileId=step.plan.arguments.fileId;
+    if(typeof fileId!=='string'||worksheetScope?.fileId!==fileId&&pdfScope?.fileId!==fileId)return true;
     if(read?.error===true||read?.kind==='unreadable'||read?.kind==='unsupported')return !read.text;
+    if(worksheetScope&&fileId===worksheetScope.fileId)return read?.kind==='xlsx'&&read.file?.id===fileId
+      &&read.worksheetScope===worksheetScope.worksheet
+      &&Array.isArray(read.sheets)&&read.sheets.length===1&&read.sheets[0]===worksheetScope.worksheet
+      &&Array.isArray(read.observedSheets)&&read.observedSheets.every(name=>name===worksheetScope.worksheet);
+    if(!pdfScope)return false;
     const range=read?.range;
-    return read?.kind==='pdf'&&read.file?.id===scope.fileId&&!!range
+    return read?.kind==='pdf'&&read.file?.id===fileId&&!!range
       &&Number.isSafeInteger(range.pageFrom)&&Number.isSafeInteger(range.pageTo)
-      &&range.pageFrom>=scope.from&&range.pageTo>=range.pageFrom&&range.pageTo<=scope.to
-      &&(scope.from===1||read.pageScopeStart===scope.from)
+      &&range.pageFrom>=pdfScope.from&&range.pageTo>=range.pageFrom&&range.pageTo<=pdfScope.to
+      &&(pdfScope.from===1||read.pageScopeStart===pdfScope.from)
       &&typeof read.pages==='number'&&Number.isSafeInteger(read.pages)
-      &&(read.pages<=scope.to||read.pageScopeLimit===scope.to);
+      &&(read.pages<=pdfScope.to||read.pageScopeLimit===pdfScope.to);
   });
+  // Old checkpoints can summarize excluded reads. They must not reintroduce those facts.
+  return eligible.length===steps.length?eligible:eligible.filter(step=>step.plan.name!=='bambook_task'||step.plan.arguments.action!=='checkpoint');
 }
 
 /** Pre-read a short PDF or an explicitly requested last page within one additional window. */

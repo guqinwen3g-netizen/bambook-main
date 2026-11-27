@@ -136,16 +136,24 @@ export function sheetRows(xml: string, shared: string[], dates: Set<number>, dat
   return { lines, truncated, ...(attributedValues?{attributedValues:true}:{}) };
 }
 
-async function xlsxText(read: (p: string) => Promise<string | undefined>, limit: number): Promise<OfficeText> {
+async function xlsxText(read: (p: string) => Promise<string | undefined>, limit: number, worksheet?: string): Promise<OfficeText & {unreadable?:boolean}> {
   const workbook = await read('xl/workbook.xml');
   if (!workbook) throw new Error('Missing workbook');
+  const sheets = [...workbook.matchAll(/<sheet\b[^>]*>/g)].flatMap(([tag])=>{
+    const attrs=new Map([...tag.matchAll(/\s([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)]
+      .map(([,name,quoted,apostrophe])=>[name,decodeXml(quoted??apostrophe)]));
+    const state=attrs.get('state'),name=attrs.get('name')??'';
+    const visible=state==='visible'||state===undefined&&!/\sstate\s*=/.test(tag);
+    return visible&&(worksheet===undefined||worksheet===name)?[{name,rid:attrs.get('r:id')}] : [];
+  });
+  if(worksheet!==undefined&&sheets.length!==1)
+    return {text:'',truncated:false,unreadable:true,reason:'未找到唯一可见的指定工作表'};
   const rels = (await read('xl/_rels/workbook.xml.rels')) ?? '';
   const target = partTargets(rels,'xl');
   const sharedXml = (await read('xl/sharedStrings.xml')) ?? '';
   const shared = [...sharedXml.matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/g)].map(si => [...si[1].replace(/<rPh\b[\s\S]*?<\/rPh>/g, '').matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map(t => decodeXml(t[1])).join(''));
   const dates = dateStyles(await read('xl/styles.xml'));
   const date1904 = /<workbookPr\b[^>]*\sdate1904="(1|true)"/.test(workbook);
-  const sheets = [...workbook.matchAll(/<sheet\b[^>]*>/g)].map(m => ({ name: attr(m[0], 'name') ?? '', rid: attr(m[0], 'r:id'), hidden: /state="(hidden|veryHidden)"/.test(m[0]) })).filter(s => !s.hidden);
   const parts: string[] = [], sheetBlocks: SheetBlock[] = [];
   let truncated = sheets.length > SHEETS_MAX, used = 0, attributedValues = false;
   for (const sheet of sheets.slice(0, SHEETS_MAX)) {
@@ -182,7 +190,7 @@ async function pptxText(read: (p: string) => Promise<string | undefined>): Promi
 }
 
 /** 返回未截断的正文（由调用方统一按 limit 截取）；无法解析时给出原因。 */
-export async function extractOfficeText(kind: OfficeKind, bytes: Uint8Array, limit: number): Promise<OfficeText & { unreadable?: boolean }> {
+export async function extractOfficeText(kind: OfficeKind, bytes: Uint8Array, limit: number, worksheet?:string): Promise<OfficeText & { unreadable?: boolean }> {
   if (bytes[0] !== 0x50 || bytes[1] !== 0x4b) return { text: '', truncated: false, unreadable: true, reason: '文件不是有效的 Office 文档（可能是旧版格式或已加密）' };
   let zip: JSZip;
   try { zip = await JSZip.loadAsync(bytes); } catch { return { text: '', truncated: false, unreadable: true, reason: 'Office 文档无法解压（可能已损坏或加密）' }; }
@@ -193,7 +201,7 @@ export async function extractOfficeText(kind: OfficeKind, bytes: Uint8Array, lim
       if (!xml) return { text: '', truncated: false, unreadable: true, reason: '不是有效的 Word 文档' };
       return { text: docxText(xml), truncated: false };
     }
-    if (kind === 'xlsx') return await xlsxText(read, limit);
+    if (kind === 'xlsx') return await xlsxText(read, limit, worksheet);
     return await pptxText(read);
   } catch (error) {
     if (error instanceof OfficeLimit) return { text: '', truncated: false, unreadable: true, reason: '文档解压后过大，不提取正文' };

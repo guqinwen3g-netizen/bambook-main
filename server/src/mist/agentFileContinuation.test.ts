@@ -5,6 +5,34 @@ import JSZip from 'jszip';
 import {readFileTextWindow,type FileTextWindowCache} from './agentFileWindow';
 import {platformTrail} from './agentTaskTrail';
 const scope={workspaceId:'w',fileId:'f'};
+it('restricts workbook extraction and continuations to one exactly named visible worksheet',async()=>{
+ const zip=new JSZip(), file={name:'quote.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'};
+ zip.file('xl/workbook.xml','<workbook><sheets><sheet name="报价草案" r:id="r1"/><sheet name="确认报价" r:id="r2"/><sheet name="内部底表" state = "hidden" r:id="r3"/></sheets></workbook>');
+ zip.file('xl/_rels/workbook.xml.rels','<Relationships>'+[1,2,3].map(num=>'<Relationship Id="r'+num+'" Target="worksheets/sheet'+num+'.xml"/>').join('')+'</Relationships>');
+ const xml=(value:string)=>'<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>'+value+'</t></is></c></row></sheetData></worksheet>';
+ zip.file('xl/worksheets/sheet1.xml',xml('DRAFT QUOTE'));
+ zip.file('xl/worksheets/sheet2.xml',xml('CONFIRMED '.repeat(180)+' FINAL-CELL'));
+ zip.file('xl/worksheets/sheet3.xml',xml('HIDDEN CONTENT'));
+ const bytes=await zip.generateAsync({type:'nodebuffer'});
+ const first=await readFileTextWindow(scope,file,bytes,500,undefined,undefined,undefined,'确认报价');
+ expect(first).toMatchObject({kind:'xlsx',worksheetScope:'确认报价',sheets:['确认报价'],observedSheets:['确认报价'],hasMore:true});
+ let position:unknown=first.nextCursor,last=first,joined=first.text;
+ while(position){
+  last=await readFileTextWindow(scope,file,bytes,500,position,undefined,undefined,'确认报价');joined+=last.text;position=last.nextCursor;
+ }
+ expect(last).toMatchObject({hasMore:false,complete:false,worksheetComplete:false,sourceHash:first.sourceHash});
+ const whole=await readFileTextWindow(scope,file,bytes,8000,undefined,undefined,undefined,'确认报价');
+ expect(whole).toMatchObject({hasMore:false,complete:false,worksheetComplete:true,truncated:false});
+ expect(joined).toContain('FINAL-CELL');
+ expect(joined).not.toMatch(/DRAFT QUOTE|HIDDEN CONTENT/);
+ await expect(readFileTextWindow(scope,file,bytes,500,first.nextCursor,undefined,undefined,'报价草案')).rejects.toMatchObject({code:'FILE_TEXT_SOURCE_CHANGED'});
+ for(const name of ['内部底表','不存在']){
+  const unavailable=await readFileTextWindow(scope,file,bytes,500,undefined,undefined,undefined,name);
+  expect(unavailable).toMatchObject({kind:'unreadable',text:'',hasMore:false});
+  expect(JSON.stringify(unavailable)).not.toMatch(/DRAFT QUOTE|HIDDEN CONTENT/);
+ }
+});
+
 it('returns consecutive stable text windows, never calling the final fragment a complete document',async()=>{
  const file={name:'contract.txt',mimeType:'text/plain'},bytes=Buffer.from('条款 ABC '.repeat(5000)+'尾部交期 2026-12-31');
  let cursor:unknown;let joined='',hash='';let calls=0;

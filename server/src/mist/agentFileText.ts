@@ -60,7 +60,7 @@ function sheetTextSpans(text:string, raw:OfficeText):SheetTextSpan[] {
   return spans;
 }
 
-export async function extractFileText(file: { name: string; mimeType: string }, bytes: Uint8Array, limit: number, startPage=1, maxPage=Infinity): Promise<FileTextResult> {
+export async function extractFileText(file: { name: string; mimeType: string }, bytes: Uint8Array, limit: number, startPage=1, maxPage=Infinity, worksheet?:string): Promise<FileTextResult> {
   if (bytes.length > SOURCE_BYTES_MAX) return { kind: 'unsupported', text: '', truncated: false, reason: '文件超过 20MB，不提取正文' };
   const isPdf = /^application\/pdf\b/i.test(file.mimeType) || /\.pdf$/i.test(file.name);
   if (isPdf) {
@@ -91,7 +91,7 @@ export async function extractFileText(file: { name: string; mimeType: string }, 
   }
   const office = officeKind(file);
   if (office) {
-    const result = await extractOfficeText(office, bytes, limit);
+    const result = await extractOfficeText(office, bytes, limit, worksheet);
     if (result.unreadable) return { kind: 'unreadable', text: '', truncated: false, reason: result.reason };
     const normalized = clean(result.text);
     const out = cut(normalized, limit);
