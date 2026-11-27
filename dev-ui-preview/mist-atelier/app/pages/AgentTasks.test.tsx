@@ -4,9 +4,9 @@ import {createRoot,type Root} from 'react-dom/client';
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 import {getByRole,getByLabelText,getByText,queryByRole,fireEvent} from '@testing-library/dom';
 import {MistRoot,ToastProvider} from '../../../../components/mist';
-const seam=vi.hoisted(()=>({api:vi.fn(),copy:vi.fn(),refresh:vi.fn(),go:vi.fn(),identity:'A',userId:'sales',routeId:'',automationId:''}));
+const seam=vi.hoisted(()=>({api:vi.fn(),readAttachment:vi.fn(),copy:vi.fn(),refresh:vi.fn(),go:vi.fn(),identity:'A',userId:'sales',routeId:'',automationId:''}));
 vi.mock('../runtime/auth',()=>({useMistSession:()=>({sessionKey:seam.identity,user:{id:seam.userId}})}));
-vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>({workspace:{id:'workspace'},refresh:seam.refresh}),mistApiRequest:(...args:any[])=>seam.api(...args)}));
+vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>({workspace:{id:'workspace'},refresh:seam.refresh,readTaskAttachment:seam.readAttachment}),mistApiRequest:(...args:any[])=>seam.api(...args)}));
 vi.mock('../nav',()=>({useNav:()=>({go:seam.go,route:{view:'assistant',section:'tasks',id:seam.routeId||undefined,automationId:seam.automationId||undefined}})}));
 import {AgentTasks} from './AgentTasks';
 let host:HTMLDivElement,root:Root;
@@ -381,6 +381,38 @@ it('rechecks an open report on focus and visibility, withholds it after confirme
  expect(detailRequests).toBe(4);
  expect(getByRole(document.body,'dialog',{name:'核对邮件'}).textContent).toContain(report.result);
 });
+it('opens a report attachment from the task drawer and removes its preview on restriction', async () => {
+ const pdf={id:'pdf-a',name:'发票.pdf',mimeType:'application/pdf',size:30};
+ const report={...row(),state:'succeeded',executor:'platform',result:'请核对 发票.pdf 第 23 页。',canControl:false,contentRestricted:false,
+  attachments:[pdf],trail:[{at:'',kind:'read',label:'已读',taskAttachmentId:pdf.id,taskAttachmentObservedPages:[23]}]};
+ let current=report;
+ seam.readAttachment.mockRejectedValue(new Error('暂时无法读取'));
+ seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:current}
+  :url.includes('agent-identities')?{items:[identity()]}:url.endsWith('/history')?{items:[],nextCursor:null}:{items:[current],nextCursor:null}));
+ act(paint);await flush();await click(getByText(host,report.name));
+ expect(seam.readAttachment).not.toHaveBeenCalled();
+ const dialog=getByRole(document.body,'dialog',{name:report.name});
+ const citation=getByRole(dialog,'button',{name:pdf.name});
+ expect(citation.title).toBe('第 23 页');
+ citation.focus();await click(citation);
+ expect(getByRole(document.body,'dialog',{name:pdf.name})).toBeTruthy();
+ expect(seam.readAttachment).toHaveBeenLastCalledWith(report.id,pdf);
+ await act(async()=>document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));await flush();
+ expect(document.activeElement).toBe(citation);
+ await click(citation);
+ current={...report,name:'Agent任务',result:'',attachments:[],trail:[],contentRestricted:true};
+ await act(async()=>window.dispatchEvent(new Event('focus')));await flush();
+ expect(queryByRole(document.body,'dialog',{name:pdf.name})).toBeNull();
+ expect(getByRole(document.body,'dialog',{name:'Agent任务'})).toBeTruthy();
+ expect(queryByRole(document.body,'button',{name:pdf.name})).toBeNull();
+ current=report;
+ await act(async()=>window.dispatchEvent(new Event('focus')));await flush();
+ expect(getByRole(document.body,'button',{name:pdf.name})).toBeTruthy();
+ expect(queryByRole(document.body,'dialog',{name:pdf.name})).toBeNull();
+ expect(seam.readAttachment).toHaveBeenCalledTimes(2);
+ expect(seam.api.mock.calls.every(([,init])=>!init?.method||init.method==='GET')).toBe(true);
+});
+
 it('does not replace a committed task control receipt with an older focus read',async()=>{
  const active={...row(),executor:'platform',state:'running'};
  const stopped={...active,state:'cancelled',version:active.version+1,canControl:false};
