@@ -673,6 +673,51 @@ it('ignores late model output after human stop, even when the model ignores its 
  const current=await f.current(task.id);await f.human.post(f.base+'/agent-tasks/'+task.id+'/cancel').send({requestId:randomUUID(),version:current.version}).expect(200);const stopped=(await f.human.get(f.base).expect(200)).body.workspace.state;await f.worker.stop();resolve(tool('bambook_execute',{command:{type:'email.flag',payload:{id:before.email.messages[0].id,flag:'starred',value:true}}}));await Promise.resolve();
  expect((await f.current(task.id)).state).toBe('cancelled');const after=(await f.human.get(f.base).expect(200)).body.workspace.state;expect(after).toEqual(stopped);expect(after.email).toEqual(before.email);
 });
+it('reports a same-turn backup through the task and personal activity until the next tool starts', async () => {
+ vi.stubEnv('ARK_API_KEY','test-primary');
+ vi.stubEnv('BAMBOOK_LLM_BACKUP_URL','https://backup.example/v1');
+ vi.stubEnv('BAMBOOK_LLM_BACKUP_KEY','test-backup');
+ const success=(content:string)=>new Response(JSON.stringify({choices:[{message:{content}}]}),{headers:{'content-type':'application/json'}});
+ let releasePrimary!:(response:Response)=>void,releaseBackup!:(response:Response)=>void,releaseNext!:(response:Response)=>void;
+ const primary=new Promise<Response>(resolve=>{releasePrimary=resolve;});
+ const backup=new Promise<Response>(resolve=>{releaseBackup=resolve;});
+ const next=new Promise<Response>(resolve=>{releaseNext=resolve;});
+ const fetchMock=vi.fn().mockReturnValueOnce(primary).mockReturnValueOnce(backup).mockReturnValueOnce(next);
+ vi.stubGlobal('fetch',fetchMock);
+ try {
+  const complete=createLlmCompleter({platformProfile:'agent-task',platformProviders:{chain:()=>[]},subscriptions:{isConnected:()=>false,complete:async()=>''}});
+  const f=await fixture(complete,{pulseMs:60000});
+  f.worker.start(3_600_000);
+  const {item:task}=(await f.human.post(f.base+'/personal-agent/tasks').send({
+   requestId:randomUUID(),name:'模拟备用模型',instructions:'只读核对当前来信。',
+  }).expect(201)).body;
+  await f.worker.tick();
+  await vi.waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(1));
+  expect(await f.current(task.id)).not.toHaveProperty('modelFallbackSince');
+  releasePrimary(new Response('{}',{status:503}));
+  await vi.waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(2));
+  const backupView=await f.current(task.id);
+  expect(backupView).toMatchObject({state:'running',executionStage:'model',modelFallbackSince:expect.any(String)});
+  expect(Date.parse(backupView.modelFallbackSince)).toBeGreaterThanOrEqual(Date.parse(backupView.executionStageSince));
+  expect((await f.human.get(f.base+'/personal-agent/activity').expect(200)).body.items).toEqual([
+   expect.objectContaining({id:task.id,modelFallbackSince:backupView.modelFallbackSince}),
+  ]);
+  releaseBackup(success(tool('bambook_get',{type:'email',id:f.workspace.state.email.messages[0].id})));
+  await vi.waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(3));
+  expect(await f.current(task.id)).not.toHaveProperty('modelFallbackSince');
+  releaseNext(success(tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对模拟来信。'})));
+  await f.worker.settled();
+  const finished=await f.current(task.id);
+  expect(finished).toMatchObject({state:'succeeded',result:'已核对模拟来信。'});
+  expect(finished).not.toHaveProperty('modelFallbackSince');
+ } finally {
+  releasePrimary(new Response('{}',{status:503}));
+  releaseBackup(new Response('{}',{status:503}));
+  releaseNext(new Response('{}',{status:503}));
+  vi.unstubAllGlobals();
+ }
+});
+
 it('does not send a fallback when the user has cancelled between provider attempts', async () => {
  vi.stubEnv('ARK_API_KEY','test-primary');
  vi.stubEnv('BAMBOOK_LLM_BACKUP_URL','https://backup.example/v1');

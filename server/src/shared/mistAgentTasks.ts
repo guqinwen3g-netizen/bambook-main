@@ -49,6 +49,8 @@ export type AgentTaskView = {
   /** Server-observed worker state; it does not change the task lease. */
   runnerStatus?: 'heartbeat_stale' | 'awaiting_reclaim';
   executionStageSince?: string;
+  /** Start of the same-turn backup model attempt. */
+  modelFallbackSince?: string;
   executionIssue?:{code:'model_unavailable'|'model_response_invalid';retryAt?:string};
   /** Absent in older servers; questions and answers use the task's existing content visibility. */
   questions?:AgentTaskQuestion[];
@@ -67,6 +69,7 @@ export type AgentTaskActivity = {
   name: string;
   state: 'queued' | 'running';
   executionStage?: AgentTaskView['executionStage'];
+  modelFallbackSince?: AgentTaskView['modelFallbackSince'];
   runnerStatus?: AgentTaskView['runnerStatus'];
   retrying?: boolean;
   currentStep?: string;
