@@ -925,26 +925,16 @@ it('reads the short tail of each PDF before asking the model to prepare the repo
  expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'已整理附件核对报告'});
 });
 
-it('records complete coverage only after all text slices of a dense PDF have been read',async()=>{
- let turns=0;
+it('pre-reads both text slices and the short tail of a dense PDF before calling the model',async()=>{
  const complete=vi.fn(async(model:LlmCompletionInput)=>{
   const content=model.messages[0].content as string,facts=JSON.parse(content.slice(content.indexOf('{')));
   const reads=facts.history.recent.filter((step:{name:string})=>step.name==='bambook_file_text');
-  const result=reads.at(-1).result;
-  turns++;
-  if(turns===1){
-   expect(result.range).toMatchObject({pageFrom:1,pageTo:20,start:0,end:3500,textLimited:true});
-   expect(facts.history).not.toHaveProperty('pdfCoverage');
-   return tool('bambook_file_text',{fileId:'attachment_1',cursor:'next',maxChars:3500});
-  }
-  if(turns===2){
-   expect(result.range).toMatchObject({pageFrom:1,pageTo:20,start:3500});
-   expect(result.nextPageFrom).toBe(21);
-   expect(facts.history).not.toHaveProperty('pdfCoverage');
-   return tool('bambook_file_text',{fileId:'attachment_1',cursor:'next',maxChars:3500});
-  }
-  expect(result.range).toMatchObject({pageFrom:21,pageTo:23,start:0});
-  expect(result.text).toContain('DENSE-INVOICE-TAIL-23');
+  expect(reads).toHaveLength(3);
+  expect(reads[0].result.range).toMatchObject({pageFrom:1,pageTo:20,start:0,end:3500,textLimited:true});
+  expect(reads[1].result.range).toMatchObject({pageFrom:1,pageTo:20,start:3500});
+  expect(reads[1].result.nextPageFrom).toBe(21);
+  expect(reads[2].result.range).toMatchObject({pageFrom:21,pageTo:23,start:0});
+  expect(reads[2].result.text).toContain('DENSE-INVOICE-TAIL-23');
   expect(facts.history.pdfCoverage).toEqual([{fileId:'attachment_1',pagesChecked:23,pagesWithoutText:[]}]);
   return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对测试资料。'});
  });
@@ -954,8 +944,11 @@ it('records complete coverage only after all text slices of a dense PDF have bee
   .field('task',JSON.stringify({requestId:randomUUID(),name:'密集资料核对',instructions:'核对模拟条款。'}))
   .attach('attachments',pdf('DENSE-INVOICE-TAIL-23',23,true),'dense.pdf').expect(201)).body.item;
  await f.drain();
- expect(complete).toHaveBeenCalledTimes(3);
- expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'已核对测试资料。'});
+ expect(complete).toHaveBeenCalledTimes(1);
+ const completed=await f.current(task.id);
+ expect(completed).toMatchObject({state:'succeeded',result:'已核对测试资料。'});
+ expect(completed.trail.filter((entry:{taskAttachmentId?:string})=>entry.taskAttachmentId).map((entry:{taskAttachmentPageRange:unknown})=>entry.taskAttachmentPageRange))
+  .toEqual([{from:1,to:20},{from:1,to:20},{from:21,to:23}]);
 });
 
 it('supplies separate report labels and reads for attachments with identical original filenames',async()=>{

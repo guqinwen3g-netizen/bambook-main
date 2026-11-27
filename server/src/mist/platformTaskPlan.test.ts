@@ -1,5 +1,5 @@
 import{expect,it}from'vitest';
-import{compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,shortPdfTailPlan}from'./platformTaskPlan';
+import{compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,shortPdfContinuationPlan}from'./platformTaskPlan';
 import{platformReasoning}from'../ai/platformModel';
 
 it('accepts only a bound business tool decision, without thoughts, owner impersonation or model request IDs',()=>{
@@ -74,14 +74,14 @@ it('uses the last verified continuation for the same file and only exposes a sho
 it('limits automatic PDF continuation to one short page window without a prior continuation attempt', () => {
  const file={id:'pdf',name:'sample.pdf',mimeType:'application/pdf',size:1500};
  const plan={name:'bambook_file_text',arguments:{fileId:file.id}};
- const result={kind:'pdf',pages:24,range:{pageFrom:1,pageTo:20},hasMore:true,nextPageFrom:21,nextCursor:'aft1.original'};
+ const result={kind:'pdf',file:{id:file.id},sourceHash:'a'.repeat(64),pages:24,range:{start:0,end:3500,pageFrom:1,pageTo:20},hasMore:true,nextPageFrom:21,nextCursor:'aft1.original'};
  const first={...newPlatformTaskStep(plan,0),result};
- expect(shortPdfTailPlan([file],[first])?.arguments).toEqual({fileId:file.id,cursor:'aft1.original',maxChars:3500});
- expect(shortPdfTailPlan([file],[{...first,result:{...result,pages:25}}])).toBeUndefined();
- expect(shortPdfTailPlan([file],[{...first,result:{...result,nextPageFrom:undefined}}])).toBeUndefined();
- expect(shortPdfTailPlan([file],[{...first,compacted:true}])).toBeUndefined();
+ expect(shortPdfContinuationPlan([file],[first])?.arguments).toEqual({fileId:file.id,cursor:'aft1.original',maxChars:3500});
+ expect(shortPdfContinuationPlan([file],[{...first,result:{...result,pages:25}}])).toBeUndefined();
+ expect(shortPdfContinuationPlan([file],[{...first,result:{...result,nextPageFrom:undefined}}])).toBeUndefined();
+ expect(shortPdfContinuationPlan([file],[{...first,compacted:true}])).toBeUndefined();
  const failed={...newPlatformTaskStep({...plan,arguments:{...plan.arguments,cursor:result.nextCursor}},1),result:{error:true}};
- expect(shortPdfTailPlan([file],[first,failed])).toBeUndefined();
+ expect(shortPdfContinuationPlan([file],[first,failed])).toBeUndefined();
 });
 
 it('continues each eligible PDF using its own cursor and skips long or already attempted sources',()=>{
@@ -90,17 +90,37 @@ it('continues each eligible PDF using its own cursor and skips long or already a
  const longer={...first,id:'long-pdf',name:'longer.pdf'};
  const read=(id:string,pages:number,cursor:string)=>({
   ...newPlatformTaskStep({name:'bambook_file_text',arguments:{fileId:id}},0),
-  result:{kind:'pdf',pages,range:{pageFrom:1,pageTo:20},hasMore:true,nextPageFrom:21,nextCursor:cursor},
+  result:{kind:'pdf',file:{id},sourceHash:'a'.repeat(64),pages,range:{start:0,end:3500,pageFrom:1,pageTo:20},hasMore:true,nextPageFrom:21,nextCursor:cursor},
  });
  const heads=[read(first.id,21,'aft1.first'),read(second.id,24,'aft1.second'),read(longer.id,25,'aft1.long')];
  const files=[longer,first,second];
- const firstTail=shortPdfTailPlan(files,heads);
+ const firstTail=shortPdfContinuationPlan(files,heads);
  expect(firstTail?.arguments).toEqual({fileId:first.id,cursor:'aft1.first',maxChars:3500});
  const failed={...newPlatformTaskStep(firstTail!,1),result:{error:true}};
- const secondTail=shortPdfTailPlan(files,[...heads,failed]);
+ const secondTail=shortPdfContinuationPlan(files,[...heads,failed]);
  expect(secondTail?.arguments).toEqual({fileId:second.id,cursor:'aft1.second',maxChars:3500});
  const completed={...newPlatformTaskStep(secondTail!,2),result:{hasMore:false}};
- expect(shortPdfTailPlan(files,[...heads,failed,completed])).toBeUndefined();
+ expect(shortPdfContinuationPlan(files,[...heads,failed,completed])).toBeUndefined();
+});
+
+it('pre-reads only one same-page continuation before an optional short tail',()=>{
+ const file={id:'pdf',name:'dense.pdf',mimeType:'application/pdf',size:1200};
+ const head={...newPlatformTaskStep({name:'bambook_file_text',arguments:{fileId:file.id}},0),result:{
+  kind:'pdf',file:{id:file.id},sourceHash:'a'.repeat(64),pages:23,
+  range:{start:0,end:3500,pageFrom:1,pageTo:20,textLimited:true},hasMore:true,nextCursor:'aft1.middle',
+ }};
+ const next=shortPdfContinuationPlan([file],[head]);
+ expect(next?.arguments.cursor).toBe('aft1.middle');
+ const middle={...newPlatformTaskStep(next!,1),result:{...head.result,
+  range:{...head.result.range,start:3500,end:4500,textLimited:false},nextPageFrom:21,nextCursor:'aft1.tail',
+ }};
+ expect(shortPdfContinuationPlan([file],[head,middle])?.arguments.cursor).toBe('aft1.tail');
+ const stillPartial={...middle,result:{...middle.result,range:{...middle.result.range,textLimited:true},
+  nextPageFrom:undefined,nextCursor:'aft1.more'}};
+ expect(shortPdfContinuationPlan([file],[head,stillPartial])).toBeUndefined();
+ expect(shortPdfContinuationPlan([file],[head,{...middle,result:{...middle.result,sourceHash:'b'.repeat(64)}}])).toBeUndefined();
+ const short={...head,result:{...head.result,pages:12,range:{...head.result.range,pageTo:12}}};
+ expect(shortPdfContinuationPlan([file],[short])?.arguments.cursor).toBe('aft1.middle');
 });
 
 it('summarizes only continuous PDF page windows with the same verified source and exact cursor',()=>{
