@@ -11,7 +11,6 @@ import { isAgentActor, type AgentActor } from './agentDelegation';
 import { identityRecord, personalIdentityId, assertServiceLease, serviceActorFromIdentity, type AgentServiceLease } from './agentIdentities';
 import { fail, MistApiError } from './errors';
 import { taskScopeHash, type TaskSourceRef } from './agentTaskVisibility';
-import { PDF_SELECTION_QUESTION } from '../shared/mistTaskAttachments';
 import {compactPlatformTaskSteps,newPlatformTaskStep,requestedTaskAttachmentScope,scopedAttachmentTaskSteps,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskProgress} from './platformTaskPlan';
 import{responseLocale,type ResponseLocale}from'./responseLanguage';
 import {CONDITION_CHECK_MS,taskConditionInput,type TaskCondition,type TaskConditionTarget} from './agentTaskConditions';
@@ -167,13 +166,13 @@ export function taskView(c: TaskRecord, actor: TokenPayload, now: number, author
     && c.identityId===personalIdentityId(c.workspaceId,c.ownerId) ? splitTaskRequest(c.instructions) : c.instructions;
   let visibleSteps = readable ? c.platform?.steps : undefined;
   let questions=readable?c.questions??[]:[];
-  if(visibleSteps?.length||questions.some(q=>q.question===PDF_SELECTION_QUESTION&&!q.answeredAt)){
-    const {pdf,worksheet,allowedFiles,excludedPdfIds,pdfChoiceIds}=requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions);
-    if(visibleSteps&&(allowedFiles||excludedPdfIds||pdfChoiceIds)){
-      const permitted=pdfChoiceIds?new Set<string>():allowedFiles;
-      visibleSteps=scopedAttachmentTaskSteps(visibleSteps,pdf,worksheet,permitted,excludedPdfIds);
+  if(visibleSteps?.length||questions.some(q=>!q.answeredAt)){
+    const {pdfRanges,worksheet,allowedFiles,excludedPdfIds,pdfChoice,pdfScopeConflict}=requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions);
+    if(visibleSteps&&(pdfRanges.size||allowedFiles||excludedPdfIds||pdfChoice||pdfScopeConflict)){
+      const permitted=pdfChoice||pdfScopeConflict?new Set<string>():allowedFiles;
+      visibleSteps=scopedAttachmentTaskSteps(visibleSteps,pdfRanges,worksheet,permitted,excludedPdfIds);
     }
-    if(pdfChoiceIds)questions=questions.map(q=>q.question===PDF_SELECTION_QUESTION&&!q.answeredAt?{...q,attachmentChoiceIds:pdfChoiceIds}:q);
+    if(pdfChoice)questions=questions.map(q=>q.question===pdfChoice.question&&!q.answeredAt?{...q,attachmentChoiceIds:pdfChoice.ids}:q);
   }
   return {
     ...(!readable ? { contentRestricted: true as const } : {}),
@@ -484,8 +483,7 @@ export async function answerTaskQuestion(db:any,actor:TokenPayload,workspaceId:s
     // a fresh read, and existing source or approval obligations stay in force.
     // A deterministic PDF choice binds the prefetch in the next lease. It does not
     // require an unrelated whole-file or business read before a read-only report.
-    const choosingPdf=question.question===PDF_SELECTION_QUESTION
-      &&!!requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions).pdfChoiceIds;
+    const choosingPdf=requestedTaskAttachmentScope(c.attachments,c.instructions,c.questions).pdfChoice?.question===question.question;
     const requiresRead=n.platform.requiresRead===true||!!(c.requiredRead||c.lastProposalDecision||c.condition||c.automationId
       ||c.sources.length||c.intentRefs?.length||!choosingPdf&&c.attachments?.length||c.waitingProposalIds.length);
     n.platform={...n.platform,nextRunAt:0,requiresRead,requiresReadBeforeWrite:requiresRead?undefined:true};

@@ -1097,6 +1097,93 @@ it.each([22,3])('extracts only a single requested PDF page and refuses page-wind
  }
 });
 
+it.each([false,true])('enforces independent PDF ranges and discards wider prior receipts (%s)',async legacy=>{
+ let calls=0;
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>++calls===1
+  ?tool('bambook_file_text',{fileId:'attachment_1',cursor:'next'})
+  :tool('bambook_task',{action:'finish',outcome:'succeeded',result:'两份原件已按各自页段核对。'}));
+ const f=await fixture(complete);
+ vi.spyOn(f.worker,'wake').mockImplementation(()=>{});
+ f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'两份 PDF 分页核对',instructions:'请只读取 quote.pdf 第 22 页。请只读取 terms.pdf 第 11 至 15 页。'}))
+  .attach('attachments',pdf('OUTSIDE-QUOTE-LAST',23),'quote.pdf')
+  .attach('attachments',pdf('OUTSIDE-TERMS-LAST',27),'terms.pdf').expect(201)).body.item;
+ if(legacy)await f.local.database.$transaction(async db=>{
+  const {row,value}=await taskRecord(db,f.workspace.id,task.id),at=new Date().toISOString();
+  const receipts=task.attachments.map((file:{id:string},index:number)=>({
+   id:'platform_legacy_file_'+index,at,plan:{name:'bambook_file_text',arguments:{fileId:file.id}},
+   result:{kind:'pdf',file:{id:file.id},pages:27,range:{pageFrom:1,pageTo:20},text:'LEGACY-OUTSIDE-'+index},
+  }));
+  const next={id:'platform_legacy_finish',at,plan:{name:'bambook_task',arguments:{
+   action:'finish',outcome:'succeeded',requestId:'platform_legacy_finish',result:'LEGACY-OUTSIDE-REPORT',
+  }}};
+  await db.mistCommandReceipt.updateMany({where:{id:row.id},data:{result:{...row.result,__agentTask:{
+   ...value,checkpoint:'LEGACY-OUTSIDE-CHECKPOINT',platform:{...value.platform,steps:[...receipts,next],nextRunAt:Date.now()},
+  }}}});
+ });
+ await f.drain();
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'两份原件已按各自页段核对。'});
+ expect(complete).toHaveBeenCalledTimes(2);
+ for(const [input] of complete.mock.calls){
+  const message=input.messages[0].content,{history}=JSON.parse(message.slice(message.indexOf('{')));
+  const reads=history.recent.filter((step:any)=>step.name==='bambook_file_text'&&!step.result.error);
+  expect(reads.map((step:any)=>[step.arguments.fileId,step.result.pdfTextByPage.map((entry:any)=>entry.page)]))
+   .toEqual([['attachment_1',[22]],['attachment_2',[11,12,13,14,15]]]);
+  expect(message).not.toMatch(/OUTSIDE-|Page (?:10|16|21): general terms/);
+ }
+});
+
+it('keeps two ambiguous page requests separate and reads neither until both are answered',async()=>{
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>
+  tool('bambook_task',{action:'finish',outcome:'succeeded',result:'两份原件已按页核对。'}));
+ const f=await fixture(complete);
+ f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'两份原件待确认',instructions:'请只读 quote.pdf 第 22 页。请只读 terms.pdf 第 2 至 4 页。'}))
+  .attach('attachments',pdf('EXCLUDED-QUOTE'),'quote.pdf')
+  .attach('attachments',pdf('OUTSIDE-QUOTE',23),'quote.pdf')
+  .attach('attachments',pdf('EXCLUDED-TERMS'),'terms.pdf')
+  .attach('attachments',pdf('OUTSIDE-TERMS',7),'terms.pdf').expect(201)).body.item;
+ const initial=[];
+ for(const [offset,label] of [[0,'quote.pdf（2）'],[2,'terms.pdf（4）']] as const){
+  await f.drain();
+  const current=await f.current(task.id),question=current.questions.at(-1);
+  expect(current.state).toBe('waiting_human');
+  expect(question.attachmentChoiceIds).toEqual(task.attachments.slice(offset,offset+2).map((file:any)=>file.id));
+  expect(current.trail?.some((row:any)=>row.kind==='read')).not.toBe(true);
+  expect(complete).not.toHaveBeenCalled();
+  initial.push(question.question);
+  await f.human.post(f.base+'/agent-tasks/'+task.id+'/answer').send({
+   requestId:randomUUID(),version:current.version,questionId:question.id,answer:label,
+  }).expect(200);
+ }
+ expect(new Set(initial).size).toBe(2);
+ await f.drain();
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded',id:task.id});
+ expect(complete).toHaveBeenCalledTimes(1);
+ const text=complete.mock.calls[0][0].messages[0].content;
+ const facts=JSON.parse(text.slice(text.indexOf('{')));
+ expect(facts.history.recent.filter((row:any)=>row.name==='bambook_file_text').map((row:any)=>
+  [row.arguments.fileId,row.result.pdfTextByPage.map((page:any)=>page.page)]))
+  .toEqual([['attachment_2',[22]],['attachment_4',[2,3,4]]]);
+ expect(text).not.toMatch(/EXCLUDED-QUOTE|EXCLUDED-TERMS|OUTSIDE-QUOTE|OUTSIDE-TERMS/);
+});
+
+it('reports conflicting limits on the same PDF before reading it or using the model',async()=>{
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'意外读取'}));
+ const f=await fixture(complete);
+ f.worker.start(3_600_000);
+ const {body:{item:task}}=await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'冲突页码',instructions:'只读 terms.pdf 第 1 页。只读 terms.pdf 第 3 页。'}))
+  .attach('attachments',pdf('OUTSIDE-CONFLICT',5),'terms.pdf').expect(201);
+ await f.drain();
+ const done=await f.current(task.id);
+ expect(done).toMatchObject({state:'failed',result:expect.stringContaining('PDF 页码范围不一致')});
+ expect(done.trail?.some((row:any)=>row.kind==='read')).not.toBe(true);
+ expect(complete).not.toHaveBeenCalled();
+});
+
 it('waits for the owner to pick a candidate before reading an ambiguous PDF',async()=>{
  const finish=(result:string)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result});
  const complete=vi.fn(async (_input:LlmCompletionInput)=>finish('已核对指定 PDF。'))

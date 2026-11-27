@@ -56,7 +56,7 @@ export function taskAttachmentChoicesForQuestion(
   if (question?.question === WORKBOOK_SELECTION_QUESTION) return {
     prompt: '选择要读取的工作簿', choices: taskWorkbookChoices(files),
   };
-  if (question?.question === PDF_SELECTION_QUESTION && question.attachmentChoiceIds?.length) return {
-    prompt: '选择要读取的 PDF', choices: taskPdfChoices(files, question.attachmentChoiceIds),
+  if (question?.attachmentChoiceIds?.length) return {
+    prompt: question.question===PDF_SELECTION_QUESTION?'选择要读取的 PDF':question.question, choices: taskPdfChoices(files, question.attachmentChoiceIds),
   };
 }

@@ -1,5 +1,5 @@
 import type { FileTextWindowCache } from './agentFileWindow';
-import { isTaskImage, taskAttachmentLabels, PDF_SELECTION_QUESTION, WORKBOOK_SELECTION_QUESTION } from '../shared/mistTaskAttachments';
+import { isTaskImage, taskAttachmentLabels, WORKBOOK_SELECTION_QUESTION } from '../shared/mistTaskAttachments';
 import { splitTaskRequest } from '../shared/mistTaskHistoryText';
 import{randomUUID}from'node:crypto';
 import{createLlmCompleter,LlmProviderRetryError,LlmProviderCooldownError,type LlmCompletionInput}from'../ai/llmProviders';
@@ -161,18 +161,24 @@ export class MistPlatformTaskWorker{
       pulse=setInterval(()=>{if(pulsing)return;pulsing=true;void this.repository.pulsePlatformTask(actor!).catch(()=>abort.abort()).finally(()=>{pulsing=false;});},this.options.pulseMs??5000);pulse.unref?.();
       while(!abort.signal.aborted&&this.enabled){
         phase='store';const context=await this.repository.platformTaskContext(actor);let step=context.steps.at(-1);
-        const {pdf:pdfScope,worksheet:worksheetScope,allowedFiles,excludedPdfIds,pdfChoiceIds}=requestedTaskAttachmentScope(context.task.attachments,context.task.instructions,context.task.questions);
-        const question=pdfChoiceIds?PDF_SELECTION_QUESTION:worksheetScope&&!worksheetScope.fileId?WORKBOOK_SELECTION_QUESTION:undefined;
+        const {pdfRanges,worksheet:worksheetScope,allowedFiles,excludedPdfIds,pdfChoice,pdfScopeConflict}=requestedTaskAttachmentScope(context.task.attachments,context.task.instructions,context.task.questions);
+        if(pdfScopeConflict){
+          await this.repository.agentTaskRuntime(actor,job.workspaceId,'finish',{
+            requestId:'platform-pdf-range-conflict-'+job.taskId,outcome:'failed',result:'PDF 页码范围不一致。请为每份 PDF 指定一个连续页段后重新提交。',
+          });
+          return;
+        }
+        const question=pdfChoice?.question??(worksheetScope&&!worksheetScope.fileId?WORKBOOK_SELECTION_QUESTION:undefined);
         if(question){
-          const attempts=context.task.questions?.filter(q=>q.question===question).length??0;
-          const prefix=pdfChoiceIds?'platform-pdf-choice-':'platform-workbook-choice-';
+          const attempts=pdfChoice?(context.task.questions?.length??0):(context.task.questions?.filter(q=>q.question===question).length??0);
+          const prefix=pdfChoice?'platform-pdf-choice-':'platform-workbook-choice-';
           await this.repository.agentTaskRuntime(actor,job.workspaceId,'question',{
             requestId:prefix+job.taskId+'-'+attempts,question,
           });
           return;
         }
         const outsideAttachmentScope=(fileId:string)=>excludedPdfIds?.has(fileId)||!!allowedFiles&&!allowedFiles.has(fileId);
-        const readableSteps=scopedAttachmentTaskSteps(context.steps,pdfScope,worksheetScope,allowedFiles,excludedPdfIds);
+        const readableSteps=scopedAttachmentTaskSteps(context.steps,pdfRanges,worksheetScope,allowedFiles,excludedPdfIds);
         const readableAttachments=context.task.attachments?.filter(file=>!outsideAttachmentScope(file.id)
           &&(!worksheetScope?.workbookIds.includes(file.id)||file.id===worksheetScope.fileId));
         const pendingScopedReads=new Set<string>();
@@ -235,7 +241,7 @@ export class MistPlatformTaskWorker{
               // Tool receipts provide the evidence. The UI trail is a second rendering of the same work.
               const {trail:_uiTrail,...modelTask}=context.task;
               if(readableSteps.length!==context.steps.length){modelTask.checkpoint='';modelTask.result='';}
-              if(allowedFiles||excludedPdfIds||pdfScope)modelTask.instructions=splitTaskRequest(modelTask.instructions);
+              if(allowedFiles||excludedPdfIds||pdfRanges.size)modelTask.instructions=splitTaskRequest(modelTask.instructions);
               const history=platformTaskHistory(readableSteps);
               const coverageRule=history.pdfCoverage
                 ? '\nhistory.pdfCoverage 是同一原件从第一页到末页的连续核对范围。单个续读段的 truncated 只描述该段。仍须注明 pagesWithoutText 中不能核对的页，并以各段原文为准。'

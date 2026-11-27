@@ -6,6 +6,7 @@ import { sampleCustodyEnglish } from './en-US-sample-custody';
 export const reviewedEnglish: Record<string, string> = {
   ...sampleCustodyEnglish,
   '选择要读取的 PDF': 'Choose a PDF to read',
+  '选择第 {0} 页对应的 PDF（第 {1} 处）': 'Choose the PDF for page range {0} (request {1})',
   '选择要读取的工作簿': 'Choose a workbook to read',
   '原承诺 ': 'Former promise ',
   '原跟进日 ': 'Former follow-up date ',

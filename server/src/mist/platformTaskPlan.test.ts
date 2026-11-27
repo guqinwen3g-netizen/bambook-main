@@ -1,7 +1,14 @@
 import{expect,it}from'vitest';
-import{compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,requestedPdfRange,requestedTaskAttachmentScope,shortPdfContinuationPlan,shortOfficeTailPlan}from'./platformTaskPlan';
+import{compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,requestedTaskAttachmentScope,shortPdfContinuationPlan,shortOfficeTailPlan}from'./platformTaskPlan';
 import{platformReasoning}from'../ai/platformModel';
 import {composeTaskInstructions} from '../shared/mistTaskHistoryText';
+
+function requestedPdfRange(files:Parameters<typeof requestedTaskAttachmentScope>[0], text:string) {
+ const {pdfRanges,pdfChoice,pdfScopeConflict}=requestedTaskAttachmentScope(files,text);
+ if(pdfChoice||pdfScopeConflict||pdfRanges.size!==1)return;
+ const [[fileId,range]]=[...pdfRanges];
+ return {fileId,...range};
+}
 
 const mixedFiles=[
   {id:'pdf1',name:'quote.pdf',mimeType:'application/pdf',size:1},
@@ -20,7 +27,7 @@ it.each([
 ])('selects known attachments only for an explicit exclusive request (%s)',(request,expected)=>{
   const scope=requestedTaskAttachmentScope(mixedFiles,request);
   expect([...scope.allowedFiles!]).toEqual(expected);
-  if(expected[0]==='pdf2')expect(scope.pdf).toEqual({fileId:'pdf2',from:1,to:3});
+  if(expected[0]==='pdf2')expect(scope.pdfRanges.get('pdf2')).toEqual({from:1,to:3});
 });
 
 it('keeps mixed-source reading and ignores exclusion text in prior conversation context',()=>{
@@ -123,7 +130,7 @@ it('recognizes a single explicitly requested PDF page without interpreting a wid
   expect(requestedPdfRange([file],request)).toBeUndefined();
  }
  const exclusive=requestedTaskAttachmentScope(mixedFiles,'请只读取 quote.pdf（2）的第 22 页，其他附件不要读。');
- expect(exclusive.pdf).toEqual({fileId:'pdf2',from:22,to:22});
+ expect(exclusive.pdfRanges.get('pdf2')).toEqual({from:22,to:22});
  expect([...exclusive.allowedFiles!]).toEqual(['pdf2']);
 });
 
@@ -139,6 +146,27 @@ it('binds a PDF page limit to an exact name or numbered original in its own clau
  const scoped=requestedTaskAttachmentScope(files,'请只读取 quote.pdf（2）的第 22 页。也核对 terms.pdf。');
  expect(scoped.excludedPdfIds).toEqual(new Set(['pdf1']));
  expect(requestedTaskAttachmentScope(files,'请只读取 quote.pdf（2）的第 22 页。也核对 quote.pdf（1）。').excludedPdfIds).toBeUndefined();
+});
+
+it('keeps different page limits per original and gives each unresolved range its own question',()=>{
+ const terms={id:'terms',name:'terms.pdf',mimeType:'application/pdf',size:1};
+ const selected=requestedTaskAttachmentScope([...mixedFiles,terms],'请只读 quote.pdf（2）第 22 页，且核对其他来源。请只读 terms.pdf 第 2 至 4 页。');
+ expect([...selected.pdfRanges]).toEqual([['pdf2',{from:22,to:22}],['terms',{from:2,to:4}]]);
+ const doc={id:'word',name:'sample.docx',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',size:1};
+ expect(requestedTaskAttachmentScope([...mixedFiles,doc],'请只读取 sample.docx 第 2 页。').pdfChoice).toBeUndefined();
+ const conflict=requestedTaskAttachmentScope([terms],'只读 terms.pdf 第 1 页。只读 terms.pdf 第 3 页。');
+ expect(conflict.pdfScopeConflict).toBe(true);
+ const files=[...mixedFiles,terms,{...terms,id:'terms2'}];
+ const text='请只读取 quote.pdf 第 22 页。请只读取 terms.pdf 第 2 至 4 页。';
+ const pending=requestedTaskAttachmentScope(files,text).pdfChoice!;
+ expect(pending.ids).toEqual(['pdf1','pdf2']);
+ const first={id:'q1',question:pending.question,askedAt:'2026-11-27',answeredAt:'2026-11-27',answer:'quote.pdf（2）'};
+ const next=requestedTaskAttachmentScope(files,text,[first]).pdfChoice!;
+ expect(next.ids).toEqual(['terms','terms2']);
+ expect(next.question).not.toBe(first.question);
+ const second={...first,id:'q2',question:next.question,answer:'terms.pdf（5）'};
+ expect([...requestedTaskAttachmentScope(files,text,[first,second]).pdfRanges])
+  .toEqual([['pdf2',{from:22,to:22}],['terms',{from:2,to:4}]]);
 });
 
 it('limits automatic PDF continuation to one short page window without a prior continuation attempt', () => {
