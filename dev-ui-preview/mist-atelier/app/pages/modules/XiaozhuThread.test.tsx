@@ -58,6 +58,16 @@ it('exposes a focused recheck while task progress is stale',async()=>{
  expect(queryByRole(host,'button',{name:'重新读取进度',exact:true})).toBeNull();
 });
 
+it('can check a running task when automatic progress polling is paused',async()=>{
+ const onRecheckProgress=vi.fn(async()=>{});
+ const actions={...fns(),onRecheckProgress,progressPollingPaused:true};
+ await paint([task({executionStage:'model'})],actions);
+ await act(async()=>getByRole(host,'button',{name:'重新读取进度',exact:true}).click());
+ expect(onRecheckProgress).toHaveBeenCalledExactlyOnceWith('t1');
+ await paint([task({state:'succeeded',result:'已读回报告'})],actions);
+ expect(queryByRole(host,'button',{name:'重新读取进度'})).toBeNull();
+});
+
 it('shows the current read on a collapsed task and clears it after the phase changes',async()=>{
  const first={at:'',kind:'read',label:'读取附件 报价.pdf',completed:false};
  const f={...fns(),workLog:{expanded:new Map([['t1',false]]),setExpanded:vi.fn()}};

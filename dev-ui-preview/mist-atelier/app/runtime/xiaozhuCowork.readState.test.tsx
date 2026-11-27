@@ -41,6 +41,25 @@ it('rechecks a stale task directly and coalesces concurrent progress reads',asyn
  expect(api.mock.calls.map(([url])=>url)).toEqual(['/api/mist/workspaces/workspace/agent-tasks/task']);
 });
 
+it('allows a direct progress read while model execution is unavailable',async()=>{
+ const running={...task,state:'running',executionStage:'model',version:2,canControl:true};
+ api.mockImplementation(async(url:string)=>{
+  if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:false};
+  if(url.endsWith('/agent-tasks/task'))return {item:{...running,state:'succeeded',version:3,result:'已读回原报告'}};
+  if(url.endsWith('/agent-tasks'))return {items:[running],nextCursor:null};
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View/>));
+ expect(channel.available).toBe(false);
+ expect(channel.tasks[0].state).toBe('running');
+ expect(api.mock.calls.some(([url])=>url.endsWith('/agent-tasks/task'))).toBe(false);
+ api.mockClear();
+ await act(async()=>{await channel.recheckProgress('task');});
+ expect(api.mock.calls.map(([url])=>url)).toEqual(['/api/mist/workspaces/workspace/agent-tasks/task']);
+ expect(channel.tasks[0]).toMatchObject({state:'succeeded',result:'已读回原报告'});
+});
+
 it('rechecks opened completed reports on focus and restores access from a fresh report',async()=>{
  const conversationId='conversation_current';
  const report={...task,conversationId,result:'已核对原件',attachments:[{id:'file',name:'原件.pdf'}]};
