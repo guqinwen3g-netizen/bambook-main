@@ -27,6 +27,27 @@ it('offers explicit voice continuation only on eligible tasks and passes the sel
  await act(async()=>getByRole(host,'button',{name:'语音接续 核对交期'}).click());
  expect(onVoiceTask).toHaveBeenLastCalledWith(first,'delivery-question');
 });
+it('keeps an unreceived confirmation in its original task and offers a read-only refresh',async()=>{
+ const refresh=vi.fn();
+ const f={...fns(),onRefreshProposals:refresh};
+ const waiting=task({state:'waiting_human',waitingProposalIds:['p1']});
+ await paint([waiting],f);
+ expect(getByRole(host,'status').textContent).toBe('待我确认');
+ expect(host.querySelector('.mist-xz-shimmer')).toBeNull();
+ expect(queryByRole(host,'button',{name:'确认执行'})).toBeNull();
+ await act(async()=>getByRole(host,'button',{name:'刷新待确认事项'}).click());
+ expect(refresh).toHaveBeenCalledTimes(1);
+ await paint([waiting],{...f,refreshingProposals:true});
+ expect((getByRole(host,'button',{name:'刷新待确认事项'}) as HTMLButtonElement).disabled).toBe(true);
+ await paint([waiting],f,[proposal()]);
+ expect(queryByRole(host,'button',{name:'刷新待确认事项'})).toBeNull();
+ await act(async()=>getByRole(host,'button',{name:'查看并确认'}).click());
+ expect(f.onProposal).toHaveBeenCalledExactlyOnceWith('p1');
+ await paint([task({state:'cancelled',waitingProposalIds:[]})],f);
+ expect(queryByRole(host,'button',{name:'刷新待确认事项'})).toBeNull();
+ expect(host.textContent).toContain('已停止');
+});
+
 it('requires detailed review for medium risk and routes a pending receipt to its original proposal',async()=>{
  const onDecide=vi.fn(async()=>{}),onRecoverProposal=vi.fn(async()=>{});
  const f={...fns(),onDecide,onRecoverProposal};
