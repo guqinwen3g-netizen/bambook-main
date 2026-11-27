@@ -55,7 +55,21 @@ export function XiaozhuComposer({ value, onChange, onSend, ready, busy, working,
         <IconButton size="sm" icon={X} label={uiText('移除附件')+' '+attachmentLabels[index]} disabled={busy} onClick={file.remove} />
       </span>)}</div>}
     {sources.length > 0 && <div className="mist-xz-sources">{sources.map(s => <span key={s.id} className="mist-xz-source"><span>{uiText(s.label)}</span><IconButton size="sm" icon={X} label={uiText('移除 ' + s.label)} disabled={busy} onClick={() => onRemoveSource(s)} /></span>)}</div>}
-    <textarea ref={field as React.RefObject<HTMLTextAreaElement>} rows={1} aria-label={uiText('向助手提问')} placeholder={placeholder} value={value} maxLength={TASK_INSTRUCTION_LIMIT} disabled={busy || disabled} onChange={e => onChange(e.target.value)} onKeyDown={e => {
+    <textarea ref={field as React.RefObject<HTMLTextAreaElement>} rows={1} aria-label={uiText('向助手提问')} placeholder={placeholder} value={value} maxLength={TASK_INSTRUCTION_LIMIT} disabled={busy || disabled} onChange={e => onChange(e.target.value)} onPaste={event => {
+      if (!acceptsFiles) return;
+      const incoming = Array.from(event.clipboardData.files);
+      if (!incoming.length) {
+        for (const item of Array.from(event.clipboardData.items)) {
+          if (item.kind !== 'file') continue;
+          const file = item.getAsFile();
+          if (file) incoming.push(file);
+        }
+      }
+      if (!incoming.length) return;
+      // Leave plain-text insertion to the textarea when a paste includes both files and text.
+      if (!event.clipboardData.getData('text/plain')) event.preventDefault();
+      onAddFiles?.(incoming);
+    }} onKeyDown={e => {
       if (e.nativeEvent.isComposing) return;
       const before=value.slice(0,e.currentTarget.selectionStart);
       if (e.key === '@' && (!before || /[\s，。；、：]$/.test(before))) { e.preventDefault(); onAttach(); }
