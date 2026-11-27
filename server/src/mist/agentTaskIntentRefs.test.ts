@@ -48,3 +48,16 @@ it('keeps exact completed reads alongside selected refs without inheriting parti
   return makeRead('bambook_get',{type:'order',id},{object:order(id)});
  }))).toBeUndefined();
 });
+
+it('inherits canonical order IDs from single or batch reads that matched the exact business code', () => {
+ const read = (name: string, args: Record<string, unknown>, result: unknown) => ({
+  id:'step',at:'2026-11-01T00:00:00Z',plan:{name,arguments:args},result,
+ });
+ const order = (id: string, code: string, label = code) => ({type:'order',id,label,truncated:false,data:{code}});
+ const single = read('bambook_get',{type:'order',id:'SO-A'},{object:order('id-A','SO-A')});
+ const batch = read('bambook_get_orders',{ids:['SO-B','id-C','LABEL-ONLY']},{
+  orders:[order('id-B','SO-B'),order('id-C','SO-C'),order('unrelated','SO-D','LABEL-ONLY')],
+ });
+ const wrongCode = read('bambook_get',{type:'order',id:'so-a'},{object:order('id-duplicate','SO-A')});
+ expect(taskHistoryReadRefs([],[single,batch,wrongCode])).toEqual(['id-A','id-B','id-C'].map(id=>({kind:'orders',id})));
+});

@@ -167,18 +167,18 @@ it('only carries authorized task history into a follow-up and masks it when its 
  expect(complete).toHaveBeenCalledTimes(2);
 });
 
-it.each(['selected','discovered'] as const)('re-reads the %s order for a follow-up without changing the old report', async source => {
+it.each(['selected','discovered','exact order code'] as const)('re-reads the %s order for a follow-up without changing the old report', async source => {
  const originalDue='2027-05-07', currentDue='2027-05-21';
  const conversationId='c_history_current_order';
  const followRequest='现在这张订单是哪天交货？';
- let orderId:string;
+ let orderId:string, lookupId:string;
  const facts=(input:LlmCompletionInput)=>{
   const text=String(input.messages[0].content);
   return JSON.parse(text.slice(text.indexOf('{"task":')));
  };
  const complete=vi.fn(async (input:LlmCompletionInput)=>{
   const turn=facts(input), read=turn.history.recent.at(-1)?.result?.object;
-  if(!read && !turn.task.instructions.includes(followRequest))return tool('bambook_get',{type:'order',id:orderId});
+  if(!read && !turn.task.instructions.includes(followRequest))return tool('bambook_get',{type:'order',id:lookupId});
   return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'确认交期 '+(read?.data.due??originalDue)});
  });
  const f=await fixture(complete,{mode:'read'});
@@ -187,6 +187,8 @@ it.each(['selected','discovered'] as const)('re-reads the %s order for a follow-
   lines:[{name:'模拟样衣',style:'SYNTH-FRESHNESS',qty:20,unit:'件',price:5,img:'coat',fulfillmentMode:'full_package',cmtIncludedItems:[]}],
  });
  orderId=created.body.receipt.result.orderId;
+ const storedOrder=created.body.workspace.state.orders.find((order:{id:string})=>order.id===orderId);
+ lookupId=source==='exact order code'?storedOrder.code:orderId;
  const endpoint=f.base+'/personal-agent/tasks';
  const post=async (instructions:string,options:Record<string,unknown>={})=>(await f.human.post(endpoint).send({
   requestId:randomUUID(),name:'核对模拟交期',instructions,conversationId,...options,
