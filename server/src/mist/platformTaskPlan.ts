@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type {AgentTaskIntentRef,AgentTaskView} from '../shared/mistAgentTasks';
 import type { MarketQuotation } from '../shared/mistMarket';
+import type { PdfPageTextSpan } from './agentFileText';
 import type{ResponseLocale}from'./responseLanguage';
 
 export type PlatformTaskPlan={name:string;arguments:Record<string,unknown>;progress?:string};
@@ -136,6 +137,16 @@ function pdfReadCoverage(steps:PlatformTaskStep[]){
   return coverage;
 }
 
+/** Give the model physical page identities without sending the same excerpt twice. */
+function modelFileRead(result:unknown) {
+  if(!result||typeof result!=='object')return result;
+  const read=result as {kind?:string;nextCursor?:unknown;text?:string;pageTextSpans?:PdfPageTextSpan[]};
+  const cursor=typeof read.nextCursor==='string'?{nextCursor:'next'}:{};
+  if(read.kind!=='pdf'||typeof read.text!=='string'||!read.pageTextSpans?.length)return {...read,...cursor};
+  const {text,pageTextSpans,...metadata}=read;
+  return {...metadata,...cursor,pdfTextByPage:pageTextSpans.map(({page,start,end})=>({page,text:text.slice(start,end)}))};
+}
+
 /** Model context is explicit about omitted history; it cannot silently become full-read evidence. */
 export function platformTaskHistory(steps:PlatformTaskStep[]){
   let remaining=240_000;const recent:Array<{operationId:string;name:string;arguments:unknown;result:unknown;compacted?:boolean;quotationAmountScope?:ReturnType<typeof quotationAmountScope>}>=[];
@@ -148,8 +159,7 @@ export function platformTaskHistory(steps:PlatformTaskStep[]){
       : undefined;
     const duplicateOf=key&&readResults.get(key);
     const fileRead=step.plan.name==='bambook_file_text';
-    const window=fileRead?step.result as {nextCursor?:unknown}|undefined:undefined;
-    const displayedResult=typeof window?.nextCursor==='string'?{...window,nextCursor:'next'}:step.result;
+    const displayedResult=fileRead?modelFileRead(step.result):step.result;
     const args=fileRead&&typeof step.plan.arguments.cursor==='string'?{...step.plan.arguments,cursor:'next'}:step.plan.arguments;
     const result=duplicateOf?{duplicateOf,readHint:'此读取的参数和完整结果与所引用步骤相同，请查看该步骤回执。'}:displayedResult;
     const amounts = !duplicateOf && !step.compacted && step.plan.name === 'bambook_get' && step.plan.arguments.type === 'quotation'

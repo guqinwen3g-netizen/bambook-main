@@ -14,7 +14,10 @@ class PdfPageOutOfRange extends RangeError {}
 const TEXT_MIME = /^(text\/|application\/(json|xml|csv)\b)/i;
 const TEXT_EXT = /\.(txt|csv|json|xml|md|log)$/i;
 
-export type FileTextResult = { kind: 'text' | 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'unsupported' | 'unreadable'; text: string; truncated: boolean; pages?: number; window?: {start:number;end:number}; pagesWithoutText?:number[]; sheets?: string[]; reason?: string };
+/** Offsets in UTF-16 code units relative to the returned text slice. */
+export type PdfPageTextSpan = {page:number;start:number;end:number};
+
+export type FileTextResult = { kind: 'text' | 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'unsupported' | 'unreadable'; text: string; truncated: boolean; pages?: number; window?: {start:number;end:number}; pagesWithoutText?:number[]; pageTextSpans?:PdfPageTextSpan[]; sheets?: string[]; reason?: string };
 
 export const fileTextLimit = (value: unknown): number => {
   if (value === undefined) return FILE_TEXT_DEFAULT;
@@ -24,6 +27,21 @@ export const fileTextLimit = (value: unknown): number => {
 
 const clean = (text: string) => text.replace(/\u0000/g, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 const cut = (text: string, limit: number) => ({ text: text.slice(0, limit), truncated: text.length > limit });
+
+// Match the existing normalized text so previously issued character cursors keep the same offsets.
+function pdfPageTextSpans(text:string, pages:ReadonlyMap<number,string>, startPage:number, endPage:number) {
+  const spans:PdfPageTextSpan[]=[];
+  let end=0;
+  for(let page=startPage;page<=endPage;page++){
+    const visible=pages.get(page);
+    if(!visible)continue;
+    const start=text.indexOf(visible,end);
+    if(start<0||text.slice(end,start).trim())return;
+    end=start+visible.length;
+    spans.push({page,start,end});
+  }
+  if(!text.slice(end).trim())return spans;
+}
 
 export async function extractFileText(file: { name: string; mimeType: string }, bytes: Uint8Array, limit: number, startPage=1): Promise<FileTextResult> {
   if (bytes.length > SOURCE_BYTES_MAX) return { kind: 'unsupported', text: '', truncated: false, reason: '文件超过 20MB，不提取正文' };
@@ -37,11 +55,13 @@ export async function extractFileText(file: { name: string; mimeType: string }, 
       if(startPage>result.total)throw new PdfPageOutOfRange('附件续读页码超出原件');
       const window={start:startPage,end:Math.min(result.total,startPage+PDF_PAGES_MAX-1)},morePages=window.end<result.total;
       const text = clean(result.text ?? '');
-      const pageText=new Map(result.pages.map(page=>[page.num,page.text]));
-      const pagesWithoutText=Array.from({length:window.end-window.start+1},(_,i)=>window.start+i).filter(page=>!clean(pageText.get(page)??''));
+      const pageText=new Map(result.pages.map(page=>[page.num,clean(page.text)]));
+      const pagesWithoutText=Array.from({length:window.end-window.start+1},(_,i)=>window.start+i).filter(page=>!pageText.get(page));
       if (!text) return { kind: 'pdf', text: '', truncated: morePages, pages: result.total, window, pagesWithoutText, reason: morePages ? `第 ${window.start}–${window.end} 页未提取到文字，后续页尚未读取` : '未提取到文字，可能是扫描件或图片' };
       const out = cut(text, limit);
-      return { kind: 'pdf', ...out, truncated: out.truncated || morePages, pages: result.total, window, ...(pagesWithoutText.length?{pagesWithoutText,reason:`第 ${pagesWithoutText.join('、')} 页没有可提取文字，请核对原页是否为空白或扫描件`}:{}) };
+      const spans=pdfPageTextSpans(text,pageText,window.start,window.end);
+      const pageTextSpans=spans?.filter(span=>span.start<limit).map(span=>({...span,end:Math.min(span.end,limit)}));
+      return { kind: 'pdf', ...out, truncated: out.truncated || morePages, pages: result.total, window, ...(pageTextSpans?{pageTextSpans}:{}), ...(pagesWithoutText.length?{pagesWithoutText,reason:`第 ${pagesWithoutText.join('、')} 页没有可提取文字，请核对原页是否为空白或扫描件`}:{}) };
     } catch(error) { if(error instanceof PdfPageOutOfRange)throw error;return { kind: 'unreadable', text: '', truncated: false, reason: 'PDF 无法解析（可能已加密或损坏）' }; }
     finally { try { await parser?.destroy(); } catch { /* parser already released */ } }
   }

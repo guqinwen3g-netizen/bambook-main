@@ -62,8 +62,10 @@ function citedPdfPage(suffix:string,file:TaskAttachment,reads:readonly AgentTask
   if(/^[ \t]*[）)]?[ \t]*(?:至|到|[-~–—/,，、]|和|或|及|and\b|to\b)[ \t]*(?:第[ \t]*|pages?[ \t]+)?\d/i.test(rest))return;
   const page=Number(lastPage?lastPage[2]:citation[1]??citation[2]);
   if(!Number.isSafeInteger(page))return;
-  if(reads.some(read=>read.taskAttachmentId===file.id&&read.taskAttachmentPageRange
-    &&page>=read.taskAttachmentPageRange.from&&page<=read.taskAttachmentPageRange.to))return page;
+  if(reads.some(read=>read.taskAttachmentId===file.id&&(
+    read.taskAttachmentObservedPages?.includes(page)
+    ?? (read.taskAttachmentPageRange&&page>=read.taskAttachmentPageRange.from&&page<=read.taskAttachmentPageRange.to)
+  )))return page;
 }
 
 function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTaskTrailItem[]) {

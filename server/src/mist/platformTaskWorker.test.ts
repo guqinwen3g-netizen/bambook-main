@@ -913,8 +913,8 @@ it('reads the short tail of each PDF before asking the model to prepare the repo
  expect(reads).toEqual([
    expect.objectContaining({arguments:expect.objectContaining({fileId:'attachment_1'}),result:expect.objectContaining({range:expect.objectContaining({pageFrom:1,pageTo:20})})}),
    expect.objectContaining({arguments:expect.objectContaining({fileId:'attachment_2'}),result:expect.objectContaining({range:expect.objectContaining({pageFrom:1,pageTo:20})})}),
-   expect.objectContaining({arguments:expect.objectContaining({fileId:'attachment_1',cursor:'next'}),result:expect.objectContaining({range:expect.objectContaining({pageFrom:21,pageTo:23}),hasMore:false,text:expect.stringContaining('PDF-TAIL-CONTROL-23')})}),
-   expect.objectContaining({arguments:expect.objectContaining({fileId:'attachment_2',cursor:'next'}),result:expect.objectContaining({range:expect.objectContaining({pageFrom:21,pageTo:21}),hasMore:false,text:expect.stringContaining('PDF-TAIL-INVOICE-21')})}),
+   expect.objectContaining({arguments:expect.objectContaining({fileId:'attachment_1',cursor:'next'}),result:expect.objectContaining({range:expect.objectContaining({pageFrom:21,pageTo:23}),hasMore:false,pdfTextByPage:expect.arrayContaining([{page:23,text:expect.stringContaining('PDF-TAIL-CONTROL-23')}])})}),
+   expect.objectContaining({arguments:expect.objectContaining({fileId:'attachment_2',cursor:'next'}),result:expect.objectContaining({range:expect.objectContaining({pageFrom:21,pageTo:21}),hasMore:false,pdfTextByPage:expect.arrayContaining([{page:21,text:expect.stringContaining('PDF-TAIL-INVOICE-21')}])})}),
  ]);
  expect(facts.history.pdfCoverage).toEqual([
   {fileId:'attachment_1',pagesChecked:23,pagesWithoutText:[]},
@@ -936,7 +936,12 @@ it('pre-reads both text slices and the short tail of a dense PDF before calling 
   expect(reads[1].result.range).toMatchObject({pageFrom:1,pageTo:20,start:3500});
   expect(reads[1].result.nextPageFrom).toBe(21);
   expect(reads[2].result.range).toMatchObject({pageFrom:21,pageTo:23,start:0});
-  expect(reads[2].result.text).toContain('DENSE-INVOICE-TAIL-23');
+  expect(reads[2].result).not.toHaveProperty('text');
+  expect(reads[2].result.pdfTextByPage).toEqual([
+   {page:21,text:expect.not.stringContaining('DENSE-INVOICE-TAIL-23')},
+   {page:22,text:expect.not.stringContaining('DENSE-INVOICE-TAIL-23')},
+   {page:23,text:expect.stringContaining('DENSE-INVOICE-TAIL-23')},
+  ]);
   expect(facts.history.pdfCoverage).toEqual([{fileId:'attachment_1',pagesChecked:23,pagesWithoutText:[]}]);
   return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对测试资料。'});
  });
@@ -970,8 +975,8 @@ it('supplies separate report labels and reads for attachments with identical ori
   expect.objectContaining({id:'attachment_2',name:'quote.pdf',reportLabel:'quote.pdf（2）'}),
  ]);
  expect(facts.history.recent).toEqual([
-  expect.objectContaining({arguments:expect.objectContaining({fileId:'attachment_1'}),result:expect.objectContaining({text:expect.stringContaining('FIRST-QUOTE-781')})}),
-  expect.objectContaining({arguments:expect.objectContaining({fileId:'attachment_2'}),result:expect.objectContaining({text:expect.stringContaining('SECOND-QUOTE-972')})}),
+  expect.objectContaining({arguments:expect.objectContaining({fileId:'attachment_1'}),result:expect.objectContaining({pdfTextByPage:[{page:1,text:expect.stringContaining('FIRST-QUOTE-781')}]})}),
+  expect.objectContaining({arguments:expect.objectContaining({fileId:'attachment_2'}),result:expect.objectContaining({pdfTextByPage:[{page:1,text:expect.stringContaining('SECOND-QUOTE-972')}]})}),
  ]);
  const saved=await f.current(task.id);
  expect(saved.attachments.map((file:{name:string})=>file.name)).toEqual(['quote.pdf','quote.pdf']);
