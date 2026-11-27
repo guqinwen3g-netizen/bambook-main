@@ -78,6 +78,11 @@ it('limits automatic PDF continuation to one short page window without a prior c
  const first={...newPlatformTaskStep(plan,0),result};
  expect(shortPdfContinuationPlan([file],[first])?.arguments).toEqual({fileId:file.id,cursor:'aft1.original',maxChars:3500});
  expect(shortPdfContinuationPlan([file],[{...first,result:{...result,pages:25}}])).toBeUndefined();
+ const longer={...first,result:{...result,pages:26}};
+ expect(shortPdfContinuationPlan([file],[longer],'请核对 sample.pdf 末页。')?.arguments.cursor).toBe('aft1.original');
+ expect(shortPdfContinuationPlan([file],[longer],'此次仅查看 sample.pdf 第 26 页。')).toBeUndefined();
+ expect(shortPdfContinuationPlan([file,{...file,id:'other',name:'other.pdf'}],[longer],'请核对 sample.pdf 末页。')).toBeUndefined();
+ expect(shortPdfContinuationPlan([file],[{...longer,result:{...longer.result,pages:41}}],'请核对 sample.pdf 末页。')).toBeUndefined();
  expect(shortPdfContinuationPlan([file],[{...first,result:{...result,nextPageFrom:undefined}}])).toBeUndefined();
  expect(shortPdfContinuationPlan([file],[{...first,compacted:true}])).toBeUndefined();
  const failed={...newPlatformTaskStep({...plan,arguments:{...plan.arguments,cursor:result.nextCursor}},1),result:{error:true}};

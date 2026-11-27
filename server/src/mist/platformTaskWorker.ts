@@ -170,7 +170,7 @@ export class MistPlatformTaskWorker{
             const attachment=context.task.attachments?.find(file=>!isTaskImage(file.name)&&!context.steps.some(step=>step.plan.name==='bambook_file_text'&&step.plan.arguments.fileId===file.id&&step.result!==undefined));
             const attachmentPlan:PlatformTaskPlan|undefined=attachment
               ?{name:'bambook_file_text',arguments:{fileId:attachment.id,maxChars:ATTACHMENT_PREFETCH_CHARS}}
-              :shortPdfContinuationPlan(context.task.attachments,context.steps)??shortOfficeTailPlan(context.task.attachments,context.steps);
+              :shortPdfContinuationPlan(context.task.attachments,context.steps,context.task.instructions)??shortOfficeTailPlan(context.task.attachments,context.steps);
             if(attachmentPlan){
               step=await this.repository.savePlatformTaskPlan(actor,attachmentPlan);
             }else{

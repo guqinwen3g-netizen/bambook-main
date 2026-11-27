@@ -1012,6 +1012,28 @@ it('reads the short tail of each PDF before asking the model to prepare the repo
  expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'已整理附件核对报告'});
 });
 
+it.each([
+ {pages:26,request:'请核对 long.pdf，续读到第 26 页并确认末页编号。',last:26,readCount:2},
+ {pages:23,request:'这次只核对 long.pdf 的前 20 页，不要续读第 21 页及之后。',last:20,readCount:1},
+])('prefetches within the requested PDF range ($pages pages)',async ({pages,request,last,readCount})=>{
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>
+  tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对指定范围。'}));
+ const f=await fixture(complete);f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'核对 PDF 指定范围',instructions:request}))
+  .attach('attachments',pdf('FINAL PDF REF',pages),'long.pdf').expect(201)).body.item;
+ await f.drain();
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded'});
+ expect(complete).toHaveBeenCalledTimes(1);
+ const text=complete.mock.calls[0][0].messages[0].content;
+ const {history}=JSON.parse(text.slice(text.indexOf('{')));
+ const reads=history.recent.filter((step:{name:string})=>step.name==='bambook_file_text');
+ expect(reads).toHaveLength(readCount);
+ expect(reads.at(-1).result.range.pageTo).toBe(last);
+ if(last===pages)expect(reads.at(-1).result.pdfTextByPage).toContainEqual({page:last,text:'FINAL PDF REF'});
+ else expect(JSON.stringify(reads)).not.toContain('FINAL PDF REF');
+});
+
 it('pre-reads both text slices and the short tail of a dense PDF before calling the model',async()=>{
  const complete=vi.fn(async(model:LlmCompletionInput)=>{
   const content=model.messages[0].content as string,facts=JSON.parse(content.slice(content.indexOf('{')));
