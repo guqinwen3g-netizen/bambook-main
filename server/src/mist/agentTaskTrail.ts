@@ -132,8 +132,11 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
         const pdfContinuation = unreadPageRange ? '；本次未读'+unreadPageRange : !result?.hasMore ? ''
           : pages?.textLimited === true && nextPage === undefined && typeof result.nextCursor === 'string'
             ? '；本页段正文待续读' : '；还有后续内容';
+        const scopeStart = result?.pageScopeStart;
+        const earlierPages = pageRange && Number.isSafeInteger(scopeStart) && scopeStart > 1 && scopeStart === pages.pageFrom
+          ? '；本次未读'+pdfPageRange(1,scopeStart-1) : '';
         const detail = result?.error === true ? FILE_FAILURE_DETAILS.get(result.message)
-          : pdfDetail ? pdfDetail+pdfContinuation
+          : pdfDetail ? pdfDetail+earlierPages+pdfContinuation
           : failed ? text(result?.reason, 120)
           : result?.hasMore ? '本次读取部分正文，还有后续内容'
           : result?.complete ? '已提取可读取正文' : '';

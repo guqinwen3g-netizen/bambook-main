@@ -74,10 +74,10 @@ it('allows a changed response size without splitting surrogate pairs or skipping
 
 it('never returns PDF text beyond a task prefix, including across character slices', async () => {
  const file={name:'contract.pdf',mimeType:'application/pdf'}, bytes=contractPdf(23,3);
- const first=await readFileTextWindow(scope,file,bytes,1000,undefined,undefined,10);
+ const first=await readFileTextWindow(scope,file,bytes,1000,undefined,undefined,{from:1,to:10});
  let position:unknown=first.nextCursor,last=first,body=first.text;
  while(position){
-  last=await readFileTextWindow(scope,file,bytes,1000,position,undefined,10);
+  last=await readFileTextWindow(scope,file,bytes,1000,position,undefined,{from:1,to:10});
   body+=last.text;position=last.nextCursor;
  }
  expect(first).toMatchObject({pages:23,pagesWithoutText:[3],pageScopeLimit:10,range:{pageFrom:1,pageTo:10}});
@@ -88,7 +88,32 @@ it('never returns PDF text beyond a task prefix, including across character slic
  expect(body).not.toContain('Clause P11:');
  expect(body).not.toContain('FINAL TERM');
  const forged='aft1.'+Buffer.from(JSON.stringify({...scope,v:1,source:first.sourceHash,page:21,offset:0})).toString('base64url');
- await expect(readFileTextWindow(scope,file,bytes,1000,forged,undefined,10)).rejects.toMatchObject({code:'FILE_TEXT_PAGE_SCOPE'});
+ await expect(readFileTextWindow(scope,file,bytes,1000,forged,undefined,{from:1,to:10})).rejects.toMatchObject({code:'FILE_TEXT_PAGE_SCOPE'});
+});
+
+it('starts an explicitly bounded PDF at its selected page and rejects cursors before or after the range',async()=>{
+ const file={name:'contract.pdf',mimeType:'application/pdf'}, bytes=contractPdf(23,3), selected={from:11,to:15};
+ const read=await readFileTextWindow(scope,file,bytes,8000,undefined,undefined,selected);
+ expect(read).toMatchObject({pageScopeStart:11,pageScopeLimit:15,pages:23,hasMore:false,complete:false,range:{pageFrom:11,pageTo:15}});
+ expect(read.text).toContain('Clause P11:');
+ expect(read.text).toContain('Clause P15:');
+ expect(read.text).not.toMatch(/Clause P(?:10|16):/);
+ const [receipt]=platformTrail([{id:'range',at:'',plan:{name:'bambook_file_text',arguments:{fileId:scope.fileId}},result:read}]);
+ expect(receipt.detail).toBe('提取范围第 11 至 15 页；本次未读第 1 至 10 页；本次未读第 16 至 23 页');
+ for(const page of [1,31]){
+  const forged='aft1.'+Buffer.from(JSON.stringify({...scope,v:1,source:read.sourceHash,page,offset:0})).toString('base64url');
+  await expect(readFileTextWindow(scope,file,bytes,1000,forged,undefined,selected)).rejects.toMatchObject({code:'FILE_TEXT_PAGE_SCOPE'});
+ }
+});
+
+it('continues a selected PDF range from the selected starting page',async()=>{
+ const file={name:'contract.pdf',mimeType:'application/pdf'}, bytes=contractPdf(39), selected={from:11,to:35};
+ const first=await readFileTextWindow(scope,file,bytes,20_000,undefined,undefined,selected);
+ expect(first).toMatchObject({hasMore:true,nextPageFrom:31,range:{pageFrom:11,pageTo:30}});
+ const tail=await readFileTextWindow(scope,file,bytes,20_000,first.nextCursor,undefined,selected);
+ expect(tail).toMatchObject({sourceHash:first.sourceHash,hasMore:false,complete:false,range:{pageFrom:31,pageTo:35}});
+ expect(tail.text).toContain('Clause P35:');
+ expect(tail.text).not.toContain('Clause P36:');
 });
 
 it('reports PDF page windows and partial text honestly in the same task trail', async () => {
