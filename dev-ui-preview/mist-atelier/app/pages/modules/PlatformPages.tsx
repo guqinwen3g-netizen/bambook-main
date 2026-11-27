@@ -173,17 +173,28 @@ function matchesReadOnlySource(source: unknown, selectedIds: readonly string[]):
   return !!kind && typeof id === 'string' && typeof label === 'string' && typeof entityId === 'string'
     && id === kind + ':' + entityId && selectedIds.includes(id);
 }
+const NO_ASSISTANT_FILES: File[] = [];
+const NO_ASSISTANT_ATTACHMENT_REFS: AssistantAttachmentRef[] = [];
+
 export function AssistantPage(){
   const nav=useNav(),tasksOpen=nav.route.section==='tasks'||nav.route.section==='agent';
   const rulesRoute=nav.route.section==='automations';
+  const readOnlyRoute=nav.route.section==='read-only';
   const originTaskId=nav.route.section==='task-origin'?nav.route.id:undefined;
   const w=usePlatform(),[kind,setKind]=React.useState('orders'),[query,setQuery]=React.useState(''),[editor,setEditor]=useRouteDraft<ModuleEditorSpec|null>(null);
   const scope=w.session.sessionKey+':'+(w.workspace?.id??'');
-  const {question,setQuestion,selected,setSelected,messages,setMessages,files,setFiles,attachmentRefs,setAttachmentRefs,inactiveDrafts,switchDraft,clearDraft,answerDrafts,setAnswerDraft,discardAnswerDrafts,taskControlRequests,workLogExpanded,setWorkLogExpanded}=useAssistantConversation(scope);
+  const conversation=useAssistantConversation(scope);
+  const {messages,setMessages,setFiles,setAttachmentRefs,inactiveDrafts,switchDraft,clearDraft,answerDrafts,setAnswerDraft,discardAnswerDrafts,taskControlRequests,workLogExpanded,setWorkLogExpanded}=conversation;
+  const question=readOnlyRoute?conversation.readOnlyQuestion:conversation.question;
+  const setQuestion=readOnlyRoute?conversation.setReadOnlyQuestion:conversation.setQuestion;
+  const selected=readOnlyRoute?conversation.readOnlySelected:conversation.selected;
+  const setSelected=readOnlyRoute?conversation.setReadOnlySelected:conversation.setSelected;
+  const files=readOnlyRoute?NO_ASSISTANT_FILES:conversation.files;
+  const attachmentRefs=readOnlyRoute?NO_ASSISTANT_ATTACHMENT_REFS:conversation.attachmentRefs;
   const [configuration,setConfiguration]=React.useState<{configured:boolean;models?:string[];subscription?:{provider:'chatgpt';connected:boolean}}|null>(null),[checking,setChecking]=React.useState(false),[busy,setBusy]=React.useState(false),[error,setError]=useRouteDraft('');
   const [navOpen,setNavOpen]=React.useState(()=>{try{return localStorage.getItem('mist.xiaozhu.nav')!=='0';}catch{return true;}}),[navDrawer,setNavDrawer]=React.useState(false),[confirmOpen,setConfirmOpen]=React.useState(false),[atBottom,setAtBottom]=React.useState(true),atBottomRef=React.useRef(true),scrollRef=React.useRef<HTMLDivElement>(null);
   const [automations,setAutomations]=React.useState(false),[automationSeed,setAutomationSeed]=React.useState(''),[newRule,setNewRule]=React.useState(0),[proposalId,setProposalId]=React.useState(''),[picker,setPicker]=React.useState(false),[drafts,setDrafts]=React.useState(false);
-  const rulesOpen=!tasksOpen&&(rulesRoute||automations);
+  const rulesOpen=!readOnlyRoute&&!tasksOpen&&(rulesRoute||automations);
   const active=React.useRef<AbortController|null>(null),generation=React.useRef(0),live=React.useRef(''),sendLock=React.useRef(false),field=React.useRef<HTMLTextAreaElement>(null),end=React.useRef<HTMLDivElement>(null);
   const composerDock=React.useRef<HTMLDivElement>(null);
   const originRead=React.useRef<AbortController|undefined>(undefined);
@@ -246,7 +257,7 @@ export function AssistantPage(){
     if(!withinAttachmentLimits([...files,...next]))return;
     setError('');setAttachmentRefs(next);if(!picker)field.current?.focus();
   };
-  const cowork=useXiaozhuCowork(w.workspace?.id,scope,canChat,conversationId,originTaskId,taskControlRequests);
+  const cowork=useXiaozhuCowork(w.workspace?.id,scope,canChat&&!readOnlyRoute,conversationId,originTaskId,taskControlRequests);
   React.useEffect(()=>{
     if(!answerDrafts.size)return;
     const tasks=new Map(cowork.all.map(task=>[task.id,task]));
@@ -316,8 +327,8 @@ export function AssistantPage(){
     })();
     return()=>{cancelled=true;};
   },[cowork.recoveredSubmissions,conversationId,taskText,selected,files,attachmentRefs,clearDraft]);
-  const showTaskHistory=canChat&&(cowork.available||cowork.tasks.length>0);
-  const index=React.useMemo(()=>recordIndex(w.state),[w.state]),automationRules=useAutomationRules(w.workspace?.id,showTaskHistory,rulesOpen),meta=useConversationMeta(w.workspace?.id,showTaskHistory),conversations=React.useMemo(()=>conversationsOf(cowork.tasks,meta.items),[cowork.tasks,meta.items]),current=conversations.find(c=>c.id===conversationId)??(openedOrigin?.scope===scope&&openedOrigin.conversationId===conversationId?conversationsOf(cowork.tasks.filter(task=>task.conversationId===conversationId))[0]:undefined),visibleTasks=showTaskHistory?(current?.tasks??[]):[],proposals=(w.state?.agentProposals??[]).filter(p=>p.state==='pending'),voice=usePersonalAgentVoice(scope+':'+canChat,w.workspace?.id,cowork.track,conversationId),inCall=voiceInCall(voice);
+  const showTaskHistory=canChat&&!readOnlyRoute&&(cowork.available||cowork.tasks.length>0);
+  const index=React.useMemo(()=>recordIndex(w.state),[w.state]),automationRules=useAutomationRules(w.workspace?.id,showTaskHistory,rulesOpen),meta=useConversationMeta(w.workspace?.id,showTaskHistory),conversations=React.useMemo(()=>conversationsOf(cowork.tasks,meta.items),[cowork.tasks,meta.items]),current=conversations.find(c=>c.id===conversationId)??(openedOrigin?.scope===scope&&openedOrigin.conversationId===conversationId?conversationsOf(cowork.tasks.filter(task=>task.conversationId===conversationId))[0]:undefined),visibleTasks=showTaskHistory?(current?.tasks??[]):[],proposals=(w.state?.agentProposals??[]).filter(p=>p.state==='pending'),voice=usePersonalAgentVoice(scope+':'+(canChat&&!readOnlyRoute),w.workspace?.id,cowork.track,conversationId),inCall=voiceInCall(voice);
   const originActions=React.useRef({refreshTask:cowork.refreshTask,openConversation,go:nav.go});
   originActions.current={refreshTask:cowork.refreshTask,openConversation,go:nav.go};
   React.useEffect(()=>{
@@ -351,13 +362,18 @@ export function AssistantPage(){
     return ()=>{controller.abort();if(originRead.current===controller)originRead.current=undefined;};
   },[originTaskId,w.workspace?.id,scope,canChat,originAttempt]);
   const newConversation=()=>{
+    if(readOnlyRoute){
+      setMessages([]);setQuestion('');setSelected([]);
+      requestAnimationFrame(()=>field.current?.focus());
+      return;
+    }
     const unsubmitted = cowork.available
       ? [...inactiveDrafts.keys()].reverse().find(id=>!conversations.some(conversation=>conversation.id===id))
       : undefined;
     openConversation(unsubmitted??newConversationId());
     requestAnimationFrame(()=>field.current?.focus());
   };
-  const pickingAttachments=kind==='attachments';
+  const pickingAttachments=!readOnlyRoute&&kind==='attachments';
   const attachmentChoices=new Map<string,{task:AgentTaskView;file:TaskAttachment}>();
   if(picker&&pickingAttachments){
     const keyword=query.trim().toLocaleLowerCase();
@@ -381,7 +397,7 @@ export function AssistantPage(){
   };
   const request=async(path:string,init:RequestInit={})=>{const result=await fetch(path,{...init,headers:{...apiService.getAuthHeaders(),...(init.headers as Record<string,string>??{})},credentials:'include'});const body=await result.json().catch(()=>null);if(!result.ok)throw new Error(body?.error?.message??body?.message??'助手请求未完成');if(!body)throw new Error('助手没有返回可核对的结果');return body;};
   const check=React.useCallback(async()=>{if(!w.workspace?.id)return;const epoch=++generation.current,bound=scope;setChecking(true);setError('');try{const result=await request('/api/mist/workspaces/'+encodeURIComponent(w.workspace.id)+'/assistant/status');const status=result.status??result;if(typeof status.configured!=='boolean')throw new Error('模型配置状态响应无效');if(live.current===bound&&generation.current===epoch)setConfiguration(status);}catch(e){if(live.current===bound&&generation.current===epoch)setError(e instanceof Error?e.message:'无法读取模型配置');}finally{if(live.current===bound&&generation.current===epoch)setChecking(false);}},[w.workspace?.id,scope]);
-  React.useEffect(()=>{active.current?.abort();active.current=null;sendLock.current=false;generation.current++;setConfiguration(null);setError('');setBusy(false);setPicker(false);void check();return()=>{active.current?.abort();generation.current++;};},[scope,check]);
+  React.useEffect(()=>{active.current?.abort();active.current=null;sendLock.current=false;generation.current++;setConfiguration(null);setError('');setBusy(false);setPicker(false);if(readOnlyRoute)setKind(old=>old==='attachments'?'orders':old);void check();return()=>{active.current?.abort();generation.current++;};},[scope,check,readOnlyRoute]);
   const SOURCE_SCOPE:Record<string,string>={orders:'orders:read',invoices:'invoices:read',risks:'risk:read',customers:'relations:read',purchases:'procurement:read',shipments:'shipments:read',developments:'products:read'};
   const canReadSource=w.session.hasPermission(SOURCE_SCOPE[kind]||'risk:read');
   const data=(kind==='customers'?(w.state?.customers??[]).map(c=>({id:'customers:'+c.id,entityId:c.id,label:c.name,detail:[c.country,c.grade].filter(Boolean).join(' · '),view:'crm'})):kind==='purchases'?(w.state?.fulfillment.purchases??[]).filter(p=>p.state!=='cancelled').map(p=>({id:'purchases:'+p.id,entityId:p.id,label:p.code+' · '+p.supplier,detail:p.description,view:'procurement'})):kind==='shipments'?(w.state?.fulfillment.shipments??[]).filter(x=>x.state!=='cancelled').map(x=>({id:'shipments:'+x.id,entityId:x.id,label:x.code+' · '+x.customer,detail:x.state,view:'shipments'})):kind==='developments'?(w.state?.devs??[]).map(d=>({id:'developments:'+d.id,entityId:d.id,label:d.code+' · '+d.name,detail:d.state,view:'development/detail'})):kind==='orders'?(w.state?.orders??[]).map(o=>({id:'orders:'+o.id,entityId:o.id,label:o.code+' · '+o.customer,detail:o.state+' · '+money(o.amount)+' '+o.currency,view:'orders/detail'})):kind==='invoices'?(w.state?.invoices??[]).map(i=>({id:'invoices:'+i.id,entityId:i.id,label:i.code+' · '+i.customer,detail:'未收 '+money(i.open)+' '+i.currency,view:'invoices'})):(w.platform?.risks??[]).map(r=>({id:'risks:'+r.id,entityId:r.id,label:r.title,detail:label[r.state],view:'risks'}))).filter(r=>canReadSource&&(!query||(r.label+' '+r.detail).toLowerCase().includes(query.toLowerCase())));
@@ -394,7 +410,7 @@ export function AssistantPage(){
     return target;
   };
   // A stored task can still be reviewed with the worker offline. A text-only model cannot continue its task thread.
-  const useTaskThread=cowork.available||visibleTasks.length>0;
+  const useTaskThread=!readOnlyRoute&&(cowork.available||visibleTasks.length>0);
   const readOnlyHistory=useReadOnlyAssistantHistory(messages,scope,w.workspace?.id,w.workspace?.revision,canChat&&!useTaskThread&&!cowork.checkingAvailability);
   const visibleMessages=readOnlyHistory.visible;
   React.useEffect(()=>{if(visibleMessages.length||busy)end.current?.scrollIntoView?.({block:'end',behavior:'smooth'});},[visibleMessages.length,busy]);
@@ -408,7 +424,7 @@ export function AssistantPage(){
   const statusQuestion=!files.length&&!attachmentRefs.length&&!selected.length&&isCurrentTaskStatusQuestion(question);
   const statusTask=statusQuestion ? statusTarget : undefined;
   const ambiguousStatus=statusQuestion&&unfinishedTasks.length>1;
-  const activeStatusChoices=statusChoices?.scope===attachmentScope?statusChoices:undefined;
+  const activeStatusChoices=!readOnlyRoute&&statusChoices?.scope===attachmentScope?statusChoices:undefined;
   const checkedTask=statusCheck?.scope===attachmentScope ? visibleTasks.find(task=>task.id===statusCheck.taskId) : undefined;
   const canAsk=!uncheckedAttachments.length&&!hasRestrictedAttachment&&!cowork.checkingReceipt&&!cowork.checkingAvailability&&(!(files.length||attachmentRefs.length)||cowork.available)&&!taskThreadOffline&&!cowork.error&&(cowork.available||!!configuration?.configured);
   const ready=!busy&&!cowork.loading&&canChat&&!!question.trim()&&(!!statusTask||ambiguousStatus||canAsk);
@@ -436,7 +452,7 @@ export function AssistantPage(){
       setStatusChoices({scope:attachmentScope,ids:unfinishedTasks.map(task=>task.id)});
       return;
     }
-    if(cowork.available&&canChat){
+    if(!readOnlyRoute&&cowork.available&&canChat){
       if(sendLock.current||busy||!question.trim())return;
       sendLock.current=true;
       setBusy(true);
@@ -473,13 +489,13 @@ export function AssistantPage(){
       if(result.mode!=='read_only'||typeof result.text!=='string'||!result.text.trim()||!Number.isSafeInteger(result.revision)
         ||typeof result.contextToken!=='string'||!result.contextToken.length||result.contextToken.length>8192
         ||!Array.isArray(result.sources)||result.sources.some((source:unknown)=>!matchesReadOnlySource(source,sent)))throw new Error('助手响应格式无效');
-      if(live.current===bound){
+      if(live.current===bound&&active.current===controller&&!controller.signal.aborted){
         readOnlyHistory.remember(result.contextToken);
         setMessages(previous=>[...previous,{role:'user',content},{role:'assistant',content:result.text,sources:result.sources,revision:result.revision,truncated:!!result.truncated,contextToken:result.contextToken}]);
         if(liveConversation.current===conversationId)setQuestion('');
       }
     } catch(e) {
-      if(live.current===bound&&!(e instanceof Error&&e.name==='AbortError'))setError(e instanceof Error?e.message:'模型调用失败');
+      if(live.current===bound&&active.current===controller&&!(e instanceof Error&&e.name==='AbortError'))setError(e instanceof Error?e.message:'模型调用失败');
     } finally {
       if(active.current===controller){active.current=null;sendLock.current=false;if(live.current===bound)setBusy(false);}
     }
@@ -616,7 +632,7 @@ export function AssistantPage(){
   const canStartTaskVoice=canChat&&cowork.available&&!cowork.loading&&!cowork.error&&!busy&&!inCall;
   // The composer stop button is only unambiguous for one running task while the composer is idle.
   const composerStopTask=runningTasks.length===1&&cowork.available&&!busy&&!inCall&&!question.trim()?runningTasks[0]:undefined;
-  const composer=<XiaozhuComposer value={question} onChange={setQuestion} onSend={()=>void send()} onLatest={hasThread&&!atBottom?returnToLatest:undefined} ready={ready} busy={busy} working={!!composerStopTask} stopping={!!composerStopTask&&cowork.controls[composerStopTask.id]?.busy} onStop={active.current?()=>active.current?.abort():composerStopTask?()=>void cowork.cancel(composerStopTask):undefined} sources={selected} onRemoveSource={toggle} onAttach={()=>setPicker(true)} files={files} onAddFiles={cowork.available&&!uncheckedAttachments.length?addFiles:undefined} onRemoveFile={index=>setFiles(files.filter((_,i)=>i!==index))} attachmentRefs={attachmentRefs.map(ref=>ref.needsVerification?{...ref,name:uiText('未核对的原附件')}:restrictedTaskIds.has(ref.taskId)?{...ref,name:uiText('原件读取权限已变化')}:ref)} onRemoveAttachmentRef={fileId=>setAttachmentRefs(refs=>refs.filter(ref=>ref.fileId!==fileId))} voice={voice} voiceAvailable={cowork.available&&(!cowork.loading&&!cowork.error||inCall)} field={field} placeholder={uiText(canChat?'问小竹，或交代一件事':'当前账号无模型助手权限')} disabled={!canChat}/>;
+  const composer=<XiaozhuComposer value={question} onChange={setQuestion} onSend={()=>void send()} onLatest={hasThread&&!atBottom?returnToLatest:undefined} ready={ready} busy={busy} working={!!composerStopTask} stopping={!!composerStopTask&&cowork.controls[composerStopTask.id]?.busy} onStop={active.current?()=>active.current?.abort():composerStopTask?()=>void cowork.cancel(composerStopTask):undefined} sources={selected} onRemoveSource={toggle} onAttach={()=>setPicker(true)} files={files} onAddFiles={!readOnlyRoute&&cowork.available&&!uncheckedAttachments.length?addFiles:undefined} onRemoveFile={index=>setFiles(files.filter((_,i)=>i!==index))} attachmentRefs={attachmentRefs.map(ref=>ref.needsVerification?{...ref,name:uiText('未核对的原附件')}:restrictedTaskIds.has(ref.taskId)?{...ref,name:uiText('原件读取权限已变化')}:ref)} onRemoveAttachmentRef={fileId=>setAttachmentRefs(refs=>refs.filter(ref=>ref.fileId!==fileId))} voice={voice} voiceAvailable={!readOnlyRoute&&cowork.available&&(!cowork.loading&&!cowork.error||inCall)} field={field} placeholder={uiText(canChat?readOnlyRoute?'向小竹提问':'问小竹，或交代一件事':'当前账号无模型助手权限')} disabled={!canChat}/>;
   const leftNav=<XiaozhuNav conversations={conversations} activeId={conversationId} onSelect={openConversation} onNew={newConversation} confirmCount={proposals.length} runningCount={running} ruleCount={automationRules.rules.filter(r=>r.enabled).length} draftCount={saved.length} onOpenConfirm={()=>{setNavDrawer(false);setConfirmOpen(true);}} onOpenTasks={()=>{setNavDrawer(false);nav.go('assistant',undefined,{section:'tasks'});}} onOpenRules={()=>{setNavDrawer(false);setAutomations(true);}} onOpenDrafts={()=>{setNavDrawer(false);setDrafts(true);}} unread={unread} renaming={renaming?.startsWith('nav:')?renaming.slice(4):undefined} setRenaming={id=>setRenaming(id?'nav:'+id:undefined)} onRename={rename} onRemove={id=>setRemoving(id)} hasMore={cowork.hasMore} loadingMore={cowork.loadingMore} moreError={cowork.moreError} onLoadMore={()=>void cowork.loadMore()}/>;
   return <MistPage><ErrorNotice inlinePending={pendingProposalVisible}/><XiaozhuAutomations key={scope} scopeKey={scope} open={rulesOpen} onClose={()=>{setAutomations(false);setAutomationSeed('');if(rulesRoute)nav.go('assistant');}} workspaceId={w.workspace?.id} seed={automationSeed} newRule={newRule} returnRuleId={rulesRoute?nav.route.id:undefined}/><XiaozhuTasks refreshSignal={cowork.tasks.length} open={tasksOpen} onClose={()=>nav.go('assistant')} onTaskUpdate={cowork.applyTaskUpdate}/><AgentProposalDialog incomingAccess={w.workspace?.developmentIncomingAccess} referenceAccess={w.workspace?.developmentReferenceAccess} taskClosePlans={w.workspace?.developmentTaskClosePlans} commercialSampleLoanSources={w.workspace?.commercialSampleLoanSources} canConfirmShippingBasis={w.session.hasPermission('products:write')} state={w.state} scopeKey={attachmentScope} onRejection={w.dismissError} proposal={proposals.find(p=>p.id===proposalId)} onClose={()=>{setMissingProposalReceipt(undefined);setProposalId('');}} run={(command,options)=>w.run(command,options)} pendingRequestId={pendingProposalId===proposalId?w.pending?.requestId:undefined} pendingDecision={pendingProposalId!==proposalId?undefined:pendingCommand?.type==='agent.proposal.reject'?'reject':'confirm'}
     missingOriginalReceipt={missingProposalReceipt===pendingProposalBinding.current}
@@ -630,7 +646,9 @@ export function AssistantPage(){
       <div className="mist-xz-main">
         <div className="mist-xz-head"><h1 className="mist-sr-only">{uiText('小竹')}</h1>{showTaskHistory&&<IconButton className="mist-xz-navtoggle" icon={navOpen?PanelLeftClose:PanelLeftOpen} label={uiText('对话列表')} aria-pressed={navOpen} onClick={toggleNav}/>}{!cowork.available&&status}{!cowork.available&&<IconButton icon={RefreshCw} label={uiText("检查模型配置")} disabled={checking||busy} onClick={()=>void check()}/>}{cowork.available&&hasThread&&current&&(renaming==='head:'+current.id?<span className="mist-xz-headtitle"><TitleEditor initial={current.title} onDone={title=>{setRenaming(undefined);if(title)rename(current.id,title);}}/></span>:<span className="mist-xz-headtitle"><span title={current.title}>{current.title}</span><ActionMenu icon={ChevronDown} label={uiText('对话操作')} items={[{label:'重命名',icon:PenLine,onSelect:()=>setRenaming('head:'+current.id)},{label:'从列表移除',icon:Trash2,tone:'bad',onSelect:()=>setRemoving(current.id)}]}/></span>)}<span className="mist-spacer"/>
           {cowork.available&&hasThread&&<IconButton className="mist-xz-newicon" icon={SquarePen} label={uiText('新对话')} onClick={newConversation}/>}
-          {!showTaskHistory&&!cowork.checkingAvailability&&canChat&&w.workspace?.id&&<IconButton icon={Zap} label={uiText('自动规则')} onClick={()=>setAutomations(true)}/>}
+          {!readOnlyRoute&&showTaskHistory&&messages.length>0&&<Button variant="quiet" onClick={()=>nav.go('assistant',undefined,{section:'read-only'})}>{uiText('只读对话')}</Button>}
+          {readOnlyRoute&&<Button variant="quiet" onClick={()=>nav.go('assistant')}>{uiText('返回工作任务')}</Button>}
+          {!readOnlyRoute&&!showTaskHistory&&!cowork.checkingAvailability&&canChat&&w.workspace?.id&&<IconButton icon={Zap} label={uiText('自动规则')} onClick={()=>setAutomations(true)}/>}
           {!showTaskHistory&&<IconButton icon={FileText} label={uiText('草稿')} count={saved.length||undefined} onClick={()=>setDrafts(true)}/>}
           {!cowork.available&&hasThread&&<IconButton icon={SquarePen} label={uiText('新对话')} onClick={newConversation}/>}
         </div>
@@ -675,7 +693,7 @@ export function AssistantPage(){
     </Drawer>
     <Drawer open={picker} onClose={()=>setPicker(false)} title={uiText("引用资料")}>
       <Toolbar>
-        <Select aria-label={uiText("检索对象")} value={kind} options={[{value:'attachments',label:'对话附件'},{value:'orders',label:'订单'},{value:'customers',label:'客户'},{value:'purchases',label:'采购'},{value:'shipments',label:'出运'},{value:'developments',label:'开发案'},{value:'invoices',label:'发票'},{value:'risks',label:'风险'}]} onChange={e=>{setKind(e.target.value);setQuery('');}}/>
+        <Select aria-label={uiText("检索对象")} value={readOnlyRoute&&kind==='attachments'?'orders':kind} options={[...(readOnlyRoute?[]:[{value:'attachments',label:'对话附件'}]),{value:'orders',label:'订单'},{value:'customers',label:'客户'},{value:'purchases',label:'采购'},{value:'shipments',label:'出运'},{value:'developments',label:'开发案'},{value:'invoices',label:'发票'},{value:'risks',label:'风险'}]} onChange={e=>{setKind(e.target.value);setQuery('');}}/>
         <TextInput aria-label={uiText(pickingAttachments?'附件文件名':'业务关键词')} placeholder={uiText(pickingAttachments?'附件文件名':'编号、客户或状态')} value={query} onChange={e=>setQuery(e.target.value)}/>
       </Toolbar>
       {pickingAttachments&&error===attachmentLimitMessage&&<Banner tone="warn" title={uiText(attachmentLimitMessage)}/>}

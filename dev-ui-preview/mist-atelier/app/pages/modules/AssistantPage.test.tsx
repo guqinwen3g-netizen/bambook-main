@@ -162,6 +162,44 @@ it('preserves work-log expansion when returning from an order within the same ac
   expect(expanded()).toBe('false');
 });
 
+it('continues signed read-only exchanges while leaving a platform task draft untouched', async () => {
+  sessionStorage.setItem('mist.assistant.conversation:session-a:workspace',JSON.stringify({
+    question:'待发送的工作任务草稿',messages:[
+      {role:'user',content:'侧边问题'},
+      {role:'assistant',content:'侧边结果',contextToken:'drawer-receipt',revision:1,sources:[]},
+    ],
+  }));
+  const bodies: unknown[]=[];
+  mock.api.mockImplementation(async (url:string, init?:RequestInit)=>{
+    if(url.endsWith('/history-access'))return {allowedTokens:JSON.parse(String(init?.body)).tokens};
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    return {items:[],nextCursor:null};
+  });
+  mock.fetch.mockImplementation(async (url:string, init?:RequestInit)=>{
+    if(url.endsWith('/status'))return response({configured:true});
+    bodies.push(JSON.parse(String(init?.body)));
+    return response({mode:'read_only',text:'续问的结果',revision:1,sources:[]});
+  });
+  await mount();
+  expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('待发送的工作任务草稿');
+  await act(async()=>root!.render(view(true,'drawer','read-only')));
+  expect(host.textContent).toContain('侧边结果');
+  expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('');
+  await question('续问侧边问题');
+  await click('发送');
+  expect(bodies).toEqual([expect.objectContaining({history:[
+    {role:'user',content:'侧边问题'},
+    {role:'assistant',content:'侧边结果',contextToken:'drawer-receipt'},
+  ]})]);
+  expect(host.textContent).toContain('续问的结果');
+  expect(mock.api.mock.calls.some(([url])=>url.endsWith('/personal-agent/tasks'))).toBe(false);
+  await click('返回工作任务');
+  expect(go).toHaveBeenCalledWith('assistant');
+  await act(async()=>root!.render(view()));
+  expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('待发送的工作任务草稿');
+  expect(host.textContent).not.toContain('侧边结果');
+});
+
 it('hides previous read-only history while a changed workspace revision is being verified', async () => {
   const token = 'saved-revision-ticket';
   sessionStorage.setItem('mist.assistant.conversation:session-a:workspace', JSON.stringify({ messages: [

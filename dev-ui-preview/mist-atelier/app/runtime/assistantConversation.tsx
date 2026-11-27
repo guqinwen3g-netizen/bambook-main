@@ -21,9 +21,11 @@ type Conversation = ComposerDraft & {
   inactiveDrafts: Map<string, ComposerDraft>;
   answerDrafts: Map<string,TaskAnswerDraft>;
   workLogExpanded: Map<string,boolean>;
+  readOnlyQuestion: string;
+  readOnlySelected: ComposerDraft['selected'];
 };
 const emptyDraft = (): ComposerDraft => ({ question: '', selected: [], files: [], attachmentRefs: [] });
-const empty = (): Conversation => ({ ...emptyDraft(), messages: [], inactiveDrafts: new Map(),answerDrafts:new Map(), workLogExpanded:new Map() });
+const empty = (): Conversation => ({ ...emptyDraft(), messages: [], inactiveDrafts: new Map(),answerDrafts:new Map(), workLogExpanded:new Map(), readOnlyQuestion:'', readOnlySelected:[] });
 /** fin50：对话按账号与公司（scope）存本标签页 sessionStorage，切页与刷新后保留；换账号或关标签即清空。 */
 const KEY = (scope: string) => 'mist.assistant.conversation:' + scope;
 const attachmentId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -66,6 +68,8 @@ function useConversationState(scope: string) {
   }, [scope]);
   const setQuestion = React.useCallback<React.Dispatch<React.SetStateAction<string>>>(value => update('question', value), [update]);
   const setSelected = React.useCallback<React.Dispatch<React.SetStateAction<Conversation['selected']>>>(value => update('selected', value), [update]);
+  const setReadOnlyQuestion = React.useCallback<React.Dispatch<React.SetStateAction<string>>>(value => update('readOnlyQuestion', value), [update]);
+  const setReadOnlySelected = React.useCallback<React.Dispatch<React.SetStateAction<Conversation['selected']>>>(value => update('readOnlySelected', value), [update]);
   const setMessages = React.useCallback<React.Dispatch<React.SetStateAction<AssistantReply[]>>>(value => update('messages', value), [update]);
   const setFiles = React.useCallback<React.Dispatch<React.SetStateAction<File[]>>>(value => update('files', value), [update]);
   const setAttachmentRefs = React.useCallback<React.Dispatch<React.SetStateAction<AssistantAttachmentRef[]>>>(value => update('attachmentRefs', value), [update]);
@@ -104,7 +108,7 @@ function useConversationState(scope: string) {
       return { scope, value: { ...previous.value, inactiveDrafts } };
     });
   }, [scope]);
-  return { scope, ...(entry.scope === scope ? entry.value : fresh), setQuestion, setSelected, setMessages, setFiles, setAttachmentRefs, switchDraft, clearDraft,setAnswerDraft,discardAnswerDrafts,taskControlRequests,setWorkLogExpanded };
+  return { scope, ...(entry.scope === scope ? entry.value : fresh), setQuestion, setSelected, setMessages, setFiles, setAttachmentRefs, switchDraft, clearDraft,setAnswerDraft,discardAnswerDrafts,taskControlRequests,setWorkLogExpanded,setReadOnlyQuestion,setReadOnlySelected };
 }
 
 const Context = React.createContext<ReturnType<typeof useConversationState> | null>(null);

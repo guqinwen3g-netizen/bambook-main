@@ -18,10 +18,15 @@ vi.mock('./pages/modules/MarketPages',()=>({MARKET_PAGES:{}}));
 vi.mock('./pages/modules/PlatformPages',()=>({PLATFORM_PAGES:{}}));
 import {ReferenceApp} from './ReferenceApp';
 let root:Root|undefined,host:HTMLDivElement;const originalScroll=HTMLElement.prototype.scrollTo;
-const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
+const response=(body:unknown,ok=true)=>({ok,json:async()=>
+  (body as {mode?:unknown})?.mode==='read_only' ? {contextToken:crypto.randomUUID(),...body as object} : body});
 function workspace(id='workspace-a',code='SO-ONE'){let i=0;const state=createMistState({id:()=>`drawer-${++i}`,now:'2026-10-13T00:00:00Z',actorName:'Test'},'empty');state.orders.push({id:'order-a',code,customer:'Fixture customer',state:'Open',currency:'USD',amount:10} as any);return{state,workspace:{id,name:'Test workspace',revision:2},workspaces:[],error:'',loading:false,saving:false,pending:null,run:vi.fn(),refresh:vi.fn()};}
 beforeEach(()=>{localStorage.removeItem('bambook.device.locale');(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;bridge.workspace=workspace();bridge.sessionKey='session-a';bridge.canAsk=true;bridge.fetch.mockReset();vi.stubGlobal('fetch',(url:unknown,init?:RequestInit)=>url==='/api/hr/teams/mine'?Promise.resolve({ok:true,json:async()=>({ok:true,teams:[]})}):bridge.fetch(url,init));vi.stubGlobal('matchMedia',()=>({matches:false,addEventListener(){},removeEventListener(){}}));HTMLElement.prototype.scrollTo=vi.fn();history.replaceState(null,'','/?intro=0&theme=light&view=orders/detail&id=order-a');});
-beforeEach(()=>bridge.activity.mockReset().mockResolvedValue({items:[]}));
+beforeEach(()=>{
+  sessionStorage.clear();
+  bridge.activity.mockReset().mockImplementation(async (url:string, init?:RequestInit) => url.endsWith('/history-access')
+    ? { allowedTokens: JSON.parse(String(init?.body)).tokens } : { items:[] });
+});
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();localStorage.removeItem('bambook.device.locale');HTMLElement.prototype.scrollTo=originalScroll;vi.unstubAllGlobals();vi.restoreAllMocks();});
 async function mount(){
   host=document.createElement('div');document.body.append(host);root=createRoot(host);
@@ -102,7 +107,34 @@ it.each(['workspace','identity'])('aborts and discards an old answer after a %s 
 it('does not expose an assistant or send model requests without ai permission',async()=>{bridge.canAsk=false;await mount();await act(async()=>window.dispatchEvent(new KeyboardEvent('keydown',{key:'j',metaKey:true,bubbles:true,cancelable:true})));expect(queryByRole(document.body,'dialog',{name:uiText('小竹')})).toBeNull();expect(queryByRole(document.body,'button',{name:uiText('问小竹')})).toBeNull();expect(bridge.fetch).not.toHaveBeenCalled();});
 it('provides the full assistant page without replacing the drawer trigger',async()=>{await mount();const drawer=await open();await click(getByRole(drawer,'button',{name:'完整版'}));expect(new URLSearchParams(location.search).get('view')).toBe('assistant');expect(queryByRole(document.body,'dialog',{name:uiText('小竹')})).toBeNull();await open();expect(queryByRole(document.body,'dialog',{name:uiText('小竹')})).not.toBeNull();});
 
-it('passes the current device language on every question without saving company settings',async()=>{bridge.fetch.mockResolvedValue(response({mode:'read_only',text:'Short answer.',revision:2,sources:[]}));writeDevice('locale','en-US');await mount();await open();await send('First question');expect(bridge.fetch.mock.calls[0][1].headers['X-Bambook-Locale']).toBe('en-US');await act(async()=>writeDevice('locale','zh-CN'));await send('Second question');const body=JSON.parse(bridge.fetch.mock.calls[1][1].body);expect(bridge.fetch.mock.calls[1][1].headers['X-Bambook-Locale']).toBe('zh-CN');expect(body).not.toHaveProperty('locale');expect(body.history).toContainEqual({role:'assistant',content:'Short answer.'});expect(bridge.workspace.run).not.toHaveBeenCalled();});
+it('carries only verified drawer replies into follow-ups and preserves the receipt on expansion', async () => {
+  bridge.fetch.mockResolvedValueOnce(response({mode:'read_only',text:'旧订单答复',revision:2,sources:[],contextToken:'old-token'}))
+    .mockResolvedValueOnce(response({mode:'read_only',text:'有效追问结果',revision:2,sources:[],contextToken:'next-token'}))
+    .mockResolvedValueOnce(response({mode:'read_only',text:'本轮结果',revision:3,sources:[],contextToken:'fresh-token'}));
+  await mount();
+  const drawer = await open();
+  await send('先核对这张订单');
+  await send('继续上一轮');
+  expect(JSON.parse(bridge.fetch.mock.calls[1][1].body).history).toEqual([
+    {role:'user',content:'先核对这张订单'}, {role:'assistant',content:'旧订单答复',contextToken:'old-token'},
+  ]);
+  bridge.activity.mockImplementation(async (url:string, init?:RequestInit) => url.endsWith('/history-access')
+    ? {allowedTokens:JSON.parse(String(init?.body)).tokens.filter((token:string)=>token==='fresh-token')} : {items:[]});
+  bridge.workspace = {...bridge.workspace, workspace:{...bridge.workspace.workspace,revision:3}};
+  await act(async()=>root!.render(<ReferenceApp/>));
+  expect(drawer.textContent).not.toContain('旧订单答复');
+  await send('核对本轮');
+  expect(JSON.parse(bridge.fetch.mock.calls[2][1].body).history).toEqual([]);
+  await click(getByRole(drawer,'button',{name:'完整版'}));
+  expect(new URLSearchParams(location.search).get('section')).toBe('read-only');
+  const shared=JSON.parse(sessionStorage.getItem('mist.assistant.conversation:session-a:workspace-a')!);
+  expect(shared.messages).toHaveLength(6);
+  expect(shared.messages.slice(-2)).toEqual([{role:'user',content:'核对本轮'},expect.objectContaining({
+    role:'assistant',content:'本轮结果',contextToken:'fresh-token',revision:3,sources:[],
+  })]);
+});
+
+it('passes the current device language on every question without saving company settings',async()=>{bridge.fetch.mockResolvedValue(response({mode:'read_only',text:'Short answer.',revision:2,sources:[]}));writeDevice('locale','en-US');await mount();await open();await send('First question');expect(bridge.fetch.mock.calls[0][1].headers['X-Bambook-Locale']).toBe('en-US');await act(async()=>writeDevice('locale','zh-CN'));await send('Second question');const body=JSON.parse(bridge.fetch.mock.calls[1][1].body);expect(bridge.fetch.mock.calls[1][1].headers['X-Bambook-Locale']).toBe('zh-CN');expect(body).not.toHaveProperty('locale');expect(body.history).toContainEqual({role:'assistant',content:'Short answer.',contextToken:expect.any(String)});expect(bridge.workspace.run).not.toHaveBeenCalled();});
 
 it('sends the resolved device language to AI and follows a system language change',async()=>{const languages=vi.spyOn(navigator,'languages','get').mockReturnValue(['en-GB']);bridge.fetch.mockResolvedValue(response({mode:'read_only',text:'Short answer.',revision:2,sources:[]}));writeDevice('locale','system');await mount();await open();await send('Hello');expect(bridge.fetch.mock.calls[0][1].headers['X-Bambook-Locale']).toBe('en-US');languages.mockReturnValue(['zh-CN']);await act(async()=>window.dispatchEvent(new Event('languagechange')));await send('你好');expect(bridge.fetch.mock.calls[1][1].headers['X-Bambook-Locale']).toBe('zh-CN');expect(readLocalPreference()).toBe('system');expect(bridge.workspace.run).not.toHaveBeenCalled();});
 
