@@ -35,22 +35,20 @@ export function platformTaskAttachmentHandles(attachments: AgentTaskView['attach
   return new Map(attachments.map((file, index) => [file.id, `${PLATFORM_TASK_ATTACHMENT_PREFIX}${index + 1}`]));
 }
 
-/** Pre-read at most one short physical page window per PDF attachment. */
-export function shortPdfTailPlan(attachments: AgentTaskView['attachments'] = [], steps: PlatformTaskStep[]): PlatformTaskPlan | undefined {
-  for(const file of attachments){
-    if(file.mimeType !== 'application/pdf' && !/\.pdf$/i.test(file.name))continue;
-    const reads=steps.filter(step=>step.plan.name==='bambook_file_text'&&step.plan.arguments.fileId===file.id);
-    if(reads.length!==1)continue;
-    const [initial]=reads;
-    const result=initial.result as {
-      kind?: string; error?: boolean; pages?: number; hasMore?: boolean;
-      range?: { pageFrom?: number; pageTo?: number }; nextPageFrom?: number; nextCursor?: unknown;
-    } | undefined;
-    if(initial.compacted || initial.plan.arguments.cursor !== undefined || result?.error || result?.kind !== 'pdf'
-      || typeof result.pages !== 'number' || !Number.isInteger(result.pages) || result.pages < 21 || result.pages > 24
-      || result.range?.pageFrom !== 1 || result.range.pageTo !== 20 || result.hasMore !== true
-      || result.nextPageFrom !== 21 || typeof result.nextCursor !== 'string' || !result.nextCursor.startsWith('aft1.'))continue;
-    return {name:'bambook_file_text',arguments:{fileId:file.id,cursor:result.nextCursor,maxChars:3500}};
+/** Pre-read a short PDF's next text slice and at most one tail window. */
+export function shortPdfContinuationPlan(attachments: AgentTaskView['attachments'] = [], steps: PlatformTaskStep[]): PlatformTaskPlan | undefined {
+  for (const file of attachments) {
+    if (file.mimeType !== 'application/pdf' && !/\.pdf$/i.test(file.name)) continue;
+    const reads = steps.filter(step => step.plan.name === 'bambook_file_text' && step.plan.arguments.fileId === file.id);
+    if (reads.length === 0 || reads.length > 2) continue;
+    const verified = pdfReadCoverage(reads).get(file.id);
+    if (!verified?.next || verified.pages > 24) continue;
+
+    const first = reads[0].result as PdfReadWindow;
+    if (first.range?.pageTo !== Math.min(20, verified.pages)) continue;
+    if (reads.length === 2 && (first.nextPageFrom !== undefined || verified.next.from !== 21 || verified.next.offset !== 0)) continue;
+
+    return { name: 'bambook_file_text', arguments: { fileId: file.id, cursor: verified.next.cursor, maxChars: 3500 } };
   }
 }
 
@@ -99,8 +97,8 @@ type PdfReadWindow = {
 
 type PdfContinuation = {cursor:string;from:number;offset:number;to?:number};
 
-/** Summarize checked pages only when every required page and text window remains in context. */
-function checkedPdfCoverage(steps:PlatformTaskStep[]){
+/** Track coverage only across an exact continuation chain for the same original. */
+function pdfReadCoverage(steps:PlatformTaskStep[]){
   const coverage=new Map<string,{sourceHash:string;pages:number;next?:PdfContinuation;pagesWithoutText:number[]}>();
   for(const step of steps){
     const {name,arguments:args}=step.plan;
@@ -135,8 +133,7 @@ function checkedPdfCoverage(steps:PlatformTaskStep[]){
     coverage.set(fileId,{sourceHash:read.sourceHash,pages:read.pages,next,
       pagesWithoutText:[...new Set([...(head?[]:previous?.pagesWithoutText??[]),...missing])]});
   }
-  return [...coverage].flatMap(([fileId,read])=>!read.next
-    ? [{fileId,pagesChecked:read.pages,pagesWithoutText:read.pagesWithoutText}] : []);
+  return coverage;
 }
 
 /** Model context is explicit about omitted history; it cannot silently become full-read evidence. */
@@ -163,7 +160,9 @@ export function platformTaskHistory(steps:PlatformTaskStep[]){
     if(key&&!duplicateOf)readResults.set(key,step.id);
   }
   const included=new Set(recent.map(item=>item.operationId));
-  const pdfCoverage=checkedPdfCoverage(steps.filter(step=>included.has(step.id)));
+  const coverage=pdfReadCoverage(steps.filter(step=>included.has(step.id)));
+  const pdfCoverage=[...coverage].flatMap(([fileId,read])=>!read.next
+    ? [{fileId,pagesChecked:read.pages,pagesWithoutText:read.pagesWithoutText}] : []);
   return{recent,...(pdfCoverage.length?{pdfCoverage}:{}),omitted:steps.filter(s=>s.result!==undefined).length-recent.length,operations:steps.map(s=>({operationId:s.id,name:s.plan.name,completed:s.result!==undefined}))};
 }
 /** Keep durable completed-operation references, while bounding the registry and future prompts. */
