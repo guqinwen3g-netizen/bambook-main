@@ -132,7 +132,10 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const currentTasks = React.useRef(tasks);
   currentTasks.current = tasks;
   const [checkingAvailability, setCheckingAvailability] = React.useState(true);
-  const [loading, setLoading] = React.useState(true), [error, setError] = React.useState(''), [busy, setBusy] = React.useState(false), [more, setMore] = React.useState<string | undefined>(undefined);
+  const [loading, setLoading] = React.useState(true), [error, setError] = React.useState(''), [more, setMore] = React.useState<string | undefined>(undefined);
+  const [submission, setSubmission] = React.useState<{scope:string;conversationId?:string}>();
+  const busy = submission?.scope === scope;
+  const submittingHere = busy && (!visibleConversationId || submission.conversationId === visibleConversationId);
   const [staleProgress, setStaleProgress] = React.useState<{ scope: string; ids: ReadonlySet<string> }>();
   const clearStaleProgress = React.useCallback((id: string) => setStaleProgress(old => {
     if (old?.scope !== scope || !old.ids.has(id)) return old;
@@ -278,7 +281,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if (current()) { setLoading(false); setCheckingAvailability(false); }
     }
   }, [base, enabled, scope, checkReceipts]);
-  React.useEffect(() => { restrictedReports.current = new Set(); setReportAccess(undefined); setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); setRecoveredSubmissions([]); setCheckingReceipt(false); setControls({});  setBusy(false); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); moreRead.current?.abort(); receiptRead.current?.abort(); receiptRead.current=undefined; sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [load,scope]);
+  React.useEffect(() => { restrictedReports.current = new Set(); setReportAccess(undefined); setTasks([]); setMore(undefined); setAvailable(false); setLoading(true);personalIdentity.current=undefined;lastAvailability.current=null; pending.current=readPendingSubmissions(scope); setRecoveredSubmissions([]); setCheckingReceipt(false); setControls({});  setSubmission(undefined); setSendFailure(undefined); void load(); return () => { version.current++; historyRead.current?.abort(); capabilityRead.current?.abort(); moreRead.current?.abort(); receiptRead.current?.abort(); receiptRead.current=undefined; sendRequest.current?.abort(); sendRequest.current=undefined; for(const controller of controlRequests.current.values())controller.abort(); controlRequests.current.clear(); }; }, [load,scope]);
   const openReportIds = React.useMemo(() => {
     if (!visibleConversationId) return '';
     const personal = cachedTasks.filter(task => !task.automationId);
@@ -446,7 +449,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     const bound = scope, controller = new AbortController();
     sendRequest.current = controller;
     const isCurrent = () => live.current === bound && sendRequest.current === controller;
-    setBusy(true);
+    setSubmission({scope:bound,conversationId:visibleConversationId??conversationId});
     setSendFailure(undefined);
     setRecoveredSubmissions(old=>old.filter(entry=>(entry.sourceConversationId??entry.conversationId)!==(visibleConversationId??conversationId)));
     let firstAttempt: string | undefined, attemptedFingerprint: string | undefined;
@@ -515,7 +518,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     } finally {
       if (isCurrent()) {
         sendRequest.current = undefined;
-        setBusy(false);
+        setSubmission(undefined);
       }
     }
   };
@@ -669,5 +672,5 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         ? {canCheckStop:true} : pending.action==='answer' ? {answerQuestionToCheck:pending.questionId} : {})};
     }
   }
-  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls:visibleControls, hasPendingSubmission, recoveredSubmissions, staleProgressIds, busy, send, refreshTask, answer, checkAnswer, cancel, checkStop, resume, recheckProgress, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track };
+  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls:visibleControls, hasPendingSubmission, recoveredSubmissions, staleProgressIds, busy, submittingHere, send, refreshTask, answer, checkAnswer, cancel, checkStop, resume, recheckProgress, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track };
 }
