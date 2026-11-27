@@ -97,9 +97,11 @@ type PdfReadWindow = {
   hasMore?:boolean; nextCursor?:string; nextPageFrom?:number; pagesWithoutText?:number[]; reason?:string;
 };
 
-/** Summarize checked physical pages only when every full window remains in the model context. */
+type PdfContinuation = {cursor:string;from:number;offset:number;to?:number};
+
+/** Summarize checked pages only when every required page and text window remains in context. */
 function checkedPdfCoverage(steps:PlatformTaskStep[]){
-  const coverage=new Map<string,{sourceHash:string;pages:number;checkedUntil:number;nextCursor?:string;pagesWithoutText:number[]}>();
+  const coverage=new Map<string,{sourceHash:string;pages:number;next?:PdfContinuation;pagesWithoutText:number[]}>();
   for(const step of steps){
     const {name,arguments:args}=step.plan;
     const fileId=args.fileId;
@@ -108,21 +110,32 @@ function checkedPdfCoverage(steps:PlatformTaskStep[]){
     coverage.delete(fileId);
     const read=step.result as PdfReadWindow|undefined,range=read?.range,missing=read?.pagesWithoutText??[];
     if(step.compacted||read?.error||read?.kind!=='pdf'||read.file?.id!==fileId||typeof read.sourceHash!=='string'||!/^[a-f0-9]{64}$/.test(read.sourceHash)
-      ||!range||range.textLimited||range.start!==0||!Number.isSafeInteger(range.end)||range.end<0
+      ||!range||!Number.isSafeInteger(range.start)||range.start<0||!Number.isSafeInteger(range.end)||range.end<range.start
       ||!Number.isSafeInteger(range.pageFrom)||!Number.isSafeInteger(range.pageTo)||range.pageFrom<1||range.pageTo<range.pageFrom
       ||typeof read.pages!=='number'||!Number.isSafeInteger(read.pages)||range.pageTo>read.pages||typeof read.hasMore!=='boolean'
       ||!Array.isArray(missing)||missing.some(page=>!Number.isSafeInteger(page)||page<range.pageFrom||page>range.pageTo)
       ||(read.reason&&!missing.length))continue;
-    if(read.hasMore
-      ? typeof read.nextCursor!=='string'||!read.nextCursor.startsWith('aft1.')||read.nextPageFrom!==range.pageTo+1||range.pageTo>=read.pages
-      : read.nextCursor!==undefined||range.pageTo!==read.pages)continue;
     const head=args.cursor===undefined;
-    if(head?range.pageFrom!==1:!previous?.nextCursor||previous.nextCursor!==args.cursor
-      ||previous.sourceHash!==read.sourceHash||previous.pages!==read.pages||range.pageFrom!==previous.checkedUntil+1)continue;
-    coverage.set(fileId,{sourceHash:read.sourceHash,pages:read.pages,checkedUntil:range.pageTo,
-      nextCursor:read.nextCursor,pagesWithoutText:[...new Set([...(head?[]:previous?.pagesWithoutText??[]),...missing])]});
+    const expected=previous?.next;
+    if(head?range.pageFrom!==1||range.start!==0:!expected||expected.cursor!==args.cursor
+      ||previous?.sourceHash!==read.sourceHash||previous.pages!==read.pages||range.pageFrom!==expected.from
+      ||range.start!==expected.offset||(expected.to!==undefined&&range.pageTo!==expected.to))continue;
+
+    let next:PdfContinuation|undefined;
+    if(read.hasMore){
+      if(typeof read.nextCursor!=='string'||!read.nextCursor.startsWith('aft1.'))continue;
+      if(read.nextPageFrom===undefined){
+        if(!range.textLimited||range.end===range.start)continue;
+        next={cursor:read.nextCursor,from:range.pageFrom,to:range.pageTo,offset:range.end};
+      }else{
+        if(range.textLimited||read.nextPageFrom!==range.pageTo+1||range.pageTo>=read.pages)continue;
+        next={cursor:read.nextCursor,from:read.nextPageFrom,offset:0};
+      }
+    }else if(read.nextCursor!==undefined||range.textLimited||range.pageTo!==read.pages)continue;
+    coverage.set(fileId,{sourceHash:read.sourceHash,pages:read.pages,next,
+      pagesWithoutText:[...new Set([...(head?[]:previous?.pagesWithoutText??[]),...missing])]});
   }
-  return [...coverage].flatMap(([fileId,read])=>read.checkedUntil===read.pages&&!read.nextCursor
+  return [...coverage].flatMap(([fileId,read])=>!read.next
     ? [{fileId,pagesChecked:read.pages,pagesWithoutText:read.pagesWithoutText}] : []);
 }
 

@@ -128,6 +128,29 @@ it('summarizes only continuous PDF page windows with the same verified source an
  expect(platformTaskHistory([first,last,{...last,result:{error:true}}])).not.toHaveProperty('pdfCoverage');
 });
 
+it('requires contiguous character offsets when a PDF page window is split',()=>{
+ const read=(from:number,to:number,start:number,end:number,cursor?:string,next?:string,nextPageFrom?:number,textLimited=false)=>({
+  ...newPlatformTaskStep({name:'bambook_file_text',arguments:{fileId:'pdf',...(cursor?{cursor}:{})}},0),
+  result:{kind:'pdf',file:{id:'pdf'},sourceHash:'a'.repeat(64),pages:23,
+   range:{start,end,pageFrom:from,pageTo:to,...(textLimited?{textLimited:true}:{})},
+   hasMore:!!next,...(next?{nextCursor:next}:{}),...(nextPageFrom?{nextPageFrom}:{})},
+ });
+ const first=read(1,20,0,3500,undefined,'aft1.slice',undefined,true);
+ const second=read(1,20,3500,4400,'aft1.slice','aft1.tail',21);
+ const last=read(21,23,0,400,'aft1.tail');
+ expect(platformTaskHistory([first,second,last]).pdfCoverage).toEqual([{fileId:'pdf',pagesChecked:23,pagesWithoutText:[]}]);
+ for(const bad of [
+  read(1,20,3501,4400,'aft1.slice','aft1.tail',21),
+  read(1,20,3499,4400,'aft1.slice','aft1.tail',21),
+  read(1,19,3500,4400,'aft1.slice','aft1.tail',20),
+  read(1,20,3500,4400,'aft1.wrong','aft1.tail',21),
+ ]){
+  expect(platformTaskHistory([first,bad,last])).not.toHaveProperty('pdfCoverage');
+ }
+ expect(platformTaskHistory([first,last])).not.toHaveProperty('pdfCoverage');
+ expect(platformTaskHistory([first,second,read(21,23,0,400,'aft1.tail',undefined,undefined,true)])).not.toHaveProperty('pdfCoverage');
+});
+
 it('identifies the full quotation amount and the exact converted line amounts in a complete read', () => {
   const plan={name:'bambook_get',arguments:{type:'quotation',id:'quote'}};
   const object={type:'quotation',id:'quote',label:'QT-8',truncated:false,data:{

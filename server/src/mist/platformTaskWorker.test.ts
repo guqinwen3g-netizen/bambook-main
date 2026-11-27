@@ -880,12 +880,13 @@ it.each([false,true])('keeps a valid development draft proposal visible across r
  await f.command('agent.proposal.confirm',{id:proposal.id});await f.drain();const after=(await f.human.get(f.base).expect(200)).body.workspace;expect(after.state.drafts.find((d:any)=>d.id===draft).values.style).toBe('NW-31');expect(after.state.drafts).toHaveLength(direct.state.drafts.length);expect(after.state.devs).toHaveLength(direct.state.devs.length);
 });
 
-function pdf(text:string, pageCount=1){
+function pdf(text:string, pageCount=1,dense=false){
  const font=3+2*pageCount;
  const objects=['<</Type/Catalog/Pages 2 0 R>>',`<</Type/Pages/Kids[${Array.from({length:pageCount},(_,i)=>`${3+2*i} 0 R`).join(' ')}]/Count ${pageCount}>>`];
  for(let page=1;page<=pageCount;page++){
-   const stream=`BT /F1 12 Tf 10 50 Td (${page===pageCount?text:`Page ${page}: general terms`}) Tj ET`;
-   objects.push(`<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 100]/Contents ${2+2*page} 0 R/Resources<</Font<</F1 ${font} 0 R>>>>>>`, `<</Length ${stream.length}>>\nstream\n${stream}\nendstream`);
+   const extra=dense?Array.from({length:5},(_,index)=>`BT /F1 9 Tf 10 ${120+14*index} Td (Page ${page}, line ${index}: synthetic detailed invoice terms) Tj ET`).join('\n'):'';
+   const stream=`BT /F1 12 Tf 10 50 Td (${page===pageCount?text:`Page ${page}: general terms`}) Tj ET\n${extra}`;
+   objects.push(`<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 ${dense?200:100}]/Contents ${2+2*page} 0 R/Resources<</Font<</F1 ${font} 0 R>>>>>>`, `<</Length ${stream.length}>>\nstream\n${stream}\nendstream`);
  }
  objects.push('<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>');
  let out='%PDF-1.4\n';const offsets:number[]=[];objects.forEach((o,i)=>{offsets.push(out.length);out+=`${i+1} 0 obj\n${o}\nendobj\n`;});
@@ -922,6 +923,39 @@ it('reads the short tail of each PDF before asking the model to prepare the repo
  expect(reads[3].result.sourceHash).toBe(reads[1].result.sourceHash);
  expect(reads[0].result.sourceHash).not.toBe(reads[1].result.sourceHash);
  expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'已整理附件核对报告'});
+});
+
+it('records complete coverage only after all text slices of a dense PDF have been read',async()=>{
+ let turns=0;
+ const complete=vi.fn(async(model:LlmCompletionInput)=>{
+  const content=model.messages[0].content as string,facts=JSON.parse(content.slice(content.indexOf('{')));
+  const reads=facts.history.recent.filter((step:{name:string})=>step.name==='bambook_file_text');
+  const result=reads.at(-1).result;
+  turns++;
+  if(turns===1){
+   expect(result.range).toMatchObject({pageFrom:1,pageTo:20,start:0,end:3500,textLimited:true});
+   expect(facts.history).not.toHaveProperty('pdfCoverage');
+   return tool('bambook_file_text',{fileId:'attachment_1',cursor:'next',maxChars:3500});
+  }
+  if(turns===2){
+   expect(result.range).toMatchObject({pageFrom:1,pageTo:20,start:3500});
+   expect(result.nextPageFrom).toBe(21);
+   expect(facts.history).not.toHaveProperty('pdfCoverage');
+   return tool('bambook_file_text',{fileId:'attachment_1',cursor:'next',maxChars:3500});
+  }
+  expect(result.range).toMatchObject({pageFrom:21,pageTo:23,start:0});
+  expect(result.text).toContain('DENSE-INVOICE-TAIL-23');
+  expect(facts.history.pdfCoverage).toEqual([{fileId:'attachment_1',pagesChecked:23,pagesWithoutText:[]}]);
+  return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对测试资料。'});
+ });
+ const f=await fixture(complete);
+ f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'密集资料核对',instructions:'核对模拟条款。'}))
+  .attach('attachments',pdf('DENSE-INVOICE-TAIL-23',23,true),'dense.pdf').expect(201)).body.item;
+ await f.drain();
+ expect(complete).toHaveBeenCalledTimes(3);
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'已核对测试资料。'});
 });
 
 it('supplies separate report labels and reads for attachments with identical original filenames',async()=>{
