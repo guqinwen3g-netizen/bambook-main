@@ -106,7 +106,26 @@ it('shows the active model and retry phases instead of the last completed read',
   await paint([task({ trail, executionStage: 'model' })]);
   expect(host.querySelector('.mist-xz-shimmer')?.textContent).toBe('正在等待模型');
   await paint([task({ trail, state: 'queued', executionIssue: { code: 'model_unavailable', retryAt: new Date().toISOString() } })]);
-  expect(host.querySelector('.mist-xz-shimmer')?.textContent).toBe('模型重试中');
+  expect(host.querySelector('.mist-xz-shimmer')?.textContent).toBe('等待模型重试');
+});
+
+it('shows the scheduled retry delay until it elapses without implying a model is running',async()=>{
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date('2026-11-27T04:00:00Z'));
+    const retryAt = new Date(Date.now()+5_000).toISOString();
+    await paint([task({state:'queued',executionIssue:{code:'model_unavailable',retryAt},executionStageSince:new Date(Date.now()-40_000).toISOString()})]);
+    expect(host.textContent).toContain('等待模型重试');
+    expect(host.querySelector('[role="timer"]')?.textContent).toContain('最早 5 秒后重试');
+    await act(async()=>vi.advanceTimersByTimeAsync(3_000));
+    expect(host.querySelector('[role="timer"]')?.textContent).toContain('最早 2 秒后重试');
+    await act(async()=>vi.advanceTimersByTimeAsync(2_000));
+    expect(host.querySelector('[role="timer"]')).toBeNull();
+    expect(host.textContent).toContain('等待模型重试');
+    await paint([task({state:'running',executionStage:'model',executionStageSince:new Date().toISOString()})]);
+    expect(host.textContent).toContain('正在等待模型');
+    expect(host.querySelector('[role="timer"]')?.textContent).toContain('0 秒');
+  } finally {vi.useRealTimers();}
 });
 
 

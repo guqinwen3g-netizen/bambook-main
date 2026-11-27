@@ -16,7 +16,7 @@ export function xiaozhuTaskStatusLabel(task: AgentTaskView): string {
   if (task.contentRestricted) return '权限已变化';
   if (task.runnerStatus === 'heartbeat_stale') return '执行进度暂未更新';
   if (task.runnerStatus === 'awaiting_reclaim') return '待重新领取';
-  if (task.state === 'queued' && task.executionIssue?.retryAt) return '模型重试中';
+  if (task.state === 'queued' && task.executionIssue?.retryAt) return '等待模型重试';
   if (task.state === 'running' && task.executionStage === 'model') return '正在等待模型';
   if (task.state === 'waiting_human' && task.questions?.some(question => !question.answeredAt)) return '等待补充资料';
   return STATE[task.state][0];
@@ -33,21 +33,28 @@ const clock = (iso: string) => new Date(iso).toLocaleTimeString(interfaceLocale(
 const VIEW: Record<string, string> = { order: 'orders/detail', customer: 'crm', development: 'development/detail', purchase: 'procurement', shipment: 'shipments', invoice: 'invoices', quotation: 'quotations', supplier: 'suppliers', email: 'emails', production: 'production-board', risk: 'risks', claim: 'claims' };
 
 type OpenRecord = (view: string, id: string, target?: import('../../nav').RouteTarget) => void;
-function Elapsed({ since }: { since: string }) {
+function PhaseTimer({ at, countdown = false }: { at: string; countdown?: boolean }) {
   const [now, setNow] = React.useState(Date.now);
+  const target = Date.parse(at);
   React.useEffect(() => {
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    const current = Date.now();
+    setNow(current);
+    if (!Number.isFinite(target) || (countdown && current >= target)) return;
+    const timer = window.setInterval(() => {
+      const current = Date.now();
+      setNow(current);
+      if (countdown && current >= target) window.clearInterval(timer);
+    }, 1000);
     return () => window.clearInterval(timer);
-  }, [since]);
-  const start = Date.parse(since);
-  if (!Number.isFinite(start)) return null;
-  const seconds = Math.max(0, Math.floor((now - start) / 1000));
-  return <span className="mist-xz-elapsed" role="timer" aria-live="off">· {ui`${seconds} 秒`}</span>;
+  }, [target, countdown]);
+  if (!Number.isFinite(target)) return null;
+  const seconds = countdown ? Math.ceil((target - now) / 1000) : Math.max(0, Math.floor((now - target) / 1000));
+  if (countdown && seconds <= 0) return null;
+  return <span className="mist-xz-elapsed" role="timer" aria-live="off">· {countdown ? ui`最早 ${seconds} 秒后重试` : ui`${seconds} 秒`}</span>;
 }
 
-function Trail({ task, items, active, activeLabel, since, recovering, onOpen, onPreviewAttachment }: {
-  task: AgentTaskView; items: AgentTaskTrailItem[]; active: boolean; activeLabel?: string; since?: string; recovering?: boolean; onOpen: OpenRecord;
+function Trail({ task, items, active, activeLabel, since, retryAt, recovering, onOpen, onPreviewAttachment }: {
+  task: AgentTaskView; items: AgentTaskTrailItem[]; active: boolean; activeLabel?: string; since?: string; retryAt?: string; recovering?: boolean; onOpen: OpenRecord;
   onPreviewAttachment?: ThreadActions['onPreviewAttachment'];
 }) {
   const [expanded, setExpanded] = React.useState<boolean>();
@@ -56,7 +63,7 @@ function Trail({ task, items, active, activeLabel, since, recovering, onOpen, on
   return <div className="mist-xz-trail" data-open={open || undefined}>
     {active && <div className="mist-xz-progress">
       <span role="status" className={recovering?undefined:'mist-xz-shimmer'}>{label}</span>
-      {since && <Elapsed since={since} />}
+      {retryAt ? <PhaseTimer at={retryAt} countdown /> : since && <PhaseTimer at={since} />}
     </div>}
     {!!items.length && <button type="button" className="mist-xz-trail-h" aria-expanded={open} onClick={() => setExpanded(!open)}>
       {uiText('办理过程')}<ChevronRight size={13} />
@@ -212,9 +219,10 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
     const request = splitRequest(t.instructions), done = !active && t.state !== 'waiting_human', working = active && !asking && !pending.length;
     const retryable = done && !!request.trim() && t.state !== 'access_changed'
       && (!t.attachments?.length || (!!t.conversationId && ['succeeded','failed','cancelled'].includes(t.state)));
-    const activeLabel = t.runnerStatus ? xiaozhuTaskStatusLabel(t) : t.state === 'queued' ? (t.executionIssue?.retryAt ? '模型重试中' : '待执行')
-      : t.state === 'waiting_time' || t.state === 'waiting_condition' ? STATE[t.state][0]
-      : t.executionStage === 'model' ? '正在等待模型' : undefined;
+    const retryAt = t.state === 'queued' && !t.runnerStatus ? t.executionIssue?.retryAt : undefined;
+    const hasSpecificStatus = t.runnerStatus || t.state === 'queued' || t.state === 'waiting_time'
+      || t.state === 'waiting_condition' || (t.state === 'running' && t.executionStage === 'model');
+    const activeLabel = hasSpecificStatus ? xiaozhuTaskStatusLabel(t) : undefined;
     const status = !active && t.state !== 'succeeded' ? <Pill tone={STATE[t.state][1]}>{uiText(STATE[t.state][0])}</Pill> : undefined;
     return <div className="mist-xz-turn" key={t.id} data-task-state={t.state} data-task-id={t.id}>
       {divider && <div className="mist-xz-day"><span>{dayLabel(t.createdAt)}</span></div>}
@@ -228,7 +236,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
         </div>}
       </div>
       <XiaozhuTurnShell status={status}>
-        {(!!t.trail?.length || working) && <Trail task={t} items={t.trail ?? []} active={working} activeLabel={activeLabel} recovering={!!t.runnerStatus} since={t.runnerStatus==='heartbeat_stale'?t.lastHeartbeatAt??undefined:t.executionStageSince} onOpen={actions.onOpenRecord} onPreviewAttachment={actions.onPreviewAttachment} />}
+        {(!!t.trail?.length || working) && <Trail task={t} items={t.trail ?? []} active={working} activeLabel={activeLabel} retryAt={retryAt} recovering={!!t.runnerStatus} since={t.runnerStatus==='heartbeat_stale'?t.lastHeartbeatAt??undefined:t.executionStageSince} onOpen={actions.onOpenRecord} onPreviewAttachment={actions.onPreviewAttachment} />}
         <AnsweredQuestions questions={t.questions}/>
         {t.result && <XiaozhuMarkdown text={t.result} index={index} onOpen={actions.onOpenRecord} attachments={t.attachments}
           onOpenAttachment={actions.onPreviewAttachment ? file => actions.onPreviewAttachment?.(t, file) : undefined} />}

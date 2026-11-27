@@ -72,7 +72,7 @@ export function useXiaozhuActivity(workspaceId: string | undefined, scope: strin
 export function xiaozhuActivityLabel(task: AgentTaskActivity) {
   if (task.runnerStatus === 'heartbeat_stale') return '执行进度暂未更新';
   if (task.runnerStatus === 'awaiting_reclaim') return '待重新领取';
-  if (task.retrying) return '模型重试中';
+  if (task.retrying) return '等待模型重试';
   if (task.state === 'queued') return '待执行';
   if (task.executionStage === 'model') return '正在等待模型';
   return task.currentStep || '办理中';
