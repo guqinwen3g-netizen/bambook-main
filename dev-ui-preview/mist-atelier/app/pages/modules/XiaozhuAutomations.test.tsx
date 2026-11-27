@@ -9,7 +9,7 @@ import {XiaozhuAutomations} from './XiaozhuAutomations';
 let host:HTMLDivElement,root:Root;let rules:any[];
 const rule=(o:any={})=>({id:'r1',name:'每日汇总',trigger:'daily',time:'09:00',instructions:'汇总待办',enabled:true,version:1,runs:[],...o});
 const flush=()=>act(async()=>{for(let i=0;i<5;i++)await Promise.resolve();});
-const paint=async()=>{await act(async()=>root.render(<MistRoot><ToastProvider><XiaozhuAutomations open onClose={()=>undefined} workspaceId="ws"/></ToastProvider></MistRoot>));await flush();};
+const paint=async(scopeKey?:string)=>{await act(async()=>root.render(<MistRoot><ToastProvider><XiaozhuAutomations open onClose={()=>undefined} workspaceId="ws" scopeKey={scopeKey}/></ToastProvider></MistRoot>));await flush();};
 beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;sessionStorage.clear();rules=[];seam.go.mockClear();seam.api.mockReset();seam.api.mockImplementation(async(_u:string,i:any)=>{if(!i?.method||i.method==='GET')return{items:rules};if(i.method==='POST'){rules=[rule(JSON.parse(i.body))];return{item:rules[0]};}if(i.method==='PATCH'){rules=[{...rules[0],enabled:JSON.parse(i.body).enabled,version:rules[0].version+1}];return{item:rules[0]};}rules=[];return {removed:true};});host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 const button=(name:string)=>getByRole(document.body,'button',{name});
@@ -108,6 +108,32 @@ it('keeps one rule pending when a different rule is deleted successfully',async(
   expect(document.body.textContent).toContain('规则操作结果待核对');
   expect(getByRole(document.body,'status').textContent).toContain('每日汇总');
   expect(seam.api.mock.calls.filter(([,init])=>['PATCH','DELETE'].includes(init?.method))).toHaveLength(2);
+});
+it.each(['disconnected','in flight'])('retains a rule check after remount with a %s request',async(phase)=>{
+  rules=[rule({id:'12345678-1234-4234-8234-123456789012',name:'模拟待核对规则'})];
+  seam.api.mockImplementation(async(_url:string,init?:RequestInit)=>{
+    if(init?.method==='PATCH'){
+      if(phase==='in flight')return new Promise(()=>{});
+      throw Object.assign(Error('规则操作结果待核对'),{status:0});
+    }
+    return {items:rules};
+  });
+  await paint();
+  await act(async()=>getByRole(document.body,'switch',{name:'开启 模拟待核对规则'}).click());
+  await act(async()=>root.render(null));
+  await paint();
+  expect(document.body.textContent).toContain('规则操作结果待核对');
+  expect(seam.api.mock.calls.filter(([,init])=>init?.method==='PATCH')).toHaveLength(1);
+  expect(Object.values(sessionStorage).join('')).not.toContain('模拟待核对规则');
+  await paint('other-account:ws');
+  expect(document.body.textContent).not.toContain('规则操作结果待核对');
+  await paint();
+  expect(document.body.textContent).toContain('规则操作结果待核对');
+  rules=[{...rules[0],enabled:false,version:2}];
+  await act(async()=>root.render(null));
+  await paint();
+  expect(document.body.textContent).not.toContain('规则操作结果待核对');
+  expect(seam.api.mock.calls.filter(([,init])=>init?.method==='PATCH')).toHaveLength(1);
 });
 it('clears only the matching result when two rule changes are awaiting verification',async()=>{
   rules=[rule(),rule({id:'r2',name:'其他规则'})];
