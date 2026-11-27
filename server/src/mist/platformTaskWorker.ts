@@ -196,6 +196,9 @@ export class MistPlatformTaskWorker{
               const coverageRule=history.pdfCoverage
                 ? '\nhistory.pdfCoverage 是同一原件从第一页到末页的连续核对范围。单个续读段的 truncated 只描述该段。仍须注明 pagesWithoutText 中不能核对的页，并以各段原文为准。'
                 : '';
+              const pendingCoverageRule=history.pdfPendingCoverage
+                ? '\nhistory.pdfPendingCoverage 只表示同一原件连续返回的正文范围。returnedThroughPage 是已返回完毕的末页，0 表示尚无完整页段。partialWindow 只返回了部分正文，unreadPages 尚未读取。仅 pagesWithoutText 明确列出的页没有可提取文字。问题需要剩余内容时，用同一原件续读；无法补读时分别说明缺字页与未核实范围。'
+                : '';
               const facts={task:{...modelTask,attachments},clock:platformTaskClock(now),businessClock:platformTaskClock(businessAt),requiresRead:context.requiresRead,...(context.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),decisions:context.decisions,history,...(imageSources?.length?{imageSources}:{})};
               const answerRule=context.requiresReadBeforeWrite&&!context.requiresRead
                 ? '\n当前答复无待复核的业务来源。问题已由本人补充且只需回答时，直接用 finish。若要办理业务，必须先读取当前相关记录；补充资料不代表批准操作。'
@@ -217,7 +220,7 @@ export class MistPlatformTaskWorker{
                 catch (error) { abort.abort(); throw error; }
               };
               if(context.hasTaskHistory)await checkModelAuthority(false);
-              const response=await this.model({images,beforeFallback:()=>checkModelAuthority(true),systemPrompt:MODEL_PROMPT_PREFIX+attachmentRules+numberedAttachments+identifierRules+coverageRule+imageRules+answerRule+historyRule+attachmentAttributionRule+'\n'+responseLanguagePrompt(context.locale),messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts, (_key, value) => typeof value === 'string' ? attachmentHandles.get(value) ?? value : value)),context.locale)}],temperature:0.1,jsonMode:true},abort.signal);
+              const response=await this.model({images,beforeFallback:()=>checkModelAuthority(true),systemPrompt:MODEL_PROMPT_PREFIX+attachmentRules+numberedAttachments+identifierRules+coverageRule+pendingCoverageRule+imageRules+answerRule+historyRule+attachmentAttributionRule+'\n'+responseLanguagePrompt(context.locale),messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts, (_key, value) => typeof value === 'string' ? attachmentHandles.get(value) ?? value : value)),context.locale)}],temperature:0.1,jsonMode:true},abort.signal);
               if(abort.signal.aborted)return;const plan=resolvePlatformFileContinuation(parsePlatformTaskPlan(response),context.steps,attachmentHandles);phase='store';step=await this.repository.savePlatformTaskPlan(actor,plan);
             }
           }
