@@ -68,6 +68,17 @@ it('can check a running task when automatic progress polling is paused',async()=
  expect(queryByRole(host,'button',{name:'重新读取进度'})).toBeNull();
 });
 
+it('continues the original paused task directly from its turn',async()=>{
+ const paused=task({state:'paused',executor:'platform'});
+ const onResume=vi.fn(),f=fns();
+ await paint([paused],{...f,onResume});
+ await act(async()=>getByRole(host,'button',{name:'继续任务',exact:true}).click());
+ expect(onResume).toHaveBeenCalledExactlyOnceWith(paused);
+ expect(f.onRetry).not.toHaveBeenCalled();
+ await paint([task({state:'queued',executor:'platform'})],{...f,onResume});
+ expect(queryByRole(host,'button',{name:'继续任务',exact:true})).toBeNull();
+});
+
 it('shows the current read on a collapsed task and clears it after the phase changes',async()=>{
  const first={at:'',kind:'read',label:'读取附件 报价.pdf',completed:false};
  const f={...fns(),workLog:{expanded:new Map([['t1',false]]),setExpanded:vi.fn()}};
