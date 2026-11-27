@@ -64,7 +64,7 @@ function singleLabel(node: Node): string {
 
 function mentionsAnotherSource(node: Node): boolean {
   if (node.type === 'link' || node.type === 'linkReference') return true;
-  if ('value' in node && typeof node.value === 'string') return /\.pdf(?![a-z0-9_-])/i.test(node.value);
+  if ('value' in node && typeof node.value === 'string') return /\.(?:pdf|xlsx)(?![a-z0-9_-])/i.test(node.value);
   return 'children' in node && Array.isArray(node.children) && node.children.some(mentionsAnotherSource);
 }
 
@@ -86,13 +86,20 @@ function citedPdfPage(suffix:string,file:TaskAttachment,reads:readonly AgentTask
   )))return page;
 }
 
-function citedSheet(suffix:string,file:TaskAttachment,reads:readonly AgentTaskTrailItem[]):string|undefined {
+const WORKSHEET_REFERENCE = /^(?:工作表|worksheet)(?:[ \t]*[：:][ \t]*|[ \t]+)/i;
+
+function observedWorksheet(text:string,file:TaskAttachment,reads:readonly AgentTaskTrailItem[],boundary:RegExp):string|undefined {
   if(!/\.xlsx$/i.test(file.name)&&!/spreadsheetml\.sheet/i.test(file.mimeType))return;
-  const syntax=/^[ \t]*[（(][ \t]*(?:工作表|worksheet)(?:[ \t]*[：:][ \t]*|[ \t]+)/i.exec(suffix);
-  if(!syntax)return;
-  const nameAndEnd=suffix.slice(syntax[0].length);
   const names=reads.filter(read=>read.taskAttachmentId===file.id).flatMap(read=>read.taskAttachmentObservedSheets??[]);
-  return names.sort((a,b)=>b.length-a.length).find(name=>nameAndEnd.startsWith(name)&&/^[ \t]*[）)]/.test(nameAndEnd.slice(name.length)));
+  return names.sort((a,b)=>b.length-a.length).find(name=>text.startsWith(name)&&boundary.test(text.slice(name.length)));
+}
+
+function citedSheet(suffix:string,file:TaskAttachment,reads:readonly AgentTaskTrailItem[]):string|undefined {
+  const prefix=/^[ \t]*[（(][ \t]*/.exec(suffix);
+  if(!prefix)return;
+  const reference=suffix.slice(prefix[0].length);
+  const syntax=WORKSHEET_REFERENCE.exec(reference);
+  if(syntax)return observedWorksheet(reference.slice(syntax[0].length),file,reads,/^[ \t]*[）)]/);
 }
 
 function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTaskTrailItem[]) {
@@ -106,8 +113,9 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
     byName.set(label,index);
     aliases.set(label,index);
   });
-  const toAttachment=(index:number,child:Link['children'][number],following:string,page=citedPdfPage(following,files[index],reads)):Link=>{
-    const sheet=citedSheet(following,files[index],reads);
+  const toAttachment=(index:number,child:Link['children'][number],following:string,target?:number|string):Link=>{
+    const page=typeof target==='number'?target:citedPdfPage(following,files[index],reads);
+    const sheet=typeof target==='string'?target:citedSheet(following,files[index],reads);
     return {type:'link',url:ATTACHMENT_LINK,data:{hProperties:{'data-task-attachment-index':index,
       ...(page!==undefined?{'data-task-attachment-page':page}:{}),
       ...(sheet!==undefined?{'data-task-attachment-sheet':sheet}:{})}},children:[child]};
@@ -115,19 +123,29 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
   const names = [...byName.keys()].sort((a, b) => b.length - a.length);
   const pattern = new RegExp('(?<![\\p{L}\\p{N}_./\\\\-])(' + names.map(escapeSourceLabel).join('|') + ')(?:(?=第[ \\t]*[1-9])|(?![\\p{L}\\p{N}_/\\\\-]|\\.[\\p{L}\\p{N}_]))', 'gu');
   const observedReads = reads.filter(read => read.taskAttachmentObservedPages !== undefined);
-  const linkSectionPage = (paragraph: Paragraph, index: number) => {
+  const linkSectionReference = (paragraph: Paragraph, index: number) => {
     if (mentionsAnotherSource(paragraph)) return;
     const first = paragraph.children[0];
     const container = first?.type === 'strong' || first?.type === 'emphasis' ? first : paragraph;
     const start = container.children[0];
     if (start?.type !== 'text') return;
-    const citation = PDF_PAGE_REFERENCE.exec(start.value)?.[0];
-    if (!citation) return;
-    const next = inlineTextStart(container.children[1]) || (container !== paragraph ? inlineTextStart(paragraph.children[1]) : '');
-    const page = citedPdfPage(start.value+next, files[index], observedReads);
-    if (page === undefined) return;
-    const remainder = start.value.slice(citation.length);
-    container.children.splice(0,1,toAttachment(index,{type:'text',value:citation},'',page),
+    const suffixContainer = container.children.length>1 ? container : paragraph;
+    const following = suffixContainer.children[1];
+    const next = inlineTextStart(following) + inlineTextStart(suffixContainer.children[2])
+      + (suffixContainer !== paragraph ? inlineTextStart(paragraph.children[1]) : '');
+    const file = files[index], text = start.value;
+    const pageLabel = PDF_PAGE_REFERENCE.exec(text)?.[0];
+    const page = pageLabel ? citedPdfPage(text+next,file,observedReads) : undefined;
+    const sheetPrefix = WORKSHEET_REFERENCE.exec(text)?.[0];
+    const sheet = sheetPrefix ? observedWorksheet((text+next).slice(sheetPrefix.length),file,reads,/^[ \t]*(?:$|[：:。])/u) : undefined;
+    if (sheet && sheetPrefix === text && following && singleLabel(following) === sheet) {
+      suffixContainer.children.splice(1,1,toAttachment(index,following,'',sheet));
+      return;
+    }
+    const label = page !== undefined ? pageLabel : sheet ? sheetPrefix+sheet : undefined;
+    if (!label || !text.startsWith(label)) return;
+    const remainder = text.slice(label.length);
+    container.children.splice(0,1,toAttachment(index,{type:'text',value:label},'',page??sheet),
       ...(remainder ? [{type:'text' as const,value:remainder}] : []));
   };
   return {
@@ -140,11 +158,11 @@ function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTa
         const index = byName.get(singleLabel(heading).trim().replace(/[：:]$/,'').trim());
         if (index === undefined) continue;
         const details = tree.children[position];
-        if (details.type === 'paragraph') linkSectionPage(details,index);
+        if (details.type === 'paragraph') linkSectionReference(details,index);
         if (details.type === 'list') {
           for (const item of details.children) {
             const paragraph = item.children[0];
-            if (paragraph?.type === 'paragraph') linkSectionPage(paragraph,index);
+            if (paragraph?.type === 'paragraph') linkSectionReference(paragraph,index);
           }
         }
       }
