@@ -102,6 +102,57 @@ it('rechecks authority before using a ready fallback when the primary is cooling
  expect(fetchMock).toHaveBeenCalledTimes(3);
 });
 
+it('reuses the persisted provider deadline between separate task completers', async () => {
+  process.env.ARK_API_KEY = 'shared-test-key';
+  let clock = Date.now();
+  const time = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+  const records = new Map<string, number>();
+  const cooldownStore = {
+    active: vi.fn(async () => new Map(records)),
+    remember: vi.fn(async (key: string, until: number) => { records.set(key, until); }),
+  };
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response('{}', { status: 429, headers: { 'Retry-After': '60' } }))
+    .mockResolvedValueOnce(okCompletion('after retry'));
+  vi.stubGlobal('fetch', fetchMock);
+  try {
+    const options = { platformProfile: 'agent-task' as const, platformProviders: { chain: () => [] }, cooldownStore };
+    await expect(createLlmCompleter(options)(BASE_INPUT)).rejects.toMatchObject({ retryNotBefore: clock + 60000 });
+    expect(cooldownStore.remember).toHaveBeenCalledWith(expect.stringMatching(/^[a-f0-9]{64}$/), clock + 60000, clock);
+    const next = createLlmCompleter(options);
+    await expect(next(BASE_INPUT)).rejects.toMatchObject({ message: 'LLM_PROVIDER_COOLDOWN', retryNotBefore: clock + 60000 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    records.clear();
+    clock += 60000;
+    await expect(next(BASE_INPUT)).resolves.toBe('after retry');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  } finally {
+    time.mockRestore();
+  }
+});
+
+it('retains the local cooldown while the shared store is unavailable', async () => {
+  process.env.ARK_API_KEY = 'shared-test-key';
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const time = vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000);
+  const cooldownStore = {
+    active: vi.fn().mockRejectedValue(new Error('read unavailable')),
+    remember: vi.fn().mockRejectedValue(new Error('write unavailable')),
+  };
+  const fetchMock = vi.fn().mockResolvedValueOnce(new Response('{}', { status: 503, headers: { 'Retry-After': '60' } }));
+  vi.stubGlobal('fetch', fetchMock);
+  const complete = createLlmCompleter({ platformProfile: 'agent-task', platformProviders: { chain: () => [] }, cooldownStore });
+  try {
+    await expect(complete(BASE_INPUT)).rejects.toMatchObject({ retryNotBefore: Date.now() + 60000 });
+    await expect(complete(BASE_INPUT)).rejects.toMatchObject({ message: 'LLM_PROVIDER_COOLDOWN', retryNotBefore: Date.now() + 60000 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls).toEqual([['[platform-agent] PROVIDER_COOLDOWN_STORE_UNAVAILABLE']]);
+  } finally {
+    time.mockRestore();
+    warn.mockRestore();
+  }
+});
+
 describe('A. resolveLlmProviderChain', () => {
   it('无任何 key → 空链', () => {
     expect(resolveLlmProviderChain()).toEqual([]);

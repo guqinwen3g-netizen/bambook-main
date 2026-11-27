@@ -9870,3 +9870,11 @@ model CompanyMember {
   @@index([userId])
   @@index([companyId, status])
 }
+
+// Platform-scoped retry metadata. Stores only a provider fingerprint and deadline.
+model AiProviderCooldown {
+  providerKey      String @id @db.VarChar(64)
+  retryNotBeforeMs BigInt
+
+  @@index([retryNotBeforeMs])
+}

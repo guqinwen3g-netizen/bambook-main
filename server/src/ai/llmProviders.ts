@@ -130,7 +130,13 @@ export function resolveEnvProviderChain(): LlmProviderConfig[] {
  * 链式 LLM completer：逐 provider 尝试，AbortError 直抛，全链失败抛
  * LLM_ALL_PROVIDERS_FAILED。同一 provider 内保持"流式优先、流式失败降级非流式"。
  */
+export type LlmProviderCooldownStore = {
+  active(keys: readonly string[], now: number): Promise<ReadonlyMap<string, number>>;
+  remember(key: string, until: number, now: number): Promise<void>;
+};
+
 export type LlmCompleterOptions = {
+  cooldownStore?: LlmProviderCooldownStore;
   /** 平台 AI 功能档位；平台 ChatGPT 订阅已连接时按档位推理强度优先使用。 */
   platformProfile?: PlatformAiProfile;
   subscriptions?: Pick<CodexSubscriptionService, 'isConnected' | 'complete'>;
@@ -147,6 +153,20 @@ const ARK_DEEPSEEK_FLASH = 'deepseek-v4.1-flash';
 
 export function createLlmCompleter(options: LlmCompleterOptions = {}) {
   const cooldowns = new Map<string, number>();
+  const store = options.platformProfile === 'agent-task' ? options.cooldownStore : undefined;
+  let reportedStoreError = false;
+  const reportStoreError = () => {
+    if (reportedStoreError) return;
+    reportedStoreError = true;
+    console.warn('[platform-agent] PROVIDER_COOLDOWN_STORE_UNAVAILABLE');
+  };
+  const rememberLocal = (key: string, until: number) => {
+    const newest = Math.max(cooldowns.get(key) ?? 0, until);
+    cooldowns.delete(key);
+    cooldowns.set(key, newest);
+    const oldest = cooldowns.keys().next().value;
+    if (oldest !== undefined && cooldowns.size > MAX_PROVIDER_COOLDOWNS) cooldowns.delete(oldest);
+  };
   return async function complete(input: LlmCompletionInput): Promise<string> {
     const subscriptions = options.subscriptions ?? codexSubscriptions();
     const steps = [
@@ -159,6 +179,21 @@ export function createLlmCompleter(options: LlmCompleterOptions = {}) {
     const cooldownKey = (step: typeof steps[number]) => profile === 'agent-task' && step.kind === 'api'
       ? createHash('sha256').update(JSON.stringify([step.provider.baseUrl, input.model || step.provider.model, step.provider.apiKey])).digest('hex')
       : undefined;
+    if (store) {
+      const keys = [...new Set(steps.flatMap(step => {
+        const key = cooldownKey(step);
+        return key ? [key] : [];
+      }))];
+      try {
+        const saved = await store.active(keys, now);
+        for (const key of keys) {
+          const until = saved.get(key);
+          if (until !== undefined && Number.isSafeInteger(until) && until > Date.now()) rememberLocal(key, until);
+        }
+      } catch {
+        reportStoreError();
+      }
+    }
     const available = (step: typeof steps[number]) => step.kind === 'api' || (!!profile && subscriptions.isConnected(PLATFORM_SUBJECT));
     const failures: Array<{ providerId: string; error: string }> = [];
     let invalidResponse: Error | undefined;
@@ -211,11 +246,14 @@ export function createLlmCompleter(options: LlmCompleterOptions = {}) {
         if (err instanceof LlmProviderRetryError) {
           retryNotBefore = Math.max(retryNotBefore ?? 0, err.retryNotBefore);
           if (key) {
-            const until = Math.max(cooldowns.get(key) ?? 0, err.retryNotBefore);
-            cooldowns.delete(key);
-            cooldowns.set(key, until);
-            const oldest = cooldowns.keys().next().value;
-            if (oldest !== undefined && cooldowns.size > MAX_PROVIDER_COOLDOWNS) cooldowns.delete(oldest);
+            rememberLocal(key, err.retryNotBefore);
+            if (store) {
+              try {
+                await store.remember(key, err.retryNotBefore, Date.now());
+              } catch {
+                reportStoreError();
+              }
+            }
           }
         }
         const code = step.kind === 'subscription' && typeof err?.code === 'string' ? err.code + ': ' : '';
