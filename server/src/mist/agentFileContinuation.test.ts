@@ -1,6 +1,7 @@
-import {expect,it} from 'vitest';
+import {expect,it,vi} from 'vitest';
+import {PDFParse} from 'pdf-parse';
 import JSZip from 'jszip';
-import {readFileTextWindow} from './agentFileWindow';
+import {readFileTextWindow,type PdfTextWindowCache} from './agentFileWindow';
 import {platformTrail} from './agentTaskTrail';
 const scope={workspaceId:'w',fileId:'f'};
 it('returns consecutive stable text windows, never calling the final fragment a complete document',async()=>{
@@ -113,4 +114,32 @@ it('reports only workbook tabs represented in the current slice, excluding hidde
  const fileRef={id:scope.fileId,name:file.name};
  const trail=platformTrail([{id:'xlsx',at:'',plan:{name:'bambook_file_text',arguments:{fileId:fileRef.id}},result:{...first,file:fileRef}}],[fileRef]);
  expect(trail[0].taskAttachmentObservedSheets).toEqual(['报价草案']);
+});
+
+it('reuses one parsed PDF window for consecutive slices while keeping byte and page checks',async()=>{
+ const file={name:'dense.pdf',mimeType:'application/pdf'},bytes=contractPdf(23,22);
+ const cache:PdfTextWindowCache=new Map();
+ const parse=vi.spyOn(PDFParse.prototype,'getText');
+ try {
+  const first=await readFileTextWindow(scope,file,bytes,1000,undefined,cache);
+  expect(parse).toHaveBeenCalledTimes(1);
+  await expect(readFileTextWindow(scope,file,contractPdf(23,21),8000,first.nextCursor,cache))
+   .rejects.toMatchObject({code:'FILE_TEXT_SOURCE_CHANGED'});
+  await expect(readFileTextWindow({...scope,fileId:'other'},file,bytes,8000,first.nextCursor,cache)).rejects.toThrow('续读');
+  const otherScope={...scope,fileId:'other'};
+  const other=await readFileTextWindow(otherScope,file,bytes,1000,undefined,cache);
+  expect(parse).toHaveBeenCalledTimes(2);
+  const middle=await readFileTextWindow(scope,file,bytes,8000,first.nextCursor,cache);
+  expect(parse).toHaveBeenCalledTimes(2);
+  expect(middle.nextPageFrom).toBe(21);
+  expect(middle).toEqual(await readFileTextWindow(scope,file,bytes,8000,first.nextCursor));
+  const tail=await readFileTextWindow(scope,file,bytes,8000,middle.nextCursor,cache);
+  expect(parse).toHaveBeenCalledTimes(4);
+  expect(tail.pagesWithoutText).toEqual([22]);
+  expect(tail.text).toContain('FINAL TERM');
+  expect(cache.size).toBe(1);
+  expect((await readFileTextWindow(otherScope,file,bytes,8000,other.nextCursor,cache)).nextPageFrom).toBe(21);
+  expect(parse).toHaveBeenCalledTimes(4);
+  expect(cache.size).toBe(0);
+ }finally{parse.mockRestore();}
 });

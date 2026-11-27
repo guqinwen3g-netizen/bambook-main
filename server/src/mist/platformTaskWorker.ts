@@ -1,3 +1,4 @@
+import type { PdfTextWindowCache } from './agentFileWindow';
 import { isTaskImage, taskAttachmentLabels } from '../shared/mistTaskAttachments';
 import{randomUUID}from'node:crypto';
 import{createLlmCompleter,type LlmCompletionInput}from'../ai/llmProviders';
@@ -35,7 +36,7 @@ const MODEL_PROMPT_PREFIX=[
 ].join('\n');
 
 /** The same typed tools, permissions, source provenance and human gates as standard MCP. */
-export async function invokePlatformTaskTool(repository:MistRepository,actor:AgentActor,step:PlatformTaskStep){
+export async function invokePlatformTaskTool(repository:MistRepository,actor:AgentActor,step:PlatformTaskStep,pdfCache?:PdfTextWindowCache){
   const lease=actor.agentTaskLease!,{beforeFinish,beforeWrite}=await repository.platformTaskReadRequirements(actor);
   const finishing=step.plan.name==='bambook_task'&&step.plan.arguments.action==='finish'&&['succeeded','stopped'].includes(String(step.plan.arguments.outcome));
   if(beforeWrite&&step.plan.name==='bambook_execute'||beforeFinish&&finishing)return{error:true,message:'本人决定或等待结束后，请先回源读取当前业务，再办理或报告结果。'};
@@ -51,7 +52,7 @@ export async function invokePlatformTaskTool(repository:MistRepository,actor:Age
     const operation=step.plan.name==='bambook_execute'?step.id:step.id+'_'+lease.runId.slice(0,8);
     await repository.reserveAgentTaskRequest(actor,operation,{method:'platform-mcp',name:step.plan.name,arguments:args});actor.agentTaskOperation=operation;
   }
-  const reply:any=await handleMcpMessage(repository as unknown as McpRepository,actor,{jsonrpc:'2.0',id:step.id,method:'tools/call',params:{name:step.plan.name,arguments:args}},(e:any)=>e instanceof MistApiError||e?.status>=400&&e?.status<500?String(e.message):'操作未完成，请核对原结果');
+  const reply:any=await handleMcpMessage(repository as unknown as McpRepository,actor,{jsonrpc:'2.0',id:step.id,method:'tools/call',params:{name:step.plan.name,arguments:args}},(e:any)=>e instanceof MistApiError||e?.status>=400&&e?.status<500?String(e.message):'操作未完成，请核对原结果',pdfCache);
   if(reply?.error)return{error:true,message:'工具请求未完成，请核对参数和原操作。'};
   const result=reply?.result;if(result?.isError)return{error:true,message:String(result.content?.[0]?.text??'操作未完成').slice(0,2000)};
   const data=result?.structuredContent;
@@ -154,6 +155,7 @@ export class MistPlatformTaskWorker{
     try{
       actor=await this.repository.claimPlatformTask(job,this.id,this.options.makeCredential);if(!actor)return;
       const renderedImages: PlatformTaskImageCache = new Map();
+      const pdfCache: PdfTextWindowCache = new Map();
       pulse=setInterval(()=>{if(pulsing)return;pulsing=true;void this.repository.pulsePlatformTask(actor!).catch(()=>abort.abort()).finally(()=>{pulsing=false;});},this.options.pulseMs??5000);pulse.unref?.();
       while(!abort.signal.aborted&&this.enabled){
         phase='store';const context=await this.repository.platformTaskContext(actor);let step=context.steps.at(-1);
@@ -219,7 +221,7 @@ export class MistPlatformTaskWorker{
             }
           }
         }
-        if(abort.signal.aborted)return;phase='tool';const result:any=await invokePlatformTaskTool(this.repository,actor,step);
+        if(abort.signal.aborted)return;phase='tool';const result:any=await invokePlatformTaskTool(this.repository,actor,step,pdfCache);
         // These effects already acknowledge the frozen step inside their own durable transaction.
         if(result?.status==='awaiting_confirmation'||['waiting_time','waiting_condition','waiting_human','succeeded','failed','cancelled'].includes(result?.item?.state))return;
         if(abort.signal.aborted)return;phase='store';await this.repository.acknowledgePlatformTaskStep(actor,step.id,result);
