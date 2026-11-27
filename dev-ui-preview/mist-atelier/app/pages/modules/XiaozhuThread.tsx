@@ -3,7 +3,7 @@ import React from 'react';
 import { ChevronRight, Copy, Download, Eye, FileText, RotateCcw, Zap, ShieldCheck, Search, PenLine, HelpCircle, Clock, Check, Square, Link2, Mic } from 'lucide-react';
 import { AIBadge, AssistantEyes, Button, Icon, IconButton, Pill, type Tone } from '../../../../../components/mist';
 import type { AgentTaskTrailItem, AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
-import type { TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
+import { taskAttachmentLabels, type TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
 import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../../server/src/shared/mistAgentProposals';
 import { uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { activeModelFallbackSince } from '../../runtime/xiaozhuActivity';
@@ -199,6 +199,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
     const openQuestion = t.questions?.find(q=>!q.answeredAt);
     const active = COWORK_ACTIVE.includes(t.state), asking = t.state === 'waiting_human' && !!openQuestion;
     const control = actions.controls?.[t.id];
+    const attachmentLabels=taskAttachmentLabels(t.attachments);
     const pending = t.waitingProposalIds.map(id => proposals.find(p => p.id === id && p.state === 'pending')).filter((p): p is AgentProposal => !!p);
     const produced = proposals.filter(p => p.taskId === t.id && p.state === 'confirmed' && p.produced && !p.unavailable);
     const request = splitRequest(t.instructions), done = !active && t.state !== 'waiting_human', working = active && !asking && !pending.length;
@@ -217,10 +218,10 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
       {divider && <div className="mist-xz-day"><span>{dayLabel(t.createdAt)}</span></div>}
       <div className="mist-xz-user">{request}
         {!!t.attachments?.length && <div className="mist-xz-sources" aria-label={uiText('附件')}>
-          {t.attachments.map(file => <span className="mist-xz-source" key={file.id} data-attachment><span title={file.name}>{file.name}</span>
-            {actions.onPreviewAttachment&&<PreviewOriginal name={file.name} onPreview={()=>actions.onPreviewAttachment?.(t,file)}/>}
-            {actions.onDownloadAttachment&&<DownloadOriginal name={file.name} onDownload={()=>actions.onDownloadAttachment!(t,file)}/>}
-            {actions.onReuseAttachment && t.conversationId && <IconButton size="sm" icon={Link2} label={uiText('引用附件')+' '+file.name} onClick={() => actions.onReuseAttachment?.(t,file)} />}
+          {t.attachments.map((file,attachmentIndex) => <span className="mist-xz-source" key={file.id} data-attachment><span title={attachmentLabels[attachmentIndex]}>{attachmentLabels[attachmentIndex]}</span>
+            {actions.onPreviewAttachment&&<PreviewOriginal name={attachmentLabels[attachmentIndex]} onPreview={()=>actions.onPreviewAttachment?.(t,file)}/>}
+            {actions.onDownloadAttachment&&<DownloadOriginal name={attachmentLabels[attachmentIndex]} onDownload={()=>actions.onDownloadAttachment!(t,file)}/>}
+            {actions.onReuseAttachment && t.conversationId && <IconButton size="sm" icon={Link2} label={uiText('引用附件')+' '+attachmentLabels[attachmentIndex]} onClick={() => actions.onReuseAttachment?.(t,file)} />}
           </span>)}
         </div>}
       </div>

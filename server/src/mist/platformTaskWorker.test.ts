@@ -919,6 +919,50 @@ it('reads the short tail of each PDF before asking the model to prepare the repo
  expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'已整理附件核对报告'});
 });
 
+it('supplies separate report labels and reads for attachments with identical original filenames',async()=>{
+ const complete=vi.fn(async(_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'核对 quote.pdf（1） 和 quote.pdf（2）。'}));
+ const f=await fixture(complete);
+ f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'核对同名附件',instructions:'区分两份报价。'}))
+  .attach('attachments',pdf('FIRST-QUOTE-781'),'quote.pdf')
+  .attach('attachments',pdf('SECOND-QUOTE-972'),'quote.pdf').expect(201)).body.item;
+ await f.drain();
+ expect(complete).toHaveBeenCalledTimes(1);
+ const input=complete.mock.calls[0][0].messages[0].content as string;
+ const facts=JSON.parse(input.slice(input.indexOf('{')));
+ expect(facts.task.attachments).toEqual([
+  expect.objectContaining({id:'attachment_1',name:'quote.pdf',reportLabel:'quote.pdf（1）'}),
+  expect.objectContaining({id:'attachment_2',name:'quote.pdf',reportLabel:'quote.pdf（2）'}),
+ ]);
+ expect(facts.history.recent).toEqual([
+  expect.objectContaining({arguments:expect.objectContaining({fileId:'attachment_1'}),result:expect.objectContaining({text:expect.stringContaining('FIRST-QUOTE-781')})}),
+  expect.objectContaining({arguments:expect.objectContaining({fileId:'attachment_2'}),result:expect.objectContaining({text:expect.stringContaining('SECOND-QUOTE-972')})}),
+ ]);
+ const saved=await f.current(task.id);
+ expect(saved.attachments.map((file:{name:string})=>file.name)).toEqual(['quote.pdf','quote.pdf']);
+ expect(saved.trail.filter((step:{taskAttachmentId?:string})=>step.taskAttachmentId).map((step:{label:string})=>step.label))
+  .toEqual(['读取附件 quote.pdf（1）','读取附件 quote.pdf（2）']);
+});
+
+it('labels identical image filenames in the same order as the actual image payloads',async()=>{
+ const complete=vi.fn(async(_input:LlmCompletionInput)=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'核对照片。'}));
+ const f=await fixture(complete);
+ f.worker.start(3_600_000);
+ const bytes=async(background:string)=>sharp({create:{width:16,height:12,channels:3,background}}).png().toBuffer();
+ const first=await bytes('#112233'),second=await bytes('#ffaa55');
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'同名图片',instructions:'核对两份照片。'}))
+  .attach('attachments',first,'sample.png').attach('attachments',second,'sample.png').expect(201)).body.item;
+ await f.drain();
+ expect(complete).toHaveBeenCalledTimes(1);
+ const model=complete.mock.calls[0][0],input=model.messages[0].content as string;
+ expect(model.images?.map(image=>image.name)).toEqual(['sample.png（1）','sample.png（2）']);
+ expect(model.images?.[0].url).not.toBe(model.images?.[1].url);
+ expect(input).toContain('"imageSources":["sample.png（1）","sample.png（2）"]');
+ expect((await f.current(task.id)).state).toBe('succeeded');
+});
+
 it('researches a PDF, workbook and image together with a selected order, keeping all uploaded files task-private',async()=>{
  let readTask: (()=>Promise<any>) | undefined;
  let turns=0;

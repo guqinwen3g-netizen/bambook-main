@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import type { Link, Root, Text } from 'mdast';
 import type { Node, Parent } from 'unist';
 import { escapeSourceLabel, linkRecords, type RecordRef } from '../../runtime/xiaozhuRecords';
-import type { TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
+import { taskAttachmentLabels, type TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
 
 import {agentSource} from '../../runtime/agentSource';
 import type {RouteTarget} from '../../nav';
@@ -44,6 +44,15 @@ function attachmentLinks(files: readonly TaskAttachment[]) {
   files.forEach((file, index) => {
     if (file.name) byName.set(file.name, byName.has(file.name) ? undefined : index);
   });
+  const aliases=new Map<string,number>();
+  taskAttachmentLabels(files).forEach((label,index)=>{
+    if(label===files[index].name||byName.has(label))return;
+    byName.set(label,index);
+    aliases.set(label,index);
+  });
+  const toAttachment=(index:number,child:Link['children'][number]):Link=>({
+    type:'link',url:ATTACHMENT_LINK,data:{hProperties:{'data-task-attachment-index':index}},children:[child],
+  });
   const names = [...byName.keys()].sort((a, b) => b.length - a.length);
   const pattern = new RegExp('(?<![\\p{L}\\p{N}_./\\\\-])(' + names.map(escapeSourceLabel).join('|') + ')(?![\\p{L}\\p{N}_/\\\\-]|\\.[\\p{L}\\p{N}_])', 'gu');
   return {
@@ -53,6 +62,10 @@ function attachmentLinks(files: readonly TaskAttachment[]) {
       const visit = (parent: Parent) => {
         parent.children = parent.children.flatMap<Node>(child => {
           if ('children' in child && Array.isArray(child.children) && child.type !== 'link' && child.type !== 'linkReference') visit(child as Parent);
+          if(child.type==='inlineCode'&&'value' in child&&typeof child.value==='string'){
+            const index=aliases.get(child.value);
+            if(index!==undefined)return [toAttachment(index,{type:'inlineCode',value:child.value})];
+          }
           if (child.type !== 'text' || !('value' in child) || typeof child.value !== 'string') return [child];
           const value = child.value, parts: (Link | Text)[] = [];
           let last = 0;
@@ -61,11 +74,7 @@ function attachmentLinks(files: readonly TaskAttachment[]) {
             if (index === undefined) continue;
             if (match.index > last) parts.push({ type: 'text', value: value.slice(last, match.index) });
             // This marker comes from parsed text, never from a model-provided URL.
-            parts.push({
-              type: 'link', url: ATTACHMENT_LINK,
-              data: { hProperties: { 'data-task-attachment-index': index } },
-              children: [{ type: 'text', value: match[0] }],
-            });
+            parts.push(toAttachment(index,{type:'text',value:match[0]}));
             last = match.index + match[0].length;
           }
           if (!parts.length) return [child];
