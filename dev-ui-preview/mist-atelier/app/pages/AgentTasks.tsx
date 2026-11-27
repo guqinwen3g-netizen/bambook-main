@@ -10,7 +10,8 @@ import type { AgentIdentityView } from '../../../../server/src/shared/mistAgentI
 import { uiText, interfaceLocale } from '../../../../services/interfaceLanguage';
 import { mistApiRequest, useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
-import { useNav } from '../nav';
+import { useNav, type RouteTarget } from '../nav';
+import { taskReportRecordIndex } from '../runtime/xiaozhuRecords';
 import { agentConnectionEndpoint } from './AgentConnections';
 import { FailureNotice } from '../runtime/FailureNotice';
 import { withRequestDeadline } from '../runtime/requestDeadline';
@@ -250,14 +251,23 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
  };
  React.useEffect(()=>{if(refreshSignal)void currentLoad.current();},[refreshSignal]);
  const routeTaskId=nav?.route?.section==='tasks'?nav.route.id:undefined;
- const closeDetail=()=>{
+ const previousRouteTask=React.useRef(routeTaskId);
+ const resetDetail=()=>{
   detailGeneration.current++;detailAbort.current?.abort();historyAbort.current?.abort();setDetailTarget(null);setCurrentDetail(null);setOpening(false);
+ };
+ const closeDetail=()=>{
+  resetDetail();
   if(!routeTaskId)return;
   const automationId=nav.route.automationId;
   if(automationId)nav.go('assistant',routeTaskId,{section:'automations',automationId});
   else nav.go('assistant',undefined,{section:'tasks'});
  };
- React.useEffect(()=>{if(routeTaskId)void openDetail(routeTaskId);},[routeTaskId,base]);
+ React.useEffect(()=>{
+  const previous=previousRouteTask.current;
+  previousRouteTask.current=routeTaskId;
+  if(routeTaskId)void openDetail(routeTaskId);
+  else if(previous)resetDetail();
+ },[routeTaskId,base]);
  const begin=(next:Plan)=>{setFailure('');setUncertain(false);setCredential(null);setPlan(next);};
  const closePlan=()=>{if(busy)return;writeGeneration.current++;writeAbort.current?.abort();setPlan(null);setCredential(null);setFailure('');setUncertain(false);};
  const submit=async()=>{
@@ -348,6 +358,13 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
 function TaskReport({ task }: { task: AgentTaskView }) {
  const workspace = useMistWorkspace(), nav = useNav();
  const [selection, setSelection] = React.useState<{ fileId: string; target?: number | string }>();
+ const recordRefs = React.useMemo(() => taskReportRecordIndex(task.trail), [task.trail]);
+ const openRecord = (view: string, id: string, target?: RouteTarget) => {
+  // A task opened from a list row has no history entry until it leaves the drawer.
+  if (nav.route.section !== 'tasks' || nav.route.id !== task.id) nav.go('assistant', task.id, { section: 'tasks' });
+  nav.go(view, id, target);
+ };
+
  const files = task.attachments ?? [];
  const index = files.findIndex(file => file.id === selection?.fileId);
  const file = files[index];
@@ -360,7 +377,7 @@ function TaskReport({ task }: { task: AgentTaskView }) {
   <Card>
    <CardHeader title={uiText('Agent执行报告')}/>
    <CardBody>
-    <XiaozhuMarkdown text={task.result} index={[]} onOpen={(view,id,target)=>nav.go(view,id,target)}
+    <XiaozhuMarkdown text={task.result} index={recordRefs} onOpen={openRecord}
       attachments={files} attachmentReads={task.trail} onOpenAttachment={files.length ? open : undefined}/>
    </CardBody>
   </Card>
