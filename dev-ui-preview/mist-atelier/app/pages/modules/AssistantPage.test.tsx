@@ -6,13 +6,287 @@ import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import {createMistState} from '../../../../../server/src/shared/mistWorkspace';
 import {AssistantPage} from './PlatformPages';
 import {Nav} from '../../nav';
-const mock=vi.hoisted(()=>({api:vi.fn(),workspace:null as any,fetch:vi.fn(),sessionKey:'session-a',readOrders:true}));
+const mock=vi.hoisted(()=>({api:vi.fn(),workspace:null as any,fetch:vi.fn(),sessionKey:'session-a',readOrders:true,chatPermission:true}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>mock.workspace,mistApiRequest:(...a:any[])=>mock.api(...a)}));
-vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({sessionKey:mock.sessionKey,user:{id:'actor'},hasPermission:(scope:string)=>scope!=='orders:read'||mock.readOrders}); return { useMistSession, useOptionalMistSession: useMistSession }; });
+vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({sessionKey:mock.sessionKey,user:{id:'actor'},hasPermission:(scope:string)=>scope==='ai:chat'?mock.chatPermission:scope!=='orders:read'||mock.readOrders}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 vi.mock('../../../../../services/apiService',()=>({apiService:{getAuthHeaders:()=>({'X-Test-Auth':'authenticated'})}}));
 let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
 const view=(active=true, taskId?:string,section='tasks')=> <Nav.Provider value={{route:{view:'assistant',...(taskId?{section,id:taskId}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
-const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
+const response=(body:unknown,ok=true)=>{
+  const result=body&&typeof body==='object'&&(body as {mode?:unknown}).mode==='read_only'
+    ? {contextToken:crypto.randomUUID(),...body}:body;
+  return {ok,json:async()=>result};
+};
+
+it('reuses the exact unconfirmed answer request after leaving and reopening its task',async()=>{
+  const pending={id:'answer-task',conversationId:'c_answer_task',executor:'platform',identityId:'personal',version:3,
+    name:'待补交期',instructions:'核对订单',state:'waiting_human',canControl:true,waitingProposalIds:[],
+    questions:[{id:'question-1',question:'请给出模拟交期'}],createdAt:'2026-11-26T06:00:00Z',updatedAt:'2026-11-26T06:00:00Z'};
+  const posts:unknown[]=[];
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async(url:string,init?:RequestInit)=>{
+    if(url.endsWith('/answer')){
+      posts.push(JSON.parse(String(init?.body)));
+      if(posts.length===1)throw Object.assign(new Error('模拟断线'),{status:0});
+      return {item:{...pending,version:4,state:'queued',questions:[{...pending.questions[0],answer:'1 月 22 日',answeredAt:pending.updatedAt}]}};
+    }
+    if(url.endsWith('/agent-tasks/answer-task'))return {item:pending};
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    return {items:[],nextCursor:null};
+  });
+  await mount();
+  await act(async()=>root!.render(view(true,pending.id,'task-origin')));
+  const answer=()=>host.querySelector<HTMLInputElement>('[aria-label="回答小竹"]')!;
+  await act(async()=>{
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(answer(),'1 月 22 日');
+    answer().dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  await click('回答');
+  expect(posts).toHaveLength(1);
+  expect(host.textContent).toContain('回答未确认，可重试');
+  await act(async()=>root!.render(view(false)));
+  await act(async()=>root!.render(view(true,pending.id,'task-origin')));
+  expect(answer().value).toBe('1 月 22 日');
+  expect(host.textContent).toContain('回答未确认，可重试');
+  expect(posts).toHaveLength(1);
+  await click('回答');
+  expect(posts).toHaveLength(2);
+  expect(posts[1]).toEqual(posts[0]);
+});
+
+it('restores an unsent task answer only in its original task and account after navigation',async()=>{
+  const item=(id:string)=>({id,conversationId:'c_'+id,executor:'platform',identityId:'personal',
+    name:'模拟待补任务',instructions:'核对来源',state:'waiting_human',canControl:true,waitingProposalIds:[],
+    questions:[{id:'shared-question-id',question:'请补充模拟客户交期'}],createdAt:'2026-11-26T06:00:00Z',updatedAt:'2026-11-26T06:00:00Z'});
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async(url:string)=>{
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    if(url.endsWith('/agent-tasks/draft-task-a'))return {item:item('draft-task-a')};
+    if(url.endsWith('/agent-tasks/draft-task-b'))return {item:item('draft-task-b')};
+    return {items:[],nextCursor:null};
+  });
+  await mount();
+  await act(async()=>root!.render(view(true,'draft-task-a','task-origin')));
+  const answer=()=>host.querySelector<HTMLInputElement>('[aria-label="回答小竹"]')!;
+  await act(async()=>{
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(answer(),'模拟未提交交期');
+    answer().dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  expect(answer().value).toBe('模拟未提交交期');
+  expect(sessionStorage.getItem('mist.assistant.conversation:session-a:workspace')).not.toContain('模拟未提交交期');
+  await act(async()=>root!.render(view(false)));
+  await act(async()=>root!.render(view(true,'draft-task-b','task-origin')));
+  expect(answer().value).toBe('');
+  await act(async()=>root!.render(view(true,'draft-task-a','task-origin')));
+  expect(answer().value).toBe('模拟未提交交期');
+  mock.sessionKey='session-b';
+  await act(async()=>root!.render(view(true,'draft-task-a','task-origin')));
+  expect(answer().value).toBe('');
+  expect(mock.api.mock.calls.some(([url,init])=>url.endsWith('/answer')&&init?.method==='POST')).toBe(false);
+});
+
+it('keeps an authorized read-only turn usable and omits it after access is withdrawn',async()=>{
+  const key='mist.assistant.conversation:session-a:workspace';
+  sessionStorage.setItem(key,JSON.stringify({messages:[{role:'user',content:'旧订单问题'},
+    {role:'assistant',content:'模拟订单旧答复',contextToken:'previous-authority',sources:[],revision:1}]}));
+  let allowedTokens=['previous-authority'];
+  const requests: unknown[]=[];
+  mock.api.mockImplementation(async(url:string)=>url.endsWith('/assistant/history-access')?{allowedTokens}:
+    url.endsWith('/agent-task-capabilities')?{platformAvailable:false}:{items:[],nextCursor:null});
+  mock.fetch.mockImplementation(async(url:string,options?:RequestInit)=>{
+    if(url.endsWith('/status'))return response({configured:true});
+    requests.push(JSON.parse(String(options?.body)));
+    return response({text:'新答复',mode:'read_only',revision:1,sources:[]});
+  });
+  await mount();
+  expect(host.textContent).toContain('模拟订单旧答复');
+  await question('沿用有效答复');await click('发送');
+  expect(requests[0]).toMatchObject({history:[{role:'user',content:'旧订单问题'},
+    {role:'assistant',content:'模拟订单旧答复',contextToken:'previous-authority'}]});
+  allowedTokens=[];
+  await act(async()=>window.dispatchEvent(new Event('focus')));
+  expect(host.textContent).not.toContain('模拟订单旧答复');
+  expect(host.textContent).toContain('部分历史答复需重新核对');
+  await question('撤权后继续提问');await click('发送');
+  expect(requests[1]).toMatchObject({history:[]});
+});
+
+it('preserves work-log expansion when returning from an order within the same account and workspace', async () => {
+  const report = {
+    id:'multiorder-report', name:'核对三张订单', conversationId:'c_multiorder_report',
+    executor:'platform', state:'succeeded', instructions:'核对三张订单',
+    result:'三张订单已核对。', questions:[], waitingProposalIds:[], version:3,
+    createdAt:'2026-11-27T03:00:00Z', updatedAt:'2026-11-27T03:01:00Z',
+    trail:[{kind:'read',at:'2026-11-27T03:01:00Z',label:'读取 3 张订单',refs:[
+      {id:'order-1',view:'orders/detail',type:'order',label:'模拟订单一'},
+      {id:'order-2',view:'orders/detail',type:'order',label:'模拟订单二'},
+      {id:'order-3',view:'orders/detail',type:'order',label:'模拟订单三'},
+    ]}],
+  };
+  mock.fetch.mockResolvedValue(response({ configured:true }));
+  mock.api.mockImplementation(async (url: string) => {
+    if (url.endsWith('/agent-task-capabilities')) return { platformAvailable:true };
+    if (url.endsWith('/agent-tasks/'+report.id)) return { item:report };
+    if (url.endsWith('/agent-tasks')) return { items:[report],nextCursor:null };
+    return { items:[],restrictedIds:[] };
+  });
+  await mount();
+  const reopen = () => act(async () => root!.render(view(true,report.id,'task-origin')));
+  const leave = () => act(async () => root!.render(view(false)));
+  const expanded = () => button('办理过程')?.getAttribute('aria-expanded');
+  await reopen();
+  expect(expanded()).toBe('false');
+  await click('办理过程');
+  await click('模拟订单一');
+  expect(go).toHaveBeenCalledWith('orders/detail','order-1',undefined);
+  await leave();
+  await reopen();
+  expect(expanded()).toBe('true');
+  expect(button('模拟订单二')).toBeTruthy();
+
+  await click('办理过程');
+  await leave();
+  await reopen();
+  expect(expanded()).toBe('false');
+
+  await click('办理过程');
+  mock.sessionKey='session-b';
+  await reopen();
+  expect(expanded()).toBe('false');
+
+  await click('办理过程');
+  mock.workspace = { ...mock.workspace, workspace: { ...mock.workspace.workspace, id:'other-company' } };
+  await reopen();
+  expect(expanded()).toBe('false');
+});
+
+it('continues signed read-only exchanges while leaving a platform task draft untouched', async () => {
+  sessionStorage.setItem('mist.assistant.conversation:session-a:workspace',JSON.stringify({
+    question:'待发送的工作任务草稿',messages:[
+      {role:'user',content:'侧边问题'},
+      {role:'assistant',content:'侧边结果',contextToken:'drawer-receipt',revision:1,sources:[]},
+    ],
+  }));
+  const bodies: unknown[]=[];
+  mock.api.mockImplementation(async (url:string, init?:RequestInit)=>{
+    if(url.endsWith('/history-access'))return {allowedTokens:JSON.parse(String(init?.body)).tokens};
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    return {items:[],nextCursor:null};
+  });
+  mock.fetch.mockImplementation(async (url:string, init?:RequestInit)=>{
+    if(url.endsWith('/status'))return response({configured:true});
+    bodies.push(JSON.parse(String(init?.body)));
+    return response({mode:'read_only',text:'续问的结果',revision:1,sources:[]});
+  });
+  await mount();
+  expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('待发送的工作任务草稿');
+  await act(async()=>root!.render(view(true,'drawer','read-only')));
+  expect(host.textContent).toContain('侧边结果');
+  expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('');
+  await question('续问侧边问题');
+  await click('发送');
+  expect(bodies).toEqual([expect.objectContaining({history:[
+    {role:'user',content:'侧边问题'},
+    {role:'assistant',content:'侧边结果',contextToken:'drawer-receipt'},
+  ]})]);
+  expect(host.textContent).toContain('续问的结果');
+  expect(mock.api.mock.calls.some(([url])=>url.endsWith('/personal-agent/tasks'))).toBe(false);
+  await click('返回工作任务');
+  expect(go).toHaveBeenCalledWith('assistant');
+  await act(async()=>root!.render(view()));
+  expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('待发送的工作任务草稿');
+  expect(host.textContent).not.toContain('侧边结果');
+});
+
+it('hides previous read-only history while a changed workspace revision is being verified', async () => {
+  const token = 'saved-revision-ticket';
+  sessionStorage.setItem('mist.assistant.conversation:session-a:workspace', JSON.stringify({ messages: [
+    { role: 'user', content: '原订单交期' },
+    { role: 'assistant', content: '模拟旧交期 1 月 21 日', contextToken: token, revision: 1 },
+  ] }));
+  const requests: unknown[] = [];
+  let historyCheck: () => Promise<unknown> = async () => ({ allowedTokens: [token] });
+  mock.api.mockImplementation(async (url: string) => {
+    if (url.endsWith('/assistant/history-access')) return historyCheck();
+    return url.endsWith('/agent-task-capabilities') ? { platformAvailable: false } : { items: [], nextCursor: null };
+  });
+  mock.fetch.mockImplementation(async (url: string, options?: RequestInit) => {
+    if (url.endsWith('/status')) return response({ configured: true });
+    requests.push(JSON.parse(String(options?.body)));
+    return response({ text: '本轮答复', mode: 'read_only', revision: 2, sources: [] });
+  });
+  await mount();
+  expect(host.textContent).toContain('模拟旧交期 1 月 21 日');
+
+  historyCheck = () => new Promise(() => {});
+  mock.workspace = { ...mock.workspace, workspace: { ...mock.workspace.workspace, revision: 2 } };
+  await act(async () => root!.render(view()));
+  expect(host.textContent).not.toContain('模拟旧交期 1 月 21 日');
+  await question('独立核对问题');
+  await click('发送');
+  expect(requests).toEqual([expect.objectContaining({ history: [] })]);
+  expect(host.textContent).toContain('本轮答复');
+  expect(host.textContent).not.toContain('模拟旧交期 1 月 21 日');
+
+});
+
+it('does not render legacy cached read-only answers without an authorization token',async()=>{
+  sessionStorage.setItem('mist.assistant.conversation:session-a:workspace',JSON.stringify({messages:[
+    {role:'user',content:'上次问答'}, {role:'assistant',content:'旧版缓存的模拟记录',revision:1,sources:[]},
+  ]}));
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  await mount();
+  expect(host.textContent).not.toContain('旧版缓存的模拟记录');
+  expect(host.textContent).toContain('部分历史答复需重新核对');
+});
+
+it('can retry a failed history check without reopening the thread',async()=>{
+  sessionStorage.setItem('mist.assistant.conversation:session-a:workspace',JSON.stringify({messages:[
+    {role:'user',content:'原始只读问题'}, {role:'assistant',content:'原始只读答复',contextToken:'saved-ticket'},
+  ]}));
+  let reads=0;
+  mock.api.mockImplementation(async(url:string)=>{
+    if(url.endsWith('/assistant/history-access')){
+      if(++reads===1)throw Object.assign(new Error('temporary failure'),{status:503});
+      return {allowedTokens:['saved-ticket']};
+    }
+    return url.endsWith('/agent-task-capabilities')?{platformAvailable:false}:{items:[],nextCursor:null};
+  });
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  await mount();
+  expect(host.textContent).not.toContain('原始只读答复');
+  expect(host.textContent).toContain('历史答复暂时无法核对');
+  await click('重试核对历史答复');
+  expect(reads).toBe(2);
+  expect(host.textContent).toContain('原始只读答复');
+  expect(host.textContent).not.toContain('历史答复暂时无法核对');
+});
+
+it.each([
+  ['customers','crm'], ['purchases','procurement'], ['shipments','shipments'], ['developments','development/detail'],
+])('opens an authorized %s source from a read-only model reply',async(kind,sourceView)=>{
+  const record={id:'record-1',name:'原始记录',code:'DOC-001',state:'open',supplier:'模拟供应商',customer:'模拟客户',description:'模拟业务记录'};
+  const state=mock.workspace.state;
+  const catalog=kind==='purchases'||kind==='shipments'?state.fulfillment:state;
+  catalog[kind==='developments'?'devs':kind].push(record);
+  const id=kind+':'+record.id;
+  mock.fetch.mockImplementation(async(url:string)=>response(url.endsWith('/status')?{configured:true,models:['test-model']}:
+    {text:'所选业务来源已核对',mode:'read_only',revision:1,sources:[{id,label:'打开已核对的原记录',view:sourceView,entityId:record.id}]}));
+  await mount();
+  await click('引用业务记录');
+  const select=document.querySelector<HTMLSelectElement>('select[aria-label="检索对象"]')!;
+  await act(async()=>{select.value=kind;select.dispatchEvent(new Event('change',{bubbles:true}));});
+  await click('加入问题');
+  await question('请核对已选来源');
+  await click('发送');
+  const [,init]=mock.fetch.mock.calls.find(([url])=>String(url).endsWith('/assistant'))!;
+  expect(JSON.parse(init.body).sourceIds).toEqual([id]);
+  expect(host.textContent).toContain('所选业务来源已核对');
+  await click('打开已核对的原记录');
+  expect(go).toHaveBeenCalledWith(sourceView,record.id);
+});
 
 it('shows why a voice call ended and keeps the composer available', async () => {
   mock.fetch.mockResolvedValue(response({configured:true}));
@@ -79,6 +353,54 @@ it('opens the exact task from a reminder even when it was absent from the loaded
   await act(async()=>root!.render(view()));
   await act(async()=>root!.render(view(true,'older-task','task-origin')));
   expect(host.querySelector('[data-task-id="older-task"]')?.textContent).toContain('客户书面确认的交期是哪天？');
+});
+
+it('opens a pending question from its reminder without waiting for unrelated history', async () => {
+  const task={id:'pending-reminder',conversationId:'c_pending_reminder',identityId:'personal',executor:'platform',
+    name:'核对交期',instructions:'核对订单',state:'waiting_human',version:1,canControl:true,
+    waitingProposalIds:[],questions:[{id:'question',question:'客户已确认哪天交货？'}],
+    createdAt:'2026-11-26T01:00:00Z',updatedAt:'2026-11-26T01:00:00Z'};
+  let finishHistory!: (page:{items:never[];nextCursor:null})=>void;
+  const history=new Promise<{items:never[];nextCursor:null}>(resolve=>{finishHistory=resolve;});
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async(url:string)=>{
+    if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    if(url.endsWith('/agent-tasks/pending-reminder'))return {item:task};
+    if(url.endsWith('/agent-tasks'))return history;
+    return {items:[],nextCursor:null};
+  });
+  await mount();
+  await act(async()=>root!.render(view(true,task.id,'task-origin')));
+  expect(mock.api.mock.calls.some(([url])=>url.endsWith('/agent-tasks/pending-reminder'))).toBe(true);
+  expect(host.querySelector('[data-task-id="pending-reminder"]')?.textContent).toContain('客户已确认哪天交货？');
+  await act(async()=>finishHistory({items:[],nextCursor:null}));
+  expect(host.querySelector('[data-task-id="pending-reminder"]')?.textContent).toContain('客户已确认哪天交货？');
+});
+
+it('does not reopen a reminder read that was in flight when history access was denied', async () => {
+  const task={id:'protected-reminder',conversationId:'c_protected_reminder',identityId:'personal',executor:'platform',
+    name:'核对交期',instructions:'核对订单',state:'waiting_human',version:1,canControl:true,
+    waitingProposalIds:[],questions:[{id:'question',question:'仅本人可见的交期确认'}],
+    createdAt:'2026-11-26T01:00:00Z',updatedAt:'2026-11-26T01:00:00Z'};
+  let denyHistory!: (error:Error)=>void, finishTask!: (response:{item:typeof task})=>void;
+  const history=new Promise((_,reject)=>{denyHistory=reject;});
+  const direct=new Promise<{item:typeof task}>(resolve=>{finishTask=resolve;});
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async(url:string)=>{
+    if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    if(url.endsWith('/agent-tasks/protected-reminder'))return direct;
+    if(url.endsWith('/agent-tasks'))return history;
+    return {items:[],nextCursor:null};
+  });
+  await mount();
+  await act(async()=>root!.render(view(true,task.id,'task-origin')));
+  expect(mock.api.mock.calls.some(([url])=>url.endsWith('/agent-tasks/protected-reminder'))).toBe(true);
+  await act(async()=>denyHistory(Object.assign(new Error('任务访问已失效'),{status:403})));
+  await act(async()=>finishTask({item:task}));
+  expect(host.textContent).not.toContain('仅本人可见的交期确认');
+  expect(host.textContent).toContain('任务暂时无法核对');
 });
 
 it('asks which running task to check before issuing a read-only status request', async () => {
@@ -291,6 +613,86 @@ it('restores the request, order and original attachment of a failed task for rev
   } finally {
     localStorage.removeItem('mist.xiaozhu.conversation:session-a:workspace');
   }
+});
+
+it('preserves a reused original across reload after a submission is interrupted', async () => {
+  const original = {
+    id: '00000000-0000-4000-8000-000000000081',
+    identityId: 'personal', executor: 'platform', conversationId: 'c_reload_reused_original',
+    instructions: '首次核对原始资料', state: 'succeeded', result: '原资料已核对', questions: [], waitingProposalIds: [],
+    createdAt: '2026-11-24T00:00:00Z', updatedAt: '2026-11-24T00:01:00Z',
+    attachments:[{id:'00000000-0000-4000-8000-000000000082',name:'original.pdf',size:42}],
+  };
+  const posts:Array<Record<string,unknown>>=[];
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async(url:string,init?:RequestInit)=>{
+    if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    if(url.includes('/personal-agent/tasks/receipt/'))throw Object.assign(new Error('无回执'),{status:404});
+    if(url.endsWith('/agent-tasks/'+original.id))return {item:original};
+    if(init?.method==='POST'&&url.endsWith('/personal-agent/tasks')){
+      posts.push(JSON.parse(String(init.body)));
+      if(posts.length===1)throw new Error('模拟断线');
+      return {item:{...original,id:'recovered',instructions:'请继续核对',result:'续问办完'}};
+    }
+    return {items:url.endsWith('/agent-tasks')?[original]:[],nextCursor:null};
+  });
+  await mount();
+  await click('首次核对原始资料');
+  await click('引用附件 original.pdf');
+  await question('请继续核对');
+  await click('发送');
+  expect(posts).toHaveLength(1);
+  expect(posts[0].attachmentRefs).toEqual([{taskId:original.id,fileId:original.attachments[0].id}]);
+  const savedDraft=JSON.parse(sessionStorage.getItem('mist.assistant.conversation:session-a:workspace')!);
+  expect(savedDraft.attachmentRefs).toEqual(posts[0].attachmentRefs);
+  expect(host.textContent).toContain('提交结果待核对');
+  await act(async()=>root!.unmount());root=undefined;host.remove();
+  await mount();
+  expect(host.querySelector('textarea')?.value).toBe('请继续核对');
+  expect(posts).toHaveLength(1);
+  const restoredOriginal = !!button('移除附件 original.pdf');
+  await click('发送');
+  expect({
+    restoredOriginal,
+    sentAgain:posts.length===2,
+    blockedAsMissingAttachment:host.textContent?.includes('请恢复原附件后重试'),
+  }).toEqual({restoredOriginal:true,sentAgain:true,blockedAsMissingAttachment:false});
+  expect(posts[1]).toEqual(posts[0]);
+});
+
+it.each(['withdrawn','different conversation'])('blocks a restored attachment from a %s source until it can be verified', async kind => {
+  const conversationId='c_rehydrate_draft';
+  const taskId='00000000-0000-4000-8000-000000000083',fileId='00000000-0000-4000-8000-000000000084';
+  const task={id:taskId,identityId:'personal',executor:'platform',conversationId,state:'succeeded',instructions:'原任务',result:'原报告',questions:[],waitingProposalIds:[],
+    createdAt:'2026-11-24T00:00:00Z',updatedAt:'2026-11-24T00:00:01Z',attachments:[{id:fileId,name:'authorized.pdf',size:42}]};
+  sessionStorage.setItem('mist.xiaozhu.conversation:session-a:workspace',conversationId);
+  sessionStorage.setItem('mist.assistant.conversation:session-a:workspace',JSON.stringify({question:'继续核对原附件',selected:[],messages:[],
+    attachmentRefs:[{taskId,fileId,name:'旧缓存私密文件名.pdf',size:42}]}));
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  let reads=0,authorized=false;
+  mock.api.mockImplementation(async(url:string)=>{
+    if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    if(url.endsWith('/agent-tasks/'+taskId)){
+      reads++;
+      if(authorized)return {item:task};
+      return {item:kind==='withdrawn'?{...task,contentRestricted:true}:{...task,conversationId:'c_another_draft'}};
+    }
+    return {items:[],nextCursor:null};
+  });
+  await mount();
+  expect(reads).toBe(1);
+  expect(host.textContent).toContain('无法核验原件');
+  expect(host.textContent).not.toContain('旧缓存私密文件名.pdf');
+  expect(button('移除附件 authorized.pdf')).toBeUndefined();
+  expect(button('发送')?.disabled).toBe(true);
+  expect(mock.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+  authorized=true;
+  await click('重试核对原附件');
+  expect(reads).toBe(2);
+  expect(button('移除附件 authorized.pdf')).toBeTruthy();
+  expect(button('发送')?.disabled).toBe(false);
 });
 
 it('retains the original submission key when checking finds no receipt and the user resends',async()=>{
@@ -611,7 +1013,7 @@ it('clears retained conversation when the authenticated session changes outside 
   expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('');
   expect(host.textContent).not.toContain('Private account-A question');
 });
-beforeEach(()=>{mock.api.mockReset();mock.api.mockImplementation(async(url:string)=>{if(url.includes('/agent-identities'))return{items:[]};if(url.includes('/agent-task-capabilities'))return{platformAvailable:false};if(url.endsWith('/agent-tasks'))return{items:[],nextCursor:null};throw new Error('unexpected task API');});(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;sessionStorage.clear();let i=0;const state=createMistState({id:()=>`assistant-ui-${++i}`,now:'2026-10-13T00:00:00Z',actorName:'Test'},'empty');state.orders.push({id:'order',code:'SO-SELECTED',customer:'Fixture',state:'Open',amount:10,currency:'USD'} as any);mock.workspace={state,workspace:{id:'workspace',name:'Test workspace',revision:1},error:'',loading:false,saving:false,pending:null,refresh:vi.fn(),run:vi.fn()};mock.sessionKey='session-a';mock.readOrders=true;go.mockReset();mock.fetch.mockReset();vi.stubGlobal('fetch',mock.fetch);});
+beforeEach(()=>{mock.api.mockReset();mock.api.mockImplementation(async(url:string,init?:RequestInit)=>{if(url.endsWith('/assistant/history-access'))return {allowedTokens:JSON.parse(String(init?.body)).tokens};if(url.includes('/agent-identities'))return{items:[]};if(url.includes('/agent-task-capabilities'))return{platformAvailable:false};if(url.endsWith('/agent-tasks'))return{items:[],nextCursor:null};throw new Error('unexpected task API');});(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;sessionStorage.clear();let i=0;const state=createMistState({id:()=>`assistant-ui-${++i}`,now:'2026-10-13T00:00:00Z',actorName:'Test'},'empty');state.orders.push({id:'order',code:'SO-SELECTED',customer:'Fixture',state:'Open',amount:10,currency:'USD'} as any);mock.workspace={state,workspace:{id:'workspace',name:'Test workspace',revision:1},error:'',loading:false,saving:false,pending:null,refresh:vi.fn(),run:vi.fn()};mock.sessionKey='session-a';mock.readOrders=true;go.mockReset();mock.fetch.mockReset();vi.stubGlobal('fetch',mock.fetch);});
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();vi.unstubAllGlobals();});
 async function mount(){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(view()));}
 const button=(name:string)=>[...document.querySelectorAll('button')].find(b=>b.textContent?.trim()===name||b.getAttribute('aria-label')===name) as HTMLButtonElement|undefined;
@@ -666,7 +1068,8 @@ it('works with Xiaozhu as a coworker: a request becomes a platform task whose pr
 function mockTaskStatus(read: (task: Record<string, unknown>) => Promise<unknown>, available=true, terminal=false, activeState = 'paused') {
   const task={id:'existing-task',identityId:'personal',executor:'platform',name:'修改付款条件',instructions:'修改付款条件',
     conversationId:'current-task-conversation',state:terminal?'budget_exhausted':activeState,result:'',checkpoint:'',questions:[],waitingProposalIds:[],
-    version:1,canControl:true,createdAt:'2026-11-24T00:00:00Z',updatedAt:'2026-11-24T00:00:00Z'};
+    version:1,canControl:true,createdAt:'2026-11-24T00:00:00Z',updatedAt:'2026-11-24T00:00:00Z',
+    ...(activeState==='running'?{executionStage:'model',executionStageSince:new Date().toISOString()}:{})};
   mock.fetch.mockResolvedValue(response({configured:false,models:[]}));
   mock.api.mockImplementation(async(url:string,opts:any)=>{
     if(opts?.method==='POST')throw new Error('task submission captured');
@@ -678,6 +1081,53 @@ function mockTaskStatus(read: (task: Record<string, unknown>) => Promise<unknown
     return {items:[]};
   });
 }
+
+it.each(['confirmed missing','unknown','changed request'])('only carries an exact missing receipt from the task card (%s)',async outcome=>{
+  const id='proposal-1', requestId='customer-update-original';
+  let finishLookup=()=>{};
+  const recover=vi.fn(async (options:{requestId:string;receiptOnly?:true;onMissingReceipt?:()=>void})=>{
+    if(!options.receiptOnly)return {requestId};
+    if(outcome==='changed request')await new Promise<void>(resolve=>{finishLookup=resolve;});
+    if(outcome!=='unknown')options.onMissingReceipt?.();
+    return undefined;
+  });
+  mockTaskStatus(async task=>({item:task}),true,false,'waiting_human');
+  const statusApi=mock.api.getMockImplementation()!;
+  mock.api.mockImplementation(async(url:string,opts:any)=>{
+    const result=await statusApi(url,opts);
+    if(url.endsWith('/agent-tasks'))return {...result,items:result.items.map((task:any)=>({...task,waitingProposalIds:[id]}))};
+    if(url.endsWith('/agent-tasks/existing-task'))return {...result,item:{...result.item,waitingProposalIds:[id]}};
+    return result;
+  });
+  mock.workspace.state.agentProposals=[{id,ownerId:'actor',owner:'User',summary:['Update'],state:'pending',createdAt:'2026-11-24T00:00:00Z',command:{type:'customer.update',payload:{id:'c',patch:{city:'York'}}}}];
+  mock.workspace.pending={requestId,command:{type:'agent.proposal.confirm',payload:{id}}};
+  mock.workspace.recover=recover;
+  mock.workspace.isCurrent=()=>true;
+  sessionStorage.setItem('mist.xiaozhu.conversation:session-a:workspace','current-task-conversation');
+  await mount();
+  await click('核对原请求');
+  expect(recover).toHaveBeenCalledExactlyOnceWith({requestId,receiptOnly:true,onMissingReceipt:expect.any(Function)});
+  expect(mock.workspace.run).not.toHaveBeenCalled();
+  if(outcome==='changed request'){
+    mock.workspace.pending={...mock.workspace.pending,requestId:'new-original'};
+    await act(async()=>root!.render(view()));
+    await act(async()=>finishLookup());
+    expect(document.querySelector('[data-agent-proposal-dialog]')).toBeNull();
+    expect(button('重试原操作')).toBeUndefined();
+    expect(recover).toHaveBeenCalledTimes(1);
+    return;
+  }
+  expect(document.querySelector('[data-agent-proposal-dialog]')).not.toBeNull();
+  if(outcome==='confirmed missing'){
+    expect(document.body.textContent).toContain('暂未查到原回执');
+    await click('重试原操作');
+    expect(recover).toHaveBeenNthCalledWith(2,{requestId});
+  }else{
+    expect(document.body.textContent).not.toContain('暂未查到原回执');
+    expect(button('重试原操作')).toBeUndefined();
+    expect(recover).toHaveBeenCalledTimes(1);
+  }
+});
 
 it('answers a direct status inquiry from the existing task without submitting a new one',async()=>{
   mockTaskStatus(async task=>({item:{...task,state:'waiting_human',waitingProposalIds:['proposal-1'],updatedAt:'2026-11-24T00:00:03Z'}}),false);
@@ -743,16 +1193,19 @@ it('announces a delayed progress read without blocking the composer and shows th
     await mount();
     await click('修改付款条件');
 
+    const originalTask = () => host.querySelector('[data-task-id="existing-task"]');
+    expect(originalTask()?.querySelector('[role="timer"]')).toBeTruthy();
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-    expect([...host.querySelectorAll('[role="status"]')].some(status => status.textContent === '进度暂未更新，正在重试')).toBe(true);
+    expect(originalTask()?.querySelector('[role="status"]')?.textContent).toBe('执行进度暂未更新');
+    expect(originalTask()?.querySelector('[role="timer"]')).toBeNull();
     expect(host.textContent).not.toContain('小竹操作未完成');
     const field = await question('另一件独立的业务');
     expect(button('发送')?.disabled).toBe(false);
 
     recovered = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-    expect(host.textContent).toContain('订单核对完成');
-    expect(host.textContent).not.toContain('进度暂未更新，正在重试');
+    expect(originalTask()?.textContent).toContain('订单核对完成');
+    expect(originalTask()?.textContent).not.toContain('执行进度暂未更新');
     expect(field.value).toBe('另一件独立的业务');
     expect(mock.api.mock.calls.filter(([, opts]) => opts?.method === 'POST')).toHaveLength(0);
   } finally {
@@ -792,4 +1245,40 @@ it('retries a failed automation read and only shows an empty list after success'
   await click('重新读取');
   expect(document.body.textContent).toContain('还没有规则');
   expect(document.body.textContent).not.toContain('规则暂时无法读取');
+});
+
+it('opens and pauses existing rules without task service or prior tasks', async () => {
+  let rule={id:'existing-rule',name:'模拟离线规则',trigger:'daily',time:'09:00',instructions:'检查待办',enabled:true,version:2,runs:[]};
+  mock.api.mockImplementation(async (url: string, init?: RequestInit) => {
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:false};
+    if(url.endsWith('/agent-automations'))return {items:[rule]};
+    if(url.endsWith('/agent-automations/existing-rule') && init?.method==='PATCH'){
+      rule={...rule,enabled:false,version:3};
+      return {item:rule};
+    }
+    return {items:[],nextCursor:null};
+  });
+  mock.fetch.mockResolvedValue(response({configured:false,models:[]}));
+  await mount();
+  expect(mock.api.mock.calls.some(([path])=>path.endsWith('/agent-automations'))).toBe(false);
+  await click('自动规则');
+  const toggle=document.querySelector<HTMLInputElement>('input[role="switch"][aria-label="开启 模拟离线规则"]');
+  expect(toggle?.checked).toBe(true);
+  await act(async()=>toggle!.click());
+  expect(toggle?.checked).toBe(false);
+  const patch=mock.api.mock.calls.filter(([,options])=>options?.method==='PATCH');
+  expect(patch).toHaveLength(1);
+  expect(JSON.parse(patch[0][1].body)).toEqual({enabled:false,expectedVersion:2});
+});
+
+it('keeps the fallback rules entry hidden without the chat permission', async () => {
+  mock.chatPermission=false;
+  try {
+    mock.fetch.mockResolvedValue(response({configured:false,models:[]}));
+    await mount();
+    expect(button('自动规则')).toBeUndefined();
+    expect(mock.api.mock.calls.some(([path])=>path.includes('/agent-automations'))).toBe(false);
+  } finally {
+    mock.chatPermission=true;
+  }
 });
