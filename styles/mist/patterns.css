@@ -1312,6 +1312,10 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .mist-root::-webkit-scrollbar,
 .mist-xz-card-h > svg { color: var(--mist-ai); }
 .mist-xz-card p { margin: 0; line-height: 1.6; }
 .mist-xz-card ul { margin: 0; padding-left: 18px; list-style: disc; color: var(--mist-ink-2); font-size: var(--mist-text-sm); line-height: 1.6; }
+.mist-xz-workbook-choices { display: grid; gap: var(--mist-space-1); }
+.mist-xz-workbook-choices .mist-btn { min-width: 0; height: auto; min-height: 32px; padding-block: 6px; justify-content: flex-start; text-align: start; white-space: normal; }
+.mist-xz-workbook-choices .mist-btn > span { min-width: 0; overflow-wrap: anywhere; }
+.mist-xz-workbook-choices .mist-btn > svg { flex: none; }
 .mist-xz-answer { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 12px; border-radius: var(--mist-r-md); background: var(--mist-card); }
 .mist-xz-answer:focus-within { box-shadow: 0 0 0 2px var(--mist-ai-tint); }
 .mist-xz-answer input { flex: 1; min-width: 0; height: 32px; border: 0; outline: 0; background: none; color: var(--mist-ink); font: inherit; }

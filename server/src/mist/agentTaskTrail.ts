@@ -1,6 +1,7 @@
 /** 小竹的办理过程：只给本人看“做了什么、读了哪条记录”，不带任何读取到的内容。 */
 import { AGENT_OBJECT_TYPES } from './agentRead';
 import { commandLabel } from './agentCommandLabel';
+import { taskAttachmentLabels } from '../shared/mistTaskAttachments';
 import type { AgentTaskTrailItem } from '../shared/mistAgentTasks';
 import { PLATFORM_TASK_TURN_LIMIT, type PlatformTaskStep } from './platformTaskPlan';
 
@@ -22,6 +23,7 @@ function target(link: unknown): { view: string; id: string; section?: string } |
 // Tool errors can include source content. Only stable server messages are shown.
 const FILE_FAILURE_DETAILS = new Map([
   ['附件已变化，请从首段重新读取','原件已变化，无法继续读取'],
+  ['Excel 正文读取方式已更新，请从首段重新读取','Excel 正文读取方式已更新，请从首段重新读取'],
   ['引用的原附件已变化','原件已变化，无法继续读取'],
   ['附件不存在或当前账号无权访问','原件不存在或无权访问'],
   ['原附件不存在或无权访问','原件不存在或无权访问'],
@@ -30,7 +32,15 @@ const FILE_FAILURE_DETAILS = new Map([
   ['该附件没有可用的下一段；请核对最近一次读取结果。','原件没有可继续读取的位置'],
 ]);
 
+const pdfPageRange = (from: number, to: number) => `第 ${from === to ? from : `${from} 至 ${to}`} 页`;
+
 export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments: readonly {id:string;name:string}[] = []): AgentTaskTrailItem[] {
+  const labels=taskAttachmentLabels(attachments);
+  const numberedNames=new Map(attachments.flatMap((file,index)=>{
+    if(labels[index]===file.name)return [];
+    const suffix=labels[index].slice(file.name.length);
+    return [[file.id,text(file.name,60-suffix.length)+suffix] as const];
+  }));
   const names=new Map(attachments.map(file=>[file.id,text(file.name,60)]));
   const taskAttachmentIds=new Set(names.keys());
   const out: AgentTaskTrailItem[] = [];
@@ -84,16 +94,27 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
         const matchedId=typeof args.fileId==='string'&&result?.file?.id===args.fileId ? args.fileId : undefined;
         if(observedName&&matchedId)names.set(matchedId,observedName);
         const taskAttachmentId=completed&&!step.compacted&&result?.error!==true&&matchedId&&taskAttachmentIds.has(matchedId) ? matchedId : undefined;
-        const file=observedName||names.get(args.fileId);
+        const file=numberedNames.get(args.fileId)||observedName||names.get(args.fileId);
         const pages=result?.range;
         const pageRange=result?.kind==='pdf'&&Number.isSafeInteger(pages?.pageFrom)&&Number.isSafeInteger(pages?.pageTo)
           &&pages.pageFrom>=1&&pages.pageTo>=pages.pageFrom
-          ? `第 ${pages.pageFrom===pages.pageTo?pages.pageFrom:`${pages.pageFrom} 至 ${pages.pageTo}`} 页` : '';
+          ? pdfPageRange(pages.pageFrom,pages.pageTo) : '';
         const missingPages=pageRange&&Array.isArray(result.pagesWithoutText)
           ? [...new Set<number>(result.pagesWithoutText.filter((page:unknown)=>typeof page==='number'&&Number.isSafeInteger(page)&&page>=pages.pageFrom&&page<=pages.pageTo))].sort((a,b)=>a-b).slice(0,20)
           : [];
-        const taskAttachmentPage: number | undefined = taskAttachmentId && pageRange
-          ? (missingPages.length === 1 ? missingPages[0] : pages.pageFrom) : undefined;
+        const taskAttachmentPageRange=taskAttachmentId&&pageRange
+          ? {from:pages.pageFrom,to:pages.pageTo} : undefined;
+        const observedPages = taskAttachmentPageRange && Array.isArray(result.pageTextSpans)
+          ? [...new Set<number>([
+            ...result.pageTextSpans.map((span: {page?:unknown})=>span?.page)
+              .filter((page:unknown)=>typeof page==='number'&&Number.isSafeInteger(page)&&page>=pages.pageFrom&&page<=pages.pageTo),
+            ...missingPages,
+          ])].sort((a,b)=>a-b).slice(0,20) : undefined;
+        const taskAttachmentPage: number | undefined = taskAttachmentPageRange
+          ? (missingPages.length === 1 ? missingPages[0] : observedPages?.[0] ?? pages.pageFrom) : undefined;
+        const observedSheets = taskAttachmentId && result?.kind==='xlsx' && Array.isArray(result.observedSheets)
+          ? [...new Set<string>(result.observedSheets.filter((name:unknown)=>typeof name==='string'&&name.length>0))]
+          : undefined;
         const partialText = pages?.textLimited === true || pages?.start > 0;
         const rangeDetail = pageRange ? partialText
           ? `${pageRange}的部分正文` : `提取范围${pageRange}` : '';
@@ -101,12 +122,29 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
           ? `${pageRange}无可提取文字`
           : missingPages.length ? `${rangeDetail}；第 ${missingPages.join('、')} 页无可提取文字` : '';
         const pdfDetail = unreadablePages || (!failed ? rangeDetail : '');
+        const scopeEnded = !!pageRange && result?.hasMore === false && Number.isSafeInteger(result.pageScopeLimit)
+          && result.pageScopeLimit === pages.pageTo;
+        const nextPage = scopeEnded ? pages.pageTo+1 : result?.nextPageFrom;
+        const unreadPageRange = pageRange && (result?.hasMore === true || scopeEnded) && pages.textLimited !== true
+          && Number.isSafeInteger(nextPage) && nextPage === pages.pageTo+1
+          && Number.isSafeInteger(result.pages) && nextPage <= result.pages
+          ? pdfPageRange(nextPage,result.pages) : '';
+        const pdfContinuation = unreadPageRange ? '；本次未读'+unreadPageRange : !result?.hasMore ? ''
+          : pages?.textLimited === true && nextPage === undefined && typeof result.nextCursor === 'string'
+            ? '；本页段正文待续读' : '；还有后续内容';
+        const scopeStart = result?.pageScopeStart;
+        const earlierPages = pageRange && Number.isSafeInteger(scopeStart) && scopeStart > 1 && scopeStart === pages.pageFrom
+          ? '；本次未读'+pdfPageRange(1,scopeStart-1) : '';
+        const worksheetRead = result?.worksheetComplete===true&&typeof result.worksheetScope==='string'
+          && observedSheets?.includes(result.worksheetScope) ? text(result.worksheetScope,60) : '';
         const detail = result?.error === true ? FILE_FAILURE_DETAILS.get(result.message)
-          : pdfDetail ? `${pdfDetail}${result.hasMore?'；还有后续内容':''}`
+          : pdfDetail ? pdfDetail+earlierPages+pdfContinuation
+          : worksheetRead ? '已读取工作表：'+worksheetRead
           : failed ? text(result?.reason, 120)
           : result?.hasMore ? '本次读取部分正文，还有后续内容'
           : result?.complete ? '已提取可读取正文' : '';
-        out.push({ ...base, kind: 'read', label: result?.error===true?`附件读取失败${file?' '+file:''}`:file?`读取附件 ${file}`:'读取附件正文', ...(detail ? { detail } : {}), ...(taskAttachmentId ? { taskAttachmentId } : {}), ...(taskAttachmentPage !== undefined ? { taskAttachmentPage } : {}) });
+        const readLabel=!completed&&typeof args.cursor==='string'?'续读附件':'读取附件';
+        out.push({ ...base, kind: 'read', label: result?.error===true?`附件读取失败${file?' '+file:''}`:file?`${readLabel} ${file}`:`${readLabel}正文`, ...(detail ? { detail } : {}), ...(taskAttachmentId ? { taskAttachmentId } : {}), ...(taskAttachmentPage !== undefined ? { taskAttachmentPage, taskAttachmentPageRange } : {}), ...(observedPages ? {taskAttachmentObservedPages:observedPages} : {}), ...(observedSheets ? {taskAttachmentObservedSheets:observedSheets} : {}) });
         break;
       }
       case 'bambook_mail_receiving': out.push({ ...base, kind: 'read', label: '查看邮箱收件状态' }); break;
