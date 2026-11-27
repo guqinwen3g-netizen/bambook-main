@@ -43,6 +43,24 @@ function okCompletion(text: string): Response {
   return new Response(JSON.stringify({ choices: [{ message: { content: text } }] }), { status: 200 });
 }
 
+it('only exposes the longest observed retry delay when the provider chain is exhausted',async()=>{
+ process.env.ARK_API_KEY='primary-key';
+ process.env.BAMBOOK_LLM_BACKUP_URL='https://backup.example/v1';
+ process.env.BAMBOOK_LLM_BACKUP_KEY='backup-key';
+ const clock=Date.now(),time=vi.spyOn(Date,'now').mockReturnValue(clock);
+ const busy=(seconds:number)=>new Response('{}',{status:429,headers:{'Retry-After':String(seconds)}});
+ const fetchMock=vi.fn()
+  .mockResolvedValueOnce(busy(45)).mockResolvedValueOnce(okCompletion('backup report'))
+  .mockResolvedValueOnce(busy(45)).mockResolvedValueOnce(busy(75));
+ vi.stubGlobal('fetch',fetchMock);
+ try{
+  const complete=createLlmCompleter({platformProviders:{chain:()=>[]}});
+  await expect(complete(BASE_INPUT)).resolves.toBe('backup report');
+  await expect(complete(BASE_INPUT)).rejects.toMatchObject({retryNotBefore:clock+75_000});
+  expect(fetchMock).toHaveBeenCalledTimes(4);
+ }finally{time.mockRestore();}
+});
+
 describe('A. resolveLlmProviderChain', () => {
   it('无任何 key → 空链', () => {
     expect(resolveLlmProviderChain()).toEqual([]);

@@ -18,6 +18,22 @@
  *      env 提供方始终排在最后兜底（见 platformProviders.ts）。
  */
 
+/** A provider-supplied lower bound for the next automatic attempt. */
+export class LlmProviderRetryError extends Error {
+  constructor(message: string, readonly retryNotBefore: number) {
+    super(message);
+  }
+}
+
+function responseRetryNotBefore(response: Response, now: number) {
+  if (response.status !== 429 && response.status !== 503) return;
+  const value = response.headers?.get('retry-after')?.trim();
+  if (!value) return;
+  const at = /^\d+$/.test(value) ? Math.min(Number.MAX_SAFE_INTEGER, now + Number(value) * 1000)
+    : /^[A-Za-z]{3}/.test(value) ? Date.parse(value) : NaN;
+  return Number.isSafeInteger(at) && at > now ? at : undefined;
+}
+
 export type LlmProviderConfig = {
   id: string;
   baseUrl: string;
@@ -135,6 +151,7 @@ export function createLlmCompleter(options: LlmCompleterOptions = {}) {
     const failures: Array<{ providerId: string; error: string }> = [];
     let invalidResponse: Error | undefined;
     let attemptedProvider = false;
+    let retryNotBefore: number | undefined;
     for (const [index, step] of steps.entries()) {
       if (!available(step)) continue;
       input.signal.throwIfAborted();
@@ -167,15 +184,18 @@ export function createLlmCompleter(options: LlmCompleterOptions = {}) {
         return reply;
       } catch (err: any) {
         if (input.signal.aborted || (!deadline?.signal.aborted && err?.name === 'AbortError')) throw err;
+        if (err instanceof LlmProviderRetryError) retryNotBefore = Math.max(retryNotBefore ?? 0, err.retryNotBefore);
         const code = step.kind === 'subscription' && typeof err?.code === 'string' ? err.code + ': ' : '';
         failures.push({ providerId, error: deadline?.signal.aborted ? 'PROVIDER_ATTEMPT_TIMEOUT' : code + String(err?.message || err) });
       } finally {
         clearTimeout(timer);
       }
     }
-    if (invalidResponse) throw invalidResponse;
-    if (failures.length === 0) throw new Error('Model API key is not configured on Mac mini');
-    throw new Error(`LLM_ALL_PROVIDERS_FAILED: ${JSON.stringify(failures)}`);
+    if (!invalidResponse && failures.length === 0) throw new Error('Model API key is not configured on Mac mini');
+    const failure = invalidResponse ?? new Error(`LLM_ALL_PROVIDERS_FAILED: ${JSON.stringify(failures)}`);
+    // A successful fallback returns above. Only an exhausted chain advises the task scheduler.
+    if (retryNotBefore !== undefined) throw new LlmProviderRetryError(failure.message, retryNotBefore);
+    throw failure;
   };
 }
 
@@ -235,8 +255,11 @@ async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompl
     body: JSON.stringify(body),
   });
   if (!res.ok) {
+    const retryNotBefore = responseRetryNotBefore(res, Date.now());
     const data: any = await res.json().catch(() => ({}));
-    throw new Error(data?.error?.message || data?.message || `Model API failed with ${res.status}`);
+    const message = data?.error?.message || data?.message || `Model API failed with ${res.status}`;
+    if (retryNotBefore !== undefined) throw new LlmProviderRetryError(message, retryNotBefore);
+    throw new Error(message);
   }
   const data: any = await res.json().catch(() => ({}));
   const text = String(data?.choices?.[0]?.message?.content || '').trim();
