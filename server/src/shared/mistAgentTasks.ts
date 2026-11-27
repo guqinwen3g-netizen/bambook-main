@@ -71,6 +71,7 @@ export type AgentTaskActivity = {
   name: string;
   state: 'queued' | 'running';
   executionStage?: AgentTaskView['executionStage'];
+  executionStageSince?: AgentTaskView['executionStageSince'];
   modelFallbackSince?: AgentTaskView['modelFallbackSince'];
   runnerStatus?: AgentTaskView['runnerStatus'];
   retrying?: boolean;

@@ -351,8 +351,10 @@ it('shows only the owner’s active XiaoZhu tasks with a live stage and hides ta
   await f.worker.tick();
   await entered.promise;
   const active = (await f.human.get(path).expect(200)).body.items;
+  const executionStageSince = (await f.current(personal.id)).executionStageSince;
+  expect(Number.isFinite(Date.parse(executionStageSince))).toBe(true);
   expect(active).toEqual([
-   {id:personal.id,name:'核对交期',state:'running',executionStage:'model'},
+   {id:personal.id,name:'核对交期',state:'running',executionStage:'model',executionStageSince},
    {id:queued.id,name:'核对数量',state:'queued'},
   ]);
  } finally {

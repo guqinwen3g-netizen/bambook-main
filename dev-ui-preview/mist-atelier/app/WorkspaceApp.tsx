@@ -15,7 +15,8 @@ import { preloadPagesWhenIdle } from './pagePreload';
 import { primaryImageId } from '../../../server/src/shared/mistPrimaryImage';
 import { useAssistantConversation, type AssistantReply } from './runtime/assistantConversation';
 import { useReadOnlyAssistantHistory } from './runtime/readonlyAssistantHistory';
-import { useXiaozhuActivity, xiaozhuActivityLabel } from './runtime/xiaozhuActivity';
+import { activeModelFallbackSince, useXiaozhuActivity, xiaozhuActivityLabel } from './runtime/xiaozhuActivity';
+import { XiaozhuPhaseTimer } from './pages/modules/XiaozhuPhaseTimer';
 import { Bell, ClipboardList, Component, KeyRound, Layers, ListTodo, Moon, Search, Settings2, ShieldCheck, Sparkles, SquareDashed, Users } from 'lucide-react';
 
 import {
@@ -180,6 +181,8 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
   const noticeScope = session.sessionKey + ':' + (workspace.workspace?.id || '');
   const [activeAgentTask] = useXiaozhuActivity(workspace.workspace?.id, noticeScope, canAI);
   const agentActivityLabel = activeAgentTask ? uiText(xiaozhuActivityLabel(activeAgentTask)) : '';
+  const agentModelSince = activeAgentTask?.state === 'running' && activeAgentTask.executionStage === 'model' && !activeAgentTask.runnerStatus
+    ? activeModelFallbackSince(activeAgentTask) ?? activeAgentTask.executionStageSince : undefined;
   const unreadIds = visibleNotifications.filter(n => !n.readAt).map(n => n.id).join('|');
   React.useEffect(() => {
     const unread = visibleNotifications.filter(n => !n.readAt), seen = seenNotices.current;
@@ -491,10 +494,13 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
           assistant={activeAgentTask ? {
             title: '小竹',
             activityLabel: [uiText('小竹'), activeAgentTask.name, agentActivityLabel].join(' · '),
-            text: <span aria-live="polite" aria-atomic="true">
+            text: <>
               <span className="mist-side-ai-task" title={activeAgentTask.name}>{activeAgentTask.name}</span>
-              <span className="mist-side-ai-stage">{agentActivityLabel}</span>
-            </span>,
+              <span className="mist-side-ai-stage">
+                <span aria-live="polite">{agentActivityLabel}</span>
+                {agentModelSince && <> <XiaozhuPhaseTimer at={agentModelSince} /></>}
+              </span>
+            </>,
             onClick: () => go('assistant', activeAgentTask.id, { section: 'task-origin' }),
           } : undefined} />}
         topbar={scrolled => <MistTopbar scrolled={scrolled} onBack={backTarget ? goBack : undefined} backLabel={backTarget ? '返回' + backTarget.label : undefined} crumbs={platformOnly && ['system-settings','settings'].includes(route.view) ? [{label:'平台运营'},{label:'平台设置'}] : crumbsFor(route, go, state?.devs.find(d=>d.id===route.id)?.code || state?.orders.find(o=>o.id===route.id)?.code, state?.versions.find(v=>v.id===route.versionId)?.label)}
