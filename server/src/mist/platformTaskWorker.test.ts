@@ -831,6 +831,33 @@ it.each([429,503])('respects provider retry timing for %i and retains acknowledg
  }finally{vi.unstubAllGlobals();}
 });
 
+it('queues another task during the same provider cooldown without recording a model failure',async()=>{
+ vi.stubEnv('ARK_API_KEY','fixture-shared-flash-key');
+ vi.stubEnv('BAMBOOK_MODEL_BASE_URL','https://ark.cn-beijing.volces.com/api/plan/v3');
+ vi.stubEnv('BAMBOOK_MODEL_NAME','deepseek-v4.1-flash');
+ const complete=createLlmCompleter({platformProfile:'agent-task',platformProviders:{chain:()=>[]},subscriptions:{isConnected:()=>false,complete:async()=>''}});
+ const f=await fixture(complete);
+ let clock=Date.now();vi.spyOn(Date,'now').mockImplementation(()=>clock);
+ const fetchMock=vi.fn()
+  .mockResolvedValueOnce(new Response('{}',{status:429,headers:{'Retry-After':'60'}}))
+  .mockImplementation(async()=>new Response(JSON.stringify({choices:[{message:{content:tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已续办原任务。'})}}]})));
+ vi.stubGlobal('fetch',fetchMock);
+ try{
+  f.worker.start(3_600_000);
+  const first=await f.create('platform');await f.drain();
+  const second=await f.create('platform');await f.drain();
+  const retryAt=new Date(clock+60_000).toISOString();
+  for(const task of [first,second])expect(await f.current(task.id)).toMatchObject({state:'queued',executionIssue:{retryAt}});
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  const stored=(await taskRecord((f.repository as any).prisma,f.workspace.id,second.id)).value;
+  expect(stored.platform?.failures).toBe(0);
+  clock+=59_999;await f.drain();expect(fetchMock).toHaveBeenCalledTimes(1);
+  clock+=1;await f.drain();await f.drain();
+  for(const task of [first,second])expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'已续办原任务。'});
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+ }finally{vi.unstubAllGlobals();}
+});
+
 it('pauses repeated invalid model output and allows explicit owner recovery on the same task',async()=>{
  let valid=false,mail='',read=false;const complete=vi.fn(async()=>!valid?'not a tool decision':!read?(read=true,tool('bambook_get',{type:'email',id:mail})):tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对原邮件。'}));
  const f=await fixture(complete);mail=f.workspace.state.email.messages[0].id;f.worker.start(3_600_000);const task=await f.create('platform');let clock=Date.now();vi.spyOn(Date,'now').mockImplementation(()=>clock);

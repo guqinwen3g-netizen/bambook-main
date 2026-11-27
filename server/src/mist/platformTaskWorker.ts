@@ -1,7 +1,7 @@
 import type { FileTextWindowCache } from './agentFileWindow';
 import { isTaskImage, taskAttachmentLabels } from '../shared/mistTaskAttachments';
 import{randomUUID}from'node:crypto';
-import{createLlmCompleter,LlmProviderRetryError,type LlmCompletionInput}from'../ai/llmProviders';
+import{createLlmCompleter,LlmProviderRetryError,LlmProviderCooldownError,type LlmCompletionInput}from'../ai/llmProviders';
 import{getMistAssistantStatus}from'./assistant';
 import{handleMcpMessage,MCP_SOURCE_RULES,platformTaskModelToolCatalog,type McpRepository}from'./agentMcp';
 import type{AgentActor}from'./agentDelegation';
@@ -232,6 +232,7 @@ export class MistPlatformTaskWorker{
       if(!abort.signal.aborted){
         if(phase==='model'&&error instanceof LlmProviderRetryError)providerRetryAt=error.retryNotBefore;
         issue=/^MODEL_PLAN_/.test(String(error?.message))?'model_response_invalid'
+          :phase==='model'&&error instanceof LlmProviderCooldownError?'model_cooldown'
           :phase==='model'&&error instanceof PlatformModelTimeout?'model_timeout'
           :phase==='model'||error?.message==='MODEL_UNAVAILABLE'?'model_unavailable':undefined;
         this.options.onError?.(issue?'PLATFORM_TASK_MODEL_RETRY':'PLATFORM_TASK_RECOVERY_REQUIRED');
