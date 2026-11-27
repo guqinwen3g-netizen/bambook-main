@@ -102,6 +102,20 @@ function Question({ task, onAnswer, busy, draft }: { task: AgentTaskView; onAnsw
       <Button size="sm" variant="ai" loading={busy} disabled={busy||!text.trim()} onClick={send}>{uiText('回答')}</Button></div></div>;
 }
 
+function AnsweredQuestions({questions}: {questions:AgentTaskView['questions']}) {
+  const answered=questions?.flatMap(({id,question,answer,answeredAt})=>answeredAt&&answer?[{id,question,answer,answeredAt}]:[])??[];
+  if(!answered.length)return null;
+  return <div className="mist-xz-card">
+    <div className="mist-xz-card-h"><Icon icon={Check} size="sm"/><b>{uiText('资料已补充')}</b></div>
+    {answered.map(question=><div key={question.id} className="mist-col">
+      <p>{question.question}</p>
+      <div><span className="mist-label">{uiText('本人答复')}</span>
+        <time className="mist-xz-time" dateTime={question.answeredAt}>{clock(question.answeredAt)}</time></div>
+      <p>{question.answer}</p>
+    </div>)}
+  </div>;
+}
+
 function ProposalCard({ proposal, onOpen, onDecide, onRecover, blocked }: {
   proposal: AgentProposal; onOpen: (id: string) => void; onDecide?: (id: string, confirm: boolean) => Promise<void>;
   onRecover?: (id:string)=>Promise<void>; blocked?: boolean;
@@ -215,6 +229,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
       </div>
       <XiaozhuTurnShell status={status}>
         {(!!t.trail?.length || working) && <Trail task={t} items={t.trail ?? []} active={working} activeLabel={activeLabel} recovering={!!t.runnerStatus} since={t.runnerStatus==='heartbeat_stale'?t.lastHeartbeatAt??undefined:t.executionStageSince} onOpen={actions.onOpenRecord} onPreviewAttachment={actions.onPreviewAttachment} />}
+        <AnsweredQuestions questions={t.questions}/>
         {t.result && <XiaozhuMarkdown text={t.result} index={index} onOpen={actions.onOpenRecord} attachments={t.attachments}
           onOpenAttachment={actions.onPreviewAttachment ? file => actions.onPreviewAttachment?.(t, file) : undefined} />}
         {active && t.checkpoint && !t.result && !working && <p className="mist-xz-note">{t.checkpoint}</p>}

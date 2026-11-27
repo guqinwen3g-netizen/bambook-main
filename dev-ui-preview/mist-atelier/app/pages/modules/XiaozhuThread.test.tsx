@@ -82,6 +82,20 @@ it('keeps the work trail collapsed after the request is done, and expands it on 
 it('asks the open question inline and sends the answer for that question',async()=>{const f=fns();await paint([task({state:'waiting_human',questions:[{id:'q1',question:'核对哪个客户？',askedAt:''}]})],f);expect(host.textContent).toContain('核对哪个客户？');const box=getByLabelText(host,'回答小竹') as HTMLInputElement;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(box,'客户A');box.dispatchEvent(new Event('input',{bubbles:true}));});await act(async()=>getByRole(host,'button',{name:'回答'}).click());expect(f.onAnswer).toHaveBeenCalledWith(expect.objectContaining({id:'t1'}),'q1','客户A');expect(box.value).toBe('客户A');});
 it('shows what will change and opens the confirmation without leaving the conversation',async()=>{const f=fns();await paint([task({state:'waiting_human',waitingProposalIds:['p1']})],f,[proposal()]);expect(host.textContent).toContain('需要你确认');expect(host.textContent).toContain('归档邮件 PO 确认');expect(host.textContent).toContain('中风险');await act(async()=>getByRole(host,'button',{name:'查看并确认'}).click());expect(f.onProposal).toHaveBeenCalledWith('p1');});
 it('labels a stopped request instead of leaving it blank',async()=>{await paint([task({state:'budget_exhausted',checkpoint:'已读 20 条'})]);expect(host.textContent).toContain('达到限额');});
+it('shows the confirmed answer beside its original question, without reopening it',async()=>{
+  const f=fns();
+  const questions=[{id:'q1',question:'客人确认了哪天交货？',askedAt:'2026-11-27T02:00:00Z',answeredAt:'2026-11-27T02:03:00Z',answer:'模拟交期 1 月 22 日'},
+    {id:'q2',question:'请提供模拟出运港。',askedAt:'2026-11-27T02:04:00Z'}];
+  const asking=task({state:'waiting_human',questions});
+  await paint([asking],f);
+  expect(host.textContent).toContain('客人确认了哪天交货？');
+  expect(host.textContent).toContain('模拟交期 1 月 22 日');
+  expect(host.textContent).toContain('请提供模拟出运港。');
+  expect(host.querySelectorAll('[aria-label="回答小竹"]')).toHaveLength(1);
+  await paint([{...asking,contentRestricted:true}],f);
+  expect(host.textContent).not.toContain('模拟交期 1 月 22 日');
+  expect(f.onAnswer).not.toHaveBeenCalled();
+});
 it('groups requests by day',()=>{const now=new Date('2026-11-09T10:00:00+08:00');expect(dayLabel('2026-11-09T01:00:00+08:00',now)).toBe('今天');expect(dayLabel('2026-11-08T17:30:00Z',now)).toBe('今天');expect(dayLabel('2026-11-08T23:00:00+08:00',now)).toBe('昨天');});
 
 
