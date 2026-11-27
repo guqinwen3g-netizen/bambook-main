@@ -43,7 +43,7 @@ import { exportRebateExtraPermissions } from '../shared/mistExportRebate';
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyCompanyRoster, canMaintainCompany, companyDataScope, companyTeamIds, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
 import { isAgentActor, type AgentActor } from './agentDelegation';
-import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, assertTaskLease, assertTaskAuthority, assertTaskViewAuthority, acknowledgePlatformStep, advanceTaskSources, answerTaskQuestion, askTaskQuestion, changeTask, checkpointTask, claimTask, deferPlatformJob, duePlatformTasks, createTask, finishTask, finishTaskSession, heartbeatTask, issueTaskControl, listTasks, parseTaskHistoryIds, readTaskRecord, reserveTaskStep, resolveTaskControl, resolveTaskCredential, releasePlatformTask, savePlatformPlan, saveTaskSources, settleTaskProposal, taskFromCreationReceipt, taskHistory, taskRecord, taskView, waitTaskForProposal, type MakeTaskCredential, type MakeTaskControl, type TaskConversationHistory, type TaskRecord, type PlatformTaskJob, type PlatformTaskReleaseIssue } from './agentTasks';
+import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, assertTaskLease, assertTaskAuthority, assertTaskViewAuthority, acknowledgePlatformStep, advanceTaskSources, answerTaskQuestion, askTaskQuestion, changeTask, checkpointTask, claimTask, deferPlatformJob, duePlatformTasks, createTask, finishTask, finishTaskSession, heartbeatTask, issueTaskControl, listTasks, markPlatformModelFallback, parseTaskHistoryIds, readTaskRecord, reserveTaskStep, resolveTaskControl, resolveTaskCredential, releasePlatformTask, savePlatformPlan, saveTaskSources, settleTaskProposal, taskFromCreationReceipt, taskHistory, taskRecord, taskView, waitTaskForProposal, type MakeTaskCredential, type MakeTaskControl, type TaskConversationHistory, type TaskRecord, type PlatformTaskJob, type PlatformTaskReleaseIssue } from './agentTasks';
 import { collectTaskSources, knownCommandSourcesVisible, taskScopeHash, taskSourcesVisible } from './agentTaskVisibility';
 import { taskHistoryReadRefs, taskIntentRefsVisible, validateTaskIntentRefs } from './agentTaskIntentRefs';
 import {taskNotice,taskNoticeCandidates} from './agentTaskAttention';
@@ -355,6 +355,14 @@ export class MistRepository {
   async assertPlatformTaskActive(prior: AgentActor) {
     if (prior.agentExecutor !== 'platform' || !prior.agentTaskLease) fail('FORBIDDEN', '请使用平台任务执行器', 403);
     await this.transact(db => this.own(db, prior, prior.agentTaskLease!.workspaceId, 'ai:chat'));
+  }
+  async markPlatformModelFallback(prior:AgentActor){
+    const lease=prior.agentTaskLease;
+    if(prior.agentExecutor!=='platform'||!lease)fail('FORBIDDEN','请使用平台任务执行器',403);
+    await this.connectionTransaction(async db=>{
+      const {actor}=await this.own(db,prior,lease.workspaceId,'ai:chat');
+      await markPlatformModelFallback(db,{...prior,...actor},lease,Date.now());
+    });
   }
   async pulsePlatformTask(prior:AgentActor){
     if(prior.agentExecutor!=='platform'||!prior.agentTaskLease)fail('FORBIDDEN','请使用平台任务执行器',403);

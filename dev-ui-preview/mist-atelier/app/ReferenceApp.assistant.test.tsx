@@ -50,6 +50,14 @@ it('shows live activity in the sidebar, opens its original task, and hides after
   bridge.activity.mockResolvedValue({items:[{...task,executionStage:'model'}]});
   await change();
   expect(card()?.textContent).toContain('正在等待模型');
+  const modelFallbackSince = new Date().toISOString();
+  bridge.activity.mockResolvedValue({items:[{...task,executionStage:'model',modelFallbackSince}]});
+  await change();
+  expect(card()?.textContent).toContain('正在等待备用模型');
+  bridge.activity.mockResolvedValue({items:[{...task,executionStage:'model',modelFallbackSince,runnerStatus:'heartbeat_stale'}]});
+  await change();
+  expect(card()?.textContent).toContain('执行进度暂未更新');
+  expect(card()?.textContent).not.toContain('正在等待备用模型');
   await click(card()!);
   expect(Object.fromEntries(new URLSearchParams(location.search))).toMatchObject({view:'assistant',id:'task-a',section:'task-origin'});
   bridge.activity.mockResolvedValue({items:[]});
