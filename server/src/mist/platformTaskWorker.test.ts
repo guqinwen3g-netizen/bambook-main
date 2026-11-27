@@ -1143,6 +1143,56 @@ it.each([false,true])('uses only the selected worksheet, including on resuming w
  expect((await f.current(task.id)).trail.at(-1)?.detail).toBe('已读取工作表：确认报价');
 });
 
+it.each([false,true])('honors explicitly excluded attachments before and after a stored read (%s)', async legacy=>{
+ let excludedFileId = '';
+ let calls = 0;
+ const complete = vi.fn(async (_input:LlmCompletionInput)=>++calls===1
+  ? tool('bambook_file_text',{fileId:excludedFileId})
+  : tool('bambook_task',{action:'finish',outcome:'succeeded',result:'只核对所选表。'}));
+ const workbook=XLSX.utils.book_new();
+ XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([['FINAL-EUR-2500']]),'确认报价');
+ const png=await sharp({create:{width:2,height:2,channels:3,background:'#222'}}).png().toBuffer();
+ const f=await fixture(complete);
+ vi.spyOn(f.worker,'wake').mockImplementation(()=>{});
+ f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'只核对选定表',instructions:'请只读取 quote.xlsx 的「确认报价」工作表。不要读取其他附件。'}))
+  .attach('attachments',pdf('OUTSIDE-PDF-TEXT'),'other.pdf')
+  .attach('attachments',XLSX.write(workbook,{type:'buffer',bookType:'xlsx'}),'quote.xlsx')
+  .attach('attachments',png,'outside.png').expect(201)).body.item;
+ excludedFileId=task.attachments[0].id;
+ if(legacy)await f.local.database.$transaction(async db=>{
+  const {row,value}=await taskRecord(db,f.workspace.id,task.id);
+  const at=new Date().toISOString();
+  const evidence={id:'platform_excluded_pdf',at,plan:{name:'bambook_file_text',arguments:{fileId:excludedFileId}},
+   result:{kind:'pdf',file:{id:excludedFileId},text:'OLD-EXCLUDED-RECEIPT'}};
+  const finish={id:'platform_frozen_finish',at,plan:{name:'bambook_task',arguments:{
+   action:'finish',outcome:'succeeded',requestId:'platform_frozen_finish',result:'OLD-EXCLUDED-REPORT'}}};
+  const saved=await db.mistCommandReceipt.updateMany({where:{id:row.id},data:{
+   result:{...row.result,__agentTask:{...value,checkpoint:'OLD-EXCLUDED-SUMMARY',platform:{...value.platform,nextRunAt:Date.now(),steps:[evidence,finish]}}},
+  }});
+  expect(saved.count).toBe(1);
+ });
+ await f.drain();
+ expect(await f.current(task.id)).toMatchObject({state:'succeeded',result:'只核对所选表。'});
+ expect(complete).toHaveBeenCalledTimes(2);
+ for(const [input] of complete.mock.calls){
+  expect(input.images??[]).toHaveLength(0);
+  const message=input.messages[0].content;
+  expect(message).not.toMatch(/OUTSIDE-PDF-TEXT|OLD-EXCLUDED-|other.pdf|outside.png/);
+  expect(message).toContain('FINAL-EUR-2500');
+  const facts=JSON.parse(message.slice(message.indexOf('{')));
+  expect(facts.task.attachments.map((file:{id:string})=>file.id)).toEqual(['attachment_2']);
+ }
+ const stored=await f.local.database.$transaction(db=>taskRecord(db,f.workspace.id,task.id));
+ const refused=stored.value.platform?.steps.find(step=>step.plan.arguments.fileId===excludedFileId
+  && (step.result as {error?:boolean}|undefined)?.error);
+ expect(refused?.result).toMatchObject({error:true,message:'本任务不读取该附件'});
+ const final=await f.current(task.id);
+ expect(final.trail.filter((step:any)=>step.kind==='read'&&step.completed).map((step:any)=>step.taskAttachmentId))
+  .toEqual([task.attachments[1].id]);
+});
+
 it.each([true,false])('reads only the numbered workbook and asks when the number is missing (%s)',async explicitlyNumbered=>{
  let calls=0;
  const complete=vi.fn(async (_input:LlmCompletionInput)=>++calls===1

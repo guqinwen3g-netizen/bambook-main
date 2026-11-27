@@ -1,6 +1,35 @@
 import{expect,it}from'vitest';
-import{compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,requestedPdfRange,shortPdfContinuationPlan,shortOfficeTailPlan}from'./platformTaskPlan';
+import{compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,requestedPdfRange,requestedTaskAttachmentScope,shortPdfContinuationPlan,shortOfficeTailPlan}from'./platformTaskPlan';
 import{platformReasoning}from'../ai/platformModel';
+import {composeTaskInstructions} from '../shared/mistTaskHistoryText';
+
+const mixedFiles=[
+  {id:'pdf1',name:'quote.pdf',mimeType:'application/pdf',size:1},
+  {id:'pdf2',name:'quote.pdf',mimeType:'application/pdf',size:1},
+  {id:'xlsx',name:'compare.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',size:1},
+  {id:'photo',name:'label.png',mimeType:'image/png',size:1},
+];
+
+it.each([
+  ['请只读取 quote.pdf（2）的前 3 页，其他文件不要读取。',['pdf2']],
+  ['只读取 label.png，不要读剩余附件。',['photo']],
+  ['Please read only label.png. Do not open any other files.',['photo']],
+  ['读取 label.png 不要读取其他附件 compare.xlsx。',['photo']],
+  ['请查看 label.png。勿读取任何附件。',[]],
+  ['请只读 quote.pdf，不要读取其他文件。',[]],
+])('selects known attachments only for an explicit exclusive request (%s)',(request,expected)=>{
+  const scope=requestedTaskAttachmentScope(mixedFiles,request);
+  expect([...scope.allowedFiles!]).toEqual(expected);
+  if(expected[0]==='pdf2')expect(scope.pdf).toEqual({fileId:'pdf2',from:1,to:3});
+});
+
+it('keeps mixed-source reading and ignores exclusion text in prior conversation context',()=>{
+  const request=composeTaskInstructions([{state:'succeeded',instructions:'不要读取其他附件。',result:'已核对。'}],
+    '请只读取 compare.xlsx 的「确认报价」工作表。也核对标签。');
+  const scope=requestedTaskAttachmentScope(mixedFiles,request);
+  expect(scope.allowedFiles).toBeUndefined();
+  expect(scope.worksheet).toMatchObject({fileId:'xlsx',worksheet:'确认报价'});
+});
 
 it('accepts only a bound business tool decision, without thoughts, owner impersonation or model request IDs',()=>{
   expect(parsePlatformTaskPlan('{"name":"bambook_query","arguments":{"type":"email"}}')).toEqual({name:'bambook_query',arguments:{type:'email'}});

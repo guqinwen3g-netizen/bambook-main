@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type {AgentTaskIntentRef,AgentTaskQuestion,AgentTaskView} from '../shared/mistAgentTasks';
 import type { MarketQuotation } from '../shared/mistMarket';
 import { splitTaskRequest } from '../shared/mistTaskHistoryText';
-import { officeKind, taskWorkbookChoices, WORKBOOK_SELECTION_QUESTION } from '../shared/mistTaskAttachments';
+import { officeKind, taskAttachmentLabels, taskWorkbookChoices, WORKBOOK_SELECTION_QUESTION } from '../shared/mistTaskAttachments';
 import type { PdfPageTextSpan } from './agentFileText';
 import { isFileTextCursor } from './agentFileWindow';
 import type{ResponseLocale}from'./responseLanguage';
@@ -58,6 +58,8 @@ export function requestedPdfRange(attachments:AgentTaskView['attachments']=[],in
     return {fileId:file.id,...range};
 }
 
+const escapeAttachmentName = (value:string)=>value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+
 export function requestedWorkbookWorksheet(attachments:AgentTaskView['attachments']=[],instructions='',questions:readonly AgentTaskQuestion[]=[]) {
   const request=splitTaskRequest(instructions);
   const workbooks=taskWorkbookChoices(attachments);
@@ -71,8 +73,7 @@ export function requestedWorkbookWorksheet(attachments:AgentTaskView['attachment
 
   const workbookIds=workbooks.map(({file})=>file.id);
   const aliases=[...new Set(workbooks.flatMap(({file,label})=>[file.name,label]))].sort((a,b)=>b.length-a.length);
-  const escape=(value:string)=>value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-  const pattern=new RegExp('(?<![\\w./-])(?:'+aliases.map(escape).join('|')+')(?![\\w./-]|[（(]\\d+)','gu');
+  const pattern=new RegExp('(?<![\\w./-])(?:'+aliases.map(escapeAttachmentName).join('|')+')(?![\\w./-]|[（(]\\d+)','gu');
   const normalizeLabel=(value:string)=>value.replace(/(\.xlsx)\((\d+)\)/gi,'$1（$2）');
   const subjects=chinese.map(match=>normalizeLabel(match[1]));
   const candidates=new Set<string>();
@@ -91,16 +92,64 @@ export function requestedWorkbookWorksheet(attachments:AgentTaskView['attachment
   return {fileId:matching.length===1?matching[0].file.id:undefined,worksheet,workbookIds};
 }
 
+const SKIP_READ_ZH = /(?:不要|请勿|无需|不|勿)(?:再)?(?:读取|阅读|核对|查看|检查|处理|读|看)/.source;
+const OTHER_FILES_ZH = /(?:其他|其它|其余|剩余)的?(?:附件|文件)(?!夹|名)/.source;
+const EXCLUDE_ALL_FILES = new RegExp(SKIP_READ_ZH+'[ \t]*(?:任何|全部)附件','u');
+const EXCLUDE_OTHER_FILES = new RegExp(
+  SKIP_READ_ZH+'[ \t]*(?:任何)?'+OTHER_FILES_ZH+'|'+OTHER_FILES_ZH+'[ \t]*(?:均|都|一律)?'+SKIP_READ_ZH,'u',
+);
+const SKIP_FILE_READ = new RegExp(SKIP_READ_ZH+String.raw`|\b(?:do not|don't|never) (?:read|open|check|review|inspect)\b`,'iu');
+
+/**
+ * Explicit negatives apply to the entire task attachment set. A page or worksheet limit on
+ * its own still allows the task to check other requested sources.
+ */
+export function requestedTaskAttachmentScope(attachments:AgentTaskView['attachments']=[],instructions='',questions:readonly AgentTaskQuestion[]=[]) {
+  const pdf = requestedPdfRange(attachments,instructions);
+  const worksheet = requestedWorkbookWorksheet(attachments,instructions,questions);
+  const request = splitTaskRequest(instructions);
+  const allExcluded = EXCLUDE_ALL_FILES.test(request)
+    || /\b(?:do not|don't|never) (?:read|open|check|review|inspect) (?:any|all) attachments\b/iu.test(request);
+  const othersExcluded = EXCLUDE_OTHER_FILES.test(request)
+    || /\b(?:do not|don't|never) (?:read|open|check|review|inspect) (?:any )?(?:other|remaining) (?:attachments|files)\b/iu.test(request);
+  if (!allExcluded && !othersExcluded) return {pdf,worksheet};
+
+  const allowed = new Set<string>();
+  if (allExcluded) return {pdf:undefined,worksheet:undefined,allowedFiles:allowed};
+  if (pdf) allowed.add(pdf.fileId);
+  if (worksheet?.fileId) allowed.add(worksheet.fileId);
+
+  // Specialised scopes disambiguate same-name originals. For a whole-file request, require
+  // an exact filename or numbered label in the affirmative part before a clause separator.
+  if (attachments.length) {
+    const labels = taskAttachmentLabels(attachments);
+    const names = [...new Set([...attachments.map(file=>file.name),...labels])].sort((a,b)=>b.length-a.length);
+    const namedFile = new RegExp('(?<![A-Za-z0-9_./-])(?:'+names.map(escapeAttachmentName).join('|')+')(?![A-Za-z0-9_/-]|\\.[A-Za-z0-9]|[（(]\\d+)','gu');
+    const affirmative = /(?:^|[。！？；;!?\n]|\.[ \t]+)[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:(?:只|仅)?(?:读取|阅读|核对|查看|检查|处理|读|看)|(?:please[ \t]+)?(?:only[ \t]+)?(?:read|open|check|review|inspect)(?:[ \t]+only)?\b)(?:(?!\.[ \t])[^。！？；;!?，,\n])+/giu;
+    for (const clause of request.matchAll(affirmative)) {
+      const normalized = clause[0].split(SKIP_FILE_READ,1)[0].replace(/(\.[a-z0-9]+)\((\d+)\)/gi,'$1（$2）');
+      for (const [name] of normalized.matchAll(namedFile)) {
+        const matches = attachments.filter((file,index)=>file.name===name||labels[index]===name);
+        if (matches.length === 1 && !worksheet?.workbookIds.includes(matches[0].id)) allowed.add(matches[0].id);
+      }
+    }
+  }
+  const eligibleFiles = attachments.filter(file=>allowed.has(file.id));
+  return {pdf:pdf??requestedPdfRange(eligibleFiles,instructions),worksheet,allowedFiles:allowed};
+}
+
 /** Older receipts without the requested scope cannot inform a new model turn. */
 export function scopedAttachmentTaskSteps(steps:PlatformTaskStep[],pdfScope:ReturnType<typeof requestedPdfRange>,
-  worksheetScope:ReturnType<typeof requestedWorkbookWorksheet>):PlatformTaskStep[] {
-  if(!pdfScope&&!worksheetScope)return steps;
+  worksheetScope:ReturnType<typeof requestedWorkbookWorksheet>,allowedFiles?:ReadonlySet<string>):PlatformTaskStep[] {
+  if(!pdfScope&&!worksheetScope&&!allowedFiles)return steps;
   const eligible=steps.filter(step=>{
-    const read=step.result as (PdfReadWindow&{worksheetScope?:string;sheets?:string[];observedSheets?:string[];attachmentScopeRereadRequired?:boolean;pdfScopeRereadRequired?:boolean})|undefined;
+    const read=step.result as (PdfReadWindow&{worksheetScope?:string;sheets?:string[];observedSheets?:string[];attachmentScopeRereadRequired?:boolean;pdfScopeRereadRequired?:boolean;excludedAttachmentHistoryDiscarded?:boolean})|undefined;
+    if(read?.excludedAttachmentHistoryDiscarded===true)return false;
     if(step.plan.name==='bambook_task'&&step.plan.arguments.action==='finish'
       &&(read?.pdfScopeRereadRequired===true||read?.attachmentScopeRereadRequired===true))return false;
     if(step.plan.name!=='bambook_file_text'||step.result===undefined)return true;
     const fileId=step.plan.arguments.fileId;
+    if(typeof fileId==='string'&&allowedFiles&&!allowedFiles.has(fileId))return false;
     const workbookInScope=typeof fileId==='string'&&worksheetScope?.workbookIds.includes(fileId);
     if(typeof fileId!=='string'||!workbookInScope&&pdfScope?.fileId!==fileId)return true;
     if(read?.error===true||read?.kind==='unreadable'||read?.kind==='unsupported')return !read.text;
