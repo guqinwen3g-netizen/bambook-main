@@ -6657,6 +6657,8 @@
   "正在等待备用模型": "Waiting for the backup model",
   "只读对话": "Read-only conversation",
   "返回工作任务": "Back to work tasks",
+  "打开原对话": "Open original conversation",
+  "打开原规则": "Open original rule",
   "移除不可用引用": "Remove unavailable reference",
   "向小竹提问": "Ask Xiaozhu",
   "等待模型重试": "Waiting to retry the model",

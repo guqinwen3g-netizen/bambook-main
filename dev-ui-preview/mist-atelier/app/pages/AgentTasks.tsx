@@ -2,7 +2,7 @@ import {agentSource} from '../runtime/agentSource';
 import {XiaozhuMarkdown} from './modules/XiaozhuMarkdown';
 import {XiaozhuPhaseTimer} from './modules/XiaozhuPhaseTimer';
 import React from 'react';
-import { Bot, Copy, Plus, RefreshCw } from 'lucide-react';
+import { Bot, Copy, MessageSquare, Plus, RefreshCw, Zap } from 'lucide-react';
 import { Banner, Button, Card, CardBody, CardHeader, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, KeyValue, Pill, Select, Skeleton, TextArea, TextInput, useToast, type Column, type Tone } from '../../../../components/mist';
 import type { AgentTaskEvent, AgentTaskPage, AgentTaskView } from '../../../../server/src/shared/mistAgentTasks';
 import type { AgentIdentityView } from '../../../../server/src/shared/mistAgentIdentities';
@@ -282,6 +282,11 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
   const target=agentSource(source);if(target)nav.go(target.view,target.id,target.target);
  };
  const active=identities.filter(i=>i.state==='active'),aiUnavailable=identities.some(i=>i.state==='invalid'&&i.canIssue===false),create=plan?.kind==='create'?plan:null,answer=plan?.kind==='answer'?plan:null;
+ const detailOrigin=detail&&!contentRestricted(detail)&&detail.state!=='access_changed'&&detail.executor==='platform'
+  ? detail.automationId?{id:detail.automationId,section:'automations',label:'打开原规则',icon:Zap}
+   :detail.conversationId?{id:detail.id,section:'task-origin',label:'打开原对话',icon:MessageSquare}
+   :undefined
+  :undefined;
  const detailProgressUnavailable=detailNeedsRead||!!detailError;
  const detailModelSince=detail&&!detailProgressUnavailable&&!detail.runnerStatus
   &&detail.state==='running'&&detail.executionStage==='model'
@@ -304,6 +309,7 @@ function TaskPanel({workspaceId,onConnections,rowAction,refreshSignal,onTaskUpda
    {detailError&&detailTarget&&<FailureNotice title="任务详情读取失败" detail={detailError} retry={()=>void openDetail(detailTarget)}/>}
    {detail&&<div className="mist-col"><div className="mist-row"><Pill tone={tone(detail.state)}>{uiText(statusLabel(detail,detailProgressUnavailable))}</Pill>{detailModelSince&&<XiaozhuPhaseTimer at={detailModelSince}/>}
     {contentRestricted(detail)&&detail.state!=='access_changed'&&<Pill tone="warn">{uiText('权限已变化')}</Pill>}
+    {detailOrigin&&<Button size="sm" variant="quiet" icon={detailOrigin.icon} onClick={()=>nav.go('assistant',detailOrigin.id,{section:detailOrigin.section})}>{uiText(detailOrigin.label)}</Button>}
    </div>
     <KeyValue items={[
       {label:uiText('执行方式'),value:uiText(detail.executor==='platform'?'平台执行':'外部客户端')},
