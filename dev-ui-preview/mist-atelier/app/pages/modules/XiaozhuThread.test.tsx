@@ -129,6 +129,44 @@ it('shows the scheduled retry delay until it elapses without implying a model is
 });
 
 
+it('starts the backup model timer at failover and gives recovery states priority', async () => {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date('2026-11-27T04:00:00Z'));
+    const model = task({
+      executionStage:'model',
+      executionStageSince:new Date(Date.now()-47_000).toISOString(),
+      modelFallbackSince:new Date(Date.now()-2_000).toISOString(),
+    });
+    await paint([model]);
+    expect(getByRole(host,'status').textContent).toBe('正在等待备用模型');
+    expect(getByRole(host,'timer').textContent).toBe('· 2 秒');
+    await act(async()=>vi.advanceTimersByTimeAsync(1000));
+    expect(getByRole(host,'timer').textContent).toBe('· 3 秒');
+
+    await paint([model], {...fns(),staleProgressIds:new Set([model.id])});
+    expect(getByRole(host,'status').textContent).toBe('执行进度暂未更新');
+    expect(queryByRole(host,'timer')).toBeNull();
+
+    await paint([{...model,runnerStatus:'heartbeat_stale',lastHeartbeatAt:new Date(Date.now()-20_000).toISOString()}]);
+    expect(getByRole(host,'status').textContent).toBe('执行进度暂未更新');
+    expect(getByRole(host,'timer').textContent).toBe('· 20 秒');
+
+    const retryAt = new Date(Date.now()+5000).toISOString();
+    await paint([{...model,state:'queued',executionIssue:{code:'model_unavailable',retryAt}}]);
+    expect(getByRole(host,'status').textContent).toBe('等待模型重试');
+    expect(getByRole(host,'timer').textContent).toBe('· 最早 5 秒后重试');
+
+    await paint([{...model,modelFallbackSince:'unparseable'}]);
+    expect(getByRole(host,'status').textContent).toBe('正在等待模型');
+    expect(getByRole(host,'timer').textContent).toBe('· 48 秒');
+
+    await paint([{...model,executionStage:'tool',executionStageSince:new Date().toISOString()}]);
+    expect(getByRole(host,'status').textContent).toBe('正在办理');
+    expect(getByRole(host,'timer').textContent).toBe('· 0 秒');
+  } finally { vi.useRealTimers(); }
+});
+
 it('shows actual step details as they arrive while the model wait counts up', async () => {
   vi.useFakeTimers();
   try {

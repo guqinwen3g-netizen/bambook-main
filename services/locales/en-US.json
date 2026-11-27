@@ -6654,6 +6654,7 @@
   "此文件类型暂不支持": "This file type is not supported",
   "执行进度暂未更新": "Progress unavailable",
   "正在等待模型": "Waiting for the model",
+  "正在等待备用模型": "Waiting for the backup model",
   "只读对话": "Read-only conversation",
   "返回工作任务": "Back to work tasks",
   "移除不可用引用": "Remove unavailable reference",

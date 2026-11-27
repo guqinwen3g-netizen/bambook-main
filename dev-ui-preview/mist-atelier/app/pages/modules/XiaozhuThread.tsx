@@ -6,6 +6,7 @@ import type { AgentTaskTrailItem, AgentTaskView } from '../../../../../server/sr
 import type { TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
 import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../../server/src/shared/mistAgentProposals';
 import { ui, uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
+import { activeModelFallbackSince } from '../../runtime/xiaozhuActivity';
 import { COWORK_ACTIVE, splitRequest, type TaskControlState } from '../../runtime/xiaozhuCowork';
 import type { RecordRef } from '../../runtime/xiaozhuRecords';
 import { commandRequiresSignature } from '../../runtime/signatureRules';
@@ -17,7 +18,7 @@ export function xiaozhuTaskStatusLabel(task: AgentTaskView): string {
   if (task.runnerStatus === 'heartbeat_stale') return '执行进度暂未更新';
   if (task.runnerStatus === 'awaiting_reclaim') return '待重新领取';
   if (task.state === 'queued' && task.executionIssue?.retryAt) return '等待模型重试';
-  if (task.state === 'running' && task.executionStage === 'model') return '正在等待模型';
+  if (task.state === 'running' && task.executionStage === 'model') return activeModelFallbackSince(task) ? '正在等待备用模型' : '正在等待模型';
   if (task.state === 'waiting_human' && task.questions?.some(question => !question.answeredAt)) return '等待补充资料';
   return STATE[task.state][0];
 }
@@ -224,7 +225,8 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
       && (!t.attachments?.length || (!!t.conversationId && ['succeeded','failed','cancelled'].includes(t.state)));
     const progressStale = active && actions.staleProgressIds?.has(t.id);
     const retryAt = !progressStale && t.state === 'queued' && !t.runnerStatus ? t.executionIssue?.retryAt : undefined;
-    const since = progressStale ? undefined : t.runnerStatus === 'heartbeat_stale' ? t.lastHeartbeatAt ?? undefined : t.executionStageSince;
+    const since = progressStale ? undefined : t.runnerStatus === 'heartbeat_stale' ? t.lastHeartbeatAt ?? undefined
+      : activeModelFallbackSince(t) ?? t.executionStageSince;
     const hasSpecificStatus = t.runnerStatus || t.state === 'queued' || t.state === 'waiting_time'
       || t.state === 'waiting_condition' || (t.state === 'running' && t.executionStage === 'model');
     const activeLabel = progressStale ? '执行进度暂未更新' : hasSpecificStatus ? xiaozhuTaskStatusLabel(t) : undefined;

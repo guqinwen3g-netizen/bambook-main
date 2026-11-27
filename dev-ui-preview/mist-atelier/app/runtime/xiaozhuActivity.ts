@@ -1,5 +1,5 @@
 import React from 'react';
-import type { AgentTaskActivity } from '../../../../server/src/shared/mistAgentTasks';
+import type { AgentTaskActivity, AgentTaskView } from '../../../../server/src/shared/mistAgentTasks';
 import { withRequestDeadline } from './requestDeadline';
 import { mistApiRequest } from './workspace';
 
@@ -74,11 +74,17 @@ export function useXiaozhuActivity(workspaceId: string | undefined, scope: strin
   return enabled && snapshot?.scope === scope ? snapshot.items : [];
 }
 
+export function activeModelFallbackSince(task: Pick<AgentTaskView, 'state' | 'executionStage' | 'runnerStatus' | 'modelFallbackSince'>) {
+  const since = task.modelFallbackSince;
+  if (task.state === 'running' && task.executionStage === 'model' && !task.runnerStatus
+    && typeof since === 'string' && Number.isFinite(Date.parse(since))) return since;
+}
+
 export function xiaozhuActivityLabel(task: AgentTaskActivity) {
   if (task.runnerStatus === 'heartbeat_stale') return '执行进度暂未更新';
   if (task.runnerStatus === 'awaiting_reclaim') return '待重新领取';
   if (task.retrying) return '等待模型重试';
   if (task.state === 'queued') return '待执行';
-  if (task.executionStage === 'model') return '正在等待模型';
+  if (task.executionStage === 'model') return activeModelFallbackSince(task) ? '正在等待备用模型' : '正在等待模型';
   return task.currentStep || '办理中';
 }
