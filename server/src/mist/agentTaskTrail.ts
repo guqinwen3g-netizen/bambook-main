@@ -124,7 +124,8 @@ export function platformTrail(steps: PlatformTaskStep[] | undefined, attachments
           : failed ? text(result?.reason, 120)
           : result?.hasMore ? '本次读取部分正文，还有后续内容'
           : result?.complete ? '已提取可读取正文' : '';
-        out.push({ ...base, kind: 'read', label: result?.error===true?`附件读取失败${file?' '+file:''}`:file?`读取附件 ${file}`:'读取附件正文', ...(detail ? { detail } : {}), ...(taskAttachmentId ? { taskAttachmentId } : {}), ...(taskAttachmentPage !== undefined ? { taskAttachmentPage, taskAttachmentPageRange } : {}), ...(observedPages ? {taskAttachmentObservedPages:observedPages} : {}), ...(observedSheets ? {taskAttachmentObservedSheets:observedSheets} : {}) });
+        const readLabel=!completed&&typeof args.cursor==='string'?'续读附件':'读取附件';
+        out.push({ ...base, kind: 'read', label: result?.error===true?`附件读取失败${file?' '+file:''}`:file?`${readLabel} ${file}`:`${readLabel}正文`, ...(detail ? { detail } : {}), ...(taskAttachmentId ? { taskAttachmentId } : {}), ...(taskAttachmentPage !== undefined ? { taskAttachmentPage, taskAttachmentPageRange } : {}), ...(observedPages ? {taskAttachmentObservedPages:observedPages} : {}), ...(observedSheets ? {taskAttachmentObservedSheets:observedSheets} : {}) });
         break;
       }
       case 'bambook_mail_receiving': out.push({ ...base, kind: 'read', label: '查看邮箱收件状态' }); break;

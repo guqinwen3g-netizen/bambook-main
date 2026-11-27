@@ -2,7 +2,7 @@
 import React from 'react';
 import { ChevronRight, Copy, Download, Eye, FileText, RotateCcw, Zap, ShieldCheck, Search, PenLine, HelpCircle, Clock, Check, Square, Link2, Mic } from 'lucide-react';
 import { AIBadge, AssistantEyes, Button, Icon, IconButton, Pill, type Tone } from '../../../../../components/mist';
-import type { AgentTaskTrailItem, AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
+import { activeAgentTaskStep, type AgentTaskTrailItem, type AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
 import { taskAttachmentLabels, type TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
 import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../../server/src/shared/mistAgentProposals';
 import { ui, uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
@@ -21,7 +21,7 @@ export function xiaozhuTaskStatusLabel(task: AgentTaskView): string {
   if (task.state === 'queued' && task.executionIssue?.retryAt) return '等待模型重试';
   if (task.state === 'running' && task.executionStage === 'model') return activeModelFallbackSince(task) ? '正在等待备用模型' : '正在等待模型';
   if (task.state === 'waiting_human' && task.questions?.some(question => !question.answeredAt)) return '等待补充资料';
-  return STATE[task.state][0];
+  return activeAgentTaskStep(task) ?? STATE[task.state][0];
 }
 const RISK_TONE: Record<string, Tone> = { low: 'neutral', medium: 'warn', high: 'bad' };
 const KIND_ICON = { read: Search, write: PenLine, ask: HelpCircle, wait: Clock, note: Check };
@@ -234,7 +234,7 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
       : activeModelFallbackSince(t) ?? t.executionStageSince;
     const hasSpecificStatus = t.runnerStatus || t.state === 'queued' || t.state === 'waiting_time'
       || t.state === 'waiting_condition' || (t.state === 'running' && t.executionStage === 'model');
-    const activeLabel = progressStale ? '执行进度暂未更新' : hasSpecificStatus ? xiaozhuTaskStatusLabel(t) : undefined;
+    const activeLabel = progressStale ? '执行进度暂未更新' : hasSpecificStatus ? xiaozhuTaskStatusLabel(t) : activeAgentTaskStep(t);
     const status = progressStale && !working ? <span role="status"><Pill tone="warn">{uiText('执行进度暂未更新')}</Pill></span>
       : t.state === 'waiting_human' && !asking && !pending.length ? <span role="status"><Pill tone="warn">{uiText('待我确认')}</Pill></span>
       : !active && t.state !== 'succeeded' ? <Pill tone={STATE[t.state][1]}>{uiText(STATE[t.state][0])}</Pill> : undefined;
