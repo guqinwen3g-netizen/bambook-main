@@ -34,7 +34,7 @@ const REVIEW_COMMAND_BY_KIND = {
 } as const satisfies Record<MistReviewTask['kind'],MistCommand['type']>;
 const REVIEW_KIND_BY_COMMAND = new Map<string,MistReviewTask['kind']>(Object.entries(REVIEW_COMMAND_BY_KIND).map(([kind,type])=>[type,kind as MistReviewTask['kind']]));
 import { hasScope } from '../auth/permissionService';
-import {readFileTextWindow,type PdfTextWindowCache} from './agentFileWindow';
+import {readFileTextWindow,type FileTextWindowCache} from './agentFileWindow';
 import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projectState, projectShipmentReleaseGates, canReadTarget, canHandleTask, isTaxBaseCommand, maskTaxBaseText, type MistWorkspaceAccess, type MistMemberLog } from './access';
 import { prepareFilePrivacy, restrictedSensitiveFiles, restrictedUploadContent, type FilePrivacyContext } from './filePrivacy';
 import { payablesCommandPermissions, financialDisposalViews } from '../shared/mistPayables';
@@ -2229,10 +2229,10 @@ export class MistRepository {
     }));
   }
   /** 复用附件下载的同一授权（canReadFile）后提取有界正文摘录；不返回字节。 */
-  async fileText(prior: TokenPayload, workspaceId: string, fileId: string, maxChars?: number, cursor?: unknown, pdfCache?: PdfTextWindowCache) {
+  async fileText(prior: TokenPayload, workspaceId: string, fileId: string, maxChars?: number, cursor?: unknown, fileCache?: FileTextWindowCache) {
     const taskFile=(await this.privateTaskFiles(prior,workspaceId)).find(file=>file.id===fileId);
     const {file,bytes}=taskFile?{file:taskFile,bytes:await this.files.read(workspaceId,taskFile)}:await this.download(prior,workspaceId,fileId);
-    const result=await readFileTextWindow({workspaceId,fileId},file,bytes,maxChars,cursor,pdfCache);
+    const result=await readFileTextWindow({workspaceId,fileId},file,bytes,maxChars,cursor,fileCache);
     // Parsing is asynchronous. Recheck live file access before releasing the result.
     const current=taskFile?{file,bytes:await this.files.read(workspaceId,file)}:await this.download(prior,workspaceId,fileId);
     if(taskFile&&!(await this.privateTaskFiles(prior,workspaceId)).some(item=>item.id===fileId))fail('FILE_NOT_FOUND','附件不在当前任务内',404);
