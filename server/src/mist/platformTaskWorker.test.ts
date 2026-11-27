@@ -913,6 +913,11 @@ it('reads the short tail of each PDF before asking the model to prepare the repo
    expect.objectContaining({arguments:expect.objectContaining({fileId:'attachment_1',cursor:'next'}),result:expect.objectContaining({range:expect.objectContaining({pageFrom:21,pageTo:23}),hasMore:false,text:expect.stringContaining('PDF-TAIL-CONTROL-23')})}),
    expect.objectContaining({arguments:expect.objectContaining({fileId:'attachment_2',cursor:'next'}),result:expect.objectContaining({range:expect.objectContaining({pageFrom:21,pageTo:21}),hasMore:false,text:expect.stringContaining('PDF-TAIL-INVOICE-21')})}),
  ]);
+ expect(facts.history.pdfCoverage).toEqual([
+  {fileId:'attachment_1',pagesChecked:23,pagesWithoutText:[]},
+  {fileId:'attachment_2',pagesChecked:21,pagesWithoutText:[]},
+ ]);
+ expect(complete.mock.calls[0][0].systemPrompt).toContain('逐字保留该标识');
  expect(reads[2].result.sourceHash).toBe(reads[0].result.sourceHash);
  expect(reads[3].result.sourceHash).toBe(reads[1].result.sourceHash);
  expect(reads[0].result.sourceHash).not.toBe(reads[1].result.sourceHash);

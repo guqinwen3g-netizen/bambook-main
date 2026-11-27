@@ -103,6 +103,31 @@ it('continues each eligible PDF using its own cursor and skips long or already a
  expect(shortPdfTailPlan(files,[...heads,failed,completed])).toBeUndefined();
 });
 
+it('summarizes only continuous PDF page windows with the same verified source and exact cursor',()=>{
+ const makeRead=(fileId:string,from:number,to:number,pages:number,cursor:string|undefined,nextCursor:string|undefined,extra={})=>({
+  ...newPlatformTaskStep({name:'bambook_file_text',arguments:{fileId,...(cursor?{cursor}:{})}},0),
+  result:{kind:'pdf',file:{id:fileId},sourceHash:'a'.repeat(64),pages,range:{start:0,end:5,pageFrom:from,pageTo:to},
+   hasMore:!!nextCursor,...(nextCursor?{nextCursor,nextPageFrom:to+1}:{}),...extra},
+ });
+ const first=makeRead('first',1,20,23,undefined,'aft1.first');
+ const last=makeRead('first',21,23,23,'aft1.first',undefined,{pagesWithoutText:[22],reason:'第 22 页没有可提取文字',truncated:true,complete:false});
+ const unrelated=makeRead('other',21,21,21,'aft1.other',undefined);
+ expect(platformTaskHistory([first,unrelated,last]).pdfCoverage).toEqual([{fileId:'first',pagesChecked:23,pagesWithoutText:[22]}]);
+ for(const variant of [
+  {...last,plan:{...last.plan,arguments:{fileId:'first',cursor:'aft1.other'}}},
+  {...last,result:{...last.result,sourceHash:'b'.repeat(64)}},
+  {...last,result:{...last.result,range:{...last.result.range,pageFrom:22}}},
+  {...last,result:{...last.result,range:{...last.result.range,textLimited:true}}},
+  {...last,result:{...last.result,range:{...last.result.range,start:2}}},
+  {...last,result:{...last.result,reason:'正文超过安全提取范围',pagesWithoutText:undefined}},
+  {...last,compacted:true},
+ ]){
+  expect(platformTaskHistory([first,variant])).not.toHaveProperty('pdfCoverage');
+ }
+ expect(platformTaskHistory([last])).not.toHaveProperty('pdfCoverage');
+ expect(platformTaskHistory([first,last,{...last,result:{error:true}}])).not.toHaveProperty('pdfCoverage');
+});
+
 it('identifies the full quotation amount and the exact converted line amounts in a complete read', () => {
   const plan={name:'bambook_get',arguments:{type:'quotation',id:'quote'}};
   const object={type:'quotation',id:'quote',label:'QT-8',truncated:false,data:{
