@@ -1,5 +1,5 @@
 import{expect,it}from'vitest';
-import{compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,shortPdfContinuationPlan}from'./platformTaskPlan';
+import{compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,shortPdfContinuationPlan,shortOfficeTailPlan}from'./platformTaskPlan';
 import{platformReasoning}from'../ai/platformModel';
 
 it('accepts only a bound business tool decision, without thoughts, owner impersonation or model request IDs',()=>{
@@ -121,6 +121,26 @@ it('pre-reads only one same-page continuation before an optional short tail',()=
  expect(shortPdfContinuationPlan([file],[head,{...middle,result:{...middle.result,sourceHash:'b'.repeat(64)}}])).toBeUndefined();
  const short={...head,result:{...head.result,pages:12,range:{...head.result.range,pageTo:12}}};
  expect(shortPdfContinuationPlan([file],[short])?.arguments.cursor).toBe('aft1.middle');
+});
+
+it('pre-reads an Office tail only with a bounded result from that exact original',()=>{
+ const file={id:'quote',name:'quote.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',size:2000};
+ const plan={name:'bambook_file_text',arguments:{fileId:file.id}};
+ const result={kind:'xlsx',file:{id:file.id},sourceHash:'a'.repeat(64),range:{start:0,end:3500},
+  hasMore:true,nextCursor:'aft1.scope',remainingOfficeChars:3500};
+ const first={...newPlatformTaskStep(plan,0),result};
+ expect(shortOfficeTailPlan([file],[first])?.arguments).toEqual({fileId:file.id,cursor:'aft1.scope',maxChars:3500});
+ for(const invalid of [
+  {...result,remainingOfficeChars:undefined},
+  {...result,remainingOfficeChars:3501},
+  {...result,remainingOfficeChars:0},
+  {...result,file:{id:'other'}},
+  {...result,reason:'正文超过安全提取范围'},
+ ]){
+  expect(shortOfficeTailPlan([file],[{...first,result:invalid}])).toBeUndefined();
+ }
+ const failed={...newPlatformTaskStep({...plan,arguments:{...plan.arguments,cursor:result.nextCursor}},1),result:{error:true}};
+ expect(shortOfficeTailPlan([file],[first,failed])).toBeUndefined();
 });
 
 it('summarizes only continuous PDF page windows with the same verified source and exact cursor',()=>{

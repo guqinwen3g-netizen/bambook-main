@@ -27,6 +27,7 @@ export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:
  const raw=p.offset>0&&cached?.sourceHash===sourceHash&&cached.page===p.page
    ? cached.result : await extractFileText(file,bytes,TEXT_WINDOW_MAX+1,p.page);
  const content=raw.text.slice(0,TEXT_WINDOW_MAX),pdf=raw.kind==='pdf',morePages=!!raw.window&&raw.window.end<(raw.pages??0);
+ const office=raw.kind==='docx'||raw.kind==='xlsx'||raw.kind==='pptx';
  if(!pdf&&p.page!==1||p.offset>content.length||p.offset>0&&/[\uDC00-\uDFFF]/.test(content[p.offset]??''))throw new RangeError('附件续读位置超出当前正文');
  const readable=!['unreadable','unsupported'].includes(raw.kind);
  let end=Math.min(content.length,p.offset+limit);
@@ -39,8 +40,7 @@ export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:
  const next=readable&&end<content.length?{...p,offset:end}:readable&&morePages&&!extractionLimited?{...p,page:raw.window!.end+1,offset:0}:undefined;
  if(fileCache){
    fileCache.delete(cacheKey);
-   const reusable=pdf||raw.kind==='docx'||raw.kind==='xlsx'||raw.kind==='pptx';
-   if(reusable&&next?.page===p.page&&raw.text.length<=TEXT_WINDOW_MAX){
+   if((pdf||office)&&next?.page===p.page&&raw.text.length<=TEXT_WINDOW_MAX){
      fileCache.set(cacheKey,{sourceHash,page:p.page,result:raw});
      let retainedChars=0;
      for(const window of fileCache.values())retainedChars+=window.result.text.length;
@@ -56,6 +56,7 @@ export async function readFileTextWindow(scope:Scope,file:{name:string;mimeType:
  return {kind:raw.kind,text,truncated:readable&&(!complete),complete,hasMore,
   ...(next?{nextCursor:'aft1.'+Buffer.from(JSON.stringify(next)).toString('base64url')}:{}),
   ...(next&&next.page>p.page?{nextPageFrom:next.page}:{}),
+  ...(office&&next&&!extractionLimited?{remainingOfficeChars:content.length-end}:{}),
   sourceHash,sha256,range:{unit:'utf16' as const,start:p.offset,end,...(raw.window?{
    pageFrom:raw.window.start,pageTo:raw.window.end,...(end<content.length||extractionLimited?{textLimited:true as const}:{})
   }:{})},

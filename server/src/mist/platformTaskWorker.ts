@@ -9,7 +9,7 @@ import type{MakeTaskCredential,PlatformTaskJob,PlatformTaskReleaseIssue}from'./a
 import type{MistRepository,PlatformTaskImageCache}from'./repository';
 import{MistApiError}from'./errors';
 import{responseLanguagePrompt,responseUserMessage}from'./responseLanguage';
-import{parsePlatformTaskPlan,platformTaskHistory,platformTaskAttachmentHandles,shortPdfContinuationPlan,resolvePlatformFileContinuation,PLATFORM_TASK_ATTACHMENT_PREFIX,PLATFORM_TASK_RESULT_LIMIT,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskStep}from'./platformTaskPlan';
+import{parsePlatformTaskPlan,platformTaskHistory,platformTaskAttachmentHandles,shortPdfContinuationPlan,shortOfficeTailPlan,ATTACHMENT_PREFETCH_CHARS,resolvePlatformFileContinuation,PLATFORM_TASK_ATTACHMENT_PREFIX,PLATFORM_TASK_RESULT_LIMIT,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskStep}from'./platformTaskPlan';
 import{nextTaskIntentRead}from'./agentTaskIntentRefs';
 
 class PlatformModelTimeout extends Error {}
@@ -168,8 +168,8 @@ export class MistPlatformTaskWorker{
           else{
             const attachment=context.task.attachments?.find(file=>!isTaskImage(file.name)&&!context.steps.some(step=>step.plan.name==='bambook_file_text'&&step.plan.arguments.fileId===file.id&&step.result!==undefined));
             const attachmentPlan:PlatformTaskPlan|undefined=attachment
-              ?{name:'bambook_file_text',arguments:{fileId:attachment.id,maxChars:3500}}
-              :shortPdfContinuationPlan(context.task.attachments,context.steps);
+              ?{name:'bambook_file_text',arguments:{fileId:attachment.id,maxChars:ATTACHMENT_PREFETCH_CHARS}}
+              :shortPdfContinuationPlan(context.task.attachments,context.steps)??shortOfficeTailPlan(context.task.attachments,context.steps);
             if(attachmentPlan){
               step=await this.repository.savePlatformTaskPlan(actor,attachmentPlan);
             }else{

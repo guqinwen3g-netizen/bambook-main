@@ -2,12 +2,14 @@ import { createHash, randomUUID } from 'node:crypto';
 import type {AgentTaskIntentRef,AgentTaskView} from '../shared/mistAgentTasks';
 import type { MarketQuotation } from '../shared/mistMarket';
 import type { PdfPageTextSpan } from './agentFileText';
+import { officeKind } from './agentOfficeText';
 import type{ResponseLocale}from'./responseLanguage';
 
 export type PlatformTaskPlan={name:string;arguments:Record<string,unknown>;progress?:string};
 export type PlatformTaskStep={id:string;plan:PlatformTaskPlan;result?:unknown;at:string;completedAt?:string;compacted?:boolean};
 export type PlatformTaskProgress={steps:PlatformTaskStep[];nextRunAt:number;modelFallbackAt?:number;requiresRead?:boolean;requiresReadBeforeWrite?:boolean;checkpointBeforeIssue?:string;retryAt?:number;failures?:number;issue?:'model_unavailable'|'model_response_invalid'};
 export const PLATFORM_TASK_TURN_LIMIT=60;
+export const ATTACHMENT_PREFETCH_CHARS=3500;
 export const PLATFORM_TASK_RESULT_LIMIT=160_000;
 export type PlatformTaskContext={task:AgentTaskView;locale:ResponseLocale;businessAt?:string;hasTaskHistory?:boolean;taskReadRefs:AgentTaskIntentRef[];requiresRead:boolean;requiresReadBeforeWrite?:boolean;steps:PlatformTaskStep[];decisions:Array<{id:string;state:string;note?:string;produced?:{fileId:string;fileName:string}}>};
 const names=new Set(['bambook_task','bambook_query','bambook_get','bambook_get_orders','bambook_related','bambook_commands','bambook_preview','bambook_execute','bambook_audit','bambook_mail_receiving','bambook_file_text']);
@@ -49,7 +51,29 @@ export function shortPdfContinuationPlan(attachments: AgentTaskView['attachments
     if (first.range?.pageTo !== Math.min(20, verified.pages)) continue;
     if (reads.length === 2 && (first.nextPageFrom !== undefined || verified.next.from !== 21 || verified.next.offset !== 0)) continue;
 
-    return { name: 'bambook_file_text', arguments: { fileId: file.id, cursor: verified.next.cursor, maxChars: 3500 } };
+    return { name: 'bambook_file_text', arguments: { fileId: file.id, cursor: verified.next.cursor, maxChars: ATTACHMENT_PREFETCH_CHARS } };
+  }
+}
+
+/** Pre-read at most one small, fully extractable Office tail per original attachment. */
+export function shortOfficeTailPlan(attachments:AgentTaskView['attachments']=[],steps:PlatformTaskStep[]):PlatformTaskPlan|undefined{
+  for(const file of attachments){
+    const kind=officeKind(file);
+    if(!kind)continue;
+    const reads=steps.filter(step=>step.plan.name==='bambook_file_text'&&step.plan.arguments.fileId===file.id);
+    if(reads.length!==1)continue;
+    const [first]=reads;
+    const read=first.result as {
+      kind?:string;error?:boolean;reason?:string;file?:{id?:string};sourceHash?:string;
+      range?:{start:number;end:number};hasMore?:boolean;nextCursor?:unknown;remainingOfficeChars?:number;
+    } | undefined;
+    if(first.compacted||first.plan.arguments.cursor!==undefined||read?.kind!==kind||read.error||read.reason
+      ||read.file?.id!==file.id||typeof read.sourceHash!=='string'||!/^[a-f0-9]{64}$/.test(read.sourceHash)
+      ||read.range?.start!==0||!Number.isSafeInteger(read.range.end)||read.range.end<1
+      ||read.hasMore!==true||typeof read.nextCursor!=='string'||!read.nextCursor.startsWith('aft1.')
+      ||typeof read.remainingOfficeChars!=='number'||!Number.isSafeInteger(read.remainingOfficeChars)
+      ||read.remainingOfficeChars<1||read.remainingOfficeChars>ATTACHMENT_PREFETCH_CHARS)continue;
+    return {name:'bambook_file_text',arguments:{fileId:file.id,cursor:read.nextCursor,maxChars:ATTACHMENT_PREFETCH_CHARS}};
   }
 }
 
