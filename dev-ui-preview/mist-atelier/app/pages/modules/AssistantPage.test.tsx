@@ -5,6 +5,7 @@ import {createRoot, type Root} from 'react-dom/client';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import {createMistState} from '../../../../../server/src/shared/mistWorkspace';
 import {AssistantPage} from './PlatformPages';
+import {getByRole} from '@testing-library/dom';
 import {Nav} from '../../nav';
 const mock=vi.hoisted(()=>({api:vi.fn(),workspace:null as any,fetch:vi.fn(),sessionKey:'session-a',readOrders:true,chatPermission:true}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>mock.workspace,mistApiRequest:(...a:any[])=>mock.api(...a)}));
@@ -896,7 +897,8 @@ it('keeps the same conversation in sync when a paused task is resumed from its d
     await click('核对模拟订单');
     expect(host.textContent).toContain('已暂停');
     await act(async () => root!.render(view(true, paused.id)));
-    await click('继续任务');
+    const drawer=getByRole(document.body,'dialog',{name:paused.name});
+    await act(async()=>getByRole(drawer,'button',{name:'继续任务',exact:true}).click());
     await click('确认');
     expect(acknowledged).toBe(true);
     await act(async () => root!.render(view()));

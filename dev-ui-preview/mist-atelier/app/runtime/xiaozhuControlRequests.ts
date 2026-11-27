@@ -1,8 +1,8 @@
-export type TaskControlIntent = {action:'answer';questionId:string;answer:string} | {action:'cancel'};
+export type TaskControlIntent = {action:'answer';questionId:string;answer:string} | {action:'cancel'|'resume'};
 type ControlRecord = {version:number;requestId:string};
 export type TaskControlRequest = ControlRecord & (
   | {action:'answer';questionId:string;answer?:string;fingerprint?:string}
-  | {action:'cancel'}
+  | {action:'cancel'|'resume'}
 );
 
 const storageKey = (scope:string) => 'mist.xiaozhu.controls:' + scope;
@@ -28,7 +28,7 @@ export function readTaskControls(scope:string): Map<string,TaskControlRequest> {
       if (!isId(id)||typeof entry?.requestId!=='string'||!uuidPattern.test(entry.requestId)
         ||!Number.isSafeInteger(entry.version)||entry.version<0) continue;
       const base={version:entry.version,requestId:entry.requestId};
-      if(entry.action==='cancel') entries.set(id,{...base,action:'cancel'});
+      if(entry.action==='cancel'||entry.action==='resume') entries.set(id,{...base,action:entry.action});
       else if(entry.action==='answer'&&isId(entry.questionId)&&typeof entry.fingerprint==='string'&&fingerprintPattern.test(entry.fingerprint))
         entries.set(id,{...base,action:'answer',questionId:entry.questionId,fingerprint:entry.fingerprint});
     }
@@ -41,7 +41,7 @@ export function saveTaskControls(scope:string, entries:ReadonlyMap<string,TaskCo
   try {
     const stored=[...entries].slice(-90).flatMap<[string,TaskControlRequest]>(([id,entry])=>{
       const base={requestId:entry.requestId,version:entry.version};
-      if(entry.action==='cancel') return [[id,{...base,action:'cancel'}]];
+      if(entry.action!=='answer') return [[id,{...base,action:entry.action}]];
       if(!entry.fingerprint) return [];
       return [[id,{...base,action:'answer',questionId:entry.questionId,fingerprint:entry.fingerprint}]];
     });

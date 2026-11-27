@@ -167,6 +167,7 @@ export type ThreadActions = {
   onAnswer: (task: AgentTaskView, id: string, text: string) => void;
   onCheckAnswer?: (task: AgentTaskView, questionId: string) => void;
   onCancel: (task: AgentTaskView) => void;
+  onResume?: (task: AgentTaskView) => void;
   onCheckStop?: (task: AgentTaskView) => void;
   onVoiceTask?: (task: AgentTaskView, questionId?: string) => void;
   answerDraft?: {read:(taskId:string,questionId:string)=>string;write:(taskId:string,questionId:string,text:string)=>void};
@@ -285,6 +286,8 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
             onClick={()=>actions.onCheckAnswer?.(t,openQuestion.id)}>{uiText('核对回答结果')}</Button>}
           {control?.canCheckStop && actions.onCheckStop && <Button size="sm" variant="quiet"
             loading={control.busy} disabled={control.busy} onClick={()=>actions.onCheckStop?.(t)}>{uiText('核对停止结果')}</Button>}
+          {t.state==='paused' && t.executor==='platform' && t.canControl && actions.onResume && <Button size="sm" variant="ai"
+            loading={control?.busy} disabled={control?.busy} onClick={()=>actions.onResume?.(t)}>{uiText('继续任务')}</Button>}
           {actions.onVoiceTask && t.executor==='platform' && t.conversationId && t.canControl && (active || t.state==='paused') &&
             <Button size="sm" variant="quiet" icon={Mic} aria-label={uiText('语音接续')+' '+t.name}
               disabled={control?.busy} onClick={() => actions.onVoiceTask?.(t,openQuestion?.id)}>{uiText('语音接续')}</Button>}

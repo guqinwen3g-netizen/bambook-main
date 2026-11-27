@@ -639,6 +639,7 @@ export const reviewedEnglish: Record<string, string> = {
   '打开任务详情':'Open task details',
   '停止结果未确认，可重试':'Stop not confirmed. Try again.',
   '回答未确认，可重试':'Answer not confirmed. Try again.',
+  '继续结果未确认，可重试':'Resume not confirmed. Try again.',
   '引用附件':'Reuse attachment',
   '下载原附件':'Download original attachment',
   '预览原附件':'Preview original attachment',

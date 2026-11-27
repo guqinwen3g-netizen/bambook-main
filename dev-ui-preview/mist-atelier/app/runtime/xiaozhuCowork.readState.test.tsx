@@ -60,6 +60,27 @@ it('allows a direct progress read while model execution is unavailable',async()=
  expect(channel.tasks[0]).toMatchObject({state:'succeeded',result:'已读回原报告'});
 });
 
+it('resumes the same paused task and recovers its lost receipt by reading that task',async()=>{
+ const paused={...task,state:'paused',version:5,canControl:true};
+ const resumed={...paused,state:'queued',version:6};
+ let resumedOnServer=false;
+ api.mockImplementation(async(url:string)=>{
+  if(url.endsWith('/task/resume')){resumedOnServer=true;throw Object.assign(new Error('回执未收到'),{status:0});}
+  if(url.endsWith('/agent-tasks/task'))return {item:resumedOnServer?resumed:paused};
+  if(url.endsWith('/agent-tasks'))return {items:[paused],nextCursor:null};
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View/>));
+ await act(async()=>{await channel.resume(channel.tasks[0]);});
+ expect(channel.tasks[0]).toMatchObject({id:'task',state:'queued',version:6});
+ expect(channel.controls.task?.error).toBeFalsy();
+ const writes=api.mock.calls.filter(([,init])=>init?.method==='POST');
+ expect(writes).toHaveLength(1);
+ expect(writes[0][0]).toMatch(/\/agent-tasks\/task\/resume$/);
+ expect(JSON.parse(writes[0][1].body)).toMatchObject({version:5,requestId:expect.any(String)});
+});
+
 it('rechecks opened completed reports on focus and restores access from a fresh report',async()=>{
  const conversationId='conversation_current';
  const report={...task,conversationId,result:'已核对原件',attachments:[{id:'file',name:'原件.pdf'}]};

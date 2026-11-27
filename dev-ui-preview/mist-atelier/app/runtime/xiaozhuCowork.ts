@@ -120,7 +120,7 @@ function mergeTaskUpdate(previous: AgentTaskView, next: AgentTaskView): AgentTas
 }
 
 export type TaskControlState = { busy: boolean; error?: string; canCheckStop?: boolean; answerQuestionToCheck?: string };
-const CONTROL_FAILURE={answer:'回答未确认，可重试',cancel:'停止结果未确认，可重试'};
+const CONTROL_FAILURE={answer:'回答未确认，可重试',cancel:'停止结果未确认，可重试',resume:'继续结果未确认，可重试'};
 
 export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string, originTaskId?: string, savedControls?:Map<string,TaskControlRequest>, controlStorageScope?:string) {
   const base = workspaceId ? '/api/mist/workspaces/' + encodeURIComponent(workspaceId) : '';
@@ -593,6 +593,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       const confirmed = request.action==='answer'
         ? answer!==undefined&&(request.answer!==undefined
           ? answer===request.answer : !!request.fingerprint&&await answerFingerprint(task.id,request.questionId,answer)===request.fingerprint)
+        : request.action==='resume' ? latest.version>request.version&&latest.state!=='paused'
         : !COWORK_ACTIVE.includes(latest.state)&&latest.state!=='paused';
       if (!isCurrent() || deniedHistory.current!==denial) return;
       clearStaleProgress(task.id);
@@ -611,12 +612,13 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       const existing=controlKeys.get(task.id);
       const fingerprint=intent.action==='answer'?await answerFingerprint(task.id,intent.questionId,intent.answer):undefined;
       if(!isCurrent())return;
-      const same=existing?.version===task.version&&(intent.action==='cancel'?existing.action==='cancel'
+      const same=existing?.version===task.version&&(intent.action!=='answer'?existing.action===intent.action
         : existing.action==='answer'&&existing.questionId===intent.questionId
           &&(existing.answer===intent.answer||!!fingerprint&&existing.fingerprint===fingerprint));
       const requestId=same?existing.requestId:crypto.randomUUID();
-      submitted=intent.action==='cancel'?{action:'cancel',requestId,version:task.version}
-        : {...intent,requestId,version:task.version,fingerprint};
+      submitted=intent.action==='answer'
+        ? {...intent,requestId,version:task.version,fingerprint}
+        : {...intent,requestId,version:task.version};
       controlKeys.set(task.id,submitted);
       if(controlStorageScope)saveTaskControls(controlStorageScope,controlKeys);
       const result = await withRequestDeadline(controller,HISTORY_READ_TIMEOUT_MS,failure,signal =>
@@ -647,6 +649,9 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     if (submitted?.action==='answer'&&submitted.questionId===questionId)return controlTask(task,submitted);
   };
   const cancel = (task:AgentTaskView) => controlTask(task,{action:'cancel'});
+  const resume = (task:AgentTaskView) => {
+    if(available&&task.state==='paused'&&task.canControl)return controlTask(task,{action:'resume'});
+  };
   const checkStop = (task:AgentTaskView) => {
     const submitted=controlKeys.get(task.id);
     if(submitted?.action==='cancel')return controlTask(task,submitted);
@@ -659,10 +664,10 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     if(previous?.error&&!matching)visibleControls[task.id]={...previous,error:''};
     if(!previous&&matching&&task.canControl)
       visibleControls[task.id]={busy:false,error:CONTROL_FAILURE[pending.action]};
-    if(matching&&visibleControls[task.id]?.error) {
+    if(matching&&pending.action!=='resume'&&visibleControls[task.id]?.error) {
       visibleControls[task.id]={...visibleControls[task.id],...(pending.action==='cancel'
-        ? {canCheckStop:true} : {answerQuestionToCheck:pending.questionId})};
+        ? {canCheckStop:true} : pending.action==='answer' ? {answerQuestionToCheck:pending.questionId} : {})};
     }
   }
-  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls:visibleControls, hasPendingSubmission, recoveredSubmissions, staleProgressIds, busy, send, refreshTask, answer, checkAnswer, cancel, checkStop, recheckProgress, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track };
+  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls:visibleControls, hasPendingSubmission, recoveredSubmissions, staleProgressIds, busy, send, refreshTask, answer, checkAnswer, cancel, checkStop, resume, recheckProgress, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track };
 }
