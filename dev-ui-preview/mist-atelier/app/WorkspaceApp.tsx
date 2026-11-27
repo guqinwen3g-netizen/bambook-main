@@ -302,38 +302,53 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
   const density = useDevice('density');
   const report = (failure: unknown) => toast(failure instanceof Error ? failure.message : '操作未完成', 'bad');
   const routeBase=route.view.split('/')[0];
-  const currentAiSource=route.id&&routeBase==='orders'&&canOrders&&session.hasPermission('orders:read')
-    ?state?.orders.find(row=>row.id===route.id)
-      ?{id:'orders:'+route.id,label:state.orders.find(row=>row.id===route.id)!.code,view:'orders/detail',entityId:route.id}:null
-    :route.id&&routeBase==='invoices'&&session.hasPermission('invoices:read')
-      ?state?.invoices.find(row=>row.id===route.id)
-        ?{id:'invoices:'+route.id,label:state.invoices.find(row=>row.id===route.id)!.code,view:'invoices',entityId:route.id}:null
-      :route.id&&routeBase==='risks'&&session.hasPermission('risk:read')
-        ?state?.platform?.risks.find(row=>row.id===route.id)
-          ?{id:'risks:'+route.id,label:state.platform.risks.find(row=>row.id===route.id)!.title,view:'risks',entityId:route.id}:null
-        :null;
+  const findAiSource=(kind:string,id:string|undefined)=>{
+    if(!id)return null;
+    if(kind==='orders'&&canOrders&&session.hasPermission('orders:read')){
+      const order=state?.orders.find(row=>row.id===id);
+      if(order)return {id:'orders:'+id,label:order.code};
+    }
+    if(kind==='invoices'&&session.hasPermission('invoices:read')){
+      const invoice=state?.invoices.find(row=>row.id===id);
+      if(invoice)return {id:'invoices:'+id,label:invoice.code};
+    }
+    if(kind==='risks'&&session.hasPermission('risk:read')){
+      const risk=state?.platform?.risks.find(row=>row.id===id);
+      if(risk)return {id:'risks:'+id,label:risk.title};
+    }
+    return null;
+  };
+  const currentAiSource=findAiSource(routeBase,route.id);
   const overview = (): ChatMessage => {
     if (!state) return {role:'assistant',content:'公司数据尚未读取，请稍后再试。'};
     const visibleDevs=canDevelopment?state.devs:[],visibleOrders=canOrders?state.orders:[],visibleTasks=state.tasks.filter(t=>session.canAccessView(t.target.view.split('/')[0] as View));
     const devs=visibleDevs.filter(d=>d.stage<4).slice(0,4),late=(canProduction?state.productions:[]).filter(p=>!p.closed&&p.col!=='done'&&p.due<platformBusinessDate(businessNow()));
     return {role:'assistant',content:<div><p>{uiText("当前公司有 ")}{visibleDevs.length}{uiText(" 个可见开发案、")}{visibleOrders.length}{uiText(" 张订单；")}{visibleTasks.filter(t=>!t.done).length}{uiText(" 项待办未完成，")}{late.length}{uiText(" 项生产已过交期。")}</p>{devs.map(d=><p key={d.id}><Button variant="quiet" onClick={()=>go('development/detail',d.id,{versionId:d.currentVersionId||undefined})}>{d.code} · {d.name} · {d.state}</Button></p>)}</div>,sources:[state.settings.workspaceName || '当前公司'],actions:<>{currentAiSource?<Button aria-pressed={aiUseRouteSource} disabled={aiBusy} onClick={()=>setAiUseRouteSource(value=>!value)}>{uiText(aiUseRouteSource?'取消引用：':'引用当前来源：')}{uiText(currentAiSource.label)}</Button>:null}</>};
   };
-  const send = async (question:string,retrySources?:string[]) => {
+  const send = async (question:string,retryTurn?:DrawerTurn) => {
     const content=question.trim();
     const available=()=>aiMounted.current&&aiCurrent.current===aiScope;
     if(!content||!canAI||!available())return;
-    const sourceIds=retrySources??(aiUseRouteSource&&currentAiSource?[currentAiSource.id]:[]);
-    const turn={id:Symbol('assistant-turn'),question:content};
+    const sourceIds=retryTurn?.retrySources??(aiUseRouteSource&&currentAiSource?[currentAiSource.id]:[]);
+    const turn=retryTurn??{id:Symbol('assistant-turn'),question:content};
     const add=(error?:string,retry=true)=>setDrawer(old=>({scope:aiScope,turns:[
       ...(old.scope===aiScope?old.turns:[]),{...turn,...(error?{error,retrySources:retry?sourceIds:undefined}:{})},
     ]}));
     const finish=(change:Partial<DrawerTurn>)=>setDrawer(old=>old.scope===aiScope
       ? {...old,turns:old.turns.map(item=>item.id===turn.id?{...item,...change}:item)} : old);
-    if(aiRun.current){add('上一个问题仍在处理。内容已保留，请等待完成后重试。');return;}
-    if(!workspace.workspace?.id||workspace.loading){add('公司数据尚未读取，请完成读取后重试。');return;}
+    if(aiRun.current){
+      if(!retryTurn)add('上一个问题仍在处理。内容已保留，请等待完成后重试。');
+      return;
+    }
+    if(!workspace.workspace?.id||workspace.loading){
+      const error='公司数据尚未读取，请完成读取后重试。';
+      if(retryTurn)finish({error});else add(error);
+      return;
+    }
     if(content.length>4000){add('问题超过4000个字符，请缩短后重试。',false);return;}
-    const token=turn.id,controller=new AbortController();
-    aiRun.current=token;aiController.current=controller;setAiBusy(true);add();
+    const token=Symbol('assistant-request'),controller=new AbortController();
+    aiRun.current=token;aiController.current=controller;setAiBusy(true);
+    if(retryTurn)finish({error:undefined,retrySources:undefined});else add();
     const history=drawerHistory.visible.slice(-8).map(({role,content,contextToken})=>({
       role,content:content.slice(0,2000),...(contextToken?{contextToken}:{}),
     }));
@@ -359,7 +374,7 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
     if(reply)return [question,{role:'assistant',content:<><p style={{whiteSpace:'pre-wrap'}}>{reply.content}</p>{reply.truncated&&<p className="mist-note">{uiText("回复过长，已截断；可缩小问题范围继续询问。")}</p>}</>,
       actions:reply.sources?.map(source=><Button key={source.id} variant="quiet" onClick={()=>go(source.view,source.entityId)}>{uiText(source.label)}</Button>)}];
     return turn.error?[question,{role:'assistant',content:<p>{turn.error}</p>,actions:turn.retrySources&&
-      <Button onClick={()=>void send(turn.question,turn.retrySources)}>{uiText("重试此问题")}</Button>}]:[question];
+      <Button disabled={aiBusy} onClick={()=>void send(turn.question,turn)}>{uiText("重试此问题")}</Button>}]:[question];
   });
   if(drawerHistory.unavailable)drawerMessages.push({role:'assistant',content:uiText('历史答复暂时无法核对'),
     actions:<Button onClick={drawerHistory.retry}>{uiText('重试核对历史答复')}</Button>});
@@ -368,9 +383,22 @@ function AppInner({ theme, locale, toggleTheme }: WorkspaceProps) {
   const expandAI=()=>{
     // The full page revalidates the signed exchanges before showing or reusing them.
     if(drawerExchanges.length)conversation.setMessages(old=>[...old,...drawerExchanges]);
-    setDrawer({scope:aiScope,turns:[]});
+    const failed=drawerTurns.filter(turn=>turn.retrySources!==undefined).at(-1);
+    let moved:DrawerTurn|undefined;
+    if(failed&&!conversation.readOnlyQuestion.trim()&&!conversation.readOnlySelected.length){
+      const firstId=failed.retrySources?.[0];
+      const separator=firstId?.indexOf(':')??-1;
+      const source=firstId&&separator>0?findAiSource(firstId.slice(0,separator),firstId.slice(separator+1)):null;
+      // A referenced draft is transferred only with its currently visible reference.
+      if(!firstId||source){
+        conversation.setReadOnlyQuestion(failed.question);
+        conversation.setReadOnlySelected(source?[source]:[]);
+        moved=failed;
+      }
+    }
+    setDrawer({scope:aiScope,turns:drawerTurns.filter(turn=>!turn.reply&&turn.id!==moved?.id)});
     setAI(false);
-    go('assistant',undefined,drawerExchanges.length?{section:'read-only'}:{});
+    go('assistant',undefined,drawerExchanges.length||failed?{section:'read-only'}:{});
   };
   const openAI = (prompt?: string) => {if(!canAI)return;setAI(true);setPalette(false);if(prompt)void send(prompt);};
   useHotkey('k', () => { if (session.status === 'authenticated') setPalette(value => !value); }, { meta: true });
