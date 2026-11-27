@@ -80,6 +80,16 @@ it('limits automatic PDF continuation to one short page window without a prior c
  expect(shortPdfContinuationPlan([file],[{...first,result:{...result,pages:25}}])).toBeUndefined();
  const longer={...first,result:{...result,pages:26}};
  expect(shortPdfContinuationPlan([file],[longer],'请核对 sample.pdf 末页。')?.arguments.cursor).toBe('aft1.original');
+ for(const request of [
+  '不要核对 sample.pdf 末页。',
+  '先核对 sample.pdf 前 20 页，尾段留待下一轮。',
+  'sample.pdf 的最后一页暂不查看。',
+  'Please check the PDF, but do not read the last page yet.',
+ ]){
+  expect(shortPdfContinuationPlan([file],[first],request)).toBeUndefined();
+  expect(shortPdfContinuationPlan([file],[longer],request)).toBeUndefined();
+ }
+ expect(shortPdfContinuationPlan([file],[longer],'请核对 sample.pdf 末页，不要换算金额。')?.arguments.cursor).toBe('aft1.original');
  expect(shortPdfContinuationPlan([file],[longer],'此次仅查看 sample.pdf 第 26 页。')).toBeUndefined();
  expect(shortPdfContinuationPlan([file,{...file,id:'other',name:'other.pdf'}],[longer],'请核对 sample.pdf 末页。')).toBeUndefined();
  expect(shortPdfContinuationPlan([file],[{...longer,result:{...longer.result,pages:41}}],'请核对 sample.pdf 末页。')).toBeUndefined();
