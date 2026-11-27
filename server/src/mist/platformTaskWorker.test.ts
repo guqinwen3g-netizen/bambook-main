@@ -1074,14 +1074,39 @@ it('reads only the selected middle pages of a task PDF before asking the model',
  expect(history).not.toHaveProperty('pdfCoverage');
 });
 
-it.each([false,true])('re-reads only permitted pages after a wider legacy PDF receipt (finish already planned: %s)',async frozenFinish=>{
+it.each([22,3])('extracts only a single requested PDF page and refuses page-window continuation (%s)',async page=>{
+ let calls=0;
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>++calls===1
+  ? tool('bambook_file_text',{fileId:'attachment_1',cursor:'next'})
+  : tool('bambook_task',{action:'finish',outcome:'succeeded',result:`第 ${page} 页核对结束。`}));
+ const f=await fixture(complete);
+ f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'核对指定 PDF 原页',instructions:`请只读取 long.pdf 的第 ${page} 页。`}))
+  .attach('attachments',pdf('OUTSIDE SINGLE PAGE',23,false,3),'long.pdf').expect(201)).body.item;
+ await f.drain();
+ expect((await f.current(task.id)).state).toBe('succeeded');
+ expect(complete).toHaveBeenCalledTimes(2);
+ for(const [input] of complete.mock.calls){
+  const message=input.messages[0].content,{history}=JSON.parse(message.slice(message.indexOf('{')));
+  const read=history.recent.find((step:{name:string})=>step.name==='bambook_file_text').result;
+  expect(read).toMatchObject({pageScopeStart:page,pageScopeLimit:page,range:{pageFrom:page,pageTo:page},hasMore:false,complete:false});
+  if(page===22)expect(read.pdfTextByPage).toEqual([{page:22,text:'Page 22: general terms'}]);
+  else expect(read).toMatchObject({pagesWithoutText:[3]});
+  expect(message).not.toMatch(/Page (?:2|4|21): general terms|OUTSIDE SINGLE PAGE/);
+ }
+});
+
+it.each([
+ [false,11,15],[true,11,15],[true,22,22],
+])('re-reads only permitted pages after a wider legacy PDF receipt (finish %s, pages %s–%s)',async (frozenFinish,from,to)=>{
  const complete=vi.fn(async(_input:LlmCompletionInput)=>
   tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已按当前限定范围核对。'}));
  const f=await fixture(complete);
  vi.spyOn(f.worker,'wake').mockImplementation(()=>{});
  f.worker.start(3_600_000);
  const task=(await f.human.post(f.base+'/personal-agent/tasks')
-  .field('task',JSON.stringify({requestId:randomUUID(),name:'只核对指定页段',instructions:'请只读取 long.pdf 第 11 至 15 页。'}))
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'只核对指定页段',instructions:from===to?`请只读取 long.pdf 第 ${from} 页。`:`请只读取 long.pdf 第 ${from} 至 ${to} 页。`}))
   .attach('attachments',pdf('OUTSIDE RANGE',23,false,3),'long.pdf').expect(201)).body.item;
  const fileId=task.attachments[0].id;
  await f.local.database.$transaction(async db=>{
@@ -1105,7 +1130,7 @@ it.each([false,true])('re-reads only permitted pages after a wider legacy PDF re
  expect(message).not.toContain('OUTSIDE PLAN');
  const {history}=JSON.parse(message.slice(message.indexOf('{')));
  const result=history.recent.find((step:{name:string})=>step.name==='bambook_file_text').result;
- expect(result).toMatchObject({pageScopeStart:11,pageScopeLimit:15,range:{pageFrom:11,pageTo:15},hasMore:false});
+ expect(result).toMatchObject({pageScopeStart:from,pageScopeLimit:to,range:{pageFrom:from,pageTo:to},hasMore:false});
 });
 
 it.each([false,true])('uses only the selected worksheet, including on resuming wider history (%s)', async legacy=>{

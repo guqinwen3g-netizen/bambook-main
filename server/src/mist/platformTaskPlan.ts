@@ -46,11 +46,26 @@ export function requestedPdfRange(attachments:AgentTaskView['attachments']=[],in
   if(files.length!==1)return;
   const file=files[0];
   if(attachments.length>1&&!request.includes(file.name)&&!/\bpdf\b/i.test(request))return;
-  const chinese=[...request.matchAll(/(?:^|[。；;\n])[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:只|仅)[ \t]*(?:读取|阅读|核对|查看|检查|读|看)[^。；;，,\n]{0,32}?(?:前[ \t]*|第[ \t]*([1-9]\d*)[ \t]*(?:至|到|[-–—])[ \t]*第?[ \t]*)([1-9]\d*)[ \t]*页/gu)];
-  const english=[...request.matchAll(/(?:^|[.;\n])[ \t]*(?:please[ \t]+)?(?:only[ \t]+(?:read|check|review)|(?:read|check|review)[ \t]+only)[ \t]+(?:(?:the[ \t]+)?first[ \t]+([1-9]\d*)[ \t]+pages?\b|pages[ \t]+([1-9]\d*)[ \t]*(?:to|[-–—])[ \t]*([1-9]\d*)\b)/gi)];
+  const chinese=[...request.matchAll(/(?:^|[。；;\n])[ \t]*(?:(?:本次|这次|请)[ \t]*){0,2}(?:只|仅)[ \t]*(?:读取|阅读|核对|查看|检查|读|看)[^。；;，,\n]{0,32}?(?:前[ \t]*([1-9]\d*)|第[ \t]*([1-9]\d*)(?:[ \t]*(?:页[ \t]*)?(?:至|到|[-–—])[ \t]*第?[ \t]*([1-9]\d*))?)[ \t]*页/gu)];
+  const english=[...request.matchAll(/(?:^|[.;\n])[ \t]*(?:please[ \t]+)?(?:only[ \t]+(?:read|check|review)|(?:read|check|review)[ \t]+only)[ \t]+(?:the[ \t]+)?(?:first[ \t]+([1-9]\d*)[ \t]+pages?\b|pages[ \t]+([1-9]\d*)[ \t]*(?:to|[-–—])[ \t]*([1-9]\d*)\b|page[ \t]+([1-9]\d*)\b|([1-9]\d*)(?:st|nd|rd|th)[ \t]+page\b)/gi)];
+  // Check the suffix after finding the first page expression, so a list cannot backtrack to its last item.
+  const widerChinese=/^[ \t]*(?:之?[前后]|以[前后外]|之外|起|开始|往[前后]|及其后|(?:和|与|及|以及|或|至|到|[、，,–—/-])[ \t]*(?:(?:第[ \t]*)?[0-9]|末页|最后))/u;
+  const widerEnglish=/^[ \t]*(?:(?:and|or|to|through|[–—/,-])[ \t]*(?:(?:page[ \t]+)?[0-9]|later|earlier)|onward|before|after)/i;
   const ranges=[
-    ...chinese.map(match=>({from:Number(match[1]??1),to:Number(match[2])})),
-    ...english.map(match=>({from:Number(match[2]??1),to:Number(match[1]??match[3])})),
+    ...chinese.flatMap(match=>{
+      const [,first,start,end]=match;
+      if(first)return [{from:1,to:Number(first)}];
+      if(end)return [{from:Number(start),to:Number(end)}];
+      const suffix=request.slice((match.index??0)+match[0].length);
+      return widerChinese.test(suffix)?[]:[{from:Number(start),to:Number(start)}];
+    }),
+    ...english.flatMap(match=>{
+      const [,first,start,end,page,ordinal]=match;
+      if(first)return [{from:1,to:Number(first)}];
+      if(start)return [{from:Number(start),to:Number(end)}];
+      const suffix=request.slice((match.index??0)+match[0].length);
+      return widerEnglish.test(suffix)?[]:[{from:Number(page??ordinal),to:Number(page??ordinal)}];
+    }),
   ];
   const range=ranges[0];
   if(!range||ranges.some(({from,to})=>from!==range.from||to!==range.to))return;
