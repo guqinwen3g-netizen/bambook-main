@@ -228,8 +228,8 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
       <XiaozhuTurnShell status={status}>
         {(!!t.trail?.length || working) && <Trail task={t} items={t.trail ?? []} active={working} activeLabel={activeLabel} retryAt={retryAt} workLog={actions.workLog} recovering={progressStale || !!t.runnerStatus} since={since} onOpen={actions.onOpenRecord} onPreviewAttachment={actions.onPreviewAttachment} />}
         <AnsweredQuestions questions={t.questions}/>
-        {t.result && <XiaozhuMarkdown text={t.result} index={index} onOpen={actions.onOpenRecord} attachments={t.attachments}
-          onOpenAttachment={actions.onPreviewAttachment ? file => actions.onPreviewAttachment?.(t, file) : undefined} />}
+        {t.result && <XiaozhuMarkdown text={t.result} index={index} onOpen={actions.onOpenRecord} attachments={t.attachments} attachmentReads={t.trail}
+          onOpenAttachment={actions.onPreviewAttachment ? (file,page) => page===undefined?actions.onPreviewAttachment?.(t,file):actions.onPreviewAttachment?.(t,file,page) : undefined} />}
         {active && t.checkpoint && !t.result && !working && <p className="mist-xz-note">{t.checkpoint}</p>}
         {!active && t.state !== 'succeeded' && !t.result && t.checkpoint && <p className="mist-xz-note">{t.checkpoint}</p>}
         {!!produced.length && actions.onOpenFile && <ProducedFiles proposals={produced} onOpen={actions.onOpenFile} />}
