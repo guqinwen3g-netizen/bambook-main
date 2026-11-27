@@ -12,6 +12,7 @@ type Trigger = 'new_mail' | 'new_receipt' | 'due_soon' | 'daily';
 type Rule = { id: string; name: string; trigger: Trigger; time: string; instructions: string; enabled: boolean; version: number; runs: Array<{ at: string; taskId: string; detail: string }>; halted?: { message: string } };
 type RuleDraft = Pick<Rule,'trigger'|'name'|'instructions'|'time'>;
 type RuleIntent = {requestId:string;draft:RuleDraft};
+type RuleChange = {id:string;version:number} & ({kind:'toggle';enabled:boolean}|{kind:'delete'});
 const TRIGGERS: Array<{ value: Trigger; label: string; name: string; instructions: string }> = [
   { value: 'new_mail', label: '收到新邮件', name: '新邮件整理', instructions: '读取新邮件，总结要点，判断是否需要跟进，并起草回复。' },
   { value: 'new_receipt', label: '收到新到账', name: '到账核对', instructions: '核对新到账，匹配对应应收，说明依据和需要人工确认的地方。' },
@@ -47,6 +48,7 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
   const [pending,setPending]=React.useState<{scope:string;intent:RuleIntent}>();
   const activeIntent=React.useRef<RuleIntent|undefined>(undefined);
   const mutation=React.useRef<AbortController|undefined>(undefined);
+  const uncertainChange=React.useRef<{scope:string;change:RuleChange}|undefined>(undefined);
   const pendingHere=pending?.scope===scope?pending.intent:undefined;
   const remember=(intent?:RuleIntent)=>{
     activeIntent.current=intent;
@@ -61,12 +63,14 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
     activeIntent.current=restored;
     setPending(restored?{scope,intent:restored}:undefined);
     setDraft(restored?.draft??null);
+    uncertainChange.current=undefined;
     setRules(null);setExpandedRuns({});setError('');setReadError('');setBusy(false);
     return()=>{mutation.current?.abort();mutation.current=undefined;listing.current?.abort();readGeneration.current++;};
   },[scope]);
   const load = React.useCallback(async () => {
     if (!base) return;
     const generation = ++readGeneration.current;
+    const checking=uncertainChange.current;
     const controller=new AbortController();
     listing.current?.abort();
     listing.current=controller;
@@ -75,15 +79,22 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
       const result = await withRequestDeadline(controller,8_000,'规则读取超时',signal =>
         mistApiRequest(base,{signal}) as Promise<{items:Rule[]}>);
       if (!Array.isArray(result.items)) throw new Error('规则响应无效');
-      if (generation !== readGeneration.current) return;
+      if (generation !== readGeneration.current || liveScope.current!==scope) return;
       setRules(result.items);
       setReadError('');
+      if(checking?.scope===scope&&uncertainChange.current===checking){
+        const {change}=checking;
+        const currentRule=result.items.find(rule=>rule.id===change.id);
+        const observed=change.kind==='delete'?!currentRule:
+          !!currentRule&&Number.isSafeInteger(currentRule.version)&&currentRule.version>change.version&&currentRule.enabled===change.enabled;
+        if(observed){uncertainChange.current=undefined;setError('');}
+      }
     } catch (e) {
-      if (generation !== readGeneration.current) return;
+      if (generation !== readGeneration.current || liveScope.current!==scope) return;
       if (e instanceof Error && 'status' in e && [401, 403, 404].includes(Number(e.status))) setRules(null);
       setReadError(e instanceof Error ? e.message : '读取失败');
     } finally {
-      if (generation === readGeneration.current){listing.current=undefined;setLoading(false);}
+      if (generation === readGeneration.current&&liveScope.current===scope){listing.current=undefined;setLoading(false);}
     }
   }, [base,scope]);
   React.useEffect(() => {
@@ -107,18 +118,19 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
   React.useEffect(() => { if (!open) return; const timer = setInterval(() => { if (document.visibilityState !== 'hidden') void load(); }, 10_000); return () => clearInterval(timer); }, [open, load]);
   const start = () => { const t = TRIGGERS[0]; setDraft({ trigger: t.value, name: t.name, instructions: t.instructions, time: '09:00' }); };
   const pick = (value: Trigger) => { const t = TRIGGERS.find(x => x.value === value)!; setDraft(d => d && { ...d, trigger: value, name: t.name, instructions: t.instructions }); };
-  const act = async <T,>(run:(signal:AbortSignal)=>Promise<T>,apply:(result:T)=>void) => {
+  const act = async <T,>(change:RuleChange,run:(signal:AbortSignal)=>Promise<T>,apply:(result:T)=>void) => {
     if(busy||activeIntent.current||mutation.current)return;
     const controller=new AbortController();
     mutation.current=controller;
     const current=()=>liveScope.current===scope&&mutation.current===controller;
-    setBusy(true);setError('');
+    uncertainChange.current=undefined;setBusy(true);setError('');
     try {
       const result=await withRequestDeadline(controller,10_000,'规则操作结果待核对',run);
       if(current())apply(result);
     } catch (problem) {
       if(current()){
         const status=(problem as {status?:number})?.status;
+        if(!status||status===408||status>=500)uncertainChange.current={scope,change};
         setError(status===409?'规则已更新，请核对后重试':problem instanceof Error?problem.message:'操作未完成');
       }
     } finally {
@@ -135,7 +147,7 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
     const controller=new AbortController();
     mutation.current=controller;
     const isCurrent=()=>liveScope.current===scope&&mutation.current===controller;
-    remember(intent);setBusy(true);setError('');
+    uncertainChange.current=undefined;remember(intent);setBusy(true);setError('');
     try {
       const result=await withRequestDeadline(controller,10_000,'规则开启结果待核对',signal=>
         mistApiRequest(base,{method:'POST',signal,body:JSON.stringify({...intent.draft,enabled:true,requestId:intent.requestId})}) as Promise<{item:Rule}>);
@@ -154,14 +166,14 @@ export function XiaozhuAutomations({ open, onClose, workspaceId, scopeKey, seed,
       if(isCurrent()){mutation.current=undefined;setBusy(false);}
     }
   };
-  const toggle = (rule:Rule,enabled:boolean) => act(signal=>
+  const toggle = (rule:Rule,enabled:boolean) => act({kind:'toggle',id:rule.id,version:rule.version,enabled},signal=>
     mistApiRequest(base+'/'+encodeURIComponent(rule.id),{
       method:'PATCH',signal,body:JSON.stringify({enabled,expectedVersion:rule.version}),
     }) as Promise<{item:Rule}>,result=>{
       if(result.item?.id!==rule.id)throw Error('规则操作结果待核对');
       setRules(old=>old?.map(item=>item.id===rule.id&&item.version<=result.item.version?result.item:item)??old);
     });
-  const remove = (rule:Rule) => act(signal=>
+  const remove = (rule:Rule) => act({kind:'delete',id:rule.id,version:rule.version},signal=>
     mistApiRequest(base+'/'+encodeURIComponent(rule.id)+'?expectedVersion='+encodeURIComponent(rule.version),{
       method:'DELETE',signal,
     }) as Promise<{removed?:boolean}>,result=>{
