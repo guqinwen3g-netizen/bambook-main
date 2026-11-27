@@ -60,7 +60,7 @@ function sheetTextSpans(text:string, raw:OfficeText):SheetTextSpan[] {
   return spans;
 }
 
-export async function extractFileText(file: { name: string; mimeType: string }, bytes: Uint8Array, limit: number, startPage=1): Promise<FileTextResult> {
+export async function extractFileText(file: { name: string; mimeType: string }, bytes: Uint8Array, limit: number, startPage=1, maxPage=Infinity): Promise<FileTextResult> {
   if (bytes.length > SOURCE_BYTES_MAX) return { kind: 'unsupported', text: '', truncated: false, reason: '文件超过 20MB，不提取正文' };
   const isPdf = /^application\/pdf\b/i.test(file.mimeType) || /\.pdf$/i.test(file.name);
   if (isPdf) {
@@ -68,9 +68,10 @@ export async function extractFileText(file: { name: string; mimeType: string }, 
     let parser: PDFParse | undefined;
     try {
       parser = new PDFParse({ data: new Uint8Array(bytes) });
-      const result = await parser.getText({ first: startPage, last: startPage+PDF_PAGES_MAX-1, pageJoiner: '' });
+      const last = Math.min(startPage+PDF_PAGES_MAX-1,maxPage);
+      const result = await parser.getText({ first: startPage, last, pageJoiner: '' });
       if(startPage>result.total)throw new PdfPageOutOfRange('附件续读页码超出原件');
-      const window={start:startPage,end:Math.min(result.total,startPage+PDF_PAGES_MAX-1)},morePages=window.end<result.total;
+      const window={start:startPage,end:Math.min(result.total,last)},morePages=window.end<result.total;
       const text = clean(result.text ?? '');
       const pageText=new Map(result.pages.map(page=>[page.num,clean(page.text)]));
       const pagesWithoutText=Array.from({length:window.end-window.start+1},(_,i)=>window.start+i).filter(page=>!pageText.get(page));

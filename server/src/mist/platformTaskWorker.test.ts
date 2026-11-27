@@ -1036,6 +1036,27 @@ it.each([
  else expect(JSON.stringify(reads)).not.toContain('FINAL PDF REF');
 });
 
+it('keeps the platform PDF prefix when the model asks for another page window',async()=>{
+ let calls=0;
+ const complete=vi.fn(async (_input:LlmCompletionInput)=>++calls===1
+  ?tool('bambook_file_text',{fileId:'attachment_1',cursor:'next'})
+  :tool('bambook_task',{action:'finish',outcome:'succeeded',result:'前 10 页已核对。'}));
+ const f=await fixture(complete);f.worker.start(3_600_000);
+ const task=(await f.human.post(f.base+'/personal-agent/tasks')
+  .field('task',JSON.stringify({requestId:randomUUID(),name:'只核对 PDF 首段',instructions:'请只读取 long.pdf 前 10 页。'}))
+  .attach('attachments',pdf('OUTSIDE PREFIX',23,false,3),'long.pdf').expect(201)).body.item;
+ await f.drain();
+ expect((await f.current(task.id)).state).toBe('succeeded');
+ expect(complete).toHaveBeenCalledTimes(2);
+ for(const [input] of complete.mock.calls){
+  const message=input.messages[0].content,{history}=JSON.parse(message.slice(message.indexOf('{')));
+  const read=history.recent.find((step:{name:string})=>step.name==='bambook_file_text');
+  expect(read.result).toMatchObject({range:{pageFrom:1,pageTo:10},pageScopeLimit:10,hasMore:false,complete:false});
+  expect(message).not.toContain('Page 11: general terms');
+  expect(message).not.toContain('OUTSIDE PREFIX');
+ }
+});
+
 it('pre-reads both text slices and the short tail of a dense PDF before calling the model',async()=>{
  const complete=vi.fn(async(model:LlmCompletionInput)=>{
   const content=model.messages[0].content as string,facts=JSON.parse(content.slice(content.indexOf('{')));
