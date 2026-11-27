@@ -136,6 +136,7 @@ function ProposalCard({ proposal, onOpen, onDecide, onRecover, blocked }: {
 
 export type ThreadActions = {
   onAnswer: (task: AgentTaskView, id: string, text: string) => void;
+  onCheckAnswer?: (task: AgentTaskView, questionId: string) => void;
   onCancel: (task: AgentTaskView) => void;
   onCheckStop?: (task: AgentTaskView) => void;
   onVoiceTask?: (task: AgentTaskView, questionId?: string) => void;
@@ -247,6 +248,9 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
           {missingProposals && actions.onRefreshProposals && <Button size="sm" variant="quiet"
             disabled={actions.refreshingProposals} loading={actions.refreshingProposals}
             onClick={actions.onRefreshProposals}>{uiText('刷新待确认事项')}</Button>}
+          {asking && openQuestion && control?.answerQuestionToCheck===openQuestion.id && actions.onCheckAnswer && <Button size="sm"
+            variant="quiet" loading={control.busy} disabled={control.busy}
+            onClick={()=>actions.onCheckAnswer?.(t,openQuestion.id)}>{uiText('核对回答结果')}</Button>}
           {control?.canCheckStop && actions.onCheckStop && <Button size="sm" variant="quiet"
             loading={control.busy} disabled={control.busy} onClick={()=>actions.onCheckStop?.(t)}>{uiText('核对停止结果')}</Button>}
           {actions.onVoiceTask && t.executor==='platform' && t.conversationId && t.canControl && (active || t.state==='paused') &&

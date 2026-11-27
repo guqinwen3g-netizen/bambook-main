@@ -1,5 +1,5 @@
 import {withRequestDeadline} from './requestDeadline';
-import type {TaskControlRequest} from './assistantConversation';
+import type {TaskControlIntent,TaskControlRequest} from './assistantConversation';
 /**
  * 小竹的 cowork（2026-11-07 定案）：对话里的每一条请求就是一项交给小竹的平台任务，
  * 小竹经平台 AI 与 MCP 业务工具办理，进度、追问和待确认事项回到同一条对话里；对话由服务端任务记录承载，换设备也在。
@@ -119,7 +119,7 @@ function mergeTaskUpdate(previous: AgentTaskView, next: AgentTaskView): AgentTas
   return previous.conversationId && !next.conversationId ? { ...next, conversationId: previous.conversationId } : next;
 }
 
-export type TaskControlState = { busy: boolean; error?: string; canCheckStop?: boolean };
+export type TaskControlState = { busy: boolean; error?: string; canCheckStop?: boolean; answerQuestionToCheck?: string };
 const CONTROL_FAILURE={answer:'回答未确认，可重试',cancel:'停止结果未确认，可重试'};
 
 export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string, originTaskId?: string, savedControls?:Map<string,TaskControlRequest>) {
@@ -540,8 +540,9 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       }
     }
   };
-  const controlTask = async (task:AgentTaskView, action:'answer'|'cancel', details:Record<string,string>, confirmed:(item:AgentTaskView)=>boolean, checkOnly=false) => {
+  const controlTask = async (task:AgentTaskView, intent:TaskControlIntent, checkOnly=false) => {
     if (!base || !enabled || controlRequests.current.has(task.id)) return;
+    const {action,...details}=intent;
     const body = {version:task.version,...details};
     const key = JSON.stringify([action,body]);
     const existing = controlKeys.get(task.id);
@@ -553,7 +554,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     setControls(old=>({...old,[task.id]:{busy:true,...(checkOnly?{error:failure}:{})}}));
 
     const requestId = existing?.key===key ? existing.requestId : crypto.randomUUID();
-    if (!checkOnly) controlKeys.set(task.id,{action,version:task.version,key,requestId});
+    if (!checkOnly) controlKeys.set(task.id,{...intent,version:task.version,key,requestId});
     let error = '';
     const accept = (item:AgentTaskView) => {
       if (!isCurrent()) return;
@@ -563,9 +564,14 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     };
 
     const checkTask = async () => {
+      const denial = deniedHistory.current;
       const latest = await readCoworkTask(base,task.id,controller.signal);
-      if (!isCurrent()) return;
-      if (confirmed(latest)) {
+      if (!isCurrent() || deniedHistory.current!==denial) return;
+      clearStaleProgress(task.id);
+      const confirmed = intent.action==='answer'
+        ? latest.questions?.some(question=>question.id===intent.questionId&&question.answeredAt&&question.answer===intent.answer)
+        : !COWORK_ACTIVE.includes(latest.state)&&latest.state!=='paused';
+      if (confirmed) {
         accept(latest);
         error = '';
       } else applyTaskUpdate(latest);
@@ -598,14 +604,15 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       }
     }
   };
-  const answer = (task:AgentTaskView,questionId:string,text:string) => {
-    const answer = text.trim();
-    return controlTask(task,'answer',{questionId,answer},item =>
-      !!item.questions?.some(question=>question.id===questionId&&question.answeredAt&&question.answer===answer));
+  const answer = (task:AgentTaskView,questionId:string,text:string) =>
+    controlTask(task,{action:'answer',questionId,answer:text.trim()});
+  const checkAnswer = (task:AgentTaskView,questionId:string) => {
+    const submitted=controlKeys.get(task.id);
+    if (submitted?.action!=='answer'||submitted.questionId!==questionId) return;
+    return controlTask(task,{action:'answer',questionId,answer:submitted.answer},true);
   };
-  const stopResolved = (item:AgentTaskView) => !COWORK_ACTIVE.includes(item.state)&&item.state!=='paused';
-  const cancel = (task:AgentTaskView) => controlTask(task,'cancel',{},stopResolved);
-  const checkStop = (task:AgentTaskView) => controlTask(task,'cancel',{},stopResolved,true);
+  const cancel = (task:AgentTaskView) => controlTask(task,{action:'cancel'});
+  const checkStop = (task:AgentTaskView) => controlTask(task,{action:'cancel'},true);
   const hasPendingSubmission = [...pending.current.values()].some(entry=>(entry.sourceConversationId??entry.conversationId)===visibleConversationId);
   const visibleControls={...controls};
   for(const task of tasks){
@@ -614,8 +621,10 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     if(previous?.error&&!matching)visibleControls[task.id]={...previous,error:''};
     if(!previous&&matching&&task.canControl)
       visibleControls[task.id]={busy:false,error:CONTROL_FAILURE[pending.action]};
-    if(matching&&pending.action==='cancel'&&visibleControls[task.id]?.error)
-      visibleControls[task.id]={...visibleControls[task.id],canCheckStop:true};
+    if(matching&&visibleControls[task.id]?.error) {
+      visibleControls[task.id]={...visibleControls[task.id],...(pending.action==='cancel'
+        ? {canCheckStop:true} : {answerQuestionToCheck:pending.questionId})};
+    }
   }
-  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls:visibleControls, hasPendingSubmission, recoveredSubmissions, staleProgressIds, busy, send, refreshTask, answer, cancel, checkStop, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track };
+  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls:visibleControls, hasPendingSubmission, recoveredSubmissions, staleProgressIds, busy, send, refreshTask, answer, checkAnswer, cancel, checkStop, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track };
 }

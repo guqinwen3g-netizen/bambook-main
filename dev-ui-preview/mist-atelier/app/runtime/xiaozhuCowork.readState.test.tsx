@@ -91,6 +91,34 @@ it('checks an unconfirmed stop by reading the same task without sending another 
  expect(api.mock.calls.filter(([url])=>url.endsWith('/agent-tasks'))).toHaveLength(1);
 });
 
+it('reads the original submitted answer after a lost receipt without sending a new answer',async()=>{
+ const asking={...task,state:'waiting_human',version:2,canControl:true,questions:[{id:'q1',question:'请给出交期'}]};
+ const answered={...asking,state:'queued',version:3,questions:[{...asking.questions[0],answer:'1 月 18 日',answeredAt:task.updatedAt}]};
+ let sent=false,readable=false;
+ api.mockImplementation(async(url:string)=>{
+  if(url.endsWith('/task/answer')){sent=true;throw Object.assign(new Error('回执断开'),{status:0});}
+  if(url.endsWith('/task')){
+   if(sent&&!readable)throw new Error('任务暂不可读');
+   return {item:sent?answered:asking};
+  }
+  if(url.endsWith('/agent-tasks'))return {items:[asking],nextCursor:null};
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View/>));
+ await act(async()=>{await channel.answer(channel.tasks[0],'q1','1 月 18 日');});
+ expect(channel.controls.task).toMatchObject({answerQuestionToCheck:'q1',error:'回答未确认，可重试'});
+ const before=api.mock.calls.length;
+ await act(async()=>{await channel.checkAnswer(channel.tasks[0],'q-other');});
+ expect(api.mock.calls).toHaveLength(before);
+ readable=true;
+ await act(async()=>{await channel.checkAnswer(channel.tasks[0],'q1');});
+ expect(channel.tasks[0].questions).toEqual(answered.questions);
+ expect(channel.controls.task?.answerQuestionToCheck).toBeUndefined();
+ expect(channel.controls.task?.error).toBeFalsy();
+ expect(api.mock.calls.filter(([url])=>url.endsWith('/task/answer'))).toHaveLength(1);
+});
+
 it('does not keep an unconfirmed answer warning on a newer task question',async()=>{
  const asking={...task,state:'waiting_human',version:2,canControl:true,questions:[{id:'q1',question:'请给出交期'}]};
  api.mockImplementation(async(url:string)=>{

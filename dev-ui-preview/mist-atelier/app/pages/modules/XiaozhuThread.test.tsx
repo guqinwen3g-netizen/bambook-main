@@ -59,6 +59,18 @@ it('offers a stop status check on the same task without invoking stop again',asy
  expect(queryByRole(host,'button',{name:'核对停止结果'})).toBeNull();
 });
 
+it('checks the unanswered question without sending or clearing the current draft',async()=>{
+ const waiting=task({state:'waiting_human',questions:[{id:'q1',question:'请给交期'}]});
+ const onCheckAnswer=vi.fn(),f=fns(),write=vi.fn();
+ await paint([waiting],{...f,onCheckAnswer,answerDraft:{read:()=> '尚未提交的编辑',write},
+  controls:{t1:{busy:false,error:'回答未确认，可重试',answerQuestionToCheck:'q1'}}});
+ await act(async()=>getByRole(host,'button',{name:'核对回答结果',exact:true}).click());
+ expect(onCheckAnswer).toHaveBeenCalledExactlyOnceWith(waiting,'q1');
+ expect(f.onAnswer).not.toHaveBeenCalled();
+ expect(write).not.toHaveBeenCalled();
+ expect((getByLabelText(host,'回答小竹') as HTMLInputElement).value).toBe('尚未提交的编辑');
+});
+
 it('requires detailed review for medium risk and routes a pending receipt to its original proposal',async()=>{
  const onDecide=vi.fn(async()=>{}),onRecoverProposal=vi.fn(async()=>{});
  const f={...fns(),onDecide,onRecoverProposal};
