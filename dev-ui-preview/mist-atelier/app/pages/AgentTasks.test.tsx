@@ -171,7 +171,7 @@ it('lets a pending older page finish without the automatic refresh aborting it',
 
 it.each([
  ['personal', {executor:'platform',conversationId:'c_original_report'}, '打开原对话', ['assistant','task',{section:'task-origin'}]],
- ['automation', {executor:'platform',automationId:'rule-original'}, '打开原规则', ['assistant','rule-original',{section:'automations'}]],
+ ['automation', {executor:'platform',automationId:'rule-original'}, '打开原规则', ['assistant','task',{section:'automations',automationId:'rule-original'}]],
  ['external', {executor:'external',conversationId:'c_external_report'}, undefined, []],
  ['restricted', {executor:'platform',conversationId:'c_restricted_report',contentRestricted:true}, undefined, []],
 ] as const)('offers an exact origin only for a readable task with an origin (%s)',async(_kind,metadata,label,route)=>{
@@ -196,7 +196,7 @@ it('returns the task detail to its original automation rule when closed',async()
  seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:{...row(),automationId:'rule-a'}}:url.includes('agent-identities')?{items:[identity()]}:{items:[],nextCursor:null}));
  act(paint);await flush();
  await click(getByRole(getByRole(document.body,'dialog',{name:'核对邮件'}),'button',{name:'关闭'}));
- expect(seam.go).toHaveBeenCalledExactlyOnceWith('assistant','rule-a',{section:'automations'});
+ expect(seam.go).toHaveBeenCalledExactlyOnceWith('assistant','task',{section:'automations',automationId:'rule-a'});
 });
 it('opens the exact notification task even when it is absent from the first list page',async()=>{
  seam.routeId='older-task';seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/older-task')?{item:{...row(),id:'older-task',name:'核对旧交接',state:'waiting_human',questions:[{id:'q',question:'请提供书面交期。',askedAt:'2026-11-01T00:00:00Z'}]}}:url.includes('/history')?{items:[],nextCursor:null}:url.includes('agent-identities')?{items:[identity()]}:{items:[],nextCursor:null}));

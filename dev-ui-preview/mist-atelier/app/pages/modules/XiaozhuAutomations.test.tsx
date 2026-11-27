@@ -9,10 +9,44 @@ import {XiaozhuAutomations} from './XiaozhuAutomations';
 let host:HTMLDivElement,root:Root;let rules:any[];
 const rule=(o:any={})=>({id:'r1',name:'每日汇总',trigger:'daily',time:'09:00',instructions:'汇总待办',enabled:true,version:1,runs:[],...o});
 const flush=()=>act(async()=>{for(let i=0;i<5;i++)await Promise.resolve();});
-const paint=async(scopeKey?:string)=>{await act(async()=>root.render(<MistRoot><ToastProvider><XiaozhuAutomations open onClose={()=>undefined} workspaceId="ws" scopeKey={scopeKey}/></ToastProvider></MistRoot>));await flush();};
+const paint=async(scopeKey?:string, origin?:{returnRuleId:string;returnTaskId:string})=>{await act(async()=>root.render(<MistRoot><ToastProvider><XiaozhuAutomations open onClose={()=>undefined} workspaceId="ws" scopeKey={scopeKey} {...origin}/></ToastProvider></MistRoot>));await flush();};
 beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;sessionStorage.clear();rules=[];seam.go.mockClear();seam.api.mockReset();seam.api.mockImplementation(async(_u:string,i:any)=>{if(!i?.method||i.method==='GET')return{items:rules};if(i.method==='POST'){rules=[rule(JSON.parse(i.body))];return{item:rules[0]};}if(i.method==='PATCH'){rules=[{...rules[0],enabled:JSON.parse(i.body).enabled,version:rules[0].version+1}];return{item:rules[0]};}rules=[];return {removed:true};});host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 const button=(name:string)=>getByRole(document.body,'button',{name});
+it('identifies the exact older run when returning from its report',async()=>{
+ const older=Array.from({length:6},(_,i)=>({at:'2026-11-07T01:00:00Z',taskId:'task-'+i,detail:'每日定时'}));
+ rules=[rule({runs:older}),rule({id:'r2',name:'另一条规则',runs:[older[5]]})];
+ await paint(undefined,{returnRuleId:'r1',returnTaskId:'task-5'});
+ const buttons=getAllByRole(document.body,'button',{name:'查看'});
+ expect(buttons).toHaveLength(7);
+ expect(buttons.filter(node=>node.getAttribute('aria-current')==='true')).toEqual([buttons[5]]);
+ await act(async()=>buttons[5].click());
+ expect(seam.go).toHaveBeenCalledExactlyOnceWith('assistant','task-5',{section:'tasks',automationId:'r1'});
+});
+
+it.each([
+ {items:[rule({id:'other-rule'})],message:'原规则已不可见'},
+ {items:[rule()],message:'原运行记录已不可见'},
+])('offers the same report when its original rule or run is no longer visible',async({items,message})=>{
+ rules=items;
+ await paint(undefined,{returnRuleId:'r1',returnTaskId:'task-old'});
+ expect(document.body.textContent).toContain(message);
+ await act(async()=>button('返回原报告').click());
+ expect(seam.go).toHaveBeenCalledExactlyOnceWith('assistant','task-old',{section:'tasks',automationId:'r1'});
+ expect(seam.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+});
+
+it('keeps the exact return target while the origin read recovers from a transient error',async()=>{
+ seam.api.mockRejectedValueOnce(Object.assign(Error('临时读取失败'),{status:503}));
+ rules=[rule({runs:[{at:'2026-11-07T01:00:00Z',taskId:'exact-task',detail:'每日定时'}]})];
+ await paint(undefined,{returnRuleId:'r1',returnTaskId:'exact-task'});
+ expect(document.body.textContent).toContain('规则读取失败');
+ expect(document.body.textContent).not.toContain('原规则已不可见');
+ await act(async()=>button('重新读取').click());await flush();
+ expect(button('查看').getAttribute('aria-current')).toBe('true');
+ expect(document.body.textContent).not.toContain('规则读取失败');
+});
+
 it('expands retained runs per rule and opens the exact older task', async () => {
   rules = [rule({runs:Array.from({length:5},(_,i)=>({at:'2026-11-07T01:00:00Z',taskId:'task-'+i,detail:'每日定时'}))})];
   await paint();
