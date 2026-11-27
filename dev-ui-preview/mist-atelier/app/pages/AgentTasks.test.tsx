@@ -52,6 +52,64 @@ it('refreshes the opened platform task as it switches models without reloading c
  }finally{vi.useRealTimers();vi.restoreAllMocks();}
 });
 
+it('refreshes the visible task list without requerying stable connection settings on every poll',async()=>{
+ vi.useFakeTimers();
+ const hidden=vi.spyOn(document,'hidden','get').mockReturnValue(false);
+ const online=vi.spyOn(navigator,'onLine','get').mockReturnValue(true);
+ const count=(suffix:string)=>seam.api.mock.calls.filter(([url])=>String(url).endsWith(suffix)).length;
+ const api=seam.api.getMockImplementation()!;
+ seam.api.mockImplementation((url:string,init?:RequestInit)=>url.endsWith('/agent-task-capabilities')
+  ? Promise.resolve({platformAvailable:true}) : api(url,init));
+ try{
+  act(paint);await flush();
+  expect(count('/agent-tasks')).toBe(1);
+  expect(count('/agent-identities?scope=mine')).toBe(1);
+  expect(count('/agent-task-capabilities')).toBe(1);
+  await act(async()=>vi.advanceTimersByTimeAsync(20_000));
+  expect(count('/agent-tasks')).toBe(3);
+  expect(count('/agent-identities?scope=mine')).toBe(1);
+  expect(count('/agent-task-capabilities')).toBe(1);
+
+  hidden.mockReturnValue(true);
+  await act(async()=>vi.advanceTimersByTimeAsync(20_000));
+  expect(count('/agent-tasks')).toBe(3);
+  hidden.mockReturnValue(false);
+  await act(async()=>document.dispatchEvent(new Event('visibilitychange')));
+  expect(count('/agent-tasks')).toBe(4);
+  expect(count('/agent-identities?scope=mine')).toBe(2);
+  await click(getByRole(host,'button',{name:'刷新'}));
+  expect(count('/agent-task-capabilities')).toBe(3);
+  online.mockReturnValue(false);
+  await act(async()=>vi.advanceTimersByTimeAsync(10_000));
+  expect(count('/agent-tasks')).toBe(5);
+  online.mockReturnValue(true);
+  await act(async()=>window.dispatchEvent(new Event('online')));
+  expect(count('/agent-tasks')).toBe(6);
+  expect(count('/agent-identities?scope=mine')).toBe(4);
+ }finally{vi.useRealTimers();vi.restoreAllMocks();}
+});
+
+it('checks connection metadata on the next visible poll after a transient failure',async()=>{
+ vi.useFakeTimers();
+ vi.spyOn(document,'hidden','get').mockReturnValue(false);
+ const api=seam.api.getMockImplementation()!;
+ let attempts=0;
+ seam.api.mockImplementation((url:string,init?:RequestInit)=>{
+  if(url.endsWith('/agent-task-capabilities'))return Promise.resolve({platformAvailable:true});
+  if(url.includes('agent-identities')&&++attempts===1)return Promise.reject(new Error('临时连接失败'));
+  return api(url,init);
+ });
+ try{
+  act(paint);await flush();
+  expect(getByText(host,'Agent连接读取失败')).toBeTruthy();
+  await act(async()=>vi.advanceTimersByTimeAsync(10_000));
+  expect(attempts).toBe(2);
+  expect(host.textContent).not.toContain('Agent连接读取失败');
+  await act(async()=>vi.advanceTimersByTimeAsync(10_000));
+  expect(attempts).toBe(2);
+ }finally{vi.useRealTimers();vi.restoreAllMocks();}
+});
+
 it('returns the task detail to its original automation rule when closed',async()=>{
  seam.routeId='task';seam.automationId='rule-a';
  seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:{...row(),automationId:'rule-a'}}:url.includes('agent-identities')?{items:[identity()]}:{items:[],nextCursor:null}));
