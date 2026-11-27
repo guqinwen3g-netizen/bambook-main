@@ -119,7 +119,7 @@ function mergeTaskUpdate(previous: AgentTaskView, next: AgentTaskView): AgentTas
   return previous.conversationId && !next.conversationId ? { ...next, conversationId: previous.conversationId } : next;
 }
 
-export type TaskControlState = { busy: boolean; error?: string };
+export type TaskControlState = { busy: boolean; error?: string; canCheckStop?: boolean };
 const CONTROL_FAILURE={answer:'回答未确认，可重试',cancel:'停止结果未确认，可重试'};
 
 export function useXiaozhuCowork(workspaceId: string | undefined, scope: string, enabled: boolean, visibleConversationId?: string, originTaskId?: string, savedControls?:Map<string,TaskControlRequest>) {
@@ -540,19 +540,20 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       }
     }
   };
-  const controlTask = async (task:AgentTaskView, action:'answer'|'cancel', details:Record<string,string>, confirmed:(item:AgentTaskView)=>boolean) => {
+  const controlTask = async (task:AgentTaskView, action:'answer'|'cancel', details:Record<string,string>, confirmed:(item:AgentTaskView)=>boolean, checkOnly=false) => {
     if (!base || !enabled || controlRequests.current.has(task.id)) return;
-    let controller = new AbortController();
-    const isCurrent = () => live.current===scope && controlRequests.current.get(task.id)===controller;
-    controlRequests.current.set(task.id,controller);
-    setControls(old=>({...old,[task.id]:{busy:true}}));
-
     const body = {version:task.version,...details};
     const key = JSON.stringify([action,body]);
     const existing = controlKeys.get(task.id);
-    const requestId = existing?.key===key ? existing.requestId : crypto.randomUUID();
-    controlKeys.set(task.id,{action,version:task.version,key,requestId});
+    if (checkOnly && (existing?.key!==key || task.contentRestricted || !task.canControl)) return;
     const failure = CONTROL_FAILURE[action];
+    let controller = new AbortController();
+    const isCurrent = () => live.current===scope && controlRequests.current.get(task.id)===controller;
+    controlRequests.current.set(task.id,controller);
+    setControls(old=>({...old,[task.id]:{busy:true,...(checkOnly?{error:failure}:{})}}));
+
+    const requestId = existing?.key===key ? existing.requestId : crypto.randomUUID();
+    if (!checkOnly) controlKeys.set(task.id,{action,version:task.version,key,requestId});
     let error = '';
     const accept = (item:AgentTaskView) => {
       if (!isCurrent()) return;
@@ -561,7 +562,20 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       window.dispatchEvent(new Event('bambook:agent-task-update'));
     };
 
+    const checkTask = async () => {
+      const latest = await readCoworkTask(base,task.id,controller.signal);
+      if (!isCurrent()) return;
+      if (confirmed(latest)) {
+        accept(latest);
+        error = '';
+      } else applyTaskUpdate(latest);
+    };
     try {
+      if (checkOnly) {
+        error = failure;
+        await checkTask();
+        return;
+      }
       const result = await withRequestDeadline(controller,HISTORY_READ_TIMEOUT_MS,failure,signal =>
         mistApiRequest(base+'/agent-tasks/'+encodeURIComponent(task.id)+'/'+action,{
           method:'POST',body:JSON.stringify({requestId,...body}),signal,
@@ -569,22 +583,14 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if (result.item?.id!==task.id) throw new Error(failure);
       accept(result.item);
     } catch (problem) {
-      if (!isCurrent()) return;
+      if (!isCurrent() || checkOnly) return;
       error = (problem as {status?:number})?.status===0 ? failure
         : problem instanceof Error ? problem.message : failure;
       // A timeout has already aborted the write signal. The read has its own deadline.
       controller = new AbortController();
       controlRequests.current.set(task.id,controller);
-      try {
-        const latest = await readCoworkTask(base,task.id,controller.signal);
-        if (!isCurrent()) return;
-        applyTaskUpdate(latest);
-        if (confirmed(latest)) {
-          controlKeys.delete(task.id);
-          error = '';
-          window.dispatchEvent(new Event('bambook:agent-task-update'));
-        }
-      } catch { /* The original operation remains available for an exact retry. */ }
+      try { await checkTask(); }
+      catch { /* The original operation remains available for an exact retry. */ }
     } finally {
       if (isCurrent()) {
         controlRequests.current.delete(task.id);
@@ -597,8 +603,9 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     return controlTask(task,'answer',{questionId,answer},item =>
       !!item.questions?.some(question=>question.id===questionId&&question.answeredAt&&question.answer===answer));
   };
-  const cancel = (task:AgentTaskView) => controlTask(task,'cancel',{},item=>
-    !COWORK_ACTIVE.includes(item.state)&&item.state!=='paused');
+  const stopResolved = (item:AgentTaskView) => !COWORK_ACTIVE.includes(item.state)&&item.state!=='paused';
+  const cancel = (task:AgentTaskView) => controlTask(task,'cancel',{},stopResolved);
+  const checkStop = (task:AgentTaskView) => controlTask(task,'cancel',{},stopResolved,true);
   const hasPendingSubmission = [...pending.current.values()].some(entry=>(entry.sourceConversationId??entry.conversationId)===visibleConversationId);
   const visibleControls={...controls};
   for(const task of tasks){
@@ -607,6 +614,8 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     if(previous?.error&&!matching)visibleControls[task.id]={...previous,error:''};
     if(!previous&&matching&&task.canControl)
       visibleControls[task.id]={busy:false,error:CONTROL_FAILURE[pending.action]};
+    if(matching&&pending.action==='cancel'&&visibleControls[task.id]?.error)
+      visibleControls[task.id]={...visibleControls[task.id],canCheckStop:true};
   }
-  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls:visibleControls, hasPendingSubmission, recoveredSubmissions, staleProgressIds, busy, send, refreshTask, answer, cancel, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track };
+  return { available, tasks: tasks.filter(t => !t.automationId), all: tasks, loading, checkingAvailability, error, sendError, checkingReceipt, checkSubmission:()=>checkReceipts(false,visibleConversationId), controls:visibleControls, hasPendingSubmission, recoveredSubmissions, staleProgressIds, busy, send, refreshTask, answer, cancel, checkStop, reload: load, loadMore, loadingMore, moreError, hasMore: !!more, applyTaskUpdate, track };
 }

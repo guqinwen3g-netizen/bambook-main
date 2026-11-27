@@ -137,6 +137,7 @@ function ProposalCard({ proposal, onOpen, onDecide, onRecover, blocked }: {
 export type ThreadActions = {
   onAnswer: (task: AgentTaskView, id: string, text: string) => void;
   onCancel: (task: AgentTaskView) => void;
+  onCheckStop?: (task: AgentTaskView) => void;
   onVoiceTask?: (task: AgentTaskView, questionId?: string) => void;
   answerDraft?: {read:(taskId:string,questionId:string)=>string;write:(taskId:string,questionId:string,text:string)=>void};
   controls?: Record<string,TaskControlState>;
@@ -246,6 +247,8 @@ export function XiaozhuThread({ tasks, index, proposals, ...actions }: { tasks: 
           {missingProposals && actions.onRefreshProposals && <Button size="sm" variant="quiet"
             disabled={actions.refreshingProposals} loading={actions.refreshingProposals}
             onClick={actions.onRefreshProposals}>{uiText('刷新待确认事项')}</Button>}
+          {control?.canCheckStop && actions.onCheckStop && <Button size="sm" variant="quiet"
+            loading={control.busy} disabled={control.busy} onClick={()=>actions.onCheckStop?.(t)}>{uiText('核对停止结果')}</Button>}
           {actions.onVoiceTask && t.executor==='platform' && t.conversationId && t.canControl && (active || t.state==='paused') &&
             <Button size="sm" variant="quiet" icon={Mic} aria-label={uiText('语音接续')+' '+t.name}
               disabled={control?.busy} onClick={() => actions.onVoiceTask?.(t,openQuestion?.id)}>{uiText('语音接续')}</Button>}
