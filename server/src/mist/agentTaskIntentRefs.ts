@@ -1,7 +1,7 @@
 import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
 import type { MistState } from '../shared/mistWorkspace';
-import { normalizeAgentTaskIntentRefs, type AgentTaskIntentKind, type AgentTaskIntentRef } from '../shared/mistAgentTasks';
+import { AGENT_TASK_INTENT_KINDS, normalizeAgentTaskIntentRefs, type AgentTaskIntentKind, type AgentTaskIntentRef } from '../shared/mistAgentTasks';
 import { AGENT_OBJECT_TYPES } from './agentRead';
 import { fail } from './errors';
 import type { PlatformTaskStep, PlatformTaskPlan } from './platformTaskPlan';
@@ -19,6 +19,33 @@ export function validateTaskIntentRefs(value:unknown,actor:TokenPayload,visible:
   return refs!;
 }
 export function taskIntentCeilingAllows(refs:AgentTaskIntentRef[],ceiling:readonly string[]):boolean{return refs.every(ref=>ceiling.includes(descriptor(ref.kind).scope)||ceiling.includes('*'));}
+const HISTORY_READ_LIMIT = 12;
+type PriorReadObject = { type?: string; id?: string; truncated?: boolean; data?: object };
+
+export function taskHistoryReadRefs(
+  selected: AgentTaskIntentRef[],
+  steps: PlatformTaskStep[],
+): AgentTaskIntentRef[] | undefined {
+  const reads = new Map(selected.map(ref => [ref.kind + '\0' + ref.id, ref]));
+  const collect = (object: PriorReadObject | undefined, expectedType: unknown, expectedIds: readonly unknown[]) => {
+    if (!object?.data || object.truncated !== false || object.type !== expectedType
+      || typeof object.id !== 'string' || !expectedIds.includes(object.id)) return;
+    const kind = AGENT_TASK_INTENT_KINDS.find(kind => OBJECT_TYPE[kind] === object.type);
+    if (kind) reads.set(kind + '\0' + object.id, { kind, id: object.id });
+  };
+  for (const step of steps) {
+    const result = step.result as { error?: boolean; object?: PriorReadObject; orders?: PriorReadObject[] } | undefined;
+    if (!result || result.error || step.compacted) continue;
+    const { name, arguments: args } = step.plan;
+    if (name === 'bambook_get') collect(result.object, args.type, [args.id]);
+    if (name === 'bambook_get_orders' && Array.isArray(args.ids) && Array.isArray(result.orders)) {
+      for (const object of result.orders) collect(object, 'order', args.ids);
+    }
+    if (reads.size > HISTORY_READ_LIMIT) return undefined;
+  }
+  return [...reads.values()];
+}
+
 /** Only completed real get steps satisfy this pre-read; selecting an ID is not a read. */
 export function nextTaskIntentRead(refs:AgentTaskIntentRef[],steps:PlatformTaskStep[]):{plan?:PlatformTaskPlan;failed?:boolean}{
   for(const target of taskIntentReadTargets(refs)){

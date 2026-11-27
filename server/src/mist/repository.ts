@@ -16,6 +16,7 @@ import { emailAnalysisHash } from './mail/intelligence';
 import { createHash, randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import type { TokenPayload } from '../auth/service';
+import type { AgentTaskIntentRef } from '../shared/mistAgentTasks';
 import type { MistState, MistCommand, MistContext } from '../shared/mistWorkspace';
 import { freshMistAuthority, type FreshAuthority } from './authority';
 import { fail, MistApiError } from './errors';
@@ -44,7 +45,7 @@ import { applyCompanyRoster, canMaintainCompany, companyDataScope, companyTeamId
 import { isAgentActor, type AgentActor } from './agentDelegation';
 import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, assertTaskLease, assertTaskAuthority, assertTaskViewAuthority, acknowledgePlatformStep, advanceTaskSources, answerTaskQuestion, askTaskQuestion, changeTask, checkpointTask, claimTask, deferPlatformJob, duePlatformTasks, createTask, finishTask, finishTaskSession, heartbeatTask, issueTaskControl, listTasks, parseTaskHistoryIds, readTaskRecord, reserveTaskStep, resolveTaskControl, resolveTaskCredential, releasePlatformTask, savePlatformPlan, saveTaskSources, settleTaskProposal, taskFromCreationReceipt, taskHistory, taskRecord, taskView, waitTaskForProposal, type MakeTaskCredential, type MakeTaskControl, type TaskConversationHistory, type TaskRecord, type PlatformTaskJob, type PlatformTaskReleaseIssue } from './agentTasks';
 import { collectTaskSources, knownCommandSourcesVisible, taskScopeHash, taskSourcesVisible } from './agentTaskVisibility';
-import { taskIntentRefsVisible, validateTaskIntentRefs } from './agentTaskIntentRefs';
+import { taskHistoryReadRefs, taskIntentRefsVisible, validateTaskIntentRefs } from './agentTaskIntentRefs';
 import {taskNotice,taskNoticeCandidates} from './agentTaskAttention';
 import {parseTaskAccessIds,personalTaskActivity,personalTaskActivityCandidates,UNFINISHED_TASK_STATES} from './agentTasks';
 import type {AgentTaskActivity,PersonalTaskAccess} from '../shared/mistAgentTasks';
@@ -326,11 +327,19 @@ export class MistRepository {
     if(prior.agentExecutor!=='platform'||!prior.agentTaskLease)fail('FORBIDDEN','请使用平台任务执行器',403);
     return this.transact(async db=>{const{actor,row}=await this.own(db,prior,prior.agentTaskLease!.workspaceId,'ai:chat'),c=(await taskRecord(db,row.id,prior.agentTaskLease!.taskId)).value;const visible=(await this.preparedView(db,row,actor)).state;
       const task=taskView(c,actor,Date.now());
-      if(c.conversationHistory){
-        const history=await Promise.all(c.conversationHistory.taskIds.map(async id=>(await taskRecord(db,row.id,id)).value));
-        task.instructions=composeTaskInstructions(history,task.instructions);
+      let taskReadRefs = c.intentRefs ?? [];
+      if (c.conversationHistory?.taskIds.length) {
+        const history = await Promise.all(c.conversationHistory.taskIds.map(async id => (await taskRecord(db,row.id,id)).value));
+        const retained: TaskRecord[] = [];
+        for (const turn of history.reverse()) {
+          const refs = this.taskHistoryRefsInFocus(turn, taskReadRefs, actor, visible);
+          if (!refs) continue;
+          if (!taskReadRefs.length) taskReadRefs = refs;
+          retained.unshift(turn);
+        }
+        task.instructions = composeTaskInstructions(retained, task.instructions);
       }
-      return{task,locale:c.locale??'zh-CN',businessAt:this.context(actor,row.state).now,hasTaskHistory:!!c.conversationHistory?.taskIds.length,requiresRead:platformTaskRequiresRead(c),...(c.platform?.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),steps:structuredClone(c.platform?.steps??[]),decisions:(visible.agentProposals??[]).filter(p=>p.taskId===c.id&&p.ownerId===actor.userId).map(p=>({id:p.id,state:p.state,...(p.note?{note:p.note}:{}),...(p.produced?{produced:{fileId:p.produced.fileId,fileName:p.produced.fileName}}:{})}))};});
+      return{task,taskReadRefs,locale:c.locale??'zh-CN',businessAt:this.context(actor,row.state).now,hasTaskHistory:!!c.conversationHistory?.taskIds.length,requiresRead:platformTaskRequiresRead(c),...(c.platform?.requiresReadBeforeWrite?{requiresReadBeforeWrite:true}:{}),steps:structuredClone(c.platform?.steps??[]),decisions:(visible.agentProposals??[]).filter(p=>p.taskId===c.id&&p.ownerId===actor.userId).map(p=>({id:p.id,state:p.state,...(p.note?{note:p.note}:{}),...(p.produced?{produced:{fileId:p.produced.fileId,fileName:p.produced.fileName}}:{})}))};});
   }
   async platformTaskReadRequirements(prior:AgentActor){
     const lease=prior.agentTaskLease;
@@ -1019,9 +1028,16 @@ export class MistRepository {
       throw error;
     }
   }
+  private taskHistoryRefsInFocus(turn: TaskRecord, focus: AgentTaskIntentRef[], actor: TokenPayload, visible: MistState) {
+    const refs = taskHistoryReadRefs(turn.intentRefs ?? [], turn.platform?.steps ?? []);
+    if (!refs || !taskIntentRefsVisible(refs, actor, visible)) return;
+    if (focus.length && refs.some(ref => !focus.some(active => active.kind === ref.kind && active.id === ref.id))) return;
+    return refs;
+  }
+
   private async prepareTaskHistory(
     db: any, row: MistWorkspaceRow, actor: TokenPayload, conversationId: string | undefined,
-    requestedIds: string[], instructions: string, visible: MistState,
+    requestedIds: string[], instructions: string, visible: MistState, selectedRefs: AgentTaskIntentRef[],
   ): Promise<TaskConversationHistory> {
     const taskIds:string[]=[], authorityTaskIds=new Set<string>();
     if(!conversationId || !requestedIds.length) return {taskIds,authorityTaskIds:[]};
@@ -1034,15 +1050,19 @@ export class MistRepository {
       return result;
     };
     const turns:TaskRecord[]=[];
+    let focus = selectedRefs;
     for(const id of [...requestedIds].reverse()){
       const turn=await load(id);
       if(!turn)continue;
+      const refs = this.taskHistoryRefsInFocus(turn, focus, actor, visible);
+      if (!refs) continue;
       if(composeTaskInstructions([turn,...turns],instructions)===composeTaskInstructions(turns,instructions))break;
       const inherited=[id,...(turn.conversationHistory?.authorityTaskIds??[])];
       const combined=new Set([...authorityTaskIds,...inherited]);
       if(combined.size>TASK_HISTORY_AUTHORITY_LIMIT)continue;
       const roots=await Promise.all(inherited.map(load));
       if(roots.some(root=>!root))continue;
+      if (!focus.length) focus = refs;
       turns.unshift(turn);
       taskIds.unshift(id);
       for(const ref of inherited)authorityTaskIds.add(ref);
@@ -1122,7 +1142,7 @@ export class MistRepository {
       }:undefined;
       const history=personalHistory ? {
         ...personalHistory,
-        prepare:(instructions:string)=>this.prepareTaskHistory(db,row,actor,taskInput.conversationId as string|undefined,personalHistory.requestedIds??[],instructions,visible),
+        prepare:(instructions:string)=>this.prepareTaskHistory(db,row,actor,taskInput.conversationId as string|undefined,personalHistory.requestedIds??[],instructions,visible,refs),
       }:undefined;
       const result=await createTask(db,actor,workspaceId,taskInput,Date.now(),taskScopeHash(scopeOf(row),row.state),automationId,refs,attachments,[],history);
       const c=(await taskRecord(db,workspaceId,result.id)).value;
