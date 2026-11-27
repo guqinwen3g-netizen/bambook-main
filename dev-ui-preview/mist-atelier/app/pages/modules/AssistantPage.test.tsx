@@ -18,6 +18,38 @@ const response=(body:unknown,ok=true)=>{
   return {ok,json:async()=>result};
 };
 
+it('restores an unsent task answer only in its original task and account after navigation',async()=>{
+  const item=(id:string)=>({id,conversationId:'c_'+id,executor:'platform',identityId:'personal',
+    name:'模拟待补任务',instructions:'核对来源',state:'waiting_human',canControl:true,waitingProposalIds:[],
+    questions:[{id:'shared-question-id',question:'请补充模拟客户交期'}],createdAt:'2026-11-26T06:00:00Z',updatedAt:'2026-11-26T06:00:00Z'});
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async(url:string)=>{
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    if(url.endsWith('/agent-tasks/draft-task-a'))return {item:item('draft-task-a')};
+    if(url.endsWith('/agent-tasks/draft-task-b'))return {item:item('draft-task-b')};
+    return {items:[],nextCursor:null};
+  });
+  await mount();
+  await act(async()=>root!.render(view(true,'draft-task-a','task-origin')));
+  const answer=()=>host.querySelector<HTMLInputElement>('[aria-label="回答小竹"]')!;
+  await act(async()=>{
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(answer(),'模拟未提交交期');
+    answer().dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  expect(answer().value).toBe('模拟未提交交期');
+  expect(sessionStorage.getItem('mist.assistant.conversation:session-a:workspace')).not.toContain('模拟未提交交期');
+  await act(async()=>root!.render(view(false)));
+  await act(async()=>root!.render(view(true,'draft-task-b','task-origin')));
+  expect(answer().value).toBe('');
+  await act(async()=>root!.render(view(true,'draft-task-a','task-origin')));
+  expect(answer().value).toBe('模拟未提交交期');
+  mock.sessionKey='session-b';
+  await act(async()=>root!.render(view(true,'draft-task-a','task-origin')));
+  expect(answer().value).toBe('');
+  expect(mock.api.mock.calls.some(([url,init])=>url.endsWith('/answer')&&init?.method==='POST')).toBe(false);
+});
+
 it('keeps an authorized read-only turn usable and omits it after access is withdrawn',async()=>{
   const key='mist.assistant.conversation:session-a:workspace';
   sessionStorage.setItem(key,JSON.stringify({messages:[{role:'user',content:'旧订单问题'},
@@ -425,6 +457,86 @@ it('restores the request, order and original attachment of a failed task for rev
   } finally {
     localStorage.removeItem('mist.xiaozhu.conversation:session-a:workspace');
   }
+});
+
+it('preserves a reused original across reload after a submission is interrupted', async () => {
+  const original = {
+    id: '00000000-0000-4000-8000-000000000081',
+    identityId: 'personal', executor: 'platform', conversationId: 'c_reload_reused_original',
+    instructions: '首次核对原始资料', state: 'succeeded', result: '原资料已核对', questions: [], waitingProposalIds: [],
+    createdAt: '2026-11-24T00:00:00Z', updatedAt: '2026-11-24T00:01:00Z',
+    attachments:[{id:'00000000-0000-4000-8000-000000000082',name:'original.pdf',size:42}],
+  };
+  const posts:Array<Record<string,unknown>>=[];
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  mock.api.mockImplementation(async(url:string,init?:RequestInit)=>{
+    if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    if(url.includes('/personal-agent/tasks/receipt/'))throw Object.assign(new Error('无回执'),{status:404});
+    if(url.endsWith('/agent-tasks/'+original.id))return {item:original};
+    if(init?.method==='POST'&&url.endsWith('/personal-agent/tasks')){
+      posts.push(JSON.parse(String(init.body)));
+      if(posts.length===1)throw new Error('模拟断线');
+      return {item:{...original,id:'recovered',instructions:'请继续核对',result:'续问办完'}};
+    }
+    return {items:url.endsWith('/agent-tasks')?[original]:[],nextCursor:null};
+  });
+  await mount();
+  await click('首次核对原始资料');
+  await click('引用附件 original.pdf');
+  await question('请继续核对');
+  await click('发送');
+  expect(posts).toHaveLength(1);
+  expect(posts[0].attachmentRefs).toEqual([{taskId:original.id,fileId:original.attachments[0].id}]);
+  const savedDraft=JSON.parse(sessionStorage.getItem('mist.assistant.conversation:session-a:workspace')!);
+  expect(savedDraft.attachmentRefs).toEqual(posts[0].attachmentRefs);
+  expect(host.textContent).toContain('提交结果待核对');
+  await act(async()=>root!.unmount());root=undefined;host.remove();
+  await mount();
+  expect(host.querySelector('textarea')?.value).toBe('请继续核对');
+  expect(posts).toHaveLength(1);
+  const restoredOriginal = !!button('移除附件 original.pdf');
+  await click('发送');
+  expect({
+    restoredOriginal,
+    sentAgain:posts.length===2,
+    blockedAsMissingAttachment:host.textContent?.includes('请恢复原附件后重试'),
+  }).toEqual({restoredOriginal:true,sentAgain:true,blockedAsMissingAttachment:false});
+  expect(posts[1]).toEqual(posts[0]);
+});
+
+it.each(['withdrawn','different conversation'])('blocks a restored attachment from a %s source until it can be verified', async kind => {
+  const conversationId='c_rehydrate_draft';
+  const taskId='00000000-0000-4000-8000-000000000083',fileId='00000000-0000-4000-8000-000000000084';
+  const task={id:taskId,identityId:'personal',executor:'platform',conversationId,state:'succeeded',instructions:'原任务',result:'原报告',questions:[],waitingProposalIds:[],
+    createdAt:'2026-11-24T00:00:00Z',updatedAt:'2026-11-24T00:00:01Z',attachments:[{id:fileId,name:'authorized.pdf',size:42}]};
+  sessionStorage.setItem('mist.xiaozhu.conversation:session-a:workspace',conversationId);
+  sessionStorage.setItem('mist.assistant.conversation:session-a:workspace',JSON.stringify({question:'继续核对原附件',selected:[],messages:[],
+    attachmentRefs:[{taskId,fileId,name:'旧缓存私密文件名.pdf',size:42}]}));
+  mock.fetch.mockResolvedValue(response({configured:true}));
+  let reads=0,authorized=false;
+  mock.api.mockImplementation(async(url:string)=>{
+    if(url.includes('/agent-identities'))return {items:[{id:'personal',kind:'personal',state:'active'}]};
+    if(url.endsWith('/agent-task-capabilities'))return {platformAvailable:true};
+    if(url.endsWith('/agent-tasks/'+taskId)){
+      reads++;
+      if(authorized)return {item:task};
+      return {item:kind==='withdrawn'?{...task,contentRestricted:true}:{...task,conversationId:'c_another_draft'}};
+    }
+    return {items:[],nextCursor:null};
+  });
+  await mount();
+  expect(reads).toBe(1);
+  expect(host.textContent).toContain('无法核验原件');
+  expect(host.textContent).not.toContain('旧缓存私密文件名.pdf');
+  expect(button('移除附件 authorized.pdf')).toBeUndefined();
+  expect(button('发送')?.disabled).toBe(true);
+  expect(mock.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+  authorized=true;
+  await click('重试核对原附件');
+  expect(reads).toBe(2);
+  expect(button('移除附件 authorized.pdf')).toBeTruthy();
+  expect(button('发送')?.disabled).toBe(false);
 });
 
 it('retains the original submission key when checking finds no receipt and the user resends',async()=>{

@@ -20,7 +20,7 @@ export { PricingPage, validatePlatformPricingDraft } from './PricingPage';
 import { InvoicePage } from './InvoicePage';
 export { InvoicePage } from './InvoicePage';
 import { useRouteDraft, useRouteScope } from './useRouteDraft';
-import { useAssistantConversation } from '../../runtime/assistantConversation';
+import { taskAnswerDraftKey, useAssistantConversation, type AssistantAttachmentRef } from '../../runtime/assistantConversation';
 import { useReadOnlyAssistantHistory } from '../../runtime/readonlyAssistantHistory';
 import { submissionDraftKey, submissionFingerprint } from '../../runtime/xiaozhuSubmissions';
 import { ArrowRight, ArrowUp, Calculator, Download, FileText, PanelLeftClose, PanelLeftOpen, SquarePen, ChevronDown, PenLine, Trash2, RefreshCw, Sparkles, Square, X, Package, Receipt, ShieldCheck, Users, Database, Building2 } from 'lucide-react';
@@ -179,7 +179,7 @@ export function AssistantPage(){
   const originTaskId=nav.route.section==='task-origin'?nav.route.id:undefined;
   const w=usePlatform(),[kind,setKind]=React.useState('orders'),[query,setQuery]=React.useState(''),[editor,setEditor]=useRouteDraft<ModuleEditorSpec|null>(null);
   const scope=w.session.sessionKey+':'+(w.workspace?.id??'');
-  const {question,setQuestion,selected,setSelected,messages,setMessages,files,setFiles,attachmentRefs,setAttachmentRefs,inactiveDrafts,switchDraft,clearDraft}=useAssistantConversation(scope);
+  const {question,setQuestion,selected,setSelected,messages,setMessages,files,setFiles,attachmentRefs,setAttachmentRefs,inactiveDrafts,switchDraft,clearDraft,answerDrafts,setAnswerDraft,discardAnswerDrafts}=useAssistantConversation(scope);
   const [configuration,setConfiguration]=React.useState<{configured:boolean;models?:string[];subscription?:{provider:'chatgpt';connected:boolean}}|null>(null),[checking,setChecking]=React.useState(false),[busy,setBusy]=React.useState(false),[error,setError]=useRouteDraft('');
   const [navOpen,setNavOpen]=React.useState(()=>{try{return localStorage.getItem('mist.xiaozhu.nav')!=='0';}catch{return true;}}),[navDrawer,setNavDrawer]=React.useState(false),[confirmOpen,setConfirmOpen]=React.useState(false),[atBottom,setAtBottom]=React.useState(true),atBottomRef=React.useRef(true),scrollRef=React.useRef<HTMLDivElement>(null);
   const [automations,setAutomations]=React.useState(false),[automationSeed,setAutomationSeed]=React.useState(''),[newRule,setNewRule]=React.useState(0),[proposalId,setProposalId]=React.useState(''),[picker,setPicker]=React.useState(false),[drafts,setDrafts]=React.useState(false);
@@ -247,6 +247,46 @@ export function AssistantPage(){
     setError('');setAttachmentRefs(next);if(!picker)field.current?.focus();
   };
   const cowork=useXiaozhuCowork(w.workspace?.id,scope,canChat,conversationId,originTaskId);
+  React.useEffect(()=>{
+    if(!answerDrafts.size)return;
+    const tasks=new Map(cowork.all.map(task=>[task.id,task]));
+    discardAnswerDrafts(({taskId,questionId})=>{
+      const task=tasks.get(taskId);
+      return !!task&&(!!task.contentRestricted||!task.canControl||task.questions?.some(question=>question.id===questionId&&!!question.answeredAt)===true);
+    });
+  },[answerDrafts,cowork.all,discardAnswerDrafts]);
+  const uncheckedAttachments=React.useMemo(()=>attachmentRefs.filter(ref=>ref.needsVerification),[attachmentRefs]);
+  const [attachmentCheckFailure,setAttachmentCheckFailure]=React.useState<string>();
+  const [attachmentCheckAttempt,retryAttachmentCheck]=React.useReducer((attempt:number)=>attempt+1,0);
+  const attachmentCheck=React.useRef({read:cowork.refreshTask,track:cowork.track});
+  attachmentCheck.current={read:cowork.refreshTask,track:cowork.track};
+  React.useEffect(()=>{
+    if(!w.workspace?.id||!canChat||cowork.loading||cowork.error||!uncheckedAttachments.length)return;
+    const controller=new AbortController();
+    setAttachmentCheckFailure(undefined);
+    const {read,track}=attachmentCheck.current;
+    const taskIds=[...new Set(uncheckedAttachments.map(ref=>ref.taskId))];
+    void Promise.allSettled(taskIds.map(async taskId=>[taskId,await read(taskId,controller.signal)] as const)).then(results=>{
+      if(controller.signal.aborted||live.current!==scope||liveConversation.current!==conversationId)return;
+      const originalTasks=new Map(results.flatMap(result=>result.status==='fulfilled'?[result.value]:[]));
+      const restored=new Map<string,AssistantAttachmentRef>();
+      const authorizedTasks=new Set<AgentTaskView>();
+      for(const {taskId,fileId} of uncheckedAttachments){
+        const task=originalTasks.get(taskId);
+        if(!task||task.conversationId!==conversationId||task.executor!=='platform'||task.automationId||task.contentRestricted||task.state==='access_changed')continue;
+        const file=task.attachments?.find(item=>item.id===fileId);
+        if(!file?.name||!Number.isSafeInteger(file.size)||file.size<=0||file.size>TASK_ATTACHMENT_BYTES)continue;
+        restored.set(fileId,{taskId,fileId,name:file.name,size:file.size});
+        authorizedTasks.add(task);
+      }
+      if(restored.size){
+        for(const task of authorizedTasks)track(task);
+        setAttachmentRefs(refs=>refs.map(ref=>ref.needsVerification?(restored.get(ref.fileId)??ref):ref));
+      }
+      if(restored.size!==uncheckedAttachments.length)setAttachmentCheckFailure(attachmentScope);
+    });
+    return()=>controller.abort();
+  },[attachmentScope,attachmentCheckAttempt,canChat,conversationId,cowork.loading,cowork.error,scope,setAttachmentRefs,uncheckedAttachments,w.workspace?.id]);
   const restrictedTaskIds=new Set(cowork.tasks.filter(task=>task.contentRestricted).map(task=>task.id));
   const hasRestrictedAttachment=attachmentRefs.some(ref=>restrictedTaskIds.has(ref.taskId));
   const handledRecoveries=React.useRef(new Set<string>());
@@ -370,7 +410,7 @@ export function AssistantPage(){
   const ambiguousStatus=statusQuestion&&unfinishedTasks.length>1;
   const activeStatusChoices=statusChoices?.scope===attachmentScope?statusChoices:undefined;
   const checkedTask=statusCheck?.scope===attachmentScope ? visibleTasks.find(task=>task.id===statusCheck.taskId) : undefined;
-  const canAsk=!hasRestrictedAttachment&&!cowork.checkingReceipt&&!cowork.checkingAvailability&&(!(files.length||attachmentRefs.length)||cowork.available)&&!taskThreadOffline&&!cowork.error&&(cowork.available||!!configuration?.configured);
+  const canAsk=!uncheckedAttachments.length&&!hasRestrictedAttachment&&!cowork.checkingReceipt&&!cowork.checkingAvailability&&(!(files.length||attachmentRefs.length)||cowork.available)&&!taskThreadOffline&&!cowork.error&&(cowork.available||!!configuration?.configured);
   const ready=!busy&&!cowork.loading&&canChat&&!!question.trim()&&(!!statusTask||ambiguousStatus||canAsk);
   const checkCurrentTask=async(taskId:string,named=false)=>{
     const controller=new AbortController();
@@ -576,7 +616,7 @@ export function AssistantPage(){
   const canStartTaskVoice=canChat&&cowork.available&&!cowork.loading&&!cowork.error&&!busy&&!inCall;
   // The composer stop button is only unambiguous for one running task while the composer is idle.
   const composerStopTask=runningTasks.length===1&&cowork.available&&!busy&&!inCall&&!question.trim()?runningTasks[0]:undefined;
-  const composer=<XiaozhuComposer value={question} onChange={setQuestion} onSend={()=>void send()} onLatest={hasThread&&!atBottom?returnToLatest:undefined} ready={ready} busy={busy} working={!!composerStopTask} stopping={!!composerStopTask&&cowork.controls[composerStopTask.id]?.busy} onStop={active.current?()=>active.current?.abort():composerStopTask?()=>void cowork.cancel(composerStopTask):undefined} sources={selected} onRemoveSource={toggle} onAttach={()=>setPicker(true)} files={files} onAddFiles={cowork.available?addFiles:undefined} onRemoveFile={index=>setFiles(files.filter((_,i)=>i!==index))} attachmentRefs={attachmentRefs.map(ref=>restrictedTaskIds.has(ref.taskId)?{...ref,name:uiText('原件读取权限已变化')}:ref)} onRemoveAttachmentRef={fileId=>setAttachmentRefs(refs=>refs.filter(ref=>ref.fileId!==fileId))} voice={voice} voiceAvailable={cowork.available&&(!cowork.loading&&!cowork.error||inCall)} field={field} placeholder={uiText(canChat?'问小竹，或交代一件事':'当前账号无模型助手权限')} disabled={!canChat}/>;
+  const composer=<XiaozhuComposer value={question} onChange={setQuestion} onSend={()=>void send()} onLatest={hasThread&&!atBottom?returnToLatest:undefined} ready={ready} busy={busy} working={!!composerStopTask} stopping={!!composerStopTask&&cowork.controls[composerStopTask.id]?.busy} onStop={active.current?()=>active.current?.abort():composerStopTask?()=>void cowork.cancel(composerStopTask):undefined} sources={selected} onRemoveSource={toggle} onAttach={()=>setPicker(true)} files={files} onAddFiles={cowork.available&&!uncheckedAttachments.length?addFiles:undefined} onRemoveFile={index=>setFiles(files.filter((_,i)=>i!==index))} attachmentRefs={attachmentRefs.map(ref=>ref.needsVerification?{...ref,name:uiText('未核对的原附件')}:restrictedTaskIds.has(ref.taskId)?{...ref,name:uiText('原件读取权限已变化')}:ref)} onRemoveAttachmentRef={fileId=>setAttachmentRefs(refs=>refs.filter(ref=>ref.fileId!==fileId))} voice={voice} voiceAvailable={cowork.available&&(!cowork.loading&&!cowork.error||inCall)} field={field} placeholder={uiText(canChat?'问小竹，或交代一件事':'当前账号无模型助手权限')} disabled={!canChat}/>;
   const leftNav=<XiaozhuNav conversations={conversations} activeId={conversationId} onSelect={openConversation} onNew={newConversation} confirmCount={proposals.length} runningCount={running} ruleCount={automationRules.rules.filter(r=>r.enabled).length} draftCount={saved.length} onOpenConfirm={()=>{setNavDrawer(false);setConfirmOpen(true);}} onOpenTasks={()=>{setNavDrawer(false);nav.go('assistant',undefined,{section:'tasks'});}} onOpenRules={()=>{setNavDrawer(false);setAutomations(true);}} onOpenDrafts={()=>{setNavDrawer(false);setDrafts(true);}} unread={unread} renaming={renaming?.startsWith('nav:')?renaming.slice(4):undefined} setRenaming={id=>setRenaming(id?'nav:'+id:undefined)} onRename={rename} onRemove={id=>setRemoving(id)} hasMore={cowork.hasMore} loadingMore={cowork.loadingMore} moreError={cowork.moreError} onLoadMore={()=>void cowork.loadMore()}/>;
   return <MistPage><ErrorNotice inlinePending={pendingProposalVisible}/><XiaozhuAutomations key={scope} scopeKey={scope} open={rulesOpen} onClose={()=>{setAutomations(false);setAutomationSeed('');if(rulesRoute)nav.go('assistant');}} workspaceId={w.workspace?.id} seed={automationSeed} newRule={newRule} returnRuleId={rulesRoute?nav.route.id:undefined}/><XiaozhuTasks refreshSignal={cowork.tasks.length} open={tasksOpen} onClose={()=>nav.go('assistant')} onTaskUpdate={cowork.applyTaskUpdate}/><AgentProposalDialog incomingAccess={w.workspace?.developmentIncomingAccess} referenceAccess={w.workspace?.developmentReferenceAccess} taskClosePlans={w.workspace?.developmentTaskClosePlans} commercialSampleLoanSources={w.workspace?.commercialSampleLoanSources} canConfirmShippingBasis={w.session.hasPermission('products:write')} state={w.state} scopeKey={attachmentScope} onRejection={w.dismissError} proposal={proposals.find(p=>p.id===proposalId)} onClose={()=>{setMissingProposalReceipt(undefined);setProposalId('');}} run={(command,options)=>w.run(command,options)} pendingRequestId={pendingProposalId===proposalId?w.pending?.requestId:undefined} pendingDecision={pendingProposalId!==proposalId?undefined:pendingCommand?.type==='agent.proposal.reject'?'reject':'confirm'}
     missingOriginalReceipt={missingProposalReceipt===pendingProposalBinding.current}
@@ -597,6 +637,8 @@ export function AssistantPage(){
         {!useTaskThread&&(readOnlyHistory.unavailable?<div className="mist-xz-col mist-xz-banner"><Banner variant="status" tone="warn" title={uiText('历史答复暂时无法核对')}
           actions={<Button aria-label={uiText('重试核对历史答复')} onClick={readOnlyHistory.retry}>{uiText('重试')}</Button>}/></div>
           :readOnlyHistory.hidden&&<div className="mist-xz-col mist-xz-banner"><Banner variant="status" tone="warn" title={uiText('部分历史答复需重新核对')}/></div>)}
+        {!!uncheckedAttachments.length&&attachmentCheckFailure===attachmentScope&&<div className="mist-xz-col mist-xz-banner"><Banner variant="status" tone="warn" title={uiText('无法核验原件')}
+          actions={<Button aria-label={uiText('重试核对原附件')} onClick={retryAttachmentCheck}>{uiText('重试')}</Button>}/></div>}
         {cowork.progressStale&&<div className="mist-xz-col mist-xz-banner"><Banner variant="status" tone="warn" title={uiText("进度暂未更新，正在重试")}/></div>}
         {originTaskId&&originStatus&&<div className="mist-xz-col mist-xz-banner">
           <Banner variant="status" tone={originStatus==='loading'?'neutral':'warn'} title={uiText(originStatus==='loading'?'正在查找原对话':'任务暂时无法核对')}
@@ -609,7 +651,7 @@ export function AssistantPage(){
         {canChat&&cowork.loading&&!hasThread?<div className="mist-xz-scroll"><div className="mist-xz-col mist-xz-loading" role="status" aria-label={uiText('正在读取对话')}><i/><i/><i/><i/></div></div>:hasThread?<>
           <div className="mist-xz-scroll" ref={scrollRef} onScroll={e=>{const el=e.currentTarget,near=el.scrollHeight-el.scrollTop-el.clientHeight<96;atBottomRef.current=near;setAtBottom(near);}}>
             <div className="mist-xz-col">
-              {useTaskThread?<XiaozhuThread tasks={visibleTasks} onVoiceTask={canStartTaskVoice?(task,questionId)=>void voice.start(task.id,questionId):undefined} onPreviewAttachment={previewAttachment} onDownloadAttachment={downloadAttachment} controls={cowork.controls} composerStopTaskId={composerStopTask?.id} onReuseAttachment={cowork.available&&!busy&&!inCall?reuseAttachment:undefined} index={index} proposals={w.state?.agentProposals??[]} onOpenFile={fileId=>{const file=w.state?.files.find(f=>f.id===fileId);if(!file){toast(uiText('文件已不可见'),'bad');return;}void w.downloadFile(file).catch((e:Error)=>toast(e.message,'bad'));}} onAnswer={(t,id,text)=>void cowork.answer(t,id,text)} onCancel={t=>void cowork.cancel(t)} onRetry={cowork.available?retryTask:undefined} retryBlocked={retryBlocked} onCopy={text=>{void navigator.clipboard?.writeText(text).then(()=>toast(uiText('已复制')),()=>toast(uiText('复制失败，请手动选择文字'),'bad'));}} onDraft={text=>draft(text)} onAutomate={text=>{setAutomationSeed(text);setAutomations(true);}} onOpenRecord={(view,id,target)=>{if(view)w.go(view,id,target);}} onProposal={setProposalId} onDecide={decide} proposalsBlocked={w.saving||!!w.pending||!!w.pendingCreate} pendingProposalId={pendingProposalId} onRecoverProposal={recoverProposal}/>
+              {useTaskThread?<XiaozhuThread tasks={visibleTasks} answerDraft={{read:(taskId,questionId)=>answerDrafts.get(taskAnswerDraftKey(taskId,questionId))?.text??'',write:setAnswerDraft}} onVoiceTask={canStartTaskVoice?(task,questionId)=>void voice.start(task.id,questionId):undefined} onPreviewAttachment={previewAttachment} onDownloadAttachment={downloadAttachment} controls={cowork.controls} composerStopTaskId={composerStopTask?.id} onReuseAttachment={cowork.available&&!busy&&!inCall&&!uncheckedAttachments.length?reuseAttachment:undefined} index={index} proposals={w.state?.agentProposals??[]} onOpenFile={fileId=>{const file=w.state?.files.find(f=>f.id===fileId);if(!file){toast(uiText('文件已不可见'),'bad');return;}void w.downloadFile(file).catch((e:Error)=>toast(e.message,'bad'));}} onAnswer={(t,id,text)=>void cowork.answer(t,id,text)} onCancel={t=>void cowork.cancel(t)} onRetry={cowork.available?retryTask:undefined} retryBlocked={retryBlocked} onCopy={text=>{void navigator.clipboard?.writeText(text).then(()=>toast(uiText('已复制')),()=>toast(uiText('复制失败，请手动选择文字'),'bad'));}} onDraft={text=>draft(text)} onAutomate={text=>{setAutomationSeed(text);setAutomations(true);}} onOpenRecord={(view,id,target)=>{if(view)w.go(view,id,target);}} onProposal={setProposalId} onDecide={decide} proposalsBlocked={w.saving||!!w.pending||!!w.pendingCreate} pendingProposalId={pendingProposalId} onRecoverProposal={recoverProposal}/>
               :<div className="mist-xz-thread">{visibleMessages.map((m,i)=>m.role==='user'?<div key={i} className="mist-xz-turn"><div className="mist-xz-user">{m.content}</div></div>:<div key={i} className="mist-xz-turn"><XiaozhuTurnShell><XiaozhuMarkdown text={m.content} index={index} onOpen={(view,id,target)=>w.go(view,id,target)}/>{m.truncated&&<p className="mist-xz-note">{uiText("回复较长，已截断。可缩小问题范围继续询问。")}</p>}
                 <div className="mist-xz-acts">{m.sources?.map(source=><Button key={source.id} size="sm" variant="quiet" iconRight={ArrowRight} onClick={()=>w.go(source.view,source.entityId)}>{uiText(source.label)}</Button>)}{canChat&&<Button size="sm" variant="quiet" icon={FileText} onClick={()=>draft(m.content)}>{uiText("保存草稿")}</Button>}</div></XiaozhuTurnShell></div>)}
                 {busy&&<div className="mist-xz-turn"><XiaozhuTurnShell><span className="mist-xz-shimmer" aria-label={uiText("小竹正在回复")}>{uiText('正在思考')}</span></XiaozhuTurnShell></div>}</div>}
@@ -643,7 +685,7 @@ export function AssistantPage(){
           <div className="mist-chat-pick-t"><b>{file.name}</b><span>{task.name}</span></div>
           <PreviewOriginal name={file.name} onPreview={()=>previewAttachment(task,file)}/>
           <DownloadOriginal name={file.name} onDownload={()=>downloadAttachment(task,file)}/>
-          <Button size="sm" variant={on?'secondary':'ai'} aria-pressed={on} aria-label={ui`${on?'移除附件':'引用附件'} ${file.name}`} disabled={busy||!on&&!cowork.available}
+          <Button size="sm" variant={on?'secondary':'ai'} aria-pressed={on} aria-label={ui`${on?'移除附件':'引用附件'} ${file.name}`} disabled={busy||!on&&(!cowork.available||!!uncheckedAttachments.length)}
             onClick={()=>{if(on){setAttachmentRefs(refs=>refs.filter(ref=>ref.fileId!==file.id));setError('');}else reuseAttachment(task,file);}}>{uiText(on?'移除附件':'加入问题')}</Button>
         </div>;
       })}</div>:<EmptyState title={uiText(cowork.loading?'正在读取对话':cowork.hasMore?'已加载的对话中没有匹配附件':query.trim()?'没有匹配的附件':'此对话暂无附件')} compact/>}
