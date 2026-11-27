@@ -1,5 +1,6 @@
 import type { FileTextWindowCache } from './agentFileWindow';
 import { isTaskImage, taskAttachmentLabels, WORKBOOK_SELECTION_QUESTION } from '../shared/mistTaskAttachments';
+import { splitTaskRequest } from '../shared/mistTaskHistoryText';
 import{randomUUID}from'node:crypto';
 import{createLlmCompleter,LlmProviderRetryError,LlmProviderCooldownError,type LlmCompletionInput}from'../ai/llmProviders';
 import{getMistAssistantStatus}from'./assistant';
@@ -9,7 +10,7 @@ import type{MakeTaskCredential,PlatformTaskJob,PlatformTaskReleaseIssue}from'./a
 import type{MistRepository,PlatformTaskImageCache}from'./repository';
 import{MistApiError}from'./errors';
 import{responseLanguagePrompt,responseUserMessage}from'./responseLanguage';
-import{parsePlatformTaskPlan,platformTaskHistory,platformTaskAttachmentHandles,requestedPdfRange,requestedWorkbookWorksheet,scopedAttachmentTaskSteps,shortPdfContinuationPlan,shortOfficeTailPlan,ATTACHMENT_PREFETCH_CHARS,resolvePlatformFileContinuation,PLATFORM_TASK_ATTACHMENT_PREFIX,PLATFORM_TASK_RESULT_LIMIT,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskStep}from'./platformTaskPlan';
+import{parsePlatformTaskPlan,platformTaskHistory,platformTaskAttachmentHandles,requestedTaskAttachmentScope,scopedAttachmentTaskSteps,shortPdfContinuationPlan,shortOfficeTailPlan,ATTACHMENT_PREFETCH_CHARS,resolvePlatformFileContinuation,PLATFORM_TASK_ATTACHMENT_PREFIX,PLATFORM_TASK_RESULT_LIMIT,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskStep}from'./platformTaskPlan';
 import{nextTaskIntentRead}from'./agentTaskIntentRefs';
 
 class PlatformModelTimeout extends Error {}
@@ -160,8 +161,7 @@ export class MistPlatformTaskWorker{
       pulse=setInterval(()=>{if(pulsing)return;pulsing=true;void this.repository.pulsePlatformTask(actor!).catch(()=>abort.abort()).finally(()=>{pulsing=false;});},this.options.pulseMs??5000);pulse.unref?.();
       while(!abort.signal.aborted&&this.enabled){
         phase='store';const context=await this.repository.platformTaskContext(actor);let step=context.steps.at(-1);
-        const pdfScope=requestedPdfRange(context.task.attachments,context.task.instructions);
-        const worksheetScope=requestedWorkbookWorksheet(context.task.attachments,context.task.instructions,context.task.questions);
+        const {pdf:pdfScope,worksheet:worksheetScope,allowedFiles}=requestedTaskAttachmentScope(context.task.attachments,context.task.instructions,context.task.questions);
         if(worksheetScope&&!worksheetScope.fileId){
           const attempts=context.task.questions?.filter(q=>q.question===WORKBOOK_SELECTION_QUESTION).length??0;
           await this.repository.agentTaskRuntime(actor,job.workspaceId,'question',{
@@ -169,20 +169,31 @@ export class MistPlatformTaskWorker{
           });
           return;
         }
-        const readableSteps=scopedAttachmentTaskSteps(context.steps,pdfScope,worksheetScope);
-        const readableAttachments=context.task.attachments?.filter(file=>!worksheetScope?.workbookIds.includes(file.id)||file.id===worksheetScope.fileId);
+        const readableSteps=scopedAttachmentTaskSteps(context.steps,pdfScope,worksheetScope,allowedFiles);
+        const readableAttachments=context.task.attachments?.filter(file=>(!allowedFiles||allowedFiles.has(file.id))
+          &&(!worksheetScope?.workbookIds.includes(file.id)||file.id===worksheetScope.fileId));
         const pendingScopedReads=new Set<string>();
+        let discardedReadNeedsReview=false;
         if(readableSteps.length!==context.steps.length){
           for(const previous of context.steps){
             const fileId=previous.plan.arguments.fileId;
+            const result=previous.result as {error?:boolean;excludedAttachmentHistoryDiscarded?:boolean}|undefined;
+            if(result?.excludedAttachmentHistoryDiscarded)discardedReadNeedsReview=false;
             if(previous.plan.name!=='bambook_file_text'||previous.result===undefined||typeof fileId!=='string')continue;
+            if(allowedFiles&&!allowedFiles.has(fileId)){
+              if(!result?.error)discardedReadNeedsReview=true;
+              continue;
+            }
             if(readableSteps.includes(previous))pendingScopedReads.delete(fileId);
             else if(worksheetScope?.fileId&&worksheetScope.workbookIds.includes(fileId))pendingScopedReads.add(worksheetScope.fileId);
             else pendingScopedReads.add(fileId);
           }
         }
-        if(pendingScopedReads.size&&step&&step.result===undefined&&step.plan.name==='bambook_task'&&step.plan.arguments.action==='finish'){
-          await this.repository.acknowledgePlatformTaskStep(actor,step.id,{error:true,attachmentScopeRereadRequired:true});
+        const frozenReport=step?.plan.name==='bambook_task'&&['finish','checkpoint'].includes(String(step.plan.arguments.action));
+        if(step&&step.result===undefined&&(discardedReadNeedsReview||pendingScopedReads.size&&frozenReport)){
+          await this.repository.acknowledgePlatformTaskStep(actor,step.id,{
+            error:true,attachmentScopeRereadRequired:true,...(discardedReadNeedsReview?{excludedAttachmentHistoryDiscarded:true}:{}),
+          });
           continue;
         }
         if(!step||step.result!==undefined){
@@ -196,7 +207,7 @@ export class MistPlatformTaskWorker{
               ||!readableSteps.some(step=>step.plan.name==='bambook_file_text'&&step.plan.arguments.fileId===file.id&&step.result!==undefined)));
             const attachmentPlan:PlatformTaskPlan|undefined=attachment
               ?{name:'bambook_file_text',arguments:{fileId:attachment.id,maxChars:ATTACHMENT_PREFETCH_CHARS}}
-              :shortPdfContinuationPlan(context.task.attachments,readableSteps,context.task.instructions)??shortOfficeTailPlan(readableAttachments,readableSteps);
+              :shortPdfContinuationPlan(readableAttachments,readableSteps,context.task.instructions)??shortOfficeTailPlan(readableAttachments,readableSteps);
             if(attachmentPlan){
               step=await this.repository.savePlatformTaskPlan(actor,attachmentPlan);
             }else{
@@ -204,12 +215,14 @@ export class MistPlatformTaskWorker{
               phase='model';
               const now=Date.now();
               const businessAt=context.businessAt===undefined?now:Date.parse(context.businessAt);
-              const images=context.task.attachments?.some(file=>isTaskImage(file.name))?await this.repository.platformTaskImages(actor,job.workspaceId,renderedImages):undefined;
+              const images=readableAttachments?.some(file=>isTaskImage(file.name))?await this.repository.platformTaskImages(actor,job.workspaceId,renderedImages):undefined;
               const imageSources=images?.map(image=>image.name);
               const attachmentHandles=platformTaskAttachmentHandles(context.task.attachments);
               const attachmentRules=attachmentHandles.size ? '\n本任务附件用 task.attachments 中的简短 id，例如 attachment_1。调用 bambook_file_text 时把对应附件的简短 id 原样填入 fileId；续读保留同一简短 id，不猜原件编号或借用其他附件的编号。PDF 的 pdfTextByPage 逐页对应原件；引用正文的明确单页时，以其中对应文字为准，文件名或 reportLabel 紧接“第 N 页”（英文 page N）。只有页段时，不推断段落属于哪一页。pagesWithoutText 只用于说明哪些页无可提取文字。fileText 回执的 pageScopeStart 和 pageScopeLimit 表示本人明确限定的 PDF 页码边界，范围外未核实，不请求越界续读。 Excel 引用已读取的具体工作表时，在文件名或 reportLabel 后紧接“（工作表：名称）”，名称使用该次读取的 observedSheets 原文。只有名称、未返回该表正文时，不把其他表的字段归给它。worksheetScope 表示只读取了本人指定的工作表；worksheetComplete 为 true 表示该表的可提取正文在本次已完整返回；此时 complete 为 false 表示整份工作簿仍未核实。' : '';
               const labels=taskAttachmentLabels(context.task.attachments);
-              const attachments=context.task.attachments?.map((file,index)=>labels[index]===file.name?file:{...file,reportLabel:labels[index]});
+              const attachments=context.task.attachments?.flatMap((file,index)=>allowedFiles&&!allowedFiles.has(file.id)?[]:[
+                labels[index]===file.name?file:{...file,reportLabel:labels[index]},
+              ]);
               const identifierRules=attachmentHandles.size
                 ? '\n本人要求核对编号或控制码时，若原文列出独立标识却未注明类型，逐字保留该标识，并说明原件未标为控制码；不要把有标识的来源报告为没有编号。'
                 : '';
@@ -219,6 +232,7 @@ export class MistPlatformTaskWorker{
               // Tool receipts provide the evidence. The UI trail is a second rendering of the same work.
               const {trail:_uiTrail,...modelTask}=context.task;
               if(readableSteps.length!==context.steps.length){modelTask.checkpoint='';modelTask.result='';}
+              if(allowedFiles)modelTask.instructions=splitTaskRequest(modelTask.instructions);
               const history=platformTaskHistory(readableSteps);
               const coverageRule=history.pdfCoverage
                 ? '\nhistory.pdfCoverage 是同一原件从第一页到末页的连续核对范围。单个续读段的 truncated 只描述该段。仍须注明 pagesWithoutText 中不能核对的页，并以各段原文为准。'

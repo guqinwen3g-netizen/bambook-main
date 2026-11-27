@@ -52,7 +52,7 @@ import type {AgentTaskActivity,PersonalTaskAccess} from '../shared/mistAgentTask
 import {markTaskNoticeRead,waitTaskUntil,platformTaskUsage,agentDailyUsage,assertDailyRoom} from './agentTasks';
 import {assertTaskBusinessRead,checkTaskCondition,type PlatformTaskScanCursor} from './agentTasks';
 import {prepareTaskCondition,taskConditionChanged} from './agentTaskConditions';
-import {requestedPdfRange,requestedWorkbookWorksheet,type PlatformTaskContext,type PlatformTaskPlan} from './platformTaskPlan';
+import {requestedTaskAttachmentScope,type PlatformTaskContext,type PlatformTaskPlan} from './platformTaskPlan';
 import {assertConnection,listConnections,getConnection,createConnection,changeConnection,type MakeAgentLease} from './agentConnections';
 import {ensurePersonalIdentity,personalIdentityId,assertPersonalVoiceAvailable,assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceActorFromIdentity,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
 import { assertReceivingLease, receivingRecord, receivingView, setReceiving, claimReceiving, finishReceiving, blockReceiving, invalidateReceiving, dueReceiving, RECEIVE_LEASE_MS, RECEIVE_INTERVAL_MS, type MailSyncActor, type MailSyncLease, type ReceivingJob, receiveSource } from './mail/receiverRegistry';
@@ -2209,8 +2209,9 @@ export class MistRepository {
     });
   }
   async platformTaskImages(prior: AgentActor, workspaceId: string, rendered: PlatformTaskImageCache) {
-    const {files}=await this.privateTaskAttachments(prior,workspaceId),labels=taskAttachmentLabels(files);
-    const images=files.flatMap((file,index)=>isTaskImage(file.name)?[{file,name:labels[index]}]:[]);
+    const {files,instructions,questions}=await this.privateTaskAttachments(prior,workspaceId);
+    const {allowedFiles}=requestedTaskAttachmentScope(files,instructions,questions),labels=taskAttachmentLabels(files);
+    const images=files.flatMap((file,index)=>(!allowedFiles||allowedFiles.has(file.id))&&isTaskImage(file.name)?[{file,name:labels[index]}]:[]);
     return Promise.all(images.map(async ({file,name}) => {
       // Check the live original even when a previous model turn rendered the same image.
       const bytes = await this.files.read(workspaceId, file);
@@ -2232,8 +2233,8 @@ export class MistRepository {
   async fileText(prior: TokenPayload, workspaceId: string, fileId: string, maxChars?: number, cursor?: unknown, fileCache?: FileTextWindowCache) {
     const {files,instructions,questions}=await this.privateTaskAttachments(prior,workspaceId);
     const taskFile=files.find(file=>file.id===fileId);
-    const range=taskFile?requestedPdfRange(files,instructions):undefined;
-    const sheet=taskFile?requestedWorkbookWorksheet(files,instructions,questions):undefined;
+    const {pdf:range,worksheet:sheet,allowedFiles}=requestedTaskAttachmentScope(files,instructions,questions);
+    if(allowedFiles&&!allowedFiles.has(fileId))fail('FILE_TEXT_ATTACHMENT_SCOPE','本任务不读取该附件',422);
     if(sheet?.workbookIds.includes(fileId)&&sheet.fileId!==fileId)
       fail('FILE_TEXT_WORKBOOK_SCOPE','该工作簿未被选中，本任务不读取它的正文',422);
     const {file,bytes}=taskFile?{file:taskFile,bytes:await this.files.read(workspaceId,taskFile)}:await this.download(prior,workspaceId,fileId);
