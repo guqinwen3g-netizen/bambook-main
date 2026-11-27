@@ -61,7 +61,7 @@ import { AGENT_AUDIT_FIELD, AGENT_AUDIT_HASH, AGENT_AUDIT_PREFIX, agentAuditRece
 import { auditFromReceipt, auditMatchesParent, auditEntry, projectAgentAudit, readableCommand } from './agentAuditRead';
 import { markAgentProposalConfirmed, agentCommandRisk, effectiveAgentCommandRisk, AI_WRITE_SCOPES, AGENT_RISK_LABEL } from '../shared/mistAgentProposals';
 import { listConversationMeta, saveConversationMeta } from './agentConversations';
-import { AUTOMATION_FAILURE_LIMIT, AUTOMATION_FAILURE_SPAN_MS, automationInstructions, automationRecord, automationView, dueAutomations, evaluateAutomation, listAutomations, recordAutomationRun, removeAutomation, saveAutomation, setAutomationEnabled, shouldCommitAutomation, writeAutomation } from './agentAutomations';
+import { AUTOMATION_FAILURE_LIMIT, AUTOMATION_FAILURE_SPAN_MS, automationFromCreationReceipt, automationInstructions, automationRecord, automationView, dueAutomations, evaluateAutomation, listAutomations, recordAutomationRun, removeAutomation, saveAutomation, setAutomationEnabled, shouldCommitAutomation, writeAutomation } from './agentAutomations';
 
 /** Bound provenance independently of the three turns that are sent to the model. */
 const TASK_HISTORY_AUTHORITY_LIMIT = 24;
@@ -862,6 +862,13 @@ export class MistRepository {
   async listConversations(prior:TokenPayload,workspaceId:string){if(isAgentActor(prior))fail('FORBIDDEN','对话设置须由本人管理',403);return this.transact(async db=>{const{actor}=await this.own(db,prior,workspaceId,'ai:chat');return{items:await listConversationMeta(db,workspaceId,actor.userId)};});}
   async saveConversation(prior:TokenPayload,workspaceId:string,id:string,input:Record<string,unknown>){if(isAgentActor(prior))fail('FORBIDDEN','对话设置须由本人管理',403);return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,workspaceId,'ai:chat');return saveConversationMeta(db,actor,workspaceId,id,input,Date.now());});}
   async listAutomations(prior:TokenPayload,workspaceId:string){if(isAgentActor(prior))fail('FORBIDDEN','自动规则须由本人管理',403);return this.transact(async db=>{const{actor}=await this.own(db,prior,workspaceId,'ai:chat');return{items:(await listAutomations(db,workspaceId,actor.userId)).map(automationView)};});}
+  async getAutomationCreationReceipt(prior:TokenPayload,workspaceId:string,requestId:unknown){
+    if(isAgentActor(prior))fail('FORBIDDEN','自动规则须由本人管理',403);
+    return this.transact(async db=>{
+      const {actor,row}=await this.own(db,prior,workspaceId,'ai:chat');
+      return automationView(await automationFromCreationReceipt(db,actor,row.id,requestId));
+    });
+  }
   async saveAutomation(prior:TokenPayload,workspaceId:string,id:string|undefined,input:Record<string,unknown>){if(isAgentActor(prior))fail('FORBIDDEN','自动规则须由本人管理',403);return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,workspaceId,'ai:chat');return automationView(await saveAutomation(db,actor,workspaceId,id,input,Date.now()));});}
   async setAutomationEnabled(prior:TokenPayload,workspaceId:string,id:string,input:Record<string,unknown>){
     if(isAgentActor(prior))fail('FORBIDDEN','自动规则须由本人管理',403);

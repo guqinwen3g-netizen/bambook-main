@@ -82,6 +82,20 @@ it('keeps the work trail collapsed after the request is done, and expands it on 
 it('asks the open question inline and sends the answer for that question',async()=>{const f=fns();await paint([task({state:'waiting_human',questions:[{id:'q1',question:'核对哪个客户？',askedAt:''}]})],f);expect(host.textContent).toContain('核对哪个客户？');const box=getByLabelText(host,'回答小竹') as HTMLInputElement;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(box,'客户A');box.dispatchEvent(new Event('input',{bubbles:true}));});await act(async()=>getByRole(host,'button',{name:'回答'}).click());expect(f.onAnswer).toHaveBeenCalledWith(expect.objectContaining({id:'t1'}),'q1','客户A');expect(box.value).toBe('客户A');});
 it('shows what will change and opens the confirmation without leaving the conversation',async()=>{const f=fns();await paint([task({state:'waiting_human',waitingProposalIds:['p1']})],f,[proposal()]);expect(host.textContent).toContain('需要你确认');expect(host.textContent).toContain('归档邮件 PO 确认');expect(host.textContent).toContain('中风险');await act(async()=>getByRole(host,'button',{name:'查看并确认'}).click());expect(f.onProposal).toHaveBeenCalledWith('p1');});
 it('labels a stopped request instead of leaving it blank',async()=>{await paint([task({state:'budget_exhausted',checkpoint:'已读 20 条'})]);expect(host.textContent).toContain('达到限额');});
+it('shows the confirmed answer beside its original question, without reopening it',async()=>{
+  const f=fns();
+  const questions=[{id:'q1',question:'客人确认了哪天交货？',askedAt:'2026-11-27T02:00:00Z',answeredAt:'2026-11-27T02:03:00Z',answer:'模拟交期 1 月 22 日'},
+    {id:'q2',question:'请提供模拟出运港。',askedAt:'2026-11-27T02:04:00Z'}];
+  const asking=task({state:'waiting_human',questions});
+  await paint([asking],f);
+  expect(host.textContent).toContain('客人确认了哪天交货？');
+  expect(host.textContent).toContain('模拟交期 1 月 22 日');
+  expect(host.textContent).toContain('请提供模拟出运港。');
+  expect(host.querySelectorAll('[aria-label="回答小竹"]')).toHaveLength(1);
+  await paint([{...asking,contentRestricted:true}],f);
+  expect(host.textContent).not.toContain('模拟交期 1 月 22 日');
+  expect(f.onAnswer).not.toHaveBeenCalled();
+});
 it('groups requests by day',()=>{const now=new Date('2026-11-09T10:00:00+08:00');expect(dayLabel('2026-11-09T01:00:00+08:00',now)).toBe('今天');expect(dayLabel('2026-11-08T17:30:00Z',now)).toBe('今天');expect(dayLabel('2026-11-08T23:00:00+08:00',now)).toBe('昨天');});
 
 
@@ -92,7 +106,26 @@ it('shows the active model and retry phases instead of the last completed read',
   await paint([task({ trail, executionStage: 'model' })]);
   expect(host.querySelector('.mist-xz-shimmer')?.textContent).toBe('正在等待模型');
   await paint([task({ trail, state: 'queued', executionIssue: { code: 'model_unavailable', retryAt: new Date().toISOString() } })]);
-  expect(host.querySelector('.mist-xz-shimmer')?.textContent).toBe('模型重试中');
+  expect(host.querySelector('.mist-xz-shimmer')?.textContent).toBe('等待模型重试');
+});
+
+it('shows the scheduled retry delay until it elapses without implying a model is running',async()=>{
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date('2026-11-27T04:00:00Z'));
+    const retryAt = new Date(Date.now()+5_000).toISOString();
+    await paint([task({state:'queued',executionIssue:{code:'model_unavailable',retryAt},executionStageSince:new Date(Date.now()-40_000).toISOString()})]);
+    expect(host.textContent).toContain('等待模型重试');
+    expect(host.querySelector('[role="timer"]')?.textContent).toContain('最早 5 秒后重试');
+    await act(async()=>vi.advanceTimersByTimeAsync(3_000));
+    expect(host.querySelector('[role="timer"]')?.textContent).toContain('最早 2 秒后重试');
+    await act(async()=>vi.advanceTimersByTimeAsync(2_000));
+    expect(host.querySelector('[role="timer"]')).toBeNull();
+    expect(host.textContent).toContain('等待模型重试');
+    await paint([task({state:'running',executionStage:'model',executionStageSince:new Date().toISOString()})]);
+    expect(host.textContent).toContain('正在等待模型');
+    expect(host.querySelector('[role="timer"]')?.textContent).toContain('0 秒');
+  } finally {vi.useRealTimers();}
 });
 
 
@@ -164,4 +197,26 @@ it('shows recovery independently of the model stage and returns to live model wa
  expect(getByRole(host,'status').textContent).toBe('待重新领取');
  await paint([task({executionStage:'model'})]);
  expect(getByRole(host,'status').textContent).toBe('正在等待模型');
+});
+
+it('replaces unverified live phases per task while keeping previously read sources', async () => {
+  const executionStageSince = new Date(Date.now()-3000).toISOString();
+  const trail = [{ at:'', kind:'read', label:'读取订单 SO-1001', completed:true }];
+  const running = task({ id:'model', executionStage:'model', executionStageSince, trail });
+  const queued = task({ id:'retry', state:'queued', executionIssue:{code:'model_unavailable',retryAt:new Date(Date.now()+60_000).toISOString()} });
+  const renderedTask = (id: string) => host.querySelector<HTMLElement>('[data-task-id="'+id+'"]')!;
+  const staleProgressIds = new Set(['model']);
+  await paint([running, queued], { ...fns(), staleProgressIds });
+  const model = renderedTask('model'), retry = renderedTask('retry');
+  expect(getByRole(model,'status').textContent).toBe('执行进度暂未更新');
+  expect(queryByRole(model,'timer')).toBeNull();
+  expect(model.querySelector('.mist-xz-shimmer')).toBeNull();
+  expect(model.querySelector('.mist-xz-steps')?.textContent).toContain('读取订单 SO-1001');
+  expect(getByRole(retry,'timer').textContent).toContain('秒后重试');
+
+  await paint([running, queued], { ...fns(), staleProgressIds:new Set(['retry']) });
+  expect(getByRole(model,'status').textContent).toBe('正在等待模型');
+  expect(getByRole(model,'timer')).toBeTruthy();
+  expect(getByRole(retry,'status').textContent).toBe('执行进度暂未更新');
+  expect(queryByRole(retry,'timer')).toBeNull();
 });

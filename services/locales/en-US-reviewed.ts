@@ -621,6 +621,7 @@ export const reviewedEnglish: Record<string, string> = {
   '语音接续':'Resume by voice',
   '收起运行记录':'Collapse run history',
   '规则开启结果待核对':'Rule creation confirmation pending',
+  '核对开启结果':'Check rule creation',
   '规则操作结果待核对':'Rule action confirmation pending',
   '规则已更新，请核对后重试':'Rule updated. Check it before trying again.',
   '已找回原规则':'Original rule recovered',

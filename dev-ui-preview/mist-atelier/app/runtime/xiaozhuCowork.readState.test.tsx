@@ -58,6 +58,22 @@ it('recovers a lost stop receipt from the one task without rereading history',as
  expect(api.mock.calls.filter(([url])=>url.endsWith('/agent-tasks'))).toHaveLength(1);
 });
 
+it('does not keep an unconfirmed answer warning on a newer task question',async()=>{
+ const asking={...task,state:'waiting_human',version:2,canControl:true,questions:[{id:'q1',question:'请给出交期'}]};
+ api.mockImplementation(async(url:string)=>{
+  if(url.endsWith('/task/answer'))throw Object.assign(new Error('连接断开'),{status:0});
+  if(url.endsWith('/task'))return {item:asking};
+  if(url.endsWith('/agent-tasks'))return {items:[asking],nextCursor:null};
+  return loaded(url);
+ });
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<View/>));
+ await act(async()=>{await channel.answer(channel.tasks[0],'q1','1 月 18 日');});
+ expect(channel.controls.task.error).toBe('回答未确认，可重试');
+ await act(async()=>channel.track({...asking,version:3,questions:[{id:'q2',question:'请给出出运港'}]} as any));
+ expect(channel.controls.task?.error).toBeFalsy();
+});
+
 it('retries an unconfirmed answer with the same operation ID and keeps the rest of the channel usable',async()=>{
  const asking={...task,state:'waiting_human',version:2,questions:[{id:'q1',question:'请给出交期'}]};
  const resumed={...asking,state:'queued',version:3,questions:[{...asking.questions[0],answer:'1 月 18 日',answeredAt:task.updatedAt}]};
@@ -163,6 +179,43 @@ it('releases a stalled paginated history read and ignores its late response afte
     await act(async () => finishStalePage({ items: [{ ...task, id: 'stale' }], nextCursor: 'even-older' }));
     expect(api.mock.calls).toHaveLength(callCount);
     expect(channel.tasks).toEqual([task]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('checks the original task immediately when the browser reconnects during progress backoff', async () => {
+  vi.useFakeTimers();
+  const conversationId = 'conversation_reconnect';
+  const running = { ...task, conversationId, state: 'running', version: 2, result: '' };
+  const finished = { ...task, conversationId, version: 3 };
+  let connected = false;
+  const attempted = () => api.mock.calls.filter(([url]) => url.endsWith('/agent-tasks/task')).length;
+  try {
+    api.mockImplementation(async (url: string) => {
+      if (url.includes('/personal-agent/task-access?')) return { restrictedIds: [] };
+      if (url.endsWith('/agent-tasks')) return { items: [running], nextCursor: null };
+      if (url.endsWith('/agent-tasks/task')) {
+        if (!connected) throw new TypeError('Failed to fetch');
+        return { item: finished };
+      }
+      return loaded(url);
+    });
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+    await act(async () => root!.render(<View conversationId={conversationId} />));
+    await act(async () => vi.advanceTimersByTimeAsync(7000));
+    expect(attempted()).toBe(4);
+    expect(channel.staleProgressIds?.has('task')).toBe(true);
+
+    connected = true;
+    await act(async () => window.dispatchEvent(new Event('online')));
+    expect(attempted()).toBe(5);
+    expect(channel.tasks[0]).toEqual(finished);
+    expect(channel.staleProgressIds?.has('task') ?? false).toBe(false);
+    expect(api.mock.calls.filter(([url]) => url.endsWith('/agent-tasks'))).toHaveLength(1);
+    expect(api.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   } finally {
     vi.useRealTimers();
   }
