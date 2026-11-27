@@ -5,11 +5,12 @@ import { AIBadge, AssistantEyes, Button, Icon, IconButton, Pill, type Tone } fro
 import type { AgentTaskTrailItem, AgentTaskView } from '../../../../../server/src/shared/mistAgentTasks';
 import type { TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
 import { agentProposalRisk, AGENT_RISK_LABEL, type AgentProposal } from '../../../../../server/src/shared/mistAgentProposals';
-import { ui, uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
+import { uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { activeModelFallbackSince } from '../../runtime/xiaozhuActivity';
 import { COWORK_ACTIVE, splitRequest, type TaskControlState } from '../../runtime/xiaozhuCowork';
 import type { RecordRef } from '../../runtime/xiaozhuRecords';
 import { commandRequiresSignature } from '../../runtime/signatureRules';
+import { XiaozhuPhaseTimer } from './XiaozhuPhaseTimer';
 import { XiaozhuMarkdown } from './XiaozhuMarkdown';
 
 const STATE: Record<AgentTaskView['state'], [string, Tone]> = { queued: ['待执行', 'accent'], running: ['办理中', 'accent'], waiting_time: ['等待继续', 'neutral'], waiting_condition: ['等待资料变化', 'neutral'], waiting_human: ['待我确认', 'warn'], paused: ['已暂停', 'neutral'], succeeded: ['已完成', 'ok'], failed: ['未完成', 'bad'], cancelled: ['已停止', 'neutral'], expired: ['已到期', 'neutral'], budget_exhausted: ['达到限额', 'warn'], access_changed: ['权限已变化', 'warn'] };
@@ -34,26 +35,6 @@ const clock = (iso: string) => new Date(iso).toLocaleTimeString(interfaceLocale(
 const VIEW: Record<string, string> = { order: 'orders/detail', customer: 'crm', development: 'development/detail', purchase: 'procurement', shipment: 'shipments', invoice: 'invoices', quotation: 'quotations', supplier: 'suppliers', email: 'emails', production: 'production-board', risk: 'risks', claim: 'claims' };
 
 type OpenRecord = (view: string, id: string, target?: import('../../nav').RouteTarget) => void;
-function PhaseTimer({ at, countdown = false }: { at: string; countdown?: boolean }) {
-  const [now, setNow] = React.useState(Date.now);
-  const target = Date.parse(at);
-  React.useEffect(() => {
-    const current = Date.now();
-    setNow(current);
-    if (!Number.isFinite(target) || (countdown && current >= target)) return;
-    const timer = window.setInterval(() => {
-      const current = Date.now();
-      setNow(current);
-      if (countdown && current >= target) window.clearInterval(timer);
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [target, countdown]);
-  if (!Number.isFinite(target)) return null;
-  const seconds = countdown ? Math.ceil((target - now) / 1000) : Math.max(0, Math.floor((now - target) / 1000));
-  if (countdown && seconds <= 0) return null;
-  return <span className="mist-xz-elapsed" role="timer" aria-live="off">· {countdown ? ui`最早 ${seconds} 秒后重试` : ui`${seconds} 秒`}</span>;
-}
-
 function Trail({ task, items, active, activeLabel, since, retryAt, recovering, workLog, onOpen, onPreviewAttachment }: {
   task: AgentTaskView; items: AgentTaskTrailItem[]; active: boolean; activeLabel?: string; since?: string; retryAt?: string; recovering?: boolean; onOpen: OpenRecord;
   workLog?: ThreadActions['workLog'];
@@ -65,7 +46,7 @@ function Trail({ task, items, active, activeLabel, since, retryAt, recovering, w
   return <div className="mist-xz-trail" data-open={open || undefined}>
     {active && <div className="mist-xz-progress">
       <span role="status" className={recovering?undefined:'mist-xz-shimmer'}>{label}</span>
-      {retryAt ? <PhaseTimer at={retryAt} countdown /> : since && <PhaseTimer at={since} />}
+      {retryAt ? <XiaozhuPhaseTimer at={retryAt} countdown /> : since && <XiaozhuPhaseTimer at={since} />}
     </div>}
     {!!items.length && <button type="button" className="mist-xz-trail-h" aria-expanded={open} onClick={() => workLog ? workLog.setExpanded(task.id, !open) : setExpanded(!open)}>
       {uiText('办理过程')}<ChevronRight size={13} />
