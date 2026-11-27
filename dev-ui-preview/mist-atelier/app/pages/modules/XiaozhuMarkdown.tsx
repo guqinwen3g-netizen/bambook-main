@@ -2,10 +2,12 @@
 import React from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { Link, Root, Text } from 'mdast';
+import type { Link, Paragraph, Root, Text } from 'mdast';
 import type { Node, Parent } from 'unist';
+import { ui } from '../../../../../services/interfaceLanguage';
 import { escapeSourceLabel, linkRecords, type RecordRef } from '../../runtime/xiaozhuRecords';
-import type { TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
+import type { AgentTaskTrailItem } from '../../../../../server/src/shared/mistAgentTasks';
+import { taskAttachmentLabels, type TaskAttachment } from '../../../../../server/src/shared/mistTaskAttachments';
 
 import {agentSource} from '../../runtime/agentSource';
 import type {RouteTarget} from '../../nav';
@@ -13,11 +15,12 @@ import type {RouteTarget} from '../../nav';
 const SAFE = /^(https?:|mailto:|bambook:)/i;
 const ATTACHMENT_LINK = 'bambook://task-attachment';
 const EMPTY_ATTACHMENTS: readonly TaskAttachment[] = [];
+const EMPTY_READS: readonly AgentTaskTrailItem[] = [];
 type LinkScope = {
   files: readonly TaskAttachment[];
   index: RecordRef[];
   onOpen: (view: string, id: string, target?:RouteTarget) => void;
-  onOpenAttachment?: (file: TaskAttachment) => void;
+  onOpenAttachment?: (file: TaskAttachment,target?: number | string) => void;
 };
 const MarkdownLinks = React.createContext<LinkScope | null>(null);
 const markdownComponents: Components = {
@@ -29,9 +32,13 @@ const markdownComponents: Components = {
     const {files, index, onOpen, onOpenAttachment} = links;
     const fileIndex = node?.properties['data-task-attachment-index'];
     const file = href === ATTACHMENT_LINK && typeof fileIndex === 'number' ? files[fileIndex] : undefined;
-    if (file && onOpenAttachment) return <button type="button" className="mist-xz-ref" onClick={() => onOpenAttachment(file)}>{children}</button>;
+    const page=node?.properties['data-task-attachment-page'],sheet=node?.properties['data-task-attachment-sheet'];
+    const target=typeof page==='number'?page:typeof sheet==='string'?sheet:undefined;
+    const title=typeof target==='number'?ui`第 ${target} 页`:typeof target==='string'?ui`工作表 ${target}`:undefined;
+    if(file&&onOpenAttachment)return <button type="button" className="mist-xz-ref" title={title}
+      onClick={()=>target===undefined?onOpenAttachment(file):onOpenAttachment(file,target)}>{children}</button>;
     const hit = href?.startsWith('bambook://r/') ? index[Number(href.slice(12))] : undefined;
-    if (hit) return <button type="button" className="mist-xz-ref" data-code={/\d/.test(hit.text) || undefined} onClick={() => onOpen(hit.view, hit.id)}>{children}</button>;
+    if (hit) return <button type="button" className="mist-xz-ref" data-code={/\d/.test(hit.text) || undefined} onClick={() => hit.target ? onOpen(hit.view, hit.id, hit.target) : onOpen(hit.view, hit.id)}>{children}</button>;
     const source=agentSource(href);
     if(source)return <button type="button" className="mist-xz-ref" onClick={()=>onOpen(source.view,source.id,source.target)}>{children}</button>;
     return href && /^https?:/i.test(href) ? <a href={href} target="_blank" rel="noopener noreferrer">{children}</a> : <>{children}</>;
@@ -39,20 +46,136 @@ const markdownComponents: Components = {
   table: ({ children }) => <div className="mist-xz-table"><table>{children}</table></div>,
 };
 
-function attachmentLinks(files: readonly TaskAttachment[]) {
+function inlineTextStart(node:Node|undefined):string {
+  if(!node)return '';
+  if((node.type==='text'||node.type==='inlineCode')&&'value' in node&&typeof node.value==='string')return node.value;
+  if((node.type==='strong'||node.type==='emphasis')&&'children' in node&&Array.isArray(node.children))return inlineTextStart(node.children[0]);
+  return '';
+}
+
+const PDF_PAGE_REFERENCE = /^(?:第[ \t]*([1-9]\d*)[ \t]*页|page[ \t]+([1-9]\d*)\b)/i;
+
+function singleLabel(node: Node): string {
+  if ('value' in node && (node.type === 'text' || node.type === 'inlineCode') && typeof node.value === 'string') return node.value;
+  if ('children' in node && Array.isArray(node.children) && node.children.length === 1
+    && ['heading', 'paragraph', 'strong', 'emphasis'].includes(node.type)) return singleLabel(node.children[0]);
+  return '';
+}
+
+function mentionsAnotherSource(node: Node): boolean {
+  if (node.type === 'link' || node.type === 'linkReference') return true;
+  if ('value' in node && typeof node.value === 'string') return /\.(?:pdf|xlsx)(?![a-z0-9_-])/i.test(node.value);
+  return 'children' in node && Array.isArray(node.children) && node.children.some(mentionsAnotherSource);
+}
+
+function citedPdfPage(suffix:string,file:TaskAttachment,reads:readonly AgentTaskTrailItem[]):number|undefined {
+  if(file.mimeType!=='application/pdf'&&!/\.pdf$/i.test(file.name))return;
+  const scoped=suffix.replace(/^[ \t]*[：:]?[ \t]*/,'');
+  const prefix = /^[（(]?[ \t]*/.exec(scoped)?.[0].length ?? 0;
+  const direct = PDF_PAGE_REFERENCE.exec(scoped.slice(prefix));
+  const lastPage=direct?null:/^共[ \t]*([1-9]\d*)[ \t]*页[；;，,][ \t]*(?:末页|最后一页)[ \t]*[（(][ \t]*第[ \t]*([1-9]\d*)[ \t]*页[ \t]*[）)]/.exec(scoped);
+  const citation=direct??lastPage;
+  if(!citation||lastPage&&lastPage[1]!==lastPage[2])return;
+  const rest=scoped.slice(citation[0].length+(direct?prefix:0));
+  if(/^[ \t]*[）)]?[ \t]*(?:至|到|[-~–—/,，、]|和|或|及|and\b|to\b)[ \t]*(?:第[ \t]*|pages?[ \t]+)?\d/i.test(rest))return;
+  const page=Number(lastPage?lastPage[2]:citation[1]??citation[2]);
+  if(!Number.isSafeInteger(page))return;
+  if(reads.some(read=>read.taskAttachmentId===file.id&&(
+    read.taskAttachmentObservedPages?.includes(page)
+    ?? (read.taskAttachmentPageRange&&page>=read.taskAttachmentPageRange.from&&page<=read.taskAttachmentPageRange.to)
+  )))return page;
+}
+
+const WORKSHEET_REFERENCE = /^(?:工作表|worksheet)(?:[ \t]*[：:][ \t]*|[ \t]+)/i;
+
+function observedWorksheet(text:string,file:TaskAttachment,reads:readonly AgentTaskTrailItem[],boundary:RegExp):string|undefined {
+  if(!/\.xlsx$/i.test(file.name)&&!/spreadsheetml\.sheet/i.test(file.mimeType))return;
+  const names=reads.filter(read=>read.taskAttachmentId===file.id).flatMap(read=>read.taskAttachmentObservedSheets??[]);
+  return names.sort((a,b)=>b.length-a.length).find(name=>text.startsWith(name)&&boundary.test(text.slice(name.length)));
+}
+
+function citedSheet(suffix:string,file:TaskAttachment,reads:readonly AgentTaskTrailItem[]):string|undefined {
+  const prefix=/^[ \t]*[（(][ \t]*/.exec(suffix);
+  if(!prefix)return;
+  const reference=suffix.slice(prefix[0].length);
+  const syntax=WORKSHEET_REFERENCE.exec(reference);
+  if(syntax)return observedWorksheet(reference.slice(syntax[0].length),file,reads,/^[ \t]*[）)]/);
+}
+
+function attachmentLinks(files: readonly TaskAttachment[],reads:readonly AgentTaskTrailItem[]) {
   const byName = new Map<string, number | undefined>();
   files.forEach((file, index) => {
     if (file.name) byName.set(file.name, byName.has(file.name) ? undefined : index);
   });
+  const aliases=new Map<string,number>();
+  taskAttachmentLabels(files).forEach((label,index)=>{
+    if(label===files[index].name||byName.has(label))return;
+    byName.set(label,index);
+    aliases.set(label,index);
+  });
+  const toAttachment=(index:number,child:Link['children'][number],following:string,target?:number|string):Link=>{
+    const page=typeof target==='number'?target:citedPdfPage(following,files[index],reads);
+    const sheet=typeof target==='string'?target:citedSheet(following,files[index],reads);
+    return {type:'link',url:ATTACHMENT_LINK,data:{hProperties:{'data-task-attachment-index':index,
+      ...(page!==undefined?{'data-task-attachment-page':page}:{}),
+      ...(sheet!==undefined?{'data-task-attachment-sheet':sheet}:{})}},children:[child]};
+  };
   const names = [...byName.keys()].sort((a, b) => b.length - a.length);
-  const pattern = new RegExp('(?<![\\p{L}\\p{N}_./\\\\-])(' + names.map(escapeSourceLabel).join('|') + ')(?![\\p{L}\\p{N}_/\\\\-]|\\.[\\p{L}\\p{N}_])', 'gu');
+  const pattern = new RegExp('(?<![\\p{L}\\p{N}_./\\\\-])(' + names.map(escapeSourceLabel).join('|') + ')(?:(?=第[ \\t]*[1-9])|(?![\\p{L}\\p{N}_/\\\\-]|\\.[\\p{L}\\p{N}_]))', 'gu');
+  const observedReads = reads.filter(read => read.taskAttachmentObservedPages !== undefined);
+  const linkSectionReference = (paragraph: Paragraph, index: number) => {
+    if (mentionsAnotherSource(paragraph)) return;
+    const first = paragraph.children[0];
+    const container = first?.type === 'strong' || first?.type === 'emphasis' ? first : paragraph;
+    const start = container.children[0];
+    if (start?.type !== 'text') return;
+    const suffixContainer = container.children.length>1 ? container : paragraph;
+    const following = suffixContainer.children[1];
+    const next = inlineTextStart(following) + inlineTextStart(suffixContainer.children[2])
+      + (suffixContainer !== paragraph ? inlineTextStart(paragraph.children[1]) : '');
+    const file = files[index], text = start.value;
+    const pageLabel = PDF_PAGE_REFERENCE.exec(text)?.[0];
+    const page = pageLabel ? citedPdfPage(text+next,file,observedReads) : undefined;
+    const sheetPrefix = WORKSHEET_REFERENCE.exec(text)?.[0];
+    const sheet = sheetPrefix ? observedWorksheet((text+next).slice(sheetPrefix.length),file,reads,/^[ \t]*(?:$|[：:。])/u) : undefined;
+    if (sheet && sheetPrefix === text && following && singleLabel(following) === sheet) {
+      suffixContainer.children.splice(1,1,toAttachment(index,following,'',sheet));
+      return;
+    }
+    const label = page !== undefined ? pageLabel : sheet ? sheetPrefix+sheet : undefined;
+    if (!label || !text.startsWith(label)) return;
+    const remainder = text.slice(label.length);
+    container.children.splice(0,1,toAttachment(index,{type:'text',value:label},'',page??sheet),
+      ...(remainder ? [{type:'text' as const,value:remainder}] : []));
+  };
   return {
     names,
     plugin: () => (tree: Root) => {
       if (!names.length) return;
-      const visit = (parent: Parent) => {
-        parent.children = parent.children.flatMap<Node>(child => {
-          if ('children' in child && Array.isArray(child.children) && child.type !== 'link' && child.type !== 'linkReference') visit(child as Parent);
+      for (let position=1;position<tree.children.length;position++) {
+        const heading = tree.children[position-1];
+        if (heading.type !== 'heading' && heading.type !== 'paragraph') continue;
+        const index = byName.get(singleLabel(heading).trim().replace(/[：:]$/,'').trim());
+        if (index === undefined) continue;
+        const details = tree.children[position];
+        if (details.type === 'paragraph') linkSectionReference(details,index);
+        if (details.type === 'list') {
+          for (const item of details.children) {
+            const paragraph = item.children[0];
+            if (paragraph?.type === 'paragraph') linkSectionReference(paragraph,index);
+          }
+        }
+      }
+      const visit = (parent: Parent, following='') => {
+        const children=parent.children;
+        parent.children = children.flatMap<Node>((child,position) => {
+          const next=position+1<children.length?inlineTextStart(children[position+1]):following;
+          if ('children' in child && Array.isArray(child.children) && child.type !== 'link' && child.type !== 'linkReference')
+            visit(child as Parent,child.type==='strong'||child.type==='emphasis'?next:'');
+          if(child.type==='inlineCode'&&'value' in child&&typeof child.value==='string'){
+            const index=aliases.get(child.value);
+            if(index!==undefined)return [toAttachment(index,{type:'inlineCode',value:child.value},next)];
+          }
           if (child.type !== 'text' || !('value' in child) || typeof child.value !== 'string') return [child];
           const value = child.value, parts: (Link | Text)[] = [];
           let last = 0;
@@ -61,12 +184,8 @@ function attachmentLinks(files: readonly TaskAttachment[]) {
             if (index === undefined) continue;
             if (match.index > last) parts.push({ type: 'text', value: value.slice(last, match.index) });
             // This marker comes from parsed text, never from a model-provided URL.
-            parts.push({
-              type: 'link', url: ATTACHMENT_LINK,
-              data: { hProperties: { 'data-task-attachment-index': index } },
-              children: [{ type: 'text', value: match[0] }],
-            });
             last = match.index + match[0].length;
+            parts.push(toAttachment(index,{type:'text',value:match[0]},value.slice(last)+next));
           }
           if (!parts.length) return [child];
           if (last < value.length) parts.push({ type: 'text', value: value.slice(last) });
@@ -78,12 +197,13 @@ function attachmentLinks(files: readonly TaskAttachment[]) {
   };
 }
 
-export function XiaozhuMarkdown({ text, index, onOpen, attachments = EMPTY_ATTACHMENTS, onOpenAttachment }: {
+export function XiaozhuMarkdown({ text, index, onOpen, attachments = EMPTY_ATTACHMENTS, attachmentReads=EMPTY_READS, onOpenAttachment }: {
   text: string; index: RecordRef[]; onOpen: (view: string, id: string, target?:RouteTarget) => void;
-  attachments?: readonly TaskAttachment[]; onOpenAttachment?: (file: TaskAttachment) => void;
+  attachments?: readonly TaskAttachment[];
+  attachmentReads?: readonly AgentTaskTrailItem[]; onOpenAttachment?: (file: TaskAttachment,target?: number | string) => void;
 }) {
   const files = onOpenAttachment ? attachments : EMPTY_ATTACHMENTS;
-  const attachment = React.useMemo(() => attachmentLinks(files), [files]);
+  const attachment = React.useMemo(() => attachmentLinks(files,attachmentReads), [files,attachmentReads]);
   const source = React.useMemo(() => linkRecords(text, index, attachment.names), [text, index, attachment]);
   return <MarkdownLinks.Provider value={{files,index,onOpen,onOpenAttachment}}>
     <div className="mist-xz-md"><Markdown remarkPlugins={[remarkGfm, attachment.plugin]} skipHtml
