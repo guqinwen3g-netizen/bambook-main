@@ -171,3 +171,33 @@ it('opens an observed worksheet from separate report details without choosing an
   host.remove();
  }
 });
+
+
+it('opens independent verified references on later lines inside the same report paragraph', async () => {
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const host=document.createElement('div'),root=createRoot(host),preview=vi.fn();
+ document.body.append(host);
+ const pdf={id:'pdf',name:'long.pdf',mimeType:'application/pdf',size:200};
+ const sheet={id:'xlsx',name:'报价.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',size:400};
+ const text=[
+  '### long.pdf',
+  '第 26 页：核对末页。\n**第 3 页**：无可提取文字。  \n第 26 页及第 3 页一起概括。\n第 26 页及\n第 3 页作为一组。\n第 10 页仍未核对。\n**第 12 页：第一条。\n第 13 页：第二条。**',
+  '### 报价.xlsx',
+  '工作表：报价草案：原币 USD。\n工作表：**确认报价**：原币 EUR。\n工作表：**报价草案**、确认报价。\n工作表：内部底表。\n见 [另一原件](https://example.invalid/other.xlsx)。\n工作表：报价草案：归属已不明确。',
+ ].join('\n\n');
+ const attachmentReads=[
+  {at:'',kind:'read' as const,label:'已读',taskAttachmentId:pdf.id,taskAttachmentObservedPages:[3,12,13,26]},
+  {at:'',kind:'read' as const,label:'已读',taskAttachmentId:sheet.id,taskAttachmentObservedSheets:['报价草案','确认报价']},
+ ];
+ try {
+  await act(async()=>root.render(<XiaozhuMarkdown text={text} index={[]} onOpen={vi.fn()} attachments={[pdf,sheet]} attachmentReads={attachmentReads} onOpenAttachment={preview}/>));
+  const buttons=[...host.querySelectorAll('button')];
+  expect(buttons.map(button=>button.textContent)).toEqual(['long.pdf','第 26 页','第 3 页','第 12 页','第 13 页','报价.xlsx','工作表：报价草案','确认报价']);
+  expect(host.querySelector('br')).not.toBeNull();
+  expect(host.querySelector('strong > button')?.textContent).toBe('第 3 页');
+  await act(async()=>buttons.forEach(button=>button.click()));
+  expect(preview.mock.calls).toEqual([[pdf],[pdf,26],[pdf,3],[pdf,12],[pdf,13],[sheet],[sheet,'报价草案'],[sheet,'确认报价']]);
+ } finally {
+  await act(async()=>root.unmount());host.remove();
+ }
+});
