@@ -27,6 +27,7 @@ import{defaultAgentDelegation}from'./route';
 import type{AgentDelegation}from'./agentDelegation';
 import { MistVoiceService, type VoiceOptions } from './voice/service';
 import { createPlatformVoiceStore } from '../ai/platformVoice';
+import { createProviderCooldownStore } from '../ai/providerCooldownStore';
 export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;host?:string;mailTransport?:MailTransport;mailResolve?:(host:string)=>Promise<string[]>;mailReceive?:Pick<MailReceiverOptions,'tickMs'|'concurrency'>&{intervalMs?:number;leaseMs?:number;timeoutMs?:number};agentTasks?:Omit<PlatformTaskWorkerOptions,'makeCredential'>;voice?:VoiceOptions}={}) {
   const app = express(); app.disable('x-powered-by');
   const host=options.host??process.env.MIST_HOST??'127.0.0.1';
@@ -43,7 +44,7 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
     app.locals.mailReceiver=mailReceiver;
     return{mail,mailReceiver};
   };
-  const agentRuntime=(repository:MistRepository,delegation:AgentDelegation)=>{const worker=new MistPlatformTaskWorker(repository,{onError:code=>console.error('[platform-agent]',code),...options.agentTasks,makeCredential:delegation.makeTaskCredential});app.locals.platformTaskWorker=worker;app.locals.mistRepository=repository;app.locals.automationWorker=new MistAutomationWorker(repository,{make:delegation.makeServiceCredential,...(local?{localActor:local.actorForProfile}:{}),onError:code=>console.error('[agent-automation]',code)});repository.setPlatformTaskRuntime(()=>worker.available,delegation.hydrateServiceActor,()=>worker.wake());};
+  const agentRuntime=(repository:MistRepository,delegation:AgentDelegation)=>{const worker=new MistPlatformTaskWorker(repository,{cooldownStore:!local&&prisma?createProviderCooldownStore(prisma):undefined,onError:code=>console.error('[platform-agent]',code),...options.agentTasks,makeCredential:delegation.makeTaskCredential});app.locals.platformTaskWorker=worker;app.locals.mistRepository=repository;app.locals.automationWorker=new MistAutomationWorker(repository,{make:delegation.makeServiceCredential,...(local?{localActor:local.actorForProfile}:{}),onError:code=>console.error('[agent-automation]',code)});repository.setPlatformTaskRuntime(()=>worker.available,delegation.hydrateServiceActor,()=>worker.wake());};
   const marketStore=createMarketStore(process.env.BAMBOOK_MARKET_DIR?.trim()||(local?path.join(local.database.directory,'market'):undefined));
   app.locals.marketStore=marketStore;app.locals.marketWorker=new MarketQuoteWorker(marketStore,{onError:code=>console.error('[market-quotes]',code)});
   const configured = new Set((local?'':process.env.MIST_CORS_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean));
