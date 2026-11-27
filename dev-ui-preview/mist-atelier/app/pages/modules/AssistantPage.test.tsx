@@ -113,6 +113,55 @@ it('keeps an authorized read-only turn usable and omits it after access is withd
   expect(requests[1]).toMatchObject({history:[]});
 });
 
+it('preserves work-log expansion when returning from an order within the same account and workspace', async () => {
+  const report = {
+    id:'multiorder-report', name:'核对三张订单', conversationId:'c_multiorder_report',
+    executor:'platform', state:'succeeded', instructions:'核对三张订单',
+    result:'三张订单已核对。', questions:[], waitingProposalIds:[], version:3,
+    createdAt:'2026-11-27T03:00:00Z', updatedAt:'2026-11-27T03:01:00Z',
+    trail:[{kind:'read',at:'2026-11-27T03:01:00Z',label:'读取 3 张订单',refs:[
+      {id:'order-1',view:'orders/detail',type:'order',label:'模拟订单一'},
+      {id:'order-2',view:'orders/detail',type:'order',label:'模拟订单二'},
+      {id:'order-3',view:'orders/detail',type:'order',label:'模拟订单三'},
+    ]}],
+  };
+  mock.fetch.mockResolvedValue(response({ configured:true }));
+  mock.api.mockImplementation(async (url: string) => {
+    if (url.endsWith('/agent-task-capabilities')) return { platformAvailable:true };
+    if (url.endsWith('/agent-tasks/'+report.id)) return { item:report };
+    if (url.endsWith('/agent-tasks')) return { items:[report],nextCursor:null };
+    return { items:[],restrictedIds:[] };
+  });
+  await mount();
+  const reopen = () => act(async () => root!.render(view(true,report.id,'task-origin')));
+  const leave = () => act(async () => root!.render(view(false)));
+  const expanded = () => button('办理过程')?.getAttribute('aria-expanded');
+  await reopen();
+  expect(expanded()).toBe('false');
+  await click('办理过程');
+  await click('模拟订单一');
+  expect(go).toHaveBeenCalledWith('orders/detail','order-1',undefined);
+  await leave();
+  await reopen();
+  expect(expanded()).toBe('true');
+  expect(button('模拟订单二')).toBeTruthy();
+
+  await click('办理过程');
+  await leave();
+  await reopen();
+  expect(expanded()).toBe('false');
+
+  await click('办理过程');
+  mock.sessionKey='session-b';
+  await reopen();
+  expect(expanded()).toBe('false');
+
+  await click('办理过程');
+  mock.workspace = { ...mock.workspace, workspace: { ...mock.workspace.workspace, id:'other-company' } };
+  await reopen();
+  expect(expanded()).toBe('false');
+});
+
 it('hides previous read-only history while a changed workspace revision is being verified', async () => {
   const token = 'saved-revision-ticket';
   sessionStorage.setItem('mist.assistant.conversation:session-a:workspace', JSON.stringify({ messages: [

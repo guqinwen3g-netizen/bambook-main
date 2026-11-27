@@ -2,7 +2,7 @@ import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
 import type { MistState } from '../shared/mistWorkspace';
 import { AGENT_TASK_INTENT_KINDS, normalizeAgentTaskIntentRefs, type AgentTaskIntentKind, type AgentTaskIntentRef } from '../shared/mistAgentTasks';
-import { AGENT_OBJECT_TYPES } from './agentRead';
+import { AGENT_OBJECT_TYPES, matchesAgentObjectIdentifier } from './agentRead';
 import { fail } from './errors';
 import type { PlatformTaskStep, PlatformTaskPlan } from './platformTaskPlan';
 
@@ -20,7 +20,7 @@ export function validateTaskIntentRefs(value:unknown,actor:TokenPayload,visible:
 }
 export function taskIntentCeilingAllows(refs:AgentTaskIntentRef[],ceiling:readonly string[]):boolean{return refs.every(ref=>ceiling.includes(descriptor(ref.kind).scope)||ceiling.includes('*'));}
 const HISTORY_READ_LIMIT = 12;
-type PriorReadObject = { type?: string; id?: string; truncated?: boolean; data?: object };
+type PriorReadObject = { type?: string; id?: string; truncated?: boolean; data?: { code?: unknown; sku?: unknown } };
 
 export function taskHistoryReadRefs(
   selected: AgentTaskIntentRef[],
@@ -28,8 +28,10 @@ export function taskHistoryReadRefs(
 ): AgentTaskIntentRef[] | undefined {
   const reads = new Map(selected.map(ref => [ref.kind + '\0' + ref.id, ref]));
   const collect = (object: PriorReadObject | undefined, expectedType: unknown, expectedIds: readonly unknown[]) => {
-    if (!object?.data || object.truncated !== false || object.type !== expectedType
-      || typeof object.id !== 'string' || !expectedIds.includes(object.id)) return;
+    if (!object?.data || object.truncated !== false || object.type !== expectedType || typeof object.id !== 'string') return;
+    const { code, sku } = object.data;
+    const identifier = { id: object.id, code, sku };
+    if (!expectedIds.some(id => typeof id === 'string' && matchesAgentObjectIdentifier(identifier, id))) return;
     const kind = AGENT_TASK_INTENT_KINDS.find(kind => OBJECT_TYPE[kind] === object.type);
     if (kind) reads.set(kind + '\0' + object.id, { kind, id: object.id });
   };
