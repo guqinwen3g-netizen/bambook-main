@@ -1,7 +1,7 @@
 import {expect,it} from 'vitest';
 import {createMistState} from '../shared/mistWorkspace';
 import {normalizeAgentTaskIntentRefs} from '../shared/mistAgentTasks';
-import {taskIntentReadTargets,validateTaskIntentRefs,taskIntentRefsVisible,taskIntentCeilingAllows,nextTaskIntentRead} from './agentTaskIntentRefs';
+import {taskHistoryReadRefs,taskIntentReadTargets,validateTaskIntentRefs,taskIntentRefsVisible,taskIntentCeilingAllows,nextTaskIntentRead} from './agentTaskIntentRefs';
 import {AGENT_OBJECT_TYPES} from './agentRead';
 const actor:any={userId:'owner',roles:[],departmentIds:[],authorizationLoaded:true,permissions:['orders:read','invoices:read']};
 const state=()=>{const s=createMistState({id:()=>'',now:'2026-11-01T00:00:00Z',actorId:'owner',actorName:'owner'},'empty');s.orders.push({id:'order-A',code:'同名',ownerId:'owner'}as any);s.invoices.push({id:'invoice-A',code:'同名'}as any);return s;};
@@ -26,4 +26,25 @@ it('requires completed exact MCP gets and preserves failed and compacted read bo
  expect(nextTaskIntentRead([...refs],[step('order','A',{object:{id:'other'}})])).toEqual({failed:true});expect(nextTaskIntentRead([...refs],[step('order','A',{error:true})])).toEqual({failed:true});
  expect(nextTaskIntentRead([...refs],[step('order','A',{object:{id:'A'},truncated:true})]).plan?.arguments).toEqual({type:'invoice',id:'B'});
  expect(nextTaskIntentRead([...refs],[step('order','A',{truncated:true},true)]).plan?.arguments.id).toBe('B');expect(nextTaskIntentRead([...refs],[step('order','A',{error:true},true)])).toEqual({failed:true});
+});
+
+it('keeps exact completed reads alongside selected refs without inheriting partial or unrelated IDs', () => {
+ const makeRead = (name:string, args:Record<string,unknown>, result:unknown, compacted=false) => ({
+  id:'step',at:'2026-11-01T00:00:00Z',plan:{name,arguments:args},result,compacted,
+ });
+ const order = (id:string, truncated=false) => ({type:'order',id,truncated,data:{due:'2027-05-21'}});
+ const selected = [{kind:'orders' as const,id:'A'}];
+ expect(taskHistoryReadRefs(selected,[
+  makeRead('bambook_get',{type:'order',id:'A'},{object:order('A')}),
+  makeRead('bambook_get',{type:'order',id:'B'},{object:order('B')}),
+  makeRead('bambook_get',{type:'order',id:'C'},{object:order('C',true)}),
+  makeRead('bambook_get',{type:'order',id:'D'},{object:order('other')}),
+  makeRead('bambook_get',{type:'order',id:'E'},{error:true,object:order('E')}),
+  makeRead('bambook_get',{type:'order',id:'F'},{object:order('F')},true),
+  makeRead('bambook_get_orders',{ids:['G']},{orders:[order('G'),order('unrequested')]}),
+ ])).toEqual(['A','B','G'].map(id => ({kind:'orders',id})));
+ expect(taskHistoryReadRefs(selected,Array.from({length:12},(_,i)=>{
+  const id='read-'+i;
+  return makeRead('bambook_get',{type:'order',id},{object:order(id)});
+ }))).toBeUndefined();
 });

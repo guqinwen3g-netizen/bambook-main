@@ -113,6 +113,38 @@ it('keeps an authorized read-only turn usable and omits it after access is withd
   expect(requests[1]).toMatchObject({history:[]});
 });
 
+it('hides previous read-only history while a changed workspace revision is being verified', async () => {
+  const token = 'saved-revision-ticket';
+  sessionStorage.setItem('mist.assistant.conversation:session-a:workspace', JSON.stringify({ messages: [
+    { role: 'user', content: '原订单交期' },
+    { role: 'assistant', content: '模拟旧交期 1 月 21 日', contextToken: token, revision: 1 },
+  ] }));
+  const requests: unknown[] = [];
+  let historyCheck: () => Promise<unknown> = async () => ({ allowedTokens: [token] });
+  mock.api.mockImplementation(async (url: string) => {
+    if (url.endsWith('/assistant/history-access')) return historyCheck();
+    return url.endsWith('/agent-task-capabilities') ? { platformAvailable: false } : { items: [], nextCursor: null };
+  });
+  mock.fetch.mockImplementation(async (url: string, options?: RequestInit) => {
+    if (url.endsWith('/status')) return response({ configured: true });
+    requests.push(JSON.parse(String(options?.body)));
+    return response({ text: '本轮答复', mode: 'read_only', revision: 2, sources: [] });
+  });
+  await mount();
+  expect(host.textContent).toContain('模拟旧交期 1 月 21 日');
+
+  historyCheck = () => new Promise(() => {});
+  mock.workspace = { ...mock.workspace, workspace: { ...mock.workspace.workspace, revision: 2 } };
+  await act(async () => root!.render(view()));
+  expect(host.textContent).not.toContain('模拟旧交期 1 月 21 日');
+  await question('独立核对问题');
+  await click('发送');
+  expect(requests).toEqual([expect.objectContaining({ history: [] })]);
+  expect(host.textContent).toContain('本轮答复');
+  expect(host.textContent).not.toContain('模拟旧交期 1 月 21 日');
+
+});
+
 it('does not render legacy cached read-only answers without an authorization token',async()=>{
   sessionStorage.setItem('mist.assistant.conversation:session-a:workspace',JSON.stringify({messages:[
     {role:'user',content:'上次问答'}, {role:'assistant',content:'旧版缓存的模拟记录',revision:1,sources:[]},

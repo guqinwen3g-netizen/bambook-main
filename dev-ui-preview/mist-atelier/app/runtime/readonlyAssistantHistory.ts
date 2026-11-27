@@ -5,8 +5,9 @@ import { mistApiRequest } from './workspace';
 
 export function useReadOnlyAssistantHistory(messages: readonly AssistantReply[], scope: string,
   workspaceId: string | undefined, revision: number | undefined, enabled: boolean) {
-  const [verified,setVerified] = React.useState<{scope:string;tokens:Set<string>}>();
-  const [failedScope,setFailedScope] = React.useState<string>();
+  const verificationKey = JSON.stringify([scope, revision]);
+  const [verified,setVerified] = React.useState<{key:string;tokens:Set<string>}>();
+  const [failedKey,setFailedKey] = React.useState<string>();
   const [retryAttempt,advanceRetry] = React.useReducer((attempt:number)=>attempt+1,0);
   const turns = React.useMemo(() => {
     const pairs: Array<[AssistantReply,AssistantReply]> = [];
@@ -32,14 +33,14 @@ export function useReadOnlyAssistantHistory(messages: readonly AssistantReply[],
           }) as Promise<{allowedTokens?:unknown}>);
         if(!live||controller.signal.aborted)return;
         if(!Array.isArray(response?.allowedTokens))throw new Error('历史答复暂时无法核对');
-        setVerified({scope,tokens:new Set(response.allowedTokens.filter((token:unknown):token is string=>typeof token==='string'&&tokens.includes(token)))});
-        setFailedScope(undefined);
+        setVerified({key:verificationKey,tokens:new Set(response.allowedTokens.filter((token:unknown):token is string=>typeof token==='string'&&tokens.includes(token)))});
+        setFailedKey(undefined);
       } catch (cause) {
         if(!live)return;
         if([401,403,404].includes(Number((cause as {status?:number})?.status))){
-          setVerified({scope,tokens:new Set()});
-          setFailedScope(undefined);
-        } else setFailedScope(scope);
+          setVerified({key:verificationKey,tokens:new Set()});
+          setFailedKey(undefined);
+        } else setFailedKey(verificationKey);
       } finally {if(request===controller)request=undefined;}
     };
     const refresh=()=>void check();
@@ -47,10 +48,11 @@ export function useReadOnlyAssistantHistory(messages: readonly AssistantReply[],
     const interval=window.setInterval(refresh,10000);
     window.addEventListener('focus',refresh);document.addEventListener('visibilitychange',refresh);
     return()=>{live=false;request?.abort();window.clearInterval(interval);window.removeEventListener('focus',refresh);document.removeEventListener('visibilitychange',refresh);};
-  },[enabled,revision,scope,tokens,workspaceId,retryAttempt]);
-  const visible=turns.flatMap(([user,reply])=>verified?.scope===scope&&reply.contextToken&&verified.tokens.has(reply.contextToken)?[user,reply]:[]);
-  const remember=(token:string)=>setVerified(previous=>({scope,tokens:new Set([...(previous?.scope===scope?previous.tokens:[]),token])}));
-  const retry=()=>{setFailedScope(undefined);advanceRetry();};
-  return {visible,remember,retry,unavailable:enabled&&tokens.length>0&&failedScope===scope,
-    hidden:turns.length*2>visible.length&&(verified?.scope===scope||!tokens.length)};
+  },[enabled,verificationKey,tokens,workspaceId,retryAttempt]);
+  const currentTokens = enabled && verified?.key === verificationKey ? verified.tokens : undefined;
+  const visible=turns.flatMap(([user,reply])=>reply.contextToken&&currentTokens?.has(reply.contextToken)?[user,reply]:[]);
+  const remember=(token:string)=>setVerified(previous=>({key:verificationKey,tokens:new Set([...(previous?.key===verificationKey?previous.tokens:[]),token])}));
+  const retry=()=>{setFailedKey(undefined);advanceRetry();};
+  return {visible,remember,retry,unavailable:enabled&&tokens.length>0&&failedKey===verificationKey,
+    hidden:enabled&&turns.length*2>visible.length&&(currentTokens!==undefined||!tokens.length)};
 }
