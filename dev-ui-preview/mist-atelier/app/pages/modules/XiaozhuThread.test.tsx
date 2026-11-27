@@ -198,3 +198,25 @@ it('shows recovery independently of the model stage and returns to live model wa
  await paint([task({executionStage:'model'})]);
  expect(getByRole(host,'status').textContent).toBe('正在等待模型');
 });
+
+it('replaces unverified live phases per task while keeping previously read sources', async () => {
+  const executionStageSince = new Date(Date.now()-3000).toISOString();
+  const trail = [{ at:'', kind:'read', label:'读取订单 SO-1001', completed:true }];
+  const running = task({ id:'model', executionStage:'model', executionStageSince, trail });
+  const queued = task({ id:'retry', state:'queued', executionIssue:{code:'model_unavailable',retryAt:new Date(Date.now()+60_000).toISOString()} });
+  const renderedTask = (id: string) => host.querySelector<HTMLElement>('[data-task-id="'+id+'"]')!;
+  const staleProgressIds = new Set(['model']);
+  await paint([running, queued], { ...fns(), staleProgressIds });
+  const model = renderedTask('model'), retry = renderedTask('retry');
+  expect(getByRole(model,'status').textContent).toBe('执行进度暂未更新');
+  expect(queryByRole(model,'timer')).toBeNull();
+  expect(model.querySelector('.mist-xz-shimmer')).toBeNull();
+  expect(model.querySelector('.mist-xz-steps')?.textContent).toContain('读取订单 SO-1001');
+  expect(getByRole(retry,'timer').textContent).toContain('秒后重试');
+
+  await paint([running, queued], { ...fns(), staleProgressIds:new Set(['retry']) });
+  expect(getByRole(model,'status').textContent).toBe('正在等待模型');
+  expect(getByRole(model,'timer')).toBeTruthy();
+  expect(getByRole(retry,'status').textContent).toBe('执行进度暂未更新');
+  expect(queryByRole(retry,'timer')).toBeNull();
+});
