@@ -363,7 +363,7 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
   const recheckProgress = React.useCallback(async(taskId:string)=>{ await manualProgressRead.current?.(taskId); },[]);
 
   React.useEffect(() => {
-    if ((!foregroundId && !backgroundIds) || !base || !available) return;
+    if ((!foregroundId && !backgroundIds) || !base || !enabled) return;
     const background = backgroundIds ? backgroundIds.split(',') : [];
     const inFlight = new Map<string, {controller:AbortController;promise:Promise<void>}>();
     const retry = new Map<string, { delay: number; at: number }>();
@@ -399,7 +399,17 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
       if(live.current!==scope||!navigator.onLine||(id!==foregroundId&&!background.includes(id)))return;
       return readProgress(id);
     };
+    const abortReads = () => {
+      for(const {controller} of inFlight.values())controller.abort();
+      inFlight.clear();
+    };
+    const releaseReaders=()=>{
+      if(manualProgressRead.current===manual)manualProgressRead.current=undefined;
+      abortReads();
+    };
     manualProgressRead.current=manual;
+    // Model availability gates automatic polling, not reads of an existing task.
+    if(!available)return releaseReaders;
     const poll = () => {
       if (live.current !== scope || !navigator.onLine || document.visibilityState === 'hidden') return;
       const ids = foregroundId ? [foregroundId] : [];
@@ -413,10 +423,6 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
         void readProgress(id);
       }
     };
-    const abortReads = () => {
-      for(const {controller} of inFlight.values())controller.abort();
-      inFlight.clear();
-    };
     const offline = () => { abortReads(); markStale(foregroundId ? [foregroundId, ...background] : background); };
     const refreshVisible = () => { lastBackground = 0; void poll(); };
     const reconnect = () => { retry.clear(); refreshVisible(); };
@@ -427,14 +433,13 @@ export function useXiaozhuCowork(workspaceId: string | undefined, scope: string,
     if (navigator.onLine) poll();
     else offline();
     return () => {
-      if(manualProgressRead.current===manual)manualProgressRead.current=undefined;
-      abortReads();
+      releaseReaders();
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', refreshVisible);
       window.removeEventListener('offline', offline);
       window.removeEventListener('online', reconnect);
     };
-  }, [foregroundId, backgroundIds, base, available, scope, clearStaleProgress]);
+  }, [foregroundId, backgroundIds, base, available, enabled, scope, clearStaleProgress]);
   const send = async (text: string, history: AgentTaskView[] = [], conversationId?: string, intentRefs:AgentTaskIntentRef[]=[], files:File[]=[], attachmentRefs:ReadonlyArray<TaskAttachmentRef>=[]): Promise<AgentTaskView | null> => {
     const message = text.trim();
     if (!message || sendRequest.current || receiptRead.current || !base || loading || checkingAvailability || error || !available) return null;
