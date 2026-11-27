@@ -4,10 +4,15 @@ import {createRoot,type Root} from 'react-dom/client';
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 import {getByRole,getByLabelText,getByText,queryByRole,fireEvent} from '@testing-library/dom';
 import {MistRoot,ToastProvider} from '../../../../components/mist';
-const seam=vi.hoisted(()=>({api:vi.fn(),readAttachment:vi.fn(),copy:vi.fn(),refresh:vi.fn(),go:vi.fn(),identity:'A',userId:'sales',routeId:'',automationId:''}));
+import type { Route } from '../nav';
+const seam=vi.hoisted(()=>({api:vi.fn(),readAttachment:vi.fn(),copy:vi.fn(),refresh:vi.fn(),go:vi.fn(),identity:'A',userId:'sales',routeId:'',automationId:'',sourcePosition:undefined as Route['sourcePosition']}));
 vi.mock('../runtime/auth',()=>({useMistSession:()=>({sessionKey:seam.identity,user:{id:seam.userId}})}));
 vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>({workspace:{id:'workspace'},refresh:seam.refresh,readTaskAttachment:seam.readAttachment}),mistApiRequest:(...args:any[])=>seam.api(...args)}));
-vi.mock('../nav',()=>({useNav:()=>({go:seam.go,route:{view:'assistant',section:'tasks',id:seam.routeId||undefined,automationId:seam.automationId||undefined}})}));
+vi.mock('../nav',async importOriginal=>({
+ ...await importOriginal<typeof import('../nav')>(),
+ useNav:()=>({go:seam.go,route:{view:'assistant',section:'tasks',id:seam.routeId||undefined,
+  automationId:seam.automationId||undefined,sourcePosition:seam.sourcePosition}}),
+}));
 import {AgentTasks} from './AgentTasks';
 let host:HTMLDivElement,root:Root;
 const row=()=>({id:'task',identityId:'identity',identityName:'邮件助理',name:'核对邮件',ownerId:'sales',ownerName:'顾言',mode:'operate',instructions:'核对本人来信，移动前交本人确认。',state:'queued',version:3,createdAt:'2026-11-01T00:00:00Z',updatedAt:'2026-11-01T00:00:00Z',expiresAt:'2026-11-02T00:00:00Z',stepsUsed:0,stepLimit:40,runtimeUsedMs:0,runtimeLimitMs:1800000,lastHeartbeatAt:null,checkpoint:'',result:'',waitingProposalIds:[],canControl:true});
@@ -494,6 +499,33 @@ it('closes a routed report when browser history returns to the task list', async
  act(paint);await flush();
  expect(queryByRole(document.body,'dialog',{name:report.name})).toBeNull();
  expect(seam.go).not.toHaveBeenCalled();
+});
+
+it('restores the exact repeated report citation only for the same session and report version', async () => {
+ const report={...row(),state:'succeeded',result:'起始 SO-1200。末段 SO-1200。',canControl:false,
+  trail:[{kind:'read',ref:{type:'order',id:'order-id',label:'SO-1200',view:'orders/detail'}}]};
+ const saved={view:'assistant' as const,scope:seam.identity+':workspace',taskId:report.id,
+  version:report.version,updatedAt:report.updatedAt,citation:1,offset:30};
+ seam.routeId=report.id;
+ seam.sourcePosition={...saved,scope:'other-session:workspace'};
+ seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/task')?{item:report}
+  :url.includes('agent-identities')?{items:[identity()]}:url.endsWith('/history')?{items:[],nextCursor:null}:{items:[report],nextCursor:null}));
+ const nextFrame=()=>act(async()=>{await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));});
+ try {
+  act(paint);await flush();await nextFrame();
+  const dialog=getByRole(document.body,'dialog',{name:report.name});
+  const citations=[...dialog.querySelectorAll('button.mist-xz-ref')];
+  expect(citations).toHaveLength(2);
+  expect(citations).not.toContain(document.activeElement);
+  seam.sourcePosition={...saved,version:report.version-1};
+  act(paint);await nextFrame();
+  expect(citations).not.toContain(document.activeElement);
+  seam.sourcePosition=saved;
+  act(paint);await nextFrame();
+  expect(document.activeElement).toBe(citations[1]);
+ } finally {
+  seam.sourcePosition=undefined;
+ }
 });
 
 it('opens the exact attachment source version from a formatted task report',async()=>{
