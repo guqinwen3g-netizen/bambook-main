@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createMistLocalRuntime } from './local';
 import { createMistServer } from './server';
 import { AGENT_DELEGATION_HEADER as HEADER } from './agentDelegation';
-import { agentCommandSensitivity, handleMcpMessage, taskMcpTools, type McpRepository } from './agentMcp';
+import { agentCommandSensitivity, handleMcpMessage, platformTaskModelToolCatalog, taskMcpTools, type McpRepository } from './agentMcp';
 import { agentCommandRisk } from '../shared/mistAgentProposals';
 import { MistApiError } from './errors';
 import { MIST_COMMAND_CATALOG } from './agentCommandCatalog';
@@ -558,6 +558,20 @@ describe('proposal fallback summary', () => {
   });
 });
 
+
+it('shares repeated prompt definitions without changing any task tool schema',()=>{
+ const full=taskMcpTools(),compact=platformTaskModelToolCatalog();
+ const expanded=compact.tools.map(tool=>({...tool,inputSchema:{...tool.inputSchema,
+  properties:Object.fromEntries(Object.entries(tool.inputSchema.properties).map(([name,shape])=>{
+   if(!shape||typeof shape!=='object'||!('$ref' in shape))return [name,shape];
+   const {$ref,...details}=shape;
+   expect($ref).toBe('#/$defs/objectType');
+   return [name,{...compact.$defs.objectType,...details}];
+  })),
+ }}));
+ expect(expanded).toEqual(full);
+ expect(Buffer.byteLength(JSON.stringify(compact))).toBeLessThan(Buffer.byteLength(JSON.stringify(full))-1000);
+});
 
 it('identifies stale order lines after a real preview conflict without upgrading the revision',async()=>{
   const preview=vi.fn().mockRejectedValueOnce(new MistApiError('REVISION_CONFLICT','业务已更新',409))

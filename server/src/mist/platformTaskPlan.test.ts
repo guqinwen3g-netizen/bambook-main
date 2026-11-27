@@ -1,5 +1,5 @@
 import{expect,it}from'vitest';
-import{compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,shortPdfTailPlan}from'./platformTaskPlan';
+import{compactPlatformTaskSteps,newPlatformTaskStep,parsePlatformTaskPlan,platformTaskHistory,resolvePlatformFileContinuation,shortPdfContinuationPlan,shortOfficeTailPlan}from'./platformTaskPlan';
 import{platformReasoning}from'../ai/platformModel';
 
 it('accepts only a bound business tool decision, without thoughts, owner impersonation or model request IDs',()=>{
@@ -74,15 +74,139 @@ it('uses the last verified continuation for the same file and only exposes a sho
 it('limits automatic PDF continuation to one short page window without a prior continuation attempt', () => {
  const file={id:'pdf',name:'sample.pdf',mimeType:'application/pdf',size:1500};
  const plan={name:'bambook_file_text',arguments:{fileId:file.id}};
- const result={kind:'pdf',pages:24,range:{pageFrom:1,pageTo:20},hasMore:true,nextPageFrom:21,nextCursor:'aft1.original'};
+ const result={kind:'pdf',file:{id:file.id},sourceHash:'a'.repeat(64),pages:24,range:{start:0,end:3500,pageFrom:1,pageTo:20},hasMore:true,nextPageFrom:21,nextCursor:'aft1.original'};
  const first={...newPlatformTaskStep(plan,0),result};
- expect(shortPdfTailPlan([file],[first])?.arguments).toEqual({fileId:file.id,cursor:'aft1.original',maxChars:3500});
- expect(shortPdfTailPlan([file,{...file,id:'another-pdf'}],[first])).toBeUndefined();
- expect(shortPdfTailPlan([file],[{...first,result:{...result,pages:25}}])).toBeUndefined();
- expect(shortPdfTailPlan([file],[{...first,result:{...result,nextPageFrom:undefined}}])).toBeUndefined();
- expect(shortPdfTailPlan([file],[{...first,compacted:true}])).toBeUndefined();
+ expect(shortPdfContinuationPlan([file],[first])?.arguments).toEqual({fileId:file.id,cursor:'aft1.original',maxChars:3500});
+ expect(shortPdfContinuationPlan([file],[{...first,result:{...result,pages:25}}])).toBeUndefined();
+ const longer={...first,result:{...result,pages:26}};
+ expect(shortPdfContinuationPlan([file],[longer],'请核对 sample.pdf 末页。')?.arguments.cursor).toBe('aft1.original');
+ expect(shortPdfContinuationPlan([file],[longer],'此次仅查看 sample.pdf 第 26 页。')).toBeUndefined();
+ expect(shortPdfContinuationPlan([file,{...file,id:'other',name:'other.pdf'}],[longer],'请核对 sample.pdf 末页。')).toBeUndefined();
+ expect(shortPdfContinuationPlan([file],[{...longer,result:{...longer.result,pages:41}}],'请核对 sample.pdf 末页。')).toBeUndefined();
+ expect(shortPdfContinuationPlan([file],[{...first,result:{...result,nextPageFrom:undefined}}])).toBeUndefined();
+ expect(shortPdfContinuationPlan([file],[{...first,compacted:true}])).toBeUndefined();
  const failed={...newPlatformTaskStep({...plan,arguments:{...plan.arguments,cursor:result.nextCursor}},1),result:{error:true}};
- expect(shortPdfTailPlan([file],[first,failed])).toBeUndefined();
+ expect(shortPdfContinuationPlan([file],[first,failed])).toBeUndefined();
+});
+
+it('continues each eligible PDF using its own cursor and skips long or already attempted sources',()=>{
+ const first={id:'short-one',name:'first.pdf',mimeType:'application/pdf',size:1200};
+ const second={...first,id:'short-two',name:'second.pdf'};
+ const longer={...first,id:'long-pdf',name:'longer.pdf'};
+ const read=(id:string,pages:number,cursor:string)=>({
+  ...newPlatformTaskStep({name:'bambook_file_text',arguments:{fileId:id}},0),
+  result:{kind:'pdf',file:{id},sourceHash:'a'.repeat(64),pages,range:{start:0,end:3500,pageFrom:1,pageTo:20},hasMore:true,nextPageFrom:21,nextCursor:cursor},
+ });
+ const heads=[read(first.id,21,'aft1.first'),read(second.id,24,'aft1.second'),read(longer.id,25,'aft1.long')];
+ const files=[longer,first,second];
+ const firstTail=shortPdfContinuationPlan(files,heads);
+ expect(firstTail?.arguments).toEqual({fileId:first.id,cursor:'aft1.first',maxChars:3500});
+ const failed={...newPlatformTaskStep(firstTail!,1),result:{error:true}};
+ const secondTail=shortPdfContinuationPlan(files,[...heads,failed]);
+ expect(secondTail?.arguments).toEqual({fileId:second.id,cursor:'aft1.second',maxChars:3500});
+ const completed={...newPlatformTaskStep(secondTail!,2),result:{hasMore:false}};
+ expect(shortPdfContinuationPlan(files,[...heads,failed,completed])).toBeUndefined();
+});
+
+it('pre-reads only one same-page continuation before an optional short tail',()=>{
+ const file={id:'pdf',name:'dense.pdf',mimeType:'application/pdf',size:1200};
+ const head={...newPlatformTaskStep({name:'bambook_file_text',arguments:{fileId:file.id}},0),result:{
+  kind:'pdf',file:{id:file.id},sourceHash:'a'.repeat(64),pages:23,
+  range:{start:0,end:3500,pageFrom:1,pageTo:20,textLimited:true},hasMore:true,nextCursor:'aft1.middle',
+ }};
+ const next=shortPdfContinuationPlan([file],[head]);
+ expect(next?.arguments.cursor).toBe('aft1.middle');
+ const middle={...newPlatformTaskStep(next!,1),result:{...head.result,
+  range:{...head.result.range,start:3500,end:4500,textLimited:false},nextPageFrom:21,nextCursor:'aft1.tail',
+ }};
+ expect(shortPdfContinuationPlan([file],[head,middle])?.arguments.cursor).toBe('aft1.tail');
+ const stillPartial={...middle,result:{...middle.result,range:{...middle.result.range,textLimited:true},
+  nextPageFrom:undefined,nextCursor:'aft1.more'}};
+ expect(shortPdfContinuationPlan([file],[head,stillPartial])).toBeUndefined();
+ expect(shortPdfContinuationPlan([file],[head,{...middle,result:{...middle.result,sourceHash:'b'.repeat(64)}}])).toBeUndefined();
+ const short={...head,result:{...head.result,pages:12,range:{...head.result.range,pageTo:12}}};
+ expect(shortPdfContinuationPlan([file],[short])?.arguments.cursor).toBe('aft1.middle');
+});
+
+it('pre-reads an Office tail only with a bounded result from that exact original',()=>{
+ const file={id:'quote',name:'quote.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',size:2000};
+ const plan={name:'bambook_file_text',arguments:{fileId:file.id}};
+ const result={kind:'xlsx',file:{id:file.id},sourceHash:'a'.repeat(64),range:{start:0,end:3500},
+  hasMore:true,nextCursor:'aft1.scope',remainingOfficeChars:3500};
+ const first={...newPlatformTaskStep(plan,0),result};
+ expect(shortOfficeTailPlan([file],[first])?.arguments).toEqual({fileId:file.id,cursor:'aft1.scope',maxChars:3500});
+ for(const invalid of [
+  {...result,remainingOfficeChars:undefined},
+  {...result,remainingOfficeChars:3501},
+  {...result,remainingOfficeChars:0},
+  {...result,file:{id:'other'}},
+  {...result,reason:'正文超过安全提取范围'},
+ ]){
+  expect(shortOfficeTailPlan([file],[{...first,result:invalid}])).toBeUndefined();
+ }
+ const failed={...newPlatformTaskStep({...plan,arguments:{...plan.arguments,cursor:result.nextCursor}},1),result:{error:true}};
+ expect(shortOfficeTailPlan([file],[first,failed])).toBeUndefined();
+});
+
+it('summarizes only continuous PDF page windows with the same verified source and exact cursor',()=>{
+ const makeRead=(fileId:string,from:number,to:number,pages:number,cursor:string|undefined,nextCursor:string|undefined,extra={})=>({
+  ...newPlatformTaskStep({name:'bambook_file_text',arguments:{fileId,...(cursor?{cursor}:{})}},0),
+  result:{kind:'pdf',file:{id:fileId},sourceHash:'a'.repeat(64),pages,range:{start:0,end:5,pageFrom:from,pageTo:to},
+   hasMore:!!nextCursor,...(nextCursor?{nextCursor,nextPageFrom:to+1}:{}),...extra},
+ });
+ const first=makeRead('first',1,20,23,undefined,'aft1.first',{pagesWithoutText:[3]});
+ expect(platformTaskHistory([first])).toMatchObject({
+  pdfPendingCoverage:[{fileId:'first',pagesInOriginal:23,returnedThroughPage:20,pagesWithoutText:[3],unreadPages:{from:21,to:23}}],
+ });
+ expect(platformTaskHistory([first])).not.toHaveProperty('pdfCoverage');
+ const last=makeRead('first',21,23,23,'aft1.first',undefined,{pagesWithoutText:[22],reason:'第 22 页没有可提取文字',truncated:true,complete:false});
+ const unrelated=makeRead('other',21,21,21,'aft1.other',undefined);
+ expect(platformTaskHistory([first,unrelated,last]).pdfCoverage).toEqual([{fileId:'first',pagesChecked:23,pagesWithoutText:[3,22]}]);
+ for(const variant of [
+  {...last,plan:{...last.plan,arguments:{fileId:'first',cursor:'aft1.other'}}},
+  {...last,result:{...last.result,sourceHash:'b'.repeat(64)}},
+  {...last,result:{...last.result,range:{...last.result.range,pageFrom:22}}},
+  {...last,result:{...last.result,range:{...last.result.range,textLimited:true}}},
+  {...last,result:{...last.result,range:{...last.result.range,start:2}}},
+  {...last,result:{...last.result,reason:'正文超过安全提取范围',pagesWithoutText:undefined}},
+  {...last,compacted:true},
+ ]){
+  expect(platformTaskHistory([first,variant])).not.toHaveProperty('pdfCoverage');
+ }
+ expect(platformTaskHistory([last])).not.toHaveProperty('pdfCoverage');
+ expect(platformTaskHistory([first,last,{...last,result:{error:true}}])).not.toHaveProperty('pdfCoverage');
+});
+
+it('requires contiguous character offsets when a PDF page window is split',()=>{
+ const read=(from:number,to:number,start:number,end:number,cursor?:string,next?:string,nextPageFrom?:number,textLimited=false)=>({
+  ...newPlatformTaskStep({name:'bambook_file_text',arguments:{fileId:'pdf',...(cursor?{cursor}:{})}},0),
+  result:{kind:'pdf',file:{id:'pdf'},sourceHash:'a'.repeat(64),pages:23,
+   range:{start,end,pageFrom:from,pageTo:to,...(textLimited?{textLimited:true}:{})},
+   hasMore:!!next,...(next?{nextCursor:next}:{}),...(nextPageFrom?{nextPageFrom}:{})},
+ });
+ const first=read(1,20,0,3500,undefined,'aft1.slice',undefined,true);
+ const second=read(1,20,3500,4400,'aft1.slice','aft1.tail',21);
+ expect(platformTaskHistory([first]).pdfPendingCoverage).toEqual([
+  {fileId:'pdf',pagesInOriginal:23,returnedThroughPage:0,pagesWithoutText:[],partialWindow:{from:1,to:20},unreadPages:{from:21,to:23}},
+ ]);
+ expect(platformTaskHistory([first,second]).pdfPendingCoverage).toEqual([
+  {fileId:'pdf',pagesInOriginal:23,returnedThroughPage:20,pagesWithoutText:[],unreadPages:{from:21,to:23}},
+ ]);
+
+ const last=read(21,23,0,400,'aft1.tail');
+ expect(platformTaskHistory([first,second,last]).pdfCoverage).toEqual([{fileId:'pdf',pagesChecked:23,pagesWithoutText:[]}]);
+ for(const bad of [
+  read(1,20,3501,4400,'aft1.slice','aft1.tail',21),
+  read(1,20,3499,4400,'aft1.slice','aft1.tail',21),
+  read(1,19,3500,4400,'aft1.slice','aft1.tail',20),
+  read(1,20,3500,4400,'aft1.wrong','aft1.tail',21),
+ ]){
+  const history=platformTaskHistory([first,bad,last]);
+  expect(history).not.toHaveProperty('pdfCoverage');
+  expect(history).not.toHaveProperty('pdfPendingCoverage');
+ }
+ expect(platformTaskHistory([first,last])).not.toHaveProperty('pdfCoverage');
+ expect(platformTaskHistory([first,second,read(21,23,0,400,'aft1.tail',undefined,undefined,true)])).not.toHaveProperty('pdfCoverage');
 });
 
 it('identifies the full quotation amount and the exact converted line amounts in a complete read', () => {
