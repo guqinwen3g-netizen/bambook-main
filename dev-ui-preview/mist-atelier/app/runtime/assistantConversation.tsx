@@ -1,12 +1,12 @@
 import React from 'react';
-import type { TaskAttachment, TaskAttachmentRef } from '../../../../server/src/shared/mistTaskAttachments';
+import { TASK_ATTACHMENT_COUNT, type TaskAttachment, type TaskAttachmentRef } from '../../../../server/src/shared/mistTaskAttachments';
 
 export type AssistantReply = {
   role: 'user' | 'assistant'; content: string;
   sources?: Array<{ id: string; label: string; view: string; entityId: string }>;
   revision?: number; truncated?: boolean; contextToken?: string;
 };
-export type AssistantAttachmentRef = TaskAttachmentRef & Pick<TaskAttachment, 'name' | 'size'>;
+export type AssistantAttachmentRef = TaskAttachmentRef & Pick<TaskAttachment, 'name' | 'size'> & { needsVerification?: true };
 type TaskAnswerDraft = {taskId:string;questionId:string;text:string};
 export const taskAnswerDraftKey=(taskId:string,questionId:string)=>JSON.stringify([taskId,questionId]);
 type ComposerDraft = {
@@ -24,10 +24,22 @@ const emptyDraft = (): ComposerDraft => ({ question: '', selected: [], files: []
 const empty = (): Conversation => ({ ...emptyDraft(), messages: [], inactiveDrafts: new Map(),answerDrafts:new Map() });
 /** fin50：对话按账号与公司（scope）存本标签页 sessionStorage，切页与刷新后保留；换账号或关标签即清空。 */
 const KEY = (scope: string) => 'mist.assistant.conversation:' + scope;
-function load(scope: string): Conversation {
-  try { const raw = typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem(KEY(scope)); if (!raw) return empty(); const v = JSON.parse(raw) as Conversation; return Array.isArray(v?.messages) ? { ...empty(), question: String(v.question || ''), selected: Array.isArray(v.selected) ? v.selected : [], messages: v.messages.slice(-40) } : empty(); } catch { return empty(); }
+const attachmentId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function storedAttachmentRefs(value: unknown): AssistantAttachmentRef[] {
+  if (!Array.isArray(value) || value.length > TASK_ATTACHMENT_COUNT) return [];
+  const fileIds = new Set<string>();
+  return value.flatMap(ref => {
+    const { taskId, fileId } = ref ?? {};
+    if (typeof taskId !== 'string' || !attachmentId.test(taskId) || typeof fileId !== 'string' || !attachmentId.test(fileId)
+      || fileIds.has(fileId)) return [];
+    fileIds.add(fileId);
+    return [{ taskId, fileId, name: '', size: 0, needsVerification: true as const }];
+  });
 }
-function save(scope: string, { question, selected, messages }: Conversation) { try { if (typeof sessionStorage !== 'undefined' && scope) sessionStorage.setItem(KEY(scope), JSON.stringify({ question, selected, messages })); } catch { /* storage full or blocked: keep in memory only */ } }
+function load(scope: string): Conversation {
+  try { const raw = typeof sessionStorage === 'undefined' ? null : sessionStorage.getItem(KEY(scope)); if (!raw) return empty(); const v = JSON.parse(raw) as Conversation; return Array.isArray(v?.messages) ? { ...empty(), question: String(v.question || ''), selected: Array.isArray(v.selected) ? v.selected : [], attachmentRefs: storedAttachmentRefs(v.attachmentRefs), messages: v.messages.slice(-40) } : empty(); } catch { return empty(); }
+}
+function save(scope: string, { question, selected, messages, attachmentRefs }: Conversation) { try { if (typeof sessionStorage !== 'undefined' && scope) sessionStorage.setItem(KEY(scope), JSON.stringify({ question, selected, messages, attachmentRefs: attachmentRefs.map(({taskId,fileId})=>({taskId,fileId})) })); } catch { /* storage full or blocked: keep in memory only */ } }
 
 function useConversationState(scope: string) {
   const [entry, setEntry] = React.useState(() => ({ scope, value: load(scope) }));
@@ -91,7 +103,7 @@ function useConversationState(scope: string) {
 
 const Context = React.createContext<ReturnType<typeof useConversationState> | null>(null);
 
-/** Session/company memory only. It survives source navigation, not logout, company change or reload. */
+/** The active draft is tab/account/company scoped. Local file bytes and drafts in inactive threads stay in memory. */
 export function AssistantConversationProvider({ scope, children }: { scope: string; children: React.ReactNode }) {
   const value = useConversationState(scope);
   return <Context.Provider value={value}>{children}</Context.Provider>;
