@@ -242,17 +242,22 @@ export function proposalAccountRows(command: AgentProposal['command'], state?: M
  * 本人确认 Agent 提议：确认后由服务端按本人身份执行提议里的原命令（完整权限与业务校验），失败时提议保持待确认。
  * 中、高风险都列出将要执行的具体内容；高风险另须本人密码。拒绝只记录结论，不改业务。
  */
-export function AgentProposalDialog({ proposal, state, incomingAccess, referenceAccess, taskClosePlans, commercialSampleLoanSources, canConfirmShippingBasis = false, scopeKey = '', onClose, run, onDone, onRejection, pendingRequestId, pendingDecision, onRecoverOriginal, onReplayOriginal }: {
-  proposal: AgentProposal | undefined; state?: MistState | null; incomingAccess?:DevelopmentIncomingAccess; referenceAccess?:DevelopmentReferenceAccess; taskClosePlans?:Record<string,DevelopmentTaskClosePlan>; commercialSampleLoanSources?:MistWorkspaceEnvelope['commercialSampleLoanSources']; canConfirmShippingBasis?:boolean; scopeKey?: string; onClose: () => void; run: (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string } }) => Promise<unknown>; onDone: (message: string) => void; onRejection?: (message: string) => void; pendingRequestId?:string; pendingDecision?:'confirm'|'reject'; onRecoverOriginal?:(requestId:string)=>Promise<boolean>; onReplayOriginal?:(requestId:string)=>Promise<boolean>;
+export function AgentProposalDialog({ proposal, state, incomingAccess, referenceAccess, taskClosePlans, commercialSampleLoanSources, canConfirmShippingBasis = false, scopeKey = '', onClose, run, onDone, onRejection, pendingRequestId, pendingDecision, missingOriginalReceipt, onRecoverOriginal, onReplayOriginal }: {
+  proposal: AgentProposal | undefined; state?: MistState | null; incomingAccess?:DevelopmentIncomingAccess; referenceAccess?:DevelopmentReferenceAccess; taskClosePlans?:Record<string,DevelopmentTaskClosePlan>; commercialSampleLoanSources?:MistWorkspaceEnvelope['commercialSampleLoanSources']; canConfirmShippingBasis?:boolean; scopeKey?: string; onClose: () => void; run: (command: MistCommand, options?: { reauth?: { password: string }; signature?: { svg: string } }) => Promise<unknown>; onDone: (message: string) => void; onRejection?: (message: string) => void; pendingRequestId?:string; pendingDecision?:'confirm'|'reject'; missingOriginalReceipt?:boolean; onRecoverOriginal?:(requestId:string)=>Promise<'confirmed'|'missing'|'unknown'>; onReplayOriginal?:(requestId:string)=>Promise<boolean>;
 }) {
   const [note, setNote] = React.useState(''), [busy, setBusy] = React.useState(false), [failure, setFailure] = React.useState(''), [password, setPassword] = React.useState(''), [signature, setSignature] = React.useState<SignatureValue | null>(null);
   const [pendingFailure,setPendingFailure]=React.useState(false),failureRef=React.useRef<HTMLDivElement>(null),alive=React.useRef(true);
-  const [missingReceiptId,setMissingReceiptId]=React.useState<string>();
   const active=React.useRef({scope:scopeKey,id:proposal?.id});
   if(active.current.scope!==scopeKey||active.current.id!==proposal?.id)active.current={scope:scopeKey,id:proposal?.id};
+  const pendingReceipt=React.useRef({proposal:active.current,requestId:pendingRequestId,decision:pendingDecision});
+  if(pendingReceipt.current.proposal!==active.current||pendingReceipt.current.requestId!==pendingRequestId||pendingReceipt.current.decision!==pendingDecision)
+    pendingReceipt.current={proposal:active.current,requestId:pendingRequestId,decision:pendingDecision};
+  const [missingReceipt,setMissingReceipt]=React.useState<typeof pendingReceipt.current>();
+  const checkedMissing=!!pendingRequestId&&(missingOriginalReceipt||missingReceipt===pendingReceipt.current);
+  const failureMessage=failure||(checkedMissing?'暂未查到原回执':'');
   React.useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
-  React.useLayoutEffect(()=>{if(failure)failureRef.current?.scrollIntoView?.({block:'nearest'});},[failure]);
-  React.useEffect(() => { setNote(''); setFailure(''); setPassword(''); setSignature(null);setPendingFailure(false);setMissingReceiptId(undefined);setBusy(false); }, [proposal?.id,scopeKey]);
+  React.useLayoutEffect(()=>{if(failureMessage)failureRef.current?.scrollIntoView?.({block:'nearest'});},[failureMessage]);
+  React.useEffect(() => { setNote(''); setFailure(''); setPassword(''); setSignature(null);setPendingFailure(false);setMissingReceipt(undefined);setBusy(false); }, [proposal?.id,scopeKey]);
   const incoming=proposal?incomingProposalDetails(proposal.command,state,incomingAccess,businessNow().toISOString()):null;
   const sourceReview=proposal?(developmentReferenceProposalDetails(proposal.command,state,referenceAccess,businessNow().toISOString())||commercialSampleProposalDetails(proposal.command,state,commercialSampleLoanSources,canConfirmShippingBasis,businessNow().toISOString())||developmentTaskProposalDetails(proposal.command,state,taskClosePlans)||shippingSampleProposalDetails(proposal.command,state,canConfirmShippingBasis)):null;
   const sourceBasis=React.useRef({key:'',fingerprint:''}),sourceKey=scopeKey+':'+proposal?.id;
@@ -286,22 +291,26 @@ export function AgentProposalDialog({ proposal, state, incomingAccess, reference
   const confirmBlocked=!!mail?.reason||!!reopening?.reason||!!incoming?.reason||incomingChanged||!!sourceReview?.reason
     ||sourceChanged||!!proposal.taskBlocked||!!proposal.unavailable||!!draftSourceMissing||quoteSourceMissing||rfqSourceUnavailable
     ||orderSourceUnavailable||incomplete||(risk==='high'&&!password)||(signing&&!signature);
-  const canReplay=!!pendingRequestId&&missingReceiptId===pendingRequestId&&!!onReplayOriginal
+  const canReplay=checkedMissing&&!!onReplayOriginal
     &&(pendingDecision==='reject'||pendingDecision==='confirm'&&risk!=='high'&&!signing&&!confirmBlocked);
   const recoverOriginal=async(replay=false)=>{
     const action=replay?onReplayOriginal:onRecoverOriginal;
     if(!pendingRequestId||!action||busy||replay&&!canReplay)return;
     const operation=active.current;
+    const binding=pendingReceipt.current;
     const current=()=>alive.current&&active.current.scope===operation.scope&&(active.current===operation||active.current.id===undefined);
     setBusy(true);
     setFailure('');
+    setMissingReceipt(undefined);
     try {
-      const confirmed=await action(pendingRequestId);
+      const outcome=await action(pendingRequestId);
       if(!current())return;
-      if(confirmed){setPendingFailure(false);setPassword('');setSignature(null);onDone('已核对原请求');onClose();}
-      else {setMissingReceiptId(pendingRequestId);setFailure('暂未查到原回执');}
+      if(outcome===true||outcome==='confirmed'){
+        if(pendingReceipt.current!==binding&&pendingReceipt.current.requestId!==undefined)return;
+        setPendingFailure(false);setPassword('');setSignature(null);onDone('已核对原请求');onClose();
+      } else if(outcome==='missing'&&pendingReceipt.current===binding)setMissingReceipt(binding);
     } catch (problem) {
-      if(current())setFailure(problem instanceof Error?problem.message:'原请求仍待核对');
+      if(current()&&pendingReceipt.current===binding)setFailure(problem instanceof Error?problem.message:'原请求仍待核对');
     } finally { if(current())setBusy(false); }
   };
   const decide = async (command: MistCommand, message: string, reauth?: { password: string }, signed?: { svg: string }) => {
@@ -321,7 +330,7 @@ export function AgentProposalDialog({ proposal, state, incomingAccess, reference
       <Button disabled={busy||awaitingReceipt} onClick={() => void decide({ type: 'agent.proposal.reject', payload: { id: proposal.id, ...(note.trim() ? { note: note.trim() } : {}) } }, '已拒绝提议')}>{uiText('拒绝')}</Button>
       <Button variant={canReplay?'quiet':'primary'} loading={busy&&!awaitingReceipt} disabled={busy||awaitingReceipt||confirmBlocked} onClick={() => void decide({ type: 'agent.proposal.confirm', payload: { id: proposal.id } }, '已确认并执行', risk === 'high' ? { password } : undefined, signing && signature ? { svg: signature.svg } : undefined)}>{uiText('确认执行')}</Button></>}>
     <div className="mist-col" data-agent-proposal-dialog>
-      {(failure||awaitingReceipt) && <div ref={failureRef}><Banner tone={awaitingReceipt?'warn':'bad'} title={uiText(awaitingReceipt?'结果待核对':'没有执行')}>{uiText(failure)}</Banner></div>}
+      {(failureMessage||awaitingReceipt) && <div ref={failureRef}><Banner tone={awaitingReceipt?'warn':'bad'} title={uiText(awaitingReceipt?'结果待核对':'没有执行')}>{uiText(failureMessage)}</Banner></div>}
       {draftSourceMissing&&<Banner tone="warn" title={uiText('草稿或附件已不可见，请重新核对')} />}
       {quoteSourceMissing&&<Banner tone="warn" title={uiText('报价或来源资料已不可见，请重新核对')} />}
       {rfqSourceUnavailable&&<Banner tone="warn" title={uiText('询价或报价依据已不可用，请重新核对')} />}
