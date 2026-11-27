@@ -9,7 +9,7 @@ import type{MakeTaskCredential,PlatformTaskJob,PlatformTaskReleaseIssue}from'./a
 import type{MistRepository,PlatformTaskImageCache}from'./repository';
 import{MistApiError}from'./errors';
 import{responseLanguagePrompt,responseUserMessage}from'./responseLanguage';
-import{parsePlatformTaskPlan,platformTaskHistory,platformTaskAttachmentHandles,requestedPdfRange,requestedWorkbookWorksheet,scopedAttachmentTaskSteps,shortPdfContinuationPlan,shortOfficeTailPlan,ATTACHMENT_PREFETCH_CHARS,resolvePlatformFileContinuation,PLATFORM_TASK_ATTACHMENT_PREFIX,PLATFORM_TASK_RESULT_LIMIT,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskStep}from'./platformTaskPlan';
+import{parsePlatformTaskPlan,platformTaskHistory,platformTaskAttachmentHandles,WORKBOOK_SELECTION_QUESTION,requestedPdfRange,requestedWorkbookWorksheet,scopedAttachmentTaskSteps,shortPdfContinuationPlan,shortOfficeTailPlan,ATTACHMENT_PREFETCH_CHARS,resolvePlatformFileContinuation,PLATFORM_TASK_ATTACHMENT_PREFIX,PLATFORM_TASK_RESULT_LIMIT,PLATFORM_TASK_TURN_LIMIT,type PlatformTaskPlan,type PlatformTaskStep}from'./platformTaskPlan';
 import{nextTaskIntentRead}from'./agentTaskIntentRefs';
 
 class PlatformModelTimeout extends Error {}
@@ -161,14 +161,23 @@ export class MistPlatformTaskWorker{
       while(!abort.signal.aborted&&this.enabled){
         phase='store';const context=await this.repository.platformTaskContext(actor);let step=context.steps.at(-1);
         const pdfScope=requestedPdfRange(context.task.attachments,context.task.instructions);
-        const worksheetScope=requestedWorkbookWorksheet(context.task.attachments,context.task.instructions);
+        const worksheetScope=requestedWorkbookWorksheet(context.task.attachments,context.task.instructions,context.task.questions);
+        if(worksheetScope&&!worksheetScope.fileId){
+          const attempts=context.task.questions?.filter(q=>q.question===WORKBOOK_SELECTION_QUESTION).length??0;
+          await this.repository.agentTaskRuntime(actor,job.workspaceId,'question',{
+            requestId:'platform-workbook-choice-'+job.taskId+'-'+attempts,question:WORKBOOK_SELECTION_QUESTION,
+          });
+          return;
+        }
         const readableSteps=scopedAttachmentTaskSteps(context.steps,pdfScope,worksheetScope);
+        const readableAttachments=context.task.attachments?.filter(file=>!worksheetScope?.workbookIds.includes(file.id)||file.id===worksheetScope.fileId);
         const pendingScopedReads=new Set<string>();
         if(readableSteps.length!==context.steps.length){
           for(const previous of context.steps){
             const fileId=previous.plan.arguments.fileId;
             if(previous.plan.name!=='bambook_file_text'||previous.result===undefined||typeof fileId!=='string')continue;
             if(readableSteps.includes(previous))pendingScopedReads.delete(fileId);
+            else if(worksheetScope?.fileId&&worksheetScope.workbookIds.includes(fileId))pendingScopedReads.add(worksheetScope.fileId);
             else pendingScopedReads.add(fileId);
           }
         }
@@ -183,11 +192,11 @@ export class MistPlatformTaskWorker{
           if(!this.available)throw Error('MODEL_UNAVAILABLE');
           if(intentRead.plan){step=await this.repository.savePlatformTaskPlan(actor,intentRead.plan);}
           else{
-            const attachment=context.task.attachments?.find(file=>!isTaskImage(file.name)&&(pendingScopedReads.has(file.id)
+            const attachment=readableAttachments?.find(file=>!isTaskImage(file.name)&&(pendingScopedReads.has(file.id)
               ||!readableSteps.some(step=>step.plan.name==='bambook_file_text'&&step.plan.arguments.fileId===file.id&&step.result!==undefined)));
             const attachmentPlan:PlatformTaskPlan|undefined=attachment
               ?{name:'bambook_file_text',arguments:{fileId:attachment.id,maxChars:ATTACHMENT_PREFETCH_CHARS}}
-              :shortPdfContinuationPlan(context.task.attachments,readableSteps,context.task.instructions)??shortOfficeTailPlan(context.task.attachments,readableSteps);
+              :shortPdfContinuationPlan(context.task.attachments,readableSteps,context.task.instructions)??shortOfficeTailPlan(readableAttachments,readableSteps);
             if(attachmentPlan){
               step=await this.repository.savePlatformTaskPlan(actor,attachmentPlan);
             }else{
