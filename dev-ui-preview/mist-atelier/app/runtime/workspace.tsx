@@ -46,7 +46,7 @@ export interface MistWorkspaceContext {
   issueCreditDocument: (creditId: string, versionId: string, correction?:CreditPrintCorrection) => Promise<Record<string, unknown>>;
   downloadCreditDocument: (creditId: string, versionId: string) => Promise<void>;
   fileUrl: (file: MistFile) => string;
-  refresh: () => Promise<void>; recover: (options?:{requestId:string;receiptOnly?:true}) => Promise<MistRunReceipt | undefined>;
+  refresh: () => Promise<void>; recover: (options?:{requestId:string;receiptOnly?:true;onMissingReceipt?:()=>void}) => Promise<MistRunReceipt | undefined>;
   /** 撤下上一条已明确被服务端拒绝（结果确定、无需核对）的操作提示；离开页面时由外壳调用。 */
   dismissRejection?: () => void;
   switchWorkspace: (id: string) => Promise<void>;
@@ -675,7 +675,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
     if(correction&&(!claimIdentifier(correction.correctsPrintId)||!correction.reason.trim()))throw new RequestError('请填写更正原因并选择准确原件');
     return (await run({ type: 'platform.credit.issue', payload: { creditId, versionId,...(correction??{}) } })).result;
   }, [run]);
-  const recover = React.useCallback(async (options?:{requestId:string;receiptOnly?:true}): Promise<MistRunReceipt | undefined> => {
+  const recover = React.useCallback(async (options?:{requestId:string;receiptOnly?:true;onMissingReceipt?:()=>void}): Promise<MistRunReceipt | undefined> => {
     assertIdentity(authority);
     const intent = pendingRef.current; if (!intent) return;
     if(options&&(intent.kind!=='command'||intent.requestId!==options.requestId))return;
@@ -732,7 +732,10 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       try { data = await request(BASE + '/' + encodeURIComponent(intent.workspaceId) + '/receipts/' + encodeURIComponent(intent.requestId)); }
       catch (failure) {
         assertSource(authority, boundEpoch, boundWorkspaceId);
-        if (options?.receiptOnly&&failure instanceof RequestError&&failure.status===404) return;
+        if (options?.receiptOnly&&failure instanceof RequestError&&failure.status===404) {
+          options.onMissingReceipt?.();
+          return;
+        }
         if (failure instanceof RequestError && failure.status === 404 && intent.kind === 'command') return recovered(await perform(intent, JSON.stringify({ requestId: intent.requestId, expectedRevision: intent.expectedRevision, command: intent.command, ...(intent.signature ? { signature: intent.signature } : {}) }), authority));
         if (failure instanceof RequestError && failure.status === 404 && intent.kind === 'member') return await perform(intent, JSON.stringify({ requestId: intent.requestId, expectedRevision: intent.expectedRevision, action: intent.action, account: intent.account }), authority);
         throw failure;
